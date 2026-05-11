@@ -118,3 +118,15 @@ export async function normalizeEnvelopeToPlain(document: unknown): Promise<unkno
   // 信封根上的 documentFormat: Envelope 会经 canonicalize 折入 meta；合并后须是 Plain 形，避免「下载 Plain」仍带 Envelope。
   return { ...innerStripped, ...(meta as Record<string, unknown>), documentFormat: 'Plain' }
 }
+
+// v2 version helpers
+export { detectVersion, migrateV1ToV2 } from './versionMigration'
+export type {
+  V2PlainSceneDocument,
+  V2BlockInstance,
+  V2BlockPart,
+  V2AnnotationBox,
+  V2Label,
+  V2GuiState,
+  V2StatsTemplate,
+} from './sceneDocumentV2'
