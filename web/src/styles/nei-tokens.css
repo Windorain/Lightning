@@ -1,0 +1,270 @@
+/**
+ * NEI / MC 式 GUI token（Web 纯 CSS 近似）。
+ * 亮色 = 原版 NEI，暗色 = 末影蓝变体。
+ * 槽位逻辑尺寸对应 NEI 18×18，界面使用 2×（36px）以保证可读性。
+ */
+:root {
+  /* 亮色 NEI（默认，Embed 兼容） */
+  --nei-bg: #c6c6c6;
+  --nei-bg-deep: #b0b0b0;
+  --nei-viewport-bg: #5a5a5a;
+  --nei-highlight: #ffffff;
+  --nei-shadow: #555555;
+  --nei-inset-bg: #373737;
+  --nei-inset-bg-mid: #2a2a2a;
+  --nei-text: #ffffff;
+  --nei-text-muted: #e8e8e8;
+  --nei-text-dark: #303030;
+  --nei-label-shadow: 1px 1px 0 #3f3f3f;
+
+  --nei-status-ok: #2d6a4f;
+  --nei-status-warn: #b45309;
+  --nei-status-err: #9b2226;
+
+  --nei-tooltip-bg: rgba(16, 0, 16, 0.92);
+  --nei-tooltip-border: #500080;
+  --nei-tooltip-text: #ffffff;
+
+  --nei-focus-ring: #8080c0;
+
+  --nei-bevel-w: 2px;
+
+  --nei-loading-text: #fcd34d;
+  --nei-ok-text: #86efac;
+  --nei-warn-text: #fde047;
+  --nei-error-text: #fecaca;
+  --nei-error-bg: #450a0a;
+  --nei-error-border: #7f1d1d;
+  --nei-link: #93c5fd;
+  --nei-checkerboard-dark: #6b6b6b;
+  --nei-checkerboard-light: #4a4a4a;
+
+  /* 新增：亮色补充 token */
+  --nei-accent: #5a8c3e;
+  --nei-accent-hover: #4a7a2e;
+  --nei-accent-text: #ffffff;
+  --nei-accent-shadow: 1px 1px 0 #2a5a1a;
+  --nei-label: #555555;
+  --nei-muted: #707070;
+  --nei-border: #999999;
+  --nei-section-line: #999999;
+  --nei-btn-bg: #8b8b8b;
+  --nei-btn-text: #404040;
+  --nei-panel-hover: #a0a0a0;
+  --nei-dropdown-bg: #b0b0b0;
+  --nei-dropdown-hover: #2563eb;
+  --nei-divider-bg: transparent;
+  --nei-divider-hover: #8080c0;
+  --nei-tab-active-border: #5a8c3e;
+  --nei-tab-text: #707070;
+  --nei-tab-active-text: #303030;
+  --nei-online: #22c55e;
+  --nei-offline: #888;
+  --nei-check: #22c55e;
+  --nei-drawer-backdrop: rgba(2, 6, 23, 0.35);
+  --nei-drawer-shadow: -12px 0 40px rgba(0, 0, 0, 0.2);
+  --nei-seg-off-bg: #b0b0b0;
+  --nei-seg-off-border: #999;
+  --nei-seg-off-text: #303030;
+  --nei-seg-on-bg: #c6d8c0;
+  --nei-seg-on-border: #5a8c3e;
+  --nei-seg-on-text: #2a4a1a;
+}
+
+[data-nei-theme="dark"] {
+  --nei-bg: #1a1e28;
+  --nei-bg-deep: #212636;
+  --nei-viewport-bg: #151920;
+  --nei-highlight: #3a4a5e;
+  --nei-shadow: #0d1119;
+  --nei-inset-bg: #12161e;
+  --nei-inset-bg-mid: #1a2030;
+  --nei-text: #d0d8e8;
+  --nei-text-muted: #8898a8;
+  --nei-text-dark: #d0d8e8;
+  --nei-label-shadow: 1px 1px 0 #0a0e14;
+
+  --nei-accent: #3b5f8a;
+  --nei-accent-hover: #4a72a0;
+  --nei-accent-text: #e0f0ff;
+  --nei-accent-shadow: 1px 1px 0 #0a1a2a;
+  --nei-label: #6a7a8a;
+  --nei-muted: #5a6a7a;
+  --nei-border: #2a3040;
+  --nei-section-line: #2a3040;
+  --nei-btn-bg: #242836;
+  --nei-btn-text: #8898a8;
+  --nei-panel-hover: #2a3040;
+  --nei-dropdown-bg: #212636;
+  --nei-dropdown-hover: #3b5f8a;
+  --nei-divider-bg: transparent;
+  --nei-divider-hover: #3b5f8a;
+  --nei-tab-active-border: #3b5f8a;
+  --nei-tab-text: #5a6a7a;
+  --nei-tab-active-text: #d0d8e8;
+  --nei-online: #22c55e;
+  --nei-offline: #5a6a7a;
+  --nei-check: #22c55e;
+  --nei-drawer-backdrop: rgba(2, 6, 23, 0.55);
+  --nei-drawer-shadow: -12px 0 40px rgba(0, 0, 0, 0.35);
+  --nei-seg-off-bg: #212636;
+  --nei-seg-off-border: #2a3040;
+  --nei-seg-off-text: #8898a8;
+  --nei-seg-on-bg: #1a2a3a;
+  --nei-seg-on-border: #3b5f8a;
+  --nei-seg-on-text: #d0d8e8;
+
+  --nei-loading-text: #fcd34d;
+  --nei-ok-text: #86efac;
+  --nei-warn-text: #fde047;
+  --nei-error-text: #fecaca;
+  --nei-error-bg: #450a0a;
+  --nei-error-border: #7f1d1d;
+  --nei-link: #93c5fd;
+  --nei-checkerboard-dark: #5a5a5a;
+  --nei-checkerboard-light: #3a3a3a;
+}
+
+/* 保留不变的全局类 */
+.nei-bevel-outset {
+  border: var(--nei-bevel-w) solid;
+  border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight);
+  background: var(--nei-bg);
+}
+
+.nei-bevel-inset {
+  border: var(--nei-bevel-w) solid;
+  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
+  background: var(--nei-inset-bg);
+}
+
+.nei-bevel-inset--panel {
+  background: var(--nei-inset-bg-mid);
+}
+
+.nei-label {
+  color: var(--nei-text);
+  text-shadow: var(--nei-label-shadow);
+  font-weight: 600;
+}
+
+/**
+ * 与 MC/NEI 式悬浮 ToolTip 一致的视觉（背景、描边、字体、换行）。
+ * {@link ToolTipBox} 叠加定位类 {@code .wm-tooltip-box}；面板内预览使用 {@code .wm-tooltip-surface} + 可选 {@code .wm-tooltip-surface--inline}。
+ */
+.wm-tooltip-surface {
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: system-ui, 'Segoe UI', sans-serif;
+  color: var(--nei-tooltip-text);
+  background: var(--nei-tooltip-bg);
+  border: 1px solid var(--nei-tooltip-border);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+/** 属性面板等内嵌预览：占满可用宽度，不撑破侧栏 */
+.wm-tooltip-surface--inline {
+  width: 100%;
+  max-width: min(22rem, 100%);
+}
+
+/* Teleport 到 body 的 tooltip，需全局类名 */
+.wm-tooltip-box {
+  position: fixed;
+  z-index: 2147483646;
+  width: fit-content;
+  max-width: min(22rem, calc(100vw - 24px));
+  min-width: 0;
+  pointer-events: none;
+}
+
+.wm-tooltip-surface .wm-tooltip-body {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.wm-tooltip-body strong { font-weight: 700; }
+.wm-tooltip-body em { font-style: italic; }
+.wm-tooltip-body code { font-family: ui-monospace, 'Cascadia Code', monospace; background: rgba(0,0,0,0.15); padding: 0 2px; border-radius: 2px; }
+.wm-tooltip-body a { color: var(--nei-focus-ring, #60a5fa); }
+
+/* ===== NEI 按钮 ===== */
+.nei-btn {
+  width: 28px; height: 28px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  color: var(--nei-text); text-shadow: var(--nei-label-shadow);
+  background: var(--nei-bg);
+  border: var(--nei-bevel-w) solid;
+  border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight);
+  border-radius: 0; cursor: pointer; user-select: none; box-sizing: border-box;
+}
+.nei-btn:hover { filter: brightness(1.06); }
+.nei-btn:active {
+  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
+  padding-top: 1px; padding-left: 1px;
+}
+.nei-btn:focus-visible { outline: 2px solid var(--nei-focus-ring); outline-offset: 2px; }
+
+/* 小号圆形按钮 */
+.nei-btn--circle-sm {
+  width: 18px; height: 18px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800; line-height: 1;
+  color: var(--nei-text); text-shadow: var(--nei-label-shadow);
+  background: var(--nei-inset-bg);
+  border: var(--nei-bevel-w) solid;
+  border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight);
+  border-radius: 50%; cursor: help; user-select: none; box-sizing: border-box;
+}
+.nei-btn--circle-sm:hover { filter: brightness(1.06); }
+.nei-btn--circle-sm:focus-visible { outline: 2px solid var(--nei-focus-ring); outline-offset: 2px; }
+
+/* ===== NEI 自定义滑块 ===== */
+.nei-slider {
+  position: relative; flex: 1; min-width: 0; height: 28px;
+  display: flex; align-items: center;
+}
+.nei-slider__track {
+  position: absolute; left: 0; right: 0; top: 50%; height: 8px; margin-top: -4px;
+  background: var(--nei-inset-bg);
+  border: var(--nei-bevel-w) solid;
+  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
+  box-sizing: border-box; pointer-events: none;
+}
+.nei-slider__fill {
+  position: absolute; left: 0; top: 50%; height: 6px; margin-top: -3px;
+  margin-left: 2px; max-width: calc(100% - 4px);
+  background: var(--nei-accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  pointer-events: none; box-sizing: border-box; z-index: 1;
+}
+.nei-slider__range {
+  position: relative; z-index: 2; width: 100%; height: 28px; margin: 0;
+  background: none; cursor: pointer; box-sizing: border-box;
+  -webkit-appearance: none; appearance: none;
+}
+.nei-slider__range:disabled { cursor: not-allowed; opacity: 0.55; }
+.nei-slider__range:focus-visible { outline: 2px solid var(--nei-focus-ring); outline-offset: 2px; }
+.nei-slider__range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 16px; border-radius: 0;
+  background: var(--nei-bg);
+  border: var(--nei-bevel-w) solid;
+  border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight);
+  box-shadow: none;
+}
+.nei-slider__range::-webkit-slider-runnable-track { height: 0; background: transparent; }
+.nei-slider__range::-moz-range-thumb {
+  width: 12px; height: 16px; border-radius: 0;
+  background: var(--nei-bg);
+  border: var(--nei-bevel-w) solid;
+  border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight);
+  box-shadow: none;
+}
+.nei-slider__range::-moz-range-track { background: transparent; border: none; height: 0; }
