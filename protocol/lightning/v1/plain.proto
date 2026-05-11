@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package lightning.v1;
+
+// Plain — 内部直接存储格式，完整场景数据
+message PlainSceneDocument {
+  string format_version = 1;
+  SceneMeta meta = 2;
+  repeated WorldFrame frames = 3;
+  map<string, BlockState> block_palette = 4;
+  MaterialLibrary materials = 5;
+}
+
+message SceneMeta {
+  string name = 1;
+  string author = 2;
+  int64 created_at_ms = 3;
+  string description = 4;
+  repeated string tags = 5;
+  BlockPos origin = 6;
+}
+
+message BlockPos {
+  int32 x = 1;
+  int32 y = 2;
+  int32 z = 3;
+}
+
+message WorldFrame {
+  string label = 1;
+  int32 index = 2;
+  repeated BlockInstance blocks = 3;
+  repeated EntityInstance entities = 4;
+}
+
+message BlockInstance {
+  BlockPos pos = 1;
+  string block_state_id = 2;
+  map<string, string> nbt = 3;
+}
+
+message EntityInstance {
+  BlockPos pos = 1;
+  string entity_id = 2;
+  map<string, string> nbt = 3;
+}
+
+message BlockState {
+  string name = 1;
+  map<string, string> properties = 2;
+}
+
+message MaterialLibrary {
+  repeated MaterialEntry entries = 1;
+}
+
+message MaterialEntry {
+  string key = 1;
+  bytes texture_png = 2;
+  string blend_mode = 3;
+  bool is_animated = 4;
+  int32 animation_ticks_per_frame = 5;
+  int32 animation_frame_count = 6;
+}
