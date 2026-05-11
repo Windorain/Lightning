@@ -2,6 +2,7 @@
 
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref } from 'vue'
+import type { ThreeToolContext } from '@/workbench/tools/_base'
 
 export interface Tool {
   id: string
@@ -9,15 +10,19 @@ export interface Tool {
   icon: string
   cursor?: string
   defaultKey?: string
-  onActivate?(): void
+  onActivate?(ctx: ThreeToolContext): void
   onDeactivate?(): void
+  onPointerDown?(ctx: ThreeToolContext, event: PointerEvent): void
+  onPointerMove?(ctx: ThreeToolContext, event: PointerEvent): void
+  onPointerUp?(ctx: ThreeToolContext, event: PointerEvent): void
+  onKeyDown?(ctx: ThreeToolContext, event: KeyboardEvent): void
 }
 
 export interface ToolRegistry {
   readonly activeTool: Ref<Tool | null>
   readonly tools: Map<string, Tool>
   register(tool: Tool): void
-  activate(id: string): void
+  activate(id: string, ctx?: ThreeToolContext): void
   deactivate(): void
   getPreviousEditToolId(): string | null
 }
@@ -33,7 +38,7 @@ export function provideToolRegistry(): ToolRegistry {
     tools.set(tool.id, tool)
   }
 
-  function activate(id: string): void {
+  function activate(id: string, ctx?: ThreeToolContext): void {
     const tool = tools.get(id)
     if (!tool || activeTool.value?.id === id) return
     // Deactivate previous tool
@@ -43,7 +48,7 @@ export function provideToolRegistry(): ToolRegistry {
       previousEditToolId = activeTool.value.id
     }
     activeTool.value = tool
-    tool.onActivate?.()
+    tool.onActivate?.(ctx!)
   }
 
   function deactivate(): void {
