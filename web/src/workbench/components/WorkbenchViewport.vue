@@ -18,6 +18,7 @@ import {
 } from '@/preview/sceneStore'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { useSceneContext } from '@/workbench/sceneContext'
+import { useSelectionContext } from '@/workbench/selectionContext'
 import { t } from '@/workbench/i18n'
 
 const props = defineProps<{
@@ -25,6 +26,7 @@ const props = defineProps<{
 }>()
 
 const ctx = useSceneContext()
+const selection = useSelectionContext()
 
 defineEmits<{}>()
 
@@ -76,8 +78,19 @@ function onViewportHover(
 function onViewportSelect(
   p: { blockId: string; voxel: { column: number; row: number; zSlice: number } } | null,
 ): void {
-  ctx.setSelectedBlock(p ? { blockId: p.blockId, voxel: p.voxel } : null)
+  if (p) {
+    selection.select({ block_state_id: p.blockId, pos: { x: p.voxel.column, y: p.voxel.row, z: p.voxel.zSlice } })
+  } else {
+    selection.clear()
+  }
 }
+
+const selectedVoxel = computed(() => {
+  if (selection.items.value.size === 0) return null
+  const first = selection.items.value.values().next().value
+  if (!first) return null
+  return { column: first.pos.x, row: first.pos.y, zSlice: first.pos.z }
+})
 
 watch(
   worldFrameIndex,
@@ -103,7 +116,7 @@ onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
       :layer-preview-mode="layerPreviewMode"
       :scene-background="mergedConfig.sceneBackground"
       :edit-mode="true"
-      :selected-voxel="ctx.selectedBlock.value?.voxel ?? null"
+      :selected-voxel="selectedVoxel"
       @ready="onViewportReady"
       @hover-block="onViewportHover"
       @select-block="onViewportSelect"

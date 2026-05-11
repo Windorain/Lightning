@@ -32,16 +32,10 @@ import {
 export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle'
 export type { WorkbenchScene }
 
-export interface SelectedBlock {
-  blockId: string
-  voxel?: { column: number; row: number; zSlice: number }
-}
-
 export interface SceneContext {
   // --- 场景状态 ---
   readonly scene: Ref<WorkbenchScene | null>
   readonly dirty: Ref<boolean>
-  readonly selectedBlock: Ref<SelectedBlock | null>
   readonly sceneLoadEpoch: Ref<number>
   /** World 多帧：与预览视口一致的当前 `frames` 下标（单结构恒为 0） */
   readonly previewWorldFrameIndex: Ref<number>
@@ -57,7 +51,6 @@ export interface SceneContext {
   readonly localFileName: Ref<string | null>
 
   // --- Setters ---
-  setSelectedBlock(v: SelectedBlock | null): void
   setPreviewWorldFrameIndex(index: number): void
   setWorkspaceMode(mode: WorkbenchWorkspaceMode): void
   markDirty(): void
@@ -99,7 +92,6 @@ export function provideSceneContext(): SceneContext {
   // 场景状态
   const scene = ref<WorkbenchScene | null>(null)
   const dirty = ref(false)
-  const selectedBlock = ref<SelectedBlock | null>(null)
   const sceneLoadEpoch = ref(0)
   const previewWorldFrameIndex = ref(0)
 
@@ -253,10 +245,6 @@ export function provideSceneContext(): SceneContext {
     await loadSceneDocument(next, { mode: 'local-bundle', fileName: `示例 · ${id}.json` })
   }
 
-  function setSelectedBlock(v: SelectedBlock | null): void {
-    selectedBlock.value = v
-  }
-
   function setPreviewWorldFrameIndex(index: number): void {
     const i = Math.floor(index)
     previewWorldFrameIndex.value = Number.isFinite(i) && i >= 0 ? i : 0
@@ -279,7 +267,6 @@ export function provideSceneContext(): SceneContext {
   const ctx: SceneContext = {
     scene: scene as unknown as Ref<WorkbenchScene | null>,
     dirty: dirty as unknown as Ref<boolean>,
-    selectedBlock: selectedBlock as unknown as Ref<SelectedBlock | null>,
     sceneLoadEpoch: sceneLoadEpoch as unknown as Ref<number>,
     previewWorldFrameIndex: previewWorldFrameIndex as unknown as Ref<number>,
     previewConfig: previewConfig as unknown as ShallowRef<PreviewConfig | null>,
@@ -288,7 +275,6 @@ export function provideSceneContext(): SceneContext {
     previewError: previewError as unknown as Ref<string | null>,
     workspaceMode: workspaceMode as unknown as Ref<WorkbenchWorkspaceMode>,
     localFileName: localFileName as unknown as Ref<string | null>,
-    setSelectedBlock,
     setPreviewWorldFrameIndex,
     setWorkspaceMode,
     markDirty,

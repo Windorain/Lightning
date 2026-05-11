@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { copyTextToClipboard } from '@/util/browser'
 import { renderTooltipHtml } from './renderTooltipHtml'
 import { useSceneContext } from '@/workbench/sceneContext'
+import { useSelectionContext } from '@/workbench/selectionContext'
 import { isWorldDocument, resolveRenderBundle } from '@/render/data/bundleResolve'
 import { findBlockPaletteEntryByBlockId } from '@/render/data/blockRegistryResolve'
 import type { BlockPaletteEntry, RenderBundle } from '@/render/schema/types'
@@ -13,7 +14,16 @@ function copyNbtToClipboard(): void {
 }
 
 const ctx = useSceneContext()
-const selectedBlock = computed(() => ctx.selectedBlock.value)
+const selection = useSelectionContext()
+const selectedBlock = computed(() => {
+  if (selection.items.value.size === 0) return null
+  const first = selection.items.value.values().next().value
+  if (!first) return null
+  return {
+    blockId: first.block_state_id,
+    voxel: { column: first.pos.x, row: first.pos.y, zSlice: first.pos.z },
+  }
+})
 
 const paletteEntry = computed<BlockPaletteEntry | null>(() => {
   if (!selectedBlock.value) return null

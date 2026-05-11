@@ -13,9 +13,13 @@ import WikiViewerWorkspace from '@/workbench/components/WikiViewerWorkspace.vue'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
 import { provideSceneContext } from '@/workbench/sceneContext'
 import { provideConnectionContext } from '@/workbench/connectionContext'
+import { provideSelectionContext } from '@/workbench/selectionContext'
+import { provideEditHistory } from '@/workbench/editHistoryContext'
 
 const scene = provideSceneContext()
 const connection = provideConnectionContext(scene)
+provideSelectionContext()
+provideEditHistory(256)
 useNeiTheme()
 
 const workspace = ref<'preview' | 'wiki' | 'export'>('preview')
