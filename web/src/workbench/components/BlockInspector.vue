@@ -7,6 +7,7 @@ import { useSelectionContext } from '@/workbench/selectionContext'
 import { isWorldDocument, resolveRenderBundle } from '@/render/data/bundleResolve'
 import { findBlockPaletteEntryByBlockId } from '@/render/data/blockRegistryResolve'
 import type { BlockPaletteEntry, RenderBundle } from '@/render/schema/types'
+import type { V2GuiState, V2BlockPart } from '@/render/data/sceneDocumentV2'
 
 function copyNbtToClipboard(): void {
   if (!paletteEntry.value?.nbt) return
@@ -96,6 +97,18 @@ function copyTooltipLine(line: string): void {
 function copyAllTooltip(): void {
   copyTextToClipboard(neiTooltipLines.value.join('\n'))
 }
+
+// Computed helpers for gui_state and parts
+const guiState = computed<V2GuiState | null>(() => {
+  // Read gui_state from the currently inspected block
+  // This is a placeholder that will be wired by the parent
+  return null
+})
+
+const parts = computed<V2BlockPart[]>(() => {
+  // Read parts from the currently inspected block
+  return []
+})
 </script>
 
 <template>
@@ -158,10 +171,54 @@ function copyAllTooltip(): void {
         </div>
       </template>
       <p v-else class="pe-muted">无 NBT 数据</p>
+      <!-- gui_state: simplified machine GUI -->
+      <div v-if="guiState" class="bi-section">
+        <h4 class="bi-section-title">Machine GUI</h4>
+        <div class="bi-gui">
+          <div v-if="guiState.item_slots && guiState.item_slots.length" class="bi-gui-slots">
+            <div v-for="slot in guiState.item_slots" :key="slot.slot_index" class="bi-gui-slot">
+              <span class="bi-gui-slot-idx">{{ slot.slot_index }}</span>
+              <span class="bi-gui-slot-item">{{ slot.item_id }}</span>
+              <span v-if="slot.count > 0" class="bi-gui-slot-count">×{{ slot.count }}</span>
+            </div>
+          </div>
+          <div v-if="guiState.fluid_tanks && guiState.fluid_tanks.length" class="bi-gui-tanks">
+            <div v-for="tank in guiState.fluid_tanks" :key="tank.tank_index" class="bi-gui-tank">
+              <span class="bi-gui-tank-label">{{ tank.fluid_id || 'Empty' }}</span>
+              <div class="bi-gui-tank-bar">
+                <div class="bi-gui-tank-fill" :style="{ width: tank.capacity_mb ? (tank.amount_mb / tank.capacity_mb * 100) + '%' : '0%' }" />
+              </div>
+              <span class="bi-gui-tank-amount">{{ tank.amount_mb }} / {{ tank.capacity_mb }} mB</span>
+            </div>
+          </div>
+          <div v-if="guiState.energy" class="bi-gui-energy">
+            <span class="bi-gui-energy-label">Energy</span>
+            <div class="bi-gui-tank-bar">
+              <div class="bi-gui-energy-fill" :style="{ width: guiState.energy.capacity_eu ? (guiState.energy.stored_eu / guiState.energy.capacity_eu * 100) + '%' : '0%' }" />
+            </div>
+            <span class="bi-gui-energy-amount">{{ guiState.energy.stored_eu }} / {{ guiState.energy.capacity_eu }} EU</span>
+          </div>
+          <div v-if="guiState.config && Object.keys(guiState.config).length" class="bi-gui-config">
+            <div v-for="(_v, k) in guiState.config" :key="k" class="bi-gui-config-row">
+              <span class="bi-gui-config-key">{{ k }}</span>
+              <span class="bi-gui-config-val">{{ _v }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- parts: multipart sub-block display -->
+      <div v-if="parts && parts.length" class="bi-section">
+        <h4 class="bi-section-title">Parts ({{ parts.length }})</h4>
+        <div v-for="part in parts" :key="part.local_id" class="bi-part">
+          <span class="bi-part-kind">{{ part.part_kind }}</span>
+          <span class="bi-part-dir">dir: {{ part.direction >= 0 ? ['DOWN','UP','NORTH','SOUTH','WEST','EAST','CENTER'][part.direction] : 'N/A' }}</span>
+          <span v-if="part.tooltip" class="bi-part-tooltip">{{ part.tooltip }}</span>
+        </div>
+      </div>
     </template>
   </div>
 </template>
-
 <style scoped>
 .pe-panel { padding: 10px; font-size: 12px; }
 .pe-title { font-size: 13px; font-weight: 600; color: var(--nei-text); text-shadow: var(--nei-label-shadow); margin-bottom: 8px; }
@@ -197,4 +254,29 @@ h3 { font-size: 10px; font-weight: 600; color: var(--nei-label); text-transform:
   font-family: ui-monospace, monospace;
   color: var(--nei-text-dark);
 }
+/* gui_state styles */
+.bi-section { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--nei-border); }
+.bi-section-title { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--nei-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.bi-gui { font-size: 11px; }
+.bi-gui-slots { display: flex; flex-wrap: wrap; gap: 3px; }
+.bi-gui-slot { display: flex; align-items: center; gap: 3px; padding: 2px 6px; background: var(--nei-bg); border: 1px solid var(--nei-border); border-radius: 3px; }
+.bi-gui-slot-idx { color: var(--nei-muted); font-size: 10px; }
+.bi-gui-slot-item { font-size: 10px; overflow: hidden; text-overflow: ellipsis; max-width: 100px; white-space: nowrap; }
+.bi-gui-slot-count { color: var(--nei-label); font-size: 10px; }
+.bi-gui-tank, .bi-gui-energy { margin-top: 4px; }
+.bi-gui-tank-label, .bi-gui-energy-label { font-size: 10px; color: var(--nei-muted); }
+.bi-gui-tank-bar { height: 6px; background: var(--nei-bg); border: 1px solid var(--nei-border); border-radius: 3px; margin: 2px 0; overflow: hidden; }
+.bi-gui-tank-fill { height: 100%; background: #4488cc; border-radius: 2px; transition: width 0.2s; }
+.bi-gui-energy-fill { height: 100%; background: #cc4444; border-radius: 2px; transition: width 0.2s; }
+.bi-gui-tank-amount, .bi-gui-energy-amount { font-size: 10px; color: var(--nei-muted); font-variant-numeric: tabular-nums; }
+.bi-gui-config { margin-top: 4px; }
+.bi-gui-config-row { display: flex; gap: 6px; font-size: 10px; padding: 1px 0; }
+.bi-gui-config-key { color: var(--nei-muted); }
+.bi-gui-config-val { color: var(--nei-label); }
+
+/* parts display */
+.bi-part { display: flex; align-items: center; gap: 6px; padding: 2px 4px; font-size: 10px; }
+.bi-part-kind { color: var(--nei-label); font-weight: 500; }
+.bi-part-dir { color: var(--nei-muted); font-size: 10px; }
+.bi-part-tooltip { color: var(--nei-text-dark); font-style: italic; }
 </style>
