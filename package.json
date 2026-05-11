@@ -1,0 +1,15 @@
+{
+  "private": true,
+  "name": "lightning",
+  "version": "0.0.0",
+  "description": "Lightning — Minecraft structure data replay platform",
+  "scripts": {
+    "dev:web":           "cd web && npm run dev",
+    "build:web":         "cd web && npm run build:all",
+    "build:mod:gtnh":    "cd mod/gtnh && ./gradlew build",
+    "build:all":         "npm run build:web && npm run build:mod:gtnh",
+    "protocol:gen":      "cd protocol && buf generate",
+    "protocol:lint":     "cd protocol && buf lint",
+    "protocol:breaking": "cd protocol && buf breaking --against '.git#branch=main'"
+  }
+}
