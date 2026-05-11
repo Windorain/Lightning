@@ -6,4 +6,4 @@ import { createApp } from 'vue'
 import DevApp from '@/dev/DevApp.vue'
 import '@/styles/nei-tokens.css'
 
-createApp(DevApp).mount('#web-structure-renderer')
+createApp(DevApp).mount('#app')
