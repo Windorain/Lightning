@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package lightning.v2;
+
+// Plain v2 — 完整场景数据，含 v2 新增字段
+message PlainSceneDocument {
+  string format_version = 1;          // "2.0"
+  SceneMeta meta = 2;
+  repeated WorldFrame frames = 3;
+  map<string, BlockState> block_palette = 4;
+  MaterialLibrary materials = 5;
+
+  // v2 新增
+  repeated AnnotationBox annotations = 6;
+  repeated Label labels = 7;
+  StatsTemplate stats_template = 8;
+}
+
+message SceneMeta {
+  string name = 1;
+  string author = 2;
+  int64 created_at_ms = 3;
+  string description = 4;
+  repeated string tags = 5;
+  BlockPos origin = 6;
+}
+
+message BlockPos {
+  int32 x = 1;
+  int32 y = 2;
+  int32 z = 3;
+}
+
+message WorldFrame {
+  string label = 1;
+  int32 index = 2;
+  repeated BlockInstance blocks = 3;
+  repeated EntityInstance entities = 4;
+}
+
+message BlockInstance {
+  BlockPos pos = 1;
+  string block_state_id = 2;
+  map<string, string> nbt = 3;
+  repeated BlockPart parts = 4;       // v2 新增
+  GuiState gui_state = 5;             // v2 新增
+}
+
+message BlockPart {
+  string local_id = 1;                // 父块内唯一标识
+  string part_kind = 2;               // modid:类型
+  int32 direction = 3;                // -1=无, 0-5=DUNSWE, 6=CENTER
+  map<string, string> properties = 4; // 部件属性
+  string tooltip = 5;                 // 独立 tooltip
+}
+
+message GuiState {
+  string layout_id = 1;
+  repeated ItemSlot item_slots = 2;
+  repeated FluidTank fluid_tanks = 3;
+  EnergyState energy = 4;
+  map<string, string> config = 5;
+}
+
+message ItemSlot {
+  int32 slot_index = 1;
+  string item_id = 2;
+  int32 count = 3;
+  int32 damage = 4;
+  map<string, string> nbt = 5;
+}
+
+message FluidTank {
+  int32 tank_index = 1;
+  string fluid_id = 2;
+  int64 amount_mb = 3;
+  int64 capacity_mb = 4;
+}
+
+message EnergyState {
+  int64 stored_eu = 1;
+  int64 capacity_eu = 2;
+}
+
+message BlockState {
+  string name = 1;
+  map<string, string> properties = 2;
+}
+
+message EntityInstance {
+  BlockPos pos = 1;
+  string entity_id = 2;
+  map<string, string> nbt = 3;
+}
+
+message MaterialLibrary {
+  repeated MaterialEntry entries = 1;
+}
+
+message MaterialEntry {
+  string key = 1;
+  bytes texture_png = 2;
+  string blend_mode = 3;
+  bool is_animated = 4;
+  int32 animation_ticks_per_frame = 5;
+  int32 animation_frame_count = 6;
+}
+
+message AnnotationBox {
+  string id = 1;
+  string title = 2;
+  string description = 3;             // Markdown
+  BlockPos min = 4;
+  BlockPos max = 5;
+  string color = 6;
+  bool visible = 7;
+  repeated PartRef part_refs = 8;     // 可选：定向注解 part
+  int64 created_at = 9;
+  int64 updated_at = 10;
+}
+
+message PartRef {
+  BlockPos block_pos = 1;
+  string part_local_id = 2;
+}
+
+message Label {
+  string id = 1;
+  string text = 2;
+  float x = 3;
+  float y = 4;
+  float z = 5;
+  string color = 6;
+  int32 font_size = 7;
+  bool visible = 8;
+}
+
+message StatsTemplate {
+  string mode = 1;                    // "auto" | "custom"
+  repeated StatsGroup groups = 2;
+  bool show_others = 3;
+}
+
+message StatsGroup {
+  string label = 1;
+  repeated StatsEntry entries = 2;
+}
+
+message StatsEntry {
+  string block_state_id = 1;
+  string label_override = 2;
+  string icon_source = 3;
+}

@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package lightning.v2;
+
+message EnvelopeDocument {
+  string format_version = 1;          // "2.0"
+  EnvelopeMeta meta = 2;
+  bytes compressed_payload = 3;       // gzip → JSON(PlainSceneDocument)
+}
+
+message EnvelopeMeta {
+  string scene_id = 1;
+  string name = 2;
+  string author = 3;
+  int64 created_at_ms = 4;
+  int64 compressed_size_bytes = 5;
+  int64 uncompressed_size_bytes = 6;
+  string sha256_hex = 7;
+}
