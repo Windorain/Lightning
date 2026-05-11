@@ -15,11 +15,14 @@ import { provideSceneContext } from '@/workbench/sceneContext'
 import { provideConnectionContext } from '@/workbench/connectionContext'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
+import { provideToolRegistry } from '@/workbench/toolRegistry'
+import ToolShelf from '@/workbench/components/ToolShelf.vue'
 
 const scene = provideSceneContext()
 const connection = provideConnectionContext(scene)
 provideSelectionContext()
 provideEditHistory(256)
+provideToolRegistry()
 useNeiTheme()
 
 const workspace = ref<'preview' | 'wiki' | 'export'>('preview')
@@ -58,7 +61,9 @@ onMounted(async () => {
     <template #workspace-tabs>
       <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
     </template>
-    <template #tool-shelf />
+    <template #tool-shelf>
+      <ToolShelf />
+    </template>
     <template #viewport>
       <ViewportHost />
     </template>
