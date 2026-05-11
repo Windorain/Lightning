@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, provide, ref } from 'vue'
+import { onMounted, onBeforeUnmount, provide, ref } from 'vue'
 
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
 import WorkbenchSettingsDrawer from '@/workbench/components/WorkbenchSettingsDrawer.vue'
@@ -15,15 +15,71 @@ import { provideSceneContext } from '@/workbench/sceneContext'
 import { provideConnectionContext } from '@/workbench/connectionContext'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
-import { provideToolRegistry } from '@/workbench/toolRegistry'
+import { provideToolRegistry, useToolRegistry } from '@/workbench/toolRegistry'
 import ToolShelf from '@/workbench/components/ToolShelf.vue'
+
+// Tools
+import { selectTool } from '@/workbench/tools/selectTool'
+import { moveTool } from '@/workbench/tools/moveTool'
+import { deleteTool } from '@/workbench/tools/deleteTool'
+import { replaceTool } from '@/workbench/tools/replaceTool'
+import { fillTool } from '@/workbench/tools/fillTool'
+import { mirrorTool } from '@/workbench/tools/mirrorTool'
+import { generateTool } from '@/workbench/tools/generateTool'
+import { annotationTool } from '@/workbench/tools/annotationTool'
+import { labelTool } from '@/workbench/tools/labelTool'
+import { eyedropperTool } from '@/workbench/tools/eyedropperTool'
+
+// Keymap
+import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
 
 const scene = provideSceneContext()
 const connection = provideConnectionContext(scene)
 provideSelectionContext()
-provideEditHistory(256)
+const editHistory = provideEditHistory(256)
 provideToolRegistry()
+const toolRegistry = useToolRegistry()
 useNeiTheme()
+
+// Register all tools
+toolRegistry.register(selectTool)
+toolRegistry.register(moveTool)
+toolRegistry.register(deleteTool)
+toolRegistry.register(replaceTool)
+toolRegistry.register(fillTool)
+toolRegistry.register(mirrorTool)
+toolRegistry.register(generateTool)
+toolRegistry.register(annotationTool)
+toolRegistry.register(labelTool)
+toolRegistry.register(eyedropperTool)
+toolRegistry.activate('select')
+
+// Keymap
+let keymap: KeyBinding[] = []
+
+function handleKeydown(event: KeyboardEvent): void {
+  for (const binding of keymap) {
+    if (!matchBinding(binding, event)) continue
+    event.preventDefault()
+    if (binding.toolId) {
+      toolRegistry.activate(binding.toolId)
+    } else if (binding.action) {
+      switch (binding.action) {
+        case 'undo': editHistory.undo(); break
+        case 'redo': editHistory.redo(); break
+        case 'toggle-tool': {
+          const prev = toolRegistry.getPreviousEditToolId()
+          if (prev) { toolRegistry.activate(prev) } else { toolRegistry.activate('select') }
+          break
+        }
+        case 'toggle-toolshelf': break
+        case 'toggle-properties': break
+        case 'invert': break
+      }
+    }
+    return
+  }
+}
 
 const workspace = ref<'preview' | 'wiki' | 'export'>('preview')
 const settingsOpen = ref(false)
@@ -36,6 +92,9 @@ function resetLayout(): void {
 }
 
 onMounted(async () => {
+  keymap = loadKeymap()
+  window.addEventListener('keydown', handleKeydown)
+
   if (connection.apiBase.value) {
     await connection.testConnection()
     if (connection.connected.value) {
@@ -49,6 +108,10 @@ onMounted(async () => {
       try { await scene.loadBuiltinScene(sceneId) } catch { /* ignore */ }
     }
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
