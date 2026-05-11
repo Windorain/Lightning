@@ -6,6 +6,13 @@
  */
 import { computed, ref, type Component } from 'vue'
 import { t } from '@/workbench/i18n'
+import { useToolRegistry } from '@/workbench/toolRegistry'
+import { useSelectionContext } from '@/workbench/selectionContext'
+import TransformPanel from '@/workbench/components/TransformPanel.vue'
+import BatchEditPanel from '@/workbench/components/BatchEditPanel.vue'
+import AnnotationEditor from '@/workbench/components/AnnotationEditor.vue'
+import LabelEditor from '@/workbench/components/LabelEditor.vue'
+import GeneratePanel from '@/workbench/components/GeneratePanel.vue'
 import BlockInspector from './BlockInspector.vue'
 import TooltipEditor from './TooltipEditor.vue'
 import BlockStatsEditor from './BlockStatsEditor.vue'
@@ -38,18 +45,53 @@ const ALL_EDITORS: Record<string, EditorEntry[]> = {
 const editors = computed(() => ALL_EDITORS[props.editors ?? 'editor'] ?? ALL_EDITORS.editor)
 const activeEditorId = ref(editors.value[0]?.id ?? '')
 const activeEditor = computed<Component>(() => editors.value.find(e => e.id === activeEditorId.value)?.comp ?? editors.value[0]!.comp)
+
+// Tool-driven tab switching
+const toolRegistry = useToolRegistry()
+const selection = useSelectionContext()
+
+const TOOL_PANEL_MAP: Record<string, Component> = {
+  transform: TransformPanel,
+  'batch-edit': BatchEditPanel,
+  'annotation-editor': AnnotationEditor,
+  'label-editor': LabelEditor,
+  'generate-panel': GeneratePanel,
+}
+
+const activeTab = computed(() => {
+  const tool = toolRegistry.activeTool.value
+  if (!tool) return 'block-inspector'
+  switch (tool.id) {
+    case 'select':
+      return selection.items.value.size > 1 ? 'batch-edit' : 'block-inspector'
+    case 'move':
+      return 'transform'
+    case 'annotation':
+      return 'annotation-editor'
+    case 'label':
+      return 'label-editor'
+    case 'generate':
+    case 'replace':
+    case 'fill':
+      return 'generate-panel'
+    default:
+      return 'block-inspector'
+  }
+})
+
+const toolPanel = computed<Component | null>(() => TOOL_PANEL_MAP[activeTab.value] ?? null)
 </script>
 
 <template>
   <div class="pp-root">
-    <div class="pp-header">
+    <div v-if="!toolPanel" class="pp-header">
       <select v-model="activeEditorId" class="pp-editor-select">
         <option v-for="ed in editors" :key="ed.id" :value="ed.id">{{ t(ed.i18nKey) }}</option>
       </select>
     </div>
     <div class="pp-body">
       <KeepAlive>
-        <component :is="activeEditor" />
+        <component :is="toolPanel ?? activeEditor" />
       </KeepAlive>
     </div>
   </div>
