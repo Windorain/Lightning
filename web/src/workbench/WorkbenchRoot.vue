@@ -15,7 +15,7 @@ import { provideSceneContext } from '@/workbench/sceneContext'
 import { provideConnectionContext } from '@/workbench/connectionContext'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
-import { provideToolRegistry, useToolRegistry } from '@/workbench/toolRegistry'
+import { provideToolRegistry } from '@/workbench/toolRegistry'
 import ToolShelf from '@/workbench/components/ToolShelf.vue'
 
 // Tools
@@ -37,8 +37,7 @@ const scene = provideSceneContext()
 const connection = provideConnectionContext(scene)
 provideSelectionContext()
 const editHistory = provideEditHistory(256)
-provideToolRegistry()
-const toolRegistry = useToolRegistry()
+const toolRegistry = provideToolRegistry()
 useNeiTheme()
 
 // Register all tools
