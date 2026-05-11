@@ -2,9 +2,9 @@
 {
   "modid": "lightning",
   "name": "Lightning",
-  "description": "World scan to Wiki v6 JSON (palette + cellGrid). Commands: /sde",
+  "description": "Minecraft structure data replay platform — capture, upload, and share 3D structure replays",
   "version": "0.2",
   "mcversion": "${minecraftVersion}",
-  "authorList": ["WikiMultiStructureRender"]
+  "authorList": ["Lightning Team"]
 }
 ]

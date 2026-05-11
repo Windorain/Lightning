@@ -1,7 +1,7 @@
-item.sde_tool_select.name=SDE 选区魔棒
-item.sde_tool_record.name=SDE 录制魔棒
-item.sde_tool_noter.name=SDE 体素备注器
-sde.gui.cell_note.title=体素备注
-sde.gui.cell_note.hint=用于 Wiki 悬停说明；点保存或回车写盘。Esc 取消不保存。
-sde.gui.cell_note.save=保存
-sde.gui.cell_note.cancel=取消
+item.lightning.sde_tool_select.name=Lightning 选区魔棒
+item.lightning.sde_tool_record.name=Lightning 录制魔棒
+item.lightning.sde_tool_noter.name=Lightning 体素备注器
+lightning.gui.cell_note.title=体素备注
+lightning.gui.cell_note.hint=用于 Wiki 悬停说明；点保存或回车写盘。Esc 取消不保存。
+lightning.gui.cell_note.save=保存
+lightning.gui.cell_note.cancel=取消
