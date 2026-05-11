@@ -1,0 +1,7 @@
+item.sde_tool_select.name=SDE Selection Wand
+item.sde_tool_record.name=SDE Record Wand
+item.sde_tool_noter.name=SDE Cell Note
+sde.gui.cell_note.title=Cell note
+sde.gui.cell_note.hint=Enter text for the Wiki tooltip; saved on Save or Enter. Esc cancels.
+sde.gui.cell_note.save=Save
+sde.gui.cell_note.cancel=Cancel

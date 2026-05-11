@@ -1,0 +1,10 @@
+[
+{
+  "modid": "lightning",
+  "name": "Lightning",
+  "description": "World scan to Wiki v6 JSON (palette + cellGrid). Commands: /sde",
+  "version": "0.2",
+  "mcversion": "${minecraftVersion}",
+  "authorList": ["WikiMultiStructureRender"]
+}
+]

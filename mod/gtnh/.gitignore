@@ -1,0 +1,18 @@
+/.gradle/
+/build/
+/run/
+/out/
+*.iml
+.idea/
+*.log
+.refs/
+
+# WebStructureRenderer 本地检出目录（默认名 dist-workbench，见 sde.workbenchNpmDir）；勿提交
+/dist-workbench/
+
+# Workbench 打包进资源目录的前端构建产物，勿提交
+src/main/resources/assets/structuredataexporter/web/
+
+.claude
+CLAUDE.md
+.worktrees/
