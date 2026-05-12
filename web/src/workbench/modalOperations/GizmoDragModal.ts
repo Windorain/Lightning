@@ -1,4 +1,3 @@
-import * as THREE from 'three'
 import {
   type ModalOperation,
   type ModalKeymap,
@@ -7,7 +6,6 @@ import {
 } from '@/workbench/eventDispatcher'
 import type { MoveGizmo, GizmoAxis } from '@/workbench/tools/gizmos'
 import type { BContext } from '@/workbench/context/bContext'
-import type { V2PlainSceneDocument } from '@/render/data/sceneDocumentV2'
 
 const GIZMO_DRAG_ITEMS = [
   { key: 'Escape', value: 'CANCEL' },
@@ -29,7 +27,7 @@ export class GizmoDragModal implements ModalOperation {
   private gizmo: MoveGizmo
   private bctx: BContext
   private controlsRef: { enabled: boolean } | null
-  private origin: THREE.Vector3
+  private origin: { x: number; y: number; z: number }
   private gizmoPart: GizmoAxis
   private initialPositions: Array<{ x: number; y: number; z: number }>
   private keymap: ModalKeymap
@@ -47,7 +45,7 @@ export class GizmoDragModal implements ModalOperation {
     this.gizmo = gizmo
     this.bctx = bctx
     this.controlsRef = controlsRef
-    this.origin = gizmo.root.position.clone()
+    this.origin = { x: gizmo.root.position.x, y: gizmo.root.position.y, z: gizmo.root.position.z }
     this.keymap = createModalKeymap(GIZMO_DRAG_ITEMS as any)
     this.initialPositions = [...(bctx.selection.items.value)].map(i => ({ ...i.pos }))
     this.computeScreenDelta = computeScreenDelta
@@ -82,37 +80,31 @@ export class GizmoDragModal implements ModalOperation {
       let delta = this.computeScreenDelta(event)
       if (this.precision) delta *= 0.1
 
-      const dirs: Record<string, THREE.Vector3> = {
-        x: new THREE.Vector3(1, 0, 0),
-        y: new THREE.Vector3(0, 1, 0),
-        z: new THREE.Vector3(0, 0, 1),
-      }
-      const dir = dirs[this.gizmoPart] ?? new THREE.Vector3()
-      this.gizmo.root.position.copy(this.origin.clone().addScaledVector(dir, delta))
+      const newPos = this.bctx.queries.axisAdd(this.origin, this.gizmoPart as any, delta)
+      this.gizmo.root.position.set(newPos.x, newPos.y, newPos.z)
       return { break: true }
     }
 
     if (event.type === 'pointerup') {
-      const finalDelta = this.gizmo.root.position.clone().sub(this.origin)
-      const dx = Math.round(finalDelta.x)
-      const dy = Math.round(finalDelta.y)
-      const dz = Math.round(finalDelta.z)
-      if (dx !== 0 || dy !== 0 || dz !== 0) {
-        const doc = this.bctx.scene.scene.value as V2PlainSceneDocument | null
-        if (doc?.frames?.length) {
-          const idx = this.bctx.selection.frameIndex.value ?? 0
-          const frame = doc.frames[idx]
-          if (frame) {
-            for (const initPos of this.initialPositions) {
-              const block = findBlock(frame.blocks as any[], initPos)
-              if (block) {
-                block.pos.x = initPos.x + dx
-                block.pos.y = initPos.y + dy
-                block.pos.z = initPos.z + dz
-              }
+      const cur = this.gizmo.root.position
+      const delta = this.bctx.queries.roundVec({
+        x: cur.x - this.origin.x,
+        y: cur.y - this.origin.y,
+        z: cur.z - this.origin.z,
+      })
+
+      if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
+        const frame = this.bctx.queries.getCurrentFrame()
+        if (frame) {
+          for (const initPos of this.initialPositions) {
+            const block = findBlock(frame.blocks as any[], initPos)
+            if (block) {
+              block.pos.x = initPos.x + delta.x
+              block.pos.y = initPos.y + delta.y
+              block.pos.z = initPos.z + delta.z
             }
-            this.bctx.scene.markDirty()
           }
+          this.bctx.scene.markDirty()
         }
       }
       eventDispatcher.commitModal()
@@ -124,7 +116,7 @@ export class GizmoDragModal implements ModalOperation {
 
   onExit(cancelled: boolean): void {
     if (cancelled) {
-      this.gizmo.root.position.copy(this.origin)
+      this.gizmo.root.position.set(this.origin.x, this.origin.y, this.origin.z)
     }
     if (this.controlsRef) this.controlsRef.enabled = true
   }
