@@ -17,4 +17,4 @@ build/
 .idea/
 .vscode/
 *.iml
-.claude/worktrees/
+.claude/
