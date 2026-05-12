@@ -5,6 +5,7 @@ import { useBContext } from '@/workbench/context/bContext'
 import { useSnapping } from '@/workbench/composables/useSnapping'
 
 const registry = useToolRegistry()
+const { tools, activeTool } = registry
 const bctx = useBContext()
 const { snapEnabled, toggleSnap } = useSnapping()
 </script>
@@ -12,11 +13,11 @@ const { snapEnabled, toggleSnap } = useSnapping()
 <template>
   <div class="toolshelf">
     <button
-      v-for="[_id, tool] in registry.tools"
+      v-for="[_id, tool] in tools"
       :key="tool.id"
       :data-testid="`tool-${tool.id}`"
       class="toolshelf__btn"
-      :class="{ 'toolshelf__btn--active': registry.activeTool.value?.id === tool.id }"
+      :class="{ 'toolshelf__btn--active': activeTool?.id === tool.id }"
       :title="tool.label + (tool.defaultKey ? ` (${tool.defaultKey})` : '')"
       @click="registry.activate(tool.id, bctx)"
     >

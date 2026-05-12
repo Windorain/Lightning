@@ -1,15 +1,5 @@
-/**
- * ToolRegistry — 对标 Blender 的工具激活系统。
- *
- * 现在是 OperatorRegistry 的薄包装层：
- * - 管理"活跃工具"（即当前被选中的操作符）
- * - 提供 ToolShelf 所需的显示元数据（icon, cursor, defaultKey）
- * - Tab 切换（select ↔ 上次编辑工具）
- *
- * 实际的交互事件由 activeToolHandler 直接通过 globalOperators 分发。
- */
 import type { InjectionKey, Ref } from 'vue'
-import { inject, provide, ref } from 'vue'
+import { inject, provide, ref, shallowRef } from 'vue'
 import type { BContext } from '@/workbench/context/bContext'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { logToolActivated } from '@/workbench/debug/debugLog'
@@ -37,22 +27,25 @@ export interface OperatorTool {
 
 export interface ToolRegistry {
   readonly activeTool: Ref<OperatorTool | null>
-  readonly tools: Map<string, OperatorTool>
+  readonly tools: Ref<Map<string, OperatorTool>>
   activate(id: string, bctx?: BContext): void
   deactivate(): void
   getPreviousEditToolId(): string | null
+  rebuildTools(): void
 }
 
 export const toolRegistryKey: InjectionKey<ToolRegistry> = Symbol('toolRegistry')
 
 export function provideToolRegistry(): ToolRegistry {
   const activeTool = ref<OperatorTool | null>(null)
+  const tools = shallowRef<Map<string, OperatorTool>>(new Map())
   let previousEditToolId: string | null = null
 
-  function buildToolList(): Map<string, OperatorTool> {
+  function rebuildTools(): void {
     const map = new Map<string, OperatorTool>()
     for (const op of globalOperators.all()) {
-      const meta = OPERATOR_TOOL_META[op.id] ?? { icon: '?' }
+      const meta = OPERATOR_TOOL_META[op.id]
+      if (!meta) continue // skip internal operators (e.g. OPERATOR_MOVE_GIZMO)
       map.set(op.id, {
         id: op.id,
         label: op.label,
@@ -61,16 +54,13 @@ export function provideToolRegistry(): ToolRegistry {
         defaultKey: meta.defaultKey,
       })
     }
-    return map
+    tools.value = map
   }
 
-  const tools = buildToolList()
-
   function activate(id: string, _bctx?: BContext): void {
-    const tool = tools.get(id)
+    const tool = tools.value.get(id)
     if (!tool || activeTool.value?.id === id) return
 
-    // Track last non-select tool for Tab toggle
     if (activeTool.value && activeTool.value.id !== 'OPERATOR_SELECT') {
       previousEditToolId = activeTool.value.id
     }
@@ -80,7 +70,7 @@ export function provideToolRegistry(): ToolRegistry {
   }
 
   function deactivate(): void {
-    activeTool.value = tools.get('OPERATOR_SELECT') ?? null
+    activeTool.value = tools.value.get('OPERATOR_SELECT') ?? null
     previousEditToolId = null
   }
 
@@ -94,6 +84,7 @@ export function provideToolRegistry(): ToolRegistry {
     activate,
     deactivate,
     getPreviousEditToolId,
+    rebuildTools,
   }
   provide(toolRegistryKey, registry)
   return registry

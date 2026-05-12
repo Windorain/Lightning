@@ -75,7 +75,8 @@ globalOperators.register(AnnotationOperator)
 globalOperators.register(LabelOperator)
 globalOperators.register(MoveGizmoOperator)
 
-// Activate select tool by default
+// Rebuild tool list after all operators registered, then activate default
+toolRegistry.rebuildTools()
 toolRegistry.activate('OPERATOR_SELECT')
 
 // Keymap — maps to operator IDs
