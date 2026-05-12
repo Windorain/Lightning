@@ -1,7 +1,6 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
 import { pickVoxel } from '@/workbench/context/sceneQueries'
-import { setReplaceBrush, setFillBrush } from './brushState'
 
 export const EyedropperOperator: OperatorType = {
   id: 'OPERATOR_EYEDROPPER',
@@ -16,8 +15,8 @@ export const EyedropperOperator: OperatorType = {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
     const picked = pickVoxel(bctx, event)
     if (!picked) return OP_RESULT.CANCELLED
-    setReplaceBrush(picked.block_state_id)
-    setFillBrush(null)
+    bctx.settings.replaceBrush = picked.block_state_id
+    bctx.settings.fillBrush = null
     return OP_RESULT.FINISHED
   },
 }

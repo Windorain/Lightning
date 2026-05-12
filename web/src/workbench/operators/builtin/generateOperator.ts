@@ -2,7 +2,6 @@ import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
 import { pickVoxel } from '@/workbench/context/sceneQueries'
 import type { V2PlainSceneDocument, V2BlockInstance } from '@/render/data/sceneDocumentV2'
-import { getReplaceBrush } from './brushState'
 
 export const GenerateOperator: OperatorType = {
   id: 'OPERATOR_GENERATE',
@@ -11,12 +10,12 @@ export const GenerateOperator: OperatorType = {
   flagUndo: true,
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null && getReplaceBrush() !== null
+    return bctx.scene.scene.value !== null && bctx.settings.replaceBrush !== null
   },
 
   invoke(bctx, _props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
-    const brush = getReplaceBrush()
+    const brush = bctx.settings.replaceBrush
     if (!brush) return OP_RESULT.CANCELLED
 
     const picked = pickVoxel(bctx, event)

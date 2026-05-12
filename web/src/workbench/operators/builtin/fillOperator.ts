@@ -2,7 +2,6 @@ import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
 import { pickVoxel } from '@/workbench/context/sceneQueries'
 import type { V2PlainSceneDocument } from '@/render/data/sceneDocumentV2'
-import { getFillBrush } from './brushState'
 
 export const FillOperator: OperatorType = {
   id: 'OPERATOR_FILL',
@@ -11,12 +10,12 @@ export const FillOperator: OperatorType = {
   flagUndo: true,
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null && getFillBrush() !== null
+    return bctx.scene.scene.value !== null && bctx.settings.fillBrush !== null
   },
 
   invoke(bctx, _props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
-    const brush = getFillBrush()
+    const brush = bctx.settings.fillBrush
     if (!brush) return OP_RESULT.CANCELLED
 
     const picked = pickVoxel(bctx, event)

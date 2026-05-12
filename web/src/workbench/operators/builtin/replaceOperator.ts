@@ -1,7 +1,6 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
 import type { V2PlainSceneDocument } from '@/render/data/sceneDocumentV2'
-import { getReplaceBrush } from './brushState'
 import { pickVoxel } from '@/workbench/context/sceneQueries'
 
 export const ReplaceOperator: OperatorType = {
@@ -11,12 +10,12 @@ export const ReplaceOperator: OperatorType = {
   flagUndo: true,
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null && getReplaceBrush() !== null
+    return bctx.scene.scene.value !== null && bctx.settings.replaceBrush !== null
   },
 
   invoke(bctx, _props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
-    const brush = getReplaceBrush()
+    const brush = bctx.settings.replaceBrush
     if (!brush) return OP_RESULT.CANCELLED
 
     const picked = pickVoxel(bctx, event)

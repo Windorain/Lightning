@@ -17,6 +17,8 @@ import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
 import { provideToolRegistry } from '@/workbench/toolRegistry'
 import { provideBContext, type BContext } from '@/workbench/context/bContext'
+import { createProductionQueries } from '@/workbench/context/sceneQueries'
+import { createBContextSettings } from '@/workbench/context/toolSettings'
 import ToolShelf from '@/workbench/components/ToolShelf.vue'
 
 // Operators
@@ -57,7 +59,7 @@ const connection = provideConnectionContext(scene)
 const selection = provideSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
-const bctx: BContext = {
+const bctx = {
   scene,
   selection,
   editHistory,
@@ -69,7 +71,9 @@ const bctx: BContext = {
   controlsRef: null,
   definition: null,
   layerPreview: null,
-}
+  settings: createBContextSettings(),
+} as BContext
+bctx.queries = createProductionQueries(bctx)
 provideBContext(bctx)
 useNeiTheme()
 

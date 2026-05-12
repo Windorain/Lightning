@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { getGenerateType, setGenerateType, FLOOR_TEMPLATES } from '@/workbench/operators/builtin/brushState'
-import { setReplaceBrush, getReplaceBrush } from '@/workbench/operators/builtin/brushState'
 import { useSceneContext } from '@/workbench/sceneContext'
+import { useBContext } from '@/workbench/context/bContext'
+import { FLOOR_TEMPLATES } from '@/workbench/context/toolSettings'
 
 const scene = useSceneContext()
+const bctx = useBContext()
 
 const activeTab = ref<'palette' | 'floor'>('palette')
 
@@ -17,12 +18,12 @@ function refreshPalette(): void {
 refreshPalette()
 
 function selectType(id: string): void {
-  setGenerateType(id)
-  setReplaceBrush(id)
+  bctx.settings.generateType = id
+  bctx.settings.replaceBrush = id
 }
 
 function selectFloor(templateId: string): void {
-  setGenerateType(templateId)
+  bctx.settings.generateType = templateId
 }
 </script>
 
@@ -38,7 +39,7 @@ function selectFloor(templateId: string): void {
       <button
         v-for="id in paletteEntries" :key="id"
         class="gp-item"
-        :class="{ 'gp-item--active': getGenerateType() === id || getReplaceBrush() === id }"
+        :class="{ 'gp-item--active': bctx.settings.generateType === id || bctx.settings.replaceBrush === id }"
         @click="selectType(id)"
       >
         {{ id }}
@@ -50,7 +51,7 @@ function selectFloor(templateId: string): void {
       <button
         v-for="tmpl in FLOOR_TEMPLATES" :key="tmpl.id"
         class="gp-item"
-        :class="{ 'gp-item--active': getGenerateType() === tmpl.id }"
+        :class="{ 'gp-item--active': bctx.settings.generateType === tmpl.id }"
         @click="selectFloor(tmpl.id)"
       >
         <span class="gp-swatch" :style="{ background: tmpl.color.includes('/') ? 'repeating-conic-gradient(#fff 0% 25%, #000 0% 50%) 0 / 12px 12px' : tmpl.color }" />
