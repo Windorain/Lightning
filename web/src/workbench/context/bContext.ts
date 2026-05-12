@@ -14,6 +14,33 @@ import type { ConnectionContext } from '@/workbench/connectionContext'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type * as THREE from 'three'
+import type { BlockRef } from '@/workbench/selectionContext'
+import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
+
+export interface BContextQueries {
+  /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
+  pickVoxel(event: PointerEvent): BlockRef | null
+  /** 获取当前帧的可变引用（用于读写 blocks/labels/annotations） */
+  getCurrentFrame(): V2WorldFrame | null
+  /** 获取当前帧的 BlockRef 快照列表 */
+  getFrameBlocks(): BlockRef[]
+  /** 方块世界坐标 → 屏幕坐标（供测试反算点击位置） */
+  projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null
+  /** Gizmo 箭头在屏幕上的锚点坐标 */
+  getGizmoAnchor(axis: 'x' | 'y' | 'z'): { x: number; y: number } | null
+  /** 轴对齐向量运算：target = origin + dir * delta（替代 THREE.Vector3） */
+  axisAdd(origin: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', delta: number): { x: number; y: number; z: number }
+  /** 向量取整 */
+  roundVec(v: { x: number; y: number; z: number }): { x: number; y: number; z: number }
+}
+
+export interface BContextSettings {
+  replaceBrush: string | null
+  fillBrush: string | null
+  generateType: string | null
+  /** Gizmo 拖拽灵敏度（原硬编码 const k = 0.05） */
+  dragSensitivity: number
+}
 
 export interface BContext {
   scene: SceneContext
@@ -21,6 +48,10 @@ export interface BContext {
   editHistory: UndoManager
   toolRegistry: ToolRegistry
   connection: ConnectionContext
+  /** 场景查询（操作符通过此访问场景数据，不直接 import sceneQueries） */
+  queries: BContextQueries
+  /** 工具设置（替代 brushState.ts 的模块级 Vue ref） */
+  settings: BContextSettings
   /** Viewport 运行时状态（WorkbenchViewport.onViewportReady 时填充） */
   camera: THREE.Camera | null
   contentGroup: THREE.Group | null
