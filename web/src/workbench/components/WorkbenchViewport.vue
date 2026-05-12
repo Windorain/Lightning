@@ -4,8 +4,6 @@
  * 与 EmbedViewer（Wiki 嵌入）分离，不共享 editMode/features 开关。
  */
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-import type { Scene } from 'three'
-
 import StructureViewport from '@/embed/components/StructureViewport.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
@@ -19,7 +17,12 @@ import {
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { useSceneContext } from '@/workbench/sceneContext'
 import { useSelectionContext } from '@/workbench/selectionContext'
-import { t } from '@/workbench/i18n'
+import { useToolRegistry } from '@/workbench/toolRegistry'
+import { useEditHistory } from '@/workbench/editHistoryContext'
+import type { ThreeToolContext } from '@/workbench/tools/_base'
+import { createToolContext, type ToolContextDeps } from '@/workbench/tools/interactionFactory'
+import { MoveGizmo } from '@/workbench/tools/gizmos'
+import * as THREE from 'three'
 
 const props = defineProps<{
   mergedConfig: PreviewConfig
@@ -27,6 +30,9 @@ const props = defineProps<{
 
 const ctx = useSceneContext()
 const selection = useSelectionContext()
+
+const toolRegistry = useToolRegistry()
+const editHistory = useEditHistory()
 
 defineEmits<{}>()
 
@@ -38,6 +44,11 @@ watch(() => props.mergedConfig, async (cfg) => {
 })
 
 const { hover, setHover, clearHover } = usePreviewTooltip()
+
+let toolCtx: ThreeToolContext | null = null
+let moveGizmo: MoveGizmo | null = null
+let gizmoDragPart: string | null = null
+let gizmoDragOrigin: THREE.Vector3 | null = null
 
 const {
   loadStatus,
@@ -63,9 +74,60 @@ type BottomTab = 'frame' | 'layer'
 const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 
 /* ---- Viewport events ---- */
-async function onViewportReady(scene: Scene): Promise<void> {
+async function onViewportReady(scene: THREE.Scene): Promise<void> {
   store.registerScene(scene)
   try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e) }
+
+  // Create tool context when scene + viewport are ready
+  const vp = store as any
+  const camera: THREE.Camera | undefined = vp._camera ?? /* fallback */ scene.children.find(c => c instanceof THREE.Camera) as THREE.Camera | undefined
+  const canvas: HTMLElement | undefined = vp._domElement ?? vp._canvas
+
+  if (camera && canvas) {
+    const deps: ToolContextDeps = {
+      scene: ctx,
+      selection,
+      toolRegistry,
+      editHistory,
+      camera,
+      contentGroup: contentGroupRef.value ?? new THREE.Group(),
+      domElement: canvas,
+      definition: structureDefinition.value!,
+      layerPreview: layerPreviewMode.value,
+    }
+    toolCtx = createToolContext(deps)
+
+    // Attach pointer listeners to canvas
+    canvas.addEventListener('pointerdown', handlePointerDown)
+    canvas.addEventListener('pointermove', handlePointerMove)
+    canvas.addEventListener('pointerup', handlePointerUp)
+    canvas.addEventListener('contextmenu', handleContextMenu)
+
+    // Create and add MoveGizmo to scene
+    moveGizmo = new MoveGizmo()
+    scene.add(moveGizmo.root)
+  }
+}
+
+function handlePointerDown(event: PointerEvent): void {
+  if (!toolCtx) return
+  toolCtx._selectStart = { x: event.clientX, y: event.clientY }
+  toolRegistry.activeTool.value?.onPointerDown?.(toolCtx, event)
+}
+
+function handlePointerMove(event: PointerEvent): void {
+  if (!toolCtx) return
+  toolRegistry.activeTool.value?.onPointerMove?.(toolCtx, event)
+}
+
+function handlePointerUp(event: PointerEvent): void {
+  if (!toolCtx) return
+  toolRegistry.activeTool.value?.onPointerUp?.(toolCtx, event)
+}
+
+function handleContextMenu(event: Event): void {
+  // Prevent default browser context menu — ContextMenu.vue handles the rest
+  event.preventDefault()
 }
 
 function onViewportHover(
@@ -101,7 +163,19 @@ watch(
 )
 
 onMounted(async () => { await store.loadStructureAndResources() })
-onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
+onBeforeUnmount(() => {
+  // Remove canvas listeners
+  const vp = store as any
+  const canvas: HTMLElement | undefined = vp._domElement ?? vp._canvas
+  if (canvas) {
+    canvas.removeEventListener('pointerdown', handlePointerDown)
+    canvas.removeEventListener('pointermove', handlePointerMove)
+    canvas.removeEventListener('pointerup', handlePointerUp)
+    canvas.removeEventListener('contextmenu', handleContextMenu)
+  }
+  moveGizmo?.dispose()
+  store.disposeCachesAndLibrary()
+})
 </script>
 
 <template>
@@ -121,14 +195,6 @@ onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
       @hover-block="onViewportHover"
       @select-block="onViewportSelect"
     />
-    </div>
-
-    <!-- 悬浮 ToolShelf -->
-    <div class="wv-shelf">
-      <div class="wv-shelf-panel">
-        <div class="wv-shelf-title">{{ t('tools') }}</div>
-        <button class="wv-tool-btn wv-tool-btn--active">{{ t('select') }}</button>
-      </div>
     </div>
 
     <!-- 底部 Tab 控件栏 -->
@@ -235,28 +301,4 @@ onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
   flex: 1; min-width: 0;
   background: transparent; border: none; padding: 0;
 }
-
-.wv-shelf {
-  position: absolute; top: 8px; left: 4px; z-index: 20;
-}
-.wv-shelf-panel {
-  padding: 6px;
-  background: var(--nei-bg);
-  border-radius: 6px;
-  border: 1px solid var(--nei-panel-hover);
-  min-width: 72px;
-  width: max-content;
-  backdrop-filter: blur(6px);
-}
-.wv-shelf-title {
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-  color: var(--nei-muted); margin-bottom: 4px; padding: 0 4px;
-}
-.wv-tool-btn {
-  display: block; padding: 3px 6px; border: none;
-  background: transparent; color: var(--nei-label); font-size: 11px;
-  text-align: left; cursor: pointer; border-radius: 3px; margin-bottom: 1px;
-}
-.wv-tool-btn:hover { background: var(--nei-panel-hover); color: var(--nei-text-dark); }
-.wv-tool-btn--active { background: var(--nei-panel-hover); color: var(--nei-text); }
 </style>
