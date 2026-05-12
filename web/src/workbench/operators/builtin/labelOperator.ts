@@ -1,7 +1,6 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
-import { pickVoxel } from '@/workbench/context/sceneQueries'
-import type { V2PlainSceneDocument, V2Label } from '@/render/data/sceneDocumentV2'
+import type { V2Label } from '@/render/data/sceneDocumentV2'
 
 export const LabelOperator: OperatorType = {
   id: 'OPERATOR_LABEL',
@@ -15,10 +14,10 @@ export const LabelOperator: OperatorType = {
 
   invoke(bctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
-    const picked = pickVoxel(bctx, event)
+    const picked = bctx.queries.pickVoxel(event)
     if (!picked) return OP_RESULT.CANCELLED
 
-    const doc = bctx.scene.scene.value as V2PlainSceneDocument | null
+    const doc = bctx.scene.scene.value as any
     if (!doc) return OP_RESULT.CANCELLED
 
     if (!doc.labels) doc.labels = []

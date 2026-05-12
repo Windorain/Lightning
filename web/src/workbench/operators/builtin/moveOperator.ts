@@ -1,6 +1,5 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
-import { pickVoxel } from '@/workbench/context/sceneQueries'
 
 /**
  * MoveOperator — 对标 Blender 的 TRANSFORM_OT_translate。
@@ -20,7 +19,7 @@ export const MoveOperator: OperatorType = {
   invoke(bctx, _props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
 
-    const picked = pickVoxel(bctx, event)
+    const picked = bctx.queries.pickVoxel(event)
     if (picked) {
       if (event.ctrlKey || event.metaKey) {
         bctx.selection.add([picked])

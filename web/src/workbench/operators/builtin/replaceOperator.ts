@@ -1,7 +1,5 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
-import type { V2PlainSceneDocument } from '@/render/data/sceneDocumentV2'
-import { pickVoxel } from '@/workbench/context/sceneQueries'
 
 export const ReplaceOperator: OperatorType = {
   id: 'OPERATOR_REPLACE',
@@ -18,13 +16,10 @@ export const ReplaceOperator: OperatorType = {
     const brush = bctx.settings.replaceBrush
     if (!brush) return OP_RESULT.CANCELLED
 
-    const picked = pickVoxel(bctx, event)
+    const picked = bctx.queries.pickVoxel(event)
     if (!picked) return OP_RESULT.CANCELLED
 
-    const doc = bctx.scene.scene.value as V2PlainSceneDocument | null
-    if (!doc?.frames?.length) return OP_RESULT.CANCELLED
-    const idx = bctx.selection.frameIndex.value ?? 0
-    const frame = doc.frames[idx]
+    const frame = bctx.queries.getCurrentFrame()
     if (!frame) return OP_RESULT.CANCELLED
 
     const block = frame.blocks.find(

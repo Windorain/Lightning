@@ -1,5 +1,5 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
-import type { V2PlainSceneDocument, V2BlockInstance } from '@/render/data/sceneDocumentV2'
+import type { V2BlockInstance } from '@/render/data/sceneDocumentV2'
 
 export const DeleteOperator: OperatorType = {
   id: 'OPERATOR_DELETE',
@@ -12,10 +12,7 @@ export const DeleteOperator: OperatorType = {
   },
 
   exec(bctx, _props) {
-    const doc = bctx.scene.scene.value as V2PlainSceneDocument | null
-    if (!doc?.frames?.length) return
-    const idx = bctx.selection.frameIndex.value ?? 0
-    const frame = doc.frames[idx]
+    const frame = bctx.queries.getCurrentFrame()
     if (!frame) return
 
     const targetKeys = new Set(
