@@ -35,6 +35,7 @@ import { MoveGizmoOperator } from '@/workbench/operators/builtin/moveGizmoOperat
 
 import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
 import { installLogCenter } from '@/workbench/logging/LogCenter'
+import { installTestRunner } from '@/workbench/testing/testRunner'
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
@@ -164,6 +165,7 @@ onBeforeUnmount(() => {
 })
 
 installLogCenter()
+installTestRunner(bctx)
 
 if (import.meta.env.DEV) {
   injectDebugRefs({
