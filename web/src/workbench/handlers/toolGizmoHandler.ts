@@ -59,7 +59,8 @@ export function createToolGizmoHandler(
       const computeDelta = (_moveEvent: PointerEvent): number => {
         const dx = _moveEvent.clientX - startX
         const dy = _moveEvent.clientY - startY
-        const k = 0.05
+        const bctxNow = getBctx()
+        const k = bctxNow?.settings.dragSensitivity ?? 0.05
         return (hit === 'x' || hit === 'z') ? -dx * k : dy * k
       }
 
