@@ -107,24 +107,10 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   canvas.addEventListener('pointerup', handlePointerUp)
   canvas.addEventListener('contextmenu', handleContextMenu)
 
-  // Create overlay scene — rendered after main scene with depth cleared
+  // Create overlay scene — rendered on top with depth cleared by StructureViewport
   const overlayScene = new THREE.Scene()
   overlaySceneRef = overlayScene
-
-  // Depth-clear hook: invisible mesh at max renderOrder, clears depth on afterRender
-  const depthHookGeo = new THREE.SphereGeometry(0.001, 1, 1)
-  const depthHookMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthTest: false, depthWrite: false })
-  const depthHook = new THREE.Mesh(depthHookGeo, depthHookMat)
-  depthHook.renderOrder = 99999
-  depthHook.name = '__gizmo_depth_hook__'
-  depthHook.onAfterRender = (renderer: THREE.WebGLRenderer) => {
-    const prevAutoClear = renderer.autoClear
-    renderer.autoClear = false
-    renderer.clearDepth()
-    renderer.render(overlayScene, camera)
-    renderer.autoClear = prevAutoClear
-  }
-  scene.add(depthHook)
+  store.registerOverlayScene(overlayScene)
 
   // Add gizmo, wireframe, annotation preview to overlay scene (not main scene)
   moveGizmo = new MoveGizmo()

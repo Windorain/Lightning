@@ -60,6 +60,8 @@ export interface PreviewSceneStore {
   layerPreviewLabel: ComputedRef<string>
   tooltipPalette: ShallowRef<string[]>
   registerScene(scene: THREE.Scene): void
+  readonly overlayScene: ShallowRef<THREE.Scene | null>
+  registerOverlayScene(s: THREE.Scene): void
   loadStructureAndResources(): Promise<void>
   rebuildContentMesh(): Promise<void>
   detachAndDisposeMesh(): void
@@ -293,6 +295,12 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
     sceneRef.value = scene
   }
 
+  /** Overlay scene — rendered on top after depth clear. Gizmos, wireframes, previews. */
+  const overlayScene = shallowRef<THREE.Scene | null>(null)
+  function registerOverlayScene(s: THREE.Scene): void {
+    overlayScene.value = s
+  }
+
   function clearWorldPlaybackSchedule(): void {
     if (worldPlaybackTimeoutId !== null) {
       clearTimeout(worldPlaybackTimeoutId)
@@ -510,6 +518,8 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
     layerPreviewLabel,
     tooltipPalette,
     registerScene,
+    overlayScene,
+    registerOverlayScene,
     loadStructureAndResources,
     rebuildContentMesh,
     detachAndDisposeMesh,

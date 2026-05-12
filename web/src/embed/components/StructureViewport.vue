@@ -408,6 +408,18 @@ onMounted(() => {
     props.materialLibrary.tick(clock.getDelta() * 1000)
     vp.controls.update()
     vp.render(scene)
+    // Render overlay scene (gizmos, wireframes) on top with cleared depth
+    const overlay = store?.overlayScene?.value
+    if (overlay) {
+      const renderer = (vp as any).renderer as THREE.WebGLRenderer
+      if (renderer) {
+        const prevAutoClear = renderer.autoClear
+        renderer.autoClear = false
+        renderer.clearDepth()
+        renderer.render(overlay, vp.activeCamera)
+        renderer.autoClear = prevAutoClear
+      }
+    }
   }
   tick()
 
