@@ -6,13 +6,12 @@
  */
 import type { OperatorType, OperatorProperties } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
-import * as THREE from 'three'
 import type { MoveGizmo, GizmoAxis } from '@/workbench/tools/gizmos'
 
 interface GizmoDragState {
   _gizmo: MoveGizmo
   _gizmoPart: GizmoAxis
-  _origin: THREE.Vector3
+  _origin: { x: number; y: number; z: number }
   _initialPositions: Array<{ x: number; y: number; z: number }>
   _startX: number
   _startY: number
@@ -51,7 +50,7 @@ export const MoveGizmoOperator: OperatorType = {
     const state: GizmoDragState = {
       _gizmo: gizmo,
       _gizmoPart: gizmoPart,
-      _origin: gizmo.root.position.clone(),
+      _origin: { x: gizmo.root.position.x, y: gizmo.root.position.y, z: gizmo.root.position.z },
       _initialPositions: [...bctx.selection.items.value].map(i => ({ ...i.pos })),
       _startX: event.clientX,
       _startY: event.clientY,
@@ -74,50 +73,40 @@ export const MoveGizmoOperator: OperatorType = {
     if (event.type === 'pointermove') {
       const dx = event.clientX - s._startX
       const dy = event.clientY - s._startY
-      const k = 0.05
+      const k = bctx.settings.dragSensitivity
       const part = s._gizmoPart
       let delta = (part === 'x' || part === 'z') ? -dx * k : dy * k
       if (s._precision) delta *= 0.1
 
-      const dirs: Record<string, THREE.Vector3> = {
-        x: new (THREE as any).Vector3(1, 0, 0),
-        y: new (THREE as any).Vector3(0, 1, 0),
-        z: new (THREE as any).Vector3(0, 0, 1),
-      }
-      const dir = dirs[s._gizmoPart] ?? new (THREE as any).Vector3()
-      s._gizmo.root.position.copy(s._origin.clone().addScaledVector(dir, delta))
+      const newPos = bctx.queries.axisAdd(s._origin, s._gizmoPart as 'x' | 'y' | 'z', delta)
+      s._gizmo.root.position.set(newPos.x, newPos.y, newPos.z)
       return OP_RESULT.RUNNING_MODAL
     }
 
     if (event.type === 'pointerup') {
-      const finalDelta = s._gizmo.root.position.clone().sub(s._origin)
-      const dx = Math.round(finalDelta.x)
-      const dy = Math.round(finalDelta.y)
-      const dz = Math.round(finalDelta.z)
+      const cur = s._gizmo.root.position
+      const delta = bctx.queries.roundVec({
+        x: cur.x - s._origin.x,
+        y: cur.y - s._origin.y,
+        z: cur.z - s._origin.z,
+      })
 
-      if (dx !== 0 || dy !== 0 || dz !== 0) {
-        const doc = bctx.scene.scene.value
-        if (doc && 'frames' in (doc as any)) {
-          const frames = (doc as any).frames
-          if (frames?.length) {
-            const idx = bctx.selection.frameIndex.value ?? 0
-            const frame = frames[idx]
-            if (frame) {
-              for (const initPos of s._initialPositions) {
-                const block = findBlock(frame.blocks, initPos)
-                if (block) {
-                  block.pos.x = initPos.x + dx
-                  block.pos.y = initPos.y + dy
-                  block.pos.z = initPos.z + dz
-                }
-              }
-              bctx.scene.markDirty()
+      if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
+        const frame = bctx.queries.getCurrentFrame()
+        if (frame) {
+          for (const initPos of s._initialPositions) {
+            const block = findBlock(frame.blocks as any[], initPos)
+            if (block) {
+              block.pos.x = initPos.x + delta.x
+              block.pos.y = initPos.y + delta.y
+              block.pos.z = initPos.z + delta.z
             }
           }
+          bctx.scene.markDirty()
         }
       } else {
         // No movement — restore gizmo position
-        s._gizmo.root.position.copy(s._origin)
+        s._gizmo.root.position.set(s._origin.x, s._origin.y, s._origin.z)
       }
 
       if (s._controlsRef) s._controlsRef.enabled = true
@@ -129,7 +118,7 @@ export const MoveGizmoOperator: OperatorType = {
 
   cancel(_bctx, props) {
     const s = props as unknown as GizmoDragState
-    s._gizmo.root.position.copy(s._origin)
+    s._gizmo.root.position.set(s._origin.x, s._origin.y, s._origin.z)
     if (s._controlsRef) s._controlsRef.enabled = true
   },
 }
