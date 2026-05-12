@@ -17,12 +17,11 @@ import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
 import { getDevSceneDocument } from '@/dev/devScenes'
 import { formatSdeError } from '@/workbench/sdeApi'
 import { isEnvelopeDocument, normalizeEnvelopeToPlain } from '@/render/data/compactSceneDocument'
-import { isWorldDocument } from '@/render/data/bundleResolve'
-import { getDefaultFrameIndex } from '@/render/data/worldPlayback'
 import { documentLooksPreviewable, previewConfigFromDocument } from '@/preview/previewFromDocument'
+import { formatDispatcher } from '@/workbench/context/documentHandler'
 import { downloadJson } from '@/util/browser'
 import { getShowSaveFilePicker } from '@/util/browser'
-import { logSceneLoaded } from '@/workbench/debug/debugLog'
+import { logCenter } from '@/workbench/logging/LogCenter'
 import {
   cloneDocument,
   parseWorkbenchQuery,
@@ -151,26 +150,46 @@ export function provideSceneContext(): SceneContext {
     doc: unknown,
     opts?: { mode?: WorkbenchWorkspaceMode; fileName?: string },
   ): Promise<void> {
-    let next: WorkbenchScene | null = null
-    if (doc && isEnvelopeDocument(doc)) {
-      next = (await normalizeEnvelopeToPlain(doc)) as WorkbenchScene
-    } else if (doc && typeof doc === 'object') {
-      next = cloneDocument(doc)
+    let raw: unknown = doc
+    if (raw && isEnvelopeDocument(raw)) {
+      raw = await normalizeEnvelopeToPlain(raw)
+    } else if (raw && typeof raw === 'object') {
+      raw = cloneDocument(raw)
     }
-    scene.value = next
-    if (next && isWorldDocument(next)) {
-      previewWorldFrameIndex.value = getDefaultFrameIndex(next)
-    } else {
+
+    // 格式分发：全部转为 V2Plain
+    const result = raw ? formatDispatcher.normalize(raw) : { document: null, handler: null, error: '空文档' }
+    scene.value = result.document as WorkbenchScene | null
+
+    if (result.document) {
       previewWorldFrameIndex.value = 0
-    }
-    if (next) {
       sceneLoadEpoch.value += 1
+      const frames = result.document.frames
+      const totalBlocks = frames.reduce((sum: number, f) => sum + (f.blocks?.length ?? 0), 0)
+      const fileName = opts?.fileName ?? localFileName.value ?? 'unknown'
+
+      if (result.handler?.formatName !== 'V2Plain') {
+        logCenter.info('场景加载', `从 ${result.handler?.formatName} 转换为 V2Plain 格式`, {
+          fileName,
+          sourceFormat: result.handler?.formatName,
+          targetFormat: 'V2Plain',
+          frames: frames.length,
+          blocks: totalBlocks,
+        })
+      } else {
+        logCenter.info('场景加载', `${fileName}`, {
+          fileName,
+          frames: frames.length,
+          blocks: totalBlocks,
+        })
+      }
+    } else {
+      logCenter.error('场景加载', result.error ?? '未知错误', {
+        fileName: opts?.fileName ?? 'unknown',
+        error: result.error,
+      })
     }
-    if (next) {
-      const frames = (next as any).frames ?? (next as any).worldFrames ?? []
-      const totalBlocks = frames.reduce((sum: number, f: any) => sum + ((f.blocks ?? f.blockInstances)?.length ?? 0), 0)
-      logSceneLoaded(opts?.fileName ?? localFileName.value ?? 'unknown', totalBlocks)
-    }
+
     if (opts?.mode) {
       workspaceMode.value = opts.mode
     }

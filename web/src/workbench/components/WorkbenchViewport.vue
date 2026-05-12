@@ -88,12 +88,9 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   bctx.definition = structureDefinition.value ?? null
   bctx.layerPreview = layerPreviewMode.value
 
-  // Remap OrbitControls: LMB→tools, MMB→orbit, RMB→pan
-  const ctrlRef = store.controlsRef
-  if (ctrlRef && 'mouseButtons' in ctrlRef) {
-    const mb = (ctrlRef as any).mouseButtons
-    if (mb) mb.LEFT = -1
-  }
+  // OrbitControls mouse mapping keeps defaults:
+  //   LMB=ROTATE (when tool doesn't consume), MMB=PAN, RMB=DOLLY
+  // Tools/gizmos consume events via capture-phase dispatch, not by disabling mouse buttons
 
   // EventDispatcher — capture phase runs before OrbitControls' bubble listeners
   canvas.addEventListener('pointerdown', (e) => { if (dispatchCanvas(e)) e.stopImmediatePropagation() }, { capture: true })
@@ -216,22 +213,20 @@ function updateGizmo(): void {
   if (!moveGizmo) return
 
   const tool = toolRegistry.activeTool.value
-  const showMoveGizmo = tool?.id === 'OPERATOR_MOVE'
+  const items = selection.items.value
+  const showMoveGizmo = tool?.id === 'OPERATOR_MOVE' && items.size > 0
   moveGizmo.setVisible(showMoveGizmo)
 
   if (showMoveGizmo) {
-    const items = selection.items.value
-    if (items.size > 0) {
-      const def = structureDefinition.value
-      if (def) {
-        let cx = 0, cy = 0, cz = 0
-        for (const item of items) {
-          const w = voxelToWorld(item.pos.x, item.pos.y, item.pos.z, def)
-          cx += w.x; cy += w.y; cz += w.z
-        }
-        cx /= items.size; cy /= items.size; cz /= items.size
-        moveGizmo.setPosition(new THREE.Vector3(cx, cy, cz))
+    const def = structureDefinition.value
+    if (def) {
+      let cx = 0, cy = 0, cz = 0
+      for (const item of items) {
+        const w = voxelToWorld(item.pos.x, item.pos.y, item.pos.z, def)
+        cx += w.x; cy += w.y; cz += w.z
       }
+      cx /= items.size; cy /= items.size; cz /= items.size
+      moveGizmo.setPosition(new THREE.Vector3(cx, cy, cz))
     }
   }
 

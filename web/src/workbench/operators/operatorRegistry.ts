@@ -8,6 +8,7 @@ import type { OperatorType, OperatorProperties, OpResult } from './operatorType'
 import { OP_RESULT } from './operatorType'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { ModalOperatorWrapper } from './modalOperatorWrapper'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
 export class OperatorRegistry {
   private operators = new Map<string, OperatorType>()
@@ -27,8 +28,10 @@ export class OperatorRegistry {
   /** 无交互执行操作符。如果 flagUndo 为 true，自动包裹 undo。 */
   exec(bctx: BContext, id: string, props?: OperatorProperties): void {
     const op = this.operators.get(id)
-    if (!op) { console.warn(`[OperatorRegistry] 未找到操作符: ${id}`); return }
-    if (op.poll && !op.poll(bctx)) { console.warn(`[OperatorRegistry] poll 未通过: ${id}`); return }
+    if (!op) { logCenter.warn('OperatorRegistry', `exec: 未找到 ${id}`); return }
+    if (op.poll && !op.poll(bctx)) { logCenter.debug('OperatorRegistry', `exec: poll 未通过 ${id}`); return }
+
+    logCenter.operator('OperatorRegistry', `${op.label}`, { opId: id, action: 'exec' })
 
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
@@ -64,8 +67,10 @@ export class OperatorRegistry {
     event?: PointerEvent | KeyboardEvent,
   ): OpResult {
     const op = this.operators.get(id)
-    if (!op) return OP_RESULT.CANCELLED
-    if (op.poll && !op.poll(bctx)) return OP_RESULT.CANCELLED
+    if (!op) { logCenter.warn('OperatorRegistry', `invoke: 未找到 ${id}`); return OP_RESULT.CANCELLED }
+    if (op.poll && !op.poll(bctx)) { logCenter.debug('OperatorRegistry', `invoke: poll 未通过 ${id}`); return OP_RESULT.CANCELLED }
+
+    logCenter.operator('OperatorRegistry', `${op.label}`, { opId: id, action: 'invoke' })
 
     const resolvedProps: OperatorProperties = props ?? {}
 

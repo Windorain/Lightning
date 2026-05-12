@@ -34,12 +34,22 @@ import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
 import { MoveGizmoOperator } from '@/workbench/operators/builtin/moveGizmoOperator'
 
 import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
+import { installLogCenter } from '@/workbench/logging/LogCenter'
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
 
 // RNA — 加载属性描述符
 import '@/workbench/rna/plainSceneRna'
+
+// Document format handlers — 注册到分发中心
+import { formatDispatcher } from '@/workbench/context/documentHandler'
+import { V2PlainHandler } from '@/workbench/context/handlers/v2PlainHandler'
+import { WorldHandler } from '@/workbench/context/handlers/worldHandler'
+import { StructureDataHandler } from '@/workbench/context/handlers/structureDataHandler'
+formatDispatcher.register(V2PlainHandler)
+formatDispatcher.register(WorldHandler)
+formatDispatcher.register(StructureDataHandler)
 
 const scene = provideSceneContext()
 const connection = provideConnectionContext(scene)
@@ -152,6 +162,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
 })
+
+installLogCenter()
 
 if (import.meta.env.DEV) {
   injectDebugRefs({

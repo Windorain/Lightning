@@ -41,22 +41,24 @@ export function createActiveToolHandler(
       if (event.type === 'pointerdown') {
         // Start interaction via invoke
         if (operator.invoke) {
-          const result = operator.invoke(bctx, {}, pe)
+          const props = operator.initModalState?.() ?? {} as Record<string, unknown>
+          const result = operator.invoke(bctx, props, pe)
           if (result === OP_RESULT.RUNNING_MODAL) {
-            // Push modal wrapper onto event dispatcher stack
-            const wrapper = new ModalOperatorWrapper(operator, bctx, {})
+            // Push modal wrapper onto event dispatcher stack with same props
+            const wrapper = new ModalOperatorWrapper(operator, bctx, props)
             eventDispatcher.pushModal(wrapper, pe)
             modalActive = true
             return { break: true }
           }
+          // FINISHED / CANCELLED: operation completed, let event pass through to OrbitControls
           if (result === OP_RESULT.FINISHED || result === OP_RESULT.CANCELLED) {
-            return { break: true }
+            return { break: false }
           }
         }
         // exec-only operator: invoke → direct exec with undo wrapping
         if (operator.exec) {
           globalOperators.exec(bctx, activeId)
-          return { break: true }
+          return { break: false }
         }
       }
 
