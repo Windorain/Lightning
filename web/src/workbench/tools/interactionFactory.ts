@@ -52,6 +52,7 @@ class ToolContextImpl implements ThreeToolContext {
   _fillStart?: { x: number; y: number } | null
   _labelPosition?: { x: number; y: number; z: number } | null
   _showLabelEditor?: boolean
+  _annotPreview?: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null
 
   constructor(deps: ToolContextDeps) {
     this.scene = deps.scene
@@ -90,6 +91,21 @@ class ToolContextImpl implements ThreeToolContext {
       pos: { ...b.pos },
       block_state_id: b.block_state_id,
     }))
+  }
+
+  resetTransientState(): void {
+    this._selectStart = null
+    this._boxSelecting = false
+    this._moveStart = null
+    this._moveDelta = null
+    this._moveInitialPositions = null
+    this._annotStart = null
+    this._annotEnd = null
+    this._annotating = false
+    this._annotPreview = null
+    this._fillStart = null
+    this._labelPosition = null
+    this._showLabelEditor = false
   }
 
   executeMove(initialPositions: Array<{ x: number; y: number; z: number }>, delta: { x: number; y: number; z: number }): void {

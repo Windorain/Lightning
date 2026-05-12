@@ -25,6 +25,9 @@ export interface ThreeToolContext {
   executeGenerate(blockStateId: string, pos: { x: number; y: number; z: number }): void
   executeCreateAnnotation(bounds: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } }): void
 
+  /** Clear all transient tool state. Called on tool switch. */
+  resetTransientState(): void
+
   // --- Transient tool state (for drag operations, cleared on tool deactivate) ---
   _selectStart?: { x: number; y: number } | null
   _boxSelecting?: boolean

@@ -53,6 +53,7 @@ export function provideToolRegistry(): ToolRegistry {
     }
     activeTool.value = tool
     const resolvedCtx = ctx ?? _toolCtx
+    resolvedCtx?.resetTransientState()
     if (tool.onActivate && resolvedCtx) {
       tool.onActivate(resolvedCtx)
     }
