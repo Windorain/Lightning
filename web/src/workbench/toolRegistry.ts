@@ -1,68 +1,86 @@
-// web/src/workbench/toolRegistry.ts
-
+/**
+ * ToolRegistry — 对标 Blender 的工具激活系统。
+ *
+ * 现在是 OperatorRegistry 的薄包装层：
+ * - 管理"活跃工具"（即当前被选中的操作符）
+ * - 提供 ToolShelf 所需的显示元数据（icon, cursor, defaultKey）
+ * - Tab 切换（select ↔ 上次编辑工具）
+ *
+ * 实际的交互事件由 activeToolHandler 直接通过 globalOperators 分发。
+ */
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref } from 'vue'
-import type { ThreeToolContext } from '@/workbench/tools/_base'
+import type { BContext } from '@/workbench/context/bContext'
+import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { logToolActivated } from '@/workbench/debug/debugLog'
 
-export interface Tool {
+const OPERATOR_TOOL_META: Record<string, { icon: string; cursor?: string; defaultKey?: string }> = {
+  OPERATOR_SELECT:       { icon: '▲', cursor: 'default' },
+  OPERATOR_MOVE:          { icon: '↕', cursor: 'move', defaultKey: 'g' },
+  OPERATOR_DELETE:        { icon: '✕', defaultKey: 'x' },
+  OPERATOR_REPLACE:       { icon: '🖌', cursor: 'crosshair', defaultKey: 'r' },
+  OPERATOR_FILL:          { icon: '⬛', defaultKey: 'f' },
+  OPERATOR_EYEDROPPER:    { icon: '💉', defaultKey: 'e' },
+  OPERATOR_MIRROR:        { icon: '↔', defaultKey: 'Ctrl+m' },
+  OPERATOR_GENERATE:      { icon: '＋', defaultKey: 'Shift+a' },
+  OPERATOR_ANNOTATION:    { icon: '📝' },
+  OPERATOR_LABEL:         { icon: '🏷' },
+}
+
+export interface OperatorTool {
   id: string
   label: string
   icon: string
   cursor?: string
   defaultKey?: string
-  onActivate?(ctx: ThreeToolContext): void
-  onDeactivate?(): void
-  onPointerDown?(ctx: ThreeToolContext, event: PointerEvent): void
-  onPointerMove?(ctx: ThreeToolContext, event: PointerEvent): void
-  onPointerUp?(ctx: ThreeToolContext, event: PointerEvent): void
-  onKeyDown?(ctx: ThreeToolContext, event: KeyboardEvent): void
-  renderOverlay?(ctx: ThreeToolContext): void
 }
 
 export interface ToolRegistry {
-  readonly activeTool: Ref<Tool | null>
-  readonly tools: Map<string, Tool>
-  register(tool: Tool): void
-  activate(id: string, ctx?: ThreeToolContext): void
+  readonly activeTool: Ref<OperatorTool | null>
+  readonly tools: Map<string, OperatorTool>
+  activate(id: string, bctx?: BContext): void
   deactivate(): void
   getPreviousEditToolId(): string | null
-  setToolContext(ctx: ThreeToolContext): void
 }
 
 export const toolRegistryKey: InjectionKey<ToolRegistry> = Symbol('toolRegistry')
 
 export function provideToolRegistry(): ToolRegistry {
-  const tools = new Map<string, Tool>()
-  const activeTool = ref<Tool | null>(null)
+  const activeTool = ref<OperatorTool | null>(null)
   let previousEditToolId: string | null = null
-  let _toolCtx: ThreeToolContext | undefined
 
-  function register(tool: Tool): void {
-    tools.set(tool.id, tool)
+  function buildToolList(): Map<string, OperatorTool> {
+    const map = new Map<string, OperatorTool>()
+    for (const op of globalOperators.all()) {
+      const meta = OPERATOR_TOOL_META[op.id] ?? { icon: '?' }
+      map.set(op.id, {
+        id: op.id,
+        label: op.label,
+        icon: meta.icon,
+        cursor: meta.cursor,
+        defaultKey: meta.defaultKey,
+      })
+    }
+    return map
   }
 
-  function activate(id: string, ctx?: ThreeToolContext): void {
+  const tools = buildToolList()
+
+  function activate(id: string, _bctx?: BContext): void {
     const tool = tools.get(id)
     if (!tool || activeTool.value?.id === id) return
-    // Deactivate previous tool
-    activeTool.value?.onDeactivate?.()
+
     // Track last non-select tool for Tab toggle
-    if (activeTool.value && activeTool.value.id !== 'select') {
+    if (activeTool.value && activeTool.value.id !== 'OPERATOR_SELECT') {
       previousEditToolId = activeTool.value.id
     }
+
     activeTool.value = tool
-    const resolvedCtx = ctx ?? _toolCtx
-    resolvedCtx?.resetTransientState()
-    if (tool.onActivate && resolvedCtx) {
-      tool.onActivate(resolvedCtx)
-    }
     logToolActivated(id)
   }
 
   function deactivate(): void {
-    activeTool.value?.onDeactivate?.()
-    activeTool.value = tools.get('select') ?? null
+    activeTool.value = tools.get('OPERATOR_SELECT') ?? null
     previousEditToolId = null
   }
 
@@ -70,11 +88,13 @@ export function provideToolRegistry(): ToolRegistry {
     return previousEditToolId
   }
 
-  function setToolContext(ctx: ThreeToolContext): void {
-    _toolCtx = ctx
+  const registry: ToolRegistry = {
+    activeTool,
+    tools,
+    activate,
+    deactivate,
+    getPreviousEditToolId,
   }
-
-  const registry: ToolRegistry = { activeTool, tools, register, activate, deactivate, getPreviousEditToolId, setToolContext }
   provide(toolRegistryKey, registry)
   return registry
 }

@@ -1,8 +1,4 @@
 <script setup lang="ts">
-/**
- * 工作台 3D 视口：始终可编辑，点击选取方块，浮动 ToolShelf。
- * 与 EmbedViewer（Wiki 嵌入）分离，不共享 editMode/features 开关。
- */
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import StructureViewport from '@/embed/components/StructureViewport.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
@@ -18,10 +14,7 @@ import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { useSceneContext } from '@/workbench/sceneContext'
 import { useSelectionContext } from '@/workbench/selectionContext'
 import { useToolRegistry } from '@/workbench/toolRegistry'
-import { useEditHistory } from '@/workbench/editHistoryContext'
 import { useBContext } from '@/workbench/context/bContext'
-import type { ThreeToolContext } from '@/workbench/tools/_base'
-import { createToolContext, type ToolContextDeps } from '@/workbench/tools/interactionFactory'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { updateGizmoState, updateCameraState, logError } from '@/workbench/debug/debugLog'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
@@ -36,9 +29,8 @@ const props = defineProps<{
 
 const ctx = useSceneContext()
 const selection = useSelectionContext()
-
 const toolRegistry = useToolRegistry()
-const editHistory = useEditHistory()
+const bctx = useBContext()
 
 defineEmits<{}>()
 
@@ -51,7 +43,6 @@ watch(() => props.mergedConfig, async (cfg) => {
 
 const { hover, setHover, clearHover } = usePreviewTooltip()
 
-let toolCtx: ThreeToolContext | null = null
 let overlaySceneRef: THREE.Scene | null = null
 let moveGizmo: MoveGizmo | null = null
 let selectionWireframe: THREE.LineSegments | null = null
@@ -86,25 +77,10 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   store.registerScene(scene)
   try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logError(`rebuildContentMesh: ${e}`) }
 
-  // Create tool context when scene + viewport are ready
   viewportCamera = camera
   orbitTarget = _orbitTarget
-  const deps: ToolContextDeps = {
-    scene: ctx,
-    selection,
-    toolRegistry,
-    editHistory,
-    camera,
-    contentGroup: contentGroupRef.value ?? new THREE.Group(),
-    domElement: canvas,
-    definition: structureDefinition.value!,
-    layerPreview: layerPreviewMode.value,
-  }
-  toolCtx = createToolContext(deps)
-  toolRegistry.setToolContext(toolCtx)
 
   // Wire bContext viewport state
-  const bctx = useBContext()
   bctx.camera = camera
   bctx.contentGroup = contentGroupRef.value ?? new THREE.Group()
   bctx.domElement = canvas
@@ -112,58 +88,60 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   bctx.definition = structureDefinition.value ?? null
   bctx.layerPreview = layerPreviewMode.value
 
-  // EventDispatcher — capture-phase dispatch (priority above OrbitControls bubble-phase)
-  canvas.addEventListener('pointerdown', (e) => { dispatchCanvas(e) }, { capture: true })
+  // Remap OrbitControls: LMB→tools, MMB→orbit, RMB→pan
+  const ctrlRef = store.controlsRef
+  if (ctrlRef && 'mouseButtons' in ctrlRef) {
+    const mb = (ctrlRef as any).mouseButtons
+    if (mb) mb.LEFT = -1
+  }
+
+  // EventDispatcher — capture phase runs before OrbitControls' bubble listeners
+  canvas.addEventListener('pointerdown', (e) => { if (dispatchCanvas(e)) e.stopImmediatePropagation() }, { capture: true })
   canvas.addEventListener('pointermove', (e) => { dispatchCanvas(e) }, { capture: true })
-  canvas.addEventListener('pointerup', (e) => { dispatchCanvas(e) }, { capture: true })
-  canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); dispatchCanvas(e) }, { capture: true })
+  canvas.addEventListener('pointerup', (e) => { if (dispatchCanvas(e)) e.stopImmediatePropagation() }, { capture: true })
+  canvas.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
   document.addEventListener('keydown', (e) => { eventDispatcher.dispatch(e) }, { capture: true })
 
-  // Register handlers
-  const unregGizmo = eventDispatcher.registerHandler(
+  // Register handlers (operator-based)
+  const unregGizmo = eventDispatcher.registerTypedHandler(
     createToolGizmoHandler(
-      () => toolRegistry.activeTool.value?.id ?? 'select',
+      () => toolRegistry.activeTool.value?.id ?? 'OPERATOR_SELECT',
       () => moveGizmo,
-      () => toolCtx,
+      () => bctx,
       () => viewportCamera,
       () => store.controlsRef as { enabled: boolean } | null,
     ),
   )
-  const unregTool = eventDispatcher.registerHandler(
-    createActiveToolHandler(() => toolRegistry, () => toolCtx),
+  const unregTool = eventDispatcher.registerTypedHandler(
+    createActiveToolHandler(() => bctx),
   )
   const unregPick = eventDispatcher.registerHandler(createDefaultPickHandler())
 
-  // Store unregister functions for cleanup
   ;(store as any)._unregHandlers = [unregGizmo, unregTool, unregPick]
 
-  // Create overlay scene — rendered on top with depth cleared by StructureViewport
+  // Create overlay scene
   const overlayScene = new THREE.Scene()
   overlaySceneRef = overlayScene
   store.registerOverlayScene(overlayScene)
 
-  // Add gizmo, wireframe, annotation preview to overlay scene (not main scene)
+  // MoveGizmo
   moveGizmo = new MoveGizmo()
   overlayScene.add(moveGizmo.root)
 
-  // Register per-frame gizmo update via requestAnimationFrame wrapper
+  // Per-frame update
   const origAnimate = (store as any)._animate as (() => void) | undefined
   if (origAnimate) {
-    const wrapped = () => {
-      origAnimate()
-      updateGizmo()
-    }
+    const wrapped = () => { origAnimate(); updateGizmo() }
     ;(store as any)._animate = wrapped
   } else {
-    // Fallback: run updateGizmo via setInterval if animate hook isn't accessible
-    const interval = setInterval(updateGizmo, 16) // ~60fps
+    const interval = setInterval(updateGizmo, 16)
     ;(store as any)._gizmoInterval = interval
   }
 }
 
-function dispatchCanvas(event: Event): void {
+function dispatchCanvas(event: Event): boolean {
   const result = eventDispatcher.dispatch(event)
-  if (result.break) event.stopImmediatePropagation()
+  return result.break
 }
 
 let annotPreviewMesh: THREE.LineSegments | null = null
@@ -175,33 +153,10 @@ function updateAnnotationPreview(): void {
     ;(annotPreviewMesh.material as THREE.Material)?.dispose()
     annotPreviewMesh = null
   }
-
-  if (!toolCtx?._annotPreview) return
-  const { min, max } = toolCtx._annotPreview
-
-  const c = [
-    min.x-0.5, min.y-0.5, min.z-0.5, max.x+0.5, min.y-0.5, min.z-0.5,
-    max.x+0.5, min.y-0.5, min.z-0.5, max.x+0.5, max.y+0.5, min.z-0.5,
-    max.x+0.5, max.y+0.5, min.z-0.5, min.x-0.5, max.y+0.5, min.z-0.5,
-    min.x-0.5, max.y+0.5, min.z-0.5, min.x-0.5, min.y-0.5, min.z-0.5,
-    min.x-0.5, min.y-0.5, max.z+0.5, max.x+0.5, min.y-0.5, max.z+0.5,
-    max.x+0.5, min.y-0.5, max.z+0.5, max.x+0.5, max.y+0.5, max.z+0.5,
-    max.x+0.5, max.y+0.5, max.z+0.5, min.x-0.5, max.y+0.5, max.z+0.5,
-    min.x-0.5, max.y+0.5, max.z+0.5, min.x-0.5, min.y-0.5, max.z+0.5,
-    min.x-0.5, min.y-0.5, min.z-0.5, min.x-0.5, min.y-0.5, max.z+0.5,
-    max.x+0.5, min.y-0.5, min.z-0.5, max.x+0.5, min.y-0.5, max.z+0.5,
-    max.x+0.5, max.y+0.5, min.z-0.5, max.x+0.5, max.y+0.5, max.z+0.5,
-    min.x-0.5, max.y+0.5, min.z-0.5, min.x-0.5, max.y+0.5, max.z+0.5,
-  ]
-
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(c, 3))
-  const mat = new THREE.LineBasicMaterial({ color: 0x4488ff, linewidth: 1, depthTest: true, transparent: true, opacity: 0.5 })
-  annotPreviewMesh = new THREE.LineSegments(geo, mat)
-  overlaySceneRef?.add(annotPreviewMesh)
+  // Annotation preview is now driven by AnnotationOperator.modal() render state
+  // The preview wireframe is rendered by operator.renderOverlay (future phase)
 }
 
-/** 将网格索引 (col, row, zSlice) 转为世界坐标，与 StructureViewport.voxelToWorld 一致 */
 function voxelToWorld(col: number, row: number, zSlice: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
   const sCol = def.cellGrid[0]?.[0]?.length ?? 1
   const sRow = def.cellGrid[0]?.length ?? 1
@@ -232,24 +187,15 @@ function updateSelectionWireframe(): void {
 
   for (const item of items) {
     const world = voxelToWorld(item.pos.x, item.pos.y, item.pos.z, def)
-    const x = world.x
-    const y = world.y
-    const z = world.z
+    const x = world.x; const y = world.y; const z = world.z
 
-    // 12 edges per cube, 2 vertices per edge: consecutive pairs form line segments
     const verts = [
-      [x-s, y-s, z-s], [x+s, y-s, z-s],
-      [x+s, y-s, z-s], [x+s, y+s, z-s],
-      [x+s, y+s, z-s], [x-s, y+s, z-s],
-      [x-s, y+s, z-s], [x-s, y-s, z-s],
-      [x-s, y-s, z+s], [x+s, y-s, z+s],
-      [x+s, y-s, z+s], [x+s, y+s, z+s],
-      [x+s, y+s, z+s], [x-s, y+s, z+s],
-      [x-s, y+s, z+s], [x-s, y-s, z+s],
-      [x-s, y-s, z-s], [x-s, y-s, z+s],
-      [x+s, y-s, z-s], [x+s, y-s, z+s],
-      [x+s, y+s, z-s], [x+s, y+s, z+s],
-      [x-s, y+s, z-s], [x-s, y+s, z+s],
+      [x-s, y-s, z-s], [x+s, y-s, z-s], [x+s, y-s, z-s], [x+s, y+s, z-s],
+      [x+s, y+s, z-s], [x-s, y+s, z-s], [x-s, y+s, z-s], [x-s, y-s, z-s],
+      [x-s, y-s, z+s], [x+s, y-s, z+s], [x+s, y-s, z+s], [x+s, y+s, z+s],
+      [x+s, y+s, z+s], [x-s, y+s, z+s], [x-s, y+s, z+s], [x-s, y-s, z+s],
+      [x-s, y-s, z-s], [x-s, y-s, z+s], [x+s, y-s, z-s], [x+s, y-s, z+s],
+      [x+s, y+s, z-s], [x+s, y+s, z+s], [x-s, y+s, z-s], [x-s, y+s, z+s],
     ]
     for (let i = 0; i < verts.length; i += 2) {
       const p1 = verts[i], p2 = verts[i + 1]
@@ -267,14 +213,13 @@ function updateSelectionWireframe(): void {
 }
 
 function updateGizmo(): void {
-  if (!moveGizmo || !toolCtx) return
+  if (!moveGizmo) return
 
   const tool = toolRegistry.activeTool.value
-  const showMoveGizmo = tool?.id === 'move'
+  const showMoveGizmo = tool?.id === 'OPERATOR_MOVE'
   moveGizmo.setVisible(showMoveGizmo)
 
   if (showMoveGizmo) {
-    // Position gizmo at selection center (world coords)
     const items = selection.items.value
     if (items.size > 0) {
       const def = structureDefinition.value
@@ -290,16 +235,9 @@ function updateGizmo(): void {
     }
   }
 
-  // Call active tool's renderOverlay
-  tool?.renderOverlay?.(toolCtx)
-
-  // Update selection wireframe
   updateSelectionWireframe()
-
-  // Update annotation preview wireframe
   updateAnnotationPreview()
 
-  // Debug observability — update gizmo/camera state each frame
   if (moveGizmo && showMoveGizmo) {
     const gp = moveGizmo.root.position
     updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
@@ -331,19 +269,12 @@ function onViewportSelect(
   }
 }
 
-const selectedVoxel = computed(() => null) // Disabled — wireframe now rendered by updateSelectionWireframe()
+const selectedVoxel = computed(() => null)
 
-watch(
-  worldFrameIndex,
-  (i) => {
-    ctx.setPreviewWorldFrameIndex(i)
-  },
-  { immediate: true },
-)
+watch(worldFrameIndex, (i) => { ctx.setPreviewWorldFrameIndex(i) }, { immediate: true })
 
 onMounted(async () => { await store.loadStructureAndResources() })
 onBeforeUnmount(() => {
-  // Unregister event handlers
   const unregs = (store as any)._unregHandlers as Array<() => void> | undefined
   unregs?.forEach(fn => fn())
   const gizmoInterval = (store as any)._gizmoInterval as number | undefined
@@ -367,7 +298,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="wv-root">
-    <!-- 3D Viewport -->
     <div class="wv-viewport-wrap">
     <StructureViewport
       v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
@@ -384,20 +314,10 @@ onBeforeUnmount(() => {
     />
     </div>
 
-    <!-- 底部 Tab 控件栏 -->
     <div class="wv-bottom-dock">
       <div class="wv-tab-row">
-        <button
-          v-if="hasWorldMultiFrame"
-          class="wv-tab"
-          :class="{ 'wv-tab--active': activeTab === 'frame' }"
-          @click="activeTab = 'frame'"
-        >帧控制</button>
-        <button
-          class="wv-tab"
-          :class="{ 'wv-tab--active': activeTab === 'layer' }"
-          @click="activeTab = 'layer'"
-        >分层预览</button>
+        <button v-if="hasWorldMultiFrame" class="wv-tab" :class="{ 'wv-tab--active': activeTab === 'frame' }" @click="activeTab = 'frame'">帧控制</button>
+        <button class="wv-tab" :class="{ 'wv-tab--active': activeTab === 'layer' }" @click="activeTab = 'layer'">分层预览</button>
         <div class="wv-tab-status">
           <span v-if="hasWorldMultiFrame" class="wv-tab-stat">帧 <strong>{{ worldFrameIndex + 1 }}/{{ worldFrameCount }}</strong></span>
           <span class="wv-tab-stat">层 <strong>{{ layerPreviewLabel }}</strong></span>
@@ -412,80 +332,23 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- ToolTip -->
-    <ToolTipBox
-      v-if="hover && tooltipDisplayText"
-      :text="tooltipDisplayText"
-      :client-x="hover.clientX"
-      :client-y="hover.clientY"
-    />
+    <ToolTipBox v-if="hover && tooltipDisplayText" :text="tooltipDisplayText" :client-x="hover.clientX" :client-y="hover.clientY" />
   </div>
 </template>
 
 <style scoped>
 .wv-root { width: 100%; height: 100%; position: relative; display: flex; flex-direction: column; }
 .wv-viewport-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-
-/* ===== 底部 Tab 控件栏 ===== */
-.wv-bottom-dock {
-  flex-shrink: 0;
-  display: flex; flex-direction: column;
-  background: var(--nei-inset-bg);
-}
-.wv-tab-row {
-  display: flex; align-items: center;
-  padding: 0 4px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-shadow);
-}
-.wv-tab {
-  padding: 6px 14px 5px;
-  font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace;
-  font-weight: 600;
-  color: var(--nei-text-muted);
-  background: none; border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer; user-select: none;
-  white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s;
-}
+.wv-bottom-dock { flex-shrink: 0; display: flex; flex-direction: column; background: var(--nei-inset-bg); }
+.wv-tab-row { display: flex; align-items: center; padding: 0 4px; background: var(--nei-bg-deep); border-bottom: 1px solid var(--nei-shadow); }
+.wv-tab { padding: 6px 14px 5px; font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace; font-weight: 600; color: var(--nei-text-muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s, border-color 0.15s; }
 .wv-tab:hover { color: var(--nei-text); }
-.wv-tab--active {
-  color: var(--nei-text);
-  border-bottom-color: var(--nei-accent);
-}
-.wv-tab-status {
-  margin-left: auto;
-  display: flex; align-items: center; gap: 14px;
-  padding: 0 10px;
-  font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace;
-  color: var(--nei-text-muted);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
-  flex-shrink: 0;
-}
-.wv-tab-stat strong {
-  color: var(--nei-text);
-  font-weight: 600;
-}
-.wv-tab-panel {
-  display: none;
-  padding: 6px 10px;
-  align-items: center; gap: 10px;
-  height: 40px;
-  background: var(--nei-inset-bg);
-}
+.wv-tab--active { color: var(--nei-text); border-bottom-color: var(--nei-accent); }
+.wv-tab-status { margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace; color: var(--nei-text-muted); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4); flex-shrink: 0; }
+.wv-tab-stat strong { color: var(--nei-text); font-weight: 600; }
+.wv-tab-panel { display: none; padding: 6px 10px; align-items: center; gap: 10px; height: 40px; background: var(--nei-inset-bg); }
 .wv-tab-panel--active { display: flex; }
-
-/* 子组件嵌入 tab panel 时：拉伸填满，剥除外层边框背景 */
-.wv-tab-panel :deep(.wm-wfs) {
-  flex: 1; min-width: 0;
-  background: transparent; border: none; padding: 0;
-}
-.wv-tab-panel :deep(.wm-wfp-controls) {
-  background: transparent; border: none; padding: 0;
-}
-.wv-tab-panel :deep(.wm-layer-bar) {
-  flex: 1; min-width: 0;
-  background: transparent; border: none; padding: 0;
-}
+.wv-tab-panel :deep(.wm-wfs) { flex: 1; min-width: 0; background: transparent; border: none; padding: 0; }
+.wv-tab-panel :deep(.wm-wfp-controls) { background: transparent; border: none; padding: 0; }
+.wv-tab-panel :deep(.wm-layer-bar) { flex: 1; min-width: 0; background: transparent; border: none; padding: 0; }
 </style>

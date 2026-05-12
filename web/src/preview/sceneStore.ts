@@ -62,6 +62,9 @@ export interface PreviewSceneStore {
   registerScene(scene: THREE.Scene): void
   readonly overlayScene: ShallowRef<THREE.Scene | null>
   registerOverlayScene(s: THREE.Scene): void
+  /** OrbitControls — set by StructureViewport, consumed by Workbench to suppress during gizmo drag */
+  controlsRef: THREE.EventDispatcher | null
+  registerControls(c: THREE.EventDispatcher): void
   loadStructureAndResources(): Promise<void>
   rebuildContentMesh(): Promise<void>
   detachAndDisposeMesh(): void
@@ -301,6 +304,11 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
     overlayScene.value = s
   }
 
+  let controlsRef: THREE.EventDispatcher | null = null
+  function registerControls(c: THREE.EventDispatcher): void {
+    controlsRef = c
+  }
+
   function clearWorldPlaybackSchedule(): void {
     if (worldPlaybackTimeoutId !== null) {
       clearTimeout(worldPlaybackTimeoutId)
@@ -520,6 +528,8 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
     registerScene,
     overlayScene,
     registerOverlayScene,
+    controlsRef,
+    registerControls,
     loadStructureAndResources,
     rebuildContentMesh,
     detachAndDisposeMesh,

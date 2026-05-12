@@ -1,9 +1,11 @@
 <!-- web/src/workbench/components/ToolShelf.vue -->
 <script setup lang="ts">
 import { useToolRegistry } from '@/workbench/toolRegistry'
+import { useBContext } from '@/workbench/context/bContext'
 import { useSnapping } from '@/workbench/composables/useSnapping'
 
 const registry = useToolRegistry()
+const bctx = useBContext()
 const { snapEnabled, toggleSnap } = useSnapping()
 </script>
 
@@ -16,7 +18,7 @@ const { snapEnabled, toggleSnap } = useSnapping()
       class="toolshelf__btn"
       :class="{ 'toolshelf__btn--active': registry.activeTool.value?.id === tool.id }"
       :title="tool.label + (tool.defaultKey ? ` (${tool.defaultKey})` : '')"
-      @click="registry.activate(tool.id)"
+      @click="registry.activate(tool.id, bctx)"
     >
       <span class="toolshelf__icon">{{ tool.icon }}</span>
     </button>

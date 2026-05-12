@@ -6,7 +6,8 @@ import {
   eventDispatcher,
 } from '@/workbench/eventDispatcher'
 import type { MoveGizmo, GizmoAxis } from '@/workbench/tools/gizmos'
-import type { ThreeToolContext } from '@/workbench/tools/_base'
+import type { BContext } from '@/workbench/context/bContext'
+import type { V2PlainSceneDocument } from '@/render/data/sceneDocumentV2'
 
 const GIZMO_DRAG_ITEMS = [
   { key: 'Escape', value: 'CANCEL' },
@@ -16,10 +17,17 @@ const GIZMO_DRAG_ITEMS = [
   { key: 'z', ctrl: true, shift: false, value: 'UNDO' },
 ] as const
 
+function findBlock(
+  blocks: Array<{ pos: { x: number; y: number; z: number }; block_state_id: string }>,
+  pos: { x: number; y: number; z: number },
+) {
+  return blocks.find(b => b.pos.x === pos.x && b.pos.y === pos.y && b.pos.z === pos.z)
+}
+
 export class GizmoDragModal implements ModalOperation {
   id = 'gizmo-drag'
   private gizmo: MoveGizmo
-  private toolCtx: ThreeToolContext
+  private bctx: BContext
   private controlsRef: { enabled: boolean } | null
   private origin: THREE.Vector3
   private gizmoPart: GizmoAxis
@@ -31,17 +39,17 @@ export class GizmoDragModal implements ModalOperation {
   constructor(
     gizmoPart: GizmoAxis,
     gizmo: MoveGizmo,
-    toolCtx: ThreeToolContext,
+    bctx: BContext,
     controlsRef: { enabled: boolean } | null,
     computeScreenDelta: (event: PointerEvent) => number,
   ) {
     this.gizmoPart = gizmoPart
     this.gizmo = gizmo
-    this.toolCtx = toolCtx
+    this.bctx = bctx
     this.controlsRef = controlsRef
     this.origin = gizmo.root.position.clone()
     this.keymap = createModalKeymap(GIZMO_DRAG_ITEMS as any)
-    this.initialPositions = [...(toolCtx.selection.items.value)].map(i => ({ ...i.pos }))
+    this.initialPositions = [...(bctx.selection.items.value)].map(i => ({ ...i.pos }))
     this.computeScreenDelta = computeScreenDelta
   }
 
@@ -53,14 +61,13 @@ export class GizmoDragModal implements ModalOperation {
   handleEvent(event: Event): { break: boolean } {
     const evt = event as any
 
-    // Modal keymap events (synthetic MODAL_MAP type)
     if (evt.type === 'MODAL_MAP') {
       switch (evt.value) {
         case 'CANCEL':
-          eventDispatcher.cancelModal() // internally calls onExit(true)
+          eventDispatcher.cancelModal()
           return { break: true }
         case 'CONFIRM':
-          eventDispatcher.commitModal() // internally calls onExit(false)
+          eventDispatcher.commitModal()
           return { break: true }
         case 'PRECISION_TOGGLE':
           this.precision = !this.precision
@@ -71,7 +78,6 @@ export class GizmoDragModal implements ModalOperation {
 
     if (!(event instanceof PointerEvent)) return { break: false }
 
-    // Pointer move: update gizmo position along constrained axis
     if (event.type === 'pointermove') {
       let delta = this.computeScreenDelta(event)
       if (this.precision) delta *= 0.1
@@ -86,16 +92,30 @@ export class GizmoDragModal implements ModalOperation {
       return { break: true }
     }
 
-    // Pointer up: commit the move
     if (event.type === 'pointerup') {
       const finalDelta = this.gizmo.root.position.clone().sub(this.origin)
       const dx = Math.round(finalDelta.x)
       const dy = Math.round(finalDelta.y)
       const dz = Math.round(finalDelta.z)
       if (dx !== 0 || dy !== 0 || dz !== 0) {
-        this.toolCtx.executeMove(this.initialPositions, { x: dx, y: dy, z: dz })
+        const doc = this.bctx.scene.scene.value as V2PlainSceneDocument | null
+        if (doc?.frames?.length) {
+          const idx = this.bctx.selection.frameIndex.value ?? 0
+          const frame = doc.frames[idx]
+          if (frame) {
+            for (const initPos of this.initialPositions) {
+              const block = findBlock(frame.blocks as any[], initPos)
+              if (block) {
+                block.pos.x = initPos.x + dx
+                block.pos.y = initPos.y + dy
+                block.pos.z = initPos.z + dz
+              }
+            }
+            this.bctx.scene.markDirty()
+          }
+        }
       }
-      eventDispatcher.commitModal() // internally calls onExit(false)
+      eventDispatcher.commitModal()
       return { break: true }
     }
 

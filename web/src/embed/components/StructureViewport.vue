@@ -424,6 +424,7 @@ onMounted(() => {
   tick()
 
   emit('ready', scene, vp.activeCamera, domCanvas, vp.controls.target)
+  store?.registerControls?.(vp.controls)
 })
 
 onBeforeUnmount(() => {

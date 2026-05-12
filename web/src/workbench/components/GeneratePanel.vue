@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { getGenerateType, setGenerateType, FLOOR_TEMPLATES } from '@/workbench/tools/generateTool'
-import { setReplaceBrush, getReplaceBrush } from '@/workbench/tools/replaceTool'
+import { getGenerateType, setGenerateType, FLOOR_TEMPLATES } from '@/workbench/operators/builtin/brushState'
+import { setReplaceBrush, getReplaceBrush } from '@/workbench/operators/builtin/brushState'
 import { useSceneContext } from '@/workbench/sceneContext'
 
 const scene = useSceneContext()

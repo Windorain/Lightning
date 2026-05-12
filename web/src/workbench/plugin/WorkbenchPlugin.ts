@@ -1,7 +1,7 @@
 // web/src/workbench/plugin/WorkbenchPlugin.ts
 
 import type { Component } from 'vue'
-import type { Tool } from '@/workbench/toolRegistry'
+import type { OperatorType } from '@/workbench/operators/operatorType'
 import type { SceneStorageProvider } from './FileSystemProvider'
 
 export interface WorkbenchPlugin {
@@ -20,6 +20,6 @@ export interface WorkbenchPlugin {
     action: () => void | Promise<void>
   }>
   provideContexts?: () => Record<string, unknown>
-  tools?: Tool[]
+  operators?: OperatorType[]
   layoutVariants?: Record<string, Component>
 }

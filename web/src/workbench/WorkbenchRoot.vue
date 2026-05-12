@@ -19,19 +19,7 @@ import { provideToolRegistry } from '@/workbench/toolRegistry'
 import { provideBContext, type BContext } from '@/workbench/context/bContext'
 import ToolShelf from '@/workbench/components/ToolShelf.vue'
 
-// Old tools (will be removed in Phase 4)
-import { selectTool } from '@/workbench/tools/selectTool'
-import { moveTool } from '@/workbench/tools/moveTool'
-import { deleteTool } from '@/workbench/tools/deleteTool'
-import { replaceTool } from '@/workbench/tools/replaceTool'
-import { fillTool } from '@/workbench/tools/fillTool'
-import { mirrorTool } from '@/workbench/tools/mirrorTool'
-import { generateTool } from '@/workbench/tools/generateTool'
-import { annotationTool } from '@/workbench/tools/annotationTool'
-import { labelTool } from '@/workbench/tools/labelTool'
-import { eyedropperTool } from '@/workbench/tools/eyedropperTool'
-
-// New operators
+// Operators
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { SelectOperator } from '@/workbench/operators/builtin/selectOperator'
 import { MoveOperator } from '@/workbench/operators/builtin/moveOperator'
@@ -49,6 +37,9 @@ import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
+
+// RNA — 加载属性描述符
+import '@/workbench/rna/plainSceneRna'
 
 const scene = provideSceneContext()
 const connection = provideConnectionContext(scene)
@@ -71,20 +62,7 @@ const bctx: BContext = {
 provideBContext(bctx)
 useNeiTheme()
 
-// Register all tools
-toolRegistry.register(selectTool)
-toolRegistry.register(moveTool)
-toolRegistry.register(deleteTool)
-toolRegistry.register(replaceTool)
-toolRegistry.register(fillTool)
-toolRegistry.register(mirrorTool)
-toolRegistry.register(generateTool)
-toolRegistry.register(annotationTool)
-toolRegistry.register(labelTool)
-toolRegistry.register(eyedropperTool)
-toolRegistry.activate('select')
-
-// Register new operators (parallel to old tools)
+// Register all operators
 globalOperators.register(SelectOperator)
 globalOperators.register(MoveOperator)
 globalOperators.register(DeleteOperator)
@@ -97,7 +75,23 @@ globalOperators.register(AnnotationOperator)
 globalOperators.register(LabelOperator)
 globalOperators.register(MoveGizmoOperator)
 
-// Keymap
+// Activate select tool by default
+toolRegistry.activate('OPERATOR_SELECT')
+
+// Keymap — maps to operator IDs
+const OPERATOR_KEY_MAP: Record<string, string> = {
+  select: 'OPERATOR_SELECT',
+  move: 'OPERATOR_MOVE',
+  delete: 'OPERATOR_DELETE',
+  replace: 'OPERATOR_REPLACE',
+  fill: 'OPERATOR_FILL',
+  eyedropper: 'OPERATOR_EYEDROPPER',
+  mirror: 'OPERATOR_MIRROR',
+  generate: 'OPERATOR_GENERATE',
+  annotation: 'OPERATOR_ANNOTATION',
+  label: 'OPERATOR_LABEL',
+}
+
 let keymap: KeyBinding[] = []
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -105,14 +99,15 @@ function handleKeydown(event: KeyboardEvent): void {
     if (!matchBinding(binding, event)) continue
     event.preventDefault()
     if (binding.toolId) {
-      toolRegistry.activate(binding.toolId)
+      const opId = OPERATOR_KEY_MAP[binding.toolId] ?? `OPERATOR_${binding.toolId.toUpperCase()}`
+      toolRegistry.activate(opId, bctx)
     } else if (binding.action) {
       switch (binding.action) {
         case 'undo': editHistory.undo(); break
         case 'redo': editHistory.redo(); break
         case 'toggle-tool': {
           const prev = toolRegistry.getPreviousEditToolId()
-          if (prev) { toolRegistry.activate(prev) } else { toolRegistry.activate('select') }
+          if (prev) { toolRegistry.activate(prev, bctx) } else { toolRegistry.activate('OPERATOR_SELECT', bctx) }
           break
         }
         case 'toggle-toolshelf': break
@@ -174,7 +169,6 @@ if (import.meta.env.DEV) {
 </script>
 
 <template>
-  <!-- Preview Workspace: 3-column Blender layout -->
   <WorkbenchShell v-show="workspace === 'preview'">
     <template #menubar>
       <MenuBar @open-settings="openSettings" @reset-layout="resetLayout" />
@@ -196,7 +190,6 @@ if (import.meta.env.DEV) {
     </template>
   </WorkbenchShell>
 
-  <!-- Wiki Viewer Workspace -->
   <div v-show="workspace === 'wiki'" class="wb-standalone">
     <header class="wb-standalone-menubar">
       <MenuBar @open-settings="openSettings" @reset-layout="resetLayout" />
@@ -211,7 +204,6 @@ if (import.meta.env.DEV) {
     </main>
   </div>
 
-  <!-- Export Workspace -->
   <div v-show="workspace === 'export'" class="wb-standalone">
     <header class="wb-standalone-menubar">
       <MenuBar @open-settings="openSettings" @reset-layout="resetLayout" />
