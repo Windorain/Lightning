@@ -21,7 +21,7 @@ import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useEditHistory } from '@/workbench/editHistoryContext'
 import type { ThreeToolContext } from '@/workbench/tools/_base'
 import { createToolContext, type ToolContextDeps } from '@/workbench/tools/interactionFactory'
-import { MoveGizmo } from '@/workbench/tools/gizmos'
+import { MoveGizmo, type GizmoPart } from '@/workbench/tools/gizmos'
 import { updateGizmoState, updateCameraState, logError } from '@/workbench/debug/debugLog'
 import * as THREE from 'three'
 
@@ -49,8 +49,9 @@ const { hover, setHover, clearHover } = usePreviewTooltip()
 let toolCtx: ThreeToolContext | null = null
 let sceneRef: THREE.Scene | null = null
 let moveGizmo: MoveGizmo | null = null
-let gizmoDragPart: string | null = null
+let gizmoDragPart: GizmoPart = null
 let gizmoDragOrigin: THREE.Vector3 | null = null
+let gizmoDragging = false
 let selectionWireframe: THREE.LineSegments | null = null
 let viewportCamera: THREE.Camera | null = null
 let orbitTarget: THREE.Vector3 | null = null
@@ -218,7 +219,7 @@ function updateGizmo(): void {
   const showMoveGizmo = tool?.id === 'move'
   moveGizmo.setVisible(showMoveGizmo)
 
-  if (showMoveGizmo) {
+  if (showMoveGizmo && !gizmoDragging) {
     // Position gizmo at selection center
     const items = selection.items.value
     if (items.size > 0) {
@@ -275,6 +276,7 @@ function handlePointerDown(event: PointerEvent): void {
         if (hit && hit.length === 1) {
           gizmoDragPart = hit
           gizmoDragOrigin = moveGizmo.root.position.clone()
+          gizmoDragging = true
           return // Gizmo handles the drag, don't forward to tool
         }
       }
@@ -289,7 +291,7 @@ function handlePointerMove(event: PointerEvent): void {
   if (!toolCtx) return
   toolRegistry.activeTool.value?.onPointerMove?.(toolCtx, event)
 
-  // Hover-highlight gizmo parts for Move tool
+  // Gizmo interaction for Move tool
   if (moveGizmo && toolRegistry.activeTool.value?.id === 'move') {
     const cam = viewportCamera
     if (cam) {
@@ -299,8 +301,22 @@ function handlePointerMove(event: PointerEvent): void {
         const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
         const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
         raycaster.setFromCamera(new THREE.Vector2(x, y), cam)
-        const hit = moveGizmo.hitTest(raycaster)
-        moveGizmo.setHighlight(hit)
+
+        if (gizmoDragging && gizmoDragPart && gizmoDragOrigin) {
+          // Compute constrained axis delta
+          const delta = moveGizmo.computeAxisDelta(gizmoDragPart, gizmoDragOrigin, raycaster)
+          const dirs: Record<string, THREE.Vector3> = {
+            x: new THREE.Vector3(1, 0, 0),
+            y: new THREE.Vector3(0, 1, 0),
+            z: new THREE.Vector3(0, 0, 1),
+          }
+          const dir = dirs[gizmoDragPart] ?? new THREE.Vector3()
+          moveGizmo.root.position.copy(gizmoDragOrigin.clone().addScaledVector(dir, delta))
+        } else {
+          // Hover highlight
+          const hit = moveGizmo.hitTest(raycaster)
+          moveGizmo.setHighlight(hit)
+        }
       }
     }
   }
@@ -325,6 +341,8 @@ function handlePointerUp(event: PointerEvent): void {
     }
     gizmoDragPart = null
     gizmoDragOrigin = null
+    gizmoDragging = false
+    // Re-snap gizmo to selection center on next frame
     return
   }
 

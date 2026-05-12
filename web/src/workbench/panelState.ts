@@ -1,15 +1,15 @@
-import { ref, computed } from 'vue'
+import { ref, computed, type ComputedRef } from 'vue'
 
 const _highlightedBlockTypes = ref<Set<string>>(new Set())
 const _pinnedBlockTypes = ref<Set<string>>(new Set())
 
 export interface PanelState {
   /** Hover-highlighted block types (temporary, cleared on mouse leave) */
-  readonly highlightedBlockTypes: ReadonlySet<string>
+  readonly highlightedBlockTypes: ComputedRef<ReadonlySet<string>>
   /** Click-pinned block types (persistent until unpinned) */
-  readonly pinnedBlockTypes: ReadonlySet<string>
+  readonly pinnedBlockTypes: ComputedRef<ReadonlySet<string>>
   /** Combined set for viewport overlay rendering (union of hover + pinned) */
-  readonly activeBlockTypes: ReadonlySet<string>
+  readonly activeBlockTypes: ComputedRef<ReadonlySet<string>>
   highlightType(blockStateId: string): void
   clearHighlight(): void
   pinType(blockStateId: string): void
@@ -23,6 +23,8 @@ function setUnion(a: Set<string>, b: Set<string>): Set<string> {
   return s
 }
 
+const highlightedBlockTypes = computed<ReadonlySet<string>>(() => _highlightedBlockTypes.value)
+const pinnedBlockTypes = computed<ReadonlySet<string>>(() => _pinnedBlockTypes.value)
 const activeBlockTypes = computed<ReadonlySet<string>>(() =>
   setUnion(_highlightedBlockTypes.value, _pinnedBlockTypes.value)
 )
@@ -53,9 +55,9 @@ export function usePanelState(): PanelState {
   }
 
   return {
-    highlightedBlockTypes: _highlightedBlockTypes.value as ReadonlySet<string>,
-    pinnedBlockTypes: _pinnedBlockTypes.value as ReadonlySet<string>,
-    activeBlockTypes: activeBlockTypes.value as ReadonlySet<string>,
+    highlightedBlockTypes,
+    pinnedBlockTypes,
+    activeBlockTypes,
     highlightType,
     clearHighlight,
     pinType,

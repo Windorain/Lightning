@@ -7,7 +7,7 @@ import { useSelectionContext } from '@/workbench/selectionContext'
 import { isWorldDocument, resolveRenderBundle } from '@/render/data/bundleResolve'
 import { findBlockPaletteEntryByBlockId } from '@/render/data/blockRegistryResolve'
 import type { BlockPaletteEntry, RenderBundle } from '@/render/schema/types'
-import type { V2GuiState, V2BlockPart } from '@/render/data/sceneDocumentV2'
+import type { V2GuiState, V2BlockPart, V2BlockInstance } from '@/render/data/sceneDocumentV2'
 
 function copyNbtToClipboard(): void {
   if (!paletteEntry.value?.nbt) return
@@ -99,15 +99,25 @@ function copyAllTooltip(): void {
 }
 
 // Computed helpers for gui_state and parts
+function findSelectedBlockInstance(): V2BlockInstance | null {
+  if (!selectedBlock.value) return null
+  const doc = ctx.scene.value
+  if (!doc) return null
+  const v = selectedBlock.value.voxel
+  const frameIdx = isWorldDocument(doc) ? ctx.previewWorldFrameIndex.value : 0
+  const frame = (doc as any).frames?.[frameIdx]
+  if (!frame?.blocks) return null
+  return (frame.blocks as V2BlockInstance[]).find(
+    (b: V2BlockInstance) => b.pos.x === v.column && b.pos.y === v.row && b.pos.z === v.zSlice
+  ) ?? null
+}
+
 const guiState = computed<V2GuiState | null>(() => {
-  // Read gui_state from the currently inspected block
-  // This is a placeholder that will be wired by the parent
-  return null
+  return findSelectedBlockInstance()?.gui_state ?? null
 })
 
 const parts = computed<V2BlockPart[]>(() => {
-  // Read parts from the currently inspected block
-  return []
+  return findSelectedBlockInstance()?.parts ?? []
 })
 </script>
 
