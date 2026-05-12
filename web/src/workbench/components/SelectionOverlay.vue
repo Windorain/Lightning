@@ -2,9 +2,9 @@
 import { useSelectionContext } from '@/workbench/selectionContext'
 
 const selection = useSelectionContext()
-void selection
+void selection // Referenced by WorkbenchViewport via imperative Three.js rendering
 </script>
 
 <template>
-  <!-- Selection wireframe overlay rendered by WorkbenchViewport using SelectionContext items -->
+  <!-- Rendered imperatively by WorkbenchViewport via Three.js LineSegments -->
 </template>

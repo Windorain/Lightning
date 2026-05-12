@@ -54,4 +54,8 @@ export const selectTool: Tool = {
       }
     }
   },
+
+  renderOverlay(_ctx: ThreeToolContext): void {
+    // Selection wireframe rendered by viewport using SelectionContext.items
+  },
 }
