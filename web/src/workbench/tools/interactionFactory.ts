@@ -8,7 +8,7 @@ import type { StructureDefinition } from '@/render/schema/types'
 import type { V2BlockInstance, V2PlainSceneDocument, V2AnnotationBox } from '@/render/data/sceneDocumentV2'
 import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
-import { logMove, logDelete, logReplace, logMirror } from '@/workbench/debug/debugLog'
+import { logMove, logDelete, logReplace, logMirror, logGenerate, logAnnotationCreated } from '@/workbench/debug/debugLog'
 
 function generateId(): string {
   return 'cmd_' + Math.random().toString(36).slice(2, 10)
@@ -127,7 +127,7 @@ class ToolContextImpl implements ThreeToolContext {
       },
     }
     this.editHistory.push(cmd)
-    logMove(delta.x, delta.y, delta.z, 0, 0, 0)
+    logMove(delta.x, delta.y, delta.z, initialPositions[0].x + delta.x, initialPositions[0].y + delta.y, initialPositions[0].z + delta.z)
   }
 
   executeDelete(targets: BlockRef[]): void {
@@ -263,6 +263,7 @@ class ToolContextImpl implements ThreeToolContext {
       },
     }
     this.editHistory.push(cmd)
+    logGenerate(blockStateId, pos.x, pos.y, pos.z)
   }
 
   executeCreateAnnotation(bounds: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } }): void {
@@ -298,6 +299,7 @@ class ToolContextImpl implements ThreeToolContext {
       },
     }
     this.editHistory.push(cmd)
+    logAnnotationCreated(bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z)
   }
 }
 

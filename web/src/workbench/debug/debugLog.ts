@@ -140,6 +140,14 @@ export function logMirror(axis: string, count: number): void {
   log('镜像', `沿 ${axis} 轴, ${count} 方块`)
 }
 
+export function logGenerate(blockStateId: string, x: number, y: number, z: number): void {
+  log('生成方块', `${blockStateId} @ (${x}, ${y}, ${z})`)
+}
+
+export function logAnnotationCreated(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): void {
+  log('创建注解', `(${minX},${minY},${minZ}) → (${maxX},${maxY},${maxZ})`)
+}
+
 export function logError(message: string): void {
   log('错误', message)
 }

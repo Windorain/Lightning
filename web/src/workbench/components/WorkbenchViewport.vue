@@ -22,7 +22,7 @@ import { useEditHistory } from '@/workbench/editHistoryContext'
 import type { ThreeToolContext } from '@/workbench/tools/_base'
 import { createToolContext, type ToolContextDeps } from '@/workbench/tools/interactionFactory'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
-import { updateGizmoState, updateCameraState } from '@/workbench/debug/debugLog'
+import { updateGizmoState, updateCameraState, logError } from '@/workbench/debug/debugLog'
 import * as THREE from 'three'
 
 const props = defineProps<{
@@ -41,7 +41,7 @@ const store = createPreviewSceneStore(props.mergedConfig)
 provide(PreviewSceneContextKey, store)
 
 watch(() => props.mergedConfig, async (cfg) => {
-  try { await store.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e) }
+  try { await store.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logError(`reloadFromConfig: ${e}`) }
 })
 
 const { hover, setHover, clearHover } = usePreviewTooltip()
@@ -53,6 +53,7 @@ let gizmoDragPart: string | null = null
 let gizmoDragOrigin: THREE.Vector3 | null = null
 let selectionWireframe: THREE.LineSegments | null = null
 let viewportCamera: THREE.Camera | null = null
+let orbitTarget: THREE.Vector3 | null = null
 
 const {
   loadStatus,
@@ -78,13 +79,14 @@ type BottomTab = 'frame' | 'layer'
 const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 
 /* ---- Viewport events ---- */
-async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas: HTMLElement): Promise<void> {
+async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas: HTMLElement, _orbitTarget: THREE.Vector3): Promise<void> {
   store.registerScene(scene)
   sceneRef = scene
-  try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e) }
+  try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logError(`rebuildContentMesh: ${e}`) }
 
   // Create tool context when scene + viewport are ready
   viewportCamera = camera
+  orbitTarget = _orbitTarget
   const deps: ToolContextDeps = {
     scene: ctx,
     selection,
@@ -250,7 +252,7 @@ function updateGizmo(): void {
   if (viewportCamera) {
     updateCameraState({
       position: [viewportCamera.position.x, viewportCamera.position.y, viewportCamera.position.z],
-      target: [0, 0, 0], // OrbitControls target — placeholder, actual access depends on control impl
+      target: orbitTarget ? [orbitTarget.x, orbitTarget.y, orbitTarget.z] : [0, 0, 0],
     })
   }
 }
