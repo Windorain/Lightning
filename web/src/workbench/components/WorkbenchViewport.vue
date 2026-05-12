@@ -50,6 +50,7 @@ let sceneRef: THREE.Scene | null = null
 let moveGizmo: MoveGizmo | null = null
 let gizmoDragPart: string | null = null
 let gizmoDragOrigin: THREE.Vector3 | null = null
+let selectionWireframe: THREE.LineSegments | null = null
 
 const {
   loadStatus,
@@ -160,6 +161,56 @@ function updateAnnotationPreview(): void {
   sceneRef?.add(annotPreviewMesh)
 }
 
+function updateSelectionWireframe(): void {
+  // Remove old wireframe
+  if (selectionWireframe) {
+    sceneRef?.remove(selectionWireframe)
+    selectionWireframe.geometry?.dispose()
+    ;(selectionWireframe.material as THREE.Material)?.dispose()
+    selectionWireframe = null
+  }
+
+  const items = selection.items.value
+  if (items.size === 0 || items.size > 500) return
+
+  const edges: number[] = []
+  const s = 0.52 // Half block size + small offset
+
+  for (const item of items) {
+    const x = item.pos.x
+    const y = item.pos.y
+    const z = item.pos.z
+
+    // 12 edges per cube, 2 vertices per edge: consecutive pairs form line segments
+    const verts = [
+      [x-s, y-s, z-s], [x+s, y-s, z-s],
+      [x+s, y-s, z-s], [x+s, y+s, z-s],
+      [x+s, y+s, z-s], [x-s, y+s, z-s],
+      [x-s, y+s, z-s], [x-s, y-s, z-s],
+      [x-s, y-s, z+s], [x+s, y-s, z+s],
+      [x+s, y-s, z+s], [x+s, y+s, z+s],
+      [x+s, y+s, z+s], [x-s, y+s, z+s],
+      [x-s, y+s, z+s], [x-s, y-s, z+s],
+      [x-s, y-s, z-s], [x-s, y-s, z+s],
+      [x+s, y-s, z-s], [x+s, y-s, z+s],
+      [x+s, y+s, z-s], [x+s, y+s, z+s],
+      [x-s, y+s, z-s], [x-s, y+s, z+s],
+    ]
+    for (let i = 0; i < verts.length; i += 2) {
+      const p1 = verts[i], p2 = verts[i + 1]
+      edges.push(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2])
+    }
+  }
+
+  if (edges.length === 0) return
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3))
+  const mat = new THREE.LineBasicMaterial({ color: 0xffaa00, linewidth: 1, depthTest: true })
+  selectionWireframe = new THREE.LineSegments(geo, mat)
+  sceneRef?.add(selectionWireframe)
+}
+
 function updateGizmo(): void {
   if (!moveGizmo || !toolCtx) return
 
@@ -184,6 +235,9 @@ function updateGizmo(): void {
 
   // Call active tool's renderOverlay
   tool?.renderOverlay?.(toolCtx)
+
+  // Update selection wireframe
+  updateSelectionWireframe()
 
   // Update annotation preview wireframe
   updateAnnotationPreview()
@@ -314,6 +368,12 @@ onBeforeUnmount(() => {
   const gizmoInterval = (store as any)._gizmoInterval as number | undefined
   if (gizmoInterval) clearInterval(gizmoInterval)
   moveGizmo?.dispose()
+  if (selectionWireframe) {
+    sceneRef?.remove(selectionWireframe)
+    selectionWireframe.geometry?.dispose()
+    ;(selectionWireframe.material as THREE.Material)?.dispose()
+    selectionWireframe = null
+  }
   if (annotPreviewMesh) {
     sceneRef?.remove(annotPreviewMesh)
     annotPreviewMesh.geometry?.dispose()

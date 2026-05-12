@@ -12,6 +12,7 @@ const { snapEnabled, toggleSnap } = useSnapping()
     <button
       v-for="[_id, tool] in registry.tools"
       :key="tool.id"
+      :data-testid="`tool-${tool.id}`"
       class="toolshelf__btn"
       :class="{ 'toolshelf__btn--active': registry.activeTool.value?.id === tool.id }"
       :title="tool.label + (tool.defaultKey ? ` (${tool.defaultKey})` : '')"
