@@ -7,10 +7,121 @@
  * 运行方式：
  *   node dist/run.js debug-eval "runTest('select-click')"
  */
-import type { BContext } from '@/workbench/context/bContext'
+import type { BContext, BContextQueries, BContextSettings } from '@/workbench/context/bContext'
+import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
+import type { BlockRef } from '@/workbench/selectionContext'
+import { ref } from 'vue'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
+
+/* —— Mock BContext —— */
+
+export function createMockBContext(opts?: {
+  blocks?: Array<{ x: number; y: number; z: number; id: string }>
+  settings?: Partial<BContextSettings>
+}): BContext {
+  const selectionItems = ref<Set<BlockRef>>(new Set())
+  const frameIndex = ref(0)
+
+  const mockScene = ref<any>(null)
+  const mockDirty = ref(false)
+
+  if (opts?.blocks?.length) {
+    const frame: V2WorldFrame = {
+      label: 'Frame 0',
+      index: 0,
+      blocks: opts.blocks.map(b => ({
+        pos: { x: b.x, y: b.y, z: b.z },
+        block_state_id: b.id,
+      })),
+      entities: [],
+    }
+    mockScene.value = {
+      format_version: '2.0',
+      meta: { name: 'test', author: '', created_at_ms: 0, description: '', tags: [], origin: { x: 0, y: 0, z: 0 } },
+      frames: [frame],
+      block_palette: {},
+      materials: { entries: [] },
+    }
+  }
+
+  const mockQueries: BContextQueries = {
+    pickVoxel(event: PointerEvent): BlockRef | null {
+      return (event as any).__mockPickedBlock ?? null
+    },
+    getCurrentFrame(): V2WorldFrame | null {
+      const doc = mockScene.value
+      if (!doc?.frames?.length) return null
+      return doc.frames[frameIndex.value ?? 0] ?? null
+    },
+    getFrameBlocks(): BlockRef[] {
+      const frame = this.getCurrentFrame()
+      if (!frame) return []
+      return (frame.blocks ?? []).map(b => ({
+        pos: { ...b.pos },
+        block_state_id: b.block_state_id,
+      }))
+    },
+    projectBlock(_pos) { return null },
+    getGizmoAnchor(_axis) { return null },
+    axisAdd(origin, axis, delta) {
+      return {
+        x: origin.x + (axis === 'x' ? delta : 0),
+        y: origin.y + (axis === 'y' ? delta : 0),
+        z: origin.z + (axis === 'z' ? delta : 0),
+      }
+    },
+    roundVec(v) {
+      return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) }
+    },
+  }
+
+  const mockSettings: BContextSettings = {
+    replaceBrush: opts?.settings?.replaceBrush ?? null,
+    fillBrush: opts?.settings?.fillBrush ?? null,
+    generateType: opts?.settings?.generateType ?? null,
+    dragSensitivity: opts?.settings?.dragSensitivity ?? 0.05,
+  }
+
+  return {
+    scene: {
+      scene: mockScene,
+      dirty: mockDirty,
+      markDirty() { mockDirty.value = true },
+      markClean() { mockDirty.value = false },
+    } as any,
+    selection: {
+      items: selectionItems,
+      frameIndex,
+      select(voxel: BlockRef) { selectionItems.value = new Set([voxel]) },
+      add(voxels: BlockRef[]) {
+        const s = new Set(selectionItems.value)
+        voxels.forEach(v => s.add(v))
+        selectionItems.value = s
+      },
+      clear() { selectionItems.value = new Set() },
+    } as any,
+    editHistory: { push() {}, entries: [] } as any,
+    toolRegistry: {
+      activeTool: ref(null),
+      activate(id: string) { (this.activeTool as any).value = { id } },
+      deactivate() { (this.activeTool as any).value = null },
+      rebuildTools() {},
+      tools: ref(new Map()),
+      getPreviousEditToolId() { return null },
+    } as any,
+    connection: {} as any,
+    queries: mockQueries,
+    settings: mockSettings,
+    camera: null,
+    contentGroup: null,
+    domElement: null,
+    controlsRef: { enabled: true },
+    definition: null,
+    layerPreview: null,
+  }
+}
 
 /* —— TestSpec —— */
 
@@ -19,6 +130,7 @@ export interface TestAction {
   id?: string
   x?: number
   y?: number
+  z?: number
   key?: string
   ctrlKey?: boolean
   shiftKey?: boolean
@@ -95,10 +207,24 @@ function executeAction(bctx: BContext, action: TestAction): { passed: boolean; d
         clientX: action.x ?? 0, clientY: action.y ?? 0,
         ctrlKey: action.ctrlKey, shiftKey: action.shiftKey, button: 0,
       })
-      // 使用 operator.invoke 或 modal 取决于当前上下文
-      if (action.action === 'pointerdown' && op.invoke) {
-        const result = op.invoke(bctx, {}, event)
-        return { passed: result !== 'CANCELLED', detail: { result } }
+      // Mock pick: find block matching action coordinates
+      if (action.action === 'pointerdown') {
+        const frame = bctx.queries.getCurrentFrame()
+        if (frame && action.x !== undefined && action.y !== undefined && action.z !== undefined) {
+          const block = frame.blocks.find(
+            b => b.pos.x === action.x && b.pos.y === action.y && b.pos.z === action.z,
+          )
+          if (block) {
+            (event as any).__mockPickedBlock = {
+              pos: { ...block.pos },
+              block_state_id: block.block_state_id,
+            }
+          }
+        }
+        if (op.invoke) {
+          const result = op.invoke(bctx, {}, event)
+          return { passed: result !== 'CANCELLED', detail: { result } }
+        }
       }
       if (op.modal) {
         const result = op.modal(bctx, {}, event)
