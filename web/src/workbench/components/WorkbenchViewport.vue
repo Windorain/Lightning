@@ -371,12 +371,7 @@ function onViewportSelect(
   }
 }
 
-const selectedVoxel = computed(() => {
-  if (selection.items.value.size === 0) return null
-  const first = selection.items.value.values().next().value
-  if (!first) return null
-  return { column: first.pos.x, row: first.pos.y, zSlice: first.pos.z }
-})
+const selectedVoxel = computed(() => null) // Disabled — wireframe now rendered by updateSelectionWireframe()
 
 watch(
   worldFrameIndex,
