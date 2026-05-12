@@ -29,13 +29,14 @@ import { generateTool } from '@/workbench/tools/generateTool'
 import { annotationTool } from '@/workbench/tools/annotationTool'
 import { labelTool } from '@/workbench/tools/labelTool'
 import { eyedropperTool } from '@/workbench/tools/eyedropperTool'
+import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
 
 const scene = provideSceneContext()
 const connection = provideConnectionContext(scene)
-provideSelectionContext()
+const selection = provideSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
 useNeiTheme()
@@ -112,6 +113,23 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
 })
+
+if (import.meta.env.DEV) {
+  injectDebugRefs({
+    scene: () => scene.scene.value as any,
+    selection: () => [...selection.items.value],
+    toolRegistry: () => ({
+      activeToolId: toolRegistry.activeTool.value?.id ?? 'none',
+      canUndo: editHistory.canUndo.value,
+      canRedo: editHistory.canRedo.value,
+      undoLabel: editHistory.undoLabel.value,
+      redoLabel: editHistory.redoLabel.value,
+    }),
+    gizmoPosition: () => null,
+    cameraState: () => null,
+  })
+  installDebugApi()
+}
 </script>
 
 <template>

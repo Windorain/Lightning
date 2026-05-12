@@ -99,6 +99,7 @@ async function onViewportReady(scene: THREE.Scene): Promise<void> {
       layerPreview: layerPreviewMode.value,
     }
     toolCtx = createToolContext(deps)
+    toolRegistry.setToolContext(toolCtx)
 
     // Attach pointer listeners to canvas
     canvas.addEventListener('pointerdown', handlePointerDown)

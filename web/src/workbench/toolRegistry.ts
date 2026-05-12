@@ -3,6 +3,7 @@
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref } from 'vue'
 import type { ThreeToolContext } from '@/workbench/tools/_base'
+import { logToolActivated } from '@/workbench/debug/debugLog'
 
 export interface Tool {
   id: string
@@ -26,6 +27,7 @@ export interface ToolRegistry {
   activate(id: string, ctx?: ThreeToolContext): void
   deactivate(): void
   getPreviousEditToolId(): string | null
+  setToolContext(ctx: ThreeToolContext): void
 }
 
 export const toolRegistryKey: InjectionKey<ToolRegistry> = Symbol('toolRegistry')
@@ -34,6 +36,7 @@ export function provideToolRegistry(): ToolRegistry {
   const tools = new Map<string, Tool>()
   const activeTool = ref<Tool | null>(null)
   let previousEditToolId: string | null = null
+  let _toolCtx: ThreeToolContext | undefined
 
   function register(tool: Tool): void {
     tools.set(tool.id, tool)
@@ -49,7 +52,11 @@ export function provideToolRegistry(): ToolRegistry {
       previousEditToolId = activeTool.value.id
     }
     activeTool.value = tool
-    tool.onActivate?.(ctx!)
+    const resolvedCtx = ctx ?? _toolCtx
+    if (tool.onActivate && resolvedCtx) {
+      tool.onActivate(resolvedCtx)
+    }
+    logToolActivated(id)
   }
 
   function deactivate(): void {
@@ -62,7 +69,11 @@ export function provideToolRegistry(): ToolRegistry {
     return previousEditToolId
   }
 
-  const registry: ToolRegistry = { activeTool, tools, register, activate, deactivate, getPreviousEditToolId }
+  function setToolContext(ctx: ThreeToolContext): void {
+    _toolCtx = ctx
+  }
+
+  const registry: ToolRegistry = { activeTool, tools, register, activate, deactivate, getPreviousEditToolId, setToolContext }
   provide(toolRegistryKey, registry)
   return registry
 }

@@ -22,6 +22,7 @@ import { getDefaultFrameIndex } from '@/render/data/worldPlayback'
 import { documentLooksPreviewable, previewConfigFromDocument } from '@/preview/previewFromDocument'
 import { downloadJson } from '@/util/browser'
 import { getShowSaveFilePicker } from '@/util/browser'
+import { logSceneLoaded } from '@/workbench/debug/debugLog'
 import {
   cloneDocument,
   parseWorkbenchQuery,
@@ -164,6 +165,10 @@ export function provideSceneContext(): SceneContext {
     }
     if (next) {
       sceneLoadEpoch.value += 1
+    }
+    if (next) {
+      const totalBlocks = (next as any).frames?.reduce((sum: number, f: any) => sum + (f.blocks?.length ?? 0), 0) ?? 0
+      logSceneLoaded(opts?.fileName ?? localFileName.value ?? 'unknown', totalBlocks)
     }
     if (opts?.mode) {
       workspaceMode.value = opts.mode

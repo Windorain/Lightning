@@ -8,6 +8,7 @@ import type { StructureDefinition } from '@/render/schema/types'
 import type { V2BlockInstance, V2PlainSceneDocument, V2AnnotationBox } from '@/render/data/sceneDocumentV2'
 import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
+import { logMove, logDelete, logReplace, logMirror } from '@/workbench/debug/debugLog'
 
 function generateId(): string {
   return 'cmd_' + Math.random().toString(36).slice(2, 10)
@@ -126,6 +127,7 @@ class ToolContextImpl implements ThreeToolContext {
       },
     }
     this.editHistory.push(cmd)
+    logMove(delta.x, delta.y, delta.z, 0, 0, 0)
   }
 
   executeDelete(targets: BlockRef[]): void {
@@ -157,6 +159,7 @@ class ToolContextImpl implements ThreeToolContext {
       },
     }
     this.editHistory.push(cmd)
+    logDelete(targets.length)
   }
 
   executeReplace(replacements: Array<{ pos: { x: number; y: number; z: number }; oldBlockStateId: string; newBlockStateId: string }>): void {
@@ -187,6 +190,7 @@ class ToolContextImpl implements ThreeToolContext {
       },
     }
     this.editHistory.push(cmd)
+    logReplace(replacements[0]?.oldBlockStateId ?? '', replacements[0]?.newBlockStateId ?? '')
   }
 
   executeMirror(targets: BlockRef[], axis: 'x' | 'y' | 'z'): void {
@@ -235,6 +239,7 @@ class ToolContextImpl implements ThreeToolContext {
       },
     }
     this.editHistory.push(cmd)
+    logMirror(axis, targets.length)
   }
 
   executeGenerate(blockStateId: string, pos: { x: number; y: number; z: number }): void {
