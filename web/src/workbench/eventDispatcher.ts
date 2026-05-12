@@ -1,11 +1,14 @@
 /**
  * 交互事件分发器 — 对标 Blender 的 wm_event_do_handlers 事件链。
  *
- * 两层 dispatch：
- *   modalStack（模态操作栈，LIFO）→ regionHandlers（常规处理器，priority 升序）
+ * 三层 dispatch：
+ *   modalStack（模态操作栈，LIFO）→ typedHandlers（类型+优先级排序）→ legacyHandlers
  * 任一 handler 返回 { break: true } 即阻断后续 dispatch。
- * DOM capture phase 提供天然的"高于 OrbitControls"优先级。
+ *
+ * Handler 类型顺序（对标 Blender）：GIZMO(0) → OPERATOR(1) → KEYMAP(2) → UI(3)
  */
+import type { TypedEventHandler } from '@/workbench/events/eventTypes'
+
 export interface ModalKeymapItem {
   key: string
   ctrl?: boolean
@@ -25,6 +28,7 @@ export interface ModalOperation {
   onExit(cancelled: boolean): void
 }
 
+/** @deprecated 使用 TypedEventHandler 替代 */
 export interface EventHandler {
   priority: number
   handle(event: Event): { break: boolean }
@@ -49,6 +53,7 @@ export function createModalKeymap(items: ModalKeymapItem[]): ModalKeymap {
 
 class EventDispatcherImpl {
   private _modalStack: ModalOperation[] = []
+  private _typedHandlers: TypedEventHandler[] = []
   private _regionHandlers: EventHandler[] = []
 
   /** 进入模态操作。返回 pop 函数。 */
@@ -59,12 +64,12 @@ class EventDispatcherImpl {
     return () => this._popModal(false)
   }
 
-  /** 在当前栈顶取消模态操作（cancelled=true → onExit 复位视觉状态） */
+  /** 在当前栈顶取消模态操作 */
   cancelModal(): void {
     this._popModal(true)
   }
 
-  /** 在当前栈顶提交模态操作（cancelled=false → onExit 仅释放资源） */
+  /** 在当前栈顶提交模态操作 */
   commitModal(): void {
     this._popModal(false)
   }
@@ -74,7 +79,17 @@ class EventDispatcherImpl {
     op?.onExit(cancelled)
   }
 
-  /** 注册常规处理器。返回 unregister 函数。 */
+  /** 注册类型化处理器。按 type 排序（同 type 保持注册顺序）。 */
+  registerTypedHandler(handler: TypedEventHandler): () => void {
+    this._typedHandlers.push(handler)
+    this._typedHandlers.sort((a, b) => a.type - b.type)
+    return () => {
+      const idx = this._typedHandlers.indexOf(handler)
+      if (idx >= 0) this._typedHandlers.splice(idx, 1)
+    }
+  }
+
+  /** @deprecated 使用 registerTypedHandler */
   registerHandler(handler: EventHandler): () => void {
     this._regionHandlers.push(handler)
     this._regionHandlers.sort((a, b) => a.priority - b.priority)
@@ -90,13 +105,10 @@ class EventDispatcherImpl {
     if (this._modalStack.length > 0) {
       const modal = this._modalStack[this._modalStack.length - 1]
       if (event instanceof KeyboardEvent) {
-        // 每个 modal 的 onEnter 返回 keymap，存为 modal 属性
         const keymap = (modal as any).__keymap as ModalKeymap | undefined
         if (keymap) {
           const mapped = keymap.match(event)
           if (mapped) {
-            // mapped is { type: 'MODAL_MAP', value: string } — not a real Event,
-            // but ModalOperation.handleEvent accepts the synthetic shape via cast.
             modal.handleEvent(mapped as unknown as Event)
             return { break: true }
           }
@@ -104,13 +116,19 @@ class EventDispatcherImpl {
       }
     }
 
-    // 2. 模态操作栈（LIFO: 栈顶最先处理）
+    // 2. 模态操作栈（LIFO）
     for (let i = this._modalStack.length - 1; i >= 0; i--) {
       const result = this._modalStack[i].handleEvent(event)
       if (result.break) return result
     }
 
-    // 3. 常规处理器（priority 升序 = 数字小的先执行）
+    // 3. 类型化处理器（GIZMO → OPERATOR → KEYMAP → UI）
+    for (const handler of this._typedHandlers) {
+      const result = handler.handle(event)
+      if (result.break) return result
+    }
+
+    // 4. 遗留处理器（priority 排序，向后兼容）
     for (const handler of this._regionHandlers) {
       const result = handler.handle(event)
       if (result.break) return result
@@ -119,7 +137,6 @@ class EventDispatcherImpl {
     return { break: false }
   }
 
-  /** 获取 modal stack 深度（调试用） */
   get modalDepth(): number {
     return this._modalStack.length
   }

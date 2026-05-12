@@ -19,6 +19,7 @@ import { useSceneContext } from '@/workbench/sceneContext'
 import { useSelectionContext } from '@/workbench/selectionContext'
 import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useEditHistory } from '@/workbench/editHistoryContext'
+import { useBContext } from '@/workbench/context/bContext'
 import type { ThreeToolContext } from '@/workbench/tools/_base'
 import { createToolContext, type ToolContextDeps } from '@/workbench/tools/interactionFactory'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
@@ -101,6 +102,15 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   }
   toolCtx = createToolContext(deps)
   toolRegistry.setToolContext(toolCtx)
+
+  // Wire bContext viewport state
+  const bctx = useBContext()
+  bctx.camera = camera
+  bctx.contentGroup = contentGroupRef.value ?? new THREE.Group()
+  bctx.domElement = canvas
+  bctx.controlsRef = store.controlsRef as { enabled: boolean } | null
+  bctx.definition = structureDefinition.value ?? null
+  bctx.layerPreview = layerPreviewMode.value
 
   // EventDispatcher — capture-phase dispatch (priority above OrbitControls bubble-phase)
   canvas.addEventListener('pointerdown', (e) => { dispatchCanvas(e) }, { capture: true })

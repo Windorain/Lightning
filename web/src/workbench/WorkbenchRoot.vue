@@ -16,9 +16,10 @@ import { provideConnectionContext } from '@/workbench/connectionContext'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
 import { provideToolRegistry } from '@/workbench/toolRegistry'
+import { provideBContext, type BContext } from '@/workbench/context/bContext'
 import ToolShelf from '@/workbench/components/ToolShelf.vue'
 
-// Tools
+// Old tools (will be removed in Phase 4)
 import { selectTool } from '@/workbench/tools/selectTool'
 import { moveTool } from '@/workbench/tools/moveTool'
 import { deleteTool } from '@/workbench/tools/deleteTool'
@@ -29,6 +30,21 @@ import { generateTool } from '@/workbench/tools/generateTool'
 import { annotationTool } from '@/workbench/tools/annotationTool'
 import { labelTool } from '@/workbench/tools/labelTool'
 import { eyedropperTool } from '@/workbench/tools/eyedropperTool'
+
+// New operators
+import { globalOperators } from '@/workbench/operators/operatorRegistry'
+import { SelectOperator } from '@/workbench/operators/builtin/selectOperator'
+import { MoveOperator } from '@/workbench/operators/builtin/moveOperator'
+import { DeleteOperator } from '@/workbench/operators/builtin/deleteOperator'
+import { ReplaceOperator } from '@/workbench/operators/builtin/replaceOperator'
+import { FillOperator } from '@/workbench/operators/builtin/fillOperator'
+import { EyedropperOperator } from '@/workbench/operators/builtin/eyedropperOperator'
+import { MirrorOperator } from '@/workbench/operators/builtin/mirrorOperator'
+import { GenerateOperator } from '@/workbench/operators/builtin/generateOperator'
+import { AnnotationOperator } from '@/workbench/operators/builtin/annotationOperator'
+import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
+import { MoveGizmoOperator } from '@/workbench/operators/builtin/moveGizmoOperator'
+
 import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
 
 // Keymap
@@ -39,6 +55,20 @@ const connection = provideConnectionContext(scene)
 const selection = provideSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
+const bctx: BContext = {
+  scene,
+  selection,
+  editHistory,
+  toolRegistry,
+  connection,
+  camera: null,
+  contentGroup: null,
+  domElement: null,
+  controlsRef: null,
+  definition: null,
+  layerPreview: null,
+}
+provideBContext(bctx)
 useNeiTheme()
 
 // Register all tools
@@ -53,6 +83,19 @@ toolRegistry.register(annotationTool)
 toolRegistry.register(labelTool)
 toolRegistry.register(eyedropperTool)
 toolRegistry.activate('select')
+
+// Register new operators (parallel to old tools)
+globalOperators.register(SelectOperator)
+globalOperators.register(MoveOperator)
+globalOperators.register(DeleteOperator)
+globalOperators.register(ReplaceOperator)
+globalOperators.register(FillOperator)
+globalOperators.register(EyedropperOperator)
+globalOperators.register(MirrorOperator)
+globalOperators.register(GenerateOperator)
+globalOperators.register(AnnotationOperator)
+globalOperators.register(LabelOperator)
+globalOperators.register(MoveGizmoOperator)
 
 // Keymap
 let keymap: KeyBinding[] = []
