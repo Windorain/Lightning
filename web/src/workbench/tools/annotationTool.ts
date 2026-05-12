@@ -21,6 +21,25 @@ export const annotationTool: Tool = {
     ctx._annotEnd = picked.pos
   },
 
+  renderOverlay(ctx: ThreeToolContext): void {
+    if (!ctx._annotating || !ctx._annotStart) {
+      ctx._annotPreview = null
+      return
+    }
+    const end = ctx._annotEnd ?? ctx._annotStart
+    const min = {
+      x: Math.min(ctx._annotStart.x, end.x),
+      y: Math.min(ctx._annotStart.y, end.y),
+      z: Math.min(ctx._annotStart.z, end.z),
+    }
+    const max = {
+      x: Math.max(ctx._annotStart.x, end.x),
+      y: Math.max(ctx._annotStart.y, end.y),
+      z: Math.max(ctx._annotStart.z, end.z),
+    }
+    ctx._annotPreview = { min, max }
+  },
+
   onPointerUp(ctx: ThreeToolContext, _event: PointerEvent): void {
     if (!ctx._annotating || !ctx._annotStart) return
     const end = ctx._annotEnd ?? ctx._annotStart

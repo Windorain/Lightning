@@ -37,4 +37,5 @@ export interface ThreeToolContext {
   _fillStart?: { x: number; y: number } | null
   _labelPosition?: { x: number; y: number; z: number } | null
   _showLabelEditor?: boolean
+  _annotPreview?: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null
 }
