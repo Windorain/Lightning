@@ -1,12 +1,15 @@
 <script setup lang="ts">
-defineProps<{ selectionCount?: number }>()
+import { computed } from 'vue'
+import { useSelectionContext } from '@/workbench/selectionContext'
+
+const selection = useSelectionContext()
+const selectionCount = computed(() => selection.items.value.size)
 </script>
 
 <template>
   <div class="transform-panel">
     <h4 class="tp-heading">Transform</h4>
-    <p class="tp-info" v-if="selectionCount">{{ selectionCount }} block(s) selected</p>
-    <p class="tp-info" v-else>No selection</p>
+    <p class="tp-info">{{ selectionCount }} block(s) selected</p>
   </div>
 </template>
 

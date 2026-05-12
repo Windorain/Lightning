@@ -95,7 +95,10 @@ class ToolContextImpl implements ThreeToolContext {
   executeMove(initialPositions: Array<{ x: number; y: number; z: number }>, delta: { x: number; y: number; z: number }): void {
     const doc = this.scene.scene.value as V2PlainSceneDocument | null
     if (!doc) return
-    const frame = doc.frames[this.selection.frameIndex.value ?? 0]
+    const frames = doc.frames
+    if (!frames || frames.length === 0) return
+    const idx = this.selection.frameIndex.value ?? 0
+    const frame = frames[idx]
     if (!frame) return
 
     const cmd: EditCommand = {
@@ -133,7 +136,10 @@ class ToolContextImpl implements ThreeToolContext {
   executeDelete(targets: BlockRef[]): void {
     const doc = this.scene.scene.value as V2PlainSceneDocument | null
     if (!doc) return
-    const frame = doc.frames[this.selection.frameIndex.value ?? 0]
+    const frames = doc.frames
+    if (!frames || frames.length === 0) return
+    const idx = this.selection.frameIndex.value ?? 0
+    const frame = frames[idx]
     if (!frame) return
 
     const removed: V2BlockInstance[] = []
@@ -165,7 +171,10 @@ class ToolContextImpl implements ThreeToolContext {
   executeReplace(replacements: Array<{ pos: { x: number; y: number; z: number }; oldBlockStateId: string; newBlockStateId: string }>): void {
     const doc = this.scene.scene.value as V2PlainSceneDocument | null
     if (!doc) return
-    const frame = doc.frames[this.selection.frameIndex.value ?? 0]
+    const frames = doc.frames
+    if (!frames || frames.length === 0) return
+    const idx = this.selection.frameIndex.value ?? 0
+    const frame = frames[idx]
     if (!frame) return
 
     const oldIds = replacements.map(r => ({ pos: r.pos, oldId: r.oldBlockStateId }))
@@ -196,7 +205,10 @@ class ToolContextImpl implements ThreeToolContext {
   executeMirror(targets: BlockRef[], axis: 'x' | 'y' | 'z'): void {
     const doc = this.scene.scene.value as V2PlainSceneDocument | null
     if (!doc) return
-    const frame = doc.frames[this.selection.frameIndex.value ?? 0]
+    const frames = doc.frames
+    if (!frames || frames.length === 0) return
+    const idx = this.selection.frameIndex.value ?? 0
+    const frame = frames[idx]
     if (!frame) return
 
     const min = { x: Infinity, y: Infinity, z: Infinity }
@@ -245,7 +257,10 @@ class ToolContextImpl implements ThreeToolContext {
   executeGenerate(blockStateId: string, pos: { x: number; y: number; z: number }): void {
     const doc = this.scene.scene.value as V2PlainSceneDocument | null
     if (!doc) return
-    const frame = doc.frames[this.selection.frameIndex.value ?? 0]
+    const frames = doc.frames
+    if (!frames || frames.length === 0) return
+    const idx = this.selection.frameIndex.value ?? 0
+    const frame = frames[idx]
     if (!frame) return
 
     const newBlock: V2BlockInstance = { pos: { ...pos }, block_state_id: blockStateId }

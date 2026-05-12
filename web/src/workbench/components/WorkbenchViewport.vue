@@ -263,7 +263,7 @@ function handlePointerDown(event: PointerEvent): void {
 
   // Check gizmo hit for drag initiation
   if (moveGizmo && toolRegistry.activeTool.value?.id === 'move') {
-    const cam = (store as any)._camera as THREE.Camera | undefined
+    const cam = viewportCamera
     if (cam) {
       const raycaster = new THREE.Raycaster()
       const rect = (event.target as HTMLElement)?.getBoundingClientRect?.()
@@ -291,7 +291,7 @@ function handlePointerMove(event: PointerEvent): void {
 
   // Hover-highlight gizmo parts for Move tool
   if (moveGizmo && toolRegistry.activeTool.value?.id === 'move') {
-    const cam = (store as any)._camera as THREE.Camera | undefined
+    const cam = viewportCamera
     if (cam) {
       const raycaster = new THREE.Raycaster()
       const rect = (event.target as HTMLElement)?.getBoundingClientRect?.()
