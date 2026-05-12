@@ -162,8 +162,19 @@ function updateAnnotationPreview(): void {
   sceneRef?.add(annotPreviewMesh)
 }
 
+/** 将网格索引 (col, row, zSlice) 转为世界坐标，与 StructureViewport.voxelToWorld 一致 */
+function voxelToWorld(col: number, row: number, zSlice: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
+  const sCol = def.cellGrid[0]?.[0]?.length ?? 1
+  const sRow = def.cellGrid[0]?.length ?? 1
+  const sZ = def.cellGrid.length ?? 1
+  return new THREE.Vector3(
+    col - sCol / 2 + 0.5,
+    sRow / 2 - 0.5 - row,
+    zSlice - sZ / 2 + 0.5,
+  )
+}
+
 function updateSelectionWireframe(): void {
-  // Remove old wireframe
   if (selectionWireframe) {
     sceneRef?.remove(selectionWireframe)
     selectionWireframe.geometry?.dispose()
@@ -174,13 +185,17 @@ function updateSelectionWireframe(): void {
   const items = selection.items.value
   if (items.size === 0 || items.size > 500) return
 
+  const def = structureDefinition.value
+  if (!def) return
+
   const edges: number[] = []
-  const s = 0.52 // Half block size + small offset
+  const s = 0.52
 
   for (const item of items) {
-    const x = item.pos.x
-    const y = item.pos.y
-    const z = item.pos.z
+    const world = voxelToWorld(item.pos.x, item.pos.y, item.pos.z, def)
+    const x = world.x
+    const y = world.y
+    const z = world.z
 
     // 12 edges per cube, 2 vertices per edge: consecutive pairs form line segments
     const verts = [
@@ -220,17 +235,19 @@ function updateGizmo(): void {
   moveGizmo.setVisible(showMoveGizmo)
 
   if (showMoveGizmo && !gizmoDragging) {
-    // Position gizmo at selection center
+    // Position gizmo at selection center (world coords)
     const items = selection.items.value
     if (items.size > 0) {
-      let cx = 0, cy = 0, cz = 0
-      for (const item of items) {
-        cx += item.pos.x
-        cy += item.pos.y
-        cz += item.pos.z
+      const def = structureDefinition.value
+      if (def) {
+        let cx = 0, cy = 0, cz = 0
+        for (const item of items) {
+          const w = voxelToWorld(item.pos.x, item.pos.y, item.pos.z, def)
+          cx += w.x; cy += w.y; cz += w.z
+        }
+        cx /= items.size; cy /= items.size; cz /= items.size
+        moveGizmo.setPosition(new THREE.Vector3(cx, cy, cz))
       }
-      cx /= items.size; cy /= items.size; cz /= items.size
-      moveGizmo.setPosition(new THREE.Vector3(cx, cy, cz))
     }
   }
 
