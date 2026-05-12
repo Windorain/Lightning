@@ -118,8 +118,11 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   depthHook.renderOrder = 99999
   depthHook.name = '__gizmo_depth_hook__'
   depthHook.onAfterRender = (renderer: THREE.WebGLRenderer) => {
+    const prevAutoClear = renderer.autoClear
+    renderer.autoClear = false
     renderer.clearDepth()
     renderer.render(overlayScene, camera)
+    renderer.autoClear = prevAutoClear
   }
   scene.add(depthHook)
 
