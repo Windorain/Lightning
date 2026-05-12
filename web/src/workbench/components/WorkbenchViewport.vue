@@ -22,6 +22,7 @@ import { useEditHistory } from '@/workbench/editHistoryContext'
 import type { ThreeToolContext } from '@/workbench/tools/_base'
 import { createToolContext, type ToolContextDeps } from '@/workbench/tools/interactionFactory'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
+import { updateGizmoState, updateCameraState } from '@/workbench/debug/debugLog'
 import * as THREE from 'three'
 
 const props = defineProps<{
@@ -51,6 +52,7 @@ let moveGizmo: MoveGizmo | null = null
 let gizmoDragPart: string | null = null
 let gizmoDragOrigin: THREE.Vector3 | null = null
 let selectionWireframe: THREE.LineSegments | null = null
+let viewportCamera: THREE.Camera | null = null
 
 const {
   loadStatus,
@@ -83,7 +85,8 @@ async function onViewportReady(scene: THREE.Scene): Promise<void> {
 
   // Create tool context when scene + viewport are ready
   const vp = store as any
-  const camera: THREE.Camera | undefined = vp._camera ?? /* fallback */ scene.children.find(c => c instanceof THREE.Camera) as THREE.Camera | undefined
+  const camera = (vp._camera ?? scene.children.find(c => c instanceof THREE.Camera)) as THREE.Camera | undefined
+  viewportCamera = camera ?? null
   const canvas: HTMLElement | undefined = vp._domElement ?? vp._canvas
 
   if (camera && canvas) {
@@ -242,6 +245,20 @@ function updateGizmo(): void {
 
   // Update annotation preview wireframe
   updateAnnotationPreview()
+
+  // Debug observability — update gizmo/camera state each frame
+  if (moveGizmo && showMoveGizmo) {
+    const gp = moveGizmo.root.position
+    updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
+  } else {
+    updateGizmoState(null)
+  }
+  if (viewportCamera) {
+    updateCameraState({
+      position: [viewportCamera.position.x, viewportCamera.position.y, viewportCamera.position.z],
+      target: [0, 0, 0], // OrbitControls target — placeholder, actual access depends on control impl
+    })
+  }
 }
 
 function handlePointerDown(event: PointerEvent): void {
