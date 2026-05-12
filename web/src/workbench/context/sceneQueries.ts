@@ -81,12 +81,3 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
   }
 }
 
-/** @deprecated 通过 bctx.queries.pickVoxel(event) 调用 */
-export function pickVoxel(bctx: BContext, event: PointerEvent): BlockRef | null {
-  return bctx.queries.pickVoxel(event)
-}
-
-/** @deprecated 通过 bctx.queries.getFrameBlocks() 调用 */
-export function getFrameBlocks(bctx: BContext): BlockRef[] {
-  return bctx.queries.getFrameBlocks()
-}
