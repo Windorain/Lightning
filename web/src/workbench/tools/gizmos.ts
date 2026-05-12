@@ -55,7 +55,7 @@ function makeArrow(axis: 'x' | 'y' | 'z', color: number): ArrowMeshes {
 function makePlane(axes: 'xy' | 'xz' | 'yz', color: number): PlaneMeshes {
   const geo = new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE)
   const mat = new THREE.MeshBasicMaterial({
-    color, side: THREE.DoubleSide, depthTest: true,
+    color, side: THREE.DoubleSide, depthTest: false,
     depthWrite: false, transparent: true, opacity: 0.3,
   })
   const plane = new THREE.Mesh(geo, mat)

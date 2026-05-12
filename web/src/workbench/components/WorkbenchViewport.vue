@@ -47,7 +47,7 @@ watch(() => props.mergedConfig, async (cfg) => {
 const { hover, setHover, clearHover } = usePreviewTooltip()
 
 let toolCtx: ThreeToolContext | null = null
-let sceneRef: THREE.Scene | null = null
+let overlaySceneRef: THREE.Scene | null = null
 let moveGizmo: MoveGizmo | null = null
 let gizmoDragPart: GizmoPart = null
 let gizmoDragOrigin: THREE.Vector3 | null = null
@@ -82,7 +82,6 @@ const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 /* ---- Viewport events ---- */
 async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas: HTMLElement, _orbitTarget: THREE.Vector3): Promise<void> {
   store.registerScene(scene)
-  sceneRef = scene
   try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logError(`rebuildContentMesh: ${e}`) }
 
   // Create tool context when scene + viewport are ready
@@ -108,9 +107,25 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   canvas.addEventListener('pointerup', handlePointerUp)
   canvas.addEventListener('contextmenu', handleContextMenu)
 
-  // Create and add MoveGizmo to scene
+  // Create overlay scene — rendered after main scene with depth cleared
+  const overlayScene = new THREE.Scene()
+  overlaySceneRef = overlayScene
+
+  // Depth-clear hook: invisible mesh at max renderOrder, clears depth on afterRender
+  const depthHookGeo = new THREE.SphereGeometry(0.001, 1, 1)
+  const depthHookMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthTest: false, depthWrite: false })
+  const depthHook = new THREE.Mesh(depthHookGeo, depthHookMat)
+  depthHook.renderOrder = 99999
+  depthHook.name = '__gizmo_depth_hook__'
+  depthHook.onAfterRender = (renderer: THREE.WebGLRenderer) => {
+    renderer.clearDepth()
+    renderer.render(overlayScene, camera)
+  }
+  scene.add(depthHook)
+
+  // Add gizmo, wireframe, annotation preview to overlay scene (not main scene)
   moveGizmo = new MoveGizmo()
-  scene.add(moveGizmo.root)
+  overlayScene.add(moveGizmo.root)
 
   // Register per-frame gizmo update via requestAnimationFrame wrapper
   const origAnimate = (store as any)._animate as (() => void) | undefined
@@ -131,7 +146,7 @@ let annotPreviewMesh: THREE.LineSegments | null = null
 
 function updateAnnotationPreview(): void {
   if (annotPreviewMesh) {
-    sceneRef?.remove(annotPreviewMesh)
+    overlaySceneRef?.remove(annotPreviewMesh)
     annotPreviewMesh.geometry?.dispose()
     ;(annotPreviewMesh.material as THREE.Material)?.dispose()
     annotPreviewMesh = null
@@ -159,7 +174,7 @@ function updateAnnotationPreview(): void {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(c, 3))
   const mat = new THREE.LineBasicMaterial({ color: 0x4488ff, linewidth: 1, depthTest: true, transparent: true, opacity: 0.5 })
   annotPreviewMesh = new THREE.LineSegments(geo, mat)
-  sceneRef?.add(annotPreviewMesh)
+  overlaySceneRef?.add(annotPreviewMesh)
 }
 
 /** 将网格索引 (col, row, zSlice) 转为世界坐标，与 StructureViewport.voxelToWorld 一致 */
@@ -176,7 +191,7 @@ function voxelToWorld(col: number, row: number, zSlice: number, def: { cellGrid:
 
 function updateSelectionWireframe(): void {
   if (selectionWireframe) {
-    sceneRef?.remove(selectionWireframe)
+    overlaySceneRef?.remove(selectionWireframe)
     selectionWireframe.geometry?.dispose()
     ;(selectionWireframe.material as THREE.Material)?.dispose()
     selectionWireframe = null
@@ -224,7 +239,7 @@ function updateSelectionWireframe(): void {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3))
   const mat = new THREE.LineBasicMaterial({ color: 0xffaa00, linewidth: 1, depthTest: true })
   selectionWireframe = new THREE.LineSegments(geo, mat)
-  sceneRef?.add(selectionWireframe)
+  overlaySceneRef?.add(selectionWireframe)
 }
 
 function updateGizmo(): void {
@@ -413,13 +428,13 @@ onBeforeUnmount(() => {
   if (gizmoInterval) clearInterval(gizmoInterval)
   moveGizmo?.dispose()
   if (selectionWireframe) {
-    sceneRef?.remove(selectionWireframe)
+    overlaySceneRef?.remove(selectionWireframe)
     selectionWireframe.geometry?.dispose()
     ;(selectionWireframe.material as THREE.Material)?.dispose()
     selectionWireframe = null
   }
   if (annotPreviewMesh) {
-    sceneRef?.remove(annotPreviewMesh)
+    overlaySceneRef?.remove(annotPreviewMesh)
     annotPreviewMesh.geometry?.dispose()
     ;(annotPreviewMesh.material as THREE.Material)?.dispose()
     annotPreviewMesh = null
