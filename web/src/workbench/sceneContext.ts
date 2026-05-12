@@ -167,7 +167,8 @@ export function provideSceneContext(): SceneContext {
       sceneLoadEpoch.value += 1
     }
     if (next) {
-      const totalBlocks = (next as any).frames?.reduce((sum: number, f: any) => sum + (f.blocks?.length ?? 0), 0) ?? 0
+      const frames = (next as any).frames ?? (next as any).worldFrames ?? []
+      const totalBlocks = frames.reduce((sum: number, f: any) => sum + ((f.blocks ?? f.blockInstances)?.length ?? 0), 0)
       logSceneLoaded(opts?.fileName ?? localFileName.value ?? 'unknown', totalBlocks)
     }
     if (opts?.mode) {

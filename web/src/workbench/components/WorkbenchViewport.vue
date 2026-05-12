@@ -78,55 +78,49 @@ type BottomTab = 'frame' | 'layer'
 const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 
 /* ---- Viewport events ---- */
-async function onViewportReady(scene: THREE.Scene): Promise<void> {
+async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas: HTMLElement): Promise<void> {
   store.registerScene(scene)
   sceneRef = scene
   try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e) }
 
   // Create tool context when scene + viewport are ready
-  const vp = store as any
-  const camera = (vp._camera ?? scene.children.find(c => c instanceof THREE.Camera)) as THREE.Camera | undefined
-  viewportCamera = camera ?? null
-  const canvas: HTMLElement | undefined = vp._domElement ?? vp._canvas
+  viewportCamera = camera
+  const deps: ToolContextDeps = {
+    scene: ctx,
+    selection,
+    toolRegistry,
+    editHistory,
+    camera,
+    contentGroup: contentGroupRef.value ?? new THREE.Group(),
+    domElement: canvas,
+    definition: structureDefinition.value!,
+    layerPreview: layerPreviewMode.value,
+  }
+  toolCtx = createToolContext(deps)
+  toolRegistry.setToolContext(toolCtx)
 
-  if (camera && canvas) {
-    const deps: ToolContextDeps = {
-      scene: ctx,
-      selection,
-      toolRegistry,
-      editHistory,
-      camera,
-      contentGroup: contentGroupRef.value ?? new THREE.Group(),
-      domElement: canvas,
-      definition: structureDefinition.value!,
-      layerPreview: layerPreviewMode.value,
+  // Attach pointer listeners to canvas
+  canvas.addEventListener('pointerdown', handlePointerDown)
+  canvas.addEventListener('pointermove', handlePointerMove)
+  canvas.addEventListener('pointerup', handlePointerUp)
+  canvas.addEventListener('contextmenu', handleContextMenu)
+
+  // Create and add MoveGizmo to scene
+  moveGizmo = new MoveGizmo()
+  scene.add(moveGizmo.root)
+
+  // Register per-frame gizmo update via requestAnimationFrame wrapper
+  const origAnimate = (store as any)._animate as (() => void) | undefined
+  if (origAnimate) {
+    const wrapped = () => {
+      origAnimate()
+      updateGizmo()
     }
-    toolCtx = createToolContext(deps)
-    toolRegistry.setToolContext(toolCtx)
-
-    // Attach pointer listeners to canvas
-    canvas.addEventListener('pointerdown', handlePointerDown)
-    canvas.addEventListener('pointermove', handlePointerMove)
-    canvas.addEventListener('pointerup', handlePointerUp)
-    canvas.addEventListener('contextmenu', handleContextMenu)
-
-    // Create and add MoveGizmo to scene
-    moveGizmo = new MoveGizmo()
-    scene.add(moveGizmo.root)
-
-    // Register per-frame gizmo update via requestAnimationFrame wrapper
-    const origAnimate = (vp as any)._animate as (() => void) | undefined
-    if (origAnimate) {
-      const wrapped = () => {
-        origAnimate()
-        updateGizmo()
-      }
-      ;(vp as any)._animate = wrapped
-    } else {
-      // Fallback: run updateGizmo via setInterval if animate hook isn't accessible
-      const interval = setInterval(updateGizmo, 16) // ~60fps
-      ;(vp as any)._gizmoInterval = interval
-    }
+    ;(store as any)._animate = wrapped
+  } else {
+    // Fallback: run updateGizmo via setInterval if animate hook isn't accessible
+    const interval = setInterval(updateGizmo, 16) // ~60fps
+    ;(store as any)._gizmoInterval = interval
   }
 }
 

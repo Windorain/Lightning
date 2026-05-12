@@ -46,7 +46,7 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  ready: [scene: THREE.Scene]
+  ready: [scene: THREE.Scene, camera: THREE.Camera, canvas: HTMLElement]
   'hover-block': [
     payload: {
       blockId: string
@@ -411,7 +411,7 @@ onMounted(() => {
   }
   tick()
 
-  emit('ready', scene)
+  emit('ready', scene, vp.activeCamera, domCanvas)
 })
 
 onBeforeUnmount(() => {
