@@ -46,6 +46,7 @@ watch(() => props.mergedConfig, async (cfg) => {
 const { hover, setHover, clearHover } = usePreviewTooltip()
 
 let toolCtx: ThreeToolContext | null = null
+let sceneRef: THREE.Scene | null = null
 let moveGizmo: MoveGizmo | null = null
 let gizmoDragPart: string | null = null
 let gizmoDragOrigin: THREE.Vector3 | null = null
@@ -76,6 +77,7 @@ const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 /* ---- Viewport events ---- */
 async function onViewportReady(scene: THREE.Scene): Promise<void> {
   store.registerScene(scene)
+  sceneRef = scene
   try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e) }
 
   // Create tool context when scene + viewport are ready
@@ -106,22 +108,158 @@ async function onViewportReady(scene: THREE.Scene): Promise<void> {
     // Create and add MoveGizmo to scene
     moveGizmo = new MoveGizmo()
     scene.add(moveGizmo.root)
+
+    // Register per-frame gizmo update via requestAnimationFrame wrapper
+    const origAnimate = (vp as any)._animate as (() => void) | undefined
+    if (origAnimate) {
+      const wrapped = () => {
+        origAnimate()
+        updateGizmo()
+      }
+      ;(vp as any)._animate = wrapped
+    } else {
+      // Fallback: run updateGizmo via setInterval if animate hook isn't accessible
+      const interval = setInterval(updateGizmo, 16) // ~60fps
+      ;(vp as any)._gizmoInterval = interval
+    }
   }
+}
+
+let annotPreviewMesh: THREE.LineSegments | null = null
+
+function updateAnnotationPreview(): void {
+  if (annotPreviewMesh) {
+    sceneRef?.remove(annotPreviewMesh)
+    annotPreviewMesh.geometry?.dispose()
+    ;(annotPreviewMesh.material as THREE.Material)?.dispose()
+    annotPreviewMesh = null
+  }
+
+  if (!toolCtx?._annotPreview) return
+  const { min, max } = toolCtx._annotPreview
+
+  const c = [
+    min.x-0.5, min.y-0.5, min.z-0.5, max.x+0.5, min.y-0.5, min.z-0.5,
+    max.x+0.5, min.y-0.5, min.z-0.5, max.x+0.5, max.y+0.5, min.z-0.5,
+    max.x+0.5, max.y+0.5, min.z-0.5, min.x-0.5, max.y+0.5, min.z-0.5,
+    min.x-0.5, max.y+0.5, min.z-0.5, min.x-0.5, min.y-0.5, min.z-0.5,
+    min.x-0.5, min.y-0.5, max.z+0.5, max.x+0.5, min.y-0.5, max.z+0.5,
+    max.x+0.5, min.y-0.5, max.z+0.5, max.x+0.5, max.y+0.5, max.z+0.5,
+    max.x+0.5, max.y+0.5, max.z+0.5, min.x-0.5, max.y+0.5, max.z+0.5,
+    min.x-0.5, max.y+0.5, max.z+0.5, min.x-0.5, min.y-0.5, max.z+0.5,
+    min.x-0.5, min.y-0.5, min.z-0.5, min.x-0.5, min.y-0.5, max.z+0.5,
+    max.x+0.5, min.y-0.5, min.z-0.5, max.x+0.5, min.y-0.5, max.z+0.5,
+    max.x+0.5, max.y+0.5, min.z-0.5, max.x+0.5, max.y+0.5, max.z+0.5,
+    min.x-0.5, max.y+0.5, min.z-0.5, min.x-0.5, max.y+0.5, max.z+0.5,
+  ]
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(c, 3))
+  const mat = new THREE.LineBasicMaterial({ color: 0x4488ff, linewidth: 1, depthTest: true, transparent: true, opacity: 0.5 })
+  annotPreviewMesh = new THREE.LineSegments(geo, mat)
+  sceneRef?.add(annotPreviewMesh)
+}
+
+function updateGizmo(): void {
+  if (!moveGizmo || !toolCtx) return
+
+  const tool = toolRegistry.activeTool.value
+  const showMoveGizmo = tool?.id === 'move'
+  moveGizmo.setVisible(showMoveGizmo)
+
+  if (showMoveGizmo) {
+    // Position gizmo at selection center
+    const items = selection.items.value
+    if (items.size > 0) {
+      let cx = 0, cy = 0, cz = 0
+      for (const item of items) {
+        cx += item.pos.x
+        cy += item.pos.y
+        cz += item.pos.z
+      }
+      cx /= items.size; cy /= items.size; cz /= items.size
+      moveGizmo.setPosition(new THREE.Vector3(cx, cy, cz))
+    }
+  }
+
+  // Call active tool's renderOverlay
+  tool?.renderOverlay?.(toolCtx)
+
+  // Update annotation preview wireframe
+  updateAnnotationPreview()
 }
 
 function handlePointerDown(event: PointerEvent): void {
   if (!toolCtx) return
   toolCtx._selectStart = { x: event.clientX, y: event.clientY }
+
+  // Check gizmo hit for drag initiation
+  if (moveGizmo && toolRegistry.activeTool.value?.id === 'move') {
+    const cam = (store as any)._camera as THREE.Camera | undefined
+    if (cam) {
+      const raycaster = new THREE.Raycaster()
+      const rect = (event.target as HTMLElement)?.getBoundingClientRect?.()
+      if (rect) {
+        const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+        const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+        raycaster.setFromCamera(new THREE.Vector2(x, y), cam)
+        const hit = moveGizmo.hitTest(raycaster)
+        if (hit && hit.length === 1) {
+          gizmoDragPart = hit
+          gizmoDragOrigin = moveGizmo.root.position.clone()
+          return // Gizmo handles the drag, don't forward to tool
+        }
+      }
+    }
+  }
+
+  // Forward to active tool if no gizmo hit
   toolRegistry.activeTool.value?.onPointerDown?.(toolCtx, event)
 }
 
 function handlePointerMove(event: PointerEvent): void {
   if (!toolCtx) return
   toolRegistry.activeTool.value?.onPointerMove?.(toolCtx, event)
+
+  // Hover-highlight gizmo parts for Move tool
+  if (moveGizmo && toolRegistry.activeTool.value?.id === 'move') {
+    const cam = (store as any)._camera as THREE.Camera | undefined
+    if (cam) {
+      const raycaster = new THREE.Raycaster()
+      const rect = (event.target as HTMLElement)?.getBoundingClientRect?.()
+      if (rect) {
+        const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+        const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+        raycaster.setFromCamera(new THREE.Vector2(x, y), cam)
+        const hit = moveGizmo.hitTest(raycaster)
+        moveGizmo.setHighlight(hit)
+      }
+    }
+  }
 }
 
 function handlePointerUp(event: PointerEvent): void {
   if (!toolCtx) return
+
+  // Finish gizmo drag
+  if (gizmoDragPart && gizmoDragOrigin) {
+    const items = [...selection.items.value]
+    if (items.length > 0) {
+      const newCenter = moveGizmo!.root.position.clone()
+      const delta = {
+        x: Math.round(newCenter.x - gizmoDragOrigin.x),
+        y: Math.round(newCenter.y - gizmoDragOrigin.y),
+        z: Math.round(newCenter.z - gizmoDragOrigin.z),
+      }
+      if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
+        toolCtx.executeMove(items.map(i => ({ ...i.pos })), delta)
+      }
+    }
+    gizmoDragPart = null
+    gizmoDragOrigin = null
+    return
+  }
+
   toolRegistry.activeTool.value?.onPointerUp?.(toolCtx, event)
 }
 
@@ -173,7 +311,15 @@ onBeforeUnmount(() => {
     canvas.removeEventListener('pointerup', handlePointerUp)
     canvas.removeEventListener('contextmenu', handleContextMenu)
   }
+  const gizmoInterval = (store as any)._gizmoInterval as number | undefined
+  if (gizmoInterval) clearInterval(gizmoInterval)
   moveGizmo?.dispose()
+  if (annotPreviewMesh) {
+    sceneRef?.remove(annotPreviewMesh)
+    annotPreviewMesh.geometry?.dispose()
+    ;(annotPreviewMesh.material as THREE.Material)?.dispose()
+    annotPreviewMesh = null
+  }
   store.disposeCachesAndLibrary()
 })
 </script>

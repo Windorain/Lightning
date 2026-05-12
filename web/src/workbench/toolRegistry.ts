@@ -16,6 +16,7 @@ export interface Tool {
   onPointerMove?(ctx: ThreeToolContext, event: PointerEvent): void
   onPointerUp?(ctx: ThreeToolContext, event: PointerEvent): void
   onKeyDown?(ctx: ThreeToolContext, event: KeyboardEvent): void
+  renderOverlay?(ctx: ThreeToolContext): void
 }
 
 export interface ToolRegistry {
