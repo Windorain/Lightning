@@ -21,8 +21,12 @@ import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useEditHistory } from '@/workbench/editHistoryContext'
 import type { ThreeToolContext } from '@/workbench/tools/_base'
 import { createToolContext, type ToolContextDeps } from '@/workbench/tools/interactionFactory'
-import { MoveGizmo, type GizmoPart } from '@/workbench/tools/gizmos'
+import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { updateGizmoState, updateCameraState, logError } from '@/workbench/debug/debugLog'
+import { eventDispatcher } from '@/workbench/eventDispatcher'
+import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
+import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
+import { createDefaultPickHandler } from '@/workbench/handlers/defaultPickHandler'
 import * as THREE from 'three'
 
 const props = defineProps<{
@@ -49,9 +53,6 @@ const { hover, setHover, clearHover } = usePreviewTooltip()
 let toolCtx: ThreeToolContext | null = null
 let overlaySceneRef: THREE.Scene | null = null
 let moveGizmo: MoveGizmo | null = null
-let gizmoDragPart: GizmoPart = null
-let gizmoDragOrigin: THREE.Vector3 | null = null
-let gizmoDragging = false
 let selectionWireframe: THREE.LineSegments | null = null
 let viewportCamera: THREE.Camera | null = null
 let orbitTarget: THREE.Vector3 | null = null
@@ -101,11 +102,30 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   toolCtx = createToolContext(deps)
   toolRegistry.setToolContext(toolCtx)
 
-  // Attach pointer listeners to canvas
-  canvas.addEventListener('pointerdown', handlePointerDown)
-  canvas.addEventListener('pointermove', handlePointerMove)
-  canvas.addEventListener('pointerup', handlePointerUp)
-  canvas.addEventListener('contextmenu', handleContextMenu)
+  // EventDispatcher — capture-phase dispatch (priority above OrbitControls bubble-phase)
+  canvas.addEventListener('pointerdown', (e) => { dispatchCanvas(e) }, { capture: true })
+  canvas.addEventListener('pointermove', (e) => { dispatchCanvas(e) }, { capture: true })
+  canvas.addEventListener('pointerup', (e) => { dispatchCanvas(e) }, { capture: true })
+  canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); dispatchCanvas(e) }, { capture: true })
+  document.addEventListener('keydown', (e) => { eventDispatcher.dispatch(e) }, { capture: true })
+
+  // Register handlers
+  const unregGizmo = eventDispatcher.registerHandler(
+    createToolGizmoHandler(
+      () => toolRegistry.activeTool.value?.id ?? 'select',
+      () => moveGizmo,
+      () => toolCtx,
+      () => viewportCamera,
+      () => store.controlsRef as { enabled: boolean } | null,
+    ),
+  )
+  const unregTool = eventDispatcher.registerHandler(
+    createActiveToolHandler(() => toolRegistry, () => toolCtx),
+  )
+  const unregPick = eventDispatcher.registerHandler(createDefaultPickHandler())
+
+  // Store unregister functions for cleanup
+  ;(store as any)._unregHandlers = [unregGizmo, unregTool, unregPick]
 
   // Create overlay scene — rendered on top with depth cleared by StructureViewport
   const overlayScene = new THREE.Scene()
@@ -129,6 +149,11 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
     const interval = setInterval(updateGizmo, 16) // ~60fps
     ;(store as any)._gizmoInterval = interval
   }
+}
+
+function dispatchCanvas(event: Event): void {
+  const result = eventDispatcher.dispatch(event)
+  if (result.break) event.stopImmediatePropagation()
 }
 
 let annotPreviewMesh: THREE.LineSegments | null = null
@@ -238,7 +263,7 @@ function updateGizmo(): void {
   const showMoveGizmo = tool?.id === 'move'
   moveGizmo.setVisible(showMoveGizmo)
 
-  if (showMoveGizmo && !gizmoDragging) {
+  if (showMoveGizmo) {
     // Position gizmo at selection center (world coords)
     const items = selection.items.value
     if (items.size > 0) {
@@ -279,102 +304,6 @@ function updateGizmo(): void {
   }
 }
 
-function handlePointerDown(event: PointerEvent): void {
-  if (!toolCtx) return
-  toolCtx._selectStart = { x: event.clientX, y: event.clientY }
-
-  // Check gizmo hit for drag initiation
-  if (moveGizmo && toolRegistry.activeTool.value?.id === 'move') {
-    const cam = viewportCamera
-    if (cam) {
-      const raycaster = new THREE.Raycaster()
-      const rect = (event.target as HTMLElement)?.getBoundingClientRect?.()
-      if (rect) {
-        const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-        const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-        raycaster.setFromCamera(new THREE.Vector2(x, y), cam)
-        const hit = moveGizmo.hitTest(raycaster)
-        if (hit && hit.length === 1) {
-          gizmoDragPart = hit
-          gizmoDragOrigin = moveGizmo.root.position.clone()
-          gizmoDragging = true
-          return // Gizmo handles the drag, don't forward to tool
-        }
-      }
-    }
-  }
-
-  // Forward to active tool if no gizmo hit
-  toolRegistry.activeTool.value?.onPointerDown?.(toolCtx, event)
-}
-
-function handlePointerMove(event: PointerEvent): void {
-  if (!toolCtx) return
-  toolRegistry.activeTool.value?.onPointerMove?.(toolCtx, event)
-
-  // Gizmo interaction for Move tool
-  if (moveGizmo && toolRegistry.activeTool.value?.id === 'move') {
-    const cam = viewportCamera
-    if (cam) {
-      const raycaster = new THREE.Raycaster()
-      const rect = (event.target as HTMLElement)?.getBoundingClientRect?.()
-      if (rect) {
-        const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-        const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-        raycaster.setFromCamera(new THREE.Vector2(x, y), cam)
-
-        if (gizmoDragging && gizmoDragPart && gizmoDragOrigin) {
-          // Compute constrained axis delta
-          const delta = moveGizmo.computeAxisDelta(gizmoDragPart, gizmoDragOrigin, raycaster)
-          const dirs: Record<string, THREE.Vector3> = {
-            x: new THREE.Vector3(1, 0, 0),
-            y: new THREE.Vector3(0, 1, 0),
-            z: new THREE.Vector3(0, 0, 1),
-          }
-          const dir = dirs[gizmoDragPart] ?? new THREE.Vector3()
-          moveGizmo.root.position.copy(gizmoDragOrigin.clone().addScaledVector(dir, delta))
-        } else {
-          // Hover highlight
-          const hit = moveGizmo.hitTest(raycaster)
-          moveGizmo.setHighlight(hit)
-        }
-      }
-    }
-  }
-}
-
-function handlePointerUp(event: PointerEvent): void {
-  if (!toolCtx) return
-
-  // Finish gizmo drag
-  if (gizmoDragPart && gizmoDragOrigin) {
-    const items = [...selection.items.value]
-    if (items.length > 0) {
-      const newCenter = moveGizmo!.root.position.clone()
-      const delta = {
-        x: Math.round(newCenter.x - gizmoDragOrigin.x),
-        y: Math.round(newCenter.y - gizmoDragOrigin.y),
-        z: Math.round(newCenter.z - gizmoDragOrigin.z),
-      }
-      if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
-        toolCtx.executeMove(items.map(i => ({ ...i.pos })), delta)
-      }
-    }
-    gizmoDragPart = null
-    gizmoDragOrigin = null
-    gizmoDragging = false
-    // Re-snap gizmo to selection center on next frame
-    return
-  }
-
-  toolRegistry.activeTool.value?.onPointerUp?.(toolCtx, event)
-}
-
-function handleContextMenu(event: Event): void {
-  // Prevent default browser context menu — ContextMenu.vue handles the rest
-  event.preventDefault()
-}
-
 function onViewportHover(
   p: { blockId: string; clientX: number; clientY: number; voxel: { column: number; row: number; zSlice: number } } | null,
 ): void {
@@ -404,15 +333,9 @@ watch(
 
 onMounted(async () => { await store.loadStructureAndResources() })
 onBeforeUnmount(() => {
-  // Remove canvas listeners
-  const vp = store as any
-  const canvas: HTMLElement | undefined = vp._domElement ?? vp._canvas
-  if (canvas) {
-    canvas.removeEventListener('pointerdown', handlePointerDown)
-    canvas.removeEventListener('pointermove', handlePointerMove)
-    canvas.removeEventListener('pointerup', handlePointerUp)
-    canvas.removeEventListener('contextmenu', handleContextMenu)
-  }
+  // Unregister event handlers
+  const unregs = (store as any)._unregHandlers as Array<() => void> | undefined
+  unregs?.forEach(fn => fn())
   const gizmoInterval = (store as any)._gizmoInterval as number | undefined
   if (gizmoInterval) clearInterval(gizmoInterval)
   moveGizmo?.dispose()
