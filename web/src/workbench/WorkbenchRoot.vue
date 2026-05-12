@@ -125,8 +125,6 @@ if (import.meta.env.DEV) {
       undoLabel: editHistory.undoLabel.value,
       redoLabel: editHistory.redoLabel.value,
     }),
-    gizmoPosition: () => null,
-    cameraState: () => null,
   })
   installDebugApi()
 }

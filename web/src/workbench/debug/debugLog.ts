@@ -70,21 +70,24 @@ export function injectDebugRefs(refs: {
   scene: () => V2PlainSceneDocument | null
   selection: () => BlockRef[]
   toolRegistry: () => { activeToolId: string; canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null }
-  gizmoPosition: () => { x: number; y: number; z: number } | null
-  cameraState: () => { position: [number, number, number]; target: [number, number, number] } | null
 }): void {
   if (!import.meta.env.DEV) return
   _sceneRef = refs.scene
   _selectionRef = refs.selection
   _toolRegistryRef = refs.toolRegistry
-  _gizmoPosRef = refs.gizmoPosition
-  _cameraStateRef = refs.cameraState
+  // gizmo/camera state 不在这里注入 — 由 updateGizmoState / updateCameraState 从 viewport 推送
 }
 
 // ---- 由 WorkbenchViewport 在 render loop 中调用的状态更新 ----
 
 let _gizmoPos: { x: number; y: number; z: number } | null = null
 let _cameraState: { position: [number, number, number]; target: [number, number, number] } | null = null
+
+// 模块加载时即绑定 getter → 读内部变量
+if (import.meta.env.DEV) {
+  _gizmoPosRef = () => _gizmoPos
+  _cameraStateRef = () => _cameraState
+}
 
 export function updateGizmoState(pos: { x: number; y: number; z: number } | null): void {
   if (!import.meta.env.DEV) return
@@ -94,14 +97,6 @@ export function updateCameraState(state: { position: [number, number, number]; t
   if (!import.meta.env.DEV) return
   _cameraState = state
 }
-
-// 覆盖 injectDebugRefs 的 getter 为直接读值（在带 setter 时更高效）
-function _installExternalGetters(): void {
-  _gizmoPosRef = () => _gizmoPos
-  _cameraStateRef = () => _cameraState
-}
-// 模块加载时即注册
-if (import.meta.env.DEV) _installExternalGetters()
 
 // ---- 预设日志函数（按操作类型） ----
 
