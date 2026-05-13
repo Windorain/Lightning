@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, provide, ref } from 'vue'
+import { onMounted, onBeforeUnmount, provide, ref, computed } from 'vue'
 
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
 import WorkbenchSettingsDrawer from '@/workbench/components/WorkbenchSettingsDrawer.vue'
 import MenuBar from '@/workbench/components/MenuBar.vue'
 import WorkspaceTabs from '@/workbench/components/WorkspaceTabs.vue'
 import ViewportHost from '@/workbench/components/ViewportHost.vue'
-import PropertiesPanel from '@/workbench/components/PropertiesPanel.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import WikiViewerWorkspace from '@/workbench/components/WikiViewerWorkspace.vue'
@@ -19,7 +18,6 @@ import { provideToolRegistry } from '@/workbench/toolRegistry'
 import { provideBContext, type BContext } from '@/workbench/context/bContext'
 import { createProductionQueries } from '@/workbench/context/sceneQueries'
 import { createBContextSettings } from '@/workbench/context/toolSettings'
-import ToolShelf from '@/workbench/components/ToolShelf.vue'
 
 // Operators
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
@@ -48,6 +46,9 @@ import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
 import { SpaceType, RegionType, type bScreen } from '@/workbench/ux/types/screen'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOf, regionAt, relayout } from '@/workbench/ux/layout'
+import UIRenderer from '@/workbench/ux/UIRenderer.vue'
+import { blockInspectorPanel } from '@/workbench/ux/panels/blockInspector'
+import { toolShelfPanel } from '@/workbench/ux/panels/toolShelf'
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
@@ -131,6 +132,25 @@ const defaultScreen: bScreen = {
   popupRegions: [],
   bounds: { width: 1400, height: 800 },
 }
+
+// Register panels into screen regions
+const viewportArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
+viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels.push(toolShelfPanel)
+const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
+propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(blockInspectorPanel)
+
+// Reactive panel queries — poll() and layout() are tracked by Vue reactivity
+const activeToolshelfPanels = computed(() =>
+  viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels
+    .filter(p => p.poll(bctx))
+    .map(p => ({ id: p.id, layout: p.layout(bctx) }))
+)
+
+const activePropertiesPanels = computed(() =>
+  propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels
+    .filter(p => p.poll(bctx))
+    .map(p => ({ id: p.id, layout: p.layout(bctx) }))
+)
 
 // Compute initial layout
 computeLayout(bctx, defaultScreen)
@@ -277,13 +297,23 @@ if (import.meta.env.DEV) {
       <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
     </template>
     <template #tool-shelf>
-      <ToolShelf />
+      <UIRenderer
+        v-for="panel in activeToolshelfPanels"
+        :key="panel.id"
+        :layout="panel.layout"
+        :rna="bctx.rna"
+      />
     </template>
     <template #viewport>
       <ViewportHost />
     </template>
     <template #properties>
-      <PropertiesPanel />
+      <UIRenderer
+        v-for="panel in activePropertiesPanels"
+        :key="panel.id"
+        :layout="panel.layout"
+        :rna="bctx.rna"
+      />
     </template>
     <template #statusbar>
       <StatusBar />
