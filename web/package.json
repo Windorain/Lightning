@@ -7,6 +7,8 @@
     "build:embed": "vite build --config vite.embed.config.ts",
     "build:workbench": "vite build --config vite.workbench.config.ts",
     "build:all": "npm run build:embed && npm run build:workbench",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
@@ -23,8 +25,10 @@
     "@types/pako": "^2.0.4",
     "@types/three": "^0.174.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "jsdom": "^29.1.1",
     "typescript": "~5.7.2",
     "vite": "^6.0.7",
+    "vitest": "^4.1.6",
     "vue-tsc": "^2.2.0"
   }
 }
