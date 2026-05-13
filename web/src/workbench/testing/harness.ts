@@ -15,6 +15,10 @@ export interface TestHarness {
   click(x: number, y: number, opts?: { ctrl?: boolean; shift?: boolean }): void
   drag(fromX: number, fromY: number, toX: number, toY: number, opts?: { steps?: number; ctrl?: boolean; shift?: boolean }): void
 
+  // Semantic interaction (L2 — resolve widgets by logical ID, then interact)
+  clickOperator(opId: string, opts?: { index?: number }): void
+  setRNAValue(rnaPath: string, value: unknown, owner?: unknown): void
+
   // Assertions
   assert(condition: boolean, message?: string): void
   assertSelectionSize(n: number): void
@@ -79,6 +83,20 @@ export function createTestHarness(
         )
       }
       this.pointerUp(toX, toY, { ctrl, shift })
+    },
+
+    clickOperator(opId, o = {}) {
+      const rects = ctx.ui.boundsOfByOperator(opId)
+      const idx = o.index ?? 0
+      if (idx >= rects.length) throw new Error(`clickOperator: ${opId} has only ${rects.length} instances, requested index ${idx}`)
+      const r = rects[idx]
+      this.click(r.x + r.width / 2, r.y + r.height / 2)
+    },
+
+    setRNAValue(rnaPath, value, owner) {
+      const desc = ctx.rna.resolve(rnaPath)
+      if (!desc) throw new Error(`setRNAValue: RNA path "${rnaPath}" not resolved`)
+      desc.set(owner ?? {}, value)
     },
 
     assert(condition, message = 'assertion failed') {

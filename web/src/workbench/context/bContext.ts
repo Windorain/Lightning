@@ -116,6 +116,8 @@ export interface BContext {
   ui: {
     computeLayout(screen: bScreen): void
     boundsOf(id: string): Rect | null
+    boundsOfByOperator(opId: string): Rect[]
+    boundsOfByRNAPath(rnaPath: string): Rect[]
     regionAt(x: number, y: number): { area: ScrArea; region: ARegion } | null
     relayout(): void
   }

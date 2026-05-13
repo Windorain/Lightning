@@ -23,7 +23,7 @@ function renderItem(item: UILayoutItem, prefix: string, index: number): VNode {
   switch (item.kind) {
     case 'property': {
       const desc = props.rna.resolve(item.rnaPath)
-      return h(RNAWidget, { descriptor: desc, label: item.label, owner: props.owner, 'data-layout-id': layoutId })
+      return h(RNAWidget, { descriptor: desc, label: item.label, rnaPath: item.rnaPath, owner: props.owner, 'data-layout-id': layoutId })
     }
     case 'operator':
       return h(OperatorBtn, { opId: item.id, label: item.label, icon: item.icon, title: item.title, operatorProps: item.props, 'data-layout-id': layoutId })

@@ -138,6 +138,24 @@ export function boundsOf(ctx: BContext, id: string): Rect | null {
   return null
 }
 
+/** Find all widget rects matching a given operator ID (e.g., 'OPERATOR_DELETE'). */
+export function boundsOfByOperator(opId: string): Rect[] {
+  const rects: Rect[] = []
+  for (const wr of widgetCache.values()) {
+    if (wr.operatorId === opId) rects.push({ ...wr.bounds })
+  }
+  return rects
+}
+
+/** Find all widget rects matching a given RNA path (e.g., 'block.id'). */
+export function boundsOfByRNAPath(rnaPath: string): Rect[] {
+  const rects: Rect[] = []
+  for (const wr of widgetCache.values()) {
+    if (wr.rnaPath === rnaPath) rects.push({ ...wr.bounds })
+  }
+  return rects
+}
+
 export function relayout(ctx: BContext): void {
   if (ctx.screen) computeLayout(ctx, ctx.screen)
 }

@@ -45,7 +45,7 @@ import { wikiConfig } from '@/workbench/wikiConfig'
 import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
 import { SpaceType, RegionType, type bScreen } from '@/workbench/ux/types/screen'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
-import { computeLayout, boundsOf, regionAt, relayout } from '@/workbench/ux/layout'
+import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt, relayout } from '@/workbench/ux/layout'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import {
   blockInspectorPanel, toolShelfPanel, generatePanel,
@@ -167,6 +167,8 @@ computeLayout(bctx, defaultScreen)
 ;(bctx as any).ui = {
   computeLayout: (s: bScreen) => computeLayout(bctx, s),
   boundsOf: (id: string) => boundsOf(bctx, id),
+  boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
+  boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),
   regionAt: (x: number, y: number) => regionAt(defaultScreen, x, y),
   relayout: () => relayout(bctx),
 }

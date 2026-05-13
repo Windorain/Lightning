@@ -11,6 +11,8 @@ import type { BContext, BContextQueries, BContextSettings } from '@/workbench/co
 import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
 import type { BlockRef } from '@/workbench/selectionContext'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
+import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt } from '@/workbench/ux/layout'
+import type { bScreen } from '@/workbench/ux/types/screen'
 import { ref } from 'vue'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
@@ -143,10 +145,12 @@ export function createMockBContext(opts?: {
     region: null as any,
     rna: createMockRNA(),
     ui: {
-      computeLayout: (_s: any) => {},
-      boundsOf: (_id: string) => null,
-      regionAt: (_x: number, _y: number) => null,
-      relayout: () => {},
+      computeLayout: (s: bScreen) => computeLayout(mockCtx as any, s),
+      boundsOf: (id: string) => boundsOf(mockCtx as any, id),
+      boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
+      boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),
+      regionAt: (x: number, y: number) => regionAt(mockCtx.screen ?? null as any, x, y),
+      relayout: () => { if (mockCtx.screen) computeLayout(mockCtx as any, mockCtx.screen) },
     } as any,
     operators: {
       exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(mockCtx as any, id, props),

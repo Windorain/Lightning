@@ -20,6 +20,7 @@ function onClick() {
   <button
     class="ux-operator-btn"
     :data-op-id="opId"
+    :data-props="operatorProps ? JSON.stringify(operatorProps) : undefined"
     :title="title ?? label"
     @click="onClick"
   >

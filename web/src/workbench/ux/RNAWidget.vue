@@ -5,6 +5,7 @@ import type { PropertyDescriptor } from './rna/types'
 const props = defineProps<{
   descriptor: PropertyDescriptor | null
   label: string
+  rnaPath?: string
   owner?: unknown
 }>()
 
@@ -37,7 +38,7 @@ function setValue(val: unknown): void {
 </script>
 
 <template>
-  <div class="ux-rna-widget" :data-rna-path="descriptor?.name">
+  <div class="ux-rna-widget" :data-rna-path="rnaPath ?? descriptor?.name">
     <label class="ux-rna-label">{{ label }}</label>
     <div class="ux-rna-input">
       <input
