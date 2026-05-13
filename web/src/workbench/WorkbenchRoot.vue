@@ -37,6 +37,7 @@ import { MoveGizmoOperator } from '@/workbench/operators/builtin/moveGizmoOperat
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
+import { SceneMetaEditOperator, TooltipEditOperator } from '@/workbench/operators/builtin/sceneEditOperators'
 
 import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
 import { installLogCenter } from '@/workbench/logging/LogCenter'
@@ -98,6 +99,8 @@ globalOperators.register(ViewRotateOperator)
 globalOperators.register(ViewPanOperator)
 globalOperators.register(ViewZoomOperator)
 globalOperators.register(ToolSetOperator)
+globalOperators.register(SceneMetaEditOperator)
+globalOperators.register(TooltipEditOperator)
 
 // Rebuild tool list after all operators registered, then activate default
 toolRegistry.rebuildTools()

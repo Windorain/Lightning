@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { globalOperators } from '@/workbench/operators/operatorRegistry'
+import { useBContext } from '@/workbench/context/bContext'
 import { renderTooltipHtml } from './renderTooltipHtml'
 import { useSceneContext } from '@/workbench/sceneContext'
 import { useSelectionContext } from '@/workbench/selectionContext'
@@ -9,6 +11,7 @@ import { autoTooltipFromNbt } from '@/workbench/nbtTooltipTemplate'
 import type { BlockPaletteEntry, RenderBundle } from '@/render/schema/types'
 
 const ctx = useSceneContext()
+const bctx = useBContext()
 const selection = useSelectionContext()
 const selectedBlock = computed(() => {
   if (selection.items.value.size === 0) return null
@@ -65,63 +68,15 @@ function readCurrentTooltip(): string {
   return String(tp[palIdx] ?? '')
 }
 
-function buildEmptyTooltipGrid(doc: Record<string, unknown>): number[][][] {
-  const cg = doc.cellGrid
-  if (!Array.isArray(cg) || cg.length === 0) return []
-  const grid: number[][][] = []
-  for (const zArr of cg) {
-    if (!Array.isArray(zArr)) continue
-    const rows: number[][] = []
-    for (const rArr of zArr) {
-      if (!Array.isArray(rArr)) continue
-      rows.push(new Array(rArr.length).fill(-1))
-    }
-    grid.push(rows)
-  }
-  return grid
-}
-
-function setPaletteAndGrid(doc: Record<string, unknown>, z: number, r: number, c: number, text: string): void {
-  if (isWorldDocument(doc)) {
-    if (!Array.isArray(doc.tooltipPalette)) doc.tooltipPalette = []
-    const tp = doc.tooltipPalette as string[]
-    let idx = tp.indexOf(text)
-    if (idx === -1 && text) { idx = tp.length; tp.push(text) }
-    const frames = doc.frames
-    if (Array.isArray(frames) && frames.length > 0) {
-      const n = frames.length
-      const raw = Math.floor(ctx.previewWorldFrameIndex.value)
-      const fIdx = ((raw % n) + n) % n
-      const st = (frames[fIdx] as Record<string, unknown>)?.structure as Record<string, unknown> | undefined
-      if (st) {
-        if (!Array.isArray(st.cellTooltipGrid)) st.cellTooltipGrid = buildEmptyTooltipGrid(st)
-        const ttg = st.cellTooltipGrid as number[][][]
-        if (ttg[z] && ttg[z][r]) ttg[z][r][c] = text ? idx : -1
-      }
-    }
-  } else {
-    if (!Array.isArray(doc.tooltipPalette)) doc.tooltipPalette = []
-    const tp = doc.tooltipPalette as string[]
-    let idx = tp.indexOf(text)
-    if (idx === -1 && text) { idx = tp.length; tp.push(text) }
-    if (!Array.isArray(doc.cellTooltipGrid)) doc.cellTooltipGrid = buildEmptyTooltipGrid(doc)
-    const ttg = doc.cellTooltipGrid as number[][][]
-    if (ttg[z] && ttg[z][r]) ttg[z][r][c] = text ? idx : -1
-  }
-}
-
 async function saveTooltip(): Promise<void> {
-  const doc = ctx.scene.value
-  if (!doc || !selectedBlock.value?.voxel) return
-  const { zSlice, row, column } = selectedBlock.value.voxel
-  try {
-    setPaletteAndGrid(doc, zSlice, row, column, tooltipText.value)
-    ctx.markDirty()
-    void ctx.syncPreview()
-    saveFeedback.value = '已保存'
-  } catch (e) {
-    saveFeedback.value = e instanceof Error ? e.message : String(e)
-  }
+  const block = selectedBlock.value
+  if (!block) return
+  globalOperators.exec(bctx, 'OPERATOR_TOOLTIP_EDIT', {
+    text: tooltipText.value,
+    pos: block.voxel,
+  })
+  void ctx.syncPreview()
+  saveFeedback.value = '已保存'
 }
 
 const previewHtml = computed(() => tooltipText.value ? renderTooltipHtml(tooltipText.value) : '')

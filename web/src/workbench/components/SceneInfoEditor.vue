@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { globalOperators } from '@/workbench/operators/operatorRegistry'
+import { useBContext } from '@/workbench/context/bContext'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { useSceneContext } from '@/workbench/sceneContext'
 import { t } from '@/workbench/i18n'
 
 const ctx = useSceneContext()
+const bctx = useBContext()
 
 const hasScene = computed(() => ctx.scene.value != null)
 
@@ -27,7 +30,7 @@ watch(
   { immediate: true },
 )
 
-// 表单 → scene（300ms debounce，原地修改）
+// 表单 → scene（300ms debounce，通过 operator 提交）
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 function scheduleSync(): void {
   if (debounceTimer) clearTimeout(debounceTimer)
@@ -40,9 +43,8 @@ function scheduleSync(): void {
       id: id.value, label: label.value, author: author.value,
       gtnhVersion: gtnhVersion.value, structureId: structureId.value,
     })) {
-      if (v === '') { delete (doc as any)[k] } else { (doc as any)[k] = v }
+      globalOperators.exec(bctx, 'OPERATOR_SCENE_META_EDIT', { field: k, value: v || null })
     }
-    ctx.dirty.value = true
     void ctx.syncPreview()
   }, 300)
 }
