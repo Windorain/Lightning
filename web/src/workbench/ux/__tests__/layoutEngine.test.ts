@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { computeLayout, regionAt, boundsOf } from '../layout/engine'
-import { SpaceType, RegionType, type bScreen, type ScrArea, type ARegion } from '../types/screen'
+import { SpaceType, RegionType, type bScreen, type ScrArea } from '../types/screen'
 import type { PanelDeclaration } from '../types/panel'
-import type { UILayout } from '../types/layout'
+import type { LayoutWithItems } from '../types/layout'
 import type { BContext } from '@/workbench/context/bContext'
 
 function mockBctx(): BContext {
@@ -12,7 +12,7 @@ function mockBctx(): BContext {
   } as unknown as BContext
 }
 
-function dummyPanel(id: string, items: UILayout['items']): PanelDeclaration {
+function dummyPanel(id: string, items: LayoutWithItems['items']): PanelDeclaration {
   return {
     id, label: id, spaceType: SpaceType.PROPERTIES, regionType: RegionType.MAIN,
     poll: () => true,

@@ -1,4 +1,5 @@
 import type { UILayout, UILayoutItem } from '../types/layout'
+import { hasLayoutItems } from '../types/layout'
 import type { Rect } from '../types/screen'
 
 export interface WidgetRect {
@@ -20,12 +21,14 @@ export function computeWidgetRects(
   container: Rect,
   prefix = '',
 ): WidgetRect[] {
+  // UISplit is handled by the caller (UIRenderer splits it into left/right)
+  if (!hasLayoutItems(layout)) return []
+
   const result: WidgetRect[] = []
   const cursor = { x: container.x + ITEM_PADDING, y: container.y + ITEM_PADDING }
   const availWidth = container.width - ITEM_PADDING * 2
   const isRow = layout.kind === 'row'
 
-  // For rows, compute per-item width (equal share of available width)
   const leafCount = layout.items.filter(i => !isLayoutContainer(i)).length
   const columnPad = isRow && leafCount > 0 ? ITEM_PADDING * (leafCount - 1) : 0
   const itemWidth = isRow && leafCount > 0 ? Math.floor((availWidth - columnPad) / leafCount) : availWidth
@@ -88,6 +91,6 @@ function advance(cursor: { x: number; y: number }, distance: number, isRow: bool
 
 function isLayoutContainer(item: UILayoutItem): item is UILayout {
   if (typeof item !== 'object' || item === null) return false
-  const i = item as Record<string, unknown>
-  return ['row', 'column', 'box', 'split', 'panel', 'scroll'].includes(i.kind as string)
+  const k = (item as { kind?: string }).kind
+  return k !== undefined && ['row', 'column', 'box', 'split', 'panel', 'scroll'].includes(k)
 }

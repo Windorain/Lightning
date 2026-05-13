@@ -1,5 +1,12 @@
 export type UILayout = UIRow | UIColumn | UIBox | UISplit | UIPanel | UIScroll
 
+/** Layout containers that have an `items` array (all except UISplit) */
+export type LayoutWithItems = UIRow | UIColumn | UIBox | UIPanel | UIScroll
+
+export function hasLayoutItems(layout: UILayout): layout is LayoutWithItems {
+  return layout.kind !== 'split'
+}
+
 export interface UIRow {
   kind: 'row'
   align: boolean
