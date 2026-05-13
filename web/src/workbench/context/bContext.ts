@@ -16,6 +16,8 @@ import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type * as THREE from 'three'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
+import type { wmWindow, bScreen, ScrArea, ARegion, Rect } from '@/workbench/ux/types/screen'
+import type { RNARegistry } from '@/workbench/ux/rna/types'
 
 export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
@@ -93,6 +95,28 @@ export interface BContext {
   controlsRef: { enabled: boolean } | null
   definition: StructureDefinition | null
   layerPreview: LayerPreviewMode | null
+
+  /** Window manager (Blender 对标 wmWindowManager) */
+  wm: {
+    windows: wmWindow[]
+    activeWindow: wmWindow | null
+  }
+
+  /** Current context pointers (C->screen, C->area, C->region in Blender) */
+  screen: bScreen | null
+  area: ScrArea | null
+  region: ARegion | null
+
+  /** RNA reflection registry */
+  rna: RNARegistry
+
+  /** UI layout engine */
+  ui: {
+    computeLayout(screen: bScreen): void
+    boundsOf(id: string): Rect | null
+    regionAt(x: number, y: number): { area: ScrArea; region: ARegion } | null
+    relayout(): void
+  }
 }
 
 export const bContextKey: InjectionKey<BContext> = Symbol('bContext')

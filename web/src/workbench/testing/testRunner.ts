@@ -124,6 +124,22 @@ export function createMockBContext(opts?: {
     controlsRef: { enabled: true },
     definition: null,
     layerPreview: null,
+    wm: { windows: [], activeWindow: null } as any,
+    screen: null as any,
+    area: null as any,
+    region: null as any,
+    rna: {
+      structs: new Map(),
+      register: () => {},
+      resolve: () => null,
+      widgetFor: () => 'text',
+    } as any,
+    ui: {
+      computeLayout: () => {},
+      boundsOf: () => null,
+      regionAt: () => null,
+      relayout: () => {},
+    } as any,
     operators: {
       exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(mockCtx as any, id, props),
       invoke: (id: string, props?: Record<string, unknown>, event?: Event) => globalOperators.invoke(mockCtx as any, id, props, event as any),
