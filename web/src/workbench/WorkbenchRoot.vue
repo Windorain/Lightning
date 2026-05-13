@@ -49,6 +49,7 @@ import { computeLayout, boundsOf, regionAt, relayout } from '@/workbench/ux/layo
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import { blockInspectorPanel } from '@/workbench/ux/panels/blockInspector'
 import { toolShelfPanel } from '@/workbench/ux/panels/toolShelf'
+import { generatePanel } from '@/workbench/ux/panels/generate'
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
@@ -137,7 +138,7 @@ const defaultScreen: bScreen = {
 const viewportArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
 viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels.push(toolShelfPanel)
 const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
-propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(blockInspectorPanel)
+propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(blockInspectorPanel, generatePanel)
 
 // Reactive panel queries — poll() and layout() are tracked by Vue reactivity
 const activeToolshelfPanels = computed(() =>
