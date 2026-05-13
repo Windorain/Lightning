@@ -11,7 +11,7 @@ export interface PropertyDescriptor {
   max?: number
   enumItems?: string[]
   update?: string
-  uiWidget?: string
+  uiWidget?: 'text' | 'number' | 'slider' | 'checkbox' | 'dropdown' | 'color' | 'vector'
   get(owner: unknown): unknown
   set(owner: unknown, value: unknown): void
 }

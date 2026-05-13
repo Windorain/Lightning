@@ -101,7 +101,7 @@ describe('RNARegistry', () => {
   it('widgetFor respects explicit uiWidget override', () => {
     const desc = {
       name: 'test', type: 'number' as const, label: '', description: '', default: 0,
-      min: 0, max: 100, uiWidget: 'number',
+      min: 0, max: 100, uiWidget: 'number' as const,
       get() { return 0 }, set() {},
     }
     expect(rna.widgetFor(desc)).toBe('number')
