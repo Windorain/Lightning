@@ -10,7 +10,7 @@ export const annotationPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
 
   poll(ctx: BContext): boolean {
-    return ctx.toolRegistry.activeTool.value?.id === 'annotation'
+    return ctx.toolRegistry.activeTool.value?.id === 'OPERATOR_ANNOTATION'
   },
 
   layout(_ctx: BContext): UILayout {

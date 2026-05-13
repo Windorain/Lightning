@@ -10,7 +10,7 @@ export const labelPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
 
   poll(ctx: BContext): boolean {
-    return ctx.toolRegistry.activeTool.value?.id === 'label'
+    return ctx.toolRegistry.activeTool.value?.id === 'OPERATOR_LABEL'
   },
 
   layout(_ctx: BContext): UILayout {

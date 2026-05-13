@@ -10,7 +10,7 @@ export const transformPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
 
   poll(ctx: BContext): boolean {
-    return ctx.toolRegistry.activeTool.value?.id === 'move'
+    return ctx.toolRegistry.activeTool.value?.id === 'OPERATOR_MOVE'
   },
 
   layout(ctx: BContext): UILayout {

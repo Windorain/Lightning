@@ -10,7 +10,7 @@ export const batchEditPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
 
   poll(ctx: BContext): boolean {
-    return ctx.toolRegistry.activeTool.value?.id === 'select'
+    return ctx.toolRegistry.activeTool.value?.id === 'OPERATOR_SELECT'
       && ctx.selection.items.value.size > 1
   },
 
