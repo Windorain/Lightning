@@ -12,48 +12,36 @@ const props = defineProps<{
   owner?: unknown
 }>()
 
-function renderItem(item: UILayoutItem, index: number): VNode {
-  if (isLayout(item)) {
-    return renderLayout(item, `item-${index}`)
+/** Render a leaf item. prefix matches computeWidgetRects convention. */
+function renderItem(item: UILayoutItem, prefix: string, index: number): VNode {
+  const layoutId = prefix ? `${prefix}.item-${index}` : `item-${index}`
+
+  if (isLayoutItem(item)) {
+    return renderLayout(item, layoutId)
   }
+
   switch (item.kind) {
     case 'property': {
       const desc = props.rna.resolve(item.rnaPath)
-      return h(RNAWidget, {
-        descriptor: desc,
-        label: item.label,
-        owner: props.owner,
-        'data-layout-id': `item-${index}`,
-      })
+      return h(RNAWidget, { descriptor: desc, label: item.label, owner: props.owner, 'data-layout-id': layoutId })
     }
     case 'operator':
-      return h(OperatorBtn, {
-        opId: item.id,
-        label: item.label,
-        icon: (item as any).icon,
-        operatorProps: (item as any).props,
-        'data-layout-id': `item-${index}`,
-      })
+      return h(OperatorBtn, { opId: item.id, label: item.label, icon: item.icon, operatorProps: item.props, 'data-layout-id': layoutId })
     case 'label':
-      return h('span', { class: 'ux-label', 'data-layout-id': `item-${index}` }, item.text)
+      return h('span', { class: 'ux-label', 'data-layout-id': layoutId }, item.text)
     case 'separator':
-      return h('hr', { class: 'ux-sep', 'data-layout-id': `item-${index}` })
+      return h('hr', { class: 'ux-sep', 'data-layout-id': layoutId })
     case 'menu':
-      return h(UIMenu, {
-        label: item.label,
-        icon: (item as any).icon,
-        items: (item as any).items,
-        'data-layout-id': `item-${index}`,
-      })
+      return h(UIMenu, { label: item.label, icon: item.icon, items: item.items, 'data-layout-id': layoutId })
     default:
       return h('span', {}, '')
   }
 }
 
+/** Render a layout container. key is the cumulative layoutId path. */
 function renderLayout(l: UILayout, key: string): VNode {
   const attrs: Record<string, unknown> = { 'data-layout-id': key }
 
-  // UISplit: no items array, uses left/right instead
   if (l.kind === 'split') {
     const leftPct = `${l.percentage}%`
     const rightPct = `${100 - l.percentage}%`
@@ -63,7 +51,7 @@ function renderLayout(l: UILayout, key: string): VNode {
     ])
   }
 
-  const children = (l as LayoutWithItems).items.map((item, i) => renderItem(item, i))
+  const children = (l as LayoutWithItems).items.map((item, i) => renderItem(item, key, i))
 
   switch (l.kind) {
     case 'row':
@@ -72,7 +60,7 @@ function renderLayout(l: UILayout, key: string): VNode {
       return h('div', { class: 'ux-column', ...attrs }, children)
     case 'box':
       return h('div', { class: 'ux-box', ...attrs }, [
-        h('label', { class: 'ux-box-label' }, l.label),
+        h('label', { class: 'ux-box-label', 'data-layout-id': key }, l.label),
         ...children,
       ])
     case 'panel':
@@ -84,7 +72,7 @@ function renderLayout(l: UILayout, key: string): VNode {
   }
 }
 
-function isLayout(item: UILayoutItem): item is UILayout {
+function isLayoutItem(item: UILayoutItem): item is UILayout {
   if (typeof item !== 'object' || item === null) return false
   const k = (item as { kind?: string }).kind
   return k !== undefined && ['row', 'column', 'box', 'split', 'panel', 'scroll'].includes(k)

@@ -19,9 +19,11 @@ export function createRNARegistry(): RNARegistry {
       const struct = structs.get(structName)
       if (!struct) return null
 
-      const propName = propPath.includes('.') ? propPath.slice(0, propPath.indexOf('.')) : propPath
+      // Sub-property paths (block.pos.x) not supported — vector3 components need
+      // special handling at the UI layer. Return null for now.
+      if (propPath.includes('.')) return null
 
-      return struct.properties.find(p => p.name === propName) ?? null
+      return struct.properties.find(p => p.name === propPath) ?? null
     },
 
     widgetFor(prop: PropertyDescriptor): string {

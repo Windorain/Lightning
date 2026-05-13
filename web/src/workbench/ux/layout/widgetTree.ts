@@ -40,15 +40,27 @@ export function computeWidgetRects(
     if (isLayoutContainer(item)) {
       if (item.kind === 'box') {
         result.push({ layoutId, kind: 'box-label', bounds: { x: cursor.x, y: cursor.y, width: itemWidth, height: BOX_HEADER_HEIGHT } })
-        advance(cursor, BOX_HEADER_HEIGHT, isRow)
+        const savedY = cursor.y
+        cursor.y += BOX_HEADER_HEIGHT
         const boxBody = { x: cursor.x + BOX_PADDING, y: cursor.y, width: itemWidth - BOX_PADDING * 2, height: Math.max(0, container.height - (cursor.y - container.y) - BOX_PADDING) }
         const inner = computeWidgetRects(item, boxBody, layoutId)
         result.push(...inner)
-        advance(cursor, inner.reduce((h, r) => h + r.bounds.height + ITEM_PADDING, 0) + BOX_PADDING, isRow)
+        if (isRow) {
+          cursor.y = savedY
+          advance(cursor, itemWidth + ITEM_PADDING, isRow)
+        } else {
+          cursor.y += inner.reduce((h, r) => h + r.bounds.height + ITEM_PADDING, 0) + BOX_PADDING
+        }
       } else {
+        const savedY = cursor.y
         const inner = computeWidgetRects(item, { x: cursor.x, y: cursor.y, width: itemWidth, height: container.height - (cursor.y - container.y) }, layoutId)
         result.push(...inner)
-        advance(cursor, inner.reduce((h, r) => h + r.bounds.height + ITEM_PADDING, 0), isRow)
+        if (isRow) {
+          cursor.y = savedY
+          advance(cursor, itemWidth + ITEM_PADDING, isRow)
+        } else {
+          cursor.y += inner.reduce((h, r) => h + r.bounds.height + ITEM_PADDING, 0)
+        }
       }
     } else {
       const w = isRow ? itemWidth : availWidth

@@ -1,16 +1,50 @@
 import type { BContext } from '@/workbench/context/bContext'
 import type { bScreen, ScrArea, ARegion, Rect } from '../types/screen'
 import { RegionType } from '../types/screen'
+import { computeWidgetRects, type WidgetRect } from './widgetTree'
 
-const HEADER_HEIGHT = 32
-const FOOTER_HEIGHT = 24
-const TOOLSHELF_WIDTH = 48
-const PROPERTIES_WIDTH = 300
+export const HEADER_HEIGHT = 32
+export const FOOTER_HEIGHT = 24
+export const TOOLSHELF_WIDTH = 48
+export const PROPERTIES_WIDTH = 300
+
+/** Layout-id → WidgetRect cache, populated by computeLayout via computeWidgetRects */
+const widgetCache = new Map<string, WidgetRect>()
+
+export function clearWidgetCache(): void {
+  widgetCache.clear()
+}
 
 export function computeLayout(ctx: BContext, screen: bScreen): void {
   ctx.screen = screen
+  clearWidgetCache()
+
   for (const area of screen.areas) {
     layoutArea(area, screen.bounds)
+  }
+
+  // Popup regions — stack from top
+  for (const popup of screen.popupRegions) {
+    if (!popup.visible) continue
+    popup.bounds = { x: 0, y: 0, width: screen.bounds.width, height: screen.bounds.height }
+  }
+
+  // Compute widget rects for each panel and cache by layoutId + panel.id
+  for (const area of screen.areas) {
+    for (const region of area.regions) {
+      for (const panel of region.panels) {
+        if (!panel.poll(ctx)) continue
+        const layout = panel.layout(ctx)
+        const rects = computeWidgetRects(layout, region.bounds, panel.id)
+        for (const r of rects) {
+          widgetCache.set(r.layoutId, r)
+        }
+        // Also cache by panel id for coarse-grained lookup
+        if (!widgetCache.has(panel.id)) {
+          widgetCache.set(panel.id, { layoutId: panel.id, kind: 'panel', bounds: { ...region.bounds } })
+        }
+      }
+    }
   }
 }
 
@@ -72,8 +106,13 @@ export function regionAt(
   return null
 }
 
-export function boundsOf(ctx: BContext, id: string): Rect | null {
-  for (const area of ctx.screen?.areas ?? []) {
+/** Get the computed bounds for a widget or panel by its id (layoutId or panel id). */
+export function boundsOf(_ctx: BContext, id: string): Rect | null {
+  const cached = widgetCache.get(id)
+  if (cached) return { ...cached.bounds }
+
+  // Fallback: search region panels
+  for (const area of _ctx.screen?.areas ?? []) {
     for (const region of area.regions) {
       for (const panel of region.panels) {
         if (panel.id === id) {

@@ -10,11 +10,22 @@
 import type { BContext, BContextQueries, BContextSettings } from '@/workbench/context/bContext'
 import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
 import type { BlockRef } from '@/workbench/selectionContext'
+import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA } from '@/workbench/ux/rna'
 import { ref } from 'vue'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
+
+/* —— Mock RNA —— */
+
+function createMockRNA() {
+  const rna = createRNARegistry()
+  rna.register(blockRNA)
+  rna.register(toolSettingsRNA)
+  rna.register(sceneMetaRNA)
+  return rna
+}
 
 /* —— Mock BContext —— */
 
@@ -128,16 +139,11 @@ export function createMockBContext(opts?: {
     screen: null as any,
     area: null as any,
     region: null as any,
-    rna: {
-      structs: new Map(),
-      register: () => {},
-      resolve: () => null,
-      widgetFor: () => 'text',
-    } as any,
+    rna: createMockRNA(),
     ui: {
-      computeLayout: () => {},
-      boundsOf: () => null,
-      regionAt: () => null,
+      computeLayout: (_s: any) => {},
+      boundsOf: (_id: string) => null,
+      regionAt: (_x: number, _y: number) => null,
       relayout: () => {},
     } as any,
     operators: {
