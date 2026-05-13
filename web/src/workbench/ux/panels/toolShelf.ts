@@ -1,7 +1,7 @@
 import type { BContext } from '@/workbench/context/bContext'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
-import type { UILayout } from '../types/layout'
+import type { UILayout, UILayoutItem } from '../types/layout'
 
 export const toolShelfPanel: PanelDeclaration = {
   id: 'tool-shelf',
@@ -13,7 +13,7 @@ export const toolShelfPanel: PanelDeclaration = {
 
   layout(ctx: BContext): UILayout {
     const tools = ctx.operators.all()
-    const items: any[] = tools.map(t => ({
+    const items: UILayoutItem[] = tools.map(t => ({
       kind: 'operator' as const,
       id: 'OPERATOR_TOOL_SET',
       label: t.label,

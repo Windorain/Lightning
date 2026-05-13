@@ -78,11 +78,10 @@ function isLayoutItem(item: UILayoutItem): item is UILayout {
   return k !== undefined && ['row', 'column', 'box', 'split', 'panel', 'scroll'].includes(k)
 }
 
-const vnode = renderLayout(props.layout, 'root')
 </script>
 
 <template>
-  <component :is="() => vnode" />
+  <component :is="renderLayout(layout, 'root')" />
 </template>
 
 <style scoped>

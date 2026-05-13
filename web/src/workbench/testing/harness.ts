@@ -13,7 +13,7 @@ export interface TestHarness {
 
   // Composed flows (L1)
   click(x: number, y: number, opts?: { ctrl?: boolean; shift?: boolean }): void
-  drag(fromX: number, fromY: number, toX: number, toY: number, opts?: { steps?: number }): void
+  drag(fromX: number, fromY: number, toX: number, toY: number, opts?: { steps?: number; ctrl?: boolean; shift?: boolean }): void
 
   // Assertions
   assert(condition: boolean, message?: string): void
@@ -68,15 +68,17 @@ export function createTestHarness(
 
     drag(fromX, fromY, toX, toY, o = {}) {
       const steps = o.steps ?? 5
-      this.pointerDown(fromX, fromY)
+      const ctrl = o.ctrl, shift = o.shift
+      this.pointerDown(fromX, fromY, { ctrl, shift })
       for (let i = 1; i < steps; i++) {
         const t = i / steps
         this.pointerMove(
           fromX + (toX - fromX) * t,
           fromY + (toY - fromY) * t,
+          { ctrl, shift },
         )
       }
-      this.pointerUp(toX, toY)
+      this.pointerUp(toX, toY, { ctrl, shift })
     },
 
     assert(condition, message = 'assertion failed') {

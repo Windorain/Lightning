@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useBContext } from '@/workbench/context/bContext'
 import type { UIOperator, UILabel, UISeparator } from './types/layout'
 
 defineProps<{
@@ -8,10 +9,15 @@ defineProps<{
   items: (UIOperator | UILabel | UISeparator)[]
 }>()
 
+const bctx = useBContext()
 const open = ref(false)
 
 function toggle() { open.value = !open.value }
 function close() { open.value = false }
+function invokeOp(op: UIOperator) {
+  close()
+  bctx.operators.invoke(op.id, op.props ?? {})
+}
 </script>
 
 <template>
@@ -28,7 +34,7 @@ function close() { open.value = false }
         <button
           v-else-if="item.kind === 'operator'"
           class="ux-menu-item"
-          @click="close"
+          @click="invokeOp(item)"
         >
           <span v-if="item.icon" class="ux-icon">{{ item.icon }}</span>
           {{ item.label }}
