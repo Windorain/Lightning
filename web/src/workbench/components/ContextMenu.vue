@@ -2,10 +2,13 @@
 import { useSelectionContext } from '@/workbench/selectionContext'
 import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useEditHistory } from '@/workbench/editHistoryContext'
+import { globalOperators } from '@/workbench/operators/operatorRegistry'
+import { useBContext } from '@/workbench/context/bContext'
 
 const selection = useSelectionContext()
 const toolRegistry = useToolRegistry()
 const history = useEditHistory()
+const bctx = useBContext()
 
 defineProps<{ x: number; y: number; visible: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -19,8 +22,8 @@ function run(action: string): void {
     case 'eyedropper': toolRegistry.activate('eyedropper'); break
     case 'move': toolRegistry.activate('move'); break
     case 'mirror': toolRegistry.activate('mirror'); break
-    case 'undo': history.undo(); break
-    case 'redo': history.redo(); break
+    case 'undo': globalOperators.exec(bctx, 'OPERATOR_UNDO'); break
+    case 'redo': globalOperators.exec(bctx, 'OPERATOR_REDO'); break
   }
   emit('close')
 }
