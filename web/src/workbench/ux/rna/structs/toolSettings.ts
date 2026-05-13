@@ -42,5 +42,14 @@ export const toolSettingsRNA: RNAStruct = {
       get(owner: any) { return owner.dragSensitivity },
       set(owner: any, val: unknown) { owner.dragSensitivity = val as number },
     },
+    {
+      name: 'snapEnabled',
+      type: 'boolean',
+      label: '吸附',
+      description: '移动时吸附到整数坐标',
+      default: false,
+      get(owner: any) { return owner.snapEnabled },
+      set(owner: any, val: unknown) { owner.snapEnabled = val as boolean },
+    },
   ],
 }

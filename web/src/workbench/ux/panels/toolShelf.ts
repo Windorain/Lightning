@@ -20,6 +20,10 @@ export const toolShelfPanel: PanelDeclaration = {
       title: t.label,
       props: { toolId: t.id },
     }))
+    items.push(
+      { kind: 'separator' },
+      { kind: 'property', rnaPath: 'toolsettings.snapEnabled', label: '', widget: 'checkbox' },
+    )
     return { kind: 'column', align: false, items }
   },
 }

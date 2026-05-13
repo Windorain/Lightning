@@ -44,6 +44,8 @@ export interface BContextSettings {
   generateType: string | null
   /** Gizmo 拖拽灵敏度（原硬编码 const k = 0.05） */
   dragSensitivity: number
+  /** Snap 吸附开关 */
+  snapEnabled: boolean
 }
 
 export interface BContext {

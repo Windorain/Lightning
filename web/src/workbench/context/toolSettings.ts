@@ -13,6 +13,7 @@ export function createBContextSettings(): BContextSettings {
   const replaceBrush = ref<string | null>(null)
   const fillBrush = ref<string | null>(null)
   const generateType = ref<string | null>(null)
+  const snapEnabled = ref<boolean>(false)
 
   return {
     get replaceBrush(): string | null { return replaceBrush.value },
@@ -22,5 +23,7 @@ export function createBContextSettings(): BContextSettings {
     get generateType(): string | null { return generateType.value },
     set generateType(v: string | null) { generateType.value = v },
     dragSensitivity: 0.05,
+    get snapEnabled(): boolean { return snapEnabled.value },
+    set snapEnabled(v: boolean) { snapEnabled.value = v },
   }
 }

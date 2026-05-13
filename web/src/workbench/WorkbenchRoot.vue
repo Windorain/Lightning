@@ -358,7 +358,7 @@ if (import.meta.env.DEV) {
   <WorkbenchSettingsDrawer />
 </template>
 
-<style>
+<style scoped>
 .wb-toolshelf {
   position: absolute; top: 4px; left: 4px; z-index: 100;
   display: flex; flex-direction: column; gap: 2px;
@@ -368,7 +368,7 @@ if (import.meta.env.DEV) {
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
-.wb-toolshelf .ux-operator-btn {
+.wb-toolshelf :deep(.ux-operator-btn) {
   width: 32px; height: 32px; padding: 0;
   font-size: 16px; line-height: 1;
   display: flex; align-items: center; justify-content: center;
@@ -376,10 +376,12 @@ if (import.meta.env.DEV) {
   background: transparent;
   color: var(--nei-label);
 }
-.wb-toolshelf .ux-operator-btn:hover {
+.wb-toolshelf :deep(.ux-operator-btn:hover) {
   background: var(--nei-panel-hover);
 }
+</style>
 
+<style>
 .wb-standalone {
   display: flex;
   flex-direction: column;

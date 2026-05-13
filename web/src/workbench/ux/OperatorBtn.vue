@@ -12,7 +12,7 @@ const props = defineProps<{
 const bctx = useBContext()
 
 function onClick() {
-  bctx.operators.invoke(props.opId, props.operatorProps ?? {})
+  bctx.operators.exec(props.opId, props.operatorProps ?? {})
 }
 </script>
 

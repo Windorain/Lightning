@@ -97,6 +97,7 @@ export function createMockBContext(opts?: {
     fillBrush: opts?.settings?.fillBrush ?? null,
     generateType: opts?.settings?.generateType ?? null,
     dragSensitivity: opts?.settings?.dragSensitivity ?? 0.05,
+    snapEnabled: opts?.settings?.snapEnabled ?? false,
   }
 
   const mockCtx = {
