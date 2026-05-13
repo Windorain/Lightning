@@ -45,6 +45,9 @@ import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
 import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
+import { SpaceType, RegionType, type bScreen } from '@/workbench/ux/types/screen'
+import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA } from '@/workbench/ux/rna'
+import { computeLayout, boundsOf, regionAt, relayout } from '@/workbench/ux/layout'
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
@@ -93,6 +96,58 @@ const bctx = {
   settings: createBContextSettings(),
 } as BContext
 bctx.queries = createProductionQueries(bctx)
+
+// Build RNA registry
+const rna = createRNARegistry()
+rna.register(blockRNA)
+rna.register(toolSettingsRNA)
+rna.register(sceneMetaRNA)
+
+// Build default screen layout (single VIEW_3D area + PROPERTIES area)
+const defaultScreen: bScreen = {
+  id: 'workbench',
+  areas: [
+    {
+      id: 'viewport-area',
+      spaceType: SpaceType.VIEW_3D,
+      splitDir: 'none',
+      parentArea: null,
+      regions: [
+        { id: 'r-header', type: RegionType.HEADER, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
+        { id: 'r-toolshelf', type: RegionType.TOOLSHELF, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
+        { id: 'r-viewport', type: RegionType.MAIN, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
+      ],
+    },
+    {
+      id: 'properties-area',
+      spaceType: SpaceType.PROPERTIES,
+      splitDir: 'none',
+      parentArea: null,
+      regions: [
+        { id: 'r-props-main', type: RegionType.MAIN, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
+      ],
+    },
+  ],
+  popupRegions: [],
+  bounds: { width: 1400, height: 800 },
+}
+
+// Compute initial layout
+computeLayout(bctx, defaultScreen)
+
+// Wire into bctx
+;(bctx as any).wm = { windows: [], activeWindow: null }
+;(bctx as any).screen = defaultScreen
+;(bctx as any).area = null
+;(bctx as any).region = null
+;(bctx as any).rna = rna
+;(bctx as any).ui = {
+  computeLayout: (s: bScreen) => computeLayout(bctx, s),
+  boundsOf: (id: string) => boundsOf(bctx, id),
+  regionAt: (x: number, y: number) => regionAt(defaultScreen, x, y),
+  relayout: () => relayout(bctx),
+}
+
 provideBContext(bctx)
 useNeiTheme()
 
