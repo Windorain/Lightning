@@ -19,9 +19,7 @@ export function computeLayout(ctx: BContext, screen: bScreen): void {
   ctx.screen = screen
   clearWidgetCache()
 
-  for (const area of screen.areas) {
-    layoutArea(area, screen.bounds)
-  }
+  layoutAreas(screen.areas, screen.bounds)
 
   // Popup regions — stack from top
   for (const popup of screen.popupRegions) {
@@ -48,17 +46,33 @@ export function computeLayout(ctx: BContext, screen: bScreen): void {
   }
 }
 
-function layoutArea(area: ScrArea, screenBounds: { width: number; height: number }): void {
+function layoutAreas(areas: ScrArea[], screenBounds: { width: number; height: number }): void {
+  if (areas.length === 1) {
+    layoutAreaInRect(areas[0], { x: 0, y: 0, width: screenBounds.width, height: screenBounds.height })
+  } else {
+    // Split horizontally across areas
+    const w = Math.floor(screenBounds.width / areas.length)
+    for (let i = 0; i < areas.length; i++) {
+      layoutAreaInRect(areas[i], { x: i * w, y: 0, width: w, height: screenBounds.height })
+    }
+  }
+}
+
+function layoutAreaInRect(area: ScrArea, rect: Rect): void {
+  layoutArea(area, rect)
+}
+
+function layoutArea(area: ScrArea, areaBounds: Rect): void {
   const header = area.regions.find(r => r.type === RegionType.HEADER)
   const footer = area.regions.find(r => r.type === RegionType.FOOTER)
   const toolshelf = area.regions.find(r => r.type === RegionType.TOOLSHELF)
   const properties = area.regions.find(r => r.type === RegionType.PROPERTIES)
   const main = area.regions.find(r => r.type === RegionType.MAIN)
 
-  let top = 0
-  let bottom = screenBounds.height
-  let left = 0
-  let right = screenBounds.width
+  let top = areaBounds.y
+  let bottom = areaBounds.y + areaBounds.height
+  let left = areaBounds.x
+  let right = areaBounds.x + areaBounds.width
 
   if (header && header.visible && !header.collapsed) {
     header.bounds = { x: left, y: top, width: right - left, height: HEADER_HEIGHT }
