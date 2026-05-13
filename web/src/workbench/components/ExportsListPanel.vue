@@ -3,11 +3,11 @@ import { computed } from 'vue'
 
 import { useSceneContext } from '@/workbench/sceneContext'
 import { useConnectionContext } from '@/workbench/connectionContext'
-import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
+import { useBContext } from '@/workbench/context/bContext'
 
 const scene = useSceneContext()
 const conn = useConnectionContext()
-const { setStatusMessage } = useStatusMessage()
+const bctx = useBContext()
 
 const isSde = computed(() => scene.workspaceMode.value === 'sde')
 const apiBaseStr = computed(() => conn.apiBase.value)
@@ -18,9 +18,9 @@ const selectedName = computed(() => conn.selectedExportName.value)
 async function onPick(name: string): Promise<void> {
   try {
     await conn.loadExport(name)
-    setStatusMessage(`已加载 ${name}`)
+    bctx.statusMessage.value = `已加载 ${name}`
   } catch (e) {
-    setStatusMessage(String(e instanceof Error ? e.message : e))
+    bctx.statusMessage.value = String(e instanceof Error ? e.message : e)
   }
 }
 </script>

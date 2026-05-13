@@ -11,9 +11,10 @@ import type { BContext, BContextQueries, BContextSettings } from '@/workbench/co
 import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
 import type { BlockRef } from '@/workbench/selectionContext'
 import { ref } from 'vue'
+import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
-import { logCenter } from '@/workbench/logging/LogCenter'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
 /* —— Mock BContext —— */
 
@@ -87,7 +88,7 @@ export function createMockBContext(opts?: {
     dragSensitivity: opts?.settings?.dragSensitivity ?? 0.05,
   }
 
-  return {
+  const mockCtx = {
     scene: {
       scene: mockScene,
       dirty: mockDirty,
@@ -123,7 +124,19 @@ export function createMockBContext(opts?: {
     controlsRef: { enabled: true },
     definition: null,
     layerPreview: null,
+    operators: {
+      exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(mockCtx as any, id, props),
+      invoke: (id: string, props?: Record<string, unknown>, event?: Event) => globalOperators.invoke(mockCtx as any, id, props, event as any),
+      find: (id: string) => globalOperators.find(id),
+      all: () => globalOperators.all(),
+      register: (op: any) => globalOperators.register(op),
+    } as any,
+    eventDispatcher: eventDispatcher as any,
+    log: logCenter as any,
+    wikiConfig: {},
+    statusMessage: ref('') as any,
   }
+  return mockCtx
 }
 
 /* —— TestSpec —— */
@@ -169,7 +182,7 @@ export function runTestSpec(bctx: BContext, spec: TestSpec): TestResult {
   const steps: TestStepResult[] = []
 
   // Reset
-  logCenter.clear()
+  bctx.log.clear()
   bctx.selection.clear()
 
   for (let i = 0; i < spec.steps.length; i++) {
@@ -192,7 +205,7 @@ function executeAction(bctx: BContext, action: TestAction): { passed: boolean; d
 
     case 'activate-operator': {
       if (!action.id) return { passed: false, error: 'missing id' }
-      const op = globalOperators.find(action.id)
+      const op = bctx.operators.find(action.id) as unknown as OperatorType | undefined
       if (!op) return { passed: false, error: `operator not found: ${action.id}` }
       bctx.toolRegistry.activate(action.id, bctx)
       const active = bctx.toolRegistry.activeTool.value
@@ -204,7 +217,7 @@ function executeAction(bctx: BContext, action: TestAction): { passed: boolean; d
     case 'pointerup': {
       const activeId = bctx.toolRegistry.activeTool.value?.id
       if (!activeId) return { passed: false, error: 'no active operator' }
-      const op = globalOperators.find(activeId)
+      const op = bctx.operators.find(activeId) as unknown as OperatorType | undefined
       if (!op) return { passed: false, error: `operator not found: ${activeId}` }
       const event = new PointerEvent(action.action, {
         clientX: action.x ?? 0, clientY: action.y ?? 0,
@@ -240,7 +253,7 @@ function executeAction(bctx: BContext, action: TestAction): { passed: boolean; d
       const event = new KeyboardEvent('keydown', {
         key: action.key, ctrlKey: action.ctrlKey, shiftKey: action.shiftKey,
       })
-      const result = eventDispatcher.dispatch(event)
+      const result = bctx.eventDispatcher.dispatch(event)
       return { passed: true, detail: { break: result.break } }
     }
 
@@ -255,8 +268,8 @@ function executeAction(bctx: BContext, action: TestAction): { passed: boolean; d
     }
 
     case 'assert-log': {
-      const contains = logCenter.contains(action.value as number)
-      return { passed: contains, detail: { mask: action.value, recent: logCenter.recent(action.value as number, 5) } }
+      const contains = bctx.log.contains(action.value as number)
+      return { passed: contains, detail: { mask: action.value, recent: bctx.log.recent(action.value as number, 5) } }
     }
 
     default:

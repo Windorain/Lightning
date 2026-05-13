@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { useBContext } from '@/workbench/context/bContext'
 import { renderTooltipHtml } from './renderTooltipHtml'
 import { copyTextToClipboard } from '@/util/browser'
@@ -83,7 +82,7 @@ function copyAllNbtJson(): void {
 async function saveTooltip(): Promise<void> {
   const block = selectedBlock.value
   if (!block) return
-  globalOperators.exec(bctx, 'OPERATOR_TOOLTIP_EDIT', {
+  bctx.operators.exec('OPERATOR_TOOLTIP_EDIT', {
     text: markdownText.value,
     pos: block.voxel,
   })

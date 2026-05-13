@@ -3,7 +3,6 @@
 import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useBContext } from '@/workbench/context/bContext'
 import { useSnapping } from '@/workbench/composables/useSnapping'
-import { globalOperators } from '@/workbench/operators/operatorRegistry'
 
 const registry = useToolRegistry()
 const { tools, activeTool } = registry
@@ -20,7 +19,7 @@ const { snapEnabled, toggleSnap } = useSnapping()
       class="toolshelf__btn"
       :class="{ 'toolshelf__btn--active': activeTool?.id === tool.id }"
       :title="tool.label + (tool.defaultKey ? ` (${tool.defaultKey})` : '')"
-      @click="globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: tool.id })"
+      @click="bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: tool.id })"
     >
       <span class="toolshelf__icon">{{ tool.icon }}</span>
     </button>

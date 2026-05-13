@@ -17,7 +17,6 @@ import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useBContext } from '@/workbench/context/bContext'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { updateGizmoState, updateCameraState, logError } from '@/workbench/debug/debugLog'
-import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
 import { createDefaultPickHandler } from '@/workbench/handlers/defaultPickHandler'
@@ -97,10 +96,10 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   canvas.addEventListener('pointermove', (e) => { dispatchCanvas(e) }, { capture: true })
   canvas.addEventListener('pointerup', (e) => { if (dispatchCanvas(e)) e.stopImmediatePropagation() }, { capture: true })
   canvas.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
-  document.addEventListener('keydown', (e) => { eventDispatcher.dispatch(e) }, { capture: true })
+  document.addEventListener('keydown', (e) => { bctx.eventDispatcher.dispatch(e) }, { capture: true })
 
   // Register handlers (operator-based)
-  const unregGizmo = eventDispatcher.registerTypedHandler(
+  const unregGizmo = bctx.eventDispatcher.registerTypedHandler(
     createToolGizmoHandler(
       () => toolRegistry.activeTool.value?.id ?? 'OPERATOR_SELECT',
       () => moveGizmo,
@@ -109,10 +108,10 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
       () => store.controlsRef as { enabled: boolean } | null,
     ),
   )
-  const unregTool = eventDispatcher.registerTypedHandler(
+  const unregTool = bctx.eventDispatcher.registerTypedHandler(
     createActiveToolHandler(() => bctx),
   )
-  const unregPick = eventDispatcher.registerHandler(createDefaultPickHandler())
+  const unregPick = bctx.eventDispatcher.registerHandler(createDefaultPickHandler())
 
   ;(store as any)._unregHandlers = [unregGizmo, unregTool, unregPick]
 
@@ -137,7 +136,7 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
 }
 
 function dispatchCanvas(event: Event): boolean {
-  const result = eventDispatcher.dispatch(event)
+  const result = bctx.eventDispatcher.dispatch(event)
   return result.break
 }
 

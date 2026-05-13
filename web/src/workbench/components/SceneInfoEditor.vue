@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { useBContext } from '@/workbench/context/bContext'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { useSceneContext } from '@/workbench/sceneContext'
@@ -43,7 +42,7 @@ function scheduleSync(): void {
       id: id.value, label: label.value, author: author.value,
       gtnhVersion: gtnhVersion.value, structureId: structureId.value,
     })) {
-      globalOperators.exec(bctx, 'OPERATOR_SCENE_META_EDIT', { field: k, value: v || null })
+      bctx.operators.exec('OPERATOR_SCENE_META_EDIT', { field: k, value: v || null })
     }
     void ctx.syncPreview()
   }, 300)

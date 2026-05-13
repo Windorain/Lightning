@@ -4,7 +4,7 @@
  * 聚合所有 Vue provide/inject 上下文为单一对象，
  * 操作符通过 bContext 隐式获取 scene/selection/editHistory/toolRegistry/connection。
  */
-import type { InjectionKey } from 'vue'
+import type { InjectionKey, Ref } from 'vue'
 import { inject, provide } from 'vue'
 import type { SceneContext } from '@/workbench/sceneContext'
 import type { SelectionContext } from '@/workbench/selectionContext'
@@ -54,6 +54,38 @@ export interface BContext {
   queries: BContextQueries
   /** 工具设置（替代 brushState.ts 的模块级 Vue ref） */
   settings: BContextSettings
+  /** 操作符注册表（通过 exec/invoke/find 执行操作符） */
+  operators: {
+    exec(id: string, props?: Record<string, unknown>): void
+    invoke(id: string, props?: Record<string, unknown>, event?: Event): string
+    find(id: string): { id: string; label: string } | undefined
+    all(): { id: string; label: string }[]
+    register(op: any): void
+  }
+  /** 事件分发器 */
+  eventDispatcher: {
+    pushModal(op: unknown, event: PointerEvent): () => void
+    dispatch(event: Event): { break: boolean }
+    registerHandler(handler: unknown): () => void
+    registerTypedHandler(handler: unknown): () => void
+  }
+  /** 日志中心 */
+  log: {
+    readonly entries: { value: Array<{ id: number; time: string; level: number; source: string; message: string; detail?: unknown }> }
+    readonly lastDisplayable: { value: { level: number; source: string; message: string; detail?: unknown } | null }
+    debug(source: string, message: string, detail?: unknown): unknown
+    info(source: string, message: string, detail?: unknown): unknown
+    operator(source: string, message: string, detail?: unknown): unknown
+    warn(source: string, message: string, detail?: unknown): unknown
+    error(source: string, message: string, detail?: unknown): unknown
+    clear(): void
+    contains(levelMask: number): boolean
+    recent(levelMask?: number, count?: number): Array<unknown>
+  }
+  /** Wiki 配置 */
+  wikiConfig: Record<string, any>
+  /** 状态消息 */
+  statusMessage: Ref<string>
   /** Viewport 运行时状态（WorkbenchViewport.onViewportReady 时填充） */
   camera: THREE.Camera | null
   contentGroup: THREE.Group | null

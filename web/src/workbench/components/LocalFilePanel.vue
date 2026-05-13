@@ -2,10 +2,10 @@
 import { ref } from 'vue'
 
 import { useSceneContext } from '@/workbench/sceneContext'
-import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
+import { useBContext } from '@/workbench/context/bContext'
 
 const ctx = useSceneContext()
-const { setStatusMessage } = useStatusMessage()
+const bctx = useBContext()
 const fileInput = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
 const lastErr = ref('')
@@ -32,7 +32,7 @@ async function pickFile(): Promise<void> {
       const handle = handles[0]
       const file = await handle.getFile()
       await ctx.loadSceneFromFile(file, { saveHandle: handle })
-      setStatusMessage(`已打开 ${file.name}`)
+      bctx.statusMessage.value = `已打开 ${file.name}`
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return
       lastErr.value = err instanceof Error ? err.message : String(err)
@@ -53,7 +53,7 @@ async function onFile(e: Event): Promise<void> {
   lastErr.value = ''
   try {
     await ctx.loadSceneFromFile(file)
-    setStatusMessage(`已打开 ${file.name}`)
+    bctx.statusMessage.value = `已打开 ${file.name}`
   } catch (err) {
     lastErr.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -72,7 +72,7 @@ async function onDrop(ev: DragEvent): Promise<void> {
   lastErr.value = ''
   try {
     await ctx.loadSceneFromFile(file)
-    setStatusMessage(`已打开 ${file.name}`)
+    bctx.statusMessage.value = `已打开 ${file.name}`
   } catch (err) {
     lastErr.value = err instanceof Error ? err.message : String(err)
   } finally {

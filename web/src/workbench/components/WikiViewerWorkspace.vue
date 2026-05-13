@@ -3,10 +3,12 @@ import { computed } from 'vue'
 import EmbedViewer from '@/embed/EmbedViewer.vue'
 import PropertiesPanel from './PropertiesPanel.vue'
 import { useSceneContext } from '@/workbench/sceneContext'
-import { wikiConfig } from '@/workbench/wikiConfig'
+import { useBContext } from '@/workbench/context/bContext'
 import type { PreviewConfig } from '@/preview/previewConfig'
 
 const ctx = useSceneContext()
+const bctx = useBContext()
+const wikiConfig = bctx.wikiConfig as any
 
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())

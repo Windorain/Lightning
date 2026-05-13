@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useSelectionContext } from '@/workbench/selectionContext'
 import { useEditHistory } from '@/workbench/editHistoryContext'
-import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { useBContext } from '@/workbench/context/bContext'
 
 const selection = useSelectionContext()
@@ -13,15 +12,15 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 function run(action: string): void {
   switch (action) {
-    case 'inspect': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_SELECT' }); break
-    case 'annotate': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_ANNOTATION' }); break
-    case 'label': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_LABEL' }); break
-    case 'delete': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_DELETE' }); break
-    case 'eyedropper': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_EYEDROPPER' }); break
-    case 'move': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_MOVE' }); break
-    case 'mirror': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_MIRROR' }); break
-    case 'undo': globalOperators.exec(bctx, 'OPERATOR_UNDO'); break
-    case 'redo': globalOperators.exec(bctx, 'OPERATOR_REDO'); break
+    case 'inspect': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_SELECT' }); break
+    case 'annotate': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_ANNOTATION' }); break
+    case 'label': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_LABEL' }); break
+    case 'delete': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_DELETE' }); break
+    case 'eyedropper': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_EYEDROPPER' }); break
+    case 'move': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_MOVE' }); break
+    case 'mirror': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_MIRROR' }); break
+    case 'undo': bctx.operators.exec('OPERATOR_UNDO'); break
+    case 'redo': bctx.operators.exec('OPERATOR_REDO'); break
   }
   emit('close')
 }

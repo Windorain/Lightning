@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 import type { TypedEventHandler } from '@/workbench/events/eventTypes'
 import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
-import { eventDispatcher } from '@/workbench/eventDispatcher'
 import type { MoveGizmo, GizmoAxis } from '@/workbench/tools/gizmos'
 import type { BContext } from '@/workbench/context/bContext'
 import { GizmoDragModal } from '@/workbench/modalOperations/GizmoDragModal'
@@ -71,7 +70,7 @@ export function createToolGizmoHandler(
         controlsRef,
         computeDelta,
       )
-      eventDispatcher.pushModal(modal, pe)
+      bctx.eventDispatcher.pushModal(modal, pe)
 
       return { break: true }
     },

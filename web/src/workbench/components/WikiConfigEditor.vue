@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { wikiConfig } from '@/workbench/wikiConfig'
+import { useBContext } from '@/workbench/context/bContext'
+
+const bctx = useBContext()
+const wikiConfig = bctx.wikiConfig as any
 </script>
 
 <template>

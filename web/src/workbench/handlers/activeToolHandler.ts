@@ -10,7 +10,6 @@
 import type { TypedEventHandler } from '@/workbench/events/eventTypes'
 import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
 import type { BContext } from '@/workbench/context/bContext'
-import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
 export function createActiveToolHandler(
   getBctx: () => BContext | null,
@@ -30,7 +29,7 @@ export function createActiveToolHandler(
       if (event.type === 'wheel') {
         const bctxNow = getBctx()
         if (bctxNow && bctxNow.camera) {
-          globalOperators.invoke(bctxNow, 'OPERATOR_VIEW_ZOOM', undefined, event as any)
+          bctxNow.operators.invoke('OPERATOR_VIEW_ZOOM', undefined, event as any)
         }
         return { break: false }
       }
@@ -39,11 +38,11 @@ export function createActiveToolHandler(
       if (pe.button === 1) {
         if (event.type === 'pointerdown') {
           if (pe.ctrlKey || pe.metaKey) {
-            globalOperators.invoke(bctx, 'OPERATOR_VIEW_ZOOM', undefined, pe)
+            bctx.operators.invoke('OPERATOR_VIEW_ZOOM', undefined, pe)
           } else if (pe.shiftKey) {
-            globalOperators.invoke(bctx, 'OPERATOR_VIEW_PAN', undefined, pe)
+            bctx.operators.invoke('OPERATOR_VIEW_PAN', undefined, pe)
           } else {
-            globalOperators.invoke(bctx, 'OPERATOR_VIEW_ROTATE', undefined, pe)
+            bctx.operators.invoke('OPERATOR_VIEW_ROTATE', undefined, pe)
           }
           return { break: false }
         }
@@ -56,22 +55,16 @@ export function createActiveToolHandler(
       const activeId = bctx.toolRegistry.activeTool.value?.id
       if (!activeId) return { break: false }
 
-      const operator = globalOperators.find(activeId)
+      const operator = bctx.operators.find(activeId)
       if (!operator) return { break: false }
 
       if (event.type === 'pointerdown') {
-        if (operator.invoke) {
-          const result = globalOperators.invoke(bctx, activeId, undefined, pe)
-          if (result === OP_RESULT.RUNNING_MODAL) {
-            modalActive = true
-            return { break: true }
-          }
-          if (result === OP_RESULT.FINISHED || result === OP_RESULT.CANCELLED) {
-            return { break: false }
-          }
+        const result = bctx.operators.invoke(activeId, undefined, pe)
+        if (result === OP_RESULT.RUNNING_MODAL) {
+          modalActive = true
+          return { break: true }
         }
-        if (operator.exec) {
-          globalOperators.exec(bctx, activeId)
+        if (result === OP_RESULT.FINISHED || result === OP_RESULT.CANCELLED) {
           return { break: false }
         }
       }

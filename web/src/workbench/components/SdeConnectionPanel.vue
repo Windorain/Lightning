@@ -2,10 +2,11 @@
 import { computed } from 'vue'
 
 import { useConnectionContext } from '@/workbench/connectionContext'
-import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
+import { useBContext } from '@/workbench/context/bContext'
 
 const conn = useConnectionContext()
-const { statusMessage } = useStatusMessage()
+const bctx = useBContext()
+const statusMessage = bctx.statusMessage
 
 const connectionOk = computed(() => conn.connected.value)
 const connectionMessageText = computed(() => statusMessage.value)

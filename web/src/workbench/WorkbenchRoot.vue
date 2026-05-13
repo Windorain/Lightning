@@ -41,6 +41,10 @@ import { SceneMetaEditOperator, TooltipEditOperator } from '@/workbench/operator
 import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
 import { installLogCenter } from '@/workbench/logging/LogCenter'
 import { installTestRunner } from '@/workbench/testing/testRunner'
+import { eventDispatcher } from '@/workbench/eventDispatcher'
+import { logCenter } from '@/workbench/logging/LogCenter'
+import { wikiConfig } from '@/workbench/wikiConfig'
+import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
@@ -62,12 +66,24 @@ const connection = provideConnectionContext(scene)
 const selection = provideSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
+const statusMessage = useStatusMessage().statusMessage
 const bctx = {
   scene,
   selection,
   editHistory,
   toolRegistry,
   connection,
+  operators: {
+    exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(bctx, id, props),
+    invoke: (id: string, props?: Record<string, unknown>, event?: Event) => globalOperators.invoke(bctx, id, props, event as any),
+    find: (id: string) => globalOperators.find(id),
+    all: () => globalOperators.all(),
+    register: (op: any) => globalOperators.register(op),
+  },
+  eventDispatcher: eventDispatcher as any,
+  log: logCenter as any,
+  wikiConfig: wikiConfig as any,
+  statusMessage: statusMessage as any,
   camera: null,
   contentGroup: null,
   domElement: null,
@@ -81,24 +97,24 @@ provideBContext(bctx)
 useNeiTheme()
 
 // Register all operators
-globalOperators.register(SelectOperator)
-globalOperators.register(MoveOperator)
-globalOperators.register(DeleteOperator)
-globalOperators.register(ReplaceOperator)
-globalOperators.register(FillOperator)
-globalOperators.register(EyedropperOperator)
-globalOperators.register(MirrorOperator)
-globalOperators.register(GenerateOperator)
-globalOperators.register(AnnotationOperator)
-globalOperators.register(LabelOperator)
-globalOperators.register(UndoOperator)
-globalOperators.register(RedoOperator)
-globalOperators.register(ViewRotateOperator)
-globalOperators.register(ViewPanOperator)
-globalOperators.register(ViewZoomOperator)
-globalOperators.register(ToolSetOperator)
-globalOperators.register(SceneMetaEditOperator)
-globalOperators.register(TooltipEditOperator)
+bctx.operators.register(SelectOperator)
+bctx.operators.register(MoveOperator)
+bctx.operators.register(DeleteOperator)
+bctx.operators.register(ReplaceOperator)
+bctx.operators.register(FillOperator)
+bctx.operators.register(EyedropperOperator)
+bctx.operators.register(MirrorOperator)
+bctx.operators.register(GenerateOperator)
+bctx.operators.register(AnnotationOperator)
+bctx.operators.register(LabelOperator)
+bctx.operators.register(UndoOperator)
+bctx.operators.register(RedoOperator)
+bctx.operators.register(ViewRotateOperator)
+bctx.operators.register(ViewPanOperator)
+bctx.operators.register(ViewZoomOperator)
+bctx.operators.register(ToolSetOperator)
+bctx.operators.register(SceneMetaEditOperator)
+bctx.operators.register(TooltipEditOperator)
 
 // Rebuild tool list after all operators registered, then activate default
 toolRegistry.rebuildTools()
@@ -126,11 +142,11 @@ function handleKeydown(event: KeyboardEvent): void {
     event.preventDefault()
     if (binding.toolId) {
       const opId = OPERATOR_KEY_MAP[binding.toolId] ?? `OPERATOR_${binding.toolId.toUpperCase()}`
-      globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: opId })
+      bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: opId })
     } else if (binding.action) {
       switch (binding.action) {
-        case 'undo': globalOperators.exec(bctx, 'OPERATOR_UNDO'); break
-        case 'redo': globalOperators.exec(bctx, 'OPERATOR_REDO'); break
+        case 'undo': bctx.operators.exec('OPERATOR_UNDO'); break
+        case 'redo': bctx.operators.exec('OPERATOR_REDO'); break
         case 'toggle-tool': {
           const prev = toolRegistry.getPreviousEditToolId()
           if (prev) { toolRegistry.activate(prev, bctx) } else { toolRegistry.activate('OPERATOR_SELECT', bctx) }
