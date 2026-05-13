@@ -34,6 +34,7 @@ import { GenerateOperator } from '@/workbench/operators/builtin/generateOperator
 import { AnnotationOperator } from '@/workbench/operators/builtin/annotationOperator'
 import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
 import { MoveGizmoOperator } from '@/workbench/operators/builtin/moveGizmoOperator'
+import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 
 import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
 import { installLogCenter } from '@/workbench/logging/LogCenter'
@@ -89,6 +90,8 @@ globalOperators.register(GenerateOperator)
 globalOperators.register(AnnotationOperator)
 globalOperators.register(LabelOperator)
 globalOperators.register(MoveGizmoOperator)
+globalOperators.register(UndoOperator)
+globalOperators.register(RedoOperator)
 
 // Rebuild tool list after all operators registered, then activate default
 toolRegistry.rebuildTools()
@@ -119,8 +122,8 @@ function handleKeydown(event: KeyboardEvent): void {
       toolRegistry.activate(opId, bctx)
     } else if (binding.action) {
       switch (binding.action) {
-        case 'undo': editHistory.undo(); break
-        case 'redo': editHistory.redo(); break
+        case 'undo': globalOperators.exec(bctx, 'OPERATOR_UNDO'); break
+        case 'redo': globalOperators.exec(bctx, 'OPERATOR_REDO'); break
         case 'toggle-tool': {
           const prev = toolRegistry.getPreviousEditToolId()
           if (prev) { toolRegistry.activate(prev, bctx) } else { toolRegistry.activate('OPERATOR_SELECT', bctx) }
