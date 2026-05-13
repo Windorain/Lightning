@@ -10,7 +10,8 @@ export const generatePanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
 
   poll(ctx: BContext): boolean {
-    return ctx.toolRegistry.activeTool.value?.id === 'OPERATOR_GENERATE'
+    const tool = ctx.toolRegistry.activeTool.value?.id
+    return tool === 'OPERATOR_GENERATE' || tool === 'OPERATOR_REPLACE' || tool === 'OPERATOR_FILL'
   },
 
   layout(ctx: BContext): UILayout {

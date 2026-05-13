@@ -1,3 +1,8 @@
 export { blockInspectorPanel } from './blockInspector'
 export { toolShelfPanel } from './toolShelf'
 export { generatePanel } from './generate'
+export { transformPanel } from './transform'
+export { batchEditPanel } from './batchEdit'
+export { annotationPanel } from './annotation'
+export { labelPanel } from './label'
+export { sceneInfoPanel } from './sceneInfo'

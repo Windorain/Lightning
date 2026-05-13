@@ -47,9 +47,10 @@ import { SpaceType, RegionType, type bScreen } from '@/workbench/ux/types/screen
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOf, regionAt, relayout } from '@/workbench/ux/layout'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
-import { blockInspectorPanel } from '@/workbench/ux/panels/blockInspector'
-import { toolShelfPanel } from '@/workbench/ux/panels/toolShelf'
-import { generatePanel } from '@/workbench/ux/panels/generate'
+import {
+  blockInspectorPanel, toolShelfPanel, generatePanel,
+  transformPanel, batchEditPanel, annotationPanel, labelPanel, sceneInfoPanel,
+} from '@/workbench/ux/panels'
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
@@ -138,7 +139,10 @@ const defaultScreen: bScreen = {
 const viewportArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
 viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels.push(toolShelfPanel)
 const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
-propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(blockInspectorPanel, generatePanel)
+propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
+  blockInspectorPanel, generatePanel, transformPanel,
+  batchEditPanel, annotationPanel, labelPanel, sceneInfoPanel,
+)
 
 // Reactive panel queries — poll() and layout() are tracked by Vue reactivity
 const activeToolshelfPanels = computed(() =>
