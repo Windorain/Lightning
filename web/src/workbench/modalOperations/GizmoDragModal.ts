@@ -96,15 +96,48 @@ export class GizmoDragModal implements ModalOperation {
       if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
         const frame = this.bctx.queries.getCurrentFrame()
         if (frame) {
-          for (const initPos of this.initialPositions) {
+          // Snapshot current positions for undo
+          const oldPositions = this.initialPositions.map(initPos => {
             const block = findBlock(frame.blocks as any[], initPos)
-            if (block) {
-              block.pos.x = initPos.x + delta.x
-              block.pos.y = initPos.y + delta.y
-              block.pos.z = initPos.z + delta.z
-            }
-          }
-          this.bctx.scene.markDirty()
+            return block ? { x: block.pos.x, y: block.pos.y, z: block.pos.z } : null
+          })
+          const newPositions = this.initialPositions.map(initPos => ({
+            x: initPos.x + delta.x,
+            y: initPos.y + delta.y,
+            z: initPos.z + delta.z,
+          }))
+
+          // Push undo command (push() internally calls execute() to apply the move)
+          const label = `移动 (${delta.x}, ${delta.y}, ${delta.z})`
+          this.bctx.editHistory.push({
+            id: 'gizmo_' + Math.random().toString(36).slice(2, 10),
+            label,
+            timestamp: Date.now(),
+            execute: () => {
+              for (let i = 0; i < this.initialPositions.length; i++) {
+                const initPos = this.initialPositions[i]
+                const block = findBlock(frame.blocks as any[], initPos)
+                if (block) {
+                  block.pos.x = newPositions[i].x
+                  block.pos.y = newPositions[i].y
+                  block.pos.z = newPositions[i].z
+                }
+              }
+              this.bctx.scene.markDirty()
+            },
+            undo: () => {
+              for (let i = 0; i < this.initialPositions.length; i++) {
+                const initPos = this.initialPositions[i]
+                const block = findBlock(frame.blocks as any[], initPos)
+                if (block && oldPositions[i]) {
+                  block.pos.x = oldPositions[i]!.x
+                  block.pos.y = oldPositions[i]!.y
+                  block.pos.z = oldPositions[i]!.z
+                }
+              }
+              this.bctx.scene.markDirty()
+            },
+          })
         }
       }
       eventDispatcher.commitModal()
