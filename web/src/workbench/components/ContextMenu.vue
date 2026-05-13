@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { useSelectionContext } from '@/workbench/selectionContext'
-import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useEditHistory } from '@/workbench/editHistoryContext'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { useBContext } from '@/workbench/context/bContext'
 
 const selection = useSelectionContext()
-const toolRegistry = useToolRegistry()
 const history = useEditHistory()
 const bctx = useBContext()
 
@@ -15,13 +13,13 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 function run(action: string): void {
   switch (action) {
-    case 'inspect': toolRegistry.activate('select'); break
-    case 'annotate': toolRegistry.activate('annotation'); break
-    case 'label': toolRegistry.activate('label'); break
-    case 'delete': toolRegistry.activate('delete'); break
-    case 'eyedropper': toolRegistry.activate('eyedropper'); break
-    case 'move': toolRegistry.activate('move'); break
-    case 'mirror': toolRegistry.activate('mirror'); break
+    case 'inspect': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_SELECT' }); break
+    case 'annotate': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_ANNOTATION' }); break
+    case 'label': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_LABEL' }); break
+    case 'delete': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_DELETE' }); break
+    case 'eyedropper': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_EYEDROPPER' }); break
+    case 'move': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_MOVE' }); break
+    case 'mirror': globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: 'OPERATOR_MIRROR' }); break
     case 'undo': globalOperators.exec(bctx, 'OPERATOR_UNDO'); break
     case 'redo': globalOperators.exec(bctx, 'OPERATOR_REDO'); break
   }

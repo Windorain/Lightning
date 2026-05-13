@@ -36,6 +36,7 @@ import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
 import { MoveGizmoOperator } from '@/workbench/operators/builtin/moveGizmoOperator'
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
+import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
 
 import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
 import { installLogCenter } from '@/workbench/logging/LogCenter'
@@ -96,6 +97,7 @@ globalOperators.register(RedoOperator)
 globalOperators.register(ViewRotateOperator)
 globalOperators.register(ViewPanOperator)
 globalOperators.register(ViewZoomOperator)
+globalOperators.register(ToolSetOperator)
 
 // Rebuild tool list after all operators registered, then activate default
 toolRegistry.rebuildTools()
@@ -123,7 +125,7 @@ function handleKeydown(event: KeyboardEvent): void {
     event.preventDefault()
     if (binding.toolId) {
       const opId = OPERATOR_KEY_MAP[binding.toolId] ?? `OPERATOR_${binding.toolId.toUpperCase()}`
-      toolRegistry.activate(opId, bctx)
+      globalOperators.exec(bctx, 'OPERATOR_TOOL_SET', { toolId: opId })
     } else if (binding.action) {
       switch (binding.action) {
         case 'undo': globalOperators.exec(bctx, 'OPERATOR_UNDO'); break
