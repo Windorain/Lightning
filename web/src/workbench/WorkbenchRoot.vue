@@ -33,7 +33,6 @@ import { MirrorOperator } from '@/workbench/operators/builtin/mirrorOperator'
 import { GenerateOperator } from '@/workbench/operators/builtin/generateOperator'
 import { AnnotationOperator } from '@/workbench/operators/builtin/annotationOperator'
 import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
-import { MoveGizmoOperator } from '@/workbench/operators/builtin/moveGizmoOperator'
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
@@ -92,7 +91,6 @@ globalOperators.register(MirrorOperator)
 globalOperators.register(GenerateOperator)
 globalOperators.register(AnnotationOperator)
 globalOperators.register(LabelOperator)
-globalOperators.register(MoveGizmoOperator)
 globalOperators.register(UndoOperator)
 globalOperators.register(RedoOperator)
 globalOperators.register(ViewRotateOperator)
