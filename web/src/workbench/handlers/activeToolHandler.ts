@@ -12,9 +12,6 @@ import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
 import type { BContext } from '@/workbench/context/bContext'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
-import { eventDispatcher } from '@/workbench/eventDispatcher'
-import { ModalOperatorWrapper } from '@/workbench/operators/modalOperatorWrapper'
-
 export function createActiveToolHandler(
   getBctx: () => BContext | null,
 ): TypedEventHandler {
