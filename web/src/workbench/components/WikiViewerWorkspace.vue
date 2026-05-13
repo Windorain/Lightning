@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import EmbedViewer from '@/embed/EmbedViewer.vue'
-import PropertiesPanel from './PropertiesPanel.vue'
+import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import { useSceneContext } from '@/workbench/sceneContext'
 import { useBContext } from '@/workbench/context/bContext'
+import { sceneInfoPanel, wikiConfigPanel, blockStatsPanel } from '@/workbench/ux/panels'
 import type { PreviewConfig } from '@/preview/previewConfig'
 
 const ctx = useSceneContext()
 const bctx = useBContext()
 const wikiConfig = bctx.wikiConfig as any
+
+const wikiPanels = [sceneInfoPanel, wikiConfigPanel, blockStatsPanel]
+
+const activeWikiPanels = computed(() =>
+  wikiPanels
+    .filter(p => p.poll(bctx))
+    .map(p => ({ id: p.id, layout: p.layout(bctx) }))
+)
 
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
@@ -48,7 +57,13 @@ const mergedConfig = computed<PreviewConfig | null>(() => {
       </div>
     </div>
     <div class="ww-panel">
-      <PropertiesPanel editors="wiki" />
+      <UIRenderer
+        v-for="panel in activeWikiPanels"
+        :key="panel.id"
+        :layout="panel.layout"
+        :rna="bctx.rna"
+        :owner="wikiConfig"
+      />
     </div>
   </div>
 </template>

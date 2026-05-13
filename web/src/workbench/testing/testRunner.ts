@@ -10,7 +10,7 @@
 import type { BContext, BContextQueries, BContextSettings } from '@/workbench/context/bContext'
 import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
 import type { BlockRef } from '@/workbench/selectionContext'
-import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA } from '@/workbench/ux/rna'
+import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
 import { ref } from 'vue'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
@@ -24,6 +24,7 @@ function createMockRNA() {
   rna.register(blockRNA)
   rna.register(toolSettingsRNA)
   rna.register(sceneMetaRNA)
+  rna.register(wikiConfigRNA)
   return rna
 }
 

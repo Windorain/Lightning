@@ -44,7 +44,7 @@ import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
 import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
 import { SpaceType, RegionType, type bScreen } from '@/workbench/ux/types/screen'
-import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA } from '@/workbench/ux/rna'
+import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOf, regionAt, relayout } from '@/workbench/ux/layout'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import {
@@ -105,6 +105,7 @@ const rna = createRNARegistry()
 rna.register(blockRNA)
 rna.register(toolSettingsRNA)
 rna.register(sceneMetaRNA)
+rna.register(wikiConfigRNA)
 
 // Build default screen layout (single VIEW_3D area + PROPERTIES area)
 const defaultScreen: bScreen = {

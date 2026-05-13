@@ -1,0 +1,58 @@
+import type { RNAStruct } from '../types'
+
+export const wikiConfigRNA: RNAStruct = {
+  name: 'WikiConfig',
+  description: 'Wiki 视口配置',
+  properties: [
+    {
+      name: 'viewWidth',
+      type: 'number',
+      label: '视口宽度',
+      description: 'Wiki 预览视口宽度',
+      default: 600,
+      min: 200, max: 2000,
+      get(owner: any) { return owner.viewWidth },
+      set(owner: any, val: unknown) { owner.viewWidth = val as number },
+    },
+    {
+      name: 'viewHeight',
+      type: 'number',
+      label: '视口高度',
+      description: 'Wiki 预览视口高度',
+      default: 400,
+      min: 150, max: 1500,
+      get(owner: any) { return owner.viewHeight },
+      set(owner: any, val: unknown) { owner.viewHeight = val as number },
+    },
+    {
+      name: 'cameraYaw',
+      type: 'number',
+      label: '偏航角 (°)',
+      description: '初始摄像头偏航角',
+      default: 45,
+      min: 0, max: 360,
+      get(owner: any) { return owner.cameraYaw },
+      set(owner: any, val: unknown) { owner.cameraYaw = val as number },
+    },
+    {
+      name: 'cameraElevation',
+      type: 'number',
+      label: '俯仰角 (°)',
+      description: '初始摄像头俯仰角',
+      default: 30,
+      min: 5, max: 85,
+      get(owner: any) { return owner.cameraElevation },
+      set(owner: any, val: unknown) { owner.cameraElevation = val as number },
+    },
+    {
+      name: 'cameraZoom',
+      type: 'number',
+      label: '缩放',
+      description: '初始缩放 (1=默认)',
+      default: 1,
+      min: 0.05, max: 50,
+      get(owner: any) { return owner.cameraZoom },
+      set(owner: any, val: unknown) { owner.cameraZoom = val as number },
+    },
+  ],
+}
