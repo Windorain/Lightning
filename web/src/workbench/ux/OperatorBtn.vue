@@ -5,6 +5,7 @@ const props = defineProps<{
   opId: string
   label: string
   icon?: string
+  title?: string
   operatorProps?: Record<string, unknown>
 }>()
 
@@ -19,6 +20,7 @@ function onClick() {
   <button
     class="ux-operator-btn"
     :data-op-id="opId"
+    :title="title ?? label"
     @click="onClick"
   >
     <span v-if="icon" class="ux-icon">{{ icon }}</span>

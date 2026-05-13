@@ -61,6 +61,7 @@ export interface UIOperator {
   id: string
   label: string
   icon?: string
+  title?: string
   props?: Record<string, unknown>
 }
 

@@ -302,12 +302,14 @@ if (import.meta.env.DEV) {
       <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
     </template>
     <template #tool-shelf>
-      <UIRenderer
-        v-for="panel in activeToolshelfPanels"
-        :key="panel.id"
-        :layout="panel.layout"
-        :rna="bctx.rna"
-      />
+      <div class="wb-toolshelf">
+        <UIRenderer
+          v-for="panel in activeToolshelfPanels"
+          :key="panel.id"
+          :layout="panel.layout"
+          :rna="bctx.rna"
+        />
+      </div>
     </template>
     <template #viewport>
       <ViewportHost />
@@ -357,6 +359,27 @@ if (import.meta.env.DEV) {
 </template>
 
 <style>
+.wb-toolshelf {
+  position: absolute; top: 4px; left: 4px; z-index: 100;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 4px;
+  background: var(--nei-dropdown-bg);
+  border: 1px solid var(--nei-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.wb-toolshelf .ux-operator-btn {
+  width: 32px; height: 32px; padding: 0;
+  font-size: 16px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--nei-label);
+}
+.wb-toolshelf .ux-operator-btn:hover {
+  background: var(--nei-panel-hover);
+}
+
 .wb-standalone {
   display: flex;
   flex-direction: column;

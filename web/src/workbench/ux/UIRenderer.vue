@@ -26,7 +26,7 @@ function renderItem(item: UILayoutItem, prefix: string, index: number): VNode {
       return h(RNAWidget, { descriptor: desc, label: item.label, owner: props.owner, 'data-layout-id': layoutId })
     }
     case 'operator':
-      return h(OperatorBtn, { opId: item.id, label: item.label, icon: item.icon, operatorProps: item.props, 'data-layout-id': layoutId })
+      return h(OperatorBtn, { opId: item.id, label: item.label, icon: item.icon, title: item.title, operatorProps: item.props, 'data-layout-id': layoutId })
     case 'label':
       return h('span', { class: 'ux-label', 'data-layout-id': layoutId }, item.text)
     case 'separator':

@@ -12,11 +12,12 @@ export const toolShelfPanel: PanelDeclaration = {
   poll(): boolean { return true },
 
   layout(ctx: BContext): UILayout {
-    const tools = ctx.operators.all()
+    const tools = [...ctx.toolRegistry.tools.value.values()]
     const items: UILayoutItem[] = tools.map(t => ({
       kind: 'operator' as const,
       id: 'OPERATOR_TOOL_SET',
-      label: t.label,
+      label: t.icon,
+      title: t.label,
       props: { toolId: t.id },
     }))
     return { kind: 'column', align: false, items }
