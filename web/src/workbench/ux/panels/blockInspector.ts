@@ -13,6 +13,7 @@ export const blockInspectorPanel: PanelDeclaration = {
     return ctx.selection.items.value.size === 1
   },
 
+  owner(ctx: BContext): unknown { return [...ctx.selection.items.value][0] },
   layout(_ctx: BContext): UILayout {
     return {
       kind: 'column', align: false, items: [

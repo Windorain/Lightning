@@ -12,7 +12,7 @@ export const annotationPanel: PanelDeclaration = {
   poll(ctx: BContext): boolean {
     return ctx.toolRegistry.activeTool.value?.id === 'OPERATOR_ANNOTATION'
   },
-
+  owner(ctx: BContext): unknown { return [...ctx.selection.items.value][0] },
   layout(_ctx: BContext): UILayout {
     return {
       kind: 'column', align: false, items: [

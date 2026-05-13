@@ -1,7 +1,7 @@
 import type { BContext } from '@/workbench/context/bContext'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
-import type { UILayout } from '../types/layout'
+import type { UILayout, UILayoutItem } from '../types/layout'
 
 export const blockStatsPanel: PanelDeclaration = {
   id: 'block-stats-panel',
@@ -14,7 +14,7 @@ export const blockStatsPanel: PanelDeclaration = {
   layout(ctx: BContext): UILayout {
     const doc = ctx.scene.scene.value as Record<string, any> | null
     const palette = doc?.block_palette as Record<string, any> | undefined
-    const items: any[] = []
+    const items: UILayoutItem[] = []
     if (palette) {
       for (const [id, entry] of Object.entries(palette)) {
         const label = (entry as any)?.localized_name ?? id

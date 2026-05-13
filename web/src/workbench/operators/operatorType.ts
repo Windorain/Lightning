@@ -9,7 +9,7 @@
  * 另有 poll（上下文检查）和 cancel（外部中断清理）。
  */
 import type { BContext } from '@/workbench/context/bContext'
-import type { RnaProperty } from '@/workbench/rna/rnaTypes'
+import type { PropertyDescriptor } from '@/workbench/ux/rna/types'
 
 /** 操作符属性容器（对标 Blender operator properties） */
 export type OperatorProperties = Record<string, unknown>
@@ -28,8 +28,8 @@ export interface OperatorType {
   id: string
   label: string
   description?: string
-  /** RNA 属性定义（对标 Blender operator RNA properties） */
-  properties?: RnaProperty[]
+  /** RNA 属性定义（对标 Blender operator RNA properties），用于未来自动 UI 生成 */
+  properties?: PropertyDescriptor[]
   /** 是否自动包裹 undo */
   flagUndo?: boolean
   /** 无交互执行 */

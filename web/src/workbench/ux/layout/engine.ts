@@ -121,12 +121,12 @@ export function regionAt(
 }
 
 /** Get the computed bounds for a widget or panel by its id (layoutId or panel id). */
-export function boundsOf(_ctx: BContext, id: string): Rect | null {
+export function boundsOf(ctx: BContext, id: string): Rect | null {
   const cached = widgetCache.get(id)
   if (cached) return { ...cached.bounds }
 
   // Fallback: search region panels
-  for (const area of _ctx.screen?.areas ?? []) {
+  for (const area of ctx.screen?.areas ?? []) {
     for (const region of area.regions) {
       for (const panel of region.panels) {
         if (panel.id === id) {

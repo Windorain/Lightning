@@ -10,7 +10,7 @@ export const toolShelfPanel: PanelDeclaration = {
   regionType: RegionType.TOOLSHELF,
 
   poll(): boolean { return true },
-
+  owner(ctx: BContext): unknown { return ctx.settings },
   layout(ctx: BContext): UILayout {
     const tools = [...ctx.toolRegistry.tools.value.values()]
     const items: UILayoutItem[] = tools.map(t => ({

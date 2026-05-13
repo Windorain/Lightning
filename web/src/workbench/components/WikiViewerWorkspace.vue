@@ -16,7 +16,7 @@ const wikiPanels = [sceneInfoPanel, wikiConfigPanel, blockStatsPanel]
 const activeWikiPanels = computed(() =>
   wikiPanels
     .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, layout: p.layout(bctx) }))
+    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
 function parseHex6(s: string): number {
@@ -62,7 +62,7 @@ const mergedConfig = computed<PreviewConfig | null>(() => {
         :key="panel.id"
         :layout="panel.layout"
         :rna="bctx.rna"
-        :owner="wikiConfig"
+        :owner="panel.owner"
       />
     </div>
   </div>

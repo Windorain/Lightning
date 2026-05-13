@@ -55,9 +55,6 @@ import {
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
 
-// RNA — 加载属性描述符
-import '@/workbench/rna/plainSceneRna'
-
 // Document format handlers — 注册到分发中心
 import { formatDispatcher } from '@/workbench/context/documentHandler'
 import { V2PlainHandler } from '@/workbench/context/handlers/v2PlainHandler'
@@ -149,13 +146,13 @@ propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
 const activeToolshelfPanels = computed(() =>
   viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels
     .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, layout: p.layout(bctx) }))
+    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
 const activePropertiesPanels = computed(() =>
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels
     .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, layout: p.layout(bctx) }))
+    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
 // Compute initial layout
@@ -309,6 +306,7 @@ if (import.meta.env.DEV) {
           :key="panel.id"
           :layout="panel.layout"
           :rna="bctx.rna"
+          :owner="panel.owner"
         />
       </div>
     </template>
@@ -321,6 +319,7 @@ if (import.meta.env.DEV) {
         :key="panel.id"
         :layout="panel.layout"
         :rna="bctx.rna"
+        :owner="panel.owner"
       />
     </template>
     <template #statusbar>

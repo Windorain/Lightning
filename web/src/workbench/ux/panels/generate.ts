@@ -13,7 +13,7 @@ export const generatePanel: PanelDeclaration = {
     const tool = ctx.toolRegistry.activeTool.value?.id
     return tool === 'OPERATOR_GENERATE' || tool === 'OPERATOR_REPLACE' || tool === 'OPERATOR_FILL'
   },
-
+  owner(ctx: BContext): unknown { return ctx.settings },
   layout(ctx: BContext): UILayout {
     const doc = ctx.scene.scene.value as Record<string, any> | null
     const palette: string[] = doc?.block_palette ? Object.keys(doc.block_palette) : []

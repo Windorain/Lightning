@@ -12,7 +12,7 @@ export const transformPanel: PanelDeclaration = {
   poll(ctx: BContext): boolean {
     return ctx.toolRegistry.activeTool.value?.id === 'OPERATOR_MOVE'
   },
-
+  owner(ctx: BContext): unknown { return [...ctx.selection.items.value][0] },
   layout(ctx: BContext): UILayout {
     const sel = [...ctx.selection.items.value]
     if (sel.length === 0) {

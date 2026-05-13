@@ -10,7 +10,7 @@ export const wikiConfigPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
 
   poll(): boolean { return true },
-
+  owner(ctx: BContext): unknown { return ctx.wikiConfig },
   layout(_ctx: BContext): UILayout {
     return {
       kind: 'column', align: false, items: [

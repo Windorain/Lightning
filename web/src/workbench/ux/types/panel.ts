@@ -10,4 +10,6 @@ export interface PanelDeclaration {
   regionType: RegionType
   poll(ctx: BContext): boolean
   layout(ctx: BContext): UILayout
+  /** The owner object passed to RNAWidget for property get/set. null = no owner. */
+  owner?(ctx: BContext): unknown
 }
