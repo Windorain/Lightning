@@ -6,63 +6,69 @@
  * 后续每个事件通过 wrapper 转发到 operator.modal()。
  */
 import type { ModalOperation, ModalKeymap } from '@/workbench/eventDispatcher'
-import type { OperatorType, OperatorProperties, OpResult } from './operatorType'
-import type { BContext } from '@/workbench/context/bContext'
-import { OP_RESULT } from './operatorType'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
+import type { BContext } from '@/workbench/context/bContext'
+import type { OperatorType, OperatorProperties } from './operatorType'
+import { OP_RESULT } from './operatorType'
 
 export class ModalOperatorWrapper implements ModalOperation {
   id: string
   private op: OperatorType
   private bctx: BContext
   private props: OperatorProperties
+  private undoSnapshot: unknown = null
 
   constructor(op: OperatorType, bctx: BContext, props: OperatorProperties) {
-    this.id = op.id
     this.op = op
     this.bctx = bctx
     this.props = props
+    this.id = op.id
+  }
+
+  setUndoSnapshot(snapshot: unknown): void {
+    this.undoSnapshot = snapshot
   }
 
   onEnter(_event: PointerEvent): ModalKeymap | null {
-    // 操作符的模态键盘映射由 operatorType 的 properties 描述
     return null
   }
 
   handleEvent(event: Event): { break: boolean } {
-    if (!this.op.modal) return { break: false }
+    const result = this.op.modal!(this.bctx, this.props, event)
 
-    const result: OpResult = this.op.modal(this.bctx, this.props, event)
-
-    switch (result) {
-      case OP_RESULT.FINISHED: {
-        // 模态完成：提交操作
-        if (this.op.flagUndo) {
-          // 快照已在 invoke 时保存，此处直接 commit
-        }
-        eventDispatcher.commitModal()
-        return { break: true }
+    if (result === OP_RESULT.FINISHED) {
+      if (this.op.flagUndo && this.undoSnapshot !== null) {
+        const snapshotAfter = JSON.parse(JSON.stringify(this.bctx.scene.scene.value))
+        this.bctx.editHistory.push({
+          id: 'op_' + Math.random().toString(36).slice(2, 10),
+          label: this.op.label,
+          timestamp: Date.now(),
+          execute: () => { this.bctx.scene.scene.value = snapshotAfter; this.bctx.scene.markDirty() },
+          undo: () => { this.bctx.scene.scene.value = this.undoSnapshot as any; this.bctx.scene.markDirty() },
+        })
+        this.undoSnapshot = null
       }
-      case OP_RESULT.CANCELLED: {
-        // 模态取消
-        this.op.cancel?.(this.bctx, this.props)
-        eventDispatcher.cancelModal()
-        return { break: true }
-      }
-      case OP_RESULT.RUNNING_MODAL: {
-        return { break: true }
-      }
-      case OP_RESULT.PASS_THROUGH: {
-        return { break: false }
-      }
-      default:
-        return { break: true }
+      eventDispatcher.commitModal()
+      return { break: true }
     }
+
+    if (result === OP_RESULT.CANCELLED) {
+      this.op.cancel?.(this.bctx, this.props)
+      eventDispatcher.cancelModal()
+      return { break: true }
+    }
+
+    if (result === OP_RESULT.RUNNING_MODAL) {
+      return { break: true }
+    }
+
+    return { break: false }
   }
 
   onExit(cancelled: boolean): void {
     if (cancelled) {
       this.op.cancel?.(this.bctx, this.props)
     }
+    this.undoSnapshot = null
   }
 }

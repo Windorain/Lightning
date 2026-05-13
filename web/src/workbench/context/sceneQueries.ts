@@ -47,6 +47,10 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       }))
     },
 
+    getDocument(): Record<string, any> | null {
+      return bctx.scene.scene.value as Record<string, any> | null
+    },
+
     projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null {
       const { camera, domElement } = bctx
       if (!camera || !domElement) return null

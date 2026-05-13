@@ -75,16 +75,23 @@ export class OperatorRegistry {
     const resolvedProps: OperatorProperties = props ?? {}
 
     if (op.invoke) {
+      // Take before-snapshot for flagUndo operators
+      const snapshot = op.flagUndo
+        ? JSON.parse(JSON.stringify(bctx.scene.scene.value))
+        : null
+
       const result = op.invoke(bctx, resolvedProps, event)
+
       if (result === OP_RESULT.RUNNING_MODAL) {
         const wrapper = new ModalOperatorWrapper(op, bctx, resolvedProps)
+        if (snapshot !== null) {
+          wrapper.setUndoSnapshot(snapshot)
+        }
         if (event instanceof PointerEvent) {
           eventDispatcher.pushModal(wrapper, event)
         }
-      } else if (result === OP_RESULT.FINISHED && op.flagUndo && op.exec) {
-        // invoke 返回 FINISHED 但无 modal → 作为一次性操作 undo
-        const snapshot = JSON.parse(JSON.stringify(bctx.scene.scene.value))
-        op.exec(bctx, resolvedProps)
+      } else if (result === OP_RESULT.FINISHED && snapshot !== null) {
+        // One-shot invoke: push undo with before/after snapshots
         const snapshotAfter = JSON.parse(JSON.stringify(bctx.scene.scene.value))
         bctx.editHistory.push({
           id: 'op_' + Math.random().toString(36).slice(2, 10),

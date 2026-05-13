@@ -63,6 +63,9 @@ export function createMockBContext(opts?: {
         block_state_id: b.block_state_id,
       }))
     },
+    getDocument(): Record<string, any> | null {
+      return mockScene.value
+    },
     projectBlock(_pos) { return null },
     getGizmoAnchor(_axis) { return null },
     axisAdd(origin, axis, delta) {

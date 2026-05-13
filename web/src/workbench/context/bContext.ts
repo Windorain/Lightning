@@ -24,6 +24,8 @@ export interface BContextQueries {
   getCurrentFrame(): V2WorldFrame | null
   /** 获取当前帧的 BlockRef 快照列表 */
   getFrameBlocks(): BlockRef[]
+  /** 获取完整的场景文档（用于 annotations、labels 等顶层集合的访问） */
+  getDocument(): Record<string, any> | null
   /** 方块世界坐标 → 屏幕坐标（供测试反算点击位置） */
   projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null
   /** Gizmo 箭头在屏幕上的锚点坐标 */
