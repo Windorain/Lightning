@@ -17,7 +17,7 @@ export const LabelOperator: OperatorType = {
     const picked = bctx.queries.pickVoxel(event)
     if (!picked) return OP_RESULT.CANCELLED
 
-    const doc = bctx.scene.scene.value as any
+    const doc = bctx.queries.getDocument()
     if (!doc) return OP_RESULT.CANCELLED
 
     if (!doc.labels) doc.labels = []

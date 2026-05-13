@@ -35,6 +35,7 @@ import { AnnotationOperator } from '@/workbench/operators/builtin/annotationOper
 import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
 import { MoveGizmoOperator } from '@/workbench/operators/builtin/moveGizmoOperator'
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
+import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 
 import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
 import { installLogCenter } from '@/workbench/logging/LogCenter'
@@ -92,6 +93,9 @@ globalOperators.register(LabelOperator)
 globalOperators.register(MoveGizmoOperator)
 globalOperators.register(UndoOperator)
 globalOperators.register(RedoOperator)
+globalOperators.register(ViewRotateOperator)
+globalOperators.register(ViewPanOperator)
+globalOperators.register(ViewZoomOperator)
 
 // Rebuild tool list after all operators registered, then activate default
 toolRegistry.rebuildTools()

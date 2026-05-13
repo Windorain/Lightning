@@ -57,7 +57,7 @@ export const AnnotationOperator: OperatorType = {
         return OP_RESULT.FINISHED
       }
 
-      const doc = bctx.scene.scene.value as any
+      const doc = bctx.queries.getDocument()
       if (!doc) {
         state._annotStart = null
         state._annotEnd = null

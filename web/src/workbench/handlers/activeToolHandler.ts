@@ -27,8 +27,34 @@ export function createActiveToolHandler(
       const bctx = getBctx()
       if (!bctx) return { break: false }
 
-      // MMB/RMB pass through to OrbitControls
-      if ((event as PointerEvent).button !== 0) return { break: false }
+      const pe = event as PointerEvent
+
+      // Scroll wheel: zoom
+      if (event.type === 'wheel') {
+        const bctxNow = getBctx()
+        if (bctxNow && bctxNow.camera) {
+          globalOperators.invoke(bctxNow, 'OPERATOR_VIEW_ZOOM', undefined, event as any)
+        }
+        return { break: false }
+      }
+
+      // MMB: viewport navigation operators
+      if (pe.button === 1) {
+        if (event.type === 'pointerdown') {
+          if (pe.ctrlKey || pe.metaKey) {
+            globalOperators.invoke(bctx, 'OPERATOR_VIEW_ZOOM', undefined, pe)
+          } else if (pe.shiftKey) {
+            globalOperators.invoke(bctx, 'OPERATOR_VIEW_PAN', undefined, pe)
+          } else {
+            globalOperators.invoke(bctx, 'OPERATOR_VIEW_ROTATE', undefined, pe)
+          }
+          return { break: false }
+        }
+        return { break: false }
+      }
+
+      // RMB pass through
+      if (pe.button !== 0) return { break: false }
 
       const activeId = bctx.toolRegistry.activeTool.value?.id
       if (!activeId) return { break: false }
@@ -36,26 +62,17 @@ export function createActiveToolHandler(
       const operator = globalOperators.find(activeId)
       if (!operator) return { break: false }
 
-      const pe = event as PointerEvent
-
       if (event.type === 'pointerdown') {
-        // Start interaction via invoke
         if (operator.invoke) {
-          const props = operator.initModalState?.() ?? {} as Record<string, unknown>
-          const result = operator.invoke(bctx, props, pe)
+          const result = globalOperators.invoke(bctx, activeId, undefined, pe)
           if (result === OP_RESULT.RUNNING_MODAL) {
-            // Push modal wrapper onto event dispatcher stack with same props
-            const wrapper = new ModalOperatorWrapper(operator, bctx, props)
-            eventDispatcher.pushModal(wrapper, pe)
             modalActive = true
             return { break: true }
           }
-          // FINISHED / CANCELLED: operation completed, let event pass through to OrbitControls
           if (result === OP_RESULT.FINISHED || result === OP_RESULT.CANCELLED) {
             return { break: false }
           }
         }
-        // exec-only operator: invoke → direct exec with undo wrapping
         if (operator.exec) {
           globalOperators.exec(bctx, activeId)
           return { break: false }
