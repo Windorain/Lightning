@@ -223,20 +223,33 @@ export function createMockBContext(opts?: {
   return mockCtx as BContext
 }
 
-/* —— TestSpec (backward compat) —— */
+/* —— TestSpec (semantic actions, event-driven) —— */
 
-export interface TestAction {
-  action: 'activate-operator' | 'pointerdown' | 'pointermove' | 'pointerup' | 'keydown' | 'assert-selection' | 'assert-log' | 'sleep'
-  id?: string
-  x?: number
-  y?: number
-  z?: number
-  key?: string
-  ctrlKey?: boolean
-  shiftKey?: boolean
-  value?: unknown
-  timeout?: number
+/** 工具名 → 键盘绑定（与 harness.ts TOOL_KEY_BINDING 同源） */
+const TOOL_KEY_BINDING: Record<string, { key: string; ctrl?: boolean; shift?: boolean }> = {
+  select:    { key: 'b' },
+  move:      { key: 'g' },
+  delete:    { key: 'x' },
+  replace:   { key: 'r' },
+  fill:      { key: 'f' },
+  eyedropper:{ key: 'e' },
+  mirror:    { key: 'm', ctrl: true },
+  generate:  { key: 'a', shift: true },
 }
+
+/** 语义动作类型 — 所有动作走 L0 事件链，不直接调用 operator API */
+export type TestAction =
+  | { action: 'activate-tool'; tool: string }
+  | { action: 'click-at'; x: number; y: number; ctrl?: boolean; shift?: boolean }
+  | { action: 'click-block'; x: number; y: number; z: number }
+  | { action: 'set-brush'; brush: string }
+  | { action: 'drag-world'; axis: 'x' | 'y' | 'z'; amount: number; steps?: number }
+  | { action: 'keydown'; key: string; ctrl?: boolean; shift?: boolean }
+  | { action: 'assert-block-count'; n: number }
+  | { action: 'assert-selection-size'; n: number }
+  | { action: 'assert-operator-active'; id: string }
+  | { action: 'assert-block-at'; x: number; y: number; z: number; id?: string }
+  | { action: 'assert-block-not-at'; x: number; y: number; z: number }
 
 export interface TestSpec {
   name: string
@@ -259,7 +272,7 @@ export interface TestResult {
   duration: number
 }
 
-/* —— Runner (backward compat) —— */
+/* —— Runner —— */
 
 export function runTestSpec(bctx: BContext, spec: TestSpec): TestResult {
   const start = performance.now()
@@ -285,47 +298,127 @@ export function runTestSpec(bctx: BContext, spec: TestSpec): TestResult {
 
 function executeAction(bctx: BContext, action: TestAction): { passed: boolean; detail?: unknown; error?: string } {
   switch (action.action) {
-    case 'activate-operator': {
-      if (!action.id) return { passed: false, error: 'missing id' }
-      bctx.toolRegistry.activate(action.id, bctx)
-      return { passed: bctx.toolRegistry.activeTool.value?.id === action.id, detail: { active: bctx.toolRegistry.activeTool.value?.id } }
+    /* —— Input (all through L0 events) —— */
+
+    case 'activate-tool': {
+      const binding = TOOL_KEY_BINDING[action.tool]
+      if (!binding) return { passed: false, error: `unknown tool: ${action.tool}` }
+      const event = new KeyboardEvent('keydown', {
+        key: binding.key, ctrlKey: binding.ctrl ?? false, shiftKey: binding.shift ?? false,
+      })
+      bctx.eventDispatcher.dispatch(event)
+      const active = bctx.toolRegistry.activeTool.value?.id ?? null
+      const expectedOpId = `OPERATOR_${action.tool.toUpperCase()}`
+      return { passed: active === expectedOpId, detail: { active, expected: expectedOpId } }
     }
 
-    case 'pointerdown':
-    case 'pointermove':
-    case 'pointerup': {
-      const event = new PointerEvent(action.action, {
-        clientX: action.x ?? 0, clientY: action.y ?? 0,
-        ctrlKey: action.ctrlKey, shiftKey: action.shiftKey, button: 0,
+    case 'click-at': {
+      const down = new PointerEvent('pointerdown', {
+        clientX: action.x, clientY: action.y,
+        ctrlKey: action.ctrl ?? false, shiftKey: action.shift ?? false, button: 0,
       })
-      const result = bctx.eventDispatcher.dispatch(event)
-      return { passed: true, detail: { break: result.break } }
+      const up = new PointerEvent('pointerup', {
+        clientX: action.x, clientY: action.y,
+        ctrlKey: action.ctrl ?? false, shiftKey: action.shift ?? false, button: 0,
+      })
+      bctx.eventDispatcher.dispatch(down)
+      bctx.eventDispatcher.dispatch(up)
+      return { passed: true, detail: { x: action.x, y: action.y } }
+    }
+
+    case 'click-block': {
+      // First activate select tool
+      const selBinding = TOOL_KEY_BINDING.select
+      bctx.eventDispatcher.dispatch(new KeyboardEvent('keydown', { key: selBinding.key }))
+      // Then project and click
+      const p = bctx.queries.projectBlock({ x: action.x, y: action.y, z: action.z })
+      if (!p) return { passed: false, error: `block at (${action.x},${action.y},${action.z}) not visible` }
+      bctx.eventDispatcher.dispatch(new PointerEvent('pointerdown', {
+        clientX: p.x, clientY: p.y, button: 0,
+      }))
+      bctx.eventDispatcher.dispatch(new PointerEvent('pointerup', {
+        clientX: p.x, clientY: p.y, button: 0,
+      }))
+      return { passed: true, detail: { projectedTo: p } }
+    }
+
+    case 'set-brush': {
+      const desc = bctx.rna.resolve('toolsettings.replaceBrush')
+      if (!desc) return { passed: false, error: 'RNA path toolsettings.replaceBrush not resolved' }
+      desc.set(bctx.settings, action.brush)
+      return { passed: true, detail: { brush: action.brush } }
+    }
+
+    case 'drag-world': {
+      const gizmo = bctx.queries.getGizmoAnchor(action.axis)
+      if (!gizmo) return { passed: false, error: `gizmo anchor null for axis ${action.axis}` }
+      const k = bctx.settings.dragSensitivity
+      const steps = action.steps ?? 5
+      let screenDx = 0, screenDy = 0
+      if (action.axis === 'x') screenDx = action.amount / k
+      else if (action.axis === 'y') screenDy = -action.amount / k
+      else screenDx = -action.amount / k
+
+      // pointer down
+      bctx.eventDispatcher.dispatch(new PointerEvent('pointerdown', {
+        clientX: gizmo.x, clientY: gizmo.y, button: 0,
+      }))
+      // N moves
+      for (let i = 1; i < steps; i++) {
+        const t = i / steps
+        bctx.eventDispatcher.dispatch(new PointerEvent('pointermove', {
+          clientX: gizmo.x + screenDx * t, clientY: gizmo.y + screenDy * t, button: 0,
+        }))
+      }
+      // pointer up at final position
+      bctx.eventDispatcher.dispatch(new PointerEvent('pointerup', {
+        clientX: gizmo.x + screenDx, clientY: gizmo.y + screenDy, button: 0,
+      }))
+      return { passed: true, detail: { axis: action.axis, amount: action.amount } }
     }
 
     case 'keydown': {
       const event = new KeyboardEvent('keydown', {
-        key: action.key, ctrlKey: action.ctrlKey, shiftKey: action.shiftKey,
+        key: action.key, ctrlKey: action.ctrl ?? false, shiftKey: action.shift ?? false,
       })
-      const result = bctx.eventDispatcher.dispatch(event)
-      return { passed: true, detail: { break: result.break } }
+      bctx.eventDispatcher.dispatch(event)
+      return { passed: true, detail: { key: action.key } }
     }
 
-    case 'assert-selection': {
-      const size = bctx.selection.items.value.size
-      const expected = (action.value as number) ?? 0
-      return {
-        passed: size === expected,
-        detail: { expected, actual: size, items: [...bctx.selection.items.value].slice(0, 10) },
-        error: size !== expected ? `selection: expected ${expected}, got ${size}` : undefined,
-      }
-    }
+    /* —— Assertions —— */
 
-    case 'assert-log': {
-      return { passed: bctx.log.contains(action.value as number), detail: { mask: action.value, recent: bctx.log.recent(action.value as number, 5) } }
+    case 'assert-block-count': {
+      const actual = bctx.queries.getFrameBlocks().length
+      return { passed: actual === action.n, detail: { expected: action.n, actual },
+        error: actual !== action.n ? `block count: expected ${action.n}, got ${actual}` : undefined }
     }
-
-    default:
-      return { passed: false, error: `unknown action: ${(action as any).action}` }
+    case 'assert-selection-size': {
+      const actual = bctx.selection.items.value.size
+      return { passed: actual === action.n, detail: { expected: action.n, actual },
+        error: actual !== action.n ? `selection size: expected ${action.n}, got ${actual}` : undefined }
+    }
+    case 'assert-operator-active': {
+      const actual = bctx.toolRegistry.activeTool.value?.id ?? null
+      return { passed: actual === action.id, detail: { expected: action.id, actual },
+        error: actual !== action.id ? `operator: expected ${action.id}, got ${actual}` : undefined }
+    }
+    case 'assert-block-at': {
+      const blocks = bctx.queries.getFrameBlocks()
+      const found = blocks.find(b =>
+        b.pos.x === action.x && b.pos.y === action.y && b.pos.z === action.z &&
+        (action.id === undefined || b.block_state_id === action.id),
+      )
+      return { passed: !!found, detail: { pos: { x: action.x, y: action.y, z: action.z }, id: action.id },
+        error: found ? undefined : `block not found at (${action.x},${action.y},${action.z})` }
+    }
+    case 'assert-block-not-at': {
+      const blocks = bctx.queries.getFrameBlocks()
+      const found = blocks.some(b =>
+        b.pos.x === action.x && b.pos.y === action.y && b.pos.z === action.z,
+      )
+      return { passed: !found, detail: { pos: { x: action.x, y: action.y, z: action.z } },
+        error: found ? `block should not exist at (${action.x},${action.y},${action.z})` : undefined }
+    }
   }
 }
 

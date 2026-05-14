@@ -1,13 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createTestHarness } from '../harness'
 
-/* —— helper —— */
-function selectBlock(h: ReturnType<typeof createTestHarness>, pos: { x: number; y: number; z: number }) {
-  h.keyDown('b')
-  const p = h.ctx.queries.projectBlock(pos)
-  h.click(p!.x, p!.y)
-}
-
 describe('select operator', () => {
   it('click at projected block position selects that block', () => {
     const h = createTestHarness({
@@ -17,10 +10,10 @@ describe('select operator', () => {
       ],
     })
 
-    h.keyDown('b')
+    h.activateTool('select')
     h.assertOperatorActive('OPERATOR_SELECT')
 
-    selectBlock(h, { x: 3, y: 0, z: 5 })
+    h.clickBlock({ x: 3, y: 0, z: 5 })
     h.assertSelectionSize(1)
     h.assertSelectionContains({ x: 3, y: 0, z: 5 })
   })
@@ -30,7 +23,7 @@ describe('select operator', () => {
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    selectBlock(h, { x: 3, y: 0, z: 5 })
+    h.clickBlock({ x: 3, y: 0, z: 5 })
     h.assertSelectionSize(1)
 
     h.click(0, 0)
@@ -45,13 +38,10 @@ describe('select operator', () => {
       ],
     })
 
-    h.keyDown('b')
-    selectBlock(h, { x: 3, y: 0, z: 5 })
+    h.clickBlock({ x: 3, y: 0, z: 5 })
     h.assertSelectionSize(1)
 
-    // Ctrl+click second block
-    const p2 = h.ctx.queries.projectBlock({ x: 0, y: 0, z: 0 })
-    h.click(p2!.x, p2!.y, { ctrl: true })
+    h.clickBlock({ x: 0, y: 0, z: 0 }, { ctrl: true })
     h.assertSelectionSize(2)
     h.assertSelectionContains({ x: 3, y: 0, z: 5 })
     h.assertSelectionContains({ x: 0, y: 0, z: 0 })
@@ -66,15 +56,13 @@ describe('select operator', () => {
       ],
     })
 
-    h.keyDown('b')
-
     for (const pos of [
       { x: -1, y: 2, z: 3 },
       { x: 5, y: -2, z: 0 },
       { x: 0, y: 0, z: 10 },
     ]) {
-      h.ctx.selection.clear()
-      selectBlock(h, pos)
+      h.click(0, 0) // clear selection by clicking empty
+      h.clickBlock(pos)
       h.assertSelectionSize(1)
       h.assertSelectionContains(pos)
     }
@@ -98,10 +86,10 @@ describe('delete operator', () => {
       ],
     })
 
-    selectBlock(h, { x: 3, y: 0, z: 5 })
+    h.clickBlock({ x: 3, y: 0, z: 5 })
     h.assertBlockCount(2)
 
-    h.keyDown('x')
+    h.activateTool('delete')
     h.assertOperatorActive('OPERATOR_DELETE')
     h.click(400, 300)
 
@@ -116,7 +104,7 @@ describe('delete operator', () => {
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    h.keyDown('x')
+    h.activateTool('delete')
     h.click(400, 300)
     h.assertBlockCount(1)
     h.assertSelectionSize(0)
@@ -124,15 +112,15 @@ describe('delete operator', () => {
 })
 
 describe('move operator — select path', () => {
-  it('keyDown g activates move, click selects block', () => {
+  it('g key activates move, clickBlock selects block', () => {
     const h = createTestHarness({
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    h.keyDown('g')
+    h.activateTool('move')
     h.assertOperatorActive('OPERATOR_MOVE')
 
-    selectBlock(h, { x: 3, y: 0, z: 5 })
+    h.clickBlock({ x: 3, y: 0, z: 5 })
     h.assertSelectionSize(1)
     h.assertBlockAt({ x: 3, y: 0, z: 5 })
   })
@@ -142,8 +130,8 @@ describe('move operator — select path', () => {
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    h.keyDown('g')
-    selectBlock(h, { x: 3, y: 0, z: 5 })
+    h.activateTool('move')
+    h.clickBlock({ x: 3, y: 0, z: 5 })
     h.assertSelectionSize(1)
 
     h.click(0, 0)
@@ -157,11 +145,10 @@ describe('move operator — gizmo drag', () => {
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    h.keyDown('b')
-    selectBlock(h, { x: 3, y: 0, z: 5 })
+    h.clickBlock({ x: 3, y: 0, z: 5 })
     h.assertSelectionSize(1)
 
-    h.keyDown('g')
+    h.activateTool('move')
     h.assertOperatorActive('OPERATOR_MOVE')
     h.dragWorld('y', 1)
 
@@ -174,10 +161,8 @@ describe('move operator — gizmo drag', () => {
       blocks: [{ x: 3, y: 5, z: 5, id: 'stone' }],
     })
 
-    h.keyDown('b')
-    selectBlock(h, { x: 3, y: 5, z: 5 })
-
-    h.keyDown('g')
+    h.clickBlock({ x: 3, y: 5, z: 5 })
+    h.activateTool('move')
     h.dragWorld('y', -1)
 
     h.assertBlockAt({ x: 3, y: 4, z: 5 }, 'stone')
@@ -188,10 +173,8 @@ describe('move operator — gizmo drag', () => {
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    h.keyDown('b')
-    selectBlock(h, { x: 3, y: 0, z: 5 })
-
-    h.keyDown('g')
+    h.clickBlock({ x: 3, y: 0, z: 5 })
+    h.activateTool('move')
     h.dragWorld('x', 1)
 
     h.assertBlockAt({ x: 4, y: 0, z: 5 }, 'stone')
@@ -202,10 +185,8 @@ describe('move operator — gizmo drag', () => {
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    h.keyDown('b')
-    selectBlock(h, { x: 3, y: 0, z: 5 })
-
-    h.keyDown('g')
+    h.clickBlock({ x: 3, y: 0, z: 5 })
+    h.activateTool('move')
     h.dragWorld('z', 1)
 
     h.assertBlockAt({ x: 3, y: 0, z: 6 }, 'stone')
@@ -216,7 +197,7 @@ describe('move operator — gizmo drag', () => {
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    h.keyDown('g')
+    h.activateTool('move')
     const anchor = h.ctx.queries.getGizmoAnchor('y')
     h.assert(anchor === null, 'gizmo anchor should be null when nothing selected')
   })
@@ -227,24 +208,20 @@ describe('generate operator', () => {
     const h = createTestHarness({
       blocks: [{ x: 2, y: 0, z: 2, id: 'seed' }],
     })
-    h.setRNAValue('toolsettings.replaceBrush', 'stone', h.ctx.settings)
+    h.setBrush('stone')
 
-    h.keyDown('a', { shift: true })
+    h.activateTool('generate')
     h.assertOperatorActive('OPERATOR_GENERATE')
 
-    // click with generate tool active → places brush block
-    const p = h.ctx.queries.projectBlock({ x: 2, y: 0, z: 2 })
-    h.click(p!.x, p!.y)
+    h.clickBlock({ x: 2, y: 0, z: 2 })
     h.assertBlockCount(2)
   })
 
   it('generate places block when clicking empty space', () => {
-    const h = createTestHarness({
-      blocks: [],
-    })
-    h.setRNAValue('toolsettings.replaceBrush', 'stone', h.ctx.settings)
+    const h = createTestHarness({ blocks: [] })
+    h.setBrush('stone')
 
-    h.keyDown('a', { shift: true })
+    h.activateTool('generate')
     h.assertOperatorActive('OPERATOR_GENERATE')
 
     h.click(400, 300)
@@ -258,20 +235,17 @@ describe('generate operator', () => {
         { x: 2, y: 0, z: 2, id: 'seed-b' },
       ],
     })
-    h.setRNAValue('toolsettings.replaceBrush', 'placed', h.ctx.settings)
+    h.setBrush('placed')
 
-    // Generate at seed-a position
-    h.keyDown('a', { shift: true })
-    const p = h.ctx.queries.projectBlock({ x: 0, y: 0, z: 0 })
-    h.click(p!.x, p!.y)
+    h.activateTool('generate')
+    h.clickBlock({ x: 0, y: 0, z: 0 })
     h.assertBlockCount(3)
 
-    // Select at that position
-    selectBlock(h, { x: 0, y: 0, z: 0 })
+    h.activateTool('select')
+    h.clickBlock({ x: 0, y: 0, z: 0 })
     h.assertSelectionSize(1)
 
-    // Delete — removes all blocks at position (0,0,0)
-    h.keyDown('x')
+    h.activateTool('delete')
     h.click(400, 300)
     h.assertBlockCount(1)
     h.assertBlockAt({ x: 2, y: 0, z: 2 }, 'seed-b')
@@ -288,10 +262,8 @@ describe('multi-selection', () => {
       ],
     })
 
-    selectBlock(h, { x: 0, y: 0, z: 5 })
-
-    const p = h.ctx.queries.projectBlock({ x: 5, y: 0, z: 5 })
-    h.click(p!.x, p!.y, { ctrl: true })
+    h.clickBlock({ x: 0, y: 0, z: 5 })
+    h.clickBlock({ x: 5, y: 0, z: 5 }, { ctrl: true })
 
     h.assertSelectionSize(2)
     h.assertSelectionContains({ x: 0, y: 0, z: 5 })
@@ -306,9 +278,8 @@ describe('multi-selection', () => {
       ],
     })
 
-    selectBlock(h, { x: 0, y: 0, z: 0 })
-    const p = h.ctx.queries.projectBlock({ x: 5, y: 0, z: 0 })
-    h.click(p!.x, p!.y, { ctrl: true })
+    h.clickBlock({ x: 0, y: 0, z: 0 })
+    h.clickBlock({ x: 5, y: 0, z: 0 }, { ctrl: true })
     h.assertSelectionSize(2)
 
     h.click(799, 599)
@@ -325,7 +296,7 @@ describe('edge cases', () => {
       ],
     })
 
-    selectBlock(h, { x: 0, y: 0, z: 0 })
+    h.clickBlock({ x: 0, y: 0, z: 0 })
     h.assertSelectionSize(1)
     h.assertSelectionContains({ x: 0, y: 0, z: 0 })
   })
@@ -346,16 +317,16 @@ describe('keyboard tool switching', () => {
       blocks: [{ x: 0, y: 0, z: 0, id: 'x' }],
     })
 
-    h.keyDown('b')
+    h.activateTool('select')
     h.assertOperatorActive('OPERATOR_SELECT')
 
-    h.keyDown('g')
+    h.activateTool('move')
     h.assertOperatorActive('OPERATOR_MOVE')
 
-    h.keyDown('x')
+    h.activateTool('delete')
     h.assertOperatorActive('OPERATOR_DELETE')
 
-    h.keyDown('b')
+    h.activateTool('select')
     h.assertOperatorActive('OPERATOR_SELECT')
   })
 })
@@ -371,9 +342,9 @@ describe('event injection safety', () => {
     expect(() => h.pointerUp(110, 100)).not.toThrow()
     expect(() => h.click(100, 100)).not.toThrow()
     expect(() => h.drag(100, 100, 200, 200, { steps: 3 })).not.toThrow()
-    expect(() => h.keyDown('b')).not.toThrow()
-    expect(() => h.keyDown('g')).not.toThrow()
-    expect(() => h.keyDown('x')).not.toThrow()
+    expect(() => h.activateTool('select')).not.toThrow()
+    expect(() => h.activateTool('move')).not.toThrow()
+    expect(() => h.activateTool('delete')).not.toThrow()
   })
 
   it('assert throws on false condition', () => {
@@ -403,5 +374,65 @@ describe('RNA registry', () => {
     const desc = h.assertRNAPath('block.id')
     h.assert(desc.type === 'string', 'block.id type should be string')
     h.assert(desc.label === '方块标识', 'block.id label should be 方块标识')
+  })
+})
+
+describe('semantic L2 actions', () => {
+  it('activateTool dispatches key event through full chain', () => {
+    const h = createTestHarness({
+      blocks: [{ x: 0, y: 0, z: 0, id: 'x' }],
+    })
+
+    h.activateTool('select')
+    h.assertOperatorActive('OPERATOR_SELECT')
+
+    h.activateTool('generate')
+    h.assertOperatorActive('OPERATOR_GENERATE')
+  })
+
+  it('setBrush sets brush via RNA path', () => {
+    const h = createTestHarness({ blocks: [] })
+    h.setBrush('oak')
+    h.assert(h.ctx.settings.replaceBrush === 'oak', 'replaceBrush should be oak')
+  })
+
+  it('clickBlock selects block at world position', () => {
+    const h = createTestHarness({
+      blocks: [
+        { x: 5, y: 0, z: 0, id: 'target' },
+        { x: 0, y: 0, z: 5, id: 'other' },
+      ],
+    })
+
+    h.clickBlock({ x: 5, y: 0, z: 0 })
+    h.assertSelectionSize(1)
+    h.assertSelectionContains({ x: 5, y: 0, z: 0 })
+  })
+})
+
+describe('batch collect mode', () => {
+  it('collect returns all check results without throwing', () => {
+    const h = createTestHarness({
+      blocks: [
+        { x: 0, y: 0, z: 0, id: 'a' },
+        { x: 1, y: 0, z: 0, id: 'b' },
+      ],
+    })
+
+    h.clickBlock({ x: 0, y: 0, z: 0 })
+    h.assertSelectionSize(1)
+
+    // Batch collect — none throw, collects all results
+    const results = h.collect()
+      .check('selection size is 2', () => h.ctx.selection.items.value.size === 2, 2, () => h.ctx.selection.items.value.size)
+      .check('block count is 2', () => h.ctx.queries.getFrameBlocks().length === 2, 2, () => h.ctx.queries.getFrameBlocks().length)
+      .check('selection size is 1', () => h.ctx.selection.items.value.size === 1, 1, () => h.ctx.selection.items.value.size)
+      .done()
+
+    // First two fail, third passes
+    expect(results).toHaveLength(3)
+    expect(results[0].pass).toBe(false) // selection size expected 2, got 1
+    expect(results[1].pass).toBe(true)  // block count is 2
+    expect(results[2].pass).toBe(true)  // selection size is 1
   })
 })

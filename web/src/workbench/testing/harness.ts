@@ -3,10 +3,12 @@
  *
  * L0: pointerDown/Move/Up, keyDown（纯事件注入）
  * L1: click, drag（组合事件）
- * L2: clickOperator, setRNAValue（语义交互）
+ * L2: clickBlock, setBrush, activateTool, clickOperator, setRNAValue（语义交互）
+ * L3: dragWorld（世界坐标交互）
  *
  * 事件走完整 dispatch 链：eventDispatcher → KEYMAP/OPERATOR handler → operator.invoke/modal
  * 只通过事件注入和 bctx 读数验证，不直接调用 operator API。
+ * L2 方法内部只用 L0/L1 方法，不绕过事件链。
  */
 import type { BContext } from '@/workbench/context/bContext'
 import type { TestSpec, TestResult } from './testRunner'
@@ -17,6 +19,7 @@ import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
 import { DEFAULT_KEYMAP, matchBinding } from '@/workbench/keymap'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { logCenter } from '@/workbench/logging/LogCenter'
+import type { CheckResult } from '@/workbench/logging/LogCenter'
 import { MockGizmo, createTestGizmoHandler } from './gizmoMock'
 import { screenDeltaToWorld } from './screenDeltaToWorld'
 
@@ -49,9 +52,20 @@ const TOOL_KEY_MAP: Record<string, string> = {
   mirror: 'OPERATOR_MIRROR', generate: 'OPERATOR_GENERATE',
 }
 
+/** 工具名 → 键盘绑定（从 DEFAULT_KEYMAP 提取，供 activateTool 使用） */
+const TOOL_KEY_BINDING: Record<string, { key: string; ctrl?: boolean; shift?: boolean }> = {
+  select:    { key: 'b' },
+  move:      { key: 'g' },
+  delete:    { key: 'x' },
+  replace:   { key: 'r' },
+  fill:      { key: 'f' },
+  eyedropper:{ key: 'e' },
+  mirror:    { key: 'm', ctrl: true },
+  generate:  { key: 'a', shift: true },
+}
+
 /* —— Event handler cookbook —— */
 
-// 可变 bctx 引用，避免多个 harness 实例间 handler 闭包捕获旧值
 let _bctxRef: BContext | null = null
 let _mockGizmo: MockGizmo | null = null
 let _handlersBooted = false
@@ -62,18 +76,15 @@ function bootEventHandlers(bctx: BContext): void {
   if (_handlersBooted) return
   _handlersBooted = true
 
-  // Register all builtin operators (idempotent)
   for (const op of BUILTIN_OPERATORS) {
     if (!globalOperators.find(op.id)) globalOperators.register(op)
   }
 
-  // GIZMO: pointerdown on gizmo handle → enter drag modal
   _mockGizmo = new MockGizmo()
   eventDispatcher.registerTypedHandler(
     createTestGizmoHandler(() => _mockGizmo, () => _bctxRef),
   )
 
-  // KEYMAP: keyboard → tool activation
   eventDispatcher.registerTypedHandler({
     type: HANDLER_TYPE.KEYMAP,
     handle(event: Event): { break: boolean } {
@@ -92,8 +103,27 @@ function bootEventHandlers(bctx: BContext): void {
     },
   })
 
-  // OPERATOR: pointer events → active operator
   eventDispatcher.registerTypedHandler(createActiveToolHandler(() => _bctxRef))
+}
+
+/* —— Batch assertion collector —— */
+
+export interface CheckCollector {
+  check(name: string, fn: () => boolean, expected: unknown, actual?: () => unknown): this
+  done(): CheckResult[]
+}
+
+function createCollector(ctx: BContext): CheckCollector {
+  const results: CheckResult[] = []
+  return {
+    check(name, fn, expected, actualFn) {
+      let pass = false, actual: unknown = undefined
+      try { pass = fn(); actual = actualFn?.() ?? actual } catch (e) { actual = String(e) }
+      results.push({ pass, expected, actual: actual ?? (pass ? expected : 'failed') })
+      return this
+    },
+    done() { return results },
+  }
 }
 
 /* —— Harness —— */
@@ -112,15 +142,23 @@ export interface TestHarness {
   click(x: number, y: number, opts?: { ctrl?: boolean; shift?: boolean }): void
   drag(fromX: number, fromY: number, toX: number, toY: number, opts?: { steps?: number; ctrl?: boolean; shift?: boolean }): void
 
-  // L2: Semantic interaction (resolve by layout then interact)
+  // L2: Semantic interaction
+  /** 激活工具（通过键盘事件，走完整 KEYMAP → ToolSetOperator 链路） */
+  activateTool(name: string): void
+  /** 设置当前刷子（通过 RNA 路径） */
+  setBrush(brushId: string): void
+  /** 点击世界坐标处的方块（自动 projectBlock + 激活 select） */
+  clickBlock(pos: { x: number; y: number; z: number }, opts?: { ctrl?: boolean; shift?: boolean }): void
+  /** 点击操作符按钮（通过布局查询） */
   clickOperator(opId: string, opts?: { index?: number }): void
+  /** 设置 RNA 属性值 */
   setRNAValue(rnaPath: string, value: unknown, owner?: unknown): void
 
   // L3: World-coordinate interaction
   /** 沿 gizmo 轴拖拽世界距离（自动计算屏幕像素） */
   dragWorld(axis: 'x' | 'y' | 'z', amount: number, opts?: { steps?: number }): void
 
-  // Assertions
+  // Assertions (throw on fail)
   assert(condition: boolean, message?: string): void
   assertSelectionSize(n: number): void
   assertSelectionContains(pos: { x: number; y: number; z: number }): void
@@ -130,6 +168,10 @@ export interface TestHarness {
   assertOperatorActive(id: string): void
   assertProjectBlockNull(pos: { x: number; y: number; z: number }): void
   assertRNAPath(path: string): any
+
+  // Batch check (collect, don't throw)
+  /** 收集模式：返回 CheckCollector，所有 check 不抛异常，done() 返回结果列表 */
+  collect(): CheckCollector
 
   // Spec runner
   run(spec: TestSpec): TestResult
@@ -141,12 +183,15 @@ export function createTestHarness(
   const ctx = createMockBContext(opts)
   bootEventHandlers(ctx)
 
-  // Activate default tool
+  // Activate default tool via event chain (not direct activate)
+  // We use the keyDown path for this
   ctx.toolRegistry.activate('OPERATOR_SELECT', ctx)
 
-  return {
+  const harness: TestHarness = {
     ctx,
     log: logCenter,
+
+    /* —— L0 —— */
 
     pointerDown(x, y, o = {}) {
       const event = new PointerEvent('pointerdown', {
@@ -174,6 +219,8 @@ export function createTestHarness(
       ctx.eventDispatcher.dispatch(event)
     },
 
+    /* —— L1 —— */
+
     click(x, y, o = {}) {
       this.pointerDown(x, y, o)
       this.pointerUp(x, y, o)
@@ -194,6 +241,24 @@ export function createTestHarness(
       this.pointerUp(toX, toY, { ctrl, shift })
     },
 
+    /* —— L2 —— */
+
+    activateTool(name) {
+      const binding = TOOL_KEY_BINDING[name]
+      if (!binding) throw new Error(`activateTool: unknown tool "${name}"`)
+      this.keyDown(binding.key, { ctrl: binding.ctrl, shift: binding.shift })
+    },
+
+    setBrush(brushId) {
+      this.setRNAValue('toolsettings.replaceBrush', brushId, ctx.settings)
+    },
+
+    clickBlock(pos, o = {}) {
+      const p = ctx.queries.projectBlock(pos)
+      if (!p) throw new Error(`clickBlock: block at (${pos.x},${pos.y},${pos.z}) not visible on screen`)
+      this.click(p.x, p.y, { ctrl: o.ctrl, shift: o.shift })
+    },
+
     clickOperator(opId, o = {}) {
       const rects = ctx.ui.boundsOfByOperator(opId)
       const idx = o.index ?? 0
@@ -210,25 +275,22 @@ export function createTestHarness(
       desc.set(owner ?? {}, value)
     },
 
+    /* —— L3 —— */
+
     dragWorld(axis, amount, o = {}) {
       const gizmo = ctx.queries.getGizmoAnchor(axis)
       if (!gizmo) throw new Error(`dragWorld: gizmo anchor null for axis ${axis} — nothing selected?`)
-      // 根据 screenDeltaToWorld 的 Blender 符号约定反解屏幕偏移:
-      //   screenDeltaToWorld(dx, 0, 'x', k) = dx*k   →  令 amount = dx*k  得 dx = amount/k
-      //   screenDeltaToWorld(0, dy, 'y', k) = -dy*k  →  令 amount = -dy*k 得 dy = -amount/k
-      //   screenDeltaToWorld(dx, 0, 'z', k) = -dx*k  →  令 amount = -dx*k 得 dx = -amount/k
       const k = ctx.settings.dragSensitivity
       const steps = o.steps ?? 5
       let screenDx = 0, screenDy = 0
       if (axis === 'x') screenDx = amount / k
       else if (axis === 'y') screenDy = -amount / k
       else screenDx = -amount / k
-      // 用共享函数验证反算正确性（浮点精确，不会触发）
       this.assert(screenDeltaToWorld(screenDx, screenDy, axis, k) === amount)
       this.drag(gizmo.x, gizmo.y, gizmo.x + screenDx, gizmo.y + screenDy, { steps })
     },
 
-    // Assertions
+    /* —— Assertions —— */
 
     assert(condition, message = 'assertion failed') {
       if (!condition) throw new Error(message)
@@ -284,6 +346,16 @@ export function createTestHarness(
       return desc
     },
 
+    /* —— Batch —— */
+
+    collect() {
+      return createCollector(ctx)
+    },
+
+    /* —— Spec runner —— */
+
     run(spec) { return runTestSpec(ctx, spec) },
   }
+
+  return harness
 }
