@@ -1,6 +1,5 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
-import type { V2BlockInstance } from '@/render/data/sceneDocumentV2'
 
 export const GenerateOperator: OperatorType = {
   id: 'OPERATOR_GENERATE',
@@ -23,11 +22,11 @@ export const GenerateOperator: OperatorType = {
     const frame = bctx.queries.getCurrentFrame()
     if (!frame) return OP_RESULT.CANCELLED
 
-    const newBlock: V2BlockInstance = {
+    const newBlock = {
       pos: { x: picked.pos.x, y: picked.pos.y, z: picked.pos.z },
       block_state_id: brush,
     }
-    frame.blocks.push(newBlock)
+    ;(frame as any).blocks.push(newBlock)
     bctx.scene.markDirty()
     return OP_RESULT.FINISHED
   },

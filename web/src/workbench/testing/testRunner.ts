@@ -7,7 +7,7 @@
  */
 
 import type { BContext, BContextQueries, BContextSettings } from '@/workbench/context/bContext'
-import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
+import type { Frame } from '@/render/schema/types'
 import type { BlockRef } from '@/workbench/selectionContext'
 import { documentLooksPreviewable, previewConfigFromDocument } from '@/preview/previewFromDocument'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
@@ -50,7 +50,7 @@ function blockAABB(pos: { x: number; y: number; z: number }) {
 function createMockQueries(
   camera: CameraParams,
   getBlocks: () => Array<{ pos: { x: number; y: number; z: number }; block_state_id: string }>,
-  getFrame: () => V2WorldFrame | null,
+  getFrame: () => Frame | null,
   getDoc: () => Record<string, any> | null,
   getSelectionCenter: () => { x: number; y: number; z: number } | null,
 ): BContextQueries {
@@ -71,7 +71,7 @@ function createMockQueries(
       return best
     },
 
-    getCurrentFrame(): V2WorldFrame | null { return getFrame() },
+    getCurrentFrame(): Frame | null { return getFrame() },
 
     getFrameBlocks(): BlockRef[] {
       return getBlocks().map(b => ({ pos: { ...b.pos }, block_state_id: b.block_state_id }))
@@ -189,11 +189,11 @@ export function createMockBContext(opts?: {
   }))
 
   {
-    const frame: V2WorldFrame = {
+    const frame = {
       label: 'Frame 0', index: 0,
       blocks: blockEntries,
       entities: [],
-    }
+    } as Frame
     // Build block palette from block IDs + explicit palette option
     const palette: Record<string, { name: string }> = { ...opts?.blockPalette }
     for (const b of opts?.blocks ?? []) {

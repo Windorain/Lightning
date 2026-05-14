@@ -25,17 +25,9 @@ function base64PngToDataUrl(b64: string): string {
  */
 export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDataUrlItem[] {
   if (!document || typeof document !== 'object') return []
-  const root = document as { textureBlobs?: unknown; materials?: { entries?: Array<{ key: string; texture_png?: string }> } }
+  const root = document as { textureBlobs?: unknown }
 
-  // V2 materials.entries（编辑态文档）
-  const v2Entries = root.materials?.entries
-  if (Array.isArray(v2Entries) && v2Entries.length > 0) {
-    return v2Entries
-      .filter(e => typeof e.texture_png === 'string' && e.texture_png.length > 0)
-      .map(e => ({ materialId: e.key, dataUrl: base64PngToDataUrl(e.texture_png!) }))
-  }
-
-  // Packed textureBlobs（发布态文档）
+  // Packed textureBlobs
   const blobs = root.textureBlobs
   if (!Array.isArray(blobs)) return []
 
@@ -81,9 +73,9 @@ function forEachPaletteSlot(
     }
     return
   }
-  const d = document as StructureData
-  if (!isBakedStructureData(d) || !Array.isArray(d.materialPalette)) return
-  const pal = d.materialPalette
+  const sd = document as StructureData
+  if (!isBakedStructureData(sd) || !Array.isArray(sd.materialPalette)) return
+  const pal = sd.materialPalette
   for (let i = 0; i < pal.length; i++) {
     fn(pal[i], String(i))
   }

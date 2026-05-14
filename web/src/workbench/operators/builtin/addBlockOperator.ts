@@ -1,6 +1,5 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
-import type { V2BlockInstance } from '@/render/data/sceneDocumentV2'
 
 export const AddBlockOperator: OperatorType = {
   id: 'OPERATOR_ADD_BLOCK',
@@ -23,11 +22,11 @@ export const AddBlockOperator: OperatorType = {
       const frame = bctx.queries.getCurrentFrame()
       if (!frame) return OP_RESULT.CANCELLED
 
-      const newBlock: V2BlockInstance = {
+      const newBlock = {
         pos: { x: surface.pos.x, y: surface.pos.y, z: surface.pos.z },
         block_state_id: brush,
       }
-      frame.blocks.push(newBlock)
+      ;(frame as any).blocks.push(newBlock)
       bctx.scene.markDirty()
       return OP_RESULT.FINISHED
     }
@@ -38,11 +37,11 @@ export const AddBlockOperator: OperatorType = {
       const frame = bctx.queries.getCurrentFrame()
       if (!frame) return OP_RESULT.CANCELLED
 
-      const newBlock: V2BlockInstance = {
+      const newBlock = {
         pos: { x: ground.x, y: ground.y, z: ground.z },
         block_state_id: brush,
       }
-      frame.blocks.push(newBlock)
+      ;(frame as any).blocks.push(newBlock)
       bctx.scene.markDirty()
       return OP_RESULT.FINISHED
     }

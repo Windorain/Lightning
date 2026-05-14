@@ -7,7 +7,8 @@
 import * as THREE from 'three'
 import type { BContext, BContextQueries } from '@/workbench/context/bContext'
 import type { BlockRef } from '@/workbench/selectionContext'
-import type { V2PlainSceneDocument, V2WorldFrame } from '@/render/data/sceneDocumentV2'
+import type { V2PlainSceneDocument } from '@/render/data/sceneDocumentV2'
+import type { Frame } from '@/render/schema/types'
 import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
 
 export function createProductionQueries(bctx: BContext): BContextQueries {
@@ -31,7 +32,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       }
     },
 
-    getCurrentFrame(): V2WorldFrame | null {
+    getCurrentFrame(): Frame | null {
       const doc = bctx.scene.scene.value as V2PlainSceneDocument | null
       if (!doc?.frames?.length) return null
       const idx = bctx.selection.frameIndex.value ?? 0
@@ -40,11 +41,27 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
 
     getFrameBlocks(): BlockRef[] {
       const frame = this.getCurrentFrame()
-      if (!frame) return []
-      return (frame.blocks ?? []).map(b => ({
-        pos: { ...b.pos },
-        block_state_id: b.block_state_id,
-      }))
+      if (!frame?.structure || !('cellGrid' in frame.structure)) return []
+      const st = frame.structure as { cellGrid: number[][][]; blockPalette: Array<{ registryId: string; meta: number }> }
+      const blocks: BlockRef[] = []
+      for (let z = 0; z < st.cellGrid.length; z++) {
+        const slice = st.cellGrid[z]
+        if (!slice) continue
+        for (let row = 0; row < slice.length; row++) {
+          const cols = slice[row]
+          if (!cols) continue
+          for (let col = 0; col < cols.length; col++) {
+            const idx = cols[col]
+            const entry = st.blockPalette[idx]
+            if (!entry || entry.registryId === 'air' || entry.registryId === 'minecraft:air') continue
+            blocks.push({
+              pos: { x: col, y: row, z },
+              block_state_id: `${entry.registryId}:${entry.meta}`,
+            })
+          }
+        }
+      }
+      return blocks
     },
 
     getDocument(): Record<string, any> | null {

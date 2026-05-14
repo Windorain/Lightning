@@ -22,8 +22,8 @@ export const ReplaceOperator: OperatorType = {
     const frame = bctx.queries.getCurrentFrame()
     if (!frame) return OP_RESULT.CANCELLED
 
-    const block = frame.blocks.find(
-      b => b.pos.x === picked.pos.x && b.pos.y === picked.pos.y && b.pos.z === picked.pos.z,
+    const block = (frame as any).blocks.find(
+      (b: any) => b.pos.x === picked.pos.x && b.pos.y === picked.pos.y && b.pos.z === picked.pos.z,
     )
     if (!block) return OP_RESULT.CANCELLED
     block.block_state_id = brush

@@ -1,5 +1,4 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
-import type { V2BlockInstance } from '@/render/data/sceneDocumentV2'
 
 export const MirrorOperator: OperatorType = {
   id: 'OPERATOR_MIRROR',
@@ -27,15 +26,15 @@ export const MirrorOperator: OperatorType = {
     const center = { x: Math.round((min.x + max.x) / 2), y: Math.round((min.y + max.y) / 2), z: Math.round((min.z + max.z) / 2) }
 
     const targetKeys = new Set(targets.map(t => `${t.pos.x},${t.pos.y},${t.pos.z}`))
-    const originalBlocks = frame.blocks.filter(b => targetKeys.has(`${b.pos.x},${b.pos.y},${b.pos.z}`))
-    const newBlocks: V2BlockInstance[] = []
+    const originalBlocks = (frame as any).blocks.filter((b: any) => targetKeys.has(`${b.pos.x},${b.pos.y},${b.pos.z}`))
+    const newBlocks: any[] = []
 
     for (const b of originalBlocks) {
-      const mirrored: V2BlockInstance = {
+      const mirrored = {
         pos: { ...b.pos },
         block_state_id: b.block_state_id,
         nbt: b.nbt ? { ...b.nbt } : undefined,
-        parts: b.parts?.map(p => ({ ...p, local_id: p.local_id + '_mirror' })),
+        parts: b.parts?.map((p: any) => ({ ...p, local_id: p.local_id + '_mirror' })),
       }
       if (axis === 'x') mirrored.pos.x = center.x * 2 - mirrored.pos.x
       if (axis === 'y') mirrored.pos.y = center.y * 2 - mirrored.pos.y
@@ -43,7 +42,7 @@ export const MirrorOperator: OperatorType = {
       newBlocks.push(mirrored)
     }
 
-    frame.blocks.push(...newBlocks)
+    ;(frame as any).blocks.push(...newBlocks)
     bctx.scene.markDirty()
   },
 }

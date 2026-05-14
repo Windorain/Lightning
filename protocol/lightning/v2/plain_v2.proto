@@ -48,7 +48,7 @@ message BlockInstance {
 
 message BlockPart {
   string local_id = 1;                // 父块内唯一标识
-  string part_kind = 2;               // modid:类型
+  string part_tag = 2;                // 部件标记
   int32 direction = 3;                // -1=无, 0-5=DUNSWE, 6=CENTER
   map<string, string> properties = 4; // 部件属性
   string tooltip = 5;                 // 独立 tooltip

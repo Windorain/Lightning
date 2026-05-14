@@ -51,6 +51,7 @@ export interface PreviewSceneStore {
   statusMessage: Ref<string>
   layerWorldY: Ref<number>
   meshBusy: Ref<boolean>
+  /** 渲染用结构定义 */
   structureDefinition: ShallowRef<StructureDefinition | null>
   materialLibrary: ShallowRef<MaterialLibraryApi | null>
   blockIconCache: ShallowRef<BlockIconCache | null>
@@ -383,9 +384,7 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
 
   async function setCurrentWorldFrame(rawNext: number): Promise<void> {
     const doc = config.value.renderBundle.document
-    if (!isWorldDocument(doc) || doc.frames.length === 0) {
-      return
-    }
+    if (!isWorldDocument(doc) || doc.frames.length === 0) return
     return runMesh(async () => {
       const idx = normalizeWorldFrameListIndex(doc, rawNext)
       worldFrameIndex.value = idx
@@ -393,15 +392,8 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
       const lib = config.value.materialLibrary
-      /** 每帧新建 BlockIconCache 前必须释放旧实例：其内部懒建 WebGLRenderer 烘焙，会占满浏览器 WebGL 上下文上限。 */
-      if (blockIconCache.value) {
-        blockIconCache.value.dispose()
-      }
-      const iconCache = new BlockIconCache(
-        lib,
-        config.value.blockIconCacheOptions,
-        resolved.definition,
-      )
+      if (blockIconCache.value) blockIconCache.value.dispose()
+      const iconCache = new BlockIconCache(lib, config.value.blockIconCacheOptions, resolved.definition)
       iconCache.setRevisionKey(
         `${resolved.definition.id}:${summarizeBlocksForCache(resolved.definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(config.value.blockIconCacheOptions)}`,
       )
@@ -431,9 +423,7 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
       materialLibrary.value = config.value.materialLibrary
-      if (blockIconCache.value) {
-        blockIconCache.value.dispose()
-      }
+      if (blockIconCache.value) blockIconCache.value.dispose()
       const iconCache = new BlockIconCache(config.value.materialLibrary, config.value.blockIconCacheOptions, resolved.definition)
       iconCache.setRevisionKey(
         `${resolved.definition.id}:${summarizeBlocksForCache(resolved.definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(config.value.blockIconCacheOptions)}`,
@@ -446,7 +436,7 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
       loadStatus.value = 'error'
       statusBarTone.value = 'error'
       statusMessage.value = formatError(e)
-      console.error('[StructureRenderer]', e)
+      console.error('[StructureLoader] loadStructureAndResources FAILED:', e instanceof Error ? e.stack : e)
     }
   }
 

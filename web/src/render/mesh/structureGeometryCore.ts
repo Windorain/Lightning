@@ -16,7 +16,6 @@ import type {
 import { isAirState } from '../schema/types'
 import { decodeBakedGeometry } from './bakedGeometryDecode'
 import { vec3ToFaceNameComponents } from './facingMap'
-
 export interface StructureGeometryGatherOptions {
   layerPreview?: LayerPreviewMode
   /**
@@ -286,6 +285,20 @@ export function mergeBakedQuadPiecesAttributes(pieces: BakedQuadGeometryPiece[])
   return { positions, uvs, colors }
 }
 
+/** BlockModel Part 展平为 BakedQuad[]，复用现有三角化路径 */
+export function blockModelQuadsFromParts(parts: import('../schema/types').BlockPartDef[]): BakedQuad[] {
+  const quads: BakedQuad[] = []
+  for (const part of parts) {
+    for (const face of part.faces) {
+      quads.push({
+        materialIndex: face.materialIndex,
+        vertices: face.vertices,
+      })
+    }
+  }
+  return quads
+}
+
 /**
  * 遍历体素网格，产出三角网格片段与统计。**无副作用**（仅分配新 TypedArray / 数组）。
  */
@@ -305,7 +318,6 @@ export function collectStructureGeometryPiecesPure(
   let nonAirVoxelCount = 0
   let skippedUnmappedCount = 0
   const undefinedDetails = new Map<string, UndefinedBlockDetail>()
-
   for (let zSlice = 0; zSlice < sizeZSlice; zSlice++) {
     for (let row = 0; row < sizeRow; row++) {
       for (let col = 0; col < sizeColumn; col++) {
@@ -320,31 +332,23 @@ export function collectStructureGeometryPiecesPure(
         nonAirVoxelCount++
         const idx = def.cellGrid[zSlice][row][col]
         const entry = blockPalette[idx]
-        if (entry.renderMode === 'Special') {
-          skippedUnmappedCount++
-          const k = `${entry.registryId}@${entry.meta}`
-          const prev = undefinedDetails.get(k)
-          undefinedDetails.set(k, {
-            registryKey: k,
-            reason: 'special_no_geometry',
-            voxelCount: (prev?.voxelCount ?? 0) + 1,
-          })
-          continue
-        }
-
         let quads: BakedQuad[]
-        try {
-          quads = decodeBakedGeometry(entry.geometry)
-        } catch {
-          skippedUnmappedCount++
-          const k = `${entry.registryId}@${entry.meta}`
-          const prev = undefinedDetails.get(k)
-          undefinedDetails.set(k, {
-            registryKey: k,
-            reason: 'decode_error',
-            voxelCount: (prev?.voxelCount ?? 0) + 1,
-          })
-          continue
+        if (entry.renderMode === 'BlockModel') {
+          quads = blockModelQuadsFromParts(entry.parts)
+        } else {
+          try {
+            quads = decodeBakedGeometry(entry.geometry)
+          } catch {
+            skippedUnmappedCount++
+            const k = `${entry.registryId}@${entry.meta}`
+            const prev = undefinedDetails.get(k)
+            undefinedDetails.set(k, {
+              registryKey: k,
+              reason: 'decode_error',
+              voxelCount: (prev?.voxelCount ?? 0) + 1,
+            })
+            continue
+          }
         }
 
         for (let qi = 0; qi < quads.length; qi++) {

@@ -173,9 +173,9 @@ export interface BlockPart {
      */
     localId: string; // 父块内唯一标识
     /**
-     * @generated from protobuf field: string part_kind = 2
+     * @generated from protobuf field: string part_tag = 2
      */
-    partKind: string; // modid:类型
+    partTag: string; // 部件标记
     /**
      * @generated from protobuf field: int32 direction = 3
      */
@@ -1016,7 +1016,7 @@ class BlockPart$Type extends MessageType<BlockPart> {
     constructor() {
         super("lightning.v2.BlockPart", [
             { no: 1, name: "local_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 2, name: "part_kind", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "part_tag", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "direction", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 4, name: "properties", kind: "map", K: 9 /*ScalarType.STRING*/, V: { kind: "scalar", T: 9 /*ScalarType.STRING*/ } },
             { no: 5, name: "tooltip", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
@@ -1025,7 +1025,7 @@ class BlockPart$Type extends MessageType<BlockPart> {
     create(value?: PartialMessage<BlockPart>): BlockPart {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.localId = "";
-        message.partKind = "";
+        message.partTag = "";
         message.direction = 0;
         message.properties = {};
         message.tooltip = "";
@@ -1041,8 +1041,8 @@ class BlockPart$Type extends MessageType<BlockPart> {
                 case /* string local_id */ 1:
                     message.localId = reader.string();
                     break;
-                case /* string part_kind */ 2:
-                    message.partKind = reader.string();
+                case /* string part_tag */ 2:
+                    message.partTag = reader.string();
                     break;
                 case /* int32 direction */ 3:
                     message.direction = reader.int32();
@@ -1084,9 +1084,9 @@ class BlockPart$Type extends MessageType<BlockPart> {
         /* string local_id = 1; */
         if (message.localId !== "")
             writer.tag(1, WireType.LengthDelimited).string(message.localId);
-        /* string part_kind = 2; */
-        if (message.partKind !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.partKind);
+        /* string part_tag = 2; */
+        if (message.partTag !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.partTag);
         /* int32 direction = 3; */
         if (message.direction !== 0)
             writer.tag(3, WireType.Varint).int32(message.direction);

@@ -187,7 +187,16 @@ export function provideSceneContext(): SceneContext {
       previewWorldFrameIndex.value = 0
       sceneLoadEpoch.value += 1
       const frames = result.document.frames
-      const totalBlocks = frames.reduce((sum: number, f) => sum + (f.blocks?.length ?? 0), 0)
+      const totalBlocks = frames.reduce((sum: number, f) => {
+        const st = f.structure as { cellGrid?: number[][][] } | undefined
+        if (!st?.cellGrid) return sum
+        for (const slice of st.cellGrid) {
+          for (const row of slice ?? []) {
+            sum += (row as number[])?.filter(c => c !== 0).length ?? 0
+          }
+        }
+        return sum
+      }, 0)
       const fileName = opts?.fileName ?? localFileName.value ?? 'unknown'
 
       if (result.handler?.formatName !== 'V2Plain') {

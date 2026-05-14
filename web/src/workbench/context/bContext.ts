@@ -15,7 +15,7 @@ import type { StructureDefinition } from '@/render/schema/types'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type * as THREE from 'three'
 import type { BlockRef } from '@/workbench/selectionContext'
-import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
+import type { Frame } from '@/render/schema/types'
 import type { WidgetRect } from '@/workbench/ux/layout'
 import type { wmWindow, bScreen, ScrArea, ARegion, Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
@@ -24,7 +24,7 @@ export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
   pickVoxel(event: PointerEvent): BlockRef | null
   /** 获取当前帧的可变引用（用于读写 blocks/labels/annotations） */
-  getCurrentFrame(): V2WorldFrame | null
+  getCurrentFrame(): Frame | null
   /** 获取当前帧的 BlockRef 快照列表 */
   getFrameBlocks(): BlockRef[]
   /** 获取完整的场景文档（用于 annotations、labels 等顶层集合的访问） */

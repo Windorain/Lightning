@@ -7,7 +7,7 @@ import * as THREE from 'three'
 
 import type { MaterialLibraryApi } from '../materials/simpleMaterialLibrary'
 import { buildBlockMesh } from '../mesh/blockMesh'
-import type { BlockPaletteEntry, MaterialPaletteEntry, StructureDefinition } from '../schema/types'
+import type { BlockPaletteEntry, BakedModelPaletteEntry, BakedQuad, MaterialPaletteEntry, StructureDefinition } from '../schema/types'
 
 /** 矩阵或光照变更时递增，用于缓存失效 */
 export const MC_ITEM_SLOT_BAKE_REVISION = '11'
@@ -43,11 +43,11 @@ export interface SingleBlockBakeResult {
 /**
  * 使用与结构网格相同的 1×1×1 体素坐标（column=0, row=0, zSlice=0），六面均生成面片。
  */
-const AIR_ICON_PALETTE: BlockPaletteEntry = {
+const AIR_ICON_PALETTE: BakedModelPaletteEntry = {
   registryId: 'air',
   meta: 0,
   occludesAdjacentFaces: false,
-  renderMode: 'BakedQuads',
+  renderMode: 'BakedModel',
   geometry: { encoding: 'bakedQuadsJsonV1', quads: [] },
 }
 
@@ -59,10 +59,15 @@ export async function buildSingleBlockPreviewFromBakedPalette(
   materialPalette: MaterialPaletteEntry[],
   library: MaterialLibraryApi,
 ): Promise<SingleBlockBakeResult> {
-  const blockPalette: BlockPaletteEntry[] = [
-    AIR_ICON_PALETTE,
-    { ...entry, geometry: { ...entry.geometry, quads: [...entry.geometry.quads] } },
-  ]
+  const entryQuads: BakedQuad[] = entry.renderMode === 'BlockModel'
+    ? entry.parts.flatMap(p => p.faces.map(f => ({ materialIndex: f.materialIndex, vertices: f.vertices })))
+    : entry.geometry.quads
+  const iconEntry: BakedModelPaletteEntry = {
+    ...entry,
+    renderMode: 'BakedModel' as const,
+    geometry: { encoding: 'bakedQuadsJsonV1' as const, quads: [...entryQuads] },
+  }
+  const blockPalette: BlockPaletteEntry[] = [AIR_ICON_PALETTE, iconEntry]
   const miniDef: StructureDefinition = {
     geometryPhase: 'baked',
     id: 'icon-bake',

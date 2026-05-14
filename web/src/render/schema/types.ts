@@ -277,7 +277,7 @@ export function isAirState(v: VoxelState): boolean {
   return v.registryId === 'air'
 }
 
-export type BlockRenderMode = 'BakedQuads' | 'Special'
+export type BlockRenderMode = 'BlockModel' | 'BakedModel'
 
 export type BakedGeometryEncoding = 'bakedQuadsJsonV1' | 'packedQuadsV1'
 
@@ -302,21 +302,47 @@ export interface BakedQuadsGeometry {
   quads: BakedQuad[]
 }
 
-/** 方块调色盘条目：逻辑 +烘焙几何 */
-export interface BlockPaletteEntry {
+/** Part 的一个面：4 顶点 + 方向 + 材质 */
+export interface BlockPartFace {
+  direction: number            // 0-5 DUNSWE
+  vertices: BakedQuadVertex[]  // always 4
+  materialIndex: number
+}
+
+/** 一个逻辑 Part，含 1-6 个面 */
+export interface BlockPartDef {
+  local_id: string
+  part_tag: string
+  faces: BlockPartFace[]
+}
+
+/** BlockModel 调色盘条目：几何由 Parts 承载，无平铺 quads */
+export interface BlockModelPaletteEntry {
   registryId: string
   meta: number
   facing?: FaceName
   nbt?: JsonNbt
-  /** Base64-encoded PNG rendered via renderBlockAsItem */
   thumbnailPNG?: string
-  /** NEI 风格 ToolTip 文本行（由 SDE 客户端 finalize 时通过 ItemStack.getTooltip() 生成） */
   tooltip?: string[]
-  /** 完整不透明立方体时邻面可剔除；缺省/非 true 视为不遮挡（旧 JSON 兼容） */
   occludesAdjacentFaces?: boolean
-  renderMode: BlockRenderMode
+  renderMode: 'BlockModel'
+  parts: BlockPartDef[]
+}
+
+/** BakedModel 调色盘条目：扁平 BakedQuad[] 几何 */
+export interface BakedModelPaletteEntry {
+  registryId: string
+  meta: number
+  facing?: FaceName
+  nbt?: JsonNbt
+  thumbnailPNG?: string
+  tooltip?: string[]
+  occludesAdjacentFaces?: boolean
+  renderMode: 'BakedModel'
   geometry: BakedQuadsGeometry
 }
+
+export type BlockPaletteEntry = BlockModelPaletteEntry | BakedModelPaletteEntry
 
 /** Wiki 网格管线使用的终态结构（保证已烘焙） */
 export type StructureDefinition = StructureDataBaked

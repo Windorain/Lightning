@@ -8,7 +8,7 @@ export const V2PlainHandler: DocumentHandler = {
   detect(doc: unknown): boolean {
     if (!doc || typeof doc !== 'object') return false
     const d = doc as Record<string, unknown>
-    return d.format_version === '2.0' && Array.isArray(d.frames) && d.block_palette !== undefined
+    return d.format_version === '2.0' && Array.isArray(d.frames)
   },
 
   toEditable(doc: unknown): V2PlainSceneDocument | null {

@@ -1,29 +1,21 @@
 import type { V2PlainSceneDocument } from '@/render/data/sceneDocumentV2'
 
-/** Build a stripped embed envelope — frames + palette + materials only, no editing metadata */
+/** Build a stripped embed envelope — V1 data + meta only, no editing metadata */
 export function buildEmbedEnvelope(doc: V2PlainSceneDocument): V2PlainSceneDocument {
   return {
     format_version: doc.format_version,
+    id: doc.id,
     meta: {
       ...doc.meta,
       description: doc.meta.description.replace(/[#*`\[\]()]/g, ''),
     },
-    frames: doc.frames.map(f => ({
-      ...f,
-      blocks: f.blocks.map(b => ({
-        pos: b.pos,
-        block_state_id: b.block_state_id,
-        nbt: b.nbt,
-      })),
-      entities: f.entities,
-    })),
-    block_palette: doc.block_palette,
-    materials: doc.materials,
-    // Omit: annotations, labels, stats_template, parts, gui_state
+    frames: doc.frames,
+    annotations: doc.annotations,
+    labels: doc.labels,
   }
 }
 
-/** Full workbench envelope — all v2 data preserved */
+/** Full workbench envelope — all data preserved */
 export function buildWorkbenchEnvelope(doc: V2PlainSceneDocument): V2PlainSceneDocument {
   return doc
 }

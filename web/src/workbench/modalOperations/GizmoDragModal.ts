@@ -107,7 +107,7 @@ export class GizmoDragModal implements ModalOperation {
         if (frame) {
           // Snapshot current positions for undo
           const oldPositions = this.initialPositions.map(initPos => {
-            const block = findBlock(frame.blocks as any[], initPos)
+            const block = findBlock((frame as any).blocks, initPos)
             return block ? { x: block.pos.x, y: block.pos.y, z: block.pos.z } : null
           })
           const newPositions = this.initialPositions.map(initPos => ({
@@ -125,7 +125,7 @@ export class GizmoDragModal implements ModalOperation {
             execute: () => {
               for (let i = 0; i < this.initialPositions.length; i++) {
                 const initPos = this.initialPositions[i]
-                const block = findBlock(frame.blocks as any[], initPos)
+                const block = findBlock((frame as any).blocks, initPos)
                 if (block) {
                   block.pos.x = newPositions[i].x
                   block.pos.y = newPositions[i].y
@@ -137,7 +137,7 @@ export class GizmoDragModal implements ModalOperation {
             undo: () => {
               for (let i = 0; i < this.initialPositions.length; i++) {
                 const initPos = this.initialPositions[i]
-                const block = findBlock(frame.blocks as any[], initPos)
+                const block = findBlock((frame as any).blocks, initPos)
                 if (block && oldPositions[i]) {
                   block.pos.x = oldPositions[i]!.x
                   block.pos.y = oldPositions[i]!.y
