@@ -37,10 +37,10 @@ export interface ConnectionContext {
   testConnection(): Promise<void>
   /** @side-effect HTTP GET /exports */
   refreshExportList(): Promise<void>
-  /** @side-effect HTTP GET /exports/:name → scene.loadSceneDocument */
-  loadExport(name: string): Promise<void>
-  /** @side-effect HTTP GET workspace → scene.loadSceneDocument */
-  pullFromServer(): Promise<void>
+  /** @side-effect HTTP GET /exports/:name → 返回导出数据 */
+  fetchExportData(name: string): Promise<unknown>
+  /** @side-effect HTTP GET workspace → 返回工作区数据 */
+  fetchWorkspaceData(): Promise<unknown>
   /** @side-effect HTTP PUT workspace */
   pushToServer(): Promise<void>
   /** @side-effect 清除连接/导出状态 */
@@ -91,20 +91,20 @@ export function provideConnectionContext(scene: SceneContext): ConnectionContext
     }
   }
 
-  async function loadExport(name: string): Promise<void> {
-    if (!apiBase.value) return
+  async function fetchExportData(name: string): Promise<unknown> {
+    if (!apiBase.value) throw new Error('未设置 API 基址')
     selectedExportName.value = name
-    const data = await sdeGetExportFile(apiBase.value, token.value, name)
-    await scene.loadSceneDocument(data, { mode: 'sde' })
+    return await sdeGetExportFile(apiBase.value, token.value, name)
   }
 
-  async function pullFromServer(): Promise<void> {
-    if (!apiBase.value) return
+  async function fetchWorkspaceData(): Promise<unknown> {
+    if (!apiBase.value) return null
     const data = await sdeGetWorkspaceDocument(apiBase.value, token.value)
     const c = cloneDocument(data)
     if (c && Object.keys(c).length > 0) {
-      await scene.loadSceneDocument(c)
+      return c
     }
+    return null
   }
 
   async function pushToServer(): Promise<void> {
@@ -132,8 +132,8 @@ export function provideConnectionContext(scene: SceneContext): ConnectionContext
     setToken,
     testConnection,
     refreshExportList,
-    loadExport,
-    pullFromServer,
+    fetchExportData,
+    fetchWorkspaceData,
     pushToServer,
     resetConnection,
   }

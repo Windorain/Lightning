@@ -317,7 +317,10 @@ onMounted(async () => {
     await connection.testConnection()
     if (connection.connected.value) {
       await connection.refreshExportList()
-      await connection.pullFromServer()
+      const data = await connection.fetchWorkspaceData()
+      if (data) {
+        await scene.loadFromData(data)
+      }
     }
   } else if (import.meta.env.DEV) {
     const q = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null

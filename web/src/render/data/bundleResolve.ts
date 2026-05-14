@@ -101,15 +101,12 @@ function validateMaterialPaletteEntries(blobs: string[], pal: unknown, ctx: stri
 }
 
 /**
- * 校验 Wiki 消费态：非空 `textureBlobs` 且每条材质槽位含合法 `textureBlobIndex`。
+ * 校验 Wiki 消费态：若存在 textureBlobs 则校验材质槽位合法性。
+ * 编辑态空文档无 textureBlobs 时跳过校验。
  */
 export function validatePackedSceneDocument(document: unknown): void {
   const blobs = rootTextureBlobs(document)
-  if (!blobs) {
-    throw new Error(
-      '场景缺少非空 textureBlobs（须为含 Base64 PNG 池的打包 JSON；旧版仅 locator 已不再支持）',
-    )
-  }
+  if (!blobs) return  // 编辑态文档可能无打包纹理，跳过校验
   if (isWorldDocument(document)) {
     const pal = document.materialPalette
     if (pal?.length) {

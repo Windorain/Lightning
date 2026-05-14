@@ -29,7 +29,10 @@ export const SDELoadExportOperator: OperatorType = {
 
   async exec(bctx, _props) {
     const name = _props.name as string
-    await bctx.connection.loadExport(name)
+    bctx.selection.clear()
+    bctx.editHistory.clear()
+    const data = await bctx.connection.fetchExportData(name)
+    await bctx.scene.loadFromData(data, { mode: 'sde' })
   },
 }
 

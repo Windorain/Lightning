@@ -18,8 +18,8 @@ export function documentLooksPreviewable(document: unknown): boolean {
   if (!document || typeof document !== 'object') return false
 
   const v2 = document as { format_version?: unknown; frames?: unknown; materials?: { entries?: Array<{ texture_png?: unknown }> } }
-  if (v2.format_version === '2.0' && Array.isArray(v2.frames) && v2.materials?.entries) {
-    return v2.materials.entries.some(e => typeof e.texture_png === 'string' && e.texture_png.length > 0)
+  if (v2.format_version === '2.0' && Array.isArray(v2.frames)) {
+    return true
   }
 
   const blobs = (document as { textureBlobs?: unknown }).textureBlobs

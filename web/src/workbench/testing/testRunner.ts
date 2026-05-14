@@ -253,10 +253,12 @@ export function createMockBContext(opts?: {
           materials: { entries: [] },
         }
         mockDirty.value = false
+        selectionItems.value = new Set()
       },
       async saveToFile() { /* mock: no-op */ },
       async loadSceneFromFile(_file: File) { /* mock: no-op */ },
       async loadBuiltinScene(_sceneId?: string) { /* mock: no-op */ },
+      async loadFromData(_doc: unknown, _opts?: any) { /* mock: no-op */ },
       async syncPreview() { /* mock: no-op */ },
     } as any,
     selection: {
@@ -314,8 +316,8 @@ export function createMockBContext(opts?: {
       apiBase: ref(''),
       async testConnection() { /* mock: no-op */ },
       async refreshExportList() { /* mock: no-op */ },
-      async pullFromServer() { /* mock: no-op */ },
-      async loadExport(_name: string) { /* mock: no-op */ },
+      async fetchWorkspaceData() { return null },
+      async fetchExportData(_name: string) { return {} },
       async pushToServer() { /* mock: no-op */ },
     } as any,
     settings: mockSettings,

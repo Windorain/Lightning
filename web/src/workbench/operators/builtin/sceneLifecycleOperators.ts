@@ -10,6 +10,8 @@ export const NewSceneOperator: OperatorType = {
   },
 
   async exec(bctx, _props) {
+    bctx.selection.clear()
+    bctx.editHistory.clear()
     await bctx.scene.newScene()
   },
 }
@@ -26,6 +28,8 @@ export const OpenSceneOperator: OperatorType = {
   async exec(bctx, _props) {
     const file = _props.file as File | undefined
     if (file) {
+      bctx.selection.clear()
+      bctx.editHistory.clear()
       await bctx.scene.loadSceneFromFile(file)
     }
   },
@@ -56,6 +60,8 @@ export const LoadBuiltinSceneOperator: OperatorType = {
 
   async exec(bctx, _props) {
     const sceneId = _props.sceneId as string | undefined
+    bctx.selection.clear()
+    bctx.editHistory.clear()
     await bctx.scene.loadBuiltinScene(sceneId)
   },
 }

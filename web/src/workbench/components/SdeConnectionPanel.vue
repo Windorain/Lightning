@@ -14,7 +14,12 @@ async function onConnect(): Promise<void> {
   await bctx.connection.testConnection()
   if (bctx.connection.connected.value && bctx.connection.apiBase.value) {
     await bctx.connection.refreshExportList()
-    await bctx.connection.pullFromServer()
+    bctx.selection.clear()
+    bctx.editHistory.clear()
+    const data = await bctx.connection.fetchWorkspaceData()
+    if (data) {
+      await bctx.scene.loadFromData(data)
+    }
   }
 }
 </script>

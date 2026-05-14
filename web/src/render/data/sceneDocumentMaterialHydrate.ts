@@ -21,12 +21,21 @@ function base64PngToDataUrl(b64: string): string {
 }
 
 /**
- * 枚举 palette 纹理为 data URL（依赖根级 `textureBlobs` + 各槽 `textureBlobIndex`）。
- * 调用前应先 {@link validatePackedSceneDocument}。
+ * 枚举纹理为 data URL。优先从根级 `textureBlobs` 读取，其次从 V2 `materials.entries[].texture_png`。
  */
 export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDataUrlItem[] {
   if (!document || typeof document !== 'object') return []
-  const root = document as { textureBlobs?: unknown }
+  const root = document as { textureBlobs?: unknown; materials?: { entries?: Array<{ key: string; texture_png?: string }> } }
+
+  // V2 materials.entries（编辑态文档）
+  const v2Entries = root.materials?.entries
+  if (Array.isArray(v2Entries) && v2Entries.length > 0) {
+    return v2Entries
+      .filter(e => typeof e.texture_png === 'string' && e.texture_png.length > 0)
+      .map(e => ({ materialId: e.key, dataUrl: base64PngToDataUrl(e.texture_png!) }))
+  }
+
+  // Packed textureBlobs（发布态文档）
   const blobs = root.textureBlobs
   if (!Array.isArray(blobs)) return []
 
@@ -40,10 +49,7 @@ export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDat
       if (typeof idx !== 'number' || !Number.isFinite(idx)) continue
       const b = blobs[Math.floor(idx)]
       if (typeof b !== 'string') continue
-      items.push({
-        materialId: String(i),
-        dataUrl: base64PngToDataUrl(b),
-      })
+      items.push({ materialId: String(i), dataUrl: base64PngToDataUrl(b) })
     }
     return items
   }
@@ -57,10 +63,7 @@ export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDat
     if (typeof idx !== 'number' || !Number.isFinite(idx)) continue
     const b = blobs[Math.floor(idx)]
     if (typeof b !== 'string') continue
-    items.push({
-      materialId: String(i),
-      dataUrl: base64PngToDataUrl(b),
-    })
+    items.push({ materialId: String(i), dataUrl: base64PngToDataUrl(b) })
   }
   return items
 }
