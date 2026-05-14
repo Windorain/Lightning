@@ -6,7 +6,7 @@ describe('add block operator', () => {
     const h = createTestHarness({
       blocks: [{ x: 3, y: 0, z: 3, id: 'stone' }],
     })
-    h.setBrush('oak')
+    h.selectBrush('stone')
 
     h.activateTool('add-block')
     h.assertOperatorActive('OPERATOR_ADD_BLOCK')
@@ -14,12 +14,15 @@ describe('add block operator', () => {
     h.clickBlock({ x: 3, y: 0, z: 3 })
 
     h.assertBlockCount(2)
-    h.assertBlockAt({ x: 3, y: 1, z: 3 }, 'oak')
+    h.assertBlockAt({ x: 3, y: 1, z: 3 }, 'stone')
   })
 
   it('click empty space → block placed on ground plane', () => {
-    const h = createTestHarness({ blocks: [] })
-    h.setBrush('dirt')
+    const h = createTestHarness({
+      blocks: [],
+      blockPalette: { dirt: { name: 'dirt' } },
+    })
+    h.selectBrush('dirt')
 
     h.activateTool('add-block')
     h.click(400, 300)
@@ -31,7 +34,7 @@ describe('add block operator', () => {
     const h = createTestHarness({
       blocks: [{ x: 0, y: 0, z: 0, id: 'seed' }],
     })
-    h.setBrush('stone')
+    h.selectBrush('seed')
 
     h.activateTool('add-block')
     h.clickBlock({ x: 0, y: 0, z: 0 })

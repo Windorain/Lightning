@@ -50,7 +50,7 @@ const mergedConfig = computed<PreviewConfig | null>(() => {
   <div class="ww-root">
     <div class="ww-preview-wrap">
       <div class="ww-preview" :style="{ width: `${wikiConfig.viewWidth}px`, height: `${wikiConfig.viewHeight}px` }">
-        <EmbedViewer v-if="mergedConfig" :key="ctx.previewEpoch.value" :merged-config="mergedConfig" />
+        <EmbedViewer v-if="mergedConfig" :key="bctx.scene.previewEpoch.value" :merged-config="mergedConfig" />
         <div v-else class="ww-placeholder">No scene loaded</div>
       </div>
     </div>

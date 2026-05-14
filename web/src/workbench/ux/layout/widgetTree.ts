@@ -8,6 +8,7 @@ export interface WidgetRect {
   bounds: Rect
   rnaPath?: string
   operatorId?: string
+  props?: Record<string, unknown>
 }
 
 const ITEM_HEIGHT = 28
@@ -75,7 +76,7 @@ export function computeWidgetRects(
           advance(cursor, step, isRow)
           break
         case 'operator':
-          result.push({ layoutId, kind: 'operator', operatorId: item.id, bounds: { x: cursor.x, y: cursor.y, width: w, height: ITEM_HEIGHT } })
+          result.push({ layoutId, kind: 'operator', operatorId: item.id, props: item.props, bounds: { x: cursor.x, y: cursor.y, width: w, height: ITEM_HEIGHT } })
           advance(cursor, step, isRow)
           break
         case 'property':
@@ -93,6 +94,7 @@ export function computeWidgetRects(
                 layoutId: subId,
                 kind: 'operator',
                 operatorId: sub.id,
+                props: sub.props,
                 bounds: { x: cursor.x, y: cursor.y + (mi + 1) * (ITEM_HEIGHT + ITEM_PADDING), width: w, height: ITEM_HEIGHT },
               })
             }

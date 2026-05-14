@@ -13,7 +13,7 @@ describe('menu bar — HEADER region integration', () => {
 
   it('menu bar operator buttons are in widget cache', () => {
     const h = createTestHarness({ blocks: [] })
-    const rects = h.ctx.ui.boundsOfByOperator('OPERATOR_NEW_SCENE')
+    const rects = h.getOperatorBounds('OPERATOR_NEW_SCENE')
     h.assert(rects.length >= 1, 'OPERATOR_NEW_SCENE should be in widget cache')
     h.assert(rects[0].width > 0, 'widget should have non-zero width')
     h.assert(rects[0].height > 0, 'widget should have non-zero height')
@@ -34,29 +34,30 @@ describe('menu bar — HEADER region integration', () => {
     const h = createTestHarness({
       blocks: [{ x: 0, y: 0, z: 0, id: 'stone' }],
     })
-    h.assert(h.ctx.ui.boundsOfByOperator('OPERATOR_SAVE_FILE').length >= 1, 'OPERATOR_SAVE_FILE exists')
-    h.assert(h.ctx.ui.boundsOfByOperator('OPERATOR_OPEN_SCENE').length >= 1, 'OPERATOR_OPEN_SCENE exists')
-    h.assert(h.ctx.ui.boundsOfByOperator('OPERATOR_TOGGLE_THEME').length >= 1, 'OPERATOR_TOGGLE_THEME exists')
-    h.assert(h.ctx.ui.boundsOfByOperator('OPERATOR_RESET_LAYOUT').length >= 1, 'OPERATOR_RESET_LAYOUT exists')
+    h.assert(h.getOperatorBounds('OPERATOR_SAVE_FILE').length >= 1, 'OPERATOR_SAVE_FILE exists')
+    h.assert(h.getOperatorBounds('OPERATOR_OPEN_SCENE').length >= 1, 'OPERATOR_OPEN_SCENE exists')
+    h.assert(h.getOperatorBounds('OPERATOR_TOGGLE_THEME').length >= 1, 'OPERATOR_TOGGLE_THEME exists')
+    h.assert(h.getOperatorBounds('OPERATOR_RESET_LAYOUT').length >= 1, 'OPERATOR_RESET_LAYOUT exists')
   })
 
   it('menu bar SET_LANGUAGE operator buttons exist with correct props', () => {
     const h = createTestHarness({ blocks: [] })
 
     // Find SET_LANGUAGE widgets in cache
-    const zhRects = h.ctx.ui.boundsOfByOperator('OPERATOR_SET_LANGUAGE')
+    const zhRects = h.getOperatorBounds('OPERATOR_SET_LANGUAGE')
     h.assert(zhRects.length >= 2, 'should have 2 SET_LANGUAGE buttons (zh + en)')
   })
 
   it('new scene via menu button click clears blocks and allows further interaction', async () => {
     const h = createTestHarness({
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
+      blockPalette: { oak: { name: 'oak' } },
     })
 
+    h.selectBrush('oak')
     h.clickOperator('OPERATOR_NEW_SCENE')
     h.assertBlockCount(0)
 
-    h.setBrush('oak')
     h.activateTool('add-block')
     // Click screen center — ray hits ground plane at camera target (3,0,5)
     h.click(400, 300)

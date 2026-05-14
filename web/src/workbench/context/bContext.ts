@@ -16,6 +16,7 @@ import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type * as THREE from 'three'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
+import type { WidgetRect } from '@/workbench/ux/layout'
 import type { wmWindow, bScreen, ScrArea, ARegion, Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
 
@@ -131,6 +132,7 @@ export interface BContext {
     computeLayout(screen: bScreen): void
     boundsOf(id: string): Rect | null
     boundsOfByOperator(opId: string): Rect[]
+    boundsOfByOperatorMatchProps(opId: string, matchProps: Record<string, unknown>): WidgetRect[]
     boundsOfByRNAPath(rnaPath: string): Rect[]
     regionAt(x: number, y: number): { area: ScrArea; region: ARegion } | null
     relayout(): void

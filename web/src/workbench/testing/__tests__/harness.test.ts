@@ -287,8 +287,9 @@ describe('cross-tool workflow', () => {
         { x: 0, y: 0, z: 0, id: 'seed-a' },
         { x: 2, y: 0, z: 2, id: 'seed-b' },
       ],
+      blockPalette: { placed: { name: 'placed' } },
     })
-    h.setBrush('placed')
+    h.selectBrush('placed')
 
     h.activateTool('add-block')
     h.clickBlock({ x: 0, y: 0, z: 0 })

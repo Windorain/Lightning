@@ -11,10 +11,14 @@ import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
 import type { BlockRef } from '@/workbench/selectionContext'
 import { documentLooksPreviewable, previewConfigFromDocument } from '@/preview/previewFromDocument'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
-import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt } from '@/workbench/ux/layout'
+import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByOperatorMatchProps, boundsOfByRNAPath, regionAt } from '@/workbench/ux/layout'
 import { RegionType, SpaceType } from '@/workbench/ux/types/screen'
 import type { bScreen } from '@/workbench/ux/types/screen'
 import { menuBarPanel } from '@/workbench/ux/panels/menuBar'
+import { toolShelfPanel } from '@/workbench/ux/panels/toolShelf'
+import { generatePanel } from '@/workbench/ux/panels/generate'
+import { blockInspectorPanel } from '@/workbench/ux/panels/blockInspector'
+import { transformPanel } from '@/workbench/ux/panels/transform'
 import { ref, shallowRef } from 'vue'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
@@ -171,6 +175,8 @@ function createMockQueries(
 export function createMockBContext(opts?: {
   blocks?: Array<{ x: number; y: number; z: number; id: string }>
   settings?: Partial<BContextSettings>
+  /** Extra block palette entries for selectBrush validation (beyond those auto-populated from blocks) */
+  blockPalette?: Record<string, { name: string }>
 }): BContext {
   const selectionItems = ref<Set<BlockRef>>(new Set())
   const frameIndex = ref(0)
@@ -188,11 +194,17 @@ export function createMockBContext(opts?: {
       blocks: blockEntries,
       entities: [],
     }
+    // Build block palette from block IDs + explicit palette option
+    const palette: Record<string, { name: string }> = { ...opts?.blockPalette }
+    for (const b of opts?.blocks ?? []) {
+      if (b.id && !palette[b.id]) palette[b.id] = { name: b.id }
+    }
+
     mockScene.value = {
       format_version: '2.0',
       meta: { name: 'test', author: '', created_at_ms: 0, description: '', tags: [], origin: { x: 0, y: 0, z: 0 } },
       frames: [frame],
-      block_palette: {},
+      block_palette: palette,
       materials: { entries: [] },
     }
   }
@@ -377,6 +389,7 @@ export function createMockBContext(opts?: {
       computeLayout: (s: bScreen) => computeLayout(mockCtx as any, s),
       boundsOf: (id: string) => boundsOf(mockCtx as any, id),
       boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
+      boundsOfByOperatorMatchProps: (opId: string, matchProps: Record<string, unknown>) => boundsOfByOperatorMatchProps(opId, matchProps),
       boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),
       regionAt: (x: number, y: number) => regionAt(mockCtx.screen ?? null as any, x, y),
       relayout: () => { if (mockCtx.screen) computeLayout(mockCtx as any, mockCtx.screen) },
@@ -397,7 +410,7 @@ export function createMockBContext(opts?: {
   // Wire queries after ctx exists (needs getSelectionCenter closure)
   ;(mockCtx as any).queries = createMockQueries(camera, getBlocks, getFrame, getDoc, getSelectionCenter)
 
-  // Set up minimal screen with menu panel for UI handler / clickOperator
+  // Set up screen with HEADER, TOOLSHELF, and MAIN regions for UI handler / clickOperator
   {
     const testScreen: bScreen = {
       id: 'test',
@@ -407,14 +420,32 @@ export function createMockBContext(opts?: {
         spaceType: SpaceType.VIEW_3D as any,
         splitDir: null,
         parentArea: null,
-        regions: [{
-          id: 'r-header',
-          type: RegionType.HEADER,
-          visible: true, collapsed: false,
-          bounds: { x: 0, y: 0, width: 800, height: 32 },
-          panels: [menuBarPanel],
-          handlers: [],
-        }],
+        regions: [
+          {
+            id: 'r-header',
+            type: RegionType.HEADER,
+            visible: true, collapsed: false,
+            bounds: { x: 0, y: 0, width: 800, height: 32 },
+            panels: [menuBarPanel],
+            handlers: [],
+          },
+          {
+            id: 'r-toolshelf',
+            type: RegionType.TOOLSHELF,
+            visible: true, collapsed: false,
+            bounds: { x: 0, y: 32, width: 48, height: 568 },
+            panels: [toolShelfPanel],
+            handlers: [],
+          },
+          {
+            id: 'r-main',
+            type: RegionType.MAIN,
+            visible: true, collapsed: false,
+            bounds: { x: 48, y: 32, width: 752, height: 568 },
+            panels: [generatePanel, blockInspectorPanel, transformPanel],
+            handlers: [],
+          },
+        ],
       }],
       popupRegions: [],
     }
@@ -445,7 +476,7 @@ export type TestAction =
   | { action: 'activate-tool'; tool: string }
   | { action: 'click-at'; x: number; y: number; ctrl?: boolean; shift?: boolean }
   | { action: 'click-block'; x: number; y: number; z: number }
-  | { action: 'set-brush'; brush: string }
+  | { action: 'select-brush'; brush: string; toolId?: string }
   | { action: 'drag-world'; axis: 'x' | 'y' | 'z'; amount: number; steps?: number }
   | { action: 'keydown'; key: string; ctrl?: boolean; shift?: boolean }
   | { action: 'assert-block-count'; n: number }
@@ -513,6 +544,7 @@ function executeAction(bctx: BContext, action: TestAction): { passed: boolean; d
         key: binding.key, ctrlKey: binding.ctrl ?? false, shiftKey: binding.shift ?? false,
       })
       bctx.eventDispatcher.dispatch(event)
+      bctx.ui.relayout()  // refresh widget cache for tool-specific panels
       const active = bctx.toolRegistry.activeTool.value?.id ?? null
       const expectedOpId = `OPERATOR_${action.tool.toUpperCase()}`
       return { passed: active === expectedOpId, detail: { active, expected: expectedOpId } }
@@ -548,10 +580,34 @@ function executeAction(bctx: BContext, action: TestAction): { passed: boolean; d
       return { passed: true, detail: { projectedTo: p } }
     }
 
-    case 'set-brush': {
-      const desc = bctx.rna.resolve('toolsettings.replaceBrush')
-      if (!desc) return { passed: false, error: 'RNA path toolsettings.replaceBrush not resolved' }
-      desc.set(bctx.settings, action.brush)
+    case 'select-brush': {
+      const doc = (bctx as any).queries.getDocument?.() ?? null
+      const palette = doc?.block_palette
+      if (palette && !palette[action.brush]) {
+        return {
+          passed: false,
+          error: `select-brush: '${action.brush}' not in block_palette. Available: [${Object.keys(palette).join(', ')}]`,
+        }
+      }
+      // Activate the tool via keyboard
+      const bind = TOOL_KEY_BINDING['add-block']
+      if (!bind) return { passed: false, error: 'select-brush: no key binding for add-block' }
+      bctx.eventDispatcher.dispatch(new KeyboardEvent('keydown', {
+        key: bind.key, ctrlKey: bind.ctrl ?? false, shiftKey: bind.shift ?? false,
+      }))
+      bctx.ui.relayout()
+      // Click the palette button
+      const rects = bctx.ui.boundsOfByOperatorMatchProps('OPERATOR_TOOL_SET', { brushId: action.brush })
+      if (rects.length === 0) {
+        return { passed: false, error: `select-brush: no palette button for '${action.brush}'` }
+      }
+      const r = rects[0]
+      bctx.eventDispatcher.dispatch(new PointerEvent('pointerdown', {
+        clientX: r.bounds.x + r.bounds.width / 2, clientY: r.bounds.y + r.bounds.height / 2, button: 0,
+      }))
+      bctx.eventDispatcher.dispatch(new PointerEvent('pointerup', {
+        clientX: r.bounds.x + r.bounds.width / 2, clientY: r.bounds.y + r.bounds.height / 2, button: 0,
+      }))
       return { passed: true, detail: { brush: action.brush } }
     }
 

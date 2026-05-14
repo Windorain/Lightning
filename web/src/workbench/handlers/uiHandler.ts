@@ -26,7 +26,7 @@ export function createUIHandler(
 
       const hit = widgetAt(pe.clientX, pe.clientY)
       if (hit?.operatorId) {
-        bctx.operators.exec(hit.operatorId)
+        bctx.operators.exec(hit.operatorId, hit.props ?? {})
         return { break: true }
       }
 

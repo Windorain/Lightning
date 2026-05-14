@@ -6,7 +6,7 @@ describe('add tool integration', () => {
     const h = createTestHarness({
       blocks: [{ x: 1, y: 0, z: 1, id: 'stone' }],
     })
-    h.setBrush('oak')
+    h.selectBrush('stone')
 
     h.keyDown('a', { shift: true })
     h.assertContextMenuOpen()

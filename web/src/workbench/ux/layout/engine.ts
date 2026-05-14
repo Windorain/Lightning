@@ -147,6 +147,24 @@ export function boundsOfByOperator(opId: string): Rect[] {
   return rects
 }
 
+/** Find widget rects matching operator ID and all given props. */
+export function boundsOfByOperatorMatchProps(
+  opId: string,
+  matchProps: Record<string, unknown>,
+): WidgetRect[] {
+  const result: WidgetRect[] = []
+  for (const wr of widgetCache.values()) {
+    if (wr.operatorId !== opId) continue
+    if (!wr.props) continue
+    let match = true
+    for (const [k, v] of Object.entries(matchProps)) {
+      if (wr.props[k] !== v) { match = false; break }
+    }
+    if (match) result.push({ ...wr })
+  }
+  return result
+}
+
 /** Find all widget rects matching a given RNA path (e.g., 'block.id'). */
 export function boundsOfByRNAPath(rnaPath: string): Rect[] {
   const rects: Rect[] = []

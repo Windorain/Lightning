@@ -404,7 +404,7 @@ onMounted(() => {
     </template>
   </WorkbenchShell>
 
-  <div v-show="workspace === 'wiki'" class="wb-standalone">
+  <div v-if="workspace === 'wiki'" class="wb-standalone">
     <header class="wb-standalone-menubar">
       <div class="wb-menubar-inner">
         <UIRenderer
@@ -426,7 +426,7 @@ onMounted(() => {
     </main>
   </div>
 
-  <div v-show="workspace === 'export'" class="wb-standalone">
+  <div v-if="workspace === 'export'" class="wb-standalone">
     <header class="wb-standalone-menubar">
       <div class="wb-menubar-inner">
         <UIRenderer

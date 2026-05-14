@@ -3,7 +3,7 @@
  *
  * L0: pointerDown/Move/Up, keyDown（纯事件注入）
  * L1: click, drag（组合事件）
- * L2: clickBlock, setBrush, activateTool, clickOperator, setRNAValue（语义交互）
+ * L2: clickBlock, selectBrush, activateTool, clickOperator, setRNAValue（语义交互）
  * L3: dragWorld（世界坐标交互）
  *
  * 事件走完整 dispatch 链：eventDispatcher → KEYMAP/OPERATOR handler → operator.invoke/modal
@@ -17,6 +17,8 @@ import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
 import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
 import { createUIHandler } from '@/workbench/handlers/uiHandler'
+import { createApp, h, type Component } from 'vue'
+import { bContextKey } from '@/workbench/context/bContext'
 import { DEFAULT_KEYMAP, matchBinding } from '@/workbench/keymap'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { logCenter } from '@/workbench/logging/LogCenter'
@@ -69,6 +71,13 @@ const TOOL_KEY_BINDING: Record<string, { key: string; ctrl?: boolean; shift?: bo
   mirror:    { key: 'm', ctrl: true },
   'add-block':           { key: 'h' },
   'add-annotation-box':  { key: 'j' },
+}
+
+/** Operator ID → 友好名反转映射（供 selectBrush 使用） */
+const OP_ID_TO_FRIENDLY: Record<string, string> = {
+  'OPERATOR_ADD_BLOCK': 'add-block',
+  'OPERATOR_REPLACE': 'replace',
+  'OPERATOR_FILL': 'fill',
 }
 
 /* —— Event handler cookbook —— */
@@ -173,8 +182,8 @@ export interface TestHarness {
   // L2: Semantic interaction
   /** 激活工具（通过键盘事件，走完整 KEYMAP → ToolSetOperator 链路） */
   activateTool(name: string): void
-  /** 设置当前刷子（通过 RNA 路径） */
-  setBrush(brushId: string): void
+  /** 选择刷子（激活工具 → 刷新面板 → 点击调色盘按钮，走完整事件链） */
+  selectBrush(brushId: string, opts?: { toolId?: string }): void
   /** 点击世界坐标处的方块（自动 projectBlock + 激活 select） */
   clickBlock(pos: { x: number; y: number; z: number }, opts?: { ctrl?: boolean; shift?: boolean }): void
   /** 点击操作符按钮（通过布局查询） */
@@ -204,6 +213,10 @@ export interface TestHarness {
   /** ContextMenu 可见性断言 */
   assertContextMenuOpen(): void
   assertContextMenuClosed(): void
+  /** 标记场景为脏 */
+  markDirty(): void
+  /** 获取操作符按钮位置 */
+  getOperatorBounds(opId: string): Array<{ x: number; y: number; width: number; height: number }>
   /** 点击 ContextMenu 中的项 */
   clickContextMenuItem(label: string): void
 
@@ -232,6 +245,11 @@ export interface TestHarness {
 
   // Spec runner
   run(spec: TestSpec): TestResult
+
+  /** Mount a Vue component with the harness BContext. Returns unmount function. */
+  mount(comp: Component, props?: Record<string, unknown>): () => void
+  /** Unmount all previously mounted components. */
+  unmountAll(): void
 }
 
 export function createTestHarness(
@@ -243,6 +261,8 @@ export function createTestHarness(
   // Activate default tool via event chain (not direct activate)
   // We use the keyDown path for this
   ctx.toolRegistry.activate('OPERATOR_SELECT', ctx)
+
+  const mountedFns: Array<() => void> = []
 
   const harness: TestHarness = {
     ctx,
@@ -304,10 +324,36 @@ export function createTestHarness(
       const binding = TOOL_KEY_BINDING[name]
       if (!binding) throw new Error(`activateTool: unknown tool "${name}"`)
       this.keyDown(binding.key, { ctrl: binding.ctrl, shift: binding.shift })
+      ctx.ui.relayout()
     },
 
-    setBrush(brushId) {
-      this.setRNAValue('toolsettings.replaceBrush', brushId, ctx.settings)
+    selectBrush(brushId, opts = {}) {
+      const doc = ctx.queries.getDocument()
+      const palette = doc?.block_palette
+      if (palette && !palette[brushId]) {
+        throw new Error(
+          `selectBrush: '${brushId}' not in block_palette. ` +
+          `Available: [${Object.keys(palette).join(', ')}]`
+        )
+      }
+
+      // 走完整事件链：激活工具 → 刷新面板 → 点击调色盘按钮
+      const toolId = opts.toolId ?? 'OPERATOR_ADD_BLOCK'
+      const toolName = OP_ID_TO_FRIENDLY[toolId] ?? 'add-block'
+      this.activateTool(toolName)
+      ctx.ui.relayout()
+
+      const rects = ctx.ui.boundsOfByOperatorMatchProps('OPERATOR_TOOL_SET', { brushId })
+      if (rects.length === 0) {
+        // Debug dump
+        const allOps = ctx.ui.boundsOfByOperator('OPERATOR_TOOL_SET')
+        throw new Error(
+          `selectBrush: no palette button for '${brushId}'. ` +
+          `Available OPERATOR_TOOL_SET: ${JSON.stringify(allOps)}`
+        )
+      }
+      const r = rects[0]
+      this.click(r.bounds.x + r.bounds.width / 2, r.bounds.y + r.bounds.height / 2)
     },
 
     clickBlock(pos, o = {}) {
@@ -438,7 +484,7 @@ export function createTestHarness(
         const available = cm.items.map((i: any) => i.label).join(', ')
         throw new Error(`context menu item "${label}" not found. Available: ${available}`)
       }
-      ctx.operators.invoke(item.opId, item.props ?? {})
+      ctx.operators.exec(item.opId, item.props ?? {})
       if (wm.hideContextMenu) wm.hideContextMenu(cm)
     },
 
@@ -455,6 +501,40 @@ export function createTestHarness(
     assertDirty(expected) {
       const actual = ctx.scene.dirty.value
       if (actual !== expected) throw new Error(`dirty: expected ${expected}, got ${actual}`)
+    },
+
+    markDirty() {
+      ctx.scene.markDirty()
+    },
+
+    getOperatorBounds(opId) {
+      return ctx.ui.boundsOfByOperator(opId)
+    },
+
+    /* —— Mount Vue components —— */
+
+    mount(comp: Component, props = {}) {
+      const container = document.createElement('div')
+      container.dataset.testMount = String(mountedFns.length)
+      document.body.appendChild(container)
+
+      const app = createApp({
+        render() { return h(comp, props) },
+      })
+      app.provide(bContextKey, ctx)
+      const vm = app.mount(container)
+
+      const unmount = () => {
+        app.unmount()
+        container.remove()
+      }
+      mountedFns.push(unmount)
+      return unmount
+    },
+
+    unmountAll() {
+      for (const fn of mountedFns) fn()
+      mountedFns.length = 0
     },
 
     /* —— Batch —— */
