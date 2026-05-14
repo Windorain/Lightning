@@ -12,7 +12,8 @@ const OPERATOR_TOOL_META: Record<string, { icon: string; cursor?: string; defaul
   OPERATOR_FILL:          { icon: '⬛', defaultKey: 'f' },
   OPERATOR_EYEDROPPER:    { icon: '💉', defaultKey: 'e' },
   OPERATOR_MIRROR:        { icon: '↔', defaultKey: 'Ctrl+m' },
-  OPERATOR_GENERATE:      { icon: '＋', defaultKey: 'Shift+a' },
+  OPERATOR_ADD_BLOCK:           { icon: '⬜', cursor: 'crosshair', defaultKey: 'h' },
+  OPERATOR_ADD_ANNOTATION_BOX:  { icon: '📝', cursor: 'crosshair', defaultKey: 'j' },
   OPERATOR_ANNOTATION:    { icon: '📝' },
   OPERATOR_LABEL:         { icon: '🏷' },
 }

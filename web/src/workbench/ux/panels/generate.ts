@@ -11,7 +11,7 @@ export const generatePanel: PanelDeclaration = {
 
   poll(ctx: BContext): boolean {
     const tool = ctx.toolRegistry.activeTool.value?.id
-    return tool === 'OPERATOR_GENERATE' || tool === 'OPERATOR_REPLACE' || tool === 'OPERATOR_FILL'
+    return tool === 'OPERATOR_ADD_BLOCK' || tool === 'OPERATOR_REPLACE' || tool === 'OPERATOR_FILL'
   },
   owner(ctx: BContext): unknown { return ctx.settings },
   layout(ctx: BContext): UILayout {
@@ -32,7 +32,7 @@ export const generatePanel: PanelDeclaration = {
           kind: 'operator',
           id: 'OPERATOR_TOOL_SET',
           label: id,
-          props: { toolId: 'OPERATOR_GENERATE', brushId: id },
+          props: { toolId: 'OPERATOR_ADD_BLOCK', brushId: id },
         })
       }
     }

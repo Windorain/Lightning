@@ -31,7 +31,8 @@ import { ReplaceOperator } from '@/workbench/operators/builtin/replaceOperator'
 import { FillOperator } from '@/workbench/operators/builtin/fillOperator'
 import { EyedropperOperator } from '@/workbench/operators/builtin/eyedropperOperator'
 import { MirrorOperator } from '@/workbench/operators/builtin/mirrorOperator'
-import { GenerateOperator } from '@/workbench/operators/builtin/generateOperator'
+import { AddBlockOperator } from '@/workbench/operators/builtin/addBlockOperator'
+import { AddAnnotationBoxOperator } from '@/workbench/operators/builtin/addAnnotationBoxOperator'
 import { AnnotationOperator } from '@/workbench/operators/builtin/annotationOperator'
 import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
 import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
@@ -39,7 +40,8 @@ import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workben
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 const BUILTIN_OPERATORS = [
   SelectOperator, MoveOperator, DeleteOperator, ReplaceOperator,
-  FillOperator, EyedropperOperator, MirrorOperator, GenerateOperator,
+  FillOperator, EyedropperOperator, MirrorOperator,
+  AddBlockOperator, AddAnnotationBoxOperator,
   AnnotationOperator, LabelOperator, ToolSetOperator,
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator,
   UndoOperator, RedoOperator,
@@ -49,7 +51,7 @@ const TOOL_KEY_MAP: Record<string, string> = {
   select: 'OPERATOR_SELECT', move: 'OPERATOR_MOVE',
   delete: 'OPERATOR_DELETE', replace: 'OPERATOR_REPLACE',
   fill: 'OPERATOR_FILL', eyedropper: 'OPERATOR_EYEDROPPER',
-  mirror: 'OPERATOR_MIRROR', generate: 'OPERATOR_GENERATE',
+  mirror: 'OPERATOR_MIRROR',
   'add-block': 'OPERATOR_ADD_BLOCK',
   'add-annotation-box': 'OPERATOR_ADD_ANNOTATION_BOX',
 }
@@ -63,7 +65,6 @@ const TOOL_KEY_BINDING: Record<string, { key: string; ctrl?: boolean; shift?: bo
   fill:      { key: 'f' },
   eyedropper:{ key: 'e' },
   mirror:    { key: 'm', ctrl: true },
-  generate:  { key: 'a', shift: true },
   'add-block':           { key: 'h' },
   'add-annotation-box':  { key: 'j' },
 }

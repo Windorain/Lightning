@@ -28,7 +28,8 @@ import { ReplaceOperator } from '@/workbench/operators/builtin/replaceOperator'
 import { FillOperator } from '@/workbench/operators/builtin/fillOperator'
 import { EyedropperOperator } from '@/workbench/operators/builtin/eyedropperOperator'
 import { MirrorOperator } from '@/workbench/operators/builtin/mirrorOperator'
-import { GenerateOperator } from '@/workbench/operators/builtin/generateOperator'
+import { AddBlockOperator } from '@/workbench/operators/builtin/addBlockOperator'
+import { AddAnnotationBoxOperator } from '@/workbench/operators/builtin/addAnnotationBoxOperator'
 import { AnnotationOperator } from '@/workbench/operators/builtin/annotationOperator'
 import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
@@ -171,7 +172,7 @@ const ADD_MENU_ITEMS: ContextMenuItem[] = [
 
 function invokeContextMenuItem(item: ContextMenuItem) {
   if (item.opId) {
-    bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: item.opId })
+    bctx.operators.invoke(item.opId, item.props ?? {})
   }
 }
 
@@ -205,7 +206,8 @@ bctx.operators.register(ReplaceOperator)
 bctx.operators.register(FillOperator)
 bctx.operators.register(EyedropperOperator)
 bctx.operators.register(MirrorOperator)
-bctx.operators.register(GenerateOperator)
+bctx.operators.register(AddBlockOperator)
+bctx.operators.register(AddAnnotationBoxOperator)
 bctx.operators.register(AnnotationOperator)
 bctx.operators.register(LabelOperator)
 bctx.operators.register(UndoOperator)
@@ -230,7 +232,8 @@ const OPERATOR_KEY_MAP: Record<string, string> = {
   fill: 'OPERATOR_FILL',
   eyedropper: 'OPERATOR_EYEDROPPER',
   mirror: 'OPERATOR_MIRROR',
-  generate: 'OPERATOR_GENERATE',
+  'add-block': 'OPERATOR_ADD_BLOCK',
+  'add-annotation-box': 'OPERATOR_ADD_ANNOTATION_BOX',
   annotation: 'OPERATOR_ANNOTATION',
   label: 'OPERATOR_LABEL',
 }
@@ -401,7 +404,7 @@ onMounted(() => {
       v-if="contextMenu.open.value"
       class="context-menu-overlay"
       @click="hideContextMenu(contextMenu)"
-      @keydown.escape="hideContextMenu(contextMenu)"
+      @contextmenu.prevent="hideContextMenu(contextMenu)"
     >
       <div
         class="context-menu-popup"

@@ -115,17 +115,17 @@ function createMockQueries(
         const t = rayAABB(origin, dir, aabb.min, aabb.max)
         if (t !== null && t < bestT) {
           bestT = t
-          const hitX = origin.x + dir.x * t
-          const hitY = origin.y + dir.y * t
-          const hitZ = origin.z + dir.z * t
-          const eps = 0.001
+          // Determine entry face from ray direction: the face where the ray
+          // first enters the AABB. Compute entry t for each axis and take
+          // the axis with the largest t (that axis "blocks" the ray last).
+          // When t values tie (corner entry), prefer Y (top face) for intuitive placement.
+          const t_x = dir.x !== 0 ? (dir.x > 0 ? aabb.min.x - origin.x : aabb.max.x - origin.x) / dir.x : -Infinity
+          const t_y = dir.y !== 0 ? (dir.y > 0 ? aabb.min.y - origin.y : aabb.max.y - origin.y) / dir.y : -Infinity
+          const t_z = dir.z !== 0 ? (dir.z > 0 ? aabb.min.z - origin.z : aabb.max.z - origin.z) / dir.z : -Infinity
           let nx = 0, ny = 0, nz = 0
-          if (Math.abs(hitX - aabb.min.x) < eps) nx = -1
-          else if (Math.abs(hitX - aabb.max.x) < eps) nx = 1
-          else if (Math.abs(hitY - aabb.min.y) < eps) ny = -1
-          else if (Math.abs(hitY - aabb.max.y) < eps) ny = 1
-          else if (Math.abs(hitZ - aabb.min.z) < eps) nz = -1
-          else if (Math.abs(hitZ - aabb.max.z) < eps) nz = 1
+          if (t_y >= t_x && t_y >= t_z) ny = dir.y > 0 ? -1 : 1
+          else if (t_x >= t_z) nx = dir.x > 0 ? -1 : 1
+          else nz = dir.z > 0 ? -1 : 1
           best = {
             pos: { x: b.pos.x + nx, y: b.pos.y + ny, z: b.pos.z + nz },
             normal: { x: nx, y: ny, z: nz },
@@ -179,7 +179,7 @@ export function createMockBContext(opts?: {
     block_state_id: b.id,
   }))
 
-  if (blockEntries.length > 0) {
+  {
     const frame: V2WorldFrame = {
       label: 'Frame 0', index: 0,
       blocks: blockEntries,

@@ -203,32 +203,32 @@ describe('move operator — gizmo drag', () => {
   })
 })
 
-describe('generate operator', () => {
-  it('activate generate with brush, click block → new block placed', () => {
+describe('add block operator', () => {
+  it('activate add-block with brush, click block → new block placed adjacent to surface', () => {
     const h = createTestHarness({
       blocks: [{ x: 2, y: 0, z: 2, id: 'seed' }],
     })
     h.setBrush('stone')
 
-    h.activateTool('generate')
-    h.assertOperatorActive('OPERATOR_GENERATE')
+    h.activateTool('add-block')
+    h.assertOperatorActive('OPERATOR_ADD_BLOCK')
 
     h.clickBlock({ x: 2, y: 0, z: 2 })
     h.assertBlockCount(2)
   })
 
-  it('generate places block when clicking empty space', () => {
+  it('add-block places block when clicking empty space (ground fallback)', () => {
     const h = createTestHarness({ blocks: [] })
     h.setBrush('stone')
 
-    h.activateTool('generate')
-    h.assertOperatorActive('OPERATOR_GENERATE')
+    h.activateTool('add-block')
+    h.assertOperatorActive('OPERATOR_ADD_BLOCK')
 
     h.click(400, 300)
     h.assertBlockCount(1)
   })
 
-  it('generate → select → delete full cycle', () => {
+  it('add-block → select → delete full cycle', () => {
     const h = createTestHarness({
       blocks: [
         { x: 0, y: 0, z: 0, id: 'seed-a' },
@@ -237,7 +237,7 @@ describe('generate operator', () => {
     })
     h.setBrush('placed')
 
-    h.activateTool('generate')
+    h.activateTool('add-block')
     h.clickBlock({ x: 0, y: 0, z: 0 })
     h.assertBlockCount(3)
 
@@ -247,7 +247,8 @@ describe('generate operator', () => {
 
     h.activateTool('delete')
     h.click(400, 300)
-    h.assertBlockCount(1)
+    // seed-a was deleted; seed-b + adjacent block remain
+    h.assertBlockCount(2)
     h.assertBlockAt({ x: 2, y: 0, z: 2 }, 'seed-b')
     h.assertBlockNotAt({ x: 0, y: 0, z: 0 })
   })
@@ -386,8 +387,8 @@ describe('semantic L2 actions', () => {
     h.activateTool('select')
     h.assertOperatorActive('OPERATOR_SELECT')
 
-    h.activateTool('generate')
-    h.assertOperatorActive('OPERATOR_GENERATE')
+    h.activateTool('add-block')
+    h.assertOperatorActive('OPERATOR_ADD_BLOCK')
   })
 
   it('setBrush sets brush via RNA path', () => {

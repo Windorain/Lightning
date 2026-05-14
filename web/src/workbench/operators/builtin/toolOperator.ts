@@ -9,5 +9,8 @@ export const ToolSetOperator: OperatorType = {
     const toolId = props.toolId as string
     if (!toolId) return
     bctx.toolRegistry.activate(toolId, bctx)
+    if (props.brushId) {
+      bctx.settings.replaceBrush = props.brushId as string
+    }
   },
 }
