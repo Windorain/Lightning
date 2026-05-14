@@ -56,6 +56,12 @@ export interface BContextSettings {
   dragSensitivity: number
   /** Snap 吸附开关 */
   snapEnabled: boolean
+  /** Hook for dirty-check confirmation; used by NewScene/OpenScene operators */
+  confirmDirty?: (message: string) => boolean
+  /** Current theme ('dark' | 'light') — observable for testing */
+  theme?: 'dark' | 'light'
+  /** Current language ('zh' | 'en') — observable for testing */
+  language?: 'zh' | 'en'
 }
 
 export interface BContext {

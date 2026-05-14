@@ -9,9 +9,12 @@
 import type { BContext, BContextQueries, BContextSettings } from '@/workbench/context/bContext'
 import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
 import type { BlockRef } from '@/workbench/selectionContext'
+import { documentLooksPreviewable, previewConfigFromDocument } from '@/preview/previewFromDocument'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt } from '@/workbench/ux/layout'
+import { RegionType, SpaceType } from '@/workbench/ux/types/screen'
 import type { bScreen } from '@/workbench/ux/types/screen'
+import { menuBarPanel } from '@/workbench/ux/panels/menuBar'
 import { ref, shallowRef } from 'vue'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
@@ -224,6 +227,9 @@ export function createMockBContext(opts?: {
     generateType: opts?.settings?.generateType ?? null,
     dragSensitivity: opts?.settings?.dragSensitivity ?? 0.05,
     snapEnabled: opts?.settings?.snapEnabled ?? false,
+    confirmDirty: () => false,
+    theme: 'dark' as 'dark' | 'light',
+    language: 'zh' as 'zh' | 'en',
   }
 
   const mockCtx = {
@@ -253,13 +259,38 @@ export function createMockBContext(opts?: {
           materials: { entries: [] },
         }
         mockDirty.value = false
-        selectionItems.value = new Set()
+        await this.syncPreview()
       },
       async saveToFile() { /* mock: no-op */ },
       async loadSceneFromFile(_file: File) { /* mock: no-op */ },
       async loadBuiltinScene(_sceneId?: string) { /* mock: no-op */ },
       async loadFromData(_doc: unknown, _opts?: any) { /* mock: no-op */ },
-      async syncPreview() { /* mock: no-op */ },
+      async syncPreview() {
+        if (this.previewBusy.value) return
+        this.previewBusy.value = true
+        this.previewError.value = null
+        try {
+          const doc = mockScene.value
+          if (!doc) {
+            this.previewError.value = '无场景数据'
+            this.previewConfig.value = null
+            this.previewEpoch.value = 0
+            return
+          }
+          if (!documentLooksPreviewable(doc)) {
+            this.previewError.value = '当前文档缺少 textureBlobs 或非 geometryPhase=baked，无法内嵌预览（可继续编辑元数据并导出）。'
+            return
+          }
+          const snapshot = { ...doc }
+          const cfg = await previewConfigFromDocument(snapshot)
+          this.previewConfig.value = cfg
+          this.previewEpoch.value += 1
+        } catch (e) {
+          this.previewError.value = String(e)
+        } finally {
+          this.previewBusy.value = false
+        }
+      },
     } as any,
     selection: {
       items: selectionItems, frameIndex,
@@ -277,6 +308,12 @@ export function createMockBContext(opts?: {
       _stack: [] as any[],
       _redoStack: [] as any[],
 
+      clear() {
+        this._stack = []
+        this._redoStack = []
+        this.canUndo.value = false
+        this.canRedo.value = false
+      },
       push(entry: any) {
         entry.execute?.()
         this._stack.push(entry)
@@ -360,6 +397,30 @@ export function createMockBContext(opts?: {
   // Wire queries after ctx exists (needs getSelectionCenter closure)
   ;(mockCtx as any).queries = createMockQueries(camera, getBlocks, getFrame, getDoc, getSelectionCenter)
 
+  // Set up minimal screen with menu panel for UI handler / clickOperator
+  {
+    const testScreen: bScreen = {
+      id: 'test',
+      bounds: { width: 800, height: 600 },
+      areas: [{
+        id: 'area-main',
+        spaceType: SpaceType.VIEW_3D as any,
+        splitDir: null,
+        parentArea: null,
+        regions: [{
+          id: 'r-header',
+          type: RegionType.HEADER,
+          visible: true, collapsed: false,
+          bounds: { x: 0, y: 0, width: 800, height: 32 },
+          panels: [menuBarPanel],
+          handlers: [],
+        }],
+      }],
+      popupRegions: [],
+    }
+    computeLayout(mockCtx as any, testScreen)
+  }
+
   return mockCtx as BContext
 }
 
@@ -392,6 +453,9 @@ export type TestAction =
   | { action: 'assert-operator-active'; id: string }
   | { action: 'assert-block-at'; x: number; y: number; z: number; id?: string }
   | { action: 'assert-block-not-at'; x: number; y: number; z: number }
+  | { action: 'assert-theme'; expected: 'dark' | 'light' }
+  | { action: 'assert-language'; expected: 'zh' | 'en' }
+  | { action: 'assert-dirty'; expected: boolean }
 
 export interface TestSpec {
   name: string
@@ -560,6 +624,21 @@ function executeAction(bctx: BContext, action: TestAction): { passed: boolean; d
       )
       return { passed: !found, detail: { pos: { x: action.x, y: action.y, z: action.z } },
         error: found ? `block should not exist at (${action.x},${action.y},${action.z})` : undefined }
+    }
+    case 'assert-theme': {
+      const actual = bctx.settings.theme ?? 'dark'
+      return { passed: actual === action.expected, detail: { expected: action.expected, actual },
+        error: actual !== action.expected ? `theme: expected ${action.expected}, got ${actual}` : undefined }
+    }
+    case 'assert-language': {
+      const actual = bctx.settings.language ?? 'zh'
+      return { passed: actual === action.expected, detail: { expected: action.expected, actual },
+        error: actual !== action.expected ? `language: expected ${action.expected}, got ${actual}` : undefined }
+    }
+    case 'assert-dirty': {
+      const actual = bctx.scene.dirty.value
+      return { passed: actual === action.expected, detail: { expected: action.expected, actual },
+        error: actual !== action.expected ? `dirty: expected ${action.expected}, got ${actual}` : undefined }
     }
   }
 }

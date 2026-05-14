@@ -84,6 +84,19 @@ export function computeWidgetRects(
           break
         case 'menu':
           result.push({ layoutId, kind: 'menu', bounds: { x: cursor.x, y: cursor.y, width: w, height: ITEM_HEIGHT } })
+          // Recurse into menu items so they're discoverable in widget cache for testing
+          for (let mi = 0; mi < item.items.length; mi++) {
+            const sub = item.items[mi]
+            if (sub.kind === 'operator') {
+              const subId = `${layoutId}.m${mi}`
+              result.push({
+                layoutId: subId,
+                kind: 'operator',
+                operatorId: sub.id,
+                bounds: { x: cursor.x, y: cursor.y + (mi + 1) * (ITEM_HEIGHT + ITEM_PADDING), width: w, height: ITEM_HEIGHT },
+              })
+            }
+          }
           advance(cursor, step, isRow)
           break
       }

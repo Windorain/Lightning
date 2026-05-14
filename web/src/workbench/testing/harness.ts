@@ -16,6 +16,7 @@ import { createMockBContext, runTestSpec } from './testRunner'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
 import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
+import { createUIHandler } from '@/workbench/handlers/uiHandler'
 import { DEFAULT_KEYMAP, matchBinding } from '@/workbench/keymap'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { logCenter } from '@/workbench/logging/LogCenter'
@@ -37,6 +38,7 @@ import { AnnotationOperator } from '@/workbench/operators/builtin/annotationOper
 import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
 import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
+import { NewSceneOperator } from '@/workbench/operators/builtin/sceneLifecycleOperators'
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 const BUILTIN_OPERATORS = [
   SelectOperator, MoveOperator, DeleteOperator, ReplaceOperator,
@@ -44,7 +46,7 @@ const BUILTIN_OPERATORS = [
   AddBlockOperator, AddAnnotationBoxOperator,
   AnnotationOperator, LabelOperator, ToolSetOperator,
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator,
-  UndoOperator, RedoOperator,
+  UndoOperator, RedoOperator, NewSceneOperator,
 ]
 
 const TOOL_KEY_MAP: Record<string, string> = {
@@ -89,6 +91,8 @@ function bootEventHandlers(bctx: BContext): void {
   eventDispatcher.registerTypedHandler(
     createTestGizmoHandler(() => _mockGizmo, () => _bctxRef),
   )
+
+  eventDispatcher.registerTypedHandler(createUIHandler(() => _bctxRef))
 
   eventDispatcher.registerTypedHandler({
     type: HANDLER_TYPE.KEYMAP,
@@ -202,6 +206,13 @@ export interface TestHarness {
   assertContextMenuClosed(): void
   /** 点击 ContextMenu 中的项 */
   clickContextMenuItem(label: string): void
+
+  /** 断言当前主题 */
+  assertTheme(expected: 'dark' | 'light'): void
+  /** 断言当前语言 */
+  assertLanguage(expected: 'zh' | 'en'): void
+  /** 断言场景脏状态 */
+  assertDirty(expected: boolean): void
 
   // Scene lifecycle helpers
   /** 新建空白场景 */
@@ -431,6 +442,21 @@ export function createTestHarness(
       if (wm.hideContextMenu) wm.hideContextMenu(cm)
     },
 
+    assertTheme(expected) {
+      const actual = ctx.settings.theme ?? 'dark'
+      if (actual !== expected) throw new Error(`theme: expected ${expected}, got ${actual}`)
+    },
+
+    assertLanguage(expected) {
+      const actual = ctx.settings.language ?? 'zh'
+      if (actual !== expected) throw new Error(`language: expected ${expected}, got ${actual}`)
+    },
+
+    assertDirty(expected) {
+      const actual = ctx.scene.dirty.value
+      if (actual !== expected) throw new Error(`dirty: expected ${expected}, got ${actual}`)
+    },
+
     /* —— Batch —— */
 
     collect() {
@@ -440,7 +466,7 @@ export function createTestHarness(
     /* —— Scene lifecycle —— */
 
     async newScene() {
-      await ctx.scene.newScene()
+      this.clickOperator('OPERATOR_NEW_SCENE')
     },
 
     async saveToFile() {

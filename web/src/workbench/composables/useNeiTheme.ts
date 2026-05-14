@@ -14,23 +14,30 @@ function readStored(): NeiTheme {
 }
 
 function applyTheme(t: NeiTheme): void {
-  document.documentElement.setAttribute(ATTR, t)
+  if (typeof document !== 'undefined') {
+    document.documentElement.setAttribute(ATTR, t)
+  }
 }
 
 const theme = ref<NeiTheme>(readStored())
 
-// 初始应用
-applyTheme(theme.value)
+// 初始应用 (only in browser)
+if (typeof document !== 'undefined') {
+  applyTheme(theme.value)
+}
 
 watch(theme, (t) => {
   applyTheme(t)
   try { localStorage.setItem(STORAGE_KEY, t) } catch { /* noop */ }
 })
 
-export function useNeiTheme() {
-  function toggleTheme(): void {
-    theme.value = theme.value === 'dark' ? 'light' : 'dark'
-  }
+/** Module-level toggle for use outside Vue components (operators, node) */
+export function toggleTheme(): void {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+}
 
+export function useNeiTheme() {
   return { theme, toggleTheme }
 }
+
+export { theme }

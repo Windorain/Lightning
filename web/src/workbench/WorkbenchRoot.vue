@@ -3,7 +3,6 @@ import { onMounted, onBeforeUnmount, provide, ref, computed } from 'vue'
 
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
 import WorkbenchSettingsDrawer from '@/workbench/components/WorkbenchSettingsDrawer.vue'
-import MenuBar from '@/workbench/components/MenuBar.vue'
 import WorkspaceTabs from '@/workbench/components/WorkspaceTabs.vue'
 import ViewportHost from '@/workbench/components/ViewportHost.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
@@ -41,6 +40,7 @@ import { SyncPreviewOperator, SetFrameIndexOperator } from '@/workbench/operator
 import { SetWorkspaceModeOperator, ResetLayoutOperator } from '@/workbench/operators/builtin/workspaceOperators'
 import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/workbench/operators/builtin/sdeOperators'
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
+import { ThemeToggleOperator, SetLanguageOperator } from '@/workbench/operators/builtin/appearanceOperators'
 
 import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
 import { installTestRunner } from '@/workbench/testing/testRunner'
@@ -55,6 +55,7 @@ import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import {
   blockInspectorPanel, toolShelfPanel, generatePanel,
   transformPanel, batchEditPanel, annotationPanel, labelPanel, sceneInfoPanel,
+  menuBarPanel,
 } from '@/workbench/ux/panels'
 
 // Keymap
@@ -142,6 +143,7 @@ const defaultScreen: bScreen = {
 // Register panels into screen regions
 const viewportArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
 viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels.push(toolShelfPanel)
+viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels.push(menuBarPanel)
 const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
 propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
   blockInspectorPanel, generatePanel, transformPanel,
@@ -157,6 +159,12 @@ const activeToolshelfPanels = computed(() =>
 
 const activePropertiesPanels = computed(() =>
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels
+    .filter(p => p.poll(bctx))
+    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
+)
+
+const activeHeaderPanels = computed(() =>
+  viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels
     .filter(p => p.poll(bctx))
     .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
@@ -238,6 +246,8 @@ bctx.operators.register(ExportPlainOperator)
 bctx.operators.register(ExportEnvelopeOperator)
 bctx.operators.register(ExportObjOperator)
 bctx.operators.register(ExportIsoPngOperator)
+bctx.operators.register(ThemeToggleOperator)
+bctx.operators.register(SetLanguageOperator)
 
 // Rebuild tool list after all operators registered, then activate default
 toolRegistry.rebuildTools()
@@ -302,11 +312,6 @@ const workspace = ref<'preview' | 'wiki' | 'export'>('preview')
 const settingsOpen = ref(false)
 provide('workbenchSettingsOpen', settingsOpen)
 
-function openSettings(): void { settingsOpen.value = true }
-function resetLayout(): void {
-  try { localStorage.removeItem('wsr-wb-left-w'); localStorage.removeItem('wsr-wb-right-w') } catch { /* */ }
-  location.reload()
-}
 
 onMounted(async () => {
   keymap = loadKeymap()
@@ -358,7 +363,15 @@ onMounted(() => {
 <template>
   <WorkbenchShell v-show="workspace === 'preview'">
     <template #menubar>
-      <MenuBar @open-settings="openSettings" @reset-layout="resetLayout" />
+      <div class="wb-menubar-inner">
+        <UIRenderer
+          v-for="panel in activeHeaderPanels"
+          :key="panel.id"
+          :layout="panel.layout"
+          :rna="bctx.rna"
+          :owner="panel.owner"
+        />
+      </div>
     </template>
     <template #workspace-tabs>
       <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
@@ -393,7 +406,15 @@ onMounted(() => {
 
   <div v-show="workspace === 'wiki'" class="wb-standalone">
     <header class="wb-standalone-menubar">
-      <MenuBar @open-settings="openSettings" @reset-layout="resetLayout" />
+      <div class="wb-menubar-inner">
+        <UIRenderer
+          v-for="panel in activeHeaderPanels"
+          :key="panel.id"
+          :layout="panel.layout"
+          :rna="bctx.rna"
+          :owner="panel.owner"
+        />
+      </div>
     </header>
     <header class="wb-standalone-top">
       <div class="wb-standalone-tabs">
@@ -407,7 +428,15 @@ onMounted(() => {
 
   <div v-show="workspace === 'export'" class="wb-standalone">
     <header class="wb-standalone-menubar">
-      <MenuBar @open-settings="openSettings" @reset-layout="resetLayout" />
+      <div class="wb-menubar-inner">
+        <UIRenderer
+          v-for="panel in activeHeaderPanels"
+          :key="panel.id"
+          :layout="panel.layout"
+          :rna="bctx.rna"
+          :owner="panel.owner"
+        />
+      </div>
     </header>
     <header class="wb-standalone-top">
       <div class="wb-standalone-tabs">
@@ -471,6 +500,43 @@ onMounted(() => {
 }
 .wb-toolshelf :deep(.ux-operator-btn:hover) {
   background: var(--nei-panel-hover);
+}
+.wb-menubar-inner {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 4px;
+}
+.wb-menubar-inner :deep(.ux-menu-btn) {
+  border: none;
+  background: transparent;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--nei-label);
+  cursor: pointer;
+}
+.wb-menubar-inner :deep(.ux-menu-btn:hover) {
+  background: var(--nei-panel-hover);
+  border-radius: 4px;
+}
+.wb-menubar-inner :deep(.ux-arrow) { display: none; }
+.wb-menubar-inner :deep(.ux-operator-btn) {
+  border: none;
+  background: transparent;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--nei-label);
+  width: auto;
+  cursor: pointer;
+}
+.wb-menubar-inner :deep(.ux-operator-btn:hover) {
+  background: var(--nei-panel-hover);
+  border-radius: 4px;
+}
+.wb-menubar-inner :deep(.ux-label) {
+  font-size: 11px;
+  color: var(--nei-muted);
+  padding: 0 4px;
 }
 </style>
 

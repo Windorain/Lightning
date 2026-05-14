@@ -156,6 +156,14 @@ export function boundsOfByRNAPath(rnaPath: string): Rect[] {
   return rects
 }
 
+/** Find a widget rect containing (x, y), or null. */
+export function widgetAt(x: number, y: number): WidgetRect | null {
+  for (const wr of widgetCache.values()) {
+    if (rectContains(wr.bounds, x, y)) return { ...wr }
+  }
+  return null
+}
+
 export function relayout(ctx: BContext): void {
   if (ctx.screen) computeLayout(ctx, ctx.screen)
 }

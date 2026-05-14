@@ -10,6 +10,13 @@ export const NewSceneOperator: OperatorType = {
   },
 
   async exec(bctx, _props) {
+    if (bctx.scene.dirty.value) {
+      const confirmFn = bctx.settings.confirmDirty ?? window.confirm
+      const ok = confirmFn('当前场景有未保存的修改，是否保存？')
+      if (ok) {
+        await bctx.operators.exec('OPERATOR_SAVE_FILE')
+      }
+    }
     bctx.selection.clear()
     bctx.editHistory.clear()
     await bctx.scene.newScene()
@@ -27,11 +34,17 @@ export const OpenSceneOperator: OperatorType = {
 
   async exec(bctx, _props) {
     const file = _props.file as File | undefined
-    if (file) {
-      bctx.selection.clear()
-      bctx.editHistory.clear()
-      await bctx.scene.loadSceneFromFile(file)
+    if (!file) return
+    if (bctx.scene.dirty.value) {
+      const confirmFn = bctx.settings.confirmDirty ?? window.confirm
+      const ok = confirmFn('当前场景有未保存的修改，是否保存？')
+      if (ok) {
+        await bctx.operators.exec('OPERATOR_SAVE_FILE')
+      }
     }
+    bctx.selection.clear()
+    bctx.editHistory.clear()
+    await bctx.scene.loadSceneFromFile(file)
   },
 }
 

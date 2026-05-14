@@ -1,5 +1,7 @@
 import { ref } from 'vue'
 import type { BContextSettings } from '@/workbench/context/bContext'
+import { currentLang } from '@/workbench/i18n'
+import { theme } from '@/workbench/composables/useNeiTheme'
 
 export const FLOOR_TEMPLATES = [
   { id: 'floor_stone', label: 'Stone Floor', color: '#808080' },
@@ -25,5 +27,8 @@ export function createBContextSettings(): BContextSettings {
     dragSensitivity: 0.05,
     get snapEnabled(): boolean { return snapEnabled.value },
     set snapEnabled(v: boolean) { snapEnabled.value = v },
+    confirmDirty: (msg: string) => window.confirm(msg),
+    get theme(): 'dark' | 'light' { return theme.value },
+    get language(): 'zh' | 'en' { return currentLang.value },
   }
 }
