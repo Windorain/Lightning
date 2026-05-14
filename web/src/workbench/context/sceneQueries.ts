@@ -82,6 +82,84 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     roundVec(v: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
       return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) }
     },
+
+    getAnnotationBoxes() {
+      const doc = bctx.scene.scene.value as Record<string, any> | null
+      return (doc?.annotations as any[]) ?? []
+    },
+
+    getAnnotationBox(id: string) {
+      const doc = bctx.scene.scene.value as Record<string, any> | null
+      return (doc?.annotations as any[])?.find((a: any) => a.id === id) ?? null
+    },
+
+    pickSurface(event: PointerEvent) {
+      const { camera, contentGroup, domElement, definition, layerPreview } = bctx
+      if (!camera || !contentGroup || !domElement || !definition) return null
+      const result = pickVoxelFromPointer({
+        clientX: event.clientX, clientY: event.clientY,
+        domElement, camera, contentGroup, def: definition,
+        layerPreview: layerPreview ?? undefined as any,
+      })
+      if (!result) return null
+      const cx = result.column + 0.5, cy = result.row + 0.5, cz = result.zSlice + 0.5
+      const dx = result.column + 0.5 - cx, dy = result.row + 0.5 - cy, dz = result.zSlice + 0.5 - cz
+      const absDx = Math.abs(dx), absDy = Math.abs(dy), absDz = Math.abs(dz)
+      let nx = 0, ny = 0, nz = 0
+      if (absDx >= absDy && absDx >= absDz) nx = dx > 0 ? 1 : -1
+      else if (absDy >= absDx && absDy >= absDz) ny = dy > 0 ? 1 : -1
+      else nz = dz > 0 ? 1 : -1
+      return {
+        pos: { x: result.column + nx, y: result.row + ny, z: result.zSlice + nz },
+        normal: { x: nx, y: ny, z: nz },
+      }
+    },
+
+    pickGround(event: PointerEvent) {
+      const { camera, domElement } = bctx
+      if (!camera || !domElement) return null
+      const rect = domElement.getBoundingClientRect()
+      const mouse = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      const raycaster = new THREE.Raycaster()
+      raycaster.setFromCamera(mouse, camera)
+      const dir = raycaster.ray.direction
+      const origin = raycaster.ray.origin
+      if (Math.abs(dir.y) < 0.0001) return null
+      const t = -origin.y / dir.y
+      if (t <= 0) return null
+      return {
+        x: Math.round(origin.x + dir.x * t),
+        y: 0,
+        z: Math.round(origin.z + dir.z * t),
+      }
+    },
+
+    pickWorldPoint(event: PointerEvent) {
+      const surface = this.pickSurface(event)
+      if (surface) return surface.pos
+      const { camera, domElement } = bctx
+      if (!camera || !domElement) return null
+      const rect = domElement.getBoundingClientRect()
+      const mouse = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      const raycaster = new THREE.Raycaster()
+      raycaster.setFromCamera(mouse, camera)
+      const dir = raycaster.ray.direction
+      const origin = raycaster.ray.origin
+      if (Math.abs(dir.y) < 0.0001) return null
+      const t = -origin.y / dir.y
+      if (t <= 0) return null
+      return {
+        x: origin.x + dir.x * t,
+        y: 0,
+        z: origin.z + dir.z * t,
+      }
+    },
   }
 }
 

@@ -75,6 +75,11 @@ export const AnnotationOperator: OperatorType = {
         visible: true,
         created_at: Date.now(),
         updated_at: Date.now(),
+        hover_event: 'none',
+        hover_payload: '',
+        render_style: 'wireframe',
+        render_opacity: 0.5,
+        linked_block_ref: '',
       }
 
       if (!doc.annotations) doc.annotations = []

@@ -6,6 +6,12 @@ export interface V2BlockPos {
   z: number
 }
 
+export interface V2FloatPos {
+  x: number
+  y: number
+  z: number
+}
+
 export interface V2BlockPart {
   local_id: string
   part_kind: string
@@ -59,13 +65,18 @@ export interface V2AnnotationBox {
   id: string
   title: string
   description: string
-  min: V2BlockPos
-  max: V2BlockPos
+  min: V2FloatPos
+  max: V2FloatPos
   color: string
   visible: boolean
   part_refs?: V2PartRef[]
   created_at: number
   updated_at: number
+  hover_event: string
+  hover_payload: string
+  render_style: string
+  render_opacity: number
+  linked_block_ref: string
 }
 
 export interface V2Label {

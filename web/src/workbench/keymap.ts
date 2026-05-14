@@ -17,6 +17,8 @@ export const DEFAULT_KEYMAP: KeyBinding[] = [
   { key: 'e', toolId: 'eyedropper', description: '拾色器' },
   { key: 'm', ctrl: true, toolId: 'mirror', description: '镜像工具' },
   { key: 'a', shift: true, toolId: 'generate', description: '生成工具' },
+  { key: 'h', toolId: 'add-block', description: '添加方块' },
+  { key: 'j', toolId: 'add-annotation-box', description: '添加注解框' },
   { key: 'z', ctrl: true, shift: false, action: 'undo', description: '撤销' },
   { key: 'z', ctrl: true, shift: true, action: 'redo', description: '重做' },
   { key: 'i', ctrl: true, action: 'invert', description: '反选' },

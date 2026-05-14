@@ -53,6 +53,7 @@ import {
 
 // Keymap
 import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
+import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 
 // Document format handlers — 注册到分发中心
 import { formatDispatcher } from '@/workbench/context/documentHandler'
@@ -157,8 +158,29 @@ const activePropertiesPanels = computed(() =>
 // Compute initial layout
 computeLayout(bctx, defaultScreen)
 
+// Context menu
+const contextMenu = createContextMenu()
+const lastMousePosition = ref<{ x: number; y: number } | null>(null)
+
+const ADD_MENU_ITEMS: ContextMenuItem[] = [
+  { kind: 'label', label: '生成', icon: '＋' },
+  { kind: 'separator', label: '' },
+  { kind: 'operator', label: '方块', icon: '⬜', opId: 'OPERATOR_ADD_BLOCK', props: {} },
+  { kind: 'operator', label: '注解框', icon: '📝', opId: 'OPERATOR_ADD_ANNOTATION_BOX', props: {} },
+]
+
+function invokeContextMenuItem(item: ContextMenuItem) {
+  if (item.opId) {
+    bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: item.opId })
+  }
+}
+
+function onMouseMove(e: MouseEvent) {
+  lastMousePosition.value = { x: e.clientX, y: e.clientY }
+}
+
 // Wire into bctx
-;(bctx as any).wm = { windows: [], activeWindow: null }
+;(bctx as any).wm = { windows: [], activeWindow: null, contextMenu, showContextMenu, hideContextMenu }
 ;(bctx as any).screen = defaultScreen
 ;(bctx as any).area = null
 ;(bctx as any).region = null
@@ -216,6 +238,19 @@ const OPERATOR_KEY_MAP: Record<string, string> = {
 let keymap: KeyBinding[] = []
 
 function handleKeydown(event: KeyboardEvent): void {
+  // Shift+A → context menu
+  if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    event.preventDefault()
+    const pos = lastMousePosition.value ?? { x: 400, y: 300 }
+    showContextMenu(contextMenu, pos, ADD_MENU_ITEMS)
+    return
+  }
+
+  // Click to close context menu
+  if (contextMenu.open.value) {
+    hideContextMenu(contextMenu)
+  }
+
   for (const binding of keymap) {
     if (!matchBinding(binding, event)) continue
     event.preventDefault()
@@ -253,6 +288,7 @@ function resetLayout(): void {
 onMounted(async () => {
   keymap = loadKeymap()
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('mousemove', onMouseMove)
 
   if (connection.apiBase.value) {
     await connection.testConnection()
@@ -271,6 +307,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('mousemove', onMouseMove)
 })
 
 installTestRunner(bctx)
@@ -357,6 +394,35 @@ onMounted(() => {
   </div>
 
   <WorkbenchSettingsDrawer />
+
+  <!-- ContextMenu floating overlay -->
+  <Teleport to="body">
+    <div
+      v-if="contextMenu.open.value"
+      class="context-menu-overlay"
+      @click="hideContextMenu(contextMenu)"
+      @keydown.escape="hideContextMenu(contextMenu)"
+    >
+      <div
+        class="context-menu-popup"
+        :style="{ left: contextMenu.position.value.x + 'px', top: contextMenu.position.value.y + 'px' }"
+        @click.stop
+      >
+        <template v-for="(item, i) in contextMenu.items.value" :key="i">
+          <hr v-if="item.kind === 'separator'" class="cm-sep" />
+          <span v-else-if="item.kind === 'label'" class="cm-label">{{ item.label }}</span>
+          <button
+            v-else-if="item.kind === 'operator'"
+            class="cm-item"
+            @click="invokeContextMenuItem(item); hideContextMenu(contextMenu)"
+          >
+            <span v-if="item.icon" class="cm-icon">{{ item.icon }}</span>
+            {{ item.label }}
+          </button>
+        </template>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -383,6 +449,30 @@ onMounted(() => {
 </style>
 
 <style>
+.context-menu-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+}
+.context-menu-popup {
+  position: absolute;
+  min-width: 160px;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.cm-item {
+  display: block; width: 100%; padding: 4px 12px;
+  border: none; background: transparent; color: #ccc;
+  font-size: 13px; text-align: left; cursor: pointer;
+}
+.cm-item:hover { background: #4a4a4a; }
+.cm-label {
+  display: block; padding: 2px 12px; font-size: 11px; color: #999;
+}
+.cm-sep { margin: 4px 8px; border: none; border-top: 1px solid #555; }
+.cm-icon { margin-right: 6px; }
+
 .wb-standalone {
   display: flex;
   flex-direction: column;

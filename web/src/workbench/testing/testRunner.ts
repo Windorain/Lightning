@@ -94,6 +94,72 @@ function createMockQueries(
       }
     },
     roundVec(v) { return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) } },
+
+    getAnnotationBoxes() {
+      const doc = getDoc()
+      return (doc?.annotations as any[]) ?? []
+    },
+
+    getAnnotationBox(id: string) {
+      const doc = getDoc()
+      return (doc?.annotations as any[])?.find((a: any) => a.id === id) ?? null
+    },
+
+    pickSurface(event: PointerEvent) {
+      const { origin, dir } = screenToRay(event.clientX, event.clientY, camera)
+      const blocks = getBlocks()
+      let bestT = Infinity
+      let best: { pos: { x: number; y: number; z: number }; normal: { x: number; y: number; z: number } } | null = null
+      for (const b of blocks) {
+        const aabb = blockAABB(b.pos)
+        const t = rayAABB(origin, dir, aabb.min, aabb.max)
+        if (t !== null && t < bestT) {
+          bestT = t
+          const hitX = origin.x + dir.x * t
+          const hitY = origin.y + dir.y * t
+          const hitZ = origin.z + dir.z * t
+          const eps = 0.001
+          let nx = 0, ny = 0, nz = 0
+          if (Math.abs(hitX - aabb.min.x) < eps) nx = -1
+          else if (Math.abs(hitX - aabb.max.x) < eps) nx = 1
+          else if (Math.abs(hitY - aabb.min.y) < eps) ny = -1
+          else if (Math.abs(hitY - aabb.max.y) < eps) ny = 1
+          else if (Math.abs(hitZ - aabb.min.z) < eps) nz = -1
+          else if (Math.abs(hitZ - aabb.max.z) < eps) nz = 1
+          best = {
+            pos: { x: b.pos.x + nx, y: b.pos.y + ny, z: b.pos.z + nz },
+            normal: { x: nx, y: ny, z: nz },
+          }
+        }
+      }
+      return best
+    },
+
+    pickGround(event: PointerEvent) {
+      const { origin, dir } = screenToRay(event.clientX, event.clientY, camera)
+      if (Math.abs(dir.y) < 0.0001) return null
+      const t = -origin.y / dir.y
+      if (t <= 0) return null
+      return {
+        x: Math.round(origin.x + dir.x * t),
+        y: 0,
+        z: Math.round(origin.z + dir.z * t),
+      }
+    },
+
+    pickWorldPoint(event: PointerEvent) {
+      const surface = this.pickSurface(event)
+      if (surface) return surface.pos
+      const { origin, dir } = screenToRay(event.clientX, event.clientY, camera)
+      if (Math.abs(dir.y) < 0.0001) return null
+      const t = -origin.y / dir.y
+      if (t <= 0) return null
+      return {
+        x: origin.x + dir.x * t,
+        y: 0,
+        z: origin.z + dir.z * t,
+      }
+    },
   }
 }
 
@@ -235,6 +301,8 @@ const TOOL_KEY_BINDING: Record<string, { key: string; ctrl?: boolean; shift?: bo
   eyedropper:{ key: 'e' },
   mirror:    { key: 'm', ctrl: true },
   generate:  { key: 'a', shift: true },
+  'add-block':           { key: 'h' },
+  'add-annotation-box':  { key: 'j' },
 }
 
 /** 语义动作类型 — 所有动作走 L0 事件链，不直接调用 operator API */

@@ -50,6 +50,8 @@ const TOOL_KEY_MAP: Record<string, string> = {
   delete: 'OPERATOR_DELETE', replace: 'OPERATOR_REPLACE',
   fill: 'OPERATOR_FILL', eyedropper: 'OPERATOR_EYEDROPPER',
   mirror: 'OPERATOR_MIRROR', generate: 'OPERATOR_GENERATE',
+  'add-block': 'OPERATOR_ADD_BLOCK',
+  'add-annotation-box': 'OPERATOR_ADD_ANNOTATION_BOX',
 }
 
 /** 工具名 → 键盘绑定（从 DEFAULT_KEYMAP 提取，供 activateTool 使用） */
@@ -62,6 +64,8 @@ const TOOL_KEY_BINDING: Record<string, { key: string; ctrl?: boolean; shift?: bo
   eyedropper:{ key: 'e' },
   mirror:    { key: 'm', ctrl: true },
   generate:  { key: 'a', shift: true },
+  'add-block':           { key: 'h' },
+  'add-annotation-box':  { key: 'j' },
 }
 
 /* —— Event handler cookbook —— */
@@ -113,10 +117,10 @@ export interface CheckCollector {
   done(): CheckResult[]
 }
 
-function createCollector(ctx: BContext): CheckCollector {
+function createCollector(_ctx: BContext): CheckCollector {
   const results: CheckResult[] = []
   return {
-    check(name, fn, expected, actualFn) {
+    check(_name, fn, expected, actualFn) {
       let pass = false, actual: unknown = undefined
       try { pass = fn(); actual = actualFn?.() ?? actual } catch (e) { actual = String(e) }
       results.push({ pass, expected, actual: actual ?? (pass ? expected : 'failed') })
@@ -168,6 +172,16 @@ export interface TestHarness {
   assertOperatorActive(id: string): void
   assertProjectBlockNull(pos: { x: number; y: number; z: number }): void
   assertRNAPath(path: string): any
+  /** 注解框断言 */
+  assertAnnotationBoxCount(n: number): void
+  assertAnnotationBoxExists(id: string): void
+  /** 点击世界坐标（用于测试空白区域放置） */
+  clickWorld(worldPos: { x: number; y: number; z: number }): void
+  /** ContextMenu 可见性断言 */
+  assertContextMenuOpen(): void
+  assertContextMenuClosed(): void
+  /** 点击 ContextMenu 中的项 */
+  clickContextMenuItem(label: string): void
 
   // Batch check (collect, don't throw)
   /** 收集模式：返回 CheckCollector，所有 check 不抛异常，done() 返回结果列表 */
@@ -344,6 +358,43 @@ export function createTestHarness(
       const desc = ctx.rna.resolve(path)
       if (!desc) throw new Error(`RNA path "${path}" did not resolve`)
       return desc
+    },
+
+    assertAnnotationBoxCount(n) {
+      const actual = ctx.queries.getAnnotationBoxes().length
+      if (actual !== n) throw new Error(`annotation box count: expected ${n}, got ${actual}`)
+    },
+
+    assertAnnotationBoxExists(id) {
+      const found = ctx.queries.getAnnotationBox(id)
+      if (!found) throw new Error(`annotation box "${id}" not found`)
+    },
+
+    clickWorld(worldPos) {
+      const p = ctx.queries.projectBlock(worldPos)
+      if (!p) throw new Error(`clickWorld: (${worldPos.x},${worldPos.y},${worldPos.z}) not visible`)
+      this.click(p.x, p.y)
+    },
+
+    assertContextMenuOpen() {
+      const cm = (ctx.wm as any).contextMenu
+      if (!cm || !cm.open) throw new Error('context menu should be open')
+    },
+
+    assertContextMenuClosed() {
+      const cm = (ctx.wm as any).contextMenu
+      if (cm && cm.open) throw new Error('context menu should be closed')
+    },
+
+    clickContextMenuItem(label) {
+      const cm = (ctx.wm as any).contextMenu
+      if (!cm || !cm.open) throw new Error('context menu not open')
+      const item = cm.items.find((i: any) => i.label === label)
+      if (!item) {
+        const available = cm.items.map((i: any) => i.label).join(', ')
+        throw new Error(`context menu item "${label}" not found. Available: ${available}`)
+      }
+      ctx.operators.invoke(item.opId, item.props ?? {})
     },
 
     /* —— Batch —— */

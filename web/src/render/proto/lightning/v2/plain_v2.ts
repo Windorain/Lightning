@@ -100,6 +100,23 @@ export interface BlockPos {
     z: number;
 }
 /**
+ * @generated from protobuf message lightning.v2.FloatPos
+ */
+export interface FloatPos {
+    /**
+     * @generated from protobuf field: float x = 1
+     */
+    x: number;
+    /**
+     * @generated from protobuf field: float y = 2
+     */
+    y: number;
+    /**
+     * @generated from protobuf field: float z = 3
+     */
+    z: number;
+}
+/**
  * @generated from protobuf message lightning.v2.WorldFrame
  */
 export interface WorldFrame {
@@ -351,13 +368,13 @@ export interface AnnotationBox {
      */
     description: string; // Markdown
     /**
-     * @generated from protobuf field: lightning.v2.BlockPos min = 4
+     * @generated from protobuf field: lightning.v2.FloatPos min = 4
      */
-    min?: BlockPos;
+    min?: FloatPos; // was BlockPos
     /**
-     * @generated from protobuf field: lightning.v2.BlockPos max = 5
+     * @generated from protobuf field: lightning.v2.FloatPos max = 5
      */
-    max?: BlockPos;
+    max?: FloatPos; // was BlockPos
     /**
      * @generated from protobuf field: string color = 6
      */
@@ -369,7 +386,7 @@ export interface AnnotationBox {
     /**
      * @generated from protobuf field: repeated lightning.v2.PartRef part_refs = 8
      */
-    partRefs: PartRef[]; // 可选：定向注解 part
+    partRefs: PartRef[];
     /**
      * @generated from protobuf field: int64 created_at = 9
      */
@@ -378,6 +395,28 @@ export interface AnnotationBox {
      * @generated from protobuf field: int64 updated_at = 10
      */
     updatedAt: bigint;
+    /**
+     * v2.1 注解框具体属性
+     *
+     * @generated from protobuf field: string hover_event = 11
+     */
+    hoverEvent: string; // "none" | "tooltip" | "highlight" | "navigate"
+    /**
+     * @generated from protobuf field: string hover_payload = 12
+     */
+    hoverPayload: string; // event payload (e.g. route path, tooltip text)
+    /**
+     * @generated from protobuf field: string render_style = 13
+     */
+    renderStyle: string; // "wireframe" | "translucent" | "hidden"
+    /**
+     * @generated from protobuf field: float render_opacity = 14
+     */
+    renderOpacity: number; // 0.0 - 1.0, only when render_style != "hidden"
+    /**
+     * @generated from protobuf field: string linked_block_ref = 15
+     */
+    linkedBlockRef: string; // optional: target block_state_id for auto-linking
 }
 /**
  * @generated from protobuf message lightning.v2.PartRef
@@ -745,6 +784,69 @@ class BlockPos$Type extends MessageType<BlockPos> {
  * @generated MessageType for protobuf message lightning.v2.BlockPos
  */
 export const BlockPos = new BlockPos$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FloatPos$Type extends MessageType<FloatPos> {
+    constructor() {
+        super("lightning.v2.FloatPos", [
+            { no: 1, name: "x", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 2, name: "y", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 3, name: "z", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FloatPos>): FloatPos {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.x = 0;
+        message.y = 0;
+        message.z = 0;
+        if (value !== undefined)
+            reflectionMergePartial<FloatPos>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FloatPos): FloatPos {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* float x */ 1:
+                    message.x = reader.float();
+                    break;
+                case /* float y */ 2:
+                    message.y = reader.float();
+                    break;
+                case /* float z */ 3:
+                    message.z = reader.float();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FloatPos, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* float x = 1; */
+        if (message.x !== 0)
+            writer.tag(1, WireType.Bit32).float(message.x);
+        /* float y = 2; */
+        if (message.y !== 0)
+            writer.tag(2, WireType.Bit32).float(message.y);
+        /* float z = 3; */
+        if (message.z !== 0)
+            writer.tag(3, WireType.Bit32).float(message.z);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message lightning.v2.FloatPos
+ */
+export const FloatPos = new FloatPos$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class WorldFrame$Type extends MessageType<WorldFrame> {
     constructor() {
@@ -1609,13 +1711,18 @@ class AnnotationBox$Type extends MessageType<AnnotationBox> {
             { no: 1, name: "id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "min", kind: "message", T: () => BlockPos },
-            { no: 5, name: "max", kind: "message", T: () => BlockPos },
+            { no: 4, name: "min", kind: "message", T: () => FloatPos },
+            { no: 5, name: "max", kind: "message", T: () => FloatPos },
             { no: 6, name: "color", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 7, name: "visible", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 8, name: "part_refs", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => PartRef },
             { no: 9, name: "created_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 10, name: "updated_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 10, name: "updated_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 11, name: "hover_event", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 12, name: "hover_payload", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 13, name: "render_style", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 14, name: "render_opacity", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 15, name: "linked_block_ref", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<AnnotationBox>): AnnotationBox {
@@ -1628,6 +1735,11 @@ class AnnotationBox$Type extends MessageType<AnnotationBox> {
         message.partRefs = [];
         message.createdAt = 0n;
         message.updatedAt = 0n;
+        message.hoverEvent = "";
+        message.hoverPayload = "";
+        message.renderStyle = "";
+        message.renderOpacity = 0;
+        message.linkedBlockRef = "";
         if (value !== undefined)
             reflectionMergePartial<AnnotationBox>(this, message, value);
         return message;
@@ -1646,11 +1758,11 @@ class AnnotationBox$Type extends MessageType<AnnotationBox> {
                 case /* string description */ 3:
                     message.description = reader.string();
                     break;
-                case /* lightning.v2.BlockPos min */ 4:
-                    message.min = BlockPos.internalBinaryRead(reader, reader.uint32(), options, message.min);
+                case /* lightning.v2.FloatPos min */ 4:
+                    message.min = FloatPos.internalBinaryRead(reader, reader.uint32(), options, message.min);
                     break;
-                case /* lightning.v2.BlockPos max */ 5:
-                    message.max = BlockPos.internalBinaryRead(reader, reader.uint32(), options, message.max);
+                case /* lightning.v2.FloatPos max */ 5:
+                    message.max = FloatPos.internalBinaryRead(reader, reader.uint32(), options, message.max);
                     break;
                 case /* string color */ 6:
                     message.color = reader.string();
@@ -1666,6 +1778,21 @@ class AnnotationBox$Type extends MessageType<AnnotationBox> {
                     break;
                 case /* int64 updated_at */ 10:
                     message.updatedAt = reader.int64().toBigInt();
+                    break;
+                case /* string hover_event */ 11:
+                    message.hoverEvent = reader.string();
+                    break;
+                case /* string hover_payload */ 12:
+                    message.hoverPayload = reader.string();
+                    break;
+                case /* string render_style */ 13:
+                    message.renderStyle = reader.string();
+                    break;
+                case /* float render_opacity */ 14:
+                    message.renderOpacity = reader.float();
+                    break;
+                case /* string linked_block_ref */ 15:
+                    message.linkedBlockRef = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -1688,12 +1815,12 @@ class AnnotationBox$Type extends MessageType<AnnotationBox> {
         /* string description = 3; */
         if (message.description !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.description);
-        /* lightning.v2.BlockPos min = 4; */
+        /* lightning.v2.FloatPos min = 4; */
         if (message.min)
-            BlockPos.internalBinaryWrite(message.min, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
-        /* lightning.v2.BlockPos max = 5; */
+            FloatPos.internalBinaryWrite(message.min, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* lightning.v2.FloatPos max = 5; */
         if (message.max)
-            BlockPos.internalBinaryWrite(message.max, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+            FloatPos.internalBinaryWrite(message.max, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         /* string color = 6; */
         if (message.color !== "")
             writer.tag(6, WireType.LengthDelimited).string(message.color);
@@ -1709,6 +1836,21 @@ class AnnotationBox$Type extends MessageType<AnnotationBox> {
         /* int64 updated_at = 10; */
         if (message.updatedAt !== 0n)
             writer.tag(10, WireType.Varint).int64(message.updatedAt);
+        /* string hover_event = 11; */
+        if (message.hoverEvent !== "")
+            writer.tag(11, WireType.LengthDelimited).string(message.hoverEvent);
+        /* string hover_payload = 12; */
+        if (message.hoverPayload !== "")
+            writer.tag(12, WireType.LengthDelimited).string(message.hoverPayload);
+        /* string render_style = 13; */
+        if (message.renderStyle !== "")
+            writer.tag(13, WireType.LengthDelimited).string(message.renderStyle);
+        /* float render_opacity = 14; */
+        if (message.renderOpacity !== 0)
+            writer.tag(14, WireType.Bit32).float(message.renderOpacity);
+        /* string linked_block_ref = 15; */
+        if (message.linkedBlockRef !== "")
+            writer.tag(15, WireType.LengthDelimited).string(message.linkedBlockRef);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

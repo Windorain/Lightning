@@ -36,6 +36,16 @@ export interface BContextQueries {
   axisAdd(origin: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', delta: number): { x: number; y: number; z: number }
   /** 向量取整 */
   roundVec(v: { x: number; y: number; z: number }): { x: number; y: number; z: number }
+  /** 场景中所有注解框 */
+  getAnnotationBoxes(): import('@/render/data/sceneDocumentV2').V2AnnotationBox[]
+  /** 按 ID 获取单个注解框 */
+  getAnnotationBox(id: string): import('@/render/data/sceneDocumentV2').V2AnnotationBox | null
+  /** 射线命中方块 → 相邻放置位置 + 面法线。无命中返回 null */
+  pickSurface(event: PointerEvent): { pos: { x: number; y: number; z: number }; normal: { x: number; y: number; z: number } } | null
+  /** 射线与地平面 (y=0) 交点，返回整数网格坐标 */
+  pickGround(event: PointerEvent): { x: number; y: number; z: number } | null
+  /** 射线命中浮点世界坐标（注解框用）。无命中 fallback 到地平面浮点坐标 */
+  pickWorldPoint(event: PointerEvent): { x: number; y: number; z: number } | null
 }
 
 export interface BContextSettings {

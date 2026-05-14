@@ -1,6 +1,6 @@
 import type { DocumentHandler } from '@/workbench/context/documentHandler'
 import type { V2PlainSceneDocument, V2WorldFrame, V2BlockInstance, V2MaterialEntry, V2BlockState } from '@/render/data/sceneDocumentV2'
-import type { StructureDataBaked, BlockPaletteEntry } from '@/render/schema/types'
+import type { StructureDataBaked } from '@/render/schema/types'
 
 export const StructureDataHandler: DocumentHandler = {
   priority: 30,
