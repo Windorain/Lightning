@@ -16,7 +16,7 @@ import { useSelectionContext } from '@/workbench/selectionContext'
 import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useBContext } from '@/workbench/context/bContext'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
-import { updateGizmoState, updateCameraState, logError } from '@/workbench/debug/debugLog'
+import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
 import { createDefaultPickHandler } from '@/workbench/handlers/defaultPickHandler'
@@ -37,7 +37,7 @@ const store = createPreviewSceneStore(props.mergedConfig)
 provide(PreviewSceneContextKey, store)
 
 watch(() => props.mergedConfig, async (cfg) => {
-  try { await store.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logError(`reloadFromConfig: ${e}`) }
+  try { await store.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logCenter.error('WorkbenchViewport', `reloadFromConfig: ${e}`) }
 })
 
 const { hover, setHover, clearHover } = usePreviewTooltip()
@@ -74,7 +74,7 @@ const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 /* ---- Viewport events ---- */
 async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas: HTMLElement, _orbitTarget: THREE.Vector3): Promise<void> {
   store.registerScene(scene)
-  try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logError(`rebuildContentMesh: ${e}`) }
+  try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
 
   viewportCamera = camera
   orbitTarget = _orbitTarget
@@ -234,12 +234,12 @@ function updateGizmo(): void {
 
   if (moveGizmo && showMoveGizmo) {
     const gp = moveGizmo.root.position
-    updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
+    logCenter.updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
   } else {
-    updateGizmoState(null)
+    logCenter.updateGizmoState(null)
   }
   if (viewportCamera) {
-    updateCameraState({
+    logCenter.updateCameraState({
       position: [viewportCamera.position.x, viewportCamera.position.y, viewportCamera.position.z],
       target: orbitTarget ? [orbitTarget.x, orbitTarget.y, orbitTarget.z] : [0, 0, 0],
     })

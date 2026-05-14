@@ -6,6 +6,8 @@ import {
 } from '@/workbench/eventDispatcher'
 import type { MoveGizmo, GizmoAxis } from '@/workbench/tools/gizmos'
 import type { BContext } from '@/workbench/context/bContext'
+import { logCenter } from '@/workbench/logging/LogCenter'
+import type { SessionHandle } from '@/workbench/logging/LogCenter'
 
 const GIZMO_DRAG_ITEMS = [
   { key: 'Escape', value: 'CANCEL' },
@@ -32,6 +34,7 @@ export class GizmoDragModal implements ModalOperation {
   private initialPositions: Array<{ x: number; y: number; z: number }>
   private keymap: ModalKeymap
   private precision = false
+  private session: SessionHandle | null = null
   private computeScreenDelta: (event: PointerEvent) => number
 
   constructor(
@@ -53,6 +56,11 @@ export class GizmoDragModal implements ModalOperation {
 
   onEnter(_event: PointerEvent): ModalKeymap | null {
     if (this.controlsRef) this.controlsRef.enabled = false
+    this.session = logCenter.beginSession('GizmoDrag', `拖拽 ${this.gizmoPart} 开始`, {
+      axis: this.gizmoPart,
+      startPos: { ...this.origin },
+      selectionSize: this.initialPositions.length,
+    })
     return this.keymap
   }
 
@@ -79,6 +87,7 @@ export class GizmoDragModal implements ModalOperation {
     if (event.type === 'pointermove') {
       let delta = this.computeScreenDelta(event)
       if (this.precision) delta *= 0.1
+      this.session?.update(`拖拽 ${this.gizmoPart} ${delta.toFixed(2)}`, { delta })
 
       const newPos = this.bctx.queries.axisAdd(this.origin, this.gizmoPart as any, delta)
       this.gizmo.root.position.set(newPos.x, newPos.y, newPos.z)
@@ -140,6 +149,11 @@ export class GizmoDragModal implements ModalOperation {
           })
         }
       }
+      this.session?.end(`拖拽 ${this.gizmoPart} 完成`, {
+        delta: { x: delta.x, y: delta.y, z: delta.z },
+        blocksAffected: this.initialPositions.length,
+        axis: this.gizmoPart,
+      })
       eventDispatcher.commitModal()
       return { break: true }
     }
@@ -149,6 +163,7 @@ export class GizmoDragModal implements ModalOperation {
 
   onExit(cancelled: boolean): void {
     if (cancelled) {
+      this.session?.end(`拖拽 ${this.gizmoPart} 取消`, { cancelled: true })
       this.gizmo.root.position.set(this.origin.x, this.origin.y, this.origin.z)
     }
     if (this.controlsRef) this.controlsRef.enabled = true

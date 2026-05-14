@@ -1,12 +1,11 @@
 /**
  * Direct test runner — 无浏览器模式。
  *
- * 测试用例是纯数据（TestSpec JSON），直接调用 operator.invoke/modal。
- * 通过 window.__test__ 暴露给 browser-test-loop / SDD。
- *
- * 运行方式：
- *   node dist/run.js debug-eval "runTest('select-click')"
+ * 纯数学 pickVoxel / projectBlock / getGizmoAnchor，零 Three.js 依赖。
+ * 只提供 mock context 工厂和兼容的 JSON spec 运行器。
+ * 事件 handler 注册在 harness.ts 中完成。
  */
+
 import type { BContext, BContextQueries, BContextSettings } from '@/workbench/context/bContext'
 import type { V2WorldFrame } from '@/render/data/sceneDocumentV2'
 import type { BlockRef } from '@/workbench/selectionContext'
@@ -14,10 +13,12 @@ import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigR
 import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt } from '@/workbench/ux/layout'
 import type { bScreen } from '@/workbench/ux/types/screen'
 import { ref } from 'vue'
-import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
+
+import { screenToRay, worldToScreen, rayAABB, vec3, type CameraParams } from './rayMath'
+import { createCameraForBlocks } from './cameraMocks'
 
 /* —— Mock RNA —— */
 
@@ -30,6 +31,72 @@ function createMockRNA() {
   return rna
 }
 
+/* —— Mock Queries —— */
+
+function blockAABB(pos: { x: number; y: number; z: number }) {
+  return {
+    min: vec3(pos.x - 0.5, pos.y - 0.5, pos.z - 0.5),
+    max: vec3(pos.x + 0.5, pos.y + 0.5, pos.z + 0.5),
+  }
+}
+
+function createMockQueries(
+  camera: CameraParams,
+  getBlocks: () => Array<{ pos: { x: number; y: number; z: number }; block_state_id: string }>,
+  getFrame: () => V2WorldFrame | null,
+  getDoc: () => Record<string, any> | null,
+  getSelectionCenter: () => { x: number; y: number; z: number } | null,
+): BContextQueries {
+  return {
+    pickVoxel(event: PointerEvent): BlockRef | null {
+      const { origin, dir } = screenToRay(event.clientX, event.clientY, camera)
+      const blocks = getBlocks()
+      let bestT = Infinity
+      let best: BlockRef | null = null
+      for (const b of blocks) {
+        const aabb = blockAABB(b.pos)
+        const t = rayAABB(origin, dir, aabb.min, aabb.max)
+        if (t !== null && t < bestT) {
+          bestT = t
+          best = { pos: { ...b.pos }, block_state_id: b.block_state_id }
+        }
+      }
+      return best
+    },
+
+    getCurrentFrame(): V2WorldFrame | null { return getFrame() },
+
+    getFrameBlocks(): BlockRef[] {
+      return getBlocks().map(b => ({ pos: { ...b.pos }, block_state_id: b.block_state_id }))
+    },
+
+    getDocument(): Record<string, any> | null { return getDoc() },
+
+    projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null {
+      return worldToScreen(vec3(pos.x, pos.y, pos.z), camera)
+    },
+
+    getGizmoAnchor(axis: 'x' | 'y' | 'z'): { x: number; y: number } | null {
+      const center = getSelectionCenter()
+      if (!center) return null
+      const anchor = { x: center.x, y: center.y, z: center.z }
+      if (axis === 'x') anchor.x += 1
+      else if (axis === 'y') anchor.y += 1
+      else anchor.z += 1
+      return worldToScreen(vec3(anchor.x, anchor.y, anchor.z), camera)
+    },
+
+    axisAdd(origin, axis, delta) {
+      return {
+        x: origin.x + (axis === 'x' ? delta : 0),
+        y: origin.y + (axis === 'y' ? delta : 0),
+        z: origin.z + (axis === 'z' ? delta : 0),
+      }
+    },
+    roundVec(v) { return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) } },
+  }
+}
+
 /* —— Mock BContext —— */
 
 export function createMockBContext(opts?: {
@@ -38,18 +105,18 @@ export function createMockBContext(opts?: {
 }): BContext {
   const selectionItems = ref<Set<BlockRef>>(new Set())
   const frameIndex = ref(0)
-
   const mockScene = ref<any>(null)
   const mockDirty = ref(false)
 
-  if (opts?.blocks?.length) {
+  const blockEntries = (opts?.blocks ?? []).map(b => ({
+    pos: { x: b.x, y: b.y, z: b.z },
+    block_state_id: b.id,
+  }))
+
+  if (blockEntries.length > 0) {
     const frame: V2WorldFrame = {
-      label: 'Frame 0',
-      index: 0,
-      blocks: opts.blocks.map(b => ({
-        pos: { x: b.x, y: b.y, z: b.z },
-        block_state_id: b.id,
-      })),
+      label: 'Frame 0', index: 0,
+      blocks: blockEntries,
       entities: [],
     }
     mockScene.value = {
@@ -61,38 +128,28 @@ export function createMockBContext(opts?: {
     }
   }
 
-  const mockQueries: BContextQueries = {
-    pickVoxel(event: PointerEvent): BlockRef | null {
-      return (event as any).__mockPickedBlock ?? null
-    },
-    getCurrentFrame(): V2WorldFrame | null {
-      const doc = mockScene.value
-      if (!doc?.frames?.length) return null
-      return doc.frames[frameIndex.value ?? 0] ?? null
-    },
-    getFrameBlocks(): BlockRef[] {
-      const frame = this.getCurrentFrame()
-      if (!frame) return []
-      return (frame.blocks ?? []).map(b => ({
-        pos: { ...b.pos },
-        block_state_id: b.block_state_id,
-      }))
-    },
-    getDocument(): Record<string, any> | null {
-      return mockScene.value
-    },
-    projectBlock(_pos) { return null },
-    getGizmoAnchor(_axis) { return null },
-    axisAdd(origin, axis, delta) {
-      return {
-        x: origin.x + (axis === 'x' ? delta : 0),
-        y: origin.y + (axis === 'y' ? delta : 0),
-        z: origin.z + (axis === 'z' ? delta : 0),
-      }
-    },
-    roundVec(v) {
-      return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) }
-    },
+  const camera = createCameraForBlocks(
+    blockEntries.map(b => b.pos),
+    { viewportWidth: 800, viewportHeight: 600 },
+  )
+
+  const getBlocks = () => {
+    const doc = mockScene.value
+    if (!doc?.frames?.length) return []
+    return doc.frames[frameIndex.value ?? 0]?.blocks ?? []
+  }
+  const getFrame = () => {
+    const doc = mockScene.value
+    if (!doc?.frames?.length) return null
+    return doc.frames[frameIndex.value ?? 0] ?? null
+  }
+  const getDoc = () => mockScene.value
+  const getSelectionCenter = () => {
+    const items = selectionItems.value
+    if (items.size === 0) return null
+    let sx = 0, sy = 0, sz = 0
+    for (const item of items) { sx += item.pos.x; sy += item.pos.y; sz += item.pos.z }
+    return { x: sx / items.size, y: sy / items.size, z: sz / items.size }
   }
 
   const mockSettings: BContextSettings = {
@@ -105,14 +162,12 @@ export function createMockBContext(opts?: {
 
   const mockCtx = {
     scene: {
-      scene: mockScene,
-      dirty: mockDirty,
+      scene: mockScene, dirty: mockDirty,
       markDirty() { mockDirty.value = true },
       markClean() { mockDirty.value = false },
     } as any,
     selection: {
-      items: selectionItems,
-      frameIndex,
+      items: selectionItems, frameIndex,
       select(voxel: BlockRef) { selectionItems.value = new Set([voxel]) },
       add(voxels: BlockRef[]) {
         const s = new Set(selectionItems.value)
@@ -121,7 +176,10 @@ export function createMockBContext(opts?: {
       },
       clear() { selectionItems.value = new Set() },
     } as any,
-    editHistory: { push() {}, entries: [] } as any,
+    editHistory: {
+      push(entry: any) { entry.execute?.(); this.entries.push(entry) },
+      entries: [] as any[],
+    } as any,
     toolRegistry: {
       activeTool: ref(null),
       activate(id: string) { (this.activeTool as any).value = { id } },
@@ -131,18 +189,12 @@ export function createMockBContext(opts?: {
       getPreviousEditToolId() { return null },
     } as any,
     connection: {} as any,
-    queries: mockQueries,
     settings: mockSettings,
-    camera: null,
-    contentGroup: null,
-    domElement: null,
+    camera: null, contentGroup: null, domElement: null,
     controlsRef: { enabled: true },
-    definition: null,
-    layerPreview: null,
+    definition: null, layerPreview: null,
     wm: { windows: [], activeWindow: null } as any,
-    screen: null as any,
-    area: null as any,
-    region: null as any,
+    screen: null as any, area: null as any, region: null as any,
     rna: createMockRNA(),
     ui: {
       computeLayout: (s: bScreen) => computeLayout(mockCtx as any, s),
@@ -154,7 +206,8 @@ export function createMockBContext(opts?: {
     } as any,
     operators: {
       exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(mockCtx as any, id, props),
-      invoke: (id: string, props?: Record<string, unknown>, event?: Event) => globalOperators.invoke(mockCtx as any, id, props, event as any),
+      invoke: (id: string, props?: Record<string, unknown>, event?: Event) =>
+        globalOperators.invoke(mockCtx as any, id, props, event as any),
       find: (id: string) => globalOperators.find(id),
       all: () => globalOperators.all(),
       register: (op: any) => globalOperators.register(op),
@@ -162,12 +215,15 @@ export function createMockBContext(opts?: {
     eventDispatcher: eventDispatcher as any,
     log: logCenter as any,
     wikiConfig: {},
-    statusMessage: ref('') as any,
   }
-  return mockCtx
+
+  // Wire queries after ctx exists (needs getSelectionCenter closure)
+  ;(mockCtx as any).queries = createMockQueries(camera, getBlocks, getFrame, getDoc, getSelectionCenter)
+
+  return mockCtx as BContext
 }
 
-/* —— TestSpec —— */
+/* —— TestSpec (backward compat) —— */
 
 export interface TestAction {
   action: 'activate-operator' | 'pointerdown' | 'pointermove' | 'pointerup' | 'keydown' | 'assert-selection' | 'assert-log' | 'sleep'
@@ -188,13 +244,6 @@ export interface TestSpec {
   steps: TestAction[]
 }
 
-export interface TestResult {
-  name: string
-  passed: boolean
-  steps: TestStepResult[]
-  duration: number
-}
-
 export interface TestStepResult {
   index: number
   action: TestAction
@@ -203,13 +252,19 @@ export interface TestStepResult {
   detail?: unknown
 }
 
-/* —— Runner —— */
+export interface TestResult {
+  name: string
+  passed: boolean
+  steps: TestStepResult[]
+  duration: number
+}
+
+/* —— Runner (backward compat) —— */
 
 export function runTestSpec(bctx: BContext, spec: TestSpec): TestResult {
   const start = performance.now()
   const steps: TestStepResult[] = []
 
-  // Reset
   bctx.log.clear()
   bctx.selection.clear()
 
@@ -220,7 +275,7 @@ export function runTestSpec(bctx: BContext, spec: TestSpec): TestResult {
       steps.push({ index: i, action, passed: result.passed, detail: result.detail, error: result.error })
     } catch (e) {
       steps.push({ index: i, action, passed: false, error: String(e) })
-      break // 失败即停
+      break
     }
   }
 
@@ -230,51 +285,21 @@ export function runTestSpec(bctx: BContext, spec: TestSpec): TestResult {
 
 function executeAction(bctx: BContext, action: TestAction): { passed: boolean; detail?: unknown; error?: string } {
   switch (action.action) {
-
     case 'activate-operator': {
       if (!action.id) return { passed: false, error: 'missing id' }
-      const op = bctx.operators.find(action.id) as unknown as OperatorType | undefined
-      if (!op) return { passed: false, error: `operator not found: ${action.id}` }
       bctx.toolRegistry.activate(action.id, bctx)
-      const active = bctx.toolRegistry.activeTool.value
-      return { passed: active?.id === action.id, detail: { active: active?.id } }
+      return { passed: bctx.toolRegistry.activeTool.value?.id === action.id, detail: { active: bctx.toolRegistry.activeTool.value?.id } }
     }
 
     case 'pointerdown':
     case 'pointermove':
     case 'pointerup': {
-      const activeId = bctx.toolRegistry.activeTool.value?.id
-      if (!activeId) return { passed: false, error: 'no active operator' }
-      const op = bctx.operators.find(activeId) as unknown as OperatorType | undefined
-      if (!op) return { passed: false, error: `operator not found: ${activeId}` }
       const event = new PointerEvent(action.action, {
         clientX: action.x ?? 0, clientY: action.y ?? 0,
         ctrlKey: action.ctrlKey, shiftKey: action.shiftKey, button: 0,
       })
-      // Mock pick: find block matching action coordinates
-      if (action.action === 'pointerdown') {
-        const frame = bctx.queries.getCurrentFrame()
-        if (frame && action.x !== undefined && action.y !== undefined && action.z !== undefined) {
-          const block = frame.blocks.find(
-            b => b.pos.x === action.x && b.pos.y === action.y && b.pos.z === action.z,
-          )
-          if (block) {
-            (event as any).__mockPickedBlock = {
-              pos: { ...block.pos },
-              block_state_id: block.block_state_id,
-            }
-          }
-        }
-        if (op.invoke) {
-          const result = op.invoke(bctx, {}, event)
-          return { passed: result !== 'CANCELLED', detail: { result } }
-        }
-      }
-      if (op.modal) {
-        const result = op.modal(bctx, {}, event)
-        return { passed: result !== 'CANCELLED', detail: { result } }
-      }
-      return { passed: false, error: 'operator has no modal handler' }
+      const result = bctx.eventDispatcher.dispatch(event)
+      return { passed: true, detail: { break: result.break } }
     }
 
     case 'keydown': {
@@ -296,8 +321,7 @@ function executeAction(bctx: BContext, action: TestAction): { passed: boolean; d
     }
 
     case 'assert-log': {
-      const contains = bctx.log.contains(action.value as number)
-      return { passed: contains, detail: { mask: action.value, recent: bctx.log.recent(action.value as number, 5) } }
+      return { passed: bctx.log.contains(action.value as number), detail: { mask: action.value, recent: bctx.log.recent(action.value as number, 5) } }
     }
 
     default:

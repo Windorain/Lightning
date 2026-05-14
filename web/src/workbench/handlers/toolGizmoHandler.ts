@@ -60,7 +60,9 @@ export function createToolGizmoHandler(
         const dy = _moveEvent.clientY - startY
         const bctxNow = getBctx()
         const k = bctxNow?.settings.dragSensitivity ?? 0.05
-        return (hit === 'x' || hit === 'z') ? -dx * k : dy * k
+        if (hit === 'x') return dx * k
+        if (hit === 'y') return -dy * k
+        return -dx * k  // 'z'
       }
 
       const modal = new GizmoDragModal(

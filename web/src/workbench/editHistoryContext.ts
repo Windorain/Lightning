@@ -1,6 +1,6 @@
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref } from 'vue'
-import { logUndo, logRedo } from '@/workbench/debug/debugLog'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
 export interface EditCommand {
   id: string
@@ -64,7 +64,7 @@ export function provideEditHistory(maxStack = 256): UndoManager {
     if (!cmd) return
     redoStack.push(cmd)
     cmd.undo()
-    logUndo(cmd.label)
+    logCenter.operator('EditHistory', `undo: ${cmd.label}`, { action: 'undo', label: cmd.label })
     refreshFlags()
   }
 
@@ -73,7 +73,7 @@ export function provideEditHistory(maxStack = 256): UndoManager {
     if (!cmd) return
     undoStack.push(cmd)
     cmd.execute()
-    logRedo(cmd.label)
+    logCenter.operator('EditHistory', `redo: ${cmd.label}`, { action: 'redo', label: cmd.label })
     refreshFlags()
   }
 

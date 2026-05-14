@@ -9,6 +9,21 @@ import { OP_RESULT } from './operatorType'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { ModalOperatorWrapper } from './modalOperatorWrapper'
 import { logCenter } from '@/workbench/logging/LogCenter'
+import type { StateDigest } from '@/workbench/logging/LogCenter'
+
+function logOperatorResult(
+  bctx: BContext, opId: string, label: string, result: string,
+  snapBefore?: StateDigest,
+) {
+  const detail: Record<string, unknown> = { opId, result }
+  if (snapBefore) {
+    const d = logCenter.diff(snapBefore, bctx)
+    if (d.blocksAdded.length || d.blocksRemoved.length || d.blocksMoved.length || d.selectionChanged) {
+      detail.changes = d
+    }
+  }
+  logCenter.operator('Operator', `${label} → ${result}`, detail)
+}
 
 export class OperatorRegistry {
   private operators = new Map<string, OperatorType>()
@@ -28,34 +43,30 @@ export class OperatorRegistry {
   /** 无交互执行操作符。如果 flagUndo 为 true，自动包裹 undo。 */
   exec(bctx: BContext, id: string, props?: OperatorProperties): void {
     const op = this.operators.get(id)
-    if (!op) { logCenter.warn('OperatorRegistry', `exec: 未找到 ${id}`); return }
-    if (op.poll && !op.poll(bctx)) { logCenter.debug('OperatorRegistry', `exec: poll 未通过 ${id}`); return }
+    if (!op) { logCenter.warn('Operator', `exec: op not found ${id}`, { opId: id }); return }
+    if (op.poll && !op.poll(bctx)) {
+      logCenter.info('Operator', `exec: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
+      return
+    }
 
-    logCenter.operator('OperatorRegistry', `${op.label}`, { opId: id, action: 'exec' })
-
+    const snap = logCenter.snapshot(bctx)
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
       if (op.flagUndo) {
-        // snapshot before + auto push undo after exec
-        const snapshot = JSON.parse(JSON.stringify(bctx.scene.scene.value))
+        const before = JSON.parse(JSON.stringify(bctx.scene.scene.value))
         op.exec(bctx, resolvedProps)
-        const snapshotAfter = JSON.parse(JSON.stringify(bctx.scene.scene.value))
+        const after = JSON.parse(JSON.stringify(bctx.scene.scene.value))
         bctx.editHistory.push({
           id: 'op_' + Math.random().toString(36).slice(2, 10),
           label: op.label,
           timestamp: Date.now(),
-          execute: () => {
-            bctx.scene.scene.value = snapshotAfter
-            bctx.scene.markDirty()
-          },
-          undo: () => {
-            bctx.scene.scene.value = snapshot
-            bctx.scene.markDirty()
-          },
+          execute: () => { bctx.scene.scene.value = after; bctx.scene.markDirty() },
+          undo: () => { bctx.scene.scene.value = before; bctx.scene.markDirty() },
         })
       } else {
         op.exec(bctx, resolvedProps)
       }
+      logOperatorResult(bctx, id, op.label, 'FINISHED', snap)
     }
   }
 
@@ -67,10 +78,13 @@ export class OperatorRegistry {
     event?: PointerEvent | KeyboardEvent,
   ): OpResult {
     const op = this.operators.get(id)
-    if (!op) { logCenter.warn('OperatorRegistry', `invoke: 未找到 ${id}`); return OP_RESULT.CANCELLED }
-    if (op.poll && !op.poll(bctx)) { logCenter.debug('OperatorRegistry', `invoke: poll 未通过 ${id}`); return OP_RESULT.CANCELLED }
+    if (!op) { logCenter.warn('Operator', `invoke: op not found ${id}`, { opId: id }); return OP_RESULT.CANCELLED }
+    if (op.poll && !op.poll(bctx)) {
+      logCenter.info('Operator', `invoke: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
+      return OP_RESULT.CANCELLED
+    }
 
-    logCenter.operator('OperatorRegistry', `${op.label}`, { opId: id, action: 'invoke' })
+    const snap = logCenter.snapshot(bctx)
 
     const resolvedProps: OperatorProperties = props ?? {}
 
@@ -90,16 +104,19 @@ export class OperatorRegistry {
         if (event instanceof PointerEvent) {
           eventDispatcher.pushModal(wrapper, event)
         }
-      } else if (result === OP_RESULT.FINISHED && snapshot !== null) {
-        // One-shot invoke: push undo with before/after snapshots
-        const snapshotAfter = JSON.parse(JSON.stringify(bctx.scene.scene.value))
-        bctx.editHistory.push({
-          id: 'op_' + Math.random().toString(36).slice(2, 10),
-          label: op.label,
-          timestamp: Date.now(),
-          execute: () => { bctx.scene.scene.value = snapshotAfter; bctx.scene.markDirty() },
-          undo: () => { bctx.scene.scene.value = snapshot; bctx.scene.markDirty() },
-        })
+        logOperatorResult(bctx, id, op.label, 'RUNNING_MODAL', snap)
+      } else if (result === OP_RESULT.FINISHED) {
+        if (snapshot !== null) {
+          const snapshotAfter = JSON.parse(JSON.stringify(bctx.scene.scene.value))
+          bctx.editHistory.push({
+            id: 'op_' + Math.random().toString(36).slice(2, 10),
+            label: op.label,
+            timestamp: Date.now(),
+            execute: () => { bctx.scene.scene.value = snapshotAfter; bctx.scene.markDirty() },
+            undo: () => { bctx.scene.scene.value = snapshot; bctx.scene.markDirty() },
+          })
+        }
+        logOperatorResult(bctx, id, op.label, 'FINISHED', snap)
       }
       return result
     }

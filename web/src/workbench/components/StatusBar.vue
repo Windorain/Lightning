@@ -4,12 +4,9 @@
  */
 import { inject } from 'vue'
 import { PreviewSceneContextKey } from '@/preview/sceneStore'
-import { LOG_LEVEL_LABEL, LOG_LEVEL } from '@/workbench/logging/LogCenter'
-import { useBContext } from '@/workbench/context/bContext'
+import { logCenter, LOG_LEVEL } from '@/workbench/logging/LogCenter'
 
 const store = inject(PreviewSceneContextKey)
-const bctx = useBContext()
-const statusMessage = bctx.statusMessage
 
 function logClass(level: number): string {
   if (level & LOG_LEVEL.ERROR) return 'sb-item sb-item--error'
@@ -24,10 +21,10 @@ function logLevelLabel(level: number): string {
 
 <template>
   <div class="sb-root">
-    <span v-if="bctx.log.lastDisplayable.value" :class="logClass(bctx.log.lastDisplayable.value.level)" :title="logLevelLabel(bctx.log.lastDisplayable.value.level)">
-      {{ bctx.log.lastDisplayable.value.message }}
+    <span v-if="logCenter.lastDisplayable.value" :class="logClass(logCenter.lastDisplayable.value.level)">
+      {{ logCenter.lastDisplayable.value.message }}
     </span>
-    <span v-if="statusMessage && !bctx.log.lastDisplayable.value" class="sb-item">{{ statusMessage }}</span>
+    <span v-if="logCenter.statusMessage && !logCenter.lastDisplayable.value" class="sb-item">{{ logCenter.statusMessage }}</span>
     <span class="sb-spacer" />
     <span v-if="store?.hasWorldMultiFrame.value" class="sb-item">
       Frame {{ store.worldFrameIndex.value + 1 }} / {{ store.worldFrameCount.value }}

@@ -2,7 +2,7 @@
 
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref } from 'vue'
-import { logBlockSelected, logBoxSelect } from '@/workbench/debug/debugLog'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
 export interface BlockRef {
   pos: { x: number; y: number; z: number }
@@ -42,7 +42,7 @@ export function provideSelectionContext(): SelectionContext {
     items.value = new Set([voxel])
     index.value = new Map([[posKey(voxel.pos), voxel]])
     mode.value = 'single'
-    logBlockSelected(voxel.block_state_id, voxel.pos.x, voxel.pos.y, voxel.pos.z)
+    logCenter.debug('Selection', 'block selected', { id: voxel.block_state_id, x: voxel.pos.x, y: voxel.pos.y, z: voxel.pos.z })
   }
 
   function selectBox(min: { x: number; y: number; z: number }, max: { x: number; y: number; z: number }, blocks: BlockRef[]): void {
@@ -62,7 +62,7 @@ export function provideSelectionContext(): SelectionContext {
     index.value = map
     mode.value = 'box'
     if (set.size > 0) {
-      logBoxSelect(set.size, min.x, min.y, min.z, max.x, max.y, max.z)
+      logCenter.debug('Selection', 'box select', { count: set.size, min: { x: min.x, y: min.y, z: min.z }, max: { x: max.x, y: max.y, z: max.z } })
     }
   }
 

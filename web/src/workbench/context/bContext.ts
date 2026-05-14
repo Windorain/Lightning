@@ -88,8 +88,6 @@ export interface BContext {
   }
   /** Wiki 配置 */
   wikiConfig: Record<string, any>
-  /** 状态消息 */
-  statusMessage: Ref<string>
   /** Viewport 运行时状态（WorkbenchViewport.onViewportReady 时填充） */
   camera: THREE.Camera | null
   contentGroup: THREE.Group | null

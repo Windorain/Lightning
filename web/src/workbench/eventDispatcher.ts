@@ -8,6 +8,7 @@
  * Handler 类型顺序（对标 Blender）：GIZMO(0) → OPERATOR(1) → KEYMAP(2) → UI(3)
  */
 import type { TypedEventHandler } from '@/workbench/events/eventTypes'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
 export interface ModalKeymapItem {
   key: string
@@ -100,7 +101,8 @@ class EventDispatcherImpl {
   }
 
   /** 主 dispatch */
-  dispatch(event: Event): { break: boolean } {
+  dispatch(event: Event): { break: boolean; traceId?: string } {
+    const traceId = logCenter.beginTrace('EventDispatcher', event)
     // 1. 模态键盘映射（栈顶 modal 优先）
     if (this._modalStack.length > 0) {
       const modal = this._modalStack[this._modalStack.length - 1]
@@ -118,23 +120,35 @@ class EventDispatcherImpl {
 
     // 2. 模态操作栈（LIFO）
     for (let i = this._modalStack.length - 1; i >= 0; i--) {
-      const result = this._modalStack[i].handleEvent(event)
-      if (result.break) return result
+      const modal = this._modalStack[i]
+      if (!modal) continue
+      const result = modal.handleEvent(event)
+      if (result.break) {
+        logCenter.endTrace(`consumed by modal ${modal.id}`)
+        return { break: true, traceId }
+      }
     }
 
     // 3. 类型化处理器（GIZMO → OPERATOR → KEYMAP → UI）
     for (const handler of this._typedHandlers) {
       const result = handler.handle(event)
-      if (result.break) return result
+      if (result.break) {
+        logCenter.endTrace(`consumed by typedHandler type=${handler.type}`)
+        return { break: true, traceId }
+      }
     }
 
     // 4. 遗留处理器（priority 排序，向后兼容）
     for (const handler of this._regionHandlers) {
       const result = handler.handle(event)
-      if (result.break) return result
+      if (result.break) {
+        logCenter.endTrace(`consumed by legacy handler pri=${handler.priority}`)
+        return { break: true, traceId }
+      }
     }
 
-    return { break: false }
+    logCenter.endTrace('unhandled')
+    return { break: false, traceId }
   }
 
   get modalDepth(): number {

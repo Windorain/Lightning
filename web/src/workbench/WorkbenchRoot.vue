@@ -36,8 +36,7 @@ import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workben
 import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
 import { SceneMetaEditOperator, TooltipEditOperator } from '@/workbench/operators/builtin/sceneEditOperators'
 
-import { installDebugApi, injectDebugRefs } from '@/workbench/debug/debugLog'
-import { installLogCenter } from '@/workbench/logging/LogCenter'
+import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
 import { installTestRunner } from '@/workbench/testing/testRunner'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
@@ -274,23 +273,23 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
 })
 
-installLogCenter()
 installTestRunner(bctx)
 
-if (import.meta.env.DEV) {
-  injectDebugRefs({
-    scene: () => scene.scene.value as any,
-    selection: () => [...selection.items.value],
-    toolRegistry: () => ({
-      activeToolId: toolRegistry.activeTool.value?.id ?? 'none',
-      canUndo: editHistory.canUndo.value,
-      canRedo: editHistory.canRedo.value,
-      undoLabel: editHistory.undoLabel.value,
-      redoLabel: editHistory.redoLabel.value,
-    }),
-  })
-  installDebugApi()
-}
+logCenter.injectStateRefs({
+  scene: () => scene.scene.value as any,
+  selection: () => [...selection.items.value],
+  toolRegistry: () => ({
+    activeToolId: toolRegistry.activeTool.value?.id ?? 'none',
+    canUndo: editHistory.canUndo.value,
+    canRedo: editHistory.canRedo.value,
+    undoLabel: editHistory.undoLabel.value,
+    redoLabel: editHistory.redoLabel.value,
+  }),
+})
+
+onMounted(() => {
+  installUnifiedLogApi(bctx)
+})
 </script>
 
 <template>

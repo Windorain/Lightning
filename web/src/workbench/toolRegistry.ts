@@ -2,7 +2,7 @@ import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref, shallowRef } from 'vue'
 import type { BContext } from '@/workbench/context/bContext'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
-import { logToolActivated } from '@/workbench/debug/debugLog'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
 const OPERATOR_TOOL_META: Record<string, { icon: string; cursor?: string; defaultKey?: string }> = {
   OPERATOR_SELECT:       { icon: '▲', cursor: 'default' },
@@ -66,7 +66,7 @@ export function provideToolRegistry(): ToolRegistry {
     }
 
     activeTool.value = tool
-    logToolActivated(id)
+    logCenter.operator('ToolRegistry', `tool activated: ${id}`, { toolId: id, action: 'activate' })
   }
 
   function deactivate(): void {
