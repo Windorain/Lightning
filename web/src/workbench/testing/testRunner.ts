@@ -259,7 +259,16 @@ export function createMockBContext(opts?: {
     camera: null, contentGroup: null, domElement: null,
     controlsRef: { enabled: true },
     definition: null, layerPreview: null,
-    wm: { windows: [], activeWindow: null } as any,
+    wm: {
+      windows: [], activeWindow: null,
+      contextMenu: { open: false, position: { x: 0, y: 0 }, items: [] as any[] },
+      showContextMenu(cm: any, pos: { x: number; y: number }, items: any[]) {
+        cm.position = pos; cm.items = items; cm.open = true
+      },
+      hideContextMenu(cm: any) {
+        cm.open = false; cm.items = []
+      },
+    } as any,
     screen: null as any, area: null as any, region: null as any,
     rna: createMockRNA(),
     ui: {

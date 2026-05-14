@@ -94,6 +94,25 @@ function bootEventHandlers(bctx: BContext): void {
     type: HANDLER_TYPE.KEYMAP,
     handle(event: Event): { break: boolean } {
       if (!(event instanceof KeyboardEvent)) return { break: false }
+
+      // Shift+A → context menu with add tools (handled before keymap in real app)
+      if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        const ADD_MENU_ITEMS = [
+          { kind: 'label', label: '生成', icon: '＋' },
+          { kind: 'separator', label: '' },
+          { kind: 'operator', label: '方块', icon: '⬜', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_BLOCK' } },
+          { kind: 'operator', label: '注解框', icon: '📝', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_ANNOTATION_BOX' } },
+        ]
+        const bctx = _bctxRef
+        if (bctx) {
+          const wm = (bctx as any).wm
+          if (wm?.showContextMenu) {
+            wm.showContextMenu(wm.contextMenu, { x: 400, y: 300 }, ADD_MENU_ITEMS)
+          }
+        }
+        return { break: true }
+      }
+
       for (const binding of DEFAULT_KEYMAP) {
         if (!matchBinding(binding, event)) continue
         if (binding.toolId) {
@@ -388,7 +407,8 @@ export function createTestHarness(
     },
 
     clickContextMenuItem(label) {
-      const cm = (ctx.wm as any).contextMenu
+      const wm = (ctx.wm as any)
+      const cm = wm.contextMenu
       if (!cm || !cm.open) throw new Error('context menu not open')
       const item = cm.items.find((i: any) => i.label === label)
       if (!item) {
@@ -396,6 +416,7 @@ export function createTestHarness(
         throw new Error(`context menu item "${label}" not found. Available: ${available}`)
       }
       ctx.operators.invoke(item.opId, item.props ?? {})
+      if (wm.hideContextMenu) wm.hideContextMenu(cm)
     },
 
     /* —— Batch —— */

@@ -166,8 +166,8 @@ const lastMousePosition = ref<{ x: number; y: number } | null>(null)
 const ADD_MENU_ITEMS: ContextMenuItem[] = [
   { kind: 'label', label: '生成', icon: '＋' },
   { kind: 'separator', label: '' },
-  { kind: 'operator', label: '方块', icon: '⬜', opId: 'OPERATOR_ADD_BLOCK', props: {} },
-  { kind: 'operator', label: '注解框', icon: '📝', opId: 'OPERATOR_ADD_ANNOTATION_BOX', props: {} },
+  { kind: 'operator', label: '方块', icon: '⬜', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_BLOCK' } },
+  { kind: 'operator', label: '注解框', icon: '📝', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_ANNOTATION_BOX' } },
 ]
 
 function invokeContextMenuItem(item: ContextMenuItem) {
