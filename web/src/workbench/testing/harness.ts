@@ -18,6 +18,7 @@ import { DEFAULT_KEYMAP, matchBinding } from '@/workbench/keymap'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { MockGizmo, createTestGizmoHandler } from './gizmoMock'
+import { screenDeltaToWorld } from './screenDeltaToWorld'
 
 // Operators
 import { SelectOperator } from '@/workbench/operators/builtin/selectOperator'
@@ -127,6 +128,8 @@ export interface TestHarness {
   assertBlockNotAt(pos: { x: number; y: number; z: number }): void
   assertBlockCount(n: number): void
   assertOperatorActive(id: string): void
+  assertProjectBlockNull(pos: { x: number; y: number; z: number }): void
+  assertRNAPath(path: string): any
 
   // Spec runner
   run(spec: TestSpec): TestResult
@@ -210,17 +213,19 @@ export function createTestHarness(
     dragWorld(axis, amount, o = {}) {
       const gizmo = ctx.queries.getGizmoAnchor(axis)
       if (!gizmo) throw new Error(`dragWorld: gizmo anchor null for axis ${axis} — nothing selected?`)
-      // 计算世界位移对应的屏幕像素
-      // computeDelta 映射: X→dx*k, Y→-dy*k, Z→-dx*k
-      // 反解: X: screenDx=amount/k, Y: screenDy=-amount/k, Z: screenDx=-amount/k
+      // 根据 screenDeltaToWorld 的 Blender 符号约定反解屏幕偏移:
+      //   screenDeltaToWorld(dx, 0, 'x', k) = dx*k   →  令 amount = dx*k  得 dx = amount/k
+      //   screenDeltaToWorld(0, dy, 'y', k) = -dy*k  →  令 amount = -dy*k 得 dy = -amount/k
+      //   screenDeltaToWorld(dx, 0, 'z', k) = -dx*k  →  令 amount = -dx*k 得 dx = -amount/k
       const k = ctx.settings.dragSensitivity
       const steps = o.steps ?? 5
-      let toX = gizmo.x
-      let toY = gizmo.y
-      if (axis === 'x') toX += amount / k
-      else if (axis === 'y') toY -= amount / k
-      else toX -= amount / k
-      this.drag(gizmo.x, gizmo.y, toX, toY, { steps })
+      let screenDx = 0, screenDy = 0
+      if (axis === 'x') screenDx = amount / k
+      else if (axis === 'y') screenDy = -amount / k
+      else screenDx = -amount / k
+      // 用共享函数验证反算正确性（浮点精确，不会触发）
+      this.assert(screenDeltaToWorld(screenDx, screenDy, axis, k) === amount)
+      this.drag(gizmo.x, gizmo.y, gizmo.x + screenDx, gizmo.y + screenDy, { steps })
     },
 
     // Assertions
@@ -266,6 +271,17 @@ export function createTestHarness(
     assertOperatorActive(id) {
       const actual = ctx.toolRegistry.activeTool.value?.id
       if (actual !== id) throw new Error(`active operator: expected ${id}, got ${actual ?? 'null'}`)
+    },
+
+    assertProjectBlockNull(pos) {
+      const result = ctx.queries.projectBlock(pos)
+      if (result !== null) throw new Error(`projectBlock should return null for (${pos.x},${pos.y},${pos.z})`)
+    },
+
+    assertRNAPath(path) {
+      const desc = ctx.rna.resolve(path)
+      if (!desc) throw new Error(`RNA path "${path}" did not resolve`)
+      return desc
     },
 
     run(spec) { return runTestSpec(ctx, spec) },

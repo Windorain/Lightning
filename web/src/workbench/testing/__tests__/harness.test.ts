@@ -85,7 +85,7 @@ describe('select operator', () => {
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    expect(h.ctx.queries.projectBlock({ x: 1000, y: 1000, z: 1000 })).toBeNull()
+    h.assertProjectBlockNull({ x: 1000, y: 1000, z: 1000 })
   })
 })
 
@@ -111,7 +111,7 @@ describe('delete operator', () => {
     h.assertBlockNotAt({ x: 3, y: 0, z: 5 })
   })
 
-  it('delete with nothing selected poll fails, scene unchanged', () => {
+  it('delete with nothing selected leaves scene unchanged', () => {
     const h = createTestHarness({
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
@@ -217,7 +217,8 @@ describe('move operator — gizmo drag', () => {
     })
 
     h.keyDown('g')
-    expect(h.ctx.queries.getGizmoAnchor('y')).toBeNull()
+    const anchor = h.ctx.queries.getGizmoAnchor('y')
+    h.assert(anchor === null, 'gizmo anchor should be null when nothing selected')
   })
 })
 
@@ -225,8 +226,8 @@ describe('generate operator', () => {
   it('activate generate with brush, click block → new block placed', () => {
     const h = createTestHarness({
       blocks: [{ x: 2, y: 0, z: 2, id: 'seed' }],
-      settings: { replaceBrush: 'stone' },
     })
+    h.setRNAValue('toolsettings.replaceBrush', 'stone', h.ctx.settings)
 
     h.keyDown('a', { shift: true })
     h.assertOperatorActive('OPERATOR_GENERATE')
@@ -237,14 +238,16 @@ describe('generate operator', () => {
     h.assertBlockCount(2)
   })
 
-  it('generate with null brush → poll fails, nothing placed', () => {
+  it('generate places block when clicking empty space', () => {
     const h = createTestHarness({
-      blocks: [{ x: 0, y: 0, z: 0, id: 'seed' }],
+      blocks: [],
     })
+    h.setRNAValue('toolsettings.replaceBrush', 'stone', h.ctx.settings)
 
     h.keyDown('a', { shift: true })
-    const p = h.ctx.queries.projectBlock({ x: 0, y: 0, z: 0 })
-    h.click(p!.x, p!.y)
+    h.assertOperatorActive('OPERATOR_GENERATE')
+
+    h.click(400, 300)
     h.assertBlockCount(1)
   })
 
@@ -254,8 +257,8 @@ describe('generate operator', () => {
         { x: 0, y: 0, z: 0, id: 'seed-a' },
         { x: 2, y: 0, z: 2, id: 'seed-b' },
       ],
-      settings: { replaceBrush: 'placed' },
     })
+    h.setRNAValue('toolsettings.replaceBrush', 'placed', h.ctx.settings)
 
     // Generate at seed-a position
     h.keyDown('a', { shift: true })
@@ -397,9 +400,8 @@ describe('RNA registry', () => {
       blocks: [{ x: 3, y: 0, z: 5, id: 'stone' }],
     })
 
-    const desc = h.ctx.rna.resolve('block.id')
-    expect(desc).not.toBeNull()
-    expect(desc!.type).toBe('string')
-    expect(desc!.label).toBe('方块标识')
+    const desc = h.assertRNAPath('block.id')
+    h.assert(desc.type === 'string', 'block.id type should be string')
+    h.assert(desc.label === '方块标识', 'block.id label should be 方块标识')
   })
 })

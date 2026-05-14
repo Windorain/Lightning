@@ -10,6 +10,7 @@ import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
 import type { BContext } from '@/workbench/context/bContext'
 import type { GizmoAxis } from '@/workbench/tools/gizmos'
 import { GizmoDragModal } from '@/workbench/modalOperations/GizmoDragModal'
+import { screenDeltaToWorld } from './screenDeltaToWorld'
 
 const HIT_RADIUS = 20 // px，点击距 gizmo 锚点在此范围内视为命中
 
@@ -83,10 +84,7 @@ export function createTestGizmoHandler(
       const computeDelta = (_moveEvent: PointerEvent): number => {
         const dx = _moveEvent.clientX - startX
         const dy = _moveEvent.clientY - startY
-        const k = bctx.settings.dragSensitivity
-        if (hit === 'x') return dx * k
-        if (hit === 'y') return -dy * k
-        return -dx * k  // 'z'
+        return screenDeltaToWorld(dx, dy, hit as 'x' | 'y' | 'z', bctx.settings.dragSensitivity)
       }
 
       const modal = new GizmoDragModal(

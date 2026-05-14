@@ -4,7 +4,7 @@
  * 聚合所有 Vue provide/inject 上下文为单一对象，
  * 操作符通过 bContext 隐式获取 scene/selection/editHistory/toolRegistry/connection。
  */
-import type { InjectionKey, Ref } from 'vue'
+import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
 import type { SceneContext } from '@/workbench/sceneContext'
 import type { SelectionContext } from '@/workbench/selectionContext'
