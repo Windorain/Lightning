@@ -3,15 +3,13 @@
  * PS 风格菜单栏：File / Edit / View / Help
  */
 import { ref } from 'vue'
-import { useSceneContext } from '@/workbench/sceneContext'
-import { useConnectionContext } from '@/workbench/connectionContext'
+import { useBContext } from '@/workbench/context/bContext'
 import { t, setLang, currentLang } from '@/workbench/i18n'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
 
 const { theme, toggleTheme } = useNeiTheme()
 
-const scene = useSceneContext()
-const conn = useConnectionContext()
+const bctx = useBContext()
 
 defineProps<{ editMode?: boolean }>()
 
@@ -36,26 +34,35 @@ function closeMenu(): void { openMenu.value = null }
 
 async function openSceneFile(): Promise<void> {
   closeMenu()
-  if (scene.dirty.value) {
+  if (bctx.scene.dirty.value) {
     const ok = window.confirm('当前场景有未保存的修改，是否保存？')
     if (ok) {
-      await scene.saveToFile().catch(() => {})
+      await bctx.operators.exec('OPERATOR_SAVE_FILE')
     }
   }
   fileInput.value?.click()
 }
 
+async function newSceneFile(): Promise<void> {
+  closeMenu()
+  if (bctx.scene.dirty.value) {
+    const ok = window.confirm('当前场景有未保存的修改，是否保存？')
+    if (ok) await bctx.operators.exec('OPERATOR_SAVE_FILE')
+  }
+  await bctx.operators.exec('OPERATOR_NEW_SCENE')
+}
+
 async function onSceneFileSelected(): Promise<void> {
   const file = fileInput.value?.files?.[0]
   if (!file) return
-  await scene.loadSceneFromFile(file)
+  await bctx.operators.exec('OPERATOR_OPEN_SCENE', { file })
   if (fileInput.value) fileInput.value.value = ''
 }
 
 function onMenuAction(action: string): void {
   closeMenu()
   switch (action) {
-    case 'save-file': void scene.saveToFile().catch(() => {}); break
+    case 'save-file': void bctx.operators.exec('OPERATOR_SAVE_FILE'); break
     case 'reset-layout': emit('reset-layout'); break
   }
 }
@@ -67,6 +74,7 @@ function onMenuAction(action: string): void {
       <div class="mb-item" @mouseenter="toggleMenu('file')">
         <span class="mb-label">{{ t('file') }}</span>
         <div v-if="openMenu === 'file'" class="mb-dropdown">
+          <button class="mb-dd-item" @click="newSceneFile">{{ t('newFile') }}</button>
           <button class="mb-dd-item" @click="openSceneFile">{{ t('openScene') }}</button>
           <button class="mb-dd-item" @click="onMenuAction('save-file')">{{ t('saveToFile') }}</button>
         </div>
@@ -95,8 +103,8 @@ function onMenuAction(action: string): void {
       <button class="mb-theme-btn" :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'" @click="toggleTheme">
         {{ theme === 'dark' ? '☀' : '☾' }}
       </button>
-      <span class="mb-status-dot" :class="conn.connected.value ? 'mb-online' : 'mb-offline'" />
-      <span class="mb-status-label">{{ conn.connected.value ? t('connected') : t('offline') }}</span>
+      <span class="mb-status-dot" :class="bctx.connection.connected.value ? 'mb-online' : 'mb-offline'" />
+      <span class="mb-status-label">{{ bctx.connection.connected.value ? t('connected') : t('offline') }}</span>
     </div>
     <input ref="fileInput" type="file" accept=".json" class="mb-file-input" @change="onSceneFileSelected" />
   </div>

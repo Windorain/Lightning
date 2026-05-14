@@ -1,44 +1,35 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { loadStructureOrWorld } from '@/render/data/bundleResolve'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
-import { buildEnvelopePackage } from '@/render/data/sceneExport'
-import { copyTextToClipboard, downloadBlob, downloadJson } from '@/util/browser'
-import { buildStructureBundleZip } from '@/workbench/structureBundleExport'
-import { bakeIsometricStructurePngDataUrl, dataUrlToPngBlob } from '@/workbench/exportIsometricImage'
+import { copyTextToClipboard } from '@/util/browser'
+import { bakeIsometricStructurePngDataUrl } from '@/workbench/exportIsometricImage'
 import { formatUnknownError } from '@/util/formatUnknownError'
-import { useSceneContext } from '@/workbench/sceneContext'
-import { useConnectionContext } from '@/workbench/connectionContext'
+import { useBContext } from '@/workbench/context/bContext'
 import { t } from '@/workbench/i18n'
 
-const scene = useSceneContext()
-const conn = useConnectionContext()
-const doc = computed(() => scene.scene.value)
+const bctx = useBContext()
+const doc = computed(() => bctx.scene.scene.value)
 const baseName = computed(() => doc.value ? sceneStableStringIdFromDocument(doc.value) : 'scene')
-const showSdeSave = computed(() => scene.workspaceMode.value === 'sde' && conn.apiBase.value.length > 0)
+const showSdeSave = computed(() => bctx.scene.workspaceMode.value === 'sde' && bctx.connection.apiBase.value.length > 0)
 const feedback = ref('')
 
 function msg(s: string): void { feedback.value = s }
 
-async function downloadPlain(): Promise<void> {
-  if (!doc.value) return
-  try { const raw = doc.value as Record<string, unknown>; downloadJson(`${baseName.value}-plain`, raw, true); msg('已下载 Plain JSON') } catch (e) { msg(formatUnknownError(e)) }
+function downloadPlain(): void {
+  try { bctx.operators.exec('OPERATOR_EXPORT_PLAIN'); msg('已下载 Plain JSON') } catch (e) { msg(formatUnknownError(e)) }
 }
-async function downloadEnvelope(): Promise<void> {
-  if (!doc.value) return
-  try { const raw = doc.value as Record<string, unknown>; downloadJson(`${baseName.value}-envelope`, buildEnvelopePackage(raw), true); msg('已下载 Envelope JSON') } catch (e) { msg(formatUnknownError(e)) }
+function downloadEnvelope(): void {
+  try { bctx.operators.exec('OPERATOR_EXPORT_ENVELOPE'); msg('已下载 Envelope JSON') } catch (e) { msg(formatUnknownError(e)) }
 }
 async function copyRawJson(): Promise<void> {
   if (!doc.value) return
   try { const raw = doc.value; await copyTextToClipboard(JSON.stringify(raw, null, 2)); msg('已复制到剪贴板') } catch (e) { msg(formatUnknownError(e)) }
 }
-async function downloadObjBlock(): Promise<void> {
-  if (!doc.value) return
-  try { const n = doc.value as Record<string, unknown>; const def = loadStructureOrWorld(n, undefined); const zip = await buildStructureBundleZip(def, n, { mode: 'block' }); downloadBlob(`${baseName.value}-block.zip`, zip); msg('已导出 OBJ (block)') } catch (e) { msg(formatUnknownError(e)) }
+function downloadObjBlock(): void {
+  try { bctx.operators.exec('OPERATOR_EXPORT_OBJ', { connected: false }); msg('已导出 OBJ (block)') } catch (e) { msg(formatUnknownError(e)) }
 }
-async function downloadObjConnected(): Promise<void> {
-  if (!doc.value) return
-  try { const n = doc.value as Record<string, unknown>; const def = loadStructureOrWorld(n, undefined); const zip = await buildStructureBundleZip(def, n, { mode: 'connected' }); downloadBlob(`${baseName.value}-connected.zip`, zip); msg('已导出 OBJ (connected)') } catch (e) { msg(formatUnknownError(e)) }
+function downloadObjConnected(): void {
+  try { bctx.operators.exec('OPERATOR_EXPORT_OBJ', { connected: true }); msg('已导出 OBJ (connected)') } catch (e) { msg(formatUnknownError(e)) }
 }
 
 const isoDir = ref(0)
@@ -55,9 +46,11 @@ async function bakeIso(): Promise<void> {
   finally { if (seq === isoSeq) isoBusy.value = false }
 }
 watch(() => [doc.value, isoDir.value] as const, () => { void bakeIso() }, { immediate: true })
-async function downloadIso(): Promise<void> {
-  if (!doc.value || !isoUrl.value) return
-  try { downloadBlob(`${baseName.value}-iso-${isoDir.value}.png`, dataUrlToPngBlob(isoUrl.value)); msg(`已下载等轴视角 PNG ${isoDir.value + 1}/4`) } catch (e) { msg(formatUnknownError(e)) }
+function downloadIso(): void {
+  try { bctx.operators.exec('OPERATOR_EXPORT_ISO_PNG', { direction: isoDir.value }); msg(`已下载等轴视角 PNG ${isoDir.value + 1}/4`) } catch (e) { msg(formatUnknownError(e)) }
+}
+function pushToServer(): void {
+  try { bctx.operators.exec('OPERATOR_SDE_PUSH'); msg('已同步到 SDE') } catch (e) { msg(formatUnknownError(e)) }
 }
 </script>
 
@@ -95,7 +88,7 @@ async function downloadIso(): Promise<void> {
 
       <section v-if="showSdeSave" class="ew-card">
         <h3>{{ t("sdeSync") }}</h3>
-        <button class="ew-btn ew-btn--primary" @click="void conn.pushToServer().then(() => msg('已同步到 SDE')).catch(e => msg(String(e)))">{{ t("putToSde") }}</button>
+        <button class="ew-btn ew-btn--primary" @click="pushToServer()">{{ t("putToSde") }}</button>
       </section>
     </div>
 

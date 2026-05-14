@@ -12,7 +12,7 @@ import type { BlockRef } from '@/workbench/selectionContext'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt } from '@/workbench/ux/layout'
 import type { bScreen } from '@/workbench/ux/types/screen'
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
@@ -228,9 +228,36 @@ export function createMockBContext(opts?: {
 
   const mockCtx = {
     scene: {
-      scene: mockScene, dirty: mockDirty,
+      scene: mockScene,
+      dirty: mockDirty,
+      sceneLoadEpoch: ref(0),
+      previewWorldFrameIndex: ref(0),
+      previewConfig: shallowRef(null),
+      previewEpoch: ref(0),
+      previewBusy: ref(false),
+      previewError: ref(null),
+      workspaceMode: ref('local-file') as any,
+      localFileName: ref(null),
+
       markDirty() { mockDirty.value = true },
       markClean() { mockDirty.value = false },
+      setPreviewWorldFrameIndex(index: number) { (this.previewWorldFrameIndex as any).value = index },
+      setWorkspaceMode(mode: string) { (this.workspaceMode as any).value = mode },
+
+      async newScene() {
+        mockScene.value = {
+          format_version: '2.0',
+          meta: { name: 'new', author: '', created_at_ms: Date.now(), description: '', tags: [], origin: { x: 0, y: 0, z: 0 } },
+          frames: [{ label: 'Frame 0', index: 0, blocks: [], entities: [] }],
+          block_palette: {},
+          materials: { entries: [] },
+        }
+        mockDirty.value = false
+      },
+      async saveToFile() { /* mock: no-op */ },
+      async loadSceneFromFile(_file: File) { /* mock: no-op */ },
+      async loadBuiltinScene(_sceneId?: string) { /* mock: no-op */ },
+      async syncPreview() { /* mock: no-op */ },
     } as any,
     selection: {
       items: selectionItems, frameIndex,
@@ -243,8 +270,36 @@ export function createMockBContext(opts?: {
       clear() { selectionItems.value = new Set() },
     } as any,
     editHistory: {
-      push(entry: any) { entry.execute?.(); this.entries.push(entry) },
-      entries: [] as any[],
+      canUndo: ref(false),
+      canRedo: ref(false),
+      _stack: [] as any[],
+      _redoStack: [] as any[],
+
+      push(entry: any) {
+        entry.execute?.()
+        this._stack.push(entry)
+        this._redoStack = []
+        this.canUndo.value = this._stack.length > 0
+        this.canRedo.value = false
+      },
+      undo() {
+        const entry = this._stack.pop()
+        if (entry) {
+          entry.undo()
+          this._redoStack.push(entry)
+          this.canUndo.value = this._stack.length > 0
+          this.canRedo.value = true
+        }
+      },
+      redo() {
+        const entry = this._redoStack.pop()
+        if (entry) {
+          entry.execute?.()
+          this._stack.push(entry)
+          this.canRedo.value = this._redoStack.length > 0
+          this.canUndo.value = true
+        }
+      },
     } as any,
     toolRegistry: {
       activeTool: ref(null),
@@ -254,7 +309,15 @@ export function createMockBContext(opts?: {
       tools: ref(new Map()),
       getPreviousEditToolId() { return null },
     } as any,
-    connection: {} as any,
+    connection: {
+      connected: ref(false),
+      apiBase: ref(''),
+      async testConnection() { /* mock: no-op */ },
+      async refreshExportList() { /* mock: no-op */ },
+      async pullFromServer() { /* mock: no-op */ },
+      async loadExport(_name: string) { /* mock: no-op */ },
+      async pushToServer() { /* mock: no-op */ },
+    } as any,
     settings: mockSettings,
     camera: null, contentGroup: null, domElement: null,
     controlsRef: { enabled: true },

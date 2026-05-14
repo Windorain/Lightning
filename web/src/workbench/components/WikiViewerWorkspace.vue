@@ -2,12 +2,10 @@
 import { computed } from 'vue'
 import EmbedViewer from '@/embed/EmbedViewer.vue'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
-import { useSceneContext } from '@/workbench/sceneContext'
 import { useBContext } from '@/workbench/context/bContext'
 import { sceneInfoPanel, wikiConfigPanel, blockStatsPanel } from '@/workbench/ux/panels'
 import type { PreviewConfig } from '@/preview/previewConfig'
 
-const ctx = useSceneContext()
 const bctx = useBContext()
 const wikiConfig = bctx.wikiConfig as any
 
@@ -26,7 +24,7 @@ function parseHex6(s: string): number {
 }
 
 const mergedConfig = computed<PreviewConfig | null>(() => {
-  const c = ctx.previewConfig.value
+  const c = bctx.scene.previewConfig.value
   if (!c) return null
   return {
     ...c,

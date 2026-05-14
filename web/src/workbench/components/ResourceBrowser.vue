@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useSceneContext } from '@/workbench/sceneContext'
+import { useBContext } from '@/workbench/context/bContext'
 import { usePanelState } from '@/workbench/panelState'
 import { useSelectionContext } from '@/workbench/selectionContext'
 import type { V2AnnotationBox, V2Label } from '@/render/data/sceneDocumentV2'
 
-const scene = useSceneContext()
+const bctx = useBContext()
 const { highlightType, clearHighlight, pinType } = usePanelState()
 const selection = useSelectionContext()
 
@@ -19,7 +19,7 @@ interface TreeNode {
 }
 
 const tree = computed<TreeNode[]>(() => {
-  const doc = scene.scene.value
+  const doc = bctx.scene.scene.value
   if (!doc) return []
   const q = searchQuery.value.toLowerCase()
 

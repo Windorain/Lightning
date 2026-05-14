@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import WorkbenchViewport from './WorkbenchViewport.vue'
-import { useSceneContext } from '@/workbench/sceneContext'
+import { useBContext } from '@/workbench/context/bContext'
 import { ALL_FEATURES_OFF, type PreviewConfig } from '@/preview/previewConfig'
 
-const ctx = useSceneContext()
+const bctx = useBContext()
 
 const mergedConfig = computed<PreviewConfig | null>(() => {
-  const c = ctx.previewConfig.value
+  const c = bctx.scene.previewConfig.value
   if (!c) return null
   return { ...c, features: { ...c.features, ...ALL_FEATURES_OFF, frameControls: true, layerBar: true } }
 })

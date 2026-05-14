@@ -36,6 +36,11 @@ import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOp
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
 import { SceneMetaEditOperator, TooltipEditOperator } from '@/workbench/operators/builtin/sceneEditOperators'
+import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/workbench/operators/builtin/sceneLifecycleOperators'
+import { SyncPreviewOperator, SetFrameIndexOperator } from '@/workbench/operators/builtin/previewOperators'
+import { SetWorkspaceModeOperator, ResetLayoutOperator } from '@/workbench/operators/builtin/workspaceOperators'
+import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/workbench/operators/builtin/sdeOperators'
+import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
 
 import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
 import { installTestRunner } from '@/workbench/testing/testRunner'
@@ -218,6 +223,21 @@ bctx.operators.register(ViewZoomOperator)
 bctx.operators.register(ToolSetOperator)
 bctx.operators.register(SceneMetaEditOperator)
 bctx.operators.register(TooltipEditOperator)
+bctx.operators.register(NewSceneOperator)
+bctx.operators.register(OpenSceneOperator)
+bctx.operators.register(SaveFileOperator)
+bctx.operators.register(LoadBuiltinSceneOperator)
+bctx.operators.register(SyncPreviewOperator)
+bctx.operators.register(SetFrameIndexOperator)
+bctx.operators.register(SetWorkspaceModeOperator)
+bctx.operators.register(ResetLayoutOperator)
+bctx.operators.register(SDEConnectOperator)
+bctx.operators.register(SDELoadExportOperator)
+bctx.operators.register(SDEPushOperator)
+bctx.operators.register(ExportPlainOperator)
+bctx.operators.register(ExportEnvelopeOperator)
+bctx.operators.register(ExportObjOperator)
+bctx.operators.register(ExportIsoPngOperator)
 
 // Rebuild tool list after all operators registered, then activate default
 toolRegistry.rebuildTools()

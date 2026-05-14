@@ -27,6 +27,7 @@ const dict: Record<string, Record<Lang, string>> = {
   'view': { zh: '视图', en: 'View' },
   'help': { zh: '帮助', en: 'Help' },
   'openScene': { zh: '打开场景…', en: 'Open Scene…' },
+  'newFile': { zh: '新建文件', en: 'New File' },
   'saveToFile': { zh: '保存到文件', en: 'Save to File' },
   'language': { zh: '语言', en: 'Language' },
   'chinese': { zh: '中文', en: '中文' },

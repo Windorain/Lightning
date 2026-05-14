@@ -203,6 +203,18 @@ export interface TestHarness {
   /** 点击 ContextMenu 中的项 */
   clickContextMenuItem(label: string): void
 
+  // Scene lifecycle helpers
+  /** 新建空白场景 */
+  newScene(): Promise<void>
+  /** 保存当前场景到文件 */
+  saveToFile(): Promise<void>
+  /** 同步预览 */
+  syncPreview(): Promise<void>
+  /** 切换工作区模式 */
+  setWorkspaceMode(mode: string): void
+  /** 设置帧索引 */
+  setFrameIndex(index: number): void
+
   // Batch check (collect, don't throw)
   /** 收集模式：返回 CheckCollector，所有 check 不抛异常，done() 返回结果列表 */
   collect(): CheckCollector
@@ -423,6 +435,28 @@ export function createTestHarness(
 
     collect() {
       return createCollector(ctx)
+    },
+
+    /* —— Scene lifecycle —— */
+
+    async newScene() {
+      await ctx.scene.newScene()
+    },
+
+    async saveToFile() {
+      await ctx.scene.saveToFile()
+    },
+
+    async syncPreview() {
+      await ctx.scene.syncPreview()
+    },
+
+    setWorkspaceMode(mode: string) {
+      ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode })
+    },
+
+    setFrameIndex(index: number) {
+      ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index })
     },
 
     /* —— Spec runner —— */

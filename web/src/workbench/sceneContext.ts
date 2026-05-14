@@ -69,6 +69,8 @@ export interface SceneContext {
   loadBuiltinScene(sceneId?: string): Promise<void>
   /** @side-effect 重置所有会话状态 */
   resetSession(): void
+  /** @side-effect 新建空场景 */
+  newScene(): Promise<void>
 }
 
 export const sceneContextKey: InjectionKey<SceneContext> = Symbol('sceneContext')
@@ -116,6 +118,26 @@ export function provideSceneContext(): SceneContext {
     previewError.value = null
     localFileName.value = null
     fileSaveHandle.value = null
+  }
+
+  const EMPTY_SCENE = {
+    format_version: '2.0',
+    meta: {
+      name: '未命名',
+      author: '',
+      created_at_ms: Date.now(),
+      description: '',
+      tags: [] as string[],
+      origin: { x: 0, y: 0, z: 0 },
+    },
+    frames: [{ label: 'Frame 0', index: 0, blocks: [], entities: [] }],
+    block_palette: {} as Record<string, { name: string; properties: Record<string, string> }>,
+    materials: { entries: [] },
+  }
+
+  async function newScene(): Promise<void> {
+    await loadSceneDocument(EMPTY_SCENE, { mode: 'local-file', fileName: '未命名' })
+    dirty.value = false
   }
 
   async function syncPreview(): Promise<void> {
@@ -310,6 +332,7 @@ export function provideSceneContext(): SceneContext {
     saveToFile,
     loadBuiltinScene,
     resetSession,
+    newScene,
   }
 
   provide(sceneContextKey, ctx)

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-import { useSceneContext } from '@/workbench/sceneContext'
+import { useBContext } from '@/workbench/context/bContext'
 import { logCenter } from '@/workbench/logging/LogCenter'
 
-const ctx = useSceneContext()
+const bctx = useBContext()
 const fileInput = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
 const lastErr = ref('')
@@ -30,7 +30,7 @@ async function pickFile(): Promise<void> {
       })
       const handle = handles[0]
       const file = await handle.getFile()
-      await ctx.loadSceneFromFile(file, { saveHandle: handle })
+      await bctx.operators.exec('OPERATOR_OPEN_SCENE', { file })
       logCenter.setStatus(`已打开 ${file.name}`)
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return
@@ -51,7 +51,7 @@ async function onFile(e: Event): Promise<void> {
   busy.value = true
   lastErr.value = ''
   try {
-    await ctx.loadSceneFromFile(file)
+    await bctx.operators.exec('OPERATOR_OPEN_SCENE', { file })
     logCenter.setStatus(`已打开 ${file.name}`)
   } catch (err) {
     lastErr.value = err instanceof Error ? err.message : String(err)
@@ -70,7 +70,7 @@ async function onDrop(ev: DragEvent): Promise<void> {
   busy.value = true
   lastErr.value = ''
   try {
-    await ctx.loadSceneFromFile(file)
+    await bctx.operators.exec('OPERATOR_OPEN_SCENE', { file })
     logCenter.setStatus(`已打开 ${file.name}`)
   } catch (err) {
     lastErr.value = err instanceof Error ? err.message : String(err)

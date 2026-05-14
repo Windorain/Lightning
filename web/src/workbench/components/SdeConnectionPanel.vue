@@ -1,22 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import { useConnectionContext } from '@/workbench/connectionContext'
 import { useBContext } from '@/workbench/context/bContext'
 
-const conn = useConnectionContext()
 const bctx = useBContext()
 const statusMessage = bctx.statusMessage
 
-const connectionOk = computed(() => conn.connected.value)
+const connectionOk = computed(() => bctx.connection.connected.value)
 const connectionMessageText = computed(() => statusMessage.value)
-const showConnectionHint = computed(() => conn.connected.value !== null)
+const showConnectionHint = computed(() => bctx.connection.connected.value !== null)
 
 async function onConnect(): Promise<void> {
-  await conn.testConnection()
-  if (conn.connected.value && conn.apiBase.value) {
-    await conn.refreshExportList()
-    await conn.pullFromServer()
+  await bctx.connection.testConnection()
+  if (bctx.connection.connected.value && bctx.connection.apiBase.value) {
+    await bctx.connection.refreshExportList()
+    await bctx.connection.pullFromServer()
   }
 }
 </script>
@@ -27,11 +25,11 @@ async function onConnect(): Promise<void> {
     <p class="dash-card__desc">填写游戏内 <code class="dash-code">/sde web</code> 打印的地址与 Token，与 <code class="dash-code">structure_exports</code> 目录同步。</p>
     <label class="dash-field">
       <span class="dash-field__label">API 基址</span>
-      <input v-model="conn.apiBase" class="dash-input" type="text" autocomplete="off" placeholder="http://127.0.0.1:37564" />
+      <input v-model="bctx.connection.apiBase" class="dash-input" type="text" autocomplete="off" placeholder="http://127.0.0.1:37564" />
     </label>
     <label class="dash-field">
       <span class="dash-field__label">Token</span>
-      <input v-model="conn.token" class="dash-input" type="password" autocomplete="off" placeholder="Bearer" />
+      <input v-model="bctx.connection.token" class="dash-input" type="password" autocomplete="off" placeholder="Bearer" />
     </label>
     <div class="dash-row">
       <button type="button" class="dash-btn dash-btn--primary" @click="onConnect">连接并刷新</button>

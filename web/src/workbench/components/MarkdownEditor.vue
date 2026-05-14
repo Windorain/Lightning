@@ -3,12 +3,10 @@ import { computed, ref, watch } from 'vue'
 import { useBContext } from '@/workbench/context/bContext'
 import { renderTooltipHtml } from './renderTooltipHtml'
 import { copyTextToClipboard } from '@/util/browser'
-import { useSceneContext } from '@/workbench/sceneContext'
 import { useSelectionContext } from '@/workbench/selectionContext'
 import { isWorldDocument, loadStructureOrWorld } from '@/render/data/bundleResolve'
 import type { BlockPaletteEntry } from '@/render/schema/types'
 
-const ctx = useSceneContext()
 const bctx = useBContext()
 const selection = useSelectionContext()
 const selectedBlock = computed(() => {
@@ -26,7 +24,7 @@ const nbtPanelOpen = ref(true)
 
 const paletteEntry = computed<BlockPaletteEntry | null>(() => {
   if (!selectedBlock.value) return null
-  const doc = ctx.scene.value
+  const doc = bctx.scene.scene.value
   if (!doc) return null
   try {
     const def = loadStructureOrWorld(doc, undefined)
@@ -40,7 +38,7 @@ const nbtEntries = computed<Array<[string, unknown]>>(() => {
 })
 
 function readCurrentTooltip(): string {
-  const doc = ctx.scene.value
+  const doc = bctx.scene.scene.value
   if (!doc || !selectedBlock.value?.voxel) return ''
   const { zSlice, row, column } = selectedBlock.value.voxel
   let tp: unknown, ttg: unknown
@@ -86,7 +84,7 @@ async function saveTooltip(): Promise<void> {
     text: markdownText.value,
     pos: block.voxel,
   })
-  void ctx.syncPreview()
+  void bctx.operators.exec('OPERATOR_SYNC_PREVIEW')
   saveFeedback.value = '已保存'
 }
 

@@ -2,19 +2,19 @@
 import { computed, onMounted, ref } from 'vue'
 
 import EmbedViewer from '@/embed/EmbedViewer.vue'
-import { useSceneContext } from '@/workbench/sceneContext'
+import { useBContext } from '@/workbench/context/bContext'
 
 const PREVIEW_H_STORAGE = 'wmsr-workbench-preview-h'
 const PREVIEW_H_DEFAULT = 520
 const PREVIEW_H_MIN = 260
 
-const ctx = useSceneContext()
+const bctx = useBContext()
 
-const scene = computed(() => ctx.scene.value)
-const previewBusy = computed(() => ctx.previewBusy.value)
-const previewErrorText = computed(() => ctx.previewError.value)
-const previewCfg = computed(() => ctx.previewConfig.value)
-const previewKey = computed(() => ctx.previewEpoch.value)
+const scene = computed(() => bctx.scene.scene.value)
+const previewBusy = computed(() => bctx.scene.previewBusy.value)
+const previewErrorText = computed(() => bctx.scene.previewError.value)
+const previewCfg = computed(() => bctx.scene.previewConfig.value)
+const previewKey = computed(() => bctx.scene.previewEpoch.value)
 
 function clampPreviewHeight(h: number): number {
   const max =
@@ -36,7 +36,7 @@ onMounted(() => {
 })
 
 async function onRetrySync(): Promise<void> {
-  await ctx.syncPreview()
+  await bctx.operators.exec('OPERATOR_SYNC_PREVIEW')
 }
 
 function persistPreviewHeight(): void {

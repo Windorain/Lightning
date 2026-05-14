@@ -11,7 +11,6 @@ import {
   createPreviewSceneStore,
 } from '@/preview/sceneStore'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
-import { useSceneContext } from '@/workbench/sceneContext'
 import { useSelectionContext } from '@/workbench/selectionContext'
 import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useBContext } from '@/workbench/context/bContext'
@@ -26,7 +25,6 @@ const props = defineProps<{
   mergedConfig: PreviewConfig
 }>()
 
-const ctx = useSceneContext()
 const selection = useSelectionContext()
 const toolRegistry = useToolRegistry()
 const bctx = useBContext()
@@ -265,7 +263,7 @@ function onViewportSelect(
 
 const selectedVoxel = computed(() => null)
 
-watch(worldFrameIndex, (i) => { ctx.setPreviewWorldFrameIndex(i) }, { immediate: true })
+watch(worldFrameIndex, (i) => { bctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }) }, { immediate: true })
 
 onMounted(async () => { await store.loadStructureAndResources() })
 onBeforeUnmount(() => {
