@@ -18,3 +18,4 @@ build/
 .vscode/
 *.iml
 .claude/
+CLAUDE.md
