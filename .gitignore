@@ -19,3 +19,9 @@ build/
 *.iml
 .claude/
 CLAUDE.md
+
+# Generated protobuf output
+web/src/render/proto/lightning/v1/
+
+# Test artifacts
+web/test-artifacts/
