@@ -2,40 +2,21 @@
  * Test harness — 黑盒测试入口。
  *
  * 只做三件事：
- * 1. 搭 VM（createWorkbenchContext + bootTestViewport）
+ * 1. 搭 VM（createVM）
  * 2. 注入事件（L0/L1/L2/L3）
  * 3. 断言（读 VM 公开状态）
- *
- * 不直接操作 bctx 内部字段，不走任何 mock 路径。
  */
 
 import type { BContext } from '@/workbench/context/bContext'
 import type { TestSpec, TestResult } from './testRunner'
 import { runTestSpec } from './testRunner'
-import { buildTestSceneDocument, blocksToCellGrid, type BlockTuple } from './testScene'
+import { type BlockTuple } from './testScene'
+import { createVM } from '@/workbench/context/vm'
 
-import { createWorkbenchContext, registerAllOperators, bootTestViewport } from '@/workbench/context/workbenchContext'
-import { createSceneContext } from '@/workbench/sceneContext'
-import { createConnectionContext } from '@/workbench/connectionContext'
-import { createSelectionContext } from '@/workbench/selectionContext'
-import { createEditHistory } from '@/workbench/editHistoryContext'
-import { createToolRegistry } from '@/workbench/toolRegistry'
-import { createBContextSettings } from '@/workbench/context/toolSettings'
-
-import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { createApp, h, type Component } from 'vue'
 import { bContextKey } from '@/workbench/context/bContext'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import type { CheckResult } from '@/workbench/logging/LogCenter'
-
-// 文档格式处理器注册（与 WorkbenchRoot.vue 一致）
-import { formatDispatcher } from '@/workbench/context/documentHandler'
-import { V2PlainHandler } from '@/workbench/context/handlers/v2PlainHandler'
-import { WorldHandler } from '@/workbench/context/handlers/worldHandler'
-import { StructureDataHandler } from '@/workbench/context/handlers/structureDataHandler'
-formatDispatcher.register(V2PlainHandler)
-formatDispatcher.register(WorldHandler)
-formatDispatcher.register(StructureDataHandler)
 
 // ---- 工具键映射 ----
 const TOOL_KEY_BINDING: Record<string, { key: string; ctrl?: boolean; shift?: boolean }> = {
@@ -129,35 +110,8 @@ export function createTestHarness(opts?: {
 }): TestHarness {
   const blocks = opts?.blocks ?? []
 
-  // 1. 创建 context 对象（生产 create* 工厂）
-  const scene = createSceneContext()
-  const connection = createConnectionContext(scene)
-  const selection = createSelectionContext()
-  const editHistory = createEditHistory(256)
-  const toolRegistry = createToolRegistry()
-  const settings = createBContextSettings({
-    theme: 'dark',
-    language: 'zh',
-    confirmDirty: () => false,
-  })
-
-  // 2. 组装 VM（生产 + 测试同一函数）
-  const { bctx } = createWorkbenchContext({
-    scene, connection, selection, editHistory, toolRegistry, settings,
-  })
-
-  // 3. 注册 operators + 激活默认
-  registerAllOperators(bctx)
-  toolRegistry.rebuildTools()
-  toolRegistry.activate('OPERATOR_SELECT')
-
-  // 4. 启动测试视口（camera / contentGroup / DOM / handlers）
-  const { cellGrid, blockPalette } = blocksToCellGrid(blocks)
-  bootTestViewport(bctx, { cellGrid, blockPalette })
-
-  // 5. 加载测试场景数据
-  const doc = buildTestSceneDocument(blocks)
-  scene.loadFromData(doc)
+  // VM 接管一切：context 创建、BContext 组装、operator 注册、视口启动、场景加载
+  const { bctx } = createVM({ blocks })
 
   // ---- Harness: 事件注入 + 断言 ----
   const mountedFns: Array<() => void> = []
