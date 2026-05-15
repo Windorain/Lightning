@@ -18,29 +18,8 @@ import { provideBContext, type BContext } from '@/workbench/context/bContext'
 import { createProductionQueries } from '@/workbench/context/sceneQueries'
 import { createBContextSettings } from '@/workbench/context/toolSettings'
 
-// Operators
-import { globalOperators } from '@/workbench/operators/operatorRegistry'
-import { SelectOperator } from '@/workbench/operators/builtin/selectOperator'
-import { MoveOperator } from '@/workbench/operators/builtin/moveOperator'
-import { DeleteOperator } from '@/workbench/operators/builtin/deleteOperator'
-import { ReplaceOperator } from '@/workbench/operators/builtin/replaceOperator'
-import { FillOperator } from '@/workbench/operators/builtin/fillOperator'
-import { EyedropperOperator } from '@/workbench/operators/builtin/eyedropperOperator'
-import { MirrorOperator } from '@/workbench/operators/builtin/mirrorOperator'
-import { AddBlockOperator } from '@/workbench/operators/builtin/addBlockOperator'
-import { AddAnnotationBoxOperator } from '@/workbench/operators/builtin/addAnnotationBoxOperator'
-import { AnnotationOperator } from '@/workbench/operators/builtin/annotationOperator'
-import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
-import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
-import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
-import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
-import { SceneMetaEditOperator, TooltipEditOperator } from '@/workbench/operators/builtin/sceneEditOperators'
-import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/workbench/operators/builtin/sceneLifecycleOperators'
-import { SyncPreviewOperator, SetFrameIndexOperator } from '@/workbench/operators/builtin/previewOperators'
-import { SetWorkspaceModeOperator, ResetLayoutOperator } from '@/workbench/operators/builtin/workspaceOperators'
-import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/workbench/operators/builtin/sdeOperators'
-import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
-import { ThemeToggleOperator, SetLanguageOperator } from '@/workbench/operators/builtin/appearanceOperators'
+// Operators — registered via shared VM assembly
+import { createWorkbenchContext, registerAllOperators } from '@/workbench/context/workbenchContext'
 
 import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
 import { installTestRunner } from '@/workbench/testing/testRunner'
@@ -77,80 +56,26 @@ const selection = provideSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
 const statusMessage = useStatusMessage().statusMessage
-const bctx = {
-  scene,
-  selection,
-  editHistory,
-  toolRegistry,
-  connection,
-  operators: {
-    exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(bctx, id, props),
-    invoke: (id: string, props?: Record<string, unknown>, event?: Event) => globalOperators.invoke(bctx, id, props, event as any),
-    find: (id: string) => globalOperators.find(id),
-    all: () => globalOperators.all(),
-    register: (op: any) => globalOperators.register(op),
-  },
-  eventDispatcher: eventDispatcher as any,
-  log: logCenter as any,
-  wikiConfig: wikiConfig as any,
-  statusMessage: statusMessage as any,
-  camera: null,
-  contentGroup: null,
-  domElement: null,
-  controlsRef: null,
-  definition: null,
-  layerPreview: null,
-  settings: createBContextSettings(),
-} as BContext
-bctx.queries = createProductionQueries(bctx)
 
-// Build RNA registry
-const rna = createRNARegistry()
-rna.register(blockRNA)
-rna.register(toolSettingsRNA)
-rna.register(sceneMetaRNA)
-rna.register(wikiConfigRNA)
+// 共享 VM 组装
+const settings = createBContextSettings()
+const { bctx, rna, screen: defaultScreen } = createWorkbenchContext({
+  scene, connection, selection, editHistory, toolRegistry, settings,
+  statusMessage,
+})
 
-// Build default screen layout (single VIEW_3D area + PROPERTIES area)
-const defaultScreen: bScreen = {
-  id: 'workbench',
-  areas: [
-    {
-      id: 'viewport-area',
-      spaceType: SpaceType.VIEW_3D,
-      splitDir: 'none',
-      parentArea: null,
-      regions: [
-        { id: 'r-header', type: RegionType.HEADER, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
-        { id: 'r-toolshelf', type: RegionType.TOOLSHELF, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
-        { id: 'r-viewport', type: RegionType.MAIN, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
-      ],
-    },
-    {
-      id: 'properties-area',
-      spaceType: SpaceType.PROPERTIES,
-      splitDir: 'none',
-      parentArea: null,
-      regions: [
-        { id: 'r-props-main', type: RegionType.MAIN, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
-      ],
-    },
-  ],
-  popupRegions: [],
-  bounds: { width: 1400, height: 800 },
-}
+provideBContext(bctx)
+useNeiTheme()
 
-// Register panels into screen regions
+// 注册所有 operators + 重建工具列表 + 激活默认
+registerAllOperators(bctx)
+toolRegistry.rebuildTools()
+toolRegistry.activate('OPERATOR_SELECT')
+
+// Reactive panel queries
 const viewportArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
-viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels.push(toolShelfPanel)
-viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels.push(menuBarPanel)
 const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
-propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
-  blockInspectorPanel, generatePanel, transformPanel,
-  batchEditPanel, annotationPanel, labelPanel, sceneInfoPanel,
-)
 
-// Reactive panel queries — poll() and layout() are tracked by Vue reactivity
 const activeToolshelfPanels = computed(() =>
   viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels
     .filter(p => p.poll(bctx))
@@ -168,9 +93,6 @@ const activeHeaderPanels = computed(() =>
     .filter(p => p.poll(bctx))
     .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
-
-// Compute initial layout
-computeLayout(bctx, defaultScreen)
 
 // Context menu
 const contextMenu = createContextMenu()
@@ -193,65 +115,9 @@ function onMouseMove(e: MouseEvent) {
   lastMousePosition.value = { x: e.clientX, y: e.clientY }
 }
 
-// Wire into bctx
-;(bctx as any).wm = { windows: [], activeWindow: null, contextMenu, showContextMenu, hideContextMenu }
-;(bctx as any).screen = defaultScreen
-;(bctx as any).area = null
-;(bctx as any).region = null
-;(bctx as any).rna = rna
-;(bctx as any).ui = {
-  computeLayout: (s: bScreen) => computeLayout(bctx, s),
-  boundsOf: (id: string) => boundsOf(bctx, id),
-  boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
-  boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),
-  regionAt: (x: number, y: number) => regionAt(defaultScreen, x, y),
-  relayout: () => relayout(bctx),
-}
-
-provideBContext(bctx)
-useNeiTheme()
-
-// Register all operators
-bctx.operators.register(SelectOperator)
-bctx.operators.register(MoveOperator)
-bctx.operators.register(DeleteOperator)
-bctx.operators.register(ReplaceOperator)
-bctx.operators.register(FillOperator)
-bctx.operators.register(EyedropperOperator)
-bctx.operators.register(MirrorOperator)
-bctx.operators.register(AddBlockOperator)
-bctx.operators.register(AddAnnotationBoxOperator)
-bctx.operators.register(AnnotationOperator)
-bctx.operators.register(LabelOperator)
-bctx.operators.register(UndoOperator)
-bctx.operators.register(RedoOperator)
-bctx.operators.register(ViewRotateOperator)
-bctx.operators.register(ViewPanOperator)
-bctx.operators.register(ViewZoomOperator)
-bctx.operators.register(ToolSetOperator)
-bctx.operators.register(SceneMetaEditOperator)
-bctx.operators.register(TooltipEditOperator)
-bctx.operators.register(NewSceneOperator)
-bctx.operators.register(OpenSceneOperator)
-bctx.operators.register(SaveFileOperator)
-bctx.operators.register(LoadBuiltinSceneOperator)
-bctx.operators.register(SyncPreviewOperator)
-bctx.operators.register(SetFrameIndexOperator)
-bctx.operators.register(SetWorkspaceModeOperator)
-bctx.operators.register(ResetLayoutOperator)
-bctx.operators.register(SDEConnectOperator)
-bctx.operators.register(SDELoadExportOperator)
-bctx.operators.register(SDEPushOperator)
-bctx.operators.register(ExportPlainOperator)
-bctx.operators.register(ExportEnvelopeOperator)
-bctx.operators.register(ExportObjOperator)
-bctx.operators.register(ExportIsoPngOperator)
-bctx.operators.register(ThemeToggleOperator)
-bctx.operators.register(SetLanguageOperator)
-
-// Rebuild tool list after all operators registered, then activate default
-toolRegistry.rebuildTools()
-toolRegistry.activate('OPERATOR_SELECT')
+// Wire context menu + show/hide into wm (不在 createWorkbenchContext 内，因为依赖 showContextMenu 闭包)
+;(bctx.wm as any).showContextMenu = showContextMenu
+;(bctx.wm as any).hideContextMenu = hideContextMenu
 
 // Keymap — maps to operator IDs
 const OPERATOR_KEY_MAP: Record<string, string> = {
