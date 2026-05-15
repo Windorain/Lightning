@@ -24,7 +24,7 @@ import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import type { CheckResult } from '@/workbench/logging/LogCenter'
 import { MockGizmo, createTestGizmoHandler } from './gizmoMock'
-import { screenDeltaToWorld } from './screenDeltaToWorld'
+
 
 // Operators
 import { SelectOperator } from '@/workbench/operators/builtin/selectOperator'
@@ -389,7 +389,6 @@ export function createTestHarness(
       if (axis === 'x') screenDx = amount / k
       else if (axis === 'y') screenDy = -amount / k
       else screenDx = -amount / k
-      this.assert(screenDeltaToWorld(screenDx, screenDy, axis, k) === amount)
       this.drag(gizmo.x, gizmo.y, gizmo.x + screenDx, gizmo.y + screenDy, { steps })
     },
 

@@ -64,6 +64,33 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       return blocks
     },
 
+    moveBlockInCellGrid(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }): boolean {
+      const frame = this.getCurrentFrame()
+      if (!frame?.structure) return false
+      const st = frame.structure as { cellGrid: number[][][] }
+      const grid = st.cellGrid
+      // bounds check
+      if (from.z < 0 || from.z >= grid.length) return false
+      const fromSlice = grid[from.z]
+      if (!fromSlice || from.y < 0 || from.y >= fromSlice.length) return false
+      const fromRow = fromSlice[from.y]
+      if (!fromRow || from.x < 0 || from.x >= fromRow.length) return false
+      // source must be non-air
+      if (fromRow[from.x] === 0) return false
+      // target bounds
+      if (to.z < 0 || to.z >= grid.length) return false
+      const toSlice = grid[to.z]
+      if (!toSlice || to.y < 0 || to.y >= toSlice.length) return false
+      const toRow = toSlice[to.y]
+      if (!toRow || to.x < 0 || to.x >= toRow.length) return false
+      // target must be air
+      if (toRow[to.x] !== 0) return false
+      // move
+      toRow[to.x] = fromRow[from.x]
+      fromRow[from.x] = 0
+      return true
+    },
+
     getDocument(): Record<string, any> | null {
       return bctx.scene.scene.value as Record<string, any> | null
     },
@@ -80,8 +107,30 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       }
     },
 
-    getGizmoAnchor(_axis: 'x' | 'y' | 'z'): { x: number; y: number } | null {
-      return null
+    getGizmoAnchor(axis: 'x' | 'y' | 'z'): { x: number; y: number } | null {
+      const { camera, domElement } = bctx
+      if (!camera || !domElement) return null
+
+      const items = bctx.selection.items.value
+      if (items.size === 0) return null
+      let cx = 0, cy = 0, cz = 0
+      for (const item of items) {
+        cx += item.pos.x; cy += item.pos.y; cz += item.pos.z
+      }
+      cx /= items.size; cy /= items.size; cz /= items.size
+
+      const tip = new THREE.Vector3(
+        cx + (axis === 'x' ? 1 : 0),
+        cy + (axis === 'y' ? 1 : 0),
+        cz + (axis === 'z' ? 1 : 0),
+      )
+      tip.project(camera)
+
+      const rect = domElement.getBoundingClientRect()
+      return {
+        x: ((tip.x + 1) / 2) * rect.width + rect.left,
+        y: ((-tip.y + 1) / 2) * rect.height + rect.top,
+      }
     },
 
     axisAdd(
@@ -113,19 +162,36 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     pickSurface(event: PointerEvent) {
       const { camera, contentGroup, domElement, definition, layerPreview } = bctx
       if (!camera || !contentGroup || !domElement || !definition) return null
+
+      const rect = domElement.getBoundingClientRect()
+      const mouse = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+
+      const raycaster = new THREE.Raycaster()
+      raycaster.setFromCamera(mouse, camera)
+
+      const hits = raycaster.intersectObject(contentGroup, true)
+      if (!hits.length || !hits[0].face) return null
+
+      const hit = hits[0]
+      const normalWorld = hit.face.normal
+        .clone()
+        .transformDirection((hit.object as THREE.Object3D).matrixWorld)
+        .normalize()
+
+      const nx = Math.round(normalWorld.x)
+      const ny = Math.round(normalWorld.y)
+      const nz = Math.round(normalWorld.z)
+
       const result = pickVoxelFromPointer({
         clientX: event.clientX, clientY: event.clientY,
         domElement, camera, contentGroup, def: definition,
         layerPreview: layerPreview ?? undefined as any,
       })
       if (!result) return null
-      const cx = result.column + 0.5, cy = result.row + 0.5, cz = result.zSlice + 0.5
-      const dx = result.column + 0.5 - cx, dy = result.row + 0.5 - cy, dz = result.zSlice + 0.5 - cz
-      const absDx = Math.abs(dx), absDy = Math.abs(dy), absDz = Math.abs(dz)
-      let nx = 0, ny = 0, nz = 0
-      if (absDx >= absDy && absDx >= absDz) nx = dx > 0 ? 1 : -1
-      else if (absDy >= absDx && absDy >= absDz) ny = dy > 0 ? 1 : -1
-      else nz = dz > 0 ? 1 : -1
+
       return {
         pos: { x: result.column + nx, y: result.row + ny, z: result.zSlice + nz },
         normal: { x: nx, y: ny, z: nz },

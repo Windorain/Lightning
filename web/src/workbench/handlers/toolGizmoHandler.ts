@@ -5,6 +5,7 @@ import type { MoveGizmo, GizmoAxis } from '@/workbench/tools/gizmos'
 import type { BContext } from '@/workbench/context/bContext'
 import { GizmoDragModal } from '@/workbench/modalOperations/GizmoDragModal'
 
+
 /**
  * Gizmo handler (HANDLER_TYPE.GIZMO).
  * pointermove: hover highlight (never consumes event)
@@ -55,14 +56,15 @@ export function createToolGizmoHandler(
 
       const startX = pe.clientX
       const startY = pe.clientY
+      const axis = hit as 'x' | 'y' | 'z'
       const computeDelta = (_moveEvent: PointerEvent): number => {
         const dx = _moveEvent.clientX - startX
         const dy = _moveEvent.clientY - startY
         const bctxNow = getBctx()
         const k = bctxNow?.settings.dragSensitivity ?? 0.05
-        if (hit === 'x') return dx * k
-        if (hit === 'y') return -dy * k
-        return -dx * k  // 'z'
+        if (axis === 'x') return dx * k
+        if (axis === 'y') return -dy * k
+        return -dx * k
       }
 
       const modal = new GizmoDragModal(
