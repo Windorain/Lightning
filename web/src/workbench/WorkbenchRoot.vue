@@ -209,6 +209,9 @@ onBeforeUnmount(() => {
 
 installTestRunner(bctx)
 
+// VM 句柄：测试层通过 window.__vm__ 访问公开观测面
+;(window as any).__vm__ = bctx
+
 logCenter.injectStateRefs({
   scene: () => scene.scene.value as any,
   selection: () => [...selection.items.value],
