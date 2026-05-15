@@ -1,13 +1,12 @@
 /**
  * Test harness — 黑盒测试入口。
  *
- * L0: pointerDown/Move/Up, keyDown（纯事件注入）
- * L1: click, drag（组合事件）
- * L2: clickBlock, selectBrush, activateTool, clickOperator, setRNAValue（语义交互）
- * L3: dragWorld（世界坐标交互）
+ * 只做三件事：
+ * 1. 搭 VM（createWorkbenchContext + bootTestViewport）
+ * 2. 注入事件（L0/L1/L2/L3）
+ * 3. 断言（读 VM 公开状态）
  *
- * VM 由 createWorkbenchContext 搭建（与 WorkbenchRoot.vue 共享同一函数）。
- * 测试基础设施只做三件事：搭 VM、注入事件、观测状态。
+ * 不直接操作 bctx 内部字段，不走任何 mock 路径。
  */
 
 import type { BContext } from '@/workbench/context/bContext'
@@ -15,7 +14,7 @@ import type { TestSpec, TestResult } from './testRunner'
 import { runTestSpec } from './testRunner'
 import { buildTestSceneDocument, blocksToCellGrid, type BlockTuple } from './testScene'
 
-import { createWorkbenchContext, registerAllOperators } from '@/workbench/context/workbenchContext'
+import { createWorkbenchContext, registerAllOperators, bootTestViewport } from '@/workbench/context/workbenchContext'
 import { createSceneContext } from '@/workbench/sceneContext'
 import { createConnectionContext } from '@/workbench/connectionContext'
 import { createSelectionContext } from '@/workbench/selectionContext'
@@ -24,21 +23,12 @@ import { createToolRegistry } from '@/workbench/toolRegistry'
 import { createBContextSettings } from '@/workbench/context/toolSettings'
 
 import { eventDispatcher } from '@/workbench/eventDispatcher'
-import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
-import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
-import { createUIHandler } from '@/workbench/handlers/uiHandler'
-import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
-import type { MoveGizmo } from '@/workbench/tools/gizmos'
 import { createApp, h, type Component } from 'vue'
 import { bContextKey } from '@/workbench/context/bContext'
-import { DEFAULT_KEYMAP, matchBinding } from '@/workbench/keymap'
-import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import type { CheckResult } from '@/workbench/logging/LogCenter'
-import { JSDOM } from 'jsdom'
-import * as THREE from 'three'
 
-// 注册文档格式处理器（与 WorkbenchRoot.vue 一致）
+// 文档格式处理器注册（与 WorkbenchRoot.vue 一致）
 import { formatDispatcher } from '@/workbench/context/documentHandler'
 import { V2PlainHandler } from '@/workbench/context/handlers/v2PlainHandler'
 import { WorldHandler } from '@/workbench/context/handlers/worldHandler'
@@ -47,68 +37,7 @@ formatDispatcher.register(V2PlainHandler)
 formatDispatcher.register(WorldHandler)
 formatDispatcher.register(StructureDataHandler)
 
-// ---- VM 外设：DOM ----
-const dom = new JSDOM('<!DOCTYPE html><html><body><canvas id="test-canvas"></canvas></body></html>')
-const testDomElement = dom.window.document.getElementById('test-canvas') as HTMLElement
-testDomElement.getBoundingClientRect = (() => {
-  const r = { x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 }
-  return () => ({ ...r, toJSON() { return {} } })
-})() as any
-
-// ---- VM 外设：相机 ----
-function createTestCamera(): THREE.OrthographicCamera {
-  const aspect = 800 / 600
-  const frustumSize = 20
-  const camera = new THREE.OrthographicCamera(
-    -frustumSize * aspect / 2, frustumSize * aspect / 2,
-    frustumSize / 2, -frustumSize / 2, 0.1, 500,
-  )
-  camera.position.set(5, 20, 5)
-  camera.up.set(0, 1, 0)
-  camera.lookAt(0, 0, 0)
-  return camera
-}
-
-// ---- VM 外设：contentGroup mesh 填充（供 pickVoxel 射线检测） ----
-function populateContentGroup(cellGrid: number[][][]): THREE.Group {
-  const g = new THREE.Group()
-  const sizeZ = cellGrid.length
-  const sizeY = cellGrid[0]?.length ?? 0
-  const sizeX = cellGrid[0]?.[0]?.length ?? 0
-  if (sizeX > 0 && sizeY > 0 && sizeZ > 0) {
-    const geo = new THREE.BoxGeometry(1, 1, 1)
-    const mat = new THREE.MeshBasicMaterial()
-    for (let z = 0; z < sizeZ; z++) {
-      const slice = cellGrid[z]; if (!slice) continue
-      for (let y = 0; y < sizeY; y++) {
-        const row = slice[y]; if (!row) continue
-        for (let x = 0; x < sizeX; x++) {
-          if (row[x] === 0) continue
-          const mesh = new THREE.Mesh(geo, mat)
-          mesh.position.set(
-            x - sizeX / 2 + 0.5,
-            sizeY / 2 - y - 0.5,
-            z - sizeZ / 2 + 0.5,
-          )
-          g.add(mesh)
-        }
-      }
-    }
-  }
-  g.updateMatrixWorld()
-  return g
-}
-
 // ---- 工具键映射 ----
-const TOOL_KEY_MAP: Record<string, string> = {
-  select: 'OPERATOR_SELECT', move: 'OPERATOR_MOVE',
-  delete: 'OPERATOR_DELETE', replace: 'OPERATOR_REPLACE',
-  fill: 'OPERATOR_FILL', eyedropper: 'OPERATOR_EYEDROPPER',
-  mirror: 'OPERATOR_MIRROR',
-  'add-block': 'OPERATOR_ADD_BLOCK',
-  'add-annotation-box': 'OPERATOR_ADD_ANNOTATION_BOX',
-}
-
 const TOOL_KEY_BINDING: Record<string, { key: string; ctrl?: boolean; shift?: boolean }> = {
   select:    { key: 'b' },
   move:      { key: 'g' },
@@ -125,71 +54,6 @@ const OP_ID_TO_FRIENDLY: Record<string, string> = {
   'OPERATOR_ADD_BLOCK': 'add-block',
   'OPERATOR_REPLACE': 'replace',
   'OPERATOR_FILL': 'fill',
-}
-
-// ---- Handler 注册 ----
-let _bctxRef: BContext | null = null
-let _gizmoRef: MoveGizmo | null = null
-let _handlersBooted = false
-
-function bootEventHandlers(bctx: BContext): void {
-  _bctxRef = bctx
-  if (_handlersBooted) return
-  _handlersBooted = true
-
-  // Gizmo handler（生产 createToolGizmoHandler）
-  bctx.eventDispatcher.registerTypedHandler(
-    createToolGizmoHandler(
-      () => _bctxRef?.toolRegistry.activeTool.value?.id ?? '',
-      () => _gizmoRef,
-      () => _bctxRef,
-      () => _bctxRef?.camera ?? null,
-      () => _bctxRef?.controlsRef ?? null,
-    ),
-  )
-
-  // UI handler
-  bctx.eventDispatcher.registerTypedHandler(createUIHandler(() => _bctxRef))
-
-  // Keymap handler
-  bctx.eventDispatcher.registerTypedHandler({
-    type: HANDLER_TYPE.KEYMAP,
-    handle(event: Event): { break: boolean } {
-      if (!(event instanceof KeyboardEvent)) return { break: false }
-
-      if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
-        const ADD_MENU_ITEMS = [
-          { kind: 'label', label: '生成', icon: '＋' },
-          { kind: 'separator', label: '' },
-          { kind: 'operator', label: '方块', icon: '⬜', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_BLOCK' } },
-          { kind: 'operator', label: '注解框', icon: '📝', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_ANNOTATION_BOX' } },
-        ]
-        const bctx = _bctxRef
-        if (bctx) {
-          const wm = (bctx as any).wm
-          if (wm?.showContextMenu) {
-            wm.showContextMenu(wm.contextMenu, { x: 400, y: 300 }, ADD_MENU_ITEMS)
-          }
-        }
-        return { break: true }
-      }
-
-      for (const binding of DEFAULT_KEYMAP) {
-        if (!matchBinding(binding, event)) continue
-        if (binding.toolId) {
-          const opId = TOOL_KEY_MAP[binding.toolId] ?? `OPERATOR_${binding.toolId.toUpperCase()}`
-          _bctxRef?.operators.exec('OPERATOR_TOOL_SET', { toolId: opId })
-          return { break: true }
-        }
-        if (binding.action === 'undo') { _bctxRef?.operators.exec('OPERATOR_UNDO'); return { break: true } }
-        if (binding.action === 'redo') { _bctxRef?.operators.exec('OPERATOR_REDO'); return { break: true } }
-      }
-      return { break: false }
-    },
-  })
-
-  // Active tool handler
-  bctx.eventDispatcher.registerTypedHandler(createActiveToolHandler(() => _bctxRef))
 }
 
 // ---- Batch assertion collector ----
@@ -215,7 +79,6 @@ function createCollector(_ctx: BContext): CheckCollector {
 export interface TestHarness {
   ctx: BContext
   log: typeof logCenter
-
   pointerDown(x: number, y: number, opts?: { ctrl?: boolean; shift?: boolean }): void
   pointerMove(x: number, y: number, opts?: { ctrl?: boolean; shift?: boolean }): void
   pointerUp(x: number, y: number, opts?: { ctrl?: boolean; shift?: boolean }): void
@@ -278,39 +141,25 @@ export function createTestHarness(opts?: {
     confirmDirty: () => false,
   })
 
-  // 2. 组装 VM（与 WorkbenchRoot.vue 同一函数）
+  // 2. 组装 VM（生产 + 测试同一函数）
   const { bctx } = createWorkbenchContext({
     scene, connection, selection, editHistory, toolRegistry, settings,
   })
 
-  // 3. 注册 operators + 激活默认工具
+  // 3. 注册 operators + 激活默认
   registerAllOperators(bctx)
   toolRegistry.rebuildTools()
   toolRegistry.activate('OPERATOR_SELECT')
 
-  // 4. 加载测试场景数据（走生产路径 scene.loadFromData）
+  // 4. 启动测试视口（camera / contentGroup / DOM / handlers）
+  const { cellGrid, blockPalette } = blocksToCellGrid(blocks)
+  bootTestViewport(bctx, { cellGrid, blockPalette })
+
+  // 5. 加载测试场景数据
   const doc = buildTestSceneDocument(blocks)
   scene.loadFromData(doc)
 
-  // 5. 设置 VM 外设（模拟 onViewportReady）
-  const camera = createTestCamera()
-  const { cellGrid } = blocksToCellGrid(blocks)
-  const contentGroup = populateContentGroup(cellGrid)
-
-  bctx.camera = camera
-  bctx.contentGroup = contentGroup
-  bctx.domElement = testDomElement
-  bctx.controlsRef = null
-  bctx.layerPreview = 'all'
-  // definition 供 pickVoxelFromPointer → buildVoxelVolume 使用
-  bctx.definition = {
-    cellGrid,
-    blockPalette: blocksToCellGrid(blocks).blockPalette,
-  } as any
-
-  // 6. 注册事件 handlers
-  bootEventHandlers(bctx)
-
+  // ---- Harness: 事件注入 + 断言 ----
   const mountedFns: Array<() => void> = []
 
   const harness: TestHarness = {
@@ -322,7 +171,7 @@ export function createTestHarness(opts?: {
       const event = new PointerEvent('pointerdown', {
         clientX: x, clientY: y, ctrlKey: o.ctrl, shiftKey: o.shift, button: 0,
       })
-      Object.defineProperty(event, 'target', { value: testDomElement, writable: false })
+      Object.defineProperty(event, 'target', { value: bctx.domElement, writable: false })
       bctx.eventDispatcher.dispatch(event)
     },
 
@@ -330,7 +179,7 @@ export function createTestHarness(opts?: {
       const event = new PointerEvent('pointermove', {
         clientX: x, clientY: y, ctrlKey: o.ctrl, shiftKey: o.shift, button: 0,
       })
-      Object.defineProperty(event, 'target', { value: testDomElement, writable: false })
+      Object.defineProperty(event, 'target', { value: bctx.domElement, writable: false })
       bctx.eventDispatcher.dispatch(event)
     },
 
@@ -338,7 +187,7 @@ export function createTestHarness(opts?: {
       const event = new PointerEvent('pointerup', {
         clientX: x, clientY: y, ctrlKey: o.ctrl, shiftKey: o.shift, button: 0,
       })
-      Object.defineProperty(event, 'target', { value: testDomElement, writable: false })
+      Object.defineProperty(event, 'target', { value: bctx.domElement, writable: false })
       bctx.eventDispatcher.dispatch(event)
     },
 
@@ -391,7 +240,6 @@ export function createTestHarness(opts?: {
     },
 
     clickBlock(pos, o = {}) {
-      // 网格坐标 → 世界坐标
       const def = bctx.definition as any
       const sizeX = def?.cellGrid?.[0]?.[0]?.length ?? 0
       const sizeY = def?.cellGrid?.[0]?.length ?? 0

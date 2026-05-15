@@ -199,3 +199,169 @@ export function registerAllOperators(bctx: BContext): void {
     }
   }
 }
+
+// ---- 测试视口启动（对标 WorkbenchViewport.onViewportReady） ----
+
+import { JSDOM } from 'jsdom'
+import * as THREE from 'three'
+import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
+import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
+import { createUIHandler } from '@/workbench/handlers/uiHandler'
+import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
+import { DEFAULT_KEYMAP, matchBinding } from '@/workbench/keymap'
+
+let _testDomElement: HTMLElement | null = null
+
+function ensureTestDom(): HTMLElement {
+  if (!_testDomElement) {
+    const dom = new JSDOM('<!DOCTYPE html><html><body><canvas id="test-canvas"></canvas></body></html>')
+    _testDomElement = dom.window.document.getElementById('test-canvas') as HTMLElement
+    _testDomElement.getBoundingClientRect = (() => {
+      const r = { x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 }
+      return () => ({ ...r, toJSON() { return {} } })
+    })() as any
+  }
+  return _testDomElement
+}
+
+function createTestCamera(): THREE.OrthographicCamera {
+  const aspect = 800 / 600
+  const frustumSize = 20
+  const camera = new THREE.OrthographicCamera(
+    -frustumSize * aspect / 2, frustumSize * aspect / 2,
+    frustumSize / 2, -frustumSize / 2, 0.1, 500,
+  )
+  camera.position.set(5, 20, 5)
+  camera.up.set(0, 1, 0)
+  camera.lookAt(0, 0, 0)
+  return camera
+}
+
+function populateContentGroup(cellGrid: number[][][]): THREE.Group {
+  const g = new THREE.Group()
+  const sizeZ = cellGrid.length
+  const sizeY = cellGrid[0]?.length ?? 0
+  const sizeX = cellGrid[0]?.[0]?.length ?? 0
+  if (sizeX > 0 && sizeY > 0 && sizeZ > 0) {
+    const geo = new THREE.BoxGeometry(1, 1, 1)
+    const mat = new THREE.MeshBasicMaterial()
+    for (let z = 0; z < sizeZ; z++) {
+      const slice = cellGrid[z]; if (!slice) continue
+      for (let y = 0; y < sizeY; y++) {
+        const row = slice[y]; if (!row) continue
+        for (let x = 0; x < sizeX; x++) {
+          if (row[x] === 0) continue
+          const mesh = new THREE.Mesh(geo, mat)
+          mesh.position.set(
+            x - sizeX / 2 + 0.5,
+            sizeY / 2 - y - 0.5,
+            z - sizeZ / 2 + 0.5,
+          )
+          g.add(mesh)
+        }
+      }
+    }
+  }
+  g.updateMatrixWorld()
+  return g
+}
+
+const TOOL_KEY_MAP: Record<string, string> = {
+  select: 'OPERATOR_SELECT', move: 'OPERATOR_MOVE',
+  delete: 'OPERATOR_DELETE', replace: 'OPERATOR_REPLACE',
+  fill: 'OPERATOR_FILL', eyedropper: 'OPERATOR_EYEDROPPER',
+  mirror: 'OPERATOR_MIRROR',
+  'add-block': 'OPERATOR_ADD_BLOCK',
+  'add-annotation-box': 'OPERATOR_ADD_ANNOTATION_BOX',
+}
+
+export interface BootViewportOpts {
+  cellGrid: number[][][]
+  blockPalette: Array<{ registryId: string; meta: number }>
+}
+
+/**
+ * 启动测试视口——对标 WorkbenchViewport.onViewportReady。
+ * 创建 camera / contentGroup / domElement / definition，
+ * 注册事件 handlers。harness 调用一次即可。
+ */
+let _viewportBooted = false
+let _activeBctx: BContext | null = null
+
+export function bootTestViewport(bctx: BContext, opts: BootViewportOpts): void {
+  _activeBctx = bctx
+
+  if (_viewportBooted) return
+  _viewportBooted = true
+
+  const { cellGrid, blockPalette } = opts
+
+  // camera
+  const camera = createTestCamera()
+  bctx.camera = camera
+
+  // contentGroup（mesh 供 pickVoxel 射线检测）
+  const contentGroup = populateContentGroup(cellGrid)
+  bctx.contentGroup = contentGroup
+
+  // DOM
+  bctx.domElement = ensureTestDom()
+
+  // definition（供 buildVoxelVolume）
+  bctx.definition = { cellGrid, blockPalette } as any
+
+  // layer preview
+  bctx.layerPreview = 'all'
+
+  // controls
+  bctx.controlsRef = null
+
+  // 注册事件 handlers（与 WorkbenchViewport.onViewportReady 一致，只注册一次）
+  let gizmoRef: any = null
+  const getBctx = () => _activeBctx
+  const getCamera = () => _activeBctx?.camera ?? null
+  const getControls = () => _activeBctx?.controlsRef ?? null
+
+  bctx.eventDispatcher.registerTypedHandler(
+    createToolGizmoHandler(
+      () => getBctx()?.toolRegistry.activeTool.value?.id ?? '',
+      () => gizmoRef,
+      () => getBctx(),
+      () => getCamera(),
+      () => getControls(),
+    ),
+  )
+  bctx.eventDispatcher.registerTypedHandler(createUIHandler(() => getBctx()))
+  bctx.eventDispatcher.registerTypedHandler({
+    type: HANDLER_TYPE.KEYMAP,
+    handle(event: Event): { break: boolean } {
+      const ctx = getBctx()
+      if (!ctx || !(event instanceof KeyboardEvent)) return { break: false }
+      if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        const ADD_MENU_ITEMS = [
+          { kind: 'label', label: '生成', icon: '＋' },
+          { kind: 'separator', label: '' },
+          { kind: 'operator', label: '方块', icon: '⬜', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_BLOCK' } },
+          { kind: 'operator', label: '注解框', icon: '📝', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_ANNOTATION_BOX' } },
+        ]
+        const wm = (ctx as any).wm
+        if (wm?.showContextMenu) {
+          wm.showContextMenu(wm.contextMenu, { x: 400, y: 300 }, ADD_MENU_ITEMS)
+        }
+        return { break: true }
+      }
+      for (const binding of DEFAULT_KEYMAP) {
+        if (!matchBinding(binding, event)) continue
+        if (binding.toolId) {
+          const opId = TOOL_KEY_MAP[binding.toolId] ?? `OPERATOR_${binding.toolId.toUpperCase()}`
+          ctx.operators.exec('OPERATOR_TOOL_SET', { toolId: opId })
+          return { break: true }
+        }
+        if (binding.action === 'undo') { ctx.operators.exec('OPERATOR_UNDO'); return { break: true } }
+        if (binding.action === 'redo') { ctx.operators.exec('OPERATOR_REDO'); return { break: true } }
+      }
+      return { break: false }
+    },
+  })
+  bctx.eventDispatcher.registerTypedHandler(createActiveToolHandler(() => getBctx()))
+}
