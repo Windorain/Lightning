@@ -25,7 +25,7 @@ export interface UndoManager {
 
 export const editHistoryKey: InjectionKey<UndoManager> = Symbol('editHistory')
 
-export function provideEditHistory(maxStack = 256): UndoManager {
+export function createEditHistory(maxStack = 256): UndoManager {
   const undoStack: EditCommand[] = []
   const redoStack: EditCommand[] = []
   const canUndo = ref(false)
@@ -83,8 +83,13 @@ export function provideEditHistory(maxStack = 256): UndoManager {
     refreshFlags()
   }
 
-  provide(editHistoryKey, { canUndo, canRedo, undoLabel, redoLabel, push, undo, redo, clear })
   return { canUndo, canRedo, undoLabel, redoLabel, push, undo, redo, clear }
+}
+
+export function provideEditHistory(maxStack = 256): UndoManager {
+  const ctx = createEditHistory(maxStack)
+  provide(editHistoryKey, ctx)
+  return ctx
 }
 
 export function useEditHistory(): UndoManager {
