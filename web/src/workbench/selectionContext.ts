@@ -31,7 +31,7 @@ function posKey(pos: { x: number; y: number; z: number }): string {
   return `${pos.x},${pos.y},${pos.z}`
 }
 
-export function provideSelectionContext(): SelectionContext {
+export function createSelectionContext(): SelectionContext {
   const items = ref<Set<BlockRef>>(new Set())
   const mode = ref<SelectionMode>('single')
   const frameIndex = ref(0)
@@ -125,13 +125,16 @@ export function provideSelectionContext(): SelectionContext {
     return index.value.has(posKey(pos))
   }
 
-  const ctx: SelectionContext = {
+  return {
     items: items as unknown as Ref<Set<BlockRef>>,
     mode: mode as unknown as Ref<SelectionMode>,
     frameIndex: frameIndex as unknown as Ref<number>,
     select, selectBox, selectByType, add, remove, clear, invert, isSelected,
   }
+}
 
+export function provideSelectionContext(): SelectionContext {
+  const ctx = createSelectionContext()
   provide(selectionContextKey, ctx)
   return ctx
 }
