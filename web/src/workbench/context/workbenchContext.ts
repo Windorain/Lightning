@@ -287,11 +287,25 @@ export interface BootViewportOpts {
  */
 let _viewportBooted = false
 let _activeBctx: BContext | null = null
+const _registeredHandlerUnsubs: Array<() => void> = []
+
+/** 硬重置——清空跨测试累积的单例状态 */
+function resetVMState(): void {
+  // 清空 modal 栈
+  const ed = _activeBctx?.eventDispatcher ?? eventDispatcher as any
+  while ((ed as any)._modalStack?.length > 0) {
+    (ed as any)._modalStack.pop()
+  }
+  // 注销上次注册的 handlers
+  for (const unsub of _registeredHandlerUnsubs) unsub()
+  _registeredHandlerUnsubs.length = 0
+  _viewportBooted = false
+}
 
 export function bootTestViewport(bctx: BContext, opts: BootViewportOpts): void {
+  // 每次调用先重置旧 VM 残留状态
+  resetVMState()
   _activeBctx = bctx
-
-  if (_viewportBooted) return
   _viewportBooted = true
 
   const { cellGrid, blockPalette } = opts
@@ -322,7 +336,7 @@ export function bootTestViewport(bctx: BContext, opts: BootViewportOpts): void {
   const getCamera = () => _activeBctx?.camera ?? null
   const getControls = () => _activeBctx?.controlsRef ?? null
 
-  bctx.eventDispatcher.registerTypedHandler(
+  _registeredHandlerUnsubs.push(bctx.eventDispatcher.registerTypedHandler(
     createToolGizmoHandler(
       () => getBctx()?.toolRegistry.activeTool.value?.id ?? '',
       () => gizmoRef,
@@ -330,9 +344,9 @@ export function bootTestViewport(bctx: BContext, opts: BootViewportOpts): void {
       () => getCamera(),
       () => getControls(),
     ),
-  )
-  bctx.eventDispatcher.registerTypedHandler(createUIHandler(() => getBctx()))
-  bctx.eventDispatcher.registerTypedHandler({
+  ))
+  _registeredHandlerUnsubs.push(bctx.eventDispatcher.registerTypedHandler(createUIHandler(() => getBctx())))
+  _registeredHandlerUnsubs.push(bctx.eventDispatcher.registerTypedHandler({
     type: HANDLER_TYPE.KEYMAP,
     handle(event: Event): { break: boolean } {
       const ctx = getBctx()
@@ -362,6 +376,6 @@ export function bootTestViewport(bctx: BContext, opts: BootViewportOpts): void {
       }
       return { break: false }
     },
-  })
-  bctx.eventDispatcher.registerTypedHandler(createActiveToolHandler(() => getBctx()))
+  }))
+  _registeredHandlerUnsubs.push(bctx.eventDispatcher.registerTypedHandler(createActiveToolHandler(() => getBctx())))
 }
