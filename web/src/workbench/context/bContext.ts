@@ -13,12 +13,14 @@ import type { ToolRegistry } from '@/workbench/toolRegistry'
 import type { ConnectionContext } from '@/workbench/connectionContext'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
+import type { Ref } from 'vue'
 import type * as THREE from 'three'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { Frame } from '@/render/schema/types'
 import type { WidgetRect } from '@/workbench/ux/layout'
 import type { wmWindow, bScreen, ScrArea, ARegion, Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
+import type { MoveGizmo } from '@/workbench/tools/gizmos'
 
 export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
@@ -33,6 +35,8 @@ export interface BContextQueries {
   projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null
   /** Gizmo 箭头在屏幕上的锚点坐标 */
   getGizmoAnchor(axis: 'x' | 'y' | 'z'): { x: number; y: number } | null
+  /** 在 cellGrid 中移动方块（整数坐标），返回是否成功 */
+  moveBlockInCellGrid(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }): boolean
   /** 轴对齐向量运算：target = origin + dir * delta（替代 THREE.Vector3） */
   axisAdd(origin: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', delta: number): { x: number; y: number; z: number }
   /** 向量取整 */
@@ -65,17 +69,27 @@ export interface BContextSettings {
   language?: 'zh' | 'en'
 }
 
+/** 视口运行时——所有可观测的 Three.js / DOM 状态。单一赋值点：WorkbenchViewport.onViewportReady */
+export interface ViewportRuntime {
+  camera: Ref<THREE.Camera | null>
+  contentGroup: Ref<THREE.Group | null>
+  domElement: Ref<HTMLElement | null>
+  controls: Ref<{ enabled: boolean } | null>
+  definition: Ref<StructureDefinition | null>
+  layerPreview: Ref<LayerPreviewMode | null>
+  gizmo: Ref<MoveGizmo | null>
+  overlayScene: Ref<THREE.Scene | null>
+  wireframe: Ref<THREE.LineSegments | null>
+}
+
 export interface BContext {
   scene: SceneContext
   selection: SelectionContext
   editHistory: UndoManager
   toolRegistry: ToolRegistry
   connection: ConnectionContext
-  /** 场景查询（操作符通过此访问场景数据，不直接 import sceneQueries） */
   queries: BContextQueries
-  /** 工具设置（替代 brushState.ts 的模块级 Vue ref） */
   settings: BContextSettings
-  /** 操作符注册表（通过 exec/invoke/find 执行操作符） */
   operators: {
     exec(id: string, props?: Record<string, unknown>): void
     invoke(id: string, props?: Record<string, unknown>, event?: Event): string
@@ -83,14 +97,12 @@ export interface BContext {
     all(): { id: string; label: string }[]
     register(op: any): void
   }
-  /** 事件分发器 */
   eventDispatcher: {
     pushModal(op: unknown, event: PointerEvent): () => void
     dispatch(event: Event): { break: boolean }
     registerHandler(handler: unknown): () => void
     registerTypedHandler(handler: unknown): () => void
   }
-  /** 日志中心 */
   log: {
     readonly entries: { value: Array<{ id: number; time: string; level: number; source: string; message: string; detail?: unknown }> }
     readonly lastDisplayable: { value: { level: number; source: string; message: string; detail?: unknown } | null }
@@ -103,15 +115,9 @@ export interface BContext {
     contains(levelMask: number): boolean
     recent(levelMask?: number, count?: number): Array<unknown>
   }
-  /** Wiki 配置 */
   wikiConfig: Record<string, any>
-  /** Viewport 运行时状态（WorkbenchViewport.onViewportReady 时填充） */
-  camera: THREE.Camera | null
-  contentGroup: THREE.Group | null
-  domElement: HTMLElement | null
-  controlsRef: { enabled: boolean } | null
-  definition: StructureDefinition | null
-  layerPreview: LayerPreviewMode | null
+  /** 视口运行时（WorkbenchViewport.onViewportReady 时填充） */
+  viewport: ViewportRuntime
 
   /** Window manager (Blender 对标 wmWindowManager) */
   wm: {
@@ -119,15 +125,11 @@ export interface BContext {
     activeWindow: wmWindow | null
   }
 
-  /** Current context pointers (C->screen, C->area, C->region in Blender) */
   screen: bScreen | null
   area: ScrArea | null
   region: ARegion | null
-
-  /** RNA reflection registry */
   rna: RNARegistry
 
-  /** UI layout engine */
   ui: {
     computeLayout(screen: bScreen): void
     boundsOf(id: string): Rect | null

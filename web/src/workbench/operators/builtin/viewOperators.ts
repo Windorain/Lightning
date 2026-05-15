@@ -3,7 +3,7 @@
  *
  * MMB drag → rotate, Shift+MMB → pan, Ctrl+MMB / wheel → zoom。
  * 每个操作符进入模态，在 modal 中读鼠标 delta 变换相机。
- * 纯数学实现，不依赖 THREE 导入 — 仅通过 bctx.camera 操作。
+ * 纯数学实现，不依赖 THREE 导入 — 仅通过 bctx.viewport.camera.value 操作。
  */
 import type { OperatorType, OperatorProperties } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
@@ -15,7 +15,7 @@ interface NavState {
 }
 
 function disableOrbit(bctx: any): { enabled: boolean } | null {
-  const ref = bctx.controlsRef
+  const ref = bctx.viewport.controls.value
   if (ref) ref.enabled = false
   return ref
 }
@@ -30,7 +30,7 @@ export const ViewRotateOperator: OperatorType = {
   description: 'MMB 拖拽旋转视角',
 
   poll(bctx) {
-    return bctx.camera !== null && bctx.domElement !== null
+    return bctx.viewport.camera.value !== null && bctx.viewport.domElement.value !== null
   },
 
   invoke(bctx, props, event) {
@@ -47,7 +47,7 @@ export const ViewRotateOperator: OperatorType = {
   modal(bctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
     const s = props as unknown as NavState & OperatorProperties
-    const camera = bctx.camera
+    const camera = bctx.viewport.camera.value
     if (!camera) return OP_RESULT.CANCELLED
 
     if (event.type === 'pointermove') {
@@ -86,7 +86,7 @@ export const ViewPanOperator: OperatorType = {
   description: 'Shift+MMB 拖拽平移视角',
 
   poll(bctx) {
-    return bctx.camera !== null && bctx.domElement !== null
+    return bctx.viewport.camera.value !== null && bctx.viewport.domElement.value !== null
   },
 
   invoke(bctx, props, event) {
@@ -103,7 +103,7 @@ export const ViewPanOperator: OperatorType = {
   modal(bctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
     const s = props as unknown as NavState & OperatorProperties
-    const camera = bctx.camera
+    const camera = bctx.viewport.camera.value
     if (!camera) return OP_RESULT.CANCELLED
 
     if (event.type === 'pointermove') {
@@ -148,7 +148,7 @@ export const ViewZoomOperator: OperatorType = {
   description: 'Ctrl+MMB 拖拽 / 滚轮缩放视角',
 
   poll(bctx) {
-    return bctx.camera !== null && bctx.domElement !== null
+    return bctx.viewport.camera.value !== null && bctx.viewport.domElement.value !== null
   },
 
   invoke(bctx, props, event) {
@@ -163,7 +163,7 @@ export const ViewZoomOperator: OperatorType = {
 
   modal(bctx, props, event) {
     if (event instanceof WheelEvent) {
-      const camera = bctx.camera
+      const camera = bctx.viewport.camera.value
       if (!camera) return OP_RESULT.CANCELLED
       const factor = event.deltaY > 0 ? 1.1 : 0.9
       camera.position.x *= factor
@@ -175,7 +175,7 @@ export const ViewZoomOperator: OperatorType = {
 
     if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
     const s = props as unknown as NavState & OperatorProperties
-    const camera = bctx.camera
+    const camera = bctx.viewport.camera.value
     if (!camera) return OP_RESULT.CANCELLED
 
     if (event.type === 'pointermove') {

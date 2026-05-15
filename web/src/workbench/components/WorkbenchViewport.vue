@@ -40,10 +40,6 @@ watch(() => props.mergedConfig, async (cfg) => {
 
 const { hover, setHover, clearHover } = usePreviewTooltip()
 
-let overlaySceneRef: THREE.Scene | null = null
-let moveGizmo: MoveGizmo | null = null
-let selectionWireframe: THREE.LineSegments | null = null
-let viewportCamera: THREE.Camera | null = null
 let orbitTarget: THREE.Vector3 | null = null
 
 const {
@@ -74,16 +70,16 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   store.registerScene(scene)
   try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
 
-  viewportCamera = camera
   orbitTarget = _orbitTarget
 
-  // Wire bContext viewport state
-  bctx.camera = camera
-  bctx.contentGroup = contentGroupRef.value ?? new THREE.Group()
-  bctx.domElement = canvas
-  bctx.controlsRef = store.controlsRef as { enabled: boolean } | null
-  bctx.definition = structureDefinition.value ?? null
-  bctx.layerPreview = layerPreviewMode.value
+  // Wire bContext viewport state (唯一赋值点)
+  const vp = bctx.viewport
+  vp.camera.value = camera
+  vp.contentGroup.value = contentGroupRef.value ?? new THREE.Group()
+  vp.domElement.value = canvas
+  vp.controls.value = store.controlsRef as { enabled: boolean } | null
+  vp.definition.value = structureDefinition.value ?? null
+  vp.layerPreview.value = layerPreviewMode.value
 
   // OrbitControls mouse mapping keeps defaults:
   //   LMB=ROTATE (when tool doesn't consume), MMB=PAN, RMB=DOLLY
@@ -100,10 +96,10 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   const unregGizmo = bctx.eventDispatcher.registerTypedHandler(
     createToolGizmoHandler(
       () => toolRegistry.activeTool.value?.id ?? 'OPERATOR_SELECT',
-      () => moveGizmo,
+      () => vp.gizmo.value,
       () => bctx,
-      () => viewportCamera,
-      () => store.controlsRef as { enabled: boolean } | null,
+      () => vp.camera.value,
+      () => vp.controls.value,
     ),
   )
   const unregTool = bctx.eventDispatcher.registerTypedHandler(
@@ -115,11 +111,12 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
 
   // Create overlay scene
   const overlayScene = new THREE.Scene()
-  overlaySceneRef = overlayScene
+  vp.overlayScene.value = overlayScene
   store.registerOverlayScene(overlayScene)
 
   // MoveGizmo
-  moveGizmo = new MoveGizmo()
+  const moveGizmo = new MoveGizmo()
+  vp.gizmo.value = moveGizmo
   overlayScene.add(moveGizmo.root)
 
   // Per-frame update
@@ -142,7 +139,7 @@ let annotPreviewMesh: THREE.LineSegments | null = null
 
 function updateAnnotationPreview(): void {
   if (annotPreviewMesh) {
-    overlaySceneRef?.remove(annotPreviewMesh)
+    bctx.viewport.overlayScene.value?.remove(annotPreviewMesh)
     annotPreviewMesh.geometry?.dispose()
     ;(annotPreviewMesh.material as THREE.Material)?.dispose()
     annotPreviewMesh = null
@@ -163,11 +160,11 @@ function voxelToWorld(col: number, row: number, zSlice: number, def: { cellGrid:
 }
 
 function updateSelectionWireframe(): void {
-  if (selectionWireframe) {
-    overlaySceneRef?.remove(selectionWireframe)
-    selectionWireframe.geometry?.dispose()
-    ;(selectionWireframe.material as THREE.Material)?.dispose()
-    selectionWireframe = null
+  if (bctx.viewport.wireframe.value) {
+    bctx.viewport.overlayScene.value?.remove(bctx.viewport.wireframe.value)
+    bctx.viewport.wireframe.value.geometry?.dispose()
+    ;(bctx.viewport.wireframe.value.material as THREE.Material)?.dispose()
+    bctx.viewport.wireframe.value = null
   }
 
   const items = selection.items.value
@@ -202,19 +199,20 @@ function updateSelectionWireframe(): void {
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3))
   const mat = new THREE.LineBasicMaterial({ color: 0xffaa00, linewidth: 1, depthTest: true })
-  selectionWireframe = new THREE.LineSegments(geo, mat)
-  overlaySceneRef?.add(selectionWireframe)
+  bctx.viewport.wireframe.value = new THREE.LineSegments(geo, mat)
+  bctx.viewport.overlayScene.value?.add(bctx.viewport.wireframe.value)
 }
 
 function updateGizmo(): void {
-  if (!moveGizmo) return
+  if (!bctx.viewport.gizmo.value) return
 
   const tool = toolRegistry.activeTool.value
   const items = selection.items.value
   const showMoveGizmo = tool?.id === 'OPERATOR_MOVE' && items.size > 0
-  moveGizmo.setVisible(showMoveGizmo)
+  bctx.viewport.gizmo.value.setVisible(showMoveGizmo)
 
-  if (showMoveGizmo) {
+  // 模态操作（GizmoDragModal）期间跳过定位，由 modal 自己控制 gizmo 位置
+  if (showMoveGizmo && bctx.eventDispatcher.modalDepth === 0) {
     const def = structureDefinition.value
     if (def) {
       let cx = 0, cy = 0, cz = 0
@@ -223,22 +221,22 @@ function updateGizmo(): void {
         cx += w.x; cy += w.y; cz += w.z
       }
       cx /= items.size; cy /= items.size; cz /= items.size
-      moveGizmo.setPosition(new THREE.Vector3(cx, cy, cz))
+      bctx.viewport.gizmo.value.setPosition(new THREE.Vector3(cx, cy, cz))
     }
   }
 
   updateSelectionWireframe()
   updateAnnotationPreview()
 
-  if (moveGizmo && showMoveGizmo) {
-    const gp = moveGizmo.root.position
+  if (bctx.viewport.gizmo.value && showMoveGizmo) {
+    const gp = bctx.viewport.gizmo.value.root.position
     logCenter.updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
   } else {
     logCenter.updateGizmoState(null)
   }
-  if (viewportCamera) {
+  if (bctx.viewport.camera.value) {
     logCenter.updateCameraState({
-      position: [viewportCamera.position.x, viewportCamera.position.y, viewportCamera.position.z],
+      position: [bctx.viewport.camera.value.position.x, bctx.viewport.camera.value.position.y, bctx.viewport.camera.value.position.z],
       target: orbitTarget ? [orbitTarget.x, orbitTarget.y, orbitTarget.z] : [0, 0, 0],
     })
   }
@@ -271,15 +269,15 @@ onBeforeUnmount(() => {
   unregs?.forEach(fn => fn())
   const gizmoInterval = (store as any)._gizmoInterval as number | undefined
   if (gizmoInterval) clearInterval(gizmoInterval)
-  moveGizmo?.dispose()
-  if (selectionWireframe) {
-    overlaySceneRef?.remove(selectionWireframe)
-    selectionWireframe.geometry?.dispose()
-    ;(selectionWireframe.material as THREE.Material)?.dispose()
-    selectionWireframe = null
+  bctx.viewport.gizmo.value?.dispose()
+  if (bctx.viewport.wireframe.value) {
+    bctx.viewport.overlayScene.value?.remove(bctx.viewport.wireframe.value)
+    bctx.viewport.wireframe.value.geometry?.dispose()
+    ;(bctx.viewport.wireframe.value.material as THREE.Material)?.dispose()
+    bctx.viewport.wireframe.value = null
   }
   if (annotPreviewMesh) {
-    overlaySceneRef?.remove(annotPreviewMesh)
+    bctx.viewport.overlayScene.value?.remove(annotPreviewMesh)
     annotPreviewMesh.geometry?.dispose()
     ;(annotPreviewMesh.material as THREE.Material)?.dispose()
     annotPreviewMesh = null

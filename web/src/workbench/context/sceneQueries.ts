@@ -14,7 +14,11 @@ import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
 export function createProductionQueries(bctx: BContext): BContextQueries {
   return {
     pickVoxel(event: PointerEvent): BlockRef | null {
-      const { camera, contentGroup, domElement, definition, layerPreview } = bctx
+      const vp = bctx.viewport
+      const camera = vp.camera.value
+      const contentGroup = vp.contentGroup.value
+      const domElement = vp.domElement.value
+      const definition = vp.definition.value
       if (!camera || !contentGroup || !domElement || !definition) return null
       const result = pickVoxelFromPointer({
         clientX: event.clientX,
@@ -23,7 +27,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
         camera,
         contentGroup,
         def: definition,
-        layerPreview: layerPreview ?? 'all',
+        layerPreview: vp.layerPreview.value ?? 'all',
       })
       if (!result) return null
       return {
@@ -96,7 +100,9 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null {
-      const { camera, domElement } = bctx
+      const vp = bctx.viewport
+      const camera = vp.camera.value
+      const domElement = vp.domElement.value
       if (!camera || !domElement) return null
       const worldPos = new THREE.Vector3(pos.x, pos.y, pos.z)
       worldPos.project(camera)
@@ -108,7 +114,9 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     getGizmoAnchor(axis: 'x' | 'y' | 'z'): { x: number; y: number } | null {
-      const { camera, domElement } = bctx
+      const vp = bctx.viewport
+      const camera = vp.camera.value
+      const domElement = vp.domElement.value
       if (!camera || !domElement) return null
 
       const items = bctx.selection.items.value
@@ -160,7 +168,11 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     pickSurface(event: PointerEvent) {
-      const { camera, contentGroup, domElement, definition, layerPreview } = bctx
+      const vp = bctx.viewport
+      const camera = vp.camera.value
+      const contentGroup = vp.contentGroup.value
+      const domElement = vp.domElement.value
+      const definition = vp.definition.value
       if (!camera || !contentGroup || !domElement || !definition) return null
 
       const rect = domElement.getBoundingClientRect()
@@ -188,7 +200,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const result = pickVoxelFromPointer({
         clientX: event.clientX, clientY: event.clientY,
         domElement, camera, contentGroup, def: definition,
-        layerPreview: layerPreview ?? 'all',
+        layerPreview: vp.layerPreview.value ?? 'all',
       })
       if (!result) return null
 
@@ -199,7 +211,9 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     pickGround(event: PointerEvent) {
-      const { camera, domElement } = bctx
+      const vp = bctx.viewport
+      const camera = vp.camera.value
+      const domElement = vp.domElement.value
       if (!camera || !domElement) return null
       const rect = domElement.getBoundingClientRect()
       const mouse = new THREE.Vector2(
@@ -223,7 +237,9 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     pickWorldPoint(event: PointerEvent) {
       const surface = this.pickSurface(event)
       if (surface) return surface.pos
-      const { camera, domElement } = bctx
+      const vp = bctx.viewport
+      const camera = vp.camera.value
+      const domElement = vp.domElement.value
       if (!camera || !domElement) return null
       const rect = domElement.getBoundingClientRect()
       const mouse = new THREE.Vector2(
