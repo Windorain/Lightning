@@ -10,6 +10,7 @@ import type { BlockRef } from '@/workbench/selectionContext'
 import type { V2PlainSceneDocument } from '@/render/data/sceneDocumentV2'
 import type { Frame } from '@/render/schema/types'
 import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
+import { ARROW_LENGTH, CONE_LENGTH } from '@/workbench/tools/gizmos'
 
 export function createProductionQueries(bctx: BContext): BContextQueries {
   return {
@@ -73,25 +74,50 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       if (!frame?.structure) return false
       const st = frame.structure as { cellGrid: number[][][] }
       const grid = st.cellGrid
-      // bounds check
+      // validate source
       if (from.z < 0 || from.z >= grid.length) return false
       const fromSlice = grid[from.z]
       if (!fromSlice || from.y < 0 || from.y >= fromSlice.length) return false
       const fromRow = fromSlice[from.y]
       if (!fromRow || from.x < 0 || from.x >= fromRow.length) return false
-      // source must be non-air
-      if (fromRow[from.x] === 0) return false
-      // target bounds
-      if (to.z < 0 || to.z >= grid.length) return false
+      if (fromRow[from.x] === 0) return false // source must be non-air
+
+      // auto-expand grid for positive out-of-bounds targets
+      if (to.z < 0 || to.y < 0 || to.x < 0) return false
+      const curMaxX = grid[0]?.[0]?.length ?? 0
+      const curMaxY = grid[0]?.length ?? 0
+      const curMaxZ = grid.length
+      const newZ = Math.max(curMaxZ, to.z + 1)
+      const newY = Math.max(curMaxY, to.y + 1)
+      const newX = Math.max(curMaxX, to.x + 1)
+
+      if (newZ > curMaxZ) {
+        const emptySlice = Array.from({ length: newY }, () => new Array(newX).fill(0))
+        while (grid.length < newZ) grid.push(emptySlice.map(r => [...r]))
+      }
+      if (newY > curMaxY) {
+        for (const slice of grid) {
+          while (slice.length < newY) slice.push(new Array(newX).fill(0))
+        }
+      }
+      if (newX > curMaxX) {
+        for (const slice of grid) {
+          for (const row of slice) {
+            while (row.length < newX) row.push(0)
+          }
+        }
+      }
+
+      // validate target is air
       const toSlice = grid[to.z]
-      if (!toSlice || to.y < 0 || to.y >= toSlice.length) return false
       const toRow = toSlice[to.y]
-      if (!toRow || to.x < 0 || to.x >= toRow.length) return false
-      // target must be air
       if (toRow[to.x] !== 0) return false
+
       // move
+      console.log('[moveBlock] moving', JSON.stringify(from), '→', JSON.stringify(to), 'fromVal:', fromRow[from.x], 'toVal:', toRow[to.x])
       toRow[to.x] = fromRow[from.x]
       fromRow[from.x] = 0
+      console.log('[moveBlock] done, fromRow:', JSON.stringify(fromRow), 'toRow:', JSON.stringify(toRow))
       return true
     },
 
@@ -103,8 +129,19 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const vp = bctx.viewport
       const camera = vp.camera.value
       const domElement = vp.domElement.value
+      const def = vp.definition.value
       if (!camera || !domElement) return null
-      const worldPos = new THREE.Vector3(pos.x, pos.y, pos.z)
+      // Convert grid coordinates to world coordinates (same as voxelToWorld)
+      let wx = pos.x, wy = pos.y, wz = pos.z
+      if (def?.cellGrid) {
+        const sCol = def.cellGrid[0]?.[0]?.length ?? 1
+        const sRow = def.cellGrid[0]?.length ?? 1
+        const sZ = def.cellGrid.length ?? 1
+        wx = pos.x - sCol / 2 + 0.5
+        wy = sRow / 2 - 0.5 - pos.y
+        wz = pos.z - sZ / 2 + 0.5
+      }
+      const worldPos = new THREE.Vector3(wx, wy, wz)
       worldPos.project(camera)
       const rect = domElement.getBoundingClientRect()
       return {
@@ -117,27 +154,25 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const vp = bctx.viewport
       const camera = vp.camera.value
       const domElement = vp.domElement.value
-      if (!camera || !domElement) return null
+      const gizmo = vp.gizmo.value
+      if (!camera || !domElement || !gizmo) return null
+      if (bctx.selection.items.value.size === 0) return null
 
-      const items = bctx.selection.items.value
-      if (items.size === 0) return null
-      let cx = 0, cy = 0, cz = 0
-      for (const item of items) {
-        cx += item.pos.x; cy += item.pos.y; cz += item.pos.z
-      }
-      cx /= items.size; cy /= items.size; cz /= items.size
-
-      const tip = new THREE.Vector3(
-        cx + (axis === 'x' ? 1 : 0),
-        cy + (axis === 'y' ? 1 : 0),
-        cz + (axis === 'z' ? 1 : 0),
+      // Use the gizmo's actual world position (set by voxelToWorld in updateGizmo)
+      // Offset to the arrow cylinder center (best hit-test surface area)
+      const arrowCenter = (ARROW_LENGTH - CONE_LENGTH) / 2
+      const gPos = gizmo.root.position
+      const anchor = new THREE.Vector3(
+        gPos.x + (axis === 'x' ? arrowCenter : 0),
+        gPos.y + (axis === 'y' ? arrowCenter : 0),
+        gPos.z + (axis === 'z' ? arrowCenter : 0),
       )
-      tip.project(camera)
+      anchor.project(camera)
 
       const rect = domElement.getBoundingClientRect()
       return {
-        x: ((tip.x + 1) / 2) * rect.width + rect.left,
-        y: ((-tip.y + 1) / 2) * rect.height + rect.top,
+        x: ((anchor.x + 1) / 2) * rect.width + rect.left,
+        y: ((-anchor.y + 1) / 2) * rect.height + rect.top,
       }
     },
 

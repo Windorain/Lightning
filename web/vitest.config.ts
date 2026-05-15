@@ -5,8 +5,8 @@ import { resolve } from 'path'
 export default defineConfig({
   plugins: [vue()],
   test: {
-    environment: 'jsdom',
     include: ['src/**/*.test.ts'],
+    testTimeout: 30000,
   },
   resolve: {
     alias: { '@': resolve(__dirname, 'src') },

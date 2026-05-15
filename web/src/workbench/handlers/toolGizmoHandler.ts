@@ -27,8 +27,8 @@ export function createToolGizmoHandler(
       if (!gizmo || !camera) return { break: false }
 
       const pe = event as PointerEvent
-      const target = event.target as HTMLElement
-      const rect = target.getBoundingClientRect?.()
+      const target = event.target as HTMLElement | null
+      const rect = target?.getBoundingClientRect?.()
       if (!rect) return { break: false }
 
       const x = ((pe.clientX - rect.left) / rect.width) * 2 - 1
@@ -54,17 +54,34 @@ export function createToolGizmoHandler(
       const controlsRef = getControlsRef()
       if (!bctx) return { break: false }
 
+      // Compute axis screen direction and pixel-to-world scale from camera
+      const gPos = gizmo.root.position
+      const axisWorldDir = new THREE.Vector3(
+        hit === 'x' ? 1 : 0,
+        hit === 'y' ? 1 : 0,
+        hit === 'z' ? 1 : 0,
+      )
+      const p1 = gPos.clone().project(camera)
+      const p2 = gPos.clone().add(axisWorldDir).project(camera)
+
+      // 1 world unit along this axis = how many screen pixels?
+      const sx = ((p2.x - p1.x) / 2) * rect.width
+      const sy = -((p2.y - p1.y) / 2) * rect.height
+      const screenLen = Math.sqrt(sx * sx + sy * sy)
+
+      const screenDirX = screenLen > 0.001 ? sx / screenLen : 0
+      const screenDirY = screenLen > 0.001 ? sy / screenLen : 0
+      // pixels-per-world-unit = screenLen, so k = 1 / screenLen
+      const k = screenLen > 0.001 ? 1 / screenLen : 0
+
       const startX = pe.clientX
       const startY = pe.clientY
-      const axis = hit as 'x' | 'y' | 'z'
-      const computeDelta = (_moveEvent: PointerEvent): number => {
-        const dx = _moveEvent.clientX - startX
-        const dy = _moveEvent.clientY - startY
-        const bctxNow = getBctx()
-        const k = bctxNow?.settings.dragSensitivity ?? 0.05
-        if (axis === 'x') return dx * k
-        if (axis === 'y') return -dy * k
-        return -dx * k
+
+      const computeDelta = (moveEvent: PointerEvent): number => {
+        const dx = moveEvent.clientX - startX
+        const dy = moveEvent.clientY - startY
+        const proj = dx * screenDirX + dy * screenDirY
+        return proj * k
       }
 
       const modal = new GizmoDragModal(

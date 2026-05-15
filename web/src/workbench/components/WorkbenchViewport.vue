@@ -263,6 +263,11 @@ const selectedVoxel = computed(() => null)
 
 watch(worldFrameIndex, (i) => { bctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }) }, { immediate: true })
 
+// Sync vp.definition when the store updates its definition after scene reload
+watch(structureDefinition, (def) => {
+  bctx.viewport.definition.value = def ?? null
+})
+
 onMounted(async () => { await store.loadStructureAndResources() })
 onBeforeUnmount(() => {
   const unregs = (store as any)._unregHandlers as Array<() => void> | undefined

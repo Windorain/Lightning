@@ -1,5 +1,29 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 
+function pickFile(): Promise<File | undefined> {
+  return new Promise(resolve => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = () => {
+      cleanup()
+      resolve(input.files?.[0])
+    }
+    const onFocus = () => {
+      // Dialog closed; if no file was selected, treat as cancel
+      setTimeout(() => {
+        if (!input.files?.length) {
+          cleanup()
+          resolve(undefined)
+        }
+      }, 300)
+    }
+    const cleanup = () => window.removeEventListener('focus', onFocus)
+    window.addEventListener('focus', onFocus)
+    input.click()
+  })
+}
+
 export const NewSceneOperator: OperatorType = {
   id: 'OPERATOR_NEW_SCENE',
   label: '新建场景',
@@ -33,8 +57,11 @@ export const OpenSceneOperator: OperatorType = {
   },
 
   async exec(bctx, _props) {
-    const file = _props.file as File | undefined
-    if (!file) return
+    let file = _props.file as File | undefined
+    if (!file) {
+      file = await pickFile()
+      if (!file) return
+    }
     if (bctx.scene.dirty.value) {
       const confirmFn = bctx.settings.confirmDirty ?? window.confirm
       const ok = confirmFn('当前场景有未保存的修改，是否保存？')

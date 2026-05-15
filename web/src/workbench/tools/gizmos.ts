@@ -12,10 +12,10 @@ const AXIS_COLORS_HI = {
   z: 0x88bbff,
 } as const
 
-const ARROW_LENGTH = 1.2
+export const ARROW_LENGTH = 1.2
 const ARROW_RADIUS = 0.04
 const CONE_RADIUS = 0.10
-const CONE_LENGTH = 0.25
+export const CONE_LENGTH = 0.25
 const PLANE_SIZE = 0.3
 
 export type GizmoAxis = 'x' | 'y' | 'z' | 'xy' | 'xz' | 'yz'
@@ -108,6 +108,7 @@ export class MoveGizmo {
 
   setPosition(pos: THREE.Vector3): void {
     this.root.position.copy(pos)
+    this.root.updateMatrixWorld(true)
   }
 
   setVisible(v: boolean): void {

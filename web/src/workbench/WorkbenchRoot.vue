@@ -22,7 +22,9 @@ import { createBContextSettings } from '@/workbench/context/toolSettings'
 import { createWorkbenchContext, registerAllOperators } from '@/workbench/context/workbenchContext'
 
 import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
-import { installTestRunner } from '@/workbench/testing/testRunner'
+import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
+import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
+import { createUIHandler } from '@/workbench/handlers/uiHandler'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
@@ -207,10 +209,23 @@ onBeforeUnmount(() => {
   window.removeEventListener('mousemove', onMouseMove)
 })
 
-installTestRunner(bctx)
 
 // VM 句柄：测试层通过 window.__vm__ 访问公开观测面
 ;(window as any).__vm__ = bctx
+;(window as any).__vm_ready__ = true
+
+// 注册输入 handler（不依赖 WebGL，VM 启动即上线）
+bctx.eventDispatcher.registerTypedHandler(
+  createToolGizmoHandler(
+    () => toolRegistry.activeTool.value?.id ?? 'OPERATOR_SELECT',
+    () => bctx.viewport.gizmo.value,
+    () => bctx,
+    () => bctx.viewport.camera.value,
+    () => bctx.viewport.controls.value,
+  ),
+)
+bctx.eventDispatcher.registerTypedHandler(createActiveToolHandler(() => bctx))
+bctx.eventDispatcher.registerTypedHandler(createUIHandler(() => bctx))
 
 logCenter.injectStateRefs({
   scene: () => scene.scene.value as any,

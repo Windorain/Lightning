@@ -17,13 +17,6 @@ const GIZMO_DRAG_ITEMS = [
   { key: 'z', ctrl: true, shift: false, value: 'UNDO' },
 ] as const
 
-function findBlock(
-  blocks: Array<{ pos: { x: number; y: number; z: number }; block_state_id: string }>,
-  pos: { x: number; y: number; z: number },
-) {
-  return blocks.find(b => b.pos.x === pos.x && b.pos.y === pos.y && b.pos.z === pos.z)
-}
-
 export class GizmoDragModal implements ModalOperation {
   id = 'gizmo-drag'
   private gizmo: MoveGizmo
@@ -86,7 +79,7 @@ export class GizmoDragModal implements ModalOperation {
 
     if (event.type === 'pointermove') {
       let delta = this.computeScreenDelta(event)
-      if (this.precision) delta *= 0.1
+      if (this.precision) delta = Math.round(delta * 10) / 10
       this.session?.update(`拖拽 ${this.gizmoPart} ${delta.toFixed(2)}`, { delta })
 
       const newPos = this.bctx.queries.axisAdd(this.origin, this.gizmoPart as any, delta)
@@ -103,51 +96,44 @@ export class GizmoDragModal implements ModalOperation {
       })
 
       if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
-        const frame = this.bctx.queries.getCurrentFrame()
-        if (frame) {
-          // Snapshot current positions for undo
-          const oldPositions = this.initialPositions.map(initPos => {
-            const block = findBlock((frame as any).blocks, initPos)
-            return block ? { x: block.pos.x, y: block.pos.y, z: block.pos.z } : null
-          })
-          const newPositions = this.initialPositions.map(initPos => ({
-            x: initPos.x + delta.x,
-            y: initPos.y + delta.y,
-            z: initPos.z + delta.z,
-          }))
+        const q = this.bctx.queries
+        const moves = this.initialPositions.map(initPos => ({
+          from: { ...initPos },
+          to: { x: initPos.x + delta.x, y: initPos.y + delta.y, z: initPos.z + delta.z },
+        }))
 
-          // Push undo command (push() internally calls execute() to apply the move)
-          const label = `移动 (${delta.x}, ${delta.y}, ${delta.z})`
-          this.bctx.editHistory.push({
-            id: 'gizmo_' + Math.random().toString(36).slice(2, 10),
-            label,
-            timestamp: Date.now(),
-            execute: () => {
-              for (let i = 0; i < this.initialPositions.length; i++) {
-                const initPos = this.initialPositions[i]
-                const block = findBlock((frame as any).blocks, initPos)
-                if (block) {
-                  block.pos.x = newPositions[i].x
-                  block.pos.y = newPositions[i].y
-                  block.pos.z = newPositions[i].z
-                }
-              }
-              this.bctx.scene.markDirty()
-            },
-            undo: () => {
-              for (let i = 0; i < this.initialPositions.length; i++) {
-                const initPos = this.initialPositions[i]
-                const block = findBlock((frame as any).blocks, initPos)
-                if (block && oldPositions[i]) {
-                  block.pos.x = oldPositions[i]!.x
-                  block.pos.y = oldPositions[i]!.y
-                  block.pos.z = oldPositions[i]!.z
-                }
-              }
-              this.bctx.scene.markDirty()
-            },
-          })
-        }
+        const label = `移动 (${delta.x}, ${delta.y}, ${delta.z})`
+        const sel = this.bctx.selection
+        this.bctx.editHistory.push({
+          id: 'gizmo_' + Math.random().toString(36).slice(2, 10),
+          label,
+          timestamp: Date.now(),
+          execute: () => {
+            for (const m of moves) {
+              q.moveBlockInCellGrid(m.from, m.to)
+            }
+            // 同步更新 selection 坐标
+            const newItems = [...sel.items.value].map(item => {
+              const m = moves.find(mm => mm.from.x === item.pos.x && mm.from.y === item.pos.y && mm.from.z === item.pos.z)
+              return m ? { ...item, pos: { ...m.to } } : item
+            })
+            sel.items.value = new Set(newItems)
+            this.bctx.scene.markDirty()
+            this.bctx.scene.syncPreview()
+          },
+          undo: () => {
+            for (const m of moves) {
+              q.moveBlockInCellGrid(m.to, m.from)
+            }
+            const newItems = [...sel.items.value].map(item => {
+              const m = moves.find(mm => mm.to.x === item.pos.x && mm.to.y === item.pos.y && mm.to.z === item.pos.z)
+              return m ? { ...item, pos: { ...m.from } } : item
+            })
+            sel.items.value = new Set(newItems)
+            this.bctx.scene.markDirty()
+            this.bctx.scene.syncPreview()
+          },
+        })
       }
       this.session?.end(`拖拽 ${this.gizmoPart} 完成`, {
         delta: { x: delta.x, y: delta.y, z: delta.z },

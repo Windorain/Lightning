@@ -41,7 +41,7 @@ export class OperatorRegistry {
   }
 
   /** 无交互执行操作符。如果 flagUndo 为 true，自动包裹 undo。 */
-  exec(bctx: BContext, id: string, props?: OperatorProperties): void {
+  async exec(bctx: BContext, id: string, props?: OperatorProperties): Promise<void> {
     const op = this.operators.get(id)
     if (!op) { logCenter.warn('Operator', `exec: op not found ${id}`, { opId: id }); return }
     if (op.poll && !op.poll(bctx)) {
@@ -54,7 +54,7 @@ export class OperatorRegistry {
     if (op.exec) {
       if (op.flagUndo) {
         const before = JSON.parse(JSON.stringify(bctx.scene.scene.value))
-        op.exec(bctx, resolvedProps)
+        await op.exec(bctx, resolvedProps)
         const after = JSON.parse(JSON.stringify(bctx.scene.scene.value))
         bctx.editHistory.push({
           id: 'op_' + Math.random().toString(36).slice(2, 10),
@@ -64,7 +64,7 @@ export class OperatorRegistry {
           undo: () => { bctx.scene.scene.value = before; bctx.scene.markDirty() },
         })
       } else {
-        op.exec(bctx, resolvedProps)
+        await op.exec(bctx, resolvedProps)
       }
       logOperatorResult(bctx, id, op.label, 'FINISHED', snap)
     }
