@@ -23,7 +23,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
         camera,
         contentGroup,
         def: definition,
-        layerPreview: layerPreview ?? undefined as any,
+        layerPreview: layerPreview ?? 'all',
       })
       if (!result) return null
       return {
@@ -188,7 +188,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const result = pickVoxelFromPointer({
         clientX: event.clientX, clientY: event.clientY,
         domElement, camera, contentGroup, def: definition,
-        layerPreview: layerPreview ?? undefined as any,
+        layerPreview: layerPreview ?? 'all',
       })
       if (!result) return null
 
