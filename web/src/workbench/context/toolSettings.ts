@@ -11,7 +11,11 @@ export const FLOOR_TEMPLATES = [
   { id: 'floor_glass', label: 'Glass Floor', color: '#88ccff' },
 ]
 
-export function createBContextSettings(): BContextSettings {
+export function createBContextSettings(overrides?: {
+  theme?: 'dark' | 'light'
+  language?: 'zh' | 'en'
+  confirmDirty?: (msg: string) => boolean
+}): BContextSettings {
   const replaceBrush = ref<string | null>(null)
   const fillBrush = ref<string | null>(null)
   const generateType = ref<string | null>(null)
@@ -27,8 +31,14 @@ export function createBContextSettings(): BContextSettings {
     dragSensitivity: 0.05,
     get snapEnabled(): boolean { return snapEnabled.value },
     set snapEnabled(v: boolean) { snapEnabled.value = v },
-    confirmDirty: (msg: string) => window.confirm(msg),
-    get theme(): 'dark' | 'light' { return theme.value },
-    get language(): 'zh' | 'en' { return currentLang.value },
+    confirmDirty: overrides?.confirmDirty ?? ((msg: string) => window.confirm(msg)),
+    get theme(): 'dark' | 'light' {
+      if (overrides?.theme) return overrides.theme
+      return theme.value
+    },
+    get language(): 'zh' | 'en' {
+      if (overrides?.language) return overrides.language
+      return currentLang.value
+    },
   }
 }

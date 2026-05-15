@@ -49,7 +49,7 @@ export interface ConnectionContext {
 
 export const connectionContextKey: InjectionKey<ConnectionContext> = Symbol('connectionContext')
 
-export function provideConnectionContext(scene: SceneContext): ConnectionContext {
+export function createConnectionContext(_scene: SceneContext): ConnectionContext {
   const apiBase = ref('')
   const token = ref('')
   const connected = ref<boolean | null>(null)
@@ -108,10 +108,10 @@ export function provideConnectionContext(scene: SceneContext): ConnectionContext
   }
 
   async function pushToServer(): Promise<void> {
-    if (!apiBase.value || !scene.scene.value) return
-    await sdePutWorkspaceDocument(apiBase.value, token.value, scene.scene.value as Record<string, unknown>)
-    scene.markClean()
-    await scene.syncPreview()
+    if (!apiBase.value || !_scene.scene.value) return
+    await sdePutWorkspaceDocument(apiBase.value, token.value, _scene.scene.value as Record<string, unknown>)
+    _scene.markClean()
+    await _scene.syncPreview()
   }
 
   function resetConnection(): void {
@@ -121,7 +121,7 @@ export function provideConnectionContext(scene: SceneContext): ConnectionContext
     selectedExportName.value = null
   }
 
-  const ctx: ConnectionContext = {
+  return {
     apiBase: apiBase as unknown as Ref<string>,
     token: token as unknown as Ref<string>,
     connected: connected as unknown as Ref<boolean | null>,
@@ -137,7 +137,10 @@ export function provideConnectionContext(scene: SceneContext): ConnectionContext
     pushToServer,
     resetConnection,
   }
+}
 
+export function provideConnectionContext(scene: SceneContext): ConnectionContext {
+  const ctx = createConnectionContext(scene)
   provide(connectionContextKey, ctx)
   return ctx
 }
