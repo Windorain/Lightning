@@ -88,9 +88,7 @@ async function ensureFileWritePermission(handle: FileSystemFileHandle): Promise<
   throw new Error('未授予文件写入权限')
 }
 
-export function provideSceneContext(): SceneContext {
-  const initial = parseWorkbenchQuery()
-
+export function createSceneContext(): SceneContext {
   // 场景状态
   const scene = ref<WorkbenchScene | null>(null)
   const dirty = ref(false)
@@ -104,7 +102,7 @@ export function provideSceneContext(): SceneContext {
   const previewError = ref<string | null>(null)
 
   // 文件元数据
-  const workspaceMode = ref<WorkbenchWorkspaceMode>(initial.apiBase ? 'sde' : 'local-file')
+  const workspaceMode = ref<WorkbenchWorkspaceMode>('local-file')
   const localFileName = ref<string | null>(null)
   const fileSaveHandle: ShallowRef<FileSystemFileHandle | null> = shallowRef(null)
 
@@ -344,6 +342,15 @@ export function provideSceneContext(): SceneContext {
     newScene,
   }
 
+  return ctx
+}
+
+export function provideSceneContext(): SceneContext {
+  const initial = parseWorkbenchQuery()
+  const ctx = createSceneContext()
+  if (initial.apiBase) {
+    ;(ctx.workspaceMode as any).value = 'sde'
+  }
   provide(sceneContextKey, ctx)
   return ctx
 }
