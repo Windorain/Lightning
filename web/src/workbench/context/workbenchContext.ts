@@ -111,12 +111,17 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     log: logCenter as any,
     wikiConfig: wikiConfig as any,
     statusMessage: deps.statusMessage ?? ref('') as any,
-    camera: null,
-    contentGroup: null,
-    domElement: null,
-    controlsRef: null,
-    definition: null,
-    layerPreview: null,
+    viewport: {
+      camera: ref(null) as any,
+      contentGroup: ref(null) as any,
+      domElement: ref(null) as any,
+      controls: ref(null) as any,
+      definition: ref(null) as any,
+      layerPreview: ref(null) as any,
+      gizmo: ref(null) as any,
+      overlayScene: ref(null) as any,
+      wireframe: ref(null) as any,
+    },
     settings,
   } as BContext
 
@@ -312,29 +317,29 @@ export function bootTestViewport(bctx: BContext, opts: BootViewportOpts): void {
 
   // camera
   const camera = createTestCamera()
-  bctx.camera = camera
+  bctx.viewport.camera.value = camera
 
   // contentGroup（mesh 供 pickVoxel 射线检测）
   const contentGroup = populateContentGroup(cellGrid)
-  bctx.contentGroup = contentGroup
+  bctx.viewport.contentGroup.value = contentGroup
 
   // DOM
-  bctx.domElement = ensureTestDom()
+  bctx.viewport.domElement.value = ensureTestDom()
 
   // definition（供 buildVoxelVolume）
-  bctx.definition = { cellGrid, blockPalette } as any
+  bctx.viewport.definition.value = { cellGrid, blockPalette } as any
 
   // layer preview
-  bctx.layerPreview = 'all'
+  bctx.viewport.layerPreview.value = 'all'
 
   // controls
-  bctx.controlsRef = null
+  bctx.viewport.controls.value = null
 
   // 注册事件 handlers（与 WorkbenchViewport.onViewportReady 一致，只注册一次）
   let gizmoRef: any = null
   const getBctx = () => _activeBctx
-  const getCamera = () => _activeBctx?.camera ?? null
-  const getControls = () => _activeBctx?.controlsRef ?? null
+  const getCamera = () => _activeBctx?.viewport.camera.value ?? null
+  const getControls = () => _activeBctx?.viewport.controls.value ?? null
 
   _registeredHandlerUnsubs.push(bctx.eventDispatcher.registerTypedHandler(
     createToolGizmoHandler(

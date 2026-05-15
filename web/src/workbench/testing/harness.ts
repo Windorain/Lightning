@@ -105,13 +105,15 @@ export interface TestHarness {
 
 export function createTestHarness(opts?: {
   blocks?: BlockTuple[]
+  document?: Record<string, any>
   settings?: Record<string, any>
   blockPalette?: Record<string, { name: string }>
 }): TestHarness {
-  const blocks = opts?.blocks ?? []
-
   // VM 接管一切：context 创建、BContext 组装、operator 注册、视口启动、场景加载
-  const { bctx } = createVM({ blocks })
+  const { bctx } = createVM({
+    blocks: opts?.blocks,
+    document: opts?.document,
+  })
 
   // ---- Harness: 事件注入 + 断言 ----
   const mountedFns: Array<() => void> = []
@@ -125,7 +127,7 @@ export function createTestHarness(opts?: {
       const event = new PointerEvent('pointerdown', {
         clientX: x, clientY: y, ctrlKey: o.ctrl, shiftKey: o.shift, button: 0,
       })
-      Object.defineProperty(event, 'target', { value: bctx.domElement, writable: false })
+      Object.defineProperty(event, 'target', { value: bctx.viewport.domElement.value, writable: false })
       bctx.eventDispatcher.dispatch(event)
     },
 
@@ -133,7 +135,7 @@ export function createTestHarness(opts?: {
       const event = new PointerEvent('pointermove', {
         clientX: x, clientY: y, ctrlKey: o.ctrl, shiftKey: o.shift, button: 0,
       })
-      Object.defineProperty(event, 'target', { value: bctx.domElement, writable: false })
+      Object.defineProperty(event, 'target', { value: bctx.viewport.domElement.value, writable: false })
       bctx.eventDispatcher.dispatch(event)
     },
 
@@ -141,7 +143,7 @@ export function createTestHarness(opts?: {
       const event = new PointerEvent('pointerup', {
         clientX: x, clientY: y, ctrlKey: o.ctrl, shiftKey: o.shift, button: 0,
       })
-      Object.defineProperty(event, 'target', { value: bctx.domElement, writable: false })
+      Object.defineProperty(event, 'target', { value: bctx.viewport.domElement.value, writable: false })
       bctx.eventDispatcher.dispatch(event)
     },
 
@@ -194,7 +196,7 @@ export function createTestHarness(opts?: {
     },
 
     clickBlock(pos, o = {}) {
-      const def = bctx.definition as any
+      const def = bctx.viewport.definition.value as any
       const sizeX = def?.cellGrid?.[0]?.[0]?.length ?? 0
       const sizeY = def?.cellGrid?.[0]?.length ?? 0
       const sizeZ = def?.cellGrid?.length ?? 0
