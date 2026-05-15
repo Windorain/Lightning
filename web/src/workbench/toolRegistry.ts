@@ -37,7 +37,7 @@ export interface ToolRegistry {
 
 export const toolRegistryKey: InjectionKey<ToolRegistry> = Symbol('toolRegistry')
 
-export function provideToolRegistry(): ToolRegistry {
+export function createToolRegistry(): ToolRegistry {
   const activeTool = ref<OperatorTool | null>(null)
   const tools = shallowRef<Map<string, OperatorTool>>(new Map())
   let previousEditToolId: string | null = null
@@ -79,7 +79,7 @@ export function provideToolRegistry(): ToolRegistry {
     return previousEditToolId
   }
 
-  const registry: ToolRegistry = {
+  return {
     activeTool,
     tools,
     activate,
@@ -87,6 +87,10 @@ export function provideToolRegistry(): ToolRegistry {
     getPreviousEditToolId,
     rebuildTools,
   }
+}
+
+export function provideToolRegistry(): ToolRegistry {
+  const registry = createToolRegistry()
   provide(toolRegistryKey, registry)
   return registry
 }
