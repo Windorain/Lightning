@@ -166,8 +166,8 @@ export const MoveOperator: OperatorType = {
           const grid = rf?.grid
           if (grid) {
             const moves = s._initialPositions.map(initPos => ({
-              from: { col: initPos.x, row: initPos.y, z: initPos.z },
-              to: { col: initPos.x + delta.x, row: initPos.y + delta.y, z: initPos.z + delta.z },
+              from: { x: initPos.x, y: initPos.y, z: initPos.z },
+              to: { x: initPos.x + delta.x, y: initPos.y + delta.y, z: initPos.z + delta.z },
             }))
 
             const sel = bctx.selection
@@ -180,11 +180,11 @@ export const MoveOperator: OperatorType = {
                 const newItems = [...sel.items.value].map(item => {
                   const m = moves.find(
                     mm =>
-                      mm.from.col === item.pos.x &&
-                      mm.from.row === item.pos.y &&
+                      mm.from.x === item.pos.x &&
+                      mm.from.y === item.pos.y &&
                       mm.from.z === item.pos.z,
                   )
-                  return m ? { ...item, pos: { x: m.to.col, y: m.to.row, z: m.to.z } } : item
+                  return m ? { ...item, pos: { x: m.to.x, y: m.to.y, z: m.to.z } } : item
                 })
                 sel.items.value = new Set(newItems)
                 bctx.scene.markDirty()
@@ -195,11 +195,11 @@ export const MoveOperator: OperatorType = {
                 const newItems = [...sel.items.value].map(item => {
                   const m = moves.find(
                     mm =>
-                      mm.to.col === item.pos.x &&
-                      mm.to.row === item.pos.y &&
+                      mm.to.x === item.pos.x &&
+                      mm.to.y === item.pos.y &&
                       mm.to.z === item.pos.z,
                   )
-                  return m ? { ...item, pos: { x: m.from.col, y: m.from.row, z: m.from.z } } : item
+                  return m ? { ...item, pos: { x: m.from.x, y: m.from.y, z: m.from.z } } : item
                 })
                 sel.items.value = new Set(newItems)
                 bctx.scene.markDirty()

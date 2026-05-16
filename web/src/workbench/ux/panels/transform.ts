@@ -2,6 +2,7 @@ import type { BContext } from '@/workbench/context/bContext'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout } from '../types/layout'
+import type { BlockRef } from '@/workbench/selectionContext'
 
 export const transformPanel: PanelDeclaration = {
   id: 'transform-panel',
@@ -12,7 +13,13 @@ export const transformPanel: PanelDeclaration = {
   poll(ctx: BContext): boolean {
     return ctx.toolRegistry.activeTool.value?.id === 'OPERATOR_MOVE'
   },
-  owner(ctx: BContext): unknown { return [...ctx.selection.items.value][0] },
+  owner(ctx: BContext): unknown {
+    const item = [...ctx.selection.items.value][0]
+    if (!item) return null
+    const g = ctx.scene.scene.value?.frame(0)?.grid
+    ;(item as BlockRef)._gridSize = g ? { w: g.width, h: g.height, d: g.depth } : null
+    return item
+  },
   layout(ctx: BContext): UILayout {
     const sel = [...ctx.selection.items.value]
     if (sel.length === 0) {

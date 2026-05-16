@@ -13,9 +13,14 @@ const selectedBlock = computed(() => {
   if (selection.items.value.size === 0) return null
   const first = selection.items.value.values().next().value
   if (!first) return null
+  const grid = bctx.scene.scene.value?.frame(0)?.grid
   return {
     blockId: first.block_state_id,
-    voxel: { column: first.pos.x, row: first.pos.y, zSlice: first.pos.z },
+    voxel: {
+      column: first.pos.x,
+      row: grid ? grid.height - 1 - first.pos.y : first.pos.y,
+      zSlice: first.pos.z,
+    },
   }
 })
 const markdownText = ref('')

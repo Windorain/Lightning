@@ -16,15 +16,13 @@ import type { PreviewConfig } from '@/preview/previewConfig'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
 import { getDevSceneDocument } from '@/dev/devScenes'
 import { formatSdeError } from '@/workbench/sdeApi'
-import { isEnvelopeDocument, normalizeEnvelopeToPlain } from '@/render/data/compactSceneDocument'
 import { documentLooksPreviewable, previewConfigFromDocument } from '@/preview/previewFromDocument'
-import { formatDispatcher } from '@/workbench/context/documentHandler'
+import { parserRegistry } from '@/workbench/context/parserRegistry'
 import { downloadJson } from '@/util/browser'
 import { getShowSaveFilePicker } from '@/util/browser'
 import { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import {
-  cloneDocument,
   parseWorkbenchQuery,
   suggestedJsonBaseName,
   type WorkbenchScene,
@@ -157,45 +155,28 @@ export function createSceneContext(): SceneContext {
     doc: unknown,
     opts?: { mode?: WorkbenchWorkspaceMode; fileName?: string },
   ): Promise<void> {
-    let raw: unknown = doc
-    if (raw && isEnvelopeDocument(raw)) {
-      raw = await normalizeEnvelopeToPlain(raw)
-    } else if (raw && typeof raw === 'object') {
-      raw = cloneDocument(raw)
-    }
-
-    // 格式分发：全部转为 V2Plain
-    const result = raw ? formatDispatcher.normalize(raw) : { document: null, handler: null, error: '空文档' }
-    scene.value = result.document ? RuntimeDocument.fromRaw(result.document as Record<string, unknown>) : null
+    // ParserRegistry 负责格式探测、解压、反序列化，直接产出 RuntimeDocument
+    const result = doc ? await parserRegistry.detectAndParse(doc) : { document: null, parser: null, error: '空文档' }
+    scene.value = result.document ?? null
 
     if (result.document) {
       previewWorldFrameIndex.value = 0
       sceneLoadEpoch.value += 1
-      const frames = result.document.frames
-      const totalBlocks = frames.reduce((sum: number, f) => {
-        const st = f.structure as { cellGrid?: number[][][] } | undefined
-        if (!st?.cellGrid) return sum
-        for (const slice of st.cellGrid) {
-          for (const row of slice ?? []) {
-            sum += (row as number[])?.filter(c => c !== 0).length ?? 0
-          }
-        }
-        return sum
-      }, 0)
+      const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       const fileName = opts?.fileName ?? localFileName.value ?? 'unknown'
 
-      if (result.handler?.formatName !== 'V2Plain') {
-        logCenter.info('场景加载', `从 ${result.handler?.formatName} 转换为 V2Plain 格式`, {
+      if (result.parser?.formatName !== 'V2Plain') {
+        logCenter.info('场景加载', `从 ${result.parser?.formatName} 转换为内部格式`, {
           fileName,
-          sourceFormat: result.handler?.formatName,
-          targetFormat: 'V2Plain',
-          frames: frames.length,
+          sourceFormat: result.parser?.formatName,
+          targetFormat: 'RuntimeDocument',
+          frames: result.document.frameCount,
           blocks: totalBlocks,
         })
       } else {
         logCenter.info('场景加载', `${fileName}`, {
           fileName,
-          frames: frames.length,
+          frames: result.document.frameCount,
           blocks: totalBlocks,
         })
       }
@@ -227,12 +208,8 @@ export function createSceneContext(): SceneContext {
     } catch (e) {
       throw new Error(`JSON 解析失败：${formatSdeError(e)}`)
     }
-    const parsed = cloneDocument(data)
-    if (!parsed) {
-      throw new Error('JSON 根须为对象')
-    }
     fileSaveHandle.value = opts?.saveHandle ?? null
-    await loadSceneDocument(parsed, { mode: 'local-file', fileName: file.name })
+    await loadSceneDocument(data, { mode: 'local-file', fileName: file.name })
   }
 
   async function saveToFile(): Promise<void> {

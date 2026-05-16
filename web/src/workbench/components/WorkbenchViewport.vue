@@ -116,7 +116,7 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
     createKeymapHandler(VIEWPORT_REGION_ID, () => bctx),
   )
 
-  ;(store as any)._unregHandlers = [unregGizmo, unregKeymap]
+  unregHandlers.push(unregGizmo, unregKeymap)
 
   // Create overlay scene
   const overlayScene = new THREE.Scene()
@@ -134,32 +134,21 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
     const wrapped = () => { origAnimate(); updateGizmo() }
     ;(store as any)._animate = wrapped
   } else {
-    const interval = setInterval(updateGizmo, 16)
-    ;(store as any)._gizmoInterval = interval
+    gizmoInterval = setInterval(updateGizmo, 16)
   }
 }
 
-let annotPreviewMesh: THREE.LineSegments | null = null
+let unregHandlers: Array<() => void> = []
+let gizmoInterval: ReturnType<typeof setInterval> | undefined
 
-function updateAnnotationPreview(): void {
-  if (annotPreviewMesh) {
-    bctx.viewport.overlayScene.value?.remove(annotPreviewMesh)
-    annotPreviewMesh.geometry?.dispose()
-    ;(annotPreviewMesh.material as THREE.Material)?.dispose()
-    annotPreviewMesh = null
-  }
-  // Annotation preview is now driven by AnnotationOperator.modal() render state
-  // The preview wireframe is rendered by operator.renderOverlay (future phase)
-}
-
-function voxelToWorld(col: number, row: number, zSlice: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
+function voxelToWorld(x: number, y: number, z: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
   const sCol = def.cellGrid[0]?.[0]?.length ?? 1
   const sRow = def.cellGrid[0]?.length ?? 1
   const sZ = def.cellGrid.length ?? 1
   return new THREE.Vector3(
-    col - sCol / 2 + 0.5,
-    sRow / 2 - 0.5 - row,
-    zSlice - sZ / 2 + 0.5,
+    x - sCol / 2 + 0.5,
+    y - sRow / 2 + 0.5,  // Y-up: y = world Y (0 = bottom, h-1 = top)
+    z - sZ / 2 + 0.5,
   )
 }
 
@@ -230,7 +219,6 @@ function updateGizmo(): void {
   }
 
   updateSelectionWireframe()
-  updateAnnotationPreview()
 
   if (bctx.viewport.gizmo.value && showMoveGizmo) {
     const gp = bctx.viewport.gizmo.value.root.position
@@ -257,7 +245,11 @@ function onViewportSelect(
   p: { blockId: string; voxel: { column: number; row: number; zSlice: number } } | null,
 ): void {
   if (p) {
-    selection.select({ block_state_id: p.blockId, pos: { x: p.voxel.column, y: p.voxel.row, z: p.voxel.zSlice } })
+    // 预览视口返回 cellGrid row (0=top)，转换为 Y-up
+    const def = structureDefinition.value
+    const h = def?.cellGrid[0]?.length ?? 0
+    const worldY = h > 0 ? h - 1 - p.voxel.row : p.voxel.row
+    selection.select({ block_state_id: p.blockId, pos: { x: p.voxel.column, y: worldY, z: p.voxel.zSlice } })
   } else {
     selection.clear()
   }
@@ -274,9 +266,7 @@ watch(structureDefinition, (def) => {
 
 onMounted(async () => { await store.loadStructureAndResources() })
 onBeforeUnmount(() => {
-  const unregs = (store as any)._unregHandlers as Array<() => void> | undefined
-  unregs?.forEach(fn => fn())
-  const gizmoInterval = (store as any)._gizmoInterval as number | undefined
+  unregHandlers.forEach(fn => fn())
   if (gizmoInterval) clearInterval(gizmoInterval)
   bctx.viewport.gizmo.value?.dispose()
   if (bctx.viewport.wireframe.value) {
@@ -284,12 +274,6 @@ onBeforeUnmount(() => {
     bctx.viewport.wireframe.value.geometry?.dispose()
     ;(bctx.viewport.wireframe.value.material as THREE.Material)?.dispose()
     bctx.viewport.wireframe.value = null
-  }
-  if (annotPreviewMesh) {
-    bctx.viewport.overlayScene.value?.remove(annotPreviewMesh)
-    annotPreviewMesh.geometry?.dispose()
-    ;(annotPreviewMesh.material as THREE.Material)?.dispose()
-    annotPreviewMesh = null
   }
   store.disposeCachesAndLibrary()
 })

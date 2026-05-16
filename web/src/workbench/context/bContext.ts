@@ -104,6 +104,7 @@ export interface BContext {
     registerRegionHandler(regionId: string, handler: import('@/workbench/events/handlerTypes').RegionEventHandler): () => void
     setActiveRegion(regionId: string): void
     getActiveRegion(): string | null
+    getCurrentRegionId(): string | null
     pushModal(regionId: string, op: import('@/workbench/eventDispatcher').ModalOperation, event: PointerEvent): void
     cancelModal(regionId: string): void
     commitModal(regionId: string): void
@@ -123,6 +124,8 @@ export interface BContext {
     recent(levelMask?: number, count?: number): Array<unknown>
   }
   wikiConfig: Record<string, any>
+  /** 底部状态栏消息 */
+  statusMessage: { value: string }
   /** 视口运行时（WorkbenchViewport.onViewportReady 时填充） */
   viewport: ViewportRuntime
 

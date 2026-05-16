@@ -37,14 +37,16 @@ import {
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 
-// Document format handlers — 注册到分发中心
-import { formatDispatcher } from '@/workbench/context/documentHandler'
-import { V2PlainHandler } from '@/workbench/context/handlers/v2PlainHandler'
-import { WorldHandler } from '@/workbench/context/handlers/worldHandler'
-import { StructureDataHandler } from '@/workbench/context/handlers/structureDataHandler'
-formatDispatcher.register(V2PlainHandler)
-formatDispatcher.register(WorldHandler)
-formatDispatcher.register(StructureDataHandler)
+// Document format parsers — 注册到解析分发中心
+import { parserRegistry } from '@/workbench/context/parserRegistry'
+import { V2PlainParser } from '@/workbench/context/parsers/v2PlainParser'
+import { StructureDataParser } from '@/workbench/context/parsers/structureDataParser'
+import { WorldParser } from '@/workbench/context/parsers/worldParser'
+import { EnvelopeParser } from '@/workbench/context/parsers/envelopeParser'
+parserRegistry.register(V2PlainParser)
+parserRegistry.register(EnvelopeParser)
+parserRegistry.register(WorldParser)
+parserRegistry.register(StructureDataParser)
 
 const scene = provideSceneContext()
 const connection = provideConnectionContext(scene)

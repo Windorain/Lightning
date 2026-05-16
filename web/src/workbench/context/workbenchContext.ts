@@ -96,23 +96,23 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
       all: () => globalOperators.all(),
       register: (op: any) => globalOperators.register(op),
     },
-    eventDispatcher: eventDispatcher as any,
-    log: logCenter as any,
-    wikiConfig: wikiConfig as any,
-    statusMessage: deps.statusMessage ?? ref('') as any,
+    eventDispatcher,
+    log: logCenter,
+    wikiConfig,
+    statusMessage: deps.statusMessage ?? ref(''),
     viewport: {
-      camera: ref(null) as any,
-      contentGroup: ref(null) as any,
-      domElement: ref(null) as any,
-      definition: ref(null) as any,
-      layerPreview: ref(null) as any,
-      gizmo: ref(null) as any,
-      overlayScene: ref(null) as any,
-      wireframe: ref(null) as any,
-      orbitTarget: ref(null) as any,
+      camera: ref(null),
+      contentGroup: ref(null),
+      domElement: ref(null),
+      definition: ref(null),
+      layerPreview: ref(null),
+      gizmo: ref(null),
+      overlayScene: ref(null),
+      wireframe: ref(null),
+      orbitTarget: ref(null),
     },
     settings,
-  } as BContext
+  } as unknown as BContext
 
   // queries 依赖 bctx 自身（循环引用）
   bctx.queries = createProductionQueries(bctx)

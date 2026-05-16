@@ -7,6 +7,7 @@
 import * as THREE from 'three'
 import type { BContext, BContextQueries } from '@/workbench/context/bContext'
 import type { BlockRef } from '@/workbench/selectionContext'
+import type { V2AnnotationBox } from '@/render/data/sceneDocumentV2'
 import type { Frame } from '@/render/schema/types'
 import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
 import { ARROW_LENGTH, CONE_LENGTH } from '@/workbench/tools/gizmos'
@@ -30,8 +31,13 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
         layerPreview: vp.layerPreview.value ?? 'all',
       })
       if (!result) return null
+
+      // 从 structure definition 获取 grid height 以转换 cellGrid row → world Y
+      const h = definition.cellGrid[0]?.length ?? 0
+      const worldY = h > 0 ? h - 1 - result.row : result.row
+
       return {
-        pos: { x: result.column, y: result.row, z: result.zSlice },
+        pos: { x: result.column, y: worldY, z: result.zSlice },
         block_state_id: result.blockId,
       }
     },
@@ -40,7 +46,9 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const doc = bctx.scene.scene.value
       if (!doc) return null
       const idx = bctx.selection.frameIndex.value ?? 0
-      return doc.frame(idx)?.toRaw() ?? null
+      const rf = doc.frame(idx)
+      if (!rf) return null
+      return rf.toRaw() as Frame | null
     },
 
     getFrameBlocks(): BlockRef[] {
@@ -49,7 +57,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
       if (!rf?.grid) return []
       return rf.grid.blocks().map(({ pos, block }) => ({
-        pos: { x: pos.col, y: pos.row, z: pos.z },
+        pos: { x: pos.x, y: pos.y, z: pos.z },
         block_state_id: `minecraft:${block.name}:${block.meta}`,
       }))
     },
@@ -60,13 +68,13 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
       if (!rf?.grid) return false
       return rf.grid.moveBlock(
-        { col: from.x, row: from.y, z: from.z },
-        { col: to.x, row: to.y, z: to.z },
+        { x: from.x, y: from.y, z: from.z },
+        { x: to.x, y: to.y, z: to.z },
       )
     },
 
     getDocument(): Record<string, any> | null {
-      return bctx.scene.scene.value?.toRaw() ?? null
+      return bctx.scene.scene.value?.serialize() ?? null
     },
 
     projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null {
@@ -82,8 +90,9 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const sRow = grid?.height ?? 1
       const sZ = grid?.depth ?? 1
 
+      // GridPos is Y-up, Three.js scene is centered at origin
       const wx = pos.x - sCol / 2 + 0.5
-      const wy = sRow / 2 - 0.5 - pos.y
+      const wy = pos.y - sRow / 2 + 0.5
       const wz = pos.z - sZ / 2 + 0.5
       const worldPos = new THREE.Vector3(wx, wy, wz)
       worldPos.project(camera)
@@ -102,8 +111,6 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       if (!camera || !domElement || !gizmo) return null
       if (bctx.selection.items.value.size === 0) return null
 
-      // Use the gizmo's actual world position (set by voxelToWorld in updateGizmo)
-      // Offset to the arrow cylinder center (best hit-test surface area)
       const arrowCenter = (ARROW_LENGTH - CONE_LENGTH) / 2
       const gPos = gizmo.root.position
       const anchor = new THREE.Vector3(
@@ -136,12 +143,12 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) }
     },
 
-    getAnnotationBoxes() {
-      return bctx.scene.scene.value?.annotations ?? []
+    getAnnotationBoxes(): V2AnnotationBox[] {
+      return (bctx.scene.scene.value?.annotations ?? []) as V2AnnotationBox[]
     },
 
-    getAnnotationBox(id: string) {
-      return bctx.scene.scene.value?.annotations?.find((a: any) => a.id === id) ?? null
+    getAnnotationBox(id: string): V2AnnotationBox | null {
+      return (bctx.scene.scene.value?.annotations?.find((a: any) => a.id === id) ?? null) as V2AnnotationBox | null
     },
 
     pickSurface(event: PointerEvent) {
@@ -162,9 +169,9 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       raycaster.setFromCamera(mouse, camera)
 
       const hits = raycaster.intersectObject(contentGroup, true)
-      if (!hits.length || !hits[0].face) return null
-
+      if (!hits.length) return null
       const hit = hits[0]
+      if (!hit.face) return null
       const normalWorld = hit.face.normal
         .clone()
         .transformDirection((hit.object as THREE.Object3D).matrixWorld)
@@ -181,8 +188,12 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       })
       if (!result) return null
 
+      // cellGrid row → world Y
+      const h = definition.cellGrid[0]?.length ?? 0
+      const worldY = h > 0 ? h - 1 - result.row : result.row
+
       return {
-        pos: { x: result.column + nx, y: result.row + ny, z: result.zSlice + nz },
+        pos: { x: result.column + nx, y: worldY + ny, z: result.zSlice + nz },
         normal: { x: nx, y: ny, z: nz },
       }
     },
@@ -238,4 +249,3 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
   }
 }
-

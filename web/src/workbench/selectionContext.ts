@@ -7,6 +7,8 @@ import { logCenter } from '@/workbench/logging/LogCenter'
 export interface BlockRef {
   pos: { x: number; y: number; z: number }
   block_state_id: string
+  /** @internal 构建 RNA owner 时注入的网格尺寸 */
+  _gridSize?: { w: number; h: number; d: number } | null
 }
 
 export type SelectionMode = 'single' | 'box' | 'type'

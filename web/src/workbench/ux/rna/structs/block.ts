@@ -29,10 +29,19 @@ export const blockRNA: RNAStruct = {
       label: '世界坐标',
       description: '方块在场景中的位置',
       default: { x: 0, y: 0, z: 0 },
-      get(owner: any) { return { ...owner.pos } },
+      get(owner: any) {
+        const p = owner.pos
+        const h = owner._gridSize?.h
+        // cellGrid row 0 = 结构顶部 → 世界 Y 翻转
+        const y = h != null ? h - 1 - p.y : p.y
+        return { x: p.x, y, z: p.z }
+      },
       set(owner: any, val: unknown) {
         const v = val as { x: number; y: number; z: number }
-        owner.pos = { x: v.x, y: v.y, z: v.z }
+        const h = owner._gridSize?.h
+        // 世界 Y → cellGrid row
+        const row = h != null ? h - 1 - v.y : v.y
+        owner.pos = { x: v.x, y: row, z: v.z }
       },
     },
   ],
