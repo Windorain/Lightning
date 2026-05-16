@@ -17,9 +17,7 @@ import { useBContext } from '@/workbench/context/bContext'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
-import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
-import { createViewNavigationHandler } from '@/workbench/handlers/viewNavigationHandler'
 import * as THREE from 'three'
 
 const props = defineProps<{
@@ -78,37 +76,47 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   vp.definition.value = structureDefinition.value ?? null
   vp.layerPreview.value = layerPreviewMode.value
 
-  // EventDispatcher — capture phase is sole input path (OrbitControls removed)
+  const VIEWPORT_REGION_ID = 'r-viewport'
+
+  // EventDispatcher — capture phase is sole input path
+  bctx.eventDispatcher.registerRegion(VIEWPORT_REGION_ID)
+  bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
+
   canvas.addEventListener('pointerdown', (e) => {
+    bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
     if (e.button === 1) e.preventDefault()
-    if (dispatchCanvas(e)) e.stopImmediatePropagation()
+    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
   }, { capture: true })
-  canvas.addEventListener('pointermove', (e) => { dispatchCanvas(e) }, { capture: true })
-  canvas.addEventListener('pointerup', (e) => { if (dispatchCanvas(e)) e.stopImmediatePropagation() }, { capture: true })
-  canvas.addEventListener('wheel', (e) => { dispatchCanvas(e); e.preventDefault() }, { capture: true, passive: false })
+  canvas.addEventListener('pointermove', (e) => {
+    bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
+    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
+  }, { capture: true })
+  canvas.addEventListener('pointerup', (e) => {
+    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
+  }, { capture: true })
+  canvas.addEventListener('wheel', (e) => {
+    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
+    e.preventDefault()
+  }, { capture: true, passive: false })
   canvas.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
   document.addEventListener('keydown', (e) => { bctx.eventDispatcher.dispatch(e) }, { capture: true })
 
-  // Register handlers (operator-based)
-  const unregGizmo = bctx.eventDispatcher.registerTypedHandler(
+  // Register handlers (GIZMO → KEYMAP)
+  const unregGizmo = bctx.eventDispatcher.registerRegionHandler(
+    VIEWPORT_REGION_ID,
     createToolGizmoHandler(
-      () => toolRegistry.activeTool.value?.id ?? 'OPERATOR_SELECT',
+      VIEWPORT_REGION_ID,
       () => vp.gizmo.value,
       () => bctx,
       () => vp.camera.value,
     ),
   )
-  const unregTool = bctx.eventDispatcher.registerTypedHandler(
-    createActiveToolHandler(() => bctx),
-  )
-  const unregKeymap = bctx.eventDispatcher.registerTypedHandler(
-    createKeymapHandler(() => bctx),
-  )
-  const unregViewNav = bctx.eventDispatcher.registerTypedHandler(
-    createViewNavigationHandler(() => bctx),
+  const unregKeymap = bctx.eventDispatcher.registerRegionHandler(
+    VIEWPORT_REGION_ID,
+    createKeymapHandler(VIEWPORT_REGION_ID, () => bctx),
   )
 
-  ;(store as any)._unregHandlers = [unregGizmo, unregTool, unregKeymap, unregViewNav]
+  ;(store as any)._unregHandlers = [unregGizmo, unregKeymap]
 
   // Create overlay scene
   const overlayScene = new THREE.Scene()
@@ -129,11 +137,6 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
     const interval = setInterval(updateGizmo, 16)
     ;(store as any)._gizmoInterval = interval
   }
-}
-
-function dispatchCanvas(event: Event): boolean {
-  const result = bctx.eventDispatcher.dispatch(event)
-  return result.break
 }
 
 let annotPreviewMesh: THREE.LineSegments | null = null
@@ -213,7 +216,7 @@ function updateGizmo(): void {
   bctx.viewport.gizmo.value.setVisible(showMoveGizmo)
 
   // 模态操作（MoveOperator.modal）期间跳过定位，由 modal 自己控制 gizmo 位置
-  if (showMoveGizmo && bctx.eventDispatcher.modalDepth === 0) {
+  if (showMoveGizmo && bctx.eventDispatcher.modalDepth('r-viewport') === 0) {
     const def = structureDefinition.value
     if (def) {
       let cx = 0, cy = 0, cz = 0

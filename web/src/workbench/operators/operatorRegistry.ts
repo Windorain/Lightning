@@ -70,12 +70,13 @@ export class OperatorRegistry {
     }
   }
 
-  /** 交互式调用操作符。返回操作状态。 */
+  /** 交互式调用操作符。返回操作状态。regionId 指定目标区域的模态栈。 */
   invoke(
     bctx: BContext,
     id: string,
     props?: OperatorProperties,
     event?: PointerEvent | KeyboardEvent,
+    regionId?: string,
   ): OpResult {
     const op = this.operators.get(id)
     if (!op) { logCenter.warn('Operator', `invoke: op not found ${id}`, { opId: id }); return OP_RESULT.CANCELLED }
@@ -89,7 +90,6 @@ export class OperatorRegistry {
     const resolvedProps: OperatorProperties = props ?? {}
 
     if (op.invoke) {
-      // Take before-snapshot for flagUndo operators
       const snapshot = op.flagUndo
         ? bctx.scene.scene.value?.clone() ?? null
         : null
@@ -97,12 +97,13 @@ export class OperatorRegistry {
       const result = op.invoke(bctx, resolvedProps, event)
 
       if (result === OP_RESULT.RUNNING_MODAL) {
-        const wrapper = new ModalOperatorWrapper(op, bctx, resolvedProps)
+        const targetRegion = regionId ?? (bctx.eventDispatcher as any).getCurrentRegionId?.() ?? 'r-viewport'
+        const wrapper = new ModalOperatorWrapper(op, bctx, resolvedProps, targetRegion)
         if (snapshot !== null) {
           wrapper.setUndoSnapshot(snapshot)
         }
         if (event instanceof PointerEvent) {
-          eventDispatcher.pushModal(wrapper, event)
+          eventDispatcher.pushModal(targetRegion, wrapper, event)
         }
         logOperatorResult(bctx, id, op.label, 'RUNNING_MODAL', snap)
       } else if (result === OP_RESULT.FINISHED) {

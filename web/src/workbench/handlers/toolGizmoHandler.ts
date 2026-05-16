@@ -1,6 +1,6 @@
 import * as THREE from 'three'
-import type { TypedEventHandler } from '@/workbench/events/eventTypes'
-import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
+import type { RegionEventHandler } from '@/workbench/events/handlerTypes'
+import { HANDLER_TYPE } from '@/workbench/events/handlerTypes'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
 import type { BContext } from '@/workbench/context/bContext'
 
@@ -11,17 +11,16 @@ import type { BContext } from '@/workbench/context/bContext'
  * pointerdown: hit test → invoke MoveOperator with gizmo props
  */
 export function createToolGizmoHandler(
-  getActiveToolId: () => string,
+  regionId: string,
   getGizmo: () => MoveGizmo | null,
   getBctx: () => BContext | null,
   getCamera: () => THREE.Camera | null,
-): TypedEventHandler {
+): RegionEventHandler {
   return {
     type: HANDLER_TYPE.GIZMO,
     handle(event: Event): { break: boolean } {
       const gizmo = getGizmo()
       const camera = getCamera()
-      const toolId = getActiveToolId()
       if (!gizmo || !camera) return { break: false }
 
       const pe = event as PointerEvent
@@ -35,15 +34,12 @@ export function createToolGizmoHandler(
       raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
 
       if (event.type === 'pointermove') {
-        if (toolId === 'OPERATOR_MOVE') {
-          const hit = gizmo.hitTest(raycaster)
-          gizmo.setHighlight(hit)
-        }
+        const hit = gizmo.hitTest(raycaster)
+        gizmo.setHighlight(hit)
         return { break: false }
       }
 
       if (event.type !== 'pointerdown') return { break: false }
-      if (toolId !== 'OPERATOR_MOVE') return { break: false }
 
       const hit = gizmo.hitTest(raycaster)
       if (!hit || hit.length !== 1) return { break: false }
@@ -68,7 +64,6 @@ export function createToolGizmoHandler(
 
       const screenDirX = screenLen > 0.001 ? sx / screenLen : 0
       const screenDirY = screenLen > 0.001 ? sy / screenLen : 0
-      // pixels-per-world-unit = screenLen, so k = 1 / screenLen
       const k = screenLen > 0.001 ? 1 / screenLen : 0
 
       bctx.operators.invoke('OPERATOR_MOVE', {
@@ -77,7 +72,7 @@ export function createToolGizmoHandler(
         screenDirX,
         screenDirY,
         k,
-      }, pe)
+      }, pe, regionId)
       return { break: true }
     },
   }

@@ -2,7 +2,7 @@
  * ModalOperatorWrapper — 适配器，将 OperatorType.modal() 桥接到 eventDispatcher 的 ModalOperation 接口。
  *
  * 当操作符的 invoke() 返回 RUNNING_MODAL 时，
- * OperatorRegistry.invoke() 创建此 wrapper 并推入 eventDispatcher 模态栈。
+ * OperatorRegistry.invoke() 创建此 wrapper 并推入目标 region 的模态栈。
  * 后续每个事件通过 wrapper 转发到 operator.modal()。
  */
 import type { ModalOperation, ModalKeymap } from '@/workbench/eventDispatcher'
@@ -18,12 +18,14 @@ export class ModalOperatorWrapper implements ModalOperation {
   private bctx: BContext
   private props: OperatorProperties
   private undoSnapshot: RuntimeDocument | null = null
+  private regionId: string
 
-  constructor(op: OperatorType, bctx: BContext, props: OperatorProperties) {
+  constructor(op: OperatorType, bctx: BContext, props: OperatorProperties, regionId: string) {
     this.op = op
     this.bctx = bctx
     this.props = props
     this.id = op.id
+    this.regionId = regionId
   }
 
   setUndoSnapshot(snapshot: RuntimeDocument | null): void {
@@ -50,13 +52,13 @@ export class ModalOperatorWrapper implements ModalOperation {
         })
         this.undoSnapshot = null
       }
-      eventDispatcher.commitModal()
+      eventDispatcher.commitModal(this.regionId)
       return { break: true }
     }
 
     if (result === OP_RESULT.CANCELLED) {
       this.op.cancel?.(this.bctx, this.props)
-      eventDispatcher.cancelModal()
+      eventDispatcher.cancelModal(this.regionId)
       return { break: true }
     }
 

@@ -97,6 +97,8 @@ const lastMousePosition = ref<{ x: number; y: number } | null>(null)
 const ADD_MENU_ITEMS: ContextMenuItem[] = [
   { kind: 'label', label: '生成', icon: '＋' },
   { kind: 'separator', label: '' },
+  { kind: 'operator', label: '撤销 (Ctrl+Z)', opId: 'OPERATOR_UNDO' },
+  { kind: 'operator', label: '重做 (Ctrl+Shift+Z)', opId: 'OPERATOR_REDO' },
 ]
 
 function invokeContextMenuItem(item: ContextMenuItem) {
@@ -110,8 +112,10 @@ function onMouseMove(e: MouseEvent) {
 }
 
 // Wire context menu + show/hide into wm (不在 createWorkbenchContext 内，因为依赖 showContextMenu 闭包)
+;(bctx.wm as any).contextMenu = contextMenu  // 覆盖 workbenchContext 创建的空菜单
 ;(bctx.wm as any).showContextMenu = showContextMenu
 ;(bctx.wm as any).hideContextMenu = hideContextMenu
+;(bctx.wm as any).contextMenuItems = ADD_MENU_ITEMS
 
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
@@ -275,7 +279,7 @@ onMounted(() => {
       v-if="contextMenu.open.value"
       class="context-menu-overlay"
       @click="hideContextMenu(contextMenu)"
-      @contextmenu.prevent="hideContextMenu(contextMenu)"
+      @contextmenu.prevent
     >
       <div
         class="context-menu-popup"

@@ -1,56 +1,114 @@
 /**
- * Keymap handler — 对标 Blender 的 KEYMAP handler。
+ * Keymap handler — 对标 Blender 的 WM_HANDLER_TYPE_KEYMAP。
  *
- * 将 KeyboardEvent 与 keymap bindings 匹配，执行对应操作符。
- * 优先于 UI handler 执行，被 modal stack 完全覆盖。
+ * 职责：
+ * 1. 将输入事件与 keymap 绑定匹配 → invoke 对应操作符
+ * 2. operator FINISHED 后的拖拽手势检测 → 越过阈值 → invoke ViewRotate
  */
-import type { TypedEventHandler } from '@/workbench/events/eventTypes'
-import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
+import type { RegionEventHandler } from '@/workbench/events/handlerTypes'
+import { HANDLER_TYPE } from '@/workbench/events/handlerTypes'
 import type { BContext } from '@/workbench/context/bContext'
-import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
+import { loadKeymap, matchBinding, type InputBinding } from '@/workbench/keymap'
+import { OP_RESULT } from '@/workbench/operators/operatorType'
 
-const OPERATOR_KEY_MAP: Record<string, string> = {
-  select: 'OPERATOR_SELECT',
-  move: 'OPERATOR_MOVE',
-  mirror: 'OPERATOR_MIRROR',
+interface DragState {
+  active: boolean
+  startX: number
+  startY: number
 }
 
-export function createKeymapHandler(getBctx: () => BContext | null): TypedEventHandler {
-  let keymap: KeyBinding[] = []
+export function createKeymapHandler(
+  regionId: string,
+  getBctx: () => BContext | null,
+): RegionEventHandler {
+  let keymap: InputBinding[] = []
+  const drag: DragState = { active: false, startX: 0, startY: 0 }
 
   return {
     type: HANDLER_TYPE.KEYMAP,
     handle(event: Event): { break: boolean } {
-      if (!(event instanceof KeyboardEvent)) return { break: false }
-
-      // Lazy-load keymap on first use
-      if (keymap.length === 0) keymap = loadKeymap()
-
       const bctx = getBctx()
       if (!bctx) return { break: false }
 
+      if (keymap.length === 0) keymap = loadKeymap()
+
+      // ---- Dragging state consumes pointermove/pointerup ----
+      if (drag.active) {
+        if (event.type === 'pointerdown') {
+          // New press → clear drag state and let keymap matching handle it
+          drag.active = false
+        } else if (event.type === 'pointermove') {
+          const pe = event as PointerEvent
+          const dx = pe.clientX - drag.startX
+          const dy = pe.clientY - drag.startY
+          if (dx * dx + dy * dy > 25) {
+            drag.active = false
+            bctx.operators.invoke('OPERATOR_VIEW_ROTATE', undefined, event, regionId)
+          }
+          return { break: false }
+        } else if (event.type === 'pointerup' || event.type === 'pointercancel') {
+          drag.active = false
+          return { break: false }
+        } else {
+          return { break: false }
+        }
+      }
+
+      // ---- Match keymap bindings ----
       for (const binding of keymap) {
         if (!matchBinding(binding, event)) continue
-        event.preventDefault()
 
-        if (binding.toolId) {
-          const opId = OPERATOR_KEY_MAP[binding.toolId] ?? `OPERATOR_${binding.toolId.toUpperCase()}`
-          bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: opId })
-        } else if (binding.action) {
-          switch (binding.action) {
-            case 'undo': bctx.operators.exec('OPERATOR_UNDO'); break
-            case 'redo': bctx.operators.exec('OPERATOR_REDO'); break
-            case 'toggle-tool': {
-              const prev = bctx.toolRegistry.getPreviousEditToolId()
-              if (prev) { bctx.toolRegistry.activate(prev, bctx) } else { bctx.toolRegistry.activate('OPERATOR_SELECT', bctx) }
-              break
+        // KEY binding
+        if (binding.type === 'KEY') {
+          if (binding.action) {
+            switch (binding.action) {
+              case 'undo': bctx.operators.exec('OPERATOR_UNDO'); break
+              case 'redo': bctx.operators.exec('OPERATOR_REDO'); break
+              case 'toggle-tool': {
+                const prev = bctx.toolRegistry.getPreviousEditToolId()
+                if (prev) bctx.toolRegistry.activate(prev, bctx)
+                else bctx.toolRegistry.activate('OPERATOR_SELECT', bctx)
+                break
+              }
+              case 'select-all': bctx.operators.exec('OPERATOR_SELECT_ALL'); break
             }
-            case 'toggle-toolshelf': break
-            case 'toggle-properties': break
           }
+          return { break: true }
         }
-        return { break: true }
+
+        // MOUSE binding
+        if (binding.type === 'MOUSE') {
+          if (binding.action === 'context-menu') {
+            const wm = (bctx as any).wm as any
+            const pe = event as PointerEvent
+            if (wm.showContextMenu && wm.contextMenu) {
+              const items = wm.contextMenuItems ?? []
+              wm.showContextMenu(wm.contextMenu, { x: pe.clientX, y: pe.clientY }, items)
+            }
+            return { break: true }
+          }
+
+          if (binding.opId) {
+            const result = bctx.operators.invoke(binding.opId, undefined, event, regionId)
+            if (result === OP_RESULT.FINISHED) {
+              const pe = event as PointerEvent
+              drag.active = true
+              drag.startX = pe.clientX
+              drag.startY = pe.clientY
+            }
+          }
+          return { break: false }
+        }
+
+        // WHEEL binding
+        if (binding.type === 'WHEEL') {
+          bctx.operators.invoke(binding.opId!, undefined, event, regionId)
+          return { break: false }
+        }
+
+        return { break: false }
       }
+
       return { break: false }
     },
   }

@@ -25,7 +25,6 @@ import { createProductionQueries } from '@/workbench/context/sceneQueries'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt, relayout } from '@/workbench/ux/layout'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
-import { createContextMenu } from '@/workbench/ux/contextMenu'
 import {
   blockInspectorPanel, toolShelfPanel,
   transformPanel, sceneInfoPanel,
@@ -92,7 +91,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     connection,
     operators: {
       exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(bctx, id, props),
-      invoke: (id: string, props?: Record<string, unknown>, event?: Event) => globalOperators.invoke(bctx, id, props, event as any),
+      invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) => globalOperators.invoke(bctx, id, props, event as any, regionId),
       find: (id: string) => globalOperators.find(id),
       all: () => globalOperators.all(),
       register: (op: any) => globalOperators.register(op),
@@ -164,11 +163,15 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
 
   computeLayout(bctx, defaultScreen)
 
-  // ---- Context menu ----
-  const contextMenu = createContextMenu()
+  // ---- Register all regions with event dispatcher ----
+  for (const area of defaultScreen.areas) {
+    for (const region of area.regions) {
+      eventDispatcher.registerRegion(region.id)
+    }
+  }
 
   // ---- 挂载到 bctx ----
-  ;(bctx as any).wm = { windows: [], activeWindow: null, contextMenu }
+  ;(bctx as any).wm = { windows: [], activeWindow: null }
   ;(bctx as any).screen = defaultScreen
   ;(bctx as any).area = null
   ;(bctx as any).region = null

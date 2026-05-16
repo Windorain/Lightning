@@ -116,16 +116,34 @@ export class MoveGizmo {
   }
 
   hitTest(raycaster: THREE.Raycaster): GizmoPart {
+    // 1. Exact geometry intersection
     const hits = raycaster.intersectObjects(this.allMeshes, false)
-    if (hits.length === 0) return null
+    if (hits.length > 0) {
+      const obj = hits[0].object
+      for (const [axis, arrow] of Object.entries(this.arrows)) {
+        if (obj === arrow.line || obj === arrow.cone) return axis as GizmoAxis
+      }
+      for (const [plane, p] of Object.entries(this.planes)) {
+        if (obj === p.plane) return plane as GizmoAxis
+      }
+      return null
+    }
 
-    const obj = hits[0].object
+    // 2. Edge tolerance: ray 在 part 中心附近就算命中
+    const TOLERANCE = 0.4
+    const wp = new THREE.Vector3()
+
     for (const [axis, arrow] of Object.entries(this.arrows)) {
-      if (obj === arrow.line || obj === arrow.cone) return axis as GizmoAxis
+      arrow.line.getWorldPosition(wp)
+      if (raycaster.ray.distanceToPoint(wp) < TOLERANCE) return axis as GizmoAxis
+      arrow.cone.getWorldPosition(wp)
+      if (raycaster.ray.distanceToPoint(wp) < TOLERANCE) return axis as GizmoAxis
     }
     for (const [plane, p] of Object.entries(this.planes)) {
-      if (obj === p.plane) return plane as GizmoAxis
+      p.plane.getWorldPosition(wp)
+      if (raycaster.ray.distanceToPoint(wp) < TOLERANCE) return plane as GizmoAxis
     }
+
     return null
   }
 

@@ -93,18 +93,22 @@ export interface BContext {
   settings: BContextSettings
   operators: {
     exec(id: string, props?: Record<string, unknown>): void
-    invoke(id: string, props?: Record<string, unknown>, event?: Event): string
+    invoke(id: string, props?: Record<string, unknown>, event?: Event, regionId?: string): string
     find(id: string): { id: string; label: string } | undefined
     all(): { id: string; label: string }[]
     register(op: any): void
   }
   eventDispatcher: {
-    pushModal(op: unknown, event: PointerEvent): () => void
-    dispatch(event: Event): { break: boolean }
-    registerTypedHandler(handler: unknown): () => void
-    cancelModal(): void
-    commitModal(): void
-    readonly modalDepth: number
+    registerRegion(regionId: string): void
+    unregisterRegion(regionId: string): void
+    registerRegionHandler(regionId: string, handler: import('@/workbench/events/handlerTypes').RegionEventHandler): () => void
+    setActiveRegion(regionId: string): void
+    getActiveRegion(): string | null
+    pushModal(regionId: string, op: import('@/workbench/eventDispatcher').ModalOperation, event: PointerEvent): void
+    cancelModal(regionId: string): void
+    commitModal(regionId: string): void
+    modalDepth(regionId: string): number
+    dispatch(event: Event, options?: { regionId?: string }): { break: boolean }
   }
   log: {
     readonly entries: { value: Array<{ id: number; time: string; level: number; source: string; message: string; detail?: unknown }> }

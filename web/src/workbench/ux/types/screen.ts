@@ -37,6 +37,8 @@ export interface ARegion {
   visible: boolean
   collapsed: boolean
   handlers: EventHandler[]
+  /** 该 region 使用的 keymap 标识（用于 region 特定 keymap 加载） */
+  keymapId?: string
 }
 
 export interface bScreen {
@@ -54,6 +56,6 @@ export interface wmWindow {
 }
 
 export interface EventHandler {
-  type: 'GIZMO' | 'OPERATOR' | 'KEYMAP' | 'UI'
+  type: 'GIZMO' | 'KEYMAP'
   handle(event: Event): { break: boolean }
 }
