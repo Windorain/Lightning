@@ -18,7 +18,8 @@ import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
-import { createDefaultPickHandler } from '@/workbench/handlers/defaultPickHandler'
+import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
+import { createViewNavigationHandler } from '@/workbench/handlers/viewNavigationHandler'
 import * as THREE from 'three'
 
 const props = defineProps<{
@@ -39,8 +40,6 @@ watch(() => props.mergedConfig, async (cfg) => {
 })
 
 const { hover, setHover, clearHover } = usePreviewTooltip()
-
-let orbitTarget: THREE.Vector3 | null = null
 
 const {
   loadStatus,
@@ -70,25 +69,23 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
   store.registerScene(scene)
   try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
 
-  orbitTarget = _orbitTarget
-
   // Wire bContext viewport state (唯一赋值点)
   const vp = bctx.viewport
+  vp.orbitTarget.value = _orbitTarget
   vp.camera.value = camera
   vp.contentGroup.value = contentGroupRef.value ?? new THREE.Group()
   vp.domElement.value = canvas
-  vp.controls.value = store.controlsRef as { enabled: boolean } | null
   vp.definition.value = structureDefinition.value ?? null
   vp.layerPreview.value = layerPreviewMode.value
 
-  // OrbitControls mouse mapping keeps defaults:
-  //   LMB=ROTATE (when tool doesn't consume), MMB=PAN, RMB=DOLLY
-  // Tools/gizmos consume events via capture-phase dispatch, not by disabling mouse buttons
-
-  // EventDispatcher — capture phase runs before OrbitControls' bubble listeners
-  canvas.addEventListener('pointerdown', (e) => { if (dispatchCanvas(e)) e.stopImmediatePropagation() }, { capture: true })
+  // EventDispatcher — capture phase is sole input path (OrbitControls removed)
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button === 1) e.preventDefault()
+    if (dispatchCanvas(e)) e.stopImmediatePropagation()
+  }, { capture: true })
   canvas.addEventListener('pointermove', (e) => { dispatchCanvas(e) }, { capture: true })
   canvas.addEventListener('pointerup', (e) => { if (dispatchCanvas(e)) e.stopImmediatePropagation() }, { capture: true })
+  canvas.addEventListener('wheel', (e) => { dispatchCanvas(e); e.preventDefault() }, { capture: true, passive: false })
   canvas.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
   document.addEventListener('keydown', (e) => { bctx.eventDispatcher.dispatch(e) }, { capture: true })
 
@@ -99,15 +96,19 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
       () => vp.gizmo.value,
       () => bctx,
       () => vp.camera.value,
-      () => vp.controls.value,
     ),
   )
   const unregTool = bctx.eventDispatcher.registerTypedHandler(
     createActiveToolHandler(() => bctx),
   )
-  const unregPick = bctx.eventDispatcher.registerHandler(createDefaultPickHandler())
+  const unregKeymap = bctx.eventDispatcher.registerTypedHandler(
+    createKeymapHandler(() => bctx),
+  )
+  const unregViewNav = bctx.eventDispatcher.registerTypedHandler(
+    createViewNavigationHandler(() => bctx),
+  )
 
-  ;(store as any)._unregHandlers = [unregGizmo, unregTool, unregPick]
+  ;(store as any)._unregHandlers = [unregGizmo, unregTool, unregKeymap, unregViewNav]
 
   // Create overlay scene
   const overlayScene = new THREE.Scene()
@@ -211,7 +212,7 @@ function updateGizmo(): void {
   const showMoveGizmo = tool?.id === 'OPERATOR_MOVE' && items.size > 0
   bctx.viewport.gizmo.value.setVisible(showMoveGizmo)
 
-  // 模态操作（GizmoDragModal）期间跳过定位，由 modal 自己控制 gizmo 位置
+  // 模态操作（MoveOperator.modal）期间跳过定位，由 modal 自己控制 gizmo 位置
   if (showMoveGizmo && bctx.eventDispatcher.modalDepth === 0) {
     const def = structureDefinition.value
     if (def) {
@@ -237,7 +238,7 @@ function updateGizmo(): void {
   if (bctx.viewport.camera.value) {
     logCenter.updateCameraState({
       position: [bctx.viewport.camera.value.position.x, bctx.viewport.camera.value.position.y, bctx.viewport.camera.value.position.z],
-      target: orbitTarget ? [orbitTarget.x, orbitTarget.y, orbitTarget.z] : [0, 0, 0],
+      target: bctx.viewport.orbitTarget.value ? [bctx.viewport.orbitTarget.value.x, bctx.viewport.orbitTarget.value.y, bctx.viewport.orbitTarget.value.z] : [0, 0, 0],
     })
   }
 }

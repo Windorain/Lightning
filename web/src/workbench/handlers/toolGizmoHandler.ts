@@ -1,22 +1,20 @@
 import * as THREE from 'three'
 import type { TypedEventHandler } from '@/workbench/events/eventTypes'
 import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
-import type { MoveGizmo, GizmoAxis } from '@/workbench/tools/gizmos'
+import type { MoveGizmo } from '@/workbench/tools/gizmos'
 import type { BContext } from '@/workbench/context/bContext'
-import { GizmoDragModal } from '@/workbench/modalOperations/GizmoDragModal'
 
 
 /**
  * Gizmo handler (HANDLER_TYPE.GIZMO).
  * pointermove: hover highlight (never consumes event)
- * pointerdown: hit test → enter GizmoDragModal
+ * pointerdown: hit test → invoke MoveOperator with gizmo props
  */
 export function createToolGizmoHandler(
   getActiveToolId: () => string,
   getGizmo: () => MoveGizmo | null,
   getBctx: () => BContext | null,
   getCamera: () => THREE.Camera | null,
-  getControlsRef: () => { enabled: boolean } | null,
 ): TypedEventHandler {
   return {
     type: HANDLER_TYPE.GIZMO,
@@ -51,7 +49,6 @@ export function createToolGizmoHandler(
       if (!hit || hit.length !== 1) return { break: false }
 
       const bctx = getBctx()
-      const controlsRef = getControlsRef()
       if (!bctx) return { break: false }
 
       // Compute axis screen direction and pixel-to-world scale from camera
@@ -74,25 +71,13 @@ export function createToolGizmoHandler(
       // pixels-per-world-unit = screenLen, so k = 1 / screenLen
       const k = screenLen > 0.001 ? 1 / screenLen : 0
 
-      const startX = pe.clientX
-      const startY = pe.clientY
-
-      const computeDelta = (moveEvent: PointerEvent): number => {
-        const dx = moveEvent.clientX - startX
-        const dy = moveEvent.clientY - startY
-        const proj = dx * screenDirX + dy * screenDirY
-        return proj * k
-      }
-
-      const modal = new GizmoDragModal(
-        hit as GizmoAxis,
+      bctx.operators.invoke('OPERATOR_MOVE', {
+        gizmoAxis: hit,
         gizmo,
-        bctx,
-        controlsRef,
-        computeDelta,
-      )
-      bctx.eventDispatcher.pushModal(modal, pe)
-
+        screenDirX,
+        screenDirY,
+        k,
+      }, pe)
       return { break: true }
     },
   }

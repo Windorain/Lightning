@@ -239,8 +239,8 @@ function fitIsometricOrbitToContentGroup(vp: RenderViewport, group: THREE.Group)
   const cam = store?.config.value?.initialCamera
   const finalDist = cam?.distance ?? dist
   const o = vp.orthographicCamera
-  vp.controls.target.copy(center)
-  applyDiagonalOrbitView(o, vp.controls, {
+  vp.orbitTarget.copy(center)
+  applyDiagonalOrbitView(o, vp.orbitTarget, {
     yawDeg: cam?.yawDeg ?? 225,
     elevationFromHorizontalDeg: cam?.elevationDeg ?? STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
     distance: finalDist,
@@ -255,7 +255,6 @@ function fitIsometricOrbitToContentGroup(vp: RenderViewport, group: THREE.Group)
   o.right = halfH * aspect
   o.zoom = clampOrthoZoom(cam?.zoom)
   o.updateProjectionMatrix()
-  vp.controls.update()
 }
 
 watch(
@@ -336,12 +335,12 @@ onMounted(() => {
   const fallbackPosition = new THREE.Vector3(8, 6, 10)
 
   const o = vp.orthographicCamera
-  applyInitialCamera(o, vp.controls, def, fallbackTarget, fallbackPosition)
-  applyDiagonalOrbitView(o, vp.controls, {
+  applyInitialCamera(o, vp.orbitTarget, def, fallbackTarget, fallbackPosition)
+  applyDiagonalOrbitView(o, vp.orbitTarget, {
     yawDeg: 225,
     elevationFromHorizontalDeg: STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
   })
-  const d0 = Math.max(0.1, o.position.distanceTo(vp.controls.target))
+  const d0 = Math.max(0.1, o.position.distanceTo(vp.orbitTarget))
   const orthoHeight0 = 2 * d0 * Math.tan(THREE.MathUtils.degToRad(ORTHO_FRUSTUM_REF_HALF_FOV_DEG))
   const aspect0 = el.clientWidth / Math.max(el.clientHeight, 1)
   const halfH0 = orthoHeight0 / 2
@@ -350,7 +349,6 @@ onMounted(() => {
   o.left = -halfH0 * aspect0
   o.right = halfH0 * aspect0
   o.updateProjectionMatrix()
-  vp.controls.update()
 
   /**
    * 拖动预览高度时 ResizeObserver 会连续触发，若对 WebGL 每事件 setSize 可能触发驱动/context 异常
@@ -406,7 +404,6 @@ onMounted(() => {
   const tick = () => {
     animationId = requestAnimationFrame(tick)
     props.materialLibrary.tick(clock.getDelta() * 1000)
-    vp.controls.update()
     vp.render(scene)
     // Render overlay scene (gizmos, wireframes) on top with cleared depth
     const overlay = store?.overlayScene?.value
@@ -423,8 +420,7 @@ onMounted(() => {
   }
   tick()
 
-  emit('ready', scene, vp.activeCamera, domCanvas, vp.controls.target)
-  store?.registerControls?.(vp.controls)
+  emit('ready', scene, vp.activeCamera, domCanvas, vp.orbitTarget)
 })
 
 onBeforeUnmount(() => {

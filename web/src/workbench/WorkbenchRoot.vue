@@ -22,10 +22,6 @@ import { createBContextSettings } from '@/workbench/context/toolSettings'
 import { createWorkbenchContext, registerAllOperators } from '@/workbench/context/workbenchContext'
 
 import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
-import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
-import { createActiveToolHandler } from '@/workbench/handlers/activeToolHandler'
-import { createUIHandler } from '@/workbench/handlers/uiHandler'
-import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
 import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
@@ -34,13 +30,11 @@ import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigR
 import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt, relayout } from '@/workbench/ux/layout'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import {
-  blockInspectorPanel, toolShelfPanel, generatePanel,
-  transformPanel, batchEditPanel, annotationPanel, labelPanel, sceneInfoPanel,
+  blockInspectorPanel, toolShelfPanel,
+  transformPanel, sceneInfoPanel,
   menuBarPanel,
 } from '@/workbench/ux/panels'
 
-// Keymap
-import { loadKeymap, matchBinding, type KeyBinding } from '@/workbench/keymap'
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 
 // Document format handlers — 注册到分发中心
@@ -103,8 +97,6 @@ const lastMousePosition = ref<{ x: number; y: number } | null>(null)
 const ADD_MENU_ITEMS: ContextMenuItem[] = [
   { kind: 'label', label: '生成', icon: '＋' },
   { kind: 'separator', label: '' },
-  { kind: 'operator', label: '方块', icon: '⬜', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_BLOCK' } },
-  { kind: 'operator', label: '注解框', icon: '📝', opId: 'OPERATOR_TOOL_SET', props: { toolId: 'OPERATOR_ADD_ANNOTATION_BOX' } },
 ]
 
 function invokeContextMenuItem(item: ContextMenuItem) {
@@ -121,58 +113,14 @@ function onMouseMove(e: MouseEvent) {
 ;(bctx.wm as any).showContextMenu = showContextMenu
 ;(bctx.wm as any).hideContextMenu = hideContextMenu
 
-// Keymap — maps to operator IDs
-const OPERATOR_KEY_MAP: Record<string, string> = {
-  select: 'OPERATOR_SELECT',
-  move: 'OPERATOR_MOVE',
-  delete: 'OPERATOR_DELETE',
-  replace: 'OPERATOR_REPLACE',
-  fill: 'OPERATOR_FILL',
-  eyedropper: 'OPERATOR_EYEDROPPER',
-  mirror: 'OPERATOR_MIRROR',
-  'add-block': 'OPERATOR_ADD_BLOCK',
-  'add-annotation-box': 'OPERATOR_ADD_ANNOTATION_BOX',
-  annotation: 'OPERATOR_ANNOTATION',
-  label: 'OPERATOR_LABEL',
-}
-
-let keymap: KeyBinding[] = []
-
 function handleKeydown(event: KeyboardEvent): void {
-  // Shift+A → context menu
   if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
     event.preventDefault()
     const pos = lastMousePosition.value ?? { x: 400, y: 300 }
     showContextMenu(contextMenu, pos, ADD_MENU_ITEMS)
-    return
   }
-
-  // Click to close context menu
   if (contextMenu.open.value) {
     hideContextMenu(contextMenu)
-  }
-
-  for (const binding of keymap) {
-    if (!matchBinding(binding, event)) continue
-    event.preventDefault()
-    if (binding.toolId) {
-      const opId = OPERATOR_KEY_MAP[binding.toolId] ?? `OPERATOR_${binding.toolId.toUpperCase()}`
-      bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: opId })
-    } else if (binding.action) {
-      switch (binding.action) {
-        case 'undo': bctx.operators.exec('OPERATOR_UNDO'); break
-        case 'redo': bctx.operators.exec('OPERATOR_REDO'); break
-        case 'toggle-tool': {
-          const prev = toolRegistry.getPreviousEditToolId()
-          if (prev) { toolRegistry.activate(prev, bctx) } else { toolRegistry.activate('OPERATOR_SELECT', bctx) }
-          break
-        }
-        case 'toggle-toolshelf': break
-        case 'toggle-properties': break
-        case 'invert': break
-      }
-    }
-    return
   }
 }
 
@@ -182,7 +130,6 @@ provide('workbenchSettingsOpen', settingsOpen)
 
 
 onMounted(async () => {
-  keymap = loadKeymap()
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousemove', onMouseMove)
 
@@ -214,18 +161,6 @@ onBeforeUnmount(() => {
 ;(window as any).__vm__ = bctx
 ;(window as any).__vm_ready__ = true
 
-// 注册输入 handler（不依赖 WebGL，VM 启动即上线）
-bctx.eventDispatcher.registerTypedHandler(
-  createToolGizmoHandler(
-    () => toolRegistry.activeTool.value?.id ?? 'OPERATOR_SELECT',
-    () => bctx.viewport.gizmo.value,
-    () => bctx,
-    () => bctx.viewport.camera.value,
-    () => bctx.viewport.controls.value,
-  ),
-)
-bctx.eventDispatcher.registerTypedHandler(createActiveToolHandler(() => bctx))
-bctx.eventDispatcher.registerTypedHandler(createUIHandler(() => bctx))
 
 logCenter.injectStateRefs({
   scene: () => scene.scene.value?.toRaw() as any,

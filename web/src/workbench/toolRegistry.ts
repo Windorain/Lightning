@@ -7,15 +7,6 @@ import { logCenter } from '@/workbench/logging/LogCenter'
 const OPERATOR_TOOL_META: Record<string, { icon: string; cursor?: string; defaultKey?: string }> = {
   OPERATOR_SELECT:       { icon: '▲', cursor: 'default' },
   OPERATOR_MOVE:          { icon: '↕', cursor: 'move', defaultKey: 'g' },
-  OPERATOR_DELETE:        { icon: '✕', defaultKey: 'x' },
-  OPERATOR_REPLACE:       { icon: '🖌', cursor: 'crosshair', defaultKey: 'r' },
-  OPERATOR_FILL:          { icon: '⬛', defaultKey: 'f' },
-  OPERATOR_EYEDROPPER:    { icon: '💉', defaultKey: 'e' },
-  OPERATOR_MIRROR:        { icon: '↔', defaultKey: 'Ctrl+m' },
-  OPERATOR_ADD_BLOCK:           { icon: '⬜', cursor: 'crosshair', defaultKey: 'h' },
-  OPERATOR_ADD_ANNOTATION_BOX:  { icon: '📝', cursor: 'crosshair', defaultKey: 'j' },
-  OPERATOR_ANNOTATION:    { icon: '📝' },
-  OPERATOR_LABEL:         { icon: '🏷' },
 }
 
 export interface OperatorTool {

@@ -74,12 +74,13 @@ export interface ViewportRuntime {
   camera: Ref<THREE.Camera | null>
   contentGroup: Ref<THREE.Group | null>
   domElement: Ref<HTMLElement | null>
-  controls: Ref<{ enabled: boolean } | null>
   definition: Ref<StructureDefinition | null>
   layerPreview: Ref<LayerPreviewMode | null>
   gizmo: Ref<MoveGizmo | null>
   overlayScene: Ref<THREE.Scene | null>
   wireframe: Ref<THREE.LineSegments | null>
+  /** 轨道旋转目标点（scene.world.origin 偏移），默认 (0,0,0) */
+  orbitTarget: Ref<THREE.Vector3 | null>
 }
 
 export interface BContext {
@@ -100,8 +101,10 @@ export interface BContext {
   eventDispatcher: {
     pushModal(op: unknown, event: PointerEvent): () => void
     dispatch(event: Event): { break: boolean }
-    registerHandler(handler: unknown): () => void
     registerTypedHandler(handler: unknown): () => void
+    cancelModal(): void
+    commitModal(): void
+    readonly modalDepth: number
   }
   log: {
     readonly entries: { value: Array<{ id: number; time: string; level: number; source: string; message: string; detail?: unknown }> }

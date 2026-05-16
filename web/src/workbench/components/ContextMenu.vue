@@ -13,12 +13,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 function run(action: string): void {
   switch (action) {
     case 'inspect': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_SELECT' }); break
-    case 'annotate': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_ANNOTATION' }); break
-    case 'label': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_LABEL' }); break
-    case 'delete': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_DELETE' }); break
-    case 'eyedropper': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_EYEDROPPER' }); break
     case 'move': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_MOVE' }); break
-    case 'mirror': bctx.operators.exec('OPERATOR_TOOL_SET', { toolId: 'OPERATOR_MIRROR' }); break
     case 'undo': bctx.operators.exec('OPERATOR_UNDO'); break
     case 'redo': bctx.operators.exec('OPERATOR_REDO'); break
   }
@@ -26,26 +21,13 @@ function run(action: string): void {
 }
 
 const hasSelection = selection.items.value.size > 0
-const hasMultiple = selection.items.value.size > 1
 </script>
 
 <template>
   <div v-if="visible" class="ctx-menu" :style="{ left: x + 'px', top: y + 'px' }" @click.stop>
-    <template v-if="!hasSelection">
-      <button class="ctx-item" @click="run('label')">放置标签</button>
-    </template>
-    <template v-else-if="!hasMultiple">
+    <template v-if="hasSelection">
       <button class="ctx-item" @click="run('inspect')">检查</button>
-      <button class="ctx-item" @click="run('annotate')">注解</button>
-      <button class="ctx-item" @click="run('label')">放置标签</button>
-      <button class="ctx-item" @click="run('delete')">移除此方块</button>
-      <button class="ctx-item" @click="run('eyedropper')">拾取类型</button>
-    </template>
-    <template v-else>
-      <button class="ctx-item" @click="run('annotate')">批量注解</button>
       <button class="ctx-item" @click="run('move')">移动选中</button>
-      <button class="ctx-item" @click="run('delete')">删除选中</button>
-      <button class="ctx-item" @click="run('mirror')">镜像选中</button>
     </template>
     <div class="ctx-sep" />
     <button class="ctx-item" @click="run('undo')" :disabled="!history.canUndo.value">撤销</button>

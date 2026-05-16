@@ -20,16 +20,6 @@ export const toolShelfPanel: PanelDeclaration = {
       title: t.label,
       props: { toolId: t.id },
     }))
-    items.push(
-      { kind: 'menu' as const, label: '生成', icon: '＋', items: [
-        { kind: 'operator' as const, id: 'OPERATOR_TOOL_SET', label: '方块', icon: '⬜',
-          props: { toolId: 'OPERATOR_ADD_BLOCK' } },
-        { kind: 'operator' as const, id: 'OPERATOR_TOOL_SET', label: '注解框', icon: '📝',
-          props: { toolId: 'OPERATOR_ADD_ANNOTATION_BOX' } },
-      ]},
-      { kind: 'separator' },
-      { kind: 'property', rnaPath: 'toolsettings.snapEnabled', label: '', widget: 'checkbox' },
-    )
     return { kind: 'column', align: false, items }
   },
 }

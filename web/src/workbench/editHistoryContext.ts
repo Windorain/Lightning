@@ -51,15 +51,12 @@ export function createEditHistory(maxStack = 256): UndoManager {
     }
 
     undoStack.push(command)
-    console.log('[editHistory] push, label:', command.label, 'stack size:', undoStack.length)
     if (undoStack.length > maxStack) {
       undoStack.shift()
     }
     redoStack.length = 0
     refreshFlags()
-    console.log('[editHistory] calling execute for:', command.label)
     command.execute()
-    console.log('[editHistory] execute done for:', command.label)
   }
 
   function undo(): void {

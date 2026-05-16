@@ -1,14 +1,13 @@
 /**
  * Handler type constants — 对标 Blender 的 eWM_EventHandlerType。
  *
- * 按类型排序的分发链：GIZMO → UI → OPERATOR → KEYMAP。
- * 对标 Blender eWM_EventHandlerType 顺序。
+ * 按类型排序的分发链：GIZMO → OPERATOR → KEYMAP → VIEW。
  */
 export const HANDLER_TYPE = {
   GIZMO: 0,
-  UI: 1,
-  OPERATOR: 2,
-  KEYMAP: 3,
+  OPERATOR: 1,
+  KEYMAP: 2,
+  VIEW: 3,
 } as const
 
 export type HandlerType = (typeof HANDLER_TYPE)[keyof typeof HANDLER_TYPE]

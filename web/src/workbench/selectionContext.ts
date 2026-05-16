@@ -133,6 +133,39 @@ export function createSelectionContext(): SelectionContext {
   }
 }
 
+/**
+ * Minimal interface for pick-then-select operations.
+ * Accepts only what applyPickSelection needs — avoids coupling to full bContext.
+ */
+export interface PickHandler {
+  pickVoxel(event: PointerEvent): BlockRef | null
+  selection: {
+    select(voxel: BlockRef): void
+    add(voxels: BlockRef[]): void
+    clear(): void
+  }
+}
+
+/**
+ * Shared pick-and-select logic used by SelectOperator and MoveOperator.
+ * Extracted to keep both operators consistent.
+ */
+export function applyPickSelection(ctx: PickHandler, event: PointerEvent): BlockRef | null {
+  const picked = ctx.pickVoxel(event)
+  if (picked) {
+    if (event.ctrlKey || event.metaKey) {
+      ctx.selection.add([picked])
+    } else {
+      ctx.selection.select(picked)
+    }
+    return picked
+  }
+  if (!event.ctrlKey && !event.metaKey) {
+    ctx.selection.clear()
+  }
+  return null
+}
+
 export function provideSelectionContext(): SelectionContext {
   const ctx = createSelectionContext()
   provide(selectionContextKey, ctx)

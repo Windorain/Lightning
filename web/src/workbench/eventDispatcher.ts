@@ -1,11 +1,11 @@
 /**
  * 交互事件分发器 — 对标 Blender 的 wm_event_do_handlers 事件链。
  *
- * 三层 dispatch：
- *   modalStack（模态操作栈，LIFO）→ typedHandlers（类型+优先级排序）→ legacyHandlers
+ * 两层 dispatch：
+ *   modalStack（模态操作栈，LIFO）→ typedHandlers（按 type 排序）
  * 任一 handler 返回 { break: true } 即阻断后续 dispatch。
  *
- * Handler 类型顺序（对标 Blender）：GIZMO(0) → OPERATOR(1) → KEYMAP(2) → UI(3)
+ * Handler 类型顺序：GIZMO(0) → OPERATOR(1) → KEYMAP(2) → VIEW(3)
  */
 import type { TypedEventHandler } from '@/workbench/events/eventTypes'
 import { logCenter } from '@/workbench/logging/LogCenter'
@@ -29,12 +29,6 @@ export interface ModalOperation {
   onExit(cancelled: boolean): void
 }
 
-/** @deprecated 使用 TypedEventHandler 替代 */
-export interface EventHandler {
-  priority: number
-  handle(event: Event): { break: boolean }
-}
-
 /** 创建标准 ModalKeymap */
 export function createModalKeymap(items: ModalKeymapItem[]): ModalKeymap {
   return {
@@ -55,7 +49,6 @@ export function createModalKeymap(items: ModalKeymapItem[]): ModalKeymap {
 class EventDispatcherImpl {
   private _modalStack: ModalOperation[] = []
   private _typedHandlers: TypedEventHandler[] = []
-  private _regionHandlers: EventHandler[] = []
 
   /** 进入模态操作。返回 pop 函数。 */
   pushModal(op: ModalOperation, event: PointerEvent): () => void {
@@ -90,16 +83,6 @@ class EventDispatcherImpl {
     }
   }
 
-  /** @deprecated 使用 registerTypedHandler */
-  registerHandler(handler: EventHandler): () => void {
-    this._regionHandlers.push(handler)
-    this._regionHandlers.sort((a, b) => a.priority - b.priority)
-    return () => {
-      const idx = this._regionHandlers.indexOf(handler)
-      if (idx >= 0) this._regionHandlers.splice(idx, 1)
-    }
-  }
-
   /** 主 dispatch */
   dispatch(event: Event): { break: boolean; traceId?: string } {
     const traceId = logCenter.beginTrace('EventDispatcher', event)
@@ -129,20 +112,11 @@ class EventDispatcherImpl {
       }
     }
 
-    // 3. 类型化处理器（GIZMO → OPERATOR → KEYMAP → UI）
+    // 3. 类型化处理器（GIZMO → OPERATOR → KEYMAP → VIEW）
     for (const handler of this._typedHandlers) {
       const result = handler.handle(event)
       if (result.break) {
         logCenter.endTrace(`consumed by typedHandler type=${handler.type}`)
-        return { break: true, traceId }
-      }
-    }
-
-    // 4. 遗留处理器（priority 排序，向后兼容）
-    for (const handler of this._regionHandlers) {
-      const result = handler.handle(event)
-      if (result.break) {
-        logCenter.endTrace(`consumed by legacy handler pri=${handler.priority}`)
         return { break: true, traceId }
       }
     }

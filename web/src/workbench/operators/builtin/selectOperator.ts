@@ -1,11 +1,12 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
+import { applyPickSelection } from '@/workbench/selectionContext'
 
 /**
  * SelectOperator — 对标 Blender 的 VIEW3D_OT_select。
  *
  * invoke 即时选择：pointerdown 时 pick voxel → select/clear → FINISHED。
- * 不进入模态，事件可穿透到 OrbitControls 旋转视图。
+ * 不进入模态，事件继续冒泡（无 OrbitControls 干扰）。
  * 框选由 B 键（keymap → OPERATOR_SELECT + box-select action）单独触发。
  */
 export const SelectOperator: OperatorType = {
@@ -20,18 +21,7 @@ export const SelectOperator: OperatorType = {
   invoke(bctx, _props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
 
-    const picked = bctx.queries.pickVoxel(event)
-    if (picked) {
-      if (event.ctrlKey || event.metaKey) {
-        bctx.selection.add([picked])
-      } else {
-        bctx.selection.select(picked)
-      }
-    } else {
-      if (!event.ctrlKey && !event.metaKey) {
-        bctx.selection.clear()
-      }
-    }
+    applyPickSelection({ pickVoxel: (e) => bctx.queries.pickVoxel(e), selection: bctx.selection }, event)
     return OP_RESULT.FINISHED
   },
 

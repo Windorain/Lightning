@@ -27,23 +27,14 @@ import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionA
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import { createContextMenu } from '@/workbench/ux/contextMenu'
 import {
-  blockInspectorPanel, toolShelfPanel, generatePanel,
-  transformPanel, batchEditPanel, annotationPanel, labelPanel, sceneInfoPanel,
+  blockInspectorPanel, toolShelfPanel,
+  transformPanel, sceneInfoPanel,
   menuBarPanel,
 } from '@/workbench/ux/panels'
 
 // All builtin operators
 import { SelectOperator } from '@/workbench/operators/builtin/selectOperator'
 import { MoveOperator } from '@/workbench/operators/builtin/moveOperator'
-import { DeleteOperator } from '@/workbench/operators/builtin/deleteOperator'
-import { ReplaceOperator } from '@/workbench/operators/builtin/replaceOperator'
-import { FillOperator } from '@/workbench/operators/builtin/fillOperator'
-import { EyedropperOperator } from '@/workbench/operators/builtin/eyedropperOperator'
-import { MirrorOperator } from '@/workbench/operators/builtin/mirrorOperator'
-import { AddBlockOperator } from '@/workbench/operators/builtin/addBlockOperator'
-import { AddAnnotationBoxOperator } from '@/workbench/operators/builtin/addAnnotationBoxOperator'
-import { AnnotationOperator } from '@/workbench/operators/builtin/annotationOperator'
-import { LabelOperator } from '@/workbench/operators/builtin/labelOperator'
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
@@ -56,12 +47,11 @@ import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportI
 import { ThemeToggleOperator, SetLanguageOperator } from '@/workbench/operators/builtin/appearanceOperators'
 
 const ALL_OPERATORS = [
-  SelectOperator, MoveOperator, DeleteOperator, ReplaceOperator,
-  FillOperator, EyedropperOperator, MirrorOperator,
-  AddBlockOperator, AddAnnotationBoxOperator,
-  AnnotationOperator, LabelOperator, UndoOperator, RedoOperator,
+  SelectOperator, MoveOperator,
+  UndoOperator, RedoOperator,
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator,
-  ToolSetOperator, SceneMetaEditOperator, TooltipEditOperator,
+  ToolSetOperator,
+  SceneMetaEditOperator, TooltipEditOperator,
   NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator,
   SyncPreviewOperator, SetFrameIndexOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator,
@@ -115,12 +105,12 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
       camera: ref(null) as any,
       contentGroup: ref(null) as any,
       domElement: ref(null) as any,
-      controls: ref(null) as any,
       definition: ref(null) as any,
       layerPreview: ref(null) as any,
       gizmo: ref(null) as any,
       overlayScene: ref(null) as any,
       wireframe: ref(null) as any,
+      orbitTarget: ref(null) as any,
     },
     settings,
   } as BContext
@@ -169,8 +159,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels.push(menuBarPanel)
   const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
-    blockInspectorPanel, generatePanel, transformPanel,
-    batchEditPanel, annotationPanel, labelPanel, sceneInfoPanel,
+    blockInspectorPanel, transformPanel, sceneInfoPanel,
   )
 
   computeLayout(bctx, defaultScreen)

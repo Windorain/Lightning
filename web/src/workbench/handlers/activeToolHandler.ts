@@ -1,22 +1,17 @@
 /**
- * Active tool handler — 对标 Blender 的 OPERATOR handler。
+ * Active tool handler — 只处理 LMB → active tool operator 路由。
  *
- * 将 pointer 事件转发给当前活跃操作符：
- * - pointerdown → operator.invoke() → 若返回 RUNNING_MODAL，进入模态循环
- * - 模态期间 → operator.modal() 处理 pointermove/pointerup
- *
- * MMB/RMB 透传给 OrbitControls。
+ * 不处理视口导航（MMB/滚轮/LMB 空白拖拽），这些由 VIEW handler 兜底。
+ * 仅将 LMB pointerdown 事件转给当前活跃工具的操作符，
+ * 不检查返回值（工具自行决定进入模态或即时完成）。
  */
 import type { TypedEventHandler } from '@/workbench/events/eventTypes'
 import { HANDLER_TYPE } from '@/workbench/events/eventTypes'
 import type { BContext } from '@/workbench/context/bContext'
-import { OP_RESULT } from '@/workbench/operators/operatorType'
+
 export function createActiveToolHandler(
   getBctx: () => BContext | null,
 ): TypedEventHandler {
-  /** Track which operator is currently in modal */
-  let modalActive = false
-
   return {
     type: HANDLER_TYPE.OPERATOR,
     handle(event: Event): { break: boolean } {
@@ -25,57 +20,13 @@ export function createActiveToolHandler(
 
       const pe = event as PointerEvent
 
-      // Scroll wheel: zoom
-      if (event.type === 'wheel') {
-        const bctxNow = getBctx()
-        if (bctxNow && bctxNow.camera) {
-          bctxNow.operators.invoke('OPERATOR_VIEW_ZOOM', undefined, event as any)
-        }
-        return { break: false }
-      }
-
-      // MMB: viewport navigation operators
-      if (pe.button === 1) {
-        if (event.type === 'pointerdown') {
-          if (pe.ctrlKey || pe.metaKey) {
-            bctx.operators.invoke('OPERATOR_VIEW_ZOOM', undefined, pe)
-          } else if (pe.shiftKey) {
-            bctx.operators.invoke('OPERATOR_VIEW_PAN', undefined, pe)
-          } else {
-            bctx.operators.invoke('OPERATOR_VIEW_ROTATE', undefined, pe)
-          }
-          return { break: false }
-        }
-        return { break: false }
-      }
-
-      // RMB pass through
+      // 只处理 LMB pointerdown
       if (pe.button !== 0) return { break: false }
+      if (event.type !== 'pointerdown') return { break: false }
 
       const activeId = bctx.toolRegistry.activeTool.value?.id
-      if (!activeId) return { break: false }
-
-      const operator = bctx.operators.find(activeId)
-      if (!operator) return { break: false }
-
-      if (event.type === 'pointerdown') {
-        const result = bctx.operators.invoke(activeId, undefined, pe)
-        if (result === OP_RESULT.RUNNING_MODAL) {
-          modalActive = true
-          return { break: true }
-        }
-        if (result === OP_RESULT.FINISHED || result === OP_RESULT.CANCELLED) {
-          return { break: false }
-        }
-      }
-
-      // During modal, events go through ModalOperatorWrapper on the stack
-      if (modalActive && (event.type === 'pointermove' || event.type === 'pointerup')) {
-        // Modal is handled by the event dispatcher's modal stack, not here
-        if (event.type === 'pointerup') {
-          modalActive = false
-        }
-        return { break: false }
+      if (activeId) {
+        bctx.operators.invoke(activeId, undefined, pe)
       }
 
       return { break: false }
