@@ -109,7 +109,7 @@ export function createConnectionContext(_scene: SceneContext): ConnectionContext
 
   async function pushToServer(): Promise<void> {
     if (!apiBase.value || !_scene.scene.value) return
-    await sdePutWorkspaceDocument(apiBase.value, token.value, _scene.scene.value as Record<string, unknown>)
+    await sdePutWorkspaceDocument(apiBase.value, token.value, _scene.scene.value?.toRaw() as Record<string, unknown>)
     _scene.markClean()
     await _scene.syncPreview()
   }

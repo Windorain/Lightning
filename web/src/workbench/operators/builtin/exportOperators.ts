@@ -23,7 +23,7 @@ export const ExportPlainOperator: OperatorType = {
   },
 
   exec(bctx, _props) {
-    const doc = bctx.scene.scene.value as Record<string, unknown> | null
+    const doc = (bctx.scene.scene.value?.toRaw() ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-plain`, doc, true)
@@ -40,7 +40,7 @@ export const ExportEnvelopeOperator: OperatorType = {
   },
 
   exec(bctx, _props) {
-    const doc = bctx.scene.scene.value as Record<string, unknown> | null
+    const doc = (bctx.scene.scene.value?.toRaw() ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-envelope`, buildEnvelopePackage(doc), true)
@@ -57,11 +57,11 @@ export const ExportObjOperator: OperatorType = {
   },
 
   async exec(bctx, _props) {
-    const doc = bctx.scene.scene.value
+    const doc = bctx.scene.scene.value?.toRaw()
     if (!doc) return
     const connected = (_props.connected as boolean) ?? false
     const mode = connected ? 'connected' : 'block'
-    const baseName = sceneStableStringIdFromDocument(doc as Record<string, unknown>)
+    const baseName = sceneStableStringIdFromDocument(doc)
     const def = loadStructureOrWorld(doc, undefined)
     const blob = await buildStructureBundleZip(def, doc, { mode })
     downloadBlob(`${baseName}-${mode}.zip`, blob)
@@ -80,7 +80,7 @@ export const ExportIsoPngOperator: OperatorType = {
   async exec(bctx, _props) {
     const direction = (_props.direction as string) ?? 'nw'
     const directionIndex = ISO_DIRECTION_MAP[direction] ?? 0
-    const doc = bctx.scene.scene.value
+    const doc = bctx.scene.scene.value?.toRaw()
     if (!doc) return
     try {
       const dataUrl = await bakeIsometricStructurePngDataUrl(doc, directionIndex)

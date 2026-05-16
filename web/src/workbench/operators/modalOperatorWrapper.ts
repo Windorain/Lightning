@@ -10,13 +10,14 @@ import { eventDispatcher } from '@/workbench/eventDispatcher'
 import type { BContext } from '@/workbench/context/bContext'
 import type { OperatorType, OperatorProperties } from './operatorType'
 import { OP_RESULT } from './operatorType'
+import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 
 export class ModalOperatorWrapper implements ModalOperation {
   id: string
   private op: OperatorType
   private bctx: BContext
   private props: OperatorProperties
-  private undoSnapshot: unknown = null
+  private undoSnapshot: RuntimeDocument | null = null
 
   constructor(op: OperatorType, bctx: BContext, props: OperatorProperties) {
     this.op = op
@@ -25,7 +26,7 @@ export class ModalOperatorWrapper implements ModalOperation {
     this.id = op.id
   }
 
-  setUndoSnapshot(snapshot: unknown): void {
+  setUndoSnapshot(snapshot: RuntimeDocument | null): void {
     this.undoSnapshot = snapshot
   }
 
@@ -38,13 +39,14 @@ export class ModalOperatorWrapper implements ModalOperation {
 
     if (result === OP_RESULT.FINISHED) {
       if (this.op.flagUndo && this.undoSnapshot !== null) {
-        const snapshotAfter = JSON.parse(JSON.stringify(this.bctx.scene.scene.value))
+        const snap = this.undoSnapshot
+        const snapshotAfter = this.bctx.scene.scene.value?.clone() ?? null
         this.bctx.editHistory.push({
           id: 'op_' + Math.random().toString(36).slice(2, 10),
           label: this.op.label,
           timestamp: Date.now(),
           execute: () => { this.bctx.scene.scene.value = snapshotAfter; this.bctx.scene.markDirty() },
-          undo: () => { this.bctx.scene.scene.value = this.undoSnapshot as any; this.bctx.scene.markDirty() },
+          undo: () => { this.bctx.scene.scene.value = snap; this.bctx.scene.markDirty() },
         })
         this.undoSnapshot = null
       }

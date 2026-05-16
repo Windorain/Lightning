@@ -228,7 +228,7 @@ bctx.eventDispatcher.registerTypedHandler(createActiveToolHandler(() => bctx))
 bctx.eventDispatcher.registerTypedHandler(createUIHandler(() => bctx))
 
 logCenter.injectStateRefs({
-  scene: () => scene.scene.value as any,
+  scene: () => scene.scene.value?.toRaw() as any,
   selection: () => [...selection.items.value],
   toolRegistry: () => ({
     activeToolId: toolRegistry.activeTool.value?.id ?? 'none',

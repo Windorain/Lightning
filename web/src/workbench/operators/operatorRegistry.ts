@@ -53,9 +53,9 @@ export class OperatorRegistry {
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
       if (op.flagUndo) {
-        const before = JSON.parse(JSON.stringify(bctx.scene.scene.value))
+        const before = bctx.scene.scene.value?.clone() ?? null
         await op.exec(bctx, resolvedProps)
-        const after = JSON.parse(JSON.stringify(bctx.scene.scene.value))
+        const after = bctx.scene.scene.value?.clone() ?? null
         bctx.editHistory.push({
           id: 'op_' + Math.random().toString(36).slice(2, 10),
           label: op.label,
@@ -91,7 +91,7 @@ export class OperatorRegistry {
     if (op.invoke) {
       // Take before-snapshot for flagUndo operators
       const snapshot = op.flagUndo
-        ? JSON.parse(JSON.stringify(bctx.scene.scene.value))
+        ? bctx.scene.scene.value?.clone() ?? null
         : null
 
       const result = op.invoke(bctx, resolvedProps, event)
@@ -107,7 +107,7 @@ export class OperatorRegistry {
         logOperatorResult(bctx, id, op.label, 'RUNNING_MODAL', snap)
       } else if (result === OP_RESULT.FINISHED) {
         if (snapshot !== null) {
-          const snapshotAfter = JSON.parse(JSON.stringify(bctx.scene.scene.value))
+          const snapshotAfter = bctx.scene.scene.value?.clone() ?? null
           bctx.editHistory.push({
             id: 'op_' + Math.random().toString(36).slice(2, 10),
             label: op.label,
@@ -122,22 +122,23 @@ export class OperatorRegistry {
     }
 
     if (op.exec) {
-      return invokeExecFallback(bctx, op, resolvedProps)
+      void invokeExecFallback(bctx, op, resolvedProps)
+      return OP_RESULT.FINISHED
     }
 
     return OP_RESULT.CANCELLED
   }
 }
 
-function invokeExecFallback(
+async function invokeExecFallback(
   bctx: BContext,
   op: OperatorType,
   props: OperatorProperties,
-): OpResult {
+): Promise<OpResult> {
   if (op.flagUndo) {
-    const snapshot = JSON.parse(JSON.stringify(bctx.scene.scene.value))
-    op.exec!(bctx, props)
-    const snapshotAfter = JSON.parse(JSON.stringify(bctx.scene.scene.value))
+    const snapshot = bctx.scene.scene.value?.clone() ?? null
+    await op.exec!(bctx, props)
+    const snapshotAfter = bctx.scene.scene.value?.clone() ?? null
     bctx.editHistory.push({
       id: 'op_' + Math.random().toString(36).slice(2, 10),
       label: op.label,
@@ -146,7 +147,7 @@ function invokeExecFallback(
       undo: () => { bctx.scene.scene.value = snapshot; bctx.scene.markDirty() },
     })
   } else {
-    op.exec!(bctx, props)
+    await op.exec!(bctx, props)
   }
   return OP_RESULT.FINISHED
 }

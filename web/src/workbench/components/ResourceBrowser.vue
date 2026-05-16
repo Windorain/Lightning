@@ -19,7 +19,7 @@ interface TreeNode {
 }
 
 const tree = computed<TreeNode[]>(() => {
-  const doc = bctx.scene.scene.value
+  const doc = bctx.scene.scene.value?.toRaw()
   if (!doc) return []
   const q = searchQuery.value.toLowerCase()
 

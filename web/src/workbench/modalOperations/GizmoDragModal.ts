@@ -96,10 +96,14 @@ export class GizmoDragModal implements ModalOperation {
       })
 
       if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
-        const q = this.bctx.queries
+        const doc = this.bctx.scene.scene.value
+        const rf = doc?.frame(this.bctx.selection.frameIndex.value ?? 0)
+        const grid = rf?.grid
+        if (!grid) { eventDispatcher.commitModal(); return { break: true } }
+
         const moves = this.initialPositions.map(initPos => ({
-          from: { ...initPos },
-          to: { x: initPos.x + delta.x, y: initPos.y + delta.y, z: initPos.z + delta.z },
+          from: { col: initPos.x, row: initPos.y, z: initPos.z },
+          to: { col: initPos.x + delta.x, row: initPos.y + delta.y, z: initPos.z + delta.z },
         }))
 
         const label = `移动 (${delta.x}, ${delta.y}, ${delta.z})`
@@ -110,12 +114,12 @@ export class GizmoDragModal implements ModalOperation {
           timestamp: Date.now(),
           execute: () => {
             for (const m of moves) {
-              q.moveBlockInCellGrid(m.from, m.to)
+              grid.moveBlock(m.from, m.to)
             }
             // 同步更新 selection 坐标
             const newItems = [...sel.items.value].map(item => {
-              const m = moves.find(mm => mm.from.x === item.pos.x && mm.from.y === item.pos.y && mm.from.z === item.pos.z)
-              return m ? { ...item, pos: { ...m.to } } : item
+              const m = moves.find(mm => mm.from.col === item.pos.x && mm.from.row === item.pos.y && mm.from.z === item.pos.z)
+              return m ? { ...item, pos: { x: m.to.col, y: m.to.row, z: m.to.z } } : item
             })
             sel.items.value = new Set(newItems)
             this.bctx.scene.markDirty()
@@ -123,11 +127,11 @@ export class GizmoDragModal implements ModalOperation {
           },
           undo: () => {
             for (const m of moves) {
-              q.moveBlockInCellGrid(m.to, m.from)
+              grid.moveBlock(m.to, m.from)
             }
             const newItems = [...sel.items.value].map(item => {
-              const m = moves.find(mm => mm.to.x === item.pos.x && mm.to.y === item.pos.y && mm.to.z === item.pos.z)
-              return m ? { ...item, pos: { ...m.from } } : item
+              const m = moves.find(mm => mm.to.col === item.pos.x && mm.to.row === item.pos.y && mm.to.z === item.pos.z)
+              return m ? { ...item, pos: { x: m.from.col, y: m.from.row, z: m.from.z } } : item
             })
             sel.items.value = new Set(newItems)
             this.bctx.scene.markDirty()

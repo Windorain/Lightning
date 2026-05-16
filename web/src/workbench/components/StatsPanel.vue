@@ -10,7 +10,7 @@ const selection = useSelectionContext()
 const { highlightType, clearHighlight, pinType } = usePanelState()
 
 const template = computed<V2StatsTemplate | null>(() => {
-  return (bctx.scene.scene.value as any)?.stats_template ?? null
+  return (bctx.scene.scene.value?.toRaw() as any)?.stats_template ?? null
 })
 
 const mode = computed(() => template.value?.mode ?? 'auto')
@@ -22,7 +22,7 @@ interface StatRow {
 }
 
 const rows = computed<StatRow[]>(() => {
-  const doc = bctx.scene.scene.value
+  const doc = bctx.scene.scene.value?.toRaw()
   if (!doc) return []
   const currentFrame = (doc as any).frames?.[selection.frameIndex.value ?? 0]
   const blocks = (currentFrame?.blocks ?? []) as Array<{ block_state_id: string }>

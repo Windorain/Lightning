@@ -7,7 +7,6 @@
 import * as THREE from 'three'
 import type { BContext, BContextQueries } from '@/workbench/context/bContext'
 import type { BlockRef } from '@/workbench/selectionContext'
-import type { V2PlainSceneDocument } from '@/render/data/sceneDocumentV2'
 import type { Frame } from '@/render/schema/types'
 import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
 import { ARROW_LENGTH, CONE_LENGTH } from '@/workbench/tools/gizmos'
@@ -38,109 +37,54 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     getCurrentFrame(): Frame | null {
-      const doc = bctx.scene.scene.value as V2PlainSceneDocument | null
-      if (!doc?.frames?.length) return null
+      const doc = bctx.scene.scene.value
+      if (!doc) return null
       const idx = bctx.selection.frameIndex.value ?? 0
-      return doc.frames[idx] ?? null
+      return doc.frame(idx)?.toRaw() ?? null
     },
 
     getFrameBlocks(): BlockRef[] {
-      const frame = this.getCurrentFrame()
-      if (!frame?.structure || !('cellGrid' in frame.structure)) return []
-      const st = frame.structure as { cellGrid: number[][][]; blockPalette: Array<{ registryId: string; meta: number }> }
-      const blocks: BlockRef[] = []
-      for (let z = 0; z < st.cellGrid.length; z++) {
-        const slice = st.cellGrid[z]
-        if (!slice) continue
-        for (let row = 0; row < slice.length; row++) {
-          const cols = slice[row]
-          if (!cols) continue
-          for (let col = 0; col < cols.length; col++) {
-            const idx = cols[col]
-            const entry = st.blockPalette[idx]
-            if (!entry || entry.registryId === 'air' || entry.registryId === 'minecraft:air') continue
-            blocks.push({
-              pos: { x: col, y: row, z },
-              block_state_id: `${entry.registryId}:${entry.meta}`,
-            })
-          }
-        }
-      }
-      return blocks
+      const doc = bctx.scene.scene.value
+      if (!doc) return []
+      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      if (!rf?.grid) return []
+      return rf.grid.blocks().map(({ pos, block }) => ({
+        pos: { x: pos.col, y: pos.row, z: pos.z },
+        block_state_id: `minecraft:${block.name}:${block.meta}`,
+      }))
     },
 
     moveBlockInCellGrid(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }): boolean {
-      const frame = this.getCurrentFrame()
-      if (!frame?.structure) return false
-      const st = frame.structure as { cellGrid: number[][][] }
-      const grid = st.cellGrid
-      // validate source
-      if (from.z < 0 || from.z >= grid.length) return false
-      const fromSlice = grid[from.z]
-      if (!fromSlice || from.y < 0 || from.y >= fromSlice.length) return false
-      const fromRow = fromSlice[from.y]
-      if (!fromRow || from.x < 0 || from.x >= fromRow.length) return false
-      if (fromRow[from.x] === 0) return false // source must be non-air
-
-      // auto-expand grid for positive out-of-bounds targets
-      if (to.z < 0 || to.y < 0 || to.x < 0) return false
-      const curMaxX = grid[0]?.[0]?.length ?? 0
-      const curMaxY = grid[0]?.length ?? 0
-      const curMaxZ = grid.length
-      const newZ = Math.max(curMaxZ, to.z + 1)
-      const newY = Math.max(curMaxY, to.y + 1)
-      const newX = Math.max(curMaxX, to.x + 1)
-
-      if (newZ > curMaxZ) {
-        const emptySlice = Array.from({ length: newY }, () => new Array(newX).fill(0))
-        while (grid.length < newZ) grid.push(emptySlice.map(r => [...r]))
-      }
-      if (newY > curMaxY) {
-        for (const slice of grid) {
-          while (slice.length < newY) slice.push(new Array(newX).fill(0))
-        }
-      }
-      if (newX > curMaxX) {
-        for (const slice of grid) {
-          for (const row of slice) {
-            while (row.length < newX) row.push(0)
-          }
-        }
-      }
-
-      // validate target is air
-      const toSlice = grid[to.z]
-      const toRow = toSlice[to.y]
-      if (toRow[to.x] !== 0) return false
-
-      // move
-      console.log('[moveBlock] moving', JSON.stringify(from), '→', JSON.stringify(to), 'fromVal:', fromRow[from.x], 'toVal:', toRow[to.x])
-      toRow[to.x] = fromRow[from.x]
-      fromRow[from.x] = 0
-      console.log('[moveBlock] done, fromRow:', JSON.stringify(fromRow), 'toRow:', JSON.stringify(toRow))
-      return true
+      const doc = bctx.scene.scene.value
+      if (!doc) return false
+      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      if (!rf?.grid) return false
+      return rf.grid.moveBlock(
+        { col: from.x, row: from.y, z: from.z },
+        { col: to.x, row: to.y, z: to.z },
+      )
     },
 
     getDocument(): Record<string, any> | null {
-      return bctx.scene.scene.value as Record<string, any> | null
+      return bctx.scene.scene.value?.toRaw() ?? null
     },
 
     projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null {
       const vp = bctx.viewport
       const camera = vp.camera.value
       const domElement = vp.domElement.value
-      const def = vp.definition.value
       if (!camera || !domElement) return null
-      // Convert grid coordinates to world coordinates (same as voxelToWorld)
-      let wx = pos.x, wy = pos.y, wz = pos.z
-      if (def?.cellGrid) {
-        const sCol = def.cellGrid[0]?.[0]?.length ?? 1
-        const sRow = def.cellGrid[0]?.length ?? 1
-        const sZ = def.cellGrid.length ?? 1
-        wx = pos.x - sCol / 2 + 0.5
-        wy = sRow / 2 - 0.5 - pos.y
-        wz = pos.z - sZ / 2 + 0.5
-      }
+
+      const doc = bctx.scene.scene.value
+      const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
+      const grid = rf?.grid
+      const sCol = grid?.width ?? 1
+      const sRow = grid?.height ?? 1
+      const sZ = grid?.depth ?? 1
+
+      const wx = pos.x - sCol / 2 + 0.5
+      const wy = sRow / 2 - 0.5 - pos.y
+      const wz = pos.z - sZ / 2 + 0.5
       const worldPos = new THREE.Vector3(wx, wy, wz)
       worldPos.project(camera)
       const rect = domElement.getBoundingClientRect()
@@ -193,13 +137,11 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     getAnnotationBoxes() {
-      const doc = bctx.scene.scene.value as Record<string, any> | null
-      return (doc?.annotations as any[]) ?? []
+      return bctx.scene.scene.value?.annotations ?? []
     },
 
     getAnnotationBox(id: string) {
-      const doc = bctx.scene.scene.value as Record<string, any> | null
-      return (doc?.annotations as any[])?.find((a: any) => a.id === id) ?? null
+      return bctx.scene.scene.value?.annotations?.find((a: any) => a.id === id) ?? null
     },
 
     pickSurface(event: PointerEvent) {

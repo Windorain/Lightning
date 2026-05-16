@@ -21,6 +21,7 @@ import { documentLooksPreviewable, previewConfigFromDocument } from '@/preview/p
 import { formatDispatcher } from '@/workbench/context/documentHandler'
 import { downloadJson } from '@/util/browser'
 import { getShowSaveFilePicker } from '@/util/browser'
+import { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import {
   cloneDocument,
@@ -118,24 +119,10 @@ export function createSceneContext(): SceneContext {
     fileSaveHandle.value = null
   }
 
-  const EMPTY_SCENE = {
-    format_version: '2.0',
-    meta: {
-      name: '未命名',
-      author: '',
-      created_at_ms: Date.now(),
-      description: '',
-      tags: [] as string[],
-      origin: { x: 0, y: 0, z: 0 },
-    },
-    frames: [{ label: 'Frame 0', index: 0, blocks: [], entities: [] }],
-    block_palette: {} as Record<string, { name: string; properties: Record<string, string> }>,
-    materials: { entries: [] },
-  }
-
   async function newScene(): Promise<void> {
-    await loadSceneDocument(EMPTY_SCENE, { mode: 'local-file', fileName: '未命名' })
+    scene.value = RuntimeDocument.empty()
     dirty.value = false
+    await syncPreview()
   }
 
   async function syncPreview(): Promise<void> {
@@ -143,7 +130,7 @@ export function createSceneContext(): SceneContext {
     previewBusy.value = true
     previewError.value = null
     try {
-      const doc = scene.value
+      const doc = scene.value?.toRaw()
       if (!doc) {
         previewError.value = '无场景数据'
         previewConfig.value = null
@@ -179,7 +166,7 @@ export function createSceneContext(): SceneContext {
 
     // 格式分发：全部转为 V2Plain
     const result = raw ? formatDispatcher.normalize(raw) : { document: null, handler: null, error: '空文档' }
-    scene.value = result.document as WorkbenchScene | null
+    scene.value = result.document ? RuntimeDocument.fromRaw(result.document as Record<string, unknown>) : null
 
     if (result.document) {
       previewWorldFrameIndex.value = 0
@@ -249,7 +236,7 @@ export function createSceneContext(): SceneContext {
   }
 
   async function saveToFile(): Promise<void> {
-    const doc = scene.value
+    const doc = scene.value?.toRaw()
     if (!doc) return
     const text = `${JSON.stringify(doc, null, 2)}\n`
     const baseName = suggestedJsonBaseName(localFileName.value, 'structure-export')
@@ -295,8 +282,7 @@ export function createSceneContext(): SceneContext {
   async function loadBuiltinScene(sceneId?: string): Promise<void> {
     const id = sceneId && sceneId.length > 0 ? sceneId : DEFAULT_PREVIEW_SCENE_ID
     const raw = getDevSceneDocument(id)
-    const next = cloneDocument(raw)
-    await loadSceneDocument(next, { mode: 'local-bundle', fileName: `示例 · ${id}.json` })
+    await loadSceneDocument(raw, { mode: 'local-bundle', fileName: `示例 · ${id}.json` })
   }
 
   function setPreviewWorldFrameIndex(index: number): void {

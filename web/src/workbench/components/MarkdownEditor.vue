@@ -24,7 +24,7 @@ const nbtPanelOpen = ref(true)
 
 const paletteEntry = computed<BlockPaletteEntry | null>(() => {
   if (!selectedBlock.value) return null
-  const doc = bctx.scene.scene.value
+  const doc = bctx.scene.scene.value?.toRaw()
   if (!doc) return null
   try {
     const def = loadStructureOrWorld(doc, undefined)
@@ -38,7 +38,7 @@ const nbtEntries = computed<Array<[string, unknown]>>(() => {
 })
 
 function readCurrentTooltip(): string {
-  const doc = bctx.scene.scene.value
+  const doc = bctx.scene.scene.value?.toRaw()
   if (!doc || !selectedBlock.value?.voxel) return ''
   const { zSlice, row, column } = selectedBlock.value.voxel
   let tp: unknown, ttg: unknown
