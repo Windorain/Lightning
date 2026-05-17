@@ -6,6 +6,7 @@
 import type * as THREE from 'three'
 import type { BakedQuad, BlockPaletteEntry, StructureDefinition } from '../schema/types'
 import type { MaterialLibraryApi } from '../materials/simpleMaterialLibrary'
+import type { BlockMeshBuildStats } from './structureGeometryCore'
 
 // ── BlockHandler（BlockMeshProvider 内部） ──
 
@@ -33,14 +34,11 @@ export interface BlockHandler {
 
 export type MeshOutput =
   | { kind: 'quads'; quads: BakedQuad[] }
-  | { kind: 'object3d'; object: THREE.Object3D }
+  | { kind: 'object3d'; object: THREE.Object3D; dispose(): void; stats?: BlockMeshBuildStats }
   | { kind: 'none' }
 
 export interface MeshProvider {
-  /** 排序优先级，越小越先匹配（default 100） */
   priority: number
-  /** 产出挂载到哪个 layer group */
   target: 'structure' | 'decal' | 'overlay'
-  /** 用结构和材质库构建产出 */
-  build(def: StructureDefinition, lib: MaterialLibraryApi): Promise<MeshOutput[]>
+  build(def: StructureDefinition, lib: MaterialLibraryApi, opts?: Record<string, unknown>): Promise<MeshOutput[]>
 }

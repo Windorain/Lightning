@@ -54,8 +54,8 @@ export class BlockMeshProvider implements MeshProvider {
     ].sort((a, b) => a.priority - b.priority)
   }
 
-  async build(def: StructureDefinition, lib: MaterialLibraryApi): Promise<MeshOutput[]> {
-    const result = await buildBlockMesh(def, lib, { handlers: this.handlers })
-    return [{ kind: 'object3d', object: result.group }]
+  async build(def: StructureDefinition, lib: MaterialLibraryApi, opts?: { layerPreview?: import('../data/layerPreview').LayerPreviewMode }): Promise<MeshOutput[]> {
+    const result = await buildBlockMesh(def, lib, { handlers: this.handlers, layerPreview: opts?.layerPreview })
+    return [{ kind: 'object3d', object: result.group, dispose: result.dispose, stats: result.stats }]
   }
 }

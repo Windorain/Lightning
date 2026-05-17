@@ -28,11 +28,8 @@ import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import { isWorldDocument, resolveRenderBundle, type RenderBundleResolveResult } from '@/render/data/bundleResolve'
 import { frameAt } from '@/render/data/worldPlayback'
-import {
-  buildBlockMesh,
-  formatUndefinedBlockDetailsForStatus,
-  type BlockMeshBuildStats,
-} from '@/render/mesh/blockMesh'
+import { formatUndefinedBlockDetailsForStatus, type BlockMeshBuildStats } from '@/render/mesh/blockMesh'
+import { BlockMeshProvider } from '@/render/mesh/blockMeshProvider'
 import type { StructureDefinition, World } from '@/render/schema/types'
 import { formatUnknownError } from '@/util/formatUnknownError'
 
@@ -112,6 +109,7 @@ export function createView3DStore(initialConfig: View3DConfig): View3DStore {
   const tooltipPalette = shallowRef<string[]>([])
   const sceneRef = shallowRef<THREE.Scene | null>(null)
   const mainMeshGroup = shallowRef<THREE.Group | null>(null)
+  const blockMeshProvider = new BlockMeshProvider()
 
   const worldFrameIndex = ref(0)
   const framesPlaybackIsPlaying = ref(false)
@@ -247,9 +245,9 @@ export function createView3DStore(initialConfig: View3DConfig): View3DStore {
           applyBuildStatusToBar(def, hit.stats, hit.group)
           return
         }
-        const result = await buildBlockMesh(def, lib, {
-          layerPreview,
-        })
+        const outputs = await blockMeshProvider.build(def, lib, { layerPreview })
+        const out = outputs[0]! as Extract<import('@/render/mesh/providerTypes').MeshOutput, { kind: 'object3d' }>
+        const result = { group: out.object as THREE.Group, dispose: out.dispose, stats: out.stats! }
         if (lib.isDisposed() || materialLibrary.value !== lib) {
           result.dispose()
           return
@@ -263,7 +261,9 @@ export function createView3DStore(initialConfig: View3DConfig): View3DStore {
         applyBuildStatusToBar(def, result.stats, result.group)
         return
       }
-      const result = await buildBlockMesh(def, lib, { layerPreview })
+      const outputs = await blockMeshProvider.build(def, lib, { layerPreview })
+      const out = outputs[0]! as Extract<import('@/render/mesh/providerTypes').MeshOutput, { kind: 'object3d' }>
+      const result = { group: out.object as THREE.Group, dispose: out.dispose, stats: out.stats! }
       if (lib.isDisposed() || materialLibrary.value !== lib) {
         result.dispose()
         return
