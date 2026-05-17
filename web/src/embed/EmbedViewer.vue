@@ -1,34 +1,34 @@
 <script setup lang="ts">
 /**
  * 预览壳：previewSceneStore + StructureViewport + 可选周边组件。
- * 所有外围 UI（侧栏、分层条、播放器、标题、状态栏）按 `mergedConfig.features` 开关。
+ * 所有外围 UI（侧栏、分层条、播放器、标题、状态栏）按 `config.features` 开关。
  * 工作台模式下关闭外围组件，由外围 ViewportHost 提供等价 UI。
  */
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-import type { Scene } from 'three'
+import type * as THREE from 'three'
 
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
-import StructureViewport from '@/embed/components/StructureViewport.vue'
+import ViewerCore from '@/embed/components/ViewerCore.vue'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
-import type { PreviewConfig } from '@/preview/previewConfig'
+import type { View3DConfig } from '@/preview/previewConfig'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import { PreviewSceneContextKey, createPreviewSceneStore } from '@/preview/sceneStore'
+import { View3DContextKey, createView3DStore } from '@/preview/sceneStore'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
 
 const props = defineProps<{
-  mergedConfig: PreviewConfig
+  config: View3DConfig
 }>()
 
-const store = createPreviewSceneStore(props.mergedConfig)
-provide(PreviewSceneContextKey, store)
+const store = createView3DStore(props.config)
+provide(View3DContextKey, store)
 
-watch(() => props.mergedConfig, (cfg) => {
+watch(() => props.config, (cfg) => {
   store.config.value = cfg
 })
 
@@ -43,7 +43,7 @@ const {
   blockIconCache,
   blockStatsEntries,
   layerPreviewMode,
-  contentGroupRef,
+  mainMeshGroup,
   tooltipPalette,
   hasWorldMultiFrame,
   worldFrameIndex,
@@ -51,12 +51,12 @@ const {
   layerPreviewLabel,
 } = store
 
-const f = computed(() => props.mergedConfig.features)
+const f = computed(() => props.config.features)
 const showLayerBar = computed(() => f.value.layerBar)
 const showFrameCtl = computed(() => f.value.frameControls)
 const showTitle = computed(() => f.value.titleBar)
 const showStats = computed(() => f.value.blockStatsSidebar)
-const showDebugStatus = computed(() => f.value.debugStatusBar && props.mergedConfig.debug)
+const showDebugStatus = computed(() => f.value.debugStatusBar && props.config.debug)
 
 const hasBottomDock = computed(() =>
   (showFrameCtl.value && hasWorldMultiFrame.value) || showLayerBar.value,
@@ -67,7 +67,7 @@ const activeTab = ref<BottomTab>(
   (showFrameCtl.value && hasWorldMultiFrame.value) ? 'frame' : 'layer',
 )
 
-const sceneDocument = computed(() => props.mergedConfig.renderBundle.document)
+const sceneDocument = computed(() => props.config.renderBundle.document)
 
 const metaTooltipText = computed(() => {
   const d = sceneDocument.value
@@ -120,7 +120,7 @@ const neiTooltipText = computed(() => {
 })
 
 const previewTitle = computed(() => {
-  const fromDoc = sceneDisplayTitleFromRootDocument(props.mergedConfig.renderBundle.document)
+  const fromDoc = sceneDisplayTitleFromRootDocument(props.config.renderBundle.document)
   if (fromDoc) return fromDoc
   const def = structureDefinition.value
   const lab = def?.label?.trim()
@@ -147,7 +147,7 @@ const statusSummary = computed(() => {
   return parts.join(' · ')
 })
 
-async function onViewportReady(scene: Scene): Promise<void> {
+async function onViewportReady({ scene }: { scene: THREE.Scene }): Promise<void> {
   store.registerScene(scene)
   try { await store.rebuildContentMesh() } catch (e) { console.error('[StructureRenderer] onViewportReady', e) }
 }
@@ -190,11 +190,11 @@ onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
         @tooltip-hover="onSidebarTooltipHover"
       />
       <div class="wm-viewport-column">
-        <StructureViewport
+        <ViewerCore
           v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
           :definition="structureDefinition" :material-library="materialLibrary"
-          :content-group="contentGroupRef"
-          :layer-preview-mode="layerPreviewMode" :scene-background="mergedConfig.sceneBackground"
+          :content-group="mainMeshGroup"
+          :layer-preview-mode="layerPreviewMode" :scene-background="config.sceneBackground"
           :show-axes-gizmo="f.showAxesGizmo"
           @ready="onViewportReady"
           @hover-block="onViewportHover"

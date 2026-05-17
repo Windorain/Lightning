@@ -107,7 +107,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
       definition: ref(null),
       layerPreview: ref(null),
       gizmo: ref(null),
-      overlayScene: ref(null),
+      overlayGroup: ref(null),
       wireframe: ref(null),
       orbitTarget: ref(null),
     },

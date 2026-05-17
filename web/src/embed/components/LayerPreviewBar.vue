@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
-import { PreviewSceneContextKey } from '@/preview/sceneStore'
+import { View3DContextKey } from '@/preview/sceneStore'
 
-const store = inject(PreviewSceneContextKey)
+const store = inject(View3DContextKey)
 if (!store) throw new Error('LayerPreviewBar: PreviewSceneContext missing')
 
-const { layerPreviewLabel, sizeRow: sizeRowRef, meshBusy } = store
+const { layerPreviewLabel, gridHeight, meshBusy } = store
 
 const localY = ref<number>(store.layerWorldY.value)
 
@@ -14,7 +14,7 @@ watch(() => store!.layerWorldY.value, (v) => {
   if (!meshBusy.value) localY.value = v
 })
 
-const maxY = computed(() => Math.max(0, sizeRowRef.value - 1))
+const maxY = computed(() => Math.max(0, gridHeight.value - 1))
 
 function onInput(e: Event): void {
   localY.value = Number((e.target as HTMLInputElement).value)
@@ -28,7 +28,7 @@ function onChange(e: Event): void {
 </script>
 
 <template>
-  <div v-if="sizeRowRef > 0" class="wm-layer-bar">
+  <div v-if="gridHeight > 0" class="wm-layer-bar">
     <label class="wm-layer-label" for="wm-layer-range">分层预览</label>
     <div class="nei-slider">
       <div class="nei-slider__track" />

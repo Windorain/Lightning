@@ -2,11 +2,11 @@
 import { computed } from 'vue'
 import WorkbenchViewport from './WorkbenchViewport.vue'
 import { useBContext } from '@/workbench/context/bContext'
-import { ALL_FEATURES_OFF, type PreviewConfig } from '@/preview/previewConfig'
+import { ALL_FEATURES_OFF, type View3DConfig } from '@/preview/previewConfig'
 
 const bctx = useBContext()
 
-const mergedConfig = computed<PreviewConfig | null>(() => {
+const mergedConfig = computed<View3DConfig | null>(() => {
   const c = bctx.scene.previewConfig.value
   if (!c) return null
   return { ...c, features: { ...c.features, ...ALL_FEATURES_OFF, frameControls: true, layerBar: true } }
@@ -17,7 +17,7 @@ const mergedConfig = computed<PreviewConfig | null>(() => {
   <div class="vh-root">
     <WorkbenchViewport
       v-if="mergedConfig"
-      :merged-config="mergedConfig"
+      :config="mergedConfig"
     />
     <div v-else class="vh-placeholder"><span class="vh-placeholder-text">No scene loaded</span></div>
   </div>

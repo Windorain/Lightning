@@ -4,7 +4,7 @@ import EmbedViewer from '@/embed/EmbedViewer.vue'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import { useBContext } from '@/workbench/context/bContext'
 import { sceneInfoPanel, wikiConfigPanel, blockStatsPanel } from '@/workbench/ux/panels'
-import type { PreviewConfig } from '@/preview/previewConfig'
+import type { View3DConfig } from '@/preview/previewConfig'
 
 const bctx = useBContext()
 const wikiConfig = bctx.wikiConfig as any
@@ -23,7 +23,7 @@ function parseHex6(s: string): number {
   return parseInt(m[1], 16)
 }
 
-const mergedConfig = computed<PreviewConfig | null>(() => {
+const mergedConfig = computed<View3DConfig | null>(() => {
   const c = bctx.scene.previewConfig.value
   if (!c) return null
   return {
@@ -50,7 +50,7 @@ const mergedConfig = computed<PreviewConfig | null>(() => {
   <div class="ww-root">
     <div class="ww-preview-wrap">
       <div class="ww-preview" :style="{ width: `${wikiConfig.viewWidth}px`, height: `${wikiConfig.viewHeight}px` }">
-        <EmbedViewer v-if="mergedConfig" :key="bctx.scene.previewEpoch.value" :merged-config="mergedConfig" />
+        <EmbedViewer v-if="mergedConfig" :key="bctx.scene.previewEpoch.value" :config="mergedConfig" />
         <div v-else class="ww-placeholder">No scene loaded</div>
       </div>
     </div>

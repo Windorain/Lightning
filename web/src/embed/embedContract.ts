@@ -2,13 +2,13 @@
  * 嵌入端公开契约：宿主传入已打包 document（含 textureBlobs），无 HTTP 加载阶段。
  */
 
-import type { PreviewConfig, PreviewFeatures } from '@/preview/previewConfig'
+import type { View3DConfig, View3DFeatures } from '@/preview/previewConfig'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import { loadPreviewSessionFromDocument } from '@/preview/previewSession'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
 
-export type { PreviewFeatures }
+export type { View3DFeatures }
 
 export interface EmbedData {
   /** SDE 打包后的 StructureData 或 World（根级含 `textureBlobs`） */
@@ -31,24 +31,24 @@ export interface EmbedUiOptions {
 export interface EmbedBootstrapOptions {
   data: EmbedData
   /** 未指定字段使用 defaultEmbedUi（previewConfig） */
-  features?: Partial<PreviewFeatures>
+  features?: Partial<View3DFeatures>
   ui?: EmbedUiOptions
 }
 
-export async function resolveBootstrapToPreviewConfig(
+export async function resolveBootstrapToView3DConfig(
   options: EmbedBootstrapOptions,
-): Promise<PreviewConfig> {
+): Promise<View3DConfig> {
   const ui = options.ui ?? {}
 
   const { document } = options.data
   const { renderBundle, materialLibrary } = await loadPreviewSessionFromDocument(document)
-  const features: PreviewFeatures = {
+  const features: View3DFeatures = {
     ...defaultEmbedUi.features,
     ...options.features,
   }
   const sceneId = sceneStableStringIdFromDocument(renderBundle.document)
 
-  const out: PreviewConfig = {
+  const out: View3DConfig = {
     sceneId,
     renderBundle,
     materialLibrary,

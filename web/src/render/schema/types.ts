@@ -1,5 +1,5 @@
 /**
- * StructureData：`geometryPhase` 区分扫描中间态与可渲染终态；预览 UI 由 `PreviewConfig.features` 控制。
+ * StructureData：`geometryPhase` 区分扫描中间态与可渲染终态；预览 UI 由 `View3DConfig.features` 控制。
  */
 
 /** 资源包定位符：namespace:path（不含 textures/ 与 .png），与 MC 习惯一致 */

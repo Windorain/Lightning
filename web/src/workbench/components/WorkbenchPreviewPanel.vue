@@ -95,7 +95,7 @@ function onResizeHandleDblClick(): void {
     <template v-else>
       <div class="wm-preview-resize-root" :style="{ height: `${previewHeightPx}px` }">
         <div class="wm-preview-embed" :class="{ 'wm-preview-embed--busy': previewBusy }">
-          <EmbedViewer :key="`pv-${previewKey}`" :merged-config="previewCfg" />
+          <EmbedViewer :key="`pv-${previewKey}`" :config="previewCfg" />
           <div v-if="previewBusy" class="wm-preview-veil" aria-hidden="true" />
         </div>
         <div

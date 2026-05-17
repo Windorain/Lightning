@@ -83,11 +83,9 @@ const dict: Record<string, Record<Lang, string>> = {
   'clear': { zh: '清除', en: 'Clear' },
   'savedToMemory': { zh: '已保存到内存（同步预览生效）', en: 'Saved to memory (sync preview to apply)' },
   'enterEditMode': { zh: '进入编辑模式并点击方块以查看', en: 'Enter edit mode and click a block' },
-  'noCurrentConfig': { zh: '无当前 PreviewConfig', en: 'No current PreviewConfig' },
   'noSceneData': { zh: '无场景数据，无法重建材质库', en: 'No scene data, cannot rebuild material library' },
   'bgMustBeHex': { zh: '场景背景色须为 #RRGGBB', en: 'Background must be #RRGGBB' },
   'iconClearMustBeHex': { zh: '图标 clearColor 须为 #RRGGBB', en: 'Icon clearColor must be #RRGGBB' },
-  'noPreviewConfig': { zh: '(尚无预览配置，请先同步预览)', en: '(No preview config; sync preview first)' },
 }
 
 /** 获取翻译文本 */

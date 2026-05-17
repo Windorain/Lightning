@@ -4,9 +4,9 @@
  */
 import { computed, inject } from 'vue'
 
-import { PreviewSceneContextKey } from '@/preview/sceneStore'
+import { View3DContextKey } from '@/preview/sceneStore'
 
-const store = inject(PreviewSceneContextKey)
+const store = inject(View3DContextKey)
 
 const visible = computed(() => store?.hasWorldMultiFrame.value ?? false)
 const playing = computed(() => store?.framesPlaybackIsPlaying.value ?? false)

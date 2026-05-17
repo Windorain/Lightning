@@ -36,15 +36,15 @@ import {
 import type { StructureDefinition, World } from '@/render/schema/types'
 import { formatUnknownError } from '@/util/formatUnknownError'
 
-import type { PreviewConfig } from './previewConfig'
+import type { View3DConfig } from './previewConfig'
 
 export type LoadStatus = 'loading' | 'ok' | 'error'
 
 export type StatusBarTone = 'loading' | 'ok' | 'warn' | 'error'
 
-export interface PreviewSceneStore {
+export interface View3DStore {
   /** 可被外部更新以同步最新配置（工作台 syncPreview 等场景） */
-  config: ShallowRef<PreviewConfig>
+  config: ShallowRef<View3DConfig>
   showBlockStatsSidebar: boolean
   loadStatus: Ref<LoadStatus>
   statusBarTone: Ref<StatusBarTone>
@@ -55,19 +55,17 @@ export interface PreviewSceneStore {
   structureDefinition: ShallowRef<StructureDefinition | null>
   materialLibrary: ShallowRef<MaterialLibraryApi | null>
   blockIconCache: ShallowRef<BlockIconCache | null>
-  sizeRow: ComputedRef<number>
+  gridHeight: ComputedRef<number>
   layerPreviewMode: ComputedRef<LayerPreviewMode>
   blockStatsEntries: ComputedRef<BlockStatRow[]>
   layerPreviewLabel: ComputedRef<string>
   tooltipPalette: ShallowRef<string[]>
   registerScene(scene: THREE.Scene): void
-  readonly overlayScene: ShallowRef<THREE.Scene | null>
-  registerOverlayScene(s: THREE.Scene): void
   loadStructureAndResources(): Promise<void>
   rebuildContentMesh(): Promise<void>
   detachAndDisposeMesh(): void
   disposeCachesAndLibrary(): void
-  contentGroupRef: ShallowRef<THREE.Group | null>
+  mainMeshGroup: ShallowRef<THREE.Group | null>
   hasWorldMultiFrame: ComputedRef<boolean>
   worldFrameIndex: Ref<number>
   framesPlaybackIsPlaying: Ref<boolean>
@@ -77,10 +75,10 @@ export interface PreviewSceneStore {
   /** 清除所有已缓存的 mesh 与 icon 缓存（config 切换时调用） */
   clearAllMeshStorage(): void
   /** 从新 config 重载结构数据并重建网格（保持现有 Three.js 场景） */
-  reloadFromConfig(cfg: PreviewConfig): Promise<void>
+  reloadFromConfig(cfg: View3DConfig): Promise<void>
 }
 
-export const PreviewSceneContextKey: InjectionKey<PreviewSceneStore> = Symbol('PreviewSceneContext')
+export const View3DContextKey: InjectionKey<View3DStore> = Symbol('View3DContext')
 
 function formatError(err: unknown): string {
   return formatUnknownError(err)
@@ -101,8 +99,8 @@ interface WorldMeshEntry {
   stats: BlockMeshBuildStats
 }
 
-export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSceneStore {
-  const config = shallowRef<PreviewConfig>(initialConfig)
+export function createView3DStore(initialConfig: View3DConfig): View3DStore {
+  const config = shallowRef<View3DConfig>(initialConfig)
   const loadStatus = ref<LoadStatus>('loading')
   const statusBarTone = ref<StatusBarTone>('loading')
   const statusMessage = ref(config.value.loadingMessage)
@@ -113,7 +111,7 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
   const blockIconCache = shallowRef<BlockIconCache | null>(null)
   const tooltipPalette = shallowRef<string[]>([])
   const sceneRef = shallowRef<THREE.Scene | null>(null)
-  const contentGroupRef = shallowRef<THREE.Group | null>(null)
+  const mainMeshGroup = shallowRef<THREE.Group | null>(null)
 
   const worldFrameIndex = ref(0)
   const framesPlaybackIsPlaying = ref(false)
@@ -132,7 +130,7 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
 
   const hasWorldMultiFrame = computed(() => worldFrameCount.value > 1)
 
-  const sizeRow = computed(() => structureDefinition.value?.cellGrid[0]?.length ?? 0)
+  const gridHeight = computed(() => structureDefinition.value?.cellGrid[0]?.length ?? 0)
 
   const layerPreviewMode = computed<LayerPreviewMode>(() => {
     const y = layerWorldY.value
@@ -212,7 +210,7 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
       return
     }
 
-    /** 真源为 `PreviewConfig.materialLibrary`；store 的 ref 可能仍指向已 dispose 实例（与 setFrame 里用的 config 不一致）。 */
+    /** 真源为 `View3DConfig.materialLibrary`；store 的 ref 可能仍指向已 dispose 实例（与 setFrame 里用的 config 不一致）。 */
     const fromConfig = config.value.materialLibrary
     if (fromConfig && !fromConfig.isDisposed()) {
       materialLibrary.value = fromConfig
@@ -237,14 +235,14 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
         const k = worldMeshKey()
         const hit = worldMeshCache.get(k)
         if (hit) {
-          if (contentGroupRef.value === hit.group && hit.group.parent === scene) {
+          if (mainMeshGroup.value === hit.group && hit.group.parent === scene) {
             applyBuildStatusToBar(def, hit.stats, hit.group)
             return
           }
-          if (contentGroupRef.value) {
-            scene.remove(contentGroupRef.value)
+          if (mainMeshGroup.value) {
+            scene.remove(mainMeshGroup.value)
           }
-          contentGroupRef.value = hit.group
+          mainMeshGroup.value = hit.group
           scene.add(hit.group)
           applyBuildStatusToBar(def, hit.stats, hit.group)
           return
@@ -257,10 +255,10 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
           return
         }
         worldMeshCache.set(k, { group: result.group, dispose: result.dispose, stats: result.stats })
-        if (contentGroupRef.value) {
-          scene.remove(contentGroupRef.value)
+        if (mainMeshGroup.value) {
+          scene.remove(mainMeshGroup.value)
         }
-        contentGroupRef.value = result.group
+        mainMeshGroup.value = result.group
         scene.add(result.group)
         applyBuildStatusToBar(def, result.stats, result.group)
         return
@@ -270,13 +268,13 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
         result.dispose()
         return
       }
-      if (contentGroupRef.value) {
-        scene.remove(contentGroupRef.value)
+      if (mainMeshGroup.value) {
+        scene.remove(mainMeshGroup.value)
         nonWorldMeshDispose?.()
         nonWorldMeshDispose = null
       }
       nonWorldMeshDispose = result.dispose
-      contentGroupRef.value = result.group
+      mainMeshGroup.value = result.group
       scene.add(result.group)
       applyBuildStatusToBar(def, result.stats, result.group)
     } catch (e) {
@@ -294,12 +292,6 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
 
   function registerScene(scene: THREE.Scene): void {
     sceneRef.value = scene
-  }
-
-  /** Overlay scene — rendered on top after depth clear. Gizmos, wireframes, previews. */
-  const overlayScene = shallowRef<THREE.Scene | null>(null)
-  function registerOverlayScene(s: THREE.Scene): void {
-    overlayScene.value = s
   }
 
   function clearWorldPlaybackSchedule(): void {
@@ -436,7 +428,7 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
     return runMesh(() => presentContentMesh())
   }
 
-  async function reloadFromConfig(cfg: PreviewConfig): Promise<void> {
+  async function reloadFromConfig(cfg: View3DConfig): Promise<void> {
     config.value = cfg
     clearAllMeshStorage()
     blockIconCache.value?.dispose()
@@ -449,11 +441,11 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
 
   function detachAndDisposeMesh(): void {
     const scene = sceneRef.value
-    const g = contentGroupRef.value
+    const g = mainMeshGroup.value
     if (g && scene) {
       scene.remove(g)
     }
-    contentGroupRef.value = null
+    mainMeshGroup.value = null
     if (!isWorldDocument(config.value.renderBundle.document)) {
       nonWorldMeshDispose?.()
       nonWorldMeshDispose = null
@@ -464,7 +456,7 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
     clearWorldPlaybackSchedule()
     framesPlaybackIsPlaying.value = false
     clearAllMeshStorage()
-    contentGroupRef.value = null
+    mainMeshGroup.value = null
     blockIconCache.value?.dispose()
     blockIconCache.value = null
     materialLibrary.value?.dispose()
@@ -481,11 +473,11 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
     }
     void runMesh(async () => {
       const scene = sceneRef.value
-      const g = contentGroupRef.value
+      const g = mainMeshGroup.value
       if (g && scene) {
         scene.remove(g)
       }
-      contentGroupRef.value = null
+      mainMeshGroup.value = null
       clearAllMeshStorage()
       await presentContentMesh()
     })
@@ -502,21 +494,19 @@ export function createPreviewSceneStore(initialConfig: PreviewConfig): PreviewSc
     structureDefinition,
     materialLibrary,
     blockIconCache,
-    sizeRow,
+    gridHeight,
     layerPreviewMode,
     blockStatsEntries,
     layerPreviewLabel,
     tooltipPalette,
     registerScene,
-    overlayScene,
-    registerOverlayScene,
     loadStructureAndResources,
     rebuildContentMesh,
     detachAndDisposeMesh,
     disposeCachesAndLibrary,
     clearAllMeshStorage,
     reloadFromConfig,
-    contentGroupRef,
+    mainMeshGroup,
     hasWorldMultiFrame,
     worldFrameIndex,
     framesPlaybackIsPlaying,

@@ -25,7 +25,7 @@ export const SelectOperator: OperatorType = {
     return OP_RESULT.FINISHED
   },
 
-  renderOverlay(_bctx, _props, _overlayScene) {
+  renderOverlay(_bctx, _props, _overlayGroup) {
     // Selection wireframe rendered by viewport using SelectionContext.items
   },
 }

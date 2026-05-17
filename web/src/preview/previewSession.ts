@@ -32,9 +32,9 @@ function loadTextureDataUrl(loader: THREE.TextureLoader, dataUrl: string): Promi
 }
 
 /**
- * 由打包场景 document（StructureData | World）构建 **PreviewConfig 核心载荷**：
+ * 由打包场景 document（StructureData | World）构建 **View3DConfig 核心载荷**：
  * `renderBundle`（`document` 为 normalize 后值）+ 预载 `materialLibrary`。
- * `AppShell` / `createPreviewSceneStore` 只消费 `PreviewConfig` 中这两部分 + UI 开关。
+ * `AppShell` / `createView3DStore` 只消费 `View3DConfig` 中这两部分 + UI 开关。
  */
 export async function loadPreviewSessionFromDocument(document: unknown): Promise<PreviewSessionResult> {
   const normalized = await normalizeEnvelopeToPlain(document)

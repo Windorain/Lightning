@@ -3,10 +3,10 @@
  * 底栏状态条：模型信息 + 帧信息 + 渲染状态
  */
 import { inject } from 'vue'
-import { PreviewSceneContextKey } from '@/preview/sceneStore'
+import { View3DContextKey } from '@/preview/sceneStore'
 import { logCenter, LOG_LEVEL } from '@/workbench/logging/LogCenter'
 
-const store = inject(PreviewSceneContextKey)
+const store = inject(View3DContextKey)
 
 function logClass(level: number): string {
   if (level & LOG_LEVEL.ERROR) return 'sb-item sb-item--error'

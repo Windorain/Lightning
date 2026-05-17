@@ -22,6 +22,8 @@ export interface GridPos {
 export interface SlotBlock {
   name: string   // "stone"（已截去 "minecraft:" 前缀）
   meta: number
+  /** 反序列化时保留的原始 palette index；编辑新增的 block 无此字段 */
+  paletteIndex?: number
 }
 
 /** Palette 条目元数据（序列化 round-trip 用） */
@@ -306,6 +308,7 @@ export class Grid {
 }
 
 function blockKey(b: SlotBlock): string {
+  if (b.paletteIndex !== undefined) return '#' + String(b.paletteIndex)
   return b.name + ':' + b.meta
 }
 
@@ -609,15 +612,15 @@ export class RuntimeDocument {
     cellGrid: number[][][],
     rawPalette: Record<string, unknown>[],
   ): Grid {
-    // 构建 palette cache（保留完整元数据用于 round-trip）
+    // 构建 palette cache（key = palette index，保留原始映射避免同名不同态被覆盖）
     const paletteCache = new Map<string, PaletteEntryMeta>()
-    for (const entry of rawPalette) {
+    for (let i = 0; i < rawPalette.length; i++) {
+      const entry = rawPalette[i]!
       const rid = entry.registryId as string
-      const meta = (entry.meta as number) ?? 0
       const colon = rid.indexOf(':')
       const name = colon >= 0 ? rid.slice(colon + 1) : rid
       if (name !== 'air' && name !== 'Air') {
-        paletteCache.set(name + ':' + meta, entry as unknown as PaletteEntryMeta)
+        paletteCache.set('#' + String(i), entry as unknown as PaletteEntryMeta)
       }
     }
 
@@ -643,7 +646,7 @@ export class RuntimeDocument {
             const colon = rid.indexOf(':')
             const name = colon >= 0 ? rid.slice(colon + 1) : rid
             if (name !== 'air' && name !== 'Air') {
-              outRow[x] = { name, meta: (entry.meta as number) ?? 0 }
+              outRow[x] = { name, meta: (entry.meta as number) ?? 0, paletteIndex: palIdx }
             }
           }
         }

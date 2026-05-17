@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-import StructureViewport from '@/embed/components/StructureViewport.vue'
+import ViewerCore, { type ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
-import type { PreviewConfig } from '@/preview/previewConfig'
+import type { View3DConfig } from '@/preview/previewConfig'
 import {
-  PreviewSceneContextKey,
-  createPreviewSceneStore,
+  View3DContextKey,
+  createView3DStore,
 } from '@/preview/sceneStore'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { useSelectionContext } from '@/workbench/selectionContext'
@@ -21,7 +21,7 @@ import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import * as THREE from 'three'
 
 const props = defineProps<{
-  mergedConfig: PreviewConfig
+  config: View3DConfig
 }>()
 
 const selection = useSelectionContext()
@@ -30,10 +30,10 @@ const bctx = useBContext()
 
 defineEmits<{}>()
 
-const store = createPreviewSceneStore(props.mergedConfig)
-provide(PreviewSceneContextKey, store)
+const store = createView3DStore(props.config)
+provide(View3DContextKey, store)
 
-watch(() => props.mergedConfig, async (cfg) => {
+watch(() => props.config, async (cfg) => {
   try { await store.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logCenter.error('WorkbenchViewport', `reloadFromConfig: ${e}`) }
 })
 
@@ -44,7 +44,7 @@ const {
   structureDefinition,
   materialLibrary,
   layerPreviewMode,
-  contentGroupRef,
+  mainMeshGroup,
   tooltipPalette,
   hasWorldMultiFrame,
   worldFrameIndex,
@@ -63,45 +63,45 @@ type BottomTab = 'frame' | 'layer'
 const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 
 /* ---- Viewport events ---- */
-async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas: HTMLElement, _orbitTarget: THREE.Vector3): Promise<void> {
+async function onViewportReady({ scene, layers, camera, domElement, orbitTarget }: ViewerCoreReadyPayload): Promise<void> {
   store.registerScene(scene)
   try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
 
-  // Wire bContext viewport state (唯一赋值点)
+  // Wire bContext viewport state
   const vp = bctx.viewport
-  vp.orbitTarget.value = _orbitTarget
+  vp.orbitTarget.value = orbitTarget
   vp.camera.value = camera
-  vp.contentGroup.value = contentGroupRef.value ?? new THREE.Group()
-  vp.domElement.value = canvas
+  vp.contentGroup.value = mainMeshGroup.value ?? new THREE.Group()
+  vp.domElement.value = domElement
   vp.definition.value = structureDefinition.value ?? null
   vp.layerPreview.value = layerPreviewMode.value
 
   const VIEWPORT_REGION_ID = 'r-viewport'
 
-  // EventDispatcher — capture phase is sole input path
+  // EventDispatcher
   bctx.eventDispatcher.registerRegion(VIEWPORT_REGION_ID)
   bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
 
-  canvas.addEventListener('pointerdown', (e) => {
+  domElement.addEventListener('pointerdown', (e) => {
     bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
     if (e.button === 1) e.preventDefault()
     bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
   }, { capture: true })
-  canvas.addEventListener('pointermove', (e) => {
+  domElement.addEventListener('pointermove', (e) => {
     bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
     bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
   }, { capture: true })
-  canvas.addEventListener('pointerup', (e) => {
+  domElement.addEventListener('pointerup', (e) => {
     bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
   }, { capture: true })
-  canvas.addEventListener('wheel', (e) => {
+  domElement.addEventListener('wheel', (e) => {
     bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
     e.preventDefault()
   }, { capture: true, passive: false })
-  canvas.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
+  domElement.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
   document.addEventListener('keydown', (e) => { bctx.eventDispatcher.dispatch(e) }, { capture: true })
 
-  // Register handlers (GIZMO → KEYMAP)
+  // Register handlers
   const unregGizmo = bctx.eventDispatcher.registerRegionHandler(
     VIEWPORT_REGION_ID,
     createToolGizmoHandler(
@@ -118,28 +118,26 @@ async function onViewportReady(scene: THREE.Scene, camera: THREE.Camera, canvas:
 
   unregHandlers.push(unregGizmo, unregKeymap)
 
-  // Create overlay scene
-  const overlayScene = new THREE.Scene()
-  vp.overlayScene.value = overlayScene
-  store.registerOverlayScene(overlayScene)
+  // Overlay — use ViewerCore's layer group directly
+  vp.overlayGroup.value = layers.overlay
 
   // MoveGizmo
   const moveGizmo = new MoveGizmo()
   vp.gizmo.value = moveGizmo
-  overlayScene.add(moveGizmo.root)
+  layers.overlay.add(moveGizmo.root)
 
-  // Per-frame update
-  const origAnimate = (store as any)._animate as (() => void) | undefined
-  if (origAnimate) {
-    const wrapped = () => { origAnimate(); updateGizmo() }
-    ;(store as any)._animate = wrapped
-  } else {
-    gizmoInterval = setInterval(updateGizmo, 16)
+  // Per-frame gizmo update via rAF
+  function rafTick() {
+    if (!_alive) return
+    gizmoRafId = requestAnimationFrame(rafTick)
+    updateGizmo()
   }
+  gizmoRafId = requestAnimationFrame(rafTick)
 }
 
 let unregHandlers: Array<() => void> = []
-let gizmoInterval: ReturnType<typeof setInterval> | undefined
+let gizmoRafId: number | undefined
+let _alive = true
 
 function voxelToWorld(x: number, y: number, z: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
   const sCol = def.cellGrid[0]?.[0]?.length ?? 1
@@ -154,7 +152,7 @@ function voxelToWorld(x: number, y: number, z: number, def: { cellGrid: any[][][
 
 function updateSelectionWireframe(): void {
   if (bctx.viewport.wireframe.value) {
-    bctx.viewport.overlayScene.value?.remove(bctx.viewport.wireframe.value)
+    bctx.viewport.overlayGroup.value?.remove(bctx.viewport.wireframe.value)
     bctx.viewport.wireframe.value.geometry?.dispose()
     ;(bctx.viewport.wireframe.value.material as THREE.Material)?.dispose()
     bctx.viewport.wireframe.value = null
@@ -193,7 +191,7 @@ function updateSelectionWireframe(): void {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3))
   const mat = new THREE.LineBasicMaterial({ color: 0xffaa00, linewidth: 1, depthTest: true })
   bctx.viewport.wireframe.value = new THREE.LineSegments(geo, mat)
-  bctx.viewport.overlayScene.value?.add(bctx.viewport.wireframe.value)
+  bctx.viewport.overlayGroup.value?.add(bctx.viewport.wireframe.value)
 }
 
 function updateGizmo(): void {
@@ -255,7 +253,6 @@ function onViewportSelect(
   }
 }
 
-const selectedVoxel = computed(() => null)
 
 watch(worldFrameIndex, (i) => { bctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }) }, { immediate: true })
 
@@ -267,10 +264,11 @@ watch(structureDefinition, (def) => {
 onMounted(async () => { await store.loadStructureAndResources() })
 onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())
-  if (gizmoInterval) clearInterval(gizmoInterval)
+  _alive = false
+  if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
   bctx.viewport.gizmo.value?.dispose()
   if (bctx.viewport.wireframe.value) {
-    bctx.viewport.overlayScene.value?.remove(bctx.viewport.wireframe.value)
+    bctx.viewport.overlayGroup.value?.remove(bctx.viewport.wireframe.value)
     bctx.viewport.wireframe.value.geometry?.dispose()
     ;(bctx.viewport.wireframe.value.material as THREE.Material)?.dispose()
     bctx.viewport.wireframe.value = null
@@ -282,15 +280,15 @@ onBeforeUnmount(() => {
 <template>
   <div class="wv-root">
     <div class="wv-viewport-wrap">
-    <StructureViewport
+    <ViewerCore
       v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
       :definition="structureDefinition"
       :material-library="materialLibrary"
-      :content-group="contentGroupRef"
+      :content-group="mainMeshGroup"
       :layer-preview-mode="layerPreviewMode"
-      :scene-background="mergedConfig.sceneBackground"
+      :scene-background="config.sceneBackground"
       :edit-mode="true"
-      :selected-voxel="selectedVoxel"
+      :show-axes-gizmo="config.features.showAxesGizmo !== false"
       @ready="onViewportReady"
       @hover-block="onViewportHover"
       @select-block="onViewportSelect"

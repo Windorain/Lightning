@@ -5,18 +5,18 @@
  * 数据流（单向）：
  * 1. 入口：文件 / SDE 数据 / 内置示例 → loadSceneDocument → scene (Plain)
  * 2. 编辑：编辑器直接读写 ctx.scene，调用 syncPreview
- * 3. 预览：syncPreview() 浅拷贝 scene 后构建 PreviewConfig
+ * 3. 预览：syncPreview() 浅拷贝 scene 后构建 View3DConfig
  * 4. 导出：保存直接序列化 Plain；Envelope 仅导出时 buildEnvelopePackage
  */
 
 import type { InjectionKey, Ref, ShallowRef } from 'vue'
 import { inject, provide, ref, shallowRef } from 'vue'
 
-import type { PreviewConfig } from '@/preview/previewConfig'
+import type { View3DConfig } from '@/preview/previewConfig'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
 import { getDevSceneDocument } from '@/dev/devScenes'
 import { formatSdeError } from '@/workbench/sdeApi'
-import { documentLooksPreviewable, previewConfigFromDocument } from '@/preview/previewFromDocument'
+import { documentLooksPreviewable, view3DConfigFromDocument } from '@/preview/previewFromDocument'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
 import { downloadJson } from '@/util/browser'
 import { getShowSaveFilePicker } from '@/util/browser'
@@ -40,7 +40,7 @@ export interface SceneContext {
   readonly previewWorldFrameIndex: Ref<number>
 
   // --- 预览派生状态 ---
-  readonly previewConfig: ShallowRef<PreviewConfig | null>
+  readonly previewConfig: ShallowRef<View3DConfig | null>
   readonly previewEpoch: Ref<number>
   readonly previewBusy: Ref<boolean>
   readonly previewError: Ref<string | null>
@@ -56,7 +56,7 @@ export interface SceneContext {
   markClean(): void
 
   // --- 副作用方法 ---
-  /** @side-effect 以 scene 为源重建 PreviewConfig，bump previewEpoch */
+  /** @side-effect 以 scene 为源重建 View3DConfig，bump previewEpoch */
   syncPreview(): Promise<void>
   /** @side-effect 从外部数据加载场景（SDE 路径用），bump sceneLoadEpoch */
   loadFromData(doc: unknown, opts?: { mode?: WorkbenchWorkspaceMode; fileName?: string }): Promise<void>
@@ -95,7 +95,7 @@ export function createSceneContext(): SceneContext {
   const previewWorldFrameIndex = ref(0)
 
   // 预览派生状态
-  const previewConfig = shallowRef<PreviewConfig | null>(null)
+  const previewConfig = shallowRef<View3DConfig | null>(null)
   const previewEpoch = ref(0)
   const previewBusy = ref(false)
   const previewError = ref<string | null>(null)
@@ -141,7 +141,7 @@ export function createSceneContext(): SceneContext {
         return
       }
       const snapshot = { ...doc }
-      const cfg = await previewConfigFromDocument(snapshot)
+      const cfg = await view3DConfigFromDocument(snapshot)
       previewConfig.value = cfg
       previewEpoch.value += 1
     } catch (e) {
@@ -286,7 +286,7 @@ export function createSceneContext(): SceneContext {
     dirty: dirty as unknown as Ref<boolean>,
     sceneLoadEpoch: sceneLoadEpoch as unknown as Ref<number>,
     previewWorldFrameIndex: previewWorldFrameIndex as unknown as Ref<number>,
-    previewConfig: previewConfig as unknown as ShallowRef<PreviewConfig | null>,
+    previewConfig: previewConfig as unknown as ShallowRef<View3DConfig | null>,
     previewEpoch: previewEpoch as unknown as Ref<number>,
     previewBusy: previewBusy as unknown as Ref<boolean>,
     previewError: previewError as unknown as Ref<string | null>,

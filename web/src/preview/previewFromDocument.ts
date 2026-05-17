@@ -1,11 +1,11 @@
 /**
- * 由可编辑场景 document 构建 `PreviewConfig`（经 `loadPreviewSessionFromDocument` 生成
+ * 由可编辑场景 document 构建 `View3DConfig`（经 `loadPreviewSessionFromDocument` 生成
  * `renderBundle` 与 `materialLibrary`）。工作台/合入后刷新预览应调用本函数并传入**当前**内存快照。
  */
 
-import type { PreviewConfig, PreviewFeatures } from '@/preview/previewConfig'
+import type { View3DConfig, View3DFeatures } from '@/preview/previewConfig'
 import { defaultEmbedUi } from '@/preview/previewConfig'
-import { resolveBootstrapToPreviewConfig } from '@/embed/embedContract'
+import { resolveBootstrapToView3DConfig } from '@/embed/embedContract'
 import { isBakedStructureData, isWorldDocument } from '@/render/data/bundleResolve'
 import { embeddedStructure } from '@/render/data/worldPlayback'
 import type { StructureData } from '@/render/schema/types'
@@ -33,18 +33,18 @@ export function documentLooksPreviewable(document: unknown): boolean {
   return isBakedStructureData(document as StructureData)
 }
 
-export interface PreviewFromDocumentOptions {
+export interface View3DConfigFromDocumentOptions {
   /** 覆盖默认嵌入 UI（工作台 dev 面板等） */
-  features?: Partial<PreviewFeatures>
+  features?: Partial<View3DFeatures>
   /** false 时隐藏底部调试状态栏 */
   debug?: boolean
 }
 
-export async function previewConfigFromDocument(
+export async function view3DConfigFromDocument(
   document: unknown,
-  options: PreviewFromDocumentOptions = {},
-): Promise<PreviewConfig> {
-  return await resolveBootstrapToPreviewConfig({
+  options: View3DConfigFromDocumentOptions = {},
+): Promise<View3DConfig> {
+  return await resolveBootstrapToView3DConfig({
     data: { document },
     features: options.features,
     ui: {

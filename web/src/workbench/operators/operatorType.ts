@@ -45,7 +45,7 @@ export interface OperatorType {
   /** 创建模态状态（每次 invoke 进入模态时调用） */
   initModalState?: () => OperatorProperties
   /** 视口叠加层渲染（逐帧调用） */
-  renderOverlay?(bctx: BContext, props: OperatorProperties, overlayScene: THREE.Scene): void
+  renderOverlay?(bctx: BContext, props: OperatorProperties, overlayGroup: THREE.Group): void
 }
 
 /* eslint-disable @typescript-eslint/no-unused-vars */

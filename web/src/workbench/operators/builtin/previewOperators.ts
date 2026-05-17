@@ -3,7 +3,7 @@ import type { OperatorType } from '@/workbench/operators/operatorType'
 export const SyncPreviewOperator: OperatorType = {
   id: 'OPERATOR_SYNC_PREVIEW',
   label: '同步预览',
-  description: '从当前场景数据重建 PreviewConfig',
+  description: '从当前场景数据重建 View3DConfig',
 
   poll(bctx) {
     return bctx.scene.scene.value !== null
