@@ -114,7 +114,7 @@ export const ViewPanOperator: OperatorType = {
     if (event.type === 'pointermove') {
       const dx = event.clientX - s._startX
       const dy = event.clientY - s._startY
-      const k = 0.01
+      const k = 0.03
       const orbitTarget = bctx.viewport.orbitTarget.value
       const tx = orbitTarget?.x ?? 0
       const ty = orbitTarget?.y ?? 0

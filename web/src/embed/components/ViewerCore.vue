@@ -228,10 +228,6 @@ onMounted(() => {
   scene = new THREE.Scene()
   scene.background = new THREE.Color(props.sceneBackground)
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.55)
-  const dir = new THREE.DirectionalLight(0xffffff, 0.9)
-  dir.position.set(6, 10, 8)
-  scene.add(ambient, dir)
 
   layers = {
     structure: new THREE.Group(),
