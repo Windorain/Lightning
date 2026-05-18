@@ -99,7 +99,7 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
     e.preventDefault()
   }, { capture: true, passive: false })
   domElement.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
-  document.addEventListener('keydown', (e) => { bctx.eventDispatcher.dispatch(e) }, { capture: true })
+  document.addEventListener('keydown', (e) => { bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID }) }, { capture: true })
 
   // Register handlers
   const unregGizmo = bctx.eventDispatcher.registerRegionHandler(

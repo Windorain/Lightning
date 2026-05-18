@@ -1,30 +1,47 @@
 <script setup lang="ts">
 /**
- * 预览壳：previewSceneStore + StructureViewport + 可选周边组件。
- * 所有外围 UI（侧栏、分层条、播放器、标题、状态栏）按 `config.features` 开关。
- * 工作台模式下关闭外围组件，由外围 ViewportHost 提供等价 UI。
+ * EmbedViewer — 纯 View 组件。
+ *
+ * 职责：
+ * - 创建 View3DStore 做场景编排（加载/mesh/帧/层）
+ * - 渲染 UI 组件（标题栏、侧栏、视口、底部控件、tooltip）
+ * - 处理 hover/tooltip 状态
+ * - ViewerCore @ready 后注册 scene、重建 mesh，向上 emit ready 供 Controller 层装配事件
+ *
+ * 不创建 EmbedContext、不注册 region/handler、不加 capture listener。
+ * 事件装配由上级 Controller 负责：
+ *   独立嵌入 → EmbedShell (embed/EmbedShell.vue)
+ *   工作台内 → Workbench Area/Region 路由
  */
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-import type * as THREE from 'three'
 
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import ViewerCore from '@/embed/components/ViewerCore.vue'
+import type { ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
 import type { View3DConfig } from '@/preview/previewConfig'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import { View3DContextKey, createView3DStore } from '@/preview/sceneStore'
+import {
+  View3DContextKey,
+  createView3DStore,
+} from '@/preview/sceneStore'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
+
+const emit = defineEmits<{
+  ready: [payload: ViewerCoreReadyPayload]
+}>()
 
 const props = defineProps<{
   config: View3DConfig
 }>()
 
+// ---- View3DStore (scene orchestration) ----
 const store = createView3DStore(props.config)
 provide(View3DContextKey, store)
 
@@ -32,6 +49,7 @@ watch(() => props.config, (cfg) => {
   store.config.value = cfg
 })
 
+// ---- Hover / tooltip ----
 const { hover, setHover, clearHover } = usePreviewTooltip()
 
 const {
@@ -51,6 +69,7 @@ const {
   layerPreviewLabel,
 } = store
 
+// ---- Feature flags ----
 const f = computed(() => props.config.features)
 const showLayerBar = computed(() => f.value.layerBar)
 const showFrameCtl = computed(() => f.value.frameControls)
@@ -67,6 +86,7 @@ const activeTab = ref<BottomTab>(
   (showFrameCtl.value && hasWorldMultiFrame.value) ? 'frame' : 'layer',
 )
 
+// ---- Title / meta hint ----
 const sceneDocument = computed(() => props.config.renderBundle.document)
 
 const metaTooltipText = computed(() => {
@@ -91,6 +111,7 @@ function onMetaHintPointerLeave(): void { metaHintPointer.value = null }
 function onMetaHintFocusIn(e: FocusEvent): void { const t = e.currentTarget as HTMLElement; const r = t.getBoundingClientRect(); metaHintPointer.value = { clientX: r.left + r.width / 2, clientY: r.bottom } }
 function onMetaHintFocusOut(): void { metaHintPointer.value = null }
 
+// ---- Tooltip text ----
 const tooltipDisplayText = computed(() => {
   const def = structureDefinition.value
   const h = hover.value
@@ -98,7 +119,6 @@ const tooltipDisplayText = computed(() => {
   return resolvePreviewTooltipText(def, tooltipPalette.value, h)
 })
 
-/** blockId → NEI tooltip 文本行（预计算映射） */
 const neiTooltipMap = computed<Map<string, string[]>>(() => {
   const def = structureDefinition.value
   if (!def) return new Map()
@@ -147,9 +167,11 @@ const statusSummary = computed(() => {
   return parts.join(' · ')
 })
 
-async function onViewportReady({ scene }: { scene: THREE.Scene }): Promise<void> {
-  store.registerScene(scene)
-  try { await store.rebuildContentMesh() } catch (e) { console.error('[StructureRenderer] onViewportReady', e) }
+// ---- Viewport events ----
+function onViewportReady(payload: ViewerCoreReadyPayload): void {
+  store.registerScene(payload.scene)
+  store.rebuildContentMesh().catch(e => { console.error('[EmbedViewer] rebuildContentMesh', e) })
+  emit('ready', payload)
 }
 
 function onViewportHover(
@@ -167,7 +189,9 @@ function onSidebarTooltipHover(
 }
 
 onMounted(async () => { await store.loadStructureAndResources() })
-onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
+onBeforeUnmount(() => {
+  store.disposeCachesAndLibrary()
+})
 </script>
 
 <template>
@@ -183,7 +207,6 @@ onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
     </p>
 
     <div class="wm-main-stage">
-      <!-- 方块统计侧栏（嵌入模式） -->
       <BlockStatsSidebar
         v-if="showStats && loadStatus === 'ok' && blockIconCache"
         :entries="blockStatsEntries" :cache="blockIconCache"
@@ -202,7 +225,7 @@ onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
       </div>
     </div>
 
-    <!-- 底部 Tab 控件栏（全宽，在主舞台下方） -->
+    <!-- 底部 Tab 控件栏 -->
     <div v-if="hasBottomDock && loadStatus === 'ok'" class="wm-bottom-dock">
       <div class="wm-tab-row">
         <button
@@ -252,7 +275,6 @@ onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
 .wm-main-stage { display: flex; flex: 1; flex-direction: row; align-items: stretch; min-height: 0; width: 100%; border-radius: 0; overflow: hidden; border: var(--nei-bevel-w) solid; border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight); border-bottom: none; background: var(--nei-bg); }
 .wm-viewport-column { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-/* ===== 底部 Tab 控件栏 ===== */
 .wm-bottom-dock {
   flex-shrink: 0;
   display: flex; flex-direction: column;
@@ -306,7 +328,6 @@ onBeforeUnmount(() => { store.disposeCachesAndLibrary() })
 }
 .wm-tab-panel--active { display: flex; }
 
-/* 子组件嵌入 tab panel 时：拉伸填满，剥除外层边框背景 */
 .wm-tab-panel :deep(.wm-wfs) {
   flex: 1; min-width: 0;
   background: transparent; border: none; padding: 0;

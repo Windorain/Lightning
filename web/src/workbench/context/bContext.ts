@@ -13,7 +13,8 @@ import type { ToolRegistry } from '@/workbench/toolRegistry'
 import type { ConnectionContext } from '@/workbench/connectionContext'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
-import type { Ref } from 'vue'
+import type { View3DConfig } from '@/preview/previewConfig'
+import type { Ref, ShallowRef } from 'vue'
 import type * as THREE from 'three'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { Frame } from '@/render/schema/types'
@@ -128,6 +129,9 @@ export interface BContext {
   statusMessage: { value: string }
   /** 视口运行时（WorkbenchViewport.onViewportReady 时填充） */
   viewport: ViewportRuntime
+
+  /** 3D 渲染配置（embed 场景使用，workbench 内可选） */
+  config?: ShallowRef<View3DConfig>
 
   /** Window manager (Blender 对标 wmWindowManager) */
   wm: {

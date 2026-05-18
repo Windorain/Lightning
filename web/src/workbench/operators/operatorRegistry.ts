@@ -49,10 +49,10 @@ export class OperatorRegistry {
       return
     }
 
-    const snap = logCenter.snapshot(bctx)
+    const snap = bctx.queries ? logCenter.snapshot(bctx) : undefined
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
-      if (op.flagUndo) {
+      if (op.flagUndo && bctx.scene) {
         const before = bctx.scene.scene.value?.clone() ?? null
         await op.exec(bctx, resolvedProps)
         const after = bctx.scene.scene.value?.clone() ?? null
@@ -85,12 +85,12 @@ export class OperatorRegistry {
       return OP_RESULT.CANCELLED
     }
 
-    const snap = logCenter.snapshot(bctx)
+    const snap = bctx.queries ? logCenter.snapshot(bctx) : undefined
 
     const resolvedProps: OperatorProperties = props ?? {}
 
     if (op.invoke) {
-      const snapshot = op.flagUndo
+      const snapshot = op.flagUndo && bctx.scene
         ? bctx.scene.scene.value?.clone() ?? null
         : null
 
@@ -136,7 +136,7 @@ async function invokeExecFallback(
   op: OperatorType,
   props: OperatorProperties,
 ): Promise<OpResult> {
-  if (op.flagUndo) {
+  if (op.flagUndo && bctx.scene) {
     const snapshot = bctx.scene.scene.value?.clone() ?? null
     await op.exec!(bctx, props)
     const snapshotAfter = bctx.scene.scene.value?.clone() ?? null
