@@ -23,9 +23,7 @@ export const boxTool: Tool = {
   },
   keymap: [
     { type: 'KEY', key: 'b', toolId: 'annotation-box', description: '注解框工具' },
-  ],
-  keymapFallback: [
-    { type: 'MOUSE', button: 0, opId: 'OPERATOR_SELECT', description: '选择（回退）' },
+    { type: 'MOUSE', button: 0, description: '（注解放置由 Gizmo 处理）' },
   ],
 }
 

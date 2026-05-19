@@ -158,7 +158,10 @@ let _annoPending = false
 function updateAnnotationOverlay(): void {
   const doc = bctx.scene.scene.value as Record<string, any> | null
   const annos: Annotation[] = doc?.annotations ?? []
-  const hash = annos.length > 0 ? String(annos.length) : 'empty'
+  const maxUpdated = annos.length > 0
+    ? annos.reduce((max, a) => Math.max(max, (a as any).updated_at ?? 0), 0)
+    : 0
+  const hash = annos.length > 0 ? `${annos.length}_${maxUpdated}` : 'empty'
   if (hash === _annoHash || _annoPending) return
   _annoHash = hash
   _annoPending = true

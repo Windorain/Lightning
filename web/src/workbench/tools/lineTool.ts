@@ -21,9 +21,7 @@ export const lineTool: Tool = {
   },
   keymap: [
     { type: 'KEY', key: 'l', toolId: 'annotation-line', description: '线段工具' },
-  ],
-  keymapFallback: [
-    { type: 'MOUSE', button: 0, opId: 'OPERATOR_SELECT', description: '选择（回退）' },
+    { type: 'MOUSE', button: 0, description: '（线段绘制由 Gizmo 处理）' },
   ],
 }
 

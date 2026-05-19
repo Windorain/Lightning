@@ -27,6 +27,10 @@ export function createToolGizmoHandler(
 
       const pe = event as PointerEvent
 
+      // Only left-click (button 0) triggers gizmo interaction.
+      // Middle/right button reserved for view manipulation, context menu.
+      if (pe.type === 'pointerdown' && pe.button !== 0) return { break: false }
+
       switch (event.type) {
         case 'pointermove':
           gizmo.onPointerMove?.(ctx, pe)

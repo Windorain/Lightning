@@ -53,7 +53,8 @@ export const AnnotationUpdateOperator: OperatorType = {
     const idx = annotations.findIndex((a: Annotation) => a.id === id)
     if (idx === -1) return
 
-    annotations[idx] = { ...annotations[idx], ...patch, updated_at: Date.now() } as Annotation
+    // Mutate in place so the draft reference stays bound to doc.annotations
+    Object.assign(annotations[idx], patch, { updated_at: Date.now() })
     bctx.scene.markDirty()
   },
 }
@@ -80,5 +81,7 @@ export const AnnotationDeleteOperator: OperatorType = {
 
     annotations.splice(idx, 1)
     bctx.scene.markDirty()
+    // Clear draft so the panel disappears
+    ;(bctx as any).annotationState?.clearDraft()
   },
 }

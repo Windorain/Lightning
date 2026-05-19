@@ -20,9 +20,7 @@ export const pointTool: Tool = {
   },
   keymap: [
     { type: 'KEY', key: 'p', toolId: 'annotation-point', description: '标记点工具' },
-  ],
-  keymapFallback: [
-    { type: 'MOUSE', button: 0, opId: 'OPERATOR_SELECT', description: '选择（回退）' },
+    { type: 'MOUSE', button: 0, description: '（标记点放置由 Gizmo 处理）' },
   ],
 }
 

@@ -3,6 +3,8 @@ import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout, UILayoutItem } from '../types/layout'
 
+const AUTO_SAVE_DELAY = 200
+
 export const annotationPanel: PanelDeclaration = {
   id: 'annotation-panel',
   label: '注解属性',
@@ -15,7 +17,24 @@ export const annotationPanel: PanelDeclaration = {
   },
 
   owner(ctx: BContext): unknown {
-    return (ctx as any).annotationState?.currentDraft ?? null
+    const draft = (ctx as any).annotationState?.currentDraft as Record<string, any> | null
+    if (!draft) return null
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    return new Proxy(draft, {
+      set(target, prop, value) {
+        target[prop as string] = value
+        // Skip meta keys — don't auto-save id/timestamps
+        if (prop === 'id' || prop === 'created_at' || prop === 'updated_at') return true
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => {
+          timer = undefined
+          ctx.operators.invoke('ANNOTATION_UPDATE', { id: target.id, patch: { ...target } })
+        }, AUTO_SAVE_DELAY)
+        return true
+      },
+    })
   },
 
   layout(ctx: BContext): UILayout {
@@ -107,10 +126,9 @@ export const annotationPanel: PanelDeclaration = {
         break
     }
 
-    // Action buttons
+    // Delete only — edits are auto-saved via the Proxy owner
     items.push(
       { kind: 'separator' },
-      { kind: 'operator', id: 'ANNOTATION_UPDATE', label: '保存', props: { id: draft.id, patch: draft } },
       { kind: 'operator', id: 'ANNOTATION_DELETE', label: '删除', props: { id: draft.id } },
     )
 

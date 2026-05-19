@@ -21,9 +21,7 @@ export const textTool: Tool = {
   },
   keymap: [
     { type: 'KEY', key: 't', toolId: 'annotation-text', description: '文本标签工具' },
-  ],
-  keymapFallback: [
-    { type: 'MOUSE', button: 0, opId: 'OPERATOR_SELECT', description: '选择（回退）' },
+    { type: 'MOUSE', button: 0, description: '（文本放置由 Gizmo 处理）' },
   ],
 }
 
