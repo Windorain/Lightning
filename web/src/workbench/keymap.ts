@@ -38,6 +38,8 @@ export const DEFAULT_KEYMAP: InputBinding[] = [
   { type: 'KEY', key: 'z', ctrl: true, action: 'undo', description: '撤销' },
   { type: 'KEY', key: 'z', ctrl: true, shift: true, action: 'redo', description: '重做' },
   { type: 'KEY', key: 'Tab', action: 'toggle-tool', description: 'Select/上次工具切换' },
+  { type: 'KEY', key: 'b', toolId: 'annotation-box', description: '注解框工具' },
+  { type: 'KEY', key: 'l', toolId: 'annotation-line', description: '线段工具' },
   { type: 'KEY', key: 't', action: 'toggle-toolshelf', description: '工具栏显示' },
   { type: 'KEY', key: 'n', action: 'toggle-properties', description: '属性面板显示' },
 

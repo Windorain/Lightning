@@ -12,12 +12,11 @@ import {
 } from '@/preview/sceneStore'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { useSelectionContext } from '@/workbench/selectionContext'
-import { useToolRegistry } from '@/workbench/toolRegistry'
 import { useBContext } from '@/workbench/context/bContext'
-import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
+import type { ToolContext } from '@/workbench/tools/tool'
 import * as THREE from 'three'
 
 const props = defineProps<{
@@ -25,7 +24,6 @@ const props = defineProps<{
 }>()
 
 const selection = useSelectionContext()
-const toolRegistry = useToolRegistry()
 const bctx = useBContext()
 
 defineEmits<{}>()
@@ -62,6 +60,22 @@ const tooltipDisplayText = computed(() => {
 type BottomTab = 'frame' | 'layer'
 const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 
+function createToolContext(): ToolContext {
+  return {
+    scene: bctx.scene,
+    selection,
+    editHistory: bctx.editHistory,
+    viewport: bctx.viewport,
+    pickVoxel: (e) => bctx.queries.pickVoxel(e),
+    getCurrentFrame: () => bctx.queries.getCurrentFrame(),
+    invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
+    execOperator: (id, props) => bctx.operators.exec(id, props),
+    activeTool: bctx.toolRegistry.activeTool,
+    transient: {},
+    resetTransient() { this.transient = {} },
+  }
+}
+
 /* ---- Viewport events ---- */
 async function onViewportReady({ scene, layers, camera, domElement, orbitTarget }: ViewerCoreReadyPayload): Promise<void> {
   store.registerScene(scene)
@@ -75,6 +89,9 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
   vp.domElement.value = domElement
   vp.definition.value = structureDefinition.value ?? null
   vp.layerPreview.value = layerPreviewMode.value
+
+  // Build ToolContext for gizmos and tools
+  toolCtx = createToolContext()
 
   const VIEWPORT_REGION_ID = 'r-viewport'
 
@@ -106,9 +123,8 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
     VIEWPORT_REGION_ID,
     createToolGizmoHandler(
       VIEWPORT_REGION_ID,
-      () => vp.gizmo.value,
       () => bctx,
-      () => vp.camera.value,
+      () => toolCtx,
     ),
   )
   const unregKeymap = bctx.eventDispatcher.registerRegionHandler(
@@ -121,16 +137,11 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
   // Overlay — use ViewerCore's layer group directly
   vp.overlayGroup.value = layers.overlay
 
-  // MoveGizmo
-  const moveGizmo = new MoveGizmo()
-  vp.gizmo.value = moveGizmo
-  layers.overlay.add(moveGizmo.root)
-
   // Per-frame gizmo update via rAF
   function rafTick() {
     if (!_alive) return
     gizmoRafId = requestAnimationFrame(rafTick)
-    updateGizmo()
+    updateOverlay()
   }
   gizmoRafId = requestAnimationFrame(rafTick)
 }
@@ -138,6 +149,7 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
 let unregHandlers: Array<() => void> = []
 let gizmoRafId: number | undefined
 let _alive = true
+let toolCtx: ToolContext | null = null
 
 function voxelToWorld(x: number, y: number, z: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
   const sCol = def.cellGrid[0]?.[0]?.length ?? 1
@@ -194,31 +206,18 @@ function updateSelectionWireframe(): void {
   bctx.viewport.overlayGroup.value?.add(bctx.viewport.wireframe.value)
 }
 
-function updateGizmo(): void {
-  if (!bctx.viewport.gizmo.value) return
-
-  const tool = toolRegistry.activeTool.value
-  const items = selection.items.value
-  const showMoveGizmo = tool?.id === 'OPERATOR_MOVE' && items.size > 0
-  bctx.viewport.gizmo.value.setVisible(showMoveGizmo)
-
-  // 模态操作（MoveOperator.modal）期间跳过定位，由 modal 自己控制 gizmo 位置
-  if (showMoveGizmo && bctx.eventDispatcher.modalDepth('r-viewport') === 0) {
-    const def = structureDefinition.value
-    if (def) {
-      let cx = 0, cy = 0, cz = 0
-      for (const item of items) {
-        const w = voxelToWorld(item.pos.x, item.pos.y, item.pos.z, def)
-        cx += w.x; cy += w.y; cz += w.z
-      }
-      cx /= items.size; cy /= items.size; cz /= items.size
-      bctx.viewport.gizmo.value.setPosition(new THREE.Vector3(cx, cy, cz))
-    }
+function updateOverlay(): void {
+  // Call active gizmo's render (MoveGizmo handles its own visibility/positioning)
+  const gizmo = bctx.toolRegistry.activeGizmo.value
+  if (gizmo && toolCtx) {
+    gizmo.render(toolCtx)
   }
 
+  // Selection wireframe (shared, not gizmo-specific)
   updateSelectionWireframe()
 
-  if (bctx.viewport.gizmo.value && showMoveGizmo) {
+  // Debug state
+  if (bctx.viewport.gizmo.value && bctx.toolRegistry.activeTool.value?.id === 'move') {
     const gp = bctx.viewport.gizmo.value.root.position
     logCenter.updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
   } else {
@@ -266,7 +265,6 @@ onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())
   _alive = false
   if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
-  bctx.viewport.gizmo.value?.dispose()
   if (bctx.viewport.wireframe.value) {
     bctx.viewport.overlayGroup.value?.remove(bctx.viewport.wireframe.value)
     bctx.viewport.wireframe.value.geometry?.dispose()

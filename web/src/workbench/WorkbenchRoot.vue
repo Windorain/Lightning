@@ -14,26 +14,17 @@ import { provideConnectionContext } from '@/workbench/connectionContext'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
 import { provideToolRegistry } from '@/workbench/toolRegistry'
-import { provideBContext, type BContext } from '@/workbench/context/bContext'
-import { createProductionQueries } from '@/workbench/context/sceneQueries'
+import { provideBContext } from '@/workbench/context/bContext'
 import { createBContextSettings } from '@/workbench/context/toolSettings'
 
 // Operators — registered via shared VM assembly
-import { createWorkbenchContext, registerAllOperators } from '@/workbench/context/workbenchContext'
+import { createWorkbenchContext } from '@/workbench/context/workbenchContext'
 
 import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
 import { logCenter } from '@/workbench/logging/LogCenter'
-import { wikiConfig } from '@/workbench/wikiConfig'
 import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
-import { SpaceType, RegionType, type bScreen } from '@/workbench/ux/types/screen'
-import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
-import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt, relayout } from '@/workbench/ux/layout'
+import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
-import {
-  blockInspectorPanel, toolShelfPanel,
-  transformPanel, sceneInfoPanel,
-  menuBarPanel,
-} from '@/workbench/ux/panels'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 
@@ -57,7 +48,7 @@ const statusMessage = useStatusMessage().statusMessage
 
 // 共享 VM 组装
 const settings = createBContextSettings()
-const { bctx, rna, screen: defaultScreen } = createWorkbenchContext({
+const { bctx, screen: defaultScreen } = createWorkbenchContext({
   scene, connection, selection, editHistory, toolRegistry, settings,
   statusMessage,
 })
@@ -65,10 +56,6 @@ const { bctx, rna, screen: defaultScreen } = createWorkbenchContext({
 provideBContext(bctx)
 useNeiTheme()
 
-// 注册所有 operators + 重建工具列表 + 激活默认
-registerAllOperators(bctx)
-toolRegistry.rebuildTools()
-toolRegistry.activate('OPERATOR_SELECT')
 
 // Reactive panel queries
 const viewportArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!

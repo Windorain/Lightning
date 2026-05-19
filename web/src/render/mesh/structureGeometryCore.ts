@@ -290,20 +290,6 @@ export function mergeBakedQuadPiecesAttributes(pieces: BakedQuadGeometryPiece[])
   return { positions, uvs, colors }
 }
 
-/** BlockModel Part 展平为 BakedQuad[]，复用现有三角化路径 */
-export function blockModelQuadsFromParts(parts: import('../schema/types').BlockPartDef[]): BakedQuad[] {
-  const quads: BakedQuad[] = []
-  for (const part of parts) {
-    for (const face of part.faces) {
-      quads.push({
-        materialIndex: face.materialIndex,
-        vertices: face.vertices,
-      })
-    }
-  }
-  return quads
-}
-
 /**
  * 遍历体素网格，产出三角网格片段与统计。**无副作用**（仅分配新 TypedArray / 数组）。
  */
@@ -338,9 +324,6 @@ export function collectStructureGeometryPiecesPure(
       if (out.kind === 'none') return { quads: [] }
       // object3d from handler not supported in this collector — caller handles separately
       return { quads: [] }
-    }
-    if (entry.renderMode === 'BlockModel') {
-      return { quads: blockModelQuadsFromParts(entry.parts) }
     }
     try {
       return { quads: decodeBakedGeometry(entry.geometry) }

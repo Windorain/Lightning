@@ -59,9 +59,7 @@ export async function buildSingleBlockPreviewFromBakedPalette(
   materialPalette: MaterialPaletteEntry[],
   library: MaterialLibraryApi,
 ): Promise<SingleBlockBakeResult> {
-  const entryQuads: BakedQuad[] = entry.renderMode === 'BlockModel'
-    ? entry.parts.flatMap(p => p.faces.map(f => ({ materialIndex: f.materialIndex, vertices: f.vertices })))
-    : entry.geometry.quads
+  const entryQuads: BakedQuad[] = entry.geometry.quads
   const iconEntry: BakedModelPaletteEntry = {
     ...entry,
     renderMode: 'BakedModel' as const,

@@ -302,33 +302,6 @@ export interface BakedQuadsGeometry {
   quads: BakedQuad[]
 }
 
-/** Part 的一个面：4 顶点 + 方向 + 材质 */
-export interface BlockPartFace {
-  direction: number            // 0-5 DUNSWE
-  vertices: BakedQuadVertex[]  // always 4
-  materialIndex: number
-}
-
-/** 一个逻辑 Part，含 1-6 个面 */
-export interface BlockPartDef {
-  local_id: string
-  part_tag: string
-  faces: BlockPartFace[]
-}
-
-/** BlockModel 调色盘条目：几何由 Parts 承载，无平铺 quads */
-export interface BlockModelPaletteEntry {
-  registryId: string
-  meta: number
-  facing?: FaceName
-  nbt?: JsonNbt
-  thumbnailPNG?: string
-  tooltip?: string[]
-  occludesAdjacentFaces?: boolean
-  renderMode: 'BlockModel'
-  parts: BlockPartDef[]
-}
-
 /** BakedModel 调色盘条目：扁平 BakedQuad[] 几何 */
 export interface BakedModelPaletteEntry {
   registryId: string
@@ -342,19 +315,10 @@ export interface BakedModelPaletteEntry {
   geometry: BakedQuadsGeometry
 }
 
-export type BlockPaletteEntry = BlockModelPaletteEntry | BakedModelPaletteEntry
+export type BlockPaletteEntry = BakedModelPaletteEntry
 
 /** Wiki 网格管线使用的终态结构（保证已烘焙） */
 export type StructureDefinition = StructureDataBaked
-
-export function voxelStateFromBlockPaletteEntry(e: BlockPaletteEntry): VoxelState {
-  return {
-    registryId: e.registryId,
-    meta: e.meta,
-    facing: e.facing,
-    nbt: e.nbt,
-  }
-}
 
 export interface VoxelVolume {
   sizeColumn: number
@@ -369,6 +333,7 @@ export interface Frame {
   structureRef?: string
   durationMs?: number
   label?: string
+  annotations?: import('../data/annotationTypes').Annotation[]
 }
 
 export interface World {

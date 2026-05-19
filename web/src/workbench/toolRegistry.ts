@@ -1,93 +1,77 @@
+// web/src/workbench/toolRegistry.ts
 import type { InjectionKey, Ref } from 'vue'
-import { inject, provide, ref, shallowRef } from 'vue'
-import type { BContext } from '@/workbench/context/bContext'
-import { globalOperators } from '@/workbench/operators/operatorRegistry'
-import { logCenter } from '@/workbench/logging/LogCenter'
+import { inject, provide, ref } from 'vue'
+import type { Tool, ToolGizmo } from '@/workbench/tools/tool'
 
-const OPERATOR_TOOL_META: Record<string, { icon: string; cursor?: string; defaultKey?: string }> = {
-  OPERATOR_SELECT:       { icon: '▲', cursor: 'default' },
-  OPERATOR_MOVE:          { icon: '↕', cursor: 'move', defaultKey: 'g' },
-}
-
-export interface OperatorTool {
-  id: string
-  label: string
-  icon: string
-  cursor?: string
-  defaultKey?: string
-}
+export { type Tool, type ToolGizmo } from '@/workbench/tools/tool'
 
 export interface ToolRegistry {
-  readonly activeTool: Ref<OperatorTool | null>
-  readonly tools: Ref<Map<string, OperatorTool>>
-  activate(id: string, bctx?: BContext): void
+  readonly activeTool: Ref<Tool | null>
+  readonly activeGizmo: Ref<ToolGizmo | null>
+  readonly tools: Map<string, Tool>
+  readonly lastToolId: Ref<string | null>
+
+  register(tool: Tool, gizmo?: ToolGizmo): void
+  activate(id: string): void
   deactivate(): void
-  getPreviousEditToolId(): string | null
-  rebuildTools(): void
+  getTool(id: string): Tool | undefined
 }
 
 export const toolRegistryKey: InjectionKey<ToolRegistry> = Symbol('toolRegistry')
 
-export function createToolRegistry(): ToolRegistry {
-  const activeTool = ref<OperatorTool | null>(null)
-  const tools = shallowRef<Map<string, OperatorTool>>(new Map())
-  let previousEditToolId: string | null = null
+export function provideToolRegistry(): ToolRegistry {
+  const tools = new Map<string, Tool>()
+  const gizmos = new Map<string, ToolGizmo>()
+  const activeTool = ref<Tool | null>(null)
+  const activeGizmo = ref<ToolGizmo | null>(null)
+  const lastToolId = ref<string | null>(null)
 
-  function rebuildTools(): void {
-    const map = new Map<string, OperatorTool>()
-    for (const op of globalOperators.all()) {
-      const meta = OPERATOR_TOOL_META[op.id]
-      if (!meta) continue // skip internal operators (e.g. OPERATOR_MOVE_GIZMO)
-      map.set(op.id, {
-        id: op.id,
-        label: op.label,
-        icon: meta.icon,
-        cursor: meta.cursor,
-        defaultKey: meta.defaultKey,
-      })
-    }
-    tools.value = map
+  function register(tool: Tool, gizmo?: ToolGizmo): void {
+    tools.set(tool.id, tool)
+    if (gizmo) gizmos.set(tool.id, gizmo)
   }
 
-  function activate(id: string, _bctx?: BContext): void {
-    const tool = tools.value.get(id)
+  function activate(id: string): void {
+    const tool = tools.get(id)
     if (!tool || activeTool.value?.id === id) return
 
-    if (activeTool.value && activeTool.value.id !== 'OPERATOR_SELECT') {
-      previousEditToolId = activeTool.value.id
+    // Deactivate previous tool
+    if (activeTool.value) {
+      activeGizmo.value?.deactivate()
+    }
+
+    // Track last non-select tool for Tab toggle
+    if (activeTool.value && activeTool.value.id !== 'select') {
+      lastToolId.value = activeTool.value.id
     }
 
     activeTool.value = tool
-    logCenter.operator('ToolRegistry', `tool activated: ${id}`, { toolId: id, action: 'activate' })
+    const gizmo = gizmos.get(id) ?? null
+    activeGizmo.value = gizmo
   }
 
   function deactivate(): void {
-    activeTool.value = tools.value.get('OPERATOR_SELECT') ?? null
-    previousEditToolId = null
+    activeGizmo.value?.deactivate()
+    const select = tools.get('select')
+    activeTool.value = select ?? null
+    activeGizmo.value = select ? (gizmos.get('select') ?? null) : null
+    lastToolId.value = null
   }
 
-  function getPreviousEditToolId(): string | null {
-    return previousEditToolId
+  function getTool(id: string): Tool | undefined {
+    return tools.get(id)
   }
 
-  return {
-    activeTool,
-    tools,
-    activate,
-    deactivate,
-    getPreviousEditToolId,
-    rebuildTools,
+  const registry: ToolRegistry = {
+    activeTool, activeGizmo, tools, lastToolId,
+    register, activate, deactivate, getTool,
   }
-}
-
-export function provideToolRegistry(): ToolRegistry {
-  const registry = createToolRegistry()
   provide(toolRegistryKey, registry)
   return registry
 }
 
 export function useToolRegistry(): ToolRegistry {
   const ctx = inject(toolRegistryKey)
-  if (!ctx) throw new Error('useToolRegistry() 须在 WorkbenchRoot 子树内调用')
+  if (!ctx) throw new Error('useToolRegistry() must be called within WorkbenchRoot subtree')
   return ctx
 }

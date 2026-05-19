@@ -8,6 +8,6 @@ export const ToolSetOperator: OperatorType = {
   exec(bctx, props) {
     const toolId = props.toolId as string
     if (!toolId) return
-    bctx.toolRegistry.activate(toolId, bctx)
+    bctx.toolRegistry.activate(toolId)
   },
 }

@@ -4,7 +4,7 @@
  */
 
 import type { StructureDefinition, VoxelState, VoxelVolume } from '../schema/types'
-import { AIR_VOXEL, voxelStateFromBlockPaletteEntry } from '../schema/types'
+import { AIR_VOXEL } from '../schema/types'
 
 export interface VoxelCell {
   column: number
@@ -41,7 +41,13 @@ export function buildVoxelVolume(def: StructureDefinition): VoxelVolume {
       }
       const idx = cellGrid[zSlice]?.[row]?.[column]
       if (idx === undefined || idx < 0 || idx >= blockPalette.length) return AIR_VOXEL
-      return voxelStateFromBlockPaletteEntry(blockPalette[idx])
+      const entry = blockPalette[idx]
+      return {
+        registryId: entry.registryId,
+        meta: entry.meta,
+        facing: entry.facing,
+        nbt: entry.nbt,
+      }
     },
   }
 }

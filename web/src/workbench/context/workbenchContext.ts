@@ -28,7 +28,8 @@ import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import {
   blockInspectorPanel, toolShelfPanel,
   transformPanel, sceneInfoPanel,
-  menuBarPanel,
+  menuBarPanel, blockStatsPanel,
+  annotationPanel,
 } from '@/workbench/ux/panels'
 
 // All builtin operators
@@ -44,6 +45,16 @@ import { SetWorkspaceModeOperator, ResetLayoutOperator } from '@/workbench/opera
 import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/workbench/operators/builtin/sdeOperators'
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
 import { ThemeToggleOperator, SetLanguageOperator } from '@/workbench/operators/builtin/appearanceOperators'
+import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/workbench/operators/builtin/annotationOperators'
+
+// Tools
+import { selectTool } from '@/workbench/tools/selectTool'
+import { moveTool } from '@/workbench/tools/moveTool'
+import { MoveGizmo } from '@/workbench/tools/gizmos'
+import { boxTool, BoxGizmo } from '@/workbench/tools/boxTool'
+import { pointTool } from '@/workbench/tools/pointTool'
+import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
+import { textTool } from '@/workbench/tools/textTool'
 
 const ALL_OPERATORS = [
   SelectOperator, MoveOperator,
@@ -57,6 +68,7 @@ const ALL_OPERATORS = [
   SDEConnectOperator, SDELoadExportOperator, SDEPushOperator,
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
   ThemeToggleOperator, SetLanguageOperator,
+  AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
 ]
 
 export interface WorkbenchContextDeps {
@@ -158,7 +170,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels.push(menuBarPanel)
   const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
-    blockInspectorPanel, transformPanel, sceneInfoPanel,
+    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel,
   )
 
   computeLayout(bctx, defaultScreen)
@@ -176,6 +188,18 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   ;(bctx as any).area = null
   ;(bctx as any).region = null
   ;(bctx as any).rna = rna
+  ;(bctx as any).annotationState = {
+    currentDraft: null as Record<string, any> | null,
+    currentId: null as string | null,
+    setDraft(draft: Record<string, any> | null) {
+      this.currentDraft = draft
+      this.currentId = draft?.id ?? null
+    },
+    clearDraft() {
+      this.currentDraft = null
+      this.currentId = null
+    },
+  }
   ;(bctx as any).ui = {
     computeLayout: (s: bScreen) => computeLayout(bctx, s),
     boundsOf: (id: string) => boundsOf(bctx, id),
@@ -184,6 +208,20 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     regionAt: (x: number, y: number) => regionAt(defaultScreen, x, y),
     relayout: () => relayout(bctx),
   }
+
+  // 注册所有内置 operators + 工具
+  registerAllOperators(bctx)
+
+  // Register tools via ToolRegistry
+  const moveGizmo = new MoveGizmo()
+  toolRegistry.register(selectTool)
+  toolRegistry.register(moveTool, moveGizmo)
+  // Register annotation tools
+  toolRegistry.register(boxTool, new BoxGizmo())
+  toolRegistry.register(pointTool)
+  toolRegistry.register(lineTool, new LineGizmo())
+  toolRegistry.register(textTool)
+  toolRegistry.activate('select')
 
   return { bctx, rna, screen: defaultScreen }
 }

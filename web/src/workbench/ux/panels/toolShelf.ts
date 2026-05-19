@@ -12,7 +12,7 @@ export const toolShelfPanel: PanelDeclaration = {
   poll(): boolean { return true },
   owner(ctx: BContext): unknown { return ctx.settings },
   layout(ctx: BContext): UILayout {
-    const tools = [...ctx.toolRegistry.tools.value.values()]
+    const tools = [...ctx.toolRegistry.tools.values()]
     const items: UILayoutItem[] = tools.map(t => ({
       kind: 'operator' as const,
       id: 'OPERATOR_TOOL_SET',

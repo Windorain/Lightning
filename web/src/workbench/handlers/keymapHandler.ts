@@ -21,7 +21,6 @@ export function createKeymapHandler(
   regionId: string,
   getBctx: () => BContext | null,
 ): RegionEventHandler {
-  let keymap: InputBinding[] = []
   const drag: DragState = { active: false, startX: 0, startY: 0 }
 
   return {
@@ -30,7 +29,17 @@ export function createKeymapHandler(
       const bctx = getBctx()
       if (!bctx) return { break: false }
 
-      if (keymap.length === 0) keymap = loadKeymap()
+      // --- Build effective keymap ---
+      const tool = bctx.toolRegistry.activeTool.value
+      const defaultKeymap = loadKeymap()
+      const toolBindings = tool?.keymap ?? []
+      const fallbackBindings = tool?.keymapFallback ?? []
+
+      // Default bindings that aren't overridden by tool bindings
+      const filteredDefault = defaultKeymap.filter(
+        b => !isOverridden(b, toolBindings, fallbackBindings)
+      )
+      const effectiveKeymap = [...toolBindings, ...fallbackBindings, ...filteredDefault]
 
       // ---- Dragging state consumes pointermove/pointerup ----
       if (drag.active) {
@@ -54,23 +63,36 @@ export function createKeymapHandler(
         }
       }
 
-      // ---- Match keymap bindings ----
-      for (const binding of keymap) {
+      // --- Match effective keymap bindings ---
+      for (const binding of effectiveKeymap) {
         if (!matchBinding(binding, event)) continue
 
         // KEY binding
         if (binding.type === 'KEY') {
+          // toolId activates a tool
+          if (binding.toolId) {
+            bctx.toolRegistry.activate(binding.toolId)
+            return { break: true }
+          }
           if (binding.action) {
             switch (binding.action) {
               case 'undo': bctx.operators.exec('OPERATOR_UNDO'); break
               case 'redo': bctx.operators.exec('OPERATOR_REDO'); break
               case 'toggle-tool': {
-                const prev = bctx.toolRegistry.getPreviousEditToolId()
-                if (prev) bctx.toolRegistry.activate(prev, bctx)
-                else bctx.toolRegistry.activate('OPERATOR_SELECT', bctx)
+                const prev = bctx.toolRegistry.lastToolId.value
+                if (prev) bctx.toolRegistry.activate(prev)
+                else bctx.toolRegistry.activate('select')
                 break
               }
               case 'select-all': bctx.operators.exec('OPERATOR_SELECT_ALL'); break
+              case 'toggle-toolshelf': {
+                // existing toggle-toolshelf logic if any
+                break
+              }
+              case 'toggle-properties': {
+                // existing toggle-properties logic if any
+                break
+              }
             }
           }
           return { break: true }
@@ -89,7 +111,12 @@ export function createKeymapHandler(
           }
 
           if (binding.opId) {
-            const result = bctx.operators.invoke(binding.opId, undefined, event, regionId)
+            // --- Property merging: tool.properties as base, keymap item props override ---
+            const toolProps = tool?.properties ?? {}
+            const itemProps = (binding as any).props ?? {}
+            const mergedProps = { ...toolProps, ...itemProps }
+
+            const result = bctx.operators.invoke(binding.opId, mergedProps, event, regionId)
             if (result === OP_RESULT.FINISHED) {
               const pe = event as PointerEvent
               drag.active = true
@@ -112,4 +139,35 @@ export function createKeymapHandler(
       return { break: false }
     },
   }
+}
+
+/** Check if a default binding is overridden by tool or fallback bindings */
+function isOverridden(
+  binding: InputBinding,
+  toolKeymap: InputBinding[],
+  fallbackKeymap: InputBinding[],
+): boolean {
+  const allOverrides = [...toolKeymap, ...fallbackKeymap]
+  return allOverrides.some(b => sameTrigger(b, binding))
+}
+
+/** Two bindings match on the same trigger (would conflict) */
+function sameTrigger(a: InputBinding, b: InputBinding): boolean {
+  if (a.type !== b.type) return false
+  if (a.type === 'KEY' && b.type === 'KEY') {
+    return a.key.toLowerCase() === b.key.toLowerCase()
+      && (a.ctrl ?? false) === (b.ctrl ?? false)
+      && (a.shift ?? false) === (b.shift ?? false)
+  }
+  if (a.type === 'MOUSE' && b.type === 'MOUSE') {
+    return a.button === b.button
+      && (a.ctrl ?? false) === (b.ctrl ?? false)
+      && (a.shift ?? false) === (b.shift ?? false)
+  }
+  if (a.type === 'WHEEL' && b.type === 'WHEEL') {
+    return a.direction === b.direction
+      && (a.ctrl ?? false) === (b.ctrl ?? false)
+      && (a.shift ?? false) === (b.shift ?? false)
+  }
+  return false
 }

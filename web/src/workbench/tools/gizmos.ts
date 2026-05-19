@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { ToolGizmo, ToolContext } from './tool'
 
 const AXIS_COLORS = {
   x: 0xff3333,
@@ -73,7 +74,7 @@ function makePlane(axes: 'xy' | 'xz' | 'yz', color: number): PlaneMeshes {
   return { plane }
 }
 
-export class MoveGizmo {
+export class MoveGizmo implements ToolGizmo {
   readonly root: THREE.Group
   private arrows: Record<'x' | 'y' | 'z', ArrowMeshes>
   private planes: Record<'xy' | 'xz' | 'yz', PlaneMeshes>
@@ -193,5 +194,103 @@ export class MoveGizmo {
       m.geometry?.dispose()
       ;(m.material as THREE.Material)?.dispose()
     }
+  }
+
+  activate(_ctx: ToolContext): void {
+    void _ctx
+    this.setVisible(false)
+  }
+
+  deactivate(): void {
+    this.setVisible(false)
+  }
+
+  render(ctx: ToolContext): void {
+    const items = ctx.selection.items.value
+    const tool = ctx.activeTool.value
+    const showGizmo = tool?.id === 'move' && items.size > 0
+    this.setVisible(showGizmo)
+
+    if (showGizmo) {
+      // Position gizmo at selection center
+      const def = ctx.viewport.definition.value
+      if (def) {
+        let cx = 0, cy = 0, cz = 0
+        for (const item of items) {
+          const w = this._voxelToWorld(item.pos.x, item.pos.y, item.pos.z, def)
+          cx += w.x; cy += w.y; cz += w.z
+        }
+        cx /= items.size; cy /= items.size; cz /= items.size
+        this.setPosition(new THREE.Vector3(cx, cy, cz))
+      }
+    }
+  }
+
+  onPointerMove(ctx: ToolContext, event: PointerEvent): void {
+    const camera = ctx.viewport.camera.value
+    const domEl = ctx.viewport.domElement.value
+    if (!camera || !domEl) return
+    const rect = domEl.getBoundingClientRect()
+    if (!rect) return
+    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
+    const hit = this.hitTest(raycaster)
+    this.setHighlight(hit)
+  }
+
+  onPointerDown(ctx: ToolContext, event: PointerEvent): void {
+    const camera = ctx.viewport.camera.value
+    const domEl = ctx.viewport.domElement.value
+    if (!camera || !domEl) return
+    const rect = domEl.getBoundingClientRect()
+    if (!rect) return
+    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
+    const hit = this.hitTest(raycaster)
+    if (!hit || hit.length !== 1) return
+
+    // Compute axis screen direction and pixel-to-world scale
+    const gPos = this.root.position
+    const axisWorldDir = new THREE.Vector3(
+      hit === 'x' ? 1 : 0,
+      hit === 'y' ? 1 : 0,
+      hit === 'z' ? 1 : 0,
+    )
+    const p1 = gPos.clone().project(camera)
+    const p2 = gPos.clone().add(axisWorldDir).project(camera)
+    const sx = ((p2.x - p1.x) / 2) * rect.width
+    const sy = -((p2.y - p1.y) / 2) * rect.height
+    const screenLen = Math.sqrt(sx * sx + sy * sy)
+    const screenDirX = screenLen > 0.001 ? sx / screenLen : 0
+    const screenDirY = screenLen > 0.001 ? sy / screenLen : 0
+    const k = screenLen > 0.001 ? 1 / screenLen : 0
+
+    ctx.invokeOperator('OPERATOR_MOVE', {
+      gizmoAxis: hit,
+      gizmo: this,
+      screenDirX,
+      screenDirY,
+      k,
+    }, event)
+  }
+
+  onPointerUp(_ctx: ToolContext, _event: PointerEvent): void {
+    void _ctx; void _event
+    // Modal completion handled by operator internally
+  }
+
+  private _voxelToWorld(x: number, y: number, z: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
+    const sCol = def.cellGrid[0]?.[0]?.length ?? 1
+    const sRow = def.cellGrid[0]?.length ?? 1
+    const sZ = def.cellGrid.length ?? 1
+    return new THREE.Vector3(
+      x - sCol / 2 + 0.5,
+      y - sRow / 2 + 0.5,
+      z - sZ / 2 + 0.5,
+    )
   }
 }
