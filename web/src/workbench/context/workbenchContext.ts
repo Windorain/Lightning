@@ -22,7 +22,7 @@ import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
 import { createProductionQueries } from '@/workbench/context/sceneQueries'
-import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA } from '@/workbench/ux/rna'
+import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt, relayout } from '@/workbench/ux/layout'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import {
@@ -135,6 +135,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   rna.register(toolSettingsRNA)
   rna.register(sceneMetaRNA)
   rna.register(wikiConfigRNA)
+  rna.register(annotationRNA)
 
   // ---- 默认 screen 布局 ----
   const defaultScreen: bScreen = {

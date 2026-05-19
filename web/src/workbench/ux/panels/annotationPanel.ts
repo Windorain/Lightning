@@ -46,8 +46,9 @@ export const annotationPanel: PanelDeclaration = {
       { kind: 'separator' },
       {
         kind: 'box', label: '外观', items: [
-          { kind: 'property', rnaPath: 'annotation.color', label: '颜色', widget: 'color' },
-          { kind: 'property', rnaPath: 'annotation.visible', label: '可见', widget: 'checkbox' },
+          { kind: 'property', rnaPath: 'annotation.color', label: '颜色' },
+          { kind: 'property', rnaPath: 'annotation.visible', label: '可见' },
+          { kind: 'property', rnaPath: 'annotation.locked', label: '锁定' },
         ],
       },
     )
@@ -59,9 +60,10 @@ export const annotationPanel: PanelDeclaration = {
           { kind: 'separator' },
           {
             kind: 'box', label: '包围盒', items: [
-              { kind: 'label', text: `Min: ${fmtVec(draft.min)}` },
-              { kind: 'label', text: `Max: ${fmtVec(draft.max)}` },
-              { kind: 'property', rnaPath: 'annotation.renderStyle', label: '渲染样式', widget: 'dropdown' },
+              { kind: 'property', rnaPath: 'annotation.min', label: '最小坐标' },
+              { kind: 'property', rnaPath: 'annotation.max', label: '最大坐标' },
+              { kind: 'property', rnaPath: 'annotation.renderStyle', label: '渲染样式' },
+              { kind: 'property', rnaPath: 'annotation.renderOpacity', label: '不透明度' },
             ],
           },
         )
@@ -71,8 +73,8 @@ export const annotationPanel: PanelDeclaration = {
           { kind: 'separator' },
           {
             kind: 'box', label: '位置 & 图标', items: [
-              { kind: 'label', text: `位置: ${fmtVec(draft.pos)}` },
-              { kind: 'property', rnaPath: 'annotation.icon', label: '图标', widget: 'dropdown' },
+              { kind: 'property', rnaPath: 'annotation.pos', label: '位置' },
+              { kind: 'property', rnaPath: 'annotation.icon', label: '图标' },
               { kind: 'property', rnaPath: 'annotation.size', label: '大小' },
             ],
           },
@@ -83,9 +85,9 @@ export const annotationPanel: PanelDeclaration = {
           { kind: 'separator' },
           {
             kind: 'box', label: '线段', items: [
-              { kind: 'label', text: `${draft.points?.length ?? 0} 个点` },
               { kind: 'property', rnaPath: 'annotation.thickness', label: '粗细' },
-              { kind: 'property', rnaPath: 'annotation.arrow', label: '箭头', widget: 'dropdown' },
+              { kind: 'property', rnaPath: 'annotation.arrow', label: '箭头' },
+              { kind: 'property', rnaPath: 'annotation.showPoints', label: '显示控制点' },
             ],
           },
         )
@@ -95,8 +97,10 @@ export const annotationPanel: PanelDeclaration = {
           { kind: 'separator' },
           {
             kind: 'box', label: '文本', items: [
-              { kind: 'property', rnaPath: 'annotation.text', label: '内容', widget: 'text' },
+              { kind: 'property', rnaPath: 'annotation.anchorPos', label: '锚点位置' },
+              { kind: 'property', rnaPath: 'annotation.text', label: '内容' },
               { kind: 'property', rnaPath: 'annotation.fontSize', label: '字号' },
+              { kind: 'property', rnaPath: 'annotation.backgroundAlpha', label: '背景透明度' },
             ],
           },
         )
@@ -112,9 +116,4 @@ export const annotationPanel: PanelDeclaration = {
 
     return { kind: 'column', align: false, items }
   },
-}
-
-function fmtVec(v: { x?: number; y?: number; z?: number } | undefined): string {
-  if (!v) return '()'
-  return `(${(v.x ?? 0).toFixed(2)}, ${(v.y ?? 0).toFixed(2)}, ${(v.z ?? 0).toFixed(2)})`
 }

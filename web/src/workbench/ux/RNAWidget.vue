@@ -11,13 +11,15 @@ const props = defineProps<{
 
 const widget = computed(() => {
   if (!props.descriptor) return 'text'
-  return props.descriptor.uiWidget ?? inferWidget(props.descriptor.type)
+  return props.descriptor.uiWidget ?? inferWidget(props.descriptor)
 })
 
-function inferWidget(type: string): string {
-  switch (type) {
-    case 'string':  return 'text'
-    case 'number':  return 'number'
+function inferWidget(desc: NonNullable<typeof props.descriptor>): string {
+  switch (desc.type) {
+    case 'string':
+      return (desc.enumItems && desc.enumItems.length > 0) ? 'dropdown' : 'text'
+    case 'number':
+      return (desc.min != null && desc.max != null) ? 'slider' : 'number'
     case 'boolean': return 'checkbox'
     case 'color':   return 'color'
     case 'enum':    return 'dropdown'
@@ -74,6 +76,13 @@ function setValue(val: unknown): void {
         :checked="(getValue() as boolean) ?? false"
         @change="(e: Event) => setValue((e.target as HTMLInputElement).checked)"
         class="ux-checkbox"
+      />
+      <input
+        v-else-if="widget === 'color'"
+        type="color"
+        :value="getValue() as string"
+        @input="(e: Event) => setValue((e.target as HTMLInputElement).value)"
+        class="ux-color"
       />
       <select
         v-else-if="widget === 'dropdown'"
@@ -144,6 +153,7 @@ function setValue(val: unknown): void {
 .ux-slider { flex: 1; }
 .ux-slider-val { font-size: 11px; min-width: 30px; text-align: right; }
 .ux-checkbox { width: 16px; height: 16px; }
+.ux-color { width: 32px; height: 22px; padding: 0; border: 1px solid var(--ui-border, #555); border-radius: 2px; cursor: pointer; }
 .ux-vec-input {
   width: 50px;
   padding: 2px 4px;
