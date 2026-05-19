@@ -52,9 +52,9 @@ import { selectTool } from '@/workbench/tools/selectTool'
 import { moveTool } from '@/workbench/tools/moveTool'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { boxTool, BoxGizmo } from '@/workbench/tools/boxTool'
-import { pointTool } from '@/workbench/tools/pointTool'
+import { pointTool, PointGizmo } from '@/workbench/tools/pointTool'
 import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
-import { textTool } from '@/workbench/tools/textTool'
+import { textTool, TextGizmo } from '@/workbench/tools/textTool'
 
 const ALL_OPERATORS = [
   SelectOperator, MoveOperator,
@@ -219,9 +219,9 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   toolRegistry.register(moveTool, moveGizmo)
   // Register annotation tools
   toolRegistry.register(boxTool, new BoxGizmo())
-  toolRegistry.register(pointTool)
+  toolRegistry.register(pointTool, new PointGizmo())
   toolRegistry.register(lineTool, new LineGizmo())
-  toolRegistry.register(textTool)
+  toolRegistry.register(textTool, new TextGizmo())
   toolRegistry.activate('select')
 
   return { bctx, rna, screen: defaultScreen }

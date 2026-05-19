@@ -1,22 +1,22 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import ViewerCore, { type ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
-import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import type { View3DConfig } from '@/preview/previewConfig'
 import {
   View3DContextKey,
   createView3DStore,
 } from '@/preview/sceneStore'
-import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { useSelectionContext } from '@/workbench/selectionContext'
 import { useBContext } from '@/workbench/context/bContext'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
+import { AnnotationMeshProvider } from '@/render/mesh/annotationMeshProvider'
+import type { Annotation } from '@/render/data/annotationTypes'
 import * as THREE from 'three'
 
 const props = defineProps<{
@@ -35,27 +35,17 @@ watch(() => props.config, async (cfg) => {
   try { await store.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logCenter.error('WorkbenchViewport', `reloadFromConfig: ${e}`) }
 })
 
-const { hover, setHover, clearHover } = usePreviewTooltip()
-
 const {
   loadStatus,
   structureDefinition,
   materialLibrary,
   layerPreviewMode,
   mainMeshGroup,
-  tooltipPalette,
   hasWorldMultiFrame,
   worldFrameIndex,
   worldFrameCount,
   layerPreviewLabel,
 } = store
-
-const tooltipDisplayText = computed(() => {
-  const def = structureDefinition.value
-  const h = hover.value
-  if (!def || !h?.blockId) return ''
-  return resolvePreviewTooltipText(def, tooltipPalette.value, h)
-})
 
 type BottomTab = 'frame' | 'layer'
 const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
@@ -159,6 +149,47 @@ let gizmoRafId: number | undefined
 let _alive = true
 let toolCtx: ToolContext | null = null
 
+// Annotation overlay
+const _annoProvider = new AnnotationMeshProvider()
+let _annoGroup: THREE.Group | null = null
+let _annoHash = ''
+let _annoPending = false
+
+function updateAnnotationOverlay(): void {
+  const doc = bctx.scene.scene.value as Record<string, any> | null
+  const annos: Annotation[] = doc?.annotations ?? []
+  const hash = annos.length > 0 ? String(annos.length) : 'empty'
+  if (hash === _annoHash || _annoPending) return
+  _annoHash = hash
+  _annoPending = true
+
+  const def = structureDefinition.value
+  const lib = materialLibrary.value
+  if (!def || !lib) { _annoPending = false; return }
+
+  _annoProvider.setAnnotations(annos)
+  _annoProvider.build(def, lib).then(outputs => {
+    _annoPending = false
+    // Dispose old
+    if (_annoGroup) {
+      bctx.viewport.overlayGroup.value?.remove(_annoGroup)
+      _annoGroup.traverse((c) => {
+        if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
+          c.geometry?.dispose()
+          ;(c.material as THREE.Material)?.dispose()
+        }
+      })
+      _annoGroup = null
+    }
+    // Add new
+    const out = outputs[0]
+    if (out && out.kind === 'object3d') {
+      _annoGroup = out.object as THREE.Group
+      bctx.viewport.overlayGroup.value?.add(_annoGroup)
+    }
+  }).catch(() => { _annoPending = false })
+}
+
 function voxelToWorld(x: number, y: number, z: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
   const sCol = def.cellGrid[0]?.[0]?.length ?? 1
   const sRow = def.cellGrid[0]?.length ?? 1
@@ -224,6 +255,9 @@ function updateOverlay(): void {
   // Selection wireframe (shared, not gizmo-specific)
   updateSelectionWireframe()
 
+  // Persistent annotation meshes
+  updateAnnotationOverlay()
+
   // Debug state
   if (bctx.viewport.gizmo.value && bctx.toolRegistry.activeTool.value?.id === 'move') {
     const gp = bctx.viewport.gizmo.value.root.position
@@ -237,13 +271,6 @@ function updateOverlay(): void {
       target: bctx.viewport.orbitTarget.value ? [bctx.viewport.orbitTarget.value.x, bctx.viewport.orbitTarget.value.y, bctx.viewport.orbitTarget.value.z] : [0, 0, 0],
     })
   }
-}
-
-function onViewportHover(
-  p: { blockId: string; clientX: number; clientY: number; voxel: { column: number; row: number; zSlice: number } } | null,
-): void {
-  if (p) setHover({ ...p, source: 'viewport' })
-  else clearHover('viewport')
 }
 
 function onViewportSelect(
@@ -296,7 +323,6 @@ onBeforeUnmount(() => {
       :edit-mode="true"
       :show-axes-gizmo="config.features.showAxesGizmo !== false"
       @ready="onViewportReady"
-      @hover-block="onViewportHover"
       @select-block="onViewportSelect"
     />
     </div>
@@ -319,7 +345,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <ToolTipBox v-if="hover && tooltipDisplayText" :text="tooltipDisplayText" :client-x="hover.clientX" :client-y="hover.clientY" />
   </div>
 </template>
 

@@ -38,29 +38,30 @@ export function detectPartBounds(
   const volume = buildVoxelVolume(def)
   const { sizeColumn, sizeRow, sizeZSlice } = volume
 
-  // Step 2: Resolve quads
+  // Step 2: Resolve quads (geometry-based blocks only)
   let quads: BakedQuad[]
+  let hasGeometry = false
   try {
-    // BakedModel: geometry.quads (standard path)
     if ('geometry' in entry && entry.geometry) {
       quads = decodeBakedGeometry(entry.geometry)
+      hasGeometry = true
     } else {
-      // No geometry available
-      return null
+      quads = []
     }
   } catch {
-    return null
+    quads = []
   }
 
-  if (quads.length === 0) return null
+  // Step 3: Fallback — no geometry → unit block AABB from voxel position
+  if (!hasGeometry || quads.length === 0) {
+    return computeUnitBlockAABB(column, row, zSlice, sizeColumn, sizeRow, sizeZSlice)
+  }
 
-  // Step 3: Determine which quad indices to include
+  // Step 4: Determine which quad indices to include
   let indices: number[]
   if (hitQuadIndex === null || hitQuadIndex < 0 || hitQuadIndex >= quads.length) {
-    // No specific quad hit → full block AABB
     indices = Array.from({ length: quads.length }, (_, i) => i)
   } else {
-    // BFS from hit quad to find connected component
     indices = findConnectedQuadGroup(hitQuadIndex, quads)
   }
 
@@ -100,6 +101,23 @@ function quadsShareVertex(a: BakedQuad, b: BakedQuad): boolean {
     }
   }
   return false
+}
+
+/** Compute unit (1x1x1) block AABB for entries without geometry */
+function computeUnitBlockAABB(
+  col: number, row: number, zSlice: number,
+  sizeCol: number, sizeRow: number, sizeZ: number,
+): PartBounds {
+  const voxelY = structureRowToWorldY(row, sizeRow)
+  const ox = col - sizeCol / 2
+  const oy = voxelY - sizeRow / 2
+  const oz = zSlice - sizeZ / 2
+  return {
+    min: { x: ox - 0.5, y: oy - 0.5, z: oz - 0.5 },
+    max: { x: ox + 0.5, y: oy + 0.5, z: oz + 0.5 },
+    quadCount: 0,
+    totalQuads: 0,
+  }
 }
 
 /** Compute world-space AABB from quad vertices */

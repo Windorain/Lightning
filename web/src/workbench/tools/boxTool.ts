@@ -1,7 +1,6 @@
 // web/src/workbench/tools/boxTool.ts
 import type { Tool, ToolGizmo, ToolContext } from './tool'
 import type { PartBounds } from './partDetect'
-import type { BoxAnnotation } from '@/render/data/annotationTypes'
 import { detectPartBounds } from './partDetect'
 import * as THREE from 'three'
 
@@ -52,19 +51,16 @@ export class BoxGizmo implements ToolGizmo {
   onPointerDown(ctx: ToolContext, event: PointerEvent): void {
     if (!this._hoverBounds) return
 
-    const draft: Partial<BoxAnnotation> = {
-      type: 'box',
+    const draft = {
+      ...ctx.activeTool.value?.properties,
+      type: 'box' as const,
       min: { ...this._hoverBounds.min },
       max: { ...this._hoverBounds.max },
+      frameIndex: ctx.getCurrentFrame()?.index ?? 0,
     }
 
-    ctx.invokeOperator('ANNOTATION_CREATE', {
-      annotation: {
-        ...ctx.activeTool.value?.properties,
-        ...draft,
-        frameIndex: ctx.getCurrentFrame()?.index ?? 0,
-      },
-    }, event)
+    ctx.invokeOperator('ANNOTATION_CREATE', { annotation: draft }, event)
+    ctx.setAnnotationDraft(draft as Record<string, unknown>)
   }
 
   onPointerUp(_ctx: ToolContext, _event: PointerEvent): void {}
