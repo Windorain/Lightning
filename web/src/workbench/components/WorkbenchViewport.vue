@@ -72,6 +72,7 @@ function createToolContext(): ToolContext {
     execOperator: (id, props) => bctx.operators.exec(id, props),
     activeTool: bctx.toolRegistry.activeTool,
     modalDepth: (rid: string) => bctx.eventDispatcher.modalDepth(rid),
+    setAnnotationDraft: (draft) => (bctx as any).annotationState?.setDraft(draft),
     transient: {},
     resetTransient() { this.transient = {} },
   }

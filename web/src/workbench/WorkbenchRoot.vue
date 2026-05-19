@@ -25,6 +25,7 @@ import { logCenter } from '@/workbench/logging/LogCenter'
 import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
+import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 
@@ -70,13 +71,13 @@ const activeToolshelfPanels = computed(() =>
 const activePropertiesPanels = computed(() =>
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels
     .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
+    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
 const activeHeaderPanels = computed(() =>
   viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels
     .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
+    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
 // Context menu
@@ -203,13 +204,7 @@ onMounted(() => {
       <ViewportHost />
     </template>
     <template #properties>
-      <UIRenderer
-        v-for="panel in activePropertiesPanels"
-        :key="panel.id"
-        :layout="panel.layout"
-        :rna="bctx.rna"
-        :owner="panel.owner"
-      />
+      <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" />
     </template>
     <template #statusbar>
       <StatusBar />

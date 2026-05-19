@@ -61,4 +61,7 @@ export interface ToolContext {
 
   /** 查询指定 region 的模态栈深度。>0 表示有操作符在模态运行中 */
   modalDepth(regionId: string): number
+
+  /** 设置注解面板 draft（触发面板自动切换） */
+  setAnnotationDraft(draft: Record<string, unknown> | null): void
 }

@@ -1,7 +1,6 @@
 // web/src/workbench/tools/lineTool.ts
 import type { Tool, ToolGizmo, ToolContext } from './tool'
 import * as THREE from 'three'
-import type { LineAnnotation } from '@/render/data/annotationTypes'
 
 export const lineTool: Tool = {
   id: 'annotation-line',
@@ -48,17 +47,14 @@ export class LineGizmo implements ToolGizmo {
     this._points.push(picked.pos)
 
     if (this._points.length >= 2) {
-      const draft: Partial<LineAnnotation> = {
-        type: 'line',
+      const draft = {
+        ...ctx.activeTool.value?.properties,
+        type: 'line' as const,
         points: [...this._points],
+        frameIndex: ctx.getCurrentFrame()?.index ?? 0,
       }
-      ctx.invokeOperator('ANNOTATION_CREATE', {
-        annotation: {
-          ...ctx.activeTool.value?.properties,
-          ...draft,
-          frameIndex: ctx.getCurrentFrame()?.index ?? 0,
-        },
-      }, event)
+      ctx.invokeOperator('ANNOTATION_CREATE', { annotation: draft }, event)
+      ctx.setAnnotationDraft(draft as Record<string, unknown>)
       this._points = []
       this._clearPreview()
     }
