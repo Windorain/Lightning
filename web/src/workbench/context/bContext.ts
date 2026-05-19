@@ -77,9 +77,9 @@ export interface ViewportRuntime {
   domElement: Ref<HTMLElement | null>
   definition: Ref<StructureDefinition | null>
   layerPreview: Ref<LayerPreviewMode | null>
-  gizmo: Ref<MoveGizmo | null>
+  gizmo: ShallowRef<MoveGizmo | null>
   overlayGroup: Ref<THREE.Group | null>
-  wireframe: Ref<THREE.LineSegments | null>
+  wireframe: ShallowRef<THREE.LineSegments | null>
   /** 轨道旋转目标点（scene.world.origin 偏移），默认 (0,0,0) */
   orbitTarget: Ref<THREE.Vector3 | null>
 }

@@ -8,7 +8,7 @@
  * 由调用方创建后传入——生产用 provide* 工厂，测试用 create* 工厂。
  */
 
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import type { BContext } from '@/workbench/context/bContext'
 import type { SceneContext } from '@/workbench/sceneContext'
 import type { ConnectionContext } from '@/workbench/connectionContext'
@@ -118,9 +118,9 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
       domElement: ref(null),
       definition: ref(null),
       layerPreview: ref(null),
-      gizmo: ref(null),
+      gizmo: shallowRef(null),
       overlayGroup: ref(null),
-      wireframe: ref(null),
+      wireframe: shallowRef(null),
       orbitTarget: ref(null),
     },
     settings,
@@ -214,6 +214,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
 
   // Register tools via ToolRegistry
   const moveGizmo = new MoveGizmo()
+  bctx.viewport.gizmo.value = moveGizmo
   toolRegistry.register(selectTool)
   toolRegistry.register(moveTool, moveGizmo)
   // Register annotation tools

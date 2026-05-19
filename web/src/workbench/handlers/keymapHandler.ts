@@ -118,10 +118,13 @@ export function createKeymapHandler(
 
             const result = bctx.operators.invoke(binding.opId, mergedProps, event, regionId)
             if (result === OP_RESULT.FINISHED) {
-              const pe = event as PointerEvent
-              drag.active = true
-              drag.startX = pe.clientX
-              drag.startY = pe.clientY
+              const hasGizmo = bctx.toolRegistry.activeGizmo.value !== null
+              if (!hasGizmo) {
+                const pe = event as PointerEvent
+                drag.active = true
+                drag.startX = pe.clientX
+                drag.startY = pe.clientY
+              }
             }
           }
           return { break: false }

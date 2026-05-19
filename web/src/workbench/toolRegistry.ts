@@ -1,7 +1,7 @@
 // web/src/workbench/toolRegistry.ts
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref } from 'vue'
-import type { Tool, ToolGizmo } from '@/workbench/tools/tool'
+import type { Tool, ToolGizmo, ToolContext } from '@/workbench/tools/tool'
 
 export { type Tool, type ToolGizmo } from '@/workbench/tools/tool'
 
@@ -15,6 +15,7 @@ export interface ToolRegistry {
   activate(id: string): void
   deactivate(): void
   getTool(id: string): Tool | undefined
+  setToolContext(ctx: ToolContext): void
 }
 
 export const toolRegistryKey: InjectionKey<ToolRegistry> = Symbol('toolRegistry')
@@ -25,6 +26,7 @@ export function provideToolRegistry(): ToolRegistry {
   const activeTool = ref<Tool | null>(null)
   const activeGizmo = ref<ToolGizmo | null>(null)
   const lastToolId = ref<string | null>(null)
+  let _toolCtx: ToolContext | null = null
 
   function register(tool: Tool, gizmo?: ToolGizmo): void {
     tools.set(tool.id, tool)
@@ -48,6 +50,9 @@ export function provideToolRegistry(): ToolRegistry {
     activeTool.value = tool
     const gizmo = gizmos.get(id) ?? null
     activeGizmo.value = gizmo
+    if (gizmo && _toolCtx) {
+      gizmo.activate(_toolCtx)
+    }
   }
 
   function deactivate(): void {
@@ -62,9 +67,16 @@ export function provideToolRegistry(): ToolRegistry {
     return tools.get(id)
   }
 
+  function setToolContext(ctx: ToolContext): void {
+    _toolCtx = ctx
+    if (activeGizmo.value) {
+      activeGizmo.value.activate(ctx)
+    }
+  }
+
   const registry: ToolRegistry = {
     activeTool, activeGizmo, tools, lastToolId,
-    register, activate, deactivate, getTool,
+    register, activate, deactivate, getTool, setToolContext,
   }
   provide(toolRegistryKey, registry)
   return registry

@@ -71,6 +71,7 @@ function createToolContext(): ToolContext {
     invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
     execOperator: (id, props) => bctx.operators.exec(id, props),
     activeTool: bctx.toolRegistry.activeTool,
+    modalDepth: (rid: string) => bctx.eventDispatcher.modalDepth(rid),
     transient: {},
     resetTransient() { this.transient = {} },
   }
@@ -92,6 +93,7 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
 
   // Build ToolContext for gizmos and tools
   toolCtx = createToolContext()
+  bctx.toolRegistry.setToolContext(toolCtx)
 
   const VIEWPORT_REGION_ID = 'r-viewport'
 
@@ -136,6 +138,11 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
 
   // Overlay — use ViewerCore's layer group directly
   vp.overlayGroup.value = layers.overlay
+
+  // Add registered gizmo roots to overlay
+  if (vp.gizmo.value) {
+    layers.overlay.add(vp.gizmo.value.root)
+  }
 
   // Per-frame gizmo update via rAF
   function rafTick() {

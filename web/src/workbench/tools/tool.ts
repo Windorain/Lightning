@@ -58,4 +58,7 @@ export interface ToolContext {
   /** 工具 transient 状态（draft 注解数据等），工具切换时 reset */
   transient: Record<string, unknown>
   resetTransient(): void
+
+  /** 查询指定 region 的模态栈深度。>0 表示有操作符在模态运行中 */
+  modalDepth(regionId: string): number
 }

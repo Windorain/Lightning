@@ -37,14 +37,14 @@ function makeArrow(axis: 'x' | 'y' | 'z', color: number): ArrowMeshes {
     : new THREE.Vector3(0, 0, 1)
 
   const cylGeo = new THREE.CylinderGeometry(ARROW_RADIUS, ARROW_RADIUS, ARROW_LENGTH - CONE_LENGTH, 8)
-  const cylMat = new THREE.MeshBasicMaterial({ color, depthTest: true, depthWrite: false })
+  const cylMat = new THREE.MeshBasicMaterial({ color, depthTest: false, depthWrite: false })
   const line = new THREE.Mesh(cylGeo, cylMat)
   line.position.copy(dir.clone().multiplyScalar((ARROW_LENGTH - CONE_LENGTH) / 2))
   if (axis === 'x') line.rotation.z = -Math.PI / 2
   if (axis === 'z') line.rotation.x = Math.PI / 2
 
   const coneGeo = new THREE.ConeGeometry(CONE_RADIUS, CONE_LENGTH, 8)
-  const coneMat = new THREE.MeshBasicMaterial({ color, depthTest: true, depthWrite: false })
+  const coneMat = new THREE.MeshBasicMaterial({ color, depthTest: false, depthWrite: false })
   const cone = new THREE.Mesh(coneGeo, coneMat)
   cone.position.copy(dir.clone().multiplyScalar(ARROW_LENGTH - CONE_LENGTH / 2))
   if (axis === 'x') cone.rotation.z = -Math.PI / 2
@@ -104,6 +104,10 @@ export class MoveGizmo implements ToolGizmo {
     for (const p of Object.values(this.planes)) {
       this.root.add(p.plane)
       this.allMeshes.push(p.plane)
+    }
+    // Render gizmo on top — depth always passes, drawn last among overlay objects
+    for (const m of this.allMeshes) {
+      m.renderOrder = 999
     }
   }
 
@@ -211,8 +215,8 @@ export class MoveGizmo implements ToolGizmo {
     const showGizmo = tool?.id === 'move' && items.size > 0
     this.setVisible(showGizmo)
 
-    if (showGizmo) {
-      // Position gizmo at selection center
+    // 模态拖拽期间跳过定位，由 OPERATOR_MOVE.modal() 控制 gizmo 位置
+    if (showGizmo && ctx.modalDepth('r-viewport') === 0) {
       const def = ctx.viewport.definition.value
       if (def) {
         let cx = 0, cy = 0, cz = 0
