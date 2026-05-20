@@ -115,6 +115,15 @@ export class Grid {
     return result
   }
 
+  /** 将 GridPos (Y-up) 转换为世界空间体素中心坐标（网格居中于原点，方块中心偏移 +0.5） */
+  centerWorld(pos: GridPos): { x: number; y: number; z: number } {
+    return {
+      x: pos.x - this._width / 2 + 0.5,
+      y: pos.y - this._height / 2 + 0.5,
+      z: pos.z - this._depth / 2 + 0.5,
+    }
+  }
+
   count(): number {
     let n = 0
     for (let z = 0; z < this._depth; z++) {

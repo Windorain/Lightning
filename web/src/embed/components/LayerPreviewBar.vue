@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
-import { View3DContextKey } from '@/preview/sceneStore'
+import { bContextKey } from '@/workbench/context/bContext'
 
-const store = inject(View3DContextKey)
-if (!store) throw new Error('LayerPreviewBar: PreviewSceneContext missing')
+const bctx = inject(bContextKey)
+if (!bctx) throw new Error('LayerPreviewBar: bContext missing')
 
-const { layerPreviewLabel, gridHeight, meshBusy } = store
+const { layerPreviewLabel, gridHeight, meshBusy } = bctx
 
-const localY = ref<number>(store.layerWorldY.value)
+const localY = ref<number>(bctx.layerWorldY.value)
 
 // 非 busy 时同步 store 值到本地
-watch(() => store!.layerWorldY.value, (v) => {
+watch(() => bctx!.layerWorldY.value, (v) => {
   if (!meshBusy.value) localY.value = v
 })
 
@@ -23,7 +23,7 @@ function onInput(e: Event): void {
 function onChange(e: Event): void {
   const v = Number((e.target as HTMLInputElement).value)
   localY.value = v
-  store!.layerWorldY.value = v
+  bctx!.layerWorldY.value = v
 }
 </script>
 

@@ -103,10 +103,10 @@ function onMouseMove(e: MouseEvent) {
 }
 
 // Wire context menu + show/hide into wm (不在 createWorkbenchContext 内，因为依赖 showContextMenu 闭包)
-;(bctx.wm as any).contextMenu = contextMenu  // 覆盖 workbenchContext 创建的空菜单
-;(bctx.wm as any).showContextMenu = showContextMenu
-;(bctx.wm as any).hideContextMenu = hideContextMenu
-;(bctx.wm as any).contextMenuItems = ADD_MENU_ITEMS
+  bctx.wm.contextMenu = contextMenu
+  bctx.wm.showContextMenu = showContextMenu
+  bctx.wm.hideContextMenu = hideContextMenu
+  bctx.wm.contextMenuItems = ADD_MENU_ITEMS
 
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {

@@ -6,6 +6,7 @@ export interface KeyBinding {
   toolId?: string
   action?: string
   opId?: string
+  props?: Record<string, unknown>
   description: string
 }
 
@@ -17,6 +18,7 @@ export interface MouseBinding {
   toolId?: string
   action?: string
   opId?: string
+  props?: Record<string, unknown>
   description: string
 }
 
@@ -26,6 +28,7 @@ export interface WheelBinding {
   ctrl?: boolean
   shift?: boolean
   opId?: string
+  props?: Record<string, unknown>
   description: string
 }
 

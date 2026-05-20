@@ -1,22 +1,19 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import ViewerCore, { type ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
 import type { View3DConfig } from '@/preview/previewConfig'
-import {
-  View3DContextKey,
-  createView3DStore,
-} from '@/preview/sceneStore'
 import { useSelectionContext } from '@/workbench/selectionContext'
-import { useBContext } from '@/workbench/context/bContext'
+import { useBContext, type LoadStatus } from '@/workbench/context/bContext'
+import { createSceneLifecycle } from '@/workbench/context/sceneLifecycle'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
-import { AnnotationMeshProvider } from '@/render/mesh/annotationMeshProvider'
 import type { Annotation } from '@/render/data/annotationTypes'
+import type { Ref, ShallowRef } from 'vue'
 import * as THREE from 'three'
 
 const props = defineProps<{
@@ -28,65 +25,97 @@ const bctx = useBContext()
 
 defineEmits<{}>()
 
-const store = createView3DStore(props.config)
-provide(View3DContextKey, store)
+// ---- Initialize rendering lifecycle on bctx ----
+bctx.config.value = props.config
+bctx.materialLibrary.value = props.config.materialLibrary
+
+const VIEWPORT_REGION_ID = 'r-viewport'
+const vpSlot = bctx.viewports.get(VIEWPORT_REGION_ID) ?? bctx.viewports.register(VIEWPORT_REGION_ID)
+const sceneRef = shallowRef<THREE.Scene | null>(null)
+
+const lifecycle = createSceneLifecycle({
+  configRef: bctx.config as ShallowRef<View3DConfig>,
+  loadStatus: bctx.loadStatus as Ref<LoadStatus>,
+  meshBusy: bctx.meshBusy,
+  materialLibrary: bctx.materialLibrary,
+  blockIconCache: bctx.blockIconCache,
+  tooltipPalette: bctx.tooltipPalette,
+  structureDefinition: vpSlot.definition,
+  mainMeshGroup: vpSlot.contentGroup,
+  sceneRef,
+  worldFrameIndex: bctx.worldFrameIndex,
+  layerWorldY: bctx.layerWorldY,
+  framesPlaybackIsPlaying: bctx.framesPlaybackIsPlaying,
+})
+
+// Override bctx stubs with real implementations
+Object.assign(bctx, {
+  loadStructureAndResources: lifecycle.loadStructureAndResources,
+  rebuildContentMesh: lifecycle.rebuildContentMesh,
+  rebuildAnnotationOverlay: lifecycle.rebuildAnnotationOverlay,
+  setCurrentWorldFrame: lifecycle.setCurrentWorldFrame,
+  toggleWorldFramesPlayback: lifecycle.toggleWorldFramesPlayback,
+  disposeCachesAndLibrary: lifecycle.disposeCachesAndLibrary,
+  reloadFromConfig: lifecycle.reloadFromConfig,
+  registerScene: lifecycle.registerScene,
+  worldFrameCount: lifecycle.computed.worldFrameCount,
+  hasWorldMultiFrame: lifecycle.computed.hasWorldMultiFrame,
+  gridHeight: lifecycle.computed.gridHeight,
+  layerPreviewMode: lifecycle.computed.layerPreviewMode,
+  layerPreviewLabel: lifecycle.computed.layerPreviewLabel,
+  blockStatsEntries: lifecycle.computed.blockStatsEntries,
+})
 
 watch(() => props.config, async (cfg) => {
-  try { await store.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logCenter.error('WorkbenchViewport', `reloadFromConfig: ${e}`) }
+  try { await bctx.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logCenter.error('WorkbenchViewport', `reloadFromConfig: ${e}`) }
 })
 
 const {
   loadStatus,
-  structureDefinition,
   materialLibrary,
   layerPreviewMode,
-  mainMeshGroup,
   hasWorldMultiFrame,
   worldFrameIndex,
   worldFrameCount,
   layerPreviewLabel,
-} = store
+} = bctx
+const structureDefinition = vpSlot.definition
+const mainMeshGroup = vpSlot.contentGroup
 
 type BottomTab = 'frame' | 'layer'
 const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 
 function createToolContext(): ToolContext {
   return {
-    scene: bctx.scene,
     selection,
-    editHistory: bctx.editHistory,
     viewport: bctx.viewport,
     pickVoxel: (e) => bctx.queries.pickVoxel(e),
     getCurrentFrame: () => bctx.queries.getCurrentFrame(),
     gridCenterWorld: (pos) => bctx.queries.gridCenterWorld(pos),
     invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
-    execOperator: (id, props) => bctx.operators.exec(id, props),
     activeTool: bctx.toolRegistry.activeTool,
     modalDepth: (rid: string) => bctx.eventDispatcher.modalDepth(rid),
-    transient: {},
-    resetTransient() { this.transient = {} },
   }
 }
 
 /* ---- Viewport events ---- */
 async function onViewportReady({ scene, layers, camera, domElement, orbitTarget }: ViewerCoreReadyPayload): Promise<void> {
-  store.registerScene(scene)
-  try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
+  const VIEWPORT_REGION_ID = 'r-viewport'
 
-  // Wire bContext viewport state
-  const vp = bctx.viewport
-  vp.orbitTarget.value = orbitTarget
-  vp.camera.value = camera
-  vp.contentGroup.value = mainMeshGroup.value ?? new THREE.Group()
-  vp.domElement.value = domElement
-  vp.definition.value = structureDefinition.value ?? null
-  vp.layerPreview.value = layerPreviewMode.value
+  bctx.registerScene(scene)
+  try { await bctx.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
+
+  // Wire bContext viewport slot
+  vpSlot.orbitTarget.value = orbitTarget
+  vpSlot.camera.value = camera
+  vpSlot.contentGroup.value = mainMeshGroup.value ?? new THREE.Group()
+  vpSlot.domElement.value = domElement
+  vpSlot.definition.value = structureDefinition.value ?? null
+  vpSlot.layerPreview.value = layerPreviewMode.value
 
   // Build ToolContext for gizmos and tools
   toolCtx = createToolContext()
   bctx.toolRegistry.setToolContext(toolCtx)
-
-  const VIEWPORT_REGION_ID = 'r-viewport'
 
   // EventDispatcher
   bctx.eventDispatcher.registerRegion(VIEWPORT_REGION_ID)
@@ -128,11 +157,11 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
   unregHandlers.push(unregGizmo, unregKeymap)
 
   // Overlay — use ViewerCore's layer group directly
-  vp.overlayGroup.value = layers.overlay
+  vpSlot.overlayGroup.value = layers.overlay
 
   // Add registered gizmo roots to overlay
-  if (vp.gizmo.value) {
-    layers.overlay.add(vp.gizmo.value.root)
+  if (vpSlot.gizmo.value) {
+    layers.overlay.add(vpSlot.gizmo.value.root)
   }
 
   // Per-frame gizmo update via rAF
@@ -150,7 +179,6 @@ let _alive = true
 let toolCtx: ToolContext | null = null
 
 // Annotation overlay
-const _annoProvider = new AnnotationMeshProvider()
 let _annoGroup: THREE.Group | null = null
 let _annoHash = ''
 let _annoPending = false
@@ -159,21 +187,15 @@ function updateAnnotationOverlay(): void {
   const doc = bctx.scene.scene.value as Record<string, any> | null
   const annos: Annotation[] = doc?.annotations ?? []
   const maxUpdated = annos.length > 0
-    ? annos.reduce((max, a) => Math.max(max, (a as any).updated_at ?? 0), 0)
+    ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
     : 0
   const hash = annos.length > 0 ? `${annos.length}_${maxUpdated}` : 'empty'
   if (hash === _annoHash || _annoPending) return
   _annoHash = hash
   _annoPending = true
 
-  const def = structureDefinition.value
-  const lib = materialLibrary.value
-  if (!def || !lib) { _annoPending = false; return }
-
-  _annoProvider.setAnnotations(annos)
-  _annoProvider.build(def, lib).then(outputs => {
+  bctx.rebuildAnnotationOverlay(annos).then(group => {
     _annoPending = false
-    // Dispose old
     if (_annoGroup) {
       bctx.viewport.overlayGroup.value?.remove(_annoGroup)
       _annoGroup.traverse((c) => {
@@ -184,10 +206,8 @@ function updateAnnotationOverlay(): void {
       })
       _annoGroup = null
     }
-    // Add new
-    const out = outputs[0]
-    if (out && out.kind === 'object3d') {
-      _annoGroup = out.object as THREE.Group
+    if (group) {
+      _annoGroup = group
       bctx.viewport.overlayGroup.value?.add(_annoGroup)
     }
   }).catch(() => { _annoPending = false })
@@ -265,23 +285,18 @@ function updateOverlay(): void {
 
 watch(worldFrameIndex, (i) => { bctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }) }, { immediate: true })
 
-// Sync vp.definition when the store updates its definition after scene reload
-watch(structureDefinition, (def) => {
-  bctx.viewport.definition.value = def ?? null
-})
-
-onMounted(async () => { await store.loadStructureAndResources() })
+onMounted(async () => { await bctx.loadStructureAndResources() })
 onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())
   _alive = false
   if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
-  if (bctx.viewport.wireframe.value) {
-    bctx.viewport.overlayGroup.value?.remove(bctx.viewport.wireframe.value)
-    bctx.viewport.wireframe.value.geometry?.dispose()
-    ;(bctx.viewport.wireframe.value.material as THREE.Material)?.dispose()
-    bctx.viewport.wireframe.value = null
+  if (vpSlot.wireframe.value) {
+    vpSlot.overlayGroup.value?.remove(vpSlot.wireframe.value)
+    vpSlot.wireframe.value.geometry?.dispose()
+    ;(vpSlot.wireframe.value.material as THREE.Material)?.dispose()
+    vpSlot.wireframe.value = null
   }
-  store.disposeCachesAndLibrary()
+  bctx.disposeCachesAndLibrary()
 })
 </script>
 
@@ -295,7 +310,6 @@ onBeforeUnmount(() => {
       :content-group="mainMeshGroup"
       :layer-preview-mode="layerPreviewMode"
       :scene-background="config.sceneBackground"
-      :edit-mode="true"
       :show-axes-gizmo="config.features.showAxesGizmo !== false"
       @ready="onViewportReady"
     />

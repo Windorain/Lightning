@@ -101,7 +101,7 @@ export function createKeymapHandler(
         // MOUSE binding
         if (binding.type === 'MOUSE') {
           if (binding.action === 'context-menu') {
-            const wm = (bctx as any).wm as any
+            const wm = bctx.wm
             const pe = event as PointerEvent
             if (wm.showContextMenu && wm.contextMenu) {
               const items = wm.contextMenuItems ?? []
@@ -113,7 +113,7 @@ export function createKeymapHandler(
           if (binding.opId) {
             // --- Property merging: tool.properties as base, keymap item props override ---
             const toolProps = tool?.properties ?? {}
-            const itemProps = (binding as any).props ?? {}
+            const itemProps = binding.props ?? {}
             const mergedProps = { ...toolProps, ...itemProps }
 
             const result = bctx.operators.invoke(binding.opId, mergedProps, event, regionId)

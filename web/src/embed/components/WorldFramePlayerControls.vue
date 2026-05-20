@@ -4,15 +4,15 @@
  */
 import { computed, inject } from 'vue'
 
-import { View3DContextKey } from '@/preview/sceneStore'
+import { bContextKey } from '@/workbench/context/bContext'
 
-const store = inject(View3DContextKey)
+const bctx = inject(bContextKey)
 
-const visible = computed(() => store?.hasWorldMultiFrame.value ?? false)
-const playing = computed(() => store?.framesPlaybackIsPlaying.value ?? false)
+const visible = computed(() => bctx?.hasWorldMultiFrame.value ?? false)
+const playing = computed(() => bctx?.framesPlaybackIsPlaying.value ?? false)
 
 function onToggle(): void {
-  store?.toggleWorldFramesPlayback()
+  bctx?.toggleWorldFramesPlayback()
 }
 </script>
 

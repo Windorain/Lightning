@@ -1,73 +1,70 @@
 <script setup lang="ts">
 /**
- * EmbedViewer — 纯 View 组件。
+ * EmbedViewport — 嵌入场景的视口消费者。
  *
- * 职责：
- * - 创建 View3DStore 做场景编排（加载/mesh/帧/层）
- * - 渲染 UI 组件（标题栏、侧栏、视口、底部控件、tooltip）
- * - 处理 hover/tooltip 状态
- * - ViewerCore @ready 后注册 scene、重建 mesh，向上 emit ready 供 Controller 层装配事件
- *
- * 不创建 EmbedContext、不注册 region/handler、不加 capture listener。
- * 事件装配由上级 Controller 负责：
- *   独立嵌入 → EmbedShell (embed/EmbedShell.vue)
- *   工作台内 → Workbench Area/Region 路由
+ * 与 WorkbenchViewport 对齐：
+ * - 优先注入父级 bctx；若不存在则自建 embed bctx
+ * - 注册 viewport slot
+ * - 桥接 Three.js 运行时到 bctx.viewports
+ * - 装配 embed 事件链（operators + keymap handler + capture listeners）
  */
-import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import ViewerCore from '@/embed/components/ViewerCore.vue'
 import type { ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
+import type { Annotation } from '@/render/data/annotationTypes'
+import * as THREE from 'three'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
 import type { View3DConfig } from '@/preview/previewConfig'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import {
-  View3DContextKey,
-  createView3DStore,
-} from '@/preview/sceneStore'
+import { bContextKey, type BContext } from '@/workbench/context/bContext'
+import { createEmbedBContext, provideEmbedBContext } from '@/embed/embedContext'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
+import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
+import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
+import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
 
-const emit = defineEmits<{
-  ready: [payload: ViewerCoreReadyPayload]
-}>()
+const props = defineProps<{ config: View3DConfig }>()
 
-const props = defineProps<{
-  config: View3DConfig
-}>()
+// ---- BContext: inject or self-create ----
+// Workbench bctx (has scene) is incompatible — create independent embed bctx
+const _injectedBctx = inject<BContext | null>(bContextKey, null)
+const _isWorkbenchBctx = _injectedBctx?.scene != null
+const _ownsBctx = !_injectedBctx || _isWorkbenchBctx
+const bctx: BContext = (_injectedBctx && !_isWorkbenchBctx) ? _injectedBctx : createEmbedBContext(props.config)
+if (_ownsBctx) {
+  provideEmbedBContext(bctx)
+}
 
-// ---- View3DStore (scene orchestration) ----
-const store = createView3DStore(props.config)
-provide(View3DContextKey, store)
-
+bctx.config.value = props.config
 watch(() => props.config, (cfg) => {
-  store.config.value = cfg
+  bctx.config.value = cfg
+  bctx.reloadFromConfig(cfg).catch(e => console.error('[EmbedViewport] reloadFromConfig', e))
 })
+
+// Viewport slot
+const EMBED_REGION = 'r-viewport'
+const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED_REGION)
 
 // ---- Hover / tooltip ----
 const { hover, setHover, clearHover } = usePreviewTooltip()
 
 const {
-  loadStatus,
-  statusBarTone,
-  statusMessage,
-  structureDefinition,
-  materialLibrary,
-  blockIconCache,
-  blockStatsEntries,
-  layerPreviewMode,
-  mainMeshGroup,
-  tooltipPalette,
-  hasWorldMultiFrame,
-  worldFrameIndex,
-  worldFrameCount,
-  layerPreviewLabel,
-} = store
+  loadStatus, materialLibrary, layerPreviewMode,
+  hasWorldMultiFrame, worldFrameIndex, worldFrameCount, layerPreviewLabel,
+  blockIconCache, blockStatsEntries, tooltipPalette,
+} = bctx
+
+// Local accessors for template
+const structureDefinition = computed(() => vpSlot.definition.value)
+const mainMeshGroup = computed(() => vpSlot.contentGroup.value)
 
 // ---- Feature flags ----
 const f = computed(() => props.config.features)
@@ -113,14 +110,14 @@ function onMetaHintFocusOut(): void { metaHintPointer.value = null }
 
 // ---- Tooltip text ----
 const tooltipDisplayText = computed(() => {
-  const def = structureDefinition.value
+  const def = vpSlot.definition.value
   const h = hover.value
   if (!def || !h?.blockId) return ''
   return resolvePreviewTooltipText(def, tooltipPalette.value, h)
 })
 
 const neiTooltipMap = computed<Map<string, string[]>>(() => {
-  const def = structureDefinition.value
+  const def = vpSlot.definition.value
   if (!def) return new Map()
   const map = new Map<string, string[]>()
   for (const e of def.blockPalette) {
@@ -142,7 +139,7 @@ const neiTooltipText = computed(() => {
 const previewTitle = computed(() => {
   const fromDoc = sceneDisplayTitleFromRootDocument(props.config.renderBundle.document)
   if (fromDoc) return fromDoc
-  const def = structureDefinition.value
+  const def = vpSlot.definition.value
   const lab = def?.label?.trim()
   if (lab) return lab
   const id = def?.id?.trim()
@@ -153,13 +150,12 @@ const previewTitle = computed(() => {
 const statusBarClass = computed(() => {
   if (loadStatus.value === 'error') return 'wm-status-bar wm-status-bar--err'
   if (loadStatus.value === 'loading') return 'wm-status-bar wm-status-bar--loading'
-  if (statusBarTone.value === 'warn') return 'wm-status-bar wm-status-bar--warn'
   return 'wm-status-bar wm-status-bar--ok'
 })
 
 const statusSummary = computed(() => {
   if (loadStatus.value === 'loading') return '加载中…'
-  if (loadStatus.value === 'error') return statusMessage.value
+  if (loadStatus.value === 'error') return ''
   const parts: string[] = ['场景已加载']
   if (hasWorldMultiFrame.value) {
     parts.push(`${worldFrameCount.value} Frames`)
@@ -168,10 +164,98 @@ const statusSummary = computed(() => {
 })
 
 // ---- Viewport events ----
+let _annoGroup: THREE.Group | null = null
+let _annoHash = ''
+let _annoPending = false
+let _alive = true
+let _annoRafId: number | undefined
+
+function updateAnnotationOverlay(): void {
+  const doc = props.config.renderBundle.document as Record<string, any> | null
+  const annos: Annotation[] = doc?.annotations ?? []
+  const maxUpdated = annos.length > 0
+    ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
+    : 0
+  const hash = annos.length > 0 ? `${annos.length}_${maxUpdated}` : 'empty'
+  if (hash === _annoHash || _annoPending) return
+  _annoHash = hash
+  _annoPending = true
+
+  bctx.rebuildAnnotationOverlay(annos).then(group => {
+    _annoPending = false
+    if (_annoGroup) {
+      vpSlot.overlayGroup.value?.remove(_annoGroup)
+      _annoGroup.traverse((c) => {
+        if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
+          c.geometry?.dispose()
+          ;(c.material as THREE.Material)?.dispose()
+        }
+      })
+      _annoGroup = null
+    }
+    if (group) {
+      _annoGroup = group
+      vpSlot.overlayGroup.value?.add(_annoGroup)
+    }
+  }).catch(() => { _annoPending = false })
+}
+
+let unregHandlers: Array<() => void> = []
+
 function onViewportReady(payload: ViewerCoreReadyPayload): void {
-  store.registerScene(payload.scene)
-  store.rebuildContentMesh().catch(e => { console.error('[EmbedViewer] rebuildContentMesh', e) })
-  emit('ready', payload)
+  bctx.registerScene(payload.scene)
+  bctx.rebuildContentMesh().catch(e => { console.error('[EmbedViewport] rebuildContentMesh', e) })
+
+  // Initial annotation load
+  updateAnnotationOverlay()
+
+  // Wire viewport slot
+  vpSlot.orbitTarget.value = payload.orbitTarget
+  vpSlot.camera.value = payload.camera
+  vpSlot.contentGroup.value = mainMeshGroup.value ?? new THREE.Group()
+  vpSlot.domElement.value = payload.domElement
+  vpSlot.definition.value = structureDefinition.value ?? null
+  vpSlot.layerPreview.value = layerPreviewMode.value
+  vpSlot.overlayGroup.value = payload.layers.overlay
+
+  // Register embed operators
+  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ResetViewOperator]) {
+    if (!bctx.operators.find(op.id)) bctx.operators.register(op)
+  }
+
+  // EventDispatcher
+  bctx.eventDispatcher.registerRegion(EMBED_REGION)
+  unregHandlers.push(
+    bctx.eventDispatcher.registerRegionHandler(
+      EMBED_REGION,
+      createEmbedKeymapHandler(EMBED_REGION, () => bctx),
+    ),
+  )
+
+  const dom = payload.domElement
+  dom.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) e.preventDefault()
+    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
+  }, { capture: true })
+  dom.addEventListener('pointermove', (e) => {
+    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
+  }, { capture: true })
+  dom.addEventListener('pointerup', (e) => {
+    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
+  }, { capture: true })
+  dom.addEventListener('wheel', (e) => {
+    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
+    e.preventDefault()
+  }, { capture: true, passive: false })
+  dom.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
+
+  // Per-frame annotation update
+  function rafTick() {
+    if (!_alive) return
+    _annoRafId = requestAnimationFrame(rafTick)
+    updateAnnotationOverlay()
+  }
+  _annoRafId = requestAnimationFrame(rafTick)
 }
 
 function onViewportHover(
@@ -188,9 +272,22 @@ function onSidebarTooltipHover(
   else clearHover('sidebar')
 }
 
-onMounted(async () => { await store.loadStructureAndResources() })
+onMounted(async () => { await bctx.loadStructureAndResources() })
 onBeforeUnmount(() => {
-  store.disposeCachesAndLibrary()
+  unregHandlers.forEach(fn => fn())
+  bctx.eventDispatcher.unregisterRegion(EMBED_REGION)
+  _alive = false
+  if (_annoRafId) cancelAnimationFrame(_annoRafId)
+  if (_annoGroup) {
+    _annoGroup.traverse((c) => {
+      if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
+        c.geometry?.dispose()
+        ;(c.material as THREE.Material)?.dispose()
+      }
+    })
+    _annoGroup = null
+  }
+  bctx.disposeCachesAndLibrary()
 })
 </script>
 
@@ -215,9 +312,11 @@ onBeforeUnmount(() => {
       <div class="wm-viewport-column">
         <ViewerCore
           v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
-          :definition="structureDefinition" :material-library="materialLibrary"
+          :definition="structureDefinition"
+          :material-library="materialLibrary"
           :content-group="mainMeshGroup"
-          :layer-preview-mode="layerPreviewMode" :scene-background="config.sceneBackground"
+          :layer-preview-mode="layerPreviewMode"
+          :scene-background="config.sceneBackground"
           :show-axes-gizmo="f.showAxesGizmo"
           @ready="onViewportReady"
           @hover-block="onViewportHover"

@@ -97,7 +97,7 @@ export class OperatorRegistry {
       const result = op.invoke(bctx, resolvedProps, event)
 
       if (result === OP_RESULT.RUNNING_MODAL) {
-        const targetRegion = regionId ?? (bctx.eventDispatcher as any).getCurrentRegionId?.() ?? 'r-viewport'
+        const targetRegion = regionId ?? bctx.eventDispatcher.getCurrentRegionId() ?? 'r-viewport'
         const wrapper = new ModalOperatorWrapper(op, bctx, resolvedProps, targetRegion)
         if (snapshot !== null) {
           wrapper.setUndoSnapshot(snapshot)
