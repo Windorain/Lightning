@@ -16,7 +16,7 @@ import {
 } from '@/render/interaction/initialCamera'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
-import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
+import { scenePickFromPointer, type ScenePickBlock } from '@/render/interaction/scenePick'
 import type { StructureDefinition } from '@/render/schema/types'
 
 export interface ViewerCoreReadyPayload {
@@ -97,14 +97,15 @@ function runPick(): void {
   const dom = canvasEl
   if (!vp || !g || !dom || !lastPointer) return
 
-  const picked = pickVoxelFromPointer({
+  const picked = scenePickFromPointer({
     clientX: lastPointer.clientX, clientY: lastPointer.clientY,
     domElement: dom, camera: vp.camera,
-    contentGroup: g, def: props.definition,
+    contentGroup: g, overlayGroup: layers?.overlay,
+    def: props.definition,
     layerPreview: props.layerPreviewMode,
   })
 
-  if (picked) {
+  if (picked && picked.kind === 'block') {
     emit('hover-block', {
       blockId: picked.blockId,
       clientX: lastPointer.clientX, clientY: lastPointer.clientY,
@@ -145,13 +146,14 @@ function onPointerUp(e: PointerEvent): void {
   const g = props.contentGroup
   const dom = canvasEl
   if (!vp || !g || !dom) return
-  const picked = pickVoxelFromPointer({
+  const picked = scenePickFromPointer({
     clientX: e.clientX, clientY: e.clientY,
     domElement: dom, camera: vp.camera,
-    contentGroup: g, def: props.definition,
+    contentGroup: g, overlayGroup: layers?.overlay,
+    def: props.definition,
     layerPreview: props.layerPreviewMode,
   })
-  if (picked) {
+  if (picked && picked.kind === 'block') {
     emit('select-block', {
       blockId: picked.blockId,
       clientX: e.clientX, clientY: e.clientY,

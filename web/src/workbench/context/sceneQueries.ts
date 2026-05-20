@@ -9,7 +9,7 @@ import type { BContext, BContextQueries } from '@/workbench/context/bContext'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { V2AnnotationBox } from '@/render/data/sceneDocumentV2'
 import type { Frame } from '@/render/schema/types'
-import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
+import { scenePickFromPointer } from '@/render/interaction/scenePick'
 import { ARROW_LENGTH, CONE_LENGTH } from '@/workbench/tools/gizmos'
 
 export function createProductionQueries(bctx: BContext): BContextQueries {
@@ -21,19 +21,22 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const domElement = vp.domElement.value
       const definition = vp.definition.value
       if (!camera || !contentGroup || !domElement || !definition) return null
-      const result = pickVoxelFromPointer({
+      const result = scenePickFromPointer({
         clientX: event.clientX,
         clientY: event.clientY,
         domElement,
         camera,
         contentGroup,
+        overlayGroup: vp.overlayGroup.value ?? undefined,
         def: definition,
         layerPreview: vp.layerPreview.value ?? 'all',
       })
-      if (!result) return null
+      if (!result || result.kind !== 'block') return null
 
-      // 从 structure definition 获取 grid height 以转换 cellGrid row → world Y
-      const h = definition.cellGrid[0]?.length ?? 0
+      // 从 RuntimeDocument Grid 获取 height 以转换 cellGrid row → world Y
+      const doc = bctx.scene.scene.value
+      const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
+      const h = rf?.grid?.height ?? 0
       const worldY = h > 0 ? h - 1 - result.row : result.row
 
       return {
@@ -159,37 +162,24 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const definition = vp.definition.value
       if (!camera || !contentGroup || !domElement || !definition) return null
 
-      const rect = domElement.getBoundingClientRect()
-      const mouse = new THREE.Vector2(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1,
-      )
-
-      const raycaster = new THREE.Raycaster()
-      raycaster.setFromCamera(mouse, camera)
-
-      const hits = raycaster.intersectObject(contentGroup, true)
-      if (!hits.length) return null
-      const hit = hits[0]
-      if (!hit.face) return null
-      const normalWorld = hit.face.normal
-        .clone()
-        .transformDirection((hit.object as THREE.Object3D).matrixWorld)
-        .normalize()
-
-      const nx = Math.round(normalWorld.x)
-      const ny = Math.round(normalWorld.y)
-      const nz = Math.round(normalWorld.z)
-
-      const result = pickVoxelFromPointer({
+      const result = scenePickFromPointer({
         clientX: event.clientX, clientY: event.clientY,
-        domElement, camera, contentGroup, def: definition,
+        domElement, camera,
+        contentGroup,
+        overlayGroup: vp.overlayGroup.value ?? undefined,
+        def: definition,
         layerPreview: vp.layerPreview.value ?? 'all',
       })
-      if (!result) return null
+      if (!result || result.kind !== 'block') return null
 
-      // cellGrid row → world Y
-      const h = definition.cellGrid[0]?.length ?? 0
+      const nx = Math.round(result.normal?.x ?? 0)
+      const ny = Math.round(result.normal?.y ?? 0)
+      const nz = Math.round(result.normal?.z ?? 0)
+
+      // cellGrid row → world Y (use RuntimeDocument Grid height)
+      const doc = bctx.scene.scene.value
+      const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
+      const h = rf?.grid?.height ?? 0
       const worldY = h > 0 ? h - 1 - result.row : result.row
 
       return {
@@ -246,6 +236,14 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
         y: 0,
         z: origin.z + dir.z * t,
       }
+    },
+
+    gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null {
+      const doc = bctx.scene.scene.value
+      if (!doc) return null
+      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      if (!rf?.grid) return null
+      return rf.grid.centerWorld(pos)
     },
   }
 }

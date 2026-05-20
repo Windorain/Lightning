@@ -15,10 +15,10 @@ export interface PartBounds {
 }
 
 /**
- * Detect the Part bounding box from a hit quad.
+ * Detect the Part bounding box from a hit voxel.
  * @param def Structure definition
  * @param column Grid column of the hit voxel
- * @param row Grid row of the hit voxel
+ * @param worldY World Y coordinate of the hit voxel (Y-up, 0=bottom)
  * @param zSlice Grid z-slice of the hit voxel
  * @param hitQuadIndex Index of the hit quad within the block's quad array, or null for full-block fallback
  * @returns PartBounds or null if no quads found
@@ -26,17 +26,21 @@ export interface PartBounds {
 export function detectPartBounds(
   def: StructureDefinition,
   column: number,
-  row: number,
+  worldY: number,
   zSlice: number,
   hitQuadIndex: number | null,
 ): PartBounds | null {
+  const volume = buildVoxelVolume(def)
+  const { sizeColumn, sizeRow, sizeZSlice } = volume
+
+  // worldY → cellGrid row (def.cellGrid uses cellGrid row, 0=top)
+  const cellGridRow = sizeRow - 1 - worldY
+
   // Step 1: Get block palette entry
-  const idx = def.cellGrid[zSlice]?.[row]?.[column]
+  const idx = def.cellGrid[zSlice]?.[cellGridRow]?.[column]
   if (idx === undefined || idx < 0 || idx >= def.blockPalette.length) return null
 
   const entry = def.blockPalette[idx]
-  const volume = buildVoxelVolume(def)
-  const { sizeColumn, sizeRow, sizeZSlice } = volume
 
   // Step 2: Resolve quads (geometry-based blocks only)
   let quads: BakedQuad[]
@@ -54,7 +58,7 @@ export function detectPartBounds(
 
   // Step 3: Fallback — no geometry → unit block AABB from voxel position
   if (!hasGeometry || quads.length === 0) {
-    return computeUnitBlockAABB(column, row, zSlice, sizeColumn, sizeRow, sizeZSlice)
+    return computeUnitBlockAABB(column, cellGridRow, zSlice, sizeColumn, sizeRow, sizeZSlice)
   }
 
   // Step 4: Determine which quad indices to include
@@ -65,7 +69,7 @@ export function detectPartBounds(
     indices = findConnectedQuadGroup(hitQuadIndex, quads)
   }
 
-  return computeWorldAABB(quads, indices, column, row, zSlice, sizeColumn, sizeRow, sizeZSlice)
+  return computeWorldAABB(quads, indices, column, cellGridRow, zSlice, sizeColumn, sizeRow, sizeZSlice)
 }
 
 /** BFS to find all quads connected to the start quad via shared vertices */

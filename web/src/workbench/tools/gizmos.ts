@@ -217,14 +217,14 @@ export class MoveGizmo implements ToolGizmo {
 
     // 模态拖拽期间跳过定位，由 OPERATOR_MOVE.modal() 控制 gizmo 位置
     if (showGizmo && ctx.modalDepth('r-viewport') === 0) {
-      const def = ctx.viewport.definition.value
-      if (def) {
-        let cx = 0, cy = 0, cz = 0
-        for (const item of items) {
-          const w = this._voxelToWorld(item.pos.x, item.pos.y, item.pos.z, def)
-          cx += w.x; cy += w.y; cz += w.z
-        }
-        cx /= items.size; cy /= items.size; cz /= items.size
+      let cx = 0, cy = 0, cz = 0
+      let valid = 0
+      for (const item of items) {
+        const w = ctx.gridCenterWorld(item.pos)
+        if (w) { cx += w.x; cy += w.y; cz += w.z; valid++ }
+      }
+      if (valid > 0) {
+        cx /= valid; cy /= valid; cz /= valid
         this.setPosition(new THREE.Vector3(cx, cy, cz))
       }
     }
@@ -285,16 +285,5 @@ export class MoveGizmo implements ToolGizmo {
   onPointerUp(_ctx: ToolContext, _event: PointerEvent): void {
     void _ctx; void _event
     // Modal completion handled by operator internally
-  }
-
-  private _voxelToWorld(x: number, y: number, z: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
-    const sCol = def.cellGrid[0]?.[0]?.length ?? 1
-    const sRow = def.cellGrid[0]?.length ?? 1
-    const sZ = def.cellGrid.length ?? 1
-    return new THREE.Vector3(
-      x - sCol / 2 + 0.5,
-      y - sRow / 2 + 0.5,
-      z - sZ / 2 + 0.5,
-    )
   }
 }

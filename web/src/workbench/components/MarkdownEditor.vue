@@ -4,7 +4,7 @@ import { useBContext } from '@/workbench/context/bContext'
 import { renderTooltipHtml } from './renderTooltipHtml'
 import { copyTextToClipboard } from '@/util/browser'
 import { useSelectionContext } from '@/workbench/selectionContext'
-import { isWorldDocument, loadStructureOrWorld } from '@/render/data/bundleResolve'
+import { isWorldDocument } from '@/render/data/bundleResolve'
 import type { BlockPaletteEntry } from '@/render/schema/types'
 
 const bctx = useBContext()
@@ -29,12 +29,15 @@ const nbtPanelOpen = ref(true)
 
 const paletteEntry = computed<BlockPaletteEntry | null>(() => {
   if (!selectedBlock.value) return null
-  const doc = bctx.scene.scene.value?.toRaw()
-  if (!doc) return null
-  try {
-    const def = loadStructureOrWorld(doc, undefined)
-    return def.blockPalette.find(e => e.registryId === selectedBlock.value!.blockId) ?? null
-  } catch { return null }
+  const def = bctx.viewport.definition.value
+  if (!def) return null
+  const blockId = selectedBlock.value.blockId
+  // blockId is "minecraft:stone" or "minecraft:stone:0" format
+  for (const e of def.blockPalette) {
+    const key = e.registryId + (e.meta !== 0 ? `@${e.meta}` : '')
+    if (key === blockId || e.registryId === blockId) return e
+  }
+  return null
 })
 
 const nbtEntries = computed<Array<[string, unknown]>>(() => {

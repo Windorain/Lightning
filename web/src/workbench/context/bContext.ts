@@ -52,6 +52,8 @@ export interface BContextQueries {
   pickGround(event: PointerEvent): { x: number; y: number; z: number } | null
   /** 射线命中浮点世界坐标（注解框用）。无命中 fallback 到地平面浮点坐标 */
   pickWorldPoint(event: PointerEvent): { x: number; y: number; z: number } | null
+  /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
+  gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null
 }
 
 export interface BContextSettings {
