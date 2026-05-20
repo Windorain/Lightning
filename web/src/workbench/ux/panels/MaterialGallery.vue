@@ -594,8 +594,11 @@ onUnmounted(() => {
   text-align: center;
 }
 .mg-detail-thumb {
-  max-width: 100%;
-  max-height: 180px;
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 220px;
+  object-fit: contain;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   border: 1px solid var(--nei-border, #3a3a3a);
