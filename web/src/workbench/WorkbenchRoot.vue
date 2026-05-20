@@ -274,7 +274,7 @@ onMounted(() => {
       </div>
     </header>
     <main class="wb-standalone-body">
-      <MaterialGallery :bctx="bctx" />
+      <MaterialGallery />
     </main>
   </div>
 

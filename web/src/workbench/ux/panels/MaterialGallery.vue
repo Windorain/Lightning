@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch } from 'vue'
-import type { BContext, MaterialQueryItem } from '@/workbench/context/bContext'
-import RNAWidget from '@/workbench/ux/RNAWidget.vue'
+import type { MaterialQueryItem } from '@/workbench/context/bContext'
+import { useBContext } from '@/workbench/context/bContext'
 import OperatorBtn from '@/workbench/ux/OperatorBtn.vue'
-import { materialRNA } from '@/workbench/ux/rna/structs/material'
+import { parsePngDims } from '@/util/pngDims'
 
-const props = defineProps<{ bctx: BContext }>()
+const bctx = useBContext()
 
 // ---- Data ----
 interface MaterialCard {
@@ -25,6 +25,9 @@ const cards = ref<MaterialCard[]>([])
 const selectedId = ref<string | null>(null)
 const focusedIndex = ref(0)
 
+const KIND_LABEL: Record<string, string> = { static16: '静态 (16×)', animated: '动画' }
+const BLEND_LABEL: Record<string, string> = { opaque: '不透明', cutout: '裁剪', translucent: '半透明' }
+
 // ---- Filters & sort ----
 const searchQuery = ref('')
 const kindFilter = ref<'all' | 'static16' | 'animated'>('all')
@@ -35,8 +38,6 @@ const selected = computed(() => {
   if (!selectedId.value) return null
   return cards.value.find(c => c.materialId === selectedId.value) ?? null
 })
-
-const selectedOwner = computed(() => selected.value)
 
 const filteredCards = computed(() => {
   let list = cards.value
@@ -68,23 +69,9 @@ const filteredCards = computed(() => {
 })
 
 // ---- Data loading ----
-function parsePngDims(dataUrl: string): { w: number; h: number } | null {
-  try {
-    const b64 = dataUrl.slice(dataUrl.indexOf('base64,') + 7)
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
-    if (bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) return null // not PNG
-    // Bytes 16-19: width (big-endian), 20-23: height
-    const w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19]
-    const h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23]
-    return { w, h }
-  } catch {
-    return null
-  }
-}
-
 function refresh() {
-  const items = props.bctx.queries?.listMaterials?.() ?? []
-  const usage = props.bctx.queries?.getMaterialUsageCounts?.() ?? {}
+  const items = bctx.queries?.listMaterials?.() ?? []
+  const usage = bctx.queries?.getMaterialUsageCounts?.() ?? {}
 
   cards.value = items.map((m: MaterialQueryItem) => {
     let textureWidth: number | null = null
@@ -122,7 +109,7 @@ function selectCard(id: string) {
   selectedId.value = selectedId.value === id ? null : id
 }
 
-watch(() => props.bctx.scene.scene.value, () => refresh(), { immediate: true })
+watch(() => bctx.scene.scene.value, () => refresh(), { immediate: true })
 
 // ---- Keyboard navigation ----
 const gridEl = ref<HTMLElement | null>(null)
@@ -139,7 +126,6 @@ function handleKeydown(e: KeyboardEvent) {
     focusedIndex.value = (focusedIndex.value - 1 + list.length) % list.length
   } else if (e.key === 'ArrowRight') {
     e.preventDefault()
-    // Advance roughly one "column" worth — approximate with 3 items
     focusedIndex.value = Math.min(focusedIndex.value + 3, list.length - 1)
   } else if (e.key === 'ArrowLeft') {
     e.preventDefault()
@@ -151,7 +137,6 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-// Scroll focused card into view when index changes
 watch(focusedIndex, () => {
   const el = gridEl.value?.querySelector('.mg-card--focused')
   el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
@@ -236,7 +221,6 @@ onUnmounted(() => {
 
 <template>
   <div class="mg-root" @keydown="handleKeydown">
-    <!-- Empty state -->
     <div v-if="cards.length === 0" class="mg-empty">
       <span class="mg-empty-icon">&#x1F3A8;</span>
       <span class="mg-empty-text">无材质数据</span>
@@ -244,9 +228,7 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
-      <!-- Main area: toolbar + waterfall -->
       <div class="mg-main">
-        <!-- Toolbar -->
         <div class="mg-toolbar">
           <input
             v-model="searchQuery"
@@ -273,7 +255,6 @@ onUnmounted(() => {
           <span class="mg-count">{{ filteredCards.length }} / {{ cards.length }}</span>
         </div>
 
-        <!-- Waterfall grid -->
         <div ref="gridEl" class="mg-grid" tabindex="0">
           <div
             v-for="(card, i) in filteredCards"
@@ -313,7 +294,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Detail panel — always visible -->
       <div class="mg-detail">
         <template v-if="selected">
           <div class="mg-detail-header">
@@ -338,21 +318,11 @@ onUnmounted(() => {
           <div class="mg-detail-props">
             <div class="mg-prop-row">
               <span class="mg-prop-label">类型</span>
-              <RNAWidget
-                :descriptor="materialRNA.properties.find(p => p.name === 'kind')!"
-                label=""
-                rna-path="Material.kind"
-                :owner="selectedOwner"
-              />
+              <span class="mg-prop-value">{{ KIND_LABEL[selected.kind] ?? selected.kind }}</span>
             </div>
             <div class="mg-prop-row">
               <span class="mg-prop-label">混合</span>
-              <RNAWidget
-                :descriptor="materialRNA.properties.find(p => p.name === 'blend')!"
-                label=""
-                rna-path="Material.blend"
-                :owner="selectedOwner"
-              />
+              <span class="mg-prop-value">{{ BLEND_LABEL[selected.blend ?? 'opaque'] ?? (selected.blend ?? 'opaque') }}</span>
             </div>
             <div v-if="selected.textureWidth" class="mg-prop-row">
               <span class="mg-prop-label">尺寸</span>
@@ -397,7 +367,6 @@ onUnmounted(() => {
           </div>
         </template>
 
-        <!-- Placeholder when nothing selected -->
         <div v-else class="mg-detail-placeholder">
           <span class="mg-detail-placeholder-icon">&#x1F5BC;</span>
           <span class="mg-detail-placeholder-text">点击左侧材质<br />查看详情</span>
