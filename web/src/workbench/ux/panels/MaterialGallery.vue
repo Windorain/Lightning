@@ -66,7 +66,6 @@ function setCanvasRef(el: unknown, materialId: string) {
 }
 
 function startAnimation(id: string) {
-  // Find the card. For detail canvases, strip the "-detail" suffix to find the card data
   const lookupId = id.endsWith('-detail') ? id.slice(0, -7) : id
   const card = cards.value.find(c => c.materialId === lookupId)
   if (!card?.dataUrl || card.kind !== 'animated') return
@@ -108,7 +107,6 @@ function startAnimation(id: string) {
       )
       animationHandles.set(id, requestAnimationFrame(step))
     }
-    // Draw first frame immediately
     ctx.drawImage(img, 0, 0, frameSize, frameSize, 0, 0, frameSize, frameSize)
     animationHandles.set(id, requestAnimationFrame(step))
   }
@@ -133,13 +131,14 @@ onUnmounted(() => {
   <div class="mg-root">
     <!-- Empty state -->
     <div v-if="cards.length === 0" class="mg-empty">
-      <span>无材质数据</span>
+      <span class="mg-empty-icon">&#x1F3A8;</span>
+      <span class="mg-empty-text">无材质数据</span>
       <span class="mg-empty-hint">加载包含 materialPalette 的场景以查看材质</span>
     </div>
 
     <template v-else>
       <!-- Waterfall grid -->
-      <div class="mg-grid" :class="{ 'mg-grid--has-detail': selected }">
+      <div class="mg-grid">
         <div
           v-for="card in cards"
           :key="card.materialId"
@@ -147,102 +146,102 @@ onUnmounted(() => {
           :class="{ 'mg-card--selected': selectedId === card.materialId }"
           @click="selectCard(card.materialId)"
         >
-          <!-- Static texture -->
           <img
             v-if="card.dataUrl && card.kind !== 'animated'"
             :src="card.dataUrl"
             class="mg-thumb"
             :alt="card.materialId"
           />
-          <!-- Animated texture -->
           <canvas
             v-else-if="card.dataUrl && card.kind === 'animated'"
             :ref="(el: unknown) => setCanvasRef(el, card.materialId)"
             class="mg-thumb"
           />
-          <!-- No texture -->
           <div v-else class="mg-thumb mg-thumb--empty">
             <span>?</span>
           </div>
-          <div class="mg-card-label">{{ card.locator || `#${card.materialId}` }}</div>
-          <div class="mg-card-badges">
-            <span v-if="card.blend && card.blend !== 'opaque'" class="mg-badge">{{ card.blend }}</span>
+          <div class="mg-card-footer">
+            <span class="mg-card-label">{{ card.locator || `#${card.materialId}` }}</span>
             <span v-if="card.kind === 'animated'" class="mg-badge mg-badge--anim">anim</span>
+            <span v-else-if="card.blend && card.blend !== 'opaque'" class="mg-badge">{{ card.blend }}</span>
           </div>
         </div>
       </div>
 
-      <!-- Detail panel -->
-      <div v-if="selected" class="mg-detail">
-        <div class="mg-detail-header">
-          <span class="mg-detail-title">{{ selected.locator || `材质 #${selected.materialId}` }}</span>
-          <button class="mg-detail-close" @click="selectedId = null">&times;</button>
-        </div>
-
-        <!-- Large preview -->
-        <div class="mg-detail-preview">
-          <img
-            v-if="selected.dataUrl && selected.kind !== 'animated'"
-            :src="selected.dataUrl"
-            class="mg-detail-thumb"
-          />
-          <canvas
-            v-else-if="selected.dataUrl && selected.kind === 'animated'"
-            :ref="(el: unknown) => { if (selected) setCanvasRef(el, `${selected.materialId}-detail`) }"
-            class="mg-detail-thumb"
-          />
-          <div v-else class="mg-detail-thumb mg-detail-thumb--empty">
-            <span>无纹理</span>
+      <!-- Detail panel — always visible -->
+      <div class="mg-detail">
+        <template v-if="selected">
+          <div class="mg-detail-header">
+            <span class="mg-detail-title">{{ selected.locator || `材质 #${selected.materialId}` }}</span>
+            <button class="mg-detail-deselect" @click="selectedId = null" title="取消选中">&times;</button>
           </div>
-        </div>
 
-        <!-- Properties via RNAWidget -->
-        <div class="mg-detail-props">
-          <div class="mg-prop-row">
-            <span class="mg-prop-label">类型</span>
-            <RNAWidget
-              :descriptor="materialRNA.properties.find(p => p.name === 'kind')!"
-              label=""
-              rna-path="Material.kind"
-              :owner="selectedOwner"
+          <div class="mg-detail-preview">
+            <img
+              v-if="selected.dataUrl && selected.kind !== 'animated'"
+              :src="selected.dataUrl"
+              class="mg-detail-thumb"
+            />
+            <canvas
+              v-else-if="selected.dataUrl && selected.kind === 'animated'"
+              :ref="(el: unknown) => { if (selected) setCanvasRef(el, `${selected.materialId}-detail`) }"
+              class="mg-detail-thumb"
+            />
+            <div v-else class="mg-detail-thumb mg-detail-thumb--empty">无纹理</div>
+          </div>
+
+          <div class="mg-detail-props">
+            <div class="mg-prop-row">
+              <span class="mg-prop-label">类型</span>
+              <RNAWidget
+                :descriptor="materialRNA.properties.find(p => p.name === 'kind')!"
+                label=""
+                rna-path="Material.kind"
+                :owner="selectedOwner"
+              />
+            </div>
+            <div class="mg-prop-row">
+              <span class="mg-prop-label">混合</span>
+              <RNAWidget
+                :descriptor="materialRNA.properties.find(p => p.name === 'blend')!"
+                label=""
+                rna-path="Material.blend"
+                :owner="selectedOwner"
+              />
+            </div>
+            <div v-if="selected.emissive" class="mg-prop-row">
+              <span class="mg-prop-label">自发光</span>
+              <span class="mg-prop-value">{{ selected.emissive }}</span>
+            </div>
+            <div v-if="selected.locator" class="mg-prop-row">
+              <span class="mg-prop-label">定位符</span>
+              <span class="mg-prop-value mg-prop-value--mono">{{ selected.locator }}</span>
+            </div>
+            <div v-if="selected.animation" class="mg-prop-row">
+              <span class="mg-prop-label">帧间隔</span>
+              <span class="mg-prop-value">{{ selected.animation.defaultFrametimeTicks ?? 1 }} tick</span>
+            </div>
+          </div>
+
+          <div class="mg-detail-ops">
+            <OperatorBtn
+              op-id="OPERATOR_EXPORT_TEXTURE"
+              label="导出 PNG"
+              :operator-props="{ materialId: selected.materialId }"
+            />
+            <OperatorBtn
+              v-if="selected.locator"
+              op-id="OPERATOR_COPY_MATERIAL_LOCATOR"
+              label="复制定位符"
+              :operator-props="{ materialId: selected.materialId }"
             />
           </div>
-          <div class="mg-prop-row">
-            <span class="mg-prop-label">混合</span>
-            <RNAWidget
-              :descriptor="materialRNA.properties.find(p => p.name === 'blend')!"
-              label=""
-              rna-path="Material.blend"
-              :owner="selectedOwner"
-            />
-          </div>
-          <div v-if="selected.emissive" class="mg-prop-row">
-            <span class="mg-prop-label">自发光</span>
-            <span class="mg-prop-value">{{ selected.emissive }}</span>
-          </div>
-          <div v-if="selected.locator" class="mg-prop-row">
-            <span class="mg-prop-label">定位符</span>
-            <span class="mg-prop-value mg-prop-value--mono">{{ selected.locator }}</span>
-          </div>
-          <div v-if="selected.animation" class="mg-prop-row">
-            <span class="mg-prop-label">帧间隔</span>
-            <span class="mg-prop-value">{{ selected.animation.defaultFrametimeTicks ?? 1 }} tick</span>
-          </div>
-        </div>
+        </template>
 
-        <!-- Operator buttons -->
-        <div class="mg-detail-ops">
-          <OperatorBtn
-            op-id="OPERATOR_EXPORT_TEXTURE"
-            label="导出 PNG"
-            :operator-props="{ materialId: selected.materialId }"
-          />
-          <OperatorBtn
-            v-if="selected.locator"
-            op-id="OPERATOR_COPY_MATERIAL_LOCATOR"
-            label="复制定位符"
-            :operator-props="{ materialId: selected.materialId }"
-          />
+        <!-- Placeholder when nothing selected -->
+        <div v-else class="mg-detail-placeholder">
+          <span class="mg-detail-placeholder-icon">&#x1F5BC;</span>
+          <span class="mg-detail-placeholder-text">点击左侧材质<br />查看详情</span>
         </div>
       </div>
     </template>
@@ -256,47 +255,42 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+/* ---- Empty state ---- */
 .mg-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
   color: var(--nei-text-muted);
-  font-size: 12px;
 }
-.mg-empty-hint {
-  font-size: 10px;
-  opacity: 0.6;
-}
+.mg-empty-icon { font-size: 32px; }
+.mg-empty-text { font-size: 13px; }
+.mg-empty-hint { font-size: 11px; opacity: 0.5; }
 
 /* ---- Waterfall grid ---- */
 .mg-grid {
   flex: 1;
   overflow-y: auto;
-  columns: 3;
-  column-gap: 6px;
-  padding: 6px;
-  will-change: transform;
-}
-.mg-grid--has-detail {
-  flex: 0 0 55%;
-  border-right: 1px solid var(--nei-border, #555);
+  column-width: 160px;
+  column-gap: 8px;
+  padding: 10px;
+  background: var(--nei-viewport-bg);
 }
 
 .mg-card {
   break-inside: avoid;
-  margin-bottom: 6px;
-  border: 1px solid var(--nei-border, #444);
+  margin-bottom: 8px;
+  border: 1px solid var(--nei-border, #3a3a3a);
   border-radius: 4px;
   overflow: hidden;
-  background: var(--nei-inset-bg, #1a1a1a);
+  background: var(--nei-bg-deep, #1a1a1a);
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s;
 }
 .mg-card:hover {
-  border-color: var(--nei-accent, #888);
+  border-color: var(--nei-accent, #6a6a6a);
 }
 .mg-card--selected {
   border-color: var(--nei-accent);
@@ -315,14 +309,20 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #222;
-  color: #666;
-  font-size: 18px;
-  min-height: 48px;
+  background: #1e1e1e;
+  color: #555;
+  font-size: 20px;
+  min-height: 64px;
 }
 
+.mg-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 4px;
+}
 .mg-card-label {
-  padding: 2px 6px;
+  flex: 1;
   font-size: 10px;
   font-family: ui-monospace, 'Cascadia Code', monospace;
   color: var(--nei-text, #ccc);
@@ -330,39 +330,39 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.mg-card-badges {
-  display: flex;
-  gap: 3px;
-  padding: 0 6px 4px;
-}
 .mg-badge {
-  font-size: 8px;
+  flex-shrink: 0;
+  font-size: 7px;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: 2px;
   background: #333;
   color: #999;
   text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 .mg-badge--anim {
-  background: #3a3;
-  color: #fff;
+  background: #2a6a2a;
+  color: #8f8;
 }
 
 /* ---- Detail panel ---- */
 .mg-detail {
-  flex: 0 0 45%;
+  flex-shrink: 0;
+  width: 260px;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 8px;
-  gap: 8px;
+  padding: 10px;
+  gap: 10px;
+  background: var(--nei-bg-deep);
+  border-left: 1px solid var(--nei-border);
 }
 
 .mg-detail-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 6px;
 }
 .mg-detail-title {
   font-size: 11px;
@@ -370,17 +370,19 @@ onUnmounted(() => {
   color: var(--nei-text);
   font-family: ui-monospace, 'Cascadia Code', monospace;
   word-break: break-all;
+  line-height: 1.3;
 }
-.mg-detail-close {
+.mg-detail-deselect {
+  flex-shrink: 0;
   background: none;
   border: none;
   color: var(--nei-text-muted);
-  font-size: 16px;
+  font-size: 15px;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0 2px;
   line-height: 1;
 }
-.mg-detail-close:hover {
+.mg-detail-deselect:hover {
   color: var(--nei-text);
 }
 
@@ -389,33 +391,33 @@ onUnmounted(() => {
 }
 .mg-detail-thumb {
   max-width: 100%;
-  max-height: 200px;
+  max-height: 180px;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  border: 1px solid var(--nei-border, #444);
+  border: 1px solid var(--nei-border, #3a3a3a);
   border-radius: 4px;
 }
 .mg-detail-thumb--empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100px;
-  background: #222;
-  color: #666;
-  font-size: 14px;
+  height: 80px;
+  background: #1e1e1e;
+  color: #555;
+  font-size: 12px;
 }
 
 .mg-detail-props {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .mg-prop-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 0;
-  border-bottom: 1px solid #333;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 .mg-prop-label {
   font-size: 10px;
@@ -436,7 +438,28 @@ onUnmounted(() => {
 
 .mg-detail-ops {
   display: flex;
+  flex-direction: column;
   gap: 4px;
-  flex-wrap: wrap;
+}
+
+/* ---- Detail placeholder ---- */
+.mg-detail-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--nei-text-muted);
+}
+.mg-detail-placeholder-icon {
+  font-size: 28px;
+  opacity: 0.5;
+}
+.mg-detail-placeholder-text {
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.5;
+  opacity: 0.5;
 }
 </style>
