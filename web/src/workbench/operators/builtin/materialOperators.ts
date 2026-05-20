@@ -1,11 +1,18 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import type { MaterialQueryItem } from '@/workbench/context/bContext'
+import { encodeAnimatedGif } from '@/workbench/animatedGifEncoder'
 
 /** Resolve the dataUrl of the material — shared helper */
 function resolveMaterialDataUrl(bctx: any, materialId: string): string | null {
   const materials = bctx.queries?.listMaterials?.() ?? []
   const m = materials.find((item: MaterialQueryItem) => item.materialId === materialId)
   return m?.textureDataUrl ?? null
+}
+
+/** Resolve the material item — shared helper */
+function resolveMaterial(bctx: any, materialId: string): MaterialQueryItem | undefined {
+  const materials = bctx.queries?.listMaterials?.() ?? []
+  return materials.find((item: MaterialQueryItem) => item.materialId === materialId)
 }
 
 /** Download a data URL as a PNG file */
@@ -16,6 +23,13 @@ function downloadPng(dataUrl: string, filename: string): void {
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
+}
+
+/** Derive a safe filename stem from a material */
+function filenameStem(m: MaterialQueryItem | undefined, materialId: string): string {
+  return m?.locator
+    ? m.locator.replace(/^.*[\\/]/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
+    : `material_${materialId}`
 }
 
 export const ExportTextureOperator: OperatorType = {
@@ -35,12 +49,7 @@ export const ExportTextureOperator: OperatorType = {
       bctx.log?.warn('导出', `材质 ${materialId} 无纹理数据`)
       return
     }
-    const materials = bctx.queries?.listMaterials?.() ?? []
-    const m = materials.find((item: MaterialQueryItem) => item.materialId === materialId)
-    const name = m?.locator
-      ? m.locator.replace(/^.*[\\/]/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
-      : `material_${materialId}`
-    downloadPng(dataUrl, name)
+    downloadPng(dataUrl, filenameStem(resolveMaterial(bctx, materialId), materialId))
   },
 }
 
@@ -60,11 +69,8 @@ export const ExportAllTexturesOperator: OperatorType = {
     let count = 0
     for (const m of materials) {
       if (!m.textureDataUrl) continue
-      const name = m.locator
-        ? m.locator.replace(/^.*[\\/]/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
-        : `material_${m.materialId}`
       // Slight delay between downloads to avoid browser blocking
-      setTimeout(() => downloadPng(m.textureDataUrl!, name), count * 100)
+      setTimeout(() => downloadPng(m.textureDataUrl!, filenameStem(m, m.materialId)), count * 100)
       count++
     }
     if (count === 0) {
@@ -94,7 +100,6 @@ export const CopyMaterialLocatorOperator: OperatorType = {
     try {
       await navigator.clipboard.writeText(m.locator)
     } catch {
-      // Fallback for older browsers
       const ta = document.createElement('textarea')
       ta.value = m.locator
       ta.style.position = 'fixed'
@@ -103,6 +108,41 @@ export const CopyMaterialLocatorOperator: OperatorType = {
       ta.select()
       document.execCommand('copy')
       document.body.removeChild(ta)
+    }
+  },
+}
+
+export const ExportGifOperator: OperatorType = {
+  id: 'OPERATOR_EXPORT_GIF',
+  label: '导出 GIF',
+  description: '将动画纹理导出为 GIF 动图',
+
+  poll(bctx) {
+    return (bctx.queries?.listMaterials?.() ?? []).some(
+      (m: MaterialQueryItem) => m.kind === 'animated' && m.textureDataUrl !== null,
+    )
+  },
+
+  async exec(bctx, props) {
+    const materialId = (props?.materialId as string) ?? '0'
+    const m = resolveMaterial(bctx, materialId)
+    if (!m?.textureDataUrl || m.kind !== 'animated') {
+      bctx.log?.warn('导出', `材质 ${materialId} 不是动画纹理`)
+      return
+    }
+    try {
+      const delay = (m.animation?.defaultFrametimeTicks ?? 1) * 5 // ticks to centiseconds
+      const { blob } = await encodeAnimatedGif(m.textureDataUrl, delay)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${filenameStem(m, materialId)}.gif`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      bctx.log?.warn('导出', `GIF 导出失败: ${e}`)
     }
   },
 }

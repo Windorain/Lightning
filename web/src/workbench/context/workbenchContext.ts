@@ -46,7 +46,7 @@ import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/wo
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
 import { ThemeToggleOperator, SetLanguageOperator } from '@/workbench/operators/builtin/appearanceOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/workbench/operators/builtin/annotationOperators'
-import { ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator } from '@/workbench/operators/builtin/materialOperators'
+import { ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/workbench/operators/builtin/materialOperators'
 
 // Tools
 import { selectTool } from '@/workbench/tools/selectTool'
@@ -70,7 +70,7 @@ const ALL_OPERATORS = [
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
   ThemeToggleOperator, SetLanguageOperator,
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
-  ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator,
+  ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator,
 ]
 
 export interface WorkbenchContextDeps {

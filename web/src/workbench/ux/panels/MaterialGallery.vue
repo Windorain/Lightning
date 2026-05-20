@@ -378,6 +378,12 @@ onUnmounted(() => {
 
           <div class="mg-detail-ops">
             <OperatorBtn
+              v-if="selected.kind === 'animated'"
+              op-id="OPERATOR_EXPORT_GIF"
+              label="导出 GIF"
+              :operator-props="{ materialId: selected.materialId }"
+            />
+            <OperatorBtn
               op-id="OPERATOR_EXPORT_TEXTURE"
               label="导出 PNG"
               :operator-props="{ materialId: selected.materialId }"
