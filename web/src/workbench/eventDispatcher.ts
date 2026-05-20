@@ -27,6 +27,7 @@ export interface ModalKeymap {
 
 export interface ModalOperation {
   id: string
+  keymap?: ModalKeymap
   onEnter(event: PointerEvent): ModalKeymap | null
   handleEvent(event: Event): { break: boolean }
   onExit(cancelled: boolean): void
@@ -116,8 +117,7 @@ class EventDispatcherImpl {
       console.warn(`[EventDispatcher] pushModal: region not found ${regionId}`)
       return
     }
-    const keymap = op.onEnter(event)
-    ;(op as any).__keymap = keymap ?? undefined
+    op.keymap = op.onEnter(event) ?? undefined
     system.modalStack.push(op)
   }
 
@@ -168,7 +168,7 @@ class EventDispatcherImpl {
       // 栈顶 modal 的键盘映射优先
       if (event instanceof KeyboardEvent) {
         const topModal = system.modalStack[system.modalStack.length - 1]
-        const keymap = (topModal as any).__keymap as ModalKeymap | undefined
+        const keymap = topModal.keymap
         if (keymap) {
           const mapped = keymap.match(event)
           if (mapped) {

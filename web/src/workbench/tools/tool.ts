@@ -21,6 +21,8 @@ export interface Tool {
   operator?: string
   /** 操作符属性预设：键映射匹配时自动注入，keymap item 的 props 覆盖这些值 */
   properties?: Record<string, unknown>
+  /** 工具级覆盖色 */
+  color?: string
 }
 
 /** Gizmo 是交互+渲染入口。一个 Tool 可以关联零个或一个 Gizmo。 */

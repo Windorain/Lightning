@@ -9,6 +9,8 @@ import { createViewportManager } from '@/workbench/context/bContext'
 import { createSceneLifecycle } from '@/workbench/context/sceneLifecycle'
 import type { View3DConfig } from '@/preview/previewConfig'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
+import type { BlockIconCache } from '@/render/interaction/blockIconCache'
+import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import * as THREE from 'three'
@@ -23,7 +25,7 @@ export function createEmbedBContext(config: View3DConfig): BContext {
   const loadStatus = ref<LoadStatus>('loading')
   const meshBusy = ref(false)
   const materialLibrary = shallowRef<MaterialLibraryApi | null>(null)
-  const blockIconCache = shallowRef(null) as any
+  const blockIconCache = shallowRef<BlockIconCache | null>(null)
   const tooltipPalette = shallowRef<string[]>([])
   const sceneRef = shallowRef<THREE.Scene | null>(null)
 
@@ -43,7 +45,7 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     configRef,
     loadStatus,
     meshBusy,
-    materialLibrary: materialLibrary as any,
+    materialLibrary,
     blockIconCache,
     tooltipPalette,
     structureDefinition,
@@ -59,30 +61,22 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
   } = lifecycle.computed
 
-  // ---- Assemble bctx (partial, for self-reference) ----
-  const ctx = {} as BContext
-
   // ---- Operators ----
   const operators = {
     exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(ctx, id, props),
     invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) =>
-      globalOperators.invoke(ctx, id, props, event as any, regionId),
+      globalOperators.invoke(ctx, id, props, event as PointerEvent | KeyboardEvent, regionId),
     find: (id: string) => { const o = globalOperators.find(id); return o ? { id: o.id, label: o.label } : undefined },
     all: () => globalOperators.all().map(o => ({ id: o.id, label: o.label })),
-    register: (op: any) => globalOperators.register(op),
+    register: (op: OperatorType) => globalOperators.register(op),
   }
 
-  // ---- Fill ctx ----
-  Object.defineProperty(ctx, 'viewport', {
-    get() { return viewports.active.value! },
-    enumerable: true,
-    configurable: true,
-  })
-  Object.assign(ctx, {
+  // ---- Atomic bctx assembly ----
+  const ctx: BContext = {
     config: configRef,
     loadStatus,
     meshBusy,
-    materialLibrary: materialLibrary as any,
+    materialLibrary,
     blockIconCache,
     tooltipPalette,
     worldFrameIndex,
@@ -103,6 +97,7 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     registerScene: lifecycle.registerScene,
     blockStatsEntries,
     viewports,
+    get viewport() { return viewports.active.value! },
     operators,
     eventDispatcher,
     settings: {
@@ -111,24 +106,20 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     },
     statusMessage: { value: '' },
 
-    // Stubs
-    scene: null as any,
-    selection: null as any,
-    editHistory: null as any,
-    toolRegistry: null as any,
-    connection: null as any,
-    queries: null as any,
-    log: {
-      entries: { value: [] }, lastDisplayable: { value: null },
-      debug: () => undefined as unknown, info: () => undefined as unknown,
-      operator: () => undefined as unknown, warn: () => undefined as unknown,
-      error: () => undefined as unknown, clear: () => {},
-      contains: () => false, recent: () => [],
-    } as any,
-    wikiConfig: null as any,
-    wm: {} as any,
-    screen: null, rna: null as any, ui: null as any,
-  })
+    // Workbench-only fields — stub
+    scene: null!,
+    selection: null!,
+    editHistory: null!,
+    toolRegistry: null!,
+    connection: null!,
+    queries: null!,
+    log: null!,
+    wikiConfig: null!,
+    wm: {},
+    screen: null,
+    rna: null!,
+    ui: null!,
+  }
 
   // Register embed operators
   for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ResetViewOperator]) {

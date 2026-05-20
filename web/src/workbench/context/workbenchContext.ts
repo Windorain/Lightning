@@ -18,7 +18,11 @@ import type { UndoManager } from '@/workbench/editHistoryContext'
 import type { ToolRegistry } from '@/workbench/toolRegistry'
 import type { BContextSettings } from '@/workbench/context/bContext'
 import type { bScreen } from '@/workbench/ux/types/screen'
+import type { View3DConfig } from '@/preview/previewConfig'
+import type { BlockStatRow } from '@/render/interaction/blockStats'
+import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
+import type { OperatorType } from '@/workbench/operators/operatorType'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
@@ -57,7 +61,7 @@ import { pointTool, PointGizmo } from '@/workbench/tools/pointTool'
 import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
 import { textTool, TextGizmo } from '@/workbench/tools/textTool'
 
-const ALL_OPERATORS = [
+const ALL_OPERATORS: OperatorType[] = [
   SelectOperator, MoveOperator,
   UndoOperator, RedoOperator,
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator,
@@ -95,7 +99,7 @@ export interface WorkbenchContextResult {
 export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchContextResult {
   const { scene, connection, selection, editHistory, toolRegistry, settings } = deps
 
-  // ---- BContext 核心对象（与 WorkbenchRoot.vue 完全一致）----
+  // ---- 所有独立的 ref / computed / 对象先创建 ----
   const loadStatus = ref<LoadStatus>('loading')
   const meshBusy = ref(false)
   const worldFrameIndex = ref(0)
@@ -103,66 +107,13 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   const hasWorldMultiFrame = computed(() => worldFrameCount.value > 1)
   const framesPlaybackIsPlaying = ref(false)
   const layerWorldY = ref(-1)
-  const layerPreviewMode = computed(() => 'all' as any)
+  const layerPreviewMode = computed<LayerPreviewMode>(() => 'all')
   const layerPreviewLabel = computed(() => 'ALL')
   const gridHeight = computed(() => 0)
-  const blockStatsEntries = computed(() => [] as any[])
+  const blockStatsEntries = computed<BlockStatRow[]>(() => [])
   const viewports = createViewportManager()
 
-  const bctx = {
-    scene,
-    selection,
-    editHistory,
-    toolRegistry,
-    connection,
-    get viewport() { return viewports.active.value! },
-    viewports,
-    operators: {
-      exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(bctx, id, props),
-      invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) => globalOperators.invoke(bctx, id, props, event as any, regionId),
-      find: (id: string) => globalOperators.find(id),
-      all: () => globalOperators.all(),
-      register: (op: any) => globalOperators.register(op),
-    },
-    eventDispatcher,
-    log: logCenter,
-    wikiConfig,
-    statusMessage: deps.statusMessage ?? ref(''),
-    settings,
-
-    // Shared rendering state — populated by WorkbenchViewport via createSceneLifecycle
-    config: shallowRef(null as any),
-    materialLibrary: shallowRef(null),
-    blockIconCache: shallowRef(null),
-    tooltipPalette: shallowRef([] as string[]),
-
-    worldFrameIndex,
-    worldFrameCount,
-    hasWorldMultiFrame,
-    framesPlaybackIsPlaying,
-    toggleWorldFramesPlayback() {},
-    setCurrentWorldFrame: async () => {},
-
-    layerWorldY,
-    layerPreviewMode,
-    layerPreviewLabel,
-    gridHeight,
-
-    loadStatus,
-    meshBusy,
-    loadStructureAndResources: async () => {},
-    rebuildContentMesh: async () => {},
-    rebuildAnnotationOverlay: async () => null,
-    disposeCachesAndLibrary() {},
-    reloadFromConfig: async () => {},
-    registerScene() {},
-    blockStatsEntries,
-  } as unknown as BContext
-
-  // queries 依赖 bctx 自身（循环引用）
-  bctx.queries = createProductionQueries(bctx)
-
-  // ---- RNA 注册表 ----
+  // RNA
   const rna = createRNARegistry()
   rna.register(blockRNA)
   rna.register(toolSettingsRNA)
@@ -170,7 +121,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   rna.register(wikiConfigRNA)
   rna.register(annotationRNA)
 
-  // ---- 默认 screen 布局 ----
+  // Screen layout
   const defaultScreen: bScreen = {
     id: 'workbench',
     areas: [
@@ -207,35 +158,86 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel,
   )
 
+  // ---- 原子构造 bctx（一次性全部填入，不用 as unknown / as any 后补） ----
+  const bctx: BContext = {
+    scene,
+    selection,
+    editHistory,
+    toolRegistry,
+    connection,
+    get viewport() { return viewports.active.value! },
+    viewports,
+    operators: {
+      exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(bctx, id, props),
+      invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) =>
+        globalOperators.invoke(bctx, id, props, event as PointerEvent | KeyboardEvent, regionId),
+      find: (id: string) => globalOperators.find(id),
+      all: () => globalOperators.all(),
+      register: (op: OperatorType) => globalOperators.register(op),
+    },
+    eventDispatcher,
+    log: logCenter,
+    wikiConfig,
+    statusMessage: deps.statusMessage ?? ref(''),
+    settings,
+
+    config: shallowRef<View3DConfig | null>(null),
+    materialLibrary: shallowRef(null),
+    blockIconCache: shallowRef(null),
+    tooltipPalette: shallowRef<string[]>([]),
+
+    worldFrameIndex,
+    worldFrameCount,
+    hasWorldMultiFrame,
+    framesPlaybackIsPlaying,
+    toggleWorldFramesPlayback() {},
+    setCurrentWorldFrame: async () => {},
+
+    layerWorldY,
+    layerPreviewMode,
+    layerPreviewLabel,
+    gridHeight,
+
+    loadStatus,
+    meshBusy,
+    loadStructureAndResources: async () => {},
+    rebuildContentMesh: async () => {},
+    rebuildAnnotationOverlay: async () => null,
+    disposeCachesAndLibrary() {},
+    reloadFromConfig: async () => {},
+    registerScene() {},
+    blockStatsEntries,
+
+    // queries 需 bctx 自身（循环引用）——先填 null，下一行立即赋真值
+    queries: null!,
+    screen: defaultScreen,
+    rna,
+    ui: {
+      boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
+      boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),
+    },
+    wm: {},
+  }
+
+  bctx.queries = createProductionQueries(bctx)
+
   computeLayout(bctx, defaultScreen)
 
-  // ---- Register all regions with event dispatcher ----
+  // Register all regions with event dispatcher
   for (const area of defaultScreen.areas) {
     for (const region of area.regions) {
       eventDispatcher.registerRegion(region.id)
     }
   }
 
-  // ---- 挂载到 bctx ----
-  ;(bctx as any).wm = {}
-  ;(bctx as any).screen = defaultScreen
-  ;(bctx as any).rna = rna
-  ;(bctx as any).ui = {
-    boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
-    boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),
-  }
-
-  // 注册所有内置 operators + 工具
+  // Register all builtin operators + tools
   registerAllOperators(bctx)
 
-  // Register tools via ToolRegistry
   const moveGizmo = new MoveGizmo()
-  // Register a default viewport slot (WorkbenchViewport will populate it at ready)
   const defaultVp = viewports.register('r-viewport')
   defaultVp.gizmo.value = moveGizmo
   toolRegistry.register(selectTool)
   toolRegistry.register(moveTool, moveGizmo)
-  // Register annotation tools
   toolRegistry.register(boxTool, new BoxGizmo())
   toolRegistry.register(pointTool, new PointGizmo())
   toolRegistry.register(lineTool, new LineGizmo())

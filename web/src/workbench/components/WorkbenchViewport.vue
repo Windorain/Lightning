@@ -13,7 +13,7 @@ import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
 import type { Annotation } from '@/render/data/annotationTypes'
-import type { Ref } from 'vue'
+import type { Ref, ShallowRef } from 'vue'
 import * as THREE from 'three'
 
 const props = defineProps<{
@@ -34,7 +34,7 @@ const vpSlot = bctx.viewports.get(VIEWPORT_REGION_ID) ?? bctx.viewports.register
 const sceneRef = shallowRef<THREE.Scene | null>(null)
 
 const lifecycle = createSceneLifecycle({
-  configRef: bctx.config,
+  configRef: bctx.config as ShallowRef<View3DConfig>,
   loadStatus: bctx.loadStatus as Ref<LoadStatus>,
   meshBusy: bctx.meshBusy,
   materialLibrary: bctx.materialLibrary,
@@ -187,7 +187,7 @@ function updateAnnotationOverlay(): void {
   const doc = bctx.scene.scene.value as Record<string, any> | null
   const annos: Annotation[] = doc?.annotations ?? []
   const maxUpdated = annos.length > 0
-    ? annos.reduce((max, a) => Math.max(max, (a as any).updated_at ?? 0), 0)
+    ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
     : 0
   const hash = annos.length > 0 ? `${annos.length}_${maxUpdated}` : 'empty'
   if (hash === _annoHash || _annoPending) return

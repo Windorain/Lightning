@@ -36,7 +36,7 @@ const props = defineProps<{ config: View3DConfig }>()
 // ---- BContext: inject or self-create ----
 // Workbench bctx (has scene) is incompatible — create independent embed bctx
 const _injectedBctx = inject<BContext | null>(bContextKey, null)
-const _isWorkbenchBctx = (_injectedBctx as any)?.scene != null
+const _isWorkbenchBctx = _injectedBctx?.scene != null
 const _ownsBctx = !_injectedBctx || _isWorkbenchBctx
 const bctx: BContext = (_injectedBctx && !_isWorkbenchBctx) ? _injectedBctx : createEmbedBContext(props.config)
 if (_ownsBctx) {
@@ -174,7 +174,7 @@ function updateAnnotationOverlay(): void {
   const doc = props.config.renderBundle.document as Record<string, any> | null
   const annos: Annotation[] = doc?.annotations ?? []
   const maxUpdated = annos.length > 0
-    ? annos.reduce((max, a) => Math.max(max, (a as any).updated_at ?? 0), 0)
+    ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
     : 0
   const hash = annos.length > 0 ? `${annos.length}_${maxUpdated}` : 'empty'
   if (hash === _annoHash || _annoPending) return

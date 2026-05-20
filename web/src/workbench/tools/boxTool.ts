@@ -70,7 +70,7 @@ export class BoxGizmo implements ToolGizmo {
     if (!this._hoverBounds) return
 
     const { min, max } = this._hoverBounds
-    const color = (ctx.activeTool.value?.properties as any)?.color ?? '#4488ff'
+    const color = ctx.activeTool.value?.color ?? '#4488ff'
     const verts = boxWireframeVerts(min, max)
 
     const geo = new THREE.BufferGeometry()

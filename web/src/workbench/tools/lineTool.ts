@@ -76,7 +76,7 @@ export class LineGizmo implements ToolGizmo {
     if (positions.length < 6) return
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    const color = (ctx.activeTool.value?.properties as any)?.color ?? '#ffaa00'
+    const color = ctx.activeTool.value?.color ?? '#ffaa00'
     const mat = new THREE.LineBasicMaterial({ color: new THREE.Color(color), depthTest: true })
     this._mesh = new THREE.Line(geo, mat)
     ctx.viewport.overlayGroup.value?.add(this._mesh)

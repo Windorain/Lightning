@@ -64,7 +64,7 @@ export class TextGizmo implements ToolGizmo {
     this._clearPreview()
     if (!this._hoverPos) return
 
-    const color = (ctx.activeTool.value?.properties as any)?.color ?? '#ffffff'
+    const color = ctx.activeTool.value?.color ?? '#ffffff'
     const geo = new THREE.SphereGeometry(0.1, 6, 6)
     const mat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(color),

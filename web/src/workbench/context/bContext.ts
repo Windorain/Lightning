@@ -129,7 +129,7 @@ export interface BContext {
   statusMessage: { value: string }
 
   // === Shared rendering resources ===
-  config: ShallowRef<View3DConfig>
+  config: ShallowRef<View3DConfig | null>
   materialLibrary: ShallowRef<MaterialLibraryApi | null>
   blockIconCache: ShallowRef<BlockIconCache | null>
   tooltipPalette: ShallowRef<string[]>
@@ -169,8 +169,10 @@ export interface BContext {
 
   /** Window manager (Blender 对标 wmWindowManager) */
   wm: {
-    showContextMenu: (pos: { x: number; y: number }, items: unknown[]) => void
-    hideContextMenu: () => void
+    contextMenu?: { open: Ref<boolean>; position: Ref<{ x: number; y: number }>; items: Ref<unknown[]> }
+    contextMenuItems?: unknown[]
+    showContextMenu?(cm: unknown, pos: { x: number; y: number }, items: unknown[]): void
+    hideContextMenu?(cm: unknown): void
   }
 
   screen: bScreen | null
