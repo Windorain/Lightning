@@ -189,18 +189,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   ;(bctx as any).area = null
   ;(bctx as any).region = null
   ;(bctx as any).rna = rna
-  ;(bctx as any).annotationState = {
-    currentDraft: null as Record<string, any> | null,
-    currentId: null as string | null,
-    setDraft(draft: Record<string, any> | null) {
-      this.currentDraft = draft
-      this.currentId = draft?.id ?? null
-    },
-    clearDraft() {
-      this.currentDraft = null
-      this.currentId = null
-    },
-  }
   ;(bctx as any).ui = {
     computeLayout: (s: bScreen) => computeLayout(bctx, s),
     boundsOf: (id: string) => boundsOf(bctx, id),

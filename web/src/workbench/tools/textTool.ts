@@ -35,40 +35,27 @@ export class TextGizmo implements ToolGizmo {
   onPointerMove(ctx: ToolContext, event: PointerEvent): void {
     const picked = ctx.pickVoxel(event)
     if (!picked) { this._hoverPos = null; return }
-    const def = ctx.viewport.definition.value
-    if (!def) return
-    const sCol = def.cellGrid[0]?.[0]?.length ?? 1
-    const sRow = def.cellGrid[0]?.length ?? 1
-    const sZ = def.cellGrid.length ?? 1
-    this._hoverPos = {
-      x: picked.pos.x - sCol / 2 + 0.5,
-      y: picked.pos.y - sRow / 2 + 0.5,
-      z: picked.pos.z - sZ / 2 + 0.5,
-    }
+    this._hoverPos = ctx.gridCenterWorld(picked.pos) ?? null
   }
 
   onPointerDown(ctx: ToolContext, event: PointerEvent): void {
     const picked = ctx.pickVoxel(event)
     if (!picked) return
-    const def = ctx.viewport.definition.value
-    if (!def) return
-    const sCol = def.cellGrid[0]?.[0]?.length ?? 1
-    const sRow = def.cellGrid[0]?.length ?? 1
-    const sZ = def.cellGrid.length ?? 1
+    const worldPos = ctx.gridCenterWorld(picked.pos)
+    if (!worldPos) return
 
     const draft = {
       ...ctx.activeTool.value?.properties,
       type: 'text' as const,
       anchorPos: {
-        x: picked.pos.x - sCol / 2 + 0.5,
-        y: picked.pos.y - sRow / 2 + 0.5 + 0.5,
-        z: picked.pos.z - sZ / 2 + 0.5,
+        x: worldPos.x,
+        y: worldPos.y + 0.5,
+        z: worldPos.z,
       },
       frameIndex: ctx.getCurrentFrame()?.index ?? 0,
     }
 
     ctx.invokeOperator('ANNOTATION_CREATE', { annotation: draft }, event)
-    ctx.setAnnotationDraft(draft as Record<string, unknown>)
   }
 
   onPointerUp(_ctx: ToolContext, _event: PointerEvent): void {}

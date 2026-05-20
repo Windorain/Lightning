@@ -61,7 +61,6 @@ export class BoxGizmo implements ToolGizmo {
     }
 
     ctx.invokeOperator('ANNOTATION_CREATE', { annotation: draft }, event)
-    ctx.setAnnotationDraft(draft as Record<string, unknown>)
   }
 
   onPointerUp(_ctx: ToolContext, _event: PointerEvent): void {}

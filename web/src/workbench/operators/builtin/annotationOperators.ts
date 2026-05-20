@@ -29,6 +29,7 @@ export const AnnotationCreateOperator: OperatorType = {
     if (!doc.annotations) doc.annotations = []
     doc.annotations.push(annotation)
     bctx.scene.markDirty()
+    bctx.selection.active.value = annotation.id
   },
 }
 
@@ -81,7 +82,6 @@ export const AnnotationDeleteOperator: OperatorType = {
 
     annotations.splice(idx, 1)
     bctx.scene.markDirty()
-    // Clear draft so the panel disappears
-    ;(bctx as any).annotationState?.clearDraft()
+    bctx.selection.active.value = null
   },
 }

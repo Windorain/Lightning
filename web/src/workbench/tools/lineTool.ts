@@ -52,7 +52,6 @@ export class LineGizmo implements ToolGizmo {
         frameIndex: ctx.getCurrentFrame()?.index ?? 0,
       }
       ctx.invokeOperator('ANNOTATION_CREATE', { annotation: draft }, event)
-      ctx.setAnnotationDraft(draft as Record<string, unknown>)
       this._points = []
       this._clearPreview()
     }

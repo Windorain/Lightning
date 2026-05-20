@@ -13,10 +13,15 @@ export interface BlockRef {
 
 export type SelectionMode = 'single' | 'box' | 'type'
 
+/** Active data — block for block selector, string for annotation ID */
+export type ActiveItem = BlockRef | string
+
 export interface SelectionContext {
   readonly items: Ref<Set<BlockRef>>
   readonly mode: Ref<SelectionMode>
   readonly frameIndex: Ref<number>
+  /** Currently active item: BlockRef for blocks, string (annotation ID) for annotations */
+  readonly active: Ref<ActiveItem | null>
   select(voxel: BlockRef): void
   selectBox(min: { x: number; y: number; z: number }, max: { x: number; y: number; z: number }, blocks: BlockRef[]): void
   selectByType(blockStateId: string, blocks: BlockRef[]): void
@@ -37,10 +42,12 @@ export function createSelectionContext(): SelectionContext {
   const items = ref<Set<BlockRef>>(new Set())
   const mode = ref<SelectionMode>('single')
   const frameIndex = ref(0)
+  const active = ref<ActiveItem | null>(null)
 
   const index = ref<Map<string, BlockRef>>(new Map())
 
   function select(voxel: BlockRef): void {
+    active.value = voxel
     items.value = new Set([voxel])
     index.value = new Map([[posKey(voxel.pos), voxel]])
     mode.value = 'single'
@@ -48,6 +55,7 @@ export function createSelectionContext(): SelectionContext {
   }
 
   function selectBox(min: { x: number; y: number; z: number }, max: { x: number; y: number; z: number }, blocks: BlockRef[]): void {
+    active.value = null
     const set = new Set<BlockRef>()
     const map = new Map<string, BlockRef>()
     for (const b of blocks) {
@@ -69,6 +77,7 @@ export function createSelectionContext(): SelectionContext {
   }
 
   function selectByType(blockStateId: string, blocks: BlockRef[]): void {
+    active.value = null
     const set = new Set<BlockRef>()
     const map = new Map<string, BlockRef>()
     for (const b of blocks) {
@@ -105,6 +114,7 @@ export function createSelectionContext(): SelectionContext {
   }
 
   function clear(): void {
+    active.value = null
     items.value = new Set()
     index.value = new Map()
   }
@@ -131,6 +141,7 @@ export function createSelectionContext(): SelectionContext {
     items: items as unknown as Ref<Set<BlockRef>>,
     mode: mode as unknown as Ref<SelectionMode>,
     frameIndex: frameIndex as unknown as Ref<number>,
+    active: active as unknown as Ref<ActiveItem | null>,
     select, selectBox, selectByType, add, remove, clear, invert, isSelected,
   }
 }

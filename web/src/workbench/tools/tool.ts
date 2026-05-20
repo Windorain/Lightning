@@ -47,6 +47,8 @@ export interface ToolContext {
 
   pickVoxel(event: PointerEvent): BlockRef | null
   getCurrentFrame(): Frame | null
+  /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
+  gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null
 
   /** 调用操作符 */
   invokeOperator(id: string, props?: Record<string, unknown>, event?: Event, regionId?: string): string
@@ -61,7 +63,4 @@ export interface ToolContext {
 
   /** 查询指定 region 的模态栈深度。>0 表示有操作符在模态运行中 */
   modalDepth(regionId: string): number
-
-  /** 设置注解面板 draft（触发面板自动切换） */
-  setAnnotationDraft(draft: Record<string, unknown> | null): void
 }

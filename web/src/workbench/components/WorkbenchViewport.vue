@@ -58,11 +58,11 @@ function createToolContext(): ToolContext {
     viewport: bctx.viewport,
     pickVoxel: (e) => bctx.queries.pickVoxel(e),
     getCurrentFrame: () => bctx.queries.getCurrentFrame(),
+    gridCenterWorld: (pos) => bctx.queries.gridCenterWorld(pos),
     invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
     execOperator: (id, props) => bctx.operators.exec(id, props),
     activeTool: bctx.toolRegistry.activeTool,
     modalDepth: (rid: string) => bctx.eventDispatcher.modalDepth(rid),
-    setAnnotationDraft: (draft) => (bctx as any).annotationState?.setDraft(draft),
     transient: {},
     resetTransient() { this.transient = {} },
   }
@@ -193,17 +193,6 @@ function updateAnnotationOverlay(): void {
   }).catch(() => { _annoPending = false })
 }
 
-function voxelToWorld(x: number, y: number, z: number, def: { cellGrid: any[][][] }): THREE.Vector3 {
-  const sCol = def.cellGrid[0]?.[0]?.length ?? 1
-  const sRow = def.cellGrid[0]?.length ?? 1
-  const sZ = def.cellGrid.length ?? 1
-  return new THREE.Vector3(
-    x - sCol / 2 + 0.5,
-    y - sRow / 2 + 0.5,  // Y-up: y = world Y (0 = bottom, h-1 = top)
-    z - sZ / 2 + 0.5,
-  )
-}
-
 function updateSelectionWireframe(): void {
   if (bctx.viewport.wireframe.value) {
     bctx.viewport.overlayGroup.value?.remove(bctx.viewport.wireframe.value)
@@ -215,14 +204,12 @@ function updateSelectionWireframe(): void {
   const items = selection.items.value
   if (items.size === 0 || items.size > 500) return
 
-  const def = structureDefinition.value
-  if (!def) return
-
   const edges: number[] = []
   const s = 0.52
 
   for (const item of items) {
-    const world = voxelToWorld(item.pos.x, item.pos.y, item.pos.z, def)
+    const world = bctx.queries.gridCenterWorld(item.pos)
+    if (!world) continue
     const x = world.x; const y = world.y; const z = world.z
 
     const verts = [
@@ -276,21 +263,6 @@ function updateOverlay(): void {
   }
 }
 
-function onViewportSelect(
-  p: { blockId: string; voxel: { column: number; row: number; zSlice: number } } | null,
-): void {
-  if (p) {
-    // 预览视口返回 cellGrid row (0=top)，转换为 Y-up
-    const def = structureDefinition.value
-    const h = def?.cellGrid[0]?.length ?? 0
-    const worldY = h > 0 ? h - 1 - p.voxel.row : p.voxel.row
-    selection.select({ block_state_id: p.blockId, pos: { x: p.voxel.column, y: worldY, z: p.voxel.zSlice } })
-  } else {
-    selection.clear()
-  }
-}
-
-
 watch(worldFrameIndex, (i) => { bctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }) }, { immediate: true })
 
 // Sync vp.definition when the store updates its definition after scene reload
@@ -326,7 +298,6 @@ onBeforeUnmount(() => {
       :edit-mode="true"
       :show-axes-gizmo="config.features.showAxesGizmo !== false"
       @ready="onViewportReady"
-      @select-block="onViewportSelect"
     />
     </div>
 

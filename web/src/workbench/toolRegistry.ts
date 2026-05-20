@@ -37,10 +37,9 @@ export function provideToolRegistry(): ToolRegistry {
     const tool = tools.get(id)
     if (!tool || activeTool.value?.id === id) return
 
-    // Deactivate previous tool and clear annotation draft
+    // Deactivate previous tool
     if (activeTool.value) {
       activeGizmo.value?.deactivate()
-      _toolCtx?.setAnnotationDraft(null)
     }
 
     // Track last non-select tool for Tab toggle
@@ -58,7 +57,6 @@ export function provideToolRegistry(): ToolRegistry {
 
   function deactivate(): void {
     activeGizmo.value?.deactivate()
-    _toolCtx?.setAnnotationDraft(null)
     const select = tools.get('select')
     activeTool.value = select ?? null
     activeGizmo.value = select ? (gizmos.get('select') ?? null) : null

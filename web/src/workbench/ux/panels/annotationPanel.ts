@@ -2,8 +2,17 @@ import type { BContext } from '@/workbench/context/bContext'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout, UILayoutItem } from '../types/layout'
+import type { Annotation } from '@/render/data/annotationTypes'
 
 const AUTO_SAVE_DELAY = 200
+
+function activeAnnotation(ctx: BContext): Annotation | null {
+  const active = ctx.selection.active.value
+  if (typeof active !== 'string') return null
+  const doc = ctx.scene.scene.value as Record<string, any> | null
+  const annos = doc?.annotations as Annotation[] | undefined
+  return annos?.find(a => a.id === active) ?? null
+}
 
 export const annotationPanel: PanelDeclaration = {
   id: 'annotation-panel',
@@ -12,20 +21,18 @@ export const annotationPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
 
   poll(ctx: BContext): boolean {
-    const state = (ctx as any).annotationState
-    return state?.currentDraft != null
+    return activeAnnotation(ctx) !== null
   },
 
   owner(ctx: BContext): unknown {
-    const draft = (ctx as any).annotationState?.currentDraft as Record<string, any> | null
-    if (!draft) return null
+    const anno = activeAnnotation(ctx)
+    if (!anno) return null
 
     let timer: ReturnType<typeof setTimeout> | undefined
 
-    return new Proxy(draft, {
+    return new Proxy(anno as Record<string, any>, {
       set(target, prop, value) {
         target[prop as string] = value
-        // Skip meta keys — don't auto-save id/timestamps
         if (prop === 'id' || prop === 'created_at' || prop === 'updated_at') return true
         if (timer) clearTimeout(timer)
         timer = setTimeout(() => {
@@ -38,8 +45,8 @@ export const annotationPanel: PanelDeclaration = {
   },
 
   layout(ctx: BContext): UILayout {
-    const state = (ctx as any).annotationState
-    const draft = state?.currentDraft as Record<string, any> | null
+    const anno = activeAnnotation(ctx)
+    const draft = anno as Record<string, any> | null
 
     if (!draft) {
       return {
@@ -129,7 +136,6 @@ export const annotationPanel: PanelDeclaration = {
         break
     }
 
-    // Delete only — edits are auto-saved via the Proxy owner
     items.push(
       { kind: 'separator' },
       { kind: 'operator', id: 'ANNOTATION_DELETE', label: '删除', props: { id: draft.id } },
