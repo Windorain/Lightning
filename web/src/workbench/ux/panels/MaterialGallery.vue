@@ -461,15 +461,19 @@ onUnmounted(() => {
 .mg-grid {
   flex: 1;
   overflow-y: auto;
-  column-width: 160px;
-  column-gap: 8px;
+  overflow-x: hidden;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 8px;
   padding: 10px;
   outline: none;
 }
 
 .mg-card {
-  break-inside: avoid;
-  margin-bottom: 8px;
+  flex: 0 0 calc((100% - 16px) / 3);
+  min-width: 140px;
+  max-width: 200px;
   border: 1px solid var(--nei-border, #3a3a3a);
   border-radius: 4px;
   overflow: hidden;
@@ -542,7 +546,7 @@ onUnmounted(() => {
 }
 
 .mg-grid-empty {
-  break-inside: avoid;
+  flex: 0 0 100%;
   padding: 20px;
   text-align: center;
   color: var(--nei-text-muted);
