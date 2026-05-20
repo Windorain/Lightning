@@ -23,6 +23,23 @@ import type { wmWindow, bScreen, ScrArea, ARegion, Rect } from '@/workbench/ux/t
 import type { RNARegistry } from '@/workbench/ux/rna/types'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
 
+export interface MaterialQueryItem {
+  materialId: string
+  kind: 'static16' | 'animated'
+  blend?: 'opaque' | 'cutout' | 'translucent'
+  locator?: string
+  emissive?: number
+  animation?: {
+    defaultFrametimeTicks?: number
+    frameSequence?: Array<{ index: number; timeTicks?: number }>
+    interpolate?: boolean
+  }
+  textureDataUrl: string | null
+  atlas?: string | null
+  linear?: boolean
+  useMipmaps?: boolean
+}
+
 export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
   pickVoxel(event: PointerEvent): BlockRef | null
@@ -52,6 +69,8 @@ export interface BContextQueries {
   pickGround(event: PointerEvent): { x: number; y: number; z: number } | null
   /** 射线命中浮点世界坐标（注解框用）。无命中 fallback 到地平面浮点坐标 */
   pickWorldPoint(event: PointerEvent): { x: number; y: number; z: number } | null
+  /** List all materials with their texture data URLs */
+  listMaterials(): MaterialQueryItem[]
 }
 
 export interface BContextSettings {

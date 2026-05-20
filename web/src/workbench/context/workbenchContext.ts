@@ -22,14 +22,14 @@ import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
 import { createProductionQueries } from '@/workbench/context/sceneQueries'
-import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA } from '@/workbench/ux/rna'
+import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA, materialRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt, relayout } from '@/workbench/ux/layout'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import {
   blockInspectorPanel, toolShelfPanel,
   transformPanel, sceneInfoPanel,
   menuBarPanel, blockStatsPanel,
-  annotationPanel,
+  annotationPanel, materialGalleryPanel,
 } from '@/workbench/ux/panels'
 
 // All builtin operators
@@ -46,6 +46,7 @@ import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/wo
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
 import { ThemeToggleOperator, SetLanguageOperator } from '@/workbench/operators/builtin/appearanceOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/workbench/operators/builtin/annotationOperators'
+import { ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator } from '@/workbench/operators/builtin/materialOperators'
 
 // Tools
 import { selectTool } from '@/workbench/tools/selectTool'
@@ -69,6 +70,7 @@ const ALL_OPERATORS = [
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
   ThemeToggleOperator, SetLanguageOperator,
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
+  ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator,
 ]
 
 export interface WorkbenchContextDeps {
@@ -136,6 +138,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   rna.register(sceneMetaRNA)
   rna.register(wikiConfigRNA)
   rna.register(annotationRNA)
+  rna.register(materialRNA)
 
   // ---- 默认 screen 布局 ----
   const defaultScreen: bScreen = {
@@ -171,7 +174,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels.push(menuBarPanel)
   const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
-    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel,
+    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel, materialGalleryPanel,
   )
 
   computeLayout(bctx, defaultScreen)

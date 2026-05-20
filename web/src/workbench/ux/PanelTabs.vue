@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, type Component } from 'vue'
 import UIRenderer from './UIRenderer.vue'
 import type { RNARegistry } from './rna/types'
 import type { UILayout } from './types/layout'
@@ -10,11 +10,13 @@ export interface PanelTabItem {
   icon?: string
   layout: UILayout
   owner?: unknown
+  component?: Component
 }
 
 const props = defineProps<{
   panels: PanelTabItem[]
   rna: RNARegistry
+  bctx?: unknown
 }>()
 
 const activeId = ref<string | null>(null)
@@ -69,8 +71,13 @@ function selectTab(id: string): void {
       </button>
     </div>
     <div class="pt-content">
+      <component
+        v-if="activePanel?.component"
+        :is="activePanel.component"
+        :bctx="bctx"
+      />
       <UIRenderer
-        v-if="activePanel"
+        v-else-if="activePanel"
         :layout="activePanel.layout"
         :rna="rna"
         :owner="activePanel.owner"

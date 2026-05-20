@@ -5,7 +5,7 @@
  * 操作符通过 bctx.queries 隐式获取场景状态，不直接 import 此文件。
  */
 import * as THREE from 'three'
-import type { BContext, BContextQueries } from '@/workbench/context/bContext'
+import type { BContext, BContextQueries, MaterialQueryItem } from '@/workbench/context/bContext'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { V2AnnotationBox } from '@/render/data/sceneDocumentV2'
 import type { Frame } from '@/render/schema/types'
@@ -246,6 +246,43 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
         y: 0,
         z: origin.z + dir.z * t,
       }
+    },
+
+    listMaterials(): MaterialQueryItem[] {
+      const doc = bctx.scene.scene.value
+      if (!doc) return []
+      const palette = doc.materialPalette as any[] | undefined
+      if (!palette?.length) return []
+      const blobs = doc.textureBlobs as Record<string, unknown> | undefined
+
+      function getBlob(index: number): string | null {
+        if (!blobs) return null
+        const key = String(index)
+        const b = blobs[key]
+        if (typeof b !== 'string') return null
+        const t = b.trim()
+        if (t.startsWith('data:')) return t
+        return `data:image/png;base64,${t}`
+      }
+
+      return palette.map((entry: any, i: number) => {
+        const idx = entry.textureBlobIndex
+        const dataUrl = (typeof idx === 'number' && Number.isFinite(idx))
+          ? getBlob(Math.floor(idx))
+          : null
+        return {
+          materialId: String(i),
+          kind: entry.kind ?? 'static16',
+          blend: entry.blend,
+          locator: entry.locator,
+          emissive: entry.emissive,
+          animation: entry.animation,
+          textureDataUrl: dataUrl,
+          atlas: entry.atlas,
+          linear: entry.linear,
+          useMipmaps: entry.useMipmaps,
+        }
+      })
     },
   }
 }

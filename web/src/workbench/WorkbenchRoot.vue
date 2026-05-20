@@ -71,7 +71,7 @@ const activeToolshelfPanels = computed(() =>
 const activePropertiesPanels = computed(() =>
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels
     .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
+    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx), component: p.component }))
 )
 
 const activeHeaderPanels = computed(() =>
@@ -204,7 +204,7 @@ onMounted(() => {
       <ViewportHost />
     </template>
     <template #properties>
-      <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" />
+      <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" :bctx="bctx" />
     </template>
     <template #statusbar>
       <StatusBar />
