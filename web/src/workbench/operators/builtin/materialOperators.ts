@@ -2,14 +2,6 @@ import type { OperatorType } from '@/workbench/operators/operatorType'
 import type { MaterialQueryItem } from '@/workbench/context/bContext'
 import { encodeAnimatedGif } from '@/workbench/animatedGifEncoder'
 
-/** Resolve the dataUrl of the material — shared helper */
-function resolveMaterialDataUrl(bctx: any, materialId: string): string | null {
-  const materials = bctx.queries?.listMaterials?.() ?? []
-  const m = materials.find((item: MaterialQueryItem) => item.materialId === materialId)
-  return m?.textureDataUrl ?? null
-}
-
-/** Resolve the material item — shared helper */
 function resolveMaterial(bctx: any, materialId: string): MaterialQueryItem | undefined {
   const materials = bctx.queries?.listMaterials?.() ?? []
   return materials.find((item: MaterialQueryItem) => item.materialId === materialId)
@@ -44,12 +36,12 @@ export const ExportTextureOperator: OperatorType = {
 
   exec(bctx, props) {
     const materialId = (props?.materialId as string) ?? '0'
-    const dataUrl = resolveMaterialDataUrl(bctx, materialId)
-    if (!dataUrl) {
+    const m = resolveMaterial(bctx, materialId)
+    if (!m?.textureDataUrl) {
       bctx.log?.warn('导出', `材质 ${materialId} 无纹理数据`)
       return
     }
-    downloadPng(dataUrl, filenameStem(resolveMaterial(bctx, materialId), materialId))
+    downloadPng(m.textureDataUrl, filenameStem(m, materialId))
   },
 }
 
@@ -91,8 +83,7 @@ export const CopyMaterialLocatorOperator: OperatorType = {
 
   async exec(bctx, props) {
     const materialId = (props?.materialId as string) ?? '0'
-    const materials = bctx.queries?.listMaterials?.() ?? []
-    const m = materials.find((item: MaterialQueryItem) => item.materialId === materialId)
+    const m = resolveMaterial(bctx, materialId)
     if (!m?.locator) {
       bctx.log?.warn('操作', `材质 ${materialId} 无定位符`)
       return

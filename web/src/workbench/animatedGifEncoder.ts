@@ -51,9 +51,6 @@ function packColor(r: number, g: number, b: number): number {
   return (r << 16) | (g << 8) | b
 }
 
-/** Sentinel colour placed at index 0 when the GIF has transparency. */
-const TRANSPARENT_SENTINEL = 0
-
 interface PaletteResult {
   /** Packed 24-bit colours, length = power of 2 (min 2, max 256). */
   colors: number[]
@@ -82,33 +79,23 @@ function buildPalette(frames: ImageData[]): PaletteResult {
     }
   }
 
-  // Sort by frequency descending; take top 255 if transparent (reserve slot 0), else 256
   const maxOpaque = hasTransparent ? 255 : 256
   const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1])
   const top = sorted.slice(0, maxOpaque)
   const palette: number[] = []
 
-  if (hasTransparent) {
-    palette.push(TRANSPARENT_SENTINEL) // index 0 = transparent
-  }
-  for (const [color] of top) {
-    palette.push(color)
-  }
+  if (hasTransparent) palette.push(0) // index 0 = transparent
+
+  for (const [color] of top) palette.push(color)
 
   // Pad to power of 2
   let size = 2
   while (size < palette.length) size *= 2
-  while (palette.length < size) {
-    palette.push(0)
-  }
+  while (palette.length < size) palette.push(0)
 
   return { colors: palette, transparentIdx: hasTransparent ? 0 : null }
 }
 
-/**
- * Convert frame ImageData to indexed pixels.  Transparent pixels (alpha < 128)
- * map to `transparentIdx`; opaque pixels are looked up in the palette.
- */
 function frameToIndices(
   frame: ImageData,
   palette: number[],
