@@ -34,14 +34,15 @@ import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
 const props = defineProps<{ config: View3DConfig }>()
 
 // ---- BContext: inject or self-create ----
+// Workbench bctx (has scene) is incompatible — create independent embed bctx
 const _injectedBctx = inject<BContext | null>(bContextKey, null)
-const _ownsBctx = !_injectedBctx
-const bctx: BContext = _injectedBctx ?? createEmbedBContext(props.config)
+const _isWorkbenchBctx = (_injectedBctx as any)?.scene != null
+const _ownsBctx = !_injectedBctx || _isWorkbenchBctx
+const bctx: BContext = (_injectedBctx && !_isWorkbenchBctx) ? _injectedBctx : createEmbedBContext(props.config)
 if (_ownsBctx) {
   provideEmbedBContext(bctx)
 }
 
-// Sync config into bctx (only if not injected, since injected bctx's config may be shared)
 bctx.config.value = props.config
 watch(() => props.config, (cfg) => {
   bctx.config.value = cfg
@@ -49,7 +50,7 @@ watch(() => props.config, (cfg) => {
 })
 
 // Viewport slot
-const EMBED_REGION = 'r-embed-viewport'
+const EMBED_REGION = 'r-viewport'
 const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED_REGION)
 
 // ---- Hover / tooltip ----
