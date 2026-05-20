@@ -260,6 +260,16 @@ watch(structureDefinition, (def) => {
   bctx.viewport.definition.value = def ?? null
 })
 
+// Sync vp.contentGroup when mesh is rebuilt (e.g. after move / scene edit)
+watch(mainMeshGroup, (g) => {
+  bctx.viewport.contentGroup.value = g ?? new THREE.Group()
+})
+
+// Sync vp.layerPreview when user switches layer
+watch(layerPreviewMode, (m) => {
+  bctx.viewport.layerPreview.value = m
+})
+
 onMounted(async () => { await store.loadStructureAndResources() })
 onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())

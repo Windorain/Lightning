@@ -72,7 +72,7 @@ export interface BContextSettings {
   language?: 'zh' | 'en'
 }
 
-/** 视口运行时——所有可观测的 Three.js / DOM 状态。单一赋值点：WorkbenchViewport.onViewportReady */
+/** 视口运行时——所有可观测的 Three.js / DOM 状态。初始值在 WorkbenchViewport.onViewportReady 中设置，动态字段通过 watcher 保持同步 */
 export interface ViewportRuntime {
   camera: Ref<THREE.Camera | null>
   contentGroup: Ref<THREE.Group | null>
