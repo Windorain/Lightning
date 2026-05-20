@@ -30,6 +30,8 @@ import { isWorldDocument, resolveRenderBundle, type RenderBundleResolveResult } 
 import { frameAt } from '@/render/data/worldPlayback'
 import { formatUndefinedBlockDetailsForStatus, type BlockMeshBuildStats } from '@/render/mesh/blockMesh'
 import { BlockMeshProvider } from '@/render/mesh/blockMeshProvider'
+import { AnnotationMeshProvider } from '@/render/mesh/annotationMeshProvider'
+import type { Annotation } from '@/render/data/annotationTypes'
 import type { StructureDefinition, World } from '@/render/schema/types'
 import { formatUnknownError } from '@/util/formatUnknownError'
 
@@ -60,6 +62,7 @@ export interface View3DStore {
   registerScene(scene: THREE.Scene): void
   loadStructureAndResources(): Promise<void>
   rebuildContentMesh(): Promise<void>
+  rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null>
   detachAndDisposeMesh(): void
   disposeCachesAndLibrary(): void
   mainMeshGroup: ShallowRef<THREE.Group | null>
@@ -110,6 +113,7 @@ export function createView3DStore(initialConfig: View3DConfig): View3DStore {
   const sceneRef = shallowRef<THREE.Scene | null>(null)
   const mainMeshGroup = shallowRef<THREE.Group | null>(null)
   const blockMeshProvider = new BlockMeshProvider()
+  const annotationProvider = new AnnotationMeshProvider()
 
   const worldFrameIndex = ref(0)
   const framesPlaybackIsPlaying = ref(false)
@@ -428,6 +432,17 @@ export function createView3DStore(initialConfig: View3DConfig): View3DStore {
     return runMesh(() => presentContentMesh())
   }
 
+  async function rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null> {
+    const def = structureDefinition.value
+    const lib = materialLibrary.value
+    if (!def || !lib || annotations.length === 0) return null
+
+    annotationProvider.setAnnotations(annotations)
+    const outputs = await annotationProvider.build(def, lib)
+    const out = outputs[0]
+    return out?.kind === 'object3d' ? (out.object as THREE.Group) : null
+  }
+
   async function reloadFromConfig(cfg: View3DConfig): Promise<void> {
     config.value = cfg
     clearAllMeshStorage()
@@ -502,6 +517,7 @@ export function createView3DStore(initialConfig: View3DConfig): View3DStore {
     registerScene,
     loadStructureAndResources,
     rebuildContentMesh,
+    rebuildAnnotationOverlay,
     detachAndDisposeMesh,
     disposeCachesAndLibrary,
     clearAllMeshStorage,

@@ -15,7 +15,6 @@ import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
-import { AnnotationMeshProvider } from '@/render/mesh/annotationMeshProvider'
 import type { Annotation } from '@/render/data/annotationTypes'
 import * as THREE from 'three'
 
@@ -150,7 +149,6 @@ let _alive = true
 let toolCtx: ToolContext | null = null
 
 // Annotation overlay
-const _annoProvider = new AnnotationMeshProvider()
 let _annoGroup: THREE.Group | null = null
 let _annoHash = ''
 let _annoPending = false
@@ -166,14 +164,8 @@ function updateAnnotationOverlay(): void {
   _annoHash = hash
   _annoPending = true
 
-  const def = structureDefinition.value
-  const lib = materialLibrary.value
-  if (!def || !lib) { _annoPending = false; return }
-
-  _annoProvider.setAnnotations(annos)
-  _annoProvider.build(def, lib).then(outputs => {
+  store.rebuildAnnotationOverlay(annos).then(group => {
     _annoPending = false
-    // Dispose old
     if (_annoGroup) {
       bctx.viewport.overlayGroup.value?.remove(_annoGroup)
       _annoGroup.traverse((c) => {
@@ -184,10 +176,8 @@ function updateAnnotationOverlay(): void {
       })
       _annoGroup = null
     }
-    // Add new
-    const out = outputs[0]
-    if (out && out.kind === 'object3d') {
-      _annoGroup = out.object as THREE.Group
+    if (group) {
+      _annoGroup = group
       bctx.viewport.overlayGroup.value?.add(_annoGroup)
     }
   }).catch(() => { _annoPending = false })

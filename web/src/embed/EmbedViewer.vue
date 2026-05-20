@@ -19,6 +19,8 @@ import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import ViewerCore from '@/embed/components/ViewerCore.vue'
 import type { ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
+import type { Annotation } from '@/render/data/annotationTypes'
+import * as THREE from 'three'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
@@ -168,9 +170,21 @@ const statusSummary = computed(() => {
 })
 
 // ---- Viewport events ----
+let _annoGroup: THREE.Group | null = null
+
 function onViewportReady(payload: ViewerCoreReadyPayload): void {
   store.registerScene(payload.scene)
   store.rebuildContentMesh().catch(e => { console.error('[EmbedViewer] rebuildContentMesh', e) })
+
+  const doc = props.config.renderBundle.document as Record<string, any> | null
+  const annos: Annotation[] = doc?.annotations ?? []
+  store.rebuildAnnotationOverlay(annos).then(group => {
+    if (group) {
+      _annoGroup = group
+      payload.layers.overlay.add(_annoGroup)
+    }
+  })
+
   emit('ready', payload)
 }
 
@@ -190,6 +204,15 @@ function onSidebarTooltipHover(
 
 onMounted(async () => { await store.loadStructureAndResources() })
 onBeforeUnmount(() => {
+  if (_annoGroup) {
+    _annoGroup.traverse((c) => {
+      if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
+        c.geometry?.dispose()
+        ;(c.material as THREE.Material)?.dispose()
+      }
+    })
+    _annoGroup = null
+  }
   store.disposeCachesAndLibrary()
 })
 </script>
