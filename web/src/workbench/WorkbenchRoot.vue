@@ -8,6 +8,7 @@ import ViewportHost from '@/workbench/components/ViewportHost.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import WikiViewerWorkspace from '@/workbench/components/WikiViewerWorkspace.vue'
+import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
 import { provideSceneContext } from '@/workbench/sceneContext'
 import { provideConnectionContext } from '@/workbench/connectionContext'
@@ -118,7 +119,7 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
-const workspace = ref<'preview' | 'wiki' | 'export'>('preview')
+const workspace = ref<'preview' | 'wiki' | 'export' | 'materials'>('preview')
 const settingsOpen = ref(false)
 provide('workbenchSettingsOpen', settingsOpen)
 
@@ -252,6 +253,28 @@ onMounted(() => {
     </header>
     <main class="wb-standalone-body">
       <ExportWorkspace />
+    </main>
+  </div>
+
+  <div v-if="workspace === 'materials'" class="wb-standalone">
+    <header class="wb-standalone-menubar">
+      <div class="wb-menubar-inner">
+        <UIRenderer
+          v-for="panel in activeHeaderPanels"
+          :key="panel.id"
+          :layout="panel.layout"
+          :rna="bctx.rna"
+          :owner="panel.owner"
+        />
+      </div>
+    </header>
+    <header class="wb-standalone-top">
+      <div class="wb-standalone-tabs">
+        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
+      </div>
+    </header>
+    <main class="wb-standalone-body">
+      <MaterialGallery :bctx="bctx" />
     </main>
   </div>
 

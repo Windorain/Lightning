@@ -29,7 +29,7 @@ import {
   blockInspectorPanel, toolShelfPanel,
   transformPanel, sceneInfoPanel,
   menuBarPanel, blockStatsPanel,
-  annotationPanel, materialGalleryPanel,
+  annotationPanel,
 } from '@/workbench/ux/panels'
 
 // All builtin operators
@@ -174,7 +174,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels.push(menuBarPanel)
   const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
-    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel, materialGalleryPanel,
+    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel,
   )
 
   computeLayout(bctx, defaultScreen)

@@ -35,6 +35,7 @@ const dict: Record<string, Record<Lang, string>> = {
   'resetLayout': { zh: '重置布局', en: 'Reset Layout' },
   'preview': { zh: '编辑', en: 'Edit' },
   'wiki': { zh: 'Wiki 查看器', en: 'Wiki Viewer' },
+  'materials': { zh: '材质', en: 'Materials' },
   'export': { zh: '导出', en: 'Export' },
   'sceneInfo': { zh: '场景信息', en: 'Scene Info' },
   'previewConfig': { zh: '预览配置', en: 'Preview Config' },
