@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { RuntimeDocument } from '@/workbench/context/runtimeDocument'
+import { RuntimeDocument, Grid, RuntimeFrame } from '@/workbench/context/runtimeDocument'
 import { createProductionQueries } from '@/workbench/context/sceneQueries'
 import type { BContext } from '@/workbench/context/bContext'
 
@@ -8,7 +8,7 @@ function makeMockBctx(doc: RuntimeDocument): BContext {
     scene: {
       scene: { value: doc },
     },
-    selection: { items: { value: new Set() } },
+    selection: { items: { value: new Set() }, frameIndex: { value: 0 } },
   } as unknown as BContext
 }
 
@@ -62,5 +62,35 @@ describe('listMaterials', () => {
     expect(result).toHaveLength(1)
     expect(result[0].textureDataUrl).toBeNull()
     expect(result[0].locator).toBe('minecraft:textures/blocks/stone')
+  })
+})
+
+describe('getMaterialUsageCounts', () => {
+  it('returns empty object when no document', () => {
+    const q = createProductionQueries({ scene: { scene: { value: null } } } as any)
+    expect(q.getMaterialUsageCounts()).toEqual({})
+  })
+
+  it('returns empty object when no grid in current frame', () => {
+    const doc = new RuntimeDocument({ id: 'test', frames: [new RuntimeFrame(0, undefined, null)] })
+    const q = createProductionQueries(makeMockBctx(doc))
+    expect(q.getMaterialUsageCounts()).toEqual({})
+  })
+
+  it('counts blocks by paletteIndex', () => {
+    // Build a 1x1x3 grid: paletteIndex 0, 1, 0 (three blocks)
+    const cells: (any)[][][] = [[
+      [{ name: 'stone', meta: 0, paletteIndex: 0 }],
+      [{ name: 'dirt', meta: 0, paletteIndex: 1 }],
+      [{ name: 'stone', meta: 0, paletteIndex: 0 }],
+    ]]
+    const grid = new Grid(1, 3, 1, cells)
+    const doc = new RuntimeDocument({
+      id: 'test',
+      frames: [new RuntimeFrame(0, undefined, grid)],
+    })
+    const q = createProductionQueries(makeMockBctx(doc))
+    const counts = q.getMaterialUsageCounts()
+    expect(counts).toEqual({ '0': 2, '1': 1 })
   })
 })

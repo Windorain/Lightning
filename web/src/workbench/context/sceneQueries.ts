@@ -248,6 +248,21 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       }
     },
 
+    getMaterialUsageCounts(): Record<string, number> {
+      const counts: Record<string, number> = {}
+      const doc = bctx.scene.scene.value
+      if (!doc) return counts
+      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      if (!rf?.grid) return counts
+      rf.grid.forEach((_pos, block) => {
+        if (block.paletteIndex !== undefined) {
+          const key = String(block.paletteIndex)
+          counts[key] = (counts[key] ?? 0) + 1
+        }
+      })
+      return counts
+    },
+
     listMaterials(): MaterialQueryItem[] {
       const doc = bctx.scene.scene.value
       if (!doc) return []

@@ -71,6 +71,8 @@ export interface BContextQueries {
   pickWorldPoint(event: PointerEvent): { x: number; y: number; z: number } | null
   /** List all materials with their texture data URLs */
   listMaterials(): MaterialQueryItem[]
+  /** Count blocks using each material in the current frame (materialId → count) */
+  getMaterialUsageCounts(): Record<string, number>
 }
 
 export interface BContextSettings {
