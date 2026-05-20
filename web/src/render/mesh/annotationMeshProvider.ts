@@ -107,24 +107,24 @@ export class AnnotationMeshProvider implements MeshProvider {
     interface BarDef { cx: number; cy: number; cz: number; sx: number; sy: number; sz: number }
     const defs: BarDef[] = []
 
-    // 4 edges along X
+    // 4 edges along X — bars extend past corners by t so they overlap and form solid joints
     for (const y of [min.y, max.y]) {
       for (const z of [min.z, max.z]) {
-        const len = max.x - min.x
+        const len = max.x - min.x + t * 2
         defs.push({ cx: (min.x + max.x) / 2, cy: y, cz: z, sx: len, sy: t * 2, sz: t * 2 })
       }
     }
     // 4 edges along Y
     for (const x of [min.x, max.x]) {
       for (const z of [min.z, max.z]) {
-        const len = max.y - min.y
+        const len = max.y - min.y + t * 2
         defs.push({ cx: x, cy: (min.y + max.y) / 2, cz: z, sx: t * 2, sy: len, sz: t * 2 })
       }
     }
     // 4 edges along Z
     for (const x of [min.x, max.x]) {
       for (const y of [min.y, max.y]) {
-        const len = max.z - min.z
+        const len = max.z - min.z + t * 2
         defs.push({ cx: x, cy: y, cz: (min.z + max.z) / 2, sx: t * 2, sy: t * 2, sz: len })
       }
     }
