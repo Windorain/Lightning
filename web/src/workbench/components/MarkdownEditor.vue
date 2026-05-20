@@ -155,58 +155,55 @@ watch(selectedBlock, () => { markdownText.value = selectedBlock.value ? readCurr
 
 <style scoped>
 .pe-panel { padding: 10px; font-size: 12px; }
-.pe-title { font-size: 13px; font-weight: 600; color: var(--nei-text); text-shadow: var(--nei-label-shadow); margin-bottom: 8px; }
-.pe-muted { font-size: 11px; color: var(--nei-muted); }
+.pe-title { font-size: 13px; font-weight: 600; color: var(--wb-text); margin-bottom: 8px; }
+.pe-muted { font-size: 11px; color: var(--wb-text-dim); }
 .pe-btn {
-  padding: 4px 10px; border-radius: 4px; border: var(--nei-bevel-w) solid;
-  border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight);
-  background: var(--nei-btn-bg); color: var(--nei-btn-text); cursor: pointer; font-size: 11px;
+  padding: 4px 10px; border-radius: 4px; border: 1px solid var(--wb-border);
+  background: var(--wb-bg-surface); color: var(--wb-accent-muted); cursor: pointer; font-size: 11px;
 }
 .pe-btn--primary {
-  background: var(--nei-accent); border-color: var(--nei-accent-shadow);
-  color: var(--nei-accent-text); text-shadow: var(--nei-accent-shadow);
+  background: var(--wb-accent); border-color: var(--wb-accent);
+  color: var(--wb-text);
 }
-.pe-feedback { margin-top: 6px; font-size: 11px; color: var(--nei-muted); }
+.pe-feedback { margin-top: 6px; font-size: 11px; color: var(--wb-text-dim); }
 
 .me-info { margin-bottom: 8px; display: flex; gap: 6px; align-items: center; }
-.me-info-label { font-size: 10px; color: var(--nei-muted); text-transform: uppercase; }
-.me-info-val { font-family: ui-monospace, monospace; font-size: 12px; color: var(--nei-text-dark); background: var(--nei-bg); padding: 2px 6px; border: 1px solid var(--nei-border); }
+.me-info-label { font-size: 10px; color: var(--wb-text-dim); text-transform: uppercase; }
+.me-info-val { font-family: ui-monospace, monospace; font-size: 12px; color: var(--wb-text); background: var(--wb-bg-elevated); padding: 2px 6px; border: 1px solid var(--wb-border); }
 
 .me-row { display: flex; gap: 8px; margin-bottom: 8px; }
 .me-col { flex: 1; min-width: 0; }
-.me-label { display: block; font-size: 10px; color: var(--nei-label); text-transform: uppercase; margin-bottom: 3px; }
+.me-label { display: block; font-size: 10px; color: var(--wb-text-muted); text-transform: uppercase; margin-bottom: 3px; }
 
 .me-textarea {
-  width: 100%; padding: 6px; border-radius: 4px; border: var(--nei-bevel-w) solid;
-  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
-  background: var(--nei-inset-bg); color: var(--nei-text); font-size: 12px;
+  width: 100%; padding: 6px; border-radius: 4px; border: 1px solid var(--wb-border);
+  background: var(--wb-bg-surface); color: var(--wb-text); font-size: 12px;
   font-family: ui-monospace, monospace; resize: vertical; box-sizing: border-box;
 }
 
 .me-preview {
-  padding: 6px; border-radius: 4px; border: var(--nei-bevel-w) solid;
-  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
-  background: var(--nei-inset-bg); min-height: 60px; font-size: 12px; color: var(--nei-text); word-break: break-word;
+  padding: 6px; border-radius: 4px; border: 1px solid var(--wb-border);
+  background: var(--wb-bg-surface); min-height: 60px; font-size: 12px; color: var(--wb-text); word-break: break-word;
 }
 .me-preview :deep(strong) { font-weight: 700; }
 .me-preview :deep(em) { font-style: italic; }
 .me-preview :deep(code) { font-family: ui-monospace, monospace; background: rgba(0,0,0,0.2); padding: 1px 3px; border-radius: 2px; }
 .me-preview :deep(span) { color: inherit; }
 
-.me-nbt-section { margin-bottom: 8px; border: 1px solid var(--nei-border); border-radius: 4px; }
+.me-nbt-section { margin-bottom: 8px; border: 1px solid var(--wb-border); border-radius: 4px; }
 .me-nbt-header {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px; cursor: pointer; user-select: none;
-  background: var(--nei-bg);
+  background: var(--wb-bg-elevated);
 }
-.me-nbt-toggle { font-size: 10px; color: var(--nei-label); }
-.me-nbt-title { font-size: 11px; font-weight: 600; color: var(--nei-text); }
+.me-nbt-toggle { font-size: 10px; color: var(--wb-text-muted); }
+.me-nbt-title { font-size: 11px; font-weight: 600; color: var(--wb-text); }
 .me-nbt-count {
-  font-size: 10px; color: var(--nei-muted);
-  background: var(--nei-inset-bg); padding: 0 5px; border-radius: 8px;
+  font-size: 10px; color: var(--wb-text-dim);
+  background: var(--wb-bg-surface); padding: 0 5px; border-radius: 8px;
   margin-left: auto;
 }
-.me-nbt-body { padding: 6px 8px; border-top: 1px solid var(--nei-border); }
+.me-nbt-body { padding: 6px 8px; border-top: 1px solid var(--wb-border); }
 .me-nbt-actions { margin-bottom: 4px; }
 .me-nbt-list { max-height: 200px; overflow-y: auto; }
 .me-nbt-row {
@@ -214,21 +211,21 @@ watch(selectedBlock, () => { markdownText.value = selectedBlock.value ? readCurr
   font-size: 11px; font-family: ui-monospace, monospace;
 }
 .me-nbt-key {
-  color: var(--nei-accent); cursor: pointer; white-space: nowrap;
+  color: var(--wb-accent); cursor: pointer; white-space: nowrap;
   flex-shrink: 0;
 }
 .me-nbt-key:hover { text-decoration: underline; }
 .me-nbt-val {
-  color: var(--nei-text-dark); overflow: hidden; text-overflow: ellipsis;
+  color: var(--wb-text); overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; flex: 1; min-width: 0;
 }
 .me-nbt-copy {
   font-size: 10px; padding: 1px 6px; border-radius: 3px;
-  border: 1px solid var(--nei-border);
-  background: var(--nei-btn-bg); color: var(--nei-btn-text); cursor: pointer;
+  border: 1px solid var(--wb-border);
+  background: var(--wb-bg-surface); color: var(--wb-accent-muted); cursor: pointer;
   flex-shrink: 0;
 }
-.me-nbt-copy:hover { background: var(--nei-accent); color: var(--nei-accent-text); }
+.me-nbt-copy:hover { background: var(--wb-accent); color: var(--wb-text); }
 
 .me-btns { display: flex; gap: 6px; }
 </style>

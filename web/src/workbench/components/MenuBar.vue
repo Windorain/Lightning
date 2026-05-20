@@ -71,6 +71,7 @@ function onMenuAction(action: string): void {
 <template>
   <div class="mb-root" @mouseleave="closeMenu">
     <div class="mb-left">
+      <span class="mb-brand">LIGHTNING</span>
       <div class="mb-item" @mouseenter="toggleMenu('file')">
         <span class="mb-label">{{ t('file') }}</span>
         <div v-if="openMenu === 'file'" class="mb-dropdown">
@@ -113,46 +114,49 @@ function onMenuAction(action: string): void {
 <style scoped>
 .mb-root {
   display: flex; align-items: center; justify-content: space-between;
-  height: 100%; padding: 0 6px; font-size: 12px;
+  height: 100%; padding: 0 12px; font-size: 11px;
 }
 .mb-left, .mb-right { display: flex; align-items: center; gap: 0; }
 .mb-item { position: relative; }
-.mb-label {
-  padding: 3px 10px; border-radius: 4px; cursor: pointer;
-  user-select: none; color: var(--nei-label); display: inline-block;
+.mb-brand {
+  color: var(--wb-text); font-size: 12px; font-weight: 600; letter-spacing: 0.3px; margin-right: 20px;
+  user-select: none;
 }
-.mb-label:hover { background: var(--nei-panel-hover); }
-.mb-disabled { color: var(--nei-muted); cursor: default; }
+.mb-label {
+  padding: 4px 10px; border-radius: var(--wb-radius-sm); cursor: pointer;
+  user-select: none; color: var(--wb-accent-muted); display: inline-block;
+}
+.mb-label:hover { background: var(--wb-bg-hover); color: var(--wb-text); }
+.mb-disabled { color: var(--wb-text-dim); cursor: default; }
 .mb-disabled:hover { background: transparent; }
 .mb-dropdown {
   position: absolute; top: 100%; left: 0; z-index: 1000;
   min-width: 180px; padding: 4px;
-  background: var(--nei-dropdown-bg); border: 1px solid var(--nei-border); border-radius: 6px;
+  background: var(--wb-bg-elevated); border: 1px solid var(--wb-border); border-radius: var(--wb-radius-lg);
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
 .mb-dd-section {
-  padding: 4px 10px 2px; font-size: 10px; text-transform: uppercase;
-  color: var(--nei-muted); letter-spacing: 0.5px;
+  padding: 5px 12px 3px; font-size: 9px; text-transform: uppercase;
+  color: var(--wb-text-dim); letter-spacing: 0.5px;
 }
 .mb-dd-item {
   display: flex; align-items: center; gap: 4px;
-  width: 100%; padding: 5px 10px; border: none;
-  background: transparent; color: var(--nei-text-dark); font-size: 12px;
-  text-align: left; cursor: pointer; border-radius: 3px;
+  width: 100%; padding: 5px 12px; border: none;
+  background: transparent; color: var(--wb-text); font-size: 11px;
+  text-align: left; cursor: pointer; border-radius: var(--wb-radius-sm);
 }
-.mb-dd-item:hover { background: var(--nei-dropdown-hover); color: #fff; }
-.mb-check { width: 14px; font-size: 10px; color: var(--nei-check); }
+.mb-dd-item:hover { background: var(--wb-bg-hover); }
+.mb-check { width: 14px; font-size: 10px; color: var(--wb-success); }
 .mb-status-dot { width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; }
-.mb-online { background: var(--nei-online); box-shadow: 0 0 4px var(--nei-online); }
-.mb-offline { background: var(--nei-offline); }
-.mb-status-label { font-size: 11px; color: var(--nei-muted); }
+.mb-online { background: var(--wb-success); box-shadow: 0 0 6px rgba(46, 204, 113, 0.4); }
+.mb-offline { background: var(--wb-text-dim); }
+.mb-status-label { font-size: 10px; color: var(--wb-text-muted); }
 .mb-theme-btn {
-  width: 22px; height: 22px; border: var(--nei-bevel-w) solid;
-  border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight);
-  background: var(--nei-bg); color: var(--nei-text-dark); font-size: 12px;
+  width: 24px; height: 24px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface); color: var(--wb-accent-muted); font-size: 12px;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  border-radius: 2px; margin-right: 8px; padding: 0; line-height: 1;
+  margin-right: 10px; padding: 0; line-height: 1;
 }
-.mb-theme-btn:hover { background: var(--nei-panel-hover); }
+.mb-theme-btn:hover { background: var(--wb-bg-hover); }
 .mb-file-input { display: none; }
 </style>

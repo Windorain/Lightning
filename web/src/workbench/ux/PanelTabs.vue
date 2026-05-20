@@ -85,49 +85,46 @@ function selectTab(id: string): void {
   flex-direction: column;
   height: 100%;
 }
-
 .pt-tabs {
   flex-shrink: 0;
   display: flex;
-  border-bottom: 1px solid var(--nei-border, #555);
-  background: var(--nei-inset-bg, #1a1a1a);
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-bg-deepest);
   overflow-x: auto;
+  height: 32px;
 }
-
 .pt-tab {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
+  padding: 0 14px;
   border: none;
   background: transparent;
-  color: var(--nei-text-muted);
+  color: var(--wb-text-muted);
   font-size: 11px;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
   cursor: pointer;
   white-space: nowrap;
   border-bottom: 2px solid transparent;
   transition: color 0.15s, border-color 0.15s;
 }
 .pt-tab:hover {
-  color: var(--nei-text);
+  color: var(--wb-text);
 }
 .pt-tab--active {
-  color: var(--nei-text);
-  border-bottom-color: var(--nei-accent);
+  color: var(--wb-text);
+  border-bottom-color: var(--wb-accent);
+  font-weight: 500;
 }
-
 .pt-tab-icon {
   font-size: 14px;
   line-height: 1;
 }
 .pt-tab-label {
-  font-weight: 500;
+  font-weight: inherit;
 }
-
 .pt-content {
   flex: 1;
   overflow-y: auto;
-  padding: 4px;
+  padding: 10px 12px;
 }
 </style>

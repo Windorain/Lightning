@@ -1,0 +1,91 @@
+/**
+ * Precision Workshop — Design Tokens
+ * Cold steel blue on midnight. Industrial precision aesthetic.
+ */
+:root {
+  /* Surface hierarchy */
+  --wb-bg-deepest: #0b1217;
+  --wb-bg-surface: #101820;
+  --wb-bg-elevated: #0f161d;
+  --wb-bg-hover: #1a2532;
+
+  /* Borders */
+  --wb-border: #1a2532;
+  --wb-border-light: #1a3040;
+
+  /* Accent */
+  --wb-accent: #4dabf7;
+  --wb-accent-muted: #7aa2c4;
+
+  /* Text */
+  --wb-text: #c5d8e8;
+  --wb-text-muted: #56728a;
+  --wb-text-dim: #3a5068;
+
+  /* Semantic */
+  --wb-success: #2ecc71;
+  --wb-danger: #e74c3c;
+  --wb-danger-bg: #301a1a;
+
+  /* Scrollbar */
+  --wb-scrollbar-width: 6px;
+  --wb-scrollbar-track: #0d141c;
+  --wb-scrollbar-thumb: #1a2532;
+
+  /* Viewport */
+  --wb-viewport-bg: #0b1217;
+  --wb-grid-color: rgba(77, 171, 247, 0.025);
+
+  /* Misc */
+  --wb-radius-sm: 3px;
+  --wb-radius-md: 4px;
+  --wb-radius-lg: 6px;
+  --wb-radius-xl: 8px;
+  --wb-radius-full: 10px;
+}
+
+[data-wb-theme="light"] {
+  --wb-bg-deepest: #e8ecf0;
+  --wb-bg-surface: #f0f2f5;
+  --wb-bg-elevated: #e0e4e8;
+  --wb-bg-hover: #d0d6de;
+  --wb-border: #c0c8d0;
+  --wb-border-light: #d0d6de;
+  --wb-accent: #2563eb;
+  --wb-accent-muted: #4b7cb8;
+  --wb-text: #1a2532;
+  --wb-text-muted: #5a6678;
+  --wb-text-dim: #8898a8;
+  --wb-success: #16a34a;
+  --wb-danger: #dc2626;
+  --wb-danger-bg: #fecaca;
+  --wb-scrollbar-track: #d0d6de;
+  --wb-scrollbar-thumb: #a0aab4;
+  --wb-viewport-bg: #d8dce2;
+  --wb-grid-color: rgba(37, 99, 235, 0.04);
+}
+
+/* Custom scrollbar — global */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--wb-scrollbar-thumb) var(--wb-scrollbar-track);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--wb-scrollbar-track);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--wb-scrollbar-thumb);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--wb-accent);
+}

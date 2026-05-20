@@ -30,14 +30,14 @@ const tabs = [
 <style scoped>
 .wt-root {
   display: flex; align-items: stretch; height: 100%;
-  padding: 0 6px; gap: 1px;
+  padding: 0 10px; gap: 0;
 }
 .wt-tab {
-  padding: 0 14px; border: none; background: transparent;
-  color: var(--nei-tab-text); font-size: 12px; cursor: pointer;
+  padding: 0 18px; border: none; background: transparent;
+  color: var(--wb-text-muted); font-size: 11px; cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: color 0.15s, border-color 0.15s;
 }
-.wt-tab:hover { color: var(--nei-text-dark); }
-.wt-tab--active { color: var(--nei-tab-active-text); border-bottom-color: var(--nei-tab-active-border); }
+.wt-tab:hover { color: var(--wb-text); }
+.wt-tab--active { color: var(--wb-text); border-bottom-color: var(--wb-accent); font-weight: 500; }
 </style>

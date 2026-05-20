@@ -267,64 +267,62 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.wm-root { font-family: system-ui, 'Segoe UI', sans-serif; color: var(--nei-text-dark); background: var(--nei-bg); padding: 8px; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; }
-.wm-title { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--nei-text); text-shadow: var(--nei-label-shadow); display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.wm-root { font-family: system-ui, 'Segoe UI', sans-serif; color: var(--wb-text); background: var(--wb-bg-deepest); padding: 8px; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; }
+.wm-title { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--wb-text); display: flex; flex-direction: row; align-items: center; gap: 8px; }
 .wm-title-text { flex: 1; min-width: 0; }
-.wm-title-meta { flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--nei-text-muted); background: none; border: none; cursor: help; padding: 0 2px; line-height: 1; }
-.wm-title-meta:hover { color: var(--nei-text); }
-.wm-main-stage { display: flex; flex: 1; flex-direction: row; align-items: stretch; min-height: 0; width: 100%; border-radius: 0; overflow: hidden; border: var(--nei-bevel-w) solid; border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight); border-bottom: none; background: var(--nei-bg); }
+.wm-title-meta { flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--wb-text-muted); background: none; border: none; cursor: help; padding: 0 2px; line-height: 1; }
+.wm-title-meta:hover { color: var(--wb-text); }
+.wm-main-stage { display: flex; flex: 1; flex-direction: row; align-items: stretch; min-height: 0; width: 100%; border-radius: 0; overflow: hidden; border: 1px solid var(--wb-border); border-bottom: none; background: var(--wb-bg-elevated); }
 .wm-viewport-column { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 .wm-bottom-dock {
   flex-shrink: 0;
   display: flex; flex-direction: column;
-  border: var(--nei-bevel-w) solid;
-  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
+  border: 1px solid var(--wb-border);
   border-top: none;
-  background: var(--nei-inset-bg);
+  background: var(--wb-bg-surface);
 }
 .wm-tab-row {
   display: flex; align-items: center;
   gap: 0;
   padding: 0 4px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-shadow);
+  background: var(--wb-bg-deepest);
+  border-bottom: 1px solid var(--wb-border);
 }
 .wm-tab {
-  padding: 6px 14px 5px;
-  font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace;
-  font-weight: 600;
-  color: var(--nei-text-muted);
+  padding: 0 14px;
+  font-size: 11px; font-weight: 500;
+  color: var(--wb-text-muted);
   background: none; border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer; user-select: none;
   white-space: nowrap;
   transition: color 0.15s, border-color 0.15s;
+  height: 100%; display: flex; align-items: center;
 }
-.wm-tab:hover { color: var(--nei-text); }
+.wm-tab:hover { color: var(--wb-text); }
 .wm-tab--active {
-  color: var(--nei-text);
-  border-bottom-color: var(--nei-accent);
+  color: var(--wb-text);
+  border-bottom-color: var(--wb-accent);
 }
 .wm-tab-status {
   margin-left: auto;
   display: flex; align-items: center; gap: 14px;
   padding: 0 10px;
-  font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace;
-  color: var(--nei-text-muted);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  font-size: 10px;
+  color: var(--wb-text-muted);
   flex-shrink: 0;
 }
 .wm-tab-stat strong {
-  color: var(--nei-text);
+  color: var(--wb-text);
   font-weight: 600;
 }
 .wm-tab-panel {
   display: none;
-  padding: 6px 10px;
+  padding: 8px 12px;
   align-items: center; gap: 10px;
-  height: 40px;
-  background: var(--nei-inset-bg);
+  min-height: 44px;
+  background: var(--wb-bg-elevated);
 }
 .wm-tab-panel--active { display: flex; }
 
@@ -340,8 +338,8 @@ onBeforeUnmount(() => {
   background: transparent; border: none; padding: 0;
 }
 
-.wm-status-bar { display: flex; align-items: flex-start; gap: 8px; margin-top: 0; padding: 8px 10px; font-size: 12px; line-height: 1.45; font-family: ui-monospace, 'Cascadia Code', monospace; border-radius: 0; border: var(--nei-bevel-w) solid; border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); border-top: none; background: var(--nei-inset-bg); color: var(--nei-text-muted); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45); }
-.wm-status-bar--loading { color: var(--nei-loading-text); } .wm-status-bar--ok { color: var(--nei-ok-text); } .wm-status-bar--warn { color: var(--nei-warn-text); } .wm-status-bar--err { color: var(--nei-error-text); background: var(--nei-error-bg); }
-.wm-status-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 4px; border-radius: 0; background: currentColor; opacity: 0.9; box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4); }
+.wm-status-bar { display: flex; align-items: flex-start; gap: 8px; margin-top: 0; padding: 8px 10px; font-size: 11px; line-height: 1.45; border-radius: 0; border: 1px solid var(--wb-border); border-top: none; background: var(--wb-bg-surface); color: var(--wb-text-muted); }
+.wm-status-bar--loading { color: #fcd34d; } .wm-status-bar--ok { color: #86efac; } .wm-status-bar--warn { color: #fde047; } .wm-status-bar--err { color: #fecaca; background: var(--wb-danger-bg); }
+.wm-status-dot { flex-shrink: 0; width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: currentColor; opacity: 0.9; }
 .wm-status-text { flex: 1; word-break: break-word; white-space: pre-wrap; }
 </style>

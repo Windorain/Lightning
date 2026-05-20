@@ -37,11 +37,11 @@ function logLevelLabel(level: number): string {
   display: flex;
   align-items: center;
   width: 100%;
-  gap: 16px;
-  color: var(--nei-muted);
+  gap: 14px;
+  color: var(--wb-text-muted);
 }
-.sb-item { white-space: nowrap; }
-.sb-item--error { color: #ff5555; }
-.sb-item--warn { color: #ffaa33; }
+.sb-item { white-space: nowrap; font-size: 10px; }
+.sb-item--error { color: var(--wb-danger); }
+.sb-item--warn { color: #f59e0b; }
 .sb-spacer { flex: 1; }
 </style>

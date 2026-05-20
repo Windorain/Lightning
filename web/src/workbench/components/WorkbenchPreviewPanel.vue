@@ -114,9 +114,9 @@ function onResizeHandleDblClick(): void {
 
 <style scoped>
 .wm-preview {
-  background: var(--nei-bg);
+  background: var(--wb-bg-elevated);
   border-radius: 8px;
-  border: 1px solid var(--nei-border);
+  border: 1px solid var(--wb-border);
   overflow: hidden;
   position: relative;
 }
@@ -125,9 +125,9 @@ function onResizeHandleDblClick(): void {
   padding: 8px 12px;
   font-size: 12px;
   line-height: 1.45;
-  color: var(--nei-error-text);
-  background: var(--nei-error-bg);
-  border-bottom: 1px solid var(--nei-error-border);
+  color: var(--wb-text);
+  background: var(--wb-danger-bg);
+  border-bottom: 1px solid var(--wb-danger);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -137,9 +137,9 @@ function onResizeHandleDblClick(): void {
   padding: 4px 10px;
   font-size: 12px;
   border-radius: 6px;
-  border: 1px solid var(--nei-muted);
-  background: var(--nei-border);
-  color: var(--nei-text);
+  border: 1px solid var(--wb-text-dim);
+  background: var(--wb-border);
+  color: var(--wb-text);
   cursor: pointer;
 }
 .wm-preview-resize-root {
@@ -183,8 +183,8 @@ function onResizeHandleDblClick(): void {
   flex-shrink: 0;
   height: 10px;
   cursor: ns-resize;
-  background: linear-gradient(180deg, var(--nei-bg-deep) 0%, var(--nei-border) 45%, var(--nei-panel-hover) 100%);
-  border-top: 1px solid var(--nei-muted);
+  background: linear-gradient(180deg, var(--wb-bg-deepest) 0%, var(--wb-border) 45%, var(--wb-bg-hover) 100%);
+  border-top: 1px solid var(--wb-text-dim);
   touch-action: none;
   user-select: none;
 }
@@ -202,32 +202,32 @@ function onResizeHandleDblClick(): void {
 .wm-preview-veil {
   position: absolute;
   inset: 0;
-  background: var(--nei-bg);
+  background: var(--wb-bg-elevated);
   z-index: 2;
   pointer-events: none;
 }
 .wm-boot {
   padding: 16px;
   font-family: system-ui, sans-serif;
-  color: var(--nei-text-dark);
+  color: var(--wb-text);
 }
 .wm-boot--tall {
   min-height: 50vh;
 }
 .wm-boot--err {
-  color: var(--nei-error-text);
+  color: var(--wb-text);
   white-space: pre-wrap;
 }
 .wm-boot--muted {
-  color: var(--nei-label);
+  color: var(--wb-text-muted);
 }
 .wm-btn {
   margin-top: 8px;
   padding: 6px 12px;
   border-radius: 6px;
-  border: 1px solid var(--nei-muted);
-  background: var(--nei-border);
-  color: var(--nei-text);
+  border: 1px solid var(--wb-text-dim);
+  background: var(--wb-border);
+  color: var(--wb-text);
   cursor: pointer;
   font-size: 12px;
 }

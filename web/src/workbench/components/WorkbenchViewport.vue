@@ -325,14 +325,33 @@ onBeforeUnmount(() => {
 <style scoped>
 .wv-root { width: 100%; height: 100%; position: relative; display: flex; flex-direction: column; }
 .wv-viewport-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.wv-bottom-dock { flex-shrink: 0; display: flex; flex-direction: column; background: var(--nei-inset-bg); }
-.wv-tab-row { display: flex; align-items: center; padding: 0 4px; background: var(--nei-bg-deep); border-bottom: 1px solid var(--nei-shadow); }
-.wv-tab { padding: 6px 14px 5px; font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace; font-weight: 600; color: var(--nei-text-muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s, border-color 0.15s; }
-.wv-tab:hover { color: var(--nei-text); }
-.wv-tab--active { color: var(--nei-text); border-bottom-color: var(--nei-accent); }
-.wv-tab-status { margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace; color: var(--nei-text-muted); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4); flex-shrink: 0; }
-.wv-tab-stat strong { color: var(--nei-text); font-weight: 600; }
-.wv-tab-panel { display: none; padding: 6px 10px; align-items: center; gap: 10px; height: 40px; background: var(--nei-inset-bg); }
+.wv-bottom-dock {
+  flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--wb-bg-elevated); border-top: 1px solid var(--wb-border);
+}
+.wv-tab-row {
+  display: flex; align-items: center; padding: 0 6px;
+  background: var(--wb-bg-deepest); border-bottom: 1px solid var(--wb-border);
+  height: 30px;
+}
+.wv-tab {
+  padding: 0 14px; font-size: 11px; font-weight: 500;
+  color: var(--wb-text-muted); background: none; border: none;
+  border-bottom: 2px solid transparent; cursor: pointer; user-select: none;
+  white-space: nowrap; transition: color 0.15s, border-color 0.15s;
+  height: 100%; display: flex; align-items: center;
+}
+.wv-tab:hover { color: var(--wb-text); }
+.wv-tab--active { color: var(--wb-text); border-bottom-color: var(--wb-accent); }
+.wv-tab-status {
+  margin-left: auto; display: flex; align-items: center; gap: 14px;
+  padding: 0 10px; font-size: 10px; color: var(--wb-text-muted); flex-shrink: 0;
+}
+.wv-tab-stat strong { color: var(--wb-text); font-weight: 600; }
+.wv-tab-panel {
+  display: none; padding: 8px 12px; align-items: center; gap: 10px;
+  min-height: 44px; background: var(--wb-bg-elevated);
+}
 .wv-tab-panel--active { display: flex; }
 .wv-tab-panel :deep(.wm-wfs) { flex: 1; min-width: 0; background: transparent; border: none; padding: 0; }
 .wv-tab-panel :deep(.wm-wfp-controls) { background: transparent; border: none; padding: 0; }

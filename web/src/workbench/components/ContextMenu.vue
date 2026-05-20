@@ -38,15 +38,15 @@ const hasSelection = selection.items.value.size > 0
 <style scoped>
 .ctx-menu {
   position: fixed; z-index: 2000; min-width: 160px;
-  padding: 4px; background: var(--nei-dropdown-bg); border: 1px solid var(--nei-border);
-  border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  padding: 4px; background: var(--wb-bg-elevated); border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-lg); box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
 .ctx-item {
-  display: block; width: 100%; padding: 5px 10px; border: none;
-  background: transparent; color: var(--nei-text-dark); font-size: 12px;
-  text-align: left; cursor: pointer; border-radius: 3px;
+  display: block; width: 100%; padding: 5px 12px; border: none;
+  background: transparent; color: var(--wb-text); font-size: 11px;
+  text-align: left; cursor: pointer; border-radius: var(--wb-radius-sm);
 }
-.ctx-item:hover { background: var(--nei-dropdown-hover); color: #fff; }
-.ctx-item:disabled { color: var(--nei-muted); cursor: default; }
-.ctx-sep { height: 1px; background: var(--nei-border); margin: 2px 0; }
+.ctx-item:hover { background: var(--wb-bg-hover); }
+.ctx-item:disabled { color: var(--wb-text-dim); cursor: default; }
+.ctx-sep { height: 1px; background: var(--wb-border); margin: 4px 8px; }
 </style>

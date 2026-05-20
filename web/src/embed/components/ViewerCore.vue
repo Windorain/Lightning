@@ -40,7 +40,7 @@ const props = withDefaults(
     showAxesGizmo?: boolean
   }>(),
   {
-    sceneBackground: 0x111827,
+    sceneBackground: 0x0b1217,
     editMode: false,
     showAxesGizmo: true,
   },
@@ -341,31 +341,33 @@ onBeforeUnmount(() => {
     <button
       type="button" class="vc-reset-btn" title="复位视角"
       @click="renderer && props.contentGroup ? fitCameraToGroup(renderer, props.contentGroup) : null"
-    >⟲</button>
+    >&#8634;</button>
   </div>
 </template>
 
 <style scoped>
 .vc-viewport {
   flex: 1; min-height: 320px; min-width: 0;
-  border-radius: 0; background: var(--nei-viewport-bg);
+  border-radius: 0;
+  background: var(--wb-viewport-bg);
+  background-image:
+    linear-gradient(var(--wb-grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--wb-grid-color) 1px, transparent 1px);
+  background-size: 32px 32px;
   overflow: hidden; position: relative;
 }
 .vc-reset-btn {
-  position: absolute; top: 6px; right: 6px; z-index: 10;
-  width: 28px; height: 28px; padding: 0;
+  position: absolute; top: 8px; right: 8px; z-index: 10;
+  width: 30px; height: 30px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 700;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
-  color: var(--nei-text); text-shadow: var(--nei-label-shadow);
-  background: var(--nei-bg);
-  border: var(--nei-bevel-w) solid;
-  border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight);
-  border-radius: 0; cursor: pointer; user-select: none; box-sizing: border-box;
+  font-size: 14px;
+  color: var(--wb-accent-muted);
+  background: var(--wb-bg-surface);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-md); cursor: pointer; user-select: none; box-sizing: border-box;
 }
-.vc-reset-btn:hover { filter: brightness(1.06); }
-.vc-reset-btn:active {
-  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
-  padding-top: 1px; padding-left: 1px;
+.vc-reset-btn:hover {
+  background: var(--wb-bg-hover);
+  color: var(--wb-text);
 }
 </style>

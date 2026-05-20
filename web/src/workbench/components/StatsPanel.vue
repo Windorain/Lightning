@@ -86,16 +86,16 @@ function onClick(id: string): void { pinType(id) }
 </template>
 
 <style scoped>
-.stats-panel { padding: 8px; font-size: 12px; color: var(--nei-text-dark); height: 100%; display: flex; flex-direction: column; }
+.stats-panel { padding: 8px; font-size: 12px; color: var(--wb-text); height: 100%; display: flex; flex-direction: column; }
 .stats-panel__header { font-weight: 600; margin-bottom: 4px; flex-shrink: 0; }
 .stats-panel__list { flex: 1; overflow-y: auto; }
 .stats-row {
   display: flex; justify-content: space-between; padding: 2px 6px;
   border-radius: 3px; cursor: pointer;
 }
-.stats-row:hover { background: var(--nei-panel-hover); }
-.stats-row--empty { cursor: default; color: var(--nei-muted); justify-content: center; }
+.stats-row:hover { background: var(--wb-bg-hover); }
+.stats-row--empty { cursor: default; color: var(--wb-text-dim); justify-content: center; }
 .stats-row--empty:hover { background: transparent; }
 .stats-row__label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stats-row__count { font-variant-numeric: tabular-nums; color: var(--nei-muted); margin-left: 8px; }
+.stats-row__count { font-variant-numeric: tabular-nums; color: var(--wb-text-dim); margin-left: 8px; }
 </style>

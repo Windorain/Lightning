@@ -25,5 +25,5 @@ const mergedConfig = computed<View3DConfig | null>(() => {
 
 <style scoped>
 .vh-root { width: 100%; height: 100%; }
-.vh-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--nei-muted); font-size: 14px; }
+.vh-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--wb-text-dim); font-size: 14px; }
 </style>

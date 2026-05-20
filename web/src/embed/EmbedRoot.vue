@@ -48,12 +48,12 @@ watch(
 .embed-boot {
   padding: 16px;
   font-family: system-ui, sans-serif;
-  color: var(--nei-text);
-  background: var(--nei-viewport-bg);
+  color: var(--wb-text);
+  background: var(--wb-viewport-bg);
   min-height: 40vh;
 }
 .embed-boot--err {
-  color: var(--nei-error-text);
+  color: #fecaca;
   white-space: pre-wrap;
 }
 </style>

@@ -98,18 +98,18 @@ function onRowPointerLeave(): void {
   min-width: calc(var(--wm-slot-px) + 8px);
   max-width: 100%;
   flex-shrink: 0;
-  background: var(--nei-bg-deep);
-  border-right: var(--nei-bevel-w) solid var(--nei-shadow);
-  border-bottom: var(--nei-bevel-w) solid var(--nei-shadow);
+  background: var(--wb-bg-deepest);
+  border-right: 1px solid var(--wb-border);
+  border-bottom: 1px solid var(--wb-border);
   font-size: 12px;
-  color: var(--nei-text-dark);
+  color: var(--wb-text);
   overflow-y: auto;
 }
 .wm-block-stats-panel {
   flex: 0 0 auto;
   display: block;
   padding: 4px;
-  background: var(--nei-bg-deep);
+  background: var(--wb-bg-deepest);
   overflow-x: auto;
   overflow-y: visible;
 }
@@ -117,7 +117,7 @@ function onRowPointerLeave(): void {
   margin: 0;
   opacity: 0.85;
   font-size: 11px;
-  color: var(--nei-text-dark);
+  color: var(--wb-text);
 }
 .wm-block-stats-list {
   list-style: none;

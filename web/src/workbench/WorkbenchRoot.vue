@@ -292,8 +292,8 @@ onMounted(() => {
   position: absolute; top: 4px; left: 4px; z-index: 100;
   display: flex; flex-direction: column; gap: 2px;
   padding: 4px;
-  background: var(--nei-dropdown-bg);
-  border: 1px solid var(--nei-border);
+  background: var(--wb-bg-elevated);
+  border: 1px solid var(--wb-border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
@@ -303,10 +303,10 @@ onMounted(() => {
   display: flex; align-items: center; justify-content: center;
   border-color: transparent;
   background: transparent;
-  color: var(--nei-label);
+  color: var(--wb-text-muted);
 }
 .wb-toolshelf :deep(.ux-operator-btn:hover) {
-  background: var(--nei-panel-hover);
+  background: var(--wb-bg-hover);
 }
 .wb-menubar-inner {
   display: flex;
@@ -319,11 +319,11 @@ onMounted(() => {
   background: transparent;
   padding: 3px 8px;
   font-size: 12px;
-  color: var(--nei-label);
+  color: var(--wb-text-muted);
   cursor: pointer;
 }
 .wb-menubar-inner :deep(.ux-menu-btn:hover) {
-  background: var(--nei-panel-hover);
+  background: var(--wb-bg-hover);
   border-radius: 4px;
 }
 .wb-menubar-inner :deep(.ux-arrow) { display: none; }
@@ -332,17 +332,17 @@ onMounted(() => {
   background: transparent;
   padding: 3px 8px;
   font-size: 12px;
-  color: var(--nei-label);
+  color: var(--wb-text-muted);
   width: auto;
   cursor: pointer;
 }
 .wb-menubar-inner :deep(.ux-operator-btn:hover) {
-  background: var(--nei-panel-hover);
+  background: var(--wb-bg-hover);
   border-radius: 4px;
 }
 .wb-menubar-inner :deep(.ux-label) {
   font-size: 11px;
-  color: var(--nei-muted);
+  color: var(--wb-text-dim);
   padding: 0 4px;
 }
 </style>
@@ -376,20 +376,20 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--nei-bg);
-  color: var(--nei-text-dark);
+  background: var(--wb-bg-elevated);
+  color: var(--wb-text);
 }
 .wb-standalone-menubar {
   flex-shrink: 0;
   height: 28px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-border);
+  background: var(--wb-bg-deepest);
+  border-bottom: 1px solid var(--wb-border);
 }
 .wb-standalone-top {
   flex-shrink: 0;
   height: 32px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-border);
+  background: var(--wb-bg-deepest);
+  border-bottom: 1px solid var(--wb-border);
   display: flex;
   align-items: center;
 }

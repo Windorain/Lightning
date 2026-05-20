@@ -78,19 +78,19 @@ function onClick(id: string): void { pinType(id) }
 </template>
 
 <style scoped>
-.resource-browser { padding: 8px; font-size: 12px; color: var(--nei-text-dark); display: flex; flex-direction: column; height: 100%; }
-.rb-search { width: 100%; padding: 4px 8px; border: 1px solid var(--nei-border); border-radius: 4px;
-  background: var(--nei-bg); color: var(--nei-text-dark); font-size: 12px; margin-bottom: 4px; flex-shrink: 0; }
+.resource-browser { padding: 8px; font-size: 12px; color: var(--wb-text); display: flex; flex-direction: column; height: 100%; }
+.rb-search { width: 100%; padding: 4px 8px; border: 1px solid var(--wb-border); border-radius: 4px;
+  background: var(--wb-bg-elevated); color: var(--wb-text); font-size: 12px; margin-bottom: 4px; flex-shrink: 0; }
 .rb-tabs { display: flex; gap: 2px; margin-bottom: 4px; flex-shrink: 0; }
-.rb-tab { padding: 2px 8px; border: none; background: transparent; color: var(--nei-muted);
+.rb-tab { padding: 2px 8px; border: none; background: transparent; color: var(--wb-text-dim);
   font-size: 11px; cursor: pointer; border-radius: 3px; text-transform: capitalize; }
-.rb-tab--active { background: var(--nei-dropdown-hover); color: #fff; }
-.rb-tab:hover { background: var(--nei-panel-hover); }
+.rb-tab--active { background: var(--wb-bg-hover); color: #fff; }
+.rb-tab:hover { background: var(--wb-bg-hover); }
 .rb-tree { flex: 1; overflow-y: auto; }
 .rb-node { display: flex; justify-content: space-between; padding: 2px 6px; border-radius: 3px; cursor: pointer; }
-.rb-node:hover { background: var(--nei-panel-hover); }
-.rb-node--empty { cursor: default; color: var(--nei-muted); justify-content: center; }
+.rb-node:hover { background: var(--wb-bg-hover); }
+.rb-node--empty { cursor: default; color: var(--wb-text-dim); justify-content: center; }
 .rb-node--empty:hover { background: transparent; }
 .rb-node__label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rb-node__count { font-variant-numeric: tabular-nums; color: var(--nei-muted); margin-left: 8px; }
+.rb-node__count { font-variant-numeric: tabular-nums; color: var(--wb-text-dim); margin-left: 8px; }
 </style>
