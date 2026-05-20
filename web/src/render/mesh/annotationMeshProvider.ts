@@ -46,40 +46,128 @@ export class AnnotationMeshProvider implements MeshProvider {
   }
 
   private _buildBox(group: THREE.Group, a: BoxAnnotation): void {
-    const verts = boxWireframeVerts(a.min, a.max)
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
-    const mat = new THREE.LineBasicMaterial({
-      color: new THREE.Color(a.color),
-      depthTest: true,
-      transparent: a.renderStyle !== 'hidden',
-      opacity: a.renderOpacity,
-    })
-    const wireframe = new THREE.LineSegments(geo, mat)
-    wireframe.name = `anno-box-${a.id}`
-    group.add(wireframe)
+    if (a.renderStyle === 'hidden') return
+
+    const color = new THREE.Color(a.color)
+    const overlay = a.overlay ?? false
+    const matDepth = overlay ? { depthTest: false, depthWrite: false } : { depthTest: true }
+    const objOrder = overlay ? { renderOrder: 999 } : {}
+
+    if (a.renderStyle === 'wireframe') {
+      const verts = boxWireframeVerts(a.min, a.max)
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+      const mat = new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity: a.renderOpacity,
+        ...matDepth,
+      })
+      const mesh = new THREE.LineSegments(geo, mat)
+      mesh.name = `anno-box-wf-${a.id}`
+      Object.assign(mesh, objOrder)
+      group.add(mesh)
+    }
+
+    if (a.renderStyle === 'boxFrame') {
+      this._buildBoxFrame(group, a, color, matDepth, objOrder)
+      if ((a.fillOpacity ?? 0) > 0) {
+        this._buildBoxFill(group, a, color, a.fillOpacity, matDepth, objOrder)
+      }
+    }
 
     if (a.renderStyle === 'translucent') {
-      const boxGeo = new THREE.BoxGeometry(
-        a.max.x - a.min.x,
-        a.max.y - a.min.y,
-        a.max.z - a.min.z,
-      )
-      boxGeo.translate(
-        (a.min.x + a.max.x) / 2,
-        (a.min.y + a.max.y) / 2,
-        (a.min.z + a.max.z) / 2,
-      )
-      const fillMat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(a.color),
+      const verts = boxWireframeVerts(a.min, a.max)
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+      const mat = new THREE.LineBasicMaterial({
+        color,
         transparent: true,
-        opacity: a.renderOpacity * 0.3,
-        depthTest: true,
+        opacity: a.renderOpacity,
+        ...matDepth,
       })
-      const fill = new THREE.Mesh(boxGeo, fillMat)
-      fill.name = `anno-box-fill-${a.id}`
-      group.add(fill)
+      const mesh = new THREE.LineSegments(geo, mat)
+      mesh.name = `anno-box-wf-${a.id}`
+      Object.assign(mesh, objOrder)
+      group.add(mesh)
+      this._buildBoxFill(group, a, color, a.fillOpacity, matDepth, objOrder)
     }
+  }
+
+  private _buildBoxFrame(
+    group: THREE.Group,
+    a: BoxAnnotation,
+    color: THREE.Color,
+    matDepth: Record<string, unknown>,
+    objOrder: Record<string, unknown>,
+  ): void {
+    const t = (a.frameThickness ?? 0.04) / 2
+    const { min, max } = a
+
+    interface BarDef { cx: number; cy: number; cz: number; sx: number; sy: number; sz: number }
+    const defs: BarDef[] = []
+
+    // 4 edges along X
+    for (const y of [min.y, max.y]) {
+      for (const z of [min.z, max.z]) {
+        const len = max.x - min.x
+        defs.push({ cx: (min.x + max.x) / 2, cy: y, cz: z, sx: len, sy: t * 2, sz: t * 2 })
+      }
+    }
+    // 4 edges along Y
+    for (const x of [min.x, max.x]) {
+      for (const z of [min.z, max.z]) {
+        const len = max.y - min.y
+        defs.push({ cx: x, cy: (min.y + max.y) / 2, cz: z, sx: t * 2, sy: len, sz: t * 2 })
+      }
+    }
+    // 4 edges along Z
+    for (const x of [min.x, max.x]) {
+      for (const y of [min.y, max.y]) {
+        const len = max.z - min.z
+        defs.push({ cx: x, cy: y, cz: (min.z + max.z) / 2, sx: t * 2, sy: t * 2, sz: len })
+      }
+    }
+
+    const mat = new THREE.MeshBasicMaterial({ color, ...matDepth })
+    for (const d of defs) {
+      const geo = new THREE.BoxGeometry(d.sx, d.sy, d.sz)
+      const bar = new THREE.Mesh(geo, mat)
+      bar.position.set(d.cx, d.cy, d.cz)
+      bar.name = `anno-box-bar-${a.id}`
+      Object.assign(bar, objOrder)
+      group.add(bar)
+    }
+  }
+
+  private _buildBoxFill(
+    group: THREE.Group,
+    a: BoxAnnotation,
+    color: THREE.Color,
+    opacity: number,
+    matDepth: Record<string, unknown>,
+    objOrder: Record<string, unknown>,
+  ): void {
+    const boxGeo = new THREE.BoxGeometry(
+      a.max.x - a.min.x,
+      a.max.y - a.min.y,
+      a.max.z - a.min.z,
+    )
+    boxGeo.translate(
+      (a.min.x + a.max.x) / 2,
+      (a.min.y + a.max.y) / 2,
+      (a.min.z + a.max.z) / 2,
+    )
+    const fillMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      ...matDepth,
+    })
+    const fill = new THREE.Mesh(boxGeo, fillMat)
+    fill.name = `anno-box-fill-${a.id}`
+    Object.assign(fill, objOrder)
+    group.add(fill)
   }
 
   private _buildPoint(group: THREE.Group, a: PointAnnotation): void {

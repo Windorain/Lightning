@@ -19,8 +19,11 @@ export interface BoxAnnotation extends AnnotationBase {
   type: 'box'
   min: { x: number; y: number; z: number }
   max: { x: number; y: number; z: number }
-  renderStyle: 'wireframe' | 'translucent' | 'hidden'
+  renderStyle: 'wireframe' | 'boxFrame' | 'translucent' | 'hidden'
   renderOpacity: number
+  overlay: boolean
+  fillOpacity: number
+  frameThickness: number
 }
 
 export interface PointAnnotation extends AnnotationBase {

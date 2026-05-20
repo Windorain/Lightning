@@ -14,6 +14,19 @@ const widget = computed(() => {
   return props.descriptor.uiWidget ?? inferWidget(props.descriptor)
 })
 
+const sliderStep = computed(() => {
+  if (!props.descriptor || props.descriptor.min == null || props.descriptor.max == null) return 1
+  const range = props.descriptor.max - props.descriptor.min
+  if (range <= 0) return 1
+  const raw = range / 100
+  const exp = Math.floor(Math.log10(raw))
+  const base = Math.pow(10, exp)
+  const frac = raw / base
+  // Round to 1, 2, or 5 multiples for nice steps
+  const nice = frac <= 2 ? 1 : frac <= 5 ? 2 : 5
+  return nice * base
+})
+
 function inferWidget(desc: NonNullable<typeof props.descriptor>): string {
   switch (desc.type) {
     case 'string':
@@ -40,7 +53,7 @@ function setValue(val: unknown): void {
 </script>
 
 <template>
-  <div class="ux-rna-widget" :data-rna-path="rnaPath ?? descriptor?.name">
+  <div class="ux-rna-widget" :class="{ 'ux-rna-widget--row': widget === 'checkbox' || widget === 'color' }" :data-rna-path="rnaPath ?? descriptor?.name">
     <label class="ux-rna-label">{{ label }}</label>
     <div class="ux-rna-input">
       <input
@@ -65,6 +78,7 @@ function setValue(val: unknown): void {
           :value="getValue() as number"
           :min="descriptor?.min ?? 0"
           :max="descriptor?.max ?? 100"
+          :step="sliderStep"
           @input="(e: Event) => setValue(Number((e.target as HTMLInputElement).value))"
           class="ux-slider"
         />
@@ -131,6 +145,11 @@ function setValue(val: unknown): void {
   flex-direction: column;
   gap: 2px;
   padding: 2px 0;
+}
+.ux-rna-widget--row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
 }
 .ux-rna-label {
   font-size: 11px;

@@ -83,6 +83,9 @@ export const annotationPanel: PanelDeclaration = {
               { kind: 'property', rnaPath: 'annotation.max', label: '最大坐标' },
               { kind: 'property', rnaPath: 'annotation.renderStyle', label: '渲染样式' },
               { kind: 'property', rnaPath: 'annotation.renderOpacity', label: '不透明度' },
+              { kind: 'property', rnaPath: 'annotation.fillOpacity', label: '填充不透明度' },
+              { kind: 'property', rnaPath: 'annotation.frameThickness', label: '边框厚度' },
+              { kind: 'property', rnaPath: 'annotation.overlay', label: '覆盖层' },
             ],
           },
         )
