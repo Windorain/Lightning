@@ -130,7 +130,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     statusMessage: deps.statusMessage ?? ref(''),
     settings,
 
-    // New shared rendering state (transitional — populated by WorkbenchViewport / View3DStore)
+    // Shared rendering state — populated by WorkbenchViewport via createSceneLifecycle
     config: shallowRef(null as any),
     materialLibrary: shallowRef(null),
     blockIconCache: shallowRef(null),

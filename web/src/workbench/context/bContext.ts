@@ -145,7 +145,7 @@ export interface BContext {
   /** 底部状态栏消息 */
   statusMessage: { value: string }
 
-  // === Shared rendering resources (formerly View3DStore) ===
+  // === Shared rendering resources ===
   config: ShallowRef<View3DConfig>
   materialLibrary: ShallowRef<MaterialLibraryApi | null>
   blockIconCache: ShallowRef<BlockIconCache | null>
