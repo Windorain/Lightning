@@ -37,7 +37,7 @@ async function extractFrames(dataUrl: string): Promise<{ frames: ImageData[]; fr
   const canvas = document.createElement('canvas')
   canvas.width = frameSize
   canvas.height = frameSize
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   ctx.imageSmoothingEnabled = false
 
   const frames: ImageData[] = []
@@ -51,30 +51,37 @@ async function extractFrames(dataUrl: string): Promise<{ frames: ImageData[]; fr
 
 /**
  * Build a global color palette from all frames' pixel data.
- * Returns palette as flat [r,g,b, r,g,b, ...] array, padded to power-of-2 length (max 256).
+ * Returns palette as flat [r,g,b, r,g,b, ...] array.
+ * Length is always a power of 2 (min 2, max 256).
+ * If unique colors exceed 256, quantizes to the top 256 by frequency.
  */
 function buildPalette(frames: ImageData[]): number[] {
-  const colorMap = new Map<string, number>()
-  const colors: number[] = []
-
-  function add(r: number, g: number, b: number) {
-    const key = `${r},${g},${b}`
-    if (!colorMap.has(key)) {
-      colorMap.set(key, colors.length / 3)
-      colors.push(r, g, b)
-    }
-  }
+  const freq = new Map<string, number>()
 
   for (const frame of frames) {
     const d = frame.data
     for (let i = 0; i < d.length; i += 4) {
-      add(d[i]!, d[i + 1]!, d[i + 2]!)
+      const key = `${d[i]},${d[i + 1]},${d[i + 2]}`
+      freq.set(key, (freq.get(key) ?? 0) + 1)
     }
   }
 
-  // Pad to power of 2
+  // Sort by frequency descending, take top 256
+  const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1])
+  const top = sorted.slice(0, 256)
+  const colors: number[] = []
+  const colorMap = new Map<string, number>()
+
+  for (const [key] of top) {
+    colorMap.set(key, colors.length / 3)
+    const [r, g, b] = key.split(',').map(Number)
+    colors.push(r!, g!, b!)
+  }
+
+  // If we have fewer than 256 colors, pad to nearest power of 2
   let size = 2
-  while (size < colors.length / 3 && size < 256) size *= 2
+  const numColors = colors.length / 3
+  while (size < numColors) size *= 2
   while (colors.length / 3 < size) {
     colors.push(0, 0, 0)
   }
