@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import EmbedViewer from '@/embed/EmbedViewer.vue'
+import EmbedViewport from '@/embed/EmbedViewport.vue'
 import { useBContext } from '@/workbench/context/bContext'
 
 const PREVIEW_H_STORAGE = 'wmsr-workbench-preview-h'
@@ -95,7 +95,7 @@ function onResizeHandleDblClick(): void {
     <template v-else>
       <div class="wm-preview-resize-root" :style="{ height: `${previewHeightPx}px` }">
         <div class="wm-preview-embed" :class="{ 'wm-preview-embed--busy': previewBusy }">
-          <EmbedViewer :key="`pv-${previewKey}`" :config="previewCfg" />
+          <EmbedViewport :key="`pv-${previewKey}`" :config="previewCfg" />
           <div v-if="previewBusy" class="wm-preview-veil" aria-hidden="true" />
         </div>
         <div

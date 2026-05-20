@@ -3,7 +3,7 @@ import type { Ref } from 'vue'
 import type { SceneContext } from '@/workbench/sceneContext'
 import type { SelectionContext, BlockRef } from '@/workbench/selectionContext'
 import type { UndoManager } from '@/workbench/editHistoryContext'
-import type { ViewportRuntime } from '@/workbench/context/bContext'
+import type { ViewportSlot } from '@/workbench/context/bContext'
 import type { InputBinding } from '@/workbench/keymap'
 import type { Frame } from '@/render/schema/types'
 
@@ -43,7 +43,7 @@ export interface ToolContext {
   scene: SceneContext
   selection: SelectionContext
   editHistory: UndoManager
-  viewport: ViewportRuntime
+  viewport: ViewportSlot
 
   pickVoxel(event: PointerEvent): BlockRef | null
   getCurrentFrame(): Frame | null

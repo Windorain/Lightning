@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ViewerCore, { type ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
 import type { View3DConfig } from '@/preview/previewConfig'
 import {
-  View3DContextKey,
   createView3DStore,
 } from '@/preview/sceneStore'
 import { useSelectionContext } from '@/workbench/selectionContext'
@@ -28,7 +27,9 @@ const bctx = useBContext()
 defineEmits<{}>()
 
 const store = createView3DStore(props.config)
-provide(View3DContextKey, store)
+
+// Initialize bctx shared config (View3DStore still owns lifecycle for now)
+bctx.config.value = props.config
 
 watch(() => props.config, async (cfg) => {
   try { await store.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logCenter.error('WorkbenchViewport', `reloadFromConfig: ${e}`) }
@@ -69,11 +70,13 @@ function createToolContext(): ToolContext {
 
 /* ---- Viewport events ---- */
 async function onViewportReady({ scene, layers, camera, domElement, orbitTarget }: ViewerCoreReadyPayload): Promise<void> {
+  const VIEWPORT_REGION_ID = 'r-viewport'
+
   store.registerScene(scene)
   try { await store.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
 
-  // Wire bContext viewport state
-  const vp = bctx.viewport
+  // Wire bContext viewport slot
+  const vp = bctx.viewports.get(VIEWPORT_REGION_ID) ?? bctx.viewports.register(VIEWPORT_REGION_ID)
   vp.orbitTarget.value = orbitTarget
   vp.camera.value = camera
   vp.contentGroup.value = mainMeshGroup.value ?? new THREE.Group()
@@ -84,8 +87,6 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
   // Build ToolContext for gizmos and tools
   toolCtx = createToolContext()
   bctx.toolRegistry.setToolContext(toolCtx)
-
-  const VIEWPORT_REGION_ID = 'r-viewport'
 
   // EventDispatcher
   bctx.eventDispatcher.registerRegion(VIEWPORT_REGION_ID)

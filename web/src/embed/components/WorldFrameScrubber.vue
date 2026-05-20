@@ -4,21 +4,21 @@
  */
 import { computed, inject, ref, watch } from 'vue'
 
-import { View3DContextKey } from '@/preview/sceneStore'
+import { bContextKey } from '@/workbench/context/bContext'
 
-const store = inject(View3DContextKey)
+const bctx = inject(bContextKey)
 
-const visible = computed(() => store?.hasWorldMultiFrame.value ?? false)
-const frameCount = computed(() => store?.worldFrameCount.value ?? 0)
-const isPlaying = computed(() => store?.framesPlaybackIsPlaying.value ?? false)
-const meshBusy = computed(() => store?.meshBusy.value ?? false)
+const visible = computed(() => bctx?.hasWorldMultiFrame.value ?? false)
+const frameCount = computed(() => bctx?.worldFrameCount.value ?? 0)
+const isPlaying = computed(() => bctx?.framesPlaybackIsPlaying.value ?? false)
+const meshBusy = computed(() => bctx?.meshBusy.value ?? false)
 
 const maxIdx = computed(() => Math.max(0, frameCount.value - 1))
 
-const localIdx = ref(store?.worldFrameIndex.value ?? 0)
+const localIdx = ref(bctx?.worldFrameIndex.value ?? 0)
 const dragging = ref(false)
 
-watch(() => store?.worldFrameIndex.value ?? 0, (v) => {
+watch(() => bctx?.worldFrameIndex.value ?? 0, (v) => {
   if (!dragging.value) localIdx.value = v
 })
 
@@ -34,14 +34,14 @@ function onInput(e: Event): void {
 
 function onPointerDown(): void {
   dragging.value = true
-  if (isPlaying.value) store?.toggleWorldFramesPlayback()
+  if (isPlaying.value) bctx?.toggleWorldFramesPlayback()
 }
 
 function onChange(e: Event): void {
   dragging.value = false
   const v = Number((e.target as HTMLInputElement).value)
   localIdx.value = v
-  store?.setCurrentWorldFrame(v)
+  bctx?.setCurrentWorldFrame(v)
 }
 </script>
 

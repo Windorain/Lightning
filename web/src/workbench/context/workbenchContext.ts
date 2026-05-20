@@ -8,8 +8,9 @@
  * 由调用方创建后传入——生产用 provide* 工厂，测试用 create* 工厂。
  */
 
-import { ref, shallowRef } from 'vue'
-import type { BContext } from '@/workbench/context/bContext'
+import { computed, ref, shallowRef } from 'vue'
+import type { BContext, LoadStatus } from '@/workbench/context/bContext'
+import { createViewportManager } from '@/workbench/context/bContext'
 import type { SceneContext } from '@/workbench/sceneContext'
 import type { ConnectionContext } from '@/workbench/connectionContext'
 import type { SelectionContext } from '@/workbench/selectionContext'
@@ -95,12 +96,27 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   const { scene, connection, selection, editHistory, toolRegistry, settings } = deps
 
   // ---- BContext 核心对象（与 WorkbenchRoot.vue 完全一致）----
+  const loadStatus = ref<LoadStatus>('loading')
+  const meshBusy = ref(false)
+  const worldFrameIndex = ref(0)
+  const worldFrameCount = computed(() => 0)
+  const hasWorldMultiFrame = computed(() => worldFrameCount.value > 1)
+  const framesPlaybackIsPlaying = ref(false)
+  const layerWorldY = ref(-1)
+  const layerPreviewMode = computed(() => 'all' as any)
+  const layerPreviewLabel = computed(() => 'ALL')
+  const gridHeight = computed(() => 0)
+  const blockStatsEntries = computed(() => [] as any[])
+  const viewports = createViewportManager()
+
   const bctx = {
     scene,
     selection,
     editHistory,
     toolRegistry,
     connection,
+    get viewport() { return viewports.active.value! },
+    viewports,
     operators: {
       exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(bctx, id, props),
       invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) => globalOperators.invoke(bctx, id, props, event as any, regionId),
@@ -112,18 +128,35 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     log: logCenter,
     wikiConfig,
     statusMessage: deps.statusMessage ?? ref(''),
-    viewport: {
-      camera: ref(null),
-      contentGroup: ref(null),
-      domElement: ref(null),
-      definition: ref(null),
-      layerPreview: ref(null),
-      gizmo: shallowRef(null),
-      overlayGroup: ref(null),
-      wireframe: shallowRef(null),
-      orbitTarget: ref(null),
-    },
     settings,
+
+    // New shared rendering state (transitional — populated by WorkbenchViewport / View3DStore)
+    config: shallowRef(null as any),
+    materialLibrary: shallowRef(null),
+    blockIconCache: shallowRef(null),
+    tooltipPalette: shallowRef([] as string[]),
+
+    worldFrameIndex,
+    worldFrameCount,
+    hasWorldMultiFrame,
+    framesPlaybackIsPlaying,
+    toggleWorldFramesPlayback() {},
+    setCurrentWorldFrame: async () => {},
+
+    layerWorldY,
+    layerPreviewMode,
+    layerPreviewLabel,
+    gridHeight,
+
+    loadStatus,
+    meshBusy,
+    loadStructureAndResources: async () => {},
+    rebuildContentMesh: async () => {},
+    rebuildAnnotationOverlay: async () => null,
+    disposeCachesAndLibrary() {},
+    reloadFromConfig: async () => {},
+    registerScene() {},
+    blockStatsEntries,
   } as unknown as BContext
 
   // queries 依赖 bctx 自身（循环引用）
@@ -203,7 +236,9 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
 
   // Register tools via ToolRegistry
   const moveGizmo = new MoveGizmo()
-  bctx.viewport.gizmo.value = moveGizmo
+  // Register a default viewport slot (WorkbenchViewport will populate it at ready)
+  const defaultVp = viewports.register('r-viewport')
+  defaultVp.gizmo.value = moveGizmo
   toolRegistry.register(selectTool)
   toolRegistry.register(moveTool, moveGizmo)
   // Register annotation tools

@@ -14,7 +14,8 @@ import type { ConnectionContext } from '@/workbench/connectionContext'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { View3DConfig } from '@/preview/previewConfig'
-import type { Ref, ShallowRef } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
+import type { ComputedRef, Ref, ShallowRef } from 'vue'
 import type * as THREE from 'three'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { Frame } from '@/render/schema/types'
@@ -22,6 +23,12 @@ import type { WidgetRect } from '@/workbench/ux/layout'
 import type { wmWindow, bScreen, ScrArea, ARegion, Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
+import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
+import type { BlockIconCache } from '@/render/interaction/blockIconCache'
+import type { BlockStatRow } from '@/render/interaction/blockStats'
+import type { Annotation } from '@/render/data/annotationTypes'
+
+export type LoadStatus = 'loading' | 'ok' | 'error'
 
 export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
@@ -72,18 +79,26 @@ export interface BContextSettings {
   language?: 'zh' | 'en'
 }
 
-/** 视口运行时——所有可观测的 Three.js / DOM 状态。初始值在 WorkbenchViewport.onViewportReady 中设置，动态字段通过 watcher 保持同步 */
-export interface ViewportRuntime {
+/** Per-viewport runtime state — one slot per viewport instance. */
+export interface ViewportSlot {
+  readonly id: string
   camera: Ref<THREE.Camera | null>
-  contentGroup: Ref<THREE.Group | null>
+  contentGroup: ShallowRef<THREE.Group | null>
   domElement: Ref<HTMLElement | null>
-  definition: Ref<StructureDefinition | null>
+  definition: ShallowRef<StructureDefinition | null>
   layerPreview: Ref<LayerPreviewMode | null>
   gizmo: ShallowRef<MoveGizmo | null>
   overlayGroup: Ref<THREE.Group | null>
   wireframe: ShallowRef<THREE.LineSegments | null>
-  /** 轨道旋转目标点（scene.world.origin 偏移），默认 (0,0,0) */
   orbitTarget: Ref<THREE.Vector3 | null>
+}
+
+export interface ViewportManager {
+  register(id: string): ViewportSlot
+  unregister(id: string): void
+  get(id: string): ViewportSlot | undefined
+  readonly activeId: Ref<string | null>
+  readonly active: ComputedRef<ViewportSlot | null>
 }
 
 export interface BContext {
@@ -129,11 +144,45 @@ export interface BContext {
   wikiConfig: Record<string, any>
   /** 底部状态栏消息 */
   statusMessage: { value: string }
-  /** 视口运行时（WorkbenchViewport.onViewportReady 时填充） */
-  viewport: ViewportRuntime
 
-  /** 3D 渲染配置（embed 场景使用，workbench 内可选） */
-  config?: ShallowRef<View3DConfig>
+  // === Shared rendering resources (formerly View3DStore) ===
+  config: ShallowRef<View3DConfig>
+  materialLibrary: ShallowRef<MaterialLibraryApi | null>
+  blockIconCache: ShallowRef<BlockIconCache | null>
+  tooltipPalette: ShallowRef<string[]>
+
+  // Frame/Layer state
+  worldFrameIndex: Ref<number>
+  worldFrameCount: ComputedRef<number>
+  hasWorldMultiFrame: ComputedRef<boolean>
+  framesPlaybackIsPlaying: Ref<boolean>
+  toggleWorldFramesPlayback(): void
+  setCurrentWorldFrame(index: number): Promise<void>
+
+  layerWorldY: Ref<number>
+  layerPreviewMode: ComputedRef<LayerPreviewMode>
+  layerPreviewLabel: ComputedRef<string>
+  gridHeight: ComputedRef<number>
+
+  // Status
+  loadStatus: Ref<LoadStatus>
+  meshBusy: Ref<boolean>
+
+  // Scene lifecycle
+  loadStructureAndResources(): Promise<void>
+  rebuildContentMesh(): Promise<void>
+  rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null>
+  disposeCachesAndLibrary(): void
+  reloadFromConfig(cfg: View3DConfig): Promise<void>
+  registerScene(scene: THREE.Scene): void
+
+  // Block stats
+  blockStatsEntries: ComputedRef<BlockStatRow[]>
+
+  // === Multi-viewport ===
+  /** Backward-compat: returns the active viewport slot. Code should migrate to `viewports.get(id)`. */
+  readonly viewport: ViewportSlot
+  viewports: ViewportManager
 
   /** Window manager (Blender 对标 wmWindowManager) */
   wm: {
@@ -154,6 +203,47 @@ export interface BContext {
     boundsOfByRNAPath(rnaPath: string): Rect[]
     regionAt(x: number, y: number): { area: ScrArea; region: ARegion } | null
     relayout(): void
+  }
+}
+
+export function createViewportManager(): ViewportManager {
+  const slots = new Map<string, ViewportSlot>()
+  const activeId = ref<string | null>(null)
+  const active = computed(() => {
+    const id = activeId.value
+    return id ? (slots.get(id) ?? null) : null
+  })
+
+  return {
+    register(id: string): ViewportSlot {
+      if (slots.has(id)) return slots.get(id)!
+      const slot: ViewportSlot = {
+        id,
+        camera: ref(null),
+        contentGroup: shallowRef(null),
+        domElement: ref(null),
+        definition: shallowRef(null),
+        layerPreview: ref(null),
+        gizmo: shallowRef(null),
+        overlayGroup: ref(null),
+        wireframe: shallowRef(null),
+        orbitTarget: ref(null),
+      }
+      slots.set(id, slot)
+      if (!activeId.value) activeId.value = id
+      return slot
+    },
+    unregister(id: string): void {
+      slots.delete(id)
+      if (activeId.value === id) {
+        activeId.value = slots.keys().next().value ?? null
+      }
+    },
+    get(id: string): ViewportSlot | undefined {
+      return slots.get(id)
+    },
+    activeId,
+    active,
   }
 }
 

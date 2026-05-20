@@ -7,7 +7,7 @@
 import { inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as THREE from 'three'
 
-import { View3DContextKey } from '@/preview/sceneStore'
+import { bContextKey } from '@/workbench/context/bContext'
 import { View3DRenderer } from '@/render/viewport/renderViewport'
 import {
   applyDiagonalOrbitView,
@@ -16,7 +16,7 @@ import {
 } from '@/render/interaction/initialCamera'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
-import { scenePickFromPointer, type ScenePickBlock } from '@/render/interaction/scenePick'
+import { scenePickFromPointer } from '@/render/interaction/scenePick'
 import type { StructureDefinition } from '@/render/schema/types'
 
 export interface ViewerCoreReadyPayload {
@@ -68,7 +68,7 @@ const emit = defineEmits<{
   ]
 }>()
 
-const store = inject(View3DContextKey)
+const bctx = inject(bContextKey)
 
 function clampOrthoZoom(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1
@@ -172,7 +172,7 @@ function fitCameraToGroup(vp: View3DRenderer, group: THREE.Group): void {
   box.getSize(size)
   const maxDim = Math.max(size.x, size.y, size.z, 0.1)
   const dist = Math.max(8, maxDim * 2.2)
-  const cam = store?.config.value?.initialCamera
+  const cam = bctx?.config.value?.initialCamera
   const finalDist = cam?.distance ?? dist
   const o = vp.camera
   vp.orbitTarget.copy(center)
@@ -206,7 +206,7 @@ watch(
 )
 
 watch(
-  () => store?.config.value?.initialCamera?.zoom,
+  () => bctx?.config.value?.initialCamera?.zoom,
   (z) => {
     const vp = renderer
     if (!vp) return
@@ -332,7 +332,6 @@ onBeforeUnmount(() => {
   if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null }
   if (onResize) { window.removeEventListener('resize', onResize); onResize = null }
   if (onVisibilityToGl) { document.removeEventListener('visibilitychange', onVisibilityToGl); onVisibilityToGl = null }
-  store?.detachAndDisposeMesh()
   renderer?.dispose()
   renderer = null
 })
