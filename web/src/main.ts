@@ -8,6 +8,7 @@
  */
 
 import '@/styles/precision-tokens.css'
+import '@/styles/embed-nei-tokens.css'
 
 /** 推荐挂载点 class；无参 `mount()` 仍会回退兼容 `#web-structure-renderer` */
 export const MOUNT_SELECTOR = '.web-structure-renderer'

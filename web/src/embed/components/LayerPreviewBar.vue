@@ -52,7 +52,7 @@ function onChange(e: Event): void {
 </template>
 
 <style scoped>
-.wm-layer-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--wb-bg-surface); border: 1px solid var(--wb-border); border-bottom: none; border-left: none; border-right: none; font-size: 12px; font-family: ui-monospace, 'Cascadia Code', monospace; color: var(--wb-text); }
+.wm-layer-bar { display: flex; align-items: center; gap: 10px; padding: 0; background: transparent; font-size: 11px; color: var(--nei-text); width: 100%; }
 .wm-layer-label { flex-shrink: 0; user-select: none; }
-.wm-layer-value { flex-shrink: 0; min-width: 4.5em; text-align: right; color: var(--wb-text-muted); }
+.wm-layer-value { flex-shrink: 0; min-width: 4.5em; text-align: right; color: var(--nei-text-dim); font-family: ui-monospace, monospace; }
 </style>

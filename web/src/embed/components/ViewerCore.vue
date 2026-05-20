@@ -337,12 +337,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="vc-viewport" style="overflow: hidden">
-    <button
-      type="button" class="vc-reset-btn" title="复位视角"
-      @click="renderer && props.contentGroup ? fitCameraToGroup(renderer, props.contentGroup) : null"
-    >&#8634;</button>
-  </div>
+  <div ref="container" class="vc-viewport" style="overflow: hidden"></div>
 </template>
 
 <style scoped>
@@ -355,19 +350,5 @@ onBeforeUnmount(() => {
     linear-gradient(90deg, var(--wb-grid-color) 1px, transparent 1px);
   background-size: 32px 32px;
   overflow: hidden; position: relative;
-}
-.vc-reset-btn {
-  position: absolute; top: 8px; right: 8px; z-index: 10;
-  width: 30px; height: 30px; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 14px;
-  color: var(--wb-accent-muted);
-  background: var(--wb-bg-surface);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-md); cursor: pointer; user-select: none; box-sizing: border-box;
-}
-.vc-reset-btn:hover {
-  background: var(--wb-bg-hover);
-  color: var(--wb-text);
 }
 </style>

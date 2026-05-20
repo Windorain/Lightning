@@ -1,145 +1,273 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
-
-import BlockSlotPreview from './BlockSlotPreview.vue'
-
-/** 与 BlockSlotPreview 槽位一致（NEI 18×18 的 2×） */
-const SLOT_PX = 36
 
 const props = defineProps<{
   entries: BlockStatRow[]
   cache: BlockIconCache
+  collapsed?: boolean
 }>()
 
-const empty = computed(() => props.entries.length === 0)
-
 const emit = defineEmits<{
+  'toggle-collapse': []
   'tooltip-hover': [
     payload: {
-      blockId: string
-      clientX: number
-      clientY: number
-      source: 'sidebar'
+      blockId: string; clientX: number; clientY: number; source: 'sidebar'
     } | null,
   ]
 }>()
 
+const empty = computed(() => props.entries.length === 0)
+const count = computed(() => props.entries.length)
+
 function onRowPointerEnter(e: PointerEvent, blockId: string): void {
-  emit('tooltip-hover', {
-    blockId,
-    clientX: e.clientX,
-    clientY: e.clientY,
-    source: 'sidebar',
-  })
+  emit('tooltip-hover', { blockId, clientX: e.clientX, clientY: e.clientY, source: 'sidebar' })
 }
-
 function onRowPointerMove(e: PointerEvent, blockId: string): void {
-  emit('tooltip-hover', {
-    blockId,
-    clientX: e.clientX,
-    clientY: e.clientY,
-    source: 'sidebar',
-  })
+  emit('tooltip-hover', { blockId, clientX: e.clientX, clientY: e.clientY, source: 'sidebar' })
 }
-
 function onRowPointerLeave(): void {
   emit('tooltip-hover', null)
+}
+
+/** Resolve block display name from registryId (strip namespace prefix) */
+function displayName(row: BlockStatRow): string {
+  const id = row.blockId
+  if (!id) return '???'
+  if (id === 'minecraft:air') return id
+  const colon = id.lastIndexOf(':')
+  return colon >= 0 ? id.slice(colon + 1) : id
+}
+
+/** Check if row count > 1 for NEI badge display */
+function hasCount(row: BlockStatRow): boolean {
+  return row.count > 1
 }
 </script>
 
 <template>
   <aside
-    class="wm-block-stats"
-    :style="{ '--wm-slot-px': `${SLOT_PX}px` }"
+    class="nei-sidebar"
+    :class="{ 'nei-sidebar--collapsed': collapsed }"
     aria-label="方块统计"
   >
-    <div class="wm-block-stats-panel">
-      <p
-        v-if="empty"
-        class="wm-block-stats-empty"
+    <!-- Header -->
+    <div class="nei-sidebar-head">
+      <template v-if="!collapsed">
+        <span class="nei-sidebar-label">方块类型</span>
+        <span class="nei-sidebar-count">{{ count }}</span>
+      </template>
+      <!-- Toggle chevron -->
+      <button class="nei-sidebar-toggle" @click="emit('toggle-collapse')" :title="collapsed ? '展开侧栏' : '收起侧栏'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nei-chevron">
+          <polyline v-if="collapsed" points="9 18 15 12 9 6" />
+          <polyline v-else points="15 18 9 12 15 6" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- Empty state -->
+    <p v-if="empty" class="nei-sidebar-empty">无方块数据</p>
+
+    <!-- Slot list -->
+    <div
+      v-else
+      class="nei-sidebar-grid"
+      :class="{ 'nei-sidebar-grid--collapsed': collapsed }"
+    >
+      <div
+        v-for="row in entries"
+        :key="row.blockId"
+        class="nei-slot-row"
+        :class="{ 'nei-slot-row--collapsed': collapsed }"
+        @pointerenter="onRowPointerEnter($event, row.blockId)"
+        @pointermove="onRowPointerMove($event, row.blockId)"
+        @pointerleave="onRowPointerLeave"
+        :title="collapsed ? displayName(row) : undefined"
       >
-        无方块数据
-      </p>
-      <ul
-        v-else
-        class="wm-block-stats-list"
-        role="list"
-        style="max-height: min(72vh, 640px)"
-      >
-        <li
-          v-for="row in entries"
-          :key="row.blockId"
-          class="wm-block-stats-row"
-          @pointerenter="onRowPointerEnter($event, row.blockId)"
-          @pointermove="onRowPointerMove($event, row.blockId)"
-          @pointerleave="onRowPointerLeave"
-        >
-          <BlockSlotPreview
-            :block-id="row.blockId"
-            :count="row.count"
-            :cache="cache"
-          />
-        </li>
-      </ul>
+        <!-- Slot -->
+        <div class="nei-slot">
+          <span class="nei-slot-icon">{{ row.blockId ? '▣' : '' }}</span>
+          <span v-if="hasCount(row)" class="nei-slot-count">{{ row.count }}</span>
+        </div>
+        <!-- Expanded info -->
+        <template v-if="!collapsed">
+          <div class="nei-slot-info">
+            <div class="nei-slot-name">{{ displayName(row) }}</div>
+            <div class="nei-slot-id">{{ row.blockId }}</div>
+          </div>
+          <span class="nei-slot-qty">{{ row.count }}</span>
+        </template>
+      </div>
+    </div>
+
+    <!-- Bottom count badge (collapsed only) -->
+    <div v-if="collapsed && !empty" class="nei-sidebar-foot">
+      <span class="nei-sidebar-count">{{ count }}</span>
     </div>
   </aside>
 </template>
 
 <style scoped>
-.wm-block-stats {
-  --wm-slot-gap: 3px;
-  --wm-block-stats-max-col-h: min(72vh, 640px);
+/* ===== Sidebar Container ===== */
+.nei-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--nei-bg-surface);
+  border-right: 3px solid var(--nei-border-panel);
   display: flex;
   flex-direction: column;
-  width: max-content;
-  min-width: calc(var(--wm-slot-px) + 8px);
-  max-width: 100%;
+  transition: width 0.15s ease-out;
+  overflow: hidden;
+}
+.nei-sidebar--collapsed {
+  width: 50px;
+}
+
+/* ===== Header ===== */
+.nei-sidebar-head {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--nei-bg-panel);
+  border-bottom: 3px solid;
+  border-color: var(--nei-bevel-dark) var(--nei-border-subtle) var(--nei-border-subtle) var(--nei-bevel-dark);
   flex-shrink: 0;
-  background: var(--wb-bg-deepest);
-  border-right: 1px solid var(--wb-border);
-  border-bottom: 1px solid var(--wb-border);
-  font-size: 12px;
-  color: var(--wb-text);
-  overflow-y: auto;
 }
-.wm-block-stats-panel {
-  flex: 0 0 auto;
-  display: block;
-  padding: 4px;
-  background: var(--wb-bg-deepest);
-  overflow-x: auto;
-  overflow-y: visible;
+.nei-sidebar--collapsed .nei-sidebar-head {
+  justify-content: center;
+  padding: 8px 0 6px;
 }
-.wm-block-stats-empty {
-  margin: 0;
-  opacity: 0.85;
+.nei-sidebar-label {
+  color: #d0d0d0;
   font-size: 11px;
-  color: var(--wb-text);
+  font-weight: 700;
+  text-transform: uppercase;
+  text-shadow: var(--nei-text-shadow-deep);
 }
-.wm-block-stats-list {
-  list-style: none;
-  margin: 0;
+.nei-sidebar-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--nei-text-mono);
+  font-family: ui-monospace, monospace;
+  background: var(--nei-bg-panel);
+  padding: 2px 8px;
+  border: 1px solid var(--nei-border-panel);
+}
+.nei-sidebar--collapsed .nei-sidebar-count {
+  margin-left: 0;
+}
+.nei-sidebar-toggle {
+  width: 22px; height: 22px;
+  border: none;
+  background: none;
+  color: var(--nei-text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
+  flex-shrink: 0;
+}
+.nei-sidebar-toggle:hover { color: var(--nei-text); }
+.nei-chevron { width: 16px; height: 16px; }
+
+/* ===== Empty ===== */
+.nei-sidebar-empty {
+  padding: 14px;
+  font-size: 11px;
+  color: var(--nei-text-dim);
+  margin: 0;
+}
+
+/* ===== Grid (expanded) ===== */
+.nei-sidebar-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+}
+.nei-sidebar-grid--collapsed {
   display: flex;
   flex-direction: column;
   flex-wrap: wrap;
   align-content: flex-start;
-  align-items: flex-start;
-  gap: var(--wm-slot-gap);
-  width: max-content;
-  max-width: 100%;
-  max-height: var(--wm-block-stats-max-col-h);
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 6px 4px;
 }
-.wm-block-stats-row {
+
+/* ===== Slot Row ===== */
+.nei-slot-row {
+  display: flex;
+  align-items: center;
+  padding: 1px 0;
+  cursor: pointer;
+}
+.nei-slot-row--collapsed {
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ===== Slot (40x40, NEI border) ===== */
+.nei-slot {
+  width: 40px; height: 40px;
+  flex-shrink: 0;
+  background: var(--nei-bg-input);
+  border: 2px solid var(--nei-border-slot);
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
-  width: var(--wm-slot-px);
-  height: var(--wm-slot-px);
+  position: relative;
+}
+.nei-slot-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+.nei-slot-count {
+  position: absolute;
+  bottom: 0;
+  right: 1px;
+  font-size: 10px;
+  color: #ffffff;
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  text-shadow: 1px 1px 0 #000;
+  line-height: 1;
+}
+
+/* ===== Expanded info ===== */
+.nei-slot-info {
   min-width: 0;
+  margin-left: 10px;
+  line-height: 1.35;
+}
+.nei-slot-name {
+  font-size: 12px;
+  color: var(--nei-text);
+  text-shadow: var(--nei-text-shadow);
+}
+.nei-slot-qty {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--nei-text-dim);
+  font-family: ui-monospace, monospace;
+}
+.nei-slot-id {
+  font-size: 9px;
+  color: var(--nei-text-id);
+  font-family: ui-monospace, monospace;
+}
+
+/* ===== Footer (collapsed only) ===== */
+.nei-sidebar-foot {
+  padding: 6px 0;
+  border-top: 1px solid var(--nei-border-subtle);
+  display: flex;
+  justify-content: center;
 }
 </style>
