@@ -126,8 +126,8 @@ export function createEmbedBContext(config: View3DConfig): BContext {
       contains: () => false, recent: () => [],
     } as any,
     wikiConfig: null as any,
-    wm: { windows: [], activeWindow: null },
-    screen: null, area: null, region: null, rna: null as any, ui: null as any,
+    wm: {} as any,
+    screen: null, rna: null as any, ui: null as any,
   })
 
   // Register embed operators

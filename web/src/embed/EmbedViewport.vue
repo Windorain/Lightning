@@ -272,8 +272,6 @@ function onSidebarTooltipHover(
   else clearHover('sidebar')
 }
 
-watch(worldFrameIndex, (i) => { bctx.setCurrentWorldFrame(i) }, { immediate: false })
-
 onMounted(async () => { await bctx.loadStructureAndResources() })
 onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())

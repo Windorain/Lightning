@@ -19,8 +19,7 @@ import type { ComputedRef, Ref, ShallowRef } from 'vue'
 import type * as THREE from 'three'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { Frame } from '@/render/schema/types'
-import type { WidgetRect } from '@/workbench/ux/layout'
-import type { wmWindow, bScreen, ScrArea, ARegion, Rect } from '@/workbench/ux/types/screen'
+import type { bScreen, Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
@@ -39,26 +38,10 @@ export interface BContextQueries {
   getFrameBlocks(): BlockRef[]
   /** 获取完整的场景文档（用于 annotations、labels 等顶层集合的访问） */
   getDocument(): Record<string, any> | null
-  /** 方块世界坐标 → 屏幕坐标（供测试反算点击位置） */
-  projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null
-  /** Gizmo 箭头在屏幕上的锚点坐标 */
-  getGizmoAnchor(axis: 'x' | 'y' | 'z'): { x: number; y: number } | null
-  /** 在 cellGrid 中移动方块（整数坐标），返回是否成功 */
-  moveBlockInCellGrid(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }): boolean
   /** 轴对齐向量运算：target = origin + dir * delta（替代 THREE.Vector3） */
   axisAdd(origin: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', delta: number): { x: number; y: number; z: number }
   /** 向量取整 */
   roundVec(v: { x: number; y: number; z: number }): { x: number; y: number; z: number }
-  /** 场景中所有注解框 */
-  getAnnotationBoxes(): import('@/render/data/sceneDocumentV2').V2AnnotationBox[]
-  /** 按 ID 获取单个注解框 */
-  getAnnotationBox(id: string): import('@/render/data/sceneDocumentV2').V2AnnotationBox | null
-  /** 射线命中方块 → 相邻放置位置 + 面法线。无命中返回 null */
-  pickSurface(event: PointerEvent): { pos: { x: number; y: number; z: number }; normal: { x: number; y: number; z: number } } | null
-  /** 射线与地平面 (y=0) 交点，返回整数网格坐标 */
-  pickGround(event: PointerEvent): { x: number; y: number; z: number } | null
-  /** 射线命中浮点世界坐标（注解框用）。无命中 fallback 到地平面浮点坐标 */
-  pickWorldPoint(event: PointerEvent): { x: number; y: number; z: number } | null
   /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
   gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null
 }
@@ -186,23 +169,16 @@ export interface BContext {
 
   /** Window manager (Blender 对标 wmWindowManager) */
   wm: {
-    windows: wmWindow[]
-    activeWindow: wmWindow | null
+    showContextMenu: (pos: { x: number; y: number }, items: unknown[]) => void
+    hideContextMenu: () => void
   }
 
   screen: bScreen | null
-  area: ScrArea | null
-  region: ARegion | null
   rna: RNARegistry
 
   ui: {
-    computeLayout(screen: bScreen): void
-    boundsOf(id: string): Rect | null
     boundsOfByOperator(opId: string): Rect[]
-    boundsOfByOperatorMatchProps(opId: string, matchProps: Record<string, unknown>): WidgetRect[]
     boundsOfByRNAPath(rnaPath: string): Rect[]
-    regionAt(x: number, y: number): { area: ScrArea; region: ARegion } | null
-    relayout(): void
   }
 }
 

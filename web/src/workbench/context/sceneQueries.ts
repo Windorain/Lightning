@@ -4,13 +4,10 @@
  * createProductionQueries(bctx) 返回 BContextQueries 实现。
  * 操作符通过 bctx.queries 隐式获取场景状态，不直接 import 此文件。
  */
-import * as THREE from 'three'
 import type { BContext, BContextQueries } from '@/workbench/context/bContext'
 import type { BlockRef } from '@/workbench/selectionContext'
-import type { V2AnnotationBox } from '@/render/data/sceneDocumentV2'
 import type { Frame } from '@/render/schema/types'
 import { scenePickFromPointer } from '@/render/interaction/scenePick'
-import { ARROW_LENGTH, CONE_LENGTH } from '@/workbench/tools/gizmos'
 
 export function createProductionQueries(bctx: BContext): BContextQueries {
   return {
@@ -65,69 +62,8 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       }))
     },
 
-    moveBlockInCellGrid(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }): boolean {
-      const doc = bctx.scene.scene.value
-      if (!doc) return false
-      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
-      if (!rf?.grid) return false
-      return rf.grid.moveBlock(
-        { x: from.x, y: from.y, z: from.z },
-        { x: to.x, y: to.y, z: to.z },
-      )
-    },
-
     getDocument(): Record<string, any> | null {
       return bctx.scene.scene.value?.serialize() ?? null
-    },
-
-    projectBlock(pos: { x: number; y: number; z: number }): { x: number; y: number } | null {
-      const vp = bctx.viewport
-      const camera = vp.camera.value
-      const domElement = vp.domElement.value
-      if (!camera || !domElement) return null
-
-      const doc = bctx.scene.scene.value
-      const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
-      const grid = rf?.grid
-      const sCol = grid?.width ?? 1
-      const sRow = grid?.height ?? 1
-      const sZ = grid?.depth ?? 1
-
-      // GridPos is Y-up, Three.js scene is centered at origin
-      const wx = pos.x - sCol / 2 + 0.5
-      const wy = pos.y - sRow / 2 + 0.5
-      const wz = pos.z - sZ / 2 + 0.5
-      const worldPos = new THREE.Vector3(wx, wy, wz)
-      worldPos.project(camera)
-      const rect = domElement.getBoundingClientRect()
-      return {
-        x: ((worldPos.x + 1) / 2) * rect.width + rect.left,
-        y: ((-worldPos.y + 1) / 2) * rect.height + rect.top,
-      }
-    },
-
-    getGizmoAnchor(axis: 'x' | 'y' | 'z'): { x: number; y: number } | null {
-      const vp = bctx.viewport
-      const camera = vp.camera.value
-      const domElement = vp.domElement.value
-      const gizmo = vp.gizmo.value
-      if (!camera || !domElement || !gizmo) return null
-      if (bctx.selection.items.value.size === 0) return null
-
-      const arrowCenter = (ARROW_LENGTH - CONE_LENGTH) / 2
-      const gPos = gizmo.root.position
-      const anchor = new THREE.Vector3(
-        gPos.x + (axis === 'x' ? arrowCenter : 0),
-        gPos.y + (axis === 'y' ? arrowCenter : 0),
-        gPos.z + (axis === 'z' ? arrowCenter : 0),
-      )
-      anchor.project(camera)
-
-      const rect = domElement.getBoundingClientRect()
-      return {
-        x: ((anchor.x + 1) / 2) * rect.width + rect.left,
-        y: ((-anchor.y + 1) / 2) * rect.height + rect.top,
-      }
     },
 
     axisAdd(
@@ -144,98 +80,6 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
 
     roundVec(v: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
       return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) }
-    },
-
-    getAnnotationBoxes(): V2AnnotationBox[] {
-      return (bctx.scene.scene.value?.annotations ?? []) as V2AnnotationBox[]
-    },
-
-    getAnnotationBox(id: string): V2AnnotationBox | null {
-      return (bctx.scene.scene.value?.annotations?.find((a: any) => a.id === id) ?? null) as V2AnnotationBox | null
-    },
-
-    pickSurface(event: PointerEvent) {
-      const vp = bctx.viewport
-      const camera = vp.camera.value
-      const contentGroup = vp.contentGroup.value
-      const domElement = vp.domElement.value
-      const definition = vp.definition.value
-      if (!camera || !contentGroup || !domElement || !definition) return null
-
-      const result = scenePickFromPointer({
-        clientX: event.clientX, clientY: event.clientY,
-        domElement, camera,
-        contentGroup,
-        overlayGroup: vp.overlayGroup.value ?? undefined,
-        def: definition,
-        layerPreview: vp.layerPreview.value ?? 'all',
-      })
-      if (!result || result.kind !== 'block') return null
-
-      const nx = Math.round(result.normal?.x ?? 0)
-      const ny = Math.round(result.normal?.y ?? 0)
-      const nz = Math.round(result.normal?.z ?? 0)
-
-      // cellGrid row → world Y (use RuntimeDocument Grid height)
-      const doc = bctx.scene.scene.value
-      const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
-      const h = rf?.grid?.height ?? 0
-      const worldY = h > 0 ? h - 1 - result.row : result.row
-
-      return {
-        pos: { x: result.column + nx, y: worldY + ny, z: result.zSlice + nz },
-        normal: { x: nx, y: ny, z: nz },
-      }
-    },
-
-    pickGround(event: PointerEvent) {
-      const vp = bctx.viewport
-      const camera = vp.camera.value
-      const domElement = vp.domElement.value
-      if (!camera || !domElement) return null
-      const rect = domElement.getBoundingClientRect()
-      const mouse = new THREE.Vector2(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1,
-      )
-      const raycaster = new THREE.Raycaster()
-      raycaster.setFromCamera(mouse, camera)
-      const dir = raycaster.ray.direction
-      const origin = raycaster.ray.origin
-      if (Math.abs(dir.y) < 0.0001) return null
-      const t = -origin.y / dir.y
-      if (t <= 0) return null
-      return {
-        x: Math.round(origin.x + dir.x * t),
-        y: 0,
-        z: Math.round(origin.z + dir.z * t),
-      }
-    },
-
-    pickWorldPoint(event: PointerEvent) {
-      const surface = this.pickSurface(event)
-      if (surface) return surface.pos
-      const vp = bctx.viewport
-      const camera = vp.camera.value
-      const domElement = vp.domElement.value
-      if (!camera || !domElement) return null
-      const rect = domElement.getBoundingClientRect()
-      const mouse = new THREE.Vector2(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1,
-      )
-      const raycaster = new THREE.Raycaster()
-      raycaster.setFromCamera(mouse, camera)
-      const dir = raycaster.ray.direction
-      const origin = raycaster.ray.origin
-      if (Math.abs(dir.y) < 0.0001) return null
-      const t = -origin.y / dir.y
-      if (t <= 0) return null
-      return {
-        x: origin.x + dir.x * t,
-        y: 0,
-        z: origin.z + dir.z * t,
-      }
     },
 
     gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null {

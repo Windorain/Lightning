@@ -1,8 +1,6 @@
 // web/src/workbench/tools/tool.ts
 import type { Ref } from 'vue'
-import type { SceneContext } from '@/workbench/sceneContext'
 import type { SelectionContext, BlockRef } from '@/workbench/selectionContext'
-import type { UndoManager } from '@/workbench/editHistoryContext'
 import type { ViewportSlot } from '@/workbench/context/bContext'
 import type { InputBinding } from '@/workbench/keymap'
 import type { Frame } from '@/render/schema/types'
@@ -40,9 +38,7 @@ export interface ToolGizmo {
 
 /** ToolContext 是传递给 Tool 和 Gizmo 的运行环境。 */
 export interface ToolContext {
-  scene: SceneContext
   selection: SelectionContext
-  editHistory: UndoManager
   viewport: ViewportSlot
 
   pickVoxel(event: PointerEvent): BlockRef | null
@@ -52,14 +48,9 @@ export interface ToolContext {
 
   /** 调用操作符 */
   invokeOperator(id: string, props?: Record<string, unknown>, event?: Event, regionId?: string): string
-  execOperator(id: string, props?: Record<string, unknown>): void
 
   /** 当前活跃 Tool（切换工具时由 ToolRegistry 更新） */
   readonly activeTool: Ref<Tool | null>
-
-  /** 工具 transient 状态（draft 注解数据等），工具切换时 reset */
-  transient: Record<string, unknown>
-  resetTransient(): void
 
   /** 查询指定 region 的模态栈深度。>0 表示有操作符在模态运行中 */
   modalDepth(regionId: string): number

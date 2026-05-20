@@ -24,7 +24,7 @@ import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
 import { createProductionQueries } from '@/workbench/context/sceneQueries'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA } from '@/workbench/ux/rna'
-import { computeLayout, boundsOf, boundsOfByOperator, boundsOfByRNAPath, regionAt, relayout } from '@/workbench/ux/layout'
+import { computeLayout, boundsOfByOperator, boundsOfByRNAPath } from '@/workbench/ux/layout'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import {
   blockInspectorPanel, toolShelfPanel,
@@ -217,18 +217,12 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   }
 
   // ---- 挂载到 bctx ----
-  ;(bctx as any).wm = { windows: [], activeWindow: null }
+  ;(bctx as any).wm = {}
   ;(bctx as any).screen = defaultScreen
-  ;(bctx as any).area = null
-  ;(bctx as any).region = null
   ;(bctx as any).rna = rna
   ;(bctx as any).ui = {
-    computeLayout: (s: bScreen) => computeLayout(bctx, s),
-    boundsOf: (id: string) => boundsOf(bctx, id),
     boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
     boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),
-    regionAt: (x: number, y: number) => regionAt(defaultScreen, x, y),
-    relayout: () => relayout(bctx),
   }
 
   // 注册所有内置 operators + 工具

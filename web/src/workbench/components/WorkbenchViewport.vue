@@ -87,19 +87,14 @@ const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
 
 function createToolContext(): ToolContext {
   return {
-    scene: bctx.scene,
     selection,
-    editHistory: bctx.editHistory,
     viewport: bctx.viewport,
     pickVoxel: (e) => bctx.queries.pickVoxel(e),
     getCurrentFrame: () => bctx.queries.getCurrentFrame(),
     gridCenterWorld: (pos) => bctx.queries.gridCenterWorld(pos),
     invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
-    execOperator: (id, props) => bctx.operators.exec(id, props),
     activeTool: bctx.toolRegistry.activeTool,
     modalDepth: (rid: string) => bctx.eventDispatcher.modalDepth(rid),
-    transient: {},
-    resetTransient() { this.transient = {} },
   }
 }
 
@@ -315,7 +310,6 @@ onBeforeUnmount(() => {
       :content-group="mainMeshGroup"
       :layer-preview-mode="layerPreviewMode"
       :scene-background="config.sceneBackground"
-      :edit-mode="true"
       :show-axes-gizmo="config.features.showAxesGizmo !== false"
       @ready="onViewportReady"
     />

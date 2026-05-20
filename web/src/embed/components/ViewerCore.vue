@@ -36,12 +36,10 @@ const props = withDefaults(
     contentGroup: THREE.Group | null
     layerPreviewMode: LayerPreviewMode
     sceneBackground?: number
-    editMode?: boolean
     showAxesGizmo?: boolean
   }>(),
   {
     sceneBackground: 0x111827,
-    editMode: false,
     showAxesGizmo: true,
   },
 )
@@ -58,12 +56,6 @@ const emit = defineEmits<{
     payload: {
       blockId: string; clientX: number; clientY: number
       source: 'viewport'; voxel: { column: number; row: number; zSlice: number }
-    } | null,
-  ]
-  'select-block': [
-    payload: {
-      blockId: string; clientX: number; clientY: number
-      voxel: { column: number; row: number; zSlice: number }
     } | null,
   ]
 }>()
@@ -88,7 +80,6 @@ let onVisibilityToGl: (() => void) | null = null
 let canvasEl: HTMLElement | null = null
 let rafHoverPending = false
 let lastPointer: { clientX: number; clientY: number } | null = null
-let clickDownAt: { x: number; y: number } | null = null
 let skipNextContentGroupAutoFit = false
 
 function runPick(): void {
@@ -127,39 +118,6 @@ function onPointerMove(e: PointerEvent): void {
 function onPointerLeave(): void {
   lastPointer = null
   emit('hover-block', null)
-}
-
-function onPointerDown(e: PointerEvent): void {
-  if (!props.editMode) return
-  clickDownAt = { x: e.clientX, y: e.clientY }
-}
-
-function onPointerUp(e: PointerEvent): void {
-  if (!props.editMode || !clickDownAt) return
-  const dx = e.clientX - clickDownAt.x
-  const dy = e.clientY - clickDownAt.y
-  clickDownAt = null
-  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) return
-
-  lastPointer = { clientX: e.clientX, clientY: e.clientY }
-  const vp = renderer
-  const g = props.contentGroup
-  const dom = canvasEl
-  if (!vp || !g || !dom) return
-  const picked = scenePickFromPointer({
-    clientX: e.clientX, clientY: e.clientY,
-    domElement: dom, camera: vp.camera,
-    contentGroup: g, overlayGroup: layers?.overlay,
-    def: props.definition,
-    layerPreview: props.layerPreviewMode,
-  })
-  if (picked && picked.kind === 'block') {
-    emit('select-block', {
-      blockId: picked.blockId,
-      clientX: e.clientX, clientY: e.clientY,
-      voxel: { column: picked.column, row: picked.row, zSlice: picked.zSlice },
-    })
-  }
 }
 
 function fitCameraToGroup(vp: View3DRenderer, group: THREE.Group): void {
@@ -244,8 +202,7 @@ onMounted(() => {
   canvasEl = vp.domElement
   canvasEl.addEventListener('pointermove', onPointerMove)
   canvasEl.addEventListener('pointerleave', onPointerLeave)
-  canvasEl.addEventListener('pointerdown', onPointerDown)
-  canvasEl.addEventListener('pointerup', onPointerUp)
+
 
   const def = props.definition
   const fallbackTarget = new THREE.Vector3(0, 2, 0)
@@ -323,8 +280,7 @@ onBeforeUnmount(() => {
   if (canvasEl) {
     canvasEl.removeEventListener('pointermove', onPointerMove)
     canvasEl.removeEventListener('pointerleave', onPointerLeave)
-    canvasEl.removeEventListener('pointerdown', onPointerDown)
-    canvasEl.removeEventListener('pointerup', onPointerUp)
+
     canvasEl = null
   }
   cancelAnimationFrame(animationId)
