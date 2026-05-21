@@ -3,38 +3,79 @@
  * EmbedRoot — 嵌入场景的 bctx Owner。
  *
  * 对齐 WorkbenchRoot：
- * - 解析 bootstrap → View3DConfig
- * - 创建 embed bctx（createEmbedBContext）
+ * - 注册 parser → 解析 bootstrap → RuntimeDocument
+ * - 创建 embed bctx（createEmbedContext）
  * - 提供 bctx 给子树
  * - EmbedViewport 消费 bctx
  */
 import { ref, watch } from 'vue'
-
-import EmbedViewport from '@/embed/EmbedViewport.vue'
+import type { EmbedBootstrapOptions } from '@/embed/embedContract'
 import type { EmbedSettings } from '@/preview/previewConfig'
-import { embedSettingsFromConfig } from '@/preview/previewConfig'
-import { resolveBootstrapToView3DConfig, type EmbedBootstrapOptions } from '@/embed/embedContract'
 import { formatUnknownError } from '@/util/formatUnknownError'
+import { parserRegistry } from '@/workbench/context/parserRegistry'
+import { V2PlainParser } from '@/workbench/context/parsers/v2PlainParser'
+import { EnvelopeParser } from '@/workbench/context/parsers/envelopeParser'
+import { WorldParser } from '@/workbench/context/parsers/worldParser'
+import { StructureDataParser } from '@/workbench/context/parsers/structureDataParser'
+import { createEmbedContext, provideEmbedBContext } from '@/embed/embedContext'
+import EmbedViewport from '@/embed/EmbedViewport.vue'
+import { defaultEmbedUi } from '@/preview/previewConfig'
+import type { View3DFeatures } from '@/preview/previewConfig'
+
+// ---- 注册 parser（与 WorkbenchRoot 对齐） ----
+parserRegistry.register(V2PlainParser)
+parserRegistry.register(EnvelopeParser)
+parserRegistry.register(WorldParser)
+parserRegistry.register(StructureDataParser)
 
 const props = defineProps<{
   bootstrap: EmbedBootstrapOptions
 }>()
 
-const embedDocument = ref<unknown>(null)
-const embedSettings = ref<EmbedSettings | null>(null)
-const loadError = ref<string | null>(null)
+function buildEmbedSettings(): EmbedSettings {
+  const ui = props.bootstrap.ui ?? {}
+  const features = props.bootstrap.features ?? {}
+  return {
+    features: {
+      ...defaultEmbedUi.features,
+      ...features,
+    } as View3DFeatures,
+    blockIconCacheOptions: {
+      ...defaultEmbedUi.blockIconCacheOptions,
+      ...ui.blockIconCacheOptions,
+    },
+    initialLayerWorldY: ui.initialLayerWorldY ?? defaultEmbedUi.initialLayerWorldY,
+    initialWorldFrameIndex: ui.initialWorldFrameIndex,
+    initialCamera: ui.initialCamera,
+    sceneBackground: ui.sceneBackground ?? defaultEmbedUi.sceneBackground,
+    loadingMessage: ui.loadingMessage ?? defaultEmbedUi.loadingMessage,
+    okMessage: ui.okMessage ?? defaultEmbedUi.okMessage,
+    debug: ui.debug ?? defaultEmbedUi.debug,
+  }
+}
+
+// ---- 同步创建 bctx + provide（Vue 要求 setup 期 provide） ----
+const settings = buildEmbedSettings()
+const bctx = createEmbedContext(settings)
+provideEmbedBContext(bctx)
+
+// ---- 异步解析 document → 填入 bctx.doc ----
+const loadError = ref('')
 
 async function load() {
-  loadError.value = null
-  embedDocument.value = null
-  embedSettings.value = null
+  loadError.value = ''
   try {
-    const cfg = await resolveBootstrapToView3DConfig(props.bootstrap)
-    embedDocument.value = cfg.renderBundle.document
-    embedSettings.value = embedSettingsFromConfig(cfg)
+    const rawDoc = props.bootstrap.data.document
+    const result = await parserRegistry.detectAndParse(rawDoc)
+    if (!result.document) {
+      loadError.value = `无法解析文档（format: ${result.parser?.formatName ?? '未知'}）`
+      return
+    }
+    bctx.doc.value = result.document
+    bctx.markStructureDirty()
   } catch (e) {
     loadError.value = formatUnknownError(e)
-    console.error('[EmbedRoot] resolveBootstrapToView3DConfig', e)
+    console.error('[EmbedRoot] parse', e)
   }
 }
 
@@ -49,7 +90,7 @@ watch(
   <div v-if="loadError" class="embed-boot embed-boot--err">
     {{ loadError }}
   </div>
-  <EmbedViewport v-else-if="embedDocument && embedSettings" :document="embedDocument" :settings="embedSettings" />
+  <EmbedViewport v-else-if="bctx.doc.value" />
   <div v-else class="embed-boot">
     加载中…
   </div>

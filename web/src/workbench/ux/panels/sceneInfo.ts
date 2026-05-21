@@ -18,9 +18,14 @@ export const sceneInfoPanel: PanelDeclaration = {
           { kind: 'property', rnaPath: 'scenemetadata.name', label: '名称' },
           { kind: 'property', rnaPath: 'scenemetadata.author', label: '作者' },
           { kind: 'property', rnaPath: 'scenemetadata.description', label: '描述', widget: 'text' },
+          { kind: 'property', rnaPath: 'scenemetadata.tags', label: '标签' },
+          { kind: 'property', rnaPath: 'scenemetadata.origin', label: '原点' },
         ]},
         { kind: 'separator' },
-        { kind: 'operator', id: 'OPERATOR_SCENE_META_EDIT', label: '保存' },
+        { kind: 'box', label: '系统信息', items: [
+          { kind: 'property', rnaPath: 'scenemetadata.created_at', label: '创建时间' },
+          { kind: 'property', rnaPath: 'scenemetadata.format_version', label: '格式版本' },
+        ]},
       ],
     }
   },

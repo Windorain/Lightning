@@ -91,3 +91,49 @@ describe('getMaterialUsageCounts', () => {
     expect(counts).toEqual({ '0': 2, '1': 1 })
   })
 })
+
+describe('getBlockTypeStats', () => {
+  it('returns stats from current frame grid', () => {
+    const cells: (any)[][][] = [[
+      [{ name: 'stone', meta: 0 }],
+      [{ name: 'dirt', meta: 0 }],
+      [{ name: 'stone', meta: 0 }],
+    ]]
+    const grid = new Grid(1, 3, 1, cells)
+    const doc = new RuntimeDocument({ id: 'test', frames: [new RuntimeFrame(0, undefined, grid)] })
+    const q = createProductionQueries(makeMockBctx(doc))
+    const stats = q.getBlockTypeStats()
+    expect(stats['minecraft:stone:0']).toEqual({ count: 2 })
+    expect(stats['minecraft:dirt:0']).toEqual({ count: 1 })
+  })
+
+  it('returns empty object for no grid', () => {
+    const doc = new RuntimeDocument({ id: 'test' })
+    const q = createProductionQueries(makeMockBctx(doc))
+    expect(q.getBlockTypeStats()).toEqual({})
+  })
+})
+
+describe('getBlockPaletteEntry', () => {
+  it('returns palette entry for block at position', () => {
+    const cells: (any)[][][] = [[
+      [{ name: 'stone', meta: 0, paletteIndex: 5 }],
+    ]]
+    const cache = new Map()
+    cache.set('#5', { registryId: 'minecraft:stone', nbt: { key: 'val' }, tooltip: ['tip1'] })
+    const grid = new Grid(1, 1, 1, cells, cache)
+    const doc = new RuntimeDocument({ id: 'test', frames: [new RuntimeFrame(0, undefined, grid)] })
+    const q = createProductionQueries(makeMockBctx(doc))
+    const entry = q.getBlockPaletteEntry({ x: 0, y: 0, z: 0 })
+    expect(entry).not.toBeNull()
+    expect(entry!.nbt).toEqual({ key: 'val' })
+    expect(entry!.tooltip).toEqual(['tip1'])
+  })
+
+  it('returns null for air position', () => {
+    const grid = new Grid(1, 1, 1)
+    const doc = new RuntimeDocument({ id: 'test', frames: [new RuntimeFrame(0, undefined, grid)] })
+    const q = createProductionQueries(makeMockBctx(doc))
+    expect(q.getBlockPaletteEntry({ x: 0, y: 0, z: 0 })).toBeNull()
+  })
+})

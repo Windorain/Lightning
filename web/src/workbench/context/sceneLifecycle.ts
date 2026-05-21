@@ -6,6 +6,7 @@
  */
 import { computed, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
+import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { LoadStatus } from '@/workbench/context/bContext'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
@@ -43,8 +44,8 @@ interface WorldMeshEntry {
 }
 
 export interface RenderAssetsDeps {
-  /** 原始文档（RuntimeDocument.toRaw() 产物，或 embed 传入的 plain doc） */
-  docRef: Ref<unknown>
+  /** 场景文档（RuntimeDocument；render 管线内部按需调用 serialize() 获取 plain JSON） */
+  docRef: Ref<RuntimeDocument | null>
   loadStatus: Ref<LoadStatus>
   meshBusy: Ref<boolean>
   blockIconCache: ShallowRef<BlockIconCache | null>
@@ -100,11 +101,11 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   // === 内部纹理缓存，从 doc.textureBlobs 构建 ===
   const textureCache = shallowRef<MaterialLibraryApi | null>(null)
 
-  /** 确保 textureCache 就绪；已完成则直接返回。doc 必须是 plain V2 文档 */
-  async function ensureTextures(doc: unknown): Promise<MaterialLibraryApi | null> {
+  /** 确保 textureCache 就绪；已完成则直接返回。 */
+  async function ensureTextures(doc: RuntimeDocument): Promise<MaterialLibraryApi | null> {
     if (textureCache.value && !textureCache.value.isDisposed()) return textureCache.value
     try {
-      textureCache.value = await buildMaterialLibrary(doc)
+      textureCache.value = await buildMaterialLibrary(doc.serialize())
       return textureCache.value
     } catch (e) {
       console.error('[renderAssets] buildMaterialLibrary failed', e)
@@ -120,11 +121,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   let nonWorldMeshDispose: (() => void) | null = null
 
   // ---- Computed ----
-  const worldFrameCount = computed(() => {
-    const doc = docRef.value
-    if (!isWorldDocument(doc)) return 0
-    return doc.frames.length
-  })
+  const worldFrameCount = computed(() => docRef.value?.frameCount ?? 0)
   const hasWorldMultiFrame = computed(() => worldFrameCount.value > 1)
   const gridHeight = computed(() => structureDefinition.value?.cellGrid[0]?.length ?? 0)
   const layerPreviewMode = computed<LayerPreviewMode>(() => {
@@ -183,7 +180,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       return
     }
 
-    const isW = isWorldDocument(docRef.value)
+    const isW = (docRef.value?.frameCount ?? 0) > 1
     const layerPreview = layerPreviewMode.value
 
     meshBusy.value = true
@@ -232,8 +229,10 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
 
   function dwellMsForCurrentWorldFrame(): number {
     const doc = docRef.value
-    if (!isWorldDocument(doc) || doc.frames.length === 0) return DEFAULT_WORLD_FRAME_DWELL_MS
-    const f = frameAt(doc, worldFrameIndex.value)
+    if (!doc || doc.frameCount === 0) return DEFAULT_WORLD_FRAME_DWELL_MS
+    const plain = doc.serialize()
+    if (!isWorldDocument(plain) || plain.frames.length === 0) return DEFAULT_WORLD_FRAME_DWELL_MS
+    const f = frameAt(plain, worldFrameIndex.value)
     const d = f?.durationMs
     if (typeof d === 'number' && Number.isFinite(d) && d > 0) return d
     return DEFAULT_WORLD_FRAME_DWELL_MS
@@ -243,8 +242,8 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     clearWorldPlaybackSchedule()
     if (!framesPlaybackIsPlaying.value || !hasWorldMultiFrame.value) return
     const doc = docRef.value
-    if (!isWorldDocument(doc) || doc.frames.length < 2) return
-    const n = doc.frames.length
+    if (!doc || doc.frameCount < 2) return
+    const n = doc.frameCount
     const delay = dwellMsForCurrentWorldFrame()
     const fromIndex = worldFrameIndex.value
     worldPlaybackTimeoutId = setTimeout(() => {
@@ -267,11 +266,13 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
 
   async function setCurrentWorldFrame(rawNext: number): Promise<void> {
     const doc = docRef.value
-    if (!isWorldDocument(doc) || doc.frames.length === 0) return
+    if (!doc || doc.frameCount === 0) return
     return runMesh(async () => {
-      const idx = normalizeWorldFrameListIndex(doc, rawNext)
+      const plain = doc.serialize()
+      if (!isWorldDocument(plain) || plain.frames.length === 0) return
+      const idx = normalizeWorldFrameListIndex(plain, rawNext)
       worldFrameIndex.value = idx
-      const resolved: RenderBundleResolveResult = resolveRenderBundle({ document: doc }, idx)
+      const resolved: RenderBundleResolveResult = resolveRenderBundle({ document: plain }, idx)
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
       const lib = textureCache.value
@@ -299,8 +300,9 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     try {
       const doc = docRef.value
       if (!doc) { loadStatus.value = 'error'; return }
+      const plain = doc.serialize()
       const resolved: RenderBundleResolveResult = resolveRenderBundle(
-        { document: doc },
+        { document: plain },
         initialWorldFrameIndex,
       )
       if (resolved.worldFrameIndex !== undefined) worldFrameIndex.value = resolved.worldFrameIndex
@@ -310,7 +312,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       const lib = textureCache.value
       const effectiveLib = (lib && !lib.isDisposed())
         ? lib
-        : await ensureTextures(doc as Record<string, unknown>)
+        : await ensureTextures(doc)
       if (!effectiveLib || effectiveLib.isDisposed()) {
         loadStatus.value = 'error'
         console.error('[renderAssets] loadStructureAndResources: failed to build textureCache')

@@ -6,7 +6,7 @@
  */
 import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
-import type { SelectionContext } from '@/workbench/selectionContext'
+import type { BlockRef, SelectionContext } from '@/workbench/selectionContext'
 import type { UndoManager } from '@/workbench/editHistoryContext'
 import type { ToolRegistry } from '@/workbench/toolRegistry'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
@@ -16,14 +16,10 @@ import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import { computed, ref, shallowRef } from 'vue'
 import type { ComputedRef, Ref, ShallowRef } from 'vue'
 import type * as THREE from 'three'
-import type { BlockRef } from '@/workbench/selectionContext'
 import type { Frame } from '@/render/schema/types'
 import type { bScreen, Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
-import type { BlockIconCache } from '@/render/interaction/blockIconCache'
-import type { BlockStatRow } from '@/render/interaction/blockStats'
-import type { Annotation } from '@/render/data/annotationTypes'
 
 export type LoadStatus = 'loading' | 'ok' | 'error'
 export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle'
@@ -45,6 +41,10 @@ export interface MaterialQueryItem {
   useMipmaps?: boolean
 }
 
+export interface BlockTypeStat {
+  count: number
+}
+
 export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
   pickVoxel(event: PointerEvent): BlockRef | null
@@ -64,6 +64,10 @@ export interface BContextQueries {
   listMaterials(): MaterialQueryItem[]
   /** Count blocks using each material in the current frame (materialId → count) */
   getMaterialUsageCounts(): Record<string, number>
+  /** 当前帧方块类型统计 (block_state_id → 计数) */
+  getBlockTypeStats(): Record<string, BlockTypeStat>
+  /** 获取方块位置的调色板元数据 */
+  getBlockPaletteEntry(pos: { x: number; y: number; z: number }): import('@/workbench/context/runtimeDocument').PaletteEntryMeta | null
 }
 
 export interface BContextSettings {
@@ -166,38 +170,6 @@ export interface BContext {
   /** 底部状态栏消息 */
   statusMessage: { value: string }
 
-  // === Shared rendering resources ===
-  blockIconCache: ShallowRef<BlockIconCache | null>
-  tooltipPalette: ShallowRef<string[]>
-
-  // Frame/Layer state
-  worldFrameIndex: Ref<number>
-  worldFrameCount: ComputedRef<number>
-  hasWorldMultiFrame: ComputedRef<boolean>
-  framesPlaybackIsPlaying: Ref<boolean>
-  toggleWorldFramesPlayback(): void
-  setCurrentWorldFrame(index: number): Promise<void>
-
-  layerWorldY: Ref<number>
-  layerPreviewMode: ComputedRef<LayerPreviewMode>
-  layerPreviewLabel: ComputedRef<string>
-  gridHeight: ComputedRef<number>
-
-  // Status
-  loadStatus: Ref<LoadStatus>
-  meshBusy: Ref<boolean>
-
-  // Scene lifecycle
-  loadStructureAndResources(): Promise<void>
-  rebuildContentMesh(): Promise<void>
-  rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null>
-  disposeCachesAndLibrary(): void
-  reloadFromConfig(): Promise<void>
-  registerScene(scene: THREE.Scene): void
-
-  // Block stats
-  blockStatsEntries: ComputedRef<BlockStatRow[]>
-
   // === Multi-viewport ===
   /** Backward-compat: returns the active viewport slot. Code should migrate to `viewports.get(id)`. */
   readonly viewport: ViewportSlot
@@ -218,6 +190,23 @@ export interface BContext {
     boundsOfByOperator(opId: string): Rect[]
     boundsOfByRNAPath(rnaPath: string): Rect[]
   }
+}
+
+/**
+ * 从操作符 props 解析对应的 ViewportSlot。
+ * 若 props 带 `_regionId`（由 operatorRegistry.invoke 注入），返回该 region 的 slot；
+ * 否则回退到 `bctx.viewport`（active slot）。
+ */
+export function resolveViewportSlot(
+  bctx: BContext,
+  props: Record<string, unknown> | undefined,
+): ViewportSlot {
+  const rid = props?._regionId as string | undefined
+  if (rid) {
+    const slot = bctx.viewports.get(rid)
+    if (slot) return slot
+  }
+  return bctx.viewport
 }
 
 export function createViewportManager(): ViewportManager {
