@@ -1,11 +1,9 @@
 /**
- * 嵌入端公开契约：宿主传入已打包 document（含 textureBlobs），无 HTTP 加载阶段。
+ * 嵌入端公开契约：宿主传入已打包 document（含 textureBlobs）。
+ *
+ * EmbedRoot → parserRegistry → RuntimeDocument → createEmbedContext → bctx。
  */
-
-import type { View3DConfig, View3DFeatures } from '@/preview/previewConfig'
-import { defaultEmbedUi } from '@/preview/previewConfig'
-import { loadPreviewSessionFromDocument } from '@/preview/previewSession'
-import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
+import type { View3DFeatures } from '@/preview/previewConfig'
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
 
 export type { View3DFeatures }
@@ -33,37 +31,4 @@ export interface EmbedBootstrapOptions {
   /** 未指定字段使用 defaultEmbedUi（previewConfig） */
   features?: Partial<View3DFeatures>
   ui?: EmbedUiOptions
-}
-
-export async function resolveBootstrapToView3DConfig(
-  options: EmbedBootstrapOptions,
-): Promise<View3DConfig> {
-  const ui = options.ui ?? {}
-
-  const { document } = options.data
-  const { renderBundle, materialLibrary } = await loadPreviewSessionFromDocument(document)
-  const features: View3DFeatures = {
-    ...defaultEmbedUi.features,
-    ...options.features,
-  }
-  const sceneId = sceneStableStringIdFromDocument(renderBundle.document)
-
-  const out: View3DConfig = {
-    sceneId,
-    renderBundle,
-    materialLibrary,
-    features,
-    blockIconCacheOptions: {
-      ...defaultEmbedUi.blockIconCacheOptions,
-      ...ui.blockIconCacheOptions,
-    },
-    initialLayerWorldY: ui.initialLayerWorldY ?? defaultEmbedUi.initialLayerWorldY,
-    initialWorldFrameIndex: ui.initialWorldFrameIndex,
-    initialCamera: ui.initialCamera,
-    sceneBackground: ui.sceneBackground ?? defaultEmbedUi.sceneBackground,
-    loadingMessage: ui.loadingMessage ?? defaultEmbedUi.loadingMessage,
-    okMessage: ui.okMessage ?? defaultEmbedUi.okMessage,
-    debug: ui.debug ?? defaultEmbedUi.debug,
-  }
-  return out
 }

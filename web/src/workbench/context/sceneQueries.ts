@@ -48,7 +48,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const idx = bctx.selection.frameIndex.value ?? 0
       const rf = doc.frame(idx)
       if (!rf) return null
-      return rf.toRaw() as Frame | null
+      return { index: rf.index, label: rf.label }
     },
 
     getFrameBlocks(): BlockRef[] {
@@ -63,7 +63,9 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     getDocument(): Record<string, any> | null {
-      return bctx.doc.value?.serialize() ?? null
+      const doc = bctx.doc.value
+      if (!doc) return null
+      return doc.serialize() as Record<string, any>
     },
 
     axisAdd(

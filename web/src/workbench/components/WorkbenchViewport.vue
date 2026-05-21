@@ -20,23 +20,25 @@ const bctx = useBContext()
 const VIEWPORT_REGION_ID = 'r-viewport'
 const vpSlot = bctx.viewports.get(VIEWPORT_REGION_ID) ?? bctx.viewports.register(VIEWPORT_REGION_ID)
 
-// ---- 本地 ref ----
+// ---- 本地 ref —— 全部 renderAssets 自管，不挂 bctx ----
 const sceneRef = shallowRef<THREE.Scene | null>(null)
 const loadStatus = ref<'loading' | 'ok' | 'error'>('loading')
 const meshBusy = ref(false)
+const blockIconCache = shallowRef<import('@/render/interaction/blockIconCache').BlockIconCache | null>(null)
+const tooltipPalette = shallowRef<string[]>([])
 const worldFrameIndex = ref(0)
 const layerWorldY = ref(-1)
 const framesPlaybackIsPlaying = ref(false)
 
-const docRef = computed(() => bctx.doc.value?.toRaw() ?? null)
+const docRef = computed(() => bctx.doc.value)
 
-// ---- renderAssets（viewport 本地，不挂 bctx） ----
+// ---- renderAssets（viewport 本地） ----
 const renderAssets = createRenderAssets({
   docRef,
   loadStatus,
   meshBusy,
-  blockIconCache: bctx.blockIconCache,
-  tooltipPalette: bctx.tooltipPalette,
+  blockIconCache,
+  tooltipPalette,
   structureDefinition: vpSlot.definition,
   mainMeshGroup: vpSlot.contentGroup,
   sceneRef,
@@ -48,24 +50,8 @@ const renderAssets = createRenderAssets({
 
 const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
-  hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
+  hasWorldMultiFrame, worldFrameCount,
 } = renderAssets.computed
-
-// ---- 暴露到 bctx（兼容 embed 子组件，Phase 5 移除） ----
-Object.assign(bctx, {
-  loadStatus, meshBusy,
-  worldFrameIndex, worldFrameCount, hasWorldMultiFrame, framesPlaybackIsPlaying,
-  toggleWorldFramesPlayback: renderAssets.toggleWorldFramesPlayback,
-  setCurrentWorldFrame: renderAssets.setCurrentWorldFrame,
-  layerWorldY, layerPreviewMode, layerPreviewLabel, gridHeight,
-  blockStatsEntries,
-  loadStructureAndResources: renderAssets.loadStructureAndResources,
-  rebuildContentMesh: renderAssets.rebuildContentMesh,
-  rebuildAnnotationOverlay: renderAssets.rebuildAnnotationOverlay,
-  disposeCachesAndLibrary: renderAssets.disposeCachesAndLibrary,
-  reloadFromConfig: async () => { await renderAssets.rebuildAll() },
-  registerScene: renderAssets.registerScene,
-})
 
 // ---- structEpoch → 重建 mesh ----
 watch(() => bctx.structEpoch.value, () => {
@@ -119,6 +105,7 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
   bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
 
   domElement.addEventListener('pointerdown', (e) => {
+    bctx.viewports.activeId.value = VIEWPORT_REGION_ID
     bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
     if (e.button === 1) e.preventDefault()
     bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
@@ -328,7 +315,7 @@ onBeforeUnmount(() => {
           :mesh-busy="meshBusy"
           :layer-world-y="layerWorldY"
           :layer-preview-label="layerPreviewLabel"
-          @update:layer-y="(v: number) => { bctx.layerWorldY.value = v }"
+          @update:layer-y="(v: number) => { layerWorldY = v }"
         />
       </div>
     </div>

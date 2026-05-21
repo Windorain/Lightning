@@ -1,67 +1,50 @@
 /**
- * Embed BContext 工厂 — 创建完整 BContext 供嵌入场景使用。
+ * Embed BContext 工厂 — 创建轻量 BContext 供嵌入场景使用。
  *
- * 与 workbench 同构：接收 document + settings，内部用 createRenderAssets。
+ * 与 workbench 同构：EmbedRoot 创建 bctx → provide → EmbedViewport 消费。
+ * 只包含 embed 实际需要的字段，workbench-only 子系统抛出明确错误。
  */
-import { ref, shallowRef } from 'vue'
-import type { Ref } from 'vue'
-import type { BContext, LoadStatus } from '@/workbench/context/bContext'
+import type { BContext, BContextQueries, WorkbenchWorkspaceMode } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
-import { createRenderAssets } from '@/workbench/context/sceneLifecycle'
+import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { EmbedSettings } from '@/preview/previewConfig'
-import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { EventDispatcherImpl } from '@/workbench/eventDispatcher'
-import * as THREE from 'three'
+import { ref } from 'vue'
+import type { Ref } from 'vue'
+import type { SelectionContext } from '@/workbench/selectionContext'
+import type { UndoManager } from '@/workbench/editHistoryContext'
+import type { ToolRegistry } from '@/workbench/toolRegistry'
+import type { ExportFileInfo } from '@/workbench/sdeApi'
+import type { Rect } from '@/workbench/ux/types/screen'
+import type { RNARegistry } from '@/workbench/ux/rna/types'
 
 // Operators
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
 
-export function createEmbedBContext(document: unknown, settings: EmbedSettings): BContext {
-  // ---- Shared state ----
-  const docRef = ref<unknown>(document)
-  const loadStatus = ref<LoadStatus>('loading')
-  const meshBusy = ref(false)
-  const blockIconCache = shallowRef<BlockIconCache | null>(null)
-  const tooltipPalette = shallowRef<string[]>([])
-  const sceneRef = shallowRef<THREE.Scene | null>(null)
+function throwError(name: string): never {
+  throw new Error(`embed: ${name} not available`)
+}
 
-  // ---- Viewport slots ----
+export function createEmbedContext(settings: EmbedSettings): BContext {
   const viewports = createViewportManager()
-  const defaultVp = viewports.register('r-viewport')
-  const structureDefinition = defaultVp.definition
-  const mainMeshGroup = defaultVp.contentGroup
+  viewports.register('r-embed')
 
-  // Frame/Layer
-  const worldFrameIndex = ref(0)
-  const layerWorldY = ref(settings.initialLayerWorldY)
-  const framesPlaybackIsPlaying = ref(false)
+  const docRef: Ref<RuntimeDocument | null> = ref(null)
+  const dirtyRef = ref(false)
+  const structEpochRef = ref(0)
+  const currentWorldFrameIndexRef = ref(0)
+  const workspaceModeRef: Ref<WorkbenchWorkspaceMode> = ref('local-file')
+  const localFileNameRef = ref<string | null>(null)
+  const connectionApiBaseRef = ref('')
+  const connectionTokenRef = ref('')
+  const connectionConnectedRef = ref<boolean | null>(null)
+  const connectionExportsRef = ref<ExportFileInfo[]>([])
+  const connectionExportsLoadingRef = ref(false)
+  const connectionSelectedExportNameRef = ref<string | null>(null)
 
-  // ---- renderAssets（shared）— textureCache built internally from doc ----
-  const renderAssets = createRenderAssets({
-    docRef: docRef as Ref<unknown>,
-    loadStatus,
-    meshBusy,
-    blockIconCache,
-    tooltipPalette,
-    structureDefinition,
-    mainMeshGroup,
-    sceneRef,
-    worldFrameIndex,
-    layerWorldY,
-    framesPlaybackIsPlaying,
-    blockIconCacheOptions: settings.blockIconCacheOptions ?? {},
-    initialWorldFrameIndex: settings.initialWorldFrameIndex,
-  })
-
-  const {
-    layerPreviewMode, layerPreviewLabel, gridHeight,
-    hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
-  } = renderAssets.computed
-
-  // ---- Operators ----
   const operators = {
     exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(ctx, id, props),
     invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) =>
@@ -71,72 +54,57 @@ export function createEmbedBContext(document: unknown, settings: EmbedSettings):
     register: (op: OperatorType) => globalOperators.register(op),
   }
 
-  // ---- Atomic bctx assembly ----
-  const ctx = {
-    materialLibrary: renderAssets.textureCache,
-    initialCamera: settings.initialCamera,
-    loadStatus,
-    meshBusy,
-    blockIconCache,
-    tooltipPalette,
-    worldFrameIndex,
-    worldFrameCount,
-    hasWorldMultiFrame,
-    framesPlaybackIsPlaying,
-    toggleWorldFramesPlayback: renderAssets.toggleWorldFramesPlayback,
-    setCurrentWorldFrame: renderAssets.setCurrentWorldFrame,
-    layerWorldY,
-    layerPreviewMode,
-    layerPreviewLabel,
-    gridHeight,
-    loadStructureAndResources: renderAssets.loadStructureAndResources,
-    rebuildContentMesh: renderAssets.rebuildContentMesh,
-    rebuildAnnotationOverlay: renderAssets.rebuildAnnotationOverlay,
-    disposeCachesAndLibrary: renderAssets.disposeCachesAndLibrary,
-    registerScene: renderAssets.registerScene,
-    reloadFromConfig: async () => { await renderAssets.rebuildAll() },
-    blockStatsEntries,
-    viewports,
-    get viewport() { return viewports.active.value! },
-    operators,
-    eventDispatcher: new EventDispatcherImpl(),
+  // Minimal bctx — embed 实际使用的字段
+  const ctx: BContext = {
+    doc: docRef,
+    dirty: dirtyRef,
+    structEpoch: structEpochRef,
+    currentWorldFrameIndex: currentWorldFrameIndexRef,
+    workspaceMode: workspaceModeRef,
+    localFileName: localFileNameRef,
+    markDirty() { dirtyRef.value = true },
+    markStructureDirty() { structEpochRef.value += 1; dirtyRef.value = true },
+    markClean() { dirtyRef.value = false },
+
+    connectionApiBase: connectionApiBaseRef,
+    connectionToken: connectionTokenRef,
+    connectionConnected: connectionConnectedRef,
+    connectionExports: connectionExportsRef,
+    connectionExportsLoading: connectionExportsLoadingRef,
+    connectionSelectedExportName: connectionSelectedExportNameRef,
+
+    get selection(): SelectionContext { return throwError('selection') },
+    get editHistory(): UndoManager { return throwError('editHistory') },
+    get toolRegistry(): ToolRegistry { return throwError('toolRegistry') },
+    get queries(): BContextQueries { return throwError('queries') },
+
     settings: {
       replaceBrush: null, fillBrush: null, generateType: null,
       dragSensitivity: 0.05, snapEnabled: true,
     },
+
+    operators,
+    eventDispatcher: new EventDispatcherImpl(),
+
+    get log() { return throwError('log') },
+    wikiConfig: {},
     statusMessage: { value: '' },
 
-    // Workbench-only fields — stub
-    doc: null!,
-    dirty: null!,
-    structEpoch: null!,
-    currentWorldFrameIndex: null!,
-    workspaceMode: null!,
-    localFileName: null!,
-    markDirty: null!,
-    markStructureDirty: null!,
-    markClean: null!,
-    connectionApiBase: null!,
-    connectionToken: null!,
-    connectionConnected: null!,
-    connectionExports: null!,
-    connectionExportsLoading: null!,
-    connectionSelectedExportName: null!,
-    selection: null!,
-    editHistory: null!,
-    toolRegistry: null!,
-    queries: null!,
-    log: null!,
-    wikiConfig: null!,
-    wm: {},
-    screen: null,
-    rna: null!,
-    ui: null!,
+    viewports,
+    get viewport() { return viewports.active.value! },
+
+    get wm(): any { return {} },
+    get screen() { return null },
+    get rna(): RNARegistry { return throwError('rna') },
+    get ui(): { boundsOfByOperator(opId: string): Rect[]; boundsOfByRNAPath(rnaPath: string): Rect[] } { return throwError('ui') },
   }
+
+  // Embed-specific extras (accessed via bctx internals)
+  ;(ctx as any).initialCamera = settings.initialCamera
 
   // Register embed operators
   for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ResetViewOperator]) {
-    ctx.operators.register(op)
+    if (!ctx.operators.find(op.id)) ctx.operators.register(op)
   }
 
   return ctx

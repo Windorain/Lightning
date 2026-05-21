@@ -8,9 +8,9 @@
  * 由调用方创建后传入——生产用 provide* 工厂，测试用 create* 工厂。
  */
 
-import { computed, ref, shallowRef } from 'vue'
+import { ref } from 'vue'
 import type { Ref } from 'vue'
-import type { BContext, LoadStatus, WorkbenchWorkspaceMode } from '@/workbench/context/bContext'
+import type { BContext, WorkbenchWorkspaceMode } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
 import type { SelectionContext } from '@/workbench/selectionContext'
 import type { UndoManager } from '@/workbench/editHistoryContext'
@@ -19,8 +19,6 @@ import type { BContextSettings } from '@/workbench/context/bContext'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { bScreen } from '@/workbench/ux/types/screen'
-import type { BlockStatRow } from '@/render/interaction/blockStats'
-import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { eventDispatcher } from '@/workbench/eventDispatcher'
@@ -45,7 +43,7 @@ import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workben
 import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
 import { SceneMetaEditOperator, TooltipEditOperator } from '@/workbench/operators/builtin/sceneEditOperators'
 import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/workbench/operators/builtin/sceneLifecycleOperators'
-import { SyncPreviewOperator, SetFrameIndexOperator } from '@/workbench/operators/builtin/previewOperators'
+import { SetFrameIndexOperator } from '@/workbench/operators/builtin/previewOperators'
 import { SetWorkspaceModeOperator, ResetLayoutOperator } from '@/workbench/operators/builtin/workspaceOperators'
 import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/workbench/operators/builtin/sdeOperators'
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
@@ -68,7 +66,7 @@ const ALL_OPERATORS: OperatorType[] = [
   ToolSetOperator,
   SceneMetaEditOperator, TooltipEditOperator,
   NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator,
-  SyncPreviewOperator, SetFrameIndexOperator,
+  SetFrameIndexOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator,
   SDEConnectOperator, SDELoadExportOperator, SDEPushOperator,
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
@@ -118,17 +116,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   const connectionSelectedExportName = ref<string | null>(null)
 
   // ---- 所有独立的 ref / computed / 对象先创建 ----
-  const loadStatus = ref<LoadStatus>('loading')
-  const meshBusy = ref(false)
-  const worldFrameIndex = ref(0)
-  const worldFrameCount = computed(() => 0)
-  const hasWorldMultiFrame = computed(() => worldFrameCount.value > 1)
-  const framesPlaybackIsPlaying = ref(false)
-  const layerWorldY = ref(-1)
-  const layerPreviewMode = computed<LayerPreviewMode>(() => 'all')
-  const layerPreviewLabel = computed(() => 'ALL')
-  const gridHeight = computed(() => 0)
-  const blockStatsEntries = computed<BlockStatRow[]>(() => [])
   const viewports = createViewportManager()
 
   // RNA
@@ -213,31 +200,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     wikiConfig,
     statusMessage: deps.statusMessage ?? ref(''),
     settings,
-
-    blockIconCache: shallowRef(null),
-    tooltipPalette: shallowRef<string[]>([]),
-
-    worldFrameIndex,
-    worldFrameCount,
-    hasWorldMultiFrame,
-    framesPlaybackIsPlaying,
-    toggleWorldFramesPlayback() {},
-
-    layerWorldY,
-    layerPreviewMode,
-    layerPreviewLabel,
-    gridHeight,
-
-    loadStatus,
-    meshBusy,
-    setCurrentWorldFrame: async () => {},
-    loadStructureAndResources: async () => {},
-    rebuildContentMesh: async () => {},
-    rebuildAnnotationOverlay: async () => null,
-    disposeCachesAndLibrary() {},
-    reloadFromConfig: async () => {},
-    registerScene() {},
-    blockStatsEntries,
 
     // queries 需 bctx 自身（循环引用）——先填 null，下一行立即赋真值
     queries: null!,
