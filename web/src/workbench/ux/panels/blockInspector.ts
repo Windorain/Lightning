@@ -17,7 +17,7 @@ export const blockInspectorPanel: PanelDeclaration = {
   owner(ctx: BContext): unknown {
     const item = [...ctx.selection.items.value][0]
     if (!item) return null
-    const g = ctx.scene.scene.value?.frame(0)?.grid
+    const g = ctx.doc.value?.frame(0)?.grid
     ;(item as BlockRef)._gridSize = g ? { w: g.width, h: g.height, d: g.depth } : null
     return item
   },

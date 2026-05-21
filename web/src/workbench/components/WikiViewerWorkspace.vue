@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import EmbedViewport from '@/embed/EmbedViewport.vue'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import { useBContext } from '@/workbench/context/bContext'
 import { sceneInfoPanel, wikiConfigPanel, blockStatsPanel } from '@/workbench/ux/panels'
-import type { View3DConfig } from '@/preview/previewConfig'
+import type { EmbedSettings, View3DFeatures } from '@/preview/previewConfig'
+import { defaultEmbedUi } from '@/preview/previewConfig'
 
 const bctx = useBContext()
-const wikiConfig = bctx.wikiConfig as any
+const wikiConfig = bctx.wikiConfig as Record<string, any>
 
 const wikiPanels = [sceneInfoPanel, wikiConfigPanel, blockStatsPanel]
 
@@ -17,40 +18,54 @@ const activeWikiPanels = computed(() =>
     .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
+const embedDocument = ref<unknown>(null)
+
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
   if (!m) return 0x5a5a5a
   return parseInt(m[1], 16)
 }
 
-const mergedConfig = computed<View3DConfig | null>(() => {
-  const c = bctx.scene.previewConfig.value
-  if (!c) return null
+const embedSettings = computed<EmbedSettings | null>(() => {
+  if (!embedDocument.value) return null
   return {
-    ...c,
-    features: { ...c.features, ...wikiConfig.features },
-    debug: wikiConfig.features.debugStatusBar,
-    sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex),
+    features: {
+      ...defaultEmbedUi.features,
+      ...(wikiConfig.features ?? {}),
+    } as View3DFeatures,
     blockIconCacheOptions: {
-      ...c.blockIconCacheOptions,
-      sizePx: wikiConfig.iconSizePx,
-      orthoHalf: wikiConfig.iconOrthoHalf,
+      ...defaultEmbedUi.blockIconCacheOptions,
+      sizePx: wikiConfig.iconSizePx ?? defaultEmbedUi.blockIconCacheOptions.sizePx,
+      orthoHalf: wikiConfig.iconOrthoHalf ?? defaultEmbedUi.blockIconCacheOptions.orthoHalf,
     },
+    initialLayerWorldY: defaultEmbedUi.initialLayerWorldY,
     initialCamera: {
-      ...c.initialCamera,
       yawDeg: wikiConfig.cameraYaw,
       elevationDeg: wikiConfig.cameraElevation,
       zoom: wikiConfig.cameraZoom,
     },
+    sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex ?? '#5a5a5a'),
+    loadingMessage: defaultEmbedUi.loadingMessage,
+    okMessage: defaultEmbedUi.okMessage,
+    debug: wikiConfig.features?.debugStatusBar ?? false,
   }
 })
+
+const renderKey = ref(0)
+
+// Bump key when doc ref or structEpoch changes → fresh EmbedViewport
+// NOT on in-place doc mutations (e.g. annotation) — those don't change the mesh
+watch([() => bctx.doc.value, () => bctx.structEpoch.value], () => {
+  embedDocument.value = bctx.doc.value?.toRaw() ?? null
+  renderKey.value++
+}, { immediate: true })
 </script>
 
 <template>
   <div class="ww-root">
     <div class="ww-preview-wrap">
-      <div class="ww-preview" :style="{ width: `${wikiConfig.viewWidth}px`, height: `${wikiConfig.viewHeight}px` }">
-        <EmbedViewport v-if="mergedConfig" :key="bctx.scene.previewEpoch.value" :config="mergedConfig" />
+      <div class="ww-preview" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }">
+        <EmbedViewport v-if="embedDocument && embedSettings" :key="renderKey" :document="embedDocument" :settings="embedSettings" />
         <div v-else class="ww-placeholder">No scene loaded</div>
       </div>
     </div>

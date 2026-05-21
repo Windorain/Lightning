@@ -7,11 +7,11 @@ export const SceneMetaEditOperator: OperatorType = {
   flagUndo: true,
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   exec(bctx, props) {
-    const doc = bctx.scene.scene.value as Record<string, any> | null
+    const doc = bctx.doc.value as Record<string, any> | null
     if (!doc) return
     const field = props.field as string
     const value = props.value as string | null
@@ -21,7 +21,7 @@ export const SceneMetaEditOperator: OperatorType = {
     } else {
       doc[field] = value
     }
-    bctx.scene.markDirty()
+    bctx.markDirty()
   },
 }
 
@@ -32,7 +32,7 @@ export const TooltipEditOperator: OperatorType = {
   flagUndo: true,
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   exec(bctx, props) {
@@ -59,6 +59,6 @@ export const TooltipEditOperator: OperatorType = {
       grid[pos.z][pos.y][pos.x] = text ? idx : -1
     }
 
-    bctx.scene.markDirty()
+    bctx.markDirty()
   },
 }

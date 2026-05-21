@@ -19,11 +19,11 @@ export const ExportPlainOperator: OperatorType = {
   description: '下载完整明文 JSON',
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   exec(bctx, _props) {
-    const doc = (bctx.scene.scene.value?.toRaw() ?? null) as Record<string, unknown> | null
+    const doc = (bctx.doc.value?.toRaw() ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-plain`, doc, true)
@@ -36,11 +36,11 @@ export const ExportEnvelopeOperator: OperatorType = {
   description: '下载 gzip+Base64 信封格式',
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   exec(bctx, _props) {
-    const doc = (bctx.scene.scene.value?.toRaw() ?? null) as Record<string, unknown> | null
+    const doc = (bctx.doc.value?.toRaw() ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-envelope`, buildEnvelopePackage(doc), true)
@@ -53,11 +53,11 @@ export const ExportObjOperator: OperatorType = {
   description: '导出 Wavefront OBJ+MTL 打包为 zip',
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   async exec(bctx, _props) {
-    const doc = bctx.scene.scene.value?.toRaw()
+    const doc = bctx.doc.value?.toRaw()
     if (!doc) return
     const connected = (_props.connected as boolean) ?? false
     const mode = connected ? 'connected' : 'block'
@@ -74,13 +74,13 @@ export const ExportIsoPngOperator: OperatorType = {
   description: '将等轴方向渲染输出为 PNG',
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   async exec(bctx, _props) {
     const direction = (_props.direction as string) ?? 'nw'
     const directionIndex = ISO_DIRECTION_MAP[direction] ?? 0
-    const doc = bctx.scene.scene.value?.toRaw()
+    const doc = bctx.doc.value?.toRaw()
     if (!doc) return
     try {
       const dataUrl = await bakeIsometricStructurePngDataUrl(doc, directionIndex)

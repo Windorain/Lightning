@@ -56,6 +56,37 @@ export interface View3DConfig {
   debug: boolean
 }
 
+/**
+ * EmbedSettings — 嵌入视口的渲染配置。
+ * 从 View3DConfig 拆解出渲染端所需字段，不含 renderBundle / materialLibrary。
+ */
+export interface EmbedSettings {
+  features: View3DFeatures
+  blockIconCacheOptions: BlockIconCacheOptions
+  initialLayerWorldY: number
+  initialWorldFrameIndex?: number
+  initialCamera?: InitialCamera
+  sceneBackground: number
+  loadingMessage: string
+  okMessage: (modelId: string) => string
+  debug: boolean
+}
+
+/** 从 View3DConfig 提取 EmbedSettings */
+export function embedSettingsFromConfig(cfg: View3DConfig): EmbedSettings {
+  return {
+    features: cfg.features,
+    blockIconCacheOptions: cfg.blockIconCacheOptions,
+    initialLayerWorldY: cfg.initialLayerWorldY,
+    initialWorldFrameIndex: cfg.initialWorldFrameIndex,
+    initialCamera: cfg.initialCamera,
+    sceneBackground: cfg.sceneBackground,
+    loadingMessage: cfg.loadingMessage,
+    okMessage: cfg.okMessage,
+    debug: cfg.debug,
+  }
+}
+
 export const defaultEmbedUi: Omit<View3DConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
   features: {
     blockStatsSidebar: false,

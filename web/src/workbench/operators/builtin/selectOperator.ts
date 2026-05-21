@@ -15,7 +15,7 @@ export const SelectOperator: OperatorType = {
   description: '点击选择方块',
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   invoke(bctx, _props, event) {

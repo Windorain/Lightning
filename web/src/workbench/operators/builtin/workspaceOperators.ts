@@ -1,5 +1,5 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
-import type { WorkbenchWorkspaceMode } from '@/workbench/sceneContext'
+import type { WorkbenchWorkspaceMode } from '@/workbench/context/bContext'
 
 export const SetWorkspaceModeOperator: OperatorType = {
   id: 'OPERATOR_SET_WORKSPACE_MODE',
@@ -12,7 +12,13 @@ export const SetWorkspaceModeOperator: OperatorType = {
 
   exec(bctx, _props) {
     const mode = _props.mode as WorkbenchWorkspaceMode
-    bctx.scene.setWorkspaceMode(mode)
+    if (bctx.workspaceMode.value === mode) return
+    bctx.doc.value = null
+    bctx.dirty.value = false
+    bctx.structEpoch.value = 0
+    bctx.currentWorldFrameIndex.value = 0
+    bctx.localFileName.value = null
+    bctx.workspaceMode.value = mode
   },
 }
 

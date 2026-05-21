@@ -11,38 +11,27 @@
 import { ref, watch } from 'vue'
 
 import EmbedViewport from '@/embed/EmbedViewport.vue'
-import type { View3DConfig } from '@/preview/previewConfig'
+import type { EmbedSettings } from '@/preview/previewConfig'
+import { embedSettingsFromConfig } from '@/preview/previewConfig'
 import { resolveBootstrapToView3DConfig, type EmbedBootstrapOptions } from '@/embed/embedContract'
-import { createEmbedBContext, provideEmbedBContext } from '@/embed/embedContext'
 import { formatUnknownError } from '@/util/formatUnknownError'
 
 const props = defineProps<{
   bootstrap: EmbedBootstrapOptions
 }>()
 
-const mergedConfig = ref<View3DConfig | null>(null)
+const embedDocument = ref<unknown>(null)
+const embedSettings = ref<EmbedSettings | null>(null)
 const loadError = ref<string | null>(null)
-let bctx: ReturnType<typeof createEmbedBContext> | null = null
-let _provided = false
-
-function ensureBContext(config: View3DConfig) {
-  if (!bctx) {
-    bctx = createEmbedBContext(config)
-  }
-  if (!_provided) {
-    provideEmbedBContext(bctx)
-    _provided = true
-  }
-  return bctx
-}
 
 async function load() {
   loadError.value = null
-  mergedConfig.value = null
+  embedDocument.value = null
+  embedSettings.value = null
   try {
     const cfg = await resolveBootstrapToView3DConfig(props.bootstrap)
-    mergedConfig.value = cfg
-    ensureBContext(cfg)
+    embedDocument.value = cfg.renderBundle.document
+    embedSettings.value = embedSettingsFromConfig(cfg)
   } catch (e) {
     loadError.value = formatUnknownError(e)
     console.error('[EmbedRoot] resolveBootstrapToView3DConfig', e)
@@ -60,7 +49,7 @@ watch(
   <div v-if="loadError" class="embed-boot embed-boot--err">
     {{ loadError }}
   </div>
-  <EmbedViewport v-else-if="mergedConfig && bctx" :config="mergedConfig" />
+  <EmbedViewport v-else-if="embedDocument && embedSettings" :document="embedDocument" :settings="embedSettings" />
   <div v-else class="embed-boot">
     加载中…
   </div>

@@ -1,12 +1,12 @@
 /**
- * 共享 scene lifecycle — mesh pipeline、帧管理、注解 overlay。
+ * renderAssets — 共享渲染管线 composable。
  *
- * embedContext 和 workbenchContext 共用的核心逻辑。
+ * 从原始文档 + materialLibrary 产出 Three.js 渲染所需的数据结构与 mesh。
+ * embedContext 和 WorkbenchViewport 共用。不依赖 View3DConfig。
  */
-import { computed, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
+import { computed, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
 import type { LoadStatus } from '@/workbench/context/bContext'
-import type { View3DConfig } from '@/preview/previewConfig'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition, World } from '@/render/schema/types'
@@ -16,6 +16,7 @@ import { BlockIconCache, BLOCK_ICON_LAYOUT_REVISION, blockIconBakeLayoutKey } fr
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
 import { MC_ITEM_SLOT_BAKE_REVISION, summarizeBlocksForCache } from '@/render/interaction/blockSlotBaker'
 import { isWorldDocument, resolveRenderBundle, type RenderBundleResolveResult } from '@/render/data/bundleResolve'
+import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
 import { frameAt } from '@/render/data/worldPlayback'
 import type { BlockMeshBuildStats } from '@/render/mesh/blockMesh'
 import { BlockMeshProvider } from '@/render/mesh/blockMeshProvider'
@@ -41,11 +42,11 @@ interface WorldMeshEntry {
   stats: BlockMeshBuildStats
 }
 
-export interface SceneLifecycleDeps {
-  configRef: ShallowRef<View3DConfig>
+export interface RenderAssetsDeps {
+  /** 原始文档（RuntimeDocument.toRaw() 产物，或 embed 传入的 plain doc） */
+  docRef: Ref<unknown>
   loadStatus: Ref<LoadStatus>
   meshBusy: Ref<boolean>
-  materialLibrary: ShallowRef<MaterialLibraryApi | null>
   blockIconCache: ShallowRef<BlockIconCache | null>
   tooltipPalette: ShallowRef<string[]>
   structureDefinition: ShallowRef<StructureDefinition | null>
@@ -54,9 +55,11 @@ export interface SceneLifecycleDeps {
   worldFrameIndex: Ref<number>
   layerWorldY: Ref<number>
   framesPlaybackIsPlaying: Ref<boolean>
+  blockIconCacheOptions: { sizePx?: number; orthoHalf?: number }
+  initialWorldFrameIndex?: number
 }
 
-export interface SceneLifecycleComputed {
+export interface RenderAssetsComputed {
   layerPreviewMode: ComputedRef<LayerPreviewMode>
   layerPreviewLabel: ComputedRef<string>
   gridHeight: ComputedRef<number>
@@ -65,7 +68,7 @@ export interface SceneLifecycleComputed {
   blockStatsEntries: ComputedRef<BlockStatRow[]>
 }
 
-export interface SceneLifecycleMethods {
+export interface RenderAssets {
   registerScene(scene: THREE.Scene): void
   loadStructureAndResources(): Promise<void>
   rebuildContentMesh(): Promise<void>
@@ -73,17 +76,41 @@ export interface SceneLifecycleMethods {
   setCurrentWorldFrame(index: number): Promise<void>
   toggleWorldFramesPlayback(): void
   disposeCachesAndLibrary(): void
-  reloadFromConfig(cfg: View3DConfig): Promise<void>
-  /** 替工厂暴露内部 computed，调用方挂到各自的 bctx 上 */
-  computed: SceneLifecycleComputed
+  /** 清空缓存后重新加载结构 + 重建 mesh（替代原 reloadFromConfig） */
+  rebuildAll(): Promise<void>
+  /** 内部纹理缓存（供 ViewerCore 渲染用，只读） */
+  textureCache: Readonly<ShallowRef<MaterialLibraryApi | null>>
+  computed: RenderAssetsComputed
 }
 
-export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMethods {
+/** @deprecated 使用 RenderAssetsDeps / RenderAssets */
+export type SceneLifecycleDeps = RenderAssetsDeps
+/** @deprecated 使用 RenderAssets */
+export type SceneLifecycleMethods = RenderAssets
+/** @deprecated 使用 RenderAssetsComputed */
+export type SceneLifecycleComputed = RenderAssetsComputed
+
+export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   const {
-    configRef, loadStatus, meshBusy, materialLibrary, blockIconCache, tooltipPalette,
+    docRef, loadStatus, meshBusy, blockIconCache, tooltipPalette,
     structureDefinition, mainMeshGroup, sceneRef, worldFrameIndex, layerWorldY,
-    framesPlaybackIsPlaying,
+    framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex,
   } = deps
+
+  // === 内部纹理缓存，从 doc.textureBlobs 构建 ===
+  const textureCache = shallowRef<MaterialLibraryApi | null>(null)
+
+  /** 确保 textureCache 就绪；已完成则直接返回。doc 必须是 plain V2 文档 */
+  async function ensureTextures(doc: unknown): Promise<MaterialLibraryApi | null> {
+    if (textureCache.value && !textureCache.value.isDisposed()) return textureCache.value
+    try {
+      textureCache.value = await buildMaterialLibrary(doc)
+      return textureCache.value
+    } catch (e) {
+      console.error('[renderAssets] buildMaterialLibrary failed', e)
+      return null
+    }
+  }
 
   const blockMeshProvider = new BlockMeshProvider()
   const annotationProvider = new AnnotationMeshProvider()
@@ -94,7 +121,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
 
   // ---- Computed ----
   const worldFrameCount = computed(() => {
-    const doc = configRef.value.renderBundle.document
+    const doc = docRef.value
     if (!isWorldDocument(doc)) return 0
     return doc.frames.length
   })
@@ -149,13 +176,14 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
     const scene = sceneRef.value
     if (!def || !scene) return
 
-    const fromConfig = configRef.value.materialLibrary
-    if (fromConfig && !fromConfig.isDisposed()) materialLibrary.value = fromConfig
+    const lib = textureCache.value
+    if (!lib || lib.isDisposed()) {
+      console.warn('[renderAssets] presentContentMesh: textureCache not ready, triggering rebuildAll')
+      void rebuildAll()
+      return
+    }
 
-    const lib = materialLibrary.value
-    if (!lib || lib.isDisposed()) return
-
-    const isW = isWorldDocument(configRef.value.renderBundle.document)
+    const isW = isWorldDocument(docRef.value)
     const layerPreview = layerPreviewMode.value
 
     meshBusy.value = true
@@ -173,7 +201,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
         const outputs = await blockMeshProvider.build(def, lib, { layerPreview })
         const out = outputs[0]! as Extract<import('@/render/mesh/providerTypes').MeshOutput, { kind: 'object3d' }>
         const result = { group: out.object as THREE.Group, dispose: out.dispose, stats: out.stats! }
-        if (lib.isDisposed() || materialLibrary.value !== lib) { result.dispose(); return }
+        if (lib.isDisposed() || textureCache.value !== lib) { result.dispose(); return }
         worldMeshCache.set(k, { group: result.group, dispose: result.dispose, stats: result.stats })
         if (mainMeshGroup.value) scene.remove(mainMeshGroup.value)
         mainMeshGroup.value = result.group
@@ -183,7 +211,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
       const outputs = await blockMeshProvider.build(def, lib, { layerPreview })
       const out = outputs[0]! as Extract<import('@/render/mesh/providerTypes').MeshOutput, { kind: 'object3d' }>
       const result = { group: out.object as THREE.Group, dispose: out.dispose, stats: out.stats! }
-      if (lib.isDisposed() || materialLibrary.value !== lib) { result.dispose(); return }
+      if (lib.isDisposed() || textureCache.value !== lib) { result.dispose(); return }
       if (mainMeshGroup.value) { scene.remove(mainMeshGroup.value); nonWorldMeshDispose?.(); nonWorldMeshDispose = null }
       nonWorldMeshDispose = result.dispose
       mainMeshGroup.value = result.group
@@ -191,7 +219,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
     } catch (e) {
       const fe = formatError(e)
       if (fe.includes('MaterialLibrary 已释放')) return
-      console.error('[SceneLifecycle] buildBlockMesh', e)
+      console.error('[renderAssets] buildBlockMesh', e)
     } finally {
       meshBusy.value = false
     }
@@ -203,7 +231,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
   }
 
   function dwellMsForCurrentWorldFrame(): number {
-    const doc = configRef.value.renderBundle.document
+    const doc = docRef.value
     if (!isWorldDocument(doc) || doc.frames.length === 0) return DEFAULT_WORLD_FRAME_DWELL_MS
     const f = frameAt(doc, worldFrameIndex.value)
     const d = f?.durationMs
@@ -214,7 +242,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
   function scheduleNextWorldFrameStep(): void {
     clearWorldPlaybackSchedule()
     if (!framesPlaybackIsPlaying.value || !hasWorldMultiFrame.value) return
-    const doc = configRef.value.renderBundle.document
+    const doc = docRef.value
     if (!isWorldDocument(doc) || doc.frames.length < 2) return
     const n = doc.frames.length
     const delay = dwellMsForCurrentWorldFrame()
@@ -238,19 +266,20 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
   }
 
   async function setCurrentWorldFrame(rawNext: number): Promise<void> {
-    const doc = configRef.value.renderBundle.document
+    const doc = docRef.value
     if (!isWorldDocument(doc) || doc.frames.length === 0) return
     return runMesh(async () => {
       const idx = normalizeWorldFrameListIndex(doc, rawNext)
       worldFrameIndex.value = idx
-      const resolved: RenderBundleResolveResult = resolveRenderBundle(configRef.value.renderBundle, idx)
+      const resolved: RenderBundleResolveResult = resolveRenderBundle({ document: doc }, idx)
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
-      const lib = configRef.value.materialLibrary
+      const lib = textureCache.value
+      if (!lib || lib.isDisposed()) return
       if (blockIconCache.value) blockIconCache.value.dispose()
-      const iconCache = new BlockIconCache(lib, configRef.value.blockIconCacheOptions, resolved.definition)
+      const iconCache = new BlockIconCache(lib, blockIconCacheOptions, resolved.definition)
       iconCache.setRevisionKey(
-        `${resolved.definition.id}:${summarizeBlocksForCache(resolved.definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(configRef.value.blockIconCacheOptions)}`,
+        `${resolved.definition.id}:${summarizeBlocksForCache(resolved.definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(blockIconCacheOptions)}`,
       )
       blockIconCache.value = iconCache
       await presentContentMesh()
@@ -268,26 +297,35 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
     clearAllMeshStorage()
     loadStatus.value = 'loading'
     try {
-      const initial =
-        isWorldDocument(configRef.value.renderBundle.document) && configRef.value.initialWorldFrameIndex !== undefined
-          ? configRef.value.initialWorldFrameIndex
-          : undefined
-      const resolved: RenderBundleResolveResult = resolveRenderBundle(configRef.value.renderBundle, initial)
+      const doc = docRef.value
+      if (!doc) { loadStatus.value = 'error'; return }
+      const resolved: RenderBundleResolveResult = resolveRenderBundle(
+        { document: doc },
+        initialWorldFrameIndex,
+      )
       if (resolved.worldFrameIndex !== undefined) worldFrameIndex.value = resolved.worldFrameIndex
       else worldFrameIndex.value = 0
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
-      materialLibrary.value = configRef.value.materialLibrary
+      const lib = textureCache.value
+      const effectiveLib = (lib && !lib.isDisposed())
+        ? lib
+        : await ensureTextures(doc as Record<string, unknown>)
+      if (!effectiveLib || effectiveLib.isDisposed()) {
+        loadStatus.value = 'error'
+        console.error('[renderAssets] loadStructureAndResources: failed to build textureCache')
+        return
+      }
       if (blockIconCache.value) blockIconCache.value.dispose()
-      const iconCache = new BlockIconCache(configRef.value.materialLibrary, configRef.value.blockIconCacheOptions, resolved.definition)
+      const iconCache = new BlockIconCache(effectiveLib, blockIconCacheOptions, resolved.definition)
       iconCache.setRevisionKey(
-        `${resolved.definition.id}:${summarizeBlocksForCache(resolved.definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(configRef.value.blockIconCacheOptions)}`,
+        `${resolved.definition.id}:${summarizeBlocksForCache(resolved.definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(blockIconCacheOptions)}`,
       )
       blockIconCache.value = iconCache
       loadStatus.value = 'ok'
     } catch (e) {
       loadStatus.value = 'error'
-      console.error('[SceneLifecycle] loadStructureAndResources', e)
+      console.error('[renderAssets] loadStructureAndResources', e)
     }
   }
 
@@ -297,7 +335,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
 
   async function rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null> {
     const def = structureDefinition.value
-    const lib = materialLibrary.value
+    const lib = textureCache.value
     if (!def || !lib || annotations.length === 0) return null
     annotationProvider.setAnnotations(annotations)
     const outputs = await annotationProvider.build(def, lib)
@@ -305,8 +343,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
     return out?.kind === 'object3d' ? (out.object as THREE.Group) : null
   }
 
-  async function reloadFromConfig(cfg: View3DConfig): Promise<void> {
-    configRef.value = cfg
+  async function rebuildAll(): Promise<void> {
     clearAllMeshStorage()
     blockIconCache.value?.dispose()
     blockIconCache.value = null
@@ -321,8 +358,8 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
     mainMeshGroup.value = null
     blockIconCache.value?.dispose()
     blockIconCache.value = null
-    materialLibrary.value?.dispose()
-    materialLibrary.value = null
+    textureCache.value?.dispose()
+    textureCache.value = null
     structureDefinition.value = null
     tooltipPalette.value = []
     worldFrameIndex.value = 0
@@ -350,7 +387,8 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
     setCurrentWorldFrame,
     toggleWorldFramesPlayback,
     disposeCachesAndLibrary,
-    reloadFromConfig,
+    rebuildAll,
+    textureCache,
     computed: {
       layerPreviewMode,
       layerPreviewLabel,
@@ -361,3 +399,6 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
     },
   }
 }
+
+/** @deprecated 使用 createRenderAssets */
+export const createSceneLifecycle = createRenderAssets

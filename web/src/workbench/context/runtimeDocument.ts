@@ -493,7 +493,7 @@ export class RuntimeDocument {
       meta: { ...this.meta },
       annotations: [...this.annotations],
       labels: [...this.labels],
-      textureBlobs: this.textureBlobs ? { ...this.textureBlobs } : undefined,
+      textureBlobs: this.textureBlobs ? (Array.isArray(this.textureBlobs) ? [...this.textureBlobs] as unknown as Record<string, unknown> : { ...this.textureBlobs }) : undefined,
       tooltipPalette: this.tooltipPalette ? [...this.tooltipPalette] : undefined,
       materialPalette: this.materialPalette ? [...this.materialPalette] : undefined,
       playback: this.playback ? { ...this.playback } : undefined,

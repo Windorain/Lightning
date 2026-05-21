@@ -1,30 +1,29 @@
 /**
  * Embed BContext 工厂 — 创建完整 BContext 供嵌入场景使用。
  *
- * 核心逻辑委托给 createSceneLifecycle（与 workbench 共享）。
+ * 与 workbench 同构：接收 document + settings，内部用 createRenderAssets。
  */
 import { ref, shallowRef } from 'vue'
+import type { Ref } from 'vue'
 import type { BContext, LoadStatus } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
-import { createSceneLifecycle } from '@/workbench/context/sceneLifecycle'
-import type { View3DConfig } from '@/preview/previewConfig'
-import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
+import { createRenderAssets } from '@/workbench/context/sceneLifecycle'
+import type { EmbedSettings } from '@/preview/previewConfig'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
-import { eventDispatcher } from '@/workbench/eventDispatcher'
+import { EventDispatcherImpl } from '@/workbench/eventDispatcher'
 import * as THREE from 'three'
 
 // Operators
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
 
-export function createEmbedBContext(config: View3DConfig): BContext {
+export function createEmbedBContext(document: unknown, settings: EmbedSettings): BContext {
   // ---- Shared state ----
-  const configRef = shallowRef<View3DConfig>(config)
+  const docRef = ref<unknown>(document)
   const loadStatus = ref<LoadStatus>('loading')
   const meshBusy = ref(false)
-  const materialLibrary = shallowRef<MaterialLibraryApi | null>(null)
   const blockIconCache = shallowRef<BlockIconCache | null>(null)
   const tooltipPalette = shallowRef<string[]>([])
   const sceneRef = shallowRef<THREE.Scene | null>(null)
@@ -37,15 +36,14 @@ export function createEmbedBContext(config: View3DConfig): BContext {
 
   // Frame/Layer
   const worldFrameIndex = ref(0)
-  const layerWorldY = ref(config.initialLayerWorldY)
+  const layerWorldY = ref(settings.initialLayerWorldY)
   const framesPlaybackIsPlaying = ref(false)
 
-  // ---- Scene lifecycle (shared) ----
-  const lifecycle = createSceneLifecycle({
-    configRef,
+  // ---- renderAssets（shared）— textureCache built internally from doc ----
+  const renderAssets = createRenderAssets({
+    docRef: docRef as Ref<unknown>,
     loadStatus,
     meshBusy,
-    materialLibrary,
     blockIconCache,
     tooltipPalette,
     structureDefinition,
@@ -54,12 +52,14 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     worldFrameIndex,
     layerWorldY,
     framesPlaybackIsPlaying,
+    blockIconCacheOptions: settings.blockIconCacheOptions ?? {},
+    initialWorldFrameIndex: settings.initialWorldFrameIndex,
   })
 
   const {
     layerPreviewMode, layerPreviewLabel, gridHeight,
     hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
-  } = lifecycle.computed
+  } = renderAssets.computed
 
   // ---- Operators ----
   const operators = {
@@ -72,34 +72,34 @@ export function createEmbedBContext(config: View3DConfig): BContext {
   }
 
   // ---- Atomic bctx assembly ----
-  const ctx: BContext = {
-    config: configRef,
+  const ctx = {
+    materialLibrary: renderAssets.textureCache,
+    initialCamera: settings.initialCamera,
     loadStatus,
     meshBusy,
-    materialLibrary,
     blockIconCache,
     tooltipPalette,
     worldFrameIndex,
     worldFrameCount,
     hasWorldMultiFrame,
     framesPlaybackIsPlaying,
-    toggleWorldFramesPlayback: lifecycle.toggleWorldFramesPlayback,
-    setCurrentWorldFrame: lifecycle.setCurrentWorldFrame,
+    toggleWorldFramesPlayback: renderAssets.toggleWorldFramesPlayback,
+    setCurrentWorldFrame: renderAssets.setCurrentWorldFrame,
     layerWorldY,
     layerPreviewMode,
     layerPreviewLabel,
     gridHeight,
-    loadStructureAndResources: lifecycle.loadStructureAndResources,
-    rebuildContentMesh: lifecycle.rebuildContentMesh,
-    rebuildAnnotationOverlay: lifecycle.rebuildAnnotationOverlay,
-    reloadFromConfig: lifecycle.reloadFromConfig,
-    disposeCachesAndLibrary: lifecycle.disposeCachesAndLibrary,
-    registerScene: lifecycle.registerScene,
+    loadStructureAndResources: renderAssets.loadStructureAndResources,
+    rebuildContentMesh: renderAssets.rebuildContentMesh,
+    rebuildAnnotationOverlay: renderAssets.rebuildAnnotationOverlay,
+    disposeCachesAndLibrary: renderAssets.disposeCachesAndLibrary,
+    registerScene: renderAssets.registerScene,
+    reloadFromConfig: async () => { await renderAssets.rebuildAll() },
     blockStatsEntries,
     viewports,
     get viewport() { return viewports.active.value! },
     operators,
-    eventDispatcher,
+    eventDispatcher: new EventDispatcherImpl(),
     settings: {
       replaceBrush: null, fillBrush: null, generateType: null,
       dragSensitivity: 0.05, snapEnabled: true,
@@ -107,11 +107,24 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     statusMessage: { value: '' },
 
     // Workbench-only fields — stub
-    scene: null!,
+    doc: null!,
+    dirty: null!,
+    structEpoch: null!,
+    currentWorldFrameIndex: null!,
+    workspaceMode: null!,
+    localFileName: null!,
+    markDirty: null!,
+    markStructureDirty: null!,
+    markClean: null!,
+    connectionApiBase: null!,
+    connectionToken: null!,
+    connectionConnected: null!,
+    connectionExports: null!,
+    connectionExportsLoading: null!,
+    connectionSelectedExportName: null!,
     selection: null!,
     editHistory: null!,
     toolRegistry: null!,
-    connection: null!,
     queries: null!,
     log: null!,
     wikiConfig: null!,

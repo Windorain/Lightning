@@ -1,18 +1,20 @@
 <script setup lang="ts">
-/**
- * World 多帧：播放/暂停。状态来自 PreviewSceneContext（由 AppShell 提供 store）。
- */
-import { computed, inject } from 'vue'
+import { computed } from 'vue'
 
-import { bContextKey } from '@/workbench/context/bContext'
+const props = defineProps<{
+  hasWorldMultiFrame: boolean
+  isPlaying: boolean
+}>()
 
-const bctx = inject(bContextKey)
+const emit = defineEmits<{
+  toggle: []
+}>()
 
-const visible = computed(() => bctx?.hasWorldMultiFrame.value ?? false)
-const playing = computed(() => bctx?.framesPlaybackIsPlaying.value ?? false)
+const visible = computed(() => props.hasWorldMultiFrame)
+const playing = computed(() => props.isPlaying)
 
 function onToggle(): void {
-  bctx?.toggleWorldFramesPlayback()
+  emit('toggle')
 }
 </script>
 
