@@ -7,6 +7,7 @@ import {
   applyDiagonalOrbitView,
   STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
 } from '@/render/interaction/initialCamera'
+import { resolveViewportSlot } from '@/workbench/context/bContext'
 
 const ORTHO_FRUSTUM_REF_HALF_FOV_DEG = 25
 
@@ -21,10 +22,11 @@ export const ResetViewOperator: OperatorType = {
     )
   },
 
-  exec(bctx: any) {
-    const camera = bctx.viewport.camera.value
-    const group = bctx.viewport.contentGroup.value
-    const orbitTarget = bctx.viewport.orbitTarget.value
+  exec(bctx: any, props?: Record<string, unknown>) {
+    const vp = resolveViewportSlot(bctx, props)
+    const camera = vp.camera.value as THREE.OrthographicCamera | null
+    const group = vp.contentGroup.value
+    const orbitTarget = vp.orbitTarget.value
     if (!camera || !group || !orbitTarget) return
 
     group.updateMatrixWorld(true)
@@ -54,7 +56,7 @@ export const ResetViewOperator: OperatorType = {
       2 *
       Math.abs(finalDist) *
       Math.tan(THREE.MathUtils.degToRad(ORTHO_FRUSTUM_REF_HALF_FOV_DEG))
-    const dom = bctx.viewport.domElement.value
+    const dom = vp.domElement.value
     if (dom) {
       const aspect = dom.clientWidth / Math.max(dom.clientHeight, 1)
       const halfH = orthoHeight / 2

@@ -2,79 +2,106 @@
 /**
  * EmbedViewport — 嵌入场景的视口消费者。
  *
- * 与 WorkbenchViewport 对齐：
- * - 优先注入父级 bctx；若不存在则自建 embed bctx
- * - 注册 viewport slot
- * - 桥接 Three.js 运行时到 bctx.viewports
- * - 装配 embed 事件链（operators + keymap handler + capture listeners）
+ * 对齐 WorkbenchViewport：
+ * - useBContext() 取 bctx
+ * - 本地 createRenderAssets 管理全部渲染状态
+ * - 叶子组件全部 props/emits
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-
-import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { useBContext } from '@/workbench/context/bContext'
+import { createRenderAssets } from '@/workbench/context/sceneLifecycle'
+import ViewerCore, { type ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
-import ViewerCore from '@/embed/components/ViewerCore.vue'
-import type { ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
-import type { Annotation } from '@/render/data/annotationTypes'
-import * as THREE from 'three'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
+import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
+import type { Annotation } from '@/render/data/annotationTypes'
+import * as THREE from 'three'
 import type { EmbedSettings } from '@/preview/previewConfig'
+import type { InitialCamera } from '@/preview/previewConfig'
+import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import { bContextKey, type BContext } from '@/workbench/context/bContext'
-import { createEmbedBContext, provideEmbedBContext } from '@/embed/embedContext'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
-import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
+import type { BlockIconCache } from '@/render/interaction/blockIconCache'
+
+// Embed operators — registered on bctx if not already present (Wiki mode)
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
 
 const props = defineProps<{
-  document: unknown
-  settings: EmbedSettings
+  settings?: EmbedSettings
 }>()
 
-// ---- BContext: inject or self-create ----
-const _injectedBctx = inject<BContext | null>(bContextKey, null)
-const _isWorkbenchBctx = _injectedBctx?.doc != null
-const _ownsBctx = !_injectedBctx || _isWorkbenchBctx
-const bctx: BContext = (_injectedBctx && !_isWorkbenchBctx) ? _injectedBctx : createEmbedBContext(props.document, props.settings)
-if (_ownsBctx) {
-  provideEmbedBContext(bctx)
+const bctx = useBContext()
+
+// Ensure embed operators are registered (workbench bctx may not have them)
+for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ResetViewOperator]) {
+  if (!bctx.operators.find(op.id)) bctx.operators.register(op)
 }
 
-// Document change → full rebuild
-watch(() => props.document, (doc) => {
-  if (doc != null) bctx.reloadFromConfig().catch(e => console.error('[EmbedViewport] reload', e))
+const EMBED_REGION = 'r-embed'
+const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED_REGION)
+
+// ---- 本地 ref —— 全部 renderAssets 自管 ----
+const sceneRef = shallowRef<THREE.Scene | null>(null)
+const loadStatus = ref<'loading' | 'ok' | 'error'>('loading')
+const meshBusy = ref(false)
+const blockIconCache = shallowRef<BlockIconCache | null>(null)
+const tooltipPalette = shallowRef<string[]>([])
+const worldFrameIndex = ref(0)
+const layerWorldY = ref(props.settings?.initialLayerWorldY ?? -1)
+const framesPlaybackIsPlaying = ref(false)
+
+const docRef = computed(() => bctx.doc.value)
+
+// ---- renderAssets ----
+const renderAssets = createRenderAssets({
+  docRef,
+  loadStatus,
+  meshBusy,
+  blockIconCache,
+  tooltipPalette,
+  structureDefinition: vpSlot.definition,
+  mainMeshGroup: vpSlot.contentGroup,
+  sceneRef,
+  worldFrameIndex,
+  layerWorldY,
+  framesPlaybackIsPlaying,
+  blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
+  initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
 })
 
-// Viewport slot
-const EMBED_REGION = 'r-viewport'
-const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED_REGION)
+const {
+  layerPreviewMode, layerPreviewLabel, gridHeight,
+  hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
+} = renderAssets.computed
+
+const materialLibrary = renderAssets.textureCache
+const structureDefinition = computed(() => vpSlot.definition.value)
+const mainMeshGroup = computed(() => vpSlot.contentGroup.value)
+
+// ---- structEpoch → 重建 mesh（Wiki 模式同步） ----
+watch(() => bctx.structEpoch.value, () => {
+  void renderAssets.rebuildAll()
+})
 
 // ---- Hover / tooltip ----
 const { hover, setHover, clearHover } = usePreviewTooltip()
 
-const materialLibrary = (bctx as any).materialLibrary
-const {
-  loadStatus, layerPreviewMode,
-  hasWorldMultiFrame, worldFrameIndex, worldFrameCount, layerPreviewLabel,
-  blockIconCache, blockStatsEntries, tooltipPalette,
-} = bctx
-
-// Local accessors for template
-const structureDefinition = computed(() => vpSlot.definition.value)
-const mainMeshGroup = computed(() => vpSlot.contentGroup.value)
-
 // ---- Feature flags ----
-const f = computed(() => props.settings.features)
-const showLayerBar = computed(() => f.value.layerBar)
-const showFrameCtl = computed(() => f.value.frameControls)
-const showTitle = computed(() => f.value.titleBar)
-const showStats = computed(() => f.value.blockStatsSidebar)
-const showDebugStatus = computed(() => f.value.debugStatusBar && props.settings.debug)
+const s = computed(() => props.settings)
+const f = computed(() => s.value?.features)
+const showLayerBar = computed(() => f.value?.layerBar ?? false)
+const showFrameCtl = computed(() => f.value?.frameControls ?? false)
+const showTitle = computed(() => f.value?.titleBar ?? false)
+const showStats = computed(() => f.value?.blockStatsSidebar ?? false)
+const showDebugStatus = computed(() => (f.value?.debugStatusBar ?? false) && (s.value?.debug ?? false))
+const showAxesGizmo = computed(() => f.value?.showAxesGizmo ?? false)
+const initialCamera = computed<InitialCamera | undefined>(() => s.value?.initialCamera)
 
 const hasBottomDock = computed(() =>
   (showFrameCtl.value && hasWorldMultiFrame.value) || showLayerBar.value,
@@ -86,14 +113,15 @@ const activeTab = ref<BottomTab>(
 )
 
 // ---- Title / meta hint ----
-const sceneDocument = computed(() => props.document)
+const sceneDocument = computed(() => bctx.doc.value)
 
 const metaTooltipText = computed(() => {
   const d = sceneDocument.value
-  if (!d || typeof d !== 'object') return ''
+  if (!d) return ''
+  const plain = d.serialize()
   const rows: string[] = []
   const pick = (label: string, key: string) => {
-    const v = readSceneMetaField(d, key).trim()
+    const v = readSceneMetaField(plain, key).trim()
     if (v) rows.push(`${label}：${v}`)
   }
   pick('作者', 'author')
@@ -139,7 +167,9 @@ const neiTooltipText = computed(() => {
 })
 
 const previewTitle = computed(() => {
-  const fromDoc = sceneDisplayTitleFromRootDocument(props.document)
+  const doc = bctx.doc.value
+  if (!doc) return ''
+  const fromDoc = sceneDisplayTitleFromRootDocument(doc.serialize())
   if (fromDoc) return fromDoc
   const def = vpSlot.definition.value
   const lab = def?.label?.trim()
@@ -171,10 +201,13 @@ let _annoHash = ''
 let _annoPending = false
 let _alive = true
 let _annoRafId: number | undefined
+let unregHandlers: Array<() => void> = []
 
 function updateAnnotationOverlay(): void {
-  const doc = props.document as Record<string, any> | null
-  const annos: Annotation[] = doc?.annotations ?? []
+  const doc = bctx.doc.value
+  if (!doc) return
+  const plain = doc.serialize() as Record<string, any>
+  const annos: Annotation[] = plain.annotations ?? []
   const maxUpdated = annos.length > 0
     ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
     : 0
@@ -183,7 +216,7 @@ function updateAnnotationOverlay(): void {
   _annoHash = hash
   _annoPending = true
 
-  bctx.rebuildAnnotationOverlay(annos).then(group => {
+  renderAssets.rebuildAnnotationOverlay(annos).then(group => {
     _annoPending = false
     if (_annoGroup) {
       vpSlot.overlayGroup.value?.remove(_annoGroup)
@@ -202,16 +235,15 @@ function updateAnnotationOverlay(): void {
   }).catch(() => { _annoPending = false })
 }
 
-let unregHandlers: Array<() => void> = []
-
 function onViewportReady(payload: ViewerCoreReadyPayload): void {
-  bctx.registerScene(payload.scene)
-  bctx.rebuildContentMesh().catch(e => { console.error('[EmbedViewport] rebuildContentMesh', e) })
+  // Activate embed viewport slot so bctx.viewport (singular) resolves to this one
+  bctx.viewports.activeId.value = EMBED_REGION
 
-  // Initial annotation load
+  renderAssets.registerScene(payload.scene)
+  renderAssets.rebuildContentMesh().catch(e => { console.error('[EmbedViewport] rebuildContentMesh', e) })
+
   updateAnnotationOverlay()
 
-  // Wire viewport slot
   vpSlot.orbitTarget.value = payload.orbitTarget
   vpSlot.camera.value = payload.camera
   vpSlot.contentGroup.value = mainMeshGroup.value ?? new THREE.Group()
@@ -220,12 +252,6 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
   vpSlot.layerPreview.value = layerPreviewMode.value
   vpSlot.overlayGroup.value = payload.layers.overlay
 
-  // Register embed operators
-  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ResetViewOperator]) {
-    if (!bctx.operators.find(op.id)) bctx.operators.register(op)
-  }
-
-  // EventDispatcher
   bctx.eventDispatcher.registerRegion(EMBED_REGION)
   unregHandlers.push(
     bctx.eventDispatcher.registerRegionHandler(
@@ -236,6 +262,7 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
 
   const dom = payload.domElement
   dom.addEventListener('pointerdown', (e) => {
+    bctx.viewports.activeId.value = EMBED_REGION
     if (e.button !== 0) e.preventDefault()
     bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
   }, { capture: true })
@@ -251,7 +278,6 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
   }, { capture: true, passive: false })
   dom.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
 
-  // Per-frame annotation update
   function rafTick() {
     if (!_alive) return
     _annoRafId = requestAnimationFrame(rafTick)
@@ -274,7 +300,7 @@ function onSidebarTooltipHover(
   else clearHover('sidebar')
 }
 
-onMounted(async () => { await bctx.loadStructureAndResources() })
+onMounted(async () => { await renderAssets.loadStructureAndResources() })
 onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())
   bctx.eventDispatcher.unregisterRegion(EMBED_REGION)
@@ -289,7 +315,7 @@ onBeforeUnmount(() => {
     })
     _annoGroup = null
   }
-  bctx.disposeCachesAndLibrary()
+  renderAssets.disposeCachesAndLibrary()
 })
 </script>
 
@@ -318,8 +344,9 @@ onBeforeUnmount(() => {
           :material-library="materialLibrary"
           :content-group="mainMeshGroup"
           :layer-preview-mode="layerPreviewMode"
-          :scene-background="props.settings.sceneBackground"
-          :show-axes-gizmo="f.showAxesGizmo"
+          :initial-camera="initialCamera"
+          :scene-background="s?.sceneBackground ?? 0x5a5a5a"
+          :show-axes-gizmo="showAxesGizmo"
           @ready="onViewportReady"
           @hover-block="onViewportHover"
         />
@@ -349,26 +376,26 @@ onBeforeUnmount(() => {
       <div v-if="showFrameCtl && hasWorldMultiFrame" class="wm-tab-panel" :class="{ 'wm-tab-panel--active': activeTab === 'frame' }">
         <WorldFramePlayerControls
           :has-world-multi-frame="hasWorldMultiFrame"
-          :is-playing="bctx.framesPlaybackIsPlaying.value"
-          @toggle="bctx.toggleWorldFramesPlayback()"
+          :is-playing="framesPlaybackIsPlaying"
+          @toggle="renderAssets.toggleWorldFramesPlayback()"
         />
         <WorldFrameScrubber
           :has-world-multi-frame="hasWorldMultiFrame"
           :frame-count="worldFrameCount"
-          :is-playing="bctx.framesPlaybackIsPlaying.value"
-          :mesh-busy="bctx.meshBusy.value"
+          :is-playing="framesPlaybackIsPlaying"
+          :mesh-busy="meshBusy"
           :world-frame-index="worldFrameIndex"
-          @toggle-playback="bctx.toggleWorldFramesPlayback()"
-          @set-frame="(i: number) => bctx.setCurrentWorldFrame(i)"
+          @toggle-playback="renderAssets.toggleWorldFramesPlayback()"
+          @set-frame="(i: number) => renderAssets.setCurrentWorldFrame(i)"
         />
       </div>
       <div v-if="showLayerBar" class="wm-tab-panel" :class="{ 'wm-tab-panel--active': activeTab === 'layer' }">
         <LayerPreviewBar
-          :grid-height="bctx.gridHeight.value"
-          :mesh-busy="bctx.meshBusy.value"
-          :layer-world-y="bctx.layerWorldY.value"
+          :grid-height="gridHeight"
+          :mesh-busy="meshBusy"
+          :layer-world-y="layerWorldY"
           :layer-preview-label="layerPreviewLabel"
-          @update:layer-y="(v: number) => { bctx.layerWorldY.value = v }"
+          @update:layer-y="(v: number) => { layerWorldY = v }"
         />
       </div>
     </div>

@@ -1,8 +1,8 @@
 /**
  * 库入口（IIFE）：mount、类型与数据校验 API。
  *
- * - `EmbedViewport`：Vue 组件，必需 `props.config: View3DConfig`；内部自建 embed bContext，无需外层注入。
- * - 无整页 Vue 树时一般用 `mount()`；已有 Vue 应用可 `createApp` / `<EmbedViewport :config="cfg" />`。
+ * - `EmbedViewport`：Vue 组件；需外层 provide embed bContext（由 EmbedRoot 创建）。
+ * - 无整页 Vue 树时一般用 `mount()`；已有 Vue 应用可 `createApp(EmbedRoot, { bootstrap })`。
  * 不包含 SDE Workbench 整站（WorkbenchRoot 等）；后者见 main-workbench.ts 与 vite.workbench.config.ts，产物为 dist-workbench/（含 bundled/ 下的打包分块，勿与库 dist/ 或场景导出混淆）。
  * 灰机/wiki 嵌入只需 npm run build:lib，勿部署 dist-workbench。
  */

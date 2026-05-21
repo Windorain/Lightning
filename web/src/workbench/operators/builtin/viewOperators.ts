@@ -6,6 +6,7 @@
  */
 import type { OperatorType, OperatorProperties } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
+import { resolveViewportSlot } from '@/workbench/context/bContext'
 
 interface NavState {
   _startX: number
@@ -38,13 +39,14 @@ export const ViewRotateOperator: OperatorType = {
   modal(bctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
     const s = props as unknown as NavState & OperatorProperties
-    const camera = bctx.viewport.camera.value
+    const vp = resolveViewportSlot(bctx, props)
+    const camera = vp.camera.value
     if (!camera) return OP_RESULT.CANCELLED
 
     if (event.type === 'pointermove') {
       const dx = event.clientX - s._startX
       const dy = event.clientY - s._startY
-      const orbitTarget = bctx.viewport.orbitTarget.value
+      const orbitTarget = vp.orbitTarget.value
       const tx = orbitTarget?.x ?? 0
       const ty = orbitTarget?.y ?? 0
       const tz = orbitTarget?.z ?? 0
@@ -76,7 +78,8 @@ export const ViewRotateOperator: OperatorType = {
   cancel(bctx, props) {
     const s = props as unknown as NavState
     if (s._pointerId >= 0) {
-      const el = bctx.viewport.domElement.value
+      const vp = resolveViewportSlot(bctx, props)
+      const el = vp.domElement.value
       try { el?.releasePointerCapture(s._pointerId) } catch { /* already released */ }
       s._pointerId = -1
     }
@@ -108,14 +111,15 @@ export const ViewPanOperator: OperatorType = {
   modal(bctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
     const s = props as unknown as NavState & OperatorProperties
-    const camera = bctx.viewport.camera.value
+    const vp = resolveViewportSlot(bctx, props)
+    const camera = vp.camera.value
     if (!camera) return OP_RESULT.CANCELLED
 
     if (event.type === 'pointermove') {
       const dx = event.clientX - s._startX
       const dy = event.clientY - s._startY
       const k = 0.03
-      const orbitTarget = bctx.viewport.orbitTarget.value
+      const orbitTarget = vp.orbitTarget.value
       const tx = orbitTarget?.x ?? 0
       const ty = orbitTarget?.y ?? 0
       const tz = orbitTarget?.z ?? 0
@@ -157,7 +161,8 @@ export const ViewPanOperator: OperatorType = {
   cancel(bctx, props) {
     const s = props as unknown as NavState
     if (s._pointerId >= 0) {
-      const el = bctx.viewport.domElement.value
+      const vp = resolveViewportSlot(bctx, props)
+      const el = vp.domElement.value
       try { el?.releasePointerCapture(s._pointerId) } catch { /* already released */ }
       s._pointerId = -1
     }
@@ -183,7 +188,8 @@ export const ViewZoomOperator: OperatorType = {
   invoke(bctx, props, event) {
     // WheelEvent: zoom immediately
     if (event instanceof WheelEvent) {
-      const camera = bctx.viewport.camera.value
+      const vp = resolveViewportSlot(bctx, props)
+      const camera = vp.camera.value
       if (!camera) return OP_RESULT.CANCELLED
       const factor = (event as WheelEvent).deltaY > 0 ? 0.85 : 1.18
       applyViewZoom(camera, factor)
@@ -206,7 +212,8 @@ export const ViewZoomOperator: OperatorType = {
 
   modal(bctx, props, event) {
     if (event instanceof WheelEvent) {
-      const camera = bctx.viewport.camera.value
+      const vp = resolveViewportSlot(bctx, props)
+      const camera = vp.camera.value
       if (!camera) return OP_RESULT.CANCELLED
       const factor = event.deltaY > 0 ? 0.85 : 1.18
       applyViewZoom(camera, factor)
@@ -215,7 +222,8 @@ export const ViewZoomOperator: OperatorType = {
 
     if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
     const s = props as unknown as NavState & OperatorProperties
-    const camera = bctx.viewport.camera.value
+    const vp = resolveViewportSlot(bctx, props)
+    const camera = vp.camera.value
     if (!camera) return OP_RESULT.CANCELLED
 
     if (event.type === 'pointermove') {
@@ -239,7 +247,8 @@ export const ViewZoomOperator: OperatorType = {
   cancel(bctx, props) {
     const s = props as unknown as NavState
     if (s._pointerId >= 0) {
-      const el = bctx.viewport.domElement.value
+      const vp = resolveViewportSlot(bctx, props)
+      const el = vp.domElement.value
       try { el?.releasePointerCapture(s._pointerId) } catch { /* already released */ }
       s._pointerId = -1
     }

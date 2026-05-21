@@ -7,6 +7,7 @@ import { defaultEmbedUi } from '@/preview/previewConfig'
 import { getDevSceneDocument, listDevSceneIds } from '@/dev/devScenes'
 import { DEFAULT_PREVIEW_SCENE_ID, loadPreviewSessionFromDocument } from '@/preview/previewSession'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
+import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
 
 function parseBool(s: string | null): boolean | undefined {
   if (s === null || s === '') return undefined
@@ -120,7 +121,8 @@ export async function resolveDevView3DConfigAsync(): Promise<View3DConfig> {
 
   const sceneId = resolveSceneId({ ...mergedBase, ...url })
   const document = getDevSceneDocument(sceneId)
-  const { renderBundle, materialLibrary } = await loadPreviewSessionFromDocument(document)
+  const { renderBundle } = await loadPreviewSessionFromDocument(document)
+  const materialLibrary = await buildMaterialLibrary(renderBundle.document)
   const stableId = sceneStableStringIdFromDocument(renderBundle.document)
   const docId = stableId !== 'scene' ? stableId : sceneId
 

@@ -4,10 +4,9 @@
  * 创建 Scene + lights + 3 层 Group + View3DRenderer，管 RAF / 拾取 / 相机适配。
  * 不接触 BlockPaletteEntry / cellGrid / selection / operator。
  */
-import { inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as THREE from 'three'
 
-import { bContextKey } from '@/workbench/context/bContext'
 import { View3DRenderer } from '@/render/viewport/renderViewport'
 import {
   applyDiagonalOrbitView,
@@ -18,6 +17,7 @@ import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import { scenePickFromPointer } from '@/render/interaction/scenePick'
 import type { StructureDefinition } from '@/render/schema/types'
+import type { InitialCamera } from '@/preview/previewConfig'
 
 export interface ViewerCoreReadyPayload {
   scene: THREE.Scene
@@ -37,6 +37,7 @@ const props = withDefaults(
     layerPreviewMode: LayerPreviewMode
     sceneBackground?: number
     showAxesGizmo?: boolean
+    initialCamera?: InitialCamera
   }>(),
   {
     sceneBackground: 0x111827,
@@ -59,8 +60,6 @@ const emit = defineEmits<{
     } | null,
   ]
 }>()
-
-const bctx = inject(bContextKey)
 
 function clampOrthoZoom(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1
@@ -130,7 +129,7 @@ function fitCameraToGroup(vp: View3DRenderer, group: THREE.Group): void {
   box.getSize(size)
   const maxDim = Math.max(size.x, size.y, size.z, 0.1)
   const dist = Math.max(8, maxDim * 2.2)
-  const cam = (bctx as any)?.initialCamera
+  const cam = props.initialCamera
   const finalDist = cam?.distance ?? dist
   const o = vp.camera
   vp.orbitTarget.copy(center)
@@ -164,7 +163,7 @@ watch(
 )
 
 watch(
-  () => (bctx as any)?.initialCamera?.zoom,
+  () => props.initialCamera?.zoom,
   (z) => {
     const vp = renderer
     if (!vp) return

@@ -88,6 +88,7 @@ export class OperatorRegistry {
     const snap = bctx.queries ? logCenter.snapshot(bctx) : undefined
 
     const resolvedProps: OperatorProperties = props ?? {}
+    if (regionId) resolvedProps._regionId = regionId
 
     if (op.invoke) {
       const snapshot = op.flagUndo && bctx.doc
