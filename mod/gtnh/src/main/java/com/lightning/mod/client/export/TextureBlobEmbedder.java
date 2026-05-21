@@ -19,11 +19,11 @@ import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.client.resources.IResourceManager;
 import net.minecraft.util.ResourceLocation;
 
-import com.lightning.mod.client.meshcapture.MaterialKeyResolver;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.lightning.mod.client.meshcapture.MaterialKeyResolver;
 
 import cpw.mods.fml.common.FMLLog;
 import cpw.mods.fml.relauncher.Side;

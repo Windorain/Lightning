@@ -31,6 +31,12 @@ import net.minecraft.world.World;
 
 import org.lwjgl.opengl.GL11;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import com.lightning.mod.client.export.BlockThumbnailRenderer;
 import com.lightning.mod.client.export.ExportTextureLocator;
 import com.lightning.mod.client.export.MaterialAnimationJson;
@@ -47,12 +53,6 @@ import com.lightning.mod.client.meshcapture.primary.BlockPrimaryCaptureRegistry;
 import com.lightning.mod.core.sampling.VoxelSample;
 import com.lightning.mod.core.session.SdeCellCoords;
 import com.lightning.mod.mixin.interfaces.accessors.TextureMapAccessor;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonNull;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonPrimitive;
 
 import cpw.mods.fml.common.registry.GameRegistry;
 import cpw.mods.fml.relauncher.ReflectionHelper;

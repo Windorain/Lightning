@@ -13,8 +13,7 @@ public class PacketEnrichExportedSceneHandler implements IMessageHandler<PacketE
         if (message.fileName != null && !message.fileName.isEmpty()
             && message.utf8Json != null
             && message.utf8Json.length > 0) {
-            LightningMod.proxy
-                .enqueueMeshCapturePayload(message.fileName, message.utf8Json, message.writeRaw);
+            LightningMod.proxy.enqueueMeshCapturePayload(message.fileName, message.utf8Json, message.writeRaw);
         }
         return null;
     }
