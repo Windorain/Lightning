@@ -19,7 +19,6 @@ export type { View3DConfig } from './preview/previewConfig'
 
 export { loadPreviewSessionFromDocument } from './preview/previewSession'
 export {
-  normalizeEnvelopeToPlain,
   readDocumentFormat,
   isEnvelopeDocument,
   readSceneMetaField,
@@ -45,5 +44,4 @@ export {
   type BuildEnvelopeOptions,
 } from './render/data/sceneExport'
 export { downloadJson, copyTextToClipboard } from './util/browser'
-export { view3DConfigFromDocument, documentLooksPreviewable } from './preview/previewFromDocument'
-export type { View3DConfigFromDocumentOptions } from './preview/previewFromDocument'
+export { documentLooksPreviewable } from './preview/previewFromDocument'

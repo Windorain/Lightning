@@ -4,7 +4,7 @@
 
 import * as THREE from 'three'
 
-import { loadPreviewSessionFromDocument } from '@/preview/previewSession'
+import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
 import { resolveRenderBundle } from '@/render/data/bundleResolve'
 import {
   applyDiagonalOrbitView,
@@ -100,7 +100,8 @@ export async function bakeIsometricStructurePngDataUrl(
   const dirIdx = ((Math.floor(directionIndex) % 4) + 4) % 4
   const yawDeg = ISOMETRIC_EXPORT_YAW_DEG[dirIdx] ?? 45
 
-  const { materialLibrary, renderBundle } = await loadPreviewSessionFromDocument(document)
+  const materialLibrary = await buildMaterialLibrary(document)
+  const { definition } = resolveRenderBundle({ document })
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     alpha: true,
@@ -108,7 +109,6 @@ export async function bakeIsometricStructurePngDataUrl(
   })
 
   try {
-    const { definition } = resolveRenderBundle(renderBundle)
     const built = await buildBlockMesh(definition, materialLibrary, {
       layerPreview: 'all',
     })

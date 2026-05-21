@@ -16,7 +16,7 @@ import { BlockIconCache, BLOCK_ICON_LAYOUT_REVISION, blockIconBakeLayoutKey } fr
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
 import { MC_ITEM_SLOT_BAKE_REVISION, summarizeBlocksForCache } from '@/render/interaction/blockSlotBaker'
 import { isWorldDocument, resolveRenderBundle, type RenderBundleResolveResult } from '@/render/data/bundleResolve'
-import { view3DConfigFromDocument } from '@/preview/previewFromDocument'
+import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
 import { frameAt } from '@/render/data/worldPlayback'
 import type { BlockMeshBuildStats } from '@/render/mesh/blockMesh'
 import { BlockMeshProvider } from '@/render/mesh/blockMeshProvider'
@@ -100,14 +100,16 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   // === 内部纹理缓存，从 doc.textureBlobs 构建 ===
   const textureCache = shallowRef<MaterialLibraryApi | null>(null)
 
-  /** 确保 textureCache 就绪；已完成则直接返回 */
-  async function ensureTextures(doc: Record<string, unknown>): Promise<MaterialLibraryApi | null> {
+  /** 确保 textureCache 就绪；已完成则直接返回。doc 必须是 plain V2 文档 */
+  async function ensureTextures(doc: unknown): Promise<MaterialLibraryApi | null> {
     if (textureCache.value && !textureCache.value.isDisposed()) return textureCache.value
     try {
-      const cfg = await view3DConfigFromDocument({ ...doc })
-      textureCache.value = cfg.materialLibrary
+      textureCache.value = await buildMaterialLibrary(doc)
       return textureCache.value
-    } catch { return null }
+    } catch (e) {
+      console.error('[renderAssets] buildMaterialLibrary failed', e)
+      return null
+    }
   }
 
   const blockMeshProvider = new BlockMeshProvider()
@@ -176,10 +178,8 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
 
     const lib = textureCache.value
     if (!lib || lib.isDisposed()) {
-      const docObj = docRef.value as Record<string, unknown>
-      void ensureTextures(docObj).then(() => {
-        void runMesh(() => presentContentMesh())
-      })
+      console.warn('[renderAssets] presentContentMesh: textureCache not ready, triggering rebuildAll')
+      void rebuildAll()
       return
     }
 

@@ -18,7 +18,7 @@ const activeWikiPanels = computed(() =>
     .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
-const embedDocument = computed(() => bctx.doc.value?.toRaw() ?? null)
+const embedDocument = ref<unknown>(null)
 
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
@@ -53,8 +53,12 @@ const embedSettings = computed<EmbedSettings | null>(() => {
 
 const renderKey = ref(0)
 
-// Bump key when doc or structEpoch changes → fresh EmbedViewport
-watch([() => bctx.doc.value, () => bctx.structEpoch.value], () => { renderKey.value++ }, { immediate: true })
+// Bump key when doc ref or structEpoch changes → fresh EmbedViewport
+// NOT on in-place doc mutations (e.g. annotation) — those don't change the mesh
+watch([() => bctx.doc.value, () => bctx.structEpoch.value], () => {
+  embedDocument.value = bctx.doc.value?.toRaw() ?? null
+  renderKey.value++
+}, { immediate: true })
 </script>
 
 <template>
