@@ -91,17 +91,17 @@ function selectTab(id: string): void {
   border-bottom: 1px solid var(--wb-border);
   background: var(--wb-bg-deepest);
   overflow-x: auto;
-  height: 32px;
+  height: 34px;
 }
 .pt-tab {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 14px;
+  padding: 0 16px;
   border: none;
   background: transparent;
   color: var(--wb-text-muted);
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
   border-bottom: 2px solid transparent;

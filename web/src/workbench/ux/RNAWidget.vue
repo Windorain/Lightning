@@ -32,7 +32,7 @@ function inferWidget(desc: NonNullable<typeof props.descriptor>): string {
     case 'string':
       return (desc.enumItems && desc.enumItems.length > 0) ? 'dropdown' : 'text'
     case 'number':
-      return (desc.min != null || desc.max != null) ? 'stepper' : 'number'
+      return (desc.min != null || desc.max != null) ? 'slider' : 'number'
     case 'boolean': return 'checkbox'
     case 'color':   return 'color'
     case 'enum':    return 'dropdown'
@@ -175,7 +175,7 @@ function setValue(val: unknown): void {
   justify-content: space-between;
 }
 .ux-rna-label {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--wb-text-muted);
 }
 .ux-rna-input {
@@ -185,12 +185,12 @@ function setValue(val: unknown): void {
 }
 .ux-input, .ux-dropdown {
   flex: 1;
-  padding: 5px 8px;
+  padding: 6px 8px;
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius-sm);
   background: var(--wb-bg-surface);
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: 13px;
   outline: none;
 }
 .ux-input:focus, .ux-dropdown:focus {
@@ -215,6 +215,12 @@ function setValue(val: unknown): void {
   font-family: ui-monospace, monospace;
   outline: none;
   text-align: center;
+  -moz-appearance: textfield;
+}
+.ux-stepper-input::-webkit-inner-spin-button,
+.ux-stepper-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .ux-stepper-btns {
   display: flex;

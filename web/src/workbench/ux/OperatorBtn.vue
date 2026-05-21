@@ -19,7 +19,10 @@ function onClick() {
 <template>
   <button
     class="ux-operator-btn"
-    :class="{ 'ux-operator-btn--icon-only': !label }"
+    :class="{
+      'ux-operator-btn--icon-only': !label,
+      'ux-operator-btn--active': !label && operatorProps?.active
+    }"
     :data-op-id="opId"
     :data-props="operatorProps ? JSON.stringify(operatorProps) : undefined"
     :title="title ?? label"
@@ -41,7 +44,7 @@ function onClick() {
   background: var(--wb-bg-surface);
   color: var(--wb-accent-muted);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.4;
   width: 100%;
   transition: background 0.15s, border-color 0.15s;
@@ -81,6 +84,11 @@ function onClick() {
 .ux-operator-btn--icon-only:hover {
   background: var(--wb-bg-hover);
   border-color: var(--wb-border);
+}
+.ux-operator-btn--active {
+  background: var(--wb-bg-hover) !important;
+  border-color: var(--wb-accent) !important;
+  box-shadow: 0 0 10px rgba(77, 171, 247, 0.2);
 }
 .ux-icon {
   font-size: 14px;

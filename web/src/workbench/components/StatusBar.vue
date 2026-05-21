@@ -40,7 +40,7 @@ function logLevelLabel(level: number): string {
   gap: 14px;
   color: var(--wb-text-muted);
 }
-.sb-item { white-space: nowrap; font-size: 10px; }
+.sb-item { white-space: nowrap; font-size: 12px; }
 .sb-item--error { color: var(--wb-danger); }
 .sb-item--warn { color: #f59e0b; }
 .sb-spacer { flex: 1; }

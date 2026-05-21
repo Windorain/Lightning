@@ -33,8 +33,8 @@ const tabs = [
   padding: 0 10px; gap: 0;
 }
 .wt-tab {
-  padding: 0 18px; border: none; background: transparent;
-  color: var(--wb-text-muted); font-size: 11px; cursor: pointer;
+  padding: 0 20px; border: none; background: transparent;
+  color: var(--wb-text-muted); font-size: 13px; cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: color 0.15s, border-color 0.15s;
 }

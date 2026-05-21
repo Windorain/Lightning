@@ -33,7 +33,7 @@ export const toolShelfPanel: PanelDeclaration = {
         label: '',
         icon: toolIcon(iconId, isActive ? 'active' : 'inactive'),
         title: t.label,
-        props: { toolId: t.id },
+        props: { toolId: t.id, active: isActive },
       }
     })
     return { kind: 'column', align: false, items }

@@ -114,16 +114,16 @@ function onMenuAction(action: string): void {
 <style scoped>
 .mb-root {
   display: flex; align-items: center; justify-content: space-between;
-  height: 100%; padding: 0 12px; font-size: 11px;
+  height: 100%; padding: 0 12px; font-size: 13px;
 }
 .mb-left, .mb-right { display: flex; align-items: center; gap: 0; }
 .mb-item { position: relative; }
 .mb-brand {
-  color: var(--wb-text); font-size: 12px; font-weight: 600; letter-spacing: 0.3px; margin-right: 20px;
+  color: var(--wb-text); font-size: 16px; font-weight: 700; letter-spacing: 0.3px; margin-right: 24px;
   user-select: none;
 }
 .mb-label {
-  padding: 4px 10px; border-radius: var(--wb-radius-sm); cursor: pointer;
+  padding: 5px 10px; border-radius: var(--wb-radius-sm); cursor: pointer;
   user-select: none; color: var(--wb-accent-muted); display: inline-block;
 }
 .mb-label:hover { background: var(--wb-bg-hover); color: var(--wb-text); }
@@ -136,13 +136,13 @@ function onMenuAction(action: string): void {
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
 .mb-dd-section {
-  padding: 5px 12px 3px; font-size: 9px; text-transform: uppercase;
+  padding: 5px 14px 3px; font-size: 10px; text-transform: uppercase;
   color: var(--wb-text-dim); letter-spacing: 0.5px;
 }
 .mb-dd-item {
   display: flex; align-items: center; gap: 4px;
-  width: 100%; padding: 5px 12px; border: none;
-  background: transparent; color: var(--wb-text); font-size: 11px;
+  width: 100%; padding: 6px 14px; border: none;
+  background: transparent; color: var(--wb-text); font-size: 13px;
   text-align: left; cursor: pointer; border-radius: var(--wb-radius-sm);
 }
 .mb-dd-item:hover { background: var(--wb-bg-hover); }
@@ -150,10 +150,10 @@ function onMenuAction(action: string): void {
 .mb-status-dot { width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; }
 .mb-online { background: var(--wb-success); box-shadow: 0 0 6px rgba(46, 204, 113, 0.4); }
 .mb-offline { background: var(--wb-text-dim); }
-.mb-status-label { font-size: 10px; color: var(--wb-text-muted); }
+.mb-status-label { font-size: 12px; color: var(--wb-text-muted); }
 .mb-theme-btn {
-  width: 24px; height: 24px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-sm);
-  background: var(--wb-bg-surface); color: var(--wb-accent-muted); font-size: 12px;
+  width: 26px; height: 26px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface); color: var(--wb-accent-muted); font-size: 14px;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   margin-right: 10px; padding: 0; line-height: 1;
 }

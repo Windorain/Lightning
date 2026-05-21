@@ -89,9 +89,9 @@ export const annotationPanel: PanelDeclaration = {
               { kind: 'property', rnaPath: 'annotation.min', label: '最小坐标' },
               { kind: 'property', rnaPath: 'annotation.max', label: '最大坐标' },
               { kind: 'property', rnaPath: 'annotation.renderStyle', label: '渲染样式' },
-              { kind: 'property', rnaPath: 'annotation.renderOpacity', label: '不透明度', widget: 'stepper' },
-              { kind: 'property', rnaPath: 'annotation.fillOpacity', label: '填充不透明度', widget: 'stepper' },
-              { kind: 'property', rnaPath: 'annotation.frameThickness', label: '边框厚度', widget: 'stepper' },
+              { kind: 'property', rnaPath: 'annotation.renderOpacity', label: '不透明度' },
+              { kind: 'property', rnaPath: 'annotation.fillOpacity', label: '填充不透明度' },
+              { kind: 'property', rnaPath: 'annotation.frameThickness', label: '边框厚度' },
               { kind: 'property', rnaPath: 'annotation.overlay', label: '覆盖层' },
             ],
           },
@@ -104,7 +104,7 @@ export const annotationPanel: PanelDeclaration = {
             kind: 'box', label: '位置 & 图标', items: [
               { kind: 'property', rnaPath: 'annotation.pos', label: '位置' },
               { kind: 'property', rnaPath: 'annotation.icon', label: '图标' },
-              { kind: 'property', rnaPath: 'annotation.size', label: '大小', widget: 'stepper' },
+              { kind: 'property', rnaPath: 'annotation.size', label: '大小' },
             ],
           },
         )
@@ -114,7 +114,7 @@ export const annotationPanel: PanelDeclaration = {
           { kind: 'separator' },
           {
             kind: 'box', label: '线段', items: [
-              { kind: 'property', rnaPath: 'annotation.thickness', label: '粗细', widget: 'stepper' },
+              { kind: 'property', rnaPath: 'annotation.thickness', label: '粗细' },
               { kind: 'property', rnaPath: 'annotation.arrow', label: '箭头' },
               { kind: 'property', rnaPath: 'annotation.showPoints', label: '显示控制点' },
             ],
@@ -128,8 +128,8 @@ export const annotationPanel: PanelDeclaration = {
             kind: 'box', label: '文本', items: [
               { kind: 'property', rnaPath: 'annotation.anchorPos', label: '锚点位置' },
               { kind: 'property', rnaPath: 'annotation.text', label: '内容' },
-              { kind: 'property', rnaPath: 'annotation.fontSize', label: '字号', widget: 'stepper' },
-              { kind: 'property', rnaPath: 'annotation.backgroundAlpha', label: '背景透明度', widget: 'stepper' },
+              { kind: 'property', rnaPath: 'annotation.fontSize', label: '字号' },
+              { kind: 'property', rnaPath: 'annotation.backgroundAlpha', label: '背景透明度' },
             ],
           },
         )

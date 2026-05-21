@@ -55,20 +55,21 @@ provide('wb-dragging', dragging)
   overflow: hidden;
   background: var(--wb-bg-deepest);
   color: var(--wb-text);
-  font-family: system-ui, 'Segoe UI', sans-serif;
+  font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-size: 13px;
 }
 .wb-shell--dragging * { cursor: col-resize !important; }
 
 .wb-menubar {
   flex-shrink: 0;
-  height: 32px;
+  height: 36px;
   background: var(--wb-bg-elevated);
   border-bottom: 1px solid var(--wb-border);
 }
 
 .wb-workspace-tabs {
   flex-shrink: 0;
-  height: 34px;
+  height: 38px;
   background: var(--wb-bg-deepest);
   border-bottom: 1px solid var(--wb-border);
 }

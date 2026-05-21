@@ -56,15 +56,15 @@ function invokeOp(op: UIOperator) {
   background: var(--wb-bg-surface);
   color: var(--wb-accent-muted);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
 }
 .ux-menu-btn:hover { background: var(--wb-bg-hover); }
-.ux-arrow { font-size: 8px; }
+.ux-arrow { font-size: 9px; }
 .ux-menu-dropdown {
   position: absolute;
   top: 100%;
   left: 0;
-  min-width: 160px;
+  min-width: 180px;
   background: var(--wb-bg-elevated);
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius-lg);
@@ -75,11 +75,11 @@ function invokeOp(op: UIOperator) {
 .ux-menu-item {
   display: block;
   width: 100%;
-  padding: 5px 12px;
+  padding: 6px 14px;
   border: none;
   background: transparent;
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
   border-radius: var(--wb-radius-sm);
@@ -87,8 +87,8 @@ function invokeOp(op: UIOperator) {
 .ux-menu-item:hover { background: var(--wb-bg-hover); }
 .ux-menu-label {
   display: block;
-  padding: 5px 12px 3px;
-  font-size: 9px;
+  padding: 5px 14px 3px;
+  font-size: 10px;
   color: var(--wb-text-dim);
   text-transform: uppercase;
   letter-spacing: 0.5px;

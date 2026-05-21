@@ -95,7 +95,7 @@ function isLayoutItem(item: UILayoutItem): item is UILayout {
   background: var(--wb-bg-surface);
 }
 .ux-box-label {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--wb-text-dim);
   text-transform: uppercase;
@@ -104,7 +104,7 @@ function isLayoutItem(item: UILayoutItem): item is UILayout {
 }
 .ux-split { display: flex; flex-direction: row; }
 .ux-scroll { overflow-y: auto; }
-.ux-label { font-size: 11px; color: var(--wb-text-muted); }
+.ux-label { font-size: 13px; color: var(--wb-text-muted); }
 .ux-sep {
   border: none;
   border-top: 1px solid transparent;

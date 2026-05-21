@@ -97,21 +97,42 @@ function pushToServer(): void {
 </template>
 
 <style scoped>
-.ew-root { padding: 24px 32px; box-sizing: border-box; }
-.ew-header { margin-bottom: 20px; }
-.ew-title { font-size: 18px; font-weight: 600; color: var(--wb-text); margin: 0; }
-.ew-sub { font-size: 12px; color: var(--wb-text-dim); }
-.ew-grid { display: flex; flex-direction: column; gap: 14px; max-width: 720px; }
-.ew-card { padding: 16px; border-radius: 8px; background: var(--wb-bg-deepest); border: 1px solid var(--wb-border); }
-.ew-card h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--wb-text); }
-.ew-desc { margin: 0 0 10px; font-size: 12px; color: var(--wb-text-dim); }
+.ew-root { padding: 24px 32px; box-sizing: border-box; height: 100%; overflow-y: auto; }
+.ew-header { margin-bottom: 24px; }
+.ew-title { font-size: 20px; font-weight: 700; color: var(--wb-text); margin: 0; }
+.ew-sub { font-size: 13px; color: var(--wb-text-dim); }
+.ew-grid { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+.ew-card {
+  padding: 20px;
+  border-radius: var(--wb-radius-lg);
+  background: var(--wb-bg-surface);
+  border: 1px solid var(--wb-border);
+}
+.ew-card h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; color: var(--wb-text); }
+.ew-desc { margin: 0 0 12px; font-size: 13px; color: var(--wb-text-dim); line-height: 1.5; }
 .ew-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.ew-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--wb-border); background: var(--wb-bg-surface); color: var(--wb-accent-muted); font-size: 12px; cursor: pointer; }
-.ew-btn:hover { background: var(--wb-bg-hover); }
-.ew-btn--primary { background: var(--wb-accent); border-color: var(--wb-accent); color: var(--wb-text); }
-.ew-btn--sm { font-size: 11px; padding: 4px 10px; }
-.ew-iso { max-width: 320px; border-radius: 4px; border: 1px solid var(--wb-border); margin-top: 8px; }
-.ew-fb { font-size: 11px; color: var(--wb-text-dim); margin-top: 6px; }
+.ew-btn {
+  padding: 8px 16px;
+  border-radius: var(--wb-radius-md);
+  border: 1px solid var(--wb-border);
+  background: var(--wb-bg-elevated);
+  color: var(--wb-accent-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ew-btn:hover { background: var(--wb-bg-hover); border-color: var(--wb-accent); color: var(--wb-text); }
+.ew-btn--primary { border-color: var(--wb-accent); background: var(--wb-bg-hover); color: var(--wb-accent); font-weight: 500; }
+.ew-btn--primary:hover { background: var(--wb-accent); color: #fff; }
+.ew-btn--sm { font-size: 12px; padding: 6px 12px; }
+.ew-iso { max-width: 340px; border-radius: var(--wb-radius-md); border: 1px solid var(--wb-border); margin-top: 10px; }
+.ew-fb { font-size: 12px; color: var(--wb-text-dim); margin-top: 8px; }
 .ew-fb--err { color: var(--wb-danger); }
-.ew-fb-bar { margin-top: 16px; padding: 8px 12px; border-radius: 6px; background: var(--wb-bg-elevated); border: 1px solid var(--wb-border); font-size: 12px; color: var(--wb-text-dim); }
+.ew-fb-bar {
+  margin-top: 20px; padding: 10px 14px;
+  border-radius: var(--wb-radius-md);
+  background: var(--wb-bg-elevated);
+  border: 1px solid var(--wb-border);
+  font-size: 13px; color: var(--wb-text-dim);
+}
 </style>

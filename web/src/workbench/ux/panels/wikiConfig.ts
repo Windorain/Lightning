@@ -5,7 +5,7 @@ import type { UILayout } from '../types/layout'
 
 export const wikiConfigPanel: PanelDeclaration = {
   id: 'wiki-config-panel',
-  label: 'Wiki 配置',
+  label: '嵌入配置',
   spaceType: SpaceType.PREFERENCES,
   regionType: RegionType.MAIN,
 
@@ -14,14 +14,20 @@ export const wikiConfigPanel: PanelDeclaration = {
   layout(_ctx: BContext): UILayout {
     return {
       kind: 'column', align: false, items: [
-        { kind: 'label', text: '视口尺寸' },
-        { kind: 'property', rnaPath: 'wikiconfig.viewWidth', label: '宽' },
-        { kind: 'property', rnaPath: 'wikiconfig.viewHeight', label: '高' },
+        {
+          kind: 'box', label: '视口尺寸', items: [
+            { kind: 'property', rnaPath: 'wikiconfig.viewWidth', label: '宽度' },
+            { kind: 'property', rnaPath: 'wikiconfig.viewHeight', label: '高度' },
+          ],
+        },
         { kind: 'separator' },
-        { kind: 'label', text: '初始摄像头' },
-        { kind: 'property', rnaPath: 'wikiconfig.cameraYaw', label: '偏航角' },
-        { kind: 'property', rnaPath: 'wikiconfig.cameraElevation', label: '俯仰角' },
-        { kind: 'property', rnaPath: 'wikiconfig.cameraZoom', label: '缩放' },
+        {
+          kind: 'box', label: '初始相机', items: [
+            { kind: 'property', rnaPath: 'wikiconfig.cameraYaw', label: '偏航角 (Yaw)' },
+            { kind: 'property', rnaPath: 'wikiconfig.cameraElevation', label: '仰角 (Elev.)' },
+            { kind: 'property', rnaPath: 'wikiconfig.cameraZoom', label: '缩放 (Zoom)' },
+          ],
+        },
       ],
     }
   },
