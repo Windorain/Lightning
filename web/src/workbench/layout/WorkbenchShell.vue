@@ -3,9 +3,12 @@
  * Workbench 主布局壳：Blender 风格 3 列。
  * 通过 named slots 让父组件控制各区域的内容与 props。
  */
+import { useSlots } from 'vue'
 import { usePanelResize } from './panelResize'
 
 const { rightWidth, startRightDrag, dragging } = usePanelResize()
+const slots = useSlots()
+const hasProperties = () => !!slots.properties
 </script>
 
 <template>
@@ -25,6 +28,7 @@ const { rightWidth, startRightDrag, dragging } = usePanelResize()
       </main>
 
       <div
+        v-if="hasProperties()"
         class="wb-divider wb-divider--right"
         @pointerdown="startRightDrag"
         role="separator"
@@ -32,7 +36,7 @@ const { rightWidth, startRightDrag, dragging } = usePanelResize()
         tabindex="-1"
       />
 
-      <aside class="wb-properties" :style="{ width: `${rightWidth}px` }">
+      <aside v-if="hasProperties()" class="wb-properties" :style="{ width: `${rightWidth}px` }">
         <slot name="properties" />
       </aside>
     </div>

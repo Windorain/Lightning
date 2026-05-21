@@ -302,9 +302,10 @@ onMounted(() => {
     </template>
   </WorkbenchShell>
 
-  <div v-if="workspace === 'materials'" class="wb-standalone">
-    <header class="wb-standalone-menubar">
+  <WorkbenchShell v-if="workspace === 'materials'">
+    <template #menubar>
       <div class="wb-menubar-inner">
+        <span class="wb-brand">LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -313,16 +314,17 @@ onMounted(() => {
           :owner="panel.owner"
         />
       </div>
-    </header>
-    <header class="wb-standalone-top">
-      <div class="wb-standalone-tabs">
-        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
-      </div>
-    </header>
-    <main class="wb-standalone-body">
+    </template>
+    <template #workspace-tabs>
+      <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
+    </template>
+    <template #viewport>
       <MaterialGallery />
-    </main>
-  </div>
+    </template>
+    <template #statusbar>
+      <StatusBar />
+    </template>
+  </WorkbenchShell>
 
   <WorkbenchSettingsDrawer />
 

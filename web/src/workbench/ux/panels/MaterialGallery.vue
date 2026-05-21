@@ -285,7 +285,7 @@ onUnmounted(() => {
               <span class="mg-card-label">{{ card.locator || `#${card.materialId}` }}</span>
               <span v-if="card.usageCount > 0" class="mg-badge mg-badge--usage">{{ card.usageCount }}</span>
               <span v-if="card.kind === 'animated'" class="mg-badge mg-badge--anim">anim</span>
-              <span v-else-if="card.blend && card.blend !== 'opaque'" class="mg-badge">{{ card.blend }}</span>
+              <span v-else-if="card.blend && card.blend !== 'opaque'" class="mg-badge mg-badge--blend">{{ card.blend }}</span>
             </div>
           </div>
           <div v-if="filteredCards.length === 0" class="mg-grid-empty">
@@ -392,12 +392,12 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  color: var(--nei-text-muted);
+  gap: 8px;
+  color: var(--wb-text-dim);
 }
-.mg-empty-icon { font-size: 32px; }
-.mg-empty-text { font-size: 13px; }
-.mg-empty-hint { font-size: 11px; opacity: 0.5; }
+.mg-empty-icon { font-size: 36px; }
+.mg-empty-text { font-size: 15px; color: var(--wb-text-muted); }
+.mg-empty-hint { font-size: 12px; }
 
 /* ---- Main area ---- */
 .mg-main {
@@ -405,7 +405,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: var(--nei-viewport-bg);
+  background: var(--wb-viewport-bg);
 }
 
 /* ---- Toolbar ---- */
@@ -413,51 +413,45 @@ onUnmounted(() => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-border);
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--wb-bg-elevated);
+  border-bottom: 1px solid var(--wb-border);
 }
 .mg-search {
   flex: 1;
-  min-width: 120px;
-  padding: 3px 8px;
-  border: 1px solid var(--nei-border);
-  border-radius: 3px;
-  background: #1a1a1a;
-  color: var(--nei-text);
-  font-size: 11px;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  min-width: 140px;
+  padding: 6px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface);
+  color: var(--wb-text);
+  font-size: 13px;
   outline: none;
 }
-.mg-search:focus {
-  border-color: var(--nei-accent);
-}
-.mg-search::placeholder {
-  color: #555;
-}
+.mg-search:focus { border-color: var(--wb-accent); }
+.mg-search::placeholder { color: var(--wb-text-dim); }
 .mg-select {
-  padding: 3px 6px;
-  border: 1px solid var(--nei-border);
-  border-radius: 3px;
-  background: #1a1a1a;
-  color: var(--nei-text);
-  font-size: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface);
+  color: var(--wb-accent-muted);
+  font-size: 12px;
   cursor: pointer;
   outline: none;
 }
-.mg-select:focus {
-  border-color: var(--nei-accent);
-}
+.mg-select:focus { border-color: var(--wb-accent); }
 .mg-count {
-  font-size: 10px;
-  color: var(--nei-text-muted);
+  font-size: 11px;
+  color: var(--wb-text-dim);
+  font-family: ui-monospace, monospace;
   white-space: nowrap;
   min-width: 50px;
   text-align: right;
 }
 
-/* ---- Waterfall grid ---- */
+/* ---- Card Grid ---- */
 .mg-grid {
   flex: 1;
   overflow-y: auto;
@@ -471,32 +465,30 @@ onUnmounted(() => {
 }
 
 .mg-card {
-  flex: 0 0 calc((100% - 16px) / 3);
-  min-width: 140px;
-  max-width: 200px;
-  border: 1px solid var(--nei-border, #3a3a3a);
-  border-radius: 4px;
+  width: 150px;
+  flex-shrink: 0;
+  border: 2px solid var(--wb-border);
+  border-radius: var(--wb-radius-md);
   overflow: hidden;
-  background: var(--nei-bg-deep, #1a1a1a);
+  background: var(--wb-bg-surface);
   cursor: pointer;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.mg-card:hover {
-  border-color: var(--nei-accent, #6a6a6a);
-}
+.mg-card:hover { border-color: var(--wb-accent); }
 .mg-card--selected {
-  border-color: var(--nei-accent);
-  box-shadow: 0 0 0 1px var(--nei-accent);
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 10px rgba(77, 171, 247, 0.2);
 }
 .mg-card--focused {
-  border-color: var(--nei-accent);
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.3);
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 6px rgba(77, 171, 247, 0.3);
 }
 
 .mg-thumb {
   display: block;
   width: 100%;
   height: auto;
+  aspect-ratio: 1;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
@@ -505,78 +497,74 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #1e1e1e;
-  color: #555;
-  font-size: 20px;
-  min-height: 64px;
+  background: var(--wb-bg-deepest);
+  color: var(--wb-text-dim);
+  font-size: 24px;
+  min-height: 80px;
 }
 
 .mg-card-footer {
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px 6px 4px;
+  gap: 4px;
+  padding: 5px 6px;
+  border-top: 1px solid var(--wb-border);
 }
 .mg-card-label {
   flex: 1;
-  font-size: 10px;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
-  color: var(--nei-text, #ccc);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  color: var(--wb-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .mg-badge {
   flex-shrink: 0;
-  font-size: 7px;
-  padding: 1px 4px;
-  border-radius: 2px;
-  background: #333;
-  color: #999;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--wb-bg-hover);
+  color: var(--wb-text-muted);
+  font-family: ui-monospace, monospace;
 }
-.mg-badge--anim {
-  background: #2a6a2a;
-  color: #8f8;
-}
-.mg-badge--usage {
-  background: #3a3a5a;
-  color: #aac;
-}
+.mg-badge--anim { background: #1a2a1a; color: #2ecc71; }
+.mg-badge--usage { background: var(--wb-bg-hover); color: var(--wb-text-muted); }
+.mg-badge--blend { background: #2a2010; color: #f59e0b; }
 
 .mg-grid-empty {
   flex: 0 0 100%;
-  padding: 20px;
+  padding: 24px;
   text-align: center;
-  color: var(--nei-text-muted);
-  font-size: 12px;
+  color: var(--wb-text-dim);
+  font-size: 13px;
 }
 
 /* ---- Detail panel ---- */
 .mg-detail {
   flex-shrink: 0;
-  width: 260px;
+  width: 270px;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 10px;
-  gap: 10px;
-  background: var(--nei-bg-deep);
-  border-left: 1px solid var(--nei-border);
+  background: var(--wb-bg-elevated);
+  border-left: 1px solid var(--wb-border);
 }
 
 .mg-detail-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--wb-border);
+  flex-shrink: 0;
 }
 .mg-detail-title {
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--nei-text);
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  color: var(--wb-text);
+  font-family: ui-monospace, monospace;
   word-break: break-all;
   line-height: 1.3;
 }
@@ -584,73 +572,80 @@ onUnmounted(() => {
   flex-shrink: 0;
   background: none;
   border: none;
-  color: var(--nei-text-muted);
-  font-size: 15px;
+  color: var(--wb-text-muted);
+  font-size: 18px;
   cursor: pointer;
   padding: 0 2px;
   line-height: 1;
 }
-.mg-detail-deselect:hover {
-  color: var(--nei-text);
-}
+.mg-detail-deselect:hover { color: var(--wb-text); }
 
 .mg-detail-preview {
   text-align: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--wb-border);
+  flex-shrink: 0;
 }
 .mg-detail-thumb {
   display: block;
   width: 100%;
   height: auto;
-  max-height: 220px;
+  max-height: 180px;
+  aspect-ratio: 1;
   object-fit: contain;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  border: 1px solid var(--nei-border, #3a3a3a);
-  border-radius: 4px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-md);
+  background: var(--wb-bg-surface);
 }
 .mg-detail-thumb--empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 80px;
-  background: #1e1e1e;
-  color: #555;
-  font-size: 12px;
+  height: 100px;
+  background: var(--wb-bg-deepest);
+  color: var(--wb-text-dim);
+  font-size: 14px;
 }
 
 .mg-detail-props {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--wb-border);
 }
 .mg-prop-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 3px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
 }
 .mg-prop-label {
-  font-size: 10px;
-  color: var(--nei-text-muted);
+  font-size: 12px;
+  color: var(--wb-text-muted);
   flex-shrink: 0;
 }
 .mg-prop-value {
-  font-size: 10px;
-  color: var(--nei-text);
+  font-size: 12px;
+  color: var(--wb-accent-muted);
 }
 .mg-prop-value--mono {
-  font-family: ui-monospace, 'Cascadia Code', monospace;
-  font-size: 9px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
   word-break: break-all;
   text-align: right;
   max-width: 60%;
+  color: var(--wb-text-muted);
 }
 
 .mg-detail-ops {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  padding: 12px 14px;
 }
 
 /* ---- Detail placeholder ---- */
@@ -660,23 +655,10 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  color: var(--nei-text-muted);
+  gap: 8px;
+  color: var(--wb-text-dim);
 }
-.mg-detail-placeholder-icon {
-  font-size: 28px;
-  opacity: 0.5;
-}
-.mg-detail-placeholder-text {
-  font-size: 11px;
-  text-align: center;
-  line-height: 1.5;
-  opacity: 0.5;
-}
-.mg-detail-placeholder-hint {
-  font-size: 9px;
-  opacity: 0.3;
-  margin-top: 4px;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
-}
+.mg-detail-placeholder-icon { font-size: 32px; opacity: 0.4; }
+.mg-detail-placeholder-text { font-size: 13px; text-align: center; line-height: 1.5; opacity: 0.5; }
+.mg-detail-placeholder-hint { font-size: 10px; opacity: 0.3; margin-top: 6px; }
 </style>
