@@ -12,7 +12,7 @@ export const blockStatsPanel: PanelDeclaration = {
   poll(): boolean { return true },
 
   layout(ctx: BContext): UILayout {
-    const doc = ctx.scene.scene.value as Record<string, any> | null
+    const doc = ctx.doc.value as Record<string, any> | null
     const palette = doc?.block_palette as Record<string, any> | undefined
     const items: UILayoutItem[] = []
     if (palette) {

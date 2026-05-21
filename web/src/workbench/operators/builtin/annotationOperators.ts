@@ -12,11 +12,11 @@ export const AnnotationCreateOperator: OperatorType = {
   flagUndo: true,
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   exec(bctx, props) {
-    const doc = bctx.scene.scene.value as Record<string, any> | null
+    const doc = bctx.doc.value as Record<string, any> | null
     if (!doc) return
 
     const annotation = props.annotation as Annotation
@@ -28,7 +28,7 @@ export const AnnotationCreateOperator: OperatorType = {
 
     if (!doc.annotations) doc.annotations = []
     doc.annotations.push(annotation)
-    bctx.scene.markDirty()
+    bctx.markDirty()
     bctx.selection.active.value = annotation.id
   },
 }
@@ -39,11 +39,11 @@ export const AnnotationUpdateOperator: OperatorType = {
   flagUndo: true,
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   exec(bctx, props) {
-    const doc = bctx.scene.scene.value as Record<string, any> | null
+    const doc = bctx.doc.value as Record<string, any> | null
     if (!doc?.annotations) return
 
     const id = props.id as string
@@ -56,7 +56,7 @@ export const AnnotationUpdateOperator: OperatorType = {
 
     // Mutate in place so the draft reference stays bound to doc.annotations
     Object.assign(annotations[idx], patch, { updated_at: Date.now() })
-    bctx.scene.markDirty()
+    bctx.markDirty()
   },
 }
 
@@ -66,11 +66,11 @@ export const AnnotationDeleteOperator: OperatorType = {
   flagUndo: true,
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   exec(bctx, props) {
-    const doc = bctx.scene.scene.value as Record<string, any> | null
+    const doc = bctx.doc.value as Record<string, any> | null
     if (!doc?.annotations) return
 
     const id = props.id as string
@@ -81,7 +81,7 @@ export const AnnotationDeleteOperator: OperatorType = {
     if (idx === -1) return
 
     annotations.splice(idx, 1)
-    bctx.scene.markDirty()
+    bctx.markDirty()
     bctx.selection.active.value = null
   },
 }

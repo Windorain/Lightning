@@ -9,14 +9,15 @@
  */
 
 import { computed, ref, shallowRef } from 'vue'
-import type { BContext, LoadStatus } from '@/workbench/context/bContext'
+import type { Ref } from 'vue'
+import type { BContext, LoadStatus, WorkbenchWorkspaceMode } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
-import type { SceneContext } from '@/workbench/sceneContext'
-import type { ConnectionContext } from '@/workbench/connectionContext'
 import type { SelectionContext } from '@/workbench/selectionContext'
 import type { UndoManager } from '@/workbench/editHistoryContext'
 import type { ToolRegistry } from '@/workbench/toolRegistry'
 import type { BContextSettings } from '@/workbench/context/bContext'
+import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
+import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { bScreen } from '@/workbench/ux/types/screen'
 import type { View3DConfig } from '@/preview/previewConfig'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
@@ -77,8 +78,6 @@ const ALL_OPERATORS: OperatorType[] = [
 ]
 
 export interface WorkbenchContextDeps {
-  scene: SceneContext
-  connection: ConnectionContext
   selection: SelectionContext
   editHistory: UndoManager
   toolRegistry: ToolRegistry
@@ -97,7 +96,27 @@ export interface WorkbenchContextResult {
  * 调用方负责创建 context 对象和后续的 operator 注册/外设挂载。
  */
 export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchContextResult {
-  const { scene, connection, selection, editHistory, toolRegistry, settings } = deps
+  const { selection, editHistory, toolRegistry, settings } = deps
+
+  // === 场景核心数据 ===
+  const doc: Ref<RuntimeDocument | null> = ref(null)
+  const dirty = ref(false)
+  const structEpoch = ref(0)
+  const currentWorldFrameIndex = ref(0)
+  const workspaceMode = ref<WorkbenchWorkspaceMode>('local-file')
+  const localFileName = ref<string | null>(null)
+
+  function markDirty(): void { dirty.value = true }
+  function markStructureDirty(): void { structEpoch.value += 1; markDirty() }
+  function markClean(): void { dirty.value = false }
+
+  // === 连接数据 ===
+  const connectionApiBase = ref('')
+  const connectionToken = ref('')
+  const connectionConnected = ref<boolean | null>(null)
+  const connectionExports = ref<ExportFileInfo[]>([])
+  const connectionExportsLoading = ref(false)
+  const connectionSelectedExportName = ref<string | null>(null)
 
   // ---- 所有独立的 ref / computed / 对象先创建 ----
   const loadStatus = ref<LoadStatus>('loading')
@@ -160,11 +179,26 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
 
   // ---- 原子构造 bctx（一次性全部填入，不用 as unknown / as any 后补） ----
   const bctx: BContext = {
-    scene,
+    // === 新平铺字段 ===
+    doc,
+    dirty,
+    structEpoch,
+    currentWorldFrameIndex,
+    workspaceMode,
+    localFileName,
+    markDirty,
+    markStructureDirty,
+    markClean,
+    connectionApiBase,
+    connectionToken,
+    connectionConnected,
+    connectionExports,
+    connectionExportsLoading,
+    connectionSelectedExportName,
+
     selection,
     editHistory,
     toolRegistry,
-    connection,
     get viewport() { return viewports.active.value! },
     viewports,
     operators: {
@@ -191,7 +225,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     hasWorldMultiFrame,
     framesPlaybackIsPlaying,
     toggleWorldFramesPlayback() {},
-    setCurrentWorldFrame: async () => {},
 
     layerWorldY,
     layerPreviewMode,
@@ -200,6 +233,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
 
     loadStatus,
     meshBusy,
+    setCurrentWorldFrame: async () => {},
     loadStructureAndResources: async () => {},
     rebuildContentMesh: async () => {},
     rebuildAnnotationOverlay: async () => null,

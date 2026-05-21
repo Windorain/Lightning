@@ -9,7 +9,7 @@ const AUTO_SAVE_DELAY = 200
 function activeAnnotation(ctx: BContext): Annotation | null {
   const active = ctx.selection.active.value
   if (typeof active !== 'string') return null
-  const doc = ctx.scene.scene.value as Record<string, any> | null
+  const doc = ctx.doc.value as Record<string, any> | null
   const annos = doc?.annotations as Annotation[] | undefined
   return annos?.find(a => a.id === active) ?? null
 }

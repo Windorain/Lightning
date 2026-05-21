@@ -12,7 +12,7 @@ import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrar
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
-import { eventDispatcher } from '@/workbench/eventDispatcher'
+import { EventDispatcherImpl } from '@/workbench/eventDispatcher'
 import * as THREE from 'three'
 
 // Operators
@@ -99,7 +99,7 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     viewports,
     get viewport() { return viewports.active.value! },
     operators,
-    eventDispatcher,
+    eventDispatcher: new EventDispatcherImpl(),
     settings: {
       replaceBrush: null, fillBrush: null, generateType: null,
       dragSensitivity: 0.05, snapEnabled: true,
@@ -107,11 +107,24 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     statusMessage: { value: '' },
 
     // Workbench-only fields — stub
-    scene: null!,
+    doc: null!,
+    dirty: null!,
+    structEpoch: null!,
+    currentWorldFrameIndex: null!,
+    workspaceMode: null!,
+    localFileName: null!,
+    markDirty: null!,
+    markStructureDirty: null!,
+    markClean: null!,
+    connectionApiBase: null!,
+    connectionToken: null!,
+    connectionConnected: null!,
+    connectionExports: null!,
+    connectionExportsLoading: null!,
+    connectionSelectedExportName: null!,
     selection: null!,
     editHistory: null!,
     toolRegistry: null!,
-    connection: null!,
     queries: null!,
     log: null!,
     wikiConfig: null!,

@@ -149,10 +149,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
     const scene = sceneRef.value
     if (!def || !scene) return
 
-    const fromConfig = configRef.value.materialLibrary
-    if (fromConfig && !fromConfig.isDisposed()) materialLibrary.value = fromConfig
-
-    const lib = materialLibrary.value
+    const lib = materialLibrary.value || configRef.value.materialLibrary
     if (!lib || lib.isDisposed()) return
 
     const isW = isWorldDocument(configRef.value.renderBundle.document)
@@ -277,7 +274,7 @@ export function createSceneLifecycle(deps: SceneLifecycleDeps): SceneLifecycleMe
       else worldFrameIndex.value = 0
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
-      materialLibrary.value = configRef.value.materialLibrary
+      if (!materialLibrary.value || materialLibrary.value.isDisposed()) materialLibrary.value = configRef.value.materialLibrary
       if (blockIconCache.value) blockIconCache.value.dispose()
       const iconCache = new BlockIconCache(configRef.value.materialLibrary, configRef.value.blockIconCacheOptions, resolved.definition)
       iconCache.setRevisionKey(

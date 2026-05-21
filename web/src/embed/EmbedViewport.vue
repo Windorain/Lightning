@@ -36,7 +36,7 @@ const props = defineProps<{ config: View3DConfig }>()
 // ---- BContext: inject or self-create ----
 // Workbench bctx (has scene) is incompatible — create independent embed bctx
 const _injectedBctx = inject<BContext | null>(bContextKey, null)
-const _isWorkbenchBctx = _injectedBctx?.scene != null
+const _isWorkbenchBctx = _injectedBctx?.doc != null
 const _ownsBctx = !_injectedBctx || _isWorkbenchBctx
 const bctx: BContext = (_injectedBctx && !_isWorkbenchBctx) ? _injectedBctx : createEmbedBContext(props.config)
 if (_ownsBctx) {

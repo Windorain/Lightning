@@ -6,7 +6,7 @@
  * 后续每个事件通过 wrapper 转发到 operator.modal()。
  */
 import type { ModalOperation, ModalKeymap } from '@/workbench/eventDispatcher'
-import { eventDispatcher } from '@/workbench/eventDispatcher'
+
 import type { BContext } from '@/workbench/context/bContext'
 import type { OperatorType, OperatorProperties } from './operatorType'
 import { OP_RESULT } from './operatorType'
@@ -42,23 +42,23 @@ export class ModalOperatorWrapper implements ModalOperation {
     if (result === OP_RESULT.FINISHED) {
       if (this.op.flagUndo && this.undoSnapshot !== null) {
         const snap = this.undoSnapshot
-        const snapshotAfter = this.bctx.scene.scene.value?.clone() ?? null
+        const snapshotAfter = this.bctx.doc.value?.clone() ?? null
         this.bctx.editHistory.push({
           id: 'op_' + Math.random().toString(36).slice(2, 10),
           label: this.op.label,
           timestamp: Date.now(),
-          execute: () => { this.bctx.scene.scene.value = snapshotAfter; this.bctx.scene.markDirty() },
-          undo: () => { this.bctx.scene.scene.value = snap; this.bctx.scene.markDirty() },
+          execute: () => { this.bctx.doc.value = snapshotAfter; this.bctx.markDirty() },
+          undo: () => { this.bctx.doc.value = snap; this.bctx.markDirty() },
         })
         this.undoSnapshot = null
       }
-      eventDispatcher.commitModal(this.regionId)
+      this.bctx.eventDispatcher.commitModal(this.regionId)
       return { break: true }
     }
 
     if (result === OP_RESULT.CANCELLED) {
       this.op.cancel?.(this.bctx, this.props)
-      eventDispatcher.cancelModal(this.regionId)
+      this.bctx.eventDispatcher.cancelModal(this.regionId)
       return { break: true }
     }
 

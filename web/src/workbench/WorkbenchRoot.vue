@@ -9,8 +9,6 @@ import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import WikiViewerWorkspace from '@/workbench/components/WikiViewerWorkspace.vue'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
-import { provideSceneContext } from '@/workbench/sceneContext'
-import { provideConnectionContext } from '@/workbench/connectionContext'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
 import { provideToolRegistry } from '@/workbench/toolRegistry'
@@ -28,6 +26,7 @@ import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
+import { parseWorkbenchQuery } from '@/workbench/utils/sceneHelpers'
 
 // Document format parsers — 注册到解析分发中心
 import { parserRegistry } from '@/workbench/context/parserRegistry'
@@ -40,8 +39,6 @@ parserRegistry.register(EnvelopeParser)
 parserRegistry.register(WorldParser)
 parserRegistry.register(StructureDataParser)
 
-const scene = provideSceneContext()
-const connection = provideConnectionContext(scene)
 const selection = provideSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
@@ -50,9 +47,14 @@ const statusMessage = useStatusMessage().statusMessage
 // 共享 VM 组装
 const settings = createBContextSettings()
 const { bctx, screen: defaultScreen } = createWorkbenchContext({
-  scene, connection, selection, editHistory, toolRegistry, settings,
-  statusMessage,
+  selection, editHistory, toolRegistry, settings, statusMessage,
 })
+
+// Query string override for workspace mode
+const query = parseWorkbenchQuery()
+if (query.apiBase) {
+  bctx.workspaceMode.value = 'sde'
+}
 
 provideBContext(bctx)
 useNeiTheme()
@@ -127,20 +129,26 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousemove', onMouseMove)
 
-  if (connection.apiBase.value) {
-    await connection.testConnection()
-    if (connection.connected.value) {
-      await connection.refreshExportList()
-      const data = await connection.fetchWorkspaceData()
-      if (data) {
-        await scene.loadFromData(data)
-      }
+  if (bctx.connectionApiBase.value) {
+    try { await bctx.operators.exec('OPERATOR_SDE_CONNECT') } catch { /* ignore */ }
+    if (bctx.connectionConnected.value) {
+      try {
+        const data = await (await import('@/workbench/sdeApi')).sdeGetWorkspaceDocument(bctx.connectionApiBase.value, bctx.connectionToken.value)
+        if (data) {
+          const result = await parserRegistry.detectAndParse(data)
+          if (result.document) {
+            bctx.doc.value = result.document
+            bctx.structEpoch.value += 1
+            bctx.workspaceMode.value = 'sde'
+          }
+        }
+      } catch { /* ignore */ }
     }
   } else if (import.meta.env.DEV) {
     const q = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
     const sceneId = q?.get('sceneId')
     if (sceneId) {
-      try { await scene.loadBuiltinScene(sceneId) } catch { /* ignore */ }
+      try { await bctx.operators.exec('OPERATOR_LOAD_BUILTIN', { sceneId }) } catch { /* ignore */ }
     }
   }
 })
@@ -157,7 +165,7 @@ onBeforeUnmount(() => {
 
 
 logCenter.injectStateRefs({
-  scene: () => scene.scene.value?.toRaw() as any,
+  scene: () => bctx.doc.value?.toRaw() as any,
   selection: () => [...selection.items.value],
   toolRegistry: () => ({
     activeToolId: toolRegistry.activeTool.value?.id ?? 'none',

@@ -6,11 +6,11 @@
  */
 import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
-import type { SceneContext } from '@/workbench/sceneContext'
 import type { SelectionContext } from '@/workbench/selectionContext'
 import type { UndoManager } from '@/workbench/editHistoryContext'
 import type { ToolRegistry } from '@/workbench/toolRegistry'
-import type { ConnectionContext } from '@/workbench/connectionContext'
+import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
+import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { View3DConfig } from '@/preview/previewConfig'
@@ -28,6 +28,7 @@ import type { BlockStatRow } from '@/render/interaction/blockStats'
 import type { Annotation } from '@/render/data/annotationTypes'
 
 export type LoadStatus = 'loading' | 'ok' | 'error'
+export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle'
 
 export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
@@ -85,11 +86,29 @@ export interface ViewportManager {
 }
 
 export interface BContext {
-  scene: SceneContext
+  // === 场景核心数据（原 SceneContext） ===
+  doc: Ref<RuntimeDocument | null>
+  dirty: Ref<boolean>
+  structEpoch: Ref<number>
+  currentWorldFrameIndex: Ref<number>
+  workspaceMode: Ref<WorkbenchWorkspaceMode>
+  localFileName: Ref<string | null>
+  markDirty(): void
+  markStructureDirty(): void
+  markClean(): void
+
+  // === 连接数据（原 ConnectionContext） ===
+  connectionApiBase: Ref<string>
+  connectionToken: Ref<string>
+  connectionConnected: Ref<boolean | null>
+  connectionExports: Ref<ExportFileInfo[]>
+  connectionExportsLoading: Ref<boolean>
+  connectionSelectedExportName: Ref<string | null>
+
+  // === 子系统 ===
   selection: SelectionContext
   editHistory: UndoManager
   toolRegistry: ToolRegistry
-  connection: ConnectionContext
   queries: BContextQueries
   settings: BContextSettings
   operators: {

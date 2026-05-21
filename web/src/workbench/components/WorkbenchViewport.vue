@@ -5,6 +5,7 @@ import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
 import type { View3DConfig } from '@/preview/previewConfig'
+import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import { useSelectionContext } from '@/workbench/selectionContext'
 import { useBContext, type LoadStatus } from '@/workbench/context/bContext'
 import { createSceneLifecycle } from '@/workbench/context/sceneLifecycle'
@@ -17,7 +18,10 @@ import type { Ref, ShallowRef } from 'vue'
 import * as THREE from 'three'
 
 const props = defineProps<{
-  config: View3DConfig
+  materialLibrary: MaterialLibraryApi
+  sceneBackground: number
+  showAxesGizmo: boolean
+  structEpoch: number
 }>()
 
 const selection = useSelectionContext()
@@ -26,8 +30,7 @@ const bctx = useBContext()
 defineEmits<{}>()
 
 // ---- Initialize rendering lifecycle on bctx ----
-bctx.config.value = props.config
-bctx.materialLibrary.value = props.config.materialLibrary
+bctx.materialLibrary.value = props.materialLibrary
 
 const VIEWPORT_REGION_ID = 'r-viewport'
 const vpSlot = bctx.viewports.get(VIEWPORT_REGION_ID) ?? bctx.viewports.register(VIEWPORT_REGION_ID)
@@ -66,8 +69,9 @@ Object.assign(bctx, {
   blockStatsEntries: lifecycle.computed.blockStatsEntries,
 })
 
-watch(() => props.config, async (cfg) => {
-  try { await bctx.reloadFromConfig(cfg) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logCenter.error('WorkbenchViewport', `reloadFromConfig: ${e}`) }
+watch(() => props.structEpoch, async () => {
+  if (!bctx.config.value) return
+  try { await bctx.reloadFromConfig?.(bctx.config.value) } catch (e) { console.error('[Workbench] reloadFromConfig', e); logCenter.error('WorkbenchViewport', `reloadFromConfig: ${e}`) }
 })
 
 const {
@@ -184,7 +188,7 @@ let _annoHash = ''
 let _annoPending = false
 
 function updateAnnotationOverlay(): void {
-  const doc = bctx.scene.scene.value as Record<string, any> | null
+  const doc = bctx.doc.value as Record<string, any> | null
   const annos: Annotation[] = doc?.annotations ?? []
   const maxUpdated = annos.length > 0
     ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
@@ -309,8 +313,8 @@ onBeforeUnmount(() => {
       :material-library="materialLibrary"
       :content-group="mainMeshGroup"
       :layer-preview-mode="layerPreviewMode"
-      :scene-background="config.sceneBackground"
-      :show-axes-gizmo="config.features.showAxesGizmo !== false"
+      :scene-background="props.sceneBackground"
+      :show-axes-gizmo="props.showAxesGizmo"
       @ready="onViewportReady"
     />
     </div>

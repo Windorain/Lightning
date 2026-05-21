@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import EmbedViewport from '@/embed/EmbedViewport.vue'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import { useBContext } from '@/workbench/context/bContext'
 import { sceneInfoPanel, wikiConfigPanel, blockStatsPanel } from '@/workbench/ux/panels'
 import type { View3DConfig } from '@/preview/previewConfig'
+import { view3DConfigFromDocument } from '@/preview/previewFromDocument'
 
 const bctx = useBContext()
-const wikiConfig = bctx.wikiConfig as any
+const wikiConfig = bctx.wikiConfig as Record<string, any>
 
 const wikiPanels = [sceneInfoPanel, wikiConfigPanel, blockStatsPanel]
 
@@ -17,40 +18,53 @@ const activeWikiPanels = computed(() =>
     .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
+const embedConfig = ref<View3DConfig | null>(null)
+const renderKey = ref(0)
+let _buildSeq = 0
+
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
   if (!m) return 0x5a5a5a
   return parseInt(m[1], 16)
 }
 
-const mergedConfig = computed<View3DConfig | null>(() => {
-  const c = bctx.scene.previewConfig.value
-  if (!c) return null
-  return {
-    ...c,
-    features: { ...c.features, ...wikiConfig.features },
-    debug: wikiConfig.features.debugStatusBar,
-    sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex),
-    blockIconCacheOptions: {
-      ...c.blockIconCacheOptions,
-      sizePx: wikiConfig.iconSizePx,
-      orthoHalf: wikiConfig.iconOrthoHalf,
-    },
-    initialCamera: {
-      ...c.initialCamera,
-      yawDeg: wikiConfig.cameraYaw,
-      elevationDeg: wikiConfig.cameraElevation,
-      zoom: wikiConfig.cameraZoom,
-    },
-  }
-})
+async function buildEmbedConfig(): Promise<void> {
+  const doc = bctx.doc.value?.toRaw()
+  if (!doc) { embedConfig.value = null; return }
+  const seq = ++_buildSeq
+  try {
+    const cfg = await view3DConfigFromDocument({ ...doc as Record<string, unknown> })
+    if (seq !== _buildSeq) return
+    embedConfig.value = {
+      ...cfg,
+      features: { ...cfg.features, ...(wikiConfig.features ?? {}) },
+      debug: wikiConfig.features?.debugStatusBar ?? false,
+      sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex ?? '#5a5a5a'),
+      blockIconCacheOptions: {
+        ...cfg.blockIconCacheOptions,
+        sizePx: wikiConfig.iconSizePx ?? cfg.blockIconCacheOptions?.sizePx,
+        orthoHalf: wikiConfig.iconOrthoHalf ?? cfg.blockIconCacheOptions?.orthoHalf,
+      },
+      initialCamera: {
+        ...cfg.initialCamera,
+        yawDeg: wikiConfig.cameraYaw ?? cfg.initialCamera?.yawDeg,
+        elevationDeg: wikiConfig.cameraElevation ?? cfg.initialCamera?.elevationDeg,
+        zoom: wikiConfig.cameraZoom ?? cfg.initialCamera?.zoom,
+      },
+    }
+    renderKey.value += 1
+  } catch { embedConfig.value = null }
+}
+
+// Rebuild on doc or materialLibrary change
+watch([() => bctx.doc.value, () => bctx.materialLibrary.value], () => { void buildEmbedConfig() }, { immediate: true })
 </script>
 
 <template>
   <div class="ww-root">
     <div class="ww-preview-wrap">
-      <div class="ww-preview" :style="{ width: `${wikiConfig.viewWidth}px`, height: `${wikiConfig.viewHeight}px` }">
-        <EmbedViewport v-if="mergedConfig" :key="bctx.scene.previewEpoch.value" :config="mergedConfig" />
+      <div class="ww-preview" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }">
+        <EmbedViewport v-if="embedConfig" :key="renderKey" :config="embedConfig" />
         <div v-else class="ww-placeholder">No scene loaded</div>
       </div>
     </div>

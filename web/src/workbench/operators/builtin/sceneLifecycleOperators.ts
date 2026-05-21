@@ -1,4 +1,11 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
+import { RuntimeDocument } from '@/workbench/context/runtimeDocument'
+import { parserRegistry } from '@/workbench/context/parserRegistry'
+import { getDevSceneDocument } from '@/dev/devScenes'
+import { downloadJson } from '@/util/browser'
+import { suggestedJsonBaseName } from '@/workbench/utils/sceneHelpers'
+import { logCenter } from '@/workbench/logging/LogCenter'
+import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
 
 function pickFile(): Promise<File | undefined> {
   return new Promise(resolve => {
@@ -10,7 +17,6 @@ function pickFile(): Promise<File | undefined> {
       resolve(input.files?.[0])
     }
     const onFocus = () => {
-      // Dialog closed; if no file was selected, treat as cancel
       setTimeout(() => {
         if (!input.files?.length) {
           cleanup()
@@ -34,16 +40,16 @@ export const NewSceneOperator: OperatorType = {
   },
 
   async exec(bctx, _props) {
-    if (bctx.scene.dirty.value) {
+    if (bctx.dirty.value) {
       const confirmFn = bctx.settings.confirmDirty ?? window.confirm
-      const ok = confirmFn('当前场景有未保存的修改，是否保存？')
-      if (ok) {
-        await bctx.operators.exec('OPERATOR_SAVE_FILE')
-      }
+      if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
+      await bctx.operators.exec('OPERATOR_SAVE_FILE')
     }
     bctx.selection.clear()
     bctx.editHistory.clear()
-    await bctx.scene.newScene()
+    bctx.doc.value = RuntimeDocument.empty()
+    bctx.dirty.value = false
+    bctx.structEpoch.value += 1
   },
 }
 
@@ -62,16 +68,33 @@ export const OpenSceneOperator: OperatorType = {
       file = await pickFile()
       if (!file) return
     }
-    if (bctx.scene.dirty.value) {
+    if (bctx.dirty.value) {
       const confirmFn = bctx.settings.confirmDirty ?? window.confirm
-      const ok = confirmFn('当前场景有未保存的修改，是否保存？')
-      if (ok) {
-        await bctx.operators.exec('OPERATOR_SAVE_FILE')
-      }
+      if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
+      await bctx.operators.exec('OPERATOR_SAVE_FILE')
     }
     bctx.selection.clear()
     bctx.editHistory.clear()
-    await bctx.scene.loadSceneFromFile(file)
+    const text = await file.text()
+    let data: unknown
+    try {
+      data = JSON.parse(text)
+    } catch (e) {
+      throw new Error(`JSON 解析失败：${e}`)
+    }
+    const result = await parserRegistry.detectAndParse(data)
+    bctx.doc.value = result.document ?? null
+    if (result.document) {
+      bctx.currentWorldFrameIndex.value = 0
+      bctx.structEpoch.value += 1
+      const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
+      logCenter.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
+    } else {
+      logCenter.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
+    }
+    bctx.localFileName.value = file.name
+    bctx.workspaceMode.value = 'local-file'
+    bctx.dirty.value = false
   },
 }
 
@@ -81,11 +104,15 @@ export const SaveFileOperator: OperatorType = {
   description: '将当前场景保存到本地文件',
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
-  async exec(bctx, _props) {
-    await bctx.scene.saveToFile()
+  exec(bctx, _props) {
+    const doc = bctx.doc.value?.toRaw()
+    if (!doc) return
+    const baseName = suggestedJsonBaseName(bctx.localFileName.value, 'structure-export')
+    downloadJson(baseName, doc, true)
+    bctx.dirty.value = false
   },
 }
 
@@ -100,8 +127,22 @@ export const LoadBuiltinSceneOperator: OperatorType = {
 
   async exec(bctx, _props) {
     const sceneId = _props.sceneId as string | undefined
+    const id = sceneId && sceneId.length > 0 ? sceneId : DEFAULT_PREVIEW_SCENE_ID
+    const raw = getDevSceneDocument(id)
     bctx.selection.clear()
     bctx.editHistory.clear()
-    await bctx.scene.loadBuiltinScene(sceneId)
+    const result = await parserRegistry.detectAndParse(raw)
+    bctx.doc.value = result.document ?? null
+    if (result.document) {
+      bctx.currentWorldFrameIndex.value = 0
+      bctx.structEpoch.value += 1
+      const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
+      logCenter.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
+    } else {
+      logCenter.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
+    }
+    bctx.workspaceMode.value = 'local-bundle'
+    bctx.localFileName.value = `示例 · ${id}.json`
+    bctx.dirty.value = false
   },
 }

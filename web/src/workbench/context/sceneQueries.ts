@@ -31,7 +31,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       if (!result || result.kind !== 'block') return null
 
       // 从 RuntimeDocument Grid 获取 height 以转换 cellGrid row → world Y
-      const doc = bctx.scene.scene.value
+      const doc = bctx.doc.value
       const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
       const h = rf?.grid?.height ?? 0
       const worldY = h > 0 ? h - 1 - result.row : result.row
@@ -43,7 +43,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     getCurrentFrame(): Frame | null {
-      const doc = bctx.scene.scene.value
+      const doc = bctx.doc.value
       if (!doc) return null
       const idx = bctx.selection.frameIndex.value ?? 0
       const rf = doc.frame(idx)
@@ -52,7 +52,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     getFrameBlocks(): BlockRef[] {
-      const doc = bctx.scene.scene.value
+      const doc = bctx.doc.value
       if (!doc) return []
       const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
       if (!rf?.grid) return []
@@ -63,7 +63,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     getDocument(): Record<string, any> | null {
-      return bctx.scene.scene.value?.serialize() ?? null
+      return bctx.doc.value?.serialize() ?? null
     },
 
     axisAdd(
@@ -83,7 +83,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null {
-      const doc = bctx.scene.scene.value
+      const doc = bctx.doc.value
       if (!doc) return null
       const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
       if (!rf?.grid) return null

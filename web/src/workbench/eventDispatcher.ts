@@ -54,7 +54,7 @@ interface RegionEventSystem {
   handlerChain: RegionEventHandler[]
 }
 
-class EventDispatcherImpl {
+export class EventDispatcherImpl {
   private _regionSystems = new Map<string, RegionEventSystem>()
   /** 最后鼠标所在的 region（键盘事件路由目标） */
   private _activeRegionId: string | null = null

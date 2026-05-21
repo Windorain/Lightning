@@ -1,26 +1,49 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-
+import {
+  sdePing,
+  sdeListExports,
+  sdeGetWorkspaceDocument,
+} from '@/workbench/sdeApi'
+import { parserRegistry } from '@/workbench/context/parserRegistry'
 import { useBContext } from '@/workbench/context/bContext'
 
 const bctx = useBContext()
 const statusMessage = bctx.statusMessage
 
-const connectionOk = computed(() => bctx.connection.connected.value)
+const connectionOk = computed(() => bctx.connectionConnected.value)
 const connectionMessageText = computed(() => statusMessage.value)
-const showConnectionHint = computed(() => bctx.connection.connected.value !== null)
+const showConnectionHint = computed(() => bctx.connectionConnected.value !== null)
 
 async function onConnect(): Promise<void> {
-  await bctx.connection.testConnection()
-  if (bctx.connection.connected.value && bctx.connection.apiBase.value) {
-    await bctx.connection.refreshExportList()
+  bctx.connectionConnected.value = null
+  if (!bctx.connectionApiBase.value) {
+    bctx.connectionConnected.value = false
+    return
+  }
+  try {
+    await sdePing(bctx.connectionApiBase.value, bctx.connectionToken.value)
+    bctx.connectionConnected.value = true
+    bctx.connectionExportsLoading.value = true
+    try {
+      bctx.connectionExports.value = await sdeListExports(bctx.connectionApiBase.value, bctx.connectionToken.value)
+    } catch { bctx.connectionExports.value = [] }
+    finally { bctx.connectionExportsLoading.value = false }
+
     bctx.selection.clear()
     bctx.editHistory.clear()
-    const data = await bctx.connection.fetchWorkspaceData()
-    if (data) {
-      await bctx.scene.loadFromData(data)
+    const data = await sdeGetWorkspaceDocument(bctx.connectionApiBase.value, bctx.connectionToken.value)
+    if (data && Object.keys(data as Record<string, unknown>).length > 0) {
+      const result = await parserRegistry.detectAndParse(data)
+      bctx.doc.value = result.document ?? null
+      if (result.document) {
+        bctx.currentWorldFrameIndex.value = 0
+        bctx.structEpoch.value += 1
+      }
+      bctx.workspaceMode.value = 'sde'
+      bctx.dirty.value = false
     }
-  }
+  } catch { bctx.connectionConnected.value = false }
 }
 </script>
 
@@ -30,11 +53,11 @@ async function onConnect(): Promise<void> {
     <p class="dash-card__desc">填写游戏内 <code class="dash-code">/sde web</code> 打印的地址与 Token，与 <code class="dash-code">structure_exports</code> 目录同步。</p>
     <label class="dash-field">
       <span class="dash-field__label">API 基址</span>
-      <input v-model="bctx.connection.apiBase" class="dash-input" type="text" autocomplete="off" placeholder="http://127.0.0.1:37564" />
+      <input v-model="bctx.connectionApiBase" class="dash-input" type="text" autocomplete="off" placeholder="http://127.0.0.1:37564" />
     </label>
     <label class="dash-field">
       <span class="dash-field__label">Token</span>
-      <input v-model="bctx.connection.token" class="dash-input" type="password" autocomplete="off" placeholder="Bearer" />
+      <input v-model="bctx.connectionToken" class="dash-input" type="password" autocomplete="off" placeholder="Bearer" />
     </label>
     <div class="dash-row">
       <button type="button" class="dash-btn dash-btn--primary" @click="onConnect">连接并刷新</button>
