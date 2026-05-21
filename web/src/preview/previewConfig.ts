@@ -16,7 +16,7 @@ export interface InitialCamera {
 }
 
 /** 功能块开关 */
-export interface PreviewFeatures {
+export interface View3DFeatures {
   blockStatsSidebar: boolean
   layerBar: boolean
   frameControls: boolean
@@ -25,7 +25,7 @@ export interface PreviewFeatures {
   showAxesGizmo: boolean
 }
 
-export const ALL_FEATURES_OFF: PreviewFeatures = {
+export const ALL_FEATURES_OFF: View3DFeatures = {
   blockStatsSidebar: false,
   layerBar: false,
   frameControls: false,
@@ -35,14 +35,14 @@ export const ALL_FEATURES_OFF: PreviewFeatures = {
 }
 
 /**
- * 预览壳（`AppShell`）唯一入口：由 `loadPreviewSessionFromDocument` / `resolveBootstrapToPreviewConfig`
+ * 预览壳（`AppShell`）唯一入口：由 `loadPreviewSessionFromDocument` / `resolveBootstrapToView3DConfig`
  * 自场景 document 生成。几何与顶栏所读**场景真源**为 `renderBundle.document`（已 normalize，与材质库同批构建）。
  */
-export interface PreviewConfig {
+export interface View3DConfig {
   sceneId: string
   renderBundle: RenderBundle
   materialLibrary: MaterialLibraryApi
-  features: PreviewFeatures
+  features: View3DFeatures
   blockIconCacheOptions: BlockIconCacheOptions
   initialLayerWorldY: number
   /** World 文档时：首次加载要展示的 `frames` 下标；缺省按文档 `playback` 解析 */
@@ -56,7 +56,38 @@ export interface PreviewConfig {
   debug: boolean
 }
 
-export const defaultEmbedUi: Omit<PreviewConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
+/**
+ * EmbedSettings — 嵌入视口的渲染配置。
+ * 从 View3DConfig 拆解出渲染端所需字段，不含 renderBundle / materialLibrary。
+ */
+export interface EmbedSettings {
+  features: View3DFeatures
+  blockIconCacheOptions: BlockIconCacheOptions
+  initialLayerWorldY: number
+  initialWorldFrameIndex?: number
+  initialCamera?: InitialCamera
+  sceneBackground: number
+  loadingMessage: string
+  okMessage: (modelId: string) => string
+  debug: boolean
+}
+
+/** 从 View3DConfig 提取 EmbedSettings */
+export function embedSettingsFromConfig(cfg: View3DConfig): EmbedSettings {
+  return {
+    features: cfg.features,
+    blockIconCacheOptions: cfg.blockIconCacheOptions,
+    initialLayerWorldY: cfg.initialLayerWorldY,
+    initialWorldFrameIndex: cfg.initialWorldFrameIndex,
+    initialCamera: cfg.initialCamera,
+    sceneBackground: cfg.sceneBackground,
+    loadingMessage: cfg.loadingMessage,
+    okMessage: cfg.okMessage,
+    debug: cfg.debug,
+  }
+}
+
+export const defaultEmbedUi: Omit<View3DConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
   features: {
     blockStatsSidebar: false,
     layerBar: false,

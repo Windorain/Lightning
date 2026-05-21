@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
-import { PreviewSceneContextKey } from '@/preview/sceneStore'
+import { computed, ref, watch } from 'vue'
 
-const store = inject(PreviewSceneContextKey)
-if (!store) throw new Error('LayerPreviewBar: PreviewSceneContext missing')
+const props = defineProps<{
+  gridHeight: number
+  meshBusy: boolean
+  layerWorldY: number
+  layerPreviewLabel: string
+}>()
 
-const { layerPreviewLabel, sizeRow: sizeRowRef, meshBusy } = store
+const emit = defineEmits<{
+  'update:layerY': [value: number]
+}>()
 
-const localY = ref<number>(store.layerWorldY.value)
+const localY = ref<number>(props.layerWorldY)
 
-// 非 busy 时同步 store 值到本地
-watch(() => store!.layerWorldY.value, (v) => {
-  if (!meshBusy.value) localY.value = v
+watch(() => props.layerWorldY, (v) => {
+  if (!props.meshBusy) localY.value = v
 })
 
-const maxY = computed(() => Math.max(0, sizeRowRef.value - 1))
+const maxY = computed(() => Math.max(0, props.gridHeight - 1))
 
 function onInput(e: Event): void {
   localY.value = Number((e.target as HTMLInputElement).value)
@@ -23,12 +27,12 @@ function onInput(e: Event): void {
 function onChange(e: Event): void {
   const v = Number((e.target as HTMLInputElement).value)
   localY.value = v
-  store!.layerWorldY.value = v
+  emit('update:layerY', v)
 }
 </script>
 
 <template>
-  <div v-if="sizeRowRef > 0" class="wm-layer-bar">
+  <div v-if="gridHeight > 0" class="wm-layer-bar">
     <label class="wm-layer-label" for="wm-layer-range">分层预览</label>
     <div class="nei-slider">
       <div class="nei-slider__track" />

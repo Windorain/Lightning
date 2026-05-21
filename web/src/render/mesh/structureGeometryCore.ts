@@ -16,7 +16,6 @@ import type {
 import { isAirState } from '../schema/types'
 import { decodeBakedGeometry } from './bakedGeometryDecode'
 import { vec3ToFaceNameComponents } from './facingMap'
-
 export interface StructureGeometryGatherOptions {
   layerPreview?: LayerPreviewMode
   /**
@@ -32,6 +31,11 @@ export interface StructureGeometryGatherOptions {
     labels: Int32Array
     componentId: number
   }
+  /**
+   * 可选的 BlockHandler 列表，替代内建的 renderMode 分支。
+   * 传入后不再走 BakedModel/BlockModel 硬编码分发。
+   */
+  handlers?: import('./providerTypes').BlockHandler[]
 }
 
 export interface UndefinedBlockDetail {
@@ -299,12 +303,34 @@ export function collectStructureGeometryPiecesPure(
   const { blockPalette, materialPalette } = def
   const compGather = options?.componentGather
   const cullOccluded = compGather !== undefined ? true : options?.cullOccludedQuads !== false
+  const handlers = options?.handlers
 
   let quadSerial = 0
   const pieces: BakedQuadGeometryPiece[] = []
   let nonAirVoxelCount = 0
   let skippedUnmappedCount = 0
   const undefinedDetails = new Map<string, UndefinedBlockDetail>()
+
+  /** Resolve quads for a block entry via handlers (preferred) or legacy hardcoded branches */
+  function resolveQuads(entry: import('../schema/types').BlockPaletteEntry): { quads: import('../schema/types').BakedQuad[] } | { error: string } {
+    if (handlers) {
+      const h = handlers.find((x) => x.canRender(entry))
+      if (!h) return { error: 'unmapped' }
+      const out = h.render(entry, {
+        column: 0, row: 0, zSlice: 0,
+        sizeColumn, sizeRow, sizeZSlice,
+      })
+      if (out.kind === 'quads') return { quads: out.quads }
+      if (out.kind === 'none') return { quads: [] }
+      // object3d from handler not supported in this collector — caller handles separately
+      return { quads: [] }
+    }
+    try {
+      return { quads: decodeBakedGeometry(entry.geometry) }
+    } catch {
+      return { error: 'decode_error' }
+    }
+  }
 
   for (let zSlice = 0; zSlice < sizeZSlice; zSlice++) {
     for (let row = 0; row < sizeRow; row++) {
@@ -320,32 +346,19 @@ export function collectStructureGeometryPiecesPure(
         nonAirVoxelCount++
         const idx = def.cellGrid[zSlice][row][col]
         const entry = blockPalette[idx]
-        if (entry.renderMode === 'Special') {
+        const resolved = resolveQuads(entry)
+        if ('error' in resolved) {
           skippedUnmappedCount++
           const k = `${entry.registryId}@${entry.meta}`
           const prev = undefinedDetails.get(k)
           undefinedDetails.set(k, {
             registryKey: k,
-            reason: 'special_no_geometry',
+            reason: resolved.error === 'decode_error' ? 'decode_error' : 'special_no_geometry',
             voxelCount: (prev?.voxelCount ?? 0) + 1,
           })
           continue
         }
-
-        let quads: BakedQuad[]
-        try {
-          quads = decodeBakedGeometry(entry.geometry)
-        } catch {
-          skippedUnmappedCount++
-          const k = `${entry.registryId}@${entry.meta}`
-          const prev = undefinedDetails.get(k)
-          undefinedDetails.set(k, {
-            registryKey: k,
-            reason: 'decode_error',
-            voxelCount: (prev?.voxelCount ?? 0) + 1,
-          })
-          continue
-        }
+        const quads = resolved.quads
 
         for (let qi = 0; qi < quads.length; qi++) {
           const q = quads[qi]

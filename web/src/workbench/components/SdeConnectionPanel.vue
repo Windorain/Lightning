@@ -1,21 +1,32 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { sdeGetWorkspaceDocument } from '@/workbench/sdeApi'
+import { parserRegistry } from '@/workbench/context/parserRegistry'
+import { useBContext } from '@/workbench/context/bContext'
 
-import { useConnectionContext } from '@/workbench/connectionContext'
-import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
+const bctx = useBContext()
+const statusMessage = bctx.statusMessage
 
-const conn = useConnectionContext()
-const { statusMessage } = useStatusMessage()
-
-const connectionOk = computed(() => conn.connected.value)
+const connectionOk = computed(() => bctx.connectionConnected.value)
 const connectionMessageText = computed(() => statusMessage.value)
-const showConnectionHint = computed(() => conn.connected.value !== null)
+const showConnectionHint = computed(() => bctx.connectionConnected.value !== null)
 
 async function onConnect(): Promise<void> {
-  await conn.testConnection()
-  if (conn.connected.value && conn.apiBase.value) {
-    await conn.refreshExportList()
-    await conn.pullFromServer()
+  await bctx.operators.exec('OPERATOR_SDE_CONNECT')
+  if (!bctx.connectionConnected.value) return
+
+  const data = await sdeGetWorkspaceDocument(bctx.connectionApiBase.value, bctx.connectionToken.value)
+  if (!data || Object.keys(data as Record<string, unknown>).length === 0) return
+
+  bctx.selection.clear()
+  bctx.editHistory.clear()
+  const result = await parserRegistry.detectAndParse(data)
+  if (result.document) {
+    bctx.doc.value = result.document
+    bctx.currentWorldFrameIndex.value = 0
+    bctx.structEpoch.value += 1
+    bctx.workspaceMode.value = 'sde'
+    bctx.dirty.value = false
   }
 }
 </script>
@@ -26,11 +37,11 @@ async function onConnect(): Promise<void> {
     <p class="dash-card__desc">填写游戏内 <code class="dash-code">/sde web</code> 打印的地址与 Token，与 <code class="dash-code">structure_exports</code> 目录同步。</p>
     <label class="dash-field">
       <span class="dash-field__label">API 基址</span>
-      <input v-model="conn.apiBase" class="dash-input" type="text" autocomplete="off" placeholder="http://127.0.0.1:37564" />
+      <input v-model="bctx.connectionApiBase" class="dash-input" type="text" autocomplete="off" placeholder="http://127.0.0.1:37564" />
     </label>
     <label class="dash-field">
       <span class="dash-field__label">Token</span>
-      <input v-model="conn.token" class="dash-input" type="password" autocomplete="off" placeholder="Bearer" />
+      <input v-model="bctx.connectionToken" class="dash-input" type="password" autocomplete="off" placeholder="Bearer" />
     </label>
     <div class="dash-row">
       <button type="button" class="dash-btn dash-btn--primary" @click="onConnect">连接并刷新</button>

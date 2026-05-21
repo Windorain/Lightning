@@ -633,7 +633,7 @@ public final class MeshCaptureService {
             } catch (Exception ignored) {
                 // Thumbnail failure shouldn't block geometry export
             }
-            p.addProperty("renderMode", "BakedQuads");
+            p.addProperty("renderMode", "BakedModel");
             p.add("geometry", deepCopyJsonObject(geometryForFinal.get(fi)));
             p.addProperty(
                 "occludesAdjacentFaces",
@@ -688,7 +688,7 @@ public final class MeshCaptureService {
         JsonObject p = new JsonObject();
         p.addProperty("registryId", "air");
         p.addProperty("meta", 0);
-        p.addProperty("renderMode", "BakedQuads");
+        p.addProperty("renderMode", "BakedModel");
         p.add("geometry", emptyGeometryJson());
         p.addProperty("occludesAdjacentFaces", false);
         p.add("nbt", JsonNull.INSTANCE);

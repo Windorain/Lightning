@@ -1,65 +1,27 @@
 /**
- * 单一加载阶段：自内嵌 Base64 池解码 PNG，构造 SimpleMaterialLibrary（零 HTTP）。
+ * 预览加载 helpers。
+ *
+ * `loadPreviewSessionFromDocument` 保留用于外部 SDK 向后兼容；
+ * 解压 + 校验通过，材质库由 renderAssets 内部按需构建。
  */
-
-import * as THREE from 'three'
-
 import { normalizeEnvelopeToPlain } from '@/render/data/compactSceneDocument'
-import {
-  buildMaterialRegistryFromSceneDocument,
-  validateRenderBundle,
-} from '@/render/data/bundleResolve'
-import {
-  hydrateMaterialBlendsInSceneDocument,
-  listPaletteTextureDataUrls,
-} from '@/render/data/sceneDocumentMaterialHydrate'
-import { SimpleMaterialLibrary, type MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
+import { validatePackedSceneDocument } from '@/render/data/bundleResolve'
 import type { RenderBundle } from '@/render/schema/types'
-import { formatUnknownError } from '@/util/formatUnknownError'
 
 /** 默认 dev 场景文件名（无 URL 参数时）：`data/scenes/<id>.json` */
 export const DEFAULT_PREVIEW_SCENE_ID = 'export'
 
 export interface PreviewSessionResult {
   renderBundle: RenderBundle
-  materialLibrary: MaterialLibraryApi
-}
-
-function loadTextureDataUrl(loader: THREE.TextureLoader, dataUrl: string): Promise<THREE.Texture> {
-  return new Promise((resolve, reject) => {
-    loader.load(dataUrl, resolve, undefined, reject)
-  })
 }
 
 /**
- * 由打包场景 document（StructureData | World）构建 **PreviewConfig 核心载荷**：
- * `renderBundle`（`document` 为 normalize 后值）+ 预载 `materialLibrary`。
- * `AppShell` / `createPreviewSceneStore` 只消费 `PreviewConfig` 中这两部分 + UI 开关。
+ * 由打包场景 document 构建 RenderBundle（normalize + validate）。
+ * 材质库不在此时构建——由 renderAssets 内部按需调用 buildMaterialLibrary。
  */
 export async function loadPreviewSessionFromDocument(document: unknown): Promise<PreviewSessionResult> {
   const normalized = await normalizeEnvelopeToPlain(document)
+  validatePackedSceneDocument(normalized)
   const renderBundle: RenderBundle = { document: normalized }
-  validateRenderBundle(renderBundle)
-
-  const loader = new THREE.TextureLoader()
-  const fetchList = listPaletteTextureDataUrls(normalized)
-  const textures = await Promise.all(
-    fetchList.map(async ({ materialId, dataUrl }) => {
-      try {
-        const tex = await loadTextureDataUrl(loader, dataUrl)
-        return [materialId, tex] as const
-      } catch (e) {
-        throw new Error(
-          `解码 textureBlobs 项失败（materialId=${materialId}）：${formatUnknownError(e)}`,
-        )
-      }
-    }),
-  )
-
-  const preloaded = new Map<string, THREE.Texture>(textures)
-  hydrateMaterialBlendsInSceneDocument(normalized, preloaded)
-  const registry = buildMaterialRegistryFromSceneDocument(normalized)
-  const materialLibrary = new SimpleMaterialLibrary(registry, preloaded)
-
-  return { renderBundle, materialLibrary }
+  return { renderBundle }
 }

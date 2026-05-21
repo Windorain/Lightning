@@ -114,8 +114,18 @@ export async function buildBlockMesh(
     const geoms = bucket.units.map((x) => x.geom)
     const merged = mergeGeometries(geoms, false)
     if (!merged) continue
+
+    // Build per-triangle block identity map for scenePick
+    const triangleMap: Array<{ col: number; row: number; zSlice: number }> = []
+    for (const unit of bucket.units) {
+      const faceCount = unit.geom.attributes.position.count / 3
+      for (let f = 0; f < faceCount; f++) {
+        triangleMap.push({ col: unit.col, row: unit.row, zSlice: unit.zSlice })
+      }
+    }
     const mat = await library.getMaterialForBatch(bucket.descriptor)
     const mesh = new THREE.Mesh(merged, mat)
+    mesh.userData.triangleMap = triangleMap
     const minOrder = bucket.units.reduce((m, u) => Math.min(m, u.quadOrder), Number.POSITIVE_INFINITY)
     mesh.renderOrder = Number.isFinite(minOrder) ? Math.floor(minOrder) : batchIdx
     group.add(mesh)

@@ -1,5 +1,5 @@
 /**
- * 材质库：使用已预取的纹理与 MaterialRegistryData（由 StructureData / World 各帧 materialPalette 汇总）中的动画描述，创建 MeshStandardMaterial。
+ * 材质库：使用已预取的纹理与 MaterialRegistryData（由 StructureData / World 各帧 materialPalette 汇总）中的动画描述，创建 MeshBasicMaterial。
  * 不在此模块内发起网络请求。
  */
 
@@ -16,7 +16,7 @@ import type { MaterialBlendMode, MaterialEntry, MaterialRegistryData } from '../
 /** 嵌入/预览配置中使用的材质库公开接口（避免 Vue 模板对 class 私有字段的推断问题） */
 export interface MaterialLibraryApi {
   tick(deltaMs: number): void
-  getMaterialForBatch(descriptor: BatchDescriptor): Promise<THREE.MeshStandardMaterial>
+  getMaterialForBatch(descriptor: BatchDescriptor): Promise<THREE.MeshBasicMaterial>
   dispose(): void
   /** 一旦为 true，进行中的 buildBlockMesh 应放弃结果，不再挂场景 */
   isDisposed(): boolean
@@ -27,36 +27,23 @@ function createFaceMaterial(
   tint: THREE.Color,
   blend: MaterialBlendMode,
   useVertexColor: boolean,
-): THREE.MeshStandardMaterial {
+): THREE.MeshBasicMaterial {
   const baseColor = useVertexColor ? new THREE.Color(0xffffff) : tint
   if (blend === 'cutout' || blend === 'translucent') {
     const cutout = blend === 'cutout'
-    return new THREE.MeshStandardMaterial({
+    return new THREE.MeshBasicMaterial({
       map: tex,
       color: baseColor,
       vertexColors: useVertexColor,
       transparent: true,
       alphaTest: cutout ? 0.5 : 0,
-      /**
-       * 体素结构以 batch mesh 为单位排序，无法按像素排序半透明；不写深度会导致透明与不透明邻接处错乱。
-       * 与邻面剔除配合，多层纯玻璃重叠已减少；真流体等若需可后续单独材质策略。
-       */
       depthWrite: true,
-      roughness: 0.85,
-      metalness: 0.05,
-      /** 透明批次与不透明均开 offset 时共面处易错乱；透明单独关闭 */
-      polygonOffset: false,
     })
   }
-  return new THREE.MeshStandardMaterial({
+  return new THREE.MeshBasicMaterial({
     map: tex,
     color: baseColor,
     vertexColors: useVertexColor,
-    roughness: 0.85,
-    metalness: 0.05,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
   })
 }
 
@@ -169,7 +156,7 @@ function configureTextureForEntry(
 export class SimpleMaterialLibrary implements MaterialLibraryApi {
   private readonly textureByMaterialId = new Map<string, THREE.Texture>()
 
-  private readonly materialByBatchKey = new Map<string, THREE.MeshStandardMaterial>()
+  private readonly materialByBatchKey = new Map<string, THREE.MeshBasicMaterial>()
 
   private readonly tickFns: Array<(dtMs: number) => void> = []
 
@@ -204,7 +191,7 @@ export class SimpleMaterialLibrary implements MaterialLibraryApi {
     return this.disposed
   }
 
-  async getMaterialForBatch(descriptor: BatchDescriptor): Promise<THREE.MeshStandardMaterial> {
+  async getMaterialForBatch(descriptor: BatchDescriptor): Promise<THREE.MeshBasicMaterial> {
     if (this.disposed) {
       throw new Error('MaterialLibrary 已释放')
     }

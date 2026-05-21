@@ -1,26 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import { useSceneContext } from '@/workbench/sceneContext'
-import { useConnectionContext } from '@/workbench/connectionContext'
-import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
+import { useBContext } from '@/workbench/context/bContext'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
-const scene = useSceneContext()
-const conn = useConnectionContext()
-const { setStatusMessage } = useStatusMessage()
+const bctx = useBContext()
 
-const isSde = computed(() => scene.workspaceMode.value === 'sde')
-const apiBaseStr = computed(() => conn.apiBase.value)
-const exportFilesList = computed(() => conn.exports.value)
-const exportsLoading = computed(() => conn.exportsLoading.value)
-const selectedName = computed(() => conn.selectedExportName.value)
+const isSde = computed(() => bctx.workspaceMode.value === 'sde')
+const apiBaseStr = computed(() => bctx.connectionApiBase.value)
+const exportFilesList = computed(() => bctx.connectionExports.value)
+const exportsLoading = computed(() => bctx.connectionExportsLoading.value)
+const selectedName = computed(() => bctx.connectionSelectedExportName.value)
 
 async function onPick(name: string): Promise<void> {
   try {
-    await conn.loadExport(name)
-    setStatusMessage(`已加载 ${name}`)
+    await bctx.operators.exec('OPERATOR_SDE_LOAD', { name })
+    logCenter.setStatus(`已加载 ${name}`)
   } catch (e) {
-    setStatusMessage(String(e instanceof Error ? e.message : e))
+    logCenter.setStatus(String(e instanceof Error ? e.message : e))
   }
 }
 </script>

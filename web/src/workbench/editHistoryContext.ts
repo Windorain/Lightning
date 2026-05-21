@@ -1,5 +1,6 @@
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref } from 'vue'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
 export interface EditCommand {
   id: string
@@ -24,7 +25,7 @@ export interface UndoManager {
 
 export const editHistoryKey: InjectionKey<UndoManager> = Symbol('editHistory')
 
-export function provideEditHistory(maxStack = 256): UndoManager {
+export function createEditHistory(maxStack = 256): UndoManager {
   const undoStack: EditCommand[] = []
   const redoStack: EditCommand[] = []
   const canUndo = ref(false)
@@ -63,6 +64,7 @@ export function provideEditHistory(maxStack = 256): UndoManager {
     if (!cmd) return
     redoStack.push(cmd)
     cmd.undo()
+    logCenter.operator('EditHistory', `undo: ${cmd.label}`, { action: 'undo', label: cmd.label })
     refreshFlags()
   }
 
@@ -71,6 +73,7 @@ export function provideEditHistory(maxStack = 256): UndoManager {
     if (!cmd) return
     undoStack.push(cmd)
     cmd.execute()
+    logCenter.operator('EditHistory', `redo: ${cmd.label}`, { action: 'redo', label: cmd.label })
     refreshFlags()
   }
 
@@ -80,8 +83,13 @@ export function provideEditHistory(maxStack = 256): UndoManager {
     refreshFlags()
   }
 
-  provide(editHistoryKey, { canUndo, canRedo, undoLabel, redoLabel, push, undo, redo, clear })
   return { canUndo, canRedo, undoLabel, redoLabel, push, undo, redo, clear }
+}
+
+export function provideEditHistory(maxStack = 256): UndoManager {
+  const ctx = createEditHistory(maxStack)
+  provide(editHistoryKey, ctx)
+  return ctx
 }
 
 export function useEditHistory(): UndoManager {

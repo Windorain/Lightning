@@ -1,5 +1,5 @@
 /**
- * StructureData：`geometryPhase` 区分扫描中间态与可渲染终态；预览 UI 由 `PreviewConfig.features` 控制。
+ * StructureData：`geometryPhase` 区分扫描中间态与可渲染终态；预览 UI 由 `View3DConfig.features` 控制。
  */
 
 /** 资源包定位符：namespace:path（不含 textures/ 与 .png），与 MC 习惯一致 */
@@ -277,7 +277,7 @@ export function isAirState(v: VoxelState): boolean {
   return v.registryId === 'air'
 }
 
-export type BlockRenderMode = 'BakedQuads' | 'Special'
+export type BlockRenderMode = 'BlockModel' | 'BakedModel'
 
 export type BakedGeometryEncoding = 'bakedQuadsJsonV1' | 'packedQuadsV1'
 
@@ -302,33 +302,23 @@ export interface BakedQuadsGeometry {
   quads: BakedQuad[]
 }
 
-/** 方块调色盘条目：逻辑 +烘焙几何 */
-export interface BlockPaletteEntry {
+/** BakedModel 调色盘条目：扁平 BakedQuad[] 几何 */
+export interface BakedModelPaletteEntry {
   registryId: string
   meta: number
   facing?: FaceName
   nbt?: JsonNbt
-  /** Base64-encoded PNG rendered via renderBlockAsItem */
   thumbnailPNG?: string
-  /** NEI 风格 ToolTip 文本行（由 SDE 客户端 finalize 时通过 ItemStack.getTooltip() 生成） */
   tooltip?: string[]
-  /** 完整不透明立方体时邻面可剔除；缺省/非 true 视为不遮挡（旧 JSON 兼容） */
   occludesAdjacentFaces?: boolean
-  renderMode: BlockRenderMode
+  renderMode: 'BakedModel'
   geometry: BakedQuadsGeometry
 }
 
+export type BlockPaletteEntry = BakedModelPaletteEntry
+
 /** Wiki 网格管线使用的终态结构（保证已烘焙） */
 export type StructureDefinition = StructureDataBaked
-
-export function voxelStateFromBlockPaletteEntry(e: BlockPaletteEntry): VoxelState {
-  return {
-    registryId: e.registryId,
-    meta: e.meta,
-    facing: e.facing,
-    nbt: e.nbt,
-  }
-}
 
 export interface VoxelVolume {
   sizeColumn: number
@@ -343,6 +333,7 @@ export interface Frame {
   structureRef?: string
   durationMs?: number
   label?: string
+  annotations?: import('../data/annotationTypes').Annotation[]
 }
 
 export interface World {

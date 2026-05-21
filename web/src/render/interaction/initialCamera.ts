@@ -8,7 +8,6 @@
  */
 
 import * as THREE from 'three'
-import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 import type { StructureDefinition } from '../schema/types'
 import { FACE_NORMAL } from '../mesh/faceConstants'
@@ -75,7 +74,7 @@ export interface ApplyInitialCameraOptions {
 }
 
 export interface ApplyDiagonalOrbitViewOptions {
-  /** 与 `controls.target` 的距离；缺省为当前相机到目标距离 */
+  /** 与 `orbitTarget` 的距离；缺省为当前相机到目标距离 */
   distance?: number
   /** 绕世界 Y 轴方位角（度），默认 45（左旋 45°） */
   yawDeg?: number
@@ -84,14 +83,15 @@ export interface ApplyDiagonalOrbitViewOptions {
 }
 
 /**
- * 在已有 `controls.target` 下，将球坐标系相机置于目标外侧：默认方位 45° + 标准等轴俯仰。
+ * 在已有 `orbitTarget` 下，将球坐标系相机置于目标外侧：默认方位 45° + 标准等轴俯仰。
+ * `orbitTarget` 会被函数更新为计算后的目标位置。
  */
 export function applyDiagonalOrbitView(
   camera: THREE.Camera,
-  controls: OrbitControls,
+  orbitTarget: THREE.Vector3,
   options?: ApplyDiagonalOrbitViewOptions,
 ): void {
-  const target = controls.target.clone()
+  const target = orbitTarget.clone()
   const dist =
     options?.distance ?? Math.max(0.1, camera.position.distanceTo(target))
   const yawDeg = options?.yawDeg ?? 45
@@ -107,16 +107,16 @@ export function applyDiagonalOrbitView(
   camera.position.copy(target).add(offset)
   camera.up.copy(WORLD_UP)
   camera.lookAt(target)
-  controls.update()
 }
 
 /**
- * 若存在 `initialCamera` 且网格中能找到焦点体素：target = 体素中心；相机在正面法线外侧。
+ * 若存在 `initialCamera` 且网格中能找到焦点体素：orbitTarget = 体素中心；相机在正面法线外侧。
  * 若无 `initialCamera`、或找不到焦点体素：使用 fallbackTarget / fallbackPosition（均为世界坐标）。
+ * 将计算出的轨道中心写入 `orbitTargetOut`。
  */
 export function applyInitialCamera(
   camera: THREE.Camera,
-  controls: OrbitControls,
+  orbitTargetOut: THREE.Vector3,
   def: StructureDefinition,
   fallbackTarget: THREE.Vector3,
   fallbackPosition: THREE.Vector3,
@@ -124,7 +124,7 @@ export function applyInitialCamera(
 ): void {
   const ic = def.initialCamera
   if (!ic) {
-    controls.target.copy(fallbackTarget)
+    orbitTargetOut.copy(fallbackTarget)
     camera.position.copy(fallbackPosition)
     camera.up.copy(WORLD_UP)
     camera.lookAt(fallbackTarget)
@@ -134,7 +134,7 @@ export function applyInitialCamera(
   const grid = buildVoxelVolume(def)
   const cell = findFirstVoxelWithBlockId(grid, ic.focusBlockId)
   if (!cell) {
-    controls.target.copy(fallbackTarget)
+    orbitTargetOut.copy(fallbackTarget)
     camera.position.copy(fallbackPosition)
     camera.up.copy(WORLD_UP)
     camera.lookAt(fallbackTarget)
@@ -157,5 +157,5 @@ export function applyInitialCamera(
   setCameraUpParallelToControllerTop(camera, frontOut)
   camera.position.copy(target).add(frontOut.multiplyScalar(dist))
   camera.lookAt(target)
-  controls.target.copy(target)
+  orbitTargetOut.copy(target)
 }

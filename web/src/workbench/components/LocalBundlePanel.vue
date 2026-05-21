@@ -3,11 +3,10 @@ import { computed, onMounted, ref } from 'vue'
 
 import { listDevSceneIds } from '@/dev/devScenes'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
-import { useSceneContext } from '@/workbench/sceneContext'
-import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
+import { useBContext } from '@/workbench/context/bContext'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
-const ctx = useSceneContext()
-const { setStatusMessage } = useStatusMessage()
+const bctx = useBContext()
 
 const ids = computed(() => listDevSceneIds())
 const selectedId = ref(DEFAULT_PREVIEW_SCENE_ID)
@@ -25,8 +24,8 @@ async function load(): Promise<void> {
   busy.value = true
   lastErr.value = ''
   try {
-    await ctx.loadBuiltinScene(selectedId.value)
-    setStatusMessage(`已加载示例 ${selectedId.value}`)
+    await bctx.operators.exec('OPERATOR_LOAD_BUILTIN', { sceneId: selectedId.value })
+    logCenter.setStatus(`已加载示例 ${selectedId.value}`)
   } catch (e) {
     lastErr.value = e instanceof Error ? e.message : String(e)
   } finally {

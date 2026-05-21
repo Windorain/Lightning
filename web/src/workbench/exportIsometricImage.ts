@@ -3,9 +3,8 @@
  */
 
 import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
-import { loadPreviewSessionFromDocument } from '@/preview/previewSession'
+import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
 import { resolveRenderBundle } from '@/render/data/bundleResolve'
 import {
   applyDiagonalOrbitView,
@@ -101,8 +100,8 @@ export async function bakeIsometricStructurePngDataUrl(
   const dirIdx = ((Math.floor(directionIndex) % 4) + 4) % 4
   const yawDeg = ISOMETRIC_EXPORT_YAW_DEG[dirIdx] ?? 45
 
-  const { materialLibrary, renderBundle } = await loadPreviewSessionFromDocument(document)
-  let controls: OrbitControls | null = null
+  const materialLibrary = await buildMaterialLibrary(document)
+  const { definition } = resolveRenderBundle({ document })
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     alpha: true,
@@ -110,7 +109,6 @@ export async function bakeIsometricStructurePngDataUrl(
   })
 
   try {
-    const { definition } = resolveRenderBundle(renderBundle)
     const built = await buildBlockMesh(definition, materialLibrary, {
       layerPreview: 'all',
     })
@@ -153,16 +151,13 @@ export async function bakeIsometricStructurePngDataUrl(
     const boxForFrustum = new THREE.Box3().setFromObject(group)
 
     const persp = new THREE.PerspectiveCamera(45, 1, Math.max(0.001, maxDim * 0.001), maxDim * 100)
-    controls = new OrbitControls(persp, renderer.domElement)
-    controls.enabled = false
     /** 世界原点 = 未平移前 mesh 的 AABB 中心 */
-    controls.target.set(0, 0, 0)
-    applyDiagonalOrbitView(persp, controls, {
+    const target = new THREE.Vector3(0, 0, 0)
+    applyDiagonalOrbitView(persp, target, {
       distance: dist,
       yawDeg,
       elevationFromHorizontalDeg: STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
     })
-    controls.update()
     persp.updateProjectionMatrix()
 
     const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, maxDim * 100)
@@ -181,7 +176,6 @@ export async function bakeIsometricStructurePngDataUrl(
 
     return dataUrl
   } finally {
-    controls?.dispose()
     renderer.dispose()
     materialLibrary.dispose()
   }

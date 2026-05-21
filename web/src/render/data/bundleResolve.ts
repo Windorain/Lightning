@@ -30,9 +30,9 @@ export function buildMaterialRegistryFromSceneDocument(document: unknown): Mater
     if (!pal?.length) return { materials: {} }
     return indexedRegistryFromMaterialPalette(pal)
   }
-  const d = document as StructureData
-  if (isBakedStructureData(d) && Array.isArray(d.materialPalette) && d.materialPalette.length > 0) {
-    return indexedRegistryFromMaterialPalette(d.materialPalette)
+  const sd = document as StructureData
+  if (isBakedStructureData(sd) && Array.isArray(sd.materialPalette) && sd.materialPalette.length > 0) {
+    return indexedRegistryFromMaterialPalette(sd.materialPalette)
   }
   return { materials: {} }
 }
@@ -49,6 +49,8 @@ export function loadStructureData(raw: unknown): StructureDefinition {
 export function isWorldDocument(raw: unknown): raw is World {
   if (!raw || typeof raw !== 'object') return false
   const o = raw as Record<string, unknown>
+  // V2 文档不是 V1 World
+  if (o.format_version === '2.0') return false
   return Array.isArray(o.frames) && typeof o.id === 'string'
 }
 
@@ -74,7 +76,8 @@ export function loadStructureOrWorld(raw: unknown, frameIndex: number | undefine
 
 function rootTextureBlobs(document: unknown): string[] | null {
   if (!document || typeof document !== 'object') return null
-  const raw = (document as Record<string, unknown>).textureBlobs
+  const d = document as Record<string, unknown>
+  const raw = d.textureBlobs
   if (!Array.isArray(raw) || raw.length === 0) return null
   if (!raw.every((x) => typeof x === 'string' && (x as string).length > 0)) return null
   return raw as string[]
@@ -87,7 +90,8 @@ function validateMaterialPaletteEntries(blobs: string[], pal: unknown, ctx: stri
     if (!entry || typeof entry !== 'object') {
       throw new Error(`${ctx}[${i}] 无效`)
     }
-    const idx = (entry as { textureBlobIndex?: unknown }).textureBlobIndex
+    const e = entry as { textureBlobIndex?: unknown; texture_blob_index?: unknown }
+    const idx = e.textureBlobIndex ?? e.texture_blob_index
     if (typeof idx !== 'number' || !Number.isFinite(idx)) {
       throw new Error(`${ctx}[${i}] 缺少有效 textureBlobIndex（须为 SDE 打包后的单文件 JSON）`)
     }
@@ -101,15 +105,12 @@ function validateMaterialPaletteEntries(blobs: string[], pal: unknown, ctx: stri
 }
 
 /**
- * 校验 Wiki 消费态：非空 `textureBlobs` 且每条材质槽位含合法 `textureBlobIndex`。
+ * 校验 Wiki 消费态：若存在 textureBlobs 则校验材质槽位合法性。
+ * 编辑态空文档无 textureBlobs 时跳过校验。
  */
 export function validatePackedSceneDocument(document: unknown): void {
   const blobs = rootTextureBlobs(document)
-  if (!blobs) {
-    throw new Error(
-      '场景缺少非空 textureBlobs（须为含 Base64 PNG 池的打包 JSON；旧版仅 locator 已不再支持）',
-    )
-  }
+  if (!blobs) return
   if (isWorldDocument(document)) {
     const pal = document.materialPalette
     if (pal?.length) {
@@ -117,9 +118,9 @@ export function validatePackedSceneDocument(document: unknown): void {
     }
     return
   }
-  const d = document as StructureData
-  if (isBakedStructureData(d) && Array.isArray(d.materialPalette) && d.materialPalette.length > 0) {
-    validateMaterialPaletteEntries(blobs, d.materialPalette, 'materialPalette')
+  const sd = document as StructureData
+  if (isBakedStructureData(sd) && Array.isArray(sd.materialPalette) && sd.materialPalette.length > 0) {
+    validateMaterialPaletteEntries(blobs, sd.materialPalette, 'materialPalette')
   }
 }
 

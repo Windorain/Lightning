@@ -21,12 +21,13 @@ function base64PngToDataUrl(b64: string): string {
 }
 
 /**
- * 枚举 palette 纹理为 data URL（依赖根级 `textureBlobs` + 各槽 `textureBlobIndex`）。
- * 调用前应先 {@link validatePackedSceneDocument}。
+ * 枚举纹理为 data URL。优先从根级 `textureBlobs` 读取，其次从 V2 `materials.entries[].texture_png`。
  */
 export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDataUrlItem[] {
   if (!document || typeof document !== 'object') return []
   const root = document as { textureBlobs?: unknown }
+
+  // Packed textureBlobs
   const blobs = root.textureBlobs
   if (!Array.isArray(blobs)) return []
 
@@ -40,10 +41,7 @@ export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDat
       if (typeof idx !== 'number' || !Number.isFinite(idx)) continue
       const b = blobs[Math.floor(idx)]
       if (typeof b !== 'string') continue
-      items.push({
-        materialId: String(i),
-        dataUrl: base64PngToDataUrl(b),
-      })
+      items.push({ materialId: String(i), dataUrl: base64PngToDataUrl(b) })
     }
     return items
   }
@@ -57,10 +55,7 @@ export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDat
     if (typeof idx !== 'number' || !Number.isFinite(idx)) continue
     const b = blobs[Math.floor(idx)]
     if (typeof b !== 'string') continue
-    items.push({
-      materialId: String(i),
-      dataUrl: base64PngToDataUrl(b),
-    })
+    items.push({ materialId: String(i), dataUrl: base64PngToDataUrl(b) })
   }
   return items
 }
@@ -78,9 +73,9 @@ function forEachPaletteSlot(
     }
     return
   }
-  const d = document as StructureData
-  if (!isBakedStructureData(d) || !Array.isArray(d.materialPalette)) return
-  const pal = d.materialPalette
+  const sd = document as StructureData
+  if (!isBakedStructureData(sd) || !Array.isArray(sd.materialPalette)) return
+  const pal = sd.materialPalette
   for (let i = 0; i < pal.length; i++) {
     fn(pal[i], String(i))
   }

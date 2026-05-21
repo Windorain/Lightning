@@ -2,18 +2,26 @@
 
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref } from 'vue'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
 export interface BlockRef {
   pos: { x: number; y: number; z: number }
   block_state_id: string
+  /** @internal 构建 RNA owner 时注入的网格尺寸 */
+  _gridSize?: { w: number; h: number; d: number } | null
 }
 
 export type SelectionMode = 'single' | 'box' | 'type'
+
+/** Active data — block for block selector, string for annotation ID */
+export type ActiveItem = BlockRef | string
 
 export interface SelectionContext {
   readonly items: Ref<Set<BlockRef>>
   readonly mode: Ref<SelectionMode>
   readonly frameIndex: Ref<number>
+  /** Currently active item: BlockRef for blocks, string (annotation ID) for annotations */
+  readonly active: Ref<ActiveItem | null>
   select(voxel: BlockRef): void
   selectBox(min: { x: number; y: number; z: number }, max: { x: number; y: number; z: number }, blocks: BlockRef[]): void
   selectByType(blockStateId: string, blocks: BlockRef[]): void
@@ -30,20 +38,24 @@ function posKey(pos: { x: number; y: number; z: number }): string {
   return `${pos.x},${pos.y},${pos.z}`
 }
 
-export function provideSelectionContext(): SelectionContext {
+export function createSelectionContext(): SelectionContext {
   const items = ref<Set<BlockRef>>(new Set())
   const mode = ref<SelectionMode>('single')
   const frameIndex = ref(0)
+  const active = ref<ActiveItem | null>(null)
 
   const index = ref<Map<string, BlockRef>>(new Map())
 
   function select(voxel: BlockRef): void {
+    active.value = voxel
     items.value = new Set([voxel])
     index.value = new Map([[posKey(voxel.pos), voxel]])
     mode.value = 'single'
+    logCenter.debug('Selection', 'block selected', { id: voxel.block_state_id, x: voxel.pos.x, y: voxel.pos.y, z: voxel.pos.z })
   }
 
   function selectBox(min: { x: number; y: number; z: number }, max: { x: number; y: number; z: number }, blocks: BlockRef[]): void {
+    active.value = null
     const set = new Set<BlockRef>()
     const map = new Map<string, BlockRef>()
     for (const b of blocks) {
@@ -59,9 +71,13 @@ export function provideSelectionContext(): SelectionContext {
     items.value = set
     index.value = map
     mode.value = 'box'
+    if (set.size > 0) {
+      logCenter.debug('Selection', 'box select', { count: set.size, min: { x: min.x, y: min.y, z: min.z }, max: { x: max.x, y: max.y, z: max.z } })
+    }
   }
 
   function selectByType(blockStateId: string, blocks: BlockRef[]): void {
+    active.value = null
     const set = new Set<BlockRef>()
     const map = new Map<string, BlockRef>()
     for (const b of blocks) {
@@ -98,6 +114,7 @@ export function provideSelectionContext(): SelectionContext {
   }
 
   function clear(): void {
+    active.value = null
     items.value = new Set()
     index.value = new Map()
   }
@@ -120,13 +137,50 @@ export function provideSelectionContext(): SelectionContext {
     return index.value.has(posKey(pos))
   }
 
-  const ctx: SelectionContext = {
+  return {
     items: items as unknown as Ref<Set<BlockRef>>,
     mode: mode as unknown as Ref<SelectionMode>,
     frameIndex: frameIndex as unknown as Ref<number>,
+    active: active as unknown as Ref<ActiveItem | null>,
     select, selectBox, selectByType, add, remove, clear, invert, isSelected,
   }
+}
 
+/**
+ * Minimal interface for pick-then-select operations.
+ * Accepts only what applyPickSelection needs — avoids coupling to full bContext.
+ */
+export interface PickHandler {
+  pickVoxel(event: PointerEvent): BlockRef | null
+  selection: {
+    select(voxel: BlockRef): void
+    add(voxels: BlockRef[]): void
+    clear(): void
+  }
+}
+
+/**
+ * Shared pick-and-select logic used by SelectOperator and MoveOperator.
+ * Extracted to keep both operators consistent.
+ */
+export function applyPickSelection(ctx: PickHandler, event: PointerEvent): BlockRef | null {
+  const picked = ctx.pickVoxel(event)
+  if (picked) {
+    if (event.ctrlKey || event.metaKey) {
+      ctx.selection.add([picked])
+    } else {
+      ctx.selection.select(picked)
+    }
+    return picked
+  }
+  if (!event.ctrlKey && !event.metaKey) {
+    ctx.selection.clear()
+  }
+  return null
+}
+
+export function provideSelectionContext(): SelectionContext {
+  const ctx = createSelectionContext()
   provide(selectionContextKey, ctx)
   return ctx
 }

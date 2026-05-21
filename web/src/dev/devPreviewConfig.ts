@@ -1,12 +1,13 @@
 /**
- * 本地 dev：URL 参数与默认 UI → PreviewConfig；场景来自 `data/scenes/<id>.json` 构建期打包。
+ * 本地 dev：URL 参数与默认 UI → View3DConfig；场景来自 `data/scenes/<id>.json` 构建期打包。
  */
 
-import type { PreviewConfig, PreviewFeatures } from '@/preview/previewConfig'
+import type { View3DConfig, View3DFeatures } from '@/preview/previewConfig'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import { getDevSceneDocument, listDevSceneIds } from '@/dev/devScenes'
 import { DEFAULT_PREVIEW_SCENE_ID, loadPreviewSessionFromDocument } from '@/preview/previewSession'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
+import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
 
 function parseBool(s: string | null): boolean | undefined {
   if (s === null || s === '') return undefined
@@ -24,14 +25,14 @@ function parseHex6(s: string | null): number | undefined {
 }
 
 /**
- * 本地 dev 入口 URL 查询参数（白名单）。与 resolveDevPreviewConfigAsync 合并（覆盖默认值）。
+ * 本地 dev 入口 URL 查询参数（白名单）。与 resolveDevView3DConfigAsync 合并（覆盖默认值）。
  */
 function parseUrlPreviewParams(
   search: string = typeof window !== 'undefined' ? window.location.search : '',
-): Partial<PreviewConfig> {
+): Partial<View3DConfig> {
   const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`)
-  const out: Partial<PreviewConfig> = {}
-  const feat: Partial<PreviewFeatures> = {}
+  const out: Partial<View3DConfig> = {}
+  const feat: Partial<View3DFeatures> = {}
 
   const sceneId = params.get('sceneId')
   if (sceneId !== null && sceneId !== '') {
@@ -54,13 +55,13 @@ function parseUrlPreviewParams(
   if (debug !== undefined) out.debug = debug
 
   if (Object.keys(feat).length > 0) {
-    out.features = { ...feat } as PreviewConfig['features']
+    out.features = { ...feat } as View3DConfig['features']
   }
 
   const bg = parseHex6(params.get('bg'))
   if (bg !== undefined) out.sceneBackground = bg
 
-  const bco: Partial<PreviewConfig['blockIconCacheOptions']> = {}
+  const bco: Partial<View3DConfig['blockIconCacheOptions']> = {}
   const sizePx = params.get('iconSizePx')
   if (sizePx !== null && sizePx !== '') {
     const n = Math.round(Number(sizePx))
@@ -79,13 +80,13 @@ function parseUrlPreviewParams(
     if (Number.isFinite(n) && n >= 0 && n <= 1) bco.clearAlpha = n
   }
   if (Object.keys(bco).length > 0) {
-    out.blockIconCacheOptions = bco as PreviewConfig['blockIconCacheOptions']
+    out.blockIconCacheOptions = bco as View3DConfig['blockIconCacheOptions']
   }
 
   return out
 }
 
-const defaultDevPreviewBase: Omit<PreviewConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
+const defaultDevPreviewBase: Omit<View3DConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
   ...defaultEmbedUi,
   features: {
     ...defaultEmbedUi.features,
@@ -95,17 +96,17 @@ const defaultDevPreviewBase: Omit<PreviewConfig, 'renderBundle' | 'materialLibra
   },
 }
 
-function resolveSceneId(config: Partial<PreviewConfig>): string {
+function resolveSceneId(config: Partial<View3DConfig>): string {
   const s = config.sceneId
   if (s === undefined || s === '') return DEFAULT_PREVIEW_SCENE_ID
   return s
 }
 
-export async function resolveDevPreviewConfigAsync(): Promise<PreviewConfig> {
+export async function resolveDevView3DConfigAsync(): Promise<View3DConfig> {
   const url = parseUrlPreviewParams()
   const { features: urlFeatures, ...urlRest } = url
 
-  const mergedBase: Omit<PreviewConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
+  const mergedBase: Omit<View3DConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
     ...defaultDevPreviewBase,
     ...urlRest,
     features: {
@@ -120,11 +121,12 @@ export async function resolveDevPreviewConfigAsync(): Promise<PreviewConfig> {
 
   const sceneId = resolveSceneId({ ...mergedBase, ...url })
   const document = getDevSceneDocument(sceneId)
-  const { renderBundle, materialLibrary } = await loadPreviewSessionFromDocument(document)
+  const { renderBundle } = await loadPreviewSessionFromDocument(document)
+  const materialLibrary = await buildMaterialLibrary(renderBundle.document)
   const stableId = sceneStableStringIdFromDocument(renderBundle.document)
   const docId = stableId !== 'scene' ? stableId : sceneId
 
-  const out: PreviewConfig = {
+  const out: View3DConfig = {
     ...mergedBase,
     features: {
       ...defaultDevPreviewBase.features,

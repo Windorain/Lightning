@@ -1,8 +1,8 @@
 /**
  * 库入口（IIFE）：mount、类型与数据校验 API。
  *
- * - `EmbedViewer`：Vue 组件，必需 `props.mergedConfig: PreviewConfig`（与 `resolveBootstrapToPreviewConfig` 结果一致）；内部自建 `provide(PreviewSceneContextKey)`，无需外层注入。
- * - 无整页 Vue 树时一般用 `mount()`；已有 Vue 应用可 `createApp` / `<EmbedViewer :merged-config="cfg" />`。
+ * - `EmbedViewport`：Vue 组件；需外层 provide embed bContext（由 EmbedRoot 创建）。
+ * - 无整页 Vue 树时一般用 `mount()`；已有 Vue 应用可 `createApp(EmbedRoot, { bootstrap })`。
  * 不包含 SDE Workbench 整站（WorkbenchRoot 等）；后者见 main-workbench.ts 与 vite.workbench.config.ts，产物为 dist-workbench/（含 bundled/ 下的打包分块，勿与库 dist/ 或场景导出混淆）。
  * 灰机/wiki 嵌入只需 npm run build:lib，勿部署 dist-workbench。
  */
@@ -13,13 +13,12 @@ import '@/styles/nei-tokens.css'
 export const MOUNT_SELECTOR = '.web-structure-renderer'
 
 export { mount } from './embed/mount'
-export { default as EmbedViewer } from './embed/EmbedViewer.vue'
-export type { EmbedBootstrapOptions, EmbedData, EmbedUiOptions, PreviewFeatures } from './embed/embedContract'
-export type { PreviewConfig } from './preview/previewConfig'
+export { default as EmbedViewport } from './embed/EmbedViewport.vue'
+export type { EmbedBootstrapOptions, EmbedData, EmbedUiOptions, View3DFeatures } from './embed/embedContract'
+export type { View3DConfig } from './preview/previewConfig'
 
 export { loadPreviewSessionFromDocument } from './preview/previewSession'
 export {
-  normalizeEnvelopeToPlain,
   readDocumentFormat,
   isEnvelopeDocument,
   readSceneMetaField,
@@ -45,5 +44,4 @@ export {
   type BuildEnvelopeOptions,
 } from './render/data/sceneExport'
 export { downloadJson, copyTextToClipboard } from './util/browser'
-export { previewConfigFromDocument, documentLooksPreviewable } from './preview/previewFromDocument'
-export type { PreviewFromDocumentOptions } from './preview/previewFromDocument'
+export { documentLooksPreviewable } from './preview/previewFromDocument'

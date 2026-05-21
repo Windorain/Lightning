@@ -123,10 +123,7 @@ export async function normalizeEnvelopeToPlain(document: unknown): Promise<unkno
 export { detectVersion, migrateV1ToV2 } from './versionMigration'
 export type {
   V2PlainSceneDocument,
-  V2BlockInstance,
-  V2BlockPart,
   V2AnnotationBox,
   V2Label,
-  V2GuiState,
   V2StatsTemplate,
 } from './sceneDocumentV2'

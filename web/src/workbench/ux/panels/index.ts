@@ -1,0 +1,8 @@
+export { blockInspectorPanel } from './blockInspector'
+export { toolShelfPanel } from './toolShelf'
+export { transformPanel } from './transform'
+export { sceneInfoPanel } from './sceneInfo'
+export { wikiConfigPanel } from './wikiConfig'
+export { blockStatsPanel } from './blockStats'
+export { menuBarPanel } from './menuBar'
+export { annotationPanel } from './annotationPanel'

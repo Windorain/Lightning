@@ -1,12 +1,22 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import EmbedViewer from '@/embed/EmbedViewer.vue'
-import PropertiesPanel from './PropertiesPanel.vue'
-import { useSceneContext } from '@/workbench/sceneContext'
-import { wikiConfig } from '@/workbench/wikiConfig'
-import type { PreviewConfig } from '@/preview/previewConfig'
+import EmbedViewport from '@/embed/EmbedViewport.vue'
+import UIRenderer from '@/workbench/ux/UIRenderer.vue'
+import { useBContext } from '@/workbench/context/bContext'
+import { sceneInfoPanel, wikiConfigPanel, blockStatsPanel } from '@/workbench/ux/panels'
+import { defaultEmbedUi } from '@/preview/previewConfig'
+import type { EmbedSettings, View3DFeatures } from '@/preview/previewConfig'
 
-const ctx = useSceneContext()
+const bctx = useBContext()
+const wikiConfig = bctx.wikiConfig as Record<string, any>
+
+const wikiPanels = [sceneInfoPanel, wikiConfigPanel, blockStatsPanel]
+
+const activeWikiPanels = computed(() =>
+  wikiPanels
+    .filter(p => p.poll(bctx))
+    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
+)
 
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
@@ -14,39 +24,45 @@ function parseHex6(s: string): number {
   return parseInt(m[1], 16)
 }
 
-const mergedConfig = computed<PreviewConfig | null>(() => {
-  const c = ctx.previewConfig.value
-  if (!c) return null
-  return {
-    ...c,
-    features: { ...c.features, ...wikiConfig.features },
-    debug: wikiConfig.features.debugStatusBar,
-    sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex),
-    blockIconCacheOptions: {
-      ...c.blockIconCacheOptions,
-      sizePx: wikiConfig.iconSizePx,
-      orthoHalf: wikiConfig.iconOrthoHalf,
-    },
-    initialCamera: {
-      ...c.initialCamera,
-      yawDeg: wikiConfig.cameraYaw,
-      elevationDeg: wikiConfig.cameraElevation,
-      zoom: wikiConfig.cameraZoom,
-    },
-  }
-})
+const embedSettings = computed<EmbedSettings>(() => ({
+  features: {
+    ...defaultEmbedUi.features,
+    ...(wikiConfig.features ?? {}),
+  } as View3DFeatures,
+  blockIconCacheOptions: {
+    ...defaultEmbedUi.blockIconCacheOptions,
+    sizePx: wikiConfig.iconSizePx ?? defaultEmbedUi.blockIconCacheOptions.sizePx,
+    orthoHalf: wikiConfig.iconOrthoHalf ?? defaultEmbedUi.blockIconCacheOptions.orthoHalf,
+  },
+  initialLayerWorldY: defaultEmbedUi.initialLayerWorldY,
+  initialCamera: {
+    yawDeg: wikiConfig.cameraYaw,
+    elevationDeg: wikiConfig.cameraElevation,
+    zoom: wikiConfig.cameraZoom,
+  },
+  sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex ?? '#5a5a5a'),
+  loadingMessage: defaultEmbedUi.loadingMessage,
+  okMessage: defaultEmbedUi.okMessage,
+  debug: wikiConfig.features?.debugStatusBar ?? false,
+}))
 </script>
 
 <template>
   <div class="ww-root">
     <div class="ww-preview-wrap">
-      <div class="ww-preview" :style="{ width: `${wikiConfig.viewWidth}px`, height: `${wikiConfig.viewHeight}px` }">
-        <EmbedViewer v-if="mergedConfig" :key="ctx.previewEpoch.value" :merged-config="mergedConfig" />
+      <div class="ww-preview" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }">
+        <EmbedViewport v-if="bctx.doc.value" :settings="embedSettings" />
         <div v-else class="ww-placeholder">No scene loaded</div>
       </div>
     </div>
     <div class="ww-panel">
-      <PropertiesPanel editors="wiki" />
+      <UIRenderer
+        v-for="panel in activeWikiPanels"
+        :key="panel.id"
+        :layout="panel.layout"
+        :rna="bctx.rna"
+        :owner="panel.owner"
+      />
     </div>
   </div>
 </template>
