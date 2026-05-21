@@ -3,18 +3,16 @@ import { RuntimeDocument, Grid, RuntimeFrame } from '@/workbench/context/runtime
 import { createProductionQueries } from '@/workbench/context/sceneQueries'
 import type { BContext } from '@/workbench/context/bContext'
 
-function makeMockBctx(doc: RuntimeDocument): BContext {
+function makeMockBctx(doc: RuntimeDocument | null): BContext {
   return {
-    scene: {
-      scene: { value: doc },
-    },
+    doc: { value: doc },
     selection: { items: { value: new Set() }, frameIndex: { value: 0 } },
   } as unknown as BContext
 }
 
 describe('listMaterials', () => {
   it('returns empty array when no document', () => {
-    const q = createProductionQueries({ scene: { scene: { value: null } } } as any)
+    const q = createProductionQueries(makeMockBctx(null))
     expect(q.listMaterials()).toEqual([])
   })
 
@@ -67,7 +65,7 @@ describe('listMaterials', () => {
 
 describe('getMaterialUsageCounts', () => {
   it('returns empty object when no document', () => {
-    const q = createProductionQueries({ scene: { scene: { value: null } } } as any)
+    const q = createProductionQueries(makeMockBctx(null))
     expect(q.getMaterialUsageCounts()).toEqual({})
   })
 
@@ -78,7 +76,6 @@ describe('getMaterialUsageCounts', () => {
   })
 
   it('counts blocks by paletteIndex', () => {
-    // Build a 1x1x3 grid: paletteIndex 0, 1, 0 (three blocks)
     const cells: (any)[][][] = [[
       [{ name: 'stone', meta: 0, paletteIndex: 0 }],
       [{ name: 'dirt', meta: 0, paletteIndex: 1 }],

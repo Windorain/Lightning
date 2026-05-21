@@ -109,7 +109,7 @@ function selectCard(id: string) {
   selectedId.value = selectedId.value === id ? null : id
 }
 
-watch(() => bctx.scene.scene.value, () => refresh(), { immediate: true })
+watch(() => bctx.doc.value, () => refresh(), { immediate: true })
 
 // ---- Keyboard navigation ----
 const gridEl = ref<HTMLElement | null>(null)

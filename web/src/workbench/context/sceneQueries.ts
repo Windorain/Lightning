@@ -92,7 +92,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
 
     getMaterialUsageCounts(): Record<string, number> {
       const counts: Record<string, number> = {}
-      const doc = bctx.scene.scene.value
+      const doc = bctx.doc.value
       if (!doc) return counts
       const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
       if (!rf?.grid) return counts
@@ -106,7 +106,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     },
 
     listMaterials(): MaterialQueryItem[] {
-      const doc = bctx.scene.scene.value
+      const doc = bctx.doc.value
       if (!doc) return []
       const palette = doc.materialPalette as any[] | undefined
       if (!palette?.length) return []
