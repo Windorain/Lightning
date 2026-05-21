@@ -19,7 +19,6 @@ import type { BContextSettings } from '@/workbench/context/bContext'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { bScreen } from '@/workbench/ux/types/screen'
-import type { View3DConfig } from '@/preview/previewConfig'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
@@ -215,7 +214,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     statusMessage: deps.statusMessage ?? ref(''),
     settings,
 
-    config: shallowRef<View3DConfig | null>(null),
     blockIconCache: shallowRef(null),
     tooltipPalette: shallowRef<string[]>([]),
 

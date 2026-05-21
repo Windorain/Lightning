@@ -4,8 +4,8 @@ import EmbedViewport from '@/embed/EmbedViewport.vue'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import { useBContext } from '@/workbench/context/bContext'
 import { sceneInfoPanel, wikiConfigPanel, blockStatsPanel } from '@/workbench/ux/panels'
-import type { View3DConfig } from '@/preview/previewConfig'
-import { view3DConfigFromDocument } from '@/preview/previewFromDocument'
+import type { EmbedSettings, View3DFeatures } from '@/preview/previewConfig'
+import { defaultEmbedUi } from '@/preview/previewConfig'
 
 const bctx = useBContext()
 const wikiConfig = bctx.wikiConfig as Record<string, any>
@@ -18,9 +18,7 @@ const activeWikiPanels = computed(() =>
     .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
-const embedConfig = ref<View3DConfig | null>(null)
-const renderKey = ref(0)
-let _buildSeq = 0
+const embedDocument = computed(() => bctx.doc.value?.toRaw() ?? null)
 
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
@@ -28,43 +26,42 @@ function parseHex6(s: string): number {
   return parseInt(m[1], 16)
 }
 
-async function buildEmbedConfig(): Promise<void> {
-  const doc = bctx.doc.value?.toRaw()
-  if (!doc) { embedConfig.value = null; return }
-  const seq = ++_buildSeq
-  try {
-    const cfg = await view3DConfigFromDocument({ ...doc as Record<string, unknown> })
-    if (seq !== _buildSeq) return
-    embedConfig.value = {
-      ...cfg,
-      features: { ...cfg.features, ...(wikiConfig.features ?? {}) },
-      debug: wikiConfig.features?.debugStatusBar ?? false,
-      sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex ?? '#5a5a5a'),
-      blockIconCacheOptions: {
-        ...cfg.blockIconCacheOptions,
-        sizePx: wikiConfig.iconSizePx ?? cfg.blockIconCacheOptions?.sizePx,
-        orthoHalf: wikiConfig.iconOrthoHalf ?? cfg.blockIconCacheOptions?.orthoHalf,
-      },
-      initialCamera: {
-        ...cfg.initialCamera,
-        yawDeg: wikiConfig.cameraYaw ?? cfg.initialCamera?.yawDeg,
-        elevationDeg: wikiConfig.cameraElevation ?? cfg.initialCamera?.elevationDeg,
-        zoom: wikiConfig.cameraZoom ?? cfg.initialCamera?.zoom,
-      },
-    }
-    renderKey.value += 1
-  } catch { embedConfig.value = null }
-}
+const embedSettings = computed<EmbedSettings | null>(() => {
+  if (!embedDocument.value) return null
+  return {
+    features: {
+      ...defaultEmbedUi.features,
+      ...(wikiConfig.features ?? {}),
+    } as View3DFeatures,
+    blockIconCacheOptions: {
+      ...defaultEmbedUi.blockIconCacheOptions,
+      sizePx: wikiConfig.iconSizePx ?? defaultEmbedUi.blockIconCacheOptions.sizePx,
+      orthoHalf: wikiConfig.iconOrthoHalf ?? defaultEmbedUi.blockIconCacheOptions.orthoHalf,
+    },
+    initialLayerWorldY: defaultEmbedUi.initialLayerWorldY,
+    initialCamera: {
+      yawDeg: wikiConfig.cameraYaw,
+      elevationDeg: wikiConfig.cameraElevation,
+      zoom: wikiConfig.cameraZoom,
+    },
+    sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex ?? '#5a5a5a'),
+    loadingMessage: defaultEmbedUi.loadingMessage,
+    okMessage: defaultEmbedUi.okMessage,
+    debug: wikiConfig.features?.debugStatusBar ?? false,
+  }
+})
 
-// Rebuild on doc change or structEpoch bump
-watch([() => bctx.doc.value, () => bctx.structEpoch.value], () => { void buildEmbedConfig() }, { immediate: true })
+const renderKey = ref(0)
+
+// Bump key when doc or structEpoch changes → fresh EmbedViewport
+watch([() => bctx.doc.value, () => bctx.structEpoch.value], () => { renderKey.value++ }, { immediate: true })
 </script>
 
 <template>
   <div class="ww-root">
     <div class="ww-preview-wrap">
       <div class="ww-preview" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }">
-        <EmbedViewport v-if="embedConfig" :key="renderKey" :config="embedConfig" />
+        <EmbedViewport v-if="embedDocument && embedSettings" :key="renderKey" :document="embedDocument" :settings="embedSettings" />
         <div v-else class="ww-placeholder">No scene loaded</div>
       </div>
     </div>

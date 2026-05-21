@@ -13,7 +13,6 @@ import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
-import type { View3DConfig } from '@/preview/previewConfig'
 import { computed, ref, shallowRef } from 'vue'
 import type { ComputedRef, Ref, ShallowRef } from 'vue'
 import type * as THREE from 'three'
@@ -147,7 +146,6 @@ export interface BContext {
   statusMessage: { value: string }
 
   // === Shared rendering resources ===
-  config: ShallowRef<View3DConfig | null>
   blockIconCache: ShallowRef<BlockIconCache | null>
   tooltipPalette: ShallowRef<string[]>
 
@@ -173,7 +171,7 @@ export interface BContext {
   rebuildContentMesh(): Promise<void>
   rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null>
   disposeCachesAndLibrary(): void
-  reloadFromConfig(cfg: View3DConfig): Promise<void>
+  reloadFromConfig(): Promise<void>
   registerScene(scene: THREE.Scene): void
 
   // Block stats

@@ -19,7 +19,7 @@ import * as THREE from 'three'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
-import type { View3DConfig } from '@/preview/previewConfig'
+import type { EmbedSettings } from '@/preview/previewConfig'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
 import { bContextKey, type BContext } from '@/workbench/context/bContext'
@@ -31,22 +31,23 @@ import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
 
-const props = defineProps<{ config: View3DConfig }>()
+const props = defineProps<{
+  document: unknown
+  settings: EmbedSettings
+}>()
 
 // ---- BContext: inject or self-create ----
-// Workbench bctx (has scene) is incompatible — create independent embed bctx
 const _injectedBctx = inject<BContext | null>(bContextKey, null)
 const _isWorkbenchBctx = _injectedBctx?.doc != null
 const _ownsBctx = !_injectedBctx || _isWorkbenchBctx
-const bctx: BContext = (_injectedBctx && !_isWorkbenchBctx) ? _injectedBctx : createEmbedBContext(props.config)
+const bctx: BContext = (_injectedBctx && !_isWorkbenchBctx) ? _injectedBctx : createEmbedBContext(props.document, props.settings)
 if (_ownsBctx) {
   provideEmbedBContext(bctx)
 }
 
-bctx.config.value = props.config
-watch(() => props.config, (cfg) => {
-  bctx.config.value = cfg
-  bctx.reloadFromConfig(cfg).catch(e => console.error('[EmbedViewport] reloadFromConfig', e))
+// Document change → full rebuild
+watch(() => props.document, (doc) => {
+  if (doc != null) bctx.reloadFromConfig().catch(e => console.error('[EmbedViewport] reload', e))
 })
 
 // Viewport slot
@@ -56,7 +57,7 @@ const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED
 // ---- Hover / tooltip ----
 const { hover, setHover, clearHover } = usePreviewTooltip()
 
-const materialLibrary = computed(() => props.config.materialLibrary)
+const materialLibrary = (bctx as any).materialLibrary
 const {
   loadStatus, layerPreviewMode,
   hasWorldMultiFrame, worldFrameIndex, worldFrameCount, layerPreviewLabel,
@@ -68,12 +69,12 @@ const structureDefinition = computed(() => vpSlot.definition.value)
 const mainMeshGroup = computed(() => vpSlot.contentGroup.value)
 
 // ---- Feature flags ----
-const f = computed(() => props.config.features)
+const f = computed(() => props.settings.features)
 const showLayerBar = computed(() => f.value.layerBar)
 const showFrameCtl = computed(() => f.value.frameControls)
 const showTitle = computed(() => f.value.titleBar)
 const showStats = computed(() => f.value.blockStatsSidebar)
-const showDebugStatus = computed(() => f.value.debugStatusBar && props.config.debug)
+const showDebugStatus = computed(() => f.value.debugStatusBar && props.settings.debug)
 
 const hasBottomDock = computed(() =>
   (showFrameCtl.value && hasWorldMultiFrame.value) || showLayerBar.value,
@@ -85,7 +86,7 @@ const activeTab = ref<BottomTab>(
 )
 
 // ---- Title / meta hint ----
-const sceneDocument = computed(() => props.config.renderBundle.document)
+const sceneDocument = computed(() => props.document)
 
 const metaTooltipText = computed(() => {
   const d = sceneDocument.value
@@ -138,7 +139,7 @@ const neiTooltipText = computed(() => {
 })
 
 const previewTitle = computed(() => {
-  const fromDoc = sceneDisplayTitleFromRootDocument(props.config.renderBundle.document)
+  const fromDoc = sceneDisplayTitleFromRootDocument(props.document)
   if (fromDoc) return fromDoc
   const def = vpSlot.definition.value
   const lab = def?.label?.trim()
@@ -172,7 +173,7 @@ let _alive = true
 let _annoRafId: number | undefined
 
 function updateAnnotationOverlay(): void {
-  const doc = props.config.renderBundle.document as Record<string, any> | null
+  const doc = props.document as Record<string, any> | null
   const annos: Annotation[] = doc?.annotations ?? []
   const maxUpdated = annos.length > 0
     ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
@@ -317,7 +318,7 @@ onBeforeUnmount(() => {
           :material-library="materialLibrary"
           :content-group="mainMeshGroup"
           :layer-preview-mode="layerPreviewMode"
-          :scene-background="config.sceneBackground"
+          :scene-background="props.settings.sceneBackground"
           :show-axes-gizmo="f.showAxesGizmo"
           @ready="onViewportReady"
           @hover-block="onViewportHover"
