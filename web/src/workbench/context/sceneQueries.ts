@@ -4,7 +4,7 @@
  * createProductionQueries(bctx) 返回 BContextQueries 实现。
  * 操作符通过 bctx.queries 隐式获取场景状态，不直接 import 此文件。
  */
-import type { BContext, BContextQueries, MaterialQueryItem } from '@/workbench/context/bContext'
+import type { BContext, BContextQueries, MaterialQueryItem, BlockTypeStat } from '@/workbench/context/bContext'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { Frame } from '@/render/schema/types'
 import { scenePickFromPointer } from '@/render/interaction/scenePick'
@@ -140,6 +140,35 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
           useMipmaps: entry.useMipmaps,
         }
       })
+    },
+
+    getBlockTypeStats(): Record<string, BlockTypeStat> {
+      const stats: Record<string, BlockTypeStat> = {}
+      const doc = bctx.doc.value
+      if (!doc) return stats
+      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      if (!rf?.grid) return stats
+      rf.grid.forEach((_pos, block) => {
+        const id = `minecraft:${block.name}:${block.meta}`
+        const entry = stats[id]
+        if (entry) {
+          entry.count += 1
+        } else {
+          stats[id] = { count: 1 }
+        }
+      })
+      return stats
+    },
+
+    getBlockPaletteEntry(pos: { x: number; y: number; z: number }) {
+      const doc = bctx.doc.value
+      if (!doc) return null
+      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      if (!rf?.grid) return null
+      const block = rf.grid.at(pos)
+      if (!block || block.paletteIndex === undefined) return null
+      const cache = rf.grid.getPaletteCache()
+      return cache.get('#' + String(block.paletteIndex)) ?? null
     },
   }
 }

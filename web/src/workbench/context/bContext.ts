@@ -45,6 +45,10 @@ export interface MaterialQueryItem {
   useMipmaps?: boolean
 }
 
+export interface BlockTypeStat {
+  count: number
+}
+
 export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
   pickVoxel(event: PointerEvent): BlockRef | null
@@ -64,6 +68,10 @@ export interface BContextQueries {
   listMaterials(): MaterialQueryItem[]
   /** Count blocks using each material in the current frame (materialId → count) */
   getMaterialUsageCounts(): Record<string, number>
+  /** 当前帧方块类型统计 (block_state_id → 计数) */
+  getBlockTypeStats(): Record<string, BlockTypeStat>
+  /** 获取方块位置的调色板元数据 */
+  getBlockPaletteEntry(pos: { x: number; y: number; z: number }): import('@/workbench/context/runtimeDocument').PaletteEntryMeta | null
 }
 
 export interface BContextSettings {

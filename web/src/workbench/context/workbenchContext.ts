@@ -38,7 +38,7 @@ import {
 } from '@/workbench/ux/panels'
 
 // All builtin operators
-import { SelectOperator } from '@/workbench/operators/builtin/selectOperator'
+import { SelectOperator, SelectByTypeOperator } from '@/workbench/operators/builtin/selectOperator'
 import { MoveOperator } from '@/workbench/operators/builtin/moveOperator'
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
@@ -63,7 +63,7 @@ import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
 import { textTool, TextGizmo } from '@/workbench/tools/textTool'
 
 const ALL_OPERATORS: OperatorType[] = [
-  SelectOperator, MoveOperator,
+  SelectOperator, SelectByTypeOperator, MoveOperator,
   UndoOperator, RedoOperator,
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator,
   ToolSetOperator,

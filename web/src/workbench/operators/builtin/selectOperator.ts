@@ -29,3 +29,20 @@ export const SelectOperator: OperatorType = {
     // Selection wireframe rendered by viewport using SelectionContext.items
   },
 }
+
+export const SelectByTypeOperator: OperatorType = {
+  id: 'OPERATOR_SELECT_BY_TYPE',
+  label: '按类型选择',
+  description: '选中当前帧所有相同类型的方块',
+
+  poll(bctx) {
+    return bctx.doc.value !== null
+  },
+
+  exec(bctx, props) {
+    const blockStateId = (props?.blockStateId as string) ?? ''
+    if (!blockStateId) return
+    const blocks = bctx.queries.getFrameBlocks()
+    bctx.selection.selectByType(blockStateId, blocks)
+  },
+}
