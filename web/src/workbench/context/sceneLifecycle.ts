@@ -286,11 +286,13 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
       const lib = materialLibrary.value
-      if (lib && !lib.isDisposed()) {
-        // materialLibrary already set by operator — keep it
+      if (!lib || lib.isDisposed()) {
+        loadStatus.value = 'error'
+        console.error('[renderAssets] loadStructureAndResources: materialLibrary is null or disposed')
+        return
       }
       if (blockIconCache.value) blockIconCache.value.dispose()
-      const iconCache = new BlockIconCache(lib!, blockIconCacheOptions, resolved.definition)
+      const iconCache = new BlockIconCache(lib, blockIconCacheOptions, resolved.definition)
       iconCache.setRevisionKey(
         `${resolved.definition.id}:${summarizeBlocksForCache(resolved.definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(blockIconCacheOptions)}`,
       )

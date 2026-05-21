@@ -96,7 +96,7 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     loadStructureAndResources: renderAssets.loadStructureAndResources,
     rebuildContentMesh: renderAssets.rebuildContentMesh,
     rebuildAnnotationOverlay: renderAssets.rebuildAnnotationOverlay,
-    reloadFromConfig: async (cfg: import('@/preview/previewConfig').View3DConfig) => { configRef.value = cfg as any; await renderAssets.rebuildAll() },
+    reloadFromConfig: async (cfg: import('@/preview/previewConfig').View3DConfig) => { configRef.value = cfg as any; materialLibrary.value = cfg.materialLibrary; await renderAssets.rebuildAll() },
     disposeCachesAndLibrary: renderAssets.disposeCachesAndLibrary,
     registerScene: renderAssets.registerScene,
     blockStatsEntries,
