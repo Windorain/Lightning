@@ -216,7 +216,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     settings,
 
     config: shallowRef<View3DConfig | null>(null),
-    materialLibrary: shallowRef(null),
     blockIconCache: shallowRef(null),
     tooltipPalette: shallowRef<string[]>([]),
 

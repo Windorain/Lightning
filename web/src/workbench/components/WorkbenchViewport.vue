@@ -35,7 +35,6 @@ const renderAssets = createRenderAssets({
   docRef,
   loadStatus,
   meshBusy,
-  materialLibrary: bctx.materialLibrary,
   blockIconCache: bctx.blockIconCache,
   tooltipPalette: bctx.tooltipPalette,
   structureDefinition: vpSlot.definition,
@@ -83,7 +82,7 @@ watch(() => bctx.currentWorldFrameIndex.value, (i) => {
 
 const structureDefinition = vpSlot.definition
 const mainMeshGroup = vpSlot.contentGroup
-const materialLibrary = bctx.materialLibrary
+const materialLibrary = renderAssets.textureCache
 
 type BottomTab = 'frame' | 'layer'
 const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')

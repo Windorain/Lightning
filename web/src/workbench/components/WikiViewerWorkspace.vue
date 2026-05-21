@@ -56,8 +56,8 @@ async function buildEmbedConfig(): Promise<void> {
   } catch { embedConfig.value = null }
 }
 
-// Rebuild on doc or materialLibrary change
-watch([() => bctx.doc.value, () => bctx.materialLibrary.value], () => { void buildEmbedConfig() }, { immediate: true })
+// Rebuild on doc change or structEpoch bump
+watch([() => bctx.doc.value, () => bctx.structEpoch.value], () => { void buildEmbedConfig() }, { immediate: true })
 </script>
 
 <template>

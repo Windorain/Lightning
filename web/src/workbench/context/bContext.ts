@@ -22,7 +22,6 @@ import type { Frame } from '@/render/schema/types'
 import type { bScreen, Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
-import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
 import type { Annotation } from '@/render/data/annotationTypes'
@@ -149,7 +148,6 @@ export interface BContext {
 
   // === Shared rendering resources ===
   config: ShallowRef<View3DConfig | null>
-  materialLibrary: ShallowRef<MaterialLibraryApi | null>
   blockIconCache: ShallowRef<BlockIconCache | null>
   tooltipPalette: ShallowRef<string[]>
 

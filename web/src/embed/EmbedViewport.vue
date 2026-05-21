@@ -56,8 +56,9 @@ const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED
 // ---- Hover / tooltip ----
 const { hover, setHover, clearHover } = usePreviewTooltip()
 
+const materialLibrary = computed(() => props.config.materialLibrary)
 const {
-  loadStatus, materialLibrary, layerPreviewMode,
+  loadStatus, layerPreviewMode,
   hasWorldMultiFrame, worldFrameIndex, worldFrameCount, layerPreviewLabel,
   blockIconCache, blockStatsEntries, tooltipPalette,
 } = bctx

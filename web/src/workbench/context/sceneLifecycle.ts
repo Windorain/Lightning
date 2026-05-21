@@ -4,7 +4,7 @@
  * 从原始文档 + materialLibrary 产出 Three.js 渲染所需的数据结构与 mesh。
  * embedContext 和 WorkbenchViewport 共用。不依赖 View3DConfig。
  */
-import { computed, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
+import { computed, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
 import type { LoadStatus } from '@/workbench/context/bContext'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
@@ -16,6 +16,7 @@ import { BlockIconCache, BLOCK_ICON_LAYOUT_REVISION, blockIconBakeLayoutKey } fr
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
 import { MC_ITEM_SLOT_BAKE_REVISION, summarizeBlocksForCache } from '@/render/interaction/blockSlotBaker'
 import { isWorldDocument, resolveRenderBundle, type RenderBundleResolveResult } from '@/render/data/bundleResolve'
+import { view3DConfigFromDocument } from '@/preview/previewFromDocument'
 import { frameAt } from '@/render/data/worldPlayback'
 import type { BlockMeshBuildStats } from '@/render/mesh/blockMesh'
 import { BlockMeshProvider } from '@/render/mesh/blockMeshProvider'
@@ -46,7 +47,6 @@ export interface RenderAssetsDeps {
   docRef: Ref<unknown>
   loadStatus: Ref<LoadStatus>
   meshBusy: Ref<boolean>
-  materialLibrary: ShallowRef<MaterialLibraryApi | null>
   blockIconCache: ShallowRef<BlockIconCache | null>
   tooltipPalette: ShallowRef<string[]>
   structureDefinition: ShallowRef<StructureDefinition | null>
@@ -78,6 +78,8 @@ export interface RenderAssets {
   disposeCachesAndLibrary(): void
   /** 清空缓存后重新加载结构 + 重建 mesh（替代原 reloadFromConfig） */
   rebuildAll(): Promise<void>
+  /** 内部纹理缓存（供 ViewerCore 渲染用，只读） */
+  textureCache: Readonly<ShallowRef<MaterialLibraryApi | null>>
   computed: RenderAssetsComputed
 }
 
@@ -90,10 +92,23 @@ export type SceneLifecycleComputed = RenderAssetsComputed
 
 export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   const {
-    docRef, loadStatus, meshBusy, materialLibrary, blockIconCache, tooltipPalette,
+    docRef, loadStatus, meshBusy, blockIconCache, tooltipPalette,
     structureDefinition, mainMeshGroup, sceneRef, worldFrameIndex, layerWorldY,
     framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex,
   } = deps
+
+  // === 内部纹理缓存，从 doc.textureBlobs 构建 ===
+  const textureCache = shallowRef<MaterialLibraryApi | null>(null)
+
+  /** 确保 textureCache 就绪；已完成则直接返回 */
+  async function ensureTextures(doc: Record<string, unknown>): Promise<MaterialLibraryApi | null> {
+    if (textureCache.value && !textureCache.value.isDisposed()) return textureCache.value
+    try {
+      const cfg = await view3DConfigFromDocument({ ...doc })
+      textureCache.value = cfg.materialLibrary
+      return textureCache.value
+    } catch { return null }
+  }
 
   const blockMeshProvider = new BlockMeshProvider()
   const annotationProvider = new AnnotationMeshProvider()
@@ -159,8 +174,14 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     const scene = sceneRef.value
     if (!def || !scene) return
 
-    const lib = materialLibrary.value
-    if (!lib || lib.isDisposed()) return
+    const lib = textureCache.value
+    if (!lib || lib.isDisposed()) {
+      const docObj = docRef.value as Record<string, unknown>
+      void ensureTextures(docObj).then(() => {
+        void runMesh(() => presentContentMesh())
+      })
+      return
+    }
 
     const isW = isWorldDocument(docRef.value)
     const layerPreview = layerPreviewMode.value
@@ -180,7 +201,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
         const outputs = await blockMeshProvider.build(def, lib, { layerPreview })
         const out = outputs[0]! as Extract<import('@/render/mesh/providerTypes').MeshOutput, { kind: 'object3d' }>
         const result = { group: out.object as THREE.Group, dispose: out.dispose, stats: out.stats! }
-        if (lib.isDisposed() || materialLibrary.value !== lib) { result.dispose(); return }
+        if (lib.isDisposed() || textureCache.value !== lib) { result.dispose(); return }
         worldMeshCache.set(k, { group: result.group, dispose: result.dispose, stats: result.stats })
         if (mainMeshGroup.value) scene.remove(mainMeshGroup.value)
         mainMeshGroup.value = result.group
@@ -190,7 +211,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       const outputs = await blockMeshProvider.build(def, lib, { layerPreview })
       const out = outputs[0]! as Extract<import('@/render/mesh/providerTypes').MeshOutput, { kind: 'object3d' }>
       const result = { group: out.object as THREE.Group, dispose: out.dispose, stats: out.stats! }
-      if (lib.isDisposed() || materialLibrary.value !== lib) { result.dispose(); return }
+      if (lib.isDisposed() || textureCache.value !== lib) { result.dispose(); return }
       if (mainMeshGroup.value) { scene.remove(mainMeshGroup.value); nonWorldMeshDispose?.(); nonWorldMeshDispose = null }
       nonWorldMeshDispose = result.dispose
       mainMeshGroup.value = result.group
@@ -253,9 +274,10 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       const resolved: RenderBundleResolveResult = resolveRenderBundle({ document: doc }, idx)
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
-      const lib = materialLibrary.value
+      const lib = textureCache.value
+      if (!lib || lib.isDisposed()) return
       if (blockIconCache.value) blockIconCache.value.dispose()
-      const iconCache = new BlockIconCache(lib!, blockIconCacheOptions, resolved.definition)
+      const iconCache = new BlockIconCache(lib, blockIconCacheOptions, resolved.definition)
       iconCache.setRevisionKey(
         `${resolved.definition.id}:${summarizeBlocksForCache(resolved.definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(blockIconCacheOptions)}`,
       )
@@ -285,14 +307,17 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       else worldFrameIndex.value = 0
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
-      const lib = materialLibrary.value
-      if (!lib || lib.isDisposed()) {
+      const lib = textureCache.value
+      const effectiveLib = (lib && !lib.isDisposed())
+        ? lib
+        : await ensureTextures(doc as Record<string, unknown>)
+      if (!effectiveLib || effectiveLib.isDisposed()) {
         loadStatus.value = 'error'
-        console.error('[renderAssets] loadStructureAndResources: materialLibrary is null or disposed')
+        console.error('[renderAssets] loadStructureAndResources: failed to build textureCache')
         return
       }
       if (blockIconCache.value) blockIconCache.value.dispose()
-      const iconCache = new BlockIconCache(lib, blockIconCacheOptions, resolved.definition)
+      const iconCache = new BlockIconCache(effectiveLib, blockIconCacheOptions, resolved.definition)
       iconCache.setRevisionKey(
         `${resolved.definition.id}:${summarizeBlocksForCache(resolved.definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(blockIconCacheOptions)}`,
       )
@@ -310,7 +335,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
 
   async function rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null> {
     const def = structureDefinition.value
-    const lib = materialLibrary.value
+    const lib = textureCache.value
     if (!def || !lib || annotations.length === 0) return null
     annotationProvider.setAnnotations(annotations)
     const outputs = await annotationProvider.build(def, lib)
@@ -333,8 +358,8 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     mainMeshGroup.value = null
     blockIconCache.value?.dispose()
     blockIconCache.value = null
-    materialLibrary.value?.dispose()
-    materialLibrary.value = null
+    textureCache.value?.dispose()
+    textureCache.value = null
     structureDefinition.value = null
     tooltipPalette.value = []
     worldFrameIndex.value = 0
@@ -363,6 +388,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     toggleWorldFramesPlayback,
     disposeCachesAndLibrary,
     rebuildAll,
+    textureCache,
     computed: {
       layerPreviewMode,
       layerPreviewLabel,

@@ -7,7 +7,6 @@ import {
 } from '@/workbench/sdeApi'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
 import { logCenter } from '@/workbench/logging/LogCenter'
-import { buildMaterialLibrary } from './materialLibraryHelper'
 
 export const SDEConnectOperator: OperatorType = {
   id: 'OPERATOR_SDE_CONNECT',
@@ -56,7 +55,6 @@ export const SDELoadExportOperator: OperatorType = {
     if (result.document) {
       bctx.currentWorldFrameIndex.value = 0
       bctx.structEpoch.value += 1
-      void buildMaterialLibrary(result.document).then(lib => { if (lib) bctx.materialLibrary.value = lib })
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       logCenter.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {

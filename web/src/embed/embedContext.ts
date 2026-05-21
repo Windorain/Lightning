@@ -9,7 +9,6 @@ import type { BContext, LoadStatus } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
 import { createRenderAssets } from '@/workbench/context/sceneLifecycle'
 import type { View3DConfig } from '@/preview/previewConfig'
-import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
@@ -26,7 +25,6 @@ export function createEmbedBContext(config: View3DConfig): BContext {
   const docRef = computed(() => configRef.value.renderBundle.document)
   const loadStatus = ref<LoadStatus>('loading')
   const meshBusy = ref(false)
-  const materialLibrary = shallowRef<MaterialLibraryApi | null>(config.materialLibrary)
   const blockIconCache = shallowRef<BlockIconCache | null>(null)
   const tooltipPalette = shallowRef<string[]>([])
   const sceneRef = shallowRef<THREE.Scene | null>(null)
@@ -42,12 +40,11 @@ export function createEmbedBContext(config: View3DConfig): BContext {
   const layerWorldY = ref(config.initialLayerWorldY)
   const framesPlaybackIsPlaying = ref(false)
 
-  // ---- renderAssets (shared) ----
+  // ---- renderAssets (shared) — textureCache built internally from doc ----
   const renderAssets = createRenderAssets({
     docRef: docRef as Ref<unknown>,
     loadStatus,
     meshBusy,
-    materialLibrary,
     blockIconCache,
     tooltipPalette,
     structureDefinition,
@@ -80,7 +77,6 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     config: configRef as unknown as ShallowRef<import('@/preview/previewConfig').View3DConfig | null>,
     loadStatus,
     meshBusy,
-    materialLibrary,
     blockIconCache,
     tooltipPalette,
     worldFrameIndex,
@@ -96,7 +92,7 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     loadStructureAndResources: renderAssets.loadStructureAndResources,
     rebuildContentMesh: renderAssets.rebuildContentMesh,
     rebuildAnnotationOverlay: renderAssets.rebuildAnnotationOverlay,
-    reloadFromConfig: async (cfg: import('@/preview/previewConfig').View3DConfig) => { configRef.value = cfg as any; materialLibrary.value = cfg.materialLibrary; await renderAssets.rebuildAll() },
+    reloadFromConfig: async (cfg: import('@/preview/previewConfig').View3DConfig) => { configRef.value = cfg as any; await renderAssets.rebuildAll() },
     disposeCachesAndLibrary: renderAssets.disposeCachesAndLibrary,
     registerScene: renderAssets.registerScene,
     blockStatsEntries,

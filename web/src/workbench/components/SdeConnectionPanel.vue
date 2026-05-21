@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import { sdeGetWorkspaceDocument } from '@/workbench/sdeApi'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
-import { buildMaterialLibrary } from '@/workbench/operators/builtin/materialLibraryHelper'
 import { useBContext } from '@/workbench/context/bContext'
 
 const bctx = useBContext()
@@ -24,7 +23,6 @@ async function onConnect(): Promise<void> {
   const result = await parserRegistry.detectAndParse(data)
   if (result.document) {
     bctx.doc.value = result.document
-    void buildMaterialLibrary(result.document).then(lib => { if (lib) bctx.materialLibrary.value = lib })
     bctx.currentWorldFrameIndex.value = 0
     bctx.structEpoch.value += 1
     bctx.workspaceMode.value = 'sde'

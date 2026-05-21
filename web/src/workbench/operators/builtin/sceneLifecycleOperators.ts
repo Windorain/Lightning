@@ -6,7 +6,6 @@ import { downloadJson } from '@/util/browser'
 import { suggestedJsonBaseName } from '@/workbench/utils/sceneHelpers'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
-import { buildMaterialLibrary } from './materialLibraryHelper'
 
 function pickFile(): Promise<File | undefined> {
   return new Promise(resolve => {
@@ -50,7 +49,6 @@ export const NewSceneOperator: OperatorType = {
     bctx.editHistory.clear()
     const doc = RuntimeDocument.empty()
     bctx.doc.value = doc
-    void buildMaterialLibrary(doc).then(lib => { if (lib) bctx.materialLibrary.value = lib })
     bctx.dirty.value = false
     bctx.structEpoch.value += 1
   },
@@ -90,7 +88,6 @@ export const OpenSceneOperator: OperatorType = {
     if (result.document) {
       bctx.currentWorldFrameIndex.value = 0
       bctx.structEpoch.value += 1
-      void buildMaterialLibrary(result.document).then(lib => { if (lib) bctx.materialLibrary.value = lib })
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       logCenter.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
@@ -140,7 +137,6 @@ export const LoadBuiltinSceneOperator: OperatorType = {
     if (result.document) {
       bctx.currentWorldFrameIndex.value = 0
       bctx.structEpoch.value += 1
-      void buildMaterialLibrary(result.document).then(lib => { if (lib) bctx.materialLibrary.value = lib })
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       logCenter.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {

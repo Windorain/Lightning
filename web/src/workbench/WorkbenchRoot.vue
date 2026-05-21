@@ -27,7 +27,6 @@ import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 import { parseWorkbenchQuery } from '@/workbench/utils/sceneHelpers'
-import { buildMaterialLibrary } from '@/workbench/operators/builtin/materialLibraryHelper'
 
 // Document format parsers — 注册到解析分发中心
 import { parserRegistry } from '@/workbench/context/parserRegistry'
@@ -139,7 +138,6 @@ onMounted(async () => {
           const result = await parserRegistry.detectAndParse(data)
           if (result.document) {
             bctx.doc.value = result.document
-            void buildMaterialLibrary(result.document).then(lib => { if (lib) bctx.materialLibrary.value = lib })
             bctx.structEpoch.value += 1
             bctx.workspaceMode.value = 'sde'
           }
