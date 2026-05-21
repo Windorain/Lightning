@@ -257,6 +257,10 @@ public final class ExportTextureLocator {
             return out;
         }
         out.add(new ResourceLocation(ns, "textures/" + path + ".png"));
+        if (path.startsWith("blocks/")) {
+            String stripped = path.substring("blocks/".length());
+            out.add(new ResourceLocation(ns, "textures/" + stripped + ".png"));
+        }
         return out;
     }
 }
