@@ -3,10 +3,11 @@
  *
  * 核心逻辑委托给 createSceneLifecycle（与 workbench 共享）。
  */
-import { ref, shallowRef } from 'vue'
+import { ref, shallowRef, computed } from 'vue'
+import type { Ref, ShallowRef } from 'vue'
 import type { BContext, LoadStatus } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
-import { createSceneLifecycle } from '@/workbench/context/sceneLifecycle'
+import { createRenderAssets } from '@/workbench/context/sceneLifecycle'
 import type { View3DConfig } from '@/preview/previewConfig'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
@@ -22,9 +23,10 @@ import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
 export function createEmbedBContext(config: View3DConfig): BContext {
   // ---- Shared state ----
   const configRef = shallowRef<View3DConfig>(config)
+  const docRef = computed(() => configRef.value.renderBundle.document)
   const loadStatus = ref<LoadStatus>('loading')
   const meshBusy = ref(false)
-  const materialLibrary = shallowRef<MaterialLibraryApi | null>(null)
+  const materialLibrary = shallowRef<MaterialLibraryApi | null>(config.materialLibrary)
   const blockIconCache = shallowRef<BlockIconCache | null>(null)
   const tooltipPalette = shallowRef<string[]>([])
   const sceneRef = shallowRef<THREE.Scene | null>(null)
@@ -40,9 +42,9 @@ export function createEmbedBContext(config: View3DConfig): BContext {
   const layerWorldY = ref(config.initialLayerWorldY)
   const framesPlaybackIsPlaying = ref(false)
 
-  // ---- Scene lifecycle (shared) ----
-  const lifecycle = createSceneLifecycle({
-    configRef,
+  // ---- renderAssets (shared) ----
+  const renderAssets = createRenderAssets({
+    docRef: docRef as Ref<unknown>,
     loadStatus,
     meshBusy,
     materialLibrary,
@@ -54,12 +56,14 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     worldFrameIndex,
     layerWorldY,
     framesPlaybackIsPlaying,
+    blockIconCacheOptions: config.blockIconCacheOptions ?? {},
+    initialWorldFrameIndex: config.initialWorldFrameIndex,
   })
 
   const {
     layerPreviewMode, layerPreviewLabel, gridHeight,
     hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
-  } = lifecycle.computed
+  } = renderAssets.computed
 
   // ---- Operators ----
   const operators = {
@@ -73,7 +77,7 @@ export function createEmbedBContext(config: View3DConfig): BContext {
 
   // ---- Atomic bctx assembly ----
   const ctx: BContext = {
-    config: configRef,
+    config: configRef as unknown as ShallowRef<import('@/preview/previewConfig').View3DConfig | null>,
     loadStatus,
     meshBusy,
     materialLibrary,
@@ -83,18 +87,18 @@ export function createEmbedBContext(config: View3DConfig): BContext {
     worldFrameCount,
     hasWorldMultiFrame,
     framesPlaybackIsPlaying,
-    toggleWorldFramesPlayback: lifecycle.toggleWorldFramesPlayback,
-    setCurrentWorldFrame: lifecycle.setCurrentWorldFrame,
+    toggleWorldFramesPlayback: renderAssets.toggleWorldFramesPlayback,
+    setCurrentWorldFrame: renderAssets.setCurrentWorldFrame,
     layerWorldY,
     layerPreviewMode,
     layerPreviewLabel,
     gridHeight,
-    loadStructureAndResources: lifecycle.loadStructureAndResources,
-    rebuildContentMesh: lifecycle.rebuildContentMesh,
-    rebuildAnnotationOverlay: lifecycle.rebuildAnnotationOverlay,
-    reloadFromConfig: lifecycle.reloadFromConfig,
-    disposeCachesAndLibrary: lifecycle.disposeCachesAndLibrary,
-    registerScene: lifecycle.registerScene,
+    loadStructureAndResources: renderAssets.loadStructureAndResources,
+    rebuildContentMesh: renderAssets.rebuildContentMesh,
+    rebuildAnnotationOverlay: renderAssets.rebuildAnnotationOverlay,
+    reloadFromConfig: async (cfg: import('@/preview/previewConfig').View3DConfig) => { configRef.value = cfg as any; await renderAssets.rebuildAll() },
+    disposeCachesAndLibrary: renderAssets.disposeCachesAndLibrary,
+    registerScene: renderAssets.registerScene,
     blockStatsEntries,
     viewports,
     get viewport() { return viewports.active.value! },

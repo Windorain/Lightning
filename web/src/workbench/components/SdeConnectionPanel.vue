@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import {
-  sdePing,
-  sdeListExports,
-  sdeGetWorkspaceDocument,
-} from '@/workbench/sdeApi'
+import { sdeGetWorkspaceDocument } from '@/workbench/sdeApi'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
+import { buildMaterialLibrary } from '@/workbench/operators/builtin/materialLibraryHelper'
 import { useBContext } from '@/workbench/context/bContext'
 
 const bctx = useBContext()
@@ -16,34 +13,23 @@ const connectionMessageText = computed(() => statusMessage.value)
 const showConnectionHint = computed(() => bctx.connectionConnected.value !== null)
 
 async function onConnect(): Promise<void> {
-  bctx.connectionConnected.value = null
-  if (!bctx.connectionApiBase.value) {
-    bctx.connectionConnected.value = false
-    return
-  }
-  try {
-    await sdePing(bctx.connectionApiBase.value, bctx.connectionToken.value)
-    bctx.connectionConnected.value = true
-    bctx.connectionExportsLoading.value = true
-    try {
-      bctx.connectionExports.value = await sdeListExports(bctx.connectionApiBase.value, bctx.connectionToken.value)
-    } catch { bctx.connectionExports.value = [] }
-    finally { bctx.connectionExportsLoading.value = false }
+  await bctx.operators.exec('OPERATOR_SDE_CONNECT')
+  if (!bctx.connectionConnected.value) return
 
-    bctx.selection.clear()
-    bctx.editHistory.clear()
-    const data = await sdeGetWorkspaceDocument(bctx.connectionApiBase.value, bctx.connectionToken.value)
-    if (data && Object.keys(data as Record<string, unknown>).length > 0) {
-      const result = await parserRegistry.detectAndParse(data)
-      bctx.doc.value = result.document ?? null
-      if (result.document) {
-        bctx.currentWorldFrameIndex.value = 0
-        bctx.structEpoch.value += 1
-      }
-      bctx.workspaceMode.value = 'sde'
-      bctx.dirty.value = false
-    }
-  } catch { bctx.connectionConnected.value = false }
+  const data = await sdeGetWorkspaceDocument(bctx.connectionApiBase.value, bctx.connectionToken.value)
+  if (!data || Object.keys(data as Record<string, unknown>).length === 0) return
+
+  bctx.selection.clear()
+  bctx.editHistory.clear()
+  const result = await parserRegistry.detectAndParse(data)
+  if (result.document) {
+    bctx.doc.value = result.document
+    void buildMaterialLibrary(result.document).then(lib => { if (lib) bctx.materialLibrary.value = lib })
+    bctx.currentWorldFrameIndex.value = 0
+    bctx.structEpoch.value += 1
+    bctx.workspaceMode.value = 'sde'
+    bctx.dirty.value = false
+  }
 }
 </script>
 

@@ -4,7 +4,7 @@ import { onMounted, onBeforeUnmount, provide, ref, computed } from 'vue'
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
 import WorkbenchSettingsDrawer from '@/workbench/components/WorkbenchSettingsDrawer.vue'
 import WorkspaceTabs from '@/workbench/components/WorkspaceTabs.vue'
-import ViewportHost from '@/workbench/components/ViewportHost.vue'
+import WorkbenchViewport from '@/workbench/components/WorkbenchViewport.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import WikiViewerWorkspace from '@/workbench/components/WikiViewerWorkspace.vue'
@@ -27,6 +27,7 @@ import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 import { parseWorkbenchQuery } from '@/workbench/utils/sceneHelpers'
+import { buildMaterialLibrary } from '@/workbench/operators/builtin/materialLibraryHelper'
 
 // Document format parsers — 注册到解析分发中心
 import { parserRegistry } from '@/workbench/context/parserRegistry'
@@ -138,6 +139,7 @@ onMounted(async () => {
           const result = await parserRegistry.detectAndParse(data)
           if (result.document) {
             bctx.doc.value = result.document
+            void buildMaterialLibrary(result.document).then(lib => { if (lib) bctx.materialLibrary.value = lib })
             bctx.structEpoch.value += 1
             bctx.workspaceMode.value = 'sde'
           }
@@ -209,7 +211,7 @@ onMounted(() => {
       </div>
     </template>
     <template #viewport>
-      <ViewportHost />
+      <WorkbenchViewport v-if="bctx.doc.value" />
     </template>
     <template #properties>
       <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" />
