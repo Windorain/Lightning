@@ -6,11 +6,11 @@ import { logCenter } from '@/workbench/logging/LogCenter'
 
 const bctx = useBContext()
 
-const isSde = computed(() => bctx.scene.workspaceMode.value === 'sde')
-const apiBaseStr = computed(() => bctx.connection.apiBase.value)
-const exportFilesList = computed(() => bctx.connection.exports.value)
-const exportsLoading = computed(() => bctx.connection.exportsLoading.value)
-const selectedName = computed(() => bctx.connection.selectedExportName.value)
+const isSde = computed(() => bctx.workspaceMode.value === 'sde')
+const apiBaseStr = computed(() => bctx.connectionApiBase.value)
+const exportFilesList = computed(() => bctx.connectionExports.value)
+const exportsLoading = computed(() => bctx.connectionExportsLoading.value)
+const selectedName = computed(() => bctx.connectionSelectedExportName.value)
 
 async function onPick(name: string): Promise<void> {
   try {

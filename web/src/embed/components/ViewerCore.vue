@@ -7,7 +7,7 @@
 import { inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as THREE from 'three'
 
-import { View3DContextKey } from '@/preview/sceneStore'
+import { bContextKey } from '@/workbench/context/bContext'
 import { View3DRenderer } from '@/render/viewport/renderViewport'
 import {
   applyDiagonalOrbitView,
@@ -16,7 +16,7 @@ import {
 } from '@/render/interaction/initialCamera'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
-import { pickVoxelFromPointer } from '@/render/interaction/voxelPick'
+import { scenePickFromPointer } from '@/render/interaction/scenePick'
 import type { StructureDefinition } from '@/render/schema/types'
 
 export interface ViewerCoreReadyPayload {
@@ -36,12 +36,10 @@ const props = withDefaults(
     contentGroup: THREE.Group | null
     layerPreviewMode: LayerPreviewMode
     sceneBackground?: number
-    editMode?: boolean
     showAxesGizmo?: boolean
   }>(),
   {
     sceneBackground: 0x0b1217,
-    editMode: false,
     showAxesGizmo: true,
   },
 )
@@ -60,15 +58,9 @@ const emit = defineEmits<{
       source: 'viewport'; voxel: { column: number; row: number; zSlice: number }
     } | null,
   ]
-  'select-block': [
-    payload: {
-      blockId: string; clientX: number; clientY: number
-      voxel: { column: number; row: number; zSlice: number }
-    } | null,
-  ]
 }>()
 
-const store = inject(View3DContextKey)
+const bctx = inject(bContextKey)
 
 function clampOrthoZoom(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1
@@ -88,7 +80,6 @@ let onVisibilityToGl: (() => void) | null = null
 let canvasEl: HTMLElement | null = null
 let rafHoverPending = false
 let lastPointer: { clientX: number; clientY: number } | null = null
-let clickDownAt: { x: number; y: number } | null = null
 let skipNextContentGroupAutoFit = false
 
 function runPick(): void {
@@ -97,14 +88,15 @@ function runPick(): void {
   const dom = canvasEl
   if (!vp || !g || !dom || !lastPointer) return
 
-  const picked = pickVoxelFromPointer({
+  const picked = scenePickFromPointer({
     clientX: lastPointer.clientX, clientY: lastPointer.clientY,
     domElement: dom, camera: vp.camera,
-    contentGroup: g, def: props.definition,
+    contentGroup: g, overlayGroup: layers?.overlay,
+    def: props.definition,
     layerPreview: props.layerPreviewMode,
   })
 
-  if (picked) {
+  if (picked && picked.kind === 'block') {
     emit('hover-block', {
       blockId: picked.blockId,
       clientX: lastPointer.clientX, clientY: lastPointer.clientY,
@@ -128,38 +120,6 @@ function onPointerLeave(): void {
   emit('hover-block', null)
 }
 
-function onPointerDown(e: PointerEvent): void {
-  if (!props.editMode) return
-  clickDownAt = { x: e.clientX, y: e.clientY }
-}
-
-function onPointerUp(e: PointerEvent): void {
-  if (!props.editMode || !clickDownAt) return
-  const dx = e.clientX - clickDownAt.x
-  const dy = e.clientY - clickDownAt.y
-  clickDownAt = null
-  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) return
-
-  lastPointer = { clientX: e.clientX, clientY: e.clientY }
-  const vp = renderer
-  const g = props.contentGroup
-  const dom = canvasEl
-  if (!vp || !g || !dom) return
-  const picked = pickVoxelFromPointer({
-    clientX: e.clientX, clientY: e.clientY,
-    domElement: dom, camera: vp.camera,
-    contentGroup: g, def: props.definition,
-    layerPreview: props.layerPreviewMode,
-  })
-  if (picked) {
-    emit('select-block', {
-      blockId: picked.blockId,
-      clientX: e.clientX, clientY: e.clientY,
-      voxel: { column: picked.column, row: picked.row, zSlice: picked.zSlice },
-    })
-  }
-}
-
 function fitCameraToGroup(vp: View3DRenderer, group: THREE.Group): void {
   group.updateMatrixWorld(true)
   const box = new THREE.Box3().setFromObject(group)
@@ -170,7 +130,7 @@ function fitCameraToGroup(vp: View3DRenderer, group: THREE.Group): void {
   box.getSize(size)
   const maxDim = Math.max(size.x, size.y, size.z, 0.1)
   const dist = Math.max(8, maxDim * 2.2)
-  const cam = store?.config.value?.initialCamera
+  const cam = (bctx as any)?.initialCamera
   const finalDist = cam?.distance ?? dist
   const o = vp.camera
   vp.orbitTarget.copy(center)
@@ -204,7 +164,7 @@ watch(
 )
 
 watch(
-  () => store?.config.value?.initialCamera?.zoom,
+  () => (bctx as any)?.initialCamera?.zoom,
   (z) => {
     const vp = renderer
     if (!vp) return
@@ -242,8 +202,7 @@ onMounted(() => {
   canvasEl = vp.domElement
   canvasEl.addEventListener('pointermove', onPointerMove)
   canvasEl.addEventListener('pointerleave', onPointerLeave)
-  canvasEl.addEventListener('pointerdown', onPointerDown)
-  canvasEl.addEventListener('pointerup', onPointerUp)
+
 
   const def = props.definition
   const fallbackTarget = new THREE.Vector3(0, 2, 0)
@@ -321,8 +280,7 @@ onBeforeUnmount(() => {
   if (canvasEl) {
     canvasEl.removeEventListener('pointermove', onPointerMove)
     canvasEl.removeEventListener('pointerleave', onPointerLeave)
-    canvasEl.removeEventListener('pointerdown', onPointerDown)
-    canvasEl.removeEventListener('pointerup', onPointerUp)
+
     canvasEl = null
   }
   cancelAnimationFrame(animationId)
@@ -330,25 +288,41 @@ onBeforeUnmount(() => {
   if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null }
   if (onResize) { window.removeEventListener('resize', onResize); onResize = null }
   if (onVisibilityToGl) { document.removeEventListener('visibilitychange', onVisibilityToGl); onVisibilityToGl = null }
-  store?.detachAndDisposeMesh()
   renderer?.dispose()
   renderer = null
 })
 </script>
 
 <template>
-  <div ref="container" class="vc-viewport" style="overflow: hidden"></div>
+  <div ref="container" class="vc-viewport" style="overflow: hidden">
+    <button
+      type="button" class="vc-reset-btn" title="复位视角"
+      @click="renderer && props.contentGroup ? fitCameraToGroup(renderer, props.contentGroup) : null"
+    >⟲</button>
+  </div>
 </template>
 
 <style scoped>
 .vc-viewport {
   flex: 1; min-height: 320px; min-width: 0;
-  border-radius: 0;
-  background: var(--wb-viewport-bg);
-  background-image:
-    linear-gradient(var(--wb-grid-color) 1px, transparent 1px),
-    linear-gradient(90deg, var(--wb-grid-color) 1px, transparent 1px);
-  background-size: 32px 32px;
+  border-radius: 0; background: var(--nei-viewport-bg);
   overflow: hidden; position: relative;
+}
+.vc-reset-btn {
+  position: absolute; top: 6px; right: 6px; z-index: 10;
+  width: 28px; height: 28px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 700;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  color: var(--nei-text); text-shadow: var(--nei-label-shadow);
+  background: var(--nei-bg);
+  border: var(--nei-bevel-w) solid;
+  border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight);
+  border-radius: 0; cursor: pointer; user-select: none; box-sizing: border-box;
+}
+.vc-reset-btn:hover { filter: brightness(1.06); }
+.vc-reset-btn:active {
+  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
+  padding-top: 1px; padding-left: 1px;
 }
 </style>

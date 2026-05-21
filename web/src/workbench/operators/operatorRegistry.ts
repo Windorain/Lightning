@@ -6,7 +6,7 @@
 import type { BContext } from '@/workbench/context/bContext'
 import type { OperatorType, OperatorProperties, OpResult } from './operatorType'
 import { OP_RESULT } from './operatorType'
-import { eventDispatcher } from '@/workbench/eventDispatcher'
+
 import { ModalOperatorWrapper } from './modalOperatorWrapper'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import type { StateDigest } from '@/workbench/logging/LogCenter'
@@ -52,16 +52,16 @@ export class OperatorRegistry {
     const snap = bctx.queries ? logCenter.snapshot(bctx) : undefined
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
-      if (op.flagUndo && bctx.scene) {
-        const before = bctx.scene.scene.value?.clone() ?? null
+      if (op.flagUndo && bctx.doc) {
+        const before = bctx.doc.value?.clone() ?? null
         await op.exec(bctx, resolvedProps)
-        const after = bctx.scene.scene.value?.clone() ?? null
+        const after = bctx.doc.value?.clone() ?? null
         bctx.editHistory.push({
           id: 'op_' + Math.random().toString(36).slice(2, 10),
           label: op.label,
           timestamp: Date.now(),
-          execute: () => { bctx.scene.scene.value = after; bctx.scene.markDirty() },
-          undo: () => { bctx.scene.scene.value = before; bctx.scene.markDirty() },
+          execute: () => { bctx.doc.value = after; bctx.markDirty() },
+          undo: () => { bctx.doc.value = before; bctx.markDirty() },
         })
       } else {
         await op.exec(bctx, resolvedProps)
@@ -90,31 +90,31 @@ export class OperatorRegistry {
     const resolvedProps: OperatorProperties = props ?? {}
 
     if (op.invoke) {
-      const snapshot = op.flagUndo && bctx.scene
-        ? bctx.scene.scene.value?.clone() ?? null
+      const snapshot = op.flagUndo && bctx.doc
+        ? bctx.doc.value?.clone() ?? null
         : null
 
       const result = op.invoke(bctx, resolvedProps, event)
 
       if (result === OP_RESULT.RUNNING_MODAL) {
-        const targetRegion = regionId ?? (bctx.eventDispatcher as any).getCurrentRegionId?.() ?? 'r-viewport'
+        const targetRegion = regionId ?? bctx.eventDispatcher.getCurrentRegionId() ?? 'r-viewport'
         const wrapper = new ModalOperatorWrapper(op, bctx, resolvedProps, targetRegion)
         if (snapshot !== null) {
           wrapper.setUndoSnapshot(snapshot)
         }
         if (event instanceof PointerEvent) {
-          eventDispatcher.pushModal(targetRegion, wrapper, event)
+          bctx.eventDispatcher.pushModal(targetRegion, wrapper, event)
         }
         logOperatorResult(bctx, id, op.label, 'RUNNING_MODAL', snap)
       } else if (result === OP_RESULT.FINISHED) {
         if (snapshot !== null) {
-          const snapshotAfter = bctx.scene.scene.value?.clone() ?? null
+          const snapshotAfter = bctx.doc.value?.clone() ?? null
           bctx.editHistory.push({
             id: 'op_' + Math.random().toString(36).slice(2, 10),
             label: op.label,
             timestamp: Date.now(),
-            execute: () => { bctx.scene.scene.value = snapshotAfter; bctx.scene.markDirty() },
-            undo: () => { bctx.scene.scene.value = snapshot; bctx.scene.markDirty() },
+            execute: () => { bctx.doc.value = snapshotAfter; bctx.markDirty() },
+            undo: () => { bctx.doc.value = snapshot; bctx.markDirty() },
           })
         }
         logOperatorResult(bctx, id, op.label, 'FINISHED', snap)
@@ -136,16 +136,16 @@ async function invokeExecFallback(
   op: OperatorType,
   props: OperatorProperties,
 ): Promise<OpResult> {
-  if (op.flagUndo && bctx.scene) {
-    const snapshot = bctx.scene.scene.value?.clone() ?? null
+  if (op.flagUndo && bctx.doc) {
+    const snapshot = bctx.doc.value?.clone() ?? null
     await op.exec!(bctx, props)
-    const snapshotAfter = bctx.scene.scene.value?.clone() ?? null
+    const snapshotAfter = bctx.doc.value?.clone() ?? null
     bctx.editHistory.push({
       id: 'op_' + Math.random().toString(36).slice(2, 10),
       label: op.label,
       timestamp: Date.now(),
-      execute: () => { bctx.scene.scene.value = snapshotAfter; bctx.scene.markDirty() },
-      undo: () => { bctx.scene.scene.value = snapshot; bctx.scene.markDirty() },
+      execute: () => { bctx.doc.value = snapshotAfter; bctx.markDirty() },
+      undo: () => { bctx.doc.value = snapshot; bctx.markDirty() },
     })
   } else {
     await op.exec!(bctx, props)

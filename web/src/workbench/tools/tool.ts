@@ -1,9 +1,7 @@
 // web/src/workbench/tools/tool.ts
 import type { Ref } from 'vue'
-import type { SceneContext } from '@/workbench/sceneContext'
 import type { SelectionContext, BlockRef } from '@/workbench/selectionContext'
-import type { UndoManager } from '@/workbench/editHistoryContext'
-import type { ViewportRuntime } from '@/workbench/context/bContext'
+import type { ViewportSlot } from '@/workbench/context/bContext'
 import type { InputBinding } from '@/workbench/keymap'
 import type { Frame } from '@/render/schema/types'
 
@@ -23,6 +21,8 @@ export interface Tool {
   operator?: string
   /** 操作符属性预设：键映射匹配时自动注入，keymap item 的 props 覆盖这些值 */
   properties?: Record<string, unknown>
+  /** 工具级覆盖色 */
+  color?: string
 }
 
 /** Gizmo 是交互+渲染入口。一个 Tool 可以关联零个或一个 Gizmo。 */
@@ -40,10 +40,8 @@ export interface ToolGizmo {
 
 /** ToolContext 是传递给 Tool 和 Gizmo 的运行环境。 */
 export interface ToolContext {
-  scene: SceneContext
   selection: SelectionContext
-  editHistory: UndoManager
-  viewport: ViewportRuntime
+  viewport: ViewportSlot
 
   pickVoxel(event: PointerEvent): BlockRef | null
   getCurrentFrame(): Frame | null
@@ -52,14 +50,9 @@ export interface ToolContext {
 
   /** 调用操作符 */
   invokeOperator(id: string, props?: Record<string, unknown>, event?: Event, regionId?: string): string
-  execOperator(id: string, props?: Record<string, unknown>): void
 
   /** 当前活跃 Tool（切换工具时由 ToolRegistry 更新） */
   readonly activeTool: Ref<Tool | null>
-
-  /** 工具 transient 状态（draft 注解数据等），工具切换时 reset */
-  transient: Record<string, unknown>
-  resetTransient(): void
 
   /** 查询指定 region 的模态栈深度。>0 表示有操作符在模态运行中 */
   modalDepth(regionId: string): number

@@ -15,6 +15,7 @@
   "dependencies": {
     "@protobuf-ts/runtime": "^2.11.1",
     "jszip": "^3.10.1",
+    "omggif": "^1.0.10",
     "pako": "^2.1.0",
     "snarkdown": "^2.0.0",
     "three": "^0.174.0",

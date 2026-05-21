@@ -115,6 +115,15 @@ export class Grid {
     return result
   }
 
+  /** 将 GridPos (Y-up) 转换为世界空间体素中心坐标（网格居中于原点，方块中心偏移 +0.5） */
+  centerWorld(pos: GridPos): { x: number; y: number; z: number } {
+    return {
+      x: pos.x - this._width / 2 + 0.5,
+      y: pos.y - this._height / 2 + 0.5,
+      z: pos.z - this._depth / 2 + 0.5,
+    }
+  }
+
   count(): number {
     let n = 0
     for (let z = 0; z < this._depth; z++) {
@@ -484,7 +493,7 @@ export class RuntimeDocument {
       meta: { ...this.meta },
       annotations: [...this.annotations],
       labels: [...this.labels],
-      textureBlobs: this.textureBlobs ? { ...this.textureBlobs } : undefined,
+      textureBlobs: this.textureBlobs ? (Array.isArray(this.textureBlobs) ? [...this.textureBlobs] as unknown as Record<string, unknown> : { ...this.textureBlobs }) : undefined,
       tooltipPalette: this.tooltipPalette ? [...this.tooltipPalette] : undefined,
       materialPalette: this.materialPalette ? [...this.materialPalette] : undefined,
       playback: this.playback ? { ...this.playback } : undefined,

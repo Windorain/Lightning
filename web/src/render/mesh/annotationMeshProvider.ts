@@ -13,7 +13,7 @@ export class AnnotationMeshProvider implements MeshProvider {
   private _annotations: Annotation[] = []
 
   setAnnotations(annotations: Annotation[]): void {
-    this._annotations = annotations.filter(a => a.visible)
+    this._annotations = annotations.filter(a => a.visible !== false)
   }
 
   async build(

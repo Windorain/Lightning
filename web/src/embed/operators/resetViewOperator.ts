@@ -39,8 +39,7 @@ export const ResetViewOperator: OperatorType = {
     const maxDim = Math.max(size.x, size.y, size.z, 0.1)
     const dist = Math.max(8, maxDim * 2.2)
 
-    const config = bctx.config.value
-    const cam = config?.initialCamera
+    const cam = (bctx as any).initialCamera
     const finalDist = cam?.distance ?? dist
 
     orbitTarget.copy(center)

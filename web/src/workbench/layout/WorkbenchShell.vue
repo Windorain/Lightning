@@ -3,13 +3,9 @@
  * Workbench 主布局壳：Blender 风格 3 列。
  * 通过 named slots 让父组件控制各区域的内容与 props。
  */
-import { provide } from 'vue'
 import { usePanelResize } from './panelResize'
 
 const { rightWidth, startRightDrag, dragging } = usePanelResize()
-
-provide('wb-right-width', rightWidth)
-provide('wb-dragging', dragging)
 </script>
 
 <template>

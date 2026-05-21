@@ -4,15 +4,12 @@ import { onMounted, onBeforeUnmount, provide, ref, computed } from 'vue'
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
 import WorkbenchSettingsDrawer from '@/workbench/components/WorkbenchSettingsDrawer.vue'
 import WorkspaceTabs from '@/workbench/components/WorkspaceTabs.vue'
-import ViewportHost from '@/workbench/components/ViewportHost.vue'
+import WorkbenchViewport from '@/workbench/components/WorkbenchViewport.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import WikiViewerWorkspace from '@/workbench/components/WikiViewerWorkspace.vue'
-import EmbedShell from '@/embed/EmbedShell.vue'
-import { wikiConfigPanel, sceneInfoPanel, blockStatsPanel } from '@/workbench/ux/panels'
+import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
-import { provideSceneContext } from '@/workbench/sceneContext'
-import { provideConnectionContext } from '@/workbench/connectionContext'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
 import { provideToolRegistry } from '@/workbench/toolRegistry'
@@ -30,6 +27,7 @@ import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
+import { parseWorkbenchQuery } from '@/workbench/utils/sceneHelpers'
 
 // Document format parsers — 注册到解析分发中心
 import { parserRegistry } from '@/workbench/context/parserRegistry'
@@ -42,8 +40,6 @@ parserRegistry.register(EnvelopeParser)
 parserRegistry.register(WorldParser)
 parserRegistry.register(StructureDataParser)
 
-const scene = provideSceneContext()
-const connection = provideConnectionContext(scene)
 const selection = provideSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
@@ -52,9 +48,14 @@ const statusMessage = useStatusMessage().statusMessage
 // 共享 VM 组装
 const settings = createBContextSettings()
 const { bctx, screen: defaultScreen } = createWorkbenchContext({
-  scene, connection, selection, editHistory, toolRegistry, settings,
-  statusMessage,
+  selection, editHistory, toolRegistry, settings, statusMessage,
 })
+
+// Query string override for workspace mode
+const query = parseWorkbenchQuery()
+if (query.apiBase) {
+  bctx.workspaceMode.value = 'sde'
+}
 
 provideBContext(bctx)
 useNeiTheme()
@@ -73,7 +74,7 @@ const activeToolshelfPanels = computed(() =>
 const activePropertiesPanels = computed(() =>
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels
     .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
+    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx), component: p.component }))
 )
 
 const activeHeaderPanels = computed(() =>
@@ -81,42 +82,6 @@ const activeHeaderPanels = computed(() =>
     .filter(p => p.poll(bctx))
     .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
-
-// ---- Wiki workspace panels & config ----
-const wikiPropertiesPanels = computed(() =>
-  [wikiConfigPanel, sceneInfoPanel, blockStatsPanel]
-    .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
-)
-
-function parseHex6(s: string): number {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
-  if (!m) return 0x5a5a5a
-  return parseInt(m[1], 16)
-}
-
-const wikiEmbedConfig = computed<import('@/preview/previewConfig').View3DConfig | null>(() => {
-  const c = bctx.scene.previewConfig.value
-  if (!c) return null
-  const wc = bctx.wikiConfig as any
-  return {
-    ...c,
-    features: { ...c.features, ...wc.features },
-    debug: wc.features?.debugStatusBar,
-    sceneBackground: parseHex6(wc.sceneBackgroundHex),
-    blockIconCacheOptions: {
-      ...c.blockIconCacheOptions,
-      sizePx: wc.iconSizePx,
-      orthoHalf: wc.iconOrthoHalf,
-    },
-    initialCamera: {
-      ...c.initialCamera,
-      yawDeg: wc.cameraYaw,
-      elevationDeg: wc.cameraElevation,
-      zoom: wc.cameraZoom,
-    },
-  }
-})
 
 // Context menu
 const contextMenu = createContextMenu()
@@ -140,10 +105,10 @@ function onMouseMove(e: MouseEvent) {
 }
 
 // Wire context menu + show/hide into wm (不在 createWorkbenchContext 内，因为依赖 showContextMenu 闭包)
-;(bctx.wm as any).contextMenu = contextMenu  // 覆盖 workbenchContext 创建的空菜单
-;(bctx.wm as any).showContextMenu = showContextMenu
-;(bctx.wm as any).hideContextMenu = hideContextMenu
-;(bctx.wm as any).contextMenuItems = ADD_MENU_ITEMS
+  bctx.wm.contextMenu = contextMenu
+  bctx.wm.showContextMenu = showContextMenu
+  bctx.wm.hideContextMenu = hideContextMenu
+  bctx.wm.contextMenuItems = ADD_MENU_ITEMS
 
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
@@ -156,7 +121,7 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
-const workspace = ref<'preview' | 'wiki' | 'export'>('preview')
+const workspace = ref<'preview' | 'wiki' | 'export' | 'materials'>('preview')
 const settingsOpen = ref(false)
 provide('workbenchSettingsOpen', settingsOpen)
 
@@ -165,20 +130,26 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousemove', onMouseMove)
 
-  if (connection.apiBase.value) {
-    await connection.testConnection()
-    if (connection.connected.value) {
-      await connection.refreshExportList()
-      const data = await connection.fetchWorkspaceData()
-      if (data) {
-        await scene.loadFromData(data)
-      }
+  if (bctx.connectionApiBase.value) {
+    try { await bctx.operators.exec('OPERATOR_SDE_CONNECT') } catch { /* ignore */ }
+    if (bctx.connectionConnected.value) {
+      try {
+        const data = await (await import('@/workbench/sdeApi')).sdeGetWorkspaceDocument(bctx.connectionApiBase.value, bctx.connectionToken.value)
+        if (data) {
+          const result = await parserRegistry.detectAndParse(data)
+          if (result.document) {
+            bctx.doc.value = result.document
+            bctx.structEpoch.value += 1
+            bctx.workspaceMode.value = 'sde'
+          }
+        }
+      } catch { /* ignore */ }
     }
   } else if (import.meta.env.DEV) {
     const q = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
     const sceneId = q?.get('sceneId')
     if (sceneId) {
-      try { await scene.loadBuiltinScene(sceneId) } catch { /* ignore */ }
+      try { await bctx.operators.exec('OPERATOR_LOAD_BUILTIN', { sceneId }) } catch { /* ignore */ }
     }
   }
 })
@@ -195,7 +166,7 @@ onBeforeUnmount(() => {
 
 
 logCenter.injectStateRefs({
-  scene: () => scene.scene.value?.toRaw() as any,
+  scene: () => bctx.doc.value?.toRaw() as any,
   selection: () => [...selection.items.value],
   toolRegistry: () => ({
     activeToolId: toolRegistry.activeTool.value?.id ?? 'none',
@@ -215,7 +186,6 @@ onMounted(() => {
   <WorkbenchShell v-show="workspace === 'preview'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -240,20 +210,19 @@ onMounted(() => {
       </div>
     </template>
     <template #viewport>
-      <ViewportHost />
+      <WorkbenchViewport v-if="bctx.doc.value" />
     </template>
     <template #properties>
-      <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" />
+      <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" :bctx="bctx" />
     </template>
     <template #statusbar>
       <StatusBar />
     </template>
   </WorkbenchShell>
 
-  <WorkbenchShell v-if="workspace === 'wiki'">
-    <template #menubar>
+  <div v-if="workspace === 'wiki'" class="wb-standalone">
+    <header class="wb-standalone-menubar">
       <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -262,28 +231,20 @@ onMounted(() => {
           :owner="panel.owner"
         />
       </div>
-    </template>
-    <template #workspace-tabs>
-      <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
-    </template>
-    <template #viewport>
-      <div class="wb-wiki-embed">
-        <EmbedShell v-if="wikiEmbedConfig" :key="bctx.scene.previewEpoch.value" :config="wikiEmbedConfig" />
-        <div v-else class="wb-wiki-placeholder">嵌入预览</div>
+    </header>
+    <header class="wb-standalone-top">
+      <div class="wb-standalone-tabs">
+        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
       </div>
-    </template>
-    <template #properties>
-      <PanelTabs :panels="wikiPropertiesPanels" :rna="bctx.rna" />
-    </template>
-    <template #statusbar>
-      <StatusBar />
-    </template>
-  </WorkbenchShell>
+    </header>
+    <main class="wb-standalone-body">
+      <WikiViewerWorkspace />
+    </main>
+  </div>
 
-  <WorkbenchShell v-if="workspace === 'export'">
-    <template #menubar>
+  <div v-if="workspace === 'export'" class="wb-standalone">
+    <header class="wb-standalone-menubar">
       <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -292,17 +253,38 @@ onMounted(() => {
           :owner="panel.owner"
         />
       </div>
-    </template>
-    <template #workspace-tabs>
-      <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
-    </template>
-    <template #viewport>
+    </header>
+    <header class="wb-standalone-top">
+      <div class="wb-standalone-tabs">
+        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
+      </div>
+    </header>
+    <main class="wb-standalone-body">
       <ExportWorkspace />
-    </template>
-    <template #statusbar>
-      <StatusBar />
-    </template>
-  </WorkbenchShell>
+    </main>
+  </div>
+
+  <div v-if="workspace === 'materials'" class="wb-standalone">
+    <header class="wb-standalone-menubar">
+      <div class="wb-menubar-inner">
+        <UIRenderer
+          v-for="panel in activeHeaderPanels"
+          :key="panel.id"
+          :layout="panel.layout"
+          :rna="bctx.rna"
+          :owner="panel.owner"
+        />
+      </div>
+    </header>
+    <header class="wb-standalone-top">
+      <div class="wb-standalone-tabs">
+        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
+      </div>
+    </header>
+    <main class="wb-standalone-body">
+      <MaterialGallery />
+    </main>
+  </div>
 
   <WorkbenchSettingsDrawer />
 
@@ -341,79 +323,57 @@ onMounted(() => {
   position: absolute; top: 4px; left: 4px; z-index: 100;
   display: flex; flex-direction: column; gap: 2px;
   padding: 4px;
-  background: var(--wb-bg-elevated);
-  border: 1px solid var(--wb-border);
+  background: var(--nei-dropdown-bg);
+  border: 1px solid var(--nei-border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
 .wb-toolshelf :deep(.ux-operator-btn) {
-  width: 34px; height: 34px; padding: 0;
+  width: 32px; height: 32px; padding: 0;
   font-size: 16px; line-height: 1;
   display: flex; align-items: center; justify-content: center;
   border-color: transparent;
   background: transparent;
-  color: var(--wb-text-muted);
-  border-radius: var(--wb-radius-md);
+  color: var(--nei-label);
 }
 .wb-toolshelf :deep(.ux-operator-btn:hover) {
-  background: var(--wb-bg-hover);
-  border-color: var(--wb-border);
-}
-.wb-toolshelf :deep(.ux-operator-btn--active) {
-  background: var(--wb-bg-hover);
-  border-color: var(--wb-accent);
-  box-shadow: 0 0 10px rgba(77, 171, 247, 0.2);
-}
-.wb-toolshelf :deep(.ux-operator-btn--active:hover) {
-  background: var(--wb-bg-hover);
-  border-color: var(--wb-accent);
+  background: var(--nei-panel-hover);
 }
 .wb-menubar-inner {
   display: flex;
   align-items: center;
   height: 100%;
-  padding: 0 10px;
-}
-.wb-brand {
-  color: var(--wb-text);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  margin-right: 24px;
-  user-select: none;
-  flex-shrink: 0;
+  padding: 0 4px;
 }
 .wb-menubar-inner :deep(.ux-menu-btn) {
   border: none;
   background: transparent;
-  padding: 5px 10px;
-  font-size: 13px;
-  color: var(--wb-accent-muted);
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--nei-label);
   cursor: pointer;
 }
 .wb-menubar-inner :deep(.ux-menu-btn:hover) {
-  background: var(--wb-bg-hover);
-  border-radius: var(--wb-radius-sm);
-  color: var(--wb-text);
+  background: var(--nei-panel-hover);
+  border-radius: 4px;
 }
 .wb-menubar-inner :deep(.ux-arrow) { display: none; }
 .wb-menubar-inner :deep(.ux-operator-btn) {
   border: none;
   background: transparent;
-  padding: 5px 10px;
-  font-size: 13px;
-  color: var(--wb-accent-muted);
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--nei-label);
   width: auto;
   cursor: pointer;
 }
 .wb-menubar-inner :deep(.ux-operator-btn:hover) {
-  background: var(--wb-bg-hover);
-  border-radius: var(--wb-radius-sm);
-  color: var(--wb-text);
+  background: var(--nei-panel-hover);
+  border-radius: 4px;
 }
 .wb-menubar-inner :deep(.ux-label) {
-  font-size: 13px;
-  color: var(--wb-text-dim);
+  font-size: 11px;
+  color: var(--nei-muted);
   padding: 0 4px;
 }
 </style>
@@ -447,20 +407,20 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--wb-bg-elevated);
-  color: var(--wb-text);
+  background: var(--nei-bg);
+  color: var(--nei-text-dark);
 }
 .wb-standalone-menubar {
   flex-shrink: 0;
   height: 28px;
-  background: var(--wb-bg-deepest);
-  border-bottom: 1px solid var(--wb-border);
+  background: var(--nei-bg-deep);
+  border-bottom: 1px solid var(--nei-border);
 }
 .wb-standalone-top {
   flex-shrink: 0;
   height: 32px;
-  background: var(--wb-bg-deepest);
-  border-bottom: 1px solid var(--wb-border);
+  background: var(--nei-bg-deep);
+  border-bottom: 1px solid var(--nei-border);
   display: flex;
   align-items: center;
 }
@@ -472,20 +432,5 @@ onMounted(() => {
 .wb-standalone-body {
   flex: 1;
   overflow-y: auto;
-}
-
-/* ---- Wiki embed ---- */
-.wb-wiki-embed {
-  width: 100%; height: 100%;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--wb-viewport-bg);
-  background-image:
-    linear-gradient(var(--wb-grid-color) 1px, transparent 1px),
-    linear-gradient(90deg, var(--wb-grid-color) 1px, transparent 1px);
-  background-size: 32px 32px;
-}
-.wb-wiki-placeholder {
-  color: var(--wb-text-dim);
-  font-size: 15px;
 }
 </style>

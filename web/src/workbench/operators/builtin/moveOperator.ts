@@ -16,7 +16,7 @@ export const MoveOperator: OperatorType = {
   description: '拖拽 Gizmo 箭头移动选中方块',
 
   poll(bctx) {
-    return bctx.scene.scene.value !== null
+    return bctx.doc.value !== null
   },
 
   initModalState(): OperatorProperties {
@@ -161,7 +161,7 @@ export const MoveOperator: OperatorType = {
         })
 
         if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
-          const doc = bctx.scene.scene.value
+          const doc = bctx.doc.value
           const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
           const grid = rf?.grid
           if (grid) {
@@ -187,8 +187,7 @@ export const MoveOperator: OperatorType = {
                   return m ? { ...item, pos: { x: m.to.x, y: m.to.y, z: m.to.z } } : item
                 })
                 sel.items.value = new Set(newItems)
-                bctx.scene.markDirty()
-                bctx.scene.syncPreview()
+                bctx.markDirty()
               },
               undo: () => {
                 for (const m of moves) grid.moveBlock(m.to, m.from)
@@ -202,8 +201,7 @@ export const MoveOperator: OperatorType = {
                   return m ? { ...item, pos: { x: m.from.x, y: m.from.y, z: m.from.z } } : item
                 })
                 sel.items.value = new Set(newItems)
-                bctx.scene.markDirty()
-                bctx.scene.syncPreview()
+                bctx.markDirty()
               },
             })
           }

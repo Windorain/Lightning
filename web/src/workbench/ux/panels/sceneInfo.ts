@@ -10,7 +10,7 @@ export const sceneInfoPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
 
   poll(): boolean { return true },
-  owner(ctx: BContext): unknown { return ctx.scene.scene.value },
+  owner(ctx: BContext): unknown { return ctx.doc.value },
   layout(_ctx: BContext): UILayout {
     return {
       kind: 'column', align: false, items: [
