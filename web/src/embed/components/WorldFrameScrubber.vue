@@ -1,29 +1,32 @@
 <script setup lang="ts">
-/**
- * World 多帧时间轴：拖动时只更新本地显示，松开后才触发帧切换。
- */
-import { computed, inject, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
-import { bContextKey } from '@/workbench/context/bContext'
+const props = defineProps<{
+  hasWorldMultiFrame: boolean
+  frameCount: number
+  isPlaying: boolean
+  meshBusy: boolean
+  worldFrameIndex: number
+}>()
 
-const bctx = inject(bContextKey)
+const emit = defineEmits<{
+  togglePlayback: []
+  setFrame: [index: number]
+}>()
 
-const visible = computed(() => bctx?.hasWorldMultiFrame.value ?? false)
-const frameCount = computed(() => bctx?.worldFrameCount.value ?? 0)
-const isPlaying = computed(() => bctx?.framesPlaybackIsPlaying.value ?? false)
-const meshBusy = computed(() => bctx?.meshBusy.value ?? false)
+const visible = computed(() => props.hasWorldMultiFrame)
 
-const maxIdx = computed(() => Math.max(0, frameCount.value - 1))
+const maxIdx = computed(() => Math.max(0, props.frameCount - 1))
 
-const localIdx = ref(bctx?.worldFrameIndex.value ?? 0)
+const localIdx = ref(props.worldFrameIndex)
 const dragging = ref(false)
 
-watch(() => bctx?.worldFrameIndex.value ?? 0, (v) => {
+watch(() => props.worldFrameIndex, (v) => {
   if (!dragging.value) localIdx.value = v
 })
 
 const fillPct = computed(() => {
-  if (frameCount.value <= 1) return 0
+  if (props.frameCount <= 1) return 0
   return (localIdx.value / maxIdx.value) * 100
 })
 
@@ -34,14 +37,14 @@ function onInput(e: Event): void {
 
 function onPointerDown(): void {
   dragging.value = true
-  if (isPlaying.value) bctx?.toggleWorldFramesPlayback()
+  if (props.isPlaying) emit('togglePlayback')
 }
 
 function onChange(e: Event): void {
   dragging.value = false
   const v = Number((e.target as HTMLInputElement).value)
   localIdx.value = v
-  bctx?.setCurrentWorldFrame(v)
+  emit('setFrame', v)
 }
 </script>
 

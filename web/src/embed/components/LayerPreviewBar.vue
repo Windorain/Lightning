@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
-import { bContextKey } from '@/workbench/context/bContext'
+import { computed, ref, watch } from 'vue'
 
-const bctx = inject(bContextKey)
-if (!bctx) throw new Error('LayerPreviewBar: bContext missing')
+const props = defineProps<{
+  gridHeight: number
+  meshBusy: boolean
+  layerWorldY: number
+  layerPreviewLabel: string
+}>()
 
-const { layerPreviewLabel, gridHeight, meshBusy } = bctx
+const emit = defineEmits<{
+  'update:layerY': [value: number]
+}>()
 
-const localY = ref<number>(bctx.layerWorldY.value)
+const localY = ref<number>(props.layerWorldY)
 
-// 非 busy 时同步 store 值到本地
-watch(() => bctx!.layerWorldY.value, (v) => {
-  if (!meshBusy.value) localY.value = v
+watch(() => props.layerWorldY, (v) => {
+  if (!props.meshBusy) localY.value = v
 })
 
-const maxY = computed(() => Math.max(0, gridHeight.value - 1))
+const maxY = computed(() => Math.max(0, props.gridHeight - 1))
 
 function onInput(e: Event): void {
   localY.value = Number((e.target as HTMLInputElement).value)
@@ -23,7 +27,7 @@ function onInput(e: Event): void {
 function onChange(e: Event): void {
   const v = Number((e.target as HTMLInputElement).value)
   localY.value = v
-  bctx!.layerWorldY.value = v
+  emit('update:layerY', v)
 }
 </script>
 

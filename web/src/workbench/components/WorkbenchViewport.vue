@@ -308,11 +308,29 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div v-if="hasWorldMultiFrame" class="wv-tab-panel" :class="{ 'wv-tab-panel--active': activeTab === 'frame' }">
-        <WorldFramePlayerControls />
-        <WorldFrameScrubber />
+        <WorldFramePlayerControls
+          :has-world-multi-frame="hasWorldMultiFrame"
+          :is-playing="framesPlaybackIsPlaying"
+          @toggle="renderAssets.toggleWorldFramesPlayback()"
+        />
+        <WorldFrameScrubber
+          :has-world-multi-frame="hasWorldMultiFrame"
+          :frame-count="worldFrameCount"
+          :is-playing="framesPlaybackIsPlaying"
+          :mesh-busy="meshBusy"
+          :world-frame-index="worldFrameIndex"
+          @toggle-playback="renderAssets.toggleWorldFramesPlayback()"
+          @set-frame="(i: number) => renderAssets.setCurrentWorldFrame(i)"
+        />
       </div>
       <div class="wv-tab-panel" :class="{ 'wv-tab-panel--active': activeTab === 'layer' }">
-        <LayerPreviewBar />
+        <LayerPreviewBar
+          :grid-height="gridHeight"
+          :mesh-busy="meshBusy"
+          :layer-world-y="layerWorldY"
+          :layer-preview-label="layerPreviewLabel"
+          @update:layer-y="(v: number) => { bctx.layerWorldY.value = v }"
+        />
       </div>
     </div>
 
