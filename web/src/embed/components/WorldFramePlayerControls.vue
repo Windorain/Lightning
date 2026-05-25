@@ -28,7 +28,8 @@ function onToggle(): void {
       :aria-pressed="playing"
       @click="onToggle"
     >
-      {{ playing ? '⏸' : '▶' }}
+      <svg v-if="playing" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+      <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
     </button>
   </div>
 </template>
@@ -43,8 +44,8 @@ function onToggle(): void {
   width: 34px; height: 34px;
   border: 3px solid;
   border-color: var(--nei-bevel-light) var(--nei-bevel-dark) var(--nei-bevel-dark) var(--nei-bevel-light);
-  background: #3a3e4a;
-  color: #c0c0c0;
+  background: var(--nei-bg-elevated);
+  color: var(--nei-icon-color);
   font-size: 15px;
   font-weight: bold;
   cursor: pointer;
@@ -56,7 +57,7 @@ function onToggle(): void {
 .nei-ctrl-btn:hover { color: var(--nei-text); }
 .nei-ctrl-btn--active {
   border-color: var(--nei-accent-border-light) var(--nei-accent-border-dark) var(--nei-accent-border-dark) var(--nei-accent-border-light);
-  background: #3a3e60;
-  color: #c0c0f0;
+  background: rgba(80, 80, 160, 0.2);
+  color: var(--nei-text-accent);
 }
 </style>

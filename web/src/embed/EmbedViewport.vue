@@ -488,17 +488,18 @@ onBeforeUnmount(() => {
 .fade-leave-to { opacity: 0; }
 
 .wm-root { font-family: system-ui, 'Segoe UI', sans-serif; color: var(--nei-text); background: var(--nei-bg); box-sizing: border-box; height: 100%; display: flex; flex-direction: column; }
-/* Title bar — 40px, 3px bevel bottom */
-.wm-titlebar { flex-shrink: 0; height: var(--nei-title-height); display: flex; align-items: center; padding: 0 10px; border-bottom: var(--nei-bevel-w) solid; border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); background: var(--nei-bg-panel); }
+/* Title bar — 40px, 2-tone bevel bottom (MC: highlight line + shadow line) */
+.wm-titlebar { flex-shrink: 0; height: var(--nei-title-height); display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid var(--nei-shadow); box-shadow: 0 1px 0 var(--nei-highlight); background: var(--nei-bg-panel); }
 .wm-titlebar-left { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
-.wm-title-text { font-size: 15px; font-weight: 700; color: var(--nei-text); text-shadow: var(--nei-text-shadow-deep); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wm-title-text { font-size: 13px; font-weight: 700; color: var(--nei-text); text-shadow: var(--nei-text-shadow-deep); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wm-title-meta { flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--nei-text-dim); background: none; border: none; cursor: help; padding: 0 2px; line-height: 1; }
 .wm-title-meta:hover { color: var(--nei-text); }
 .wm-titlebar-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; margin-left: 12px; }
 .wm-titlebar-sep { width: 1px; height: 18px; background: var(--nei-titlebar-sep); margin: 0 5px; flex-shrink: 0; }
-.nei-icon-btn { width: var(--nei-icon-btn-size); height: var(--nei-icon-btn-size); padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--nei-icon-color); background: transparent; border: none; cursor: pointer; }
-.nei-icon-btn:hover { color: var(--nei-icon-hover); }
-.nei-icon-btn:active { color: var(--nei-icon-active); }
+/* Icon buttons — MC bevel: raised on normal, inset on active */
+.nei-icon-btn { width: var(--nei-icon-btn-size); height: var(--nei-icon-btn-size); padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--nei-icon-color); background: var(--nei-bg); border: var(--nei-bevel-w) solid; border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight); cursor: pointer; }
+.nei-icon-btn:hover { color: var(--nei-icon-hover); filter: brightness(1.06); }
+.nei-icon-btn:active { color: var(--nei-icon-active); border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); }
 .nei-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .nei-icon-btn svg { width: var(--nei-icon-svg-size); height: var(--nei-icon-svg-size); }
 .wm-main-stage { display: flex; flex: 1; flex-direction: row; align-items: stretch; min-height: 0; width: 100%; overflow: hidden; background: var(--nei-bg); }
@@ -518,6 +519,7 @@ onBeforeUnmount(() => {
   padding: 0 4px;
   background: var(--nei-bg-deep);
   border-bottom: 1px solid var(--nei-shadow);
+  box-shadow: 0 1px 0 var(--nei-highlight);
 }
 .wm-tab {
   padding: 6px 14px 5px;
@@ -591,7 +593,8 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 12px;
   background: var(--nei-bg-panel);
-  border-bottom: var(--nei-bevel-w) solid var(--nei-border-subtle);
+  border-bottom: 1px solid var(--nei-shadow);
+  box-shadow: 0 1px 0 var(--nei-highlight);
 }
 .nei-icon-btn:focus-visible {
   outline: 2px solid var(--nei-focus-ring);
