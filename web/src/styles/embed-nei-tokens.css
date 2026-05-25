@@ -44,6 +44,35 @@
   --nei-scrollbar-track: #1a1e28;
   --nei-scrollbar-thumb: #3a3e48;
 
+  /* Extended panel tokens */
+  --nei-bg: #1a1e28;
+  --nei-text-dark: #e8e8e8;
+  --nei-text-muted: #6a6e78;
+  --nei-viewport-bg: #151920;
+  --nei-inset-bg: #12161e;
+
+  /* Bevel border */
+  --nei-bevel-w: 2px;
+  --nei-highlight: #3a4a5e;
+  --nei-shadow: #0a0e18;
+  --nei-label-shadow: 1px 1px 0 #0a0e18;
+
+  /* Status colors */
+  --nei-loading-text: #fcd34d;
+  --nei-ok-text: #86efac;
+  --nei-warn-text: #fde047;
+  --nei-error-text: #fecaca;
+  --nei-error-bg: #450a0a;
+
+  /* Icon buttons */
+  --nei-icon-color: #8a8e98;
+  --nei-icon-hover: var(--nei-text);
+  --nei-icon-active: var(--nei-text-accent);
+  --nei-titlebar-sep: #3a3e48;
+  --nei-title-height: 40px;
+  --nei-icon-btn-size: 28px;
+  --nei-icon-svg-size: 18px;
+
   /* Misc */
   --nei-radius-none: 0;
 }

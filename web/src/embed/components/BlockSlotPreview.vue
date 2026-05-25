@@ -38,7 +38,6 @@ watch(
     if (!host) return
     host.replaceChildren()
     if (entry.value.status === 'ready' && canvas) {
-      canvas.classList.add('wm-slot-canvas')
       host.appendChild(canvas)
     }
   },
@@ -47,109 +46,55 @@ watch(
 </script>
 
 <template>
-  <div class="wm-slot" role="listitem">
+  <div class="nei-slot-preview" role="listitem">
     <div
       ref="iconHost"
-      class="wm-slot-icon"
+      class="nei-slot-preview-icon"
       aria-hidden="true"
-    />
-    <div
-      v-if="entry.status === 'pending' || entry.status === 'idle'"
-      class="wm-slot-skeleton"
-    />
-    <div
-      v-if="entry.status === 'error'"
-      class="wm-slot-fallback"
-      :title="entry.error?.message ?? '预览失败'"
     />
     <span
       v-if="count > 1"
-      class="wm-slot-count"
+      class="nei-slot-preview-count"
       aria-label="数量"
     >{{ count }}</span>
   </div>
 </template>
 
 <style scoped>
-/* 2x slot, blueprint style */
-.wm-slot {
+/* 40x40 NEI slot */
+.nei-slot-preview {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-sm);
-  background: var(--wb-bg-surface);
+  border: 2px solid var(--nei-border-slot);
+  background: var(--nei-bg-input);
   box-sizing: border-box;
 }
-.wm-slot-icon {
+.nei-slot-preview-icon {
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border-radius: 0;
 }
-.wm-slot-icon :deep(.wm-slot-canvas) {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+.nei-slot-preview-icon :deep(canvas) {
+  width: 36px;
+  height: 36px;
   image-rendering: pixelated;
-  image-rendering: crisp-edges;
   display: block;
 }
-.wm-slot-skeleton {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border-radius: 0;
-  background: linear-gradient(
-    90deg,
-    rgba(80, 80, 80, 0.5) 0%,
-    rgba(120, 120, 120, 0.7) 50%,
-    rgba(80, 80, 80, 0.5) 100%
-  );
-  background-size: 200% 100%;
-  animation: wm-shimmer 1.1s ease-in-out infinite;
-  pointer-events: none;
-}
-@keyframes wm-shimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
-  }
-}
-.wm-slot-fallback {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border-radius: 0;
-  background: repeating-linear-gradient(
-    45deg,
-    #6b6b6b,
-    #6b6b6b 4px,
-    #4a4a4a 4px,
-    #4a4a4a 8px
-  );
-  pointer-events: none;
-}
-.wm-slot-count {
+.nei-slot-preview-count {
   position: absolute;
   right: 1px;
   bottom: 0;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
-  font-weight: 600;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
-  color: var(--wb-text);
-  text-shadow:
-    1px 1px 0 #2f2f2f,
-    -1px -1px 0 #2f2f2f,
-    1px -1px 0 #2f2f2f,
-    -1px 1px 0 #2f2f2f;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  color: #ffffff;
+  text-shadow: 1px 1px 0 #000;
   pointer-events: none;
   user-select: none;
 }

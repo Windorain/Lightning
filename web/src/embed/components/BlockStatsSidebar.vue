@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import BlockSlotPreview from './BlockSlotPreview.vue'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
 
@@ -40,10 +41,6 @@ function displayName(row: BlockStatRow): string {
   return colon >= 0 ? id.slice(colon + 1) : id
 }
 
-/** Check if row count > 1 for NEI badge display */
-function hasCount(row: BlockStatRow): boolean {
-  return row.count > 1
-}
 </script>
 
 <template>
@@ -87,10 +84,11 @@ function hasCount(row: BlockStatRow): boolean {
         :title="collapsed ? displayName(row) : undefined"
       >
         <!-- Slot -->
-        <div class="nei-slot">
-          <span class="nei-slot-icon">{{ row.blockId ? '▣' : '' }}</span>
-          <span v-if="hasCount(row)" class="nei-slot-count">{{ row.count }}</span>
-        </div>
+        <BlockSlotPreview
+          :cache="cache"
+          :block-id="row.blockId"
+          :count="row.count"
+        />
         <!-- Expanded info -->
         <template v-if="!collapsed">
           <div class="nei-slot-info">
@@ -141,7 +139,7 @@ function hasCount(row: BlockStatRow): boolean {
   padding: 8px 0 6px;
 }
 .nei-sidebar-label {
-  color: #d0d0d0;
+  color: var(--nei-text);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -202,8 +200,16 @@ function hasCount(row: BlockStatRow): boolean {
 .nei-slot-row {
   display: flex;
   align-items: center;
-  padding: 1px 0;
+  padding: 2px 4px;
   cursor: pointer;
+  transition: background 0.1s, box-shadow 0.1s;
+}
+.nei-slot-row:hover {
+  background: var(--nei-bg-hover);
+}
+.nei-slot-row:active {
+  background: var(--nei-accent-glow);
+  box-shadow: inset 0 0 0 1px var(--nei-border-active);
 }
 .nei-slot-row--collapsed {
   padding: 0;
@@ -211,33 +217,6 @@ function hasCount(row: BlockStatRow): boolean {
   height: 36px;
   justify-content: center;
   flex-shrink: 0;
-}
-
-/* ===== Slot (40x40, NEI border) ===== */
-.nei-slot {
-  width: 40px; height: 40px;
-  flex-shrink: 0;
-  background: var(--nei-bg-input);
-  border: 2px solid var(--nei-border-slot);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-}
-.nei-slot-icon {
-  font-size: 22px;
-  line-height: 1;
-}
-.nei-slot-count {
-  position: absolute;
-  bottom: 0;
-  right: 1px;
-  font-size: 10px;
-  color: #ffffff;
-  font-family: ui-monospace, monospace;
-  font-weight: 700;
-  text-shadow: 1px 1px 0 #000;
-  line-height: 1;
 }
 
 /* ===== Expanded info ===== */
