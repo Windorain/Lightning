@@ -95,10 +95,19 @@ function selectTab(id: string): void {
 .pt-tabs {
   flex-shrink: 0;
   display: flex;
-  border-bottom: 1px solid var(--wb-border);
-  background: var(--wb-bg-deepest);
+  background: var(--wb-bg-surface);
   overflow-x: auto;
   height: 34px;
+  position: relative;
+}
+.pt-tabs::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--wb-border) 20%, var(--wb-border) 80%, transparent 100%);
 }
 .pt-tab {
   display: flex;
@@ -112,15 +121,21 @@ function selectTab(id: string): void {
   cursor: pointer;
   white-space: nowrap;
   border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .pt-tab:hover {
   color: var(--wb-text);
+  background: var(--wb-bg-hover);
 }
 .pt-tab--active {
   color: var(--wb-text);
   border-bottom-color: var(--wb-accent);
   font-weight: 500;
+}
+.pt-tab:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+  border-radius: 2px;
 }
 .pt-tab-icon {
   font-size: 14px;

@@ -62,31 +62,27 @@ const emit = defineEmits<{
   'hover-annotation': [
     payload: { annotationId: string; clientX: number; clientY: number } | null,
   ]
-  'open-settings': []
-  'open-workbench': []
 }>()
 
-function onScreenshot(): void {
-  const canvas = renderer?.domElement
-  if (!canvas) return
-  const dataUrl = canvas.toDataURL('image/png')
-  const a = document.createElement('a')
-  a.href = dataUrl
-  a.download = `lightning-screenshot-${Date.now()}.png`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-}
-
-function onFullscreen(): void {
-  container.value?.requestFullscreen?.()
-}
-
-function onResetView(): void {
-  if (renderer && props.contentGroup) {
-    fitCameraToGroup(renderer, props.contentGroup)
-  }
-}
+defineExpose({
+  screenshot() {
+    const canvas = renderer?.domElement
+    if (!canvas) return
+    if (renderer && scene) renderer.render(scene)
+    const dataUrl = canvas.toDataURL('image/png')
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = `lightning-screenshot-${Date.now()}.png`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  },
+  resetView() {
+    if (renderer && props.contentGroup) {
+      fitCameraToGroup(renderer, props.contentGroup)
+    }
+  },
+})
 
 function clampOrthoZoom(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1
@@ -211,6 +207,30 @@ watch(
 
 watch(() => props.showAxesGizmo, (v) => { if (renderer) renderer.showAxesGizmo = v })
 
+watch(() => props.sceneBackground, (v) => {
+  if (scene) scene.background = new THREE.Color(v)
+})
+
+watch(() => props.initialCamera?.yawDeg, (yaw) => {
+  if (renderer && props.contentGroup && yaw != null) {
+    const cam = props.initialCamera
+    applyDiagonalOrbitView(renderer.camera, renderer.orbitTarget, {
+      yawDeg: yaw,
+      elevationFromHorizontalDeg: cam?.elevationDeg ?? 35,
+    })
+  }
+})
+
+watch(() => props.initialCamera?.elevationDeg, (elev) => {
+  if (renderer && props.contentGroup && elev != null) {
+    const cam = props.initialCamera
+    applyDiagonalOrbitView(renderer.camera, renderer.orbitTarget, {
+      yawDeg: cam?.yawDeg ?? 225,
+      elevationFromHorizontalDeg: elev,
+    })
+  }
+})
+
 watch(
   [() => props.contentGroup, () => props.layerPreviewMode],
   () => { if (lastPointer) runPick() },
@@ -329,56 +349,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="vc-viewport" style="overflow: hidden">
-    <div class="vc-toolbar">
-      <!-- 操作组 -->
-      <button type="button" class="vc-toolbar-btn" title="复位视角" @click="onResetView">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 3.1L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-3.1L3 16"/><path d="M3 21v-5h5"/></svg>
-      </button>
-      <button type="button" class="vc-toolbar-btn" title="截屏" @click="onScreenshot">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-      </button>
-      <button type="button" class="vc-toolbar-btn" title="全屏" @click="onFullscreen">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-      </button>
-      <span class="vc-toolbar-sep" />
-      <button type="button" class="vc-toolbar-btn" title="在编辑器中打开 (TODO)" disabled @click="emit('open-workbench')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-      </button>
-      <button type="button" class="vc-toolbar-btn" title="设置" @click="emit('open-settings')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      </button>
-    </div>
-  </div>
+  <div ref="container" class="vc-viewport" style="overflow: hidden" />
 </template>
 
 <style scoped>
 .vc-viewport {
   flex: 1; min-height: 320px; min-width: 0;
-  border-radius: 0; background: var(--nei-viewport-bg);
-  overflow: hidden; position: relative;
-}
-.vc-toolbar {
-  position: absolute; top: 6px; right: 6px; z-index: 10;
-  display: flex; align-items: center; gap: 2px;
-}
-.vc-toolbar-btn {
-  width: 28px; height: 28px; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  color: #8a8e98;
-  background: var(--nei-bg, #1a1e28);
-  border: 3px solid;
-  border-color: var(--nei-bevel-light, #555) var(--nei-bevel-dark, #2a2a2a) var(--nei-bevel-dark, #2a2a2a) var(--nei-bevel-light, #555);
-  border-radius: 0; cursor: pointer; user-select: none; box-sizing: border-box;
-  transition: color 0.15s, background 0.15s;
-}
-.vc-toolbar-btn:hover { color: #c0c0c0; background: #2a2e38; }
-.vc-toolbar-btn:active {
-  border-color: var(--nei-bevel-dark, #2a2a2a) var(--nei-bevel-light, #555) var(--nei-bevel-light, #555) var(--nei-bevel-dark, #2a2a2a);
-}
-.vc-toolbar-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.vc-toolbar-btn svg { width: 15px; height: 15px; }
-.vc-toolbar-sep {
-  width: 1px; height: 18px; background: #3a3e48; margin: 0 4px; flex-shrink: 0;
+  background: var(--nei-viewport-bg);
+  overflow: hidden;
 }
 </style>

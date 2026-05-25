@@ -6,10 +6,10 @@ import type { UILayout } from '../types/layout'
 export const wikiConfigPanel: PanelDeclaration = {
   id: 'wiki-config-panel',
   label: '嵌入配置',
-  spaceType: SpaceType.PREFERENCES,
+  spaceType: SpaceType.PROPERTIES,
   regionType: RegionType.MAIN,
 
-  poll(): boolean { return true },
+  poll(ctx: BContext): boolean { return ctx.uiWorkspace.value === 'wiki' },
   owner(ctx: BContext): unknown { return ctx.wikiConfig },
   layout(_ctx: BContext): UILayout {
     return {
@@ -29,13 +29,6 @@ export const wikiConfigPanel: PanelDeclaration = {
             { kind: 'property', rnaPath: 'wikiconfig.showTitle', label: '标题栏' },
             { kind: 'property', rnaPath: 'wikiconfig.showDebugStatus', label: '调试状态栏' },
             { kind: 'property', rnaPath: 'wikiconfig.showAxesGizmo', label: '坐标轴' },
-          ],
-        },
-        { kind: 'separator' },
-        {
-          kind: 'box', label: '图标设置', items: [
-            { kind: 'property', rnaPath: 'wikiconfig.iconSizePx', label: '图标尺寸 (px)' },
-            { kind: 'property', rnaPath: 'wikiconfig.iconOrthoHalf', label: '正交半尺寸' },
           ],
         },
         { kind: 'separator' },

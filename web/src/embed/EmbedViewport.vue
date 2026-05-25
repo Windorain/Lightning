@@ -28,20 +28,11 @@ import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 
-// Embed operators — registered on bctx if not already present (Wiki mode)
-import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
-import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
-
 const props = defineProps<{
   settings?: EmbedSettings
 }>()
 
 const bctx = useBContext()
-
-// Ensure embed operators are registered (workbench bctx may not have them)
-for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ResetViewOperator]) {
-  if (!bctx.operators.find(op.id)) bctx.operators.register(op)
-}
 
 const EMBED_REGION = 'r-embed'
 const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED_REGION)
@@ -92,6 +83,102 @@ watch(() => bctx.structEpoch.value, () => {
 
 // ---- Hover / tooltip ----
 const { hover, setHover, clearHover } = usePreviewTooltip()
+const viewerCoreRef = ref<InstanceType<typeof ViewerCore> | null>(null)
+const wmRoot = ref<HTMLDivElement | null>(null)
+const sidebarCollapsed = ref(false)
+const selectedBlockId = ref<string | null>(null)
+let _highlightGroup: THREE.Group | null = null
+
+function updateBlockHighlight(blockId: string | null): void {
+  if (_highlightGroup) {
+    vpSlot.overlayGroup.value?.remove(_highlightGroup)
+    _highlightGroup.traverse((c) => {
+      if (c instanceof THREE.LineSegments) {
+        c.geometry?.dispose()
+        ;(c.material as THREE.Material)?.dispose()
+      }
+    })
+    _highlightGroup = null
+  }
+
+  if (!blockId) return
+
+  const def = vpSlot.definition.value
+  if (!def) return
+
+  const { cellGrid, blockPalette } = def
+  const sizeZ = cellGrid.length
+  const sizeRow = cellGrid[0]?.length ?? 0
+  const sizeCol = cellGrid[0]?.[0]?.length ?? 0
+  if (sizeZ === 0 || sizeRow === 0 || sizeCol === 0) return
+
+  const edges: number[] = []
+  const s = 0.52
+
+  for (let z = 0; z < sizeZ; z++) {
+    for (let row = 0; row < sizeRow; row++) {
+      const sliceRow = cellGrid[z]?.[row]
+      if (!sliceRow) continue
+      for (let col = 0; col < sizeCol; col++) {
+        const idx = sliceRow[col]
+        if (idx === undefined || idx < 0) continue
+        const entry = blockPalette[idx]
+        if (!entry) continue
+        if (blockRegistryKeyForPalette(entry.registryId, entry.meta) !== blockId) continue
+
+        const voxelY = sizeRow - 1 - row
+        const cx = col - sizeCol / 2 + 0.5
+        const cy = voxelY - sizeRow / 2 + 0.5
+        const cz = z - sizeZ / 2 + 0.5
+
+        const verts = [
+          [cx - s, cy - s, cz - s], [cx + s, cy - s, cz - s],
+          [cx + s, cy - s, cz - s], [cx + s, cy + s, cz - s],
+          [cx + s, cy + s, cz - s], [cx - s, cy + s, cz - s],
+          [cx - s, cy + s, cz - s], [cx - s, cy - s, cz - s],
+          [cx - s, cy - s, cz + s], [cx + s, cy - s, cz + s],
+          [cx + s, cy - s, cz + s], [cx + s, cy + s, cz + s],
+          [cx + s, cy + s, cz + s], [cx - s, cy + s, cz + s],
+          [cx - s, cy + s, cz + s], [cx - s, cy - s, cz + s],
+          [cx - s, cy - s, cz - s], [cx - s, cy - s, cz + s],
+          [cx + s, cy - s, cz - s], [cx + s, cy - s, cz + s],
+          [cx + s, cy + s, cz - s], [cx + s, cy + s, cz + s],
+          [cx - s, cy + s, cz - s], [cx - s, cy + s, cz + s],
+        ]
+        for (let i = 0; i < verts.length; i += 2) {
+          const p0 = verts[i], p1 = verts[i + 1]
+          edges.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2])
+        }
+      }
+    }
+  }
+
+  if (edges.length === 0) return
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3))
+  const mat = new THREE.LineBasicMaterial({ color: 0xffaa00, depthTest: true })
+  const wireframe = new THREE.LineSegments(geo, mat)
+  _highlightGroup = new THREE.Group()
+  _highlightGroup.add(wireframe)
+  vpSlot.overlayGroup.value?.add(_highlightGroup)
+}
+
+function onSidebarSelectBlock(blockId: string): void {
+  selectedBlockId.value = selectedBlockId.value === blockId ? null : blockId
+}
+
+watch(selectedBlockId, (id) => {
+  updateBlockHighlight(id)
+})
+
+function toggleFullscreen(): void {
+  if (document.fullscreenElement) {
+    document.exitFullscreen()
+  } else {
+    wmRoot.value?.requestFullscreen?.()
+  }
+}
 
 // ---- Feature flags ----
 const s = computed(() => props.settings)
@@ -164,7 +251,12 @@ const neiTooltipText = computed(() => {
   const h = hover.value
   if (!h || h.source !== 'sidebar') return ''
   const lines = neiTooltipMap.value.get(h.blockId)
-  return lines && lines.length > 0 ? lines.map(l => renderTooltipHtml(l)).join('<br>') : ''
+  if (lines && lines.length > 0) {
+    return lines.map(l => renderTooltipHtml(l)).join('<br>')
+  }
+  // Fallback: show blockId as display name when tooltip data is missing
+  const colon = h.blockId.lastIndexOf(':')
+  return colon >= 0 ? h.blockId.slice(colon + 1) : h.blockId
 })
 
 const previewTitle = computed(() => {
@@ -340,30 +432,65 @@ onBeforeUnmount(() => {
     })
     _annoGroup = null
   }
+  if (_highlightGroup) {
+    _highlightGroup.traverse((c) => {
+      if (c instanceof THREE.LineSegments) {
+        c.geometry?.dispose()
+        ;(c.material as THREE.Material)?.dispose()
+      }
+    })
+    _highlightGroup = null
+  }
   renderAssets.disposeCachesAndLibrary()
 })
 </script>
 
 <template>
-  <div class="wm-root">
-    <!-- 标题栏 -->
-    <p v-if="showTitle" class="wm-title">
-      <span class="wm-title-text">{{ previewTitle }}</span>
-      <span
-        v-if="showMetaHint" class="wm-title-meta" tabindex="0" aria-label="作者与版本号"
-        @pointerenter="onMetaHintPointerEnter" @pointermove="onMetaHintPointerMove"
-        @pointerleave="onMetaHintPointerLeave" @focusin="onMetaHintFocusIn" @focusout="onMetaHintFocusOut"
-      >?</span>
-    </p>
+  <div ref="wmRoot" class="wm-root">
+    <!-- Title bar -->
+    <header v-if="showTitle" class="wm-titlebar">
+      <div class="wm-titlebar-left">
+        <span class="wm-title-text">{{ previewTitle }}</span>
+        <span
+          v-if="showMetaHint" class="wm-title-meta" tabindex="0" aria-label="作者与版本号"
+          @pointerenter="onMetaHintPointerEnter" @pointermove="onMetaHintPointerMove"
+          @pointerleave="onMetaHintPointerLeave" @focusin="onMetaHintFocusIn" @focusout="onMetaHintFocusOut"
+        >?</span>
+      </div>
+      <div class="wm-titlebar-actions">
+        <button type="button" class="nei-icon-btn" title="复位视角" @click="viewerCoreRef?.resetView()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 3.1L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-3.1L3 16"/><path d="M3 21v-5h5"/></svg>
+        </button>
+        <button type="button" class="nei-icon-btn" title="截屏" @click="viewerCoreRef?.screenshot()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        </button>
+        <button type="button" class="nei-icon-btn" title="全屏" @click="toggleFullscreen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        </button>
+        <span class="wm-titlebar-sep" />
+        <button type="button" class="nei-icon-btn" title="在编辑器中打开 (TODO)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+        </button>
+        <button type="button" class="nei-icon-btn" title="设置" @click="showSettingsPanel = !showSettingsPanel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
 
     <div class="wm-main-stage">
       <BlockStatsSidebar
         v-if="showStats && loadStatus === 'ok' && blockIconCache"
         :entries="blockStatsEntries" :cache="blockIconCache"
+        :collapsed="sidebarCollapsed"
+        :selected-block-id="selectedBlockId"
+        :tooltip-map="neiTooltipMap"
         @tooltip-hover="onSidebarTooltipHover"
+        @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
+        @select-block="onSidebarSelectBlock"
       />
       <div class="wm-viewport-column">
         <ViewerCore
+          ref="viewerCoreRef"
           v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
           :definition="structureDefinition"
           :material-library="materialLibrary"
@@ -373,7 +500,6 @@ onBeforeUnmount(() => {
           :scene-background="s?.sceneBackground ?? 0x5a5a5a"
           :show-axes-gizmo="showAxesGizmo"
           @ready="onViewportReady"
-          @open-settings="showSettingsPanel = !showSettingsPanel"
           @hover-block="onViewportHover"
           @hover-annotation="onAnnotationHover"
         />
@@ -439,29 +565,46 @@ onBeforeUnmount(() => {
     <ToolTipBox v-if="metaHintPointer && metaTooltipText" :text="metaTooltipText" :client-x="metaHintPointer.clientX" :client-y="metaHintPointer.clientY" />
 
     <!-- 设置面板 -->
-    <div v-if="showSettingsPanel" class="wm-settings-overlay" @click.self="showSettingsPanel = false">
-      <div class="wm-settings-panel">
-        <div class="wm-settings-head">
-          <span>视口设置</span>
-          <button class="wm-settings-close" @click="showSettingsPanel = false">✕</button>
-        </div>
-        <div class="wm-settings-body">
-          <!-- TODO: 持久化设置 UI -->
-          <p class="wm-settings-hint">设置面板 (WIP)</p>
-          <p class="wm-settings-hint">功能开关通过 EmbedSettings.features 控制</p>
+    <Transition name="fade">
+      <div v-if="showSettingsPanel" class="wm-settings-overlay" @click.self="showSettingsPanel = false">
+        <div class="wm-settings-panel">
+          <div class="wm-settings-head">
+            <span>视口设置</span>
+            <button class="wm-settings-close" @click="showSettingsPanel = false">✕</button>
+          </div>
+          <div class="wm-settings-body">
+            <!-- TODO: 持久化设置 UI -->
+            <p class="wm-settings-hint">设置面板 (WIP)</p>
+            <p class="wm-settings-hint">功能开关通过 EmbedSettings.features 控制</p>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
-.wm-root { font-family: system-ui, 'Segoe UI', sans-serif; color: var(--nei-text-dark); background: var(--nei-bg); padding: 8px; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; }
-.wm-title { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--nei-text); text-shadow: var(--nei-label-shadow); display: flex; flex-direction: row; align-items: center; gap: 8px; }
-.wm-title-text { flex: 1; min-width: 0; }
-.wm-title-meta { flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--nei-text-muted); background: none; border: none; cursor: help; padding: 0 2px; line-height: 1; }
+.fade-enter-active,
+.fade-leave-active { transition: opacity 0.15s ease; }
+.fade-enter-from,
+.fade-leave-to { opacity: 0; }
+
+.wm-root { font-family: system-ui, 'Segoe UI', sans-serif; color: var(--nei-text); background: var(--nei-bg); box-sizing: border-box; height: 100%; display: flex; flex-direction: column; }
+/* Title bar — 40px, 2-tone bevel bottom (MC: highlight line + shadow line) */
+.wm-titlebar { flex-shrink: 0; height: var(--nei-title-height); display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid var(--nei-shadow); box-shadow: 0 1px 0 var(--nei-highlight); background: var(--nei-bg-panel); }
+.wm-titlebar-left { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.wm-title-text { font-size: 13px; font-weight: 700; color: var(--nei-text); text-shadow: var(--nei-text-shadow-deep); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wm-title-meta { flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--nei-text-dim); background: none; border: none; cursor: help; padding: 0 2px; line-height: 1; }
 .wm-title-meta:hover { color: var(--nei-text); }
-.wm-main-stage { display: flex; flex: 1; flex-direction: row; align-items: stretch; min-height: 0; width: 100%; border-radius: 0; overflow: hidden; border: var(--nei-bevel-w) solid; border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight); border-bottom: none; background: var(--nei-bg); }
+.wm-titlebar-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; margin-left: 12px; }
+.wm-titlebar-sep { width: 1px; height: 18px; background: var(--nei-titlebar-sep); margin: 0 5px; flex-shrink: 0; }
+/* Icon buttons — MC bevel: raised on normal, inset on active */
+.nei-icon-btn { width: var(--nei-icon-btn-size); height: var(--nei-icon-btn-size); padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--nei-icon-color); background: var(--nei-bg); border: var(--nei-bevel-w) solid; border-color: var(--nei-highlight) var(--nei-shadow) var(--nei-shadow) var(--nei-highlight); cursor: pointer; }
+.nei-icon-btn:hover { color: var(--nei-icon-hover); filter: brightness(1.06); }
+.nei-icon-btn:active { color: var(--nei-icon-active); border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); }
+.nei-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.nei-icon-btn svg { width: var(--nei-icon-svg-size); height: var(--nei-icon-svg-size); }
+.wm-main-stage { display: flex; flex: 1; flex-direction: row; align-items: stretch; min-height: 0; width: 100%; overflow: hidden; background: var(--nei-bg); }
 .wm-viewport-column { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 .wm-bottom-dock {
@@ -478,10 +621,11 @@ onBeforeUnmount(() => {
   padding: 0 4px;
   background: var(--nei-bg-deep);
   border-bottom: 1px solid var(--nei-shadow);
+  box-shadow: 0 1px 0 var(--nei-highlight);
 }
 .wm-tab {
   padding: 6px 14px 5px;
-  font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px; font-family: var(--nei-font-mono);
   font-weight: 600;
   color: var(--nei-text-muted);
   background: none; border: none;
@@ -499,7 +643,7 @@ onBeforeUnmount(() => {
   margin-left: auto;
   display: flex; align-items: center; gap: 14px;
   padding: 0 10px;
-  font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px; font-family: var(--nei-font-mono);
   color: var(--nei-text-muted);
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
   flex-shrink: 0;
@@ -512,7 +656,7 @@ onBeforeUnmount(() => {
   display: none;
   padding: 6px 10px;
   align-items: center; gap: 10px;
-  height: 40px;
+  height: 48px;
   background: var(--nei-inset-bg);
 }
 .wm-tab-panel--active { display: flex; }
@@ -529,7 +673,7 @@ onBeforeUnmount(() => {
   background: transparent; border: none; padding: 0;
 }
 
-.wm-status-bar { display: flex; align-items: flex-start; gap: 8px; margin-top: 0; padding: 8px 10px; font-size: 12px; line-height: 1.45; font-family: ui-monospace, 'Cascadia Code', monospace; border-radius: 0; border: var(--nei-bevel-w) solid; border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); border-top: none; background: var(--nei-inset-bg); color: var(--nei-text-muted); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45); }
+.wm-status-bar { display: flex; align-items: flex-start; gap: 8px; margin-top: 0; padding: 8px 10px; font-size: 12px; line-height: 1.45; font-family: var(--nei-font-mono); border-radius: 0; border: var(--nei-bevel-w) solid; border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); border-top: none; background: var(--nei-inset-bg); color: var(--nei-text-muted); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45); }
 .wm-status-bar--loading { color: var(--nei-loading-text); } .wm-status-bar--ok { color: var(--nei-ok-text); } .wm-status-bar--warn { color: var(--nei-warn-text); } .wm-status-bar--err { color: var(--nei-error-text); background: var(--nei-error-bg); }
 .wm-status-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 4px; border-radius: 0; background: currentColor; opacity: 0.9; box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4); }
 .wm-status-text { flex: 1; word-break: break-word; white-space: pre-wrap; }
@@ -541,23 +685,33 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: center;
 }
 .wm-settings-panel {
-  background: var(--nei-bg-deep, #1a1e28);
-  border: 3px solid;
-  border-color: var(--nei-bevel-light, #555) var(--nei-bevel-dark, #2a2a2a) var(--nei-bevel-dark, #2a2a2a) var(--nei-bevel-light, #555);
+  background: var(--nei-bg-deep);
+  border: var(--nei-bevel-w) solid;
+  border-color: var(--nei-bevel-light) var(--nei-bevel-dark) var(--nei-bevel-dark) var(--nei-bevel-light);
   min-width: 280px; max-width: 400px;
-  font-family: ui-monospace, monospace; font-size: 12px; color: var(--nei-text, #c0c0c0);
+  font-family: var(--nei-font-mono); font-size: 12px; color: var(--nei-text);
 }
 .wm-settings-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 12px;
-  background: var(--nei-bg-panel, #161a24);
-  border-bottom: 2px solid var(--nei-border-subtle, #2a2a2a);
+  background: var(--nei-bg-panel);
+  border-bottom: 1px solid var(--nei-shadow);
+  box-shadow: 0 1px 0 var(--nei-highlight);
 }
+.nei-icon-btn:focus-visible {
+  outline: 2px solid var(--nei-focus-ring);
+  outline-offset: 2px;
+}
+.wm-tab:focus-visible {
+  outline: 2px solid var(--nei-focus-ring);
+  outline-offset: -1px;
+}
+
 .wm-settings-close {
-  border: none; background: none; color: #8a8e98; cursor: pointer;
+  border: none; background: none; color: var(--nei-icon-color); cursor: pointer;
   font-size: 14px; line-height: 1; padding: 2px 6px;
 }
-.wm-settings-close:hover { color: var(--nei-text, #c0c0c0); }
+.wm-settings-close:hover { color: var(--nei-text); }
 .wm-settings-body { padding: 16px; }
-.wm-settings-hint { margin: 0; color: var(--nei-text-dim, #6a6e78); }
+.wm-settings-hint { margin: 0; color: var(--nei-text-dim); }
 </style>

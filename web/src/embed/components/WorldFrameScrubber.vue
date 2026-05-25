@@ -77,5 +77,5 @@ function onChange(e: Event): void {
 <style scoped>
 .wm-wfs { display: flex; flex: 1; min-width: 0; align-items: center; gap: 10px; user-select: none; }
 .wm-wfs--busy { opacity: 0.65; pointer-events: none; }
-.wm-wfs__label { flex-shrink: 0; font-size: 10px; font-family: ui-monospace, monospace; color: var(--nei-text-mono); min-width: 4.5em; text-align: right; }
+.wm-wfs__label { flex-shrink: 0; font-size: 10px; font-family: var(--nei-font-mono); color: var(--nei-text-mono); min-width: 4.5em; text-align: right; }
 </style>

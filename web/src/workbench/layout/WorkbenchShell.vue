@@ -65,13 +65,15 @@ const hasProperties = () => !!slots.properties
   height: 36px;
   background: var(--wb-bg-elevated);
   border-bottom: 1px solid var(--wb-border);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
 }
 
 .wb-workspace-tabs {
   flex-shrink: 0;
   height: 38px;
-  background: var(--wb-bg-deepest);
+  background: var(--wb-bg-surface);
   border-bottom: 1px solid var(--wb-border);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.1);
 }
 
 .wb-main {
@@ -88,6 +90,12 @@ const hasProperties = () => !!slots.properties
   background: var(--wb-border);
   transition: background 0.15s;
   z-index: 10;
+  position: relative;
+}
+.wb-divider::after {
+  content: '';
+  position: absolute;
+  inset: -4px -6px;
 }
 .wb-divider:hover,
 .wb-divider:active {
@@ -116,8 +124,9 @@ const hasProperties = () => !!slots.properties
 .wb-statusbar {
   flex-shrink: 0;
   height: 26px;
-  background: var(--wb-bg-deepest);
+  background: var(--wb-bg-surface);
   border-top: 1px solid var(--wb-border);
+  box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.15);
   font-size: 10px;
   display: flex;
   align-items: center;

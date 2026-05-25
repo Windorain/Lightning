@@ -31,7 +31,7 @@ export class View3DRenderer {
     const h = Math.max(height, 1)
     const aspect = w / h
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true })
     this.renderer.setPixelRatio(window.devicePixelRatio)
     this.renderer.setSize(w, h)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace

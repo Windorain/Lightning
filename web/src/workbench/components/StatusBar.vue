@@ -41,6 +41,6 @@ function logClass(level: number): string {
 }
 .sb-item { white-space: nowrap; font-size: 10px; }
 .sb-item--error { color: var(--wb-danger); }
-.sb-item--warn { color: #f59e0b; }
+.sb-item--warn { color: var(--wb-warn); }
 .sb-spacer { flex: 1; }
 </style>

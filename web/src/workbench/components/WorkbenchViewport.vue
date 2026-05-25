@@ -269,7 +269,11 @@ onBeforeUnmount(() => {
       :show-axes-gizmo="true"
       @ready="onViewportReady"
     />
-    <div v-else class="wv-placeholder"><span class="wv-placeholder-text">No scene loaded</span></div>
+    <div v-else class="wv-placeholder">
+          <svg class="wv-placeholder-icon" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+          <span class="wv-placeholder-title">No scene loaded</span>
+          <span class="wv-placeholder-hint">Open a scene from the File menu or drop a .json file</span>
+        </div>
     </div>
 
     <div class="wv-bottom-dock">
@@ -314,15 +318,26 @@ onBeforeUnmount(() => {
 <style scoped>
 .wv-root { width: 100%; height: 100%; position: relative; display: flex; flex-direction: column; }
 .wv-viewport-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.wv-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--nei-muted); font-size: 14px; }
-.wv-bottom-dock { flex-shrink: 0; display: flex; flex-direction: column; background: var(--nei-inset-bg); }
-.wv-tab-row { display: flex; align-items: center; padding: 0 4px; background: var(--nei-bg-deep); border-bottom: 1px solid var(--nei-shadow); }
-.wv-tab { padding: 6px 14px 5px; font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace; font-weight: 600; color: var(--nei-text-muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s, border-color 0.15s; }
-.wv-tab:hover { color: var(--nei-text); }
-.wv-tab--active { color: var(--nei-text); border-bottom-color: var(--nei-accent); }
-.wv-tab-status { margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace; color: var(--nei-text-muted); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4); flex-shrink: 0; }
-.wv-tab-stat strong { color: var(--nei-text); font-weight: 600; }
-.wv-tab-panel { display: none; padding: 6px 10px; align-items: center; gap: 10px; height: 40px; background: var(--nei-inset-bg); }
+.wv-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--wb-text-muted);
+}
+.wv-placeholder-icon { opacity: 0.25; color: var(--wb-text-dim); }
+.wv-placeholder-title { font-size: 15px; font-weight: 500; color: var(--wb-text-dim); }
+.wv-placeholder-hint { font-size: 11px; color: var(--wb-text-muted); }
+.wv-bottom-dock { flex-shrink: 0; display: flex; flex-direction: column; background: var(--wb-bg-elevated); box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.12); }
+.wv-tab-row { display: flex; align-items: center; padding: 0 4px; background: var(--wb-bg-surface); border-bottom: 1px solid var(--wb-border); }
+.wv-tab { padding: 6px 14px 5px; font-size: 12px; font-family: system-ui, sans-serif; font-weight: 600; color: var(--wb-text-muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s, border-color 0.15s; }
+.wv-tab:hover { color: var(--wb-text); }
+.wv-tab--active { color: var(--wb-text); border-bottom-color: var(--wb-accent); }
+.wv-tab-status { margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 12px; font-family: system-ui, sans-serif; color: var(--wb-text-muted); flex-shrink: 0; }
+.wv-tab-stat strong { color: var(--wb-text); font-weight: 600; }
+.wv-tab-panel { display: none; padding: 6px 10px; align-items: center; gap: 10px; height: 40px; background: var(--wb-bg-elevated); }
 .wv-tab-panel--active { display: flex; }
 .wv-tab-panel :deep(.wm-wfs) { flex: 1; min-width: 0; background: transparent; border: none; padding: 0; }
 .wv-tab-panel :deep(.wm-wfp-controls) { background: transparent; border: none; padding: 0; }

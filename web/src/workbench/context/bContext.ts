@@ -25,6 +25,7 @@ import type { MoveGizmo } from '@/workbench/tools/gizmos'
 
 export type LoadStatus = 'loading' | 'ok' | 'error'
 export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle'
+export type UIWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
 
 export interface MaterialQueryItem {
   materialId: string
@@ -121,6 +122,7 @@ export interface BContext {
   structEpoch: Ref<number>
   currentWorldFrameIndex: Ref<number>
   workspaceMode: Ref<WorkbenchWorkspaceMode>
+  uiWorkspace: Ref<UIWorkspace>
   localFileName: Ref<string | null>
   markDirty(): void
   markStructureDirty(): void

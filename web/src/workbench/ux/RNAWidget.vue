@@ -212,7 +212,7 @@ function setValue(val: unknown): void {
   background: var(--wb-bg-surface);
   color: var(--wb-text);
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--wb-font-mono);
   outline: none;
   text-align: center;
   -moz-appearance: textfield;
@@ -255,7 +255,7 @@ function setValue(val: unknown): void {
 
 /* Slider */
 .ux-slider { flex: 1; accent-color: var(--wb-accent); }
-.ux-slider-val { font-size: 11px; min-width: 32px; text-align: right; font-family: ui-monospace, monospace; font-weight: 600; color: var(--wb-accent); }
+.ux-slider-val { font-size: 11px; min-width: 32px; text-align: right; font-family: var(--wb-font-mono); font-weight: 600; color: var(--wb-accent); }
 
 /* Toggle */
 .ux-toggle {
@@ -277,7 +277,7 @@ function setValue(val: unknown): void {
   top: 2px;
   width: 14px; height: 14px;
   border-radius: 50%;
-  background: #fff;
+  background: #e8edf2;
   transition: left 0.15s, right 0.15s;
 }
 .ux-toggle--on .ux-toggle-knob { right: 2px; }
@@ -296,7 +296,7 @@ function setValue(val: unknown): void {
   background: var(--wb-bg-surface);
   color: var(--wb-text);
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--wb-font-mono);
   outline: none;
 }
 
@@ -309,7 +309,7 @@ function setValue(val: unknown): void {
   background: var(--wb-bg-surface);
   color: var(--wb-text);
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--wb-font-mono);
   outline: none;
   text-align: center;
 }
@@ -319,5 +319,14 @@ function setValue(val: unknown): void {
   width: 10px;
   text-align: center;
   flex-shrink: 0;
+}
+
+.ux-input:focus-visible,
+.ux-dropdown:focus-visible,
+.ux-stepper-input:focus-visible,
+.ux-color-hex:focus-visible,
+.ux-vec-input:focus-visible {
+  outline: 2px solid var(--wb-focus-ring);
+  outline-offset: 1px;
 }
 </style>

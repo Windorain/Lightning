@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import BlockSlotPreview from './BlockSlotPreview.vue'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
 
@@ -7,6 +8,8 @@ const props = defineProps<{
   entries: BlockStatRow[]
   cache: BlockIconCache
   collapsed?: boolean
+  selectedBlockId?: string | null
+  tooltipMap?: Map<string, string[]>
 }>()
 
 const emit = defineEmits<{
@@ -16,6 +19,7 @@ const emit = defineEmits<{
       blockId: string; clientX: number; clientY: number; source: 'sidebar'
     } | null,
   ]
+  'select-block': [blockId: string]
 }>()
 
 const empty = computed(() => props.entries.length === 0)
@@ -30,20 +34,35 @@ function onRowPointerMove(e: PointerEvent, blockId: string): void {
 function onRowPointerLeave(): void {
   emit('tooltip-hover', null)
 }
+function onRowClick(blockId: string): void {
+  emit('select-block', blockId)
+}
 
-/** Resolve block display name from registryId (strip namespace prefix) */
+/** Format blockId MC-style: strip namespace, replace @ with : */
+function formatBlockId(id: string): string {
+  if (!id) return '???'
+  if (id === 'minecraft:air') return 'air'
+  let s = id
+  const colon = s.lastIndexOf(':')
+  if (colon >= 0) s = s.slice(colon + 1)
+  return s.replace('@', ':')
+}
+
+/** Resolve block display name: tooltip first line if available, else strip namespace */
 function displayName(row: BlockStatRow): string {
   const id = row.blockId
   if (!id) return '???'
   if (id === 'minecraft:air') return id
+  const lines = props.tooltipMap?.get(id)
+  if (lines && lines.length > 0 && lines[0]) {
+    // Strip MC color codes (§x) from tooltip line
+    const clean = lines[0].replace(/§./g, '').trim()
+    if (clean) return clean
+  }
   const colon = id.lastIndexOf(':')
   return colon >= 0 ? id.slice(colon + 1) : id
 }
 
-/** Check if row count > 1 for NEI badge display */
-function hasCount(row: BlockStatRow): boolean {
-  return row.count > 1
-}
 </script>
 
 <template>
@@ -68,7 +87,10 @@ function hasCount(row: BlockStatRow): boolean {
     </div>
 
     <!-- Empty state -->
-    <p v-if="empty" class="nei-sidebar-empty">无方块数据</p>
+    <div v-if="empty" class="nei-sidebar-empty">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18"/></svg>
+        <span>无方块数据</span>
+      </div>
 
     <!-- Slot list -->
     <div
@@ -80,22 +102,27 @@ function hasCount(row: BlockStatRow): boolean {
         v-for="row in entries"
         :key="row.blockId"
         class="nei-slot-row"
-        :class="{ 'nei-slot-row--collapsed': collapsed }"
+        :class="{
+          'nei-slot-row--collapsed': collapsed,
+          'nei-slot-row--selected': row.blockId === selectedBlockId,
+        }"
         @pointerenter="onRowPointerEnter($event, row.blockId)"
         @pointermove="onRowPointerMove($event, row.blockId)"
         @pointerleave="onRowPointerLeave"
+        @click="onRowClick(row.blockId)"
         :title="collapsed ? displayName(row) : undefined"
       >
         <!-- Slot -->
-        <div class="nei-slot">
-          <span class="nei-slot-icon">{{ row.blockId ? '▣' : '' }}</span>
-          <span v-if="hasCount(row)" class="nei-slot-count">{{ row.count }}</span>
-        </div>
+        <BlockSlotPreview
+          :cache="cache"
+          :block-id="row.blockId"
+          :count="row.count"
+        />
         <!-- Expanded info -->
         <template v-if="!collapsed">
           <div class="nei-slot-info">
             <div class="nei-slot-name">{{ displayName(row) }}</div>
-            <div class="nei-slot-id">{{ row.blockId }}</div>
+            <div class="nei-slot-id">{{ formatBlockId(row.blockId) }}</div>
           </div>
           <span class="nei-slot-qty">{{ row.count }}</span>
         </template>
@@ -141,7 +168,7 @@ function hasCount(row: BlockStatRow): boolean {
   padding: 8px 0 6px;
 }
 .nei-sidebar-label {
-  color: #d0d0d0;
+  color: var(--nei-text);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -151,7 +178,7 @@ function hasCount(row: BlockStatRow): boolean {
   margin-left: auto;
   font-size: 10px;
   color: var(--nei-text-mono);
-  font-family: ui-monospace, monospace;
+  font-family: var(--nei-font-mono);
   background: var(--nei-bg-panel);
   padding: 2px 8px;
   border: 1px solid var(--nei-border-panel);
@@ -176,7 +203,11 @@ function hasCount(row: BlockStatRow): boolean {
 
 /* ===== Empty ===== */
 .nei-sidebar-empty {
-  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 14px;
   font-size: 11px;
   color: var(--nei-text-dim);
   margin: 0;
@@ -202,8 +233,21 @@ function hasCount(row: BlockStatRow): boolean {
 .nei-slot-row {
   display: flex;
   align-items: center;
-  padding: 1px 0;
+  padding: 2px 4px;
   cursor: pointer;
+  transition: background 0.1s, box-shadow 0.1s;
+}
+.nei-slot-row:hover {
+  background: var(--nei-bg-hover);
+}
+.nei-slot-row:active {
+  background: var(--nei-accent-glow);
+  box-shadow: inset 0 0 0 1px var(--nei-border-active);
+}
+.nei-slot-row--selected {
+  background: var(--nei-accent-glow);
+  border-left: 3px solid var(--nei-accent);
+  padding-left: 1px;
 }
 .nei-slot-row--collapsed {
   padding: 0;
@@ -211,33 +255,6 @@ function hasCount(row: BlockStatRow): boolean {
   height: 36px;
   justify-content: center;
   flex-shrink: 0;
-}
-
-/* ===== Slot (40x40, NEI border) ===== */
-.nei-slot {
-  width: 40px; height: 40px;
-  flex-shrink: 0;
-  background: var(--nei-bg-input);
-  border: 2px solid var(--nei-border-slot);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-}
-.nei-slot-icon {
-  font-size: 22px;
-  line-height: 1;
-}
-.nei-slot-count {
-  position: absolute;
-  bottom: 0;
-  right: 1px;
-  font-size: 10px;
-  color: #ffffff;
-  font-family: ui-monospace, monospace;
-  font-weight: 700;
-  text-shadow: 1px 1px 0 #000;
-  line-height: 1;
 }
 
 /* ===== Expanded info ===== */
@@ -255,12 +272,12 @@ function hasCount(row: BlockStatRow): boolean {
   margin-left: auto;
   font-size: 12px;
   color: var(--nei-text-dim);
-  font-family: ui-monospace, monospace;
+  font-family: var(--nei-font-mono);
 }
 .nei-slot-id {
   font-size: 9px;
   color: var(--nei-text-id);
-  font-family: ui-monospace, monospace;
+  font-family: var(--nei-font-mono);
 }
 
 /* ===== Footer (collapsed only) ===== */

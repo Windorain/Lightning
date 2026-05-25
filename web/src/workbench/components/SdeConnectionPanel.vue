@@ -129,7 +129,7 @@ async function onConnect(): Promise<void> {
   color: var(--wb-text-muted);
 }
 .dash-hint--ok {
-  color: #86efac;
+  color: var(--wb-success);
 }
 .dash-hint--err {
   color: var(--wb-text);

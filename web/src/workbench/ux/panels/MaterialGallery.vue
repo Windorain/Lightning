@@ -222,7 +222,7 @@ onUnmounted(() => {
 <template>
   <div class="mg-root" @keydown="handleKeydown">
     <div v-if="cards.length === 0" class="mg-empty">
-      <span class="mg-empty-icon">&#x1F3A8;</span>
+      <span class="mg-empty-icon"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-1 0-.78.62-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-5.5-4.5-10-10-10z"/></svg></span>
       <span class="mg-empty-text">无材质数据</span>
       <span class="mg-empty-hint">加载包含 materialPalette 的场景以查看材质</span>
     </div>
@@ -368,7 +368,7 @@ onUnmounted(() => {
         </template>
 
         <div v-else class="mg-detail-placeholder">
-          <span class="mg-detail-placeholder-icon">&#x1F5BC;</span>
+          <span class="mg-detail-placeholder-icon"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
           <span class="mg-detail-placeholder-text">点击左侧材质<br />查看详情</span>
           <span class="mg-detail-placeholder-hint">方向键导航 · 回车选中</span>
         </div>
@@ -395,7 +395,7 @@ onUnmounted(() => {
   gap: 8px;
   color: var(--wb-text-dim);
 }
-.mg-empty-icon { font-size: 36px; }
+.mg-empty-icon { width: 36px; height: 36px; color: var(--wb-text-dim); opacity: 0.5; }
 .mg-empty-text { font-size: 15px; color: var(--wb-text-muted); }
 .mg-empty-hint { font-size: 12px; }
 
@@ -445,7 +445,7 @@ onUnmounted(() => {
 .mg-count {
   font-size: 11px;
   color: var(--wb-text-dim);
-  font-family: ui-monospace, monospace;
+  font-family: var(--wb-font-mono);
   white-space: nowrap;
   min-width: 50px;
   text-align: right;
@@ -513,7 +513,7 @@ onUnmounted(() => {
 .mg-card-label {
   flex: 1;
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--wb-font-mono);
   color: var(--wb-text);
   white-space: nowrap;
   overflow: hidden;
@@ -526,11 +526,11 @@ onUnmounted(() => {
   border-radius: 8px;
   background: var(--wb-bg-hover);
   color: var(--wb-text-muted);
-  font-family: ui-monospace, monospace;
+  font-family: var(--wb-font-mono);
 }
-.mg-badge--anim { background: #1a2a1a; color: #2ecc71; }
+.mg-badge--anim { background: rgba(46, 204, 113, 0.1); color: var(--wb-success); }
 .mg-badge--usage { background: var(--wb-bg-hover); color: var(--wb-text-muted); }
-.mg-badge--blend { background: #2a2010; color: #f59e0b; }
+.mg-badge--blend { background: rgba(245, 158, 11, 0.1); color: var(--wb-warn); }
 
 .mg-grid-empty {
   flex: 0 0 100%;
@@ -564,7 +564,7 @@ onUnmounted(() => {
   font-size: 14px;
   font-weight: 600;
   color: var(--wb-text);
-  font-family: ui-monospace, monospace;
+  font-family: var(--wb-font-mono);
   word-break: break-all;
   line-height: 1.3;
 }
@@ -632,8 +632,15 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--wb-accent-muted);
 }
+.mg-search:focus-visible,
+.mg-select:focus-visible,
+.mg-grid:focus-visible {
+  outline: 2px solid var(--wb-focus-ring);
+  outline-offset: 2px;
+}
+
 .mg-prop-value--mono {
-  font-family: ui-monospace, monospace;
+  font-family: var(--wb-font-mono);
   font-size: 11px;
   word-break: break-all;
   text-align: right;
@@ -658,7 +665,7 @@ onUnmounted(() => {
   gap: 8px;
   color: var(--wb-text-dim);
 }
-.mg-detail-placeholder-icon { font-size: 32px; opacity: 0.4; }
-.mg-detail-placeholder-text { font-size: 13px; text-align: center; line-height: 1.5; opacity: 0.5; }
-.mg-detail-placeholder-hint { font-size: 10px; opacity: 0.3; margin-top: 6px; }
+.mg-detail-placeholder-icon { width: 48px; height: 48px; color: var(--wb-text-dim); }
+.mg-detail-placeholder-text { font-size: 13px; text-align: center; line-height: 1.5; color: var(--wb-text-dim); }
+.mg-detail-placeholder-hint { font-size: 10px; color: var(--wb-text-dim); margin-top: 6px; }
 </style>

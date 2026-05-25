@@ -58,5 +58,5 @@ function onChange(e: Event): void {
 <style scoped>
 .wm-layer-bar { display: flex; align-items: center; gap: 10px; padding: 0; background: transparent; font-size: 11px; color: var(--nei-text); width: 100%; }
 .wm-layer-label { flex-shrink: 0; user-select: none; }
-.wm-layer-value { flex-shrink: 0; min-width: 4.5em; text-align: right; color: var(--nei-text-dim); font-family: ui-monospace, monospace; }
+.wm-layer-value { flex-shrink: 0; min-width: 4.5em; text-align: right; color: var(--nei-text-dim); font-family: var(--nei-font-mono); }
 </style>

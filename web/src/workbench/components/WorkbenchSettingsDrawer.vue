@@ -43,60 +43,62 @@ onUnmounted(() => {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="drawer-root">
-      <div class="drawer-backdrop" aria-hidden="true" @click="close" />
-      <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-        <header class="drawer-head">
-          <h2 id="drawer-title" class="drawer-title">设置</h2>
-          <button type="button" class="drawer-close" aria-label="关闭" @click="close">×</button>
-        </header>
+    <Transition name="drawer">
+      <div v-if="open" class="drawer-root">
+        <div class="drawer-backdrop" aria-hidden="true" @click="close" />
+        <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+          <header class="drawer-head">
+            <h2 id="drawer-title" class="drawer-title">设置</h2>
+            <button type="button" class="drawer-close" aria-label="关闭" @click="close">×</button>
+          </header>
 
-        <div class="drawer-body">
-          <section class="drawer-section">
-            <h3 class="drawer-h3">数据源</h3>
-            <p class="drawer-lead">选择文档来源；切换会清空当前文档与连接状态。</p>
-            <div class="seg" role="group" aria-label="数据源类型">
-              <button
-                type="button"
-                class="seg__btn"
-                :class="{ 'seg__btn--on': mode === 'sde' }"
-                @click="pickMode('sde')"
-              >
-                SDE 远程
-              </button>
-              <button
-                type="button"
-                class="seg__btn"
-                :class="{ 'seg__btn--on': mode === 'local-file' }"
-                @click="pickMode('local-file')"
-              >
-                本地文件
-              </button>
-              <button
-                v-if="showBuiltin"
-                type="button"
-                class="seg__btn"
-                :class="{ 'seg__btn--on': mode === 'local-bundle' }"
-                @click="pickMode('local-bundle')"
-              >
-                内置示例
-              </button>
+          <div class="drawer-body">
+            <section class="drawer-section">
+              <h3 class="drawer-h3">数据源</h3>
+              <p class="drawer-lead">选择文档来源；切换会清空当前文档与连接状态。</p>
+              <div class="seg" role="group" aria-label="数据源类型">
+                <button
+                  type="button"
+                  class="seg__btn"
+                  :class="{ 'seg__btn--on': mode === 'sde' }"
+                  @click="pickMode('sde')"
+                >
+                  SDE 远程
+                </button>
+                <button
+                  type="button"
+                  class="seg__btn"
+                  :class="{ 'seg__btn--on': mode === 'local-file' }"
+                  @click="pickMode('local-file')"
+                >
+                  本地文件
+                </button>
+                <button
+                  v-if="showBuiltin"
+                  type="button"
+                  class="seg__btn"
+                  :class="{ 'seg__btn--on': mode === 'local-bundle' }"
+                  @click="pickMode('local-bundle')"
+                >
+                  内置示例
+                </button>
+              </div>
+            </section>
+
+            <div v-if="mode === 'sde'" class="drawer-stack">
+              <SdeConnectionPanel />
+              <ExportsListPanel />
             </div>
-          </section>
-
-          <div v-if="mode === 'sde'" class="drawer-stack">
-            <SdeConnectionPanel />
-            <ExportsListPanel />
+            <div v-else-if="mode === 'local-file'" class="drawer-stack">
+              <LocalFilePanel />
+            </div>
+            <div v-else class="drawer-stack">
+              <LocalBundlePanel />
+            </div>
           </div>
-          <div v-else-if="mode === 'local-file'" class="drawer-stack">
-            <LocalFilePanel />
-          </div>
-          <div v-else class="drawer-stack">
-            <LocalBundlePanel />
-          </div>
-        </div>
-      </aside>
-    </div>
+        </aside>
+      </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -125,12 +127,18 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   pointer-events: auto;
-  animation: drawer-in 0.18s ease-out;
 }
-@keyframes drawer-in {
-  from { transform: translateX(100%); opacity: 0.9; }
-  to { transform: translateX(0); opacity: 1; }
+
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
 }
+.drawer-enter-from,
+.drawer-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
 .drawer-head {
   display: flex;
   align-items: center;
@@ -152,7 +160,7 @@ onUnmounted(() => {
   color: var(--wb-text-muted); font-size: 16px; line-height: 1; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
-.drawer-close:hover { background: var(--wb-bg-hover); color: var(--wb-text); }
+.drawer-close:hover { background: var(--wb-bg-hover); color: var(--wb-text); box-shadow: 0 0 12px rgba(77, 171, 247, 0.15); }
 .drawer-body {
   flex: 1; overflow: auto; padding: 14px 16px 24px;
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, provide, ref, computed } from 'vue'
+import { onMounted, onBeforeUnmount, provide, ref, computed, watch } from 'vue'
 
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
 import WorkbenchSettingsDrawer from '@/workbench/components/WorkbenchSettingsDrawer.vue'
@@ -7,8 +7,10 @@ import WorkspaceTabs from '@/workbench/components/WorkspaceTabs.vue'
 import WorkbenchViewport from '@/workbench/components/WorkbenchViewport.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
-import WikiViewerWorkspace from '@/workbench/components/WikiViewerWorkspace.vue'
 import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
+import EmbedViewport from '@/embed/EmbedViewport.vue'
+import { defaultEmbedUi } from '@/preview/previewConfig'
+import type { EmbedSettings } from '@/preview/previewConfig'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
@@ -83,6 +85,31 @@ const activeHeaderPanels = computed(() =>
     .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
+// Wiki embed settings
+const wikiConfig = bctx.wikiConfig as Record<string, any>
+function parseHex6(s: string): number {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
+  if (!m) return 0x5a5a5a
+  return parseInt(m[1], 16)
+}
+const embedSettings = computed<EmbedSettings>(() => ({
+  features: {
+    ...defaultEmbedUi.features,
+    ...(wikiConfig.features ?? {}),
+  },
+  blockIconCacheOptions: defaultEmbedUi.blockIconCacheOptions,
+  initialLayerWorldY: defaultEmbedUi.initialLayerWorldY,
+  initialCamera: {
+    yawDeg: wikiConfig.cameraYaw,
+    elevationDeg: wikiConfig.cameraElevation,
+    zoom: wikiConfig.cameraZoom,
+  },
+  sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex ?? '#5a5a5a'),
+  loadingMessage: defaultEmbedUi.loadingMessage,
+  okMessage: defaultEmbedUi.okMessage,
+  debug: wikiConfig.features?.debugStatusBar ?? false,
+}))
+
 // Context menu
 const contextMenu = createContextMenu()
 const lastMousePosition = ref<{ x: number; y: number } | null>(null)
@@ -122,6 +149,7 @@ function handleKeydown(event: KeyboardEvent): void {
 }
 
 const workspace = ref<'preview' | 'wiki' | 'export' | 'materials'>('preview')
+watch(workspace, (v) => { bctx.uiWorkspace.value = v }, { immediate: true })
 const settingsOpen = ref(false)
 provide('workbenchSettingsOpen', settingsOpen)
 
@@ -183,10 +211,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <WorkbenchShell v-show="workspace === 'preview'">
+  <WorkbenchShell v-show="workspace === 'preview' || workspace === 'wiki'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
+        <span class="wb-brand"><svg class="wb-brand-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -199,7 +227,7 @@ onMounted(() => {
     <template #workspace-tabs>
       <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
     </template>
-    <template #tool-shelf>
+    <template v-if="workspace !== 'wiki'" #tool-shelf>
       <div class="wb-toolshelf">
         <UIRenderer
           v-for="panel in activeToolshelfPanels"
@@ -211,7 +239,10 @@ onMounted(() => {
       </div>
     </template>
     <template #viewport>
-      <WorkbenchViewport v-if="bctx.doc.value" />
+      <WorkbenchViewport v-if="workspace === 'preview' && bctx.doc.value" />
+      <div v-else-if="workspace === 'wiki' && bctx.doc.value" class="wb-wiki-embed">
+        <EmbedViewport :settings="embedSettings" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }" />
+      </div>
     </template>
     <template #properties>
       <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" :bctx="bctx" />
@@ -221,33 +252,10 @@ onMounted(() => {
     </template>
   </WorkbenchShell>
 
-  <div v-if="workspace === 'wiki'" class="wb-standalone">
-    <header class="wb-standalone-menubar">
-      <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
-        <UIRenderer
-          v-for="panel in activeHeaderPanels"
-          :key="panel.id"
-          :layout="panel.layout"
-          :rna="bctx.rna"
-          :owner="panel.owner"
-        />
-      </div>
-    </header>
-    <header class="wb-standalone-top">
-      <div class="wb-standalone-tabs">
-        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
-      </div>
-    </header>
-    <main class="wb-standalone-body">
-      <WikiViewerWorkspace />
-    </main>
-  </div>
-
   <WorkbenchShell v-if="workspace === 'export'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
+        <span class="wb-brand"><svg class="wb-brand-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -271,7 +279,7 @@ onMounted(() => {
   <WorkbenchShell v-if="workspace === 'materials'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
+        <span class="wb-brand"><svg class="wb-brand-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -296,31 +304,33 @@ onMounted(() => {
 
   <!-- ContextMenu floating overlay -->
   <Teleport to="body">
-    <div
-      v-if="contextMenu.open.value"
-      class="context-menu-overlay"
-      @click="hideContextMenu(contextMenu)"
-      @contextmenu.prevent
-    >
+    <Transition name="menu-pop">
       <div
-        class="context-menu-popup"
-        :style="{ left: contextMenu.position.value.x + 'px', top: contextMenu.position.value.y + 'px' }"
-        @click.stop
+        v-if="contextMenu.open.value"
+        class="context-menu-overlay"
+        @click="hideContextMenu(contextMenu)"
+        @contextmenu.prevent
       >
-        <template v-for="(item, i) in contextMenu.items.value" :key="i">
-          <hr v-if="item.kind === 'separator'" class="cm-sep" />
-          <span v-else-if="item.kind === 'label'" class="cm-label">{{ item.label }}</span>
-          <button
-            v-else-if="item.kind === 'operator'"
-            class="cm-item"
-            @click="invokeContextMenuItem(item); hideContextMenu(contextMenu)"
-          >
-            <span v-if="item.icon" class="cm-icon">{{ item.icon }}</span>
-            {{ item.label }}
-          </button>
-        </template>
+        <div
+          class="context-menu-popup"
+          :style="{ left: contextMenu.position.value.x + 'px', top: contextMenu.position.value.y + 'px' }"
+          @click.stop
+        >
+          <template v-for="(item, i) in contextMenu.items.value" :key="i">
+            <hr v-if="item.kind === 'separator'" class="cm-sep" />
+            <span v-else-if="item.kind === 'label'" class="cm-label">{{ item.label }}</span>
+            <button
+              v-else-if="item.kind === 'operator'"
+              class="cm-item"
+              @click="invokeContextMenuItem(item); hideContextMenu(contextMenu)"
+            >
+              <span v-if="item.icon" class="cm-icon">{{ item.icon }}</span>
+              {{ item.label }}
+            </button>
+          </template>
+        </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -363,6 +373,9 @@ onMounted(() => {
   padding: 0 10px;
 }
 .wb-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--wb-text);
   font-size: 16px;
   font-weight: 700;
@@ -370,6 +383,9 @@ onMounted(() => {
   margin-right: 24px;
   user-select: none;
   flex-shrink: 0;
+}
+.wb-brand-icon {
+  color: var(--wb-accent);
 }
 .wb-menubar-inner :deep(.ux-menu-btn) {
   border: none;
@@ -409,6 +425,7 @@ onMounted(() => {
 .wb-wiki-embed {
   width: 100%; height: 100%;
   display: flex; align-items: center; justify-content: center;
+  overflow: auto;
   background: var(--wb-viewport-bg);
   background-image:
     linear-gradient(var(--wb-grid-color) 1px, transparent 1px),
@@ -428,52 +445,36 @@ onMounted(() => {
 .context-menu-popup {
   position: absolute;
   min-width: 160px;
-  background: #2a2a2a;
-  border: 1px solid #555;
+  background: var(--wb-bg-elevated);
+  border: 1px solid var(--wb-border);
   border-radius: 4px;
   padding: 4px 0;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
 .cm-item {
   display: block; width: 100%; padding: 4px 12px;
-  border: none; background: transparent; color: #ccc;
+  border: none; background: transparent; color: var(--wb-text);
   font-size: 13px; text-align: left; cursor: pointer;
 }
-.cm-item:hover { background: #4a4a4a; }
+.cm-item:hover { background: var(--wb-bg-hover); }
 .cm-label {
-  display: block; padding: 2px 12px; font-size: 11px; color: #999;
+  display: block; padding: 2px 12px; font-size: 11px; color: var(--wb-text-dim);
 }
-.cm-sep { margin: 4px 8px; border: none; border-top: 1px solid #555; }
+.cm-sep { margin: 4px 8px; border: none; border-top: 1px solid var(--wb-border); }
 .cm-icon { margin-right: 6px; }
 
-.wb-standalone {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background: var(--nei-bg);
-  color: var(--nei-text-dark);
+.menu-pop-enter-active {
+  transition: opacity 0.1s ease, transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.wb-standalone-menubar {
-  flex-shrink: 0;
-  height: 28px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-border);
+.menu-pop-leave-active {
+  transition: opacity 0.08s ease;
 }
-.wb-standalone-top {
-  flex-shrink: 0;
-  height: 32px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-border);
-  display: flex;
-  align-items: center;
+.menu-pop-enter-from {
+  opacity: 0;
+  transform: scale(0.95) translateY(-4px);
 }
-.wb-standalone-tabs {
-  display: flex;
-  align-items: stretch;
-  height: 100%;
+.menu-pop-leave-to {
+  opacity: 0;
 }
-.wb-standalone-body {
-  flex: 1;
-  overflow-y: auto;
-}
+
 </style>

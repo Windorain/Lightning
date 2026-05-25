@@ -4,7 +4,7 @@
  * 与 workbench 同构：EmbedRoot 创建 bctx → provide → EmbedViewport 消费。
  * 只包含 embed 实际需要的字段，workbench-only 子系统抛出明确错误。
  */
-import type { BContext, BContextQueries, WorkbenchWorkspaceMode } from '@/workbench/context/bContext'
+import type { BContext, BContextQueries, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { EmbedSettings } from '@/preview/previewConfig'
@@ -37,6 +37,7 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
   const structEpochRef = ref(0)
   const currentWorldFrameIndexRef = ref(0)
   const workspaceModeRef: Ref<WorkbenchWorkspaceMode> = ref('local-file')
+  const uiWorkspaceRef: Ref<UIWorkspace> = ref('wiki')
   const localFileNameRef = ref<string | null>(null)
   const connectionApiBaseRef = ref('')
   const connectionTokenRef = ref('')
@@ -61,6 +62,7 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
     structEpoch: structEpochRef,
     currentWorldFrameIndex: currentWorldFrameIndexRef,
     workspaceMode: workspaceModeRef,
+    uiWorkspace: uiWorkspaceRef,
     localFileName: localFileNameRef,
     markDirty() { dirtyRef.value = true },
     markStructureDirty() { structEpochRef.value += 1; dirtyRef.value = true },

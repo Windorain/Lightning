@@ -2,6 +2,29 @@
  * Modern NEI — Design Tokens for Embed Viewer
  * Based on real NEI source: ItemsGrid.java, PanelWidget.java, LayoutStyleMinecraft.java
  */
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* Panel hierarchy */
   --nei-bg-deep: #0a0e18;
@@ -28,6 +51,9 @@
   --nei-text-shadow: 1px 1px 0 #0a0e18;
   --nei-text-shadow-deep: 2px 2px 0 #0a0e18;
 
+  /* Typography */
+  --nei-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+
   /* Accent */
   --nei-accent: #5050a0;
   --nei-accent-glow: rgba(80, 80, 160, 0.25);
@@ -44,20 +70,57 @@
   --nei-scrollbar-track: #1a1e28;
   --nei-scrollbar-thumb: #3a3e48;
 
+  /* Extended panel tokens */
+  --nei-bg: #1a1e28;
+  --nei-text-dark: #e8e8e8;
+  --nei-text-muted: #6a6e78;
+  --nei-viewport-bg: #151920;
+  --nei-inset-bg: #12161e;
+
+  /* Bevel border */
+  --nei-bevel-w: 2px;
+  --nei-highlight: #3a4a5e;
+  --nei-shadow: #0a0e18;
+  --nei-label-shadow: 1px 1px 0 #0a0e18;
+
+  /* Status colors */
+  --nei-loading-text: #fcd34d;
+  --nei-ok-text: #86efac;
+  --nei-warn-text: #fde047;
+  --nei-error-text: #fecaca;
+  --nei-error-bg: #450a0a;
+
+  /* Icon buttons */
+  --nei-icon-color: #8a8e98;
+  --nei-icon-hover: var(--nei-text);
+  --nei-icon-active: var(--nei-text-accent);
+  --nei-titlebar-sep: #3a3e48;
+  --nei-title-height: 40px;
+  --nei-icon-btn-size: 28px;
+  --nei-icon-svg-size: 18px;
+
   /* Misc */
   --nei-radius-none: 0;
 }
 
 /* ---- NEI Tooltip (global, used by ToolTipBox) ---- */
+/*
+ * Matches real MC rendering from CodeChickenLib GuiDraw.java:
+ *   bg    = 0xf0100010 → rgba(16, 0, 16, 0.94)
+ *   grad1 = 0x505000ff → rgba(80, 0, 255, 0.31)  top / left-start
+ *   grad2 = 0x5028007f → rgba(40, 0, 127, 0.31)  bottom / left-end
+ * Border: 1px, top=grad1, bottom=grad2, left/right=grad1→grad2 vertical
+ */
 .wm-tooltip-surface {
   box-sizing: border-box;
   padding: 6px 8px;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.5;
   font-family: system-ui, 'Segoe UI', sans-serif;
-  color: var(--nei-tooltip-text);
-  background: var(--nei-tooltip-bg);
-  border: 1px solid var(--nei-tooltip-border);
+  color: #aaaaaa;
+  background: rgba(16, 0, 16, 0.94);
+  border: 1px solid;
+  border-color: rgba(80, 0, 255, 0.25) rgba(80, 0, 255, 0.2) rgba(40, 0, 127, 0.3) rgba(80, 0, 255, 0.2);
   border-radius: 0;
   box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.4);
 }
@@ -73,11 +136,35 @@
   min-width: 0;
   pointer-events: none;
 }
-.wm-tooltip-body { margin: 0; white-space: pre-line; overflow-wrap: break-word; word-break: normal; }
-.wm-tooltip-body strong { font-weight: 700; }
+.wm-tooltip-body {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+/* First line = item name: white, larger, bold (matches MC §f / rarity color behavior) */
+.wm-tooltip-body::first-line {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.6;
+  color: #ffffff;
+}
+.wm-tooltip-body strong {
+  font-weight: 700;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.6);
+}
 .wm-tooltip-body em { font-style: italic; }
-.wm-tooltip-body code { font-family: ui-monospace, monospace; background: rgba(0,0,0,0.15); padding: 0 2px; border-radius: 2px; }
-.wm-tooltip-body a { color: #60a5fa; }
+.wm-tooltip-body code {
+  font-family: var(--nei-font-mono);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0 3px;
+  border-radius: 0;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+.wm-tooltip-body a { color: #60a5fa; text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5); }
+/* MC color-coded spans inherit text-shadow */
+.wm-tooltip-body span { text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4); }
 
 /* ---- NEI Slider (shared by WorldFrameScrubber & LayerPreviewBar) ---- */
 .nei-slider { position: relative; flex: 1; min-width: 0; height: 28px; display: flex; align-items: center; }
