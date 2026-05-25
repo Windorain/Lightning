@@ -167,7 +167,7 @@ onBeforeUnmount(() => {
 
 logCenter.injectStateRefs({
   scene: () => bctx.doc.value?.toRaw() as any,
-  selection: () => [...selection.items.value],
+  selection: () => [...selection.items.value].filter(e => e.kind === 'block').map(e => e.ref),
   toolRegistry: () => ({
     activeToolId: toolRegistry.activeTool.value?.id ?? 'none',
     canUndo: editHistory.canUndo.value,

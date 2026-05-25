@@ -12,6 +12,7 @@ import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
 import type { Annotation } from '@/render/data/annotationTypes'
+import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
 import * as THREE from 'three'
 
 const selection = useSelectionContext()
@@ -78,6 +79,7 @@ function createToolContext(): ToolContext {
     selection,
     viewport: bctx.viewport,
     pickVoxel: (e) => bctx.queries.pickVoxel(e),
+    pickAll: (e) => bctx.queries.pickAll(e),
     getCurrentFrame: () => bctx.queries.getCurrentFrame(),
     gridCenterWorld: (pos) => bctx.queries.gridCenterWorld(pos),
     invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
@@ -142,7 +144,7 @@ async function onViewportReady({ scene, layers, camera, domElement, orbitTarget 
   function rafTick() {
     if (!_alive) return
     gizmoRafId = requestAnimationFrame(rafTick)
-    updateOverlay()
+    try { updateOverlay() } catch (e) { console.error('[Workbench] updateOverlay error', e) }
   }
   gizmoRafId = requestAnimationFrame(rafTick)
 }
@@ -151,6 +153,10 @@ let unregHandlers: Array<() => void> = []
 let gizmoRafId: number | undefined
 let _alive = true
 let toolCtx: ToolContext | null = null
+
+// ---- Selection highlight ----
+const highlightProvider = new SelectionHighlightProvider()
+let _selHighlightGroup: THREE.Group | null = null
 
 // ---- Annotation overlay ----
 let _annoGroup: THREE.Group | null = null
@@ -187,46 +193,29 @@ function updateAnnotationOverlay(): void {
   }).catch(() => { _annoPending = false })
 }
 
-function updateSelectionWireframe(): void {
-  if (bctx.viewport.wireframe.value) {
-    bctx.viewport.overlayGroup.value?.remove(bctx.viewport.wireframe.value)
-    bctx.viewport.wireframe.value.geometry?.dispose()
-    ;(bctx.viewport.wireframe.value.material as THREE.Material)?.dispose()
-    bctx.viewport.wireframe.value = null
+function updateSelectionHighlight(): void {
+  if (_selHighlightGroup) {
+    bctx.viewport.overlayGroup.value?.remove(_selHighlightGroup)
+    _selHighlightGroup = null
   }
 
   const items = selection.items.value
   if (items.size === 0 || items.size > 500) return
 
-  const edges: number[] = []
-  const s = 0.52
+  const doc = bctx.doc.value as Record<string, any> | null
+  const annos: Annotation[] = doc?.annotations ?? []
 
-  for (const item of items) {
-    const world = bctx.queries.gridCenterWorld(item.pos)
-    if (!world) continue
-    const x = world.x; const y = world.y; const z = world.z
-
-    const verts = [
-      [x-s, y-s, z-s], [x+s, y-s, z-s], [x+s, y-s, z-s], [x+s, y+s, z-s],
-      [x+s, y+s, z-s], [x-s, y+s, z-s], [x-s, y+s, z-s], [x-s, y-s, z-s],
-      [x-s, y-s, z+s], [x+s, y-s, z+s], [x+s, y-s, z+s], [x+s, y+s, z+s],
-      [x+s, y+s, z+s], [x-s, y+s, z+s], [x-s, y+s, z+s], [x-s, y-s, z+s],
-      [x-s, y-s, z-s], [x-s, y-s, z+s], [x+s, y-s, z-s], [x+s, y-s, z+s],
-      [x+s, y+s, z-s], [x+s, y+s, z+s], [x-s, y+s, z-s], [x-s, y+s, z+s],
-    ]
-    for (let i = 0; i < verts.length; i += 2) {
-      const p1 = verts[i], p2 = verts[i + 1]
-      edges.push(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2])
-    }
+  const group = highlightProvider.build(
+    items,
+    annos,
+    (pos) => bctx.queries.getBlockGeometry(pos),
+    (pos) => bctx.queries.gridCenterWorld(pos),
+    bctx.viewport.camera.value,
+  )
+  if (group.children.length > 0) {
+    _selHighlightGroup = group
+    bctx.viewport.overlayGroup.value?.add(_selHighlightGroup)
   }
-
-  if (edges.length === 0) return
-
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3))
-  const mat = new THREE.LineBasicMaterial({ color: 0xffaa00, linewidth: 1, depthTest: true })
-  bctx.viewport.wireframe.value = new THREE.LineSegments(geo, mat)
-  bctx.viewport.overlayGroup.value?.add(bctx.viewport.wireframe.value)
 }
 
 function updateOverlay(): void {
@@ -234,7 +223,7 @@ function updateOverlay(): void {
   if (gizmo && toolCtx) {
     gizmo.render(toolCtx)
   }
-  updateSelectionWireframe()
+  updateSelectionHighlight()
   updateAnnotationOverlay()
 
   if (bctx.viewport.gizmo.value && bctx.toolRegistry.activeTool.value?.id === 'move') {
@@ -258,12 +247,11 @@ onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())
   _alive = false
   if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
-  if (vpSlot.wireframe.value) {
-    vpSlot.overlayGroup.value?.remove(vpSlot.wireframe.value)
-    vpSlot.wireframe.value.geometry?.dispose()
-    ;(vpSlot.wireframe.value.material as THREE.Material)?.dispose()
-    vpSlot.wireframe.value = null
+  if (_selHighlightGroup) {
+    bctx.viewport.overlayGroup.value?.remove(_selHighlightGroup)
+    _selHighlightGroup = null
   }
+  highlightProvider.dispose()
   renderAssets.disposeCachesAndLibrary()
 })
 </script>

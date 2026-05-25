@@ -267,20 +267,20 @@ export const logCenter = {
   snapshot(ctx: BContext): StateDigest {
     const id = nextId
     const blocks = ctx.queries.getFrameBlocks()
-    const sel = [...ctx.selection.items.value]
+    const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
     return {
       logId: id,
       blockCount: blocks.length,
       blocks: blocks.map(b => ({ pos: { ...b.pos }, id: b.block_state_id })),
       selectionSize: sel.length,
-      selection: sel.map(s => ({ ...s.pos })),
+      selection: sel.map(s => ({ ...s.ref.pos })),
       activeOperator: ctx.toolRegistry.activeTool.value?.id ?? null,
     }
   },
 
   diff(snap: StateDigest, ctx: BContext): StateDiff {
     const now = ctx.queries.getFrameBlocks()
-    const nowSel = [...ctx.selection.items.value]
+    const nowSel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
     const diff: StateDiff = {
       sinceLogId: snap.logId,
       blocksAdded: [],
@@ -301,7 +301,7 @@ export const logCenter = {
 
     diff.selectionChanged =
       snap.selectionSize !== nowSel.length ||
-      !snap.selection.every((s, i) => posEq(s, nowSel[i]?.pos ?? { x: NaN, y: NaN, z: NaN }))
+      !snap.selection.every((s, i) => posEq(s, nowSel[i]?.ref.pos ?? { x: NaN, y: NaN, z: NaN }))
 
     return diff
   },

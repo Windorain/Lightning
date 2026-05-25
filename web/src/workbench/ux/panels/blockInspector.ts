@@ -90,16 +90,16 @@ export const blockInspectorPanel: PanelDeclaration = {
   },
 
   owner(ctx: BContext): unknown {
-    const items = [...ctx.selection.items.value]
+    const items = [...ctx.selection.items.value].filter(e => e.kind === 'block')
     if (items.length !== 1) return null
-    const item = items[0]!
+    const item = items[0]!.ref
     const g = ctx.doc.value?.frame(0)?.grid
     ;(item as BlockRef)._gridSize = g ? { w: g.width, h: g.height, d: g.depth } : null
     return item
   },
 
   layout(ctx: BContext): UILayout {
-    const items = [...ctx.selection.items.value]
+    const items = [...ctx.selection.items.value].filter(e => e.kind === 'block').map(e => e.ref)
     if (items.length === 0) {
       return { kind: 'column', align: false, items: [{ kind: 'label', text: '(无选中)' }] }
     }

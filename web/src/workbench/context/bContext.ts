@@ -7,6 +7,8 @@
 import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
 import type { BlockRef, SelectionContext } from '@/workbench/selectionContext'
+import type { ScenePickEntity } from '@/render/interaction/scenePick'
+import type { BakedQuad } from '@/render/schema/types'
 import type { UndoManager } from '@/workbench/editHistoryContext'
 import type { ToolRegistry } from '@/workbench/toolRegistry'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
@@ -48,6 +50,8 @@ export interface BlockTypeStat {
 export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
   pickVoxel(event: PointerEvent): BlockRef | null
+  /** 指针位置穿透的全部实体候选（去重、按深度排序），用于轮换拾取 */
+  pickAll(event: PointerEvent): ScenePickEntity[]
   /** 获取当前帧的可变引用（用于读写 blocks/labels/annotations） */
   getCurrentFrame(): Frame | null
   /** 获取当前帧的 BlockRef 快照列表 */
@@ -68,6 +72,8 @@ export interface BContextQueries {
   getBlockTypeStats(): Record<string, BlockTypeStat>
   /** 获取方块位置的调色板元数据 */
   getBlockPaletteEntry(pos: { x: number; y: number; z: number }): import('@/workbench/context/runtimeDocument').PaletteEntryMeta | null
+  /** 获取方块位置的模型几何数据（解码后的 BakedQuad[]），用于精确轮廓描边 */
+  getBlockGeometry(pos: { x: number; y: number; z: number }): BakedQuad[] | null
 }
 
 export interface BContextSettings {

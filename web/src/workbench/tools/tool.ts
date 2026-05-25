@@ -4,6 +4,7 @@ import type { SelectionContext, BlockRef } from '@/workbench/selectionContext'
 import type { ViewportSlot } from '@/workbench/context/bContext'
 import type { InputBinding } from '@/workbench/keymap'
 import type { Frame } from '@/render/schema/types'
+import type { ScenePickEntity } from '@/render/interaction/scenePick'
 
 /** Tool 是纯数据结构，没有方法。交互走 Gizmo，数据改写走 Operator。 */
 export interface Tool {
@@ -44,6 +45,7 @@ export interface ToolContext {
   viewport: ViewportSlot
 
   pickVoxel(event: PointerEvent): BlockRef | null
+  pickAll(event: PointerEvent): ScenePickEntity[]
   getCurrentFrame(): Frame | null
   /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
   gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null

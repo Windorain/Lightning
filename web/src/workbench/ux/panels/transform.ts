@@ -15,7 +15,7 @@ export const transformPanel: PanelDeclaration = {
   },
 
   layout(ctx: BContext): UILayout {
-    const sel = [...ctx.selection.items.value]
+    const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
     if (sel.length === 0) {
       return { kind: 'column', align: false, items: [{ kind: 'label', text: '未选择方块' }] }
     }
@@ -23,7 +23,7 @@ export const transformPanel: PanelDeclaration = {
     // Build a label showing selected count and first position
     const first = sel[0]
     const posLabel = sel.length === 1
-      ? `(${first.pos.x}, ${first.pos.y}, ${first.pos.z})`
+      ? `(${first.ref.pos.x}, ${first.ref.pos.y}, ${first.ref.pos.z})`
       : `${sel.length} 个方块已选`
 
     return {

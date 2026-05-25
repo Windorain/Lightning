@@ -220,7 +220,8 @@ export class MoveGizmo implements ToolGizmo {
       let cx = 0, cy = 0, cz = 0
       let valid = 0
       for (const item of items) {
-        const w = ctx.gridCenterWorld(item.pos)
+        if (item.kind !== 'block') continue
+        const w = ctx.gridCenterWorld(item.ref.pos)
         if (w) { cx += w.x; cy += w.y; cz += w.z; valid++ }
       }
       if (valid > 0) {

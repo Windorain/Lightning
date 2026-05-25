@@ -55,7 +55,7 @@ export const MoveOperator: OperatorType = {
         _originZ: gizmo.root.position.z,
         _startX: event.clientX,
         _startY: event.clientY,
-        _initialPositions: [...(bctx.selection.items.value)].map(i => ({ ...i.pos })),
+        _initialPositions: [...(bctx.selection.items.value)].filter(e => e.kind === 'block').map(e => ({ ...e.ref.pos })),
         _precision: false,
         _screenDirX: (props.screenDirX as number) ?? 0,
         _screenDirY: (props.screenDirY as number) ?? 0,
@@ -67,6 +67,7 @@ export const MoveOperator: OperatorType = {
     }
 
     // 普通点击：pick → select/add
+    bctx.selection.resetCycle()
     const picked = bctx.queries.pickVoxel(event)
     if (picked) {
       if (event.ctrlKey || event.metaKey) {
@@ -178,13 +179,16 @@ export const MoveOperator: OperatorType = {
               execute: () => {
                 for (const m of moves) grid.moveBlock(m.from, m.to)
                 const newItems = [...sel.items.value].map(item => {
+                  if (item.kind !== 'block') return item
                   const m = moves.find(
                     mm =>
-                      mm.from.x === item.pos.x &&
-                      mm.from.y === item.pos.y &&
-                      mm.from.z === item.pos.z,
+                      mm.from.x === item.ref.pos.x &&
+                      mm.from.y === item.ref.pos.y &&
+                      mm.from.z === item.ref.pos.z,
                   )
-                  return m ? { ...item, pos: { x: m.to.x, y: m.to.y, z: m.to.z } } : item
+                  return m
+                    ? { ...item, ref: { ...item.ref, pos: { x: m.to.x, y: m.to.y, z: m.to.z } } }
+                    : item
                 })
                 sel.items.value = new Set(newItems)
                 bctx.markStructureDirty()
@@ -192,13 +196,16 @@ export const MoveOperator: OperatorType = {
               undo: () => {
                 for (const m of moves) grid.moveBlock(m.to, m.from)
                 const newItems = [...sel.items.value].map(item => {
+                  if (item.kind !== 'block') return item
                   const m = moves.find(
                     mm =>
-                      mm.to.x === item.pos.x &&
-                      mm.to.y === item.pos.y &&
-                      mm.to.z === item.pos.z,
+                      mm.to.x === item.ref.pos.x &&
+                      mm.to.y === item.ref.pos.y &&
+                      mm.to.z === item.ref.pos.z,
                   )
-                  return m ? { ...item, pos: { x: m.from.x, y: m.from.y, z: m.from.z } } : item
+                  return m
+                    ? { ...item, ref: { ...item.ref, pos: { x: m.from.x, y: m.from.y, z: m.from.z } } }
+                    : item
                 })
                 sel.items.value = new Set(newItems)
                 bctx.markStructureDirty()

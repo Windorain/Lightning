@@ -1,18 +1,18 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
-import { applyPickSelection } from '@/workbench/selectionContext'
+import { applyPickSelectionWithCycle, type PickHandlerV2 } from '@/workbench/selectionContext'
 
 /**
  * SelectOperator — 对标 Blender 的 VIEW3D_OT_select。
  *
- * invoke 即时选择：pointerdown 时 pick voxel → select/clear → FINISHED。
+ * invoke 即时选择：pointerdown 时 pick all → 轮换/选择 → FINISHED。
  * 不进入模态，事件继续冒泡（无 OrbitControls 干扰）。
  * 框选由 B 键（keymap → OPERATOR_SELECT + box-select action）单独触发。
  */
 export const SelectOperator: OperatorType = {
   id: 'OPERATOR_SELECT',
   label: '选择',
-  description: '点击选择方块',
+  description: '点击选择方块/注解，重复点击轮换',
 
   poll(bctx) {
     return bctx.doc.value !== null
@@ -21,12 +21,24 @@ export const SelectOperator: OperatorType = {
   invoke(bctx, _props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
 
-    applyPickSelection({ pickVoxel: (e) => bctx.queries.pickVoxel(e), selection: bctx.selection }, event)
+    const handler: PickHandlerV2 = {
+      pickAll: (e) => bctx.queries.pickAll(e),
+      selection: {
+        selectEntity: (entity) => bctx.selection.selectEntity(entity),
+        add: (voxels) => bctx.selection.add(voxels),
+        clear: () => bctx.selection.clear(),
+      },
+      cycleState: bctx.selection.cycleState,
+      setCycleState: (s) => bctx.selection.setCycleState(s),
+      resetCycle: () => bctx.selection.resetCycle(),
+    }
+
+    applyPickSelectionWithCycle(handler, event)
     return OP_RESULT.FINISHED
   },
 
   renderOverlay(_bctx, _props, _overlayGroup) {
-    // Selection wireframe rendered by viewport using SelectionContext.items
+    // Selection highlight rendered by SelectionHighlightProvider
   },
 }
 

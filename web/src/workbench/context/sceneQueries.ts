@@ -7,7 +7,9 @@
 import type { BContext, BContextQueries, MaterialQueryItem, BlockTypeStat } from '@/workbench/context/bContext'
 import type { BlockRef } from '@/workbench/selectionContext'
 import type { Frame } from '@/render/schema/types'
-import { scenePickFromPointer } from '@/render/interaction/scenePick'
+import { scenePickAllFromPointer, scenePickFromPointer } from '@/render/interaction/scenePick'
+import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
+import type { BakedQuadsGeometry } from '@/render/schema/types'
 
 export function createProductionQueries(bctx: BContext): BContextQueries {
   return {
@@ -40,6 +42,35 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
         pos: { x: result.column, y: worldY, z: result.zSlice },
         block_state_id: result.blockId,
       }
+    },
+
+    pickAll(event: PointerEvent) {
+      const vp = bctx.viewport
+      const camera = vp.camera.value
+      const contentGroup = vp.contentGroup.value
+      const domElement = vp.domElement.value
+      const definition = vp.definition.value
+      if (!camera || !contentGroup || !domElement || !definition) return []
+      const results = scenePickAllFromPointer({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        domElement,
+        camera,
+        contentGroup,
+        overlayGroup: vp.overlayGroup.value ?? undefined,
+        def: definition,
+        layerPreview: vp.layerPreview.value ?? 'all',
+      })
+      // Convert cellGrid row (0=top) → world Y (0=bottom) for block results
+      const doc = bctx.doc.value
+      const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
+      const h = rf?.grid?.height ?? 0
+      for (const r of results) {
+        if (r.kind === 'block' && r.row !== undefined) {
+          r.row = h > 0 ? h - 1 - r.row : r.row
+        }
+      }
+      return results
     },
 
     getCurrentFrame(): Frame | null {
@@ -171,6 +202,23 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       if (!block || block.paletteIndex === undefined) return null
       const cache = rf.grid.getPaletteCache()
       return cache.get('#' + String(block.paletteIndex)) ?? null
+    },
+
+    getBlockGeometry(pos: { x: number; y: number; z: number }) {
+      const doc = bctx.doc.value
+      if (!doc) return null
+      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      if (!rf?.grid) return null
+      const block = rf.grid.at(pos)
+      if (!block || block.paletteIndex === undefined) return null
+      const cache = rf.grid.getPaletteCache()
+      const meta = cache.get('#' + String(block.paletteIndex))
+      if (!meta?.geometry) return null
+      try {
+        return decodeBakedGeometry(meta.geometry as BakedQuadsGeometry)
+      } catch {
+        return null
+      }
     },
   }
 }
