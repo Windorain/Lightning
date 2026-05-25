@@ -3,9 +3,12 @@
  * Workbench 主布局壳：Blender 风格 3 列。
  * 通过 named slots 让父组件控制各区域的内容与 props。
  */
+import { useSlots } from 'vue'
 import { usePanelResize } from './panelResize'
 
 const { rightWidth, startRightDrag, dragging } = usePanelResize()
+const slots = useSlots()
+const hasProperties = () => !!slots.properties
 </script>
 
 <template>
@@ -25,6 +28,7 @@ const { rightWidth, startRightDrag, dragging } = usePanelResize()
       </main>
 
       <div
+        v-if="hasProperties()"
         class="wb-divider wb-divider--right"
         @pointerdown="startRightDrag"
         role="separator"
@@ -32,7 +36,7 @@ const { rightWidth, startRightDrag, dragging } = usePanelResize()
         tabindex="-1"
       />
 
-      <aside class="wb-properties" :style="{ width: `${rightWidth}px` }">
+      <aside v-if="hasProperties()" class="wb-properties" :style="{ width: `${rightWidth}px` }">
         <slot name="properties" />
       </aside>
     </div>
@@ -49,23 +53,25 @@ const { rightWidth, startRightDrag, dragging } = usePanelResize()
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  background: var(--nei-bg);
-  color: var(--nei-text-dark);
+  background: var(--wb-bg-deepest);
+  color: var(--wb-text);
+  font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-size: 13px;
 }
 .wb-shell--dragging * { cursor: col-resize !important; }
 
 .wb-menubar {
   flex-shrink: 0;
-  height: 28px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-border);
+  height: 36px;
+  background: var(--wb-bg-elevated);
+  border-bottom: 1px solid var(--wb-border);
 }
 
 .wb-workspace-tabs {
   flex-shrink: 0;
-  height: 32px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-border);
+  height: 38px;
+  background: var(--wb-bg-deepest);
+  border-bottom: 1px solid var(--wb-border);
 }
 
 .wb-main {
@@ -77,15 +83,15 @@ const { rightWidth, startRightDrag, dragging } = usePanelResize()
 
 .wb-divider {
   flex-shrink: 0;
-  width: 4px;
+  width: 1px;
   cursor: col-resize;
-  background: var(--nei-divider-bg);
+  background: var(--wb-border);
   transition: background 0.15s;
   z-index: 10;
 }
 .wb-divider:hover,
 .wb-divider:active {
-  background: var(--nei-divider-hover);
+  background: var(--wb-accent);
 }
 
 .wb-viewport {
@@ -93,25 +99,29 @@ const { rightWidth, startRightDrag, dragging } = usePanelResize()
   min-width: 0;
   position: relative;
   overflow: hidden;
-  background: var(--nei-viewport-bg);
+  background: var(--wb-viewport-bg);
+  background-image:
+    linear-gradient(var(--wb-grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--wb-grid-color) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
 .wb-properties {
   flex-shrink: 0;
   overflow-y: auto;
-  background: var(--nei-bg-deep);
-  border-left: 1px solid var(--nei-border);
+  background: var(--wb-bg-elevated);
+  border-left: 1px solid var(--wb-border);
 }
 
 .wb-statusbar {
   flex-shrink: 0;
-  height: 24px;
-  background: var(--nei-bg-deep);
-  border-top: 1px solid var(--nei-border);
-  font-size: 11px;
+  height: 26px;
+  background: var(--wb-bg-deepest);
+  border-top: 1px solid var(--wb-border);
+  font-size: 10px;
   display: flex;
   align-items: center;
-  padding: 0 10px;
-  color: var(--nei-muted);
+  padding: 0 12px;
+  color: var(--wb-text-muted);
 }
 </style>

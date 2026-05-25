@@ -32,7 +32,7 @@ function inferWidget(desc: NonNullable<typeof props.descriptor>): string {
     case 'string':
       return (desc.enumItems && desc.enumItems.length > 0) ? 'dropdown' : 'text'
     case 'number':
-      return (desc.min != null && desc.max != null) ? 'slider' : 'number'
+      return (desc.min != null || desc.max != null) ? 'slider' : 'number'
     case 'boolean': return 'checkbox'
     case 'color':   return 'color'
     case 'enum':    return 'dropdown'
@@ -72,6 +72,21 @@ function setValue(val: unknown): void {
         @input="(e: Event) => setValue(Number((e.target as HTMLInputElement).value))"
         class="ux-input"
       />
+      <template v-else-if="widget === 'stepper'">
+        <div class="ux-stepper" :class="{ 'ux-stepper--compact': descriptor?.uiWidget === 'stepper-compact' }">
+          <input
+            type="number"
+            class="ux-stepper-input"
+            :value="getValue() as number"
+            :step="sliderStep"
+            @input="(e: Event) => setValue(Number((e.target as HTMLInputElement).value))"
+          />
+          <div class="ux-stepper-btns">
+            <button class="ux-stepper-up" @click="setValue((getValue() as number) + sliderStep)">&#9650;</button>
+            <button class="ux-stepper-down" @click="setValue((getValue() as number) - sliderStep)">&#9660;</button>
+          </div>
+        </div>
+      </template>
       <template v-else-if="widget === 'slider'">
         <input
           type="range"
@@ -84,20 +99,28 @@ function setValue(val: unknown): void {
         />
         <span class="ux-slider-val">{{ getValue() }}</span>
       </template>
-      <input
+      <div
         v-else-if="widget === 'checkbox'"
-        type="checkbox"
-        :checked="(getValue() as boolean) ?? false"
-        @change="(e: Event) => setValue((e.target as HTMLInputElement).checked)"
-        class="ux-checkbox"
-      />
-      <input
-        v-else-if="widget === 'color'"
-        type="color"
-        :value="getValue() as string"
-        @input="(e: Event) => setValue((e.target as HTMLInputElement).value)"
-        class="ux-color"
-      />
+        class="ux-toggle"
+        :class="(getValue() as boolean) ? 'ux-toggle--on' : 'ux-toggle--off'"
+        @click="setValue(!(getValue() as boolean))"
+      >
+        <div class="ux-toggle-knob" />
+      </div>
+      <template v-else-if="widget === 'color'">
+        <input
+          type="color"
+          :value="getValue() as string"
+          @input="(e: Event) => setValue((e.target as HTMLInputElement).value)"
+          class="ux-color"
+        />
+        <input
+          type="text"
+          :value="getValue() as string"
+          @input="(e: Event) => setValue((e.target as HTMLInputElement).value)"
+          class="ux-color-hex"
+        />
+      </template>
       <select
         v-else-if="widget === 'dropdown'"
         :value="getValue() as string"
@@ -112,26 +135,26 @@ function setValue(val: unknown): void {
         >{{ item }}</option>
       </select>
       <template v-else-if="widget === 'vector'">
+        <span class="ux-vec-label">X</span>
         <input
           type="number"
           :value="(getValue() as any)?.x ?? 0"
           @input="(e: Event) => { const v = getValue() as any ?? { x: 0, y: 0, z: 0 }; v.x = Number((e.target as HTMLInputElement).value); setValue(v) }"
           class="ux-vec-input"
-          title="X"
         />
+        <span class="ux-vec-label">Y</span>
         <input
           type="number"
           :value="(getValue() as any)?.y ?? 0"
           @input="(e: Event) => { const v = getValue() as any ?? { x: 0, y: 0, z: 0 }; v.y = Number((e.target as HTMLInputElement).value); setValue(v) }"
           class="ux-vec-input"
-          title="Y"
         />
+        <span class="ux-vec-label">Z</span>
         <input
           type="number"
           :value="(getValue() as any)?.z ?? 0"
           @input="(e: Event) => { const v = getValue() as any ?? { x: 0, y: 0, z: 0 }; v.z = Number((e.target as HTMLInputElement).value); setValue(v) }"
           class="ux-vec-input"
-          title="Z"
         />
       </template>
       <span v-else class="ux-fallback">{{ widget }}: {{ getValue() }}</span>
@@ -143,8 +166,8 @@ function setValue(val: unknown): void {
 .ux-rna-widget {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 2px 0;
+  gap: 3px;
+  padding: 3px 0;
 }
 .ux-rna-widget--row {
   flex-direction: row;
@@ -152,8 +175,8 @@ function setValue(val: unknown): void {
   justify-content: space-between;
 }
 .ux-rna-label {
-  font-size: 11px;
-  color: var(--ui-label, #999);
+  font-size: 12px;
+  color: var(--wb-text-muted);
 }
 .ux-rna-input {
   display: flex;
@@ -162,24 +185,139 @@ function setValue(val: unknown): void {
 }
 .ux-input, .ux-dropdown {
   flex: 1;
-  padding: 2px 4px;
-  border: 1px solid var(--ui-border, #555);
-  border-radius: 2px;
-  background: var(--ui-input-bg, #2a2a2a);
-  color: var(--ui-text, #ccc);
-  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface);
+  color: var(--wb-text);
+  font-size: 13px;
+  outline: none;
 }
-.ux-slider { flex: 1; }
-.ux-slider-val { font-size: 11px; min-width: 30px; text-align: right; }
-.ux-checkbox { width: 16px; height: 16px; }
-.ux-color { width: 32px; height: 22px; padding: 0; border: 1px solid var(--ui-border, #555); border-radius: 2px; cursor: pointer; }
+.ux-input:focus, .ux-dropdown:focus {
+  border-color: var(--wb-accent);
+}
+
+/* Stepper */
+.ux-stepper {
+  display: flex;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.ux-stepper-input {
+  width: 44px;
+  padding: 4px 2px;
+  border: none;
+  background: var(--wb-bg-surface);
+  color: var(--wb-text);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  outline: none;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.ux-stepper-input::-webkit-inner-spin-button,
+.ux-stepper-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.ux-stepper-btns {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--wb-border);
+}
+.ux-stepper-up,
+.ux-stepper-down {
+  width: 15px;
+  height: 12px;
+  border: none;
+  background: var(--wb-bg-elevated);
+  color: var(--wb-text-muted);
+  font-size: 7px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.ux-stepper-down {
+  border-top: 1px solid var(--wb-border);
+}
+.ux-stepper-up:hover,
+.ux-stepper-down:hover {
+  background: var(--wb-bg-hover);
+  color: var(--wb-accent);
+}
+.ux-stepper--compact .ux-stepper-input { width: 38px; padding: 3px 2px; font-size: 10px; }
+.ux-stepper--compact .ux-stepper-up,
+.ux-stepper--compact .ux-stepper-down { width: 13px; height: 10px; font-size: 6px; }
+
+/* Slider */
+.ux-slider { flex: 1; accent-color: var(--wb-accent); }
+.ux-slider-val { font-size: 11px; min-width: 32px; text-align: right; font-family: ui-monospace, monospace; font-weight: 600; color: var(--wb-accent); }
+
+/* Toggle */
+.ux-toggle {
+  width: 32px; height: 18px;
+  border-radius: var(--wb-radius-full);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.ux-toggle--on {
+  background: var(--wb-accent);
+}
+.ux-toggle--off {
+  background: var(--wb-border);
+}
+.ux-toggle-knob {
+  position: absolute;
+  top: 2px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.15s, right 0.15s;
+}
+.ux-toggle--on .ux-toggle-knob { right: 2px; }
+.ux-toggle--off .ux-toggle-knob { left: 2px; background: var(--wb-text-muted); }
+
+/* Checkbox */
+.ux-checkbox { width: 16px; height: 16px; accent-color: var(--wb-accent); }
+
+/* Color */
+.ux-color { width: 26px; height: 26px; padding: 0; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-md); cursor: pointer; }
+.ux-color-hex {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface);
+  color: var(--wb-text);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  outline: none;
+}
+
+/* Vector */
 .ux-vec-input {
-  width: 50px;
-  padding: 2px 4px;
-  border: 1px solid var(--ui-border, #555);
-  border-radius: 2px;
-  background: var(--ui-input-bg, #2a2a2a);
-  color: var(--ui-text, #ccc);
-  font-size: 12px;
+  width: 40px;
+  padding: 4px 2px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface);
+  color: var(--wb-text);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  outline: none;
+  text-align: center;
+}
+.ux-vec-label {
+  font-size: 9px;
+  color: var(--wb-text-dim);
+  width: 10px;
+  text-align: center;
+  flex-shrink: 0;
 }
 </style>

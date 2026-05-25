@@ -106,22 +106,22 @@ async function onDrop(ev: DragEvent): Promise<void> {
 <style scoped>
 .dash-card {
   padding: 16px;
-  border: 1px solid var(--nei-border);
+  border: 1px solid var(--wb-border);
   border-radius: 10px;
-  background: var(--nei-bg-deep);
+  background: var(--wb-bg-deepest);
   margin-bottom: 14px;
 }
 .dash-card__title {
   margin: 0 0 8px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--nei-text);
+  color: var(--wb-text);
 }
 .dash-card__desc {
   margin: 0 0 14px;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--nei-label);
+  color: var(--wb-text-muted);
 }
 .dash-hidden {
   position: absolute;
@@ -131,11 +131,11 @@ async function onDrop(ev: DragEvent): Promise<void> {
   pointer-events: none;
 }
 .dash-drop {
-  border: 1px dashed var(--nei-panel-hover);
+  border: 1px dashed var(--wb-bg-hover);
   border-radius: 10px;
   padding: 20px;
   text-align: center;
-  background: var(--nei-bg);
+  background: var(--wb-bg-elevated);
 }
 .dash-drop--busy {
   opacity: 0.7;
@@ -143,14 +143,14 @@ async function onDrop(ev: DragEvent): Promise<void> {
 .dash-drop__hint {
   margin: 0 0 10px;
   font-size: 12px;
-  color: var(--nei-muted);
+  color: var(--wb-text-dim);
 }
 .dash-btn {
   padding: 8px 16px;
   border-radius: 8px;
-  border: 1px solid var(--nei-muted);
-  background: var(--nei-border);
-  color: var(--nei-text);
+  border: 1px solid var(--wb-text-dim);
+  background: var(--wb-border);
+  color: var(--wb-text);
   cursor: pointer;
   font-size: 13px;
 }
@@ -159,12 +159,12 @@ async function onDrop(ev: DragEvent): Promise<void> {
   opacity: 0.7;
 }
 .dash-btn--primary {
-  background: var(--nei-accent);
-  border-color: var(--nei-accent);
+  background: var(--wb-accent);
+  border-color: var(--wb-accent);
 }
 .dash-err {
   margin: 12px 0 0;
   font-size: 12px;
-  color: var(--nei-error-text);
+  color: var(--wb-text);
 }
 </style>

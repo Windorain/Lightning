@@ -7,7 +7,8 @@
  * 灰机/wiki 嵌入只需 npm run build:lib，勿部署 dist-workbench。
  */
 
-import '@/styles/nei-tokens.css'
+import '@/styles/precision-tokens.css'
+import '@/styles/embed-nei-tokens.css'
 
 /** 推荐挂载点 class；无参 `mount()` 仍会回退兼容 `#web-structure-renderer` */
 export const MOUNT_SELECTOR = '.web-structure-renderer'

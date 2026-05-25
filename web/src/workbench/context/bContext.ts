@@ -24,6 +24,27 @@ import type { MoveGizmo } from '@/workbench/tools/gizmos'
 export type LoadStatus = 'loading' | 'ok' | 'error'
 export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle'
 
+export interface MaterialQueryItem {
+  materialId: string
+  kind: 'static16' | 'animated'
+  blend?: 'opaque' | 'cutout' | 'translucent'
+  locator?: string
+  emissive?: number
+  animation?: {
+    defaultFrametimeTicks?: number
+    frameSequence?: Array<{ index: number; timeTicks?: number }>
+    interpolate?: boolean
+  }
+  textureDataUrl: string | null
+  atlas?: string | null
+  linear?: boolean
+  useMipmaps?: boolean
+}
+
+export interface BlockTypeStat {
+  count: number
+}
+
 export interface BContextQueries {
   /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
   pickVoxel(event: PointerEvent): BlockRef | null
@@ -39,6 +60,14 @@ export interface BContextQueries {
   roundVec(v: { x: number; y: number; z: number }): { x: number; y: number; z: number }
   /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
   gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null
+  /** List all materials with their texture data URLs */
+  listMaterials(): MaterialQueryItem[]
+  /** Count blocks using each material in the current frame (materialId → count) */
+  getMaterialUsageCounts(): Record<string, number>
+  /** 当前帧方块类型统计 (block_state_id → 计数) */
+  getBlockTypeStats(): Record<string, BlockTypeStat>
+  /** 获取方块位置的调色板元数据 */
+  getBlockPaletteEntry(pos: { x: number; y: number; z: number }): import('@/workbench/context/runtimeDocument').PaletteEntryMeta | null
 }
 
 export interface BContextSettings {

@@ -47,8 +47,8 @@ export class ModalOperatorWrapper implements ModalOperation {
           id: 'op_' + Math.random().toString(36).slice(2, 10),
           label: this.op.label,
           timestamp: Date.now(),
-          execute: () => { this.bctx.doc.value = snapshotAfter; this.bctx.markDirty() },
-          undo: () => { this.bctx.doc.value = snap; this.bctx.markDirty() },
+          execute: () => { this.bctx.doc.value = snapshotAfter; this.bctx.markStructureDirty() },
+          undo: () => { this.bctx.doc.value = snap; this.bctx.markStructureDirty() },
         })
         this.undoSnapshot = null
       }

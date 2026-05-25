@@ -187,7 +187,7 @@ export const MoveOperator: OperatorType = {
                   return m ? { ...item, pos: { x: m.to.x, y: m.to.y, z: m.to.z } } : item
                 })
                 sel.items.value = new Set(newItems)
-                bctx.markDirty()
+                bctx.markStructureDirty()
               },
               undo: () => {
                 for (const m of moves) grid.moveBlock(m.to, m.from)
@@ -201,7 +201,7 @@ export const MoveOperator: OperatorType = {
                   return m ? { ...item, pos: { x: m.from.x, y: m.from.y, z: m.from.z } } : item
                 })
                 sel.items.value = new Set(newItems)
-                bctx.markDirty()
+                bctx.markStructureDirty()
               },
             })
           }

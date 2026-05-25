@@ -2,13 +2,14 @@
 /**
  * 工作空间标签栏。
  */
-defineProps<{ modelValue: 'preview' | 'wiki' | 'export' }>()
-const emit = defineEmits<{ (e: 'update:modelValue', v: 'preview' | 'wiki' | 'export'): void }>()
+defineProps<{ modelValue: 'preview' | 'wiki' | 'export' | 'materials' }>()
+const emit = defineEmits<{ (e: 'update:modelValue', v: 'preview' | 'wiki' | 'export' | 'materials'): void }>()
 import { t } from '@/workbench/i18n'
 
 const tabs = [
   { id: 'preview' as const },
   { id: 'wiki' as const },
+  { id: 'materials' as const },
   { id: 'export' as const },
 ]
 </script>
@@ -30,14 +31,14 @@ const tabs = [
 <style scoped>
 .wt-root {
   display: flex; align-items: stretch; height: 100%;
-  padding: 0 6px; gap: 1px;
+  padding: 0 10px; gap: 0;
 }
 .wt-tab {
-  padding: 0 14px; border: none; background: transparent;
-  color: var(--nei-tab-text); font-size: 12px; cursor: pointer;
+  padding: 0 20px; border: none; background: transparent;
+  color: var(--wb-text-muted); font-size: 13px; cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: color 0.15s, border-color 0.15s;
 }
-.wt-tab:hover { color: var(--nei-text-dark); }
-.wt-tab--active { color: var(--nei-tab-active-text); border-bottom-color: var(--nei-tab-active-border); }
+.wt-tab:hover { color: var(--wb-text); }
+.wt-tab--active { color: var(--wb-text); border-bottom-color: var(--wb-accent); font-weight: 500; }
 </style>

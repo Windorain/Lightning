@@ -63,8 +63,7 @@ export class PointGizmo implements ToolGizmo {
     const geo = new THREE.SphereGeometry(0.15, 8, 8)
     const mat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(color),
-      depthTest: false,
-      depthWrite: false,
+      depthTest: true,
     })
     this._mesh = new THREE.Mesh(geo, mat)
     this._mesh.position.set(this._hoverPos.x, this._hoverPos.y, this._hoverPos.z)

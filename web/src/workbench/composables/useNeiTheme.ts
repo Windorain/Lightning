@@ -2,8 +2,8 @@ import { ref, watch } from 'vue'
 
 export type NeiTheme = 'light' | 'dark'
 
-const STORAGE_KEY = 'nei-theme'
-const ATTR = 'data-nei-theme'
+const STORAGE_KEY = 'wb-theme'
+const ATTR = 'data-wb-theme'
 
 function readStored(): NeiTheme {
   try {

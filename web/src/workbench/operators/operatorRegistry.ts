@@ -60,8 +60,8 @@ export class OperatorRegistry {
           id: 'op_' + Math.random().toString(36).slice(2, 10),
           label: op.label,
           timestamp: Date.now(),
-          execute: () => { bctx.doc.value = after; bctx.markDirty() },
-          undo: () => { bctx.doc.value = before; bctx.markDirty() },
+          execute: () => { bctx.doc.value = after; bctx.markStructureDirty() },
+          undo: () => { bctx.doc.value = before; bctx.markStructureDirty() },
         })
       } else {
         await op.exec(bctx, resolvedProps)
@@ -114,8 +114,8 @@ export class OperatorRegistry {
             id: 'op_' + Math.random().toString(36).slice(2, 10),
             label: op.label,
             timestamp: Date.now(),
-            execute: () => { bctx.doc.value = snapshotAfter; bctx.markDirty() },
-            undo: () => { bctx.doc.value = snapshot; bctx.markDirty() },
+            execute: () => { bctx.doc.value = snapshotAfter; bctx.markStructureDirty() },
+            undo: () => { bctx.doc.value = snapshot; bctx.markStructureDirty() },
           })
         }
         logOperatorResult(bctx, id, op.label, 'FINISHED', snap)
@@ -145,8 +145,8 @@ async function invokeExecFallback(
       id: 'op_' + Math.random().toString(36).slice(2, 10),
       label: op.label,
       timestamp: Date.now(),
-      execute: () => { bctx.doc.value = snapshotAfter; bctx.markDirty() },
-      undo: () => { bctx.doc.value = snapshot; bctx.markDirty() },
+      execute: () => { bctx.doc.value = snapshotAfter; bctx.markStructureDirty() },
+      undo: () => { bctx.doc.value = snapshot; bctx.markStructureDirty() },
     })
   } else {
     await op.exec!(bctx, props)

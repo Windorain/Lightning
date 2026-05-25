@@ -26,3 +26,4 @@ web/src/render/proto/lightning/v1/
 # Test artifacts
 web/test-artifacts/
 .worktrees/
+.superpowers/

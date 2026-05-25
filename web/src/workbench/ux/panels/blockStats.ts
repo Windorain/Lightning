@@ -12,13 +12,20 @@ export const blockStatsPanel: PanelDeclaration = {
   poll(): boolean { return true },
 
   layout(ctx: BContext): UILayout {
-    const doc = ctx.doc.value as Record<string, any> | null
-    const palette = doc?.block_palette as Record<string, any> | undefined
+    const stats = ctx.queries.getBlockTypeStats()
+    const entries = Object.entries(stats)
     const items: UILayoutItem[] = []
-    if (palette) {
-      for (const [id, entry] of Object.entries(palette)) {
-        const label = (entry as any)?.localized_name ?? id
-        items.push({ kind: 'label' as const, text: `${label}: ${id}` })
+
+    if (entries.length > 0) {
+      entries.sort((a, b) => b[1].count - a[1].count)
+      items.push({ kind: 'label' as const, text: `共 ${entries.length} 种方块` })
+      for (const [id, stat] of entries) {
+        items.push({
+          kind: 'operator' as const,
+          id: 'OPERATOR_SELECT_BY_TYPE',
+          label: `${id}  ×${stat.count}`,
+          props: { blockStateId: id },
+        })
       }
     } else {
       items.push({ kind: 'label' as const, text: '(无数据)' })

@@ -55,6 +55,7 @@ const tooltipPalette = shallowRef<string[]>([])
 const worldFrameIndex = ref(0)
 const layerWorldY = ref(props.settings?.initialLayerWorldY ?? -1)
 const framesPlaybackIsPlaying = ref(false)
+const showSettingsPanel = ref(false)
 
 const docRef = computed(() => bctx.doc.value)
 
@@ -300,6 +301,30 @@ function onSidebarTooltipHover(
   else clearHover('sidebar')
 }
 
+// ---- Annotation hover tooltip ----
+const annotationHover = ref<{ annotationId: string; clientX: number; clientY: number } | null>(null)
+
+function onAnnotationHover(
+  payload: { annotationId: string; clientX: number; clientY: number } | null,
+): void {
+  annotationHover.value = payload
+}
+
+const annotationTooltipText = computed(() => {
+  const h = annotationHover.value
+  if (!h) return ''
+  const doc = bctx.doc.value
+  if (!doc) return ''
+  const plain = doc.serialize() as Record<string, any>
+  const annos = plain.annotations as Annotation[] | undefined
+  const anno = annos?.find(a => a.id === h.annotationId)
+  if (!anno) return ''
+  const parts: string[] = []
+  if (anno.title) parts.push(anno.title)
+  if (anno.description) parts.push(anno.description)
+  return parts.join('\n')
+})
+
 onMounted(async () => { await renderAssets.loadStructureAndResources() })
 onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())
@@ -348,7 +373,9 @@ onBeforeUnmount(() => {
           :scene-background="s?.sceneBackground ?? 0x5a5a5a"
           :show-axes-gizmo="showAxesGizmo"
           @ready="onViewportReady"
+          @open-settings="showSettingsPanel = !showSettingsPanel"
           @hover-block="onViewportHover"
+          @hover-annotation="onAnnotationHover"
         />
       </div>
     </div>
@@ -408,7 +435,23 @@ onBeforeUnmount(() => {
 
     <ToolTipBox v-if="hover && tooltipDisplayText" :text="tooltipDisplayText" :client-x="hover.clientX" :client-y="hover.clientY" />
     <ToolTipBox v-if="hover && neiTooltipText" :text="neiTooltipText" :client-x="hover.clientX" :client-y="hover.clientY" />
+    <ToolTipBox v-if="annotationHover && annotationTooltipText" :text="annotationTooltipText" :client-x="annotationHover.clientX" :client-y="annotationHover.clientY" />
     <ToolTipBox v-if="metaHintPointer && metaTooltipText" :text="metaTooltipText" :client-x="metaHintPointer.clientX" :client-y="metaHintPointer.clientY" />
+
+    <!-- 设置面板 -->
+    <div v-if="showSettingsPanel" class="wm-settings-overlay" @click.self="showSettingsPanel = false">
+      <div class="wm-settings-panel">
+        <div class="wm-settings-head">
+          <span>视口设置</span>
+          <button class="wm-settings-close" @click="showSettingsPanel = false">✕</button>
+        </div>
+        <div class="wm-settings-body">
+          <!-- TODO: 持久化设置 UI -->
+          <p class="wm-settings-hint">设置面板 (WIP)</p>
+          <p class="wm-settings-hint">功能开关通过 EmbedSettings.features 控制</p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -490,4 +533,31 @@ onBeforeUnmount(() => {
 .wm-status-bar--loading { color: var(--nei-loading-text); } .wm-status-bar--ok { color: var(--nei-ok-text); } .wm-status-bar--warn { color: var(--nei-warn-text); } .wm-status-bar--err { color: var(--nei-error-text); background: var(--nei-error-bg); }
 .wm-status-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 4px; border-radius: 0; background: currentColor; opacity: 0.9; box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4); }
 .wm-status-text { flex: 1; word-break: break-word; white-space: pre-wrap; }
+
+/* Settings panel overlay */
+.wm-settings-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center;
+}
+.wm-settings-panel {
+  background: var(--nei-bg-deep, #1a1e28);
+  border: 3px solid;
+  border-color: var(--nei-bevel-light, #555) var(--nei-bevel-dark, #2a2a2a) var(--nei-bevel-dark, #2a2a2a) var(--nei-bevel-light, #555);
+  min-width: 280px; max-width: 400px;
+  font-family: ui-monospace, monospace; font-size: 12px; color: var(--nei-text, #c0c0c0);
+}
+.wm-settings-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--nei-bg-panel, #161a24);
+  border-bottom: 2px solid var(--nei-border-subtle, #2a2a2a);
+}
+.wm-settings-close {
+  border: none; background: none; color: #8a8e98; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 2px 6px;
+}
+.wm-settings-close:hover { color: var(--nei-text, #c0c0c0); }
+.wm-settings-body { padding: 16px; }
+.wm-settings-hint { margin: 0; color: var(--nei-text-dim, #6a6e78); }
 </style>

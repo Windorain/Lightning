@@ -158,11 +158,11 @@
   font-size: 12px;
   line-height: 1.45;
   font-family: system-ui, 'Segoe UI', sans-serif;
-  color: var(--nei-tooltip-text);
-  background: var(--nei-tooltip-bg);
-  border: 1px solid var(--nei-tooltip-border);
-  border-radius: 0;
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.35);
+  color: var(--wb-text);
+  background: var(--wb-bg-elevated);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 /** 属性面板等内嵌预览：占满可用宽度，不撑破侧栏 */
