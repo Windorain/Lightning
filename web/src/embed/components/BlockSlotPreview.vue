@@ -71,16 +71,15 @@ watch(
 </template>
 
 <style scoped>
-/* 2× NEI 逻辑 18×18 槽位 */
+/* 2x slot, blueprint style */
 .wm-slot {
   position: relative;
   width: 36px;
   height: 36px;
   flex-shrink: 0;
-  border: var(--nei-bevel-w) solid;
-  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
-  border-radius: 0;
-  background: var(--nei-btn-bg);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface);
   box-sizing: border-box;
 }
 .wm-slot-icon {
@@ -130,10 +129,10 @@ watch(
   border-radius: 0;
   background: repeating-linear-gradient(
     45deg,
-    var(--nei-checkerboard-dark),
-    var(--nei-checkerboard-dark) 4px,
-    var(--nei-checkerboard-light) 4px,
-    var(--nei-checkerboard-light) 8px
+    #6b6b6b,
+    #6b6b6b 4px,
+    #4a4a4a 4px,
+    #4a4a4a 8px
   );
   pointer-events: none;
 }
@@ -145,7 +144,7 @@ watch(
   line-height: 1;
   font-weight: 600;
   font-family: ui-monospace, 'Cascadia Code', monospace;
-  color: var(--nei-text);
+  color: var(--wb-text);
   text-shadow:
     1px 1px 0 #2f2f2f,
     -1px -1px 0 #2f2f2f,

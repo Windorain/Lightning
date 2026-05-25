@@ -8,6 +8,7 @@ import WorkbenchViewport from '@/workbench/components/WorkbenchViewport.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import WikiViewerWorkspace from '@/workbench/components/WikiViewerWorkspace.vue'
+import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
@@ -73,7 +74,7 @@ const activeToolshelfPanels = computed(() =>
 const activePropertiesPanels = computed(() =>
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels
     .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
+    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx), component: p.component }))
 )
 
 const activeHeaderPanels = computed(() =>
@@ -120,7 +121,7 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
-const workspace = ref<'preview' | 'wiki' | 'export'>('preview')
+const workspace = ref<'preview' | 'wiki' | 'export' | 'materials'>('preview')
 const settingsOpen = ref(false)
 provide('workbenchSettingsOpen', settingsOpen)
 
@@ -185,6 +186,7 @@ onMounted(() => {
   <WorkbenchShell v-show="workspace === 'preview'">
     <template #menubar>
       <div class="wb-menubar-inner">
+        <span class="wb-brand">LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -212,7 +214,7 @@ onMounted(() => {
       <WorkbenchViewport v-if="bctx.doc.value" />
     </template>
     <template #properties>
-      <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" />
+      <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" :bctx="bctx" />
     </template>
     <template #statusbar>
       <StatusBar />
@@ -222,6 +224,7 @@ onMounted(() => {
   <div v-if="workspace === 'wiki'" class="wb-standalone">
     <header class="wb-standalone-menubar">
       <div class="wb-menubar-inner">
+        <span class="wb-brand">LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -241,9 +244,10 @@ onMounted(() => {
     </main>
   </div>
 
-  <div v-if="workspace === 'export'" class="wb-standalone">
-    <header class="wb-standalone-menubar">
+  <WorkbenchShell v-if="workspace === 'export'">
+    <template #menubar>
       <div class="wb-menubar-inner">
+        <span class="wb-brand">LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -252,16 +256,41 @@ onMounted(() => {
           :owner="panel.owner"
         />
       </div>
-    </header>
-    <header class="wb-standalone-top">
-      <div class="wb-standalone-tabs">
-        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
-      </div>
-    </header>
-    <main class="wb-standalone-body">
+    </template>
+    <template #workspace-tabs>
+      <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
+    </template>
+    <template #viewport>
       <ExportWorkspace />
-    </main>
-  </div>
+    </template>
+    <template #statusbar>
+      <StatusBar />
+    </template>
+  </WorkbenchShell>
+
+  <WorkbenchShell v-if="workspace === 'materials'">
+    <template #menubar>
+      <div class="wb-menubar-inner">
+        <span class="wb-brand">LIGHTNING</span>
+        <UIRenderer
+          v-for="panel in activeHeaderPanels"
+          :key="panel.id"
+          :layout="panel.layout"
+          :rna="bctx.rna"
+          :owner="panel.owner"
+        />
+      </div>
+    </template>
+    <template #workspace-tabs>
+      <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
+    </template>
+    <template #viewport>
+      <MaterialGallery />
+    </template>
+    <template #statusbar>
+      <StatusBar />
+    </template>
+  </WorkbenchShell>
 
   <WorkbenchSettingsDrawer />
 
@@ -300,58 +329,95 @@ onMounted(() => {
   position: absolute; top: 4px; left: 4px; z-index: 100;
   display: flex; flex-direction: column; gap: 2px;
   padding: 4px;
-  background: var(--nei-dropdown-bg);
-  border: 1px solid var(--nei-border);
+  background: var(--wb-bg-elevated);
+  border: 1px solid var(--wb-border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
 .wb-toolshelf :deep(.ux-operator-btn) {
-  width: 32px; height: 32px; padding: 0;
+  width: 34px; height: 34px; padding: 0;
   font-size: 16px; line-height: 1;
   display: flex; align-items: center; justify-content: center;
   border-color: transparent;
   background: transparent;
-  color: var(--nei-label);
+  color: var(--wb-text-muted);
+  border-radius: var(--wb-radius-md);
 }
 .wb-toolshelf :deep(.ux-operator-btn:hover) {
-  background: var(--nei-panel-hover);
+  background: var(--wb-bg-hover);
+  border-color: var(--wb-border);
+}
+.wb-toolshelf :deep(.ux-operator-btn--active) {
+  background: var(--wb-bg-hover);
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 10px rgba(77, 171, 247, 0.2);
+}
+.wb-toolshelf :deep(.ux-operator-btn--active:hover) {
+  background: var(--wb-bg-hover);
+  border-color: var(--wb-accent);
 }
 .wb-menubar-inner {
   display: flex;
   align-items: center;
   height: 100%;
-  padding: 0 4px;
+  padding: 0 10px;
+}
+.wb-brand {
+  color: var(--wb-text);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  margin-right: 24px;
+  user-select: none;
+  flex-shrink: 0;
 }
 .wb-menubar-inner :deep(.ux-menu-btn) {
   border: none;
   background: transparent;
-  padding: 3px 8px;
-  font-size: 12px;
-  color: var(--nei-label);
+  padding: 5px 10px;
+  font-size: 13px;
+  color: var(--wb-accent-muted);
   cursor: pointer;
 }
 .wb-menubar-inner :deep(.ux-menu-btn:hover) {
-  background: var(--nei-panel-hover);
-  border-radius: 4px;
+  background: var(--wb-bg-hover);
+  border-radius: var(--wb-radius-sm);
+  color: var(--wb-text);
 }
 .wb-menubar-inner :deep(.ux-arrow) { display: none; }
 .wb-menubar-inner :deep(.ux-operator-btn) {
   border: none;
   background: transparent;
-  padding: 3px 8px;
-  font-size: 12px;
-  color: var(--nei-label);
+  padding: 5px 10px;
+  font-size: 13px;
+  color: var(--wb-accent-muted);
   width: auto;
   cursor: pointer;
 }
 .wb-menubar-inner :deep(.ux-operator-btn:hover) {
-  background: var(--nei-panel-hover);
-  border-radius: 4px;
+  background: var(--wb-bg-hover);
+  border-radius: var(--wb-radius-sm);
+  color: var(--wb-text);
 }
 .wb-menubar-inner :deep(.ux-label) {
-  font-size: 11px;
-  color: var(--nei-muted);
+  font-size: 13px;
+  color: var(--wb-text-dim);
   padding: 0 4px;
+}
+
+/* ---- Wiki embed ---- */
+.wb-wiki-embed {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--wb-viewport-bg);
+  background-image:
+    linear-gradient(var(--wb-grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--wb-grid-color) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.wb-wiki-placeholder {
+  color: var(--wb-text-dim);
+  font-size: 15px;
 }
 </style>
 

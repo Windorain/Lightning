@@ -50,47 +50,52 @@ function invokeOp(op: UIOperator) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
-  border: 1px solid var(--ui-border, #555);
-  border-radius: 3px;
-  background: var(--ui-btn-bg, #3a3a3a);
-  color: var(--ui-text, #ccc);
+  padding: 4px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface);
+  color: var(--wb-accent-muted);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
 }
-.ux-arrow { font-size: 10px; }
+.ux-menu-btn:hover { background: var(--wb-bg-hover); }
+.ux-arrow { font-size: 9px; }
 .ux-menu-dropdown {
   position: absolute;
   top: 100%;
   left: 0;
-  min-width: 160px;
-  background: var(--ui-dropdown-bg, #333);
-  border: 1px solid var(--ui-border, #555);
-  border-radius: 4px;
+  min-width: 180px;
+  background: var(--wb-bg-elevated);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-lg);
   z-index: 2100;
-  padding: 4px 0;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
 .ux-menu-item {
   display: block;
   width: 100%;
-  padding: 4px 12px;
+  padding: 6px 14px;
   border: none;
   background: transparent;
-  color: var(--ui-text, #ccc);
-  font-size: 12px;
+  color: var(--wb-text);
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
+  border-radius: var(--wb-radius-sm);
 }
-.ux-menu-item:hover { background: var(--ui-item-hover, #4a4a4a); }
+.ux-menu-item:hover { background: var(--wb-bg-hover); }
 .ux-menu-label {
   display: block;
-  padding: 2px 12px;
+  padding: 5px 14px 3px;
   font-size: 10px;
-  color: var(--ui-label, #999);
+  color: var(--wb-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 .ux-menu-sep {
   margin: 4px 8px;
   border: none;
-  border-top: 1px solid var(--ui-border, #555);
+  border-top: 1px solid var(--wb-border);
 }
 </style>

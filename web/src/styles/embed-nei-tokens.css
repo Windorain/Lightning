@@ -1,0 +1,141 @@
+/**
+ * Modern NEI — Design Tokens for Embed Viewer
+ * Based on real NEI source: ItemsGrid.java, PanelWidget.java, LayoutStyleMinecraft.java
+ */
+:root {
+  /* Panel hierarchy */
+  --nei-bg-deep: #0a0e18;
+  --nei-bg-panel: #1a1e28;
+  --nei-bg-surface: #242830;
+  --nei-bg-elevated: #2a2e38;
+  --nei-bg-input: #10141c;
+  --nei-bg-hover: rgba(85, 85, 85, 0.26);
+
+  /* Bevel border (3px thick, MC GUI style) */
+  --nei-bevel-light: #5a5e68;
+  --nei-bevel-dark: #0a0e18;
+  --nei-border-slot: #000000;
+  --nei-border-active: #6060a0;
+  --nei-border-panel: #3a3e48;
+  --nei-border-subtle: #2a2e38;
+
+  /* Text */
+  --nei-text: #e8e8e8;
+  --nei-text-dim: #8a8e98;
+  --nei-text-id: #98a0a8;
+  --nei-text-accent: #c0c0f0;
+  --nei-text-mono: #6a6e78;
+  --nei-text-shadow: 1px 1px 0 #0a0e18;
+  --nei-text-shadow-deep: 2px 2px 0 #0a0e18;
+
+  /* Accent */
+  --nei-accent: #5050a0;
+  --nei-accent-glow: rgba(80, 80, 160, 0.25);
+  --nei-accent-border-light: #8088c0;
+  --nei-accent-border-dark: #2a2a50;
+
+  /* Tooltip (NEI purple) */
+  --nei-tooltip-bg: rgba(16, 0, 16, 0.92);
+  --nei-tooltip-border: #500080;
+  --nei-tooltip-text: #ffffff;
+  --nei-tooltip-dim: #808080;
+
+  /* Scrollbar */
+  --nei-scrollbar-track: #1a1e28;
+  --nei-scrollbar-thumb: #3a3e48;
+
+  /* Misc */
+  --nei-radius-none: 0;
+}
+
+/* ---- NEI Tooltip (global, used by ToolTipBox) ---- */
+.wm-tooltip-surface {
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  font-family: system-ui, 'Segoe UI', sans-serif;
+  color: var(--nei-tooltip-text);
+  background: var(--nei-tooltip-bg);
+  border: 1px solid var(--nei-tooltip-border);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.4);
+}
+.wm-tooltip-surface--inline {
+  width: 100%;
+  max-width: min(22rem, 100%);
+}
+.wm-tooltip-box {
+  position: fixed;
+  z-index: 2147483646;
+  width: fit-content;
+  max-width: min(22rem, calc(100vw - 24px));
+  min-width: 0;
+  pointer-events: none;
+}
+.wm-tooltip-body { margin: 0; white-space: pre-line; overflow-wrap: break-word; word-break: normal; }
+.wm-tooltip-body strong { font-weight: 700; }
+.wm-tooltip-body em { font-style: italic; }
+.wm-tooltip-body code { font-family: ui-monospace, monospace; background: rgba(0,0,0,0.15); padding: 0 2px; border-radius: 2px; }
+.wm-tooltip-body a { color: #60a5fa; }
+
+/* ---- NEI Slider (shared by WorldFrameScrubber & LayerPreviewBar) ---- */
+.nei-slider { position: relative; flex: 1; min-width: 0; height: 28px; display: flex; align-items: center; }
+.nei-slider__track {
+  position: absolute; left: 0; right: 0; top: 50%; height: 6px; margin-top: -3px;
+  background: var(--nei-bg-input);
+  border: 1px solid var(--nei-border-subtle);
+  box-sizing: border-box; pointer-events: none;
+}
+.nei-slider__fill {
+  position: absolute; left: 0; top: 50%; height: 4px; margin-top: -2px;
+  background: var(--nei-accent);
+  pointer-events: none; z-index: 1;
+}
+.nei-slider__range {
+  position: relative; z-index: 2; width: 100%; height: 28px; margin: 0;
+  background: none; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+.nei-slider__range:disabled { cursor: not-allowed; opacity: 0.55; }
+.nei-slider__range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px;
+  background: var(--nei-bg-surface);
+  border: 3px solid;
+  border-color: var(--nei-bevel-light) var(--nei-bevel-dark) var(--nei-bevel-dark) var(--nei-bevel-light);
+  cursor: grab;
+}
+.nei-slider__range::-webkit-slider-runnable-track { height: 0; background: transparent; }
+.nei-slider__range::-moz-range-thumb {
+  width: 14px; height: 14px;
+  background: var(--nei-bg-surface);
+  border: 3px solid;
+  border-color: var(--nei-bevel-light) var(--nei-bevel-dark) var(--nei-bevel-dark) var(--nei-bevel-light);
+  cursor: grab;
+}
+.nei-slider__range::-moz-range-track { background: transparent; border: none; height: 0; }
+
+/* ---- Global thin scrollbar — NEI style ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--nei-scrollbar-thumb) var(--nei-scrollbar-track);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--nei-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--nei-scrollbar-thumb);
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--nei-accent);
+}

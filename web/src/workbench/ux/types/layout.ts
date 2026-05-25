@@ -53,7 +53,7 @@ export interface UIProperty {
   rnaPath: string
   label: string
   icon?: string
-  widget?: 'text' | 'number' | 'slider' | 'checkbox' | 'dropdown' | 'color' | 'vector'
+  widget?: 'text' | 'number' | 'slider' | 'stepper' | 'stepper-compact' | 'checkbox' | 'dropdown' | 'color' | 'vector'
 }
 
 export interface UIOperator {

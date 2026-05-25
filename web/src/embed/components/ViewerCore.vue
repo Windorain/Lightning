@@ -40,7 +40,7 @@ const props = withDefaults(
     initialCamera?: InitialCamera
   }>(),
   {
-    sceneBackground: 0x111827,
+    sceneBackground: 0x0b1217,
     showAxesGizmo: true,
   },
 )

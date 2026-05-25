@@ -85,12 +85,31 @@ function isLayoutItem(item: UILayoutItem): item is UILayout {
 </template>
 
 <style scoped>
-.ux-row { display: flex; flex-direction: row; align-items: center; gap: 4px; }
-.ux-column { display: flex; flex-direction: column; gap: 2px; }
-.ux-box { border: 1px solid var(--ui-border, #555); border-radius: 4px; padding: 6px; margin: 2px 0; }
-.ux-box-label { font-size: 10px; font-weight: bold; color: var(--ui-label, #999); text-transform: uppercase; margin-bottom: 4px; }
+.ux-row { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+.ux-column { display: flex; flex-direction: column; gap: 4px; }
+.ux-box {
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-lg);
+  padding: 10px;
+  margin: 4px 0;
+  background: var(--wb-bg-surface);
+}
+.ux-box-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--wb-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 6px;
+}
 .ux-split { display: flex; flex-direction: row; }
 .ux-scroll { overflow-y: auto; }
-.ux-label { font-size: 12px; color: var(--ui-text, #ccc); }
-.ux-sep { border: none; border-top: 1px solid var(--ui-border, #555); margin: 4px 0; }
+.ux-label { font-size: 13px; color: var(--wb-text-muted); }
+.ux-sep {
+  border: none;
+  border-top: 1px solid transparent;
+  background: linear-gradient(90deg, var(--wb-border), transparent);
+  height: 1px;
+  margin: 6px 0;
+}
 </style>

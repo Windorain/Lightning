@@ -59,29 +59,29 @@ async function onConnect(): Promise<void> {
 <style scoped>
 .dash-card {
   padding: 16px;
-  border: 1px solid var(--nei-border);
+  border: 1px solid var(--wb-border);
   border-radius: 10px;
-  background: var(--nei-bg-deep);
+  background: var(--wb-bg-deepest);
   margin-bottom: 14px;
 }
 .dash-card__title {
   margin: 0 0 8px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--nei-text);
+  color: var(--wb-text);
 }
 .dash-card__desc {
   margin: 0 0 14px;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--nei-label);
+  color: var(--wb-text-muted);
 }
 .dash-code {
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 4px;
-  background: var(--nei-bg);
-  color: var(--nei-text-dark);
+  background: var(--wb-bg-elevated);
+  color: var(--wb-text);
 }
 .dash-field {
   display: flex;
@@ -91,14 +91,14 @@ async function onConnect(): Promise<void> {
 }
 .dash-field__label {
   font-size: 11px;
-  color: var(--nei-label);
+  color: var(--wb-text-muted);
 }
 .dash-input {
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid var(--nei-panel-hover);
-  background: var(--nei-bg);
-  color: var(--nei-text-dark);
+  border: 1px solid var(--wb-bg-hover);
+  background: var(--wb-bg-elevated);
+  color: var(--wb-text);
   font-size: 13px;
 }
 .dash-row {
@@ -111,27 +111,27 @@ async function onConnect(): Promise<void> {
 .dash-btn {
   padding: 8px 16px;
   border-radius: 8px;
-  border: 1px solid var(--nei-muted);
-  background: var(--nei-border);
-  color: var(--nei-text);
+  border: 1px solid var(--wb-text-dim);
+  background: var(--wb-border);
+  color: var(--wb-text);
   cursor: pointer;
   font-size: 13px;
 }
 .dash-btn--primary {
-  background: var(--nei-accent);
-  border-color: var(--nei-accent);
+  background: var(--wb-accent);
+  border-color: var(--wb-accent);
 }
 .dash-btn:hover {
   filter: brightness(1.06);
 }
 .dash-hint {
   font-size: 12px;
-  color: var(--nei-label);
+  color: var(--wb-text-muted);
 }
 .dash-hint--ok {
-  color: var(--nei-ok-text);
+  color: #86efac;
 }
 .dash-hint--err {
-  color: var(--nei-error-text);
+  color: var(--wb-text);
 }
 </style>

@@ -4,6 +4,7 @@
 import { createApp } from 'vue'
 
 import DevApp from '@/dev/DevApp.vue'
-import '@/styles/nei-tokens.css'
+import '@/styles/precision-tokens.css'
+import '@/styles/embed-nei-tokens.css'
 
 createApp(DevApp).mount('#app')

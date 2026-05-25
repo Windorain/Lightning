@@ -25,7 +25,7 @@ import { eventDispatcher } from '@/workbench/eventDispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
 import { createProductionQueries } from '@/workbench/context/sceneQueries'
-import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA } from '@/workbench/ux/rna'
+import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA, materialRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOfByOperator, boundsOfByRNAPath } from '@/workbench/ux/layout'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import {
@@ -36,7 +36,7 @@ import {
 } from '@/workbench/ux/panels'
 
 // All builtin operators
-import { SelectOperator } from '@/workbench/operators/builtin/selectOperator'
+import { SelectOperator, SelectByTypeOperator } from '@/workbench/operators/builtin/selectOperator'
 import { MoveOperator } from '@/workbench/operators/builtin/moveOperator'
 import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
@@ -49,6 +49,7 @@ import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/wo
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
 import { ThemeToggleOperator, SetLanguageOperator } from '@/workbench/operators/builtin/appearanceOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/workbench/operators/builtin/annotationOperators'
+import { ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/workbench/operators/builtin/materialOperators'
 
 // Tools
 import { selectTool } from '@/workbench/tools/selectTool'
@@ -60,7 +61,7 @@ import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
 import { textTool, TextGizmo } from '@/workbench/tools/textTool'
 
 const ALL_OPERATORS: OperatorType[] = [
-  SelectOperator, MoveOperator,
+  SelectOperator, SelectByTypeOperator, MoveOperator,
   UndoOperator, RedoOperator,
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator,
   ToolSetOperator,
@@ -72,6 +73,7 @@ const ALL_OPERATORS: OperatorType[] = [
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
   ThemeToggleOperator, SetLanguageOperator,
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
+  ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator,
 ]
 
 export interface WorkbenchContextDeps {
@@ -125,6 +127,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   rna.register(sceneMetaRNA)
   rna.register(wikiConfigRNA)
   rna.register(annotationRNA)
+  rna.register(materialRNA)
 
   // Screen layout
   const defaultScreen: bScreen = {
