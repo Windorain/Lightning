@@ -174,8 +174,7 @@ export class AnnotationMeshProvider implements MeshProvider {
     const geo = new THREE.SphereGeometry(a.size * 0.1, 8, 8)
     const mat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(a.color),
-      depthTest: false,
-      depthWrite: false,
+      depthTest: true,
     })
     const mesh = new THREE.Mesh(geo, mat)
     mesh.position.set(a.pos.x, a.pos.y, a.pos.z)

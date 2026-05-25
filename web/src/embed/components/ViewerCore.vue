@@ -59,6 +59,9 @@ const emit = defineEmits<{
       source: 'viewport'; voxel: { column: number; row: number; zSlice: number }
     } | null,
   ]
+  'hover-annotation': [
+    payload: { annotationId: string; clientX: number; clientY: number } | null,
+  ]
   'open-settings': []
   'open-workbench': []
 }>()
@@ -126,8 +129,16 @@ function runPick(): void {
       source: 'viewport',
       voxel: { column: picked.column, row: picked.row, zSlice: picked.zSlice },
     })
+    emit('hover-annotation', null)
+  } else if (picked && picked.kind === 'annotation') {
+    emit('hover-block', null)
+    emit('hover-annotation', {
+      annotationId: picked.annotationId,
+      clientX: lastPointer.clientX, clientY: lastPointer.clientY,
+    })
   } else {
     emit('hover-block', null)
+    emit('hover-annotation', null)
   }
 }
 
@@ -141,6 +152,7 @@ function onPointerMove(e: PointerEvent): void {
 function onPointerLeave(): void {
   lastPointer = null
   emit('hover-block', null)
+  emit('hover-annotation', null)
 }
 
 function fitCameraToGroup(vp: View3DRenderer, group: THREE.Group): void {
