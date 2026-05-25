@@ -91,8 +91,9 @@ watch(
     {{ loadError }}
   </div>
   <EmbedViewport v-else-if="bctx.doc.value" />
-  <div v-else class="embed-boot">
-    加载中…
+  <div v-else class="embed-boot embed-boot--loading">
+    <div class="embed-boot-spinner"></div>
+    <span>加载中…</span>
   </div>
 </template>
 
@@ -103,6 +104,25 @@ watch(
   color: var(--wb-text);
   background: var(--wb-viewport-bg);
   min-height: 40vh;
+}
+.embed-boot--loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 120px;
+}
+.embed-boot-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--nei-border-panel);
+  border-top-color: var(--nei-accent);
+  border-radius: 50%;
+  animation: embed-spin 0.6s linear infinite;
+}
+@keyframes embed-spin {
+  to { transform: rotate(360deg); }
 }
 .embed-boot--err {
   color: #fecaca;

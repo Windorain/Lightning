@@ -17,6 +17,8 @@
   --nei-text-dark: #303030;
   --nei-label-shadow: 1px 1px 0 #3f3f3f;
 
+  --nei-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+
   --nei-status-ok: #2d6a4f;
   --nei-status-warn: #b45309;
   --nei-status-err: #9b2226;
@@ -83,6 +85,8 @@
   --nei-text-muted: #8898a8;
   --nei-text-dark: #d0d8e8;
   --nei-label-shadow: 1px 1px 0 #0a0e14;
+
+  --nei-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
 
   --nei-accent: #3b5f8a;
   --nei-accent-hover: #4a72a0;
@@ -189,7 +193,7 @@
 }
 .wm-tooltip-body strong { font-weight: 700; }
 .wm-tooltip-body em { font-style: italic; }
-.wm-tooltip-body code { font-family: ui-monospace, 'Cascadia Code', monospace; background: rgba(0,0,0,0.15); padding: 0 2px; border-radius: 2px; }
+.wm-tooltip-body code { font-family: var(--nei-font-mono); background: rgba(0,0,0,0.15); padding: 0 2px; border-radius: 2px; }
 .wm-tooltip-body a { color: var(--nei-focus-ring, #60a5fa); }
 
 /* ===== NEI 按钮 ===== */
@@ -197,7 +201,7 @@
   width: 28px; height: 28px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-family: var(--nei-font-mono);
   color: var(--nei-text); text-shadow: var(--nei-label-shadow);
   background: var(--nei-bg);
   border: var(--nei-bevel-w) solid;

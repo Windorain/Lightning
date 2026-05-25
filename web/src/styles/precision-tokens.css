@@ -2,38 +2,68 @@
  * Precision Workshop — Design Tokens
  * Cold steel blue on midnight. Industrial precision aesthetic.
  */
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* Surface hierarchy */
-  --wb-bg-deepest: #0b1217;
-  --wb-bg-surface: #101820;
-  --wb-bg-elevated: #0f161d;
-  --wb-bg-hover: #1a2532;
+  --wb-bg-deepest: #080d12;
+  --wb-bg-surface: #111c26;
+  --wb-bg-elevated: #1a2633;
+  --wb-bg-hover: #253442;
 
-  /* Borders */
-  --wb-border: #1a2532;
-  --wb-border-light: #1a3040;
+  /* Borders — tuned for surface hierarchy above */
+  --wb-border: #243544;
+  --wb-border-light: #2a3f52;
 
   /* Accent */
   --wb-accent: #4dabf7;
   --wb-accent-muted: #7aa2c4;
 
-  /* Text */
+  /* Text — dim/muted tuned for WCAG AA (≥4.5:1) on surface (#111c26) */
   --wb-text: #c5d8e8;
-  --wb-text-muted: #56728a;
-  --wb-text-dim: #3a5068;
+  --wb-text-muted: #889eb8;
+  --wb-text-dim: #6a7e96;
+
+  /* Typography */
+  --wb-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
 
   /* Semantic */
   --wb-success: #2ecc71;
   --wb-danger: #e74c3c;
   --wb-danger-bg: #301a1a;
+  --wb-warn: #f59e0b;
+
+  /* Focus */
+  --wb-focus-ring: #4dabf7;
 
   /* Scrollbar */
   --wb-scrollbar-width: 6px;
-  --wb-scrollbar-track: #0d141c;
-  --wb-scrollbar-thumb: #1a2532;
+  --wb-scrollbar-track: #080d12;
+  --wb-scrollbar-thumb: #243544;
 
   /* Viewport */
-  --wb-viewport-bg: #0b1217;
+  --wb-viewport-bg: #060a10;
   --wb-grid-color: rgba(77, 171, 247, 0.025);
 
   /* Misc */
@@ -45,20 +75,21 @@
 }
 
 [data-wb-theme="light"] {
-  --wb-bg-deepest: #e8ecf0;
-  --wb-bg-surface: #f0f2f5;
-  --wb-bg-elevated: #e0e4e8;
-  --wb-bg-hover: #d0d6de;
+  --wb-bg-deepest: #dee4ea;
+  --wb-bg-surface: #eaeef3;
+  --wb-bg-elevated: #f2f5f8;
+  --wb-bg-hover: #d8dfe8;
   --wb-border: #c0c8d0;
   --wb-border-light: #d0d6de;
   --wb-accent: #2563eb;
   --wb-accent-muted: #4b7cb8;
   --wb-text: #1a2532;
-  --wb-text-muted: #5a6678;
-  --wb-text-dim: #8898a8;
+  --wb-text-muted: #445366;
+  --wb-text-dim: #667788;
   --wb-success: #16a34a;
   --wb-danger: #dc2626;
   --wb-danger-bg: #fecaca;
+  --wb-warn: #d97706;
   --wb-scrollbar-track: #d0d6de;
   --wb-scrollbar-thumb: #a0aab4;
   --wb-viewport-bg: #d8dce2;

@@ -463,23 +463,30 @@ onBeforeUnmount(() => {
     <ToolTipBox v-if="metaHintPointer && metaTooltipText" :text="metaTooltipText" :client-x="metaHintPointer.clientX" :client-y="metaHintPointer.clientY" />
 
     <!-- 设置面板 -->
-    <div v-if="showSettingsPanel" class="wm-settings-overlay" @click.self="showSettingsPanel = false">
-      <div class="wm-settings-panel">
-        <div class="wm-settings-head">
-          <span>视口设置</span>
-          <button class="wm-settings-close" @click="showSettingsPanel = false">✕</button>
-        </div>
-        <div class="wm-settings-body">
-          <!-- TODO: 持久化设置 UI -->
-          <p class="wm-settings-hint">设置面板 (WIP)</p>
-          <p class="wm-settings-hint">功能开关通过 EmbedSettings.features 控制</p>
+    <Transition name="fade">
+      <div v-if="showSettingsPanel" class="wm-settings-overlay" @click.self="showSettingsPanel = false">
+        <div class="wm-settings-panel">
+          <div class="wm-settings-head">
+            <span>视口设置</span>
+            <button class="wm-settings-close" @click="showSettingsPanel = false">✕</button>
+          </div>
+          <div class="wm-settings-body">
+            <!-- TODO: 持久化设置 UI -->
+            <p class="wm-settings-hint">设置面板 (WIP)</p>
+            <p class="wm-settings-hint">功能开关通过 EmbedSettings.features 控制</p>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
+.fade-enter-active,
+.fade-leave-active { transition: opacity 0.15s ease; }
+.fade-enter-from,
+.fade-leave-to { opacity: 0; }
+
 .wm-root { font-family: system-ui, 'Segoe UI', sans-serif; color: var(--nei-text); background: var(--nei-bg); box-sizing: border-box; height: 100%; display: flex; flex-direction: column; }
 /* Title bar — 40px, 3px bevel bottom */
 .wm-titlebar { flex-shrink: 0; height: var(--nei-title-height); display: flex; align-items: center; padding: 0 10px; border-bottom: var(--nei-bevel-w) solid; border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); background: var(--nei-bg-panel); }
@@ -514,7 +521,7 @@ onBeforeUnmount(() => {
 }
 .wm-tab {
   padding: 6px 14px 5px;
-  font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px; font-family: var(--nei-font-mono);
   font-weight: 600;
   color: var(--nei-text-muted);
   background: none; border: none;
@@ -532,7 +539,7 @@ onBeforeUnmount(() => {
   margin-left: auto;
   display: flex; align-items: center; gap: 14px;
   padding: 0 10px;
-  font-size: 11px; font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px; font-family: var(--nei-font-mono);
   color: var(--nei-text-muted);
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
   flex-shrink: 0;
@@ -562,7 +569,7 @@ onBeforeUnmount(() => {
   background: transparent; border: none; padding: 0;
 }
 
-.wm-status-bar { display: flex; align-items: flex-start; gap: 8px; margin-top: 0; padding: 8px 10px; font-size: 12px; line-height: 1.45; font-family: ui-monospace, 'Cascadia Code', monospace; border-radius: 0; border: var(--nei-bevel-w) solid; border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); border-top: none; background: var(--nei-inset-bg); color: var(--nei-text-muted); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45); }
+.wm-status-bar { display: flex; align-items: flex-start; gap: 8px; margin-top: 0; padding: 8px 10px; font-size: 12px; line-height: 1.45; font-family: var(--nei-font-mono); border-radius: 0; border: var(--nei-bevel-w) solid; border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); border-top: none; background: var(--nei-inset-bg); color: var(--nei-text-muted); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45); }
 .wm-status-bar--loading { color: var(--nei-loading-text); } .wm-status-bar--ok { color: var(--nei-ok-text); } .wm-status-bar--warn { color: var(--nei-warn-text); } .wm-status-bar--err { color: var(--nei-error-text); background: var(--nei-error-bg); }
 .wm-status-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 4px; border-radius: 0; background: currentColor; opacity: 0.9; box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4); }
 .wm-status-text { flex: 1; word-break: break-word; white-space: pre-wrap; }
@@ -578,7 +585,7 @@ onBeforeUnmount(() => {
   border: var(--nei-bevel-w) solid;
   border-color: var(--nei-bevel-light) var(--nei-bevel-dark) var(--nei-bevel-dark) var(--nei-bevel-light);
   min-width: 280px; max-width: 400px;
-  font-family: ui-monospace, monospace; font-size: 12px; color: var(--nei-text);
+  font-family: var(--nei-font-mono); font-size: 12px; color: var(--nei-text);
 }
 .wm-settings-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -586,6 +593,15 @@ onBeforeUnmount(() => {
   background: var(--nei-bg-panel);
   border-bottom: var(--nei-bevel-w) solid var(--nei-border-subtle);
 }
+.nei-icon-btn:focus-visible {
+  outline: 2px solid var(--nei-focus-ring);
+  outline-offset: 2px;
+}
+.wm-tab:focus-visible {
+  outline: 2px solid var(--nei-focus-ring);
+  outline-offset: -1px;
+}
+
 .wm-settings-close {
   border: none; background: none; color: var(--nei-icon-color); cursor: pointer;
   font-size: 14px; line-height: 1; padding: 2px 6px;

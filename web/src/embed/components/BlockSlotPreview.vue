@@ -92,7 +92,7 @@ watch(
   font-size: 10px;
   line-height: 1;
   font-weight: 700;
-  font-family: ui-monospace, monospace;
+  font-family: var(--nei-font-mono);
   color: #ffffff;
   text-shadow: 1px 1px 0 #000;
   pointer-events: none;

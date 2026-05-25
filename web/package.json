@@ -13,6 +13,7 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@protobuf-ts/runtime": "^2.11.1",
     "jszip": "^3.10.1",
     "omggif": "^1.0.10",

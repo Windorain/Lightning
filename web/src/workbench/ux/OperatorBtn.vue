@@ -47,12 +47,16 @@ function onClick() {
   font-size: 13px;
   line-height: 1.4;
   width: 100%;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .ux-operator-btn:hover {
   background: var(--wb-bg-hover);
   border-color: var(--wb-accent);
   color: var(--wb-text);
+  transform: scale(1.04);
+}
+.ux-operator-btn:active {
+  transform: scale(0.97);
 }
 .ux-operator-btn--primary {
   border-color: var(--wb-accent);
@@ -84,6 +88,7 @@ function onClick() {
 .ux-operator-btn--icon-only:hover {
   background: var(--wb-bg-hover);
   border-color: var(--wb-border);
+  transform: scale(1.08);
 }
 .ux-operator-btn--active {
   background: var(--wb-bg-hover) !important;
@@ -99,5 +104,9 @@ function onClick() {
   width: 18px;
   height: 18px;
   display: block;
+}
+.ux-operator-btn:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 2px;
 }
 </style>

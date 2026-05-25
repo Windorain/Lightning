@@ -2,6 +2,29 @@
  * Modern NEI — Design Tokens for Embed Viewer
  * Based on real NEI source: ItemsGrid.java, PanelWidget.java, LayoutStyleMinecraft.java
  */
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* Panel hierarchy */
   --nei-bg-deep: #0a0e18;
@@ -27,6 +50,9 @@
   --nei-text-mono: #6a6e78;
   --nei-text-shadow: 1px 1px 0 #0a0e18;
   --nei-text-shadow-deep: 2px 2px 0 #0a0e18;
+
+  /* Typography */
+  --nei-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
 
   /* Accent */
   --nei-accent: #5050a0;
@@ -105,7 +131,7 @@
 .wm-tooltip-body { margin: 0; white-space: pre-line; overflow-wrap: break-word; word-break: normal; }
 .wm-tooltip-body strong { font-weight: 700; }
 .wm-tooltip-body em { font-style: italic; }
-.wm-tooltip-body code { font-family: ui-monospace, monospace; background: rgba(0,0,0,0.15); padding: 0 2px; border-radius: 2px; }
+.wm-tooltip-body code { font-family: var(--nei-font-mono); background: rgba(0,0,0,0.15); padding: 0 2px; border-radius: 2px; }
 .wm-tooltip-body a { color: #60a5fa; }
 
 /* ---- NEI Slider (shared by WorldFrameScrubber & LayerPreviewBar) ---- */

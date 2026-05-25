@@ -65,7 +65,10 @@ function displayName(row: BlockStatRow): string {
     </div>
 
     <!-- Empty state -->
-    <p v-if="empty" class="nei-sidebar-empty">无方块数据</p>
+    <div v-if="empty" class="nei-sidebar-empty">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18"/></svg>
+        <span>无方块数据</span>
+      </div>
 
     <!-- Slot list -->
     <div
@@ -149,7 +152,7 @@ function displayName(row: BlockStatRow): string {
   margin-left: auto;
   font-size: 10px;
   color: var(--nei-text-mono);
-  font-family: ui-monospace, monospace;
+  font-family: var(--nei-font-mono);
   background: var(--nei-bg-panel);
   padding: 2px 8px;
   border: 1px solid var(--nei-border-panel);
@@ -174,7 +177,11 @@ function displayName(row: BlockStatRow): string {
 
 /* ===== Empty ===== */
 .nei-sidebar-empty {
-  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 14px;
   font-size: 11px;
   color: var(--nei-text-dim);
   margin: 0;
@@ -234,12 +241,12 @@ function displayName(row: BlockStatRow): string {
   margin-left: auto;
   font-size: 12px;
   color: var(--nei-text-dim);
-  font-family: ui-monospace, monospace;
+  font-family: var(--nei-font-mono);
 }
 .nei-slot-id {
   font-size: 9px;
   color: var(--nei-text-id);
-  font-family: ui-monospace, monospace;
+  font-family: var(--nei-font-mono);
 }
 
 /* ===== Footer (collapsed only) ===== */

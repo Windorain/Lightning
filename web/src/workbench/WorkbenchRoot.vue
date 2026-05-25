@@ -214,7 +214,7 @@ onMounted(() => {
   <WorkbenchShell v-show="workspace === 'preview' || workspace === 'wiki'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
+        <span class="wb-brand"><svg class="wb-brand-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -255,7 +255,7 @@ onMounted(() => {
   <WorkbenchShell v-if="workspace === 'export'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
+        <span class="wb-brand"><svg class="wb-brand-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -279,7 +279,7 @@ onMounted(() => {
   <WorkbenchShell v-if="workspace === 'materials'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
+        <span class="wb-brand"><svg class="wb-brand-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>LIGHTNING</span>
         <UIRenderer
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
@@ -304,31 +304,33 @@ onMounted(() => {
 
   <!-- ContextMenu floating overlay -->
   <Teleport to="body">
-    <div
-      v-if="contextMenu.open.value"
-      class="context-menu-overlay"
-      @click="hideContextMenu(contextMenu)"
-      @contextmenu.prevent
-    >
+    <Transition name="menu-pop">
       <div
-        class="context-menu-popup"
-        :style="{ left: contextMenu.position.value.x + 'px', top: contextMenu.position.value.y + 'px' }"
-        @click.stop
+        v-if="contextMenu.open.value"
+        class="context-menu-overlay"
+        @click="hideContextMenu(contextMenu)"
+        @contextmenu.prevent
       >
-        <template v-for="(item, i) in contextMenu.items.value" :key="i">
-          <hr v-if="item.kind === 'separator'" class="cm-sep" />
-          <span v-else-if="item.kind === 'label'" class="cm-label">{{ item.label }}</span>
-          <button
-            v-else-if="item.kind === 'operator'"
-            class="cm-item"
-            @click="invokeContextMenuItem(item); hideContextMenu(contextMenu)"
-          >
-            <span v-if="item.icon" class="cm-icon">{{ item.icon }}</span>
-            {{ item.label }}
-          </button>
-        </template>
+        <div
+          class="context-menu-popup"
+          :style="{ left: contextMenu.position.value.x + 'px', top: contextMenu.position.value.y + 'px' }"
+          @click.stop
+        >
+          <template v-for="(item, i) in contextMenu.items.value" :key="i">
+            <hr v-if="item.kind === 'separator'" class="cm-sep" />
+            <span v-else-if="item.kind === 'label'" class="cm-label">{{ item.label }}</span>
+            <button
+              v-else-if="item.kind === 'operator'"
+              class="cm-item"
+              @click="invokeContextMenuItem(item); hideContextMenu(contextMenu)"
+            >
+              <span v-if="item.icon" class="cm-icon">{{ item.icon }}</span>
+              {{ item.label }}
+            </button>
+          </template>
+        </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -371,6 +373,9 @@ onMounted(() => {
   padding: 0 10px;
 }
 .wb-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--wb-text);
   font-size: 16px;
   font-weight: 700;
@@ -378,6 +383,9 @@ onMounted(() => {
   margin-right: 24px;
   user-select: none;
   flex-shrink: 0;
+}
+.wb-brand-icon {
+  color: var(--wb-accent);
 }
 .wb-menubar-inner :deep(.ux-menu-btn) {
   border: none;
@@ -437,22 +445,36 @@ onMounted(() => {
 .context-menu-popup {
   position: absolute;
   min-width: 160px;
-  background: #2a2a2a;
-  border: 1px solid #555;
+  background: var(--wb-bg-elevated);
+  border: 1px solid var(--wb-border);
   border-radius: 4px;
   padding: 4px 0;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
 .cm-item {
   display: block; width: 100%; padding: 4px 12px;
-  border: none; background: transparent; color: #ccc;
+  border: none; background: transparent; color: var(--wb-text);
   font-size: 13px; text-align: left; cursor: pointer;
 }
-.cm-item:hover { background: #4a4a4a; }
+.cm-item:hover { background: var(--wb-bg-hover); }
 .cm-label {
-  display: block; padding: 2px 12px; font-size: 11px; color: #999;
+  display: block; padding: 2px 12px; font-size: 11px; color: var(--wb-text-dim);
 }
-.cm-sep { margin: 4px 8px; border: none; border-top: 1px solid #555; }
+.cm-sep { margin: 4px 8px; border: none; border-top: 1px solid var(--wb-border); }
 .cm-icon { margin-right: 6px; }
+
+.menu-pop-enter-active {
+  transition: opacity 0.1s ease, transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.menu-pop-leave-active {
+  transition: opacity 0.08s ease;
+}
+.menu-pop-enter-from {
+  opacity: 0;
+  transform: scale(0.95) translateY(-4px);
+}
+.menu-pop-leave-to {
+  opacity: 0;
+}
 
 </style>

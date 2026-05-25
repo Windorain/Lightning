@@ -123,7 +123,7 @@ function pushToServer(): void {
 }
 .ew-btn:hover { background: var(--wb-bg-hover); border-color: var(--wb-accent); color: var(--wb-text); }
 .ew-btn--primary { border-color: var(--wb-accent); background: var(--wb-bg-hover); color: var(--wb-accent); font-weight: 500; }
-.ew-btn--primary:hover { background: var(--wb-accent); color: #fff; }
+.ew-btn--primary:hover { background: var(--wb-accent); color: #ffffff; }
 .ew-btn--sm { font-size: 12px; padding: 6px 12px; }
 .ew-iso { max-width: 340px; border-radius: var(--wb-radius-md); border: 1px solid var(--wb-border); margin-top: 10px; }
 .ew-fb { font-size: 12px; color: var(--wb-text-dim); margin-top: 8px; }

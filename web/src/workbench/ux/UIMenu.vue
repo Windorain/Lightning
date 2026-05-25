@@ -25,22 +25,24 @@ function invokeOp(op: UIOperator) {
     <button class="ux-menu-btn" @click="toggle">
       <span v-if="icon" class="ux-icon">{{ icon }}</span>
       {{ label }}
-      <span class="ux-arrow">▼</span>
+      <svg class="ux-arrow" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
     </button>
-    <div v-if="open" class="ux-menu-dropdown">
-      <template v-for="(item, i) in items" :key="i">
-        <hr v-if="item.kind === 'separator'" class="ux-menu-sep" />
-        <span v-else-if="item.kind === 'label'" class="ux-menu-label">{{ item.text }}</span>
-        <button
-          v-else-if="item.kind === 'operator'"
-          class="ux-menu-item"
-          @click="invokeOp(item)"
-        >
-          <span v-if="item.icon" class="ux-icon">{{ item.icon }}</span>
-          {{ item.label }}
-        </button>
-      </template>
-    </div>
+    <Transition name="menu-drop">
+      <div v-if="open" class="ux-menu-dropdown">
+        <template v-for="(item, i) in items" :key="i">
+          <hr v-if="item.kind === 'separator'" class="ux-menu-sep" />
+          <span v-else-if="item.kind === 'label'" class="ux-menu-label">{{ item.text }}</span>
+          <button
+            v-else-if="item.kind === 'operator'"
+            class="ux-menu-item"
+            @click="invokeOp(item)"
+          >
+            <span v-if="item.icon" class="ux-icon">{{ item.icon }}</span>
+            {{ item.label }}
+          </button>
+        </template>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -59,7 +61,13 @@ function invokeOp(op: UIOperator) {
   font-size: 13px;
 }
 .ux-menu-btn:hover { background: var(--wb-bg-hover); }
-.ux-arrow { font-size: 9px; }
+.ux-arrow { width: 10px; height: 10px; flex-shrink: 0; }
+.ux-menu-btn:focus-visible,
+.ux-menu-item:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 2px;
+}
+
 .ux-menu-dropdown {
   position: absolute;
   top: 100%;
@@ -97,5 +105,19 @@ function invokeOp(op: UIOperator) {
   margin: 4px 8px;
   border: none;
   border-top: 1px solid var(--wb-border);
+}
+
+.menu-drop-enter-active {
+  transition: opacity 0.1s ease, transform 0.1s ease;
+}
+.menu-drop-leave-active {
+  transition: opacity 0.08s ease;
+}
+.menu-drop-enter-from {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.menu-drop-leave-to {
+  opacity: 0;
 }
 </style>
