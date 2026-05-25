@@ -417,137 +417,10 @@ public final class MeshCaptureService {
 
         RenderBlocks rb = new RenderBlocks(world);
         rb.renderAllFaces = true;
-        rb.blockAccess = world;
+        rb.blockAccess = new ScanBackedBlockAccess(world, worldCoords, cellGrid, cellTypes);
 
         TextureMap textureMap = Minecraft.getMinecraft()
             .getTextureMapBlocks();
-
-        Map<Integer, JsonObject> geometryByCellType = new HashMap<>();
-        Map<Integer, Boolean> opaqueByCellType = new HashMap<>();
-
-        for (int ti = 0; ti < cellTypes.length; ti++) {
-            VoxelSample vs = cellTypes[ti];
-            if ("air".equals(vs.registryId) && ti == 0) {
-                continue;
-            }
-            if ("air".equals(vs.registryId)) {
-                throw new IllegalStateException("cellTypes[" + ti + "] is air but index != 0.");
-            }
-            int[] cell = findFirstCellForPaletteIndex(cellGrid, ti);
-            if (cell == null) {
-                geometryByCellType.put(ti, emptyGeometryJson());
-                opaqueByCellType.put(ti, false);
-                continue;
-            }
-            int zi = cell[0];
-            int ri = cell[1];
-            int ci = cell[2];
-            int wx = worldCoords[zi][ri][ci][0];
-            int wy = worldCoords[zi][ri][ci][1];
-            int wz = worldCoords[zi][ri][ci][2];
-
-            Block b = world.getBlock(wx, wy, wz);
-            if (b == null || b == Blocks.air) {
-                geometryByCellType.put(ti, emptyGeometryJson());
-                opaqueByCellType.put(ti, false);
-                continue;
-            }
-            String label = captureLabel(vs, b, world, wx, wy, wz);
-            CapturedBlockInstance inst = new CapturedBlockInstance();
-            /*
-             * 必须与当帧 scan JSON 的 cellTypes[ti] 一致：多帧联录后一次性 finalize 时，客户端
-             * world.getBlockMetadata 往往已是“最后一帧”世界态；若用此处元数据，各帧几何会与 record 时服务端
-             * 采样的体素态脱节（GT 等 mID 在 VoxelSample.meta / TE，而非客户端此时 blockMetadata）。
-             */
-            int blockMeta = vs != null ? vs.meta : world.getBlockMetadata(wx, wy, wz);
-            int renderType = b.getRenderType();
-            /*
-             * ISBRH/TESR 从世界 TE 读状态；多帧时客户端 TE 多为最终态。临时写入 scan 内服务端 NBT 再恢复。
-             * TileMultipart 未覆写 readFromNBT — 直接调用不会更新 parts 的取向等内部态，
-             * 需额外通过 MultipartNbtStateUtil 反射 part.load() 逐 part 注入。
-             */
-            TileEntity teForCapture = world.getTileEntity(wx, wy, wz);
-            NBTTagCompound teCaptureBackup = null;
-            boolean teIsMultipart = false;
-            if (teForCapture != null && vs != null && vs.tileNbt != null) {
-                teCaptureBackup = new NBTTagCompound();
-                teForCapture.writeToNBT(teCaptureBackup);
-                teIsMultipart = MultipartNbtStateUtil.isTileMultipart(teForCapture);
-                NBTTagCompound toApply = (NBTTagCompound) vs.tileNbt.copy();
-                toApply.setInteger("x", teForCapture.xCoord);
-                toApply.setInteger("y", teForCapture.yCoord);
-                toApply.setInteger("z", teForCapture.zCoord);
-                try {
-                    teForCapture.readFromNBT(toApply);
-                } catch (Throwable ignored) {
-                    /* 个别模组 NBT 不兼容时仍走原 TE */
-                }
-                MultipartNbtStateUtil.diagnoseReadFromNbtOverride(teForCapture);
-                if (teIsMultipart) {
-                    MultipartNbtStateUtil.loadPartStatesFromNbt(teForCapture, toApply);
-                }
-            }
-            try {
-                TessellatorCaptureState
-                    .beginBlock(wx, wy, wz, label, wx, wy, wz, b, blockMeta, renderType, vs.registryId);
-                Tessellator tess = Tessellator.instance;
-                tess.startDrawingQuads();
-                BlockPrimaryCaptureRegistry.dispatch(
-                    new BlockPrimaryCaptureContext(world, wx, wy, wz, b, blockMeta, rb, partialTicksForMeshCapture()));
-                /*
-                 * 结束静态批次再 dispatch：FMP/PR 的 renderDynamic 内会 CCRenderState#startDrawingInstance →
-                 * Tessellator#startDrawing。若外层 startDrawingQuads 尚未 draw，将 IllegalStateException: Already tesselating
-                 * （与 Vector3/ClassLoader 反射无关）。
-                 */
-                tess.draw();
-
-                MeshCaptureBlockPostRenderRegistry.dispatch(
-                    new MeshCaptureBlockPostRenderContext(
-                        world,
-                        wx,
-                        wy,
-                        wz,
-                        b,
-                        blockMeta,
-                        rb,
-                        partialTicksForMeshCapture()));
-                int quadsBeforeDraw = TessellatorCaptureState.currentBlockRecordedQuadCount();
-                try {
-                    tess.draw();
-                } catch (Throwable ignored) {
-                    /* 动态路径常已在内部 drawInstance；此时不再处于绘制中 */
-                }
-                if (quadsBeforeDraw == 0) {
-                    GL11.glPushMatrix();
-                    try {
-                        rb.renderBlockAsItem(b, blockMeta, 1.0F);
-                    } catch (Throwable ignored) {
-                        /* 少数方块在库存路径下可能抛错 */
-                    } finally {
-                        GL11.glPopMatrix();
-                    }
-                }
-                TessellatorCaptureState.endBlock(inst);
-                if (inst.quads.isEmpty()) {
-                    geometryByCellType.put(ti, emptyGeometryJson());
-                    opaqueByCellType.put(ti, false);
-                } else {
-                    attachMaterials(inst, textureMap, samplers);
-                    JsonObject geo = bakedQuadsGeometryFromCapture(inst);
-                    geometryByCellType.put(ti, geo);
-                    opaqueByCellType.put(ti, b.isOpaqueCube());
-                }
-            } finally {
-                if (teForCapture != null && teCaptureBackup != null) {
-                    try {
-                        teForCapture.readFromNBT(teCaptureBackup);
-                    } catch (Throwable ignored) { /* 尽力恢复 */ }
-                    if (teIsMultipart) {
-                        MultipartNbtStateUtil.loadPartStatesFromNbt(teForCapture, teCaptureBackup);
-                    }
-                }
-            }
-        }
 
         /* 为每种 cellType 生成 NEI 风格的 ToolTip 文本 */
         Map<Integer, List<String>> tooltipByCellType = new HashMap<>();
@@ -572,35 +445,121 @@ public final class MeshCaptureService {
             }
         }
 
-        int nextFinal = 1;
+        // Per-cell capture + geometry-hash dedup
         Map<String, Integer> sigToFinal = new HashMap<>();
-        Map<Integer, Integer> cellTypeToFinal = new HashMap<>();
-        cellTypeToFinal.put(0, 0);
         Map<Integer, VoxelSample> repForFinal = new HashMap<>();
         Map<Integer, JsonObject> geometryForFinal = new HashMap<>();
         Map<Integer, Boolean> opaqueForFinal = new HashMap<>();
         Map<Integer, List<String>> tooltipForFinal = new HashMap<>();
+        int nextFinal = 1;
+        int[][][] remapped = new int[sizeZ][sizeRow][sizeCol];
 
-        for (int ti = 1; ti < cellTypes.length; ti++) {
-            JsonObject geom = geometryByCellType.get(ti);
-            if (geom == null) {
-                geom = emptyGeometryJson();
-            }
-            VoxelSample vs = cellTypes[ti];
-            List<String> tt = tooltipByCellType.get(ti);
-            String sig = fullEqualitySignature(vs.registryId, vs.meta, vs.tileNbt, geom, tt);
-            Integer fin = sigToFinal.get(sig);
-            if (fin == null) {
-                fin = Integer.valueOf(nextFinal++);
-                sigToFinal.put(sig, fin);
-                repForFinal.put(fin, vs);
-                geometryForFinal.put(fin, deepCopyJsonObject(geom));
-                opaqueForFinal.put(fin, opaqueByCellType.getOrDefault(ti, false));
-                if (tt != null) {
-                    tooltipForFinal.put(fin, tt);
+        for (int zi = 0; zi < sizeZ; zi++) {
+            for (int ri = 0; ri < sizeRow; ri++) {
+                for (int ci = 0; ci < sizeCol; ci++) {
+                    int ti = cellGrid[zi][ri][ci];
+                    if (ti == 0) {
+                        remapped[zi][ri][ci] = 0;
+                        continue;
+                    }
+                    VoxelSample vs = cellTypes[ti];
+                    int wx = worldCoords[zi][ri][ci][0];
+                    int wy = worldCoords[zi][ri][ci][1];
+                    int wz = worldCoords[zi][ri][ci][2];
+
+                    Block b = world.getBlock(wx, wy, wz);
+                    if (b == null || b == Blocks.air) {
+                        remapped[zi][ri][ci] = 0;
+                        continue;
+                    }
+                    String label = captureLabel(vs, b, world, wx, wy, wz);
+                    CapturedBlockInstance inst = new CapturedBlockInstance();
+                    int blockMeta = vs != null ? vs.meta : world.getBlockMetadata(wx, wy, wz);
+                    int renderType = b.getRenderType();
+
+                    TileEntity teForCapture = world.getTileEntity(wx, wy, wz);
+                    NBTTagCompound teCaptureBackup = null;
+                    boolean teIsMultipart = false;
+                    if (teForCapture != null && vs != null && vs.tileNbt != null) {
+                        teCaptureBackup = new NBTTagCompound();
+                        teForCapture.writeToNBT(teCaptureBackup);
+                        teIsMultipart = MultipartNbtStateUtil.isTileMultipart(teForCapture);
+                        NBTTagCompound toApply = (NBTTagCompound) vs.tileNbt.copy();
+                        toApply.setInteger("x", teForCapture.xCoord);
+                        toApply.setInteger("y", teForCapture.yCoord);
+                        toApply.setInteger("z", teForCapture.zCoord);
+                        try {
+                            teForCapture.readFromNBT(toApply);
+                        } catch (Throwable ignored) {
+                            /* 个别模组 NBT 不兼容时仍走原 TE */
+                        }
+                        MultipartNbtStateUtil.diagnoseReadFromNbtOverride(teForCapture);
+                        if (teIsMultipart) {
+                            MultipartNbtStateUtil.loadPartStatesFromNbt(teForCapture, toApply);
+                        }
+                    }
+                    try {
+                        TessellatorCaptureState
+                            .beginBlock(wx, wy, wz, label, wx, wy, wz, b, blockMeta, renderType, vs.registryId);
+                        Tessellator tess = Tessellator.instance;
+                        tess.startDrawingQuads();
+                        BlockPrimaryCaptureRegistry.dispatch(
+                            new BlockPrimaryCaptureContext(
+                                world, wx, wy, wz, b, blockMeta, rb, partialTicksForMeshCapture()));
+                        tess.draw();
+
+                        MeshCaptureBlockPostRenderRegistry.dispatch(
+                            new MeshCaptureBlockPostRenderContext(
+                                world, wx, wy, wz, b, blockMeta, rb, partialTicksForMeshCapture()));
+                        int quadsBeforeDraw = TessellatorCaptureState.currentBlockRecordedQuadCount();
+                        try {
+                            tess.draw();
+                        } catch (Throwable ignored) {
+                            /* 动态路径常已在内部 drawInstance；此时不再处于绘制中 */
+                        }
+                        if (quadsBeforeDraw == 0) {
+                            GL11.glPushMatrix();
+                            try {
+                                rb.renderBlockAsItem(b, blockMeta, 1.0F);
+                            } catch (Throwable ignored) {
+                                /* 少数方块在库存路径下可能抛错 */
+                            } finally {
+                                GL11.glPopMatrix();
+                            }
+                        }
+                        TessellatorCaptureState.endBlock(inst);
+                        if (inst.quads.isEmpty()) {
+                            remapped[zi][ri][ci] = 0;
+                        } else {
+                            attachMaterials(inst, textureMap, samplers);
+                            JsonObject geo = bakedQuadsGeometryFromCapture(inst);
+                            List<String> tt = tooltipByCellType.get(ti);
+                            String sig = fullEqualitySignature(vs.registryId, vs.meta, vs.tileNbt, geo, tt);
+                            Integer fin = sigToFinal.get(sig);
+                            if (fin == null) {
+                                fin = Integer.valueOf(nextFinal++);
+                                sigToFinal.put(sig, fin);
+                                repForFinal.put(fin, vs);
+                                geometryForFinal.put(fin, deepCopyJsonObject(geo));
+                                opaqueForFinal.put(fin, b.isOpaqueCube());
+                                if (tt != null) {
+                                    tooltipForFinal.put(fin, tt);
+                                }
+                            }
+                            remapped[zi][ri][ci] = fin.intValue();
+                        }
+                    } finally {
+                        if (teForCapture != null && teCaptureBackup != null) {
+                            try {
+                                teForCapture.readFromNBT(teCaptureBackup);
+                            } catch (Throwable ignored) { /* 尽力恢复 */ }
+                            if (teIsMultipart) {
+                                MultipartNbtStateUtil.loadPartStatesFromNbt(teForCapture, teCaptureBackup);
+                            }
+                        }
+                    }
                 }
             }
-            cellTypeToFinal.put(ti, fin);
         }
 
         JsonArray blockPalette = new JsonArray();
@@ -621,7 +580,6 @@ public final class MeshCaptureService {
                     // NBT serialization failure shouldn't block geometry export
                 }
             }
-            // Thumbnail: render block as item to off-screen FBO and encode as base64 PNG
             try {
                 Block b = Block.getBlockFromName(r.registryId);
                 if (b != null && b != Blocks.air) {
@@ -648,17 +606,6 @@ public final class MeshCaptureService {
             }
             p.add("tooltip", ttArr);
             blockPalette.add(p);
-        }
-
-        int[][][] remapped = new int[sizeZ][sizeRow][sizeCol];
-        for (int zi = 0; zi < sizeZ; zi++) {
-            for (int ri = 0; ri < sizeRow; ri++) {
-                for (int ci = 0; ci < sizeCol; ci++) {
-                    int oldIdx = cellGrid[zi][ri][ci];
-                    remapped[zi][ri][ci] = cellTypeToFinal.getOrDefault(oldIdx, 0)
-                        .intValue();
-                }
-            }
         }
 
         structure.add("blockPalette", blockPalette);
@@ -1004,19 +951,6 @@ public final class MeshCaptureService {
             cellGridJson.add(rows);
         }
         return cellGridJson;
-    }
-
-    private static int[] findFirstCellForPaletteIndex(int[][][] cellGrid, int paletteIndex) {
-        for (int zi = 0; zi < cellGrid.length; zi++) {
-            for (int ri = 0; ri < cellGrid[zi].length; ri++) {
-                for (int ci = 0; ci < cellGrid[zi][ri].length; ci++) {
-                    if (cellGrid[zi][ri][ci] == paletteIndex) {
-                        return new int[] { zi, ri, ci };
-                    }
-                }
-            }
-        }
-        return null;
     }
 
     private static void attachMaterials(CapturedBlockInstance inst, TextureMap textureMap, SamplerTable samplers) {
