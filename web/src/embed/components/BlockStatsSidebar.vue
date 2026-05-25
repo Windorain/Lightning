@@ -8,6 +8,8 @@ const props = defineProps<{
   entries: BlockStatRow[]
   cache: BlockIconCache
   collapsed?: boolean
+  selectedBlockId?: string | null
+  tooltipMap?: Map<string, string[]>
 }>()
 
 const emit = defineEmits<{
@@ -17,6 +19,7 @@ const emit = defineEmits<{
       blockId: string; clientX: number; clientY: number; source: 'sidebar'
     } | null,
   ]
+  'select-block': [blockId: string]
 }>()
 
 const empty = computed(() => props.entries.length === 0)
@@ -31,12 +34,31 @@ function onRowPointerMove(e: PointerEvent, blockId: string): void {
 function onRowPointerLeave(): void {
   emit('tooltip-hover', null)
 }
+function onRowClick(blockId: string): void {
+  emit('select-block', blockId)
+}
 
-/** Resolve block display name from registryId (strip namespace prefix) */
+/** Format blockId MC-style: strip namespace, replace @ with : */
+function formatBlockId(id: string): string {
+  if (!id) return '???'
+  if (id === 'minecraft:air') return 'air'
+  let s = id
+  const colon = s.lastIndexOf(':')
+  if (colon >= 0) s = s.slice(colon + 1)
+  return s.replace('@', ':')
+}
+
+/** Resolve block display name: tooltip first line if available, else strip namespace */
 function displayName(row: BlockStatRow): string {
   const id = row.blockId
   if (!id) return '???'
   if (id === 'minecraft:air') return id
+  const lines = props.tooltipMap?.get(id)
+  if (lines && lines.length > 0 && lines[0]) {
+    // Strip MC color codes (§x) from tooltip line
+    const clean = lines[0].replace(/§./g, '').trim()
+    if (clean) return clean
+  }
   const colon = id.lastIndexOf(':')
   return colon >= 0 ? id.slice(colon + 1) : id
 }
@@ -80,10 +102,14 @@ function displayName(row: BlockStatRow): string {
         v-for="row in entries"
         :key="row.blockId"
         class="nei-slot-row"
-        :class="{ 'nei-slot-row--collapsed': collapsed }"
+        :class="{
+          'nei-slot-row--collapsed': collapsed,
+          'nei-slot-row--selected': row.blockId === selectedBlockId,
+        }"
         @pointerenter="onRowPointerEnter($event, row.blockId)"
         @pointermove="onRowPointerMove($event, row.blockId)"
         @pointerleave="onRowPointerLeave"
+        @click="onRowClick(row.blockId)"
         :title="collapsed ? displayName(row) : undefined"
       >
         <!-- Slot -->
@@ -96,7 +122,7 @@ function displayName(row: BlockStatRow): string {
         <template v-if="!collapsed">
           <div class="nei-slot-info">
             <div class="nei-slot-name">{{ displayName(row) }}</div>
-            <div class="nei-slot-id">{{ row.blockId }}</div>
+            <div class="nei-slot-id">{{ formatBlockId(row.blockId) }}</div>
           </div>
           <span class="nei-slot-qty">{{ row.count }}</span>
         </template>
@@ -217,6 +243,11 @@ function displayName(row: BlockStatRow): string {
 .nei-slot-row:active {
   background: var(--nei-accent-glow);
   box-shadow: inset 0 0 0 1px var(--nei-border-active);
+}
+.nei-slot-row--selected {
+  background: var(--nei-accent-glow);
+  border-left: 3px solid var(--nei-accent);
+  padding-left: 1px;
 }
 .nei-slot-row--collapsed {
   padding: 0;

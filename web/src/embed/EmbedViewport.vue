@@ -86,6 +86,91 @@ const { hover, setHover, clearHover } = usePreviewTooltip()
 const viewerCoreRef = ref<InstanceType<typeof ViewerCore> | null>(null)
 const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
+const selectedBlockId = ref<string | null>(null)
+let _highlightGroup: THREE.Group | null = null
+
+function updateBlockHighlight(blockId: string | null): void {
+  if (_highlightGroup) {
+    vpSlot.overlayGroup.value?.remove(_highlightGroup)
+    _highlightGroup.traverse((c) => {
+      if (c instanceof THREE.LineSegments) {
+        c.geometry?.dispose()
+        ;(c.material as THREE.Material)?.dispose()
+      }
+    })
+    _highlightGroup = null
+  }
+
+  if (!blockId) return
+
+  const def = vpSlot.definition.value
+  if (!def) return
+
+  const { cellGrid, blockPalette } = def
+  const sizeZ = cellGrid.length
+  const sizeRow = cellGrid[0]?.length ?? 0
+  const sizeCol = cellGrid[0]?.[0]?.length ?? 0
+  if (sizeZ === 0 || sizeRow === 0 || sizeCol === 0) return
+
+  const edges: number[] = []
+  const s = 0.52
+
+  for (let z = 0; z < sizeZ; z++) {
+    for (let row = 0; row < sizeRow; row++) {
+      const sliceRow = cellGrid[z]?.[row]
+      if (!sliceRow) continue
+      for (let col = 0; col < sizeCol; col++) {
+        const idx = sliceRow[col]
+        if (idx === undefined || idx < 0) continue
+        const entry = blockPalette[idx]
+        if (!entry) continue
+        if (blockRegistryKeyForPalette(entry.registryId, entry.meta) !== blockId) continue
+
+        const voxelY = sizeRow - 1 - row
+        const cx = col - sizeCol / 2 + 0.5
+        const cy = voxelY - sizeRow / 2 + 0.5
+        const cz = z - sizeZ / 2 + 0.5
+
+        const verts = [
+          [cx - s, cy - s, cz - s], [cx + s, cy - s, cz - s],
+          [cx + s, cy - s, cz - s], [cx + s, cy + s, cz - s],
+          [cx + s, cy + s, cz - s], [cx - s, cy + s, cz - s],
+          [cx - s, cy + s, cz - s], [cx - s, cy - s, cz - s],
+          [cx - s, cy - s, cz + s], [cx + s, cy - s, cz + s],
+          [cx + s, cy - s, cz + s], [cx + s, cy + s, cz + s],
+          [cx + s, cy + s, cz + s], [cx - s, cy + s, cz + s],
+          [cx - s, cy + s, cz + s], [cx - s, cy - s, cz + s],
+          [cx - s, cy - s, cz - s], [cx - s, cy - s, cz + s],
+          [cx + s, cy - s, cz - s], [cx + s, cy - s, cz + s],
+          [cx + s, cy + s, cz - s], [cx + s, cy + s, cz + s],
+          [cx - s, cy + s, cz - s], [cx - s, cy + s, cz + s],
+        ]
+        for (let i = 0; i < verts.length; i += 2) {
+          const p0 = verts[i], p1 = verts[i + 1]
+          edges.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2])
+        }
+      }
+    }
+  }
+
+  if (edges.length === 0) return
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3))
+  const mat = new THREE.LineBasicMaterial({ color: 0xffaa00, depthTest: true })
+  const wireframe = new THREE.LineSegments(geo, mat)
+  _highlightGroup = new THREE.Group()
+  _highlightGroup.add(wireframe)
+  vpSlot.overlayGroup.value?.add(_highlightGroup)
+}
+
+function onSidebarSelectBlock(blockId: string): void {
+  selectedBlockId.value = selectedBlockId.value === blockId ? null : blockId
+}
+
+watch(selectedBlockId, (id) => {
+  updateBlockHighlight(id)
+})
 
 function toggleFullscreen(): void {
   if (document.fullscreenElement) {
@@ -166,7 +251,12 @@ const neiTooltipText = computed(() => {
   const h = hover.value
   if (!h || h.source !== 'sidebar') return ''
   const lines = neiTooltipMap.value.get(h.blockId)
-  return lines && lines.length > 0 ? lines.map(l => renderTooltipHtml(l)).join('<br>') : ''
+  if (lines && lines.length > 0) {
+    return lines.map(l => renderTooltipHtml(l)).join('<br>')
+  }
+  // Fallback: show blockId as display name when tooltip data is missing
+  const colon = h.blockId.lastIndexOf(':')
+  return colon >= 0 ? h.blockId.slice(colon + 1) : h.blockId
 })
 
 const previewTitle = computed(() => {
@@ -342,6 +432,15 @@ onBeforeUnmount(() => {
     })
     _annoGroup = null
   }
+  if (_highlightGroup) {
+    _highlightGroup.traverse((c) => {
+      if (c instanceof THREE.LineSegments) {
+        c.geometry?.dispose()
+        ;(c.material as THREE.Material)?.dispose()
+      }
+    })
+    _highlightGroup = null
+  }
   renderAssets.disposeCachesAndLibrary()
 })
 </script>
@@ -383,8 +482,11 @@ onBeforeUnmount(() => {
         v-if="showStats && loadStatus === 'ok' && blockIconCache"
         :entries="blockStatsEntries" :cache="blockIconCache"
         :collapsed="sidebarCollapsed"
+        :selected-block-id="selectedBlockId"
+        :tooltip-map="neiTooltipMap"
         @tooltip-hover="onSidebarTooltipHover"
         @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
+        @select-block="onSidebarSelectBlock"
       />
       <div class="wm-viewport-column">
         <ViewerCore
