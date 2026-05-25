@@ -41,6 +41,9 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       return {
         pos: { x: result.column, y: worldY, z: result.zSlice },
         block_state_id: result.blockId,
+        quadIndex: result.quadIndex,
+        normal: result.normal,
+        point: result.point,
       }
     },
 

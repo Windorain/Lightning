@@ -9,6 +9,12 @@ import type { ScenePickEntity } from '@/render/interaction/scenePick'
 export interface BlockRef {
   pos: { x: number; y: number; z: number }
   block_state_id: string
+  /** 被击中的 quad 在该体素内的索引 */
+  quadIndex?: number
+  /** 命中面的世界空间法线（已归一化），用于面级别检测 */
+  normal?: { x: number; y: number; z: number }
+  /** 命中点的世界空间坐标，用于区分同法线的多个面 */
+  point?: { x: number; y: number; z: number }
   /** @internal 构建 RNA owner 时注入的网格尺寸 */
   _gridSize?: { w: number; h: number; d: number } | null
 }

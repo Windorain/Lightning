@@ -74,6 +74,14 @@ export function createKeymapHandler(
             bctx.toolRegistry.activate(binding.toolId)
             return { break: true }
           }
+          // opId invokes an operator (with tool properties merged)
+          if (binding.opId) {
+            const toolProps = tool?.properties ?? {}
+            const itemProps = binding.props ?? {}
+            const mergedProps = { ...toolProps, ...itemProps }
+            bctx.operators.invoke(binding.opId, mergedProps, event, regionId)
+            return { break: true }
+          }
           if (binding.action) {
             switch (binding.action) {
               case 'undo': bctx.operators.exec('OPERATOR_UNDO'); break

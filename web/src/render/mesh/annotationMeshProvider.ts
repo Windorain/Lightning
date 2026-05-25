@@ -5,6 +5,7 @@ import type { StructureDefinition } from '../schema/types'
 import type { MaterialLibraryApi } from '../materials/simpleMaterialLibrary'
 import type { Annotation, BoxAnnotation, PointAnnotation, LineAnnotation, TextAnnotation } from '../data/annotationTypes'
 import { isBox, isPoint, isLine, isText } from '../data/annotationTypes'
+import { computeBoxFrameBars } from '../data/aabb'
 
 export class AnnotationMeshProvider implements MeshProvider {
   priority = 50
@@ -54,19 +55,7 @@ export class AnnotationMeshProvider implements MeshProvider {
     const objOrder = overlay ? { renderOrder: 999 } : {}
 
     if (a.renderStyle === 'wireframe') {
-      const verts = boxWireframeVerts(a.min, a.max)
-      const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
-      const mat = new THREE.LineBasicMaterial({
-        color,
-        transparent: true,
-        opacity: a.renderOpacity,
-        ...matDepth,
-      })
-      const mesh = new THREE.LineSegments(geo, mat)
-      mesh.name = `anno-box-wf-${a.id}`
-      Object.assign(mesh, objOrder)
-      group.add(mesh)
+      this._buildWireframeBars(group, a, color, 0.02, a.renderOpacity, matDepth, objOrder)
     }
 
     if (a.renderStyle === 'boxFrame') {
@@ -77,19 +66,7 @@ export class AnnotationMeshProvider implements MeshProvider {
     }
 
     if (a.renderStyle === 'translucent') {
-      const verts = boxWireframeVerts(a.min, a.max)
-      const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
-      const mat = new THREE.LineBasicMaterial({
-        color,
-        transparent: true,
-        opacity: a.renderOpacity,
-        ...matDepth,
-      })
-      const mesh = new THREE.LineSegments(geo, mat)
-      mesh.name = `anno-box-wf-${a.id}`
-      Object.assign(mesh, objOrder)
-      group.add(mesh)
+      this._buildWireframeBars(group, a, color, 0.02, a.renderOpacity, matDepth, objOrder)
       this._buildBoxFill(group, a, color, a.fillOpacity, matDepth, objOrder)
     }
   }
@@ -101,40 +78,40 @@ export class AnnotationMeshProvider implements MeshProvider {
     matDepth: Record<string, unknown>,
     objOrder: Record<string, unknown>,
   ): void {
-    const t = (a.frameThickness ?? 0.04) / 2
-    const { min, max } = a
-
-    interface BarDef { cx: number; cy: number; cz: number; sx: number; sy: number; sz: number }
-    const defs: BarDef[] = []
-
-    // 4 edges along X — bars extend past corners by t so they overlap and form solid joints
-    for (const y of [min.y, max.y]) {
-      for (const z of [min.z, max.z]) {
-        const len = max.x - min.x + t * 2
-        defs.push({ cx: (min.x + max.x) / 2, cy: y, cz: z, sx: len, sy: t * 2, sz: t * 2 })
-      }
-    }
-    // 4 edges along Y
-    for (const x of [min.x, max.x]) {
-      for (const z of [min.z, max.z]) {
-        const len = max.y - min.y + t * 2
-        defs.push({ cx: x, cy: (min.y + max.y) / 2, cz: z, sx: t * 2, sy: len, sz: t * 2 })
-      }
-    }
-    // 4 edges along Z
-    for (const x of [min.x, max.x]) {
-      for (const y of [min.y, max.y]) {
-        const len = max.z - min.z + t * 2
-        defs.push({ cx: x, cy: y, cz: (min.z + max.z) / 2, sx: t * 2, sy: t * 2, sz: len })
-      }
-    }
-
+    const bars = computeBoxFrameBars(a.min, a.max, (a.frameThickness ?? 0.04) / 2)
     const mat = new THREE.MeshBasicMaterial({ color, ...matDepth })
-    for (const d of defs) {
+    for (const d of bars) {
       const geo = new THREE.BoxGeometry(d.sx, d.sy, d.sz)
       const bar = new THREE.Mesh(geo, mat)
       bar.position.set(d.cx, d.cy, d.cz)
       bar.name = `anno-box-bar-${a.id}`
+      Object.assign(bar, objOrder)
+      group.add(bar)
+    }
+  }
+
+  /** Thin wireframe bars — visually thicker than WebGL 1px LineSegments */
+  private _buildWireframeBars(
+    group: THREE.Group,
+    a: BoxAnnotation,
+    color: THREE.Color,
+    halfThickness: number,
+    opacity: number,
+    matDepth: Record<string, unknown>,
+    objOrder: Record<string, unknown>,
+  ): void {
+    const bars = computeBoxFrameBars(a.min, a.max, halfThickness)
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      ...matDepth,
+    })
+    for (const d of bars) {
+      const geo = new THREE.BoxGeometry(d.sx, d.sy, d.sz)
+      const bar = new THREE.Mesh(geo, mat)
+      bar.position.set(d.cx, d.cy, d.cz)
+      bar.name = `anno-box-wf-${a.id}`
       Object.assign(bar, objOrder)
       group.add(bar)
     }
@@ -174,7 +151,8 @@ export class AnnotationMeshProvider implements MeshProvider {
     const geo = new THREE.SphereGeometry(a.size * 0.1, 8, 8)
     const mat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(a.color),
-      depthTest: true,
+      depthTest: false,
+      depthWrite: false,
     })
     const mesh = new THREE.Mesh(geo, mat)
     mesh.position.set(a.pos.x, a.pos.y, a.pos.z)
@@ -224,17 +202,4 @@ export class AnnotationMeshProvider implements MeshProvider {
     sprite.name = `anno-text-${a.id}`
     group.add(sprite)
   }
-}
-
-function boxWireframeVerts(
-  min: { x: number; y: number; z: number },
-  max: { x: number; y: number; z: number },
-): number[] {
-  const x1 = min.x, y1 = min.y, z1 = min.z
-  const x2 = max.x, y2 = max.y, z2 = max.z
-  return [
-    x1,y1,z1, x2,y1,z1, x2,y1,z1, x2,y2,z1, x2,y2,z1, x1,y2,z1, x1,y2,z1, x1,y1,z1,
-    x1,y1,z2, x2,y1,z2, x2,y1,z2, x2,y2,z2, x2,y2,z2, x1,y2,z2, x1,y2,z2, x1,y1,z2,
-    x1,y1,z1, x1,y1,z2, x2,y1,z1, x2,y1,z2, x2,y2,z1, x2,y2,z2, x1,y2,z1, x1,y2,z2,
-  ]
 }

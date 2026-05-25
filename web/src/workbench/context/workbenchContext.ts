@@ -55,7 +55,7 @@ import { ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOp
 import { selectTool } from '@/workbench/tools/selectTool'
 import { moveTool } from '@/workbench/tools/moveTool'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
-import { boxTool, BoxGizmo } from '@/workbench/tools/boxTool'
+import { boxTool, BoxGizmo, AnnotationBoxCommitOperator, AnnotationBoxResetOperator } from '@/workbench/tools/boxTool'
 import { pointTool, PointGizmo } from '@/workbench/tools/pointTool'
 import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
 import { textTool, TextGizmo } from '@/workbench/tools/textTool'
@@ -73,6 +73,7 @@ const ALL_OPERATORS: OperatorType[] = [
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
   ThemeToggleOperator, SetLanguageOperator,
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
+  AnnotationBoxCommitOperator, AnnotationBoxResetOperator,
   ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator,
 ]
 

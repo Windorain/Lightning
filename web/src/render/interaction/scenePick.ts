@@ -20,8 +20,12 @@ export interface ScenePickBlock {
   column: number
   row: number
   zSlice: number
+  /** 被击中的 quad 在该体素内的索引 */
+  quadIndex?: number
   /** 命中面的世界空间法线（已归一化），拾取相邻位置用 */
   normal?: { x: number; y: number; z: number }
+  /** 命中点的世界空间坐标，用于区分同法线的多个面 */
+  point?: { x: number; y: number; z: number }
 }
 
 export interface ScenePickAnnotation {
@@ -41,7 +45,9 @@ export interface ScenePickEntity {
   column?: number
   row?: number
   zSlice?: number
+  quadIndex?: number
   normal?: { x: number; y: number; z: number }
+  point?: { x: number; y: number; z: number }
   // annotation fields
   annotationId?: string
   annotationType?: AnnotationType
@@ -129,7 +135,9 @@ export function scenePickFromPointer(params: ScenePickParams): ScenePickResult {
       column: entry.col,
       row: entry.row,
       zSlice: entry.zSlice,
+      quadIndex: (entry as any).quadIndex,
       normal: normalWorld ? { x: normalWorld.x, y: normalWorld.y, z: normalWorld.z } : undefined,
+      point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
     }
   }
 
@@ -206,7 +214,9 @@ export function scenePickAllFromPointer(params: ScenePickParams): ScenePickEntit
       column: entry.col,
       row: entry.row,
       zSlice: entry.zSlice,
+      quadIndex: (entry as any).quadIndex,
       normal: normalWorld ? { x: normalWorld.x, y: normalWorld.y, z: normalWorld.z } : undefined,
+      point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
     })
   }
 

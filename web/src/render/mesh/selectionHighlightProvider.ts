@@ -3,6 +3,7 @@ import type { SelectedEntity } from '@/workbench/selectionContext'
 import type { BakedQuad } from '../schema/types'
 import type { Annotation } from '../data/annotationTypes'
 import { isBox, isLine, isPoint } from '../data/annotationTypes'
+import { computeBoxFrameBars } from '../data/aabb'
 
 const HIGHLIGHT_COLOR = 0xff8800
 
@@ -337,18 +338,14 @@ export class SelectionHighlightProvider {
   }
 
   private _buildBoxOutline(a: Annotation & { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } }): void {
-    const x1 = a.min.x; const y1 = a.min.y; const z1 = a.min.z
-    const x2 = a.max.x; const y2 = a.max.y; const z2 = a.max.z
-    const verts = [
-      x1, y1, z1, x2, y1, z1, x2, y1, z1, x2, y2, z1, x2, y2, z1, x1, y2, z1, x1, y2, z1, x1, y1, z1,
-      x1, y1, z2, x2, y1, z2, x2, y1, z2, x2, y2, z2, x2, y2, z2, x1, y2, z2, x1, y2, z2, x1, y1, z2,
-      x1, y1, z1, x1, y1, z2, x2, y1, z1, x2, y1, z2, x2, y2, z1, x2, y2, z2, x1, y2, z1, x1, y2, z2,
-    ]
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
-    const mat = new THREE.LineBasicMaterial({ color: HIGHLIGHT_COLOR, linewidth: 1, depthTest: true })
-    const lines = new THREE.LineSegments(geo, mat)
-    this._group!.add(lines)
+    const bars = computeBoxFrameBars(a.min, a.max, 0.015)
+    const mat = new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLOR, depthTest: true })
+    for (const d of bars) {
+      const geo = new THREE.BoxGeometry(d.sx, d.sy, d.sz)
+      const bar = new THREE.Mesh(geo, mat)
+      bar.position.set(d.cx, d.cy, d.cz)
+      this._group!.add(bar)
+    }
   }
 
   private _buildPointHighlight(a: Annotation & { pos: { x: number; y: number; z: number }; size: number }): void {

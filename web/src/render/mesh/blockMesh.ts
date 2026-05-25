@@ -116,11 +116,11 @@ export async function buildBlockMesh(
     if (!merged) continue
 
     // Build per-triangle block identity map for scenePick
-    const triangleMap: Array<{ col: number; row: number; zSlice: number }> = []
+    const triangleMap: Array<{ col: number; row: number; zSlice: number; quadIndex: number }> = []
     for (const unit of bucket.units) {
       const faceCount = unit.geom.attributes.position.count / 3
       for (let f = 0; f < faceCount; f++) {
-        triangleMap.push({ col: unit.col, row: unit.row, zSlice: unit.zSlice })
+        triangleMap.push({ col: unit.col, row: unit.row, zSlice: unit.zSlice, quadIndex: Math.floor(f / 2) })
       }
     }
     const mat = await library.getMaterialForBatch(bucket.descriptor)
