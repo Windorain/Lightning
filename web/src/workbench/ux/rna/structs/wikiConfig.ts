@@ -68,20 +68,6 @@ export const wikiConfigRNA: RNAStruct = {
       set(o: any, v: unknown) { feat(o).showAxesGizmo = v as boolean },
     },
     {
-      name: 'iconSizePx',
-      type: 'number', label: '图标尺寸 (px)', description: '方块图标槽位像素尺寸',
-      default: 128, min: 32, max: 512,
-      get(o: any) { return o.iconSizePx },
-      set(o: any, v: unknown) { o.iconSizePx = v as number },
-    },
-    {
-      name: 'iconOrthoHalf',
-      type: 'number', label: '图标正交半尺寸', description: '图标相机的正交半高（世界单位）',
-      default: 0.85, min: 0.3, max: 5,
-      get(o: any) { return o.iconOrthoHalf },
-      set(o: any, v: unknown) { o.iconOrthoHalf = v as number },
-    },
-    {
       name: 'cameraYaw',
       type: 'number', label: '偏航角 (°)', description: '初始相机水平旋转角',
       default: 45, min: 0, max: 360,

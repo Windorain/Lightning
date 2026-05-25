@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, provide, ref, computed } from 'vue'
+import { onMounted, onBeforeUnmount, provide, ref, computed, watch } from 'vue'
 
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
 import WorkbenchSettingsDrawer from '@/workbench/components/WorkbenchSettingsDrawer.vue'
@@ -7,8 +7,10 @@ import WorkspaceTabs from '@/workbench/components/WorkspaceTabs.vue'
 import WorkbenchViewport from '@/workbench/components/WorkbenchViewport.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
-import WikiViewerWorkspace from '@/workbench/components/WikiViewerWorkspace.vue'
 import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
+import EmbedViewport from '@/embed/EmbedViewport.vue'
+import { defaultEmbedUi } from '@/preview/previewConfig'
+import type { EmbedSettings } from '@/preview/previewConfig'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
 import { provideSelectionContext } from '@/workbench/selectionContext'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
@@ -83,6 +85,31 @@ const activeHeaderPanels = computed(() =>
     .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
 
+// Wiki embed settings
+const wikiConfig = bctx.wikiConfig as Record<string, any>
+function parseHex6(s: string): number {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
+  if (!m) return 0x5a5a5a
+  return parseInt(m[1], 16)
+}
+const embedSettings = computed<EmbedSettings>(() => ({
+  features: {
+    ...defaultEmbedUi.features,
+    ...(wikiConfig.features ?? {}),
+  },
+  blockIconCacheOptions: defaultEmbedUi.blockIconCacheOptions,
+  initialLayerWorldY: defaultEmbedUi.initialLayerWorldY,
+  initialCamera: {
+    yawDeg: wikiConfig.cameraYaw,
+    elevationDeg: wikiConfig.cameraElevation,
+    zoom: wikiConfig.cameraZoom,
+  },
+  sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex ?? '#5a5a5a'),
+  loadingMessage: defaultEmbedUi.loadingMessage,
+  okMessage: defaultEmbedUi.okMessage,
+  debug: wikiConfig.features?.debugStatusBar ?? false,
+}))
+
 // Context menu
 const contextMenu = createContextMenu()
 const lastMousePosition = ref<{ x: number; y: number } | null>(null)
@@ -122,6 +149,7 @@ function handleKeydown(event: KeyboardEvent): void {
 }
 
 const workspace = ref<'preview' | 'wiki' | 'export' | 'materials'>('preview')
+watch(workspace, (v) => { bctx.uiWorkspace.value = v }, { immediate: true })
 const settingsOpen = ref(false)
 provide('workbenchSettingsOpen', settingsOpen)
 
@@ -183,7 +211,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <WorkbenchShell v-show="workspace === 'preview'">
+  <WorkbenchShell v-show="workspace === 'preview' || workspace === 'wiki'">
     <template #menubar>
       <div class="wb-menubar-inner">
         <span class="wb-brand">LIGHTNING</span>
@@ -199,7 +227,7 @@ onMounted(() => {
     <template #workspace-tabs>
       <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
     </template>
-    <template #tool-shelf>
+    <template v-if="workspace !== 'wiki'" #tool-shelf>
       <div class="wb-toolshelf">
         <UIRenderer
           v-for="panel in activeToolshelfPanels"
@@ -211,7 +239,10 @@ onMounted(() => {
       </div>
     </template>
     <template #viewport>
-      <WorkbenchViewport v-if="bctx.doc.value" />
+      <WorkbenchViewport v-if="workspace === 'preview' && bctx.doc.value" />
+      <div v-else-if="workspace === 'wiki' && bctx.doc.value" class="wb-wiki-embed">
+        <EmbedViewport :settings="embedSettings" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }" />
+      </div>
     </template>
     <template #properties>
       <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" :bctx="bctx" />
@@ -220,29 +251,6 @@ onMounted(() => {
       <StatusBar />
     </template>
   </WorkbenchShell>
-
-  <div v-if="workspace === 'wiki'" class="wb-standalone">
-    <header class="wb-standalone-menubar">
-      <div class="wb-menubar-inner">
-        <span class="wb-brand">LIGHTNING</span>
-        <UIRenderer
-          v-for="panel in activeHeaderPanels"
-          :key="panel.id"
-          :layout="panel.layout"
-          :rna="bctx.rna"
-          :owner="panel.owner"
-        />
-      </div>
-    </header>
-    <header class="wb-standalone-top">
-      <div class="wb-standalone-tabs">
-        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
-      </div>
-    </header>
-    <main class="wb-standalone-body">
-      <WikiViewerWorkspace />
-    </main>
-  </div>
 
   <WorkbenchShell v-if="workspace === 'export'">
     <template #menubar>
@@ -409,6 +417,7 @@ onMounted(() => {
 .wb-wiki-embed {
   width: 100%; height: 100%;
   display: flex; align-items: center; justify-content: center;
+  overflow: auto;
   background: var(--wb-viewport-bg);
   background-image:
     linear-gradient(var(--wb-grid-color) 1px, transparent 1px),
@@ -446,34 +455,4 @@ onMounted(() => {
 .cm-sep { margin: 4px 8px; border: none; border-top: 1px solid #555; }
 .cm-icon { margin-right: 6px; }
 
-.wb-standalone {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background: var(--nei-bg);
-  color: var(--nei-text-dark);
-}
-.wb-standalone-menubar {
-  flex-shrink: 0;
-  height: 28px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-border);
-}
-.wb-standalone-top {
-  flex-shrink: 0;
-  height: 32px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-border);
-  display: flex;
-  align-items: center;
-}
-.wb-standalone-tabs {
-  display: flex;
-  align-items: stretch;
-  height: 100%;
-}
-.wb-standalone-body {
-  flex: 1;
-  overflow-y: auto;
-}
 </style>

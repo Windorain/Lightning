@@ -10,7 +10,7 @@
 
 import { ref } from 'vue'
 import type { Ref } from 'vue'
-import type { BContext, WorkbenchWorkspaceMode } from '@/workbench/context/bContext'
+import type { BContext, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
 import type { SelectionContext } from '@/workbench/selectionContext'
 import type { UndoManager } from '@/workbench/editHistoryContext'
@@ -32,7 +32,7 @@ import {
   blockInspectorPanel, toolShelfPanel,
   transformPanel, sceneInfoPanel,
   menuBarPanel, blockStatsPanel,
-  annotationPanel,
+  annotationPanel, wikiConfigPanel,
 } from '@/workbench/ux/panels'
 
 // All builtin operators
@@ -103,6 +103,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   const structEpoch = ref(0)
   const currentWorldFrameIndex = ref(0)
   const workspaceMode = ref<WorkbenchWorkspaceMode>('local-file')
+  const uiWorkspace = ref<UIWorkspace>('preview')
   const localFileName = ref<string | null>(null)
 
   function markDirty(): void { dirty.value = true }
@@ -163,7 +164,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels.push(menuBarPanel)
   const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
-    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel,
+    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel, wikiConfigPanel,
   )
 
   // ---- 原子构造 bctx（一次性全部填入，不用 as unknown / as any 后补） ----
@@ -174,6 +175,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     structEpoch,
     currentWorldFrameIndex,
     workspaceMode,
+    uiWorkspace,
     localFileName,
     markDirty,
     markStructureDirty,

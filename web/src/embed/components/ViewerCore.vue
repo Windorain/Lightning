@@ -211,6 +211,30 @@ watch(
 
 watch(() => props.showAxesGizmo, (v) => { if (renderer) renderer.showAxesGizmo = v })
 
+watch(() => props.sceneBackground, (v) => {
+  if (scene) scene.background = new THREE.Color(v)
+})
+
+watch(() => props.initialCamera?.yawDeg, (yaw) => {
+  if (renderer && props.contentGroup && yaw != null) {
+    const cam = props.initialCamera
+    applyDiagonalOrbitView(renderer.camera, renderer.orbitTarget, {
+      yawDeg: yaw,
+      elevationFromHorizontalDeg: cam?.elevationDeg ?? 35,
+    })
+  }
+})
+
+watch(() => props.initialCamera?.elevationDeg, (elev) => {
+  if (renderer && props.contentGroup && elev != null) {
+    const cam = props.initialCamera
+    applyDiagonalOrbitView(renderer.camera, renderer.orbitTarget, {
+      yawDeg: cam?.yawDeg ?? 225,
+      elevationFromHorizontalDeg: elev,
+    })
+  }
+})
+
 watch(
   [() => props.contentGroup, () => props.layerPreviewMode],
   () => { if (lastPointer) runPick() },
