@@ -5,7 +5,7 @@ import type { StructureDefinition } from '../schema/types'
 import type { MaterialLibraryApi } from '../materials/simpleMaterialLibrary'
 import type { Annotation, BoxAnnotation, PointAnnotation, LineAnnotation, TextAnnotation, FaceAnnotation } from '../data/annotationTypes'
 import { isBox, isPoint, isLine, isText, isFace } from '../data/annotationTypes'
-import { computeBoxFrameBars, computeQuadNormal } from '../data/aabb'
+import { computeBoxFrameBars } from '../data/aabb'
 import type { BakedQuadsGeometry, BakedQuad } from '../schema/types'
 import { decodeBakedGeometry } from './bakedGeometryDecode'
 
@@ -230,9 +230,20 @@ export class AnnotationMeshProvider implements MeshProvider {
     const quad = quads[a.quadIndex]
     if (!quad || quad.vertices.length < 4) return
 
-    // Face normal for offset
-    const normal = computeQuadNormal(quad)
-    const NUDGE = 0.002
+    // Compute face normal from edge vectors, ensure outward-facing
+    const NUDGE = 0.001
+    const v0 = quad.vertices[0], v1 = quad.vertices[1], v2 = quad.vertices[2]
+    const ax = v1.x - v0.x, ay = v1.y - v0.y, az = v1.z - v0.z
+    const bx = v2.x - v0.x, by = v2.y - v0.y, bz = v2.z - v0.z
+    let nx = ay * bz - az * by
+    let ny = az * bx - ax * bz
+    let nz = ax * by - ay * bx
+    // Flip inward-pointing normals (dot with centroid should be > 0)
+    let qcx = 0, qcy = 0, qcz = 0
+    for (const v of quad.vertices) { qcx += v.x; qcy += v.y; qcz += v.z }
+    if (nx * qcx + ny * qcy + nz * qcz < 0) { nx = -nx; ny = -ny; nz = -nz }
+    const nLen = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
+    nx /= nLen; ny /= nLen; nz /= nLen
 
     // World center of the voxel
     const cx = col - sizeCol / 2 + 0.5
@@ -242,9 +253,9 @@ export class AnnotationMeshProvider implements MeshProvider {
     const verts: number[] = []
     for (const v of quad.vertices) {
       verts.push(
-        v.x + cx - 0.5 + normal.x * NUDGE,
-        v.y + cy - 0.5 + normal.y * NUDGE,
-        v.z + cz - 0.5 + normal.z * NUDGE,
+        v.x + cx - 0.5 + nx * NUDGE,
+        v.y + cy - 0.5 + ny * NUDGE,
+        v.z + cz - 0.5 + nz * NUDGE,
       )
     }
 
