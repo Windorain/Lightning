@@ -26,6 +26,8 @@ import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
+import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
+import type { BakedQuad } from '@/render/schema/types'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 
 const props = defineProps<{
@@ -87,33 +89,53 @@ const viewerCoreRef = ref<InstanceType<typeof ViewerCore> | null>(null)
 const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
 const selectedBlockId = ref<string | null>(null)
-let _highlightGroup: THREE.Group | null = null
+let _outlinePass: SelectionOutlinePass | null = null
 
-function updateBlockHighlight(blockId: string | null): void {
-  if (_highlightGroup) {
-    vpSlot.overlayGroup.value?.remove(_highlightGroup)
-    _highlightGroup.traverse((c) => {
-      if (c instanceof THREE.LineSegments) {
-        c.geometry?.dispose()
-        ;(c.material as THREE.Material)?.dispose()
-      }
-    })
-    _highlightGroup = null
+function buildBlockMaskMesh(
+  quads: BakedQuad[],
+  cx: number, cy: number, cz: number,
+): THREE.Mesh | null {
+  const corner = { x: cx - 0.5, y: cy - 0.5, z: cz - 0.5 }
+  const verts: number[] = []
+  const indices: number[] = []
+  let vi = 0
+
+  for (const q of quads) {
+    if (q.vertices.length < 4) continue
+    const v0 = vi, v1 = vi + 1, v2 = vi + 2, v3 = vi + 3
+    indices.push(v0, v1, v2, v0, v2, v3)
+    for (const v of q.vertices) {
+      verts.push(v.x + corner.x, v.y + corner.y, v.z + corner.z)
+    }
+    vi += 4
   }
 
-  if (!blockId) return
+  if (verts.length === 0) return null
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+  geo.setIndex(indices)
+  return new THREE.Mesh(geo)
+}
+
+function updateBlockHighlight(blockId: string | null): void {
+  if (!_outlinePass) return
+
+  if (!blockId) {
+    _outlinePass.setMaskMeshes([])
+    return
+  }
 
   const def = vpSlot.definition.value
-  if (!def) return
+  if (!def) { _outlinePass.setMaskMeshes([]); return }
 
   const { cellGrid, blockPalette } = def
   const sizeZ = cellGrid.length
   const sizeRow = cellGrid[0]?.length ?? 0
   const sizeCol = cellGrid[0]?.[0]?.length ?? 0
-  if (sizeZ === 0 || sizeRow === 0 || sizeCol === 0) return
+  if (sizeZ === 0 || sizeRow === 0 || sizeCol === 0) { _outlinePass.setMaskMeshes([]); return }
 
-  const edges: number[] = []
-  const s = 0.52
+  const masks: THREE.Mesh[] = []
 
   for (let z = 0; z < sizeZ; z++) {
     for (let row = 0; row < sizeRow; row++) {
@@ -131,37 +153,21 @@ function updateBlockHighlight(blockId: string | null): void {
         const cy = voxelY - sizeRow / 2 + 0.5
         const cz = z - sizeZ / 2 + 0.5
 
-        const verts = [
-          [cx - s, cy - s, cz - s], [cx + s, cy - s, cz - s],
-          [cx + s, cy - s, cz - s], [cx + s, cy + s, cz - s],
-          [cx + s, cy + s, cz - s], [cx - s, cy + s, cz - s],
-          [cx - s, cy + s, cz - s], [cx - s, cy - s, cz - s],
-          [cx - s, cy - s, cz + s], [cx + s, cy - s, cz + s],
-          [cx + s, cy - s, cz + s], [cx + s, cy + s, cz + s],
-          [cx + s, cy + s, cz + s], [cx - s, cy + s, cz + s],
-          [cx - s, cy + s, cz + s], [cx - s, cy - s, cz + s],
-          [cx - s, cy - s, cz - s], [cx - s, cy - s, cz + s],
-          [cx + s, cy - s, cz - s], [cx + s, cy - s, cz + s],
-          [cx + s, cy + s, cz - s], [cx + s, cy + s, cz + s],
-          [cx - s, cy + s, cz - s], [cx - s, cy + s, cz + s],
-        ]
-        for (let i = 0; i < verts.length; i += 2) {
-          const p0 = verts[i], p1 = verts[i + 1]
-          edges.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2])
+        const quads = entry.geometry?.quads
+        if (quads && quads.length > 0 && quads.some(q => q.vertices.length >= 4)) {
+          const mesh = buildBlockMaskMesh(quads, cx, cy, cz)
+          if (mesh) masks.push(mesh)
+        } else {
+          // Fallback: axis-aligned unit cube
+          const geo = new THREE.BoxGeometry(1, 1, 1)
+          geo.translate(cx, cy, cz)
+          masks.push(new THREE.Mesh(geo))
         }
       }
     }
   }
 
-  if (edges.length === 0) return
-
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3))
-  const mat = new THREE.LineBasicMaterial({ color: 0xffaa00, depthTest: true })
-  const wireframe = new THREE.LineSegments(geo, mat)
-  _highlightGroup = new THREE.Group()
-  _highlightGroup.add(wireframe)
-  vpSlot.overlayGroup.value?.add(_highlightGroup)
+  _outlinePass.setMaskMeshes(masks)
 }
 
 function onSidebarSelectBlock(blockId: string): void {
@@ -332,6 +338,14 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
   // Activate embed viewport slot so bctx.viewport (singular) resolves to this one
   bctx.viewports.activeId.value = EMBED_REGION
 
+  // Screen-space outline pass for block highlight
+  const outlinePass = new SelectionOutlinePass(
+    new THREE.Vector2(payload.domElement.clientWidth, payload.domElement.clientHeight),
+  )
+  outlinePass.setCamera(payload.camera as THREE.Camera)
+  payload.renderer.setOutlinePass(outlinePass)
+  _outlinePass = outlinePass
+
   renderAssets.registerScene(payload.mainScene)
   renderAssets.rebuildContentMesh().catch(e => { console.error('[EmbedViewport] rebuildContentMesh', e) })
 
@@ -432,14 +446,9 @@ onBeforeUnmount(() => {
     })
     _annoGroup = null
   }
-  if (_highlightGroup) {
-    _highlightGroup.traverse((c) => {
-      if (c instanceof THREE.LineSegments) {
-        c.geometry?.dispose()
-        ;(c.material as THREE.Material)?.dispose()
-      }
-    })
-    _highlightGroup = null
+  if (_outlinePass) {
+    _outlinePass.dispose()
+    _outlinePass = null
   }
   renderAssets.disposeCachesAndLibrary()
 })
