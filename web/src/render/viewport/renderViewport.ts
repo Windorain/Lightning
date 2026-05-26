@@ -105,6 +105,10 @@ export class View3DRenderer {
   renderOverlay(overlayScene: THREE.Scene): void {
     if (!this.isGlUsable()) return
     this.renderer.autoClear = false
+    // Clear depth buffer: main scene was rendered through EffectComposer
+    // (internal RTs), so screen depth only has the OutputPass FSQ at z≈0.
+    // Overlay objects with depthTest would fail against it.
+    this.renderer.clearDepth()
     this.renderer.render(overlayScene, this.camera)
     this.renderer.autoClear = true
   }
