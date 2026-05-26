@@ -3,7 +3,6 @@ import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout, UILayoutItem } from '../types/layout'
 import type { BlockRef } from '@/workbench/selectionContext'
-
 function singleBlockLayout(bctx: BContext, item: BlockRef): UILayoutItem[] {
   const paletteEntry = bctx.queries.getBlockPaletteEntry(item.pos)
   const items: UILayoutItem[] = []
@@ -24,21 +23,22 @@ function singleBlockLayout(bctx: BContext, item: BlockRef): UILayoutItem[] {
       items.push({ kind: 'label', text: `渲染模式: ${paletteEntry.renderMode}` })
     }
     if (paletteEntry.tooltip && paletteEntry.tooltip.length > 0) {
-      const tipItems: UILayoutItem[] = paletteEntry.tooltip.map((t: string) =>
-        ({ kind: 'label' as const, text: t })
-      )
       items.push(
         { kind: 'separator' },
-        { kind: 'box', label: 'Tooltip', items: tipItems },
+        { kind: 'box', label: 'Tooltip', items: [
+          { kind: 'widget', widget: 'tooltip-preview', props: { lines: paletteEntry.tooltip } },
+        ]},
       )
     }
     if (paletteEntry.nbt && Object.keys(paletteEntry.nbt).length > 0) {
-      const nbtItems: UILayoutItem[] = Object.entries(paletteEntry.nbt).map(([key, val]) =>
-        ({ kind: 'label' as const, text: `${key}: ${typeof val === 'object' ? JSON.stringify(val) : val}` })
-      )
+      const jsonText = '\n' + JSON.stringify(paletteEntry.nbt, null, 2)
       items.push(
         { kind: 'separator' },
-        { kind: 'box', label: 'NBT', items: nbtItems },
+        { kind: 'box', label: 'NBT', items: [
+          { kind: 'scroll', items: [
+            { kind: 'label', text: jsonText },
+          ]},
+        ]},
       )
     }
     if (paletteEntry.facing) {

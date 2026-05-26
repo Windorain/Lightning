@@ -53,7 +53,7 @@ export interface UIScroll {
   items: UILayoutItem[]
 }
 
-export type UILayoutItem = UILayout | UIProperty | UIOperator | UILabel | UISeparator | UIMenu
+export type UILayoutItem = UILayout | UIProperty | UIOperator | UILabel | UISeparator | UIMenu | UIWidget
 
 export interface UIProperty {
   kind: 'property'
@@ -76,6 +76,10 @@ export interface UILabel {
   kind: 'label'
   text: string
   icon?: string
+  /** Render text as innerHTML instead of text content (for tooltip preview etc.) */
+  html?: boolean
+  /** Override default CSS class */
+  class?: string
 }
 
 export interface UISeparator {
@@ -87,4 +91,10 @@ export interface UIMenu {
   label: string
   icon?: string
   items: (UIOperator | UILabel | UISeparator)[]
+}
+
+export interface UIWidget {
+  kind: 'widget'
+  widget: string
+  props?: Record<string, unknown>
 }
