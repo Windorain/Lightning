@@ -6,6 +6,7 @@ const props = defineProps<{
   text: string
   clientX: number
   clientY: number
+  offset?: number
 }>()
 
 const root = ref<HTMLElement | null>(null)
@@ -13,7 +14,7 @@ const boxStyle = ref<Record<string, string>>({ left: '0px', top: '0px' })
 
 const html = computed(() => renderTooltipHtml(props.text))
 
-const PAD = 12
+const pad = computed(() => props.offset ?? 12)
 
 function clampTooltipPosition(): void {
   const el = root.value
@@ -21,10 +22,10 @@ function clampTooltipPosition(): void {
   const vw = window.innerWidth
   const vh = window.innerHeight
   const r = el.getBoundingClientRect()
-  let left = props.clientX + PAD
-  let top = props.clientY + PAD
+  let left = props.clientX + pad.value
+  let top = props.clientY + pad.value
   if (left + r.width > vw - 8) {
-    left = props.clientX - r.width - PAD
+    left = props.clientX - r.width - pad.value
   }
   if (left < 8) left = 8
   if (top + r.height > vh - 8) {
@@ -38,11 +39,11 @@ function clampTooltipPosition(): void {
 }
 
 watch(
-  () => [props.clientX, props.clientY, props.text] as const,
+  () => [props.clientX, props.clientY, props.text, props.offset] as const,
   async () => {
     boxStyle.value = {
-      left: `${props.clientX + PAD}px`,
-      top: `${props.clientY + PAD}px`,
+      left: `${props.clientX + pad.value}px`,
+      top: `${props.clientY + pad.value}px`,
     }
     await nextTick()
     clampTooltipPosition()

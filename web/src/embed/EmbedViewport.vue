@@ -24,7 +24,7 @@ import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
-import { usePreferences } from '@/workbench/preferences'
+import { usePreferences } from '@/preview/preferences'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
@@ -632,10 +632,10 @@ onBeforeUnmount(() => {
       <span class="wm-status-text">{{ statusSummary }}</span>
     </div>
 
-    <ToolTipBox v-if="prefs.showHoverTooltip && hover && tooltipDisplayText" :text="tooltipDisplayText" :client-x="hover.clientX" :client-y="hover.clientY" />
-    <ToolTipBox v-if="hover && neiTooltipText" :text="neiTooltipText" :client-x="hover.clientX" :client-y="hover.clientY" />
-    <ToolTipBox v-if="annotationHover && annotationTooltipText" :text="annotationTooltipText" :client-x="annotationHover.clientX" :client-y="annotationHover.clientY" />
-    <ToolTipBox v-if="metaHintPointer && metaTooltipText" :text="metaTooltipText" :client-x="metaHintPointer.clientX" :client-y="metaHintPointer.clientY" />
+    <ToolTipBox v-if="prefs.showHoverTooltip && hover && tooltipDisplayText" :text="tooltipDisplayText" :client-x="hover.clientX" :client-y="hover.clientY" :offset="prefs.tooltipOffset" />
+    <ToolTipBox v-if="hover && neiTooltipText" :text="neiTooltipText" :client-x="hover.clientX" :client-y="hover.clientY" :offset="prefs.tooltipOffset" />
+    <ToolTipBox v-if="annotationHover && annotationTooltipText" :text="annotationTooltipText" :client-x="annotationHover.clientX" :client-y="annotationHover.clientY" :offset="prefs.tooltipOffset" />
+    <ToolTipBox v-if="metaHintPointer && metaTooltipText" :text="metaTooltipText" :client-x="metaHintPointer.clientX" :client-y="metaHintPointer.clientY" :offset="prefs.tooltipOffset" />
 
     <!-- 设置面板 -->
     <Transition name="fade">
@@ -653,6 +653,10 @@ onBeforeUnmount(() => {
             <label class="wm-settings-row">
               <span class="wm-settings-label">鼠标悬浮显示物品名称</span>
               <input type="checkbox" v-model="prefs.showHoverTooltip" />
+            </label>
+            <label class="wm-settings-row">
+              <span class="wm-settings-label">提示框距光标偏移 {{ prefs.tooltipOffset }}px</span>
+              <input type="range" min="4" max="48" v-model.number="prefs.tooltipOffset" />
             </label>
           </div>
         </div>

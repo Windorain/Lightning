@@ -6,7 +6,7 @@ import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControl
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
 import { useSelectionContext, type BlockRef } from '@/workbench/selectionContext'
 import { useBContext } from '@/workbench/context/bContext'
-import { usePreferences } from '@/workbench/preferences'
+import { usePreferences } from '@/preview/preferences'
 import { createRenderAssets } from '@/workbench/context/sceneLifecycle'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
@@ -94,6 +94,7 @@ function createToolContext(): ToolContext {
     pickAll: (e) => bctx.queries.pickAll(e),
     getCurrentFrame: () => bctx.queries.getCurrentFrame(),
     gridCenterWorld: (pos) => bctx.queries.gridCenterWorld(pos),
+    getBlockGeometry: (pos) => bctx.queries.getBlockGeometry(pos),
     invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
     activeTool: bctx.toolRegistry.activeTool,
     modalDepth: (rid: string) => bctx.eventDispatcher.modalDepth(rid),
