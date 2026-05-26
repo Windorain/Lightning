@@ -6,6 +6,12 @@ import type { RNARegistry } from './rna/types'
 import RNAWidget from './RNAWidget.vue'
 import OperatorBtn from './OperatorBtn.vue'
 import UIMenu from './UIMenu.vue'
+import ToolTipPreview from './ToolTipPreview.vue'
+import type { Component } from 'vue'
+
+const widgetRegistry: Record<string, Component> = {
+  'tooltip-preview': ToolTipPreview,
+}
 
 const props = defineProps<{
   layout: UILayout
@@ -28,12 +34,22 @@ function renderItem(item: UILayoutItem, prefix: string, index: number): VNode {
     }
     case 'operator':
       return h(OperatorBtn, { opId: item.id, label: item.label, icon: item.icon, title: item.title, operatorProps: item.props, 'data-layout-id': layoutId })
-    case 'label':
-      return h('span', { class: 'ux-label', 'data-layout-id': layoutId }, item.text)
+    case 'label': {
+      const cls = item.class ?? 'ux-label'
+      if (item.html) {
+        return h('span', { class: cls, 'data-layout-id': layoutId, innerHTML: item.text })
+      }
+      return h('span', { class: cls, 'data-layout-id': layoutId }, item.text)
+    }
     case 'separator':
       return h('hr', { class: 'ux-sep', 'data-layout-id': layoutId })
     case 'menu':
       return h(UIMenu, { label: item.label, icon: item.icon, items: item.items, 'data-layout-id': layoutId })
+    case 'widget': {
+      const comp = widgetRegistry[item.widget]
+      if (!comp) return h('span', {}, '(unknown widget)')
+      return h(comp, { ...item.props, 'data-layout-id': layoutId })
+    }
     default:
       return h('span', {}, '')
   }
@@ -90,6 +106,7 @@ function renderLayout(l: UILayout, key: string): VNode {
   background: var(--wb-bg-surface);
 }
 .ux-box-label {
+  display: block;
   font-size: 10px;
   font-weight: 600;
   color: var(--wb-text-dim);
