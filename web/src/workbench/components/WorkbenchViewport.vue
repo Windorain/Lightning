@@ -13,6 +13,7 @@ import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
 import type { Annotation } from '@/render/data/annotationTypes'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
+import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 import * as THREE from 'three'
 
 const selection = useSelectionContext()
@@ -89,8 +90,17 @@ function createToolContext(): ToolContext {
 }
 
 /* ---- Viewport events ---- */
-async function onViewportReady({ scene, layers, camera, domElement, orbitTarget }: ViewerCoreReadyPayload): Promise<void> {
-  renderAssets.registerScene(scene)
+async function onViewportReady({ mainScene, overlayScene: _overlayScene, layers, camera, domElement, orbitTarget, renderer: vpRenderer }: ViewerCoreReadyPayload): Promise<void> {
+  renderAssets.registerScene(mainScene)
+
+  // Create and register screen-space outline pass
+  const outlinePass = new SelectionOutlinePass(
+    new THREE.Vector2(domElement.clientWidth, domElement.clientHeight),
+  )
+  outlinePass.setCamera(camera as THREE.Camera)
+  vpRenderer.setOutlinePass(outlinePass)
+  _outlinePass = outlinePass
+
   try { await renderAssets.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
 
   vpSlot.orbitTarget.value = orbitTarget
@@ -154,9 +164,9 @@ let gizmoRafId: number | undefined
 let _alive = true
 let toolCtx: ToolContext | null = null
 
-// ---- Selection highlight ----
+// ---- Selection highlight (screen-space outline) ----
 const highlightProvider = new SelectionHighlightProvider()
-let _selHighlightGroup: THREE.Group | null = null
+let _outlinePass: SelectionOutlinePass | null = null
 
 // ---- Annotation overlay ----
 let _annoGroup: THREE.Group | null = null
@@ -194,28 +204,20 @@ function updateAnnotationOverlay(): void {
 }
 
 function updateSelectionHighlight(): void {
-  if (_selHighlightGroup) {
-    bctx.viewport.overlayGroup.value?.remove(_selHighlightGroup)
-    _selHighlightGroup = null
-  }
+  if (!_outlinePass) return
 
   const items = selection.items.value
-  if (items.size === 0 || items.size > 500) return
+  if (items.size === 0 || items.size > 500) {
+    _outlinePass.setMaskMeshes([])
+    return
+  }
 
-  const doc = bctx.doc.value as Record<string, any> | null
-  const annos: Annotation[] = doc?.annotations ?? []
-
-  const group = highlightProvider.build(
+  const masks = highlightProvider.build(
     items,
-    annos,
     (pos) => bctx.queries.getBlockGeometry(pos),
     (pos) => bctx.queries.gridCenterWorld(pos),
-    bctx.viewport.camera.value,
   )
-  if (group.children.length > 0) {
-    _selHighlightGroup = group
-    bctx.viewport.overlayGroup.value?.add(_selHighlightGroup)
-  }
+  _outlinePass.setMaskMeshes(masks)
 }
 
 function updateOverlay(): void {
@@ -247,9 +249,9 @@ onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())
   _alive = false
   if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
-  if (_selHighlightGroup) {
-    bctx.viewport.overlayGroup.value?.remove(_selHighlightGroup)
-    _selHighlightGroup = null
+  if (_outlinePass) {
+    _outlinePass.dispose()
+    _outlinePass = null
   }
   highlightProvider.dispose()
   renderAssets.disposeCachesAndLibrary()

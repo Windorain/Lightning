@@ -332,7 +332,7 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
   // Activate embed viewport slot so bctx.viewport (singular) resolves to this one
   bctx.viewports.activeId.value = EMBED_REGION
 
-  renderAssets.registerScene(payload.scene)
+  renderAssets.registerScene(payload.mainScene)
   renderAssets.rebuildContentMesh().catch(e => { console.error('[EmbedViewport] rebuildContentMesh', e) })
 
   updateAnnotationOverlay()

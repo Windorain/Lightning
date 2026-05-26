@@ -20,11 +20,13 @@ import type { StructureDefinition } from '@/render/schema/types'
 import type { InitialCamera } from '@/preview/previewConfig'
 
 export interface ViewerCoreReadyPayload {
-  scene: THREE.Scene
+  mainScene: THREE.Scene
+  overlayScene: THREE.Scene
   layers: { structure: THREE.Group; decal: THREE.Group; overlay: THREE.Group }
   camera: THREE.Camera
   domElement: HTMLElement
   orbitTarget: THREE.Vector3
+  renderer: View3DRenderer
 }
 
 const ORTHO_FRUSTUM_REF_HALF_FOV_DEG = 25
@@ -46,13 +48,7 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  ready: [{
-    scene: THREE.Scene
-    layers: { structure: THREE.Group; decal: THREE.Group; overlay: THREE.Group }
-    camera: THREE.Camera
-    domElement: HTMLElement
-    orbitTarget: THREE.Vector3
-  }]
+  ready: [ViewerCoreReadyPayload]
   'hover-block': [
     payload: {
       blockId: string; clientX: number; clientY: number
@@ -68,7 +64,10 @@ defineExpose({
   screenshot() {
     const canvas = renderer?.domElement
     if (!canvas) return
-    if (renderer && scene) renderer.render(scene)
+    if (renderer && mainScene && overlayScene) {
+        renderer.renderMain()
+        renderer.renderOverlay(overlayScene)
+      }
     const dataUrl = canvas.toDataURL('image/png')
     const a = document.createElement('a')
     a.href = dataUrl
@@ -91,7 +90,8 @@ function clampOrthoZoom(value: unknown): number {
 const container = ref<HTMLDivElement | null>(null)
 
 let renderer: View3DRenderer | null = null
-let scene: THREE.Scene | null = null
+let mainScene: THREE.Scene | null = null
+let overlayScene: THREE.Scene | null = null
 let layers: { structure: THREE.Group; decal: THREE.Group; overlay: THREE.Group } | null = null
 let animationId = 0
 let layoutResizeRaf: number | null = null
@@ -208,7 +208,7 @@ watch(
 watch(() => props.showAxesGizmo, (v) => { if (renderer) renderer.showAxesGizmo = v })
 
 watch(() => props.sceneBackground, (v) => {
-  if (scene) scene.background = new THREE.Color(v)
+  if (mainScene) mainScene.background = new THREE.Color(v)
 })
 
 watch(() => props.initialCamera?.yawDeg, (yaw) => {
@@ -240,16 +240,17 @@ onMounted(() => {
   const el = container.value
   if (!el) return
 
-  scene = new THREE.Scene()
-  scene.background = new THREE.Color(props.sceneBackground)
-
+  mainScene = new THREE.Scene()
+  mainScene.background = new THREE.Color(props.sceneBackground)
+  overlayScene = new THREE.Scene()
 
   layers = {
     structure: new THREE.Group(),
     decal: new THREE.Group(),
     overlay: new THREE.Group(),
   }
-  scene.add(layers.structure, layers.decal, layers.overlay)
+  mainScene.add(layers.structure, layers.decal)
+  overlayScene.add(layers.overlay)
 
   const vp = new View3DRenderer(el, el.clientWidth, el.clientHeight)
   renderer = vp
@@ -303,6 +304,8 @@ onMounted(() => {
 
   applySizeFromEl()
 
+  vp.initComposer(mainScene!)
+
   let lastContentGroup: THREE.Group | null = null
 
   const clock = new THREE.Clock()
@@ -317,17 +320,20 @@ onMounted(() => {
       if (props.contentGroup) layers!.structure.add(props.contentGroup)
     }
 
-    vp.render(scene!)
+      vp.renderMain()
+    vp.renderOverlay(overlayScene!)
     vp.renderGizmo()
   }
   tick()
 
   emit('ready', {
-    scene,
+    mainScene: mainScene!,
+    overlayScene: overlayScene!,
     layers: layers!,
     camera: vp.camera,
     domElement: vp.domElement,
     orbitTarget: vp.orbitTarget,
+    renderer: vp,
   })
 })
 
