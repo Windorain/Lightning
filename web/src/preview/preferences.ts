@@ -5,6 +5,8 @@ export interface ViewerPreferences {
   highlightOnHover: boolean
   /** 鼠标悬浮时弹出物品名称提示框 */
   showHoverTooltip: boolean
+  /** 显示注解层 */
+  showAnnotations: boolean
   /** 提示框距光标偏移量 (px) */
   tooltipOffset: number
 }
@@ -12,6 +14,7 @@ export interface ViewerPreferences {
 const DEFAULTS: ViewerPreferences = {
   highlightOnHover: true,
   showHoverTooltip: true,
+  showAnnotations: true,
   tooltipOffset: 12,
 }
 
