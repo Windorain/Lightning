@@ -1,7 +1,6 @@
 // web/src/workbench/tools/faceTool.ts
 import type { Tool, ToolGizmo, ToolContext } from './tool'
 import * as THREE from 'three'
-import { computeQuadNormal } from '@/render/data/aabb'
 
 export const faceTool: Tool = {
   id: 'annotation-face',
@@ -76,9 +75,20 @@ export class FaceGizmo implements ToolGizmo {
     const center = ctx.gridCenterWorld(pos)
     if (!center) return
 
-    // Build face geometry from quad vertices (local coords → world offset)
-    const normal = computeQuadNormal(quad)
-    const NUDGE = 0.002
+    // Compute face normal from edge vectors, ensure outward-facing
+    const NUDGE = 0.001
+    const v0 = quad.vertices[0], v1 = quad.vertices[1], v2 = quad.vertices[2]
+    const ax = v1.x - v0.x, ay = v1.y - v0.y, az = v1.z - v0.z
+    const bx = v2.x - v0.x, by = v2.y - v0.y, bz = v2.z - v0.z
+    let nx = ay * bz - az * by
+    let ny = az * bx - ax * bz
+    let nz = ax * by - ay * bx
+    let qcx = 0, qcy = 0, qcz = 0
+    for (const v of quad.vertices) { qcx += v.x; qcy += v.y; qcz += v.z }
+    if (nx * qcx + ny * qcy + nz * qcz < 0) { nx = -nx; ny = -ny; nz = -nz }
+    const nLen = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
+    nx /= nLen; ny /= nLen; nz /= nLen
+
     const verts: number[] = []
     const cx = center.x - 0.5
     const cy = center.y - 0.5
@@ -86,9 +96,9 @@ export class FaceGizmo implements ToolGizmo {
 
     for (const v of quad.vertices) {
       verts.push(
-        v.x + cx + normal.x * NUDGE,
-        v.y + cy + normal.y * NUDGE,
-        v.z + cz + normal.z * NUDGE,
+        v.x + cx + nx * NUDGE,
+        v.y + cy + ny * NUDGE,
+        v.z + cz + nz * NUDGE,
       )
     }
 
@@ -108,6 +118,7 @@ export class FaceGizmo implements ToolGizmo {
     })
 
     this._mesh = new THREE.Mesh(geo, mat)
+    this._mesh.raycast = () => {} // Don't self-intercept the pick
     ctx.viewport.overlayGroup.value?.add(this._mesh)
   }
 

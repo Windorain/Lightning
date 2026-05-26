@@ -203,7 +203,8 @@ export function pickAtPointer(params: ScenePickParams): ScenePickResult {
   const meshDist = effMesh?.distance ?? Infinity
   const aabbDist = aabbResult?.distance ?? Infinity
 
-  if (aabbDist < meshDist && aabbResult) {
+  // Annotation bias: at same depth, annotation wins over block
+  if (aabbResult && aabbDist <= meshDist + 0.005) {
     return { kind: 'annotation', distance: aabbResult.distance, annotationId: aabbResult.annotationId, point: { x: 0, y: 0, z: 0 } }
   }
   return effMesh
