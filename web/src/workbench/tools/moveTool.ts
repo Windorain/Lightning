@@ -11,4 +11,9 @@ export const moveTool: Tool = {
     { type: 'KEY', key: 'g', toolId: 'move', description: '移动工具' },
   ],
   properties: {},
+  hints: [
+    { keys: ['Drag'], action: '沿轴移动' },
+    { keys: ['Shift'], action: '精确模式' },
+    { keys: ['Esc'], action: '取消' },
+  ],
 }

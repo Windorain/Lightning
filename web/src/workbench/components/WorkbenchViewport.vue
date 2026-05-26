@@ -14,6 +14,8 @@ import type { ToolContext } from '@/workbench/tools/tool'
 import type { Annotation } from '@/render/data/annotationTypes'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
+import ToolHintsBar from '@/workbench/ux/ToolHintsBar.vue'
+import type { ToolHint } from '@/workbench/tools/tool'
 import * as THREE from 'three'
 
 const selection = useSelectionContext()
@@ -164,6 +166,11 @@ let gizmoRafId: number | undefined
 let _alive = true
 let toolCtx: ToolContext | null = null
 
+// ---- Tool hints ----
+const toolHints = computed<ToolHint[]>(() => {
+  return bctx.toolRegistry.activeTool.value?.hints ?? []
+})
+
 // ---- Selection highlight (screen-space outline) ----
 const highlightProvider = new SelectionHighlightProvider()
 let _outlinePass: SelectionOutlinePass | null = null
@@ -261,6 +268,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="wv-root">
     <div class="wv-viewport-wrap">
+      <ToolHintsBar :hints="toolHints" />
     <ViewerCore
       v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
       :definition="structureDefinition"
@@ -319,7 +327,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .wv-root { width: 100%; height: 100%; position: relative; display: flex; flex-direction: column; }
-.wv-viewport-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wv-viewport-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .wv-placeholder {
   display: flex;
   flex-direction: column;

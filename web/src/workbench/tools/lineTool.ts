@@ -23,6 +23,10 @@ export const lineTool: Tool = {
     { type: 'KEY', key: 'l', toolId: 'annotation-line', description: '线段工具' },
     { type: 'MOUSE', button: 0, description: '（线段绘制由 Gizmo 处理）' },
   ],
+  hints: [
+    { keys: ['Click'], action: '添加端点' },
+    { keys: ['2×Click'], action: '创建线段' },
+  ],
 }
 
 export class LineGizmo implements ToolGizmo {

@@ -23,6 +23,10 @@ export const textTool: Tool = {
     { type: 'KEY', key: 't', toolId: 'annotation-text', description: '文本标签工具' },
     { type: 'MOUSE', button: 0, description: '（文本放置由 Gizmo 处理）' },
   ],
+  hints: [
+    { keys: ['Click'], action: '放置文本' },
+    { keys: ['面板'], action: '编辑文字内容' },
+  ],
 }
 
 export class TextGizmo implements ToolGizmo {

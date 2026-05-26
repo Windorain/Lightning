@@ -22,6 +22,9 @@ export const pointTool: Tool = {
     { type: 'KEY', key: 'p', toolId: 'annotation-point', description: '标记点工具' },
     { type: 'MOUSE', button: 0, description: '（标记点放置由 Gizmo 处理）' },
   ],
+  hints: [
+    { keys: ['Click'], action: '放置标记点' },
+  ],
 }
 
 export class PointGizmo implements ToolGizmo {

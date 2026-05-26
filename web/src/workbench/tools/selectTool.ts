@@ -10,4 +10,8 @@ export const selectTool: Tool = {
   keymap: [
     { type: 'MOUSE', button: 0, opId: 'OPERATOR_SELECT', description: '选择方块' },
   ],
+  hints: [
+    { keys: ['Click'], action: '选择方块' },
+    { keys: ['Ctrl', 'Click'], action: '追加选择' },
+  ],
 }

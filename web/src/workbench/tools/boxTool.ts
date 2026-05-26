@@ -119,6 +119,14 @@ export const boxTool: Tool = {
     { type: 'KEY', key: 'Escape', opId: 'ANNOTATION_BOX_RESET', description: '重置面选择' },
     { type: 'MOUSE', button: 0, description: '选择面 / 累加面组' },
   ],
+  hints: [
+    { keys: ['Click'], action: '选择面组' },
+    { keys: ['Shift', 'Click'], action: '强制合并' },
+    { keys: ['Ctrl', 'Click'], action: '独立盒子' },
+    { keys: ['Click 虚空'], action: '重置选择' },
+    { keys: ['Enter'], action: '确认创建' },
+    { keys: ['Esc'], action: '取消' },
+  ],
 }
 
 // ── Gizmo ──

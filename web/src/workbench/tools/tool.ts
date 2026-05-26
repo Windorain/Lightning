@@ -6,6 +6,11 @@ import type { InputBinding } from '@/workbench/keymap'
 import type { Frame } from '@/render/schema/types'
 import type { ScenePickEntity } from '@/render/interaction/scenePick'
 
+export interface ToolHint {
+  keys: string[]
+  action: string
+}
+
 /** Tool 是纯数据结构，没有方法。交互走 Gizmo，数据改写走 Operator。 */
 export interface Tool {
   id: string
@@ -24,6 +29,8 @@ export interface Tool {
   properties?: Record<string, unknown>
   /** 工具级覆盖色 */
   color?: string
+  /** 修饰键功能提示（悬浮在 viewport 右下角） */
+  hints?: ToolHint[]
 }
 
 /** Gizmo 是交互+渲染入口。一个 Tool 可以关联零个或一个 Gizmo。 */
