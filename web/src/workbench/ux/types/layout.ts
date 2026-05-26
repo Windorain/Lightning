@@ -7,6 +7,13 @@ export function hasLayoutItems(layout: UILayout): layout is LayoutWithItems {
   return layout.kind !== 'split'
 }
 
+const LAYOUT_KINDS = new Set(['row', 'column', 'box', 'split', 'panel', 'scroll'])
+
+export function isLayoutContainer(item: UILayoutItem): item is UILayout {
+  if (typeof item !== 'object' || item === null) return false
+  return LAYOUT_KINDS.has((item as { kind?: string }).kind as string)
+}
+
 export interface UIRow {
   kind: 'row'
   align: boolean

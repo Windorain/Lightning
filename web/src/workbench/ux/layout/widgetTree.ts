@@ -1,5 +1,5 @@
-import type { UILayout, UILayoutItem } from '../types/layout'
-import { hasLayoutItems } from '../types/layout'
+import type { UILayout } from '../types/layout'
+import { hasLayoutItems, isLayoutContainer } from '../types/layout'
 import type { Rect } from '../types/screen'
 
 export interface WidgetRect {
@@ -116,8 +116,3 @@ function advance(cursor: { x: number; y: number }, distance: number, isRow: bool
   }
 }
 
-function isLayoutContainer(item: UILayoutItem): item is UILayout {
-  if (typeof item !== 'object' || item === null) return false
-  const k = (item as { kind?: string }).kind
-  return k !== undefined && ['row', 'column', 'box', 'split', 'panel', 'scroll'].includes(k)
-}

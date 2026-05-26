@@ -9,10 +9,12 @@ export const moveTool: Tool = {
   operator: 'OPERATOR_MOVE',
   keymap: [
     { type: 'KEY', key: 'g', toolId: 'move', description: '移动工具' },
+    { type: 'MOUSE', button: 0, opId: 'OPERATOR_MOVE', description: '自由移动/选择' },
   ],
   properties: {},
   hints: [
-    { keys: ['Drag'], action: '沿轴移动' },
+    { keys: ['Drag'], action: '自由移动' },
+    { keys: ['X', 'Y', 'Z'], action: '锁定轴向' },
     { keys: ['Shift'], action: '精确模式' },
     { keys: ['Esc'], action: '取消' },
   ],

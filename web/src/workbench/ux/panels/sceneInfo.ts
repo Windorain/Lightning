@@ -8,6 +8,7 @@ export const sceneInfoPanel: PanelDeclaration = {
   label: '场景信息',
   spaceType: SpaceType.PROPERTIES,
   regionType: RegionType.MAIN,
+  workspaces: ['preview', 'wiki'],
 
   poll(): boolean { return true },
   owner(ctx: BContext): unknown { return ctx.doc.value },

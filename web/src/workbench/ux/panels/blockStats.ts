@@ -8,6 +8,7 @@ export const blockStatsPanel: PanelDeclaration = {
   label: '方块统计',
   spaceType: SpaceType.PROPERTIES,
   regionType: RegionType.MAIN,
+  workspaces: ['preview'],
 
   poll(): boolean { return true },
 

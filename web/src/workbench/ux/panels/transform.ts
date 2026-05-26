@@ -8,6 +8,7 @@ export const transformPanel: PanelDeclaration = {
   label: '变换',
   spaceType: SpaceType.PROPERTIES,
   regionType: RegionType.MAIN,
+  workspaces: ['preview'],
 
   poll(ctx: BContext): boolean {
     return ctx.toolRegistry.activeTool.value?.id === 'move'

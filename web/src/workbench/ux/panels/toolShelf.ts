@@ -8,6 +8,7 @@ export const toolShelfPanel: PanelDeclaration = {
   label: '工具',
   spaceType: SpaceType.VIEW_3D,
   regionType: RegionType.TOOLSHELF,
+  workspaces: ['preview'],
 
   poll(): boolean { return true },
   owner(ctx: BContext): unknown { return ctx.settings },

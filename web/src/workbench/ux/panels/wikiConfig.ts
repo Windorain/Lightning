@@ -8,8 +8,9 @@ export const wikiConfigPanel: PanelDeclaration = {
   label: '嵌入配置',
   spaceType: SpaceType.PROPERTIES,
   regionType: RegionType.MAIN,
+  workspaces: ['wiki'],
 
-  poll(ctx: BContext): boolean { return ctx.uiWorkspace.value === 'wiki' },
+  poll(): boolean { return true },
   owner(ctx: BContext): unknown { return ctx.wikiConfig },
   layout(_ctx: BContext): UILayout {
     return {

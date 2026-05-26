@@ -1,4 +1,5 @@
 import type { BContext } from '@/workbench/context/bContext'
+import type { UIWorkspace } from '@/workbench/context/bContext'
 import type { UILayout } from './layout'
 import type { SpaceType, RegionType } from './screen'
 import type { Component } from 'vue'
@@ -9,6 +10,8 @@ export interface PanelDeclaration {
   icon?: string
   spaceType: SpaceType
   regionType: RegionType
+  /** The workspace(s) where this panel should appear. Undefined = all workspaces. */
+  workspaces?: UIWorkspace[]
   poll(ctx: BContext): boolean
   layout(ctx: BContext): UILayout
   /** The owner object passed to RNAWidget for property get/set. null = no owner. */

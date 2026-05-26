@@ -19,6 +19,7 @@ export const annotationPanel: PanelDeclaration = {
   label: '注解属性',
   spaceType: SpaceType.PROPERTIES,
   regionType: RegionType.MAIN,
+  workspaces: ['preview'],
 
   poll(ctx: BContext): boolean {
     return activeAnnotation(ctx) !== null

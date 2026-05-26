@@ -256,31 +256,52 @@ export class MoveGizmo implements ToolGizmo {
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
     const hit = this.hitTest(raycaster)
-    if (!hit || hit.length !== 1) return
+    if (!hit) return
 
-    // Compute axis screen direction and pixel-to-world scale
+    function project(origin: THREE.Vector3, dir: THREE.Vector3) {
+      const p1 = origin.clone().project(camera!)
+      const p2 = origin.clone().add(dir).project(camera!)
+      const sx = ((p2.x - p1.x) / 2) * rect.width
+      const sy = -((p2.y - p1.y) / 2) * rect.height
+      const screenLen = Math.sqrt(sx * sx + sy * sy)
+      return {
+        screenDirX: screenLen > 0.001 ? sx / screenLen : 0,
+        screenDirY: screenLen > 0.001 ? sy / screenLen : 0,
+        k: screenLen > 0.001 ? 1 / screenLen : 0,
+      }
+    }
+
     const gPos = this.root.position
-    const axisWorldDir = new THREE.Vector3(
-      hit === 'x' ? 1 : 0,
-      hit === 'y' ? 1 : 0,
-      hit === 'z' ? 1 : 0,
-    )
-    const p1 = gPos.clone().project(camera)
-    const p2 = gPos.clone().add(axisWorldDir).project(camera)
-    const sx = ((p2.x - p1.x) / 2) * rect.width
-    const sy = -((p2.y - p1.y) / 2) * rect.height
-    const screenLen = Math.sqrt(sx * sx + sy * sy)
-    const screenDirX = screenLen > 0.001 ? sx / screenLen : 0
-    const screenDirY = screenLen > 0.001 ? sy / screenLen : 0
-    const k = screenLen > 0.001 ? 1 / screenLen : 0
+    const AXES: Record<string, THREE.Vector3> = {
+      x: new THREE.Vector3(1, 0, 0),
+      y: new THREE.Vector3(0, 1, 0),
+      z: new THREE.Vector3(0, 0, 1),
+    }
 
-    ctx.invokeOperator('OPERATOR_MOVE', {
-      gizmoAxis: hit,
-      gizmo: this,
-      screenDirX,
-      screenDirY,
-      k,
-    }, event)
+    if (hit.length === 1) {
+      // Single axis
+      const axisDir = AXES[hit]
+      const proj = project(gPos, axisDir)
+      ctx.invokeOperator('OPERATOR_MOVE', {
+        gizmoAxis: hit,
+        gizmo: this,
+        screenDirX: proj.screenDirX,
+        screenDirY: proj.screenDirY,
+        k: proj.k,
+      }, event)
+    } else {
+      // Plane drag (xy, xz, yz)
+      const a1 = AXES[hit[0]]
+      const a2 = AXES[hit[1]]
+      const proj1 = project(gPos, a1)
+      const proj2 = project(gPos, a2)
+      ctx.invokeOperator('OPERATOR_MOVE', {
+        gizmoAxis: hit,
+        gizmo: this,
+        screenDirX1: proj1.screenDirX, screenDirY1: proj1.screenDirY, k1: proj1.k,
+        screenDirX2: proj2.screenDirX, screenDirY2: proj2.screenDirY, k2: proj2.k,
+      }, event)
+    }
   }
 
   onPointerUp(_ctx: ToolContext, _event: PointerEvent): void {

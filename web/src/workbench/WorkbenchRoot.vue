@@ -27,6 +27,7 @@ import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
+import { relayout } from '@/workbench/ux/layout'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 import { parseWorkbenchQuery } from '@/workbench/utils/sceneHelpers'
@@ -67,23 +68,33 @@ useNeiTheme()
 const viewportArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
 const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
 
+function panelInWorkspace(p: typeof viewportArea.regions[number]['panels'][number]): boolean {
+  const ws = bctx.uiWorkspace.value
+  return !p.workspaces || p.workspaces.includes(ws)
+}
+
 const activeToolshelfPanels = computed(() =>
   viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels
-    .filter(p => p.poll(bctx))
+    .filter(p => panelInWorkspace(p) && p.poll(bctx))
     .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx), component: p.component }))
 )
 
 const activePropertiesPanels = computed(() =>
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels
-    .filter(p => p.poll(bctx))
+    .filter(p => panelInWorkspace(p) && p.poll(bctx))
     .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx), component: p.component }))
 )
 
 const activeHeaderPanels = computed(() =>
   viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels
-    .filter(p => p.poll(bctx))
+    .filter(p => panelInWorkspace(p) && p.poll(bctx))
     .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
 )
+
+// Keep widgetCache in sync with reactive panel changes so boundsOfByOperator / boundsOfByRNAPath stay current
+watch([activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels], () => {
+  relayout(bctx)
+}, { flush: 'post' })
 
 // Wiki embed settings
 const wikiConfig = bctx.wikiConfig as Record<string, any>

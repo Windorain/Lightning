@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { h, type VNode } from 'vue'
 import type { UILayout, UILayoutItem, LayoutWithItems } from './types/layout'
+import { isLayoutContainer } from './types/layout'
 import type { RNARegistry } from './rna/types'
 import RNAWidget from './RNAWidget.vue'
 import OperatorBtn from './OperatorBtn.vue'
@@ -16,7 +17,7 @@ const props = defineProps<{
 function renderItem(item: UILayoutItem, prefix: string, index: number): VNode {
   const layoutId = prefix ? `${prefix}.item-${index}` : `item-${index}`
 
-  if (isLayoutItem(item)) {
+  if (isLayoutContainer(item)) {
     return renderLayout(item, layoutId)
   }
 
@@ -70,12 +71,6 @@ function renderLayout(l: UILayout, key: string): VNode {
     default:
       return h('div', {}, children)
   }
-}
-
-function isLayoutItem(item: UILayoutItem): item is UILayout {
-  if (typeof item !== 'object' || item === null) return false
-  const k = (item as { kind?: string }).kind
-  return k !== undefined && ['row', 'column', 'box', 'split', 'panel', 'scroll'].includes(k)
 }
 
 </script>
