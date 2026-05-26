@@ -11,7 +11,8 @@
     "MixinTextureMap",
     "MixinTessellatorCapture",
     "MixinModelRendererCapture",
-    "MixinTextureManagerBindCapture"
+    "MixinTextureManagerBindCapture",
+    "MixinResourceManagerReload"
   ],
   "server": []
 }

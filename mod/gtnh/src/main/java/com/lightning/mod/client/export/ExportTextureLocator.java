@@ -151,7 +151,7 @@ public final class ExportTextureLocator {
      * <b>处理规则</b>：去掉 path 段重复的 {@code textures/}；若 path 不以显式纹理根（{@code blocks/}、{@code items/}、{@code models/}、
      * {@code entity/} 等，与 Wiki {@code resolveAssets} 一致）开头，则补上 {@code blocks/}。{@code models/…} 对应磁盘
      * {@code assets/&lt;ns&gt;/models/…png}，不得误加 {@code blocks/} 前缀。Botania 等使用 {@code textures/model/…}
-     *（单数 {@code model/}，与 {@code models/} 不同）。GregTech {@code materialicons/…} 在
+     * （单数 {@code model/}，与 {@code models/} 不同）。GregTech {@code materialicons/…} 在
      * {@code textures/blocks/materialicons/} 与 {@code textures/items/materialicons/} 均可能出现，见
      * {@link #texturePngResourceLocationsForBundle}。
      * <p>
@@ -257,6 +257,10 @@ public final class ExportTextureLocator {
             return out;
         }
         out.add(new ResourceLocation(ns, "textures/" + path + ".png"));
+        if (path.startsWith("blocks/")) {
+            String stripped = path.substring("blocks/".length());
+            out.add(new ResourceLocation(ns, "textures/" + stripped + ".png"));
+        }
         return out;
     }
 }

@@ -8,6 +8,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.world.World;
 import net.minecraftforge.common.util.ForgeDirection;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.lightning.mod.client.export.ExportTextureLocator;
 import com.lightning.mod.client.export.GtTextureResolver;
 import com.lightning.mod.client.registry.BlockRegistryPolicy;
@@ -16,8 +18,6 @@ import com.lightning.mod.core.registry.GregTechMetaTileRegistry;
 import com.lightning.mod.core.registry.gt.GtBlockMachinesWorldPolicy;
 import com.lightning.mod.core.registry.gt.GtRenderProfiles;
 import com.lightning.mod.core.sampling.VoxelSample;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;

@@ -11,7 +11,7 @@ public final class PackVersionProbe {
     private PackVersionProbe() {}
 
     /**
-     * 优先返回 GregTech 模组版本（GTNH 环境常见），其次 dreamcraft；皆无则空串。
+     * 优先返回 GTNH 整合包版本（dreamcraft），其次 GregTech 模组版本；皆无则空串。
      */
     public static String tryPackVersionString() {
         try {
@@ -19,11 +19,11 @@ public final class PackVersionProbe {
             if (loader == null) {
                 return "";
             }
-            String greg = versionOfMod(loader, "gregtech");
-            if (!greg.isEmpty()) {
-                return greg;
+            String dreamcraft = versionOfMod(loader, "dreamcraft");
+            if (!dreamcraft.isEmpty()) {
+                return dreamcraft;
             }
-            return versionOfMod(loader, "dreamcraft");
+            return versionOfMod(loader, "gregtech");
         } catch (Throwable ignored) {
             /* ignore */
         }

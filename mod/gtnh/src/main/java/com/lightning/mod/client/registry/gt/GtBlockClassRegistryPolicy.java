@@ -4,14 +4,14 @@ import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.World;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.lightning.mod.client.export.ExportTextureLocator;
 import com.lightning.mod.client.registry.BlockRegistryPolicy;
 import com.lightning.mod.client.registry.BlockRegistryTextureProbe;
 import com.lightning.mod.core.registry.gt.GregTechBlockReflection;
 import com.lightning.mod.core.registry.gt.GtBlockClassWorldPolicy;
 import com.lightning.mod.core.sampling.VoxelSample;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;

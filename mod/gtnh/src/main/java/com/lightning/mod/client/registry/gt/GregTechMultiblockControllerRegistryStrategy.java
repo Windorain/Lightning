@@ -3,8 +3,8 @@ package com.lightning.mod.client.registry.gt;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 
-import com.lightning.mod.core.registry.GregTechMetaTileRegistry;
 import com.google.gson.JsonObject;
+import com.lightning.mod.core.registry.GregTechMetaTileRegistry;
 
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;

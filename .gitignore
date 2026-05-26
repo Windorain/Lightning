@@ -27,3 +27,4 @@ web/src/render/proto/lightning/v1/
 web/test-artifacts/
 .worktrees/
 .superpowers/
+CLAUDE.md

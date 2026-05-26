@@ -4,8 +4,8 @@ import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.World;
 
-import com.lightning.mod.core.sampling.VoxelSample;
 import com.google.gson.JsonObject;
+import com.lightning.mod.core.sampling.VoxelSample;
 
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
