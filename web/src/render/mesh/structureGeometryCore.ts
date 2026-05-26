@@ -58,6 +58,8 @@ export interface BakedQuadGeometryPiece {
   zSlice: number
   materialIndex: number
   quadOrder: number
+  /** 该 quad 在体素解码后 quads[] 数组中的索引 */
+  quadIndex: number
   matPalette: MaterialPaletteEntry
   positions: Float32Array
   uvs: Float32Array
@@ -458,6 +460,7 @@ export function collectStructureGeometryPiecesPure(
             zSlice,
             materialIndex: mi,
             quadOrder: order,
+            quadIndex: qi,
             matPalette: matPal,
             positions: attrs.positions,
             uvs: attrs.uvs,

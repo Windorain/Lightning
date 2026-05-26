@@ -49,6 +49,7 @@ export interface QuadWorkUnit {
   materialIndex: number
   geom: THREE.BufferGeometry
   quadOrder: number
+  quadIndex: number
   matPalette: MaterialPaletteEntry
   col: number
   row: number
@@ -64,6 +65,7 @@ export function gatherQuadWorkUnits(
     materialIndex: p.materialIndex,
     geom: pieceToBufferGeometry(p),
     quadOrder: p.quadOrder,
+    quadIndex: p.quadIndex,
     matPalette: p.matPalette,
     col: p.col,
     row: p.row,
@@ -120,7 +122,7 @@ export async function buildBlockMesh(
     for (const unit of bucket.units) {
       const faceCount = unit.geom.attributes.position.count / 3
       for (let f = 0; f < faceCount; f++) {
-        triangleMap.push({ col: unit.col, row: unit.row, zSlice: unit.zSlice, quadIndex: Math.floor(f / 2) })
+        triangleMap.push({ col: unit.col, row: unit.row, zSlice: unit.zSlice, quadIndex: unit.quadIndex })
       }
     }
     const mat = await library.getMaterialForBatch(bucket.descriptor)

@@ -2,8 +2,7 @@
 import type { Tool, ToolGizmo, ToolContext } from './tool'
 import type { DetectedBounds } from './partDetect'
 import { detectFaceBounds, detectPartBounds } from './partDetect'
-import { computeBoxFrameBars, computeUnionAABB, aabbsIntersect, computeQuadNormal, type AABB, type QuadLike } from '@/render/data/aabb'
-import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
+import { computeBoxFrameBars, computeUnionAABB, aabbsIntersect, type AABB } from '@/render/data/aabb'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
 import * as THREE from 'three'
@@ -169,36 +168,6 @@ export class BoxGizmo implements ToolGizmo {
       this._hoverBounds = detectPartBounds(def, picked.pos.x, picked.pos.y, picked.pos.z, null)
     }
 
-    // ── DEBUG ──
-    if (this._hoverBounds) {
-      let quads: QuadLike[] = []
-      try {
-        const szR = def.cellGrid[0]?.length ?? 0
-        const row = szR - 1 - picked.pos.y
-        const idx = (def as any).cellGrid?.[picked.pos.z]?.[row]?.[picked.pos.x]
-        const entry = idx >= 0 ? (def.blockPalette as any)[idx] : null
-        if (entry?.geometry) quads = decodeBakedGeometry(entry.geometry)
-      } catch {}
-
-      const { min, max } = this._hoverBounds
-      const stdQ = quads.filter(q => q.vertices.length === 4).length
-      const triQ = quads.length - stdQ
-      // Actual result from detectFaceBounds
-      const actualSet = new Set(this._hoverBounds.quadIndices)
-
-      console.group(`[boxTool] voxel(${picked.pos.x},${picked.pos.y},${picked.pos.z})  total:${quads.length} (std:${stdQ} tri:${triQ})`)
-      console.log(`quadIndex: ${picked.quadIndex}  normal: (${picked.normal?.x?.toFixed(3)},${picked.normal?.y?.toFixed(3)},${picked.normal?.z?.toFixed(3)})`)
-      console.log(`result: [${[...actualSet].sort((a,b)=>a-b).join(', ')}]`)
-      console.log(`AABB: (${min.x.toFixed(2)},${min.y.toFixed(2)},${min.z.toFixed(2)}) → (${max.x.toFixed(2)},${max.y.toFixed(2)},${max.z.toFixed(2)})  ${(max.x-min.x).toFixed(3)}×${(max.y-min.y).toFixed(3)}×${(max.z-min.z).toFixed(3)}`)
-
-      const lines = quads.map((q, i) => {
-        const n = computeQuadNormal(q)
-        const mark = actualSet.has(i) ? ' ✓' : ''
-        return `[${i}] v${q.vertices.length} (${n.x.toFixed(2)},${n.y.toFixed(2)},${n.z.toFixed(2)})${mark}`
-      })
-      console.log('quads:\n  ' + lines.join('\n  '))
-      console.groupEnd()
-    }
   }
 
   onPointerDown(_ctx: ToolContext, event: PointerEvent): void {
