@@ -24,6 +24,7 @@ import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
 import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
+import { usePreferences } from '@/workbench/preferences'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
@@ -35,6 +36,7 @@ const props = defineProps<{
 }>()
 
 const bctx = useBContext()
+const prefs = usePreferences()
 
 const EMBED_REGION = 'r-embed'
 const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED_REGION)
@@ -118,24 +120,20 @@ function buildBlockMaskMesh(
   return new THREE.Mesh(geo)
 }
 
-function updateBlockHighlight(blockId: string | null): void {
-  if (!_outlinePass) return
+let _selectionMasks: THREE.Mesh[] = []
 
-  if (!blockId) {
-    _outlinePass.setMaskMeshes([])
-    return
-  }
+function rebuildSelectionMasks(blockId: string | null): void {
+  _selectionMasks = []
+  if (!blockId) return
 
   const def = vpSlot.definition.value
-  if (!def) { _outlinePass.setMaskMeshes([]); return }
+  if (!def) return
 
   const { cellGrid, blockPalette } = def
   const sizeZ = cellGrid.length
   const sizeRow = cellGrid[0]?.length ?? 0
   const sizeCol = cellGrid[0]?.[0]?.length ?? 0
-  if (sizeZ === 0 || sizeRow === 0 || sizeCol === 0) { _outlinePass.setMaskMeshes([]); return }
-
-  const masks: THREE.Mesh[] = []
+  if (sizeZ === 0 || sizeRow === 0 || sizeCol === 0) return
 
   for (let z = 0; z < sizeZ; z++) {
     for (let row = 0; row < sizeRow; row++) {
@@ -156,12 +154,46 @@ function updateBlockHighlight(blockId: string | null): void {
         const quads = entry.geometry?.quads
         if (quads && quads.length > 0 && quads.some(q => q.vertices.length >= 4)) {
           const mesh = buildBlockMaskMesh(quads, cx, cy, cz)
-          if (mesh) masks.push(mesh)
+          if (mesh) _selectionMasks.push(mesh)
         } else {
-          // Fallback: axis-aligned unit cube
           const geo = new THREE.BoxGeometry(1, 1, 1)
           geo.translate(cx, cy, cz)
-          masks.push(new THREE.Mesh(geo))
+          _selectionMasks.push(new THREE.Mesh(geo))
+        }
+      }
+    }
+  }
+}
+
+function flushHighlight(): void {
+  if (!_outlinePass) return
+  const masks = [..._selectionMasks]
+
+  const hov = hoveredVoxel.value
+  if (hov && prefs.highlightOnHover) {
+    const def = vpSlot.definition.value
+    if (def) {
+      const { cellGrid, blockPalette } = def
+      const sizeZ = cellGrid.length
+      const sizeRow = cellGrid[0]?.length ?? 0
+      const sizeCol = cellGrid[0]?.[0]?.length ?? 0
+      const idx = cellGrid[hov.zSlice]?.[hov.row]?.[hov.column]
+      if (idx !== undefined && idx >= 0 && idx < blockPalette.length) {
+        const entry = blockPalette[idx]
+        if (entry) {
+          const cx = hov.column - sizeCol / 2 + 0.5
+          const cy = (sizeRow - 1 - hov.row) - sizeRow / 2 + 0.5
+          const cz = hov.zSlice - sizeZ / 2 + 0.5
+
+          const quads = entry.geometry?.quads
+          if (quads && quads.length > 0 && quads.some(q => q.vertices.length >= 4)) {
+            const mesh = buildBlockMaskMesh(quads, cx, cy, cz)
+            if (mesh) masks.push(mesh)
+          } else {
+            const geo = new THREE.BoxGeometry(1, 1, 1)
+            geo.translate(cx, cy, cz)
+            masks.push(new THREE.Mesh(geo))
+          }
         }
       }
     }
@@ -175,7 +207,8 @@ function onSidebarSelectBlock(blockId: string): void {
 }
 
 watch(selectedBlockId, (id) => {
-  updateBlockHighlight(id)
+  rebuildSelectionMasks(id)
+  flushHighlight()
 })
 
 function toggleFullscreen(): void {
@@ -237,7 +270,12 @@ const tooltipDisplayText = computed(() => {
   const def = vpSlot.definition.value
   const h = hover.value
   if (!def || !h?.blockId) return ''
-  return resolvePreviewTooltipText(def, tooltipPalette.value, h)
+  const resolved = resolvePreviewTooltipText(def, tooltipPalette.value, h)
+  if (resolved) return resolved
+  // Fallback: first line of NEI tooltip from block palette
+  const lines = neiTooltipMap.value.get(h.blockId)
+  if (lines && lines.length > 0) return renderTooltipHtml(lines[0])
+  return ''
 })
 
 const neiTooltipMap = computed<Map<string, string[]>>(() => {
@@ -389,15 +427,23 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
     if (!_alive) return
     _annoRafId = requestAnimationFrame(rafTick)
     updateAnnotationOverlay()
+    flushHighlight()
   }
   _annoRafId = requestAnimationFrame(rafTick)
 }
 
+const hoveredVoxel = ref<{ column: number; row: number; zSlice: number } | null>(null)
+
 function onViewportHover(
   payload: { blockId: string; clientX: number; clientY: number; source: 'viewport'; voxel: { column: number; row: number; zSlice: number } } | null,
 ): void {
-  if (payload) setHover(payload)
-  else clearHover('viewport')
+  if (payload) {
+    setHover(payload)
+    hoveredVoxel.value = payload.voxel
+  } else {
+    clearHover('viewport')
+    hoveredVoxel.value = null
+  }
 }
 
 function onSidebarTooltipHover(
@@ -408,12 +454,29 @@ function onSidebarTooltipHover(
 }
 
 // ---- Annotation hover tooltip ----
+const annotations = computed<Annotation[]>(() => {
+  const doc = bctx.doc.value
+  if (!doc) return []
+  const plain = doc.serialize() as Record<string, any>
+  return (plain.annotations ?? []) as Annotation[]
+})
+
 const annotationHover = ref<{ annotationId: string; clientX: number; clientY: number } | null>(null)
 
 function onAnnotationHover(
   payload: { annotationId: string; clientX: number; clientY: number } | null,
 ): void {
-  annotationHover.value = payload
+  if (!payload) {
+    annotationHover.value = null
+    return
+  }
+  const h = annotationHover.value
+  if (h && h.annotationId === payload.annotationId) {
+    h.clientX = payload.clientX
+    h.clientY = payload.clientY
+  } else {
+    annotationHover.value = { ...payload }
+  }
 }
 
 const annotationTooltipText = computed(() => {
@@ -508,6 +571,7 @@ onBeforeUnmount(() => {
           :initial-camera="initialCamera"
           :scene-background="s?.sceneBackground ?? 0x5a5a5a"
           :show-axes-gizmo="showAxesGizmo"
+          :annotations="annotations"
           @ready="onViewportReady"
           @hover-block="onViewportHover"
           @hover-annotation="onAnnotationHover"
@@ -568,7 +632,7 @@ onBeforeUnmount(() => {
       <span class="wm-status-text">{{ statusSummary }}</span>
     </div>
 
-    <ToolTipBox v-if="hover && tooltipDisplayText" :text="tooltipDisplayText" :client-x="hover.clientX" :client-y="hover.clientY" />
+    <ToolTipBox v-if="prefs.showHoverTooltip && hover && tooltipDisplayText" :text="tooltipDisplayText" :client-x="hover.clientX" :client-y="hover.clientY" />
     <ToolTipBox v-if="hover && neiTooltipText" :text="neiTooltipText" :client-x="hover.clientX" :client-y="hover.clientY" />
     <ToolTipBox v-if="annotationHover && annotationTooltipText" :text="annotationTooltipText" :client-x="annotationHover.clientX" :client-y="annotationHover.clientY" />
     <ToolTipBox v-if="metaHintPointer && metaTooltipText" :text="metaTooltipText" :client-x="metaHintPointer.clientX" :client-y="metaHintPointer.clientY" />
@@ -582,9 +646,14 @@ onBeforeUnmount(() => {
             <button class="wm-settings-close" @click="showSettingsPanel = false">✕</button>
           </div>
           <div class="wm-settings-body">
-            <!-- TODO: 持久化设置 UI -->
-            <p class="wm-settings-hint">设置面板 (WIP)</p>
-            <p class="wm-settings-hint">功能开关通过 EmbedSettings.features 控制</p>
+            <label class="wm-settings-row">
+              <span class="wm-settings-label">鼠标悬浮高亮方块</span>
+              <input type="checkbox" v-model="prefs.highlightOnHover" />
+            </label>
+            <label class="wm-settings-row">
+              <span class="wm-settings-label">鼠标悬浮显示物品名称</span>
+              <input type="checkbox" v-model="prefs.showHoverTooltip" />
+            </label>
           </div>
         </div>
       </div>
@@ -722,5 +791,14 @@ onBeforeUnmount(() => {
 }
 .wm-settings-close:hover { color: var(--nei-text); }
 .wm-settings-body { padding: 16px; }
+.wm-settings-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 0; cursor: pointer; user-select: none;
+}
+.wm-settings-row + .wm-settings-row { border-top: 1px solid var(--nei-border-subtle); }
+.wm-settings-label { font-size: 13px; color: var(--nei-text); }
+.wm-settings-row input[type="checkbox"] {
+  width: 16px; height: 16px; cursor: pointer; accent-color: var(--nei-accent);
+}
 .wm-settings-hint { margin: 0; color: var(--nei-text-dim); }
 </style>

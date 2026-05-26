@@ -8,7 +8,8 @@ import * as THREE from 'three'
 import { buildVoxelVolume } from '../data/grid'
 import { effectiveBlockId, type LayerPreviewMode } from '../data/layerPreview'
 import type { StructureDefinition } from '../schema/types'
-import type { AnnotationType } from '../data/annotationTypes'
+import type { Annotation, AnnotationType } from '../data/annotationTypes'
+import { isBox } from '../data/annotationTypes'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,6 +17,7 @@ import type { AnnotationType } from '../data/annotationTypes'
 
 export interface ScenePickBlock {
   kind: 'block'
+  distance: number
   blockId: string
   column: number
   row: number
@@ -30,6 +32,7 @@ export interface ScenePickBlock {
 
 export interface ScenePickAnnotation {
   kind: 'annotation'
+  distance: number
   annotationId: string
   point: { x: number; y: number; z: number }
 }
@@ -80,6 +83,63 @@ function parseAnnotationName(objName: string): { id: string; type: AnnotationTyp
 }
 
 // ---------------------------------------------------------------------------
+// Annotation AABB pick (ray–box intersection, no mesh dependency)
+// ---------------------------------------------------------------------------
+
+/** Ray–AABB intersection via slab method. Returns entry distance or null. */
+export function rayIntersectsBox(
+  rayOrigin: THREE.Vector3,
+  rayDirection: THREE.Vector3,
+  boxMin: { x: number; y: number; z: number },
+  boxMax: { x: number; y: number; z: number },
+): number | null {
+  let tmin = -Infinity
+  let tmax = Infinity
+
+  const origins = [rayOrigin.x, rayOrigin.y, rayOrigin.z]
+  const dirs = [rayDirection.x, rayDirection.y, rayDirection.z]
+  const mins = [boxMin.x, boxMin.y, boxMin.z]
+  const maxs = [boxMax.x, boxMax.y, boxMax.z]
+
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(dirs[i]) < 1e-10) {
+      if (origins[i] < mins[i] || origins[i] > maxs[i]) return null
+    } else {
+      let t1 = (mins[i] - origins[i]) / dirs[i]
+      let t2 = (maxs[i] - origins[i]) / dirs[i]
+      if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp }
+      tmin = Math.max(tmin, t1)
+      tmax = Math.min(tmax, t2)
+      if (tmin > tmax) return null
+    }
+  }
+
+  return tmin >= 0 ? tmin : (tmax >= 0 ? 0 : null)
+}
+
+export interface PickAnnotationAABBResult {
+  annotationId: string
+  distance: number
+}
+
+/** Return closest visible box annotation whose AABB the ray intersects, or null. */
+export function pickAnnotationsAABB(
+  rayOrigin: THREE.Vector3,
+  rayDirection: THREE.Vector3,
+  annotations: Annotation[],
+): PickAnnotationAABBResult | null {
+  let best: PickAnnotationAABBResult | null = null
+  for (const anno of annotations) {
+    if (!isBox(anno) || anno.visible === false) continue
+    const d = rayIntersectsBox(rayOrigin, rayDirection, anno.min, anno.max)
+    if (d !== null && (best === null || d < best.distance)) {
+      best = { annotationId: anno.id, distance: d }
+    }
+  }
+  return best
+}
+
+// ---------------------------------------------------------------------------
 // Single-hit pick (existing, used by Embed Viewer)
 // ---------------------------------------------------------------------------
 
@@ -108,6 +168,7 @@ export function scenePickFromPointer(params: ScenePickParams): ScenePickResult {
     const lastDash = objName.lastIndexOf('-')
     return {
       kind: 'annotation',
+      distance: hit.distance,
       annotationId: lastDash >= 0 ? objName.slice(lastDash + 1) : objName,
       point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
     }
@@ -131,6 +192,7 @@ export function scenePickFromPointer(params: ScenePickParams): ScenePickResult {
       : undefined
     return {
       kind: 'block',
+      distance: hit.distance,
       blockId,
       column: entry.col,
       row: entry.row,
