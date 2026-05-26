@@ -126,6 +126,45 @@ export const boxTool: Tool = {
     { keys: ['Enter'], action: '确认创建' },
     { keys: ['Esc'], action: '取消' },
   ],
+  group: 'annotation-box',
+}
+
+/** 注解框（整块）— 自动推荐当前方块全部 quad 的最大 AABB */
+export const boxFullTool: Tool = {
+  id: 'annotation-box-full',
+  label: '整块框',
+  icon: '▣',
+  cursor: 'crosshair',
+  operator: 'ANNOTATION_BOX_COMMIT',
+  properties: {
+    type: 'box',
+    color: '#44dd88',
+    renderStyle: 'wireframe',
+    renderOpacity: 0.5,
+    overlay: false,
+    fillOpacity: 0.3,
+    frameThickness: 0.04,
+    title: '',
+    description: '',
+    visible: true,
+    locked: false,
+    detectMode: 'full',
+  },
+  keymap: [
+    { type: 'KEY', key: 'b', toolId: 'annotation-box', description: '注解框工具（面级别）' },
+    { type: 'KEY', key: 'Enter', opId: 'ANNOTATION_BOX_COMMIT', description: '确认创建注解框' },
+    { type: 'KEY', key: 'Escape', opId: 'ANNOTATION_BOX_RESET', description: '重置面选择' },
+    { type: 'MOUSE', button: 0, description: '选择方块 / 累加' },
+  ],
+  hints: [
+    { keys: ['Click'], action: '选择方块' },
+    { keys: ['Shift', 'Click'], action: '强制合并' },
+    { keys: ['Ctrl', 'Click'], action: '独立盒子' },
+    { keys: ['Click 虚空'], action: '重置选择' },
+    { keys: ['Enter'], action: '确认创建' },
+    { keys: ['Esc'], action: '取消' },
+  ],
+  group: 'annotation-box',
 }
 
 // ── Gizmo ──
@@ -160,7 +199,10 @@ export class BoxGizmo implements ToolGizmo {
 
     this._hoverPos = picked.pos
 
-    if (picked.normal) {
+    const detectMode = ctx.activeTool.value?.properties?.detectMode as string | undefined
+    if (detectMode === 'full') {
+      this._hoverBounds = detectPartBounds(def, picked.pos.x, picked.pos.y, picked.pos.z, null)
+    } else if (picked.normal) {
       this._hoverBounds = detectFaceBounds(
         def, picked.pos.x, picked.pos.y, picked.pos.z, picked.normal, picked.quadIndex,
       )

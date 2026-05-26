@@ -31,6 +31,8 @@ export interface Tool {
   color?: string
   /** 修饰键功能提示（悬浮在 viewport 右下角） */
   hints?: ToolHint[]
+  /** 工具组 ID：相同 group 的工具在工具栏折叠为一个槽位，点击小三角展开变体 */
+  group?: string
 }
 
 /** Gizmo 是交互+渲染入口。一个 Tool 可以关联零个或一个 Gizmo。 */

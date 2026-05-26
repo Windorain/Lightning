@@ -70,7 +70,7 @@ const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.P
 const activeToolshelfPanels = computed(() =>
   viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels
     .filter(p => p.poll(bctx))
-    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
+    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx), component: p.component }))
 )
 
 const activePropertiesPanels = computed(() =>
@@ -229,13 +229,10 @@ onMounted(() => {
     </template>
     <template v-if="workspace !== 'wiki'" #tool-shelf>
       <div class="wb-toolshelf">
-        <UIRenderer
-          v-for="panel in activeToolshelfPanels"
-          :key="panel.id"
-          :layout="panel.layout"
-          :rna="bctx.rna"
-          :owner="panel.owner"
-        />
+        <template v-for="panel in activeToolshelfPanels" :key="panel.id">
+          <component v-if="panel.component" :is="panel.component" />
+          <UIRenderer v-else :layout="panel.layout" :rna="bctx.rna" :owner="panel.owner" />
+        </template>
       </div>
     </template>
     <template #viewport>

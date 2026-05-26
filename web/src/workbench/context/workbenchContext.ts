@@ -55,7 +55,7 @@ import { ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOp
 import { selectTool } from '@/workbench/tools/selectTool'
 import { moveTool } from '@/workbench/tools/moveTool'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
-import { boxTool, BoxGizmo, AnnotationBoxCommitOperator, AnnotationBoxResetOperator } from '@/workbench/tools/boxTool'
+import { boxTool, boxFullTool, BoxGizmo, AnnotationBoxCommitOperator, AnnotationBoxResetOperator } from '@/workbench/tools/boxTool'
 import { pointTool, PointGizmo } from '@/workbench/tools/pointTool'
 import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
 import { textTool, TextGizmo } from '@/workbench/tools/textTool'
@@ -238,6 +238,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   toolRegistry.register(selectTool)
   toolRegistry.register(moveTool, moveGizmo)
   toolRegistry.register(boxTool, new BoxGizmo())
+  toolRegistry.register(boxFullTool, new BoxGizmo())
   toolRegistry.register(pointTool, new PointGizmo())
   toolRegistry.register(lineTool, new LineGizmo())
   toolRegistry.register(textTool, new TextGizmo())
