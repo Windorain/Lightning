@@ -59,6 +59,7 @@ import { boxTool, boxFullTool, BoxGizmo, AnnotationBoxCommitOperator, Annotation
 import { pointTool, PointGizmo } from '@/workbench/tools/pointTool'
 import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
 import { textTool, TextGizmo } from '@/workbench/tools/textTool'
+import { faceTool, FaceGizmo } from '@/workbench/tools/faceTool'
 
 const ALL_OPERATORS: OperatorType[] = [
   SelectOperator, SelectByTypeOperator, MoveOperator,
@@ -242,6 +243,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   toolRegistry.register(pointTool, new PointGizmo())
   toolRegistry.register(lineTool, new LineGizmo())
   toolRegistry.register(textTool, new TextGizmo())
+  toolRegistry.register(faceTool, new FaceGizmo())
   toolRegistry.activate('select')
 
   return { bctx, rna, screen: defaultScreen }

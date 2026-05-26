@@ -65,6 +65,8 @@ export interface ScenePickParams {
   overlayGroup?: THREE.Group
   def: StructureDefinition
   layerPreview: LayerPreviewMode
+  /** Optional: box annotations for AABB-based picking (merged with mesh hits) */
+  annotations?: Annotation[]
 }
 
 // ---------------------------------------------------------------------------
@@ -117,34 +119,14 @@ export function rayIntersectsBox(
   return tmin >= 0 ? tmin : (tmax >= 0 ? 0 : null)
 }
 
-export interface PickAnnotationAABBResult {
-  annotationId: string
-  distance: number
-}
-
-/** Return closest visible box annotation whose AABB the ray intersects, or null. */
-export function pickAnnotationsAABB(
-  rayOrigin: THREE.Vector3,
-  rayDirection: THREE.Vector3,
-  annotations: Annotation[],
-): PickAnnotationAABBResult | null {
-  let best: PickAnnotationAABBResult | null = null
-  for (const anno of annotations) {
-    if (!isBox(anno) || anno.visible === false) continue
-    const d = rayIntersectsBox(rayOrigin, rayDirection, anno.min, anno.max)
-    if (d !== null && (best === null || d < best.distance)) {
-      best = { annotationId: anno.id, distance: d }
-    }
-  }
-  return best
-}
-
 // ---------------------------------------------------------------------------
-// Single-hit pick (existing, used by Embed Viewer)
+// Unified single-hit pick — mesh + optional AABB, one raycaster
 // ---------------------------------------------------------------------------
 
-export function scenePickFromPointer(params: ScenePickParams): ScenePickResult {
-  const { clientX, clientY, domElement, camera, contentGroup, overlayGroup, def, layerPreview } = params
+/** Pure function: screen position → closest hit (block or annotation).
+ *  If `annotations` are provided, box annotations are picked via AABB and merged with mesh hits. */
+export function pickAtPointer(params: ScenePickParams): ScenePickResult {
+  const { clientX, clientY, domElement, camera, contentGroup, overlayGroup, def, layerPreview, annotations } = params
 
   const rect = domElement.getBoundingClientRect()
   const ndc = new THREE.Vector2(
@@ -155,55 +137,81 @@ export function scenePickFromPointer(params: ScenePickParams): ScenePickResult {
   const raycaster = new THREE.Raycaster()
   raycaster.setFromCamera(ndc, camera)
 
+  // ── Mesh pick ──
   const structureHits = raycaster.intersectObject(contentGroup, true)
   const overlayHits = overlayGroup ? raycaster.intersectObject(overlayGroup, true) : []
   const allHits = structureHits.concat(overlayHits).sort((a, b) => a.distance - b.distance)
+  const meshHit = allHits[0]
 
-  const hit = allHits[0]
-  if (!hit) return null
-
-  // 1. Annotation hit
-  const objName = (hit.object as THREE.Object3D).name || ''
-  if (objName.startsWith('anno-')) {
-    const lastDash = objName.lastIndexOf('-')
-    return {
-      kind: 'annotation',
-      distance: hit.distance,
-      annotationId: lastDash >= 0 ? objName.slice(lastDash + 1) : objName,
-      point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+  let meshResult: ScenePickResult = null
+  if (meshHit) {
+    const objName = (meshHit.object as THREE.Object3D).name || ''
+    if (objName.startsWith('anno-')) {
+      const lastDash = objName.lastIndexOf('-')
+      meshResult = {
+        kind: 'annotation',
+        distance: meshHit.distance,
+        annotationId: lastDash >= 0 ? objName.slice(lastDash + 1) : objName,
+        point: { x: meshHit.point.x, y: meshHit.point.y, z: meshHit.point.z },
+      }
+    } else {
+      const triangleMap = (meshHit.object as THREE.Mesh).userData.triangleMap as
+        Array<{ col: number; row: number; zSlice: number; quadIndex?: number }> | undefined
+      if (triangleMap && meshHit.faceIndex != null && meshHit.faceIndex < triangleMap.length) {
+        const entry = triangleMap[meshHit.faceIndex]
+        const volume = buildVoxelVolume(def)
+        const blockId = effectiveBlockId(volume, entry.col, entry.row, entry.zSlice, volume.sizeRow, layerPreview)
+        if (blockId !== 'air') {
+          const normalWorld = meshHit.face
+            ? meshHit.face.normal.clone()
+                .transformDirection((meshHit.object as THREE.Mesh).matrixWorld)
+                .normalize()
+            : undefined
+          meshResult = {
+            kind: 'block',
+            distance: meshHit.distance,
+            blockId,
+            column: entry.col,
+            row: entry.row,
+            zSlice: entry.zSlice,
+            quadIndex: (entry as any).quadIndex,
+            normal: normalWorld ? { x: normalWorld.x, y: normalWorld.y, z: normalWorld.z } : undefined,
+            point: { x: meshHit.point.x, y: meshHit.point.y, z: meshHit.point.z },
+          }
+        }
+      }
     }
   }
 
-  // 2. Block hit
-  const triangleMap = (hit.object as THREE.Mesh).userData.triangleMap as
-    Array<{ col: number; row: number; zSlice: number }> | undefined
-
-  if (!triangleMap) return null
-  if (hit.faceIndex == null || hit.faceIndex >= triangleMap.length) return null
-
-  const entry = triangleMap[hit.faceIndex]
-  const volume = buildVoxelVolume(def)
-  const blockId = effectiveBlockId(volume, entry.col, entry.row, entry.zSlice, volume.sizeRow, layerPreview)
-  if (blockId !== 'air') {
-    const normalWorld = hit.face
-      ? hit.face.normal.clone()
-          .transformDirection((hit.object as THREE.Mesh).matrixWorld)
-          .normalize()
-      : undefined
-    return {
-      kind: 'block',
-      distance: hit.distance,
-      blockId,
-      column: entry.col,
-      row: entry.row,
-      zSlice: entry.zSlice,
-      quadIndex: (entry as any).quadIndex,
-      normal: normalWorld ? { x: normalWorld.x, y: normalWorld.y, z: normalWorld.z } : undefined,
-      point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+  // ── AABB pick (box annotations only) ──
+  let aabbResult: { annotationId: string; distance: number } | null = null
+  if (annotations && annotations.length > 0) {
+    for (const anno of annotations) {
+      if (!isBox(anno) || anno.visible === false) continue
+      const d = rayIntersectsBox(raycaster.ray.origin, raycaster.ray.direction, anno.min, anno.max)
+      if (d !== null && (aabbResult === null || d < aabbResult.distance)) {
+        aabbResult = { annotationId: anno.id, distance: d }
+      }
     }
   }
 
-  return null
+  // ── Merge ──
+  // Box annotation mesh hits are discarded — AABB handles them reliably
+  const meshIsBoxAnno = meshResult?.kind === 'annotation'
+    && annotations?.some(a => a.id === meshResult.annotationId && a.type === 'box')
+  const effMesh = meshIsBoxAnno ? null : meshResult
+  const meshDist = effMesh?.distance ?? Infinity
+  const aabbDist = aabbResult?.distance ?? Infinity
+
+  if (aabbDist < meshDist && aabbResult) {
+    return { kind: 'annotation', distance: aabbResult.distance, annotationId: aabbResult.annotationId, point: { x: 0, y: 0, z: 0 } }
+  }
+  return effMesh
+}
+
+/** Backward-compatible wrapper — delegates to pickAtPointer without AABB annotations. */
+export function scenePickFromPointer(params: ScenePickParams): ScenePickResult {
+  return pickAtPointer({ ...params, annotations: undefined })
 }
 
 // ---------------------------------------------------------------------------

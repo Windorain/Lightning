@@ -3,9 +3,11 @@ import * as THREE from 'three'
 import type { MeshProvider, MeshOutput } from './providerTypes'
 import type { StructureDefinition } from '../schema/types'
 import type { MaterialLibraryApi } from '../materials/simpleMaterialLibrary'
-import type { Annotation, BoxAnnotation, PointAnnotation, LineAnnotation, TextAnnotation } from '../data/annotationTypes'
-import { isBox, isPoint, isLine, isText } from '../data/annotationTypes'
-import { computeBoxFrameBars } from '../data/aabb'
+import type { Annotation, BoxAnnotation, PointAnnotation, LineAnnotation, TextAnnotation, FaceAnnotation } from '../data/annotationTypes'
+import { isBox, isPoint, isLine, isText, isFace } from '../data/annotationTypes'
+import { computeBoxFrameBars, computeQuadNormal } from '../data/aabb'
+import type { BakedQuadsGeometry, BakedQuad } from '../schema/types'
+import { decodeBakedGeometry } from './bakedGeometryDecode'
 
 export class AnnotationMeshProvider implements MeshProvider {
   priority = 50
@@ -30,6 +32,7 @@ export class AnnotationMeshProvider implements MeshProvider {
       else if (isPoint(anno)) this._buildPoint(group, anno)
       else if (isLine(anno)) this._buildLine(group, anno)
       else if (isText(anno)) this._buildText(group, anno)
+      else if (isFace(anno)) this._buildFace(group, anno, _def)
     }
 
     return [{
@@ -201,5 +204,65 @@ export class AnnotationMeshProvider implements MeshProvider {
     sprite.scale.set(2, 0.5, 1)
     sprite.name = `anno-text-${a.id}`
     group.add(sprite)
+  }
+
+  private _buildFace(group: THREE.Group, a: FaceAnnotation, def: StructureDefinition): void {
+    const { cellGrid, blockPalette } = def
+    const sizeZ = cellGrid.length
+    const sizeRow = cellGrid[0]?.length ?? 0
+    const sizeCol = cellGrid[0]?.[0]?.length ?? 0
+    if (sizeZ === 0 || sizeRow === 0 || sizeCol === 0) return
+
+    // Convert Y-up grid coords to cellGrid indices
+    const row = sizeRow - 1 - a.blockPos.y
+    const col = a.blockPos.x
+    const zSlice = a.blockPos.z
+    const idx = cellGrid[zSlice]?.[row]?.[col]
+    if (idx === undefined || idx < 0 || idx >= blockPalette.length) return
+
+    const entry = blockPalette[idx]
+    if (!entry?.geometry) return
+
+    let quads: BakedQuad[]
+    try { quads = decodeBakedGeometry(entry.geometry as BakedQuadsGeometry) } catch { return }
+    if (a.quadIndex >= quads.length) return
+
+    const quad = quads[a.quadIndex]
+    if (!quad || quad.vertices.length < 4) return
+
+    // Face normal for offset
+    const normal = computeQuadNormal(quad)
+    const NUDGE = 0.002
+
+    // World center of the voxel
+    const cx = col - sizeCol / 2 + 0.5
+    const cy = a.blockPos.y - sizeRow / 2 + 0.5
+    const cz = zSlice - sizeZ / 2 + 0.5
+
+    const verts: number[] = []
+    for (const v of quad.vertices) {
+      verts.push(
+        v.x + cx - 0.5 + normal.x * NUDGE,
+        v.y + cy - 0.5 + normal.y * NUDGE,
+        v.z + cz - 0.5 + normal.z * NUDGE,
+      )
+    }
+
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+    geo.setIndex([0, 1, 2, 0, 2, 3])
+    geo.computeVertexNormals()
+
+    const color = new THREE.Color(a.color)
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.55,
+      depthTest: true,
+      side: THREE.DoubleSide,
+    })
+    const mesh = new THREE.Mesh(geo, mat)
+    mesh.name = `anno-face-${a.id}`
+    group.add(mesh)
   }
 }
