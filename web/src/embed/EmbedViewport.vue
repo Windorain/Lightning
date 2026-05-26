@@ -343,6 +343,7 @@ function updateAnnotationOverlay(): void {
     }
     if (group) {
       _annoGroup = group
+      _annoGroup.visible = prefs.showAnnotations
       vpSlot.overlayGroup.value?.add(_annoGroup)
     }
   }).catch(() => { _annoPending = false })
@@ -442,6 +443,9 @@ const annotations = computed<Annotation[]>(() => {
   const plain = doc.serialize() as Record<string, any>
   return (plain.annotations ?? []) as Annotation[]
 })
+
+// ---- Annotation layer visibility ----
+watch(() => prefs.showAnnotations, (v) => { if (_annoGroup) _annoGroup.visible = v })
 
 // ---- Unified tooltip text ----
 const tooltipText = computed(() => {
@@ -653,6 +657,10 @@ onBeforeUnmount(() => {
             <label class="wm-settings-row">
               <span class="wm-settings-label">提示框距光标偏移 {{ prefs.tooltipOffset }}px</span>
               <input type="range" min="4" max="48" v-model.number="prefs.tooltipOffset" />
+            </label>
+            <label class="wm-settings-row">
+              <span class="wm-settings-label">显示注解层</span>
+              <input type="checkbox" v-model="prefs.showAnnotations" />
             </label>
           </div>
         </div>
