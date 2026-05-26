@@ -5,11 +5,14 @@ export interface ViewerPreferences {
   highlightOnHover: boolean
   /** 鼠标悬浮时弹出物品名称提示框 */
   showHoverTooltip: boolean
+  /** 提示框距光标偏移量 (px) */
+  tooltipOffset: number
 }
 
 const DEFAULTS: ViewerPreferences = {
   highlightOnHover: true,
   showHoverTooltip: true,
+  tooltipOffset: 12,
 }
 
 const STORAGE_KEY = 'lightning.prefs'
