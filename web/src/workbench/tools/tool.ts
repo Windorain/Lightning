@@ -59,6 +59,9 @@ export interface ToolContext {
   /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
   gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null
 
+  /** 获取方块在指定位置的四边面几何数据 */
+  getBlockGeometry(pos: { x: number; y: number; z: number }): { vertices: { x: number; y: number; z: number }[] }[] | null
+
   /** 调用操作符 */
   invokeOperator(id: string, props?: Record<string, unknown>, event?: Event, regionId?: string): string
 

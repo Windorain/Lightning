@@ -15,7 +15,7 @@ import {
 } from '@/render/interaction/initialCamera'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
-import { scenePickFromPointer, pickAnnotationsAABB } from '@/render/interaction/scenePick'
+import { pickAtPointer } from '@/render/interaction/scenePick'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { Annotation } from '@/render/data/annotationTypes'
 import type { InitialCamera } from '@/preview/previewConfig'
@@ -113,74 +113,35 @@ function runPick(): void {
   const dom = canvasEl
   if (!vp || !g || !dom || !lastPointer) return
 
-  const meshPick = scenePickFromPointer({
+  const picked = pickAtPointer({
     clientX: lastPointer.clientX, clientY: lastPointer.clientY,
     domElement: dom, camera: vp.camera,
     contentGroup: g, overlayGroup: layers?.overlay,
     def: props.definition,
     layerPreview: props.layerPreviewMode,
+    annotations: props.annotations,
   })
 
-  // AABB pick for box annotations (independent of mesh geometry)
-  let annoAabb: { annotationId: string; distance: number } | null = null
-  const annos = props.annotations
-  if (annos && annos.length > 0 && vp.camera) {
-    const rect = dom.getBoundingClientRect()
-    const ndc = new THREE.Vector2(
-      ((lastPointer.clientX - rect.left) / rect.width) * 2 - 1,
-      -((lastPointer.clientY - rect.top) / rect.height) * 2 + 1,
-    )
-    const rc = new THREE.Raycaster()
-    rc.setFromCamera(ndc, vp.camera)
-    annoAabb = pickAnnotationsAABB(rc.ray.origin, rc.ray.direction, annos)
-  }
-
-  // Box annotations: use AABB pick, ignore mesh hits on their frame bars
-  const meshIsBoxAnno = meshPick?.kind === 'annotation'
-    && annos?.some(a => a.id === meshPick.annotationId && a.type === 'box')
-  const effPick = meshIsBoxAnno ? null : meshPick
-  const effDist = effPick?.distance ?? Infinity
-  const aabbDist = annoAabb?.distance ?? Infinity
-
-  if (aabbDist < effDist && annoAabb) {
-    // AABB box annotation wins
-    if (annoAabb.annotationId !== lastAnnoId) {
-      lastAnnoId = annoAabb.annotationId
-      emit('hover-block', null)
-      emit('hover-annotation', {
-        annotationId: annoAabb.annotationId,
-        clientX: lastPointer.clientX, clientY: lastPointer.clientY,
-      })
-    } else {
-      emit('hover-annotation', {
-        annotationId: annoAabb.annotationId,
-        clientX: lastPointer.clientX, clientY: lastPointer.clientY,
-      })
-    }
-    return
-  }
-
-  if (effPick?.kind === 'block') {
+  if (picked?.kind === 'block') {
     lastAnnoId = null
     emit('hover-block', {
-      blockId: effPick.blockId,
+      blockId: picked.blockId,
       clientX: lastPointer.clientX, clientY: lastPointer.clientY,
       source: 'viewport',
-      voxel: { column: effPick.column, row: effPick.row, zSlice: effPick.zSlice },
+      voxel: { column: picked.column, row: picked.row, zSlice: picked.zSlice },
     })
     emit('hover-annotation', null)
-  } else if (effPick?.kind === 'annotation') {
-    // Non-box annotation (point/line/text) from mesh pick
-    if (effPick.annotationId !== lastAnnoId) {
-      lastAnnoId = effPick.annotationId
+  } else if (picked?.kind === 'annotation') {
+    if (picked.annotationId !== lastAnnoId) {
+      lastAnnoId = picked.annotationId
       emit('hover-block', null)
       emit('hover-annotation', {
-        annotationId: effPick.annotationId,
+        annotationId: picked.annotationId,
         clientX: lastPointer.clientX, clientY: lastPointer.clientY,
       })
     } else {
       emit('hover-annotation', {
-        annotationId: effPick.annotationId,
+        annotationId: picked.annotationId,
         clientX: lastPointer.clientX, clientY: lastPointer.clientY,
       })
     }

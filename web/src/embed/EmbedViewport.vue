@@ -23,8 +23,9 @@ import type { InitialCamera } from '@/preview/previewConfig'
 import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import { usePreviewTooltip, resolvePreviewTooltipText } from '@/preview/tooltip'
+import { resolvePreviewTooltipText } from '@/preview/tooltip'
 import { usePreferences } from '@/preview/preferences'
+import { useEmbedHover } from '@/embed/embedHover'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
@@ -85,8 +86,8 @@ watch(() => bctx.structEpoch.value, () => {
   void renderAssets.rebuildAll()
 })
 
-// ---- Hover / tooltip ----
-const { hover, setHover, clearHover } = usePreviewTooltip()
+// ---- Hover / tooltip (unified) ----
+const { hover, setViewportBlock, setSidebarBlock, setAnnotation, setMeta } = useEmbedHover()
 const viewerCoreRef = ref<InstanceType<typeof ViewerCore> | null>(null)
 const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
@@ -257,27 +258,14 @@ const metaTooltipText = computed(() => {
 })
 
 const showMetaHint = computed(() => metaTooltipText.value.length > 0)
-const metaHintPointer = ref<{ clientX: number; clientY: number } | null>(null)
 
-function onMetaHintPointerEnter(e: PointerEvent): void { metaHintPointer.value = { clientX: e.clientX, clientY: e.clientY } }
-function onMetaHintPointerMove(e: PointerEvent): void { if (!metaHintPointer.value) return; metaHintPointer.value = { clientX: e.clientX, clientY: e.clientY } }
-function onMetaHintPointerLeave(): void { metaHintPointer.value = null }
-function onMetaHintFocusIn(e: FocusEvent): void { const t = e.currentTarget as HTMLElement; const r = t.getBoundingClientRect(); metaHintPointer.value = { clientX: r.left + r.width / 2, clientY: r.bottom } }
-function onMetaHintFocusOut(): void { metaHintPointer.value = null }
+function onMetaHintPointerEnter(e: PointerEvent): void { setMeta({ clientX: e.clientX, clientY: e.clientY }) }
+function onMetaHintPointerMove(e: PointerEvent): void { setMeta({ clientX: e.clientX, clientY: e.clientY }) }
+function onMetaHintPointerLeave(): void { setMeta(null) }
+function onMetaHintFocusIn(e: FocusEvent): void { const t = e.currentTarget as HTMLElement; const r = t.getBoundingClientRect(); setMeta({ clientX: r.left + r.width / 2, clientY: r.bottom }) }
+function onMetaHintFocusOut(): void { setMeta(null) }
 
-// ---- Tooltip text ----
-const tooltipDisplayText = computed(() => {
-  const def = vpSlot.definition.value
-  const h = hover.value
-  if (!def || !h?.blockId) return ''
-  const resolved = resolvePreviewTooltipText(def, tooltipPalette.value, h)
-  if (resolved) return resolved
-  // Fallback: first line of NEI tooltip from block palette
-  const lines = neiTooltipMap.value.get(h.blockId)
-  if (lines && lines.length > 0) return renderTooltipHtml(lines[0])
-  return ''
-})
-
+// ---- NEI tooltip map (shared by block tooltip resolution) ----
 const neiTooltipMap = computed<Map<string, string[]>>(() => {
   const def = vpSlot.definition.value
   if (!def) return new Map()
@@ -289,18 +277,6 @@ const neiTooltipMap = computed<Map<string, string[]>>(() => {
     }
   }
   return map
-})
-
-const neiTooltipText = computed(() => {
-  const h = hover.value
-  if (!h || h.source !== 'sidebar') return ''
-  const lines = neiTooltipMap.value.get(h.blockId)
-  if (lines && lines.length > 0) {
-    return lines.map(l => renderTooltipHtml(l)).join('<br>')
-  }
-  // Fallback: show blockId as display name when tooltip data is missing
-  const colon = h.blockId.lastIndexOf(':')
-  return colon >= 0 ? h.blockId.slice(colon + 1) : h.blockId
 })
 
 const previewTitle = computed(() => {
@@ -432,28 +408,34 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
   _annoRafId = requestAnimationFrame(rafTick)
 }
 
-const hoveredVoxel = ref<{ column: number; row: number; zSlice: number } | null>(null)
+// ---- Hover highlight (derived from unified hover) ----
+const hoveredVoxel = computed(() => {
+  const h = hover.value
+  if (!prefs.highlightOnHover) return null
+  if (h?.kind === 'block' && h.source === 'viewport') return h.voxel
+  return null
+})
 
+// ---- Hover event handlers (write to unified hover) ----
 function onViewportHover(
   payload: { blockId: string; clientX: number; clientY: number; source: 'viewport'; voxel: { column: number; row: number; zSlice: number } } | null,
 ): void {
-  if (payload) {
-    setHover(payload)
-    hoveredVoxel.value = payload.voxel
-  } else {
-    clearHover('viewport')
-    hoveredVoxel.value = null
-  }
+  setViewportBlock(payload)
 }
 
 function onSidebarTooltipHover(
   payload: { blockId: string; clientX: number; clientY: number; source: 'sidebar' } | null,
 ): void {
-  if (payload) setHover(payload)
-  else clearHover('sidebar')
+  setSidebarBlock(payload)
 }
 
-// ---- Annotation hover tooltip ----
+function onAnnotationHover(
+  payload: { annotationId: string; clientX: number; clientY: number } | null,
+): void {
+  setAnnotation(payload)
+}
+
+// ---- Annotations list (shared by ViewerCore prop + tooltip) ----
 const annotations = computed<Annotation[]>(() => {
   const doc = bctx.doc.value
   if (!doc) return []
@@ -461,37 +443,54 @@ const annotations = computed<Annotation[]>(() => {
   return (plain.annotations ?? []) as Annotation[]
 })
 
-const annotationHover = ref<{ annotationId: string; clientX: number; clientY: number } | null>(null)
-
-function onAnnotationHover(
-  payload: { annotationId: string; clientX: number; clientY: number } | null,
-): void {
-  if (!payload) {
-    annotationHover.value = null
-    return
-  }
-  const h = annotationHover.value
-  if (h && h.annotationId === payload.annotationId) {
-    h.clientX = payload.clientX
-    h.clientY = payload.clientY
-  } else {
-    annotationHover.value = { ...payload }
-  }
-}
-
-const annotationTooltipText = computed(() => {
-  const h = annotationHover.value
+// ---- Unified tooltip text ----
+const tooltipText = computed(() => {
+  const h = hover.value
   if (!h) return ''
-  const doc = bctx.doc.value
-  if (!doc) return ''
-  const plain = doc.serialize() as Record<string, any>
-  const annos = plain.annotations as Annotation[] | undefined
-  const anno = annos?.find(a => a.id === h.annotationId)
-  if (!anno) return ''
-  const parts: string[] = []
-  if (anno.title) parts.push(anno.title)
-  if (anno.description) parts.push(anno.description)
-  return parts.join('\n')
+
+  switch (h.kind) {
+    case 'block': {
+      // Viewport: gated by showHoverTooltip setting
+      if (h.source === 'viewport' && !prefs.showHoverTooltip) return ''
+      // Resolve viewport tooltip
+      if (h.source === 'viewport') {
+        const def = vpSlot.definition.value
+        if (!def) return ''
+        const ht = { blockId: h.blockId, clientX: h.clientX, clientY: h.clientY, source: 'viewport' as const, voxel: h.voxel }
+        const resolved = resolvePreviewTooltipText(def, tooltipPalette.value, ht)
+        if (resolved) return resolved
+        // Fallback: first line of NEI tooltip from block palette
+        const lines = neiTooltipMap.value.get(h.blockId)
+        if (lines && lines.length > 0) return renderTooltipHtml(lines[0])
+        return ''
+      }
+      // Sidebar: NEI tooltip
+      const lines = neiTooltipMap.value.get(h.blockId)
+      if (lines && lines.length > 0) return lines.map(l => renderTooltipHtml(l)).join('\n')
+      const colon = h.blockId.lastIndexOf(':')
+      return colon >= 0 ? h.blockId.slice(colon + 1) : h.blockId
+    }
+
+    case 'annotation': {
+      const doc = bctx.doc.value
+      if (!doc) return ''
+      const plain = doc.serialize() as Record<string, any>
+      const annos = plain.annotations as Annotation[] | undefined
+      const anno = annos?.find(a => a.id === h.annotationId)
+      if (!anno) return ''
+      const parts: string[] = []
+      if (anno.title) parts.push(anno.title)
+      if (anno.description) parts.push(anno.description)
+      return parts.join('\n')
+    }
+
+    case 'meta': {
+      return metaTooltipText.value
+    }
+
+    default:
+      return ''
+  }
 })
 
 onMounted(async () => { await renderAssets.loadStructureAndResources() })
@@ -632,10 +631,7 @@ onBeforeUnmount(() => {
       <span class="wm-status-text">{{ statusSummary }}</span>
     </div>
 
-    <ToolTipBox v-if="prefs.showHoverTooltip && hover && tooltipDisplayText" :text="tooltipDisplayText" :client-x="hover.clientX" :client-y="hover.clientY" :offset="prefs.tooltipOffset" />
-    <ToolTipBox v-if="hover && neiTooltipText" :text="neiTooltipText" :client-x="hover.clientX" :client-y="hover.clientY" :offset="prefs.tooltipOffset" />
-    <ToolTipBox v-if="annotationHover && annotationTooltipText" :text="annotationTooltipText" :client-x="annotationHover.clientX" :client-y="annotationHover.clientY" :offset="prefs.tooltipOffset" />
-    <ToolTipBox v-if="metaHintPointer && metaTooltipText" :text="metaTooltipText" :client-x="metaHintPointer.clientX" :client-y="metaHintPointer.clientY" :offset="prefs.tooltipOffset" />
+    <ToolTipBox v-if="hover && tooltipText" :text="tooltipText" :client-x="hover.clientX" :client-y="hover.clientY" :offset="prefs.tooltipOffset" />
 
     <!-- 设置面板 -->
     <Transition name="fade">
