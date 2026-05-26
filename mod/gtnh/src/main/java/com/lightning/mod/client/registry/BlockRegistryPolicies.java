@@ -7,6 +7,7 @@ import java.util.List;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 
+import com.google.gson.JsonObject;
 import com.lightning.mod.client.registry.gt.GtBlockClassRegistryPolicy;
 import com.lightning.mod.client.registry.gt.GtBlockMachinesRegistryPolicy;
 import com.lightning.mod.core.registry.AddonModsRegistryPolicyOrder;
@@ -14,7 +15,6 @@ import com.lightning.mod.core.registry.BlockRegistryJson;
 import com.lightning.mod.core.registry.bartworks.BartWorksRenderProfiles;
 import com.lightning.mod.core.registry.gt.GtGregtechRegistryPolicyOrder;
 import com.lightning.mod.core.registry.gt.GtRenderProfiles;
-import com.google.gson.JsonObject;
 
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;

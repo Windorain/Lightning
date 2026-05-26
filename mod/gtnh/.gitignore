@@ -7,9 +7,6 @@
 *.log
 .refs/
 
-# Workbench 打包进资源目录的前端构建产物，勿提交（由 syncWeb 任务拷贝）
-src/main/resources/assets/lightning/web/
-
 .claude
 CLAUDE.md
 .worktrees/

@@ -16,14 +16,14 @@ import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.util.ResourceLocation;
 
-import com.lightning.mod.client.registry.BlockRegistryPolicies;
-import com.lightning.mod.core.export.PendingDumpFiles;
-import com.lightning.mod.core.registry.GregTechMetaTileRegistry;
-import com.lightning.mod.mixin.interfaces.accessors.TextureMapAccessor;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.lightning.mod.client.registry.BlockRegistryPolicies;
+import com.lightning.mod.core.export.PendingDumpFiles;
+import com.lightning.mod.core.registry.GregTechMetaTileRegistry;
+import com.lightning.mod.mixin.interfaces.accessors.TextureMapAccessor;
 
 import cpw.mods.fml.common.registry.GameRegistry;
 import cpw.mods.fml.relauncher.Side;

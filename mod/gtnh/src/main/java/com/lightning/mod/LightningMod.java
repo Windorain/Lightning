@@ -22,9 +22,7 @@ public class LightningMod {
     /** 1.7.10 集成服下 FML init 的 Side 可能仅有 CLIENT，tick 监听器在 {@link FMLServerStartingEvent} 注册。 */
     private static boolean sdeServerRecordTickHandlerRegistered;
 
-    @SidedProxy(
-        clientSide = "com.lightning.mod.proxy.ClientProxy",
-        serverSide = "com.lightning.mod.proxy.CommonProxy")
+    @SidedProxy(clientSide = "com.lightning.mod.proxy.ClientProxy", serverSide = "com.lightning.mod.proxy.CommonProxy")
     public static IProxy proxy;
 
     @Mod.EventHandler

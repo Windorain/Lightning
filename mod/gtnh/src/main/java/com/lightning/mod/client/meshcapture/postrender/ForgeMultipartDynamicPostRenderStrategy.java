@@ -2,13 +2,21 @@ package com.lightning.mod.client.meshcapture.postrender;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.tileentity.TileEntity;
+
+import org.lwjgl.BufferUtils;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.util.vector.Matrix4f;
+
+import com.lightning.mod.client.meshcapture.TessellatorCaptureState;
 
 import cpw.mods.fml.common.FMLLog;
 import cpw.mods.fml.relauncher.Side;
@@ -74,26 +82,56 @@ public final class ForgeMultipartDynamicPostRenderStrategy implements MeshCaptur
         prepareMultipartDynamicEnvironment(te);
         tryUpdateRenderCache(te);
 
-        if (invokeAnyRenderDynamic3(te, collectRenderDynamic3Methods(te.getClass()), wx, wy, wz, frame, 0)) {
-            return;
-        }
+        Tessellator.instance.setTranslation(0.0, 0.0, 0.0);
 
-        boolean anyPart = false;
-        for (Object part : iterableParts(te)) {
-            if (part == null) {
-                continue;
+        armDynamicPassModelViewBaselineFromCurrentMatrix();
+
+        TessellatorCaptureState.beginDynamicExtensionVertexPhase();
+        try {
+            if (invokeAnyRenderDynamic3(te, collectRenderDynamic3Methods(te.getClass()), wx, wy, wz, frame, 0)) {
+                return;
             }
-            anyPart |= invokeAnyRenderDynamic3(
-                part,
-                collectRenderDynamic3Methods(part.getClass()),
-                wx,
-                wy,
-                wz,
-                frame,
-                0);
+
+            boolean anyPart = false;
+            for (Object part : iterableParts(te)) {
+                if (part == null) {
+                    continue;
+                }
+                anyPart |= invokeAnyRenderDynamic3(
+                    part,
+                    collectRenderDynamic3Methods(part.getClass()),
+                    wx,
+                    wy,
+                    wz,
+                    frame,
+                    0);
+            }
+            if (!anyPart) {
+                FMLLog.warning("[SDE] ForgeMultipartDynamic: no renderDynamic succeeded (tile + parts)");
+            }
+        } finally {
+            TessellatorCaptureState.endDynamicExtensionVertexPhase();
         }
-        if (!anyPart) {
-            FMLLog.warning("[SDE] ForgeMultipartDynamic: no renderDynamic succeeded (tile + parts)");
+    }
+
+    /**
+     * 对齐 {@link com.lightning.mod.client.meshcapture.postrender.TileEntitySpecialRendererPostRenderStrategy}：
+     * 读取当前 MODELVIEW 并计算逆矩阵作为基线，供 mixin 做 {@code inv(M0) * M_now * v} 变换。
+     */
+    private static void armDynamicPassModelViewBaselineFromCurrentMatrix() {
+        FloatBuffer mv0 = BufferUtils.createFloatBuffer(16);
+        GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, mv0);
+        mv0.rewind();
+        Matrix4f mAtEntry = new Matrix4f();
+        mAtEntry.load(mv0);
+        Matrix4f invEntry = new Matrix4f();
+        if (Matrix4f.invert(mAtEntry, invEntry) != null) {
+            FloatBuffer invBuf = BufferUtils.createFloatBuffer(16);
+            invEntry.store(invBuf);
+            invBuf.rewind();
+            float[] snapInv = new float[16];
+            invBuf.get(snapInv);
+            TessellatorCaptureState.armDynamicPassModelViewBaselineInverse(snapInv);
         }
     }
 
