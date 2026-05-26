@@ -533,6 +533,7 @@ public final class MeshCaptureService {
                         } else {
                             attachMaterials(inst, textureMap, samplers);
                             JsonObject geo = bakedQuadsGeometryFromCapture(inst);
+
                             List<String> tt = tooltipByCellType.get(ti);
                             String sig = fullEqualitySignature(vs.registryId, vs.meta, vs.tileNbt, geo, tt);
                             Integer fin = sigToFinal.get(sig);

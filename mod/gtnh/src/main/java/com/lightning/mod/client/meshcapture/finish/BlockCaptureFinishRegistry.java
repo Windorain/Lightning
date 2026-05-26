@@ -18,6 +18,10 @@ public final class BlockCaptureFinishRegistry {
 
     private static final CopyOnWriteArrayList<BlockCaptureFinishStrategy> STRATEGIES = new CopyOnWriteArrayList<>();
 
+    static {
+        register(new JabbaBarrelDedupFinisher());
+    }
+
     private BlockCaptureFinishRegistry() {}
 
     public static void register(BlockCaptureFinishStrategy strategy) {
