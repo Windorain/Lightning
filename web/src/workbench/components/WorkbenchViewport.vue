@@ -4,8 +4,9 @@ import ViewerCore, { type ViewerCoreReadyPayload } from '@/embed/components/View
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
-import { useSelectionContext } from '@/workbench/selectionContext'
+import { useSelectionContext, type BlockRef } from '@/workbench/selectionContext'
 import { useBContext } from '@/workbench/context/bContext'
+import { usePreferences } from '@/workbench/preferences'
 import { createRenderAssets } from '@/workbench/context/sceneLifecycle'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
@@ -20,6 +21,7 @@ import * as THREE from 'three'
 
 const selection = useSelectionContext()
 const bctx = useBContext()
+const prefs = usePreferences()
 
 const VIEWPORT_REGION_ID = 'r-viewport'
 const vpSlot = bctx.viewports.get(VIEWPORT_REGION_ID) ?? bctx.viewports.register(VIEWPORT_REGION_ID)
@@ -35,6 +37,13 @@ const layerWorldY = ref(-1)
 const framesPlaybackIsPlaying = ref(false)
 
 const docRef = computed(() => bctx.doc.value)
+
+const annotations = computed<Annotation[]>(() => {
+  const doc = bctx.doc.value
+  if (!doc) return []
+  const plain = doc.serialize() as Record<string, any>
+  return (plain.annotations ?? []) as Annotation[]
+})
 
 // ---- renderAssets（viewport 本地） ----
 const renderAssets = createRenderAssets({
@@ -175,6 +184,24 @@ const toolHints = computed<ToolHint[]>(() => {
 const highlightProvider = new SelectionHighlightProvider()
 let _outlinePass: SelectionOutlinePass | null = null
 
+// ---- Hover highlight ----
+const hoveredBlockRef = ref<BlockRef | null>(null)
+
+function onViewportHover(
+  payload: { blockId: string; voxel: { column: number; row: number; zSlice: number }; source: string } | null,
+): void {
+  if (!payload || !prefs.highlightOnHover) {
+    hoveredBlockRef.value = null
+    return
+  }
+  const h = gridHeight.value ?? 0
+  const worldY = h > 0 ? h - 1 - payload.voxel.row : payload.voxel.row
+  hoveredBlockRef.value = {
+    pos: { x: payload.voxel.column, y: worldY, z: payload.voxel.zSlice },
+    block_state_id: payload.blockId,
+  }
+}
+
 // ---- Annotation overlay ----
 let _annoGroup: THREE.Group | null = null
 let _annoHash = ''
@@ -214,13 +241,29 @@ function updateSelectionHighlight(): void {
   if (!_outlinePass) return
 
   const items = selection.items.value
-  if (items.size === 0 || items.size > 500) {
-    _outlinePass.setMaskMeshes([])
+  const hov = hoveredBlockRef.value
+  if (!hov || !prefs.highlightOnHover) {
+    // No hover: selection-only (existing behavior)
+    if (items.size === 0 || items.size > 500) { _outlinePass.setMaskMeshes([]); return }
+    const masks = highlightProvider.build(
+      items,
+      (pos) => bctx.queries.getBlockGeometry(pos),
+      (pos) => bctx.queries.gridCenterWorld(pos),
+    )
+    _outlinePass.setMaskMeshes(masks)
     return
   }
 
+  // Hover + optional selection: merge, dedup by position
+  const entities = new Set(items)
+  const dup = [...items].some(
+    e => e.kind === 'block' && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z,
+  )
+  if (!dup) entities.add({ kind: 'block', ref: hov })
+
+  if (entities.size > 500) { _outlinePass.setMaskMeshes([]); return }
   const masks = highlightProvider.build(
-    items,
+    entities,
     (pos) => bctx.queries.getBlockGeometry(pos),
     (pos) => bctx.queries.gridCenterWorld(pos),
   )
@@ -277,7 +320,9 @@ onBeforeUnmount(() => {
       :layer-preview-mode="layerPreviewMode"
       :scene-background="0x5a5a5a"
       :show-axes-gizmo="true"
+      :annotations="annotations"
       @ready="onViewportReady"
+      @hover-block="onViewportHover"
     />
     <div v-else class="wv-placeholder">
           <svg class="wv-placeholder-icon" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
