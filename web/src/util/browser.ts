@@ -41,6 +41,14 @@ type SaveFilePickerOptions = {
   types?: Array<{ description: string; accept: Record<string, string[]> }>
 }
 
+/** 事件目标是否为可编辑元素（input/textarea/contenteditable） */
+export function isEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target.isContentEditable
+}
+
 /** File System Access API 的 showSaveFilePicker（仅在安全上下文可用） */
 export function getShowSaveFilePicker():
   | ((options: SaveFilePickerOptions) => Promise<FileSystemFileHandle>)

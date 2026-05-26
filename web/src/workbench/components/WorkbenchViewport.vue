@@ -13,6 +13,7 @@ import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
 import type { Annotation } from '@/render/data/annotationTypes'
+import { isEditingTarget } from '@/util/browser'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 import ToolHintsBar from '@/workbench/ux/ToolHintsBar.vue'
@@ -146,7 +147,10 @@ async function onViewportReady({ mainScene, overlayScene: _overlayScene, layers,
     e.preventDefault()
   }, { capture: true, passive: false })
   domElement.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
-  document.addEventListener('keydown', (e) => { bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID }) }, { capture: true })
+  document.addEventListener('keydown', (e) => {
+    if (isEditingTarget(e.target)) return
+    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
+  }, { capture: true })
 
   const unregGizmo = bctx.eventDispatcher.registerRegionHandler(
     VIEWPORT_REGION_ID,

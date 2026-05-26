@@ -13,6 +13,7 @@ import { defaultEmbedUi } from '@/preview/previewConfig'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
 import { provideSelectionContext } from '@/workbench/selectionContext'
+import { isEditingTarget } from '@/util/browser'
 import { provideEditHistory } from '@/workbench/editHistoryContext'
 import { provideToolRegistry } from '@/workbench/toolRegistry'
 import { provideBContext } from '@/workbench/context/bContext'
@@ -149,6 +150,7 @@ function onMouseMove(e: MouseEvent) {
   bctx.wm.contextMenuItems = ADD_MENU_ITEMS
 
 function handleKeydown(event: KeyboardEvent): void {
+  if (isEditingTarget(event.target)) return
   if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
     event.preventDefault()
     const pos = lastMousePosition.value ?? { x: 400, y: 300 }
