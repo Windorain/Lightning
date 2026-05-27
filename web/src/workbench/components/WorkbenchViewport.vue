@@ -104,6 +104,8 @@ function createToolContext(): ToolContext {
 
 /* ---- Viewport events ---- */
 async function onViewportReady({ mainScene, overlayScene: _overlayScene, layers, camera, domElement, orbitTarget, renderer: vpRenderer }: ViewerCoreReadyPayload): Promise<void> {
+  _annoHash = ''  // reset after tab switch / remount
+  bctx.viewports.activeId.value = VIEWPORT_REGION_ID
   renderAssets.registerScene(mainScene)
 
   // Create and register screen-space outline pass

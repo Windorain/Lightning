@@ -1,5 +1,7 @@
 import type { RNAStruct } from '../types'
 
+const touch = (owner: any) => { owner.updated_at = Date.now() }
+
 export const annotationRNA: RNAStruct = {
   name: 'annotation',
   description: '注解对象',
@@ -12,7 +14,7 @@ export const annotationRNA: RNAStruct = {
       description: '注解标题',
       default: '',
       get(owner: any) { return owner.title ?? '' },
-      set(owner: any, val: unknown) { owner.title = val as string },
+      set(owner: any, val: unknown) { owner.title = val as string; touch(owner) },
     },
     {
       name: 'description',
@@ -21,7 +23,7 @@ export const annotationRNA: RNAStruct = {
       description: '注解描述文本',
       default: '',
       get(owner: any) { return owner.description ?? '' },
-      set(owner: any, val: unknown) { owner.description = val as string },
+      set(owner: any, val: unknown) { owner.description = val as string; touch(owner) },
       uiWidget: 'text',
     },
     {
@@ -31,7 +33,7 @@ export const annotationRNA: RNAStruct = {
       description: '注解显示颜色',
       default: '#ffffff',
       get(owner: any) { return owner.color ?? '#ffffff' },
-      set(owner: any, val: unknown) { owner.color = val as string },
+      set(owner: any, val: unknown) { owner.color = val as string; touch(owner) },
     },
     {
       name: 'visible',
@@ -40,7 +42,7 @@ export const annotationRNA: RNAStruct = {
       description: '是否在视口中可见',
       default: true,
       get(owner: any) { return owner.visible ?? true },
-      set(owner: any, val: unknown) { owner.visible = val as boolean },
+      set(owner: any, val: unknown) { owner.visible = val as boolean; touch(owner) },
     },
     {
       name: 'locked',
@@ -49,7 +51,7 @@ export const annotationRNA: RNAStruct = {
       description: '锁定后不可在视口中编辑',
       default: false,
       get(owner: any) { return owner.locked ?? false },
-      set(owner: any, val: unknown) { owner.locked = val as boolean },
+      set(owner: any, val: unknown) { owner.locked = val as boolean; touch(owner) },
     },
 
     // ── Box ──
@@ -60,7 +62,7 @@ export const annotationRNA: RNAStruct = {
       description: '包围盒最小角',
       default: { x: 0, y: 0, z: 0 },
       get(owner: any) { return owner.min ?? { x: 0, y: 0, z: 0 } },
-      set(owner: any, val: unknown) { owner.min = { ...val as any } },
+      set(owner: any, val: unknown) { owner.min = { ...val as any }; touch(owner) },
     },
     {
       name: 'max',
@@ -69,7 +71,7 @@ export const annotationRNA: RNAStruct = {
       description: '包围盒最大角',
       default: { x: 0, y: 0, z: 0 },
       get(owner: any) { return owner.max ?? { x: 0, y: 0, z: 0 } },
-      set(owner: any, val: unknown) { owner.max = { ...val as any } },
+      set(owner: any, val: unknown) { owner.max = { ...val as any }; touch(owner) },
     },
     {
       name: 'renderStyle',
@@ -79,7 +81,7 @@ export const annotationRNA: RNAStruct = {
       default: 'wireframe',
       enumItems: ['wireframe', 'boxFrame', 'translucent', 'hidden'],
       get(owner: any) { return owner.renderStyle ?? 'wireframe' },
-      set(owner: any, val: unknown) { owner.renderStyle = val as string },
+      set(owner: any, val: unknown) { owner.renderStyle = val as string; touch(owner) },
     },
     {
       name: 'renderOpacity',
@@ -89,7 +91,7 @@ export const annotationRNA: RNAStruct = {
       default: 0.5,
       min: 0, max: 1,
       get(owner: any) { return owner.renderOpacity ?? 0.5 },
-      set(owner: any, val: unknown) { owner.renderOpacity = val as number },
+      set(owner: any, val: unknown) { owner.renderOpacity = val as number; touch(owner) },
     },
     {
       name: 'overlay',
@@ -98,7 +100,7 @@ export const annotationRNA: RNAStruct = {
       description: '浮于顶层，忽略深度遮挡',
       default: false,
       get(owner: any) { return owner.overlay ?? false },
-      set(owner: any, val: unknown) { owner.overlay = val as boolean },
+      set(owner: any, val: unknown) { owner.overlay = val as boolean; touch(owner) },
     },
     {
       name: 'fillOpacity',
@@ -108,7 +110,7 @@ export const annotationRNA: RNAStruct = {
       default: 0.3,
       min: 0, max: 1,
       get(owner: any) { return owner.fillOpacity ?? 0.3 },
-      set(owner: any, val: unknown) { owner.fillOpacity = val as number },
+      set(owner: any, val: unknown) { owner.fillOpacity = val as number; touch(owner) },
     },
     {
       name: 'frameThickness',
@@ -118,7 +120,7 @@ export const annotationRNA: RNAStruct = {
       default: 0.04,
       min: 0.01, max: 0.2,
       get(owner: any) { return owner.frameThickness ?? 0.04 },
-      set(owner: any, val: unknown) { owner.frameThickness = val as number },
+      set(owner: any, val: unknown) { owner.frameThickness = val as number; touch(owner) },
     },
 
     // ── Point ──
@@ -129,7 +131,7 @@ export const annotationRNA: RNAStruct = {
       description: '标记点世界坐标',
       default: { x: 0, y: 0, z: 0 },
       get(owner: any) { return owner.pos ?? { x: 0, y: 0, z: 0 } },
-      set(owner: any, val: unknown) { owner.pos = { ...val as any } },
+      set(owner: any, val: unknown) { owner.pos = { ...val as any }; touch(owner) },
     },
     {
       name: 'icon',
@@ -139,7 +141,7 @@ export const annotationRNA: RNAStruct = {
       default: 'diamond',
       enumItems: ['diamond', 'circle', 'square', 'cross'],
       get(owner: any) { return owner.icon ?? 'diamond' },
-      set(owner: any, val: unknown) { owner.icon = val as string },
+      set(owner: any, val: unknown) { owner.icon = val as string; touch(owner) },
     },
     {
       name: 'size',
@@ -149,7 +151,7 @@ export const annotationRNA: RNAStruct = {
       default: 1.0,
       min: 0.1, max: 5,
       get(owner: any) { return owner.size ?? 1.0 },
-      set(owner: any, val: unknown) { owner.size = val as number },
+      set(owner: any, val: unknown) { owner.size = val as number; touch(owner) },
     },
 
     // ── Line ──
@@ -161,7 +163,7 @@ export const annotationRNA: RNAStruct = {
       default: 1.0,
       min: 0.1, max: 10,
       get(owner: any) { return owner.thickness ?? 1.0 },
-      set(owner: any, val: unknown) { owner.thickness = val as number },
+      set(owner: any, val: unknown) { owner.thickness = val as number; touch(owner) },
     },
     {
       name: 'arrow',
@@ -171,7 +173,7 @@ export const annotationRNA: RNAStruct = {
       default: 'none',
       enumItems: ['none', 'start', 'end', 'both'],
       get(owner: any) { return owner.arrow ?? 'none' },
-      set(owner: any, val: unknown) { owner.arrow = val as string },
+      set(owner: any, val: unknown) { owner.arrow = val as string; touch(owner) },
     },
     {
       name: 'showPoints',
@@ -180,7 +182,7 @@ export const annotationRNA: RNAStruct = {
       description: '显示线段端点标记',
       default: true,
       get(owner: any) { return owner.showPoints ?? true },
-      set(owner: any, val: unknown) { owner.showPoints = val as boolean },
+      set(owner: any, val: unknown) { owner.showPoints = val as boolean; touch(owner) },
     },
 
     // ── Text ──
@@ -191,7 +193,7 @@ export const annotationRNA: RNAStruct = {
       description: '文本标签锚点世界坐标',
       default: { x: 0, y: 0, z: 0 },
       get(owner: any) { return owner.anchorPos ?? { x: 0, y: 0, z: 0 } },
-      set(owner: any, val: unknown) { owner.anchorPos = { ...val as any } },
+      set(owner: any, val: unknown) { owner.anchorPos = { ...val as any }; touch(owner) },
     },
     {
       name: 'text',
@@ -200,7 +202,7 @@ export const annotationRNA: RNAStruct = {
       description: '文本标签内容',
       default: '',
       get(owner: any) { return owner.text ?? '' },
-      set(owner: any, val: unknown) { owner.text = val as string },
+      set(owner: any, val: unknown) { owner.text = val as string; touch(owner) },
       uiWidget: 'text',
     },
     {
@@ -211,7 +213,7 @@ export const annotationRNA: RNAStruct = {
       default: 14,
       min: 8, max: 72,
       get(owner: any) { return owner.fontSize ?? 14 },
-      set(owner: any, val: unknown) { owner.fontSize = val as number },
+      set(owner: any, val: unknown) { owner.fontSize = val as number; touch(owner) },
     },
     {
       name: 'backgroundAlpha',
@@ -221,7 +223,7 @@ export const annotationRNA: RNAStruct = {
       default: 0xCC,
       min: 0, max: 255,
       get(owner: any) { return owner.backgroundAlpha ?? 0xCC },
-      set(owner: any, val: unknown) { owner.backgroundAlpha = val as number },
+      set(owner: any, val: unknown) { owner.backgroundAlpha = val as number; touch(owner) },
     },
   ],
 }
