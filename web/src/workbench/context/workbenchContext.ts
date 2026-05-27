@@ -33,6 +33,7 @@ import {
   transformPanel, sceneInfoPanel,
   menuBarPanel, blockStatsPanel,
   annotationPanel, wikiConfigPanel,
+  tooltipEditorPanel,
 } from '@/workbench/ux/panels'
 
 // All builtin operators
@@ -166,7 +167,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels.push(menuBarPanel)
   const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
   propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
-    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel, wikiConfigPanel,
+    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel, wikiConfigPanel, tooltipEditorPanel,
   )
 
   // ---- 原子构造 bctx（一次性全部填入，不用 as unknown / as any 后补） ----

@@ -462,7 +462,18 @@ const tooltipText = computed(() => {
         if (!def) return ''
         const ht = { blockId: h.blockId, clientX: h.clientX, clientY: h.clientY, source: 'viewport' as const, voxel: h.voxel }
         const resolved = resolvePreviewTooltipText(def, tooltipPalette.value, ht)
-        if (resolved) return resolved
+        if (resolved) {
+          const neiLines = neiTooltipMap.value.get(h.blockId)
+          const nameLine = neiLines?.[0]
+          if (nameLine) {
+            const nl = resolved.indexOf('\n')
+            const resolvedFirst = nl >= 0 ? resolved.slice(0, nl) : resolved
+            if (resolvedFirst !== nameLine) {
+              return nameLine + '\n' + resolved
+            }
+          }
+          return resolved
+        }
         // Fallback: first line of NEI tooltip from block palette
         const lines = neiTooltipMap.value.get(h.blockId)
         if (lines && lines.length > 0) return renderTooltipHtml(lines[0])
