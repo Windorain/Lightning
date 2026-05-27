@@ -20,27 +20,19 @@ const props = defineProps<{
 }>()
 
 const activeId = ref<string | null>(null)
-let prevIds = new Set<string>()
 
-// Auto-select: newly appeared panels take priority, otherwise preserve current
+// Auto-select: preserve current tab unless it was removed
 watch(
   () => props.panels,
   (list) => {
     if (list.length === 0) {
       activeId.value = null
-      prevIds = new Set()
       return
     }
     const curIds = new Set(list.map(p => p.id))
-    // New panel appeared — switch to it
-    const added = list.find(p => !prevIds.has(p.id))
-    if (added) {
-      activeId.value = added.id
-    } else if (!list.find(p => p.id === activeId.value)) {
-      // Current panel removed — fall back to first
+    if (!activeId.value || !curIds.has(activeId.value)) {
       activeId.value = list[0].id
     }
-    prevIds = curIds
   },
   { immediate: true },
 )

@@ -36,7 +36,7 @@ export const TooltipEditOperator: OperatorType = {
   },
 
   exec(bctx, props) {
-    const doc = bctx.queries.getDocument()
+    const doc = bctx.doc.value as Record<string, any> | null
     if (!doc) return
 
     const text = props.text as string

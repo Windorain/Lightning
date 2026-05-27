@@ -10,7 +10,6 @@ function singleBlockLayout(bctx: BContext, item: BlockRef): UILayoutItem[] {
   items.push(
     { kind: 'box', label: '标识', items: [
       { kind: 'property', rnaPath: 'block.id', label: '方块' },
-      { kind: 'property', rnaPath: 'block.tooltip', label: 'Tooltip', widget: 'text' },
     ]},
     { kind: 'separator' },
     { kind: 'box', label: '位置', items: [
@@ -46,14 +45,6 @@ function singleBlockLayout(bctx: BContext, item: BlockRef): UILayoutItem[] {
     }
   }
 
-  items.push(
-    { kind: 'separator' },
-    { kind: 'row', align: true, items: [
-      { kind: 'operator', id: 'OPERATOR_TOOLTIP_EDIT', label: '编辑' },
-      { kind: 'operator', id: 'OPERATOR_DELETE', label: '删除' },
-    ]},
-  )
-
   return items
 }
 
@@ -70,12 +61,6 @@ function multiBlockLayout(items: BlockRef[]): UILayoutItem[] {
   for (const [id, count] of [...typeCounts.entries()].sort((a, b) => b[1] - a[1])) {
     result.push({ kind: 'label', text: `${id}  ×${count}` })
   }
-  result.push(
-    { kind: 'separator' },
-    { kind: 'row', align: true, items: [
-      { kind: 'operator', id: 'OPERATOR_DELETE', label: '删除所选' },
-    ]},
-  )
   return result
 }
 

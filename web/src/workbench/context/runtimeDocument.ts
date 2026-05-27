@@ -361,6 +361,7 @@ export class RuntimeDocument {
   readonly labels: unknown[]
   readonly textureBlobs: Record<string, unknown> | undefined
   readonly tooltipPalette: unknown[] | undefined
+  readonly cellTooltipGrid: number[][][] | undefined
   readonly materialPalette: unknown[] | undefined
   readonly playback: Record<string, unknown> | undefined
 
@@ -376,6 +377,7 @@ export class RuntimeDocument {
     labels?: unknown[]
     textureBlobs?: Record<string, unknown> | null
     tooltipPalette?: unknown[] | null
+    cellTooltipGrid?: number[][][] | null
     materialPalette?: unknown[] | null
     playback?: Record<string, unknown> | null
     extra?: Record<string, unknown>
@@ -388,6 +390,7 @@ export class RuntimeDocument {
     this.labels = [...(opts.labels ?? [])]
     this.textureBlobs = opts.textureBlobs ?? undefined
     this.tooltipPalette = opts.tooltipPalette ?? undefined
+    this.cellTooltipGrid = opts.cellTooltipGrid ?? undefined
     this.materialPalette = opts.materialPalette ?? undefined
     this.playback = opts.playback ?? undefined
     this._extra = { ...(opts.extra ?? {}) }
@@ -458,6 +461,7 @@ export class RuntimeDocument {
     }
     if (this.textureBlobs) out.textureBlobs = this.textureBlobs
     if (this.tooltipPalette) out.tooltipPalette = [...this.tooltipPalette]
+    if (this.cellTooltipGrid) out.cellTooltipGrid = this.cellTooltipGrid.map(s => s.map(r => [...r]))
     if (this.materialPalette) out.materialPalette = [...this.materialPalette]
     if (this.playback) out.playback = { ...this.playback }
     return out
@@ -495,6 +499,7 @@ export class RuntimeDocument {
       labels: [...this.labels],
       textureBlobs: this.textureBlobs ? (Array.isArray(this.textureBlobs) ? [...this.textureBlobs] as unknown as Record<string, unknown> : { ...this.textureBlobs }) : undefined,
       tooltipPalette: this.tooltipPalette ? [...this.tooltipPalette] : undefined,
+      cellTooltipGrid: this.cellTooltipGrid ? this.cellTooltipGrid.map(s => s.map(r => [...r])) : undefined,
       materialPalette: this.materialPalette ? [...this.materialPalette] : undefined,
       playback: this.playback ? { ...this.playback } : undefined,
       extra: { ...this._extra },
@@ -516,6 +521,7 @@ export class RuntimeDocument {
       'annotations', 'labels',
       'schemaVersion', 'label', 'gtnhVersion', 'author',
       'description', 'modSource', 'globalConfig',
+      'cellTooltipGrid', 'tooltipPalette', 'materialPalette',
     ])
     const extra: Record<string, unknown> = {}
     for (const key of Object.keys(raw)) {
@@ -552,6 +558,7 @@ export class RuntimeDocument {
       labels: [...labels],
       textureBlobs: raw.textureBlobs as Record<string, unknown> | undefined,
       tooltipPalette: raw.tooltipPalette as unknown[] | undefined,
+      cellTooltipGrid: raw.cellTooltipGrid as number[][][] | undefined,
       materialPalette: raw.materialPalette as unknown[] | undefined,
       playback: raw.playback as Record<string, unknown> | undefined,
       extra,

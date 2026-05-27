@@ -24,6 +24,16 @@ export const blockRNA: RNAStruct = {
       uiWidget: 'text',
     },
     {
+      name: 'cellTooltip',
+      type: 'string',
+      label: 'Tooltip',
+      description: '方块单元格级 Tooltip（通过 cellTooltipGrid 编辑）',
+      default: '',
+      get(owner: any) { return owner.cellTooltip ?? '' },
+      set(owner: any, val: unknown) { owner.cellTooltip = val as string },
+      uiWidget: 'text',
+    },
+    {
       name: 'pos',
       type: 'vector3',
       label: '世界坐标',
