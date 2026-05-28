@@ -9,6 +9,7 @@ import com.lightning.mod.client.export.ExportBundleTickHandler;
 import com.lightning.mod.client.gui.GuiSdeCellNote;
 import com.lightning.mod.client.meshcapture.MeshCaptureClient;
 import com.lightning.mod.client.render.SelectionBoxRenderer;
+import com.lightning.mod.client.render.WandHighlightRenderer;
 import com.lightning.mod.network.packet.PacketSyncSelection;
 
 import cpw.mods.fml.common.FMLCommonHandler;
@@ -22,6 +23,7 @@ public class ClientProxy extends CommonProxy {
     public void initNetwork() {
         super.initNetwork();
         MinecraftForge.EVENT_BUS.register(new SelectionBoxRenderer());
+        MinecraftForge.EVENT_BUS.register(new WandHighlightRenderer());
         // ClientTickEvent（1.7.10）由 FML 总线派发，勿注册到 MinecraftForge.EVENT_BUS。
         FMLCommonHandler.instance()
             .bus()

@@ -2,6 +2,9 @@ package com.lightning.mod.server.command;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import net.minecraft.command.CommandBase;
 import net.minecraft.command.ICommandSender;
@@ -32,7 +35,7 @@ public class CommandSde extends CommandBase {
 
     @Override
     public String getCommandUsage(ICommandSender sender) {
-        return "/sde <pos1|pos2|hpos1|hpos2|sel [cuboid|extend]|start|end|setName|setFrame|setStructureId|record [N|cycle]|export [raw]|dump|status|web [port]|webstop>";
+        return "/sde <pos1|pos2|hpos1|hpos2|sel [cuboid|extend]|start|end|setName|setFrame|setStructureId|record [N|cycle]|export [raw]|dump|status|web [port]|webstop|hajimi [name]|hjm [name]>";
     }
 
     @Override
@@ -231,6 +234,22 @@ public class CommandSde extends CommandBase {
                     SdeWebServer.stopServer();
                     sender.addChatMessage(new ChatComponentText("SDE Web 已停止"));
                     break;
+                case "hajimi":
+                case "hjm":
+                    if (!checkPlayer(sender)) return;
+                    {
+                        EntityPlayerMP exp = (EntityPlayerMP) sender;
+                        String name = args.length >= 2 ? joinArgs(args, 1) : "export";
+                        s.setOutputName(name);
+                        s.record(exp);
+                        String expPath = s.exportToFile();
+                        java.io.File expFile = new java.io.File(expPath);
+                        byte[] expPayload = Files.readAllBytes(Paths.get(expPath));
+                        SdeNetwork.sendEnrichExportedScene(exp, expFile.getName(), expPayload, false);
+                        sender.addChatMessage(
+                            new ChatComponentText("SDE: 已导出 " + name + " → " + expFile.getName()));
+                    }
+                    break;
                 default:
                     sender.addChatMessage(new ChatComponentText("未知子命令: " + sub));
                     sender.addChatMessage(new ChatComponentText(getCommandUsage(sender)));
@@ -239,6 +258,30 @@ public class CommandSde extends CommandBase {
         } catch (Exception e) {
             sender.addChatMessage(new ChatComponentText("SDE 错误: " + e.getMessage()));
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public List<String> addTabCompletionOptions(ICommandSender sender, String[] args) {
+        if (args.length == 1) {
+            return getListOfStringsMatchingLastWord(args,
+                "pos1", "pos2", "hpos1", "hpos2", "sel", "start", "end",
+                "setName", "setFrame", "setStructureId", "record", "export",
+                "dump", "status", "web", "webstop", "hajimi", "hjm");
+        }
+        if (args.length == 2) {
+            String sub = args[0].toLowerCase();
+            if (sub.equals("sel")) {
+                return getListOfStringsMatchingLastWord(args, "cuboid", "extend");
+            }
+            if (sub.equals("export")) {
+                return getListOfStringsMatchingLastWord(args, "raw");
+            }
+            if (sub.equals("record")) {
+                return getListOfStringsMatchingLastWord(args, "cycle");
+            }
+        }
+        return null;
     }
 
     /**
