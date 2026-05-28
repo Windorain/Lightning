@@ -12,7 +12,7 @@ import { logCenter } from '@/workbench/logging/LogCenter'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
-import type { Annotation } from '@/render/data/annotationTypes'
+import { type Annotation, annotationIsOnLayer } from '@/render/data/annotationTypes'
 import { isEditingTarget } from '@/util/browser'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
@@ -216,11 +216,19 @@ let _annoPending = false
 
 function updateAnnotationOverlay(): void {
   const doc = bctx.doc.value as Record<string, any> | null
-  const annos: Annotation[] = doc?.annotations ?? []
+  let annos: Annotation[] = doc?.annotations ?? []
+
+  const mode = layerPreviewMode.value
+  if (mode !== 'all') {
+    const gh = gridHeight.value
+    annos = annos.filter(a => annotationIsOnLayer(a, mode.worldY, gh))
+  }
+
   const maxUpdated = annos.length > 0
     ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
     : 0
-  const hash = annos.length > 0 ? `${annos.length}_${maxUpdated}` : 'empty'
+  const layerKey = mode === 'all' ? 'all' : `l${mode.worldY}`
+  const hash = annos.length > 0 ? `${layerKey}_${annos.length}_${maxUpdated}` : 'empty'
   if (hash === _annoHash || _annoPending) return
   _annoHash = hash
   _annoPending = true

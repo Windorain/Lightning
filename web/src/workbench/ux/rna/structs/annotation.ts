@@ -8,15 +8,6 @@ export const annotationRNA: RNAStruct = {
   properties: [
     // ── Common ──
     {
-      name: 'title',
-      type: 'string',
-      label: '标题',
-      description: '注解标题',
-      default: '',
-      get(owner: any) { return owner.title ?? '' },
-      set(owner: any, val: unknown) { owner.title = val as string; touch(owner) },
-    },
-    {
       name: 'description',
       type: 'string',
       label: '描述',
