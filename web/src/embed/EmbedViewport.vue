@@ -351,8 +351,9 @@ function updateAnnotationOverlay(): void {
     }
     if (group) {
       _annoGroup = group
-      _annoGroup.visible = prefs.showAnnotations
-      vpSlot.overlayGroup.value?.add(_annoGroup)
+      if (prefs.showAnnotations) {
+        vpSlot.overlayGroup.value?.add(_annoGroup)
+      }
     }
   }).catch(() => { _annoPending = false })
 }
@@ -393,10 +394,8 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
   const dom = payload.domElement
   dom.addEventListener('pointerdown', (e) => {
     bctx.viewports.activeId.value = EMBED_REGION
-    console.log('[embed] pointerdown', { button: e.button, camera: !!vpSlot.camera.value, dom: !!vpSlot.domElement.value, region: EMBED_REGION })
     if (e.button !== 0) e.preventDefault()
-    const result = bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
-    console.log('[embed] dispatch result', result)
+    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
   }, { capture: true })
   dom.addEventListener('pointermove', (e) => {
     bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
@@ -448,14 +447,22 @@ function onAnnotationHover(
 
 // ---- Annotations list (shared by ViewerCore prop + tooltip) ----
 const annotations = computed<Annotation[]>(() => {
+  if (!prefs.showAnnotations) return []
   const doc = bctx.doc.value
   if (!doc) return []
   const plain = doc.serialize() as Record<string, any>
   return (plain.annotations ?? []) as Annotation[]
 })
 
-// ---- Annotation layer visibility ----
-watch(() => prefs.showAnnotations, (v) => { if (_annoGroup) _annoGroup.visible = v })
+// ---- Annotation pick & overlay visibility ----
+watch(() => prefs.showAnnotations, (v) => {
+  if (!_annoGroup) return
+  if (v) {
+    vpSlot.overlayGroup.value?.add(_annoGroup)
+  } else {
+    vpSlot.overlayGroup.value?.remove(_annoGroup)
+  }
+})
 
 // ---- Unified tooltip text ----
 const tooltipText = computed(() => {
