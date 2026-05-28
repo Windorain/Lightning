@@ -710,7 +710,7 @@ onBeforeUnmount(() => {
 .wm-viewport-column { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 .wm-bottom-dock {
-  flex-shrink: 0;
+  flex-shrink: 0; width: 100%;
   display: flex; flex-direction: column;
   border: var(--nei-bevel-w) solid;
   border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
@@ -755,13 +755,19 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 .wm-tab-panel {
-  display: none;
+  display: none; width: 100%; box-sizing: border-box;
   padding: 6px 10px;
   align-items: center; gap: 10px;
   height: 48px;
   background: var(--nei-inset-bg);
 }
 .wm-tab-panel--active { display: flex; }
+
+/* tab panel 内文字在亮色主题下用亮色（因为 panel bg 是中灰） */
+[data-nei-theme="light"] .wm-tab-panel :deep(.wm-layer-label),
+[data-nei-theme="light"] .wm-tab-panel :deep(.wm-wfs__label) {
+  color: #e0e0e0;
+}
 
 .wm-tab-panel :deep(.wm-wfs) {
   flex: 1; min-width: 0;
