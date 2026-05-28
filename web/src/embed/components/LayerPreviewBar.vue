@@ -51,7 +51,6 @@ function onChange(e: Event): void {
         @change="onChange"
       />
     </div>
-    <span class="wm-layer-value" aria-live="polite">{{ layerPreviewLabel }}</span>
   </div>
 </template>
 

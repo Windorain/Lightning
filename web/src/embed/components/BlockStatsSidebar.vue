@@ -149,7 +149,7 @@ function displayName(row: BlockStatRow): string {
   overflow: hidden;
 }
 .nei-sidebar--collapsed {
-  width: 50px;
+  width: 48px;
 }
 
 /* ===== Header ===== */
@@ -222,11 +222,9 @@ function displayName(row: BlockStatRow): string {
 .nei-sidebar-grid--collapsed {
   display: flex;
   flex-direction: column;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  justify-content: flex-start;
-  gap: 4px;
-  padding: 6px 4px;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
 }
 
 /* ===== Slot Row ===== */
@@ -235,26 +233,26 @@ function displayName(row: BlockStatRow): string {
   align-items: center;
   padding: 2px 4px;
   cursor: pointer;
-  transition: background 0.1s, box-shadow 0.1s;
+  transition: background 0.1s;
 }
 .nei-slot-row:hover {
   background: var(--nei-bg-hover);
 }
 .nei-slot-row:active {
-  background: var(--nei-accent-glow);
-  box-shadow: inset 0 0 0 1px var(--nei-border-active);
+  background: var(--nei-bg-hover);
 }
 .nei-slot-row--selected {
   background: var(--nei-accent-glow);
-  border-left: 3px solid var(--nei-accent);
-  padding-left: 1px;
 }
 .nei-slot-row--collapsed {
-  padding: 0;
-  width: 36px;
-  height: 36px;
+  padding: 2px 0;
+  width: 40px;
+  height: 44px;
   justify-content: center;
   flex-shrink: 0;
+}
+.nei-slot-row--collapsed.nei-slot-row--selected {
+  box-shadow: inset 0 0 0 2px var(--nei-accent);
 }
 
 /* ===== Expanded info ===== */
