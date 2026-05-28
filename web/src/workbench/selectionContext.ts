@@ -222,6 +222,7 @@ export interface PickHandler {
   selection: {
     select(voxel: BlockRef): void
     add(voxels: BlockRef[]): void
+    remove(voxels: BlockRef[]): void
     clear(): void
   }
 }
@@ -233,14 +234,16 @@ export interface PickHandler {
 export function applyPickSelection(ctx: PickHandler, event: PointerEvent): BlockRef | null {
   const picked = ctx.pickVoxel(event)
   if (picked) {
-    if (event.ctrlKey || event.metaKey) {
+    if (event.shiftKey) {
       ctx.selection.add([picked])
+    } else if (event.ctrlKey || event.metaKey) {
+      ctx.selection.remove([picked])
     } else {
       ctx.selection.select(picked)
     }
     return picked
   }
-  if (!event.ctrlKey && !event.metaKey) {
+  if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
     ctx.selection.clear()
   }
   return null
@@ -255,6 +258,7 @@ export interface PickHandlerV2 {
   selection: {
     selectEntity(entity: SelectedEntity): void
     add(voxels: BlockRef[]): void
+    remove(voxels: BlockRef[]): void
     clear(): void
   }
   cycleState: SelectionContext['cycleState']
@@ -300,7 +304,7 @@ export function applyPickSelectionWithCycle(
 
   if (candidates.length === 0) {
     ctx.resetCycle()
-    if (!event.ctrlKey && !event.metaKey) ctx.selection.clear()
+    if (!event.shiftKey && !event.ctrlKey && !event.metaKey) ctx.selection.clear()
     return null
   }
 
@@ -317,11 +321,15 @@ export function applyPickSelectionWithCycle(
   // New position → pick closest, start cycle
   ctx.setCycleState({ lastPoint: point, candidates, index: 0 })
   const entity = candidates[0]
-  if (event.ctrlKey || event.metaKey) {
+  if (event.shiftKey) {
     if (entity.kind === 'block') {
       ctx.selection.add([entity.ref])
     } else {
       ctx.selection.selectEntity(entity)
+    }
+  } else if (event.ctrlKey || event.metaKey) {
+    if (entity.kind === 'block') {
+      ctx.selection.remove([entity.ref])
     }
   } else {
     ctx.selection.selectEntity(entity)

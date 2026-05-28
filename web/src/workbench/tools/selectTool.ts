@@ -12,6 +12,7 @@ export const selectTool: Tool = {
   ],
   hints: [
     { keys: ['Click'], action: '选择方块' },
-    { keys: ['Ctrl', 'Click'], action: '追加选择' },
+    { keys: ['Shift', 'Click'], action: '追加选择' },
+    { keys: ['Ctrl', 'Click'], action: '减少选择' },
   ],
 }
