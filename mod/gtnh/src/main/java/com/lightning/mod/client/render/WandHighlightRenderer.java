@@ -63,8 +63,7 @@ public class WandHighlightRenderer {
             int maxX = Math.max(p1[0], p2[0]);
             int maxY = Math.max(p1[1], p2[1]);
             int maxZ = Math.max(p1[2], p2[2]);
-            AxisAlignedBB aabb = AxisAlignedBB
-                .getBoundingBox(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1)
+            AxisAlignedBB aabb = AxisAlignedBB.getBoundingBox(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1)
                 .offset(-rx, -ry, -rz);
             GL11.glColor4f(1.0F, 1.0F, 1.0F, 0.4F);
             RenderGlobal.drawOutlinedBoundingBox(aabb, 0xffffff);
@@ -83,6 +82,7 @@ public class WandHighlightRenderer {
     }
 
     private static AxisAlignedBB singleBlockBox(int x, int y, int z, double rx, double ry, double rz) {
-        return AxisAlignedBB.getBoundingBox(x, y, z, x + 1, y + 1, z + 1).offset(-rx, -ry, -rz);
+        return AxisAlignedBB.getBoundingBox(x, y, z, x + 1, y + 1, z + 1)
+            .offset(-rx, -ry, -rz);
     }
 }

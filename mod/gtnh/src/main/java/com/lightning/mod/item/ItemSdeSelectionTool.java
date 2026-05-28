@@ -10,7 +10,6 @@ import net.minecraft.network.play.server.S23PacketBlockChange;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.world.World;
 
-import com.lightning.mod.LightningMod;
 import com.lightning.mod.core.session.ExportSession;
 import com.lightning.mod.network.SdeNetwork;
 import com.lightning.mod.server.SdePermissions;
@@ -40,7 +39,8 @@ public class ItemSdeSelectionTool extends Item {
             mp.addChatMessage(new ChatComponentText("SDE: 需要 OP 权限"));
             return false;
         }
-        ExportSession.get().setPos1Block(x, y, z);
+        ExportSession.get()
+            .setPos1Block(x, y, z);
         writePos1ToNbt(stack, x, y, z);
         SdeNetwork.sendSelectionSync(mp);
         mp.playerNetServerHandler.sendPacket(new S23PacketBlockChange(x, y, z, mp.worldObj));
@@ -60,7 +60,8 @@ public class ItemSdeSelectionTool extends Item {
         if (player.isSneaking()) {
             return doQuickExport(stack, mp);
         }
-        ExportSession.get().setPos2Block(x, y, z);
+        ExportSession.get()
+            .setPos2Block(x, y, z);
         writePos2ToNbt(stack, x, y, z);
         SdeNetwork.sendSelectionSync(mp);
         mp.addChatMessage(new ChatComponentText("SDE: pos2 已记录（" + x + " " + y + " " + z + "）"));
