@@ -24,6 +24,8 @@ export interface EmbedUiOptions {
   okMessage?: (modelId: string) => string
   /** false 时不显示底部调试状态栏 */
   debug?: boolean
+  /** UI 主题，默认 'dark' */
+  theme?: 'light' | 'dark'
 }
 
 export interface EmbedBootstrapOptions {
