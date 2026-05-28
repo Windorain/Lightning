@@ -78,7 +78,7 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
     get selection(): SelectionContext { return throwError('selection') },
     get editHistory(): UndoManager { return throwError('editHistory') },
     get toolRegistry(): ToolRegistry { return throwError('toolRegistry') },
-    get queries(): BContextQueries { return throwError('queries') },
+    queries: null as any,
 
     settings: {
       replaceBrush: null, fillBrush: null, generateType: null,

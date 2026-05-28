@@ -393,8 +393,10 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
   const dom = payload.domElement
   dom.addEventListener('pointerdown', (e) => {
     bctx.viewports.activeId.value = EMBED_REGION
+    console.log('[embed] pointerdown', { button: e.button, camera: !!vpSlot.camera.value, dom: !!vpSlot.domElement.value, region: EMBED_REGION })
     if (e.button !== 0) e.preventDefault()
-    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
+    const result = bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
+    console.log('[embed] dispatch result', result)
   }, { capture: true })
   dom.addEventListener('pointermove', (e) => {
     bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
