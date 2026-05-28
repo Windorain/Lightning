@@ -9,8 +9,6 @@ import javax.imageio.ImageIO;
 
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.OpenGlHelper;
-import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.entity.RenderItem;
 import net.minecraft.client.shader.Framebuffer;
 import net.minecraft.init.Blocks;
@@ -85,13 +83,9 @@ public final class BlockThumbnailRenderer {
                 GL11.glScalef(THUMB_DRAW_SCALE, THUMB_DRAW_SCALE, THUMB_DRAW_SCALE);
                 GL11.glTranslatef(-cx, -cy, 0.0F);
 
-                RenderHelper.enableGUIStandardItemLighting();
                 GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
                 GL11.glEnable(GL11.GL_DEPTH_TEST);
-                GL11.glEnable(GL11.GL_LIGHTING);
-
-                mc.entityRenderer.enableLightmap(0.0D);
-                OpenGlHelper.setLightmapTextureCoords(OpenGlHelper.lightmapTexUnit, 240.0F, 240.0F);
+                GL11.glDisable(GL11.GL_LIGHTING);
 
                 RenderItem renderItem = new RenderItem();
                 renderItem.zLevel = 0.0F;
@@ -99,9 +93,6 @@ public final class BlockThumbnailRenderer {
                 int slotX = (THUMB_SIZE - 16) / 2;
                 int slotY = (THUMB_SIZE - 16) / 2;
                 renderItem.renderItemAndEffectIntoGUI(mc.fontRenderer, mc.renderEngine, stack, slotX, slotY);
-
-                mc.entityRenderer.disableLightmap(0.0D);
-                RenderHelper.disableStandardItemLighting();
 
                 GL11.glMatrixMode(GL11.GL_PROJECTION);
                 GL11.glPopMatrix();
