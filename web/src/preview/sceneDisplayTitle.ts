@@ -23,8 +23,14 @@ function scalarDisplay(v: unknown): string {
 export function sceneDisplayTitleFromRootDocument(d: unknown): string | null {
   if (d == null || typeof d !== 'object' || Array.isArray(d)) return null
   const o = d as Record<string, unknown>
+  // label → meta.name → meta 内 name → root id
   const rootLabel = scalarDisplay(o.label)
   if (rootLabel) return rootLabel
+  const meta = o.meta as Record<string, unknown> | undefined
+  const metaName = scalarDisplay(meta?.name)
+  if (metaName) return metaName
+  const metaLabel = scalarDisplay(meta?.label)
+  if (metaLabel) return metaLabel
   const rootId = scalarDisplay(o.id)
   if (rootId && !hasWorldFrames(d)) return rootId
   if (hasWorldFrames(d)) {

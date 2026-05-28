@@ -24,7 +24,7 @@ export default defineConfig({
       output: {
         entryFileNames: 'lightning-embed.js',
         globals: {
-          vue: 'lightningVue',
+          vue: 'cockpitVue',
         },
       },
     },
