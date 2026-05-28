@@ -3,6 +3,7 @@ import type { Tool, ToolGizmo, ToolContext } from './tool'
 import type { DetectedBounds } from './partDetect'
 import { detectFaceBounds, detectPartBounds } from './partDetect'
 import { computeBoxFrameBars, computeUnionAABB, aabbsIntersect, type AABB } from '@/render/data/aabb'
+import type { SelectedEntity } from '@/workbench/selectionContext'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
 import * as THREE from 'three'
@@ -54,13 +55,23 @@ export const AnnotationBoxCommitOperator: OperatorType = {
   poll(bctx) { return bctx.doc.value !== null && _pendingSelections.length > 0 },
   invoke(bctx, _props, event) {
     const toolProps = bctx.toolRegistry.activeTool.value?.properties ?? {}
+    const ids: string[] = []
     for (const sel of _pendingSelections) {
+      const id = 'anno_' + Math.random().toString(36).slice(2, 10)
+      ids.push(id)
       const draft = {
-        ...toolProps, type: 'box' as const,
+        ...toolProps, type: 'box' as const, id,
         min: { ...sel.aabb.min }, max: { ...sel.aabb.max },
         frameIndex: bctx.queries.getCurrentFrame()?.index ?? 0,
       }
       bctx.operators.invoke('ANNOTATION_CREATE', { annotation: draft }, event ?? undefined)
+    }
+    // Keep all created annotations selected
+    if (ids.length > 0) {
+      const set: Set<SelectedEntity> = new Set()
+      for (const id of ids) set.add({ kind: 'annotation', id, type: 'box' })
+      ;(bctx.selection.items as any).value = set
+      bctx.selection.active.value = null
     }
     _boxClearPending()
     return OP_RESULT.FINISHED

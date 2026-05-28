@@ -26,6 +26,7 @@ export const SelectOperator: OperatorType = {
       selection: {
         selectEntity: (entity) => bctx.selection.selectEntity(entity),
         add: (voxels) => bctx.selection.add(voxels),
+        remove: (voxels) => bctx.selection.remove(voxels),
         clear: () => bctx.selection.clear(),
       },
       cycleState: bctx.selection.cycleState,

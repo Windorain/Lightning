@@ -10,55 +10,79 @@ const props = defineProps<{ bctx: BContext }>()
 
 const AUTO_SAVE_DELAY = 200
 
-const anno = ref<Annotation | null>(null)
+const annos = ref<Annotation[]>([])
 const proxyOwner = ref<Record<string, any> | null>(null)
 const desc = ref('')
 const focused = ref(false)
 
 let timer: ReturnType<typeof setTimeout> | undefined
 
-function createOwner(raw: Annotation): Record<string, any> {
-  const target = raw as Record<string, any>
-  return new Proxy(target, {
-    set(_t, prop, value) {
-      target[prop as string] = value
-      if (prop === 'id' || prop === 'created_at' || prop === 'updated_at') return true
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        timer = undefined
-        props.bctx.operators.invoke('ANNOTATION_UPDATE', { id: target.id, patch: { ...target } })
-      }, AUTO_SAVE_DELAY)
-      return true
-    },
-  })
+function syncToOthers(prop: string, value: unknown, source: Record<string, any>): void {
+  for (const a of annos.value) {
+    const t = a as Record<string, any>
+    if (t !== source) t[prop] = value
+  }
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(async () => {
+    timer = undefined
+    for (const a of annos.value as Record<string, any>[]) {
+      await props.bctx.operators.exec('ANNOTATION_UPDATE', { id: a.id, patch: { ...a } })
+    }
+  }, AUTO_SAVE_DELAY)
 }
 
 function load(): void {
-  const active = props.bctx.selection.active.value
-  if (typeof active !== 'string') {
-    anno.value = null
+  const sel = [...props.bctx.selection.items.value].filter(e => e.kind === 'annotation')
+  if (sel.length === 0) {
+    annos.value = []
     proxyOwner.value = null
     return
   }
   const doc = props.bctx.doc.value as Record<string, any> | null
-  const annos = doc?.annotations as Annotation[] | undefined
-  const found = annos?.find(a => a.id === active) ?? null
-  anno.value = found
-  proxyOwner.value = found ? createOwner(found) : null
+  const all = doc?.annotations as Annotation[] | undefined
+  const found = sel.map(s => all?.find(a => a.id === s.id)).filter(Boolean) as Annotation[]
+  annos.value = found
+
+  // Build a new plain object as owner, with getters that delegate to annos[0]
+  // and setters that sync to all selected annotations
+  const first = found[0]! as Record<string, any>
+  const owner: Record<string, any> = {}
+  for (const key of Object.keys(first)) {
+    Object.defineProperty(owner, key, {
+      get() { return first[key] },
+      set(v) {
+        first[key] = v
+        if (key !== 'id' && key !== 'created_at' && key !== 'updated_at') {
+          syncToOthers(key, v, first)
+        }
+      },
+      enumerable: true,
+      configurable: true,
+    })
+  }
+  proxyOwner.value = owner
+
   if (!focused.value) {
-    desc.value = (found as Record<string, any>)?.description ?? ''
+    if (found.length === 0) {
+      desc.value = ''
+    } else if (found.length === 1) {
+      desc.value = (found[0]! as Record<string, any>).description ?? ''
+    } else {
+      const firstDesc = (found[0]! as Record<string, any>).description ?? ''
+      const same = found.every(a => ((a as Record<string, any>).description ?? '') === firstDesc)
+      desc.value = same ? firstDesc : ''
+    }
   }
 }
 
 watch(
-  () => [props.bctx.selection.active.value, props.bctx.doc.value] as const,
+  () => [props.bctx.selection.items.value, props.bctx.doc.value] as const,
   () => { load() },
   { immediate: true },
 )
 
 function onDescInput(e: Event): void {
   desc.value = (e.target as HTMLTextAreaElement).value
-  // Write through proxy owner so auto-save batches with other field changes
   if (proxyOwner.value) proxyOwner.value.description = desc.value
 }
 
@@ -67,19 +91,22 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 const previewHtml = computed(() => renderTooltipHtml(desc.value))
 
 const typeLabel = computed(() => {
-  const t = (anno.value as Record<string, any> | null)?.type as string
+  if (annos.value.length === 0) return ''
+  const t = (annos.value[0]! as Record<string, any>).type as string
   const map: Record<string, string> = { box: '包围盒', point: '标记点', line: '线段', text: '文本', face: '选面' }
-  return map[t] ?? t ?? ''
+  const base = map[t] ?? t ?? ''
+  return annos.value.length > 1 ? `${base} ×${annos.value.length}` : base
 })
 
 // Build the rest of the layout (exclude title/description which we render custom)
 const restLayout = computed<UILayout | null>(() => {
-  const a = anno.value as Record<string, any> | null
+  const a = annos.value[0] as Record<string, any> | null | undefined
   if (!a) return null
+  const multi = annos.value.length > 1
   const t = a.type as string
   const items: any[] = []
 
-  // Appearance
+  // Appearance (visible for multi-select too)
   items.push({
     kind: 'box' as const, label: '外观',
     items: [
@@ -88,6 +115,9 @@ const restLayout = computed<UILayout | null>(() => {
       { kind: 'property' as const, rnaPath: 'annotation.locked', label: '锁定' },
     ],
   })
+
+  // Type-specific fields (hidden in multi-select)
+  if (multi) return { kind: 'column' as const, align: false, items }
 
   // Type-specific
   switch (t) {
@@ -147,7 +177,7 @@ const restLayout = computed<UILayout | null>(() => {
 </script>
 
 <template>
-  <div v-if="anno" class="anno-editor">
+  <div v-if="annos.length > 0" class="anno-editor">
     <div class="anno-editor-header">
       <span class="anno-editor-type">{{ typeLabel }}</span>
     </div>
@@ -182,7 +212,7 @@ const restLayout = computed<UILayout | null>(() => {
     <hr class="ux-sep" />
     <button
       class="anno-editor-delete"
-      @click="bctx.operators.invoke('ANNOTATION_DELETE', { id: (anno as Record<string, any>).id })"
+      @click="annos.forEach(a => bctx.operators.invoke('ANNOTATION_DELETE', { id: a.id }))"
     >删除注解</button>
   </div>
   <div v-else class="tooltip-editor-empty">

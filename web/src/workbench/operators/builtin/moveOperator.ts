@@ -170,8 +170,10 @@ export const MoveOperator: OperatorType = {
     bctx.selection.resetCycle()
     const picked = bctx.queries.pickVoxel(event)
     if (picked) {
-      if (event.ctrlKey || event.metaKey) {
+      if (event.shiftKey) {
         bctx.selection.add([picked])
+      } else if (event.ctrlKey || event.metaKey) {
+        bctx.selection.remove([picked])
       } else {
         bctx.selection.select(picked)
       }
@@ -179,7 +181,7 @@ export const MoveOperator: OperatorType = {
     }
 
     // ---- Non-gizmo: empty space → free move or deselect ----
-    if (!event.ctrlKey && !event.metaKey) {
+    if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
       const sel = [...bctx.selection.items.value].filter(e => e.kind === 'block')
       const isMoveTool = bctx.toolRegistry.activeTool.value?.id === 'move'
 
