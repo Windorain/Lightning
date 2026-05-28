@@ -16,7 +16,7 @@ import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
-import type { Annotation } from '@/render/data/annotationTypes'
+import { type Annotation, annotationIsOnLayer } from '@/render/data/annotationTypes'
 import * as THREE from 'three'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { InitialCamera } from '@/preview/previewConfig'
@@ -320,11 +320,19 @@ function updateAnnotationOverlay(): void {
   const doc = bctx.doc.value
   if (!doc) return
   const plain = doc.serialize() as Record<string, any>
-  const annos: Annotation[] = plain.annotations ?? []
+  let annos: Annotation[] = plain.annotations ?? []
+
+  const mode = layerPreviewMode.value
+  if (mode !== 'all') {
+    const gh = gridHeight.value
+    annos = annos.filter(a => annotationIsOnLayer(a, mode.worldY, gh))
+  }
+
   const maxUpdated = annos.length > 0
     ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
     : 0
-  const hash = annos.length > 0 ? `${annos.length}_${maxUpdated}` : 'empty'
+  const layerKey = mode === 'all' ? 'all' : `l${mode.worldY}`
+  const hash = annos.length > 0 ? `${layerKey}_${annos.length}_${maxUpdated}` : 'empty'
   if (hash === _annoHash || _annoPending) return
   _annoHash = hash
   _annoPending = true
@@ -493,10 +501,7 @@ const tooltipText = computed(() => {
       const annos = plain.annotations as Annotation[] | undefined
       const anno = annos?.find(a => a.id === h.annotationId)
       if (!anno) return ''
-      const parts: string[] = []
-      if (anno.title) parts.push(anno.title)
-      if (anno.description) parts.push(anno.description)
-      return parts.join('\n')
+      return anno.description || ''
     }
 
     case 'meta': {

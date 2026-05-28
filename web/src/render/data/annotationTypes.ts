@@ -63,3 +63,34 @@ export function isPoint(a: Annotation): a is PointAnnotation { return a.type ===
 export function isLine(a: Annotation): a is LineAnnotation { return a.type === 'line' }
 export function isText(a: Annotation): a is TextAnnotation { return a.type === 'text' }
 export function isFace(a: Annotation): a is FaceAnnotation { return a.type === 'face' }
+
+/**
+ * 注解是否在指定分层预览的层上可见。
+ * worldY = Y-up 世界 Y（0=底, gridHeight-1=顶），gridHeight = 结构总高。
+ * 不同注解类型存储的坐标系不同，此处统一归一化。
+ */
+export function annotationIsOnLayer(a: Annotation, worldY: number, gridHeight: number): boolean {
+  if (a.type === 'box') {
+    // Box 用 CENTERED 坐标 (偏移 -h/2)，先还原到世界 Y
+    const yMin = a.min.y + gridHeight / 2
+    const yMax = a.max.y + gridHeight / 2
+    return worldY >= Math.floor(yMin) && worldY < Math.ceil(yMax)
+  }
+  if (a.type === 'point') {
+    // gridCenterWorld: wy - h/2 + 0.5
+    return Math.round(a.pos.y + gridHeight / 2 - 0.5) === worldY
+  }
+  if (a.type === 'line') {
+    // 直接存 picked.pos (RAW Y-up)
+    return a.points.some(p => p.y === worldY)
+  }
+  if (a.type === 'text') {
+    // gridCenterWorld: wy - h/2 + 0.5
+    return Math.round(a.anchorPos.y + gridHeight / 2 - 0.5) === worldY
+  }
+  if (a.type === 'face') {
+    // 直接存 picked.pos (RAW Y-up)
+    return a.blockPos.y === worldY
+  }
+  return true
+}
