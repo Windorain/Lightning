@@ -4,7 +4,7 @@
  * 与 workbench 同构：EmbedRoot 创建 bctx → provide → EmbedViewport 消费。
  * 只包含 embed 实际需要的字段，workbench-only 子系统抛出明确错误。
  */
-import type { BContext, BContextQueries, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
+import type { BContext, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { EmbedSettings } from '@/preview/previewConfig'
