@@ -16,10 +16,12 @@ val syncWeb by tasks.registering {
 
     doLast {
         // 1. Build web
-        exec {
-            workingDir = webDir
-            commandLine("npm", "run", "build:workbench")
-        }
+        val pb = ProcessBuilder("npm.cmd", "run", "build:workbench")
+            .directory(webDir)
+            .inheritIO()
+            .start()
+        val exitCode = pb.waitFor()
+        if (exitCode != 0) throw RuntimeException("npm build:workbench failed (exit $exitCode)")
 
         // 2. Clean old bundled files
         if (bundledDest.exists()) {

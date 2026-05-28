@@ -505,12 +505,26 @@ public final class MeshCaptureService {
                         tess.startDrawingQuads();
                         BlockPrimaryCaptureRegistry.dispatch(
                             new BlockPrimaryCaptureContext(
-                                world, wx, wy, wz, b, blockMeta, rb, partialTicksForMeshCapture()));
+                                world,
+                                wx,
+                                wy,
+                                wz,
+                                b,
+                                blockMeta,
+                                rb,
+                                partialTicksForMeshCapture()));
                         tess.draw();
 
                         MeshCaptureBlockPostRenderRegistry.dispatch(
                             new MeshCaptureBlockPostRenderContext(
-                                world, wx, wy, wz, b, blockMeta, rb, partialTicksForMeshCapture()));
+                                world,
+                                wx,
+                                wy,
+                                wz,
+                                b,
+                                blockMeta,
+                                rb,
+                                partialTicksForMeshCapture()));
                         int quadsBeforeDraw = TessellatorCaptureState.currentBlockRecordedQuadCount();
                         try {
                             tess.draw();
