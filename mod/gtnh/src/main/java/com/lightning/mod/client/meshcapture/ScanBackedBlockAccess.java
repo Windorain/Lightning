@@ -46,8 +46,7 @@ final class ScanBackedBlockAccess implements IBlockAccess {
         }
     }
 
-    ScanBackedBlockAccess(World delegate, int[][][][] worldCoords,
-                          int[][][] cellGrid, VoxelSample[] cellTypes) {
+    ScanBackedBlockAccess(World delegate, int[][][][] worldCoords, int[][][] cellGrid, VoxelSample[] cellTypes) {
         this.delegate = delegate;
         int sizeZ = worldCoords.length;
         int sizeRow = worldCoords[0].length;
@@ -63,8 +62,7 @@ final class ScanBackedBlockAccess implements IBlockAccess {
                     VoxelSample vs = cellTypes[ti];
                     Block b = Block.getBlockFromName(vs.registryId);
                     if (b == null || b == Blocks.air) continue;
-                    scanCells.put(key(wc[0], wc[1], wc[2]),
-                        new CellSnapshot(b, vs.meta));
+                    scanCells.put(key(wc[0], wc[1], wc[2]), new CellSnapshot(b, vs.meta));
                 }
             }
         }

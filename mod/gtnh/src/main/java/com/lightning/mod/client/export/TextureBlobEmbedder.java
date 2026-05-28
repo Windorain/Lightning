@@ -19,13 +19,13 @@ import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.client.resources.IResourceManager;
 import net.minecraft.util.ResourceLocation;
 
+import org.lwjgl.opengl.GL11;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.lightning.mod.client.meshcapture.MaterialKeyResolver;
-
-import org.lwjgl.opengl.GL11;
 
 import cpw.mods.fml.common.FMLLog;
 import cpw.mods.fml.relauncher.Side;
@@ -205,8 +205,7 @@ public final class TextureBlobEmbedder {
                 TextureMap activeAtlas = foundIn != null ? foundIn : spriteAtlas;
                 byte[] gpu = readSpriteFromGpuAtlas(spr, activeAtlas);
                 if (gpu != null) return gpu;
-            } catch (Exception ignored) {
-            }
+            } catch (Exception ignored) {}
         }
 
         // Final fallback: cached frame data saved before clearFramesTextureData
@@ -271,8 +270,7 @@ public final class TextureBlobEmbedder {
             }
             return rgbaArrayToPng(sub, pw, ph);
         } catch (Exception e) {
-            FMLLog.info("[SDE] GPU atlas readback failed for %s: %s",
-                spr.getIconName(), e.toString());
+            FMLLog.info("[SDE] GPU atlas readback failed for %s: %s", spr.getIconName(), e.toString());
             return null;
         } finally {
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, prevTex);

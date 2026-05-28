@@ -19,9 +19,7 @@ import com.lightning.mod.mixin.interfaces.accessors.TextureMapAccessor;
  * 在所有资源重载 listener（含 JABBA 的 generateIcons）执行完毕后，
  * 从 TextureMap 扫描并缓存所有 sprite 帧数据，捕获程序化生成的纹理。
  */
-@Mixin(
-    value = SimpleReloadableResourceManager.class,
-    remap = false)
+@Mixin(value = SimpleReloadableResourceManager.class, remap = false)
 public abstract class MixinResourceManagerReload {
 
     @Inject(method = "notifyReloadListeners", at = @At("TAIL"), remap = false)
@@ -43,10 +41,8 @@ public abstract class MixinResourceManagerReload {
                             SpriteFrameCache.put(name, w, h, fd[0]);
                         }
                     }
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
             }
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) {}
     }
 }

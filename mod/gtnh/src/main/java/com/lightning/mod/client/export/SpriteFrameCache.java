@@ -21,7 +21,8 @@ public final class SpriteFrameCache {
         if (iconName == null) return null;
         int c = iconName.indexOf(':');
         if (c >= 0) {
-            return iconName.substring(0, c).toLowerCase(java.util.Locale.ROOT) + iconName.substring(c);
+            return iconName.substring(0, c)
+                .toLowerCase(java.util.Locale.ROOT) + iconName.substring(c);
         }
         return iconName;
     }
