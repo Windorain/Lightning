@@ -169,7 +169,7 @@
 /* ---- NEI Slider (shared by WorldFrameScrubber & LayerPreviewBar) ---- */
 .nei-slider { position: relative; flex: 1; min-width: 0; height: 28px; display: flex; align-items: center; }
 .nei-slider__track {
-  position: absolute; left: 0; right: 0; top: 50%; height: 6px; margin-top: -3px;
+  position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px;
   background: var(--nei-bg-input);
   border: 1px solid var(--nei-border-subtle);
   box-sizing: border-box; pointer-events: none;
@@ -187,17 +187,19 @@
 .nei-slider__range:disabled { cursor: not-allowed; opacity: 0.55; }
 .nei-slider__range::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
-  width: 14px; height: 14px;
+  width: 10px; height: 10px;
+  margin-top: -3px;
   background: var(--nei-bg-surface);
-  border: 3px solid;
+  border: 2px solid;
   border-color: var(--nei-bevel-light) var(--nei-bevel-dark) var(--nei-bevel-dark) var(--nei-bevel-light);
   cursor: grab;
 }
 .nei-slider__range::-webkit-slider-runnable-track { height: 0; background: transparent; }
 .nei-slider__range::-moz-range-thumb {
-  width: 14px; height: 14px;
+  width: 10px; height: 10px;
+  margin-top: -3px;
   background: var(--nei-bg-surface);
-  border: 3px solid;
+  border: 2px solid;
   border-color: var(--nei-bevel-light) var(--nei-bevel-dark) var(--nei-bevel-dark) var(--nei-bevel-light);
   cursor: grab;
 }
@@ -225,4 +227,65 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--nei-accent);
+}
+
+/* ---- Daylight / Light Theme ---- */
+[data-nei-theme="light"] {
+  /* Panel hierarchy */
+  --nei-bg-deep: #b0b0b0;
+  --nei-bg-panel: #c6c6c6;
+  --nei-bg-surface: #e2e2e2;
+  --nei-bg-elevated: #ececec;
+  --nei-bg-input: #5a5a5a;
+  --nei-bg-hover: rgba(0, 0, 0, 0.08);
+
+  /* Bevel border */
+  --nei-bevel-light: #ffffff;
+  --nei-bevel-dark: #555555;
+  --nei-border-slot: #000000;
+  --nei-border-active: #4caf50;
+  --nei-border-panel: #8b8b8b;
+  --nei-border-subtle: #a0a0a0;
+
+  /* Text */
+  --nei-text: #303030;
+  --nei-text-dim: #606060;
+  --nei-text-id: #505050;
+  --nei-text-accent: #388e3c;
+  --nei-text-mono: #707070;
+  --nei-text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.6);
+  --nei-text-shadow-deep: 2px 2px 0 rgba(255, 255, 255, 0.7);
+
+  /* Accent */
+  --nei-accent: #4caf50;
+  --nei-accent-glow: rgba(76, 175, 80, 0.3);
+  --nei-accent-border-light: #81c784;
+  --nei-accent-border-dark: #388e3c;
+
+  /* Scrollbar */
+  --nei-scrollbar-track: #c6c6c6;
+  --nei-scrollbar-thumb: #8b8b8b;
+
+  /* Extended */
+  --nei-bg: #c6c6c6;
+  --nei-text-dark: #303030;
+  --nei-text-muted: #606060;
+  --nei-viewport-bg: #5a5a5a;
+  --nei-inset-bg: #5a5a5a;
+  --nei-highlight: #ffffff;
+  --nei-shadow: #555555;
+  --nei-label-shadow: 1px 1px 0 rgba(255, 255, 255, 0.5);
+
+  /* Status colors — keep bright (status bar bg is dark in both themes) */
+  --nei-loading-text: #fcd34d;
+  --nei-ok-text: #86efac;
+  --nei-warn-text: #fde047;
+  --nei-error-text: #fecaca;
+  --nei-error-bg: #450a0a;
+
+  /* Icon buttons */
+  --nei-icon-color: #606060;
+  --nei-icon-hover: var(--nei-text);
+  --nei-icon-active: var(--nei-text-accent);
+  --nei-titlebar-sep: #a0a0a0;
 }

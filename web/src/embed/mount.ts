@@ -26,5 +26,13 @@ export function mount(
     )
     return
   }
+
+  // 主题：options.ui.theme > html[data-nei-theme] > 默认 'dark'
+  const theme =
+    options.ui?.theme ??
+    (document.documentElement.dataset.neiTheme as 'light' | 'dark' | undefined) ??
+    'dark'
+  document.documentElement.dataset.neiTheme = theme
+
   createApp(EmbedRoot, { bootstrap: options }).mount(el)
 }
