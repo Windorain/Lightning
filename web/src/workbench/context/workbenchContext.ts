@@ -51,6 +51,7 @@ import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportI
 import { ThemeToggleOperator, SetLanguageOperator } from '@/workbench/operators/builtin/appearanceOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/workbench/operators/builtin/annotationOperators'
 import { ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/workbench/operators/builtin/materialOperators'
+import { CopyCameraFromEmbedOperator } from '@/embed/operators/copyCameraFromEmbedOperator'
 
 // Tools
 import { selectTool } from '@/workbench/tools/selectTool'
@@ -77,6 +78,7 @@ const ALL_OPERATORS: OperatorType[] = [
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
   AnnotationBoxCommitOperator, AnnotationBoxResetOperator,
   ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator,
+  CopyCameraFromEmbedOperator,
 ]
 
 export interface WorkbenchContextDeps {

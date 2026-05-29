@@ -23,6 +23,7 @@ import type { RNARegistry } from '@/workbench/ux/rna/types'
 // Operators
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
 import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
+import { CopyCameraFromEmbedOperator } from '@/embed/operators/copyCameraFromEmbedOperator'
 
 function throwError(name: string): never {
   throw new Error(`embed: ${name} not available`)
@@ -105,7 +106,7 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
   ;(ctx as any).initialCamera = settings.initialCamera
 
   // Register embed operators
-  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ResetViewOperator]) {
+  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ResetViewOperator, CopyCameraFromEmbedOperator]) {
     if (!ctx.operators.find(op.id)) ctx.operators.register(op)
   }
 

@@ -390,7 +390,9 @@ export class RuntimeDocument {
     this.labels = [...(opts.labels ?? [])]
     this.textureBlobs = opts.textureBlobs ?? undefined
     this.tooltipPalette = opts.tooltipPalette ?? undefined
-    this.cellTooltipGrid = opts.cellTooltipGrid ?? undefined
+    this.cellTooltipGrid = opts.cellTooltipGrid
+      ? opts.cellTooltipGrid.map(s => s ? s.map(r => r ? [...r] : []) : [])
+      : undefined
     this.materialPalette = opts.materialPalette ?? undefined
     this.playback = opts.playback ?? undefined
     this._extra = { ...(opts.extra ?? {}) }
@@ -461,7 +463,7 @@ export class RuntimeDocument {
     }
     if (this.textureBlobs) out.textureBlobs = this.textureBlobs
     if (this.tooltipPalette) out.tooltipPalette = [...this.tooltipPalette]
-    if (this.cellTooltipGrid) out.cellTooltipGrid = this.cellTooltipGrid.map(s => s.map(r => [...r]))
+    if (this.cellTooltipGrid) out.cellTooltipGrid = this.cellTooltipGrid.map(s => s ? s.map(r => r ? [...r] : []) : [])
     if (this.materialPalette) out.materialPalette = [...this.materialPalette]
     if (this.playback) out.playback = { ...this.playback }
     return out
@@ -499,7 +501,7 @@ export class RuntimeDocument {
       labels: [...this.labels],
       textureBlobs: this.textureBlobs ? (Array.isArray(this.textureBlobs) ? [...this.textureBlobs] as unknown as Record<string, unknown> : { ...this.textureBlobs }) : undefined,
       tooltipPalette: this.tooltipPalette ? [...this.tooltipPalette] : undefined,
-      cellTooltipGrid: this.cellTooltipGrid ? this.cellTooltipGrid.map(s => s.map(r => [...r])) : undefined,
+      cellTooltipGrid: this.cellTooltipGrid ? this.cellTooltipGrid.map(s => s ? s.map(r => r ? [...r] : []) : []) : undefined,
       materialPalette: this.materialPalette ? [...this.materialPalette] : undefined,
       playback: this.playback ? { ...this.playback } : undefined,
       extra: { ...this._extra },
