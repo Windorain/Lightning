@@ -42,6 +42,10 @@ function load(): void {
   const all = doc?.annotations as Annotation[] | undefined
   const found = sel.map(s => all?.find(a => a.id === s.id)).filter(Boolean) as Annotation[]
   annos.value = found
+  if (found.length === 0) {
+    proxyOwner.value = null
+    return
+  }
 
   // Build a new plain object as owner, with getters that delegate to annos[0]
   // and setters that sync to all selected annotations
