@@ -14,14 +14,14 @@ export const wikiConfigRNA: RNAStruct = {
     {
       name: 'viewWidth',
       type: 'number', label: '视口宽度', description: 'Wiki 预览视口宽度 (px)',
-      default: 600, min: 200, max: 2000,
+      default: 600, min: 200, max: 2000, uiWidget: 'number',
       get(o: any) { return o.viewWidth },
       set(o: any, v: unknown) { o.viewWidth = v as number },
     },
     {
       name: 'viewHeight',
       type: 'number', label: '视口高度', description: 'Wiki 预览视口高度 (px)',
-      default: 400, min: 150, max: 1500,
+      default: 400, min: 150, max: 1500, uiWidget: 'number',
       get(o: any) { return o.viewHeight },
       set(o: any, v: unknown) { o.viewHeight = v as number },
     },

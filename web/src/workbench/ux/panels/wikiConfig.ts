@@ -38,6 +38,8 @@ export const wikiConfigPanel: PanelDeclaration = {
             { kind: 'property', rnaPath: 'wikiconfig.cameraYaw', label: '偏航角 (°)' },
             { kind: 'property', rnaPath: 'wikiconfig.cameraElevation', label: '仰角 (°)' },
             { kind: 'property', rnaPath: 'wikiconfig.cameraZoom', label: '缩放' },
+            { kind: 'separator' },
+            { kind: 'operator', id: 'OPERATOR_COPY_CAMERA_FROM_EMBED', label: '从预览拷贝当前相机' },
           ],
         },
         { kind: 'separator' },
