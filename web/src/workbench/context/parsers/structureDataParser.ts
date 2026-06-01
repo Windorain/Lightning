@@ -47,7 +47,7 @@ export const StructureDataParser: DocumentParser = {
     }
 
     // Document-level fields must be at V2 root so fromV2Plain captures them
-    for (const key of ['materialPalette', 'textureBlobs', 'tooltipPalette', 'playback'] as const) {
+    for (const key of ['materialPalette', 'textureBlobs', 'tooltipPalette', 'cellTooltipGrid', 'playback'] as const) {
       if (baked[key] !== undefined) v2[key] = baked[key]
     }
 
