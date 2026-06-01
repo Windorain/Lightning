@@ -307,6 +307,37 @@ function updateOverlay(): void {
   }
 }
 
+// ---- 拖拽文件加载 ----
+const dragOver = ref(false)
+let dragEnterCount = 0
+
+function onDragEnter(e: DragEvent) {
+  e.preventDefault()
+  dragEnterCount++
+  if (e.dataTransfer?.types.includes('Files')) {
+    dragOver.value = true
+  }
+}
+function onDragOver(e: DragEvent) {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+function onDragLeave(_e: DragEvent) {
+  dragEnterCount--
+  if (dragEnterCount <= 0) {
+    dragEnterCount = 0
+    dragOver.value = false
+  }
+}
+function onDrop(e: DragEvent) {
+  e.preventDefault()
+  dragOver.value = false
+  dragEnterCount = 0
+  const file = e.dataTransfer?.files[0]
+  if (!file) return
+  bctx.operators.exec('OPERATOR_OPEN_SCENE', { file })
+}
+
 onMounted(() => {
   void renderAssets.loadStructureAndResources()
 })
@@ -325,7 +356,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="wv-root">
-    <div class="wv-viewport-wrap">
+    <div
+      class="wv-viewport-wrap"
+      @dragenter="onDragEnter"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+    >
       <ToolHintsBar :hints="toolHints" />
     <ViewerCore
       v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
@@ -344,6 +381,10 @@ onBeforeUnmount(() => {
           <span class="wv-placeholder-title">No scene loaded</span>
           <span class="wv-placeholder-hint">Open a scene from the File menu or drop a .json file</span>
         </div>
+      <div v-if="dragOver" class="wv-drag-overlay">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span>释放以加载场景</span>
+      </div>
     </div>
 
     <div class="wv-bottom-dock">
@@ -400,6 +441,25 @@ onBeforeUnmount(() => {
 .wv-placeholder-icon { opacity: 0.25; color: var(--wb-text-dim); }
 .wv-placeholder-title { font-size: 15px; font-weight: 500; color: var(--wb-text-dim); }
 .wv-placeholder-hint { font-size: 11px; color: var(--wb-text-muted); }
+
+.wv-drag-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(77, 171, 247, 0.12);
+  border: 3px dashed var(--wb-accent);
+  pointer-events: none;
+  color: var(--wb-accent);
+  font-size: 15px;
+  font-weight: 600;
+  backdrop-filter: blur(2px);
+}
+
 .wv-bottom-dock { flex-shrink: 0; display: flex; flex-direction: column; background: var(--wb-bg-elevated); box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.12); }
 .wv-tab-row { display: flex; align-items: center; padding: 0 4px; background: var(--wb-bg-surface); border-bottom: 1px solid var(--wb-border); }
 .wv-tab { padding: 6px 14px 5px; font-size: 12px; font-family: system-ui, sans-serif; font-weight: 600; color: var(--wb-text-muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s, border-color 0.15s; }
