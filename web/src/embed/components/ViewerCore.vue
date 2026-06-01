@@ -278,11 +278,14 @@ onMounted(() => {
   const fallbackTarget = new THREE.Vector3(0, 2, 0)
   const fallbackPosition = new THREE.Vector3(8, 6, 10)
   const o = vp.camera
+  const hasDefinedInitialCamera = !!def.initialCamera
   applyInitialCamera(o, vp.orbitTarget, def, fallbackTarget, fallbackPosition)
-  applyDiagonalOrbitView(o, vp.orbitTarget, {
-    yawDeg: 225,
-    elevationFromHorizontalDeg: STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
-  })
+  if (!hasDefinedInitialCamera) {
+    applyDiagonalOrbitView(o, vp.orbitTarget, {
+      yawDeg: 225,
+      elevationFromHorizontalDeg: STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
+    })
+  }
   const d0 = Math.max(0.1, o.position.distanceTo(vp.orbitTarget))
   const orthoHeight0 = 2 * d0 * Math.tan(THREE.MathUtils.degToRad(ORTHO_FRUSTUM_REF_HALF_FOV_DEG))
   const aspect0 = el.clientWidth / Math.max(el.clientHeight, 1)
