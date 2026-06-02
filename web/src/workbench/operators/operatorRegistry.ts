@@ -3,10 +3,10 @@
  *
  * 全局操作符注册表。管理所有操作符实例，提供 exec/invoke 便捷方法。
  */
-import { generateId } from '@/pure/id'
 import type { BContext } from '@/workbench/context/bContext'
 import type { OperatorType, OperatorProperties, OpResult } from './operatorType'
 import { OP_RESULT } from './operatorType'
+import { pushDocUndo } from './pushDocUndo'
 
 import { ModalOperatorWrapper } from './modalOperatorWrapper'
 import { logCenter } from '@/workbench/logging/LogCenter'
@@ -57,13 +57,7 @@ export class OperatorRegistry {
         const before = bctx.doc.value?.clone() ?? null
         await op.exec(bctx, resolvedProps)
         const after = bctx.doc.value?.clone() ?? null
-        bctx.editHistory.push({
-          id: generateId('op_'),
-          label: op.label,
-          timestamp: Date.now(),
-          execute: () => { bctx.doc.value = after; bctx.structEpoch.value += 1 },
-          undo: () => { bctx.doc.value = before; bctx.structEpoch.value += 1 },
-        })
+        pushDocUndo(bctx, before, after, op.label)
       } else {
         await op.exec(bctx, resolvedProps)
       }
@@ -105,20 +99,12 @@ export class OperatorRegistry {
         if (snapshot !== null) {
           wrapper.setUndoSnapshot(snapshot)
         }
-        if (event instanceof PointerEvent) {
-          bctx.eventDispatcher.pushModal(targetRegion, wrapper, event)
-        }
+        if (event) bctx.eventDispatcher.pushModal(targetRegion, wrapper, event)
         logOperatorResult(bctx, id, op.label, 'RUNNING_MODAL', snap)
       } else if (result === OP_RESULT.FINISHED) {
         if (snapshot !== null) {
           const snapshotAfter = bctx.doc.value?.clone() ?? null
-          bctx.editHistory.push({
-            id: generateId('op_'),
-            label: op.label,
-            timestamp: Date.now(),
-            execute: () => { bctx.doc.value = snapshotAfter; bctx.structEpoch.value += 1 },
-            undo: () => { bctx.doc.value = snapshot; bctx.structEpoch.value += 1 },
-          })
+          pushDocUndo(bctx, snapshot, snapshotAfter, op.label)
         }
         logOperatorResult(bctx, id, op.label, 'FINISHED', snap)
       }
@@ -126,7 +112,9 @@ export class OperatorRegistry {
     }
 
     if (op.exec) {
-      void invokeExecFallback(bctx, op, resolvedProps)
+      invokeExecFallback(bctx, op, resolvedProps).catch(err => {
+        logCenter.error('Operator', `invoke exec fallback failed: ${op.label}`, { opId: op.id, error: String(err) })
+      })
       return OP_RESULT.FINISHED
     }
 
@@ -143,13 +131,7 @@ async function invokeExecFallback(
     const snapshot = bctx.doc.value?.clone() ?? null
     await op.exec!(bctx, props)
     const snapshotAfter = bctx.doc.value?.clone() ?? null
-    bctx.editHistory.push({
-      id: 'op_' + Math.random().toString(36).slice(2, 10),
-      label: op.label,
-      timestamp: Date.now(),
-      execute: () => { bctx.doc.value = snapshotAfter; bctx.structEpoch.value += 1 },
-      undo: () => { bctx.doc.value = snapshot; bctx.structEpoch.value += 1 },
-    })
+    pushDocUndo(bctx, snapshot, snapshotAfter, op.label)
   } else {
     await op.exec!(bctx, props)
   }

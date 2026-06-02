@@ -81,7 +81,6 @@ export interface WorkbenchContextDeps {
   editHistory: UndoManager
   toolRegistry: ToolRegistry
   settings: BContextSettings
-  statusMessage?: { value: string }
 }
 
 export interface WorkbenchContextResult {
@@ -196,7 +195,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     eventDispatcher,
     log: logCenter,
     wikiConfig,
-    statusMessage: deps.statusMessage ?? ref(''),
     settings,
 
     // queries 需 bctx 自身（循环引用）——先填 null，下一行立即赋真值

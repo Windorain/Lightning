@@ -79,24 +79,30 @@ export function matchBinding(
 ): boolean {
   if (binding.type === 'KEY' && event instanceof KeyboardEvent) {
     if (event.key.toLowerCase() !== binding.key.toLowerCase()) return false
-    if (binding.ctrl !== undefined && binding.ctrl !== (event.ctrlKey || event.metaKey)) return false
-    if (binding.shift !== undefined && binding.shift !== event.shiftKey) return false
+    const wantCtrl = binding.ctrl ?? false
+    if (wantCtrl !== (event.ctrlKey || event.metaKey)) return false
+    const wantShift = binding.shift ?? false
+    if (wantShift !== event.shiftKey) return false
     return true
   }
 
   if (binding.type === 'MOUSE' && event instanceof PointerEvent) {
     if (event.type !== 'pointerdown') return false
     if (binding.button !== event.button) return false
-    if (binding.ctrl !== undefined && binding.ctrl !== (event.ctrlKey || event.metaKey)) return false
-    if (binding.shift !== undefined && binding.shift !== event.shiftKey) return false
+    const wantCtrl = binding.ctrl ?? false
+    if (wantCtrl !== (event.ctrlKey || event.metaKey)) return false
+    const wantShift = binding.shift ?? false
+    if (wantShift !== event.shiftKey) return false
     return true
   }
 
   if (binding.type === 'WHEEL' && event instanceof WheelEvent) {
     if (binding.direction === 'up' && event.deltaY >= 0) return false
     if (binding.direction === 'down' && event.deltaY <= 0) return false
-    if (binding.ctrl !== undefined && binding.ctrl !== (event.ctrlKey || event.metaKey)) return false
-    if (binding.shift !== undefined && binding.shift !== event.shiftKey) return false
+    const wantCtrl = binding.ctrl ?? false
+    if (wantCtrl !== (event.ctrlKey || event.metaKey)) return false
+    const wantShift = binding.shift ?? false
+    if (wantShift !== event.shiftKey) return false
     return true
   }
 

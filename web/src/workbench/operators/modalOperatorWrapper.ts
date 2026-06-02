@@ -5,12 +5,12 @@
  * OperatorRegistry.invoke() 创建此 wrapper 并推入目标 region 的模态栈。
  * 后续每个事件通过 wrapper 转发到 operator.modal()。
  */
-import { generateId } from '@/pure/id'
 import type { ModalOperation, ModalKeymap } from '@/workbench/events/dispatcher'
 
 import type { BContext } from '@/workbench/context/bContext'
 import type { OperatorType, OperatorProperties } from './operatorType'
 import { OP_RESULT } from './operatorType'
+import { pushDocUndo } from './pushDocUndo'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 
 export class ModalOperatorWrapper implements ModalOperation {
@@ -33,7 +33,7 @@ export class ModalOperatorWrapper implements ModalOperation {
     this.undoSnapshot = snapshot
   }
 
-  onEnter(_event: PointerEvent): ModalKeymap | null {
+  onEnter(_event: Event): ModalKeymap | null {
     return null
   }
 
@@ -44,13 +44,7 @@ export class ModalOperatorWrapper implements ModalOperation {
       if (this.op.flagUndo && this.undoSnapshot !== null) {
         const snap = this.undoSnapshot
         const snapshotAfter = this.bctx.doc.value?.clone() ?? null
-        this.bctx.editHistory.push({
-          id: generateId('op_'),
-          label: this.op.label,
-          timestamp: Date.now(),
-          execute: () => { this.bctx.doc.value = snapshotAfter; this.bctx.structEpoch.value += 1 },
-          undo: () => { this.bctx.doc.value = snap; this.bctx.structEpoch.value += 1 },
-        })
+        pushDocUndo(this.bctx, snap, snapshotAfter, this.op.label)
         this.undoSnapshot = null
       }
       this.bctx.eventDispatcher.commitModal(this.regionId)
@@ -58,6 +52,10 @@ export class ModalOperatorWrapper implements ModalOperation {
     }
 
     if (result === OP_RESULT.CANCELLED) {
+      if (this.undoSnapshot !== null) {
+        this.bctx.doc.value = this.undoSnapshot
+        this.undoSnapshot = null
+      }
       this.op.cancel?.(this.bctx, this.props)
       this.bctx.eventDispatcher.cancelModal(this.regionId)
       return { break: true }

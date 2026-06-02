@@ -41,7 +41,7 @@ function createBContextSettings(overrides?: {
   return {
     get replaceBrush(): string | null { return replaceBrush.value },
     set replaceBrush(v: string | null) { replaceBrush.value = v },
-    get fillBrush(): string | null { return fillBrush.value ?? replaceBrush.value },
+    get fillBrush(): string | null { return fillBrush.value },
     set fillBrush(v: string | null) { fillBrush.value = v },
     get generateType(): string | null { return generateType.value },
     set generateType(v: string | null) { generateType.value = v },
@@ -84,12 +84,11 @@ parserRegistry.register(StructureDataParser)
 const selection = provideSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
-const statusMessage = ref('')
 
 // 共享 VM 组装
 const settings = createBContextSettings()
 const { bctx, screen: defaultScreen } = createWorkbenchContext({
-  selection, editHistory, toolRegistry, settings, statusMessage,
+  selection, editHistory, toolRegistry, settings,
 })
 
 // Query string override for workspace mode

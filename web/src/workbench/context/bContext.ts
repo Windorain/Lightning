@@ -150,7 +150,7 @@ export interface BContext {
     setActiveRegion(regionId: string): void
     getActiveRegion(): string | null
     getCurrentRegionId(): string | null
-    pushModal(regionId: string, op: import('@/workbench/events/dispatcher').ModalOperation, event: PointerEvent): void
+    pushModal(regionId: string, op: import('@/workbench/events/dispatcher').ModalOperation, event: Event): void
     cancelModal(regionId: string): void
     commitModal(regionId: string): void
     modalDepth(regionId: string): number
@@ -169,8 +169,6 @@ export interface BContext {
     recent(levelMask?: number, count?: number): Array<unknown>
   }
   wikiConfig: Record<string, any>
-  /** 底部状态栏消息 */
-  statusMessage: { value: string }
 
   // === Multi-viewport ===
   /** Backward-compat: returns the active viewport slot. Code should migrate to `viewports.get(id)`. */

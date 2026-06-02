@@ -3,12 +3,12 @@ import { computed } from 'vue'
 import { sdeGetWorkspaceDocument } from '@/workbench/sdeApi'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
 import { useBContext } from '@/workbench/context/bContext'
+import { logCenter } from '@/workbench/logging/LogCenter'
 
 const bctx = useBContext()
-const statusMessage = bctx.statusMessage
 
 const connectionOk = computed(() => bctx.connectionConnected.value)
-const connectionMessageText = computed(() => statusMessage.value)
+const connectionMessageText = computed(() => logCenter.statusMessage)
 const showConnectionHint = computed(() => bctx.connectionConnected.value !== null)
 
 async function onConnect(): Promise<void> {
@@ -37,11 +37,11 @@ async function onConnect(): Promise<void> {
     <p class="dash-card__desc">填写游戏内 <code class="dash-code">/sde web</code> 打印的地址与 Token，与 <code class="dash-code">structure_exports</code> 目录同步。</p>
     <label class="dash-field">
       <span class="dash-field__label">API 基址</span>
-      <input v-model="bctx.connectionApiBase" class="dash-input" type="text" autocomplete="off" placeholder="http://127.0.0.1:37564" />
+      <input v-model="bctx.connectionApiBase.value" class="dash-input" type="text" autocomplete="off" placeholder="http://127.0.0.1:37564" />
     </label>
     <label class="dash-field">
       <span class="dash-field__label">Token</span>
-      <input v-model="bctx.connectionToken" class="dash-input" type="password" autocomplete="off" placeholder="Bearer" />
+      <input v-model="bctx.connectionToken.value" class="dash-input" type="password" autocomplete="off" placeholder="Bearer" />
     </label>
     <div class="dash-row">
       <button type="button" class="dash-btn dash-btn--primary" @click="onConnect">连接并刷新</button>

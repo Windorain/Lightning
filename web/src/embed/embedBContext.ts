@@ -87,7 +87,6 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
 
     get log() { return throwError('log') },
     wikiConfig: {},
-    statusMessage: { value: '' },
 
     viewports,
     get viewport() { return viewports.active.value! },

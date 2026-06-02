@@ -28,7 +28,7 @@ export interface ModalKeymap {
 export interface ModalOperation {
   id: string
   keymap?: ModalKeymap
-  onEnter(event: PointerEvent): ModalKeymap | null
+  onEnter(event: Event): ModalKeymap | null
   handleEvent(event: Event): { break: boolean }
   onExit(cancelled: boolean): void
 }
@@ -111,7 +111,7 @@ export class EventDispatcherImpl {
   // ---- 模态栈 ----
 
   /** 向指定 region 的模态栈推入操作 */
-  pushModal(regionId: string, op: ModalOperation, event: PointerEvent): void {
+  pushModal(regionId: string, op: ModalOperation, event: Event): void {
     const system = this._regionSystems.get(regionId)
     if (!system) {
       console.warn(`[EventDispatcher] pushModal: region not found ${regionId}`)

@@ -86,7 +86,11 @@ const mainMeshGroup = vpSlot.contentGroup
 const materialLibrary = renderAssets.textureCache
 
 type BottomTab = 'frame' | 'layer'
-const activeTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
+const _preferredTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
+const activeTab = computed<BottomTab>({
+  get: () => hasWorldMultiFrame.value ? _preferredTab.value : 'layer',
+  set: (v: BottomTab) => { _preferredTab.value = v },
+})
 
 function createToolContext(): ToolContext {
   return {
@@ -150,10 +154,12 @@ async function onViewportReady({ mainScene, overlayScene: _overlayScene, layers,
     e.preventDefault()
   }, { capture: true, passive: false })
   domElement.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
-  document.addEventListener('keydown', (e) => {
+  const _onKeydown = (e: KeyboardEvent) => {
     if (isEditingTarget(e.target)) return
     bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
-  }, { capture: true })
+  }
+  document.addEventListener('keydown', _onKeydown, { capture: true })
+  unregHandlers.push(() => document.removeEventListener('keydown', _onKeydown, { capture: true }))
 
   const unregGizmo = bctx.eventDispatcher.registerRegionHandler(
     VIEWPORT_REGION_ID,
