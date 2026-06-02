@@ -370,7 +370,6 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       const g = mainMeshGroup.value
       if (g && scene) scene.remove(g)
       mainMeshGroup.value = null
-      clearAllMeshStorage()
       await presentContentMesh()
     })
   })

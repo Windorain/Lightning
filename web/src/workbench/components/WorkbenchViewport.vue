@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import ViewerCore, { type ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
-import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
-import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
-import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
+import ViewerCore, { type ViewerCoreReadyPayload } from '@/shared/viewport/ViewerCore.vue'
+import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
+import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
+import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
 import { useSelectionContext, type BlockRef } from '@/workbench/selection'
 import { useBContext } from '@/workbench/context/bContext'
 import { usePreferences } from '@/preview/preferences'
@@ -73,13 +73,13 @@ watch(() => bctx.structEpoch.value, () => {
   void renderAssets.rebuildAll()
 })
 
-// ---- Frame index 同步：local frameIndex → operator → currentWorldFrameIndex → renderAssets ----
+// ---- Frame index 同步：local worldFrameIndex → operator → bctx.currentWorldFrameIndex ----
+// setCurrentWorldFrame 是帧切换的权威路径（scrubber/playback 直接调用），
+// 内部完成 mesh 重建并更新 worldFrameIndex。此 watcher 仅负责将 worldFrameIndex
+// 同步到 bctx.currentWorldFrameIndex 供下游（StatusBar 等）消费。
 watch(worldFrameIndex, (i) => {
   bctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i })
 })
-watch(() => bctx.currentWorldFrameIndex.value, (i) => {
-  void renderAssets.setCurrentWorldFrame(i)
-}, { immediate: true })
 
 const structureDefinition = vpSlot.definition
 const mainMeshGroup = vpSlot.contentGroup
