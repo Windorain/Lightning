@@ -15,6 +15,16 @@ interface NavState {
   _pointerId: number
 }
 
+function releasePointerCapture(bctx: any, props: any): void {
+  const s = props as unknown as NavState
+  if (s._pointerId >= 0) {
+    const vp = resolveViewportSlot(bctx, props)
+    const el = vp.domElement.value
+    try { el?.releasePointerCapture(s._pointerId) } catch { /* already released */ }
+    s._pointerId = -1
+  }
+}
+
 export const ViewRotateOperator: OperatorType = {
   id: 'OPERATOR_VIEW_ROTATE',
   label: '旋转视图',
@@ -73,15 +83,7 @@ export const ViewRotateOperator: OperatorType = {
     return OP_RESULT.PASS_THROUGH
   },
 
-  cancel(bctx, props) {
-    const s = props as unknown as NavState
-    if (s._pointerId >= 0) {
-      const vp = resolveViewportSlot(bctx, props)
-      const el = vp.domElement.value
-      try { el?.releasePointerCapture(s._pointerId) } catch { /* already released */ }
-      s._pointerId = -1
-    }
-  },
+  cancel(bctx, props) { releasePointerCapture(bctx, props) },
 }
 
 export const ViewPanOperator: OperatorType = {
@@ -148,15 +150,7 @@ export const ViewPanOperator: OperatorType = {
     return OP_RESULT.PASS_THROUGH
   },
 
-  cancel(bctx, props) {
-    const s = props as unknown as NavState
-    if (s._pointerId >= 0) {
-      const vp = resolveViewportSlot(bctx, props)
-      const el = vp.domElement.value
-      try { el?.releasePointerCapture(s._pointerId) } catch { /* already released */ }
-      s._pointerId = -1
-    }
-  },
+  cancel(bctx, props) { releasePointerCapture(bctx, props) },
 }
 
 function applyViewZoom(camera: any, factor: number): void {
@@ -234,13 +228,5 @@ export const ViewZoomOperator: OperatorType = {
     return OP_RESULT.PASS_THROUGH
   },
 
-  cancel(bctx, props) {
-    const s = props as unknown as NavState
-    if (s._pointerId >= 0) {
-      const vp = resolveViewportSlot(bctx, props)
-      const el = vp.domElement.value
-      try { el?.releasePointerCapture(s._pointerId) } catch { /* already released */ }
-      s._pointerId = -1
-    }
-  },
+  cancel(bctx, props) { releasePointerCapture(bctx, props) },
 }

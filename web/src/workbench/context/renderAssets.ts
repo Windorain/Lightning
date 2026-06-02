@@ -96,10 +96,10 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   const textureCache = shallowRef<MaterialLibraryApi | null>(null)
 
   /** 确保 textureCache 就绪；已完成则直接返回。 */
-  async function ensureTextures(doc: RuntimeDocument): Promise<MaterialLibraryApi | null> {
+  async function ensureTextures(doc: RuntimeDocument, plain?: Record<string, unknown>): Promise<MaterialLibraryApi | null> {
     if (textureCache.value && !textureCache.value.isDisposed()) return textureCache.value
     try {
-      textureCache.value = await buildMaterialLibrary(doc.serialize())
+      textureCache.value = await buildMaterialLibrary(plain ?? doc.serialize())
       return textureCache.value
     } catch (e) {
       console.error('[renderAssets] buildMaterialLibrary failed', e)
@@ -269,7 +269,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       const lib = textureCache.value
       const effectiveLib = (lib && !lib.isDisposed())
         ? lib
-        : await ensureTextures(doc)
+        : await ensureTextures(doc, plain)
       if (!effectiveLib || effectiveLib.isDisposed()) {
         loadStatus.value = 'error'
         console.error('[renderAssets] loadStructureAndResources: failed to build textureCache')

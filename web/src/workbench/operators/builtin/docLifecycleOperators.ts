@@ -8,6 +8,15 @@ import { logCenter } from '@/workbench/logging/LogCenter'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
 import { replaceDoc } from '@/workbench/context/replaceDoc'
 
+/**
+ * Open a native file picker for .json files.
+ *
+ * NOTE: The window focus + setTimeout(300) hack below is needed because
+ * there is no standard callback for "user cancelled the file picker".
+ * The 'focus' event fires when the user closes the picker without
+ * selecting a file (tab returns to the window). A short delay lets
+ * the browser populate input.files before we check it.
+ */
 function pickFile(): Promise<File | undefined> {
   return new Promise(resolve => {
     const input = document.createElement('input')
@@ -89,7 +98,7 @@ export const OpenSceneOperator: OperatorType = {
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       logCenter.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      bctx.doc.value = null
+      replaceDoc(bctx, null)
       logCenter.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
     }
     bctx.localFileName.value = file.name
@@ -136,7 +145,7 @@ export const LoadBuiltinSceneOperator: OperatorType = {
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       logCenter.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      bctx.doc.value = null
+      replaceDoc(bctx, null)
       logCenter.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
     }
     bctx.workspaceMode.value = 'local-bundle'

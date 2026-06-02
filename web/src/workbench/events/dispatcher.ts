@@ -70,6 +70,12 @@ export class EventDispatcherImpl {
   }
 
   unregisterRegion(regionId: string): void {
+    const system = this._regionSystems.get(regionId)
+    if (system) {
+      for (const modal of system.modalStack) {
+        modal.onExit(true)
+      }
+    }
     this._regionSystems.delete(regionId)
     if (this._activeRegionId === regionId) this._activeRegionId = null
     if (this._currentRegionId === regionId) this._currentRegionId = null
@@ -117,7 +123,12 @@ export class EventDispatcherImpl {
       console.warn(`[EventDispatcher] pushModal: region not found ${regionId}`)
       return
     }
-    op.keymap = op.onEnter(event) ?? undefined
+    try {
+      op.keymap = op.onEnter(event) ?? undefined
+    } catch (e) {
+      console.error(`[EventDispatcher] pushModal onEnter error for ${op.id}:`, e)
+      return
+    }
     system.modalStack.push(op)
   }
 
@@ -182,9 +193,17 @@ export class EventDispatcherImpl {
       // 从顶到底逐级分发
       for (let i = system.modalStack.length - 1; i >= 0; i--) {
         const modal = system.modalStack[i]
-        const result = modal.handleEvent(event)
-        if (result.break) {
-          logCenter.endTrace(`consumed by modal ${modal.id}`)
+        try {
+          const result = modal.handleEvent(event)
+          if (result.break) {
+            logCenter.endTrace(`consumed by modal ${modal.id}`)
+            return { break: true, traceId }
+          }
+        } catch (e) {
+          console.error(`[EventDispatcher] modal ${modal.id} handleEvent error:`, e)
+          system.modalStack.splice(i, 1)
+          modal.onExit(true)
+          logCenter.endTrace(`modal ${modal.id} crashed, removed from stack`)
           return { break: true, traceId }
         }
       }
@@ -204,5 +223,3 @@ export class EventDispatcherImpl {
   }
 }
 
-/** 全局单例 */
-export const eventDispatcher = new EventDispatcherImpl()

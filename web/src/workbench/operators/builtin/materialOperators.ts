@@ -2,20 +2,11 @@ import type { OperatorType } from '@/workbench/operators/operatorType'
 import type { MaterialQueryItem } from '@/workbench/context/bContext'
 import { encodeAnimatedGif } from '@/workbench/animatedGifEncoder'
 import { filenameStem } from '@/pure/string'
+import { downloadPng, copyTextToClipboard } from '@/util/browser'
 
 function resolveMaterial(bctx: any, materialId: string): MaterialQueryItem | undefined {
   const materials = bctx.queries?.listMaterials?.() ?? []
   return materials.find((item: MaterialQueryItem) => item.materialId === materialId)
-}
-
-/** Download a data URL as a PNG file */
-function downloadPng(dataUrl: string, filename: string): void {
-  const a = document.createElement('a')
-  a.href = dataUrl
-  a.download = filename.endsWith('.png') ? filename : `${filename}.png`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
 }
 
 export const ExportTextureOperator: OperatorType = {
@@ -39,32 +30,6 @@ export const ExportTextureOperator: OperatorType = {
   },
 }
 
-export const ExportAllTexturesOperator: OperatorType = {
-  id: 'OPERATOR_EXPORT_ALL_TEXTURES',
-  label: '导出全部纹理',
-  description: '将所有材质纹理逐个导出为 PNG 文件',
-
-  poll(bctx) {
-    return (bctx.queries?.listMaterials?.() ?? []).some(
-      (m: MaterialQueryItem) => m.textureDataUrl !== null,
-    )
-  },
-
-  exec(bctx, _props) {
-    const materials = bctx.queries?.listMaterials?.() ?? []
-    let count = 0
-    for (const m of materials) {
-      if (!m.textureDataUrl) continue
-      // Slight delay between downloads to avoid browser blocking
-      setTimeout(() => downloadPng(m.textureDataUrl!, filenameStem(m, m.materialId)), count * 100)
-      count++
-    }
-    if (count === 0) {
-      bctx.log?.warn('导出', '没有可导出的纹理')
-    }
-  },
-}
-
 export const CopyMaterialLocatorOperator: OperatorType = {
   id: 'OPERATOR_COPY_MATERIAL_LOCATOR',
   label: '复制定位符',
@@ -82,18 +47,7 @@ export const CopyMaterialLocatorOperator: OperatorType = {
       bctx.log?.warn('操作', `材质 ${materialId} 无定位符`)
       return
     }
-    try {
-      await navigator.clipboard.writeText(m.locator)
-    } catch {
-      const ta = document.createElement('textarea')
-      ta.value = m.locator
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
-    }
+    await copyTextToClipboard(m.locator)
   },
 }
 

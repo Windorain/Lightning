@@ -43,6 +43,31 @@ export const SelectOperator: OperatorType = {
   },
 }
 
+/**
+ * SelectAllOperator — 全选/取消全选。
+ *
+ * exec: 获取当前帧所有非空方块，通过 selection.invert 实现 toggle：
+ * 如果所有方块都已选中则取消全选，否则全选。
+ * flagUndo: false（全选不视为可撤销的编辑操作）。
+ * 支持 keymap 绑定 'OPERATOR_SELECT_ALL'（A 键）。
+ */
+export const SelectAllOperator: OperatorType = {
+  id: 'OPERATOR_SELECT_ALL',
+  label: '全选',
+  description: '切换选择当前帧所有方块',
+  flagUndo: false,
+
+  poll(bctx) {
+    return bctx.doc.value !== null && bctx.selection !== undefined
+  },
+
+  exec(bctx, _props) {
+    const blocks = bctx.queries!.getFrameBlocks()
+    if (blocks.length === 0) return
+    bctx.selection.invert(blocks)
+  },
+}
+
 export const SelectByTypeOperator: OperatorType = {
   id: 'OPERATOR_SELECT_BY_TYPE',
   label: '按类型选择',

@@ -1,4 +1,4 @@
-import { generateId } from '@/pure/id'
+import { generateId } from '@/pure/string'
 import * as THREE from 'three'
 import type { BContext } from '@/workbench/context/bContext'
 import type { OperatorType, OperatorProperties } from '@/workbench/operators/operatorType'

@@ -11,6 +11,8 @@ import { View3DRenderer } from '@/render/viewport/renderViewport'
 import {
   applyDiagonalOrbitView,
   applyInitialCamera,
+  fitCameraToGroup,
+  ORTHO_FRUSTUM_REF_HALF_FOV_DEG,
   STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
 } from '@/render/interaction/initialCamera'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
@@ -29,8 +31,6 @@ export interface ViewerCoreReadyPayload {
   orbitTarget: THREE.Vector3
   renderer: View3DRenderer
 }
-
-const ORTHO_FRUSTUM_REF_HALF_FOV_DEG = 25
 
 const props = withDefaults(
   defineProps<{
@@ -80,7 +80,19 @@ defineExpose({
   },
   resetView() {
     if (renderer && props.contentGroup) {
-      fitCameraToGroup(renderer, props.contentGroup)
+      const cam = props.initialCamera
+      fitCameraToGroup(
+        renderer.camera,
+        props.contentGroup,
+        renderer.orbitTarget,
+        renderer.domElement,
+        {
+          yawDeg: cam?.yawDeg,
+          elevationDeg: cam?.elevationDeg,
+          distance: cam?.distance,
+          zoom: cam?.zoom,
+        },
+      )
     }
   },
 })
@@ -165,35 +177,6 @@ function onPointerLeave(): void {
   emit('hover-annotation', null)
 }
 
-function fitCameraToGroup(vp: View3DRenderer, group: THREE.Group): void {
-  group.updateMatrixWorld(true)
-  const box = new THREE.Box3().setFromObject(group)
-  if (box.isEmpty() || !Number.isFinite(box.min.x)) return
-  const center = new THREE.Vector3()
-  const size = new THREE.Vector3()
-  box.getCenter(center)
-  box.getSize(size)
-  const maxDim = Math.max(size.x, size.y, size.z, 0.1)
-  const dist = Math.max(8, maxDim * 2.2)
-  const cam = props.initialCamera
-  const finalDist = cam?.distance ?? dist
-  const o = vp.camera
-  vp.orbitTarget.copy(center)
-  applyDiagonalOrbitView(o, vp.orbitTarget, {
-    yawDeg: cam?.yawDeg ?? 225,
-    elevationFromHorizontalDeg: cam?.elevationDeg ?? STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
-    distance: finalDist,
-  })
-  const orthoHeight = 2 * Math.abs(finalDist) * Math.tan(THREE.MathUtils.degToRad(ORTHO_FRUSTUM_REF_HALF_FOV_DEG))
-  const dom = vp.domElement
-  const aspect = dom.clientWidth / Math.max(dom.clientHeight, 1)
-  const halfH = orthoHeight / 2
-  o.top = halfH; o.bottom = -halfH
-  o.left = -halfH * aspect; o.right = halfH * aspect
-  o.zoom = clampOrthoZoom(cam?.zoom)
-  o.updateProjectionMatrix()
-}
-
 watch(
   () => props.contentGroup,
   (g, prev) => {
@@ -202,7 +185,19 @@ watch(
     if (!g) { if (prev) skipNextContentGroupAutoFit = true; return }
     if (!prev) {
       if (skipNextContentGroupAutoFit) { skipNextContentGroupAutoFit = false; return }
-      fitCameraToGroup(vp, g)
+      const cam = props.initialCamera
+      fitCameraToGroup(
+        vp.camera,
+        g,
+        vp.orbitTarget,
+        vp.domElement,
+        {
+          yawDeg: cam?.yawDeg,
+          elevationDeg: cam?.elevationDeg,
+          distance: cam?.distance,
+          zoom: cam?.zoom,
+        },
+      )
     }
   },
   { flush: 'post' },

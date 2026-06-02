@@ -15,7 +15,6 @@ import {
   resolveRenderBundle,
   type RenderBundleResolveResult,
 } from '@/render/data/bundleResolve'
-import { frameAt } from '@/render/data/worldPlayback'
 
 export const DEFAULT_WORLD_FRAME_DWELL_MS = 50
 
@@ -71,9 +70,7 @@ export function createWorldFrameController(deps: WorldFrameControllerDeps): Worl
   function dwellMsForCurrentWorldFrame(): number {
     const doc = docRef.value
     if (!doc || doc.frameCount === 0) return DEFAULT_WORLD_FRAME_DWELL_MS
-    const plain = doc.serialize()
-    if (!isWorldDocument(plain) || plain.frames.length === 0) return DEFAULT_WORLD_FRAME_DWELL_MS
-    const f = frameAt(plain, worldFrameIndex.value)
+    const f = doc.frame(worldFrameIndex.value)
     const d = f?.durationMs
     if (typeof d === 'number' && Number.isFinite(d) && d > 0) return d
     return DEFAULT_WORLD_FRAME_DWELL_MS

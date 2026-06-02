@@ -1,5 +1,5 @@
 // web/src/workbench/tools/boxTool.ts
-import { generateId } from '@/pure/id'
+import { generateId } from '@/pure/string'
 import type { Tool, ToolGizmo, ToolContext } from './tool'
 import type { DetectedBounds } from './partDetect'
 import { detectFaceBounds, detectPartBounds } from './partDetect'

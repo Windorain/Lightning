@@ -3,20 +3,6 @@ import { toggleTheme } from '@/workbench/composables/useNeiTheme'
 import { setLang } from '@/workbench/i18n'
 import type { WorkbenchWorkspaceMode } from '@/workbench/context/bContext'
 
-// ──────────────────────────── 工具 ────────────────────────────
-
-export const ToolSetOperator: OperatorType = {
-  id: 'OPERATOR_TOOL_SET',
-  label: '切换工具',
-  description: '激活指定工具',
-
-  exec(bctx, props) {
-    const toolId = props.toolId as string
-    if (!toolId) return
-    bctx.toolRegistry.activate(toolId)
-  },
-}
-
 // ──────────────────────────── 帧切换 ────────────────────────────
 
 export const SetFrameIndexOperator: OperatorType = {
@@ -125,6 +111,8 @@ export const ResetLayoutOperator: OperatorType = {
   },
 
   exec(_bctx, _props) {
+    // Direct DOM access is intentional here: we need to clear persisted layout
+    // state and force a full page reload to re-initialise the Screen layout system.
     try { localStorage.removeItem('wsr-wb-left-w'); localStorage.removeItem('wsr-wb-right-w') } catch { /* */ }
     location.reload()
   },

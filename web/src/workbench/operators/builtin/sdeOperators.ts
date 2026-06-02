@@ -58,7 +58,7 @@ export const SDELoadExportOperator: OperatorType = {
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       logCenter.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      bctx.doc.value = null
+      replaceDoc(bctx, null)
       logCenter.error('场景加载', result.error ?? '未知错误', { fileName: name, error: result.error })
     }
     bctx.workspaceMode.value = 'sde'

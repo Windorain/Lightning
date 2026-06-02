@@ -1,7 +1,8 @@
 // web/src/workbench/operators/builtin/annotationOperators.ts
-import { generateId } from '@/pure/id'
+import { generateId } from '@/pure/string'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import type { Annotation } from '@/render/data/annotationTypes'
+import { replaceDoc } from '@/workbench/context/replaceDoc'
 
 export const AnnotationCreateOperator: OperatorType = {
   id: 'ANNOTATION_CREATE',
@@ -13,7 +14,7 @@ export const AnnotationCreateOperator: OperatorType = {
   },
 
   exec(bctx, props) {
-    const doc = bctx.doc.value as Record<string, any> | null
+    const doc = bctx.doc.value
     if (!doc) return
 
     const annotation = props.annotation as Annotation
@@ -23,9 +24,9 @@ export const AnnotationCreateOperator: OperatorType = {
     annotation.created_at = Date.now()
     annotation.updated_at = Date.now()
 
-    if (!doc.annotations) doc.annotations = []
-    doc.annotations.push(annotation)
-    // dirty is now derived from undo stack (editHistory.canUndo)
+    const newDoc = doc.clone()
+    ;(newDoc.annotations as Annotation[]).push(annotation)
+    replaceDoc(bctx, newDoc)
     bctx.selection.active.value = annotation.id
   },
 }
@@ -40,20 +41,20 @@ export const AnnotationUpdateOperator: OperatorType = {
   },
 
   exec(bctx, props) {
-    const doc = bctx.doc.value as Record<string, any> | null
-    if (!doc?.annotations) return
+    const doc = bctx.doc.value
+    if (!doc) return
 
     const id = props.id as string
     const patch = props.patch as Partial<Annotation>
     if (!id || !patch) return
 
-    const annotations = doc.annotations as Annotation[]
+    const newDoc = doc.clone()
+    const annotations = newDoc.annotations as Annotation[]
     const idx = annotations.findIndex((a: Annotation) => a.id === id)
     if (idx === -1) return
 
-    // Mutate in place so the draft reference stays bound to doc.annotations
-    Object.assign(annotations[idx], patch, { updated_at: Date.now() })
-    // dirty is now derived from undo stack (editHistory.canUndo)
+    annotations[idx] = { ...annotations[idx], ...patch, updated_at: Date.now() } as Annotation
+    replaceDoc(bctx, newDoc)
   },
 }
 
@@ -67,18 +68,19 @@ export const AnnotationDeleteOperator: OperatorType = {
   },
 
   exec(bctx, props) {
-    const doc = bctx.doc.value as Record<string, any> | null
-    if (!doc?.annotations) return
+    const doc = bctx.doc.value
+    if (!doc) return
 
     const id = props.id as string
     if (!id) return
 
-    const annotations = doc.annotations as Annotation[]
+    const newDoc = doc.clone()
+    const annotations = newDoc.annotations as Annotation[]
     const idx = annotations.findIndex((a: Annotation) => a.id === id)
     if (idx === -1) return
 
     annotations.splice(idx, 1)
-    // dirty is now derived from undo stack (editHistory.canUndo)
+    replaceDoc(bctx, newDoc)
     bctx.selection.active.value = null
   },
 }

@@ -49,6 +49,27 @@ export function isEditingTarget(target: EventTarget | null): boolean {
     || target.isContentEditable
 }
 
+/**
+ * Download a data URL as a PNG file.
+ * Converts the data URL to a Blob and delegates to downloadBlob.
+ */
+export function downloadPng(dataUrl: string, filename: string): void {
+  const name = filename.endsWith('.png') ? filename : `${filename}.png`
+  downloadBlob(name, dataUrlToBlob(dataUrl))
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const parts = dataUrl.split(',')
+  const mimeMatch = parts[0]?.match(/:(.*?);/)
+  const mime = mimeMatch?.[1] ?? 'image/png'
+  const raw = atob(parts[1] ?? '')
+  const len = raw.length
+  const buf = new ArrayBuffer(len)
+  const view = new Uint8Array(buf)
+  for (let i = 0; i < len; i++) view[i] = raw.charCodeAt(i)
+  return new Blob([buf], { type: mime })
+}
+
 /** File System Access API 的 showSaveFilePicker（仅在安全上下文可用） */
 export function getShowSaveFilePicker():
   | ((options: SaveFilePickerOptions) => Promise<FileSystemFileHandle>)

@@ -21,11 +21,13 @@ export class RuntimeFrame {
   readonly index: number
   readonly label: string | undefined
   readonly grid: Grid | null
+  readonly durationMs: number | undefined
 
-  constructor(index: number, label?: string, grid?: Grid | null) {
+  constructor(index: number, label?: string, grid?: Grid | null, durationMs?: number) {
     this.index = index
     this.label = label
     this.grid = grid ?? null
+    this.durationMs = durationMs
   }
 
 
@@ -152,7 +154,7 @@ export class RuntimeDocument {
       formatVersion: this.formatVersion,
       id: this.id,
       frames: this.frames.map(f => {
-        if (!f.grid) return new RuntimeFrame(f.index, f.label)
+        if (!f.grid) return new RuntimeFrame(f.index, f.label, null, f.durationMs)
         // Deep clone grid
         const cells: (SlotBlock | null)[][][] = []
         for (let z = 0; z < f.grid.depth; z++) {
@@ -172,6 +174,7 @@ export class RuntimeDocument {
           f.index,
           f.label,
           new Grid(f.grid.width, f.grid.height, f.grid.depth, cells, paletteCache),
+          f.durationMs,
         )
       }),
       meta: { ...this.meta },
@@ -214,6 +217,7 @@ export class RuntimeDocument {
       if (!f || typeof f !== 'object') continue
       const index = (f.index as number) ?? i
       const label = f.label as string | undefined
+      const durationMs = f.durationMs as number | undefined
       const st = f.structure as Record<string, unknown> | undefined
       let grid: Grid | null = null
       if (st?.cellGrid && Array.isArray(st.cellGrid) && st.blockPalette && Array.isArray(st.blockPalette)) {
@@ -222,7 +226,7 @@ export class RuntimeDocument {
           st.blockPalette as Record<string, unknown>[],
         )
       }
-      frames.push(new RuntimeFrame(index, label, grid))
+      frames.push(new RuntimeFrame(index, label, grid, durationMs))
     }
 
     return new RuntimeDocument({

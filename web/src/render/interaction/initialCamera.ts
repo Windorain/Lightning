@@ -133,3 +133,66 @@ export function applyInitialCamera(
   camera.lookAt(target)
   orbitTargetOut.copy(target)
 }
+
+/**
+ * 正交视锥基准半视场角（度）：用于将透视距离映射到正交 frustum 高度。
+ */
+export const ORTHO_FRUSTUM_REF_HALF_FOV_DEG = 25
+
+export interface FitCameraToGroupOptions {
+  /** 覆盖方位角（度），缺省 225 */
+  yawDeg?: number
+  /** 覆盖俯仰角（度），缺省 STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG */
+  elevationDeg?: number
+  /** 覆盖相机到轨道中心的距离 */
+  distance?: number
+  /** 覆盖正交相机 zoom */
+  zoom?: number
+}
+
+/**
+ * 将正交相机适配到 THREE.Group 的内容包围盒。
+ * 计算 group 的世界包围盒 → 中心 → 尺寸 → 等轴距离 → 设置相机位置/视锥。
+ */
+export function fitCameraToGroup(
+  camera: THREE.OrthographicCamera,
+  group: THREE.Group,
+  orbitTarget: THREE.Vector3,
+  domElement: HTMLElement,
+  options?: FitCameraToGroupOptions,
+): void {
+  group.updateMatrixWorld(true)
+  const box = new THREE.Box3().setFromObject(group)
+  if (box.isEmpty() || !Number.isFinite(box.min.x)) return
+
+  const center = new THREE.Vector3()
+  const size = new THREE.Vector3()
+  box.getCenter(center)
+  box.getSize(size)
+
+  const maxDim = Math.max(size.x, size.y, size.z, 0.1)
+  const dist = Math.max(8, maxDim * 2.2)
+  const finalDist = options?.distance ?? dist
+
+  orbitTarget.copy(center)
+  applyDiagonalOrbitView(camera, orbitTarget, {
+    yawDeg: options?.yawDeg ?? 225,
+    elevationFromHorizontalDeg:
+      options?.elevationDeg ?? STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
+    distance: finalDist,
+  })
+
+  const orthoHeight =
+    2 *
+    Math.abs(finalDist) *
+    Math.tan(THREE.MathUtils.degToRad(ORTHO_FRUSTUM_REF_HALF_FOV_DEG))
+  const aspect = domElement.clientWidth / Math.max(domElement.clientHeight, 1)
+  const halfH = orthoHeight / 2
+  camera.top = halfH
+  camera.bottom = -halfH
+  camera.left = -halfH * aspect
+  camera.right = halfH * aspect
+  camera.zoom =
+    typeof options?.zoom === 'number' && options.zoom > 0 ? options.zoom : 1
+  camera.updateProjectionMatrix()
+}

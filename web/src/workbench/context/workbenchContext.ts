@@ -33,16 +33,16 @@ import {
 } from '@/workbench/ux/panels'
 
 // All builtin operators
-import { SelectOperator, SelectByTypeOperator } from '@/workbench/operators/builtin/selectOperator'
+import { SelectOperator, SelectByTypeOperator, SelectAllOperator } from '@/workbench/operators/builtin/selectOperator'
 import { MoveOperator } from '@/workbench/operators/builtin/moveOperators'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
-import { SceneMetaEditOperator, TooltipEditOperator } from '@/workbench/operators/builtin/metaEditOperators'
+import { TooltipEditOperator } from '@/workbench/operators/builtin/metaEditOperators'
 import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/workbench/operators/builtin/docLifecycleOperators'
 import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/workbench/operators/builtin/sdeOperators'
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/workbench/operators/builtin/annotationOperators'
-import { ToolSetOperator, SetFrameIndexOperator, ThemeToggleOperator, SetLanguageOperator, UndoOperator, RedoOperator, SetWorkspaceModeOperator, ResetLayoutOperator } from '@/workbench/operators/builtin/miscOperators'
-import { ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/workbench/operators/builtin/materialOperators'
+import { SetFrameIndexOperator, ThemeToggleOperator, SetLanguageOperator, UndoOperator, RedoOperator, SetWorkspaceModeOperator, ResetLayoutOperator } from '@/workbench/operators/builtin/miscOperators'
+import { ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/workbench/operators/builtin/materialOperators'
 import { CopyCameraFromEmbedOperator } from '@/embed/operators/viewOperators'
 
 // Tools
@@ -55,11 +55,10 @@ import { textTool, TextGizmo } from '@/workbench/tools/textTool'
 import { faceTool, FaceGizmo } from '@/workbench/tools/faceTool'
 
 const ALL_OPERATORS: OperatorType[] = [
-  SelectOperator, SelectByTypeOperator, MoveOperator,
+  SelectOperator, SelectByTypeOperator, SelectAllOperator, MoveOperator,
   UndoOperator, RedoOperator,
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator,
-  ToolSetOperator,
-  SceneMetaEditOperator, TooltipEditOperator,
+  TooltipEditOperator,
   NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator,
   SetFrameIndexOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator,
@@ -68,7 +67,7 @@ const ALL_OPERATORS: OperatorType[] = [
   ThemeToggleOperator, SetLanguageOperator,
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
   AnnotationBoxCommitOperator, AnnotationBoxResetOperator,
-  ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator,
+  ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator,
   CopyCameraFromEmbedOperator,
 ]
 

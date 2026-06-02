@@ -11,6 +11,7 @@ import type { BContext } from '@/workbench/context/bContext'
 import type { OperatorType, OperatorProperties } from './operatorType'
 import { OP_RESULT } from './operatorType'
 import { pushDocUndo } from './pushDocUndo'
+import { replaceDoc } from '@/workbench/context/replaceDoc'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 
 export class ModalOperatorWrapper implements ModalOperation {
@@ -53,7 +54,7 @@ export class ModalOperatorWrapper implements ModalOperation {
 
     if (result === OP_RESULT.CANCELLED) {
       if (this.undoSnapshot !== null) {
-        this.bctx.doc.value = this.undoSnapshot
+        replaceDoc(this.bctx, this.undoSnapshot)
         this.undoSnapshot = null
       }
       this.op.cancel?.(this.bctx, this.props)

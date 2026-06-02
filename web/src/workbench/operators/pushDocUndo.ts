@@ -7,7 +7,7 @@
  * For cases that mutate grid cells instead of replacing the whole doc (e.g. MoveOperator),
  * callers should build their own undo entry — this helper only works with whole-doc swap undo.
  */
-import { generateId } from '@/pure/id'
+import { generateId } from '@/pure/string'
 import type { BContext } from '@/workbench/context/bContext'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import { replaceDoc } from '@/workbench/context/replaceDoc'

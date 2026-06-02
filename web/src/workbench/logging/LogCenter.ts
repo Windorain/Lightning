@@ -103,8 +103,8 @@ const lastDisplayable = ref<Report | null>(null)
 const sessions = new Map<string, Session>()
 
 let _traceId: string | null = null
-let _displayMessage = ''
-let _displayLevel: LogLevelValue = LOG_LEVEL.INFO
+const _displayMessage = ref('')
+const _displayLevel = ref<LogLevelValue>(LOG_LEVEL.INFO)
 
 // State query refs (injected by WorkbenchRoot)
 let _sceneRef: (() => any) | null = null
@@ -133,8 +133,8 @@ function push(level: LogLevelValue, source: string, message: string, detail?: un
 
   if (level !== LOG_LEVEL.DEBUG) {
     lastDisplayable.value = report
-    _displayMessage = message
-    _displayLevel = level
+    _displayMessage.value = message
+    _displayLevel.value = level
   }
 
   if (typeof window !== 'undefined' && import.meta.env.DEV) {
@@ -188,7 +188,7 @@ export const logCenter = {
   clear(): void {
     entries.value = []
     lastDisplayable.value = null
-    _displayMessage = ''
+    _displayMessage.value = ''
   },
 
   /* —— Trace —— */
@@ -342,12 +342,12 @@ export const logCenter = {
   /* —— Status message —— */
 
   setStatus(message: string, level: LogLevelValue = LOG_LEVEL.INFO): void {
-    _displayMessage = message
-    _displayLevel = level
+    _displayMessage.value = message
+    _displayLevel.value = level
   },
 
-  get statusMessage(): string { return _displayMessage },
-  get statusLevel(): LogLevelValue { return _displayLevel },
+  get statusMessage(): string { return _displayMessage.value },
+  get statusLevel(): LogLevelValue { return _displayLevel.value },
 
   /* —— State refs (formerly debugLog) —— */
 
@@ -408,7 +408,7 @@ export function installUnifiedLogApi(bctx: BContext): void {
 
     // Sessions
     sessionSummaries: () => logCenter.sessionSummaries(),
-    isModalActive: () => (bctx as any).eventDispatcher?.modalDepth > 0,
+    isModalActive: () => (bctx as any).eventDispatcher?.modalDepth('r-viewport') > 0,
 
     // Snapshot / Diff
     snapshot: () => logCenter.snapshot(bctx),
@@ -449,9 +449,9 @@ export function installUnifiedLogApi(bctx: BContext): void {
     settle: () => {
       return new Promise<void>((resolve) => {
         const ed = (bctx as any).eventDispatcher
-        if (!ed || ed.modalDepth === 0) { resolve(); return }
+        if (!ed || ed.modalDepth('r-viewport') === 0) { resolve(); return }
         const check = () => {
-          if (ed.modalDepth === 0) resolve()
+          if (ed.modalDepth('r-viewport') === 0) resolve()
           else requestAnimationFrame(check)
         }
         requestAnimationFrame(check)

@@ -1,29 +1,5 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
-
-export const SceneMetaEditOperator: OperatorType = {
-  id: 'OPERATOR_SCENE_META_EDIT',
-  label: '编辑场景信息',
-  description: '修改场景元数据（名称、作者等）',
-  flagUndo: true,
-
-  poll(bctx) {
-    return bctx.doc.value !== null
-  },
-
-  exec(bctx, props) {
-    const doc = bctx.doc.value as Record<string, any> | null
-    if (!doc) return
-    const field = props.field as string
-    const value = props.value as string | null
-    if (!field) return
-    if (value === null || value === '') {
-      delete doc[field]
-    } else {
-      doc[field] = value
-    }
-    // dirty is now derived from undo stack (editHistory.canUndo)
-  },
-}
+import { replaceDoc } from '@/workbench/context/replaceDoc'
 
 export const TooltipEditOperator: OperatorType = {
   id: 'OPERATOR_TOOLTIP_EDIT',
@@ -36,29 +12,26 @@ export const TooltipEditOperator: OperatorType = {
   },
 
   exec(bctx, props) {
-    const doc = bctx.doc.value as Record<string, any> | null
+    const doc = bctx.doc.value
     if (!doc) return
 
     const text = props.text as string
     const pos = props.pos as { x: number; y: number; z: number }
 
-    if (!doc.tooltipPalette) doc.tooltipPalette = []
-    if (!doc.cellTooltipGrid) doc.cellTooltipGrid = []
+    const newDoc = doc.clone()
+    const tooltipPalette = (newDoc.tooltipPalette as string[]) ?? []
+    const cellTooltipGrid = (newDoc.cellTooltipGrid as number[][][]) ?? []
 
-    const palette: string[] = doc.tooltipPalette
-    let idx = text ? palette.indexOf(text) : -1
+    let idx = text ? tooltipPalette.indexOf(text) : -1
     if (idx === -1 && text) {
-      idx = palette.length
-      palette.push(text)
+      idx = tooltipPalette.length
+      tooltipPalette.push(text)
     }
 
-    const grid: number[][][] = doc.cellTooltipGrid
-    if (grid) {
-      if (!grid[pos.z]) grid[pos.z] = []
-      if (!grid[pos.z][pos.y]) grid[pos.z][pos.y] = []
-      grid[pos.z][pos.y][pos.x] = text ? idx : -1
-    }
+    if (!cellTooltipGrid[pos.z]) cellTooltipGrid[pos.z] = []
+    if (!cellTooltipGrid[pos.z][pos.y]) cellTooltipGrid[pos.z][pos.y] = []
+    cellTooltipGrid[pos.z][pos.y][pos.x] = text ? idx : -1
 
-    // dirty is now derived from undo stack (editHistory.canUndo)
+    replaceDoc(bctx, newDoc)
   },
 }

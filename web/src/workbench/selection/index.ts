@@ -241,28 +241,6 @@ export interface PickHandler {
   }
 }
 
-/**
- * Shared pick-and-select logic used by SelectOperator and MoveOperator.
- * Extracted to keep both operators consistent.
- */
-export function applyPickSelection(ctx: PickHandler, event: PointerEvent): BlockRef | null {
-  const picked = ctx.pickVoxel(event)
-  if (picked) {
-    if (event.shiftKey) {
-      ctx.selection.add([picked])
-    } else if (event.ctrlKey || event.metaKey) {
-      ctx.selection.remove([picked])
-    } else {
-      ctx.selection.select(picked)
-    }
-    return picked
-  }
-  if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
-    ctx.selection.clear()
-  }
-  return null
-}
-
 // ---------------------------------------------------------------------------
 // Pick Cycling
 // ---------------------------------------------------------------------------
