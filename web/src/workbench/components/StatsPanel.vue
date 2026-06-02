@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useBContext } from '@/workbench/context/bContext'
-import { useSelectionContext } from '@/workbench/selectionContext'
+import { useSelectionContext } from '@/workbench/selection'
 import { usePanelState } from '@/workbench/panelState'
 import type { V2StatsTemplate } from '@/render/data/sceneDocumentV2'
 
@@ -10,7 +10,7 @@ const selection = useSelectionContext()
 const { highlightType, clearHighlight, pinType } = usePanelState()
 
 const template = computed<V2StatsTemplate | null>(() => {
-  return (bctx.doc.value?.toRaw() as any)?.stats_template ?? null
+  return (bctx.doc.value?.serialize() as any)?.stats_template ?? null
 })
 
 const mode = computed(() => template.value?.mode ?? 'auto')
@@ -22,7 +22,7 @@ interface StatRow {
 }
 
 const rows = computed<StatRow[]>(() => {
-  const doc = bctx.doc.value?.toRaw()
+  const doc = bctx.doc.value?.serialize()
   if (!doc) return []
   const currentFrame = (doc as any).frames?.[selection.frameIndex.value ?? 0]
   const blocks = (currentFrame?.blocks ?? []) as Array<{ block_state_id: string }>

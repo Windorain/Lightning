@@ -336,16 +336,7 @@ export class RuntimeFrame {
     this.grid = grid ?? null
   }
 
-  /** @deprecated 直接访问 grid/fields */
-  toRaw(): Record<string, unknown> {
-    return {
-      index: this.index,
-      label: this.label,
-      structure: this.grid
-        ? { geometryPhase: 'baked' as const }
-        : undefined,
-    }
-  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -416,11 +407,6 @@ export class RuntimeDocument {
         f.grid.forEach((pos, block) => fn(f.index, pos, block))
       }
     }
-  }
-
-  /** @deprecated 改用 serialize() */
-  toRaw(): Record<string, unknown> {
-    return this.serialize()
   }
 
   /** 序列化为 V2Plain JSON（兼容 render pipeline：展开首帧 structure 字段到顶层） */
@@ -508,10 +494,6 @@ export class RuntimeDocument {
     })
   }
 
-  /** @deprecated 改用 fromV2Plain() */
-  static fromRaw(raw: Record<string, unknown>): RuntimeDocument | null {
-    return RuntimeDocument.fromV2Plain(raw)
-  }
 
   /** 从 V2Plain JSON 创建（反序列化入口） */
   static fromV2Plain(raw: Record<string, unknown>): RuntimeDocument | null {

@@ -4,7 +4,7 @@ import ViewerCore, { type ViewerCoreReadyPayload } from '@/embed/components/View
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/embed/components/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
-import { useSelectionContext, type BlockRef } from '@/workbench/selectionContext'
+import { useSelectionContext, type BlockRef } from '@/workbench/selection'
 import { useBContext } from '@/workbench/context/bContext'
 import { usePreferences } from '@/preview/preferences'
 import { createRenderAssets } from '@/workbench/context/sceneLifecycle'

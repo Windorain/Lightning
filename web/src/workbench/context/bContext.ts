@@ -6,11 +6,11 @@
  */
 import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
-import type { BlockRef, SelectionContext } from '@/workbench/selectionContext'
+import type { BlockRef, SelectionContext } from '@/workbench/selection'
 import type { ScenePickEntity } from '@/render/interaction/scenePick'
 import type { BakedQuad } from '@/render/schema/types'
-import type { UndoManager } from '@/workbench/editHistoryContext'
-import type { ToolRegistry } from '@/workbench/toolRegistry'
+import type { UndoManager } from '@/workbench/editHistory'
+import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { StructureDefinition } from '@/render/schema/types'
@@ -124,10 +124,6 @@ export interface BContext {
   workspaceMode: Ref<WorkbenchWorkspaceMode>
   uiWorkspace: Ref<UIWorkspace>
   localFileName: Ref<string | null>
-  markDirty(): void
-  markStructureDirty(): void
-  markClean(): void
-
   // === 连接数据（原 ConnectionContext） ===
   connectionApiBase: Ref<string>
   connectionToken: Ref<string>
@@ -156,7 +152,7 @@ export interface BContext {
     setActiveRegion(regionId: string): void
     getActiveRegion(): string | null
     getCurrentRegionId(): string | null
-    pushModal(regionId: string, op: import('@/workbench/eventDispatcher').ModalOperation, event: PointerEvent): void
+    pushModal(regionId: string, op: import('@/workbench/events/dispatcher').ModalOperation, event: PointerEvent): void
     cancelModal(regionId: string): void
     commitModal(regionId: string): void
     modalDepth(regionId: string): number

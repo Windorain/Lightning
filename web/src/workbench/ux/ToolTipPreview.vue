@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
+import { renderTooltipHtml } from '@/workbench/renderTooltipHtml'
 
 const props = defineProps<{
   lines: string[]

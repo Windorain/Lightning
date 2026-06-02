@@ -9,7 +9,7 @@ export interface Vec3 {
   z: number
 }
 
-export interface QuadLike {
+interface QuadLike {
   vertices: Vec3[]
 }
 
@@ -18,7 +18,7 @@ export interface AABB {
   max: Vec3
 }
 
-export interface BarDef {
+interface BarDef {
   cx: number
   cy: number
   cz: number
@@ -31,7 +31,7 @@ const DEFAULT_VERTEX_THRESHOLD = 0.01
 
 // ── AABB from quads ──
 
-export interface ComputeQuadsAABBOpts {
+interface ComputeQuadsAABBOpts {
   /** Which quad indices to include (default: all) */
   indices?: number[]
   /** World-space offset added to every vertex */
@@ -65,18 +65,6 @@ export function computeQuadsAABB(quads: QuadLike[], opts?: ComputeQuadsAABBOpts)
     min: { x: minX, y: minY, z: minZ },
     max: { x: maxX, y: maxY, z: maxZ },
   }
-}
-
-// ── Wireframe vertices (24 floats: 8 corners → 12 line segments) ──
-
-export function computeBoxWireframe(min: Vec3, max: Vec3): number[] {
-  const x1 = min.x, y1 = min.y, z1 = min.z
-  const x2 = max.x, y2 = max.y, z2 = max.z
-  return [
-    x1, y1, z1, x2, y1, z1, x2, y1, z1, x2, y2, z1, x2, y2, z1, x1, y2, z1, x1, y2, z1, x1, y1, z1,
-    x1, y1, z2, x2, y1, z2, x2, y1, z2, x2, y2, z2, x2, y2, z2, x1, y2, z2, x1, y2, z2, x1, y1, z2,
-    x1, y1, z1, x1, y1, z2, x2, y1, z1, x2, y1, z2, x2, y2, z1, x2, y2, z2, x1, y2, z1, x1, y2, z2,
-  ]
 }
 
 // ── Box frame bars (12 bars, one per edge, with overlap at corners) ──
@@ -134,7 +122,7 @@ export function aabbsIntersect(a: AABB, b: AABB, tolerance = 0.001): boolean {
 
 // ── Quad normal (from first 3 vertices) ──
 
-export function computeQuadNormal(quad: QuadLike): Vec3 {
+function computeQuadNormal(quad: QuadLike): Vec3 {
   const [v0, v1, v2] = quad.vertices
   const ax = v1.x - v0.x, ay = v1.y - v0.y, az = v1.z - v0.z
   const bx = v2.x - v0.x, by = v2.y - v0.y, bz = v2.z - v0.z
@@ -148,7 +136,7 @@ export function computeQuadNormal(quad: QuadLike): Vec3 {
 
 // ── Vertex sharing ──
 
-export function quadsShareVertex(a: QuadLike, b: QuadLike, threshold = DEFAULT_VERTEX_THRESHOLD): boolean {
+function quadsShareVertex(a: QuadLike, b: QuadLike, threshold = DEFAULT_VERTEX_THRESHOLD): boolean {
   for (const va of a.vertices) {
     for (const vb of b.vertices) {
       const dx = va.x - vb.x
@@ -164,7 +152,7 @@ export function quadsShareVertex(a: QuadLike, b: QuadLike, threshold = DEFAULT_V
 
 // ── Connected quad groups (BFS over shared vertices) ──
 
-export function findConnectedQuadGroup(start: number, quads: QuadLike[]): number[] {
+function findConnectedQuadGroup(start: number, quads: QuadLike[]): number[] {
   const visited = new Set<number>()
   const queue: number[] = [start]
   visited.add(start)
@@ -186,7 +174,7 @@ export function findConnectedQuadGroup(start: number, quads: QuadLike[]): number
 
 // ── Edge sharing (2+ shared vertices) ──
 
-export function quadsShareEdge(a: QuadLike, b: QuadLike, threshold = DEFAULT_VERTEX_THRESHOLD): boolean {
+function quadsShareEdge(a: QuadLike, b: QuadLike, threshold = DEFAULT_VERTEX_THRESHOLD): boolean {
   let shared = 0
   for (const va of a.vertices) {
     for (const vb of b.vertices) {
@@ -208,7 +196,7 @@ export function quadsShareEdge(a: QuadLike, b: QuadLike, threshold = DEFAULT_VER
  * Find standard quads (4 vertices) that share an edge with the start quad.
  * One-hop only — no recursive BFS, to avoid leaking into adjacent parts.
  */
-export function findEdgeAdjacentGroup(start: number, quads: QuadLike[]): number[] {
+function findEdgeAdjacentGroup(start: number, quads: QuadLike[]): number[] {
   const result = [start]
   for (let i = 0; i < quads.length; i++) {
     if (i === start) continue

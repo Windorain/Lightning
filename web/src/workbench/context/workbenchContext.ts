@@ -12,16 +12,16 @@ import { ref } from 'vue'
 import type { Ref } from 'vue'
 import type { BContext, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
-import type { SelectionContext } from '@/workbench/selectionContext'
-import type { UndoManager } from '@/workbench/editHistoryContext'
-import type { ToolRegistry } from '@/workbench/toolRegistry'
+import type { SelectionContext } from '@/workbench/selection'
+import type { UndoManager } from '@/workbench/editHistory'
+import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { BContextSettings } from '@/workbench/context/bContext'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { bScreen } from '@/workbench/ux/types/screen'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import type { OperatorType } from '@/workbench/operators/operatorType'
-import { eventDispatcher } from '@/workbench/eventDispatcher'
+import { eventDispatcher } from '@/workbench/events/dispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
 import { createProductionQueries } from '@/workbench/context/sceneQueries'
@@ -39,23 +39,18 @@ import {
 // All builtin operators
 import { SelectOperator, SelectByTypeOperator } from '@/workbench/operators/builtin/selectOperator'
 import { MoveOperator } from '@/workbench/operators/builtin/moveOperator'
-import { UndoOperator, RedoOperator } from '@/workbench/operators/builtin/undoOperator'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
-import { ToolSetOperator } from '@/workbench/operators/builtin/toolOperator'
 import { SceneMetaEditOperator, TooltipEditOperator } from '@/workbench/operators/builtin/sceneEditOperators'
 import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/workbench/operators/builtin/sceneLifecycleOperators'
-import { SetFrameIndexOperator } from '@/workbench/operators/builtin/previewOperators'
-import { SetWorkspaceModeOperator, ResetLayoutOperator } from '@/workbench/operators/builtin/workspaceOperators'
 import { SDEConnectOperator, SDELoadExportOperator, SDEPushOperator } from '@/workbench/operators/builtin/sdeOperators'
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/workbench/operators/builtin/exportOperators'
-import { ThemeToggleOperator, SetLanguageOperator } from '@/workbench/operators/builtin/appearanceOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/workbench/operators/builtin/annotationOperators'
+import { ToolSetOperator, SetFrameIndexOperator, ThemeToggleOperator, SetLanguageOperator, UndoOperator, RedoOperator, SetWorkspaceModeOperator, ResetLayoutOperator } from '@/workbench/operators/builtin/miscOperators'
 import { ExportTextureOperator, ExportAllTexturesOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/workbench/operators/builtin/materialOperators'
-import { CopyCameraFromEmbedOperator } from '@/embed/operators/copyCameraFromEmbedOperator'
+import { CopyCameraFromEmbedOperator } from '@/embed/operators/viewOperators'
 
 // Tools
-import { selectTool } from '@/workbench/tools/selectTool'
-import { moveTool } from '@/workbench/tools/moveTool'
+import { selectTool, moveTool } from '@/workbench/tools/toolDefs'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { boxTool, boxFullTool, BoxGizmo, AnnotationBoxCommitOperator, AnnotationBoxResetOperator } from '@/workbench/tools/boxTool'
 import { pointTool, PointGizmo } from '@/workbench/tools/pointTool'
@@ -110,10 +105,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   const workspaceMode = ref<WorkbenchWorkspaceMode>('local-file')
   const uiWorkspace = ref<UIWorkspace>('preview')
   const localFileName = ref<string | null>(null)
-
-  function markDirty(): void { dirty.value = true }
-  function markStructureDirty(): void { structEpoch.value += 1; markDirty() }
-  function markClean(): void { dirty.value = false }
 
   // === 连接数据 ===
   const connectionApiBase = ref('')
@@ -182,9 +173,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     workspaceMode,
     uiWorkspace,
     localFileName,
-    markDirty,
-    markStructureDirty,
-    markClean,
     connectionApiBase,
     connectionToken,
     connectionConnected,

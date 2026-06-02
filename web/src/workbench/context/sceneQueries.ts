@@ -5,7 +5,7 @@
  * 操作符通过 bctx.queries 隐式获取场景状态，不直接 import 此文件。
  */
 import type { BContext, BContextQueries, MaterialQueryItem, BlockTypeStat } from '@/workbench/context/bContext'
-import type { BlockRef } from '@/workbench/selectionContext'
+import type { BlockRef } from '@/workbench/selection'
 import type { Frame } from '@/render/schema/types'
 import { scenePickAllFromPointer, scenePickFromPointer } from '@/render/interaction/scenePick'
 import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'

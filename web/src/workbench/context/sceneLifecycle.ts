@@ -84,12 +84,6 @@ export interface RenderAssets {
   computed: RenderAssetsComputed
 }
 
-/** @deprecated 使用 RenderAssetsDeps / RenderAssets */
-export type SceneLifecycleDeps = RenderAssetsDeps
-/** @deprecated 使用 RenderAssets */
-export type SceneLifecycleMethods = RenderAssets
-/** @deprecated 使用 RenderAssetsComputed */
-export type SceneLifecycleComputed = RenderAssetsComputed
 
 export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   const {
@@ -401,6 +395,3 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     },
   }
 }
-
-/** @deprecated 使用 createRenderAssets */
-export const createSceneLifecycle = createRenderAssets

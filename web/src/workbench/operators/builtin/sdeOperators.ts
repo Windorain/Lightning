@@ -80,7 +80,7 @@ export const SDEPushOperator: OperatorType = {
     await sdePutWorkspaceDocument(
       bctx.connectionApiBase.value,
       bctx.connectionToken.value,
-      bctx.doc.value.toRaw() as Record<string, unknown>,
+      bctx.doc.value.serialize() as Record<string, unknown>,
     )
     bctx.dirty.value = false
   },

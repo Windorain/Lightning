@@ -10,7 +10,7 @@ export type MaterialKind = 'static16' | 'animated'
 export type MaterialBlendMode = 'opaque' | 'cutout' | 'translucent'
 
 /** 字段形状对齐 Java 版纹理 `.mcmeta` 的 `animation`；数据来自 JSON 非独立 mcmeta 文件。`kind === 'animated'` 且 PNG 为竖条多帧时按顺序 1 tick/帧播放（见 simpleMaterialLibrary） */
-export interface MaterialAnimationSpec {
+interface MaterialAnimationSpec {
   defaultFrametimeTicks?: number
   frameSequence?: Array<{ index: number; timeTicks?: number }>
   interpolate?: boolean
@@ -41,49 +41,6 @@ export interface MaterialRegistryData {
   materials: Record<string, MaterialEntry>
 }
 
-/** @deprecated 旧 capture 管线；不再写入 StructureData */
-export interface MeshCaptureVertex {
-  x: number
-  y: number
-  z: number
-  u: number
-  v: number
-  brightness?: number
-  color?: number
-}
-
-/** @deprecated */
-export interface MeshCaptureQuad {
-  materialKey: string
-  samplerIndex: number
-  vertices: MeshCaptureVertex[]
-}
-
-/** @deprecated */
-export interface MeshCaptureInstance {
-  x: number
-  y: number
-  z: number
-  label?: string
-  quads: MeshCaptureQuad[]
-}
-
-/** @deprecated */
-export interface MeshCaptureSampler {
-  texture: string
-  atlas?: string
-  linear?: boolean
-  useMipmaps?: boolean
-}
-
-/** @deprecated */
-export interface MeshCapturePayload {
-  schemaVersion?: number
-  uvSpace?: 'spriteLocal'
-  samplers: MeshCaptureSampler[]
-  instances: MeshCaptureInstance[]
-}
-
 /** 磁盘 / 传输层文档形态；Wiki 据 `documentFormat` 选择解析路径。 */
 export type DocumentFormat = 'Plain' | 'Envelope'
 
@@ -112,80 +69,7 @@ export interface RenderBundle {
 
 export type FaceName = '+x' | '-x' | '+y' | '-y' | '+z' | '-z'
 
-export interface MaterialResolveNeighborShell {
-  type: 'neighborShell'
-  casingToMaterialId: Record<string, string>
-  fallbackMaterialId?: string
-}
-
-export interface MaterialResolveNeighborShellBlock {
-  type: 'neighborShellBlock'
-  fallbackMaterialId?: string
-}
-
-export type MaterialResolveRule = MaterialResolveNeighborShell | MaterialResolveNeighborShellBlock
-
-export interface FaceLayerDef {
-  materialId: string
-  tint?: string
-  blend?: MaterialBlendMode
-  materialResolve?: MaterialResolveRule
-}
-
-export interface FaceLayersDef {
-  layers: FaceLayerDef[]
-}
-
-export type BlockMeshKind = 'SimpleCube' | 'Model' | 'Unknown'
-
-/** @deprecated 仅遗留 block_registry */
-export interface BlockEntry {
-  label?: string
-  description?: string
-  meshKind: BlockMeshKind
-  modelId?: string
-  renderProfile?: string
-  occludesAdjacentFaces?: boolean
-  faces?: {
-    all?: FaceLayersDef
-  } & Partial<Record<FaceName, FaceLayersDef>>
-}
-
-export type ModelFaceName = 'north' | 'south' | 'east' | 'west' | 'up' | 'down'
-
-export interface ModelFaceLayerDef {
-  texture: string
-  blend?: MaterialBlendMode
-  tint?: string
-}
-
-export interface ModelElementFaceDef {
-  texture?: string
-  layers?: ModelFaceLayerDef[]
-  uv?: [number, number, number, number]
-}
-
-export interface ModelElement {
-  from: number[]
-  to: number[]
-  faces?: Partial<Record<ModelFaceName, ModelElementFaceDef>>
-}
-
-export interface ModelDocument {
-  elements: ModelElement[]
-}
-
-export interface ModelRegistryData {
-  schemaVersion?: number
-  models: Record<string, ModelDocument>
-}
-
-export interface BlockRegistryData {
-  schemaVersion?: number
-  blocks: Record<string, BlockEntry>
-}
-
-export interface InitialCameraDef {
+interface InitialCameraDef {
   focusBlockId: string
   frontFace: FaceName
   distance?: number
@@ -276,8 +160,6 @@ export const AIR_VOXEL: VoxelState = { registryId: 'air', meta: 0 }
 export function isAirState(v: VoxelState): boolean {
   return v.registryId === 'air'
 }
-
-export type BlockRenderMode = 'BlockModel' | 'BakedModel'
 
 export type BakedGeometryEncoding = 'bakedQuadsJsonV1' | 'packedQuadsV1'
 

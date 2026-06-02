@@ -21,7 +21,7 @@ export const SceneMetaEditOperator: OperatorType = {
     } else {
       doc[field] = value
     }
-    bctx.markDirty()
+    bctx.dirty.value = true
   },
 }
 
@@ -59,6 +59,6 @@ export const TooltipEditOperator: OperatorType = {
       grid[pos.z][pos.y][pos.x] = text ? idx : -1
     }
 
-    bctx.markDirty()
+    bctx.dirty.value = true
   },
 }

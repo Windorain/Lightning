@@ -1,6 +1,6 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
-import { applyPickSelectionWithCycle, type PickHandlerV2 } from '@/workbench/selectionContext'
+import { applyPickSelectionWithCycle, type PickHandlerV2 } from '@/workbench/selection'
 
 /**
  * SelectOperator — 对标 Blender 的 VIEW3D_OT_select。

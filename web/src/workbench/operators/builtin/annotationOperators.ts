@@ -28,7 +28,7 @@ export const AnnotationCreateOperator: OperatorType = {
 
     if (!doc.annotations) doc.annotations = []
     doc.annotations.push(annotation)
-    bctx.markDirty()
+    bctx.dirty.value = true
     bctx.selection.active.value = annotation.id
   },
 }
@@ -56,7 +56,7 @@ export const AnnotationUpdateOperator: OperatorType = {
 
     // Mutate in place so the draft reference stays bound to doc.annotations
     Object.assign(annotations[idx], patch, { updated_at: Date.now() })
-    bctx.markDirty()
+    bctx.dirty.value = true
   },
 }
 
@@ -81,7 +81,7 @@ export const AnnotationDeleteOperator: OperatorType = {
     if (idx === -1) return
 
     annotations.splice(idx, 1)
-    bctx.markDirty()
+    bctx.dirty.value = true
     bctx.selection.active.value = null
   },
 }

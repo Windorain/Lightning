@@ -23,7 +23,7 @@ export const ExportPlainOperator: OperatorType = {
   },
 
   exec(bctx, _props) {
-    const doc = (bctx.doc.value?.toRaw() ?? null) as Record<string, unknown> | null
+    const doc = (bctx.doc.value?.serialize() ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-plain`, doc, true)
@@ -40,7 +40,7 @@ export const ExportEnvelopeOperator: OperatorType = {
   },
 
   exec(bctx, _props) {
-    const doc = (bctx.doc.value?.toRaw() ?? null) as Record<string, unknown> | null
+    const doc = (bctx.doc.value?.serialize() ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-envelope`, buildEnvelopePackage(doc), true)
@@ -57,7 +57,7 @@ export const ExportObjOperator: OperatorType = {
   },
 
   async exec(bctx, _props) {
-    const doc = bctx.doc.value?.toRaw()
+    const doc = bctx.doc.value?.serialize()
     if (!doc) return
     const connected = (_props.connected as boolean) ?? false
     const mode = connected ? 'connected' : 'block'
@@ -80,7 +80,7 @@ export const ExportIsoPngOperator: OperatorType = {
   async exec(bctx, _props) {
     const direction = (_props.direction as string) ?? 'nw'
     const directionIndex = ISO_DIRECTION_MAP[direction] ?? 0
-    const doc = bctx.doc.value?.toRaw()
+    const doc = bctx.doc.value?.serialize()
     if (!doc) return
     try {
       const dataUrl = await bakeIsometricStructurePngDataUrl(doc, directionIndex)

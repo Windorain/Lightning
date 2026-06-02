@@ -113,12 +113,6 @@ export class View3DRenderer {
     this.renderer.autoClear = true
   }
 
-  /** @deprecated Use renderMain() + renderOverlay() instead */
-  render(scene: THREE.Scene): void {
-    if (!this.isGlUsable()) return
-    this.renderer.render(scene, this.camera)
-  }
-
   renderGizmo(): void {
     if (!this.isGlUsable()) return
     this.renderer.getSize(this.cssSize)

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import type { BContext } from '@/workbench/context/bContext'
-import type { BlockRef } from '@/workbench/selectionContext'
-import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
+import type { BlockRef } from '@/workbench/selection'
+import { renderTooltipHtml } from '@/workbench/renderTooltipHtml'
 
 const props = defineProps<{ bctx: BContext }>()
 

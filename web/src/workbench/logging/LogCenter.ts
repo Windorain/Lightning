@@ -455,8 +455,3 @@ export function installUnifiedLogApi(bctx: BContext): void {
     },
   }
 }
-
-/** @deprecated 使用 installUnifiedLogApi 替代 */
-export function installLogCenter(): void {
-  installUnifiedLogApi({} as BContext) // bctx-less fallback — only exposes log subset
-}

@@ -109,7 +109,7 @@ export const SaveFileOperator: OperatorType = {
   },
 
   exec(bctx, _props) {
-    const doc = bctx.doc.value?.toRaw()
+    const doc = bctx.doc.value?.serialize()
     if (!doc) return
     const baseName = suggestedJsonBaseName(bctx.localFileName.value, 'structure-export')
     downloadJson(baseName, doc, true)

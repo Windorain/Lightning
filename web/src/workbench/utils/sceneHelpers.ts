@@ -3,13 +3,6 @@
  * 不依赖任何 Ref、Vue 响应式 API。部分函数读取浏览器全局状态（window.location）。
  */
 
-export type { RuntimeDocument as WorkbenchScene } from '@/workbench/context/runtimeDocument'
-
-/** 深拷贝场景文档（JSON 往返）。返回纯 JSON 对象（非 RuntimeDocument）。 */
-export function cloneDocument(doc: unknown): Record<string, unknown> | null {
-  if (doc === null || typeof doc !== 'object') return null
-  return JSON.parse(JSON.stringify(doc)) as Record<string, unknown>
-}
 
 /** 从 URL query 解析初始 apiBase 与 token */
 export function parseWorkbenchQuery(): { apiBase: string; token: string } {

@@ -13,10 +13,7 @@ import type { EmbedBootstrapOptions } from '@/embed/embedContract'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
-import { V2PlainParser } from '@/workbench/context/parsers/v2PlainParser'
-import { EnvelopeParser } from '@/workbench/context/parsers/envelopeParser'
-import { WorldParser } from '@/workbench/context/parsers/worldParser'
-import { StructureDataParser } from '@/workbench/context/parsers/structureDataParser'
+import { V2PlainParser, EnvelopeParser, WorldParser, StructureDataParser } from '@/workbench/parsers/builtinParsers'
 import { createEmbedContext, provideEmbedBContext } from '@/embed/embedContext'
 import EmbedViewport from '@/embed/EmbedViewport.vue'
 import { defaultEmbedUi } from '@/preview/previewConfig'
@@ -72,7 +69,7 @@ async function load() {
       return
     }
     bctx.doc.value = result.document
-    bctx.markStructureDirty()
+    bctx.structEpoch.value += 1
   } catch (e) {
     loadError.value = formatUnknownError(e)
     console.error('[EmbedRoot] parse', e)

@@ -8,7 +8,7 @@ import { useBContext } from '@/workbench/context/bContext'
 import { t } from '@/workbench/i18n'
 
 const bctx = useBContext()
-const doc = computed(() => bctx.doc.value?.toRaw() ?? null)
+const doc = computed(() => bctx.doc.value?.serialize() ?? null)
 const baseName = computed(() => doc.value ? sceneStableStringIdFromDocument(doc.value) : 'scene')
 const showSdeSave = computed(() => bctx.workspaceMode.value === 'sde' && bctx.connectionApiBase.value.length > 0)
 const feedback = ref('')

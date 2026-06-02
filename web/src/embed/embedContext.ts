@@ -10,20 +10,19 @@ import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
-import { EventDispatcherImpl } from '@/workbench/eventDispatcher'
+import { EventDispatcherImpl } from '@/workbench/events/dispatcher'
 import { ref } from 'vue'
 import type { Ref } from 'vue'
-import type { SelectionContext } from '@/workbench/selectionContext'
-import type { UndoManager } from '@/workbench/editHistoryContext'
-import type { ToolRegistry } from '@/workbench/toolRegistry'
+import type { SelectionContext } from '@/workbench/selection'
+import type { UndoManager } from '@/workbench/editHistory'
+import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
 
 // Operators
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
-import { ResetViewOperator } from '@/embed/operators/resetViewOperator'
-import { CopyCameraFromEmbedOperator } from '@/embed/operators/copyCameraFromEmbedOperator'
+import { ResetViewOperator, CopyCameraFromEmbedOperator } from '@/embed/operators/viewOperators'
 
 function throwError(name: string): never {
   throw new Error(`embed: ${name} not available`)
@@ -65,9 +64,6 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
     workspaceMode: workspaceModeRef,
     uiWorkspace: uiWorkspaceRef,
     localFileName: localFileNameRef,
-    markDirty() { dirtyRef.value = true },
-    markStructureDirty() { structEpochRef.value += 1; dirtyRef.value = true },
-    markClean() { dirtyRef.value = false },
 
     connectionApiBase: connectionApiBaseRef,
     connectionToken: connectionTokenRef,

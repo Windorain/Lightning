@@ -12,19 +12,59 @@ import EmbedViewport from '@/embed/EmbedViewport.vue'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
-import { provideSelectionContext } from '@/workbench/selectionContext'
+import { provideSelectionContext } from '@/workbench/selection'
 import { isEditingTarget } from '@/util/browser'
-import { provideEditHistory } from '@/workbench/editHistoryContext'
-import { provideToolRegistry } from '@/workbench/toolRegistry'
-import { provideBContext } from '@/workbench/context/bContext'
-import { createBContextSettings } from '@/workbench/context/toolSettings'
+import { provideEditHistory } from '@/workbench/editHistory'
+import { provideToolRegistry } from '@/workbench/tools/registry'
+import { provideBContext, type BContextSettings } from '@/workbench/context/bContext'
+import { currentLang } from '@/workbench/i18n'
+import { theme } from '@/workbench/composables/useNeiTheme'
+
+const FLOOR_TEMPLATES = [
+  { id: 'floor_stone', label: 'Stone Floor', color: '#808080' },
+  { id: 'floor_wood', label: 'Wood Floor', color: '#8B6914' },
+  { id: 'floor_checker', label: 'Checker Floor', color: '#ccc/#666' },
+  { id: 'floor_sandstone', label: 'Sandstone Floor', color: '#D4B896' },
+  { id: 'floor_glass', label: 'Glass Floor', color: '#88ccff' },
+]
+
+function createBContextSettings(overrides?: {
+  theme?: 'dark' | 'light'
+  language?: 'zh' | 'en'
+  confirmDirty?: (msg: string) => boolean
+}): BContextSettings {
+  const replaceBrush = ref<string | null>(null)
+  const fillBrush = ref<string | null>(null)
+  const generateType = ref<string | null>(null)
+  const snapEnabled = ref<boolean>(false)
+
+  return {
+    get replaceBrush(): string | null { return replaceBrush.value },
+    set replaceBrush(v: string | null) { replaceBrush.value = v },
+    get fillBrush(): string | null { return fillBrush.value ?? replaceBrush.value },
+    set fillBrush(v: string | null) { fillBrush.value = v },
+    get generateType(): string | null { return generateType.value },
+    set generateType(v: string | null) { generateType.value = v },
+    dragSensitivity: 0.05,
+    get snapEnabled(): boolean { return snapEnabled.value },
+    set snapEnabled(v: boolean) { snapEnabled.value = v },
+    confirmDirty: overrides?.confirmDirty ?? ((msg: string) => window.confirm(msg)),
+    get theme(): 'dark' | 'light' {
+      if (overrides?.theme) return overrides.theme
+      return theme.value
+    },
+    get language(): 'zh' | 'en' {
+      if (overrides?.language) return overrides.language
+      return currentLang.value
+    },
+  }
+}
 
 // Operators — registered via shared VM assembly
 import { createWorkbenchContext } from '@/workbench/context/workbenchContext'
 
 import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
 import { logCenter } from '@/workbench/logging/LogCenter'
-import { useStatusMessage } from '@/workbench/composables/useStatusMessage'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
@@ -35,10 +75,7 @@ import { parseWorkbenchQuery } from '@/workbench/utils/sceneHelpers'
 
 // Document format parsers — 注册到解析分发中心
 import { parserRegistry } from '@/workbench/context/parserRegistry'
-import { V2PlainParser } from '@/workbench/context/parsers/v2PlainParser'
-import { StructureDataParser } from '@/workbench/context/parsers/structureDataParser'
-import { WorldParser } from '@/workbench/context/parsers/worldParser'
-import { EnvelopeParser } from '@/workbench/context/parsers/envelopeParser'
+import { V2PlainParser, EnvelopeParser, WorldParser, StructureDataParser } from '@/workbench/parsers/builtinParsers'
 parserRegistry.register(V2PlainParser)
 parserRegistry.register(EnvelopeParser)
 parserRegistry.register(WorldParser)
@@ -47,7 +84,7 @@ parserRegistry.register(StructureDataParser)
 const selection = provideSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
-const statusMessage = useStatusMessage().statusMessage
+const statusMessage = ref('')
 
 // 共享 VM 组装
 const settings = createBContextSettings()
@@ -207,7 +244,7 @@ onBeforeUnmount(() => {
 
 
 logCenter.injectStateRefs({
-  scene: () => bctx.doc.value?.toRaw() as any,
+  scene: () => bctx.doc.value?.serialize() as any,
   selection: () => [...selection.items.value].filter(e => e.kind === 'block').map(e => e.ref),
   toolRegistry: () => ({
     activeToolId: toolRegistry.activeTool.value?.id ?? 'none',

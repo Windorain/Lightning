@@ -323,7 +323,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                bctx.markStructureDirty()
+                bctx.structEpoch.value += 1
               },
               undo: () => {
                 for (const m of moves) grid.moveBlock(m.to, m.from)
@@ -340,7 +340,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                bctx.markStructureDirty()
+                bctx.structEpoch.value += 1
               },
             })
           }

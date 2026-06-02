@@ -2,7 +2,7 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import type { BContext } from '@/workbench/context/bContext'
 import type { Annotation } from '@/render/data/annotationTypes'
-import { renderTooltipHtml } from '@/workbench/components/renderTooltipHtml'
+import { renderTooltipHtml } from '@/workbench/renderTooltipHtml'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import type { UILayout } from '@/workbench/ux/types/layout'
 
