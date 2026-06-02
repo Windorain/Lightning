@@ -10,6 +10,7 @@ import type { Frame } from '@/render/schema/types'
 import { scenePickAllFromPointer, scenePickFromPointer } from '@/render/interaction/scenePick'
 import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
 import type { BakedQuadsGeometry } from '@/render/schema/types'
+import { axisAdd, roundVec, structureRowToWorldY } from '@/pure/vec'
 
 export function createProductionQueries(bctx: BContext): BContextQueries {
   return {
@@ -36,7 +37,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const doc = bctx.doc.value
       const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
       const h = rf?.grid?.height ?? 0
-      const worldY = h > 0 ? h - 1 - result.row : result.row
+      const worldY = h > 0 ? structureRowToWorldY(result.row, h) : result.row
 
       return {
         pos: { x: result.column, y: worldY, z: result.zSlice },
@@ -70,7 +71,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const h = rf?.grid?.height ?? 0
       for (const r of results) {
         if (r.kind === 'block' && r.row !== undefined) {
-          r.row = h > 0 ? h - 1 - r.row : r.row
+          r.row = h > 0 ? structureRowToWorldY(r.row, h) : r.row
         }
       }
       return results
@@ -102,21 +103,8 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       return doc.serialize() as Record<string, any>
     },
 
-    axisAdd(
-      origin: { x: number; y: number; z: number },
-      axis: 'x' | 'y' | 'z',
-      delta: number,
-    ): { x: number; y: number; z: number } {
-      return {
-        x: origin.x + (axis === 'x' ? delta : 0),
-        y: origin.y + (axis === 'y' ? delta : 0),
-        z: origin.z + (axis === 'z' ? delta : 0),
-      }
-    },
-
-    roundVec(v: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
-      return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) }
-    },
+    axisAdd,
+    roundVec,
 
     gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null {
       const doc = bctx.doc.value

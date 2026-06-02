@@ -3,7 +3,7 @@ import { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
 import { getDevSceneDocument } from '@/dev/devScenes'
 import { downloadJson } from '@/util/browser'
-import { suggestedJsonBaseName } from '@/workbench/utils/sceneHelpers'
+import { suggestedJsonBaseName } from '@/workbench/utils/fileNaming'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
 

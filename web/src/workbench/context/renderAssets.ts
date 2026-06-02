@@ -2,7 +2,7 @@
  * renderAssets — 共享渲染管线 composable。
  *
  * 从原始文档 + materialLibrary 产出 Three.js 渲染所需的数据结构与 mesh。
- * embedContext 和 WorkbenchViewport 共用。不依赖 View3DConfig。
+ * embedBContext 和 WorkbenchViewport 共用。不依赖 View3DConfig。
  */
 import { computed, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'

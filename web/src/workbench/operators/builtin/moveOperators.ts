@@ -1,3 +1,4 @@
+import { generateId } from '@/pure/id'
 import * as THREE from 'three'
 import type { BContext } from '@/workbench/context/bContext'
 import type { OperatorType, OperatorProperties } from '@/workbench/operators/operatorType'
@@ -305,7 +306,7 @@ export const MoveOperator: OperatorType = {
 
             const sel = bctx.selection
             bctx.editHistory.push({
-              id: 'move_' + Math.random().toString(36).slice(2, 10),
+              id: generateId('move_'),
               label: `移动 (${delta.x}, ${delta.y}, ${delta.z})`,
               timestamp: Date.now(),
               execute: () => {

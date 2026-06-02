@@ -7,8 +7,9 @@ import WorldFrameScrubber from '@/embed/components/WorldFrameScrubber.vue'
 import { useSelectionContext, type BlockRef } from '@/workbench/selection'
 import { useBContext } from '@/workbench/context/bContext'
 import { usePreferences } from '@/preview/preferences'
-import { createRenderAssets } from '@/workbench/context/sceneLifecycle'
+import { createRenderAssets } from '@/workbench/context/renderAssets'
 import { logCenter } from '@/workbench/logging/LogCenter'
+import { structureRowToWorldY } from '@/pure/vec'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
@@ -202,7 +203,7 @@ function onViewportHover(
     return
   }
   const h = gridHeight.value ?? 0
-  const worldY = h > 0 ? h - 1 - payload.voxel.row : payload.voxel.row
+  const worldY = h > 0 ? structureRowToWorldY(payload.voxel.row, h) : payload.voxel.row
   hoveredBlockRef.value = {
     pos: { x: payload.voxel.column, y: worldY, z: payload.voxel.zSlice },
     block_state_id: payload.blockId,

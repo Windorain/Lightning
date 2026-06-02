@@ -1,7 +1,6 @@
 // web/src/render/mesh/selectionHighlightProvider.ts
 import * as THREE from 'three'
-import type { SelectedEntity } from '@/workbench/selection'
-import type { BakedQuad } from '../schema/types'
+import type { SelectedEntity, BakedQuad } from '../schema/types'
 
 export class SelectionHighlightProvider {
   build(

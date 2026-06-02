@@ -52,6 +52,4 @@ export function buildVoxelVolume(def: StructureDefinition): VoxelVolume {
   }
 }
 
-export function structureRowToWorldY(row: number, sizeRow: number): number {
-  return sizeRow - 1 - row
-}
+export { structureRowToWorldY } from '@/pure/vec'

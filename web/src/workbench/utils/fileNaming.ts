@@ -13,14 +13,4 @@ export function parseWorkbenchQuery(): { apiBase: string; token: string } {
   return { apiBase, token }
 }
 
-/** 去除尾部斜杠并 trim */
-export function normalizeApiBase(raw: string): string {
-  return raw.trim().replace(/\/+$/, '')
-}
-
-/** 建议的本地 JSON 文件名（无扩展名） */
-export function suggestedJsonBaseName(currentFileName: string | null, fallback: string): string {
-  let base = currentFileName?.replace(/^示例 · /, '') ?? fallback
-  if (!base.toLowerCase().endsWith('.json')) base = `${base}.json`
-  return base.replace(/\.json$/i, '')
-}
+export { normalizeApiBase, suggestedJsonBaseName } from '@/pure/string'

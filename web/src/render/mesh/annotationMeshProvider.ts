@@ -8,6 +8,7 @@ import { isBox, isPoint, isLine, isText, isFace } from '../data/annotationTypes'
 import { computeBoxFrameBars } from '../data/aabb'
 import type { BakedQuadsGeometry, BakedQuad } from '../schema/types'
 import { decodeBakedGeometry } from './bakedGeometryDecode'
+import { structureRowToWorldY } from '@/pure/vec'
 
 export class AnnotationMeshProvider implements MeshProvider {
   priority = 50
@@ -214,7 +215,7 @@ export class AnnotationMeshProvider implements MeshProvider {
     if (sizeZ === 0 || sizeRow === 0 || sizeCol === 0) return
 
     // Convert Y-up grid coords to cellGrid indices
-    const row = sizeRow - 1 - a.blockPos.y
+    const row = structureRowToWorldY(a.blockPos.y, sizeRow)
     const col = a.blockPos.x
     const zSlice = a.blockPos.z
     const idx = cellGrid[zSlice]?.[row]?.[col]

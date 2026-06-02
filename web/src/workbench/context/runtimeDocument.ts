@@ -5,6 +5,9 @@
  * Pallete 已解析为 SlotBlock，不使用原始的 palette index。
  * 序列化/反序列化分别在 serializers / parsers 中实现。
  */
+import { structureRowToWorldY } from '@/pure/vec'
+import { blockKey } from '@/pure/string'
+
 export const AIR_PALETTE_INDEX = 0
 
 // ---------------------------------------------------------------------------
@@ -314,11 +317,6 @@ export class Grid {
   private static _emptySlice(w: number, h: number): (null)[][] {
     return Array.from({ length: h }, () => new Array(w).fill(null))
   }
-}
-
-function blockKey(b: SlotBlock): string {
-  if (b.paletteIndex !== undefined) return '#' + String(b.paletteIndex)
-  return b.name + ':' + b.meta
 }
 
 // ---------------------------------------------------------------------------
@@ -634,8 +632,8 @@ export class RuntimeDocument {
       const rawSlice = cellGrid[z]!
       const slice: (SlotBlock | null)[][] = []
       for (let row = 0; row < height; row++) {
-        // Y-up: y = height - 1 - row (cellGrid row 0 = 顶部)
-        const y = height - 1 - row
+        // Y-up: y = structureRowToWorldY(row, height) (cellGrid row 0 = 顶部)
+        const y = structureRowToWorldY(row, height)
         const rawRow = rawSlice[row]!
         const outRow: (SlotBlock | null)[] = new Array(width).fill(null)
         for (let x = 0; x < width; x++) {

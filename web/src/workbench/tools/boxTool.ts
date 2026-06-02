@@ -1,4 +1,5 @@
 // web/src/workbench/tools/boxTool.ts
+import { generateId } from '@/pure/id'
 import type { Tool, ToolGizmo, ToolContext } from './tool'
 import type { DetectedBounds } from './partDetect'
 import { detectFaceBounds, detectPartBounds } from './partDetect'
@@ -57,7 +58,7 @@ export const AnnotationBoxCommitOperator: OperatorType = {
     const toolProps = bctx.toolRegistry.activeTool.value?.properties ?? {}
     const ids: string[] = []
     for (const sel of _pendingSelections) {
-      const id = 'anno_' + Math.random().toString(36).slice(2, 10)
+      const id = generateId('anno_')
       ids.push(id)
       const draft = {
         ...toolProps, type: 'box' as const, id,

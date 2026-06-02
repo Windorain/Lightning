@@ -2,6 +2,8 @@ import type { BContext } from '@/workbench/context/bContext'
 import type { bScreen, ScrArea, ARegion, Rect } from '../types/screen'
 import { RegionType } from '../types/screen'
 import { computeWidgetRects, type WidgetRect } from './widgetTree'
+import { rectContains, regionAt as _regionAt } from '@/pure/layout'
+export { _regionAt as regionAt, rectContains }
 
 export const HEADER_HEIGHT = 32
 export const FOOTER_HEIGHT = 24
@@ -100,26 +102,6 @@ function layoutArea(area: ScrArea, areaBounds: Rect): void {
   }
 }
 
-export function regionAt(
-  screen: bScreen,
-  x: number,
-  y: number,
-): { area: ScrArea; region: ARegion } | null {
-  for (const popup of screen.popupRegions) {
-    if (popup.visible && !popup.collapsed && rectContains(popup.bounds, x, y)) {
-      return { area: null as unknown as ScrArea, region: popup }
-    }
-  }
-  for (const area of screen.areas) {
-    for (const region of area.regions) {
-      if (region.visible && !region.collapsed && rectContains(region.bounds, x, y)) {
-        return { area, region }
-      }
-    }
-  }
-  return null
-}
-
 /** Get the computed bounds for a widget or panel by its id (layoutId or panel id). */
 export function boundsOf(ctx: BContext, id: string): Rect | null {
   const cached = widgetCache.get(id)
@@ -168,6 +150,3 @@ export function relayout(ctx: BContext): void {
   if (ctx.screen) computeLayout(ctx, ctx.screen)
 }
 
-function rectContains(r: Rect, x: number, y: number): boolean {
-  return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
-}

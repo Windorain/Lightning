@@ -1,10 +1,7 @@
 // web/src/workbench/operators/builtin/annotationOperators.ts
+import { generateId } from '@/pure/id'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import type { Annotation } from '@/render/data/annotationTypes'
-
-function generateId(): string {
-  return 'anno_' + Math.random().toString(36).slice(2, 10)
-}
 
 export const AnnotationCreateOperator: OperatorType = {
   id: 'ANNOTATION_CREATE',
@@ -22,7 +19,7 @@ export const AnnotationCreateOperator: OperatorType = {
     const annotation = props.annotation as Annotation
     if (!annotation) return
 
-    annotation.id = annotation.id ?? generateId()
+    annotation.id = annotation.id ?? generateId('anno_')
     annotation.created_at = Date.now()
     annotation.updated_at = Date.now()
 

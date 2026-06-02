@@ -7,6 +7,7 @@
 import type { OperatorType, OperatorProperties } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
 import { resolveViewportSlot } from '@/workbench/context/bContext'
+import { sphericalOrbitDelta, panDelta } from '@/pure/camera'
 
 interface NavState {
   _startX: number
@@ -53,13 +54,10 @@ export const ViewRotateOperator: OperatorType = {
       const px = camera.position.x - tx
       const py = camera.position.y - ty
       const pz = camera.position.z - tz
-      const r = Math.sqrt(px * px + py * py + pz * pz)
-      const theta = Math.atan2(px, pz) - dx * 0.005
-      const phi = Math.acos(py / r) - dy * 0.005
-      const clampedPhi = Math.max(0.01, Math.min(Math.PI - 0.01, phi))
-      camera.position.x = tx + r * Math.sin(clampedPhi) * Math.sin(theta)
-      camera.position.y = ty + r * Math.cos(clampedPhi)
-      camera.position.z = tz + r * Math.sin(clampedPhi) * Math.cos(theta)
+      const delta = sphericalOrbitDelta(px, py, pz, dx, dy)
+      camera.position.x = tx + delta.x
+      camera.position.y = ty + delta.y
+      camera.position.z = tz + delta.z
       camera.lookAt(tx, ty, tz)
       s._startX = event.clientX
       s._startY = event.clientY
@@ -118,31 +116,23 @@ export const ViewPanOperator: OperatorType = {
     if (event.type === 'pointermove') {
       const dx = event.clientX - s._startX
       const dy = event.clientY - s._startY
-      const k = 0.03
       const orbitTarget = vp.orbitTarget.value
       const tx = orbitTarget?.x ?? 0
       const ty = orbitTarget?.y ?? 0
       const tz = orbitTarget?.z ?? 0
-      const fx = tx - camera.position.x, fy = ty - camera.position.y, fz = tz - camera.position.z
-      const fl = Math.sqrt(fx * fx + fy * fy + fz * fz)
-      const forward = { x: fx / fl, y: fy / fl, z: fz / fl }
-      const rx = forward.z, ry = 0, rz = -forward.x
-      const rl = Math.sqrt(rx * rx + rz * rz) || 1
-      const right = { x: rx / rl, y: ry, z: rz / rl }
-      const ux = forward.y * right.z - forward.z * right.y
-      const uy = forward.z * right.x - forward.x * right.z
-      const uz = forward.x * right.y - forward.y * right.x
-      const panX = (dx * right.x + dy * ux) * k
-      const panY = (dx * right.y + dy * uy) * k
-      const panZ = (dx * right.z + dy * uz) * k
-      camera.position.x += panX
-      camera.position.y += panY
-      camera.position.z += panZ
+      const pd = panDelta(
+        { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+        { x: tx, y: ty, z: tz },
+        dx, dy,
+      )
+      camera.position.x += pd.x
+      camera.position.y += pd.y
+      camera.position.z += pd.z
       // 平移时 orbit target 跟随相机移动，保持旋转中心在场景中的相对位置
       if (orbitTarget) {
-        orbitTarget.x += panX
-        orbitTarget.y += panY
-        orbitTarget.z += panZ
+        orbitTarget.x += pd.x
+        orbitTarget.y += pd.y
+        orbitTarget.z += pd.z
       }
       s._startX = event.clientX
       s._startY = event.clientY

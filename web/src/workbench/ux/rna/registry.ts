@@ -1,4 +1,5 @@
 import type { RNAStruct, RNARegistry, PropertyDescriptor } from './types'
+import { widgetFor as _widgetFor } from '@/pure/layout'
 
 export function createRNARegistry(): RNARegistry {
   const structs = new Map<string, RNAStruct>()
@@ -27,18 +28,7 @@ export function createRNARegistry(): RNARegistry {
     },
 
     widgetFor(prop: PropertyDescriptor): string {
-      if (prop.uiWidget) return prop.uiWidget
-      switch (prop.type) {
-        case 'string':
-          return prop.enumItems && prop.enumItems.length > 0 ? 'dropdown' : 'text'
-        case 'number':
-          return (prop.min != null && prop.max != null) ? 'slider' : 'number'
-        case 'boolean': return 'checkbox'
-        case 'color':   return 'color'
-        case 'enum':    return 'dropdown'
-        case 'vector3': return 'vector'
-        default:        return 'text'
-      }
+      return _widgetFor(prop)
     },
   }
 }

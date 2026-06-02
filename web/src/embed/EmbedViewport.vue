@@ -9,7 +9,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useBContext } from '@/workbench/context/bContext'
-import { createRenderAssets } from '@/workbench/context/sceneLifecycle'
+import { createRenderAssets } from '@/workbench/context/renderAssets'
 import ViewerCore, { type ViewerCoreReadyPayload } from '@/embed/components/ViewerCore.vue'
 import LayerPreviewBar from '@/embed/components/LayerPreviewBar.vue'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
@@ -29,6 +29,7 @@ import { useEmbedHover } from '@/embed/embedHover'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/renderTooltipHtml'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
+import { structureRowToWorldY } from '@/pure/vec'
 import type { BakedQuad } from '@/render/schema/types'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 
@@ -147,7 +148,7 @@ function rebuildSelectionMasks(blockId: string | null): void {
         if (!entry) continue
         if (blockRegistryKeyForPalette(entry.registryId, entry.meta) !== blockId) continue
 
-        const voxelY = sizeRow - 1 - row
+        const voxelY = structureRowToWorldY(row, sizeRow)
         const cx = col - sizeCol / 2 + 0.5
         const cy = voxelY - sizeRow / 2 + 0.5
         const cz = z - sizeZ / 2 + 0.5

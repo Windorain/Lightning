@@ -3,25 +3,12 @@
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref, shallowRef } from 'vue'
 import { logCenter } from '@/workbench/logging/LogCenter'
-import type { AnnotationType } from '@/render/data/annotationTypes'
 import type { ScenePickEntity } from '@/render/interaction/scenePick'
+import { posKey, isSamePosition } from '@/pure/vec'
+import { scenePickToSelectedEntity } from '@/pure/selection'
 
-export interface BlockRef {
-  pos: { x: number; y: number; z: number }
-  block_state_id: string
-  /** 被击中的 quad 在该体素内的索引 */
-  quadIndex?: number
-  /** 命中面的世界空间法线（已归一化），用于面级别检测 */
-  normal?: { x: number; y: number; z: number }
-  /** 命中点的世界空间坐标，用于区分同法线的多个面 */
-  point?: { x: number; y: number; z: number }
-  /** @internal 构建 RNA owner 时注入的网格尺寸 */
-  _gridSize?: { w: number; h: number; d: number } | null
-}
-
-export type SelectedEntity =
-  | { kind: 'block'; ref: BlockRef }
-  | { kind: 'annotation'; id: string; type: AnnotationType }
+// Re-exported from render layer — these are pure data types shared across layers
+export type { BlockRef, SelectedEntity } from '@/render/schema/types'
 
 export type SelectionMode = 'single' | 'box' | 'type' | 'annotation'
 
@@ -53,10 +40,6 @@ export interface SelectionContext {
 }
 
 export const selectionContextKey: InjectionKey<SelectionContext> = Symbol('selectionContext')
-
-function posKey(pos: { x: number; y: number; z: number }): string {
-  return `${pos.x},${pos.y},${pos.z}`
-}
 
 export function createSelectionContext(): SelectionContext {
   const items = ref<Set<SelectedEntity>>(new Set())
@@ -264,30 +247,6 @@ export interface PickHandlerV2 {
   cycleState: SelectionContext['cycleState']
   setCycleState(s: { lastPoint: { x: number; y: number }; candidates: SelectedEntity[]; index: number }): void
   resetCycle(): void
-}
-
-function isSamePosition(a: { x: number; y: number }, b: { x: number; y: number }, tolerance = 8): boolean {
-  return Math.hypot(a.x - b.x, a.y - b.y) < tolerance
-}
-
-function scenePickToSelectedEntity(pick: ScenePickEntity): SelectedEntity | null {
-  if (pick.kind === 'block' && pick.blockId && pick.column !== undefined && pick.row !== undefined && pick.zSlice !== undefined) {
-    return {
-      kind: 'block',
-      ref: {
-        pos: { x: pick.column, y: pick.row, z: pick.zSlice },
-        block_state_id: pick.blockId,
-      },
-    }
-  }
-  if (pick.kind === 'annotation' && pick.annotationId && pick.annotationType) {
-    return {
-      kind: 'annotation',
-      id: pick.annotationId,
-      type: pick.annotationType,
-    }
-  }
-  return null
 }
 
 export function applyPickSelectionWithCycle(

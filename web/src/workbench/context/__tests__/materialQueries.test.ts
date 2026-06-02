@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { RuntimeDocument, Grid, RuntimeFrame } from '@/workbench/context/runtimeDocument'
-import { createProductionQueries } from '@/workbench/context/sceneQueries'
+import { createProductionQueries } from '@/workbench/queries/index'
 import type { BContext } from '@/workbench/context/bContext'
 
 function makeMockBctx(doc: RuntimeDocument | null): BContext {

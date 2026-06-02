@@ -1,6 +1,7 @@
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import type { MaterialQueryItem } from '@/workbench/context/bContext'
 import { encodeAnimatedGif } from '@/workbench/animatedGifEncoder'
+import { filenameStem } from '@/pure/string'
 
 function resolveMaterial(bctx: any, materialId: string): MaterialQueryItem | undefined {
   const materials = bctx.queries?.listMaterials?.() ?? []
@@ -15,13 +16,6 @@ function downloadPng(dataUrl: string, filename: string): void {
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-}
-
-/** Derive a safe filename stem from a material */
-function filenameStem(m: MaterialQueryItem | undefined, materialId: string): string {
-  return m?.locator
-    ? m.locator.replace(/^.*[\\/]/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
-    : `material_${materialId}`
 }
 
 export const ExportTextureOperator: OperatorType = {

@@ -71,7 +71,7 @@ import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 import { relayout } from '@/workbench/ux/layout'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
-import { parseWorkbenchQuery } from '@/workbench/utils/sceneHelpers'
+import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 
 // Document format parsers — 注册到解析分发中心
 import { parserRegistry } from '@/workbench/context/parserRegistry'

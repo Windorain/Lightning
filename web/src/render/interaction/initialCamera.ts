@@ -12,8 +12,8 @@ import * as THREE from 'three'
 import type { StructureDefinition } from '../schema/types'
 import { FACE_NORMAL } from '../mesh/faceConstants'
 import { buildVoxelVolume, findFirstVoxelWithBlockId } from '../data/grid'
-import type { VoxelCell } from '../data/grid'
-import { structureRowToWorldY } from '../data/grid'
+import { voxelCenterWorld, findFirstFocusVoxel } from '@/pure/vec'
+export { voxelCenterWorld, findFirstFocusVoxel }
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0)
 
@@ -26,32 +26,6 @@ const DEFAULT_DISTANCE = 10
 export const STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG = THREE.MathUtils.radToDeg(
   Math.atan(1 / Math.sqrt(2)),
 )
-
-/**
- * 与 simpleMesh 体素中心一致：column、zSlice 为体素下标；row 为 **行下标**（0=顶行），
- * 世界 Y 由 `structureRowToWorldY(row, sizeRow)` 得到。
- */
-export function voxelCenterWorld(
-  column: number,
-  structureRow: number,
-  zSlice: number,
-  sizeColumn: number,
-  sizeRow: number,
-  sizeZSlice: number,
-  out?: THREE.Vector3,
-): THREE.Vector3 {
-  const y = structureRowToWorldY(structureRow, sizeRow)
-  const v = out ?? new THREE.Vector3()
-  v.set(column + 0.5 - sizeColumn / 2, y + 0.5 - sizeRow / 2, zSlice + 0.5 - sizeZSlice / 2)
-  return v
-}
-
-/** 在网格中查找 `initialCamera.focusBlockId` 的第一个体素；无 `initialCamera` 时返回 null */
-export function findFirstFocusVoxel(def: StructureDefinition): VoxelCell | null {
-  const ic = def.initialCamera
-  if (!ic) return null
-  return findFirstVoxelWithBlockId(buildVoxelVolume(def), ic.focusBlockId)
-}
 
 /**
  * 正面朝外法线与 world up 几乎平行时，lookAt 与 up 退化，改用 +Z 作为 camera.up。

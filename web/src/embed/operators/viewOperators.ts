@@ -9,6 +9,7 @@ import {
   STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
 } from '@/render/interaction/initialCamera'
 import { resolveViewportSlot } from '@/workbench/context/bContext'
+import { cameraToSpherical } from '@/pure/camera'
 
 const ORTHO_FRUSTUM_REF_HALF_FOV_DEG = 25
 
@@ -88,20 +89,15 @@ export const CopyCameraFromEmbedOperator: OperatorType = {
     const orbitTarget = slot?.orbitTarget.value as THREE.Vector3 | null
     if (!camera || !orbitTarget) return
 
-    const px = camera.position.x - orbitTarget.x
-    const py = camera.position.y - orbitTarget.y
-    const pz = camera.position.z - orbitTarget.z
-    const r = Math.sqrt(px * px + py * py + pz * pz)
-    if (r < 1e-6) return
-
-    const yawDeg = Math.round(THREE.MathUtils.radToDeg(Math.atan2(px, pz)))
-    const phi = Math.acos(Math.max(-1, Math.min(1, py / r)))
-    const elevationDeg = Math.round(90 - THREE.MathUtils.radToDeg(phi))
-    const zoom = Math.round(((camera as any).zoom as number ?? 1) * 100) / 100
+    const result = cameraToSpherical(
+      { position: camera.position, zoom: (camera as any).zoom as number | undefined },
+      { x: orbitTarget.x, y: orbitTarget.y, z: orbitTarget.z },
+    )
+    if (!result) return
 
     const wc = bctx.wikiConfig as Record<string, any>
-    wc.cameraYaw = yawDeg
-    wc.cameraElevation = elevationDeg
-    wc.cameraZoom = zoom
+    wc.cameraYaw = result.yawDeg
+    wc.cameraElevation = result.elevationDeg
+    wc.cameraZoom = result.zoom
   },
 }

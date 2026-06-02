@@ -5,6 +5,7 @@
  * OperatorRegistry.invoke() 创建此 wrapper 并推入目标 region 的模态栈。
  * 后续每个事件通过 wrapper 转发到 operator.modal()。
  */
+import { generateId } from '@/pure/id'
 import type { ModalOperation, ModalKeymap } from '@/workbench/events/dispatcher'
 
 import type { BContext } from '@/workbench/context/bContext'
@@ -44,7 +45,7 @@ export class ModalOperatorWrapper implements ModalOperation {
         const snap = this.undoSnapshot
         const snapshotAfter = this.bctx.doc.value?.clone() ?? null
         this.bctx.editHistory.push({
-          id: 'op_' + Math.random().toString(36).slice(2, 10),
+          id: generateId('op_'),
           label: this.op.label,
           timestamp: Date.now(),
           execute: () => { this.bctx.doc.value = snapshotAfter; this.bctx.structEpoch.value += 1 },
