@@ -63,7 +63,7 @@ export const AnnotationBoxCommitOperator: OperatorType = {
       const draft = {
         ...toolProps, type: 'box' as const, id,
         min: { ...sel.aabb.min }, max: { ...sel.aabb.max },
-        frameIndex: bctx.queries.getCurrentFrame()?.index ?? 0,
+        frameIndex: bctx.queries!.getCurrentFrame()?.index ?? 0,
       }
       bctx.operators.invoke('ANNOTATION_CREATE', { annotation: draft }, event ?? undefined)
     }

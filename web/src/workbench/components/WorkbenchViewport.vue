@@ -93,14 +93,15 @@ const activeTab = computed<BottomTab>({
 })
 
 function createToolContext(): ToolContext {
+  const q = bctx.queries!
   return {
     selection,
     viewport: bctx.viewport,
-    pickVoxel: (e) => bctx.queries.pickVoxel(e),
-    pickAll: (e) => bctx.queries.pickAll(e),
-    getCurrentFrame: () => bctx.queries.getCurrentFrame(),
-    gridCenterWorld: (pos) => bctx.queries.gridCenterWorld(pos),
-    getBlockGeometry: (pos) => bctx.queries.getBlockGeometry(pos),
+    pickVoxel: (e) => q.pickVoxel(e),
+    pickAll: (e) => q.pickAll(e),
+    getCurrentFrame: () => q.getCurrentFrame(),
+    gridCenterWorld: (pos) => q.gridCenterWorld(pos),
+    getBlockGeometry: (pos) => q.getBlockGeometry(pos),
     invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
     activeTool: bctx.toolRegistry.activeTool,
     modalDepth: (rid: string) => bctx.eventDispatcher.modalDepth(rid),
@@ -261,6 +262,8 @@ function updateAnnotationOverlay(): void {
 
 function updateSelectionHighlight(): void {
   if (!_outlinePass) return
+  const q = bctx.queries
+  if (!q) return
 
   const items = selection.items.value
   const hov = hoveredBlockRef.value
@@ -269,8 +272,8 @@ function updateSelectionHighlight(): void {
     if (items.size === 0 || items.size > 500) { _outlinePass.setMaskMeshes([]); return }
     const masks = highlightProvider.build(
       items,
-      (pos) => bctx.queries.getBlockGeometry(pos),
-      (pos) => bctx.queries.gridCenterWorld(pos),
+      (pos) => q.getBlockGeometry(pos),
+      (pos) => q.gridCenterWorld(pos),
     )
     _outlinePass.setMaskMeshes(masks)
     return
@@ -286,8 +289,8 @@ function updateSelectionHighlight(): void {
   if (entities.size > 500) { _outlinePass.setMaskMeshes([]); return }
   const masks = highlightProvider.build(
     entities,
-    (pos) => bctx.queries.getBlockGeometry(pos),
-    (pos) => bctx.queries.gridCenterWorld(pos),
+    (pos) => q.getBlockGeometry(pos),
+    (pos) => q.gridCenterWorld(pos),
   )
   _outlinePass.setMaskMeshes(masks)
 }

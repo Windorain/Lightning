@@ -50,7 +50,7 @@ export class OperatorRegistry {
       return
     }
 
-    const snap = (bctx as any).queries != null ? logCenter.snapshot(bctx) : undefined
+    const snap = bctx.queries !== null ? logCenter.snapshot(bctx) : undefined
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
       if (op.flagUndo && bctx.doc) {
@@ -81,7 +81,7 @@ export class OperatorRegistry {
     }
 
     // embed bctx has no queries; use duck-check to avoid getter-throw
-    const snap = (bctx as any).queries != null ? logCenter.snapshot(bctx) : undefined
+    const snap = bctx.queries !== null ? logCenter.snapshot(bctx) : undefined
 
     const resolvedProps: OperatorProperties = props ?? {}
     if (regionId) resolvedProps._regionId = regionId

@@ -18,20 +18,20 @@ export const SDEConnectOperator: OperatorType = {
   },
 
   async exec(bctx, _props) {
-    bctx.connectionConnected.value = null
-    if (!bctx.connectionApiBase.value) {
-      bctx.connectionConnected.value = false
+    bctx.connection.connected = null
+    if (!bctx.connection.apiBase) {
+      bctx.connection.connected = false
       return
     }
     try {
-      await sdePing(bctx.connectionApiBase.value, bctx.connectionToken.value)
-      bctx.connectionConnected.value = true
-      bctx.connectionExportsLoading.value = true
+      await sdePing(bctx.connection.apiBase, bctx.connection.token)
+      bctx.connection.connected = true
+      bctx.connection.exportsLoading = true
       try {
-        bctx.connectionExports.value = await sdeListExports(bctx.connectionApiBase.value, bctx.connectionToken.value)
-      } catch { bctx.connectionExports.value = [] }
-      finally { bctx.connectionExportsLoading.value = false }
-    } catch { bctx.connectionConnected.value = false }
+        bctx.connection.exports = await sdeListExports(bctx.connection.apiBase, bctx.connection.token)
+      } catch { bctx.connection.exports = [] }
+      finally { bctx.connection.exportsLoading = false }
+    } catch { bctx.connection.connected = false }
   },
 }
 
@@ -41,15 +41,15 @@ export const SDELoadExportOperator: OperatorType = {
   description: '从 SDE 导出列表加载指定场景',
 
   poll(bctx) {
-    return bctx.connectionConnected.value === true
+    return bctx.connection.connected === true
   },
 
   async exec(bctx, _props) {
     const name = _props.name as string
     bctx.selection.clear()
     bctx.editHistory.clear()
-    const data = await sdeGetExportFile(bctx.connectionApiBase.value, bctx.connectionToken.value, name)
-    bctx.connectionSelectedExportName.value = name
+    const data = await sdeGetExportFile(bctx.connection.apiBase, bctx.connection.token, name)
+    bctx.connection.selectedExportName = name
     const result = await parserRegistry.detectAndParse(data)
     bctx.doc.value = result.document ?? null
     if (result.document) {
@@ -72,14 +72,14 @@ export const SDEPushOperator: OperatorType = {
   description: '将当前场景保存到 SDE 工作区',
 
   poll(bctx) {
-    return bctx.connectionConnected.value === true && bctx.doc.value !== null
+    return bctx.connection.connected === true && bctx.doc.value !== null
   },
 
   async exec(bctx, _props) {
-    if (!bctx.connectionApiBase.value || !bctx.doc.value) return
+    if (!bctx.connection.apiBase || !bctx.doc.value) return
     await sdePutWorkspaceDocument(
-      bctx.connectionApiBase.value,
-      bctx.connectionToken.value,
+      bctx.connection.apiBase,
+      bctx.connection.token,
       bctx.doc.value.serialize() as Record<string, unknown>,
     )
     bctx.dirty.value = false

@@ -169,7 +169,7 @@ export const MoveOperator: OperatorType = {
 
     // ---- Non-gizmo: block pick → select ----
     bctx.selection.resetCycle()
-    const picked = bctx.queries.pickVoxel(event)
+    const picked = bctx.queries!.pickVoxel(event)
     if (picked) {
       if (event.shiftKey) {
         bctx.selection.add([picked])
@@ -288,7 +288,7 @@ export const MoveOperator: OperatorType = {
       if (event.type === 'pointerup') {
         const origin = { x: s._originX, y: s._originY, z: s._originZ }
         const cur = gizmo.root.position
-        const delta = bctx.queries.roundVector({
+        const delta = bctx.queries!.roundVector({
           x: cur.x - origin.x,
           y: cur.y - origin.y,
           z: cur.z - origin.z,
@@ -296,7 +296,7 @@ export const MoveOperator: OperatorType = {
 
         if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
           const doc = bctx.doc.value
-          const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
+          const rf = doc?.frame(bctx.currentWorldFrameIndex.value ?? 0)
           const grid = rf?.grid
           if (grid) {
             const moves = s._initialPositions.map(initPos => ({

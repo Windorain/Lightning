@@ -22,7 +22,7 @@ export const SelectOperator: OperatorType = {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
 
     const handler: PickHandlerV2 = {
-      pickAll: (e) => bctx.queries.pickAll(e),
+      pickAll: (e) => bctx.queries!.pickAll(e),
       selection: {
         selectEntity: (entity) => bctx.selection.selectEntity(entity),
         add: (voxels) => bctx.selection.add(voxels),
@@ -55,7 +55,7 @@ export const SelectByTypeOperator: OperatorType = {
   exec(bctx, props) {
     const blockStateId = (props?.blockStateId as string) ?? ''
     if (!blockStateId) return
-    const blocks = bctx.queries.getFrameBlocks()
+    const blocks = bctx.queries!.getFrameBlocks()
     bctx.selection.selectByType(blockStateId, blocks)
   },
 }

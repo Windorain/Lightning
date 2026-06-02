@@ -13,7 +13,7 @@ export const blockStatsPanel: PanelDeclaration = {
   poll(): boolean { return true },
 
   layout(ctx: BContext): UILayout {
-    const stats = ctx.queries.getBlockTypeStats()
+    const stats = ctx.queries!.getBlockTypeStats()
     const entries = Object.entries(stats)
     const items: UILayoutItem[] = []
 

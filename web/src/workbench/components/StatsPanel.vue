@@ -24,7 +24,7 @@ interface StatRow {
 const rows = computed<StatRow[]>(() => {
   const doc = bctx.doc.value?.serialize()
   if (!doc) return []
-  const currentFrame = (doc as any).frames?.[selection.frameIndex.value ?? 0]
+  const currentFrame = (doc as any).frames?.[bctx.currentWorldFrameIndex.value ?? 0]
   const blocks = (currentFrame?.blocks ?? []) as Array<{ block_state_id: string }>
 
   if (mode.value === 'auto') {

@@ -35,7 +35,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
 
       // 从 RuntimeDocument Grid 获取 height 以转换 cellGrid row → world Y
       const doc = bctx.doc.value
-      const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
+      const rf = doc?.frame(bctx.currentWorldFrameIndex.value ?? 0)
       const h = rf?.grid?.height ?? 0
       const worldY = h > 0 ? structureRowToWorldY(result.row, h) : result.row
 
@@ -67,7 +67,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       })
       // Convert cellGrid row (0=top) → world Y (0=bottom) for block results
       const doc = bctx.doc.value
-      const rf = doc?.frame(bctx.selection.frameIndex.value ?? 0)
+      const rf = doc?.frame(bctx.currentWorldFrameIndex.value ?? 0)
       const h = rf?.grid?.height ?? 0
       for (const r of results) {
         if (r.kind === 'block' && r.row !== undefined) {
@@ -80,7 +80,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     getCurrentFrame(): Frame | null {
       const doc = bctx.doc.value
       if (!doc) return null
-      const idx = bctx.selection.frameIndex.value ?? 0
+      const idx = bctx.currentWorldFrameIndex.value ?? 0
       const rf = doc.frame(idx)
       if (!rf) return null
       return { index: rf.index, label: rf.label }
@@ -89,7 +89,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     getFrameBlocks(): BlockRef[] {
       const doc = bctx.doc.value
       if (!doc) return []
-      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      const rf = doc.frame(bctx.currentWorldFrameIndex.value ?? 0)
       if (!rf?.grid) return []
       return rf.grid.blocks().map(({ pos, block }) => ({
         pos: { x: pos.x, y: pos.y, z: pos.z },
@@ -108,7 +108,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null {
       const doc = bctx.doc.value
       if (!doc) return null
-      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      const rf = doc.frame(bctx.currentWorldFrameIndex.value ?? 0)
       if (!rf?.grid) return null
       return rf.grid.centerWorld(pos)
     },
@@ -117,7 +117,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const counts: Record<string, number> = {}
       const doc = bctx.doc.value
       if (!doc) return counts
-      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      const rf = doc.frame(bctx.currentWorldFrameIndex.value ?? 0)
       if (!rf?.grid) return counts
       rf.grid.forEach((_pos, block) => {
         if (block.paletteIndex !== undefined) {
@@ -169,7 +169,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       const stats: Record<string, BlockTypeStat> = {}
       const doc = bctx.doc.value
       if (!doc) return stats
-      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      const rf = doc.frame(bctx.currentWorldFrameIndex.value ?? 0)
       if (!rf?.grid) return stats
       rf.grid.forEach((_pos, block) => {
         const id = `minecraft:${block.name}:${block.meta}`
@@ -186,7 +186,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     getBlockPaletteEntry(pos: { x: number; y: number; z: number }) {
       const doc = bctx.doc.value
       if (!doc) return null
-      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      const rf = doc.frame(bctx.currentWorldFrameIndex.value ?? 0)
       if (!rf?.grid) return null
       const block = rf.grid.at(pos)
       if (!block || block.paletteIndex === undefined) return null
@@ -197,7 +197,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
     getBlockGeometry(pos: { x: number; y: number; z: number }) {
       const doc = bctx.doc.value
       if (!doc) return null
-      const rf = doc.frame(bctx.selection.frameIndex.value ?? 0)
+      const rf = doc.frame(bctx.currentWorldFrameIndex.value ?? 0)
       if (!rf?.grid) return null
       const block = rf.grid.at(pos)
       if (!block || block.paletteIndex === undefined) return null

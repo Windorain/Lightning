@@ -8,16 +8,15 @@
  * 由调用方创建后传入——生产用 provide* 工厂，测试用 create* 工厂。
  */
 
-import { ref } from 'vue'
+import { reactive, ref } from 'vue'
 import type { Ref } from 'vue'
-import type { BContext, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
+import type { BContext, ConnectionState, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
 import type { SelectionContext } from '@/workbench/selection'
 import type { UndoManager } from '@/workbench/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { BContextSettings } from '@/workbench/context/bContext'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
-import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { bScreen } from '@/workbench/ux/types/screen'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import type { OperatorType } from '@/workbench/operators/operatorType'
@@ -105,13 +104,15 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   const uiWorkspace = ref<UIWorkspace>('preview')
   const localFileName = ref<string | null>(null)
 
-  // === 连接数据 ===
-  const connectionApiBase = ref('')
-  const connectionToken = ref('')
-  const connectionConnected = ref<boolean | null>(null)
-  const connectionExports = ref<ExportFileInfo[]>([])
-  const connectionExportsLoading = ref(false)
-  const connectionSelectedExportName = ref<string | null>(null)
+  // === 连接数据（reactive ConnectionState） ===
+  const connection = reactive<ConnectionState>({
+    apiBase: '',
+    token: '',
+    connected: null,
+    exports: [],
+    exportsLoading: false,
+    selectedExportName: null,
+  })
 
   // ---- 所有独立的 ref / computed / 对象先创建 ----
   const viewports = createViewportManager()
@@ -172,12 +173,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     workspaceMode,
     uiWorkspace,
     localFileName,
-    connectionApiBase,
-    connectionToken,
-    connectionConnected,
-    connectionExports,
-    connectionExportsLoading,
-    connectionSelectedExportName,
+    connection,
 
     selection,
     editHistory,

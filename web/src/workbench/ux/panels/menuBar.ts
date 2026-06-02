@@ -14,7 +14,7 @@ export const menuBarPanel: PanelDeclaration = {
 
   layout(bctx: BContext): UILayout {
     const lang = currentLang.value
-    const conn = bctx.connectionConnected.value
+    const conn = bctx.connection.connected
 
     return {
       kind: 'row',

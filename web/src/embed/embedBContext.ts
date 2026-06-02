@@ -4,19 +4,18 @@
  * 与 workbench 同构：EmbedRoot 创建 bctx → provide → EmbedViewport 消费。
  * 只包含 embed 实际需要的字段，workbench-only 子系统抛出明确错误。
  */
-import type { BContext, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
+import type { BContext, ConnectionState, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
 import { createViewportManager } from '@/workbench/context/bContext'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import { EventDispatcherImpl } from '@/workbench/events/dispatcher'
-import { ref } from 'vue'
+import { reactive, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { SelectionContext } from '@/workbench/selection'
 import type { UndoManager } from '@/workbench/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
-import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
 
@@ -39,12 +38,14 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
   const workspaceModeRef: Ref<WorkbenchWorkspaceMode> = ref('local-file')
   const uiWorkspaceRef: Ref<UIWorkspace> = ref('wiki')
   const localFileNameRef = ref<string | null>(null)
-  const connectionApiBaseRef = ref('')
-  const connectionTokenRef = ref('')
-  const connectionConnectedRef = ref<boolean | null>(null)
-  const connectionExportsRef = ref<ExportFileInfo[]>([])
-  const connectionExportsLoadingRef = ref(false)
-  const connectionSelectedExportNameRef = ref<string | null>(null)
+  const connection = reactive<ConnectionState>({
+    apiBase: '',
+    token: '',
+    connected: null,
+    exports: [],
+    exportsLoading: false,
+    selectedExportName: null,
+  })
 
   const operators = {
     exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(ctx, id, props),
@@ -65,17 +66,12 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
     uiWorkspace: uiWorkspaceRef,
     localFileName: localFileNameRef,
 
-    connectionApiBase: connectionApiBaseRef,
-    connectionToken: connectionTokenRef,
-    connectionConnected: connectionConnectedRef,
-    connectionExports: connectionExportsRef,
-    connectionExportsLoading: connectionExportsLoadingRef,
-    connectionSelectedExportName: connectionSelectedExportNameRef,
+    connection,
 
     get selection(): SelectionContext { return throwError('selection') },
     get editHistory(): UndoManager { return throwError('editHistory') },
     get toolRegistry(): ToolRegistry { return throwError('toolRegistry') },
-    queries: null as any,
+    queries: null,
 
     settings: {
       replaceBrush: null, fillBrush: null, generateType: null,

@@ -23,10 +23,10 @@ function close(): void {
 
 function pickMode(m: WorkbenchWorkspaceMode): void {
   bctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: m })
-  bctx.connectionConnected.value = null
-  bctx.connectionExports.value = []
-  bctx.connectionExportsLoading.value = false
-  bctx.connectionSelectedExportName.value = null
+  bctx.connection.connected = null
+  bctx.connection.exports = []
+  bctx.connection.exportsLoading = false
+  bctx.connection.selectedExportName = null
 }
 
 function onKeydown(e: KeyboardEvent): void {

@@ -207,11 +207,11 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousemove', onMouseMove)
 
-  if (bctx.connectionApiBase.value) {
+  if (bctx.connection.apiBase) {
     try { await bctx.operators.exec('OPERATOR_SDE_CONNECT') } catch { /* ignore */ }
-    if (bctx.connectionConnected.value) {
+    if (bctx.connection.connected) {
       try {
-        const data = await (await import('@/workbench/sdeApi')).sdeGetWorkspaceDocument(bctx.connectionApiBase.value, bctx.connectionToken.value)
+        const data = await (await import('@/workbench/sdeApi')).sdeGetWorkspaceDocument(bctx.connection.apiBase, bctx.connection.token)
         if (data) {
           const result = await parserRegistry.detectAndParse(data)
           if (result.document) {

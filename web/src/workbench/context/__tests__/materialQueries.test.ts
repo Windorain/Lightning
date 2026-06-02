@@ -6,7 +6,8 @@ import type { BContext } from '@/workbench/context/bContext'
 function makeMockBctx(doc: RuntimeDocument | null): BContext {
   return {
     doc: { value: doc },
-    selection: { items: { value: new Set() }, frameIndex: { value: 0 } },
+    selection: { items: { value: new Set() } },
+    currentWorldFrameIndex: { value: 0 },
   } as unknown as BContext
 }
 

@@ -4,7 +4,7 @@ import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout, UILayoutItem } from '../types/layout'
 import type { BlockRef } from '@/workbench/selection'
 function singleBlockLayout(bctx: BContext, item: BlockRef): UILayoutItem[] {
-  const paletteEntry = bctx.queries.getBlockPaletteEntry(item.pos)
+  const paletteEntry = bctx.queries!.getBlockPaletteEntry(item.pos)
   const items: UILayoutItem[] = []
 
   items.push(

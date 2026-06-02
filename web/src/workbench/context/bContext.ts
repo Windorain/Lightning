@@ -75,6 +75,15 @@ export interface BContextQueries {
   getBlockGeometry(pos: { x: number; y: number; z: number }): BakedQuad[] | null
 }
 
+export interface ConnectionState {
+  apiBase: string
+  token: string
+  connected: boolean | null
+  exports: ExportFileInfo[]
+  exportsLoading: boolean
+  selectedExportName: string | null
+}
+
 export interface BContextSettings {
   replaceBrush: string | null
   fillBrush: string | null
@@ -122,19 +131,14 @@ export interface BContext {
   workspaceMode: Ref<WorkbenchWorkspaceMode>
   uiWorkspace: Ref<UIWorkspace>
   localFileName: Ref<string | null>
-  // === 连接数据（原 ConnectionContext） ===
-  connectionApiBase: Ref<string>
-  connectionToken: Ref<string>
-  connectionConnected: Ref<boolean | null>
-  connectionExports: Ref<ExportFileInfo[]>
-  connectionExportsLoading: Ref<boolean>
-  connectionSelectedExportName: Ref<string | null>
+  // === 连接数据（reactive ConnectionState） ===
+  connection: ConnectionState
 
   // === 子系统 ===
   selection: SelectionContext
   editHistory: UndoManager
   toolRegistry: ToolRegistry
-  queries: BContextQueries
+  queries: BContextQueries | null
   settings: BContextSettings
   operators: {
     exec(id: string, props?: Record<string, unknown>): void

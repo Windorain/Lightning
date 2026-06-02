@@ -66,7 +66,7 @@ onBeforeUnmount(() => {
 const paletteNameLine = computed(() => {
   const item = blockRef.value
   if (!item) return ''
-  const entry = props.bctx.queries.getBlockPaletteEntry(item.pos) as Record<string, any> | null
+  const entry = props.bctx.queries!.getBlockPaletteEntry(item.pos) as Record<string, any> | null
   const tooltip: string[] | undefined = entry?.tooltip
   if (tooltip && tooltip.length > 0) return tooltip[0]!
   return ''

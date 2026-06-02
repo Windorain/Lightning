@@ -265,6 +265,7 @@ export const logCenter = {
   /* —— Snapshot / Diff —— */
 
   snapshot(ctx: BContext): StateDigest {
+    if (!ctx.queries) throw new Error('snapshot: queries not available')
     const id = nextId
     const blocks = ctx.queries.getFrameBlocks()
     const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
@@ -279,6 +280,7 @@ export const logCenter = {
   },
 
   diff(snap: StateDigest, ctx: BContext): StateDiff {
+    if (!ctx.queries) throw new Error('diff: queries not available')
     const now = ctx.queries.getFrameBlocks()
     const nowSel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
     const diff: StateDiff = {
@@ -314,6 +316,7 @@ export const logCenter = {
       return { pass: actual === n, expected: n, actual }
     },
     blockCount(ctx: BContext, n: number): CheckResult {
+      if (!ctx.queries) return { pass: false, expected: n, actual: 'queries not available' }
       const actual = ctx.queries.getFrameBlocks().length
       return { pass: actual === n, expected: n, actual }
     },
@@ -322,6 +325,7 @@ export const logCenter = {
       return { pass: actual === id, expected: id, actual }
     },
     blockAt(ctx: BContext, pos: { x: number; y: number; z: number }, id?: string): CheckResult {
+      if (!ctx.queries) return { pass: false, expected: `block at (${pos.x},${pos.y},${pos.z}) id=${id ?? 'any'}`, actual: 'queries not available' }
       const blocks = ctx.queries.getFrameBlocks()
       const found = blocks.find(
         b => b.pos.x === pos.x && b.pos.y === pos.y && b.pos.z === pos.z &&
