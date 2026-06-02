@@ -4,9 +4,9 @@ import type { Tool, ToolGizmo, ToolContext } from './tool'
 import type { DetectedBounds } from './partDetect'
 import { detectFaceBounds, detectPartBounds } from './partDetect'
 import { computeBoxFrameBars, computeUnionAABB, aabbsIntersect, type AABB } from '@/pure/aabb'
-import type { SelectedEntity } from '@/workbench/selection'
-import type { OperatorType } from '@/workbench/operators/operatorType'
-import { OP_RESULT } from '@/workbench/operators/operatorType'
+import type { SelectedEntity } from '@/context/selection'
+import type { OperatorType } from '@/operators/operatorType'
+import { OP_RESULT } from '@/operators/operatorType'
 import * as THREE from 'three'
 
 // ── Module-level state (bridge between gizmo ↔ operators, only for face-accumulation tool) ──

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import { useBContext } from '@/workbench/context/bContext'
-import { logCenter } from '@/workbench/logging/LogCenter'
+import { useBContext } from '@/context/bContext'
+import { logCenter } from '@/logging/LogCenter'
 
 const bctx = useBContext()
 

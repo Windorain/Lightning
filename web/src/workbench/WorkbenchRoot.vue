@@ -12,12 +12,12 @@ import EmbedViewport from '@/embed/EmbedViewport.vue'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
-import { provideSelectionContext } from '@/workbench/selection'
+import { provideSelectionContext } from '@/context/selection'
 import { isEditingTarget } from '@/util/browser'
-import { provideEditHistory } from '@/workbench/editHistory'
+import { provideEditHistory } from '@/context/editHistory'
 import { provideToolRegistry } from '@/workbench/tools/registry'
-import { provideBContext, type BContextSettings } from '@/workbench/context/bContext'
-import { currentLang } from '@/workbench/i18n'
+import { provideBContext, type BContextSettings } from '@/context/bContext'
+import { currentLang } from '@/config/i18n'
 import { theme } from '@/workbench/composables/useNeiTheme'
 
 const FLOOR_TEMPLATES = [
@@ -63,9 +63,9 @@ function createBContextSettings(overrides?: {
 // Operators — registered via shared VM assembly
 import { createWorkbenchContext } from '@/workbench/context/workbenchContext'
 
-import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
-import { logCenter } from '@/workbench/logging/LogCenter'
-import { replaceDoc } from '@/workbench/context/replaceDoc'
+import { installUnifiedLogApi } from '@/logging/LogCenter'
+import { logCenter } from '@/logging/LogCenter'
+import { replaceDoc } from '@/context/replaceDoc'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
@@ -75,8 +75,8 @@ import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuIt
 import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 
 // Document format parsers — 注册到解析分发中心
-import { parserRegistry } from '@/workbench/context/parserRegistry'
-import { V2PlainParser, EnvelopeParser, WorldParser, StructureDataParser } from '@/workbench/parsers/builtinParsers'
+import { parserRegistry } from '@/context/parserRegistry'
+import { V2PlainParser, EnvelopeParser, WorldParser, StructureDataParser } from '@/parsers/builtinParsers'
 parserRegistry.register(V2PlainParser)
 parserRegistry.register(EnvelopeParser)
 parserRegistry.register(WorldParser)

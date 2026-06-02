@@ -1,8 +1,8 @@
-import type { BContext } from '@/workbench/context/bContext'
+import type { BContext } from '@/context/bContext'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout } from '../types/layout'
-import type { BlockRef } from '@/workbench/selection'
+import type { BlockRef } from '@/context/selection'
 import TooltipEditorPanel from './TooltipEditorPanel.vue'
 
 function selectedBlock(ctx: BContext): BlockRef | null {

@@ -1,5 +1,5 @@
-import type { BContext } from '@/workbench/context/bContext'
-import type { bScreen, ScrArea, ARegion, Rect } from '../types/screen'
+import type { BContext } from '@/context/bContext'
+import type { bScreen, ScrArea, Rect } from '../types/screen'
 import { RegionType } from '../types/screen'
 import { computeWidgetRects, type WidgetRect } from './widgetTree'
 import { rectContains, regionAt as _regionAt } from '@/pure/layout'

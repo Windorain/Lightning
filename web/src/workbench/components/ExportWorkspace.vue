@@ -4,8 +4,8 @@ import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocum
 import { copyTextToClipboard } from '@/util/browser'
 import { bakeIsometricStructurePngDataUrl } from '@/workbench/exportIsometricImage'
 import { formatUnknownError } from '@/util/formatUnknownError'
-import { useBContext } from '@/workbench/context/bContext'
-import { t } from '@/workbench/i18n'
+import { useBContext } from '@/context/bContext'
+import { t } from '@/config/i18n'
 
 const bctx = useBContext()
 const doc = computed(() => bctx.doc.value?.serialize() ?? null)

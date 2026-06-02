@@ -6,8 +6,8 @@ import LocalBundlePanel from '@/workbench/components/LocalBundlePanel.vue'
 import LocalFilePanel from '@/workbench/components/LocalFilePanel.vue'
 import SdeConnectionPanel from '@/workbench/components/SdeConnectionPanel.vue'
 import { listDevSceneIds } from '@/dev/devScenes'
-import type { WorkbenchWorkspaceMode } from '@/workbench/context/bContext'
-import { useBContext } from '@/workbench/context/bContext'
+import type { WorkbenchWorkspaceMode } from '@/context/bContext'
+import { useBContext } from '@/context/bContext'
 
 const bctx = useBContext()
 const settingsOpen = inject<Ref<boolean>>('workbenchSettingsOpen')!

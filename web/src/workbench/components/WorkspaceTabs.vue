@@ -4,7 +4,7 @@
  */
 defineProps<{ modelValue: 'preview' | 'wiki' | 'export' | 'materials' }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: 'preview' | 'wiki' | 'export' | 'materials'): void }>()
-import { t } from '@/workbench/i18n'
+import { t } from '@/config/i18n'
 
 const tabs = [
   { id: 'preview' as const },

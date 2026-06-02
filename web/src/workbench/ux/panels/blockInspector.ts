@@ -1,8 +1,8 @@
-import type { BContext } from '@/workbench/context/bContext'
+import type { BContext } from '@/context/bContext'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout, UILayoutItem } from '../types/layout'
-import type { BlockRef } from '@/workbench/selection'
+import type { BlockRef } from '@/context/selection'
 function singleBlockLayout(bctx: BContext, item: BlockRef): UILayoutItem[] {
   const paletteEntry = bctx.queries!.getBlockPaletteEntry(item.pos)
   const items: UILayoutItem[] = []

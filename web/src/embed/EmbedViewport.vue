@@ -9,8 +9,8 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useViewport, updateAnnotationOverlay, disposeAnnotationOverlay, getAnnotationOverlayGroup } from '@/shared/composables/useViewport'
-import { useBContext } from '@/workbench/context/bContext'
-import { createRenderAssets } from '@/workbench/context/renderAssets'
+import { useBContext } from '@/context/bContext'
+import { createRenderAssets } from '@/context/renderAssets'
 import ViewerCore, { type ViewerCoreReadyPayload } from '@/shared/viewport/ViewerCore.vue'
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'

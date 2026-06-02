@@ -4,21 +4,22 @@
  * 与 workbench 同构：EmbedRoot 创建 bctx → provide → EmbedViewport 消费。
  * 只包含 embed 实际需要的字段，workbench-only 子系统抛出明确错误。
  */
-import type { BContext, UIWorkspace } from '@/workbench/context/bContext'
+import type { BContext, UIWorkspace } from '@/context/bContext'
 import type { EmbedSettings } from '@/preview/previewConfig'
-import type { OperatorType } from '@/workbench/operators/operatorType'
-import { globalOperators } from '@/workbench/operators/operatorRegistry'
+import type { OperatorType } from '@/operators/operatorType'
+import { globalOperators } from '@/operators/operatorRegistry'
 import { ref } from 'vue'
-import type { SelectionContext } from '@/workbench/selection'
-import type { UndoManager } from '@/workbench/editHistory'
+import type { SelectionContext } from '@/context/selection'
+import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
-import { createCoreBContext } from '@/workbench/context/coreContext'
+import { createCoreBContext } from '@/context/coreContext'
 
 // Operators
-import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
-import { ResetViewOperator, CopyCameraFromEmbedOperator } from '@/embed/operators/viewOperators'
+import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/operators/builtin/viewOperators'
+import { ResetViewOperator } from '@/operators/builtin/resetView'
+import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
 
 function throwError(name: string): never {
   throw new Error(`embed: ${name} not available`)
@@ -76,4 +77,4 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
   return ctx
 }
 
-export { provideBContext as provideEmbedBContext } from '@/workbench/context/bContext'
+export { provideBContext as provideEmbedBContext } from '@/context/bContext'

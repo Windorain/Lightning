@@ -4,11 +4,11 @@
  * 复用 workbench 的 InputBinding/matchBinding 类型与匹配逻辑，
  * handler 通过 BContext 调用操作符（无拖拽手势检测、无上下文菜单、无 undo/redo 键绑定）。
  */
-import type { InputBinding } from '@/workbench/keymap'
-import { matchBinding } from '@/workbench/keymap'
-import type { RegionEventHandler } from '@/workbench/events/handlerTypes'
-import { HANDLER_TYPE } from '@/workbench/events/handlerTypes'
-import type { BContext } from '@/workbench/context/bContext'
+import type { InputBinding } from '@/keymap'
+import { matchBinding } from '@/keymap'
+import type { RegionEventHandler } from '@/events/handlerTypes'
+import { HANDLER_TYPE } from '@/events/handlerTypes'
+import type { BContext } from '@/context/bContext'
 
 export const EMBED_KEYMAP: InputBinding[] = [
   // Left mouse (primary)

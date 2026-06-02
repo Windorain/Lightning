@@ -3,8 +3,8 @@
  * 底栏状态条：模型信息 + 帧信息 + 渲染状态
  */
 import { computed, inject } from 'vue'
-import { bContextKey } from '@/workbench/context/bContext'
-import { logCenter, LOG_LEVEL } from '@/workbench/logging/LogCenter'
+import { bContextKey } from '@/context/bContext'
+import { logCenter, LOG_LEVEL } from '@/logging/LogCenter'
 
 const bctx = inject(bContextKey)
 

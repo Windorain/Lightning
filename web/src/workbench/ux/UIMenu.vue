@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useBContext } from '@/workbench/context/bContext'
+import { useBContext } from '@/context/bContext'
 import type { UIOperator, UILabel, UISeparator } from './types/layout'
 
 defineProps<{

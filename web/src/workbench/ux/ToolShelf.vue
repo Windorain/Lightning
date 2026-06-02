@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useBContext } from '@/workbench/context/bContext'
+import { useBContext } from '@/context/bContext'
 import ToolGroupButton from './ToolGroupButton.vue'
 import type { Tool } from '@/workbench/tools/tool'
 

@@ -1,5 +1,5 @@
-import type { BContext } from '@/workbench/context/bContext'
-import type { UIWorkspace } from '@/workbench/context/bContext'
+import type { BContext } from '@/context/bContext'
+import type { UIWorkspace } from '@/context/bContext'
 import type { UILayout } from './layout'
 import type { SpaceType, RegionType } from './screen'
 import type { Component } from 'vue'

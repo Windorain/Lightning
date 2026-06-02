@@ -1,8 +1,8 @@
-import type { BContext } from '@/workbench/context/bContext'
+import type { BContext } from '@/context/bContext'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout } from '../types/layout'
-import { t, currentLang } from '@/workbench/i18n'
+import { t, currentLang } from '@/config/i18n'
 
 export const menuBarPanel: PanelDeclaration = {
   id: 'menu-bar',

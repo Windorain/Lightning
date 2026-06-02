@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch } from 'vue'
-import type { MaterialQueryItem } from '@/workbench/context/bContext'
-import { useBContext } from '@/workbench/context/bContext'
+import type { MaterialQueryItem } from '@/context/bContext'
+import { useBContext } from '@/context/bContext'
 import OperatorBtn from '@/workbench/ux/OperatorBtn.vue'
 import { parsePngDims } from '@/util/pngDims'
 

@@ -3,8 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 
 import { listDevSceneIds } from '@/dev/devScenes'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
-import { useBContext } from '@/workbench/context/bContext'
-import { logCenter } from '@/workbench/logging/LogCenter'
+import { useBContext } from '@/context/bContext'
+import { logCenter } from '@/logging/LogCenter'
 
 const bctx = useBContext()
 

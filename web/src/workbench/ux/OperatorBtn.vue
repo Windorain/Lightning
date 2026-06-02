@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useBContext } from '@/workbench/context/bContext'
+import { useBContext } from '@/context/bContext'
 
 const props = defineProps<{
   opId: string

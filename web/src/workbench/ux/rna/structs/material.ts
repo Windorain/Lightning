@@ -1,5 +1,5 @@
 import type { RNAStruct } from '../types'
-import type { MaterialQueryItem } from '@/workbench/context/bContext'
+import type { MaterialQueryItem } from '@/context/bContext'
 
 export const materialRNA: RNAStruct = {
   name: 'Material',

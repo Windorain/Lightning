@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { sdeGetWorkspaceDocument } from '@/workbench/sdeApi'
-import { parserRegistry } from '@/workbench/context/parserRegistry'
-import { useBContext } from '@/workbench/context/bContext'
-import { logCenter } from '@/workbench/logging/LogCenter'
-import { replaceDoc } from '@/workbench/context/replaceDoc'
+import { parserRegistry } from '@/context/parserRegistry'
+import { useBContext } from '@/context/bContext'
+import { logCenter } from '@/logging/LogCenter'
+import { replaceDoc } from '@/context/replaceDoc'
 
 const bctx = useBContext()
 
