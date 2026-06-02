@@ -4,20 +4,17 @@
  * 与 workbench 同构：EmbedRoot 创建 bctx → provide → EmbedViewport 消费。
  * 只包含 embed 实际需要的字段，workbench-only 子系统抛出明确错误。
  */
-import type { BContext, ConnectionState, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
-import { createViewportManager } from '@/workbench/context/bContext'
-import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
+import type { BContext, UIWorkspace } from '@/workbench/context/bContext'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
-import { EventDispatcherImpl } from '@/workbench/events/dispatcher'
-import { reactive, ref } from 'vue'
-import type { Ref } from 'vue'
+import { ref } from 'vue'
 import type { SelectionContext } from '@/workbench/selection'
 import type { UndoManager } from '@/workbench/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
+import { createCoreBContext } from '@/workbench/context/coreContext'
 
 // Operators
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/workbench/operators/builtin/viewOperators'
@@ -28,26 +25,7 @@ function throwError(name: string): never {
 }
 
 export function createEmbedContext(settings: EmbedSettings): BContext {
-  const viewports = createViewportManager()
-  viewports.register('r-embed')
-
-  const docRef: Ref<RuntimeDocument | null> = ref(null)
-  const dirtyRef = ref(false)
-  const structEpochRef = ref(0)
-  const currentWorldFrameIndexRef = ref(0)
-  const workspaceModeRef: Ref<WorkbenchWorkspaceMode> = ref('local-file')
-  const uiWorkspaceRef: Ref<UIWorkspace> = ref('wiki')
-  const localFileNameRef = ref<string | null>(null)
-  const connection = reactive<ConnectionState>({
-    apiBase: '',
-    token: '',
-    connected: null,
-    exports: [],
-    exportsLoading: false,
-    selectedExportName: null,
-  })
-
-  const operators = {
+  const embedOperators = {
     exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(ctx, id, props),
     invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) =>
       globalOperators.invoke(ctx, id, props, event as PointerEvent | KeyboardEvent, regionId),
@@ -56,17 +34,12 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
     register: (op: OperatorType) => globalOperators.register(op),
   }
 
-  // Minimal bctx — embed 实际使用的字段
-  const ctx: BContext = {
-    doc: docRef,
-    dirty: dirtyRef,
-    structEpoch: structEpochRef,
-    currentWorldFrameIndex: currentWorldFrameIndexRef,
-    workspaceMode: workspaceModeRef,
-    uiWorkspace: uiWorkspaceRef,
-    localFileName: localFileNameRef,
+  const core = createCoreBContext(embedOperators)
+  core.viewports.register('r-embed')
 
-    connection,
+  const ctx: BContext = {
+    ...core,
+    uiWorkspace: ref<UIWorkspace>('wiki'),
 
     get selection(): SelectionContext { return throwError('selection') },
     get editHistory(): UndoManager { return throwError('editHistory') },
@@ -78,14 +51,9 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
       dragSensitivity: 0.05, snapEnabled: true,
     },
 
-    operators,
-    eventDispatcher: new EventDispatcherImpl(),
-
     get log() { return throwError('log') },
-    wikiConfig: {},
 
-    viewports,
-    get viewport() { return viewports.active.value! },
+    get viewport() { return core.viewports.active.value! },
 
     get wm(): any { return {} },
     get screen() { return null },

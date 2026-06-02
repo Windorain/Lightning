@@ -1,22 +1,21 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ViewerCore, { type ViewerCoreReadyPayload } from '@/shared/viewport/ViewerCore.vue'
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
+import { useViewport, updateAnnotationOverlay, disposeAnnotationOverlay } from '@/shared/composables/useViewport'
 import { useSelectionContext, type BlockRef } from '@/workbench/selection'
 import { useBContext } from '@/workbench/context/bContext'
 import { usePreferences } from '@/preview/preferences'
-import { createRenderAssets } from '@/workbench/context/renderAssets'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { structureRowToWorldY } from '@/pure/vec'
 import { createToolGizmoHandler } from '@/workbench/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/workbench/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
-import { type Annotation, annotationIsOnLayer } from '@/render/data/annotationTypes'
+import { type Annotation } from '@/render/data/annotationTypes'
 import { isEditingTarget } from '@/util/browser'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
-import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 import ToolHintsBar from '@/workbench/ux/ToolHintsBar.vue'
 import type { ToolHint } from '@/workbench/tools/tool'
 import * as THREE from 'three'
@@ -28,17 +27,19 @@ const prefs = usePreferences()
 const VIEWPORT_REGION_ID = 'r-viewport'
 const vpSlot = bctx.viewports.get(VIEWPORT_REGION_ID) ?? bctx.viewports.register(VIEWPORT_REGION_ID)
 
-// ---- 本地 ref —— 全部 renderAssets 自管，不挂 bctx ----
-const sceneRef = shallowRef<THREE.Scene | null>(null)
-const loadStatus = ref<'loading' | 'ok' | 'error'>('loading')
-const meshBusy = ref(false)
-const blockIconCache = shallowRef<import('@/render/interaction/blockIconCache').BlockIconCache | null>(null)
-const tooltipPalette = shallowRef<string[]>([])
-const worldFrameIndex = ref(0)
-const layerWorldY = ref(-1)
-const framesPlaybackIsPlaying = ref(false)
-
-const docRef = computed(() => bctx.doc.value)
+// ---- Viewport composable (shared with EmbedViewport) ----
+const vp = useViewport({
+  bctx,
+  structureDefinition: vpSlot.definition,
+  mainMeshGroup: vpSlot.contentGroup,
+  blockIconCacheOptions: {},
+})
+const {
+  loadStatus, meshBusy,
+  structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY,
+  framesPlaybackIsPlaying,
+  renderAssets, outlinePass,
+} = vp
 
 const annotations = computed<Annotation[]>(() => {
   const doc = bctx.doc.value
@@ -47,31 +48,10 @@ const annotations = computed<Annotation[]>(() => {
   return (plain.annotations ?? []) as Annotation[]
 })
 
-// ---- renderAssets（viewport 本地） ----
-const renderAssets = createRenderAssets({
-  docRef,
-  loadStatus,
-  meshBusy,
-  blockIconCache,
-  tooltipPalette,
-  structureDefinition: vpSlot.definition,
-  mainMeshGroup: vpSlot.contentGroup,
-  sceneRef,
-  worldFrameIndex,
-  layerWorldY,
-  framesPlaybackIsPlaying,
-  blockIconCacheOptions: {},
-})
-
 const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
   hasWorldMultiFrame, worldFrameCount,
 } = renderAssets.computed
-
-// ---- structEpoch → 重建 mesh ----
-watch(() => bctx.structEpoch.value, () => {
-  void renderAssets.rebuildAll()
-})
 
 // ---- Frame index 同步：local worldFrameIndex → operator → bctx.currentWorldFrameIndex ----
 // setCurrentWorldFrame 是帧切换的权威路径（scrubber/playback 直接调用），
@@ -81,8 +61,6 @@ watch(worldFrameIndex, (i) => {
   bctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i })
 })
 
-const structureDefinition = vpSlot.definition
-const mainMeshGroup = vpSlot.contentGroup
 const materialLibrary = renderAssets.textureCache
 
 type BottomTab = 'frame' | 'layer'
@@ -110,17 +88,13 @@ function createToolContext(): ToolContext {
 
 /* ---- Viewport events ---- */
 async function onViewportReady({ mainScene, overlayScene: _overlayScene, layers, camera, domElement, orbitTarget, renderer: vpRenderer }: ViewerCoreReadyPayload): Promise<void> {
-  _annoHash = ''  // reset after tab switch / remount
   bctx.viewports.activeId.value = VIEWPORT_REGION_ID
   renderAssets.registerScene(mainScene)
+  renderAssets.init()
 
-  // Create and register screen-space outline pass
-  const outlinePass = new SelectionOutlinePass(
-    new THREE.Vector2(domElement.clientWidth, domElement.clientHeight),
-  )
+  // Register screen-space outline pass
   outlinePass.setCamera(camera as THREE.Camera)
   vpRenderer.setOutlinePass(outlinePass)
-  _outlinePass = outlinePass
 
   try { await renderAssets.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
 
@@ -197,7 +171,6 @@ const toolHints = computed<ToolHint[]>(() => {
 
 // ---- Selection highlight (screen-space outline) ----
 const highlightProvider = new SelectionHighlightProvider()
-let _outlinePass: SelectionOutlinePass | null = null
 
 // ---- Hover highlight ----
 const hoveredBlockRef = ref<BlockRef | null>(null)
@@ -217,51 +190,10 @@ function onViewportHover(
   }
 }
 
-// ---- Annotation overlay ----
-let _annoGroup: THREE.Group | null = null
-let _annoHash = ''
-let _annoPending = false
-
-function updateAnnotationOverlay(): void {
-  const doc = bctx.doc.value as Record<string, any> | null
-  let annos: Annotation[] = doc?.annotations ?? []
-
-  const mode = layerPreviewMode.value
-  if (mode !== 'all') {
-    const gh = gridHeight.value
-    annos = annos.filter(a => annotationIsOnLayer(a, mode.worldY, gh))
-  }
-
-  const maxUpdated = annos.length > 0
-    ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
-    : 0
-  const layerKey = mode === 'all' ? 'all' : `l${mode.worldY}`
-  const hash = annos.length > 0 ? `${layerKey}_${annos.length}_${maxUpdated}` : 'empty'
-  if (hash === _annoHash || _annoPending) return
-  _annoHash = hash
-  _annoPending = true
-
-  renderAssets.rebuildAnnotationOverlay(annos).then(group => {
-    _annoPending = false
-    if (_annoGroup) {
-      bctx.viewport.overlayGroup.value?.remove(_annoGroup)
-      _annoGroup.traverse((c) => {
-        if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
-          c.geometry?.dispose()
-          ;(c.material as THREE.Material)?.dispose()
-        }
-      })
-      _annoGroup = null
-    }
-    if (group) {
-      _annoGroup = group
-      bctx.viewport.overlayGroup.value?.add(_annoGroup)
-    }
-  }).catch(() => { _annoPending = false })
-}
+// ---- Annotation overlay (shared via useViewport composable) ----
 
 function updateSelectionHighlight(): void {
-  if (!_outlinePass) return
+  if (!outlinePass) return
   const q = bctx.queries
   if (!q) return
 
@@ -269,13 +201,13 @@ function updateSelectionHighlight(): void {
   const hov = hoveredBlockRef.value
   if (!hov || !prefs.highlightOnHover) {
     // No hover: selection-only (existing behavior)
-    if (items.size === 0 || items.size > 500) { _outlinePass.setMaskMeshes([]); return }
+    if (items.size === 0 || items.size > 500) { outlinePass.setMaskMeshes([]); return }
     const masks = highlightProvider.build(
       items,
       (pos) => q.getBlockGeometry(pos),
       (pos) => q.gridCenterWorld(pos),
     )
-    _outlinePass.setMaskMeshes(masks)
+    outlinePass.setMaskMeshes(masks)
     return
   }
 
@@ -286,13 +218,13 @@ function updateSelectionHighlight(): void {
   )
   if (!dup) entities.add({ kind: 'block', ref: hov })
 
-  if (entities.size > 500) { _outlinePass.setMaskMeshes([]); return }
+  if (entities.size > 500) { outlinePass.setMaskMeshes([]); return }
   const masks = highlightProvider.build(
     entities,
     (pos) => q.getBlockGeometry(pos),
     (pos) => q.gridCenterWorld(pos),
   )
-  _outlinePass.setMaskMeshes(masks)
+  outlinePass.setMaskMeshes(masks)
 }
 
 function updateOverlay(): void {
@@ -301,7 +233,7 @@ function updateOverlay(): void {
     gizmo.render(toolCtx)
   }
   updateSelectionHighlight()
-  updateAnnotationOverlay()
+  updateAnnotationOverlay(bctx, renderAssets)
 
   if (bctx.viewport.gizmo.value && bctx.toolRegistry.activeTool.value?.id === 'move') {
     const gp = bctx.viewport.gizmo.value.root.position
@@ -355,12 +287,11 @@ onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())
   _alive = false
   if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
-  if (_outlinePass) {
-    _outlinePass.dispose()
-    _outlinePass = null
-  }
+  outlinePass.dispose()
+  disposeAnnotationOverlay()
   highlightProvider.dispose()
   renderAssets.disposeCachesAndLibrary()
+  renderAssets.dispose()
 })
 </script>
 

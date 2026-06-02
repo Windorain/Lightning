@@ -15,6 +15,7 @@ import { formatUnknownError } from '@/util/formatUnknownError'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
 import { V2PlainParser, EnvelopeParser, WorldParser, StructureDataParser } from '@/workbench/parsers/builtinParsers'
 import { createEmbedContext, provideEmbedBContext } from '@/embed/embedBContext'
+import { replaceDoc } from '@/workbench/context/replaceDoc'
 import EmbedViewport from '@/embed/EmbedViewport.vue'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import type { View3DFeatures } from '@/preview/previewConfig'
@@ -68,8 +69,7 @@ async function load() {
       loadError.value = `无法解析文档（format: ${result.parser?.formatName ?? '未知'}）`
       return
     }
-    bctx.doc.value = result.document
-    bctx.structEpoch.value += 1
+    replaceDoc(bctx, result.document)
   } catch (e) {
     loadError.value = formatUnknownError(e)
     console.error('[EmbedRoot] parse', e)

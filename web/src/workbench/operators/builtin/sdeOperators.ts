@@ -7,6 +7,7 @@ import {
 } from '@/workbench/sdeApi'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
 import { logCenter } from '@/workbench/logging/LogCenter'
+import { replaceDoc } from '@/workbench/context/replaceDoc'
 
 export const SDEConnectOperator: OperatorType = {
   id: 'OPERATOR_SDE_CONNECT',
@@ -51,18 +52,17 @@ export const SDELoadExportOperator: OperatorType = {
     const data = await sdeGetExportFile(bctx.connection.apiBase, bctx.connection.token, name)
     bctx.connection.selectedExportName = name
     const result = await parserRegistry.detectAndParse(data)
-    bctx.doc.value = result.document ?? null
     if (result.document) {
+      replaceDoc(bctx, result.document)
       bctx.currentWorldFrameIndex.value = 0
-      bctx.structEpoch.value += 1
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       logCenter.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
+      bctx.doc.value = null
       logCenter.error('场景加载', result.error ?? '未知错误', { fileName: name, error: result.error })
     }
     bctx.workspaceMode.value = 'sde'
     bctx.localFileName.value = name
-    bctx.dirty.value = false
   },
 }
 
@@ -82,6 +82,5 @@ export const SDEPushOperator: OperatorType = {
       bctx.connection.token,
       bctx.doc.value.serialize() as Record<string, unknown>,
     )
-    bctx.dirty.value = false
   },
 }

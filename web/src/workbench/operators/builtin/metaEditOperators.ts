@@ -21,7 +21,7 @@ export const SceneMetaEditOperator: OperatorType = {
     } else {
       doc[field] = value
     }
-    bctx.dirty.value = true
+    // dirty is now derived from undo stack (editHistory.canUndo)
   },
 }
 
@@ -59,6 +59,6 @@ export const TooltipEditOperator: OperatorType = {
       grid[pos.z][pos.y][pos.x] = text ? idx : -1
     }
 
-    bctx.dirty.value = true
+    // dirty is now derived from undo stack (editHistory.canUndo)
   },
 }

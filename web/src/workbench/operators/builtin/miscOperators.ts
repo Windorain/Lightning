@@ -108,7 +108,6 @@ export const SetWorkspaceModeOperator: OperatorType = {
     const mode = _props.mode as WorkbenchWorkspaceMode
     if (bctx.workspaceMode.value === mode) return
     bctx.doc.value = null
-    bctx.dirty.value = false
     bctx.structEpoch.value = 0
     bctx.currentWorldFrameIndex.value = 0
     bctx.localFileName.value = null

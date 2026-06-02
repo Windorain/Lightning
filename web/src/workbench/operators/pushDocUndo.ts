@@ -10,6 +10,7 @@
 import { generateId } from '@/pure/id'
 import type { BContext } from '@/workbench/context/bContext'
 import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
+import { replaceDoc } from '@/workbench/context/replaceDoc'
 
 export function pushDocUndo(
   bctx: BContext,
@@ -22,7 +23,7 @@ export function pushDocUndo(
     id: generateId('op_'),
     label,
     timestamp: Date.now(),
-    execute: () => { bctx.doc.value = after; bctx.structEpoch.value += 1 },
-    undo: () => { bctx.doc.value = before; bctx.structEpoch.value += 1 },
+    execute: () => { replaceDoc(bctx, after) },
+    undo: () => { replaceDoc(bctx, before) },
   })
 }

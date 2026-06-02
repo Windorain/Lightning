@@ -65,6 +65,7 @@ import { createWorkbenchContext } from '@/workbench/context/workbenchContext'
 
 import { installUnifiedLogApi } from '@/workbench/logging/LogCenter'
 import { logCenter } from '@/workbench/logging/LogCenter'
+import { replaceDoc } from '@/workbench/context/replaceDoc'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
@@ -215,8 +216,7 @@ onMounted(async () => {
         if (data) {
           const result = await parserRegistry.detectAndParse(data)
           if (result.document) {
-            bctx.doc.value = result.document
-            bctx.structEpoch.value += 1
+            replaceDoc(bctx, result.document)
             bctx.workspaceMode.value = 'sde'
           }
         }

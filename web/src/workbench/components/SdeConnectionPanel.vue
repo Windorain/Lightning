@@ -4,6 +4,7 @@ import { sdeGetWorkspaceDocument } from '@/workbench/sdeApi'
 import { parserRegistry } from '@/workbench/context/parserRegistry'
 import { useBContext } from '@/workbench/context/bContext'
 import { logCenter } from '@/workbench/logging/LogCenter'
+import { replaceDoc } from '@/workbench/context/replaceDoc'
 
 const bctx = useBContext()
 
@@ -22,11 +23,9 @@ async function onConnect(): Promise<void> {
   bctx.editHistory.clear()
   const result = await parserRegistry.detectAndParse(data)
   if (result.document) {
-    bctx.doc.value = result.document
+    replaceDoc(bctx, result.document)
     bctx.currentWorldFrameIndex.value = 0
-    bctx.structEpoch.value += 1
     bctx.workspaceMode.value = 'sde'
-    bctx.dirty.value = false
   }
 }
 </script>

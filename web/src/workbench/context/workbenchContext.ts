@@ -8,21 +8,18 @@
  * 由调用方创建后传入——生产用 provide* 工厂，测试用 create* 工厂。
  */
 
-import { reactive, ref } from 'vue'
-import type { Ref } from 'vue'
-import type { BContext, ConnectionState, WorkbenchWorkspaceMode, UIWorkspace } from '@/workbench/context/bContext'
-import { createViewportManager } from '@/workbench/context/bContext'
+import { computed } from 'vue'
+import type { BContext } from '@/workbench/context/bContext'
 import type { SelectionContext } from '@/workbench/selection'
 import type { UndoManager } from '@/workbench/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { BContextSettings } from '@/workbench/context/bContext'
-import type { RuntimeDocument } from '@/workbench/context/runtimeDocument'
 import type { bScreen } from '@/workbench/ux/types/screen'
 import { globalOperators } from '@/workbench/operators/operatorRegistry'
 import type { OperatorType } from '@/workbench/operators/operatorType'
-import { eventDispatcher } from '@/workbench/events/dispatcher'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { wikiConfig } from '@/workbench/wikiConfig'
+import { createCoreBContext } from './coreContext'
 import { createProductionQueries } from '@/workbench/queries/index'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA, materialRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOfByOperator, boundsOfByRNAPath } from '@/workbench/ux/layout'
@@ -95,27 +92,18 @@ export interface WorkbenchContextResult {
 export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchContextResult {
   const { selection, editHistory, toolRegistry, settings } = deps
 
-  // === 场景核心数据 ===
-  const doc: Ref<RuntimeDocument | null> = ref(null)
-  const dirty = ref(false)
-  const structEpoch = ref(0)
-  const currentWorldFrameIndex = ref(0)
-  const workspaceMode = ref<WorkbenchWorkspaceMode>('local-file')
-  const uiWorkspace = ref<UIWorkspace>('preview')
-  const localFileName = ref<string | null>(null)
+  // ---- operators (forward ref through bctx) ----
+  const bctxOperators = {
+    exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(bctx, id, props),
+    invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) =>
+      globalOperators.invoke(bctx, id, props, event as PointerEvent | KeyboardEvent, regionId),
+    find: (id: string) => globalOperators.find(id),
+    all: () => globalOperators.all(),
+    register: (op: OperatorType) => globalOperators.register(op),
+  }
 
-  // === 连接数据（reactive ConnectionState） ===
-  const connection = reactive<ConnectionState>({
-    apiBase: '',
-    token: '',
-    connected: null,
-    exports: [],
-    exportsLoading: false,
-    selectedExportName: null,
-  })
-
-  // ---- 所有独立的 ref / computed / 对象先创建 ----
-  const viewports = createViewportManager()
+  const core = createCoreBContext(bctxOperators)
+  const { viewports, eventDispatcher } = core
 
   // RNA
   const rna = createRNARegistry()
@@ -165,30 +153,13 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
 
   // ---- 原子构造 bctx（一次性全部填入，不用 as unknown / as any 后补） ----
   const bctx: BContext = {
-    // === 新平铺字段 ===
-    doc,
-    dirty,
-    structEpoch,
-    currentWorldFrameIndex,
-    workspaceMode,
-    uiWorkspace,
-    localFileName,
-    connection,
+    ...core,
+    dirty: computed(() => editHistory.canUndo.value),
 
     selection,
     editHistory,
     toolRegistry,
     get viewport() { return viewports.active.value! },
-    viewports,
-    operators: {
-      exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(bctx, id, props),
-      invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) =>
-        globalOperators.invoke(bctx, id, props, event as PointerEvent | KeyboardEvent, regionId),
-      find: (id: string) => globalOperators.find(id),
-      all: () => globalOperators.all(),
-      register: (op: OperatorType) => globalOperators.register(op),
-    },
-    eventDispatcher,
     log: logCenter,
     wikiConfig,
     settings,

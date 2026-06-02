@@ -25,7 +25,7 @@ export const AnnotationCreateOperator: OperatorType = {
 
     if (!doc.annotations) doc.annotations = []
     doc.annotations.push(annotation)
-    bctx.dirty.value = true
+    // dirty is now derived from undo stack (editHistory.canUndo)
     bctx.selection.active.value = annotation.id
   },
 }
@@ -53,7 +53,7 @@ export const AnnotationUpdateOperator: OperatorType = {
 
     // Mutate in place so the draft reference stays bound to doc.annotations
     Object.assign(annotations[idx], patch, { updated_at: Date.now() })
-    bctx.dirty.value = true
+    // dirty is now derived from undo stack (editHistory.canUndo)
   },
 }
 
@@ -78,7 +78,7 @@ export const AnnotationDeleteOperator: OperatorType = {
     if (idx === -1) return
 
     annotations.splice(idx, 1)
-    bctx.dirty.value = true
+    // dirty is now derived from undo stack (editHistory.canUndo)
     bctx.selection.active.value = null
   },
 }

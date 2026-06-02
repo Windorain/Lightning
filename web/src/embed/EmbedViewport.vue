@@ -7,16 +7,16 @@
  * - 本地 createRenderAssets 管理全部渲染状态
  * - 叶子组件全部 props/emits
  */
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useViewport, updateAnnotationOverlay, disposeAnnotationOverlay, getAnnotationOverlayGroup } from '@/shared/composables/useViewport'
 import { useBContext } from '@/workbench/context/bContext'
-import { createRenderAssets } from '@/workbench/context/renderAssets'
 import ViewerCore, { type ViewerCoreReadyPayload } from '@/shared/viewport/ViewerCore.vue'
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
-import { type Annotation, annotationIsOnLayer } from '@/render/data/annotationTypes'
+import { type Annotation } from '@/render/data/annotationTypes'
 import * as THREE from 'three'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { InitialCamera } from '@/preview/previewConfig'
@@ -28,10 +28,8 @@ import { usePreferences } from '@/preview/preferences'
 import { useEmbedHover } from '@/embed/embedHover'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { renderTooltipHtml } from '@/workbench/renderTooltipHtml'
-import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 import { structureRowToWorldY } from '@/pure/vec'
 import type { BakedQuad } from '@/render/schema/types'
-import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 
 const props = defineProps<{
   settings?: EmbedSettings
@@ -43,35 +41,23 @@ const prefs = usePreferences()
 const EMBED_REGION = 'r-embed'
 const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED_REGION)
 
-// ---- 本地 ref —— 全部 renderAssets 自管 ----
-const sceneRef = shallowRef<THREE.Scene | null>(null)
-const loadStatus = ref<'loading' | 'ok' | 'error'>('loading')
-const meshBusy = ref(false)
-const blockIconCache = shallowRef<BlockIconCache | null>(null)
-const tooltipPalette = shallowRef<string[]>([])
-const worldFrameIndex = ref(0)
-const layerWorldY = ref(props.settings?.initialLayerWorldY ?? -1)
-const framesPlaybackIsPlaying = ref(false)
-const showSettingsPanel = ref(false)
-
-const docRef = computed(() => bctx.doc.value)
-
-// ---- renderAssets ----
-const renderAssets = createRenderAssets({
-  docRef,
-  loadStatus,
-  meshBusy,
-  blockIconCache,
-  tooltipPalette,
+// ---- Viewport composable (shared with WorkbenchViewport) ----
+const vp = useViewport({
+  bctx,
   structureDefinition: vpSlot.definition,
   mainMeshGroup: vpSlot.contentGroup,
-  sceneRef,
-  worldFrameIndex,
-  layerWorldY,
-  framesPlaybackIsPlaying,
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
+  initialLayerWorldY: props.settings?.initialLayerWorldY,
 })
+const {
+  loadStatus, meshBusy, blockIconCache, tooltipPalette,
+  structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY,
+  framesPlaybackIsPlaying,
+  renderAssets, outlinePass,
+} = vp
+
+const showSettingsPanel = ref(false)
 
 const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
@@ -79,13 +65,6 @@ const {
 } = renderAssets.computed
 
 const materialLibrary = renderAssets.textureCache
-const structureDefinition = computed(() => vpSlot.definition.value)
-const mainMeshGroup = computed(() => vpSlot.contentGroup.value)
-
-// ---- structEpoch → 重建 mesh（Wiki 模式同步） ----
-watch(() => bctx.structEpoch.value, () => {
-  void renderAssets.rebuildAll()
-})
 
 // ---- Hover / tooltip (unified) ----
 const { hover, setViewportBlock, setSidebarBlock, setAnnotation, setMeta } = useEmbedHover()
@@ -93,7 +72,6 @@ const viewerCoreRef = ref<InstanceType<typeof ViewerCore> | null>(null)
 const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
 const selectedBlockId = ref<string | null>(null)
-let _outlinePass: SelectionOutlinePass | null = null
 
 function buildBlockMaskMesh(
   quads: BakedQuad[],
@@ -168,7 +146,6 @@ function rebuildSelectionMasks(blockId: string | null): void {
 }
 
 function flushHighlight(): void {
-  if (!_outlinePass) return
   const masks = [..._selectionMasks]
 
   const hov = hoveredVoxel.value
@@ -201,7 +178,7 @@ function flushHighlight(): void {
     }
   }
 
-  _outlinePass.setMaskMeshes(masks)
+  outlinePass.setMaskMeshes(masks)
 }
 
 function onSidebarSelectBlock(blockId: string): void {
@@ -310,71 +287,23 @@ const statusSummary = computed(() => {
 })
 
 // ---- Viewport events ----
-let _annoGroup: THREE.Group | null = null
-let _annoHash = ''
-let _annoPending = false
 let _alive = true
 let _annoRafId: number | undefined
 let unregHandlers: Array<() => void> = []
-
-function updateAnnotationOverlay(): void {
-  const doc = bctx.doc.value
-  if (!doc) return
-  const plain = doc.serialize() as Record<string, any>
-  let annos: Annotation[] = plain.annotations ?? []
-
-  const mode = layerPreviewMode.value
-  if (mode !== 'all') {
-    const gh = gridHeight.value
-    annos = annos.filter(a => annotationIsOnLayer(a, mode.worldY, gh))
-  }
-
-  const maxUpdated = annos.length > 0
-    ? annos.reduce((max, a) => Math.max(max, a.updated_at), 0)
-    : 0
-  const layerKey = mode === 'all' ? 'all' : `l${mode.worldY}`
-  const hash = annos.length > 0 ? `${layerKey}_${annos.length}_${maxUpdated}` : 'empty'
-  if (hash === _annoHash || _annoPending) return
-  _annoHash = hash
-  _annoPending = true
-
-  renderAssets.rebuildAnnotationOverlay(annos).then(group => {
-    _annoPending = false
-    if (_annoGroup) {
-      vpSlot.overlayGroup.value?.remove(_annoGroup)
-      _annoGroup.traverse((c) => {
-        if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
-          c.geometry?.dispose()
-          ;(c.material as THREE.Material)?.dispose()
-        }
-      })
-      _annoGroup = null
-    }
-    if (group) {
-      _annoGroup = group
-      if (prefs.showAnnotations) {
-        vpSlot.overlayGroup.value?.add(_annoGroup)
-      }
-    }
-  }).catch(() => { _annoPending = false })
-}
 
 function onViewportReady(payload: ViewerCoreReadyPayload): void {
   // Activate embed viewport slot so bctx.viewport (singular) resolves to this one
   bctx.viewports.activeId.value = EMBED_REGION
 
-  // Screen-space outline pass for block highlight
-  const outlinePass = new SelectionOutlinePass(
-    new THREE.Vector2(payload.domElement.clientWidth, payload.domElement.clientHeight),
-  )
+  // Register screen-space outline pass
   outlinePass.setCamera(payload.camera as THREE.Camera)
   payload.renderer.setOutlinePass(outlinePass)
-  _outlinePass = outlinePass
 
   renderAssets.registerScene(payload.mainScene)
+  renderAssets.init()
   renderAssets.rebuildContentMesh().catch(e => { console.error('[EmbedViewport] rebuildContentMesh', e) })
 
-  updateAnnotationOverlay()
+  updateAnnotationOverlay(bctx, renderAssets, prefs.showAnnotations)
 
   vpSlot.orbitTarget.value = payload.orbitTarget
   vpSlot.camera.value = payload.camera
@@ -413,7 +342,7 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
   function rafTick() {
     if (!_alive) return
     _annoRafId = requestAnimationFrame(rafTick)
-    updateAnnotationOverlay()
+    updateAnnotationOverlay(bctx, renderAssets, prefs.showAnnotations)
     flushHighlight()
   }
   _annoRafId = requestAnimationFrame(rafTick)
@@ -457,11 +386,12 @@ const annotations = computed<Annotation[]>(() => {
 
 // ---- Annotation pick & overlay visibility ----
 watch(() => prefs.showAnnotations, (v) => {
-  if (!_annoGroup) return
+  const g = getAnnotationOverlayGroup()
+  if (!g) return
   if (v) {
-    vpSlot.overlayGroup.value?.add(_annoGroup)
+    vpSlot.overlayGroup.value?.add(g)
   } else {
-    vpSlot.overlayGroup.value?.remove(_annoGroup)
+    vpSlot.overlayGroup.value?.remove(g)
   }
 })
 
@@ -529,20 +459,10 @@ onBeforeUnmount(() => {
   bctx.eventDispatcher.unregisterRegion(EMBED_REGION)
   _alive = false
   if (_annoRafId) cancelAnimationFrame(_annoRafId)
-  if (_annoGroup) {
-    _annoGroup.traverse((c) => {
-      if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
-        c.geometry?.dispose()
-        ;(c.material as THREE.Material)?.dispose()
-      }
-    })
-    _annoGroup = null
-  }
-  if (_outlinePass) {
-    _outlinePass.dispose()
-    _outlinePass = null
-  }
+  outlinePass.dispose()
+  disposeAnnotationOverlay()
   renderAssets.disposeCachesAndLibrary()
+  renderAssets.dispose()
 })
 </script>
 

@@ -6,6 +6,7 @@ import { downloadJson } from '@/util/browser'
 import { suggestedJsonBaseName } from '@/workbench/utils/fileNaming'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
+import { replaceDoc } from '@/workbench/context/replaceDoc'
 
 function pickFile(): Promise<File | undefined> {
   return new Promise(resolve => {
@@ -48,9 +49,7 @@ export const NewSceneOperator: OperatorType = {
     bctx.selection.clear()
     bctx.editHistory.clear()
     const doc = RuntimeDocument.empty()
-    bctx.doc.value = doc
-    bctx.dirty.value = false
-    bctx.structEpoch.value += 1
+    replaceDoc(bctx, doc)
   },
 }
 
@@ -84,18 +83,17 @@ export const OpenSceneOperator: OperatorType = {
       throw new Error(`JSON 解析失败：${e}`)
     }
     const result = await parserRegistry.detectAndParse(data)
-    bctx.doc.value = result.document ?? null
     if (result.document) {
+      replaceDoc(bctx, result.document)
       bctx.currentWorldFrameIndex.value = 0
-      bctx.structEpoch.value += 1
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       logCenter.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
+      bctx.doc.value = null
       logCenter.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
     }
     bctx.localFileName.value = file.name
     bctx.workspaceMode.value = 'local-file'
-    bctx.dirty.value = false
   },
 }
 
@@ -113,7 +111,6 @@ export const SaveFileOperator: OperatorType = {
     if (!doc) return
     const baseName = suggestedJsonBaseName(bctx.localFileName.value, 'structure-export')
     downloadJson(baseName, doc, true)
-    bctx.dirty.value = false
   },
 }
 
@@ -133,17 +130,16 @@ export const LoadBuiltinSceneOperator: OperatorType = {
     bctx.selection.clear()
     bctx.editHistory.clear()
     const result = await parserRegistry.detectAndParse(raw)
-    bctx.doc.value = result.document ?? null
     if (result.document) {
+      replaceDoc(bctx, result.document)
       bctx.currentWorldFrameIndex.value = 0
-      bctx.structEpoch.value += 1
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       logCenter.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
+      bctx.doc.value = null
       logCenter.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
     }
     bctx.workspaceMode.value = 'local-bundle'
     bctx.localFileName.value = `示例 · ${id}.json`
-    bctx.dirty.value = false
   },
 }
