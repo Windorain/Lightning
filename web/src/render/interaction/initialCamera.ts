@@ -115,7 +115,7 @@ export function applyInitialCamera(
   }
 
   const { sizeColumn, sizeRow, sizeZSlice } = grid
-  const target = voxelCenterWorld(
+  const center = voxelCenterWorld(
     cell.column,
     cell.row,
     cell.zSlice,
@@ -123,6 +123,7 @@ export function applyInitialCamera(
     sizeRow,
     sizeZSlice,
   )
+  const target = new THREE.Vector3(center.x, center.y, center.z)
 
   const frontOut = FACE_NORMAL[ic.frontFace].clone()
   const dist = options?.distance ?? ic.distance ?? DEFAULT_DISTANCE

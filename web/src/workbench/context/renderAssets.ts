@@ -17,6 +17,7 @@ import type { Annotation } from '@/render/data/annotationTypes'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { BlockMeshBuildStats } from '@/render/mesh/blockMesh'
+import type { ViewportRenderAssets } from '@/shared/types'
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
 import { BlockMeshProvider } from '@/render/mesh/blockMeshProvider'
 import { AnnotationMeshProvider } from '@/render/mesh/annotationMeshProvider'
@@ -64,7 +65,7 @@ export interface RenderAssetsComputed {
   blockStatsEntries: ComputedRef<BlockStatRow[]>
 }
 
-export interface RenderAssets {
+export interface RenderAssets extends ViewportRenderAssets {
   registerScene(scene: THREE.Scene): void
   loadStructureAndResources(): Promise<void>
   rebuildContentMesh(): Promise<void>
@@ -169,7 +170,9 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     const lib = textureCache.value
     if (!lib || lib.isDisposed()) {
       console.warn('[renderAssets] presentContentMesh: textureCache not ready, triggering rebuildAll')
-      void rebuildAll()
+      void rebuildAll().catch(e => {
+        console.error('[renderAssets] rebuildAll (from presentContentMesh) failed:', e)
+      })
       return
     }
 
@@ -239,7 +242,10 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   function init(): void {
     stopStructEpochWatch?.()
     stopStructEpochWatch = watch(structEpochRef, () => {
-      void rebuildAll()
+      void rebuildAll().catch(e => {
+        console.error('[renderAssets] rebuildAll (structEpoch watch) failed:', e)
+        loadStatus.value = 'error'
+      })
     })
   }
 

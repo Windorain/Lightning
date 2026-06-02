@@ -7,7 +7,7 @@ import {
   resolveAnimationTimeline,
   type ParsedMcmeta,
 } from '@/render/assets/textureStripAnimation'
-import type { AtlasPlacement, AtlasTilePlacement } from '@/render/mesh/atlasLayout'
+import type { AtlasPlacement, AtlasTilePlacement } from '@/pure/atlasLayout'
 import type { MaterialPaletteEntry } from '@/render/schema/types'
 
 export function base64PngToDataUrl(b64: string): string {

@@ -6,8 +6,6 @@
 import * as THREE from 'three'
 
 import type { FaceName } from '../schema/types'
-import { structureRowToWorldY } from '../data/grid'
-
 const FACE_VEC: Record<FaceName, THREE.Vector3> = {
   '+x': new THREE.Vector3(1, 0, 0),
   '-x': new THREE.Vector3(-1, 0, 0),
@@ -59,21 +57,6 @@ export function machineFrontQuaternion(machineFront: FaceName): THREE.Quaternion
 export function worldNormalFromRegistryFace(registryFace: FaceName, machineFront: FaceName): THREE.Vector3 {
   const q = machineFrontQuaternion(machineFront)
   return faceVec3(registryFace).applyQuaternion(q).normalize()
-}
-
-export function voxelCenterWorld(
-  col: number,
-  row: number,
-  zSlice: number,
-  sizeColumn: number,
-  sizeRow: number,
-  sizeZSlice: number,
-): THREE.Vector3 {
-  const baseX = col - sizeColumn / 2
-  const baseZ = zSlice - sizeZSlice / 2
-  const voxelY = structureRowToWorldY(row, sizeRow)
-  const baseY = voxelY - sizeRow / 2
-  return new THREE.Vector3(baseX + 0.5, baseY + 0.5, baseZ + 0.5)
 }
 
 /** 旋转 BufferGeometry 的 position/normal（绕 center，用于 Model 体素） */

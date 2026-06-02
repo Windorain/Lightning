@@ -3,8 +3,6 @@
  * No side effects: no Vue refs, no DOM, no I/O, no mutation of arguments.
  */
 
-import * as THREE from 'three'
-
 export interface Vec3 {
   x: number
   y: number
@@ -56,11 +54,13 @@ export function voxelCenterWorld(
   sizeColumn: number,
   sizeRow: number,
   sizeZSlice: number,
-  out?: THREE.Vector3,
-): THREE.Vector3 {
+  out?: Vec3,
+): Vec3 {
   const y = structureRowToWorldY(structureRow, sizeRow)
-  const v = out ?? new THREE.Vector3()
-  v.set(column + 0.5 - sizeColumn / 2, y + 0.5 - sizeRow / 2, zSlice + 0.5 - sizeZSlice / 2)
+  const v = out ?? { x: 0, y: 0, z: 0 }
+  v.x = column + 0.5 - sizeColumn / 2
+  v.y = y + 0.5 - sizeRow / 2
+  v.z = zSlice + 0.5 - sizeZSlice / 2
   return v
 }
 

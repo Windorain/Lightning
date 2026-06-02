@@ -33,3 +33,8 @@ export function blockKey(b: { name: string; meta: number; paletteIndex?: number 
   if (b.paletteIndex !== undefined) return '#' + String(b.paletteIndex)
   return b.name + ':' + b.meta
 }
+
+/** Generate a short random ID with a given prefix */
+export function generateId(prefix: string): string {
+  return prefix + Math.random().toString(36).slice(2, 10)
+}

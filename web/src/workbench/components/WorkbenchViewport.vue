@@ -7,6 +7,7 @@ import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
 import { useViewport, updateAnnotationOverlay, disposeAnnotationOverlay } from '@/shared/composables/useViewport'
 import { useSelectionContext, type BlockRef } from '@/workbench/selection'
 import { useBContext } from '@/workbench/context/bContext'
+import { createRenderAssets } from '@/workbench/context/renderAssets'
 import { usePreferences } from '@/preview/preferences'
 import { logCenter } from '@/workbench/logging/LogCenter'
 import { structureRowToWorldY } from '@/pure/vec'
@@ -33,6 +34,7 @@ const vp = useViewport({
   structureDefinition: vpSlot.definition,
   mainMeshGroup: vpSlot.contentGroup,
   blockIconCacheOptions: {},
+  createRenderAssets,
 })
 const {
   loadStatus, meshBusy,
@@ -288,7 +290,7 @@ onBeforeUnmount(() => {
   _alive = false
   if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
   outlinePass.dispose()
-  disposeAnnotationOverlay()
+  disposeAnnotationOverlay(bctx.viewport.id)
   highlightProvider.dispose()
   renderAssets.disposeCachesAndLibrary()
   renderAssets.dispose()

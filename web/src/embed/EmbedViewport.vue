@@ -10,6 +10,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useViewport, updateAnnotationOverlay, disposeAnnotationOverlay, getAnnotationOverlayGroup } from '@/shared/composables/useViewport'
 import { useBContext } from '@/workbench/context/bContext'
+import { createRenderAssets } from '@/workbench/context/renderAssets'
 import ViewerCore, { type ViewerCoreReadyPayload } from '@/shared/viewport/ViewerCore.vue'
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
@@ -21,15 +22,11 @@ import * as THREE from 'three'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { InitialCamera } from '@/preview/previewConfig'
 import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
-import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import { resolvePreviewTooltipText } from '@/preview/tooltip'
 import { usePreferences } from '@/preview/preferences'
 import { useEmbedHover } from '@/embed/embedHover'
-import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
-import { renderTooltipHtml } from '@/workbench/renderTooltipHtml'
-import { structureRowToWorldY } from '@/pure/vec'
-import type { BakedQuad } from '@/render/schema/types'
+import { useEmbedSelectionMasks } from '@/embed/useEmbedSelectionMasks'
+import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
 
 const props = defineProps<{
   settings?: EmbedSettings
@@ -49,6 +46,7 @@ const vp = useViewport({
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
   initialLayerWorldY: props.settings?.initialLayerWorldY,
+  createRenderAssets,
 })
 const {
   loadStatus, meshBusy, blockIconCache, tooltipPalette,
@@ -73,113 +71,22 @@ const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
 const selectedBlockId = ref<string | null>(null)
 
-function buildBlockMaskMesh(
-  quads: BakedQuad[],
-  cx: number, cy: number, cz: number,
-): THREE.Mesh | null {
-  const corner = { x: cx - 0.5, y: cy - 0.5, z: cz - 0.5 }
-  const verts: number[] = []
-  const indices: number[] = []
-  let vi = 0
+// ---- Selection masks (extracted composable) ----
+const { rebuildSelectionMasks, flushHighlight } = useEmbedSelectionMasks({
+  definitionRef: vpSlot.definition,
+  hoverRef: hover,
+  highlightOnHoverRef: computed(() => prefs.highlightOnHover),
+  outlinePass,
+})
 
-  for (const q of quads) {
-    if (q.vertices.length < 4) continue
-    const v0 = vi, v1 = vi + 1, v2 = vi + 2, v3 = vi + 3
-    indices.push(v0, v1, v2, v0, v2, v3)
-    for (const v of q.vertices) {
-      verts.push(v.x + corner.x, v.y + corner.y, v.z + corner.z)
-    }
-    vi += 4
-  }
-
-  if (verts.length === 0) return null
-
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
-  geo.setIndex(indices)
-  return new THREE.Mesh(geo)
-}
-
-let _selectionMasks: THREE.Mesh[] = []
-
-function rebuildSelectionMasks(blockId: string | null): void {
-  _selectionMasks = []
-  if (!blockId) return
-
-  const def = vpSlot.definition.value
-  if (!def) return
-
-  const { cellGrid, blockPalette } = def
-  const sizeZ = cellGrid.length
-  const sizeRow = cellGrid[0]?.length ?? 0
-  const sizeCol = cellGrid[0]?.[0]?.length ?? 0
-  if (sizeZ === 0 || sizeRow === 0 || sizeCol === 0) return
-
-  for (let z = 0; z < sizeZ; z++) {
-    for (let row = 0; row < sizeRow; row++) {
-      const sliceRow = cellGrid[z]?.[row]
-      if (!sliceRow) continue
-      for (let col = 0; col < sizeCol; col++) {
-        const idx = sliceRow[col]
-        if (idx === undefined || idx < 0) continue
-        const entry = blockPalette[idx]
-        if (!entry) continue
-        if (blockRegistryKeyForPalette(entry.registryId, entry.meta) !== blockId) continue
-
-        const voxelY = structureRowToWorldY(row, sizeRow)
-        const cx = col - sizeCol / 2 + 0.5
-        const cy = voxelY - sizeRow / 2 + 0.5
-        const cz = z - sizeZ / 2 + 0.5
-
-        const quads = entry.geometry?.quads
-        if (quads && quads.length > 0 && quads.some(q => q.vertices.length >= 4)) {
-          const mesh = buildBlockMaskMesh(quads, cx, cy, cz)
-          if (mesh) _selectionMasks.push(mesh)
-        } else {
-          const geo = new THREE.BoxGeometry(1, 1, 1)
-          geo.translate(cx, cy, cz)
-          _selectionMasks.push(new THREE.Mesh(geo))
-        }
-      }
-    }
-  }
-}
-
-function flushHighlight(): void {
-  const masks = [..._selectionMasks]
-
-  const hov = hoveredVoxel.value
-  if (hov && prefs.highlightOnHover) {
-    const def = vpSlot.definition.value
-    if (def) {
-      const { cellGrid, blockPalette } = def
-      const sizeZ = cellGrid.length
-      const sizeRow = cellGrid[0]?.length ?? 0
-      const sizeCol = cellGrid[0]?.[0]?.length ?? 0
-      const idx = cellGrid[hov.zSlice]?.[hov.row]?.[hov.column]
-      if (idx !== undefined && idx >= 0 && idx < blockPalette.length) {
-        const entry = blockPalette[idx]
-        if (entry) {
-          const cx = hov.column - sizeCol / 2 + 0.5
-          const cy = (sizeRow - 1 - hov.row) - sizeRow / 2 + 0.5
-          const cz = hov.zSlice - sizeZ / 2 + 0.5
-
-          const quads = entry.geometry?.quads
-          if (quads && quads.length > 0 && quads.some(q => q.vertices.length >= 4)) {
-            const mesh = buildBlockMaskMesh(quads, cx, cy, cz)
-            if (mesh) masks.push(mesh)
-          } else {
-            const geo = new THREE.BoxGeometry(1, 1, 1)
-            geo.translate(cx, cy, cz)
-            masks.push(new THREE.Mesh(geo))
-          }
-        }
-      }
-    }
-  }
-
-  outlinePass.setMaskMeshes(masks)
-}
+// ---- Tooltip text (extracted composable) ----
+const { tooltipText, neiTooltipMap, metaTooltipText, showMetaHint } = useEmbedTooltip({
+  hoverRef: hover,
+  definitionRef: vpSlot.definition,
+  tooltipPaletteRef: tooltipPalette,
+  showHoverTooltipRef: computed(() => prefs.showHoverTooltip),
+  docRef: bctx.doc,
+})
 
 function onSidebarSelectBlock(blockId: string): void {
   selectedBlockId.value = selectedBlockId.value === blockId ? null : blockId
@@ -218,44 +125,11 @@ const activeTab = ref<BottomTab>(
   (showFrameCtl.value && hasWorldMultiFrame.value) ? 'frame' : 'layer',
 )
 
-// ---- Title / meta hint ----
-const sceneDocument = computed(() => bctx.doc.value)
-
-const metaTooltipText = computed(() => {
-  const d = sceneDocument.value
-  if (!d) return ''
-  const plain = d.serialize()
-  const rows: string[] = []
-  const pick = (label: string, key: string) => {
-    const v = readSceneMetaField(plain, key).trim()
-    if (v) rows.push(`${label}：${v}`)
-  }
-  pick('作者', 'author')
-  pick('版本号', 'gtnhVersion')
-  return rows.join('\n')
-})
-
-const showMetaHint = computed(() => metaTooltipText.value.length > 0)
-
 function onMetaHintPointerEnter(e: PointerEvent): void { setMeta({ clientX: e.clientX, clientY: e.clientY }) }
 function onMetaHintPointerMove(e: PointerEvent): void { setMeta({ clientX: e.clientX, clientY: e.clientY }) }
 function onMetaHintPointerLeave(): void { setMeta(null) }
 function onMetaHintFocusIn(e: FocusEvent): void { const t = e.currentTarget as HTMLElement; const r = t.getBoundingClientRect(); setMeta({ clientX: r.left + r.width / 2, clientY: r.bottom }) }
 function onMetaHintFocusOut(): void { setMeta(null) }
-
-// ---- NEI tooltip map (shared by block tooltip resolution) ----
-const neiTooltipMap = computed<Map<string, string[]>>(() => {
-  const def = vpSlot.definition.value
-  if (!def) return new Map()
-  const map = new Map<string, string[]>()
-  for (const e of def.blockPalette) {
-    const key = blockRegistryKeyForPalette(e.registryId, e.meta)
-    if (!map.has(key) && e.tooltip && e.tooltip.length > 0) {
-      map.set(key, e.tooltip)
-    }
-  }
-  return map
-})
 
 const previewTitle = computed(() => {
   const doc = bctx.doc.value
@@ -348,14 +222,6 @@ function onViewportReady(payload: ViewerCoreReadyPayload): void {
   _annoRafId = requestAnimationFrame(rafTick)
 }
 
-// ---- Hover highlight (derived from unified hover) ----
-const hoveredVoxel = computed(() => {
-  const h = hover.value
-  if (!prefs.highlightOnHover) return null
-  if (h?.kind === 'block' && h.source === 'viewport') return h.voxel
-  return null
-})
-
 // ---- Hover event handlers (write to unified hover) ----
 function onViewportHover(
   payload: { blockId: string; clientX: number; clientY: number; source: 'viewport'; voxel: { column: number; row: number; zSlice: number } } | null,
@@ -386,70 +252,12 @@ const annotations = computed<Annotation[]>(() => {
 
 // ---- Annotation pick & overlay visibility ----
 watch(() => prefs.showAnnotations, (v) => {
-  const g = getAnnotationOverlayGroup()
+  const g = getAnnotationOverlayGroup(bctx.viewport.id)
   if (!g) return
   if (v) {
     vpSlot.overlayGroup.value?.add(g)
   } else {
     vpSlot.overlayGroup.value?.remove(g)
-  }
-})
-
-// ---- Unified tooltip text ----
-const tooltipText = computed(() => {
-  const h = hover.value
-  if (!h) return ''
-
-  switch (h.kind) {
-    case 'block': {
-      // Viewport: gated by showHoverTooltip setting
-      if (h.source === 'viewport' && !prefs.showHoverTooltip) return ''
-      // Resolve viewport tooltip
-      if (h.source === 'viewport') {
-        const def = vpSlot.definition.value
-        if (!def) return ''
-        const ht = { blockId: h.blockId, clientX: h.clientX, clientY: h.clientY, source: 'viewport' as const, voxel: h.voxel }
-        const resolved = resolvePreviewTooltipText(def, tooltipPalette.value, ht)
-        if (resolved) {
-          const neiLines = neiTooltipMap.value.get(h.blockId)
-          const nameLine = neiLines?.[0]
-          if (nameLine) {
-            const nl = resolved.indexOf('\n')
-            const resolvedFirst = nl >= 0 ? resolved.slice(0, nl) : resolved
-            if (resolvedFirst !== nameLine) {
-              return nameLine + '\n' + resolved
-            }
-          }
-          return resolved
-        }
-        // Fallback: first line of NEI tooltip from block palette
-        const lines = neiTooltipMap.value.get(h.blockId)
-        if (lines && lines.length > 0) return renderTooltipHtml(lines[0])
-        return ''
-      }
-      // Sidebar: NEI tooltip
-      const lines = neiTooltipMap.value.get(h.blockId)
-      if (lines && lines.length > 0) return lines.map(l => renderTooltipHtml(l)).join('\n')
-      const colon = h.blockId.lastIndexOf(':')
-      return colon >= 0 ? h.blockId.slice(colon + 1) : h.blockId
-    }
-
-    case 'annotation': {
-      const doc = bctx.doc.value
-      if (!doc) return ''
-      const plain = doc.serialize() as Record<string, any>
-      const annos = plain.annotations as Annotation[] | undefined
-      const anno = annos?.find(a => a.id === h.annotationId)
-      if (!anno) return ''
-      return anno.description || ''
-    }
-
-    case 'meta': {
-      return metaTooltipText.value
-    }
-
-    default:
-      return ''
   }
 })
 
@@ -460,7 +268,7 @@ onBeforeUnmount(() => {
   _alive = false
   if (_annoRafId) cancelAnimationFrame(_annoRafId)
   outlinePass.dispose()
-  disposeAnnotationOverlay()
+  disposeAnnotationOverlay(bctx.viewport.id)
   renderAssets.disposeCachesAndLibrary()
   renderAssets.dispose()
 })

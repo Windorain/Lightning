@@ -11,7 +11,6 @@ import { voxelLinearIndex, AIR_COMPONENT } from './voxelComponents'
 import { effectiveVoxelState, type LayerPreviewMode } from '../data/layerPreview'
 import type {
   FaceName,
-  MaterialPaletteEntry,
   StructureDefinition,
   VoxelVolume,
 } from '../schema/types'
@@ -61,20 +60,9 @@ export interface BlockMeshBuildStats {
   undefinedBlockDetails: UndefinedBlockDetail[]
 }
 
-/** 单个烘焙四边形对应的 2 个三角形（非索引、每属性定长） */
-export interface BakedQuadGeometryPiece {
-  col: number
-  row: number
-  zSlice: number
-  materialIndex: number
-  quadOrder: number
-  /** 该 quad 在体素解码后 quads[] 数组中的索引 */
-  quadIndex: number
-  matPalette: MaterialPaletteEntry
-  positions: Float32Array
-  uvs: Float32Array
-  colors: Float32Array
-}
+/** @deprecated 类型已移入 pure/meshTypes.ts；保留 re-export 以兼容现有导入 */
+import type { BakedQuadGeometryPiece as _BakedQuadGeometryPiece } from '@/pure/meshTypes'
+export type BakedQuadGeometryPiece = _BakedQuadGeometryPiece
 
 export interface StructureGeometryCollection {
   pieces: BakedQuadGeometryPiece[]

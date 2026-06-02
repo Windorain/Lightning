@@ -3,7 +3,7 @@
  */
 
 import type { Vec3 } from '@/pure/vec'
-import type { BakedQuadGeometryPiece } from './structureGeometryCore'
+import type { BakedQuadGeometryPiece } from '@/pure/meshTypes'
 
 const EPS_PLANE = 2e-4
 const EPS_2D = 1e-5

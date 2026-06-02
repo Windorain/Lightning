@@ -1,4 +1,4 @@
 // Barrel — re-exports all public APIs from the move operator sub-modules.
-// Split into: moveTranslate.ts, moveRotate.ts, moveScale.ts
+// Currently only moveTranslate.ts exists.
 
 export { MoveOperator } from './moveTranslate'

@@ -22,6 +22,7 @@ import type { Frame } from '@/render/schema/types'
 import type { bScreen, Rect } from '@/workbench/ux/types/screen'
 import type { RNARegistry } from '@/workbench/ux/rna/types'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
+import type { ViewportBContext } from '@/shared/types'
 
 export type LoadStatus = 'loading' | 'ok' | 'error'
 export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle'
@@ -122,7 +123,7 @@ export interface ViewportManager {
   readonly active: ComputedRef<ViewportSlot | null>
 }
 
-export interface BContext {
+export interface BContext extends ViewportBContext {
   // === 场景核心数据（原 SceneContext） ===
   doc: Ref<RuntimeDocument | null>
   dirty: Ref<boolean>

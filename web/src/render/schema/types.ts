@@ -2,6 +2,24 @@ import type { AnnotationType } from '@/render/data/annotationTypes'
 
 // ---- Data types shared across layers (pure, no workbench deps) ----
 
+import type {
+  MaterialBlendMode,
+  MaterialEntry,
+  MaterialKind,
+  MaterialPaletteEntry,
+  MaterialRegistryData,
+  ResourceLocator,
+} from '@/pure/materialTypes'
+
+export type {
+  MaterialBlendMode,
+  MaterialEntry,
+  MaterialKind,
+  MaterialPaletteEntry,
+  MaterialRegistryData,
+  ResourceLocator,
+}
+
 export interface BlockRef {
   pos: { x: number; y: number; z: number }
   block_state_id: string
@@ -22,45 +40,6 @@ export type SelectedEntity =
 /**
  * StructureData：`geometryPhase` 区分扫描中间态与可渲染终态；预览 UI 由 `View3DConfig.features` 控制。
  */
-
-/** 资源包定位符：namespace:path（不含 textures/ 与 .png），与 MC 习惯一致 */
-export type ResourceLocator = string
-
-export type MaterialKind = 'static16' | 'animated'
-
-export type MaterialBlendMode = 'opaque' | 'cutout' | 'translucent'
-
-/** 字段形状对齐 Java 版纹理 `.mcmeta` 的 `animation`；数据来自 JSON 非独立 mcmeta 文件。`kind === 'animated'` 且 PNG 为竖条多帧时按顺序 1 tick/帧播放（见 simpleMaterialLibrary） */
-interface MaterialAnimationSpec {
-  defaultFrametimeTicks?: number
-  frameSequence?: Array<{ index: number; timeTicks?: number }>
-  interpolate?: boolean
-}
-
-export interface MaterialEntry {
-  /** 溯源；打包态下 Wiki 仅使用 textureBlobIndex，不请求 locator */
-  locator?: ResourceLocator
-  kind: MaterialKind
-  blend?: MaterialBlendMode
-  emissive?: number
-  animation?: MaterialAnimationSpec
-}
-
-/** 结构内材质调色盘条目（并入原独立 sampler 的 atlas / 线性 / mipmap 提示） */
-export type MaterialPaletteEntry = MaterialEntry & {
-  /** 指向根级 `textureBlobs` 池中的 PNG（Base64）；打包交付必填 */
-  textureBlobIndex?: number
-  /** MC 1.7：`blocks` / `items` 对应 `TextureMap.location*Texture`；`null`/缺省且为独立贴图时由导出写 `null` */
-  atlas?: string | null
-  linear?: boolean
-  useMipmaps?: boolean
-}
-
-/** materialId → 条目；键由 StructureData.materialPalette 或 World 多帧 `frameIndex:localIndex` 派生 */
-export interface MaterialRegistryData {
-  schemaVersion?: number
-  materials: Record<string, MaterialEntry>
-}
 
 /** 磁盘 / 传输层文档形态；Wiki 据 `documentFormat` 选择解析路径。 */
 export type DocumentFormat = 'Plain' | 'Envelope'

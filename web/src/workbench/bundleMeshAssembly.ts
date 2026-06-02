@@ -6,8 +6,8 @@
 
 import JSZip from 'jszip'
 
-import { buildTileIdToUvRect, packTextureGridByTileId } from '@/render/mesh/atlasLayout'
-import { clusterCoplanarOverlappingPiecesInVoxel } from '@/render/mesh/coplanarOverlapCluster'
+import { buildTileIdToUvRect, packTextureGridByTileId } from '@/pure/atlasLayout'
+import { clusterCoplanarOverlappingPiecesInVoxel } from '@/pure/coplanarOverlapCluster'
 import {
   type ObjExportMesh,
   serializeMtl,

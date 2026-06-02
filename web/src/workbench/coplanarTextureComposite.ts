@@ -4,14 +4,14 @@
  */
 
 import type { MaterialPaletteEntry, StructureDefinition } from '@/render/schema/types'
-import type { BakedQuadGeometryPiece } from '@/render/mesh/structureGeometryCore'
+import type { BakedQuadGeometryPiece } from '@/pure/meshTypes'
 import type { Vec3 } from '@/pure/vec'
 import {
   planeBasisFromQuad,
   projectPointToSt,
   quadWorldCornersFromPiece,
   type Vec2,
-} from '@/render/mesh/coplanarOverlapCluster'
+} from '@/pure/coplanarOverlapCluster'
 import { textureBlobToFirstFramePngBlob } from '@/workbench/textureAtlasRaster'
 
 const MIN_TEX = 16

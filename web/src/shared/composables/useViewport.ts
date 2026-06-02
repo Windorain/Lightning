@@ -4,26 +4,42 @@
  * Extracts the common createRenderAssets() call, ref declarations, and
  * SelectionOutlinePass creation that were duplicated between
  * WorkbenchViewport.vue and EmbedViewport.vue.
+ *
+ * Uses minimal interfaces from @/shared/types to avoid depending on
+ * workbench/ context types.
  */
 import { computed, ref, shallowRef, type ShallowRef } from 'vue'
 import * as THREE from 'three'
-import type { BContext, LoadStatus } from '@/workbench/context/bContext'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
-import { createRenderAssets, type RenderAssets } from '@/workbench/context/renderAssets'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 import { type Annotation, annotationIsOnLayer } from '@/render/data/annotationTypes'
+import type { LoadStatus, ViewportBContext, ViewportRenderAssets } from '@/shared/types'
 
-export interface UseViewportOptions {
-  bctx: BContext
+export interface UseViewportOptions<TRenderAssets = ViewportRenderAssets> {
+  bctx: ViewportBContext
   structureDefinition: ShallowRef<StructureDefinition | null>
   mainMeshGroup: ShallowRef<THREE.Group | null>
   blockIconCacheOptions?: { sizePx?: number; orthoHalf?: number }
   initialWorldFrameIndex?: number
   initialLayerWorldY?: number
+  /**
+   * Factory function to create render assets (texture cache, mesh providers…).
+   * Provided by the caller (who imports createRenderAssets from workbench/context).
+   * The deps object matches RenderAssetsDeps structurally at runtime.
+   */
+  createRenderAssets: (deps: any) => TRenderAssets
 }
 
-export function useViewport(options: UseViewportOptions) {
+/**
+ * @typeParam TRenderAssets — The concrete RenderAssets subtype returned by
+ *   createRenderAssets. Inferred from the passed `createRenderAssets` callback
+ *   (typically RenderAssets from workbench/context). Falls back to the minimal
+ *   ViewportRenderAssets interface as a constraint.
+ */
+export function useViewport<TRenderAssets = ViewportRenderAssets>(
+  options: UseViewportOptions<TRenderAssets>,
+) {
   const {
     bctx,
     structureDefinition,
@@ -47,7 +63,7 @@ export function useViewport(options: UseViewportOptions) {
   const docRef = computed(() => bctx.doc.value)
 
   // ---- Render assets (texture cache, mesh providers, etc.) ----
-  const renderAssets: RenderAssets = createRenderAssets({
+  const renderAssets = options.createRenderAssets({
     docRef,
     loadStatus,
     meshBusy,
@@ -62,7 +78,7 @@ export function useViewport(options: UseViewportOptions) {
     blockIconCacheOptions,
     initialWorldFrameIndex,
     structEpochRef: bctx.structEpoch,
-  })
+  }) as TRenderAssets
 
   // ---- Shared SelectionOutlinePass (configured per-viewport in onViewportReady) ----
   const outlinePass = new SelectionOutlinePass(new THREE.Vector2(1024, 768))
@@ -86,10 +102,17 @@ export function useViewport(options: UseViewportOptions) {
   }
 }
 
-// ---- Module-level annotation overlay state (single viewport instance) ----
-let _annoGroup: THREE.Group | null = null
-let _annoHash = ''
-let _annoPending = false
+// ---- Per-viewport annotation overlay state (was module-level single-instance) ----
+const _annoState = new Map<string, { group: THREE.Group | null; hash: string; pending: boolean }>()
+
+function _getAnnoState(viewportId: string): { group: THREE.Group | null; hash: string; pending: boolean } {
+  let s = _annoState.get(viewportId)
+  if (!s) {
+    s = { group: null, hash: '', pending: false }
+    _annoState.set(viewportId, s)
+  }
+  return s
+}
 
 /**
  * Update annotation overlay meshes in the viewport scene.
@@ -102,8 +125,8 @@ let _annoPending = false
  *   built but not added to the overlay scene. Defaults to true.
  */
 export function updateAnnotationOverlay(
-  bctx: BContext,
-  renderAssets: RenderAssets,
+  bctx: ViewportBContext,
+  renderAssets: ViewportRenderAssets,
   showAnnotationsGate?: boolean,
 ): void {
   const doc = bctx.doc.value
@@ -122,47 +145,54 @@ export function updateAnnotationOverlay(
     : 0
   const layerKey = mode === 'all' ? 'all' : `l${mode.worldY}`
   const hash = annos.length > 0 ? `${layerKey}_${annos.length}_${maxUpdated}` : 'empty'
-  if (hash === _annoHash || _annoPending) return
-  _annoHash = hash
-  _annoPending = true
+
+  const viewportId = bctx.viewport.id
+  const s = _getAnnoState(viewportId)
+  if (hash === s.hash || s.pending) return
+  s.hash = hash
+  s.pending = true
 
   renderAssets.rebuildAnnotationOverlay(annos).then(group => {
-    _annoPending = false
-    if (_annoGroup) {
-      bctx.viewport.overlayGroup.value?.remove(_annoGroup)
-      _annoGroup.traverse((c) => {
+    const s2 = _getAnnoState(viewportId)
+    s2.pending = false
+    if (s2.group) {
+      bctx.viewport.overlayGroup.value?.remove(s2.group)
+      s2.group.traverse((c) => {
         if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
           c.geometry?.dispose()
           ;(c.material as THREE.Material)?.dispose()
         }
       })
-      _annoGroup = null
+      s2.group = null
     }
     if (group) {
-      _annoGroup = group
+      s2.group = group
       if (showAnnotationsGate ?? true) {
-        bctx.viewport.overlayGroup.value?.add(_annoGroup)
+        bctx.viewport.overlayGroup.value?.add(s2.group)
       }
     }
-  }).catch(() => { _annoPending = false })
+  }).catch(() => {
+    const s3 = _getAnnoState(viewportId)
+    s3.pending = false
+  })
 }
 
-/** Dispose annotation overlay group and reset cached state. */
-export function disposeAnnotationOverlay(): void {
-  if (_annoGroup) {
-    _annoGroup.traverse((c) => {
+/** Dispose annotation overlay group and reset cached state for a given viewport. */
+export function disposeAnnotationOverlay(viewportId: string): void {
+  const s = _annoState.get(viewportId)
+  if (!s) return
+  if (s.group) {
+    s.group.traverse((c) => {
       if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
         c.geometry?.dispose()
         ;(c.material as THREE.Material)?.dispose()
       }
     })
-    _annoGroup = null
   }
-  _annoHash = ''
-  _annoPending = false
+  _annoState.delete(viewportId)
 }
 
-/** Get the current annotation overlay group (for visibility toggling). */
-export function getAnnotationOverlayGroup(): THREE.Group | null {
-  return _annoGroup
+/** Get the current annotation overlay group for a given viewport (for visibility toggling). */
+export function getAnnotationOverlayGroup(viewportId: string): THREE.Group | null {
+  return _annoState.get(viewportId)?.group ?? null
 }

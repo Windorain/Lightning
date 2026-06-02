@@ -37,6 +37,10 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
   const core = createCoreBContext(embedOperators)
   core.viewports.register('r-embed')
 
+  // dirty: embed is read-only (no editHistory, no NEW_SCENE/OPEN_SCENE operators),
+  // so dirty is always false. Core initializes it as ref(false) and we keep it.
+  // If editing capability is added later, override with:
+  //   dirty: computed(() => editHistory.canUndo.value)  — matching workbench
   const ctx: BContext = {
     ...core,
     uiWorkspace: ref<UIWorkspace>('wiki'),
