@@ -5,13 +5,13 @@ import type { StructureDefinition } from '@/render/schema/types'
 import { buildVoxelVolume } from '@/render/data/grid'
 import { structureRowToWorldY } from '@/render/data/grid'
 import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
+import type { Vec3 } from '@/pure/vec'
 import {
   computeQuadsAABB,
   findPartByNormal,
   findPartFromHit,
   ensureMinThickness,
-  type Vec3,
-} from '@/render/data/aabb'
+} from '@/pure/aabb'
 
 export interface DetectedBounds {
   min: { x: number; y: number; z: number }

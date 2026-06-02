@@ -10,7 +10,7 @@ import type { Frame } from '@/render/schema/types'
 import { scenePickAllFromPointer, scenePickFromPointer } from '@/render/interaction/scenePick'
 import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
 import type { BakedQuadsGeometry } from '@/render/schema/types'
-import { axisAdd, roundVec, structureRowToWorldY } from '@/pure/vec'
+import { roundVector, structureRowToWorldY } from '@/pure/vec'
 
 export function createProductionQueries(bctx: BContext): BContextQueries {
   return {
@@ -103,8 +103,7 @@ export function createProductionQueries(bctx: BContext): BContextQueries {
       return doc.serialize() as Record<string, any>
     },
 
-    axisAdd,
-    roundVec,
+    roundVector,
 
     gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null {
       const doc = bctx.doc.value

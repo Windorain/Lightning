@@ -1,13 +1,9 @@
 // Pure functions for annotation AABB computation.
 // No Three.js, no StructureDefinition, no side effects.
 
-// ── Types ──
+import type { Vec3 } from './vec'
 
-export interface Vec3 {
-  x: number
-  y: number
-  z: number
-}
+// ── Types ──
 
 interface QuadLike {
   vertices: Vec3[]

@@ -3,7 +3,7 @@
  * 单结构：materialId 为 "0".."n-1"；World 多帧由 scene 层使用 "帧:槽" 键。
  */
 
-import type { MaterialEntry, MaterialPaletteEntry, MaterialRegistryData } from '../schema/types'
+import type { MaterialEntry, MaterialPaletteEntry, MaterialRegistryData } from '@/render/schema/types'
 
 /** 单格 palette 条目映射为材质注册表中的逻辑条目（无下标） */
 export function registryEntryFromPaletteSlot(e: MaterialPaletteEntry): MaterialEntry {

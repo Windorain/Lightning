@@ -4,9 +4,12 @@
  */
 
 import * as THREE from 'three'
-import type { StructureDefinition, VoxelVolume } from '@/render/schema/types'
-import { buildVoxelVolume, findFirstVoxelWithBlockId } from '@/render/data/grid'
-import type { VoxelCell } from '@/render/data/grid'
+
+export interface Vec3 {
+  x: number
+  y: number
+  z: number
+}
 
 /** Axis-aligned vector addition: origin + axis * delta */
 export function axisAdd(
@@ -22,7 +25,7 @@ export function axisAdd(
 }
 
 /** Round each component of a 3D vector to the nearest integer */
-export function roundVec(v: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+export function roundVector(v: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
   return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) }
 }
 
@@ -61,9 +64,3 @@ export function voxelCenterWorld(
   return v
 }
 
-/** Find the first voxel in the grid matching `initialCamera.focusBlockId`; null if no initialCamera */
-export function findFirstFocusVoxel(def: StructureDefinition): VoxelCell | null {
-  const ic = def.initialCamera
-  if (!ic) return null
-  return findFirstVoxelWithBlockId(buildVoxelVolume(def), ic.focusBlockId)
-}

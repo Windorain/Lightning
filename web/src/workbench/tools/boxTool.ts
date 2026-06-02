@@ -3,7 +3,7 @@ import { generateId } from '@/pure/id'
 import type { Tool, ToolGizmo, ToolContext } from './tool'
 import type { DetectedBounds } from './partDetect'
 import { detectFaceBounds, detectPartBounds } from './partDetect'
-import { computeBoxFrameBars, computeUnionAABB, aabbsIntersect, type AABB } from '@/render/data/aabb'
+import { computeBoxFrameBars, computeUnionAABB, aabbsIntersect, type AABB } from '@/pure/aabb'
 import type { SelectedEntity } from '@/workbench/selection'
 import type { OperatorType } from '@/workbench/operators/operatorType'
 import { OP_RESULT } from '@/workbench/operators/operatorType'
@@ -18,11 +18,11 @@ interface FaceSelection {
 
 let _pendingSelections: FaceSelection[] = []
 
-export function _boxGetPending(): ReadonlyArray<FaceSelection> {
+function _boxGetPending(): ReadonlyArray<FaceSelection> {
   return _pendingSelections
 }
 
-export function _boxClearPending(): void {
+function _boxClearPending(): void {
   _pendingSelections = []
 }
 

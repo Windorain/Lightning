@@ -2,16 +2,11 @@
  * 同一体素内共面且二维投影重叠（含包含）的烘焙片段聚类，用于 OBJ 多层材质合成（纯函数）。
  */
 
+import type { Vec3 } from '@/pure/vec'
 import type { BakedQuadGeometryPiece } from './structureGeometryCore'
 
 const EPS_PLANE = 2e-4
 const EPS_2D = 1e-5
-
-export interface Vec3 {
-  x: number
-  y: number
-  z: number
-}
 
 export interface Vec2 {
   x: number

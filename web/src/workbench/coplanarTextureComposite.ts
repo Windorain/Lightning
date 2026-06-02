@@ -5,12 +5,12 @@
 
 import type { MaterialPaletteEntry, StructureDefinition } from '@/render/schema/types'
 import type { BakedQuadGeometryPiece } from '@/render/mesh/structureGeometryCore'
+import type { Vec3 } from '@/pure/vec'
 import {
   planeBasisFromQuad,
   projectPointToSt,
   quadWorldCornersFromPiece,
   type Vec2,
-  type Vec3,
 } from '@/render/mesh/coplanarOverlapCluster'
 import { textureBlobToFirstFramePngBlob } from '@/workbench/textureAtlasRaster'
 

@@ -10,7 +10,7 @@ import type {
   StructureDefinition,
   World,
 } from '../schema/types'
-import { indexedRegistryFromMaterialPalette } from './materialPaletteBridge'
+import { indexedRegistryFromMaterialPalette } from '@/pure/materialPaletteBridge'
 import { toStructureDefinition } from './structureDefinition'
 import { embeddedStructure, frameAt, getDefaultFrameIndex } from './worldPlayback'
 

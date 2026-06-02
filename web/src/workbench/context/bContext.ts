@@ -59,10 +59,8 @@ export interface BContextQueries {
   getFrameBlocks(): BlockRef[]
   /** 获取完整的场景文档（用于 annotations、labels 等顶层集合的访问） */
   getDocument(): Record<string, any> | null
-  /** 轴对齐向量运算：target = origin + dir * delta（替代 THREE.Vector3） */
-  axisAdd(origin: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', delta: number): { x: number; y: number; z: number }
   /** 向量取整 */
-  roundVec(v: { x: number; y: number; z: number }): { x: number; y: number; z: number }
+  roundVector(v: { x: number; y: number; z: number }): { x: number; y: number; z: number }
   /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
   gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null
   /** List all materials with their texture data URLs */

@@ -1,13 +1,15 @@
 /**
  * 烘焙结构 → 三角网格片段：**纯函数核心**（无 Three.js、无 DOM、无 I/O）。
  * 相同输入得到相同 `pieces` / `stats`；渲染与导出在适配层再转为 BufferGeometry / OBJ。
+ *
+ * 法线计算 → {@link structureGeometryNormals}
+ * UV 计算   → {@link structureGeometryUVs}
  */
 
-import { buildVoxelVolume, structureRowToWorldY } from '../data/grid'
+import { buildVoxelVolume } from '../data/grid'
 import { voxelLinearIndex, AIR_COMPONENT } from './voxelComponents'
 import { effectiveVoxelState, type LayerPreviewMode } from '../data/layerPreview'
 import type {
-  BakedQuad,
   FaceName,
   MaterialPaletteEntry,
   StructureDefinition,
@@ -15,7 +17,15 @@ import type {
 } from '../schema/types'
 import { isAirState } from '../schema/types'
 import { decodeBakedGeometry } from './bakedGeometryDecode'
-import { vec3ToFaceNameComponents } from './facingMap'
+
+// Import sub-module functions for local use
+import { outwardWorldFaceFromBakedQuadPure } from './structureGeometryNormals'
+import { bakedQuadTriangleAttributesPure } from './structureGeometryUVs'
+
+// Re-export sub-module symbols so existing imports keep working
+export { outwardWorldFaceFromBakedQuadPure } from './structureGeometryNormals'
+export { bakedQuadTriangleAttributesPure } from './structureGeometryUVs'
+
 export interface StructureGeometryGatherOptions {
   layerPreview?: LayerPreviewMode
   /**
@@ -71,15 +81,6 @@ export interface StructureGeometryCollection {
   stats: BlockMeshBuildStats
 }
 
-function rgbTripletFromMcTessellatorColor(packed: number | undefined): [number, number, number] {
-  if (packed === undefined || !Number.isFinite(packed)) return [1, 1, 1]
-  const u = packed >>> 0
-  const r = (u & 0xff) / 255
-  const g = ((u >>> 8) & 0xff) / 255
-  const b = ((u >>> 16) & 0xff) / 255
-  return [r, g, b]
-}
-
 function gridStepForOutwardWorldFace(f: FaceName): { dc: number; dr: number; dz: number } {
   switch (f) {
     case '+x':
@@ -95,64 +96,6 @@ function gridStepForOutwardWorldFace(f: FaceName): { dc: number; dr: number; dz:
     case '-z':
       return { dc: 0, dr: 0, dz: -1 }
   }
-}
-
-/** 外向世界空间面（用于遮挡与域剔除）；与烘焙四边形法线一致 */
-export function outwardWorldFaceFromBakedQuadPure(
-  quad: BakedQuad,
-  col: number,
-  row: number,
-  zSlice: number,
-  sizeColumn: number,
-  sizeRow: number,
-  sizeZSlice: number,
-): FaceName | null {
-  const v = quad.vertices
-  if (!v || v.length !== 4) return null
-  const voxelY = structureRowToWorldY(row, sizeRow)
-  const ox = col - sizeColumn / 2
-  const oy = voxelY - sizeRow / 2
-  const oz = zSlice - sizeZSlice / 2
-  const bcx = ox + 0.5
-  const bcy = oy + 0.5
-  const bcz = oz + 0.5
-
-  const cx: number[] = []
-  const cy: number[] = []
-  const cz: number[] = []
-  for (let i = 0; i < 4; i++) {
-    cx.push(v[i].x + ox)
-    cy.push(v[i].y + oy)
-    cz.push(v[i].z + oz)
-  }
-
-  const e1x = cx[1]! - cx[0]!
-  const e1y = cy[1]! - cy[0]!
-  const e1z = cz[1]! - cz[0]!
-  const e2x = cx[2]! - cx[0]!
-  const e2y = cy[2]! - cy[0]!
-  const e2z = cz[2]! - cz[0]!
-  let nx = e1y * e2z - e1z * e2y
-  let ny = e1z * e2x - e1x * e2z
-  let nz = e1x * e2y - e1y * e2x
-  const nlen = Math.hypot(nx, ny, nz)
-  if (nlen < 1e-12) return null
-  nx /= nlen
-  ny /= nlen
-  nz /= nlen
-
-  const qcx = (cx[0]! + cx[1]! + cx[2]! + cx[3]!) * 0.25
-  const qcy = (cy[0]! + cy[1]! + cy[2]! + cy[3]!) * 0.25
-  const qcz = (cz[0]! + cz[1]! + cz[2]! + cz[3]!) * 0.25
-  const vx = qcx - bcx
-  const vy = qcy - bcy
-  const vz = qcz - bcz
-  if (nx * vx + ny * vy + nz * vz < 0) {
-    nx = -nx
-    ny = -ny
-    nz = -nz
-  }
-  return vec3ToFaceNameComponents(nx, ny, nz)
 }
 
 function componentAt(
@@ -214,51 +157,6 @@ function shouldCullQuadFacingSamePaletteNeighbor(
   if (nidx === undefined || nidx < 0 || nidx !== paletteIndex) return false
   if (def.blockPalette[nidx].occludesAdjacentFaces === true) return false
   return true
-}
-
-/**
- * 单四边形 → 6 顶点 × (position3 + uv2 + color3)，与 {@link blockMesh} 原 `bufferGeometryFromBakedQuad` 数值一致。
- */
-export function bakedQuadTriangleAttributesPure(
-  quad: BakedQuad,
-  col: number,
-  row: number,
-  zSlice: number,
-  sizeColumn: number,
-  sizeRow: number,
-  sizeZSlice: number,
-): { positions: Float32Array; uvs: Float32Array; colors: Float32Array } | null {
-  const v = quad.vertices
-  if (!v || v.length !== 4) return null
-  const voxelY = structureRowToWorldY(row, sizeRow)
-  const ox = col - sizeColumn / 2
-  const oy = voxelY - sizeRow / 2
-  const oz = zSlice - sizeZSlice / 2
-  const positions = new Float32Array(18)
-  const uvs = new Float32Array(12)
-  const colors = new Float32Array(18)
-  const triCorners = [
-    [0, 1, 2],
-    [0, 2, 3],
-  ] as const
-  let pi = 0
-  let ui = 0
-  let ci = 0
-  for (const [i0, i1, i2] of triCorners) {
-    for (const i of [i0, i1, i2]) {
-      const p = v[i]
-      positions[pi++] = p.x + ox
-      positions[pi++] = p.y + oy
-      positions[pi++] = p.z + oz
-      uvs[ui++] = p.u
-      uvs[ui++] = p.v
-      const rgb = rgbTripletFromMcTessellatorColor(p.color)
-      colors[ci++] = rgb[0]
-      colors[ci++] = rgb[1]
-      colors[ci++] = rgb[2]
-    }
-  }
-  return { positions, uvs, colors }
 }
 
 /** 将若干四边形片段的非索引属性拼接为一块（供体素×材质合并或外部再算法线） */

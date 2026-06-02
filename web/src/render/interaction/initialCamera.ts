@@ -12,8 +12,7 @@ import * as THREE from 'three'
 import type { StructureDefinition } from '../schema/types'
 import { FACE_NORMAL } from '../mesh/faceConstants'
 import { buildVoxelVolume, findFirstVoxelWithBlockId } from '../data/grid'
-import { voxelCenterWorld, findFirstFocusVoxel } from '@/pure/vec'
-export { voxelCenterWorld, findFirstFocusVoxel }
+import { voxelCenterWorld } from '@/pure/vec'
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0)
 
