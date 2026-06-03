@@ -1,6 +1,9 @@
+// Wiki 零件页：零件:StructureRenderEntry.js
+// https://gtnh.huijiwiki.com/wiki/%E9%9B%B6%E4%BB%B6:StructureRenderEntry.js
+//
 // 按照官方做法，使用入口来加载真正的逻辑文件，可参考
 // https://www.huijiwiki.com/wiki/%E5%B8%AE%E5%8A%A9:%E5%9C%A8%E7%81%B0%E6%9C%BA%E4%BD%BF%E7%94%A8Vue.js
-
+//
 // 使用 ES5 语法
 // 库由 Wiki 零件页加载（与仓库构建产物同名）：
 //   零件:StructureRender.js  ← web/dist/StructureRender.js（npm run build:embed）

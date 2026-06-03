@@ -77,7 +77,7 @@ IIFE 库，供灰机 Wiki 通过 Gadget 加载。支持：
 - 分层预览 / 多帧 World 播放
 - 偏好设置持久化（localStorage）
 
-Wiki 嵌入用法见 `scripts/huiji/Gadget-LightningRender.js`。
+Wiki 嵌入用法见 `scripts/huiji/StructureRenderEntry.js`（灰机页 **零件:StructureRenderEntry.js**）。
 
 ## Mod — `/sde` 命令
 
