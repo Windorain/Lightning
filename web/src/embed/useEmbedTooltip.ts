@@ -8,8 +8,8 @@ import { computed, type Ref, type ShallowRef } from 'vue'
 import type { EmbedHover } from '@/embed/embedHover'
 import type { StructureDefinition } from '@/render/schema/types'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
-import { resolvePreviewTooltipText } from '@/preview/tooltip'
-import { renderTooltipHtml } from '@/workbench/renderTooltipHtml'
+import { resolvePreviewTooltipText } from '@/pure/tooltipResolution'
+import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 
 export function useEmbedTooltip(deps: {

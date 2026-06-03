@@ -37,7 +37,7 @@ export interface UseViewportOptions<TRenderAssets = ViewportRenderAssets> {
  *   (typically RenderAssets from workbench/context). Falls back to the minimal
  *   ViewportRenderAssets interface as a constraint.
  */
-export function useViewport<TRenderAssets = ViewportRenderAssets>(
+export function useViewport<TRenderAssets extends ViewportRenderAssets = ViewportRenderAssets>(
   options: UseViewportOptions<TRenderAssets>,
 ) {
   const {
@@ -83,6 +83,14 @@ export function useViewport<TRenderAssets = ViewportRenderAssets>(
   // ---- Shared SelectionOutlinePass (configured per-viewport in onViewportReady) ----
   const outlinePass = new SelectionOutlinePass(new THREE.Vector2(1024, 768))
 
+  /** Dispose shared viewport resources (outline pass, annotation overlay, render assets). */
+  function dispose(): void {
+    outlinePass.dispose()
+    disposeAnnotationOverlay(bctx.viewport.id)
+    renderAssets.disposeCachesAndLibrary()
+    renderAssets.dispose()
+  }
+
   return {
     // Refs (used in templates — keep as top-level bindings via destructuring)
     sceneRef,
@@ -99,6 +107,8 @@ export function useViewport<TRenderAssets = ViewportRenderAssets>(
     // Objects
     renderAssets,
     outlinePass,
+    // Cleanup
+    dispose,
   }
 }
 

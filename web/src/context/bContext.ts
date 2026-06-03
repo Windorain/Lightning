@@ -11,6 +11,7 @@ import type { ScenePickEntity } from '@/render/interaction/scenePick'
 import type { BakedQuad } from '@/render/schema/types'
 import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
+import type { Rect, RNARegistry } from '@/shared/types'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { StructureDefinition } from '@/render/schema/types'
@@ -19,8 +20,7 @@ import { computed, ref, shallowRef } from 'vue'
 import type { ComputedRef, Ref, ShallowRef } from 'vue'
 import type * as THREE from 'three'
 import type { Frame } from '@/render/schema/types'
-import type { bScreen, Rect } from '@/workbench/ux/types/screen'
-import type { RNARegistry } from '@/workbench/ux/rna/types'
+import type { bScreen } from '@/workbench/ux/types/screen'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
 import type { ViewportBContext } from '@/shared/types'
 
@@ -126,7 +126,6 @@ export interface ViewportManager {
 export interface BContext extends ViewportBContext {
   // === 场景核心数据（原 SceneContext） ===
   doc: Ref<RuntimeDocument | null>
-  dirty: Ref<boolean>
   structEpoch: Ref<number>
   currentWorldFrameIndex: Ref<number>
   workspaceMode: Ref<WorkbenchWorkspaceMode>
@@ -162,8 +161,8 @@ export interface BContext extends ViewportBContext {
     dispatch(event: Event, options?: { regionId?: string }): { break: boolean }
   }
   log: {
-    readonly entries: { value: Array<{ id: number; time: string; level: number; source: string; message: string; detail?: unknown }> }
-    readonly lastDisplayable: { value: { level: number; source: string; message: string; detail?: unknown } | null }
+    readonly entries: ShallowRef<Array<{ id: number; time: string; level: number; source: string; message: string; detail?: unknown }>>
+    readonly lastDisplayable: Ref<{ level: number; source: string; message: string; detail?: unknown } | null>
     debug(source: string, message: string, detail?: unknown): unknown
     info(source: string, message: string, detail?: unknown): unknown
     operator(source: string, message: string, detail?: unknown): unknown
@@ -182,7 +181,8 @@ export interface BContext extends ViewportBContext {
 
   /** Window manager (Blender 对标 wmWindowManager) */
   wm: {
-    contextMenu?: { open: Ref<boolean>; position: Ref<{ x: number; y: number }>; items: Ref<unknown[]> }
+    contextMenuOpen?: Ref<boolean>
+    contextMenuPosition?: Ref<{ x: number; y: number }>
     contextMenuItems?: unknown[]
     showContextMenu?(cm: unknown, pos: { x: number; y: number }, items: unknown[]): void
     hideContextMenu?(cm: unknown): void

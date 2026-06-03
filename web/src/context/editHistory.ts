@@ -40,6 +40,7 @@ export function createEditHistory(maxStack = 256): UndoManager {
     redoLabel.value = redoStack.length > 0 ? redoStack[redoStack.length - 1].label : null
   }
 
+  /** Push command onto undo stack. NOTE: also calls command.execute() and logs via logCenter. */
   function push(command: EditCommand): void {
     if (undoStack.length > 0) {
       const last = undoStack[undoStack.length - 1]

@@ -6,19 +6,15 @@
  */
 import type { BContext, UIWorkspace } from '@/context/bContext'
 import type { EmbedSettings } from '@/preview/previewConfig'
-import type { OperatorType } from '@/operators/operatorType'
-import { globalOperators } from '@/operators/operatorRegistry'
+import { createOperatorRegistry, wrapOperatorRegistry } from '@/operators/operatorRegistry'
 import { ref } from 'vue'
 import type { SelectionContext } from '@/context/selection'
 import type { UndoManager } from '@/context/editHistory'
-import type { ToolRegistry } from '@/workbench/tools/registry'
-import type { Rect } from '@/workbench/ux/types/screen'
-import type { RNARegistry } from '@/workbench/ux/rna/types'
+import type { Rect, RNARegistry } from '@/shared/types'
 import { createCoreBContext } from '@/context/coreContext'
 
 // Operators
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/operators/builtin/viewOperators'
-import { ResetViewOperator } from '@/operators/builtin/resetView'
 import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
 
 function throwError(name: string): never {
@@ -26,14 +22,8 @@ function throwError(name: string): never {
 }
 
 export function createEmbedContext(settings: EmbedSettings): BContext {
-  const embedOperators = {
-    exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(ctx, id, props),
-    invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) =>
-      globalOperators.invoke(ctx, id, props, event as PointerEvent | KeyboardEvent, regionId),
-    find: (id: string) => { const o = globalOperators.find(id); return o ? { id: o.id, label: o.label } : undefined },
-    all: () => globalOperators.all().map(o => ({ id: o.id, label: o.label })),
-    register: (op: OperatorType) => globalOperators.register(op),
-  }
+  const registry = createOperatorRegistry()
+  const embedOperators = wrapOperatorRegistry(registry, () => ctx, true)
 
   const core = createCoreBContext(embedOperators)
   core.viewports.register('r-embed')
@@ -48,7 +38,7 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
 
     get selection(): SelectionContext { return throwError('selection') },
     get editHistory(): UndoManager { return throwError('editHistory') },
-    get toolRegistry(): ToolRegistry { return throwError('toolRegistry') },
+    get toolRegistry() { return throwError('toolRegistry') },
     queries: null,
 
     settings: {
@@ -70,8 +60,8 @@ export function createEmbedContext(settings: EmbedSettings): BContext {
   ;(ctx as any).initialCamera = settings.initialCamera
 
   // Register embed operators
-  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ResetViewOperator, CopyCameraFromEmbedOperator]) {
-    if (!ctx.operators.find(op.id)) ctx.operators.register(op)
+  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, CopyCameraFromEmbedOperator]) {
+    if (!registry.find(op.id)) registry.register(op)
   }
 
   return ctx

@@ -17,7 +17,6 @@ import { EventDispatcherImpl } from '@/events/dispatcher'
 
 export interface CoreBContext {
   doc: Ref<RuntimeDocument | null>
-  dirty: Ref<boolean>
   structEpoch: Ref<number>
   currentWorldFrameIndex: Ref<number>
   workspaceMode: Ref<WorkbenchWorkspaceMode>
@@ -33,7 +32,6 @@ export interface CoreBContext {
 export function createCoreBContext(operators: BContext['operators']): CoreBContext {
   return {
     doc: ref(null),
-    dirty: ref(false),
     structEpoch: ref(0),
     currentWorldFrameIndex: ref(0),
     workspaceMode: ref<WorkbenchWorkspaceMode>('local-file'),

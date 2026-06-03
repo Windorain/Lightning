@@ -4,7 +4,7 @@ import ViewerCore, { type ViewerCoreReadyPayload } from '@/shared/viewport/Viewe
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
-import { useViewport, updateAnnotationOverlay, disposeAnnotationOverlay } from '@/shared/composables/useViewport'
+import { useViewport, updateAnnotationOverlay } from '@/shared/composables/useViewport'
 import { useSelectionContext, type BlockRef } from '@/context/selection'
 import { useBContext } from '@/context/bContext'
 import { createRenderAssets } from '@/context/renderAssets'
@@ -289,11 +289,8 @@ onBeforeUnmount(() => {
   unregHandlers.forEach(fn => fn())
   _alive = false
   if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
-  outlinePass.dispose()
-  disposeAnnotationOverlay(bctx.viewport.id)
+  vp.dispose()
   highlightProvider.dispose()
-  renderAssets.disposeCachesAndLibrary()
-  renderAssets.dispose()
 })
 </script>
 

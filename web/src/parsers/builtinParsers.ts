@@ -8,7 +8,7 @@
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import { isEnvelopeDocument, normalizeEnvelopeToPlain } from '@/render/data/compactSceneDocument'
 import { parserRegistry } from '@/context/parserRegistry'
-import type { DocumentParser } from '@/context/parserRegistry'
+import type { DocumentParser, ParserRegistryImpl } from '@/context/parserRegistry'
 
 // ==================== V2PlainParser ====================
 
@@ -49,6 +49,28 @@ export const EnvelopeParser: DocumentParser = {
     const result = await parserRegistry.detectAndParse(plain)
     return result.document
   },
+}
+
+/**
+ * createEnvelopeParser — 创建绑定到指定 registry 的 EnvelopeParser。
+ *
+ * 与 EnvelopeParser 的区别在于它捕获传入的 registry 实例，
+ * 解压后委托给该 registry 而非全局 singleton。
+ * 供 shell 使用 createParserRegistry() 创建本地 registry 时使用。
+ */
+export function createEnvelopeParser(registry: ParserRegistryImpl): DocumentParser {
+  return {
+    formatName: 'Envelope',
+    detect(raw: unknown): boolean {
+      return isEnvelopeDocument(raw)
+    },
+    async parse(raw: unknown): Promise<RuntimeDocument | null> {
+      const plain = await normalizeEnvelopeToPlain(raw)
+      if (plain === raw) return null
+      const result = await registry.detectAndParse(plain)
+      return result.document
+    },
+  }
 }
 
 // ==================== WorldParser ====================

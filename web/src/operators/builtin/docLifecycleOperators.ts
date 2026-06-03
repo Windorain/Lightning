@@ -50,7 +50,7 @@ export const NewSceneOperator: OperatorType = {
   },
 
   async exec(bctx, _props) {
-    if (bctx.dirty.value) {
+    if (bctx.editHistory.canUndo.value) {
       const confirmFn = bctx.settings.confirmDirty ?? window.confirm
       if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
       await bctx.operators.exec('OPERATOR_SAVE_FILE')
@@ -77,7 +77,7 @@ export const OpenSceneOperator: OperatorType = {
       file = await pickFile()
       if (!file) return
     }
-    if (bctx.dirty.value) {
+    if (bctx.editHistory.canUndo.value) {
       const confirmFn = bctx.settings.confirmDirty ?? window.confirm
       if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
       await bctx.operators.exec('OPERATOR_SAVE_FILE')

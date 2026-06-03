@@ -1,4 +1,4 @@
-// web/src/workbench/selectionContext.ts
+// web/src/context/selection.ts
 
 import type { InjectionKey, Ref } from 'vue'
 import { inject, provide, ref, shallowRef } from 'vue'

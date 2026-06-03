@@ -332,6 +332,8 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       if (g && scene) scene.remove(g)
       mainMeshGroup.value = null
       await presentContentMesh()
+    }).catch((e: unknown) => {
+      console.error('[renderAssets] layer watch mesh rebuild failed', e)
     })
   })
 

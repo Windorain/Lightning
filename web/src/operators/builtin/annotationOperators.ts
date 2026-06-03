@@ -1,4 +1,4 @@
-// web/src/workbench/operators/builtin/annotationOperators.ts
+// web/src/operators/builtin/annotationOperators.ts
 import { generateId } from '@/pure/string'
 import type { OperatorType } from '@/operators/operatorType'
 import type { Annotation } from '@/render/data/annotationTypes'

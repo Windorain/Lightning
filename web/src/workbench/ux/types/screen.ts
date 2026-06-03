@@ -14,12 +14,8 @@ export enum RegionType {
   FOOTER       = 'FOOTER',
 }
 
-export interface Rect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
+import type { Rect } from '@/shared/types'
+export type { Rect }
 
 export interface ScrArea {
   id: string

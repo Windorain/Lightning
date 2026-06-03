@@ -109,6 +109,7 @@ export class RuntimeDocument {
       const frame: Record<string, unknown> = {
         index: f.index,
         label: f.label,
+        durationMs: f.durationMs,
       }
       if (f.grid) {
         const { cellGrid, blockPalette } = this._gridToV2(f.grid)

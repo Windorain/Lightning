@@ -5,6 +5,7 @@
  * 1. 将输入事件与 keymap 绑定匹配 → invoke 对应操作符
  * 2. operator FINISHED 后的拖拽手势检测 → 越过阈值 → invoke ViewRotate
  */
+import { ref } from 'vue'
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
 import type { BContext } from '@/context/bContext'
@@ -111,9 +112,10 @@ export function createKeymapHandler(
           if (binding.action === 'context-menu') {
             const wm = bctx.wm
             const pe = event as PointerEvent
-            if (wm.showContextMenu && wm.contextMenu) {
+            if (wm.showContextMenu && wm.contextMenuOpen && wm.contextMenuPosition) {
               const items = wm.contextMenuItems ?? []
-              wm.showContextMenu(wm.contextMenu, { x: pe.clientX, y: pe.clientY }, items)
+              const cmState = { open: wm.contextMenuOpen, position: wm.contextMenuPosition, items: ref(items) }
+              wm.showContextMenu(cmState, { x: pe.clientX, y: pe.clientY }, items)
             }
             return { break: true }
           }

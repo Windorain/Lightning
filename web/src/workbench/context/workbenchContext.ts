@@ -8,15 +8,15 @@
  * 由调用方创建后传入——生产用 provide* 工厂，测试用 create* 工厂。
  */
 
-import { computed } from 'vue'
 import type { BContext } from '@/context/bContext'
 import type { SelectionContext } from '@/context/selection'
 import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { BContextSettings } from '@/context/bContext'
 import type { bScreen } from '@/workbench/ux/types/screen'
-import { globalOperators } from '@/operators/operatorRegistry'
+import { createOperatorRegistry, wrapOperatorRegistry } from '@/operators/operatorRegistry'
 import type { OperatorType } from '@/operators/operatorType'
+import type { OperatorRegistry } from '@/operators/operatorRegistry'
 import { logCenter } from '@/logging/LogCenter'
 import { wikiConfig } from '@/config/wikiConfig'
 import { createCoreBContext } from '@/context/coreContext'
@@ -34,7 +34,7 @@ import {
 
 // All builtin operators
 import { SelectOperator, SelectByTypeOperator, SelectAllOperator } from '@/operators/builtin/selectOperator'
-import { MoveOperator } from '@/operators/builtin/moveOperators'
+import { MoveOperator } from '@/operators/builtin/moveTranslate'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/operators/builtin/viewOperators'
 import { TooltipEditOperator } from '@/operators/builtin/metaEditOperators'
 import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/operators/builtin/docLifecycleOperators'
@@ -92,14 +92,8 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   const { selection, editHistory, toolRegistry, settings } = deps
 
   // ---- operators (forward ref through bctx) ----
-  const bctxOperators = {
-    exec: (id: string, props?: Record<string, unknown>) => globalOperators.exec(bctx, id, props),
-    invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) =>
-      globalOperators.invoke(bctx, id, props, event as PointerEvent | KeyboardEvent, regionId),
-    find: (id: string) => globalOperators.find(id),
-    all: () => globalOperators.all(),
-    register: (op: OperatorType) => globalOperators.register(op),
-  }
+  const registry = createOperatorRegistry()
+  const bctxOperators = wrapOperatorRegistry(registry, () => bctx)
 
   const core = createCoreBContext(bctxOperators)
   const { viewports, eventDispatcher } = core
@@ -153,7 +147,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   // ---- 原子构造 bctx（一次性全部填入，不用 as unknown / as any 后补） ----
   const bctx: BContext = {
     ...core,
-    dirty: computed(() => editHistory.canUndo.value),
 
     selection,
     editHistory,
@@ -186,7 +179,7 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   }
 
   // Register all builtin operators + tools
-  registerAllOperators(bctx)
+  registerAllOperators(registry)
 
   const moveGizmo = new MoveGizmo()
   const defaultVp = viewports.register('r-viewport')
@@ -204,11 +197,11 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   return { bctx, rna, screen: defaultScreen }
 }
 
-/** 注册所有内置 operator 到 globalOperators */
-export function registerAllOperators(bctx: BContext): void {
+/** 注册所有内置 operator 到 registry */
+export function registerAllOperators(registry: OperatorRegistry): void {
   for (const op of ALL_OPERATORS) {
-    if (!globalOperators.find(op.id)) {
-      bctx.operators.register(op)
+    if (!registry.find(op.id)) {
+      registry.register(op)
     }
   }
 }

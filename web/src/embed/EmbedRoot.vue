@@ -12,15 +12,22 @@ import { ref, watch } from 'vue'
 import type { EmbedBootstrapOptions } from '@/embed/embedContract'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { formatUnknownError } from '@/util/formatUnknownError'
-import { parserRegistry } from '@/context/parserRegistry'
-import { V2PlainParser, EnvelopeParser, WorldParser, StructureDataParser } from '@/parsers/builtinParsers'
+import { createParserRegistry, parserRegistry } from '@/context/parserRegistry'
+import { V2PlainParser, EnvelopeParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/parsers/builtinParsers'
 import { createEmbedContext, provideEmbedBContext } from '@/embed/embedBContext'
 import { replaceDoc } from '@/context/replaceDoc'
 import EmbedViewport from '@/embed/EmbedViewport.vue'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import type { View3DFeatures } from '@/preview/previewConfig'
 
-// ---- 注册 parser（与 WorkbenchRoot 对齐） ----
+// ---- 创建本地 parser registry（与 WorkbenchRoot 对齐） ----
+const localParserRegistry = createParserRegistry()
+localParserRegistry.register(V2PlainParser)
+localParserRegistry.register(createEnvelopeParser(localParserRegistry))
+localParserRegistry.register(WorldParser)
+localParserRegistry.register(StructureDataParser)
+
+// ---- 全局 singleton 注册（legacy，供 operators 使用） ----
 parserRegistry.register(V2PlainParser)
 parserRegistry.register(EnvelopeParser)
 parserRegistry.register(WorldParser)
@@ -64,7 +71,7 @@ async function load() {
   loadError.value = ''
   try {
     const rawDoc = props.bootstrap.data.document
-    const result = await parserRegistry.detectAndParse(rawDoc)
+    const result = await localParserRegistry.detectAndParse(rawDoc)
     if (!result.document) {
       loadError.value = `无法解析文档（format: ${result.parser?.formatName ?? '未知'}）`
       return

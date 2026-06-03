@@ -20,7 +20,7 @@ export interface ParseResult {
   error?: string
 }
 
-class ParserRegistryImpl {
+export class ParserRegistryImpl {
   private parsers: DocumentParser[] = []
 
   register(p: DocumentParser): void {
@@ -46,4 +46,8 @@ class ParserRegistryImpl {
   }
 }
 
-export const parserRegistry = new ParserRegistryImpl()
+export function createParserRegistry(): ParserRegistryImpl {
+  return new ParserRegistryImpl()
+}
+
+export const parserRegistry = createParserRegistry()

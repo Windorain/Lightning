@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import type { BContext } from '@/context/bContext'
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
+import { bumpEpoch } from '@/context/replaceDoc'
 
 const WORLD_AXES: Record<string, THREE.Vector3> = {
   x: new THREE.Vector3(1, 0, 0),
@@ -324,7 +325,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                bctx.structEpoch.value += 1
+                bumpEpoch(bctx)
               },
               undo: () => {
                 for (const m of moves) grid.moveBlock(m.to, m.from)
@@ -341,7 +342,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                bctx.structEpoch.value += 1
+                bumpEpoch(bctx)
               },
             })
           }

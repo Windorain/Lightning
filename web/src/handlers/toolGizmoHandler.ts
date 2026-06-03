@@ -1,4 +1,4 @@
-// web/src/workbench/handlers/toolGizmoHandler.ts
+// web/src/handlers/toolGizmoHandler.ts
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
 import type { BContext } from '@/context/bContext'

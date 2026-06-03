@@ -80,313 +80,319 @@ export interface CheckResult {
   actual: unknown
 }
 
-const MAX_ENTRIES = 2000
+export function createLogCenter() {
+  const MAX_ENTRIES = 2000
 
-let nextId = 1
-function uid(): number { return nextId++ }
+  let nextId = 1
+  function uid(): number { return nextId++ }
 
-function hhmmss(): string {
-  const d = new Date()
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
-}
-
-function posKey(p: { x: number; y: number; z: number }): string {
-  return `${p.x},${p.y},${p.z}`
-}
-
-function posEq(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): boolean {
-  return a.x === b.x && a.y === b.y && a.z === b.z
-}
-
-const entries = shallowRef<Report[]>([])
-const lastDisplayable = ref<Report | null>(null)
-const sessions = new Map<string, Session>()
-
-let _traceId: string | null = null
-const _displayMessage = ref('')
-const _displayLevel = ref<LogLevelValue>(LOG_LEVEL.INFO)
-
-// State query refs (injected by WorkbenchRoot)
-let _sceneRef: (() => any) | null = null
-let _selectionRef: (() => any[]) | null = null
-let _toolRegistryRef: (() => {
-  activeToolId: string; canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null
-}) | null = null
-let _gizmoPos: { x: number; y: number; z: number } | null = null
-let _cameraState: { position: [number, number, number]; target: [number, number, number] } | null = null
-
-function push(level: LogLevelValue, source: string, message: string, detail?: unknown): Report {
-  const report: Report = {
-    id: uid(),
-    time: hhmmss(),
-    level,
-    source,
-    message,
-    detail,
-    traceId: _traceId ?? undefined,
+  function hhmmss(): string {
+    const d = new Date()
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
   }
 
-  const list = entries.value
-  list.push(report)
-  if (list.length > MAX_ENTRIES) list.splice(0, list.length - MAX_ENTRIES)
-  entries.value = list
-
-  if (level !== LOG_LEVEL.DEBUG) {
-    lastDisplayable.value = report
-    _displayMessage.value = message
-    _displayLevel.value = level
+  function posKey(p: { x: number; y: number; z: number }): string {
+    return `${p.x},${p.y},${p.z}`
   }
 
-  if (typeof window !== 'undefined' && import.meta.env.DEV) {
-    const lvlName = LOG_LEVEL_LABEL[level] ?? '?'
-    const args: unknown[] = [`[${lvlName}] ${source}: ${message}`]
-    if (detail !== undefined) args.push(detail)
-    if (level >= LOG_LEVEL.WARN) console.warn(...args)
-    else if (level === LOG_LEVEL.DEBUG) console.debug(...args)
-    else console.info(...args)
+  function posEq(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): boolean {
+    return a.x === b.x && a.y === b.y && a.z === b.z
   }
 
-  return report
-}
+  const entries = shallowRef<Report[]>([])
+  const lastDisplayable = ref<Report | null>(null)
+  const sessions = new Map<string, Session>()
 
-export const logCenter = {
-  entries,
-  lastDisplayable,
+  let _traceId: string | null = null
+  const _displayMessage = ref('')
+  const _displayLevel = ref<LogLevelValue>(LOG_LEVEL.INFO)
 
-  debug(source: string, message: string, detail?: unknown): Report {
-    return push(LOG_LEVEL.DEBUG, source, message, detail)
-  },
+  // State query refs (injected by assembly)
+  let _sceneRef: (() => any) | null = null
+  let _selectionRef: (() => any[]) | null = null
+  let _toolRegistryRef: (() => {
+    activeToolId: string; canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null
+  }) | null = null
+  let _gizmoPos: { x: number; y: number; z: number } | null = null
+  let _cameraState: { position: [number, number, number]; target: [number, number, number] } | null = null
 
-  info(source: string, message: string, detail?: unknown): Report {
-    return push(LOG_LEVEL.INFO, source, message, detail)
-  },
-
-  operator(source: string, message: string, detail?: unknown): Report {
-    return push(LOG_LEVEL.OPERATOR, source, message, detail)
-  },
-
-  warn(source: string, message: string, detail?: unknown): Report {
-    return push(LOG_LEVEL.WARN, source, message, detail)
-  },
-
-  error(source: string, message: string, detail?: unknown): Report {
-    return push(LOG_LEVEL.ERROR, source, message, detail)
-  },
-
-  recent(levelMask?: number, count = 20): Report[] {
-    let list = entries.value
-    if (levelMask !== undefined) {
-      list = list.filter(r => (r.level & levelMask) !== 0)
-    }
-    return list.slice(-count)
-  },
-
-  contains(levelMask: number): boolean {
-    return entries.value.some(r => (r.level & levelMask) !== 0)
-  },
-
-  clear(): void {
-    entries.value = []
-    lastDisplayable.value = null
-    _displayMessage.value = ''
-  },
-
-  /* —— Trace —— */
-
-  beginTrace(source: string, event: Event): string {
-    const id = `tr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
-    _traceId = id
-    this.debug(source, `trace:begin ${event.type}`, { traceId: id })
-    return id
-  },
-
-  get currentTraceId(): string | null {
-    return _traceId
-  },
-
-  endTrace(result: string): void {
-    if (_traceId) {
-      this.debug('Trace', `trace:end ${result}`, { traceId: _traceId })
-      _traceId = null
-    }
-  },
-
-  /* —— Session (合并连续操作为单条日志) —— */
-
-  beginSession(source: string, message: string, detail?: unknown): SessionHandle {
-    const sessionId = `sess_${uid()}`
-    const r = push(LOG_LEVEL.OPERATOR, source, message, { ...(detail ?? {}), sessionId, sessionPhase: 'begin' })
-    const session: Session = {
-      id: sessionId,
-      startId: r.id,
-      level: LOG_LEVEL.OPERATOR,
+  /** Append a log entry. NOTE: also updates lastDisplayable, displayMessage/Level refs, and console in DEV. */
+  function push(level: LogLevelValue, source: string, message: string, detail?: unknown): Report {
+    const report: Report = {
+      id: uid(),
+      time: hhmmss(),
+      level,
       source,
-      summary: message,
+      message,
       detail,
-      startTime: r.time,
-      frameCount: 0,
-    }
-    sessions.set(sessionId, session)
-
-    return {
-      update(msg: string, d?: unknown) {
-        session.frameCount++
-        const idx = entries.value.findIndex(e => e.sessionId === sessionId && e.sessionPhase === 'begin')
-        if (idx >= 0) {
-          const updated = { ...entries.value[idx], message: msg, detail: d }
-          entries.value = [...entries.value.slice(0, idx), updated, ...entries.value.slice(idx + 1)]
-        }
-        session.summary = msg
-        session.detail = d
-      },
-      end(msg: string, d?: unknown) {
-        session.endTime = hhmmss()
-        session.summary = msg
-        session.detail = d
-        const idx = entries.value.findIndex(e => e.sessionId === sessionId)
-        if (idx >= 0) {
-          const merged: Report = {
-            ...entries.value[idx],
-            message: msg,
-            detail: { ...(d as any ?? {}), frameCount: session.frameCount, duration: session.endTime },
-            sessionPhase: 'end',
-          }
-          entries.value = [...entries.value.slice(0, idx), merged, ...entries.value.slice(idx + 1)]
-        }
-        sessions.set(sessionId, session)
-      },
-    }
-  },
-
-  sessionSummaries(): Session[] {
-    return [...sessions.values()].filter(s => s.endTime != null)
-  },
-
-  /* —— Snapshot / Diff —— */
-
-  snapshot(ctx: BContext): StateDigest {
-    if (!ctx.queries) throw new Error('snapshot: queries not available')
-    const id = nextId
-    const blocks = ctx.queries.getFrameBlocks()
-    const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
-    return {
-      logId: id,
-      blockCount: blocks.length,
-      blocks: blocks.map(b => ({ pos: { ...b.pos }, id: b.block_state_id })),
-      selectionSize: sel.length,
-      selection: sel.map(s => ({ ...s.ref.pos })),
-      activeOperator: ctx.toolRegistry.activeTool.value?.id ?? null,
-    }
-  },
-
-  diff(snap: StateDigest, ctx: BContext): StateDiff {
-    if (!ctx.queries) throw new Error('diff: queries not available')
-    const now = ctx.queries.getFrameBlocks()
-    const nowSel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
-    const diff: StateDiff = {
-      sinceLogId: snap.logId,
-      blocksAdded: [],
-      blocksRemoved: [],
-      blocksMoved: [],
-      selectionChanged: false,
+      traceId: _traceId ?? undefined,
     }
 
-    const oldMap = new Map(snap.blocks.map(b => [posKey(b.pos), b]))
-    const newMap = new Map(now.map(b => [posKey(b.pos), { pos: { ...b.pos }, id: b.block_state_id }]))
+    const list = entries.value
+    list.push(report)
+    if (list.length > MAX_ENTRIES) list.splice(0, list.length - MAX_ENTRIES)
+    entries.value = list
 
-    for (const [key, b] of newMap) {
-      if (!oldMap.has(key)) diff.blocksAdded.push(b)
+    if (level !== LOG_LEVEL.DEBUG) {
+      lastDisplayable.value = report
+      _displayMessage.value = message
+      _displayLevel.value = level
     }
-    for (const [key, b] of oldMap) {
-      if (!newMap.has(key)) diff.blocksRemoved.push(b)
+
+    if (typeof window !== 'undefined' && import.meta.env.DEV) {
+      const lvlName = LOG_LEVEL_LABEL[level] ?? '?'
+      const args: unknown[] = [`[${lvlName}] ${source}: ${message}`]
+      if (detail !== undefined) args.push(detail)
+      if (level >= LOG_LEVEL.WARN) console.warn(...args)
+      else if (level === LOG_LEVEL.DEBUG) console.debug(...args)
+      else console.info(...args)
     }
 
-    diff.selectionChanged =
-      snap.selectionSize !== nowSel.length ||
-      !snap.selection.every((s, i) => posEq(s, nowSel[i]?.ref.pos ?? { x: NaN, y: NaN, z: NaN }))
+    return report
+  }
 
-    return diff
-  },
+  return {
+    entries,
+    lastDisplayable,
 
-  /* —— Checks (AI-friendly, structured) —— */
-
-  check: {
-    selectionSize(ctx: BContext, n: number): CheckResult {
-      const actual = ctx.selection.items.value.size
-      return { pass: actual === n, expected: n, actual }
+    debug(source: string, message: string, detail?: unknown): Report {
+      return push(LOG_LEVEL.DEBUG, source, message, detail)
     },
-    blockCount(ctx: BContext, n: number): CheckResult {
-      if (!ctx.queries) return { pass: false, expected: n, actual: 'queries not available' }
-      const actual = ctx.queries.getFrameBlocks().length
-      return { pass: actual === n, expected: n, actual }
+
+    info(source: string, message: string, detail?: unknown): Report {
+      return push(LOG_LEVEL.INFO, source, message, detail)
     },
-    operatorActive(ctx: BContext, id: string): CheckResult {
-      const actual = ctx.toolRegistry.activeTool.value?.id ?? null
-      return { pass: actual === id, expected: id, actual }
+
+    operator(source: string, message: string, detail?: unknown): Report {
+      return push(LOG_LEVEL.OPERATOR, source, message, detail)
     },
-    blockAt(ctx: BContext, pos: { x: number; y: number; z: number }, id?: string): CheckResult {
-      if (!ctx.queries) return { pass: false, expected: `block at (${pos.x},${pos.y},${pos.z}) id=${id ?? 'any'}`, actual: 'queries not available' }
-      const blocks = ctx.queries.getFrameBlocks()
-      const found = blocks.find(
-        b => b.pos.x === pos.x && b.pos.y === pos.y && b.pos.z === pos.z &&
-          (id === undefined || b.block_state_id === id),
-      )
-      return {
-        pass: !!found,
-        expected: `block at (${pos.x},${pos.y},${pos.z}) id=${id ?? 'any'}`,
-        actual: found ? `found id=${found.block_state_id}` : 'not found',
+
+    warn(source: string, message: string, detail?: unknown): Report {
+      return push(LOG_LEVEL.WARN, source, message, detail)
+    },
+
+    error(source: string, message: string, detail?: unknown): Report {
+      return push(LOG_LEVEL.ERROR, source, message, detail)
+    },
+
+    recent(levelMask?: number, count = 20): Report[] {
+      let list = entries.value
+      if (levelMask !== undefined) {
+        list = list.filter(r => (r.level & levelMask) !== 0)
+      }
+      return list.slice(-count)
+    },
+
+    contains(levelMask: number): boolean {
+      return entries.value.some(r => (r.level & levelMask) !== 0)
+    },
+
+    clear(): void {
+      entries.value = []
+      lastDisplayable.value = null
+      _displayMessage.value = ''
+    },
+
+    /* —— Trace —— */
+
+    beginTrace(source: string, event: Event): string {
+      const id = `tr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+      _traceId = id
+      this.debug(source, `trace:begin ${event.type}`, { traceId: id })
+      return id
+    },
+
+    get currentTraceId(): string | null {
+      return _traceId
+    },
+
+    endTrace(result: string): void {
+      if (_traceId) {
+        this.debug('Trace', `trace:end ${result}`, { traceId: _traceId })
+        _traceId = null
       }
     },
-  } as const,
 
-  /* —— Status message —— */
+    /* —— Session (合并连续操作为单条日志) —— */
 
-  setStatus(message: string, level: LogLevelValue = LOG_LEVEL.INFO): void {
-    _displayMessage.value = message
-    _displayLevel.value = level
-  },
+    beginSession(source: string, message: string, detail?: unknown): SessionHandle {
+      const sessionId = `sess_${uid()}`
+      const r = push(LOG_LEVEL.OPERATOR, source, message, { ...(detail ?? {}), sessionId, sessionPhase: 'begin' })
+      const session: Session = {
+        id: sessionId,
+        startId: r.id,
+        level: LOG_LEVEL.OPERATOR,
+        source,
+        summary: message,
+        detail,
+        startTime: r.time,
+        frameCount: 0,
+      }
+      sessions.set(sessionId, session)
 
-  get statusMessage(): string { return _displayMessage.value },
-  get statusLevel(): LogLevelValue { return _displayLevel.value },
+      return {
+        update(msg: string, d?: unknown) {
+          session.frameCount++
+          const idx = entries.value.findIndex(e => e.sessionId === sessionId && e.sessionPhase === 'begin')
+          if (idx >= 0) {
+            const updated = { ...entries.value[idx], message: msg, detail: d }
+            entries.value = [...entries.value.slice(0, idx), updated, ...entries.value.slice(idx + 1)]
+          }
+          session.summary = msg
+          session.detail = d
+        },
+        end(msg: string, d?: unknown) {
+          session.endTime = hhmmss()
+          session.summary = msg
+          session.detail = d
+          const idx = entries.value.findIndex(e => e.sessionId === sessionId)
+          if (idx >= 0) {
+            const merged: Report = {
+              ...entries.value[idx],
+              message: msg,
+              detail: { ...(d as any ?? {}), frameCount: session.frameCount, duration: session.endTime },
+              sessionPhase: 'end',
+            }
+            entries.value = [...entries.value.slice(0, idx), merged, ...entries.value.slice(idx + 1)]
+          }
+          sessions.set(sessionId, session)
+        },
+      }
+    },
 
-  /* —— State refs (formerly debugLog) —— */
+    sessionSummaries(): Session[] {
+      return [...sessions.values()].filter(s => s.endTime != null)
+    },
 
-  injectStateRefs(refs: {
-    scene: () => any
-    selection: () => any[]
-    toolRegistry: () => {
-      activeToolId: string; canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null
-    }
-  }): void {
-    _sceneRef = refs.scene
-    _selectionRef = refs.selection
-    _toolRegistryRef = refs.toolRegistry
-  },
+    /* —— Snapshot / Diff —— */
 
-  updateGizmoState(pos: { x: number; y: number; z: number } | null): void {
-    _gizmoPos = pos
-  },
+    snapshot(ctx: BContext): StateDigest {
+      if (!ctx.queries) throw new Error('snapshot: queries not available')
+      const id = nextId
+      const blocks = ctx.queries.getFrameBlocks()
+      const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
+      return {
+        logId: id,
+        blockCount: blocks.length,
+        blocks: blocks.map(b => ({ pos: { ...b.pos }, id: b.block_state_id })),
+        selectionSize: sel.length,
+        selection: sel.map(s => ({ ...s.ref.pos })),
+        activeOperator: ctx.toolRegistry.activeTool.value?.id ?? null,
+      }
+    },
 
-  updateCameraState(state: { position: [number, number, number]; target: [number, number, number] } | null): void {
-    _cameraState = state
-  },
+    diff(snap: StateDigest, ctx: BContext): StateDiff {
+      if (!ctx.queries) throw new Error('diff: queries not available')
+      const now = ctx.queries.getFrameBlocks()
+      const nowSel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
+      const diff: StateDiff = {
+        sinceLogId: snap.logId,
+        blocksAdded: [],
+        blocksRemoved: [],
+        blocksMoved: [],
+        selectionChanged: false,
+      }
 
-  /* —— State queries (formerly window.__wb_debug__) —— */
+      const oldMap = new Map(snap.blocks.map(b => [posKey(b.pos), b]))
+      const newMap = new Map(now.map(b => [posKey(b.pos), { pos: { ...b.pos }, id: b.block_state_id }]))
 
-  getScene(): any { return _sceneRef?.() ?? null },
-  getSelection(): any[] { return _selectionRef?.() ?? [] },
-  getActiveTool(): string { return _toolRegistryRef?.().activeToolId ?? 'none' },
-  getEditHistory(): { canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null } {
-    const r = _toolRegistryRef?.()
-    return r
-      ? { canUndo: r.canUndo, canRedo: r.canRedo, undoLabel: r.undoLabel, redoLabel: r.redoLabel }
-      : { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null }
-  },
-  getGizmoPosition(): { x: number; y: number; z: number } | null { return _gizmoPos },
-  getCameraState(): { position: [number, number, number]; target: [number, number, number] } | null {
-    return _cameraState
-  },
+      for (const [key, b] of newMap) {
+        if (!oldMap.has(key)) diff.blocksAdded.push(b)
+      }
+      for (const [key, b] of oldMap) {
+        if (!newMap.has(key)) diff.blocksRemoved.push(b)
+      }
+
+      diff.selectionChanged =
+        snap.selectionSize !== nowSel.length ||
+        !snap.selection.every((s, i) => posEq(s, nowSel[i]?.ref.pos ?? { x: NaN, y: NaN, z: NaN }))
+
+      return diff
+    },
+
+    /* —— Checks (AI-friendly, structured) —— */
+
+    check: {
+      selectionSize(ctx: BContext, n: number): CheckResult {
+        const actual = ctx.selection.items.value.size
+        return { pass: actual === n, expected: n, actual }
+      },
+      blockCount(ctx: BContext, n: number): CheckResult {
+        if (!ctx.queries) return { pass: false, expected: n, actual: 'queries not available' }
+        const actual = ctx.queries.getFrameBlocks().length
+        return { pass: actual === n, expected: n, actual }
+      },
+      operatorActive(ctx: BContext, id: string): CheckResult {
+        const actual = ctx.toolRegistry.activeTool.value?.id ?? null
+        return { pass: actual === id, expected: id, actual }
+      },
+      blockAt(ctx: BContext, pos: { x: number; y: number; z: number }, id?: string): CheckResult {
+        if (!ctx.queries) return { pass: false, expected: `block at (${pos.x},${pos.y},${pos.z}) id=${id ?? 'any'}`, actual: 'queries not available' }
+        const blocks = ctx.queries.getFrameBlocks()
+        const found = blocks.find(
+          b => b.pos.x === pos.x && b.pos.y === pos.y && b.pos.z === pos.z &&
+            (id === undefined || b.block_state_id === id),
+        )
+        return {
+          pass: !!found,
+          expected: `block at (${pos.x},${pos.y},${pos.z}) id=${id ?? 'any'}`,
+          actual: found ? `found id=${found.block_state_id}` : 'not found',
+        }
+      },
+    } as const,
+
+    /* —— Status message —— */
+
+    setStatus(message: string, level: LogLevelValue = LOG_LEVEL.INFO): void {
+      _displayMessage.value = message
+      _displayLevel.value = level
+    },
+
+    get statusMessage(): string { return _displayMessage.value },
+    get statusLevel(): LogLevelValue { return _displayLevel.value },
+
+    /* —— State refs (formerly debugLog) —— */
+
+    injectStateRefs(refs: {
+      scene: () => any
+      selection: () => any[]
+      toolRegistry: () => {
+        activeToolId: string; canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null
+      }
+    }): void {
+      _sceneRef = refs.scene
+      _selectionRef = refs.selection
+      _toolRegistryRef = refs.toolRegistry
+    },
+
+    updateGizmoState(pos: { x: number; y: number; z: number } | null): void {
+      _gizmoPos = pos
+    },
+
+    updateCameraState(state: { position: [number, number, number]; target: [number, number, number] } | null): void {
+      _cameraState = state
+    },
+
+    /* —— State queries (formerly window.__wb_debug__) —— */
+
+    getScene(): any { return _sceneRef?.() ?? null },
+    getSelection(): any[] { return _selectionRef?.() ?? [] },
+    getActiveTool(): string { return _toolRegistryRef?.().activeToolId ?? 'none' },
+    getEditHistory(): { canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null } {
+      const r = _toolRegistryRef?.()
+      return r
+        ? { canUndo: r.canUndo, canRedo: r.canRedo, undoLabel: r.undoLabel, redoLabel: r.redoLabel }
+        : { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null }
+    },
+    getGizmoPosition(): { x: number; y: number; z: number } | null { return _gizmoPos },
+    getCameraState(): { position: [number, number, number]; target: [number, number, number] } | null {
+      return _cameraState
+    },
+  }
 }
+
+/** Default singleton instance — shared across production code. Tests can call `createLogCenter()` for a fresh instance. */
+export const logCenter = createLogCenter()
 
 /* —— Window API —— */
 

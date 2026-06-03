@@ -138,4 +138,32 @@ async function invokeExecFallback(
   return OP_RESULT.FINISHED
 }
 
-export const globalOperators = new OperatorRegistry()
+export function createOperatorRegistry(): OperatorRegistry {
+  return new OperatorRegistry()
+}
+
+export const globalOperators = createOperatorRegistry()
+
+/**
+ * Wrap an OperatorRegistry into the shape expected by BContext.operators.
+ * When `sanitize` is true, `find`/`all` return only the public face (id, label)
+ * instead of the full OperatorType — used by the embed shell.
+ */
+export function wrapOperatorRegistry(
+  registry: OperatorRegistry,
+  getCtx: () => BContext,
+  sanitize?: boolean,
+) {
+  return {
+    exec: (id: string, props?: Record<string, unknown>) => registry.exec(getCtx(), id, props),
+    invoke: (id: string, props?: Record<string, unknown>, event?: Event, regionId?: string) =>
+      registry.invoke(getCtx(), id, props, event as PointerEvent | KeyboardEvent, regionId),
+    find: sanitize
+      ? (id: string) => { const o = registry.find(id); return o ? { id: o.id, label: o.label } : undefined }
+      : (id: string) => registry.find(id),
+    all: sanitize
+      ? () => registry.all().map(o => ({ id: o.id, label: o.label }))
+      : () => registry.all(),
+    register: (op: OperatorType) => registry.register(op),
+  }
+}

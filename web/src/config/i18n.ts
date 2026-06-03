@@ -15,6 +15,7 @@ function loadLang(): Lang {
   return 'zh'
 }
 
+/** Set runtime language. NOTE: also persists to localStorage. */
 export function setLang(v: Lang): void {
   currentLang.value = v
   try { localStorage.setItem(LS_KEY, v) } catch { /* */ }

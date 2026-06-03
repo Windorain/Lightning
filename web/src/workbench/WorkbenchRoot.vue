@@ -8,7 +8,7 @@ import WorkbenchViewport from '@/workbench/components/WorkbenchViewport.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
-import EmbedViewport from '@/embed/EmbedViewport.vue'
+import { EmbedPreview } from '@/shared/viewport/embedPreview'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
@@ -19,14 +19,6 @@ import { provideToolRegistry } from '@/workbench/tools/registry'
 import { provideBContext, type BContextSettings } from '@/context/bContext'
 import { currentLang } from '@/config/i18n'
 import { theme } from '@/workbench/composables/useNeiTheme'
-
-const FLOOR_TEMPLATES = [
-  { id: 'floor_stone', label: 'Stone Floor', color: '#808080' },
-  { id: 'floor_wood', label: 'Wood Floor', color: '#8B6914' },
-  { id: 'floor_checker', label: 'Checker Floor', color: '#ccc/#666' },
-  { id: 'floor_sandstone', label: 'Sandstone Floor', color: '#D4B896' },
-  { id: 'floor_glass', label: 'Glass Floor', color: '#88ccff' },
-]
 
 function createBContextSettings(overrides?: {
   theme?: 'dark' | 'light'
@@ -65,18 +57,26 @@ import { createWorkbenchContext } from '@/workbench/context/workbenchContext'
 
 import { installUnifiedLogApi } from '@/logging/LogCenter'
 import { logCenter } from '@/logging/LogCenter'
-import { replaceDoc } from '@/context/replaceDoc'
-import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
-import { relayout } from '@/workbench/ux/layout'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
+import { autoConnectSde } from '@/workbench/context/autoConnectSde'
+import { usePanelQueries } from '@/workbench/context/usePanelQueries'
 import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 
-// Document format parsers — 注册到解析分发中心
-import { parserRegistry } from '@/context/parserRegistry'
-import { V2PlainParser, EnvelopeParser, WorldParser, StructureDataParser } from '@/parsers/builtinParsers'
+// Document format parsers — 创建本地 registry 并注册解析器
+import { createParserRegistry, parserRegistry } from '@/context/parserRegistry'
+import { V2PlainParser, EnvelopeParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/parsers/builtinParsers'
+
+// ---- 本地 registry（当前 shell 使用） ----
+const localParserRegistry = createParserRegistry()
+localParserRegistry.register(V2PlainParser)
+localParserRegistry.register(createEnvelopeParser(localParserRegistry))
+localParserRegistry.register(WorldParser)
+localParserRegistry.register(StructureDataParser)
+
+// ---- 全局 singleton 注册（legacy，供 operators 使用） ----
 parserRegistry.register(V2PlainParser)
 parserRegistry.register(EnvelopeParser)
 parserRegistry.register(WorldParser)
@@ -102,37 +102,7 @@ provideBContext(bctx)
 useNeiTheme()
 
 
-// Reactive panel queries
-const viewportArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
-const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
-
-function panelInWorkspace(p: typeof viewportArea.regions[number]['panels'][number]): boolean {
-  const ws = bctx.uiWorkspace.value
-  return !p.workspaces || p.workspaces.includes(ws)
-}
-
-const activeToolshelfPanels = computed(() =>
-  viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels
-    .filter(p => panelInWorkspace(p) && p.poll(bctx))
-    .map(p => ({ id: p.id, layout: p.layout(bctx), owner: p.owner?.(bctx), component: p.component }))
-)
-
-const activePropertiesPanels = computed(() =>
-  propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels
-    .filter(p => panelInWorkspace(p) && p.poll(bctx))
-    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx), component: p.component }))
-)
-
-const activeHeaderPanels = computed(() =>
-  viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels
-    .filter(p => panelInWorkspace(p) && p.poll(bctx))
-    .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(bctx), owner: p.owner?.(bctx) }))
-)
-
-// Keep widgetCache in sync with reactive panel changes so boundsOfByOperator / boundsOfByRNAPath stay current
-watch([activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels], () => {
-  relayout(bctx)
-}, { flush: 'post' })
+const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = usePanelQueries(bctx, defaultScreen)
 
 // Wiki embed settings
 const wikiConfig = bctx.wikiConfig as Record<string, any>
@@ -181,7 +151,8 @@ function onMouseMove(e: MouseEvent) {
 }
 
 // Wire context menu + show/hide into wm (不在 createWorkbenchContext 内，因为依赖 showContextMenu 闭包)
-  bctx.wm.contextMenu = contextMenu
+  bctx.wm.contextMenuOpen = contextMenu.open
+  bctx.wm.contextMenuPosition = contextMenu.position
   bctx.wm.showContextMenu = showContextMenu
   bctx.wm.hideContextMenu = hideContextMenu
   bctx.wm.contextMenuItems = ADD_MENU_ITEMS
@@ -207,28 +178,7 @@ provide('workbenchSettingsOpen', settingsOpen)
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousemove', onMouseMove)
-
-  if (bctx.connection.apiBase) {
-    try { await bctx.operators.exec('OPERATOR_SDE_CONNECT') } catch { /* ignore */ }
-    if (bctx.connection.connected) {
-      try {
-        const data = await (await import('@/workbench/sdeApi')).sdeGetWorkspaceDocument(bctx.connection.apiBase, bctx.connection.token)
-        if (data) {
-          const result = await parserRegistry.detectAndParse(data)
-          if (result.document) {
-            replaceDoc(bctx, result.document)
-            bctx.workspaceMode.value = 'sde'
-          }
-        }
-      } catch { /* ignore */ }
-    }
-  } else if (import.meta.env.DEV) {
-    const q = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
-    const sceneId = q?.get('sceneId')
-    if (sceneId) {
-      try { await bctx.operators.exec('OPERATOR_LOAD_BUILTIN', { sceneId }) } catch { /* ignore */ }
-    }
-  }
+  await autoConnectSde(bctx, localParserRegistry)
 })
 
 onBeforeUnmount(() => {
@@ -287,7 +237,7 @@ onMounted(() => {
     <template #viewport>
       <WorkbenchViewport v-if="workspace === 'preview' && bctx.doc.value" />
       <div v-else-if="workspace === 'wiki' && bctx.doc.value" class="wb-wiki-embed">
-        <EmbedViewport :settings="embedSettings" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }" />
+        <EmbedPreview :settings="embedSettings" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }" />
       </div>
     </template>
     <template #properties>
@@ -352,17 +302,17 @@ onMounted(() => {
   <Teleport to="body">
     <Transition name="menu-pop">
       <div
-        v-if="contextMenu.open.value"
+        v-if="bctx.wm.contextMenuOpen?.value ?? false"
         class="context-menu-overlay"
         @click="hideContextMenu(contextMenu)"
         @contextmenu.prevent
       >
         <div
           class="context-menu-popup"
-          :style="{ left: contextMenu.position.value.x + 'px', top: contextMenu.position.value.y + 'px' }"
+          :style="{ left: (bctx.wm.contextMenuPosition?.value.x ?? 0) + 'px', top: (bctx.wm.contextMenuPosition?.value.y ?? 0) + 'px' }"
           @click.stop
         >
-          <template v-for="(item, i) in contextMenu.items.value" :key="i">
+          <template v-for="(item, i) in ((bctx.wm.contextMenuItems ?? []) as ContextMenuItem[])" :key="i">
             <hr v-if="item.kind === 'separator'" class="cm-sep" />
             <span v-else-if="item.kind === 'label'" class="cm-label">{{ item.label }}</span>
             <button

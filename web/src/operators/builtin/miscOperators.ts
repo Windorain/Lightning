@@ -2,6 +2,7 @@ import type { OperatorType } from '@/operators/operatorType'
 import { toggleTheme } from '@/workbench/composables/useNeiTheme'
 import { setLang } from '@/config/i18n'
 import type { WorkbenchWorkspaceMode } from '@/context/bContext'
+import { replaceDoc } from '@/context/replaceDoc'
 
 // ──────────────────────────── 帧切换 ────────────────────────────
 
@@ -93,8 +94,7 @@ export const SetWorkspaceModeOperator: OperatorType = {
   exec(bctx, _props) {
     const mode = _props.mode as WorkbenchWorkspaceMode
     if (bctx.workspaceMode.value === mode) return
-    bctx.doc.value = null
-    bctx.structEpoch.value = 0
+    replaceDoc(bctx, null)
     bctx.currentWorldFrameIndex.value = 0
     bctx.localFileName.value = null
     bctx.workspaceMode.value = mode

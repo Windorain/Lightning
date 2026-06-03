@@ -9,19 +9,6 @@ export interface Vec3 {
   z: number
 }
 
-/** Axis-aligned vector addition: origin + axis * delta */
-export function axisAdd(
-  origin: { x: number; y: number; z: number },
-  axis: 'x' | 'y' | 'z',
-  delta: number,
-): { x: number; y: number; z: number } {
-  return {
-    x: origin.x + (axis === 'x' ? delta : 0),
-    y: origin.y + (axis === 'y' ? delta : 0),
-    z: origin.z + (axis === 'z' ? delta : 0),
-  }
-}
-
 /** Round each component of a 3D vector to the nearest integer */
 export function roundVector(v: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
   return { x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z) }
