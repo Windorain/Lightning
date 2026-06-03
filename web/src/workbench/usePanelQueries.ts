@@ -1,14 +1,11 @@
 import { computed, watch } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { ScreenRoot } from '@/runtime/screenRoot'
-import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
+import { SpaceType, RegionType } from '@/runtime/screenTypes'
 import { relayout } from '@/workbench/ux/layout'
 
 /**
- * Composable that derives the three reactive panel lists (toolshelf, properties,
- * header) from the registered panels on the default screen, filtering by
- * workspace and poll result.  A post-flush watch triggers widget-cache
- * recomputation whenever the active panel set changes.
+ * 从 Screen 注册面板派生 toolshelf / properties / header 列表，并在变更后 relayout。
  */
 export function usePanelQueries(ctx: Context, screen: ScreenRoot) {
   const viewportArea = screen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
@@ -37,7 +34,6 @@ export function usePanelQueries(ctx: Context, screen: ScreenRoot) {
       .map(p => ({ id: p.id, label: p.label, icon: p.icon, layout: p.layout(ctx), owner: p.owner?.(ctx) }))
   )
 
-  // Keep widgetCache in sync with reactive panel changes so boundsOfByOperator / boundsOfByRNAPath stay current
   watch([activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels], () => {
     relayout(ctx)
   }, { flush: 'post' })

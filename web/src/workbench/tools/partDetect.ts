@@ -2,8 +2,9 @@
 // Thin wrappers: StructureDefinition → decoded quads → pure AABB functions.
 import type { BakedQuad } from '@/render/schema/types'
 import type { StructureDefinition } from '@/render/schema/types'
-import { buildVoxelVolume } from '@/render/data/grid'
-import { structureRowToWorldY } from '@/render/data/grid'
+import { buildVoxelVolume, structureRowToWorldY } from '@/render/data/grid'
+import type { VoxelVolume } from '@/render/schema/types'
+import { AIR_VOXEL } from '@/render/schema/types'
 import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
 import type { Vec3 } from '@/pure/vec'
 import {
@@ -18,6 +19,19 @@ export interface DetectedBounds {
   max: { x: number; y: number; z: number }
   quadIndices: number[]
   totalQuads: number
+}
+
+function paletteEntryAt(
+  def: StructureDefinition,
+  volume: VoxelVolume,
+  column: number,
+  row: number,
+  zSlice: number,
+) {
+  const v = volume.get(column, row, zSlice)
+  if (v.registryId === AIR_VOXEL.registryId) return null
+  const entry = def.blockPalette.find(e => e.registryId === v.registryId && e.meta === v.meta)
+  return entry ?? null
 }
 
 function computeWorldOffset(
@@ -65,10 +79,8 @@ export function detectPartBounds(
 
   const cellGridRow = sizeRow - 1 - worldY
 
-  const idx = def.cellGrid[zSlice]?.[cellGridRow]?.[column]
-  if (idx === undefined || idx < 0 || idx >= def.blockPalette.length) return null
-
-  const entry = def.blockPalette[idx]
+  const entry = paletteEntryAt(def, volume, column, cellGridRow, zSlice)
+  if (!entry) return null
 
   let quads: BakedQuad[]
   let hasGeometry = false
@@ -127,10 +139,8 @@ export function detectFaceBounds(
 
   const cellGridRow = sizeRow - 1 - worldY
 
-  const idx = def.cellGrid[zSlice]?.[cellGridRow]?.[column]
-  if (idx === undefined || idx < 0 || idx >= def.blockPalette.length) return null
-
-  const entry = def.blockPalette[idx]
+  const entry = paletteEntryAt(def, volume, column, cellGridRow, zSlice)
+  if (!entry) return null
 
   let quads: BakedQuad[]
   let hasGeometry = false

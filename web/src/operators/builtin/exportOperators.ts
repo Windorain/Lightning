@@ -2,7 +2,7 @@ import type { OperatorType } from '@/operators/operatorType'
 import { buildEnvelopePackage } from '@/render/data/sceneExport'
 import { loadStructureOrWorld } from '@/render/data/bundleResolve'
 import { downloadBlob, downloadJson } from '@/util/browser'
-import { buildStructureBundleZip } from '@/workbench/bundleMeshAssembly'
+import { buildStructureBundleZip } from '@/workbench/export/bundleMeshAssembly'
 import { bakeIsometricStructurePngDataUrl, dataUrlToPngBlob } from '@/workbench/exportIsometricImage'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 

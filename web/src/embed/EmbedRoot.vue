@@ -7,42 +7,21 @@
  */
 import { ref, watch } from 'vue'
 import type { EmbedBootstrapOptions } from '@/embed/embedContract'
-import type { EmbedSettings } from '@/preview/previewConfig'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { createEmbedHost } from '@/runtime/host/embedHost'
 import { hostKey } from '@/runtime/host'
 import { provide } from 'vue'
 import EmbedViewport from '@/embed/EmbedViewport.vue'
-import { defaultEmbedUi } from '@/preview/previewConfig'
-import type { View3DFeatures } from '@/preview/previewConfig'
+import { buildEmbedSettingsFromBootstrap } from '@/preview/previewConfig'
 
 const props = defineProps<{
   bootstrap: EmbedBootstrapOptions
 }>()
 
-function buildEmbedSettings(): EmbedSettings {
-  const ui = props.bootstrap.ui ?? {}
-  const features = props.bootstrap.features ?? {}
-  return {
-    features: {
-      ...defaultEmbedUi.features,
-      ...features,
-    } as View3DFeatures,
-    blockIconCacheOptions: {
-      ...defaultEmbedUi.blockIconCacheOptions,
-      ...ui.blockIconCacheOptions,
-    },
-    initialLayerWorldY: ui.initialLayerWorldY ?? defaultEmbedUi.initialLayerWorldY,
-    initialWorldFrameIndex: ui.initialWorldFrameIndex,
-    initialCamera: ui.initialCamera,
-    sceneBackground: ui.sceneBackground ?? defaultEmbedUi.sceneBackground,
-    loadingMessage: ui.loadingMessage ?? defaultEmbedUi.loadingMessage,
-    okMessage: ui.okMessage ?? defaultEmbedUi.okMessage,
-    debug: ui.debug ?? defaultEmbedUi.debug,
-  }
-}
-
-const settings = buildEmbedSettings()
+const settings = buildEmbedSettingsFromBootstrap({
+  ui: props.bootstrap.ui,
+  features: props.bootstrap.features,
+})
 const { host, ctx } = createEmbedHost(settings)
 provide(hostKey, host)
 

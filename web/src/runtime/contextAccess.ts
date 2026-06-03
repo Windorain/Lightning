@@ -24,8 +24,6 @@
 
 import type { Ref } from 'vue'
 import type { ConnectionState, WorkbenchWorkspaceMode, UIWorkspace } from '@/runtime/types'
-import type { BlockRef } from '@/context/selection'
-
 export type AppTheme = 'dark' | 'light'
 export type AppLanguage = 'zh' | 'en'
 
@@ -52,8 +50,6 @@ export interface WorkbenchSession {
   localFileName: Ref<string | null>
   connection: ConnectionState
   layerWorldY: Ref<number>
-  hoveredBlock: Ref<BlockRef | null>
-  hoveredAnnotationId: Ref<string | null>
 }
 
 /** Region 节点状态袋（挂载时由 ScreenRoot 工厂写入） */

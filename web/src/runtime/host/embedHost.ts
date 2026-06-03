@@ -3,7 +3,7 @@ import { SetFrameIndexOperator, SetFramePlaybackOperator, SetLayerYOperator, Tog
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator } from '@/operators/builtin/viewOperators'
 import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
 import { LoadEmbedDocumentOperator } from '@/operators/builtin/docLifecycleOperators'
-import { V2PlainParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/parsers/builtinParsers'
+import { V2PlainParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/context/parsers/builtinParsers'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { Main } from '@/runtime/main'
 import { WM } from '@/runtime/wm'

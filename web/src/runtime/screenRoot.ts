@@ -15,7 +15,6 @@ import { readPersistedPanelWidths } from '@/workbench/layout/panelLayoutStorage'
 import { REGION, REGION_KEYMAP } from '@/runtime/regionIds'
 import { createViewportHoverState } from '@/runtime/viewportHover'
 import type { ConnectionState, UIWorkspace, WorkbenchWorkspaceMode } from '@/runtime/types'
-import type { BlockRef } from '@/context/selection'
 
 export interface ScreenLayout {
   leftWidth: Ref<number>
@@ -142,8 +141,6 @@ export function createWorkbenchSession(): WorkbenchSession {
       selectedExportName: null,
     }),
     layerWorldY: ref(-1),
-    hoveredBlock: ref<BlockRef | null>(null),
-    hoveredAnnotationId: ref<string | null>(null),
   }
 }
 
@@ -184,7 +181,10 @@ export function createWorkbenchScreenRoot(
         createRegionNode(REGION.WORKBENCH_VIEWPORT, RegionType.MAIN, {
           wmInputId: REGION.WORKBENCH_VIEWPORT,
           keymapId: REGION_KEYMAP.WORKBENCH_VIEWPORT,
-          state: { viewer: createViewerPreferences('lightning.prefs.viewport') },
+          state: {
+            viewer: createViewerPreferences('lightning.prefs.viewport'),
+            hover: createViewportHoverState(),
+          },
         }),
       ],
     },

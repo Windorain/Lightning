@@ -1,22 +1,11 @@
 /**
  * builtinParsers — 内置文档格式解析器集。
- *
- * 将所有内置 DocumentParser 汇集一处，
- * EmbedRoot.vue / WorkbenchRoot.vue 只需单个 import。
  */
 
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import { isEnvelopeDocument, normalizeEnvelopeToPlain } from '@/render/data/compactSceneDocument'
 import type { DocumentParser, ParserRegistryImpl } from '@/context/parserRegistry'
 
-// ==================== V2PlainParser ====================
-
-/**
- * V2PlainParser — V2PlainSceneDocument → RuntimeDocument
- *
- * 由于 RuntimeDocument 本身已经持有 fromV2Plain 工厂方法，
- * 此 parser 只是 detect + 委托。
- */
 export const V2PlainParser: DocumentParser = {
   formatName: 'V2Plain',
   detect(raw: unknown): boolean {
@@ -29,13 +18,6 @@ export const V2PlainParser: DocumentParser = {
   },
 }
 
-// ==================== Envelope (factory) ====================
-
-/**
- * createEnvelopeParser — Envelope 文档 → RuntimeDocument
- *
- * 解压 gzip+base64 payload 后委托 registry 内其它 parser。
- */
 export function createEnvelopeParser(registry: ParserRegistryImpl): DocumentParser {
   return {
     formatName: 'Envelope',
@@ -51,13 +33,6 @@ export function createEnvelopeParser(registry: ParserRegistryImpl): DocumentPars
   }
 }
 
-// ==================== WorldParser ====================
-
-/**
- * WorldParser — World 文档（多帧）→ RuntimeDocument
- *
- * 将多帧 World 结构转为 RuntimeDocument，每个 frame 包含独立 grid。
- */
 export const WorldParser: DocumentParser = {
   formatName: 'World',
   detect(raw: unknown): boolean {
@@ -70,7 +45,6 @@ export const WorldParser: DocumentParser = {
     const frames = world.frames as unknown[] | undefined
     if (!frames?.length) return null
 
-    // 构造 V2Plain 兼容格式，委托 fromV2Plain
     const v2: Record<string, unknown> = {
       format_version: '2.0',
       id: (world.id as string) ?? '',
@@ -103,14 +77,6 @@ export const WorldParser: DocumentParser = {
   },
 }
 
-// ==================== StructureDataParser ====================
-
-/**
- * StructureDataParser — StructureDataBaked → RuntimeDocument
- *
- * 将单帧 baked 结构数据转为 RuntimeDocument。
- * 保留原始 palette 元数据用于 round-trip。
- */
 export const StructureDataParser: DocumentParser = {
   formatName: 'StructureData',
   detect(raw: unknown): boolean {
@@ -123,7 +89,6 @@ export const StructureDataParser: DocumentParser = {
     const cellGrid = baked.cellGrid as number[][][] | undefined
     if (!cellGrid?.length) return null
 
-    // Structure-level fields only (cellGrid/blockPalette inside frames[0].structure)
     const structureFields: Record<string, unknown> = {
       geometryPhase: 'baked',
       cellGrid: baked.cellGrid,
@@ -150,7 +115,6 @@ export const StructureDataParser: DocumentParser = {
       labels: [],
     }
 
-    // Document-level fields must be at V2 root so fromV2Plain captures them
     for (const key of ['materialPalette', 'textureBlobs', 'tooltipPalette', 'cellTooltipGrid', 'playback'] as const) {
       if (baked[key] !== undefined) v2[key] = baked[key]
     }

@@ -1,4 +1,9 @@
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
+import type { BlockRef } from '@/context/selection'
+import {
+  createWorkbenchHoverAnnotationIdRef,
+  createWorkbenchHoverBlockRef,
+} from '@/runtime/viewportHoverAccess'
 import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
 import type { SelectionContext } from '@/context/selection'
@@ -35,6 +40,9 @@ function workbenchUnavailable(name: string): never {
 }
 
 export class Context {
+  private workbenchHoverBlock: ComputedRef<BlockRef | null> | null = null
+  private workbenchHoverAnnotation: ComputedRef<string | null> | null = null
+
   constructor(
     readonly main: Main,
     readonly wm: WM,
@@ -140,13 +148,15 @@ export class Context {
   getLayerWorldY(): Ref<number> {
     return this.getSession().layerWorldY
   }
-  getHoveredBlock(): Ref<import('@/context/selection').BlockRef | null> {
+  getHoveredBlock(): Ref<BlockRef | null> {
     if (this.isEmbed()) workbenchUnavailable('hoveredBlock')
-    return (this.getSession() as WorkbenchSession).hoveredBlock
+    this.workbenchHoverBlock ??= createWorkbenchHoverBlockRef(this)
+    return this.workbenchHoverBlock
   }
   getHoveredAnnotationId(): Ref<string | null> {
     if (this.isEmbed()) workbenchUnavailable('hoveredAnnotationId')
-    return (this.getSession() as WorkbenchSession).hoveredAnnotationId
+    this.workbenchHoverAnnotation ??= createWorkbenchHoverAnnotationIdRef(this)
+    return this.workbenchHoverAnnotation
   }
 
   getSelection(): SelectionContext {

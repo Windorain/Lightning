@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
@@ -8,8 +8,7 @@ import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
 import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { WorkbenchHost } from '@/runtime/host/workbenchHost'
-import { DRW } from '@/runtime/drw'
-import type { ViewerPreferences } from '@/preview/preferences'
+import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
 import { REGION } from '@/runtime/regionIds'
 import { createToolGizmoHandler } from '@/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
@@ -24,45 +23,23 @@ const host = inject(hostKey)! as WorkbenchHost
 const selection = ctx.getSelection()
 
 const VIEWPORT_REGION_ID = REGION.WORKBENCH_VIEWPORT
-const prefs = ctx.requireRegion(VIEWPORT_REGION_ID).state.viewer as ViewerPreferences
+const prefs = ctx.requireRegion(VIEWPORT_REGION_ID).state.viewer
 if (!prefs) throw new Error('viewer preferences missing on r-viewport')
 
-const vpSlot = ctx.viewports.get(VIEWPORT_REGION_ID) ?? ctx.viewports.register(VIEWPORT_REGION_ID)
-
-const docRef = computed(() => ctx.getDoc().value)
-const drw = new DRW({
-  docRef,
-  structEpochRef: ctx.getStructEpoch(),
-  currentFrameIndex: ctx.main.currentFrameIndex,
-  layerWorldY: ctx.getLayerWorldY(),
-  framesPlaybackIsPlaying: ctx.main.framesPlaybackIsPlaying,
-  structureDefinition: vpSlot.definition,
-  mainMeshGroup: vpSlot.contentGroup,
-  blockIconCacheOptions: {},
-  setFrameIndex: (i) => ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
-  setFramesPlayback: (playing) => ctx.getOperators().exec('OPERATOR_SET_FRAME_PLAYBACK', { playing }),
-  showAnnotationsRef: toRef(prefs, 'showAnnotations'),
-  worldAnnotationGroupRef: vpSlot.worldAnnotationGroup,
-  toolsOverlayGroupRef: vpSlot.toolsOverlayGroup,
-  viewportCameraRef: vpSlot.viewportCamera,
-  cameraRef: vpSlot.camera,
-  orbitTargetRef: vpSlot.orbitTarget,
+const {
+  drw, vpSlot, loadStatus, meshBusy, structureDefinition, mainMeshGroup,
+  worldFrameIndex, layerWorldY, framesPlaybackIsPlaying,
+  computed: drwComputed, materialLibrary,
+} = useViewportRuntime({
+  ctx,
+  regionId: VIEWPORT_REGION_ID,
+  viewerPrefs: prefs,
 })
-
-const { loadStatus, meshBusy } = drw
-
-const structureDefinition = vpSlot.definition
-const mainMeshGroup = vpSlot.contentGroup
-const worldFrameIndex = ctx.main.currentFrameIndex
-const layerWorldY = ctx.getLayerWorldY()
-const framesPlaybackIsPlaying = ctx.main.framesPlaybackIsPlaying
 
 const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
   hasWorldMultiFrame, worldFrameCount,
-} = drw.computed
-
-const materialLibrary = drw.textureCache
+} = drwComputed
 
 type BottomTab = 'frame' | 'layer'
 const _preferredTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
@@ -109,7 +86,7 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     selectionOutline: {
       selectionItems: selection.items,
       hoveredBlock: ctx.getHoveredBlock(),
-      highlightOnHover: computed(() => prefs.highlightOnHover),
+      highlightOnHover: computed(() => prefs!.highlightOnHover),
       getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
       gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
     },

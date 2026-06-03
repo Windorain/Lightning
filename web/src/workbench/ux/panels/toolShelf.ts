@@ -1,7 +1,7 @@
 import type { Context } from '@/runtime/context'
 import { REGION } from '@/runtime/regionIds'
 import type { PanelDeclaration } from '../types/panel'
-import { SpaceType, RegionType } from '../types/screen'
+import { SpaceType, RegionType } from '@/runtime/screenTypes'
 import ToolShelf from '../ToolShelf.vue'
 
 export const toolShelfPanel: PanelDeclaration = {

@@ -144,46 +144,47 @@ export function pickAtPointer(params: ScenePickParams): ScenePickResult {
   const worldAnnoHits = worldAnnotationGroup ? raycaster.intersectObject(worldAnnotationGroup, true) : []
   const overlayHits = overlayGroup ? raycaster.intersectObject(overlayGroup, true) : []
   const allHits = structureHits.concat(worldAnnoHits, overlayHits).sort((a, b) => a.distance - b.distance)
-  const meshHit = allHits[0]
+  const volume = buildVoxelVolume(def)
 
-  let meshResult: ScenePickResult = null
-  if (meshHit) {
-    const objName = (meshHit.object as THREE.Object3D).name || ''
+  let nearestBlock: ScenePickBlock | null = null
+  let nearestAnnoMesh: ScenePickAnnotation | null = null
+
+  for (const hit of allHits) {
+    const objName = (hit.object as THREE.Object3D).name || ''
     if (objName.startsWith('anno-')) {
       const lastDash = objName.lastIndexOf('-')
-      meshResult = {
+      const pick: ScenePickAnnotation = {
         kind: 'annotation',
-        distance: meshHit.distance,
+        distance: hit.distance,
         annotationId: lastDash >= 0 ? objName.slice(lastDash + 1) : objName,
-        point: { x: meshHit.point.x, y: meshHit.point.y, z: meshHit.point.z },
+        point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
       }
-    } else {
-      const triangleMap = (meshHit.object as THREE.Mesh).userData.triangleMap as
-        Array<{ col: number; row: number; zSlice: number; quadIndex?: number }> | undefined
-      if (triangleMap && meshHit.faceIndex != null && meshHit.faceIndex < triangleMap.length) {
-        const entry = triangleMap[meshHit.faceIndex]
-        const volume = buildVoxelVolume(def)
-        const blockId = effectiveBlockId(volume, entry.col, entry.row, entry.zSlice, volume.sizeRow, layerPreview)
-        if (blockId !== 'air') {
-          const normalWorld = meshHit.face
-            ? meshHit.face.normal.clone()
-                .transformDirection((meshHit.object as THREE.Mesh).matrixWorld)
-                .normalize()
-            : undefined
-          meshResult = {
-            kind: 'block',
-            distance: meshHit.distance,
-            blockId,
-            column: entry.col,
-            row: entry.row,
-            zSlice: entry.zSlice,
-            quadIndex: (entry as any).quadIndex,
-            normal: normalWorld ? { x: normalWorld.x, y: normalWorld.y, z: normalWorld.z } : undefined,
-            point: { x: meshHit.point.x, y: meshHit.point.y, z: meshHit.point.z },
-          }
-        }
-      }
+      if (!nearestAnnoMesh || hit.distance < nearestAnnoMesh.distance) nearestAnnoMesh = pick
+      continue
     }
+    const triangleMap = (hit.object as THREE.Mesh).userData.triangleMap as
+      Array<{ col: number; row: number; zSlice: number; quadIndex?: number }> | undefined
+    if (!triangleMap || hit.faceIndex == null || hit.faceIndex >= triangleMap.length) continue
+    const entry = triangleMap[hit.faceIndex]
+    const blockId = effectiveBlockId(volume, entry.col, entry.row, entry.zSlice, volume.sizeRow, layerPreview)
+    if (blockId === 'air') continue
+    const normalWorld = hit.face
+      ? hit.face.normal.clone()
+          .transformDirection((hit.object as THREE.Mesh).matrixWorld)
+          .normalize()
+      : undefined
+    const pick: ScenePickBlock = {
+      kind: 'block',
+      distance: hit.distance,
+      blockId,
+      column: entry.col,
+      row: entry.row,
+      zSlice: entry.zSlice,
+      quadIndex: (entry as { quadIndex?: number }).quadIndex,
+      normal: normalWorld ? { x: normalWorld.x, y: normalWorld.y, z: normalWorld.z } : undefined,
+      point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+    }
+    if (!nearestBlock || hit.distance < nearestBlock.distance) nearestBlock = pick
   }
 
   // ── AABB pick (box annotations only) ──
@@ -199,18 +200,20 @@ export function pickAtPointer(params: ScenePickParams): ScenePickResult {
   }
 
   // ── Merge ──
-  // Box annotation mesh hits are discarded — AABB handles them reliably
-  const meshIsBoxAnno = meshResult?.kind === 'annotation'
-    && annotations?.some(a => a.id === meshResult.annotationId && a.type === 'box')
-  const effMesh = meshIsBoxAnno ? null : meshResult
-  const meshDist = effMesh?.distance ?? Infinity
+  const meshIsBoxAnno = nearestAnnoMesh
+    && annotations?.some(a => a.id === nearestAnnoMesh!.annotationId && a.type === 'box')
+  const effAnnoMesh = meshIsBoxAnno ? null : nearestAnnoMesh
+  const blockDist = nearestBlock?.distance ?? Infinity
+  const annoMeshDist = effAnnoMesh?.distance ?? Infinity
   const aabbDist = aabbResult?.distance ?? Infinity
+  const annoDist = Math.min(annoMeshDist, aabbDist)
 
-  // Annotation bias: at same depth, annotation wins over block
-  if (aabbResult && aabbDist <= meshDist + 0.005) {
+  const PICK_BIAS = 0.005
+  if (aabbResult && aabbDist <= blockDist + PICK_BIAS && aabbDist <= annoMeshDist + PICK_BIAS) {
     return { kind: 'annotation', distance: aabbResult.distance, annotationId: aabbResult.annotationId, point: { x: 0, y: 0, z: 0 } }
   }
-  return effMesh
+  if (effAnnoMesh && annoDist <= blockDist + PICK_BIAS) return effAnnoMesh
+  return nearestBlock
 }
 
 /** Backward-compatible wrapper — delegates to pickAtPointer without AABB annotations. */

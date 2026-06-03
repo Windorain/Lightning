@@ -1,9 +1,8 @@
 import type { Context } from '@/runtime/context'
 
 /**
- * Auto-connect to SDE on mount: if an apiBase is configured, attempt to connect
- * and load the workspace document.  In dev mode, also check for a ?sceneId=
- * query parameter and load a builtin scene.
+ * Workbench 启动：若配置了 SDE apiBase 则自动连接并拉取工作区文档；
+ * dev 模式下支持 ?sceneId= 加载内置场景。
  */
 export async function autoConnectSde(ctx: Context): Promise<void> {
   if (ctx.getConnection().apiBase) {

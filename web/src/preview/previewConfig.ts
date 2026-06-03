@@ -87,6 +87,63 @@ export function embedSettingsFromConfig(cfg: View3DConfig): EmbedSettings {
   }
 }
 
+/** Embed 契约 bootstrap → EmbedSettings */
+export function buildEmbedSettingsFromBootstrap(parts: {
+  ui?: {
+    blockIconCacheOptions?: BlockIconCacheOptions
+    initialLayerWorldY?: number
+    initialWorldFrameIndex?: number
+    initialCamera?: InitialCamera
+    sceneBackground?: number
+    loadingMessage?: string
+    okMessage?: (modelId: string) => string
+    debug?: boolean
+  }
+  features?: Partial<View3DFeatures>
+}): EmbedSettings {
+  const ui = parts.ui ?? {}
+  const features = parts.features ?? {}
+  return {
+    features: { ...defaultEmbedUi.features, ...features } as View3DFeatures,
+    blockIconCacheOptions: {
+      ...defaultEmbedUi.blockIconCacheOptions,
+      ...ui.blockIconCacheOptions,
+    },
+    initialLayerWorldY: ui.initialLayerWorldY ?? defaultEmbedUi.initialLayerWorldY,
+    initialWorldFrameIndex: ui.initialWorldFrameIndex,
+    initialCamera: ui.initialCamera,
+    sceneBackground: ui.sceneBackground ?? defaultEmbedUi.sceneBackground,
+    loadingMessage: ui.loadingMessage ?? defaultEmbedUi.loadingMessage,
+    okMessage: ui.okMessage ?? defaultEmbedUi.okMessage,
+    debug: ui.debug ?? defaultEmbedUi.debug,
+  }
+}
+
+function parseWikiSceneBackgroundHex(hex: string | undefined): number {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec((hex ?? '#5a5a5a').trim())
+  if (!m) return 0x5a5a5a
+  return parseInt(m[1], 16)
+}
+
+/** Workbench Wiki 预览 tab → EmbedSettings */
+export function buildEmbedSettingsFromWikiConfig(wiki: Record<string, unknown>): EmbedSettings {
+  const features = (wiki.features ?? {}) as Partial<View3DFeatures>
+  return {
+    features: { ...defaultEmbedUi.features, ...features },
+    blockIconCacheOptions: defaultEmbedUi.blockIconCacheOptions,
+    initialLayerWorldY: defaultEmbedUi.initialLayerWorldY,
+    initialCamera: {
+      yawDeg: wiki.cameraYaw as number | undefined,
+      elevationDeg: wiki.cameraElevation as number | undefined,
+      zoom: wiki.cameraZoom as number | undefined,
+    },
+    sceneBackground: parseWikiSceneBackgroundHex(wiki.sceneBackgroundHex as string | undefined),
+    loadingMessage: defaultEmbedUi.loadingMessage,
+    okMessage: defaultEmbedUi.okMessage,
+    debug: features.debugStatusBar ?? false,
+  }
+}
+
 export const defaultEmbedUi: Omit<View3DConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
   features: {
     blockStatsSidebar: false,

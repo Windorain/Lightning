@@ -130,42 +130,47 @@ export class DRW {
     highlightOnHover: Ref<boolean>
     getBlockGeometry: (pos: { x: number; y: number; z: number }) => import('@/render/schema/types').BakedQuad[] | null
     gridCenterWorld: (pos: { x: number; y: number; z: number }) => { x: number; y: number; z: number } | null
+    /** Embed 侧栏按 blockId 高亮等附加遮罩 */
+    extraMaskMeshes?: Ref<THREE.Mesh[]>
   }): void {
     const update = (): void => {
       if (!this.outlinePass) return
       const items = options.selectionItems.value
       const hov = options.highlightOnHover.value ? options.hoveredBlock.value : null
+      let masks: THREE.Mesh[] = []
       if (!hov) {
-        if (items.size === 0 || items.size > 500) {
-          this.outlinePass.setMaskMeshes([])
-          return
+        if (items.size > 0 && items.size <= 500) {
+          masks = this.highlightProvider.build(
+            items,
+            options.getBlockGeometry,
+            options.gridCenterWorld,
+          )
         }
-        const masks = this.highlightProvider.build(
-          items,
-          options.getBlockGeometry,
-          options.gridCenterWorld,
+      } else {
+        const entities = new Set(items)
+        const dup = [...items].some(
+          e => e.kind === 'block' && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z,
         )
-        this.outlinePass.setMaskMeshes(masks)
-        return
+        if (!dup) entities.add({ kind: 'block', ref: hov })
+        if (entities.size > 0 && entities.size <= 500) {
+          masks = this.highlightProvider.build(
+            entities,
+            options.getBlockGeometry,
+            options.gridCenterWorld,
+          )
+        }
       }
-      const entities = new Set(items)
-      const dup = [...items].some(
-        e => e.kind === 'block' && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z,
-      )
-      if (!dup) entities.add({ kind: 'block', ref: hov })
-      if (entities.size > 500) {
-        this.outlinePass.setMaskMeshes([])
-        return
-      }
-      const masks = this.highlightProvider.build(
-        entities,
-        options.getBlockGeometry,
-        options.gridCenterWorld,
-      )
-      this.outlinePass.setMaskMeshes(masks)
+      const extra = options.extraMaskMeshes?.value ?? []
+      this.outlinePass.setMaskMeshes(extra.length ? [...masks, ...extra] : masks)
     }
+    const sources: unknown[] = [
+      options.selectionItems,
+      options.hoveredBlock,
+      options.highlightOnHover,
+    ]
+    if (options.extraMaskMeshes) sources.push(options.extraMaskMeshes)
     this.stopOutlineWatch = watch(
-      [options.selectionItems, options.hoveredBlock, options.highlightOnHover],
+      sources,
       update,
       { deep: true, flush: 'post' },
     )

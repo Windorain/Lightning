@@ -15,6 +15,7 @@ export interface SelectionOutlineBind {
   highlightOnHover: Ref<boolean>
   getBlockGeometry: (pos: { x: number; y: number; z: number }) => import('@/render/schema/types').BakedQuad[] | null
   gridCenterWorld: (pos: { x: number; y: number; z: number }) => { x: number; y: number; z: number } | null
+  extraMaskMeshes?: Ref<THREE.Mesh[]>
 }
 
 export interface AttachViewportInput {

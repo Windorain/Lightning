@@ -1,7 +1,7 @@
 import type { Context } from '@/runtime/context'
 import type { UIWorkspace } from '@/runtime/types'
 import type { UILayout } from './layout'
-import type { SpaceType, RegionType } from './screen'
+import type { SpaceType, RegionType } from '@/runtime/screenTypes'
 import type { Component } from 'vue'
 
 export interface PanelDeclaration {

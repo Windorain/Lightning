@@ -1,6 +1,6 @@
 import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
-import { SpaceType, RegionType } from '../types/screen'
+import { SpaceType, RegionType } from '@/runtime/screenTypes'
 import type { UILayout } from '../types/layout'
 import type { BlockRef } from '@/context/selection'
 import TooltipEditorPanel from './TooltipEditorPanel.vue'

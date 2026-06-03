@@ -7,12 +7,16 @@
  * - 本地 DRW 管理 mesh/材质/帧状态
  * - 叶子组件全部 props/emits
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import * as THREE from 'three'
 import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { Host } from '@/runtime/host'
 import { resolveEmbedViewportRegionId, resolveEmbedViewerPreferences } from '@/runtime/embedViewportRegion'
-import { DRW } from '@/runtime/drw'
+import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
+import { blockRefFromViewportHover } from '@/runtime/viewportHoverAccess'
+import { createEmbedSidebarOutlineMasks } from '@/runtime/embedSidebarOutline'
+import { getBlockGeometry, gridCenterWorld } from '@/context/queries'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import { createHoverHandler } from '@/handlers/hoverHandler'
@@ -26,7 +30,6 @@ import type { InitialCamera } from '@/preview/previewConfig'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
 import { embedHoverFromState } from '@/runtime/viewportHover'
-import { createEmbedOutlineSync } from '@/runtime/embedOutlineSync'
 import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
 import EmbedSettingsPanel from '@/embed/components/EmbedSettingsPanel.vue'
 
@@ -41,46 +44,25 @@ const viewportRegionId = resolveEmbedViewportRegionId(ctx)
 const viewportRegion = ctx.requireRegion(viewportRegionId)
 const hoverState = viewportRegion.state.hover!
 const prefs = resolveEmbedViewerPreferences(ctx)
-const vpSlot = ctx.viewports.get(viewportRegionId) ?? ctx.viewports.register(viewportRegionId)
 
-const docRef = computed(() => ctx.getDoc().value)
-const layerWorldY = ctx.getLayerWorldY()
-const drw = new DRW({
-  docRef,
-  structEpochRef: ctx.getStructEpoch(),
-  currentFrameIndex: ctx.main.currentFrameIndex,
-  layerWorldY,
-  framesPlaybackIsPlaying: ctx.main.framesPlaybackIsPlaying,
-  structureDefinition: vpSlot.definition,
-  mainMeshGroup: vpSlot.contentGroup,
+const {
+  drw, vpSlot, loadStatus, meshBusy, blockIconCache, tooltipPalette,
+  structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY, framesPlaybackIsPlaying,
+  computed: drwComputed, materialLibrary,
+} = useViewportRuntime({
+  ctx,
+  regionId: viewportRegionId,
+  viewerPrefs: prefs,
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
-  setFrameIndex: (i) => ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
-  setFramesPlayback: (playing) => ctx.getOperators().exec('OPERATOR_SET_FRAME_PLAYBACK', { playing }),
-  showAnnotationsRef: toRef(prefs, 'showAnnotations'),
-  worldAnnotationGroupRef: vpSlot.worldAnnotationGroup,
-  toolsOverlayGroupRef: vpSlot.toolsOverlayGroup,
-  viewportCameraRef: vpSlot.viewportCamera,
-  cameraRef: vpSlot.camera,
-  orbitTargetRef: vpSlot.orbitTarget,
 })
-const {
-  loadStatus, meshBusy, blockIconCache, tooltipPalette,
-} = drw
-const structureDefinition = vpSlot.definition
-const mainMeshGroup = vpSlot.contentGroup
-const worldFrameIndex = ctx.main.currentFrameIndex
-const framesPlaybackIsPlaying = ctx.main.framesPlaybackIsPlaying
-const outlinePass = drw.outlinePass
-
-const showSettingsPanel = ref(false)
 
 const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
   hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
-} = drw.computed
+} = drwComputed
 
-const materialLibrary = drw.textureCache
+const showSettingsPanel = ref(false)
 
 // ---- Hover / tooltip（region.state.hover + 统一 HOVER handler）----
 const hover = embedHoverFromState(hoverState)
@@ -89,12 +71,14 @@ const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
 const selectedBlockId = ref<string | null>(null)
 
-// ---- Selection masks (extracted composable) ----
-const { rebuildSelectionMasks, flushHighlight } = createEmbedOutlineSync({
+const sidebarExtraMasks = ref<THREE.Mesh[]>([])
+const emptySelection = ref(new Set<import('@/context/selection').SelectedEntity>())
+const hoveredBlockForOutline = computed(() =>
+  blockRefFromViewportHover(ctx, hoverState.viewportBlock.value),
+)
+const { rebuildSelectionMasks } = createEmbedSidebarOutlineMasks({
   definitionRef: vpSlot.definition,
-  hover: hoverState,
-  highlightOnHoverRef: computed(() => prefs.highlightOnHover),
-  outlinePass,
+  masksRef: sidebarExtraMasks,
 })
 
 // ---- Tooltip text (extracted composable) ----
@@ -110,10 +94,7 @@ function onSidebarSelectBlock(blockId: string): void {
   selectedBlockId.value = selectedBlockId.value === blockId ? null : blockId
 }
 
-watch(selectedBlockId, (id) => {
-  rebuildSelectionMasks(id)
-  flushHighlight()
-})
+watch(selectedBlockId, (id) => { rebuildSelectionMasks(id) })
 
 function toggleFullscreen(): void {
   if (document.fullscreenElement) {
@@ -178,10 +159,6 @@ const statusSummary = computed(() => {
   return parts.join(' · ')
 })
 
-// ---- Viewport events ----
-let _alive = true
-let unframeHook: (() => void) | null = null
-
 async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void> {
   await host.attachViewport(viewportRegionId, {
     drw,
@@ -193,15 +170,16 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
       hover: createHoverHandler(viewportRegionId, () => ctx),
       keymap: createKeymapHandler(viewportRegionId, () => ctx),
     },
+    selectionOutline: {
+      selectionItems: emptySelection,
+      hoveredBlock: hoveredBlockForOutline,
+      highlightOnHover: computed(() => prefs.highlightOnHover),
+      getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
+      gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
+      extraMaskMeshes: sidebarExtraMasks,
+    },
     documentKeydown: false,
   })
-
-  const onFrame = (): void => {
-    if (!_alive) return
-    flushHighlight()
-  }
-  unframeHook = engineHostRef.value?.addFrameHook(onFrame) ?? null
-  onFrame()
 }
 
 function setFrameIndex(i: number): void {
@@ -222,9 +200,6 @@ onMounted(async () => { await drw.loadStructureAndResources() })
 onBeforeUnmount(() => {
   host.detachViewport(viewportRegionId)
   ctx.wm.events.unregisterRegion(viewportRegionId)
-  _alive = false
-  unframeHook?.()
-  unframeHook = null
   drw.dispose()
 })
 </script>

@@ -9,7 +9,7 @@ import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
 import { EmbedPreview } from '@/shared/viewport/embedPreview'
-import { defaultEmbedUi } from '@/preview/previewConfig'
+import { buildEmbedSettingsFromWikiConfig } from '@/preview/previewConfig'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { createSelectionContext } from '@/context/selection'
 import { provideEditHistory } from '@/context/editHistory'
@@ -27,7 +27,7 @@ import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
-import { usePanelQueries } from '@/workbench/context/usePanelQueries'
+import { usePanelQueries } from '@/workbench/usePanelQueries'
 import { REGION } from '@/runtime/regionIds'
 
 const selection = createSelectionContext()
@@ -47,30 +47,8 @@ const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = us
 const toolshelfCollapsed = computed(() => ctx.requireRegion(REGION.WORKBENCH_TOOLSHELF).collapsed)
 const propsCollapsed = computed(() => ctx.requireRegion(REGION.WORKBENCH_PROPS).collapsed)
 
-// Wiki embed settings
-const wikiConfig = ctx.requireRegion(REGION.WORKBENCH_PROPS).state.wiki as Record<string, any>
-function parseHex6(s: string): number {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
-  if (!m) return 0x5a5a5a
-  return parseInt(m[1], 16)
-}
-const embedSettings = computed<EmbedSettings>(() => ({
-  features: {
-    ...defaultEmbedUi.features,
-    ...(wikiConfig.features ?? {}),
-  },
-  blockIconCacheOptions: defaultEmbedUi.blockIconCacheOptions,
-  initialLayerWorldY: defaultEmbedUi.initialLayerWorldY,
-  initialCamera: {
-    yawDeg: wikiConfig.cameraYaw,
-    elevationDeg: wikiConfig.cameraElevation,
-    zoom: wikiConfig.cameraZoom,
-  },
-  sceneBackground: parseHex6(wikiConfig.sceneBackgroundHex ?? '#5a5a5a'),
-  loadingMessage: defaultEmbedUi.loadingMessage,
-  okMessage: defaultEmbedUi.okMessage,
-  debug: wikiConfig.features?.debugStatusBar ?? false,
-}))
+const wikiConfig = ctx.requireRegion(REGION.WORKBENCH_PROPS).state.wiki as Record<string, unknown>
+const embedSettings = computed<EmbedSettings>(() => buildEmbedSettingsFromWikiConfig(wikiConfig))
 
 // Context menu
 const contextMenu = createContextMenu()
