@@ -11,7 +11,8 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { updateAnnotationOverlay, getAnnotationOverlayGroup } from '@/runtime/viewportAnnotations'
 import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
-import type { EmbedHost } from '@/runtime/host/embedHost'
+import type { Host } from '@/runtime/host'
+import { resolveEmbedViewportRegionId, resolveEmbedViewerPreferences } from '@/runtime/embedViewportRegion'
 import { DRW } from '@/runtime/drw'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
@@ -25,9 +26,7 @@ import { type Annotation } from '@/render/data/annotationTypes'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { InitialCamera } from '@/preview/previewConfig'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
-import { REGION } from '@/runtime/regionIds'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import type { ViewerPreferences } from '@/preview/preferences'
 import { useEmbedHover } from '@/embed/embedHover'
 import { useEmbedSelectionMasks } from '@/embed/useEmbedSelectionMasks'
 import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
@@ -38,12 +37,11 @@ const props = defineProps<{
 }>()
 
 const ctx = useContext()
-const host = inject(hostKey)! as EmbedHost
+const host = inject(hostKey)! as Host
 
-const EMBED_REGION = REGION.EMBED
-const prefs = ctx.requireRegion(EMBED_REGION).state.viewer as ViewerPreferences
-if (!prefs) throw new Error('viewer preferences missing on r-embed')
-const vpSlot = ctx.viewports.get(EMBED_REGION) ?? ctx.viewports.register(EMBED_REGION)
+const viewportRegionId = resolveEmbedViewportRegionId(ctx)
+const prefs = resolveEmbedViewerPreferences(ctx)
+const vpSlot = ctx.viewports.get(viewportRegionId) ?? ctx.viewports.register(viewportRegionId)
 
 const docRef = computed(() => ctx.getDoc().value)
 const layerWorldY = ctx.getLayerWorldY()
@@ -180,15 +178,15 @@ let _annoRafId: number | undefined
 const hoverSink = { setViewportBlock, setSidebarBlock, setAnnotation }
 
 async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void> {
-  await host.attachViewport(EMBED_REGION, {
+  await host.attachViewport(viewportRegionId, {
     drw,
     payload,
     layerPreviewMode: layerPreviewMode.value,
     structureDefinition,
     mainMeshGroup,
     handlers: {
-      hover: createHoverHandler(EMBED_REGION, () => ctx, hoverSink),
-      keymap: createKeymapHandler(EMBED_REGION, () => ctx),
+      hover: createHoverHandler(viewportRegionId, () => ctx, hoverSink),
+      keymap: createKeymapHandler(viewportRegionId, () => ctx),
     },
     documentKeydown: false,
   })
@@ -240,8 +238,8 @@ watch(() => prefs.showAnnotations, (v) => {
 
 onMounted(async () => { await drw.loadStructureAndResources() })
 onBeforeUnmount(() => {
-  host.detachViewport(EMBED_REGION)
-  ctx.wm.events.unregisterRegion(EMBED_REGION)
+  host.detachViewport(viewportRegionId)
+  ctx.wm.events.unregisterRegion(viewportRegionId)
   _alive = false
   if (_annoRafId) cancelAnimationFrame(_annoRafId)
   drw.dispose()

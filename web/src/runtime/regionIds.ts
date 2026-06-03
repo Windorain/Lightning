@@ -4,6 +4,8 @@ export const REGION = {
   WORKBENCH_TOOLSHELF: 'r-toolshelf',
   WORKBENCH_VIEWPORT: 'r-viewport',
   WORKBENCH_PROPS: 'r-props-main',
+  /** Workbench「Wiki」工作区内的嵌入预览（与独立 Embed 的 r-embed 分离） */
+  WIKI_PREVIEW: 'r-wiki-preview',
   EMBED: 'r-embed',
   CHROME: 'r-chrome',
 } as const

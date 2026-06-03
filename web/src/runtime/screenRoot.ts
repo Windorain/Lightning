@@ -202,8 +202,18 @@ export function createWorkbenchScreenRoot(
     },
   ]
 
+  const wikiPreview = createRegionNode(REGION.WIKI_PREVIEW, RegionType.MAIN, {
+    wmInputId: REGION.WIKI_PREVIEW,
+    keymapId: REGION_KEYMAP.EMBED_VIEWPORT,
+    state: { viewer: createViewerPreferences() },
+  })
+  wikiPreview.visible = false
+
   const { leftWidth, rightWidth } = readPersistedPanelWidths()
-  return new ScreenRoot('workbench', { width: 1400, height: 800 }, areas, [], session, { leftWidth, rightWidth })
+  return new ScreenRoot('workbench', { width: 1400, height: 800 }, areas, [wikiPreview], session, {
+    leftWidth,
+    rightWidth,
+  })
 }
 
 /** Embed：单 Region 退化树 */
