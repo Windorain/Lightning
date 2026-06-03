@@ -75,12 +75,15 @@ watch(profile, (p) => {
   if (p === 'narrow' || p === 'tiny') sidebarCollapsed.value = true
 }, { immediate: true })
 
-const didNarrowViewFit = ref(false)
-watch([loadStatus, profile], () => {
-  if (didNarrowViewFit.value || loadStatus.value !== 'ok') return
-  if (profile.value !== 'narrow' && profile.value !== 'tiny') return
-  didNarrowViewFit.value = true
+const didAutoViewFit = ref(false)
+watch(loadStatus, (status) => {
+  if (didAutoViewFit.value || status !== 'ok') return
+  if (!mainMeshGroup.value) return
+  didAutoViewFit.value = true
   void ctx.getOperators().exec('OPERATOR_VIEW_RESET')
+})
+watch(() => ctx.getDoc().value, () => {
+  didAutoViewFit.value = false
 })
 const selectedBlockId = ref<string | null>(null)
 

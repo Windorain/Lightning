@@ -1,0 +1,25 @@
+{
+	"settings": {
+		"rights": [],
+		"default": false,
+		"package": false,
+		"hidden": false,
+		"skins": [],
+		"actions": ["view"],
+		"namespaces": [4],
+		"category": "结构渲染",
+		"supportsUrlLoad": false
+	},
+	"module": {
+		"scripts": [
+			"structureDataMultipart.js",
+			"StructureRenderUpload.js"
+		],
+		"styles": [],
+		"datas": [],
+		"peers": [],
+		"dependencies": [],
+		"messages": [],
+		"type": "general"
+	}
+}

@@ -8,6 +8,7 @@
 // 库由 Wiki 零件页加载（与仓库构建产物同名）：
 //   零件:StructureRender.js  ← web/dist/StructureRender.js（npm run build:embed）
 //   零件:StructureRender.css ← web/dist/StructureRender.css（已含 scripts/huiji/StructureRender.css）
+// 大结构分片（可选）：零件:structureDataMultipart.js → WSRStructureData
 // 全局 API 仍为 window.LightningEmbed
 //
 // 词条中可挂载多处，使用 class（推荐）：
@@ -393,14 +394,103 @@ $(function () {
         return
       }
 
+      function baseFromDataTitle(dataTitle) {
+        var m = /^Data:Structures\/(.+)\.json$/i.exec(dataTitle || '')
+        return m ? m[1].replace(/\.json$/i, '') : ''
+      }
+
+      function isMultipartIndexDoc(doc) {
+        return !!(doc && doc.documentFormat === 'Envelope/multipart' && doc.partCount > 0)
+      }
+
+      function pad2Part(n) {
+        return n < 10 ? '0' + n : String(n)
+      }
+
+      function partTitlesForIndex(indexDoc, base) {
+        var b = indexDoc.base || base
+        var n = indexDoc.partCount
+        var out = []
+        var i
+        for (i = 1; i <= n; i++) {
+          out.push('Data:Structures/' + b + '_' + pad2Part(i) + '.json')
+        }
+        return out
+      }
+
+      function mergeMultipartDocs(indexDoc, partDocs) {
+        var SD = window.WSRStructureData
+        if (SD && SD.mergeMultipartIndex) {
+          return SD.mergeMultipartIndex(indexDoc, partDocs)
+        }
+        var sorted = partDocs.slice().sort(function (a, b) {
+          return a.part - b.part
+        })
+        if (sorted.length !== indexDoc.partCount) {
+          throw new Error('分片数量不匹配')
+        }
+        var payload = ''
+        var i
+        for (i = 0; i < sorted.length; i++) {
+          if (sorted[i].part !== i + 1) {
+            throw new Error('缺少分片 part ' + (i + 1))
+          }
+          payload += sorted[i].payload || ''
+        }
+        return {
+          documentFormat: 'Envelope',
+          payloadEncoding: indexDoc.payloadEncoding || 'gzip+base64',
+          meta: indexDoc.meta || {},
+          payload: payload
+        }
+      }
+
+      function fetchPartDocsSequential(titles, index, acc, onDone, onFail) {
+        if (index >= titles.length) {
+          onDone(acc)
+          return
+        }
+        var partUrl = mw.util.getUrl(titles[index], { action: 'raw' })
+        $.getJSON(partUrl)
+          .done(function (partDoc) {
+            acc.push(partDoc)
+            fetchPartDocsSequential(titles, index + 1, acc, onDone, onFail)
+          })
+          .fail(onFail)
+      }
+
       function loadJsonInto(el, dataTitle) {
         var jsonUrl = mw.util.getUrl(dataTitle, { action: 'raw' })
         $.getJSON(jsonUrl)
-          .done(function (doc) {
-            mountIntoElement(el, doc)
+          .done(function (indexDoc) {
+            if (!isMultipartIndexDoc(indexDoc)) {
+              mountIntoElement(el, indexDoc)
+              return
+            }
+            var base = indexDoc.base || baseFromDataTitle(dataTitle)
+            var partTitles = partTitlesForIndex(indexDoc, base)
+            if (!partTitles.length) {
+              return
+            }
+            fetchPartDocsSequential(
+              partTitles,
+              0,
+              [],
+              function (partDocs) {
+                try {
+                  var merged = mergeMultipartDocs(indexDoc, partDocs)
+                  mountIntoElement(el, merged)
+                } catch (_mergeErr) {
+                  /* 合并失败：不挂载，避免向 Embed 传入无效文档 */
+                }
+              },
+              function () {
+                /* 分片请求失败：不挂载 */
+              }
+            )
           })
-          .fail(function (_jqXHR, textStatus, err) {
-            console.warn('结构数据加载失败', dataTitle, textStatus, err)
+          .fail(function () {
+            /* 结构数据请求失败：不挂载 */
           })
       }
 

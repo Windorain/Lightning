@@ -162,7 +162,7 @@ export const LoadEmbedDocumentOperator: OperatorType = {
   async exec(ctx, props) {
     const raw = props.document
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
-    if (!result.document) throw new Error(result.error ?? 'parse failed')
+    if (!result.document) throw new Error('无法加载结构数据')
     ctx.main.replaceDoc(result.document)
     ctx.viewports.resetAllViewportCameras()
   },

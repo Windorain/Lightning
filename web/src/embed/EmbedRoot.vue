@@ -30,7 +30,6 @@ async function load() {
     })
   } catch (e) {
     loadError.value = formatUnknownError(e)
-    console.error('[EmbedRoot] load', e)
   }
 }
 

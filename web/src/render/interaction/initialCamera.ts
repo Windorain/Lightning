@@ -148,11 +148,78 @@ export interface FitCameraToGroupOptions {
   distance?: number
   /** 覆盖正交相机 zoom */
   zoom?: number
+  /** 视锥相对包围盒留白，默认 1.06 */
+  padding?: number
+}
+
+/**
+ * 正交视锥在相机视空间内包住世界包围盒（含非正方形视口宽高比）。
+ */
+export function fitOrthoFrustumToWorldBox(
+  camera: THREE.OrthographicCamera,
+  box: THREE.Box3,
+  viewportAspect: number,
+  padding = 1.06,
+): void {
+  if (box.isEmpty() || !Number.isFinite(box.min.x)) return
+
+  camera.updateMatrixWorld(true)
+  const p = new THREE.Vector3()
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  let minZ = Infinity
+  let maxZ = -Infinity
+
+  const { min, max } = box
+  const xs = [min.x, max.x]
+  const ys = [min.y, max.y]
+  const zs = [min.z, max.z]
+  let xi: number
+  let yi: number
+  let zi: number
+  for (xi = 0; xi < 2; xi++) {
+    for (yi = 0; yi < 2; yi++) {
+      for (zi = 0; zi < 2; zi++) {
+        p.set(xs[xi], ys[yi], zs[zi]).applyMatrix4(camera.matrixWorldInverse)
+        if (p.x < minX) minX = p.x
+        if (p.x > maxX) maxX = p.x
+        if (p.y < minY) minY = p.y
+        if (p.y > maxY) maxY = p.y
+        if (p.z < minZ) minZ = p.z
+        if (p.z > maxZ) maxZ = p.z
+      }
+    }
+  }
+
+  const cx = (minX + maxX) * 0.5
+  const cy = (minY + maxY) * 0.5
+  let halfW = ((maxX - minX) * 0.5) * padding
+  let halfH = ((maxY - minY) * 0.5) * padding
+  const aspect = Math.max(viewportAspect, 1e-6)
+  if (halfW / halfH > aspect) {
+    halfH = halfW / aspect
+  } else {
+    halfW = halfH * aspect
+  }
+  halfW = Math.max(halfW, 1e-4)
+  halfH = Math.max(halfH, 1e-4)
+
+  camera.left = cx - halfW
+  camera.right = cx + halfW
+  camera.bottom = cy - halfH
+  camera.top = cy + halfH
+
+  const zEps = 1e-2
+  camera.near = Math.max(0.01, -maxZ + zEps)
+  camera.far = Math.max(camera.near + 0.02, -minZ + zEps)
+  camera.updateProjectionMatrix()
 }
 
 /**
  * 将正交相机适配到 THREE.Group 的内容包围盒。
- * 计算 group 的世界包围盒 → 中心 → 尺寸 → 等轴距离 → 设置相机位置/视锥。
+ * 计算 group 的世界包围盒 → 中心 → 等轴视角 → 视空间视锥贴合模型。
  */
 export function fitCameraToGroup(
   camera: THREE.OrthographicCamera,
@@ -182,16 +249,8 @@ export function fitCameraToGroup(
     distance: finalDist,
   })
 
-  const orthoHeight =
-    2 *
-    Math.abs(finalDist) *
-    Math.tan(THREE.MathUtils.degToRad(ORTHO_FRUSTUM_REF_HALF_FOV_DEG))
   const aspect = domElement.clientWidth / Math.max(domElement.clientHeight, 1)
-  const halfH = orthoHeight / 2
-  camera.top = halfH
-  camera.bottom = -halfH
-  camera.left = -halfH * aspect
-  camera.right = halfH * aspect
+  fitOrthoFrustumToWorldBox(camera, box, aspect, options?.padding ?? 1.06)
   camera.zoom =
     typeof options?.zoom === 'number' && options.zoom > 0 ? options.zoom : 1
   camera.updateProjectionMatrix()
