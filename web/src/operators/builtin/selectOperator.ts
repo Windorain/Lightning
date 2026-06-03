@@ -1,6 +1,7 @@
 import type { OperatorType } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import { applyPickSelectionWithCycle, type PickHandlerV2 } from '@/context/selection'
+import { pickAll, getFrameBlocks } from '@/context/queries'
 
 /**
  * SelectOperator — 对标 Blender 的 VIEW3D_OT_select。
@@ -22,7 +23,7 @@ export const SelectOperator: OperatorType = {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
 
     const handler: PickHandlerV2 = {
-      pickAll: (e) => bctx.queries!.pickAll(e),
+      pickAll: (e) => pickAll(bctx, e),
       selection: {
         selectEntity: (entity) => bctx.selection.selectEntity(entity),
         add: (voxels) => bctx.selection.add(voxels),
@@ -62,7 +63,7 @@ export const SelectAllOperator: OperatorType = {
   },
 
   exec(bctx, _props) {
-    const blocks = bctx.queries!.getFrameBlocks()
+    const blocks = getFrameBlocks(bctx)
     if (blocks.length === 0) return
     bctx.selection.invert(blocks)
   },
@@ -80,7 +81,7 @@ export const SelectByTypeOperator: OperatorType = {
   exec(bctx, props) {
     const blockStateId = (props?.blockStateId as string) ?? ''
     if (!blockStateId) return
-    const blocks = bctx.queries!.getFrameBlocks()
+    const blocks = getFrameBlocks(bctx)
     bctx.selection.selectByType(blockStateId, blocks)
   },
 }

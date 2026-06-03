@@ -20,7 +20,6 @@ import type { OperatorRegistry } from '@/operators/operatorRegistry'
 import { logCenter } from '@/logging/LogCenter'
 import { wikiConfig } from '@/config/wikiConfig'
 import { createCoreBContext } from '@/context/coreContext'
-import { createProductionQueries } from '@/context/queries'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA, materialRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOfByOperator, boundsOfByRNAPath } from '@/workbench/ux/layout'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
@@ -156,8 +155,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     wikiConfig,
     settings,
 
-    // queries 需 bctx 自身（循环引用）——先填 null，下一行立即赋真值
-    queries: null!,
     screen: defaultScreen,
     rna,
     ui: {
@@ -167,7 +164,6 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
     wm: {},
   }
 
-  bctx.queries = createProductionQueries(bctx)
 
   computeLayout(bctx, defaultScreen)
 

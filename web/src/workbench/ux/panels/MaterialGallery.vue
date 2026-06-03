@@ -5,6 +5,7 @@ import { useBContext } from '@/context/bContext'
 import OperatorBtn from '@/workbench/ux/OperatorBtn.vue'
 import { parsePngDims } from '@/util/pngDims'
 import { useMaterialAnimation } from './useMaterialAnimation'
+import { listMaterials, getMaterialUsageCounts } from '@/context/queries'
 
 const bctx = useBContext()
 
@@ -71,8 +72,8 @@ const filteredCards = computed(() => {
 
 // ---- Data loading ----
 function refresh() {
-  const items = bctx.queries?.listMaterials?.() ?? []
-  const usage = bctx.queries?.getMaterialUsageCounts?.() ?? {}
+  const items = listMaterials(bctx)
+  const usage = getMaterialUsageCounts(bctx)
 
   cards.value = items.map((m: MaterialQueryItem) => {
     let textureWidth: number | null = null

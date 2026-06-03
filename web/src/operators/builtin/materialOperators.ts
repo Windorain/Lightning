@@ -3,9 +3,10 @@ import type { MaterialQueryItem } from '@/context/bContext'
 import { encodeAnimatedGif } from '@/workbench/animatedGifEncoder'
 import { filenameStem } from '@/pure/string'
 import { downloadPng, copyTextToClipboard } from '@/util/browser'
+import { listMaterials } from '@/context/queries'
 
 function resolveMaterial(bctx: any, materialId: string): MaterialQueryItem | undefined {
-  const materials = bctx.queries?.listMaterials?.() ?? []
+  const materials = listMaterials(bctx)
   return materials.find((item: MaterialQueryItem) => item.materialId === materialId)
 }
 
@@ -15,7 +16,7 @@ export const ExportTextureOperator: OperatorType = {
   description: '将当前选中的材质纹理导出为 PNG 文件',
 
   poll(bctx) {
-    const materials = bctx.queries?.listMaterials?.() ?? []
+    const materials = listMaterials(bctx)
     return materials.length > 0
   },
 
@@ -36,7 +37,7 @@ export const CopyMaterialLocatorOperator: OperatorType = {
   description: '复制材质资源定位符到剪贴板',
 
   poll(bctx) {
-    const materials = bctx.queries?.listMaterials?.() ?? []
+    const materials = listMaterials(bctx)
     return materials.some((m: MaterialQueryItem) => !!m.locator)
   },
 
@@ -57,7 +58,7 @@ export const ExportGifOperator: OperatorType = {
   description: '将动画纹理导出为 GIF 动图',
 
   poll(bctx) {
-    return (bctx.queries?.listMaterials?.() ?? []).some(
+    return listMaterials(bctx).some(
       (m: MaterialQueryItem) => m.kind === 'animated' && m.textureDataUrl !== null,
     )
   },

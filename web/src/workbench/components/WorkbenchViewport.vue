@@ -14,6 +14,7 @@ import { structureRowToWorldY } from '@/pure/vec'
 import { createToolGizmoHandler } from '@/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
+import { pickVoxel, pickAll, getCurrentFrame, gridCenterWorld, getBlockGeometry } from '@/context/queries'
 import { type Annotation } from '@/render/data/annotationTypes'
 import { isEditingTarget } from '@/util/browser'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
@@ -73,15 +74,14 @@ const activeTab = computed<BottomTab>({
 })
 
 function createToolContext(): ToolContext {
-  const q = bctx.queries!
   return {
     selection,
     viewport: bctx.viewport,
-    pickVoxel: (e) => q.pickVoxel(e),
-    pickAll: (e) => q.pickAll(e),
-    getCurrentFrame: () => q.getCurrentFrame(),
-    gridCenterWorld: (pos) => q.gridCenterWorld(pos),
-    getBlockGeometry: (pos) => q.getBlockGeometry(pos),
+    pickVoxel: (e) => pickVoxel(bctx, e),
+    pickAll: (e) => pickAll(bctx, e),
+    getCurrentFrame: () => getCurrentFrame(bctx),
+    gridCenterWorld: (pos) => gridCenterWorld(bctx, pos),
+    getBlockGeometry: (pos) => getBlockGeometry(bctx, pos),
     invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
     activeTool: bctx.toolRegistry.activeTool,
     modalDepth: (rid: string) => bctx.eventDispatcher.modalDepth(rid),
@@ -196,8 +196,6 @@ function onViewportHover(
 
 function updateSelectionHighlight(): void {
   if (!outlinePass) return
-  const q = bctx.queries
-  if (!q) return
 
   const items = selection.items.value
   const hov = hoveredBlockRef.value
@@ -206,8 +204,8 @@ function updateSelectionHighlight(): void {
     if (items.size === 0 || items.size > 500) { outlinePass.setMaskMeshes([]); return }
     const masks = highlightProvider.build(
       items,
-      (pos) => q.getBlockGeometry(pos),
-      (pos) => q.gridCenterWorld(pos),
+      (pos) => getBlockGeometry(bctx, pos),
+      (pos) => gridCenterWorld(bctx, pos),
     )
     outlinePass.setMaskMeshes(masks)
     return
@@ -223,8 +221,8 @@ function updateSelectionHighlight(): void {
   if (entities.size > 500) { outlinePass.setMaskMeshes([]); return }
   const masks = highlightProvider.build(
     entities,
-    (pos) => q.getBlockGeometry(pos),
-    (pos) => q.gridCenterWorld(pos),
+    (pos) => getBlockGeometry(bctx, pos),
+    (pos) => gridCenterWorld(bctx, pos),
   )
   outlinePass.setMaskMeshes(masks)
 }

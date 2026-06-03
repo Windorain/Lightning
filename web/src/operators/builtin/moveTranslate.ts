@@ -4,6 +4,8 @@ import type { BContext } from '@/context/bContext'
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import { bumpEpoch } from '@/context/replaceDoc'
+import { pickVoxel } from '@/context/queries'
+import { roundVector } from '@/pure/vec'
 
 const WORLD_AXES: Record<string, THREE.Vector3> = {
   x: new THREE.Vector3(1, 0, 0),
@@ -170,7 +172,7 @@ export const MoveOperator: OperatorType = {
 
     // ---- Non-gizmo: block pick → select ----
     bctx.selection.resetCycle()
-    const picked = bctx.queries!.pickVoxel(event)
+    const picked = pickVoxel(bctx, event)
     if (picked) {
       if (event.shiftKey) {
         bctx.selection.add([picked])
@@ -289,7 +291,7 @@ export const MoveOperator: OperatorType = {
       if (event.type === 'pointerup') {
         const origin = { x: s._originX, y: s._originY, z: s._originZ }
         const cur = gizmo.root.position
-        const delta = bctx.queries!.roundVector({
+        const delta = roundVector({
           x: cur.x - origin.x,
           y: cur.y - origin.y,
           z: cur.z - origin.z,

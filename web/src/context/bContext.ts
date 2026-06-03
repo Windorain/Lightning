@@ -6,9 +6,7 @@
  */
 import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
-import type { BlockRef, SelectionContext } from '@/context/selection'
-import type { ScenePickEntity } from '@/render/interaction/scenePick'
-import type { BakedQuad } from '@/render/schema/types'
+import type { SelectionContext } from '@/context/selection'
 import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { Rect, RNARegistry } from '@/shared/types'
@@ -19,7 +17,7 @@ import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import { computed, ref, shallowRef } from 'vue'
 import type { ComputedRef, Ref, ShallowRef } from 'vue'
 import type * as THREE from 'three'
-import type { Frame } from '@/render/schema/types'
+
 import type { bScreen } from '@/workbench/ux/types/screen'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
 import type { ViewportBContext } from '@/shared/types'
@@ -47,33 +45,6 @@ export interface MaterialQueryItem {
 
 export interface BlockTypeStat {
   count: number
-}
-
-export interface BContextQueries {
-  /** 屏幕坐标 → 方块引用（生产走 Three.js Raycaster，测试走纯数学） */
-  pickVoxel(event: PointerEvent): BlockRef | null
-  /** 指针位置穿透的全部实体候选（去重、按深度排序），用于轮换拾取 */
-  pickAll(event: PointerEvent): ScenePickEntity[]
-  /** 获取当前帧的可变引用（用于读写 blocks/labels/annotations） */
-  getCurrentFrame(): Frame | null
-  /** 获取当前帧的 BlockRef 快照列表 */
-  getFrameBlocks(): BlockRef[]
-  /** 获取完整的场景文档（用于 annotations、labels 等顶层集合的访问） */
-  getDocument(): Record<string, any> | null
-  /** 向量取整 */
-  roundVector(v: { x: number; y: number; z: number }): { x: number; y: number; z: number }
-  /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
-  gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null
-  /** List all materials with their texture data URLs */
-  listMaterials(): MaterialQueryItem[]
-  /** Count blocks using each material in the current frame (materialId → count) */
-  getMaterialUsageCounts(): Record<string, number>
-  /** 当前帧方块类型统计 (block_state_id → 计数) */
-  getBlockTypeStats(): Record<string, BlockTypeStat>
-  /** 获取方块位置的调色板元数据 */
-  getBlockPaletteEntry(pos: { x: number; y: number; z: number }): import('@/context/runtimeDocument').PaletteEntryMeta | null
-  /** 获取方块位置的模型几何数据（解码后的 BakedQuad[]），用于精确轮廓描边 */
-  getBlockGeometry(pos: { x: number; y: number; z: number }): BakedQuad[] | null
 }
 
 export interface ConnectionState {
@@ -138,7 +109,6 @@ export interface BContext extends ViewportBContext {
   selection: SelectionContext
   editHistory: UndoManager
   toolRegistry: ToolRegistry
-  queries: BContextQueries | null
   settings: BContextSettings
   operators: {
     exec(id: string, props?: Record<string, unknown>): void

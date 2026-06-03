@@ -2,6 +2,7 @@ import type { BContext } from '@/context/bContext'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout, UILayoutItem } from '../types/layout'
+import { getBlockTypeStats } from '@/context/queries'
 
 export const blockStatsPanel: PanelDeclaration = {
   id: 'block-stats-panel',
@@ -13,7 +14,7 @@ export const blockStatsPanel: PanelDeclaration = {
   poll(): boolean { return true },
 
   layout(ctx: BContext): UILayout {
-    const stats = ctx.queries!.getBlockTypeStats()
+    const stats = getBlockTypeStats(ctx)
     const entries = Object.entries(stats)
     const items: UILayoutItem[] = []
 

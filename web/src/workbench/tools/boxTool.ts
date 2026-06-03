@@ -8,6 +8,7 @@ import type { SelectedEntity } from '@/context/selection'
 import type { OperatorType } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import * as THREE from 'three'
+import { getCurrentFrame } from '@/context/queries'
 
 // ── Module-level state (bridge between gizmo ↔ operators, only for face-accumulation tool) ──
 
@@ -63,7 +64,7 @@ export const AnnotationBoxCommitOperator: OperatorType = {
       const draft = {
         ...toolProps, type: 'box' as const, id,
         min: { ...sel.aabb.min }, max: { ...sel.aabb.max },
-        frameIndex: bctx.queries!.getCurrentFrame()?.index ?? 0,
+        frameIndex: getCurrentFrame(bctx)?.index ?? 0,
       }
       bctx.operators.invoke('ANNOTATION_CREATE', { annotation: draft }, event ?? undefined)
     }

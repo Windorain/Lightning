@@ -3,8 +3,9 @@ import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout, UILayoutItem } from '../types/layout'
 import type { BlockRef } from '@/context/selection'
+import { getBlockPaletteEntry } from '@/context/queries'
 function singleBlockLayout(bctx: BContext, item: BlockRef): UILayoutItem[] {
-  const paletteEntry = bctx.queries!.getBlockPaletteEntry(item.pos)
+  const paletteEntry = getBlockPaletteEntry(bctx, item.pos)
   const items: UILayoutItem[] = []
 
   items.push(

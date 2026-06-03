@@ -9,6 +9,7 @@
 
 import { ref, shallowRef } from 'vue'
 import type { BContext } from '@/context/bContext'
+import { getFrameBlocks } from '@/context/queries'
 
 export const LOG_LEVEL = {
   DEBUG:    1,
@@ -267,9 +268,8 @@ export function createLogCenter() {
     /* —— Snapshot / Diff —— */
 
     snapshot(ctx: BContext): StateDigest {
-      if (!ctx.queries) throw new Error('snapshot: queries not available')
       const id = nextId
-      const blocks = ctx.queries.getFrameBlocks()
+      const blocks = getFrameBlocks(ctx)
       const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
       return {
         logId: id,
@@ -282,8 +282,7 @@ export function createLogCenter() {
     },
 
     diff(snap: StateDigest, ctx: BContext): StateDiff {
-      if (!ctx.queries) throw new Error('diff: queries not available')
-      const now = ctx.queries.getFrameBlocks()
+      const now = getFrameBlocks(ctx)
       const nowSel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
       const diff: StateDiff = {
         sinceLogId: snap.logId,
@@ -318,8 +317,7 @@ export function createLogCenter() {
         return { pass: actual === n, expected: n, actual }
       },
       blockCount(ctx: BContext, n: number): CheckResult {
-        if (!ctx.queries) return { pass: false, expected: n, actual: 'queries not available' }
-        const actual = ctx.queries.getFrameBlocks().length
+        const actual = getFrameBlocks(ctx).length
         return { pass: actual === n, expected: n, actual }
       },
       operatorActive(ctx: BContext, id: string): CheckResult {
@@ -327,8 +325,7 @@ export function createLogCenter() {
         return { pass: actual === id, expected: id, actual }
       },
       blockAt(ctx: BContext, pos: { x: number; y: number; z: number }, id?: string): CheckResult {
-        if (!ctx.queries) return { pass: false, expected: `block at (${pos.x},${pos.y},${pos.z}) id=${id ?? 'any'}`, actual: 'queries not available' }
-        const blocks = ctx.queries.getFrameBlocks()
+        const blocks = getFrameBlocks(ctx)
         const found = blocks.find(
           b => b.pos.x === pos.x && b.pos.y === pos.y && b.pos.z === pos.z &&
             (id === undefined || b.block_state_id === id),
