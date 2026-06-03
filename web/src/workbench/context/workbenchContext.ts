@@ -8,18 +8,20 @@
  * 由调用方创建后传入——生产用 provide* 工厂，测试用 create* 工厂。
  */
 
-import type { BContext } from '@/context/bContext'
+import { createViewportManager } from '@/context/bContext'
+import type { BContext, BContextSettings, WorkbenchWorkspaceMode, UIWorkspace, ConnectionState } from '@/context/bContext'
 import type { SelectionContext } from '@/context/selection'
 import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
-import type { BContextSettings } from '@/context/bContext'
 import type { bScreen } from '@/workbench/ux/types/screen'
 import { createOperatorRegistry, wrapOperatorRegistry } from '@/operators/operatorRegistry'
 import type { OperatorType } from '@/operators/operatorType'
 import type { OperatorRegistry } from '@/operators/operatorRegistry'
 import { logCenter } from '@/logging/LogCenter'
 import { wikiConfig } from '@/config/wikiConfig'
-import { createCoreBContext } from '@/context/coreContext'
+import { ref, reactive, type Ref } from 'vue'
+import type { RuntimeDocument } from '@/context/runtimeDocument'
+import { EventDispatcherImpl } from '@/events/dispatcher'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA, materialRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOfByOperator, boundsOfByRNAPath } from '@/workbench/ux/layout'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
@@ -94,8 +96,8 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
   const registry = createOperatorRegistry()
   const bctxOperators = wrapOperatorRegistry(registry, () => bctx)
 
-  const core = createCoreBContext(bctxOperators)
-  const { viewports, eventDispatcher } = core
+  const viewports = createViewportManager()
+  const eventDispatcher = new EventDispatcherImpl()
 
   // RNA
   const rna = createRNARegistry()
@@ -145,7 +147,23 @@ export function createWorkbenchContext(deps: WorkbenchContextDeps): WorkbenchCon
 
   // ---- 原子构造 bctx（一次性全部填入，不用 as unknown / as any 后补） ----
   const bctx: BContext = {
-    ...core,
+    doc: ref(null) as Ref<RuntimeDocument | null>,
+    structEpoch: ref(0),
+    currentWorldFrameIndex: ref(0),
+    workspaceMode: ref<WorkbenchWorkspaceMode>('local-file'),
+    uiWorkspace: ref<UIWorkspace>('preview'),
+    localFileName: ref<string | null>(null),
+    connection: reactive<ConnectionState>({
+      apiBase: '',
+      token: '',
+      connected: null,
+      exports: [],
+      exportsLoading: false,
+      selectedExportName: null,
+    }),
+    viewports,
+    eventDispatcher,
+    operators: bctxOperators,
 
     selection,
     editHistory,

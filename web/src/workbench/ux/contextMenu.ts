@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { ref } from 'vue'
 
 export interface ContextMenuItem {
   kind: 'operator' | 'label' | 'separator'
@@ -8,19 +8,15 @@ export interface ContextMenuItem {
   props?: Record<string, unknown>
 }
 
-export interface ContextMenuState {
-  open: Ref<boolean>
-  position: Ref<{ x: number; y: number }>
-  items: Ref<ContextMenuItem[]>
-}
-
-export function createContextMenu(): ContextMenuState {
+export function createContextMenu() {
   return {
     open: ref(false),
     position: ref({ x: 0, y: 0 }),
     items: ref<ContextMenuItem[]>([]),
   }
 }
+
+export type ContextMenuState = ReturnType<typeof createContextMenu>
 
 export function showContextMenu(
   cm: ContextMenuState,

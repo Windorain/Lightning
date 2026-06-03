@@ -4,7 +4,7 @@
  * 从原始文档 + materialLibrary 产出 Three.js 渲染所需的数据结构与 mesh。
  * embedBContext 和 WorkbenchViewport 共用。不依赖 View3DConfig。
  *
- * 薄协调层，将帧播放委托给 WorldFrameController、图标缓存委托给 IconCacheManager。
+ * 薄协调层，内部管理帧播放和图标缓存。
  */
 import { computed, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
@@ -15,17 +15,23 @@ import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { Annotation } from '@/render/data/annotationTypes'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
-import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { BlockMeshBuildStats } from '@/render/mesh/blockMesh'
 import type { ViewportRenderAssets } from '@/shared/types'
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
 import { BlockMeshProvider } from '@/render/mesh/blockMeshProvider'
 import { AnnotationMeshProvider } from '@/render/mesh/annotationMeshProvider'
 import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
-import { resolveRenderBundle, type RenderBundleResolveResult } from '@/render/data/bundleResolve'
+import { isWorldDocument, resolveRenderBundle, type RenderBundleResolveResult } from '@/render/data/bundleResolve'
 import { formatUnknownError } from '@/util/formatUnknownError'
-import { createIconCacheManager } from './iconCacheManager'
-import { createWorldFrameController } from './worldFrameController'
+import {
+  BlockIconCache,
+  BLOCK_ICON_LAYOUT_REVISION,
+  blockIconBakeLayoutKey,
+} from '@/render/interaction/blockIconCache'
+import {
+  MC_ITEM_SLOT_BAKE_REVISION,
+  summarizeBlocksForCache,
+} from '@/render/interaction/blockSlotBaker'
 
 function formatError(err: unknown): string {
   return formatUnknownError(err)
@@ -219,20 +225,97 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   }
 
   // ---- 图标缓存管理 ----
-  const iconCacheManager = createIconCacheManager({ blockIconCache, blockIconCacheOptions })
+  function rebuildIconCache(lib: MaterialLibraryApi, definition: StructureDefinition): void {
+    if (blockIconCache.value) blockIconCache.value.dispose()
+    const cache = new BlockIconCache(lib, blockIconCacheOptions, definition)
+    cache.setRevisionKey(
+      `${definition.id}:${summarizeBlocksForCache(definition)}:${MC_ITEM_SLOT_BAKE_REVISION}:${BLOCK_ICON_LAYOUT_REVISION}:${blockIconBakeLayoutKey(blockIconCacheOptions)}`,
+    )
+    blockIconCache.value = cache
+  }
+  function disposeIconCache(): void {
+    blockIconCache.value?.dispose()
+    blockIconCache.value = null
+  }
 
   // ---- 帧播放控制 ----
-  const worldFrameCtrl = createWorldFrameController({
-    docRef,
-    worldFrameIndex,
-    framesPlaybackIsPlaying,
-    structureDefinition,
-    tooltipPalette,
-    textureCache,
-    rebuildBlockIconCache: iconCacheManager.rebuild,
-    runMesh,
-    presentContentMesh,
-  })
+  const DEFAULT_WORLD_FRAME_DWELL_MS = 50
+  function normalizeWorldFrameListIndex(w: { frames: unknown[] }, raw: number): number {
+    const n = w.frames.length
+    if (n === 0) return 0
+    const i = Math.floor(raw)
+    return ((i % n) + n) % n
+  }
+
+  let worldPlaybackTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+  function clearWorldPlaybackSchedule(): void {
+    if (worldPlaybackTimeoutId !== null) {
+      clearTimeout(worldPlaybackTimeoutId)
+      worldPlaybackTimeoutId = null
+    }
+  }
+
+  function dwellMsForCurrentWorldFrame(): number {
+    const doc = docRef.value
+    if (!doc || doc.frameCount === 0) return DEFAULT_WORLD_FRAME_DWELL_MS
+    const f = doc.frame(worldFrameIndex.value)
+    const d = f?.durationMs
+    if (typeof d === 'number' && Number.isFinite(d) && d > 0) return d
+    return DEFAULT_WORLD_FRAME_DWELL_MS
+  }
+
+  function scheduleNextWorldFrameStep(): void {
+    clearWorldPlaybackSchedule()
+    if (!framesPlaybackIsPlaying.value) return
+
+    const doc = docRef.value
+    if (!doc || doc.frameCount < 2) return
+    const n = doc.frameCount
+    const delay = dwellMsForCurrentWorldFrame()
+    const fromIndex = worldFrameIndex.value
+
+    worldPlaybackTimeoutId = setTimeout(() => {
+      worldPlaybackTimeoutId = null
+      if (!framesPlaybackIsPlaying.value) return
+      let next = fromIndex + 1
+      if (next >= n) next = 0
+      void setCurrentWorldFrame(next).then(() => {
+        if (framesPlaybackIsPlaying.value) scheduleNextWorldFrameStep()
+      }).catch(() => { framesPlaybackIsPlaying.value = false })
+    }, delay)
+  }
+
+  function toggleWorldFramesPlayback(): void {
+    if (framesPlaybackIsPlaying.value) {
+      framesPlaybackIsPlaying.value = false
+      clearWorldPlaybackSchedule()
+      return
+    }
+    framesPlaybackIsPlaying.value = true
+    scheduleNextWorldFrameStep()
+  }
+
+  async function setCurrentWorldFrame(rawNext: number): Promise<void> {
+    const doc = docRef.value
+    if (!doc || doc.frameCount === 0) return
+    return runMesh(async () => {
+      const plain = doc.serialize()
+      if (!isWorldDocument(plain) || plain.frames.length === 0) return
+      const idx = normalizeWorldFrameListIndex(plain, rawNext)
+      worldFrameIndex.value = idx
+
+      const resolved: RenderBundleResolveResult = resolveRenderBundle({ document: plain }, idx)
+      structureDefinition.value = resolved.definition
+      tooltipPalette.value = resolved.tooltipPalette
+
+      const lib = textureCache.value
+      if (!lib || lib.isDisposed()) return
+
+      rebuildIconCache(lib, resolved.definition)
+      await presentContentMesh()
+    })
+  }
 
   // ---- Lifecycle ----
   function registerScene(scene: THREE.Scene): void {
@@ -250,7 +333,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   }
 
   async function loadStructureAndResources(): Promise<void> {
-    worldFrameCtrl.clearWorldPlaybackSchedule()
+    clearWorldPlaybackSchedule()
     framesPlaybackIsPlaying.value = false
     clearAllMeshStorage()
     loadStatus.value = 'loading'
@@ -275,7 +358,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
         console.error('[renderAssets] loadStructureAndResources: failed to build textureCache')
         return
       }
-      iconCacheManager.rebuild(effectiveLib, resolved.definition)
+      rebuildIconCache(effectiveLib, resolved.definition)
       loadStatus.value = 'ok'
     } catch (e) {
       loadStatus.value = 'error'
@@ -299,17 +382,17 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
 
   async function rebuildAll(): Promise<void> {
     clearAllMeshStorage()
-    iconCacheManager.dispose()
+    disposeIconCache()
     await loadStructureAndResources()
     if (loadStatus.value === 'ok') await rebuildContentMesh()
   }
 
   function disposeCachesAndLibrary(): void {
-    worldFrameCtrl.clearWorldPlaybackSchedule()
+    clearWorldPlaybackSchedule()
     framesPlaybackIsPlaying.value = false
     clearAllMeshStorage()
     mainMeshGroup.value = null
-    iconCacheManager.dispose()
+    disposeIconCache()
     textureCache.value?.dispose()
     textureCache.value = null
     structureDefinition.value = null
@@ -342,8 +425,8 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     loadStructureAndResources,
     rebuildContentMesh,
     rebuildAnnotationOverlay,
-    setCurrentWorldFrame: worldFrameCtrl.setCurrentWorldFrame,
-    toggleWorldFramesPlayback: worldFrameCtrl.toggleWorldFramesPlayback,
+    setCurrentWorldFrame,
+    toggleWorldFramesPlayback,
     disposeCachesAndLibrary,
     rebuildAll,
     init,

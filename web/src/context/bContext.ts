@@ -15,12 +15,11 @@ import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import { computed, ref, shallowRef } from 'vue'
-import type { ComputedRef, Ref, ShallowRef } from 'vue'
+import type { Ref, ShallowRef } from 'vue'
 import type * as THREE from 'three'
 
 import type { bScreen } from '@/workbench/ux/types/screen'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
-import type { ViewportBContext } from '@/shared/types'
 
 export type LoadStatus = 'loading' | 'ok' | 'error'
 export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle'
@@ -86,15 +85,7 @@ export interface ViewportSlot {
   orbitTarget: Ref<THREE.Vector3 | null>
 }
 
-export interface ViewportManager {
-  register(id: string): ViewportSlot
-  unregister(id: string): void
-  get(id: string): ViewportSlot | undefined
-  readonly activeId: Ref<string | null>
-  readonly active: ComputedRef<ViewportSlot | null>
-}
-
-export interface BContext extends ViewportBContext {
+export interface BContext {
   // === 场景核心数据（原 SceneContext） ===
   doc: Ref<RuntimeDocument | null>
   structEpoch: Ref<number>
@@ -147,7 +138,7 @@ export interface BContext extends ViewportBContext {
   // === Multi-viewport ===
   /** Backward-compat: returns the active viewport slot. Code should migrate to `viewports.get(id)`. */
   readonly viewport: ViewportSlot
-  viewports: ViewportManager
+  viewports: ReturnType<typeof createViewportManager>
 
   /** Window manager (Blender 对标 wmWindowManager) */
   wm: {
@@ -184,7 +175,7 @@ export function resolveViewportSlot(
   return bctx.viewport
 }
 
-export function createViewportManager(): ViewportManager {
+export function createViewportManager() {
   const slots = new Map<string, ViewportSlot>()
   const activeId = ref<string | null>(null)
   const active = computed(() => {

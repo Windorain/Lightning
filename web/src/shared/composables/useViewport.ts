@@ -14,10 +14,14 @@ import type { StructureDefinition } from '@/render/schema/types'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 import { type Annotation, annotationIsOnLayer } from '@/render/data/annotationTypes'
-import type { LoadStatus, ViewportBContext, ViewportRenderAssets } from '@/shared/types'
+import type { LoadStatus, ViewportRenderAssets } from '@/shared/types'
 
 export interface UseViewportOptions<TRenderAssets = ViewportRenderAssets> {
-  bctx: ViewportBContext
+  bctx: {
+    doc: { value: { serialize(): Record<string, unknown>; frameCount: number } | null }
+    structEpoch: { value: number }
+    viewport: { id: string; overlayGroup: { value: THREE.Group | null } }
+  }
   structureDefinition: ShallowRef<StructureDefinition | null>
   mainMeshGroup: ShallowRef<THREE.Group | null>
   blockIconCacheOptions?: { sizePx?: number; orthoHalf?: number }
@@ -135,7 +139,11 @@ function _getAnnoState(viewportId: string): { group: THREE.Group | null; hash: s
  *   built but not added to the overlay scene. Defaults to true.
  */
 export function updateAnnotationOverlay(
-  bctx: ViewportBContext,
+  bctx: {
+    doc: { value: { serialize(): Record<string, unknown>; frameCount: number } | null }
+    structEpoch: { value: number }
+    viewport: { id: string; overlayGroup: { value: THREE.Group | null } }
+  },
   renderAssets: ViewportRenderAssets,
   showAnnotationsGate?: boolean,
 ): void {
