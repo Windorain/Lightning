@@ -37,12 +37,11 @@ const drw = new DRW({
   framesPlaybackIsPlaying: ctx.main.framesPlaybackIsPlaying,
   structureDefinition: vpSlot.definition,
   mainMeshGroup: vpSlot.contentGroup,
-  slot: vpSlot,
   blockIconCacheOptions: {},
   setFrameIndex: (i) => ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
 })
 
-const { loadStatus, meshBusy, renderAssets } = drw
+const { loadStatus, meshBusy } = drw
 
 const structureDefinition = vpSlot.definition
 const mainMeshGroup = vpSlot.contentGroup
@@ -60,9 +59,9 @@ const annotations = computed<Annotation[]>(() => {
 const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
   hasWorldMultiFrame, worldFrameCount,
-} = renderAssets.computed
+} = drw.computed
 
-const materialLibrary = renderAssets.textureCache
+const materialLibrary = drw.textureCache
 
 type BottomTab = 'frame' | 'layer'
 const _preferredTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
@@ -131,7 +130,7 @@ const toolHints = computed<ToolHint[]>(() => ctx.toolRegistry.activeTool.value?.
 function updateOverlay(): void {
   const gizmo = ctx.toolRegistry.activeGizmo.value
   if (gizmo && toolCtx) gizmo.render(toolCtx)
-  updateAnnotationOverlay(ctx, renderAssets)
+  updateAnnotationOverlay(ctx, drw)
 
   if (ctx.viewport.gizmo.value && ctx.toolRegistry.activeTool.value?.id === 'move') {
     const gp = ctx.viewport.gizmo.value.root.position
@@ -188,7 +187,7 @@ function onDrop(e: DragEvent) {
 }
 
 onMounted(() => {
-  void renderAssets.loadStructureAndResources()
+  void drw.loadStructureAndResources()
 })
 onBeforeUnmount(() => {
   host.detachViewport(VIEWPORT_REGION_ID)

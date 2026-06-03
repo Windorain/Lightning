@@ -14,7 +14,6 @@ import type { ViewportManager } from '@/runtime/viewportManager'
 import type {
   ConnectionState,
   ContextSettings,
-  RenderViewState,
   UIWorkspace,
   ViewportSlot,
   WorkbenchWorkspaceMode,
@@ -26,8 +25,6 @@ function embedUnavailable(name: string): never {
 }
 
 export class Context {
-  readonly renderView: Record<string, RenderViewState> = {}
-
   constructor(
     readonly main: Main,
     readonly wm: WM,

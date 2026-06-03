@@ -1,6 +1,6 @@
 // web/src/context/selection.ts
 
-import type { InjectionKey, Ref } from 'vue'
+import type { Ref } from 'vue'
 import { ref, shallowRef } from 'vue'
 import type { createLogCenter } from '@/logging/LogCenter'
 
@@ -76,8 +76,6 @@ export interface SelectionContext {
   resetCycle(): void
   bindLog(log: SelectionLog): void
 }
-
-export const selectionContextKey: InjectionKey<SelectionContext> = Symbol('selectionContext')
 
 export function createSelectionContext(): SelectionContext {
   let log: SelectionLog | null = null

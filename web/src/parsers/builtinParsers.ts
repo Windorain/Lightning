@@ -29,30 +29,12 @@ export const V2PlainParser: DocumentParser = {
   },
 }
 
-// ==================== EnvelopeParser ====================
+// ==================== Envelope (factory) ====================
 
 /**
- * EnvelopeParser — Envelope 文档 → RuntimeDocument
+ * createEnvelopeParser — Envelope 文档 → RuntimeDocument
  *
- * 解压 gzip+base64 payload 后委托 V2PlainParser / WorldParser。
- */
-/** @deprecated 使用 createEnvelopeParser(registry) */
-export const EnvelopeParser: DocumentParser = {
-  formatName: 'Envelope',
-  detect(raw: unknown): boolean {
-    return isEnvelopeDocument(raw)
-  },
-  async parse(): Promise<RuntimeDocument | null> {
-    throw new Error('EnvelopeParser: use createEnvelopeParser(registry) with Main.registries.parsers')
-  },
-}
-
-/**
- * createEnvelopeParser — 创建绑定到指定 registry 的 EnvelopeParser。
- *
- * 与 EnvelopeParser 的区别在于它捕获传入的 registry 实例，
- * 解压后委托给该 registry 而非全局 singleton。
- * 供 shell 使用 createParserRegistry() 创建本地 registry 时使用。
+ * 解压 gzip+base64 payload 后委托 registry 内其它 parser。
  */
 export function createEnvelopeParser(registry: ParserRegistryImpl): DocumentParser {
   return {

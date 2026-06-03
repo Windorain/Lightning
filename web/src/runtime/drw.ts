@@ -1,5 +1,5 @@
 /**
- * DRW — 视口绘制运行时：mesh/材质/帧呈现，watch Main ref（不 import Context）。
+ * DRW — 视口绘制运行时：mesh/材质/帧呈现 + selection outline（不 import Context）。
  */
 import { ref, shallowRef, watch, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
@@ -7,11 +7,18 @@ import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { LoadStatus } from '@/runtime/types'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
+import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
+import type { Annotation } from '@/render/data/annotationTypes'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
-import { createRenderAssets, type RenderAssets, type RenderAssetsComputed } from '@/context/renderAssets'
-import type { ViewportSlot } from '@/runtime/types'
+import {
+  createDrwMeshPipeline,
+  type DrwComputed,
+  type DrwMeshPipeline,
+} from '@/runtime/drwMeshPipeline'
 import type { BlockRef, SelectedEntity } from '@/context/selection'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
+
+export type { DrwComputed, DrwAnnotationApi } from '@/runtime/drwMeshPipeline'
 
 export interface DRWDeps {
   docRef: Ref<RuntimeDocument | null>
@@ -21,7 +28,6 @@ export interface DRWDeps {
   framesPlaybackIsPlaying: Ref<boolean>
   structureDefinition: ShallowRef<StructureDefinition | null>
   mainMeshGroup: ShallowRef<THREE.Group | null>
-  slot: ViewportSlot
   blockIconCacheOptions?: { sizePx?: number; orthoHalf?: number }
   initialWorldFrameIndex?: number
   setFrameIndex?: (index: number) => void | Promise<void>
@@ -34,16 +40,16 @@ export class DRW {
   readonly blockIconCache = shallowRef<BlockIconCache | null>(null)
   readonly tooltipPalette = shallowRef<string[]>([])
   readonly outlinePass: SelectionOutlinePass
-  readonly renderAssets: RenderAssets
+  readonly computed: DrwComputed
+  readonly textureCache: Readonly<ShallowRef<MaterialLibraryApi | null>>
 
-  readonly computed: RenderAssetsComputed
-
+  private readonly _mesh: DrwMeshPipeline
   private stopOutlineWatch: (() => void) | null = null
   private highlightProvider = new SelectionHighlightProvider()
 
   constructor(deps: DRWDeps) {
     this.outlinePass = new SelectionOutlinePass(new THREE.Vector2(1024, 768))
-    this.renderAssets = createRenderAssets({
+    this._mesh = createDrwMeshPipeline({
       docRef: deps.docRef,
       loadStatus: this.loadStatus,
       meshBusy: this.meshBusy,
@@ -60,29 +66,38 @@ export class DRW {
       structEpochRef: deps.structEpochRef,
       setFrameIndex: deps.setFrameIndex,
     })
-    this.computed = this.renderAssets.computed
+    this.computed = this._mesh.computed
+    this.textureCache = this._mesh.textureCache
   }
 
   registerScene(scene: THREE.Scene): void {
-    this.sceneRef.value = scene
-    this.renderAssets.registerScene(scene)
+    this._mesh.registerScene(scene)
   }
 
   init(): void {
-    this.renderAssets.init()
+    this._mesh.init()
+  }
+
+  loadStructureAndResources(): Promise<void> {
+    return this._mesh.loadStructureAndResources()
+  }
+
+  rebuildContentMesh(): Promise<void> {
+    return this._mesh.rebuildContentMesh()
+  }
+
+  rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null> {
+    return this._mesh.rebuildAnnotationOverlay(annotations)
   }
 
   dispose(): void {
     this.stopOutlineWatch?.()
     this.stopOutlineWatch = null
     this.outlinePass.dispose()
-    this.renderAssets.disposeCachesAndLibrary()
-    this.renderAssets.dispose()
+    this._mesh.disposeCachesAndLibrary()
+    this._mesh.dispose()
   }
 
-  /**
-   * watch selection + hover → outline pass（对标 Blender 视口 overlay derive）。
-   */
   bindSelectionOutline(options: {
     selectionItems: Ref<Set<SelectedEntity>>
     hoveredBlock: Ref<BlockRef | null>

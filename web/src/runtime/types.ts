@@ -63,8 +63,3 @@ export interface ViewportSlot {
   orbitTarget: Ref<THREE.Vector3 | null>
 }
 
-export interface RenderViewState {
-  loadStatus: LoadStatus
-  hasWorldMultiFrame: boolean
-  worldFrameCount: number
-}

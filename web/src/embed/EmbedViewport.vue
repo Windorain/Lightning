@@ -4,7 +4,7 @@
  *
  * 对齐 WorkbenchViewport：
  * - useContext() 取 ctx
- * - 本地 createRenderAssets 管理全部渲染状态
+ * - 本地 DRW 管理 mesh/材质/帧状态
  * - 叶子组件全部 props/emits
  */
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -53,14 +53,12 @@ const drw = new DRW({
   framesPlaybackIsPlaying: ctx.main.framesPlaybackIsPlaying,
   structureDefinition: vpSlot.definition,
   mainMeshGroup: vpSlot.contentGroup,
-  slot: vpSlot,
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
   setFrameIndex: (i) => ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
 })
 const {
   loadStatus, meshBusy, blockIconCache, tooltipPalette,
-  renderAssets,
 } = drw
 const structureDefinition = vpSlot.definition
 const mainMeshGroup = vpSlot.contentGroup
@@ -73,9 +71,9 @@ const showSettingsPanel = ref(false)
 const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
   hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
-} = renderAssets.computed
+} = drw.computed
 
-const materialLibrary = renderAssets.textureCache
+const materialLibrary = drw.textureCache
 
 // ---- Hover / tooltip (unified) ----
 const { hover, setViewportBlock, setSidebarBlock, setAnnotation, setMeta } = useEmbedHover()
@@ -192,12 +190,12 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     documentKeydown: false,
   })
 
-  updateAnnotationOverlay(ctx, renderAssets, prefs.showAnnotations)
+  updateAnnotationOverlay(ctx, drw, prefs.showAnnotations)
 
   function rafTick() {
     if (!_alive) return
     _annoRafId = requestAnimationFrame(rafTick)
-    updateAnnotationOverlay(ctx, renderAssets, prefs.showAnnotations)
+    updateAnnotationOverlay(ctx, drw, prefs.showAnnotations)
     flushHighlight()
   }
   _annoRafId = requestAnimationFrame(rafTick)
@@ -237,7 +235,7 @@ watch(() => prefs.showAnnotations, (v) => {
   }
 })
 
-onMounted(async () => { await renderAssets.loadStructureAndResources() })
+onMounted(async () => { await drw.loadStructureAndResources() })
 onBeforeUnmount(() => {
   host.detachViewport(EMBED_REGION)
   ctx.wm.events.unregisterRegion(EMBED_REGION)

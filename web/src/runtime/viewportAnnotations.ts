@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { ViewportRenderAssets } from '@/shared/types'
+import type { DrwAnnotationApi } from '@/runtime/drwMeshPipeline'
 import { type Annotation, annotationIsOnLayer } from '@/render/data/annotationTypes'
 
 const _annoState = new Map<string, { group: THREE.Group | null; hash: string; pending: boolean }>()
@@ -18,7 +18,7 @@ export function updateAnnotationOverlay(
     doc: { value: { serialize(): Record<string, unknown>; frameCount: number } | null }
     viewport: { id: string; overlayGroup: { value: THREE.Group | null } }
   },
-  renderAssets: ViewportRenderAssets,
+  drw: DrwAnnotationApi,
   showAnnotationsGate?: boolean,
 ): void {
   const doc = ctx.doc.value
@@ -26,9 +26,9 @@ export function updateAnnotationOverlay(
   const plain = doc.serialize() as Record<string, any>
   let annos: Annotation[] = plain.annotations ?? []
 
-  const mode = renderAssets.computed.layerPreviewMode.value
+  const mode = drw.computed.layerPreviewMode.value
   if (mode !== 'all') {
-    const gh = renderAssets.computed.gridHeight.value
+    const gh = drw.computed.gridHeight.value
     annos = annos.filter(a => annotationIsOnLayer(a, mode.worldY, gh))
   }
 
@@ -44,7 +44,7 @@ export function updateAnnotationOverlay(
   s.hash = hash
   s.pending = true
 
-  renderAssets.rebuildAnnotationOverlay(annos).then(group => {
+  drw.rebuildAnnotationOverlay(annos).then(group => {
     const s2 = _getAnnoState(viewportId)
     s2.pending = false
     if (s2.group) {

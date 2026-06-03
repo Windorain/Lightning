@@ -142,8 +142,6 @@ export function createOperatorRegistry(): OperatorRegistry {
   return new OperatorRegistry()
 }
 
-export const globalOperators = createOperatorRegistry()
-
 /**
  * Wrap an OperatorRegistry into the shape expected by Context.operators.
  * When `sanitize` is true, `find`/`all` return only the public face (id, label)

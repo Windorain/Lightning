@@ -1,4 +1,4 @@
-import { watch, type Ref, type ShallowRef } from 'vue'
+import type { Ref, ShallowRef } from 'vue'
 import * as THREE from 'three'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { Context } from '@/runtime/context'
@@ -53,7 +53,7 @@ export async function attachViewport(
 
   if (rebuildMesh) {
     try {
-      await drw.renderAssets.rebuildContentMesh()
+      await drw.rebuildContentMesh()
     } catch (e) {
       console.error(`[attachViewport] rebuildContentMesh ${regionId}`, e)
     }
@@ -73,23 +73,7 @@ export async function attachViewport(
     drw.bindSelectionOutline(selectionOutline)
   }
 
-  const syncRenderView = (): void => {
-    ctx.renderView[regionId] = {
-      loadStatus: drw.loadStatus.value,
-      hasWorldMultiFrame: drw.computed.hasWorldMultiFrame.value,
-      worldFrameCount: drw.computed.worldFrameCount.value,
-    }
-  }
-  syncRenderView()
-  const stopRenderViewWatch = [
-    watch(drw.loadStatus, syncRenderView),
-    watch(drw.computed.hasWorldMultiFrame, syncRenderView),
-    watch(drw.computed.worldFrameCount, syncRenderView),
-  ]
-
   return () => {
-    stopRenderViewWatch.forEach(s => s())
-    delete ctx.renderView[regionId]
     unbindDom()
     disposeAnnotationOverlay(regionId)
   }

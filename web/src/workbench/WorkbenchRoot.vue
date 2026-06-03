@@ -54,7 +54,7 @@ function createContextSettings(overrides?: {
 }
 
 // Operators — registered via shared VM assembly
-import { createWorkbenchHost } from '@/workbench/context/workbenchContext'
+import { createWorkbenchHost } from '@/runtime/host/workbenchHost'
 
 import { bindChromeDom, CHROME_REGION } from '@/runtime/chromeBinder'
 import { createChromeKeymapHandler } from '@/handlers/chromeKeymapHandler'

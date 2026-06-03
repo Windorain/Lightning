@@ -1,10 +1,5 @@
 /**
- * renderAssets — 共享渲染管线 composable。
- *
- * 从原始文档 + materialLibrary 产出 Three.js 渲染所需的数据结构与 mesh。
- * embedBContext 和 WorkbenchViewport 共用。不依赖 View3DConfig。
- *
- * 薄协调层，内部管理帧播放和图标缓存。
+ * DRW 内部 mesh/材质/帧管线（不 import Context，只订阅 Ref）。
  */
 import { computed, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
@@ -16,7 +11,6 @@ import type { StructureDefinition } from '@/render/schema/types'
 import type { Annotation } from '@/render/data/annotationTypes'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
 import type { BlockMeshBuildStats } from '@/render/mesh/blockMesh'
-import type { ViewportRenderAssets } from '@/shared/types'
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
 import { BlockMeshProvider } from '@/render/mesh/blockMeshProvider'
 import { AnnotationMeshProvider } from '@/render/mesh/annotationMeshProvider'
@@ -43,7 +37,7 @@ interface WorldMeshEntry {
   stats: BlockMeshBuildStats
 }
 
-export interface RenderAssetsDeps {
+export interface DrwMeshPipelineDeps {
   /** 场景文档（RuntimeDocument；render 管线内部按需调用 serialize() 获取 plain JSON） */
   docRef: Ref<RuntimeDocument | null>
   loadStatus: Ref<LoadStatus>
@@ -64,7 +58,7 @@ export interface RenderAssetsDeps {
   setFrameIndex?: (index: number) => void | Promise<void>
 }
 
-export interface RenderAssetsComputed {
+export interface DrwComputed {
   layerPreviewMode: ComputedRef<LayerPreviewMode>
   layerPreviewLabel: ComputedRef<string>
   gridHeight: ComputedRef<number>
@@ -73,7 +67,7 @@ export interface RenderAssetsComputed {
   blockStatsEntries: ComputedRef<BlockStatRow[]>
 }
 
-export interface RenderAssets extends ViewportRenderAssets {
+export interface DrwMeshPipeline {
   registerScene(scene: THREE.Scene): void
   loadStructureAndResources(): Promise<void>
   rebuildContentMesh(): Promise<void>
@@ -88,11 +82,13 @@ export interface RenderAssets extends ViewportRenderAssets {
   dispose(): void
   /** 内部纹理缓存（供 RenderEngine 渲染用，只读） */
   textureCache: Readonly<ShallowRef<MaterialLibraryApi | null>>
-  computed: RenderAssetsComputed
+  computed: DrwComputed
 }
 
+/** 注解 overlay 所需的最小 DRW 面 */
+export type DrwAnnotationApi = Pick<DrwMeshPipeline, 'computed' | 'rebuildAnnotationOverlay'>
 
-export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
+export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipeline {
   const {
     docRef, loadStatus, meshBusy, blockIconCache, tooltipPalette,
     structureDefinition, mainMeshGroup, sceneRef, worldFrameIndex, layerWorldY,
@@ -109,7 +105,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       textureCache.value = await buildMaterialLibrary(plain ?? doc.serialize())
       return textureCache.value
     } catch (e) {
-      console.error('[renderAssets] buildMaterialLibrary failed', e)
+      console.error('[drw] buildMaterialLibrary failed', e)
       return null
     }
   }
@@ -179,9 +175,9 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
 
     const lib = textureCache.value
     if (!lib || lib.isDisposed()) {
-      console.warn('[renderAssets] presentContentMesh: textureCache not ready, triggering rebuildAll')
+      console.warn('[drw] presentContentMesh: textureCache not ready, triggering rebuildAll')
       void rebuildAll().catch(e => {
-        console.error('[renderAssets] rebuildAll (from presentContentMesh) failed:', e)
+        console.error('[drw] rebuildAll (from presentContentMesh) failed:', e)
       })
       return
     }
@@ -222,7 +218,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     } catch (e) {
       const fe = formatError(e)
       if (fe.includes('MaterialLibrary 已释放')) return
-      console.error('[renderAssets] buildBlockMesh', e)
+      console.error('[drw] buildBlockMesh', e)
     } finally {
       meshBusy.value = false
     }
@@ -325,7 +321,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     stopStructEpochWatch?.()
     stopStructEpochWatch = watch(structEpochRef, () => {
       void rebuildAll().catch(e => {
-        console.error('[renderAssets] rebuildAll (structEpoch watch) failed:', e)
+        console.error('[drw] rebuildAll (structEpoch watch) failed:', e)
         loadStatus.value = 'error'
       })
     })
@@ -369,14 +365,14 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
         : await ensureTextures(doc, plain)
       if (!effectiveLib || effectiveLib.isDisposed()) {
         loadStatus.value = 'error'
-        console.error('[renderAssets] loadStructureAndResources: failed to build textureCache')
+        console.error('[drw] loadStructureAndResources: failed to build textureCache')
         return
       }
       rebuildIconCache(effectiveLib, resolved.definition)
       loadStatus.value = 'ok'
     } catch (e) {
       loadStatus.value = 'error'
-      console.error('[renderAssets] loadStructureAndResources', e)
+      console.error('[drw] loadStructureAndResources', e)
     }
   }
 
@@ -434,7 +430,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       mainMeshGroup.value = null
       await presentContentMesh()
     }).catch((e: unknown) => {
-      console.error('[renderAssets] layer watch mesh rebuild failed', e)
+      console.error('[drw] layer watch mesh rebuild failed', e)
     })
   })
 
