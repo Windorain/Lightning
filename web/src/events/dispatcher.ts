@@ -11,7 +11,12 @@
  * 键盘事件路由到最后鼠标所在的 region（activeRegion）。
  */
 import type { RegionEventHandler } from '@/events/handlerTypes'
-import { logCenter } from '@/logging/LogCenter'
+import type { createLogCenter } from '@/logging/LogCenter'
+
+type EventDispatcherLog = Pick<
+  ReturnType<typeof createLogCenter>,
+  'beginTrace' | 'endTrace'
+>
 
 export interface ModalKeymapItem {
   key: string
@@ -60,6 +65,8 @@ export class EventDispatcherImpl {
   private _activeRegionId: string | null = null
   /** 当前 dispatch 的目标 region（操作符上下文） */
   private _currentRegionId: string | null = null
+
+  constructor(private readonly _log?: EventDispatcherLog) {}
 
   // ---- Region 生命周期 ----
 
@@ -167,10 +174,10 @@ export class EventDispatcherImpl {
     if (!targetRegionId) return { break: false }
 
     this._currentRegionId = targetRegionId
-    const traceId = logCenter.beginTrace('EventDispatcher', event)
+    const traceId = this._log?.beginTrace('EventDispatcher', event)
     const system = this._regionSystems.get(targetRegionId)
     if (!system) {
-      logCenter.endTrace(`region not found: ${targetRegionId}`)
+      this._log?.endTrace(`region not found: ${targetRegionId}`)
       return { break: false, traceId }
     }
 
@@ -184,7 +191,7 @@ export class EventDispatcherImpl {
           const mapped = keymap.match(event)
           if (mapped) {
             topModal.handleEvent(mapped as unknown as Event)
-            logCenter.endTrace(`consumed by modal keymap ${topModal.id}`)
+            this._log?.endTrace(`consumed by modal keymap ${topModal.id}`)
             return { break: true, traceId }
           }
         }
@@ -196,14 +203,14 @@ export class EventDispatcherImpl {
         try {
           const result = modal.handleEvent(event)
           if (result.break) {
-            logCenter.endTrace(`consumed by modal ${modal.id}`)
+            this._log?.endTrace(`consumed by modal ${modal.id}`)
             return { break: true, traceId }
           }
         } catch (e) {
           console.error(`[EventDispatcher] modal ${modal.id} handleEvent error:`, e)
           system.modalStack.splice(i, 1)
           modal.onExit(true)
-          logCenter.endTrace(`modal ${modal.id} crashed, removed from stack`)
+          this._log?.endTrace(`modal ${modal.id} crashed, removed from stack`)
           return { break: true, traceId }
         }
       }
@@ -214,12 +221,12 @@ export class EventDispatcherImpl {
     for (const handler of chain) {
       const result = handler.handle(event)
       if (result.break) {
-        logCenter.endTrace(`consumed by handler type=${handler.type}`)
+        this._log?.endTrace(`consumed by handler type=${handler.type}`)
         return { break: true, traceId }
       }
     }
 
-    logCenter.endTrace('unhandled')
+    this._log?.endTrace('unhandled')
     return { break: false, traceId }
   }
 }

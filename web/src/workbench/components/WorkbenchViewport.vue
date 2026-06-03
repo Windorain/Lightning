@@ -82,7 +82,7 @@ function createToolContext(): ToolContext {
     getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
     invokeOperator: (id, props, event, rid) => ctx.operators.invoke(id, props ?? {}, event, rid),
     activeTool: ctx.toolRegistry.activeTool,
-    modalDepth: (rid: string) => ctx.eventDispatcher.modalDepth(rid),
+    modalDepth: (rid: string) => ctx.wm.events.modalDepth(rid),
   }
 }
 

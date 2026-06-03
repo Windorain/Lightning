@@ -11,7 +11,6 @@ import type { Context } from '@/runtime/context'
 import type { OperatorType, OperatorProperties } from './operatorType'
 import { OP_RESULT } from './operatorType'
 import { pushDocUndo } from './pushDocUndo'
-import { replaceDoc } from '@/context/replaceDoc'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 
 export class ModalOperatorWrapper implements ModalOperation {
@@ -48,17 +47,17 @@ export class ModalOperatorWrapper implements ModalOperation {
         pushDocUndo(this.ctx, snap, snapshotAfter, this.op.label)
         this.undoSnapshot = null
       }
-      this.ctx.eventDispatcher.commitModal(this.regionId)
+      this.ctx.wm.events.commitModal(this.regionId)
       return { break: true }
     }
 
     if (result === OP_RESULT.CANCELLED) {
       if (this.undoSnapshot !== null) {
-        replaceDoc(this.ctx, this.undoSnapshot)
+        this.ctx.main.replaceDoc(this.undoSnapshot)
         this.undoSnapshot = null
       }
       this.op.cancel?.(this.ctx, this.props)
-      this.ctx.eventDispatcher.cancelModal(this.regionId)
+      this.ctx.wm.events.cancelModal(this.regionId)
       return { break: true }
     }
 

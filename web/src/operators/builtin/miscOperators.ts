@@ -2,7 +2,7 @@ import type { OperatorType } from '@/operators/operatorType'
 import { theme } from '@/workbench/composables/useNeiTheme'
 import { currentLang } from '@/config/i18n'
 import type { WorkbenchWorkspaceMode } from '@/runtime/types'
-import { replaceDoc } from '@/context/replaceDoc'
+import type { BlockRef } from '@/context/selection'
 
 function setNested(obj: Record<string, unknown>, path: string, value: unknown): void {
   const parts = path.split('.')
@@ -122,7 +122,7 @@ export const SetWorkspaceModeOperator: OperatorType = {
   exec(ctx, _props) {
     const mode = _props.mode as WorkbenchWorkspaceMode
     if (ctx.workspaceMode.value === mode) return
-    replaceDoc(ctx, null)
+    ctx.main.replaceDoc(null)
     ctx.main.currentFrameIndex.value = 0
     ctx.localFileName.value = null
     ctx.workspaceMode.value = mode
@@ -132,10 +132,21 @@ export const SetWorkspaceModeOperator: OperatorType = {
 export const SetLayerYOperator: OperatorType = {
   id: 'OPERATOR_SET_LAYER_Y',
   label: '设置图层 Y',
-  poll(ctx) { return !ctx.isEmbed && ctx.doc.value !== null },
+  poll(ctx) { return ctx.doc.value !== null },
   exec(ctx, props) {
     const y = Math.floor(props.y as number)
-    ctx.workbench!.layerWorldY.value = Number.isFinite(y) ? y : -1
+    const v = Number.isFinite(y) ? y : -1
+    ctx.layerWorldY.value = v
+  },
+}
+
+export const SetHoveredBlockOperator: OperatorType = {
+  id: 'OPERATOR_SET_HOVERED_BLOCK',
+  label: '设置悬停方块',
+  poll(ctx) { return !ctx.isEmbed && ctx.doc.value !== null },
+  exec(ctx, props) {
+    const block = props.block as BlockRef | null | undefined
+    ctx.workbench!.hoveredBlock.value = block ?? null
   },
 }
 

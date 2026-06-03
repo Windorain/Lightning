@@ -44,7 +44,7 @@ const EMBED_REGION = 'r-embed'
 const vpSlot = ctx.viewports.get(EMBED_REGION) ?? ctx.viewports.register(EMBED_REGION)
 
 const docRef = computed(() => ctx.doc.value)
-const layerWorldY = ref(props.settings?.initialLayerWorldY ?? -1)
+const layerWorldY = ctx.layerWorldY
 const drw = new DRW({
   docRef,
   structEpochRef: ctx.structEpoch,
@@ -240,7 +240,7 @@ watch(() => prefs.showAnnotations, (v) => {
 onMounted(async () => { await renderAssets.loadStructureAndResources() })
 onBeforeUnmount(() => {
   host.detachViewport(EMBED_REGION)
-  ctx.eventDispatcher.unregisterRegion(EMBED_REGION)
+  ctx.wm.events.unregisterRegion(EMBED_REGION)
   _alive = false
   if (_annoRafId) cancelAnimationFrame(_annoRafId)
   drw.dispose()
@@ -349,7 +349,7 @@ onBeforeUnmount(() => {
           :mesh-busy="meshBusy"
           :layer-world-y="layerWorldY"
           :layer-preview-label="layerPreviewLabel"
-          @update:layer-y="(v: number) => { layerWorldY = v }"
+          @update:layer-y="(v: number) => { void ctx.operators.exec('OPERATOR_SET_LAYER_Y', { y: v }) }"
         />
       </div>
     </div>

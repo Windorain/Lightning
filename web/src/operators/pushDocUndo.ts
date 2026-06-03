@@ -10,7 +10,6 @@
 import { generateId } from '@/pure/string'
 import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
-import { replaceDoc } from '@/context/replaceDoc'
 
 export function pushDocUndo(
   ctx: Context,
@@ -23,7 +22,7 @@ export function pushDocUndo(
     id: generateId('op_'),
     label,
     timestamp: Date.now(),
-    execute: () => { replaceDoc(ctx, after) },
-    undo: () => { replaceDoc(ctx, before) },
+    execute: () => { ctx.main.replaceDoc(after) },
+    undo: () => { ctx.main.replaceDoc(before) },
   })
 }

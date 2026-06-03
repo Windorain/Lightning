@@ -1,9 +1,9 @@
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
 import type { Context } from '@/runtime/context'
+import type { BlockRef } from '@/context/selection'
 import { pickAtPointer } from '@/render/interaction/scenePick'
 import { structureRowToWorldY } from '@/pure/vec'
-import type { BlockRef } from '@/context/selection'
 
 export interface EmbedHoverSink {
   setViewportBlock(payload: {
@@ -15,34 +15,32 @@ export interface EmbedHoverSink {
   setAnnotation(payload: { annotationId: string; clientX: number; clientY: number } | null): void
 }
 
+function toBlockRef(ctx: Context, picked: {
+  blockId: string
+  column: number
+  row: number
+  zSlice: number
+}): BlockRef {
+  const doc = ctx.doc.value
+  const rf = doc?.frame(ctx.currentFrameIndex.value ?? 0)
+  const h = rf?.grid?.height ?? 0
+  const worldY = h > 0 ? structureRowToWorldY(picked.row, h) : picked.row
+  return {
+    pos: { x: picked.column, y: worldY, z: picked.zSlice },
+    block_state_id: picked.blockId,
+  }
+}
+
 /**
- * HOVER handler — pointermove/leave 拾取，更新 hover 状态（不 break，穿透 GIZMO/KEYMAP）。
+ * HOVER handler — pointermove/leave 拾取，经 OPERATOR_SET_HOVERED_BLOCK 写状态（不 break）。
  */
 export function createHoverHandler(
   regionId: string,
   getCtx: () => Context,
   embedSink?: EmbedHoverSink,
 ): RegionEventHandler {
-  function clearWorkbenchHover(ctx: Context): void {
-    if (ctx.workbench) ctx.workbench.hoveredBlock.value = null
-  }
-
-  function setWorkbenchBlock(ctx: Context, _pe: PointerEvent, picked: {
-    blockId: string
-    column: number
-    row: number
-    zSlice: number
-  }): void {
-    if (!ctx.workbench) return
-    const doc = ctx.doc.value
-    const rf = doc?.frame(ctx.currentFrameIndex.value ?? 0)
-    const h = rf?.grid?.height ?? 0
-    const worldY = h > 0 ? structureRowToWorldY(picked.row, h) : picked.row
-    const ref: BlockRef = {
-      pos: { x: picked.column, y: worldY, z: picked.zSlice },
-      block_state_id: picked.blockId,
-    }
-    ctx.workbench.hoveredBlock.value = ref
+  function setWorkbenchHover(ctx: Context, block: BlockRef | null): void {
+    void ctx.operators.exec('OPERATOR_SET_HOVERED_BLOCK', { block })
   }
 
   return {
@@ -62,7 +60,7 @@ export function createHoverHandler(
           embedSink.setViewportBlock(null)
           embedSink.setAnnotation(null)
         } else {
-          clearWorkbenchHover(ctx)
+          setWorkbenchHover(ctx, null)
         }
         return { break: false }
       }
@@ -95,7 +93,7 @@ export function createHoverHandler(
           })
           embedSink.setAnnotation(null)
         } else {
-          setWorkbenchBlock(ctx, event, picked)
+          setWorkbenchHover(ctx, toBlockRef(ctx, picked))
         }
       } else if (picked?.kind === 'annotation') {
         if (embedSink) {
@@ -106,14 +104,14 @@ export function createHoverHandler(
             clientY: event.clientY,
           })
         } else {
-          clearWorkbenchHover(ctx)
+          setWorkbenchHover(ctx, null)
         }
       } else {
         if (embedSink) {
           embedSink.setViewportBlock(null)
           embedSink.setAnnotation(null)
         } else {
-          clearWorkbenchHover(ctx)
+          setWorkbenchHover(ctx, null)
         }
       }
 

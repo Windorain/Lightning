@@ -1,8 +1,10 @@
 // web/src/context/selection.ts
 
 import type { InjectionKey, Ref } from 'vue'
-import { inject, provide, ref, shallowRef } from 'vue'
-import { logCenter } from '@/logging/LogCenter'
+import { ref, shallowRef } from 'vue'
+import type { createLogCenter } from '@/logging/LogCenter'
+
+type SelectionLog = Pick<ReturnType<typeof createLogCenter>, 'debug'>
 import type { ScenePickEntity } from '@/render/interaction/scenePick'
 import { posKey, isSamePosition } from '@/pure/vec'
 import type { AnnotationType } from '@/render/data/annotationTypes'
@@ -72,11 +74,13 @@ export interface SelectionContext {
   readonly cycleState: { lastPoint: { x: number; y: number } | null; candidates: SelectedEntity[]; index: number }
   setCycleState(state: { lastPoint: { x: number; y: number }; candidates: SelectedEntity[]; index: number }): void
   resetCycle(): void
+  bindLog(log: SelectionLog): void
 }
 
 export const selectionContextKey: InjectionKey<SelectionContext> = Symbol('selectionContext')
 
 export function createSelectionContext(): SelectionContext {
+  let log: SelectionLog | null = null
   const items = ref<Set<SelectedEntity>>(new Set())
   const mode = ref<SelectionMode>('single')
   const active = ref<ActiveItem | null>(null)
@@ -118,7 +122,7 @@ export function createSelectionContext(): SelectionContext {
     index.value = new Map()
     annotationIndex.value = new Set([entity.id])
     mode.value = 'annotation'
-    logCenter.debug('Selection', 'annotation selected', { id: entity.id, type: entity.type })
+    log?.debug('Selection', 'annotation selected', { id: entity.id, type: entity.type })
   }
 
   function select(voxel: BlockRef): void {
@@ -128,7 +132,7 @@ export function createSelectionContext(): SelectionContext {
     index.value = new Map([[posKey(voxel.pos), voxel]])
     annotationIndex.value = new Set()
     mode.value = 'single'
-    logCenter.debug('Selection', 'block selected', { id: voxel.block_state_id, x: voxel.pos.x, y: voxel.pos.y, z: voxel.pos.z })
+    log?.debug('Selection', 'block selected', { id: voxel.block_state_id, x: voxel.pos.x, y: voxel.pos.y, z: voxel.pos.z })
   }
 
   function selectBox(min: { x: number; y: number; z: number }, max: { x: number; y: number; z: number }, blocks: BlockRef[]): void {
@@ -150,7 +154,7 @@ export function createSelectionContext(): SelectionContext {
     annotationIndex.value = new Set()
     mode.value = 'box'
     if (set.size > 0) {
-      logCenter.debug('Selection', 'box select', { count: set.size, min: { x: min.x, y: min.y, z: min.z }, max: { x: max.x, y: max.y, z: max.z } })
+      log?.debug('Selection', 'box select', { count: set.size, min: { x: min.x, y: min.y, z: min.z }, max: { x: max.x, y: max.y, z: max.z } })
     }
   }
 
@@ -236,6 +240,7 @@ export function createSelectionContext(): SelectionContext {
     get cycleState() { return cycleState.value },
     setCycleState,
     resetCycle,
+    bindLog(l: SelectionLog) { log = l },
   }
 }
 
@@ -317,14 +322,3 @@ export function applyPickSelectionWithCycle(
   return entity
 }
 
-export function provideSelectionContext(): SelectionContext {
-  const ctx = createSelectionContext()
-  provide(selectionContextKey, ctx)
-  return ctx
-}
-
-export function useSelectionContext(): SelectionContext {
-  const ctx = inject(selectionContextKey)
-  if (!ctx) throw new Error('useSelectionContext() 须在 WorkbenchRoot 子树内调用')
-  return ctx
-}

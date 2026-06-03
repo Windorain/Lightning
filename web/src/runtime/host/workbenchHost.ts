@@ -22,7 +22,7 @@ import { SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SD
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/operators/builtin/exportOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/operators/builtin/annotationOperators'
 import {
-  SetFrameIndexOperator, ToggleFramePlaybackOperator, ThemeToggleOperator, SetLanguageOperator, UndoOperator, RedoOperator,
+  SetFrameIndexOperator, ToggleFramePlaybackOperator, SetHoveredBlockOperator, ThemeToggleOperator, SetLanguageOperator, UndoOperator, RedoOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator, SetWikiConfigOperator, ApplySettingsOperator, SetLayerYOperator,
 } from '@/operators/builtin/miscOperators'
 import { ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/operators/builtin/materialOperators'
@@ -54,7 +54,7 @@ const ALL_OPERATORS: OperatorType[] = [
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator,
   TooltipEditOperator,
   NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator,
-  SetFrameIndexOperator, ToggleFramePlaybackOperator, SetLayerYOperator, ApplySettingsOperator, SetWikiConfigOperator,
+  SetFrameIndexOperator, ToggleFramePlaybackOperator, SetHoveredBlockOperator, SetLayerYOperator, ApplySettingsOperator, SetWikiConfigOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator,
   SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator,
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
@@ -114,7 +114,7 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   const { selection, editHistory, toolRegistry, settings } = deps
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
-  const wm = new WM()
+  const wm = new WM(logCenter)
 
   const main = new Main({
     operators: registry,
@@ -217,6 +217,8 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   toolRegistry.activate('select')
 
   installUnifiedLogApi(ctx)
+  selection.bindLog(ctx.log)
+  editHistory.bindLog(ctx.log)
 
   return { host, ctx, screen: defaultScreen, state }
 }

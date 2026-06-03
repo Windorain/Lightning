@@ -1,5 +1,4 @@
 import type { OperatorType } from '@/operators/operatorType'
-import { replaceDoc } from '@/context/replaceDoc'
 
 export const TooltipEditOperator: OperatorType = {
   id: 'OPERATOR_TOOLTIP_EDIT',
@@ -32,6 +31,6 @@ export const TooltipEditOperator: OperatorType = {
     if (!cellTooltipGrid[pos.z][pos.y]) cellTooltipGrid[pos.z][pos.y] = []
     cellTooltipGrid[pos.z][pos.y][pos.x] = text ? idx : -1
 
-    replaceDoc(ctx, newDoc)
+    ctx.main.replaceDoc(newDoc)
   },
 }

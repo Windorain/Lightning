@@ -9,7 +9,6 @@ import { OP_RESULT } from './operatorType'
 import { pushDocUndo } from './pushDocUndo'
 
 import { ModalOperatorWrapper } from './modalOperatorWrapper'
-import { logCenter } from '@/logging/LogCenter'
 import type { StateDigest } from '@/logging/LogCenter'
 
 function logOperatorResult(
@@ -18,12 +17,12 @@ function logOperatorResult(
 ) {
   const detail: Record<string, unknown> = { opId, result }
   if (snapBefore) {
-    const d = logCenter.diff(snapBefore, ctx)
+    const d = ctx.log.diff(snapBefore, ctx)
     if (d.blocksAdded.length || d.blocksRemoved.length || d.blocksMoved.length || d.selectionChanged) {
       detail.changes = d
     }
   }
-  logCenter.operator('Operator', `${label} → ${result}`, detail)
+  ctx.log.operator('Operator', `${label} → ${result}`, detail)
 }
 
 export class OperatorRegistry {
@@ -44,14 +43,14 @@ export class OperatorRegistry {
   /** 无交互执行操作符。如果 flagUndo 为 true，自动包裹 undo。 */
   async exec(ctx: Context, id: string, props?: OperatorProperties): Promise<void> {
     const op = this.operators.get(id)
-    if (!op) { logCenter.warn('Operator', `exec: op not found ${id}`, { opId: id }); return }
+    if (!op) { ctx.log.warn('Operator', `exec: op not found ${id}`, { opId: id }); return }
     if (op.poll && !op.poll(ctx)) {
-      logCenter.info('Operator', `exec: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
+      ctx.log.info('Operator', `exec: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
       return
     }
 
     const doc = ctx.doc.value
-    const snap = doc ? logCenter.snapshot(ctx) : undefined
+    const snap = doc ? ctx.log.snapshot(ctx) : undefined
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
       if (op.flagUndo && ctx.doc) {
@@ -75,15 +74,14 @@ export class OperatorRegistry {
     regionId?: string,
   ): OpResult {
     const op = this.operators.get(id)
-    if (!op) { logCenter.warn('Operator', `invoke: op not found ${id}`, { opId: id }); return OP_RESULT.CANCELLED }
+    if (!op) { ctx.log.warn('Operator', `invoke: op not found ${id}`, { opId: id }); return OP_RESULT.CANCELLED }
     if (op.poll && !op.poll(ctx)) {
-      logCenter.info('Operator', `invoke: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
+      ctx.log.info('Operator', `invoke: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
       return OP_RESULT.CANCELLED
     }
 
-    // embed ctx has no queries; use duck-check to avoid getter-throw
     const doc = ctx.doc.value
-    const snap = doc ? logCenter.snapshot(ctx) : undefined
+    const snap = doc ? ctx.log.snapshot(ctx) : undefined
 
     const resolvedProps: OperatorProperties = props ?? {}
     if (regionId) resolvedProps._regionId = regionId
@@ -96,12 +94,12 @@ export class OperatorRegistry {
       const result = op.invoke(ctx, resolvedProps, event)
 
       if (result === OP_RESULT.RUNNING_MODAL) {
-        const targetRegion = regionId ?? ctx.eventDispatcher.getCurrentRegionId() ?? 'r-viewport'
+        const targetRegion = regionId ?? ctx.wm.events.getCurrentRegionId() ?? 'r-viewport'
         const wrapper = new ModalOperatorWrapper(op, ctx, resolvedProps, targetRegion)
         if (snapshot !== null) {
           wrapper.setUndoSnapshot(snapshot)
         }
-        if (event) ctx.eventDispatcher.pushModal(targetRegion, wrapper, event)
+        if (event) ctx.wm.events.pushModal(targetRegion, wrapper, event)
         logOperatorResult(ctx, id, op.label, 'RUNNING_MODAL', snap)
       } else if (result === OP_RESULT.FINISHED) {
         if (snapshot !== null) {
@@ -115,7 +113,7 @@ export class OperatorRegistry {
 
     if (op.exec) {
       invokeExecFallback(ctx, op, resolvedProps).catch(err => {
-        logCenter.error('Operator', `invoke exec fallback failed: ${op.label}`, { opId: op.id, error: String(err) })
+        ctx.log.error('Operator', `invoke exec fallback failed: ${op.label}`, { opId: op.id, error: String(err) })
       })
       return OP_RESULT.FINISHED
     }

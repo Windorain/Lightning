@@ -11,7 +11,7 @@ export function bindChromeDom(
   ctx: Context,
   keymap: RegionEventHandler,
 ): () => void {
-  const ed = ctx.eventDispatcher
+  const ed = ctx.wm.events
   ed.registerRegion(CHROME_REGION)
   const unreg = ed.registerRegionHandler(CHROME_REGION, keymap)
 

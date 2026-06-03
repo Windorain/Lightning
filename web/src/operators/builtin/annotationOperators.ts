@@ -2,7 +2,6 @@
 import { generateId } from '@/pure/string'
 import type { OperatorType } from '@/operators/operatorType'
 import type { Annotation } from '@/render/data/annotationTypes'
-import { replaceDoc } from '@/context/replaceDoc'
 
 export const AnnotationCreateOperator: OperatorType = {
   id: 'ANNOTATION_CREATE',
@@ -26,7 +25,7 @@ export const AnnotationCreateOperator: OperatorType = {
 
     const newDoc = doc.clone()
     ;(newDoc.annotations as Annotation[]).push(annotation)
-    replaceDoc(ctx, newDoc)
+    ctx.main.replaceDoc(newDoc)
     ctx.selection.active.value = annotation.id
   },
 }
@@ -54,7 +53,7 @@ export const AnnotationUpdateOperator: OperatorType = {
     if (idx === -1) return
 
     annotations[idx] = { ...annotations[idx], ...patch, updated_at: Date.now() } as Annotation
-    replaceDoc(ctx, newDoc)
+    ctx.main.replaceDoc(newDoc)
   },
 }
 
@@ -80,7 +79,7 @@ export const AnnotationDeleteOperator: OperatorType = {
     if (idx === -1) return
 
     annotations.splice(idx, 1)
-    replaceDoc(ctx, newDoc)
+    ctx.main.replaceDoc(newDoc)
     ctx.selection.active.value = null
   },
 }

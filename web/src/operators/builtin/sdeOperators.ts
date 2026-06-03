@@ -5,7 +5,6 @@ import {
   sdeGetExportFile,
   sdePutWorkspaceDocument,
 } from '@/workbench/sdeApi'
-import { replaceDoc } from '@/context/replaceDoc'
 
 export const SDEConnectOperator: OperatorType = {
   id: 'OPERATOR_SDE_CONNECT',
@@ -51,12 +50,12 @@ export const SDELoadExportOperator: OperatorType = {
     ctx.connection.selectedExportName = name
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      replaceDoc(ctx, result.document)
+      ctx.main.replaceDoc( result.document)
       ctx.currentFrameIndex.value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      replaceDoc(ctx, null)
+      ctx.main.replaceDoc( null)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: name, error: result.error })
     }
     ctx.workspaceMode.value = 'sde'
@@ -74,11 +73,11 @@ export const SDELoadWorkspaceOperator: OperatorType = {
     ctx.editHistory.clear()
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      replaceDoc(ctx, result.document)
+      ctx.main.replaceDoc( result.document)
       ctx.currentFrameIndex.value = 0
       ctx.log.info('场景加载', 'SDE workspace', { frames: result.document.frameCount })
     } else {
-      replaceDoc(ctx, null)
+      ctx.main.replaceDoc( null)
       ctx.log.error('场景加载', result.error ?? '未知错误')
     }
     await ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'sde' })

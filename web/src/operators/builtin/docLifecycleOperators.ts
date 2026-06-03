@@ -4,7 +4,6 @@ import { getDevSceneDocument } from '@/dev/devScenes'
 import { downloadJson } from '@/util/browser'
 import { suggestedJsonBaseName } from '@/workbench/utils/fileNaming'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
-import { replaceDoc } from '@/context/replaceDoc'
 
 /**
  * Open a native file picker for .json files.
@@ -56,7 +55,7 @@ export const NewSceneOperator: OperatorType = {
     ctx.selection.clear()
     ctx.editHistory.clear()
     const doc = RuntimeDocument.empty()
-    replaceDoc(ctx, doc)
+    ctx.main.replaceDoc( doc)
   },
 }
 
@@ -91,12 +90,12 @@ export const OpenSceneOperator: OperatorType = {
     }
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      replaceDoc(ctx, result.document)
+      ctx.main.replaceDoc( result.document)
       ctx.currentFrameIndex.value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      replaceDoc(ctx, null)
+      ctx.main.replaceDoc( null)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
     }
     ctx.localFileName.value = file.name
@@ -138,12 +137,12 @@ export const LoadBuiltinSceneOperator: OperatorType = {
     ctx.editHistory.clear()
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (result.document) {
-      replaceDoc(ctx, result.document)
+      ctx.main.replaceDoc( result.document)
       ctx.currentFrameIndex.value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      replaceDoc(ctx, null)
+      ctx.main.replaceDoc( null)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
     }
     await ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-bundle' })
@@ -159,6 +158,6 @@ export const LoadEmbedDocumentOperator: OperatorType = {
     const raw = props.document
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (!result.document) throw new Error(result.error ?? 'parse failed')
-    replaceDoc(ctx, result.document)
+    ctx.main.replaceDoc( result.document)
   },
 }

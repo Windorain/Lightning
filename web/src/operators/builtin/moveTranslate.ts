@@ -3,7 +3,6 @@ import * as THREE from 'three'
 import type { Context } from '@/runtime/context'
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
-import { bumpEpoch } from '@/context/replaceDoc'
 import { pickVoxel } from '@/context/queries'
 import { roundVector } from '@/pure/vec'
 
@@ -327,7 +326,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                bumpEpoch(ctx)
+                ctx.main.bumpEpoch()
               },
               undo: () => {
                 for (const m of moves) grid.moveBlock(m.to, m.from)
@@ -344,7 +343,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                bumpEpoch(ctx)
+                ctx.main.bumpEpoch()
               },
             })
           }

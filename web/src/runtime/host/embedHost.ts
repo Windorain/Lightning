@@ -1,5 +1,5 @@
 import { createOperatorRegistry, wrapOperatorRegistry } from '@/operators/operatorRegistry'
-import { SetFrameIndexOperator, ToggleFramePlaybackOperator } from '@/operators/builtin/miscOperators'
+import { SetFrameIndexOperator, SetLayerYOperator, ToggleFramePlaybackOperator } from '@/operators/builtin/miscOperators'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/operators/builtin/viewOperators'
 import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
 import { LoadEmbedDocumentOperator } from '@/operators/builtin/docLifecycleOperators'
@@ -32,7 +32,7 @@ export class EmbedHost extends HostBase {
 export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx: Context } {
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
-  const wm = new WM()
+  const wm = new WM(logCenter)
   viewports.register('r-embed')
 
   const main = new Main({
@@ -56,14 +56,17 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
       dragSensitivity: 0.05,
       snapEnabled: true,
     },
-    { initialCamera: settings.initialCamera },
+    {
+      initialCamera: settings.initialCamera,
+      initialLayerWorldY: settings.initialLayerWorldY,
+    },
   )
 
   let ctx!: Context
   ctx = new Context(main, wm, logCenter, viewports, null, embedState)
   main.registries.operatorsFacade = wrapOperatorRegistry(registry, () => ctx, true)
 
-  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, CopyCameraFromEmbedOperator, LoadEmbedDocumentOperator, SetFrameIndexOperator, ToggleFramePlaybackOperator]) {
+  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, CopyCameraFromEmbedOperator, LoadEmbedDocumentOperator, SetFrameIndexOperator, ToggleFramePlaybackOperator, SetLayerYOperator]) {
     if (!registry.find(op.id)) registry.register(op)
   }
 

@@ -152,7 +152,7 @@ onBeforeUnmount(() => {
 
 
 // VM 句柄：测试层通过 window.__vm__ 访问公开观测面
-;(window as any).__vm__ = ctx
+;(window as any).__vm__ = host
 ;(window as any).__vm_ready__ = true
 
 

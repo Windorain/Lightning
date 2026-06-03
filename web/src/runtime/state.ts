@@ -69,16 +69,21 @@ export function createWorkbenchState(deps: {
 export interface EmbedState {
   settings: ContextSettings
   wikiConfig: Record<string, unknown>
+  layerWorldY: Ref<number>
   initialCamera?: import('@/preview/previewConfig').InitialCamera
 }
 
 export function createEmbedState(
   settings: ContextSettings,
-  extras?: { initialCamera?: import('@/preview/previewConfig').InitialCamera },
+  extras?: {
+    initialCamera?: import('@/preview/previewConfig').InitialCamera
+    initialLayerWorldY?: number
+  },
 ): EmbedState {
   return {
     settings,
     wikiConfig: {},
+    layerWorldY: ref(extras?.initialLayerWorldY ?? -1),
     initialCamera: extras?.initialCamera,
   }
 }

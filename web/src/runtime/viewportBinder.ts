@@ -20,7 +20,7 @@ export function bindViewportDom(
   options?: { documentKeydown?: boolean },
 ): () => void {
   const unsubs: Array<() => void> = []
-  const ed = ctx.eventDispatcher
+  const ed = ctx.wm.events
 
   ed.registerRegion(regionId)
 

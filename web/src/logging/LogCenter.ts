@@ -411,7 +411,7 @@ export function installUnifiedLogApi(ctx: Context): void {
 
     // Sessions
     sessionSummaries: () => logCenter.sessionSummaries(),
-    isModalActive: () => (ctx as any).eventDispatcher?.modalDepth('r-viewport') > 0,
+    isModalActive: () => ctx.wm.events.modalDepth('r-viewport') > 0,
 
     // Snapshot / Diff
     snapshot: () => logCenter.snapshot(ctx),
@@ -451,7 +451,7 @@ export function installUnifiedLogApi(ctx: Context): void {
     // Settle
     settle: () => {
       return new Promise<void>((resolve) => {
-        const ed = (ctx as any).eventDispatcher
+        const ed = ctx.wm.events
         if (!ed || ed.modalDepth('r-viewport') === 0) { resolve(); return }
         const check = () => {
           if (ed.modalDepth('r-viewport') === 0) resolve()

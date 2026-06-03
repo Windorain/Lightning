@@ -45,12 +45,8 @@ export class Context {
   get doc(): Ref<RuntimeDocument | null> { return this.main.doc }
   get structEpoch(): Ref<number> { return this.main.structEpoch }
   get currentFrameIndex(): Ref<number> { return this.main.currentFrameIndex }
-  /** @deprecated use currentFrameIndex */
-  get currentWorldFrameIndex(): Ref<number> { return this.main.currentFrameIndex }
 
   get operators() { return this.main.registries.operatorsFacade }
-
-  get eventDispatcher() { return this.wm.events }
 
   // --- Workbench state ---
   get selection(): SelectionContext {
@@ -81,7 +77,7 @@ export class Context {
     return this.workbench?.wikiConfig ?? this.embed!.wikiConfig
   }
   get layerWorldY(): Ref<number> {
-    return this.workbench?.layerWorldY ?? embedUnavailable('layerWorldY')
+    return this.workbench?.layerWorldY ?? this.embed!.layerWorldY
   }
   get hoveredBlock(): Ref<import('@/context/selection').BlockRef | null> {
     return this.workbench?.hoveredBlock ?? embedUnavailable('hoveredBlock')
