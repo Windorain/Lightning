@@ -4,7 +4,7 @@
  * - `EmbedViewport`：Vue 组件；需外层 provide Context（由 EmbedRoot / createEmbedHost 创建）。
  * - 无整页 Vue 树时一般用 `mount()`；已有 Vue 应用可 `createApp(EmbedRoot, { bootstrap })`。
  * 不包含 SDE Workbench 整站（WorkbenchRoot 等）；后者见 main-workbench.ts 与 vite.workbench.config.ts，产物为 dist-workbench/（含 bundled/ 下的打包分块，勿与库 dist/ 或场景导出混淆）。
- * 灰机/wiki 嵌入只需 npm run build:lib，勿部署 dist-workbench。
+ * 灰机/wiki 嵌入：`npm run build:embed` → dist/StructureRender.js + StructureRender.css（与 Wiki 零件页同名）。
  */
 
 import '@/styles/precision-tokens.css'

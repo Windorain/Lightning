@@ -23,6 +23,9 @@ CLAUDE.md
 # Generated protobuf output
 web/src/render/proto/lightning/v1/
 
+# Wiki 构建导出副本（源文件在 web/dist/，npm run build:embed）
+scripts/huiji/wiki-export/
+
 # Test artifacts
 web/test-artifacts/
 web/test-results/

@@ -13,16 +13,18 @@ export default defineConfig({
     },
   },
   build: {
+    // 产物文件名与灰机 Wiki 零件页一致：零件:StructureRender.js / StructureRender.css
     lib: {
       entry: fileURLToPath(new URL('./src/main.ts', import.meta.url)),
       name: 'LightningEmbed',
-      fileName: 'lightning-embed',
+      fileName: 'StructureRender',
       formats: ['iife'],
     },
     rollupOptions: {
       external: ['vue'],
       output: {
-        entryFileNames: 'lightning-embed.js',
+        entryFileNames: 'StructureRender.js',
+        assetFileNames: 'StructureRender.[ext]',
         globals: {
           vue: 'cockpitVue',
         },

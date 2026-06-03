@@ -2,7 +2,10 @@
 // https://www.huijiwiki.com/wiki/%E5%B8%AE%E5%8A%A9:%E5%9C%A8%E7%81%B0%E6%9C%BA%E4%BD%BF%E7%94%A8Vue.js
 
 // 使用 ES5 语法
-// 加载 CSS 和 JS 文件
+// 库由 Wiki 零件页加载（与仓库构建产物同名）：
+//   零件:StructureRender.js  ← web/dist/StructureRender.js（npm run build:embed）
+//   零件:StructureRender.css ← web/dist/StructureRender.css（已含 scripts/huiji/StructureRender.css）
+// 全局 API 仍为 window.LightningEmbed
 //
 // 词条中可挂载多处，使用 class（推荐）：
 // <div class="web-structure-renderer" data-wsr-structure="MEControllers5x5"

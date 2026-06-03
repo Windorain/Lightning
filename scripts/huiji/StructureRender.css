@@ -1,6 +1,7 @@
 /**
- * 灰机 Wiki「零件:StructureRender.css」参考副本。
- * 与 Gadget-LightningRender.js 一并维护；上线时粘贴到 Wiki 零件页。
+ * 灰机 Wiki 外壳规则（.web-structure-renderer / .wsr-fit-host）。
+ * 由 web/src/embed/mount.ts 在 build:embed 时 import，并入 dist/StructureRender.css 末尾。
+ * Wiki 零件页只需粘贴构建产物 StructureRender.css，无需再手工合并本文件。
  */
 
 .web-structure-renderer {

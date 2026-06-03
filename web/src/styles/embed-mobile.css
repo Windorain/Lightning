@@ -1,16 +1,4 @@
-/* Wiki 嵌入：外壳缩放 + 窄屏 layout profile（类名由 useEmbedLayoutProfile 挂在 .wm-root） */
-
-.wsr-fit-host {
-  max-width: 100%;
-  margin-left: auto;
-  margin-right: auto;
-  overflow: hidden;
-  box-sizing: border-box;
-}
-
-.web-structure-renderer {
-  box-sizing: border-box;
-}
+/* Wiki 嵌入：窄屏 layout profile（.web-structure-renderer / .wsr-fit-host 见 scripts/huiji/StructureRender.css） */
 
 /* narrow：隐藏次要顶栏按钮 */
 .wsr-layout-narrow .wsr-mobile-hide,

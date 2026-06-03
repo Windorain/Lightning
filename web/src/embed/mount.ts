@@ -13,6 +13,8 @@ import type { EmbedBootstrapOptions } from './embedContract'
 import '@/styles/precision-tokens.css'
 import '@/styles/embed-nei-tokens.css'
 import '@/styles/embed-mobile.css'
+/* Wiki 外壳规则：与 scripts/huiji/StructureRender.css 同源，构建时并入 dist/StructureRender.css 末尾 */
+import '../../../scripts/huiji/StructureRender.css'
 
 export function mount(
   target: string | Element | null | undefined,
