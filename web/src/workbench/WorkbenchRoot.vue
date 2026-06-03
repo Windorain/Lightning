@@ -44,6 +44,9 @@ provideContext(ctx)
 provide(hostKey, host)
 const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = usePanelQueries(ctx, defaultScreen)
 
+const toolshelfCollapsed = computed(() => ctx.requireRegion(REGION.WORKBENCH_TOOLSHELF).collapsed)
+const propsCollapsed = computed(() => ctx.requireRegion(REGION.WORKBENCH_PROPS).collapsed)
+
 // Wiki embed settings
 const wikiConfig = ctx.requireRegion(REGION.WORKBENCH_PROPS).state.wiki as Record<string, any>
 function parseHex6(s: string): number {
@@ -149,7 +152,7 @@ ctx.log.injectStateRefs({
     <template #workspace-tabs>
       <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
     </template>
-    <template v-if="workspace !== 'wiki'" #tool-shelf>
+    <template v-if="workspace !== 'wiki' && !toolshelfCollapsed" #tool-shelf>
       <div class="wb-toolshelf">
         <template v-for="panel in activeToolshelfPanels" :key="panel.id">
           <component v-if="panel.component" :is="panel.component" />
@@ -163,7 +166,7 @@ ctx.log.injectStateRefs({
         <EmbedPreview :settings="embedSettings" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }" />
       </div>
     </template>
-    <template #properties>
+    <template v-if="!propsCollapsed" #properties>
       <PanelTabs :panels="activePropertiesPanels" :rna="ctx.getRna()" :ctx="ctx" />
     </template>
     <template #statusbar>

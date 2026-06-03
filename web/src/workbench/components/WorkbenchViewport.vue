@@ -89,9 +89,10 @@ function createToolContext(): ToolContext {
   }
 }
 
-let gizmoRafId: number | undefined
 let _alive = true
 let toolCtx: ToolContext | null = null
+let unframeHook: (() => void) | null = null
+const engineHostRef = ref<InstanceType<typeof RenderEngineHost> | null>(null)
 
 async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void> {
   toolCtx = createToolContext()
@@ -121,12 +122,12 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     payload.layers.overlay.add(vpSlot.gizmo.value.root)
   }
 
-  function rafTick() {
+  const onFrame = (): void => {
     if (!_alive) return
-    gizmoRafId = requestAnimationFrame(rafTick)
     try { updateOverlay() } catch (e) { console.error('[Workbench] updateOverlay', e) }
   }
-  gizmoRafId = requestAnimationFrame(rafTick)
+  unframeHook = engineHostRef.value?.addFrameHook(onFrame) ?? null
+  onFrame()
 }
 
 const toolHints = computed<ToolHint[]>(() => ctx.getToolRegistry().activeTool.value?.hints ?? [])
@@ -134,7 +135,7 @@ const toolHints = computed<ToolHint[]>(() => ctx.getToolRegistry().activeTool.va
 function updateOverlay(): void {
   const gizmo = ctx.getToolRegistry().activeGizmo.value
   if (gizmo && toolCtx) gizmo.render(toolCtx)
-  updateAnnotationOverlay(ctx, drw)
+  updateAnnotationOverlay(ctx, VIEWPORT_REGION_ID, drw)
 
   const moveGizmo = ctx.getViewport().gizmo.value
   if (moveGizmo && ctx.getToolRegistry().activeTool.value?.id === 'move') {
@@ -199,7 +200,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   host.detachViewport(VIEWPORT_REGION_ID)
   _alive = false
-  if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
+  unframeHook?.()
+  unframeHook = null
   drw.dispose()
 })
 </script>
@@ -215,6 +217,7 @@ onBeforeUnmount(() => {
     >
       <ToolHintsBar :hints="toolHints" />
     <RenderEngineHost
+      ref="engineHostRef"
       v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
       :definition="structureDefinition"
       :material-library="materialLibrary"

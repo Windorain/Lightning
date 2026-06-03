@@ -1,11 +1,11 @@
 /**
  * useEmbedTooltip — 嵌入视口的工具提示解析 composable。
  *
- * 消费 useEmbedHover() 产出的 hover 状态，结合场景数据计算出最终的
+ * 消费 region.state.hover 导出的 hover 联合类型，结合场景数据计算出最终的
  * tooltipText / neiTooltipMap / metaTooltipText / showMetaHint。
  */
 import { computed, type Ref, type ShallowRef } from 'vue'
-import type { EmbedHover } from '@/embed/embedHover'
+import type { EmbedHover } from '@/runtime/viewportHover'
 import type { StructureDefinition } from '@/render/schema/types'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { resolvePreviewTooltipText } from '@/pure/tooltipResolution'

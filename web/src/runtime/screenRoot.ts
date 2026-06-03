@@ -1,8 +1,8 @@
-import { reactive, ref } from 'vue'
+import { reactive, ref, shallowReactive } from 'vue'
 import type { Ref } from 'vue'
 import type { PanelDeclaration } from '@/workbench/ux/types/panel'
 import type { Rect } from '@/shared/types'
-import { RegionType, SpaceType, type EventHandler } from '@/workbench/ux/types/screen'
+import { RegionType, SpaceType } from '@/runtime/screenTypes'
 import type {
   EmbedSession,
   RegionState,
@@ -13,6 +13,7 @@ import { createViewerPreferences } from '@/preview/preferences'
 import { defaultWikiConfig } from '@/runtime/wikiConfigDefaults'
 import { readPersistedPanelWidths } from '@/workbench/layout/panelLayoutStorage'
 import { REGION, REGION_KEYMAP } from '@/runtime/regionIds'
+import { createViewportHoverState } from '@/runtime/viewportHover'
 import type { ConnectionState, UIWorkspace, WorkbenchWorkspaceMode } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
 
@@ -28,7 +29,6 @@ export interface RegionNode {
   panels: PanelDeclaration[]
   visible: boolean
   collapsed: boolean
-  handlers: EventHandler[]
   /** WM 输入域 id；默认与 layout region id 相同时可省略 */
   wmInputId?: string
   /** 基础键位预设 id，见 `resolveRegionBaseKeymap` */
@@ -115,18 +115,17 @@ function createRegionNode(
   type: RegionType,
   init: Partial<Pick<RegionNode, 'wmInputId' | 'keymapId' | 'panels'>> & { state?: RegionState },
 ): RegionNode {
-  return {
+  return shallowReactive({
     id,
     type,
     bounds: { x: 0, y: 0, width: 0, height: 0 },
     panels: init.panels ?? [],
     visible: true,
     collapsed: false,
-    handlers: [],
     wmInputId: init.wmInputId,
     keymapId: init.keymapId,
     state: init.state ?? {},
-  }
+  }) as RegionNode
 }
 
 export function createWorkbenchSession(): WorkbenchSession {
@@ -184,7 +183,7 @@ export function createWorkbenchScreenRoot(
         createRegionNode(REGION.WORKBENCH_VIEWPORT, RegionType.MAIN, {
           wmInputId: REGION.WORKBENCH_VIEWPORT,
           keymapId: REGION_KEYMAP.WORKBENCH_VIEWPORT,
-          state: { viewer: createViewerPreferences() },
+          state: { viewer: createViewerPreferences('lightning.prefs.viewport') },
         }),
       ],
     },
@@ -205,7 +204,7 @@ export function createWorkbenchScreenRoot(
   const wikiPreview = createRegionNode(REGION.WIKI_PREVIEW, RegionType.MAIN, {
     wmInputId: REGION.WIKI_PREVIEW,
     keymapId: REGION_KEYMAP.EMBED_VIEWPORT,
-    state: { viewer: createViewerPreferences() },
+    state: { viewer: createViewerPreferences('lightning.prefs.wiki-preview'), hover: createViewportHoverState() },
   })
   wikiPreview.visible = false
 
@@ -235,7 +234,7 @@ export function createEmbedScreenRoot(
         createRegionNode(REGION.EMBED, RegionType.MAIN, {
           wmInputId: REGION.EMBED,
           keymapId: REGION_KEYMAP.EMBED_VIEWPORT,
-          state: { tool, viewer: createViewerPreferences() },
+          state: { tool, viewer: createViewerPreferences('lightning.prefs.embed'), hover: createViewportHoverState() },
         }),
       ],
     },

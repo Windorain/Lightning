@@ -52,6 +52,14 @@ export class RenderEngine {
   private lastContentGroup: THREE.Group | null = null
   private skipNextContentGroupAutoFit = false
   private opts: RenderEngineOptions | null = null
+  private readonly frameHooks = new Set<() => void>()
+
+  /** 注册每帧回调（在 render 前执行）；返回取消注册函数 */
+  addFrameHook(fn: () => void): () => void {
+    this.frameHooks.add(fn)
+    return () => { this.frameHooks.delete(fn) }
+  }
+
   mount(container: HTMLElement, opts: RenderEngineOptions, onReady: (payload: RenderEngineReadyPayload) => void): void {
     if (this.renderer) return
     this.opts = opts
@@ -127,6 +135,9 @@ export class RenderEngine {
     const tick = () => {
       this.animationId = requestAnimationFrame(tick)
       opts.materialLibrary.tick(clock.getDelta() * 1000)
+      for (const hook of this.frameHooks) {
+        try { hook() } catch (e) { console.error('[RenderEngine] frameHook', e) }
+      }
       if (opts.contentGroup !== this.lastContentGroup) {
         if (this.lastContentGroup) layers.structure.remove(this.lastContentGroup)
         this.lastContentGroup = opts.contentGroup
@@ -243,6 +254,7 @@ export class RenderEngine {
   }
 
   dispose(): void {
+    this.frameHooks.clear()
     cancelAnimationFrame(this.animationId)
     if (this.layoutResizeRaf !== null) {
       cancelAnimationFrame(this.layoutResizeRaf)

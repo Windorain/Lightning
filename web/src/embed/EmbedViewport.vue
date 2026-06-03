@@ -27,8 +27,8 @@ import type { EmbedSettings } from '@/preview/previewConfig'
 import type { InitialCamera } from '@/preview/previewConfig'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import { useEmbedHover } from '@/embed/embedHover'
-import { useEmbedSelectionMasks } from '@/embed/useEmbedSelectionMasks'
+import { embedHoverFromState } from '@/runtime/viewportHover'
+import { createEmbedOutlineSync } from '@/runtime/embedOutlineSync'
 import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
 import EmbedSettingsPanel from '@/embed/components/EmbedSettingsPanel.vue'
 
@@ -40,6 +40,8 @@ const ctx = useContext()
 const host = inject(hostKey)! as Host
 
 const viewportRegionId = resolveEmbedViewportRegionId(ctx)
+const viewportRegion = ctx.requireRegion(viewportRegionId)
+const hoverState = viewportRegion.state.hover!
 const prefs = resolveEmbedViewerPreferences(ctx)
 const vpSlot = ctx.viewports.get(viewportRegionId) ?? ctx.viewports.register(viewportRegionId)
 
@@ -76,17 +78,17 @@ const {
 
 const materialLibrary = drw.textureCache
 
-// ---- Hover / tooltip (unified) ----
-const { hover, setViewportBlock, setSidebarBlock, setAnnotation, setMeta } = useEmbedHover()
+// ---- Hover / tooltip（region.state.hover + 统一 HOVER handler）----
+const hover = embedHoverFromState(hoverState)
 const engineHostRef = ref<InstanceType<typeof RenderEngineHost> | null>(null)
 const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
 const selectedBlockId = ref<string | null>(null)
 
 // ---- Selection masks (extracted composable) ----
-const { rebuildSelectionMasks, flushHighlight } = useEmbedSelectionMasks({
+const { rebuildSelectionMasks, flushHighlight } = createEmbedOutlineSync({
   definitionRef: vpSlot.definition,
-  hoverRef: hover,
+  hover: hoverState,
   highlightOnHoverRef: computed(() => prefs.highlightOnHover),
   outlinePass,
 })
@@ -137,11 +139,11 @@ const activeTab = ref<BottomTab>(
   (showFrameCtl.value && hasWorldMultiFrame.value) ? 'frame' : 'layer',
 )
 
-function onMetaHintPointerEnter(e: PointerEvent): void { setMeta({ clientX: e.clientX, clientY: e.clientY }) }
-function onMetaHintPointerMove(e: PointerEvent): void { setMeta({ clientX: e.clientX, clientY: e.clientY }) }
-function onMetaHintPointerLeave(): void { setMeta(null) }
-function onMetaHintFocusIn(e: FocusEvent): void { const t = e.currentTarget as HTMLElement; const r = t.getBoundingClientRect(); setMeta({ clientX: r.left + r.width / 2, clientY: r.bottom }) }
-function onMetaHintFocusOut(): void { setMeta(null) }
+function onMetaHintPointerEnter(e: PointerEvent): void { hoverState.setMeta({ clientX: e.clientX, clientY: e.clientY }) }
+function onMetaHintPointerMove(e: PointerEvent): void { hoverState.setMeta({ clientX: e.clientX, clientY: e.clientY }) }
+function onMetaHintPointerLeave(): void { hoverState.setMeta(null) }
+function onMetaHintFocusIn(e: FocusEvent): void { const t = e.currentTarget as HTMLElement; const r = t.getBoundingClientRect(); hoverState.setMeta({ clientX: r.left + r.width / 2, clientY: r.bottom }) }
+function onMetaHintFocusOut(): void { hoverState.setMeta(null) }
 
 const previewTitle = computed(() => {
   const doc = ctx.getDoc().value
@@ -174,8 +176,7 @@ const statusSummary = computed(() => {
 
 // ---- Viewport events ----
 let _alive = true
-let _annoRafId: number | undefined
-const hoverSink = { setViewportBlock, setSidebarBlock, setAnnotation }
+let unframeHook: (() => void) | null = null
 
 async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void> {
   await host.attachViewport(viewportRegionId, {
@@ -185,21 +186,19 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     structureDefinition,
     mainMeshGroup,
     handlers: {
-      hover: createHoverHandler(viewportRegionId, () => ctx, hoverSink),
+      hover: createHoverHandler(viewportRegionId, () => ctx),
       keymap: createKeymapHandler(viewportRegionId, () => ctx),
     },
     documentKeydown: false,
   })
 
-  updateAnnotationOverlay(ctx, drw, prefs.showAnnotations)
-
-  function rafTick() {
+  const onFrame = (): void => {
     if (!_alive) return
-    _annoRafId = requestAnimationFrame(rafTick)
-    updateAnnotationOverlay(ctx, drw, prefs.showAnnotations)
+    updateAnnotationOverlay(ctx, viewportRegionId, drw, prefs.showAnnotations)
     flushHighlight()
   }
-  _annoRafId = requestAnimationFrame(rafTick)
+  unframeHook = engineHostRef.value?.addFrameHook(onFrame) ?? null
+  onFrame()
 }
 
 function setFrameIndex(i: number): void {
@@ -213,7 +212,7 @@ function togglePlayback(): void {
 function onSidebarTooltipHover(
   payload: { blockId: string; clientX: number; clientY: number; source: 'sidebar' } | null,
 ): void {
-  setSidebarBlock(payload)
+  hoverState.setSidebarBlock(payload)
 }
 
 // ---- Annotations list ----
@@ -227,7 +226,7 @@ const annotations = computed<Annotation[]>(() => {
 
 // ---- Annotation pick & overlay visibility ----
 watch(() => prefs.showAnnotations, (v) => {
-  const g = getAnnotationOverlayGroup(ctx.getViewport().id)
+  const g = getAnnotationOverlayGroup(viewportRegionId)
   if (!g) return
   if (v) {
     vpSlot.overlayGroup.value?.add(g)
@@ -241,7 +240,8 @@ onBeforeUnmount(() => {
   host.detachViewport(viewportRegionId)
   ctx.wm.events.unregisterRegion(viewportRegionId)
   _alive = false
-  if (_annoRafId) cancelAnimationFrame(_annoRafId)
+  unframeHook?.()
+  unframeHook = null
   drw.dispose()
 })
 </script>

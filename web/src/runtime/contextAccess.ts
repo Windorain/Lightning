@@ -9,7 +9,7 @@
  * | chrome | `wm.chrome` | `ctx.wm.chrome` — 瞬时菜单等 |
  * | tool | `REGION.WORKBENCH_TOOLSHELF` / `REGION.EMBED` → `state.tool` | `getToolSettings()` 或 `requireRegion` |
  * | session | `ScreenRoot.session` | `getSession()` |
- * | wiki | `REGION.WORKBENCH_PROPS` → `state.wiki` | `requireRegion` / `OPERATOR_SET_WIKI_CONFIG` |
+ * | wiki | `REGION.WORKBENCH_PROPS` → `state.wiki` | `requireRegion(REGION.WORKBENCH_PROPS)` / `OPERATOR_SET_WIKI_CONFIG` |
  * | viewer | 视口 Region → `state.viewer` | `requireRegion(REGION.*_VIEWPORT\|EMBED)` |
  * | keymap | Region `keymapId` | `resolveRegionBaseKeymap`（`keymapHandler`） |
  *
@@ -60,6 +60,7 @@ export interface RegionState {
   tool?: ToolSettings
   wiki?: Record<string, unknown>
   viewer?: import('@/preview/preferences').ViewerPreferences
+  hover?: import('@/runtime/viewportHover').ViewportHoverState
   [key: string]: unknown
 }
 
@@ -68,6 +69,3 @@ export interface EmbedSession {
   layerWorldY: Ref<number>
   initialCamera?: import('@/preview/previewConfig').InitialCamera
 }
-
-/** @deprecated 使用 ToolSettings */
-export type ContextSettings = ToolSettings

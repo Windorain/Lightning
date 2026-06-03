@@ -4,16 +4,10 @@ import type { Context } from '@/runtime/context'
 import type { BlockRef } from '@/context/selection'
 import { pickAtPointer } from '@/render/interaction/scenePick'
 import { structureRowToWorldY } from '@/pure/vec'
-
-export interface EmbedHoverSink {
-  setViewportBlock(payload: {
-    blockId: string
-    voxel: { column: number; row: number; zSlice: number }
-    clientX: number
-    clientY: number
-  } | null): void
-  setAnnotation(payload: { annotationId: string; clientX: number; clientY: number } | null): void
-}
+import type { ViewportHoverState } from '@/runtime/viewportHover'
+import { createHoverPickScheduler } from '@/runtime/hoverPickSchedule'
+import { blockRefKey, pickTargetKey } from '@/runtime/hoverPickKeys'
+import type { Annotation } from '@/render/data/annotationTypes'
 
 function toBlockRef(ctx: Context, picked: {
   blockId: string
@@ -31,90 +25,112 @@ function toBlockRef(ctx: Context, picked: {
   }
 }
 
+function readAnnotations(ctx: Context): Annotation[] {
+  const doc = ctx.getDoc().value
+  if (!doc) return []
+  return (doc.annotations ?? []) as Annotation[]
+}
+
 /**
- * HOVER handler — pointermove/leave 拾取，经 OPERATOR_SET_HOVERED_BLOCK 写状态（不 break）。
+ * HOVER handler — pointermove 合并为每帧一次拾取；目标未变时跳过写入/描边重建。
  */
 export function createHoverHandler(
   regionId: string,
   getCtx: () => Context,
-  embedSink?: EmbedHoverSink,
 ): RegionEventHandler {
-  function setWorkbenchHover(ctx: Context, block: BlockRef | null): void {
-    void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block })
+  let lastPickKey = ''
+  let lastWorkbenchHoverKey = ''
+  let lastClientX = 0
+  let lastClientY = 0
+
+  const applyPick = (): void => {
+    const ctx = getCtx()
+    const slot = ctx.viewports.get(regionId) ?? ctx.getViewport()
+    const camera = slot.camera.value
+    const contentGroup = slot.contentGroup.value
+    const domElement = slot.domElement.value
+    const definition = slot.definition.value
+    if (!camera || !contentGroup || !domElement || !definition) return
+
+    const embedHover = ctx.region(regionId)?.state.hover as ViewportHoverState | undefined
+
+    const picked = pickAtPointer({
+      clientX: lastClientX,
+      clientY: lastClientY,
+      domElement,
+      camera,
+      contentGroup,
+      overlayGroup: slot.overlayGroup.value ?? undefined,
+      def: definition,
+      layerPreview: slot.layerPreview.value ?? 'all',
+      annotations: readAnnotations(ctx),
+    })
+
+    const key = pickTargetKey(picked)
+    if (key === lastPickKey) return
+    lastPickKey = key
+
+    if (picked?.kind === 'block') {
+      if (embedHover) {
+        embedHover.setViewportBlock({
+          blockId: picked.blockId,
+          clientX: lastClientX,
+          clientY: lastClientY,
+          voxel: { column: picked.column, row: picked.row, zSlice: picked.zSlice },
+        })
+      } else {
+        const block = toBlockRef(ctx, picked)
+        const bk = blockRefKey(block)
+        if (bk !== lastWorkbenchHoverKey) {
+          lastWorkbenchHoverKey = bk
+          void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block })
+        }
+      }
+    } else if (picked?.kind === 'annotation') {
+      if (embedHover) {
+        embedHover.setAnnotation({
+          annotationId: picked.annotationId,
+          clientX: lastClientX,
+          clientY: lastClientY,
+        })
+      } else {
+        if (lastWorkbenchHoverKey !== '') {
+          lastWorkbenchHoverKey = ''
+          void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block: null })
+        }
+      }
+    } else {
+      if (embedHover) embedHover.clearViewport()
+      else if (lastWorkbenchHoverKey !== '') {
+        lastWorkbenchHoverKey = ''
+        void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block: null })
+      }
+    }
   }
+
+  const scheduler = createHoverPickScheduler(applyPick)
 
   return {
     type: HANDLER_TYPE.HOVER,
     handle(event: Event): { break: boolean } {
       if (!(event instanceof PointerEvent)) return { break: false }
-      const ctx = getCtx()
-      const slot = ctx.viewports.get(regionId) ?? ctx.getViewport()
-      const camera = slot.camera.value
-      const contentGroup = slot.contentGroup.value
-      const domElement = slot.domElement.value
-      const definition = slot.definition.value
-      if (!camera || !contentGroup || !domElement || !definition) return { break: false }
 
       if (event.type === 'pointerleave') {
-        if (embedSink) {
-          embedSink.setViewportBlock(null)
-          embedSink.setAnnotation(null)
-        } else {
-          setWorkbenchHover(ctx, null)
-        }
+        scheduler.cancel()
+        lastPickKey = ''
+        lastWorkbenchHoverKey = ''
+        const ctx = getCtx()
+        const embedHover = ctx.region(regionId)?.state.hover as ViewportHoverState | undefined
+        if (embedHover) embedHover.clearViewport()
+        else void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block: null })
         return { break: false }
       }
 
       if (event.type !== 'pointermove') return { break: false }
 
-      const doc = ctx.getDoc().value
-      const plain = doc?.serialize() as Record<string, unknown> | undefined
-      const annotations = (plain?.annotations ?? []) as import('@/render/data/annotationTypes').Annotation[]
-
-      const picked = pickAtPointer({
-        clientX: event.clientX,
-        clientY: event.clientY,
-        domElement,
-        camera,
-        contentGroup,
-        overlayGroup: slot.overlayGroup.value ?? undefined,
-        def: definition,
-        layerPreview: slot.layerPreview.value ?? 'all',
-        annotations,
-      })
-
-      if (picked?.kind === 'block') {
-        if (embedSink) {
-          embedSink.setViewportBlock({
-            blockId: picked.blockId,
-            clientX: event.clientX,
-            clientY: event.clientY,
-            voxel: { column: picked.column, row: picked.row, zSlice: picked.zSlice },
-          })
-          embedSink.setAnnotation(null)
-        } else {
-          setWorkbenchHover(ctx, toBlockRef(ctx, picked))
-        }
-      } else if (picked?.kind === 'annotation') {
-        if (embedSink) {
-          embedSink.setViewportBlock(null)
-          embedSink.setAnnotation({
-            annotationId: picked.annotationId,
-            clientX: event.clientX,
-            clientY: event.clientY,
-          })
-        } else {
-          setWorkbenchHover(ctx, null)
-        }
-      } else {
-        if (embedSink) {
-          embedSink.setViewportBlock(null)
-          embedSink.setAnnotation(null)
-        } else {
-          setWorkbenchHover(ctx, null)
-        }
-      }
-
+      lastClientX = event.clientX
+      lastClientY = event.clientY
+      scheduler.schedule()
       return { break: false }
     },
   }

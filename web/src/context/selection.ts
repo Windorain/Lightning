@@ -244,7 +244,7 @@ export function createSelectionContext(): SelectionContext {
 
 /**
  * Minimal interface for pick-then-select operations.
- * Accepts only what applyPickSelection needs — avoids coupling to full bContext.
+ * Accepts only what applyPickSelection needs — avoids coupling to full Context.
  */
 export interface PickHandler {
   pickVoxel(event: PointerEvent): BlockRef | null

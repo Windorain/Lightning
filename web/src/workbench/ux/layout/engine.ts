@@ -1,7 +1,7 @@
 import type { Context } from '@/runtime/context'
-import type { ScreenRoot } from '@/runtime/screenRoot'
-import type { ScrArea, Rect } from '../types/screen'
-import { RegionType } from '../types/screen'
+import type { AreaNode, ScreenRoot } from '@/runtime/screenRoot'
+import type { Rect } from '@/shared/types'
+import { RegionType } from '@/runtime/screenTypes'
 import { computeWidgetRects, type WidgetRect } from './widgetTree'
 import { rectContains, regionAt as _regionAt } from '@/pure/layout'
 export { _regionAt as regionAt, rectContains }
@@ -21,7 +21,7 @@ export function clearWidgetCache(): void {
 export function computeLayout(ctx: Context, screen: ScreenRoot): void {
   clearWidgetCache()
 
-  layoutAreas(screen.areas as ScrArea[], screen.bounds)
+  layoutAreas(screen.areas, screen.bounds)
 
   // Popup regions — stack from top
   for (const popup of screen.popupRegions) {
@@ -48,7 +48,7 @@ export function computeLayout(ctx: Context, screen: ScreenRoot): void {
   }
 }
 
-function layoutAreas(areas: ScrArea[], screenBounds: { width: number; height: number }): void {
+function layoutAreas(areas: AreaNode[], screenBounds: { width: number; height: number }): void {
   if (areas.length === 1) {
     layoutAreaInRect(areas[0], { x: 0, y: 0, width: screenBounds.width, height: screenBounds.height })
   } else {
@@ -60,11 +60,11 @@ function layoutAreas(areas: ScrArea[], screenBounds: { width: number; height: nu
   }
 }
 
-function layoutAreaInRect(area: ScrArea, rect: Rect): void {
+function layoutAreaInRect(area: AreaNode, rect: Rect): void {
   layoutArea(area, rect)
 }
 
-function layoutArea(area: ScrArea, areaBounds: Rect): void {
+function layoutArea(area: AreaNode, areaBounds: Rect): void {
   const header = area.regions.find(r => r.type === RegionType.HEADER)
   const footer = area.regions.find(r => r.type === RegionType.FOOTER)
   const toolshelf = area.regions.find(r => r.type === RegionType.TOOLSHELF)

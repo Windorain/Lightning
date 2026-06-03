@@ -38,6 +38,7 @@ const engine = new RenderEngine()
 defineExpose({
   screenshot() { engine.screenshot() },
   resetView() { engine.resetView() },
+  addFrameHook(fn: () => void) { return engine.addFrameHook(fn) },
 })
 
 onMounted(() => {

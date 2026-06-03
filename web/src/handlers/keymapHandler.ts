@@ -8,6 +8,8 @@
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
 import type { Context } from '@/runtime/context'
+import { REGION } from '@/runtime/regionIds'
+import { toggleRegionCollapsed } from '@/runtime/screenLayout'
 import { matchBinding, resolveRegionBaseKeymap, type InputBinding } from '@/keymap'
 import { OP_RESULT } from '@/operators/operatorType'
 
@@ -93,14 +95,12 @@ export function createKeymapHandler(
                 break
               }
               case 'select-all': ctx.getOperators().exec('OPERATOR_SELECT_ALL'); break
-              case 'toggle-toolshelf': {
-                // existing toggle-toolshelf logic if any
+              case 'toggle-toolshelf':
+                if (!ctx.isEmbed()) toggleRegionCollapsed(ctx, REGION.WORKBENCH_TOOLSHELF)
                 break
-              }
-              case 'toggle-properties': {
-                // existing toggle-properties logic if any
+              case 'toggle-properties':
+                if (!ctx.isEmbed()) toggleRegionCollapsed(ctx, REGION.WORKBENCH_PROPS)
                 break
-              }
             }
           }
           return { break: true }

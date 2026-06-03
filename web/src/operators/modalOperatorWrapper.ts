@@ -1,5 +1,5 @@
 /**
- * ModalOperatorWrapper — 适配器，将 OperatorType.modal() 桥接到 eventDispatcher 的 ModalOperation 接口。
+ * ModalOperatorWrapper — 适配器，将 OperatorType.modal() 桥接到 wm.events 的 ModalOperation 接口。
  *
  * 当操作符的 invoke() 返回 RUNNING_MODAL 时，
  * OperatorRegistry.invoke() 创建此 wrapper 并推入目标 region 的模态栈。

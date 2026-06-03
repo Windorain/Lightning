@@ -110,13 +110,7 @@ export class Context {
     const rid = this.isEmbed() ? REGION.EMBED : REGION.WORKBENCH_TOOLSHELF
     const tool = this.requireRegion(rid).state.tool
     if (!tool) throw new Error(`tool settings missing on region ${rid}`)
-    return tool
-  }
-
-  getWikiConfig(): Record<string, unknown> {
-    if (this.isEmbed()) return {}
-    const wiki = this.requireRegion(REGION.WORKBENCH_PROPS).state.wiki
-    return wiki ?? {}
+    return tool as ToolSettings
   }
 
   getWorkspaceMode(): Ref<WorkbenchWorkspaceMode> {
