@@ -51,7 +51,7 @@ const loadError = ref('')
 async function load() {
   loadError.value = ''
   try {
-    await ctx.operators.exec('OPERATOR_LOAD_EMBED_DOCUMENT', {
+    await ctx.getOperators().exec('OPERATOR_LOAD_EMBED_DOCUMENT', {
       document: props.bootstrap.data.document,
     })
   } catch (e) {
@@ -71,7 +71,7 @@ watch(
   <div v-if="loadError" class="embed-boot embed-boot--err">
     {{ loadError }}
   </div>
-  <EmbedViewport v-else-if="ctx.doc.value" :settings="settings" />
+  <EmbedViewport v-else-if="ctx.getDoc().value" :settings="settings" />
   <div v-else class="embed-boot embed-boot--loading">
     <div class="embed-boot-spinner"></div>
     <span>加载中…</span>

@@ -108,7 +108,7 @@ export function boundsOf(ctx: Context, id: string): Rect | null {
   if (cached) return { ...cached.bounds }
 
   // Fallback: search region panels
-  for (const area of ctx.screen?.areas ?? []) {
+  for (const area of ctx.getScreen()?.areas ?? []) {
     for (const region of area.regions) {
       for (const panel of region.panels) {
         if (panel.id === id) {
@@ -147,6 +147,7 @@ export function widgetAt(x: number, y: number): WidgetRect | null {
 }
 
 export function relayout(ctx: Context): void {
-  if (ctx.screen) computeLayout(ctx, ctx.screen)
+  const screen = ctx.getScreen()
+  if (screen) computeLayout(ctx, screen)
 }
 

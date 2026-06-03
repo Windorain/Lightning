@@ -270,20 +270,20 @@ export function createLogCenter() {
     snapshot(ctx: Context): StateDigest {
       const id = nextId
       const blocks = getFrameBlocks(ctx)
-      const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
+      const sel = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
       return {
         logId: id,
         blockCount: blocks.length,
         blocks: blocks.map(b => ({ pos: { ...b.pos }, id: b.block_state_id })),
         selectionSize: sel.length,
         selection: sel.map(s => ({ ...s.ref.pos })),
-        activeOperator: ctx.toolRegistry.activeTool.value?.id ?? null,
+        activeOperator: ctx.getToolRegistry().activeTool.value?.id ?? null,
       }
     },
 
     diff(snap: StateDigest, ctx: Context): StateDiff {
       const now = getFrameBlocks(ctx)
-      const nowSel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
+      const nowSel = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
       const diff: StateDiff = {
         sinceLogId: snap.logId,
         blocksAdded: [],
@@ -313,7 +313,7 @@ export function createLogCenter() {
 
     check: {
       selectionSize(ctx: Context, n: number): CheckResult {
-        const actual = ctx.selection.items.value.size
+        const actual = ctx.getSelection().items.value.size
         return { pass: actual === n, expected: n, actual }
       },
       blockCount(ctx: Context, n: number): CheckResult {
@@ -321,7 +321,7 @@ export function createLogCenter() {
         return { pass: actual === n, expected: n, actual }
       },
       operatorActive(ctx: Context, id: string): CheckResult {
-        const actual = ctx.toolRegistry.activeTool.value?.id ?? null
+        const actual = ctx.getToolRegistry().activeTool.value?.id ?? null
         return { pass: actual === id, expected: id, actual }
       },
       blockAt(ctx: Context, pos: { x: number; y: number; z: number }, id?: string): CheckResult {
@@ -435,18 +435,18 @@ export function installUnifiedLogApi(ctx: Context): void {
 
     // RNA
     getRNA: (path: string) => {
-      const desc = ctx.rna.resolve(path)
+      const desc = ctx.getRna().resolve(path)
       if (!desc) return null
       return { value: desc.get({}), type: desc.type, label: desc.label }
     },
-    listRNA: () => (ctx.rna as any).list?.() ?? [],
+    listRNA: () => (ctx.getRna() as any).list?.() ?? [],
 
     // Operators
-    listOperators: () => ctx.operators.all().map((o: any) => ({ id: o.id, label: o.label })),
+    listOperators: () => ctx.getOperators().all().map((o: any) => ({ id: o.id, label: o.label })),
 
     // Layout queries
-    boundsOfByOperator: (opId: string) => ctx.ui.boundsOfByOperator(opId),
-    boundsOfByRNAPath: (rnaPath: string) => ctx.ui.boundsOfByRNAPath(rnaPath),
+    boundsOfByOperator: (opId: string) => ctx.getUi().boundsOfByOperator(opId),
+    boundsOfByRNAPath: (rnaPath: string) => ctx.getUi().boundsOfByRNAPath(rnaPath),
 
     // Settle
     settle: () => {

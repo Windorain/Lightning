@@ -15,7 +15,7 @@ export function usePanelQueries(ctx: Context, screen: bScreen) {
   const propertiesArea = screen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
 
   function panelInWorkspace(p: { workspaces?: string[] }): boolean {
-    const ws = ctx.uiWorkspace.value
+    const ws = ctx.getUiWorkspace().value
     return !p.workspaces || p.workspaces.includes(ws)
   }
 

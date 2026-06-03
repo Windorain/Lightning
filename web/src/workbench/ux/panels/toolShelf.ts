@@ -11,7 +11,7 @@ export const toolShelfPanel: PanelDeclaration = {
   workspaces: ['preview'],
 
   poll(): boolean { return true },
-  owner(ctx: Context): unknown { return ctx.settings },
+  owner(ctx: Context): unknown { return ctx.getToolSettings() },
 
   layout(_ctx: Context) {
     return { kind: 'column', align: false, items: [] }

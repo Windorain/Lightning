@@ -11,12 +11,12 @@ export const transformPanel: PanelDeclaration = {
   workspaces: ['preview'],
 
   poll(ctx: Context): boolean {
-    return ctx.toolRegistry.activeTool.value?.id === 'move'
-      && ctx.selection.items.value.size > 0
+    return ctx.getToolRegistry().activeTool.value?.id === 'move'
+      && ctx.getSelection().items.value.size > 0
   },
 
   layout(ctx: Context): UILayout {
-    const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
+    const sel = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
     if (sel.length === 0) {
       return { kind: 'column', align: false, items: [{ kind: 'label', text: '未选择方块' }] }
     }

@@ -1,6 +1,4 @@
 import type { OperatorType } from '@/operators/operatorType'
-import { theme } from '@/workbench/composables/useNeiTheme'
-import { currentLang } from '@/config/i18n'
 import type { WorkbenchWorkspaceMode } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
 
@@ -23,7 +21,7 @@ export const SetFrameIndexOperator: OperatorType = {
   description: '在多帧场景中切换当前帧',
 
   poll(ctx) {
-    return ctx.doc.value !== null
+    return ctx.getDoc().value !== null
   },
 
   exec(ctx, _props) {
@@ -37,7 +35,7 @@ export const ToggleFramePlaybackOperator: OperatorType = {
   id: 'OPERATOR_TOGGLE_FRAME_PLAYBACK',
   label: '切换帧播放',
   poll(ctx) {
-    const doc = ctx.doc.value
+    const doc = ctx.getDoc().value
     return doc !== null && doc.frameCount > 1
   },
   exec(ctx) {
@@ -55,10 +53,9 @@ export const ThemeToggleOperator: OperatorType = {
   poll(_ctx) { return true },
 
   exec(ctx) {
-    if (ctx.isEmbed) return
-    const next = ctx.workbench!.theme.value === 'dark' ? 'light' : 'dark'
-    ctx.workbench!.theme.value = next
-    theme.value = next
+    if (ctx.isEmbed()) return
+    const shell = ctx.getShellSettings()
+    shell.theme.value = shell.theme.value === 'dark' ? 'light' : 'dark'
   },
 }
 
@@ -72,9 +69,7 @@ export const SetLanguageOperator: OperatorType = {
   exec(ctx, props) {
     const lang = props.lang as 'zh' | 'en'
     if (lang !== 'zh' && lang !== 'en') return
-    if (!ctx.isEmbed) ctx.workbench!.lang.value = lang
-    currentLang.value = lang
-    try { localStorage.setItem('wsr-wb-lang', lang) } catch { /* */ }
+    if (!ctx.isEmbed()) ctx.getShellSettings().lang.value = lang
   },
 }
 
@@ -86,11 +81,11 @@ export const UndoOperator: OperatorType = {
   description: '撤销上一步操作',
 
   poll(ctx) {
-    return ctx.editHistory.canUndo.value
+    return ctx.getEditHistory().canUndo.value
   },
 
   exec(ctx, _props) {
-    ctx.editHistory.undo()
+    ctx.getEditHistory().undo()
   },
 }
 
@@ -100,11 +95,11 @@ export const RedoOperator: OperatorType = {
   description: '重做已撤销的操作',
 
   poll(ctx) {
-    return ctx.editHistory.canRedo.value
+    return ctx.getEditHistory().canRedo.value
   },
 
   exec(ctx, _props) {
-    ctx.editHistory.redo()
+    ctx.getEditHistory().redo()
   },
 }
 
@@ -121,43 +116,43 @@ export const SetWorkspaceModeOperator: OperatorType = {
 
   exec(ctx, _props) {
     const mode = _props.mode as WorkbenchWorkspaceMode
-    if (ctx.workspaceMode.value === mode) return
+    if (ctx.getWorkspaceMode().value === mode) return
     ctx.main.replaceDoc(null)
     ctx.main.currentFrameIndex.value = 0
-    ctx.localFileName.value = null
-    ctx.workspaceMode.value = mode
+    ctx.getLocalFileName().value = null
+    ctx.getWorkspaceMode().value = mode
   },
 }
 
 export const SetLayerYOperator: OperatorType = {
   id: 'OPERATOR_SET_LAYER_Y',
   label: '设置图层 Y',
-  poll(ctx) { return ctx.doc.value !== null },
+  poll(ctx) { return ctx.getDoc().value !== null },
   exec(ctx, props) {
     const y = Math.floor(props.y as number)
     const v = Number.isFinite(y) ? y : -1
-    ctx.layerWorldY.value = v
+    ctx.getLayerWorldY().value = v
   },
 }
 
 export const SetHoveredBlockOperator: OperatorType = {
   id: 'OPERATOR_SET_HOVERED_BLOCK',
   label: '设置悬停方块',
-  poll(ctx) { return !ctx.isEmbed && ctx.doc.value !== null },
+  poll(ctx) { return !ctx.isEmbed() && ctx.getDoc().value !== null },
   exec(ctx, props) {
     const block = props.block as BlockRef | null | undefined
-    ctx.workbench!.hoveredBlock.value = block ?? null
+    ctx.getHoveredBlock().value = block ?? null
   },
 }
 
 export const SetWikiConfigOperator: OperatorType = {
   id: 'OPERATOR_SET_WIKI_CONFIG',
   label: '设置 Wiki 配置',
-  poll(ctx) { return !ctx.isEmbed },
+  poll(ctx) { return !ctx.isEmbed() },
   exec(ctx, props) {
     const path = props.path as string
     if (!path) return
-    setNested(ctx.wikiConfig, path, props.value)
+    setNested(ctx.getWikiConfig(), path, props.value)
   },
 }
 
@@ -166,11 +161,11 @@ export const ApplySettingsOperator: OperatorType = {
   label: '应用启动设置',
   poll() { return true },
   exec(ctx, props) {
-    if (props.workspaceMode) ctx.workspaceMode.value = props.workspaceMode as WorkbenchWorkspaceMode
-    if (props.uiWorkspace) ctx.uiWorkspace.value = props.uiWorkspace as import('@/runtime/types').UIWorkspace
+    if (props.workspaceMode) ctx.getWorkspaceMode().value = props.workspaceMode as WorkbenchWorkspaceMode
+    if (props.uiWorkspace) ctx.getUiWorkspace().value = props.uiWorkspace as import('@/runtime/types').UIWorkspace
     const conn = props.connection as Partial<import('@/runtime/types').ConnectionState> | undefined
-    if (conn && !ctx.isEmbed) {
-      Object.assign(ctx.connection, conn)
+    if (conn && !ctx.isEmbed()) {
+      Object.assign(ctx.getConnection(), conn)
     }
   },
 }

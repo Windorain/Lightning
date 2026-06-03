@@ -18,7 +18,7 @@ export function pushDocUndo(
   label: string,
 ): void {
   if (before === null && after === null) return
-  ctx.editHistory.push({
+  ctx.getEditHistory().push({
     id: generateId('op_'),
     label,
     timestamp: Date.now(),

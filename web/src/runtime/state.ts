@@ -1,32 +1,18 @@
 import { reactive, ref } from 'vue'
-import type { Ref } from 'vue'
 import type { BlockRef, SelectionContext } from '@/context/selection'
 import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { Rect, RNARegistry } from '@/shared/types'
 import type { bScreen } from '@/workbench/ux/types/screen'
-import type {
-  ConnectionState,
-  ContextSettings,
-  UIWorkspace,
-  WorkbenchWorkspaceMode,
-} from '@/runtime/types'
+import type { ConnectionState, UIWorkspace, WorkbenchWorkspaceMode } from '@/runtime/types'
+import type { EmbedSession, ToolSettings, WorkbenchSession } from '@/runtime/contextAccess'
 import { defaultWikiConfig } from '@/runtime/wikiConfigDefaults'
 
-export interface WorkbenchState {
+/** 非 setting 服务：选中、撤销、工具注册、布局 RNA 等 */
+export interface WorkbenchServices {
   selection: SelectionContext
   editHistory: UndoManager
   toolRegistry: ToolRegistry
-  settings: ContextSettings
-  workspaceMode: Ref<WorkbenchWorkspaceMode>
-  uiWorkspace: Ref<UIWorkspace>
-  localFileName: Ref<string | null>
-  connection: ConnectionState
-  wikiConfig: Record<string, unknown>
-  layerWorldY: Ref<number>
-  hoveredBlock: Ref<BlockRef | null>
-  theme: Ref<'dark' | 'light'>
-  lang: Ref<'zh' | 'en'>
   screen: bScreen | null
   rna: RNARegistry
   ui: {
@@ -35,55 +21,68 @@ export interface WorkbenchState {
   }
 }
 
+export interface WorkbenchState extends WorkbenchServices {
+  tool: ToolSettings
+  session: WorkbenchSession
+  wiki: Record<string, unknown>
+}
+
 export function createWorkbenchState(deps: {
+  tool: ToolSettings
   selection: SelectionContext
   editHistory: UndoManager
   toolRegistry: ToolRegistry
-  settings: ContextSettings
   screen: bScreen | null
   rna: RNARegistry
   ui: WorkbenchState['ui']
-  wikiConfig?: Record<string, unknown>
+  wiki?: Record<string, unknown>
 }): WorkbenchState {
   return {
-    ...deps,
-    workspaceMode: ref<WorkbenchWorkspaceMode>('local-file'),
-    uiWorkspace: ref<UIWorkspace>('preview'),
-    localFileName: ref<string | null>(null),
-    connection: reactive<ConnectionState>({
-      apiBase: '',
-      token: '',
-      connected: null,
-      exports: [],
-      exportsLoading: false,
-      selectedExportName: null,
-    }),
-    wikiConfig: deps.wikiConfig ?? defaultWikiConfig(),
-    layerWorldY: ref(-1),
-    hoveredBlock: ref<BlockRef | null>(null),
-    theme: ref(deps.settings.theme ?? 'dark'),
-    lang: ref(deps.settings.language ?? 'zh'),
+    selection: deps.selection,
+    editHistory: deps.editHistory,
+    toolRegistry: deps.toolRegistry,
+    screen: deps.screen,
+    rna: deps.rna,
+    ui: deps.ui,
+    tool: deps.tool,
+    wiki: deps.wiki ?? defaultWikiConfig(),
+    session: {
+      workspaceMode: ref<WorkbenchWorkspaceMode>('local-file'),
+      uiWorkspace: ref<UIWorkspace>('preview'),
+      localFileName: ref<string | null>(null),
+      connection: reactive<ConnectionState>({
+        apiBase: '',
+        token: '',
+        connected: null,
+        exports: [],
+        exportsLoading: false,
+        selectedExportName: null,
+      }),
+      layerWorldY: ref(-1),
+      hoveredBlock: ref<BlockRef | null>(null),
+    },
   }
 }
 
 export interface EmbedState {
-  settings: ContextSettings
-  wikiConfig: Record<string, unknown>
-  layerWorldY: Ref<number>
-  initialCamera?: import('@/preview/previewConfig').InitialCamera
+  tool: ToolSettings
+  session: EmbedSession
+  wiki: Record<string, unknown>
 }
 
 export function createEmbedState(
-  settings: ContextSettings,
+  tool: ToolSettings,
   extras?: {
     initialCamera?: import('@/preview/previewConfig').InitialCamera
     initialLayerWorldY?: number
   },
 ): EmbedState {
   return {
-    settings,
-    wikiConfig: {},
-    layerWorldY: ref(extras?.initialLayerWorldY ?? -1),
-    initialCamera: extras?.initialCamera,
+    tool,
+    wiki: {},
+    session: {
+      layerWorldY: ref(extras?.initialLayerWorldY ?? -1),
+      initialCamera: extras?.initialCamera,
+    },
   }
 }

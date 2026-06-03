@@ -12,7 +12,7 @@ const props = defineProps<{
 const ctx = useContext()
 
 function onClick() {
-  ctx.operators.exec(props.opId, props.operatorProps ?? {})
+  ctx.getOperators().exec(props.opId, props.operatorProps ?? {})
 }
 </script>
 

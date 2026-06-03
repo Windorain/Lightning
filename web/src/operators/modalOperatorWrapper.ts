@@ -43,7 +43,7 @@ export class ModalOperatorWrapper implements ModalOperation {
     if (result === OP_RESULT.FINISHED) {
       if (this.op.flagUndo && this.undoSnapshot !== null) {
         const snap = this.undoSnapshot
-        const snapshotAfter = this.ctx.doc.value?.clone() ?? null
+        const snapshotAfter = this.ctx.getDoc().value?.clone() ?? null
         pushDocUndo(this.ctx, snap, snapshotAfter, this.op.label)
         this.undoSnapshot = null
       }

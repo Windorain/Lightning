@@ -26,19 +26,19 @@ function syncToOthers(prop: string, value: unknown, source: Record<string, any>)
   timer = setTimeout(async () => {
     timer = undefined
     for (const a of annos.value as Record<string, any>[]) {
-      await props.ctx.operators.exec('ANNOTATION_UPDATE', { id: a.id, patch: { ...a } })
+      await props.ctx.getOperators().exec('ANNOTATION_UPDATE', { id: a.id, patch: { ...a } })
     }
   }, AUTO_SAVE_DELAY)
 }
 
 function load(): void {
-  const sel = [...props.ctx.selection.items.value].filter(e => e.kind === 'annotation')
+  const sel = [...props.ctx.getSelection().items.value].filter(e => e.kind === 'annotation')
   if (sel.length === 0) {
     annos.value = []
     proxyOwner.value = null
     return
   }
-  const doc = props.ctx.doc.value as Record<string, any> | null
+  const doc = props.ctx.getDoc().value as Record<string, any> | null
   const all = doc?.annotations as Annotation[] | undefined
   const found = sel.map(s => all?.find(a => a.id === s.id)).filter(Boolean) as Annotation[]
   annos.value = found
@@ -80,7 +80,7 @@ function load(): void {
 }
 
 watch(
-  () => [props.ctx.selection.items.value, props.ctx.doc.value] as const,
+  () => [props.ctx.getSelection().items.value, props.ctx.getDoc().value] as const,
   () => { load() },
   { immediate: true },
 )
@@ -209,14 +209,14 @@ const restLayout = computed<UILayout | null>(() => {
     <UIRenderer
       v-if="restLayout"
       :layout="restLayout"
-      :rna="ctx.rna"
+      :rna="ctx.getRna()"
       :owner="proxyOwner"
     />
 
     <hr class="ux-sep" />
     <button
       class="anno-editor-delete"
-      @click="annos.forEach(a => ctx.operators.invoke('ANNOTATION_DELETE', { id: a.id }))"
+      @click="annos.forEach(a => ctx.getOperators().invoke('ANNOTATION_DELETE', { id: a.id }))"
     >删除注解</button>
   </div>
   <div v-else class="tooltip-editor-empty">

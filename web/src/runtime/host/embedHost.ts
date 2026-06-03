@@ -10,6 +10,7 @@ import { WM } from '@/runtime/wm'
 import { Context, provideContext } from '@/runtime/context'
 import { createViewportManager } from '@/runtime/viewportManager'
 import { createEmbedState } from '@/runtime/state'
+import { createToolSettings } from '@/runtime/toolSettings'
 import { HostBase } from '@/runtime/host'
 import { logCenter } from '@/logging/LogCenter'
 
@@ -32,7 +33,7 @@ export class EmbedHost extends HostBase {
 export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx: Context } {
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
-  const wm = new WM(logCenter)
+  const wm = new WM(logCenter, { surface: 'embed' })
   viewports.register('r-embed')
 
   const main = new Main({
@@ -49,13 +50,7 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
   parsers.register(StructureDataParser)
 
   const embedState = createEmbedState(
-    {
-      replaceBrush: null,
-      fillBrush: null,
-      generateType: null,
-      dragSensitivity: 0.05,
-      snapEnabled: true,
-    },
+    createToolSettings(),
     {
       initialCamera: settings.initialCamera,
       initialLayerWorldY: settings.initialLayerWorldY,

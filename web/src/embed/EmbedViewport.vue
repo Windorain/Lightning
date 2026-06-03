@@ -43,11 +43,11 @@ const prefs = usePreferences()
 const EMBED_REGION = 'r-embed'
 const vpSlot = ctx.viewports.get(EMBED_REGION) ?? ctx.viewports.register(EMBED_REGION)
 
-const docRef = computed(() => ctx.doc.value)
-const layerWorldY = ctx.layerWorldY
+const docRef = computed(() => ctx.getDoc().value)
+const layerWorldY = ctx.getLayerWorldY()
 const drw = new DRW({
   docRef,
-  structEpochRef: ctx.structEpoch,
+  structEpochRef: ctx.getStructEpoch(),
   currentFrameIndex: ctx.main.currentFrameIndex,
   layerWorldY,
   framesPlaybackIsPlaying: ctx.main.framesPlaybackIsPlaying,
@@ -55,7 +55,7 @@ const drw = new DRW({
   mainMeshGroup: vpSlot.contentGroup,
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
-  setFrameIndex: (i) => ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
+  setFrameIndex: (i) => ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
 })
 const {
   loadStatus, meshBusy, blockIconCache, tooltipPalette,
@@ -96,7 +96,7 @@ const { tooltipText, neiTooltipMap, showMetaHint } = useEmbedTooltip({
   definitionRef: vpSlot.definition,
   tooltipPaletteRef: tooltipPalette,
   showHoverTooltipRef: computed(() => prefs.showHoverTooltip),
-  docRef: ctx.doc,
+  docRef: ctx.getDoc(),
 })
 
 function onSidebarSelectBlock(blockId: string): void {
@@ -143,7 +143,7 @@ function onMetaHintFocusIn(e: FocusEvent): void { const t = e.currentTarget as H
 function onMetaHintFocusOut(): void { setMeta(null) }
 
 const previewTitle = computed(() => {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return ''
   const fromDoc = sceneDisplayTitleFromRootDocument(doc.serialize())
   if (fromDoc) return fromDoc
@@ -202,11 +202,11 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
 }
 
 function setFrameIndex(i: number): void {
-  void ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i })
+  void ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i })
 }
 
 function togglePlayback(): void {
-  void ctx.operators.exec('OPERATOR_TOGGLE_FRAME_PLAYBACK')
+  void ctx.getOperators().exec('OPERATOR_TOGGLE_FRAME_PLAYBACK')
 }
 
 function onSidebarTooltipHover(
@@ -218,7 +218,7 @@ function onSidebarTooltipHover(
 // ---- Annotations list ----
 const annotations = computed<Annotation[]>(() => {
   if (!prefs.showAnnotations) return []
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return []
   const plain = doc.serialize() as Record<string, any>
   return (plain.annotations ?? []) as Annotation[]
@@ -226,7 +226,7 @@ const annotations = computed<Annotation[]>(() => {
 
 // ---- Annotation pick & overlay visibility ----
 watch(() => prefs.showAnnotations, (v) => {
-  const g = getAnnotationOverlayGroup(ctx.viewport.id)
+  const g = getAnnotationOverlayGroup(ctx.getViewport().id)
   if (!g) return
   if (v) {
     vpSlot.overlayGroup.value?.add(g)
@@ -347,7 +347,7 @@ onBeforeUnmount(() => {
           :mesh-busy="meshBusy"
           :layer-world-y="layerWorldY"
           :layer-preview-label="layerPreviewLabel"
-          @update:layer-y="(v: number) => { void ctx.operators.exec('OPERATOR_SET_LAYER_Y', { y: v }) }"
+          @update:layer-y="(v: number) => { void ctx.getOperators().exec('OPERATOR_SET_LAYER_Y', { y: v }) }"
         />
       </div>
     </div>

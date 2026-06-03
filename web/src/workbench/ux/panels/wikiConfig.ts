@@ -11,7 +11,7 @@ export const wikiConfigPanel: PanelDeclaration = {
   workspaces: ['wiki'],
 
   poll(): boolean { return true },
-  owner(ctx: Context): unknown { return ctx.wikiConfig },
+  owner(ctx: Context): unknown { return ctx.getWikiConfig() },
   layout(_ctx: Context): UILayout {
     return {
       kind: 'column', align: false, items: [

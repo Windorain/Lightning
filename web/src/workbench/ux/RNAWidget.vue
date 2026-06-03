@@ -64,7 +64,7 @@ function setValue(val: unknown): void {
   const pathKey = props.rnaPath?.split('.').pop() ?? props.descriptor.name
   if (ctx && props.rnaPath?.toLowerCase().startsWith('wikiconfig.')) {
     const path = WIKI_CONFIG_PATHS[pathKey] ?? pathKey
-    void ctx.operators.exec('OPERATOR_SET_WIKI_CONFIG', { path, value: val })
+    void ctx.getOperators().exec('OPERATOR_SET_WIKI_CONFIG', { path, value: val })
     return
   }
   props.descriptor.set(props.owner, val)

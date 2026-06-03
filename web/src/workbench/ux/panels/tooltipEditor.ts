@@ -6,7 +6,7 @@ import type { BlockRef } from '@/context/selection'
 import TooltipEditorPanel from './TooltipEditorPanel.vue'
 
 function selectedBlock(ctx: Context): BlockRef | null {
-  const items = [...ctx.selection.items.value].filter(e => e.kind === 'block')
+  const items = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
   if (items.length !== 1) return null
   return items[0]!.ref
 }

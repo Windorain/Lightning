@@ -16,7 +16,7 @@ function toggle() { open.value = !open.value }
 function close() { open.value = false }
 function invokeOp(op: UIOperator) {
   close()
-  ctx.operators.invoke(op.id, op.props ?? {})
+  ctx.getOperators().invoke(op.id, op.props ?? {})
 }
 </script>
 

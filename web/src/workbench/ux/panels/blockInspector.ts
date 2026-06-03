@@ -73,20 +73,20 @@ export const blockInspectorPanel: PanelDeclaration = {
   workspaces: ['preview'],
 
   poll(ctx: Context): boolean {
-    return ctx.selection.items.value.size >= 1
+    return ctx.getSelection().items.value.size >= 1
   },
 
   owner(ctx: Context): unknown {
-    const items = [...ctx.selection.items.value].filter(e => e.kind === 'block')
+    const items = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
     if (items.length !== 1) return null
     const item = items[0]!.ref
-    const g = ctx.doc.value?.frame(0)?.grid
+    const g = ctx.getDoc().value?.frame(0)?.grid
     ;(item as BlockRef)._gridSize = g ? { w: g.width, h: g.height, d: g.depth } : null
     return item
   },
 
   layout(ctx: Context): UILayout {
-    const items = [...ctx.selection.items.value].filter(e => e.kind === 'block').map(e => e.ref)
+    const items = [...ctx.getSelection().items.value].filter(e => e.kind === 'block').map(e => e.ref)
     if (items.length === 0) {
       return { kind: 'column', align: false, items: [{ kind: 'label', text: '(无选中)' }] }
     }

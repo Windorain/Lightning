@@ -40,7 +40,7 @@ import { WM } from '@/runtime/wm'
 import { Context } from '@/runtime/context'
 import { createViewportManager } from '@/runtime/viewportManager'
 import { createWorkbenchState, type WorkbenchState } from '@/runtime/state'
-import type { ContextSettings } from '@/runtime/types'
+import type { ToolSettings } from '@/runtime/contextAccess'
 import type { SelectionContext } from '@/context/selection'
 import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
@@ -69,7 +69,7 @@ export interface WorkbenchHostDeps {
   selection: SelectionContext
   editHistory: UndoManager
   toolRegistry: ToolRegistry
-  settings: ContextSettings
+  tool: ToolSettings
 }
 
 export interface WorkbenchHostResult {
@@ -101,7 +101,7 @@ export class WorkbenchHost extends HostBase {
   async start(): Promise<void> {
     const query = parseWorkbenchQuery()
     if (query.apiBase) {
-      await this.ctx.operators.exec('OPERATOR_APPLY_SETTINGS', {
+      await this.ctx.getOperators().exec('OPERATOR_APPLY_SETTINGS', {
         connection: { apiBase: query.apiBase },
         workspaceMode: 'sde',
       })
@@ -111,7 +111,7 @@ export class WorkbenchHost extends HostBase {
 }
 
 export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResult {
-  const { selection, editHistory, toolRegistry, settings } = deps
+  const { selection, editHistory, toolRegistry, tool } = deps
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
   const wm = new WM(logCenter)
@@ -178,7 +178,7 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
     selection,
     editHistory,
     toolRegistry,
-    settings,
+    tool,
     screen: defaultScreen,
     rna,
     ui: {

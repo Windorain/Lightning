@@ -13,15 +13,14 @@ function _getAnnoState(viewportId: string): { group: THREE.Group | null; hash: s
   return s
 }
 
+import type { Context } from '@/runtime/context'
+
 export function updateAnnotationOverlay(
-  ctx: {
-    doc: { value: { serialize(): Record<string, unknown>; frameCount: number } | null }
-    viewport: { id: string; overlayGroup: { value: THREE.Group | null } }
-  },
+  ctx: Context,
   drw: DrwAnnotationApi,
   showAnnotationsGate?: boolean,
 ): void {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return
   const plain = doc.serialize() as Record<string, any>
   let annos: Annotation[] = plain.annotations ?? []
@@ -38,7 +37,7 @@ export function updateAnnotationOverlay(
   const layerKey = mode === 'all' ? 'all' : `l${mode.worldY}`
   const hash = annos.length > 0 ? `${layerKey}_${annos.length}_${maxUpdated}` : 'empty'
 
-  const viewportId = ctx.viewport.id
+  const viewportId = ctx.getViewport().id
   const s = _getAnnoState(viewportId)
   if (hash === s.hash || s.pending) return
   s.hash = hash
@@ -48,7 +47,7 @@ export function updateAnnotationOverlay(
     const s2 = _getAnnoState(viewportId)
     s2.pending = false
     if (s2.group) {
-      ctx.viewport.overlayGroup.value?.remove(s2.group)
+      ctx.getViewport().overlayGroup.value?.remove(s2.group)
       s2.group.traverse((c) => {
         if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
           c.geometry?.dispose()
@@ -60,7 +59,7 @@ export function updateAnnotationOverlay(
     if (group) {
       s2.group = group
       if (showAnnotationsGate ?? true) {
-        ctx.viewport.overlayGroup.value?.add(s2.group)
+        ctx.getViewport().overlayGroup.value?.add(s2.group)
       }
     }
   }).catch(() => {

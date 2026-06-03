@@ -19,7 +19,7 @@ export function createToolGizmoHandler(
       const appCtx = getCtx()
       if (!appCtx) return { break: false }
 
-      const gizmo = appCtx.toolRegistry.activeGizmo.value
+      const gizmo = appCtx.getToolRegistry().activeGizmo.value
       if (!gizmo) return { break: false }
 
       const toolCtx = getToolCtx()

@@ -11,7 +11,7 @@ export const sceneInfoPanel: PanelDeclaration = {
   workspaces: ['preview', 'wiki'],
 
   poll(): boolean { return true },
-  owner(ctx: Context): unknown { return ctx.doc.value },
+  owner(ctx: Context): unknown { return ctx.getDoc().value },
   layout(_ctx: Context): UILayout {
     return {
       kind: 'column', align: false, items: [

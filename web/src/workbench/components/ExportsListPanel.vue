@@ -4,15 +4,15 @@ import { computed } from 'vue'
 import { useContext } from '@/runtime/context'
 const ctx = useContext()
 
-const isSde = computed(() => ctx.workspaceMode.value === 'sde')
-const apiBaseStr = computed(() => ctx.connection.apiBase)
-const exportFilesList = computed(() => ctx.connection.exports)
-const exportsLoading = computed(() => ctx.connection.exportsLoading)
-const selectedName = computed(() => ctx.connection.selectedExportName)
+const isSde = computed(() => ctx.getWorkspaceMode().value === 'sde')
+const apiBaseStr = computed(() => ctx.getConnection().apiBase)
+const exportFilesList = computed(() => ctx.getConnection().exports)
+const exportsLoading = computed(() => ctx.getConnection().exportsLoading)
+const selectedName = computed(() => ctx.getConnection().selectedExportName)
 
 async function onPick(name: string): Promise<void> {
   try {
-    await ctx.operators.exec('OPERATOR_SDE_LOAD', { name })
+    await ctx.getOperators().exec('OPERATOR_SDE_LOAD', { name })
     ctx.log.setStatus(`已加载 ${name}`)
   } catch (e) {
     ctx.log.setStatus(String(e instanceof Error ? e.message : e))

@@ -11,47 +11,12 @@ import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
 import { EmbedPreview } from '@/shared/viewport/embedPreview'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import type { EmbedSettings } from '@/preview/previewConfig'
-import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
 import { createSelectionContext } from '@/context/selection'
 import { provideEditHistory } from '@/context/editHistory'
 import { provideToolRegistry } from '@/workbench/tools/registry'
 import { provideContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
-import type { ContextSettings } from '@/runtime/types'
-import { currentLang } from '@/config/i18n'
-import { theme } from '@/workbench/composables/useNeiTheme'
-
-function createContextSettings(overrides?: {
-  theme?: 'dark' | 'light'
-  language?: 'zh' | 'en'
-  confirmDirty?: (msg: string) => boolean
-}): ContextSettings {
-  const replaceBrush = ref<string | null>(null)
-  const fillBrush = ref<string | null>(null)
-  const generateType = ref<string | null>(null)
-  const snapEnabled = ref<boolean>(false)
-
-  return {
-    get replaceBrush(): string | null { return replaceBrush.value },
-    set replaceBrush(v: string | null) { replaceBrush.value = v },
-    get fillBrush(): string | null { return fillBrush.value },
-    set fillBrush(v: string | null) { fillBrush.value = v },
-    get generateType(): string | null { return generateType.value },
-    set generateType(v: string | null) { generateType.value = v },
-    dragSensitivity: 0.05,
-    get snapEnabled(): boolean { return snapEnabled.value },
-    set snapEnabled(v: boolean) { snapEnabled.value = v },
-    confirmDirty: overrides?.confirmDirty ?? ((msg: string) => window.confirm(msg)),
-    get theme(): 'dark' | 'light' {
-      if (overrides?.theme) return overrides.theme
-      return theme.value
-    },
-    get language(): 'zh' | 'en' {
-      if (overrides?.language) return overrides.language
-      return currentLang.value
-    },
-  }
-}
+import { createToolSettings } from '@/runtime/toolSettings'
 
 // Operators — registered via shared VM assembly
 import { createWorkbenchHost } from '@/runtime/host/workbenchHost'
@@ -69,20 +34,17 @@ const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
 
 // 共享 VM 组装
-const settings = createContextSettings()
+const tool = createToolSettings()
 const { host, ctx, screen: defaultScreen } = createWorkbenchHost({
-  selection, editHistory, toolRegistry, settings,
+  selection, editHistory, toolRegistry, tool,
 })
 
 provideContext(ctx)
 provide(hostKey, host)
-useNeiTheme()
-
-
 const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = usePanelQueries(ctx, defaultScreen)
 
 // Wiki embed settings
-const wikiConfig = ctx.wikiConfig as Record<string, any>
+const wikiConfig = ctx.getWikiConfig() as Record<string, any>
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
   if (!m) return 0x5a5a5a
@@ -119,7 +81,7 @@ const ADD_MENU_ITEMS: ContextMenuItem[] = [
 
 function invokeContextMenuItem(item: ContextMenuItem) {
   if (item.opId) {
-    ctx.operators.invoke(item.opId, item.props ?? {})
+    ctx.getOperators().invoke(item.opId, item.props ?? {})
   }
 }
 
@@ -134,7 +96,7 @@ let unbindChrome: (() => void) | null = null
 
 const workspace = ref<'preview' | 'wiki' | 'export' | 'materials'>('preview')
 watch(workspace, (v) => {
-  void ctx.operators.exec('OPERATOR_APPLY_SETTINGS', { uiWorkspace: v })
+  void ctx.getOperators().exec('OPERATOR_APPLY_SETTINGS', { uiWorkspace: v })
 }, { immediate: true })
 const settingsOpen = ref(false)
 provide('workbenchSettingsOpen', settingsOpen)
@@ -157,7 +119,7 @@ onBeforeUnmount(() => {
 
 
 ctx.log.injectStateRefs({
-  scene: () => ctx.doc.value?.serialize() as any,
+  scene: () => ctx.getDoc().value?.serialize() as any,
   selection: () => [...selection.items.value].filter(e => e.kind === 'block').map(e => e.ref),
   toolRegistry: () => ({
     activeToolId: toolRegistry.activeTool.value?.id ?? 'none',
@@ -178,7 +140,7 @@ ctx.log.injectStateRefs({
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
           :layout="panel.layout"
-          :rna="ctx.rna"
+          :rna="ctx.getRna()"
           :owner="panel.owner"
         />
       </div>
@@ -190,18 +152,18 @@ ctx.log.injectStateRefs({
       <div class="wb-toolshelf">
         <template v-for="panel in activeToolshelfPanels" :key="panel.id">
           <component v-if="panel.component" :is="panel.component" />
-          <UIRenderer v-else :layout="panel.layout" :rna="ctx.rna" :owner="panel.owner" />
+          <UIRenderer v-else :layout="panel.layout" :rna="ctx.getRna()" :owner="panel.owner" />
         </template>
       </div>
     </template>
     <template #viewport>
-      <WorkbenchViewport v-if="workspace === 'preview' && ctx.doc.value" />
-      <div v-else-if="workspace === 'wiki' && ctx.doc.value" class="wb-wiki-embed">
+      <WorkbenchViewport v-if="workspace === 'preview' && ctx.getDoc().value" />
+      <div v-else-if="workspace === 'wiki' && ctx.getDoc().value" class="wb-wiki-embed">
         <EmbedPreview :settings="embedSettings" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }" />
       </div>
     </template>
     <template #properties>
-      <PanelTabs :panels="activePropertiesPanels" :rna="ctx.rna" :ctx="ctx" />
+      <PanelTabs :panels="activePropertiesPanels" :rna="ctx.getRna()" :ctx="ctx" />
     </template>
     <template #statusbar>
       <StatusBar />
@@ -216,7 +178,7 @@ ctx.log.injectStateRefs({
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
           :layout="panel.layout"
-          :rna="ctx.rna"
+          :rna="ctx.getRna()"
           :owner="panel.owner"
         />
       </div>
@@ -240,7 +202,7 @@ ctx.log.injectStateRefs({
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
           :layout="panel.layout"
-          :rna="ctx.rna"
+          :rna="ctx.getRna()"
           :owner="panel.owner"
         />
       </div>

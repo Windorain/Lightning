@@ -16,7 +16,7 @@ export const SelectOperator: OperatorType = {
   description: '点击选择方块/注解，重复点击轮换',
 
   poll(ctx) {
-    return ctx.doc.value !== null
+    return ctx.getDoc().value !== null
   },
 
   invoke(ctx, _props, event) {
@@ -25,14 +25,14 @@ export const SelectOperator: OperatorType = {
     const handler: PickHandlerV2 = {
       pickAll: (e) => pickAll(ctx, e),
       selection: {
-        selectEntity: (entity) => ctx.selection.selectEntity(entity),
-        add: (voxels) => ctx.selection.add(voxels),
-        remove: (voxels) => ctx.selection.remove(voxels),
-        clear: () => ctx.selection.clear(),
+        selectEntity: (entity) => ctx.getSelection().selectEntity(entity),
+        add: (voxels) => ctx.getSelection().add(voxels),
+        remove: (voxels) => ctx.getSelection().remove(voxels),
+        clear: () => ctx.getSelection().clear(),
       },
-      cycleState: ctx.selection.cycleState,
-      setCycleState: (s) => ctx.selection.setCycleState(s),
-      resetCycle: () => ctx.selection.resetCycle(),
+      cycleState: ctx.getSelection().cycleState,
+      setCycleState: (s) => ctx.getSelection().setCycleState(s),
+      resetCycle: () => ctx.getSelection().resetCycle(),
     }
 
     applyPickSelectionWithCycle(handler, event)
@@ -59,13 +59,13 @@ export const SelectAllOperator: OperatorType = {
   flagUndo: false,
 
   poll(ctx) {
-    return ctx.doc.value !== null && ctx.selection !== undefined
+    return ctx.getDoc().value !== null
   },
 
   exec(ctx, _props) {
     const blocks = getFrameBlocks(ctx)
     if (blocks.length === 0) return
-    ctx.selection.invert(blocks)
+    ctx.getSelection().invert(blocks)
   },
 }
 
@@ -75,13 +75,13 @@ export const SelectByTypeOperator: OperatorType = {
   description: '选中当前帧所有相同类型的方块',
 
   poll(ctx) {
-    return ctx.doc.value !== null
+    return ctx.getDoc().value !== null
   },
 
   exec(ctx, props) {
     const blockStateId = (props?.blockStateId as string) ?? ''
     if (!blockStateId) return
     const blocks = getFrameBlocks(ctx)
-    ctx.selection.selectByType(blockStateId, blocks)
+    ctx.getSelection().selectByType(blockStateId, blocks)
   },
 }

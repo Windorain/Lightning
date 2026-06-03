@@ -64,12 +64,12 @@ export function createEmbedKeymapHandler(
         if (!matchBinding(binding, event)) continue
 
         if (binding.type === 'MOUSE' && binding.opId) {
-          ctx.operators.invoke(binding.opId, undefined, event, regionId)
+          ctx.getOperators().invoke(binding.opId, undefined, event, regionId)
           return { break: true }
         }
 
         if (binding.type === 'WHEEL' && binding.opId) {
-          ctx.operators.invoke(binding.opId, undefined, event, regionId)
+          ctx.getOperators().invoke(binding.opId, undefined, event, regionId)
           return { break: true }
         }
       }

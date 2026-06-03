@@ -15,7 +15,7 @@ import { structureRowToWorldY } from '@/pure/vec'
 
 /** 屏幕坐标 → 方块引用 */
 export function pickVoxel(ctx: Context, event: PointerEvent): BlockRef | null {
-  const vp = ctx.viewport
+  const vp = ctx.getViewport()
   const camera = vp.camera.value
   const contentGroup = vp.contentGroup.value
   const domElement = vp.domElement.value
@@ -33,8 +33,8 @@ export function pickVoxel(ctx: Context, event: PointerEvent): BlockRef | null {
   })
   if (!result || result.kind !== 'block') return null
 
-  const doc = ctx.doc.value
-  const rf = doc?.frame(ctx.currentFrameIndex.value ?? 0)
+  const doc = ctx.getDoc().value
+  const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
   const h = rf?.grid?.height ?? 0
   const worldY = h > 0 ? structureRowToWorldY(result.row, h) : result.row
 
@@ -49,7 +49,7 @@ export function pickVoxel(ctx: Context, event: PointerEvent): BlockRef | null {
 
 /** 指针位置穿透的全部实体候选（去重、按深度排序），用于轮换拾取 */
 export function pickAll(ctx: Context, event: PointerEvent) {
-  const vp = ctx.viewport
+  const vp = ctx.getViewport()
   const camera = vp.camera.value
   const contentGroup = vp.contentGroup.value
   const domElement = vp.domElement.value
@@ -65,8 +65,8 @@ export function pickAll(ctx: Context, event: PointerEvent) {
     def: definition,
     layerPreview: vp.layerPreview.value ?? 'all',
   })
-  const doc = ctx.doc.value
-  const rf = doc?.frame(ctx.currentFrameIndex.value ?? 0)
+  const doc = ctx.getDoc().value
+  const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
   const h = rf?.grid?.height ?? 0
   for (const r of results) {
     if (r.kind === 'block' && r.row !== undefined) {
@@ -78,9 +78,9 @@ export function pickAll(ctx: Context, event: PointerEvent) {
 
 /** 获取当前帧的可变引用 */
 export function getCurrentFrame(ctx: Context): Frame | null {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return null
-  const idx = ctx.currentFrameIndex.value ?? 0
+  const idx = ctx.getCurrentFrameIndex().value ?? 0
   const rf = doc.frame(idx)
   if (!rf) return null
   return { index: rf.index, label: rf.label }
@@ -88,9 +88,9 @@ export function getCurrentFrame(ctx: Context): Frame | null {
 
 /** 获取当前帧的 BlockRef 快照列表 */
 export function getFrameBlocks(ctx: Context): BlockRef[] {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return []
-  const rf = doc.frame(ctx.currentFrameIndex.value ?? 0)
+  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
   if (!rf?.grid) return []
   return rf.grid.blocks().map(({ pos, block }) => ({
     pos: { x: pos.x, y: pos.y, z: pos.z },
@@ -100,7 +100,7 @@ export function getFrameBlocks(ctx: Context): BlockRef[] {
 
 /** 获取完整的场景文档（用于 annotations、labels 等顶层集合的访问） */
 export function getDocument(ctx: Context): Record<string, unknown> | null {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return null
   return doc.serialize() as Record<string, unknown>
 }
@@ -110,16 +110,16 @@ export function gridCenterWorld(
   ctx: Context,
   pos: { x: number; y: number; z: number },
 ): { x: number; y: number; z: number } | null {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return null
-  const rf = doc.frame(ctx.currentFrameIndex.value ?? 0)
+  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
   if (!rf?.grid) return null
   return rf.grid.centerWorld(pos)
 }
 
 /** 列出所有材质及其纹理 dataURL */
 export function listMaterials(ctx: Context): MaterialQueryItem[] {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return []
   const palette = doc.materialPalette as any[] | undefined
   if (!palette?.length) return []
@@ -158,9 +158,9 @@ export function listMaterials(ctx: Context): MaterialQueryItem[] {
 /** 当前帧按 materialId 统计方块数量 */
 export function getMaterialUsageCounts(ctx: Context): Record<string, number> {
   const counts: Record<string, number> = {}
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return counts
-  const rf = doc.frame(ctx.currentFrameIndex.value ?? 0)
+  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
   if (!rf?.grid) return counts
   rf.grid.forEach((_pos, block) => {
     if (block.paletteIndex !== undefined) {
@@ -174,9 +174,9 @@ export function getMaterialUsageCounts(ctx: Context): Record<string, number> {
 /** 当前帧方块类型统计 (block_state_id → 计数) */
 export function getBlockTypeStats(ctx: Context): Record<string, BlockTypeStat> {
   const stats: Record<string, BlockTypeStat> = {}
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return stats
-  const rf = doc.frame(ctx.currentFrameIndex.value ?? 0)
+  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
   if (!rf?.grid) return stats
   rf.grid.forEach((_pos, block) => {
     const id = `minecraft:${block.name}:${block.meta}`
@@ -195,9 +195,9 @@ export function getBlockPaletteEntry(
   ctx: Context,
   pos: { x: number; y: number; z: number },
 ) {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return null
-  const rf = doc.frame(ctx.currentFrameIndex.value ?? 0)
+  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
   if (!rf?.grid) return null
   const block = rf.grid.at(pos)
   if (!block || block.paletteIndex === undefined) return null
@@ -210,9 +210,9 @@ export function getBlockGeometry(
   ctx: Context,
   pos: { x: number; y: number; z: number },
 ) {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return null
-  const rf = doc.frame(ctx.currentFrameIndex.value ?? 0)
+  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
   if (!rf?.grid) return null
   const block = rf.grid.at(pos)
   if (!block || block.paletteIndex === undefined) return null

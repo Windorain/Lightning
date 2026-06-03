@@ -27,8 +27,8 @@ export const CopyCameraFromEmbedOperator: OperatorType = {
     )
     if (!result) return
 
-    void ctx.operators.exec('OPERATOR_SET_WIKI_CONFIG', { path: 'cameraYaw', value: result.yawDeg })
-    void ctx.operators.exec('OPERATOR_SET_WIKI_CONFIG', { path: 'cameraElevation', value: result.elevationDeg })
-    void ctx.operators.exec('OPERATOR_SET_WIKI_CONFIG', { path: 'cameraZoom', value: result.zoom })
+    void ctx.getOperators().exec('OPERATOR_SET_WIKI_CONFIG', { path: 'cameraYaw', value: result.yawDeg })
+    void ctx.getOperators().exec('OPERATOR_SET_WIKI_CONFIG', { path: 'cameraElevation', value: result.elevationDeg })
+    void ctx.getOperators().exec('OPERATOR_SET_WIKI_CONFIG', { path: 'cameraZoom', value: result.zoom })
   },
 }

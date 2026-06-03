@@ -1,43 +1,11 @@
-import { ref, watch } from 'vue'
+/**
+ * @deprecated 壳层主题已迁入 `wm.settings`（`createShellSettings`）。
+ * Workbench 在 `new WM()` 时自动应用 DOM / localStorage；请用 `ctx.getShellSettings().theme`。
+ */
+import type { Ref } from 'vue'
+import type { AppTheme } from '@/runtime/contextAccess'
 
-export type NeiTheme = 'light' | 'dark'
-
-const STORAGE_KEY = 'wb-theme'
-const ATTR = 'data-wb-theme'
-
-function readStored(): NeiTheme {
-  try {
-    const v = localStorage.getItem(STORAGE_KEY)
-    if (v === 'light' || v === 'dark') return v
-  } catch { /* noop */ }
-  return 'dark'
+/** 仅供尚未接入 Context 的遗留代码；新代码勿用。 */
+export function useNeiTheme(): { theme: Ref<AppTheme> | null } {
+  return { theme: null }
 }
-
-function applyTheme(t: NeiTheme): void {
-  if (typeof document !== 'undefined') {
-    document.documentElement.setAttribute(ATTR, t)
-  }
-}
-
-const theme = ref<NeiTheme>(readStored())
-
-// 初始应用 (only in browser)
-if (typeof document !== 'undefined') {
-  applyTheme(theme.value)
-}
-
-watch(theme, (t) => {
-  applyTheme(t)
-  try { localStorage.setItem(STORAGE_KEY, t) } catch { /* noop */ }
-})
-
-/** Module-level toggle for use outside Vue components (operators, node) */
-export function toggleTheme(): void {
-  theme.value = theme.value === 'dark' ? 'light' : 'dark'
-}
-
-export function useNeiTheme() {
-  return { theme, toggleTheme }
-}
-
-export { theme }

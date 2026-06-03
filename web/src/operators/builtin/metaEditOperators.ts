@@ -7,11 +7,11 @@ export const TooltipEditOperator: OperatorType = {
   flagUndo: true,
 
   poll(ctx) {
-    return ctx.doc.value !== null
+    return ctx.getDoc().value !== null
   },
 
   exec(ctx, props) {
-    const doc = ctx.doc.value
+    const doc = ctx.getDoc().value
     if (!doc) return
 
     const text = props.text as string

@@ -39,16 +39,7 @@ export interface ConnectionState {
   selectedExportName: string | null
 }
 
-export interface ContextSettings {
-  replaceBrush: string | null
-  fillBrush: string | null
-  generateType: string | null
-  dragSensitivity: number
-  snapEnabled: boolean
-  confirmDirty?: (message: string) => boolean
-  theme?: 'dark' | 'light'
-  language?: 'zh' | 'en'
-}
+export type { ToolSettings } from '@/runtime/contextAccess'
 
 export interface ViewportSlot {
   readonly id: string

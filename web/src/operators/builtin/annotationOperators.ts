@@ -9,11 +9,11 @@ export const AnnotationCreateOperator: OperatorType = {
   flagUndo: true,
 
   poll(ctx) {
-    return ctx.doc.value !== null
+    return ctx.getDoc().value !== null
   },
 
   exec(ctx, props) {
-    const doc = ctx.doc.value
+    const doc = ctx.getDoc().value
     if (!doc) return
 
     const annotation = props.annotation as Annotation
@@ -26,7 +26,7 @@ export const AnnotationCreateOperator: OperatorType = {
     const newDoc = doc.clone()
     ;(newDoc.annotations as Annotation[]).push(annotation)
     ctx.main.replaceDoc(newDoc)
-    ctx.selection.active.value = annotation.id
+    ctx.getSelection().active.value = annotation.id
   },
 }
 
@@ -36,11 +36,11 @@ export const AnnotationUpdateOperator: OperatorType = {
   flagUndo: true,
 
   poll(ctx) {
-    return ctx.doc.value !== null
+    return ctx.getDoc().value !== null
   },
 
   exec(ctx, props) {
-    const doc = ctx.doc.value
+    const doc = ctx.getDoc().value
     if (!doc) return
 
     const id = props.id as string
@@ -63,11 +63,11 @@ export const AnnotationDeleteOperator: OperatorType = {
   flagUndo: true,
 
   poll(ctx) {
-    return ctx.doc.value !== null
+    return ctx.getDoc().value !== null
   },
 
   exec(ctx, props) {
-    const doc = ctx.doc.value
+    const doc = ctx.getDoc().value
     if (!doc) return
 
     const id = props.id as string
@@ -80,6 +80,6 @@ export const AnnotationDeleteOperator: OperatorType = {
 
     annotations.splice(idx, 1)
     ctx.main.replaceDoc(newDoc)
-    ctx.selection.active.value = null
+    ctx.getSelection().active.value = null
   },
 }

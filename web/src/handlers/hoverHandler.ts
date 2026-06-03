@@ -21,8 +21,8 @@ function toBlockRef(ctx: Context, picked: {
   row: number
   zSlice: number
 }): BlockRef {
-  const doc = ctx.doc.value
-  const rf = doc?.frame(ctx.currentFrameIndex.value ?? 0)
+  const doc = ctx.getDoc().value
+  const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
   const h = rf?.grid?.height ?? 0
   const worldY = h > 0 ? structureRowToWorldY(picked.row, h) : picked.row
   return {
@@ -40,7 +40,7 @@ export function createHoverHandler(
   embedSink?: EmbedHoverSink,
 ): RegionEventHandler {
   function setWorkbenchHover(ctx: Context, block: BlockRef | null): void {
-    void ctx.operators.exec('OPERATOR_SET_HOVERED_BLOCK', { block })
+    void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block })
   }
 
   return {
@@ -48,7 +48,7 @@ export function createHoverHandler(
     handle(event: Event): { break: boolean } {
       if (!(event instanceof PointerEvent)) return { break: false }
       const ctx = getCtx()
-      const slot = ctx.viewports.get(regionId) ?? ctx.viewport
+      const slot = ctx.viewports.get(regionId) ?? ctx.getViewport()
       const camera = slot.camera.value
       const contentGroup = slot.contentGroup.value
       const domElement = slot.domElement.value
@@ -67,7 +67,7 @@ export function createHoverHandler(
 
       if (event.type !== 'pointermove') return { break: false }
 
-      const doc = ctx.doc.value
+      const doc = ctx.getDoc().value
       const plain = doc?.serialize() as Record<string, unknown> | undefined
       const annotations = (plain?.annotations ?? []) as import('@/render/data/annotationTypes').Annotation[]
 

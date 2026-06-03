@@ -49,14 +49,14 @@ export class OperatorRegistry {
       return
     }
 
-    const doc = ctx.doc.value
+    const doc = ctx.getDoc().value
     const snap = doc ? ctx.log.snapshot(ctx) : undefined
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
-      if (op.flagUndo && ctx.doc) {
-        const before = ctx.doc.value?.clone() ?? null
+      if (op.flagUndo && ctx.getDoc().value !== null) {
+        const before = ctx.getDoc().value?.clone() ?? null
         await op.exec(ctx, resolvedProps)
-        const after = ctx.doc.value?.clone() ?? null
+        const after = ctx.getDoc().value?.clone() ?? null
         pushDocUndo(ctx, before, after, op.label)
       } else {
         await op.exec(ctx, resolvedProps)
@@ -80,15 +80,15 @@ export class OperatorRegistry {
       return OP_RESULT.CANCELLED
     }
 
-    const doc = ctx.doc.value
+    const doc = ctx.getDoc().value
     const snap = doc ? ctx.log.snapshot(ctx) : undefined
 
     const resolvedProps: OperatorProperties = props ?? {}
     if (regionId) resolvedProps._regionId = regionId
 
     if (op.invoke) {
-      const snapshot = op.flagUndo && ctx.doc
-        ? ctx.doc.value?.clone() ?? null
+      const snapshot = op.flagUndo && ctx.getDoc().value !== null
+        ? ctx.getDoc().value?.clone() ?? null
         : null
 
       const result = op.invoke(ctx, resolvedProps, event)
@@ -103,7 +103,7 @@ export class OperatorRegistry {
         logOperatorResult(ctx, id, op.label, 'RUNNING_MODAL', snap)
       } else if (result === OP_RESULT.FINISHED) {
         if (snapshot !== null) {
-          const snapshotAfter = ctx.doc.value?.clone() ?? null
+          const snapshotAfter = ctx.getDoc().value?.clone() ?? null
           pushDocUndo(ctx, snapshot, snapshotAfter, op.label)
         }
         logOperatorResult(ctx, id, op.label, 'FINISHED', snap)
@@ -127,10 +127,10 @@ async function invokeExecFallback(
   op: OperatorType,
   props: OperatorProperties,
 ): Promise<OpResult> {
-  if (op.flagUndo && ctx.doc) {
-    const snapshot = ctx.doc.value?.clone() ?? null
+  if (op.flagUndo && ctx.getDoc().value !== null) {
+    const snapshot = ctx.getDoc().value?.clone() ?? null
     await op.exec!(ctx, props)
-    const snapshotAfter = ctx.doc.value?.clone() ?? null
+    const snapshotAfter = ctx.getDoc().value?.clone() ?? null
     pushDocUndo(ctx, snapshot, snapshotAfter, op.label)
   } else {
     await op.exec!(ctx, props)

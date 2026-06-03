@@ -22,23 +22,23 @@ import type { ToolHint } from '@/workbench/tools/tool'
 
 const ctx = useContext()
 const host = inject(hostKey)! as WorkbenchHost
-const selection = ctx.selection
+const selection = ctx.getSelection()
 const prefs = usePreferences()
 
 const VIEWPORT_REGION_ID = 'r-viewport'
 const vpSlot = ctx.viewports.get(VIEWPORT_REGION_ID) ?? ctx.viewports.register(VIEWPORT_REGION_ID)
 
-const docRef = computed(() => ctx.doc.value)
+const docRef = computed(() => ctx.getDoc().value)
 const drw = new DRW({
   docRef,
-  structEpochRef: ctx.structEpoch,
+  structEpochRef: ctx.getStructEpoch(),
   currentFrameIndex: ctx.main.currentFrameIndex,
-  layerWorldY: ctx.layerWorldY,
+  layerWorldY: ctx.getLayerWorldY(),
   framesPlaybackIsPlaying: ctx.main.framesPlaybackIsPlaying,
   structureDefinition: vpSlot.definition,
   mainMeshGroup: vpSlot.contentGroup,
   blockIconCacheOptions: {},
-  setFrameIndex: (i) => ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
+  setFrameIndex: (i) => ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
 })
 
 const { loadStatus, meshBusy } = drw
@@ -46,11 +46,11 @@ const { loadStatus, meshBusy } = drw
 const structureDefinition = vpSlot.definition
 const mainMeshGroup = vpSlot.contentGroup
 const worldFrameIndex = ctx.main.currentFrameIndex
-const layerWorldY = ctx.layerWorldY
+const layerWorldY = ctx.getLayerWorldY()
 const framesPlaybackIsPlaying = ctx.main.framesPlaybackIsPlaying
 
 const annotations = computed<Annotation[]>(() => {
-  const doc = ctx.doc.value
+  const doc = ctx.getDoc().value
   if (!doc) return []
   const plain = doc.serialize() as Record<string, any>
   return (plain.annotations ?? []) as Annotation[]
@@ -73,14 +73,14 @@ const activeTab = computed<BottomTab>({
 function createToolContext(): ToolContext {
   return {
     selection,
-    viewport: ctx.viewport,
+    viewport: ctx.getViewport(),
     pickVoxel: (e) => pickVoxel(ctx, e),
     pickAll: (e) => pickAll(ctx, e),
     getCurrentFrame: () => getCurrentFrame(ctx),
     gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
     getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
-    invokeOperator: (id, props, event, rid) => ctx.operators.invoke(id, props ?? {}, event, rid),
-    activeTool: ctx.toolRegistry.activeTool,
+    invokeOperator: (id, props, event, rid) => ctx.getOperators().invoke(id, props ?? {}, event, rid),
+    activeTool: ctx.getToolRegistry().activeTool,
     modalDepth: (rid: string) => ctx.wm.events.modalDepth(rid),
   }
 }
@@ -91,7 +91,7 @@ let toolCtx: ToolContext | null = null
 
 async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void> {
   toolCtx = createToolContext()
-  ctx.toolRegistry.setToolContext(toolCtx)
+  ctx.getToolRegistry().setToolContext(toolCtx)
 
   await host.attachViewport(VIEWPORT_REGION_ID, {
     drw,
@@ -106,7 +106,7 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     },
     selectionOutline: {
       selectionItems: selection.items,
-      hoveredBlock: ctx.hoveredBlock,
+      hoveredBlock: ctx.getHoveredBlock(),
       highlightOnHover: computed(() => prefs.highlightOnHover),
       getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
       gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
@@ -125,37 +125,40 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
   gizmoRafId = requestAnimationFrame(rafTick)
 }
 
-const toolHints = computed<ToolHint[]>(() => ctx.toolRegistry.activeTool.value?.hints ?? [])
+const toolHints = computed<ToolHint[]>(() => ctx.getToolRegistry().activeTool.value?.hints ?? [])
 
 function updateOverlay(): void {
-  const gizmo = ctx.toolRegistry.activeGizmo.value
+  const gizmo = ctx.getToolRegistry().activeGizmo.value
   if (gizmo && toolCtx) gizmo.render(toolCtx)
   updateAnnotationOverlay(ctx, drw)
 
-  if (ctx.viewport.gizmo.value && ctx.toolRegistry.activeTool.value?.id === 'move') {
-    const gp = ctx.viewport.gizmo.value.root.position
+  const moveGizmo = ctx.getViewport().gizmo.value
+  if (moveGizmo && ctx.getToolRegistry().activeTool.value?.id === 'move') {
+    const gp = moveGizmo.root.position
     ctx.log.updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
   } else {
     ctx.log.updateGizmoState(null)
   }
-  if (ctx.viewport.camera.value) {
+  const cam = ctx.getViewport().camera.value
+  const orbit = ctx.getViewport().orbitTarget.value
+  if (cam) {
     ctx.log.updateCameraState({
-      position: [ctx.viewport.camera.value.position.x, ctx.viewport.camera.value.position.y, ctx.viewport.camera.value.position.z],
-      target: ctx.viewport.orbitTarget.value ? [ctx.viewport.orbitTarget.value.x, ctx.viewport.orbitTarget.value.y, ctx.viewport.orbitTarget.value.z] : [0, 0, 0],
+      position: [cam.position.x, cam.position.y, cam.position.z],
+      target: orbit ? [orbit.x, orbit.y, orbit.z] : [0, 0, 0],
     })
   }
 }
 
 function togglePlayback(): void {
-  void ctx.operators.exec('OPERATOR_TOGGLE_FRAME_PLAYBACK')
+  void ctx.getOperators().exec('OPERATOR_TOGGLE_FRAME_PLAYBACK')
 }
 
 function setFrameIndex(i: number): void {
-  void ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i })
+  void ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i })
 }
 
 function setLayerY(v: number): void {
-  void ctx.operators.exec('OPERATOR_SET_LAYER_Y', { y: v })
+  void ctx.getOperators().exec('OPERATOR_SET_LAYER_Y', { y: v })
 }
 
 const dragOver = ref(false)
@@ -183,7 +186,7 @@ function onDrop(e: DragEvent) {
   dragEnterCount = 0
   const file = e.dataTransfer?.files[0]
   if (!file) return
-  ctx.operators.exec('OPERATOR_OPEN_SCENE', { file })
+  ctx.getOperators().exec('OPERATOR_OPEN_SCENE', { file })
 }
 
 onMounted(() => {

@@ -31,7 +31,7 @@ export const ViewRotateOperator: OperatorType = {
   description: 'MMB 拖拽旋转视角',
 
   poll(ctx) {
-    return ctx.viewport.camera.value !== null && ctx.viewport.domElement.value !== null
+    return ctx.getViewport().camera.value !== null && ctx.getViewport().domElement.value !== null
   },
 
   invoke(_ctx, props, event) {
@@ -92,7 +92,7 @@ export const ViewPanOperator: OperatorType = {
   description: 'Shift+MMB 拖拽平移视角',
 
   poll(ctx) {
-    return ctx.viewport.camera.value !== null && ctx.viewport.domElement.value !== null
+    return ctx.getViewport().camera.value !== null && ctx.getViewport().domElement.value !== null
   },
 
   invoke(_ctx, props, event) {
@@ -166,7 +166,7 @@ export const ViewZoomOperator: OperatorType = {
   description: 'Ctrl+MMB 拖拽 / 滚轮缩放视角',
 
   poll(ctx) {
-    return ctx.viewport.camera.value !== null && ctx.viewport.domElement.value !== null
+    return ctx.getViewport().camera.value !== null && ctx.getViewport().domElement.value !== null
   },
 
   invoke(ctx, props, event) {

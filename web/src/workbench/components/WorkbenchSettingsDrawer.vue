@@ -13,7 +13,7 @@ const ctx = useContext()
 const settingsOpen = inject<Ref<boolean>>('workbenchSettingsOpen')!
 
 const open = computed(() => settingsOpen.value)
-const mode = computed(() => ctx.workspaceMode.value)
+const mode = computed(() => ctx.getWorkspaceMode().value)
 const builtinSceneCount = computed(() => listDevSceneIds().length)
 const showBuiltin = computed(() => builtinSceneCount.value > 0)
 
@@ -22,11 +22,11 @@ function close(): void {
 }
 
 function pickMode(m: WorkbenchWorkspaceMode): void {
-  ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: m })
-  ctx.connection.connected = null
-  ctx.connection.exports = []
-  ctx.connection.exportsLoading = false
-  ctx.connection.selectedExportName = null
+  ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: m })
+  ctx.getConnection().connected = null
+  ctx.getConnection().exports = []
+  ctx.getConnection().exportsLoading = false
+  ctx.getConnection().selectedExportName = null
 }
 
 function onKeydown(e: KeyboardEvent): void {

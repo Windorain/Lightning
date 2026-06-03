@@ -1,13 +1,22 @@
 import { describe, it, expect } from 'vitest'
+import { ref } from 'vue'
 import { RuntimeDocument, Grid, RuntimeFrame } from '@/context/runtimeDocument'
 import { listMaterials, getMaterialUsageCounts, getBlockTypeStats, getBlockPaletteEntry } from '@/context/queries'
 import type { Context } from '@/runtime/context'
 
 function makeMockCtx(doc: RuntimeDocument | null): Context {
   return {
-    doc: { value: doc },
-    selection: { items: { value: new Set() } },
-    currentFrameIndex: { value: 0 },
+    getDoc: () => ref(doc),
+    getCurrentFrameIndex: () => ref(0),
+    getSelection: () => ({ items: { value: new Set() } }),
+    getViewport: () => ({
+      camera: ref(null),
+      contentGroup: ref(null),
+      domElement: ref(null),
+      definition: ref(null),
+      layerPreview: ref(null),
+      overlayGroup: ref(null),
+    }),
   } as unknown as Context
 }
 

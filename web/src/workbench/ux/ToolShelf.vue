@@ -5,7 +5,7 @@ import ToolGroupButton from './ToolGroupButton.vue'
 import type { Tool } from '@/workbench/tools/tool'
 
 const ctx = useContext()
-const tools = computed(() => [...ctx.toolRegistry.tools.values()])
+const tools = computed(() => [...ctx.getToolRegistry().tools.values()])
 
 // Group tools: tools with the same `group` field, plus ungrouped tools as singleton groups
 const groups = computed(() => {

@@ -9,7 +9,7 @@ import { useContext } from '@/runtime/context'
 const ctx = useContext()
 const log = ctx.log
 
-const frameCount = computed(() => ctx?.doc.value?.frameCount ?? 0)
+const frameCount = computed(() => ctx.getDoc().value?.frameCount ?? 0)
 const hasWorldMultiFrame = computed(() => frameCount.value > 1)
 
 function logClass(level: number): string {
@@ -27,7 +27,7 @@ function logClass(level: number): string {
     <span v-if="log.statusMessage && !log.lastDisplayable.value" class="sb-item">{{ log.statusMessage }}</span>
     <span class="sb-spacer" />
     <span v-if="hasWorldMultiFrame" class="sb-item">
-      Frame {{ (ctx?.currentFrameIndex.value ?? 0) + 1 }} / {{ frameCount }}
+      Frame {{ (ctx.getCurrentFrameIndex().value ?? 0) + 1 }} / {{ frameCount }}
     </span>
   </div>
 </template>

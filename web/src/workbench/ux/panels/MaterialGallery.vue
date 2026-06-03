@@ -111,7 +111,7 @@ function selectCard(id: string) {
   selectedId.value = selectedId.value === id ? null : id
 }
 
-watch(() => ctx.doc.value, () => refresh(), { immediate: true })
+watch(() => ctx.getDoc().value, () => refresh(), { immediate: true })
 
 const { setCanvasRef } = useMaterialAnimation((id: string) => {
   const card = cards.value.find(c => c.materialId === id)

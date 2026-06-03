@@ -24,8 +24,8 @@ function projectAxis(
   origin: { x: number; y: number; z: number },
   dir: THREE.Vector3,
 ): ScreenProjection {
-  const camera = ctx.viewport.camera.value
-  const domEl = ctx.viewport.domElement.value
+  const camera = ctx.getViewport().camera.value
+  const domEl = ctx.getViewport().domElement.value
   if (!camera || !domEl) return { screenDirX: 0, screenDirY: 0, k: 0 }
   const rect = domEl.getBoundingClientRect()
   const p1 = new THREE.Vector3(origin.x, origin.y, origin.z).project(camera)
@@ -65,7 +65,7 @@ function buildProjectionAxes(
   }
 
   // Free move: camera right and up
-  const camera = ctx.viewport.camera.value
+  const camera = ctx.getViewport().camera.value
   if (!camera) return []
   const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
@@ -78,7 +78,7 @@ function buildProjectionAxes(
 /** Animation-safe way to get gizmo. Prefers props ref, falls back to registry. */
 function getGizmo(ctx: Context, props: OperatorProperties): { root: THREE.Group } | null {
   return ((props as any).gizmo as { root: THREE.Group } | null)
-    ?? (ctx.toolRegistry.activeGizmo.value as { root: THREE.Group } | null)
+    ?? (ctx.getToolRegistry().activeGizmo.value as { root: THREE.Group } | null)
 }
 
 interface MoveModalState {
@@ -108,7 +108,7 @@ export const MoveOperator: OperatorType = {
   description: '拖拽 Gizmo 或空白区域移动选中方块，X/Y/Z 锁定轴向',
 
   poll(ctx) {
-    return ctx.doc.value !== null
+    return ctx.getDoc().value !== null
   },
 
   initModalState(): OperatorProperties {
@@ -148,7 +148,7 @@ export const MoveOperator: OperatorType = {
         _originZ: gizmo.root.position.z,
         _startX: event.clientX,
         _startY: event.clientY,
-        _initialPositions: [...ctx.selection.items.value]
+        _initialPositions: [...ctx.getSelection().items.value]
           .filter(e => e.kind === 'block')
           .map(e => ({ ...e.ref.pos })),
         _precision: false,
@@ -170,23 +170,23 @@ export const MoveOperator: OperatorType = {
     }
 
     // ---- Non-gizmo: block pick → select ----
-    ctx.selection.resetCycle()
+    ctx.getSelection().resetCycle()
     const picked = pickVoxel(ctx, event)
     if (picked) {
       if (event.shiftKey) {
-        ctx.selection.add([picked])
+        ctx.getSelection().add([picked])
       } else if (event.ctrlKey || event.metaKey) {
-        ctx.selection.remove([picked])
+        ctx.getSelection().remove([picked])
       } else {
-        ctx.selection.select(picked)
+        ctx.getSelection().select(picked)
       }
       return OP_RESULT.FINISHED
     }
 
     // ---- Non-gizmo: empty space → free move or deselect ----
     if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
-      const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
-      const isMoveTool = ctx.toolRegistry.activeTool.value?.id === 'move'
+      const sel = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
+      const isMoveTool = ctx.getToolRegistry().activeTool.value?.id === 'move'
 
       if (isMoveTool && sel.length > 0) {
         // Free move
@@ -297,8 +297,8 @@ export const MoveOperator: OperatorType = {
         })
 
         if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
-          const doc = ctx.doc.value
-          const rf = doc?.frame(ctx.currentFrameIndex.value ?? 0)
+          const doc = ctx.getDoc().value
+          const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
           const grid = rf?.grid
           if (grid) {
             const moves = s._initialPositions.map(initPos => ({
@@ -306,8 +306,8 @@ export const MoveOperator: OperatorType = {
               to: { x: initPos.x + delta.x, y: initPos.y + delta.y, z: initPos.z + delta.z },
             }))
 
-            const sel = ctx.selection
-            ctx.editHistory.push({
+            const sel = ctx.getSelection()
+            ctx.getEditHistory().push({
               id: generateId('move_'),
               label: `移动 (${delta.x}, ${delta.y}, ${delta.z})`,
               timestamp: Date.now(),
@@ -371,7 +371,7 @@ export const MoveOperator: OperatorType = {
       const dx = event.clientX - s._startX
       const dy = event.clientY - s._startY
       if (dx * dx + dy * dy < 25) {
-        ctx.selection.clear()
+        ctx.getSelection().clear()
       }
       return OP_RESULT.FINISHED
     }
@@ -390,7 +390,7 @@ export const MoveOperator: OperatorType = {
         gizmo.root.position.set(s._originX, s._originY, s._originZ)
       }
       if (s._pointerId >= 0) {
-        const el = ctx.viewport.domElement.value
+        const el = ctx.getViewport().domElement.value
         try {
           el?.releasePointerCapture(s._pointerId)
         } catch {

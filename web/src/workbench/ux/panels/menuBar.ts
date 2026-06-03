@@ -2,7 +2,7 @@ import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout } from '../types/layout'
-import { t, currentLang } from '@/config/i18n'
+import { t } from '@/config/i18n'
 
 export const menuBarPanel: PanelDeclaration = {
   id: 'menu-bar',
@@ -13,8 +13,8 @@ export const menuBarPanel: PanelDeclaration = {
   poll(): boolean { return true },
 
   layout(ctx: Context): UILayout {
-    const lang = currentLang.value
-    const conn = ctx.connection.connected
+    const lang = ctx.getShellSettings().lang.value
+    const conn = ctx.getConnection().connected
 
     return {
       kind: 'row',

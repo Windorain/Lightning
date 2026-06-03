@@ -53,9 +53,9 @@ export const AnnotationBoxCommitOperator: OperatorType = {
   id: 'ANNOTATION_BOX_COMMIT',
   label: '确认注解框',
   description: '根据累加的面选择创建 box 注解',
-  poll(ctx) { return ctx.doc.value !== null && _pendingSelections.length > 0 },
+  poll(ctx) { return ctx.getDoc().value !== null && _pendingSelections.length > 0 },
   invoke(ctx, _props, event) {
-    const toolProps = ctx.toolRegistry.activeTool.value?.properties ?? {}
+    const toolProps = ctx.getToolRegistry().activeTool.value?.properties ?? {}
     const ids: string[] = []
     for (const sel of _pendingSelections) {
       const id = generateId('anno_')
@@ -65,11 +65,11 @@ export const AnnotationBoxCommitOperator: OperatorType = {
         min: { ...sel.aabb.min }, max: { ...sel.aabb.max },
         frameIndex: getCurrentFrame(ctx)?.index ?? 0,
       }
-      ctx.operators.invoke('ANNOTATION_CREATE', { annotation: draft }, event ?? undefined)
+      ctx.getOperators().invoke('ANNOTATION_CREATE', { annotation: draft }, event ?? undefined)
     }
     // Keep all created annotations selected
     if (ids.length > 0) {
-      ctx.selection.selectAnnotations(ids, 'box')
+      ctx.getSelection().selectAnnotations(ids, 'box')
     }
     _boxClearPending()
     return OP_RESULT.FINISHED
@@ -80,7 +80,7 @@ export const AnnotationBoxResetOperator: OperatorType = {
   id: 'ANNOTATION_BOX_RESET',
   label: '重置注解框选择',
   description: '清除所有累加的面选择',
-  poll(ctx) { return ctx.doc.value !== null },
+  poll(ctx) { return ctx.getDoc().value !== null },
   invoke(_ctx, _props, _event) { _boxClearPending(); return OP_RESULT.FINISHED },
 }
 

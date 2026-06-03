@@ -47,13 +47,13 @@ export const NewSceneOperator: OperatorType = {
   },
 
   async exec(ctx, _props) {
-    if (ctx.editHistory.canUndo.value) {
-      const confirmFn = ctx.settings.confirmDirty ?? window.confirm
+    if (ctx.getEditHistory().canUndo.value) {
+      const confirmFn = ctx.getToolSettings().confirmDirty ?? window.confirm
       if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
-      await ctx.operators.exec('OPERATOR_SAVE_FILE')
+      await ctx.getOperators().exec('OPERATOR_SAVE_FILE')
     }
-    ctx.selection.clear()
-    ctx.editHistory.clear()
+    ctx.getSelection().clear()
+    ctx.getEditHistory().clear()
     const doc = RuntimeDocument.empty()
     ctx.main.replaceDoc( doc)
   },
@@ -74,13 +74,13 @@ export const OpenSceneOperator: OperatorType = {
       file = await pickFile()
       if (!file) return
     }
-    if (ctx.editHistory.canUndo.value) {
-      const confirmFn = ctx.settings.confirmDirty ?? window.confirm
+    if (ctx.getEditHistory().canUndo.value) {
+      const confirmFn = ctx.getToolSettings().confirmDirty ?? window.confirm
       if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
-      await ctx.operators.exec('OPERATOR_SAVE_FILE')
+      await ctx.getOperators().exec('OPERATOR_SAVE_FILE')
     }
-    ctx.selection.clear()
-    ctx.editHistory.clear()
+    ctx.getSelection().clear()
+    ctx.getEditHistory().clear()
     const text = await file.text()
     let data: unknown
     try {
@@ -91,15 +91,15 @@ export const OpenSceneOperator: OperatorType = {
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
       ctx.main.replaceDoc( result.document)
-      ctx.currentFrameIndex.value = 0
+      ctx.getCurrentFrameIndex().value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
       ctx.main.replaceDoc( null)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
     }
-    ctx.localFileName.value = file.name
-    await ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-file' })
+    ctx.getLocalFileName().value = file.name
+    await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-file' })
   },
 }
 
@@ -109,13 +109,13 @@ export const SaveFileOperator: OperatorType = {
   description: '将当前场景保存到本地文件',
 
   poll(ctx) {
-    return ctx.doc.value !== null
+    return ctx.getDoc().value !== null
   },
 
   exec(ctx, _props) {
-    const doc = ctx.doc.value?.serialize()
+    const doc = ctx.getDoc().value?.serialize()
     if (!doc) return
-    const baseName = suggestedJsonBaseName(ctx.localFileName.value, 'structure-export')
+    const baseName = suggestedJsonBaseName(ctx.getLocalFileName().value, 'structure-export')
     downloadJson(baseName, doc, true)
   },
 }
@@ -133,20 +133,20 @@ export const LoadBuiltinSceneOperator: OperatorType = {
     const sceneId = _props.sceneId as string | undefined
     const id = sceneId && sceneId.length > 0 ? sceneId : DEFAULT_PREVIEW_SCENE_ID
     const raw = getDevSceneDocument(id)
-    ctx.selection.clear()
-    ctx.editHistory.clear()
+    ctx.getSelection().clear()
+    ctx.getEditHistory().clear()
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (result.document) {
       ctx.main.replaceDoc( result.document)
-      ctx.currentFrameIndex.value = 0
+      ctx.getCurrentFrameIndex().value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
       ctx.main.replaceDoc( null)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
     }
-    await ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-bundle' })
-    ctx.localFileName.value = `示例 · ${id}.json`
+    await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-bundle' })
+    ctx.getLocalFileName().value = `示例 · ${id}.json`
   },
 }
 

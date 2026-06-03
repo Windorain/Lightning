@@ -22,7 +22,7 @@ async function load(): Promise<void> {
   busy.value = true
   lastErr.value = ''
   try {
-    await ctx.operators.exec('OPERATOR_LOAD_BUILTIN', { sceneId: selectedId.value })
+    await ctx.getOperators().exec('OPERATOR_LOAD_BUILTIN', { sceneId: selectedId.value })
     ctx.log.setStatus(`已加载示例 ${selectedId.value}`)
   } catch (e) {
     lastErr.value = e instanceof Error ? e.message : String(e)
