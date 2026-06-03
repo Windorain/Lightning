@@ -6,7 +6,7 @@
  */
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
-import { resolveViewportSlot } from '@/context/bContext'
+import { resolveViewportSlot } from '@/runtime/context'
 import { sphericalOrbitDelta, panDelta } from '@/pure/camera'
 
 interface NavState {
@@ -15,10 +15,10 @@ interface NavState {
   _pointerId: number
 }
 
-function releasePointerCapture(bctx: any, props: any): void {
+function releasePointerCapture(ctx: any, props: any): void {
   const s = props as unknown as NavState
   if (s._pointerId >= 0) {
-    const vp = resolveViewportSlot(bctx, props)
+    const vp = resolveViewportSlot(ctx, props)
     const el = vp.domElement.value
     try { el?.releasePointerCapture(s._pointerId) } catch { /* already released */ }
     s._pointerId = -1
@@ -30,11 +30,11 @@ export const ViewRotateOperator: OperatorType = {
   label: '旋转视图',
   description: 'MMB 拖拽旋转视角',
 
-  poll(bctx) {
-    return bctx.viewport.camera.value !== null && bctx.viewport.domElement.value !== null
+  poll(ctx) {
+    return ctx.viewport.camera.value !== null && ctx.viewport.domElement.value !== null
   },
 
-  invoke(_bctx, props, event) {
+  invoke(_ctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
     const target = event.target as HTMLElement | null
     target?.setPointerCapture(event.pointerId)
@@ -47,10 +47,10 @@ export const ViewRotateOperator: OperatorType = {
     return OP_RESULT.RUNNING_MODAL
   },
 
-  modal(bctx, props, event) {
+  modal(ctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
     const s = props as unknown as NavState & OperatorProperties
-    const vp = resolveViewportSlot(bctx, props)
+    const vp = resolveViewportSlot(ctx, props)
     const camera = vp.camera.value
     if (!camera) return OP_RESULT.CANCELLED
 
@@ -83,7 +83,7 @@ export const ViewRotateOperator: OperatorType = {
     return OP_RESULT.PASS_THROUGH
   },
 
-  cancel(bctx, props) { releasePointerCapture(bctx, props) },
+  cancel(ctx, props) { releasePointerCapture(ctx, props) },
 }
 
 export const ViewPanOperator: OperatorType = {
@@ -91,11 +91,11 @@ export const ViewPanOperator: OperatorType = {
   label: '平移视图',
   description: 'Shift+MMB 拖拽平移视角',
 
-  poll(bctx) {
-    return bctx.viewport.camera.value !== null && bctx.viewport.domElement.value !== null
+  poll(ctx) {
+    return ctx.viewport.camera.value !== null && ctx.viewport.domElement.value !== null
   },
 
-  invoke(_bctx, props, event) {
+  invoke(_ctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
     const target = event.target as HTMLElement | null
     target?.setPointerCapture(event.pointerId)
@@ -108,10 +108,10 @@ export const ViewPanOperator: OperatorType = {
     return OP_RESULT.RUNNING_MODAL
   },
 
-  modal(bctx, props, event) {
+  modal(ctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
     const s = props as unknown as NavState & OperatorProperties
-    const vp = resolveViewportSlot(bctx, props)
+    const vp = resolveViewportSlot(ctx, props)
     const camera = vp.camera.value
     if (!camera) return OP_RESULT.CANCELLED
 
@@ -150,7 +150,7 @@ export const ViewPanOperator: OperatorType = {
     return OP_RESULT.PASS_THROUGH
   },
 
-  cancel(bctx, props) { releasePointerCapture(bctx, props) },
+  cancel(ctx, props) { releasePointerCapture(ctx, props) },
 }
 
 function applyViewZoom(camera: any, factor: number): void {
@@ -165,14 +165,14 @@ export const ViewZoomOperator: OperatorType = {
   label: '缩放视图',
   description: 'Ctrl+MMB 拖拽 / 滚轮缩放视角',
 
-  poll(bctx) {
-    return bctx.viewport.camera.value !== null && bctx.viewport.domElement.value !== null
+  poll(ctx) {
+    return ctx.viewport.camera.value !== null && ctx.viewport.domElement.value !== null
   },
 
-  invoke(bctx, props, event) {
+  invoke(ctx, props, event) {
     // WheelEvent: zoom immediately
     if (event instanceof WheelEvent) {
-      const vp = resolveViewportSlot(bctx, props)
+      const vp = resolveViewportSlot(ctx, props)
       const camera = vp.camera.value
       if (!camera) return OP_RESULT.CANCELLED
       const factor = (event as WheelEvent).deltaY > 0 ? 0.85 : 1.18
@@ -194,9 +194,9 @@ export const ViewZoomOperator: OperatorType = {
     return OP_RESULT.RUNNING_MODAL
   },
 
-  modal(bctx, props, event) {
+  modal(ctx, props, event) {
     if (event instanceof WheelEvent) {
-      const vp = resolveViewportSlot(bctx, props)
+      const vp = resolveViewportSlot(ctx, props)
       const camera = vp.camera.value
       if (!camera) return OP_RESULT.CANCELLED
       const factor = event.deltaY > 0 ? 0.85 : 1.18
@@ -206,7 +206,7 @@ export const ViewZoomOperator: OperatorType = {
 
     if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
     const s = props as unknown as NavState & OperatorProperties
-    const vp = resolveViewportSlot(bctx, props)
+    const vp = resolveViewportSlot(ctx, props)
     const camera = vp.camera.value
     if (!camera) return OP_RESULT.CANCELLED
 
@@ -228,5 +228,5 @@ export const ViewZoomOperator: OperatorType = {
     return OP_RESULT.PASS_THROUGH
   },
 
-  cancel(bctx, props) { releasePointerCapture(bctx, props) },
+  cancel(ctx, props) { releasePointerCapture(ctx, props) },
 }

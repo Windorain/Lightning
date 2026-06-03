@@ -3,10 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 
 import { listDevSceneIds } from '@/dev/devScenes'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
-import { useBContext } from '@/context/bContext'
-import { logCenter } from '@/logging/LogCenter'
-
-const bctx = useBContext()
+import { useContext } from '@/runtime/context'
+const ctx = useContext()
 
 const ids = computed(() => listDevSceneIds())
 const selectedId = ref(DEFAULT_PREVIEW_SCENE_ID)
@@ -24,8 +22,8 @@ async function load(): Promise<void> {
   busy.value = true
   lastErr.value = ''
   try {
-    await bctx.operators.exec('OPERATOR_LOAD_BUILTIN', { sceneId: selectedId.value })
-    logCenter.setStatus(`已加载示例 ${selectedId.value}`)
+    await ctx.operators.exec('OPERATOR_LOAD_BUILTIN', { sceneId: selectedId.value })
+    ctx.log.setStatus(`已加载示例 ${selectedId.value}`)
   } catch (e) {
     lastErr.value = e instanceof Error ? e.message : String(e)
   } finally {

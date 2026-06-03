@@ -3,22 +3,25 @@
  * EmbedViewport — 嵌入场景的视口消费者。
  *
  * 对齐 WorkbenchViewport：
- * - useBContext() 取 bctx
+ * - useContext() 取 ctx
  * - 本地 createRenderAssets 管理全部渲染状态
  * - 叶子组件全部 props/emits
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useViewport, updateAnnotationOverlay, getAnnotationOverlayGroup } from '@/shared/composables/useViewport'
-import { useBContext } from '@/context/bContext'
-import { createRenderAssets } from '@/context/renderAssets'
-import ViewerCore, { type ViewerCoreReadyPayload } from '@/shared/viewport/ViewerCore.vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { updateAnnotationOverlay, getAnnotationOverlayGroup } from '@/runtime/viewportAnnotations'
+import { useContext } from '@/runtime/context'
+import { hostKey } from '@/runtime/host'
+import type { EmbedHost } from '@/runtime/host/embedHost'
+import { DRW } from '@/runtime/drw'
+import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
+import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
+import { createHoverHandler } from '@/handlers/hoverHandler'
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
 import { type Annotation } from '@/render/data/annotationTypes'
-import * as THREE from 'three'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { InitialCamera } from '@/preview/previewConfig'
 import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
@@ -33,28 +36,37 @@ const props = defineProps<{
   settings?: EmbedSettings
 }>()
 
-const bctx = useBContext()
+const ctx = useContext()
+const host = inject(hostKey)! as EmbedHost
 const prefs = usePreferences()
 
 const EMBED_REGION = 'r-embed'
-const vpSlot = bctx.viewports.get(EMBED_REGION) ?? bctx.viewports.register(EMBED_REGION)
+const vpSlot = ctx.viewports.get(EMBED_REGION) ?? ctx.viewports.register(EMBED_REGION)
 
-// ---- Viewport composable (shared with WorkbenchViewport) ----
-const vp = useViewport({
-  bctx,
+const docRef = computed(() => ctx.doc.value)
+const layerWorldY = ref(props.settings?.initialLayerWorldY ?? -1)
+const drw = new DRW({
+  docRef,
+  structEpochRef: ctx.structEpoch,
+  currentFrameIndex: ctx.main.currentFrameIndex,
+  layerWorldY,
+  framesPlaybackIsPlaying: ctx.main.framesPlaybackIsPlaying,
   structureDefinition: vpSlot.definition,
   mainMeshGroup: vpSlot.contentGroup,
+  slot: vpSlot,
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
-  initialLayerWorldY: props.settings?.initialLayerWorldY,
-  createRenderAssets,
+  setFrameIndex: (i) => ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
 })
 const {
   loadStatus, meshBusy, blockIconCache, tooltipPalette,
-  structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY,
-  framesPlaybackIsPlaying,
-  renderAssets, outlinePass,
-} = vp
+  renderAssets,
+} = drw
+const structureDefinition = vpSlot.definition
+const mainMeshGroup = vpSlot.contentGroup
+const worldFrameIndex = ctx.main.currentFrameIndex
+const framesPlaybackIsPlaying = ctx.main.framesPlaybackIsPlaying
+const outlinePass = drw.outlinePass
 
 const showSettingsPanel = ref(false)
 
@@ -67,7 +79,7 @@ const materialLibrary = renderAssets.textureCache
 
 // ---- Hover / tooltip (unified) ----
 const { hover, setViewportBlock, setSidebarBlock, setAnnotation, setMeta } = useEmbedHover()
-const viewerCoreRef = ref<InstanceType<typeof ViewerCore> | null>(null)
+const engineHostRef = ref<InstanceType<typeof RenderEngineHost> | null>(null)
 const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
 const selectedBlockId = ref<string | null>(null)
@@ -86,7 +98,7 @@ const { tooltipText, neiTooltipMap, showMetaHint } = useEmbedTooltip({
   definitionRef: vpSlot.definition,
   tooltipPaletteRef: tooltipPalette,
   showHoverTooltipRef: computed(() => prefs.showHoverTooltip),
-  docRef: bctx.doc,
+  docRef: ctx.doc,
 })
 
 function onSidebarSelectBlock(blockId: string): void {
@@ -133,7 +145,7 @@ function onMetaHintFocusIn(e: FocusEvent): void { const t = e.currentTarget as H
 function onMetaHintFocusOut(): void { setMeta(null) }
 
 const previewTitle = computed(() => {
-  const doc = bctx.doc.value
+  const doc = ctx.doc.value
   if (!doc) return ''
   const fromDoc = sceneDisplayTitleFromRootDocument(doc.serialize())
   if (fromDoc) return fromDoc
@@ -164,70 +176,39 @@ const statusSummary = computed(() => {
 // ---- Viewport events ----
 let _alive = true
 let _annoRafId: number | undefined
-let unregHandlers: Array<() => void> = []
+const hoverSink = { setViewportBlock, setSidebarBlock, setAnnotation }
 
-function onViewportReady(payload: ViewerCoreReadyPayload): void {
-  // Activate embed viewport slot so bctx.viewport (singular) resolves to this one
-  bctx.viewports.activeId.value = EMBED_REGION
+async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void> {
+  await host.attachViewport(EMBED_REGION, {
+    drw,
+    payload,
+    layerPreviewMode: layerPreviewMode.value,
+    structureDefinition,
+    mainMeshGroup,
+    handlers: {
+      hover: createHoverHandler(EMBED_REGION, () => ctx, hoverSink),
+      keymap: createEmbedKeymapHandler(EMBED_REGION, () => ctx),
+    },
+    documentKeydown: false,
+  })
 
-  // Register screen-space outline pass
-  outlinePass.setCamera(payload.camera as THREE.Camera)
-  payload.renderer.setOutlinePass(outlinePass)
-
-  renderAssets.registerScene(payload.mainScene)
-  renderAssets.init()
-  renderAssets.rebuildContentMesh().catch(e => { console.error('[EmbedViewport] rebuildContentMesh', e) })
-
-  updateAnnotationOverlay(bctx, renderAssets, prefs.showAnnotations)
-
-  vpSlot.orbitTarget.value = payload.orbitTarget
-  vpSlot.camera.value = payload.camera
-  vpSlot.contentGroup.value = mainMeshGroup.value ?? new THREE.Group()
-  vpSlot.domElement.value = payload.domElement
-  vpSlot.definition.value = structureDefinition.value ?? null
-  vpSlot.layerPreview.value = layerPreviewMode.value
-  vpSlot.overlayGroup.value = payload.layers.overlay
-
-  bctx.eventDispatcher.registerRegion(EMBED_REGION)
-  unregHandlers.push(
-    bctx.eventDispatcher.registerRegionHandler(
-      EMBED_REGION,
-      createEmbedKeymapHandler(EMBED_REGION, () => bctx),
-    ),
-  )
-
-  const dom = payload.domElement
-  dom.addEventListener('pointerdown', (e) => {
-    bctx.viewports.activeId.value = EMBED_REGION
-    if (e.button !== 0) e.preventDefault()
-    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
-  }, { capture: true })
-  dom.addEventListener('pointermove', (e) => {
-    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
-  }, { capture: true })
-  dom.addEventListener('pointerup', (e) => {
-    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
-  }, { capture: true })
-  dom.addEventListener('wheel', (e) => {
-    bctx.eventDispatcher.dispatch(e, { regionId: EMBED_REGION })
-    e.preventDefault()
-  }, { capture: true, passive: false })
-  dom.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
+  updateAnnotationOverlay(ctx, renderAssets, prefs.showAnnotations)
 
   function rafTick() {
     if (!_alive) return
     _annoRafId = requestAnimationFrame(rafTick)
-    updateAnnotationOverlay(bctx, renderAssets, prefs.showAnnotations)
+    updateAnnotationOverlay(ctx, renderAssets, prefs.showAnnotations)
     flushHighlight()
   }
   _annoRafId = requestAnimationFrame(rafTick)
 }
 
-// ---- Hover event handlers (write to unified hover) ----
-function onViewportHover(
-  payload: { blockId: string; clientX: number; clientY: number; source: 'viewport'; voxel: { column: number; row: number; zSlice: number } } | null,
-): void {
-  setViewportBlock(payload)
+function setFrameIndex(i: number): void {
+  void ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i })
+}
+
+function togglePlayback(): void {
+  void ctx.operators.exec('OPERATOR_TOGGLE_FRAME_PLAYBACK')
 }
 
 function onSidebarTooltipHover(
@@ -236,16 +217,10 @@ function onSidebarTooltipHover(
   setSidebarBlock(payload)
 }
 
-function onAnnotationHover(
-  payload: { annotationId: string; clientX: number; clientY: number } | null,
-): void {
-  setAnnotation(payload)
-}
-
-// ---- Annotations list (shared by ViewerCore prop + tooltip) ----
+// ---- Annotations list ----
 const annotations = computed<Annotation[]>(() => {
   if (!prefs.showAnnotations) return []
-  const doc = bctx.doc.value
+  const doc = ctx.doc.value
   if (!doc) return []
   const plain = doc.serialize() as Record<string, any>
   return (plain.annotations ?? []) as Annotation[]
@@ -253,7 +228,7 @@ const annotations = computed<Annotation[]>(() => {
 
 // ---- Annotation pick & overlay visibility ----
 watch(() => prefs.showAnnotations, (v) => {
-  const g = getAnnotationOverlayGroup(bctx.viewport.id)
+  const g = getAnnotationOverlayGroup(ctx.viewport.id)
   if (!g) return
   if (v) {
     vpSlot.overlayGroup.value?.add(g)
@@ -264,11 +239,11 @@ watch(() => prefs.showAnnotations, (v) => {
 
 onMounted(async () => { await renderAssets.loadStructureAndResources() })
 onBeforeUnmount(() => {
-  unregHandlers.forEach(fn => fn())
-  bctx.eventDispatcher.unregisterRegion(EMBED_REGION)
+  host.detachViewport(EMBED_REGION)
+  ctx.eventDispatcher.unregisterRegion(EMBED_REGION)
   _alive = false
   if (_annoRafId) cancelAnimationFrame(_annoRafId)
-  vp.dispose()
+  drw.dispose()
 })
 </script>
 
@@ -285,10 +260,10 @@ onBeforeUnmount(() => {
         >?</span>
       </div>
       <div class="wm-titlebar-actions">
-        <button type="button" class="nei-icon-btn" title="复位视角" @click="viewerCoreRef?.resetView()">
+        <button type="button" class="nei-icon-btn" title="复位视角" @click="engineHostRef?.resetView()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 3.1L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-3.1L3 16"/><path d="M3 21v-5h5"/></svg>
         </button>
-        <button type="button" class="nei-icon-btn" title="截屏" @click="viewerCoreRef?.screenshot()">
+        <button type="button" class="nei-icon-btn" title="截屏" @click="engineHostRef?.screenshot()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
         </button>
         <button type="button" class="nei-icon-btn" title="全屏" @click="toggleFullscreen">
@@ -316,8 +291,8 @@ onBeforeUnmount(() => {
         @select-block="onSidebarSelectBlock"
       />
       <div class="wm-viewport-column">
-        <ViewerCore
-          ref="viewerCoreRef"
+        <RenderEngineHost
+          ref="engineHostRef"
           v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
           :definition="structureDefinition"
           :material-library="materialLibrary"
@@ -328,8 +303,6 @@ onBeforeUnmount(() => {
           :show-axes-gizmo="showAxesGizmo"
           :annotations="annotations"
           @ready="onViewportReady"
-          @hover-block="onViewportHover"
-          @hover-annotation="onAnnotationHover"
         />
       </div>
     </div>
@@ -358,7 +331,7 @@ onBeforeUnmount(() => {
         <WorldFramePlayerControls
           :has-world-multi-frame="hasWorldMultiFrame"
           :is-playing="framesPlaybackIsPlaying"
-          @toggle="renderAssets.toggleWorldFramesPlayback()"
+          @toggle="togglePlayback"
         />
         <WorldFrameScrubber
           :has-world-multi-frame="hasWorldMultiFrame"
@@ -366,8 +339,8 @@ onBeforeUnmount(() => {
           :is-playing="framesPlaybackIsPlaying"
           :mesh-busy="meshBusy"
           :world-frame-index="worldFrameIndex"
-          @toggle-playback="renderAssets.toggleWorldFramesPlayback()"
-          @set-frame="(i: number) => renderAssets.setCurrentWorldFrame(i)"
+          @toggle-playback="togglePlayback"
+          @set-frame="setFrameIndex"
         />
       </div>
       <div v-if="showLayerBar" class="wm-tab-panel" :class="{ 'wm-tab-panel--active': activeTab === 'layer' }">

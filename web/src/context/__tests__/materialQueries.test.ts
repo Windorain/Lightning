@@ -1,24 +1,24 @@
 import { describe, it, expect } from 'vitest'
 import { RuntimeDocument, Grid, RuntimeFrame } from '@/context/runtimeDocument'
 import { listMaterials, getMaterialUsageCounts, getBlockTypeStats, getBlockPaletteEntry } from '@/context/queries'
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 
-function makeMockBctx(doc: RuntimeDocument | null): BContext {
+function makeMockCtx(doc: RuntimeDocument | null): Context {
   return {
     doc: { value: doc },
     selection: { items: { value: new Set() } },
-    currentWorldFrameIndex: { value: 0 },
-  } as unknown as BContext
+    currentFrameIndex: { value: 0 },
+  } as unknown as Context
 }
 
 describe('listMaterials', () => {
   it('returns empty array when no document', () => {
-    expect(listMaterials(makeMockBctx(null))).toEqual([])
+    expect(listMaterials(makeMockCtx(null))).toEqual([])
   })
 
   it('returns empty array when no materialPalette', () => {
     const doc = new RuntimeDocument({ id: 'test' })
-    expect(listMaterials(makeMockBctx(doc))).toEqual([])
+    expect(listMaterials(makeMockCtx(doc))).toEqual([])
   })
 
   it('returns materials with textureDataUrl from textureBlobs', () => {
@@ -31,7 +31,7 @@ describe('listMaterials', () => {
       ],
       textureBlobs: { '0': pngBase64, '1': pngBase64 },
     })
-    const result = listMaterials(makeMockBctx(doc))
+    const result = listMaterials(makeMockCtx(doc))
 
     expect(result).toHaveLength(2)
     expect(result[0].materialId).toBe('0')
@@ -52,7 +52,7 @@ describe('listMaterials', () => {
       ],
       textureBlobs: {},
     })
-    const result = listMaterials(makeMockBctx(doc))
+    const result = listMaterials(makeMockCtx(doc))
 
     expect(result).toHaveLength(1)
     expect(result[0].textureDataUrl).toBeNull()
@@ -62,12 +62,12 @@ describe('listMaterials', () => {
 
 describe('getMaterialUsageCounts', () => {
   it('returns empty object when no document', () => {
-    expect(getMaterialUsageCounts(makeMockBctx(null))).toEqual({})
+    expect(getMaterialUsageCounts(makeMockCtx(null))).toEqual({})
   })
 
   it('returns empty object when no grid in current frame', () => {
     const doc = new RuntimeDocument({ id: 'test', frames: [new RuntimeFrame(0, undefined, null)] })
-    expect(getMaterialUsageCounts(makeMockBctx(doc))).toEqual({})
+    expect(getMaterialUsageCounts(makeMockCtx(doc))).toEqual({})
   })
 
   it('counts blocks by paletteIndex', () => {
@@ -81,7 +81,7 @@ describe('getMaterialUsageCounts', () => {
       id: 'test',
       frames: [new RuntimeFrame(0, undefined, grid)],
     })
-    const counts = getMaterialUsageCounts(makeMockBctx(doc))
+    const counts = getMaterialUsageCounts(makeMockCtx(doc))
     expect(counts).toEqual({ '0': 2, '1': 1 })
   })
 })
@@ -95,14 +95,14 @@ describe('getBlockTypeStats', () => {
     ]]
     const grid = new Grid(1, 3, 1, cells)
     const doc = new RuntimeDocument({ id: 'test', frames: [new RuntimeFrame(0, undefined, grid)] })
-    const stats = getBlockTypeStats(makeMockBctx(doc))
+    const stats = getBlockTypeStats(makeMockCtx(doc))
     expect(stats['minecraft:stone:0']).toEqual({ count: 2 })
     expect(stats['minecraft:dirt:0']).toEqual({ count: 1 })
   })
 
   it('returns empty object for no grid', () => {
     const doc = new RuntimeDocument({ id: 'test' })
-    expect(getBlockTypeStats(makeMockBctx(doc))).toEqual({})
+    expect(getBlockTypeStats(makeMockCtx(doc))).toEqual({})
   })
 })
 
@@ -115,7 +115,7 @@ describe('getBlockPaletteEntry', () => {
     cache.set('#5', { registryId: 'minecraft:stone', nbt: { key: 'val' }, tooltip: ['tip1'] })
     const grid = new Grid(1, 1, 1, cells, cache)
     const doc = new RuntimeDocument({ id: 'test', frames: [new RuntimeFrame(0, undefined, grid)] })
-    const entry = getBlockPaletteEntry(makeMockBctx(doc), { x: 0, y: 0, z: 0 })
+    const entry = getBlockPaletteEntry(makeMockCtx(doc), { x: 0, y: 0, z: 0 })
     expect(entry).not.toBeNull()
     expect(entry!.nbt).toEqual({ key: 'val' })
     expect(entry!.tooltip).toEqual(['tip1'])
@@ -124,6 +124,6 @@ describe('getBlockPaletteEntry', () => {
   it('returns null for air position', () => {
     const grid = new Grid(1, 1, 1)
     const doc = new RuntimeDocument({ id: 'test', frames: [new RuntimeFrame(0, undefined, grid)] })
-    expect(getBlockPaletteEntry(makeMockBctx(doc), { x: 0, y: 0, z: 0 })).toBeNull()
+    expect(getBlockPaletteEntry(makeMockCtx(doc), { x: 0, y: 0, z: 0 })).toBeNull()
   })
 })

@@ -16,7 +16,7 @@ export interface PanelTabItem {
 const props = defineProps<{
   panels: PanelTabItem[]
   rna: RNARegistry
-  bctx?: unknown
+  ctx?: unknown
 }>()
 
 const activeId = ref<string | null>(null)
@@ -66,7 +66,7 @@ function selectTab(id: string): void {
       <component
         v-if="activePanel?.component"
         :is="activePanel.component"
-        :bctx="bctx"
+        :ctx="ctx"
       />
       <UIRenderer
         v-else-if="activePanel"

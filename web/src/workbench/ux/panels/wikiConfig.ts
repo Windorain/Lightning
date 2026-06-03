@@ -1,4 +1,4 @@
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout } from '../types/layout'
@@ -11,8 +11,8 @@ export const wikiConfigPanel: PanelDeclaration = {
   workspaces: ['wiki'],
 
   poll(): boolean { return true },
-  owner(ctx: BContext): unknown { return ctx.wikiConfig },
-  layout(_ctx: BContext): UILayout {
+  owner(ctx: Context): unknown { return ctx.wikiConfig },
+  layout(_ctx: Context): UILayout {
     return {
       kind: 'column', align: false, items: [
         {

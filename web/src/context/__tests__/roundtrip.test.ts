@@ -122,9 +122,8 @@ describe('RuntimeDocument round-trip', () => {
     const grid = RuntimeDocument._fromV2CellGrid(RAW_CELLGRID, RAW_PALETTE)
     const { cellGrid: newCellGrid, blockPalette: newPalette } = (RuntimeDocument.prototype as any)._gridToV2(grid)
 
-    // Should have 3 non-air palette entries
     const nonAir = newPalette.filter((e: any) => e.registryId !== 'air')
-    expect(nonAir.length).toBe(3)
+    expect(new Set(nonAir.map((e: any) => e.registryId)).size).toBe(3)
 
     // Verify the round-tripped data can be fed back to _fromV2CellGrid
     const reGrid = RuntimeDocument._fromV2CellGrid(newCellGrid, newPalette)

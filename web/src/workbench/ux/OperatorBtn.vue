@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useBContext } from '@/context/bContext'
+import { useContext } from '@/runtime/context'
 
 const props = defineProps<{
   opId: string
@@ -9,10 +9,10 @@ const props = defineProps<{
   operatorProps?: Record<string, unknown>
 }>()
 
-const bctx = useBContext()
+const ctx = useContext()
 
 function onClick() {
-  bctx.operators.exec(props.opId, props.operatorProps ?? {})
+  ctx.operators.exec(props.opId, props.operatorProps ?? {})
 }
 </script>
 

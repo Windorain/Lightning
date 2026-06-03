@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { BlockRef } from '@/context/selection'
 import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
 import { getBlockPaletteEntry } from '@/context/queries'
 
-const props = defineProps<{ bctx: BContext }>()
+const props = defineProps<{ ctx: Context }>()
 
 const AUTO_SAVE_DELAY = 300
 
 const blockRef = computed<BlockRef | null>(() => {
-  const items = [...props.bctx.selection.items.value].filter(e => e.kind === 'block')
+  const items = [...props.ctx.selection.items.value].filter(e => e.kind === 'block')
   if (items.length !== 1) return null
   return items[0]!.ref
 })
@@ -20,7 +20,7 @@ const blockName = computed(() => blockRef.value?.block_state_id ?? '(未选中)'
 const h = computed(() => {
   const item = blockRef.value
   if (!item) return 0
-  const g = props.bctx.doc.value?.frame(0)?.grid
+  const g = props.ctx.doc.value?.frame(0)?.grid
   return g?.height ?? 0
 })
 
@@ -30,7 +30,7 @@ const focused = ref(false)
 function loadValue(): void {
   const item = blockRef.value
   if (!item) { text.value = ''; return }
-  const doc = props.bctx.doc.value as Record<string, any> | null
+  const doc = props.ctx.doc.value as Record<string, any> | null
   const grid = doc?.cellTooltipGrid as number[][][] | undefined
   const palette = doc?.tooltipPalette as string[] | undefined
   if (!grid || !palette) { text.value = ''; return }
@@ -41,7 +41,7 @@ function loadValue(): void {
 }
 
 watch(() => blockRef.value, () => { loadValue() }, { immediate: true })
-watch(() => props.bctx.doc.value, () => { if (!focused.value) loadValue() })
+watch(() => props.ctx.doc.value, () => { if (!focused.value) loadValue() })
 
 let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -53,7 +53,7 @@ function onInput(e: Event): void {
     const item = blockRef.value
     if (!item) return
     const row = h.value > 0 ? h.value - 1 - item.pos.y : item.pos.y
-    props.bctx.operators.invoke('OPERATOR_TOOLTIP_EDIT', {
+    props.ctx.operators.invoke('OPERATOR_TOOLTIP_EDIT', {
       text: text.value || '',
       pos: { x: item.pos.x, y: row, z: item.pos.z },
     })
@@ -67,7 +67,7 @@ onBeforeUnmount(() => {
 const paletteNameLine = computed(() => {
   const item = blockRef.value
   if (!item) return ''
-  const entry = getBlockPaletteEntry(props.bctx, item.pos) as Record<string, any> | null
+  const entry = getBlockPaletteEntry(props.ctx, item.pos) as Record<string, any> | null
   const tooltip: string[] | undefined = entry?.tooltip
   if (tooltip && tooltip.length > 0) return tooltip[0]!
   return ''

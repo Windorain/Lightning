@@ -1,4 +1,4 @@
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout } from '../types/layout'
@@ -12,9 +12,9 @@ export const menuBarPanel: PanelDeclaration = {
 
   poll(): boolean { return true },
 
-  layout(bctx: BContext): UILayout {
+  layout(ctx: Context): UILayout {
     const lang = currentLang.value
-    const conn = bctx.connection.connected
+    const conn = ctx.connection.connected
 
     return {
       kind: 'row',

@@ -49,5 +49,3 @@ export class ParserRegistryImpl {
 export function createParserRegistry(): ParserRegistryImpl {
   return new ParserRegistryImpl()
 }
-
-export const parserRegistry = createParserRegistry()

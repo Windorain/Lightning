@@ -6,14 +6,14 @@ import LocalBundlePanel from '@/workbench/components/LocalBundlePanel.vue'
 import LocalFilePanel from '@/workbench/components/LocalFilePanel.vue'
 import SdeConnectionPanel from '@/workbench/components/SdeConnectionPanel.vue'
 import { listDevSceneIds } from '@/dev/devScenes'
-import type { WorkbenchWorkspaceMode } from '@/context/bContext'
-import { useBContext } from '@/context/bContext'
+import type { WorkbenchWorkspaceMode } from '@/runtime/types'
+import { useContext } from '@/runtime/context'
 
-const bctx = useBContext()
+const ctx = useContext()
 const settingsOpen = inject<Ref<boolean>>('workbenchSettingsOpen')!
 
 const open = computed(() => settingsOpen.value)
-const mode = computed(() => bctx.workspaceMode.value)
+const mode = computed(() => ctx.workspaceMode.value)
 const builtinSceneCount = computed(() => listDevSceneIds().length)
 const showBuiltin = computed(() => builtinSceneCount.value > 0)
 
@@ -22,11 +22,11 @@ function close(): void {
 }
 
 function pickMode(m: WorkbenchWorkspaceMode): void {
-  bctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: m })
-  bctx.connection.connected = null
-  bctx.connection.exports = []
-  bctx.connection.exportsLoading = false
-  bctx.connection.selectedExportName = null
+  ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: m })
+  ctx.connection.connected = null
+  ctx.connection.exports = []
+  ctx.connection.exportsLoading = false
+  ctx.connection.selectedExportName = null
 }
 
 function onKeydown(e: KeyboardEvent): void {

@@ -9,7 +9,7 @@
 import { computed, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
-import type { LoadStatus } from '@/context/bContext'
+import type { LoadStatus } from '@/runtime/types'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition } from '@/render/schema/types'
@@ -60,6 +60,8 @@ export interface RenderAssetsDeps {
   initialWorldFrameIndex?: number
   /** structEpoch 递增 → 触发 rebuildAll（外部文档刷新时） */
   structEpochRef: Ref<number>
+  /** 换帧时经 Operator 写入（避免 DRW 直改 ref） */
+  setFrameIndex?: (index: number) => void | Promise<void>
 }
 
 export interface RenderAssetsComputed {
@@ -77,7 +79,6 @@ export interface RenderAssets extends ViewportRenderAssets {
   rebuildContentMesh(): Promise<void>
   rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null>
   setCurrentWorldFrame(index: number): Promise<void>
-  toggleWorldFramesPlayback(): void
   disposeCachesAndLibrary(): void
   /** 清空缓存后重新加载结构 + 重建 mesh（替代原 reloadFromConfig） */
   rebuildAll(): Promise<void>
@@ -85,7 +86,7 @@ export interface RenderAssets extends ViewportRenderAssets {
   init(): void
   /** 解构 init 注册的 watch */
   dispose(): void
-  /** 内部纹理缓存（供 ViewerCore 渲染用，只读） */
+  /** 内部纹理缓存（供 RenderEngine 渲染用，只读） */
   textureCache: Readonly<ShallowRef<MaterialLibraryApi | null>>
   computed: RenderAssetsComputed
 }
@@ -95,7 +96,7 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   const {
     docRef, loadStatus, meshBusy, blockIconCache, tooltipPalette,
     structureDefinition, mainMeshGroup, sceneRef, worldFrameIndex, layerWorldY,
-    framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex, structEpochRef,
+    framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex, structEpochRef, setFrameIndex,
   } = deps
 
   // === 内部纹理缓存，从 doc.textureBlobs 构建 ===
@@ -119,6 +120,9 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   const worldMeshCache = new Map<string, WorldMeshEntry>()
   let nonWorldMeshDispose: (() => void) | null = null
   let stopStructEpochWatch: (() => void) | null = null
+  let stopFrameIndexWatch: (() => void) | null = null
+  let stopPlaybackWatch: (() => void) | null = null
+  let suppressFrameIndexWatch = false
 
   // ---- Computed ----
   const worldFrameCount = computed(() => docRef.value?.frameCount ?? 0)
@@ -280,20 +284,13 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       if (!framesPlaybackIsPlaying.value) return
       let next = fromIndex + 1
       if (next >= n) next = 0
-      void setCurrentWorldFrame(next).then(() => {
+      const advance = setFrameIndex
+        ? () => Promise.resolve(setFrameIndex(next))
+        : () => setCurrentWorldFrame(next)
+      void advance().then(() => {
         if (framesPlaybackIsPlaying.value) scheduleNextWorldFrameStep()
       }).catch(() => { framesPlaybackIsPlaying.value = false })
     }, delay)
-  }
-
-  function toggleWorldFramesPlayback(): void {
-    if (framesPlaybackIsPlaying.value) {
-      framesPlaybackIsPlaying.value = false
-      clearWorldPlaybackSchedule()
-      return
-    }
-    framesPlaybackIsPlaying.value = true
-    scheduleNextWorldFrameStep()
   }
 
   async function setCurrentWorldFrame(rawNext: number): Promise<void> {
@@ -303,7 +300,9 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
       const plain = doc.serialize()
       if (!isWorldDocument(plain) || plain.frames.length === 0) return
       const idx = normalizeWorldFrameListIndex(plain, rawNext)
+      suppressFrameIndexWatch = true
       worldFrameIndex.value = idx
+      suppressFrameIndexWatch = false
 
       const resolved: RenderBundleResolveResult = resolveRenderBundle({ document: plain }, idx)
       structureDefinition.value = resolved.definition
@@ -329,6 +328,21 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
         console.error('[renderAssets] rebuildAll (structEpoch watch) failed:', e)
         loadStatus.value = 'error'
       })
+    })
+    stopFrameIndexWatch?.()
+    stopFrameIndexWatch = watch(worldFrameIndex, (idx, prev) => {
+      if (suppressFrameIndexWatch || idx === prev) return
+      const doc = docRef.value
+      if (!doc || doc.frameCount < 2) return
+      const plain = doc.serialize()
+      if (!isWorldDocument(plain) || plain.frames.length === 0) return
+      if (setFrameIndex) void Promise.resolve(setFrameIndex(idx))
+      else void setCurrentWorldFrame(idx)
+    })
+    stopPlaybackWatch?.()
+    stopPlaybackWatch = watch(framesPlaybackIsPlaying, (playing) => {
+      if (playing) scheduleNextWorldFrameStep()
+      else clearWorldPlaybackSchedule()
     })
   }
 
@@ -404,6 +418,10 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
   function dispose(): void {
     stopStructEpochWatch?.()
     stopStructEpochWatch = null
+    stopFrameIndexWatch?.()
+    stopFrameIndexWatch = null
+    stopPlaybackWatch?.()
+    stopPlaybackWatch = null
   }
 
   // Layer Y reactivity — re-mesh when layer changes
@@ -426,7 +444,6 @@ export function createRenderAssets(deps: RenderAssetsDeps): RenderAssets {
     rebuildContentMesh,
     rebuildAnnotationOverlay,
     setCurrentWorldFrame,
-    toggleWorldFramesPlayback,
     disposeCachesAndLibrary,
     rebuildAll,
     init,

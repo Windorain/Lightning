@@ -12,19 +12,20 @@ import { EmbedPreview } from '@/shared/viewport/embedPreview'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { useNeiTheme } from '@/workbench/composables/useNeiTheme'
-import { provideSelectionContext } from '@/context/selection'
-import { isEditingTarget } from '@/util/browser'
+import { createSelectionContext } from '@/context/selection'
 import { provideEditHistory } from '@/context/editHistory'
 import { provideToolRegistry } from '@/workbench/tools/registry'
-import { provideBContext, type BContextSettings } from '@/context/bContext'
+import { provideContext } from '@/runtime/context'
+import { hostKey } from '@/runtime/host'
+import type { ContextSettings } from '@/runtime/types'
 import { currentLang } from '@/config/i18n'
 import { theme } from '@/workbench/composables/useNeiTheme'
 
-function createBContextSettings(overrides?: {
+function createContextSettings(overrides?: {
   theme?: 'dark' | 'light'
   language?: 'zh' | 'en'
   confirmDirty?: (msg: string) => boolean
-}): BContextSettings {
+}): ContextSettings {
   const replaceBrush = ref<string | null>(null)
   const fillBrush = ref<string | null>(null)
   const generateType = ref<string | null>(null)
@@ -53,59 +54,35 @@ function createBContextSettings(overrides?: {
 }
 
 // Operators — registered via shared VM assembly
-import { createWorkbenchContext } from '@/workbench/context/workbenchContext'
+import { createWorkbenchHost } from '@/workbench/context/workbenchContext'
 
-import { installUnifiedLogApi } from '@/logging/LogCenter'
-import { logCenter } from '@/logging/LogCenter'
+import { bindChromeDom, CHROME_REGION } from '@/runtime/chromeBinder'
+import { createChromeKeymapHandler } from '@/handlers/chromeKeymapHandler'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
-import { autoConnectSde } from '@/workbench/context/autoConnectSde'
 import { usePanelQueries } from '@/workbench/context/usePanelQueries'
-import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 
-// Document format parsers — 创建本地 registry 并注册解析器
-import { createParserRegistry, parserRegistry } from '@/context/parserRegistry'
-import { V2PlainParser, EnvelopeParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/parsers/builtinParsers'
-
-// ---- 本地 registry（当前 shell 使用） ----
-const localParserRegistry = createParserRegistry()
-localParserRegistry.register(V2PlainParser)
-localParserRegistry.register(createEnvelopeParser(localParserRegistry))
-localParserRegistry.register(WorldParser)
-localParserRegistry.register(StructureDataParser)
-
-// ---- 全局 singleton 注册（legacy，供 operators 使用） ----
-parserRegistry.register(V2PlainParser)
-parserRegistry.register(EnvelopeParser)
-parserRegistry.register(WorldParser)
-parserRegistry.register(StructureDataParser)
-
-const selection = provideSelectionContext()
+const selection = createSelectionContext()
 const editHistory = provideEditHistory(256)
 const toolRegistry = provideToolRegistry()
 
 // 共享 VM 组装
-const settings = createBContextSettings()
-const { bctx, screen: defaultScreen } = createWorkbenchContext({
+const settings = createContextSettings()
+const { host, ctx, screen: defaultScreen } = createWorkbenchHost({
   selection, editHistory, toolRegistry, settings,
 })
 
-// Query string override for workspace mode
-const query = parseWorkbenchQuery()
-if (query.apiBase) {
-  bctx.workspaceMode.value = 'sde'
-}
-
-provideBContext(bctx)
+provideContext(ctx)
+provide(hostKey, host)
 useNeiTheme()
 
 
-const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = usePanelQueries(bctx, defaultScreen)
+const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = usePanelQueries(ctx, defaultScreen)
 
 // Wiki embed settings
-const wikiConfig = bctx.wikiConfig as Record<string, any>
+const wikiConfig = ctx.wikiConfig as Record<string, any>
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
   if (!m) return 0x5a5a5a
@@ -142,58 +119,45 @@ const ADD_MENU_ITEMS: ContextMenuItem[] = [
 
 function invokeContextMenuItem(item: ContextMenuItem) {
   if (item.opId) {
-    bctx.operators.invoke(item.opId, item.props ?? {})
+    ctx.operators.invoke(item.opId, item.props ?? {})
   }
 }
 
-function onMouseMove(e: MouseEvent) {
-  lastMousePosition.value = { x: e.clientX, y: e.clientY }
-}
+ctx.wm.chrome.contextMenuOpen = contextMenu.open
+ctx.wm.chrome.contextMenuPosition = contextMenu.position
+ctx.wm.chrome.contextMenuItems = ADD_MENU_ITEMS
+ctx.wm.chrome.lastMousePosition = lastMousePosition
+ctx.wm.chrome.showContextMenu = (pos, items) => showContextMenu(contextMenu, pos, items)
+ctx.wm.chrome.hideContextMenu = () => hideContextMenu(contextMenu)
 
-// Wire context menu + show/hide into wm (不在 createWorkbenchContext 内，因为依赖 showContextMenu 闭包)
-  bctx.wm.contextMenuOpen = contextMenu.open
-  bctx.wm.contextMenuPosition = contextMenu.position
-  bctx.wm.showContextMenu = showContextMenu
-  bctx.wm.hideContextMenu = hideContextMenu
-  bctx.wm.contextMenuItems = ADD_MENU_ITEMS
-
-function handleKeydown(event: KeyboardEvent): void {
-  if (isEditingTarget(event.target)) return
-  if (event.key === 'a' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
-    event.preventDefault()
-    const pos = lastMousePosition.value ?? { x: 400, y: 300 }
-    showContextMenu(contextMenu, pos, ADD_MENU_ITEMS)
-  }
-  if (contextMenu.open.value) {
-    hideContextMenu(contextMenu)
-  }
-}
+let unbindChrome: (() => void) | null = null
 
 const workspace = ref<'preview' | 'wiki' | 'export' | 'materials'>('preview')
-watch(workspace, (v) => { bctx.uiWorkspace.value = v }, { immediate: true })
+watch(workspace, (v) => {
+  void ctx.operators.exec('OPERATOR_APPLY_SETTINGS', { uiWorkspace: v })
+}, { immediate: true })
 const settingsOpen = ref(false)
 provide('workbenchSettingsOpen', settingsOpen)
 
 
 onMounted(async () => {
-  window.addEventListener('keydown', handleKeydown)
-  window.addEventListener('mousemove', onMouseMove)
-  await autoConnectSde(bctx, localParserRegistry)
+  unbindChrome = bindChromeDom(ctx, createChromeKeymapHandler(CHROME_REGION, () => ctx))
+  await host.start()
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleKeydown)
-  window.removeEventListener('mousemove', onMouseMove)
+  unbindChrome?.()
+  unbindChrome = null
 })
 
 
 // VM 句柄：测试层通过 window.__vm__ 访问公开观测面
-;(window as any).__vm__ = bctx
+;(window as any).__vm__ = ctx
 ;(window as any).__vm_ready__ = true
 
 
-logCenter.injectStateRefs({
-  scene: () => bctx.doc.value?.serialize() as any,
+ctx.log.injectStateRefs({
+  scene: () => ctx.doc.value?.serialize() as any,
   selection: () => [...selection.items.value].filter(e => e.kind === 'block').map(e => e.ref),
   toolRegistry: () => ({
     activeToolId: toolRegistry.activeTool.value?.id ?? 'none',
@@ -202,10 +166,6 @@ logCenter.injectStateRefs({
     undoLabel: editHistory.undoLabel.value,
     redoLabel: editHistory.redoLabel.value,
   }),
-})
-
-onMounted(() => {
-  installUnifiedLogApi(bctx)
 })
 </script>
 
@@ -218,7 +178,7 @@ onMounted(() => {
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
           :layout="panel.layout"
-          :rna="bctx.rna"
+          :rna="ctx.rna"
           :owner="panel.owner"
         />
       </div>
@@ -230,18 +190,18 @@ onMounted(() => {
       <div class="wb-toolshelf">
         <template v-for="panel in activeToolshelfPanels" :key="panel.id">
           <component v-if="panel.component" :is="panel.component" />
-          <UIRenderer v-else :layout="panel.layout" :rna="bctx.rna" :owner="panel.owner" />
+          <UIRenderer v-else :layout="panel.layout" :rna="ctx.rna" :owner="panel.owner" />
         </template>
       </div>
     </template>
     <template #viewport>
-      <WorkbenchViewport v-if="workspace === 'preview' && bctx.doc.value" />
-      <div v-else-if="workspace === 'wiki' && bctx.doc.value" class="wb-wiki-embed">
+      <WorkbenchViewport v-if="workspace === 'preview' && ctx.doc.value" />
+      <div v-else-if="workspace === 'wiki' && ctx.doc.value" class="wb-wiki-embed">
         <EmbedPreview :settings="embedSettings" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }" />
       </div>
     </template>
     <template #properties>
-      <PanelTabs :panels="activePropertiesPanels" :rna="bctx.rna" :bctx="bctx" />
+      <PanelTabs :panels="activePropertiesPanels" :rna="ctx.rna" :ctx="ctx" />
     </template>
     <template #statusbar>
       <StatusBar />
@@ -256,7 +216,7 @@ onMounted(() => {
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
           :layout="panel.layout"
-          :rna="bctx.rna"
+          :rna="ctx.rna"
           :owner="panel.owner"
         />
       </div>
@@ -280,7 +240,7 @@ onMounted(() => {
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
           :layout="panel.layout"
-          :rna="bctx.rna"
+          :rna="ctx.rna"
           :owner="panel.owner"
         />
       </div>
@@ -302,17 +262,17 @@ onMounted(() => {
   <Teleport to="body">
     <Transition name="menu-pop">
       <div
-        v-if="bctx.wm.contextMenuOpen?.value ?? false"
+        v-if="ctx.wm.chrome.contextMenuOpen?.value ?? false"
         class="context-menu-overlay"
         @click="hideContextMenu(contextMenu)"
         @contextmenu.prevent
       >
         <div
           class="context-menu-popup"
-          :style="{ left: (bctx.wm.contextMenuPosition?.value.x ?? 0) + 'px', top: (bctx.wm.contextMenuPosition?.value.y ?? 0) + 'px' }"
+          :style="{ left: (ctx.wm.chrome.contextMenuPosition?.value.x ?? 0) + 'px', top: (ctx.wm.chrome.contextMenuPosition?.value.y ?? 0) + 'px' }"
           @click.stop
         >
-          <template v-for="(item, i) in ((bctx.wm.contextMenuItems ?? []) as ContextMenuItem[])" :key="i">
+          <template v-for="(item, i) in ((ctx.wm.chrome.contextMenuItems ?? []) as ContextMenuItem[])" :key="i">
             <hr v-if="item.kind === 'separator'" class="cm-sep" />
             <span v-else-if="item.kind === 'label'" class="cm-label">{{ item.label }}</span>
             <button

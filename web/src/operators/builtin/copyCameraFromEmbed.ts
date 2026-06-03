@@ -10,13 +10,13 @@ export const CopyCameraFromEmbedOperator: OperatorType = {
   label: '从预览拷贝当前相机',
   flagUndo: false,
 
-  poll(bctx: any) {
-    const slot = bctx.viewports.get('r-embed')
+  poll(ctx) {
+    const slot = ctx.viewports.get('r-embed')
     return slot?.camera.value !== null
   },
 
-  exec(bctx: any) {
-    const slot = bctx.viewports.get('r-embed')
+  exec(ctx) {
+    const slot = ctx.viewports.get('r-embed')
     const camera = slot?.camera.value as THREE.Camera | null
     const orbitTarget = slot?.orbitTarget.value as THREE.Vector3 | null
     if (!camera || !orbitTarget) return
@@ -27,9 +27,8 @@ export const CopyCameraFromEmbedOperator: OperatorType = {
     )
     if (!result) return
 
-    const wc = bctx.wikiConfig as Record<string, any>
-    wc.cameraYaw = result.yawDeg
-    wc.cameraElevation = result.elevationDeg
-    wc.cameraZoom = result.zoom
+    void ctx.operators.exec('OPERATOR_SET_WIKI_CONFIG', { path: 'cameraYaw', value: result.yawDeg })
+    void ctx.operators.exec('OPERATOR_SET_WIKI_CONFIG', { path: 'cameraElevation', value: result.elevationDeg })
+    void ctx.operators.exec('OPERATOR_SET_WIKI_CONFIG', { path: 'cameraZoom', value: result.zoom })
   },
 }

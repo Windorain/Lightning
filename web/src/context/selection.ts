@@ -66,6 +66,7 @@ export interface SelectionContext {
 
   /** Unified entity selection — canonical entry point for pick-then-select */
   selectEntity(entity: SelectedEntity): void
+  selectAnnotations(ids: string[], type?: 'box' | 'point' | 'line' | 'text' | 'face'): void
 
   /** Pick cycling state */
   readonly cycleState: { lastPoint: { x: number; y: number } | null; candidates: SelectedEntity[]; index: number }
@@ -95,6 +96,16 @@ export function createSelectionContext(): SelectionContext {
 
   function resetCycle(): void {
     cycleState.value = { lastPoint: null, candidates: [], index: 0 }
+  }
+
+  function selectAnnotations(ids: string[], type: 'box' | 'point' | 'line' | 'text' | 'face' = 'box'): void {
+    active.value = null
+    const set = new Set<SelectedEntity>()
+    for (const id of ids) set.add({ kind: 'annotation', id, type })
+    items.value = set
+    index.value = new Map()
+    annotationIndex.value = new Set(ids)
+    mode.value = 'annotation'
   }
 
   function selectEntity(entity: SelectedEntity): void {
@@ -221,7 +232,7 @@ export function createSelectionContext(): SelectionContext {
     mode: mode as unknown as Ref<SelectionMode>,
     active: active as unknown as Ref<ActiveItem | null>,
     select, selectBox, selectByType, add, remove, clear, invert, isSelected,
-    selectEntity,
+    selectEntity, selectAnnotations,
     get cycleState() { return cycleState.value },
     setCycleState,
     resetCycle,

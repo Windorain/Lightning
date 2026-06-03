@@ -8,7 +8,7 @@
  */
 
 import { ref, shallowRef } from 'vue'
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import { getFrameBlocks } from '@/context/queries'
 
 export const LOG_LEVEL = {
@@ -267,7 +267,7 @@ export function createLogCenter() {
 
     /* —— Snapshot / Diff —— */
 
-    snapshot(ctx: BContext): StateDigest {
+    snapshot(ctx: Context): StateDigest {
       const id = nextId
       const blocks = getFrameBlocks(ctx)
       const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
@@ -281,7 +281,7 @@ export function createLogCenter() {
       }
     },
 
-    diff(snap: StateDigest, ctx: BContext): StateDiff {
+    diff(snap: StateDigest, ctx: Context): StateDiff {
       const now = getFrameBlocks(ctx)
       const nowSel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
       const diff: StateDiff = {
@@ -312,19 +312,19 @@ export function createLogCenter() {
     /* —— Checks (AI-friendly, structured) —— */
 
     check: {
-      selectionSize(ctx: BContext, n: number): CheckResult {
+      selectionSize(ctx: Context, n: number): CheckResult {
         const actual = ctx.selection.items.value.size
         return { pass: actual === n, expected: n, actual }
       },
-      blockCount(ctx: BContext, n: number): CheckResult {
+      blockCount(ctx: Context, n: number): CheckResult {
         const actual = getFrameBlocks(ctx).length
         return { pass: actual === n, expected: n, actual }
       },
-      operatorActive(ctx: BContext, id: string): CheckResult {
+      operatorActive(ctx: Context, id: string): CheckResult {
         const actual = ctx.toolRegistry.activeTool.value?.id ?? null
         return { pass: actual === id, expected: id, actual }
       },
-      blockAt(ctx: BContext, pos: { x: number; y: number; z: number }, id?: string): CheckResult {
+      blockAt(ctx: Context, pos: { x: number; y: number; z: number }, id?: string): CheckResult {
         const blocks = getFrameBlocks(ctx)
         const found = blocks.find(
           b => b.pos.x === pos.x && b.pos.y === pos.y && b.pos.z === pos.z &&
@@ -393,7 +393,7 @@ export const logCenter = createLogCenter()
 
 /* —— Window API —— */
 
-export function installUnifiedLogApi(bctx: BContext): void {
+export function installUnifiedLogApi(ctx: Context): void {
   if (typeof window === 'undefined') return
   ;(window as any).__log__ = {
     // Logs
@@ -411,18 +411,18 @@ export function installUnifiedLogApi(bctx: BContext): void {
 
     // Sessions
     sessionSummaries: () => logCenter.sessionSummaries(),
-    isModalActive: () => (bctx as any).eventDispatcher?.modalDepth('r-viewport') > 0,
+    isModalActive: () => (ctx as any).eventDispatcher?.modalDepth('r-viewport') > 0,
 
     // Snapshot / Diff
-    snapshot: () => logCenter.snapshot(bctx),
-    diff: (snap: StateDigest) => logCenter.diff(snap, bctx),
+    snapshot: () => logCenter.snapshot(ctx),
+    diff: (snap: StateDigest) => logCenter.diff(snap, ctx),
 
     // Checks
     check: {
-      selectionSize: (n: number) => logCenter.check.selectionSize(bctx, n),
-      blockCount: (n: number) => logCenter.check.blockCount(bctx, n),
-      blockAt: (pos: { x: number; y: number; z: number }, id?: string) => logCenter.check.blockAt(bctx, pos, id),
-      operatorActive: (id: string) => logCenter.check.operatorActive(bctx, id),
+      selectionSize: (n: number) => logCenter.check.selectionSize(ctx, n),
+      blockCount: (n: number) => logCenter.check.blockCount(ctx, n),
+      blockAt: (pos: { x: number; y: number; z: number }, id?: string) => logCenter.check.blockAt(ctx, pos, id),
+      operatorActive: (id: string) => logCenter.check.operatorActive(ctx, id),
     },
 
     // State queries
@@ -435,23 +435,23 @@ export function installUnifiedLogApi(bctx: BContext): void {
 
     // RNA
     getRNA: (path: string) => {
-      const desc = bctx.rna.resolve(path)
+      const desc = ctx.rna.resolve(path)
       if (!desc) return null
       return { value: desc.get({}), type: desc.type, label: desc.label }
     },
-    listRNA: () => (bctx.rna as any).list?.() ?? [],
+    listRNA: () => (ctx.rna as any).list?.() ?? [],
 
     // Operators
-    listOperators: () => bctx.operators.all().map((o: any) => ({ id: o.id, label: o.label })),
+    listOperators: () => ctx.operators.all().map((o: any) => ({ id: o.id, label: o.label })),
 
     // Layout queries
-    boundsOfByOperator: (opId: string) => bctx.ui.boundsOfByOperator(opId),
-    boundsOfByRNAPath: (rnaPath: string) => bctx.ui.boundsOfByRNAPath(rnaPath),
+    boundsOfByOperator: (opId: string) => ctx.ui.boundsOfByOperator(opId),
+    boundsOfByRNAPath: (rnaPath: string) => ctx.ui.boundsOfByRNAPath(rnaPath),
 
     // Settle
     settle: () => {
       return new Promise<void>((resolve) => {
-        const ed = (bctx as any).eventDispatcher
+        const ed = (ctx as any).eventDispatcher
         if (!ed || ed.modalDepth('r-viewport') === 0) { resolve(); return }
         const check = () => {
           if (ed.modalDepth('r-viewport') === 0) resolve()

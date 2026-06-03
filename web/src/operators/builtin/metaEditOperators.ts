@@ -7,12 +7,12 @@ export const TooltipEditOperator: OperatorType = {
   description: '修改方块工具提示文本',
   flagUndo: true,
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  exec(bctx, props) {
-    const doc = bctx.doc.value
+  exec(ctx, props) {
+    const doc = ctx.doc.value
     if (!doc) return
 
     const text = props.text as string
@@ -32,6 +32,6 @@ export const TooltipEditOperator: OperatorType = {
     if (!cellTooltipGrid[pos.z][pos.y]) cellTooltipGrid[pos.z][pos.y] = []
     cellTooltipGrid[pos.z][pos.y][pos.x] = text ? idx : -1
 
-    replaceDoc(bctx, newDoc)
+    replaceDoc(ctx, newDoc)
   },
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useBContext } from '@/context/bContext'
+import { useContext } from '@/runtime/context'
 import type { UIOperator, UILabel, UISeparator } from './types/layout'
 
 defineProps<{
@@ -9,14 +9,14 @@ defineProps<{
   items: (UIOperator | UILabel | UISeparator)[]
 }>()
 
-const bctx = useBContext()
+const ctx = useContext()
 const open = ref(false)
 
 function toggle() { open.value = !open.value }
 function close() { open.value = false }
 function invokeOp(op: UIOperator) {
   close()
-  bctx.operators.invoke(op.id, op.props ?? {})
+  ctx.operators.invoke(op.id, op.props ?? {})
 }
 </script>
 

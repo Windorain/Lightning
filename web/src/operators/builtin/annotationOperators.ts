@@ -9,12 +9,12 @@ export const AnnotationCreateOperator: OperatorType = {
   label: '创建注解',
   flagUndo: true,
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  exec(bctx, props) {
-    const doc = bctx.doc.value
+  exec(ctx, props) {
+    const doc = ctx.doc.value
     if (!doc) return
 
     const annotation = props.annotation as Annotation
@@ -26,8 +26,8 @@ export const AnnotationCreateOperator: OperatorType = {
 
     const newDoc = doc.clone()
     ;(newDoc.annotations as Annotation[]).push(annotation)
-    replaceDoc(bctx, newDoc)
-    bctx.selection.active.value = annotation.id
+    replaceDoc(ctx, newDoc)
+    ctx.selection.active.value = annotation.id
   },
 }
 
@@ -36,12 +36,12 @@ export const AnnotationUpdateOperator: OperatorType = {
   label: '更新注解',
   flagUndo: true,
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  exec(bctx, props) {
-    const doc = bctx.doc.value
+  exec(ctx, props) {
+    const doc = ctx.doc.value
     if (!doc) return
 
     const id = props.id as string
@@ -54,7 +54,7 @@ export const AnnotationUpdateOperator: OperatorType = {
     if (idx === -1) return
 
     annotations[idx] = { ...annotations[idx], ...patch, updated_at: Date.now() } as Annotation
-    replaceDoc(bctx, newDoc)
+    replaceDoc(ctx, newDoc)
   },
 }
 
@@ -63,12 +63,12 @@ export const AnnotationDeleteOperator: OperatorType = {
   label: '删除注解',
   flagUndo: true,
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  exec(bctx, props) {
-    const doc = bctx.doc.value
+  exec(ctx, props) {
+    const doc = ctx.doc.value
     if (!doc) return
 
     const id = props.id as string
@@ -80,7 +80,7 @@ export const AnnotationDeleteOperator: OperatorType = {
     if (idx === -1) return
 
     annotations.splice(idx, 1)
-    replaceDoc(bctx, newDoc)
-    bctx.selection.active.value = null
+    replaceDoc(ctx, newDoc)
+    ctx.selection.active.value = null
   },
 }

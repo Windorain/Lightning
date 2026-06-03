@@ -1,7 +1,7 @@
 /**
  * 嵌入端公开契约：宿主传入已打包 document（含 textureBlobs）。
  *
- * EmbedRoot → parserRegistry → RuntimeDocument → createEmbedContext → bctx。
+ * EmbedRoot → createEmbedHost → OPERATOR_LOAD_EMBED_DOCUMENT → ctx。
  */
 import type { View3DFeatures } from '@/preview/previewConfig'
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'

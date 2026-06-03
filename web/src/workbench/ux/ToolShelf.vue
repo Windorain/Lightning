@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useBContext } from '@/context/bContext'
+import { useContext } from '@/runtime/context'
 import ToolGroupButton from './ToolGroupButton.vue'
 import type { Tool } from '@/workbench/tools/tool'
 
-const bctx = useBContext()
-const tools = computed(() => [...bctx.toolRegistry.tools.values()])
+const ctx = useContext()
+const tools = computed(() => [...ctx.toolRegistry.tools.values()])
 
 // Group tools: tools with the same `group` field, plus ungrouped tools as singleton groups
 const groups = computed(() => {

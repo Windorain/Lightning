@@ -1,11 +1,11 @@
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout, UILayoutItem } from '../types/layout'
 import type { BlockRef } from '@/context/selection'
 import { getBlockPaletteEntry } from '@/context/queries'
-function singleBlockLayout(bctx: BContext, item: BlockRef): UILayoutItem[] {
-  const paletteEntry = getBlockPaletteEntry(bctx, item.pos)
+function singleBlockLayout(ctx: Context, item: BlockRef): UILayoutItem[] {
+  const paletteEntry = getBlockPaletteEntry(ctx, item.pos)
   const items: UILayoutItem[] = []
 
   items.push(
@@ -72,11 +72,11 @@ export const blockInspectorPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
   workspaces: ['preview'],
 
-  poll(ctx: BContext): boolean {
+  poll(ctx: Context): boolean {
     return ctx.selection.items.value.size >= 1
   },
 
-  owner(ctx: BContext): unknown {
+  owner(ctx: Context): unknown {
     const items = [...ctx.selection.items.value].filter(e => e.kind === 'block')
     if (items.length !== 1) return null
     const item = items[0]!.ref
@@ -85,7 +85,7 @@ export const blockInspectorPanel: PanelDeclaration = {
     return item
   },
 
-  layout(ctx: BContext): UILayout {
+  layout(ctx: Context): UILayout {
     const items = [...ctx.selection.items.value].filter(e => e.kind === 'block').map(e => e.ref)
     if (items.length === 0) {
       return { kind: 'column', align: false, items: [{ kind: 'label', text: '(无选中)' }] }

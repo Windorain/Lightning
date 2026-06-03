@@ -1,4 +1,4 @@
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import ToolShelf from '../ToolShelf.vue'
@@ -11,9 +11,9 @@ export const toolShelfPanel: PanelDeclaration = {
   workspaces: ['preview'],
 
   poll(): boolean { return true },
-  owner(ctx: BContext): unknown { return ctx.settings },
+  owner(ctx: Context): unknown { return ctx.settings },
 
-  layout(_ctx: BContext) {
+  layout(_ctx: Context) {
     return { kind: 'column', align: false, items: [] }
   },
 

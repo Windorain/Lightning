@@ -4,7 +4,6 @@ import type { Tool, ToolGizmo, ToolContext } from './tool'
 import type { DetectedBounds } from './partDetect'
 import { detectFaceBounds, detectPartBounds } from './partDetect'
 import { computeBoxFrameBars, computeUnionAABB, aabbsIntersect, type AABB } from '@/pure/aabb'
-import type { SelectedEntity } from '@/context/selection'
 import type { OperatorType } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import * as THREE from 'three'
@@ -54,9 +53,9 @@ export const AnnotationBoxCommitOperator: OperatorType = {
   id: 'ANNOTATION_BOX_COMMIT',
   label: '确认注解框',
   description: '根据累加的面选择创建 box 注解',
-  poll(bctx) { return bctx.doc.value !== null && _pendingSelections.length > 0 },
-  invoke(bctx, _props, event) {
-    const toolProps = bctx.toolRegistry.activeTool.value?.properties ?? {}
+  poll(ctx) { return ctx.doc.value !== null && _pendingSelections.length > 0 },
+  invoke(ctx, _props, event) {
+    const toolProps = ctx.toolRegistry.activeTool.value?.properties ?? {}
     const ids: string[] = []
     for (const sel of _pendingSelections) {
       const id = generateId('anno_')
@@ -64,16 +63,13 @@ export const AnnotationBoxCommitOperator: OperatorType = {
       const draft = {
         ...toolProps, type: 'box' as const, id,
         min: { ...sel.aabb.min }, max: { ...sel.aabb.max },
-        frameIndex: getCurrentFrame(bctx)?.index ?? 0,
+        frameIndex: getCurrentFrame(ctx)?.index ?? 0,
       }
-      bctx.operators.invoke('ANNOTATION_CREATE', { annotation: draft }, event ?? undefined)
+      ctx.operators.invoke('ANNOTATION_CREATE', { annotation: draft }, event ?? undefined)
     }
     // Keep all created annotations selected
     if (ids.length > 0) {
-      const set: Set<SelectedEntity> = new Set()
-      for (const id of ids) set.add({ kind: 'annotation', id, type: 'box' })
-      ;(bctx.selection.items as any).value = set
-      bctx.selection.active.value = null
+      ctx.selection.selectAnnotations(ids, 'box')
     }
     _boxClearPending()
     return OP_RESULT.FINISHED
@@ -84,8 +80,8 @@ export const AnnotationBoxResetOperator: OperatorType = {
   id: 'ANNOTATION_BOX_RESET',
   label: '重置注解框选择',
   description: '清除所有累加的面选择',
-  poll(bctx) { return bctx.doc.value !== null },
-  invoke(_bctx, _props, _event) { _boxClearPending(); return OP_RESULT.FINISHED },
+  poll(ctx) { return ctx.doc.value !== null },
+  invoke(_ctx, _props, _event) { _boxClearPending(); return OP_RESULT.FINISHED },
 }
 
 // ── Tool data ──

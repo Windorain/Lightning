@@ -1,7 +1,7 @@
 // web/src/workbench/tools/tool.ts
 import type { Ref } from 'vue'
 import type { SelectionContext, BlockRef } from '@/context/selection'
-import type { ViewportSlot } from '@/context/bContext'
+import type { ViewportSlot } from '@/runtime/types'
 import type { InputBinding } from '@/keymap'
 import type { Frame } from '@/render/schema/types'
 import type { ScenePickEntity } from '@/render/interaction/scenePick'

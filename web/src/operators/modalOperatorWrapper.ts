@@ -7,7 +7,7 @@
  */
 import type { ModalOperation, ModalKeymap } from '@/events/dispatcher'
 
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { OperatorType, OperatorProperties } from './operatorType'
 import { OP_RESULT } from './operatorType'
 import { pushDocUndo } from './pushDocUndo'
@@ -17,14 +17,14 @@ import type { RuntimeDocument } from '@/context/runtimeDocument'
 export class ModalOperatorWrapper implements ModalOperation {
   id: string
   private op: OperatorType
-  private bctx: BContext
+  private ctx: Context
   private props: OperatorProperties
   private undoSnapshot: RuntimeDocument | null = null
   private regionId: string
 
-  constructor(op: OperatorType, bctx: BContext, props: OperatorProperties, regionId: string) {
+  constructor(op: OperatorType, ctx: Context, props: OperatorProperties, regionId: string) {
     this.op = op
-    this.bctx = bctx
+    this.ctx = ctx
     this.props = props
     this.id = op.id
     this.regionId = regionId
@@ -39,26 +39,26 @@ export class ModalOperatorWrapper implements ModalOperation {
   }
 
   handleEvent(event: Event): { break: boolean } {
-    const result = this.op.modal!(this.bctx, this.props, event)
+    const result = this.op.modal!(this.ctx, this.props, event)
 
     if (result === OP_RESULT.FINISHED) {
       if (this.op.flagUndo && this.undoSnapshot !== null) {
         const snap = this.undoSnapshot
-        const snapshotAfter = this.bctx.doc.value?.clone() ?? null
-        pushDocUndo(this.bctx, snap, snapshotAfter, this.op.label)
+        const snapshotAfter = this.ctx.doc.value?.clone() ?? null
+        pushDocUndo(this.ctx, snap, snapshotAfter, this.op.label)
         this.undoSnapshot = null
       }
-      this.bctx.eventDispatcher.commitModal(this.regionId)
+      this.ctx.eventDispatcher.commitModal(this.regionId)
       return { break: true }
     }
 
     if (result === OP_RESULT.CANCELLED) {
       if (this.undoSnapshot !== null) {
-        replaceDoc(this.bctx, this.undoSnapshot)
+        replaceDoc(this.ctx, this.undoSnapshot)
         this.undoSnapshot = null
       }
-      this.op.cancel?.(this.bctx, this.props)
-      this.bctx.eventDispatcher.cancelModal(this.regionId)
+      this.op.cancel?.(this.ctx, this.props)
+      this.ctx.eventDispatcher.cancelModal(this.regionId)
       return { break: true }
     }
 
@@ -71,7 +71,7 @@ export class ModalOperatorWrapper implements ModalOperation {
 
   onExit(cancelled: boolean): void {
     if (cancelled) {
-      this.op.cancel?.(this.bctx, this.props)
+      this.op.cancel?.(this.ctx, this.props)
     }
     this.undoSnapshot = null
   }

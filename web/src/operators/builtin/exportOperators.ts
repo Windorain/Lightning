@@ -18,12 +18,12 @@ export const ExportPlainOperator: OperatorType = {
   label: '导出 Plain JSON',
   description: '下载完整明文 JSON',
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  exec(bctx, _props) {
-    const doc = (bctx.doc.value?.serialize() ?? null) as Record<string, unknown> | null
+  exec(ctx, _props) {
+    const doc = (ctx.doc.value?.serialize() ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-plain`, doc, true)
@@ -35,12 +35,12 @@ export const ExportEnvelopeOperator: OperatorType = {
   label: '导出 Envelope JSON',
   description: '下载 gzip+Base64 信封格式',
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  exec(bctx, _props) {
-    const doc = (bctx.doc.value?.serialize() ?? null) as Record<string, unknown> | null
+  exec(ctx, _props) {
+    const doc = (ctx.doc.value?.serialize() ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-envelope`, buildEnvelopePackage(doc), true)
@@ -52,12 +52,12 @@ export const ExportObjOperator: OperatorType = {
   label: '导出 OBJ',
   description: '导出 Wavefront OBJ+MTL 打包为 zip',
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  async exec(bctx, _props) {
-    const doc = bctx.doc.value?.serialize()
+  async exec(ctx, _props) {
+    const doc = ctx.doc.value?.serialize()
     if (!doc) return
     const connected = (_props.connected as boolean) ?? false
     const mode = connected ? 'connected' : 'block'
@@ -73,21 +73,21 @@ export const ExportIsoPngOperator: OperatorType = {
   label: '导出等轴 PNG',
   description: '将等轴方向渲染输出为 PNG',
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  async exec(bctx, _props) {
+  async exec(ctx, _props) {
     const direction = (_props.direction as string) ?? 'nw'
     const directionIndex = ISO_DIRECTION_MAP[direction] ?? 0
-    const doc = bctx.doc.value?.serialize()
+    const doc = ctx.doc.value?.serialize()
     if (!doc) return
     try {
       const dataUrl = await bakeIsometricStructurePngDataUrl(doc, directionIndex)
       const blob = dataUrlToPngBlob(dataUrl)
       downloadBlob(`iso-${direction}.png`, blob)
     } catch (e) {
-      bctx.log.warn('导出', `等轴 PNG 导出失败: ${e}`)
+      ctx.log.warn('导出', `等轴 PNG 导出失败: ${e}`)
     }
   },
 }

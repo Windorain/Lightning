@@ -15,31 +15,31 @@ export const SelectOperator: OperatorType = {
   label: '选择',
   description: '点击选择方块/注解，重复点击轮换',
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  invoke(bctx, _props, event) {
+  invoke(ctx, _props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
 
     const handler: PickHandlerV2 = {
-      pickAll: (e) => pickAll(bctx, e),
+      pickAll: (e) => pickAll(ctx, e),
       selection: {
-        selectEntity: (entity) => bctx.selection.selectEntity(entity),
-        add: (voxels) => bctx.selection.add(voxels),
-        remove: (voxels) => bctx.selection.remove(voxels),
-        clear: () => bctx.selection.clear(),
+        selectEntity: (entity) => ctx.selection.selectEntity(entity),
+        add: (voxels) => ctx.selection.add(voxels),
+        remove: (voxels) => ctx.selection.remove(voxels),
+        clear: () => ctx.selection.clear(),
       },
-      cycleState: bctx.selection.cycleState,
-      setCycleState: (s) => bctx.selection.setCycleState(s),
-      resetCycle: () => bctx.selection.resetCycle(),
+      cycleState: ctx.selection.cycleState,
+      setCycleState: (s) => ctx.selection.setCycleState(s),
+      resetCycle: () => ctx.selection.resetCycle(),
     }
 
     applyPickSelectionWithCycle(handler, event)
     return OP_RESULT.FINISHED
   },
 
-  renderOverlay(_bctx, _props, _overlayGroup) {
+  renderOverlay(_ctx, _props, _overlayGroup) {
     // Selection highlight rendered by SelectionHighlightProvider
   },
 }
@@ -58,14 +58,14 @@ export const SelectAllOperator: OperatorType = {
   description: '切换选择当前帧所有方块',
   flagUndo: false,
 
-  poll(bctx) {
-    return bctx.doc.value !== null && bctx.selection !== undefined
+  poll(ctx) {
+    return ctx.doc.value !== null && ctx.selection !== undefined
   },
 
-  exec(bctx, _props) {
-    const blocks = getFrameBlocks(bctx)
+  exec(ctx, _props) {
+    const blocks = getFrameBlocks(ctx)
     if (blocks.length === 0) return
-    bctx.selection.invert(blocks)
+    ctx.selection.invert(blocks)
   },
 }
 
@@ -74,14 +74,14 @@ export const SelectByTypeOperator: OperatorType = {
   label: '按类型选择',
   description: '选中当前帧所有相同类型的方块',
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  exec(bctx, props) {
+  exec(ctx, props) {
     const blockStateId = (props?.blockStateId as string) ?? ''
     if (!blockStateId) return
-    const blocks = getFrameBlocks(bctx)
-    bctx.selection.selectByType(blockStateId, blocks)
+    const blocks = getFrameBlocks(ctx)
+    ctx.selection.selectByType(blockStateId, blocks)
   },
 }

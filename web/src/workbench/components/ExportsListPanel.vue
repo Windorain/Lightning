@@ -1,23 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import { useBContext } from '@/context/bContext'
-import { logCenter } from '@/logging/LogCenter'
+import { useContext } from '@/runtime/context'
+const ctx = useContext()
 
-const bctx = useBContext()
-
-const isSde = computed(() => bctx.workspaceMode.value === 'sde')
-const apiBaseStr = computed(() => bctx.connection.apiBase)
-const exportFilesList = computed(() => bctx.connection.exports)
-const exportsLoading = computed(() => bctx.connection.exportsLoading)
-const selectedName = computed(() => bctx.connection.selectedExportName)
+const isSde = computed(() => ctx.workspaceMode.value === 'sde')
+const apiBaseStr = computed(() => ctx.connection.apiBase)
+const exportFilesList = computed(() => ctx.connection.exports)
+const exportsLoading = computed(() => ctx.connection.exportsLoading)
+const selectedName = computed(() => ctx.connection.selectedExportName)
 
 async function onPick(name: string): Promise<void> {
   try {
-    await bctx.operators.exec('OPERATOR_SDE_LOAD', { name })
-    logCenter.setStatus(`已加载 ${name}`)
+    await ctx.operators.exec('OPERATOR_SDE_LOAD', { name })
+    ctx.log.setStatus(`已加载 ${name}`)
   } catch (e) {
-    logCenter.setStatus(String(e instanceof Error ? e.message : e))
+    ctx.log.setStatus(String(e instanceof Error ? e.message : e))
   }
 }
 </script>

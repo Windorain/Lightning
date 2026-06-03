@@ -1,10 +1,8 @@
 import type { OperatorType } from '@/operators/operatorType'
 import { RuntimeDocument } from '@/context/runtimeDocument'
-import { parserRegistry } from '@/context/parserRegistry'
 import { getDevSceneDocument } from '@/dev/devScenes'
 import { downloadJson } from '@/util/browser'
 import { suggestedJsonBaseName } from '@/workbench/utils/fileNaming'
-import { logCenter } from '@/logging/LogCenter'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
 import { replaceDoc } from '@/context/replaceDoc'
 
@@ -45,20 +43,20 @@ export const NewSceneOperator: OperatorType = {
   label: '新建场景',
   description: '创建空白新场景',
 
-  poll(_bctx) {
+  poll(_ctx) {
     return true
   },
 
-  async exec(bctx, _props) {
-    if (bctx.editHistory.canUndo.value) {
-      const confirmFn = bctx.settings.confirmDirty ?? window.confirm
+  async exec(ctx, _props) {
+    if (ctx.editHistory.canUndo.value) {
+      const confirmFn = ctx.settings.confirmDirty ?? window.confirm
       if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
-      await bctx.operators.exec('OPERATOR_SAVE_FILE')
+      await ctx.operators.exec('OPERATOR_SAVE_FILE')
     }
-    bctx.selection.clear()
-    bctx.editHistory.clear()
+    ctx.selection.clear()
+    ctx.editHistory.clear()
     const doc = RuntimeDocument.empty()
-    replaceDoc(bctx, doc)
+    replaceDoc(ctx, doc)
   },
 }
 
@@ -67,23 +65,23 @@ export const OpenSceneOperator: OperatorType = {
   label: '打开场景',
   description: '从文件加载场景',
 
-  poll(_bctx) {
+  poll(_ctx) {
     return true
   },
 
-  async exec(bctx, _props) {
+  async exec(ctx, _props) {
     let file = _props.file as File | undefined
     if (!file) {
       file = await pickFile()
       if (!file) return
     }
-    if (bctx.editHistory.canUndo.value) {
-      const confirmFn = bctx.settings.confirmDirty ?? window.confirm
+    if (ctx.editHistory.canUndo.value) {
+      const confirmFn = ctx.settings.confirmDirty ?? window.confirm
       if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
-      await bctx.operators.exec('OPERATOR_SAVE_FILE')
+      await ctx.operators.exec('OPERATOR_SAVE_FILE')
     }
-    bctx.selection.clear()
-    bctx.editHistory.clear()
+    ctx.selection.clear()
+    ctx.editHistory.clear()
     const text = await file.text()
     let data: unknown
     try {
@@ -91,18 +89,18 @@ export const OpenSceneOperator: OperatorType = {
     } catch (e) {
       throw new Error(`JSON 解析失败：${e}`)
     }
-    const result = await parserRegistry.detectAndParse(data)
+    const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      replaceDoc(bctx, result.document)
-      bctx.currentWorldFrameIndex.value = 0
+      replaceDoc(ctx, result.document)
+      ctx.currentFrameIndex.value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
-      logCenter.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
+      ctx.log.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      replaceDoc(bctx, null)
-      logCenter.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
+      replaceDoc(ctx, null)
+      ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
     }
-    bctx.localFileName.value = file.name
-    bctx.workspaceMode.value = 'local-file'
+    ctx.localFileName.value = file.name
+    await ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-file' })
   },
 }
 
@@ -111,14 +109,14 @@ export const SaveFileOperator: OperatorType = {
   label: '保存到文件',
   description: '将当前场景保存到本地文件',
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
-  exec(bctx, _props) {
-    const doc = bctx.doc.value?.serialize()
+  exec(ctx, _props) {
+    const doc = ctx.doc.value?.serialize()
     if (!doc) return
-    const baseName = suggestedJsonBaseName(bctx.localFileName.value, 'structure-export')
+    const baseName = suggestedJsonBaseName(ctx.localFileName.value, 'structure-export')
     downloadJson(baseName, doc, true)
   },
 }
@@ -128,27 +126,39 @@ export const LoadBuiltinSceneOperator: OperatorType = {
   label: '加载内置示例',
   description: '加载内置示例场景',
 
-  poll(_bctx) {
+  poll(_ctx) {
     return true
   },
 
-  async exec(bctx, _props) {
+  async exec(ctx, _props) {
     const sceneId = _props.sceneId as string | undefined
     const id = sceneId && sceneId.length > 0 ? sceneId : DEFAULT_PREVIEW_SCENE_ID
     const raw = getDevSceneDocument(id)
-    bctx.selection.clear()
-    bctx.editHistory.clear()
-    const result = await parserRegistry.detectAndParse(raw)
+    ctx.selection.clear()
+    ctx.editHistory.clear()
+    const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (result.document) {
-      replaceDoc(bctx, result.document)
-      bctx.currentWorldFrameIndex.value = 0
+      replaceDoc(ctx, result.document)
+      ctx.currentFrameIndex.value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
-      logCenter.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
+      ctx.log.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      replaceDoc(bctx, null)
-      logCenter.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
+      replaceDoc(ctx, null)
+      ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
     }
-    bctx.workspaceMode.value = 'local-bundle'
-    bctx.localFileName.value = `示例 · ${id}.json`
+    await ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-bundle' })
+    ctx.localFileName.value = `示例 · ${id}.json`
+  },
+}
+
+export const LoadEmbedDocumentOperator: OperatorType = {
+  id: 'OPERATOR_LOAD_EMBED_DOCUMENT',
+  label: '加载嵌入文档',
+  poll: () => true,
+  async exec(ctx, props) {
+    const raw = props.document
+    const result = await ctx.main.registries.parsers.detectAndParse(raw)
+    if (!result.document) throw new Error(result.error ?? 'parse failed')
+    replaceDoc(ctx, result.document)
   },
 }

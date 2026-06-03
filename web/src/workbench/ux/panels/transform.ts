@@ -1,4 +1,4 @@
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '../types/screen'
 import type { UILayout } from '../types/layout'
@@ -10,12 +10,12 @@ export const transformPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
   workspaces: ['preview'],
 
-  poll(ctx: BContext): boolean {
+  poll(ctx: Context): boolean {
     return ctx.toolRegistry.activeTool.value?.id === 'move'
       && ctx.selection.items.value.size > 0
   },
 
-  layout(ctx: BContext): UILayout {
+  layout(ctx: Context): UILayout {
     const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
     if (sel.length === 0) {
       return { kind: 'column', align: false, items: [{ kind: 'label', text: '未选择方块' }] }

@@ -1,37 +1,20 @@
 <script setup lang="ts">
 /**
- * EmbedRoot — 嵌入场景的 bctx Owner。
+ * EmbedRoot — 嵌入场景的 ctx Owner。
  *
- * 对齐 WorkbenchRoot：
- * - 注册 parser → 解析 bootstrap → RuntimeDocument
- * - 创建 embed bctx（createEmbedContext）
- * - 提供 bctx 给子树
- * - EmbedViewport 消费 bctx
+ * - createEmbedHost + provideContext
+ * - OPERATOR_LOAD_EMBED_DOCUMENT 加载 bootstrap 文档
  */
 import { ref, watch } from 'vue'
 import type { EmbedBootstrapOptions } from '@/embed/embedContract'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import { formatUnknownError } from '@/util/formatUnknownError'
-import { createParserRegistry, parserRegistry } from '@/context/parserRegistry'
-import { V2PlainParser, EnvelopeParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/parsers/builtinParsers'
-import { createEmbedContext, provideEmbedBContext } from '@/embed/embedBContext'
-import { replaceDoc } from '@/context/replaceDoc'
+import { createEmbedHost } from '@/embed/embedBContext'
+import { hostKey } from '@/runtime/host'
+import { provide } from 'vue'
 import EmbedViewport from '@/embed/EmbedViewport.vue'
 import { defaultEmbedUi } from '@/preview/previewConfig'
 import type { View3DFeatures } from '@/preview/previewConfig'
-
-// ---- 创建本地 parser registry（与 WorkbenchRoot 对齐） ----
-const localParserRegistry = createParserRegistry()
-localParserRegistry.register(V2PlainParser)
-localParserRegistry.register(createEnvelopeParser(localParserRegistry))
-localParserRegistry.register(WorldParser)
-localParserRegistry.register(StructureDataParser)
-
-// ---- 全局 singleton 注册（legacy，供 operators 使用） ----
-parserRegistry.register(V2PlainParser)
-parserRegistry.register(EnvelopeParser)
-parserRegistry.register(WorldParser)
-parserRegistry.register(StructureDataParser)
 
 const props = defineProps<{
   bootstrap: EmbedBootstrapOptions
@@ -59,27 +42,21 @@ function buildEmbedSettings(): EmbedSettings {
   }
 }
 
-// ---- 同步创建 bctx + provide（Vue 要求 setup 期 provide） ----
 const settings = buildEmbedSettings()
-const bctx = createEmbedContext(settings)
-provideEmbedBContext(bctx)
+const { host, ctx } = createEmbedHost(settings)
+provide(hostKey, host)
 
-// ---- 异步解析 document → 填入 bctx.doc ----
 const loadError = ref('')
 
 async function load() {
   loadError.value = ''
   try {
-    const rawDoc = props.bootstrap.data.document
-    const result = await localParserRegistry.detectAndParse(rawDoc)
-    if (!result.document) {
-      loadError.value = `无法解析文档（format: ${result.parser?.formatName ?? '未知'}）`
-      return
-    }
-    replaceDoc(bctx, result.document)
+    await ctx.operators.exec('OPERATOR_LOAD_EMBED_DOCUMENT', {
+      document: props.bootstrap.data.document,
+    })
   } catch (e) {
     loadError.value = formatUnknownError(e)
-    console.error('[EmbedRoot] parse', e)
+    console.error('[EmbedRoot] load', e)
   }
 }
 
@@ -94,7 +71,7 @@ watch(
   <div v-if="loadError" class="embed-boot embed-boot--err">
     {{ loadError }}
   </div>
-  <EmbedViewport v-else-if="bctx.doc.value" :settings="settings" />
+  <EmbedViewport v-else-if="ctx.doc.value" :settings="settings" />
   <div v-else class="embed-boot embed-boot--loading">
     <div class="embed-boot-spinner"></div>
     <span>加载中…</span>

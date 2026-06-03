@@ -1,4 +1,4 @@
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { bScreen, ScrArea, Rect } from '../types/screen'
 import { RegionType } from '../types/screen'
 import { computeWidgetRects, type WidgetRect } from './widgetTree'
@@ -17,8 +17,8 @@ export function clearWidgetCache(): void {
   widgetCache.clear()
 }
 
-export function computeLayout(ctx: BContext, screen: bScreen): void {
-  ctx.screen = screen
+export function computeLayout(ctx: Context, screen: bScreen): void {
+  if (ctx.workbench) ctx.workbench.screen = screen
   clearWidgetCache()
 
   layoutAreas(screen.areas, screen.bounds)
@@ -103,7 +103,7 @@ function layoutArea(area: ScrArea, areaBounds: Rect): void {
 }
 
 /** Get the computed bounds for a widget or panel by its id (layoutId or panel id). */
-export function boundsOf(ctx: BContext, id: string): Rect | null {
+export function boundsOf(ctx: Context, id: string): Rect | null {
   const cached = widgetCache.get(id)
   if (cached) return { ...cached.bounds }
 
@@ -146,7 +146,7 @@ export function widgetAt(x: number, y: number): WidgetRect | null {
   return null
 }
 
-export function relayout(ctx: BContext): void {
+export function relayout(ctx: Context): void {
   if (ctx.screen) computeLayout(ctx, ctx.screen)
 }
 

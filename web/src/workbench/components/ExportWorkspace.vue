@@ -4,32 +4,32 @@ import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocum
 import { copyTextToClipboard } from '@/util/browser'
 import { bakeIsometricStructurePngDataUrl } from '@/workbench/exportIsometricImage'
 import { formatUnknownError } from '@/util/formatUnknownError'
-import { useBContext } from '@/context/bContext'
+import { useContext } from '@/runtime/context'
 import { t } from '@/config/i18n'
 
-const bctx = useBContext()
-const doc = computed(() => bctx.doc.value?.serialize() ?? null)
+const ctx = useContext()
+const doc = computed(() => ctx.doc.value?.serialize() ?? null)
 const baseName = computed(() => doc.value ? sceneStableStringIdFromDocument(doc.value) : 'scene')
-const showSdeSave = computed(() => bctx.workspaceMode.value === 'sde' && bctx.connection.apiBase.length > 0)
+const showSdeSave = computed(() => ctx.workspaceMode.value === 'sde' && ctx.connection.apiBase.length > 0)
 const feedback = ref('')
 
 function msg(s: string): void { feedback.value = s }
 
 function downloadPlain(): void {
-  try { bctx.operators.exec('OPERATOR_EXPORT_PLAIN'); msg('已下载 Plain JSON') } catch (e) { msg(formatUnknownError(e)) }
+  try { ctx.operators.exec('OPERATOR_EXPORT_PLAIN'); msg('已下载 Plain JSON') } catch (e) { msg(formatUnknownError(e)) }
 }
 function downloadEnvelope(): void {
-  try { bctx.operators.exec('OPERATOR_EXPORT_ENVELOPE'); msg('已下载 Envelope JSON') } catch (e) { msg(formatUnknownError(e)) }
+  try { ctx.operators.exec('OPERATOR_EXPORT_ENVELOPE'); msg('已下载 Envelope JSON') } catch (e) { msg(formatUnknownError(e)) }
 }
 async function copyRawJson(): Promise<void> {
   if (!doc.value) return
   try { const raw = doc.value; await copyTextToClipboard(JSON.stringify(raw, null, 2)); msg('已复制到剪贴板') } catch (e) { msg(formatUnknownError(e)) }
 }
 function downloadObjBlock(): void {
-  try { bctx.operators.exec('OPERATOR_EXPORT_OBJ', { connected: false }); msg('已导出 OBJ (block)') } catch (e) { msg(formatUnknownError(e)) }
+  try { ctx.operators.exec('OPERATOR_EXPORT_OBJ', { connected: false }); msg('已导出 OBJ (block)') } catch (e) { msg(formatUnknownError(e)) }
 }
 function downloadObjConnected(): void {
-  try { bctx.operators.exec('OPERATOR_EXPORT_OBJ', { connected: true }); msg('已导出 OBJ (connected)') } catch (e) { msg(formatUnknownError(e)) }
+  try { ctx.operators.exec('OPERATOR_EXPORT_OBJ', { connected: true }); msg('已导出 OBJ (connected)') } catch (e) { msg(formatUnknownError(e)) }
 }
 
 const isoDir = ref(0)
@@ -47,10 +47,10 @@ async function bakeIso(): Promise<void> {
 }
 watch(() => [doc.value, isoDir.value] as const, () => { void bakeIso() }, { immediate: true })
 function downloadIso(): void {
-  try { bctx.operators.exec('OPERATOR_EXPORT_ISO_PNG', { direction: isoDir.value }); msg(`已下载等轴视角 PNG ${isoDir.value + 1}/4`) } catch (e) { msg(formatUnknownError(e)) }
+  try { ctx.operators.exec('OPERATOR_EXPORT_ISO_PNG', { direction: isoDir.value }); msg(`已下载等轴视角 PNG ${isoDir.value + 1}/4`) } catch (e) { msg(formatUnknownError(e)) }
 }
 function pushToServer(): void {
-  try { bctx.operators.exec('OPERATOR_SDE_PUSH'); msg('已同步到 SDE') } catch (e) { msg(formatUnknownError(e)) }
+  try { ctx.operators.exec('OPERATOR_SDE_PUSH'); msg('已同步到 SDE') } catch (e) { msg(formatUnknownError(e)) }
 }
 </script>
 

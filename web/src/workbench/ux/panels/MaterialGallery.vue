@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import type { MaterialQueryItem } from '@/context/bContext'
-import { useBContext } from '@/context/bContext'
+import type { MaterialQueryItem } from '@/runtime/types'
+import { useContext } from '@/runtime/context'
 import OperatorBtn from '@/workbench/ux/OperatorBtn.vue'
 import { parsePngDims } from '@/util/pngDims'
 import { useMaterialAnimation } from './useMaterialAnimation'
 import { listMaterials, getMaterialUsageCounts } from '@/context/queries'
 
-const bctx = useBContext()
+const ctx = useContext()
 
 // ---- Data ----
 interface MaterialCard {
@@ -72,8 +72,8 @@ const filteredCards = computed(() => {
 
 // ---- Data loading ----
 function refresh() {
-  const items = listMaterials(bctx)
-  const usage = getMaterialUsageCounts(bctx)
+  const items = listMaterials(ctx)
+  const usage = getMaterialUsageCounts(ctx)
 
   cards.value = items.map((m: MaterialQueryItem) => {
     let textureWidth: number | null = null
@@ -111,7 +111,7 @@ function selectCard(id: string) {
   selectedId.value = selectedId.value === id ? null : id
 }
 
-watch(() => bctx.doc.value, () => refresh(), { immediate: true })
+watch(() => ctx.doc.value, () => refresh(), { immediate: true })
 
 const { setCanvasRef } = useMaterialAnimation((id: string) => {
   const card = cards.value.find(c => c.materialId === id)

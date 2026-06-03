@@ -1,51 +1,57 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import ViewerCore, { type ViewerCoreReadyPayload } from '@/shared/viewport/ViewerCore.vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
+import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
-import { useViewport, updateAnnotationOverlay } from '@/shared/composables/useViewport'
-import { useSelectionContext, type BlockRef } from '@/context/selection'
-import { useBContext } from '@/context/bContext'
-import { createRenderAssets } from '@/context/renderAssets'
+import { updateAnnotationOverlay } from '@/runtime/viewportAnnotations'
+import { useContext } from '@/runtime/context'
+import { hostKey } from '@/runtime/host'
+import type { WorkbenchHost } from '@/runtime/host/workbenchHost'
+import { DRW } from '@/runtime/drw'
 import { usePreferences } from '@/preview/preferences'
-import { logCenter } from '@/logging/LogCenter'
-import { structureRowToWorldY } from '@/pure/vec'
 import { createToolGizmoHandler } from '@/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
+import { createHoverHandler } from '@/handlers/hoverHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
 import { pickVoxel, pickAll, getCurrentFrame, gridCenterWorld, getBlockGeometry } from '@/context/queries'
 import { type Annotation } from '@/render/data/annotationTypes'
-import { isEditingTarget } from '@/util/browser'
-import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
 import ToolHintsBar from '@/workbench/ux/ToolHintsBar.vue'
 import type { ToolHint } from '@/workbench/tools/tool'
-import * as THREE from 'three'
 
-const selection = useSelectionContext()
-const bctx = useBContext()
+const ctx = useContext()
+const host = inject(hostKey)! as WorkbenchHost
+const selection = ctx.selection
 const prefs = usePreferences()
 
 const VIEWPORT_REGION_ID = 'r-viewport'
-const vpSlot = bctx.viewports.get(VIEWPORT_REGION_ID) ?? bctx.viewports.register(VIEWPORT_REGION_ID)
+const vpSlot = ctx.viewports.get(VIEWPORT_REGION_ID) ?? ctx.viewports.register(VIEWPORT_REGION_ID)
 
-// ---- Viewport composable (shared with EmbedViewport) ----
-const vp = useViewport({
-  bctx,
+const docRef = computed(() => ctx.doc.value)
+const drw = new DRW({
+  docRef,
+  structEpochRef: ctx.structEpoch,
+  currentFrameIndex: ctx.main.currentFrameIndex,
+  layerWorldY: ctx.layerWorldY,
+  framesPlaybackIsPlaying: ctx.main.framesPlaybackIsPlaying,
   structureDefinition: vpSlot.definition,
   mainMeshGroup: vpSlot.contentGroup,
+  slot: vpSlot,
   blockIconCacheOptions: {},
-  createRenderAssets,
+  setFrameIndex: (i) => ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
 })
-const {
-  loadStatus, meshBusy,
-  structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY,
-  framesPlaybackIsPlaying,
-  renderAssets, outlinePass,
-} = vp
+
+const { loadStatus, meshBusy, renderAssets } = drw
+
+const structureDefinition = vpSlot.definition
+const mainMeshGroup = vpSlot.contentGroup
+const worldFrameIndex = ctx.main.currentFrameIndex
+const layerWorldY = ctx.layerWorldY
+const framesPlaybackIsPlaying = ctx.main.framesPlaybackIsPlaying
 
 const annotations = computed<Annotation[]>(() => {
-  const doc = bctx.doc.value
+  const doc = ctx.doc.value
   if (!doc) return []
   const plain = doc.serialize() as Record<string, any>
   return (plain.annotations ?? []) as Annotation[]
@@ -55,14 +61,6 @@ const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
   hasWorldMultiFrame, worldFrameCount,
 } = renderAssets.computed
-
-// ---- Frame index 同步：local worldFrameIndex → operator → bctx.currentWorldFrameIndex ----
-// setCurrentWorldFrame 是帧切换的权威路径（scrubber/playback 直接调用），
-// 内部完成 mesh 重建并更新 worldFrameIndex。此 watcher 仅负责将 worldFrameIndex
-// 同步到 bctx.currentWorldFrameIndex 供下游（StatusBar 等）消费。
-watch(worldFrameIndex, (i) => {
-  bctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i })
-})
 
 const materialLibrary = renderAssets.textureCache
 
@@ -76,189 +74,98 @@ const activeTab = computed<BottomTab>({
 function createToolContext(): ToolContext {
   return {
     selection,
-    viewport: bctx.viewport,
-    pickVoxel: (e) => pickVoxel(bctx, e),
-    pickAll: (e) => pickAll(bctx, e),
-    getCurrentFrame: () => getCurrentFrame(bctx),
-    gridCenterWorld: (pos) => gridCenterWorld(bctx, pos),
-    getBlockGeometry: (pos) => getBlockGeometry(bctx, pos),
-    invokeOperator: (id, props, event, rid) => bctx.operators.invoke(id, props ?? {}, event, rid),
-    activeTool: bctx.toolRegistry.activeTool,
-    modalDepth: (rid: string) => bctx.eventDispatcher.modalDepth(rid),
+    viewport: ctx.viewport,
+    pickVoxel: (e) => pickVoxel(ctx, e),
+    pickAll: (e) => pickAll(ctx, e),
+    getCurrentFrame: () => getCurrentFrame(ctx),
+    gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
+    getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
+    invokeOperator: (id, props, event, rid) => ctx.operators.invoke(id, props ?? {}, event, rid),
+    activeTool: ctx.toolRegistry.activeTool,
+    modalDepth: (rid: string) => ctx.eventDispatcher.modalDepth(rid),
   }
 }
 
-/* ---- Viewport events ---- */
-async function onViewportReady({ mainScene, overlayScene: _overlayScene, layers, camera, domElement, orbitTarget, renderer: vpRenderer }: ViewerCoreReadyPayload): Promise<void> {
-  bctx.viewports.activeId.value = VIEWPORT_REGION_ID
-  renderAssets.registerScene(mainScene)
-  renderAssets.init()
+let gizmoRafId: number | undefined
+let _alive = true
+let toolCtx: ToolContext | null = null
 
-  // Register screen-space outline pass
-  outlinePass.setCamera(camera as THREE.Camera)
-  vpRenderer.setOutlinePass(outlinePass)
-
-  try { await renderAssets.rebuildContentMesh() } catch (e) { console.error('[Workbench] onViewportReady', e); logCenter.error('WorkbenchViewport', `rebuildContentMesh: ${e}`) }
-
-  vpSlot.orbitTarget.value = orbitTarget
-  vpSlot.camera.value = camera
-  vpSlot.contentGroup.value = mainMeshGroup.value ?? new THREE.Group()
-  vpSlot.domElement.value = domElement
-  vpSlot.definition.value = structureDefinition.value ?? null
-  vpSlot.layerPreview.value = layerPreviewMode.value
-
+async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void> {
   toolCtx = createToolContext()
-  bctx.toolRegistry.setToolContext(toolCtx)
+  ctx.toolRegistry.setToolContext(toolCtx)
 
-  bctx.eventDispatcher.registerRegion(VIEWPORT_REGION_ID)
-  bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
+  await host.attachViewport(VIEWPORT_REGION_ID, {
+    drw,
+    payload,
+    layerPreviewMode: layerPreviewMode.value,
+    structureDefinition,
+    mainMeshGroup,
+    handlers: {
+      hover: createHoverHandler(VIEWPORT_REGION_ID, () => ctx),
+      gizmo: createToolGizmoHandler(VIEWPORT_REGION_ID, () => ctx, () => toolCtx),
+      keymap: createKeymapHandler(VIEWPORT_REGION_ID, () => ctx),
+    },
+    selectionOutline: {
+      selectionItems: selection.items,
+      hoveredBlock: ctx.hoveredBlock,
+      highlightOnHover: computed(() => prefs.highlightOnHover),
+      getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
+      gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
+    },
+  })
 
-  domElement.addEventListener('pointerdown', (e) => {
-    bctx.viewports.activeId.value = VIEWPORT_REGION_ID
-    bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
-    if (e.button === 1) e.preventDefault()
-    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
-  }, { capture: true })
-  domElement.addEventListener('pointermove', (e) => {
-    bctx.eventDispatcher.setActiveRegion(VIEWPORT_REGION_ID)
-    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
-  }, { capture: true })
-  domElement.addEventListener('pointerup', (e) => {
-    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
-  }, { capture: true })
-  domElement.addEventListener('wheel', (e) => {
-    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
-    e.preventDefault()
-  }, { capture: true, passive: false })
-  domElement.addEventListener('contextmenu', (e) => { e.preventDefault() }, { capture: true })
-  const _onKeydown = (e: KeyboardEvent) => {
-    if (isEditingTarget(e.target)) return
-    bctx.eventDispatcher.dispatch(e, { regionId: VIEWPORT_REGION_ID })
-  }
-  document.addEventListener('keydown', _onKeydown, { capture: true })
-  unregHandlers.push(() => document.removeEventListener('keydown', _onKeydown, { capture: true }))
-
-  const unregGizmo = bctx.eventDispatcher.registerRegionHandler(
-    VIEWPORT_REGION_ID,
-    createToolGizmoHandler(VIEWPORT_REGION_ID, () => bctx, () => toolCtx),
-  )
-  const unregKeymap = bctx.eventDispatcher.registerRegionHandler(
-    VIEWPORT_REGION_ID,
-    createKeymapHandler(VIEWPORT_REGION_ID, () => bctx),
-  )
-  unregHandlers.push(unregGizmo, unregKeymap)
-
-  vpSlot.overlayGroup.value = layers.overlay
-  if (vpSlot.gizmo.value) {
-    layers.overlay.add(vpSlot.gizmo.value.root)
+  if (vpSlot.gizmo.value && payload.layers.overlay) {
+    payload.layers.overlay.add(vpSlot.gizmo.value.root)
   }
 
   function rafTick() {
     if (!_alive) return
     gizmoRafId = requestAnimationFrame(rafTick)
-    try { updateOverlay() } catch (e) { console.error('[Workbench] updateOverlay error', e) }
+    try { updateOverlay() } catch (e) { console.error('[Workbench] updateOverlay', e) }
   }
   gizmoRafId = requestAnimationFrame(rafTick)
 }
 
-let unregHandlers: Array<() => void> = []
-let gizmoRafId: number | undefined
-let _alive = true
-let toolCtx: ToolContext | null = null
-
-// ---- Tool hints ----
-const toolHints = computed<ToolHint[]>(() => {
-  return bctx.toolRegistry.activeTool.value?.hints ?? []
-})
-
-// ---- Selection highlight (screen-space outline) ----
-const highlightProvider = new SelectionHighlightProvider()
-
-// ---- Hover highlight ----
-const hoveredBlockRef = ref<BlockRef | null>(null)
-
-function onViewportHover(
-  payload: { blockId: string; voxel: { column: number; row: number; zSlice: number }; source: string } | null,
-): void {
-  if (!payload || !prefs.highlightOnHover) {
-    hoveredBlockRef.value = null
-    return
-  }
-  const h = gridHeight.value ?? 0
-  const worldY = h > 0 ? structureRowToWorldY(payload.voxel.row, h) : payload.voxel.row
-  hoveredBlockRef.value = {
-    pos: { x: payload.voxel.column, y: worldY, z: payload.voxel.zSlice },
-    block_state_id: payload.blockId,
-  }
-}
-
-// ---- Annotation overlay (shared via useViewport composable) ----
-
-function updateSelectionHighlight(): void {
-  if (!outlinePass) return
-
-  const items = selection.items.value
-  const hov = hoveredBlockRef.value
-  if (!hov || !prefs.highlightOnHover) {
-    // No hover: selection-only (existing behavior)
-    if (items.size === 0 || items.size > 500) { outlinePass.setMaskMeshes([]); return }
-    const masks = highlightProvider.build(
-      items,
-      (pos) => getBlockGeometry(bctx, pos),
-      (pos) => gridCenterWorld(bctx, pos),
-    )
-    outlinePass.setMaskMeshes(masks)
-    return
-  }
-
-  // Hover + optional selection: merge, dedup by position
-  const entities = new Set(items)
-  const dup = [...items].some(
-    e => e.kind === 'block' && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z,
-  )
-  if (!dup) entities.add({ kind: 'block', ref: hov })
-
-  if (entities.size > 500) { outlinePass.setMaskMeshes([]); return }
-  const masks = highlightProvider.build(
-    entities,
-    (pos) => getBlockGeometry(bctx, pos),
-    (pos) => gridCenterWorld(bctx, pos),
-  )
-  outlinePass.setMaskMeshes(masks)
-}
+const toolHints = computed<ToolHint[]>(() => ctx.toolRegistry.activeTool.value?.hints ?? [])
 
 function updateOverlay(): void {
-  const gizmo = bctx.toolRegistry.activeGizmo.value
-  if (gizmo && toolCtx) {
-    gizmo.render(toolCtx)
-  }
-  updateSelectionHighlight()
-  updateAnnotationOverlay(bctx, renderAssets)
+  const gizmo = ctx.toolRegistry.activeGizmo.value
+  if (gizmo && toolCtx) gizmo.render(toolCtx)
+  updateAnnotationOverlay(ctx, renderAssets)
 
-  if (bctx.viewport.gizmo.value && bctx.toolRegistry.activeTool.value?.id === 'move') {
-    const gp = bctx.viewport.gizmo.value.root.position
-    logCenter.updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
+  if (ctx.viewport.gizmo.value && ctx.toolRegistry.activeTool.value?.id === 'move') {
+    const gp = ctx.viewport.gizmo.value.root.position
+    ctx.log.updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
   } else {
-    logCenter.updateGizmoState(null)
+    ctx.log.updateGizmoState(null)
   }
-  if (bctx.viewport.camera.value) {
-    logCenter.updateCameraState({
-      position: [bctx.viewport.camera.value.position.x, bctx.viewport.camera.value.position.y, bctx.viewport.camera.value.position.z],
-      target: bctx.viewport.orbitTarget.value ? [bctx.viewport.orbitTarget.value.x, bctx.viewport.orbitTarget.value.y, bctx.viewport.orbitTarget.value.z] : [0, 0, 0],
+  if (ctx.viewport.camera.value) {
+    ctx.log.updateCameraState({
+      position: [ctx.viewport.camera.value.position.x, ctx.viewport.camera.value.position.y, ctx.viewport.camera.value.position.z],
+      target: ctx.viewport.orbitTarget.value ? [ctx.viewport.orbitTarget.value.x, ctx.viewport.orbitTarget.value.y, ctx.viewport.orbitTarget.value.z] : [0, 0, 0],
     })
   }
 }
 
-// ---- 拖拽文件加载 ----
+function togglePlayback(): void {
+  void ctx.operators.exec('OPERATOR_TOGGLE_FRAME_PLAYBACK')
+}
+
+function setFrameIndex(i: number): void {
+  void ctx.operators.exec('OPERATOR_SET_FRAME_INDEX', { index: i })
+}
+
+function setLayerY(v: number): void {
+  void ctx.operators.exec('OPERATOR_SET_LAYER_Y', { y: v })
+}
+
 const dragOver = ref(false)
 let dragEnterCount = 0
 
 function onDragEnter(e: DragEvent) {
   e.preventDefault()
   dragEnterCount++
-  if (e.dataTransfer?.types.includes('Files')) {
-    dragOver.value = true
-  }
+  if (e.dataTransfer?.types.includes('Files')) dragOver.value = true
 }
 function onDragOver(e: DragEvent) {
   e.preventDefault()
@@ -277,18 +184,17 @@ function onDrop(e: DragEvent) {
   dragEnterCount = 0
   const file = e.dataTransfer?.files[0]
   if (!file) return
-  bctx.operators.exec('OPERATOR_OPEN_SCENE', { file })
+  ctx.operators.exec('OPERATOR_OPEN_SCENE', { file })
 }
 
 onMounted(() => {
   void renderAssets.loadStructureAndResources()
 })
 onBeforeUnmount(() => {
-  unregHandlers.forEach(fn => fn())
+  host.detachViewport(VIEWPORT_REGION_ID)
   _alive = false
   if (gizmoRafId) cancelAnimationFrame(gizmoRafId)
-  vp.dispose()
-  highlightProvider.dispose()
+  drw.dispose()
 })
 </script>
 
@@ -302,7 +208,7 @@ onBeforeUnmount(() => {
       @drop="onDrop"
     >
       <ToolHintsBar :hints="toolHints" />
-    <ViewerCore
+    <RenderEngineHost
       v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
       :definition="structureDefinition"
       :material-library="materialLibrary"
@@ -312,7 +218,6 @@ onBeforeUnmount(() => {
       :show-axes-gizmo="true"
       :annotations="annotations"
       @ready="onViewportReady"
-      @hover-block="onViewportHover"
     />
     <div v-else class="wv-placeholder">
           <svg class="wv-placeholder-icon" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
@@ -338,7 +243,7 @@ onBeforeUnmount(() => {
         <WorldFramePlayerControls
           :has-world-multi-frame="hasWorldMultiFrame"
           :is-playing="framesPlaybackIsPlaying"
-          @toggle="renderAssets.toggleWorldFramesPlayback()"
+          @toggle="togglePlayback"
         />
         <WorldFrameScrubber
           :has-world-multi-frame="hasWorldMultiFrame"
@@ -346,8 +251,8 @@ onBeforeUnmount(() => {
           :is-playing="framesPlaybackIsPlaying"
           :mesh-busy="meshBusy"
           :world-frame-index="worldFrameIndex"
-          @toggle-playback="renderAssets.toggleWorldFramesPlayback()"
-          @set-frame="(i: number) => renderAssets.setCurrentWorldFrame(i)"
+          @toggle-playback="togglePlayback"
+          @set-frame="setFrameIndex"
         />
       </div>
       <div class="wv-tab-panel" :class="{ 'wv-tab-panel--active': activeTab === 'layer' }">
@@ -356,7 +261,7 @@ onBeforeUnmount(() => {
           :mesh-busy="meshBusy"
           :layer-world-y="layerWorldY"
           :layer-preview-label="layerPreviewLabel"
-          @update:layer-y="(v: number) => { layerWorldY = v }"
+          @update:layer-y="setLayerY"
         />
       </div>
     </div>

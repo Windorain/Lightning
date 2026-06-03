@@ -2,13 +2,14 @@
 /**
  * 底栏状态条：模型信息 + 帧信息 + 渲染状态
  */
-import { computed, inject } from 'vue'
-import { bContextKey } from '@/context/bContext'
-import { logCenter, LOG_LEVEL } from '@/logging/LogCenter'
+import { computed } from 'vue'
+import { LOG_LEVEL } from '@/logging/LogCenter'
+import { useContext } from '@/runtime/context'
 
-const bctx = inject(bContextKey)
+const ctx = useContext()
+const log = ctx.log
 
-const frameCount = computed(() => bctx?.doc.value?.frameCount ?? 0)
+const frameCount = computed(() => ctx?.doc.value?.frameCount ?? 0)
 const hasWorldMultiFrame = computed(() => frameCount.value > 1)
 
 function logClass(level: number): string {
@@ -20,13 +21,13 @@ function logClass(level: number): string {
 
 <template>
   <div class="sb-root">
-    <span v-if="logCenter.lastDisplayable.value" :class="logClass(logCenter.lastDisplayable.value.level)">
-      {{ logCenter.lastDisplayable.value.message }}
+    <span v-if="log.lastDisplayable.value" :class="logClass(log.lastDisplayable.value.level)">
+      {{ log.lastDisplayable.value.message }}
     </span>
-    <span v-if="logCenter.statusMessage && !logCenter.lastDisplayable.value" class="sb-item">{{ logCenter.statusMessage }}</span>
+    <span v-if="log.statusMessage && !log.lastDisplayable.value" class="sb-item">{{ log.statusMessage }}</span>
     <span class="sb-spacer" />
     <span v-if="hasWorldMultiFrame" class="sb-item">
-      Frame {{ (bctx?.currentWorldFrameIndex.value ?? 0) + 1 }} / {{ frameCount }}
+      Frame {{ (ctx?.currentFrameIndex.value ?? 0) + 1 }} / {{ frameCount }}
     </span>
   </div>
 </template>

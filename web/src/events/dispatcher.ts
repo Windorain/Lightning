@@ -5,7 +5,7 @@
  *
  *   dispatch(event)
  *     → 1. 区域模态栈 (LIFO)
- *     → 2. 区域 Handler 链：GIZMO → KEYMAP
+ *     → 2. 区域 Handler 链：HOVER → GIZMO → KEYMAP
  *
  * Canvas 事件通过坐标路由到光标所在 region。
  * 键盘事件路由到最后鼠标所在的 region（activeRegion）。
@@ -209,8 +209,9 @@ export class EventDispatcherImpl {
       }
     }
 
-    // 2. Region handler 链（GIZMO → KEYMAP）
-    for (const handler of system.handlerChain) {
+    // 2. Region handler 链（HOVER → GIZMO → KEYMAP）
+    const chain = [...system.handlerChain].sort((a, b) => a.type - b.type)
+    for (const handler of chain) {
       const result = handler.handle(event)
       if (result.break) {
         logCenter.endTrace(`consumed by handler type=${handler.type}`)

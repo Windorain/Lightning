@@ -1,6 +1,6 @@
 import { generateId } from '@/pure/string'
 import * as THREE from 'three'
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import { bumpEpoch } from '@/context/replaceDoc'
@@ -21,12 +21,12 @@ interface ScreenProjection {
 
 /** Project a world-space direction vector to screen-space at the given origin point. */
 function projectAxis(
-  bctx: BContext,
+  ctx: Context,
   origin: { x: number; y: number; z: number },
   dir: THREE.Vector3,
 ): ScreenProjection {
-  const camera = bctx.viewport.camera.value
-  const domEl = bctx.viewport.domElement.value
+  const camera = ctx.viewport.camera.value
+  const domEl = ctx.viewport.domElement.value
   if (!camera || !domEl) return { screenDirX: 0, screenDirY: 0, k: 0 }
   const rect = domEl.getBoundingClientRect()
   const p1 = new THREE.Vector3(origin.x, origin.y, origin.z).project(camera)
@@ -40,7 +40,7 @@ function projectAxis(
 
 /** Build the list of (worldDir, screenProjection) pairs for the current drag mode. */
 function buildProjectionAxes(
-  bctx: BContext,
+  ctx: Context,
   s: MoveModalState,
 ): Array<{ dir: THREE.Vector3; proj: ScreenProjection }> {
   const origin = { x: s._originX, y: s._originY, z: s._originZ }
@@ -48,7 +48,7 @@ function buildProjectionAxes(
   // Axis lock overrides everything
   if (s._axisLock) {
     const dir = WORLD_AXES[s._axisLock]
-    return [{ dir, proj: projectAxis(bctx, origin, dir) }]
+    return [{ dir, proj: projectAxis(ctx, origin, dir) }]
   }
 
   // Gizmo single axis
@@ -66,20 +66,20 @@ function buildProjectionAxes(
   }
 
   // Free move: camera right and up
-  const camera = bctx.viewport.camera.value
+  const camera = ctx.viewport.camera.value
   if (!camera) return []
   const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
   return [
-    { dir: right, proj: projectAxis(bctx, origin, right) },
-    { dir: up, proj: projectAxis(bctx, origin, up) },
+    { dir: right, proj: projectAxis(ctx, origin, right) },
+    { dir: up, proj: projectAxis(ctx, origin, up) },
   ]
 }
 
 /** Animation-safe way to get gizmo. Prefers props ref, falls back to registry. */
-function getGizmo(bctx: BContext, props: OperatorProperties): { root: THREE.Group } | null {
+function getGizmo(ctx: Context, props: OperatorProperties): { root: THREE.Group } | null {
   return ((props as any).gizmo as { root: THREE.Group } | null)
-    ?? (bctx.toolRegistry.activeGizmo.value as { root: THREE.Group } | null)
+    ?? (ctx.toolRegistry.activeGizmo.value as { root: THREE.Group } | null)
 }
 
 interface MoveModalState {
@@ -108,8 +108,8 @@ export const MoveOperator: OperatorType = {
   label: '移动',
   description: '拖拽 Gizmo 或空白区域移动选中方块，X/Y/Z 锁定轴向',
 
-  poll(bctx) {
-    return bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.doc.value !== null
   },
 
   initModalState(): OperatorProperties {
@@ -129,12 +129,12 @@ export const MoveOperator: OperatorType = {
     }
   },
 
-  invoke(bctx, props, event) {
+  invoke(ctx, props, event) {
     if (!(event instanceof PointerEvent)) return OP_RESULT.CANCELLED
 
     // ---- Gizmo drag (single axis or plane) ----
     if (props.gizmoAxis) {
-      const gizmo = getGizmo(bctx, props)
+      const gizmo = getGizmo(ctx, props)
       if (!gizmo) return OP_RESULT.CANCELLED
 
       const target = event.target as HTMLElement | null
@@ -149,7 +149,7 @@ export const MoveOperator: OperatorType = {
         _originZ: gizmo.root.position.z,
         _startX: event.clientX,
         _startY: event.clientY,
-        _initialPositions: [...bctx.selection.items.value]
+        _initialPositions: [...ctx.selection.items.value]
           .filter(e => e.kind === 'block')
           .map(e => ({ ...e.ref.pos })),
         _precision: false,
@@ -171,27 +171,27 @@ export const MoveOperator: OperatorType = {
     }
 
     // ---- Non-gizmo: block pick → select ----
-    bctx.selection.resetCycle()
-    const picked = pickVoxel(bctx, event)
+    ctx.selection.resetCycle()
+    const picked = pickVoxel(ctx, event)
     if (picked) {
       if (event.shiftKey) {
-        bctx.selection.add([picked])
+        ctx.selection.add([picked])
       } else if (event.ctrlKey || event.metaKey) {
-        bctx.selection.remove([picked])
+        ctx.selection.remove([picked])
       } else {
-        bctx.selection.select(picked)
+        ctx.selection.select(picked)
       }
       return OP_RESULT.FINISHED
     }
 
     // ---- Non-gizmo: empty space → free move or deselect ----
     if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
-      const sel = [...bctx.selection.items.value].filter(e => e.kind === 'block')
-      const isMoveTool = bctx.toolRegistry.activeTool.value?.id === 'move'
+      const sel = [...ctx.selection.items.value].filter(e => e.kind === 'block')
+      const isMoveTool = ctx.toolRegistry.activeTool.value?.id === 'move'
 
       if (isMoveTool && sel.length > 0) {
         // Free move
-        const gizmo = getGizmo(bctx, props)
+        const gizmo = getGizmo(ctx, props)
         const target = event.target as HTMLElement | null
         target?.setPointerCapture(event.pointerId)
 
@@ -228,7 +228,7 @@ export const MoveOperator: OperatorType = {
     return OP_RESULT.FINISHED
   },
 
-  modal(bctx, props, event) {
+  modal(ctx, props, event) {
     const s = toState(props)
 
     // ---- Keyboard: MODAL_MAP events ----
@@ -264,11 +264,11 @@ export const MoveOperator: OperatorType = {
     if (s._gizmoAxis || s._freeMove) {
       if (!(event instanceof PointerEvent)) return OP_RESULT.PASS_THROUGH
 
-      const gizmo = getGizmo(bctx, props)
+      const gizmo = getGizmo(ctx, props)
       if (!gizmo) return OP_RESULT.CANCELLED
 
       if (event.type === 'pointermove') {
-        const axes = buildProjectionAxes(bctx, s)
+        const axes = buildProjectionAxes(ctx, s)
         const dx = event.clientX - s._startX
         const dy = event.clientY - s._startY
 
@@ -298,8 +298,8 @@ export const MoveOperator: OperatorType = {
         })
 
         if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
-          const doc = bctx.doc.value
-          const rf = doc?.frame(bctx.currentWorldFrameIndex.value ?? 0)
+          const doc = ctx.doc.value
+          const rf = doc?.frame(ctx.currentFrameIndex.value ?? 0)
           const grid = rf?.grid
           if (grid) {
             const moves = s._initialPositions.map(initPos => ({
@@ -307,8 +307,8 @@ export const MoveOperator: OperatorType = {
               to: { x: initPos.x + delta.x, y: initPos.y + delta.y, z: initPos.z + delta.z },
             }))
 
-            const sel = bctx.selection
-            bctx.editHistory.push({
+            const sel = ctx.selection
+            ctx.editHistory.push({
               id: generateId('move_'),
               label: `移动 (${delta.x}, ${delta.y}, ${delta.z})`,
               timestamp: Date.now(),
@@ -327,7 +327,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                bumpEpoch(bctx)
+                bumpEpoch(ctx)
               },
               undo: () => {
                 for (const m of moves) grid.moveBlock(m.to, m.from)
@@ -344,7 +344,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                bumpEpoch(bctx)
+                bumpEpoch(ctx)
               },
             })
           }
@@ -372,7 +372,7 @@ export const MoveOperator: OperatorType = {
       const dx = event.clientX - s._startX
       const dy = event.clientY - s._startY
       if (dx * dx + dy * dy < 25) {
-        bctx.selection.clear()
+        ctx.selection.clear()
       }
       return OP_RESULT.FINISHED
     }
@@ -382,16 +382,16 @@ export const MoveOperator: OperatorType = {
     return OP_RESULT.PASS_THROUGH
   },
 
-  cancel(bctx, props) {
+  cancel(ctx, props) {
     const s = toState(props)
 
     if (s._gizmoAxis || s._freeMove) {
-      const gizmo = getGizmo(bctx, props)
+      const gizmo = getGizmo(ctx, props)
       if (gizmo) {
         gizmo.root.position.set(s._originX, s._originY, s._originZ)
       }
       if (s._pointerId >= 0) {
-        const el = bctx.viewport.domElement.value
+        const el = ctx.viewport.domElement.value
         try {
           el?.releasePointerCapture(s._pointerId)
         } catch {

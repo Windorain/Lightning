@@ -2,13 +2,13 @@
  * Embed keymap — 仅视口导航绑定。
  *
  * 复用 workbench 的 InputBinding/matchBinding 类型与匹配逻辑，
- * handler 通过 BContext 调用操作符（无拖拽手势检测、无上下文菜单、无 undo/redo 键绑定）。
+ * handler 通过 Context 调用操作符（无拖拽手势检测、无上下文菜单、无 undo/redo 键绑定）。
  */
 import type { InputBinding } from '@/keymap'
 import { matchBinding } from '@/keymap'
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 
 export const EMBED_KEYMAP: InputBinding[] = [
   // Left mouse (primary)
@@ -52,7 +52,7 @@ export const EMBED_KEYMAP: InputBinding[] = [
 
 export function createEmbedKeymapHandler(
   regionId: string,
-  getCtx: () => BContext | null,
+  getCtx: () => Context | null,
 ): RegionEventHandler {
   return {
     type: HANDLER_TYPE.KEYMAP,

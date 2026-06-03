@@ -1,6 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
 import type { PropertyDescriptor } from './rna/types'
+import { contextKey, type Context } from '@/runtime/context'
+
+const ctx = inject<Context | null>(contextKey, null)
+
+/** RNA 属性名 → wikiConfig 嵌套路径 */
+const WIKI_CONFIG_PATHS: Record<string, string> = {
+  showStats: 'features.blockStatsSidebar',
+  showLayerBar: 'features.layerBar',
+  showFrameControls: 'features.frameControls',
+  showTitle: 'features.titleBar',
+  showDebugStatus: 'features.debugStatusBar',
+  showAxesGizmo: 'features.showAxesGizmo',
+}
 
 const props = defineProps<{
   descriptor: PropertyDescriptor | null
@@ -48,6 +61,12 @@ function getValue(): unknown {
 
 function setValue(val: unknown): void {
   if (!props.descriptor || !props.owner) return
+  const pathKey = props.rnaPath?.split('.').pop() ?? props.descriptor.name
+  if (ctx && props.rnaPath?.toLowerCase().startsWith('wikiconfig.')) {
+    const path = WIKI_CONFIG_PATHS[pathKey] ?? pathKey
+    void ctx.operators.exec('OPERATOR_SET_WIKI_CONFIG', { path, value: val })
+    return
+  }
   props.descriptor.set(props.owner, val)
 }
 </script>

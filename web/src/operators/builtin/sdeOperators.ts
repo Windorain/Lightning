@@ -5,8 +5,6 @@ import {
   sdeGetExportFile,
   sdePutWorkspaceDocument,
 } from '@/workbench/sdeApi'
-import { parserRegistry } from '@/context/parserRegistry'
-import { logCenter } from '@/logging/LogCenter'
 import { replaceDoc } from '@/context/replaceDoc'
 
 export const SDEConnectOperator: OperatorType = {
@@ -14,25 +12,25 @@ export const SDEConnectOperator: OperatorType = {
   label: '连接 SDE',
   description: '测试 SDE 连接并拉取导出列表',
 
-  poll(_bctx) {
+  poll(_ctx) {
     return true
   },
 
-  async exec(bctx, _props) {
-    bctx.connection.connected = null
-    if (!bctx.connection.apiBase) {
-      bctx.connection.connected = false
+  async exec(ctx, _props) {
+    ctx.connection.connected = null
+    if (!ctx.connection.apiBase) {
+      ctx.connection.connected = false
       return
     }
     try {
-      await sdePing(bctx.connection.apiBase, bctx.connection.token)
-      bctx.connection.connected = true
-      bctx.connection.exportsLoading = true
+      await sdePing(ctx.connection.apiBase, ctx.connection.token)
+      ctx.connection.connected = true
+      ctx.connection.exportsLoading = true
       try {
-        bctx.connection.exports = await sdeListExports(bctx.connection.apiBase, bctx.connection.token)
-      } catch { bctx.connection.exports = [] }
-      finally { bctx.connection.exportsLoading = false }
-    } catch { bctx.connection.connected = false }
+        ctx.connection.exports = await sdeListExports(ctx.connection.apiBase, ctx.connection.token)
+      } catch { ctx.connection.exports = [] }
+      finally { ctx.connection.exportsLoading = false }
+    } catch { ctx.connection.connected = false }
   },
 }
 
@@ -41,28 +39,49 @@ export const SDELoadExportOperator: OperatorType = {
   label: '加载导出',
   description: '从 SDE 导出列表加载指定场景',
 
-  poll(bctx) {
-    return bctx.connection.connected === true
+  poll(ctx) {
+    return ctx.connection.connected === true
   },
 
-  async exec(bctx, _props) {
+  async exec(ctx, _props) {
     const name = _props.name as string
-    bctx.selection.clear()
-    bctx.editHistory.clear()
-    const data = await sdeGetExportFile(bctx.connection.apiBase, bctx.connection.token, name)
-    bctx.connection.selectedExportName = name
-    const result = await parserRegistry.detectAndParse(data)
+    ctx.selection.clear()
+    ctx.editHistory.clear()
+    const data = await sdeGetExportFile(ctx.connection.apiBase, ctx.connection.token, name)
+    ctx.connection.selectedExportName = name
+    const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      replaceDoc(bctx, result.document)
-      bctx.currentWorldFrameIndex.value = 0
+      replaceDoc(ctx, result.document)
+      ctx.currentFrameIndex.value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
-      logCenter.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
+      ctx.log.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      replaceDoc(bctx, null)
-      logCenter.error('场景加载', result.error ?? '未知错误', { fileName: name, error: result.error })
+      replaceDoc(ctx, null)
+      ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: name, error: result.error })
     }
-    bctx.workspaceMode.value = 'sde'
-    bctx.localFileName.value = name
+    ctx.workspaceMode.value = 'sde'
+    ctx.localFileName.value = name
+  },
+}
+
+export const SDELoadWorkspaceOperator: OperatorType = {
+  id: 'OPERATOR_SDE_LOAD_WORKSPACE',
+  label: '加载 SDE 工作区文档',
+  poll(ctx) { return ctx.connection.connected === true },
+  async exec(ctx, props) {
+    const data = props.data
+    ctx.selection.clear()
+    ctx.editHistory.clear()
+    const result = await ctx.main.registries.parsers.detectAndParse(data)
+    if (result.document) {
+      replaceDoc(ctx, result.document)
+      ctx.currentFrameIndex.value = 0
+      ctx.log.info('场景加载', 'SDE workspace', { frames: result.document.frameCount })
+    } else {
+      replaceDoc(ctx, null)
+      ctx.log.error('场景加载', result.error ?? '未知错误')
+    }
+    await ctx.operators.exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'sde' })
   },
 }
 
@@ -71,16 +90,16 @@ export const SDEPushOperator: OperatorType = {
   label: '推送到 SDE',
   description: '将当前场景保存到 SDE 工作区',
 
-  poll(bctx) {
-    return bctx.connection.connected === true && bctx.doc.value !== null
+  poll(ctx) {
+    return ctx.connection.connected === true && ctx.doc.value !== null
   },
 
-  async exec(bctx, _props) {
-    if (!bctx.connection.apiBase || !bctx.doc.value) return
+  async exec(ctx, _props) {
+    if (!ctx.connection.apiBase || !ctx.doc.value) return
     await sdePutWorkspaceDocument(
-      bctx.connection.apiBase,
-      bctx.connection.token,
-      bctx.doc.value.serialize() as Record<string, unknown>,
+      ctx.connection.apiBase,
+      ctx.connection.token,
+      ctx.doc.value.serialize() as Record<string, unknown>,
     )
   },
 }

@@ -8,7 +8,7 @@
  * - modal: 模态事件循环（每帧/每事件驱动）
  * 另有 poll（上下文检查）和 cancel（外部中断清理）。
  */
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { PropertyDescriptor } from '@/workbench/ux/rna/types'
 
 /** 操作符属性容器（对标 Blender operator properties） */
@@ -33,19 +33,19 @@ export interface OperatorType {
   /** 是否自动包裹 undo */
   flagUndo?: boolean
   /** 无交互执行 */
-  exec?(bctx: BContext, props: OperatorProperties): void
+  exec?(ctx: Context, props: OperatorProperties): void
   /** 初始化交互，返回模态状态 */
-  invoke?(bctx: BContext, props: OperatorProperties, event?: PointerEvent | KeyboardEvent): OpResult
+  invoke?(ctx: Context, props: OperatorProperties, event?: PointerEvent | KeyboardEvent): OpResult
   /** 模态事件循环 */
-  modal?(bctx: BContext, props: OperatorProperties, event: Event): OpResult
+  modal?(ctx: Context, props: OperatorProperties, event: Event): OpResult
   /** 上下文检查（返回 false 时操作符在 UI 中灰掉） */
-  poll?(bctx: BContext): boolean
+  poll?(ctx: Context): boolean
   /** 外部取消时的清理 */
-  cancel?(bctx: BContext, props: OperatorProperties): void
+  cancel?(ctx: Context, props: OperatorProperties): void
   /** 创建模态状态（每次 invoke 进入模态时调用） */
   initModalState?: () => OperatorProperties
   /** 视口叠加层渲染（逐帧调用） */
-  renderOverlay?(bctx: BContext, props: OperatorProperties, overlayGroup: THREE.Group): void
+  renderOverlay?(ctx: Context, props: OperatorProperties, overlayGroup: THREE.Group): void
 }
 
 /* eslint-disable @typescript-eslint/no-unused-vars */

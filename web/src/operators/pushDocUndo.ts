@@ -8,22 +8,22 @@
  * callers should build their own undo entry — this helper only works with whole-doc swap undo.
  */
 import { generateId } from '@/pure/string'
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { replaceDoc } from '@/context/replaceDoc'
 
 export function pushDocUndo(
-  bctx: BContext,
+  ctx: Context,
   before: RuntimeDocument | null,
   after: RuntimeDocument | null,
   label: string,
 ): void {
   if (before === null && after === null) return
-  bctx.editHistory.push({
+  ctx.editHistory.push({
     id: generateId('op_'),
     label,
     timestamp: Date.now(),
-    execute: () => { replaceDoc(bctx, after) },
-    undo: () => { replaceDoc(bctx, before) },
+    execute: () => { replaceDoc(ctx, after) },
+    undo: () => { replaceDoc(ctx, before) },
   })
 }

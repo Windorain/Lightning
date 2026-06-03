@@ -5,10 +5,9 @@
  * 1. 将输入事件与 keymap 绑定匹配 → invoke 对应操作符
  * 2. operator FINISHED 后的拖拽手势检测 → 越过阈值 → invoke ViewRotate
  */
-import { ref } from 'vue'
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
-import type { BContext } from '@/context/bContext'
+import type { Context } from '@/runtime/context'
 import { loadKeymap, matchBinding, type InputBinding } from '@/keymap'
 import { OP_RESULT } from '@/operators/operatorType'
 
@@ -20,18 +19,18 @@ interface DragState {
 
 export function createKeymapHandler(
   regionId: string,
-  getBctx: () => BContext | null,
+  getCtx: () => Context | null,
 ): RegionEventHandler {
   const drag: DragState = { active: false, startX: 0, startY: 0 }
 
   return {
     type: HANDLER_TYPE.KEYMAP,
     handle(event: Event): { break: boolean } {
-      const bctx = getBctx()
-      if (!bctx) return { break: false }
+      const ctx = getCtx()
+      if (!ctx) return { break: false }
 
       // --- Build effective keymap ---
-      const tool = bctx.toolRegistry.activeTool.value
+      const tool = ctx.toolRegistry.activeTool.value
       const defaultKeymap = loadKeymap()
       const toolBindings = tool?.keymap ?? []
       const fallbackBindings = tool?.keymapFallback ?? []
@@ -53,7 +52,7 @@ export function createKeymapHandler(
           const dy = pe.clientY - drag.startY
           if (dx * dx + dy * dy > 25) {
             drag.active = false
-            bctx.operators.invoke('OPERATOR_VIEW_ROTATE', undefined, event, regionId)
+            ctx.operators.invoke('OPERATOR_VIEW_ROTATE', undefined, event, regionId)
           }
           return { break: false }
         } else if (event.type === 'pointerup' || event.type === 'pointercancel') {
@@ -72,7 +71,7 @@ export function createKeymapHandler(
         if (binding.type === 'KEY') {
           // toolId activates a tool
           if (binding.toolId) {
-            bctx.toolRegistry.activate(binding.toolId)
+            ctx.toolRegistry.activate(binding.toolId)
             return { break: true }
           }
           // opId invokes an operator (with tool properties merged)
@@ -80,20 +79,20 @@ export function createKeymapHandler(
             const toolProps = tool?.properties ?? {}
             const itemProps = binding.props ?? {}
             const mergedProps = { ...toolProps, ...itemProps }
-            bctx.operators.invoke(binding.opId, mergedProps, event, regionId)
+            ctx.operators.invoke(binding.opId, mergedProps, event, regionId)
             return { break: true }
           }
           if (binding.action) {
             switch (binding.action) {
-              case 'undo': bctx.operators.exec('OPERATOR_UNDO'); break
-              case 'redo': bctx.operators.exec('OPERATOR_REDO'); break
+              case 'undo': ctx.operators.exec('OPERATOR_UNDO'); break
+              case 'redo': ctx.operators.exec('OPERATOR_REDO'); break
               case 'toggle-tool': {
-                const prev = bctx.toolRegistry.lastToolId.value
-                if (prev) bctx.toolRegistry.activate(prev)
-                else bctx.toolRegistry.activate('select')
+                const prev = ctx.toolRegistry.lastToolId.value
+                if (prev) ctx.toolRegistry.activate(prev)
+                else ctx.toolRegistry.activate('select')
                 break
               }
-              case 'select-all': bctx.operators.exec('OPERATOR_SELECT_ALL'); break
+              case 'select-all': ctx.operators.exec('OPERATOR_SELECT_ALL'); break
               case 'toggle-toolshelf': {
                 // existing toggle-toolshelf logic if any
                 break
@@ -110,12 +109,11 @@ export function createKeymapHandler(
         // MOUSE binding
         if (binding.type === 'MOUSE') {
           if (binding.action === 'context-menu') {
-            const wm = bctx.wm
+            const chrome = ctx.wm.chrome
             const pe = event as PointerEvent
-            if (wm.showContextMenu && wm.contextMenuOpen && wm.contextMenuPosition) {
-              const items = wm.contextMenuItems ?? []
-              const cmState = { open: wm.contextMenuOpen, position: wm.contextMenuPosition, items: ref(items) }
-              wm.showContextMenu(cmState, { x: pe.clientX, y: pe.clientY }, items)
+            if (chrome.showContextMenu) {
+              const items = chrome.contextMenuItems ?? []
+              chrome.showContextMenu({ x: pe.clientX, y: pe.clientY }, items)
             }
             return { break: true }
           }
@@ -126,9 +124,9 @@ export function createKeymapHandler(
             const itemProps = binding.props ?? {}
             const mergedProps = { ...toolProps, ...itemProps }
 
-            const result = bctx.operators.invoke(binding.opId, mergedProps, event, regionId)
+            const result = ctx.operators.invoke(binding.opId, mergedProps, event, regionId)
             if (result === OP_RESULT.FINISHED) {
-              const hasGizmo = bctx.toolRegistry.activeGizmo.value !== null
+              const hasGizmo = ctx.toolRegistry.activeGizmo.value !== null
               if (!hasGizmo) {
                 const pe = event as PointerEvent
                 drag.active = true
@@ -142,7 +140,7 @@ export function createKeymapHandler(
 
         // WHEEL binding
         if (binding.type === 'WHEEL') {
-          bctx.operators.invoke(binding.opId!, undefined, event, regionId)
+          ctx.operators.invoke(binding.opId!, undefined, event, regionId)
           return { break: false }
         }
 

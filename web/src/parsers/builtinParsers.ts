@@ -7,7 +7,6 @@
 
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import { isEnvelopeDocument, normalizeEnvelopeToPlain } from '@/render/data/compactSceneDocument'
-import { parserRegistry } from '@/context/parserRegistry'
 import type { DocumentParser, ParserRegistryImpl } from '@/context/parserRegistry'
 
 // ==================== V2PlainParser ====================
@@ -37,17 +36,14 @@ export const V2PlainParser: DocumentParser = {
  *
  * 解压 gzip+base64 payload 后委托 V2PlainParser / WorldParser。
  */
+/** @deprecated 使用 createEnvelopeParser(registry) */
 export const EnvelopeParser: DocumentParser = {
   formatName: 'Envelope',
   detect(raw: unknown): boolean {
     return isEnvelopeDocument(raw)
   },
-  async parse(raw: unknown): Promise<RuntimeDocument | null> {
-    const plain = await normalizeEnvelopeToPlain(raw)
-    if (plain === raw) return null // 解压失败
-    // 委托下游 parser 继续解析
-    const result = await parserRegistry.detectAndParse(plain)
-    return result.document
+  async parse(): Promise<RuntimeDocument | null> {
+    throw new Error('EnvelopeParser: use createEnvelopeParser(registry) with Main.registries.parsers')
   },
 }
 

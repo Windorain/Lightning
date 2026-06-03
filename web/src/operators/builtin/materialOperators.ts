@@ -1,12 +1,12 @@
 import type { OperatorType } from '@/operators/operatorType'
-import type { MaterialQueryItem } from '@/context/bContext'
+import type { MaterialQueryItem } from '@/runtime/types'
 import { encodeAnimatedGif } from '@/workbench/animatedGifEncoder'
 import { filenameStem } from '@/pure/string'
 import { downloadPng, copyTextToClipboard } from '@/util/browser'
 import { listMaterials } from '@/context/queries'
 
-function resolveMaterial(bctx: any, materialId: string): MaterialQueryItem | undefined {
-  const materials = listMaterials(bctx)
+function resolveMaterial(ctx: any, materialId: string): MaterialQueryItem | undefined {
+  const materials = listMaterials(ctx)
   return materials.find((item: MaterialQueryItem) => item.materialId === materialId)
 }
 
@@ -15,16 +15,16 @@ export const ExportTextureOperator: OperatorType = {
   label: '导出纹理 PNG',
   description: '将当前选中的材质纹理导出为 PNG 文件',
 
-  poll(bctx) {
-    const materials = listMaterials(bctx)
+  poll(ctx) {
+    const materials = listMaterials(ctx)
     return materials.length > 0
   },
 
-  exec(bctx, props) {
+  exec(ctx, props) {
     const materialId = (props?.materialId as string) ?? '0'
-    const m = resolveMaterial(bctx, materialId)
+    const m = resolveMaterial(ctx, materialId)
     if (!m?.textureDataUrl) {
-      bctx.log?.warn('导出', `材质 ${materialId} 无纹理数据`)
+      ctx.log?.warn('导出', `材质 ${materialId} 无纹理数据`)
       return
     }
     downloadPng(m.textureDataUrl, filenameStem(m, materialId))
@@ -36,16 +36,16 @@ export const CopyMaterialLocatorOperator: OperatorType = {
   label: '复制定位符',
   description: '复制材质资源定位符到剪贴板',
 
-  poll(bctx) {
-    const materials = listMaterials(bctx)
+  poll(ctx) {
+    const materials = listMaterials(ctx)
     return materials.some((m: MaterialQueryItem) => !!m.locator)
   },
 
-  async exec(bctx, props) {
+  async exec(ctx, props) {
     const materialId = (props?.materialId as string) ?? '0'
-    const m = resolveMaterial(bctx, materialId)
+    const m = resolveMaterial(ctx, materialId)
     if (!m?.locator) {
-      bctx.log?.warn('操作', `材质 ${materialId} 无定位符`)
+      ctx.log?.warn('操作', `材质 ${materialId} 无定位符`)
       return
     }
     await copyTextToClipboard(m.locator)
@@ -57,17 +57,17 @@ export const ExportGifOperator: OperatorType = {
   label: '导出 GIF',
   description: '将动画纹理导出为 GIF 动图',
 
-  poll(bctx) {
-    return listMaterials(bctx).some(
+  poll(ctx) {
+    return listMaterials(ctx).some(
       (m: MaterialQueryItem) => m.kind === 'animated' && m.textureDataUrl !== null,
     )
   },
 
-  async exec(bctx, props) {
+  async exec(ctx, props) {
     const materialId = (props?.materialId as string) ?? '0'
-    const m = resolveMaterial(bctx, materialId)
+    const m = resolveMaterial(ctx, materialId)
     if (!m?.textureDataUrl || m.kind !== 'animated') {
-      bctx.log?.warn('导出', `材质 ${materialId} 不是动画纹理`)
+      ctx.log?.warn('导出', `材质 ${materialId} 不是动画纹理`)
       return
     }
     try {
@@ -82,7 +82,7 @@ export const ExportGifOperator: OperatorType = {
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } catch (e) {
-      bctx.log?.warn('导出', `GIF 导出失败: ${e}`)
+      ctx.log?.warn('导出', `GIF 导出失败: ${e}`)
     }
   },
 }
