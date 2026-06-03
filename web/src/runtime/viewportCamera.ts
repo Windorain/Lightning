@@ -101,10 +101,18 @@ export function applyViewportCameraState(
 export function rotateViewportState(s: ViewportCameraState, dx: number, dy: number): ViewportCameraState {
   const dYaw = THREE.MathUtils.radToDeg(dx * 0.005)
   const dElev = THREE.MathUtils.radToDeg(dy * 0.005)
+  return rotateViewportYawState(rotateViewportElevationState(s, dElev), dYaw)
+}
+
+/** 水平拖 / 双指扭转 → 绕目标 yaw */
+export function rotateViewportYawState(s: ViewportCameraState, dYawDeg: number): ViewportCameraState {
+  return { ...s, yawDeg: s.yawDeg - dYawDeg }
+}
+
+export function rotateViewportElevationState(s: ViewportCameraState, dElevDeg: number): ViewportCameraState {
   return {
     ...s,
-    yawDeg: s.yawDeg - dYaw,
-    elevationDeg: Math.max(1, Math.min(89, s.elevationDeg + dElev)),
+    elevationDeg: Math.max(1, Math.min(89, s.elevationDeg + dElevDeg)),
   }
 }
 

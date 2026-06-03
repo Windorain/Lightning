@@ -13,6 +13,11 @@ export interface EmbedData {
   document: unknown
 }
 
+/**
+ * 挂载 div 可选属性（Gadget / 模板）：
+ * - data-wsr-mobile-fit：默认开启外壳等比缩放；`0` 关闭
+ * - data-wsr-mobile-profile：`auto` | `desktop` | `compact`
+ */
 export interface EmbedUiOptions {
   blockIconCacheOptions?: Partial<BlockIconCacheOptions>
   initialLayerWorldY?: number

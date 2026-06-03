@@ -1,7 +1,7 @@
 /**
  * DRW — 视口绘制运行时：mesh/材质/帧呈现 + selection outline（不 import Context）。
  */
-import { ref, shallowRef, watch, type Ref, type ShallowRef } from 'vue'
+import { ref, shallowRef, toRaw, watch, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { LoadStatus } from '@/runtime/types'
@@ -131,7 +131,7 @@ export class DRW {
     getBlockGeometry: (pos: { x: number; y: number; z: number }) => import('@/render/schema/types').BakedQuad[] | null
     gridCenterWorld: (pos: { x: number; y: number; z: number }) => { x: number; y: number; z: number } | null
     /** Embed 侧栏按 blockId 高亮等附加遮罩 */
-    extraMaskMeshes?: Ref<THREE.Mesh[]>
+    extraMaskMeshes?: Ref<THREE.Mesh[]> | ShallowRef<THREE.Mesh[]>
   }): void {
     const update = (): void => {
       if (!this.outlinePass) return
@@ -161,7 +161,8 @@ export class DRW {
         }
       }
       const extra = options.extraMaskMeshes?.value ?? []
-      this.outlinePass.setMaskMeshes(extra.length ? [...masks, ...extra] : masks)
+      const all = extra.length ? [...masks, ...extra] : masks
+      this.outlinePass.setMaskMeshes(all.map((m) => toRaw(m)))
     }
     const sources: unknown[] = [
       options.selectionItems,

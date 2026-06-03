@@ -1,0 +1,16 @@
+/**
+ * 灰机 Wiki「零件:StructureRender.css」参考副本。
+ * 与 Gadget-LightningRender.js 一并维护；上线时粘贴到 Wiki 零件页。
+ */
+
+.web-structure-renderer {
+  box-sizing: border-box;
+}
+
+.wsr-fit-host {
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  overflow: hidden;
+  box-sizing: border-box;
+}

@@ -15,7 +15,7 @@ export interface SelectionOutlineBind {
   highlightOnHover: Ref<boolean>
   getBlockGeometry: (pos: { x: number; y: number; z: number }) => import('@/render/schema/types').BakedQuad[] | null
   gridCenterWorld: (pos: { x: number; y: number; z: number }) => { x: number; y: number; z: number } | null
-  extraMaskMeshes?: Ref<THREE.Mesh[]>
+  extraMaskMeshes?: Ref<THREE.Mesh[]> | import('vue').ShallowRef<THREE.Mesh[]>
 }
 
 export interface AttachViewportInput {
@@ -75,7 +75,10 @@ export async function attachViewport(
   const orbit = slot.orbitTarget.value
   if (cam && orbit) applyViewportCameraState(cam, orbit, camState)
 
-  const unbindDom = bindViewportDom(ctx, regionId, payload.domElement, handlers, { documentKeydown })
+  const unbindDom = bindViewportDom(ctx, regionId, payload.domElement, handlers, {
+    documentKeydown,
+    touchScreenGestures: ctx.isEmbed(),
+  })
 
   if (selectionOutline) {
     drw.bindSelectionOutline(selectionOutline)

@@ -5,8 +5,14 @@
 import { createApp } from 'vue'
 
 import EmbedRoot from '@/embed/EmbedRoot.vue'
+import { ensureMobileFitHost } from '@/embed/mobileFitHost'
+import { initEmbedTouchSim } from '@/embed/touchPointer'
 
 import type { EmbedBootstrapOptions } from './embedContract'
+
+import '@/styles/precision-tokens.css'
+import '@/styles/embed-nei-tokens.css'
+import '@/styles/embed-mobile.css'
 
 export function mount(
   target: string | Element | null | undefined,
@@ -34,5 +40,8 @@ export function mount(
     'dark'
   document.documentElement.dataset.neiTheme = theme
 
-  createApp(EmbedRoot, { bootstrap: options }).mount(el)
+  const mountEl = el as HTMLElement
+  ensureMobileFitHost(mountEl)
+  if (import.meta.env.DEV) initEmbedTouchSim(mountEl)
+  createApp(EmbedRoot, { bootstrap: options }).mount(mountEl)
 }

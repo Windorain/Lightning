@@ -8,6 +8,7 @@
     "build:workbench": "vite build --config vite.workbench.config.ts",
     "build:all": "npm run build:embed && npm run build:workbench",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "test:watch": "vitest",
     "lint:tests": "eslint src/workbench/testing/__tests__/",
     "typecheck": "vue-tsc --noEmit"
@@ -25,6 +26,7 @@
   "version": "0.0.0",
   "description": "Lightning web frontend — 3D structure viewer and workbench",
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/pako": "^2.0.4",
     "@types/three": "^0.174.0",
     "@vitejs/plugin-vue": "^5.2.1",

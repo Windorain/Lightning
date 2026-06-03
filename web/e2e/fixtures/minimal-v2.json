@@ -1,0 +1,92 @@
+{
+  "format_version": "2.0",
+  "id": "e2e-minimal",
+  "meta": {
+    "name": "E2E Minimal",
+    "author": "",
+    "created_at_ms": 0,
+    "description": "",
+    "tags": [],
+    "origin": { "x": 0, "y": 0, "z": 0 }
+  },
+  "frames": [
+    {
+      "index": 0,
+      "structure": {
+        "geometryPhase": "baked",
+        "cellGrid": [
+          [[1, 1], [1, 1]],
+          [[1, 1], [1, 1]]
+        ],
+        "blockPalette": [
+          {
+            "registryId": "air",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": { "encoding": "bakedQuadsJsonV1", "quads": [] },
+            "occludesAdjacentFaces": false,
+            "tooltip": []
+          },
+          {
+            "registryId": "minecraft:gold_ore",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": {
+              "encoding": "bakedQuadsJsonV1",
+              "quads": [
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 0, "z": 1, "u": 0, "v": 0, "color": 16776960 },
+                    { "x": 1, "y": 0, "z": 1, "u": 1, "v": 0, "color": 16776960 },
+                    { "x": 1, "y": 1, "z": 1, "u": 1, "v": 1, "color": 16776960 },
+                    { "x": 0, "y": 1, "z": 1, "u": 0, "v": 1, "color": 16776960 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 0, "z": 0, "u": 0, "v": 0, "color": 16776960 },
+                    { "x": 1, "y": 0, "z": 0, "u": 1, "v": 0, "color": 16776960 },
+                    { "x": 1, "y": 0, "z": 1, "u": 1, "v": 1, "color": 16776960 },
+                    { "x": 0, "y": 0, "z": 1, "u": 0, "v": 1, "color": 16776960 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 1, "y": 0, "z": 0, "u": 0, "v": 0, "color": 16776960 },
+                    { "x": 1, "y": 1, "z": 0, "u": 1, "v": 0, "color": 16776960 },
+                    { "x": 1, "y": 1, "z": 1, "u": 1, "v": 1, "color": 16776960 },
+                    { "x": 1, "y": 0, "z": 1, "u": 0, "v": 1, "color": 16776960 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 0, "z": 0, "u": 0, "v": 0, "color": 16776960 },
+                    { "x": 0, "y": 1, "z": 0, "u": 1, "v": 0, "color": 16776960 },
+                    { "x": 0, "y": 1, "z": 1, "u": 1, "v": 1, "color": 16776960 },
+                    { "x": 0, "y": 0, "z": 1, "u": 0, "v": 1, "color": 16776960 }
+                  ]
+                }
+              ]
+            },
+            "occludesAdjacentFaces": true,
+            "tooltip": ["Gold Ore"]
+          }
+        ]
+      }
+    }
+  ],
+  "annotations": [],
+  "labels": [],
+  "materialPalette": [{ "textureBlobIndex": 0 }],
+  "textureBlobs": [
+    {
+      "id": "e2e-gold",
+      "mime": "image/png",
+      "dataBase64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    }
+  ]
+}

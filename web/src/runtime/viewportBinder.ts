@@ -2,6 +2,7 @@ import type { Context } from '@/runtime/context'
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
 import { isEditingTarget } from '@/util/browser'
+import { isEmbedTouchScreenPointer } from '@/embed/touchPointer'
 
 export interface ViewportBinderHandlers {
   hover: RegionEventHandler
@@ -17,8 +18,12 @@ export function bindViewportDom(
   regionId: string,
   domElement: HTMLElement,
   handlers: ViewportBinderHandlers,
-  options?: { documentKeydown?: boolean },
+  options?: { documentKeydown?: boolean; /** Embed：手指 + 触控笔走屏上手势 */ touchScreenGestures?: boolean },
 ): () => void {
+  const screenPointer = (e: PointerEvent): boolean =>
+    options?.touchScreenGestures
+      ? isEmbedTouchScreenPointer(e)
+      : e.pointerType === 'touch'
   const unsubs: Array<() => void> = []
   const ed = ctx.wm.events
 
@@ -39,12 +44,15 @@ export function bindViewportDom(
     ed.setActiveRegion(regionId)
   }
 
+  domElement.style.touchAction = 'none'
+
   const onPointerDown = (e: PointerEvent): void => {
     activate()
-    if (e.button === 1) e.preventDefault()
+    if (e.button === 1 || screenPointer(e)) e.preventDefault()
     ed.dispatch(e, { regionId })
   }
   const onPointerMove = (e: PointerEvent): void => {
+    if (screenPointer(e) && e.buttons !== 0) e.preventDefault()
     ed.setActiveRegion(regionId)
     ed.dispatch(e, { regionId })
   }

@@ -33,6 +33,9 @@
 //   data-wsr-feature-block-stats     → blockStatsSidebar
 //   data-wsr-feature-debug-status    → debugStatusBar
 //   data-wsr-feature-axes-gizmo     → showAxesGizmo
+// —— mobile ——
+//   data-wsr-mobile-fit            默认开启；0/false 关闭外壳等比缩放
+//   data-wsr-mobile-profile        auto（默认）| desktop | compact
 
 /* global $, mw, document, window, console */
 $(function () {
@@ -235,10 +238,120 @@ $(function () {
     return bootstrap
   }
 
+  var HOST_CLASS = 'wsr-fit-host'
+  var FIT_MARGIN_PX = 16
+  var DEFAULT_DESIGN_W = 800
+  var DEFAULT_DESIGN_H = 600
+
+  function parseMobileFitEnabled(el) {
+    var b = parseBoolAttr(el, 'data-wsr-mobile-fit')
+    if (b === false) {
+      return false
+    }
+    return true
+  }
+
+  function readDesignPx(el, dim) {
+    var inline = el.style[dim]
+    if (inline) {
+      var m = /^([\d.]+)\s*px$/i.exec(String(inline).replace(/^\s+|\s+$/g, ''))
+      if (m) {
+        return Math.max(1, parseFloat(m[1]))
+      }
+    }
+    var cs = window.getComputedStyle(el)
+    var parsed = parseFloat(cs[dim])
+    if (parsed > 0 && isFinite(parsed)) {
+      return parsed
+    }
+    return dim === 'width' ? DEFAULT_DESIGN_W : DEFAULT_DESIGN_H
+  }
+
+  function availWidthForHost(host) {
+    var parent = host.parentElement
+    if (parent && parent.clientWidth > 0) {
+      return parent.clientWidth
+    }
+    return document.documentElement.clientWidth
+  }
+
+  function ensureMobileFitHost(mountEl) {
+    if (!parseMobileFitEnabled(mountEl)) {
+      return
+    }
+    var host = mountEl.parentElement
+    if (!host || !host.classList || !host.classList.contains(HOST_CLASS)) {
+      host = document.createElement('div')
+      host.className = HOST_CLASS
+      if (mountEl.parentNode) {
+        mountEl.parentNode.insertBefore(host, mountEl)
+      }
+      host.appendChild(mountEl)
+    }
+    var parentRo = null
+
+    function getDesignSize() {
+      var sw = mountEl.getAttribute('data-wsr-design-width')
+      var sh = mountEl.getAttribute('data-wsr-design-height')
+      if (sw && sh) {
+        return { w: Math.max(1, parseFloat(sw)), h: Math.max(1, parseFloat(sh)) }
+      }
+      var designW = readDesignPx(mountEl, 'width')
+      var designH = readDesignPx(mountEl, 'height')
+      mountEl.setAttribute('data-wsr-design-width', String(designW))
+      mountEl.setAttribute('data-wsr-design-height', String(designH))
+      return { w: designW, h: designH }
+    }
+
+    function apply() {
+      var design = getDesignSize()
+      var designW = design.w
+      var designH = design.h
+      var avail = Math.max(1, availWidthForHost(host) - FIT_MARGIN_PX)
+      if (avail >= designW) {
+        host.style.width = ''
+        host.style.height = ''
+        mountEl.style.width = designW + 'px'
+        mountEl.style.height = designH + 'px'
+        mountEl.style.transform = ''
+        mountEl.style.transformOrigin = ''
+        mountEl.removeAttribute('data-wsr-fit-scale')
+        try {
+          window.dispatchEvent(new CustomEvent('wsr-fit-change'))
+        } catch (_e) { /* IE */ }
+        return
+      }
+      var s = avail / designW
+      var fitW = Math.round(designW * s)
+      var fitH = Math.round(designH * s)
+      host.style.width = fitW + 'px'
+      host.style.height = fitH + 'px'
+      mountEl.style.width = fitW + 'px'
+      mountEl.style.height = fitH + 'px'
+      mountEl.style.transform = ''
+      mountEl.style.transformOrigin = ''
+      mountEl.setAttribute('data-wsr-fit-scale', String(s))
+      try {
+        window.dispatchEvent(new CustomEvent('wsr-fit-change'))
+      } catch (_e) { /* IE */ }
+    }
+
+    apply()
+    window.addEventListener('resize', apply)
+    var parent = host.parentElement
+    if (parent && window.ResizeObserver) {
+      parentRo = new ResizeObserver(function () {
+        apply()
+      })
+      parentRo.observe(parent)
+    }
+  }
+
   function mountIntoElement(el, doc) {
     if (!window.LightningEmbed || !window.LightningEmbed.mount) {
       return
     }
+    ensureMobileFitHost(el)
     window.LightningEmbed.mount(el, bootstrapFromMountEl(el, doc))
   }
 

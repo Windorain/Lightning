@@ -1,4 +1,4 @@
-import type { Ref, ShallowRef } from 'vue'
+import type { ShallowRef } from 'vue'
 import type { StructureDefinition } from '@/render/schema/types'
 import {
   buildOutlineMasksForRegistryId,
@@ -8,7 +8,7 @@ import {
 /** Embed 侧栏 blockId 选中 → DRW extraMaskMeshes */
 export function createEmbedSidebarOutlineMasks(deps: {
   definitionRef: ShallowRef<StructureDefinition | null>
-  masksRef: Ref<import('three').Mesh[]>
+  masksRef: ShallowRef<import('three').Mesh[]>
 }) {
   function rebuildSelectionMasks(blockId: string | null): void {
     disposeOutlineMaskMeshes(deps.masksRef.value)

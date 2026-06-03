@@ -25,6 +25,8 @@ web/src/render/proto/lightning/v1/
 
 # Test artifacts
 web/test-artifacts/
+web/test-results/
+web/e2e/screenshots/
 .worktrees/
 .superpowers/
 CLAUDE.md

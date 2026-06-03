@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Embed Mobile E2E</title>
+    <style>
+      body {
+        margin: 0;
+        background: #e8dcc8;
+        font-family: system-ui, sans-serif;
+      }
+      #wiki-column {
+        max-width: var(--wiki-col-w, 390px);
+        margin: 0 auto;
+        padding: 8px;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wiki-column">
+      <div
+        class="web-structure-renderer"
+        data-wsr-mobile-fit="1"
+        data-wsr-mobile-profile="auto"
+        data-wsr-feature-title-bar="true"
+        data-wsr-feature-block-stats="true"
+        data-wsr-feature-layer-bar="true"
+        data-wsr-touch-sim="1"
+        style="background: #0f172a; width: 800px; height: 600px"
+      ></div>
+    </div>
+    <script type="module" src="/src/e2e/embed-mobile-main.ts"></script>
+  </body>
+</html>

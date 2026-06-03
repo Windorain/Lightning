@@ -270,11 +270,22 @@ export function createLogCenter() {
     snapshot(ctx: Context): StateDigest {
       const id = nextId
       const blocks = getFrameBlocks(ctx)
+      const blockDigest = blocks.map(b => ({ pos: { ...b.pos }, id: b.block_state_id }))
+      if (ctx.isEmbed()) {
+        return {
+          logId: id,
+          blockCount: blocks.length,
+          blocks: blockDigest,
+          selectionSize: 0,
+          selection: [],
+          activeOperator: null,
+        }
+      }
       const sel = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
       return {
         logId: id,
         blockCount: blocks.length,
-        blocks: blocks.map(b => ({ pos: { ...b.pos }, id: b.block_state_id })),
+        blocks: blockDigest,
         selectionSize: sel.length,
         selection: sel.map(s => ({ ...s.ref.pos })),
         activeOperator: ctx.getToolRegistry().activeTool.value?.id ?? null,
@@ -283,7 +294,6 @@ export function createLogCenter() {
 
     diff(snap: StateDigest, ctx: Context): StateDiff {
       const now = getFrameBlocks(ctx)
-      const nowSel = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
       const diff: StateDiff = {
         sinceLogId: snap.logId,
         blocksAdded: [],
@@ -302,9 +312,12 @@ export function createLogCenter() {
         if (!newMap.has(key)) diff.blocksRemoved.push(b)
       }
 
-      diff.selectionChanged =
-        snap.selectionSize !== nowSel.length ||
-        !snap.selection.every((s, i) => posEq(s, nowSel[i]?.ref.pos ?? { x: NaN, y: NaN, z: NaN }))
+      if (!ctx.isEmbed()) {
+        const nowSel = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
+        diff.selectionChanged =
+          snap.selectionSize !== nowSel.length ||
+          !snap.selection.every((s, i) => posEq(s, nowSel[i]?.ref.pos ?? { x: NaN, y: NaN, z: NaN }))
+      }
 
       return diff
     },

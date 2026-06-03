@@ -7,7 +7,7 @@
  * - 本地 DRW 管理 mesh/材质/帧状态
  * - 叶子组件全部 props/emits
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import * as THREE from 'three'
 import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
@@ -26,9 +26,11 @@ import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
 import type { EmbedSettings } from '@/viewer/viewerConfig'
 import type { InitialCamera } from '@/viewer/viewerConfig'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
+import { createEmbedTouchHandler } from '@/embed/embedTouchHandler'
 import { sceneDisplayTitleFromRootDocument } from '@/viewer/sceneDisplayTitle'
 import { embedHoverFromState } from '@/runtime/hover'
 import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
+import { useEmbedLayoutProfile } from '@/embed/useEmbedLayoutProfile'
 import EmbedSettingsPanel from '@/embed/components/EmbedSettingsPanel.vue'
 
 const props = defineProps<{
@@ -67,9 +69,23 @@ const hover = embedHoverFromState(hoverState)
 const engineHostRef = ref<InstanceType<typeof RenderEngineHost> | null>(null)
 const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
+const { layoutClass, profile } = useEmbedLayoutProfile(wmRoot)
+
+watch(profile, (p) => {
+  if (p === 'narrow' || p === 'tiny') sidebarCollapsed.value = true
+}, { immediate: true })
+
+const didNarrowViewFit = ref(false)
+watch([loadStatus, profile], () => {
+  if (didNarrowViewFit.value || loadStatus.value !== 'ok') return
+  if (profile.value !== 'narrow' && profile.value !== 'tiny') return
+  didNarrowViewFit.value = true
+  void ctx.getOperators().exec('OPERATOR_VIEW_RESET')
+})
 const selectedBlockId = ref<string | null>(null)
 
-const sidebarExtraMasks = ref<THREE.Mesh[]>([])
+/** 勿用 ref：深度响应式会代理 Mesh，破坏 Three.js 矩阵访问 */
+const sidebarExtraMasks = shallowRef<THREE.Mesh[]>([])
 const emptySelection = ref(new Set<import('@/context/selection').SelectedEntity>())
 const hoveredBlockForOutline = computed(() =>
   blockRefFromViewportHover(ctx, hoverState.viewportBlock.value),
@@ -166,6 +182,7 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     mainMeshGroup,
     handlers: {
       hover: createHoverHandler(viewportRegionId, () => ctx),
+      gizmo: createEmbedTouchHandler(viewportRegionId, () => ctx),
       keymap: createKeymapHandler(viewportRegionId, () => ctx),
     },
     selectionOutline: {
@@ -203,7 +220,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="wmRoot" class="wm-root">
+  <div ref="wmRoot" class="wm-root" :class="layoutClass">
     <!-- Title bar -->
     <header v-if="showTitle" class="wm-titlebar">
       <div class="wm-titlebar-left">
@@ -215,17 +232,17 @@ onBeforeUnmount(() => {
         >?</span>
       </div>
       <div class="wm-titlebar-actions">
-        <button type="button" class="nei-icon-btn" title="复位视角" @click="void ctx.getOperators().exec('OPERATOR_VIEW_RESET')">
+        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="复位视角" @click="void ctx.getOperators().exec('OPERATOR_VIEW_RESET')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 3.1L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-3.1L3 16"/><path d="M3 21v-5h5"/></svg>
         </button>
-        <button type="button" class="nei-icon-btn" title="截屏" @click="engineHostRef?.screenshot()">
+        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="截屏" @click="engineHostRef?.screenshot()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
         </button>
         <button type="button" class="nei-icon-btn" title="全屏" @click="toggleFullscreen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
         </button>
-        <span class="wm-titlebar-sep" />
-        <button type="button" class="nei-icon-btn" title="在编辑器中打开 (TODO)" disabled>
+        <span class="wm-titlebar-sep wsr-mobile-hide" />
+        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="在编辑器中打开 (TODO)" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
         </button>
         <button type="button" class="nei-icon-btn" title="设置" @click="showSettingsPanel = !showSettingsPanel">
@@ -319,5 +336,10 @@ onBeforeUnmount(() => {
 .nei-icon-btn:focus-visible {
   outline: 2px solid var(--nei-focus-ring);
   outline-offset: 2px;
+}
+
+.wm-root.wsr-layout-narrow .wsr-mobile-hide,
+.wm-root.wsr-layout-tiny .wsr-mobile-hide {
+  display: none !important;
 }
 </style>

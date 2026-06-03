@@ -1,0 +1,129 @@
+/* Wiki 嵌入：外壳缩放 + 窄屏 layout profile（类名由 useEmbedLayoutProfile 挂在 .wm-root） */
+
+.wsr-fit-host {
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.web-structure-renderer {
+  box-sizing: border-box;
+}
+
+/* narrow：隐藏次要顶栏按钮 */
+.wsr-layout-narrow .wsr-mobile-hide,
+.wsr-layout-tiny .wsr-mobile-hide {
+  display: none !important;
+}
+
+.wsr-layout-narrow .wm-title-text,
+.wsr-layout-tiny .wm-title-text {
+  font-size: 12px;
+}
+
+.wsr-layout-tiny .nei-icon-btn {
+  width: 36px;
+  height: 36px;
+}
+
+/* 窄盒子里取消 320px 视口下限，让 flex 把高度留给 canvas */
+.wsr-layout-narrow .wm-main-stage,
+.wsr-layout-tiny .wm-main-stage {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.wsr-layout-narrow .wm-viewport-column,
+.wsr-layout-tiny .wm-viewport-column {
+  min-height: 0;
+}
+
+.wsr-layout-narrow .vc-viewport,
+.wsr-layout-tiny .vc-viewport {
+  min-height: 0 !important;
+  flex: 1 1 auto;
+}
+
+.wsr-layout-tiny .vp-dock--embed .vp-dock__tab-row {
+  padding: 4px 8px 3px;
+}
+
+.wsr-layout-tiny .vp-dock--embed .vp-dock__panel {
+  height: 36px;
+}
+
+.wsr-layout-tiny .vp-dock--embed .vp-dock__tab {
+  font-size: 11px;
+  padding: 4px 10px 3px;
+}
+
+/* 窄屏收起侧栏：略收紧边距，多留 canvas */
+.wsr-layout-narrow .nei-sidebar.nei-sidebar--collapsed,
+.wsr-layout-tiny .nei-sidebar.nei-sidebar--collapsed {
+  width: 42px;
+}
+
+.wsr-layout-narrow .nei-sidebar--collapsed .nei-sidebar-head,
+.wsr-layout-tiny .nei-sidebar--collapsed .nei-sidebar-head {
+  padding: 6px 0 4px;
+}
+
+.wsr-layout-narrow .nei-sidebar-grid--collapsed,
+.wsr-layout-tiny .nei-sidebar-grid--collapsed {
+  padding: 2px 1px;
+  gap: 1px;
+}
+
+.wsr-layout-narrow .nei-sidebar,
+.wsr-layout-tiny .nei-sidebar {
+  min-height: 0;
+}
+
+.wsr-layout-narrow .nei-slot-row--collapsed,
+.wsr-layout-tiny .nei-slot-row--collapsed {
+  max-width: 36px;
+  height: 40px;
+  padding: 0;
+}
+
+.wsr-layout-narrow .nei-sidebar-foot,
+.wsr-layout-tiny .nei-sidebar-foot {
+  padding: 4px 0;
+}
+
+/* 触控：视口禁浏览器手势；控件加大可点区域 */
+.vc-viewport,
+.vc-viewport canvas {
+  touch-action: none;
+}
+
+.wsr-layout-narrow .nei-icon-btn,
+.wsr-layout-tiny .nei-icon-btn {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.wsr-layout-narrow .nei-sidebar-toggle,
+.wsr-layout-tiny .nei-sidebar-toggle {
+  width: 28px;
+  height: 28px;
+}
+
+.wsr-layout-narrow .nei-slot-row,
+.wsr-layout-tiny .nei-slot-row {
+  min-height: 40px;
+}
+
+.wsr-layout-narrow .nei-slider__range,
+.wsr-layout-tiny .nei-slider__range,
+.wsr-layout-narrow .vp-dock__tab,
+.wsr-layout-tiny .vp-dock__tab {
+  touch-action: manipulation;
+}
+
+.wsr-layout-narrow .nei-slider__range,
+.wsr-layout-tiny .nei-slider__range {
+  min-height: 36px;
+}

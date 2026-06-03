@@ -1,4 +1,5 @@
 // web/src/render/postprocessing/SelectionOutlinePass.ts
+import { toRaw } from 'vue'
 import {
   Color,
   DoubleSide,
@@ -105,8 +106,9 @@ export class SelectionOutlinePass extends Pass {
     this.maskScene.clear()
     this._maskCount = meshes.length
     for (const m of meshes) {
-      m.material = this._maskMaterial
-      this.maskScene.add(m)
+      const mesh = toRaw(m)
+      mesh.material = this._maskMaterial
+      this.maskScene.add(mesh)
     }
   }
 
