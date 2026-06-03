@@ -4,6 +4,7 @@ import { getDevSceneDocument } from '@/dev/devScenes'
 import { downloadJson } from '@/util/browser'
 import { suggestedJsonBaseName } from '@/workbench/utils/fileNaming'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
+import { resetAllViewportCameras } from '@/runtime/viewportCameras'
 
 /**
  * Open a native file picker for .json files.
@@ -55,7 +56,8 @@ export const NewSceneOperator: OperatorType = {
     ctx.getSelection().clear()
     ctx.getEditHistory().clear()
     const doc = RuntimeDocument.empty()
-    ctx.main.replaceDoc( doc)
+    ctx.main.replaceDoc(doc)
+    resetAllViewportCameras(ctx)
   },
 }
 
@@ -90,12 +92,14 @@ export const OpenSceneOperator: OperatorType = {
     }
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      ctx.main.replaceDoc( result.document)
+      ctx.main.replaceDoc(result.document)
+      resetAllViewportCameras(ctx)
       ctx.getCurrentFrameIndex().value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      ctx.main.replaceDoc( null)
+      ctx.main.replaceDoc(null)
+      resetAllViewportCameras(ctx)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
     }
     ctx.getLocalFileName().value = file.name
@@ -137,12 +141,14 @@ export const LoadBuiltinSceneOperator: OperatorType = {
     ctx.getEditHistory().clear()
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (result.document) {
-      ctx.main.replaceDoc( result.document)
+      ctx.main.replaceDoc(result.document)
+      resetAllViewportCameras(ctx)
       ctx.getCurrentFrameIndex().value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      ctx.main.replaceDoc( null)
+      ctx.main.replaceDoc(null)
+      resetAllViewportCameras(ctx)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
     }
     await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-bundle' })
@@ -158,6 +164,7 @@ export const LoadEmbedDocumentOperator: OperatorType = {
     const raw = props.document
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (!result.document) throw new Error(result.error ?? 'parse failed')
-    ctx.main.replaceDoc( result.document)
+    ctx.main.replaceDoc(result.document)
+    resetAllViewportCameras(ctx)
   },
 }

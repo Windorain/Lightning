@@ -16,6 +16,9 @@ function makeMockCtx(doc: RuntimeDocument | null): Context {
       definition: ref(null),
       layerPreview: ref(null),
       overlayGroup: ref(null),
+      toolsOverlayGroup: ref(null),
+      worldAnnotationGroup: ref(null),
+      viewportCamera: ref(null),
     }),
   } as unknown as Context
 }

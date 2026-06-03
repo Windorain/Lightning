@@ -7,7 +7,7 @@ import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import type { ViewportBinderHandlers } from '@/runtime/viewportBinder'
 import { bindViewportDom } from '@/runtime/viewportBinder'
 import type { BlockRef, SelectedEntity } from '@/context/selection'
-import { disposeAnnotationOverlay } from '@/runtime/viewportAnnotations'
+import { applyViewportCameraState, registerViewportCamera } from '@/runtime/viewportCamera'
 
 export interface SelectionOutlineBind {
   selectionItems: Ref<Set<SelectedEntity>>
@@ -59,6 +59,8 @@ export async function attachViewport(
     }
   }
 
+  drw.bindOverlayPass(payload.layers.overlay)
+
   slot.orbitTarget.value = payload.orbitTarget
   slot.camera.value = payload.camera
   slot.domElement.value = payload.domElement
@@ -66,6 +68,11 @@ export async function attachViewport(
   slot.definition.value = structureDefinition.value ?? null
   slot.layerPreview.value = layerPreviewMode
   slot.overlayGroup.value = payload.layers.overlay
+
+  const camState = registerViewportCamera(slot, structureDefinition.value)
+  const cam = slot.camera.value
+  const orbit = slot.orbitTarget.value
+  if (cam && orbit) applyViewportCameraState(cam, orbit, camState)
 
   const unbindDom = bindViewportDom(ctx, regionId, payload.domElement, handlers, { documentKeydown })
 
@@ -75,6 +82,6 @@ export async function attachViewport(
 
   return () => {
     unbindDom()
-    disposeAnnotationOverlay(regionId)
+    drw.unbindOverlayPass()
   }
 }

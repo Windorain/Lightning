@@ -1,6 +1,6 @@
 import { createOperatorRegistry, wrapOperatorRegistry } from '@/operators/operatorRegistry'
 import { SetFrameIndexOperator, SetFramePlaybackOperator, SetLayerYOperator, ToggleFramePlaybackOperator } from '@/operators/builtin/miscOperators'
-import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator } from '@/operators/builtin/viewOperators'
+import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator } from '@/operators/builtin/viewOperators'
 import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
 import { LoadEmbedDocumentOperator } from '@/operators/builtin/docLifecycleOperators'
 import { V2PlainParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/parsers/builtinParsers'
@@ -61,7 +61,7 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
     wm.events.registerRegion(inputId)
   }
 
-  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, CopyCameraFromEmbedOperator, LoadEmbedDocumentOperator, SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetLayerYOperator]) {
+  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator, CopyCameraFromEmbedOperator, LoadEmbedDocumentOperator, SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetLayerYOperator]) {
     if (!registry.find(op.id)) registry.register(op)
   }
 

@@ -93,6 +93,14 @@ export class Context {
     return this.main.currentFrameIndex
   }
 
+  /** 按 region 取视口相机；缺省为当前 WM 输入域对应 slot */
+  getViewportCamera(regionId?: string): Ref<import('@/runtime/viewportCamera').ViewportCameraState | null> {
+    const rid = regionId ?? this.resolveInputRegionId() ?? this.viewports.activeId.value
+    const slot = rid ? this.viewports.get(rid) : this.viewports.active.value
+    if (!slot) throw new Error('getViewportCamera: no viewport slot')
+    return slot.viewportCamera
+  }
+
   getOperators(): Main['registries']['operatorsFacade'] {
     return this.main.registries.operatorsFacade
   }
@@ -135,6 +143,10 @@ export class Context {
   getHoveredBlock(): Ref<import('@/context/selection').BlockRef | null> {
     if (this.isEmbed()) workbenchUnavailable('hoveredBlock')
     return (this.getSession() as WorkbenchSession).hoveredBlock
+  }
+  getHoveredAnnotationId(): Ref<string | null> {
+    if (this.isEmbed()) workbenchUnavailable('hoveredAnnotationId')
+    return (this.getSession() as WorkbenchSession).hoveredAnnotationId
   }
 
   getSelection(): SelectionContext {

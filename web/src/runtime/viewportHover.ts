@@ -70,12 +70,18 @@ export function createViewportHoverState(): ViewportHoverState {
   }
 
   function setAnnotation(payload: AnnotationHover | null): void {
-    if (payload) {
-      annotation.value = payload
-      viewportBlock.value = null
-    } else if (annotation.value) {
-      annotation.value = null
+    if (!payload) {
+      if (annotation.value) annotation.value = null
+      return
     }
+    const cur = annotation.value
+    if (cur && cur.annotationId === payload.annotationId) {
+      cur.clientX = payload.clientX
+      cur.clientY = payload.clientY
+      return
+    }
+    annotation.value = payload
+    viewportBlock.value = null
   }
 
   function setMeta(payload: MetaHover | null): void {

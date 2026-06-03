@@ -190,6 +190,16 @@ export const SetHoveredBlockOperator: OperatorType = {
   },
 }
 
+export const SetHoveredAnnotationOperator: OperatorType = {
+  id: 'OPERATOR_SET_HOVERED_ANNOTATION',
+  label: '设置悬停注解',
+  poll(ctx) { return !ctx.isEmbed() },
+  exec(ctx, props) {
+    const id = props.annotationId as string | null | undefined
+    ctx.getHoveredAnnotationId().value = id ?? null
+  },
+}
+
 export const SetWikiConfigOperator: OperatorType = {
   id: 'OPERATOR_SET_WIKI_CONFIG',
   label: '设置 Wiki 配置',

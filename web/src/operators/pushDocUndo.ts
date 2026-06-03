@@ -10,19 +10,21 @@
 import { generateId } from '@/pure/string'
 import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
+import type { ReplaceDocOptions } from '@/runtime/main'
 
 export function pushDocUndo(
   ctx: Context,
   before: RuntimeDocument | null,
   after: RuntimeDocument | null,
   label: string,
+  replaceDocOptions?: ReplaceDocOptions,
 ): void {
   if (before === null && after === null) return
   ctx.getEditHistory().push({
     id: generateId('op_'),
     label,
     timestamp: Date.now(),
-    execute: () => { ctx.main.replaceDoc(after) },
-    undo: () => { ctx.main.replaceDoc(before) },
+    execute: () => { ctx.main.replaceDoc(after, replaceDocOptions) },
+    undo: () => { ctx.main.replaceDoc(before, replaceDocOptions) },
   })
 }

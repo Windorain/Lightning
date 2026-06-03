@@ -8,34 +8,74 @@ import type { Context } from '@/runtime/context'
 import type { MaterialQueryItem, BlockTypeStat } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
 import type { Frame } from '@/render/schema/types'
-import { scenePickAllFromPointer, scenePickFromPointer } from '@/render/interaction/scenePick'
+import type { Annotation } from '@/render/data/annotationTypes'
+import {
+  scenePickAllFromPointer,
+  pickAtPointer,
+  type ScenePickParams,
+  type ScenePickResult,
+} from '@/render/interaction/scenePick'
 import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
 import type { BakedQuadsGeometry } from '@/render/schema/types'
 import { structureRowToWorldY } from '@/pure/vec'
 
-/** 屏幕坐标 → 方块引用 */
-export function pickVoxel(ctx: Context, event: PointerEvent): BlockRef | null {
-  const vp = ctx.getViewport()
+function readAnnotations(ctx: Context): Annotation[] {
+  const doc = ctx.getDoc().value
+  if (!doc) return []
+  return (doc.annotations ?? []) as Annotation[]
+}
+
+function viewportSlot(ctx: Context, regionId?: string) {
+  return regionId ? (ctx.viewports.get(regionId) ?? ctx.getViewport()) : ctx.getViewport()
+}
+
+function scenePickBase(ctx: Context, regionId?: string): Omit<ScenePickParams, 'clientX' | 'clientY'> | null {
+  const vp = viewportSlot(ctx, regionId)
   const camera = vp.camera.value
   const contentGroup = vp.contentGroup.value
   const domElement = vp.domElement.value
   const definition = vp.definition.value
   if (!camera || !contentGroup || !domElement || !definition) return null
-  const result = scenePickFromPointer({
-    clientX: event.clientX,
-    clientY: event.clientY,
+  return {
     domElement,
     camera,
     contentGroup,
     overlayGroup: vp.overlayGroup.value ?? undefined,
+    worldAnnotationGroup: vp.worldAnnotationGroup.value ?? undefined,
     def: definition,
     layerPreview: vp.layerPreview.value ?? 'all',
-  })
-  if (!result || result.kind !== 'block') return null
+    annotations: readAnnotations(ctx),
+  }
+}
 
+function gridHeight(ctx: Context): number {
   const doc = ctx.getDoc().value
   const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
-  const h = rf?.grid?.height ?? 0
+  return rf?.grid?.height ?? 0
+}
+
+/** 统一视口拾取（方块 / 注解） */
+export function pickEntity(ctx: Context, event: PointerEvent, regionId?: string): ScenePickResult {
+  return pickEntityAtClient(ctx, event.clientX, event.clientY, regionId)
+}
+
+export function pickEntityAtClient(
+  ctx: Context,
+  clientX: number,
+  clientY: number,
+  regionId?: string,
+): ScenePickResult {
+  const base = scenePickBase(ctx, regionId)
+  if (!base) return null
+  return pickAtPointer({ ...base, clientX, clientY })
+}
+
+/** 屏幕坐标 → 方块引用 */
+export function pickVoxel(ctx: Context, event: PointerEvent, regionId?: string): BlockRef | null {
+  const result = pickEntity(ctx, event, regionId)
+  if (!result || result.kind !== 'block') return null
+
+  const h = gridHeight(ctx)
   const worldY = h > 0 ? structureRowToWorldY(result.row, h) : result.row
 
   return {
@@ -48,26 +88,15 @@ export function pickVoxel(ctx: Context, event: PointerEvent): BlockRef | null {
 }
 
 /** 指针位置穿透的全部实体候选（去重、按深度排序），用于轮换拾取 */
-export function pickAll(ctx: Context, event: PointerEvent) {
-  const vp = ctx.getViewport()
-  const camera = vp.camera.value
-  const contentGroup = vp.contentGroup.value
-  const domElement = vp.domElement.value
-  const definition = vp.definition.value
-  if (!camera || !contentGroup || !domElement || !definition) return []
+export function pickAll(ctx: Context, event: PointerEvent, regionId?: string) {
+  const base = scenePickBase(ctx, regionId)
+  if (!base) return []
   const results = scenePickAllFromPointer({
+    ...base,
     clientX: event.clientX,
     clientY: event.clientY,
-    domElement,
-    camera,
-    contentGroup,
-    overlayGroup: vp.overlayGroup.value ?? undefined,
-    def: definition,
-    layerPreview: vp.layerPreview.value ?? 'all',
   })
-  const doc = ctx.getDoc().value
-  const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
-  const h = rf?.grid?.height ?? 0
+  const h = gridHeight(ctx)
   for (const r of results) {
     if (r.kind === 'block' && r.row !== undefined) {
       r.row = h > 0 ? structureRowToWorldY(r.row, h) : r.row

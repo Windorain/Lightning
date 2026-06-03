@@ -1,14 +1,15 @@
 /**
  * DRW 内部 mesh/材质/帧管线（不 import Context，只订阅 Ref）。
  */
-import { computed, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
+import { computed, ref, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { LoadStatus } from '@/runtime/types'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition } from '@/render/schema/types'
-import type { Annotation } from '@/render/data/annotationTypes'
+import { type Annotation, annotationIsOnLayer } from '@/render/data/annotationTypes'
+import { disposeAnnotationGroup } from '@/render/mesh/annotationMeshProvider'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
 import type { BlockMeshBuildStats } from '@/render/mesh/blockMesh'
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
@@ -54,6 +55,12 @@ export interface DrwMeshPipelineDeps {
   initialWorldFrameIndex?: number
   /** structEpoch 递增 → 触发 rebuildAll（外部文档刷新时） */
   structEpochRef: Ref<number>
+  /** overlay pass 可见性（Embed 偏好等）；默认始终显示 */
+  showAnnotationsRef?: Ref<boolean>
+  /** 主场景深度注解根（ViewportSlot，供拾取） */
+  worldAnnotationGroupRef?: ShallowRef<THREE.Group | null>
+  /** overlay pass 内工具预览根（ViewportSlot） */
+  toolsOverlayGroupRef?: ShallowRef<THREE.Group | null>
   /** 换帧时经 Operator 写入（避免 DRW 直改 ref） */
   setFrameIndex?: (index: number) => void | Promise<void>
   /** 停/启播放时经 Operator 写入 */
@@ -73,7 +80,9 @@ export interface DrwMeshPipeline {
   registerScene(scene: THREE.Scene): void
   loadStructureAndResources(): Promise<void>
   rebuildContentMesh(): Promise<void>
-  rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null>
+  /** 绑定 RenderEngine overlay pass 根 Group（注解层由 DRW 独占子树） */
+  bindOverlayPass(group: THREE.Group): void
+  unbindOverlayPass(): void
   setCurrentWorldFrame(index: number): Promise<void>
   disposeCachesAndLibrary(): void
   /** 清空缓存后重新加载结构 + 重建 mesh（替代原 reloadFromConfig） */
@@ -87,15 +96,17 @@ export interface DrwMeshPipeline {
   computed: DrwComputed
 }
 
-/** 注解 overlay 所需的最小 DRW 面 */
-export type DrwAnnotationApi = Pick<DrwMeshPipeline, 'computed' | 'rebuildAnnotationOverlay'>
-
 export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipeline {
   const {
     docRef, loadStatus, meshBusy, blockIconCache, tooltipPalette,
     structureDefinition, mainMeshGroup, sceneRef, worldFrameIndex, layerWorldY,
     framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex, structEpochRef, setFrameIndex, setFramesPlayback,
+    showAnnotationsRef: showAnnotationsRefIn,
+    worldAnnotationGroupRef,
+    toolsOverlayGroupRef,
   } = deps
+
+  const showAnnotationsRef = showAnnotationsRefIn ?? ref(true)
 
   function stopPlayback(): void {
     if (setFramesPlayback) void Promise.resolve(setFramesPlayback(false))
@@ -120,11 +131,166 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   const blockMeshProvider = new BlockMeshProvider()
   const annotationProvider = new AnnotationMeshProvider()
 
+  // ---- Overlay pass（与 main structure 并列，由 DRW 统一同步）----
+  let overlayPassTarget: THREE.Group | null = null
+  let overlayToolsRoot: THREE.Group | null = null
+  let overlayAnnotationRoot: THREE.Group | null = null
+  let overlayAnnotationMesh: THREE.Group | null = null
+  let structureAnnotationRoot: THREE.Group | null = null
+  let structureAnnotationMesh: THREE.Group | null = null
+  let annotationSyncGen = 0
+  let stopAnnotationPassWatch: (() => void) | null = null
+
+  function readDocumentAnnotations(): Annotation[] {
+    const doc = docRef.value
+    if (!doc) return []
+    let annos = (doc.annotations ?? []) as Annotation[]
+    const mode = layerPreviewMode.value
+    if (mode !== 'all') {
+      const gh = gridHeight.value
+      annos = annos.filter(a => annotationIsOnLayer(a, mode.worldY, gh))
+    }
+    return annos
+  }
+
+  function detachOverlayAnnotationMesh(): void {
+    if (overlayAnnotationMesh) {
+      overlayAnnotationRoot?.remove(overlayAnnotationMesh)
+      disposeAnnotationGroup(overlayAnnotationMesh)
+      overlayAnnotationMesh = null
+    }
+  }
+
+  function detachStructureAnnotationMesh(): void {
+    if (structureAnnotationMesh) {
+      structureAnnotationRoot?.remove(structureAnnotationMesh)
+      disposeAnnotationGroup(structureAnnotationMesh)
+      structureAnnotationMesh = null
+    }
+  }
+
+  function ensureStructureAnnotationRoot(scene: THREE.Scene): THREE.Group {
+    if (!structureAnnotationRoot) {
+      structureAnnotationRoot = new THREE.Group()
+      structureAnnotationRoot.name = 'drw-structure-annotations'
+      scene.add(structureAnnotationRoot)
+    } else if (structureAnnotationRoot.parent !== scene) {
+      structureAnnotationRoot.parent?.remove(structureAnnotationRoot)
+      scene.add(structureAnnotationRoot)
+    }
+    if (worldAnnotationGroupRef) worldAnnotationGroupRef.value = structureAnnotationRoot
+    return structureAnnotationRoot
+  }
+
+  function clearStructureAnnotationRootRef(): void {
+    if (structureAnnotationRoot?.parent) structureAnnotationRoot.parent.remove(structureAnnotationRoot)
+    structureAnnotationRoot = null
+    if (worldAnnotationGroupRef) worldAnnotationGroupRef.value = null
+  }
+
+  function ensureToolsOverlayRoot(): THREE.Group | null {
+    const target = overlayPassTarget
+    if (!target) return null
+    if (!overlayToolsRoot) {
+      overlayToolsRoot = new THREE.Group()
+      overlayToolsRoot.name = 'drw-overlay-tools'
+      target.add(overlayToolsRoot)
+    } else if (overlayToolsRoot.parent !== target) {
+      overlayToolsRoot.parent?.remove(overlayToolsRoot)
+      target.add(overlayToolsRoot)
+    }
+    if (toolsOverlayGroupRef) toolsOverlayGroupRef.value = overlayToolsRoot
+    return overlayToolsRoot
+  }
+
+  function clearToolsOverlayRootRef(): void {
+    if (overlayToolsRoot?.parent) overlayToolsRoot.parent.remove(overlayToolsRoot)
+    overlayToolsRoot = null
+    if (toolsOverlayGroupRef) toolsOverlayGroupRef.value = null
+  }
+
+  function ensureOverlayAnnotationRoot(): THREE.Group | null {
+    const target = overlayPassTarget
+    if (!target) return null
+    if (!overlayAnnotationRoot) {
+      overlayAnnotationRoot = new THREE.Group()
+      overlayAnnotationRoot.name = 'drw-overlay-annotations'
+      target.add(overlayAnnotationRoot)
+    } else if (overlayAnnotationRoot.parent !== target) {
+      overlayAnnotationRoot.parent?.remove(overlayAnnotationRoot)
+      target.add(overlayAnnotationRoot)
+    }
+    return overlayAnnotationRoot
+  }
+
+  /** 文档注解 → 按 overlay 属性挂到 main / overlay pass（唯一同步入口） */
+  async function syncAnnotations(): Promise<void> {
+    const gen = ++annotationSyncGen
+    const def = structureDefinition.value
+    const scene = sceneRef.value
+    const annos = readDocumentAnnotations()
+
+    if (!showAnnotationsRef.value || !def) {
+      detachOverlayAnnotationMesh()
+      detachStructureAnnotationMesh()
+      if (overlayAnnotationRoot) overlayAnnotationRoot.visible = false
+      if (structureAnnotationRoot) structureAnnotationRoot.visible = false
+      return
+    }
+
+    const buckets = annotationProvider.buildBuckets(def, annos)
+    if (gen !== annotationSyncGen) return
+
+    if (overlayPassTarget) {
+      const root = ensureOverlayAnnotationRoot()
+      if (root) {
+        root.visible = true
+        detachOverlayAnnotationMesh()
+        if (buckets.overlay) {
+          overlayAnnotationMesh = buckets.overlay
+          root.add(buckets.overlay)
+        }
+      }
+    } else {
+      detachOverlayAnnotationMesh()
+    }
+
+    if (scene) {
+      const worldRoot = ensureStructureAnnotationRoot(scene)
+      worldRoot.visible = true
+      detachStructureAnnotationMesh()
+      if (buckets.world) {
+        structureAnnotationMesh = buckets.world
+        worldRoot.add(buckets.world)
+      }
+    } else {
+      detachStructureAnnotationMesh()
+    }
+  }
+
+  function bindOverlayPass(group: THREE.Group): void {
+    overlayPassTarget = group
+    ensureToolsOverlayRoot()
+    void runMesh(() => syncAnnotations())
+  }
+
+  function unbindOverlayPass(): void {
+    annotationSyncGen++
+    detachOverlayAnnotationMesh()
+    detachStructureAnnotationMesh()
+    if (overlayAnnotationRoot?.parent) overlayAnnotationRoot.parent.remove(overlayAnnotationRoot)
+    overlayAnnotationRoot = null
+    clearStructureAnnotationRootRef()
+    clearToolsOverlayRootRef()
+    overlayPassTarget = null
+  }
+
   const worldMeshCache = new Map<string, WorldMeshEntry>()
   let nonWorldMeshDispose: (() => void) | null = null
   let stopStructEpochWatch: (() => void) | null = null
   let stopFrameIndexWatch: (() => void) | null = null
   let stopPlaybackWatch: (() => void) | null = null
+  let stopLayerWorldYWatch: (() => void) | null = null
   let suppressFrameIndexWatch = false
 
   // ---- Computed ----
@@ -229,6 +395,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     } finally {
       meshBusy.value = false
     }
+    await syncAnnotations()
   }
 
   // ---- 图标缓存管理 ----
@@ -296,6 +463,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     }, delay)
   }
 
+  /** 多帧：按索引解析 bundle 并呈现结构 mesh（唯一换帧入口） */
   async function setCurrentWorldFrame(rawNext: number): Promise<void> {
     const doc = docRef.value
     if (!doc || doc.frameCount === 0) return
@@ -303,9 +471,11 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       const plain = doc.serialize()
       if (!isWorldDocument(plain) || plain.frames.length === 0) return
       const idx = normalizeWorldFrameListIndex(plain, rawNext)
-      suppressFrameIndexWatch = true
-      worldFrameIndex.value = idx
-      suppressFrameIndexWatch = false
+      if (worldFrameIndex.value !== idx) {
+        suppressFrameIndexWatch = true
+        worldFrameIndex.value = idx
+        suppressFrameIndexWatch = false
+      }
 
       const resolved: RenderBundleResolveResult = resolveRenderBundle({ document: plain }, idx)
       structureDefinition.value = resolved.definition
@@ -325,6 +495,14 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   }
 
   function init(): void {
+    stopAnnotationPassWatch?.()
+    // 仅文档注解 / 图层过滤 / 显隐；结构重建由 presentContentMesh / rebuildAll 末尾同步
+    stopAnnotationPassWatch = watch(
+      [docRef, layerWorldY, showAnnotationsRef],
+      () => { void runMesh(() => syncAnnotations()) },
+      { flush: 'post' },
+    )
+
     stopStructEpochWatch?.()
     stopStructEpochWatch = watch(structEpochRef, () => {
       void rebuildAll().catch(e => {
@@ -332,6 +510,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
         loadStatus.value = 'error'
       })
     })
+
     stopFrameIndexWatch?.()
     stopFrameIndexWatch = watch(worldFrameIndex, (idx, prev) => {
       if (suppressFrameIndexWatch || idx === prev) return
@@ -339,9 +518,23 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       if (!doc || doc.frameCount < 2) return
       const plain = doc.serialize()
       if (!isWorldDocument(plain) || plain.frames.length === 0) return
-      if (setFrameIndex) void Promise.resolve(setFrameIndex(idx))
-      else void setCurrentWorldFrame(idx)
+      void setCurrentWorldFrame(idx)
     })
+
+    stopLayerWorldYWatch?.()
+    stopLayerWorldYWatch = watch(layerWorldY, () => {
+      if (!structureDefinition.value || !sceneRef.value) return
+      void runMesh(async () => {
+        const scene = sceneRef.value
+        const g = mainMeshGroup.value
+        if (g && scene) scene.remove(g)
+        mainMeshGroup.value = null
+        await presentContentMesh()
+      }).catch((e: unknown) => {
+        console.error('[drw] layer watch mesh rebuild failed', e)
+      })
+    })
+
     stopPlaybackWatch?.()
     stopPlaybackWatch = watch(framesPlaybackIsPlaying, (playing) => {
       if (playing) scheduleNextWorldFrameStep()
@@ -350,20 +543,24 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   }
 
   async function loadStructureAndResources(): Promise<void> {
+    const preserveViewport = loadStatus.value === 'ok'
     clearWorldPlaybackSchedule()
     stopPlayback()
     clearAllMeshStorage()
-    loadStatus.value = 'loading'
+    if (!preserveViewport) loadStatus.value = 'loading'
     try {
       const doc = docRef.value
       if (!doc) { loadStatus.value = 'error'; return }
       const plain = doc.serialize()
+      const frameIdx = preserveViewport ? worldFrameIndex.value : initialWorldFrameIndex
       const resolved: RenderBundleResolveResult = resolveRenderBundle(
         { document: plain },
-        initialWorldFrameIndex,
+        frameIdx,
       )
-      if (resolved.worldFrameIndex !== undefined) worldFrameIndex.value = resolved.worldFrameIndex
-      else worldFrameIndex.value = 0
+      if (!preserveViewport) {
+        if (resolved.worldFrameIndex !== undefined) worldFrameIndex.value = resolved.worldFrameIndex
+        else worldFrameIndex.value = 0
+      }
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
       const lib = textureCache.value
@@ -387,19 +584,11 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     return runMesh(() => presentContentMesh())
   }
 
-  async function rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null> {
-    const def = structureDefinition.value
-    const lib = textureCache.value
-    if (!def || !lib || annotations.length === 0) return null
-    annotationProvider.setAnnotations(annotations)
-    const outputs = await annotationProvider.build(def, lib)
-    const out = outputs[0]
-    return out?.kind === 'object3d' ? (out.object as THREE.Group) : null
-  }
-
   async function rebuildAll(): Promise<void> {
     clearAllMeshStorage()
     disposeIconCache()
+    textureCache.value?.dispose()
+    textureCache.value = null
     await loadStructureAndResources()
     if (loadStatus.value === 'ok') await rebuildContentMesh()
   }
@@ -407,6 +596,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   function disposeCachesAndLibrary(): void {
     clearWorldPlaybackSchedule()
     stopPlayback()
+    unbindOverlayPass()
     clearAllMeshStorage()
     mainMeshGroup.value = null
     disposeIconCache()
@@ -419,33 +609,24 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   }
 
   function dispose(): void {
+    stopAnnotationPassWatch?.()
+    stopAnnotationPassWatch = null
     stopStructEpochWatch?.()
     stopStructEpochWatch = null
     stopFrameIndexWatch?.()
     stopFrameIndexWatch = null
     stopPlaybackWatch?.()
     stopPlaybackWatch = null
+    stopLayerWorldYWatch?.()
+    stopLayerWorldYWatch = null
   }
-
-  // Layer Y reactivity — re-mesh when layer changes
-  watch(layerWorldY, () => {
-    if (!structureDefinition.value || !sceneRef.value) return
-    void runMesh(async () => {
-      const scene = sceneRef.value
-      const g = mainMeshGroup.value
-      if (g && scene) scene.remove(g)
-      mainMeshGroup.value = null
-      await presentContentMesh()
-    }).catch((e: unknown) => {
-      console.error('[drw] layer watch mesh rebuild failed', e)
-    })
-  })
 
   return {
     registerScene,
     loadStructureAndResources,
     rebuildContentMesh,
-    rebuildAnnotationOverlay,
+    bindOverlayPass,
+    unbindOverlayPass,
     setCurrentWorldFrame,
     disposeCachesAndLibrary,
     rebuildAll,

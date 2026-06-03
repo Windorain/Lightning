@@ -1,182 +1,198 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, shallowRef } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { Annotation } from '@/render/data/annotationTypes'
 import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
-import type { UILayout } from '@/workbench/ux/types/layout'
+import type { UILayout, UILayoutItem } from '@/workbench/ux/types/layout'
 
 const props = defineProps<{ ctx: Context }>()
 
-const AUTO_SAVE_DELAY = 200
+const DESC_SAVE_DELAY = 200
+const IMMEDIATE_KEYS = new Set(['description', 'id', 'created_at', 'updated_at', 'type'])
 
 const annos = ref<Annotation[]>([])
-const proxyOwner = ref<Record<string, any> | null>(null)
+const rnaOwner = shallowRef<object | null>(null)
 const desc = ref('')
 const focused = ref(false)
 
-let timer: ReturnType<typeof setTimeout> | undefined
+let descTimer: ReturnType<typeof setTimeout> | undefined
 
-function syncToOthers(prop: string, value: unknown, source: Record<string, any>): void {
-  for (const a of annos.value) {
-    const t = a as Record<string, any>
-    if (t !== source) t[prop] = value
+function selectedIds(): string[] {
+  return annos.value.map(a => a.id)
+}
+
+function applyPatch(patch: Record<string, unknown>): void {
+  for (const id of selectedIds()) {
+    void props.ctx.getOperators().exec('ANNOTATION_UPDATE', { id, patch })
   }
-  if (timer) clearTimeout(timer)
-  timer = setTimeout(async () => {
-    timer = undefined
-    for (const a of annos.value as Record<string, any>[]) {
-      await props.ctx.getOperators().exec('ANNOTATION_UPDATE', { id: a.id, patch: { ...a } })
-    }
-  }, AUTO_SAVE_DELAY)
+}
+
+function patchProperty(key: string, value: unknown): void {
+  if (IMMEDIATE_KEYS.has(key)) return
+  const patch: Record<string, unknown> = { [key]: value }
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    patch[key] = { ...(value as Record<string, unknown>) }
+  }
+  applyPatch(patch)
+}
+
+function buildRnaOwner(first: Annotation): object {
+  return new Proxy(first as object, {
+    get(target, key) {
+      return (target as Record<string, unknown>)[key as string]
+    },
+    set(_target, key, value) {
+      const k = String(key)
+      if (IMMEDIATE_KEYS.has(k) || k === 'description') return true
+      patchProperty(k, value)
+      return true
+    },
+  })
 }
 
 function load(): void {
   const sel = [...props.ctx.getSelection().items.value].filter(e => e.kind === 'annotation')
+  const doc = props.ctx.getDoc().value
+  const all = (doc?.annotations ?? []) as Annotation[]
+  let found: Annotation[]
   if (sel.length === 0) {
-    annos.value = []
-    proxyOwner.value = null
-    return
+    const hoverId = props.ctx.getHoveredAnnotationId().value
+    const hovered = hoverId ? all.find(a => a.id === hoverId) : undefined
+    if (!hovered) {
+      annos.value = []
+      rnaOwner.value = null
+      return
+    }
+    found = [hovered]
+  } else {
+    found = sel.map(s => all.find(a => a.id === s.id)).filter(Boolean) as Annotation[]
   }
-  const doc = props.ctx.getDoc().value as Record<string, any> | null
-  const all = doc?.annotations as Annotation[] | undefined
-  const found = sel.map(s => all?.find(a => a.id === s.id)).filter(Boolean) as Annotation[]
   annos.value = found
   if (found.length === 0) {
-    proxyOwner.value = null
+    rnaOwner.value = null
     return
   }
 
-  // Build a new plain object as owner, with getters that delegate to annos[0]
-  // and setters that sync to all selected annotations
-  const first = found[0]! as Record<string, any>
-  const owner: Record<string, any> = {}
-  for (const key of Object.keys(first)) {
-    Object.defineProperty(owner, key, {
-      get() { return first[key] },
-      set(v) {
-        first[key] = v
-        if (key !== 'id' && key !== 'created_at' && key !== 'updated_at') {
-          syncToOthers(key, v, first)
-        }
-      },
-      enumerable: true,
-      configurable: true,
-    })
-  }
-  proxyOwner.value = owner
+  rnaOwner.value = buildRnaOwner(found[0]!)
 
   if (!focused.value) {
-    if (found.length === 0) {
-      desc.value = ''
-    } else if (found.length === 1) {
-      desc.value = (found[0]! as Record<string, any>).description ?? ''
+    if (found.length === 1) {
+      desc.value = found[0]!.description ?? ''
     } else {
-      const firstDesc = (found[0]! as Record<string, any>).description ?? ''
-      const same = found.every(a => ((a as Record<string, any>).description ?? '') === firstDesc)
+      const firstDesc = found[0]!.description ?? ''
+      const same = found.every(a => (a.description ?? '') === firstDesc)
       desc.value = same ? firstDesc : ''
     }
   }
 }
 
 watch(
-  () => [props.ctx.getSelection().items.value, props.ctx.getDoc().value] as const,
+  () => [
+    props.ctx.getSelection().items.value,
+    props.ctx.getDoc().value,
+    props.ctx.getHoveredAnnotationId().value,
+  ] as const,
   () => { load() },
   { immediate: true },
 )
 
 function onDescInput(e: Event): void {
   desc.value = (e.target as HTMLTextAreaElement).value
-  if (proxyOwner.value) proxyOwner.value.description = desc.value
+  if (descTimer) clearTimeout(descTimer)
+  descTimer = setTimeout(() => {
+    descTimer = undefined
+    applyPatch({ description: desc.value })
+  }, DESC_SAVE_DELAY)
 }
 
-onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
+onBeforeUnmount(() => { if (descTimer) clearTimeout(descTimer) })
 
 const previewHtml = computed(() => renderTooltipHtml(desc.value))
 
 const typeLabel = computed(() => {
   if (annos.value.length === 0) return ''
-  const t = (annos.value[0]! as Record<string, any>).type as string
+  const t = annos.value[0]!.type
   const map: Record<string, string> = { box: '包围盒', point: '标记点', line: '线段', text: '文本', face: '选面' }
   const base = map[t] ?? t ?? ''
   return annos.value.length > 1 ? `${base} ×${annos.value.length}` : base
 })
 
-// Build the rest of the layout (exclude title/description which we render custom)
 const restLayout = computed<UILayout | null>(() => {
-  const a = annos.value[0] as Record<string, any> | null | undefined
+  const a = annos.value[0]
   if (!a) return null
   const multi = annos.value.length > 1
-  const t = a.type as string
-  const items: any[] = []
+  const items: UILayoutItem[] = []
 
-  // Appearance (visible for multi-select too)
   items.push({
-    kind: 'box' as const, label: '外观',
+    kind: 'box',
+    label: '外观',
     items: [
-      { kind: 'property' as const, rnaPath: 'annotation.color', label: '颜色' },
-      { kind: 'property' as const, rnaPath: 'annotation.visible', label: '可见' },
-      { kind: 'property' as const, rnaPath: 'annotation.locked', label: '锁定' },
+      { kind: 'property', rnaPath: 'annotation.color', label: '颜色' },
+      { kind: 'property', rnaPath: 'annotation.visible', label: '可见' },
+      { kind: 'property', rnaPath: 'annotation.locked', label: '锁定' },
     ],
   })
 
-  // Type-specific fields (hidden in multi-select)
-  if (multi) return { kind: 'column' as const, align: false, items }
+  if (multi) return { kind: 'column', align: false, items }
 
-  // Type-specific
-  switch (t) {
+  switch (a.type) {
     case 'box':
-      items.push({ kind: 'separator' as const })
+      items.push({ kind: 'separator' })
       items.push({
-        kind: 'box' as const, label: '包围盒',
+        kind: 'box',
+        label: '包围盒',
         items: [
-          { kind: 'property' as const, rnaPath: 'annotation.min', label: '最小坐标' },
-          { kind: 'property' as const, rnaPath: 'annotation.max', label: '最大坐标' },
-          { kind: 'property' as const, rnaPath: 'annotation.renderStyle', label: '渲染样式' },
-          { kind: 'property' as const, rnaPath: 'annotation.renderOpacity', label: '不透明度' },
-          { kind: 'property' as const, rnaPath: 'annotation.fillOpacity', label: '填充不透明度' },
-          { kind: 'property' as const, rnaPath: 'annotation.frameThickness', label: '边框厚度' },
-          { kind: 'property' as const, rnaPath: 'annotation.overlay', label: '覆盖层' },
+          { kind: 'property', rnaPath: 'annotation.min', label: '最小坐标' },
+          { kind: 'property', rnaPath: 'annotation.max', label: '最大坐标' },
+          { kind: 'property', rnaPath: 'annotation.renderStyle', label: '渲染样式' },
+          { kind: 'property', rnaPath: 'annotation.renderOpacity', label: '不透明度' },
+          { kind: 'property', rnaPath: 'annotation.fillOpacity', label: '填充不透明度' },
+          { kind: 'property', rnaPath: 'annotation.frameThickness', label: '边框厚度' },
+          { kind: 'property', rnaPath: 'annotation.overlay', label: '覆盖层' },
         ],
       })
       break
     case 'point':
-      items.push({ kind: 'separator' as const })
+      items.push({ kind: 'separator' })
       items.push({
-        kind: 'box' as const, label: '位置 & 图标',
+        kind: 'box',
+        label: '位置 & 图标',
         items: [
-          { kind: 'property' as const, rnaPath: 'annotation.pos', label: '位置' },
-          { kind: 'property' as const, rnaPath: 'annotation.icon', label: '图标' },
-          { kind: 'property' as const, rnaPath: 'annotation.size', label: '大小' },
+          { kind: 'property', rnaPath: 'annotation.pos', label: '位置' },
+          { kind: 'property', rnaPath: 'annotation.icon', label: '图标' },
+          { kind: 'property', rnaPath: 'annotation.size', label: '大小' },
         ],
       })
       break
     case 'line':
-      items.push({ kind: 'separator' as const })
+      items.push({ kind: 'separator' })
       items.push({
-        kind: 'box' as const, label: '线段',
+        kind: 'box',
+        label: '线段',
         items: [
-          { kind: 'property' as const, rnaPath: 'annotation.thickness', label: '粗细' },
-          { kind: 'property' as const, rnaPath: 'annotation.arrow', label: '箭头' },
-          { kind: 'property' as const, rnaPath: 'annotation.showPoints', label: '显示控制点' },
+          { kind: 'property', rnaPath: 'annotation.thickness', label: '粗细' },
+          { kind: 'property', rnaPath: 'annotation.arrow', label: '箭头' },
+          { kind: 'property', rnaPath: 'annotation.showPoints', label: '显示控制点' },
         ],
       })
       break
     case 'text':
-      items.push({ kind: 'separator' as const })
+      items.push({ kind: 'separator' })
       items.push({
-        kind: 'box' as const, label: '文本',
+        kind: 'box',
+        label: '文本',
         items: [
-          { kind: 'property' as const, rnaPath: 'annotation.anchorPos', label: '锚点位置' },
-          { kind: 'property' as const, rnaPath: 'annotation.text', label: '内容' },
-          { kind: 'property' as const, rnaPath: 'annotation.fontSize', label: '字号' },
-          { kind: 'property' as const, rnaPath: 'annotation.backgroundAlpha', label: '背景透明度' },
+          { kind: 'property', rnaPath: 'annotation.anchorPos', label: '锚点位置' },
+          { kind: 'property', rnaPath: 'annotation.text', label: '内容' },
+          { kind: 'property', rnaPath: 'annotation.fontSize', label: '字号' },
+          { kind: 'property', rnaPath: 'annotation.backgroundAlpha', label: '背景透明度' },
         ],
       })
       break
   }
 
-  return { kind: 'column' as const, align: false, items }
+  return { kind: 'column', align: false, items }
 })
 </script>
 
@@ -186,7 +202,6 @@ const restLayout = computed<UILayout | null>(() => {
       <span class="anno-editor-type">{{ typeLabel }}</span>
     </div>
 
-    <!-- Annotation info: description -->
     <div class="ux-box">
       <label class="ux-box-label">注解信息</label>
       <div class="anno-editor-desc">
@@ -207,10 +222,10 @@ const restLayout = computed<UILayout | null>(() => {
     </div>
 
     <UIRenderer
-      v-if="restLayout"
+      v-if="restLayout && rnaOwner"
       :layout="restLayout"
       :rna="ctx.getRna()"
-      :owner="proxyOwner"
+      :owner="rnaOwner"
     />
 
     <hr class="ux-sep" />
@@ -291,7 +306,6 @@ const restLayout = computed<UILayout | null>(() => {
 }
 </style>
 
-<!-- Global styles for ux-box/ux-box-label within this component -->
 <style>
 .ux-box {
   border: 1px solid var(--wb-border);

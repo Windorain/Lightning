@@ -63,6 +63,8 @@ export interface ScenePickParams {
   camera: THREE.Camera
   contentGroup: THREE.Group
   overlayGroup?: THREE.Group
+  /** 主场景内参与深度测试的注解（box overlay=false） */
+  worldAnnotationGroup?: THREE.Group
   def: StructureDefinition
   layerPreview: LayerPreviewMode
   /** Optional: box annotations for AABB-based picking (merged with mesh hits) */
@@ -126,7 +128,7 @@ export function rayIntersectsBox(
 /** Pure function: screen position → closest hit (block or annotation).
  *  If `annotations` are provided, box annotations are picked via AABB and merged with mesh hits. */
 export function pickAtPointer(params: ScenePickParams): ScenePickResult {
-  const { clientX, clientY, domElement, camera, contentGroup, overlayGroup, def, layerPreview, annotations } = params
+  const { clientX, clientY, domElement, camera, contentGroup, overlayGroup, worldAnnotationGroup, def, layerPreview, annotations } = params
 
   const rect = domElement.getBoundingClientRect()
   const ndc = new THREE.Vector2(
@@ -139,8 +141,9 @@ export function pickAtPointer(params: ScenePickParams): ScenePickResult {
 
   // ── Mesh pick ──
   const structureHits = raycaster.intersectObject(contentGroup, true)
+  const worldAnnoHits = worldAnnotationGroup ? raycaster.intersectObject(worldAnnotationGroup, true) : []
   const overlayHits = overlayGroup ? raycaster.intersectObject(overlayGroup, true) : []
-  const allHits = structureHits.concat(overlayHits).sort((a, b) => a.distance - b.distance)
+  const allHits = structureHits.concat(worldAnnoHits, overlayHits).sort((a, b) => a.distance - b.distance)
   const meshHit = allHits[0]
 
   let meshResult: ScenePickResult = null
@@ -220,7 +223,7 @@ export function scenePickFromPointer(params: ScenePickParams): ScenePickResult {
 // ---------------------------------------------------------------------------
 
 export function scenePickAllFromPointer(params: ScenePickParams): ScenePickEntity[] {
-  const { clientX, clientY, domElement, camera, contentGroup, overlayGroup, def, layerPreview } = params
+  const { clientX, clientY, domElement, camera, contentGroup, overlayGroup, worldAnnotationGroup, def, layerPreview, annotations } = params
 
   const rect = domElement.getBoundingClientRect()
   const ndc = new THREE.Vector2(
@@ -232,8 +235,9 @@ export function scenePickAllFromPointer(params: ScenePickParams): ScenePickEntit
   raycaster.setFromCamera(ndc, camera)
 
   const structureHits = raycaster.intersectObject(contentGroup, true)
+  const worldAnnoHits = worldAnnotationGroup ? raycaster.intersectObject(worldAnnotationGroup, true) : []
   const overlayHits = overlayGroup ? raycaster.intersectObject(overlayGroup, true) : []
-  const allHits = structureHits.concat(overlayHits).sort((a, b) => a.distance - b.distance)
+  const allHits = structureHits.concat(worldAnnoHits, overlayHits).sort((a, b) => a.distance - b.distance)
 
   const seenBlocks = new Set<string>()
   const seenAnnos = new Set<string>()
@@ -289,6 +293,23 @@ export function scenePickAllFromPointer(params: ScenePickParams): ScenePickEntit
       normal: normalWorld ? { x: normalWorld.x, y: normalWorld.y, z: normalWorld.z } : undefined,
       point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
     })
+  }
+
+  if (annotations && annotations.length > 0) {
+    for (const anno of annotations) {
+      if (!isBox(anno) || anno.visible === false) continue
+      if (seenAnnos.has(anno.id)) continue
+      const d = rayIntersectsBox(raycaster.ray.origin, raycaster.ray.direction, anno.min, anno.max)
+      if (d === null) continue
+      seenAnnos.add(anno.id)
+      results.push({
+        kind: 'annotation',
+        distance: d,
+        annotationId: anno.id,
+        annotationType: 'box',
+      })
+    }
+    results.sort((a, b) => a.distance - b.distance)
   }
 
   return results

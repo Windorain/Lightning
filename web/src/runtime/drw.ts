@@ -8,7 +8,6 @@ import type { LoadStatus } from '@/runtime/types'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { BlockIconCache } from '@/render/interaction/blockIconCache'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
-import type { Annotation } from '@/render/data/annotationTypes'
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 import {
   createDrwMeshPipeline,
@@ -17,8 +16,10 @@ import {
 } from '@/runtime/drwMeshPipeline'
 import type { BlockRef, SelectedEntity } from '@/context/selection'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
+import { bindViewportCameraSync } from '@/runtime/viewportCamera'
+import type { ViewportCameraState } from '@/runtime/viewportCamera'
 
-export type { DrwComputed, DrwAnnotationApi } from '@/runtime/drwMeshPipeline'
+export type { DrwComputed } from '@/runtime/drwMeshPipeline'
 
 export interface DRWDeps {
   docRef: Ref<RuntimeDocument | null>
@@ -32,6 +33,12 @@ export interface DRWDeps {
   initialWorldFrameIndex?: number
   setFrameIndex?: (index: number) => void | Promise<void>
   setFramesPlayback?: (playing: boolean) => void | Promise<void>
+  showAnnotationsRef?: Ref<boolean>
+  worldAnnotationGroupRef?: ShallowRef<THREE.Group | null>
+  toolsOverlayGroupRef?: ShallowRef<THREE.Group | null>
+  viewportCameraRef?: Ref<ViewportCameraState | null>
+  cameraRef?: Ref<THREE.Camera | null>
+  orbitTargetRef?: Ref<THREE.Vector3 | null>
 }
 
 export class DRW {
@@ -46,6 +53,7 @@ export class DRW {
 
   private readonly _mesh: DrwMeshPipeline
   private stopOutlineWatch: (() => void) | null = null
+  private stopCameraSync: (() => void) | null = null
   private highlightProvider = new SelectionHighlightProvider()
 
   constructor(deps: DRWDeps) {
@@ -67,7 +75,17 @@ export class DRW {
       structEpochRef: deps.structEpochRef,
       setFrameIndex: deps.setFrameIndex,
       setFramesPlayback: deps.setFramesPlayback,
+      showAnnotationsRef: deps.showAnnotationsRef,
+      worldAnnotationGroupRef: deps.worldAnnotationGroupRef,
+      toolsOverlayGroupRef: deps.toolsOverlayGroupRef,
     })
+    if (deps.viewportCameraRef && deps.cameraRef && deps.orbitTargetRef) {
+      this.stopCameraSync = bindViewportCameraSync(
+        deps.viewportCameraRef,
+        deps.cameraRef,
+        deps.orbitTargetRef,
+      )
+    }
     this.computed = this._mesh.computed
     this.textureCache = this._mesh.textureCache
   }
@@ -88,11 +106,17 @@ export class DRW {
     return this._mesh.rebuildContentMesh()
   }
 
-  rebuildAnnotationOverlay(annotations: Annotation[]): Promise<THREE.Group | null> {
-    return this._mesh.rebuildAnnotationOverlay(annotations)
+  bindOverlayPass(overlayPassGroup: THREE.Group): void {
+    this._mesh.bindOverlayPass(overlayPassGroup)
+  }
+
+  unbindOverlayPass(): void {
+    this._mesh.unbindOverlayPass()
   }
 
   dispose(): void {
+    this.stopCameraSync?.()
+    this.stopCameraSync = null
     this.stopOutlineWatch?.()
     this.stopOutlineWatch = null
     this.outlinePass.dispose()

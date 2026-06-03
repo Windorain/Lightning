@@ -57,7 +57,7 @@ export class OperatorRegistry {
         const before = ctx.getDoc().value?.clone() ?? null
         await op.exec(ctx, resolvedProps)
         const after = ctx.getDoc().value?.clone() ?? null
-        pushDocUndo(ctx, before, after, op.label)
+        pushDocUndo(ctx, before, after, op.label, op.undoReplaceDocOptions)
       } else {
         await op.exec(ctx, resolvedProps)
       }
@@ -104,7 +104,7 @@ export class OperatorRegistry {
       } else if (result === OP_RESULT.FINISHED) {
         if (snapshot !== null) {
           const snapshotAfter = ctx.getDoc().value?.clone() ?? null
-          pushDocUndo(ctx, snapshot, snapshotAfter, op.label)
+          pushDocUndo(ctx, snapshot, snapshotAfter, op.label, op.undoReplaceDocOptions)
         }
         logOperatorResult(ctx, id, op.label, 'FINISHED', snap)
       }
@@ -131,7 +131,7 @@ async function invokeExecFallback(
     const snapshot = ctx.getDoc().value?.clone() ?? null
     await op.exec!(ctx, props)
     const snapshotAfter = ctx.getDoc().value?.clone() ?? null
-    pushDocUndo(ctx, snapshot, snapshotAfter, op.label)
+    pushDocUndo(ctx, snapshot, snapshotAfter, op.label, op.undoReplaceDocOptions)
   } else {
     await op.exec!(ctx, props)
   }

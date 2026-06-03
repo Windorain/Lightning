@@ -7,7 +7,6 @@ import type * as THREE from 'three'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { StructureDefinition } from '@/render/schema/types'
-import type { Annotation } from '@/render/data/annotationTypes'
 import type { InitialCamera } from '@/preview/previewConfig'
 import { RenderEngine, type RenderEngineReadyPayload } from '@/runtime/renderEngine'
 
@@ -17,7 +16,6 @@ const props = withDefaults(
     materialLibrary: MaterialLibraryApi
     contentGroup: THREE.Group | null
     layerPreviewMode: LayerPreviewMode
-    annotations?: Annotation[]
     sceneBackground?: number
     showAxesGizmo?: boolean
     initialCamera?: InitialCamera

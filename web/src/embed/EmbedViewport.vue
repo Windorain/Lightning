@@ -7,8 +7,7 @@
  * - 本地 DRW 管理 mesh/材质/帧状态
  * - 叶子组件全部 props/emits
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { updateAnnotationOverlay, getAnnotationOverlayGroup } from '@/runtime/viewportAnnotations'
+import { computed, inject, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { Host } from '@/runtime/host'
@@ -22,7 +21,6 @@ import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
-import { type Annotation } from '@/render/data/annotationTypes'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { InitialCamera } from '@/preview/previewConfig'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
@@ -59,6 +57,12 @@ const drw = new DRW({
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
   setFrameIndex: (i) => ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
   setFramesPlayback: (playing) => ctx.getOperators().exec('OPERATOR_SET_FRAME_PLAYBACK', { playing }),
+  showAnnotationsRef: toRef(prefs, 'showAnnotations'),
+  worldAnnotationGroupRef: vpSlot.worldAnnotationGroup,
+  toolsOverlayGroupRef: vpSlot.toolsOverlayGroup,
+  viewportCameraRef: vpSlot.viewportCamera,
+  cameraRef: vpSlot.camera,
+  orbitTargetRef: vpSlot.orbitTarget,
 })
 const {
   loadStatus, meshBusy, blockIconCache, tooltipPalette,
@@ -194,7 +198,6 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
 
   const onFrame = (): void => {
     if (!_alive) return
-    updateAnnotationOverlay(ctx, viewportRegionId, drw, prefs.showAnnotations)
     flushHighlight()
   }
   unframeHook = engineHostRef.value?.addFrameHook(onFrame) ?? null
@@ -214,26 +217,6 @@ function onSidebarTooltipHover(
 ): void {
   hoverState.setSidebarBlock(payload)
 }
-
-// ---- Annotations list ----
-const annotations = computed<Annotation[]>(() => {
-  if (!prefs.showAnnotations) return []
-  const doc = ctx.getDoc().value
-  if (!doc) return []
-  const plain = doc.serialize() as Record<string, any>
-  return (plain.annotations ?? []) as Annotation[]
-})
-
-// ---- Annotation pick & overlay visibility ----
-watch(() => prefs.showAnnotations, (v) => {
-  const g = getAnnotationOverlayGroup(viewportRegionId)
-  if (!g) return
-  if (v) {
-    vpSlot.overlayGroup.value?.add(g)
-  } else {
-    vpSlot.overlayGroup.value?.remove(g)
-  }
-})
 
 onMounted(async () => { await drw.loadStructureAndResources() })
 onBeforeUnmount(() => {
@@ -259,7 +242,7 @@ onBeforeUnmount(() => {
         >?</span>
       </div>
       <div class="wm-titlebar-actions">
-        <button type="button" class="nei-icon-btn" title="复位视角" @click="engineHostRef?.resetView()">
+        <button type="button" class="nei-icon-btn" title="复位视角" @click="void ctx.getOperators().exec('OPERATOR_VIEW_RESET')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 3.1L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-3.1L3 16"/><path d="M3 21v-5h5"/></svg>
         </button>
         <button type="button" class="nei-icon-btn" title="截屏" @click="engineHostRef?.screenshot()">
@@ -300,7 +283,6 @@ onBeforeUnmount(() => {
           :initial-camera="initialCamera"
           :scene-background="s?.sceneBackground ?? 0x5a5a5a"
           :show-axes-gizmo="showAxesGizmo"
-          :annotations="annotations"
           @ready="onViewportReady"
         />
       </div>

@@ -9,6 +9,7 @@
  * 另有 poll（上下文检查）和 cancel（外部中断清理）。
  */
 import type { Context } from '@/runtime/context'
+import type { ReplaceDocOptions } from '@/runtime/main'
 import type { PropertyDescriptor } from '@/workbench/ux/rna/types'
 
 /** 操作符属性容器（对标 Blender operator properties） */
@@ -32,6 +33,8 @@ export interface OperatorType {
   properties?: PropertyDescriptor[]
   /** 是否自动包裹 undo */
   flagUndo?: boolean
+  /** undo/redo 时 replaceDoc 选项（默认全量 structEpoch） */
+  undoReplaceDocOptions?: ReplaceDocOptions
   /** 无交互执行 */
   exec?(ctx: Context, props: OperatorProperties): void
   /** 初始化交互，返回模态状态 */

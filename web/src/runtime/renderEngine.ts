@@ -50,7 +50,6 @@ export class RenderEngine {
   private onResize: (() => void) | null = null
   private onVisibilityToGl: (() => void) | null = null
   private lastContentGroup: THREE.Group | null = null
-  private skipNextContentGroupAutoFit = false
   private opts: RenderEngineOptions | null = null
   private readonly frameHooks = new Set<() => void>()
 
@@ -170,7 +169,6 @@ export class RenderEngine {
 
   updateOptions(partial: Partial<RenderEngineOptions>): void {
     if (!this.opts || !this.renderer) return
-    const prev = this.opts.contentGroup
     Object.assign(this.opts, partial)
     if (partial.sceneBackground != null && this.mainScene) {
       this.mainScene.background = new THREE.Color(partial.sceneBackground)
@@ -182,27 +180,7 @@ export class RenderEngine {
       this.renderer.camera.zoom = clampOrthoZoom(partial.initialCamera.zoom)
       this.renderer.camera.updateProjectionMatrix()
     }
-    if (partial.contentGroup !== undefined && partial.contentGroup !== prev) {
-      if (!partial.contentGroup) {
-        if (prev) this.skipNextContentGroupAutoFit = true
-      } else if (!prev && !this.skipNextContentGroupAutoFit) {
-        const cam = this.opts.initialCamera
-        fitCameraToGroup(
-          this.renderer.camera,
-          partial.contentGroup,
-          this.renderer.orbitTarget,
-          this.renderer.domElement,
-          {
-            yawDeg: cam?.yawDeg,
-            elevationDeg: cam?.elevationDeg,
-            distance: cam?.distance,
-            zoom: cam?.zoom,
-          },
-        )
-      } else if (!prev && this.skipNextContentGroupAutoFit) {
-        this.skipNextContentGroupAutoFit = false
-      }
-    }
+    // contentGroup 变更不自动改相机；由各视口 slot.viewportCamera + DRW 同步
     if (partial.initialCamera?.yawDeg != null && this.opts.contentGroup) {
       const cam = this.opts.initialCamera
       applyDiagonalOrbitView(this.renderer.camera, this.renderer.orbitTarget, {

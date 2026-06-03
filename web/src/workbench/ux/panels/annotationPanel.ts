@@ -5,7 +5,8 @@ import type { UILayout } from '../types/layout'
 import AnnotationEditorPanel from './AnnotationEditorPanel.vue'
 
 function hasAnnotationSelected(ctx: Context): boolean {
-  return [...ctx.getSelection().items.value].some(e => e.kind === 'annotation')
+  if ([...ctx.getSelection().items.value].some(e => e.kind === 'annotation')) return true
+  return ctx.getHoveredAnnotationId().value !== null
 }
 
 export const annotationPanel: PanelDeclaration = {

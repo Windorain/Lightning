@@ -6,6 +6,12 @@ import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { RNARegistry } from '@/shared/types'
 import type { ParserRegistryImpl } from '@/context/parserRegistry'
 import { createParserRegistry } from '@/context/parserRegistry'
+export interface ReplaceDocOptions {
+  /** 默认 true；注解等仅改顶层集合时设为 false，避免全量 mesh 重建 */
+  bumpStructEpoch?: boolean
+  /** 默认：仅在新文档或 id 变化时重置帧索引 */
+  resetFrameIndex?: boolean
+}
 
 export interface MainRegistries {
   operators: OperatorRegistry
@@ -36,10 +42,17 @@ export class Main {
     }
   }
 
-  replaceDoc(doc: RuntimeDocument | null): void {
+  replaceDoc(doc: RuntimeDocument | null, options?: ReplaceDocOptions): void {
+    const prev = this.doc.value
     this.doc.value = doc
-    this.structEpoch.value += 1
-    if (doc) this.currentFrameIndex.value = 0
+    if (options?.bumpStructEpoch !== false) {
+      this.structEpoch.value += 1
+    }
+    const newDocument = prev === null || (doc !== null && prev?.id !== doc.id)
+    const resetFrame = options?.resetFrameIndex ?? newDocument
+    if (doc && resetFrame) {
+      this.currentFrameIndex.value = 0
+    }
   }
 
   bumpEpoch(): void {

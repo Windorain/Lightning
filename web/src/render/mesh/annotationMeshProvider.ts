@@ -10,6 +10,35 @@ import type { BakedQuadsGeometry, BakedQuad } from '../schema/types'
 import { decodeBakedGeometry } from './bakedGeometryDecode'
 import { structureRowToWorldY } from '@/pure/vec'
 
+export interface AnnotationMeshBuckets {
+  world: THREE.Group | null
+  overlay: THREE.Group | null
+}
+
+export function partitionAnnotationsForRender(annotations: Annotation[]): {
+  world: Annotation[]
+  overlay: Annotation[]
+} {
+  const visible = annotations.filter(a => a.visible !== false)
+  const world: Annotation[] = []
+  const overlay: Annotation[] = []
+  for (const a of visible) {
+    if (isBox(a) && a.overlay !== true) world.push(a)
+    else overlay.push(a)
+  }
+  return { world, overlay }
+}
+
+export function disposeAnnotationGroup(group: THREE.Group | null): void {
+  if (!group) return
+  group.traverse((c) => {
+    if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
+      c.geometry?.dispose()
+      ;(c.material as THREE.Material)?.dispose()
+    }
+  })
+}
+
 export class AnnotationMeshProvider implements MeshProvider {
   priority = 50
   target = 'overlay' as const
@@ -20,34 +49,45 @@ export class AnnotationMeshProvider implements MeshProvider {
     this._annotations = annotations.filter(a => a.visible !== false)
   }
 
+  /** 按 overlay 属性一次构建 world / overlay 两棵子树（DRW 专用） */
+  buildBuckets(def: StructureDefinition, annotations: Annotation[]): AnnotationMeshBuckets {
+    const { world, overlay } = partitionAnnotationsForRender(annotations)
+    return {
+      world: this._createGroup(world, def, 'annotations-world'),
+      overlay: this._createGroup(overlay, def, 'annotations-overlay'),
+    }
+  }
+
   async build(
-    _def: StructureDefinition,
+    def: StructureDefinition,
     _lib: MaterialLibraryApi,
     _opts?: Record<string, unknown>,
   ): Promise<MeshOutput[]> {
-    const group = new THREE.Group()
-    group.name = 'annotations'
+    const group = this._createGroup(this._annotations, def, 'annotations')
+    if (!group) return []
+    return [{
+      kind: 'object3d',
+      object: group,
+      dispose: () => disposeAnnotationGroup(group),
+    }]
+  }
 
-    for (const anno of this._annotations) {
+  private _createGroup(
+    annotations: Annotation[],
+    def: StructureDefinition,
+    name: string,
+  ): THREE.Group | null {
+    if (annotations.length === 0) return null
+    const group = new THREE.Group()
+    group.name = name
+    for (const anno of annotations) {
       if (isBox(anno)) this._buildBox(group, anno)
       else if (isPoint(anno)) this._buildPoint(group, anno)
       else if (isLine(anno)) this._buildLine(group, anno)
       else if (isText(anno)) this._buildText(group, anno)
-      else if (isFace(anno)) this._buildFace(group, anno, _def)
+      else if (isFace(anno)) this._buildFace(group, anno, def)
     }
-
-    return [{
-      kind: 'object3d',
-      object: group,
-      dispose: () => {
-        group.traverse((c) => {
-          if (c instanceof THREE.Mesh || c instanceof THREE.LineSegments || c instanceof THREE.Line) {
-            c.geometry?.dispose()
-            ;(c.material as THREE.Material)?.dispose()
-          }
-        })
-      },
-    }]
+    return group
   }
 
   private _buildBox(group: THREE.Group, a: BoxAnnotation): void {
@@ -56,22 +96,22 @@ export class AnnotationMeshProvider implements MeshProvider {
     const color = new THREE.Color(a.color)
     const overlay = a.overlay ?? false
     const matDepth = overlay ? { depthTest: false, depthWrite: false } : { depthTest: true }
-    const objOrder = overlay ? { renderOrder: 999 } : {}
+    const renderOrder = overlay ? 999 : 0
 
     if (a.renderStyle === 'wireframe') {
-      this._buildWireframeBars(group, a, color, 0.02, a.renderOpacity, matDepth, objOrder)
+      this._buildWireframeBars(group, a, color, 0.02, a.renderOpacity, matDepth, renderOrder)
     }
 
     if (a.renderStyle === 'boxFrame') {
-      this._buildBoxFrame(group, a, color, matDepth, objOrder)
+      this._buildBoxFrame(group, a, color, matDepth, renderOrder)
       if ((a.fillOpacity ?? 0) > 0) {
-        this._buildBoxFill(group, a, color, a.fillOpacity, matDepth, objOrder)
+        this._buildBoxFill(group, a, color, a.fillOpacity, matDepth, renderOrder)
       }
     }
 
     if (a.renderStyle === 'translucent') {
-      this._buildWireframeBars(group, a, color, 0.02, a.renderOpacity, matDepth, objOrder)
-      this._buildBoxFill(group, a, color, a.fillOpacity, matDepth, objOrder)
+      this._buildWireframeBars(group, a, color, 0.02, a.renderOpacity, matDepth, renderOrder)
+      this._buildBoxFill(group, a, color, a.fillOpacity, matDepth, renderOrder)
     }
   }
 
@@ -80,7 +120,7 @@ export class AnnotationMeshProvider implements MeshProvider {
     a: BoxAnnotation,
     color: THREE.Color,
     matDepth: Record<string, unknown>,
-    objOrder: Record<string, unknown>,
+    renderOrder: number,
   ): void {
     const bars = computeBoxFrameBars(a.min, a.max, (a.frameThickness ?? 0.04) / 2)
     const mat = new THREE.MeshBasicMaterial({ color, ...matDepth })
@@ -89,7 +129,7 @@ export class AnnotationMeshProvider implements MeshProvider {
       const bar = new THREE.Mesh(geo, mat)
       bar.position.set(d.cx, d.cy, d.cz)
       bar.name = `anno-box-bar-${a.id}`
-      Object.assign(bar, objOrder)
+      bar.renderOrder = renderOrder
       group.add(bar)
     }
   }
@@ -102,7 +142,7 @@ export class AnnotationMeshProvider implements MeshProvider {
     halfThickness: number,
     opacity: number,
     matDepth: Record<string, unknown>,
-    objOrder: Record<string, unknown>,
+    renderOrder: number,
   ): void {
     const bars = computeBoxFrameBars(a.min, a.max, halfThickness)
     const mat = new THREE.MeshBasicMaterial({
@@ -116,7 +156,7 @@ export class AnnotationMeshProvider implements MeshProvider {
       const bar = new THREE.Mesh(geo, mat)
       bar.position.set(d.cx, d.cy, d.cz)
       bar.name = `anno-box-wf-${a.id}`
-      Object.assign(bar, objOrder)
+      bar.renderOrder = renderOrder
       group.add(bar)
     }
   }
@@ -127,7 +167,7 @@ export class AnnotationMeshProvider implements MeshProvider {
     color: THREE.Color,
     opacity: number,
     matDepth: Record<string, unknown>,
-    objOrder: Record<string, unknown>,
+    renderOrder: number,
   ): void {
     const boxGeo = new THREE.BoxGeometry(
       a.max.x - a.min.x,
@@ -147,7 +187,7 @@ export class AnnotationMeshProvider implements MeshProvider {
     })
     const fill = new THREE.Mesh(boxGeo, fillMat)
     fill.name = `anno-box-fill-${a.id}`
-    Object.assign(fill, objOrder)
+    fill.renderOrder = renderOrder
     group.add(fill)
   }
 

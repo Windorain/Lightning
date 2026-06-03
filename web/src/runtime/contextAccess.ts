@@ -53,6 +53,7 @@ export interface WorkbenchSession {
   connection: ConnectionState
   layerWorldY: Ref<number>
   hoveredBlock: Ref<BlockRef | null>
+  hoveredAnnotationId: Ref<string | null>
 }
 
 /** Region 节点状态袋（挂载时由 ScreenRoot 工厂写入） */

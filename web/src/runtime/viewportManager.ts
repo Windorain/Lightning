@@ -21,8 +21,11 @@ export function createViewportManager() {
         layerPreview: ref(null),
         gizmo: shallowRef(null),
         overlayGroup: ref(null),
+        toolsOverlayGroup: shallowRef(null),
+        worldAnnotationGroup: shallowRef(null),
         wireframe: shallowRef(null),
         orbitTarget: ref(null),
+        viewportCamera: ref(null),
       }
       slots.set(id, slot)
       if (!activeId.value) activeId.value = id
@@ -36,6 +39,12 @@ export function createViewportManager() {
     },
     get(id: string): ViewportSlot | undefined {
       return slots.get(id)
+    },
+    forEach(fn: (slot: ViewportSlot) => void): void {
+      for (const slot of slots.values()) fn(slot)
+    },
+    resetAllViewportCameras(): void {
+      for (const slot of slots.values()) slot.viewportCamera.value = null
     },
     activeId,
     active,

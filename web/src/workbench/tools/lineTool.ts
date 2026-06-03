@@ -83,7 +83,7 @@ export class LineGizmo implements ToolGizmo {
     const color = ctx.activeTool.value?.color ?? '#ffaa00'
     const mat = new THREE.LineBasicMaterial({ color: new THREE.Color(color), depthTest: true })
     this._mesh = new THREE.Line(geo, mat)
-    ctx.viewport.overlayGroup.value?.add(this._mesh)
+    ctx.viewport.toolsOverlayGroup.value?.add(this._mesh)
   }
 
   private _clearPreview(): void {

@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
-import { updateAnnotationOverlay } from '@/runtime/viewportAnnotations'
 import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { WorkbenchHost } from '@/runtime/host/workbenchHost'
@@ -17,7 +16,6 @@ import { createKeymapHandler } from '@/handlers/keymapHandler'
 import { createHoverHandler } from '@/handlers/hoverHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
 import { pickVoxel, pickAll, getCurrentFrame, gridCenterWorld, getBlockGeometry } from '@/context/queries'
-import { type Annotation } from '@/render/data/annotationTypes'
 import ToolHintsBar from '@/workbench/ux/ToolHintsBar.vue'
 import type { ToolHint } from '@/workbench/tools/tool'
 
@@ -43,6 +41,12 @@ const drw = new DRW({
   blockIconCacheOptions: {},
   setFrameIndex: (i) => ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
   setFramesPlayback: (playing) => ctx.getOperators().exec('OPERATOR_SET_FRAME_PLAYBACK', { playing }),
+  showAnnotationsRef: toRef(prefs, 'showAnnotations'),
+  worldAnnotationGroupRef: vpSlot.worldAnnotationGroup,
+  toolsOverlayGroupRef: vpSlot.toolsOverlayGroup,
+  viewportCameraRef: vpSlot.viewportCamera,
+  cameraRef: vpSlot.camera,
+  orbitTargetRef: vpSlot.orbitTarget,
 })
 
 const { loadStatus, meshBusy } = drw
@@ -52,13 +56,6 @@ const mainMeshGroup = vpSlot.contentGroup
 const worldFrameIndex = ctx.main.currentFrameIndex
 const layerWorldY = ctx.getLayerWorldY()
 const framesPlaybackIsPlaying = ctx.main.framesPlaybackIsPlaying
-
-const annotations = computed<Annotation[]>(() => {
-  const doc = ctx.getDoc().value
-  if (!doc) return []
-  const plain = doc.serialize() as Record<string, any>
-  return (plain.annotations ?? []) as Annotation[]
-})
 
 const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
@@ -77,9 +74,9 @@ const activeTab = computed<BottomTab>({
 function createToolContext(): ToolContext {
   return {
     selection,
-    viewport: ctx.getViewport(),
-    pickVoxel: (e) => pickVoxel(ctx, e),
-    pickAll: (e) => pickAll(ctx, e),
+    viewport: vpSlot,
+    pickVoxel: (e) => pickVoxel(ctx, e, VIEWPORT_REGION_ID),
+    pickAll: (e) => pickAll(ctx, e, VIEWPORT_REGION_ID),
     getCurrentFrame: () => getCurrentFrame(ctx),
     gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
     getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
@@ -118,8 +115,9 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     },
   })
 
-  if (vpSlot.gizmo.value && payload.layers.overlay) {
-    payload.layers.overlay.add(vpSlot.gizmo.value.root)
+  const toolsRoot = vpSlot.toolsOverlayGroup.value
+  if (vpSlot.gizmo.value && toolsRoot) {
+    toolsRoot.add(vpSlot.gizmo.value.root)
   }
 
   const onFrame = (): void => {
@@ -135,17 +133,16 @@ const toolHints = computed<ToolHint[]>(() => ctx.getToolRegistry().activeTool.va
 function updateOverlay(): void {
   const gizmo = ctx.getToolRegistry().activeGizmo.value
   if (gizmo && toolCtx) gizmo.render(toolCtx)
-  updateAnnotationOverlay(ctx, VIEWPORT_REGION_ID, drw)
 
-  const moveGizmo = ctx.getViewport().gizmo.value
+  const moveGizmo = vpSlot.gizmo.value
   if (moveGizmo && ctx.getToolRegistry().activeTool.value?.id === 'move') {
     const gp = moveGizmo.root.position
     ctx.log.updateGizmoState({ x: gp.x, y: gp.y, z: gp.z })
   } else {
     ctx.log.updateGizmoState(null)
   }
-  const cam = ctx.getViewport().camera.value
-  const orbit = ctx.getViewport().orbitTarget.value
+  const cam = vpSlot.camera.value
+  const orbit = vpSlot.orbitTarget.value
   if (cam) {
     ctx.log.updateCameraState({
       position: [cam.position.x, cam.position.y, cam.position.z],
@@ -225,7 +222,6 @@ onBeforeUnmount(() => {
       :layer-preview-mode="layerPreviewMode"
       :scene-background="0x5a5a5a"
       :show-axes-gizmo="true"
-      :annotations="annotations"
       @ready="onViewportReady"
     />
     <div v-else class="wv-placeholder">

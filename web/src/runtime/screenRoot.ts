@@ -143,6 +143,7 @@ export function createWorkbenchSession(): WorkbenchSession {
     }),
     layerWorldY: ref(-1),
     hoveredBlock: ref<BlockRef | null>(null),
+    hoveredAnnotationId: ref<string | null>(null),
   }
 }
 

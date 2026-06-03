@@ -4,6 +4,7 @@ import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
+import type { ViewportCameraState } from '@/runtime/viewportCamera'
 
 export type LoadStatus = 'loading' | 'ok' | 'error'
 export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle'
@@ -50,7 +51,13 @@ export interface ViewportSlot {
   layerPreview: Ref<LayerPreviewMode | null>
   gizmo: ShallowRef<MoveGizmo | null>
   overlayGroup: Ref<THREE.Group | null>
+  /** DRW overlay pass 内工具预览 / gizmo 子树 */
+  toolsOverlayGroup: ShallowRef<THREE.Group | null>
+  /** DRW 主场景深度注解（box overlay=false） */
+  worldAnnotationGroup: ShallowRef<THREE.Group | null>
   wireframe: ShallowRef<THREE.LineSegments | null>
   orbitTarget: Ref<THREE.Vector3 | null>
+  /** 本视口轨道相机（Main 侧真源；与 THREE 实例一一对应） */
+  viewportCamera: Ref<ViewportCameraState | null>
 }
 

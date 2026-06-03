@@ -119,7 +119,7 @@ export class FaceGizmo implements ToolGizmo {
 
     this._mesh = new THREE.Mesh(geo, mat)
     this._mesh.raycast = () => {} // Don't self-intercept the pick
-    ctx.viewport.overlayGroup.value?.add(this._mesh)
+    ctx.viewport.toolsOverlayGroup.value?.add(this._mesh)
   }
 
   private _clearPreview(): void {

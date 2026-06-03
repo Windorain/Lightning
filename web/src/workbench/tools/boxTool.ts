@@ -195,7 +195,7 @@ export class BoxGizmo implements ToolGizmo {
   render(ctx: ToolContext): void {
     this._disposePreviews()
     const color = ctx.activeTool.value?.color ?? '#4488ff'
-    const overlay = ctx.viewport.overlayGroup.value
+    const overlay = ctx.viewport.toolsOverlayGroup.value
     if (!overlay) return
 
     const detectMode = ctx.activeTool.value?.properties?.detectMode as string | undefined
