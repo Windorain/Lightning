@@ -9,11 +9,11 @@ import type {
   ToolSettings,
   WorkbenchSession,
 } from '@/runtime/contextAccess'
-import { createViewerPreferences } from '@/preview/preferences'
+import { createViewerPreferences } from '@/viewer/preferences'
 import { defaultWikiConfig } from '@/runtime/wikiConfigDefaults'
 import { readPersistedPanelWidths } from '@/workbench/layout/panelLayoutStorage'
 import { REGION, REGION_KEYMAP } from '@/runtime/regionIds'
-import { createViewportHoverState } from '@/runtime/viewportHover'
+import { createViewportHoverState } from '@/runtime/hover'
 import type { ConnectionState, UIWorkspace, WorkbenchWorkspaceMode } from '@/runtime/types'
 
 export interface ScreenLayout {
@@ -146,7 +146,7 @@ export function createWorkbenchSession(): WorkbenchSession {
 
 export function createEmbedSession(extras?: {
   initialLayerWorldY?: number
-  initialCamera?: import('@/preview/previewConfig').InitialCamera
+  initialCamera?: import('@/viewer/viewerConfig').InitialCamera
 }): EmbedSession {
   return {
     layerWorldY: ref(extras?.initialLayerWorldY ?? -1),
@@ -221,7 +221,7 @@ export function createEmbedScreenRoot(
   tool: ToolSettings,
   extras?: {
     initialLayerWorldY?: number
-    initialCamera?: import('@/preview/previewConfig').InitialCamera
+    initialCamera?: import('@/viewer/viewerConfig').InitialCamera
   },
 ): ScreenRoot {
   const session = createEmbedSession(extras)

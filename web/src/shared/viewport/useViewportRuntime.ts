@@ -1,7 +1,7 @@
 import { computed, toRef } from 'vue'
 import type { Context } from '@/runtime/context'
 import { DRW } from '@/runtime/drw'
-import type { ViewerPreferences } from '@/preview/preferences'
+import type { ViewerPreferences } from '@/viewer/preferences'
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
 
 export interface UseViewportRuntimeOptions {

@@ -2,6 +2,8 @@ import { ref } from 'vue'
 import type { Ref } from 'vue'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { OperatorRegistry } from '@/operators/operatorRegistry'
+import { wrapOperatorRegistry } from '@/operators/operatorRegistry'
+import type { Context } from '@/runtime/context'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { RNARegistry } from '@/shared/types'
 import type { ParserRegistryImpl } from '@/context/parserRegistry'
@@ -34,12 +36,25 @@ export class Main {
   readonly framesPlaybackIsPlaying = ref(false)
   readonly registries: MainRegistries
 
-  constructor(registries: Omit<MainRegistries, 'parsers'> & { parsers?: ParserRegistryImpl }) {
-    const { parsers, ...rest } = registries
+  constructor(registries: Omit<MainRegistries, 'parsers' | 'operatorsFacade'> & {
+    parsers?: ParserRegistryImpl
+    operatorsFacade?: MainRegistries['operatorsFacade']
+  }) {
+    const { parsers, operatorsFacade, ...rest } = registries
     this.registries = {
       ...rest,
+      operatorsFacade: operatorsFacade ?? stubOperatorFacade(rest.operators),
       parsers: parsers ?? createParserRegistry(),
     }
+  }
+
+  /** 在 Context 创建后绑定 operator 门面（避免重复 wrap） */
+  bindOperatorFacade(getCtx: () => Context, sanitize = false): void {
+    this.registries.operatorsFacade = wrapOperatorRegistry(
+      this.registries.operators,
+      getCtx,
+      sanitize,
+    )
   }
 
   replaceDoc(doc: RuntimeDocument | null, options?: ReplaceDocOptions): void {
@@ -57,5 +72,16 @@ export class Main {
 
   bumpEpoch(): void {
     this.structEpoch.value += 1
+  }
+}
+
+function stubOperatorFacade(registry: OperatorRegistry): MainRegistries['operatorsFacade'] {
+  const notReady = (): never => { throw new Error('Context not bound; call bindOperatorFacade first') }
+  return {
+    exec: notReady,
+    invoke: notReady,
+    find: (id) => registry.find(id),
+    all: () => registry.all(),
+    register: (op) => registry.register(op),
   }
 }

@@ -10,7 +10,7 @@ import {
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { StructureDefinition } from '@/render/schema/types'
-import type { InitialCamera } from '@/preview/previewConfig'
+import type { InitialCamera } from '@/viewer/viewerConfig'
 import type { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 
 export interface RenderEngineReadyPayload {

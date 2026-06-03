@@ -1,5 +1,2 @@
-/**
- * Shared re-export of EmbedViewport for cross-shell consumption.
- * Prevents workbench shell from importing directly from embed/ (D4 shell trapping).
- */
-export { default as EmbedPreview } from '@/embed/EmbedViewport.vue'
+/** Workbench Wiki 预览：共享视口壳（不引 embed/ 业务组件） */
+export { default as EmbedPreview } from '@/shared/viewport/EmbedViewport.vue'

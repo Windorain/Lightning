@@ -1,13 +1,13 @@
-import { createOperatorRegistry, wrapOperatorRegistry } from '@/operators/operatorRegistry'
+import { createOperatorRegistry } from '@/operators/operatorRegistry'
 import { SetFrameIndexOperator, SetFramePlaybackOperator, SetLayerYOperator, ToggleFramePlaybackOperator } from '@/operators/builtin/miscOperators'
 import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator } from '@/operators/builtin/viewOperators'
 import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
 import { LoadEmbedDocumentOperator } from '@/operators/builtin/docLifecycleOperators'
 import { V2PlainParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/context/parsers/builtinParsers'
-import type { EmbedSettings } from '@/preview/previewConfig'
+import type { EmbedSettings } from '@/viewer/viewerConfig'
 import { Main } from '@/runtime/main'
 import { WM } from '@/runtime/wm'
-import { Context, provideContext } from '@/runtime/context'
+import { Context } from '@/runtime/context'
 import { createViewportManager } from '@/runtime/viewportManager'
 import { createEmbedScreenRoot } from '@/runtime/screenRoot'
 import { createToolSettings } from '@/runtime/toolSettings'
@@ -26,7 +26,7 @@ export class EmbedHost extends HostBase {
   }
 
   async start(): Promise<void> {
-    // Document load is driven by OPERATOR_LOAD_EMBED_DOCUMENT from EmbedRoot
+    // Document load: OPERATOR_LOAD_EMBED_DOCUMENT from EmbedRoot
   }
 }
 
@@ -42,7 +42,6 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
 
   const main = new Main({
     operators: registry,
-    operatorsFacade: wrapOperatorRegistry(registry, () => ctx, true),
     tools: null,
     rna: null,
   })
@@ -53,19 +52,20 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
   parsers.register(WorldParser)
   parsers.register(StructureDataParser)
 
-  let ctx!: Context
-  ctx = new Context(main, wm, logCenter, viewports, screen, null)
-  main.registries.operatorsFacade = wrapOperatorRegistry(registry, () => ctx, true)
+  const ctx = new Context(main, wm, logCenter, viewports, screen, null)
+  main.bindOperatorFacade(() => ctx, true)
 
   for (const inputId of screen.wmInputRegionIds()) {
     wm.events.registerRegion(inputId)
   }
 
-  for (const op of [ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator, CopyCameraFromEmbedOperator, LoadEmbedDocumentOperator, SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetLayerYOperator]) {
+  for (const op of [
+    ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator,
+    CopyCameraFromEmbedOperator, LoadEmbedDocumentOperator,
+    SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetLayerYOperator,
+  ]) {
     if (!registry.find(op.id)) registry.register(op)
   }
 
-  const host = new EmbedHost(main, ctx, wm)
-  provideContext(ctx)
-  return { host, ctx }
+  return { host: new EmbedHost(main, ctx, wm), ctx }
 }

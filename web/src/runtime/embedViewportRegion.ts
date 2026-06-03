@@ -1,5 +1,5 @@
 import type { Context } from '@/runtime/context'
-import type { ViewerPreferences } from '@/preview/preferences'
+import type { ViewerPreferences } from '@/viewer/preferences'
 import { REGION } from '@/runtime/regionIds'
 
 /** EmbedViewport 使用的 WM/视口 region：独立 Embed 或 Workbench Wiki 预览 */

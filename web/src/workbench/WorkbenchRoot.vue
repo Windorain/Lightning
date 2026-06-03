@@ -9,13 +9,12 @@ import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
 import { EmbedPreview } from '@/shared/viewport/embedPreview'
-import { buildEmbedSettingsFromWikiConfig } from '@/preview/previewConfig'
-import type { EmbedSettings } from '@/preview/previewConfig'
+import { buildEmbedSettingsFromWikiConfig } from '@/viewer/viewerConfig'
+import type { EmbedSettings } from '@/viewer/viewerConfig'
 import { createSelectionContext } from '@/context/selection'
 import { provideEditHistory } from '@/context/editHistory'
 import { provideToolRegistry } from '@/workbench/tools/registry'
-import { provideContext } from '@/runtime/context'
-import { hostKey } from '@/runtime/host'
+import HostProvider from '@/runtime/HostProvider.vue'
 import { createToolSettings } from '@/runtime/toolSettings'
 
 // Operators — registered via shared VM assembly
@@ -40,8 +39,6 @@ const { host, ctx, screen: defaultScreen } = createWorkbenchHost({
   selection, editHistory, toolRegistry, tool,
 })
 
-provideContext(ctx)
-provide(hostKey, host)
 const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = usePanelQueries(ctx, defaultScreen)
 
 const toolshelfCollapsed = computed(() => ctx.requireRegion(REGION.WORKBENCH_TOOLSHELF).collapsed)
@@ -114,6 +111,7 @@ ctx.log.injectStateRefs({
 </script>
 
 <template>
+  <HostProvider :host="host" :ctx="ctx">
   <WorkbenchShell v-show="workspace === 'preview' || workspace === 'wiki'">
     <template #menubar>
       <div class="wb-menubar-inner">
@@ -232,6 +230,7 @@ ctx.log.injectStateRefs({
       </div>
     </Transition>
   </Teleport>
+  </HostProvider>
 </template>
 
 <style scoped>

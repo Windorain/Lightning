@@ -2,10 +2,10 @@
  * 本地 dev：URL 参数与默认 UI → View3DConfig；场景来自 `data/scenes/<id>.json` 构建期打包。
  */
 
-import type { View3DConfig, View3DFeatures } from '@/preview/previewConfig'
-import { defaultEmbedUi } from '@/preview/previewConfig'
+import type { View3DConfig, View3DFeatures } from '@/viewer/viewerConfig'
+import { defaultEmbedUi } from '@/viewer/viewerConfig'
 import { getDevSceneDocument, listDevSceneIds } from '@/dev/devScenes'
-import { DEFAULT_PREVIEW_SCENE_ID, loadPreviewSessionFromDocument } from '@/preview/previewSession'
+import { DEFAULT_PREVIEW_SCENE_ID, loadPreviewSessionFromDocument } from '@/viewer/viewerSession'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
 

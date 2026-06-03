@@ -3,7 +3,7 @@ import type { BlockRef } from '@/context/selection'
 import {
   createWorkbenchHoverAnnotationIdRef,
   createWorkbenchHoverBlockRef,
-} from '@/runtime/viewportHoverAccess'
+} from '@/runtime/hover/access'
 import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
 import type { SelectionContext } from '@/context/selection'

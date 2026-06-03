@@ -1,18 +1,14 @@
 <script setup lang="ts">
 /**
  * EmbedRoot — 嵌入场景的 ctx Owner。
- *
- * - createEmbedHost + provideContext
- * - OPERATOR_LOAD_EMBED_DOCUMENT 加载 bootstrap 文档
  */
 import { ref, watch } from 'vue'
 import type { EmbedBootstrapOptions } from '@/embed/embedContract'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { createEmbedHost } from '@/runtime/host/embedHost'
-import { hostKey } from '@/runtime/host'
-import { provide } from 'vue'
-import EmbedViewport from '@/embed/EmbedViewport.vue'
-import { buildEmbedSettingsFromBootstrap } from '@/preview/previewConfig'
+import HostProvider from '@/runtime/HostProvider.vue'
+import EmbedViewport from '@/shared/viewport/EmbedViewport.vue'
+import { buildEmbedSettingsFromBootstrap } from '@/viewer/viewerConfig'
 
 const props = defineProps<{
   bootstrap: EmbedBootstrapOptions
@@ -23,7 +19,6 @@ const settings = buildEmbedSettingsFromBootstrap({
   features: props.bootstrap.features,
 })
 const { host, ctx } = createEmbedHost(settings)
-provide(hostKey, host)
 
 const loadError = ref('')
 
@@ -47,14 +42,16 @@ watch(
 </script>
 
 <template>
-  <div v-if="loadError" class="embed-boot embed-boot--err">
-    {{ loadError }}
-  </div>
-  <EmbedViewport v-else-if="ctx.getDoc().value" :settings="settings" />
-  <div v-else class="embed-boot embed-boot--loading">
-    <div class="embed-boot-spinner"></div>
-    <span>加载中…</span>
-  </div>
+  <HostProvider :host="host" :ctx="ctx">
+    <div v-if="loadError" class="embed-boot embed-boot--err">
+      {{ loadError }}
+    </div>
+    <EmbedViewport v-else-if="ctx.getDoc().value" :settings="settings" />
+    <div v-else class="embed-boot embed-boot--loading">
+      <div class="embed-boot-spinner"></div>
+      <span>加载中…</span>
+    </div>
+  </HostProvider>
 </template>
 
 <style scoped>

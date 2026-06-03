@@ -14,11 +14,11 @@ import '@/styles/embed-nei-tokens.css'
 export const MOUNT_SELECTOR = '.web-structure-renderer'
 
 export { mount } from './embed/mount'
-export { default as EmbedViewport } from './embed/EmbedViewport.vue'
+export { default as EmbedViewport } from './shared/viewport/EmbedViewport.vue'
 export type { EmbedBootstrapOptions, EmbedData, EmbedUiOptions, View3DFeatures } from './embed/embedContract'
-export type { View3DConfig } from './preview/previewConfig'
+export type { View3DConfig } from './viewer/viewerConfig'
 
-export { loadPreviewSessionFromDocument } from './preview/previewSession'
+export { loadPreviewSessionFromDocument } from './viewer/viewerSession'
 export {
   readDocumentFormat,
   isEnvelopeDocument,
@@ -45,4 +45,4 @@ export {
   type BuildEnvelopeOptions,
 } from './render/data/sceneExport'
 export { downloadJson, copyTextToClipboard } from './util/browser'
-export { documentLooksPreviewable } from './preview/previewFromDocument'
+export { documentLooksPreviewable } from './viewer/viewerFromDocument'

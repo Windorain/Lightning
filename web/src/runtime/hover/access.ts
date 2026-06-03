@@ -3,8 +3,8 @@ import type { Context } from '@/runtime/context'
 import type { BlockRef } from '@/context/selection'
 import { structureRowToWorldY } from '@/pure/vec'
 import { REGION } from '@/runtime/regionIds'
-import type { ViewportBlockHover, ViewportHoverState } from '@/runtime/viewportHover'
-import { requireViewportHover } from '@/runtime/viewportHover'
+import type { ViewportBlockHover, ViewportHoverState } from '@/runtime/hover/state'
+import { requireViewportHover } from '@/runtime/hover/state'
 import type { ScenePickResult } from '@/render/interaction/scenePick'
 
 export function blockRefFromViewportHover(ctx: Context, vb: ViewportBlockHover | null): BlockRef | null {

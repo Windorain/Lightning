@@ -56,13 +56,13 @@ export interface WorkbenchSession {
 export interface RegionState {
   tool?: ToolSettings
   wiki?: Record<string, unknown>
-  viewer?: import('@/preview/preferences').ViewerPreferences
-  hover?: import('@/runtime/viewportHover').ViewportHoverState
+  viewer?: import('@/viewer/preferences').ViewerPreferences
+  hover?: import('@/runtime/hover').ViewportHoverState
   [key: string]: unknown
 }
 
 /** Embed 查看器会话（Screen 根 session） */
 export interface EmbedSession {
   layerWorldY: Ref<number>
-  initialCamera?: import('@/preview/previewConfig').InitialCamera
+  initialCamera?: import('@/viewer/viewerConfig').InitialCamera
 }

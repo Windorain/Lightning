@@ -3,7 +3,7 @@
  *
  * EmbedRoot → createEmbedHost → OPERATOR_LOAD_EMBED_DOCUMENT → ctx。
  */
-import type { View3DFeatures } from '@/preview/previewConfig'
+import type { View3DFeatures } from '@/viewer/viewerConfig'
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
 
 export type { View3DFeatures }
@@ -18,7 +18,7 @@ export interface EmbedUiOptions {
   initialLayerWorldY?: number
   /** World 多帧时指定起始帧，缺省为文档默认帧 */
   initialWorldFrameIndex?: number
-  initialCamera?: import('@/preview/previewConfig').InitialCamera
+  initialCamera?: import('@/viewer/viewerConfig').InitialCamera
   sceneBackground?: number
   loadingMessage?: string
   okMessage?: (modelId: string) => string

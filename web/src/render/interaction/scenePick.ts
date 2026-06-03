@@ -216,11 +216,6 @@ export function pickAtPointer(params: ScenePickParams): ScenePickResult {
   return nearestBlock
 }
 
-/** Backward-compatible wrapper — delegates to pickAtPointer without AABB annotations. */
-export function scenePickFromPointer(params: ScenePickParams): ScenePickResult {
-  return pickAtPointer({ ...params, annotations: undefined })
-}
-
 // ---------------------------------------------------------------------------
 // Multi-hit pick (for cycling)
 // ---------------------------------------------------------------------------

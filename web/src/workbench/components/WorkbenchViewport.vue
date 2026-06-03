@@ -2,9 +2,7 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
-import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
-import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
-import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
+import ViewportFrameLayerDock from '@/shared/viewport/ViewportFrameLayerDock.vue'
 import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { WorkbenchHost } from '@/runtime/host/workbenchHost'
@@ -212,41 +210,22 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="wv-bottom-dock">
-      <div class="wv-tab-row">
-        <button v-if="hasWorldMultiFrame" class="wv-tab" :class="{ 'wv-tab--active': activeTab === 'frame' }" @click="activeTab = 'frame'">帧控制</button>
-        <button class="wv-tab" :class="{ 'wv-tab--active': activeTab === 'layer' }" @click="activeTab = 'layer'">分层预览</button>
-        <div class="wv-tab-status">
-          <span v-if="hasWorldMultiFrame" class="wv-tab-stat">帧 <strong>{{ worldFrameIndex + 1 }}/{{ worldFrameCount }}</strong></span>
-          <span class="wv-tab-stat">层 <strong>{{ layerPreviewLabel }}</strong></span>
-        </div>
-      </div>
-      <div v-if="hasWorldMultiFrame" class="wv-tab-panel" :class="{ 'wv-tab-panel--active': activeTab === 'frame' }">
-        <WorldFramePlayerControls
-          :has-world-multi-frame="hasWorldMultiFrame"
-          :is-playing="framesPlaybackIsPlaying"
-          @toggle="togglePlayback"
-        />
-        <WorldFrameScrubber
-          :has-world-multi-frame="hasWorldMultiFrame"
-          :frame-count="worldFrameCount"
-          :is-playing="framesPlaybackIsPlaying"
-          :mesh-busy="meshBusy"
-          :world-frame-index="worldFrameIndex"
-          @toggle-playback="togglePlayback"
-          @set-frame="setFrameIndex"
-        />
-      </div>
-      <div class="wv-tab-panel" :class="{ 'wv-tab-panel--active': activeTab === 'layer' }">
-        <LayerPreviewBar
-          :grid-height="gridHeight"
-          :mesh-busy="meshBusy"
-          :layer-world-y="layerWorldY"
-          :layer-preview-label="layerPreviewLabel"
-          @update:layer-y="setLayerY"
-        />
-      </div>
-    </div>
+    <ViewportFrameLayerDock
+      v-if="loadStatus === 'ok'"
+      v-model:active-tab="activeTab"
+      theme="workbench"
+      :has-world-multi-frame="hasWorldMultiFrame"
+      :world-frame-index="worldFrameIndex"
+      :world-frame-count="worldFrameCount"
+      :frames-playback-is-playing="framesPlaybackIsPlaying"
+      :mesh-busy="meshBusy"
+      :grid-height="gridHeight"
+      :layer-world-y="layerWorldY"
+      :layer-preview-label="layerPreviewLabel"
+      @set-frame="setFrameIndex"
+      @toggle-playback="togglePlayback"
+      @update:layer-y="setLayerY"
+    />
 
   </div>
 </template>
@@ -285,16 +264,4 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(2px);
 }
 
-.wv-bottom-dock { flex-shrink: 0; display: flex; flex-direction: column; background: var(--wb-bg-elevated); box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.12); }
-.wv-tab-row { display: flex; align-items: center; padding: 0 4px; background: var(--wb-bg-surface); border-bottom: 1px solid var(--wb-border); }
-.wv-tab { padding: 6px 14px 5px; font-size: 12px; font-family: system-ui, sans-serif; font-weight: 600; color: var(--wb-text-muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s, border-color 0.15s; }
-.wv-tab:hover { color: var(--wb-text); }
-.wv-tab--active { color: var(--wb-text); border-bottom-color: var(--wb-accent); }
-.wv-tab-status { margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 12px; font-family: system-ui, sans-serif; color: var(--wb-text-muted); flex-shrink: 0; }
-.wv-tab-stat strong { color: var(--wb-text); font-weight: 600; }
-.wv-tab-panel { display: none; padding: 6px 10px; align-items: center; gap: 10px; height: 40px; background: var(--wb-bg-elevated); }
-.wv-tab-panel--active { display: flex; }
-.wv-tab-panel :deep(.wm-wfs) { flex: 1; min-width: 0; background: transparent; border: none; padding: 0; }
-.wv-tab-panel :deep(.wm-wfp-controls) { background: transparent; border: none; padding: 0; }
-.wv-tab-panel :deep(.wm-layer-bar) { flex: 1; min-width: 0; background: transparent; border: none; padding: 0; }
 </style>

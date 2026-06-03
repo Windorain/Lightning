@@ -3,7 +3,7 @@ import { RuntimeDocument } from '@/context/runtimeDocument'
 import { getDevSceneDocument } from '@/dev/devScenes'
 import { downloadJson } from '@/util/browser'
 import { suggestedJsonBaseName } from '@/workbench/utils/fileNaming'
-import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
+import { DEFAULT_PREVIEW_SCENE_ID } from '@/viewer/viewerSession'
 
 /**
  * Open a native file picker for .json files.

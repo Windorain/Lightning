@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { listDevSceneIds } from '@/dev/devScenes'
-import { DEFAULT_PREVIEW_SCENE_ID } from '@/preview/previewSession'
+import { DEFAULT_PREVIEW_SCENE_ID } from '@/viewer/viewerSession'
 import { useContext } from '@/runtime/context'
 const ctx = useContext()
 

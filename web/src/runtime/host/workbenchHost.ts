@@ -1,37 +1,6 @@
-import { createOperatorRegistry, wrapOperatorRegistry } from '@/operators/operatorRegistry'
-import type { OperatorType } from '@/operators/operatorType'
-import type { OperatorRegistry } from '@/operators/operatorRegistry'
+import { createOperatorRegistry } from '@/operators/operatorRegistry'
 import { logCenter, installUnifiedLogApi } from '@/logging/LogCenter'
-import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA, materialRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOfByOperator, boundsOfByRNAPath } from '@/workbench/ux/layout'
-import {
-  blockInspectorPanel, toolShelfPanel,
-  transformPanel, sceneInfoPanel,
-  menuBarPanel, blockStatsPanel,
-  annotationPanel, wikiConfigPanel,
-  tooltipEditorPanel,
-} from '@/workbench/ux/panels'
-import { SelectOperator, SelectByTypeOperator, SelectAllOperator } from '@/operators/builtin/selectOperator'
-import { MoveOperator } from '@/operators/builtin/moveTranslate'
-import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator } from '@/operators/builtin/viewOperators'
-import { TooltipEditOperator } from '@/operators/builtin/metaEditOperators'
-import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/operators/builtin/docLifecycleOperators'
-import { SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator } from '@/operators/builtin/sdeOperators'
-import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/operators/builtin/exportOperators'
-import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/operators/builtin/annotationOperators'
-import {
-  SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetHoveredBlockOperator, SetHoveredAnnotationOperator, ThemeToggleOperator, SetLanguageOperator, SetToolSettingOperator, SetRegionSettingOperator, UndoOperator, RedoOperator,
-  SetWorkspaceModeOperator, ResetLayoutOperator, SetWikiConfigOperator, ApplySettingsOperator, SetLayerYOperator,
-} from '@/operators/builtin/miscOperators'
-import { ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/operators/builtin/materialOperators'
-import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
-import { selectTool, moveTool } from '@/workbench/tools/toolDefs'
-import { MoveGizmo } from '@/workbench/tools/gizmos'
-import { boxTool, boxFullTool, BoxGizmo, AnnotationBoxCommitOperator, AnnotationBoxResetOperator } from '@/workbench/tools/boxTool'
-import { pointTool, PointGizmo } from '@/workbench/tools/pointTool'
-import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
-import { textTool, TextGizmo } from '@/workbench/tools/textTool'
-import { faceTool, FaceGizmo } from '@/workbench/tools/faceTool'
 import { V2PlainParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/context/parsers/builtinParsers'
 import { Main } from '@/runtime/main'
 import { WM } from '@/runtime/wm'
@@ -47,23 +16,12 @@ import { HostBase } from '@/runtime/host'
 import { REGION } from '@/runtime/regionIds'
 import { autoConnectSde } from '@/runtime/host/workbenchBoot'
 import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
-
-const ALL_OPERATORS: OperatorType[] = [
-  SelectOperator, SelectByTypeOperator, SelectAllOperator, MoveOperator,
-  UndoOperator, RedoOperator,
-  ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator,
-  TooltipEditOperator,
-  NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator,
-  SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetToolSettingOperator, SetRegionSettingOperator, SetHoveredBlockOperator, SetHoveredAnnotationOperator, SetLayerYOperator, ApplySettingsOperator, SetWikiConfigOperator,
-  SetWorkspaceModeOperator, ResetLayoutOperator,
-  SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator,
-  ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
-  ThemeToggleOperator, SetLanguageOperator,
-  AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
-  AnnotationBoxCommitOperator, AnnotationBoxResetOperator,
-  ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator,
-  CopyCameraFromEmbedOperator,
-]
+import {
+  WORKBENCH_PANELS,
+  registerWorkbenchOperators,
+  registerWorkbenchRna,
+  registerWorkbenchTools,
+} from '@/workbench/registerWorkbench'
 
 export interface WorkbenchHostDeps {
   selection: SelectionContext
@@ -116,18 +74,10 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   const viewports = createViewportManager()
   const wm = new WM(logCenter)
 
-  const screen = createWorkbenchScreenRoot(tool, {
-    toolShelf: [toolShelfPanel],
-    header: [menuBarPanel],
-    properties: [
-      blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel,
-      annotationPanel, wikiConfigPanel, tooltipEditorPanel,
-    ],
-  })
+  const screen = createWorkbenchScreenRoot(tool, WORKBENCH_PANELS)
 
   const main = new Main({
     operators: registry,
-    operatorsFacade: wrapOperatorRegistry(registry, () => ctx),
     tools: toolRegistry,
     rna: null,
   })
@@ -138,29 +88,21 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   parsers.register(WorldParser)
   parsers.register(StructureDataParser)
 
-  const rna = createRNARegistry()
-  rna.register(blockRNA)
-  rna.register(toolSettingsRNA)
-  rna.register(sceneMetaRNA)
-  rna.register(wikiConfigRNA)
-  rna.register(annotationRNA)
-  rna.register(materialRNA)
-  main.registries.rna = rna
+  registerWorkbenchRna(main)
 
   const services: WorkbenchServices = {
     selection,
     editHistory,
     toolRegistry,
-    rna,
+    rna: main.registries.rna!,
     ui: {
       boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
       boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),
     },
   }
 
-  let ctx!: Context
-  ctx = new Context(main, wm, logCenter, viewports, screen, services)
-  main.registries.operatorsFacade = wrapOperatorRegistry(registry, () => ctx)
+  const ctx = new Context(main, wm, logCenter, viewports, screen, services)
+  main.bindOperatorFacade(() => ctx)
 
   const host = new WorkbenchHost(main, ctx, wm, screen, services)
   computeLayout(ctx, screen)
@@ -170,30 +112,12 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   }
   wm.events.registerRegion(REGION.CHROME)
 
-  registerAllOperators(registry)
-
-  const moveGizmo = new MoveGizmo()
-  const defaultVp = viewports.register('r-viewport')
-  defaultVp.gizmo.value = moveGizmo
-  toolRegistry.register(selectTool)
-  toolRegistry.register(moveTool, moveGizmo)
-  toolRegistry.register(boxTool, new BoxGizmo())
-  toolRegistry.register(boxFullTool, new BoxGizmo())
-  toolRegistry.register(pointTool, new PointGizmo())
-  toolRegistry.register(lineTool, new LineGizmo())
-  toolRegistry.register(textTool, new TextGizmo())
-  toolRegistry.register(faceTool, new FaceGizmo())
-  toolRegistry.activate('select')
+  registerWorkbenchOperators(registry)
+  registerWorkbenchTools(toolRegistry, viewports, tool)
 
   installUnifiedLogApi(ctx)
   selection.bindLog(ctx.log)
   editHistory.bindLog(ctx.log)
 
   return { host, ctx, screen, services }
-}
-
-export function registerAllOperators(registry: OperatorRegistry): void {
-  for (const op of ALL_OPERATORS) {
-    if (!registry.find(op.id)) registry.register(op)
-  }
 }

@@ -43,6 +43,8 @@ export interface OperatorType {
   modal?(ctx: Context, props: OperatorProperties, event: Event): OpResult
   /** 上下文检查（返回 false 时操作符在 UI 中灰掉） */
   poll?(ctx: Context): boolean
+  /** 仅脚本/API；不在 operator 列表展示 */
+  internal?: boolean
   /** 外部取消时的清理 */
   cancel?(ctx: Context, props: OperatorProperties): void
   /** 创建模态状态（每次 invoke 进入模态时调用） */

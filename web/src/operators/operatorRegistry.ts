@@ -160,8 +160,8 @@ export function wrapOperatorRegistry(
       ? (id: string) => { const o = registry.find(id); return o ? { id: o.id, label: o.label } : undefined }
       : (id: string) => registry.find(id),
     all: sanitize
-      ? () => registry.all().map(o => ({ id: o.id, label: o.label }))
-      : () => registry.all(),
+      ? () => registry.all().filter(o => !o.internal).map(o => ({ id: o.id, label: o.label }))
+      : () => registry.all().filter(o => !o.internal),
     register: (op: OperatorType) => registry.register(op),
   }
 }

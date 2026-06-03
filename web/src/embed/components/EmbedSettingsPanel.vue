@@ -7,7 +7,7 @@
  * - 通过 prefs prop 直接双向绑定
  */
 
-import type { ViewerPreferences } from '@/preview/preferences'
+import type { ViewerPreferences } from '@/viewer/preferences'
 
 defineProps<{
   show: boolean

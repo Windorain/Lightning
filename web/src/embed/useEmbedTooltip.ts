@@ -5,7 +5,7 @@
  * tooltipText / neiTooltipMap / metaTooltipText / showMetaHint。
  */
 import { computed, type Ref, type ShallowRef } from 'vue'
-import type { EmbedHover } from '@/runtime/viewportHover'
+import type { EmbedHover } from '@/runtime/hover'
 import type { StructureDefinition } from '@/render/schema/types'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { resolvePreviewTooltipText } from '@/pure/tooltipResolution'

@@ -14,22 +14,20 @@ import { hostKey } from '@/runtime/host'
 import type { Host } from '@/runtime/host'
 import { resolveEmbedViewportRegionId, resolveEmbedViewerPreferences } from '@/runtime/embedViewportRegion'
 import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
-import { blockRefFromViewportHover } from '@/runtime/viewportHoverAccess'
+import { blockRefFromViewportHover } from '@/runtime/hover'
 import { createEmbedSidebarOutlineMasks } from '@/runtime/embedSidebarOutline'
 import { getBlockGeometry, gridCenterWorld } from '@/context/queries'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import { createHoverHandler } from '@/handlers/hoverHandler'
-import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
+import ViewportFrameLayerDock from '@/shared/viewport/ViewportFrameLayerDock.vue'
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
-import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
-import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
-import type { EmbedSettings } from '@/preview/previewConfig'
-import type { InitialCamera } from '@/preview/previewConfig'
+import type { EmbedSettings } from '@/viewer/viewerConfig'
+import type { InitialCamera } from '@/viewer/viewerConfig'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
-import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import { embedHoverFromState } from '@/runtime/viewportHover'
+import { sceneDisplayTitleFromRootDocument } from '@/viewer/sceneDisplayTitle'
+import { embedHoverFromState } from '@/runtime/hover'
 import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
 import EmbedSettingsPanel from '@/embed/components/EmbedSettingsPanel.vue'
 
@@ -263,52 +261,24 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 底部 Tab 控件栏 -->
-    <div v-if="hasBottomDock && loadStatus === 'ok'" class="wm-bottom-dock">
-      <div class="wm-tab-row">
-        <button
-          v-if="showFrameCtl && hasWorldMultiFrame"
-          class="wm-tab"
-          :class="{ 'wm-tab--active': activeTab === 'frame' }"
-          @click="activeTab = 'frame'"
-        >帧控制</button>
-        <button
-          v-if="showLayerBar"
-          class="wm-tab"
-          :class="{ 'wm-tab--active': activeTab === 'layer' }"
-          @click="activeTab = 'layer'"
-        >分层预览</button>
-        <div class="wm-tab-status">
-          <span v-if="showFrameCtl && hasWorldMultiFrame" class="wm-tab-stat">帧 <strong>{{ worldFrameIndex + 1 }}/{{ worldFrameCount }}</strong></span>
-          <span v-if="showLayerBar" class="wm-tab-stat">层 <strong>{{ layerPreviewLabel }}</strong></span>
-        </div>
-      </div>
-      <div v-if="showFrameCtl && hasWorldMultiFrame" class="wm-tab-panel" :class="{ 'wm-tab-panel--active': activeTab === 'frame' }">
-        <WorldFramePlayerControls
-          :has-world-multi-frame="hasWorldMultiFrame"
-          :is-playing="framesPlaybackIsPlaying"
-          @toggle="togglePlayback"
-        />
-        <WorldFrameScrubber
-          :has-world-multi-frame="hasWorldMultiFrame"
-          :frame-count="worldFrameCount"
-          :is-playing="framesPlaybackIsPlaying"
-          :mesh-busy="meshBusy"
-          :world-frame-index="worldFrameIndex"
-          @toggle-playback="togglePlayback"
-          @set-frame="setFrameIndex"
-        />
-      </div>
-      <div v-if="showLayerBar" class="wm-tab-panel" :class="{ 'wm-tab-panel--active': activeTab === 'layer' }">
-        <LayerPreviewBar
-          :grid-height="gridHeight"
-          :mesh-busy="meshBusy"
-          :layer-world-y="layerWorldY"
-          :layer-preview-label="layerPreviewLabel"
-          @update:layer-y="(v: number) => { void ctx.getOperators().exec('OPERATOR_SET_LAYER_Y', { y: v }) }"
-        />
-      </div>
-    </div>
+    <ViewportFrameLayerDock
+      v-if="hasBottomDock && loadStatus === 'ok'"
+      v-model:active-tab="activeTab"
+      theme="embed"
+      :show-frame-tab="showFrameCtl"
+      :show-layer-tab="showLayerBar"
+      :has-world-multi-frame="hasWorldMultiFrame"
+      :world-frame-index="worldFrameIndex"
+      :world-frame-count="worldFrameCount"
+      :frames-playback-is-playing="framesPlaybackIsPlaying"
+      :mesh-busy="meshBusy"
+      :grid-height="gridHeight"
+      :layer-world-y="layerWorldY"
+      :layer-preview-label="layerPreviewLabel"
+      @set-frame="setFrameIndex"
+      @toggle-playback="togglePlayback"
+      @update:layer-y="(v: number) => { void ctx.getOperators().exec('OPERATOR_SET_LAYER_Y', { y: v }) }"
+    />
 
     <!-- 调试状态栏 -->
     <div v-if="showDebugStatus" :class="statusBarClass" role="status" aria-live="polite">
@@ -341,78 +311,6 @@ onBeforeUnmount(() => {
 .wm-main-stage { display: flex; flex: 1; flex-direction: row; align-items: stretch; min-height: 0; width: 100%; overflow: hidden; background: var(--nei-bg); }
 .wm-viewport-column { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-.wm-bottom-dock {
-  flex-shrink: 0; width: 100%;
-  display: flex; flex-direction: column;
-  border: var(--nei-bevel-w) solid;
-  border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow);
-  border-top: none;
-  background: var(--nei-inset-bg);
-}
-.wm-tab-row {
-  display: flex; align-items: center;
-  gap: 0;
-  padding: 0 4px;
-  background: var(--nei-bg-deep);
-  border-bottom: 1px solid var(--nei-shadow);
-  box-shadow: 0 1px 0 var(--nei-highlight);
-}
-.wm-tab {
-  padding: 6px 14px 5px;
-  font-size: 11px; font-family: var(--nei-font-mono);
-  font-weight: 600;
-  color: var(--nei-text-muted);
-  background: none; border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer; user-select: none;
-  white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s;
-}
-.wm-tab:hover { color: var(--nei-text); }
-.wm-tab--active {
-  color: var(--nei-text);
-  border-bottom-color: var(--nei-accent);
-}
-.wm-tab-status {
-  margin-left: auto;
-  display: flex; align-items: center; gap: 14px;
-  padding: 0 10px;
-  font-size: 11px; font-family: var(--nei-font-mono);
-  color: var(--nei-text-muted);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
-  flex-shrink: 0;
-}
-.wm-tab-stat strong {
-  color: var(--nei-text);
-  font-weight: 600;
-}
-.wm-tab-panel {
-  display: none; width: 100%; box-sizing: border-box;
-  padding: 6px 10px;
-  align-items: center; gap: 10px;
-  height: 48px;
-  background: var(--nei-inset-bg);
-}
-.wm-tab-panel--active { display: flex; }
-
-/* tab panel 内文字在亮色主题下用亮色（因为 panel bg 是中灰） */
-[data-nei-theme="light"] .wm-tab-panel :deep(.wm-layer-label),
-[data-nei-theme="light"] .wm-tab-panel :deep(.wm-wfs__label) {
-  color: #e0e0e0;
-}
-
-.wm-tab-panel :deep(.wm-wfs) {
-  flex: 1; min-width: 0;
-  background: transparent; border: none; padding: 0;
-}
-.wm-tab-panel :deep(.wm-wfp-controls) {
-  background: transparent; border: none; padding: 0;
-}
-.wm-tab-panel :deep(.wm-layer-bar) {
-  flex: 1; min-width: 0;
-  background: transparent; border: none; padding: 0;
-}
-
 .wm-status-bar { display: flex; align-items: flex-start; gap: 8px; margin-top: 0; padding: 8px 10px; font-size: 12px; line-height: 1.45; font-family: var(--nei-font-mono); border-radius: 0; border: var(--nei-bevel-w) solid; border-color: var(--nei-shadow) var(--nei-highlight) var(--nei-highlight) var(--nei-shadow); border-top: none; background: var(--nei-inset-bg); color: var(--nei-text-muted); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45); }
 .wm-status-bar--loading { color: var(--nei-loading-text); } .wm-status-bar--ok { color: var(--nei-ok-text); } .wm-status-bar--warn { color: var(--nei-warn-text); } .wm-status-bar--err { color: var(--nei-error-text); background: var(--nei-error-bg); }
 .wm-status-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 4px; border-radius: 0; background: currentColor; opacity: 0.9; box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4); }
@@ -421,9 +319,5 @@ onBeforeUnmount(() => {
 .nei-icon-btn:focus-visible {
   outline: 2px solid var(--nei-focus-ring);
   outline-offset: 2px;
-}
-.wm-tab:focus-visible {
-  outline: 2px solid var(--nei-focus-ring);
-  outline-offset: -1px;
 }
 </style>

@@ -2,10 +2,10 @@ import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
 import type { Context } from '@/runtime/context'
 import { pickEntityAtClient } from '@/context/queries'
-import { createHoverPickScheduler } from '@/runtime/hoverPickSchedule'
-import { pickTargetKey } from '@/runtime/hoverPickKeys'
-import type { ViewportHoverState } from '@/runtime/viewportHover'
-import { applyRegionHoverPick } from '@/runtime/viewportHoverAccess'
+import { createHoverPickScheduler } from '@/runtime/hover'
+import { pickTargetKey } from '@/runtime/hover'
+import type { ViewportHoverState } from '@/runtime/hover'
+import { applyRegionHoverPick } from '@/runtime/hover'
 
 /**
  * HOVER handler — pointermove 合并为每帧一次拾取；目标未变时仅更新光标坐标。

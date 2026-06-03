@@ -2,7 +2,7 @@ import type { OperatorType } from '@/operators/operatorType'
 import type { WorkbenchWorkspaceMode } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
 import { REGION } from '@/runtime/regionIds'
-import { setRegionHoverAnnotation, setRegionHoverBlock } from '@/runtime/viewportHoverAccess'
+import { setRegionHoverAnnotation, setRegionHoverBlock } from '@/runtime/hover'
 
 function setNested(obj: Record<string, unknown>, path: string, value: unknown): void {
   const parts = path.split('.')
@@ -185,6 +185,7 @@ export const SetLayerYOperator: OperatorType = {
 export const SetHoveredBlockOperator: OperatorType = {
   id: 'OPERATOR_SET_HOVERED_BLOCK',
   label: '设置悬停方块',
+  internal: true,
   poll(ctx) { return !ctx.isEmbed() && ctx.getDoc().value !== null },
   exec(ctx, props) {
     const block = props.block as BlockRef | null | undefined
@@ -195,6 +196,7 @@ export const SetHoveredBlockOperator: OperatorType = {
 export const SetHoveredAnnotationOperator: OperatorType = {
   id: 'OPERATOR_SET_HOVERED_ANNOTATION',
   label: '设置悬停注解',
+  internal: true,
   poll(ctx) { return !ctx.isEmbed() },
   exec(ctx, props) {
     const id = props.annotationId as string | null | undefined

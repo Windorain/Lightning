@@ -1,5 +1,5 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
-import { voxelKey } from '@/runtime/hoverPickKeys'
+import { voxelKey } from '@/runtime/hover/pickKeys'
 
 export interface ViewportBlockHover {
   blockId: string
