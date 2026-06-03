@@ -26,12 +26,57 @@ function toBlockRef(ctx: Context, picked: {
 /**
  * HOVER handler — pointermove 合并为每帧一次拾取；目标未变时跳过写入/描边重建。
  */
+function applyWorkbenchHover(
+  ctx: Context,
+  picked: ReturnType<typeof pickEntityAtClient>,
+  last: { blockKey: string; annotationId: string },
+): void {
+  const hoveredBlock = ctx.getHoveredBlock()
+  const hoveredAnnotation = ctx.getHoveredAnnotationId()
+
+  if (picked?.kind === 'block') {
+    const block = toBlockRef(ctx, picked)
+    const bk = blockRefKey(block)
+    if (last.annotationId !== '') {
+      last.annotationId = ''
+      hoveredAnnotation.value = null
+    }
+    if (bk !== last.blockKey) {
+      last.blockKey = bk
+      hoveredBlock.value = block
+    }
+    return
+  }
+
+  if (picked?.kind === 'annotation') {
+    const aid = picked.annotationId
+    if (last.blockKey !== '') {
+      last.blockKey = ''
+      hoveredBlock.value = null
+    }
+    if (aid !== last.annotationId) {
+      last.annotationId = aid
+      hoveredAnnotation.value = aid
+    }
+    return
+  }
+
+  if (last.blockKey !== '') {
+    last.blockKey = ''
+    hoveredBlock.value = null
+  }
+  if (last.annotationId !== '') {
+    last.annotationId = ''
+    hoveredAnnotation.value = null
+  }
+}
+
 export function createHoverHandler(
   regionId: string,
   getCtx: () => Context,
 ): RegionEventHandler {
   let lastPickKey = ''
-  let lastWorkbenchHoverKey = ''
+  const lastWorkbenchHover = { blockKey: '', annotationId: '' }
   let lastClientX = 0
   let lastClientY = 0
 
@@ -61,48 +106,27 @@ export function createHoverHandler(
     }
     lastPickKey = key
 
-    if (picked?.kind === 'block') {
-      if (embedHover) {
+    if (embedHover) {
+      if (picked?.kind === 'block') {
         embedHover.setViewportBlock({
           blockId: picked.blockId,
           clientX: lastClientX,
           clientY: lastClientY,
           voxel: { column: picked.column, row: picked.row, zSlice: picked.zSlice },
         })
-      } else {
-        const block = toBlockRef(ctx, picked)
-        const bk = blockRefKey(block)
-        if (bk !== lastWorkbenchHoverKey) {
-          lastWorkbenchHoverKey = bk
-          void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block })
-        }
-      }
-    } else if (picked?.kind === 'annotation') {
-      if (embedHover) {
+      } else if (picked?.kind === 'annotation') {
         embedHover.setAnnotation({
           annotationId: picked.annotationId,
           clientX: lastClientX,
           clientY: lastClientY,
         })
       } else {
-        if (lastWorkbenchHoverKey !== '') {
-          lastWorkbenchHoverKey = ''
-          void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block: null })
-        }
-        void ctx.getOperators().exec('OPERATOR_SET_HOVERED_ANNOTATION', {
-          annotationId: picked.annotationId,
-        })
+        embedHover.clearViewport()
       }
-    } else {
-      if (embedHover) embedHover.clearViewport()
-      else {
-        if (lastWorkbenchHoverKey !== '') {
-          lastWorkbenchHoverKey = ''
-          void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block: null })
-        }
-        void ctx.getOperators().exec('OPERATOR_SET_HOVERED_ANNOTATION', { annotationId: null })
-      }
+      return
     }
+
+    applyWorkbenchHover(ctx, picked, lastWorkbenchHover)
   }
 
   const scheduler = createHoverPickScheduler(applyPick)
@@ -115,14 +139,12 @@ export function createHoverHandler(
       if (event.type === 'pointerleave') {
         scheduler.cancel()
         lastPickKey = ''
-        lastWorkbenchHoverKey = ''
+        lastWorkbenchHover.blockKey = ''
+        lastWorkbenchHover.annotationId = ''
         const ctx = getCtx()
         const embedHover = ctx.region(regionId)?.state.hover as ViewportHoverState | undefined
         if (embedHover) embedHover.clearViewport()
-        else {
-          void ctx.getOperators().exec('OPERATOR_SET_HOVERED_BLOCK', { block: null })
-          void ctx.getOperators().exec('OPERATOR_SET_HOVERED_ANNOTATION', { annotationId: null })
-        }
+        else applyWorkbenchHover(ctx, null, lastWorkbenchHover)
         return { break: false }
       }
 
