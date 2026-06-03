@@ -31,6 +31,7 @@ export interface DRWDeps {
   blockIconCacheOptions?: { sizePx?: number; orthoHalf?: number }
   initialWorldFrameIndex?: number
   setFrameIndex?: (index: number) => void | Promise<void>
+  setFramesPlayback?: (playing: boolean) => void | Promise<void>
 }
 
 export class DRW {
@@ -65,6 +66,7 @@ export class DRW {
       initialWorldFrameIndex: deps.initialWorldFrameIndex,
       structEpochRef: deps.structEpochRef,
       setFrameIndex: deps.setFrameIndex,
+      setFramesPlayback: deps.setFramesPlayback,
     })
     this.computed = this._mesh.computed
     this.textureCache = this._mesh.textureCache

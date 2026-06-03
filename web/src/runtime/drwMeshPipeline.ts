@@ -56,6 +56,8 @@ export interface DrwMeshPipelineDeps {
   structEpochRef: Ref<number>
   /** 换帧时经 Operator 写入（避免 DRW 直改 ref） */
   setFrameIndex?: (index: number) => void | Promise<void>
+  /** 停/启播放时经 Operator 写入 */
+  setFramesPlayback?: (playing: boolean) => void | Promise<void>
 }
 
 export interface DrwComputed {
@@ -92,8 +94,13 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   const {
     docRef, loadStatus, meshBusy, blockIconCache, tooltipPalette,
     structureDefinition, mainMeshGroup, sceneRef, worldFrameIndex, layerWorldY,
-    framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex, structEpochRef, setFrameIndex,
+    framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex, structEpochRef, setFrameIndex, setFramesPlayback,
   } = deps
+
+  function stopPlayback(): void {
+    if (setFramesPlayback) void Promise.resolve(setFramesPlayback(false))
+    else framesPlaybackIsPlaying.value = false
+  }
 
   // === 内部纹理缓存，从 doc.textureBlobs 构建 ===
   const textureCache = shallowRef<MaterialLibraryApi | null>(null)
@@ -285,7 +292,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
         : () => setCurrentWorldFrame(next)
       void advance().then(() => {
         if (framesPlaybackIsPlaying.value) scheduleNextWorldFrameStep()
-      }).catch(() => { framesPlaybackIsPlaying.value = false })
+      }).catch(() => { stopPlayback() })
     }, delay)
   }
 
@@ -344,7 +351,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
 
   async function loadStructureAndResources(): Promise<void> {
     clearWorldPlaybackSchedule()
-    framesPlaybackIsPlaying.value = false
+    stopPlayback()
     clearAllMeshStorage()
     loadStatus.value = 'loading'
     try {
@@ -399,7 +406,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
 
   function disposeCachesAndLibrary(): void {
     clearWorldPlaybackSchedule()
-    framesPlaybackIsPlaying.value = false
+    stopPlayback()
     clearAllMeshStorage()
     mainMeshGroup.value = null
     disposeIconCache()

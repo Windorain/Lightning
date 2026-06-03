@@ -8,7 +8,7 @@
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
 import type { Context } from '@/runtime/context'
-import { loadKeymap, matchBinding, type InputBinding } from '@/keymap'
+import { matchBinding, resolveRegionBaseKeymap, type InputBinding } from '@/keymap'
 import { OP_RESULT } from '@/operators/operatorType'
 
 interface DragState {
@@ -30,8 +30,8 @@ export function createKeymapHandler(
       if (!ctx) return { break: false }
 
       // --- Build effective keymap ---
-      const tool = ctx.getToolRegistry().activeTool.value
-      const defaultKeymap = loadKeymap()
+      const tool = ctx.isEmbed() ? null : ctx.getToolRegistry().activeTool.value
+      const defaultKeymap = resolveRegionBaseKeymap(ctx.region(regionId)?.keymapId)
       const toolBindings = tool?.keymap ?? []
       const fallbackBindings = tool?.keymapFallback ?? []
 
@@ -119,14 +119,14 @@ export function createKeymapHandler(
           }
 
           if (binding.opId) {
-            // --- Property merging: tool.properties as base, keymap item props override ---
             const toolProps = tool?.properties ?? {}
             const itemProps = binding.props ?? {}
             const mergedProps = { ...toolProps, ...itemProps }
 
             const result = ctx.getOperators().invoke(binding.opId, mergedProps, event, regionId)
+            if (ctx.isEmbed()) return { break: true }
             if (result === OP_RESULT.FINISHED) {
-              const hasGizmo = ctx.getToolRegistry().activeGizmo.value !== null
+              const hasGizmo = !ctx.isEmbed() && ctx.getToolRegistry().activeGizmo.value !== null
               if (!hasGizmo) {
                 const pe = event as PointerEvent
                 drag.active = true

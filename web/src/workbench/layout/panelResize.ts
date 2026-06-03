@@ -1,30 +1,14 @@
 /**
  * 可拖拽分隔线：CSS Grid 列宽拖动。左右面板均可拖拽调整宽度，
- * 宽度持久化到 localStorage。
+ * 宽度持久化到 localStorage；Workbench 写入 ScreenRoot.layout。
  */
 import { onUnmounted, ref, type Ref } from 'vue'
+import type { Context } from '@/runtime/context'
 
-const LS_KEY_LEFT = 'wsr-wb-left-w'
-const LS_KEY_RIGHT = 'wsr-wb-right-w'
-const DEFAULT_LEFT = 220
-const DEFAULT_RIGHT = 300
+import { readPersistedPanelWidths, writePersistedPanelWidth } from './panelLayoutStorage'
+
 const MIN_LEFT = 48
 const MIN_RIGHT = 200
-
-function readPersisted(key: string, fallback: number): number {
-  try {
-    const v = localStorage.getItem(key)
-    if (v !== null) {
-      const n = Number(v)
-      if (Number.isFinite(n) && n > 0) return n
-    }
-  } catch { /* noop */ }
-  return fallback
-}
-
-function writePersisted(key: string, val: number): void {
-  try { localStorage.setItem(key, String(Math.round(val))) } catch { /* noop */ }
-}
 
 export interface PanelResizeState {
   leftWidth: Ref<number>
@@ -34,9 +18,12 @@ export interface PanelResizeState {
   dragging: Ref<boolean>
 }
 
-export function usePanelResize(): PanelResizeState {
-  const leftWidth = ref(readPersisted(LS_KEY_LEFT, DEFAULT_LEFT))
-  const rightWidth = ref(readPersisted(LS_KEY_RIGHT, DEFAULT_RIGHT))
+/** @param ctx Workbench 时绑定 ScreenRoot.layout；省略则仅本地 ref（测试/孤立） */
+export function usePanelResize(ctx?: Context): PanelResizeState {
+  const screen = ctx?.getScreenRoot()
+  const fallback = readPersistedPanelWidths()
+  const leftWidth = screen?.layout.leftWidth ?? ref(fallback.leftWidth)
+  const rightWidth = screen?.layout.rightWidth ?? ref(fallback.rightWidth)
   const dragging = ref(false)
 
   let activeDrag: 'left' | 'right' | null = null
@@ -57,8 +44,8 @@ export function usePanelResize(): PanelResizeState {
 
   function onUp(): void {
     if (!activeDrag) return
-    if (activeDrag === 'left') writePersisted(LS_KEY_LEFT, leftWidth.value)
-    else writePersisted(LS_KEY_RIGHT, rightWidth.value)
+    if (activeDrag === 'left') writePersistedPanelWidth('left', leftWidth.value)
+    else writePersistedPanelWidth('right', rightWidth.value)
     activeDrag = null
     dragging.value = false
     document.removeEventListener('pointermove', onMove)

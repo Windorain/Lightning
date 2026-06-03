@@ -1,6 +1,7 @@
 import type { OperatorType } from '@/operators/operatorType'
 import type { WorkbenchWorkspaceMode } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
+import { REGION } from '@/runtime/regionIds'
 
 function setNested(obj: Record<string, unknown>, path: string, value: unknown): void {
   const parts = path.split('.')
@@ -40,6 +41,50 @@ export const ToggleFramePlaybackOperator: OperatorType = {
   },
   exec(ctx) {
     ctx.main.framesPlaybackIsPlaying.value = !ctx.main.framesPlaybackIsPlaying.value
+  },
+}
+
+export const SetFramePlaybackOperator: OperatorType = {
+  id: 'OPERATOR_SET_FRAME_PLAYBACK',
+  label: '设置帧播放',
+  poll(ctx) {
+    const doc = ctx.getDoc().value
+    return doc !== null && doc.frameCount > 1
+  },
+  exec(ctx, props) {
+    ctx.main.framesPlaybackIsPlaying.value = Boolean(props.playing)
+  },
+}
+
+export const SetToolSettingOperator: OperatorType = {
+  id: 'OPERATOR_SET_TOOL_SETTING',
+  label: '设置工具参数',
+  poll(ctx) { return !ctx.isEmbed() },
+  exec(ctx, props) {
+    const key = props.key as string
+    const tool = ctx.getToolSettings()
+    const v = props.value
+    switch (key) {
+      case 'replaceBrush':
+        tool.replaceBrush.value = v == null || v === '' ? null : String(v)
+        break
+      case 'fillBrush':
+        tool.fillBrush.value = v == null || v === '' ? null : String(v)
+        break
+      case 'generateType':
+        tool.generateType.value = v == null || v === '' ? null : String(v)
+        break
+      case 'snapEnabled':
+        tool.snapEnabled.value = Boolean(v)
+        break
+      case 'dragSensitivity': {
+        const n = Number(v)
+        if (Number.isFinite(n)) tool.dragSensitivity = Math.max(0.01, Math.min(1, n))
+        break
+      }
+      default:
+        break
+    }
   },
 }
 
@@ -152,7 +197,23 @@ export const SetWikiConfigOperator: OperatorType = {
   exec(ctx, props) {
     const path = props.path as string
     if (!path) return
-    setNested(ctx.getWikiConfig(), path, props.value)
+    const wiki = ctx.requireRegion(REGION.WORKBENCH_PROPS).state.wiki
+    if (!wiki) return
+    setNested(wiki as Record<string, unknown>, path, props.value)
+  },
+}
+
+export const SetRegionSettingOperator: OperatorType = {
+  id: 'OPERATOR_SET_REGION_SETTING',
+  label: '设置 Region 状态',
+  poll(ctx) { return ctx.getScreenRoot() !== null },
+  exec(ctx, props) {
+    const regionId = props.regionId as string
+    const path = props.path as string
+    if (!regionId || !path) return
+    const region = ctx.region(regionId)
+    if (!region) return
+    setNested(region.state as Record<string, unknown>, path, props.value)
   },
 }
 

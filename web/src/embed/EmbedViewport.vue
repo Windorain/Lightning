@@ -24,9 +24,10 @@ import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
 import { type Annotation } from '@/render/data/annotationTypes'
 import type { EmbedSettings } from '@/preview/previewConfig'
 import type { InitialCamera } from '@/preview/previewConfig'
-import { createEmbedKeymapHandler } from '@/embed/embedKeymap'
+import { createKeymapHandler } from '@/handlers/keymapHandler'
+import { REGION } from '@/runtime/regionIds'
 import { sceneDisplayTitleFromRootDocument } from '@/preview/sceneDisplayTitle'
-import { usePreferences } from '@/preview/preferences'
+import type { ViewerPreferences } from '@/preview/preferences'
 import { useEmbedHover } from '@/embed/embedHover'
 import { useEmbedSelectionMasks } from '@/embed/useEmbedSelectionMasks'
 import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
@@ -38,9 +39,10 @@ const props = defineProps<{
 
 const ctx = useContext()
 const host = inject(hostKey)! as EmbedHost
-const prefs = usePreferences()
 
-const EMBED_REGION = 'r-embed'
+const EMBED_REGION = REGION.EMBED
+const prefs = ctx.requireRegion(EMBED_REGION).state.viewer as ViewerPreferences
+if (!prefs) throw new Error('viewer preferences missing on r-embed')
 const vpSlot = ctx.viewports.get(EMBED_REGION) ?? ctx.viewports.register(EMBED_REGION)
 
 const docRef = computed(() => ctx.getDoc().value)
@@ -56,6 +58,7 @@ const drw = new DRW({
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
   setFrameIndex: (i) => ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
+  setFramesPlayback: (playing) => ctx.getOperators().exec('OPERATOR_SET_FRAME_PLAYBACK', { playing }),
 })
 const {
   loadStatus, meshBusy, blockIconCache, tooltipPalette,
@@ -185,7 +188,7 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     mainMeshGroup,
     handlers: {
       hover: createHoverHandler(EMBED_REGION, () => ctx, hoverSink),
-      keymap: createEmbedKeymapHandler(EMBED_REGION, () => ctx),
+      keymap: createKeymapHandler(EMBED_REGION, () => ctx),
     },
     documentKeydown: false,
   })

@@ -67,6 +67,10 @@ function setValue(val: unknown): void {
     void ctx.getOperators().exec('OPERATOR_SET_WIKI_CONFIG', { path, value: val })
     return
   }
+  if (ctx && props.rnaPath?.toLowerCase().startsWith('toolsettings.')) {
+    void ctx.getOperators().exec('OPERATOR_SET_TOOL_SETTING', { key: pathKey, value: val })
+    return
+  }
   props.descriptor.set(props.owner, val)
 }
 </script>

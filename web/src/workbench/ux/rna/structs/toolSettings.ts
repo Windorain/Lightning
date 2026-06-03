@@ -1,3 +1,4 @@
+import type { ToolSettings } from '@/runtime/contextAccess'
 import type { RNAStruct } from '../types'
 
 export const toolSettingsRNA: RNAStruct = {
@@ -10,8 +11,8 @@ export const toolSettingsRNA: RNAStruct = {
       label: '生成类型',
       description: '生成工具使用的方块类型',
       default: '',
-      get(owner: any) { return owner.generateType },
-      set(owner: any, val: unknown) { owner.generateType = val as string },
+      get(owner: ToolSettings) { return owner.generateType.value ?? '' },
+      set(_owner: ToolSettings, _val: unknown) { /* via OPERATOR_SET_TOOL_SETTING */ },
     },
     {
       name: 'replaceBrush',
@@ -19,8 +20,8 @@ export const toolSettingsRNA: RNAStruct = {
       label: '替换画笔',
       description: '替换工具使用的方块类型',
       default: '',
-      get(owner: any) { return owner.replaceBrush },
-      set(owner: any, val: unknown) { owner.replaceBrush = val as string },
+      get(owner: ToolSettings) { return owner.replaceBrush.value ?? '' },
+      set(_owner: ToolSettings, _val: unknown) { /* via OPERATOR_SET_TOOL_SETTING */ },
     },
     {
       name: 'fillBrush',
@@ -28,8 +29,8 @@ export const toolSettingsRNA: RNAStruct = {
       label: '填充画笔',
       description: '填充工具使用的方块类型',
       default: '',
-      get(owner: any) { return owner.fillBrush },
-      set(owner: any, val: unknown) { owner.fillBrush = val as string },
+      get(owner: ToolSettings) { return owner.fillBrush.value ?? '' },
+      set(_owner: ToolSettings, _val: unknown) { /* via OPERATOR_SET_TOOL_SETTING */ },
     },
     {
       name: 'dragSensitivity',
@@ -39,8 +40,8 @@ export const toolSettingsRNA: RNAStruct = {
       default: 0.05,
       min: 0.01,
       max: 1.0,
-      get(owner: any) { return owner.dragSensitivity },
-      set(owner: any, val: unknown) { owner.dragSensitivity = val as number },
+      get(owner: ToolSettings) { return owner.dragSensitivity },
+      set(_owner: ToolSettings, _val: unknown) { /* via OPERATOR_SET_TOOL_SETTING */ },
     },
     {
       name: 'snapEnabled',
@@ -48,8 +49,8 @@ export const toolSettingsRNA: RNAStruct = {
       label: '吸附',
       description: '移动时吸附到整数坐标',
       default: false,
-      get(owner: any) { return owner.snapEnabled },
-      set(owner: any, val: unknown) { owner.snapEnabled = val as boolean },
+      get(owner: ToolSettings) { return owner.snapEnabled.value },
+      set(_owner: ToolSettings, _val: unknown) { /* via OPERATOR_SET_TOOL_SETTING */ },
     },
   ],
 }

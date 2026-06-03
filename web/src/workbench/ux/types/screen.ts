@@ -37,18 +37,12 @@ export interface ARegion {
   keymapId?: string
 }
 
+/** @deprecated 布局真源为 `runtime/screenRoot` 的 `ScreenRoot` */
 export interface bScreen {
   id: string
   areas: ScrArea[]
   popupRegions: ARegion[]
   bounds: { width: number; height: number }
-}
-
-export interface wmWindow {
-  id: string
-  screen: bScreen
-  activeArea: string | null
-  activeRegion: string | null
 }
 
 export interface EventHandler {

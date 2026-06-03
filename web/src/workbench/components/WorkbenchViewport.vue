@@ -10,7 +10,8 @@ import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { WorkbenchHost } from '@/runtime/host/workbenchHost'
 import { DRW } from '@/runtime/drw'
-import { usePreferences } from '@/preview/preferences'
+import type { ViewerPreferences } from '@/preview/preferences'
+import { REGION } from '@/runtime/regionIds'
 import { createToolGizmoHandler } from '@/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
 import { createHoverHandler } from '@/handlers/hoverHandler'
@@ -23,9 +24,11 @@ import type { ToolHint } from '@/workbench/tools/tool'
 const ctx = useContext()
 const host = inject(hostKey)! as WorkbenchHost
 const selection = ctx.getSelection()
-const prefs = usePreferences()
 
-const VIEWPORT_REGION_ID = 'r-viewport'
+const VIEWPORT_REGION_ID = REGION.WORKBENCH_VIEWPORT
+const prefs = ctx.requireRegion(VIEWPORT_REGION_ID).state.viewer as ViewerPreferences
+if (!prefs) throw new Error('viewer preferences missing on r-viewport')
+
 const vpSlot = ctx.viewports.get(VIEWPORT_REGION_ID) ?? ctx.viewports.register(VIEWPORT_REGION_ID)
 
 const docRef = computed(() => ctx.getDoc().value)
@@ -39,6 +42,7 @@ const drw = new DRW({
   mainMeshGroup: vpSlot.contentGroup,
   blockIconCacheOptions: {},
   setFrameIndex: (i) => ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i }),
+  setFramesPlayback: (playing) => ctx.getOperators().exec('OPERATOR_SET_FRAME_PLAYBACK', { playing }),
 })
 
 const { loadStatus, meshBusy } = drw

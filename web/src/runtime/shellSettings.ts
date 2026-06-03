@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 import type { AppLanguage, AppTheme, ShellSettings } from '@/runtime/contextAccess'
-import { setLang } from '@/config/i18n'
+import { bindI18nLang, setLang } from '@/config/i18n'
 
 const WB_THEME_KEY = 'wb-theme'
 const WB_LANG_KEY = 'wsr-wb-lang'
@@ -57,6 +57,7 @@ export function createShellSettings(opts: CreateShellSettingsOptions = {}): Shel
   const lang = ref<AppLanguage>(opts.initialLang ?? loadLang())
 
   applyTheme(surface, theme.value)
+  bindI18nLang(lang)
   setLang(lang.value)
 
   watch(theme, (t) => {

@@ -1,3 +1,6 @@
+import { EMBED_KEYMAP } from './embedKeymap'
+import { REGION_KEYMAP } from '@/runtime/regionIds'
+
 export interface KeyBinding {
   type: 'KEY'
   key: string
@@ -67,6 +70,17 @@ export function loadKeymap(): InputBinding[] {
     if (raw) return JSON.parse(raw) as InputBinding[]
   } catch { /* ignore */ }
   return DEFAULT_KEYMAP
+}
+
+const REGION_KEYMAP_PRESETS: Record<string, () => InputBinding[]> = {
+  [REGION_KEYMAP.WORKBENCH_VIEWPORT]: () => loadKeymap(),
+  [REGION_KEYMAP.EMBED_VIEWPORT]: () => EMBED_KEYMAP,
+}
+
+/** 按 Screen Region.keymapId 解析基础键位（不含工具覆盖层） */
+export function resolveRegionBaseKeymap(keymapId?: string): InputBinding[] {
+  if (!keymapId) return loadKeymap()
+  return REGION_KEYMAP_PRESETS[keymapId]?.() ?? loadKeymap()
 }
 
 export function saveKeymap(keymap: InputBinding[]): void {

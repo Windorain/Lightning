@@ -1,6 +1,6 @@
 import { computed, watch } from 'vue'
 import type { Context } from '@/runtime/context'
-import type { bScreen } from '@/workbench/ux/types/screen'
+import type { ScreenRoot } from '@/runtime/screenRoot'
 import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
 import { relayout } from '@/workbench/ux/layout'
 
@@ -10,7 +10,7 @@ import { relayout } from '@/workbench/ux/layout'
  * workspace and poll result.  A post-flush watch triggers widget-cache
  * recomputation whenever the active panel set changes.
  */
-export function usePanelQueries(ctx: Context, screen: bScreen) {
+export function usePanelQueries(ctx: Context, screen: ScreenRoot) {
   const viewportArea = screen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
   const propertiesArea = screen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
 

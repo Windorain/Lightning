@@ -1,13 +1,9 @@
 import { reactive, watch } from 'vue'
 
 export interface ViewerPreferences {
-  /** 鼠标悬浮时高亮方块 */
   highlightOnHover: boolean
-  /** 鼠标悬浮时弹出物品名称提示框 */
   showHoverTooltip: boolean
-  /** 显示注解层 */
   showAnnotations: boolean
-  /** 提示框距光标偏移量 (px) */
   tooltipOffset: number
 }
 
@@ -28,16 +24,16 @@ function load(): ViewerPreferences {
   return { ...DEFAULTS }
 }
 
-let _instance: ViewerPreferences | null = null
-
-export function usePreferences(): ViewerPreferences {
-  if (!_instance) {
-    _instance = reactive(load()) as ViewerPreferences
-    watch(
-      () => ({ ..._instance }),
-      (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val)) },
-      { deep: true },
-    )
-  }
-  return _instance
+/** 为 Screen 树 Region 节点创建 viewer 偏好（reactive + 持久化） */
+export function createViewerPreferences(): ViewerPreferences {
+  const prefs = reactive(load()) as ViewerPreferences
+  watch(
+    prefs,
+    (val) => {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(val)) } catch { /* */ }
+    },
+    { deep: true },
+  )
+  return prefs
 }
+

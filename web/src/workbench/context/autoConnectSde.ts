@@ -10,13 +10,12 @@ export async function autoConnectSde(ctx: Context): Promise<void> {
     try { await ctx.getOperators().exec('OPERATOR_SDE_CONNECT') } catch { /* ignore */ }
     if (ctx.getConnection().connected) {
       try {
-        const data = await (await import('@/workbench/sdeApi')).sdeGetWorkspaceDocument(ctx.getConnection().apiBase, ctx.getConnection().token)
+        const data = await (await import('@/workbench/sdeApi')).sdeGetWorkspaceDocument(
+          ctx.getConnection().apiBase,
+          ctx.getConnection().token,
+        )
         if (data) {
-          const result = await ctx.main.registries.parsers.detectAndParse(data)
-          if (result.document) {
-            ctx.main.replaceDoc(result.document)
-            await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'sde' })
-          }
+          await ctx.getOperators().exec('OPERATOR_SDE_LOAD_WORKSPACE', { data })
         }
       } catch { /* ignore */ }
     }

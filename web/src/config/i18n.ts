@@ -7,8 +7,16 @@ export type Lang = 'zh' | 'en'
 
 const LS_KEY = 'wsr-wb-lang'
 
-/** 全局当前语言，各组件可直接读取 */
+/** 默认 ref；Workbench 启动后由 bindI18nLang(wm.settings.lang) 接管 */
 export const currentLang: Ref<Lang> = ref(loadLang())
+
+let activeLang: Ref<Lang> = currentLang
+
+/** 绑定 WM shell 语言为 t() 唯一读源 */
+export function bindI18nLang(lang: Ref<Lang>): void {
+  activeLang = lang
+  currentLang.value = lang.value
+}
 
 function loadLang(): Lang {
   try { const v = localStorage.getItem(LS_KEY); if (v === 'zh' || v === 'en') return v } catch { /* */ }
@@ -17,7 +25,8 @@ function loadLang(): Lang {
 
 /** Set runtime language. NOTE: also persists to localStorage. */
 export function setLang(v: Lang): void {
-  currentLang.value = v
+  activeLang.value = v
+  if (activeLang !== currentLang) currentLang.value = v
   try { localStorage.setItem(LS_KEY, v) } catch { /* */ }
 }
 
@@ -94,5 +103,5 @@ const dict: Record<string, Record<Lang, string>> = {
 export function t(key: string): string {
   const entry = dict[key]
   if (!entry) return key
-  return entry[currentLang.value] ?? key
+  return entry[activeLang.value] ?? key
 }

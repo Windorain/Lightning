@@ -7,9 +7,11 @@
  * |----|--------|----------------|
  * | shell | `wm.settings` | `getShellSettings()` — 主题、语言 |
  * | chrome | `wm.chrome` | `ctx.wm.chrome` — 瞬时菜单等 |
- * | tool | `workbench.tool` / `embed.tool` | `getToolSettings()` |
- * | session | `workbench.session` / `embed.session` | `getSession()` |
- * | wiki | `workbench.wiki` / `embed.wiki` | `getWikiConfig()` |
+ * | tool | `REGION.WORKBENCH_TOOLSHELF` / `REGION.EMBED` → `state.tool` | `getToolSettings()` 或 `requireRegion` |
+ * | session | `ScreenRoot.session` | `getSession()` |
+ * | wiki | `REGION.WORKBENCH_PROPS` → `state.wiki` | `requireRegion` / `OPERATOR_SET_WIKI_CONFIG` |
+ * | viewer | 视口 Region → `state.viewer` | `requireRegion(REGION.*_VIEWPORT\|EMBED)` |
+ * | keymap | Region `keymapId` | `resolveRegionBaseKeymap`（`keymapHandler`） |
  *
  * ## 访问形态
  *
@@ -53,7 +55,15 @@ export interface WorkbenchSession {
   hoveredBlock: Ref<BlockRef | null>
 }
 
-/** Embed 查看器会话 */
+/** Region 节点状态袋（挂载时由 ScreenRoot 工厂写入） */
+export interface RegionState {
+  tool?: ToolSettings
+  wiki?: Record<string, unknown>
+  viewer?: import('@/preview/preferences').ViewerPreferences
+  [key: string]: unknown
+}
+
+/** Embed 查看器会话（Screen 根 session） */
 export interface EmbedSession {
   layerWorldY: Ref<number>
   initialCamera?: import('@/preview/previewConfig').InitialCamera

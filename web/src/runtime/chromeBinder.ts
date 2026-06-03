@@ -2,7 +2,9 @@ import type { Context } from '@/runtime/context'
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { isEditingTarget } from '@/util/browser'
 
-const CHROME_REGION = 'r-chrome'
+import { REGION } from '@/runtime/regionIds'
+
+const CHROME_REGION = REGION.CHROME
 
 /**
  * 工作台壳层 DOM → wm.events（document keydown + 鼠标位置跟踪）。

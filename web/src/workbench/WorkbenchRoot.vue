@@ -28,6 +28,7 @@ import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 import { usePanelQueries } from '@/workbench/context/usePanelQueries'
+import { REGION } from '@/runtime/regionIds'
 
 const selection = createSelectionContext()
 const editHistory = provideEditHistory(256)
@@ -44,7 +45,7 @@ provide(hostKey, host)
 const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = usePanelQueries(ctx, defaultScreen)
 
 // Wiki embed settings
-const wikiConfig = ctx.getWikiConfig() as Record<string, any>
+const wikiConfig = ctx.requireRegion(REGION.WORKBENCH_PROPS).state.wiki as Record<string, any>
 function parseHex6(s: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(s.trim())
   if (!m) return 0x5a5a5a
@@ -114,7 +115,7 @@ onBeforeUnmount(() => {
 
 
 // VM 句柄：测试层通过 window.__vm__ 访问公开观测面
-;(window as any).__vm__ = host
+;(window as any).__vm__ = ctx
 ;(window as any).__vm_ready__ = true
 
 

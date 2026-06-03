@@ -4,8 +4,6 @@ import type { OperatorRegistry } from '@/operators/operatorRegistry'
 import { logCenter, installUnifiedLogApi } from '@/logging/LogCenter'
 import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA, materialRNA } from '@/workbench/ux/rna'
 import { computeLayout, boundsOfByOperator, boundsOfByRNAPath } from '@/workbench/ux/layout'
-import { SpaceType, RegionType } from '@/workbench/ux/types/screen'
-import type { bScreen } from '@/workbench/ux/types/screen'
 import {
   blockInspectorPanel, toolShelfPanel,
   transformPanel, sceneInfoPanel,
@@ -22,7 +20,7 @@ import { SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SD
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/operators/builtin/exportOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/operators/builtin/annotationOperators'
 import {
-  SetFrameIndexOperator, ToggleFramePlaybackOperator, SetHoveredBlockOperator, ThemeToggleOperator, SetLanguageOperator, UndoOperator, RedoOperator,
+  SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetHoveredBlockOperator, ThemeToggleOperator, SetLanguageOperator, SetToolSettingOperator, SetRegionSettingOperator, UndoOperator, RedoOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator, SetWikiConfigOperator, ApplySettingsOperator, SetLayerYOperator,
 } from '@/operators/builtin/miscOperators'
 import { ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/operators/builtin/materialOperators'
@@ -39,12 +37,14 @@ import { Main } from '@/runtime/main'
 import { WM } from '@/runtime/wm'
 import { Context } from '@/runtime/context'
 import { createViewportManager } from '@/runtime/viewportManager'
-import { createWorkbenchState, type WorkbenchState } from '@/runtime/state'
+import type { WorkbenchServices } from '@/runtime/state'
+import { createWorkbenchScreenRoot, type ScreenRoot } from '@/runtime/screenRoot'
 import type { ToolSettings } from '@/runtime/contextAccess'
 import type { SelectionContext } from '@/context/selection'
 import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import { HostBase } from '@/runtime/host'
+import { REGION } from '@/runtime/regionIds'
 import { autoConnectSde } from '@/workbench/context/autoConnectSde'
 import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 
@@ -54,7 +54,7 @@ const ALL_OPERATORS: OperatorType[] = [
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator,
   TooltipEditOperator,
   NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator,
-  SetFrameIndexOperator, ToggleFramePlaybackOperator, SetHoveredBlockOperator, SetLayerYOperator, ApplySettingsOperator, SetWikiConfigOperator,
+  SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetToolSettingOperator, SetRegionSettingOperator, SetHoveredBlockOperator, SetLayerYOperator, ApplySettingsOperator, SetWikiConfigOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator,
   SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator,
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
@@ -75,8 +75,8 @@ export interface WorkbenchHostDeps {
 export interface WorkbenchHostResult {
   host: WorkbenchHost
   ctx: Context
-  screen: bScreen
-  state: WorkbenchState
+  screen: ScreenRoot
+  services: WorkbenchServices
 }
 
 export class WorkbenchHost extends HostBase {
@@ -89,8 +89,8 @@ export class WorkbenchHost extends HostBase {
     main: Main,
     ctx: Context,
     wm: WM,
-    readonly screen: bScreen,
-    readonly state: WorkbenchState,
+    readonly screen: ScreenRoot,
+    readonly services: WorkbenchServices,
   ) {
     super()
     this.main = main
@@ -116,6 +116,15 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   const viewports = createViewportManager()
   const wm = new WM(logCenter)
 
+  const screen = createWorkbenchScreenRoot(tool, {
+    toolShelf: [toolShelfPanel],
+    header: [menuBarPanel],
+    properties: [
+      blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel,
+      annotationPanel, wikiConfigPanel, tooltipEditorPanel,
+    ],
+  })
+
   const main = new Main({
     operators: registry,
     operatorsFacade: wrapOperatorRegistry(registry, () => ctx),
@@ -138,68 +147,28 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   rna.register(materialRNA)
   main.registries.rna = rna
 
-  const defaultScreen: bScreen = {
-    id: 'workbench',
-    areas: [
-      {
-        id: 'viewport-area',
-        spaceType: SpaceType.VIEW_3D,
-        splitDir: 'none',
-        parentArea: null,
-        regions: [
-          { id: 'r-header', type: RegionType.HEADER, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
-          { id: 'r-toolshelf', type: RegionType.TOOLSHELF, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
-          { id: 'r-viewport', type: RegionType.MAIN, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
-        ],
-      },
-      {
-        id: 'properties-area',
-        spaceType: SpaceType.PROPERTIES,
-        splitDir: 'none',
-        parentArea: null,
-        regions: [
-          { id: 'r-props-main', type: RegionType.MAIN, panels: [], visible: true, collapsed: false, bounds: { x: 0, y: 0, width: 0, height: 0 }, handlers: [] },
-        ],
-      },
-    ],
-    popupRegions: [],
-    bounds: { width: 1400, height: 800 },
-  }
-
-  const viewportArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.VIEW_3D)!
-  viewportArea.regions.find(r => r.type === RegionType.TOOLSHELF)!.panels.push(toolShelfPanel)
-  viewportArea.regions.find(r => r.type === RegionType.HEADER)!.panels.push(menuBarPanel)
-  const propertiesArea = defaultScreen.areas.find(a => a.spaceType === SpaceType.PROPERTIES)!
-  propertiesArea.regions.find(r => r.type === RegionType.MAIN)!.panels.push(
-    blockInspectorPanel, transformPanel, sceneInfoPanel, blockStatsPanel, annotationPanel, wikiConfigPanel, tooltipEditorPanel,
-  )
-
-  const state = createWorkbenchState({
+  const services: WorkbenchServices = {
     selection,
     editHistory,
     toolRegistry,
-    tool,
-    screen: defaultScreen,
     rna,
     ui: {
       boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
       boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),
     },
-  })
+  }
 
   let ctx!: Context
-  ctx = new Context(main, wm, logCenter, viewports, state, null)
+  ctx = new Context(main, wm, logCenter, viewports, screen, services)
   main.registries.operatorsFacade = wrapOperatorRegistry(registry, () => ctx)
 
-  const host = new WorkbenchHost(main, ctx, wm, defaultScreen, state)
-  computeLayout(ctx, defaultScreen)
+  const host = new WorkbenchHost(main, ctx, wm, screen, services)
+  computeLayout(ctx, screen)
 
-  for (const area of defaultScreen.areas) {
-    for (const region of area.regions) {
-      wm.events.registerRegion(region.id)
-    }
+  for (const inputId of screen.wmInputRegionIds()) {
+    wm.events.registerRegion(inputId)
   }
-  wm.events.registerRegion('r-chrome')
+  wm.events.registerRegion(REGION.CHROME)
 
   registerAllOperators(registry)
 
@@ -220,7 +189,7 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   selection.bindLog(ctx.log)
   editHistory.bindLog(ctx.log)
 
-  return { host, ctx, screen: defaultScreen, state }
+  return { host, ctx, screen, services }
 }
 
 export function registerAllOperators(registry: OperatorRegistry): void {
@@ -228,4 +197,3 @@ export function registerAllOperators(registry: OperatorRegistry): void {
     if (!registry.find(op.id)) registry.register(op)
   }
 }
-

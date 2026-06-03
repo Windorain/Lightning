@@ -6,10 +6,9 @@ import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { Rect, RNARegistry } from '@/shared/types'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
-import type { bScreen } from '@/workbench/ux/types/screen'
 import type { Main } from '@/runtime/main'
 import type { WM } from '@/runtime/wm'
-import type { EmbedState, WorkbenchState } from '@/runtime/state'
+import type { WorkbenchServices } from '@/runtime/state'
 import type { ViewportManager } from '@/runtime/viewportManager'
 import type {
   ConnectionState,
@@ -24,6 +23,8 @@ import type {
   WorkbenchSession,
 } from '@/runtime/contextAccess'
 import type { createLogCenter } from '@/logging/LogCenter'
+import type { ScreenRoot, RegionNode } from '@/runtime/screenRoot'
+import { REGION } from '@/runtime/regionIds'
 
 function embedUnavailable(name: string): never {
   throw new Error(`embed: ${name} not available`)
@@ -39,12 +40,46 @@ export class Context {
     readonly wm: WM,
     readonly log: ReturnType<typeof createLogCenter>,
     readonly viewports: ViewportManager,
-    readonly workbench: WorkbenchState | null,
-    readonly embed: EmbedState | null,
+    readonly screen: ScreenRoot | null,
+    readonly workbench: WorkbenchServices | null,
   ) {}
 
   isEmbed(): boolean {
     return this.workbench === null
+  }
+
+  // --- WM 输入域（活跃区域通道）---
+  getActiveInputRegion(): string | null {
+    return this.wm.events.getActiveRegion()
+  }
+
+  getCurrentInputRegion(): string | null {
+    return this.wm.events.getCurrentRegionId()
+  }
+
+  resolveInputRegionId(props?: Record<string, unknown>): string | null {
+    const fromProps = props?._regionId as string | undefined
+    if (fromProps) return fromProps
+    return this.getCurrentInputRegion() ?? this.getActiveInputRegion()
+  }
+
+  // --- Screen 树（UI 状态渠道）---
+  getScreenRoot(): ScreenRoot | null {
+    return this.screen
+  }
+
+  region(regionId: string): RegionNode | undefined {
+    return this.screen?.region(regionId)
+  }
+
+  requireRegion(regionId: string): RegionNode {
+    const r = this.region(regionId)
+    if (!r) throw new Error(`region not found: ${regionId}`)
+    return r
+  }
+
+  regionByInputId(wmInputId: string): RegionNode | undefined {
+    return this.screen?.regionByInputId(wmInputId)
   }
 
   // --- Main ---
@@ -62,44 +97,52 @@ export class Context {
     return this.main.registries.operatorsFacade
   }
 
-  // --- Setting 簇（Context 渠道）---
   getShellSettings(): ShellSettings {
     return this.wm.settings
   }
 
-  getToolSettings(): ToolSettings {
-    return this.workbench?.tool ?? this.embed!.tool
+  getSession(): WorkbenchSession | EmbedSession {
+    if (!this.screen) throw new Error('screen not available')
+    return this.screen.session
   }
 
-  getSession(): WorkbenchSession | EmbedSession {
-    return this.workbench?.session ?? this.embed!.session
+  getToolSettings(): ToolSettings {
+    const rid = this.isEmbed() ? REGION.EMBED : REGION.WORKBENCH_TOOLSHELF
+    const tool = this.requireRegion(rid).state.tool
+    if (!tool) throw new Error(`tool settings missing on region ${rid}`)
+    return tool
   }
 
   getWikiConfig(): Record<string, unknown> {
-    return this.workbench?.wiki ?? this.embed!.wiki
+    if (this.isEmbed()) return {}
+    const wiki = this.requireRegion(REGION.WORKBENCH_PROPS).state.wiki
+    return wiki ?? {}
   }
 
-  // --- Workbench session 便捷投影 ---
   getWorkspaceMode(): Ref<WorkbenchWorkspaceMode> {
-    return this.workbench?.session.workspaceMode ?? workbenchUnavailable('workspaceMode')
+    if (this.isEmbed()) workbenchUnavailable('workspaceMode')
+    return (this.getSession() as WorkbenchSession).workspaceMode
   }
   getUiWorkspace(): Ref<UIWorkspace> {
-    return this.workbench?.session.uiWorkspace ?? workbenchUnavailable('uiWorkspace')
+    if (this.isEmbed()) workbenchUnavailable('uiWorkspace')
+    return (this.getSession() as WorkbenchSession).uiWorkspace
   }
   getLocalFileName(): Ref<string | null> {
-    return this.workbench?.session.localFileName ?? workbenchUnavailable('localFileName')
+    if (this.isEmbed()) workbenchUnavailable('localFileName')
+    return (this.getSession() as WorkbenchSession).localFileName
   }
   getConnection(): ConnectionState {
-    return this.workbench?.session.connection ?? workbenchUnavailable('connection')
+    if (this.isEmbed()) workbenchUnavailable('connection')
+    return (this.getSession() as WorkbenchSession).connection
   }
   getLayerWorldY(): Ref<number> {
     return this.getSession().layerWorldY
   }
   getHoveredBlock(): Ref<import('@/context/selection').BlockRef | null> {
-    return this.workbench?.session.hoveredBlock ?? workbenchUnavailable('hoveredBlock')
+    if (this.isEmbed()) workbenchUnavailable('hoveredBlock')
+    return (this.getSession() as WorkbenchSession).hoveredBlock
   }
 
-  // --- Workbench 服务 ---
   getSelection(): SelectionContext {
     return this.workbench?.selection ?? embedUnavailable('selection')
   }
@@ -108,9 +151,6 @@ export class Context {
   }
   getToolRegistry(): ToolRegistry {
     return this.workbench?.toolRegistry ?? embedUnavailable('toolRegistry')
-  }
-  getScreen(): bScreen | null {
-    return this.workbench?.screen ?? null
   }
   getRna(): RNARegistry {
     return this.workbench?.rna ?? embedUnavailable('rna')
@@ -132,7 +172,7 @@ export function resolveViewportSlot(
   ctx: Context,
   props: Record<string, unknown> | undefined,
 ): ViewportSlot {
-  const rid = props?._regionId as string | undefined
+  const rid = ctx.resolveInputRegionId(props) ?? undefined
   if (rid) {
     const slot = ctx.viewports.get(rid)
     if (slot) return slot

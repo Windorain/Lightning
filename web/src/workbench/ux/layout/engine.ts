@@ -1,5 +1,6 @@
 import type { Context } from '@/runtime/context'
-import type { bScreen, ScrArea, Rect } from '../types/screen'
+import type { ScreenRoot } from '@/runtime/screenRoot'
+import type { ScrArea, Rect } from '../types/screen'
 import { RegionType } from '../types/screen'
 import { computeWidgetRects, type WidgetRect } from './widgetTree'
 import { rectContains, regionAt as _regionAt } from '@/pure/layout'
@@ -17,11 +18,10 @@ export function clearWidgetCache(): void {
   widgetCache.clear()
 }
 
-export function computeLayout(ctx: Context, screen: bScreen): void {
-  if (ctx.workbench) ctx.workbench.screen = screen
+export function computeLayout(ctx: Context, screen: ScreenRoot): void {
   clearWidgetCache()
 
-  layoutAreas(screen.areas, screen.bounds)
+  layoutAreas(screen.areas as ScrArea[], screen.bounds)
 
   // Popup regions — stack from top
   for (const popup of screen.popupRegions) {
@@ -108,7 +108,7 @@ export function boundsOf(ctx: Context, id: string): Rect | null {
   if (cached) return { ...cached.bounds }
 
   // Fallback: search region panels
-  for (const area of ctx.getScreen()?.areas ?? []) {
+  for (const area of ctx.getScreenRoot()?.areas ?? []) {
     for (const region of area.regions) {
       for (const panel of region.panels) {
         if (panel.id === id) {
@@ -147,7 +147,7 @@ export function widgetAt(x: number, y: number): WidgetRect | null {
 }
 
 export function relayout(ctx: Context): void {
-  const screen = ctx.getScreen()
+  const screen = ctx.getScreenRoot()
   if (screen) computeLayout(ctx, screen)
 }
 

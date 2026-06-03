@@ -4,9 +4,11 @@
  * 通过 named slots 让父组件控制各区域的内容与 props。
  */
 import { useSlots } from 'vue'
+import { useContext } from '@/runtime/context'
 import { usePanelResize } from './panelResize'
 
-const { rightWidth, startRightDrag, dragging } = usePanelResize()
+const ctx = useContext()
+const { rightWidth, startRightDrag, dragging } = usePanelResize(ctx)
 const slots = useSlots()
 const hasProperties = () => !!slots.properties
 </script>
