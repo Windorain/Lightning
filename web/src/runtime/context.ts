@@ -101,12 +101,12 @@ export class Context {
     return this.main.currentFrameIndex
   }
 
-  /** 按 region 取视口相机；缺省为当前 WM 输入域对应 slot */
+  /** 按 region 取 Main 逻辑相机 */
   getViewportCamera(regionId?: string): Ref<import('@/runtime/viewportCamera').ViewportCameraState | null> {
     const rid = regionId ?? this.resolveInputRegionId() ?? this.viewports.activeId.value
     const slot = rid ? this.viewports.get(rid) : this.viewports.active.value
     if (!slot) throw new Error('getViewportCamera: no viewport slot')
-    return slot.viewportCamera
+    return this.main.cameras[slot.cameraMainKey]
   }
 
   getOperators(): Main['registries']['operatorsFacade'] {
@@ -140,6 +140,11 @@ export class Context {
   getLocalFileName(): Ref<string | null> {
     if (this.isEmbed()) workbenchUnavailable('localFileName')
     return (this.getSession() as WorkbenchSession).localFileName
+  }
+
+  getDocumentBinding() {
+    if (this.isEmbed()) workbenchUnavailable('documentBinding')
+    return (this.getSession() as WorkbenchSession).documentBinding
   }
   getConnection(): ConnectionState {
     if (this.isEmbed()) workbenchUnavailable('connection')

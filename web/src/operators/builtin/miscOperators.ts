@@ -3,6 +3,8 @@ import type { WorkbenchWorkspaceMode } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
 import { REGION } from '@/runtime/regionIds'
 import { setRegionHoverAnnotation, setRegionHoverBlock } from '@/runtime/hover'
+import { CAMERA_KEY, mergeSparseInitialCamera } from '@/runtime/mainCameras'
+import type { InitialCamera } from '@/viewer/viewerConfig'
 
 function setNested(obj: Record<string, unknown>, path: string, value: unknown): void {
   const parts = path.split('.')
@@ -160,12 +162,15 @@ export const SetWorkspaceModeOperator: OperatorType = {
     return true
   },
 
-  exec(ctx, _props) {
-    const mode = _props.mode as WorkbenchWorkspaceMode
+  exec(ctx, props) {
+    const mode = props.mode as WorkbenchWorkspaceMode
     if (ctx.getWorkspaceMode().value === mode) return
-    ctx.main.replaceDoc(null)
-    ctx.main.currentFrameIndex.value = 0
-    ctx.getLocalFileName().value = null
+    // 仅设置抽屉手动切换时清空场景；加载管线在写入文档后切模式，不可清 doc
+    if (props.resetDocument === true) {
+      ctx.main.replaceDoc(null)
+      ctx.main.currentFrameIndex.value = 0
+      ctx.getLocalFileName().value = null
+    }
     ctx.getWorkspaceMode().value = mode
   },
 }
@@ -204,6 +209,12 @@ export const SetHoveredAnnotationOperator: OperatorType = {
   },
 }
 
+const INITIAL_CAMERA_PATH: Record<string, keyof InitialCamera> = {
+  cameraYaw: 'yawDeg',
+  cameraElevation: 'elevationDeg',
+  cameraZoom: 'zoom',
+}
+
 export const SetWikiConfigOperator: OperatorType = {
   id: 'OPERATOR_SET_WIKI_CONFIG',
   label: '设置 Wiki 配置',
@@ -211,9 +222,21 @@ export const SetWikiConfigOperator: OperatorType = {
   exec(ctx, props) {
     const path = props.path as string
     if (!path) return
-    const wiki = ctx.requireRegion(REGION.WORKBENCH_PROPS).state.wiki
-    if (!wiki) return
-    setNested(wiki as Record<string, unknown>, path, props.value)
+    const icKey = INITIAL_CAMERA_PATH[path]
+    if (icKey != null) {
+      mergeSparseInitialCamera(ctx.main.initialCameras[CAMERA_KEY.embed], {
+        [icKey]: props.value as number,
+      })
+      return
+    }
+    const pub = ctx.main.embedPublish.value
+    if (path.startsWith('features.')) {
+      setNested(pub as unknown as Record<string, unknown>, path, props.value)
+      return
+    }
+    if (path === 'viewWidth' || path === 'viewHeight' || path === 'sceneBackgroundHex') {
+      setNested(pub as unknown as Record<string, unknown>, path, props.value)
+    }
   },
 }
 

@@ -49,6 +49,7 @@ export const DEFAULT_KEYMAP: InputBinding[] = [
   { type: 'KEY', key: 'p', toolId: 'annotation-point', description: '标记点工具' },
   { type: 'KEY', key: 't', action: 'toggle-toolshelf', description: '工具栏显示' },
   { type: 'KEY', key: 'n', action: 'toggle-properties', description: '属性面板显示' },
+  { type: 'KEY', key: 's', ctrl: true, opId: 'OPERATOR_WIKI_SAVE_CONFIRM', description: '保存到 Wiki' },
 
   // ---- MOUSE bindings ----
   { type: 'MOUSE', button: 0, opId: 'OPERATOR_SELECT', description: '选择方块' },

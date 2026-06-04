@@ -11,10 +11,14 @@ const ctx = useContext()
 const { rightWidth, startRightDrag, dragging } = usePanelResize(ctx)
 const slots = useSlots()
 const hasProperties = () => !!slots.properties
+const wikiEmbed = import.meta.env.VITE_HOST_PROFILE === 'wiki'
 </script>
 
 <template>
-  <div class="wb-shell" :class="{ 'wb-shell--dragging': dragging }">
+  <div
+    class="wb-shell"
+    :class="{ 'wb-shell--dragging': dragging, 'wb-shell--wiki-embed': wikiEmbed }"
+  >
     <header class="wb-menubar">
       <slot name="menubar" />
     </header>
@@ -61,6 +65,13 @@ const hasProperties = () => !!slots.properties
   font-size: 13px;
 }
 .wb-shell--dragging * { cursor: col-resize !important; }
+
+/* 灰机词条内嵌：填满 wsw-inline__app，不用 100vh 盖住 Wiki 顶栏 */
+.wb-shell--wiki-embed {
+  height: 100%;
+  min-height: 480px;
+  max-height: none;
+}
 
 .wb-menubar {
   flex-shrink: 0;

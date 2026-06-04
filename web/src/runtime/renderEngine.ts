@@ -1,16 +1,8 @@
 import * as THREE from 'three'
 import { View3DRenderer } from '@/render/viewport/renderViewport'
-import {
-  applyDiagonalOrbitView,
-  applyInitialCamera,
-  fitCameraToGroup,
-  ORTHO_FRUSTUM_REF_HALF_FOV_DEG,
-  STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
-} from '@/render/interaction/initialCamera'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { StructureDefinition } from '@/render/schema/types'
-import type { InitialCamera } from '@/viewer/viewerConfig'
 import type { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 
 export interface RenderEngineReadyPayload {
@@ -30,11 +22,6 @@ export interface RenderEngineOptions {
   layerPreviewMode: LayerPreviewMode
   sceneBackground?: number
   showAxesGizmo?: boolean
-  initialCamera?: InitialCamera
-}
-
-function clampOrthoZoom(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1
 }
 
 /**
@@ -76,28 +63,6 @@ export class RenderEngine {
 
     const vp = new View3DRenderer(container, container.clientWidth, container.clientHeight)
     vp.showAxesGizmo = opts.showAxesGizmo ?? true
-
-    const def = opts.definition
-    const fallbackTarget = new THREE.Vector3(0, 2, 0)
-    const fallbackPosition = new THREE.Vector3(8, 6, 10)
-    const o = vp.camera
-    const hasDefinedInitialCamera = !!def.initialCamera
-    applyInitialCamera(o, vp.orbitTarget, def, fallbackTarget, fallbackPosition)
-    if (!hasDefinedInitialCamera) {
-      applyDiagonalOrbitView(o, vp.orbitTarget, {
-        yawDeg: 225,
-        elevationFromHorizontalDeg: STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
-      })
-    }
-    const d0 = Math.max(0.1, o.position.distanceTo(vp.orbitTarget))
-    const orthoHeight0 = 2 * d0 * Math.tan(THREE.MathUtils.degToRad(ORTHO_FRUSTUM_REF_HALF_FOV_DEG))
-    const aspect0 = container.clientWidth / Math.max(container.clientHeight, 1)
-    const halfH0 = orthoHeight0 / 2
-    o.top = halfH0
-    o.bottom = -halfH0
-    o.left = -halfH0 * aspect0
-    o.right = halfH0 * aspect0
-    o.updateProjectionMatrix()
 
     let lastSafeW = 0
     let lastSafeH = 0
@@ -176,44 +141,10 @@ export class RenderEngine {
     if (partial.showAxesGizmo != null) {
       this.renderer.showAxesGizmo = partial.showAxesGizmo
     }
-    if (partial.initialCamera?.zoom != null) {
-      this.renderer.camera.zoom = clampOrthoZoom(partial.initialCamera.zoom)
-      this.renderer.camera.updateProjectionMatrix()
-    }
-    // contentGroup 变更不自动改相机；由各视口 slot.viewportCamera + DRW 同步
-    if (partial.initialCamera?.yawDeg != null && this.opts.contentGroup) {
-      const cam = this.opts.initialCamera
-      applyDiagonalOrbitView(this.renderer.camera, this.renderer.orbitTarget, {
-        yawDeg: partial.initialCamera.yawDeg,
-        elevationFromHorizontalDeg: cam?.elevationDeg ?? 35,
-      })
-    }
-    if (partial.initialCamera?.elevationDeg != null && this.opts.contentGroup) {
-      const cam = this.opts.initialCamera
-      applyDiagonalOrbitView(this.renderer.camera, this.renderer.orbitTarget, {
-        yawDeg: cam?.yawDeg ?? 225,
-        elevationFromHorizontalDeg: partial.initialCamera.elevationDeg,
-      })
-    }
   }
 
   resetView(): void {
-    const vp = this.renderer
-    const g = this.opts?.contentGroup
-    if (!vp || !g) return
-    const cam = this.opts?.initialCamera
-    fitCameraToGroup(
-      vp.camera,
-      g,
-      vp.orbitTarget,
-      vp.domElement,
-      {
-        yawDeg: cam?.yawDeg,
-        elevationDeg: cam?.elevationDeg,
-        distance: cam?.distance,
-        zoom: cam?.zoom,
-      },
-    )
+    // 由 OPERATOR_VIEW_RESET 写 Main.cameras；DRW 同步 THREE
   }
 
   screenshot(): void {

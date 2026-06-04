@@ -1,8 +1,10 @@
 import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '@/runtime/screenTypes'
-import type { UILayout } from '../types/layout'
+import type { UILayout, UIOperator, UILabel, UISeparator } from '../types/layout'
 import { t } from '@/config/i18n'
+import { isWikiHostProfile } from '@/runtime/hostProfile'
+import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
 
 export const menuBarPanel: PanelDeclaration = {
   id: 'menu-bar',
@@ -15,6 +17,27 @@ export const menuBarPanel: PanelDeclaration = {
   layout(ctx: Context): UILayout {
     const lang = ctx.getShellSettings().lang.value
     const conn = ctx.getConnection().connected
+    const wikiHost = isWikiHostProfile()
+    const wikiUi = ctx.wm.chrome.wikiUi
+    const wikiFileOps = wikiHost && (wikiUi?.mwReady.value ?? isWikiApiAvailable())
+
+    const fileItems: (UIOperator | UILabel | UISeparator)[] = [
+      { kind: 'operator', id: 'OPERATOR_NEW_SCENE', label: t('newFile') },
+      { kind: 'operator', id: 'OPERATOR_OPEN_SCENE', label: t('openScene') },
+    ]
+    if (wikiFileOps) {
+      fileItems.push(
+        { kind: 'separator' },
+        { kind: 'operator', id: 'OPERATOR_WIKI_PICK_AND_LOAD', label: t('loadFromWiki') },
+        { kind: 'operator', id: 'OPERATOR_WIKI_SAVE_CONFIRM', label: t('saveToWiki') },
+        { kind: 'operator', id: 'OPERATOR_WIKI_SAVE_AS', label: t('wikiSaveAs') },
+      )
+    } else if (!wikiHost) {
+      fileItems.push(
+        { kind: 'separator' },
+        { kind: 'operator', id: 'OPERATOR_SAVE_FILE', label: t('saveToFile') },
+      )
+    }
 
     return {
       kind: 'row',
@@ -24,12 +47,7 @@ export const menuBarPanel: PanelDeclaration = {
         {
           kind: 'menu',
           label: t('file'),
-          items: [
-            { kind: 'operator', id: 'OPERATOR_NEW_SCENE', label: t('newFile') },
-            { kind: 'operator', id: 'OPERATOR_OPEN_SCENE', label: t('openScene') },
-            { kind: 'separator' },
-            { kind: 'operator', id: 'OPERATOR_SAVE_FILE', label: t('saveToFile') },
-          ],
+          items: fileItems,
         },
         // Edit menu
         {
@@ -68,11 +86,15 @@ export const menuBarPanel: PanelDeclaration = {
           label: '☀',
           title: lang === 'zh' ? '切换主题' : 'Toggle Theme',
         },
-        // Connection status
-        {
-          kind: 'label',
-          text: conn ? t('connected') : t('offline'),
-        },
+        // 连接状态（Wiki 状态见 MenubarWikiStatus 组件）
+        ...(wikiHost
+          ? []
+          : [
+              {
+                kind: 'label' as const,
+                text: conn ? t('connected') : t('offline'),
+              },
+            ]),
       ],
     }
   },

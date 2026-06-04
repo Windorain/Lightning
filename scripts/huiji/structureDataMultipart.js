@@ -6,6 +6,10 @@
 (function (global) {
   /** 单页 edit 安全上限（字节），低于 Wiki 2048 KiB */
   var PAGE_LIMIT_BYTES = 1900 * 1024
+  /** 浏览器侧允许选择的整文件上限 */
+  var MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024
+  /** 分片正文页数量上限（不含索引页） */
+  var MAX_PART_COUNT = 6
   var MULTIPART = 'Envelope/multipart'
   var PART = 'Envelope/part'
 
@@ -171,6 +175,16 @@
    * @param {string} base
    * @param {object} doc parsed JSON
    */
+  function assertPartCountWithinLimit(partCount) {
+    if (partCount > MAX_PART_COUNT) {
+      throw new Error(
+        '结构数据过大：最多分成 ' +
+          MAX_PART_COUNT +
+          ' 个分片页。请缩小游戏内选区，或用工作台重新导出 Envelope 后再试。'
+      )
+    }
+  }
+
   function planUpload(base, doc) {
     var b = normalizeBase(base)
     if (!b) {
@@ -182,12 +196,16 @@
     if (isMultipartIndex(doc)) {
       throw new Error('请勿上传分片索引页；请上传完整导出的 JSON 文件')
     }
+    var plan
     if (isEnvelopeDoc(doc)) {
       var singleBytes = jsonPageBytes(doc)
       if (singleBytes <= PAGE_LIMIT_BYTES) {
-        return buildSinglePlan(b, doc)
+        plan = buildSinglePlan(b, doc)
+      } else {
+        plan = buildMultipartPlan(b, doc)
+        assertPartCountWithinLimit(plan.partCount)
       }
-      return buildMultipartPlan(b, doc)
+      return plan
     }
     var plainBytes = jsonPageBytes(doc)
     if (plainBytes <= PAGE_LIMIT_BYTES) {
@@ -284,6 +302,8 @@
 
   global.WSRStructureData = {
     PAGE_LIMIT_BYTES: PAGE_LIMIT_BYTES,
+    MAX_UPLOAD_FILE_BYTES: MAX_UPLOAD_FILE_BYTES,
+    MAX_PART_COUNT: MAX_PART_COUNT,
     MULTIPART: MULTIPART,
     PART: PART,
     normalizeBase: normalizeBase,

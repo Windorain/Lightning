@@ -5,6 +5,8 @@
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { RenderBundle } from '@/render/schema/types'
+import type { Main } from '@/runtime/main'
+import { CAMERA_KEY } from '@/runtime/mainCameras'
 
 export interface InitialCamera {
   yawDeg?: number
@@ -125,22 +127,19 @@ function parseWikiSceneBackgroundHex(hex: string | undefined): number {
   return parseInt(m[1], 16)
 }
 
-/** Workbench Wiki 预览 tab → EmbedSettings */
-export function buildEmbedSettingsFromWikiConfig(wiki: Record<string, unknown>): EmbedSettings {
-  const features = (wiki.features ?? {}) as Partial<View3DFeatures>
+/** Workbench Wiki 预览 tab → EmbedSettings（真源 Main） */
+export function buildEmbedSettingsFromMain(main: Main): EmbedSettings {
+  const pub = main.embedPublish.value
+  const ic = main.initialCameras[CAMERA_KEY.embed].value
   return {
-    features: { ...defaultEmbedUi.features, ...features },
+    features: { ...defaultEmbedUi.features, ...pub.features },
     blockIconCacheOptions: defaultEmbedUi.blockIconCacheOptions,
     initialLayerWorldY: defaultEmbedUi.initialLayerWorldY,
-    initialCamera: {
-      yawDeg: wiki.cameraYaw as number | undefined,
-      elevationDeg: wiki.cameraElevation as number | undefined,
-      zoom: wiki.cameraZoom as number | undefined,
-    },
-    sceneBackground: parseWikiSceneBackgroundHex(wiki.sceneBackgroundHex as string | undefined),
+    initialCamera: { ...ic },
+    sceneBackground: parseWikiSceneBackgroundHex(pub.sceneBackgroundHex),
     loadingMessage: defaultEmbedUi.loadingMessage,
     okMessage: defaultEmbedUi.okMessage,
-    debug: features.debugStatusBar ?? false,
+    debug: pub.features.debugStatusBar ?? false,
   }
 }
 

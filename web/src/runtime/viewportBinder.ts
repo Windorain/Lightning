@@ -2,6 +2,7 @@ import type { Context } from '@/runtime/context'
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { HANDLER_TYPE } from '@/events/handlerTypes'
 import { isEditingTarget } from '@/util/browser'
+import { shouldSkipWorkbenchDocumentKeydown } from '@/wiki/wikiInputShield'
 import { isEmbedTouchScreenPointer } from '@/embed/touchPointer'
 
 export interface ViewportBinderHandlers {
@@ -85,6 +86,7 @@ export function bindViewportDom(
 
   if (options?.documentKeydown !== false) {
     const onKeydown = (e: KeyboardEvent): void => {
+      if (shouldSkipWorkbenchDocumentKeydown(e)) return
       if (isEditingTarget(e.target)) return
       ed.dispatch(e, { regionId })
     }

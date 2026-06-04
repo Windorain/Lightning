@@ -1,10 +1,14 @@
 import { createOperatorRegistry } from '@/operators/operatorRegistry'
 import { SetFrameIndexOperator, SetFramePlaybackOperator, SetLayerYOperator, ToggleFramePlaybackOperator } from '@/operators/builtin/miscOperators'
-import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator } from '@/operators/builtin/viewOperators'
+import {
+  ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator,
+  InitViewportCameraOperator,
+} from '@/operators/builtin/viewOperators'
 import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
 import { LoadEmbedDocumentOperator } from '@/operators/builtin/docLifecycleOperators'
 import { V2PlainParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/context/parsers/builtinParsers'
 import type { EmbedSettings } from '@/viewer/viewerConfig'
+import { mergeSparseInitialCamera, CAMERA_KEY } from '@/runtime/mainCameras'
 import { Main } from '@/runtime/main'
 import { WM } from '@/runtime/wm'
 import { Context } from '@/runtime/context'
@@ -36,7 +40,6 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
   const wm = new WM(logCenter, { surface: 'embed' })
 
   const screen = createEmbedScreenRoot(createToolSettings(), {
-    initialCamera: settings.initialCamera,
     initialLayerWorldY: settings.initialLayerWorldY,
   })
 
@@ -52,6 +55,10 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
   parsers.register(WorldParser)
   parsers.register(StructureDataParser)
 
+  if (settings.initialCamera) {
+    mergeSparseInitialCamera(main.initialCameras[CAMERA_KEY.embed], settings.initialCamera)
+  }
+
   const ctx = new Context(main, wm, logCenter, viewports, screen, null)
   main.bindOperatorFacade(() => ctx, true)
 
@@ -61,6 +68,7 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
 
   for (const op of [
     ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator,
+    InitViewportCameraOperator,
     CopyCameraFromEmbedOperator, LoadEmbedDocumentOperator,
     SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetLayerYOperator,
   ]) {

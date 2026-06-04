@@ -134,6 +134,26 @@ export function applyInitialCamera(
   orbitTargetOut.copy(target)
 }
 
+/** JSON 焦点相机：解析轨道中心（无则 null） */
+export function resolveFocusOrbitTarget(
+  def: StructureDefinition | null | undefined,
+): { x: number; y: number; z: number } | null {
+  const ic = def?.initialCamera
+  if (!ic || !def) return null
+  const grid = buildVoxelVolume(def)
+  const cell = findFirstVoxelWithBlockId(grid, ic.focusBlockId)
+  if (!cell) return null
+  const { sizeColumn, sizeRow, sizeZSlice } = grid
+  return voxelCenterWorld(
+    cell.column,
+    cell.row,
+    cell.zSlice,
+    sizeColumn,
+    sizeRow,
+    sizeZSlice,
+  )
+}
+
 /**
  * 正交视锥基准半视场角（度）：用于将透视距离映射到正交 frustum 高度。
  */

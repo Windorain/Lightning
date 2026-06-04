@@ -4,6 +4,7 @@
 import type { OperatorType } from '@/operators/operatorType'
 import * as THREE from 'three'
 import { cameraToSpherical } from '@/pure/camera'
+import { resolveEmbedViewportRegionId } from '@/runtime/embedViewportRegion'
 
 export const CopyCameraFromEmbedOperator: OperatorType = {
   id: 'OPERATOR_COPY_CAMERA_FROM_EMBED',
@@ -11,12 +12,14 @@ export const CopyCameraFromEmbedOperator: OperatorType = {
   flagUndo: false,
 
   poll(ctx) {
-    const slot = ctx.viewports.get('r-embed')
+    const regionId = resolveEmbedViewportRegionId(ctx)
+    const slot = ctx.viewports.get(regionId)
     return slot?.camera.value !== null
   },
 
   exec(ctx) {
-    const slot = ctx.viewports.get('r-embed')
+    const regionId = resolveEmbedViewportRegionId(ctx)
+    const slot = ctx.viewports.get(regionId)
     const camera = slot?.camera.value as THREE.Camera | null
     const orbitTarget = slot?.orbitTarget.value as THREE.Vector3 | null
     if (!camera || !orbitTarget) return

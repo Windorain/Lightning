@@ -18,7 +18,7 @@ function makeMockCtx(doc: RuntimeDocument | null): Context {
       overlayGroup: ref(null),
       toolsOverlayGroup: ref(null),
       worldAnnotationGroup: ref(null),
-      viewportCamera: ref(null),
+      cameraMainKey: 'workbench',
     }),
   } as unknown as Context
 }

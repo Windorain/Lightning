@@ -1,6 +1,7 @@
 import type { Context } from '@/runtime/context'
 import type { RegionEventHandler } from '@/events/handlerTypes'
 import { isEditingTarget } from '@/util/browser'
+import { shouldSkipWorkbenchDocumentKeydown } from '@/wiki/wikiInputShield'
 
 import { REGION } from '@/runtime/regionIds'
 
@@ -25,6 +26,7 @@ export function bindChromeDom(
   }
 
   const onKeydown = (e: KeyboardEvent): void => {
+    if (shouldSkipWorkbenchDocumentKeydown(e)) return
     if (isEditingTarget(e.target)) return
     ed.setActiveRegion(CHROME_REGION)
     ed.dispatch(e, { regionId: CHROME_REGION })

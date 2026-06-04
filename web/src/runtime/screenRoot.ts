@@ -10,11 +10,11 @@ import type {
   WorkbenchSession,
 } from '@/runtime/contextAccess'
 import { createViewerPreferences } from '@/viewer/preferences'
-import { defaultWikiConfig } from '@/runtime/wikiConfigDefaults'
 import { readPersistedPanelWidths } from '@/workbench/layout/panelLayoutStorage'
 import { REGION, REGION_KEYMAP } from '@/runtime/regionIds'
 import { createViewportHoverState } from '@/runtime/hover'
 import type { ConnectionState, UIWorkspace, WorkbenchWorkspaceMode } from '@/runtime/types'
+import { createDocumentBindingRef } from '@/workbench/document/binding'
 
 export interface ScreenLayout {
   leftWidth: Ref<number>
@@ -132,6 +132,7 @@ export function createWorkbenchSession(): WorkbenchSession {
     workspaceMode: ref<WorkbenchWorkspaceMode>('local-file'),
     uiWorkspace: ref<UIWorkspace>('preview'),
     localFileName: ref<string | null>(null),
+    documentBinding: createDocumentBindingRef(),
     connection: reactive<ConnectionState>({
       apiBase: '',
       token: '',
@@ -146,11 +147,9 @@ export function createWorkbenchSession(): WorkbenchSession {
 
 export function createEmbedSession(extras?: {
   initialLayerWorldY?: number
-  initialCamera?: import('@/viewer/viewerConfig').InitialCamera
 }): EmbedSession {
   return {
     layerWorldY: ref(extras?.initialLayerWorldY ?? -1),
-    initialCamera: extras?.initialCamera,
   }
 }
 
@@ -164,7 +163,6 @@ export function createWorkbenchScreenRoot(
   },
 ): ScreenRoot {
   const session = createWorkbenchSession()
-  const wiki = defaultWikiConfig()
 
   const areas: AreaNode[] = [
     {
@@ -196,7 +194,6 @@ export function createWorkbenchScreenRoot(
       regions: [
         createRegionNode(REGION.WORKBENCH_PROPS, RegionType.MAIN, {
           panels: panels.properties,
-          state: { wiki },
         }),
       ],
     },
@@ -221,7 +218,6 @@ export function createEmbedScreenRoot(
   tool: ToolSettings,
   extras?: {
     initialLayerWorldY?: number
-    initialCamera?: import('@/viewer/viewerConfig').InitialCamera
   },
 ): ScreenRoot {
   const session = createEmbedSession(extras)

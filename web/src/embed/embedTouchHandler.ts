@@ -14,7 +14,7 @@ import type { Context } from '@/runtime/context'
 import { resolveViewportSlot } from '@/runtime/context'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
 import {
-  ensureViewportCamera,
+  ensureMainViewportCamera,
   panViewportState,
   rotateViewportState,
   rotateViewportYawState,
@@ -102,13 +102,14 @@ export function createEmbedTouchHandler(
   function currentCamera(ctx: Context): ViewportCameraState | null {
     const vp = resolveViewportSlot(ctx, { _regionId: regionId })
     if (!vp.camera.value) return null
-    return cloneCamera(ensureViewportCamera(vp.viewportCamera, vp.definition.value))
+    const key = vp.cameraMainKey
+    return cloneCamera(ensureMainViewportCamera(ctx.main, key, vp.definition.value))
   }
 
   function commitCamera(ctx: Context, state: ViewportCameraState): void {
     const vp = resolveViewportSlot(ctx, { _regionId: regionId })
     if (!vp.camera.value) return
-    vp.viewportCamera.value = state
+    ctx.main.cameras[vp.cameraMainKey].value = state
   }
 
   function capturePointer(pe: PointerEvent): void {
@@ -258,7 +259,7 @@ export function createEmbedTouchHandler(
           if (dx !== 0 || dy !== 0) {
             const vp = resolveViewportSlot(ctx, { _regionId: regionId })
             if (vp.camera.value) {
-              const cur = ensureViewportCamera(vp.viewportCamera, vp.definition.value)
+              const cur = ensureMainViewportCamera(ctx.main, vp.cameraMainKey, vp.definition.value)
               commitCamera(ctx, rotateViewportState(cur, dx, dy))
             }
           }

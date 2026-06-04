@@ -4,10 +4,10 @@ import type { ExportFileInfo } from '@/workbench/sdeApi'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
-import type { ViewportCameraState } from '@/runtime/viewportCamera'
+import type { CameraMainKey } from '@/runtime/mainCameras'
 
 export type LoadStatus = 'loading' | 'ok' | 'error'
-export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle'
+export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle' | 'wiki-data'
 export type UIWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
 
 export interface MaterialQueryItem {
@@ -57,7 +57,7 @@ export interface ViewportSlot {
   worldAnnotationGroup: ShallowRef<THREE.Group | null>
   wireframe: ShallowRef<THREE.LineSegments | null>
   orbitTarget: Ref<THREE.Vector3 | null>
-  /** 本视口轨道相机（Main 侧真源；与 THREE 实例一一对应） */
-  viewportCamera: Ref<ViewportCameraState | null>
+  /** 绑定的 Main.cameras 键 */
+  cameraMainKey: CameraMainKey
 }
 

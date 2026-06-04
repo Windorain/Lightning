@@ -13,6 +13,7 @@ import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { Host } from '@/runtime/host'
 import { resolveEmbedViewportRegionId, resolveEmbedViewerPreferences } from '@/runtime/embedViewportRegion'
+import { REGION } from '@/runtime/regionIds'
 import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
 import { blockRefFromViewportHover } from '@/runtime/hover'
 import { createEmbedSidebarOutlineMasks } from '@/runtime/embedSidebarOutline'
@@ -24,7 +25,6 @@ import ViewportFrameLayerDock from '@/shared/viewport/ViewportFrameLayerDock.vue
 import ToolTipBox from '@/embed/components/ToolTipBox.vue'
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
 import type { EmbedSettings } from '@/viewer/viewerConfig'
-import type { InitialCamera } from '@/viewer/viewerConfig'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
 import { createEmbedTouchHandler } from '@/embed/embedTouchHandler'
 import { sceneDisplayTitleFromRootDocument } from '@/viewer/sceneDisplayTitle'
@@ -75,16 +75,32 @@ watch(profile, (p) => {
   if (p === 'narrow' || p === 'tiny') sidebarCollapsed.value = true
 }, { immediate: true })
 
-const didAutoViewFit = ref(false)
+const initCameraProps = { _regionId: viewportRegionId }
+
+const didInitCamera = ref(false)
 watch(loadStatus, (status) => {
-  if (didAutoViewFit.value || status !== 'ok') return
+  if (didInitCamera.value || status !== 'ok') return
   if (!mainMeshGroup.value) return
-  didAutoViewFit.value = true
-  void ctx.getOperators().exec('OPERATOR_VIEW_RESET')
+  didInitCamera.value = true
+  void ctx.getOperators().exec('OPERATOR_INIT_VIEWPORT_CAMERA', initCameraProps)
 })
 watch(() => ctx.getDoc().value, () => {
-  didAutoViewFit.value = false
+  didInitCamera.value = false
 })
+
+const isWikiWorkbenchPreview = viewportRegionId === REGION.WIKI_PREVIEW
+watch(
+  () => [
+    ctx.main.initialCameras.embed.value.yawDeg,
+    ctx.main.initialCameras.embed.value.elevationDeg,
+    ctx.main.initialCameras.embed.value.zoom,
+  ],
+  () => {
+    if (!isWikiWorkbenchPreview || loadStatus.value !== 'ok' || !mainMeshGroup.value) return
+    void ctx.getOperators().exec('OPERATOR_INIT_VIEWPORT_CAMERA', initCameraProps)
+  },
+)
+
 const selectedBlockId = ref<string | null>(null)
 
 /** 勿用 ref：深度响应式会代理 Mesh，破坏 Three.js 矩阵访问 */
@@ -130,8 +146,6 @@ const showTitle = computed(() => f.value?.titleBar ?? false)
 const showStats = computed(() => f.value?.blockStatsSidebar ?? false)
 const showDebugStatus = computed(() => (f.value?.debugStatusBar ?? false) && (s.value?.debug ?? false))
 const showAxesGizmo = computed(() => f.value?.showAxesGizmo ?? false)
-const initialCamera = computed<InitialCamera | undefined>(() => s.value?.initialCamera)
-
 const hasBottomDock = computed(() =>
   (showFrameCtl.value && hasWorldMultiFrame.value) || showLayerBar.value,
 )
@@ -235,7 +249,7 @@ onBeforeUnmount(() => {
         >?</span>
       </div>
       <div class="wm-titlebar-actions">
-        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="复位视角" @click="void ctx.getOperators().exec('OPERATOR_VIEW_RESET')">
+        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="复位视角" @click="void ctx.getOperators().exec('OPERATOR_VIEW_RESET', initCameraProps)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 3.1L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-3.1L3 16"/><path d="M3 21v-5h5"/></svg>
         </button>
         <button type="button" class="nei-icon-btn wsr-mobile-hide" title="截屏" @click="engineHostRef?.screenshot()">
@@ -273,7 +287,6 @@ onBeforeUnmount(() => {
           :material-library="materialLibrary"
           :content-group="mainMeshGroup"
           :layer-preview-mode="layerPreviewMode"
-          :initial-camera="initialCamera"
           :scene-background="s?.sceneBackground ?? 0x5a5a5a"
           :show-axes-gizmo="showAxesGizmo"
           @ready="onViewportReady"

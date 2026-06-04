@@ -2,12 +2,16 @@ import { watch, type Ref } from 'vue'
 import * as THREE from 'three'
 import {
   applyDiagonalOrbitView,
+  resolveFocusOrbitTarget,
   STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
 } from '@/render/interaction/initialCamera'
 import type { StructureDefinition } from '@/render/schema/types'
 import { cameraToSpherical } from '@/pure/camera'
+import type { InitialCamera } from '@/viewer/viewerConfig'
+import type { Main } from '@/runtime/main'
+import type { CameraMainKey } from '@/runtime/mainCameras'
 
-/** Main 持有的视口相机（轨道参数，非 THREE 对象） */
+/** 视口逻辑相机（轨道参数，非 THREE 对象；操作符与 DRW 同步真源） */
 export interface ViewportCameraState {
   target: { x: number; y: number; z: number }
   yawDeg: number
@@ -30,7 +34,66 @@ export function createDefaultViewportCamera(def?: StructureDefinition | null): V
   }
 }
 
-/** 仅在「框选复位」等需要由包围盒推算新状态时调用 */
+/** 模板 / bootstrap / session 是否指定了显式视角（有则跳过无参自动框选复位） */
+export function hasExplicitExternalCamera(external?: InitialCamera): boolean {
+  if (!external) return false
+  return (
+    external.yawDeg != null
+    || external.elevationDeg != null
+    || external.zoom != null
+    || external.distance != null
+  )
+}
+
+function numOr<T extends number>(v: T | undefined, fallback: T): T {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback
+}
+
+/**
+ * 统一初始相机：外界 initialCamera 优先，其次 JSON 焦点 target/distance，最后默认等轴。
+ */
+export function resolveInitialViewportCamera(opts: {
+  external?: InitialCamera
+  definition?: StructureDefinition | null
+}): ViewportCameraState {
+  const base = createDefaultViewportCamera(opts.definition)
+  const focus = resolveFocusOrbitTarget(opts.definition)
+  if (focus) base.target = { ...focus }
+
+  const defIc = opts.definition?.initialCamera
+  if (defIc?.distance != null && opts.external?.distance == null) {
+    base.distance = defIc.distance
+  }
+
+  const ext = opts.external
+  if (ext) {
+    if (ext.yawDeg != null) base.yawDeg = ext.yawDeg
+    if (ext.elevationDeg != null) base.elevationDeg = ext.elevationDeg
+    if (ext.distance != null) base.distance = ext.distance
+    if (ext.zoom != null) base.zoom = Math.max(0.01, ext.zoom)
+  }
+
+  base.distance = numOr(base.distance, DEFAULT_DISTANCE)
+  base.zoom = numOr(base.zoom, 1)
+  base.elevationDeg = Math.max(1, Math.min(89, base.elevationDeg))
+  return base
+}
+
+export function ensureMainViewportCamera(
+  main: Main,
+  key: CameraMainKey,
+  definition?: StructureDefinition | null,
+): ViewportCameraState {
+  const ref = main.cameras[key]
+  if (!ref.value) {
+    ref.value = resolveInitialViewportCamera({
+      external: main.initialCameras[key].value,
+      definition,
+    })
+  }
+  return ref.value
+}
+
 export function captureViewportCamera(
   camera: THREE.Camera,
   orbitTarget: THREE.Vector3,
@@ -50,23 +113,6 @@ export function captureViewportCamera(
   }
 }
 
-export function ensureViewportCamera(
-  cameraRef: Ref<ViewportCameraState | null>,
-  def?: StructureDefinition | null,
-): ViewportCameraState {
-  if (!cameraRef.value) {
-    cameraRef.value = createDefaultViewportCamera(def)
-  }
-  return cameraRef.value
-}
-
-/** 视口挂载时注册/初始化本 region 的相机（Workbench / Embed 各有一份） */
-export function registerViewportCamera(
-  slot: { id: string; viewportCamera: Ref<ViewportCameraState | null> },
-  def?: StructureDefinition | null,
-): ViewportCameraState {
-  return ensureViewportCamera(slot.viewportCamera, def)
-}
 
 export function positionFromViewportState(s: ViewportCameraState): { x: number; y: number; z: number } {
   const theta = THREE.MathUtils.degToRad(s.yawDeg)
@@ -79,7 +125,6 @@ export function positionFromViewportState(s: ViewportCameraState): { x: number; 
   }
 }
 
-/** 将视口 slot 相机状态应用到 THREE（DRW watch / attach 调用） */
 export function applyViewportCameraState(
   camera: THREE.Camera,
   orbitTarget: THREE.Vector3,
@@ -104,7 +149,6 @@ export function rotateViewportState(s: ViewportCameraState, dx: number, dy: numb
   return rotateViewportYawState(rotateViewportElevationState(s, dElev), dYaw)
 }
 
-/** 水平拖 / 双指扭转 → 绕目标 yaw */
 export function rotateViewportYawState(s: ViewportCameraState, dYawDeg: number): ViewportCameraState {
   return { ...s, yawDeg: s.yawDeg - dYawDeg }
 }
@@ -150,7 +194,6 @@ export function zoomViewportState(s: ViewportCameraState, factor: number): Viewp
   return { ...s, zoom: Math.max(0.01, s.zoom * factor) }
 }
 
-/** Main → THREE；返回取消 watch */
 export function bindViewportCameraSync(
   stateRef: Ref<ViewportCameraState | null>,
   cameraRef: Ref<THREE.Camera | null>,

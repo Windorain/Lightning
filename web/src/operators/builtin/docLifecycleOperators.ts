@@ -56,7 +56,7 @@ export const NewSceneOperator: OperatorType = {
     ctx.getEditHistory().clear()
     const doc = RuntimeDocument.empty()
     ctx.main.replaceDoc(doc)
-    ctx.viewports.resetAllViewportCameras()
+    ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
   },
 }
 
@@ -92,13 +92,13 @@ export const OpenSceneOperator: OperatorType = {
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
       ctx.main.replaceDoc(result.document)
-      ctx.viewports.resetAllViewportCameras()
+      ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       ctx.getCurrentFrameIndex().value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
       ctx.main.replaceDoc(null)
-      ctx.viewports.resetAllViewportCameras()
+      ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
     }
     ctx.getLocalFileName().value = file.name
@@ -141,13 +141,13 @@ export const LoadBuiltinSceneOperator: OperatorType = {
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (result.document) {
       ctx.main.replaceDoc(result.document)
-      ctx.viewports.resetAllViewportCameras()
+      ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       ctx.getCurrentFrameIndex().value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
       ctx.main.replaceDoc(null)
-      ctx.viewports.resetAllViewportCameras()
+      ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
     }
     await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-bundle' })
@@ -164,6 +164,6 @@ export const LoadEmbedDocumentOperator: OperatorType = {
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (!result.document) throw new Error('无法加载结构数据')
     ctx.main.replaceDoc(result.document)
-    ctx.viewports.resetAllViewportCameras()
+    ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
   },
 }

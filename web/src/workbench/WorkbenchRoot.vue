@@ -9,7 +9,7 @@ import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
 import { EmbedPreview } from '@/shared/viewport/embedPreview'
-import { buildEmbedSettingsFromWikiConfig } from '@/viewer/viewerConfig'
+import { buildEmbedSettingsFromMain } from '@/viewer/viewerConfig'
 import type { EmbedSettings } from '@/viewer/viewerConfig'
 import { createSelectionContext } from '@/context/selection'
 import { provideEditHistory } from '@/context/editHistory'
@@ -28,6 +28,19 @@ import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
 import { usePanelQueries } from '@/workbench/usePanelQueries'
 import { REGION } from '@/runtime/regionIds'
+import { createWikiUiState } from '@/runtime/wikiUi'
+import WikiModalsHost from '@/workbench/components/WikiModalsHost.vue'
+import MenubarFullscreenButton from '@/workbench/components/MenubarFullscreenButton.vue'
+import MenubarWikiStatus from '@/workbench/components/MenubarWikiStatus.vue'
+import {
+  bindWikiWorkbenchKeyBubble,
+  getFloatingUiTeleportTarget,
+  getWorkbenchAppElement,
+} from '@/wiki/wikiInputShield'
+import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
+
+const hostProfile =
+  import.meta.env.VITE_HOST_PROFILE === 'wiki' ? ('wiki' as const) : ('desktop' as const)
 
 const selection = createSelectionContext()
 const editHistory = provideEditHistory(256)
@@ -36,16 +49,21 @@ const toolRegistry = provideToolRegistry()
 // 共享 VM 组装
 const tool = createToolSettings()
 const { host, ctx, screen: defaultScreen } = createWorkbenchHost({
-  selection, editHistory, toolRegistry, tool,
+  selection, editHistory, toolRegistry, tool, profile: hostProfile,
 })
+
+ctx.wm.chrome.wikiUi = createWikiUiState()
+if (hostProfile === 'wiki') {
+  ctx.wm.chrome.wikiUi.mwReady.value = isWikiApiAvailable()
+}
 
 const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = usePanelQueries(ctx, defaultScreen)
 
 const toolshelfCollapsed = computed(() => ctx.requireRegion(REGION.WORKBENCH_TOOLSHELF).collapsed)
 const propsCollapsed = computed(() => ctx.requireRegion(REGION.WORKBENCH_PROPS).collapsed)
 
-const wikiConfig = ctx.requireRegion(REGION.WORKBENCH_PROPS).state.wiki as Record<string, unknown>
-const embedSettings = computed<EmbedSettings>(() => buildEmbedSettingsFromWikiConfig(wikiConfig))
+const embedPublish = computed(() => ctx.main.embedPublish.value)
+const embedSettings = computed<EmbedSettings>(() => buildEmbedSettingsFromMain(ctx.main))
 
 // Context menu
 const contextMenu = createContextMenu()
@@ -72,6 +90,12 @@ ctx.wm.chrome.showContextMenu = (pos, items) => showContextMenu(contextMenu, pos
 ctx.wm.chrome.hideContextMenu = () => hideContextMenu(contextMenu)
 
 let unbindChrome: (() => void) | null = null
+let unbindWikiKeyBubble: (() => void) | null = null
+const floatingUiTeleportTo = ref<HTMLElement | 'body'>('body')
+
+function refreshFloatingUiTeleport(): void {
+  floatingUiTeleportTo.value = getFloatingUiTeleportTarget()
+}
 
 const workspace = ref<'preview' | 'wiki' | 'export' | 'materials'>('preview')
 watch(workspace, (v) => {
@@ -84,11 +108,20 @@ provide('workbenchSettingsOpen', settingsOpen)
 onMounted(async () => {
   unbindChrome = bindChromeDom(ctx, createChromeKeymapHandler(CHROME_REGION, () => ctx))
   await host.start()
+  refreshFloatingUiTeleport()
+  if (hostProfile === 'wiki') {
+    const app = getWorkbenchAppElement()
+    if (app) unbindWikiKeyBubble = bindWikiWorkbenchKeyBubble(app)
+  }
+  document.addEventListener('fullscreenchange', refreshFloatingUiTeleport)
 })
 
 onBeforeUnmount(() => {
   unbindChrome?.()
   unbindChrome = null
+  unbindWikiKeyBubble?.()
+  unbindWikiKeyBubble = null
+  document.removeEventListener('fullscreenchange', refreshFloatingUiTeleport)
 })
 
 
@@ -123,6 +156,8 @@ ctx.log.injectStateRefs({
           :rna="ctx.getRna()"
           :owner="panel.owner"
         />
+        <MenubarWikiStatus />
+        <MenubarFullscreenButton />
       </div>
     </template>
     <template #workspace-tabs>
@@ -139,7 +174,7 @@ ctx.log.injectStateRefs({
     <template #viewport>
       <WorkbenchViewport v-if="workspace === 'preview' && ctx.getDoc().value" />
       <div v-else-if="workspace === 'wiki' && ctx.getDoc().value" class="wb-wiki-embed">
-        <EmbedPreview :settings="embedSettings" :style="{ width: `${wikiConfig.viewWidth ?? 800}px`, height: `${wikiConfig.viewHeight ?? 600}px` }" />
+        <EmbedPreview :settings="embedSettings" :style="{ width: `${embedPublish.viewWidth}px`, height: `${embedPublish.viewHeight}px` }" />
       </div>
     </template>
     <template v-if="!propsCollapsed" #properties>
@@ -161,6 +196,8 @@ ctx.log.injectStateRefs({
           :rna="ctx.getRna()"
           :owner="panel.owner"
         />
+        <MenubarWikiStatus />
+        <MenubarFullscreenButton />
       </div>
     </template>
     <template #workspace-tabs>
@@ -185,6 +222,8 @@ ctx.log.injectStateRefs({
           :rna="ctx.getRna()"
           :owner="panel.owner"
         />
+        <MenubarWikiStatus />
+        <MenubarFullscreenButton />
       </div>
     </template>
     <template #workspace-tabs>
@@ -201,7 +240,7 @@ ctx.log.injectStateRefs({
   <WorkbenchSettingsDrawer />
 
   <!-- ContextMenu floating overlay -->
-  <Teleport to="body">
+  <Teleport :to="floatingUiTeleportTo">
     <Transition name="menu-pop">
       <div
         v-if="ctx.wm.chrome.contextMenuOpen?.value ?? false"
@@ -230,6 +269,7 @@ ctx.log.injectStateRefs({
       </div>
     </Transition>
   </Teleport>
+    <WikiModalsHost v-if="ctx.wm.chrome.wikiUi" :ctx="ctx" />
   </HostProvider>
 </template>
 
@@ -339,7 +379,8 @@ ctx.log.injectStateRefs({
 
 <style>
 .context-menu-overlay {
-  position: fixed; inset: 0; z-index: 9999;
+  position: fixed; inset: 0; z-index: 50001;
+  pointer-events: auto;
 }
 .context-menu-popup {
   position: absolute;

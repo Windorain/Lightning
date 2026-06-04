@@ -9,7 +9,7 @@
  * | chrome | `wm.chrome` | `ctx.wm.chrome` — 瞬时菜单等 |
  * | tool | `REGION.WORKBENCH_TOOLSHELF` / `REGION.EMBED` → `state.tool` | `getToolSettings()` 或 `requireRegion` |
  * | session | `ScreenRoot.session` | `getSession()` |
- * | wiki | `REGION.WORKBENCH_PROPS` → `state.wiki` | `requireRegion(REGION.WORKBENCH_PROPS)` / `OPERATOR_SET_WIKI_CONFIG` |
+ * | wiki 发布/初始相机 | `Main.embedPublish` / `Main.initialCameras.embed` | `OPERATOR_SET_WIKI_CONFIG` |
  * | viewer | 视口 Region → `state.viewer` | `requireRegion(REGION.*_VIEWPORT\|EMBED)` |
  * | keymap | Region `keymapId` | `resolveRegionBaseKeymap`（`keymapHandler`） |
  *
@@ -23,7 +23,9 @@
  */
 
 import type { Ref } from 'vue'
+import type { ShallowRef } from 'vue'
 import type { ConnectionState, WorkbenchWorkspaceMode, UIWorkspace } from '@/runtime/types'
+import type { DocumentBinding } from '@/workbench/document/types'
 export type AppTheme = 'dark' | 'light'
 export type AppLanguage = 'zh' | 'en'
 
@@ -48,6 +50,7 @@ export interface WorkbenchSession {
   workspaceMode: Ref<WorkbenchWorkspaceMode>
   uiWorkspace: Ref<UIWorkspace>
   localFileName: Ref<string | null>
+  documentBinding: ShallowRef<DocumentBinding>
   connection: ConnectionState
   layerWorldY: Ref<number>
 }
@@ -55,7 +58,6 @@ export interface WorkbenchSession {
 /** Region 节点状态袋（挂载时由 ScreenRoot 工厂写入） */
 export interface RegionState {
   tool?: ToolSettings
-  wiki?: Record<string, unknown>
   viewer?: import('@/viewer/preferences').ViewerPreferences
   hover?: import('@/runtime/hover').ViewportHoverState
   [key: string]: unknown
@@ -64,5 +66,4 @@ export interface RegionState {
 /** Embed 查看器会话（Screen 根 session） */
 export interface EmbedSession {
   layerWorldY: Ref<number>
-  initialCamera?: import('@/viewer/viewerConfig').InitialCamera
 }

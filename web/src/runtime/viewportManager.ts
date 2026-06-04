@@ -1,5 +1,6 @@
 import { computed, ref, shallowRef } from 'vue'
 import type { ViewportSlot } from '@/runtime/types'
+import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
 
 export function createViewportManager() {
   const slots = new Map<string, ViewportSlot>()
@@ -25,7 +26,7 @@ export function createViewportManager() {
         worldAnnotationGroup: shallowRef(null),
         wireframe: shallowRef(null),
         orbitTarget: ref(null),
-        viewportCamera: ref(null),
+        cameraMainKey: cameraMainKeyForRegion(id),
       }
       slots.set(id, slot)
       if (!activeId.value) activeId.value = id
@@ -43,8 +44,8 @@ export function createViewportManager() {
     forEach(fn: (slot: ViewportSlot) => void): void {
       for (const slot of slots.values()) fn(slot)
     },
-    resetAllViewportCameras(): void {
-      for (const slot of slots.values()) slot.viewportCamera.value = null
+    resetAllViewportCameras(mainCameras: Record<string, import('vue').Ref<import('@/runtime/viewportCamera').ViewportCameraState | null>>): void {
+      for (const slot of slots.values()) mainCameras[slot.cameraMainKey].value = null
     },
     activeId,
     active,

@@ -22,7 +22,7 @@ function close(): void {
 }
 
 function pickMode(m: WorkbenchWorkspaceMode): void {
-  ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: m })
+  ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: m, resetDocument: true })
   ctx.getConnection().connected = null
   ctx.getConnection().exports = []
   ctx.getConnection().exportsLoading = false

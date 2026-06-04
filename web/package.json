@@ -4,8 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:wiki-workbench": "vite --config vite.wiki-workbench.config.ts",
     "build:embed": "vite build --config vite.embed.config.ts",
     "build:workbench": "vite build --config vite.workbench.config.ts",
+    "build:wiki-workbench": "vite build --config vite.wiki-workbench.config.ts",
+    "stage:wiki-workbench": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/huiji/stage-wiki-workbench.ps1",
     "build:all": "npm run build:embed && npm run build:workbench",
     "test": "vitest run",
     "test:e2e": "playwright test",

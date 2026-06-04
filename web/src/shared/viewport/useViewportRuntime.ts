@@ -1,5 +1,6 @@
 import { computed, toRef } from 'vue'
 import type { Context } from '@/runtime/context'
+import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
 import { DRW } from '@/runtime/drw'
 import type { ViewerPreferences } from '@/viewer/preferences'
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
@@ -35,7 +36,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     showAnnotationsRef: toRef(viewerPrefs, 'showAnnotations'),
     worldAnnotationGroupRef: vpSlot.worldAnnotationGroup,
     toolsOverlayGroupRef: vpSlot.toolsOverlayGroup,
-    viewportCameraRef: vpSlot.viewportCamera,
+    viewportCameraRef: ctx.main.cameras[cameraMainKeyForRegion(regionId)],
     cameraRef: vpSlot.camera,
     orbitTargetRef: vpSlot.orbitTarget,
   })

@@ -15,6 +15,8 @@ import type { ToolRegistry } from '@/workbench/tools/registry'
 import { HostBase } from '@/runtime/host'
 import { REGION } from '@/runtime/regionIds'
 import { autoConnectSde } from '@/runtime/host/workbenchBoot'
+import { bootWikiWorkbench } from '@/runtime/host/wikiWorkbenchBoot'
+import { isWikiHostProfile, setHostProfile, type HostProfile } from '@/runtime/hostProfile'
 import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 import {
   WORKBENCH_PANELS,
@@ -28,6 +30,7 @@ export interface WorkbenchHostDeps {
   editHistory: UndoManager
   toolRegistry: ToolRegistry
   tool: ToolSettings
+  profile?: HostProfile
 }
 
 export interface WorkbenchHostResult {
@@ -57,6 +60,10 @@ export class WorkbenchHost extends HostBase {
   }
 
   async start(): Promise<void> {
+    if (isWikiHostProfile()) {
+      await bootWikiWorkbench(this.ctx)
+      return
+    }
     const query = parseWorkbenchQuery()
     if (query.apiBase) {
       await this.ctx.getOperators().exec('OPERATOR_APPLY_SETTINGS', {
@@ -69,6 +76,7 @@ export class WorkbenchHost extends HostBase {
 }
 
 export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResult {
+  setHostProfile(deps.profile ?? 'desktop')
   const { selection, editHistory, toolRegistry, tool } = deps
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()

@@ -10,7 +10,10 @@ import {
 } from '@/workbench/ux/panels'
 import { SelectOperator, SelectByTypeOperator, SelectAllOperator } from '@/operators/builtin/selectOperator'
 import { MoveOperator } from '@/operators/builtin/moveTranslate'
-import { ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator } from '@/operators/builtin/viewOperators'
+import {
+  ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator,
+  InitViewportCameraOperator,
+} from '@/operators/builtin/viewOperators'
 import { TooltipEditOperator } from '@/operators/builtin/metaEditOperators'
 import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/operators/builtin/docLifecycleOperators'
 import { SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator } from '@/operators/builtin/sdeOperators'
@@ -23,6 +26,19 @@ import {
 } from '@/operators/builtin/miscOperators'
 import { ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/operators/builtin/materialOperators'
 import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
+import {
+  DocumentLoadOperator,
+  DocumentSaveOperator,
+  WikiReloadOperator,
+  WikiPreviewSaveOperator,
+} from '@/operators/builtin/documentIoOperators'
+import {
+  WikiPickAndLoadOperator,
+  WikiSaveConfirmOperator,
+  WikiSaveAsOperator,
+  CopyWikiEmbedOperator,
+} from '@/operators/builtin/wikiOperators'
+import { isWikiHostProfile } from '@/runtime/hostProfile'
 import { selectTool, moveTool } from '@/workbench/tools/toolDefs'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { boxTool, boxFullTool, BoxGizmo, AnnotationBoxCommitOperator, AnnotationBoxResetOperator } from '@/workbench/tools/boxTool'
@@ -49,6 +65,7 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   SelectOperator, SelectByTypeOperator, SelectAllOperator, MoveOperator,
   UndoOperator, RedoOperator,
   ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator,
+  InitViewportCameraOperator,
   TooltipEditOperator,
   NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator,
   SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetToolSettingOperator, SetRegionSettingOperator, SetHoveredBlockOperator, SetHoveredAnnotationOperator, SetLayerYOperator, ApplySettingsOperator, SetWikiConfigOperator,
@@ -60,11 +77,39 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   AnnotationBoxCommitOperator, AnnotationBoxResetOperator,
   ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator,
   CopyCameraFromEmbedOperator,
+  DocumentLoadOperator,
+  DocumentSaveOperator,
+  WikiReloadOperator,
+  WikiPreviewSaveOperator,
+  WikiPickAndLoadOperator,
+  WikiSaveConfirmOperator,
+  WikiSaveAsOperator,
+  CopyWikiEmbedOperator,
 ]
+
+function disableOnWikiProfile(op: OperatorType): OperatorType {
+  if (!op.poll) return op
+  const origPoll = op.poll.bind(op)
+  return {
+    ...op,
+    poll(ctx) {
+      if (isWikiHostProfile()) return false
+      return origPoll(ctx)
+    },
+  }
+}
+
+const SDE_OPERATOR_IDS = new Set([
+  'OPERATOR_SDE_CONNECT',
+  'OPERATOR_SDE_LOAD',
+  'OPERATOR_SDE_LOAD_WORKSPACE',
+  'OPERATOR_SDE_PUSH',
+])
 
 export function registerWorkbenchOperators(registry: OperatorRegistry): void {
   for (const op of WORKBENCH_OPERATORS) {
-    if (!registry.find(op.id)) registry.register(op)
+    const toRegister = SDE_OPERATOR_IDS.has(op.id) ? disableOnWikiProfile(op) : op
+    if (!registry.find(toRegister.id)) registry.register(toRegister)
   }
 }
 

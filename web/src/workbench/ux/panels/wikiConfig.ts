@@ -1,5 +1,4 @@
 import type { Context } from '@/runtime/context'
-import { REGION } from '@/runtime/regionIds'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '@/runtime/screenTypes'
 import type { UILayout } from '../types/layout'
@@ -12,7 +11,7 @@ export const wikiConfigPanel: PanelDeclaration = {
   workspaces: ['wiki'],
 
   poll(): boolean { return true },
-  owner(ctx: Context): unknown { return ctx.requireRegion(REGION.WORKBENCH_PROPS).state.wiki },
+  owner(ctx: Context): unknown { return { main: ctx.main } },
   layout(_ctx: Context): UILayout {
     return {
       kind: 'column', align: false, items: [

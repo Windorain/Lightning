@@ -176,6 +176,18 @@
     var api = options.api || new mw.Api()
 
     clearLog(logEl)
+
+    if (file.size > SD.MAX_UPLOAD_FILE_BYTES) {
+      onErr(
+        new Error(
+          '文件不能超过 10 MB（当前约 ' +
+            Math.ceil(file.size / (1024 * 1024)) +
+            ' MB）。请缩小选区后重新导出。'
+        )
+      )
+      return
+    }
+
     log(logEl, '读取文件…')
 
     readFileAsText(
@@ -312,7 +324,7 @@
     root.innerHTML =
       '<div class="wsr-upload">' +
       '<h2 class="wsr-upload__title">结构数据上传</h2>' +
-      '<p class="wsr-upload__hint">选择游戏或工作台导出的 JSON。小于约 1.9MB 将自动单页上传；更大文件会自动分片。上传完成后在词条使用 <code>data-wsr-structure="名称"</code> 即可。</p>' +
+      '<p class="wsr-upload__hint">选择游戏或工作台导出的 JSON（单文件不超过 10 MB；过大时最多自动分成 6 个分片页）。小于约 1.9 MB 将整页上传。上传完成后在词条使用 <code>data-wsr-structure="名称"</code> 即可。</p>' +
       '<label class="wsr-upload__field"><span>结构名称</span><input type="text" class="wsr-upload__base" placeholder="例如 PseudoBiosphere" /></label>' +
       '<label class="wsr-upload__field"><span>JSON 文件</span><input type="file" accept=".json,application/json" class="wsr-upload__file" /></label>' +
       '<label class="wsr-upload__check"><input type="checkbox" class="wsr-upload__overwrite" checked /> 覆盖已有同名数据（推荐）</label>' +

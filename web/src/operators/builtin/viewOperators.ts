@@ -1,16 +1,14 @@
 /**
  * Viewport navigation operators — 对标 Blender 的 VIEW3D_OT_rotate/move/zoom。
  *
- * 只修改当前视口 slot.viewportCamera；DRW 将状态同步到 THREE。
+ * 只修改 Main.cameras；DRW 将状态同步到 THREE。
  */
-import * as THREE from 'three'
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import { resolveViewportSlot } from '@/runtime/context'
-import { fitCameraToGroup } from '@/render/interaction/initialCamera'
+import { applyViewportCameraFromMainInitial } from '@/runtime/viewportCameraApply'
 import {
-  captureViewportCamera,
-  ensureViewportCamera,
+  ensureMainViewportCamera,
   rotateViewportState,
   panViewportState,
   zoomViewportState,
@@ -63,8 +61,10 @@ export const ViewRotateOperator: OperatorType = {
     if (event.type === 'pointermove') {
       const dx = event.clientX - s._startX
       const dy = event.clientY - s._startY
-      const cur = ensureViewportCamera(vp.viewportCamera, vp.definition.value)
-      vp.viewportCamera.value = rotateViewportState(cur, dx, dy)
+      const key = vp.cameraMainKey
+      const camRef = ctx.main.cameras[key]
+      const cur = ensureMainViewportCamera(ctx.main, key, vp.definition.value)
+      camRef.value = rotateViewportState(cur, dx, dy)
       s._startX = event.clientX
       s._startY = event.clientY
       return OP_RESULT.RUNNING_MODAL
@@ -113,8 +113,10 @@ export const ViewPanOperator: OperatorType = {
     if (event.type === 'pointermove') {
       const dx = event.clientX - s._startX
       const dy = event.clientY - s._startY
-      const cur = ensureViewportCamera(vp.viewportCamera, vp.definition.value)
-      vp.viewportCamera.value = panViewportState(cur, dx, dy)
+      const key = vp.cameraMainKey
+      const camRef = ctx.main.cameras[key]
+      const cur = ensureMainViewportCamera(ctx.main, key, vp.definition.value)
+      camRef.value = panViewportState(cur, dx, dy)
       s._startX = event.clientX
       s._startY = event.clientY
       return OP_RESULT.RUNNING_MODAL
@@ -132,34 +134,31 @@ export const ViewPanOperator: OperatorType = {
   cancel(ctx, props) { releasePointerCapture(ctx, props) },
 }
 
+export const InitViewportCameraOperator: OperatorType = {
+  id: 'OPERATOR_INIT_VIEWPORT_CAMERA',
+  label: '初始化视口相机',
+  internal: true,
+  poll(ctx) {
+    const vp = ctx.getViewport()
+    return vp.camera.value !== null
+  },
+  exec(ctx, props) {
+    applyViewportCameraFromMainInitial(ctx, props)
+  },
+}
+
 export const ViewResetOperator: OperatorType = {
   id: 'OPERATOR_VIEW_RESET',
   label: '复位视角',
-  description: '将相机框选到当前结构内容并写入 Main',
+  description: '恢复 Main 初始相机（无外界时自动框选）',
 
   poll(ctx) {
     const vp = ctx.getViewport()
-    return vp.contentGroup.value !== null && vp.camera.value !== null && vp.domElement.value !== null
+    return vp.camera.value !== null
   },
 
   exec(ctx, props) {
-    const vp = resolveViewportSlot(ctx, props)
-    const group = vp.contentGroup.value
-    const camera = vp.camera.value
-    const orbit = vp.orbitTarget.value
-    const dom = vp.domElement.value
-    if (!group || !camera || !orbit || !dom) return
-
-    const ic = vp.definition.value?.initialCamera
-    fitCameraToGroup(
-      camera as THREE.OrthographicCamera,
-      group,
-      orbit,
-      dom,
-      { distance: ic?.distance },
-    )
-    const captured = captureViewportCamera(camera, orbit)
-    if (captured) vp.viewportCamera.value = captured
+    applyViewportCameraFromMainInitial(ctx, props)
   },
 }
 
@@ -176,8 +175,10 @@ export const ViewZoomOperator: OperatorType = {
     if (event instanceof WheelEvent) {
       const factor = event.deltaY > 0 ? 0.85 : 1.18
       const vp = resolveViewportSlot(ctx, props)
-      const cur = ensureViewportCamera(vp.viewportCamera, vp.definition.value)
-      vp.viewportCamera.value = zoomViewportState(cur, factor)
+      const key = vp.cameraMainKey
+      const camRef = ctx.main.cameras[key]
+      const cur = ensureMainViewportCamera(ctx.main, key, vp.definition.value)
+      camRef.value = zoomViewportState(cur, factor)
       return OP_RESULT.FINISHED
     }
 
@@ -198,8 +199,10 @@ export const ViewZoomOperator: OperatorType = {
     if (event instanceof WheelEvent) {
       const factor = event.deltaY > 0 ? 0.85 : 1.18
       const vp = resolveViewportSlot(ctx, props)
-      const cur = ensureViewportCamera(vp.viewportCamera, vp.definition.value)
-      vp.viewportCamera.value = zoomViewportState(cur, factor)
+      const key = vp.cameraMainKey
+      const camRef = ctx.main.cameras[key]
+      const cur = ensureMainViewportCamera(ctx.main, key, vp.definition.value)
+      camRef.value = zoomViewportState(cur, factor)
       return OP_RESULT.FINISHED
     }
 
@@ -211,8 +214,10 @@ export const ViewZoomOperator: OperatorType = {
     if (event.type === 'pointermove') {
       const dy = event.clientY - s._startY
       const factor = dy > 0 ? 1 + dy * 0.005 : 1 / (1 - dy * 0.005)
-      const cur = ensureViewportCamera(vp.viewportCamera, vp.definition.value)
-      vp.viewportCamera.value = zoomViewportState(cur, factor)
+      const key = vp.cameraMainKey
+      const camRef = ctx.main.cameras[key]
+      const cur = ensureMainViewportCamera(ctx.main, key, vp.definition.value)
+      camRef.value = zoomViewportState(cur, factor)
       s._startX = event.clientX
       s._startY = event.clientY
       return OP_RESULT.RUNNING_MODAL
