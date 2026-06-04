@@ -25,7 +25,10 @@ import {
   SetWorkspaceModeOperator, ResetLayoutOperator, SetWikiConfigOperator, ApplySettingsOperator, SetLayerYOperator,
 } from '@/operators/builtin/miscOperators'
 import { ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/operators/builtin/materialOperators'
-import { CopyCameraFromEmbedOperator } from '@/operators/builtin/copyCameraFromEmbed'
+import {
+  HydrateEmbedInitialViewOperator,
+  SyncEmbedInitialViewOperator,
+} from '@/operators/builtin/embedInitialViewOperators'
 import {
   DocumentLoadOperator,
   DocumentSaveOperator,
@@ -76,7 +79,8 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
   AnnotationBoxCommitOperator, AnnotationBoxResetOperator,
   ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator,
-  CopyCameraFromEmbedOperator,
+  HydrateEmbedInitialViewOperator,
+  SyncEmbedInitialViewOperator,
   DocumentLoadOperator,
   DocumentSaveOperator,
   WikiReloadOperator,

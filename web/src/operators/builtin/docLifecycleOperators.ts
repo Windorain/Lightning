@@ -1,4 +1,5 @@
 import type { OperatorType } from '@/operators/operatorType'
+import { hydrateMainEmbedInitialViewFromDoc } from '@/context/embedInitialView'
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import { getDevSceneDocument } from '@/dev/devScenes'
 import { downloadJson } from '@/util/browser'
@@ -56,6 +57,7 @@ export const NewSceneOperator: OperatorType = {
     ctx.getEditHistory().clear()
     const doc = RuntimeDocument.empty()
     ctx.main.replaceDoc(doc)
+    ctx.main.embedInitialView.value = null
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
   },
 }
@@ -93,11 +95,13 @@ export const OpenSceneOperator: OperatorType = {
     if (result.document) {
       ctx.main.replaceDoc(result.document)
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
+      hydrateMainEmbedInitialViewFromDoc(ctx.main)
       ctx.getCurrentFrameIndex().value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
       ctx.main.replaceDoc(null)
+      ctx.main.embedInitialView.value = null
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
     }
@@ -142,11 +146,13 @@ export const LoadBuiltinSceneOperator: OperatorType = {
     if (result.document) {
       ctx.main.replaceDoc(result.document)
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
+      hydrateMainEmbedInitialViewFromDoc(ctx.main)
       ctx.getCurrentFrameIndex().value = 0
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
       ctx.main.replaceDoc(null)
+      ctx.main.embedInitialView.value = null
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
     }
@@ -165,5 +171,6 @@ export const LoadEmbedDocumentOperator: OperatorType = {
     if (!result.document) throw new Error('无法加载结构数据')
     ctx.main.replaceDoc(result.document)
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
+    hydrateMainEmbedInitialViewFromDoc(ctx.main)
   },
 }

@@ -3,9 +3,6 @@ import type { WorkbenchWorkspaceMode } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
 import { REGION } from '@/runtime/regionIds'
 import { setRegionHoverAnnotation, setRegionHoverBlock } from '@/runtime/hover'
-import { CAMERA_KEY, mergeSparseInitialCamera } from '@/runtime/mainCameras'
-import type { InitialCamera } from '@/viewer/viewerConfig'
-
 function setNested(obj: Record<string, unknown>, path: string, value: unknown): void {
   const parts = path.split('.')
   let cur: Record<string, unknown> = obj
@@ -209,12 +206,6 @@ export const SetHoveredAnnotationOperator: OperatorType = {
   },
 }
 
-const INITIAL_CAMERA_PATH: Record<string, keyof InitialCamera> = {
-  cameraYaw: 'yawDeg',
-  cameraElevation: 'elevationDeg',
-  cameraZoom: 'zoom',
-}
-
 export const SetWikiConfigOperator: OperatorType = {
   id: 'OPERATOR_SET_WIKI_CONFIG',
   label: '设置 Wiki 配置',
@@ -222,13 +213,6 @@ export const SetWikiConfigOperator: OperatorType = {
   exec(ctx, props) {
     const path = props.path as string
     if (!path) return
-    const icKey = INITIAL_CAMERA_PATH[path]
-    if (icKey != null) {
-      mergeSparseInitialCamera(ctx.main.initialCameras[CAMERA_KEY.embed], {
-        [icKey]: props.value as number,
-      })
-      return
-    }
     const pub = ctx.main.embedPublish.value
     if (path.startsWith('features.')) {
       setNested(pub as unknown as Record<string, unknown>, path, props.value)

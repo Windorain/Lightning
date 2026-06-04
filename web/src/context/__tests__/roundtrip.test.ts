@@ -3,6 +3,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import { RuntimeDocument } from '@/context/runtimeDocument'
+import {
+  EMBED_INITIAL_VIEW_META_KEY,
+  getDocumentEmbedInitialView,
+  setDocumentEmbedInitialView,
+} from '@/context/embedInitialView'
 
 const RAW_PALETTE: Record<string, unknown>[] = [
   { registryId: 'air', meta: 0, renderMode: 'BakedQuads', geometry: { encoding: 'bakedQuadsJsonV1', quads: [] }, occludesAdjacentFaces: false, tooltip: [] },
@@ -141,5 +146,36 @@ describe('RuntimeDocument round-trip', () => {
         }
       }
     }
+  })
+
+  it('preserves meta.embed_initial_view through serialize round-trip', () => {
+    const view = {
+      target: { x: 1, y: 2, z: 3 },
+      yawDeg: 210,
+      elevationDeg: 35,
+      distance: 12.5,
+      zoom: 1.2,
+    }
+    const v2 = {
+      format_version: '2.0',
+      id: 'cam-test',
+      meta: {
+        name: 'cam', author: '', created_at_ms: 0, description: '', tags: [], origin: { x: 0, y: 0, z: 0 },
+        [EMBED_INITIAL_VIEW_META_KEY]: view,
+      },
+      frames: [{
+        index: 0,
+        structure: { geometryPhase: 'baked', cellGrid: RAW_CELLGRID, blockPalette: RAW_PALETTE },
+      }],
+      annotations: [],
+      labels: [],
+    }
+    const doc = RuntimeDocument.fromV2Plain(v2 as Record<string, unknown>)
+    expect(doc).not.toBeNull()
+    expect(getDocumentEmbedInitialView(doc!)).toEqual(view)
+    const again = RuntimeDocument.fromV2Plain(doc!.serialize() as Record<string, unknown>)
+    expect(getDocumentEmbedInitialView(again!)).toEqual(view)
+    setDocumentEmbedInitialView(doc!, null)
+    expect(doc!.meta[EMBED_INITIAL_VIEW_META_KEY]).toBeUndefined()
   })
 })

@@ -7,7 +7,6 @@ import {
   type EmbedPublishSettings,
 } from '@/runtime/mainCameras'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
-import type { InitialCamera } from '@/viewer/viewerConfig'
 import type { OperatorRegistry } from '@/operators/operatorRegistry'
 import { wrapOperatorRegistry } from '@/operators/operatorRegistry'
 import type { Context } from '@/runtime/context'
@@ -43,7 +42,8 @@ export class Main {
   readonly framesPlaybackIsPlaying = ref(false)
   readonly registries: MainRegistries
   readonly cameras: Record<CameraMainKey, Ref<ViewportCameraState | null>>
-  readonly initialCameras: Record<CameraMainKey, Ref<InitialCamera>>
+  /** 文档 `meta.embed_initial_view` 的运行时镜像（加载/同步后写入） */
+  readonly embedInitialView: Ref<ViewportCameraState | null>
   readonly embedPublish: Ref<EmbedPublishSettings>
 
   constructor(registries: Omit<MainRegistries, 'parsers' | 'operatorsFacade'> & {
@@ -58,7 +58,7 @@ export class Main {
     }
     const store = createMainCameraStore()
     this.cameras = store.cameras
-    this.initialCameras = store.initialCameras
+    this.embedInitialView = store.embedInitialView
     this.embedPublish = store.embedPublish
   }
 

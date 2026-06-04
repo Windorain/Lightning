@@ -1,27 +1,27 @@
 import * as THREE from 'three'
 import type { Context } from '@/runtime/context'
 import { resolveViewportSlot } from '@/runtime/context'
+import { cloneViewportCameraState } from '@/context/embedInitialView'
 import { fitCameraToGroup } from '@/render/interaction/initialCamera'
 import type { CameraMainKey } from '@/runtime/mainCameras'
 import {
   captureViewportCamera,
-  hasExplicitExternalCamera,
   resolveInitialViewportCamera,
 } from '@/runtime/viewportCamera'
 
-/** INIT / RESET：有外界初始则恢复 preset；否则 fit 结构 + 默认等轴 */
-export function applyViewportCameraFromMainInitial(
+/** INIT / RESET：有文档嵌入初始快照则整包恢复；否则 fit 结构 + 默认等轴 */
+export function applyViewportCameraFromDocumentInitial(
   ctx: Context,
   props?: Record<string, unknown>,
 ): void {
   const vp = resolveViewportSlot(ctx, props)
   const key: CameraMainKey = vp.cameraMainKey
-  const external = ctx.main.initialCameras[key].value
   const def = vp.definition.value
   const camRef = ctx.main.cameras[key]
+  const snapshot = ctx.main.embedInitialView.value
 
-  if (hasExplicitExternalCamera(external)) {
-    camRef.value = resolveInitialViewportCamera({ external, definition: def })
+  if (snapshot) {
+    camRef.value = cloneViewportCameraState(snapshot)
     return
   }
 
@@ -30,11 +30,11 @@ export function applyViewportCameraFromMainInitial(
   const orbit = vp.orbitTarget.value
   const dom = vp.domElement.value
   if (!group || !camera || !orbit || !dom) {
-    camRef.value = resolveInitialViewportCamera({ external, definition: def })
+    camRef.value = resolveInitialViewportCamera({ definition: def })
     return
   }
 
-  const preset = resolveInitialViewportCamera({ external, definition: def })
+  const preset = resolveInitialViewportCamera({ definition: def })
   fitCameraToGroup(
     camera as THREE.OrthographicCamera,
     group,
@@ -49,3 +49,6 @@ export function applyViewportCameraFromMainInitial(
   )
   camRef.value = captureViewportCamera(camera, orbit) ?? preset
 }
+
+/** @deprecated 使用 applyViewportCameraFromDocumentInitial */
+export const applyViewportCameraFromMainInitial = applyViewportCameraFromDocumentInitial

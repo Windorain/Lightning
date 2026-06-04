@@ -23,7 +23,6 @@ export interface EmbedUiOptions {
   initialLayerWorldY?: number
   /** World 多帧时指定起始帧，缺省为文档默认帧 */
   initialWorldFrameIndex?: number
-  initialCamera?: import('@/viewer/viewerConfig').InitialCamera
   sceneBackground?: number
   loadingMessage?: string
   okMessage?: (modelId: string) => string

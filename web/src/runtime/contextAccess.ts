@@ -9,7 +9,8 @@
  * | chrome | `wm.chrome` | `ctx.wm.chrome` — 瞬时菜单等 |
  * | tool | `REGION.WORKBENCH_TOOLSHELF` / `REGION.EMBED` → `state.tool` | `getToolSettings()` 或 `requireRegion` |
  * | session | `ScreenRoot.session` | `getSession()` |
- * | wiki 发布/初始相机 | `Main.embedPublish` / `Main.initialCameras.embed` | `OPERATOR_SET_WIKI_CONFIG` |
+ * | wiki 发布壳 | `Main.embedPublish` | `OPERATOR_SET_WIKI_CONFIG` |
+ * | 嵌入初始视角 | `doc.meta.embed_initial_view` / `Main.embedInitialView` | 嵌入配置面板「同步预览视角到文档」 |
  * | viewer | 视口 Region → `state.viewer` | `requireRegion(REGION.*_VIEWPORT\|EMBED)` |
  * | keymap | Region `keymapId` | `resolveRegionBaseKeymap`（`keymapHandler`） |
  *

@@ -6,7 +6,6 @@ import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { RenderBundle } from '@/render/schema/types'
 import type { Main } from '@/runtime/main'
-import { CAMERA_KEY } from '@/runtime/mainCameras'
 
 export interface InitialCamera {
   yawDeg?: number
@@ -130,12 +129,10 @@ function parseWikiSceneBackgroundHex(hex: string | undefined): number {
 /** Workbench Wiki 预览 tab → EmbedSettings（真源 Main） */
 export function buildEmbedSettingsFromMain(main: Main): EmbedSettings {
   const pub = main.embedPublish.value
-  const ic = main.initialCameras[CAMERA_KEY.embed].value
   return {
     features: { ...defaultEmbedUi.features, ...pub.features },
     blockIconCacheOptions: defaultEmbedUi.blockIconCacheOptions,
     initialLayerWorldY: defaultEmbedUi.initialLayerWorldY,
-    initialCamera: { ...ic },
     sceneBackground: parseWikiSceneBackgroundHex(pub.sceneBackgroundHex),
     loadingMessage: defaultEmbedUi.loadingMessage,
     okMessage: defaultEmbedUi.okMessage,

@@ -3,6 +3,7 @@ import type { WorkbenchWorkspaceMode } from '@/runtime/types'
 import type { DocumentBindingRef, DocumentLoadResult, DocumentSourceId } from './types'
 import { applyDocumentBinding } from './binding'
 import { pushRecentStructure } from '@/wiki/wikiRecentStructures'
+import { hydrateMainEmbedInitialViewFromDoc } from '@/context/embedInitialView'
 
 function workspaceModeForSource(sourceId: DocumentSourceId): WorkbenchWorkspaceMode {
   switch (sourceId) {
@@ -40,6 +41,7 @@ export async function documentLoadPipeline(
   if (result.document) {
     ctx.main.replaceDoc(result.document)
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
+    hydrateMainEmbedInitialViewFromDoc(ctx.main)
     ctx.getCurrentFrameIndex().value = 0
     const totalBlocks = result.document.frames.reduce(
       (sum, f) => sum + (f.grid?.count() ?? 0),
@@ -62,6 +64,7 @@ export async function documentLoadPipeline(
     }
   } else {
     ctx.main.replaceDoc(null)
+    ctx.main.embedInitialView.value = null
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
     ctx.log.error('场景加载', result.error ?? '未知错误', {
       locator: loadResult.locator,

@@ -7,6 +7,11 @@ import {
 } from '@/render/interaction/initialCamera'
 import type { StructureDefinition } from '@/render/schema/types'
 import { cameraToSpherical } from '@/pure/camera'
+import {
+  effectiveOrthoZoomForState,
+  orthoAspectFromFrustum,
+  setSymmetricOrthoFrustum,
+} from '@/render/viewport/orthoFrustum'
 import type { InitialCamera } from '@/viewer/viewerConfig'
 import type { Main } from '@/runtime/main'
 import type { CameraMainKey } from '@/runtime/mainCameras'
@@ -86,10 +91,17 @@ export function ensureMainViewportCamera(
 ): ViewportCameraState {
   const ref = main.cameras[key]
   if (!ref.value) {
-    ref.value = resolveInitialViewportCamera({
-      external: main.initialCameras[key].value,
-      definition,
-    })
+    if (main.embedInitialView.value) {
+      ref.value = {
+        target: { ...main.embedInitialView.value.target },
+        yawDeg: main.embedInitialView.value.yawDeg,
+        elevationDeg: main.embedInitialView.value.elevationDeg,
+        distance: main.embedInitialView.value.distance,
+        zoom: main.embedInitialView.value.zoom,
+      }
+    } else {
+      ref.value = resolveInitialViewportCamera({ definition })
+    }
   }
   return ref.value
 }
@@ -100,6 +112,10 @@ export function captureViewportCamera(
 ): ViewportCameraState | null {
   const spherical = cameraToSpherical(camera, orbitTarget)
   if (!spherical) return null
+  const zoom =
+    camera instanceof THREE.OrthographicCamera
+      ? Math.round(effectiveOrthoZoomForState(camera) * 100) / 100
+      : spherical.zoom
   const px = camera.position.x - orbitTarget.x
   const py = camera.position.y - orbitTarget.y
   const pz = camera.position.z - orbitTarget.z
@@ -107,7 +123,7 @@ export function captureViewportCamera(
   return {
     yawDeg: spherical.yawDeg,
     elevationDeg: spherical.elevationDeg,
-    zoom: spherical.zoom,
+    zoom,
     distance: Math.max(0.1, distance),
     target: { x: orbitTarget.x, y: orbitTarget.y, z: orbitTarget.z },
   }
@@ -136,10 +152,11 @@ export function applyViewportCameraState(
     elevationFromHorizontalDeg: state.elevationDeg,
     distance: state.distance,
   })
-  if ('zoom' in camera) {
-    const cam = camera as THREE.OrthographicCamera
-    cam.zoom = Math.max(0.01, state.zoom)
-    cam.updateProjectionMatrix()
+  if (camera instanceof THREE.OrthographicCamera) {
+    const aspect = orthoAspectFromFrustum(camera)
+    setSymmetricOrthoFrustum(camera, aspect)
+    camera.zoom = Math.max(0.01, state.zoom)
+    camera.updateProjectionMatrix()
   }
 }
 

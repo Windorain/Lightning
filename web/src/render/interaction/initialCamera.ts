@@ -13,6 +13,11 @@ import type { StructureDefinition } from '../schema/types'
 import { FACE_NORMAL } from '../mesh/faceConstants'
 import { buildVoxelVolume, findFirstVoxelWithBlockId } from '../data/grid'
 import { voxelCenterWorld } from '@/pure/vec'
+import {
+  orthoVerticalHalfExtent,
+  ORTHO_CANONICAL_HALF_HEIGHT,
+  setSymmetricOrthoFrustum,
+} from '@/render/viewport/orthoFrustum'
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0)
 
@@ -271,7 +276,13 @@ export function fitCameraToGroup(
 
   const aspect = domElement.clientWidth / Math.max(domElement.clientHeight, 1)
   fitOrthoFrustumToWorldBox(camera, box, aspect, options?.padding ?? 1.06)
-  camera.zoom =
+  const halfHFit = orthoVerticalHalfExtent(camera)
+  const presetZoom =
     typeof options?.zoom === 'number' && options.zoom > 0 ? options.zoom : 1
+  setSymmetricOrthoFrustum(camera, aspect)
+  camera.zoom = Math.max(
+    0.01,
+    presetZoom * (ORTHO_CANONICAL_HALF_HEIGHT / Math.max(halfHFit, 1e-4)),
+  )
   camera.updateProjectionMatrix()
 }

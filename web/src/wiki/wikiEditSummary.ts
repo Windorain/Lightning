@@ -1,4 +1,5 @@
 import type { RuntimeDocument } from '@/context/runtimeDocument'
+import { EMBED_INITIAL_VIEW_META_KEY } from '@/context/embedInitialView'
 
 /** 保存到灰机 Data:Structures 时的默认编辑摘要 */
 export const WIKI_DEFAULT_EDIT_SUMMARY = '结构工作台'
@@ -47,6 +48,10 @@ export function buildWikiEditSummaryDraft(
   }
   if (metaChanges > 0) {
     lines.push({ key: 'meta', label: '场景元数据', count: metaChanges })
+  }
+
+  if (metaFieldChanged(bMeta, cMeta, EMBED_INITIAL_VIEW_META_KEY)) {
+    lines.push({ key: 'embed_initial_view', label: '嵌入初始视角', count: 1 })
   }
 
   const tooltipDelta = countArrayDelta(

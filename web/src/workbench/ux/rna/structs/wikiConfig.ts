@@ -7,14 +7,10 @@ function pub(o: WikiConfigOwner) {
   return o.main.embedPublish.value
 }
 
-function ic(o: WikiConfigOwner) {
-  return o.main.initialCameras.embed.value
-}
-
 /** 写入经 RNAWidget → OPERATOR_SET_WIKI_CONFIG；descriptor.set 为 no-op */
 export const wikiConfigRNA: RNAStruct = {
   name: 'WikiConfig',
-  description: 'Wiki 视口配置',
+  description: 'Wiki 嵌入发布壳配置（视角见文档 meta.embed_initial_view）',
   properties: [
     {
       name: 'viewWidth',
@@ -70,27 +66,6 @@ export const wikiConfigRNA: RNAStruct = {
       type: 'boolean', label: '坐标轴', description: '视口内坐标轴指示器',
       default: false,
       get(o: WikiConfigOwner) { return pub(o).features.showAxesGizmo ?? false },
-      set(_o: WikiConfigOwner, _v: unknown) { /* OPERATOR_SET_WIKI_CONFIG */ },
-    },
-    {
-      name: 'cameraYaw',
-      type: 'number', label: '偏航角 (°)', description: '初始相机水平旋转角',
-      default: 45, min: 0, max: 360,
-      get(o: WikiConfigOwner) { return ic(o).yawDeg },
-      set(_o: WikiConfigOwner, _v: unknown) { /* OPERATOR_SET_WIKI_CONFIG */ },
-    },
-    {
-      name: 'cameraElevation',
-      type: 'number', label: '俯仰角 (°)', description: '初始相机仰角（水平面以上）',
-      default: 30, min: 5, max: 85,
-      get(o: WikiConfigOwner) { return ic(o).elevationDeg },
-      set(_o: WikiConfigOwner, _v: unknown) { /* OPERATOR_SET_WIKI_CONFIG */ },
-    },
-    {
-      name: 'cameraZoom',
-      type: 'number', label: '缩放', description: '初始正交相机 zoom',
-      default: 1, min: 0.05, max: 50,
-      get(o: WikiConfigOwner) { return ic(o).zoom },
       set(_o: WikiConfigOwner, _v: unknown) { /* OPERATOR_SET_WIKI_CONFIG */ },
     },
     {

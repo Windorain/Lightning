@@ -10,7 +10,6 @@ import type { DocumentSourceId } from '@/workbench/document/types'
 import { buildWikiEditSummaryDraft, hasWikiAuditableChanges } from '@/wiki/wikiEditSummary'
 import { wikiDataPageSource } from '@/workbench/document/sources/wikiDataPageSource'
 import { isEditConflictError } from '@/wiki/mwApiAdapter'
-
 export const DocumentLoadOperator: OperatorType = {
   id: 'OPERATOR_DOCUMENT_LOAD',
   label: '加载文档',

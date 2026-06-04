@@ -1,6 +1,5 @@
 import { ref, type Ref } from 'vue'
 import type { View3DFeatures } from '@/viewer/viewerConfig'
-import type { InitialCamera } from '@/viewer/viewerConfig'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
 import { REGION } from '@/runtime/regionIds'
 
@@ -42,7 +41,7 @@ export function cameraMainKeyForRegion(regionId: string): CameraMainKey {
 
 export function createMainCameraStore(): {
   cameras: Record<CameraMainKey, Ref<ViewportCameraState | null>>
-  initialCameras: Record<CameraMainKey, Ref<InitialCamera>>
+  embedInitialView: Ref<ViewportCameraState | null>
   embedPublish: Ref<EmbedPublishSettings>
 } {
   return {
@@ -50,23 +49,7 @@ export function createMainCameraStore(): {
       embed: ref(null),
       workbench: ref(null),
     },
-    initialCameras: {
-      embed: ref({}),
-      workbench: ref({}),
-    },
+    embedInitialView: ref(null),
     embedPublish: ref(defaultEmbedPublish()),
   }
-}
-
-/** 稀疏合并外界初始相机字段 */
-export function mergeSparseInitialCamera(
-  target: Ref<InitialCamera>,
-  patch: Partial<InitialCamera>,
-): void {
-  const cur = { ...target.value }
-  if (patch.yawDeg != null) cur.yawDeg = patch.yawDeg
-  if (patch.elevationDeg != null) cur.elevationDeg = patch.elevationDeg
-  if (patch.distance != null) cur.distance = patch.distance
-  if (patch.zoom != null) cur.zoom = patch.zoom
-  target.value = cur
 }

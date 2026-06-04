@@ -6,7 +6,7 @@
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import { resolveViewportSlot } from '@/runtime/context'
-import { applyViewportCameraFromMainInitial } from '@/runtime/viewportCameraApply'
+import { applyViewportCameraFromDocumentInitial } from '@/runtime/viewportCameraApply'
 import {
   ensureMainViewportCamera,
   rotateViewportState,
@@ -143,7 +143,7 @@ export const InitViewportCameraOperator: OperatorType = {
     return vp.camera.value !== null
   },
   exec(ctx, props) {
-    applyViewportCameraFromMainInitial(ctx, props)
+    applyViewportCameraFromDocumentInitial(ctx, props)
   },
 }
 
@@ -158,7 +158,7 @@ export const ViewResetOperator: OperatorType = {
   },
 
   exec(ctx, props) {
-    applyViewportCameraFromMainInitial(ctx, props)
+    applyViewportCameraFromDocumentInitial(ctx, props)
   },
 }
 

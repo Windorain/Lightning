@@ -15,7 +15,6 @@ import { displayNameFromLocator as locDisplay } from '@/wiki/wikiUrls'
 import { afterDocumentSave } from '@/workbench/document/pipeline'
 import { applyDocumentBinding } from '@/workbench/document/binding'
 import { pushRecentStructure } from '@/wiki/wikiRecentStructures'
-
 export const WikiPickAndLoadOperator: OperatorType = {
   id: 'OPERATOR_WIKI_PICK_AND_LOAD',
   label: '从 Wiki 加载',

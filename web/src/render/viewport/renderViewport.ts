@@ -4,8 +4,9 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import type { SelectionOutlinePass } from '../postprocessing/SelectionOutlinePass'
+import { ORTHO_CANONICAL_HALF_HEIGHT, setSymmetricOrthoFrustum } from './orthoFrustum'
 
-const DEFAULT_FRUSTUM_SIZE = 10
+const DEFAULT_FRUSTUM_SIZE = ORTHO_CANONICAL_HALF_HEIGHT * 2
 
 /**
  * 自包含 3D 视口：持有 WebGLRenderer + OrthographicCamera + EffectComposer + WorldAxesGizmo。
@@ -130,13 +131,7 @@ export class View3DRenderer {
     const h = Math.max(height, 1)
     const aspect = w / h
 
-    const cam = this.camera
-    const halfH = cam.top > 0 && cam.bottom < 0 ? cam.top : DEFAULT_FRUSTUM_SIZE / 2
-    cam.left = -halfH * aspect
-    cam.right = halfH * aspect
-    cam.top = halfH
-    cam.bottom = -halfH
-    cam.updateProjectionMatrix()
+    setSymmetricOrthoFrustum(this.camera, aspect)
 
     this.renderer.setPixelRatio(window.devicePixelRatio)
     this.renderer.setSize(w, h)

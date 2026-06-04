@@ -175,27 +175,6 @@ $(function () {
       ui.loadingMessage = String(lm)
     }
 
-    var yaw = parseNumAttr(el, 'data-wsr-camera-yaw')
-    var elv = parseNumAttr(el, 'data-wsr-camera-elevation')
-    var dist = parseNumAttr(el, 'data-wsr-camera-distance')
-    var zm = parseNumAttr(el, 'data-wsr-camera-zoom')
-    if (yaw !== undefined || elv !== undefined || dist !== undefined || zm !== undefined) {
-      var cam = {}
-      if (yaw !== undefined) {
-        cam.yawDeg = yaw
-      }
-      if (elv !== undefined) {
-        cam.elevationDeg = elv
-      }
-      if (dist !== undefined) {
-        cam.distance = dist
-      }
-      if (zm !== undefined) {
-        cam.zoom = zm
-      }
-      ui.initialCamera = cam
-    }
-
     var iconPx = parseNumAttr(el, 'data-wsr-icon-size-px')
     var orthoH = parseNumAttr(el, 'data-wsr-icon-ortho-half')
     if (iconPx !== undefined || orthoH !== undefined) {

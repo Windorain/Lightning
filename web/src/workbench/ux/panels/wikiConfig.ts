@@ -34,12 +34,8 @@ export const wikiConfigPanel: PanelDeclaration = {
         },
         { kind: 'separator' },
         {
-          kind: 'box', label: '初始相机', items: [
-            { kind: 'property', rnaPath: 'wikiconfig.cameraYaw', label: '偏航角 (°)' },
-            { kind: 'property', rnaPath: 'wikiconfig.cameraElevation', label: '仰角 (°)' },
-            { kind: 'property', rnaPath: 'wikiconfig.cameraZoom', label: '缩放' },
-            { kind: 'separator' },
-            { kind: 'operator', id: 'OPERATOR_COPY_CAMERA_FROM_EMBED', label: '从预览拷贝当前相机' },
+          kind: 'box', label: '嵌入初始视角', items: [
+            { kind: 'operator', id: 'OPERATOR_SYNC_EMBED_INITIAL_VIEW', label: '同步预览视角到文档' },
           ],
         },
         { kind: 'separator' },

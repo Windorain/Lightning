@@ -13,7 +13,6 @@ import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { Host } from '@/runtime/host'
 import { resolveEmbedViewportRegionId, resolveEmbedViewerPreferences } from '@/runtime/embedViewportRegion'
-import { REGION } from '@/runtime/regionIds'
 import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
 import { blockRefFromViewportHover } from '@/runtime/hover'
 import { createEmbedSidebarOutlineMasks } from '@/runtime/embedSidebarOutline'
@@ -87,19 +86,6 @@ watch(loadStatus, (status) => {
 watch(() => ctx.getDoc().value, () => {
   didInitCamera.value = false
 })
-
-const isWikiWorkbenchPreview = viewportRegionId === REGION.WIKI_PREVIEW
-watch(
-  () => [
-    ctx.main.initialCameras.embed.value.yawDeg,
-    ctx.main.initialCameras.embed.value.elevationDeg,
-    ctx.main.initialCameras.embed.value.zoom,
-  ],
-  () => {
-    if (!isWikiWorkbenchPreview || loadStatus.value !== 'ok' || !mainMeshGroup.value) return
-    void ctx.getOperators().exec('OPERATOR_INIT_VIEWPORT_CAMERA', initCameraProps)
-  },
-)
 
 const selectedBlockId = ref<string | null>(null)
 
