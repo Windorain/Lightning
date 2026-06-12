@@ -264,7 +264,7 @@ export function fitCameraToGroup(
 
   const maxDim = Math.max(size.x, size.y, size.z, 0.1)
   const dist = Math.max(8, maxDim * 2.2)
-  const finalDist = options?.distance ?? dist
+  const finalDist = Math.max(options?.distance ?? 0, dist)
 
   orbitTarget.copy(center)
   applyDiagonalOrbitView(camera, orbitTarget, {
