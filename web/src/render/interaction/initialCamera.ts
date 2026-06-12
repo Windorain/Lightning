@@ -165,17 +165,21 @@ export function resolveFocusOrbitTarget(
 export const ORTHO_FRUSTUM_REF_HALF_FOV_DEG = 25
 
 export interface FitCameraToGroupOptions {
-  /** 覆盖方位角（度），缺省 225 */
+  /** 方位角（度），缺省 225 */
   yawDeg?: number
-  /** 覆盖俯仰角（度），缺省 STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG */
+  /** 俯仰角（度），缺省 STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG */
   elevationDeg?: number
-  /** 覆盖相机到轨道中心的距离 */
-  distance?: number
-  /** 覆盖正交相机 zoom */
+  /** 最小距离：计算结果不会低于此值，用于防止预设距离过小 */
+  minDistance?: number
+  /** 正交相机 zoom */
   zoom?: number
   /** 视锥相对包围盒留白，默认 1.06 */
   padding?: number
 }
+
+export type FitCameraResult =
+  | { ok: true }
+  | { ok: false; reason: string }
 
 /**
  * 正交视锥在相机视空间内包住世界包围盒（含非正方形视口宽高比）。
@@ -245,6 +249,7 @@ export function fitOrthoFrustumToWorldBox(
 /**
  * 将正交相机适配到 THREE.Group 的内容包围盒。
  * 计算 group 的世界包围盒 → 中心 → 等轴视角 → 视空间视锥贴合模型。
+ * 返回 FitCameraResult：成功时 camera 已更新并携带 state；失败时 reason 说明原因。
  */
 export function fitCameraToGroup(
   camera: THREE.OrthographicCamera,
@@ -252,10 +257,12 @@ export function fitCameraToGroup(
   orbitTarget: THREE.Vector3,
   domElement: HTMLElement,
   options?: FitCameraToGroupOptions,
-): void {
+): FitCameraResult {
   group.updateMatrixWorld(true)
   const box = new THREE.Box3().setFromObject(group)
-  if (box.isEmpty() || !Number.isFinite(box.min.x)) return
+  if (box.isEmpty() || !Number.isFinite(box.min.x)) {
+    return { ok: false, reason: 'group has no geometry bounds' }
+  }
 
   const center = new THREE.Vector3()
   const size = new THREE.Vector3()
@@ -264,7 +271,7 @@ export function fitCameraToGroup(
 
   const maxDim = Math.max(size.x, size.y, size.z, 0.1)
   const dist = Math.max(8, maxDim * 2.2)
-  const finalDist = Math.max(options?.distance ?? 0, dist)
+  const finalDist = Math.max(options?.minDistance ?? 0, dist)
 
   orbitTarget.copy(center)
   applyDiagonalOrbitView(camera, orbitTarget, {
@@ -285,4 +292,6 @@ export function fitCameraToGroup(
     presetZoom * (ORTHO_CANONICAL_HALF_HEIGHT / Math.max(halfHFit, 1e-4)),
   )
   camera.updateProjectionMatrix()
+
+  return { ok: true }
 }

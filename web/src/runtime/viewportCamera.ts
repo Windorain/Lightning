@@ -112,6 +112,8 @@ export function captureViewportCamera(
 ): ViewportCameraState | null {
   const spherical = cameraToSpherical(camera, orbitTarget)
   if (!spherical) return null
+  // 极端仰角（-90°/90°）说明相机在目标正下/正上方，通常是未正确摆放的产物
+  if (Math.abs(spherical.elevationDeg) > 89) return null
   const zoom =
     camera instanceof THREE.OrthographicCamera
       ? Math.round(effectiveOrthoZoomForState(camera) * 100) / 100
