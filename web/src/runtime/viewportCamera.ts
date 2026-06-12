@@ -173,7 +173,7 @@ export function rotateViewportYawState(s: ViewportCameraState, dYawDeg: number):
 export function rotateViewportElevationState(s: ViewportCameraState, dElevDeg: number): ViewportCameraState {
   return {
     ...s,
-    elevationDeg: s.elevationDeg + dElevDeg,
+    elevationDeg: Math.max(-89.9, Math.min(89.9, s.elevationDeg + dElevDeg)),
   }
 }
 
