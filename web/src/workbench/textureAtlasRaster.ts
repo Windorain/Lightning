@@ -172,7 +172,7 @@ export async function rasterizeVoxelAtlasToPngBlob(options: {
   atlasWidth: number
   atlasHeight: number
   placements: AtlasTilePlacement[]
-  tileSources: VoxelAtlasTileSource[]
+  tileSources: (VoxelAtlasTileSource | null | undefined)[]
   blobs: string[]
   representativeEntry: (blobIndex: number) => MaterialPaletteEntry | undefined
 }): Promise<Blob> {

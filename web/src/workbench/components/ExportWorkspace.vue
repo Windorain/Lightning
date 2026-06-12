@@ -31,6 +31,9 @@ function downloadObjBlock(): void {
 function downloadObjConnected(): void {
   try { ctx.getOperators().exec('OPERATOR_EXPORT_OBJ', { connected: true }); msg('已导出 OBJ (connected)') } catch (e) { msg(formatUnknownError(e)) }
 }
+function downloadObjLayered(): void {
+  try { ctx.getOperators().exec('OPERATOR_EXPORT_OBJ', { mode: 'layered' }); msg('已导出 OBJ (layered)') } catch (e) { msg(formatUnknownError(e)) }
+}
 
 const isoDir = ref(0)
 const isoUrl = ref<string | null>(null)
@@ -71,7 +74,7 @@ function pushToServer(): void {
       <section class="ew-card">
         <h3>{{ t("obj") }}</h3>
         <p class="ew-desc">{{ t("objDesc") }}</p>
-        <div class="ew-row"><button class="ew-btn" @click="void downloadObjBlock()">{{ t("objBlock") }}</button><button class="ew-btn" @click="void downloadObjConnected()">{{ t("objConnected") }}</button></div>
+        <div class="ew-row"><button class="ew-btn" @click="void downloadObjBlock()">{{ t("objBlock") }}</button><button class="ew-btn" @click="void downloadObjConnected()">{{ t("objConnected") }}</button><button class="ew-btn" @click="void downloadObjLayered()">{{ t("objLayered") }}</button></div>
       </section>
 
       <section class="ew-card">

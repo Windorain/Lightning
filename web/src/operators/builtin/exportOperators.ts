@@ -59,11 +59,12 @@ export const ExportObjOperator: OperatorType = {
   async exec(ctx, _props) {
     const doc = ctx.getDoc().value?.serialize()
     if (!doc) return
+    const explicit = (_props.mode as string | undefined)
     const connected = (_props.connected as boolean) ?? false
-    const mode = connected ? 'connected' : 'block'
+    const mode = explicit ?? (connected ? 'connected' : 'block')
     const baseName = sceneStableStringIdFromDocument(doc)
     const def = loadStructureOrWorld(doc, undefined)
-    const blob = await buildStructureBundleZip(def, doc, { mode })
+    const blob = await buildStructureBundleZip(def, doc, { mode: mode as any })
     downloadBlob(`${baseName}-${mode}.zip`, blob)
   },
 }

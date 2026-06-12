@@ -88,6 +88,7 @@ const dict: Record<string, Record<Lang, string>> = {
   'copyToClipboard': { zh: '复制到剪贴板', en: 'Copy to Clipboard' },
   'objBlock': { zh: '方块模式 .zip', en: 'Block mode .zip' },
   'objConnected': { zh: '连通模式 .zip', en: 'Connected mode .zip' },
+  'objLayered': { zh: '分层模式 .zip', en: 'Layered mode .zip' },
   'json': { zh: 'JSON', en: 'JSON' },
   'obj': { zh: 'OBJ 3D 模型', en: 'OBJ 3D Model' },
   'isoPng': { zh: '等轴 PNG', en: 'Isometric PNG' },
