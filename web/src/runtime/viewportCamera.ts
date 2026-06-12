@@ -80,7 +80,7 @@ export function resolveInitialViewportCamera(opts: {
 
   base.distance = numOr(base.distance, DEFAULT_DISTANCE)
   base.zoom = numOr(base.zoom, 1)
-  base.elevationDeg = Math.max(1, Math.min(89, base.elevationDeg))
+  base.elevationDeg = numOr(base.elevationDeg, STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG)
   return base
 }
 
@@ -112,8 +112,6 @@ export function captureViewportCamera(
 ): ViewportCameraState | null {
   const spherical = cameraToSpherical(camera, orbitTarget)
   if (!spherical) return null
-  // 极端仰角（-90°/90°）说明相机在目标正下/正上方，通常是未正确摆放的产物
-  if (Math.abs(spherical.elevationDeg) > 89) return null
   const zoom =
     camera instanceof THREE.OrthographicCamera
       ? Math.round(effectiveOrthoZoomForState(camera) * 100) / 100
@@ -175,7 +173,7 @@ export function rotateViewportYawState(s: ViewportCameraState, dYawDeg: number):
 export function rotateViewportElevationState(s: ViewportCameraState, dElevDeg: number): ViewportCameraState {
   return {
     ...s,
-    elevationDeg: Math.max(1, Math.min(89, s.elevationDeg + dElevDeg)),
+    elevationDeg: s.elevationDeg + dElevDeg,
   }
 }
 
