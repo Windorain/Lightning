@@ -40,11 +40,47 @@
 //   data-wsr-feature-block-stats     → blockStatsSidebar
 //   data-wsr-feature-debug-status    → debugStatusBar
 //   data-wsr-feature-axes-gizmo     → showAxesGizmo
+//   data-wsr-feature-edit-workbench → editInWorkbench（默认随 titleBar 显示编辑钮；显式 false 可隐藏）
 // —— mobile ——
 //   data-wsr-mobile-fit            默认开启；0/false 关闭外壳等比缩放
 //   data-wsr-mobile-profile        auto（默认）| desktop | compact
 
 /* global $, mw, document, window, console */
+window.WSR = window.WSR || {}
+;(function (WSR) {
+  WSR.WIKI_WORKBENCH_HUB_TITLE = '在线结构工作台'
+
+  function trim(s) {
+    return String(s == null ? '' : s).replace(/^\s+|\s+$/g, '')
+  }
+
+  function normalizeStructureBase(raw) {
+    var v = trim(raw)
+    if (!v) return ''
+    v = v.replace(/\.json$/i, '')
+    v = v.replace(/^Data:Structures\//i, '')
+    v = v.replace(/^Data:/i, '')
+    var slash = v.lastIndexOf('/')
+    if (slash >= 0) v = v.slice(slash + 1)
+    return v.replace(/\.json$/i, '')
+  }
+
+  WSR.normalizeStructureBase = normalizeStructureBase
+
+  WSR.buildWorkbenchHubUrl = function (structureBase) {
+    var base = normalizeStructureBase(structureBase)
+    if (!base) return ''
+    var pageEnc = encodeURIComponent(WSR.WIKI_WORKBENCH_HUB_TITLE.replace(/ /g, '_'))
+    return location.origin + '/wiki/' + pageEnc + '?data=' + encodeURIComponent(base)
+  }
+
+  WSR.openWorkbenchInNewTab = function (structureBase) {
+    var url = WSR.buildWorkbenchHubUrl(structureBase)
+    if (!url) return
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+})(window.WSR)
+
 $(function () {
   function loadCss() {
     if (document.querySelector('link[data-wsr-css]')) {
@@ -134,13 +170,38 @@ $(function () {
     if (v == null || typeof v !== 'string') {
       return ''
     }
-    v = v.replace(/^\s+|\s+$/g, '')
+    v = window.WSR.normalizeStructureBase(v)
     if (!v) {
       return ''
     }
-    v = v.replace(/\.json$/i, '')
     return 'Data:Structures/' + v + '.json'
   }
+
+  function structureBaseFromMountEl(el) {
+    var title = structureDataTitleFromMountEl(el)
+    if (!title) return ''
+    var m = /^Data:Structures\/(.+)\.json$/i.exec(title)
+    return m ? m[1].replace(/\.json$/i, '') : ''
+  }
+
+  function pollWorkbenchEdit(mountEl) {
+    var base = structureBaseFromMountEl(mountEl)
+    if (!base) {
+      return { enabled: false, reason: '未指定结构（data-wsr-structure）' }
+    }
+    if (!window.mw) {
+      return { enabled: false, reason: '仅 Wiki 内可编辑' }
+    }
+    var name =
+      (window.mw.user && window.mw.user.getName && window.mw.user.getName()) ||
+      (window.mw.config && window.mw.config.get('wgUserName'))
+    if (!name) {
+      return { enabled: false, reason: '请登录后编辑' }
+    }
+    return { enabled: true, reason: '在结构工作台中打开' }
+  }
+
+  window.WSR.pollWorkbenchEdit = pollWorkbenchEdit
 
   function uiFromMountEl(el) {
     var ui = {}
@@ -199,6 +260,7 @@ $(function () {
       ['data-wsr-feature-block-stats', 'blockStatsSidebar'],
       ['data-wsr-feature-debug-status', 'debugStatusBar'],
       ['data-wsr-feature-axes-gizmo', 'showAxesGizmo'],
+      ['data-wsr-feature-edit-workbench', 'editInWorkbench'],
     ]
     for (var i = 0; i < pairs.length; i++) {
       var b = parseBoolAttr(el, pairs[i][0])
@@ -213,6 +275,11 @@ $(function () {
     var bootstrap = {
       data: { document: doc },
     }
+    var base = structureBaseFromMountEl(el)
+    if (base) {
+      bootstrap.structureBase = base
+    }
+    bootstrap.workbenchEdit = pollWorkbenchEdit(el)
     var ui = uiFromMountEl(el)
     if (objectHasAnyKey(ui)) {
       bootstrap.ui = ui

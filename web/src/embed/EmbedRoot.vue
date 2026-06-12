@@ -18,7 +18,11 @@ const settings = buildEmbedSettingsFromBootstrap({
   ui: props.bootstrap.ui,
   features: props.bootstrap.features,
 })
-const { host, ctx } = createEmbedHost(settings)
+const { host, ctx } = createEmbedHost(settings, {
+  structureBase: props.bootstrap.structureBase,
+  workbenchEdit: props.bootstrap.workbenchEdit,
+  handlers: props.bootstrap.handlers,
+})
 
 const loadError = ref('')
 

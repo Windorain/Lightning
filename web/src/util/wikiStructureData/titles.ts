@@ -2,6 +2,8 @@ export function normalizeBase(name: string): string {
   let v = String(name || '').trim()
   v = v.replace(/\.json$/i, '')
   v = v.replace(/\\/g, '/')
+  v = v.replace(/^Data:Structures\//i, '')
+  v = v.replace(/^Data:/i, '')
   const slash = v.lastIndexOf('/')
   if (slash >= 0) v = v.slice(slash + 1)
   return v

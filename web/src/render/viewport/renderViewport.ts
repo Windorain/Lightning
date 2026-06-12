@@ -41,13 +41,18 @@ export class View3DRenderer {
     return this._outlinePass
   }
 
+  /** 截屏等需读写 WebGL 清屏色时使用 */
+  get webglRenderer(): THREE.WebGLRenderer {
+    return this.renderer
+  }
+
   constructor(container: HTMLElement, width: number, height: number) {
     this.container = container
     const w = Math.max(width, 1)
     const h = Math.max(height, 1)
     const aspect = w / h
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true })
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true })
     this.renderer.setPixelRatio(window.devicePixelRatio)
     this.renderer.setSize(w, h)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace

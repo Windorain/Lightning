@@ -1,5 +1,5 @@
 import type { Context } from '@/runtime/context'
-import { normalizeBase } from '@/util/wikiStructureData'
+import { indexTitle, normalizeBase } from '@/util/wikiStructureData'
 
 declare global {
   interface Window {
@@ -10,23 +10,14 @@ declare global {
 function readBootDataTitle(): string | null {
   if (typeof document === 'undefined') return null
   const fromGlobal = window.__WSR_WORKBENCH_DATA_TITLE__?.trim()
-  if (fromGlobal) {
-    if (/^Data:/i.test(fromGlobal)) return fromGlobal
-    return `Data:Structures/${normalizeBase(fromGlobal)}.json`
-  }
+  if (fromGlobal) return indexTitle(fromGlobal)
   const root =
     document.querySelector('.web-structure-workbench') ??
     document.getElementById('wsr-workbench-app')
   const fromAttr = root?.getAttribute('data-wsw-data')?.trim()
-  if (fromAttr) {
-    const base = normalizeBase(fromAttr)
-    return `Data:Structures/${base}.json`
-  }
+  if (fromAttr) return indexTitle(fromAttr)
   const q = new URLSearchParams(window.location.search).get('data')?.trim()
-  if (q) {
-    if (/^Data:/i.test(q)) return q
-    return `Data:Structures/${normalizeBase(q)}.json`
-  }
+  if (q) return indexTitle(q)
   return null
 }
 

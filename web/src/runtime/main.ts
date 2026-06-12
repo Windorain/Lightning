@@ -7,6 +7,7 @@ import {
   type EmbedPublishSettings,
 } from '@/runtime/mainCameras'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
+import type { EmbedWorkbenchEditHandlers } from '@/embed/embedContract'
 import type { OperatorRegistry } from '@/operators/operatorRegistry'
 import { wrapOperatorRegistry } from '@/operators/operatorRegistry'
 import type { Context } from '@/runtime/context'
@@ -45,6 +46,14 @@ export class Main {
   /** 文档 `meta.embed_initial_view` 的运行时镜像（加载/同步后写入） */
   readonly embedInitialView: Ref<ViewportCameraState | null>
   readonly embedPublish: Ref<EmbedPublishSettings>
+  /** Wiki `data-wsr-structure` 对应 base 名（Embed 编辑跳转用） */
+  readonly embedStructureBase = ref<string | null>(null)
+  /** Entry `pollWorkbenchEdit` 结果（标题栏编辑钮灰显与 tooltip） */
+  readonly embedWorkbenchEdit = ref<{ enabled: boolean; reason: string }>({
+    enabled: false,
+    reason: '',
+  })
+  embedWorkbenchHandlers: EmbedWorkbenchEditHandlers | null = null
 
   constructor(registries: Omit<MainRegistries, 'parsers' | 'operatorsFacade'> & {
     parsers?: ParserRegistryImpl

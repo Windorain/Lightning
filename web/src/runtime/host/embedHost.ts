@@ -7,7 +7,9 @@ import {
 import { SyncEmbedInitialViewOperator } from '@/operators/builtin/embedInitialViewOperators'
 import { LoadEmbedDocumentOperator } from '@/operators/builtin/docLifecycleOperators'
 import { V2PlainParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/context/parsers/builtinParsers'
+import type { EmbedBootstrapOptions } from '@/embed/embedContract'
 import type { EmbedSettings } from '@/viewer/viewerConfig'
+import { OpenWikiWorkbenchOperator } from '@/operators/builtin/embedWorkbenchOperators'
 import { Main } from '@/runtime/main'
 import { WM } from '@/runtime/wm'
 import { Context } from '@/runtime/context'
@@ -33,7 +35,10 @@ export class EmbedHost extends HostBase {
   }
 }
 
-export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx: Context } {
+export function createEmbedHost(
+  settings: EmbedSettings,
+  bootstrap?: Pick<EmbedBootstrapOptions, 'structureBase' | 'workbenchEdit' | 'handlers'>,
+): { host: EmbedHost; ctx: Context } {
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
   const wm = new WM(logCenter, { surface: 'embed' })
@@ -47,6 +52,14 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
     tools: null,
     rna: null,
   })
+
+  if (bootstrap?.structureBase) {
+    main.embedStructureBase.value = bootstrap.structureBase
+  }
+  if (bootstrap?.workbenchEdit) {
+    main.embedWorkbenchEdit.value = bootstrap.workbenchEdit
+  }
+  main.embedWorkbenchHandlers = bootstrap?.handlers?.workbenchEdit ?? null
 
   const parsers = main.registries.parsers
   parsers.register(V2PlainParser)
@@ -65,6 +78,7 @@ export function createEmbedHost(settings: EmbedSettings): { host: EmbedHost; ctx
     ViewRotateOperator, ViewPanOperator, ViewZoomOperator, ViewResetOperator,
     InitViewportCameraOperator,
     SyncEmbedInitialViewOperator, LoadEmbedDocumentOperator,
+    OpenWikiWorkbenchOperator,
     SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetLayerYOperator,
   ]) {
     if (!registry.find(op.id)) registry.register(op)

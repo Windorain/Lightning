@@ -18,6 +18,17 @@ export interface EmbedData {
  * - data-wsr-mobile-fit：默认开启外壳等比缩放；`0` 关闭
  * - data-wsr-mobile-profile：`auto` | `desktop` | `compact`
  */
+export interface EmbedWorkbenchEditState {
+  enabled: boolean
+  reason: string
+}
+
+export interface EmbedWorkbenchEditHandlers {
+  /** 返回 false 则取消默认打开 Hub 新标签 */
+  beforeOpen?: (ctx: { structureBase: string }) => boolean | Promise<boolean>
+  afterOpen?: (ctx: { structureBase: string }) => void
+}
+
 export interface EmbedUiOptions {
   blockIconCacheOptions?: Partial<BlockIconCacheOptions>
   initialLayerWorldY?: number
@@ -37,4 +48,10 @@ export interface EmbedBootstrapOptions {
   /** 未指定字段使用 defaultEmbedUi（previewConfig） */
   features?: Partial<View3DFeatures>
   ui?: EmbedUiOptions
+  /** 与 data-wsr-structure 一致，不含 Data: 前缀 */
+  structureBase?: string
+  workbenchEdit?: EmbedWorkbenchEditState
+  handlers?: {
+    workbenchEdit?: EmbedWorkbenchEditHandlers
+  }
 }

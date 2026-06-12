@@ -24,6 +24,8 @@ export interface View3DFeatures {
   titleBar: boolean
   debugStatusBar: boolean
   showAxesGizmo: boolean
+  /** 标题栏「在结构工作台中打开」（需 data-wsr-feature-edit-workbench） */
+  editInWorkbench?: boolean
 }
 
 export const ALL_FEATURES_OFF: View3DFeatures = {
@@ -33,6 +35,7 @@ export const ALL_FEATURES_OFF: View3DFeatures = {
   titleBar: false,
   debugStatusBar: false,
   showAxesGizmo: false,
+  editInWorkbench: false,
 }
 
 /**

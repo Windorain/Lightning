@@ -151,9 +151,23 @@ export class RenderEngine {
     const vp = this.renderer
     const canvas = vp?.domElement
     if (!canvas || !vp || !this.mainScene || !this.overlayScene) return
+
+    const gl = vp.webglRenderer
+    const prevBg = this.mainScene.background
+    const prevClear = new THREE.Color()
+    const prevClearAlpha = gl.getClearAlpha()
+    gl.getClearColor(prevClear)
+
+    this.mainScene.background = null
+    gl.setClearColor(0x000000, 0)
+
     vp.renderMain()
     vp.renderOverlay(this.overlayScene)
+
     const dataUrl = canvas.toDataURL('image/png')
+
+    this.mainScene.background = prevBg
+    gl.setClearColor(prevClear, prevClearAlpha)
     const a = document.createElement('a')
     a.href = dataUrl
     a.download = `lightning-screenshot-${Date.now()}.png`

@@ -132,6 +132,15 @@ const showTitle = computed(() => f.value?.titleBar ?? false)
 const showStats = computed(() => f.value?.blockStatsSidebar ?? false)
 const showDebugStatus = computed(() => (f.value?.debugStatusBar ?? false) && (s.value?.debug ?? false))
 const showAxesGizmo = computed(() => f.value?.showAxesGizmo ?? false)
+/** 与标题栏同显；仅当 data-wsr-feature-edit-workbench=false 时隐藏 */
+const showEditInWorkbench = computed(() => {
+  if (f.value?.editInWorkbench === false) return false
+  return (f.value?.titleBar ?? false) || f.value?.editInWorkbench === true
+})
+const workbenchEdit = computed(() => ctx.main.embedWorkbenchEdit.value)
+const editWorkbenchTitle = computed(() =>
+  workbenchEdit.value.enabled ? '在结构工作台中打开' : workbenchEdit.value.reason,
+)
 const hasBottomDock = computed(() =>
   (showFrameCtl.value && hasWorldMultiFrame.value) || showLayerBar.value,
 )
@@ -245,7 +254,14 @@ onBeforeUnmount(() => {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
         </button>
         <span class="wm-titlebar-sep wsr-mobile-hide" />
-        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="在编辑器中打开 (TODO)" disabled>
+        <button
+          v-if="showEditInWorkbench"
+          type="button"
+          class="nei-icon-btn wsr-mobile-hide"
+          :title="editWorkbenchTitle"
+          :disabled="!workbenchEdit.enabled"
+          @click="void ctx.getOperators().exec('OPERATOR_EMBED_OPEN_WIKI_WORKBENCH')"
+        >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
         </button>
         <button type="button" class="nei-icon-btn" title="设置" @click="showSettingsPanel = !showSettingsPanel">

@@ -12,6 +12,8 @@ describe('wikiStructureData', () => {
   it('normalizeBase strips path and extension', () => {
     expect(normalizeBase('Data:Structures/Foo.json')).toBe('Foo')
     expect(normalizeBase('  bar.json ')).toBe('bar')
+    expect(normalizeBase('Data:夸克胶子AE方案结构')).toBe('夸克胶子AE方案结构')
+    expect(normalizeBase('Data:Structures/Data:夸克胶子AE方案结构.json')).toBe('夸克胶子AE方案结构')
   })
 
   it('indexTitle', () => {
