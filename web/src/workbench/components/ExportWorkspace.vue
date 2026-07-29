@@ -25,14 +25,14 @@ async function copyRawJson(): Promise<void> {
   if (!doc.value) return
   try { const raw = doc.value; await copyTextToClipboard(JSON.stringify(raw, null, 2)); msg('已复制到剪贴板') } catch (e) { msg(formatUnknownError(e)) }
 }
-function downloadObjBlock(): void {
-  try { ctx.getOperators().exec('OPERATOR_EXPORT_OBJ', { connected: false }); msg('已导出 OBJ (block)') } catch (e) { msg(formatUnknownError(e)) }
+async function downloadObjBlock(): Promise<void> {
+  try { await ctx.getOperators().exec('OPERATOR_EXPORT_OBJ', { connected: false }); msg('已导出 OBJ (block)') } catch (e) { msg(formatUnknownError(e)) }
 }
-function downloadObjConnected(): void {
-  try { ctx.getOperators().exec('OPERATOR_EXPORT_OBJ', { connected: true }); msg('已导出 OBJ (connected)') } catch (e) { msg(formatUnknownError(e)) }
+async function downloadObjConnected(): Promise<void> {
+  try { await ctx.getOperators().exec('OPERATOR_EXPORT_OBJ', { connected: true }); msg('已导出 OBJ (connected)') } catch (e) { msg(formatUnknownError(e)) }
 }
-function downloadObjLayered(): void {
-  try { ctx.getOperators().exec('OPERATOR_EXPORT_OBJ', { mode: 'layered' }); msg('已导出 OBJ (layered)') } catch (e) { msg(formatUnknownError(e)) }
+async function downloadObjLayered(): Promise<void> {
+  try { await ctx.getOperators().exec('OPERATOR_EXPORT_OBJ', { mode: 'layered' }); msg('已导出 OBJ (layered)') } catch (e) { msg(formatUnknownError(e)) }
 }
 
 const isoDir = ref(0)
@@ -49,8 +49,8 @@ async function bakeIso(): Promise<void> {
   finally { if (seq === isoSeq) isoBusy.value = false }
 }
 watch(() => [doc.value, isoDir.value] as const, () => { void bakeIso() }, { immediate: true })
-function downloadIso(): void {
-  try { ctx.getOperators().exec('OPERATOR_EXPORT_ISO_PNG', { direction: isoDir.value }); msg(`已下载等轴视角 PNG ${isoDir.value + 1}/4`) } catch (e) { msg(formatUnknownError(e)) }
+async function downloadIso(): Promise<void> {
+  try { await ctx.getOperators().exec('OPERATOR_EXPORT_ISO_PNG', { direction: isoDir.value }); msg(`已下载等轴视角 PNG ${isoDir.value + 1}/4`) } catch (e) { msg(formatUnknownError(e)) }
 }
 function pushToServer(): void {
   try { ctx.getOperators().exec('OPERATOR_SDE_PUSH'); msg('已同步到 SDE') } catch (e) { msg(formatUnknownError(e)) }
@@ -74,7 +74,7 @@ function pushToServer(): void {
       <section class="ew-card">
         <h3>{{ t("obj") }}</h3>
         <p class="ew-desc">{{ t("objDesc") }}</p>
-        <div class="ew-row"><button class="ew-btn" @click="void downloadObjBlock()">{{ t("objBlock") }}</button><button class="ew-btn" @click="void downloadObjConnected()">{{ t("objConnected") }}</button><button class="ew-btn" @click="void downloadObjLayered()">{{ t("objLayered") }}</button></div>
+        <div class="ew-row"><button class="ew-btn" @click="downloadObjBlock()">{{ t("objBlock") }}</button><button class="ew-btn" @click="downloadObjConnected()">{{ t("objConnected") }}</button><button class="ew-btn" @click="downloadObjLayered()">{{ t("objLayered") }}</button></div>
       </section>
 
       <section class="ew-card">
@@ -82,7 +82,7 @@ function pushToServer(): void {
         <p class="ew-desc">{{ t("isoDesc") }}</p>
         <div class="ew-row">
           <button class="ew-btn ew-btn--sm" @click="cycleIso" :disabled="isoBusy">{{ t("isoDir") }} {{ isoDir + 1 }}/4</button>
-          <button v-if="isoUrl" class="ew-btn ew-btn--primary" @click="void downloadIso()">{{ t("downloadPng") }}</button>
+          <button v-if="isoUrl" class="ew-btn ew-btn--primary" @click="downloadIso()">{{ t("downloadPng") }}</button>
         </div>
         <div v-if="isoBusy" class="ew-fb">{{ t('rendering') }}</div>
         <img v-else-if="isoUrl" :src="isoUrl" class="ew-iso" alt="Iso preview" />

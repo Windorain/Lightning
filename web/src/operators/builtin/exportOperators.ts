@@ -65,6 +65,12 @@ export const ExportObjOperator: OperatorType = {
     const baseName = sceneStableStringIdFromDocument(doc)
     const def = loadStructureOrWorld(doc, undefined)
     const blob = await buildStructureBundleZip(def, doc, { mode: mode as any })
+    // 插桩：验证 ZIP 文件头
+    const sigBytes = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
+    const sigHex = Array.from(sigBytes).map(b => b.toString(16).padStart(2, '0')).join('')
+    if (sigHex !== '504b0304') {
+      ctx.log.warn('导出', `ZIP 文件头异常: 期望 504b0304, 实际 ${sigHex}, 大小 ${blob.size}`)
+    }
     downloadBlob(`${baseName}-${mode}.zip`, blob)
   },
 }
