@@ -7,6 +7,7 @@
 
   用法（零人工交互）：
     pwsh -File scripts/multiblock-pipeline/run-parts-probe.ps1 -Label p02-run-1
+    pwsh -File scripts/multiblock-pipeline/run-parts-probe.ps1 -Label p03-run-1 -SingleBox   # P0.3 单盒探针
 
   退出码：0 = 三族全部读到部件；2 = 至少一族没读到部件（放置或读取失败，细节见 dump）；
           3 = 管线级致命（超时/进世界失败/写出失败）；4 = 外层编排自身失败（无结果文件）。
@@ -20,7 +21,9 @@ param(
     # 客户端进程总超时（分钟）
     [int]$ProcessTimeoutMinutes = 30,
     # 只做前置检查与触发文件写入，不启动客户端（干跑）
-    [switch]$DryRun
+    [switch]$DryRun,
+    # P0.3：追加单盒通用路径探针（slab/火把/箱子/栅栏 + 满方块对照），写入触发文件 singleBox=true
+    [switch]$SingleBox
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,6 +93,9 @@ $trigger = [ordered]@{
     requestedBy     = 'scripts/multiblock-pipeline/run-parts-probe.ps1'
     cleanupTrigger  = $true
     syncWaitTicks   = $SyncWaitTicks
+}
+if ($SingleBox) {
+    $trigger.singleBox = $true
 }
 $triggerPath = Join-Path $mcDataDir 'sde_parts_probe.json'
 $json = $trigger | ConvertTo-Json -Depth 6

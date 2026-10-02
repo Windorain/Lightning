@@ -84,6 +84,8 @@ public final class PartsProbeAutomation {
     private static int worldSettleTicks = 40;
     private static int chunkWaitTicks = 60;
     private static int syncWaitTicks = 60;
+    /** P0.3：触发文件 {@code "singleBox":true} 时追加单盒通用路径探针（默认关闭，P0.2 行为不变）。 */
+    private static boolean singleBox;
 
     private static final List<String> warnings = new ArrayList<String>();
     private static final PartsProbePlacement placement = new PartsProbePlacement();
@@ -181,10 +183,17 @@ public final class PartsProbeAutomation {
                 syncWaitTicks = o.get("syncWaitTicks")
                     .getAsInt();
             }
+            if (o.has("singleBox")) {
+                singleBox = o.get("singleBox")
+                    .getAsBoolean();
+            }
         } catch (Throwable t) {
             warnings.add("触发文件解析失败（用默认配置继续）: " + PartsProbeReflect.describe(t));
         }
         FMLLog.info("[SDE][P0.2] 三族部件探针启动 label=%s 基点=(%d,%d,%d)", label, BASE_X, BASE_Y, BASE_Z);
+        if (singleBox) {
+            FMLLog.info("[SDE][P0.3] 单盒通用路径探针已启用（singleBox=true）");
+        }
         toPhase(Phase.JOIN);
     }
 
@@ -264,6 +273,10 @@ public final class PartsProbeAutomation {
         List<EntityPlayerMP> players = server.getConfigurationManager().playerEntityList;
         EntityPlayerMP player = players.isEmpty() ? null : players.get(0);
         placement.placeAll(server, world, player, BASE_X, BASE_Y, BASE_Z);
+        if (singleBox) {
+            placement.placeSingleBox(world, BASE_X, BASE_Y, BASE_Z);
+            FMLLog.info("[SDE][P0.3] 单盒场景放置完成（11 格）");
+        }
         FMLLog.info(
             "[SDE][P0.2] 放置完成：%d 个探针方块，放置错误 %d 条",
             Integer.valueOf(placement.placed.size()),
@@ -315,6 +328,8 @@ public final class PartsProbeAutomation {
                 block = EnderIoPartProbe.probeBlock(mc, p.x, p.y, p.z);
             } else if ("fmp".equals(p.family)) {
                 block = FmpPartProbe.probeBlock(mc, p.x, p.y, p.z);
+            } else if ("singlebox".equals(p.family)) {
+                block = SingleBoxProbe.probeBlock(mc, p.x, p.y, p.z);
             } else {
                 block = new JsonObject();
                 block.addProperty("error", "unknown family " + p.family);
@@ -349,7 +364,8 @@ public final class PartsProbeAutomation {
         // 成败判据：三族都至少有 1 个方块读到 ≥1 个部件（放置错误或探针错误都会在 dump 留痕）
         JsonObject families = dump == null ? null : dump.getAsJsonObject("families");
         JsonArray summary = new JsonArray();
-        String[] required = { "ae2", "enderio", "fmp" };
+        String[] required = singleBox ? new String[] { "ae2", "enderio", "fmp", "singlebox" }
+            : new String[] { "ae2", "enderio", "fmp" };
         for (String fam : required) {
             int parts = 0;
             String detail = "missing";

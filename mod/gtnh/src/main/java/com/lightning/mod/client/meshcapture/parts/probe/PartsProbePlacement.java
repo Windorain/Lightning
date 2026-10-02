@@ -7,6 +7,7 @@ import java.util.List;
 
 import net.minecraft.block.Block;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.init.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
@@ -108,6 +109,69 @@ final class PartsProbePlacement {
         for (int dy = 0; dy < 4; dy++) {
             world.setBlockToAir(x, y + dy, z);
         }
+    }
+
+    // ------------------------------------------------------------------ P0.3 单盒（原版方块）
+
+    /**
+     * P0.3 单盒通用路径探针的放置半环：纯原版方块，{@code world.setBlock(x,y,z,block,meta,3)} 即可，
+     * 无需任何 mod 特定入口。共 11 个探针格（触发文件 {@code "singleBox":true} 时才放置）：
+     *
+     * <pre>
+     * 行 A (z=base+3)：石头（满方块对照）| 下半 slab(meta 0) | 上半 slab(meta 8)
+     *                | 地面火把(meta 5，垫脚石在 y-1) | 挂墙火把(meta 1，附在西侧石柱)
+     * 行 F (z=base+6)：孤立栅栏 | 东西三连栅栏（探中间格）| 四向十字栅栏（探中心格）
+     * 行 C (z=base+10)：单箱(meta 2) | 相邻同向双箱(meta 2，探两格)
+     * </pre>
+     *
+     * 邻居影响证据场景：栅栏 3 形态、箱子单/双——盒随邻居变化 ⇒ 「盒 = 导出时快照」的论据。
+     */
+    void placeSingleBox(WorldServer world, int bx, int by, int bz) {
+        // 清场：专用世界幂等复用，先把区域扫成空气（含垫脚石所在层）
+        for (int x = bx + 1; x <= bx + 12; x++) {
+            for (int z = bz + 2; z <= bz + 12; z++) {
+                for (int y = by - 2; y <= by + 6; y++) {
+                    world.setBlockToAir(x, y, z);
+                }
+            }
+        }
+
+        int za = bz + 3;
+        world.setBlock(bx + 2, by, za, Blocks.stone, 0, 3);
+        world.setBlock(bx + 4, by, za, Blocks.stone_slab, 0, 3); // 下半
+        world.setBlock(bx + 5, by, za, Blocks.stone_slab, 8, 3); // 上半
+        world.setBlock(bx + 7, by - 1, za, Blocks.stone, 0, 3); // 火把垫脚石
+        world.setBlock(bx + 7, by, za, Blocks.torch, 5, 3); // 地面火把
+        world.setBlock(bx + 9, by, za, Blocks.stone, 0, 3); // 挂墙火把的承载柱
+        world.setBlock(bx + 10, by, za, Blocks.torch, 1, 3); // 挂墙火把（附 x-1 即承载柱）
+
+        int zf = bz + 6;
+        world.setBlock(bx + 2, by, zf, Blocks.fence, 0, 3); // 孤立
+        world.setBlock(bx + 4, by, zf, Blocks.fence, 0, 3); // 东西三连
+        world.setBlock(bx + 5, by, zf, Blocks.fence, 0, 3);
+        world.setBlock(bx + 6, by, zf, Blocks.fence, 0, 3);
+        world.setBlock(bx + 9, by, zf, Blocks.fence, 0, 3); // 四向十字（中心）
+        world.setBlock(bx + 8, by, zf, Blocks.fence, 0, 3);
+        world.setBlock(bx + 10, by, zf, Blocks.fence, 0, 3);
+        world.setBlock(bx + 9, by, zf - 1, Blocks.fence, 0, 3);
+        world.setBlock(bx + 9, by, zf + 1, Blocks.fence, 0, 3);
+
+        int zc = bz + 10;
+        world.setBlock(bx + 2, by, zc, Blocks.chest, 2, 3); // 单箱
+        world.setBlock(bx + 5, by, zc, Blocks.chest, 2, 3); // 双箱（西）
+        world.setBlock(bx + 6, by, zc, Blocks.chest, 2, 3); // 双箱（东）
+
+        placed.add(new Placed("singlebox", "stone-control(full-cube)", bx + 2, by, za));
+        placed.add(new Placed("singlebox", "slab-bottom(meta0)", bx + 4, by, za));
+        placed.add(new Placed("singlebox", "slab-top(meta8)", bx + 5, by, za));
+        placed.add(new Placed("singlebox", "torch-floor(meta5)", bx + 7, by, za));
+        placed.add(new Placed("singlebox", "torch-wall(meta1)", bx + 10, by, za));
+        placed.add(new Placed("singlebox", "fence-isolated", bx + 2, by, zf));
+        placed.add(new Placed("singlebox", "fence-ew-connected(middle-of-3)", bx + 5, by, zf));
+        placed.add(new Placed("singlebox", "fence-plus-connected(center)", bx + 9, by, zf));
+        placed.add(new Placed("singlebox", "chest-single", bx + 2, by, zc));
+        placed.add(new Placed("singlebox", "chest-double-west", bx + 5, by, zc));
+        placed.add(new Placed("singlebox", "chest-double-east", bx + 6, by, zc));
     }
 
     // ------------------------------------------------------------------ AE2

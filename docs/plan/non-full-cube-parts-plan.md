@@ -393,5 +393,10 @@ Phase 3 集成与验收（E 管线驱动，零人工）
 10. proto 扩展后的 Java 侧落盘路径：mod 端现用 Gson 手拼 JSON、不消费 proto 生成代码（P0.1 实证：buf.gen.yaml 仅 TS 插件、mod 构建无 protobuf 依赖、生成物两端皆未提交）→ P0.4 拍板（继续 Gson 手拼 + proto 作契约文档 vs 引入 Java 生成）
 11. `StatsEntry` 条目键如何引用部件（现仅 `block_state_id`，块粒度）→ P0.4 拍板
 12. FMP 27 槽位超出 `BlockPart.direction` 枚举（0–5+CENTER）的表达方案（properties 兜底 vs 扩展编码）→ P0.4 拍板
+13. 部件盒超出 [0,1]³ 格界的表达（P0.3 实测：栅栏碰撞盒 maxY=1.5；探针如实记录不裁剪）→ P0.4 拍板（允许越界 vs 裁剪策略）
+14. 火把类"选择盒==整格但 renderAsNormalBlock==false"的退化标记：真实几何只在渲染代码里，通用盒档只能落退化整格盒，精确几何交 P1.6 推断档 → P0.4 契约标记方式拍板
+15. 单盒方块计数键取 drop 身份（registry+damageDropped）而非方块 meta（P0.3 实测：上/下半 slab 掉落同为 stone_slab:0；朝向 meta 均坍缩）→ P0.4 并入类型键定义
+
+**探针基建开放项（P1.8 前置）**：`sde_parts_probe_world` 跨轮不清理，FMP `addPart` 路径会跨轮堆积部件（p03-run-3 实测 FMP 部件 2→4 重复）；原版方块 setBlock 幂等不受影响。P1.8 建造器/oracle 生成器必须有世界重置机制（每轮全新世界或建造前清场），否则 oracle 不可复现。
 
 **事实勘误（调度者复核登记）**：P0.1 报告称"`web/src/render/proto/` 目录不存在"，实际目录存在但仅含空的 v1 残留子目录（无任何生成文件；.gitignore L26 仅忽略 `lightning/v1/`）——实质结论（生成代码两端皆无）不变。
