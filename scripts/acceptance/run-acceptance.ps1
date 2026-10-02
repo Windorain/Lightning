@@ -292,10 +292,15 @@ function Invoke-Preflight {
     }
 
     $status = Get-GateStatus $gates
+    # preflight 结果必须落盘于运行目录（「无口头结论」机器门禁要求每个阶段有证据文件）
+    $preLog = Join-Path $logDir 'preflight.log'
+    $preLines = @("preflight gates @ $(Get-Date -Format o)")
+    foreach ($g in $gates) { $preLines += ("[{0}] {1} :: {2}" -f $(if ($g.ok) { 'OK' } else { 'FAIL' }), $g.name, $g.detail) }
+    [System.IO.File]::WriteAllLines($preLog, $preLines)
     $frag = Write-StageFragment -Id 'preflight' -Name '前置检查（playwright / CoFH conf / T1.2 事实层 / 构建产物）' `
         -Command 'internal' -Status $status -ExitCode $(if ($status -eq 'pass') { 0 } else { 3 }) `
         -DurationMs ([int]((Get-Date) - $t0).TotalMilliseconds) -StartedAt $t0.ToString('o') -EndedAt (Get-Date).ToString('o') `
-        -Gates $gates -Evidence @() -Data @{ confHit = "$confHit"; facts = "$($facts | Select-Object -First 1)"; playwright = "$pwHit"; gitHead = "$gitHead"; gitDirtyLines = $gitDirty; port5199InUse = $portInUse }
+        -Gates $gates -Evidence @($preLog) -Data @{ confHit = "$confHit"; facts = "$($facts | Select-Object -First 1)"; playwright = "$pwHit"; gitHead = "$gitHead"; gitDirtyLines = $gitDirty; port5199InUse = $portInUse }
     foreach ($g in $gates) { if ($g.ok) { Write-Ok $g.name } else { Write-Err2 "$($g.name)：$($g.detail)" } }
     return $frag
 }
