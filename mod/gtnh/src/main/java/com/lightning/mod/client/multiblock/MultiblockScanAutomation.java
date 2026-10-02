@@ -54,11 +54,20 @@ public final class MultiblockScanAutomation {
 
     /** 触发文件是否存在。仅做一次文件系统探测，开销可忽略。 */
     public static boolean isRequested(Minecraft mc) {
-        return mc != null && MultiblockScanRunner.triggerFile(mc)
-            .isFile();
+        if (mc == null) return false;
+        if (MultiblockScanRunner.triggerFile(mc)
+            .isFile()) return true;
+        // T1.3 变体捕获复用同一个 tick 接管点（避免改动 client/automation/ 下不在 T1.3 写范围内的文件）；
+        // 两个触发文件都不存在时，本方法行为与 T1.2 完全一致（零行为变化）。
+        return VariantCaptureAutomation.isRequested(mc);
     }
 
     public static void tick(Minecraft mc) {
+        // T1.3 优先：它自带独立的触发文件与产物目录（sde_variant_capture.json / variant_capture/）。
+        if (VariantCaptureAutomation.isRequested(mc)) {
+            VariantCaptureAutomation.tick(mc);
+            return;
+        }
         if (finished) return;
         ticks++;
 

@@ -646,6 +646,90 @@ public final class MeshCaptureService {
         return geometry;
     }
 
+    /**
+     * T1.3 公共捕获工具：把「条目内容签名」与「烘焙几何条目构造」两件设施以<strong>纯新增</strong>的方式提升为公共
+     * 工具，供 {@code com.lightning.mod.client.multiblock} 的变体捕获复用，避免 {@code StateGeometryCapture} 那种
+     * 「按同口径重写一份」造成两套签名长期漂移（T0.3 移交建议 #2）。
+     * <p>
+     * <b>零行为改动</b>：本嵌套类只做转发，不修改任何既有方法的可见性或实现；既有 {@code finalizeStructureJson} /
+     * {@code liftBlockPaletteToRoot} 路径逐字节不变。
+     * <p>
+     * 复用的是三件东西：
+     * <ol>
+     * <li>{@code geometrySignature} / {@code entryEqualitySignature} / {@code fullEqualitySignature} —— 与既有
+     * 「调色板全局去重」完全同一套内容签名（{@code L672–776}）；</li>
+     * <li>{@code bakedQuadsGeometryFromCapture} / {@code airBlockPaletteEntry} —— 与既有产物完全同形的
+     * {@code bakedQuadsJsonV1} 调色板条目；</li>
+     * <li>{@link MaterialTable} —— 全局材质表（跨变体共享，保证 {@code materialIndex} 在整个数据集内稳定，
+     * 即契约 §6.1「几何编码全文件统一」）。</li>
+     * </ol>
+     */
+    public static final class CaptureToolkit {
+
+        private CaptureToolkit() {}
+
+        /** 空几何（{@code bakedQuadsJsonV1} + 空 quads）：与既有 air 条目同形。 */
+        public static JsonObject airEntry() {
+            return airBlockPaletteEntry();
+        }
+
+        /** 由一次「逐格捕获」的实例产出 {@code bakedQuadsJsonV1} 几何；调用前需先 {@link #attachQuadMaterials}。 */
+        public static JsonObject geometryOf(CapturedBlockInstance inst) {
+            return bakedQuadsGeometryFromCapture(inst);
+        }
+
+        /**
+         * 给已经捕获好的四边形挂上材质下标（写入 {@link CapturedQuad#samplerIndex}）。
+         * {@code table} 必须在整个数据集内共享，否则 {@code materialIndex} 会跨变体漂移。
+         */
+        public static void attachQuadMaterials(CapturedBlockInstance inst, TextureMap textureMap, MaterialTable table) {
+            attachMaterials(inst, textureMap, table.inner);
+        }
+
+        /** 几何内容签名（4 位小数 / 四边形内顶点排序 / 四边形间排序 / SHA-256）。 */
+        public static String signatureOfGeometry(JsonObject geometry) {
+            return geometrySignature(geometry);
+        }
+
+        /** 调色板条目内容签名（registryId + meta + 几何签名 + nbt + tooltip）。 */
+        public static String signatureOfEntry(JsonObject entry) {
+            return entryEqualitySignature(entry);
+        }
+
+        /**
+         * 与 {@code finalizeSingleStructure} 内「同一方块状态只存一份」用的判据同口径的签名；{@code tileNbt} /
+         * {@code tooltip} 传 {@code null} 即表示不参与签名（T1.3 的捕获数据集正是这样去重的，见报告）。
+         */
+        public static String signatureOfState(String registryId, int meta, NBTTagCompound tileNbt, JsonObject geometry,
+            List<String> tooltip) {
+            return fullEqualitySignature(registryId, meta, tileNbt, geometry, tooltip);
+        }
+
+        /** 深拷贝（避免把已入库的条目对象交给下游继续改写）。 */
+        public static JsonObject copy(JsonObject src) {
+            return deepCopyJsonObject(src);
+        }
+
+        /** 全数据集共享的材质表；{@link SamplerTable} 的公共门面。 */
+        public static final class MaterialTable {
+
+            private final SamplerTable inner = new SamplerTable();
+
+            public int indexFor(String materialKey, TextureMap blocksTextureMap, boolean standaloneFileTexture,
+                String paletteAtlasKind) {
+                return inner.indexForMaterial(materialKey, blocksTextureMap, standaloneFileTexture, paletteAtlasKind);
+            }
+
+            public JsonArray toMaterialPalette() {
+                return inner.toMaterialPalette();
+            }
+
+            public int size() {
+                return inner.list.size();
+            }
+        }
+    }
+
     private static JsonObject airBlockPaletteEntry() {
         JsonObject p = new JsonObject();
         p.addProperty("registryId", "air");
