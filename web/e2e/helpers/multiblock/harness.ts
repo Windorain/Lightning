@@ -545,3 +545,106 @@ export async function waitForMeshIdle(page: Page, selector: string, timeout = 30
 export async function readDockStatus(page: Page): Promise<string> {
   return (await page.locator(DOCK_STATUS).first().innerText()).replace(/\s+/g, ' ').trim()
 }
+
+// ---------------------------------------------------------------------------
+// 第二阶段（通道滑杆遍历）通用原语
+// ---------------------------------------------------------------------------
+
+/**
+ * 轮询直到 `probe()` 返回真值，返回命中的值（超时抛错并带上 `label`）。
+ *
+ * 用途：多方块通道装配是**异步**的（`useMultiblockChannels.commit` → `revision++` →
+ * `bindMultiblockMeshSync` 的 `watch(..., {flush:'post'})` → `loadStructureAndResources()`
+ * → `rebuildContentMesh()`），而面板的 `data-*` 属性是**同步**更新的。
+ * 因此断言前必须等"渲染定义真的跟上"，而不是等一个固定时长。
+ */
+export async function pollUntil<T>(
+  probe: () => Promise<T | null | undefined | false>,
+  label: string,
+  timeout = 20_000,
+  interval = 25,
+): Promise<T> {
+  const deadline = Date.now() + timeout
+  let last: unknown = null
+  for (;;) {
+    const v = await probe()
+    if (v) return v as T
+    if (Date.now() > deadline) {
+      throw new Error(`T2.6：等待超时（${timeout}ms）—— ${label}${last === null ? '' : `（最后一次观测：${JSON.stringify(last)}）`}`)
+    }
+    last = v === undefined ? null : v
+    await new Promise((r) => setTimeout(r, interval))
+  }
+}
+
+/**
+ * 等到"渲染定义与参考基线逐格一致"，返回命中的渲染观测。
+ *
+ * 收敛判据用**逐格比对结果**（不是形状）：形状一致但内容还停留在上一次装配时，
+ * 本函数会继续轮询；真出现实现级错配时则**超时后**由调用方给出完整 diff 证据
+ * （因此不会把"异步没跟上"误报成"逻辑错了"）。
+ */
+export async function waitForRenderMatch<T extends { diffCount: number }>(
+  probe: () => Promise<T>,
+  timeout = 20_000,
+): Promise<T> {
+  const deadline = Date.now() + timeout
+  let last = await probe()
+  while (last.diffCount !== 0 && Date.now() <= deadline) {
+    await new Promise((r) => setTimeout(r, 25))
+    last = await probe()
+  }
+  if (last.diffCount !== 0) {
+    // 再给一次机会：装配走的是 `watch(flush:'post')` 微任务 + 异步 mesh 重建，
+    // 页面上其它区域仍在收尾时，首个读回可能刚好落在旧定义上。这里显式让出一轮宏任务
+    // 再读一次，避免把"刚好慢半拍"判成实现错配（真错配仍会带着完整 diff 报红）。
+    await new Promise((r) => setTimeout(r, 150))
+    last = await probe()
+  }
+  return last
+}
+
+export interface RenderedDefinitionObservation {
+  present: boolean
+  /** `[d, h, w]`。 */
+  shape: [number, number, number]
+  /** `cellGrid[z][row][x]` 下标（**原样**取自渲染定义，不做任何翻转）。 */
+  cellGrid: number[][][]
+  /** 渲染调色板条目（原样；用于重建签名）。 */
+  palette: unknown[]
+  solidCells: number
+}
+
+/**
+ * 读渲染定义的**原样**内容（`cellGrid` + `blockPalette`），供签名级逐格比对。
+ *
+ * 与 `readRenderedGrid()` 的差别：后者已把调色板压成 `registryId@meta` 字符串
+ * （够用于"有没有东西"的诊断，但**不足以**做签名对齐——渲染调色板是重编号的，
+ * 且 `name:meta` 会归并内容不同的条目）。本函数把原始条目交回，由 helper 侧统一建表。
+ */
+export async function readRenderedDefinition(
+  page: Page,
+  regionId: string = VIEWPORT_REGION,
+): Promise<RenderedDefinitionObservation> {
+  return await page.evaluate((rid) => {
+    const ctx = (window as any).__vm__
+    const def = ctx.viewports.get(rid)?.definition?.value ?? null
+    if (!def) {
+      return { present: false, shape: [0, 0, 0], cellGrid: [], palette: [], solidCells: 0 }
+    }
+    const cellGrid = def.cellGrid as number[][][]
+    let solid = 0
+    for (const slice of cellGrid) {
+      for (const row of slice) {
+        for (const idx of row) if (idx !== 0) solid++
+      }
+    }
+    return {
+      present: true,
+      shape: [cellGrid.length, cellGrid[0]?.length ?? 0, cellGrid[0]?.[0]?.length ?? 0],
+      cellGrid,
+      palette: def.blockPalette ?? [],
+      solidCells: solid,
+    }
+  }, regionId)
+}

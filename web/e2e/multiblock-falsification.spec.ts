@@ -26,14 +26,22 @@ import {
   cloneInner,
   contractFor,
   declarationViolations,
+  diffSignatureGrids,
+  drivePanel,
   expectBackbone,
   expectDeclaration,
   gotoWorkbench,
   injectSceneDocumentOk,
+  openChannelTabReady,
+  paletteSignatures,
+  readChannelPanel,
   readDocObservation,
   readFixture,
+  readRenderedDefinition,
   readPixelStats,
   rewrap,
+  signatureGrid,
+  snapshotOrFallbackReference,
   waitForRenderedGrid,
   type PixelStats,
 } from './helpers/multiblock'
@@ -186,6 +194,163 @@ test.describe('T2.6 · 断言证伪：篡改注入副本 → 管线必须变红'
   })
 })
 
+test.describe('T2.6 第二阶段 · 逐格 diff 的证伪：篡改 indexTable → 对应组合必须变红', () => {
+  /**
+   * 目标（计划 T2.6 自检）：证明**第二阶段新增的 cellGrid 级断言**不是恒绿。
+   *
+   * 篡改口径：把 EBF 规则 `coil.slot` 的 `indexTable`（`[2,2,3,4]`，索引 = `coil` 有效值）
+   * 的第 1、2 项互换 → `coil=1` 与 `coil=2` 的方块身份互换。这是**内容差异**篡改：
+   * 形状/尺寸/变体键/通道声明都不变，唯独逐格内容会错 —— 正是"格级断言"该抓的东西。
+   *
+   * 三条纪律（与格级/声明级证伪一致）：
+   *  1. 仓库 fixture 原件一字不改（篡改只在内存副本上，用 `cloneInner` + `rewrap`）；
+   *  2. 红色必须来自**断言**而不是加载失败（先断言篡改副本仍能正常加载）；
+   *  3. 证伪必须**定向**：只在该组合变红、且差异格坐标可解释（`(x=1,row=1,z=1)` = `coil.slot`）。
+   */
+  test('篡改 coil.slot 的 indexTable（换两个下标）→ 该组合逐格 diff 变红，其余组合仍绿', async ({ page }) => {
+    test.setTimeout(300_000)
+    const file = 'multiblock-ebf-2ch.json'
+    const ref = snapshotOrFallbackReference(file)
+    const { envelope, inner } = readFixture(file)
+
+    /**
+     * 目标组合：`height=5`（骨架阶 4 → 3×5×3）、`coil=2`（命中被互换的表项，`coil.slot=(x=1,y=1,z=1)`）、
+     * `glass=2`、`tt=1`、`idle`。
+     *
+     * ⚠️ 两个口径坑（都踩过，记在这里以免复现"证伪失败其实是目标选错"）：
+     *  1. `coil.slot` 是 `(x=1,y=1,z=1)` 的 `setCell`，契约朝向 row 0 = 顶部 —— `height=1`（3×1×3）
+     *     时 `row=1` **越界**，该规则被 `expandOp` 静默丢弃；
+     *  2. `height=2` 时 `(x=1,y=1,z=1)` 又被同相位的运行态规则 `runstate.face.h2.idle`
+     *     （`phase:"runstate"` 排在 `replace` 之后，后写者胜）覆盖成控制器方块，
+     *     于是 `coil.slot` 的篡改被**遮蔽**。只有 `height=5` 的组合里该格由 `coil.slot` 独占。
+     *  实测（蓝本装配，见报告）：`height:5|coil:2|glass:2|tt:1|idle` 上互换 `indexTable[2]/[3]`
+     *  恰好产生 **1 格**差异 `(x=1,row=1,z=1)`：`gt.blockcasings5:4`(Kanthal) ↔ `gt.blockcasings5:5`(Nichrome)。
+     */
+    const targetKey = 'height:5|coil:2|glass:2|tt:1|runstate:idle'
+    /** 对照组一：coil=0（indexTable[0] 未被动过）→ 篡改后仍应逐格一致。 */
+    const controlKey = 'height:5|coil:0|glass:2|tt:1|runstate:idle'
+    /** 对照组二：coil=1（indexTable[1] 与 [2] 的值**相同**，互换后仍同值）→ 必须仍一致。 */
+    const controlKey2 = 'height:5|coil:1|glass:2|tt:1|runstate:idle'
+    const target = ref.byVariant.get(targetKey)!
+    const control = ref.byVariant.get(controlKey)!
+    expect(target, `参考清单必须含 ${targetKey}`).toBeTruthy()
+
+    /**
+     * 驱动到某组合并返回"渲染签名网格 vs 参考"的逐格 diff。
+     *
+     * ⚠️ 这里**不能**用 `waitForRenderMatch`（它的语义是"等收敛到 0，否则耗满超时"）：
+     * 证伪用例期望的恰恰是**非零** diff，用收敛等待会白等满 20 s（实测整个用例 23.5 s，
+     * 其中基线只占 1.3 s）。改为"等渲染签名**稳定**（连续两次读数相同）"，通常 1～2 次探测即返回。
+     */
+    const diffAt = async (key: string) => {
+      const reference = ref.byVariant.get(key)!
+      let prev = ''
+      let observed = { rendered: await readRenderedDefinition(page), sig: signatureGrid([], [], 'idMeta') }
+      for (let i = 0; i < 120; i++) {
+        observed = await readRenderedDefinition(page).then((rendered) => ({
+          rendered,
+          sig: signatureGrid(rendered.cellGrid, rendered.palette, 'idMeta'),
+        }))
+        const stamp = JSON.stringify(observed.sig.rows)
+        if (stamp === prev) break // 连续两次读数一致 = 装配已落定
+        prev = stamp
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      return {
+        diff: diffSignatureGrids(observed.sig, reference.signature),
+        shape: observed.rendered.shape,
+        referenceShape: [reference.dims.d, reference.dims.h, reference.dims.w] as [number, number, number],
+      }
+    }
+
+    /** 驱动面板到目标组合（DOM 事件注入）。 */
+    const gotoCombo = async (height: number, coil: number) => {
+      await drivePanel(page, { tier: 1, runstate: 'idle', values: { height, coil, glass: 2 } })
+    }
+    // ── 基线：未篡改原件 → 目标组合与对照组都必须 diff=0 ──
+    await gotoWorkbench(page)
+    await injectSceneDocumentOk(page, envelope, file)
+    await openChannelTabReady(page)
+    await gotoCombo(5, 2)
+    const cleanTarget = await diffAt(targetKey)
+    await gotoCombo(5, 0)
+    const cleanControl = await diffAt(controlKey)
+    expect(cleanTarget.diff.count, `基线：未篡改时 ${targetKey} 必须 diff=0`).toBe(0)
+    expect(cleanControl.diff.count, `基线：未篡改时 ${controlKey} 必须 diff=0`).toBe(0)
+    // 前置断言：目标组合的骨架阶必须**容得下** coil.slot 的落点 (x=1,y=1,z=1)
+    expect(target.dims, '目标组合骨架阶尺寸必须容得下 row=1').toEqual({ w: 3, h: 5, d: 3 })
+
+    // ── 篡改：互换 coil.slot 的 indexTable[2] 与 indexTable[3] ──
+    // （EBF 的 `coil.slot.indexTable = [2,2,3,4]`：下标 1 与 2 值**相同**，互换不可观测 ——
+    //  那正是"证伪本身也要被自检"的坑，故取 [2]↔[3] 这一对**内容不同**的相邻项。）
+    const tampered = cloneInner(inner)
+    const mb = tampered.multiblock as Record<string, unknown>
+    const rules = mb.rules as Array<Record<string, unknown>>
+    const coilRule = rules.find((r) => r.id === 'coil.slot')!
+    expect(coilRule, 'EBF 必须有 coil.slot 规则').toBeTruthy()
+    const table = coilRule.indexTable as number[]
+    expect(table, 'coil.slot.indexTable 形状前提').toHaveLength(4)
+    const before = table.slice()
+    const i1 = 2
+    const i2 = 3
+    ;[table[i1], table[i2]] = [table[i2]!, table[i1]!]
+    expect(table, '篡改必须真的互换了两个下标').not.toEqual(before)
+    const palette = (tampered.blockPalette as unknown[]) ?? ref.palette
+    const sigs = paletteSignatures(palette)
+    // 前置断言：被互换的两个下标必须是**不同内容**（否则篡改不可观测，证伪是假的）
+    expect(
+      sigs[before[i1]!]!.idMeta,
+      `被互换的两个调色板条目（${before[i1]} / ${before[i2]}）必须内容不同，否则篡改不可观测`,
+    ).not.toBe(sigs[before[i2]!]!.idMeta)
+    // 前置断言：其余表项在互换前后必须一致（保证"定向"）
+    for (const i of [0, 1]) expect(table[i], `indexTable[${i}] 不得被动到`).toBe(before[i])
+
+    // 重新起干净页面注入篡改副本（注入路径与原件完全相同：Envelope → Multiblock parser）
+    await gotoWorkbench(page)
+    const injected = await injectSceneDocumentOk(page, rewrap(envelope, tampered), 'tampered-indextable.json')
+    expect(injected.docLoaded, '篡改 indexTable 后仍应能正常解析（否则红色来自解析失败）').toBe(true)
+    expect(injected.isMultiblock).toBe(true)
+    await openChannelTabReady(page)
+
+    // ── 目标组合：必须变红 ──
+    await gotoCombo(5, 2)
+    const panel = await readChannelPanel(page)
+    expect(panel.variantKey, '变体键不受 indexTable 篡改影响（键只由声明值派生）').toBe(targetKey)
+    const bad = await diffAt(targetKey)
+    expect(bad.diff.count, `${targetKey}：篡改后逐格 diff 必须 > 0（管线变红）`).toBeGreaterThan(0)
+    expect(bad.shape, '篡改的是内容而不是形状：尺寸必须不变').toEqual(bad.referenceShape)
+
+    // 差异必须落在 coil.slot 那格（x=1,row=1,z=1），且证据三元组可解释
+    const atSlot = bad.diff.details.filter((d) => d.x === 1 && d.y === 1 && d.z === 1)
+    expect(atSlot.length, `差异必须落在 coil.slot（x=1,row=1,z=1）。实测 ${JSON.stringify(bad.diff.details)}`).toBeGreaterThan(0)
+    const detail = atSlot[0]!
+    expect(detail.want, '参考侧该格 = 原 indexTable 对应的方块').toBe(sigs[before[i1]!]!.idMeta)
+    expect(detail.got, '渲染侧该格 = 被篡改后 indexTable 对应的方块').toBe(sigs[before[i2]!]!.idMeta)
+    console.log(
+      `[T2.6] 格级证伪（indexTable）：${targetKey} 差异 ${bad.diff.count} 格 —— ` +
+        `(${detail.x},${detail.y},${detail.z}) 参考=${detail.want} 渲染=${detail.got}（互换了 indexTable[${i1}]/[${i2}]）`,
+    )
+
+    // ── 定向性一：对照组 coil=0（未动到被篡改的下标）仍必须 diff=0 ──
+    await gotoCombo(5, 0)
+    const stillOk = await diffAt(controlKey)
+    expect(
+      stillOk.diff.count,
+      `${controlKey}：indexTable[0] 未被动过，逐格 diff 必须仍为 0（证伪是定向的，不是整体崩）`,
+    ).toBe(0)
+    // 对照组基线自洽：height=5 的骨架阶是 3×5×3
+    expect(control.dims, '对照组参考尺寸').toEqual({ w: 3, h: 5, d: 3 })
+
+    // ── 定向性二：coil=1（被互换的两项在互换前后**同值**）也必须 diff=0 ──
+    await gotoCombo(5, 1)
+    const stillOk2 = await diffAt(controlKey2)
+    expect(
+      stillOk2.diff.count,
+      `${controlKey2}：indexTable[1]/[2] 同值，互换后该档位结果不变，逐格 diff 必须仍为 0`,
+    ).toBe(0)
+  })
+})
+
 /** 同步版非空断言（`expectNotBlank` 的等价包装，供 captureFailure 使用）。 */
 function assertNotBlankSync(stats: PixelStats): void {
   const violations = blankViolations(stats)
@@ -208,3 +373,4 @@ async function makeSolidPng(page: Page, color: string, w: number, h: number): Pr
   )
   return Buffer.from(b64, 'base64')
 }
+

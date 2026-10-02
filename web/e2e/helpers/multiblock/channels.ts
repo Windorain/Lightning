@@ -71,11 +71,18 @@ export interface ChannelPanelObservation {
   displayName: string | null
   /** 当前取值派生的变体键（装配器的输出观测点）。 */
   variantKey: string | null
+  /**
+   * 当前取值是否命中**已声明组合**（契约 §5.2 推论 1：UI 的滑杆取值域 + Tier 吸附
+   * 使所有可达组合都是已声明的）。`null` = 属性缺失。
+   */
+  declaredVariant: boolean | null
   /** 装配结果尺寸 `w×h×d`（装配失败为空串）。 */
   dims: string | null
   tier: number | null
   tierMin: number | null
   tierMax: number | null
+  /** Tier 滑杆的 `list="mb-tier-samples"` 对应的已声明抽样清单（`data-mb-tier-samples`，逗号分隔）。 */
+  tierSamples: number[] | null
   tierValueText: string | null
   runstate: string | null
   runstateOptions: Array<{ id: string; name: string }>
@@ -96,10 +103,12 @@ export async function readChannelPanel(page: Page): Promise<ChannelPanelObservat
         present: false,
         displayName: null,
         variantKey: null,
+        declaredVariant: null,
         dims: null,
         tier: null,
         tierMin: null,
         tierMax: null,
+        tierSamples: null,
         tierValueText: null,
         runstate: null,
         runstateOptions: [],
@@ -137,10 +146,23 @@ export async function readChannelPanel(page: Page): Promise<ChannelPanelObservat
         present: true,
         displayName: panel.getAttribute('data-mb-display-name'),
         variantKey: panel.getAttribute('data-mb-variant'),
+        declaredVariant: (() => {
+          const raw = panel.getAttribute('data-mb-declared')
+          return raw === null ? null : raw === 'true'
+        })(),
         dims: panel.getAttribute('data-mb-dims'),
         tier: num(panel.getAttribute('data-mb-tier')),
         tierMin: num(panel.getAttribute('data-mb-tier-min')),
         tierMax: num(panel.getAttribute('data-mb-tier-max')),
+        tierSamples: (() => {
+          const raw = panel.getAttribute('data-mb-tier-samples')
+          if (raw === null) return null
+          return raw
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+            .map((s) => Number(s))
+        })(),
         tierValueText: (panel.querySelector(tierValueSel)?.textContent ?? '').trim() || null,
         runstate: panel.getAttribute('data-mb-runstate'),
         runstateOptions: options,
@@ -157,6 +179,25 @@ export async function openChannelTab(page: Page): Promise<void> {
   await expect(page.locator(CHANNEL_TAB)).toBeVisible()
   await page.locator(CHANNEL_TAB).click()
   await expect(page.locator(CHANNEL_PANEL)).toBeAttached()
+}
+
+/**
+ * 切到「通道」tab 并等到面板的**装配观测**就绪（`data-mb-dims` 非空）。
+ *
+ * 为什么需要这一等：`data-mb-dims` 来自装配结论（`buildChannelPanelModel`），
+ * 而面板的出现只要求 `decl !== null`。文档刚注入时装配可能还没跑完，
+ * 此时 `data-mb-dims` 为空串——若在那一刻断言尺寸，会得到假红。
+ */
+export async function openChannelTabReady(page: Page, timeout = 30_000): Promise<void> {
+  await openChannelTab(page)
+  await page.waitForFunction(
+    (sel) => {
+      const el = document.querySelector(sel)
+      return !!el && (el.getAttribute('data-mb-dims') ?? '') !== ''
+    },
+    CHANNEL_PANEL,
+    { timeout },
+  )
 }
 
 /** 驱动总 Tier 滑杆（DOM 事件注入；面板的 Tier 吸附在 `useMultiblockChannels` 内）。 */
@@ -178,4 +219,70 @@ export async function setRunstate(page: Page, id: string): Promise<void> {
     s.value = v
     s.dispatchEvent(new Event('change', { bubbles: true }))
   }, id)
+}
+
+/** 一个组合的驱动载荷（`undefined` 字段 = 不驱动该控件，用于渐进拖动）。 */
+export interface PanelDrivePayload {
+  tier?: number
+  /** `channelKey → 声明值`（只驱动给出的 key）。 */
+  values?: Record<string, number>
+  runstate?: string
+}
+
+/**
+ * **批量**驱动通道面板：一次性把 Tier / 若干通道 / 运行态推到目标取值。
+ *
+ * 与逐个调用 `setTier`/`setChannelValue`/`setRunstate` **事件语义完全一致**
+ * （同样只设 `value` 再派发 `input`（滑杆）或 `change`（下拉），由 Vue 监听器消费），
+ * 区别只是把 N 次 CDP 往返压成 1 次 —— 552 组合遍历的性能关键（实测逐个驱动
+ * ≈530 ms/组合，批量后 ≈50~80 ms/组合，见 README 耗时表）。
+ *
+ * 施加顺序（与生产者一致，避免"先写通道再写 Tier"导致通道域短暂不一致）：
+ * Tier → 各通道 → 运行态。
+ */
+export async function drivePanel(page: Page, payload: PanelDrivePayload): Promise<void> {
+  await expect(page.locator(TIER_SLIDER)).toBeAttached()
+  await expect(page.locator(TIER_SLIDER)).toBeEnabled()
+  await page.evaluate(
+    ({ panelSel, tierSel, runstateSel, payload }) => {
+      const panel = document.querySelector(panelSel)
+      if (!panel) throw new Error('T2.6: 通道面板未挂载')
+      const fire = (el: HTMLInputElement | HTMLSelectElement, kind: 'input' | 'change'): void => {
+        el.dispatchEvent(new Event(kind, { bubbles: true }))
+      }
+      if (payload.tier !== undefined) {
+        const el = panel.querySelector(tierSel) as HTMLInputElement | null
+        if (!el) throw new Error('T2.6: Tier 滑杆未找到')
+        el.value = String(payload.tier)
+        fire(el, 'input')
+        fire(el, 'change')
+        // ⚠️ 写回模型值（可用 `data-mb-tier` 观测）：
+        // Tier 滑杆**吸附**已声明抽样，且 `setTier` 在"吸附后与当前值相同"时直接返回。
+        // 此时 Vue 不会重渲染，DOM 里就留着我们刚写进去的原始输入值 —— 下一次派发事件时
+        // 处理函数会把那个**陈旧输入**当成新的用户输入（实测表现为"请求 2 却被吸附到 14"）。
+        // 真人拖动滑杆走的是原生 value 变化路径，这里补一次同步，保证每次驱动都从
+        // "面板当前真实取值"出发。
+        const model = Number(panel.getAttribute('data-mb-tier'))
+        if (Number.isFinite(model)) el.value = String(model)
+      }
+      for (const [key, value] of Object.entries(payload.values ?? {})) {
+        const el = panel.querySelector(`input[data-mb-channel="${key}"]`) as HTMLInputElement | null
+        if (!el) throw new Error(`T2.6: 通道滑杆未找到: ${key}`)
+        el.value = String(value)
+        fire(el, 'input')
+        fire(el, 'change')
+        // 同 Tier：写回模型当前值（`data-mb-channel-value` 文本 → 数字），避免"陈旧 DOM 输入"
+        // 在 Vue 未重渲染（本次取值与模型相同）时污染下一次驱动。
+        const text = panel.querySelector(`[data-mb-channel-value="${key}"]`)?.textContent?.trim() ?? ''
+        el.value = text === '' || text === 'Not set' ? '0' : text
+      }
+      if (payload.runstate !== undefined) {
+        const el = panel.querySelector(runstateSel) as HTMLSelectElement | null
+        if (!el) throw new Error('T2.6: 运行态下拉未找到')
+        el.value = payload.runstate
+        fire(el, 'change')
+      }
+    },
+    { panelSel: CHANNEL_PANEL, tierSel: TIER_SLIDER, runstateSel: RUNSTATE_SELECT, payload },
+  )
 }
