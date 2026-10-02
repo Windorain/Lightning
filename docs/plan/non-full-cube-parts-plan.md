@@ -390,3 +390,8 @@ Phase 3 集成与验收（E 管线驱动，零人工）
 7. 悬停与统计栏 UI 呈现细节 → P2.2/P2.4 拍板
 8. 几何推断在 mod 侧的执行位置（捕获流水线挂点）→ P1.6 拍板
 9. 验收命令名与 oracle 输出目录 → P1.8 + P2.5 对接时拍板
+10. proto 扩展后的 Java 侧落盘路径：mod 端现用 Gson 手拼 JSON、不消费 proto 生成代码（P0.1 实证：buf.gen.yaml 仅 TS 插件、mod 构建无 protobuf 依赖、生成物两端皆未提交）→ P0.4 拍板（继续 Gson 手拼 + proto 作契约文档 vs 引入 Java 生成）
+11. `StatsEntry` 条目键如何引用部件（现仅 `block_state_id`，块粒度）→ P0.4 拍板
+12. FMP 27 槽位超出 `BlockPart.direction` 枚举（0–5+CENTER）的表达方案（properties 兜底 vs 扩展编码）→ P0.4 拍板
+
+**事实勘误（调度者复核登记）**：P0.1 报告称"`web/src/render/proto/` 目录不存在"，实际目录存在但仅含空的 v1 残留子目录（无任何生成文件；.gitignore L26 仅忽略 `lightning/v1/`）——实质结论（生成代码两端皆无）不变。
