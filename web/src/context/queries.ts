@@ -14,10 +14,17 @@ import {
   pickAtPointer,
   type ScenePickParams,
   type ScenePickResult,
+  type ScenePickBlock,
 } from '@/render/interaction/scenePick'
 import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
 import type { BakedQuadsGeometry } from '@/render/schema/types'
 import { structureRowToWorldY } from '@/pure/vec'
+import {
+  blockLocalPointFromWorldPoint,
+  pickPartAtLocalPoint,
+  type BlockLocalPoint,
+} from '@/pure/partHit'
+import type { PartRecord } from '@/pure/partTypes'
 
 function readAnnotations(ctx: Context): Annotation[] {
   const doc = ctx.getDoc().value
@@ -85,6 +92,36 @@ export function pickVoxel(ctx: Context, event: PointerEvent, regionId?: string):
     normal: result.normal,
     point: result.point,
   }
+}
+
+/** 部件级拾取结果（P2.2）：命中的部件 + 格内局部命中点 */
+export interface PartPick {
+  part: PartRecord
+  localPoint: BlockLocalPoint
+}
+
+/**
+ * pickVoxel 的部件级细化（P2.2，契约 §6/§8）：
+ * 命中格有部件且世界命中点换算为格内局部坐标后落入某部件盒 ⇒ 返回该部件；
+ * 否则返回 null（调用方保持宿主格既有行为，不劣化）。
+ * 盒为导出时快照，可越出 [0,1]³（契约 §6.3）；命中规则见 pure/partHit.ts。
+ */
+export function pickPartForScenePick(ctx: Context, picked: ScenePickBlock): PartPick | null {
+  if (!picked.point) return null
+  const doc = ctx.getDoc().value
+  const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const grid = rf?.grid
+  if (!grid || grid.height <= 0) return null
+  const worldY = structureRowToWorldY(picked.row, grid.height)
+  const parts = grid.partsAt({ x: picked.column, y: worldY, z: picked.zSlice })
+  if (!parts || parts.length === 0) return null
+  const localPoint = blockLocalPointFromWorldPoint(
+    picked.point,
+    { column: picked.column, row: picked.row, zSlice: picked.zSlice },
+    { sizeColumn: grid.width, sizeRow: grid.height, sizeZSlice: grid.depth },
+  )
+  const part = pickPartAtLocalPoint(parts, localPoint)
+  return part ? { part, localPoint } : null
 }
 
 /** 指针位置穿透的全部实体候选（去重、按深度排序），用于轮换拾取 */

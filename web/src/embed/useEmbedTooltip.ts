@@ -8,7 +8,7 @@ import { computed, type Ref, type ShallowRef } from 'vue'
 import type { EmbedHover } from '@/runtime/hover'
 import type { StructureDefinition } from '@/render/schema/types'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
-import { resolvePreviewTooltipText } from '@/pure/tooltipResolution'
+import { resolvePreviewTooltipText, resolveViewportTooltipChain } from '@/pure/tooltipResolution'
 import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 
@@ -65,23 +65,13 @@ export function useEmbedTooltip(deps: {
           const def = deps.definitionRef.value
           if (!def) return ''
           const ht = { blockId: h.blockId, clientX: h.clientX, clientY: h.clientY, source: 'viewport' as const, voxel: h.voxel }
-          const resolved = resolvePreviewTooltipText(def, deps.tooltipPaletteRef.value, ht)
-          if (resolved) {
-            const neiLines = neiTooltipMap.value.get(h.blockId)
-            const nameLine = neiLines?.[0]
-            if (nameLine) {
-              const nl = resolved.indexOf('\n')
-              const resolvedFirst = nl >= 0 ? resolved.slice(0, nl) : resolved
-              if (resolvedFirst !== nameLine) {
-                return nameLine + '\n' + resolved
-              }
-            }
-            return resolved
-          }
-          // Fallback: first line of NEI tooltip from block palette
-          const lines = neiTooltipMap.value.get(h.blockId)
-          if (lines && lines.length > 0) return renderTooltipHtml(lines[0])
-          return ''
+          const cellText = resolvePreviewTooltipText(def, deps.tooltipPaletteRef.value, ht)
+          // 优先级链（契约 §8 末段 + P2.2）：逐格人工说明（叠加层）→ 部件说明 → 宿主 NEI 回退
+          return resolveViewportTooltipChain({
+            cellText,
+            part: h.part ?? null,
+            hostNeiLines: neiTooltipMap.value.get(h.blockId),
+          })
         }
         // Sidebar: NEI tooltip
         const lines = neiTooltipMap.value.get(h.blockId)

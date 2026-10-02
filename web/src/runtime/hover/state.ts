@@ -1,11 +1,17 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import { voxelKey } from '@/runtime/hover/pickKeys'
+import type { PartTooltipInfo } from '@/pure/tooltipResolution'
 
 export interface ViewportBlockHover {
   blockId: string
   voxel: { column: number; row: number; zSlice: number }
   clientX: number
   clientY: number
+  /**
+   * 部件命中快照（P2.2）：命中格有部件且命中点落入部件盒时非空；
+   * null/缺省 = 宿主格命中（既有行为）。tooltip 为导出时生成完毕的最终行（契约 §8）。
+   */
+  part?: PartTooltipInfo | null
 }
 
 export interface SidebarBlockHover {
@@ -56,7 +62,12 @@ export function createViewportHoverState(): ViewportHoverState {
       return
     }
     const cur = viewportBlock.value
-    if (cur && cur.blockId === payload.blockId && voxelKey(cur.voxel) === voxelKey(payload.voxel)) {
+    if (
+      cur
+      && cur.blockId === payload.blockId
+      && voxelKey(cur.voxel) === voxelKey(payload.voxel)
+      && (cur.part?.localId ?? null) === (payload.part?.localId ?? null)
+    ) {
       cur.clientX = payload.clientX
       cur.clientY = payload.clientY
       return

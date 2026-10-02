@@ -6,6 +6,7 @@ import { REGION } from '@/runtime/regionIds'
 import type { ViewportBlockHover, ViewportHoverState } from '@/runtime/hover/state'
 import { requireViewportHover } from '@/runtime/hover/state'
 import type { ScenePickResult } from '@/render/interaction/scenePick'
+import type { PartTooltipInfo } from '@/pure/tooltipResolution'
 
 export function blockRefFromViewportHover(ctx: Context, vb: ViewportBlockHover | null): BlockRef | null {
   if (!vb) return null
@@ -35,6 +36,8 @@ export function applyRegionHoverPick(
   picked: ScenePickResult,
   clientX: number,
   clientY: number,
+  /** P2.2 部件命中快照（由调用方经 pickPartForScenePick 解析；缺省 = 宿主格命中） */
+  part?: PartTooltipInfo | null,
 ): void {
   if (picked?.kind === 'block') {
     hover.setViewportBlock({
@@ -42,6 +45,7 @@ export function applyRegionHoverPick(
       clientX,
       clientY,
       voxel: { column: picked.column, row: picked.row, zSlice: picked.zSlice },
+      part: part ?? null,
     })
     return
   }
