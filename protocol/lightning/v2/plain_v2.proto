@@ -47,11 +47,38 @@ message BlockInstance {
 }
 
 message BlockPart {
-  string local_id = 1;                // 父块内唯一标识
-  string part_tag = 2;                // 部件标记
-  int32 direction = 3;                // -1=无, 0-5=DUNSWE, 6=CENTER
-  map<string, string> properties = 4; // 部件属性
-  string tooltip = 5;                 // 独立 tooltip
+  string local_id = 1;                // 父块内唯一标识（族命名空间："<族>:<族内定位符>"，见 format-parts-contract §4）
+  string part_tag = 2;                // 部件标记（语义定稿 = typeKey 跨格类型键/计数键，见契约 §5）
+  int32 direction = 3;                // -1=无, 0-5=DUNSWE, 6=CENTER（AE2 面语义；FMP 27 槽位走 local_id）
+  map<string, string> properties = 4; // 部件属性（族特有扩展点；强契约字段不得藏这里）
+  string tooltip = 5;                 // 独立 tooltip（优先级链导出时生成完毕）
+  repeated PartBox boxes = 6;         // 空间盒（多子盒；0-1 方块局部 Y-up，允许越界如实记录）
+  repeated PartItem items = 7;        // 物品身份（可合成物品；空 = 显式"无"）
+  string display_name = 8;            // 显示名（尊重游戏内显示名）
+  PartSource source = 9;              // 来源四元组（族/兜底/视觉或碰撞/档位）
+}
+
+// 部件空间盒：0-1 方块局部、MC 标准朝向 Y-up；允许超出 [0,1]³（如栅栏碰撞盒高 1.5）
+message PartBox {
+  repeated double min = 1;            // [x, y, z]
+  repeated double max = 2;            // [x, y, z]
+  string kind = 3;                    // "visual" | "collision"
+}
+
+// 部件物品身份（计数单位 = 可合成物品；FMP 材料等 NBT 区分进 nbt_discriminator，如 "mat=..."）
+message PartItem {
+  string registry = 1;
+  int32 damage = 2;
+  string nbt_discriminator = 3;
+  int32 count = 4;
+}
+
+// 部件来源四元组
+message PartSource {
+  string family = 1;                  // "ae2" | "enderio" | "fmp" | "generic" | "inferred"
+  bool fallback = 2;                  // 是否兜底（族权威=false）
+  string box_provenance = 3;          // "both" | "collision-derived-visual" | "visual-only" | "collision-only" | "degenerate"
+  int32 tier = 4;                     // 1=族权威 2=通用盒 3=几何推断
 }
 
 message GuiState {
@@ -150,4 +177,5 @@ message StatsEntry {
   string block_state_id = 1;
   string label_override = 2;
   string icon_source = 3;
+  string part_type_key = 4;           // 可选：部件视图条目键（= BlockPart.part_tag/typeKey）
 }
