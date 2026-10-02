@@ -37,11 +37,16 @@ public final class SceneEnvelopeBuilder {
             copyIfPresent(rawFinal, meta, "playback");
             copyIfPresent(rawFinal, meta, "globalConfig");
             copyIfPresent(rawFinal, meta, "schemaVersion");
+            // T1.4（契约 §8.1）：文档级形态枚举量进 meta —— "multiblock" 与缺省的"帧为主"互斥。
+            copyIfPresent(rawFinal, meta, "documentShape");
             copyIfPresent(rawFinal, inner, "frames");
             copyIfPresent(rawFinal, inner, "materialPalette");
             copyIfPresent(rawFinal, inner, "blockPalette");
             copyIfPresent(rawFinal, inner, "textureBlobs");
             copyIfPresent(rawFinal, inner, "tooltipPalette");
+            // T1.4（契约 §8.1）：多方块声明作为新的 inner 键（判别式需要 inner.multiblock + multiblockCount）。
+            copyIfPresent(rawFinal, inner, "multiblock");
+            copyIfPresent(rawFinal, inner, "multiblockCount");
         } else {
             copyIfPresent(rawFinal, meta, "geometryPhase");
             copyIfPresent(rawFinal, meta, "mode");
