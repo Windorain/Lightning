@@ -16,6 +16,7 @@ import net.minecraft.world.storage.SaveFormatComparator;
 
 import org.apache.logging.log4j.Level;
 
+import com.lightning.mod.client.multiblock.RunStateProbeAutomation;
 import com.lightning.mod.config.SdeAutomationConfig;
 
 import cpw.mods.fml.common.FMLLog;
@@ -45,11 +46,18 @@ public final class SdeClientAutomationTickHandler {
         if (e.side != Side.CLIENT || e.phase != TickEvent.Phase.END) {
             return;
         }
-        if (!SdeAutomationConfig.autoLoadFirstSingleplayerWorld) {
+
+        Minecraft mc = Minecraft.getMinecraft();
+
+        // T0.3 运行态探针：只有在 mcDataDir 下存在触发文件时接管本 tick（触发文件不存在时零行为变化）。
+        if (RunStateProbeAutomation.isRequested(mc)) {
+            RunStateProbeAutomation.tick(mc);
             return;
         }
 
-        Minecraft mc = Minecraft.getMinecraft();
+        if (!SdeAutomationConfig.autoLoadFirstSingleplayerWorld) {
+            return;
+        }
 
         if (mc.theWorld == null && mc.currentScreen instanceof GuiMainMenu && !autoJoinAttempted) {
             tryAutoJoinFirstWorld(mc);
@@ -91,6 +99,14 @@ public final class SdeClientAutomationTickHandler {
 
     private void tryAutoJoinFirstWorld(Minecraft mc) {
         autoJoinAttempted = true;
+        joinFirstSingleplayerWorld(mc);
+    }
+
+    /**
+     * 加载存档列表排序后的第一个单人存档；抽出为公开静态方法，供其它无人值守入口（如 T0.3 运行态探针）复用同一
+     * 进档路径，避免第二份「自动进世界」实现。调用方自行负责「只试一次」的语义。
+     */
+    public static void joinFirstSingleplayerWorld(Minecraft mc) {
         ISaveFormat loader = mc.getSaveLoader();
         List<?> raw;
         try {

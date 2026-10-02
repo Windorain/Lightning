@@ -427,3 +427,9 @@ Phase 3 集成与验收（串行，全部由 E 管线驱动，零人工）
 - §T0.2 背景隐含「IStructureChannels 属 StructureLib」→ 实际在 **GT5U**（`gregtech/api/structure/`）；编译期依赖必须同时覆盖 GT5U 与 StructureLib。
 - §T0.2「运行态进入需要 GT 内部状态机（风险最高处）」→ 经 pinned jar `javap` 核实，`MTEMultiBlockBase` 运行态字段（`mMachine`/`mProgresstime`/`mMaxProgresstime`/`mRuntime`）**全部 public**，活动态为派生量（`setActive(mMaxProgresstime > 0)`），风险等级下修；可达性仍以 T0.3 实测为准。
 - §T0.4 建议「UI 标签 = 通道 id 首字母大写」→ 修正为 **UI 呈现名取枚举名**（`capitalize(id)` 会继承 `casing` ×3 歧义，是参考实现的已知缺陷）；文件格式通道标识用 `{enumName, id}` 双键。证据：[probe-channels.md](probe-channels.md) §5。
+
+**T0.3 探针结论与运行态轴裁决**（证据：[probe-run-state.md](probe-run-state.md)）：
+- **可达**：假世界满足 `onPostTick` 服务端门槛，活动态由真实状态机从 `mMaxProgresstime` 派生；两态烘焙几何差异已捕获（EBF 差异 4 quad，材质差异恰好为活动纹理切换），三次运行签名一致。
+- **调度者临时裁决（待用户确认）**：文件格式的「运行态」轴本轮只承诺**纹理/材质层**两态差异。依据：该层差异是真实状态机驱动、真实捕获、可重复的；超出此范围需要新捕获机制与真实配方运行，属独立工作量。
+- **【用户裁决开放项 · 不阻塞流程】**：① shader/VAO 型 TESR 活动表现（GT5U 唯一 `IMTERenderer` 多方块 MTEExoFoundry）几何不经 Tessellator，捕获需新增非 Tessellator 捕获策略；② 部件展开（虫洞/激光/黑洞/纳米锻炉等附属渲染方块）仅真实配方运行中才存在；③ `mMachine=true`（结构成形校验通过）未达成，`checkMachine` 失败点已缩小至 `checkPiece` 未定位到具体格。用户可裁决：接受上述范围排除 / 追加投入攻克哪一项。
+- 留白 #5（mod 侧新包命名）→ 已由 T0.3 确立：`com.lightning.mod.client.multiblock/`（假世界/构建/捕获设施齐备，T1.1 直接复用，不再另立）。

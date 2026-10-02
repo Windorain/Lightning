@@ -209,6 +209,26 @@ protected ...CheckRecipeResult doCheckRecipe();  // protected
 即：**新增 2 行 `compileOnly`**，**把 L14 的 `1.4.28` 字面量换成变量**，其余 38 行保持原样。
 
 > **【调度者落地修正 · 放行执行时 adjudication】** 实际落地为 `compileOnly(...) { transitive = false }`。原因：GTNH maven 上 GT5U 的间接依赖坐标已漂移（`CodeChickenLib:1.3.0` 等 5 个 artifact 404），传递解析导致 `compileClasspath` 不可解析。非传递后编译只需本 jar；若后续引用到缺失间接类型，逐个补显式 `compileOnly` 并在本节追加记录。放行验证结果：① compileJava 通过且 GT5U/StructureLib import 探针真实参与编译（探针已删）；② 错误类名 → 响亮编译失败（否定性测试通过）；③ `gradlew build` 默认配置（含配置缓存）EXIT=0；④ 产物 jar 190 条目，无 `gregtech/`、`com/gtnewhorizon/structurelib/` 类（compileOnly 未污染产物）；⑤ runClient 冒烟推迟至 T0.3 探针执行时一并验证（运行期声明逐字节等价，装配不变是构造性结论）。
+>
+> **【§6.1 后续追加记录 · T0.3 探针实际引用到的间接类型（2026-10-02）】** T0.3 探针（`mod/gtnh/src/main/java/com/lightning/mod/client/multiblock/`）第一次真正把 GT5U 的公开 API 编进业务代码，暴露出 3 个必须补的间接类型 —— 它们都出现在 GT5U 公开签名/接口继承链上，`transitive = false` 后不在编译类路径：
+>
+> | 缺失类型 | 来源 | 出现在哪条链上 |
+> |---|---|---|
+> | `com.gtnewhorizon.gtnhlib.capability.CapabilityProvider` | GTNHLib | `IMetaTileEntity extends CapabilityProvider` |
+> | `com.cleanroommc.modularui.api.IGuiHolder` | ModularUI2 | `IMetaTileEntity extends IGuiHolder<PosGuiData>` |
+> | `appeng.api.crafting.ICraftingIconProvider` | Applied Energistics 2 | `BlockMachines` / `ItemMachines` 继承链（`ItemStack#onItemUse` 放置路径） |
+>
+> 追加的 3 行（同样 `transitive = false`，版本取 `gradlew dependencies --configuration runtimeClasspath` 的**实际解析结果**以保证编译期/运行期锁步）：
+>
+> ```groovy
+> def gtnhLibVer = (project.findProperty("gtnhRun.gtnhLibVersion") ?: "0.9.62").toString()
+> compileOnly("com.github.GTNewHorizons:GTNHLib:${gtnhLibVer}:dev") { transitive = false }
+> compileOnly("com.github.GTNewHorizons:ModularUI2:2.3.43-1.7.10:dev") { transitive = false }
+> compileOnly("com.github.GTNewHorizons:Applied-Energistics-2-Unofficial:rv3-beta-834-GTNH:dev") { transitive = false }
+> ```
+>
+> 注意 `GTNHLib` 声明即 `0.9.20` 而运行期被冲突解析到 `0.9.62`（`runtimeOnlyNonPublishable` 里写的是 0.9.20）—— compileOnly 取 **0.9.62**，与真实运行类路径一致；这是 §5.4 锁步纪律的一次具体应用（版本来源改为"运行期解析结果"而非"声明字面量"）。
+> 验证：`gradlew compileJava`/`gradlew build` 通过；探针两次 `runClient` 全量启动（79 mods）并产出结果；运行期声明未改。
 
 配套（可选但推荐）在 `mod/gtnh/gradle.properties` L89 附近追加，使版本单点在 properties 里也可覆盖：
 

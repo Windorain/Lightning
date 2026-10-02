@@ -18,6 +18,16 @@ dependencies {
     compileOnly("com.github.GTNewHorizons:GT5-Unofficial:${gt5Ver}:dev") { transitive = false }
     compileOnly("com.github.GTNewHorizons:StructureLib:${structureLibVer}:dev") { transitive = false }
 
+    // T0.3 探针实际引用到的「间接类型」：它们出现在 GT5U 公开签名/接口继承链上，transitive=false 后必须显式补。
+    //   com.gtnewhorizon.gtnhlib.capability.CapabilityProvider        <- IMetaTileEntity extends
+    //   com.cleanroommc.modularui.api.IGuiHolder                      <- IMetaTileEntity extends
+    //   appeng.api.crafting.ICraftingIconProvider                     <- BlockMachines/ItemMachines 继承链
+    // 版本取 `gradlew dependencies --configuration runtimeClasspath` 的实际解析结果，保证编译期/运行期锁步。
+    def gtnhLibVer = (project.findProperty("gtnhRun.gtnhLibVersion") ?: "0.9.62").toString()
+    compileOnly("com.github.GTNewHorizons:GTNHLib:${gtnhLibVer}:dev") { transitive = false }
+    compileOnly("com.github.GTNewHorizons:ModularUI2:2.3.43-1.7.10:dev") { transitive = false }
+    compileOnly("com.github.GTNewHorizons:Applied-Energistics-2-Unofficial:rv3-beta-834-GTNH:dev") { transitive = false }
+
     // GregTech 5 + NEI 等（GT5 仓库 dependencies.gradle 中 api/implementation 条目的运行时装载）
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:GT5-Unofficial:${gt5Ver}:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:StructureLib:${structureLibVer}:dev")
