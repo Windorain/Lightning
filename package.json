@@ -10,6 +10,11 @@
     "build:all":         "npm run build:web && npm run build:mod:gtnh",
     "protocol:gen":      "cd protocol && buf generate",
     "protocol:lint":     "cd protocol && buf lint",
-    "protocol:breaking": "cd protocol && buf breaking --against '.git#branch=main'"
+    "protocol:breaking": "cd protocol && buf breaking --against '.git#branch=main'",
+
+    "multiblock:export":          "pwsh -NoProfile -File scripts/multiblock-pipeline/run-pipeline.ps1",
+    "multiblock:verify-expanded": "node scripts/multiblock-pipeline/verify-expanded.mjs",
+    "multiblock:compare-runs":    "node scripts/multiblock-pipeline/compare-runs.mjs",
+    "multiblock:selfcheck":       "pwsh -NoProfile -File scripts/multiblock-pipeline/selfcheck.ps1"
   }
 }

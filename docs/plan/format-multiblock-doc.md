@@ -421,9 +421,11 @@ GT 里通道值不可为 0；"未设置"的位置由**主通道值**（总 Tier�
   这需要 `bakedGeometryDecode.ts` 新增一条解码分支（约 20 行），属**渲染层**工作，**不在 T0.5 范围**。
   触发条件：T3.2 体积曲线显示 `palette.geometry` 占比过高且落盘体积超预算时，作为独立任务立项；
   届时用 `multiblock.geometryEncoding` 加新取值实现（**格式已经预留了判别位**）。
-- **`thumbnailPNG` 政策**（T0.1 §8 F3 要求显式决策）：**按既有字段原样进条目、参与签名去重**；
-  **禁止**在多方块产物里逐变体重复缩略图。本节定稿为：全文件所有条目的 `thumbnailPNG` 之后**共享同一 blob 池**
-  是后续优化项；本轮保持既有逐条目字段（blockPalette 条目本来就按状态去重，天然不随变体数增长）。
+- **`thumbnailPNG` 政策**（T0.1 §8 F3 要求显式决策）：~~按既有字段原样进条目、参与签名去重~~
+  **【修订 · 缩略图确定性修复后】multiblock 导出产物不携带 `thumbnailPNG`**——GPU 渲染像素跨运行不确定，
+  会破坏幂等字节一致性与签名对齐（证据：docs/plan/fix-thumbnail-determinism.md）。web 3D 渲染不使用 per-block 缩略图；
+  若将来需要，须确定性软件光栅另行立项并走独立 blob 池，不得进主产物条目。条目字段集合恒为
+  `{registryId, meta, renderMode, geometry, occludesAdjacentFaces, nbt, tooltip}`。
 
 ---
 
@@ -844,7 +846,7 @@ node scripts/multiblock-fixtures/validate-multiblock-fixtures.mjs --all         
 | 4 | **`indexAliases` 的语义边界** | 只做"整表替换"，不做"按下标范围替换" | 已足够（fixture 未用到它，但它是硬约束 4 明文要求的能力）；若 T1.4 需要区间替换，加 `indexRangeAliases`，**不要**改成表达式 |
 | 5 | **运行态只覆盖材质层** | TESR/部件展开不支持（T0.3 裁决） | 已在 `viewerSemantics.runstateCoverage` 显式声明；**不得**作为验收条件。用户若裁决追加投入，按 `probe-run-state.md §5` 立项 |
 | 6 | **`MTELapotronicSuperCapacitor` 的挂起项** | T0.4 R9：`glassTier = BOROGLASS.getValue(trigger)+2` 疑似把下标当电压等级（变体玻璃不成立） | 不属 T0.5 范围；T1.3 比对几何时留意；如需可向上游报告 |
-| 7 | **`thumbnailPNG` 的隐藏纹理成本** | 每个调色板条目约 936 B（T0.1 §8 F3），随方块状态数增长 | 条目级去重已覆盖（同状态同缩略图只存一份）；进一步"共享 blob 池"记为可选优化（§6.3） |
+| 7 | ~~**`thumbnailPNG` 的隐藏纹理成本**~~（已消解） | 每条目约 936 B 且 GPU 渲染跨运行不确定 | **已修订为不产出**（§6.3 修订条）：体积风险与幂等风险一并消除 |
 | 8 | **几何编码的长尾** | 顶点对象化是未压缩体积最大开销，但改动在渲染层 | 触发条件与实现位已定（§6.3）；届时用 `geometryEncoding` 加新取值，不破坏本契约 |
 | 9 | **`opsLegend` 是否必须** | fixture 用它把说明集中一处（否则说明文字会主导体积，实测翻倍） | 生产产物可省（`opsLegend` 可选）；但**必须**保留 `notes[]` 里的软约束声明（那是语义，不是注释） |
 | 10 | **参考网格产物位置** | `--verify-grids` 落盘到 `scripts/multiblock-fixtures/.out/`（非提交物） | T3.3 的正式对照物是 T1.6 的展开校验文件（留白 #10），不要在 CI 里依赖本目录 |

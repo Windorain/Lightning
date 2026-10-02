@@ -13,9 +13,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.world.storage.ISaveFormat;
 import net.minecraft.world.storage.SaveFormatComparator;
+import net.minecraftforge.client.event.ClientChatReceivedEvent;
 
 import org.apache.logging.log4j.Level;
 
+import com.lightning.mod.client.multiblock.MultiblockPipelineAutomation;
 import com.lightning.mod.client.multiblock.MultiblockScanAutomation;
 import com.lightning.mod.client.multiblock.RunStateProbeAutomation;
 import com.lightning.mod.config.SdeAutomationConfig;
@@ -49,6 +51,14 @@ public final class SdeClientAutomationTickHandler {
         }
 
         Minecraft mc = Minecraft.getMinecraft();
+
+        // T1.6 游戏内自动导出管线：触发文件（sde_multiblock_pipeline.json）存在时接管本 tick。
+        // 它自己负责「进专用干净世界 → 发 /sde multiblock → 等导出 → 落结构化结果 → 按退出码退出」，
+        // 因此必须排在其它分派之前；触发文件不存在时本分支零行为变化。
+        if (MultiblockPipelineAutomation.isRequested(mc)) {
+            MultiblockPipelineAutomation.tick(mc);
+            return;
+        }
 
         // T1.2 多方块扫描：只有在 mcDataDir 下存在触发文件时接管本 tick（触发文件不存在时零行为变化）。
         if (MultiblockScanAutomation.isRequested(mc)) {
@@ -107,6 +117,20 @@ public final class SdeClientAutomationTickHandler {
     private void tryAutoJoinFirstWorld(Minecraft mc) {
         autoJoinAttempted = true;
         joinFirstSingleplayerWorld(mc);
+    }
+
+    /**
+     * 服务端聊天回包：只在 T1.6 管线运行期间被记录（用于诊断「命令为什么没被受理」，例如 OP 权限不足）。
+     * 管线未运行时 {@link MultiblockPipelineAutomation#onChat} 立即返回 —— 既有行为零变化。
+     */
+    @SubscribeEvent
+    public void onClientChat(ClientChatReceivedEvent e) {
+        if (e == null || e.message == null) return;
+        try {
+            MultiblockPipelineAutomation.onChat(e.message.getUnformattedText());
+        } catch (Throwable ignored) {
+            // 诊断通道失败不得影响游戏
+        }
     }
 
     /**

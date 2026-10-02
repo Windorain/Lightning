@@ -27,7 +27,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  *   "machines": ["MTEBrickedBlastFurnace"],  // 目标机（simpleName 或 fqcn）；空 = 4 台默认代表机
  *   "limitPerMachine": -1,                   // 调试：每台只跑前 N 个 (tier × 取值组合) 单元
  *   "maxVariantsPerMachine": 2000,           // 超过则按契约 tierSample 语义抽样并写进产物 notes
- *   "includeThumbnails": true,
+ *   // 注意：没有 includeThumbnails —— 条目恒不写 thumbnailPNG（幂等硬约束，见 GeometryPalette 类注释）
  *   "embedTextures": true,
  *   "factsPath": "",                         // 覆盖 T1.2 machines.json 路径
  *   "exit": true,

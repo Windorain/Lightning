@@ -83,7 +83,11 @@ public final class VariantCaptureRunner {
         public int maxVariantsPerMachine = DEFAULT_MAX_VARIANTS_PER_MACHINE;
         /** 调试用：每台只处理前 N 个 (tier × 取值组合) 单元（-1 = 全部）。 */
         public int limitPerMachine = -1;
-        public boolean includeThumbnails = true;
+        /**
+         * 已移除：{@code includeThumbnails}。调色板条目**恒不写** {@code thumbnailPNG} —— GPU 渲染的缩略图
+         * 跨运行像素不稳定，会破坏产物逐字节幂等与跨运行内容签名对齐（见 {@link GeometryPalette#EMITS_THUMBNAIL_PNG}、
+         * {@code docs/plan/fix-thumbnail-determinism.md}）。
+         */
         public boolean embedTextures = true;
         public long globalBudgetMs = DEFAULT_GLOBAL_BUDGET_MS;
         /** T1.2 machines.json 的显式路径覆盖；空 = 自动取 multiblock_scan 下 run 号最大者。 */
@@ -151,8 +155,7 @@ public final class VariantCaptureRunner {
                 .getAsInt();
             if (o.has("limitPerMachine")) c.limitPerMachine = o.get("limitPerMachine")
                 .getAsInt();
-            if (o.has("includeThumbnails")) c.includeThumbnails = o.get("includeThumbnails")
-                .getAsBoolean();
+            // 旧触发文件里的 includeThumbnails 被静默忽略：本路径恒不产出 thumbnailPNG（见 Config 字段注释）。
             if (o.has("embedTextures")) c.embedTextures = o.get("embedTextures")
                 .getAsBoolean();
             if (o.has("globalBudgetMs")) c.globalBudgetMs = o.get("globalBudgetMs")
@@ -271,7 +274,7 @@ public final class VariantCaptureRunner {
         }
 
         File factsFile = resolveFactsFile(mc, cfg);
-        GeometryPalette palette = new GeometryPalette(cfg.includeThumbnails);
+        GeometryPalette palette = new GeometryPalette();
         PlanCache planCache = new PlanCache();
 
         List<JsonObject> failures = new ArrayList<JsonObject>();
@@ -282,6 +285,10 @@ public final class VariantCaptureRunner {
         int totalCaptures = 0;
         int totalBuilds = 0;
 
+        notes.add(
+            "缩略图：blockPalette 条目不含 thumbnailPNG（GeometryPalette.EMITS_THUMBNAIL_PNG=false）——"
+                + "GPU 渲染的缩略图跨运行像素不稳定，会同时破坏产物逐字节幂等与跨运行内容签名对齐；"
+                + "见 docs/plan/fix-thumbnail-determinism.md");
         if (factsFile == null) {
             notes.add(
                 "找不到 T1.2 的 machines.json（multiblock_scan/run-NNNN/），本轮的「预期取值表/尺寸规则」断言全部缺少输入，"
@@ -1853,7 +1860,8 @@ public final class VariantCaptureRunner {
         o.addProperty("cleanupTrigger", cfg.cleanupTrigger);
         o.addProperty("maxVariantsPerMachine", cfg.maxVariantsPerMachine);
         o.addProperty("limitPerMachine", cfg.limitPerMachine);
-        o.addProperty("includeThumbnails", cfg.includeThumbnails);
+        // 保留该键（而不是删掉）以便下游读者不炸：值恒为 false = 本路径不产出 thumbnailPNG（见 Config 字段注释）。
+        o.addProperty("includeThumbnails", GeometryPalette.EMITS_THUMBNAIL_PNG);
         o.addProperty("embedTextures", cfg.embedTextures);
         o.addProperty("globalBudgetMs", cfg.globalBudgetMs);
         o.add("machines", ScanJson.strings(cfg.machines));

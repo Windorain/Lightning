@@ -61,6 +61,13 @@ import net.minecraftforge.common.config.Configuration;
  * <td>整轮时间预算（安全兜底）：超时后剩余机器不执行并写入失败清单（不静默跳过）。</td>
  * </tr>
  * </table>
+ * <p>
+ * <b>已移除的配置项：{@code includeThumbnails}</b>（原默认 {@code true}）。多方块路径**恒不产出**
+ * {@code thumbnailPNG}：它是 GPU 渲染的方块缩略图，跨运行像素不稳定，会同时摧毁「产物逐字节幂等」
+ * 与「跨运行内容签名对齐」两条硬判据（实测证据见 {@code docs/plan/fix-thumbnail-determinism.md}）。
+ * 旧配置文件里残留的 {@code B:includeThumbnails=...} 会被静默忽略；本路径不提供「重新打开」的开关
+ * （需要缩略图须改用确定性软件光栅另行立项，已登记为开放项）。既有的 {@code /sde export}（wiki）
+ * 路径不受影响 —— 缩略图仍由 {@code MeshCaptureService} 的既有分支产出。
  */
 public final class SdeMultiblockConfig {
 
@@ -80,8 +87,6 @@ public final class SdeMultiblockConfig {
     public static String outputDirName = "sde_multiblock_exports";
     /** 整轮时间预算（ms，安全兜底）。 */
     public static long globalBudgetMs = 4L * 60L * 60L * 1000L;
-    /** 是否在调色板里嵌缩略图（体积换诊断）。 */
-    public static boolean includeThumbnails = true;
     /** 是否嵌纹理 blob（既有机制）。 */
     public static boolean embedTextures = true;
     /** 每轮的中间数据集是否保留（false = 编码完删除，只留产物）。 */
@@ -140,7 +145,9 @@ public final class SdeMultiblockConfig {
                 1000,
                 Integer.MAX_VALUE,
                 "整轮时间预算（ms，安全兜底）；超时后剩余机器不执行并写入失败清单。");
-            includeThumbnails = cfg.getBoolean("includeThumbnails", "multiblock", true, "是否在调色板条目里嵌缩略图（体积换诊断）。");
+            // 注意：不再有 includeThumbnails 配置项 —— multiblock 路径**恒不产出** thumbnailPNG
+            // （GPU 渲染像素跨运行不稳定，违反「产物逐字节幂等」硬约束；见 docs/plan/fix-thumbnail-determinism.md）。
+            // 旧配置文件里的 B:includeThumbnails=... 会被静默忽略（不报错、不产生任何行为差异）。
             embedTextures = cfg.getBoolean("embedTextures", "multiblock", true, "是否嵌纹理 blob（既有机制）。");
             keepDataset = cfg
                 .getBoolean("keepDataset", "multiblock", true, "是否保留每轮的中间数据集（variant_capture 形态，供离线复算/闭环验证）。");

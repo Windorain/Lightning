@@ -369,8 +369,8 @@ public final class VariantGeometryBakery {
         // 因此**每个四边形只能调用一次**（重复调用会把局部 UV 当图集 UV 再解析 → 退化成 "unknown"）。
         MeshCaptureService.CaptureToolkit.attachQuadMaterials(inst, textureMap, palette.materials());
         JsonObject geometry = MeshCaptureService.CaptureToolkit.geometryOf(inst);
-        return palette
-            .intern(registryId, meta, geometry, block.isOpaqueCube(), block, referencedByMachine, inst.quads.size());
+        // 注意：不传 Block —— 调色板条目不再带 thumbnailPNG（GPU 像素跨运行不稳定，见 GeometryPalette 类注释）。
+        return palette.intern(registryId, meta, geometry, block.isOpaqueCube(), referencedByMachine, inst.quads.size());
     }
 
     private static JsonObject emptyGrid() {

@@ -212,7 +212,7 @@ public final class MultiblockExportRunner {
         cap.includeActiveRunstate = !structuralOnly;
         cap.maxVariantsPerMachine = Math.max(2, maxVariants);
         cap.globalBudgetMs = budgetMs;
-        cap.includeThumbnails = SdeMultiblockConfig.includeThumbnails;
+        // 不设 includeThumbnails：T1.3 调色板恒不产出 thumbnailPNG（幂等硬约束，见 GeometryPalette.EMITS_THUMBNAIL_PNG）。
         cap.embedTextures = SdeMultiblockConfig.embedTextures;
         cap.factsPath = factsFile.getAbsolutePath();
         cap.exit = false;
@@ -682,7 +682,8 @@ public final class MultiblockExportRunner {
         o.addProperty("structuralOnly", Boolean.valueOf(structuralOnly));
         o.addProperty("outputDirName", outputDirName);
         o.addProperty("globalBudgetMs", Long.valueOf(budgetMs));
-        o.addProperty("includeThumbnails", Boolean.valueOf(SdeMultiblockConfig.includeThumbnails));
+        o.addProperty("includeThumbnails", Boolean.valueOf(GeometryPalette.EMITS_THUMBNAIL_PNG));
+        o.addProperty("thumbnailPNGPolicy", "恒不产出：GPU 渲染像素跨运行不稳定，违反产物逐字节幂等（docs/plan/fix-thumbnail-determinism.md）");
         o.addProperty("embedTextures", Boolean.valueOf(SdeMultiblockConfig.embedTextures));
         return o;
     }

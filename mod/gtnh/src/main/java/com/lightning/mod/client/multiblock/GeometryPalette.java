@@ -6,13 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 
-import net.minecraft.block.Block;
-
 import com.google.gson.JsonArray;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
-import com.lightning.mod.client.export.BlockThumbnailRenderer;
 import com.lightning.mod.client.export.TextureBlobEmbedder;
 import com.lightning.mod.client.meshcapture.MeshCaptureService;
 
@@ -33,11 +30,27 @@ import cpw.mods.fml.relauncher.SideOnly;
  * </ol>
  * 与既有 {@code MeshCaptureService#liftBlockPaletteToRoot} 是同一套机制（同一签名函数、同一 air-0 约定、
  * 同一 {@code renderMode/geometry/occludesAdjacentFaces/nbt/tooltip} 条目形状），只是调用方换成了 T1.3 的变体循环。
+ * <p>
+ * <b>不产出 {@code thumbnailPNG}（本路径的硬约束）</b>：条目不写缩略图，见 {@link #EMITS_THUMBNAIL_PNG}。
+ * 该字段是 GPU 渲染的方块缩略图，跨运行像素不稳定（实测同一输入两次运行的 9/14 条条目缩略图不同，
+ * 剥离后其余字节逐字节一致），只要写进条目就会同时摧毁「产物逐字节幂等」与「跨运行内容签名对齐」两条硬判据。
+ * 多方块产物不需要它：web 3D 渲染靠 {@code textureBlobs} 承载纹理，缩略图只服务 UI 预览，本轮无消费者。
+ * 既有 {@code /sde export}（wiki）路径的缩略图行为**一字不动**（那是 {@code MeshCaptureService} 的另一条调用）。
  */
 @SideOnly(Side.CLIENT)
 public final class GeometryPalette {
 
     public static final String GEOMETRY_ENCODING = "bakedQuadsJsonV1";
+
+    /**
+     * 本调色板是否把 {@code thumbnailPNG} 写进条目：<b>恒为 {@code false}</b>。
+     * <p>
+     * 刻意保留成常量而不是删掉字段：它是「产物无缩略图」这一契约的机器可读落点
+     * （写进 {@link #statsJson()}，并在 T1.5/T1.3 的配置回报里回显），
+     * 使「产物里没有 thumbnailPNG」可被判据核对，而不是靠人读代码。
+     * 完整论证与实测证据见 {@code docs/plan/fix-thumbnail-determinism.md}。
+     */
+    public static final boolean EMITS_THUMBNAIL_PNG = false;
 
     public static final class Entry {
 
@@ -67,7 +80,6 @@ public final class GeometryPalette {
     private final Map<String, Entry> bySignature = new LinkedHashMap<String, Entry>();
     private final List<Entry> entries = new ArrayList<Entry>();
     private final MeshCaptureService.CaptureToolkit.MaterialTable materials = new MeshCaptureService.CaptureToolkit.MaterialTable();
-    private final boolean includeThumbnails;
 
     /** 同签名重复捕获次数（= 被去重掉的烘焙几何份数），硬约束 3 的机器判据之一。 */
     private int duplicateCaptures;
@@ -78,8 +90,7 @@ public final class GeometryPalette {
     private JsonArray textureBlobs = new JsonArray();
     private boolean texturesEmbedded;
 
-    public GeometryPalette(boolean includeThumbnails) {
-        this.includeThumbnails = includeThumbnails;
+    public GeometryPalette() {
         JsonObject air = MeshCaptureService.CaptureToolkit.airEntry();
         Entry e = new Entry(0, "air", 0, air, MeshCaptureService.CaptureToolkit.signatureOfEntry(air), 0);
         bySignature.put(e.signature, e);
@@ -108,13 +119,16 @@ public final class GeometryPalette {
 
     /**
      * 入库一个方块状态的烘焙几何；返回它的全局下标（同一内容签名只保留一份）。
+     * <p>
+     * 条目形状恒为 <code>{registryId, meta, renderMode, geometry, occludesAdjacentFaces, nbt, tooltip}</code>：
+     * <b>不写 {@code thumbnailPNG}</b>（{@link #EMITS_THUMBNAIL_PNG}）。调用方因此也不需要传 {@code Block} ——
+     * 本方法不再触碰任何 GPU/渲染状态，纯数据入库。
      *
      * @param geometry              {@code bakedQuadsJsonV1} 几何（已挂好 {@code materialIndex}）
      * @param occludesAdjacentFaces 与既有条目同义
-     * @param block                 用于缩略图渲染；可为 {@code null}（则跳过缩略图）
      * @param referencedByMachine   变体所属机器（去重统计/诊断）
      */
-    public Entry intern(String registryId, int meta, JsonObject geometry, boolean occludesAdjacentFaces, Block block,
+    public Entry intern(String registryId, int meta, JsonObject geometry, boolean occludesAdjacentFaces,
         String referencedByMachine, int quadCount) {
         internCalls++;
         String sig = MeshCaptureService.CaptureToolkit.signatureOfState(registryId, meta, null, geometry, null);
@@ -128,16 +142,6 @@ public final class GeometryPalette {
         JsonObject entry = new JsonObject();
         entry.addProperty("registryId", registryId);
         entry.addProperty("meta", meta);
-        if (includeThumbnails && block != null) {
-            try {
-                String thumbB64 = BlockThumbnailRenderer.renderToBase64PNG(block, meta);
-                if (thumbB64 != null && !thumbB64.isEmpty()) {
-                    entry.addProperty("thumbnailPNG", thumbB64);
-                }
-            } catch (Throwable ignored) {
-                // 缩略图失败不阻断几何导出（与既有 finalizeSingleStructure 同处置）
-            }
-        }
         entry.addProperty("renderMode", "BakedModel");
         entry.add("geometry", geometry);
         entry.addProperty("occludesAdjacentFaces", occludesAdjacentFaces);
@@ -219,6 +223,10 @@ public final class GeometryPalette {
             "dedupKey",
             "MeshCaptureService#fullEqualitySignature(registryId, meta, nbt=null, geometry, tooltip=null)");
         o.addProperty("geometryEncoding", GEOMETRY_ENCODING);
+        o.addProperty("thumbnailPNG", EMITS_THUMBNAIL_PNG);
+        o.addProperty(
+            "thumbnailPNGPolicy",
+            "条目不含 thumbnailPNG：GPU 渲染的缩略图跨运行像素不稳定，会同时破坏产物逐字节幂等" + "与跨运行内容签名对齐（docs/plan/fix-thumbnail-determinism.md）");
         o.addProperty("materialEntries", materialPalette.size());
         o.addProperty("textureBlobs", textureBlobs.size());
         JsonArray ur = new JsonArray();

@@ -40,3 +40,6 @@ CLAUDE.md
 scripts/multiblock-fixtures/.out/
 
 scripts/multiblock-encode/.out/
+
+# T1.6 游戏内自动导出管线的归档与日志（可再生）
+scripts/multiblock-pipeline/.out/
