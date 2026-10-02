@@ -440,3 +440,7 @@ Phase 3 集成与验收（串行，全部由 E 管线驱动，零人工）
 - **调度者临时裁决（待用户确认）**：文件格式的「运行态」轴本轮只承诺**纹理/材质层**两态差异。依据：该层差异是真实状态机驱动、真实捕获、可重复的；超出此范围需要新捕获机制与真实配方运行，属独立工作量。
 - **【用户裁决开放项 · 不阻塞流程】**：① shader/VAO 型 TESR 活动表现（GT5U 唯一 `IMTERenderer` 多方块 MTEExoFoundry）几何不经 Tessellator，捕获需新增非 Tessellator 捕获策略；② 部件展开（虫洞/激光/黑洞/纳米锻炉等附属渲染方块）仅真实配方运行中才存在；③ `mMachine=true`（结构成形校验通过）未达成，`checkMachine` 失败点已缩小至 `checkPiece` 未定位到具体格。用户可裁决：接受上述范围排除 / 追加投入攻克哪一项。
 - 留白 #5（mod 侧新包命名）→ 已由 T0.3 确立：`com.lightning.mod.client.multiblock/`（假世界/构建/捕获设施齐备，T1.1 直接复用，不再另立）。
+
+**T2.6/T3.1 判据修正**（T2.4/T2.5 实测发现，证据：[decision-channel-ui.md](decision-channel-ui.md)）：
+- 合成 fixture 的方块几何为 0..16 像素单位且共面双四边形（真实导出为 0..1 逐面绕组），在生产 `FrontSide` 材质下视口**视觉为空**——装配/渲染链路本身已验证正确（顶点在视锥内、definition 与面板一致）。
+- 因此：§T2.6「截图不得全黑/全空」像素断言**仅适用于 T1.6 真实导出文件（T3.1）**；合成 fixture 阶段的通过判据改用 cellGrid 级断言（`data-mb-dims`/`data-mb-variant`/`definition.cellGrid`/方块统计行）。「相邻等级截图有差异」同理只在真实导出上判定。
