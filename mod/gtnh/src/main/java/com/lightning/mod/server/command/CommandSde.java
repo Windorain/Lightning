@@ -16,6 +16,7 @@ import net.minecraft.util.MathHelper;
 import net.minecraft.util.MovingObjectPosition;
 
 import com.google.gson.JsonObject;
+import com.lightning.mod.config.SdeMultiblockConfig;
 import com.lightning.mod.core.session.ExportSession;
 import com.lightning.mod.core.session.SdeSelectionMode;
 import com.lightning.mod.core.util.RayTraceUtil;
@@ -33,7 +34,7 @@ public class CommandSde extends CommandBase {
 
     @Override
     public String getCommandUsage(ICommandSender sender) {
-        return "/sde <pos1|pos2|hpos1|hpos2|sel [cuboid|extend]|start|end|setName|setFrame|setStructureId|record [N|cycle]|export [raw]|dump|status|web [port]|webstop|hajimi [name]|hjm [name]>";
+        return "/sde <pos1|pos2|hpos1|hpos2|sel [cuboid|extend]|start|end|setName|setFrame|setStructureId|record [N|cycle]|export [raw]|multiblock [all|<name,...>] [limit=N]|dump|status|web [port]|webstop|hajimi [name]|hjm [name]>";
     }
 
     @Override
@@ -201,6 +202,60 @@ public class CommandSde extends CommandBase {
                             "SDE: 已写入 pending_dump.json，客户端将生成全量 block_registry.json / material_registry.json: "
                                 + dumpRoot));
                     break;
+                case "multiblock": {
+                    // T1.5：枚举（T1.2）→ 逐台变体构建+捕获（T1.3）→ 因子化编码（T1.4）→ 信封落盘。
+                    // 实际执行在客户端 tick（client/multiblock/MultiblockExportAutomation）；
+                    // 命令只登记请求，故本类不引用任何 @SideOnly(CLIENT) 类。
+                    if (!(sender instanceof EntityPlayerMP)) {
+                        sender.addChatMessage(new ChatComponentText("SDE: /sde multiblock 仅玩家（集成服客户端）可用"));
+                        return;
+                    }
+                    EntityPlayerMP mbPlayer = (EntityPlayerMP) sender;
+                    if (!SdePermissions.canUseSde(mbPlayer)) {
+                        mbPlayer.addChatMessage(new ChatComponentText("SDE: 需要 OP 权限"));
+                        return;
+                    }
+                    String scope = "";
+                    int limit = -1;
+                    for (int i = 1; i < args.length; i++) {
+                        String a = args[i];
+                        if (a == null || a.trim()
+                            .isEmpty()) continue;
+                        if (a.toLowerCase()
+                            .startsWith("limit=")) {
+                            try {
+                                limit = Integer.parseInt(
+                                    a.substring("limit=".length())
+                                        .trim());
+                            } catch (NumberFormatException ex) {
+                                sender.addChatMessage(new ChatComponentText("SDE: limit= 需要整数"));
+                                return;
+                            }
+                            continue;
+                        }
+                        scope = scope.isEmpty() ? a : (scope + "," + a);
+                    }
+                    String requested = (scope.isEmpty() ? "all" : scope) + (limit > 0 ? " limit=" + limit : "");
+                    if (!SdeMultiblockConfig.requestExport(scope, mbPlayer.getCommandSenderName())) {
+                        sender.addChatMessage(new ChatComponentText("SDE: 已有一次 /sde multiblock 待执行，请等它结束"));
+                        return;
+                    }
+                    if (limit > 0) {
+                        // 范围上限是本轮的运行参数（与配置文件里的默认值同语义）
+                        SdeMultiblockConfig.maxExportMachines = limit;
+                    }
+                    sender.addChatMessage(
+                        new ChatComponentText(
+                            "SDE: 已排队多方块导出（范围=" + requested
+                                + "）；客户端 tick 将在主菜单后执行，产物目录与 /sde export 完全独立（配置项 outputDirName="
+                                + SdeMultiblockConfig.outputDirName
+                                + "）。"));
+                    sender.addChatMessage(
+                        new ChatComponentText(
+                            "SDE: 用法: /sde multiblock [all | <simpleName|fqcn>[,<...>]] [limit=N]；"
+                                + "配置文件 <mcDataDir>/config/sde_multiblock.cfg 可调上限与开关（默认全量不裁剪）。"));
+                    break;
+                }
                 case "status":
                     sender.addChatMessage(new ChatComponentText(s.statusLine()));
                     break;
@@ -274,6 +329,7 @@ public class CommandSde extends CommandBase {
                 "setStructureId",
                 "record",
                 "export",
+                "multiblock",
                 "dump",
                 "status",
                 "web",
@@ -291,6 +347,11 @@ public class CommandSde extends CommandBase {
             }
             if (sub.equals("record")) {
                 return getListOfStringsMatchingLastWord(args, "cycle");
+            }
+            if (sub.equals("multiblock")) {
+                // 机器名清单来自 T1.2 枚举数据（machines.json），不在命令侧解析文件；
+                // 这里只补全范围关键字与上限开关，避免把 221 个名字硬编码进补全表。
+                return getListOfStringsMatchingLastWord(args, "all", "limit=");
             }
         }
         return null;

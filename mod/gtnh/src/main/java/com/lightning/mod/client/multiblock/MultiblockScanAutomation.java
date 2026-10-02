@@ -59,11 +59,19 @@ public final class MultiblockScanAutomation {
             .isFile()) return true;
         // T1.3 变体捕获复用同一个 tick 接管点（避免改动 client/automation/ 下不在 T1.3 写范围内的文件）；
         // 两个触发文件都不存在时，本方法行为与 T1.2 完全一致（零行为变化）。
-        return VariantCaptureAutomation.isRequested(mc);
+        if (VariantCaptureAutomation.isRequested(mc)) return true;
+        // T1.5 多方块导出同样复用本挂接点（触发文件 sde_multiblock.json 或命令侧待执行请求）；
+        // 三个来源都不存在时行为仍与 T1.2 完全一致。
+        return MultiblockExportAutomation.isRequested(mc);
     }
 
     public static void tick(Minecraft mc) {
-        // T1.3 优先：它自带独立的触发文件与产物目录（sde_variant_capture.json / variant_capture/）。
+        // T1.5 优先：它是 T1.3 的下游（自己会驱动一次 T1.3 捕获），必须先于 T1.3 的分派判断。
+        if (MultiblockExportAutomation.isRequested(mc)) {
+            MultiblockExportAutomation.tick(mc);
+            return;
+        }
+        // T1.3 次之：它自带独立的触发文件与产物目录（sde_variant_capture.json / variant_capture/）。
         if (VariantCaptureAutomation.isRequested(mc)) {
             VariantCaptureAutomation.tick(mc);
             return;

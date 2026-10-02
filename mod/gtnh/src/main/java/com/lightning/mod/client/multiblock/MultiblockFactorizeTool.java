@@ -45,6 +45,7 @@ public final class MultiblockFactorizeTool {
         .create();
 
     private static File outDir;
+    private static MultiblockDatasetCodec codec;
     private static JsonArray palette;
     private static JsonArray materialPalette;
     private static JsonArray textureBlobs;
@@ -84,12 +85,12 @@ public final class MultiblockFactorizeTool {
         }
 
         File paletteFile = new File(datasetDir, "palette.json");
-        JsonObject pal = readObject(paletteFile);
-        palette = pal.getAsJsonArray("blockPalette");
-        materialPalette = pal.getAsJsonArray("materialPalette");
-        textureBlobs = pal.getAsJsonArray("textureBlobs");
-        tooltipPalette = pal.getAsJsonArray("tooltipPalette");
-        datasetLabel = datasetDir.getName();
+        codec = new MultiblockDatasetCodec(datasetDir);
+        palette = codec.palette();
+        materialPalette = codec.materialPalette();
+        textureBlobs = codec.textureBlobs();
+        tooltipPalette = codec.tooltipPalette();
+        datasetLabel = codec.datasetLabel();
 
         File machinesDir = new File(datasetDir, "machines");
         File[] files = machinesDir.listFiles();
@@ -229,187 +230,13 @@ public final class MultiblockFactorizeTool {
     }
 
     // -----------------------------------------------------------------------
-    // 读取
+    // 读取（唯一读取器 = MultiblockDatasetCodec，与游戏内 /sde multiblock 共用）
     // -----------------------------------------------------------------------
 
     private static MultiblockFactorizer.MachineIn readMachine(File f, String slug, Subset subset) throws Exception {
-        JsonObject src = readObject(f);
-        JsonObject m = src.getAsJsonObject("machine");
-        MultiblockFactorizer.MachineIn mi = new MultiblockFactorizer.MachineIn();
-        String fqcn = str(m, "fqcn");
-        String simple = str(m, "simpleName");
-        String ns = fqcn.startsWith("gtPlusPlus") ? "gtpp" : (fqcn.startsWith("gregtech") ? "gregtech" : "lightning");
-        mi.id = ns + ":metaTileEntity_" + lowerFirst(simple.startsWith("MTE") ? simple.substring(3) : simple);
-        mi.displayName = str(m, "displayName");
-        mi.sourceClass = fqcn;
-        mi.sourceSlug = slug;
-        mi.datasetSource = datasetLabel + "/machines/" + slug + ".json";
-
-        List<String> keep = subset == null ? null : subset.keepChannels;
-        for (JsonElement ce : src.getAsJsonArray("channels")) {
-            JsonObject c = ce.getAsJsonObject();
-            String key = str(c, "key");
-            if (keep != null && !keep.contains(key)) continue;
-            MultiblockFactorizer.ChannelIn ch = new MultiblockFactorizer.ChannelIn();
-            ch.enumName = c.has("enum") && !c.get("enum")
-                .isJsonNull() ? c.get("enum")
-                    .getAsString() : null;
-            ch.id = str(c, "id");
-            ch.key = key;
-            ch.name = str(c, "name");
-            ch.kind = str(c, "kind");
-            ch.max = c.has("max") ? c.get("max")
-                .getAsInt() : 1;
-            if (c.has("min") && !c.get("min")
-                .isJsonNull())
-                ch.dimensionAtMin = Integer.valueOf(
-                    c.get("min")
-                        .getAsInt());
-            int domainMax = ch.max;
-            if (c.has("domain") && c.getAsJsonObject("domain")
-                .has("max")) {
-                domainMax = c.getAsJsonObject("domain")
-                    .get("max")
-                    .getAsInt();
-            }
-            if (subset != null && subset.channelMax != null && subset.channelMax.containsKey(key)) {
-                domainMax = subset.channelMax.get(key)
-                    .intValue();
-                ch.max = domainMax;
-                ch.subsetOverridden = true;
-            }
-            ch.domainMax = Integer.valueOf(domainMax);
-            ch.domainSource = str(c, "domainSource");
-            ch.valueSemantics = str(c, "valueSemantics");
-            mi.channels.add(ch);
-            if ("dimension".equals(ch.kind)) {
-                JsonObject note = new JsonObject();
-                note.addProperty("kind", "note");
-                note.addProperty(
-                    "text",
-                    "尺寸型通道 " + ch.key
-                        + "：数据集的 min="
-                        + ch.dimensionAtMin
-                        + " 是「值 1 对应的实际尺寸」，与契约 §4.2 的 min（有效取值下界 = 1）语义不同；"
-                        + "本文档按契约写 min=1 / max="
-                        + domainMax
-                        + "，二者满足 阶数 = max − min + 1。");
-                note.addProperty("source", "probe-variant-capture.md §5.3 / format-multiblock-doc.md §4.4");
-                mi.extraNotes.add(note);
-            }
-        }
-        JsonObject tt = src.getAsJsonObject("totalTierDomain");
-        mi.ttMin = tt.get("min")
-            .getAsInt();
-        mi.ttMax = tt.get("max")
-            .getAsInt();
-        mi.ttDefault = tt.has("default") ? tt.get("default")
-            .getAsInt() : mi.ttMin;
-        mi.ttSource = tt.has("source") ? tt.get("source")
-            .getAsString() : "probed";
-        if (subset != null && subset.tierSample != null) {
-            mi.tierSample.addAll(subset.tierSample);
-        } else {
-            for (JsonElement te : src.getAsJsonArray("tierSample")) mi.tierSample.add(Integer.valueOf(te.getAsInt()));
-        }
-        for (JsonElement re : src.getAsJsonArray("runstates")) {
-            JsonObject r = re.getAsJsonObject();
-            MultiblockFactorizer.RunstateIn rs = new MultiblockFactorizer.RunstateIn();
-            rs.id = str(r, "id");
-            rs.name = str(r, "name");
-            rs.materialSwap = r.has("materialSwap") && r.get("materialSwap")
-                .getAsBoolean();
-            mi.runstates.add(rs);
-        }
-
-        for (JsonElement ve : src.getAsJsonArray("variants")) {
-            JsonObject v = ve.getAsJsonObject();
-            int totalTier = v.get("totalTier")
-                .getAsInt();
-            String runstate = str(v, "runstate");
-            if (!mi.tierSample.contains(Integer.valueOf(totalTier))) continue;
-            JsonObject values = v.has("values") ? v.getAsJsonObject("values") : new JsonObject();
-            // 子集过滤：被丢弃的通道必须为 0（未设置）；保留通道的取值必须落在覆盖后的域内
-            boolean ok = true;
-            for (Map.Entry<String, JsonElement> e : values.entrySet()) {
-                String k = e.getKey();
-                boolean kept = false;
-                for (MultiblockFactorizer.ChannelIn c : mi.channels) {
-                    if (c.key.equals(k)) {
-                        kept = true;
-                        if (e.getValue()
-                            .getAsInt() > c.domainMax.intValue()) ok = false;
-                        break;
-                    }
-                }
-                if (!kept && e.getValue()
-                    .getAsInt() != 0) ok = false;
-            }
-            if (!ok) continue;
-            MultiblockFactorizer.VariantIn vi = new MultiblockFactorizer.VariantIn();
-            vi.totalTier = totalTier;
-            vi.runstate = runstate;
-            for (MultiblockFactorizer.ChannelIn c : mi.channels) {
-                int raw = values.has(c.key) ? values.get(c.key)
-                    .getAsInt() : 0;
-                vi.values.put(c.key, Integer.valueOf(raw));
-            }
-            vi.key = variantKey(mi.channels, vi.values, runstate, totalTier);
-            if (v.has("effective")) {
-                JsonObject eff = v.getAsJsonObject("effective");
-                for (MultiblockFactorizer.ChannelIn c : mi.channels) {
-                    if (eff.has(c.key)) vi.effectiveCrossCheck.put(
-                        c.key,
-                        Integer.valueOf(
-                            eff.get(c.key)
-                                .getAsInt()));
-                }
-            }
-            JsonObject grid = v.getAsJsonObject("grid");
-            vi.cellGrid = toGrid(grid.getAsJsonArray("cellGrid"));
-            mi.variants.add(vi);
-        }
-        mi.palette = palette;
-        mi.materialPalette = materialPalette;
-        mi.textureBlobs = textureBlobs;
-        mi.tooltipPalette = tooltipPalette;
-        return mi;
-    }
-
-    /** 契约 §5.1 的键派生（与 lib.mjs 的 {@code variantKey} 同口径）。 */
-    private static String variantKey(List<MultiblockFactorizer.ChannelIn> channels, Map<String, Integer> values,
-        String runstate, int totalTier) {
-        StringBuilder sb = new StringBuilder();
-        for (MultiblockFactorizer.ChannelIn c : channels) {
-            if (sb.length() > 0) sb.append('|');
-            Integer raw = values.get(c.key);
-            sb.append(c.key)
-                .append(':')
-                .append(raw == null ? 0 : raw.intValue());
-        }
-        if (sb.length() > 0) sb.append('|');
-        sb.append("tt:")
-            .append(totalTier)
-            .append("|runstate:")
-            .append(runstate);
-        return sb.toString();
-    }
-
-    private static int[][][] toGrid(JsonArray cg) {
-        int[][][] g = new int[cg.size()][][];
-        for (int z = 0; z < cg.size(); z++) {
-            JsonArray slice = cg.get(z)
-                .getAsJsonArray();
-            g[z] = new int[slice.size()][];
-            for (int y = 0; y < slice.size(); y++) {
-                JsonArray row = slice.get(y)
-                    .getAsJsonArray();
-                g[z][y] = new int[row.size()];
-                for (int x = 0; x < row.size(); x++) g[z][y][x] = row.get(x)
-                    .getAsInt();
-            }
-        }
-        return g;
+        MultiblockDatasetCodec.Override ov = subset == null ? null
+            : new MultiblockDatasetCodec.Override(subset.channelMax, subset.tierSample, subset.keepChannels);
+        return codec.readMachine(f, slug, ov);
     }
 
     // -----------------------------------------------------------------------

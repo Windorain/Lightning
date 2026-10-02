@@ -31,7 +31,10 @@ import com.google.gson.JsonPrimitive;
  * <li><b>尺寸型通道定骨架阶</b>：按变体网格尺寸 + 尺寸通道有效值聚类 → {@code backbone.sizeSteps}；
  * 阶数恒等于尺寸通道域长度；每阶 {@code cellGrid} 只放"所有变体都不变"的格子（替换型/运行态位置写 0 = 空）。</li>
  * <li><b>逐位置依赖分类</b>：对每个格位置枚举候选键（≤1 条替换型通道 × {总 Tier, 运行态} 的幂集），
- * 取"帧分区最少 → 帧轴最少 → 键最小"的<b>精确键</b>；由此把位置分成常量组 / 单通道组 / 运行态组 / 等级组。</li>
+ * 取"帧分区最少 → 帧轴最少 → 键最小"的<b>精确键</b>；由此把位置分成常量组 / 单通道组 / 运行态组 / 等级组。
+ * 快路径无解时（同一格的取值同时依赖 ≥2 条替换型通道 = 通道作用域相交）回退到
+ * <b>多通道键 + guard 消歧规则组</b>（契约 §4.5.3）：{@code channels[0]} 仍走 {@code indexTable}，
+ * 其余通道落 {@code guard.clauses} 的等值条件，帧只引用 guard 成立的规则。</li>
  * <li><b>规则只存一份</b>：同键同查表的位置集合合成一条规则（{@code fill} 的矩形分解 + 逐层坐标），
  * frame 只按 id 引用。</li>
  * <li><b>系统性替换</b>：单通道依赖走 {@code indexTable} 查表；调色板剪枝后的<b>重编号</b>走
@@ -75,6 +78,8 @@ public final class MultiblockFactorizer {
         public String valueSemantics;
         /** 子集重编码时域被覆盖（此时 T1.3 的 effective 不再是本域的 oracle，跳过交叉校验）。 */
         public boolean subsetOverridden;
+        /** 收窄前该通道的真实域上界（T1.5 抽样时数据集会写；缺省 = null = 未收窄）。 */
+        public Integer trueDomainMax;
     }
 
     public static final class RunstateIn {
@@ -160,10 +165,18 @@ public final class MultiblockFactorizer {
     // 内部状态
     // -----------------------------------------------------------------------
 
-    /** 候选键：至多一条替换型通道 + 可选的 (总 Tier, 运行态)。 */
+    /**
+     * 候选键：若干条替换型通道（升序下标）+ 可选的 (总 Tier, 运行态)。
+     * <p>
+     * 快路径只用「≤1 条通道」的键（与 T1.4 完全同构，保证既有机器产物逐字节不变）；
+     * 只有当某位置的取值同时依赖 ≥2 条替换型通道（通道作用域相交，T0.4 记录的
+     * {@code MTELapotronicSuperCapacitor} 型例外）时才回退到多通道键，并按契约 §4.5.3
+     * 生成带 {@code guard} 的规则组（见 {@link #findGuardKey}）。
+     */
     private static final class DepKey {
 
-        int channel; // -1 = 不依赖通道
+        /** 升序通道下标；空 = 不依赖通道。{@code channels[0]} = 查表通道（indexTable），其余 = guard 通道。 */
+        final List<Integer> channels = new ArrayList<Integer>();
         boolean withTt;
         boolean withRs;
 
@@ -171,17 +184,35 @@ public final class MultiblockFactorizer {
             return (withTt ? 1 : 0) + (withRs ? 1 : 0);
         }
 
+        /** guard 通道数（= 通道数 − 1）；>0 表示本键需要 guard 消歧。 */
+        int leadCount() {
+            return Math.max(0, channels.size() - 1);
+        }
+
+        boolean needsGuard() {
+            return leadCount() > 0;
+        }
+
         @Override
         public String toString() {
-            return "chan=" + channel + ",tt=" + withTt + ",rs=" + withRs;
+            return "chans=" + channels + ",tt=" + withTt + ",rs=" + withRs;
         }
     }
 
-    /** 一个帧轴元组（总 Tier / 运行态的具体取值）。 */
+    /**
+     * 一个帧轴元组（总 Tier / 运行态 / guard 通道有效取值）。
+     * <p>
+     * {@code lead*} 只对多通道键非空，长度 = {@code key.leadCount()}：它决定该规则组的
+     * {@code guard.clauses}，并进入 {@link #toString()}（因此规则 id 唯一）。
+     */
     private static final class FrameTuple {
 
         int tt;
         String rs; // null = 不区分
+        /** guard 通道在 {@link #replaceChannels} 里的下标。 */
+        int[] leadChannels = new int[0];
+        /** 与 {@link #leadChannels} 对齐的有效取值。 */
+        int[] leadValues = new int[0];
 
         @Override
         public String toString() {
@@ -191,6 +222,13 @@ public final class MultiblockFactorizer {
                 if (sb.length() > 0) sb.append('.');
                 sb.append("tt")
                     .append(tt);
+            }
+            for (int i = 0; i < leadChannels.length; i++) {
+                if (sb.length() > 0) sb.append('.');
+                sb.append('g')
+                    .append(leadChannels[i])
+                    .append('v')
+                    .append(leadValues[i]);
             }
             return sb.length() == 0 ? "all" : sb.toString();
         }
@@ -230,6 +268,9 @@ public final class MultiblockFactorizer {
         int tt;
         boolean withRs;
         String rs;
+        /** guard 通道下标（与 {@link #guardValues} 对齐）；空 = 无 guard。 */
+        int[] guardChannels = new int[0];
+        int[] guardValues = new int[0];
     }
 
     private final MachineIn in;
@@ -241,8 +282,18 @@ public final class MultiblockFactorizer {
     private final LinkedHashMap<Integer, Integer> aliases = new LinkedHashMap<Integer, Integer>();
     private final List<JsonObject> rules = new ArrayList<JsonObject>();
     private final List<RuleRef> ruleRefs = new ArrayList<RuleRef>();
+    /** 变体键 → 契约 §5.2 的有效取值（guard 通道的帧引用过滤要用）。 */
+    private final Map<String, Map<String, Integer>> effectiveByVariantKey = new LinkedHashMap<String, Map<String, Integer>>();
     private int tableGapFills;
     private int sizeEffectiveMismatch;
+    /** 需要 guard 消歧的位置数（>0 ⇒ 文档标 {@code hasScopeOverlap:true}）。 */
+    private int guardPositions;
+    /** 生成的 guard 规则条数。 */
+    private int guardRules;
+    /** 多通道相交的位置按「哪几条通道相交」聚合的诊断计数。 */
+    private final TreeMap<String, Integer> guardKeyHistogram = new TreeMap<String, Integer>();
+    /** 同一聚合下的样例位置（最多 3 个/组合），供 {@code scopeOverlapNote} 指明是哪片区域。 */
+    private final TreeMap<String, List<String>> guardKeyExamples = new TreeMap<String, List<String>>();
 
     private ChannelIn channelByKey(String key) {
         for (ChannelIn c : in.channels) {
@@ -266,6 +317,9 @@ public final class MultiblockFactorizer {
     private Result run() {
         classifyChannels();
         List<Map<String, Integer>> effectiveByVariant = resolveAll();
+        for (int i = 0; i < in.variants.size(); i++) {
+            effectiveByVariantKey.put(in.variants.get(i).key, effectiveByVariant.get(i));
+        }
         buildSteps(effectiveByVariant);
         prunePalette();
         for (StepInfo si : steps) classifyStep(si);
@@ -530,7 +584,7 @@ public final class MultiblockFactorizer {
         for (int ci = -1; ci < replaceChannels.size(); ci++) {
             for (int flags = 0; flags < 4; flags++) {
                 DepKey k = new DepKey();
-                k.channel = ci;
+                if (ci >= 0) k.channels.add(Integer.valueOf(ci));
                 k.withTt = (flags & 1) != 0;
                 k.withRs = (flags & 2) != 0;
                 candidates.add(k);
@@ -564,6 +618,25 @@ public final class MultiblockFactorizer {
                         }
                     }
                     if (best == null) {
+                        // 多通道作用域相交（T0.4 记录的例外机）：快路径只覆盖「≤1 条替换型通道」，
+                        // 此处按契约 §4.5.3 回退到「多通道键 + guard 消歧规则组」。
+                        best = findGuardKey(si, values[c]);
+                        if (best != null) {
+                            guardPositions++;
+                            String histKey = guardKeyLabel(best);
+                            Integer prev = guardKeyHistogram.get(histKey);
+                            guardKeyHistogram.put(histKey, Integer.valueOf(prev == null ? 1 : prev.intValue() + 1));
+                            List<String> ex = guardKeyExamples.get(histKey);
+                            if (ex == null) {
+                                ex = new ArrayList<String>();
+                                guardKeyExamples.put(histKey, ex);
+                            }
+                            if (ex.size() < 3) {
+                                ex.add(si.stepIndex + ":(" + x + "," + y + "," + z + ")");
+                            }
+                        }
+                    }
+                    if (best == null) {
                         throw new FactorizeException(
                             "位置 (" + x
                                 + ","
@@ -572,10 +645,10 @@ public final class MultiblockFactorizer {
                                 + z
                                 + ") 在骨架阶 "
                                 + si.stepIndex
-                                + " 上的取值无法表达：本实现只支持"
-                                + "「≤1 条替换型通道 + 总 Tier + 运行态」的查表依赖（多通道相交需要 guard 消歧规则）");
+                                + " 上的取值无法表达：即使取「全部替换型通道 + 总 Tier + 运行态」的完整键也不是精确键"
+                                + "（同一有效取值元组上出现两个不同值 —— 契约 §5.2 的有效值语义无法区分它们）");
                     }
-                    if (best.channel < 0 && !best.withTt && !best.withRs) {
+                    if (best.channels.isEmpty() && !best.withTt && !best.withRs) {
                         si.skeleton[z][y][x] = values[c][0];
                         constCells++;
                         continue;
@@ -601,6 +674,7 @@ public final class MultiblockFactorizer {
             PositionGroup pg = si.groups.get(gi);
             List<JsonObject> rects = rectangles(pg.positions, w, h, d);
             si.rectCount += rects.size();
+            ChannelIn tableCh = tableChannelOf(pg.key);
             for (int ti = 0; ti < pg.tuples.size(); ti++) {
                 FrameTuple t = pg.tuples.get(ti);
                 int[] table = pg.tables.get(ti);
@@ -611,12 +685,17 @@ public final class MultiblockFactorizer {
                         + gi
                         + ".r"
                         + ri
-                        + (pg.key.frameAxes() > 0 ? "." + t.toString() : "");
+                        + ((pg.key.frameAxes() > 0 || pg.key.needsGuard()) ? "." + t.toString() : "");
                     rule.addProperty("id", id);
                     rule.addProperty("phase", pg.key.withRs ? "runstate" : "replace");
-                    if (pg.key.channel >= 0) {
-                        rule.addProperty("legend", "channel.replace");
-                        rule.addProperty("channel", replaceChannels.get(pg.key.channel).key);
+                    JsonObject guard = guardOf(pg.key, t);
+                    if (guard != null) {
+                        rule.add("guard", guard);
+                        guardRules++;
+                    }
+                    if (tableCh != null) {
+                        rule.addProperty("legend", pg.key.needsGuard() ? "channel.guard" : "channel.replace");
+                        rule.addProperty("channel", tableCh.key);
                         rule.add("indexTable", prunedTable(table));
                     } else {
                         rule.addProperty("legend", pg.key.withTt ? "tier.overlay" : "runstate.overlay");
@@ -631,14 +710,89 @@ public final class MultiblockFactorizer {
                     ref.tt = t.tt;
                     ref.withRs = pg.key.withRs;
                     ref.rs = t.rs;
+                    ref.guardChannels = t.leadChannels;
+                    ref.guardValues = t.leadValues;
                     ruleRefs.add(ref);
                 }
             }
         }
     }
 
+    /** 查表通道（{@code channels[0]}）；无通道键返回 null。 */
+    private ChannelIn tableChannelOf(DepKey k) {
+        if (k.channels.isEmpty()) return null;
+        return replaceChannels.get(
+            k.channels.get(0)
+                .intValue());
+    }
+
+    /** guard 通道的（枚举下标 → 该通道 key）标签，仅用于诊断直方图。 */
+    private String guardKeyLabel(DepKey k) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i < k.channels.size(); i++) {
+            if (sb.length() > 0) sb.append('+');
+            sb.append(
+                replaceChannels.get(
+                    k.channels.get(i)
+                        .intValue()).key);
+        }
+        return sb.toString();
+    }
+
+    /** 多通道键的 guard：{@code clauses} 之间 AND，每条 = 一个 guard 通道的有效取值等于（契约 §4.5.3）。 */
+    private JsonObject guardOf(DepKey k, FrameTuple t) {
+        if (t.leadChannels.length == 0) return null;
+        JsonObject guard = new JsonObject();
+        JsonArray clauses = new JsonArray();
+        for (int i = 0; i < t.leadChannels.length; i++) {
+            JsonObject cl = new JsonObject();
+            cl.addProperty("channel", replaceChannels.get(t.leadChannels[i]).key);
+            cl.addProperty("value", Integer.valueOf(t.leadValues[i]));
+            clauses.add(cl);
+        }
+        guard.add("clauses", clauses);
+        return guard;
+    }
+
+    /**
+     * 多通道相交的回退搜索：变量集 = 全部替换型通道 + (总 Tier, 运行态)。
+     * <p>
+     * 精确性是**单调**的（键更细 ⇒ 分组更小 ⇒ 不可能引入冲突），故从全集出发逐个尝试消去
+     * （先 tt、再 rs、再通道按下标从大到小）得到的是<b>不可约</b>精确键 —— 确定性地最小化
+     * 规则组划分。返回 null 表示连完整键都不精确（契约 §5.2 的有效值语义下不可无损编码）。
+     */
+    private DepKey findGuardKey(StepInfo si, int[] cellValues) {
+        boolean[] use = new boolean[replaceChannels.size()];
+        for (int i = 0; i < use.length; i++) use[i] = true;
+        boolean withTt = true;
+        boolean withRs = true;
+        if (exactTuples(si, cellValues, keyOf(use, false, true)) >= 0) withTt = false;
+        if (exactTuples(si, cellValues, keyOf(use, withTt, false)) >= 0) withRs = false;
+        for (int ci = use.length - 1; ci >= 0; ci--) {
+            use[ci] = false;
+            if (exactTuples(si, cellValues, keyOf(use, withTt, withRs)) < 0) use[ci] = true;
+        }
+        DepKey k = keyOf(use, withTt, withRs);
+        if (k.channels.size() < 2) return null;
+        if (exactTuples(si, cellValues, k) < 0) return null;
+        return k;
+    }
+
+    private static DepKey keyOf(boolean[] use, boolean withTt, boolean withRs) {
+        DepKey k = new DepKey();
+        for (int i = 0; i < use.length; i++) {
+            if (use[i]) k.channels.add(Integer.valueOf(i));
+        }
+        k.withTt = withTt;
+        k.withRs = withRs;
+        return k;
+    }
+
     private static int orderOf(DepKey k) {
-        return (k.channel + 1) * 4 + (k.withTt ? 1 : 0) * 2 + (k.withRs ? 1 : 0);
+        int first = k.channels.isEmpty() ? -1
+            : k.channels.get(0)
+                .intValue();
+        return (first + 1) * 4 + (k.withTt ? 1 : 0) * 2 + (k.withRs ? 1 : 0);
     }
 
     /**
@@ -662,8 +816,17 @@ public final class MultiblockFactorizer {
 
     /** 键 K 在观测上的<b>不同元组数</b>；不精确（同一元组两个值）则返回 -1。 */
     private int exactTuples(StepInfo si, int[] cellValues, DepKey k) {
-        if (k.channel >= replaceChannels.size()) return -1;
-        String chanKey = k.channel < 0 ? null : replaceChannels.get(k.channel).key;
+        if (k.channels.isEmpty()) return exactTuplesOf(si, cellValues, null, k);
+        int[] idx = new int[k.channels.size()];
+        for (int i = 0; i < idx.length; i++) {
+            idx[i] = k.channels.get(i)
+                .intValue();
+            if (idx[i] >= replaceChannels.size()) return -1;
+        }
+        return exactTuplesOf(si, cellValues, idx, k);
+    }
+
+    private int exactTuplesOf(StepInfo si, int[] cellValues, int[] channelIdx, DepKey k) {
         LinkedHashMap<String, Integer> seen = new LinkedHashMap<String, Integer>();
         for (int i = 0; i < si.variants.size(); i++) {
             VariantIn v = si.variants.get(i);
@@ -672,9 +835,13 @@ public final class MultiblockFactorizer {
             tb.append('|');
             if (k.withRs) tb.append(v.runstate);
             tb.append('|');
-            if (chanKey != null) tb.append(
-                si.effective.get(i)
-                    .get(chanKey));
+            if (channelIdx != null) {
+                Map<String, Integer> eff = si.effective.get(i);
+                for (int j = 0; j < channelIdx.length; j++) {
+                    tb.append(eff.get(replaceChannels.get(channelIdx[j]).key))
+                        .append(',');
+                }
+            }
             String key = tb.toString();
             Integer prev = seen.get(key);
             if (prev != null && prev.intValue() != cellValues[i]) return -1;
@@ -685,20 +852,24 @@ public final class MultiblockFactorizer {
 
     /**
      * 把一个位置在键 K 下的值整理成「帧轴元组 → 查表」：
-     * 无通道时表长 1（常量）；有通道时表长 = 域长（下标 = 通道有效取值），缺失档用最近观测档补齐
-     * （档 0 = "未设置"分支，契约 §6.2）。
+     * 无通道时表长 1（常量）；有通道时表长 = {@code channels[0]} 的域长（下标 = 该通道有效取值），
+     * 缺失档用最近观测档补齐（档 0 = "未设置"分支，契约 §6.2）。
+     * 多通道键的元组额外带 guard 通道取值（契约 §4.5.3），表按元组分别建。
      */
     private PositionGroup buildGroup(StepInfo si, DepKey k, int[] cellValues) {
         PositionGroup pg = new PositionGroup();
         pg.key = k;
-        ChannelIn ch = k.channel >= 0 ? replaceChannels.get(k.channel) : null;
+        ChannelIn ch = tableChannelOf(k);
+        int[] leadIdx = new int[k.leadCount()];
+        for (int i = 0; i < leadIdx.length; i++) {
+            leadIdx[i] = k.channels.get(i + 1)
+                .intValue();
+        }
         int tableLen = ch == null ? 1 : (domainMaxOf(ch) + 1);
         TreeMap<String, FrameTuple> tuples = new TreeMap<String, FrameTuple>();
         for (int i = 0; i < si.variants.size(); i++) {
             VariantIn v = si.variants.get(i);
-            FrameTuple t = new FrameTuple();
-            t.tt = k.withTt ? v.totalTier : 0;
-            t.rs = k.withRs ? v.runstate : null;
+            FrameTuple t = tupleOf(si, i, k, leadIdx);
             tuples.put(t.toString(), t);
         }
         for (FrameTuple t : tuples.values()) {
@@ -708,6 +879,7 @@ public final class MultiblockFactorizer {
                 VariantIn v = si.variants.get(i);
                 if (k.withTt && v.totalTier != t.tt) continue;
                 if (k.withRs && !v.runstate.equals(t.rs)) continue;
+                if (!leadMatches(si, i, t)) continue;
                 int slot = ch == null ? 0
                     : si.effective.get(i)
                         .get(ch.key)
@@ -747,9 +919,35 @@ public final class MultiblockFactorizer {
         return pg;
     }
 
+    private FrameTuple tupleOf(StepInfo si, int variantIndex, DepKey k, int[] leadIdx) {
+        VariantIn v = si.variants.get(variantIndex);
+        FrameTuple t = new FrameTuple();
+        t.tt = k.withTt ? v.totalTier : 0;
+        t.rs = k.withRs ? v.runstate : null;
+        t.leadChannels = leadIdx;
+        t.leadValues = new int[leadIdx.length];
+        Map<String, Integer> eff = si.effective.get(variantIndex);
+        for (int j = 0; j < leadIdx.length; j++) {
+            t.leadValues[j] = eff.get(replaceChannels.get(leadIdx[j]).key)
+                .intValue();
+        }
+        return t;
+    }
+
+    /** 该变体是否落在元组 t 的 guard 条件下（guard 通道有效取值全等）。 */
+    private boolean leadMatches(StepInfo si, int variantIndex, FrameTuple t) {
+        if (t.leadChannels.length == 0) return true;
+        Map<String, Integer> eff = si.effective.get(variantIndex);
+        for (int j = 0; j < t.leadChannels.length; j++) {
+            if (eff.get(replaceChannels.get(t.leadChannels[j]).key)
+                .intValue() != t.leadValues[j]) return false;
+        }
+        return true;
+    }
+
     private String signatureOf(PositionGroup pg) {
         StringBuilder sb = new StringBuilder();
-        sb.append(pg.key.channel)
+        sb.append(pg.key.channels)
             .append('/')
             .append(pg.key.withTt)
             .append('/')
@@ -996,11 +1194,13 @@ public final class MultiblockFactorizer {
                 f.addProperty("stepIndex", Integer.valueOf(si.stepIndex));
                 JsonArray refs = new JsonArray();
                 if (in.paletteRenumberViaAliases) refs.add(new JsonPrimitive(PALETTE_RENUMBER_RULE_ID));
+                Map<String, Integer> eff = effectiveByVariantKey.get(v.key);
                 for (RuleRef r : ruleRefs) {
                     if (r.stepIndex < 0) continue;
                     if (r.stepIndex != si.stepIndex) continue;
                     if (r.withTt && r.tt != v.totalTier) continue;
                     if (r.withRs && !r.rs.equals(v.runstate)) continue;
+                    if (!guardRefMatches(r, eff)) continue;
                     refs.add(new JsonPrimitive(r.id));
                 }
                 f.add("rules", refs);
@@ -1008,6 +1208,22 @@ public final class MultiblockFactorizer {
             }
         }
         return frames;
+    }
+
+    /**
+     * 帧是否引用该 guard 规则：guard 通道有效取值必须全部相等。
+     * <p>
+     * 帧的引用列表只挑「本变体落在其 guard 条件内」的规则（更省字节），装配器**仍**按契约 §5.4
+     * 对每条被引用规则求值 guard —— 两条路径对同一文档得出相同结果。
+     */
+    private boolean guardRefMatches(RuleRef r, Map<String, Integer> eff) {
+        if (r.guardChannels.length == 0) return true;
+        if (eff == null) return false;
+        for (int i = 0; i < r.guardChannels.length; i++) {
+            Integer v = eff.get(replaceChannels.get(r.guardChannels[i]).key);
+            if (v == null || v.intValue() != r.guardValues[i]) return false;
+        }
+        return true;
     }
 
     private JsonObject buildInnerBody(JsonArray frames) {
@@ -1028,7 +1244,11 @@ public final class MultiblockFactorizer {
         mb.addProperty("id", in.id);
         mb.addProperty("displayName", in.displayName);
         if (in.sourceClass != null) mb.addProperty("sourceClass", in.sourceClass);
-        mb.addProperty("hasScopeOverlap", Boolean.FALSE);
+        mb.addProperty("hasScopeOverlap", Boolean.valueOf(guardPositions > 0));
+        if (guardPositions > 0) {
+            // 契约 §4.1：hasScopeOverlap=true 时 scopeOverlapNote 必填（说明是哪片区域）。
+            mb.addProperty("scopeOverlapNote", scopeOverlapNote());
+        }
         JsonObject tt = new JsonObject();
         tt.addProperty("min", Integer.valueOf(in.ttMin));
         tt.addProperty("max", Integer.valueOf(in.ttMax));
@@ -1136,6 +1356,53 @@ public final class MultiblockFactorizer {
             n.addProperty("source", "probe-variant-capture.md §9.2");
             notes.add(n);
         }
+        if (guardPositions > 0) {
+            JsonObject n = new JsonObject();
+            n.addProperty("kind", "note");
+            n.addProperty(
+                "text",
+                "通道作用域相交（T0.4 记录的例外）：本机有 " + guardPositions
+                    + " 个格的取值同时依赖 ≥2 条替换型通道，已按契约 §4.5.3 生成 "
+                    + guardRules
+                    + " 条带 guard 的多组差异规则，文档标 hasScopeOverlap: true；相交通道组合（guard 通道）计数："
+                    + guardKeyHistogram);
+            n.addProperty("source", "format-multiblock-doc.md §4.5.3 / probe-channels.md §2");
+            notes.add(n);
+        }
+        // 忠实度声明（硬约束「不得靠丢弃变体换体积」的边界）：域收窄 / 总 Tier 抽样必须写进产物本身。
+        for (ChannelIn c : in.channels) {
+            if (!c.subsetOverridden) continue;
+            JsonObject n = new JsonObject();
+            n.addProperty("kind", "note");
+            n.addProperty(
+                "text",
+                "通道 " + c.key
+                    + " 的声明域为 0.."
+                    + domainMaxOf(c)
+                    + "，小于真实域上界 "
+                    + (c.trueDomainMax == null ? "（未知，见数据集 subsetNote）" : String.valueOf(c.trueDomainMax))
+                    + "：本产物只覆盖声明域内的取值，被排除取值在真实机器上存在但本文件不代表其几何。"
+                    + "收窄来源 = T1.5 的安全上限/显式抽样（组合积过大时的兜底），非编码器丢弃变体。");
+            n.addProperty("source", "multiblock-channel-renderer-plan.md §T1.5 / §7 风险 7");
+            notes.add(n);
+        }
+        int ttSpan = in.ttMax - in.ttMin + 1;
+        if (!in.tierSample.isEmpty() && in.tierSample.size() < ttSpan) {
+            JsonObject n = new JsonObject();
+            n.addProperty("kind", "note");
+            n.addProperty(
+                "text",
+                "总 Tier 抽样 = " + in.tierSample
+                    + "（完整域 "
+                    + in.ttMin
+                    + ".."
+                    + in.ttMax
+                    + "，共 "
+                    + ttSpan
+                    + " 档）：未覆盖的 Tier 在真实机器上存在，本产物不代表它们的几何（按契约 §9.4 的 tierSample 语义抽样）。");
+            n.addProperty("source", "format-multiblock-doc.md §4.1 tierSample");
+            notes.add(n);
+        }
         for (JsonObject extra : in.extraNotes) notes.add(extra);
         JsonObject n2 = new JsonObject();
         n2.addProperty("kind", "note");
@@ -1156,6 +1423,12 @@ public final class MultiblockFactorizer {
         legend.addProperty(
             "channel.replace",
             "替换型通道：indexTable 按该通道有效取值查表（档 0 = 未设置分支，实际由装配第 0 步回落到总 Tier）（契约 §4.2/§6.2）。");
+        if (guardRules > 0) {
+            legend.addProperty(
+                "channel.guard",
+                "通道作用域相交（同一格的取值同时依赖 ≥2 条替换型通道）：indexTable 仍按 channels[0] 的取值查表，"
+                    + "但该规则只在 guard.clauses 全真时生效 —— 每条 clause 是另一条通道的有效取值等值条件（契约 §4.5.3）。");
+        }
         legend.addProperty("runstate.overlay", "运行态叠加层：同位姿在 idle / running 两态取不同下标（本轮只落材质层，几何不变）。");
         legend.addProperty("tier.overlay", "总 Tier 叠加层：该位置的内容随总 Tier 变化（按帧引用不同规则，不做算术）。");
         return legend;
@@ -1271,6 +1544,10 @@ public final class MultiblockFactorizer {
         stats.addProperty("constCells", Integer.valueOf(constCells));
         stats.addProperty("varyingCells", Integer.valueOf(varyingCells));
         stats.addProperty("rectangles", Integer.valueOf(rects));
+        stats.addProperty("hasScopeOverlap", Boolean.valueOf(guardPositions > 0));
+        stats.addProperty("guardPositions", Integer.valueOf(guardPositions));
+        stats.addProperty("guardRules", Integer.valueOf(guardRules));
+        stats.add("guardKeyHistogram", guardHistogramJson());
         JsonObject byPhase = new JsonObject();
         JsonObject byKind = new JsonObject();
         JsonObject byLegend = new JsonObject();
@@ -1303,6 +1580,7 @@ public final class MultiblockFactorizer {
         ruleStats.addProperty("constant", Integer.valueOf(constRules));
         ruleStats.addProperty("indexAliases", Integer.valueOf(aliasRules));
         ruleStats.addProperty("tableGapFillsPerPosition", Integer.valueOf(tableGapFills));
+        ruleStats.addProperty("guardRules", Integer.valueOf(guardRules));
         ruleStats.addProperty("paletteRenumberViaAliases", Boolean.valueOf(in.paletteRenumberViaAliases));
         int refs = 0;
         for (RuleRef r : ruleRefs) {
@@ -1333,6 +1611,35 @@ public final class MultiblockFactorizer {
         stats.add("volume", vol);
         stats.addProperty("innerSha256", sha256(innerBytes));
         return new Result(inner, stats);
+    }
+
+    /**
+     * 契约 §4.1：{@code hasScopeOverlap=true} 时必填，说明"是哪片区域"。
+     * 逐交通道组合给出格数与样例位置（骨架阶:坐标），不猜语义、不做归因。
+     */
+    private String scopeOverlapNote() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("通道作用域相交区域：");
+        for (Map.Entry<String, Integer> e : guardKeyHistogram.entrySet()) {
+            if (sb.charAt(sb.length() - 1) != '：') sb.append("；");
+            sb.append("guard 通道 [")
+                .append(e.getKey())
+                .append("] 参与决定的格 ")
+                .append(e.getValue())
+                .append(" 个，样例位置（骨架阶:x,y,z）= ")
+                .append(guardKeyExamples.get(e.getKey()));
+        }
+        sb.append("。这些格整体落入差异规则表（多组规则 + guard.clauses），不进入骨架；")
+            .append("规则由本编码器按「guard 通道取值精确等值 + 查表通道 indexTable」生成（契约 §4.5.3）。");
+        return sb.toString();
+    }
+
+    private JsonObject guardHistogramJson() {
+        JsonObject o = new JsonObject();
+        for (Map.Entry<String, Integer> e : guardKeyHistogram.entrySet()) {
+            o.addProperty(e.getKey(), e.getValue());
+        }
+        return o;
     }
 
     private static void bump(JsonObject o, String key) {

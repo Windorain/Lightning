@@ -446,3 +446,9 @@ Phase 3 集成与验收（串行，全部由 E 管线驱动，零人工）
 - 因此：§T2.6「截图不得全黑/全空」像素断言**仅适用于 T1.6 真实导出文件（T3.1）**；合成 fixture 阶段的通过判据改用 cellGrid 级断言（`data-mb-dims`/`data-mb-variant`/`definition.cellGrid`/方块统计行）。「相邻等级截图有差异」同理只在真实导出上判定。
 - **R1 裁决（T2.6 一阶段开放项）**：合成 fixture 视觉不可见已排除「装配 mesh 与渲染场景绑定断裂」（装配后 mesh 顶点数 72→180 变化证明绑定正常），剩余为几何/相机因素，不阻断流程。不投入修复合成 fixture 可视性；像素证据由 T1.6 真实导出承担。
 - **R2 登记（既有行为，非本轮引入）**：V2Plain 多帧文档帧切换不重建网格（`isWorldDocument` 门对 `format_version==='2.0'` 恒 false）。T3.4 按既有设计断言帧播放语义（doc 帧索引/播放推进/DOM 状态），「帧切换几何跟随」是否缺陷列为用户开放项，不在本轮范围。
+
+**T1.5 落地与风险 7 裁决**（证据：[probe-multiblock-command.md](probe-multiblock-command.md)）：
+- 留白 #6（上限默认值）→ **已拍板**：`maxVariantsPerMachine=20000`（单台兜底，仅 2/221 台触限）、`maxChannelValues=0`、`maxExportMachines=0`、`structuralOnly=false`、`globalBudgetMs=4h`；收窄域时强制 tierSample ≤ 新域上界，抽样事实写入产物 notes。
+- 留白 #2 补充：guard 规则路径已实现（两段式键搜索 + 贪心不可约精确键），合成三通道相交用例 576 变体闭环 diff=0；真实 LSC 依赖分析为**负结果**（采样窗口内 0 位置依赖 ≥2 通道，T0.4 的三重相交在内容层是一元依赖）。
+- **风险 7 触发**：实测 279.5 ms/变体，全量不裁剪 5,551,258 变体 ≈ 431 h；默认上限 ≈ 32 h。**调度者临时裁决（待用户确认）**：Phase 3 验收用代表机子集（10–20 台可无损编码机器，1–3 h），全量导出的验收范围由用户裁定（子集验收 / 分片并行 / 下调上限）。
+- **捕获保真度开放项（待用户裁决投入）**：run B 13 台中 5 台无法无损编码，原因逐条定位（状态键几何不稳定/未声明尺寸轴/尺寸平台期/通道 id 重复/BlockWithoutGeometry），修复属捕获层，Phase 3 代表机避开这些机器。另：T1.2 枚举 221 条 → 219 唯一 slug（重名落 DuplicateSlug 失败，不静默覆盖）。

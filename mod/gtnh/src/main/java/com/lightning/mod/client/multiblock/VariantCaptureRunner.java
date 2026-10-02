@@ -95,10 +95,39 @@ public final class VariantCaptureRunner {
         public int verifyPositionsPerKey = 8;
         /** 位置数 ≤ 该值的状态键一律逐格验证（EBF 的线圈 16 格、机壳 11 格都走这条）。 */
         public int fullVerifyUpTo = 24;
+        /**
+         * 产物目录名（相对 {@code mcDataDir}）。默认 {@link #OUTPUT_DIR}（T1.3 行为不变）；
+         * T1.5 的 {@code /sde multiblock} 把它指到自己的数据集目录，避免与 T1.3 运行混在一起。
+         */
+        public String outputDirName = OUTPUT_DIR;
+        /**
+         * **按机抽样的通道取值清单**（机 simpleName → 通道 id → 取值清单，必须是从 0 起的连续前缀）。
+         * 空 = 该通道按事实层的全量域 0..max 枚举（T1.3 行为不变）。
+         * T1.5 用它把组合积超出安全上限的机器收窄到可捕获规模（产物 notes 会记下真实域与被裁剪的事实）。
+         */
+        public final Map<String, Map<String, List<Integer>>> channelSample = new LinkedHashMap<String, Map<String, List<Integer>>>();
+        /**
+         * 是否捕获/声明 active 运行态。true = 两态（T1.3 行为不变）；
+         * false = 只捕获 idle（T1.5 配置面「只导出结构性组合」），此时产物只声明 idle 一态。
+         */
+        public boolean includeActiveRunstate = true;
+
+        public List<Integer> sampleFor(String machineSimpleName, String channelId) {
+            Map<String, List<Integer>> perMachine = channelSample.get(machineSimpleName);
+            if (perMachine == null) return null;
+            return perMachine.get(channelId);
+        }
     }
 
     public static File outputDir(Minecraft mc) {
         return new File(mc.mcDataDir, OUTPUT_DIR);
+    }
+
+    public static File outputDir(Minecraft mc, Config cfg) {
+        String name = cfg == null || cfg.outputDirName == null
+            || cfg.outputDirName.trim()
+                .isEmpty() ? OUTPUT_DIR : cfg.outputDirName.trim();
+        return new File(mc.mcDataDir, name);
     }
 
     public static File triggerFile(Minecraft mc) {
@@ -134,6 +163,32 @@ public final class VariantCaptureRunner {
                 .getAsInt();
             if (o.has("factsPath")) c.factsPath = o.get("factsPath")
                 .getAsString();
+            if (o.has("outputDirName")) c.outputDirName = o.get("outputDirName")
+                .getAsString();
+            if (o.has("includeActiveRunstate")) c.includeActiveRunstate = o.get("includeActiveRunstate")
+                .getAsBoolean();
+            if (o.has("channelSample") && o.get("channelSample")
+                .isJsonObject()) {
+                for (Map.Entry<String, JsonElement> me : o.getAsJsonObject("channelSample")
+                    .entrySet()) {
+                    if (!me.getValue()
+                        .isJsonObject()) continue;
+                    Map<String, List<Integer>> perMachine = new LinkedHashMap<String, List<Integer>>();
+                    for (Map.Entry<String, JsonElement> ce : me.getValue()
+                        .getAsJsonObject()
+                        .entrySet()) {
+                        if (!ce.getValue()
+                            .isJsonArray()) continue;
+                        List<Integer> vals = new ArrayList<Integer>();
+                        for (JsonElement ve : ce.getValue()
+                            .getAsJsonArray()) {
+                            vals.add(Integer.valueOf(ve.getAsInt()));
+                        }
+                        perMachine.put(ce.getKey(), vals);
+                    }
+                    c.channelSample.put(me.getKey(), perMachine);
+                }
+            }
             if (o.has("machines") && o.get("machines")
                 .isJsonArray()) {
                 for (JsonElement e : o.getAsJsonArray("machines")) {
@@ -194,9 +249,16 @@ public final class VariantCaptureRunner {
     // ------------------------------------------------------------------ 主流程
 
     public static JsonObject run(Minecraft mc) throws Exception {
-        Config cfg = readConfig(mc);
+        return run(mc, readConfig(mc));
+    }
+
+    /**
+     * 用**显式配置**跑一轮（T1.5 的 {@code /sde multiblock} 走这条：它自带机器清单、通道抽样与
+     * 产物目录，不读 T1.3 的触发文件）。除配置来源外，行为与 {@link #run(Minecraft)} 完全一致。
+     */
+    public static JsonObject run(Minecraft mc, Config cfg) throws Exception {
         long started = System.currentTimeMillis();
-        File dir = outputDir(mc);
+        File dir = outputDir(mc, cfg);
         if (!dir.isDirectory() && !dir.mkdirs()) {
             throw new IllegalStateException("Cannot mkdir: " + dir.getAbsolutePath());
         }
@@ -366,17 +428,76 @@ public final class VariantCaptureRunner {
         }
         List<String> sampleNotes = new ArrayList<String>();
 
-        // 取值组合（通道值 0..max；0 = 未设置，契约 §5.2）
-        List<int[]> combos = enumerateCombos(channels);
+        // 通道取值抽样（T1.5）：把域收窄到「从 0 起的连续前缀」——产物仍声明 0..K，
+        // 于是「域 ⊆ 真实域」这一事实必须写进 notes（契约 §4.2 的 domain 是「可作哪些值」的模式）。
+        Map<String, List<Integer>> channelSample = new LinkedHashMap<String, List<Integer>>();
+        for (VariantMachineFacts.ChannelFact c : channels) {
+            List<Integer> want = cfg.sampleFor(t.label, c.key());
+            if (want == null || want.isEmpty()) continue;
+            List<Integer> sorted = new ArrayList<Integer>(new TreeSet<Integer>(want));
+            int k = -1;
+            for (int i = 0; i < sorted.size(); i++) {
+                if (sorted.get(i)
+                    .intValue() != i) {
+                    failures.add(
+                        failure(
+                            t.label,
+                            "config",
+                            "BadChannelSample",
+                            "通道抽样 " + c.key() + " 必须是 0..K 的连续前缀，实际 " + sorted + "（否则产物声明的域装不下声明值）"));
+                    k = -1;
+                    break;
+                }
+                k = i;
+            }
+            if (k < 0) continue;
+            if (k >= c.max) continue; // 未收窄，保持全量语义
+            channelSample.put(c.key(), sorted);
+            sampleNotes.add(
+                "通道 " + c.key()
+                    + " 的取值域被收窄到 0.."
+                    + k
+                    + "（真实域 0.."
+                    + c.max
+                    + "，来源 T1.2 machines.json）：该通道的全部真实取值未被覆盖，产物 notes/此处均已如实记录；"
+                    + "总 Tier 抽样上界必须 ≤ 收窄后的域上界，否则「未设置回落总 Tier」在契约 §5.2 下不可无损编码（T1.4 开放项 5）");
+        }
+        final int narrowedMinMax = minNarrowedMax(channels, channelSample);
+
+        // 取值组合（通道值 0..max，或配置给定的收窄前缀；0 = 未设置，契约 §5.2）
+        List<int[]> combos = enumerateCombos(channels, channelSample);
+
+        // 「未设置 → 回落总 Tier」的可声明性（T1.4 开放项 5）：收窄域后 totalTier 不得越出该域上界，
+        // 否则真实回落到 K 以上而声明域装不下 → 契约 §5.2 下不可无损编码。
+        if (narrowedMinMax > 0) {
+            int capped = Math.min(maxTotalTier, narrowedMinMax);
+            if (capped < maxTotalTier) {
+                List<Integer> limited = new ArrayList<Integer>();
+                for (Integer tv : tierSample) {
+                    if (tv.intValue() <= capped) limited.add(tv);
+                }
+                if (limited.isEmpty()) limited.add(Integer.valueOf(1));
+                tierSample = limited;
+                sampleNotes.add(
+                    "总 Tier 抽样上界被夹到 " + capped
+                        + "（= 收窄后最小的通道域上界）："
+                        + "未设置通道在更高 Tier 下的真实回落值超出声明域，产物无法无损表达该回落（T1.4 报告 §8 开放项 5）。");
+            }
+        }
 
         // 组合数上限：> maxVariantsPerMachine 时按契约 §9.4 的 tierSample 抽样语义抽样（并写进产物）
         int units = combos.size() * tierSample.size();
-        if (units * 2 > cfg.maxVariantsPerMachine) {
-            int budgetUnits = Math.max(1, cfg.maxVariantsPerMachine / 2);
+        int runstateCount = cfg.includeActiveRunstate ? 2 : 1;
+        if (units * runstateCount > cfg.maxVariantsPerMachine) {
+            int budgetUnits = Math.max(1, cfg.maxVariantsPerMachine / runstateCount);
             int keep = Math.max(1, budgetUnits / Math.max(1, combos.size()));
-            tierSample = sampleEvenly(1, maxTotalTier, keep);
+            tierSample = sampleEvenly(
+                1,
+                tierSample.get(tierSample.size() - 1)
+                    .intValue(),
+                keep);
             sampleNotes.add(
-                "组合数 " + (units * 2)
+                "组合数 " + (units * runstateCount)
                     + " > 上限 "
                     + cfg.maxVariantsPerMachine
                     + "，按契约 tierSample 语义抽样：总 Tier 取 "
@@ -411,6 +532,10 @@ public final class VariantCaptureRunner {
         JsonArray channelsJson = new JsonArray();
         for (VariantMachineFacts.ChannelFact c : channels) {
             JsonObject o = new JsonObject();
+            List<Integer> narrowed = channelSample.get(c.key());
+            int declaredMax = narrowed == null ? c.max
+                : narrowed.get(narrowed.size() - 1)
+                    .intValue();
             o.addProperty("enum", c.enumName);
             o.addProperty("id", c.id);
             o.addProperty("key", c.key());
@@ -419,11 +544,22 @@ public final class VariantCaptureRunner {
             o.addProperty("kind", c.kind);
             JsonObject domain = new JsonObject();
             domain.addProperty("min", 0);
-            domain.addProperty("max", c.max);
+            domain.addProperty("max", declaredMax);
             o.add("domain", domain);
             if (c.min != null) o.addProperty("min", c.min.intValue());
-            o.addProperty("max", c.max);
+            o.addProperty("max", declaredMax);
             o.addProperty("observedMax", c.observedMax);
+            if (narrowed != null) {
+                o.addProperty("subsetOverridden", true);
+                o.addProperty("trueDomainMax", c.max);
+                o.addProperty(
+                    "subsetNote",
+                    "本产物只声明域 0.." + declaredMax
+                        + "（真实域 0.."
+                        + c.max
+                        + "）：组合积超安全上限后按 T1.5 配置收窄；"
+                        + "被排除的取值在真实机器上存在，本文件不代表它们的几何。");
+            }
             o.addProperty(
                 "valueSemantics",
                 "replace".equals(c.kind) ? "channel-data（0 = 未设置 → 回落总 Tier）"
@@ -449,7 +585,11 @@ public final class VariantCaptureRunner {
                 expected.add(e);
             }
             o.add("expectedStates", expected);
-            o.add("notes", ScanJson.strings(c.notes));
+            List<String> chNotes = new ArrayList<String>(c.notes);
+            if (narrowed != null) {
+                chNotes.add("T1.5 配置收窄：声明域 0.." + declaredMax + "，真实域 0.." + c.max + "（被排除的取值未捕获、未声明）。");
+            }
+            o.add("notes", ScanJson.strings(chNotes));
             channelsJson.add(o);
         }
         machineJson.add("channels", channelsJson);
@@ -471,11 +611,15 @@ public final class VariantCaptureRunner {
         idleState.addProperty("name", "Idle");
         idleState.addProperty("materialSwap", false);
         runstates.add(idleState);
-        JsonObject activeState = new JsonObject();
-        activeState.addProperty("id", RUNSTATE_ACTIVE);
-        activeState.addProperty("name", "Running");
-        activeState.addProperty("materialSwap", true);
-        runstates.add(activeState);
+        if (cfg.includeActiveRunstate) {
+            JsonObject activeState = new JsonObject();
+            activeState.addProperty("id", RUNSTATE_ACTIVE);
+            activeState.addProperty("name", "Running");
+            activeState.addProperty("materialSwap", true);
+            runstates.add(activeState);
+        } else {
+            sampleNotes.add("T1.5 配置：只导出结构性组合（includeActiveRunstate=false）→ 产物只声明 idle 一态，未捕获 active。");
+        }
         machineJson.add("runstates", runstates);
 
         JsonObject gridConvention = new JsonObject();
@@ -589,7 +733,7 @@ public final class VariantCaptureRunner {
                         failure(t.label, "runstate", "ServerBranchNotExecuted", buildTag + " → errorDisplayID 未变化"));
                 }
 
-                for (int si = 0; si < 2; si++) {
+                for (int si = 0; si < (cfg.includeActiveRunstate ? 2 : 1); si++) {
                     boolean active = si == 1;
                     String stateId = active ? RUNSTATE_ACTIVE : RUNSTATE_IDLE;
                     VariantStateDriver.StateResult st = active
@@ -1459,6 +1603,15 @@ public final class VariantCaptureRunner {
 
     /** 枚举取值组合：每个通道 0..max，odometer 进位（最后一维最快），顺序确定。 */
     private static List<int[]> enumerateCombos(List<VariantMachineFacts.ChannelFact> channels) {
+        return enumerateCombos(channels, null);
+    }
+
+    /**
+     * 枚举取值组合；{@code sample} 让指定通道只枚举给定的取值清单（T1.5 的域收窄），
+     * 其余通道仍走 0..max。清单必须已校验为「从 0 起的连续前缀」。
+     */
+    private static List<int[]> enumerateCombos(List<VariantMachineFacts.ChannelFact> channels,
+        Map<String, List<Integer>> sample) {
         List<int[]> out = new ArrayList<int[]>();
         if (channels.isEmpty()) {
             out.add(new int[0]);
@@ -1469,14 +1622,36 @@ public final class VariantCaptureRunner {
             out.add(cur.clone());
             int i = channels.size() - 1;
             while (i >= 0) {
+                VariantMachineFacts.ChannelFact c = channels.get(i);
+                List<Integer> vals = sample == null ? null : sample.get(c.key());
                 cur[i]++;
-                if (cur[i] <= channels.get(i).max) break;
+                if (vals == null) {
+                    if (cur[i] <= c.max) break;
+                } else {
+                    // 连续前缀：下标与取值同值，越界即回绕
+                    int pos = cur[i];
+                    if (pos < vals.size()) break;
+                }
                 cur[i] = 0;
                 i--;
             }
             if (i < 0) break;
         }
         return out;
+    }
+
+    /** 收窄后最小的域上界（无收窄返回 -1）：决定总 Tier 抽样的可声明上界（T1.4 开放项 5）。 */
+    private static int minNarrowedMax(List<VariantMachineFacts.ChannelFact> channels,
+        Map<String, List<Integer>> sample) {
+        int min = -1;
+        for (VariantMachineFacts.ChannelFact c : channels) {
+            List<Integer> vals = sample.get(c.key());
+            if (vals == null || vals.isEmpty()) continue;
+            int k = vals.get(vals.size() - 1)
+                .intValue();
+            if (min < 0 || k < min) min = k;
+        }
+        return min;
     }
 
     private static List<Integer> sampleEvenly(int lo, int hi, int count) {
