@@ -86,6 +86,8 @@ public final class PartsProbeAutomation {
     private static int syncWaitTicks = 60;
     /** P0.3：触发文件 {@code "singleBox":true} 时追加单盒通用路径探针（默认关闭，P0.2 行为不变）。 */
     private static boolean singleBox;
+    /** P1.1/P1.2：触发文件 {@code "partsPipeline":true} 时追加部件流水线探针（默认关闭；隐含 singleBox 放置）。 */
+    private static boolean partsPipeline;
 
     private static final List<String> warnings = new ArrayList<String>();
     private static final PartsProbePlacement placement = new PartsProbePlacement();
@@ -187,12 +189,23 @@ public final class PartsProbeAutomation {
                 singleBox = o.get("singleBox")
                     .getAsBoolean();
             }
+            if (o.has("partsPipeline")) {
+                partsPipeline = o.get("partsPipeline")
+                    .getAsBoolean();
+                if (partsPipeline) {
+                    // P1.1/P1.2 流水线探针复用 P0.3 的 11 单盒场景 ⇒ 隐含 singleBox 放置与必收族
+                    singleBox = true;
+                }
+            }
         } catch (Throwable t) {
             warnings.add("触发文件解析失败（用默认配置继续）: " + PartsProbeReflect.describe(t));
         }
         FMLLog.info("[SDE][P0.2] 三族部件探针启动 label=%s 基点=(%d,%d,%d)", label, BASE_X, BASE_Y, BASE_Z);
         if (singleBox) {
             FMLLog.info("[SDE][P0.3] 单盒通用路径探针已启用（singleBox=true）");
+        }
+        if (partsPipeline) {
+            FMLLog.info("[SDE][P1.1] 部件流水线探针已启用（partsPipeline=true）");
         }
         toPhase(Phase.JOIN);
     }
@@ -344,6 +357,18 @@ public final class PartsProbeAutomation {
                 .add(block);
         }
         dump.add("families", families);
+        if (partsPipeline) {
+            try {
+                dump.add("partsPipeline", PartsPipelineProbe.runExperiments(mc, placement.placed));
+            } catch (Throwable t) {
+                // 流水线探针自身失败不得拖垮整个探针轮（留痕即可）
+                warnings.add("partsPipeline probe failed: " + PartsProbeReflect.describe(t));
+                JsonObject failed = new JsonObject();
+                failed.addProperty("pass", Boolean.FALSE);
+                failed.addProperty("error", PartsProbeReflect.describe(t));
+                dump.add("partsPipeline", failed);
+            }
+        }
         finalizeRun(mc);
     }
 
@@ -408,6 +433,24 @@ public final class PartsProbeAutomation {
             s.addProperty("partsRead", Integer.valueOf(parts));
             s.addProperty("detail", detail);
             summary.add(s);
+        }
+        // P1.1/P1.2：流水线探针 pass=false ⇒ 退出码 2（细节在 dump.partsPipeline.cells[].checks）
+        if (partsPipeline) {
+            JsonObject pp = dump == null ? null : dump.getAsJsonObject("partsPipeline");
+            boolean ppPass = pp != null && pp.has("pass")
+                && pp.get("pass")
+                    .getAsBoolean();
+            JsonObject s = new JsonObject();
+            s.addProperty("family", "partsPipeline");
+            s.addProperty("partsRead", Integer.valueOf(ppPass ? 1 : 0));
+            s.addProperty(
+                "detail",
+                ppPass ? "expA-emptyRegistry/expB-throwingProvider/expC-genericBaseline all pass"
+                    : "FAIL: see dump.partsPipeline.*.cells[].checks");
+            summary.add(s);
+            if (fatalCode == 0 && !ppPass) {
+                code = 2;
+            }
         }
         if (placement.errors.size() > 0) {
             warnings.add("放置阶段有错误（详见 dump.placementErrors）: " + placement.errors);
