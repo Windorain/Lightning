@@ -17,6 +17,7 @@ import net.minecraftforge.client.event.ClientChatReceivedEvent;
 
 import org.apache.logging.log4j.Level;
 
+import com.lightning.mod.client.meshcapture.parts.probe.PartsProbeAutomation;
 import com.lightning.mod.client.multiblock.MultiblockPipelineAutomation;
 import com.lightning.mod.client.multiblock.MultiblockScanAutomation;
 import com.lightning.mod.client.multiblock.RunStateProbeAutomation;
@@ -69,6 +70,13 @@ public final class SdeClientAutomationTickHandler {
         // T0.3 运行态探针：只有在 mcDataDir 下存在触发文件时接管本 tick（触发文件不存在时零行为变化）。
         if (RunStateProbeAutomation.isRequested(mc)) {
             RunStateProbeAutomation.tick(mc);
+            return;
+        }
+
+        // P0.2 三族部件接口反射探针：只有在 mcDataDir 下存在触发文件（sde_parts_probe.json）时接管本 tick
+        // （新增分支，默认不激活；触发文件不存在时零行为变化）。
+        if (PartsProbeAutomation.isRequested(mc)) {
+            PartsProbeAutomation.tick(mc);
             return;
         }
 
