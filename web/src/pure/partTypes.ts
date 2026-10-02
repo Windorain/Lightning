@@ -39,6 +39,8 @@ export interface PartItem {
   /** FMP 材料串等 NBT 判别（契约 §5 fmp 行）；缺省 = 无 */
   nbtDiscriminator?: string
   count: number
+  /** 可选：该物品条目显示名（附加条目无部件级 displayName 时用；缺省 ⇒ UI 以物品身份键作 label） */
+  display?: string
 }
 
 /** 来源族（契约 §4 localId 命名空间即由此派生） */

@@ -74,7 +74,10 @@ boolean isFullCube(Block block, World world, int x, int y, int z) {
   "displayName": "ME Storage Bus", // ④ 显示名（尊重游戏内显示名，硬约束）
   "tooltip": ["ME Storage Bus", "..."],  // ④ 说明行（按 §8 优先级链在导出时生成完毕）
   "items": [                       // ⑤ 物品身份（可合成物品；空数组 = 显式"无"）
-    { "registry": "appliedenergistics2:item.ItemMultiPart", "damage": 220, "count": 1 }
+    { "registry": "appliedenergistics2:item.ItemMultiPart", "damage": 220, "count": 1,
+      "nbtDiscriminator": "mat=...",   // 可选：NBT 判别（FMP 材料串等；参与物品身份键）
+      "display": "ME Storage Bus" }    // 可选：该物品条目的显示名（附加条目无部件级 displayName 时用；
+                                       //   缺省 ⇒ web 以物品身份键作行 label——P2.3 裁决登记）
   ],
   "source": {                      // 来源四元组
     "family": "ae2",               //   族：ae2 | enderio | fmp | generic | inferred
@@ -203,8 +206,16 @@ web 侧逐格人工说明（`cellTooltipGrid`/`tooltipPalette`）保留为**叠�
 - 文档级默认写入 `statsTemplate`（挂到 V2 plain 文档根；proto `StatsTemplate` 已预留，
   web `V2PlainSceneDocument` 补挂载——P2.3 范围）：默认 = **部件物品清单视图**（typeKey 分组计数）。
 - `StatsEntry` 增加可选 `part_type_key` 字段：部件视图的条目键 = typeKey；宿主视图的条目键沿用
-  `block_state_id`。三级配置（文档默认 → 文档覆盖 → 查看者本地 localStorage）的存储细节由 P2.3
-  拍板并登记。
+  `block_state_id`。
+- **三级配置存储（留白 #6 由 P2.3 定稿，登记）**：① 文档默认 = 文件内 `statsTemplate`（camelCase
+  落盘权威，snake_case 仅旧数据读取回退；mode auto=部件视图 / custom=显式分组）；② 文档覆盖 =
+  **新增可选根字段 `statsOverride`**（camelCase，形状 = StatsRules 层 JSON；随 `_extra` 兜底机制
+  round-trip，写回由统计栏 UI 触发）；③ 查看者本地 = localStorage `lightning:stats:v1:<docId>`
+  （schema 字段备迁移）。合并 = 字段级覆盖（本地 > 覆盖 > 默认 > 内建），规则键整体替换不深合并；
+  逐字段来源（provenance）对 UI 可见（"默认值来自文档"这一事实必须可呈现）。
+- **多帧 World 格式**：本轮只定义文档根级 `statsTemplate`；帧级统计配置不支持（登记为开放项）。
+- 规则表达能力（分组键粒度/忽略表/系数换算/别名合并/宿主行开关/排序与分组标题）的 JSON 形状
+  以 `web/src/pure/partStats.ts` 文件头登记为准（留白 #6 的实现侧全文）。
 
 ## 10. proto 扩展与 Java 落盘（留白 #4/#10 拍板）
 
@@ -292,7 +303,7 @@ JSON 字段名按本契约 §3 的 camelCase 落盘（proto snake_case 为规范
 | 3 | 统一盒坐标系 | 0–1 方块局部 Y-up | §6.1 |
 | 4 | proto 扩展方案 | 字段号追加（boxes=6/items=7/display_name=8/source=9，part_type_key=4），线格式兼容旧生成代码 | §10.2 |
 | 5 | 兜底默认取舍 | 永远降级（档 3 永远有结果），来源逐档标记 | §7.1 |
-| 6 | 计数规则表达与三级配置存储 | typeKey=物品身份；三级配置存储细节 → P2.3 拍板登记 | §9 |
+| 6 | 计数规则表达与三级配置存储 | **已定稿（P2.3）**：JSON StatsRules（非 DSL）；三级 = statsTemplate / statsOverride / localStorage；字段级覆盖+规则键整体替换 | §9 |
 | 7 | 悬停/统计 UI 呈现细节 | → P2.2/P2.4 拍板登记 | §8/§9 |
 | 8 | 几何推断 mod 侧执行位置 | → P1.6 拍板登记 | §7.1 |
 | 9 | 验收命令名与 oracle 目录 | → P1.8+P2.5 对接拍板 | §11 |

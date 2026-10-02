@@ -71,6 +71,7 @@ message PartItem {
   int32 damage = 2;
   string nbt_discriminator = 3;
   int32 count = 4;
+  string display = 5;               // 可选：物品条目显示名（附加条目无部件级 display_name 时用）
 }
 
 // 部件来源四元组
