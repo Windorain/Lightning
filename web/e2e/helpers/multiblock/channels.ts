@@ -174,8 +174,7 @@ export async function readChannelPanel(page: Page): Promise<ChannelPanelObservat
   )
 }
 
-/** 切到「通道」tab 并等面板挂载（第二阶段遍历前的固定起手）。 */
-export async function openChannelTab(page: Page): Promise<void> {
+/** 切到「通道」tab 并等面板挂载（第二阶段遍历前的固定起手）。 */export async function openChannelTab(page: Page): Promise<void> {
   await expect(page.locator(CHANNEL_TAB)).toBeVisible()
   await page.locator(CHANNEL_TAB).click()
   await expect(page.locator(CHANNEL_PANEL)).toBeAttached()
@@ -285,4 +284,218 @@ export async function drivePanel(page: Page, payload: PanelDrivePayload): Promis
     },
     { panelSel: CHANNEL_PANEL, tierSel: TIER_SLIDER, runstateSel: RUNSTATE_SELECT, payload },
   )
+}
+
+// ---------------------------------------------------------------------------
+// 第三阶段（真实产物验收）：组合落定原语
+// ---------------------------------------------------------------------------
+
+/**
+ * 面板上的**模型当前值**（从模型渲染出的属性读，**不读滑杆的 `el.value`**）。
+ *
+ * 为什么不用 `readChannelPanel().channels[].value`：README §6.2 记录的坑 ——
+ * Tier 滑杆会**吸附**已声明抽样，而 `setTier` 在"吸附后与模型值相同"时直接 return、不 commit；
+ * 此时 Vue 不重渲染，DOM 的 `value` 会停留在被写进去的**原始输入值**（陈旧）。
+ * 模型值在 `data-mb-tier` / `[data-mb-channel-value]` 文本上 —— 那两个才是真源。
+ */
+export function panelModelValues(panel: ChannelPanelObservation): {
+  tier: number
+  values: Record<string, number>
+  runstate: string
+} {
+  const values: Record<string, number> = {}
+  for (const c of panel.channels) {
+    const t = c.valueText.trim()
+    values[c.key] = t === '' || t === 'Not set' ? 0 : Number(t)
+  }
+  return { tier: panel.tier ?? 0, values, runstate: panel.runstate ?? '' }
+}
+
+export interface ComboSettleRequest {
+  /** 期望变体键（`data-mb-variant`）。 */
+  expectedVariant: string
+  /** 期望尺寸文本（`w×h×d`，与 `data-mb-dims` 同格式）。 */
+  expectedDims: string
+  /**
+   * 驱动前的 mesh 世代 uuid。
+   * `expectMeshChange` 为 true 时，必须等到 uuid 变化（新一代 mesh 已挂进场景）。
+   */
+  previousMeshUuid?: string | null
+  /** 本次驱动是否应当触发一次 mesh 重建（驱动载荷为空时置 false）。 */
+  expectMeshChange?: boolean
+  regionId?: string
+  timeoutMs?: number
+}
+
+export interface ComboSnapshot {
+  panelVariant: string | null
+  panelDims: string | null
+  panelTier: number | null
+  panelRunstate: string | null
+  panelDisplayName: string | null
+  /** 模型值（同 `panelModelValues` 口径）。 */
+  panelChannelValues: Record<string, number>
+  meshUuid: string | null
+  meshMeshes: number
+  meshVertices: number
+  meshTriangles: number
+  defPresent: boolean
+  /** `[d, h, w]`（渲染定义）。 */
+  defShape: [number, number, number]
+  defSolidCells: number
+  /** 渲染定义的廉价内容指纹（FNV-1a：逐格下标 + 调色板标签），用于"内容真的换了"的诊断。 */
+  defContentHash: string
+  defPaletteSize: number
+  /** 轮询次数。 */
+  probes: number
+  /** 驱动→落定耗时（ms）。 */
+  elapsedMs: number
+  /** 落定判据是否全部满足（超时后为 false —— 交给断言报红，不在这里抛错）。 */
+  settled: boolean
+}
+
+/**
+ * 一次 CDP 往返读回「面板观测 + mesh 世代 + 渲染定义形状/内容指纹」。
+ *
+ * 刻意**不**回传整张 `cellGrid`：全组合遍历（真实产物 1262 条）里逐格数据只在抽样组合上取，
+ * 这里用页面内计算的指纹替代（避免把 15×21×15 的网格反序列化上千次）。
+ */
+async function readComboSnapshot(
+  page: Page,
+  regionId: string,
+): Promise<Omit<ComboSnapshot, 'probes' | 'elapsedMs' | 'settled'>> {
+  return await page.evaluate(
+    ({ panelSel, regionId }) => {
+      const ctx = (window as any).__vm__
+      const panel = document.querySelector(panelSel) as HTMLElement | null
+      const slot = ctx?.viewports?.get(regionId)
+      const def = slot?.definition?.value ?? null
+      const group = slot?.contentGroup?.value ?? null
+
+      let meshes = 0
+      let vertices = 0
+      let triangles = 0
+      if (group) {
+        group.traverse((o: any) => {
+          if (!o?.isMesh || !o.geometry) return
+          meshes++
+          const pos = o.geometry.getAttribute?.('position')
+          if (pos) vertices += pos.count
+          const idx = o.geometry.getIndex?.()
+          if (idx) triangles += idx.count / 3
+          else if (pos) triangles += pos.count / 3
+        })
+      }
+
+      const channelValues: Record<string, number> = {}
+      if (panel) {
+        for (const el of panel.querySelectorAll('input[data-mb-channel]')) {
+          const key = el.getAttribute('data-mb-channel')!
+          const text = (panel.querySelector(`[data-mb-channel-value="${key}"]`)?.textContent ?? '').trim()
+          channelValues[key] = text === '' || text === 'Not set' ? 0 : Number(text)
+        }
+      }
+
+      // 廉价内容指纹：FNV-1a 32bit over (逐格下标, 调色板身份标签)
+      let hash = 0x811c9dc5
+      const mix = (s: string): void => {
+        for (let i = 0; i < s.length; i++) {
+          hash ^= s.charCodeAt(i)
+          hash = Math.imul(hash, 0x01000193) >>> 0
+        }
+      }
+      let solid = 0
+      let shape: [number, number, number] = [0, 0, 0]
+      if (def) {
+        const grid = def.cellGrid as number[][][]
+        shape = [grid.length, grid[0]?.length ?? 0, grid[0]?.[0]?.length ?? 0]
+        for (const slice of grid) {
+          for (const row of slice) {
+            for (const idx of row) {
+              if (idx !== 0) solid++
+              mix(String(idx))
+              mix(',')
+            }
+            mix(';')
+          }
+        }
+        for (const p of (def.blockPalette ?? []) as any[]) mix(`${p?.registryId}@${p?.meta}|`)
+      }
+
+      const num = (v: string | null): number | null => (v === null ? null : Number(v))
+      return {
+        panelVariant: panel?.getAttribute('data-mb-variant') ?? null,
+        panelDims: panel?.getAttribute('data-mb-dims') ?? null,
+        panelTier: num(panel?.getAttribute('data-mb-tier') ?? null),
+        panelRunstate: panel?.getAttribute('data-mb-runstate') ?? null,
+        panelDisplayName: panel?.getAttribute('data-mb-display-name') ?? null,
+        panelChannelValues: channelValues,
+        meshUuid: group && typeof group.uuid === 'string' ? group.uuid : null,
+        meshMeshes: meshes,
+        meshVertices: Math.round(vertices),
+        meshTriangles: Math.round(triangles),
+        defPresent: def !== null && def !== undefined,
+        defShape: shape,
+        defSolidCells: solid,
+        defContentHash: (hash >>> 0).toString(16),
+        defPaletteSize: def ? ((def.blockPalette ?? []) as unknown[]).length : 0,
+      }
+    },
+    { panelSel: CHANNEL_PANEL, regionId },
+  )
+}
+
+/** `w×h×d` → `[d, h, w]`（面板 `data-mb-dims` 的格式）。 */
+export function parseDimsText(text: string): [number, number, number] | null {
+  const m = /^(\d+)×(\d+)×(\d+)$/.exec(text.trim())
+  if (!m) return null
+  return [Number(m[3]), Number(m[2]), Number(m[1])]
+}
+
+/**
+ * **组合落定原语**（T3.1 全组合遍历的 `waitForMeshIdle` 强化版）。
+ *
+ * 落定 = 三个条件同时满足：
+ *  1. `data-mb-variant` = 期望变体键（面板属性是**同步**更新的，单独满足它不足够）；
+ *  2. `data-mb-dims` = 期望尺寸 **且** 渲染定义形状 = 期望形状（装配链真的跑到本组合）；
+ *  3. `contentGroup` 的**世代 uuid 变化**（`expectMeshChange` 时）—— 这一条是"mesh 真的重建完成"，
+ *     因为 `definition` 在 `loadStructureAndResources()` 里**先**写，mesh 在其后的
+ *     `rebuildContentMesh()` 才落地：只看定义会在 mesh 还没换时提前放行（截图会拍到上一代）。
+ *
+ * 超时不抛错（返回 `settled: false` 的最后观测），由调用方的断言给出完整证据；
+ * 这样"装配没跟上"与"逻辑错了"不会被混淆成同一种红。
+ */
+export async function pollComboSettled(
+  page: Page,
+  req: ComboSettleRequest,
+): Promise<ComboSnapshot> {
+  const timeout = req.timeoutMs ?? 20_000
+  const regionId = req.regionId ?? 'r-viewport'
+  const expectShape = parseDimsText(req.expectedDims)
+  const expectMeshChange = req.expectMeshChange ?? true
+  const previousUuid = req.previousMeshUuid ?? null
+  const t0 = Date.now()
+  const deadline = t0 + timeout
+  let probes = 0
+  let last = await readComboSnapshot(page, regionId)
+  probes++
+
+  const isSettled = (s: typeof last): boolean => {
+    if (s.panelVariant !== req.expectedVariant) return false
+    if (s.panelDims !== req.expectedDims) return false
+    if (!s.defPresent) return false
+    if (expectShape && (s.defShape[0] !== expectShape[0] || s.defShape[1] !== expectShape[1] || s.defShape[2] !== expectShape[2])) {
+      return false
+    }
+    if (s.meshUuid === null) return false
+    if (expectMeshChange && s.meshUuid === previousUuid) return false
+    return true
+  }
+
+  while (!isSettled(last) && Date.now() <= deadline) {
+    await new Promise((r) => setTimeout(r, 15))
+    last = await readComboSnapshot(page, regionId)
+    probes++
+  }
+  return { ...last, probes, elapsedMs: Date.now() - t0, settled: isSettled(last) }
 }

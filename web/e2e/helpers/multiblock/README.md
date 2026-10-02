@@ -1,11 +1,17 @@
-# T2.6 无头渲染断言管线 —— harness 说明（第一阶段：骨架；第二阶段：通道滑杆全组合遍历）
+# T2.6 无头渲染断言管线 —— harness 说明（第一阶段：骨架；第二阶段：通道滑杆全组合遍历；第三阶段：真实导出产物验收 T3.1/T3.3）
 
 > 计划依据：`docs/plan/multiblock-channel-renderer-plan.md` §T2.6、§5 Phase 3（E 管线的 web 半环）。
-> 本目录只做**测试**，不改 `web/src/`。运行：`cd web && npm run test:e2e:multiblock`。
+> 本目录只做**测试**，不改 `web/src/`。运行：`cd web && npm run test:e2e:multiblock`（全部 multiblock spec）
+> 或 `cd web && npx playwright test multiblock-real-acceptance.spec.ts`（第三阶段）。
 >
 > **第二阶段判据框架（调度者裁决）**：合成 fixture 的视觉不可见是**几何属性问题**，不是链路问题，
 > 因此 **cellGrid 级断言为通过判据**（`data-mb-variant` / `data-mb-dims` / 逐格 diff），
 > **像素断言只诊断记录、不作门禁**（门禁留给 T3.1 的真实导出产物）。
+>
+> **第三阶段判据框架（§10 判据修正的落点）**：真实产物是 0..1 逐面绕组的真实烘焙几何，
+> **几何确实可见**（实测视口 uniqueColors 260～406、σ 24～46），因此像素断言**重新升为门禁**：
+> 截图非空 + 相邻取值/等级对照对必须产生可观测差异。逐格 diff 仍是核心门禁（35 组合必须为 0）。
+> 详见 §8。
 
 ## 1. 文件
 
@@ -16,6 +22,7 @@
 | `helpers/multiblock/contract.ts` | 三份多方块 fixture 的**文档声明级**钉死契约 + 断言谓词 + 只读读取/内存篡改工具 |
 | `helpers/multiblock/panelContract.ts` | **第二阶段新增**：**面板 UI 级**钉死期望（滑杆条数/标签/范围/Not set/Tier 域/运行态）+ 期望组合枚举 + 尺寸方向契约 |
 | `helpers/multiblock/referenceGrids.ts` | **第二阶段新增**：552 份参考展开网格的读入、**调色板下标 → 方块签名**对齐、逐格 diff、缺文件就地补生成 |
+| `helpers/multiblock/realExports.ts` | **第三阶段新增**：**真实产物**（T1.6 `/sde multiblock` 5 台）的目录解析（`MB_REAL_EXPORTS_DIR`）/ 产物读入 / 声明级期望值枚举 / 骨架阶尺寸派生 / 像素对照组构造 / 展开校验文件（35 组合）读入与**逐格 diff 报告** |
 | `helpers/multiblock/frameDoc.ts` | 「帧为主」多帧样例合成器（仓库现有样例都是单帧） |
 | `helpers/multiblock/channels.ts` | 通道面板选择器 + `readChannelPanel` / `setTier` / `setChannelValue` / `setRunstate` / `openChannelTabReady` / **`drivePanel`（批量驱动）** |
 | `../../multiblock-fixture-load.spec.ts` | 多方块 fixture 加载断言（不依赖通道 UI） |
@@ -24,6 +31,7 @@
 | `../../multiblock-channel-panel.spec.ts` | **第二阶段**：面板声明一致性（3 份 fixture × 条数/标签/范围/Not set/Tier 域/运行态） |
 | `../../multiblock-channel-traversal.spec.ts` | **第二阶段**：全组合遍历（desktop 552 / mobile 抽样）+ 逐格 diff + 尺寸方向 + 像素诊断 |
 | `../../multiblock-channel-illegal.spec.ts` | **第二阶段**：非法组合行为（域外夹取 / Tier 吸附 / 耦合 clamp / Not set 回落） |
+| `../../multiblock-real-acceptance.spec.ts` | **第三阶段（T3.1/T3.3）**：真实产物 5 台的声明一致性、1262 组合遍历、像素门禁、35 组合逐格 diff、indexTable 证伪、`MB_REAL_EXPORTS_DIR` 接管 |
 
 ## 2. 零替身五原则的落点
 
@@ -48,6 +56,7 @@
 | 帧数据 | `doc.frames[i].grid` → `{depth,height,width,count()}` | 帧为主文档的「当前帧数据」 |
 | 当前帧 / 图层 | `ctx.getCurrentFrameIndex().value` / `ctx.getLayerWorldY().value` | 帧切换与分层预览语义 |
 | 渲染网格 | `ctx.viewports.get('r-viewport').definition.value` → `{cellGrid, blockPalette}` | **T3.3「web 装配 vs mod 导出逐格 diff」的 web 侧输入**（与 DRW 用同一份 `StructureDefinition`） |
+| 内容 mesh（**第三阶段新增**） | `ctx.viewports.get('r-viewport').contentGroup.value` → mesh 数 / 顶点数 / 三角形数 / **世代 uuid** | 判「装配 → mesh 重建」是否真的落定（`readContentMesh` / `waitForMeshGeneration` / `pollComboSettled`）；与 README §7.1 已登记的 `slot.contentGroup` 观测同口径 |
 | DOM | `.vp-dock__tab`、`.vp-dock__tab-status`（`帧 i/N` / `层 X`）、`input[aria-label^="当前帧"]`、`#wm-layer-range`、`.wm-wfp-controls .nei-ctrl-btn`（`aria-pressed`）、`.vc-viewport canvas` | UI 语义与布局断言 |
 | 截图 | `page.screenshot()` / `locator.screenshot()` | 证据链 + 非空 + 差异判据 |
 
@@ -304,3 +313,204 @@
    资源增长，未定位；552 全量仍在 7 min 量级（可用，但不理想）。
    如 Phase 3 需要进一步压缩，候选手段：把 552 组合分片到多个测试/worker（`fullyParallel`
    与 `workers` 当前为默认串行），或把 `loadStructureAndResources` 的重复资源解析纳入诊断。
+
+---
+
+## 8. 第三阶段：真实导出产物验收（T3.1 / T3.3）
+
+### 8.1 产物来源与接管
+
+```powershell
+# 产物由 T1.6 的游戏内自动导出管线生成（零人工交互，默认验收子集 5 台）
+npm run multiblock:export                      # 仓库根
+# 缺省目录：mod/gtnh/run/client/sde_multiblock_exports
+#   <slug>.multiblock.json                      5 份主产物（base64(gzip(json)) 信封）
+#   expanded/_manifest.json                     35 条抽样清单（T1.6 留白 #10）
+#   expanded/<slug>.multiblock__<variant>.json  35 份展开形态校验文件（ground-truth cellGrid）
+#   _dataset/run-NNNN/palette.json              全局并集调色板（展开文件的签名空间）
+```
+
+目录可被环境变量接管：**`MB_REAL_EXPORTS_DIR`**（绝对路径，或相对**仓库根**/CWD 的路径；
+两者都会尝试，失败信息里逐条列出检查过的候选）。
+
+**缺产物一律显式失败**（`resolveRealExportsDir` / `loadRealProducts` / `loadExpandedManifest` /
+`loadExpandedGrid` 全部抛错并给出再生命令）—— 静默跳过会让"1262 组合遍历 + 35 组合逐格 diff"
+在干净检出上退化成空跑。spec 的 `产物目录与清单完整性` 用例把这条语义也做成了**断言**
+（把 `MB_REAL_EXPORTS_DIR` 指到不存在的目录 / 空目录，必须抛错）。
+
+### 8.2 声明级期望值的来源（反同义反复的边界）
+
+真实产物组合规模远大于 fixture（5 台 1262 组合），期望值**不硬编码**，而是从产物 JSON 的
+**声明节**读取（`realExports.ts`）：
+
+| 期望 | 来源（文件声明） | 与之互证的独立来源 |
+|------|------------------|--------------------|
+| 组合集合 / 变体键 | `∏(通道 0..domain.hi) × tierSample × runstates` | 必须**逐字等于** `multiblock.variants[].key` 集合（不等即抛错） |
+| 骨架尺寸 `w×h×d` | `frames[].stepIndex → backbone.sizeSteps[]` | 展开清单的 `dims`；面板 `data-mb-dims`；渲染定义形状 |
+| 通道条数/标签/取值域 | `multiblock.channels[]` | 面板 `data-mb-*` + 解析结果 `doc.multiblockChannels` |
+| 运行态 | `multiblock.runstates[]` | 面板 `<option>` 的 id + 呈现名 |
+| 软约束提示 | `multiblock.notes[]` | 面板 notice 文本逐条包含 |
+| 逐格内容 | **mod 侧独立导出的展开校验文件** | 不在本进程重算（这是 T3.3 的 ground-truth） |
+
+**断言目标是"UI/解析器忠实呈现文件声明"**（而不是"文件正确"）—— 文件本身的正确性由
+T1.5/T1.6 的导出期自检（`verify-encoded.mjs` / `validate-multiblock-fixtures.mjs`）承担。
+证伪用例（§8.6）覆盖这一边界：篡改**声明节之外**的内容（规则表）必须让逐格 diff 变红，
+而声明级断言仍绿。
+
+### 8.3 T3.3 逐格比对的对齐口径
+
+参考基线 = `<产物目录>/expanded/*.json`（**另一进程、另一实现**产出的展开完整结构）。
+
+| 口径 | 约定 | 是否门禁 |
+|------|------|----------|
+| 坐标朝向 | 两边同一口径 `cellGrid[z][row][x]`，`row 0 = 结构顶部`，**不翻转不转置** | 是（朝向不一致 → diff 立刻红） |
+| 下标空间 | 参考 = **全局并集**；渲染 = `_gridToV2` **按本组合重编号** → 两边必然不同，只能走**内容签名** | — |
+| 签名 `full` | 参考侧取文件内联的 `canonicalJson(entry)` **原文**（不重新 stringify）；渲染侧 `canonicalJson(渲染调色板条目)` | 是（实测 35/35 = 0） |
+| 签名 `idMeta` | `name:meta`（air → `''`） | 是（唯一门禁；两侧都归一 air） |
+| **映射不上** | 参考网格用到、但文件内联签名表里没有的全局下标 | **硬失败**（绝不当作 air 放过） |
+| **标签自洽** | 文件 `palette.labels[i]`（`name@meta`）与 `signatures[i]` 解析出的身份必须一致 | **硬失败**（两条独立对齐来源矛盾 = 不可信） |
+| 幻影方块 | 渲染调色板的每个非空条目必须能从参考签名集合派生；下标 0 必须 air | 是 |
+
+失败信息按契约 §T3.3 给出**坐标 + 两边各自下标 + 两边调色板条目**（`describeRealGridDiff`）：
+`(x=…,row=…,z=…) 渲染[下标]=条目 vs 参考[下标]=条目`。
+
+### 8.4 驱动与落定原语（第三阶段新增）
+
+| 原语 | 作用 |
+|------|------|
+| `readContentMesh(page)` | 读 `ViewportSlot.contentGroup`（公开字段）→ mesh 数/顶点数/三角形数/**世代 uuid** |
+| `waitForMeshGeneration(page, prevUuid)` | 等"新一代 mesh 已挂进场景"（`presentContentMesh` 每次重建都会新建 Group 并整体替换） |
+| `pollComboSettled(page, req)` | 一次 CDP 往返读回「面板属性 + mesh 世代 + 渲染定义形状/内容指纹」，直到三条同时满足：`data-mb-variant` = 期望键、`data-mb-dims` = 期望尺寸 **且** 渲染定义形状 = 期望形状、**mesh 世代 uuid 变化** |
+| `panelModelValues(panel)` | 面板的**模型值**（从 `data-mb-tier` / `[data-mb-channel-value]` 文本读，**不读滑杆 `el.value`** —— 后者在"吸附后不 commit"时会陈旧，见 §6.2） |
+| `parseDimsText` | `w×h×d` → `[d,h,w]` |
+
+> **为什么"落定"必须包含 mesh 世代**：`loadStructureAndResources()` 先写 `definition`，
+> `rebuildContentMesh()` 才把新 mesh 挂进场景。只看 `definition` 会在 mesh 还是上一代时放行，
+> 截图就拍到旧结构（像素判据会因此假红/假绿）。
+>
+> **`waitForMeshIdle(selector)` 的口径**：它是"帧/层滑杆重新可交互"（那两个滑杆绑定 `meshBusy`）。
+> **通道面板的滑杆没有 disabled 分支**（不受 `meshBusy` 门控），所以它在 `openProduct()` 里
+> 作为"面板已可交互"的挂载守卫调用一次；逐组合的"mesh 已重建"由世代 uuid 判定（同语义的更强形式）。
+
+### 8.5 像素门禁：口径、标定与实测
+
+真实产物的同态像素**不是绝对确定**的。实测（连续 9 张截图，间隔 400 ms，相机/几何静止）：
+
+| 机器 | 同态逐张差异 | 说明 |
+|------|--------------|------|
+| EBF / AdvEBF / DT / BBF | **全 0**（每张 meanAbs=0.000 / maxAbs=0.00 / 变化格 0） | 完全稳定 |
+| **QFT**（15×21×15，21660 顶点 / 7220 三角形） | **持续振荡**：稳态重复对（丢弃热帧后）16 分格 maxAbs 2.6～7.14、变化格 0；9 连拍里最深一次 10.07（含热帧） | 相机 `position/quaternion/zoom` 逐帧**完全相同**（已实测），噪声集中在结构所在屏幕区域；画布级与容器级截图同样存在（非 DOM overlay）。根因未定位，**如实登记为开放项（§8.8）** |
+
+因此门禁**按本次会话实测的振荡地板标定**（`pixelVerdict`）：
+
+| 判定 | 门限 | 实测分离度 |
+|------|------|-----------|
+| `structural`（结构级变化） | `changedCells ≥ 3` **且** `maxAbs > max(8, 会话振荡地板)` | 信号 8～115 格 / maxAbs 11.8～86.3 |
+| `single-cell`（单格强变化） | `maxAbs ≥ max(12, 会话振荡地板)` | BBF 单方块材质切换在窄视口只覆盖 1 格、幅度 27.8～65.4 |
+| `none` | 其余（**如实记录**，不静默降级） | 见 §8.7 的"内容变了但画面不可观测"清单 |
+| 会话可信性守卫 | 该机所有稳态重复截图 `maxAbs < 16` | 实测最差 7.14（QFT 稳态；9 连拍含热帧时 10.07） |
+
+截图策略（控制总量）：每个 **Tier 档位的第一条** + **抽样组合** + **每个像素对照组的 A/B 稳态图**
+（对照组先丢一张"热帧"，再连拍两张稳态图，两张之差即该组的振荡地板）。
+每条被归档的截图都过 `expectNotBlank`（uniqueColors ≥ 32 / σ ≥ 3 / nonBlack ≥ 0.02；
+真实产物实测 uniqueColors 260～406、σ 24～46、nonBlack ≥ 0.9979）。
+
+### 8.6 覆盖矩阵与实测（`--retries=0`，本机）
+
+| project | 机器 | 变体总数 | 遍历覆盖 | 截图 | 遍历耗时 | ms/组合 | 驱动→落定 mean |
+|---------|------|--------:|---------|-----:|--------:|--------:|---------------:|
+| desktop-chrome | mteelectricblastfurnace | 420 | **全量 420** | 24 | 100.7 s | 240 | 33 ms |
+| desktop-chrome | mteadvebf | 420 | **全量 420** | 24 | 107.8 s | 257 | 33 ms |
+| desktop-chrome | mtedistillationtower | 220 | **全量 220** | 20 | 60.1 s | 273 | 35 ms |
+| desktop-chrome | mtequantumforcetransformer | 200 | **全量 200** | 14 | 73.5 s | 367 | 37 ms |
+| desktop-chrome | mtebrickedblastfurnace | 2 | **全量 2** | 2 | 1.9 s | 932 | 39 ms |
+| desktop-chrome | **合计** | **1262** | **1262（全量）** | 84 | **≈ 5.7 min** | ≈ 273 | — |
+| mobile-chrome | mteelectricblastfurnace | 420 | 抽样 12 | 12 | 13.6 s | 1129 | 37 ms |
+| mobile-chrome | mteadvebf | 420 | 抽样 12 | 12 | 13.4 s | 1117 | 35 ms |
+| mobile-chrome | mtedistillationtower | 220 | 抽样 12 | 12 | 13.9 s | 1162 | 39 ms |
+| mobile-chrome | mtequantumforcetransformer | 200 | 抽样 12 | 12 | 15.0 s | 1248 | 37 ms |
+| mobile-chrome | mtebrickedblastfurnace | 2 | 抽样 2（无通道 → 三档取值去重后 = 全部变体） | 2 | 2.2 s | 1086 | 52 ms |
+| mobile-chrome | **合计** | 1262 | **50（抽样）** | 50 | **≈ 0.7 min** | ≈ 1150 | — |
+
+> 抽样规则（固定、可复现、不随机）：每通道取值三档（`全 0` = Not set 基线 / 每通道有效下界 `ch.min` /
+> 每通道取值域上界 `ch.domainHi`）× Tier 首尾两档 × 每个运行态，**按变体键去重**
+> （无通道的 BBF 三档取值相同 → 去重后只剩 2 条 = 它的全部变体）。
+> 每台还有约 10 s 的固定开销（页面挂载 + 注入 + 等挂载期 mesh 世代稳定），故小样本机器的 ms/组合偏高；
+> 单组合耗时的运行间波动约 ±30%（实测同一份 mobile 抽样在两次运行里为 720 与 1129 ms/组合）。
+
+> 遍历已做的性能优化（相对首版）：驱动器**跟踪上一组合**而不是每次读面板（每次落定都断言
+> `data-mb-variant`，所以跟踪是安全的）；逐组合的"mesh 已重建"用世代 uuid 判定（`pollComboSettled`
+> 一次 CDP 往返同时拿到面板属性 + mesh 世代 + 定义形状/指纹）。首版实测 323～604 ms/组合，
+> 优化后 desktop **240～367 ms/组合**、mobile 1117～1248 ms/组合（其中截图约占 24 张 × ~0.4 s；
+> mobile 单张截图更大更慢）。
+> 第三阶段 desktop 整个 spec 文件 **8.4 min**（14 个用例，含 1262 组合遍历 + 35 组合逐格 +
+> 像素门禁 + 证伪）；mobile **4.0 min**。
+> **整仓全量**（`cd web && npx playwright test --retries=0`，16 worker 并行 + 与既有 8 个 spec 竞争 CPU）：
+> **102 项 = 95 passed + 7 skipped + 0 failed，14.0 min**（7 skipped 是既有 `embed-mobile.spec.ts`
+> 在 desktop 项目的既有跳过；其中既有 spec 67 passed 全绿，本 spec 28 项全绿）。
+> 竞争环境下上表耗时会上浮约 1.5～2 倍（实测 desktop 遍历 355～636 ms/组合），
+> 且**接近门限的个别像素对照对会在 `structural`/`none` 之间翻转**（如 QFT `tier 1→2` 7.4～11.8 /
+> 0～8 格）—— 这正是门禁取"每台至少一对显著 + 有取值轴的机器至少一对取值/Tier 对显著"、
+> 而不是"每一对都必须显著"的原因（逐对结论仍全部打印）。
+
+T3.3 逐格比对（35 抽样组合，desktop）：
+
+| 机器 | 抽样 | 格数 | idMeta diff | full diff |
+|------|-----:|-----:|------------:|----------:|
+| mteelectricblastfurnace | 8 | 288 | **0** | **0** |
+| mteadvebf | 8 | 288 | **0** | **0** |
+| mtedistillationtower | 8 | 576 | **0** | **0** |
+| mtebrickedblastfurnace | 2 | 72 | **0** | **0** |
+| mtequantumforcetransformer | 9 | 42,525 | **0** | **0** |
+| **合计** | **35** | **43,749** | **0** | **0** |
+
+> 与 T1.6 的 mod 半环自检（`verify-expanded.mjs`）**同一批数字**：35 组合 / 43,749 格 / 0 差异。
+> 即"web 装配 = mod 导出"在真实产物上逐格成立，且 `full`（条目全文）口径也成立。
+
+**证伪**（内存篡改一条规则的 `indexTable`，仓库产物一字不改）：
+
+```
+[T3.1] 证伪（indexTable）：mteadvebf coil:0|tt:1|runstate:idle :: 篡改 r.s0.g0.r0.indexTable[1]↔[2]
+       → 差异 12/36 格（参考 gt.blockcasings5:0 vs 渲染 gt.blockcasings5:1）
+       例：(x=0,row=1,z=0) 渲染[4]=gt.blockcasings5@1 vs 参考[3]=gt.blockcasings5@0
+[T3.1] 证伪对照组仍绿：coil:14|tt:1|runstate:idle（coil 生效值 ∉ {1,2}）diff=0
+[T3.1] 证伪对照组仍绿：coil:3|tt:5|runstate:active（coil 生效值 ∉ {1,2}）diff=0
+```
+
+目标组合的选择是**机器判据**（不是人工挑的）：遍历规则表，取第一对"内容不同（`canonicalJson(entry)`
+不同）且抽样里存在生效值命中其一"的表项位置，再取生效值未命中 `{i,j}` 的两条抽样作对照组；
+差异必须落在被互换的两个条目上（逐格校验参考侧 = 原表项、渲染侧 = 换入表项）。
+
+### 8.7 真实产物上的像素行为结论（T3.1 像素门禁的最终判定依据）
+
+- **几何可见**：视口实测 uniqueColors 260～406、σ 24～46、nonBlack ≥ 0.9979；
+  结构性变化产生 15～115 个签名格、maxAbs 16.8～86.3 的差异（同视口的合成 fixture 为 0 变化格）。
+  → **T3.1 的像素门禁在真实产物上成立**（合成 fixture 的不可见问题是几何属性，不是链路问题）。
+- **相邻取值/等级差异成立**：`通道 有效下界→域上界`（EBF/AdvEBF `coil 1→14`；DT `height 1→10`；
+  QFT `manipulator 1→4`、`shielding 1→4`）与 `Tier 首档→次档`（EBF/AdvEBF/DT/QFT）在 desktop 上
+  **全部显著（`structural`）**；BBF（无通道、Tier 域退化为单点）由运行态对承担（65.40 / 3 格）。
+  14 对里 13 对判定非 `none`。
+- **`none` 的对（如实记录，非静默降级）**：
+  | 对 | 现象 | 解释 |
+  |----|------|------|
+  | EBF `idle→active` | 1 个调色板条目差异、maxAbs 7.37 变化格 0 | 两态是 `idle/active` 面纹理互换（同 `name:meta`、仅 nbt/tooltip 不同）；该面在当前正交视角下几乎侧对相机，单格幅度低于 12 的单格门限 |
+  该机其余三对（运行态以外的 `coil 1→14` 32.6/16 格、`tier 1→2` 45.46/33 格）显著，
+  所以机器的结构性门禁成立；EBF 的 `idle→active` 差异由**逐格 diff**（T3.3）与运行态对的
+  `full` 签名差异 1 条共同兜住（像素不可判定不等于内容未变）。
+  §8.5 已说明：QFT 的 `tier` / `shielding` 对在**旧捕捉口径**（用热帧当基线）下曾落在地板之下，
+  改为"丢弃热帧 + 稳态基线"后两者都判为 `structural`（11.83/8 格、18.66/21 格）。
+
+### 8.8 开放项（第三阶段新增）
+
+1. **QFT 同态像素持续小幅振荡**（稳态重复对 16 分格 maxAbs ≤ 7.14、变化格 0；9 连拍含热帧时最深 10.07；
+   相机/几何静止，非 DOM 层）。根因未定位（候选：该机烘焙几何里的共面/重叠四边形导致的深度竞争，
+   或某条目使用了随帧推进的纹理）。影响：像素门禁必须按**会话内实测**的振荡地板标定（§8.5），
+   并**丢弃 mesh 刚落地的那张热帧**（实测热帧与稳态差可达 ~10）；不影响该机的结构性门禁
+   （4 对全部 `structural`）与逐格 diff（9 组合全部 0）。
+2. **`full` 签名口径在真实产物上与 `idMeta` 同为 0**（35/35），因此本阶段两个口径都设为门禁；
+   第二阶段记录的"同 `name:meta` 互换不可分辨"盲区在真实产物上**不适用** ——
+   真实产物的渲染调色板是按**并集下标**（`SlotBlock.paletteIndex`）缓存的，不会按 `name:meta` 归并。
+3. **遍历仍是单 worker 串行**（`fullyParallel: false`）。真实产物 1262 组合在桌面约 10 min 量级；
+   如需进一步压缩，可把 5 台机器分片到多个测试（同一 spec 内已按机器分 test，可直接开并行）。
+4. **`expanded/` 抽样清单是 T1.6 的固定产物**（35 条）：若产物集被更换，T3.3 的覆盖数断言
+   （35 组合 / 43,749 格）会随之变化；断言按清单实测值给出，并打印逐台明细。

@@ -604,6 +604,95 @@ export async function waitForRenderMatch<T extends { diffCount: number }>(
   return last
 }
 
+// ---------------------------------------------------------------------------
+// 第三阶段（真实产物验收）：内容 mesh 的「世代」观测
+// ---------------------------------------------------------------------------
+
+export interface ContentMeshObservation {
+  /** 视口 slot 里是否已有内容 mesh 组。 */
+  present: boolean
+  /**
+   * 当前 `contentGroup` 的 uuid。
+   *
+   * 为什么它是"装配真的落定"的判据：`presentContentMesh()` 每次重建都会
+   * **新建一个 Group 并整体替换** `slot.contentGroup.value`（`mainMeshGroup.value = result.group`），
+   * 且 `loadStructureAndResources()` 每次都会 `clearAllMeshStorage()`（world mesh 缓存必空）。
+   * 因此 uuid 变化 ⇔ 新一代 mesh 已经挂进场景 —— 比"definition 已更新"更强
+   * （definition 在 `loadStructureAndResources()` 里先写，mesh 在之后的 `rebuildContentMesh()` 才落地）。
+   *
+   * 观测口径与 README §7.1 已登记的 `slot.contentGroup`（mesh 数 / 三角形数）一致：
+   * 它是**公开字段**（`ViewportSlot.contentGroup`），不是测试专用后门。
+   */
+  uuid: string | null
+  /** 组内 mesh 数。 */
+  meshes: number
+  /** 顶点数合计。 */
+  vertices: number
+  /** 三角形数合计。 */
+  triangles: number
+}
+
+/** 读视口内容 mesh 的观测（mesh 数 / 顶点数 / 三角形数 / 世代 uuid）。 */
+export async function readContentMesh(
+  page: Page,
+  regionId: string = VIEWPORT_REGION,
+): Promise<ContentMeshObservation> {
+  return await page.evaluate((rid) => {
+    const ctx = (window as any).__vm__
+    const slot = ctx?.viewports?.get(rid)
+    const group = slot?.contentGroup?.value ?? null
+    if (!group) return { present: false, uuid: null, meshes: 0, vertices: 0, triangles: 0 }
+    let meshes = 0
+    let vertices = 0
+    let triangles = 0
+    group.traverse((o: any) => {
+      if (!o?.isMesh || !o.geometry) return
+      meshes++
+      const pos = o.geometry.getAttribute?.('position')
+      if (pos) vertices += pos.count
+      const idx = o.geometry.getIndex?.()
+      if (idx) triangles += idx.count / 3
+      else if (pos) triangles += pos.count / 3
+    })
+    return {
+      present: true,
+      uuid: typeof group.uuid === 'string' ? group.uuid : null,
+      meshes,
+      vertices: Math.round(vertices),
+      triangles: Math.round(triangles),
+    }
+  }, regionId)
+}
+
+/**
+ * 等到「新一代内容 mesh 已挂进场景」：
+ * `contentGroup.uuid` 从 `previousUuid` 变成别的值（`previousUuid === null` 时只要求非空）。
+ *
+ * 超时抛错（带上最后一次观测），因为"mesh 世代没变"意味着装配根本没落地 ——
+ * 那是必须报红的实现问题，不是可以放过的噪声。
+ */
+export async function waitForMeshGeneration(
+  page: Page,
+  previousUuid: string | null,
+  timeout = 30_000,
+  regionId: string = VIEWPORT_REGION,
+): Promise<ContentMeshObservation> {
+  const deadline = Date.now() + timeout
+  let last: ContentMeshObservation = { present: false, uuid: null, meshes: 0, vertices: 0, triangles: 0 }
+  for (;;) {
+    last = await readContentMesh(page, regionId)
+    const changed = last.present && last.uuid !== null && (previousUuid === null || last.uuid !== previousUuid)
+    if (changed) return last
+    if (Date.now() > deadline) {
+      throw new Error(
+        `T3.1：等待内容 mesh 世代更新超时（${timeout}ms）—— previousUuid=${previousUuid ?? '<首次>'}，` +
+          `最后一次观测 ${JSON.stringify(last)}。装配/mesh 重建未落地，属必须报红的实现问题。`,
+      )
+    }
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
 export interface RenderedDefinitionObservation {
   present: boolean
   /** `[d, h, w]`。 */
