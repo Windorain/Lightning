@@ -15,6 +15,9 @@
     "multiblock:export":          "pwsh -NoProfile -File scripts/multiblock-pipeline/run-pipeline.ps1",
     "multiblock:verify-expanded": "node scripts/multiblock-pipeline/verify-expanded.mjs",
     "multiblock:compare-runs":    "node scripts/multiblock-pipeline/compare-runs.mjs",
-    "multiblock:selfcheck":       "pwsh -NoProfile -File scripts/multiblock-pipeline/selfcheck.ps1"
+    "multiblock:selfcheck":       "pwsh -NoProfile -File scripts/multiblock-pipeline/selfcheck.ps1",
+
+    "acceptance:multiblock":      "pwsh -NoProfile -File scripts/acceptance/run-acceptance.ps1",
+    "acceptance:volume-doc":      "node scripts/acceptance/volume-doc.mjs"
   }
 }
