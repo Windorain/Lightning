@@ -411,3 +411,19 @@ Phase 3 集成与验收（串行，全部由 E 管线驱动，零人工）
 8. 验收总入口命令名与编排方式（npm script / gradle task / 外壳脚本）→ T1.6 + T2.6 对接时拍板
 9. 体积增长的机器判定式（线性拟合容差 / 安全系数取值）→ T0.5 定稿时定义，T3.2 执行
 10. 展开形态校验文件的格式与抽样清单 → T1.6 拍板（须与 T2.6 的 diff 工具对齐）
+
+---
+
+## 10. 勘误与决策回写（Phase 0 核实修正）
+
+**留白决策登记**（§9 对应条目）：
+1. 依赖路线 → **已拍板：compileOnly 为主 + 4 处受控反射内核**（无公开访问器的成员：`val$channel`、`LazyStructureElement`、`HatchElementBuilder#mHint`、匿名类 `this$0`）。决策与回退方案见 [decision-deps-route.md](decision-deps-route.md)。
+2-10. 待定稿后回写。
+
+**事实勘误**（以探针实测为准，下游任务按新口径执行）：
+- §T0.4 / §8「通道定义全集 27 条」→ 实测 **30 条枚举常量 / 28 个不同 id**（27 替换型 + 2 尺寸型 + 1 舱口布局型）。重名 id 仅 `casing` ×3，无其他。证据：[probe-channels.md](probe-channels.md) §1.2、§2。
+- §T0.4「玻璃等级 ≤ 线圈等级」类耦合的假设 → 全库不存在；主导模式是「玻璃 ≥ 能量仓等级」，其一方为可变结构内容而非通道，格式中记为软约束 note，不参与装配夹取。证据：[probe-channels.md](probe-channels.md) §4.3。
+- §1 表格/§8 锚点 `core/registry/gt/GregTechMetaTileRegistry` → 实际位于 `core/registry/GregTechMetaTileRegistry.java`。
+- §T0.2 背景隐含「IStructureChannels 属 StructureLib」→ 实际在 **GT5U**（`gregtech/api/structure/`）；编译期依赖必须同时覆盖 GT5U 与 StructureLib。
+- §T0.2「运行态进入需要 GT 内部状态机（风险最高处）」→ 经 pinned jar `javap` 核实，`MTEMultiBlockBase` 运行态字段（`mMachine`/`mProgresstime`/`mMaxProgresstime`/`mRuntime`）**全部 public**，活动态为派生量（`setActive(mMaxProgresstime > 0)`），风险等级下修；可达性仍以 T0.3 实测为准。
+- §T0.4 建议「UI 标签 = 通道 id 首字母大写」→ 修正为 **UI 呈现名取枚举名**（`capitalize(id)` 会继承 `casing` ×3 歧义，是参考实现的已知缺陷）；文件格式通道标识用 `{enumName, id}` 双键。证据：[probe-channels.md](probe-channels.md) §5。
