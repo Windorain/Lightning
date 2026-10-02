@@ -5,6 +5,19 @@
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import { isEnvelopeDocument, normalizeEnvelopeToPlain } from '@/render/data/compactSceneDocument'
 import type { DocumentParser, ParserRegistryImpl } from '@/context/parserRegistry'
+import { MultiblockParser } from '@/context/parsers/multiblockParser'
+
+export { MultiblockParser }
+
+/**
+ * 「文档形态判别型」parser —— **必须先于**按 `format_version` / `frames` 泛匹配的 parser 判别。
+ *
+ * 契约 §2.2 的判别优先级：多方块为主的文档为了复用 `frames` 语义，天然带
+ * `format_version:"2.0" + frames`（V2Plain 的判别条件）、且 `id` 来自信封 meta（World 的判别条件），
+ * 因此必须先被多方块判别器接走。既有四类 parser 的 `detect` 一行未改；
+ * 由 `createParserRegistry()` 预置在表头，host 仍按历史顺序追加既有四类（见 `parserRegistry.ts`）。
+ */
+export const SHAPE_FIRST_PARSERS: DocumentParser[] = [MultiblockParser]
 
 export const V2PlainParser: DocumentParser = {
   formatName: 'V2Plain',

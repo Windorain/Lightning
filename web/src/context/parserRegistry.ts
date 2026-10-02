@@ -6,6 +6,7 @@
  * 取代旧的 formatDispatcher + handler 系统。
  */
 import type { RuntimeDocument } from '@/context/runtimeDocument'
+import { SHAPE_FIRST_PARSERS } from '@/context/parsers/builtinParsers'
 
 export interface DocumentParser {
   formatName: string
@@ -46,6 +47,18 @@ export class ParserRegistryImpl {
   }
 }
 
+/**
+ * 创建默认注册表。
+ *
+ * **注册顺序即判别优先级**：`SHAPE_FIRST_PARSERS`（形态判别型，当前 = Multiblock）预置在表头，
+ * 之后由 host 按历史顺序追加既有四类（V2Plain → Envelope → World → StructureData）。
+ * 多方块为主的文档带 `format_version:"2.0" + frames`，若不抢先判别会被 V2Plain/World 抢走
+ * （契约 §2.2）；既有四类 parser 的 detect 与注册顺序均未改动。
+ */
 export function createParserRegistry(): ParserRegistryImpl {
-  return new ParserRegistryImpl()
+  const registry = new ParserRegistryImpl()
+  for (const p of SHAPE_FIRST_PARSERS) {
+    registry.register(p)
+  }
+  return registry
 }

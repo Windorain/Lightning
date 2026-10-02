@@ -1,15 +1,51 @@
 /**
  * RuntimeDocument — 运行时场景文档。
  *
- * 独立于传输格式（V2Plain / StructureData / World），使用 Y-up 坐标系。
+ * 独立于传输格式（V2Plain / StructureData / World / Multiblock），使用 Y-up 坐标系。
  * Pallete 已解析为 SlotBlock，不使用原始的 palette index。
  * 序列化/反序列化分别在 serializers / parsers 中实现。
+ *
+ * **支持两种文档形态（互斥，见 `docs/plan/format-multiblock-doc.md` §2）**：
+ *  - **帧为主**（缺省）：`multiblock === null`，帧自带 grid（既有行为，一行未变）。
+ *  - **多方块为主**（`documentShape === "multiblock"`）：`multiblock` 承载全部声明
+ *    （通道清单 / 总 Tier 域 / 运行态 / 变体 / 规则表 / 骨架 / viewerSemantics），
+ *    帧只承载**变体声明**（`RuntimeFrame.multiblock`，`grid === null`）——
+ *    网格是装配产物，由装配器（T2.2）按当前取值选择生成。
  */
 import { structureRowToWorldY } from '@/pure/vec'
 import { blockKey } from '@/pure/string'
 import { Grid, type GridPos, type SlotBlock, type PaletteEntryMeta } from './grid'
+import {
+  MULTIBLOCK_DOCUMENT_SHAPE,
+  parseMultiblockDeclaration,
+  type MultiblockChannelDecl,
+  type MultiblockDeclaration,
+  type MultiblockFrameDecl,
+  type MultiblockRuleDecl,
+  type MultiblockRunstateDecl,
+  type MultiblockVariantDecl,
+} from './parsers/multiblockDocument'
 
 export { Grid, GridPos, SlotBlock, PaletteEntryMeta }
+
+export type {
+  MultiblockDeclaration,
+  MultiblockDecl,
+  MultiblockChannelDecl,
+  MultiblockChannelKind,
+  MultiblockRunstateDecl,
+  MultiblockRuleDecl,
+  MultiblockRuleRef,
+  MultiblockVariantDecl,
+  MultiblockFrameDecl,
+  MultiblockSizeStep,
+  MultiblockBackbone,
+  MultiblockCouplingDecl,
+  MultiblockNoteDecl,
+  MultiblockViewerSemantics,
+  MultiblockTotalTierDomain,
+} from './parsers/multiblockDocument'
+export { MULTIBLOCK_DOCUMENT_SHAPE, MultiblockParseError, multiblockVariantKey } from './parsers/multiblockDocument'
 
 export const AIR_PALETTE_INDEX = 0
 
@@ -22,12 +58,24 @@ export class RuntimeFrame {
   readonly label: string | undefined
   readonly grid: Grid | null
   readonly durationMs: number | undefined
+  /**
+   * 多方块帧声明（`variant` / `stepIndex` / `rules` —— Frame 是**唯一**变体存储原语）。
+   * 帧为主文档恒为 `null`。注意：多方块帧的 `grid` 由装配器按需生成，构造时为 `null`。
+   */
+  readonly multiblock: MultiblockFrameDecl | null
 
-  constructor(index: number, label?: string, grid?: Grid | null, durationMs?: number) {
+  constructor(
+    index: number,
+    label?: string,
+    grid?: Grid | null,
+    durationMs?: number,
+    multiblock?: MultiblockFrameDecl | null,
+  ) {
     this.index = index
     this.label = label
     this.grid = grid ?? null
     this.durationMs = durationMs
+    this.multiblock = multiblock ?? null
   }
 
 
@@ -50,6 +98,15 @@ export class RuntimeDocument {
   readonly materialPalette: unknown[] | undefined
   readonly playback: Record<string, unknown> | undefined
 
+  /**
+   * 多方块声明（`documentShape === "multiblock"`）；帧为主文档恒为 `null`。
+   * 承载 T2.2 装配器与 T2.4 UI 需要的**全部声明**：
+   * 通道清单（双键 enum/id、kind、取值域含 0 = "Not set"、size 型 min/max）、总 Tier 域 + tierSample、
+   * 运行态清单与呈现名、变体映射、规则表、骨架 sizeSteps、couplings/notes/viewerSemantics。
+   * `multiblock.raw` 即**契约内层 JSON 原文**（含 `blockPalette`/`frames`），是装配器的输入形态。
+   */
+  readonly multiblock: MultiblockDeclaration | null
+
   /** 不认识的顶层 key 兜底（round-trip 无损） */
   private _extra: Record<string, unknown>
 
@@ -65,6 +122,7 @@ export class RuntimeDocument {
     cellTooltipGrid?: number[][][] | null
     materialPalette?: unknown[] | null
     playback?: Record<string, unknown> | null
+    multiblock?: MultiblockDeclaration | null
     extra?: Record<string, unknown>
   }) {
     this.formatVersion = opts.formatVersion ?? '2.0'
@@ -80,7 +138,46 @@ export class RuntimeDocument {
       : undefined
     this.materialPalette = opts.materialPalette ?? undefined
     this.playback = opts.playback ?? undefined
+    this.multiblock = opts.multiblock ?? null
     this._extra = { ...(opts.extra ?? {}) }
+  }
+
+  /** 是否为「多方块为主」文档（形态枚举量判别，与「帧为主」互斥）。 */
+  get isMultiblock(): boolean {
+    return this.multiblock !== null
+  }
+
+  /** 通道清单（空 = 仅总 Tier；T2.4 每通道一条滑杆，`kind === 'hatch'` 的 `slider === false`）。 */
+  get multiblockChannels(): MultiblockChannelDecl[] {
+    return this.multiblock?.decl.channels ?? []
+  }
+
+  /** 运行态清单与呈现名（T2.4 运行态切换）。 */
+  get multiblockRunstates(): MultiblockRunstateDecl[] {
+    return this.multiblock?.decl.runstates ?? []
+  }
+
+  /** 变体清单（声明值集合；帧是变体的存储原语）。 */
+  get multiblockVariants(): MultiblockVariantDecl[] {
+    return this.multiblock?.decl.variants ?? []
+  }
+
+  /** 差异规则表（按引用复用；帧只存 id）。 */
+  get multiblockRules(): MultiblockRuleDecl[] {
+    return this.multiblock?.decl.rules ?? []
+  }
+
+  /** 帧声明（`variant` / `stepIndex` / `rules`）；帧为主文档为空数组。 */
+  get multiblockFrames(): MultiblockFrameDecl[] {
+    return this.multiblock?.frames ?? []
+  }
+
+  /**
+   * **契约内层 JSON 原文**（`multiblock` + `blockPalette` + `frames` + …）——
+   * T2.2 装配器的输入（冻结接缝：内层 JSON 对象 + `{values, runstate}`）。帧为主文档为 `null`。
+   */
+  get multiblockSource(): Record<string, unknown> | null {
+    return this.multiblock?.raw ?? null
   }
 
   get frameCount(): number {
@@ -106,11 +203,11 @@ export class RuntimeDocument {
   /** 序列化为 V2Plain JSON（兼容 render pipeline：展开首帧 structure 字段到顶层） */
   serialize(): Record<string, unknown> {
     const rawFrames = this.frames.map(f => {
-      const frame: Record<string, unknown> = {
-        index: f.index,
-        label: f.label,
-        durationMs: f.durationMs,
-      }
+      // 多方块帧：以原样帧对象为底（variant/runstate/stepIndex/rules/参考 cellGrid 全部保留）
+      const frame: Record<string, unknown> = f.multiblock ? { ...f.multiblock.raw } : {}
+      frame.index = f.index
+      frame.label = f.label
+      frame.durationMs = f.durationMs
       if (f.grid) {
         const { cellGrid, blockPalette } = this._gridToV2(f.grid)
         frame.structure = {
@@ -130,6 +227,16 @@ export class RuntimeDocument {
       frames: rawFrames,
       annotations: [...this.annotations],
       labels: [...this.labels],
+    }
+    // 多方块文档：`_extra` 已带回 multiblock/multiblockCount/blockPalette（原样），
+    // 此处只补「构造期未经过反序列化」时缺失的节点，使形态自描述（documentShape 判别可复原）。
+    if (this.multiblock) {
+      if (!('documentShape' in out)) out.documentShape = MULTIBLOCK_DOCUMENT_SHAPE
+      if (!('multiblock' in out)) out.multiblock = this.multiblock.decl.raw
+      if (!('multiblockCount' in out)) out.multiblockCount = this.multiblock.multiblockCount
+      if (!('blockPalette' in out) && this.multiblock.blockPalette.length > 0) {
+        out.blockPalette = this.multiblock.blockPalette
+      }
     }
     // 展开首帧 structure 到顶层，兼容 render pipeline（loadStructureData 直接读顶层字段）
     if (rawFrames.length > 0) {
@@ -155,7 +262,8 @@ export class RuntimeDocument {
       formatVersion: this.formatVersion,
       id: this.id,
       frames: this.frames.map(f => {
-        if (!f.grid) return new RuntimeFrame(f.index, f.label, null, f.durationMs)
+        const frameMultiblock = f.multiblock ? (structuredClone(f.multiblock) as MultiblockFrameDecl) : null
+        if (!f.grid) return new RuntimeFrame(f.index, f.label, null, f.durationMs, frameMultiblock)
         // Deep clone grid
         const cells: (SlotBlock | null)[][][] = []
         for (let z = 0; z < f.grid.depth; z++) {
@@ -176,6 +284,7 @@ export class RuntimeDocument {
           f.label,
           new Grid(f.grid.width, f.grid.height, f.grid.depth, cells, paletteCache),
           f.durationMs,
+          frameMultiblock,
         )
       }),
       meta: { ...this.meta },
@@ -186,13 +295,22 @@ export class RuntimeDocument {
       cellTooltipGrid: this.cellTooltipGrid ? this.cellTooltipGrid.map(s => s ? s.map(r => r ? [...r] : []) : []) : undefined,
       materialPalette: this.materialPalette ? [...this.materialPalette] : undefined,
       playback: this.playback ? { ...this.playback } : undefined,
+      multiblock: this.multiblock ? (structuredClone(this.multiblock) as MultiblockDeclaration) : null,
       extra: { ...this._extra },
     })
   }
 
 
-  /** 从 V2Plain JSON 创建（反序列化入口） */
-  static fromV2Plain(raw: Record<string, unknown>): RuntimeDocument | null {
+  /**
+   * 从 V2Plain JSON 创建（反序列化入口）。
+   *
+   * `opts.multiblockSource` = **信封内层 body 原文**（多方块文档；缺省用 `raw` 自身，即裸体形态）。
+   * 仅当 `raw.documentShape === "multiblock"` 时才构建多方块声明，其它文档走原路径（行为不变）。
+   */
+  static fromV2Plain(
+    raw: Record<string, unknown>,
+    opts?: { multiblockSource?: Record<string, unknown> },
+  ): RuntimeDocument | null {
     const framesRaw = raw.frames
     if (!Array.isArray(framesRaw)) return null
 
@@ -212,6 +330,14 @@ export class RuntimeDocument {
     const annotations = (raw.annotations as unknown[]) ?? []
     const labels = (raw.labels as unknown[]) ?? []
 
+    // 多方块文档：形态枚举量在信封 meta（真实产物）或根级（裸体）；不满足者走既有路径。
+    const multiblock = raw.documentShape === MULTIBLOCK_DOCUMENT_SHAPE
+      ? parseMultiblockDeclaration(opts?.multiblockSource ?? raw)
+      : null
+    // 帧声明按位置对应（内层 body 的 frames 与合并后的 frames 同序、同源）
+    const frameDeclByIndex = new Map<number, MultiblockFrameDecl>()
+    for (const fd of multiblock?.frames ?? []) frameDeclByIndex.set(fd.index, fd)
+
     const frames: RuntimeFrame[] = []
     for (let i = 0; i < framesRaw.length; i++) {
       const f = framesRaw[i] as Record<string, unknown> | undefined
@@ -227,7 +353,9 @@ export class RuntimeDocument {
           st.blockPalette as Record<string, unknown>[],
         )
       }
-      frames.push(new RuntimeFrame(index, label, grid, durationMs))
+      // 多方块帧：解析期**不建 Grid**（装配产物由 T2.2 按当前取值生成）
+      const frameMultiblock = multiblock ? (frameDeclByIndex.get(index) ?? multiblock.frames[i] ?? null) : null
+      frames.push(new RuntimeFrame(index, label, grid, durationMs, frameMultiblock))
     }
 
     return new RuntimeDocument({
@@ -242,6 +370,7 @@ export class RuntimeDocument {
       cellTooltipGrid: raw.cellTooltipGrid as number[][][] | undefined,
       materialPalette: raw.materialPalette as unknown[] | undefined,
       playback: raw.playback as Record<string, unknown> | undefined,
+      multiblock,
       extra,
     })
   }

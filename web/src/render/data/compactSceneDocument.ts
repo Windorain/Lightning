@@ -6,6 +6,25 @@ import { omitEnvelopeMetaKeys } from '@/render/data/compactMetaKeys'
 import type { EnvelopeDocument, DocumentFormat } from '@/render/schema/types'
 import { COMPACT_PAYLOAD_ENCODING } from '@/render/schema/types'
 
+/**
+ * fixture 专用载荷编码：`base64(未压缩 JSON)`。
+ *
+ * 与生产形态 `gzip+base64` **共用同一读取路径**（多方块格式契约 §8.3）：
+ * `payload` 解 base64 得字节 → 先当 UTF-8 JSON 文本解析 → 失败再 gunzip → 解析。
+ * 该取值只影响人工阅读/diff 的便利性，不影响任何解析分支 —— 分派由「先 JSON 后 gunzip」完成。
+ */
+export const PLAIN_BASE64_PAYLOAD_ENCODING = 'base64(json)' as const
+
+/** 已支持的载荷编码（契约 §8.3 的两个取值）。 */
+export const SUPPORTED_PAYLOAD_ENCODINGS = [COMPACT_PAYLOAD_ENCODING, PLAIN_BASE64_PAYLOAD_ENCODING] as const
+
+/** 只要带 payload/meta 的信封形对象即可读取（`EnvelopeDocument` 的 `payloadEncoding` 类型只认生产取值）。 */
+export interface EnvelopePayloadDocument {
+  payloadEncoding?: unknown
+  payload: string
+  meta: Record<string, unknown>
+}
+
 function base64ToUint8Array(b64: string): Uint8Array {
   const bin = atob(b64)
   const out = new Uint8Array(bin.length)
@@ -28,7 +47,7 @@ async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
 /** `canonicalizeEnvelopeInPlace` 会把根上 `documentFormat` 折入 `meta`，此时仍须识别为 Envelope 信封。 */
 function isEnvelopeStructural(doc: Record<string, unknown>): boolean {
   return (
-    doc.payloadEncoding === COMPACT_PAYLOAD_ENCODING &&
+    (SUPPORTED_PAYLOAD_ENCODINGS as readonly unknown[]).includes(doc.payloadEncoding) &&
     typeof doc.payload === 'string' &&
     doc.payload.length > 0 &&
     doc.meta !== null &&
@@ -83,6 +102,84 @@ export function sceneStableStringIdFromDocument(document: unknown): string {
 }
 
 /**
+ * Envelope 载荷解码（契约 §8.3 的**同一把钥匙**）：base64 → 字节 → 先当 UTF-8 JSON 文本解析 → 失败再 gunzip。
+ *
+ * 生产形态 `base64(gzip(json))` 与 fixture 形态 `base64(json)` 都由此读取；
+ * 未知 `payloadEncoding` 仍显式报错（既有行为不变）。
+ */
+export async function decodeEnvelopePayload(document: EnvelopePayloadDocument): Promise<Record<string, unknown>> {
+  if (!(SUPPORTED_PAYLOAD_ENCODINGS as readonly unknown[]).includes(document.payloadEncoding)) {
+    throw new Error(
+      `不支持的 payloadEncoding：期望 "${COMPACT_PAYLOAD_ENCODING}" 或 "${PLAIN_BASE64_PAYLOAD_ENCODING}"，` +
+        `实际为 ${String(document.payloadEncoding)}`,
+    )
+  }
+  if (typeof document.payload !== 'string' || document.payload.length === 0) {
+    throw new Error('Envelope 文档缺少非空 payload 字符串')
+  }
+  const bytes = base64ToUint8Array(document.payload)
+
+  const direct = tryParseUtf8Json(bytes)
+  const inner = direct ?? (await parseGunzippedPayload(bytes))
+  if (inner === null || typeof inner !== 'object' || Array.isArray(inner)) {
+    throw new Error('Envelope payload 解压后须为 JSON 对象')
+  }
+  return inner as Record<string, unknown>
+}
+
+/**
+ * Envelope → `{ inner, plain }`：
+ *  - `inner`  = payload 解出的**内层 body**（多方块文档要把它原样交给装配器）；
+ *  - `plain`  = `inner` 剔除信封元数据键后与 `meta` 合并（**meta 权威**）的 Plain 形态。
+ *
+ * 非 Envelope 输入抛错（调用方先用 `isEnvelopeDocument` 判别）。
+ */
+export async function readEnvelopeLayers(
+  document: EnvelopePayloadDocument,
+): Promise<{ inner: Record<string, unknown>; plain: Record<string, unknown> }> {
+  const { meta } = document
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) {
+    throw new Error('Envelope 文档缺少 meta 对象')
+  }
+  const inner = await decodeEnvelopePayload(document)
+  const innerStripped = omitEnvelopeMetaKeys(inner)
+  // 信封根上的 documentFormat: Envelope 会经 canonicalize 折入 meta；合并后须是 Plain 形，避免「下载 Plain」仍带 Envelope。
+  const plain = { ...innerStripped, ...(meta as Record<string, unknown>), documentFormat: 'Plain' }
+  return { inner, plain }
+}
+
+function tryParseUtf8Json(bytes: Uint8Array): unknown | null {
+  let text: string
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return null
+  }
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return null
+  }
+}
+
+async function parseGunzippedPayload(bytes: Uint8Array): Promise<unknown> {
+  let decoded: Uint8Array
+  try {
+    decoded = await gunzip(bytes)
+  } catch (e) {
+    throw new Error(
+      `Envelope payload 既不是 JSON 文本，也无法 gunzip 解压：${e instanceof Error ? e.message : String(e)}`,
+    )
+  }
+  const text = new TextDecoder('utf-8').decode(decoded)
+  try {
+    return JSON.parse(text) as unknown
+  } catch (e) {
+    throw new Error(`Envelope payload 非合法 JSON：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+/**
  * Envelope：解压 payload，去掉 payload 根上的元数据键，再与 `meta` 合并（**meta 权威**）。
  * Plain：原样返回。
  */
@@ -90,33 +187,8 @@ export async function normalizeEnvelopeToPlain(document: unknown): Promise<unkno
   if (!isEnvelopeDocument(document)) {
     return document
   }
-  if (document.payloadEncoding !== COMPACT_PAYLOAD_ENCODING) {
-    throw new Error(
-      `不支持的 payloadEncoding：期望 "${COMPACT_PAYLOAD_ENCODING}"，实际为 ${String(document.payloadEncoding)}`,
-    )
-  }
-  if (typeof document.payload !== 'string' || document.payload.length === 0) {
-    throw new Error('Envelope 文档缺少非空 payload 字符串')
-  }
-  const { meta } = document
-  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) {
-    throw new Error('Envelope 文档缺少 meta 对象')
-  }
-  const bytes = base64ToUint8Array(document.payload)
-  const decoded = await gunzip(bytes)
-  const text = new TextDecoder('utf-8').decode(decoded)
-  let inner: unknown
-  try {
-    inner = JSON.parse(text) as unknown
-  } catch (e) {
-    throw new Error(`Envelope payload 非合法 JSON：${e instanceof Error ? e.message : String(e)}`)
-  }
-  if (inner === null || typeof inner !== 'object' || Array.isArray(inner)) {
-    throw new Error('Envelope payload 解压后须为 JSON 对象')
-  }
-  const innerStripped = omitEnvelopeMetaKeys(inner as Record<string, unknown>)
-  // 信封根上的 documentFormat: Envelope 会经 canonicalize 折入 meta；合并后须是 Plain 形，避免「下载 Plain」仍带 Envelope。
-  return { ...innerStripped, ...(meta as Record<string, unknown>), documentFormat: 'Plain' }
+  const { plain } = await readEnvelopeLayers(document)
+  return plain
 }
 
 // v2 version helpers
