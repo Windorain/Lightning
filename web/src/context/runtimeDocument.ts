@@ -14,6 +14,7 @@
  */
 import { structureRowToWorldY } from '@/pure/vec'
 import { blockKey } from '@/pure/string'
+import { PARTS_GRID_NONE, partListSignature, type PartList, type PartRecord } from '@/pure/partTypes'
 import { Grid, type GridPos, type SlotBlock, type PaletteEntryMeta } from './grid'
 import {
   MULTIBLOCK_DOCUMENT_SHAPE,
@@ -27,6 +28,8 @@ import {
 } from './parsers/multiblockDocument'
 
 export { Grid, GridPos, SlotBlock, PaletteEntryMeta }
+export { PARTS_GRID_NONE, partListSignature }
+export type { PartBox, PartItem, PartList, PartRecord, PartSource } from '@/pure/partTypes'
 
 export type {
   MultiblockDeclaration,
@@ -200,6 +203,14 @@ export class RuntimeDocument {
     }
   }
 
+  /**
+   * 按格取部件列表（契约 §2 cellPartsGrid/partLists 的运行时查询；无部件/无网格 ⇒ null）。
+   * 盒为导出时快照，web 端任何编辑不重算（契约 §12）。
+   */
+  partsAt(frameIndex: number, pos: GridPos): readonly PartRecord[] | null {
+    return this.frames[frameIndex]?.grid?.partsAt(pos) ?? null
+  }
+
   /** 序列化为 V2Plain JSON（兼容 render pipeline：展开首帧 structure 字段到顶层） */
   serialize(): Record<string, unknown> {
     const rawFrames = this.frames.map(f => {
@@ -209,11 +220,13 @@ export class RuntimeDocument {
       frame.label = f.label
       frame.durationMs = f.durationMs
       if (f.grid) {
-        const { cellGrid, blockPalette } = this._gridToV2(f.grid)
+        const { cellGrid, blockPalette, cellPartsGrid, partLists } = this._gridToV2(f.grid)
         frame.structure = {
           geometryPhase: 'baked' as const,
           cellGrid,
           blockPalette,
+          // 契约 §2：仅当确有部件数据时才写出（缺省 ⇒ 与无部件行为完全一致）
+          ...(cellPartsGrid ? { cellPartsGrid, partLists } : {}),
         }
       }
       return frame
@@ -279,10 +292,14 @@ export class RuntimeDocument {
           cells.push(slice)
         }
         const paletteCache = new Map(f.grid.getPaletteCache())
+        const cellParts = new Map<string, PartRecord[]>()
+        f.grid.forEachParts((pos, parts) => {
+          cellParts.set(`${pos.x},${pos.y},${pos.z}`, structuredClone(parts) as PartRecord[])
+        })
         return new RuntimeFrame(
           f.index,
           f.label,
-          new Grid(f.grid.width, f.grid.height, f.grid.depth, cells, paletteCache),
+          new Grid(f.grid.width, f.grid.height, f.grid.depth, cells, paletteCache, cellParts),
           f.durationMs,
           frameMultiblock,
         )
@@ -320,6 +337,9 @@ export class RuntimeDocument {
       'schemaVersion', 'label', 'gtnhVersion', 'author',
       'description', 'modSource', 'globalConfig',
       'cellTooltipGrid', 'tooltipPalette', 'materialPalette',
+      // 契约 §2：根级 cellPartsGrid/partLists 是 serialize() 的首帧展开副本（可由 frames 派生），
+      // 不进 _extra —— 否则编辑后再序列化根级会残留过期快照（派生数据不收编进兜底透传）。
+      'cellPartsGrid', 'partLists',
     ])
     const extra: Record<string, unknown> = {}
     for (const key of Object.keys(raw)) {
@@ -351,6 +371,9 @@ export class RuntimeDocument {
         grid = RuntimeDocument._fromV2CellGrid(
           st.cellGrid as number[][][],
           st.blockPalette as Record<string, unknown>[],
+          // 契约 §2：cellPartsGrid/partLists 可选；缺省 ⇒ 无部件（行为与旧文件一致）
+          st.cellPartsGrid as number[][][] | undefined,
+          st.partLists as PartList[] | undefined,
         )
       }
       // 多方块帧：解析期**不建 Grid**（装配产物由 T2.2 按当前取值生成）
@@ -388,7 +411,12 @@ export class RuntimeDocument {
 
   // ---- 内部序列化辅助 ----
 
-  private _gridToV2(grid: Grid): { cellGrid: number[][][]; blockPalette: Record<string, unknown>[] } {
+  private _gridToV2(grid: Grid): {
+    cellGrid: number[][][]
+    blockPalette: Record<string, unknown>[]
+    cellPartsGrid?: number[][][]
+    partLists?: PartList[]
+  } {
     const paletteCache = grid.getPaletteCache()
     // name:meta → palette index (AIR_PALETTE_INDEX = 0 = air)
     const indexMap = new Map<string, number>()
@@ -396,11 +424,19 @@ export class RuntimeDocument {
     const blockPalette: Record<string, unknown>[] = [{ registryId: 'air', meta: AIR_PALETTE_INDEX }]
     const cellGrid: number[][][] = []
 
+    // 部件池（契约 §2.1：同内容 partList 内容签名去重、跨格共享下标）
+    const wantParts = grid.hasAnyParts()
+    const partLists: PartList[] = []
+    const partListIndexBySignature = new Map<string, number>()
+    const cellPartsGrid: number[][][] = []
+
     for (let z = 0; z < grid.depth; z++) {
       const slice: number[][] = []
+      const partsSlice: number[][] = []
       for (let y = 0; y < grid.height; y++) {
         // cellGrid row = height - 1 - y (Y-up → cellGrid row, 0=top)
         const row: number[] = []
+        const partsRow: number[] = []
         for (let x = 0; x < grid.width; x++) {
           const block = grid.at({ x, y, z })
           if (block) {
@@ -416,27 +452,48 @@ export class RuntimeDocument {
                     registryId: 'minecraft:' + block.name,
                     meta: block.meta,
                     renderMode: 'BlockModel',
-                    parts: [],
                   })
             }
             row.push(idx)
           } else {
             row.push(AIR_PALETTE_INDEX)
           }
+
+          // 部件下标（与 cellGrid 同行列对齐；无部件 ⇒ PARTS_GRID_NONE）
+          if (wantParts) {
+            const parts = block ? grid.partsAt({ x, y, z }) : null
+            if (parts && parts.length > 0) {
+              const sig = partListSignature(parts)
+              let pIdx = partListIndexBySignature.get(sig)
+              if (pIdx === undefined) {
+                pIdx = partLists.length
+                partListIndexBySignature.set(sig, pIdx)
+                partLists.push(structuredClone(parts) as PartList)
+              }
+              partsRow.push(pIdx)
+            } else {
+              partsRow.push(PARTS_GRID_NONE)
+            }
+          }
         }
         // cellGrid 的 row 顺序：row 0 = 顶部 = height-1-y
         slice.unshift(row)
+        if (wantParts) partsSlice.unshift(partsRow)
       }
       cellGrid.push(slice)
+      if (wantParts) cellPartsGrid.push(partsSlice)
     }
 
-    return { cellGrid, blockPalette }
+    if (!wantParts) return { cellGrid, blockPalette }
+    return { cellGrid, blockPalette, cellPartsGrid, partLists }
   }
 
   /** @internal */
   static _fromV2CellGrid(
     cellGrid: number[][][],
     rawPalette: Record<string, unknown>[],
+    cellPartsGrid?: number[][][],
+    partLists?: PartList[],
   ): Grid {
     // 构建 palette cache（key = palette index，保留原始映射避免同名不同态被覆盖）
     const paletteCache = new Map<string, PaletteEntryMeta>()
@@ -481,6 +538,28 @@ export class RuntimeDocument {
       cells.push(slice)
     }
 
-    return new Grid(width, height, depth, cells, paletteCache)
+    const grid = new Grid(width, height, depth, cells, paletteCache)
+
+    // 契约 §2：cellPartsGrid 与 cellGrid 同形、同下标 [z][row][column]；
+    // 值 = partLists 下标，PARTS_GRID_NONE(-1) = 无部件。部件挂到宿主格（宿主为空气时容错跳过）。
+    if (Array.isArray(cellPartsGrid) && Array.isArray(partLists) && partLists.length > 0) {
+      for (let z = 0; z < depth; z++) {
+        const partsSlice = cellPartsGrid[z]
+        if (!Array.isArray(partsSlice)) continue
+        for (let row = 0; row < height; row++) {
+          const partsRow = partsSlice[row]
+          if (!Array.isArray(partsRow)) continue
+          const y = structureRowToWorldY(row, height)
+          for (let x = 0; x < width; x++) {
+            const pIdx = partsRow[x]
+            if (typeof pIdx !== 'number' || pIdx <= PARTS_GRID_NONE || pIdx >= partLists.length) continue
+            if (!grid.has({ x, y, z })) continue
+            grid.setParts({ x, y, z }, partLists[pIdx]!)
+          }
+        }
+      }
+    }
+
+    return grid
   }
 }

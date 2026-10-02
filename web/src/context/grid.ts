@@ -9,9 +9,11 @@
  */
 import { blockKey } from '@/pure/string'
 import type { GridPos, SlotBlock, PaletteEntryMeta } from '@/pure/gridTypes'
+import type { PartRecord } from '@/pure/partTypes'
 
 // Re-export for backward compatibility
 export type { GridPos, SlotBlock, PaletteEntryMeta }
+export type { PartRecord }
 
 // ---------------------------------------------------------------------------
 // Grid
@@ -26,6 +28,12 @@ export class Grid {
   /** 反序列化 round-trip 用：name:meta → 完整 palette 元数据 */
   private _paletteCache: Map<string, PaletteEntryMeta>
 
+  /**
+   * 格级部件数据（契约 §2 cellPartsGrid/partLists 的运行时形态）：`"x,y,z"` → PartRecord[]。
+   * 盒是导出时快照，web 端编辑不重算（契约 §12）；部件随宿主走（见 setBlock/removeBlock/moveBlock）。
+   */
+  private _cellParts: Map<string, PartRecord[]>
+
   get width(): number { return this._width }
   get height(): number { return this._height }
   get depth(): number { return this._depth }
@@ -37,12 +45,14 @@ export class Grid {
     depth: number,
     cells?: (SlotBlock | null)[][][],
     paletteCache?: Map<string, PaletteEntryMeta>,
+    cellParts?: Map<string, PartRecord[]>,
   ) {
     this._width = width
     this._height = height
     this._depth = depth
     this._cells = cells ?? Grid._emptyCells(width, height, depth)
     this._paletteCache = paletteCache ?? new Map()
+    this._cellParts = cellParts ?? new Map()
   }
 
   private static _emptyCells(w: number, h: number, d: number): (null)[][][] {
@@ -87,6 +97,46 @@ export class Grid {
     const result: Array<{ pos: GridPos; block: SlotBlock }> = []
     this.forEach((pos, block) => result.push({ pos, block }))
     return result
+  }
+
+  // ---- 部件（非满方块，契约 §2/§12）----
+
+  private static _partsKey(pos: GridPos): string {
+    return `${pos.x},${pos.y},${pos.z}`
+  }
+
+  /** 按格取部件列表（只读视图；无部件 ⇒ null）。盒为导出时快照，可能越出 [0,1]³（契约 §6.3）。 */
+  partsAt(pos: GridPos): readonly PartRecord[] | null {
+    if (!this._inBounds(pos)) return null
+    return this._cellParts.get(Grid._partsKey(pos)) ?? null
+  }
+
+  /** 是否存在任何格级部件数据（序列化时决定是否写出 cellPartsGrid/partLists）。 */
+  hasAnyParts(): boolean {
+    return this._cellParts.size > 0
+  }
+
+  /** 遍历所有带部件的格（序列化/统计用；回调收到的是内部列表，勿改）。 */
+  forEachParts(fn: (pos: GridPos, parts: readonly PartRecord[]) => void): void {
+    for (const [key, parts] of this._cellParts) {
+      const [x, y, z] = key.split(',').map(Number)
+      fn({ x: x!, y: y!, z: z! }, parts)
+    }
+  }
+
+  /**
+   * 设置/清除某格部件列表（深拷贝存入；`null` 清除）。
+   * 仅供解析链与 RuntimeDocument 序列化层调用——编辑路径只经 Grid API（CLAUDE.md 纪律）。
+   */
+  setParts(pos: GridPos, parts: readonly PartRecord[] | null): boolean {
+    if (!this._inBounds(pos)) return false
+    const key = Grid._partsKey(pos)
+    if (parts === null || parts.length === 0) {
+      this._cellParts.delete(key)
+    } else {
+      this._cellParts.set(key, structuredClone(parts) as PartRecord[])
+    }
+    return true
   }
 
   /** 将 GridPos (Y-up) 转换为世界空间体素中心坐标（网格居中于原点，方块中心偏移 +0.5） */
@@ -149,13 +199,15 @@ export class Grid {
     this._expandToFit(pos)
     this._cells[pos.z]![pos.y]![pos.x] = { ...block }
 
+    // 编辑语义（契约 §12）：覆盖宿主 ⇒ 旧宿主的部件随之失效（新建/手绘方块无部件数据）
+    this._cellParts.delete(Grid._partsKey(pos))
+
     // 确保 palette cache 有此条目（序列化用）
     const key = blockKey(block)
     if (!this._paletteCache.has(key)) {
       this._paletteCache.set(key, {
         registryId: 'minecraft:' + block.name,
         renderMode: 'BlockModel',
-        parts: [],
       })
     }
     return true
@@ -164,6 +216,8 @@ export class Grid {
   removeBlock(pos: GridPos): boolean {
     if (!this._inBounds(pos)) return false
     this._cells[pos.z]![pos.y]![pos.x] = null
+    // 编辑语义（契约 §12）：删除宿主方块 ⇒ 其部件随之删除
+    this._cellParts.delete(Grid._partsKey(pos))
     this._trimTrailingEmpty()
     return true
   }
@@ -180,6 +234,11 @@ export class Grid {
     this._expandToFit(to)
     this._cells[to.z]![to.y]![to.x] = block
     this._cells[from.z]![from.y]![from.x] = null
+    // 编辑语义（契约 §12）：移动方块 ⇒ 部件随宿主移动（盒可能因邻居变化而过期，如实呈现）
+    const fromPartsKey = Grid._partsKey(from)
+    const movedParts = this._cellParts.get(fromPartsKey)
+    this._cellParts.delete(fromPartsKey)
+    if (movedParts) this._cellParts.set(Grid._partsKey(to), movedParts)
     this._trimTrailingEmpty()
     return true
   }

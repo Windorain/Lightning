@@ -40,6 +40,8 @@ export interface V2Label {
 export interface V2StatsEntry {
   block_state_id: string
   label_override?: string; icon_source?: string
+  /** 部件视图的条目键 = 部件 typeKey（契约 §9/§10.2；与 block_state_id 互斥使用） */
+  partTypeKey?: string
 }
 
 export interface V2StatsGroup { label: string; entries: V2StatsEntry[] }
@@ -47,6 +49,8 @@ export interface V2StatsGroup { label: string; entries: V2StatsEntry[] }
 export interface V2StatsTemplate {
   mode: 'auto' | 'custom'
   groups?: V2StatsGroup[]; show_others?: boolean
+  /** camelCase 落盘形态（契约 §10.2：JSON 字段名按 camelCase，与 proto show_others 对应） */
+  showOthers?: boolean
 }
 
 // ============================================================
@@ -86,4 +90,6 @@ export interface V2PlainSceneDocument {
   meta: V2SceneMeta
   annotations?: V2AnnotationBox[]
   labels?: V2Label[]
+  /** 文档级统计默认值（契约 §9：默认 = 部件物品清单视图；三级配置的"文档默认"层） */
+  statsTemplate?: V2StatsTemplate
 }

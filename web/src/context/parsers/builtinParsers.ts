@@ -107,6 +107,10 @@ export const StructureDataParser: DocumentParser = {
       cellGrid: baked.cellGrid,
       blockPalette: baked.blockPalette,
     }
+    // 契约 §2：baked 结构自带的部件字段随 structure 透传（旧文件无此键 ⇒ 行为不变）
+    for (const key of ['cellPartsGrid', 'partLists'] as const) {
+      if (baked[key] !== undefined) structureFields[key] = baked[key]
+    }
 
     const v2: Record<string, unknown> = {
       format_version: '2.0',

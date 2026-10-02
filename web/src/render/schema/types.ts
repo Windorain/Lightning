@@ -11,6 +11,8 @@ import type {
   ResourceLocator,
 } from '@/pure/materialTypes'
 
+import type { PartList } from '@/pure/partTypes'
+
 export type {
   MaterialBlendMode,
   MaterialEntry,
@@ -19,6 +21,19 @@ export type {
   MaterialRegistryData,
   ResourceLocator,
 }
+
+// ---- 部件（非满方块）数据模型：纯类型定义见 pure/partTypes（契约 docs/plan/format-parts-contract.md §3） ----
+export type {
+  PartBox,
+  PartBoxKind,
+  PartBoxProvenance,
+  PartFamily,
+  PartItem,
+  PartList,
+  PartRecord,
+  PartSource,
+} from '@/pure/partTypes'
+export { PARTS_GRID_NONE, partListSignature } from '@/pure/partTypes'
 
 export interface BlockRef {
   pos: { x: number; y: number; z: number }
@@ -111,6 +126,11 @@ export interface StructureDataScan {
  */
 export const TOOLTIP_GRID_NONE = -1
 
+/**
+ * 与 `cellGrid` 同下标 `cellGrid[zSlice][row][column]` 时，`cellPartsGrid` 也按 `[zSlice][row][column]` 对齐。
+ * 值为同结构 `partLists` 池的下标；`PARTS_GRID_NONE` 表示该格无部件（契约 §2）。
+ */
+
 /** 可渲染终态（palette + cellGrid） */
 export interface StructureDataBaked {
   geometryPhase: 'baked'
@@ -137,6 +157,16 @@ export interface StructureDataBaked {
    * 与 `cellGrid` 同形、同下标。单文件文档时，配合同对象上的 `tooltipPalette` 或外裹 World 根上的 `tooltipPalette`。
    */
   cellTooltipGrid?: number[][][]
+  /**
+   * 部件格级索引（契约 §2）：与 `cellGrid` 同形、同下标 `[zSlice][row][column]`；
+   * 值为 `partLists` 下标，`PARTS_GRID_NONE`(-1) 表示该格无部件。缺省或全 -1 ⇒ 与无部件行为一致。
+   */
+  cellPartsGrid?: number[][][]
+  /**
+   * 部件列表池（契约 §2/§3）：`cellPartsGrid` 的值指向此数组；
+   * 同内容列表跨格共享一份（§2.1 内容签名去重）。
+   */
+  partLists?: PartList[]
   /**
    * 单文件 baked 根上的 ToolTip 文案池；`World` 文档时见根级 `World.tooltipPalette`（帧内 `structure` 不重复此字段亦可）。
    */
