@@ -1,5 +1,19 @@
 /**
  * 方块 id → 物品栏精灵（Canvas / data URL）集中缓存；单 WebGLRenderer 串行烘焙。
+ *
+ * ── P2.4 部件物品图标通道（留白 #7 拍板登记，见 BlockStatsSidebar.vue 文件头）──
+ *
+ * 统计栏部件行的图标键 = **部件物品身份键**（`registry:damage[#nbt]`，契约 §5），
+ * 与宿主方块键（`registryId` / `registryId@meta`）不撞名（损伤值段用 `:`、宿主 meta 段用 `@`），
+ * 两族键共用同一张缓存表。部件物品图标按以下**键控通道 + 回退链**解析：
+ *  1. **嵌入纹理通道**：导出时嵌入的部件物品图标纹理（P1.7/P1.8 产物），
+ *     经 `setPartIconTextureSource` 以 `物品身份键 → base64 PNG` 解析器接入；
+ *  2. **宿主调色板回退**：物品键 → 宿主方块键候选（`partItemKeyToBlockIdCandidates`，
+ *     如 `minecraft:stone_slab:0` → `minecraft:stone_slab`），复用宿主
+ *     thumbnailPNG 优先 / WebGL 烘焙兜底路径；
+ *  3. **占位**：无纹理且无宿主几何 ⇒ `error` 条目，调用方渲染空槽位（与宿主图标失败同形态）。
+ * 本轮 fixture 无部件图标纹理，通道 1 由 `setPartIconTextureSource` 键控注入验证；
+ * 真实图标数据流由 P1.7/P1.8 产物接入后验证（通道与回退语义在此锁定）。
  */
 
 import * as THREE from 'three'
@@ -7,7 +21,29 @@ import * as THREE from 'three'
 import { findBlockPaletteEntryByBlockId } from '../data/blockRegistryResolve'
 import type { MaterialLibraryApi } from '../materials/simpleMaterialLibrary'
 import { buildSingleBlockPreviewFromBakedPalette } from './blockSlotBaker'
-import type { StructureDefinition } from '../schema/types'
+import type { BlockPaletteEntry, StructureDefinition } from '../schema/types'
+
+/**
+ * 部件物品图标纹理源：物品身份键（`registry:damage[#nbt]`）→ base64 PNG；
+ * 返回 null = 该键无嵌入纹理（走回退链）。数据源 = 导出时嵌入的纹理体系（P1.7/P1.8）。
+ */
+export type PartIconTextureSource = (itemKey: string) => string | null
+
+/**
+ * 部件物品身份键 → 宿主方块调色板键候选（回退通道用，有序，先精确后宽泛）。
+ * `registry:damage[#nbt]`：damage > 0 先试 `registry@damage` 再试 `registry`；
+ * damage = 0 先 `registry`（宿主键省略 `@0`）再 `registry@0`。
+ * 物品与方块注册名不同名（AE2/FMP 物品）时全部落空 ⇒ 调用方走占位。
+ */
+export function partItemKeyToBlockIdCandidates(itemKey: string): string[] {
+  const noNbt = itemKey.split('#', 1)[0]!
+  const idx = noNbt.lastIndexOf(':')
+  if (idx <= 0) return [noNbt]
+  const registry = noNbt.slice(0, idx)
+  const damage = Number(noNbt.slice(idx + 1))
+  if (!Number.isInteger(damage) || damage < 0) return [noNbt]
+  return damage === 0 ? [registry, `${registry}@0`] : [`${registry}@${damage}`, registry]
+}
 
 export type BlockIconCacheStatus = 'idle' | 'pending' | 'ready' | 'error'
 
@@ -68,6 +104,12 @@ export class BlockIconCache {
 
   private disposed = false
 
+  /** 部件物品图标纹理源（通道 1；P1.7/P1.8 产物接入点） */
+  private partIconSource: PartIconTextureSource | null = null
+
+  /** 已登记为"部件物品身份键"的缓存键（bake 分流依据；与宿主键同表不撞名） */
+  private readonly partIconKeys = new Set<string>()
+
   private loadFromBase64PNG(b64: string): Promise<HTMLCanvasElement> {
     return new Promise((resolve, reject) => {
       const img = new Image()
@@ -104,6 +146,32 @@ export class BlockIconCache {
     if (this.revision === key) return
     this.revision = key
     this.clearEntries()
+  }
+
+  /** 构造时注入的结构（统计栏等消费方读取文档根字段 / 回退通道取调色板用） */
+  getStructure(): StructureDefinition | null {
+    return this.structure
+  }
+
+  /**
+   * 接入/更换部件物品图标纹理源（通道 1）。更换后已烘部件条目全部作废重烘，
+   * 宿主条目不受影响。`null` = 无嵌入纹理（纯回退链）。
+   */
+  setPartIconTextureSource(source: PartIconTextureSource | null): void {
+    if (this.partIconSource === source) return
+    this.partIconSource = source
+    const keys = [...this.partIconKeys]
+    for (const key of keys) {
+      const v = this.map.get(key)
+      if (v?.canvas) {
+        v.canvas.width = 0
+        v.canvas.height = 0
+      }
+      this.map.delete(key)
+    }
+    if (this.disposed || keys.length === 0) return
+    this.ensurePartIcons(keys)
+    for (const key of keys) this.notifyBlock(key)
   }
 
   get(blockId: string): BlockIconCachedEntry {
@@ -164,6 +232,25 @@ export class BlockIconCache {
     void this.drainQueue()
   }
 
+  /**
+   * 部件物品图标通道入口：登记物品身份键并排队烘焙（通道/回退链见文件头拍板）。
+   * 与 `ensure` 同表缓存；键一旦被登记为部件键，后续 bake 走部件回退链而非宿主查找。
+   */
+  ensurePartIcons(itemKeys: string[]): void {
+    if (this.disposed) return
+    const seen = new Set<string>()
+    for (const key of itemKeys) {
+      if (seen.has(key)) continue
+      seen.add(key)
+      this.partIconKeys.add(key)
+      const row = this.map.get(key)
+      if (row?.status === 'ready' || row?.status === 'pending') continue
+      this.map.set(key, { status: 'pending' })
+      this.pendingQueue.push(key)
+    }
+    void this.drainQueue()
+  }
+
   private async drainQueue(): Promise<void> {
     if (this.drainRunning || this.disposed) return
     this.drainRunning = true
@@ -197,6 +284,7 @@ export class BlockIconCache {
 
   private async bakeOne(blockId: string): Promise<void> {
     if (this.disposed) return
+    if (this.partIconKeys.has(blockId)) return this.bakePartIcon(blockId)
     const paletteEntry = this.structure ? findBlockPaletteEntryByBlockId(this.structure, blockId) : undefined
 
     if (!paletteEntry) {
@@ -208,13 +296,69 @@ export class BlockIconCache {
       return
     }
 
-    // 优先使用 Java 端 renderBlockAsItem 预渲染的缩略图
+    try {
+      const canvas = await this.bakePaletteEntryCanvas(paletteEntry)
+      this.map.set(blockId, { status: 'ready', canvas })
+      this.notifyBlock(blockId)
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e))
+      this.map.set(blockId, { status: 'error', error: err })
+      this.notifyBlock(blockId)
+    }
+  }
+
+  /**
+   * 部件物品图标烘焙（键控通道 + 回退链，见文件头拍板）：
+   * 嵌入纹理（通道 1）→ 宿主调色板回退（通道 2，thumbnailPNG/WebGL）→ 占位（通道 3）。
+   */
+  private async bakePartIcon(itemKey: string): Promise<void> {
+    if (this.disposed) return
+
+    // 通道 1：导出时嵌入的部件物品图标纹理
+    const embedded = this.partIconSource?.(itemKey) ?? null
+    if (embedded) {
+      try {
+        const canvas = await this.loadFromBase64PNG(embedded)
+        this.map.set(itemKey, { status: 'ready', canvas })
+        this.notifyBlock(itemKey)
+        return
+      } catch {
+        // 解码失败：落回退链
+      }
+    }
+
+    // 通道 2：物品键 → 宿主方块键候选，复用宿主 thumbnailPNG 优先 / WebGL 兜底
+    if (this.structure) {
+      for (const candidate of partItemKeyToBlockIdCandidates(itemKey)) {
+        const paletteEntry = findBlockPaletteEntryByBlockId(this.structure, candidate)
+        if (!paletteEntry) continue
+        try {
+          const canvas = await this.bakePaletteEntryCanvas(paletteEntry)
+          this.map.set(itemKey, { status: 'ready', canvas })
+          this.notifyBlock(itemKey)
+          return
+        } catch {
+          // 试下一候选
+        }
+      }
+    }
+
+    // 通道 3：占位（调用方渲染空槽位，与宿主图标失败同形态）
+    this.map.set(itemKey, {
+      status: 'error',
+      error: new Error(`部件物品图标不可用: ${itemKey}`),
+    })
+    this.notifyBlock(itemKey)
+  }
+
+  /**
+   * 宿主调色板条目 → 图标 canvas：Java 端 renderBlockAsItem 预渲染缩略图优先，
+   * 缺失/解码失败时 WebGL 烘焙兜底。
+   */
+  private async bakePaletteEntryCanvas(paletteEntry: BlockPaletteEntry): Promise<HTMLCanvasElement> {
     if (paletteEntry.thumbnailPNG) {
       try {
-        const canvas = await this.loadFromBase64PNG(paletteEntry.thumbnailPNG)
-        this.map.set(blockId, { status: 'ready', canvas })
-        this.notifyBlock(blockId)
-        return
+        return await this.loadFromBase64PNG(paletteEntry.thumbnailPNG)
       } catch {
         // 回退到 WebGL 烘焙
       }
@@ -263,12 +407,7 @@ export class BlockIconCache {
       if (!ctx) throw new Error('2D context unavailable')
       ctx.drawImage(src, 0, 0)
 
-      this.map.set(blockId, { status: 'ready', canvas })
-      this.notifyBlock(blockId)
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e))
-      this.map.set(blockId, { status: 'error', error: err })
-      this.notifyBlock(blockId)
+      return canvas
     } finally {
       disposeMesh?.()
     }
@@ -282,6 +421,7 @@ export class BlockIconCache {
       }
     }
     this.map.clear()
+    this.partIconKeys.clear()
     this.pendingQueue.length = 0
     this.notifyAllSubscribers()
   }
