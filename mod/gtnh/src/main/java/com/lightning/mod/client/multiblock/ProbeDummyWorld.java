@@ -64,6 +64,24 @@ public final class ProbeDummyWorld extends World {
     private final Map<Long, TileEntity> tiles = new HashMap<Long, TileEntity>();
     private int placementCount;
 
+    /** 变更轨迹（诊断用）：最近若干次真正改变世界的 setBlock 的「坐标 + 旧值 → 新值」。 */
+    private final List<String> trace = new ArrayList<String>();
+    private static final int TRACE_LIMIT = 24;
+
+    /** 开始一次新的变更轨迹（清空缓冲）。 */
+    public void beginTrace() {
+        trace.clear();
+    }
+
+    /** 当前轨迹快照。 */
+    public List<String> trace() {
+        return new ArrayList<String>(trace);
+    }
+
+    private void recordChange(String what) {
+        if (trace.size() < TRACE_LIMIT) trace.add(what);
+    }
+
     public ProbeDummyWorld() {
         super(
             new ProbeSaveHandler(),
@@ -104,12 +122,20 @@ public final class ProbeDummyWorld extends World {
     public boolean setBlock(int x, int y, int z, Block block, int meta, int flags) {
         long k = key(x, y, z);
         if (block == null || block == Blocks.air) {
+            // 已经是空气 = 无变更，不能计入 placementCount。
+            // 否则「对空气位重复 setBlock(air)」会被误判成「结构还在长」（T1.2 总 Tier 试探实测撞上：
+            // 6 台机器因此永远解不出总 Tier，因为 GT 的舱口/占位元素会反复把空位清成空气）。
+            if (!blocks.containsKey(k)) {
+                return true;
+            }
             blocks.remove(k);
             blockMetas.remove(k);
             TileEntity removed = tiles.remove(k);
             if (removed != null) {
                 removed.invalidate();
             }
+            placementCount++;
+            recordChange("AIR at (" + x + "," + y + "," + z + ")");
             return true;
         }
         Block prev = blocks.get(k);
@@ -120,6 +146,18 @@ public final class ProbeDummyWorld extends World {
         blocks.put(k, block);
         blockMetas.put(k, Integer.valueOf(meta));
         placementCount++;
+        recordChange(
+            "(" + x
+                + ","
+                + y
+                + ","
+                + z
+                + ") "
+                + (prev == null ? "air" : String.valueOf(Block.blockRegistry.getNameForObject(prev)) + ":" + prevMeta)
+                + " -> "
+                + String.valueOf(Block.blockRegistry.getNameForObject(block))
+                + ":"
+                + meta);
         if (block.hasTileEntity(meta)) {
             TileEntity tile = block.createTileEntity(this, meta);
             if (tile != null) {
@@ -184,6 +222,16 @@ public final class ProbeDummyWorld extends World {
         return placementCount;
     }
 
+    /**
+     * 与 {@link #blocksPlaced()} 同义，语义名对齐「世界发生了变更」这一判据。
+     * <p>
+     * T1.2 的总 Tier 逐级试探用 {@code construct(trigger)} 前后的差值判断「结构是否还在长」，
+     * 与参考实现 {@code ObserverWorld#hasChanged} 等价，但不依赖任何元素内部实现。
+     */
+    public int mutationCount() {
+        return placementCount;
+    }
+
     /** 已放置（非空气）坐标，按 x → y → z 升序，保证跨运行确定序。 */
     public List<int[]> placedPositions() {
         List<int[]> out = new ArrayList<int[]>(blocks.size());
@@ -200,6 +248,55 @@ public final class ProbeDummyWorld extends World {
 
     public int nonAirCount() {
         return blocks.size();
+    }
+
+    /**
+     * 当前方块布局的内容签名（坐标 + 方块 + 元数据，按坐标排序后哈希）。
+     * <p>
+     * T1.2 的总 Tier 试探判据：{@code construct(trigger)} 之后签名不变 → 结构不再长 → 收敛。
+     * <b>为什么不能只看「本次有没有写方块」</b>：GT 的 {@code construct} 每一级都会<b>重新遍历整个结构</b>并把
+     * 每个位置写成当级方块（实测 {@code MTEBrickedBlastFurnace} 每级 4 次写入、
+     * {@code MTEExtremeIndustrialGreenhouse} 每级 130 次写入），写入次数永远非零；只有「布局是否与上一级相同」
+     * 才是收敛判据。更本质地说，「结构还在长」= 存在使用第 k 档与第 (k+1) 档不同方块的符号
+     * （尺寸型通道增加片数、替换型通道的提示列表循环），两种情形都体现在布局签名上。
+     */
+    public String stateSignature() {
+        List<String> entries = new ArrayList<String>(blocks.size());
+        for (Map.Entry<Long, Block> e : blocks.entrySet()) {
+            long k = e.getKey()
+                .longValue();
+            Integer meta = blockMetas.get(e.getKey());
+            entries.add(
+                unpackX(k) + ","
+                    + unpackY(k)
+                    + ","
+                    + unpackZ(k)
+                    + "="
+                    + Block.blockRegistry.getNameForObject(e.getValue())
+                    + ":"
+                    + (meta == null ? 0 : meta.intValue()));
+        }
+        Collections.sort(entries);
+        return sha256(entries);
+    }
+
+    private static String sha256(List<String> entries) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            for (String s : entries) {
+                md.update(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                md.update((byte) '\n');
+            }
+            byte[] d = md.digest();
+            StringBuilder sb = new StringBuilder(d.length * 2);
+            for (byte b : d) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+                sb.append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "sha256-unavailable:" + entries.size();
+        }
     }
 
     public void reset() {

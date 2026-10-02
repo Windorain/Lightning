@@ -16,6 +16,7 @@ import net.minecraft.world.storage.SaveFormatComparator;
 
 import org.apache.logging.log4j.Level;
 
+import com.lightning.mod.client.multiblock.MultiblockScanAutomation;
 import com.lightning.mod.client.multiblock.RunStateProbeAutomation;
 import com.lightning.mod.config.SdeAutomationConfig;
 
@@ -48,6 +49,12 @@ public final class SdeClientAutomationTickHandler {
         }
 
         Minecraft mc = Minecraft.getMinecraft();
+
+        // T1.2 多方块扫描：只有在 mcDataDir 下存在触发文件时接管本 tick（触发文件不存在时零行为变化）。
+        if (MultiblockScanAutomation.isRequested(mc)) {
+            MultiblockScanAutomation.tick(mc);
+            return;
+        }
 
         // T0.3 运行态探针：只有在 mcDataDir 下存在触发文件时接管本 tick（触发文件不存在时零行为变化）。
         if (RunStateProbeAutomation.isRequested(mc)) {
