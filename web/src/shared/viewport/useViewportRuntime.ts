@@ -1,5 +1,6 @@
-import { computed, toRef } from 'vue'
+import { computed, toRef, type Ref } from 'vue'
 import type { Context } from '@/runtime/context'
+import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
 import { DRW } from '@/runtime/drw'
 import type { ViewerPreferences } from '@/viewer/preferences'
@@ -11,15 +12,23 @@ export interface UseViewportRuntimeOptions {
   viewerPrefs: ViewerPreferences
   blockIconCacheOptions?: BlockIconCacheOptions
   initialWorldFrameIndex?: number
+  /**
+   * 可选的**渲染视图文档**覆盖（T2.5 接线）。
+   *
+   * 多方块文档的 `frame.grid` 恒为 `null`（网格是装配产物），故渲染路径必须吃装配结果；
+   * 由 `useMultiblockChannels().renderDoc` 提供（帧为主文档时它就是 `ctx.getDoc()` 本身，行为零变化）。
+   * 省略该参数时 DRW 直接订阅 `ctx.getDoc()`（既有行为）。
+   */
+  docOverride?: Ref<RuntimeDocument | null>
 }
 
 /**
  * 共享视口运行时：ViewportSlot 注册 + DRW 构造（Embed / Workbench 共用）。
  */
 export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
-  const { ctx, regionId, viewerPrefs, blockIconCacheOptions = {}, initialWorldFrameIndex } = opts
+  const { ctx, regionId, viewerPrefs, blockIconCacheOptions = {}, initialWorldFrameIndex, docOverride } = opts
   const vpSlot = ctx.viewports.get(regionId) ?? ctx.viewports.register(regionId)
-  const docRef = computed(() => ctx.getDoc().value)
+  const docRef = docOverride ?? computed(() => ctx.getDoc().value)
 
   const drw = new DRW({
     docRef,

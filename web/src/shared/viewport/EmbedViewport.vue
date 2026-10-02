@@ -14,6 +14,8 @@ import { hostKey } from '@/runtime/host'
 import type { Host } from '@/runtime/host'
 import { resolveEmbedViewportRegionId, resolveEmbedViewerPreferences } from '@/runtime/embedViewportRegion'
 import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
+import { bindMultiblockMeshSync, useMultiblockChannels } from '@/shared/viewport/useMultiblockChannels'
+import { availableDockTabs, defaultDockTab, resolveDockTab, type ViewportDockTab } from '@/shared/viewport/dockTabs'
 import { blockRefFromViewportHover } from '@/runtime/hover'
 import { createEmbedSidebarOutlineMasks } from '@/runtime/embedSidebarOutline'
 import { getBlockGeometry, gridCenterWorld } from '@/context/queries'
@@ -44,6 +46,17 @@ const viewportRegion = ctx.requireRegion(viewportRegionId)
 const hoverState = viewportRegion.state.hover!
 const prefs = resolveEmbedViewerPreferences(ctx)
 
+/**
+ * 多方块通道状态（视口本地）：必须在 DRW 构造前创建，`renderDoc` 作为 DRW 的文档来源。
+ * 帧为主文档时 `renderDoc` 即 `ctx.getDoc()`，渲染路径行为零变化。
+ */
+const mb = useMultiblockChannels(ctx)
+const {
+  isMultiblock, renderDoc, revision,
+  panel: channelPanel,
+  setTier: setChannelTier, setChannelValue, setRunstate: setChannelRunstate,
+} = mb
+
 const {
   drw, vpSlot, loadStatus, meshBusy, blockIconCache, tooltipPalette,
   structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY, framesPlaybackIsPlaying,
@@ -54,6 +67,7 @@ const {
   viewerPrefs: prefs,
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
+  docOverride: renderDoc,
 })
 
 const {
@@ -141,14 +155,34 @@ const workbenchEdit = computed(() => ctx.main.embedWorkbenchEdit.value)
 const editWorkbenchTitle = computed(() =>
   workbenchEdit.value.enabled ? '在结构工作台中打开' : workbenchEdit.value.reason,
 )
-const hasBottomDock = computed(() =>
-  (showFrameCtl.value && hasWorldMultiFrame.value) || showLayerBar.value,
-)
 
-type BottomTab = 'frame' | 'layer'
-const activeTab = ref<BottomTab>(
-  (showFrameCtl.value && hasWorldMultiFrame.value) ? 'frame' : 'layer',
-)
+/**
+ * 下方栏 tab：可用性由「形态 + 既有特性开关」共同决定（两端共用 `dockTabs` 纯逻辑，行为一致）。
+ * 通道 tab 由**文档形态**驱动（多方块为主文档），不受 `features` 开关影响。
+ */
+const dockTabAvailability = computed(() => ({
+  showFrameTab: showFrameCtl.value,
+  hasWorldMultiFrame: hasWorldMultiFrame.value,
+  showLayerTab: showLayerBar.value,
+  showChannelsTab: isMultiblock.value,
+}))
+const dockTabs = computed(() => availableDockTabs(dockTabAvailability.value))
+const hasBottomDock = computed(() => dockTabs.value.length > 0)
+
+const _preferredTab = ref<ViewportDockTab>(defaultDockTab(dockTabAvailability.value))
+const activeTab = computed<ViewportDockTab>({
+  get: () => resolveDockTab(_preferredTab.value, dockTabs.value),
+  set: (v: ViewportDockTab) => { _preferredTab.value = v },
+})
+
+// ---- 多方块接线：取值变化 → 装配产物 → DRW 重新解析 + 重建 mesh ----
+bindMultiblockMeshSync(revision, drw)
+/** 渲染定义随装配刷新：让 `vpSlot.definition` 始终等于"当前渲染的网格"（公开观测点） */
+watch(structureDefinition, (d) => { vpSlot.definition.value = d ?? null }, { flush: 'post' })
+
+function onChannelValue(payload: { key: string; value: number }): void {
+  setChannelValue(payload.key, payload.value)
+}
 
 function onMetaHintPointerEnter(e: PointerEvent): void { hoverState.setMeta({ clientX: e.clientX, clientY: e.clientY }) }
 function onMetaHintPointerMove(e: PointerEvent): void { hoverState.setMeta({ clientX: e.clientX, clientY: e.clientY }) }
@@ -310,8 +344,12 @@ onBeforeUnmount(() => {
       :grid-height="gridHeight"
       :layer-world-y="layerWorldY"
       :layer-preview-label="layerPreviewLabel"
+      :channel-panel="channelPanel"
       @set-frame="setFrameIndex"
       @toggle-playback="togglePlayback"
+      @set-tier="setChannelTier"
+      @set-channel-value="onChannelValue"
+      @set-runstate="setChannelRunstate"
       @update:layer-y="(v: number) => { void ctx.getOperators().exec('OPERATOR_SET_LAYER_Y', { y: v }) }"
     />
 

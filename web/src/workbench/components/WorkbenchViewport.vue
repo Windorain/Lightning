@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import ViewportFrameLayerDock from '@/shared/viewport/ViewportFrameLayerDock.vue'
@@ -7,6 +7,8 @@ import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { WorkbenchHost } from '@/runtime/host/workbenchHost'
 import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
+import { bindMultiblockMeshSync, useMultiblockChannels } from '@/shared/viewport/useMultiblockChannels'
+import { availableDockTabs, defaultDockTab, resolveDockTab, type ViewportDockTab } from '@/shared/viewport/dockTabs'
 import { REGION } from '@/runtime/regionIds'
 import { createToolGizmoHandler } from '@/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
@@ -24,6 +26,14 @@ const VIEWPORT_REGION_ID = REGION.WORKBENCH_VIEWPORT
 const prefs = ctx.requireRegion(VIEWPORT_REGION_ID).state.viewer
 if (!prefs) throw new Error('viewer preferences missing on r-viewport')
 
+/** 多方块通道状态（视口本地）：必须先于 DRW 创建，`renderDoc` 即 DRW 的文档来源（T2.5 接线） */
+const mb = useMultiblockChannels(ctx)
+const {
+  isMultiblock, renderDoc, revision,
+  panel: channelPanel,
+  setTier: setChannelTier, setChannelValue, setRunstate: setChannelRunstate,
+} = mb
+
 const {
   drw, vpSlot, loadStatus, meshBusy, structureDefinition, mainMeshGroup,
   worldFrameIndex, layerWorldY, framesPlaybackIsPlaying,
@@ -32,6 +42,7 @@ const {
   ctx,
   regionId: VIEWPORT_REGION_ID,
   viewerPrefs: prefs,
+  docOverride: renderDoc,
 })
 
 const {
@@ -39,12 +50,31 @@ const {
   hasWorldMultiFrame, worldFrameCount,
 } = drwComputed
 
-type BottomTab = 'frame' | 'layer'
-const _preferredTab = ref<BottomTab>(hasWorldMultiFrame.value ? 'frame' : 'layer')
-const activeTab = computed<BottomTab>({
-  get: () => hasWorldMultiFrame.value ? _preferredTab.value : 'layer',
-  set: (v: BottomTab) => { _preferredTab.value = v },
+/**
+ * 下方栏 tab：可用性与默认项走两端共用的纯逻辑（`dockTabs`），
+ * Workbench 侧帧控制/分层预览恒被允许（是否显示帧 tab 仍由多帧与否决定）。
+ */
+const dockTabAvailability = computed(() => ({
+  showFrameTab: true,
+  hasWorldMultiFrame: hasWorldMultiFrame.value,
+  showLayerTab: true,
+  showChannelsTab: isMultiblock.value,
+}))
+const dockTabs = computed(() => availableDockTabs(dockTabAvailability.value))
+const _preferredTab = ref<ViewportDockTab>(defaultDockTab(dockTabAvailability.value))
+const activeTab = computed<ViewportDockTab>({
+  get: () => resolveDockTab(_preferredTab.value, dockTabs.value),
+  set: (v: ViewportDockTab) => { _preferredTab.value = v },
 })
+
+// ---- 多方块接线：取值变化 → 装配产物 → DRW 重新解析 + 重建 mesh ----
+bindMultiblockMeshSync(revision, drw)
+/** 渲染定义随装配刷新：让 `vpSlot.definition` 始终等于"当前渲染的网格"（公开观测点） */
+watch(structureDefinition, (d) => { vpSlot.definition.value = d ?? null }, { flush: 'post' })
+
+function onChannelValue(payload: { key: string; value: number }): void {
+  setChannelValue(payload.key, payload.value)
+}
 
 function createToolContext(): ToolContext {
   return {
@@ -222,8 +252,12 @@ onBeforeUnmount(() => {
       :grid-height="gridHeight"
       :layer-world-y="layerWorldY"
       :layer-preview-label="layerPreviewLabel"
+      :channel-panel="channelPanel"
       @set-frame="setFrameIndex"
       @toggle-playback="togglePlayback"
+      @set-tier="setChannelTier"
+      @set-channel-value="onChannelValue"
+      @set-runstate="setChannelRunstate"
       @update:layer-y="setLayerY"
     />
 

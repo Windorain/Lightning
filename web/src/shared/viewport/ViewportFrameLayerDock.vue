@@ -1,10 +1,15 @@
+<script lang="ts">
+export type { ViewportDockTab } from './dockTabs'
+</script>
+
 <script setup lang="ts">
 import { computed } from 'vue'
 import LayerPreviewBar from '@/shared/viewport/LayerPreviewBar.vue'
 import WorldFramePlayerControls from '@/shared/viewport/WorldFramePlayerControls.vue'
 import WorldFrameScrubber from '@/shared/viewport/WorldFrameScrubber.vue'
-
-export type ViewportDockTab = 'frame' | 'layer'
+import MultiblockChannelPanel from '@/shared/viewport/MultiblockChannelPanel.vue'
+import type { MultiblockChannelPanelModel } from '@/shared/viewport/multiblockChannelUi'
+import type { ViewportDockTab } from '@/shared/viewport/dockTabs'
 
 const props = withDefaults(defineProps<{
   theme?: 'embed' | 'workbench'
@@ -18,10 +23,16 @@ const props = withDefaults(defineProps<{
   gridHeight: number
   layerWorldY: number
   layerPreviewLabel: string
+  /**
+   * 「通道」面板模型（`null`/缺省 = 非多方块文档 ⇒ 通道 tab 不出现）。
+   * 由 `useMultiblockChannels` 组装，本组件只负责呈现与转发事件（叶子组件约定）。
+   */
+  channelPanel?: MultiblockChannelPanelModel | null
 }>(), {
   theme: 'workbench',
   showFrameTab: true,
   showLayerTab: true,
+  channelPanel: null,
 })
 
 const activeTab = defineModel<ViewportDockTab>('activeTab', { required: true })
@@ -32,11 +43,25 @@ const showFramePanel = computed(
 const showLayerPanel = computed(
   () => props.showLayerTab && activeTab.value === 'layer',
 )
+const showChannelsTab = computed(() => props.channelPanel !== null && props.channelPanel !== undefined)
+const channelsModel = computed(() => (activeTab.value === 'channels' && showChannelsTab.value
+  ? props.channelPanel as MultiblockChannelPanelModel
+  : null))
+/** 状态区一行摘要：通道条数 · Tier · 运行态呈现名（呈现名来自文件声明） */
+const channelStatus = computed(() => {
+  const m = props.channelPanel
+  if (!m) return null
+  const runstateName = m.runstates.find(r => r.id === m.runstate)?.name ?? m.runstate
+  return { count: m.channels.length, tier: m.tier, runstateName }
+})
 
 const emit = defineEmits<{
   setFrame: [index: number]
   togglePlayback: []
   'update:layerY': [y: number]
+  setTier: [value: number]
+  setChannelValue: [payload: { key: string; value: number }]
+  setRunstate: [id: string]
 }>()
 </script>
 
@@ -44,10 +69,19 @@ const emit = defineEmits<{
   <div class="vp-dock" :class="`vp-dock--${theme}`">
     <div class="vp-dock__tab-row">
       <button
+        v-if="showChannelsTab"
+        type="button"
+        class="vp-dock__tab"
+        :class="{ 'vp-dock__tab--active': activeTab === 'channels' }"
+        data-dock-tab="channels"
+        @click="activeTab = 'channels'"
+      >通道</button>
+      <button
         v-if="showFrameTab && hasWorldMultiFrame"
         type="button"
         class="vp-dock__tab"
         :class="{ 'vp-dock__tab--active': activeTab === 'frame' }"
+        data-dock-tab="frame"
         @click="activeTab = 'frame'"
       >帧控制</button>
       <button
@@ -55,16 +89,32 @@ const emit = defineEmits<{
         type="button"
         class="vp-dock__tab"
         :class="{ 'vp-dock__tab--active': activeTab === 'layer' }"
+        data-dock-tab="layer"
         @click="activeTab = 'layer'"
       >分层预览</button>
       <div class="vp-dock__tab-status">
+        <!-- 既有状态在前：`[data-mb-status]` 是新增观测点，但**不得**改变既有
+             `.vp-dock__stat` 的文档顺序（`.first()` 仍应是「帧」/「层」，T2.6 harness 依赖） -->
         <span v-if="showFrameTab && hasWorldMultiFrame" class="vp-dock__stat">
           帧 <strong>{{ worldFrameIndex + 1 }}/{{ worldFrameCount }}</strong>
         </span>
         <span v-if="showLayerTab" class="vp-dock__stat">
           层 <strong>{{ layerPreviewLabel }}</strong>
         </span>
+        <span v-if="channelStatus" class="vp-dock__stat" data-mb-status>
+          通道 <strong>{{ channelStatus.count }}</strong>
+          · Tier <strong>{{ channelStatus.tier }}</strong>
+          · <strong>{{ channelStatus.runstateName }}</strong>
+        </span>
       </div>
+    </div>
+    <div v-if="channelsModel" class="vp-dock__panel vp-dock__panel--channels" data-dock-panel="channels">
+      <MultiblockChannelPanel
+        :model="channelsModel"
+        @update:tier="emit('setTier', $event)"
+        @update:value="emit('setChannelValue', $event)"
+        @update:runstate="emit('setRunstate', $event)"
+      />
     </div>
     <div v-if="showFramePanel" class="vp-dock__panel vp-dock__panel--active">
       <WorldFramePlayerControls
@@ -165,6 +215,12 @@ const emit = defineEmits<{
 }
 .vp-dock--embed .vp-dock__panel { height: 48px; background: var(--nei-inset-bg); }
 .vp-dock--workbench .vp-dock__panel { height: 40px; background: var(--wb-bg-elevated); }
+/* 通道面板：内容高度随声明条数增长（视口下方栏按需变高，超过上限内部滚动） */
+.vp-dock__panel--channels {
+  height: auto; min-height: 40px; max-height: 152px;
+  align-items: stretch; overflow-y: auto;
+}
+.vp-dock--embed .vp-dock__panel--channels { min-height: 48px; }
 .vp-dock__panel :deep(.wm-wfs),
 .vp-dock__panel :deep(.wm-wfp-controls),
 .vp-dock__panel :deep(.wm-layer-bar) {
