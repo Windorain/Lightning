@@ -397,7 +397,9 @@ Phase 3 集成与验收（E 管线驱动，零人工）
 14. 火把类"选择盒==整格但 renderAsNormalBlock==false"的退化标记：真实几何只在渲染代码里，通用盒档只能落退化整格盒，精确几何交 P1.6 推断档 → P0.4 契约标记方式拍板
 15. 单盒方块计数键取 drop 身份（registry+damageDropped）而非方块 meta（P0.3 实测：上/下半 slab 掉落同为 stone_slab:0；朝向 meta 均坍缩）→ P0.4 并入类型键定义
 
-**探针基建开放项（P1.8 前置）**：`sde_parts_probe_world` 跨轮不清理，FMP `addPart` 路径会跨轮堆积部件（p03-run-3 实测 FMP 部件 2→4 重复）；原版方块 setBlock 幂等不受影响。P1.8 建造器/oracle 生成器必须有世界重置机制（每轮全新世界或建造前清场），否则 oracle 不可复现。
+**探针基建开放项（P1.8 前置，P1.3–P1.5 已定位根因并给出解法）**：~~`sde_parts_probe_world` 跨轮不清理，FMP `addPart` 路径会跨轮堆积部件~~ **根因已查明（p13-run-1 实证）**：BlockMultipart 非 BlockContainer，裸 setBlockToAir 不移除 tile，且服务端静默清理不同步客户端 stale tile → 新一轮 addPart 同步包追加 ⇒ 翻倍。**解法 = 逐部件反射 `remPart`**（FMP 正常移除通道，removal 包同步两端），已在 PartsProbePlacement.placeFamilyPrep 实现并经 p13-run-2/3 幂等验证（稳定 2 部件）。P1.8 建造器/oracle 生成器的世界重置机制照此办理。
+
+**风险 #1 闭环与叠加区裁决（P1.3–P1.5 实证后调度者拍板）**：GTNH 中三族 tile 互斥寄宿——真实"同格两族"在 ae2/eio/fmp 之间不存在（EnderIO 束只与 Immibis 微方块共存，Immibis 在三族范围外；AE2 总线被 FMP 转换后属 fmp 单族）。多族合并语义已由等价实验机器证明（真实 FmpPartProvider + 探针 tier-1 提供者同格合并出 3 部件、localId 命名空间零冲突、落档 1——p13-run-2 归档），契约 §4 命名空间方案的有效性成立。**P1.8 叠加区重定义**：不再追求字面"三族同格"，改为最大复杂度真实格组合（EnderIO 5 导管束含连接器与跨格段 / AE2 facade+线缆格 / FMP 多微方块格）+ 合并语义断言沿用等价实验；**不新增 Immibis 提供者**——若未来需要，按"新接一族 = 注册一个提供者"的架构承诺另行立项（本身即 D 交付的活证）。
 
 **P2.1 实施登记（调度者复核后采录）**：① statsTemplate 命名以 **camelCase（showOthers）为落盘权威**（契约 §10.2），snake_case（show_others）仅作旧数据读取回退——P2.3 消费时按此执行；② 根级 cellGrid/blockPalette 存在与本次已修复的 parts 字段同类的"首帧展开副本残留过期快照"隐患（**既有问题，非本轮引入**）——登记为开放项，是否同样按派生数据排除出 _extra 由后续立项裁定；③ `PaletteEntryMeta.parts?: unknown[]` 残留类型暂保留（未知字段 round-trip 透传通道），确认无消费后可清理（清理属可选优化，不阻塞）。
 

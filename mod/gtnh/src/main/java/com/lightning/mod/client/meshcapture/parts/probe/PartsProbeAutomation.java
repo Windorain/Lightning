@@ -88,6 +88,11 @@ public final class PartsProbeAutomation {
     private static boolean singleBox;
     /** P1.1/P1.2：触发文件 {@code "partsPipeline":true} 时追加部件流水线探针（默认关闭；隐含 singleBox 放置）。 */
     private static boolean partsPipeline;
+    /**
+     * P1.3–P1.5：触发文件 {@code "familyProviders":true} 时追加三族权威提供者验证探针（默认关闭；
+     * 隐含 FMP 格清场防跨轮堆积 + AE2 facade 格放置，见 PartsFamilyProviderProbe）。
+     */
+    private static boolean familyProviders;
 
     private static final List<String> warnings = new ArrayList<String>();
     private static final PartsProbePlacement placement = new PartsProbePlacement();
@@ -197,6 +202,10 @@ public final class PartsProbeAutomation {
                     singleBox = true;
                 }
             }
+            if (o.has("familyProviders")) {
+                familyProviders = o.get("familyProviders")
+                    .getAsBoolean();
+            }
         } catch (Throwable t) {
             warnings.add("触发文件解析失败（用默认配置继续）: " + PartsProbeReflect.describe(t));
         }
@@ -206,6 +215,9 @@ public final class PartsProbeAutomation {
         }
         if (partsPipeline) {
             FMLLog.info("[SDE][P1.1] 部件流水线探针已启用（partsPipeline=true）");
+        }
+        if (familyProviders) {
+            FMLLog.info("[SDE][P1.3-1.5] 三族权威提供者验证探针已启用（familyProviders=true）");
         }
         toPhase(Phase.JOIN);
     }
@@ -285,7 +297,16 @@ public final class PartsProbeAutomation {
         @SuppressWarnings("unchecked")
         List<EntityPlayerMP> players = server.getConfigurationManager().playerEntityList;
         EntityPlayerMP player = players.isEmpty() ? null : players.get(0);
+        if (familyProviders) {
+            // P1.5：先清 FMP 格跨轮堆积（BlockMultipart 非 BlockContainer，裸 setBlockToAir 留孤儿 tile）
+            placement.placeFamilyPrep(world, BASE_X, BASE_Y, BASE_Z);
+        }
         placement.placeAll(server, world, player, BASE_X, BASE_Y, BASE_Z);
+        if (familyProviders) {
+            // P1.3：追加 AE2 facade 格（补 P0.2 未放的 IFacadeContainer 环）
+            placement.placeFamilyExtras(world, player, BASE_X, BASE_Y, BASE_Z);
+            FMLLog.info("[SDE][P1.3-1.5] facade 场景放置完成");
+        }
         if (singleBox) {
             placement.placeSingleBox(world, BASE_X, BASE_Y, BASE_Z);
             FMLLog.info("[SDE][P0.3] 单盒场景放置完成（11 格）");
@@ -369,6 +390,18 @@ public final class PartsProbeAutomation {
                 dump.add("partsPipeline", failed);
             }
         }
+        if (familyProviders) {
+            try {
+                dump.add("familyProviders", PartsFamilyProviderProbe.run(mc, placement.placed));
+            } catch (Throwable t) {
+                // 族提供者验证探针自身失败不得拖垮整个探针轮（留痕即可）
+                warnings.add("familyProviders probe failed: " + PartsProbeReflect.describe(t));
+                JsonObject failed = new JsonObject();
+                failed.addProperty("pass", Boolean.FALSE);
+                failed.addProperty("error", PartsProbeReflect.describe(t));
+                dump.add("familyProviders", failed);
+            }
+        }
         finalizeRun(mc);
     }
 
@@ -449,6 +482,24 @@ public final class PartsProbeAutomation {
                     : "FAIL: see dump.partsPipeline.*.cells[].checks");
             summary.add(s);
             if (fatalCode == 0 && !ppPass) {
+                code = 2;
+            }
+        }
+        // P1.3–P1.5：族提供者验证探针 pass=false ⇒ 退出码 2（细节在 dump.familyProviders.*.checks）
+        if (familyProviders) {
+            JsonObject fp = dump == null ? null : dump.getAsJsonObject("familyProviders");
+            boolean fpPass = fp != null && fp.has("pass")
+                && fp.get("pass")
+                    .getAsBoolean();
+            JsonObject s = new JsonObject();
+            s.addProperty("family", "familyProviders");
+            s.addProperty("partsRead", Integer.valueOf(fpPass ? 1 : 0));
+            s.addProperty(
+                "detail",
+                fpPass ? "ae2/eio/fmp 逐格核对 + facade + 合并实验 all pass"
+                    : "FAIL: see dump.familyProviders.cells[].checks and .mergeExperiment.checks");
+            summary.add(s);
+            if (fatalCode == 0 && !fpPass) {
                 code = 2;
             }
         }

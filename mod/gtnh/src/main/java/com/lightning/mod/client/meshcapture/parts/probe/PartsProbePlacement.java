@@ -442,6 +442,120 @@ final class PartsProbePlacement {
         return fallback >= 0 ? fallback : stoneId;
     }
 
+    // ------------------------------------------------------------------ P1.3–P1.5 族提供者验证场景的放置扩展
+
+    /**
+     * P1.3–P1.5 验证探针的<strong>前置清场</strong>（须在 {@link #placeAll} 之前调用）：
+     * 清理 FMP 探针格（bx+7, by, bz）的跨轮堆积——已知问题（计划 §9 探针基建开放项 / P0.2 §6）：
+     * {@code BlockMultipart} 是普通 Block（非 BlockContainer，hasTileEntity=false），
+     * 裸 {@code setBlockToAir} 不移除 TileMultipart 孤儿 tile；且<strong>服务端静默 clearParts 不同步
+     * 客户端</strong>——客户端 stale tile 仍在，新一轮 addPart 同步包追加 ⇒ 部件翻倍（p13-run-1 实证
+     * 2→4）。正确清法 = 逐部件 {@code remPart}（FMP 正常移除通道：removal 包发客户端，清空后
+     * 自行 setBlockToAir），两端同清；最后 removeTileEntity + setBlockToAir 兜底服务端。
+     */
+    void placeFamilyPrep(WorldServer world, int bx, int by, int bz) {
+        int x = bx + 7;
+        int y = by;
+        int z = bz;
+        try {
+            Class<?> tMultiPartClass = PartsProbeReflect.cls("codechicken.multipart.TMultiPart");
+            for (int guard = 0; guard < 64; guard++) {
+                TileEntity te = world.getTileEntity(x, y, z);
+                if (te == null || !te.getClass()
+                    .getName()
+                    .contains("TileMultipart")) {
+                    break;
+                }
+                List<?> parts = (List<?>) te.getClass()
+                    .getMethod("jPartList")
+                    .invoke(te);
+                if (parts == null || parts.isEmpty()) {
+                    break;
+                }
+                // remPart 内部对最后一个部件自行 setBlockToAir（remPart_do），并逐个发 removal 包
+                te.getClass()
+                    .getMethod("remPart", tMultiPartClass)
+                    .invoke(te, parts.get(0));
+            }
+        } catch (Throwable t) {
+            errors.add(new JsonPrimitive("fmp-prep/remPart: " + PartsProbeReflect.describe(t)));
+        }
+        // 兜底：保证服务端格彻底干净（remPart 清空后已自行 setBlockToAir，此处幂等）
+        world.removeTileEntity(x, y, z);
+        world.setBlockToAir(x, y, z);
+    }
+
+    /**
+     * P1.3–P1.5 验证探针的<strong>追加场景</strong>（须在 {@link #placeAll} 之后调用）：
+     * AE2 facade 格（bx+6, by, bz）= 玻璃线缆(UNKNOWN) + stone 伪装板(EAST)——
+     * 补 P0.2 未放的 facade 环（§1.5#2：facade 不在 getPart 枚举里，走 IFacadeContainer）。
+     */
+    void placeFamilyExtras(WorldServer world, EntityPlayer player, int bx, int by, int bz) {
+        try {
+            placeAe2FacadeCell(world, bx + 6, by, bz);
+        } catch (Throwable t) {
+            errors.add(new JsonPrimitive("ae2-facade/place: " + PartsProbeReflect.describe(t)));
+        }
+    }
+
+    /**
+     * AE2 facade 格：{@code world.setBlock(cableBusBlock)} → {@code addPart(cable, UNKNOWN)} →
+     * {@code definitions().items().facade()}（ItemFacade）
+     * {@code createFacadeForItem(stone, false)} → {@code createPartFromItemStack(stack, EAST)} →
+     * {@code getFacadeContainer().addFacade(IFacadePart)}（真实服务端添加路径）。
+     */
+    private void placeAe2FacadeCell(World world, int x, int y, int z) throws Exception {
+        Class<?> aeApiClass = PartsProbeReflect.cls("appeng.api.AEApi");
+        Object api = aeApiClass.getMethod("instance")
+            .invoke(null);
+        Object defs = PartsProbeReflect.invoke(api, "definitions", new Class<?>[0]);
+        Object parts = PartsProbeReflect.invoke(defs, "parts", new Class<?>[0]);
+        Object items = PartsProbeReflect.invoke(defs, "items", new Class<?>[0]);
+        ItemStack cable = ae2ColoredStack(parts, "cableGlass", "Transparent");
+        ItemStack facadeItem = ae2MaybeStack(items, "facade");
+
+        Block cableBusBlock = findBlockByClass("appeng.block.networking.BlockCableBus");
+        world.setBlock(x, y, z, cableBusBlock, 0, 3);
+        TileEntity te = world.getTileEntity(x, y, z);
+        if (te == null || !te.getClass()
+            .getName()
+            .contains("TileCableBus")) {
+            throw new IllegalStateException(
+                "AE2 facade 格 tile 未按预期生成: " + (te == null ? "null"
+                    : te.getClass()
+                        .getName()));
+        }
+        Method addPart = te.getClass()
+            .getMethod("addPart", ItemStack.class, ForgeDirection.class, EntityPlayer.class);
+        Object r1 = addPart.invoke(te, cable, ForgeDirection.UNKNOWN, null);
+
+        Object itemFacade = facadeItem.getItem();
+        ItemStack facadeStack = (ItemStack) itemFacade.getClass()
+            .getMethod("createFacadeForItem", ItemStack.class, boolean.class)
+            .invoke(itemFacade, new ItemStack(Blocks.stone), Boolean.FALSE);
+        if (facadeStack == null) {
+            throw new IllegalStateException("createFacadeForItem(stone) 返回 null");
+        }
+        Object facadePart = itemFacade.getClass()
+            .getMethod("createPartFromItemStack", ItemStack.class, ForgeDirection.class)
+            .invoke(itemFacade, facadeStack, ForgeDirection.EAST);
+        if (facadePart == null) {
+            throw new IllegalStateException("createPartFromItemStack 返回 null");
+        }
+        Object fc = te.getClass()
+            .getMethod("getFacadeContainer")
+            .invoke(te);
+        Class<?> facadePartIface = PartsProbeReflect.cls("appeng.api.parts.IFacadePart");
+        Object r2 = fc.getClass()
+            .getMethod("addFacade", facadePartIface)
+            .invoke(fc, facadePart);
+        world.markBlockForUpdate(x, y, z);
+
+        placed.add(new Placed("ae2", "cable+facade(E)", x, y, z));
+        logPlacedStack("ae2/facadeCellCable", cable, String.valueOf(r1));
+        logPlacedStack("ae2/facadeCellFacade", facadeStack, String.valueOf(r2));
+    }
+
     // ------------------------------------------------------------------ 小工具
 
     /** 按运行时类名在方块注册表里找方块（不依赖注册名拼写，注册名各版本可能不同）。 */

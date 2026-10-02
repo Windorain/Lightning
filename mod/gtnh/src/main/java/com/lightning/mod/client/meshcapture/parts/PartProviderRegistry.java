@@ -5,6 +5,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import com.lightning.mod.client.meshcapture.parts.ae2.Ae2PartProvider;
+import com.lightning.mod.client.meshcapture.parts.enderio.EnderIoPartProvider;
+import com.lightning.mod.client.meshcapture.parts.fmp.FmpPartProvider;
 import com.lightning.mod.client.meshcapture.parts.generic.GenericSingleBoxPartProvider;
 
 import cpw.mods.fml.common.FMLLog;
@@ -24,10 +27,17 @@ import cpw.mods.fml.relauncher.SideOnly;
  * <p>
  * 内置提供者：
  * <ul>
+ * <li>{@link Ae2PartProvider} — 档 1 AE2 族权威（P1.3），priority
+ * {@value Ae2PartProvider#DEFAULT_PRIORITY}；</li>
+ * <li>{@link EnderIoPartProvider} — 档 1 EnderIO 族权威（P1.4），priority
+ * {@value EnderIoPartProvider#DEFAULT_PRIORITY}；</li>
+ * <li>{@link FmpPartProvider} — 档 1 FMP 族权威（P1.5），priority
+ * {@value FmpPartProvider#DEFAULT_PRIORITY}；</li>
  * <li>{@link GenericSingleBoxPartProvider} — 档 2 通用盒（P1.2），priority
  * {@value GenericSingleBoxPartProvider#DEFAULT_PRIORITY}。</li>
  * </ul>
- * 族权威提供者（P1.3–P1.5，档 1）与几何推断（P1.6，档 3）在各自任务内 {@link #register}。
+ * 族提供者构造零反射（引导延迟到 collectParts 内逐环 try-catch），注册本身不会失败；
+ * 目标 mod 缺失时 applies 不命中、零开销。几何推断（P1.6，档 3）在各自任务内 {@link #register}。
  */
 @SideOnly(Side.CLIENT)
 public final class PartProviderRegistry {
@@ -35,6 +45,9 @@ public final class PartProviderRegistry {
     private static final CopyOnWriteArrayList<PartProvider> PROVIDERS = new CopyOnWriteArrayList<>();
 
     static {
+        register(new Ae2PartProvider());
+        register(new EnderIoPartProvider());
+        register(new FmpPartProvider());
         register(new GenericSingleBoxPartProvider());
     }
 

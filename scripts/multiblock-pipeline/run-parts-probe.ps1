@@ -9,6 +9,7 @@
     pwsh -File scripts/multiblock-pipeline/run-parts-probe.ps1 -Label p02-run-1
     pwsh -File scripts/multiblock-pipeline/run-parts-probe.ps1 -Label p03-run-1 -SingleBox   # P0.3 单盒探针
     pwsh -File scripts/multiblock-pipeline/run-parts-probe.ps1 -Label p11-run-1 -PartsPipeline # P1.1/P1.2 流水线探针
+    pwsh -File scripts/multiblock-pipeline/run-parts-probe.ps1 -Label p13-run-1 -FamilyProviders # P1.3–P1.5 三族提供者探针
 
   退出码：0 = 三族全部读到部件；2 = 至少一族没读到部件（放置或读取失败，细节见 dump）；
           3 = 管线级致命（超时/进世界失败/写出失败）；4 = 外层编排自身失败（无结果文件）。
@@ -27,7 +28,10 @@ param(
     [switch]$SingleBox,
     # P1.1/P1.2：追加部件流水线探针（空注册表/必抛假提供者/P0.3 基准核对三实验），写入触发文件
     # partsPipeline=true（隐含 singleBox 放置）
-    [switch]$PartsPipeline
+    [switch]$PartsPipeline,
+    # P1.3–P1.5：追加三族权威提供者验证探针（对 P0.2 p02-run-2 基准逐格核对 localId/typeKey/盒/物品身份
+    # + AE2 facade 场景 + FMP 格跨轮堆积清场 + 同格多族合并实验），写入触发文件 familyProviders=true
+    [switch]$FamilyProviders
 )
 
 $ErrorActionPreference = 'Stop'
@@ -103,6 +107,9 @@ if ($SingleBox) {
 }
 if ($PartsPipeline) {
     $trigger.partsPipeline = $true
+}
+if ($FamilyProviders) {
+    $trigger.familyProviders = $true
 }
 $triggerPath = Join-Path $mcDataDir 'sde_parts_probe.json'
 $json = $trigger | ConvertTo-Json -Depth 6
