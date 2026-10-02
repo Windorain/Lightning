@@ -12,6 +12,7 @@
     "build:all": "npm run build:embed && npm run build:workbench",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:multiblock": "playwright test multiblock-",
     "test:watch": "vitest",
     "lint:tests": "eslint src/workbench/testing/__tests__/",
     "typecheck": "vue-tsc --noEmit"
