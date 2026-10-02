@@ -399,4 +399,6 @@ Phase 3 集成与验收（E 管线驱动，零人工）
 
 **探针基建开放项（P1.8 前置）**：`sde_parts_probe_world` 跨轮不清理，FMP `addPart` 路径会跨轮堆积部件（p03-run-3 实测 FMP 部件 2→4 重复）；原版方块 setBlock 幂等不受影响。P1.8 建造器/oracle 生成器必须有世界重置机制（每轮全新世界或建造前清场），否则 oracle 不可复现。
 
+**P2.1 实施登记（调度者复核后采录）**：① statsTemplate 命名以 **camelCase（showOthers）为落盘权威**（契约 §10.2），snake_case（show_others）仅作旧数据读取回退——P2.3 消费时按此执行；② 根级 cellGrid/blockPalette 存在与本次已修复的 parts 字段同类的"首帧展开副本残留过期快照"隐患（**既有问题，非本轮引入**）——登记为开放项，是否同样按派生数据排除出 _extra 由后续立项裁定；③ `PaletteEntryMeta.parts?: unknown[]` 残留类型暂保留（未知字段 round-trip 透传通道），确认无消费后可清理（清理属可选优化，不阻塞）。
+
 **事实勘误（调度者复核登记）**：P0.1 报告称"`web/src/render/proto/` 目录不存在"，实际目录存在但仅含空的 v1 残留子目录（无任何生成文件；.gitignore L26 仅忽略 `lightning/v1/`）——实质结论（生成代码两端皆无）不变。
