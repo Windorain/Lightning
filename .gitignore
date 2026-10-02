@@ -35,3 +35,6 @@ web/e2e/screenshots/
 .worktrees/
 .superpowers/
 CLAUDE.md
+
+# 多方块 fixture 校验器输出（可再生）
+scripts/multiblock-fixtures/.out/

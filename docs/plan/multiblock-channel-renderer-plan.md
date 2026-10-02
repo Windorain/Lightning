@@ -418,7 +418,10 @@ Phase 3 集成与验收（串行，全部由 E 管线驱动，零人工）
 
 **留白决策登记**（§9 对应条目）：
 1. 依赖路线 → **已拍板：compileOnly 为主 + 4 处受控反射内核**（无公开访问器的成员：`val$channel`、`LazyStructureElement`、`HatchElementBuilder#mHint`、匿名类 `this$0`）。决策与回退方案见 [decision-deps-route.md](decision-deps-route.md)。
-2-10. 待定稿后回写。
+2. 压缩编码与文件格式细节 → **已定稿**：骨干（sizeSteps）+ 共享差异规则表（frames 按 id 引用，禁止 `frames[].ops`/`frames[].cellGrid`）+ 调色板并集。装配 = 尺寸型→骨干→替换型→运行态，纯查表。契约全文：[format-multiblock-doc.md](format-multiblock-doc.md)。
+3. 是否扩展 protocol/ → **拍板：不动 protobuf**。proto 当前不是运行时契约（web 解析走 JSON，`web/src/render/proto/` 为空目录）；触发条件与将来改动清单见 [format-multiblock-doc.md](format-multiblock-doc.md)。
+9. 体积增长机器判定式 → **已定稿并对 §T3.2 建议式作出修正**：自变量为 **N（组合数）** 而非 S（取值数之和）——硬约束 2「Frame 是唯一变体原语」意味着每组合至少一帧，N 是各通道域的积，"随相加而非相乘"在每组合一帧下不可能成立。可判定三条：R1 κ=V/G 随 N 同步增长；R2 线性拟合 G≈a+b·N，R²≥0.95，b≤2048 B/组合（小结构走常数主导分支）；R3 S 那一份（骨架+规则+调色板）不随 N 增长。**安全系数 λ=1.35**。判定式细节与理由：[format-multiblock-doc.md](format-multiblock-doc.md)。T3.2 按此执行。
+4-8、10. 待定稿后回写。
 
 **事实勘误**（以探针实测为准，下游任务按新口径执行）：
 - §T0.4 / §8「通道定义全集 27 条」→ 实测 **30 条枚举常量 / 28 个不同 id**（27 替换型 + 2 尺寸型 + 1 舱口布局型）。重名 id 仅 `casing` ×3，无其他。证据：[probe-channels.md](probe-channels.md) §1.2、§2。
