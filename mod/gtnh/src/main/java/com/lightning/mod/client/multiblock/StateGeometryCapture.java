@@ -96,19 +96,19 @@ public final class StateGeometryCapture {
         out.name = name;
         out.activeObserved = activeObserved;
 
-        // TESR 补画路径（TileEntitySpecialRendererPostRenderStrategy）会调
-        // TileEntityRendererDispatcher#cacheActiveRenderInfo(..., renderViewEntity, ...)，而 1.7.10 的实现会
-        // 解引用该实体（prevRotationYaw/rotationYaw/...）。主菜单态 mc.renderViewEntity 为 null → NPE → 整条 TESR
-        // 补画被吞掉。因此捕获期间临时挂上假玩家，结束后立刻还原（这是「让既有捕获管线在主菜单态也能跑 TESR」的唯一改动）。
+        // 捕获期的渲染环境对齐（详见 ProbeCaptureEnvironment 类注释）：
+        // 1) TileEntityRendererDispatcher#cacheActiveRenderInfo(..., renderViewEntity, ...) 的 1.7.10 实现会
+        // 解引用该实体（prevRotationYaw/rotationYaw/...）。主菜单态 mc.renderViewEntity 为 null → NPE → 整条
+        // TESR 补画被吞掉。因此捕获期间临时挂上假玩家，结束后立刻还原。
+        // 2) **mc.thePlayer 必须活在正在被捕获的世界里**：GT 的 GTRenderedTexture#getExtendedFacing 用
+        // player.getEntityWorld() 查机器朝向；玩家在会话世界而方块在 ProbeDummyWorld 时会查不到 TE，
+        // 回退分支会把 NORTH 面的 .extFacing() 图标覆盖层上下颠倒（扳手图标颠倒的根因）。
         Minecraft mc = Minecraft.getMinecraft();
-        net.minecraft.entity.EntityLivingBase previousViewEntity = mc.renderViewEntity;
-        if (previousViewEntity == null && renderInfoFallback != null) {
-            mc.renderViewEntity = renderInfoFallback;
-        }
+        ProbeCaptureEnvironment env = ProbeCaptureEnvironment.begin(mc, world, renderInfoFallback);
         try {
             return captureInternal(out, world, controllerX, controllerY, controllerZ);
         } finally {
-            mc.renderViewEntity = previousViewEntity;
+            env.end();
         }
     }
 

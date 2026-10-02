@@ -467,3 +467,10 @@ Phase 3 集成与验收（串行，全部由 E 管线驱动，零人工）
 - 第一轮完整运行：16 阶段实绿，报告 fail 21/23——两条红项根因为报告组装缺陷（preflight 结果未落盘），已修根因（preflight 门禁结果写 `logs/preflight.log` 并挂证据，修复经第二轮运行验证生效）。
 - 第二轮运行完成约 60% 后由用户主动终止；终止前 preflight 修复验证生效、web 真实验收连续第二次通过、产物第 7 次逐字节一致。
 - **全部 16 个阶段在修复后代码上各通过 ≥1 次（多数 2 次）；mod 产物 7 轮字节级幂等；无单次不间断全绿运行**——用户裁决接受此状态作为终验，正式全绿报告留作发版前一条命令重跑：`npm run acceptance:multiblock`。
+
+**覆盖层 UV 镜像缺陷修复登记**（用户报障"扳手图标上下颠倒"，调度者独立验收通过后提交）：
+- **根因**：GT5U `GTRenderedTexture#getExtendedFacing` 用**玩家所在世界**（`mc.thePlayer.worldObj`）查机器朝向，探针方块建在 `ProbeDummyWorld` 而玩家在会话世界 → 查不到 TE → 落入 GT「查不到朝向」回退分支（NORTH flipV / EAST、DOWN flipU）→ `.extFacing()` 图标覆盖层被镜像。底层纹理不受影响（39/47 条目修复前后逐字节一致，差异只在覆盖层）。根因、证据与验证全录见 `docs/plan/fix-texture-uv.md`。
+- **修复**：新增 `ProbeCaptureEnvironment`（捕获窗口内把会话玩家 `worldObj` 指向被捕获世界，`finally` 还原），`VariantGeometryBakery`/`StateGeometryCapture` 两个捕获入口改用之；`/sde export` 路径、web 解码器、协议一字未动。
+- **验收**（调度者亲自重跑）：门禁 37 覆盖层四边形 0 镜像；修复前后差异恰 19 个 `v→1-v`、0 期望外；verify-expanded 35 组合 43749 格 diff=0；产物三次导出逐字节幂等（哈希复核一致）；证伪（临时撤修复）精确复现原缺陷（数据 0 差异 + 截图 SHA 相同）；vitest 114/114、gradlew build 通过。
+- **新增常驻门禁**：`scripts/multiblock-pipeline/verify-uv-orientation.mjs --expect clean`（同面覆盖层手性必须等于基础贴图手性），后续全量导出复验时使用。
+- **开放项登记**：① EAST/DOWN 面 `flipU` 分支本轮无实测样本（5 台机器正面均朝 NORTH），修复两条分支同治但缺实测——并入既有"全量导出范围"用户开放项，全量导出时用同一门禁复核（门禁对 `u→1-u` 同样敏感）；② T1.6 管线 `waitWorld()` 存在低概率卡点（`mc.currentScreen != null` 门禁 22 min 未满足，`jstack` 留证，重试即恢复，与捕获代码无关）——建议加等待超时诊断，属脚本层增强，待排期；③ 主菜单态（`mc.thePlayer == null`）走 GT 自身 DEFAULT 分支，本轮实测与修复后产物逐字节一致，若未来出现 alignment ≠ DEFAULT 的探针机器需为该态补玩家对齐；④ 修复依赖 GT5U 内部语义，升级 GT5U 版本时复核 `GTRenderedTexture`。

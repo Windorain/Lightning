@@ -96,13 +96,13 @@ public final class VariantGeometryBakery {
     public static Capture capture(ProbeDummyWorld world, int controllerX, int controllerY, int controllerZ,
         GeometryPalette palette, EntityLivingBase renderInfoFallback, String referencedByMachine,
         Map<String, String> verifiedKeys, TreeSet<String> unstableKeys, int verifyPositionsPerKey, int fullVerifyUpTo) {
-        // 与 StateGeometryCapture 同处置：主菜单态 mc.renderViewEntity 为 null 会让 TESR 补画路径 NPE 被整条吞掉，
-        // 捕获期间临时挂假玩家，结束后立刻还原。
+        // 捕获期的渲染环境对齐（两件事，缺一不可，见 ProbeCaptureEnvironment 的类注释）：
+        // 1) 主菜单态 mc.renderViewEntity 为 null 会让 TESR 补画路径 NPE 被整条吞掉 → 临时挂假玩家；
+        // 2) **mc.thePlayer 必须活在正在被捕获的世界里**：GT 的 GTRenderedTexture#getExtendedFacing 用
+        // player.getEntityWorld() 查机器朝向，若玩家在会话世界（而方块在 ProbeDummyWorld）就查不到 TE →
+        // 回退分支会把 NORTH 面的 .extFacing() 图标覆盖层上下颠倒（扳手图标颠倒的根因）。
         Minecraft mc = Minecraft.getMinecraft();
-        EntityLivingBase previousViewEntity = mc.renderViewEntity;
-        if (previousViewEntity == null && renderInfoFallback != null) {
-            mc.renderViewEntity = renderInfoFallback;
-        }
+        ProbeCaptureEnvironment env = ProbeCaptureEnvironment.begin(mc, world, renderInfoFallback);
         try {
             return captureInternal(
                 world,
@@ -116,7 +116,7 @@ public final class VariantGeometryBakery {
                 verifyPositionsPerKey,
                 fullVerifyUpTo);
         } finally {
-            mc.renderViewEntity = previousViewEntity;
+            env.end();
         }
     }
 
