@@ -386,7 +386,7 @@ export function runPartsChecklist(ctx) {
           [paths.playwrightPartsFixtures, paths.l2Observations],
         ).status,
         'fixture 路径三级配置迁移用例（document-default → viewer-local → 清除）全绿；宿主视图 = 旧 countBlocksById 行集' +
-          '（真实导出路径的**文档默认层缺失**已登记为偏差 F1，见 findings —— 不静默）',
+          '；真实导出路径文档默认层（F1 偏差）已修复闭环——徽标应判得 document-default',
         [paths.playwrightPartsFixtures, paths.l2Observations],
       ),
     )

@@ -75,6 +75,24 @@ const {
   hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
 } = drwComputed
 
+/**
+ * F2 接线（拍板：**prop 传递**，与 P2.4 的消费点一致 —— `BlockStatsSidebar` 已内建
+ * `partIconTextures` prop 并在其 watch 内注入 `BlockIconCache#setPartIconTextureSource`，
+ * 故本组件只负责把**文档根字段**送到该 prop，不在视口侧重复注入缓存）。
+ *
+ * 数据来源 = 渲染定义根（`structureDefinition`，即 DRW 解析后的 `StructureDefinition`）：
+ * `partIconTextures` 是**文档根级**字段（与 `statsTemplate` 同级，非 structure 级），
+ * 经解析链（StructureDataParser 根透传 / V2Plain `_extra` 兜底）→ `RuntimeDocument.serialize()`
+ * 根展开 → `toStructureDefinition` 浅拷贝挂到该对象上；与侧栏回退读取的
+ * `cache.getStructure()` 是**同一份对象**（DRW 用同一 definition 重建图标缓存）。
+ * 键 = 物品身份键（`registry:damage[#nbt]`，契约 §5）；缺省/空 ⇒ null（纯回退链，行为同旧文件）。
+ */
+type PartIconTexturesCarrier = { partIconTextures?: Record<string, string> }
+const partIconTextures = computed<Record<string, string> | null>(() => {
+  const raw = (structureDefinition.value as unknown as PartIconTexturesCarrier | null)?.partIconTextures
+  return raw && typeof raw === 'object' ? raw : null
+})
+
 const showSettingsPanel = ref(false)
 
 // ---- Hover / tooltip（region.state.hover + 统一 HOVER handler）----
@@ -311,6 +329,7 @@ onBeforeUnmount(() => {
         :collapsed="sidebarCollapsed"
         :selected-block-id="selectedBlockId"
         :tooltip-map="neiTooltipMap"
+        :part-icon-textures="partIconTextures"
         @tooltip-hover="onSidebarTooltipHover"
         @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
         @select-block="onSidebarSelectBlock"

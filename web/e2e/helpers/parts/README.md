@@ -17,12 +17,12 @@
 | 文件 | 作用 |
 |------|------|
 | `helpers/parts/hover.ts` | Wiki 工作区切入（生产 WorkspaceTabs DOM click）、格内局部坐标 → 正交相机投影 → `pointermove` 注入、悬停状态/tooltip DOM 读取 |
-| `helpers/parts/statsSidebar.ts` | 统计侧栏 DOM 读取（行/视图按钮/来源徽标/provenance 面板）、视图切换驱动、窄布局自愈展开 |
+| `helpers/parts/statsSidebar.ts` | 统计侧栏 DOM 读取（行/视图按钮/来源徽标/provenance 面板/**行图标槽 canvas**）、视图切换驱动、窄布局自愈展开 |
 | `helpers/parts/fixtures.ts` | fixture 只读读取、内存深拷贝、**几何增强**（双绕组面追加）、textureBlobs 归一化、解析级部件观测（Grid API；含盒快照与 `properties`） |
 | `helpers/parts/realExport.ts` | **P3.1**：真实产物/oracle 读入与定位（`PARTS_ACCEPTANCE_DIR`）、`grid:[zi,ri,ci]` 格映射、**探针候选点推导**、`probePartHover`/`probeAnyOfParts`、运行时定义根字段存活观测 |
 | `../../parts-hover-stats.spec.ts` | P2.5 主断言包：加载解析 / 悬停 / 统计三视图+provenance / 图标键 / 无部件回归 |
 | `../../parts-falsification.spec.ts` | P2.5 证伪：篡改计数 / displayName 的内存副本 → 对应断言必红 + 定向对照仍绿 |
-| `../../parts-real-export.spec.ts` | **P3.1 主断言包（真实产物）**：加载渲染 / 解析级逐格与 oracle 一致 / 单盒区悬停 / AE2 同格多部件不同 tooltip / 满方块回归 / 统计与 `expectedCounts` 精确比对 / 偏差锁 F1F2 / degraded_all 档位与统计 |
+| `../../parts-real-export.spec.ts` | **P3.1 主断言包（真实产物）**：加载渲染 / 解析级逐格与 oracle 一致 / 单盒区悬停 / AE2 同格多部件不同 tooltip / 满方块回归 / 统计与 `expectedCounts` 精确比对 / **F1F2 修复锁（正向）** / degraded_all 档位与统计 |
 
 ## 2. 为什么经 Wiki 工作区（EmbedPreview）
 
@@ -56,16 +56,25 @@ src 侧后门。
 4. **历史阻断（已闭环）**：深响应式 `ref` 下 `structuredClone` 遇 Vue Proxy 必炸
    （serialize/clone 对含部件文档全表面不可用）——本包擒获上报后由实现侧
    c98351a 修复（`deepCopyPlain` + `reactivePartsDoc.test.ts` 回归锁定）。
-5. **P3.1 擒获的两条实现偏差（F1/F2，本轮不代修）**：
-   - **F1**：真实导出是 `geometryPhase=baked` 的 StructureData，走 `StructureDataParser`；
-     该解析器不透传 `statsTemplate`/`statsOverride`/`partIconTextures`
+5. **P3.1 擒获的 F1/F2 已修复，偏差锁已翻转为正向锁**：
+   - **F1（已修）**：真实导出是 `geometryPhase=baked` 的 StructureData，走 `StructureDataParser`；
+     该解析器此前不透传**文档根级** `statsTemplate`/`statsOverride`/`partIconTextures`
      ⇒ 渲染定义根上没有文档默认统计层（契约 §9 第 1 级）⇒ 侧栏来源徽标 = "内建默认"。
-     fixture（V2Plain，未知根字段进 `_extra`）不受影响。
-   - **F2**：`partIconTextures` 在 web 侧无消费接线（`EmbedViewport` 未把该根字段传给
+     修复 = 三个**文档根级**键随 v2 根透传（与 structure 级的 `cellPartsGrid`/`partLists` 分层，
+     `builtinParsers.ts#StructureDataParser`）；单元锁定见
+     `web/src/context/__tests__/structureDataRootFields.test.ts`（含"旧文件零差异"与
+     V2Plain `_extra` 链路核验）。fixture（V2Plain，未知根字段进 `_extra`）本就不受影响。
+   - **F2（已修）**：`partIconTextures` 此前在 web 侧无消费接线（`EmbedViewport` 未把该根字段传给
      `BlockStatsSidebar`）⇒ 部件行图标只走宿主调色板回退（AE2/EnderIO/FMP 物品键非方块键 ⇒ 占位空槽）。
-   两者由 `parts-real-export.spec.ts` 的**偏差锁**用例机器记录（断言当前可复现状态；
-   实现被修好时该用例主动变红，迫使断言与验收清单同步更新），并写进
-   `acceptance-report.json#findings`。
+     修复 = **prop 传递**（`EmbedViewport.vue` 从渲染定义根读该字段 → `:part-icon-textures`；
+     注入点沿用 P2.4 已建好的 `BlockStatsSidebar` watch → `BlockIconCache#setPartIconTextureSource`）。
+   - **锁已翻转**：`parts-real-export.spec.ts` §C2 由"断言偏差状态"翻转为正向断言
+     （徽标 = `document-default`、定义根字段与文件逐值一致、**有纹理来源的部件行图标槽必须渲染出
+     canvas** —— `waitStatsRowIcons` 的生产 DOM 观测）。原本"实现修好时主动变红"的机制由此完成闭环。
+   - **残留（新登记，本包写范围外不代修）**：FMP 三行的**行图标键**是 `...#mat=<材料串>`
+     （= `part.typeKey`），而 `partIconTextures` 的键是**物品身份键** `...#<材料串>`
+     （`PartItem.iconKey()`）⇒ 这三行取不到嵌入纹理，仍落回退/占位。以 finding `F2b` 写进
+     `l2-observations.json`（不判红，不静默）。
 6. **平面类部件零厚度盒（测量观察）**：AE2 破坏面板（`:300`）碰撞盒在 y/z 两轴零厚度
    （视觉盒有厚度）——平面语义的如实快照，非契约违例；盒判据 = "逐轴 min≤max + 非全轴退化"。
 7. **格映射两套下标（实测擒获）**：oracle `grid:[zi,ri,ci]` 的行号是 `y-top-first`

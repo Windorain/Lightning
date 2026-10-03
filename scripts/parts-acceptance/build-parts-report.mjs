@@ -9,7 +9,7 @@
  *   <run>/static-checks.json             `check-static.mjs`（降级/字节干净/旧格式/web 不重算/proto）
  *   <run>/falsification/falsification.json  `falsification.mjs`（负对照 + 正对照 + 假提供者引用）
  *   <run>/web/*.json                     playwright json 报告（L2 / fixture 回归 / 多方块交叉）
- *   <run>/web/l2-observations.json       L2 侧观测（偏差登记 F1/F2）
+ *   <run>/web/l2-observations.json       L2 侧观测（F1/F2 已修复闭环；仅残留差异进 findings，如修复前登记的形状）
  *   <run>/logs/*.log                     各阶段 stdout/stderr
  *   <run>/idempotency.json               `-Runs 2` 的跨轮产物字节比对（编排写）
  *

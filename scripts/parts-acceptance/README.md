@@ -154,8 +154,9 @@ evidenceLayout    运行目录/阶段/日志/L1/verify/静态/证伪/web 的路�
 
 | id | 级别 | 内容 |
 |----|------|------|
-| F1 | deviation | 真实导出是 `geometryPhase=baked` 的 StructureData，走 `StructureDataParser`；该解析器**不透传** `statsTemplate`/`statsOverride`/`partIconTextures` ⇒ 渲染定义根上没有文档默认统计层（契约 §9 三级配置第 1 级）⇒ 侧栏来源徽标落"内建默认"。fixture（V2Plain，未知根字段进 `_extra`）不受影响。 |
-| F2 | deviation | `partIconTextures` 在 web 侧**无消费接线**：`EmbedViewport.vue` 渲染 `BlockStatsSidebar` 时未传 `:part-icon-textures`，`setPartIconTextureSource` 恒为 null ⇒ 部件行图标只走宿主调色板回退（AE2/EnderIO/FMP 物品键非方块键 ⇒ 占位空槽）。 |
+| F1 | **resolved** | 【已修复闭环】StructureDataParser 不透传文档根级 `statsTemplate`/`statsOverride`/`partIconTextures` ⇒ 已加入根级透传白名单（`builtinParsers.ts`），`structureDataRootFields.test.ts` 6 用例锁定；L2 正向锁判徽标=`document-default`。fixture（V2Plain `_extra`）本不受影响。 |
+| F2 | **resolved** | 【已修复闭环】`partIconTextures` 无消费接线 ⇒ `EmbedViewport.vue` 新增 computed + `:part-icon-textures` prop 接线（注入沿用 BlockStatsSidebar 既有 watch）；L2 正向锁新增消费级断言"iconKey ∈ 纹理表的部件行全部渲染出 canvas"。 |
+| F2b | **resolved** | 【已修复闭环】FMP 行图标键（typeKey，带 `mat=` 前缀）与嵌入纹理键（`PartItem.iconKey()`，裸材料串）错位 ⇒ mod 侧 `nbtDiscriminator` 改存 `mat=<材料串>` 键值串（契约 §10.2 同形），iconKey()==typeKey；web 侧既有测试本就按带前缀形状编写，无需改。 |
 | F3 | deviation | **跨会话 FMP stale-tile 累积**（本轮 P3.1 实测擒获，两轮各现一次）：同一验收世界的第二次客户端会话里，overlay 区 FMP 格由 3 部件（`fmp:slot0/1/2`）变成 6 部件（追加 `fmp:slot0#2/slot1#2/slot2#2`），L1 内嵌验证器 4 条判据红、退出码 2；随后单会话运行又恢复正常 ⇒ **时序相关、偶发**（与计划 §9 已登记的探针开放项同源）。**处置**：编排默认每轮从 `world-baseline/` 还原世界（各轮起点逐字节相同）；**判定式照实报红（非静默通过）**；mod 侧属写范围外 ⇒ 只登记。 |
 | F5 | deviation | **AE2 伪装板格偶发整格缺失**（本轮实测 1/8 会话）：`cellPartsGrid[12][1][3]`（世界 [68,12,76]，facade+线缆）三套件同报 `FAIL: 部件格应有 partLists 下标（实际 -1）`，计数 `ItemMultiPart:16` 5→4 / `ItemFacade:0` 2→1；下一轮同位置完全正常。mod 侧（建造/捕获时序）⇒ 只登记。 |
 | M1 | measurement | AE2 平面类部件（成形/破坏面板）碰撞盒在某轴零厚度（`ae2:SOUTH/collision` y/z 两轴 0 厚度）——平面语义的**如实快照**，非契约违例；L1/L2 盒判据按"逐轴 min≤max + 非全轴退化"判定。 |
@@ -163,9 +164,7 @@ evidenceLayout    运行目录/阶段/日志/L1/verify/静态/证伪/web 的路�
 | M3 | known-limitation | 动画纹理物品图标的跨进程不确定性（EnderIO 导管 `.mcmeta`）；验收会话已把图集动画精灵复位帧 0，长期方案待定。 |
 | M4 | measurement | **从零生成的验收世界导出无效**：清掉验收世界后重建，建造 0 错误但客户端在 `WAIT_SYNC`（60 tick）窗口内收不到新方块 ⇒ `measured` 全格 `hostFullCube=true`、导出无 `cellPartsGrid`。⇒ `-ResetWorld` **默认关闭**（复用既有世界，自动化自带 `resetWorld` 清场 + 重建）。 |
 
-**F1/F2 由 L2 的"偏差锁"用例机器记录**（`web/e2e/parts-real-export.spec.ts` 的
-`偏差锁 F1/F2`：断言**当前可复现的偏差状态**，实现被修好时该用例**主动变红**，迫使断言与清单同步更新）。
-本轮**不代修**（写范围：`web/e2e/` + `scripts/parts-acceptance/` + `package.json`）。
+**F1/F2 已由 L2 的"正向锁"用例闭环**（`web/e2e/parts-real-export.spec.ts` 的修复锁用例：断言修复后的正确行为——徽标=document-default、定义根两字段与文件逐值一致、图标 canvas 逐行渲染；回退接线则必红，证伪实证见当轮记录）。F3/F5 仍为开放项（mod 侧时序偶发，编排有确定性规避）。
 
 ## 7. 资产与运行位置
 

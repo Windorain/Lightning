@@ -9,7 +9,10 @@
  *  - provenance 面板 `[data-stats-provenance]` 的逐字段行 `[data-stats-prov-field]`；
  *  - 行 `.nei-slot-row`：部件模式带 `data-stats-row-key` / `data-stats-row-kind` /
  *    `data-stats-icon-key`（**图标键**，部件行 = 物品身份键，宿主行 = 宿主键），
- *    旧路径行无 data 属性（DOM 零新增退化的直接证据）。
+ *    旧路径行无 data 属性（DOM 零新增退化的直接证据）；
+ *  - 行图标槽 `.nei-slot-preview-icon`：`BlockSlotPreview` 只在缓存条目 ready 时挂 canvas
+ *    ⇒ "槽内有 canvas" = 该图标键解析出了图标（F2 嵌入纹理通道的生产可观测结果，
+ *    见 `readStatsRowIcons` / `waitStatsRowIcons`）。
  *
  * 驱动 = 生产按钮的真实 `click()`（DOM 事件注入）；不触碰 src 内部函数。
  */
@@ -226,4 +229,81 @@ export async function readProvenance(page: Page, openPanel: boolean, timeout = 1
       hasReset: !!document.querySelector('.wb-wiki-embed [data-stats-reset-local]'),
     }
   })
+}
+
+// ---------------------------------------------------------------------------
+// 部件行图标槽（F2：嵌入图标纹理通道的**生产可观测结果**）
+// ---------------------------------------------------------------------------
+
+export interface StatsRowIconObservation {
+  /** 行身份键（同 `StatsRowObservation.key`）。 */
+  key: string | null
+  /** 'part' | 'host' | null。 */
+  kind: string | null
+  /** 图标键（部件行 = 物品身份键 `registry:damage[#nbt]`）。 */
+  iconKey: string | null
+  /**
+   * 图标槽内是否已挂**就绪 canvas**。
+   *
+   * 生产语义（`BlockSlotPreview.vue`）：`BlockIconCache` 条目 `status==='ready'` 时把烘焙 canvas
+   * `appendChild` 进 `.nei-slot-preview-icon`；`pending`/`error`（含"键不在方块调色板里 ⇒ 占位空槽"）
+   * 都渲染空槽。因此"槽里有 canvas" = 该图标键**真的解析出了图标**（嵌入纹理通道或宿主回退链），
+   * 这正是 F2"部件物品图标纹理生效"能对用户看见的形态。
+   */
+  hasCanvas: boolean
+  canvasWidth: number
+  canvasHeight: number
+}
+
+/** 读全部行的图标槽状态（生产 DOM，无归一化假设）。 */
+export async function readStatsRowIcons(page: Page): Promise<StatsRowIconObservation[]> {
+  return await page.evaluate(() => {
+    const sidebar = document.querySelector('.wb-wiki-embed .nei-sidebar')
+    if (!sidebar) return []
+    return [...sidebar.querySelectorAll('.nei-slot-row')].map((r) => {
+      const canvas = r.querySelector('.nei-slot-preview-icon canvas') as HTMLCanvasElement | null
+      return {
+        key: r.getAttribute('data-stats-row-key'),
+        kind: r.getAttribute('data-stats-row-kind'),
+        iconKey: r.getAttribute('data-stats-icon-key'),
+        hasCanvas: !!canvas,
+        canvasWidth: canvas?.width ?? 0,
+        canvasHeight: canvas?.height ?? 0,
+      }
+    })
+  })
+}
+
+/**
+ * 等「图标键在给定集合内的**部件行**」全部渲染出 canvas（图标烘焙是异步的：base64 解码
+ * 在 `BlockIconCache` 的串行队列里）。
+ *
+ * 超时**抛错并列出仍无 canvas 的行**（含键），不静默返回 —— 调用方据此判定
+ * "嵌入纹理通道没接通"还是"某个键没有纹理来源"。
+ * `coveredIconKeys` 之外的键不参与等待（它们本就该走回退链/占位）。
+ */
+export async function waitStatsRowIcons(
+  page: Page,
+  coveredIconKeys: readonly string[],
+  timeout = 30_000,
+): Promise<StatsRowIconObservation[]> {
+  const covered = new Set(coveredIconKeys)
+  const deadline = Date.now() + timeout
+  let last: StatsRowIconObservation[] = []
+  for (;;) {
+    last = await readStatsRowIcons(page)
+    const partRows = last.filter((r) => r.kind === 'part')
+    const pending = partRows.filter(
+      (r) => r.iconKey !== null && covered.has(r.iconKey) && !r.hasCanvas,
+    )
+    if (partRows.length > 0 && pending.length === 0) return last
+    if (Date.now() > deadline) {
+      throw new Error(
+        `P3.1：等待部件行图标就位超时（${timeout}ms）—— 仍有 ${pending.length} 行无 canvas：` +
+          `${pending.map((r) => r.iconKey).join(', ') || '<部件行尚未渲染>'}` +
+          `\n  最后读数：${JSON.stringify(last.slice(0, 6))}${last.length > 6 ? ` …（共 ${last.length} 行）` : ''}`,
+      )
+    }
+    await new Promise((r) => setTimeout(r, 50))
+  }
 }

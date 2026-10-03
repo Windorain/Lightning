@@ -852,10 +852,11 @@ Write-Host ""
 $script:openItems = @(
     [ordered]@{ id = 'p2.5-geometry-augmented-copy'; severity = 'info'; text = 'P2.5 fixture 悬停用例采用「几何增强内存副本」口径（fixture 单绕组背向默认相机 + AE2 补面与邻盒共边界）；真实导出（本编排 L2）几何完整，不需要增强 —— 见 web/e2e/helpers/parts/README.md' },
     [ordered]@{ id = 'p2.5-mobile-collapse-oscillation'; severity = 'info'; text = 'mobile 窄布局侧栏展开 ~50ms 内被生产 watcher 折回（P2.5 实证）；展开态统计交互仅 desktop 跑，mobile 覆盖 = 解析级 + 悬停' },
-    [ordered]@{ id = 'f1-f2-real-export-root-fields'; severity = 'deviation'; text = '真实导出（StructureData 解析链）丢失 statsTemplate/statsOverride/partIconTextures，且 partIconTextures 在 web 侧无消费接线 —— 详见报告 findings F1/F2（本轮只登记不代修）' },
+    [ordered]@{ id = 'f1-f2-real-export-root-fields'; severity = 'resolved'; text = '【已修复闭环】StructureDataParser 根级透传 statsTemplate/statsOverride/partIconTextures + EmbedViewport 接线 :part-icon-textures（structureDataRootFields.test.ts 6 用例 + L2 正向锁：徽标=document-default、图标 canvas 逐行断言）' },
+    [ordered]@{ id = 'f2b-fmp-iconkey-mat-prefix'; severity = 'resolved'; text = '【已修复闭环】FMP 行图标键带 mat= 前缀而嵌入纹理键不带 ⇒ mod 侧 nbtDiscriminator 改存 "mat=<材料串>" 键值串（契约 §10.2 同形），iconKey()==typeKey，图标键对齐' },
     [ordered]@{ id = 'ae2-plane-zero-thickness-box'; severity = 'info'; text = 'AE2 平面类部件（成形/破坏面板）碰撞盒在某轴零厚度（如实快照）；L1/L2 判据按「逐轴 min≤max + 非全轴退化」判定 —— 见报告 findings M1' },
     [ordered]@{ id = 'family-naming-eio'; severity = 'info'; text = '契约 §3 示例把 EnderIO 族写作 enderio，实现统一用 eio（localId 前缀 = family = 开关族名，自洽）—— 见报告 findings M2' },
-    [ordered]@{ id = 'gitignore-parts-acceptance-out'; severity = 'action'; text = '`.gitignore` 是否覆盖 `scripts/parts-acceptance/.out/` 请提交前确认（本任务写范围不含 .gitignore），否则运行证据会被 git add -A 带进仓库' }
+    [ordered]@{ id = 'gitignore-parts-acceptance-out'; severity = 'resolved'; text = '【已闭环】.gitignore 已覆盖 scripts/parts-acceptance/.out/（L51），运行证据不会入库' }
 )
 $script:adjudications = @(
     [ordered]@{ id = 'P3.1-l2-real-export-archive'; text = 'L2 直接消费 L1 归档产物（每次完整编排内由 L1 阶段新鲜产出，canonical oracle 权威），不做"另跑一轮只导出"以减少客户端启动次数（一次一个 MC 客户端纪律）。'; source = '执行侧拍板（计划 §5 P3.1 允许"验收编排内重新导出"）' },

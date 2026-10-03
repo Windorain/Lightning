@@ -123,7 +123,7 @@ boolean isFullCube(Block block, World world, int x, int y, int z) {
 |----|--------------|------|
 | ae2 | `registry:damage`（:16/:80/:220 同 item 不同 damage） | P0.2 §1.4 |
 | eio | `registry:damage`（conduit subtype；连接器 conduitType==null 不是物品，**不发射部件**） | P0.2 §2.4/2.5 |
-| fmp | `registry:damage#mat=<材料串>`（同 damage 不同材料 = 不同物品；材料名是别名，权威身份 = NBT mat 串） | P0.2 §3.4/3.5 |
+| fmp | `registry:damage#mat=<材料串>`（同 damage 不同材料 = 不同物品；材料名是别名，权威身份 = NBT mat 串；`nbtDiscriminator` 字段值 = 同形键值串 `mat=<材料串>`，使物品身份键与 typeKey 一致） | P0.2 §3.4/3.5 |
 | generic | **drop 身份**：`getItemDropped` registry + `damageDropped`（**不是**方块 meta——上/下半 slab 同为 `stone_slab:0`，朝向 meta 坍缩） | P0.3 §5 |
 | inferred | 宿主 drop 身份（推断档无更细信息） | — |
 

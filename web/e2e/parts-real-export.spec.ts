@@ -24,6 +24,9 @@
  *  5. **满方块格回归**：整格方块悬停不携带部件（`part === null`）、tooltip = 宿主回退（基线一致）。
  *  6. **统计默认视图行与 oracle `expectedCounts` 精确比对**（21 条 / 61 件；总数硬编码做反同义反复）。
  *  7. **来源徽标呈现** + 部件行图标键 = 物品身份键（不是宿主方块键）。
+ *     P3.1 首轮擒获的 F1（StructureData 解析链丢文档根级 statsTemplate）与
+ *     F2（partIconTextures 无消费接线）**已修复**，本节 C2 由"偏差锁"翻转为**正向锁**
+ *     （徽标 = 文档默认 + 有纹理来源的部件行图标槽必须出 canvas）。
  *  8. **退化导出（degraded_all）**：全格落档 3 `family=inferred`、逐格与退化 oracle 哨兵语义一致；
  *     统计行有 inferred 族部件行，且 `countsScope=untransformed-cells-only` 子集精确
  *     （torch 12 件——退化档唯一"未变换格"）。
@@ -75,6 +78,7 @@ import {
   readStatsSidebarSettled,
   readTooltipText,
   readWikiHover,
+  waitStatsRowIcons,
   waitStatsSidebarReady,
   type StatsRowObservation,
 } from './helpers/parts'
@@ -485,27 +489,34 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
 })
 
 // ===========================================================================
-// C2. 文档根字段存活（已知实现偏差的**机器锁**，见文件头 findings F1/F2）
+// C2. 文档根字段存活（F1/F2 **已修复**后的正向锁）
 // ===========================================================================
 
-test.describe('P3.1 · 偏差锁：文档根字段在真实导出解析链上的存活', () => {
+test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/F2 修复锁）', () => {
   /**
-   * 这是本编排唯一的"**已知偏差锁**"用例：它断言的不是理想行为，而是**当前可复现的偏差状态**，
-   * 目的是让偏差被机器记录、写进报告（`acceptance-report.json#findings`），并在实现被修好时
-   * **主动变红**（迫使把断言与 §6 清单一起更新），而不是静默漂移。
+   * 本用例原为"**已知偏差锁**"（P3.1 首轮）：断言当时的偏差状态（`definition.statsTemplate` 不可得、
+   * 徽标 = 内建默认、`partIconTextures` 无消费接线），让偏差被机器记录进
+   * `acceptance-report.json#findings`，并在实现被修好时主动变红。
    *
-   * 偏差（本轮上报，未代修）：
-   *  - **F1**：真实导出是 `geometryPhase=baked` 的 StructureData，走 `StructureDataParser`
-   *    （`web/src/context/parsers/builtinParsers.ts` L100–140）。该解析器透传
-   *    `materialPalette/textureBlobs/tooltipPalette/cellTooltipGrid/playback`，
-   *    **不透传** `statsTemplate` / `statsOverride` / `partIconTextures` ⇒ 渲染定义根上
-   *    没有文档默认统计层（契约 §9 三级配置第 1 级）⇒ 侧栏来源徽标落"内建默认"而非"文档默认"。
-   *    （fixture 走 V2PlainParser，未知根字段进 `_extra` 兜底 ⇒ 三级配置在 fixture 路径正常。）
-   *  - **F2**：`partIconTextures` 在 web 侧**无消费接线**：`EmbedViewport.vue` L308–317 渲染
-   *    `BlockStatsSidebar` 时未传 `:part-icon-textures`，`setPartIconTextureSource` 因此恒为 null
-   *    ⇒ 部件行图标只走"宿主调色板回退"通道（AE2/EnderIO/FMP 物品键非方块键 ⇒ 占位空槽）。
+   * **修复后已翻转为正向锁**（本轮，见报告 findings F1/F2 的 `expectedAfterFix`）：
+   *  - **F1**：`StructureDataParser` 已把**文档根级** `statsTemplate`/`statsOverride`/`partIconTextures`
+   *    透传到 v2 根（与 structure 级的 `cellPartsGrid`/`partLists` 分层，见
+   *    `web/src/context/__tests__/structureDataRootFields.test.ts`）⇒ 渲染定义根带文档默认统计层
+   *    ⇒ 侧栏来源徽标 = **文档默认**（契约 §9 三级配置第 1 级）；
+   *  - **F2**：`EmbedViewport.vue` 已把该根字段传给 `BlockStatsSidebar` 的 `partIconTextures`
+   *    prop ⇒ `BlockIconCache#setPartIconTextureSource` 接通嵌入纹理通道 ⇒ 部件行图标槽
+   *    渲染出真实图标（不再恒走宿主调色板回退/占位）。
+   *
+   * 断言口径（正向）：
+   *  ① 文件侧文档根字段在位（ground truth）；
+   *  ② 运行时**渲染定义根**两字段可得的**值**与文件一致（不是"有个键就算过"）；
+   *  ③ 徽标来源 = `document-default`；
+   *  ④ **有纹理来源的部件行**（`iconKey` ∈ `partIconTextures` 键集）图标槽必须有 canvas
+   *     —— 这是 F2 接线的生产可观测结果（`helpers/parts/statsSidebar.ts#waitStatsRowIcons`）。
+   *     `iconKey` 不在纹理表里的行（实测 = FMP 的 `#mat=` 类型键与 `partIconTextures` 的
+   *     物品身份键 `#<mat>` 拼写差异）走回退链，**不判红但如实登记**为 finding（见下方 payload）。
    */
-  test('偏差锁 F1/F2：文件带 statsTemplate/partIconTextures，真实导出链上二者均不可得', async ({ page }, testInfo) => {
+  test('F1/F2 修复锁：文件带 statsTemplate/partIconTextures，真实导出链上二者均生效', async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== 'desktop-chrome',
       '观测文件写入必须是单写者（幂等：运行目录产物字节一致），故只在 desktop 跑',
@@ -523,13 +534,61 @@ test.describe('P3.1 · 偏差锁：文档根字段在真实导出解析链上的
     const obs = await readDefinitionRootFields(page, WIKI_REGION)
     const s = await readStatsSidebarSettled(page)
 
-    // ── 运行时定义侧：两个字段都没活下来（F1/F2）──
-    // 若下列断言变红 ⇒ 实现已修复（解析链接上了文档根字段）：
-    //   ① 把这两条改成 toBe(true)；② 把统计徽标断言改成 document-default；
-    //   ③ 更新 scripts/parts-acceptance/build-parts-report.mjs 的 findings 与 §6 清单说明。
-    expect(obs.hasStatsTemplate, 'F1 锁：真实导出经 StructureData 解析链后 statsTemplate 不可得').toBe(false)
-    expect(obs.hasPartIconTextures, 'F2 锁：真实导出经 StructureData 解析链后 partIconTextures 不可得').toBe(false)
-    expect(s.pill?.source, 'F1 后果：侧栏来源徽标 = 内建默认（文档默认层缺失）').toBe('builtin')
+    // ── F1：运行时定义根带着**同一份**文档默认统计层 → 徽标 = 文档默认 ──
+    expect(obs.hasStatsTemplate, 'F1：真实导出经 StructureData 解析链后 statsTemplate 可得').toBe(true)
+    expect(obs.statsTemplate, 'F1：定义根的 statsTemplate 与文件逐值一致').toEqual(FULL.statsTemplate)
+    expect(s.pill, '含部件 ⇒ 配置来源徽标常驻').not.toBeNull()
+    expect(
+      s.pill!.source,
+      `F1：徽标来源 = 文档默认（实际 ${s.pill!.source}/「${s.pill!.text}」；内建默认 ⇒ F1 未接通）`,
+    ).toBe('document-default')
+
+    // ── F2：定义根带部件图标纹理表，且**已被侧栏消费**（行图标槽真的出图）──
+    expect(obs.hasPartIconTextures, 'F2：真实导出经解析链后 partIconTextures 可得').toBe(true)
+    expect(obs.partIconTextureKeys, 'F2：定义根纹理键数 = 文件键数').toBe(fileIconKeys.length)
+
+    const partRows = s.rows.filter((r) => r.kind === 'part')
+    expect(partRows.length, '统计侧栏渲染出部件行').toBeGreaterThan(0)
+    const coveredRows = partRows.filter((r) => r.iconKey !== null && fileIconKeys.includes(r.iconKey))
+    expect(
+      coveredRows.length,
+      `F2：有嵌入纹理来源的部件行数 > 0（实际 ${coveredRows.length}/${partRows.length}）`,
+    ).toBeGreaterThan(0)
+    const icons = await waitStatsRowIcons(page, coveredRows.map((r) => r.iconKey!))
+    const byIconKey = new Map(icons.map((r) => [r.iconKey, r]))
+    const naked = coveredRows.filter((r) => byIconKey.get(r.iconKey!)?.hasCanvas !== true)
+    expect(
+      naked.map((r) => r.iconKey),
+      'F2：有纹理来源的部件行必须全部渲染出图标 canvas（空槽 ⇒ 嵌入纹理通道未接通）',
+    ).toEqual([])
+    for (const r of coveredRows) {
+      const got = byIconKey.get(r.iconKey!)!
+      expect(got.canvasWidth, `${r.iconKey} 图标 canvas 宽 > 0`).toBeGreaterThan(0)
+      expect(got.canvasHeight, `${r.iconKey} 图标 canvas 高 > 0`).toBeGreaterThan(0)
+    }
+
+    // ── 残留差异（如实登记，不判红）：行图标键不在纹理表里的部件行 ──
+    // 它们只能走宿主调色板回退/占位。实测 = FMP 三行（行键/图标键 = `...#mat=<材料>`
+    // vs `partIconTextures` 键 = 物品身份键 `...#<材料>`，mod 侧 `PartItem.iconKey()` 与
+    // web 侧 `partStats` 主条目行键（= `part.typeKey`）在 FMP 上拼写不同）。
+    const uncovered = partRows.filter((r) => r.iconKey === null || !fileIconKeys.includes(r.iconKey))
+    const uncoveredKeys = uncovered.map((r) => r.iconKey ?? r.key ?? '?')
+    const uncoveredFindings = uncoveredKeys.length > 0
+      ? [{
+          id: 'F2b',
+          severity: 'deviation',
+          title: '部件行图标键与 partIconTextures 键拼写不一致（FMP `#mat=` 段）',
+          observed:
+            `行图标键不在 ${REAL_EXPORT_FILES.full} 的 partIconTextures 键集里：${uncoveredKeys.join(', ')}` +
+            `（${uncoveredKeys.length}/${partRows.length} 行）⇒ 这些行仍走宿主回退/占位`,
+          expectedAfterFix:
+            '统一"物品身份键"拼写：web 侧部件行 iconKey 取 partItemKey(items[0])（契约 §5 物品身份键），' +
+            '或在导出侧让 typeKey 与 partIconTextures 键同形 —— 本包写范围外（web/src/pure/partStats.ts 未在修复写范围内），只登记',
+          codeAnchor:
+            'web/src/pure/partStats.ts#partItemContributions（主条目 rawKey = part.typeKey）vs ' +
+            'mod PartItem.iconKey()（registry:damage#nbtDiscriminator）',
+        }]
+      : []
 
     // ── 观测落盘（供报告 findings 消费；无 timestamps ⇒ 幂等）──
     const payload = {
@@ -544,24 +603,18 @@ test.describe('P3.1 · 偏差锁：文档根字段在真实导出解析链上的
       definitionRoot: obs,
       statsSidebarPill: s.pill,
       statsRows: s.rows.length,
-      findings: [
-        {
-          id: 'F1',
-          severity: 'deviation',
-          title: '真实导出（StructureData 解析链）丢失文档默认统计层 statsTemplate',
-          observed: `definition.statsTemplate=${obs.hasStatsTemplate} → 徽标 ${s.pill?.source}`,
-          expectedAfterFix: 'definition.statsTemplate=true → 徽标 document-default',
-          codeAnchor: 'web/src/context/parsers/builtinParsers.ts（StructureDataParser 透传键白名单缺 statsTemplate/statsOverride/partIconTextures）',
-        },
-        {
-          id: 'F2',
-          severity: 'deviation',
-          title: 'partIconTextures 在 web 侧无消费接线（部件物品图标纹理不生效）',
-          observed: `file 键 ${fileIconKeys.length} 个 / definition.partIconTextures=${obs.hasPartIconTextures}`,
-          expectedAfterFix: 'EmbedViewport 向 BlockStatsSidebar 传 :part-icon-textures（键 = 物品身份键）',
-          codeAnchor: 'web/src/shared/viewport/EmbedViewport.vue L308–317（未传 partIconTextures）；web/src/render/interaction/blockIconCache.ts#setPartIconTextureSource 仅由该 prop 驱动',
-        },
-      ],
+      /** F2 消费证据：有纹理来源的部件行 → 图标槽 canvas 就位情况（生产 DOM）。 */
+      partRowIcons: {
+        partRows: partRows.length,
+        coveredByPartIconTextures: coveredRows.length,
+        renderedCanvas: coveredRows.filter((r) => byIconKey.get(r.iconKey!)?.hasCanvas === true).length,
+        uncoveredIconKeys: uncoveredKeys,
+      },
+      /**
+       * F1/F2 **已修复**（本锁已翻转为正向断言）⇒ 不再登记二者为偏差；
+       * 仅保留修复过程中实测到的残留差异（F2b，若有）。
+       */
+      findings: uncoveredFindings,
     }
     const out = process.env.PARTS_L2_OBSERVATIONS_OUT
     if (out) {
@@ -570,9 +623,11 @@ test.describe('P3.1 · 偏差锁：文档根字段在真实导出解析链上的
       console.log(`[P3.1-L2] 观测落盘：${out}`)
     }
     console.log(
-      `[P3.1-L2] 偏差锁：file.statsTemplate=${JSON.stringify(FULL.statsTemplate)} / ` +
+      `[P3.1-L2] F1/F2 修复锁：file.statsTemplate=${JSON.stringify(FULL.statsTemplate)} / ` +
         `file.partIconTextures=${fileIconKeys.length} 键；definition.hasStatsTemplate=${obs.hasStatsTemplate} / ` +
-        `definition.partIconTextures=${obs.hasPartIconTextures}；徽标=${s.pill?.text}/${s.pill?.source}`,
+        `definition.partIconTextures=${obs.hasPartIconTextures}；徽标=${s.pill?.text}/${s.pill?.source}；` +
+        `图标 canvas ${payload.partRowIcons.renderedCanvas}/${coveredRows.length} 行（纹理表覆盖）；` +
+        `无纹理来源 ${uncoveredKeys.length} 行：${uncoveredKeys.join(', ') || '<无>'}`,
     )
   })
 })

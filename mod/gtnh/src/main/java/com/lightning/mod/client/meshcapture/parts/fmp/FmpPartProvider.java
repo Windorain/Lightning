@@ -186,14 +186,20 @@ public final class FmpPartProvider implements PartProvider {
         addCuboids(rec, part, "getSubParts", PartBox.KIND_VISUAL);
         addCuboids(rec, part, "getCollisionBoxes", PartBox.KIND_COLLISION);
 
-        // items 数组逐条（含 nbtDiscriminator = mat 串）
+        // items 数组逐条（nbtDiscriminator = "mat=<材料串>" 键值串，与契约 §10.2 proto 注释及
+        // typeKey 的 `#mat=` 段同形 ⇒ PartItem.iconKey() == typeKey，web 统计行图标键直配）
         String mat = null;
         for (ItemStack drop : drops) {
             String dropMat = matString(drop);
             if (mat == null) {
                 mat = dropMat;
             }
-            rec.items.add(new PartItem(registryOf(drop), drop.getItemDamage(), drop.stackSize, dropMat));
+            rec.items.add(
+                new PartItem(
+                    registryOf(drop),
+                    drop.getItemDamage(),
+                    drop.stackSize,
+                    dropMat == null ? null : "mat=" + dropMat));
         }
 
         fillDisplayAndTooltip(rec, drops, fmpType);
