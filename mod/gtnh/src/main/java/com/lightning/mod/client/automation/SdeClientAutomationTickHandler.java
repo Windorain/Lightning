@@ -17,6 +17,7 @@ import net.minecraftforge.client.event.ClientChatReceivedEvent;
 
 import org.apache.logging.log4j.Level;
 
+import com.lightning.mod.client.meshcapture.parts.probe.LpTeRoundTripAutomation;
 import com.lightning.mod.client.meshcapture.parts.probe.PartsAcceptanceAutomation;
 import com.lightning.mod.client.meshcapture.parts.probe.PartsProbeAutomation;
 import com.lightning.mod.client.multiblock.MultiblockPipelineAutomation;
@@ -53,6 +54,13 @@ public final class SdeClientAutomationTickHandler {
         }
 
         Minecraft mc = Minecraft.getMinecraft();
+
+        // Gitea issue #12 验证回路（LP 管道 TE 的 NBT 往返）：触发文件 sde_lp_te_probe.json 存在时接管本 tick。
+        // 它自带专用世界与专用放置路径，必须排在其它探针之前；触发文件不存在时本分支零行为变化。
+        if (LpTeRoundTripAutomation.isRequested(mc)) {
+            LpTeRoundTripAutomation.tick(mc);
+            return;
+        }
 
         // T1.6 游戏内自动导出管线：触发文件（sde_multiblock_pipeline.json）存在时接管本 tick。
         // 它自己负责「进专用干净世界 → 发 /sde multiblock → 等导出 → 落结构化结果 → 按退出码退出」，
