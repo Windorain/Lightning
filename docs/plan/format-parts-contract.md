@@ -323,5 +323,6 @@ JSON 字段名按本契约 §3 的 camelCase 落盘（proto snake_case 为规范
 | `web/e2e/fixtures/parts-ae2-multibox.v2.json` | AE2 线缆总线格（中心线缆 + NORTH 切换总线 + UP 存储总线，盒取自 p02-run-2 实测）+ 相邻满方块 | 多部件格、命名空间、视觉/碰撞双盒、typeKey 含 damage |
 | `web/e2e/fixtures/parts-singlebox-mix.v2.json` | 下半 slab + 上半 slab + 石头（满方块对照，无 parts）+ 栅栏（1.5 高碰撞盒） | 单盒档、满方块混存、越界盒、drop 身份计数键（上下半同键） |
 
-fixture 的 geometry 字段从简（最小合法 bakedQuadsJsonV1，部件验收不依赖宿主几何保真）；
+fixture 的 geometry 字段从简（最小合法 bakedQuadsJsonV1，部件验收不依赖宿主几何保真），但**每个
+部件盒内须有至少一个 raycast 可命中的面**（悬停 E2E 的物理可达性；P2.5 实证擒获后补全）；
 fixture 被 P2.1 解析通过后本契约定稿生效。

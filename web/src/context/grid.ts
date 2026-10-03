@@ -8,6 +8,7 @@
  * Palette 已解析为 SlotBlock，不使用原始的 palette index。
  */
 import { blockKey } from '@/pure/string'
+import { deepCopyPlain } from '@/pure/deepCopy'
 import type { GridPos, SlotBlock, PaletteEntryMeta } from '@/pure/gridTypes'
 import type { PartRecord } from '@/pure/partTypes'
 
@@ -134,7 +135,7 @@ export class Grid {
     if (parts === null || parts.length === 0) {
       this._cellParts.delete(key)
     } else {
-      this._cellParts.set(key, structuredClone(parts) as PartRecord[])
+      this._cellParts.set(key, deepCopyPlain(parts) as PartRecord[])
     }
     return true
   }

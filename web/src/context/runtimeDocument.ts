@@ -15,6 +15,7 @@
 import { structureRowToWorldY } from '@/pure/vec'
 import { blockKey } from '@/pure/string'
 import { PARTS_GRID_NONE, partListSignature, type PartList, type PartRecord } from '@/pure/partTypes'
+import { deepCopyPlain } from '@/pure/deepCopy'
 import { Grid, type GridPos, type SlotBlock, type PaletteEntryMeta } from './grid'
 import {
   MULTIBLOCK_DOCUMENT_SHAPE,
@@ -275,7 +276,7 @@ export class RuntimeDocument {
       formatVersion: this.formatVersion,
       id: this.id,
       frames: this.frames.map(f => {
-        const frameMultiblock = f.multiblock ? (structuredClone(f.multiblock) as MultiblockFrameDecl) : null
+        const frameMultiblock = f.multiblock ? (deepCopyPlain(f.multiblock) as MultiblockFrameDecl) : null
         if (!f.grid) return new RuntimeFrame(f.index, f.label, null, f.durationMs, frameMultiblock)
         // Deep clone grid
         const cells: (SlotBlock | null)[][][] = []
@@ -294,7 +295,7 @@ export class RuntimeDocument {
         const paletteCache = new Map(f.grid.getPaletteCache())
         const cellParts = new Map<string, PartRecord[]>()
         f.grid.forEachParts((pos, parts) => {
-          cellParts.set(`${pos.x},${pos.y},${pos.z}`, structuredClone(parts) as PartRecord[])
+          cellParts.set(`${pos.x},${pos.y},${pos.z}`, deepCopyPlain(parts) as PartRecord[])
         })
         return new RuntimeFrame(
           f.index,
@@ -312,7 +313,7 @@ export class RuntimeDocument {
       cellTooltipGrid: this.cellTooltipGrid ? this.cellTooltipGrid.map(s => s ? s.map(r => r ? [...r] : []) : []) : undefined,
       materialPalette: this.materialPalette ? [...this.materialPalette] : undefined,
       playback: this.playback ? { ...this.playback } : undefined,
-      multiblock: this.multiblock ? (structuredClone(this.multiblock) as MultiblockDeclaration) : null,
+      multiblock: this.multiblock ? (deepCopyPlain(this.multiblock) as MultiblockDeclaration) : null,
       extra: { ...this._extra },
     })
   }
@@ -468,7 +469,7 @@ export class RuntimeDocument {
               if (pIdx === undefined) {
                 pIdx = partLists.length
                 partListIndexBySignature.set(sig, pIdx)
-                partLists.push(structuredClone(parts) as PartList)
+                partLists.push(deepCopyPlain(parts) as PartList)
               }
               partsRow.push(pIdx)
             } else {
