@@ -178,13 +178,20 @@ public final class InferredGeometryPartProvider implements PartProvider {
     }
 
     private static String safeDisplayName(ItemStack stack) {
-        if (stack == null) {
+        // P1.8 验收实证修复（degraded-all 轮）：无物品形态的宿主方块（如 FMP BlockMultipart 无
+        // ItemBlock）⇒ ItemStack.item == null ⇒ getDisplayName 与 getUnlocalizedName 双双 NPE，
+        // 异常逃出 collectParts 导致档 3「永远有结果」（§7.1）被击穿（该格部件整格缺失）。
+        if (stack == null || stack.getItem() == null) {
             return "<unknown>";
         }
         try {
             return stack.getDisplayName();
         } catch (Throwable t) {
-            return stack.getUnlocalizedName();
+            try {
+                return stack.getUnlocalizedName();
+            } catch (Throwable t2) {
+                return "<unknown>";
+            }
         }
     }
 

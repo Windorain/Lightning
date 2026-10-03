@@ -18,6 +18,7 @@
     "multiblock:selfcheck":       "pwsh -NoProfile -File scripts/multiblock-pipeline/selfcheck.ps1",
 
     "acceptance:multiblock":      "pwsh -NoProfile -File scripts/acceptance/run-acceptance.ps1",
+    "acceptance:parts":           "pwsh -NoProfile -File scripts/parts-acceptance/run-acceptance.ps1",
     "acceptance:volume-doc":      "node scripts/acceptance/volume-doc.mjs"
   }
 }

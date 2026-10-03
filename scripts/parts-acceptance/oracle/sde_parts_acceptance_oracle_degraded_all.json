@@ -1,0 +1,973 @@
+{
+  "schema": "lightning.parts-oracle/1",
+  "structure": "parts-acceptance-degraded",
+  "builtAtEpochMs": 0,
+  "zones": [
+    "full-cube",
+    "single-box",
+    "ae2",
+    "enderio",
+    "fmp",
+    "overlay",
+    "variants",
+    "degraded"
+  ],
+  "gridIndex": {
+    "origin": [
+      65,
+      12,
+      64
+    ],
+    "size": [
+      13,
+      2,
+      15
+    ],
+    "rowAxis": "y-top-first"
+  },
+  "cells": [
+    {
+      "pos": [
+        65,
+        12,
+        64
+      ],
+      "zone": "full-cube",
+      "grid": [
+        0,
+        1,
+        0
+      ],
+      "host": "minecraft:stone:0",
+      "expectFullCube": true,
+      "parts": []
+    },
+    {
+      "pos": [
+        66,
+        12,
+        64
+      ],
+      "zone": "full-cube",
+      "grid": [
+        0,
+        1,
+        1
+      ],
+      "host": "minecraft:stone:0",
+      "expectFullCube": true,
+      "parts": []
+    },
+    {
+      "pos": [
+        67,
+        12,
+        64
+      ],
+      "zone": "full-cube",
+      "grid": [
+        0,
+        1,
+        2
+      ],
+      "host": "minecraft:furnace:5",
+      "expectFullCube": true,
+      "parts": []
+    },
+    {
+      "pos": [
+        68,
+        12,
+        64
+      ],
+      "zone": "full-cube",
+      "grid": [
+        0,
+        1,
+        3
+      ],
+      "host": "minecraft:crafting_table:0",
+      "expectFullCube": true,
+      "parts": []
+    },
+    {
+      "pos": [
+        65,
+        12,
+        66
+      ],
+      "zone": "single-box",
+      "grid": [
+        2,
+        1,
+        0
+      ],
+      "host": "minecraft:stone_slab:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:stone_slab:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        66,
+        12,
+        66
+      ],
+      "zone": "single-box",
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "host": "minecraft:stone_slab:8",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:stone_slab:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        68,
+        12,
+        66
+      ],
+      "zone": "single-box",
+      "grid": [
+        2,
+        1,
+        3
+      ],
+      "host": "minecraft:torch:5",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:0",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:1",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:2",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:3",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:4",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:5",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        }
+      ]
+    },
+    {
+      "pos": [
+        69,
+        12,
+        66
+      ],
+      "zone": "single-box",
+      "grid": [
+        2,
+        1,
+        4
+      ],
+      "host": "minecraft:stone:0",
+      "expectFullCube": true,
+      "parts": []
+    },
+    {
+      "pos": [
+        70,
+        12,
+        66
+      ],
+      "zone": "single-box",
+      "grid": [
+        2,
+        1,
+        5
+      ],
+      "host": "minecraft:torch:1",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:0",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:1",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:2",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:3",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:4",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        },
+        {
+          "localId": "inferred:5",
+          "typeKey": "minecraft:torch:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": 1,
+          "boxProvenance": "visual-only"
+        }
+      ]
+    },
+    {
+      "pos": [
+        72,
+        12,
+        66
+      ],
+      "zone": "single-box",
+      "grid": [
+        2,
+        1,
+        7
+      ],
+      "host": "minecraft:chest:3",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:chest:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        74,
+        12,
+        66
+      ],
+      "zone": "single-box",
+      "grid": [
+        2,
+        1,
+        9
+      ],
+      "host": "minecraft:chest:3",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:chest:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        75,
+        12,
+        66
+      ],
+      "zone": "single-box",
+      "grid": [
+        2,
+        1,
+        10
+      ],
+      "host": "minecraft:chest:3",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:chest:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        65,
+        12,
+        68
+      ],
+      "zone": "single-box",
+      "grid": [
+        4,
+        1,
+        0
+      ],
+      "host": "minecraft:fence:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:fence:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        67,
+        12,
+        68
+      ],
+      "zone": "single-box",
+      "grid": [
+        4,
+        1,
+        2
+      ],
+      "host": "minecraft:fence:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:fence:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        68,
+        12,
+        68
+      ],
+      "zone": "single-box",
+      "grid": [
+        4,
+        1,
+        3
+      ],
+      "host": "minecraft:fence:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:fence:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        69,
+        12,
+        68
+      ],
+      "zone": "single-box",
+      "grid": [
+        4,
+        1,
+        4
+      ],
+      "host": "minecraft:fence:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:fence:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        76,
+        12,
+        68
+      ],
+      "zone": "single-box",
+      "grid": [
+        4,
+        1,
+        11
+      ],
+      "host": "minecraft:fence:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:fence:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        75,
+        12,
+        68
+      ],
+      "zone": "single-box",
+      "grid": [
+        4,
+        1,
+        10
+      ],
+      "host": "minecraft:fence:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:fence:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        77,
+        12,
+        68
+      ],
+      "zone": "single-box",
+      "grid": [
+        4,
+        1,
+        12
+      ],
+      "host": "minecraft:fence:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:fence:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        76,
+        12,
+        67
+      ],
+      "zone": "single-box",
+      "grid": [
+        3,
+        1,
+        11
+      ],
+      "host": "minecraft:fence:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:fence:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        76,
+        12,
+        69
+      ],
+      "zone": "single-box",
+      "grid": [
+        5,
+        1,
+        11
+      ],
+      "host": "minecraft:fence:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "minecraft:fence:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        65,
+        12,
+        70
+      ],
+      "zone": "ae2",
+      "grid": [
+        6,
+        1,
+        0
+      ],
+      "host": "appliedenergistics2:tile.BlockCableBus:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "appliedenergistics2:tile.BlockCableBus:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        67,
+        12,
+        70
+      ],
+      "zone": "ae2",
+      "grid": [
+        6,
+        1,
+        2
+      ],
+      "host": "appliedenergistics2:tile.BlockCableBus:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "appliedenergistics2:tile.BlockCableBus:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        69,
+        12,
+        70
+      ],
+      "zone": "ae2",
+      "grid": [
+        6,
+        1,
+        4
+      ],
+      "host": "appliedenergistics2:tile.BlockCableBus:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "appliedenergistics2:tile.BlockCableBus:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        65,
+        12,
+        72
+      ],
+      "zone": "enderio",
+      "grid": [
+        8,
+        1,
+        0
+      ],
+      "host": "EnderIO:blockConduitBundle:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "EnderIO:blockConduitBundle:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        66,
+        12,
+        72
+      ],
+      "zone": "enderio",
+      "grid": [
+        8,
+        1,
+        1
+      ],
+      "host": "EnderIO:blockConduitBundle:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "EnderIO:blockConduitBundle:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        65,
+        12,
+        74
+      ],
+      "zone": "fmp",
+      "grid": [
+        10,
+        1,
+        0
+      ],
+      "host": "ForgeMultipart:block:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "ForgeMultipart:block:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        67,
+        12,
+        74
+      ],
+      "zone": "fmp",
+      "grid": [
+        10,
+        1,
+        2
+      ],
+      "host": "ForgeMultipart:block:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "ForgeMultipart:block:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        67,
+        13,
+        74
+      ],
+      "zone": "fmp",
+      "grid": [
+        10,
+        0,
+        2
+      ],
+      "host": "ForgeMultipart:block:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "ForgeMultipart:block:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        65,
+        12,
+        76
+      ],
+      "zone": "overlay",
+      "grid": [
+        12,
+        1,
+        0
+      ],
+      "host": "EnderIO:blockConduitBundle:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "EnderIO:blockConduitBundle:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        66,
+        12,
+        76
+      ],
+      "zone": "overlay",
+      "grid": [
+        12,
+        1,
+        1
+      ],
+      "host": "EnderIO:blockConduitBundle:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "EnderIO:blockConduitBundle:0",
+          "itemCount": 1,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        68,
+        12,
+        76
+      ],
+      "zone": "overlay",
+      "grid": [
+        12,
+        1,
+        3
+      ],
+      "host": "appliedenergistics2:tile.BlockCableBus:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "appliedenergistics2:tile.BlockCableBus:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        70,
+        12,
+        76
+      ],
+      "zone": "overlay",
+      "grid": [
+        12,
+        1,
+        5
+      ],
+      "host": "ForgeMultipart:block:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "ForgeMultipart:block:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        65,
+        12,
+        78
+      ],
+      "zone": "variants",
+      "grid": [
+        14,
+        1,
+        0
+      ],
+      "host": "appliedenergistics2:tile.BlockCableBus:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "appliedenergistics2:tile.BlockCableBus:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        67,
+        12,
+        78
+      ],
+      "zone": "variants",
+      "grid": [
+        14,
+        1,
+        2
+      ],
+      "host": "appliedenergistics2:tile.BlockCableBus:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "appliedenergistics2:tile.BlockCableBus:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    },
+    {
+      "pos": [
+        69,
+        12,
+        78
+      ],
+      "zone": "variants",
+      "grid": [
+        14,
+        1,
+        4
+      ],
+      "host": "appliedenergistics2:tile.BlockCableBus:0",
+      "expectFullCube": false,
+      "parts": [
+        {
+          "localId": "inferred:*",
+          "typeKey": "appliedenergistics2:tile.BlockCableBus:0",
+          "itemCount": 0,
+          "boxTier": 3,
+          "boxCount": -1,
+          "boxProvenance": "*"
+        }
+      ]
+    }
+  ],
+  "countsScope": "untransformed-cells-only",
+  "expectedCounts": [
+    {
+      "typeKey": "minecraft:torch:0",
+      "display": "minecraft:torch:0",
+      "count": 12
+    }
+  ]
+}

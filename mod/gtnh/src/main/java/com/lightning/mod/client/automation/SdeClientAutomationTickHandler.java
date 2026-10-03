@@ -17,6 +17,7 @@ import net.minecraftforge.client.event.ClientChatReceivedEvent;
 
 import org.apache.logging.log4j.Level;
 
+import com.lightning.mod.client.meshcapture.parts.probe.PartsAcceptanceAutomation;
 import com.lightning.mod.client.meshcapture.parts.probe.PartsProbeAutomation;
 import com.lightning.mod.client.multiblock.MultiblockPipelineAutomation;
 import com.lightning.mod.client.multiblock.MultiblockScanAutomation;
@@ -77,6 +78,13 @@ public final class SdeClientAutomationTickHandler {
         // （新增分支，默认不激活；触发文件不存在时零行为变化）。
         if (PartsProbeAutomation.isRequested(mc)) {
             PartsProbeAutomation.tick(mc);
+            return;
+        }
+
+        // P1.8 部件验收（建造→导出→oracle 落盘）：只有在 mcDataDir 下存在触发文件
+        // （sde_parts_acceptance.json）时接管本 tick（触发文件不存在时零行为变化）。
+        if (PartsAcceptanceAutomation.isRequested(mc)) {
+            PartsAcceptanceAutomation.tick(mc);
             return;
         }
 

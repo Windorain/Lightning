@@ -197,13 +197,19 @@ public final class GenericSingleBoxPartProvider implements PartProvider {
     }
 
     private static String safeDisplayName(ItemStack stack) {
-        if (stack == null) {
+        // 与 InferredGeometryPartProvider 同款守卫（P1.8 实证）：无物品形态宿主方块
+        // （ItemStack.item == null）时两个取名路径都 NPE，必须兜底保「导出绝不中断」。
+        if (stack == null || stack.getItem() == null) {
             return "<unknown>";
         }
         try {
             return stack.getDisplayName();
         } catch (Throwable t) {
-            return stack.getUnlocalizedName();
+            try {
+                return stack.getUnlocalizedName();
+            } catch (Throwable t2) {
+                return "<unknown>";
+            }
         }
     }
 

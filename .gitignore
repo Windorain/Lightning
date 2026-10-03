@@ -46,3 +46,6 @@ scripts/multiblock-encode/.out/
 scripts/multiblock-pipeline/.out/
 
 scripts/acceptance/.out/
+
+# P1.8 部件验收的归档与日志（可再生；oracle/ 为 P2.5 消费交付物，须入库不忽略）
+scripts/parts-acceptance/.out/

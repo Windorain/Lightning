@@ -3,6 +3,8 @@ package com.lightning.mod.client.meshcapture.parts;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.lightning.mod.client.meshcapture.parts.ae2.Ae2PartProvider;
@@ -46,6 +48,14 @@ import cpw.mods.fml.relauncher.SideOnly;
 public final class PartProviderRegistry {
 
     private static final CopyOnWriteArrayList<PartProvider> PROVIDERS = new CopyOnWriteArrayList<>();
+
+    /**
+     * P1.8 按族提供者开关（P3.3 退化验证依赖）：族名（{@link PartProvider#family()}，如
+     * {@code "ae2"}/{@code "eio"}/{@code "fmp"}）在本集合中 ⇒ {@link #dispatch} 跳过该族提供者。
+     * <strong>默认空 = 全开，生产行为不变</strong>；仅供验收/探针通道（触发文件驱动）调用，
+     * 生产代码不得触碰。开关只影响调度，不注销提供者（恢复 = {@link #clearFamilySwitchesForProbe}）。
+     */
+    private static final Set<String> DISABLED_FAMILIES_FOR_PROBE = ConcurrentHashMap.newKeySet();
 
     static {
         register(new Ae2PartProvider());
@@ -102,6 +112,33 @@ public final class PartProviderRegistry {
         }
     }
 
+    // ------------------------------------------------------------------ P1.8 按族开关（探针/验收专用）
+
+    /**
+     * 探针/验收专用（P1.8/P3.3 退化验证）：开/关指定族的提供者调度。族名 =
+     * {@link PartProvider#family()}（{@code ae2|eio|fmp|generic|inferred}）。默认全开。
+     */
+    public static void setFamilyEnabledForProbe(String family, boolean enabled) {
+        if (family == null || family.isEmpty()) {
+            return;
+        }
+        if (enabled) {
+            DISABLED_FAMILIES_FOR_PROBE.remove(family);
+        } else {
+            DISABLED_FAMILIES_FOR_PROBE.add(family);
+        }
+    }
+
+    /** 探针/验收专用：恢复全部族为开启（默认生产态）。 */
+    public static void clearFamilySwitchesForProbe() {
+        DISABLED_FAMILIES_FOR_PROBE.clear();
+    }
+
+    /** 该族当前是否参与调度（默认 true）。 */
+    public static boolean isFamilyEnabled(String family) {
+        return family != null && !DISABLED_FAMILIES_FOR_PROBE.contains(family);
+    }
+
     /**
      * 按 {@code tier} 过滤、priority 升序，对<strong>所有</strong> {@code applies} 为 true 的提供者
      * 依次执行 {@link PartProvider#collectParts} 并合并结果（postrender 式语义）。
@@ -117,6 +154,10 @@ public final class PartProviderRegistry {
         sorted.sort(Comparator.comparingInt(PartProvider::priority));
         for (PartProvider p : sorted) {
             try {
+                // P1.8 按族开关（探针/验收专用，默认全开）：被关族直接跳过 ⇒ 格落下一档兜底
+                if (!isFamilyEnabled(p.family())) {
+                    continue;
+                }
                 if (p.tier() == tier && p.applies(ctx)) {
                     List<PartRecord> produced = p.collectParts(ctx);
                     if (produced != null) {
@@ -126,15 +167,40 @@ public final class PartProviderRegistry {
             } catch (Throwable t) {
                 String failure = p.getClass()
                     .getName() + ": "
-                    + t;
+                    + describeFailure(t);
                 FMLLog.warning(
                     "[SDE] PartProviderRegistry: provider %s failed: %s",
                     p.getClass()
                         .getName(),
-                    String.valueOf(t));
+                    describeFailure(t));
                 failures.add(failure);
             }
         }
         return new DispatchOutcome(merged, failures);
+    }
+
+    /**
+     * 失败描述（P1.8 验收定位需要）：剥 InvocationTargetException 包装 + 前 4 帧堆栈。
+     * 只影响 {@link DispatchOutcome#failures} 的诊断文本（该列表本来就只断言空/非空）。
+     */
+    private static String describeFailure(Throwable t) {
+        Throwable c = t;
+        while (c instanceof java.lang.reflect.InvocationTargetException && c.getCause() != null) {
+            c = c.getCause();
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(
+            c.getClass()
+                .getName());
+        if (c.getMessage() != null) {
+            sb.append(": ")
+                .append(c.getMessage());
+        }
+        StackTraceElement[] st = c.getStackTrace();
+        for (int i = 0; i < Math.min(4, st.length); i++) {
+            sb.append(" @ ")
+                .append(st[i].toString());
+        }
+        return sb.toString();
     }
 }
