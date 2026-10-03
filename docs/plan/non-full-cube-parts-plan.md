@@ -389,7 +389,7 @@ Phase 3 集成与验收（E 管线驱动，零人工）
 6. 计数规则表达方式与三级配置的存储细节 → **已定稿（P2.3）**：JSON StatsRules（非 DSL）；三级 = statsTemplate / statsOverride（新落盘字段）/ localStorage `lightning:stats:v1:<docId>`；字段级覆盖、规则键整体替换；全文见契约 §9 与 `web/src/pure/partStats.ts` 文件头
 7. 悬停与统计栏 UI 呈现细节 → **已定稿**：悬停（P2.2，记录于 `web/src/pure/partHit.ts`/`tooltipResolution.ts` 文件头）= 两趟视觉优先命中 + 最小体积重叠取舍 + 「位于 <宿主>」归属标注；统计栏（P2.4，记录于 `web/src/embed/components/BlockStatsSidebar.vue` 文件头）= 部件模式工具条 + 来源徽标/逐字段 provenance 面板 + statsOverride 本轮只读 + 无部件 DOM 零新增退化
 8. 几何推断在 mod 侧的执行位置（捕获流水线挂点）→ P1.6 拍板
-9. 验收命令名与 oracle 输出目录 → P1.8 + P2.5 对接时拍板
+9. 验收命令名与 oracle 输出目录 → **已定稿（P1.8）**：`npm run acceptance:parts`（= `scripts/parts-acceptance/run-acceptance.ps1`）；oracle canonical = `scripts/parts-acceptance/oracle/`（入库三件：full/degraded_ae2/degraded_all）；归档 `.out/<label>[-rN]/`（gitignore）
 10. proto 扩展后的 Java 侧落盘路径：mod 端现用 Gson 手拼 JSON、不消费 proto 生成代码（P0.1 实证：buf.gen.yaml 仅 TS 插件、mod 构建无 protobuf 依赖、生成物两端皆未提交）→ P0.4 拍板（继续 Gson 手拼 + proto 作契约文档 vs 引入 Java 生成）
 11. `StatsEntry` 条目键如何引用部件（现仅 `block_state_id`，块粒度）→ P0.4 拍板
 12. FMP 27 槽位超出 `BlockPart.direction` 枚举（0–5+CENTER）的表达方案（properties 兜底 vs 扩展编码）→ P0.4 拍板

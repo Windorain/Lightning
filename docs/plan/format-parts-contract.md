@@ -296,9 +296,22 @@ JSON 字段名按本契约 §3 的 camelCase 落盘（proto snake_case 为规范
 ```
 
 - ground truth 是建造的副产品（建造器知道放了什么），不靠人维护。
+- **格映射通道（P1.8 吸收）**：导出文件 finalize 后不含 worldGrid ⇒ oracle 每格携带扩展字段
+  `zone` + `grid: [zi, ri, ci]`（cellPartsGrid 下标），root 携带 `gridIndex: {origin, size, rowAxis}`——
+  下游据此把 oracle pos 映射到导出文件下标，无需重算。
+- **退化格哨兵语义（P1.8 吸收）**：退化档的盒数/来源/档 3 岛序号静态不可预测 ⇒ 退化 oracle 对
+  退化格使用哨兵值 `boxCount=-1` / `boxProvenance="*"` / `localId="inferred:*"`（仍精确断言
+  档位/族/fallback/typeKey）；退化轮 `expectedCounts` 只覆盖未退化格
+  （root `countsScope=untransformed-cells-only`，验证器子集比对）。
+- **幂等口径**：oracle `builtAtEpochMs` 恒写 0（跨轮字节一致）；真实时刻在运行结果文件。
 - 盒数值本身**不进 oracle**（快照数值易受环境微扰）；oracle 断言 = 部件存在性 + localId/typeKey/
   物品计数 + 档位/盒数/来源；盒数值合理性由 L1 断言的范围校验（0–1 邻域、min<max、非退化）承担。
 - 退化区（提供者开关关闭后重导出）oracle 由同一建造产物 + 期望档位变换生成。
+
+**已知不确定源登记（P1.8 实证）**：动画纹理物品图标（如 EnderIO 导管 .mcmeta 动画）的渲染帧随
+游戏 tick 漂移 ⇒ `partIconTextures` 中动画图标的 base64 跨进程不确定。验收自动化在导出前把图集
+动画精灵复位帧 0（限验收会话）保证幂等；长期方案（图标渲染确定性化）登记为开放项。
+`BlockThumbnailRenderer` 对动画方块纹理有同款隐患（本结构未命中），一并登记。
 
 ## 12. 编辑语义（web 端，硬约束"不重算"的推论）
 
