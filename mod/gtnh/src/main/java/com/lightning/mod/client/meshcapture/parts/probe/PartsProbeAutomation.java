@@ -93,6 +93,16 @@ public final class PartsProbeAutomation {
      * 隐含 FMP 格清场防跨轮堆积 + AE2 facade 格放置，见 PartsFamilyProviderProbe）。
      */
     private static boolean familyProviders;
+    /**
+     * P1.6：触发文件 {@code "inferredTier3":true} 时追加档 3 几何推断验证探针（默认关闭；
+     * 隐含 singleBox 放置——火把/slab 等单盒场景是案 a/b 的载体）。
+     */
+    private static boolean inferredTier3;
+    /**
+     * P1.7：触发文件 {@code "partsExport":true} 时追加导出集成验证探针（默认关闭；
+     * 隐含 singleBox 放置——真实 finalizeStructureJson 路径的形状/字节干净/幂等验证）。
+     */
+    private static boolean partsExport;
 
     private static final List<String> warnings = new ArrayList<String>();
     private static final PartsProbePlacement placement = new PartsProbePlacement();
@@ -206,6 +216,22 @@ public final class PartsProbeAutomation {
                 familyProviders = o.get("familyProviders")
                     .getAsBoolean();
             }
+            if (o.has("inferredTier3")) {
+                inferredTier3 = o.get("inferredTier3")
+                    .getAsBoolean();
+                if (inferredTier3) {
+                    // P1.6 探针案 a/b 复用 P0.3 单盒场景（火把/slab/栅栏/箱）⇒ 隐含 singleBox 放置
+                    singleBox = true;
+                }
+            }
+            if (o.has("partsExport")) {
+                partsExport = o.get("partsExport")
+                    .getAsBoolean();
+                if (partsExport) {
+                    // P1.7 导出探针复用 P0.3 单盒场景（火把/slab/石头）⇒ 隐含 singleBox 放置
+                    singleBox = true;
+                }
+            }
         } catch (Throwable t) {
             warnings.add("触发文件解析失败（用默认配置继续）: " + PartsProbeReflect.describe(t));
         }
@@ -218,6 +244,12 @@ public final class PartsProbeAutomation {
         }
         if (familyProviders) {
             FMLLog.info("[SDE][P1.3-1.5] 三族权威提供者验证探针已启用（familyProviders=true）");
+        }
+        if (inferredTier3) {
+            FMLLog.info("[SDE][P1.6] 档 3 几何推断验证探针已启用（inferredTier3=true）");
+        }
+        if (partsExport) {
+            FMLLog.info("[SDE][P1.7] 导出集成验证探针已启用（partsExport=true）");
         }
         toPhase(Phase.JOIN);
     }
@@ -402,6 +434,30 @@ public final class PartsProbeAutomation {
                 dump.add("familyProviders", failed);
             }
         }
+        if (inferredTier3) {
+            try {
+                dump.add("inferredTier3", PartsInferredTier3Probe.run(mc, placement.placed));
+            } catch (Throwable t) {
+                // 档 3 验证探针自身失败不得拖垮整个探针轮（留痕即可）
+                warnings.add("inferredTier3 probe failed: " + PartsProbeReflect.describe(t));
+                JsonObject failed = new JsonObject();
+                failed.addProperty("pass", Boolean.FALSE);
+                failed.addProperty("error", PartsProbeReflect.describe(t));
+                dump.add("inferredTier3", failed);
+            }
+        }
+        if (partsExport) {
+            try {
+                dump.add("partsExport", PartsExportProbe.run(mc, placement.placed));
+            } catch (Throwable t) {
+                // 导出集成验证探针自身失败不得拖垮整个探针轮（留痕即可）
+                warnings.add("partsExport probe failed: " + PartsProbeReflect.describe(t));
+                JsonObject failed = new JsonObject();
+                failed.addProperty("pass", Boolean.FALSE);
+                failed.addProperty("error", PartsProbeReflect.describe(t));
+                dump.add("partsExport", failed);
+            }
+        }
         finalizeRun(mc);
     }
 
@@ -500,6 +556,39 @@ public final class PartsProbeAutomation {
                     : "FAIL: see dump.familyProviders.cells[].checks and .mergeExperiment.checks");
             summary.add(s);
             if (fatalCode == 0 && !fpPass) {
+                code = 2;
+            }
+        }
+        // P1.6：档 3 几何推断探针 pass=false ⇒ 退出码 2（细节在 dump.inferredTier3.cells[].checks）
+        if (inferredTier3) {
+            JsonObject it = dump == null ? null : dump.getAsJsonObject("inferredTier3");
+            boolean itPass = it != null && it.has("pass")
+                && it.get("pass")
+                    .getAsBoolean();
+            JsonObject s = new JsonObject();
+            s.addProperty("family", "inferredTier3");
+            s.addProperty("partsRead", Integer.valueOf(itPass ? 1 : 0));
+            s.addProperty(
+                "detail",
+                itPass ? "案a火把档3 / 案b无inferred主来源 / 案c退化兜底 all pass"
+                    : "FAIL: see dump.inferredTier3.cells[].checks and .degenerateNoGeometry.checks");
+            summary.add(s);
+            if (fatalCode == 0 && !itPass) {
+                code = 2;
+            }
+        }
+        // P1.7：导出集成探针 pass=false ⇒ 退出码 2（细节在 dump.partsExport.checks）
+        if (partsExport) {
+            JsonObject pe = dump == null ? null : dump.getAsJsonObject("partsExport");
+            boolean pePass = pe != null && pe.has("pass")
+                && pe.get("pass")
+                    .getAsBoolean();
+            JsonObject s = new JsonObject();
+            s.addProperty("family", "partsExport");
+            s.addProperty("partsRead", Integer.valueOf(pePass ? 1 : 0));
+            s.addProperty("detail", pePass ? "落盘形状/字节干净/幂等/信封透传 all pass" : "FAIL: see dump.partsExport.checks");
+            summary.add(s);
+            if (fatalCode == 0 && !pePass) {
                 code = 2;
             }
         }

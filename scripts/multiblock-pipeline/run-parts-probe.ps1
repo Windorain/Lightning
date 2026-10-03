@@ -31,7 +31,13 @@ param(
     [switch]$PartsPipeline,
     # P1.3–P1.5：追加三族权威提供者验证探针（对 P0.2 p02-run-2 基准逐格核对 localId/typeKey/盒/物品身份
     # + AE2 facade 场景 + FMP 格跨轮堆积清场 + 同格多族合并实验），写入触发文件 familyProviders=true
-    [switch]$FamilyProviders
+    [switch]$FamilyProviders,
+    # P1.6：追加档 3 几何推断验证探针（案 a 火把地面+挂墙 ⇒ inferred 小柱盒+facing；案 b 档 1/档 2 格
+    # 绝不出现 inferred；案 c 无几何 ⇒ 整格 degenerate 兜底），写入触发文件 inferredTier3=true（隐含 singleBox 放置）
+    [switch]$InferredTier3,
+    # P1.7：追加导出集成验证探针（真实 finalizeStructureJson 路径：cellPartsGrid/partLists 形状 +
+    # 满方块-only 字节对 + 幂等 + 信封透传），写入触发文件 partsExport=true（隐含 singleBox 放置）
+    [switch]$PartsExport
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,6 +117,12 @@ if ($PartsPipeline) {
 if ($FamilyProviders) {
     $trigger.familyProviders = $true
 }
+if ($InferredTier3) {
+    $trigger.inferredTier3 = $true
+}
+if ($PartsExport) {
+    $trigger.partsExport = $true
+}
 $triggerPath = Join-Path $mcDataDir 'sde_parts_probe.json'
 $json = $trigger | ConvertTo-Json -Depth 6
 Set-Content -Path $triggerPath -Value $json -Encoding utf8NoBOM
@@ -163,6 +175,12 @@ Copy-Item -Force $resultPath (Join-Path $logDir 'parts-probe-result.json')
 if (Test-Path $dumpPath) {
     Copy-Item -Force $dumpPath (Join-Path $logDir 'parts-probe-dump.json')
     Write-Ok "探针数据归档: $(Join-Path $logDir 'parts-probe-dump.json')"
+}
+# P1.7：导出产物归档（若本轮启用 partsExport）
+Get-ChildItem $mcDataDir -Filter 'sde_parts_export_probe_*.json' -File -ErrorAction SilentlyContinue | ForEach-Object {
+    Copy-Item -Force $_.FullName (Join-Path $logDir $_.Name)
+    Remove-Item -Force $_.FullName
+    Write-Ok "导出产物归档: $($_.Name)"
 }
 
 Write-Step "汇总"

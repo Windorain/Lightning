@@ -44,6 +44,10 @@ public final class SceneEnvelopeBuilder {
             copyIfPresent(rawFinal, inner, "blockPalette");
             copyIfPresent(rawFinal, inner, "textureBlobs");
             copyIfPresent(rawFinal, inner, "tooltipPalette");
+            // P1.7（部件）：帧结构的 cellPartsGrid/partLists 随 frames 整体随行；
+            // 文档级 statsTemplate/partIconTextures 仅在含部件数据时存在（copyIfPresent 天然字节干净）。
+            copyIfPresent(rawFinal, inner, "statsTemplate");
+            copyIfPresent(rawFinal, inner, "partIconTextures");
             // T1.4（契约 §8.1）：多方块声明作为新的 inner 键（判别式需要 inner.multiblock + multiblockCount）。
             copyIfPresent(rawFinal, inner, "multiblock");
             copyIfPresent(rawFinal, inner, "multiblockCount");
@@ -70,6 +74,11 @@ public final class SceneEnvelopeBuilder {
             copyIfPresent(rawFinal, inner, "sdeCellNotes");
             copyIfPresent(rawFinal, inner, "textureBlobs");
             copyIfPresent(rawFinal, inner, "tooltipPalette");
+            // P1.7（部件，契约 §2/§9）：仅在含部件数据时存在 ⇒ copyIfPresent 保持无部件文件字节干净
+            copyIfPresent(rawFinal, inner, "cellPartsGrid");
+            copyIfPresent(rawFinal, inner, "partLists");
+            copyIfPresent(rawFinal, inner, "statsTemplate");
+            copyIfPresent(rawFinal, inner, "partIconTextures");
         }
         byte[] utf8 = COMPACT_GSON.toJson(inner)
             .getBytes(StandardCharsets.UTF_8);

@@ -34,8 +34,8 @@ import cpw.mods.fml.relauncher.SideOnly;
  * 恒抛）后逐格跑流水线——期望：流程照常完成、档 2 结果与 expC 一致、每格 providerFailures 有记录
  * （容错非摆设），事后注销；</li>
  * <li><strong>expC 正常注册表（P1.2 基准）</strong>：逐格核对盒数值 / typeKey / localId / 来源四元组
- * 与 {@code docs/plan/probe-single-box.md} §2.3 实测基准一致；火把 ×2 ⇒ 档 2 不产出（落档 3，
- * P1.6 未实现 ⇒ 零产出 + notes 留痕）。</li>
+ * 与 {@code docs/plan/probe-single-box.md} §2.3 实测基准一致；火把 ×2 ⇒ 档 2 不产出（§7.3 退化），
+ * 落档 3 几何推断（P1.6 已实现 ⇒ inferred 部件，盒数值容差断言由 PartsInferredTier3Probe 案 a 承担）。</li>
  * </ol>
  *
  * <p>
@@ -205,16 +205,20 @@ final class PartsPipelineProbe {
         expect(checks, !r.hostFullCube, label + " 应判为非满");
 
         if (label.startsWith("torch-")) {
-            // 火把退化（§7.3）：档 2 不产出，交档 3（P1.6 未实现 ⇒ 零产出 + notes 留痕）
-            expect(checks, r.parts.isEmpty(), label + " 火把应档 2 不产出（退化）");
-            expect(checks, r.tier == 0, label + " 火把档位应为 0（待 P1.6 档 3）");
-            boolean noted = false;
-            for (String n : r.notes) {
-                if (n.contains("P1.6")) {
-                    noted = true;
-                }
+            // 火把退化（§7.3）：档 2 不产出，落档 3 几何推断（P1.6 已实现 ⇒ inferred 部件永远有结果；
+            // 盒数值与 properties.facing 的容差断言见 PartsInferredTier3Probe 案 a）
+            expect(checks, r.tier == PartSource.TIER_INFERRED, label + " 火把应落档 3（P1.6 几何推断）");
+            expect(checks, !r.parts.isEmpty(), label + " 火把档 3 应永远有结果");
+            for (PartRecord part : r.parts) {
+                expect(
+                    checks,
+                    part.source != null && PartSource.FAMILY_INFERRED.equals(part.source.family),
+                    label + " 部件 family 应为 inferred");
+                expect(
+                    checks,
+                    part.source != null && part.source.fallback && part.source.tier == PartSource.TIER_INFERRED,
+                    label + " 部件应为 fallback=true / tier=3");
             }
-            expect(checks, noted, label + " 火把应有'待 P1.6'留痕");
             return;
         }
 

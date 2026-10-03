@@ -9,6 +9,7 @@ import com.lightning.mod.client.meshcapture.parts.ae2.Ae2PartProvider;
 import com.lightning.mod.client.meshcapture.parts.enderio.EnderIoPartProvider;
 import com.lightning.mod.client.meshcapture.parts.fmp.FmpPartProvider;
 import com.lightning.mod.client.meshcapture.parts.generic.GenericSingleBoxPartProvider;
+import com.lightning.mod.client.meshcapture.parts.inferred.InferredGeometryPartProvider;
 
 import cpw.mods.fml.common.FMLLog;
 import cpw.mods.fml.relauncher.Side;
@@ -34,10 +35,12 @@ import cpw.mods.fml.relauncher.SideOnly;
  * <li>{@link FmpPartProvider} — 档 1 FMP 族权威（P1.5），priority
  * {@value FmpPartProvider#DEFAULT_PRIORITY}；</li>
  * <li>{@link GenericSingleBoxPartProvider} — 档 2 通用盒（P1.2），priority
- * {@value GenericSingleBoxPartProvider#DEFAULT_PRIORITY}。</li>
+ * {@value GenericSingleBoxPartProvider#DEFAULT_PRIORITY}；</li>
+ * <li>{@link InferredGeometryPartProvider} — 档 3 几何推断（P1.6，永不当主来源），priority
+ * {@value InferredGeometryPartProvider#DEFAULT_PRIORITY}。</li>
  * </ul>
  * 族提供者构造零反射（引导延迟到 collectParts 内逐环 try-catch），注册本身不会失败；
- * 目标 mod 缺失时 applies 不命中、零开销。几何推断（P1.6，档 3）在各自任务内 {@link #register}。
+ * 目标 mod 缺失时 applies 不命中、零开销。
  */
 @SideOnly(Side.CLIENT)
 public final class PartProviderRegistry {
@@ -49,6 +52,7 @@ public final class PartProviderRegistry {
         register(new EnderIoPartProvider());
         register(new FmpPartProvider());
         register(new GenericSingleBoxPartProvider());
+        register(new InferredGeometryPartProvider());
     }
 
     private PartProviderRegistry() {}

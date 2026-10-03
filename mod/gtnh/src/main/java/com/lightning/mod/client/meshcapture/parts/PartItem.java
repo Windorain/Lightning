@@ -42,6 +42,14 @@ public final class PartItem {
         return new PartItem(reg == null ? "<unregistered>" : reg, stack.getItemDamage(), stack.stackSize);
     }
 
+    /**
+     * 物品身份键（P1.7 部件图标 iconKey，与 web 统计栏 P2.3/P2.4 约定一致）：
+     * {@code registry:damage[#nbtDiscriminator]}。
+     */
+    public String iconKey() {
+        return registry + ":" + damage + (nbtDiscriminator != null ? "#" + nbtDiscriminator : "");
+    }
+
     /** 契约 §3⑤ 的 JSON 形态：{@code {"registry":"...","damage":N,"count":M}}。 */
     public JsonObject toJson() {
         JsonObject o = new JsonObject();

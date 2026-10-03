@@ -46,6 +46,10 @@ import com.lightning.mod.client.export.TextureBlobEmbedder;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedBlockInstance;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedQuad;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedVertex;
+import com.lightning.mod.client.meshcapture.parts.PartCapturePipeline;
+import com.lightning.mod.client.meshcapture.parts.PartCaptureResult;
+import com.lightning.mod.client.meshcapture.parts.PartExportIntegrator;
+import com.lightning.mod.client.meshcapture.parts.PartItem;
 import com.lightning.mod.client.meshcapture.postrender.MeshCaptureBlockPostRenderContext;
 import com.lightning.mod.client.meshcapture.postrender.MeshCaptureBlockPostRenderRegistry;
 import com.lightning.mod.client.meshcapture.primary.BlockPrimaryCaptureContext;
@@ -54,6 +58,7 @@ import com.lightning.mod.core.sampling.VoxelSample;
 import com.lightning.mod.core.session.SdeCellCoords;
 import com.lightning.mod.mixin.interfaces.accessors.TextureMapAccessor;
 
+import cpw.mods.fml.common.FMLLog;
 import cpw.mods.fml.common.registry.GameRegistry;
 import cpw.mods.fml.relauncher.ReflectionHelper;
 import cpw.mods.fml.relauncher.Side;
@@ -125,11 +130,12 @@ public final class MeshCaptureService {
         if (root.has("frames")) {
             SamplerTable samplers = new SamplerTable();
             JsonArray frames = root.getAsJsonArray("frames");
+            List<PartExportIntegrator.StructureSink> partsSinks = new ArrayList<>();
             for (int i = 0; i < frames.size(); i++) {
                 JsonObject fr = frames.get(i)
                     .getAsJsonObject();
                 if (fr.has("structure")) {
-                    finalizeSingleStructure(fr.getAsJsonObject("structure"), samplers);
+                    partsSinks.add(finalizeSingleStructure(fr.getAsJsonObject("structure"), samplers));
                 }
             }
             root.add("materialPalette", samplers.toMaterialPalette());
@@ -138,14 +144,18 @@ public final class MeshCaptureService {
             if (!root.has("tooltipPalette")) {
                 root.add("tooltipPalette", new com.google.gson.JsonArray());
             }
+            finishPartsDocument(root, partsSinks);
             TextureBlobEmbedder.embedIntoDocument(root);
             return;
         }
         if (root.has("geometryPhase") && "scan".equals(
             root.get("geometryPhase")
                 .getAsString())) {
-            finalizeSingleStructure(root);
+            PartExportIntegrator.StructureSink partsSink = finalizeSingleStructure(root);
             integrateSdeCellNotesSingleBakedRoot(root);
+            List<PartExportIntegrator.StructureSink> partsSinks = new ArrayList<>();
+            partsSinks.add(partsSink);
+            finishPartsDocument(root, partsSinks);
             TextureBlobEmbedder.embedIntoDocument(root);
             return;
         }
@@ -376,20 +386,45 @@ public final class MeshCaptureService {
         applySdeCellNotesToBakedStructure(root, stringToIndex);
     }
 
-    private static void finalizeSingleStructure(JsonObject structure) throws Exception {
+    private static PartExportIntegrator.StructureSink finalizeSingleStructure(JsonObject structure) throws Exception {
         SamplerTable samplers = new SamplerTable();
-        finalizeSingleStructure(structure, samplers);
+        PartExportIntegrator.StructureSink partsSink = finalizeSingleStructure(structure, samplers);
         structure.add("materialPalette", samplers.toMaterialPalette());
+        return partsSink;
     }
 
-    private static void finalizeSingleStructure(JsonObject structure, SamplerTable samplers) throws Exception {
-        if (structure == null || !structure.has("cellGrid")) {
+    /**
+     * P1.7 文档级收尾（契约 §9/部件图标）：文档含部件数据 ⇒ 写 {@code statsTemplate} 默认值 +
+     * {@code partIconTextures}（iconKey → base64 PNG）；无部件 ⇒ 两字段完全不产出（字节干净硬约束）。
+     */
+    private static void finishPartsDocument(JsonObject root, List<PartExportIntegrator.StructureSink> partsSinks) {
+        if (root == null || partsSinks == null || !PartExportIntegrator.isEnabled()) {
             return;
+        }
+        Map<String, PartItem> uniqueItems = new LinkedHashMap<>();
+        boolean hasParts = false;
+        for (PartExportIntegrator.StructureSink sink : partsSinks) {
+            if (sink != null && sink.hasParts()) {
+                hasParts = true;
+                uniqueItems.putAll(sink.uniquePartItems());
+            }
+        }
+        if (!hasParts) {
+            return;
+        }
+        root.add("statsTemplate", PartExportIntegrator.defaultStatsTemplate());
+        PartExportIntegrator.embedPartIcons(root, uniqueItems);
+    }
+
+    private static PartExportIntegrator.StructureSink finalizeSingleStructure(JsonObject structure,
+        SamplerTable samplers) throws Exception {
+        if (structure == null || !structure.has("cellGrid")) {
+            return null;
         }
         if (!structure.has("geometryPhase") || !"scan".equals(
             structure.get("geometryPhase")
                 .getAsString())) {
-            return;
+            return null;
         }
         if (!structure.has("cellTypes") || !structure.has("worldGrid")) {
             throw new IllegalStateException("geometryPhase=scan finalize requires cellTypes and worldGrid.");
@@ -412,6 +447,11 @@ public final class MeshCaptureService {
         int sizeZ = cellGrid.length;
         int sizeRow = cellGrid[0].length;
         int sizeCol = cellGrid[0][0].length;
+
+        // P1.7：结构级部件落盘汇聚器（探针 A/B 开关关闭时为 null = 完全跳过部件采集）
+        PartExportIntegrator.StructureSink partsSink = PartExportIntegrator.isEnabled()
+            ? PartExportIntegrator.newStructureSink(sizeZ, sizeRow, sizeCol)
+            : null;
 
         validateWorldGridChunks(world, cellGrid, worldCoords);
 
@@ -562,6 +602,30 @@ public final class MeshCaptureService {
                                 }
                             }
                             remapped[zi][ri][ci] = fin.intValue();
+
+                            // P1.7：逐格一次性部件采集（契约 §7.1 三档流水线；该格烘焙四边形快照
+                            // 直供档 3 几何推断，零重复渲染）。任何失败跳过该格、绝不中断导出。
+                            if (partsSink != null) {
+                                try {
+                                    PartCaptureResult partsResult = PartCapturePipeline
+                                        .collectParts(world, wx, wy, wz, inst.quads);
+                                    partsSink.addCell(
+                                        zi,
+                                        ri,
+                                        ci,
+                                        partsResult,
+                                        tooltipByCellType.get(Integer.valueOf(ti)),
+                                        b,
+                                        blockMeta);
+                                } catch (Throwable t) {
+                                    FMLLog.warning(
+                                        "[SDE] P1.7 部件采集失败（跳过该格 (%d,%d,%d)，不中断导出）: %s",
+                                        Integer.valueOf(wx),
+                                        Integer.valueOf(wy),
+                                        Integer.valueOf(wz),
+                                        String.valueOf(t));
+                                }
+                            }
                         }
                     } finally {
                         if (teForCapture != null && teCaptureBackup != null) {
@@ -634,9 +698,14 @@ public final class MeshCaptureService {
             }
         }
         structure.add("cellTooltipGrid", cellGridToJson(tooltips));
+        // P1.7：有部件 ⇒ 写 cellPartsGrid + partLists（契约 §2）；无部件 ⇒ 两字段完全不产出（字节干净）
+        if (partsSink != null) {
+            partsSink.writeInto(structure);
+        }
         structure.addProperty("geometryPhase", "baked");
         structure.remove("cellTypes");
         structure.remove("worldGrid");
+        return partsSink;
     }
 
     private static JsonObject emptyGeometryJson() {

@@ -52,6 +52,13 @@ boolean isFullCube(Block block, World world, int x, int y, int z) {
 
 - `cellPartsGrid` 缺省或全 -1 ⇒ 与今天行为完全一致。
 - 满方块格**必须**为 -1（判定路径保证）；非满格至少一个部件。
+- **多帧 frames JSON**（V2 plain 家族的 World 包装，非 proto `WorldFrame` 线格式）：`cellPartsGrid`/
+  `partLists` 落在**每个帧的 `structure` 根**，池化形状与单结构一致（P1.7 实证落盘；proto
+  `BlockInstance.parts` 的非池化表述仅指 proto 线格式，不适用于 frames JSON 中间形态）。
+- **部件图标**：文档根 `partIconTextures: { <iconKey>: <base64 PNG> }`，iconKey = 物品身份键
+  `registry:damage[#nbt]`（与统计行 iconKey 同键）；仅当文档含部件数据时写入（无部件文件字节
+  干净）。已知限制：FMP 材料变体图标 = 基础物品图标（nbtDiscriminator 是字符串键、无法重建
+  NBT 栈）。
 - World 多帧格式：`BlockInstance.parts`（proto 已预留）直接挂同 schema 的 PartRecord 数组，
   不走池化（该格式本就逐实例展开）。
 
@@ -188,6 +195,14 @@ boolean isFullCube(Block block, World world, int x, int y, int z) {
 直接落档 3 几何推断（其选择盒是整格，作为"通用盒"产出既无信息又误导；真实小柱几何只在渲染代码
 里，由推断档从烘焙几何取）。挂墙朝向等状态信息进 `properties`（如 `facing=meta1`）。
 
+**原版 alpha 斜面真相（P1.6 实证，反编译 vanilla `renderTorchAtAngle` 实锤）**：火把类方块的四
+个侧立面在 1.7.10 烘焙中本就画成**撑满整格的斜面四边形**，靠图标 PNG 的 alpha 透明像素裁剪只
+显示细柱——捕获链与调色板无 bug。档 3 推断因此引入 **alpha 收紧**（`AlphaTightener`）：按材质
+PNG alpha 掩码 + UV 仿射反算把四边形收紧到可见纹素区域后再算岛盒；不可收紧（多材质混合面/
+TESR 动态层/磁盘无 PNG）⇒ 回退原始顶点盒（永远不更糟）。收紧后火把盒 = 棍柱量级（实证
+`[0.3875,-0.05,0.3875→0.6125,0.675,0.6125]`）。岛扩组分组仍用原始顶点（aabb.ts 语义不动），
+收紧只作用于盒计算。
+
 ## 8. 说明（tooltip）优先级链
 
 **导出时生成完毕、落盘为最终行**（web 端只做展示选择，不重放生成逻辑）：
@@ -313,6 +328,8 @@ JSON 字段名按本契约 §3 的 camelCase 落盘（proto snake_case 为规范
 | 13 | 盒越界 | 允许，如实记录不裁剪 | §6.3 |
 | 14 | 火把退化标记 | 档 2 不产出，落档 3；boxProvenance=degenerate 预留给档 2 边界情形 | §7.3 |
 | 15 | 单盒计数键 | drop 身份（registry+damageDropped） | §5 |
+| 16 | 部件图标落盘形状 | **已定稿（P1.7）**：文档根 `partIconTextures: {iconKey: base64PNG}`，仅含部件时写入；FMP 材料变体图标 = 基础物品图标（限制声明） | §2 |
+| 17 | 原版 alpha 斜面几何（火把类） | **已定稿（P1.6）**：档 3 引入 alpha 收紧（AlphaTightener），不可收紧回退原始顶点盒；多材质/TESR 动态层不覆盖 | §7.3 |
 
 ## 14. fixture（P2 开发基座）
 

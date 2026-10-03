@@ -10,6 +10,7 @@ import net.minecraft.init.Blocks;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.world.World;
 
+import com.lightning.mod.client.meshcapture.TessellatorCaptureState;
 import com.lightning.mod.client.meshcapture.parts.PartProviderRegistry.DispatchOutcome;
 
 import cpw.mods.fml.common.FMLLog;
@@ -33,7 +34,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  *    ├─是→ 完成（tier 2）
  *    │否（§7.3 退化情形）
  *    ▼
- * 档 3 几何推断（P1.6 未实现前：无 tier-3 提供者注册 ⇒ 无产出 + notes 留痕待 P1.6）
+ * 档 3 几何推断（P1.6 InferredGeometryPartProvider，输入 = 该格烘焙四边形快照）
  * </pre>
  *
  * <p>
@@ -93,6 +94,17 @@ public final class PartCapturePipeline {
      *         非满方块 ⇒ 三档兜底结果（可能为空列表，档位与失败记录见结果字段）。
      */
     public static PartCaptureResult collectParts(World world, int x, int y, int z) {
+        return collectParts(world, x, y, z, null);
+    }
+
+    /**
+     * {@link #collectParts(World, int, int, int)} 的全参形态（P1.6/P1.7）：
+     * {@code bakedQuads} = 该格客户端烘焙四边形快照（块局部 [0,1]³，捕获产物；
+     * {@code MeshCaptureService} 逐格捕获循环在 {@code TessellatorCaptureState.endBlock} 后传入），
+     * 供档 3 几何推断消费；为 null 时档 3 提供者自行现场烘焙（探针等无捕获产物路径）。
+     */
+    public static PartCaptureResult collectParts(World world, int x, int y, int z,
+        List<TessellatorCaptureState.CapturedQuad> bakedQuads) {
         List<String> notes = new ArrayList<>();
         List<String> failures = new ArrayList<>();
         try {
@@ -117,7 +129,14 @@ public final class PartCapturePipeline {
                 return PartCaptureResult.fullCube();
             }
 
-            PartProviderContext ctx = new PartProviderContext(world, x, y, z, block, world.getBlockMetadata(x, y, z));
+            PartProviderContext ctx = new PartProviderContext(
+                world,
+                x,
+                y,
+                z,
+                block,
+                world.getBlockMetadata(x, y, z),
+                bakedQuads);
 
             // 档 1 族权威：全部命中都执行、结果合并（§7.1/§7.2）
             DispatchOutcome tier1 = PartProviderRegistry.dispatch(ctx, PartSource.TIER_FAMILY);
@@ -136,14 +155,16 @@ public final class PartCapturePipeline {
             }
 
             // 档 3 几何推断：只在档 1/档 2 均无产出时执行（推断永不当主来源，§7.2 结构保证）。
-            // P1.6 未实现前无 tier-3 提供者注册 ⇒ 零迭代、无产出，留痕待 P1.6（如火把退化情形 §7.3）。
+            // P1.6 已注册 InferredGeometryPartProvider（family=inferred, fallback=true）：
+            // 输入 = 该格烘焙四边形快照（bakedQuads；为 null 时提供者现场烘焙），永远有结果
+            // （连可用几何都没有 ⇒ 整格 degenerate 盒）。
             DispatchOutcome tier3 = PartProviderRegistry.dispatch(ctx, PartSource.TIER_INFERRED);
             failures.addAll(tier3.failures);
             if (!tier3.parts.isEmpty()) {
                 dedupeLocalIds(tier3.parts, notes);
                 return PartCaptureResult.of(tier3.parts, PartSource.TIER_INFERRED, notes, failures);
             }
-            notes.add("tier-3 inference not implemented yet (pending P1.6); no parts emitted for this cell");
+            notes.add("tier-3 inference produced no parts for this cell (unexpected; provider should always emit)");
             return PartCaptureResult.of(new ArrayList<PartRecord>(), TIER_NONE, notes, failures);
         } catch (Throwable t) {
             // 流水线级兜底：绝不中断导出（§7.2）
