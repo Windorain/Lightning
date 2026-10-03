@@ -87,7 +87,8 @@ boolean isFullCube(Block block, World world, int x, int y, int z) {
                                        //   缺省 ⇒ web 以物品身份键作行 label——P2.3 裁决登记）
   ],
   "source": {                      // 来源四元组
-    "family": "ae2",               //   族：ae2 | enderio | fmp | generic | inferred
+    "family": "ae2",               //   族：ae2 | eio | fmp | generic | inferred
+                                   //   （实现统一前缀 `eio`；family=localId 前缀=开关族名三者同值自洽）
     "fallback": false,             //   是否兜底（族权威 = false；generic/inferred = true）
     "boxProvenance": "both",       //   视觉或碰撞：both | collision-derived-visual | visual-only | collision-only | degenerate
     "tier": 1                      //   档位：1=族权威 2=通用盒 3=几何推断
@@ -106,7 +107,7 @@ boolean isFullCube(Block block, World world, int x, int y, int z) {
 | 族 | localId 形态 | 依据（探针实证） |
 |----|--------------|------------------|
 | ae2 | `ae2:<FACE>`（`NORTH`…`UP` 挂载面；中心线缆 `ae2:UNKNOWN`，与 AE2 枚举一致）；伪装板 `ae2:facade:<FACE>` | P0.2 §1：`getPart(ForgeDirection)` 枚举，facade 独立容器 |
-| enderio | `eio:<ConduitType 接口简单名>`（如 `eio:IPowerConduit`） | P0.2 §2：`getBaseConduitType()` |
+| eio | `eio:<ConduitType 接口简单名>`（如 `eio:IPowerConduit`） | P0.2 §2：`getBaseConduitType()` |
 | fmp | `fmp:slot<N>`（N = PartMap 0–26 规范槽位）；无槽部件 `fmp:part<枚举序号>` | P0.2 §3：`getSlot()`（27 槽由此承载，**不扩展 direction 枚举**，留白 #12 拍板） |
 | generic | `generic:0`（单盒通用档一格一个部件） | P0.3 |
 | inferred | `inferred:<岛序号>`（几何推断岛） | P1.6 移植 aabb.ts 岛扩组 |
@@ -121,7 +122,7 @@ boolean isFullCube(Block block, World world, int x, int y, int z) {
 | 族 | typeKey 构成 | 依据 |
 |----|--------------|------|
 | ae2 | `registry:damage`（:16/:80/:220 同 item 不同 damage） | P0.2 §1.4 |
-| enderio | `registry:damage`（conduit subtype；连接器 conduitType==null 不是物品，**不发射部件**） | P0.2 §2.4/2.5 |
+| eio | `registry:damage`（conduit subtype；连接器 conduitType==null 不是物品，**不发射部件**） | P0.2 §2.4/2.5 |
 | fmp | `registry:damage#mat=<材料串>`（同 damage 不同材料 = 不同物品；材料名是别名，权威身份 = NBT mat 串） | P0.2 §3.4/3.5 |
 | generic | **drop 身份**：`getItemDropped` registry + `damageDropped`（**不是**方块 meta——上/下半 slab 同为 `stone_slab:0`，朝向 meta 坍缩） | P0.3 §5 |
 | inferred | 宿主 drop 身份（推断档无更细信息） | — |

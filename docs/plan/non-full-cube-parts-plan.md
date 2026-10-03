@@ -406,3 +406,9 @@ Phase 3 集成与验收（E 管线驱动，零人工）
 **P2.1 实施登记（调度者复核后采录）**：① statsTemplate 命名以 **camelCase（showOthers）为落盘权威**（契约 §10.2），snake_case（show_others）仅作旧数据读取回退——P2.3 消费时按此执行；② 根级 cellGrid/blockPalette 存在与本次已修复的 parts 字段同类的"首帧展开副本残留过期快照"隐患（**既有问题，非本轮引入**）——登记为开放项，是否同样按派生数据排除出 _extra 由后续立项裁定；③ `PaletteEntryMeta.parts?: unknown[]` 残留类型暂保留（未知字段 round-trip 透传通道），确认无消费后可清理（清理属可选优化，不阻塞）。
 
 **事实勘误（调度者复核登记）**：P0.1 报告称"`web/src/render/proto/` 目录不存在"，实际目录存在但仅含空的 v1 残留子目录（无任何生成文件；.gitignore L26 仅忽略 `lightning/v1/`）——实质结论（生成代码两端皆无）不变。
+
+**Phase 3 实施登记（调度者复核采录，p3-release/p3-idem8 两轮全绿：22/22 §6 清单机器判定 pass、跨轮 13 个数据产物逐字节一致）**：
+- **编排拍板（P3 执行者，采录）**：`npm run acceptance:parts` = 14 阶段编排（退出码沿用多方块轮体系）；L2 消费同编排内 L1 新鲜归档；P3.4「敲掉部件」用导出侧等价注入；多方块交叉回归选 `multiblock-channel-traversal.spec.ts -g 尺寸变化方向` 单用例；「推断永不当主来源」为 scripts 侧静态判据；proto 同步以「契约字段在册」静态判据替代跑 protocol:gen（契约 §10.1 口径）；L1 默认 `-L1Runs 1` + 世界基线快照（绕开 F3）+ `-SyncWaitTicks 120`（F5 缓解）。
+- **F1/F2 偏差（硬约束相关，派单修复）**：StructureDataParser 不透传 statsTemplate/statsOverride/partIconTextures（三级配置文档默认层对真实导出失效）；partIconTextures 无 EmbedViewport 消费接线（部件图标回退占位）——验收用例以偏差锁形式锁定当前行为，修复落地时翻转。
+- **F3/F5 开放项（mod 侧时序偶发，用户裁决是否投入根治）**：F3 跨会话 FMP stale-tile 累积（验收世界第二次会话部件 3→6，remPart 通道非万无一失；编排以世界基线快照规避）；F5 AE2 线缆总线格偶发整格缺失（疑 chunkWaitTicks 硬编码 60 与客户端区块就绪竞争；编排以 SyncWaitTicks 120 缓解，根治 = 区块就绪前置条件化）。两处证据在验收报告 findings/。
+- **测量登记**：M1 AE2 平面类部件碰撞盒零厚度轴 = 平面语义如实快照（判据按逐轴 min≤max+非全轴退化）；M2 契约文本 enderio→eio 已统一（调度者已改契约）；M4 从零生成验收世界产出无效 ⇒ -ResetWorld 默认关（复用既有世界+自动化清场重建）。

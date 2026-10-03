@@ -112,6 +112,12 @@ export function quadCenter(q: QuadCorners): { lx: number; ly: number; lz: number
 // 公开观测：文档部件数据（Grid API，解析级 —— 不经渲染管线）
 // ---------------------------------------------------------------------------
 
+export interface CellPartBoxObservation {
+  min: [number, number, number]
+  max: [number, number, number]
+  kind: string
+}
+
 export interface CellPartsObservation {
   pos: { x: number; y: number; z: number }
   parts: Array<{
@@ -122,7 +128,11 @@ export interface CellPartsObservation {
     itemKeys: string[]
     itemCounts: number[]
     boxCount: number
+    /** 盒快照（契约 §6：0–1 方块局部、允许越界；P3.1 L2 用真实导出盒推导探针点）。 */
+    boxes: CellPartBoxObservation[]
     source: { family: string; fallback: boolean; boxProvenance: string; tier: number }
+    /** 族特有补充（契约 §3：如 `facing=meta5`）；无 ⇒ null。 */
+    properties: Record<string, string> | null
   }> | null
 }
 
@@ -151,7 +161,13 @@ export async function readPartsObservation(page: Page): Promise<CellPartsObserva
               itemKeys: p.items.map((it: any) => `${it.registry}:${it.damage}`),
               itemCounts: p.items.map((it: any) => it.count),
               boxCount: p.boxes.length,
+              boxes: p.boxes.map((b: any) => ({
+                min: [...b.min] as [number, number, number],
+                max: [...b.max] as [number, number, number],
+                kind: b.kind,
+              })),
               source: { ...p.source },
+              properties: p.properties ? { ...p.properties } : null,
             })),
           })
         }

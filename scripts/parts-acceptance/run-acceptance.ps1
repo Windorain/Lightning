@@ -21,6 +21,8 @@
 param(
     # 本次运行的标签（归档目录名与结果文件 label）
     [string]$Label = "",
+    # 归档根目录（缺省 = 本脚本所在目录的 .out；外层编排用 -OutRoot 把本阶段产物收进运行目录）
+    [string]$OutRoot = "",
     # 跨轮幂等轮数（每轮独立启动客户端；≥2 时逐文件比对字节一致）
     [int]$Runs = 2,
     # 放置后等待服务端→客户端同步的 tick 数
@@ -41,7 +43,7 @@ $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $scriptDir '..\..')).Path
 $modDir = Join-Path $repoRoot 'mod\gtnh'
 $mcDataDir = Join-Path $modDir 'run\client'
-$archiveRoot = Join-Path $scriptDir '.out'
+$archiveRoot = if ([string]::IsNullOrWhiteSpace($OutRoot)) { Join-Path $scriptDir '.out' } else { $OutRoot }
 $oracleDir = Join-Path $scriptDir 'oracle'
 
 if ([string]::IsNullOrWhiteSpace($Label)) {
