@@ -21,6 +21,8 @@
  * **浏览器 + 生产侧栏点击 → 描边通道**这一段。
  */
 import { expect, test } from '@playwright/test'
+import fs from 'node:fs'
+import path from 'node:path'
 import {
   gotoWikiPreviewWithScene,
   clearWikiHover,
@@ -43,6 +45,8 @@ import { pollUntil } from './helpers/multiblock'
 
 const AE2_GRID = { w: 2, h: 1, d: 1 }
 const CELL = { col: 0, row: 0, z: 0 }
+/** 证据截图目录（`.gitignore` 内：`web/e2e/screenshots/`）。 */
+const SHOT_DIR = path.join(import.meta.dirname, 'screenshots', 'parts')
 
 /** AE2 物品身份键（= 左栏行键，硬编码；不从 fixture 反读）。 */
 const CABLE = 'appliedenergistics2:item.ItemMultiPart:16'
@@ -146,6 +150,11 @@ test.describe('B-5 · 点选物品行 → 视口部件级高亮', () => {
     expect(local3.min, '并集 mask 下界').toEqual([0.125, 0.375, 0])
     expect(local3.max, '并集 mask 上界').toEqual([0.875, 1, 0.875])
 
+    // ── 证据截图：多选两行 + 视口两块描边（PR/Issue 附件用）──
+    fs.mkdirSync(SHOT_DIR, { recursive: true })
+    await page.screenshot({ path: path.join(SHOT_DIR, 'b5-multiselect-outline.png') })
+    await page.locator('.wb-wiki-embed .nei-sidebar').screenshot({ path: path.join(SHOT_DIR, 'b5-multiselect-sidebar.png') })
+
     // ── 无对应（显式 none）：可选中、不高亮、提示含"没有对应方块" ──
     const s4 = await clickStatsRow(page, CABLE)
     expect(selectedRowKeys(s4), '无对应行仍是单选该行').toEqual([CABLE])
@@ -156,6 +165,10 @@ test.describe('B-5 · 点选物品行 → 视口部件级高亮', () => {
       '无对应 ⇒ mask 清空（不高亮）',
       20_000,
     )
+
+    // ── 证据截图（PR/Issue 附件用；`web/e2e/screenshots/` 在 .gitignore 内）──
+    fs.mkdirSync(SHOT_DIR, { recursive: true })
+    await page.locator('.wb-wiki-embed .nei-sidebar').screenshot({ path: path.join(SHOT_DIR, 'b5-unresolved-row-marker.png') })
 
     // ── Ctrl + 单击 有对应行 ⇒ 混选：只亮有对应项，且两项逐项可辨认 ──
     const s5 = await clickStatsRow(page, TOGGLE, { ctrl: true })
