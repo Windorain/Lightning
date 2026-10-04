@@ -134,9 +134,10 @@ export const StructureDataParser: DocumentParser = {
 
     // 文档**根级**字段（与上面的 structure 级 cellPartsGrid/partLists 不同层级）：
     // `materialPalette/textureBlobs/...` 沿用既有透传；`statsTemplate`/`statsOverride`
-    // （契约 §9 三级配置第 1/2 级）与 `partIconTextures`（契约 §2 部件物品图标纹理，P1.7 落盘）
-    // 亦挂在真实导出文档根上，必须一并透传到 v2 根 —— 否则运行时定义根缺文档默认统计层
-    // （徽标落"内建默认"）且部件行图标无嵌入纹理源。
+    // （旧文档统计配置，**语义已作废**，见契约 §9 兼容口径）与 `partIconTextures`
+    // （契约 §2 部件物品图标纹理，P1.7 落盘）亦挂在真实导出文档根上：一律透传到 v2 根 ——
+    // 统计侧只保留 `partIconTextures` 的消费方；两个 stats* 键透传的目的仅是
+    // "旧文档字段读取后静默忽略"（不丢字段、不报错），不再有任何语义消费方。
     // 旧文件无这些键 ⇒ 循环体不执行，行为零差异（字节干净同 serialize()）。
     for (const key of [
       'materialPalette', 'textureBlobs', 'tooltipPalette', 'cellTooltipGrid', 'playback',
