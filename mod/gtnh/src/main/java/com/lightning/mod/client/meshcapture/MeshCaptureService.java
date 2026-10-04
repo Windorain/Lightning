@@ -673,9 +673,14 @@ public final class MeshCaptureService {
             if (r.tileNbt != null && !r.tileNbt.hasNoTags()) {
                 try {
                     String nbtJson = NbtJsonSerializer.toJson(r.tileNbt);
-                    p.add("nbt", JsonParser.parseString(nbtJson));
-                } catch (Exception ignored) {
-                    // NBT serialization failure shouldn't block geometry export
+                    // 必须用实例 API：JsonParser.parseString 是 gson >= 2.8.6 的静态方法，
+                    // 而 MC 1.7.10 运行期 gson 是 2.2.4（issue #17 验证回路实测：
+                    // 静态调用 NoSuchMethodError ⇒ 整次导出中止）。
+                    p.add("nbt", new JsonParser().parse(nbtJson));
+                } catch (Throwable ignored) {
+                    // NBT serialization failure shouldn't block geometry export。
+                    // 捕获 Throwable 而非 Exception：链接错误（NoSuchMethodError、
+                    // NoClassDefFoundError 等）属 Error，不许中止整次导出 —— 挂不上 NBT 只应丢这个字段。
                 }
             }
             try {
