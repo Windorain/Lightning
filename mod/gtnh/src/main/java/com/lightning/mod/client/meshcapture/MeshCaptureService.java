@@ -73,6 +73,22 @@ public final class MeshCaptureService {
 
     private MeshCaptureService() {}
 
+    /**
+     * TE 捕获模式。默认（以及除 {@code inplace} 外的任何值）=「副本 TE」：按扫描 NBT 造一份副本 TE 注入后处理
+     * 渲染，<strong>世界活动 TE 全程零写入</strong>。
+     * <p>
+     * {@code -Dsde.teCaptureMode=inplace} 恢复 issue #12 之前的旧行为（备份活动 TE → 就地
+     * {@code readFromNBT(扫描 NBT)} → finally 回滚），<strong>仅供 issue #12 复现/证伪的负对照使用，严禁默认
+     * 启用</strong>：LogisticsPipes 的 {@code LogisticsTileGenericPipe.readFromNBT} 非幂等（每次读 NBT 都重建
+     * pipe，而 {@code bindPipe()} 有 {@code if (pipeBound) return;} 一次性绑定守卫），第二次及以后读 NBT 建出的
+     * pipe 永远绑不上容器（{@code pipe.container} 永久为 null）→ 导出结束后正常渲染 NPE 崩溃客户端；读备份回滚
+     * 同样修不回来（再读一次 NBT 只会再建一个绑不上的 pipe）。
+     */
+    private static final boolean TE_CAPTURE_INPLACE = "inplace".equals(
+        System.getProperty("sde.teCaptureMode", "copy")
+            .trim()
+            .toLowerCase(Locale.ROOT));
+
     public static void enrichExportFile(File file) throws Exception {
         if (!file.isFile()) {
             throw new IllegalArgumentException("Not a file: " + file);
@@ -517,25 +533,29 @@ public final class MeshCaptureService {
                     int blockMeta = vs != null ? vs.meta : world.getBlockMetadata(wx, wy, wz);
                     int renderType = b.getRenderType();
 
+                    // Gitea issue #12：**不得**对世界活动 TE 做 readFromNBT。LogisticsPipes 等模组的
+                    // readFromNBT 非幂等：LogisticsTileGenericPipe.readFromNBT 每次都重建 pipe 对象，而
+                    // bindPipe() 有 `if (pipeBound) return;` 一次性绑定守卫（pipeBound 只在构造期为 false），
+                    // 于是第二次及以后读 NBT 建出的 pipe 永远绑不上容器（container 永久为 null）→ 导出结束后
+                    // 正常渲染 NPE 崩溃客户端；"读备份回滚"也修不回来（再读一次只会再建一个绑不上的 pipe）。
+                    // 默认路径：活动 TE 全程零写入，改为按扫描 NBT 造一份「副本 TE」注入后处理渲染。
                     TileEntity teForCapture = world.getTileEntity(wx, wy, wz);
-                    NBTTagCompound teCaptureBackup = null;
                     boolean teIsMultipart = false;
+                    TileEntity teForRender = teForCapture;
+                    NBTTagCompound legacyInplaceBackup = null;
                     if (teForCapture != null && vs != null && vs.tileNbt != null) {
-                        teCaptureBackup = new NBTTagCompound();
-                        teForCapture.writeToNBT(teCaptureBackup);
+                        // 以下两步均为只读：判定/诊断只读活动 TE 的类，不写任何字段
                         teIsMultipart = MultipartNbtStateUtil.isTileMultipart(teForCapture);
-                        NBTTagCompound toApply = (NBTTagCompound) vs.tileNbt.copy();
-                        toApply.setInteger("x", teForCapture.xCoord);
-                        toApply.setInteger("y", teForCapture.yCoord);
-                        toApply.setInteger("z", teForCapture.zCoord);
-                        try {
-                            teForCapture.readFromNBT(toApply);
-                        } catch (Throwable ignored) {
-                            /* 个别模组 NBT 不兼容时仍走原 TE */
-                        }
                         MultipartNbtStateUtil.diagnoseReadFromNbtOverride(teForCapture);
-                        if (teIsMultipart) {
-                            MultipartNbtStateUtil.loadPartStatesFromNbt(teForCapture, toApply);
+                        if (TE_CAPTURE_INPLACE) {
+                            // 负对照（-Dsde.teCaptureMode=inplace；issue #12 复现/证伪专用，严禁默认启用）：
+                            // 旧行为 = 备份活动 TE → 就地 readFromNBT(扫描 NBT) → finally 回滚
+                            legacyInplaceBackup = new NBTTagCompound();
+                            teForCapture.writeToNBT(legacyInplaceBackup);
+                            applyTileNbtInPlace(teForCapture, vs.tileNbt, teIsMultipart);
+                        } else {
+                            // 副本创建失败时返回 null：该格显式跳过 TE 渲染，绝不回退查活动 TE
+                            teForRender = createCaptureTileEntityCopy(world, vs.tileNbt, teForCapture, teIsMultipart);
                         }
                     }
                     try {
@@ -555,6 +575,8 @@ public final class MeshCaptureService {
                                 partialTicksForMeshCapture()));
                         tess.draw();
 
+                        // 注入副本 TE（无副本时为活动 TE / null = 与现状一致），
+                        // 后处理策略经 ctx.getTileEntity() 取到的一律是副本，活动 TE 零写入
                         MeshCaptureBlockPostRenderRegistry.dispatch(
                             new MeshCaptureBlockPostRenderContext(
                                 world,
@@ -564,7 +586,8 @@ public final class MeshCaptureService {
                                 b,
                                 blockMeta,
                                 rb,
-                                partialTicksForMeshCapture()));
+                                partialTicksForMeshCapture(),
+                                teForRender));
                         int quadsBeforeDraw = TessellatorCaptureState.currentBlockRecordedQuadCount();
                         try {
                             tess.draw();
@@ -628,13 +651,9 @@ public final class MeshCaptureService {
                             }
                         }
                     } finally {
-                        if (teForCapture != null && teCaptureBackup != null) {
-                            try {
-                                teForCapture.readFromNBT(teCaptureBackup);
-                            } catch (Throwable ignored) { /* 尽力恢复 */ }
-                            if (teIsMultipart) {
-                                MultipartNbtStateUtil.loadPartStatesFromNbt(teForCapture, teCaptureBackup);
-                            }
+                        if (legacyInplaceBackup != null) {
+                            // 只有 inplace 负对照路径需要回滚；默认副本路径对活动 TE 零写入，故无回滚段
+                            restoreTileEntityInPlace(teForCapture, legacyInplaceBackup, teIsMultipart);
                         }
                     }
                 }
@@ -706,6 +725,78 @@ public final class MeshCaptureService {
         structure.remove("cellTypes");
         structure.remove("worldGrid");
         return partsSink;
+    }
+
+    /**
+     * 按扫描 NBT 造一份<strong>副本</strong> TE 供后处理渲染使用：世界活动 TE 全程零写入（Gitea issue #12）。
+     * <p>
+     * 任何失败（含制出的副本类型不符）一律返回 {@code null}，捕获继续，后处理策略对 null 会跳过该格——
+     * 绝不回退到活动 TE（那等于把"当前世界状态"烤进导出，且与旧就地路径的失败语义不再一致）。
+     *
+     * @param teIsMultipart 是否多部件格（判定基于活动 TE 的类，只读）
+     */
+    private static TileEntity createCaptureTileEntityCopy(World world, NBTTagCompound tileNbt, TileEntity liveTe,
+        boolean teIsMultipart) {
+        try {
+            NBTTagCompound toApply = captureNbtWithCoords(tileNbt, liveTe);
+            // 1.7.10 静态工厂：按 NBT 的 "id" 建实例并 readFromNBT（扫描 NBT 来自 writeToNBT，含 id）
+            TileEntity copyTe = TileEntity.createAndLoadEntity(toApply);
+            if (teIsMultipart && !MultipartNbtStateUtil.isTileMultipart(copyTe)) {
+                // FMP 把多部件 TE 的 "id" 写成 "savedMultipart"（→ MultipartSaveLoad$TileNBTContainer），
+                // createAndLoadEntity 只能造出那个空壳（既非 TileMultipart 也无 part），必须走 FMP 自己的建法
+                copyTe = MultipartNbtStateUtil.createMultipartCopyFromNbt(toApply);
+            }
+            if (copyTe == null || (teIsMultipart && !MultipartNbtStateUtil.isTileMultipart(copyTe))) {
+                return null;
+            }
+            // createAndLoadEntity / createFromNBT 都不设置 worldObj
+            copyTe.setWorldObj(world);
+            if (teIsMultipart) {
+                MultipartNbtStateUtil.loadPartStatesFromNbt(copyTe, toApply);
+            }
+            return copyTe;
+        } catch (Throwable t) {
+            FMLLog.warning("[SDE] 捕获副本 TE 创建失败（该格跳过 TE 渲染；活动 TE 不受影响）: %s", String.valueOf(t));
+            return null;
+        }
+    }
+
+    /** 扫描 NBT 的副本 + 该格 x/y/z 三键（与旧就地逻辑补键行为一致，不动原 NBT）。 */
+    private static NBTTagCompound captureNbtWithCoords(NBTTagCompound tileNbt, TileEntity liveTe) {
+        NBTTagCompound toApply = (NBTTagCompound) tileNbt.copy();
+        toApply.setInteger("x", liveTe.xCoord);
+        toApply.setInteger("y", liveTe.yCoord);
+        toApply.setInteger("z", liveTe.zCoord);
+        return toApply;
+    }
+
+    /**
+     * 旧行为（{@code -Dsde.teCaptureMode=inplace} 负对照专用，严禁默认启用）：对<strong>活动 TE</strong>就地
+     * {@code readFromNBT(扫描 NBT)}。LP 等模组的 readFromNBT 非幂等，就地改写会永久改坏世界里的 TE
+     * （Gitea issue #12），此处刻意保留原样以便复现/证伪该缺陷。
+     */
+    private static void applyTileNbtInPlace(TileEntity te, NBTTagCompound tileNbt, boolean teIsMultipart) {
+        NBTTagCompound toApply = captureNbtWithCoords(tileNbt, te);
+        try {
+            te.readFromNBT(toApply);
+        } catch (Throwable ignored) {
+            /* 个别模组 NBT 不兼容时仍走原 TE */
+        }
+        if (teIsMultipart) {
+            MultipartNbtStateUtil.loadPartStatesFromNbt(te, toApply);
+        }
+    }
+
+    /** 旧行为（inplace 负对照专用）的回滚：把备份 NBT 读回活动 TE（对非幂等 readFromNBT 同样修不回来）。 */
+    private static void restoreTileEntityInPlace(TileEntity te, NBTTagCompound backup, boolean teIsMultipart) {
+        try {
+            te.readFromNBT(backup);
+        } catch (Throwable ignored) {
+            /* 尽力恢复 */
+        }
+        if (teIsMultipart) {
+            MultipartNbtStateUtil.loadPartStatesFromNbt(te, backup);
+        }
     }
 
     private static JsonObject emptyGeometryJson() {

@@ -57,4 +57,15 @@ dependencies {
     // 植物学：宾尼（Binnie，含 Botany / Genetics 等）；需林业（ForestryMC）作为 API 依赖
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:ForestryMC:4.11.15:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:Binnie:2.6.24:dev")
+
+    // 物流管道（LogisticsPipes）：仅供 dev 客户端运行时放置 `logisticspipes.pipes.basic.LogisticsBlockGenericPipe`
+    // 方块（LP 管道 TileEntity 导出崩溃的验证）。验证代码只按注册名/反射触达 LP，故**不**加 compileOnly/implementation。
+    //
+    // 版本选择 1.5.28-GTNH（而非最新 1.5.36-GTNH），依据 LP 自己的 Gradle 模块元数据
+    // （https://nexus.gtnewhorizons.com/repository/public/com/github/GTNewHorizons/LogisticsPipes/<ver>/LogisticsPipes-<ver>.module）：
+    //   - 1.5.28 对 GTNHLib 只是约束 0.9.36 < 本树已解析的 0.9.62 → 不抬高 GTNHLib；
+    //   - 1.5.36 约束 GTNHLib 0.11.37，会把已锁定的 0.9.62 顶到 0.11.x（GT5U 5.09.52.283 的编译基线被打破），故不选。
+    // 传递依赖由 Gradle 自动解析（已实测）：BuildCraft 7.1.60（提供 BuildCraft|Core/Transport/Silicon/Robotics，
+    // LP 的 @Mod 硬依赖）、unimixins 0.2.1（提供 gtnhmixins）、NotEnoughItems 2.8.100-GTNH、ModularUI2 2.3.72-1.7.10。
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:LogisticsPipes:1.5.28-GTNH:dev")
 }

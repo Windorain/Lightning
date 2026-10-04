@@ -79,6 +79,36 @@ public final class MultipartNbtStateUtil {
     }
 
     /**
+     * 用 FMP 自己的入口 {@code TileMultipart.createFromNBT(NBTTagCompound)} 造一份<strong>副本</strong>多部件 TE。
+     * <p>
+     * 为什么不能只靠 {@link TileEntity#createAndLoadEntity}：FMP 把每个生成的多部件 TE 类登记进
+     * {@code TileEntity} 的 classToNameMap（值恒为 {@code "savedMultipart"}，见 {@code MultipartSaveLoad}），
+     * 所以扫描 NBT 的 {@code id} 是 {@code savedMultipart}，{@code createAndLoadEntity} 只会造出一个
+     * {@code MultipartSaveLoad$TileNBTContainer} —— 既不是 {@code TileMultipart}、也不含任何 part，于是
+     * {@link #isTileMultipart(TileEntity)} 与 {@link #loadPartStatesFromNbt(TileEntity, NBTTagCompound)}
+     * 都只会静默空转（动态部件渲染随之丢失）。本方法走与区块加载完全相同的路径（构建复合类 + loadParts）。
+     * <p>
+     * 副本不写世界：{@code createFromNBT} 只 new 实例并灌入 NBT。失败（FMP 缺失/反射不可用/无 part）返回
+     * {@code null}，由调用方决定回退。
+     */
+    public static TileEntity createMultipartCopyFromNbt(NBTTagCompound nbt) {
+        if (nbt == null) {
+            return null;
+        }
+        resolve();
+        if (tileMultipartClass == null) {
+            return null;
+        }
+        try {
+            Method m = tileMultipartClass.getMethod("createFromNBT", NBTTagCompound.class);
+            Object created = m.invoke(null, nbt);
+            return created instanceof TileEntity ? (TileEntity) created : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /**
      * 检测 {@code te} 的类层级是否覆写了 {@code readFromNBT(NBTTagCompound)}。
      * 若声明类仍为 {@link TileEntity} 本身，说明没有任何子类覆写 —— 此时 swap
      * 与 TileMultipart 为同一模式：{@code readFromNBT} 只写 x/y/z，TE 真实内部态
