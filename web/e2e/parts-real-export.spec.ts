@@ -128,8 +128,11 @@ const ITEM_INDEX_PART_ATTRS = 61
 const ITEM_INDEX_HOST_ATTRS = 10
 /** 退化档（degraded_all）itemIndex 键数（火把/石板/箱子/栅栏 + EIO 方块身份；实测 5）。 */
 const ITEM_INDEX_KEYS_DEGRADED_ALL = 5
-/** 退化档 `EnderIO:blockConduitBundle:0` 的归属数（4 变换格 × (part+host)；实测证据）。 */
-const DEGRADED_EIO_BUNDLE_ATTRS = 8
+/**
+ * 退化档 `EnderIO:blockConduitBundle:0` 的 **host** 归属数（4 变换格各 1 条宿主归属；实测证据）。
+ * 注：**总**归属数还含岛级 part 归属（`inferred:<岛序号>`，岛数静态不可预测）⇒ 不硬编码总数。
+ */
+const DEGRADED_EIO_BUNDLE_HOST_ATTRS = 4
 
 /**
  * 契约 §2.2 归属条目身份（与消费侧 `pure/itemIndex.ts#normalizeHits` 同口径）：
@@ -199,9 +202,18 @@ function diffItemIndex(oracle: OracleDoc, doc: RealExportDoc): string[] {
     const used = new Array(e.attribution.length).fill(false)
     for (const w of want.attribution ?? []) {
       if (w.localId === 'inferred:*') {
-        if (!e.attribution.some((a) => attrMatches(a, w))) {
-          out.push(`${key} 缺通配归属 ${JSON.stringify(w)}`)
+        // 通配哨兵（契约 §11 档 3）：`inferred:<岛序号>` 的**条数静态不可预测**，
+        // 故 oracle 一条通配期望要**消耗该格该来源的全部岛级归属**（不能只判"存在"，
+        // 否则同一格的其余岛会被下面的循环误报"多出未登记归属"；#39 阶段二实测擒获）。
+        let consumedAny = false
+        for (let i = 0; i < e.attribution.length; i++) {
+          if (used[i]) continue
+          if (attrMatches(e.attribution[i]!, w)) {
+            used[i] = true
+            consumedAny = true
+          }
         }
+        if (!consumedAny) out.push(`${key} 缺通配归属 ${JSON.stringify(w)}`)
         continue
       }
       const idx = e.attribution.findIndex((a, i) => !used[i] && attrMatches(a, w))
@@ -955,14 +967,29 @@ test.describe('P3.5 · 退化导出 itemIndex：在册键精确 + 变换格哨�
       'untransformed-cells-only',
     )
     expect(Object.keys(file).length, 'degraded_all itemIndex 键数 = 硬编码 5').toBe(ITEM_INDEX_KEYS_DEGRADED_ALL)
+    // 反同义反复锚点（#39 阶段二修正）：**host 归属数**稳定 = 4 变换格（EIO 方块身份键命中层① 的宿主格）；
+    // part 归属是**岛级**的（`inferred:<岛序号>`，契约 §11 退化哨兵语义：岛数静态不可预测），
+    // 阶段一写的"总归属 8"是拿**oracle 通配条数**当文件条数 ⇒ 实测 52（4 格 × 13/9/15 个岛）必红。
+    // 故这里判「每条 part 归属都必须是 `inferred:<序号>` 形态」+「逐条对 oracle（通配）零差异」，
+    // 不硬编码岛数（F3/F5 类环境偶发会改变岛数，绑死数字会把噪声当判定力）。
+    const eioAttrs = file['EnderIO:blockConduitBundle:0']?.attribution ?? []
+    const eioHost = eioAttrs.filter((a) => a.source === 'host')
+    const eioPart = eioAttrs.filter((a) => a.source === 'part')
+    expect(eioHost.length, 'EIO 方块身份键 host 归属数 = 硬编码 4（4 个变换格各 1 条）').toBe(
+      DEGRADED_EIO_BUNDLE_HOST_ATTRS,
+    )
     expect(
-      (file['EnderIO:blockConduitBundle:0']?.attribution ?? []).length,
-      'EIO 方块身份键归属数 = 硬编码 8（4 变换格 × (part 通配 + host)）',
-    ).toBe(DEGRADED_EIO_BUNDLE_ATTRS)
+      eioPart.length,
+      'EIO 方块身份键 part 归属数 = 变换格数 × 岛数 ≥ 4（岛级归属；岛数静态不可预测，只判下界）',
+    ).toBeGreaterThanOrEqual(DEGRADED_EIO_BUNDLE_HOST_ATTRS)
+    expect(
+      eioPart.every((a) => /^inferred:\d+$/.test(a.localId ?? '')),
+      'EIO 方块身份键的 part 归属必须全部是 inferred:<岛序号>（退化哨兵语义）',
+    ).toBe(true)
     expect(diffItemIndex(ORACLE_DEGRADED_ALL, DEGRADED_ALL), '退化 itemIndex 与 oracle 差异').toEqual([])
     console.log(
       `[P3.5] degraded_all itemIndex：${Object.keys(file).length} 键（${Object.keys(file).join(', ')}）；` +
-        `EIO 方块身份键归属 ${DEGRADED_EIO_BUNDLE_ATTRS} 条`,
+        `EIO 方块身份键归属 ${eioAttrs.length} 条（host ${eioHost.length} + part ${eioPart.length} 岛级，通配比对 0 差异）`,
     )
   })
 })

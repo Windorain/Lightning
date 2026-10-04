@@ -484,6 +484,9 @@ final class PartsAcceptanceOracle {
         Map<String, JsonObject> expect = new TreeMap<String, JsonObject>();
         List<String> absent = new ArrayList<String>();
         List<String> derive = new ArrayList<String>();
+        // 诊断证据（不参与断言；#39 阶段二）：逐宿主记录判定链的**运行时读数**，
+        // 供"同一宿主在不同轮（full vs 退化）落不同类"这类现象定性用（derive 的成因必须可查）。
+        JsonArray evidence = new JsonArray();
         Set<String> seen = new LinkedHashSet<String>();
         for (PartsAcceptanceBuilder.CellIntent c : intents) {
             if (c.host == null || c.host.isEmpty() || !seen.add(c.host)) {
@@ -492,21 +495,56 @@ final class PartsAcceptanceOracle {
             int colon = c.host.lastIndexOf(':');
             String registry = colon > 0 ? c.host.substring(0, colon) : c.host;
             int meta = colon > 0 ? Integer.parseInt(c.host.substring(colon + 1)) : 0;
-            Block b = Block.getBlockFromName(registry);
+            JsonObject ev = new JsonObject();
+            ev.addProperty("host", c.host);
+            Block b = null;
+            String blockClass = null;
+            try {
+                b = Block.getBlockFromName(registry);
+                blockClass = b == null ? null
+                    : b.getClass()
+                        .getName();
+            } catch (Throwable t) {
+                ev.addProperty("blockLookupError", String.valueOf(t));
+            }
+            ev.addProperty("blockFound", Boolean.valueOf(b != null));
+            if (b != null) {
+                ev.addProperty("blockClass", blockClass);
+            }
             if (b == null) {
+                ev.addProperty("verdict", "derive");
                 derive.add(c.host);
+                evidence.add(ev);
                 continue;
             }
             Item item = Item.getItemFromBlock(b);
+            ev.addProperty("itemFromBlockNull", Boolean.valueOf(item == null));
             if (item == null) {
+                ev.addProperty("verdict", "absent");
                 absent.add(c.host);
+                evidence.add(ev);
                 continue;
             }
-            String itemRegistry = Item.itemRegistry.getNameForObject(item);
+            ev.addProperty(
+                "itemClass",
+                item.getClass()
+                    .getName());
+            String itemRegistry;
+            try {
+                itemRegistry = Item.itemRegistry.getNameForObject(item);
+            } catch (Throwable t) {
+                ev.addProperty("itemRegistryError", String.valueOf(t));
+                itemRegistry = null;
+            }
+            ev.addProperty("itemRegistry", itemRegistry);
             if (itemRegistry == null) {
+                ev.addProperty("verdict", "derive");
                 derive.add(c.host);
+                evidence.add(ev);
                 continue;
             }
+            ev.addProperty("verdict", "expect");
+            evidence.add(ev);
             JsonObject h = new JsonObject();
             h.addProperty("registry", itemRegistry);
             h.addProperty("damage", Integer.valueOf(meta));
@@ -527,6 +565,7 @@ final class PartsAcceptanceOracle {
             deriveArr.add(new JsonPrimitive(s));
         }
         spec.add("derive", deriveArr);
+        spec.add("evidence", evidence);
         root.add("hostItems", spec);
     }
 

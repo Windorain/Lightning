@@ -136,7 +136,12 @@ export function aabbOfQuadsWithinBox(
     }
   }
   if (!any) return null
-  return { min: [minX, minY, minZ], max: [maxX, maxY, maxZ], kind: 'visual' }
+  // 注意（#39 阶段二登记）：本行是**包络构造**（几何输入 = 上面的文件 baked quads），
+  // 不是契约 §6/§12 禁止的"重算导出语义盒" —— 不读世界、不调游戏取盒 API、不参与命中/统计。
+  // `scripts/parts-acceptance/check-static.mjs` 的"web 端不构造部件盒"规则用标记
+  // `PartBoxMaskEnvelope` 对本行**具名豁免**（`BOX_RULE_EXEMPTIONS`），且该豁免带
+  // "标记消失即判红"守卫；挪动/改写本行须同步核对那条登记。
+  return { min: [minX, minY, minZ], max: [maxX, maxY, maxZ], kind: 'visual' } // PartBoxMaskEnvelope
 }
 
 /** 四边面是否整体落于盒内（含端点容差） */

@@ -426,11 +426,17 @@ final class PartsAcceptanceVerifier {
         Set<String> sentinels = sentinelGrids(oracle);
 
         // 键集：exact 双向精确；退化轮在册键必在（变换格多出放行）
-        for (String key : expected.keySet()) {
+        // 注意：必须用 entrySet() 而非 keySet() 遍历 —— JsonObject.keySet() 是 Gson 2.8.1 才有的 API，
+        // 而 1.7.10 运行时实际加载的是随游戏分发的旧版 Gson（#39 阶段二 L1 实测 NoSuchMethodError：
+        // com.google.gson.JsonObject.keySet()Ljava/util/Set;）。entrySet() 在 2.2.4 起即存在，
+        // 两个版本都可用（build.gradle 声明的 2.8.9 不为运行时保证）。
+        for (Map.Entry<String, JsonElement> en : expected.entrySet()) {
+            String key = en.getKey();
             expect(checks, actual.has(key), "itemIndex 缺期望键 " + key);
         }
         if (!subset) {
-            for (String key : actual.keySet()) {
+            for (Map.Entry<String, JsonElement> en : actual.entrySet()) {
+                String key = en.getKey();
                 expect(checks, expected.has(key), "itemIndex 多出未登记键 " + key);
             }
         }

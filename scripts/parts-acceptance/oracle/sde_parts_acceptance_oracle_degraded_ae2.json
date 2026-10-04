@@ -1248,7 +1248,6 @@
       ]
     },
     "ForgeMicroblock:microblock:2#mat\u003dProjRed|Exploration:projectred.exploration.stone_1": {
-      "display": null,
       "displayChecked": false,
       "tooltipNonEmpty": true,
       "source": "part",
@@ -1266,7 +1265,6 @@
       ]
     },
     "ForgeMicroblock:microblock:2#mat\u003dTConstruct:GlassBlock": {
-      "display": null,
       "displayChecked": false,
       "tooltipNonEmpty": true,
       "source": "part",
@@ -1294,7 +1292,6 @@
       ]
     },
     "ForgeMicroblock:microblock:4#mat\u003dProjRed|Exploration:projectred.exploration.stone": {
-      "display": null,
       "displayChecked": false,
       "tooltipNonEmpty": true,
       "source": "part",
@@ -1738,16 +1735,32 @@
     "rule": "契约 §2.2 层②：blockPalette[j].hostItem \u003d { registry: Item.getItemFromBlock(宿主方块) 的注册名, damage: 该条目 meta }；无物品形态 ⇒ 字段缺席（不猜）",
     "damageEqualsMeta": true,
     "expect": {
-      "minecraft:stone:0": {
-        "registry": "minecraft:stone",
+      "EnderIO:blockConduitBundle:0": {
+        "registry": "EnderIO:blockConduitBundle",
+        "damage": 0
+      },
+      "appliedenergistics2:tile.BlockCableBus:0": {
+        "registry": "appliedenergistics2:tile.BlockCableBus",
+        "damage": 0
+      },
+      "minecraft:chest:3": {
+        "registry": "minecraft:chest",
+        "damage": 3
+      },
+      "minecraft:crafting_table:0": {
+        "registry": "minecraft:crafting_table",
+        "damage": 0
+      },
+      "minecraft:fence:0": {
+        "registry": "minecraft:fence",
         "damage": 0
       },
       "minecraft:furnace:5": {
         "registry": "minecraft:furnace",
         "damage": 5
       },
-      "minecraft:crafting_table:0": {
-        "registry": "minecraft:crafting_table",
+      "minecraft:stone:0": {
+        "registry": "minecraft:stone",
         "damage": 0
       },
       "minecraft:stone_slab:0": {
@@ -1758,31 +1771,126 @@
         "registry": "minecraft:stone_slab",
         "damage": 8
       },
-      "minecraft:torch:5": {
-        "registry": "minecraft:torch",
-        "damage": 5
-      },
       "minecraft:torch:1": {
         "registry": "minecraft:torch",
         "damage": 1
       },
-      "minecraft:chest:3": {
-        "registry": "minecraft:chest",
-        "damage": 3
-      },
-      "minecraft:fence:0": {
-        "registry": "minecraft:fence",
-        "damage": 0
-      },
-      "EnderIO:blockConduitBundle:0": {
-        "registry": "EnderIO:blockConduitBundle",
-        "damage": 0
+      "minecraft:torch:5": {
+        "registry": "minecraft:torch",
+        "damage": 5
       }
     },
-    "absent": [],
-    "derive": [
-      "appliedenergistics2:tile.BlockCableBus:0",
+    "absent": [
       "ForgeMultipart:block:0"
+    ],
+    "derive": [],
+    "evidence": [
+      {
+        "host": "minecraft:stone:0",
+        "blockFound": true,
+        "blockClass": "net.minecraft.block.BlockStone",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemBlock",
+        "itemRegistry": "minecraft:stone",
+        "verdict": "expect"
+      },
+      {
+        "host": "minecraft:furnace:5",
+        "blockFound": true,
+        "blockClass": "net.minecraft.block.BlockFurnace",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemBlock",
+        "itemRegistry": "minecraft:furnace",
+        "verdict": "expect"
+      },
+      {
+        "host": "minecraft:crafting_table:0",
+        "blockFound": true,
+        "blockClass": "net.minecraft.block.BlockWorkbench",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemBlock",
+        "itemRegistry": "minecraft:crafting_table",
+        "verdict": "expect"
+      },
+      {
+        "host": "minecraft:stone_slab:0",
+        "blockFound": true,
+        "blockClass": "net.minecraft.block.BlockStoneSlab",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemSlab",
+        "itemRegistry": "minecraft:stone_slab",
+        "verdict": "expect"
+      },
+      {
+        "host": "minecraft:stone_slab:8",
+        "blockFound": true,
+        "blockClass": "net.minecraft.block.BlockStoneSlab",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemSlab",
+        "itemRegistry": "minecraft:stone_slab",
+        "verdict": "expect"
+      },
+      {
+        "host": "minecraft:torch:5",
+        "blockFound": true,
+        "blockClass": "net.minecraft.block.BlockTorch",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemBlock",
+        "itemRegistry": "minecraft:torch",
+        "verdict": "expect"
+      },
+      {
+        "host": "minecraft:torch:1",
+        "blockFound": true,
+        "blockClass": "net.minecraft.block.BlockTorch",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemBlock",
+        "itemRegistry": "minecraft:torch",
+        "verdict": "expect"
+      },
+      {
+        "host": "minecraft:chest:3",
+        "blockFound": true,
+        "blockClass": "net.minecraft.block.BlockChest",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemBlock",
+        "itemRegistry": "minecraft:chest",
+        "verdict": "expect"
+      },
+      {
+        "host": "minecraft:fence:0",
+        "blockFound": true,
+        "blockClass": "net.minecraft.block.BlockFence",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemBlock",
+        "itemRegistry": "minecraft:fence",
+        "verdict": "expect"
+      },
+      {
+        "host": "appliedenergistics2:tile.BlockCableBus:0",
+        "blockFound": true,
+        "blockClass": "appeng.block.networking.BlockCableBus",
+        "itemFromBlockNull": false,
+        "itemClass": "appeng.block.AEBaseItemBlock",
+        "itemRegistry": "appliedenergistics2:tile.BlockCableBus",
+        "verdict": "expect"
+      },
+      {
+        "host": "EnderIO:blockConduitBundle:0",
+        "blockFound": true,
+        "blockClass": "crazypants.enderio.conduit.BlockConduitBundle",
+        "itemFromBlockNull": false,
+        "itemClass": "net.minecraft.item.ItemBlock",
+        "itemRegistry": "EnderIO:blockConduitBundle",
+        "verdict": "expect"
+      },
+      {
+        "host": "ForgeMultipart:block:0",
+        "blockFound": true,
+        "blockClass": "codechicken.multipart.BlockMultipart",
+        "itemFromBlockNull": true,
+        "verdict": "absent"
+      }
     ]
   },
   "countsScope": "untransformed-cells-only",
