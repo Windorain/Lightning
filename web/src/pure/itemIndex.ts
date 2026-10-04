@@ -258,3 +258,22 @@ export function resolveItemHit(
 ): ItemHitIndexEntry | null {
   return index.get(key) ?? null
 }
+
+/**
+ * 「该物品**没有对应方块**」——左栏行内标记与"可选中、不高亮"提示的唯一判据（B-5 / #38）。
+ *
+ * 两种情形同义（都意味着点选后视口不会有任何变化）：
+ *  1. 索引里**没有该键的条目**（旧部件文件无 `itemIndex`、超出索引范围的物品键）；
+ *  2. 有条目但 `attribution` 为空（显式"无对应"，`ItemIndexEntry.source === 'none'`）。
+ *
+ * 与 `ItemHitIndexEntry.unresolved` 的区别：后者只覆盖情形 2（"键存在、状态明确"），
+ * 语义上区分"无数据"与"数据说没有"；本函数是**用户可见判据**——两者对用户是同一件事
+ * （"点了也不会亮"），故在此合并，避免调用方各自决定。
+ */
+export function isItemUnresolved(
+  index: ItemHitIndex | null | undefined,
+  key: string,
+): boolean {
+  const entry = index?.get(key)
+  return entry === undefined || entry.unresolved
+}

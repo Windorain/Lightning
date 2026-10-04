@@ -11,7 +11,7 @@
  *  2. **红色必须来自断言，而不是解析失败**：每个用例先断言篡改副本仍正常加载
  *     （`injectSceneDocumentOk` 内部已断言 `docLoaded === true`），再用
  *     `captureAsyncFailure` 验证**断言确实抛出**。
- *  3. **证伪必须定向**：计数篡改只打红统计计数断言（宿主视图行集仍绿）；
+ *  3. **证伪必须定向**：计数篡改只打红统计计数断言（行集/顺序与另一物品行仍绿）；
  *     displayName 篡改只打红该部件的 tooltip/行名断言（同格另一部件仍绿）。
  */
 
@@ -22,7 +22,6 @@ import {
   clearWikiHover,
   readStatsSidebarSettled,
   waitStatsSidebarReady,
-  switchStatsView,
   readPartsFixture,
   readPartsObservation,
   cloneFixture,
@@ -102,14 +101,16 @@ test.describe('P2.5 证伪 · 篡改计数 → 统计断言必红', () => {
     expect(err, '计数篡改后统计断言必须抛出（必红）').not.toBeNull()
     console.log(`[P2.5] 证伪（计数 3→5）→ 断言红：${(err as Error).message.split('\n')[0]}`)
 
-    // ── 定向性：宿主视图（旧口径，不经部件物品计数）仍必须全绿 ──
-    const hosts = await switchStatsView(page, 'hosts')
-    expect(hosts.rows.map((r) => [r.key, r.qty]), '物品计数篡改不影响宿主口径').toEqual([
-      ['minecraft:fence', '1'],
-      ['minecraft:stone', '1'],
-      ['minecraft:stone_slab', '2'],
-      ['minecraft:stone_slab@8', '1'],
-    ])
+    // ── 定向性：篡改只动 Stone Slab 的计数 —— 行集/顺序与另一物品行必须不随之变化 ──
+    //    （B-3 已移除「宿主视图」这条旧口径对照；定向性改由"同页另一行不受影响"承担。）
+    expect(
+      dirty.rows.map((r) => r.key),
+      '行集/顺序不因计数篡改而变化（slab 5 件仍居首）',
+    ).toEqual(['minecraft:stone_slab:0', 'minecraft:fence:0'])
+    expect(
+      dirty.rows.filter((r) => r.key !== 'minecraft:stone_slab:0').map((r) => [r.name, r.qty]),
+      '物品计数篡改不影响其它物品行（定向性）',
+    ).toEqual([['Fence', '1']])
 
     // 解析级对照：篡改后的部件数据沿 Grid API 透出（证明红来自数据而非管线崩坏）
     const cells = await readPartsObservation(page)

@@ -121,6 +121,12 @@ function expectNoPartsModeUi(el: HTMLElement): void {
   expect(el.querySelector('[data-stats-reset-local]')).toBeNull()
   expect(el.querySelector('[data-stats-group-title]')).toBeNull()
   expect(el.querySelector('[data-stats-itemless]')).toBeNull()
+  // B-5 新增的部件模式数据位/UI 同样不得出现在旧路径（两条路径互不串台）
+  expect(el.querySelector('[data-stats-selected]')).toBeNull()
+  expect(el.querySelector('[data-stats-unresolved]')).toBeNull()
+  expect(el.querySelector('[data-stats-unresolved-dot]')).toBeNull()
+  expect(el.querySelector('[data-stats-anchor]')).toBeNull()
+  expect(el.querySelector('[data-stats-selection-notice]')).toBeNull()
 }
 
 const STATS_LOCAL_PREFIX = 'lightning:stats:v1:'
@@ -201,6 +207,23 @@ describe('旧文件回归锁：minimal-v2（真实旧文件 fixture）', () => {
 
     row.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(onSelect).toHaveBeenCalledExactlyOnceWith('minecraft:gold_ore')
+  })
+
+  it('B-5 的清空交互**不侵入**旧路径：Esc / 点左栏空白都不发 clear-selection', () => {
+    const onClear = vi.fn()
+    const el = mountSidebar(legacyDefOf(minimalV2), { onClearSelection: onClear })
+
+    el.querySelector('.nei-sidebar-grid')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(onClear, '旧文件宿主清单路径无多选语义 ⇒ 不清空（逐项不变）').not.toHaveBeenCalled()
+  })
+
+  it('B-5 的选中态数据位不落到旧路径行上（仍是单值 selectedBlockId 语义）', () => {
+    const el = mountSidebar(legacyDefOf(singleboxFixture), { selectedBlockId: 'minecraft:fence' })
+    expectNoPartsModeUi(el)
+    const rows = [...el.querySelectorAll<HTMLElement>('.nei-slot-row')]
+    expect(rows.filter((r) => r.classList.contains('nei-slot-row--selected'))).toHaveLength(1)
+    expect(rows[0]!.classList.contains('nei-slot-row--selected')).toBe(true)
   })
 })
 

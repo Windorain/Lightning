@@ -13,13 +13,15 @@
  *     三个部件（中心线缆 / NORTH 切换总线 / UP 存储总线）投影位置各注入 pointer
  *     事件 → 公开悬停状态的部件身份（localId）+ DOM tooltip 文本分别为各部件
  *     事物名；slab fixture 满方块石头格 tooltip = 宿主 NEI 名（回归）。
- *  2. 统计断言：slab fixture 默认视图（部件物品清单）DOM 行 = Stone Slab×3 /
- *     Fence×1 精确比对（Stone 不出现）；三视图切换（切宿主 = 旧口径行集）；
- *     provenance 徽标（文档默认 → 切换后本机修改 → 切回清除）。
- *  3. 图标断言：部件行 `data-stats-icon-key` = 物品身份键（`registry:damage`），
+ *  2. 统计断言：slab fixture 默认视图（物品清单）DOM 行 = Stone Slab×3 /
+ *     Fence×1 精确比对（Stone 不出现）；无对应标记与选择提示的行为（B-5）。
+ *     **注**：原「三视图切换 + provenance 徽标迁移」断言已删除 —— 该 UI 随 **B-3 决策 C**
+ *     整套移除（工具条/视图按钮/徽标/provenance 面板），留着就是确定性坏断言。
+ *  3. 图标断言：物品行 `data-stats-icon-key` = 物品身份键（`registry:damage`），
  *     不是宿主方块键。
- *  4. 回归断言：minimal-v2（无部件）侧栏无部件模式 UI（工具条/视图按钮/来源徽标
- *     全部不存在），行集 = 旧路径；无部件文档悬停 part = null、tooltip = 宿主名。
+ *  4. 回归断言：minimal-v2（无部件）侧栏无部件模式 UI（无 `data-stats-row-key` /
+ *     选中态数据位 / 未计入提示），行集 = 旧路径；无部件文档悬停 part = null、
+ *     tooltip = 宿主名。
  *
  * ── 拍板登记（本 spec 的两处输入整备，均已上报调度者）──
  *  【几何增强副本】悬停是真实 raycast（命中三角形 → 命中点 → 部件盒）。fixture
@@ -46,8 +48,6 @@ import {
   clearWikiHover,
   readStatsSidebarSettled,
   waitStatsSidebarReady,
-  switchStatsView,
-  readProvenance,
   readPartsFixture,
   readPartsObservation,
   augmentFixtureGeometry,
@@ -108,8 +108,11 @@ function augmentedSingleboxFixture(): Record<string, unknown> {
 }
 
 /** 行观测 → 紧凑可比对形状（断言失败时 diff 直接可读）。 */
-function compactRows(rows: StatsRowObservation[]): Array<Record<string, string | null>> {
-  return rows.map((r) => ({ key: r.key, kind: r.kind, iconKey: r.iconKey, name: r.name, qty: r.qty }))
+function compactRows(rows: StatsRowObservation[]): Array<Record<string, string | boolean | null>> {
+  return rows.map((r) => ({
+    key: r.key, iconKey: r.iconKey, name: r.name, qty: r.qty,
+    selected: r.selected, unresolved: r.unresolved,
+  }))
 }
 
 /**
@@ -231,100 +234,59 @@ test.describe('P2.5 · 悬停断言（AE2 同格三部件 + 满方块回归）',
   })
 })
 
-test.describe('P2.5 · 统计断言（slab fixture 三视图 + provenance）', () => {
+test.describe('P2.5 · 统计断言（slab fixture：物品行 = 唯一视图）', () => {
   // 本 describe 的用例都依赖「展开态保持」，跳过理由见 EXPANDED_SIDEBAR_DESKTOP_ONLY。
 
-  test('默认视图 = 部件物品清单（Stone Slab×3 / Fence×1；石头不出现）；图标键 = 物品身份键', async ({ page }, testInfo) => {
+  test('默认视图 = 物品清单（Stone Slab×3 / Fence×1；石头不出现）；图标键 = 物品身份键', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', EXPANDED_SIDEBAR_DESKTOP_ONLY)
     test.setTimeout(180_000)
     await gotoWikiPreviewWithScene(page, readPartsFixture('parts-singlebox-mix.v2.json'), 'parts-singlebox-mix.v2.json', { requireMesh: false })
     await waitStatsSidebarReady(page)
     const s = await readStatsSidebarSettled(page)
 
-    expect(s.toolbar, '有部件数据 ⇒ 部件模式工具条渲染').toBe(true)
-    expect(s.viewButtons.map((b) => [b.id, b.active])).toEqual([['parts', true], ['hosts', false], ['custom', false]])
-    expect(s.pill, '初始来源 = 文档默认（fixture 根级 statsTemplate mode=auto）').toEqual({ text: '文档默认', source: 'document-default' })
-
+    // 视图切换工具条 / 视图按钮 / 配置来源徽标已随 B-3（决策 C）整套移除 ⇒ 无对应断言。
     // 默认视图行集精确比对（count-desc：Stone Slab×3 在前；石头满方块不是物品，不出现）
-    expect(compactRows(s.rows), '部件物品清单 = Stone Slab×3 / Fence×1（硬编码期望）').toEqual([
-      { key: 'minecraft:stone_slab:0', kind: 'part', iconKey: 'minecraft:stone_slab:0', name: 'Stone Slab', qty: '3' },
-      { key: 'minecraft:fence:0', kind: 'part', iconKey: 'minecraft:fence:0', name: 'Fence', qty: '1' },
+    expect(compactRows(s.rows), '物品清单 = Stone Slab×3 / Fence×1（硬编码期望）').toEqual([
+      { key: 'minecraft:stone_slab:0', iconKey: 'minecraft:stone_slab:0', name: 'Stone Slab', qty: '3', selected: false, unresolved: true },
+      { key: 'minecraft:fence:0', iconKey: 'minecraft:fence:0', name: 'Fence', qty: '1', selected: false, unresolved: true },
     ])
-    // 图标断言：部件行图标键 = 物品身份键（带 :damage 段），≠ 宿主方块键（registryId / registryId@meta）
+    // 图标断言：物品行图标键 = 物品身份键（带 :damage 段），≠ 宿主方块键（registryId / registryId@meta）
     for (const r of s.rows) {
-      expect(r.kind).toBe('part')
+      expect(r.key, '物品行必须有行键（旧宿主清单行无行键）').not.toBeNull()
       expect(r.iconKey, `行 ${r.name} 的图标键必须是物品身份键`).toBe(r.key)
       expect(r.iconKey, '物品身份键带 :damage 段（宿主键没有）').toMatch(/:\d+$/)
     }
     expect(s.rows.map((r) => r.name)).not.toContain('Stone')
+    // B-5：该 fixture 无 B-2 的 `itemIndex` ⇒ 每一行都标"没有对应方块"（不得让用户误判为渲染故障）
+    expect(s.rows.every((r) => r.unresolved), '无 itemIndex ⇒ 全部行可辨认地标"没有对应方块"').toBe(true)
+    expect(s.rows.some((r) => r.selected), '初始无选中态').toBe(false)
+    expect(s.notice, '初始无选择 ⇒ 无会话提示').toBeNull()
 
     fs.mkdirSync(SHOT_DIR, { recursive: true })
     await page.locator('.wb-wiki-embed .nei-sidebar').screenshot({ path: path.join(SHOT_DIR, 'singlebox-stats-parts-view.png') })
     console.log(`[P2.5] slab 默认视图行 = ${JSON.stringify(compactRows(s.rows))}`)
   })
 
-  test('AE2 fixture 默认视图：三部件物品行（计数键含 damage；图标键 = 物品键）', async ({ page }, testInfo) => {
+  test('AE2 fixture 默认视图：三物品行（计数键含 damage；图标键 = 物品键）', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', EXPANDED_SIDEBAR_DESKTOP_ONLY)
     test.setTimeout(180_000)
     await gotoWikiPreviewWithScene(page, readPartsFixture('parts-ae2-multibox.v2.json'), 'parts-ae2-multibox.v2.json', { requireMesh: false })
     await waitStatsSidebarReady(page)
     const s = await readStatsSidebarSettled(page)
-    expect(s.pill?.source).toBe('document-default')
     // 全 ×1 ⇒ count-desc 并列按 key 字典序：:16 < :220 < :80（逐字符比较）
     expect(compactRows(s.rows)).toEqual([
-      { key: AE2_PARTS.cable.typeKey, kind: 'part', iconKey: AE2_PARTS.cable.typeKey, name: AE2_PARTS.cable.name, qty: '1' },
-      { key: AE2_PARTS.storage.typeKey, kind: 'part', iconKey: AE2_PARTS.storage.typeKey, name: AE2_PARTS.storage.name, qty: '1' },
-      { key: AE2_PARTS.toggle.typeKey, kind: 'part', iconKey: AE2_PARTS.toggle.typeKey, name: AE2_PARTS.toggle.name, qty: '1' },
+      { key: AE2_PARTS.cable.typeKey, iconKey: AE2_PARTS.cable.typeKey, name: AE2_PARTS.cable.name, qty: '1', selected: false, unresolved: true },
+      { key: AE2_PARTS.storage.typeKey, iconKey: AE2_PARTS.storage.typeKey, name: AE2_PARTS.storage.name, qty: '1', selected: false, unresolved: true },
+      { key: AE2_PARTS.toggle.typeKey, iconKey: AE2_PARTS.toggle.typeKey, name: AE2_PARTS.toggle.name, qty: '1', selected: false, unresolved: true },
     ])
     // 图标键 = 物品注册名（item.ItemMultiPart），与宿主方块键（tile.BlockCableBus）不同族
     for (const r of s.rows) expect(r.iconKey).not.toBe(AE2_PARTS.hostKey)
   })
-
-  test('三视图切换：切宿主 = 旧口径行集；provenance 文档默认 → 本机修改 → 切回清除', async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'desktop-chrome', EXPANDED_SIDEBAR_DESKTOP_ONLY)
-    test.setTimeout(240_000)
-    await gotoWikiPreviewWithScene(page, readPartsFixture('parts-singlebox-mix.v2.json'), 'parts-singlebox-mix.v2.json', { requireMesh: false })
-    await waitStatsSidebarReady(page)
-
-    // ── 切宿主：行集 = 旧 countBlocksById 口径（硬编码；sortBy=key 字典序）──
-    const hosts = await switchStatsView(page, 'hosts')
-    expect(compactRows(hosts.rows), '宿主视图 = 旧口径行集（上/下半 slab 是两条宿主行）').toEqual([
-      { key: 'minecraft:fence', kind: 'host', iconKey: 'minecraft:fence', name: 'Fence', qty: '1' },
-      { key: 'minecraft:stone', kind: 'host', iconKey: 'minecraft:stone', name: 'Stone', qty: '1' },
-      { key: 'minecraft:stone_slab', kind: 'host', iconKey: 'minecraft:stone_slab', name: 'Stone Slab', qty: '2' },
-      { key: 'minecraft:stone_slab@8', kind: 'host', iconKey: 'minecraft:stone_slab@8', name: 'Stone Slab', qty: '1' },
-    ])
-    // provenance：视图切换写查看者本地层 ⇒ 徽标 = 本机修改
-    expect(hosts.pill, '切换后来源徽标 = 本机修改').toEqual({ text: '本机修改', source: 'viewer-local' })
-    const prov = await readProvenance(page, true)
-    expect(prov.panel, 'provenance 面板展开').not.toBeNull()
-    const viewField = prov.panel!.find((f) => f.field === 'view')
-    expect(viewField, '逐字段来源：视图 = 本机修改').toMatchObject({ source: 'viewer-local', sourceText: '本机修改' })
-    expect(prov.hasReset, '存在本机修改 ⇒ 提供「清除本机修改」').toBe(true)
-
-    // ── 切自定义：空规则 ⇒ 行集同部件视图（语义由引擎钉死），视图按钮 = custom ──
-    const custom = await switchStatsView(page, 'custom')
-    expect(custom.viewButtons.find((b) => b.id === 'custom')?.active).toBe(true)
-    expect(compactRows(custom.rows), '自定义视图（无规则）行集 = 部件物品清单').toEqual([
-      { key: 'minecraft:stone_slab:0', kind: 'part', iconKey: 'minecraft:stone_slab:0', name: 'Stone Slab', qty: '3' },
-      { key: 'minecraft:fence:0', kind: 'part', iconKey: 'minecraft:fence:0', name: 'Fence', qty: '1' },
-    ])
-    expect(custom.pill?.source, 'custom ≠ 下层合成 ⇒ 仍为本机修改').toBe('viewer-local')
-
-    // ── 切回部件物品：与下层（文档默认）相同 ⇒ 本地覆盖清除，徽标回到文档默认 ──
-    const back = await switchStatsView(page, 'parts')
-    expect(back.pill, '切回下层同值视图 ⇒ 本机修改清除').toEqual({ text: '文档默认', source: 'document-default' })
-    expect(compactRows(back.rows)).toEqual([
-      { key: 'minecraft:stone_slab:0', kind: 'part', iconKey: 'minecraft:stone_slab:0', name: 'Stone Slab', qty: '3' },
-      { key: 'minecraft:fence:0', kind: 'part', iconKey: 'minecraft:fence:0', name: 'Fence', qty: '1' },
-    ])
-    console.log('[P2.5] 三视图切换 + provenance 迁移：document-default → viewer-local → document-default（清除）')
-  })
 })
 
 test.describe('P2.5 · 回归断言（无部件文档：DOM 零新增 + 行为基线）', () => {
-  test('minimal-v2：侧栏无部件模式 UI，行集 = 旧路径（Gold Ore×8）', async ({ page }, testInfo) => {
-    // 「无工具条」只有在展开态下才是有效断言（折叠态本来就不渲染工具条）；
+  test('minimal-v2：侧栏无部件模式 UI（含 B-5 数据位），行集 = 旧路径（Gold Ore×8）', async ({ page }, testInfo) => {
+    // 「无部件模式 UI」只有在展开态下才是有效断言（折叠态本来就不渲染）；
     // 展开态保持见统计 describe 的振荡登记 —— 本用例仅 desktop。
     test.skip(testInfo.project.name !== 'desktop-chrome', EXPANDED_SIDEBAR_DESKTOP_ONLY)
     test.setTimeout(180_000)
@@ -332,13 +294,27 @@ test.describe('P2.5 · 回归断言（无部件文档：DOM 零新增 + 行为�
     await waitStatsSidebarReady(page)
     const s = await readStatsSidebarSettled(page)
 
-    expect(s.toolbar, '无部件旧文件 ⇒ 部件模式工具条不渲染（DOM 零新增）').toBe(false)
-    expect(s.viewButtons, '无部件 ⇒ 无视图切换按钮').toEqual([])
-    expect(s.pill, '无部件 ⇒ 无配置来源徽标').toBeNull()
+    // 视图切换 UI / 来源徽标 / provenance 已随 B-3 决策 C 移除 ⇒ 不再断言其不存在；
+    // 改为断言**当前**的部件模式数据位在旧路径上一个都不出现（DOM 零新增的直接证据）。
+    const partsModeAttrs = await page.evaluate(() => {
+      const el = document.querySelector('.wb-wiki-embed .nei-sidebar')
+      if (!el) return null
+      return {
+        rowKey: el.querySelector('[data-stats-row-key]') !== null,
+        selected: el.querySelector('[data-stats-selected]') !== null,
+        unresolved: el.querySelector('[data-stats-unresolved]') !== null,
+        anchor: el.querySelector('[data-stats-anchor]') !== null,
+        notice: el.querySelector('[data-stats-selection-notice]') !== null,
+      }
+    })
+    expect(partsModeAttrs, '旧路径行不得带任何部件模式数据位').toEqual({
+      rowKey: false, selected: false, unresolved: false, anchor: false, notice: false,
+    })
     expect(s.itemless).toBeNull()
+    expect(s.notice).toBeNull()
     // 旧路径行：无 data 属性（DOM 零新增的直接证据），行集 = 旧口径
     expect(compactRows(s.rows)).toEqual([
-      { key: null, kind: null, iconKey: null, name: 'Gold Ore', qty: '8' },
+      { key: null, iconKey: null, name: 'Gold Ore', qty: '8', selected: false, unresolved: false },
     ])
   })
 

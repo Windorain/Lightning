@@ -2,6 +2,7 @@
 import * as THREE from 'three'
 import type { BlockRef, SelectedEntity } from '../schema/types'
 import type { PartMaskGeometry } from '@/pure/partMask'
+import { OUTLINE_MASK_LIMIT } from '@/pure/outlineLimits'
 import { buildBoxesMaskMesh, buildQuadsMaskMesh } from './maskGeometryBuild'
 
 /**
@@ -33,7 +34,7 @@ export class SelectionHighlightProvider {
   ): THREE.Mesh[] {
     const meshes: THREE.Mesh[] = []
 
-    if (entities.size === 0 || entities.size > 500) return meshes
+    if (entities.size === 0 || entities.size > OUTLINE_MASK_LIMIT) return meshes
 
     for (const entity of entities) {
       if (entity.kind !== 'block') continue

@@ -184,6 +184,21 @@ export function gridCenterWorld(
   return rf.grid.centerWorld(pos)
 }
 
+/**
+ * 当前帧的**帧键**（`RuntimeFrame.index`），即 `ItemAttributionHit.frame` 的取值域。
+ *
+ * 为什么要它而不是 `getCurrentFrameIndex()`：后者是**数组下标**，前者是落盘在帧上的
+ * `index` 字段——`itemIndex` 的归属条目按后者记录（契约 §2.2）。两者在常规导出里相同，
+ * 但以落盘字段为准才是"同一坐标系"。
+ *
+ * 消费方：B-5 的物品点选高亮（`pure/itemOutlinePlan.ts#planItemOutlineHits` 的帧过滤）。
+ */
+export function currentFrameKey(ctx: Context): number {
+  const doc = ctx.getDoc().value
+  const i = ctx.getCurrentFrameIndex().value ?? 0
+  return doc?.frame(i)?.index ?? i
+}
+
 /** 列出所有材质及其纹理 dataURL */
 export function listMaterials(ctx: Context): MaterialQueryItem[] {
   const doc = ctx.getDoc().value
