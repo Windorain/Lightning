@@ -1,1 +1,24 @@
-# TODO: rewrite CI pipeline
+# CI 流水线占位（Gitea Actions）—— 见 Gitea issue #22
+#
+# 为什么是占位而不是真实流水线：
+#   本 Gitea 实例（D:\Workspace\gitea）尚未注册 act_runner，
+#   任何 push 触发的作业都只会永久排队，制造僵尸 run 与假红。
+#   故此处只保留一个「格式合法、仅手动触发」的入口。
+# 真实流水线（web 单测 / 构建 / mod 编译）待 runner 就位后另立单补。
+# 约束：本文件必须始终是语法+ schema 合法的 workflow；
+#   纯注释文件会被 Gitea 解析为 EOF，报「工作流配置无效」并每 push 记一条 failure run。
+name: CI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  placeholder:
+    name: 占位（未实现）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 说明
+        run: echo "CI 流水线尚未实现：本 Gitea 实例未注册 act_runner。"
