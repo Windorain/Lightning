@@ -1,0 +1,16 @@
+{
+  "note": "B-2（#35）无部件字节一致基线：既有测试资产（e2e/fixtures/minimal-v2.json、structuredata-exported-envelope.json）经 web「解析 → RuntimeDocument.serialize()」管线的逐字节输出指纹。",
+  "why": "无部件导出产物必须与基线字节一致（契约 §2 向后兼容硬约束）；B-2 新增的 itemIndex / blockPalette[].hostItem 只允许出现在含部件数据的文档里。只存指纹不存原文：envelope 序列化输出 2.5 MB（textureBlobs base64），全文入库不值当。",
+  "howToRegenerate": "在 web/ 下用生产解析链（V2PlainParser + createEnvelopeParser + WorldParser + StructureDataParser，注册顺序同 workbenchHost）解析 fixture，取 document.serialize() 的 JSON.stringify()，算 sha256 与 UTF-8 字节数。任何一处不一致都意味着管线改动动了无部件文档的字节。",
+  "generatedFrom": "B-2 改动前的 builtinParsers / runtimeDocument（B-2 只加了文档根级字段透传，对无部件输入零影响）",
+  "entries": {
+    "minimal-v2": {
+      "sha256": "b011ee5d8126800a8f9fa3875b7db62133ed8a7b624c015c50a411a90c52e966",
+      "bytes": 2842
+    },
+    "structuredata-exported-envelope": {
+      "sha256": "bb69e6642f778d7a95ceca90671a4d7c9179d265eeff3deea6df6ff818944614",
+      "bytes": 2517798
+    }
+  }
+}
