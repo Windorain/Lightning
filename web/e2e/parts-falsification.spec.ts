@@ -11,7 +11,8 @@
  *  2. **红色必须来自断言，而不是解析失败**：每个用例先断言篡改副本仍正常加载
  *     （`injectSceneDocumentOk` 内部已断言 `docLoaded === true`），再用
  *     `captureAsyncFailure` 验证**断言确实抛出**。
- *  3. **证伪必须定向**：计数篡改只打红统计计数断言（宿主视图行集仍绿）；
+ *  3. **证伪必须定向**：计数篡改只打红被篡改的物品行计数断言（同视图内未篡改行仍绿，
+ *     见下方「定向性」注释 —— B-3 后宿主视图已不存在，定向性判据随之改写）；
  *     displayName 篡改只打红该部件的 tooltip/行名断言（同格另一部件仍绿）。
  */
 
@@ -22,7 +23,6 @@ import {
   clearWikiHover,
   readStatsSidebarSettled,
   waitStatsSidebarReady,
-  switchStatsView,
   readPartsFixture,
   readPartsObservation,
   cloneFixture,
@@ -64,7 +64,7 @@ const EXPANDED_SIDEBAR_DESKTOP_ONLY =
   'mobile 窄布局自动折叠振荡（展开 ~50ms 内被 watcher 折回，probe 实证）；展开态统计交互仅 desktop 跑'
 
 test.describe('P2.5 证伪 · 篡改计数 → 统计断言必红', () => {
-  test('slab fixture：partLists[0] 物品 count 1→2 → 计数断言红、宿主视图断言仍绿', async ({ page }, testInfo) => {
+  test('slab fixture：partLists[0] 物品 count 1→2 → 计数断言红，且篡改只打红被篡改的行', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', EXPANDED_SIDEBAR_DESKTOP_ONLY)
     test.setTimeout(240_000)
 
@@ -102,14 +102,17 @@ test.describe('P2.5 证伪 · 篡改计数 → 统计断言必红', () => {
     expect(err, '计数篡改后统计断言必须抛出（必红）').not.toBeNull()
     console.log(`[P2.5] 证伪（计数 3→5）→ 断言红：${(err as Error).message.split('\n')[0]}`)
 
-    // ── 定向性：宿主视图（旧口径，不经部件物品计数）仍必须全绿 ──
-    const hosts = await switchStatsView(page, 'hosts')
-    expect(hosts.rows.map((r) => [r.key, r.qty]), '物品计数篡改不影响宿主口径').toEqual([
-      ['minecraft:fence', '1'],
-      ['minecraft:stone', '1'],
-      ['minecraft:stone_slab', '2'],
-      ['minecraft:stone_slab@8', '1'],
-    ])
+    // ── 定向性：未被篡改的行（Fence 不受共享池 partLists[0] 影响）仍必须全绿 ──
+    //
+    // B-4 收口：原「切宿主视图 ⇒ 旧口径行集不动」用 B-3（决策 C）已整套移除的视图切换
+    // 驱动（`switchStatsView` 已删，宿主视图已不存在）⇒ 该定向性断言无法再以原形态成立。
+    // 改为**同视图内的定向性**（语义等价且更贴近当前契约）：篡改的污染面必须只落在
+    // 被篡改的物品行上，未篡改行逐项不变。
+    const fenceRow = dirty.rows.find((r) => r.key === 'minecraft:fence:0')
+    expect(
+      [fenceRow?.name, fenceRow?.qty],
+      '未篡改行（Fence）不受共享池篡改影响',
+    ).toEqual(['Fence', '1'])
 
     // 解析级对照：篡改后的部件数据沿 Grid API 透出（证明红来自数据而非管线崩坏）
     const cells = await readPartsObservation(page)

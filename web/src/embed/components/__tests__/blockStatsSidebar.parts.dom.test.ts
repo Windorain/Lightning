@@ -15,20 +15,26 @@
  *  - **图标通道不变**：`partIconTextures` prop → `setPartIconTextureSource` →
  *    `ensurePartIcons(物品身份键)`；部件模式**不**走宿主 `ensure`（无宿主行）；
  *  - **事件通道不堵死**：物品行照发 `tooltip-hover` / `select-block`（payload = 物品身份键，
- *    即 B-4/B-5 的接入点）；但物品行不套 `--selected` 视觉（不引入选中态行 UI）。
+ *    即 B-4/B-5 的接入点）；但物品行不套 `--selected` 视觉（不引入选中态行 UI）；
+ *  - **B-4（#37）两条 DOM 断言**：① 物品行 emit `tooltip-hover`；② 该 hover 经生产解析层
+ *    （`useEmbedTooltip`）解析出的文案非空、含物品显示名，且来自文档根级 `itemIndex`
+ *    （不是 `"0"`、不是宿主方块名）。解析层的逐键/兜底/两类键不混用细节见
+ *    `web/src/embed/__tests__/embedTooltipParts.test.ts`。
  *
  * 无框架依赖：`createApp(...).mount(el)` + 原生 DOM 断言（仓库未装 @vue/test-utils）。
  * BlockIconCache 以真实实例构造（jsdom 无 WebGL ⇒ 烘焙确定性失败落占位，行 DOM 不依赖图标产出）；
  * 对它的 `vi.spyOn` 只做**调用观测**（对象仍是生产实例，无替身）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, nextTick, type App } from 'vue'
+import { createApp, nextTick, ref, shallowRef, type App } from 'vue'
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
+import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
 import { BlockIconCache } from '@/render/interaction/blockIconCache'
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { StructureDefinition } from '@/render/schema/types'
+import type { EmbedHover } from '@/runtime/hover'
 import type { PartRecord } from '@/pure/partTypes'
 
 import singleboxFixture from '../../../../e2e/fixtures/parts-singlebox-mix.v2.json'
@@ -416,5 +422,96 @@ describe('B-3 事件通道：物品行照发 tooltip-hover / select-block', () =
 
     expect(slab.classList.contains('nei-slot-row--selected')).toBe(false)
     expect(el.querySelector('.nei-slot-row--selected')).toBeNull()
+  })
+
+  it('无 itemIndex 且非宿主调色板键 ⇒ 回退行键本身（不再是 "0" 这类尾段片段）', () => {
+    const onHover = vi.fn()
+    const { el } = mountSidebar(runtimeDefOf(singleboxFixture), { onTooltipHover: onHover })
+    rowByKey(el, 'minecraft:fence:0')
+      .dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 1, clientY: 1 }))
+    const payload = onHover.mock.lastCall![0] as { blockId: string }
+    // 解析层（useEmbedTooltip）在两条键通道都不中时返回行键本身
+    expect(tooltipTextFor(runtimeDefOf(singleboxFixture), payload.blockId)).toBe(payload.blockId)
+    expect(tooltipTextFor(runtimeDefOf(singleboxFixture), payload.blockId)).not.toBe('0')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B-4（#37）DOM 断言：物品行 emit `tooltip-hover` + 该 hover 解析出的文案
+// ---------------------------------------------------------------------------
+
+/**
+ * 物品索引表条目（契约 §2.2 落盘形态；mod 侧 `ItemIndexIntegrator` 逐字段对齐）。
+ * 说明行**故意与部件级 `PartRecord.tooltip` / 宿主 NEI 文案都不同** ⇒ 解析出它即证明
+ * 文案确实来自 `itemIndex`（而不是恰好相同的旁路）。
+ */
+const ITEM_INDEX_FOR_FENCE = {
+  'minecraft:fence:0': {
+    display: 'Fence',
+    tooltip: ['Fence', 'DOCK-B4-说明行（物品索引表）'],
+    source: 'part',
+    attribution: [{ source: 'part', frame: 0, grid: [0, 0, 4], localId: 'generic:0' }],
+  },
+}
+
+/**
+ * 把侧栏 itemIndex 条目喂给**生产解析层** `useEmbedTooltip`（与 EmbedViewport 同一接线：
+ * `definitionRef` = 渲染定义根）——DOM 只负责发事件，文案解析走真实 composable。
+ */
+function tooltipTextFor(def: StructureDefinition, blockId: string): string {
+  const hoverRef = ref<EmbedHover | null>({
+    kind: 'block', source: 'sidebar', blockId, clientX: 0, clientY: 0,
+  })
+  const api = useEmbedTooltip({
+    hoverRef,
+    definitionRef: shallowRef(def),
+    tooltipPaletteRef: ref<readonly string[]>([]),
+    showHoverTooltipRef: ref(true),
+    docRef: ref(null),
+  })
+  return api.tooltipText.value
+}
+
+describe('B-4 物品行 DOM 断言（#37 硬要求两条）', () => {
+  it('断言①：物品行 emit `tooltip-hover`，payload = 物品身份键 + 指针坐标', () => {
+    const onHover = vi.fn()
+    const { el } = mountSidebar(runtimeDefOf(singleboxFixture), { onTooltipHover: onHover })
+
+    const fence = rowByKey(el, 'minecraft:fence:0')
+    expect(fence.getAttribute('data-stats-icon-key')).toBe('minecraft:fence:0')
+    fence.dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 11, clientY: 22 }))
+    expect(onHover).toHaveBeenLastCalledWith({
+      blockId: 'minecraft:fence:0', clientX: 11, clientY: 22, source: 'sidebar',
+    })
+
+    // 同路径的 pointermove 亦发（B-3 已删 `kind === 'host'` 短路 ⇒ 无短路残留）
+    fence.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 33, clientY: 44 }))
+    expect(onHover).toHaveBeenLastCalledWith({
+      blockId: 'minecraft:fence:0', clientX: 33, clientY: 44, source: 'sidebar',
+    })
+  })
+
+  it('断言②：该 hover 解析出的文案非空且含物品显示名，且不是 "0"、不是宿主方块名', () => {
+    const onHover = vi.fn()
+    // 文档根级 itemIndex 手工构造（单元层允许直接构造根字段；与导出侧落盘同形）
+    const def = {
+      ...runtimeDefOf(singleboxFixture),
+      itemIndex: ITEM_INDEX_FOR_FENCE,
+    } as unknown as StructureDefinition
+    const { el } = mountSidebar(def, { definition: def, onTooltipHover: onHover })
+
+    const fence = rowByKey(el, 'minecraft:fence:0')
+    fence.dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 11, clientY: 22 }))
+
+    // 事件 payload 与解析层之间不插桩：拿 DOM 真实发出的行键去喂生产解析层
+    const payload = onHover.mock.lastCall![0] as { blockId: string }
+    expect(payload.blockId).toBe('minecraft:fence:0')
+
+    const text = tooltipTextFor(def, payload.blockId)
+    expect(text.length, '文案非空').toBeGreaterThan(0)
+    expect(text, '含物品显示名').toContain('Fence')
+    expect(text, '文案来自物品索引表（不是部件 tooltip / 宿主 NEI）').toContain('DOCK-B4-说明行')
+    expect(text, '不是 "0"（缺口② 的键错配产物）').not.toBe('0')
+    expect(text, '不是宿主方块名').not.toContain('Stone')
   })
 })
