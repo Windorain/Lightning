@@ -1122,6 +1122,937 @@
       ]
     }
   ],
+  "itemIndex": {
+    "EnderIO:itemItemConduit:0": {
+      "display": "Item Conduit",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            8,
+            1,
+            0
+          ],
+          "localId": "eio:IItemConduit"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            8,
+            1,
+            1
+          ],
+          "localId": "eio:IItemConduit"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            0
+          ],
+          "localId": "eio:IItemConduit"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            1
+          ],
+          "localId": "eio:IItemConduit"
+        }
+      ]
+    },
+    "EnderIO:itemLiquidConduit:0": {
+      "display": "Fluid Conduit",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            8,
+            1,
+            0
+          ],
+          "localId": "eio:ILiquidConduit"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            0
+          ],
+          "localId": "eio:ILiquidConduit"
+        }
+      ]
+    },
+    "EnderIO:itemMEConduit:0": {
+      "display": "ME Conduit",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            8,
+            1,
+            0
+          ],
+          "localId": "eio:IMEConduit"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            0
+          ],
+          "localId": "eio:IMEConduit"
+        }
+      ]
+    },
+    "EnderIO:itemPowerConduit:0": {
+      "display": "Energy Conduit",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            8,
+            1,
+            0
+          ],
+          "localId": "eio:IPowerConduit"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            8,
+            1,
+            1
+          ],
+          "localId": "eio:IPowerConduit"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            0
+          ],
+          "localId": "eio:IPowerConduit"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            1
+          ],
+          "localId": "eio:IPowerConduit"
+        }
+      ]
+    },
+    "EnderIO:itemRedstoneConduit:0": {
+      "display": "Redstone Conduit",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            8,
+            1,
+            0
+          ],
+          "localId": "eio:IRedstoneConduit"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            0
+          ],
+          "localId": "eio:IRedstoneConduit"
+        }
+      ]
+    },
+    "ForgeMicroblock:microblock:2#mat\u003dProjRed|Exploration:projectred.exploration.stone_1": {
+      "display": null,
+      "displayChecked": false,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            5
+          ],
+          "localId": "fmp:slot2"
+        }
+      ]
+    },
+    "ForgeMicroblock:microblock:2#mat\u003dTConstruct:GlassBlock": {
+      "display": null,
+      "displayChecked": false,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            10,
+            1,
+            0
+          ],
+          "localId": "fmp:slot1"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            5
+          ],
+          "localId": "fmp:slot1"
+        }
+      ]
+    },
+    "ForgeMicroblock:microblock:4#mat\u003dProjRed|Exploration:projectred.exploration.stone": {
+      "display": null,
+      "displayChecked": false,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            10,
+            1,
+            0
+          ],
+          "localId": "fmp:slot0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            10,
+            1,
+            2
+          ],
+          "localId": "fmp:slot1"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            10,
+            0,
+            2
+          ],
+          "localId": "fmp:slot0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            5
+          ],
+          "localId": "fmp:slot0"
+        }
+      ]
+    },
+    "appliedenergistics2:item.ItemFacade:0": {
+      "display": "Cable Facade - Stone",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            6,
+            1,
+            4
+          ],
+          "localId": "ae2:facade:EAST"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            3
+          ],
+          "localId": "ae2:facade:EAST"
+        }
+      ]
+    },
+    "appliedenergistics2:item.ItemMultiPart:11": {
+      "display": "ME Glass Cable - Blue",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            14,
+            1,
+            4
+          ],
+          "localId": "ae2:UNKNOWN"
+        }
+      ]
+    },
+    "appliedenergistics2:item.ItemMultiPart:14": {
+      "display": "ME Glass Cable - Red",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            14,
+            1,
+            2
+          ],
+          "localId": "ae2:UNKNOWN"
+        }
+      ]
+    },
+    "appliedenergistics2:item.ItemMultiPart:16": {
+      "display": "ME Glass Cable - Fluix",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            6,
+            1,
+            0
+          ],
+          "localId": "ae2:UNKNOWN"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            6,
+            1,
+            2
+          ],
+          "localId": "ae2:UNKNOWN"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            6,
+            1,
+            4
+          ],
+          "localId": "ae2:UNKNOWN"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            12,
+            1,
+            3
+          ],
+          "localId": "ae2:UNKNOWN"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            14,
+            1,
+            0
+          ],
+          "localId": "ae2:UNKNOWN"
+        }
+      ]
+    },
+    "appliedenergistics2:item.ItemMultiPart:220": {
+      "display": "ME Storage Bus",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            6,
+            1,
+            2
+          ],
+          "localId": "ae2:UP"
+        }
+      ]
+    },
+    "appliedenergistics2:item.ItemMultiPart:300": {
+      "display": "ME Annihilation Plane",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            6,
+            1,
+            4
+          ],
+          "localId": "ae2:SOUTH"
+        }
+      ]
+    },
+    "appliedenergistics2:item.ItemMultiPart:320": {
+      "display": "ME Formation Plane",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            6,
+            1,
+            4
+          ],
+          "localId": "ae2:NORTH"
+        }
+      ]
+    },
+    "appliedenergistics2:item.ItemMultiPart:380": {
+      "display": "ME Terminal",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            6,
+            1,
+            4
+          ],
+          "localId": "ae2:UP"
+        }
+      ]
+    },
+    "appliedenergistics2:item.ItemMultiPart:80": {
+      "display": "ME Toggle Bus",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            6,
+            1,
+            2
+          ],
+          "localId": "ae2:NORTH"
+        }
+      ]
+    },
+    "minecraft:chest:0": {
+      "display": "Chest",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            7
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            9
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            10
+          ],
+          "localId": "generic:0"
+        }
+      ]
+    },
+    "minecraft:fence:0": {
+      "display": "Fence",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            0
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            2
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            3
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            4
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            11
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            10
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            12
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            3,
+            1,
+            11
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            5,
+            1,
+            11
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            0
+          ]
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            2
+          ]
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            3
+          ]
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            4
+          ]
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            11
+          ]
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            10
+          ]
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            4,
+            1,
+            12
+          ]
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            3,
+            1,
+            11
+          ]
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            5,
+            1,
+            11
+          ]
+        }
+      ]
+    },
+    "minecraft:stone_slab:0": {
+      "display": "Stone Slab",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            0
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            1
+          ],
+          "localId": "generic:0"
+        },
+        {
+          "source": "host",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "minecraft:torch:0": {
+      "display": "Torch",
+      "displayChecked": true,
+      "tooltipNonEmpty": true,
+      "source": "part",
+      "attribution": [
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            3
+          ],
+          "localId": "inferred:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            3
+          ],
+          "localId": "inferred:1"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            3
+          ],
+          "localId": "inferred:2"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            3
+          ],
+          "localId": "inferred:3"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            3
+          ],
+          "localId": "inferred:4"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            3
+          ],
+          "localId": "inferred:5"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            5
+          ],
+          "localId": "inferred:0"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            5
+          ],
+          "localId": "inferred:1"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            5
+          ],
+          "localId": "inferred:2"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            5
+          ],
+          "localId": "inferred:3"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            5
+          ],
+          "localId": "inferred:4"
+        },
+        {
+          "source": "part",
+          "frame": 0,
+          "grid": [
+            2,
+            1,
+            5
+          ],
+          "localId": "inferred:5"
+        }
+      ]
+    }
+  },
+  "itemIndexScope": "exact",
+  "itemIndexRules": {
+    "keySet": "exact: 文件键集 \u003d 本表键集（双向）；untransformed-cells-only: 在册键必在，变换格多出放行",
+    "displayFallback": "displayChecked\u003dfalse ⇒ 只断言非空（NBT 变体：FMP 材料串显示名依赖 NBT，静态不可复算）",
+    "tooltipFallback": "tooltip 非空，空 ⇒ 至少 display 一行（契约 §2.2 空值语义）",
+    "sourceDerivation": "source \u003d attribution 首条来源；空数组 ⇒ none",
+    "attributionOrder": "part → host → family 分组；组内集合比对（同来源内顺序未规定）",
+    "localIdWildcard": "inferred:* \u003d 档 3 岛序号不可静态预测（退化哨兵）",
+    "familyLayer": "层③族特有本轮不实现（规则注册表恒空）⇒ 不产出 family 归属"
+  },
+  "hostItems": {
+    "rule": "契约 §2.2 层②：blockPalette[j].hostItem \u003d { registry: Item.getItemFromBlock(宿主方块) 的注册名, damage: 该条目 meta }；无物品形态 ⇒ 字段缺席（不猜）",
+    "damageEqualsMeta": true,
+    "expect": {
+      "minecraft:stone:0": {
+        "registry": "minecraft:stone",
+        "damage": 0
+      },
+      "minecraft:furnace:5": {
+        "registry": "minecraft:furnace",
+        "damage": 5
+      },
+      "minecraft:crafting_table:0": {
+        "registry": "minecraft:crafting_table",
+        "damage": 0
+      },
+      "minecraft:stone_slab:0": {
+        "registry": "minecraft:stone_slab",
+        "damage": 0
+      },
+      "minecraft:stone_slab:8": {
+        "registry": "minecraft:stone_slab",
+        "damage": 8
+      },
+      "minecraft:torch:5": {
+        "registry": "minecraft:torch",
+        "damage": 5
+      },
+      "minecraft:torch:1": {
+        "registry": "minecraft:torch",
+        "damage": 1
+      },
+      "minecraft:chest:3": {
+        "registry": "minecraft:chest",
+        "damage": 3
+      },
+      "minecraft:fence:0": {
+        "registry": "minecraft:fence",
+        "damage": 0
+      },
+      "EnderIO:blockConduitBundle:0": {
+        "registry": "EnderIO:blockConduitBundle",
+        "damage": 0
+      }
+    },
+    "absent": [],
+    "derive": [
+      "appliedenergistics2:tile.BlockCableBus:0",
+      "ForgeMultipart:block:0"
+    ]
+  },
   "countsScope": "all-cells",
   "expectedCounts": [
     {

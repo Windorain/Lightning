@@ -20,7 +20,8 @@
  *       （"任何降级路径不中断导出"的产物级证据）。
  *  C. **无部件文件字节干净**（契约 §2 硬约束"无部件信息 ⇒ 行为与今天完全一致"）：
  *     - `sde_parts_acceptance_export_fullcube_only.json` 不得含
- *       `cellPartsGrid` / `partLists` / `partIconTextures` / `statsTemplate`（满方块-only 结构）；
+ *       `cellPartsGrid` / `partLists` / `partIconTextures` / `statsTemplate` / `itemIndex`
+ *       （满方块-only 结构），且**不得有任何 `blockPalette[].hostItem`**（契约 §2.2 层②：仅含部件文档写入）；
  *     - L1 的结构化结果里 `fullCubeByteClean.pass === true`（开启部件链路 vs 关闭的 sha256 相等）
  *       —— **引用其结论**，不在脚本侧重算（重算需要两次游戏内导出）。
  *  D. **旧格式兼容**（P3.2）：仓库里既有无部件 fixture（`minimal-v2.json` /
@@ -49,7 +50,7 @@ import {
   writeJson,
 } from './lib/parts-io.mjs'
 
-const PARTS_KEYS = ['cellPartsGrid', 'partLists', 'partIconTextures', 'statsTemplate', 'statsOverride']
+const PARTS_KEYS = ['cellPartsGrid', 'partLists', 'partIconTextures', 'statsTemplate', 'statsOverride', 'itemIndex']
 
 /** 取某格部件（按 cellPartsGrid 下标）。 */
 function partsAt(exportRoot, zi, ri, ci) {
@@ -221,6 +222,14 @@ function main() {
     for (const k of PARTS_KEYS) {
       if (k in doc) fullCubeByteClean.violations.push(`满方块-only 产物含部件字段 ${k}（必须字节干净）`)
     }
+    // 契约 §2.2 层②：hostItem 只允许出现在含部件数据的文档里（满方块-only ⇒ 一个调色板条目都不许带）
+    const withHostItem = (doc.blockPalette ?? []).filter((e) => e && e.hostItem !== undefined)
+    if (withHostItem.length > 0) {
+      fullCubeByteClean.violations.push(
+        `满方块-only 产物有 ${withHostItem.length} 个 blockPalette 条目带 hostItem（契约 §2.2 层②：无部件文件字节干净）`,
+      )
+    }
+    fullCubeByteClean.hostItemEntries = withHostItem.length
     fullCubeByteClean.cells = (doc.cellGrid ?? []).length
     fullCubeByteClean.blockPalette = (doc.blockPalette ?? []).length
     fullCubeByteClean.nonFullCubeCells = (() => {
@@ -370,6 +379,10 @@ function main() {
     'message PartItem',
     'message PartSource',
     'part_type_key',
+    // B-2（契约 §2.2 / §10.2）：物品索引表与宿主级物品身份的规范名（仅作文档登记，无 Java 生成）
+    'message ItemIndexEntry',
+    'message ItemAttribution',
+    'message HostItemIdentity',
   ]
   const proto = { path: protoRel, present: fs.existsSync(protoPath), missingFields: [], violations: [] }
   if (!proto.present) {

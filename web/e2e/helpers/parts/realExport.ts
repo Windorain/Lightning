@@ -294,7 +294,58 @@ export interface OracleDoc {
   cells: OracleCell[]
   countsScope: string
   expectedCounts: Array<{ typeKey: string; display: string; count: number }>
+  /** 契约 §2.2 物品索引表期望（#39 阶段一扩展；缺省 = 该 oracle 未扩展）。 */
+  itemIndex: Record<string, OracleItemIndexEntry>
+  /** `exact`（全量轮，键集双向精确）/ `untransformed-cells-only`（退化轮，在册键必在）。 */
+  itemIndexScope: string
+  /** 契约 §2.2 层② 宿主级物品身份期望（缺省 = null）。 */
+  hostItems: OracleHostItems | null
   raw: Record<string, unknown>
+}
+
+/** oracle 侧归属条目期望（`localId: "inferred:*"` = 档 3 岛序号通配哨兵）。 */
+export interface OracleItemAttribution {
+  source: string
+  frame: number
+  grid: [number, number, number]
+  localId?: string
+}
+
+/** oracle 侧一条物品索引期望。 */
+export interface OracleItemIndexEntry {
+  /** 期望显示名；`displayChecked === false` ⇒ 只断言非空（NBT 变体不可静态复算）。 */
+  display: string | null
+  displayChecked: boolean
+  tooltipNonEmpty: boolean
+  source: string
+  attribution: OracleItemAttribution[]
+}
+
+/** oracle 侧宿主级物品身份期望（契约 §2.2 层②）。 */
+export interface OracleHostItems {
+  rule?: string
+  damageEqualsMeta?: boolean
+  /** 字面值期望：宿主 `registry:meta` → `{registry,damage}`。 */
+  expect: Record<string, { registry: string; damage: number }>
+  /** 无物品形态的宿主 ⇒ `hostItem` 必须缺席。 */
+  absent: string[]
+  /** 静态不可推导（ItemBlock 注册名需运行时查表）⇒ 只断言 damage = 条目 meta + registry 非空。 */
+  derive: string[]
+}
+
+/** 真实导出文件的 `itemIndex` 条目（宽容读入：缺省 ⇒ 空表）。 */
+export interface FileItemIndexEntry {
+  display: string
+  tooltip: string[]
+  source: string
+  attribution: OracleItemAttribution[]
+}
+
+/** 文件侧 `blockPalette[].hostItem` 观测（一条调色板条目）。 */
+export interface FileHostItemObs {
+  registryId: string
+  meta: number
+  hostItem: { registry: string; damage: number } | null
 }
 
 export function parseOracle(raw: Record<string, unknown>): OracleDoc {
@@ -311,8 +362,61 @@ export function parseOracle(raw: Record<string, unknown>): OracleDoc {
     cells: asArray(raw.cells) as OracleCell[],
     countsScope: String(raw.countsScope ?? 'all'),
     expectedCounts: asArray(raw.expectedCounts) as OracleDoc['expectedCounts'],
+    itemIndex: (raw.itemIndex && typeof raw.itemIndex === 'object'
+      ? (raw.itemIndex as Record<string, OracleItemIndexEntry>)
+      : {}),
+    itemIndexScope: String(raw.itemIndexScope ?? 'exact'),
+    hostItems: (raw.hostItems && typeof raw.hostItems === 'object'
+      ? (raw.hostItems as OracleHostItems)
+      : null),
     raw,
   }
+}
+
+/** 文件侧 `itemIndex`（原样读入；缺省 ⇒ 空表 —— 旧归档（B-2 前）即此情形）。 */
+export function readFileItemIndex(doc: RealExportDoc): Record<string, FileItemIndexEntry> {
+  const raw = doc.raw.itemIndex
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, FileItemIndexEntry> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue
+    const e = value as Record<string, unknown>
+    out[key] = {
+      display: typeof e.display === 'string' ? e.display : '',
+      tooltip: Array.isArray(e.tooltip) ? e.tooltip.filter((s): s is string => typeof s === 'string') : [],
+      source: typeof e.source === 'string' ? e.source : '',
+      attribution: Array.isArray(e.attribution) ? (e.attribution as OracleItemAttribution[]) : [],
+    }
+  }
+  return out
+}
+
+/** 文件侧 `blockPalette[].hostItem` 观测（跳过 air；按调色板顺序）。 */
+export function readFileHostItems(doc: RealExportDoc): FileHostItemObs[] {
+  const out: FileHostItemObs[] = []
+  for (const e of doc.blockPalette) {
+    if (!e || typeof e !== 'object') continue
+    const entry = e as Record<string, unknown>
+    const registryId = String(entry.registryId ?? '')
+    if (registryId === '' || registryId === 'air' || registryId === 'minecraft:air') continue
+    const hi = entry.hostItem
+    out.push({
+      registryId,
+      meta: Number(entry.meta ?? 0),
+      hostItem: hi && typeof hi === 'object'
+        ? {
+            registry: String((hi as Record<string, unknown>).registry ?? ''),
+            damage: Number((hi as Record<string, unknown>).damage ?? NaN),
+          }
+        : null,
+    })
+  }
+  return out
+}
+
+/** 归属条目身份（与 `pure/itemIndex.ts#normalizeHits` 同一口径）。 */
+export function attributionKey(a: OracleItemAttribution): string {
+  return `${a.source}|${a.frame}|${a.grid?.[0]},${a.grid?.[1]},${a.grid?.[2]}|${a.localId ?? ''}`
 }
 
 /** `[zi, ri, ci]` → 投影注入用的格下标（`injectHoverAtCellLocal` 的 `CellLocalPoint` 字段）。 */

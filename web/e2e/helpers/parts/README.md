@@ -16,14 +16,14 @@
 
 | 文件 | 作用 |
 |------|------|
-| `helpers/parts/hover.ts` | Wiki 工作区切入（生产 WorkspaceTabs DOM click）、格内局部坐标 → 正交相机投影 → `pointermove` 注入、悬停状态/tooltip DOM 读取 |
-| `helpers/parts/statsSidebar.ts` | 统计侧栏 DOM 读取（物品行键/图标键/**B-5 选中态 / 无对应标记 / 锚点 / 会话提示**、`[data-stats-itemless]` 提示行、窄布局自愈展开、**稳定性等待**）、**B-5 点选驱动**（`clickStatsRow` / `clickStatsBlank` / `pressStatsEscape`）、**行图标槽 canvas**、**B-3 移除锁读取**（视图切换/徽标/provenance 入口计数 + `lightning:stats:v1:*` 残留键） |
+| `helpers/parts/hover.ts` | Wiki 工作区切入（生产 WorkspaceTabs DOM click）、格内局部坐标 → 正交相机投影 → `pointermove` 注入、悬停状态/tooltip DOM 读取、**`compactTooltipText`**（TooltipBox 文本的格式无关压缩：`_…_` 被行内强调吃掉，比对只取字母数字与冒号） |
+| `helpers/parts/statsSidebar.ts` | 统计侧栏 DOM 读取（物品行键/图标键/**B-5 选中态 / 无对应标记 / 锚点 / 会话提示**、`[data-stats-itemless]` 提示行、窄布局自愈展开、**稳定性等待**）、**B-5 点选驱动**（`clickStatsRow` / `clickStatsBlank` / `pressStatsEscape`）、**B-4 行悬停驱动**（`hoverStatsRow` / `leaveStatsRow`：生产 `pointerenter/pointermove` → 物品 TooltipBox）、**行图标槽 canvas**、**B-3 移除锁读取**（视图切换/徽标/provenance 入口计数 + `lightning:stats:v1:*` 残留键） |
 | `helpers/parts/fixtures.ts` | fixture 只读读取、内存深拷贝、**几何增强**（双绕组面追加）、textureBlobs 归一化、解析级部件观测（Grid API；含盒快照与 `properties`） |
-| `helpers/parts/realExport.ts` | **P3.1**：真实产物/oracle 读入与定位（`PARTS_ACCEPTANCE_DIR`）、`grid:[zi,ri,ci]` 格映射、**探针候选点推导**、`probePartHover`/`probeAnyOfParts`、运行时定义根字段存活观测 |
-| `../../parts-hover-stats.spec.ts` | P2.5 主断言包：加载解析 / 悬停 / 统计（物品清单 + 无对应标记）+ **B-3 移除锁**（视图切换/徽标/provenance 入口不存在、残留本机配置不读写）/ 图标键 / 无部件回归 |
+| `helpers/parts/realExport.ts` | **P3.1**：真实产物/oracle 读入与定位（`PARTS_ACCEPTANCE_DIR`）、`grid:[zi,ri,ci]` 格映射、**探针候选点推导**、`probePartHover`/`probeAnyOfParts`、运行时定义根字段存活观测、**契约 §2.2 读面**（oracle `itemIndex`/`itemIndexScope`/`hostItems` 解析 + 文件 `itemIndex`/`blockPalette[].hostItem` 读取 + `attributionKey`） |
+| `../../parts-hover-stats.spec.ts` | P2.5 主断言包：加载解析 / 悬停 / 统计（物品清单 + 无对应标记）+ **B-3 移除锁**（视图切换/徽标/provenance 入口不存在、残留本机配置不读写）/ 图标键 / 无部件回归 / **B-4 物品行 → 物品 TooltipBox** / **P3.5 大批量命中截断 + 帧时间登记** |
 | `../../parts-item-select-b5.spec.ts` | **B-5 主断言包**：点选物品行 → **生产描边通道** mask（部件级 / 并集 / 无对应不高亮 / 多选语义 / 证伪） |
-| `../../parts-falsification.spec.ts` | P2.5 证伪：篡改计数 / displayName 的内存副本 → 对应断言必红 + 定向对照仍绿 |
-| `../../parts-real-export.spec.ts` | **P3.1 主断言包（真实产物）**：加载渲染 / 解析级逐格与 oracle 一致 / 单盒区悬停 / AE2 同格多部件不同 tooltip / 满方块回归 / 统计与 `expectedCounts` 精确比对 / **F1F2 修复锁（正向）** / degraded_all 档位与统计 |
+| `../../parts-falsification.spec.ts` | P2.5 证伪：篡改计数 / displayName 的内存副本 → 对应断言必红 + 定向对照仍绿；**#39 阶段一增补**：篡改 `itemIndex` 归属（`localId` 换部件 / 整条清空）⇒ 高亮集合必变；篡改 `itemIndex` 说明行 ⇒ 物品 TooltipBox 断言必红（同页未篡改行仍绿） |
+| `../../parts-real-export.spec.ts` | **P3.1 主断言包（真实产物）**：加载渲染 / 解析级逐格与 oracle 一致 / 单盒区悬停 / AE2 同格多部件不同 tooltip / 满方块回归 / 统计与 `expectedCounts` 精确比对 / **F1F2 修复锁（正向）** / degraded_all 档位与统计 / **#39 阶段一：`itemIndex` 逐键（含"归属必须指向真实存在的同键部件"交叉自检）+ `blockPalette[].hostItem` 逐条 + B-4 物品 TooltipBox + 侧栏"无对应"标记集 = 文件里 `attribution` 为空的键集** |
 
 > **⚠️ 已移除 UI 的断言不留**（B-3 决策 C 移除了「视图切换工具条 / 视图按钮 / 配置来源徽标 /
 > provenance 面板 / 宿主行」；B-4/B-5 接手物品行的悬停说明与点选）。本目录与三个 spec 中

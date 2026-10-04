@@ -1,11 +1,17 @@
 package com.lightning.mod.client.meshcapture.parts.probe;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+
+import net.minecraft.block.Block;
+import net.minecraft.item.Item;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
@@ -90,6 +96,10 @@ final class PartsAcceptanceVerifier {
 
         // expectedCounts 双向比对
         verifyCounts(checks, oracle, grid, lists);
+
+        // 契约 §2.2 扩展（#39 阶段一）：物品索引表 + 宿主级物品身份
+        verifyItemIndex(checks, oracle, exportRoot);
+        verifyHostItems(checks, oracle, exportRoot);
 
         int failed = countFails(checks);
         out.add("checks", checks);
@@ -387,6 +397,450 @@ final class PartsAcceptanceVerifier {
                     "expectedCounts 多出未预期 typeKey " + e.getKey() + "=" + e.getValue());
             }
         }
+    }
+
+    // ------------------------------------------------------------------ 契约 §2.2：物品索引表
+
+    /**
+     * 物品索引表核对（契约 §2.2；口径与脚本侧 `verifyItemIndex` 同源、独立实现）：
+     * 文件自洽（display 非空 / 说明行非空 / `source` = 首条归属来源 / 归属按权威度分组且不重复）
+     * + oracle 逐键比对（键集、display、source、归属逐条；`inferred:*` 通配；退化轮多出的归属
+     * 只允许落在 oracle 哨兵格）。
+     */
+    private static void verifyItemIndex(JsonArray checks, JsonObject oracle, JsonObject exportRoot) {
+        JsonObject expected = oracle.has("itemIndex") && oracle.get("itemIndex")
+            .isJsonObject() ? oracle.getAsJsonObject("itemIndex") : null;
+        JsonObject actual = exportRoot.has("itemIndex") && exportRoot.get("itemIndex")
+            .isJsonObject() ? exportRoot.getAsJsonObject("itemIndex") : null;
+        String scope = oracle.has("itemIndexScope") ? oracle.get("itemIndexScope")
+            .getAsString() : "exact";
+        boolean subset = "untransformed-cells-only".equals(scope);
+        if (expected == null) {
+            checks.add(new JsonPrimitive("FAIL: oracle 缺 itemIndex 期望（契约 §2.2 扩展；#39 阶段一）"));
+            return;
+        }
+        if (actual == null) {
+            checks.add(new JsonPrimitive("FAIL: 导出文件缺 itemIndex（含部件文档必须落盘，契约 §2.2）"));
+            return;
+        }
+        Set<String> sentinels = sentinelGrids(oracle);
+
+        // 键集：exact 双向精确；退化轮在册键必在（变换格多出放行）
+        for (String key : expected.keySet()) {
+            expect(checks, actual.has(key), "itemIndex 缺期望键 " + key);
+        }
+        if (!subset) {
+            for (String key : actual.keySet()) {
+                expect(checks, expected.has(key), "itemIndex 多出未登记键 " + key);
+            }
+        }
+
+        // A. 文件自洽
+        for (Map.Entry<String, JsonElement> en : actual.entrySet()) {
+            String at = "itemIndex[" + en.getKey() + "]";
+            JsonObject e = en.getValue()
+                .isJsonObject()
+                    ? en.getValue()
+                        .getAsJsonObject()
+                    : null;
+            if (e == null) {
+                checks.add(new JsonPrimitive("FAIL: " + at + " 必须是对象"));
+                continue;
+            }
+            expect(
+                checks,
+                e.has("display") && e.get("display")
+                    .isJsonPrimitive()
+                    && e.get("display")
+                        .getAsString()
+                        .length() > 0,
+                at + " display 必须为非空字符串（缺省兜底 = 键本身）");
+            expect(
+                checks,
+                e.has("tooltip") && e.get("tooltip")
+                    .isJsonArray()
+                    && e.getAsJsonArray("tooltip")
+                        .size() > 0,
+                at + " tooltip 必须非空（空值语义：至少 display 一行）");
+            JsonArray attrs = e.has("attribution") && e.get("attribution")
+                .isJsonArray() ? e.getAsJsonArray("attribution") : null;
+            if (attrs == null) {
+                checks.add(new JsonPrimitive("FAIL: " + at + " attribution 必须是数组（空数组 = 显式\"无对应\"）"));
+                continue;
+            }
+            String wantSource = attrs.size() == 0 ? "none"
+                : attrs.get(0)
+                    .getAsJsonObject()
+                    .get("source")
+                    .getAsString();
+            expect(
+                checks,
+                e.has("source") && wantSource.equals(
+                    e.get("source")
+                        .getAsString()),
+                at + " source 必须 = attribution 首条来源（期望 " + wantSource + "）");
+            int prevRank = -1;
+            boolean orderOk = true;
+            Set<String> seen = new HashSet<String>();
+            for (int i = 0; i < attrs.size(); i++) {
+                JsonObject a = attrs.get(i)
+                    .getAsJsonObject();
+                String aat = at + ".attribution[" + i + "]";
+                String src = a.has("source") ? a.get("source")
+                    .getAsString() : "";
+                expect(
+                    checks,
+                    "part".equals(src) || "host".equals(src) || "family".equals(src),
+                    aat + " source 非法：" + src);
+                expect(
+                    checks,
+                    a.has("frame") && a.get("frame")
+                        .getAsInt() >= 0,
+                    aat + " frame 必须为非负整数");
+                expect(
+                    checks,
+                    a.has("grid") && a.get("grid")
+                        .isJsonArray()
+                        && a.getAsJsonArray("grid")
+                            .size() == 3,
+                    aat + " grid 必须是长度 3 的整数数组（[zSlice,row,column]）");
+                if ("part".equals(src)) {
+                    expect(
+                        checks,
+                        a.has("localId") && a.get("localId")
+                            .getAsString()
+                            .length() > 0,
+                        aat + " source=part 必须带 localId（部件级定位）");
+                }
+                int rank = "part".equals(src) ? 0 : ("host".equals(src) ? 1 : ("family".equals(src) ? 2 : -1));
+                if (rank >= 0) {
+                    if (rank < prevRank) {
+                        orderOk = false;
+                    }
+                    prevRank = Math.max(prevRank, rank);
+                }
+                String id = attrKey(a);
+                expect(checks, seen.add(id), aat + " 归属重复（" + id + "）");
+            }
+            expect(checks, orderOk, at + " attribution 必须按来源权威度分组（part → host → family）");
+        }
+
+        // B. oracle 逐键比对
+        for (Map.Entry<String, JsonElement> en : expected.entrySet()) {
+            String key = en.getKey();
+            String at = "itemIndex[" + key + "]";
+            if (!actual.has(key)) {
+                continue;
+            }
+            JsonObject exp = en.getValue()
+                .getAsJsonObject();
+            JsonObject act = actual.getAsJsonObject(key);
+            boolean displayChecked = !exp.has("displayChecked") || exp.get("displayChecked")
+                .getAsBoolean();
+            if (displayChecked) {
+                String want = exp.has("display") && exp.get("display")
+                    .isJsonPrimitive() ? exp.get("display")
+                        .getAsString() : null;
+                String got = act.has("display") ? act.get("display")
+                    .getAsString() : null;
+                expect(checks, want != null && want.equals(got), at + " display 应为 " + want + "（实际 " + got + "）");
+            }
+            String wantSource = exp.has("source") ? exp.get("source")
+                .getAsString() : "part";
+            expect(
+                checks,
+                act.has("source") && wantSource.equals(
+                    act.get("source")
+                        .getAsString()),
+                at + " source 应为 " + wantSource);
+            JsonArray attrs = act.has("attribution") && act.get("attribution")
+                .isJsonArray() ? act.getAsJsonArray("attribution") : new JsonArray();
+            boolean[] used = new boolean[attrs.size()];
+            JsonArray wantAttrs = exp.has("attribution") && exp.get("attribution")
+                .isJsonArray() ? exp.getAsJsonArray("attribution") : new JsonArray();
+            for (int i = 0; i < wantAttrs.size(); i++) {
+                JsonObject want = wantAttrs.get(i)
+                    .getAsJsonObject();
+                boolean wildcard = want.has("localId") && PartsAcceptanceOracle.LOCALID_INFERRED_WILDCARD.equals(
+                    want.get("localId")
+                        .getAsString());
+                if (wildcard) {
+                    boolean hit = false;
+                    for (int j = 0; j < attrs.size(); j++) {
+                        if (matchesWildcard(
+                            attrs.get(j)
+                                .getAsJsonObject(),
+                            want)) {
+                            hit = true;
+                            break;
+                        }
+                    }
+                    expect(
+                        checks,
+                        hit,
+                        at + " 期望格 "
+                            + want.get("grid")
+                            + " 至少一条 inferred:* 的 "
+                            + want.get("source")
+                            + " 归属（退化档岛序号不可预测）");
+                    continue;
+                }
+                int idx = -1;
+                for (int j = 0; j < attrs.size(); j++) {
+                    if (!used[j] && sameAttribution(
+                        attrs.get(j)
+                            .getAsJsonObject(),
+                        want)) {
+                        idx = j;
+                        break;
+                    }
+                }
+                expect(checks, idx >= 0, at + " 缺期望归属 " + want);
+                if (idx >= 0) {
+                    used[idx] = true;
+                }
+            }
+            for (int j = 0; j < attrs.size(); j++) {
+                if (used[j]) {
+                    continue;
+                }
+                JsonObject a = attrs.get(j)
+                    .getAsJsonObject();
+                JsonArray g = a.getAsJsonArray("grid");
+                String gk = g.get(0) + "," + g.get(1) + "," + g.get(2);
+                if (subset && sentinels.contains(gk)) {
+                    checks.add(new JsonPrimitive("ok: " + at + " 多出变换格归属 " + attrKey(a) + "（退化轮口径放行）"));
+                } else {
+                    checks.add(new JsonPrimitive("FAIL: " + at + " 多出未登记归属 " + attrKey(a)));
+                }
+            }
+        }
+    }
+
+    /** 归属条目身份（与脚本侧 `attrKey` 同口径）。 */
+    private static String attrKey(JsonObject a) {
+        JsonArray g = a.getAsJsonArray("grid");
+        return (a.has("source") ? a.get("source")
+            .getAsString() : "") + '|'
+            + (a.has("frame") ? a.get("frame")
+                .getAsInt() : -1)
+            + '|'
+            + g.get(0)
+            + ","
+            + g.get(1)
+            + ","
+            + g.get(2)
+            + '|'
+            + (a.has("localId") ? a.get("localId")
+                .getAsString() : "");
+    }
+
+    private static boolean sameAttribution(JsonObject got, JsonObject want) {
+        if (!sameGrid(got, want)) {
+            return false;
+        }
+        if (!str(got, "source").equals(str(want, "source"))) {
+            return false;
+        }
+        if (got.has("frame") && got.get("frame")
+            .getAsInt()
+            != want.get("frame")
+                .getAsInt()) {
+            return false;
+        }
+        return str(got, "localId").equals(str(want, "localId"));
+    }
+
+    private static boolean matchesWildcard(JsonObject got, JsonObject want) {
+        if (!sameGrid(got, want) || !str(got, "source").equals(str(want, "source"))) {
+            return false;
+        }
+        return got.has("frame") && want.has("frame")
+            && got.get("frame")
+                .getAsInt()
+                == want.get("frame")
+                    .getAsInt()
+            && str(got, "localId").startsWith("inferred:");
+    }
+
+    private static boolean sameGrid(JsonObject a, JsonObject b) {
+        JsonArray ga = a.has("grid") && a.get("grid")
+            .isJsonArray() ? a.getAsJsonArray("grid") : null;
+        JsonArray gb = b.has("grid") && b.get("grid")
+            .isJsonArray() ? b.getAsJsonArray("grid") : null;
+        if (ga == null || gb == null || ga.size() != 3 || gb.size() != 3) {
+            return false;
+        }
+        for (int i = 0; i < 3; i++) {
+            if (ga.get(i)
+                .getAsInt()
+                != gb.get(i)
+                    .getAsInt()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String str(JsonObject o, String field) {
+        return o.has(field) && o.get(field)
+            .isJsonPrimitive() ? o.get(field)
+                .getAsString() : "";
+    }
+
+    /** oracle 里带哨兵的格（退化档 3 岛序号/盒数不可静态预测）。 */
+    private static Set<String> sentinelGrids(JsonObject oracle) {
+        Set<String> out = new HashSet<String>();
+        if (!oracle.has("cells") || !oracle.get("cells")
+            .isJsonArray()) {
+            return out;
+        }
+        JsonArray cells = oracle.getAsJsonArray("cells");
+        for (int i = 0; i < cells.size(); i++) {
+            JsonObject cell = cells.get(i)
+                .getAsJsonObject();
+            JsonArray parts = cell.has("parts") ? cell.getAsJsonArray("parts") : new JsonArray();
+            boolean wild = parts.size() == 1 && parts.get(0)
+                .getAsJsonObject()
+                .has("localId")
+                && PartsAcceptanceOracle.LOCALID_INFERRED_WILDCARD.equals(
+                    parts.get(0)
+                        .getAsJsonObject()
+                        .get("localId")
+                        .getAsString());
+            for (int j = 0; j < parts.size() && !wild; j++) {
+                wild = parts.get(j)
+                    .getAsJsonObject()
+                    .get("boxCount")
+                    .getAsInt() == PartsAcceptanceOracle.BOXCOUNT_UNCHECKED;
+            }
+            if (wild) {
+                JsonArray g = cell.getAsJsonArray("grid");
+                out.add(g.get(0) + "," + g.get(1) + "," + g.get(2));
+            }
+        }
+        return out;
+    }
+
+    // ------------------------------------------------------------------ 契约 §2.2：宿主级物品身份
+
+    /**
+     * `blockPalette[].hostItem` 核对（契约 §2.2 层②）：oracle `expect` 字面值精确、
+     * `absent` 必缺席（无物品形态）、`derive` 在**游戏内**用 MC 原语独立复算（Item.getItemFromBlock
+     * 的注册名）后比对、未登记宿主判红；恒定口径 = `hostItem.damage == 条目 meta`。
+     */
+    private static void verifyHostItems(JsonArray checks, JsonObject oracle, JsonObject exportRoot) {
+        JsonObject spec = oracle.has("hostItems") && oracle.get("hostItems")
+            .isJsonObject() ? oracle.getAsJsonObject("hostItems") : null;
+        if (spec == null) {
+            checks.add(new JsonPrimitive("FAIL: oracle 缺 hostItems 期望（契约 §2.2 层② 扩展；#39 阶段一）"));
+            return;
+        }
+        if (!exportRoot.has("blockPalette") || !exportRoot.get("blockPalette")
+            .isJsonArray()) {
+            checks.add(new JsonPrimitive("FAIL: 导出文件缺 blockPalette（契约 §2）"));
+            return;
+        }
+        JsonObject expect = spec.has("expect") ? spec.getAsJsonObject("expect") : new JsonObject();
+        Set<String> absent = strSet(spec, "absent");
+        Set<String> derive = strSet(spec, "derive");
+        JsonArray palette = exportRoot.getAsJsonArray("blockPalette");
+        for (int i = 0; i < palette.size(); i++) {
+            JsonObject e = palette.get(i)
+                .getAsJsonObject();
+            String registryId = e.has("registryId") ? e.get("registryId")
+                .getAsString() : "";
+            if (registryId.isEmpty() || "air".equals(registryId) || "minecraft:air".equals(registryId)) {
+                continue;
+            }
+            int meta = e.get("meta")
+                .getAsInt();
+            String key = registryId + ":" + meta;
+            boolean has = e.has("hostItem") && e.get("hostItem")
+                .isJsonObject();
+            if (has) {
+                expect(
+                    checks,
+                    e.getAsJsonObject("hostItem")
+                        .get("damage")
+                        .getAsInt() == meta,
+                    "blockPalette[" + i + "] hostItem.damage 必须 = 条目 meta=" + meta + "（契约 §2.2 层②）");
+            }
+            if (expect.has(key)) {
+                JsonObject want = expect.getAsJsonObject(key);
+                expect(checks, has, "blockPalette[" + i + "] 宿主 " + key + " 必须带 hostItem（契约 §2.2 层②）");
+                if (has) {
+                    JsonObject got = e.getAsJsonObject("hostItem");
+                    expect(
+                        checks,
+                        want.get("registry")
+                            .getAsString()
+                            .equals(
+                                got.get("registry")
+                                    .getAsString()),
+                        "blockPalette[" + i
+                            + "] 宿主 "
+                            + key
+                            + " hostItem.registry 应为 "
+                            + want.get("registry")
+                                .getAsString());
+                    expect(
+                        checks,
+                        want.get("damage")
+                            .getAsInt()
+                            == got.get("damage")
+                                .getAsInt(),
+                        "blockPalette[" + i
+                            + "] 宿主 "
+                            + key
+                            + " hostItem.damage 应为 "
+                            + want.get("damage")
+                                .getAsInt());
+                }
+            } else if (absent.contains(key)) {
+                expect(checks, !has, "blockPalette[" + i + "] 宿主 " + key + " 无物品形态 ⇒ hostItem 必须缺席（不猜）");
+            } else if (derive.contains(key)) {
+                // 游戏内独立复算（契约 §2.2 层②原文规则：Item.getItemFromBlock + 物品注册名）
+                Block b = Block.getBlockFromName(registryId);
+                Item item = b == null ? null : Item.getItemFromBlock(b);
+                String itemRegistry = item == null ? null : Item.itemRegistry.getNameForObject(item);
+                if (itemRegistry == null) {
+                    expect(checks, !has, "blockPalette[" + i + "] 宿主 " + key + " 无物品形态 ⇒ hostItem 必须缺席");
+                } else if (has) {
+                    expect(
+                        checks,
+                        itemRegistry.equals(
+                            e.getAsJsonObject("hostItem")
+                                .get("registry")
+                                .getAsString()),
+                        "blockPalette[" + i
+                            + "] 宿主 "
+                            + key
+                            + " hostItem.registry 应为 Item.getItemFromBlock 的注册名 "
+                            + itemRegistry);
+                } else {
+                    checks.add(
+                        new JsonPrimitive(
+                            "FAIL: blockPalette[" + i + "] 宿主 " + key + " 有物品形态（" + itemRegistry + "）但 hostItem 缺席"));
+                }
+            } else {
+                checks.add(new JsonPrimitive("FAIL: blockPalette[" + i + "] 宿主 " + key + " 未在 oracle hostItems 登记"));
+            }
+        }
+    }
+
+    private static Set<String> strSet(JsonObject o, String field) {
+        Set<String> out = new HashSet<String>();
+        if (o.has(field) && o.get(field)
+            .isJsonArray()) {
+            JsonArray arr = o.getAsJsonArray(field);
+            for (int i = 0; i < arr.size(); i++) {
+                out.add(
+                    arr.get(i)
+                        .getAsString());
+            }
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ 小工具
