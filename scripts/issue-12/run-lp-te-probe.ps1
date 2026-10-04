@@ -5,7 +5,7 @@
   → gradlew runClientSdePipeline（独占资源）→ 游戏内探针自动进专用世界 → 走 LP 自己的放置路径
   放 4 根管道 → 等同步 → 前置校验（真 LP 管道 TE + pipe/container 非 null）→ TESR 自检
   → scan 文档（含 tileNbtB64）跑真实 MeshCaptureService 捕获（两次）→ 逐管道 writeToNBT 快照比对
-  → 结果 JSON 落盘（崩溃在后不丢证据）→ 读结果 → 归档到 state\Scene\issue-12\<Label>\。
+  → 结果 JSON 落盘（崩溃在后不丢证据）→ 读结果 → 归档到 temp/Scene\issue-12\<Label>\。
 
   两种模式（同一探针，唯一差别是 JVM 属性）：
     -Mode copy     默认副本 TE 路径（被测修复；MeshCaptureService 默认分支）

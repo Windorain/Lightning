@@ -8,7 +8,7 @@
 > 本文只讲**怎么复用**，不记过程流水；issue #12 全程只作为贯穿示例。
 >
 > **行号约定**：除显式标注外，所有 `file:line` 都取自本工作树 `branches/bug-fix` **修复提交 `e9f0bf3` 之后**的文件。
-> 侦察报告 `state/issue-12/probe-infra-recon.md` 与 `state/issue-12-body.md:67-68` 的行号取自修复前文件（同一份代码已整体后移），
+> 侦察报告 `temp/issue-12/probe-infra-recon.md` 与 `temp/issue-12-body.md:67-68` 的行号取自修复前文件（同一份代码已整体后移），
 > 引用时以本文核对过的行号为准。
 
 ---
@@ -20,7 +20,7 @@
 | **适用** | ① 验证捕获路径对**世界状态 / 活动 TileEntity** 的副作用（改坏、泄漏、回滚不回来）；② 验证**某个 mod 的方块或 TE 能否被捕获**（几何、NBT、TESR 路径是否可达）；③ 任何**必须走真实 `MeshCaptureService.finalizeStructureJson`** 的断言 |
 | **不适用** | 只关心假世界几何/变体的捕获（`ProbeDummyWorld` 有**自带**捕获循环，见 §3.1）；纯 JVM 无头单测（捕获需要活的 GL 上下文，见 §3.3）；只想测「导出产物字节幂等」而与被捕获世界状态无关的场景 |
 | **硬前提** | 必须能在 `runClient` 进程内执行（§3.3）；被捕获方块必须真实存在于 `mc.theWorld`（§3.1）；被断言的世界状态必须能在**捕获前后各读一次**（§4.3） |
-| **首个实例** | issue #12：`/sde export` 为渲染 TESR 就地做 `writeToNBT`/`readFromNBT` 往返，LogisticsPipes 的 `readFromNBT` 非幂等（每次重建 pipe，`bindPipe()` 有一次性守卫 `pipeBound`），活动 TE 的 `pipe.container` 永久为 null ⇒ 导出结束恢复渲染即 NPE 崩溃（`state/issue-12-body.md:62-79`）。修复改为按扫描 NBT 造**副本 TE**，活动 TE 全程零写入 |
+| **首个实例** | issue #12：`/sde export` 为渲染 TESR 就地做 `writeToNBT`/`readFromNBT` 往返，LogisticsPipes 的 `readFromNBT` 非幂等（每次重建 pipe，`bindPipe()` 有一次性守卫 `pipeBound`），活动 TE 的 `pipe.container` 永久为 null ⇒ 导出结束恢复渲染即 NPE 崩溃（`temp/issue-12-body.md:62-79`）。修复改为按扫描 NBT 造**副本 TE**，活动 TE 全程零写入 |
 
 **判据纪律（本回路的存在意义）**
 
@@ -42,7 +42,7 @@ runtimeOnlyNonPublishable("com.github.GTNewHorizons:LogisticsPipes:1.5.28-GTNH:d
 
 | 规则 | 理由 | 出处 |
 |---|---|---|
-| 用 `runtimeOnlyNonPublishable` | 只给 dev 客户端装配，不写发布 POM；验证目标是「不引入 compile 耦合」 | `dependencies.gradle:61-62`、`:70`；裁决 A5（`state/issue-12/adjudications.md:13`） |
+| 用 `runtimeOnlyNonPublishable` | 只给 dev 客户端装配，不写发布 POM；验证目标是「不引入 compile 耦合」 | `dependencies.gradle:61-62`、`:70`；裁决 A5（`temp/issue-12/adjudications.md:13`） |
 | **不加** `compileOnly` / `implementation` | 探测代码一旦 import 该 mod 的类，编译期就真耦合了，且换版本即编译失败 | `LpPipeReflect.java:24-27` |
 | 验证代码**一律反射**触达 | `compileClasspath` 不含该 mod；反射失败要落盘候选清单，不静默替换 | `LpPipeReflect.java:54-60`、`:129-138` |
 
@@ -70,7 +70,7 @@ runtimeOnlyNonPublishable("com.github.GTNewHorizons:LogisticsPipes:1.5.28-GTNH:d
 | **1.5.28-GTNH** | `GTNHLib` requires `0.9.36` | 本树已解析 `0.9.62`（`dependencies.gradle:26`）≫ 0.9.36 ⇒ **不抬高** | **采纳**（且 issue 字节码核对用的就是 1.5.28） |
 | 1.5.36-GTNH | `GTNHLib` requires `0.11.37` | 会把已锁定的 `0.9.62` 顶到 `0.11.x`，打破 GT5U 5.09.52.283 的编译基线 | 弃用 |
 
-出处：`dependencies.gradle:64-67`；裁决 A4（`state/issue-12/adjudications.md:12`）。
+出处：`dependencies.gradle:64-67`；裁决 A4（`temp/issue-12/adjudications.md:12`）。
 两个版本的约束差异由本文编写时抓取 `.module` 独立复核（见上表右列的值）。
 
 **梯度一致性也要核**：换版本会连带改传递依赖（1.5.36 要 BuildCraft 7.1.63 / NEI 2.8.123 / ModularUI2 2.3.85 /
@@ -250,7 +250,7 @@ createPipe(item)  →  world.setBlock(管道方块)  →  取 TE  →  initializ
 
 ### 4.3 断言三件套（+ 一条可达性自检）
 
-> 编号沿用探针自己的口径（`LpTeRoundTripAutomation.java:872-999`，与 `state/Scene/issue-12/README.md:43-49` 一致）：
+> 编号沿用探针自己的口径（`LpTeRoundTripAutomation.java:872-999`，与 `temp/Scene/issue-12/README.md:43-49` 一致）：
 > 断言 1/2/4a/4b/5 是判据本体，3a/3b 是产物层旁证。
 
 | # | 断言 | 实现口径 | 出处 |
@@ -270,7 +270,7 @@ createPipe(item)  →  world.setBlock(管道方块)  →  取 TE  →  initializ
 **比对口径的两条坑**
 
 - **`writeToNBT` 是安全口径**：LP 的破坏点在 `readFromNBT`（重建 pipe + 一次性绑定），
-  所以「前后各 `writeToNBT` 一次比字节」在机制上成立（`state/issue-12/probe-infra-recon.md` §5.4、`state/issue-12-body.md:70-74`）。
+  所以「前后各 `writeToNBT` 一次比字节」在机制上成立（`temp/issue-12/probe-infra-recon.md` §5.4、`temp/issue-12-body.md:70-74`）。
 - **运行时 gson 是 MC 1.7.10 自带的 2.2.4**：`JsonArray.isEmpty()` 到 2.8.2 才有，实测会抛
   `NoSuchMethodError` ——一律用 `size() > 0`（`LpTeRoundTripAutomation.java:923-924`）。
 
@@ -286,11 +286,11 @@ createPipe(item)  →  world.setBlock(管道方块)  →  取 TE  →  initializ
 
 **负对照必须让断言变红（实测判据）**：`inplace` 轮断言 1/2/4a 全红、4/4 管道的
 `pipe.container` 由 true→false、**8 条**策略失败警告（与 issue 原件同签名同条数）
-（`state/Scene/issue-12/README.md:14`、`:43-49`）。
+（`temp/Scene/issue-12/README.md:14`、`:43-49`）。
 
 ### 4.5 崩溃安全（本回路的强制约定）
 
-issue #12 的崩溃发生在「导出结束、正常渲染恢复」**之后 1~2 秒**（`state/issue-12-body.md:76-79`），
+issue #12 的崩溃发生在「导出结束、正常渲染恢复」**之后 1~2 秒**（`temp/issue-12-body.md:76-79`），
 因此：
 
 1. **捕获完成后立刻落盘中途结果**：`stepSnapAfterA` 在 runA 之后马上写结果 JSON（`status=in-progress`），
@@ -366,21 +366,21 @@ pwsh -File scripts/issue-12/run-lp-te-probe.ps1 -DryRun
 | 级 | 路径 | 内容 | 出处 |
 |---|---|---|---|
 | 游戏内（原始） | `mod/gtnh/run/client/`（= `mc.mcDataDir`） | `sde_lp_te_probe_result.json`、`_exit.json`、`_scan.json`、`_export.json`、`_export-runB.json`、`crash-reports/` | 探针 `:77`、`:241`、`:1474-1476`；`mcDataDir` 见脚本 `:47` |
-| 归档（跨轮保留） | `state/Scene/issue-<N>/<label>/` | `result.json`（结果副本）、`sde_lp_te_probe_*.json` 全部、`sde-lines.log`、`gradle-runClient.log`、本轮新崩溃报告 | 脚本 `:50`、`:56`、`:199-214` |
-| 运行日志 | `state/logs/issue<N>-<label>.log`（完整）、`.log.err`、`.sde.log`（仅 `[SDE]` 行） | 崩溃现场最要紧的是 `[SDE]` 摘录与 `.log.err` | 脚本 `:51`、`:59-60`、`:164`、`:178-182` |
+| 归档（跨轮保留） | `temp/Scene/issue-<N>/<label>/` | `result.json`（结果副本）、`sde_lp_te_probe_*.json` 全部、`sde-lines.log`、`gradle-runClient.log`、本轮新崩溃报告 | 脚本 `:50`、`:56`、`:199-214` |
+| 运行日志 | `temp/logs/issue<N>-<label>.log`（完整）、`.log.err`、`.sde.log`（仅 `[SDE]` 行） | 崩溃现场最要紧的是 `[SDE]` 摘录与 `.log.err` | 脚本 `:51`、`:59-60`、`:164`、`:178-182` |
 
 **约定**
 
-- 每个 issue 一个目录 `state/Scene/issue-<N>/`，其下**一轮一个 `<label>/`**；
+- 每个 issue 一个目录 `temp/Scene/issue-<N>/`，其下**一轮一个 `<label>/`**；
   目录里放一份 `README.md` 作为索引，用表格列出**权威运行**（哪一轮是对照、结论是什么），
-  **不要覆盖历史轮次**（`state/Scene/issue-12/README.md:9-14` 即此形态）。
+  **不要覆盖历史轮次**（`temp/Scene/issue-12/README.md:9-14` 即此形态）。
 - 归档必须包含**本轮新生成**的崩溃报告（按 `LastWriteTime >= 本轮开始时刻` 过滤，脚本 `:207-214`）。
 - 命名：`<mode>-run-<n>`（`copy-run-6` / `inplace-run-2`），使目录名自带模式信息。
 
 ### 6.2 仓库树内零未跟踪文件纪律
 
 - **所有产物、日志、临时脚本一律不进仓库树**：`mod/gtnh/run/` 已被
-  `mod/gtnh/.gitignore:3`（`/run/`）忽略，`state/` 与根级 `resources/` 在工作树之外（见根 `AGENTS.md`）。
+  `mod/gtnh/.gitignore:3`（`/run/`）忽略，`temp/` 与根级 `resources/` 在工作树之外（见根 `AGENTS.md`）。
 - 树内新增文件**只允许**是「本次要提交的代码 / 脚本 / 文档」三类。
   交付验证回路时，探针 Java 源、分派挂接、`scripts/issue-<N>/` 都必须**随后提交**；
   本文编写时 `git status` 实证该实例尚有一处 modified（`SdeClientAutomationTickHandler.java`）与四处未跟踪
@@ -395,7 +395,7 @@ pwsh -File scripts/issue-12/run-lp-te-probe.ps1 -DryRun
 
 | # | 坑 | 现象 | 处置 | 出处 |
 |---|---|---|---|---|
-| 1 | `mod/gtnh/gradlew` 的 wrapper jar **未入库** | `gradlew` 不可用（`gradle/wrapper/` 下只有 `.properties`） | 用同版本分发包：`C:\gradle-cache\wrapper\dists\gradle-9.2.1-bin\2t0n5ozlw9xmuyvbp7dnzaxug\gradle-9.2.1\bin\gradle.bat` | 脚本 `:48`、`:72-73`；裁决 A6 / 开放项 O1（`state/issue-12/adjudications.md:14`、`:20`）。根因：根 `.gitignore:12` 的 `!gradle/wrapper/gradle-wrapper.jar` 只反选仓库根，`mod/gtnh/...` 仍被 `*.jar` 吃掉 |
+| 1 | `mod/gtnh/gradlew` 的 wrapper jar **未入库** | `gradlew` 不可用（`gradle/wrapper/` 下只有 `.properties`） | 用同版本分发包：`C:\gradle-cache\wrapper\dists\gradle-9.2.1-bin\2t0n5ozlw9xmuyvbp7dnzaxug\gradle-9.2.1\bin\gradle.bat` | 脚本 `:48`、`:72-73`；裁决 A6 / 开放项 O1（`temp/issue-12/adjudications.md:14`、`:20`）。根因：根 `.gitignore:12` 的 `!gradle/wrapper/gradle-wrapper.jar` 只反选仓库根，`mod/gtnh/...` 仍被 `*.jar` 吃掉 |
 | 2 | `web/node_modules` 未装 | `:syncWeb` 失败（它要跑 `npm run build:workbench`），而 `processResources dependsOn syncWeb` ⇒ 任务图直接失败 | **二者都要排除**：`-x syncWeb -x processResources`（探针不依赖 web 产物）；或先 `npm ci` | `mod/gtnh/build.gradle.kts:19-24`、`:47-49`；脚本 `:146-147`、`:154`；开放项 O2 |
 | 3 | `runClient` 是**独占资源** | 同树两个客户端抢 Gradle 锁 / 端口 / 世界存档 | 起客户端前做进程检查并**直接判退出 4**；判据必须限定「本工作树」——**不能**用 `-Dgradlestart.bouncerClient`（那是 gtnhconvention 注入给**所有** GTNH 客户端的，实测会误报其它项目的客户端） | 脚本 `:103-114`；根 `AGENTS.md`「独占串行」 |
 | 4 | CoFH MCP conf 缺失 | 启动阶段**静默挂住**且日志无输出（`ObfMapping$MCPRemapper.confDirectoryGuess → JFileChooser`） | 启动**前**做硬前置：扫 `%USERPROFILE%\.gradle` / `%GRADLE_USER_HOME%` / `C:\gradle-cache` 下的 `caches/minecraft/net/minecraftforge/forge/*/unpacked/conf`，判据不是「目录存在」而是**里面真有 `*.srg`** | 脚本 `:75-90`；`docs/plan/probe-export-pipeline.md` §6.1 |
@@ -410,19 +410,19 @@ pwsh -File scripts/issue-12/run-lp-te-probe.ps1 -DryRun
    在本环境**没有注册任何 ISBRH**（`isbrhClass = <none-for-renderType>`，FML 的 `renderWorldBlock` 返回 false），
    其 TESR 在捕获期间写入 **0 个四边形**（`tesrQuadsDelta = 0`）⇒ 产物里管道格为空，
    断言 3a/3b 在 **copy 与 inplace 两种模式下都红**。
-   出处：`state/Scene/issue-12/README.md:53`；诊断字段由 `LpPrimaryCaptureProbeStrategy.java:96-152` 落盘
+   出处：`temp/Scene/issue-12/README.md:53`；诊断字段由 `LpPrimaryCaptureProbeStrategy.java:96-152` 落盘
    （`renderType` / `isbrhClass` / `quadsAtEntry` / `quadsAfterPrimary` / `quadsIsbrhDelta` / `fmlRenderWorldBlockHandled`）。
 2. **负对照下客户端渲染崩溃未复现**：停留 100 tick（5 s，覆盖「导出后 1~2 秒」窗口）后进程未崩溃、
    无 `crash-reports`、无未捕获异常。最可能同因第 1 条（本环境 LP 渲染器不画东西 ⇒ 正常帧里走不到
    `LogisticsTileGenericPipe.isOpaque()`）；issue 原件是 LP `1.5.26-GTNH`、本树 `1.5.28-GTNH`，
-   两个变量都可能起作用，**本次不能区分**（`state/Scene/issue-12/README.md:54`）。
+   两个变量都可能起作用，**本次不能区分**（`temp/Scene/issue-12/README.md:54`）。
    ⇒ 因此本实例的「红」是靠**断言 1/2/4a**（TE 快照 + 反射字段 + 策略失败计数）证明的，不是靠崩溃。
 3. **`runClient` 的实际 `workingDir` 未确证**：影响 `/sde export` 的 `structure_exports` 绝对落点
    （服务端侧落盘相对 JVM 工作目录，路径硬编码在 `core/session/ExportSession.java:373-378`；
    客户端富化落盘写的是另一个目录 `mc.mcDataDir/structure_exports`，`MeshCaptureService.java:122`）。
    本回路不受影响 —— 探针产物一律写 `mc.mcDataDir`（侦察报告 §4.1 与附录未确证项 #2）。
 4. **LP 版本串落盘为 `<unknown>`**：`logisticspipes.LPConstants` 没有探针能读到的 public 版本字段
-   （已按候选名与字段类型扫描）⇒ 结果 JSON 的 `lpVersion` 不能当版本证据用（`state/Scene/issue-12/README.md:55`）。
+   （已按候选名与字段类型扫描）⇒ 结果 JSON 的 `lpVersion` 不能当版本证据用（`temp/Scene/issue-12/README.md:55`）。
 
 ---
 
@@ -434,8 +434,8 @@ pwsh -File scripts/issue-12/run-lp-te-probe.ps1 -DryRun
 | 2 | 「裸 `world.setBlock` 造出的 LP 管道 TE 必然通不过前置校验」 | §4.2 的放置路径纪律（未做对照实验；但前置校验使误判不可能） |
 | 3 | `runClient` 实际 `workingDir`（= `mod/gtnh` 还是 `mod/gtnh/run/client`） | §8 第 3 条；只影响 `/sde export` 的落点 |
 | 4 | 负对照下客户端崩溃为何不复现（ISBRH 缺口 vs LP 版本，两变量未分离） | §8 第 2 条 |
-| 5 | 捕获期间对活动 TE 的改写是否**污染导出结果本身** | issue #12 的待确认项（`state/issue-12-body.md:86`）；现有「同轮双导出 sha256 一致」判据测不到（两次导出都在同一个被改坏的世界里），需「干净基线 vs 捕获后产物」的跨状态比对 |
-| 6 | 主批次 ISBRH/RenderBlocks 路径仍读活动 TE 的保真度影响 | 裁决 O4（`state/issue-12/adjudications.md:23`）：属保真度话题，非崩溃缺陷 |
+| 5 | 捕获期间对活动 TE 的改写是否**污染导出结果本身** | issue #12 的待确认项（`temp/issue-12-body.md:86`）；现有「同轮双导出 sha256 一致」判据测不到（两次导出都在同一个被改坏的世界里），需「干净基线 vs 捕获后产物」的跨状态比对 |
+| 6 | 主批次 ISBRH/RenderBlocks 路径仍读活动 TE 的保真度影响 | 裁决 O4（`temp/issue-12/adjudications.md:23`）：属保真度话题，非崩溃缺陷 |
 
 **关键 `file:line` 索引**（本文引用的主文件）：
 
@@ -450,4 +450,4 @@ pwsh -File scripts/issue-12/run-lp-te-probe.ps1 -DryRun
 | `mod/gtnh/dependencies.gradle` | `:61-70` LP 依赖与版本裁决 |
 | `mod/gtnh/build.gradle.kts` | `:47-49` `syncWeb` 依赖、`:61-79` `runClientSdePipeline` |
 | `scripts/issue-12/run-lp-te-probe.ps1` | `:20-21` 退出码、`:24-40` 参数、`:70-114` 前置、`:151-176` 起客户端与超时杀树、`:199-214` 归档 |
-| 证据归档 | `state/Scene/issue-12/README.md`（权威运行与缺口）、`state/issue-12/probe-infra-recon.md`（侦察细节）、`state/issue-12/adjudications.md`（裁决 A1-A6 / 开放项 O1-O7） |
+| 证据归档 | `temp/Scene/issue-12/README.md`（权威运行与缺口）、`temp/issue-12/probe-infra-recon.md`（侦察细节）、`temp/issue-12/adjudications.md`（裁决 A1-A6 / 开放项 O1-O7） |
