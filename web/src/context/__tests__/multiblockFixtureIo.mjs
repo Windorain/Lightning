@@ -68,5 +68,5 @@ export function loadInnerDocument(name) {
 
 /** 动态载入冻结蓝本 `scripts/multiblock-fixtures/lib.mjs`（仅在参考网格缺失时使用）。 */
 export function loadReferenceLib() {
-  return import(pathToFileURL(join(REPO, 'scripts', 'multiblock-fixtures', 'lib.mjs')).href)
+  return import(/* @vite-ignore */ pathToFileURL(join(REPO, 'scripts', 'multiblock-fixtures', 'lib.mjs')).href)
 }
