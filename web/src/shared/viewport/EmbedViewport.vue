@@ -81,11 +81,12 @@ const {
  * 故本组件只负责把**文档根字段**送到该 prop，不在视口侧重复注入缓存）。
  *
  * 数据来源 = 渲染定义根（`structureDefinition`，即 DRW 解析后的 `StructureDefinition`）：
- * `partIconTextures` 是**文档根级**字段（与 `statsTemplate` 同级，非 structure 级），
+ * `partIconTextures` 是**文档根级**字段（非 structure 级），
  * 经解析链（StructureDataParser 根透传 / V2Plain `_extra` 兜底）→ `RuntimeDocument.serialize()`
  * 根展开 → `toStructureDefinition` 浅拷贝挂到该对象上；与侧栏回退读取的
  * `cache.getStructure()` 是**同一份对象**（DRW 用同一 definition 重建图标缓存）。
  * 键 = 物品身份键（`registry:damage[#nbt]`，契约 §5）；缺省/空 ⇒ null（纯回退链，行为同旧文件）。
+ * （本轮同级的 `statsTemplate`/`statsOverride` 语义已随决策 C 作废，本组件不再读取。）
  */
 type PartIconTexturesCarrier = { partIconTextures?: Record<string, string> }
 const partIconTextures = computed<Record<string, string> | null>(() => {

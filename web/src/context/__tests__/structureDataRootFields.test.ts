@@ -1,22 +1,26 @@
 /**
  * F1（P3.1 验收擒获）—— **文档根级字段**在 StructureData 解析链上的存活。
  *
- * 背景（契约 §9 三级配置 / §2 文件表达）：
- *  - `statsTemplate`（文档默认统计层）、`statsOverride`（文档覆盖层）、
+ * 背景（契约 §2 文件表达 / §9 已废弃）：
+ *  - `statsTemplate`（旧文档默认统计层）、`statsOverride`（旧文档覆盖层）、
  *    `partIconTextures`（部件物品图标纹理，P1.7 落盘）都是**文档根级**字段，
  *    与 structure 级的 `cellPartsGrid`/`partLists` **不同层级**；
  *  - 真实导出是 `geometryPhase=baked` 的 StructureData（无 `format_version`/`frames`），
  *    走 `StructureDataParser`；该解析器此前不透传上述三键 ⇒ 渲染定义根缺文档默认统计层
- *    （侧栏来源徽标落"内建默认"）且部件行图标无嵌入纹理源（P3.1 findings F1/F2）。
+ *    （侧栏来源徽标落"内建默认"）且部件行图标无嵌入纹理源（P3.1 findings F1/F2）；
+ *  - **B-3（决策 C）后**：`statsTemplate`/`statsOverride` 的**语义已作废**（统计栏不再有
+ *    三级配置、无来源徽标）——本文件对它们只保留"**透传不丢、不凭空生成**"这一条：
+ *    这正是契约 §9 的兼容口径「旧文档携带 statsTemplate/statsOverride ⇒ 读取后静默忽略」
+ *    （读得到、留得住、不影响展示）。语义消费端由 `BlockStatsSidebar` 的
+ *    `blockStatsSidebar.parts.dom.test.ts` / `blockStatsSidebar.legacyHostRows.dom.test.ts`
+ *    以 DOM 断言钉死（残留配置不空栏不报错）。
  *
  * 本测试钉死两件事：
  *  1. **透传**：三键经「解析 → serialize() → `loadStructureData`（渲染定义入口）」
- *     完整存活到**渲染定义根**（= `BlockStatsSidebar` 读取 `definition.statsTemplate` /
- *     `EmbedViewport` 读取 `definition.partIconTextures` 的同一对象）；
+ *     完整存活到**渲染定义根**（= `EmbedViewport` 读取 `definition.partIconTextures` 的同一对象）；
  *  2. **旧文件零差异**：无这三键的旧 baked 文档，序列化根不出现这三键（不产出占位）。
  *
- * 顺带**核验（非假设）** V2Plain 链路：三键随 `RuntimeDocument._extra` 兜底 round-trip
- * （与 `partsRoundtrip.test.ts#statsTemplate` 同源，此处补齐另两键 + 定义根观测）。
+ * 顺带**核验（非假设）** V2Plain 链路：三键随 `RuntimeDocument._extra` 兜底 round-trip。
  */
 import { describe, it, expect } from 'vitest'
 import { createParserRegistry } from '@/context/parserRegistry'
@@ -27,8 +31,6 @@ import {
   createEnvelopeParser,
 } from '@/context/parsers/builtinParsers'
 import { loadStructureData } from '@/render/data/bundleResolve'
-import { statsConfigFromV2Template } from '@/render/interaction/partStatsAdapter'
-import type { V2StatsTemplate } from '@/render/data/sceneDocumentV2'
 
 import singleboxFixture from '../../../e2e/fixtures/parts-singlebox-mix.v2.json'
 
@@ -48,9 +50,9 @@ function productionRegistry() {
 const FIXTURE_STRUCTURE = ((singleboxFixture as unknown as Json).frames as Json[])[0]!
   .structure as Json
 
-/** P1.7 落盘形态：文档默认统计层（契约 §9 第 1 级）。 */
+/** P1.7 落盘形态：旧文档默认统计层（契约 §9 已废弃；本文件只钉"透传不丢"）。 */
 const STATS_TEMPLATE = { mode: 'auto', groups: [], showOthers: true }
-/** 文档覆盖层（契约 §9 第 2 级；真实导出当前为缺省，此处用最小合法形状验透传）。 */
+/** 旧文档覆盖层（契约 §9 已废弃；同上）。 */
 const STATS_OVERRIDE = { view: 'parts' }
 /** 部件物品图标键 → base64 PNG（键 = 物品身份键 `registry:damage[#nbt]`）。 */
 const PART_ICON_TEXTURES = {
@@ -96,11 +98,6 @@ describe('F1 文档根级字段：StructureData 解析链透传', () => {
     expect(def.statsTemplate).toEqual(STATS_TEMPLATE)
     expect(def.statsOverride).toEqual(STATS_OVERRIDE)
     expect(def.partIconTextures).toEqual(PART_ICON_TEXTURES)
-
-    // 契约 §9 第 1 级生效：文档默认层产出「部件物品清单」视图（徽标 = 文档默认的前提）
-    expect(statsConfigFromV2Template(def.statsTemplate as unknown as V2StatsTemplate)).toEqual({
-      view: 'parts',
-    })
   })
 
   it('二次序列化幂等：三键原样保留（不随编辑派生字段被丢弃）', async () => {
