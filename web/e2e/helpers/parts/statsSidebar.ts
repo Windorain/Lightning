@@ -1,17 +1,21 @@
 /**
  * 部件断言包 —— 统计侧栏 DOM 读取/驱动 helper（零替身）。
  *
- * 观测面 = `BlockStatsSidebar.vue` 渲染的生产 DOM。**形态口径随 B-3（决策 C）与 B-5（#38）更新**：
- *  - B-3 移除了视图切换工具条 / 视图按钮 / 配置来源徽标 / provenance 面板 / 宿主行
+ * 观测面 = `BlockStatsSidebar.vue` 渲染的生产 DOM。**形态口径随 B-3（决策 C）、B-4（#37）与
+ * B-5（#38）更新**：
+ *  - B-3 移除了视图切换工具条 / 视图按钮 / 配置来源徽标 / provenance 面板 / 分组标题 / 宿主行
  *    ⇒ 本 helper 不再有 `toolbar` / `viewButtons` / `pill` / `readProvenance` / `switchStatsView`
- *    （读已不存在的 UI 只会造出**确定性坏断言**，故整套删除而非留着）；
+ *    （读已不存在的 UI 只会造出**确定性坏断言**，故整套删除而非留着）；契约 §9 的兼容口径
+ *    （旧文档携带 `statsTemplate`/`statsOverride` ⇒ 静默忽略）改由**移除锁**观测：
+ *    `legacyToolbar` / `readLegacyStatsUiAbsent`；
+ *  - 行 `.nei-slot-row`：**只有物品行一种**，带 `data-stats-row-key`（= 物品身份键
+ *    `registry:damage[#nbt]`）与 `data-stats-icon-key`（= 行键恒等）；旧文件退化路径的行
+ *    **无任何 data 属性**（DOM 零新增的直接证据），且**不带** B-5 的选中态/无对应数据位。
+ *    侧栏的「有部件 / 无部件」活性判据 = 行上有无 `data-stats-row-key`；
+ *  - 「N 个无物品部件未计入清单」提示行 `[data-stats-itemless]`；
  *  - B-5 起物品行有**选中态集合**与会话提示：`[data-stats-selected]` / `[data-stats-unresolved]`
  *    （+ 行内色点 `[data-stats-unresolved-dot]`，title = "没有对应方块"）/ `[data-stats-anchor]`
  *    / `[data-stats-selection-notice]`；点选驱动 = 真实 DOM `click`（含 Ctrl/Shift 修饰键）。
- *
- * 行 DOM：`data-stats-row-key` / `data-stats-icon-key`（**图标键 = 物品身份键**）。
- * 旧文件（无部件）的宿主清单行**无任何 data 属性**（DOM 零新增的直接证据），
- * 且**不带** B-5 的选中态/无对应数据位。
  *
  * 行图标槽 `.nei-slot-preview-icon`：`BlockSlotPreview` 只在缓存条目 ready 时挂 canvas
  * ⇒ "槽内有 canvas" = 该图标键解析出了图标（F2 嵌入纹理通道的生产可观测结果，
@@ -33,10 +37,29 @@ export const statsRow = (key: string): string => `${WIKI_EMBED} [data-stats-row-
 export const statsRowDot = (key: string): string =>
   `${WIKI_EMBED} [data-stats-row-key="${key}"] [data-stats-unresolved-dot]`
 
+// ---------------------------------------------------------------------------
+// 移除锁选择器（B-3 / 决策 C 之后必须恒不存在；负向断言用）
+// ---------------------------------------------------------------------------
+
+/** 已移除的视图切换工具条（`switchStatsView`/`readProvenance` 的宿主，B-3 整套移除）。 */
+export const STATS_TOOLBAR = `${WIKI_EMBED} .nei-stats-toolbar`
+/** 已移除的配置来源徽标；`data-stats-source` 取值曾为 builtin/document-default/… */
+export const STATS_PILL = `${WIKI_EMBED} .nei-stats-prov-pill`
+/** 已移除的 provenance 逐字段面板及其行。 */
+export const STATS_PROV_PANEL = `${WIKI_EMBED} [data-stats-provenance]`
+export const STATS_PROV_FIELD = `${WIKI_EMBED} [data-stats-prov-field]`
+/** 已移除的「清除本机修改」按钮。 */
+export const STATS_RESET_LOCAL = `${WIKI_EMBED} [data-stats-reset-local]`
+/** 已移除的视图切换按钮（曾按 id 取 parts|hosts|custom）与分组标题。 */
+export const STATS_VIEW_BTN = `${WIKI_EMBED} [data-stats-view-btn]`
+export const STATS_GROUP_TITLE = `${WIKI_EMBED} [data-stats-group-title]`
+/** 行 kind 属性（B-3 起不存在：左栏只有物品行一种）。 */
+export const STATS_ROW_KIND = `${WIKI_EMBED} [data-stats-row-kind]`
+
 export interface StatsRowObservation {
-  /** 行身份键（物品身份键 `registry:damage[#nbt]`）；旧路径行 = null。 */
+  /** 行身份键（物品行 = 物品身份键 `registry:damage[#nbt]`）。旧路径行 = null。 */
   key: string | null
-  /** 图标键（= 物品身份键）。旧路径行 = null。 */
+  /** 图标键（与 `key` 恒等；P2.4 图标断言的观测点）。旧路径行 = null。 */
   iconKey: string | null
   /** 显示名（`.nei-slot-name` 文本；无对应项的行内色点不带文本，不影响本读数）。 */
   name: string
@@ -55,6 +78,13 @@ export interface StatsRowObservation {
 export interface StatsSidebarObservation {
   present: boolean
   collapsed: boolean
+  /**
+   * 已移除的视图切换工具条是否出现。**必须恒为 false**。
+   *
+   * 保留该字段而非直接删：它同时是「统计栏确实渲染了（不是空跑）」的活性判据 ——
+   * 组件若整体没挂载，本字段与 `rows` 会一起为空，负向断言才不会假绿。
+   */
+  legacyToolbar: boolean
   /** 「N 个无物品部件未计入清单」提示行（无 ⇒ null）。 */
   itemless: string | null
   /** B-5 选择状态提示（无对应项 / 命中截断；无 ⇒ null）。 */
@@ -67,7 +97,7 @@ export async function readStatsSidebar(page: Page): Promise<StatsSidebarObservat
   return await page.evaluate(() => {
     const sidebar = document.querySelector('.wb-wiki-embed .nei-sidebar')
     if (!sidebar) {
-      return { present: false, collapsed: false, itemless: null, notice: null, rows: [] }
+      return { present: false, collapsed: false, legacyToolbar: false, itemless: null, notice: null, rows: [] }
     }
     const rows = [...sidebar.querySelectorAll('.nei-slot-row')].map((r) => ({
       key: r.getAttribute('data-stats-row-key'),
@@ -83,6 +113,7 @@ export async function readStatsSidebar(page: Page): Promise<StatsSidebarObservat
     return {
       present: true,
       collapsed: sidebar.classList.contains('nei-sidebar--collapsed'),
+      legacyToolbar: !!sidebar.querySelector('.nei-stats-toolbar'),
       itemless: sidebar.querySelector('[data-stats-itemless]')?.textContent?.trim() ?? null,
       notice: sidebar.querySelector('[data-stats-selection-notice]')?.textContent?.trim() ?? null,
       rows,
@@ -201,6 +232,60 @@ export async function clickStatsRow(
   return await readStatsSidebar(page)
 }
 
+// ---------------------------------------------------------------------------
+// 移除锁读取（B-3 / 决策 C：视图切换与三级配置 UI 已整套移除）
+// ---------------------------------------------------------------------------
+
+export interface LegacyStatsUiObservation {
+  /** 侧栏是否挂载（活性；false ⇒ 其余字段的 false 不构成证据）。 */
+  present: boolean
+  /** 移除组件的出现次数（全部必须为 0）。 */
+  counts: {
+    toolbar: number
+    viewButtons: number
+    pill: number
+    provenancePanel: number
+    provenanceFields: number
+    resetLocal: number
+    groupTitles: number
+    rowKind: number
+  }
+  /** 侧栏仍未读写的本机配置键（`lightning:stats:v1:*`；残留必须原样留存、无新增）。 */
+  legacyLocalKeys: string[]
+}
+
+/**
+ * 读「B-3 已移除 UI」的存在性（负向断言 + 兼容兜底观测）。
+ *
+ * 契约 §9 兼容口径：旧文档/本机残留的 `statsTemplate` / `statsOverride` / localStorage
+ * 配置 ⇒ 读取后**静默忽略**。可判定的生产形态 = 这些配置入口一个都不渲染，
+ * 且 `lightning:stats:v1:*` 残留键一字未动（既不清除也不新增）。
+ */
+export async function readLegacyStatsUiAbsent(page: Page): Promise<LegacyStatsUiObservation> {
+  return await page.evaluate(() => {
+    const count = (sel: string): number => document.querySelectorAll(sel).length
+    const keys: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!
+      if (k.startsWith('lightning:stats:v1:')) keys.push(k)
+    }
+    return {
+      present: !!document.querySelector('.wb-wiki-embed .nei-sidebar'),
+      counts: {
+        toolbar: count('.wb-wiki-embed .nei-stats-toolbar'),
+        viewButtons: count('.wb-wiki-embed [data-stats-view-btn]'),
+        pill: count('.wb-wiki-embed .nei-stats-prov-pill'),
+        provenancePanel: count('.wb-wiki-embed [data-stats-provenance]'),
+        provenanceFields: count('.wb-wiki-embed [data-stats-prov-field]'),
+        resetLocal: count('.wb-wiki-embed [data-stats-reset-local]'),
+        groupTitles: count('.wb-wiki-embed [data-stats-group-title]'),
+        rowKind: count('.wb-wiki-embed [data-stats-row-kind]'),
+      },
+      legacyLocalKeys: keys.sort(),
+    }
+  })
+}
+
 /** 点左栏空白（`Esc` 之外的第二条清空路径）。 */
 export async function clickStatsBlank(page: Page): Promise<StatsSidebarObservation> {
   await page.locator(`${STATS_SIDEBAR} .nei-sidebar-grid`).dispatchEvent('click')
@@ -267,6 +352,9 @@ export async function readStatsRowIcons(page: Page): Promise<StatsRowIconObserva
  * 等「图标键在给定集合内的**物品行**」全部渲染出 canvas（图标烘焙是异步的：base64 解码
  * 在 `BlockIconCache` 的串行队列里）。
  *
+ * 「物品行」判据 = 行带 `data-stats-row-key`（B-3 后左栏行键只有物品身份键一种；
+ * 旧的 `data-stats-row-kind` 属性已随决策 C 移除，不得再作为判据）。
+ *
  * 超时**抛错并列出仍无 canvas 的行**（含键），不静默返回 —— 调用方据此判定
  * "嵌入纹理通道没接通"还是"某个键没有纹理来源"。
  * `coveredIconKeys` 之外的键不参与等待（它们本就该走回退链/占位）。
@@ -281,14 +369,15 @@ export async function waitStatsRowIcons(
   let last: StatsRowIconObservation[] = []
   for (;;) {
     last = await readStatsRowIcons(page)
-    const pending = last.filter(
+    const itemRows = last.filter((r) => r.key !== null)
+    const pending = itemRows.filter(
       (r) => r.iconKey !== null && covered.has(r.iconKey) && !r.hasCanvas,
     )
-    if (last.length > 0 && pending.length === 0) return last
+    if (itemRows.length > 0 && pending.length === 0) return last
     if (Date.now() > deadline) {
       throw new Error(
-        `P3.1：等待部件行图标就位超时（${timeout}ms）—— 仍有 ${pending.length} 行无 canvas：` +
-          `${pending.map((r) => r.iconKey).join(', ') || '<部件行尚未渲染>'}` +
+        `P3.1：等待物品行图标就位超时（${timeout}ms）—— 仍有 ${pending.length} 行无 canvas：` +
+          `${pending.map((r) => r.iconKey).join(', ') || '<物品行尚未渲染>'}` +
           `\n  最后读数：${JSON.stringify(last.slice(0, 6))}${last.length > 6 ? ` …（共 ${last.length} 行）` : ''}`,
       )
     }

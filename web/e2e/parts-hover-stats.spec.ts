@@ -13,10 +13,12 @@
  *     三个部件（中心线缆 / NORTH 切换总线 / UP 存储总线）投影位置各注入 pointer
  *     事件 → 公开悬停状态的部件身份（localId）+ DOM tooltip 文本分别为各部件
  *     事物名；slab fixture 满方块石头格 tooltip = 宿主 NEI 名（回归）。
- *  2. 统计断言：slab fixture 默认视图（物品清单）DOM 行 = Stone Slab×3 /
- *     Fence×1 精确比对（Stone 不出现）；无对应标记与选择提示的行为（B-5）。
- *     **注**：原「三视图切换 + provenance 徽标迁移」断言已删除 —— 该 UI 随 **B-3 决策 C**
- *     整套移除（工具条/视图按钮/徽标/provenance 面板），留着就是确定性坏断言。
+ *  2. 统计断言：slab fixture 默认视图（B-3 决策 C 后左栏**唯一**形态 = 物品清单）DOM 行 =
+ *     Stone Slab×3 / Fence×1 精确比对（Stone 不出现）；图标键 = 物品身份键；
+ *     无对应标记与选择提示的行为（B-5）。**移除锁**：视图切换工具条 / 视图按钮 /
+ *     配置来源徽标 / provenance 面板 / 分组标题全部不存在（B-4 按 B-3 后的实际形态收口，
+ *     见下方 describe —— 原「三视图切换 + provenance 徽标迁移」断言已删除，
+ *     该 UI 随 B-3 整套移除，留着就是确定性坏断言）。
  *  3. 图标断言：物品行 `data-stats-icon-key` = 物品身份键（`registry:damage`），
  *     不是宿主方块键。
  *  4. 回归断言：minimal-v2（无部件）侧栏无部件模式 UI（无 `data-stats-row-key` /
@@ -48,6 +50,7 @@ import {
   clearWikiHover,
   readStatsSidebarSettled,
   waitStatsSidebarReady,
+  readLegacyStatsUiAbsent,
   readPartsFixture,
   readPartsObservation,
   augmentFixtureGeometry,
@@ -107,12 +110,25 @@ function augmentedSingleboxFixture(): Record<string, unknown> {
   return normalizeTextureBlobsForRender(f)
 }
 
-/** 行观测 → 紧凑可比对形状（断言失败时 diff 直接可读）。 */
+/**
+ * 行观测 → 紧凑可比对形状（断言失败时 diff 直接可读）。
+ *
+ * B-4 收口：B-3（决策 C）后左栏**只有物品行一种**，`data-stats-row-kind` 属性根本不再渲染
+ * ⇒ 原先的 `kind` 字段读到的恒为 null，按它写的 `kind === 'part'/'host'` 断言永远不可能通过
+ * （确定性坏断言，已随本单删除）。行种类判据 = **行上有无 `data-stats-row-key`**
+ * （物品行有、旧文件退化路径行没有）—— `isItemRow` 即该判据。
+ * （B-5 增补：`selected` / `unresolved` 两个数据位一并入紧凑形状。）
+ */
 function compactRows(rows: StatsRowObservation[]): Array<Record<string, string | boolean | null>> {
   return rows.map((r) => ({
     key: r.key, iconKey: r.iconKey, name: r.name, qty: r.qty,
     selected: r.selected, unresolved: r.unresolved,
   }))
+}
+
+/** 物品行判据 = 行带 `data-stats-row-key`（B-3 后无 `kind` 属性可用，见 `compactRows` 注释）。 */
+function isItemRow(r: StatsRowObservation): boolean {
+  return r.key !== null
 }
 
 /**
@@ -234,7 +250,7 @@ test.describe('P2.5 · 悬停断言（AE2 同格三部件 + 满方块回归）',
   })
 })
 
-test.describe('P2.5 · 统计断言（slab fixture：物品行 = 唯一视图）', () => {
+test.describe('P2.5 · 统计断言（slab fixture 物品清单 + B-3 移除锁 + B-5 选择提示）', () => {
   // 本 describe 的用例都依赖「展开态保持」，跳过理由见 EXPANDED_SIDEBAR_DESKTOP_ONLY。
 
   test('默认视图 = 物品清单（Stone Slab×3 / Fence×1；石头不出现）；图标键 = 物品身份键', async ({ page }, testInfo) => {
@@ -244,7 +260,8 @@ test.describe('P2.5 · 统计断言（slab fixture：物品行 = 唯一视图）
     await waitStatsSidebarReady(page)
     const s = await readStatsSidebarSettled(page)
 
-    // 视图切换工具条 / 视图按钮 / 配置来源徽标已随 B-3（决策 C）整套移除 ⇒ 无对应断言。
+    // 视图切换工具条 / 视图按钮 / 配置来源徽标已随 B-3（决策 C）整套移除 ⇒ 无对应断言
+    //（移除锁由下方「B-3 移除锁」用例承担）。
     // 默认视图行集精确比对（count-desc：Stone Slab×3 在前；石头满方块不是物品，不出现）
     expect(compactRows(s.rows), '物品清单 = Stone Slab×3 / Fence×1（硬编码期望）').toEqual([
       { key: 'minecraft:stone_slab:0', iconKey: 'minecraft:stone_slab:0', name: 'Stone Slab', qty: '3', selected: false, unresolved: true },
@@ -252,7 +269,7 @@ test.describe('P2.5 · 统计断言（slab fixture：物品行 = 唯一视图）
     ])
     // 图标断言：物品行图标键 = 物品身份键（带 :damage 段），≠ 宿主方块键（registryId / registryId@meta）
     for (const r of s.rows) {
-      expect(r.key, '物品行必须有行键（旧宿主清单行无行键）').not.toBeNull()
+      expect(isItemRow(r), `行 ${r.name} 必须是物品行（行带 data-stats-row-key）`).toBe(true)
       expect(r.iconKey, `行 ${r.name} 的图标键必须是物品身份键`).toBe(r.key)
       expect(r.iconKey, '物品身份键带 :damage 段（宿主键没有）').toMatch(/:\d+$/)
     }
@@ -280,7 +297,51 @@ test.describe('P2.5 · 统计断言（slab fixture：物品行 = 唯一视图）
       { key: AE2_PARTS.toggle.typeKey, iconKey: AE2_PARTS.toggle.typeKey, name: AE2_PARTS.toggle.name, qty: '1', selected: false, unresolved: true },
     ])
     // 图标键 = 物品注册名（item.ItemMultiPart），与宿主方块键（tile.BlockCableBus）不同族
-    for (const r of s.rows) expect(r.iconKey).not.toBe(AE2_PARTS.hostKey)
+    for (const r of s.rows) {
+      expect(isItemRow(r)).toBe(true)
+      expect(r.iconKey).not.toBe(AE2_PARTS.hostKey)
+    }
+  })
+
+  /**
+   * B-4 收口（替代原「三视图切换 + provenance 迁移」用例）。
+   *
+   * 原用例驱动 B-3 已整套移除的 UI（视图按钮 / 来源徽标 / provenance 面板），
+   * 其断言**永远不可能通过** —— 属确定性坏断言，已按 B-3 后的实际形态改写为
+   * **移除锁 + 兼容兜底**（契约 §9：文档/本机残留配置 ⇒ 静默忽略）：含部件文档照样
+   * 只出物品行，且这些入口一个都不渲染、`lightning:stats:v1:*` 残留键一字未动。
+   */
+  test('B-3 移除锁：视图切换/来源徽标/provenance 入口不存在；残留本机配置不被读写', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-chrome', EXPANDED_SIDEBAR_DESKTOP_ONLY)
+    test.setTimeout(180_000)
+    // 先埋一份 B-3 前的本机配置残留（旧实现的写入口径），生产代码必须完全无视它
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'lightning:stats:v1:parts-singlebox-mix',
+        JSON.stringify({ schema: 1, config: { view: 'hosts', rules: { showHostRows: true } } }),
+      )
+    })
+    await gotoWikiPreviewWithScene(page, readPartsFixture('parts-singlebox-mix.v2.json'), 'parts-singlebox-mix.v2.json', { requireMesh: false })
+    await waitStatsSidebarReady(page)
+    const s = await readStatsSidebarSettled(page)
+
+    // 行集不受残留配置影响：仍是物品清单
+    expect(compactRows(s.rows)).toEqual([
+      { key: 'minecraft:stone_slab:0', iconKey: 'minecraft:stone_slab:0', name: 'Stone Slab', qty: '3', selected: false, unresolved: true },
+      { key: 'minecraft:fence:0', iconKey: 'minecraft:fence:0', name: 'Fence', qty: '1', selected: false, unresolved: true },
+    ])
+
+    const ui = await readLegacyStatsUiAbsent(page)
+    expect(ui.present, '侧栏已挂载（缺此前提，下面的 0 计数不构成证据）').toBe(true)
+    expect(ui.counts, 'B-3 已移除的 UI 入口一个都不渲染').toEqual({
+      toolbar: 0, viewButtons: 0, pill: 0,
+      provenancePanel: 0, provenanceFields: 0, resetLocal: 0, groupTitles: 0, rowKind: 0,
+    })
+    expect(ui.legacyLocalKeys, '残留本机配置键原样留存（不读不写不清除、无新增）').toEqual([
+      'lightning:stats:v1:parts-singlebox-mix',
+    ])
+    expect(s.legacyToolbar, '旧读取字段同口径：工具条不存在').toBe(false)
+    console.log('[P2.5] B-3 移除锁：视图切换/徽标/provenance 入口全部不存在；残留本机配置一字未动')
   })
 })
 
@@ -310,6 +371,8 @@ test.describe('P2.5 · 回归断言（无部件文档：DOM 零新增 + 行为�
     expect(partsModeAttrs, '旧路径行不得带任何部件模式数据位').toEqual({
       rowKey: false, selected: false, unresolved: false, anchor: false, notice: false,
     })
+    expect(s.legacyToolbar, '无部件旧文件 ⇒ 视图切换工具条不渲染（DOM 零新增）').toBe(false)
+    expect(s.rows.every((r) => !isItemRow(r)), '无部件 ⇒ 无物品行（行无 data-stats-row-key）').toBe(true)
     expect(s.itemless).toBeNull()
     expect(s.notice).toBeNull()
     // 旧路径行：无 data 属性（DOM 零新增的直接证据），行集 = 旧口径

@@ -74,6 +74,7 @@ import {
   clearWikiHover,
   gotoWikiPreviewWithScene,
   injectHoverAtCellLocal,
+  readLegacyStatsUiAbsent,
   readStatsSidebarSettled,
   readTooltipText,
   readWikiHover,
@@ -125,6 +126,16 @@ function familyOfLocalId(localId: string): string {
 /** oracle 格（有部件者）→ 该格的部件期望。 */
 function cellsWithParts(oracle: OracleDoc): OracleCell[] {
   return oracle.cells.filter((c) => (c.parts ?? []).length > 0)
+}
+
+/**
+ * 紧凑行形状（断言失败时 diff 可读）。
+ *
+ * B-4 收口：B-3（决策 C）后 `data-stats-row-kind` 属性不再渲染（左栏只有物品行一种），
+ * 故 `kind` 字段已从 `StatsRowObservation` 移除 —— 行种类判据 = 行上有无 `data-stats-row-key`。
+ */
+function compactRows(rows: StatsRowObservation[]): Array<{ key: string | null; qty: string }> {
+  return rows.map((r) => ({ key: r.key, qty: r.qty }))
 }
 
 /** 部件类型键 → 该键在文件里出现过的全部显示名（应唯一）。 */
@@ -425,9 +436,11 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
       'oracle expectedCounts 总件数 = 硬编码 61',
     ).toBe(EXPECTED_COUNTS_TOTAL)
 
-    // ── 默认视图 = 部件物品清单，行/计数与 oracle 精确一致 ──
+    // ── 默认视图 = 物品清单，行/计数与 oracle 精确一致 ──
     //    （B-3 决策 C 已移除"视图切换工具条 / 视图按钮 / 配置来源徽标 / provenance 面板"：
-    //     此处不再有它们的断言——读已移除的 UI 只会造出确定性坏断言。）
+    //     此处不再有它们的断言——读已移除的 UI 只会造出确定性坏断言；工具条的不存在
+    //     由下面的移除锁计数断言锁定。）
+    expect(s.legacyToolbar, 'B-3：已移除的视图切换工具条不渲染').toBe(false)
     const rowsByKey = new Map(s.rows.map((r) => [r.key!, r]))
     expect(s.rows.length, '统计行数 = oracle 条目数（无多行/少行）').toBe(ORACLE_FULL.expectedCounts.length)
     const mismatch: string[] = []
@@ -449,8 +462,8 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
     // ── 名称与图标键：名称取部件显示名（文件自带），图标键 = 物品身份键 ──
     const names = displayNamesByTypeKey(FULL)
     for (const r of s.rows) {
-      // 物品行带行键（旧文件宿主清单行无 `data-stats-row-key` ⇒ 行键为 null）
-      expect(r.key, '统计行必须是物品行（旧宿主清单行无行键）').not.toBeNull()
+      // 物品行带行键（B-3 后左栏只有物品行；旧文件宿主清单行无 `data-stats-row-key` ⇒ null）
+      expect(r.key, '统计行必须是物品行（带 data-stats-row-key）').not.toBeNull()
       expect(r.iconKey, `行 ${r.key} 图标键在位`).not.toBeNull()
       const wantNames = names.get(r.key!)
       expect(wantNames, `行 ${r.key} 在导出文件里有对应部件`).toBeTruthy()
@@ -466,11 +479,20 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
     //    硬断言放在 `parts-hover-stats.spec.ts`（fixture 内联构造 itemIndex，确定可判）。
     const unresolvedRows = s.rows.filter((r) => r.unresolved).length
 
+    // ── B-3 移除锁（契约 §9 兼容口径）：视图切换 / 来源徽标 / provenance 入口都不存在 ──
+    const legacyUi = await readLegacyStatsUiAbsent(page)
+    expect(legacyUi.present, '侧栏已挂载（前提；否则下面的 0 计数不构成证据）').toBe(true)
+    expect(legacyUi.counts, 'B-3 已移除 UI 的出现次数').toEqual({
+      toolbar: 0, viewButtons: 0, pill: 0,
+      provenancePanel: 0, provenanceFields: 0, resetLocal: 0, groupTitles: 0, rowKind: 0,
+    })
+
     fs.mkdirSync(SHOT_DIR, { recursive: true })
     await page.locator('.wb-wiki-embed .nei-sidebar').screenshot({ path: path.join(SHOT_DIR, 'real-export-stats.png') })
     console.log(
       `[P3.1-L2] 真实导出统计：${s.rows.length} 行与 oracle 精确一致（共 61 件）；` +
-        `无对应标记行 ${unresolvedRows}/${s.rows.length}（归档无 itemIndex 时全标记）；会话提示「${s.notice ?? '<无>'}」`,
+        `无对应标记行 ${unresolvedRows}/${s.rows.length}（归档无 itemIndex 时全标记）；会话提示「${s.notice ?? '<无>'}」；` +
+        `B-3 已移除 UI 计数 = ${JSON.stringify(legacyUi.counts)}`,
     )
   })
 })
@@ -488,17 +510,21 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
    * **修复后已翻转为正向锁**（本轮，见报告 findings F1/F2 的 `expectedAfterFix`）：
    *  - **F1**：`StructureDataParser` 已把**文档根级** `statsTemplate`/`statsOverride`/`partIconTextures`
    *    透传到 v2 根（与 structure 级的 `cellPartsGrid`/`partLists` 分层，见
-   *    `web/src/context/__tests__/structureDataRootFields.test.ts`）⇒ 渲染定义根带文档默认统计层
-   *    ⇒ 侧栏来源徽标 = **文档默认**（契约 §9 三级配置第 1 级）；
+   *    `web/src/context/__tests__/structureDataRootFields.test.ts`）⇒ 渲染定义根带该字段
+   *    （**值**与文件一致 = F1 的修复锁）；
+   *    ⚠ B-3（决策 C）后 `statsTemplate` 的**语义已作废**（统计栏不再有视图切换与三级配置）
+   *    ⇒ 原「侧栏来源徽标 = 文档默认」不再是可判定的生产形态，改由移除锁断言
+   *    （`readLegacyStatsUiAbsent`：徽标/工具条/provenance 入口计数恒为 0）。字段仍必须透传
+   *    —— 这正是契约 §9「旧文档携带 ⇒ 读取后静默忽略」的前提（要读得到，才谈得上忽略）；
    *  - **F2**：`EmbedViewport.vue` 已把该根字段传给 `BlockStatsSidebar` 的 `partIconTextures`
-   *    prop ⇒ `BlockIconCache#setPartIconTextureSource` 接通嵌入纹理通道 ⇒ 部件行图标槽
+   *    prop ⇒ `BlockIconCache#setPartIconTextureSource` 接通嵌入纹理通道 ⇒ 物品行图标槽
    *    渲染出真实图标（不再恒走宿主调色板回退/占位）。
    *
    * 断言口径（正向）：
    *  ① 文件侧文档根字段在位（ground truth）；
    *  ② 运行时**渲染定义根**两字段可得的**值**与文件一致（不是"有个键就算过"）；
-   *  ③ 运行时渲染定义根上两字段的**值**与文件一致（F1）；
-   *  ④ **有纹理来源的部件行**（`iconKey` ∈ `partIconTextures` 键集）图标槽必须有 canvas
+   *  ③ B-3 移除锁：视图切换/徽标/provenance 入口都不渲染（`statsTemplate` 静默忽略）；
+   *  ④ **有纹理来源的物品行**（`iconKey` ∈ `partIconTextures` 键集）图标槽必须有 canvas
    *     —— 这是 F2 接线的生产可观测结果（`helpers/parts/statsSidebar.ts#waitStatsRowIcons`）。
    *     `iconKey` 不在纹理表里的行（实测 = FMP 的 `#mat=` 类型键与 `partIconTextures` 的
    *     物品身份键 `#<mat>` 拼写差异）走回退链，**不判红但如实登记**为 finding（见下方 payload）。
@@ -529,11 +555,18 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
     //     存活与逐值一致仍在此正面锁定。）
     expect(obs.hasStatsTemplate, 'F1：真实导出经 StructureData 解析链后 statsTemplate 可得').toBe(true)
     expect(obs.statsTemplate, 'F1：定义根的 statsTemplate 与文件逐值一致').toEqual(FULL.statsTemplate)
+    // B-3（决策 C）后 statsTemplate 的**语义已作废**：字段仍透传（F1 正向锁在上一行），
+    // 但统计栏不再消费它 —— 生产形态 = 相关 UI 入口一个都不渲染（移除锁）。
+    const legacyUi = await readLegacyStatsUiAbsent(page)
+    expect(legacyUi.present, '侧栏已挂载（前提）').toBe(true)
+    expect(legacyUi.counts.pill, 'B-3：配置来源徽标不再渲染（statsTemplate 静默忽略）').toBe(0)
+    expect(legacyUi.counts.toolbar, 'B-3：视图切换工具条不再渲染').toBe(0)
 
     // ── F2：定义根带部件图标纹理表，且**已被侧栏消费**（行图标槽真的出图）──
     expect(obs.hasPartIconTextures, 'F2：真实导出经解析链后 partIconTextures 可得').toBe(true)
     expect(obs.partIconTextureKeys, 'F2：定义根纹理键数 = 文件键数').toBe(fileIconKeys.length)
 
+    // 「物品行」判据 = 行带 data-stats-row-key（B-3 后无 row-kind 属性，见 compactRows 注释）
     const partRows = s.rows.filter((r) => r.key !== null)
     expect(partRows.length, '统计侧栏渲染出物品行').toBeGreaterThan(0)
     const coveredRows = partRows.filter((r) => r.iconKey !== null && fileIconKeys.includes(r.iconKey))
@@ -598,6 +631,8 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
         unresolvedRows: s.rows.filter((r) => r.unresolved).length,
         notice: s.notice,
       },
+      /** B-3（决策 C）后 statsTemplate 语义作废：改为登记「相关 UI 入口都不渲染」的移除锁计数。 */
+      legacyStatsUiCounts: legacyUi.counts,
       statsRows: s.rows.length,
       /** F2 消费证据：有纹理来源的部件行 → 图标槽 canvas 就位情况（生产 DOM）。 */
       partRowIcons: {
@@ -622,6 +657,7 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
       `[P3.1-L2] F1/F2 修复锁：file.statsTemplate=${JSON.stringify(FULL.statsTemplate)} / ` +
         `file.partIconTextures=${fileIconKeys.length} 键；definition.hasStatsTemplate=${obs.hasStatsTemplate} / ` +
         `definition.partIconTextures=${obs.hasPartIconTextures}；` +
+        `B-3 移除锁计数=${JSON.stringify(legacyUi.counts)}；` +
         `图标 canvas ${payload.partRowIcons.renderedCanvas}/${coveredRows.length} 行（纹理表覆盖）；` +
         `无纹理来源 ${uncoveredKeys.length} 行：${uncoveredKeys.join(', ') || '<无>'}`,
     )
@@ -728,11 +764,12 @@ test.describe('P3.1 · 退化导出（degraded_all）：档位标记 + 统计行
     expect(ORACLE_DEGRADED_ALL.countsScope, '退化 oracle 口径 = untransformed-cells-only').toBe(
       'untransformed-cells-only',
     )
+    expect(s.legacyToolbar, 'B-3：已移除的视图切换工具条不渲染（退化导出同为含部件文档）').toBe(false)
     expect(s.rows.length, '退化档统计行非空（推断档部件进入清单）').toBeGreaterThan(0)
     // 行集 = 物品行（旧宿主清单行无行键）；图标键 = 物品身份键
     // （工具条/视图按钮/徽标已随 B-3 决策 C 移除 ⇒ 不再有它们的断言）
     for (const r of s.rows) {
-      expect(r.key, `退化档行 ${r.key} 是物品行（有行键）`).not.toBeNull()
+      expect(r.key, `退化档行 ${r.key} 是物品行（带 data-stats-row-key）`).not.toBeNull()
       expect(r.iconKey, `退化档行 ${r.key} 图标键 = 物品身份键`).toBe(r.key)
     }
 
