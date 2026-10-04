@@ -1,5 +1,6 @@
 package com.lightning.mod.client.meshcapture.parts;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -40,8 +41,13 @@ import cpw.mods.fml.relauncher.SideOnly;
  * <li>部件图标：{@code partIconTextures} = {@code iconKey → base64 PNG}（iconKey =
  * {@link PartItem#iconKey()} 物品身份键，与 web P2.3/P2.4 统计栏通道 1 纹理源约定一致；
  * <strong>契约留白登记</strong>：部件图标落盘字段名契约未定，本类拍板此形状并上报）；</li>
+ * <li>物品索引表（契约 §2.2）：本类只负责<strong>逐格采集贡献</strong>（
+ * {@link ItemIndexIntegrator.Sink}：层①部件主物品 + 层②宿主格候选，含说明行与归属），
+ * 文档根 {@code itemIndex} 的按键去重/跨帧合并/落盘由 {@code MeshCaptureService} 收尾段调用
+ * {@link ItemIndexIntegrator#buildDocumentIndex(java.util.List)} 完成；</li>
  * <li><strong>字节干净硬约束</strong>：无部件 ⇒ {@code cellPartsGrid}/{@code partLists}/
- * {@code statsTemplate}/{@code partIconTextures} 四字段完全不产出，其余字节零改动。</li>
+ * {@code statsTemplate}/{@code partIconTextures}/{@code itemIndex} 五字段完全不产出，
+ * {@code blockPalette} 条目亦不附 {@code hostItem}，其余字节零改动。</li>
  * </ul>
  */
 @SideOnly(Side.CLIENT)
@@ -70,7 +76,7 @@ public final class PartExportIntegrator {
 
     // ------------------------------------------------------------------ 结构级汇聚
 
-    /** 一个结构的部件落盘汇聚器（cellPartsGrid + partLists 池 + 唯一物品身份收集）。 */
+    /** 一个结构的部件落盘汇聚器（cellPartsGrid + partLists 池 + 唯一物品身份收集 + 物品索引贡献）。 */
     public static final class StructureSink {
 
         private final int[][][] grid;
@@ -79,9 +85,12 @@ public final class PartExportIntegrator {
         /** iconKey → PartItem（首次出现），供文档级图标嵌入；LinkedHashMap 保序 = 幂等。 */
         private final Map<String, PartItem> uniqueItems = new LinkedHashMap<String, PartItem>();
         private final Set<String> providerFailures = new LinkedHashSet<String>();
+        /** 物品索引表（契约 §2.2）本结构的贡献；文档级按键去重/跨帧合并在 MeshCaptureService 收尾。 */
+        private final ItemIndexIntegrator.Sink itemIndex;
         private int cellsWithParts;
 
-        private StructureSink(int sizeZ, int sizeRow, int sizeCol) {
+        private StructureSink(int frameIndex, int sizeZ, int sizeRow, int sizeCol) {
+            itemIndex = new ItemIndexIntegrator.Sink(frameIndex);
             grid = new int[sizeZ][sizeRow][sizeCol];
             for (int zi = 0; zi < sizeZ; zi++) {
                 for (int ri = 0; ri < sizeRow; ri++) {
@@ -95,7 +104,8 @@ public final class PartExportIntegrator {
         /**
          * 逐格入口（{@code MeshCaptureService} 捕获循环内一次性调用）：
          * 满方块/零产出格不动（grid 保持 -1）；非满有产出格 ⇒ 补说明链回退、收集物品身份、
-         * 签名去重入池、写 grid 下标。任何异常向上抛由调用方容错（流水线本身绝不抛出）。
+         * 采集物品索引贡献（契约 §2.2 层①②）、签名去重入池、写 grid 下标。任何异常向上抛由调用方
+         * 容错（流水线本身绝不抛出）。
          */
         public void addCell(int zi, int ri, int ci, PartCaptureResult r, List<String> hostTooltip, Block hostBlock,
             int hostMeta) {
@@ -106,8 +116,14 @@ public final class PartExportIntegrator {
             if (r.hostFullCube || r.parts.isEmpty()) {
                 return;
             }
+            // 层② 宿主级物品身份（契约 §2.2）：该格宿主方块的自身物品身份 → 该格归属候选
+            itemIndex.addHostCell(zi, ri, ci, hostBlock, hostMeta);
             for (PartRecord p : r.parts) {
+                // 物品级说明（层①）取宿主回退之前的物品 tooltip（§8 第一优先级），
+                // 与 PartRecord.tooltip 同源生成、各自保留（不做口径合并）
+                List<String> itemTooltipBeforeChain = new ArrayList<String>(p.tooltip);
                 applyTooltipChain(p, hostTooltip, hostBlock, hostMeta);
+                itemIndex.addPart(zi, ri, ci, p, itemTooltipBeforeChain);
                 for (PartItem it : p.items) {
                     if (it != null && !uniqueItems.containsKey(it.iconKey())) {
                         uniqueItems.put(it.iconKey(), it);
@@ -135,6 +151,11 @@ public final class PartExportIntegrator {
 
         public Map<String, PartItem> uniquePartItems() {
             return uniqueItems;
+        }
+
+        /** 物品索引表（契约 §2.2）本结构的贡献（文档级合并由收尾段完成）。 */
+        public ItemIndexIntegrator.Sink itemIndexSink() {
+            return itemIndex;
         }
 
         /** 有部件 ⇒ 写 {@code cellPartsGrid} + {@code partLists}；无部件 ⇒ 两字段完全不产出（字节干净）。 */
@@ -213,8 +234,17 @@ public final class PartExportIntegrator {
         }
     }
 
+    /**
+     * @param frameIndex 该结构所属帧下标（单文件文档 = 0；World 文档 = 帧 index）——
+     *                   物品索引表归属条目按帧定位（契约 §2.2 跨帧不重复）
+     */
+    public static StructureSink newStructureSink(int frameIndex, int sizeZ, int sizeRow, int sizeCol) {
+        return new StructureSink(frameIndex, sizeZ, sizeRow, sizeCol);
+    }
+
+    /** 单文件文档便捷入口（帧下标 = 0）。 */
     public static StructureSink newStructureSink(int sizeZ, int sizeRow, int sizeCol) {
-        return new StructureSink(sizeZ, sizeRow, sizeCol);
+        return new StructureSink(0, sizeZ, sizeRow, sizeCol);
     }
 
     // ------------------------------------------------------------------ 文档级收尾
