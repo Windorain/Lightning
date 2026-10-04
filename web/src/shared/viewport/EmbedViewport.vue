@@ -18,7 +18,7 @@ import { bindMultiblockMeshSync, useMultiblockChannels } from '@/shared/viewport
 import { availableDockTabs, defaultDockTab, resolveDockTab, type ViewportDockTab } from '@/shared/viewport/dockTabs'
 import { blockRefFromViewportHover } from '@/runtime/hover'
 import { createEmbedSidebarOutlineMasks } from '@/runtime/embedSidebarOutline'
-import { getBlockGeometry, gridCenterWorld } from '@/context/queries'
+import { getBlockGeometry, getPartMaskGeometry, gridCenterWorld } from '@/context/queries'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import { createHoverHandler } from '@/handlers/hoverHandler'
@@ -255,6 +255,8 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
       highlightOnHover: computed(() => prefs.highlightOnHover),
       getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
       gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
+      // B-1：格 + 部件定位 → 该部件 mask（Wiki 预览的悬停描边走这里；独立 Embed 无部件悬停态）
+      getPartMaskGeometry: (ref) => getPartMaskGeometry(ctx, ref),
       extraMaskMeshes: sidebarExtraMasks,
     },
     documentKeydown: false,

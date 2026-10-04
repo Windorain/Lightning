@@ -14,6 +14,8 @@ export interface SelectionOutlineBind {
   highlightOnHover: Ref<boolean>
   getBlockGeometry: (pos: { x: number; y: number; z: number }) => import('@/render/schema/types').BakedQuad[] | null
   gridCenterWorld: (pos: { x: number; y: number; z: number }) => { x: number; y: number; z: number } | null
+  /** B-1 部件级 mask 通道（缺省 ⇒ 整格几何，既有行为） */
+  getPartMaskGeometry?: import('@/render/mesh/selectionHighlightProvider').MaskGeometrySource
   extraMaskMeshes?: Ref<THREE.Mesh[]> | import('vue').ShallowRef<THREE.Mesh[]>
 }
 

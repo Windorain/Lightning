@@ -25,6 +25,7 @@ import {
   type BlockLocalPoint,
 } from '@/pure/partHit'
 import type { PartRecord } from '@/pure/partTypes'
+import { resolvePartMaskGeometry, type PartMaskGeometry } from '@/pure/partMask'
 
 function readAnnotations(ctx: Context): Annotation[] {
   const doc = ctx.getDoc().value
@@ -290,4 +291,36 @@ export function getBlockGeometry(
   } catch {
     return null
   }
+}
+
+/** 获取方块位置的部件列表（契约 §3；无部件 ⇒ null，只读视图勿改） */
+export function getPartsAt(
+  ctx: Context,
+  pos: { x: number; y: number; z: number },
+): readonly PartRecord[] | null {
+  const doc = ctx.getDoc().value
+  if (!doc) return null
+  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  if (!rf?.grid) return null
+  return rf.grid.partsAt(pos)
+}
+
+/**
+ * 「格 + 部件定位 → 该部件 mask」通道（B-1）：hover 描边与（B-5 的）点选高亮**共用**此入口。
+ *
+ * - `ref.partLocalId === undefined` ⇒ 整格几何（既有行为：无部件格、框选/按类型选择等）；
+ * - 给定 `partLocalId` 且该格有部件 ⇒ 该部件盒 union（贴面盒退化为其所辖 quads 的 AABB）；
+ * - 无几何 ⇒ null（调用方退化为格中心 1×1×1 盒，与既有实现一致）。
+ *
+ * 判定规则与理由见 `pure/partMask.ts` 文件头（含「按部件盒 vs 按 quads 归属切分」对比结论）。
+ */
+export function getPartMaskGeometry(
+  ctx: Context,
+  ref: BlockRef,
+): PartMaskGeometry | null {
+  return resolvePartMaskGeometry(
+    getPartsAt(ctx, ref.pos),
+    getBlockGeometry(ctx, ref.pos),
+    ref.partLocalId,
+  )
 }
