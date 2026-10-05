@@ -811,11 +811,12 @@ try {
             $png = Join-Path $shotsDir ("{0}.png" -f $cam.name)
             $meta = Join-Path $shotsDir ("{0}.meta.json" -f $cam.name)
 
-            if (-not (Test-Path $png -PathType Leaf)) { $pngProblems += "$($cam.name).png 缺失" }
-            elseif ((Get-Item $png).Length -le 0) { $pngProblems += "$($cam.name).png 为 0 字节" }
+            if (-not (Test-Path $png -PathType Leaf)) { $pngProblems += "$($cam.name).png 缺失"; $sizeProblems += "$($cam.name).png 缺失（无法实读尺寸）" }
+            elseif ((Get-Item $png).Length -le 0) { $pngProblems += "$($cam.name).png 为 0 字节"; $sizeProblems += "$($cam.name).png 为 0 字节" }
 
             if (-not (Test-Path $meta -PathType Leaf)) {
                 $metaProblems += "$($cam.name).meta.json 缺失"
+                if ($cam.tiled) { $tileProblems += "$($cam.name).meta.json 缺失（无法核验片数）"; $nameProblems += "$($cam.name).meta.json 缺失（无法核验命名）" }
             } else {
                 $m = Read-JsonFile $meta
                 if ($null -eq $m) { $metaProblems += "$($cam.name).meta.json 不是合法 JSON" }
