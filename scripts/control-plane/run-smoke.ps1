@@ -43,6 +43,9 @@ param(
     [switch]$KeepClient,
     # 后备通道：用 JVM 属性 -Dsde.controlPlane=on 启用（会绕过 lightning.cfg 通道，仅排障用）
     [switch]$EnableViaJvmProperty,
+    # 用 runClient25（lwjgl3ify 现代 JVM，启动更快）替代 runClientSdePipeline；
+    # fml.queryResult=confirm 改经 JAVA_TOOL_OPTIONS 注入（runClientSdePipeline 的 task 注入只覆盖裸 runClient）
+    [switch]$UseModernJdk,
     # server.json 等待上限（分钟）
     [int]$ClientReadyTimeoutMin = 5,
     # 单次 case.run 的总超时（毫秒），默认 10 min
@@ -384,19 +387,23 @@ try {
             if (Test-Path $f) { Move-Item -Force $f (Join-Path $staleDir (Split-Path $f -Leaf)); Write-Warn2 "陈旧发现文件已移入归档: $(Split-Path $f -Leaf)" }
         }
 
-        Write-Step "启动客户端（gradlew runClientSdePipeline --console=plain，日志 $logDir\gradle-runClient.log）"
+        $runTask = if ($UseModernJdk) { 'runClient25' } else { 'runClientSdePipeline' }
+        Write-Step "启动客户端（gradlew $runTask --console=plain，日志 $logDir\gradle-runClient.log）"
+        $jvmOpts = @()
+        if ($UseModernJdk) { $jvmOpts += '-Dfml.queryResult=confirm' }
         if ($EnableViaJvmProperty) {
-            $env:JAVA_TOOL_OPTIONS = '-Dsde.controlPlane=on'
-            Write-Warn2 "已设 JAVA_TOOL_OPTIONS=-Dsde.controlPlane=on（绕过 lightning.cfg 通道，仅排障用）"
+            $jvmOpts += '-Dsde.controlPlane=on'
+            Write-Warn2 "已设 JAVA_TOOL_OPTIONS 含 -Dsde.controlPlane=on（绕过 lightning.cfg 通道，仅排障用）"
         }
+        if ($jvmOpts.Count -gt 0) { $env:JAVA_TOOL_OPTIONS = ($jvmOpts -join ' ') }
         try {
             $clientProc = Start-Process -FilePath $gradlew `
-                -ArgumentList @('runClientSdePipeline', '--console=plain') `
+                -ArgumentList @($runTask, '--console=plain') `
                 -WorkingDirectory $modDir -NoNewWindow -PassThru `
                 -RedirectStandardOutput (Join-Path $logDir 'gradle-runClient.log') `
                 -RedirectStandardError (Join-Path $logDir 'gradle-runClient.log.err')
         } finally {
-            if ($EnableViaJvmProperty) { Remove-Item Env:\JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue }
+            if ($jvmOpts.Count -gt 0) { Remove-Item Env:\JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue }
         }
         Write-Ok "客户端进程 pid=$($clientProc.Id)"
 
