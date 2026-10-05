@@ -381,7 +381,8 @@ public final class ShotExecutor {
             long t = in.capture.worldTime();
             try {
                 net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
-                if (server != null && server.worldServers != null && server.worldServers.length > 0
+                if (server != null && server.worldServers != null
+                    && server.worldServers.length > 0
                     && server.worldServers[0] != null) {
                     server.worldServers[0].setWorldTime(t);
                 }
