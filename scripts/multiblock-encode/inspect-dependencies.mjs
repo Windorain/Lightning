@@ -10,7 +10,7 @@
  *   - `tier{...}` / `runstate×chan`：组合依赖 → 按帧引用的多条规则。
  *
  * 新机器接入（T1.5 全量导出）时先跑它：若某位置落在"无法表达"的分类里，
- * 那台机器就需要 guard 消歧规则（见 `docs/plan/probe-factorized-encoding.md` §8.4）。
+ * 那台机器就需要 guard 消歧规则（见历史因子化编码报告 §8.4，原文见 issue #51 / git 历史）。
  */
 import fs from 'node:fs'
 

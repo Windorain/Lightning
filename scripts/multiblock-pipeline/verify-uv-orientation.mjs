@@ -2,7 +2,7 @@
 /**
  * 纹理朝向门禁（BUG: 多方块产物覆盖层图标上下颠倒 / UV 不正确）。
  *
- * ## 判据（与 docs/plan/fix-texture-uv.md 的根因一致，来源 = GT5U 5.09.52.283 源码）
+ * ## 判据（与历史 UV 修复报告的根因一致，来源 = GT5U 5.09.52.283 源码；原文见 issue #51 / git 历史）
  *
  * GT 的图标覆盖层分两类：
  *  - **基础贴图**（`TextureFactory.builder().addIcon(icon).build()`，`useExtFacing=false`）→

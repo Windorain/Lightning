@@ -162,7 +162,7 @@ public final class MultiblockDatasetCodec {
                         + "本文档按契约写 min=1 / max="
                         + domainMax
                         + "，二者满足 阶数 = max − min + 1。");
-                note.addProperty("source", "probe-variant-capture.md §5.3 / format-multiblock-doc.md §4.4");
+                note.addProperty("source", "docs/contracts/format-multiblock-doc.md §4.4（变体捕获口径的历史记录见 issue #51）");
                 mi.extraNotes.add(note);
             }
         }

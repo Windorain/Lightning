@@ -62,7 +62,9 @@ import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
  * <li>{@code geometrySignature} 由「位置 → 条目签名」聚合，与捕获模式无关，可跨模式/跨运行比对。</li>
  * </ul>
  * 状态键 = {@code registryId:meta | MTE 类名 | 激活位} —— 缺了 MTE 类名会把「同一 blockmachines:0 的静音仓/
- * 维护仓/能量仓」误并成一条（实测它们分别是 7/8/9 个四边形）。
+ * 维护仓/能量仓」误并成一条（实测它们分别是 7/8/9 个四边形）。该 {@code registryId:meta} 在并集调色板里实测有
+ * <b>7 条</b>不同几何（不同舱口各一条，按内容签名确实是不同方块状态），故只按 {@code registryId:meta} 合并会串味 ——
+ * <b>MTE 类名是状态键的必要组成部分，不得省略</b>。
  */
 @SideOnly(Side.CLIENT)
 public final class VariantGeometryBakery {

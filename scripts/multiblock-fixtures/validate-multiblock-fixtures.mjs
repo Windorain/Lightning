@@ -71,7 +71,7 @@ function validateChannelList(ch, chk) {
     if (ids.has(c.id)) {
       chk.fail(
         'channels/id-unique-per-multiblock',
-        `同一多方块内 id 重复: ${c.id}（probe-channels.md §5.2 断言：需人工处理，导出应失败）`,
+        `同一多方块内 id 重复: ${c.id}（契约 docs/contracts/format-multiblock-doc.md §4.2 的导出期断言：需人工处理，导出应失败）`,
       )
     } else ids.add(c.id)
     if (c.enum !== null && c.enum !== undefined) {

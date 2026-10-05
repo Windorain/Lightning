@@ -32,7 +32,7 @@ import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
  * 然后断言 {@code base.isActive()}。活动位由 {@code setActive(mMaxProgresstime > 0)} 派生。
  * <b>这三行只对 {@link MTEMultiBlockBase} 成立</b>：它把 {@code mProgresstime}/{@code mMaxProgresstime}
  * 作为 public 字段暴露；其它基类（如 {@code MetaTileEntity}）的公开面里没有进度字段可写，
- * 本类**不用反射**（避免在 {@code decision-deps-route.md} 的受控反射内核之外新增断点）。</li>
+ * 本类**不用反射**（避免在受控反射内核之外新增断点）。</li>
  * <li><b>逃生门</b>：仅当第 3 步不适用或拿不到活动位且调用方允许时，才用
  * {@code IGregTechTileEntity#setActive(boolean)}（{@code IMachineProgress} 的公开方法）兜底，
  * 并在 {@link Drive#activeMechanism} 与变体产物里显式标注<strong>为什么</strong>走了这条路。</li>

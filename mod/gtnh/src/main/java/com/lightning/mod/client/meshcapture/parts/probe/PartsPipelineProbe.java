@@ -34,7 +34,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  * 恒抛）后逐格跑流水线——期望：流程照常完成、档 2 结果与 expC 一致、每格 providerFailures 有记录
  * （容错非摆设），事后注销；</li>
  * <li><strong>expC 正常注册表（P1.2 基准）</strong>：逐格核对盒数值 / typeKey / localId / 来源四元组
- * 与 {@code docs/plan/probe-single-box.md} §2.3 实测基准一致；火把 ×2 ⇒ 档 2 不产出（§7.3 退化），
+ * 与历史单盒探针 §2.3 的实测基准一致；火把 ×2 ⇒ 档 2 不产出（§7.3 退化），
  * 落档 3 几何推断（P1.6 已实现 ⇒ inferred 部件，盒数值容差断言由 PartsInferredTier3Probe 案 a 承担）。</li>
  * </ol>
  *

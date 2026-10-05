@@ -2,8 +2,8 @@
 /**
  * T3.2 —— 体积增长曲线的**机器判定**（需求 C 的机器证明）。
  *
- * 依据（唯一判据真源）：`docs/plan/format-multiblock-doc.md` §9.2/§9.3/§9.4（判定式 R1/R2/R3、λ=1.35、
- * R²≥0.95、b≤2048 B/组合、常数主导分支）+ 计划 §10「留白 #9 已定稿并对 §T3.2 建议式作出修正」。
+ * 依据（唯一判据真源）：`docs/contracts/format-multiblock-doc.md` §9.2/§9.3/§9.4（判定式 R1/R2/R3、λ=1.35、
+ * R²≥0.95、b≤2048 B/组合、常数主导分支）。
  *
  * ## 两条独立数据线（都必须跑，互为交叉验证）
  *  1. **编码器对照组（真实数据）**：`MultiblockFactorizeTool --control` 对**本次捕获的数据集**做
@@ -31,7 +31,7 @@
  *       [--pipeline-result <pipeline-result.json>] [--label <run-label>]
  *
  * 产物（全部落 `<out>/`）：`volume-curve.json`（机器可读，唯一真源）、`volume-curve.svg`（曲线图）、
- * `volume-curve.md`（人读表格；`docs/plan/volume-profile-result.md` 的数据来源）。
+ * `volume-curve.md`（人读表格；`scripts/acceptance/.out/volume/volume-profile-result.md` 的数据来源）。
  */
 
 import fs from 'node:fs'
@@ -757,7 +757,7 @@ function measureProducts(dir, profileByLabel) {
 function mdFromReport(report) {  const L = []
   L.push('# T3.2 体积增长曲线（机器判定）')
   L.push('')
-  L.push(`> 判据真源：\`docs/plan/format-multiblock-doc.md\` §9.2/§9.3/§9.4；λ=${CRITERION.safetyFactor}、R²≥${CRITERION.r2Min}、b≤${CRITERION.maxMarginalBytesPerVariant} B/组合、常数项下限 ${CRITERION.floorBytes} B。`)
+  L.push(`> 判据真源：\`docs/contracts/format-multiblock-doc.md\` §9.2/§9.3/§9.4；λ=${CRITERION.safetyFactor}、R²≥${CRITERION.r2Min}、b≤${CRITERION.maxMarginalBytesPerVariant} B/组合、常数项下限 ${CRITERION.floorBytes} B。`)
   L.push(`> 生成时间：${report.generatedAt}；输入：\`${report.input.encodedDir}\``)
   L.push('')
   L.push(`## 总判定：**${report.verdict.status}**`)

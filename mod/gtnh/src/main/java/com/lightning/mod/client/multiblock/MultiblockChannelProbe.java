@@ -597,6 +597,10 @@ public final class MultiblockChannelProbe {
 
             Map<String, List<IStructureElement<IConstructable>>> byId = new LinkedHashMap<String, List<IStructureElement<IConstructable>>>();
             List<IStructureElement<IConstructable>> unknownElements = new ArrayList<IStructureElement<IConstructable>>();
+            // 本环境实测：221 台一条都没命中（enumerated 通道分布 = 替换型 89 / 尺寸型 10 / 舱口布局型 0），
+            // 即下面的 sawHatch 分支在当前数据集上是**死路径**——不是逻辑错，而是没有机器走到
+            // HatchElementBuilder 那个元素。离线复核手段：读 multiblock_scan/run-NNNN/enumeration.json 的
+            // elementClasses（逐台元素类名清单）筛 HatchElementBuilder，不必再跑一遍客户端。
             boolean sawHatch = false;
 
             for (IStructureElement<IConstructable> e : distinct) {
@@ -632,7 +636,10 @@ public final class MultiblockChannelProbe {
                 detectValueDependentElement(m, e, unknownSignatures);
             }
 
-            // 尺寸型通道从不绑定符号（T0.4 §3.5），只能按「机器 → 通道」的静态事实表补登记
+            // 尺寸型通道从不绑定符号（T0.4 §3.5），只能按「机器 → 通道」的静态事实表补登记。
+            // ★ 判据是「**是否读 `STRUCTURE_HEIGHT`/`STRUCTURE_LENGTH` 通道**」，不是「结构尺寸是否可变」：
+            // `MTEYottaFluidTank` 的 1..15 层是**隐式 while 循环**（`MTEYottaFluidTank.java:276-279`），
+            // 没有尺寸通道。按「尺寸可变」判会误报出一堆不存在的尺寸通道。
             String dimChannel = MACHINE_DIMENSION_CHANNEL.get(m.simpleName);
             if (dimChannel != null) {
                 m.channels.add(dimensionChannelProbe(m, dimChannel));
@@ -835,6 +842,12 @@ public final class MultiblockChannelProbe {
      * 仅靠「上界吻合」会张冠李戴（实测把 {@code item_pipe} 认成 {@code chassis}）。因此这里只产出
      * 「元素类名 + 观测上界 + 观测序列」的原始事实，落进 {@code unknownValueDependentElements}，
      * 由人工/T1.3 决定是否需要补映射；唯一例外是元素自己<b>直接持有</b>可读的通道 id（见 {@link #capturedChannelId}）。
+     * <p>
+     * <b>实测规模与处置（221 台全量扫描）</b>：这类记录共 <b>119 条 / 74 台</b>。它们<b>不需要</b>转成通道——
+     * 绝大多数是「同一通道的未包裹副本」：{@code StructureUtility$7} ×93 与 {@code GTStructureUtility$7} ×15
+     * （= {@code ofBlocksTiered} / {@code GTStructureUtility#ofCoil} 的未包裹副本，该通道已有 {@code withChannel}
+     * 副本被正确登记），另有 {@code MTELapotronicSuperCapacitor$CellElement} 等自定义元素（其通道同样已登记）。
+     * 保留这批记录的价值是「本机存在读通道的自定义元素」的直接证据，以及作用域相交机（LSC）的抽查依据。
      */
     private static void detectValueDependentElement(MachineProbe m, IStructureElement<IConstructable> e,
         Set<String> seenSignatures) {

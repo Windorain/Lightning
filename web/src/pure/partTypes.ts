@@ -1,7 +1,7 @@
 /**
  * pure/partTypes.ts — 非满方块（部件）数据模型的纯类型与纯函数。
  *
- * 契约：`docs/plan/format-parts-contract.md`（§2 文件表达、§3 PartRecord schema、§6 盒坐标系）。
+ * 契约：`docs/contracts/format-parts-contract.md`（§2 文件表达、§3 PartRecord schema、§6 盒坐标系）。
  * No side effects: no Vue refs, no DOM, no I/O, no mutation of arguments.
  */
 
@@ -43,8 +43,8 @@ export interface PartItem {
   display?: string
 }
 
-/** 来源族（契约 §4 localId 命名空间即由此派生） */
-export type PartFamily = 'ae2' | 'enderio' | 'fmp' | 'generic' | 'inferred'
+/** 来源族（契约 §4 localId 命名空间即由此派生；落盘值恒为 `eio` —— 旧写法 `enderio` 已按契约 §3/§10.2 废弃） */
+export type PartFamily = 'ae2' | 'eio' | 'fmp' | 'generic' | 'inferred'
 
 /** 盒来源标记（契约 §6.4） */
 export type PartBoxProvenance =

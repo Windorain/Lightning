@@ -151,7 +151,7 @@ public final class MultiblockFactorizeTool {
     }
 
     // -----------------------------------------------------------------------
-    // 对照组（计划 T1.4 自检：取值数 +1 / 通道数 +1）
+    // 对照组（编码端自检：取值数 +1 / 通道数 +1）
     // -----------------------------------------------------------------------
 
     private static void runControls(File machinesDir) throws Exception {

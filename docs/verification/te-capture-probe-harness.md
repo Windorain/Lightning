@@ -92,7 +92,7 @@ cd mod\gtnh
 （`GTNHLib:0.9.36 -> 0.9.62`），与编译基线（`dependencies.gradle:26`）一致 —— 这就是「版本没有顶破基线」的可执行判据；
 ② 零命中（`compileClasspath` 共 85 行）。
 「版本取 `runtimeClasspath` 的实际解析结果以保证编译期/运行期锁步」是本项目既有惯例，
-出处 `dependencies.gradle:25`、`docs/plan/decision-deps-route.md:221`。
+出处 `dependencies.gradle:25`（依赖路线的历史决策记录见 issue #51 / git 历史）。
 
 ---
 
@@ -303,7 +303,7 @@ issue #12 的崩溃发生在「导出结束、正常渲染恢复」**之后 1~2 
    `sde_lp_te_probe_exit.json`（含 `requestedExitCode` / `uncaughtThrowable` / `dwellLeftAtExit`，`:220-247`），
    供外层脚本对账「探针自己请求的退出码」与「进程实际退出码」。
 5. **退出路径**：`code == 0` 走 `mc.shutdown()`，非 0 走 `FMLCommonHandler.instance().exitJava(code, false)`
-   （**不要**用 `Runtime.halt`：FML 的安全管理器会拦 `exitVM`，见 `docs/plan/probe-export-pipeline.md` §6.3），
+   （**不要**用 `Runtime.halt`：FML 的安全管理器会拦 `exitVM`，见历史导出管线报告 §6.3），
    两条路都挂 60 s 安全网线程 `exitJava(code, true)`（`:1436-1462`）。
 
 ### 4.6 移植到其它 mod / 其它断言的最小清单
@@ -398,7 +398,7 @@ pwsh -File scripts/issue-12/run-lp-te-probe.ps1 -DryRun
 | 1 | `mod/gtnh/gradlew` 的 wrapper jar **未入库** | `gradlew` 不可用（`gradle/wrapper/` 下只有 `.properties`） | 用同版本分发包：`C:\gradle-cache\wrapper\dists\gradle-9.2.1-bin\2t0n5ozlw9xmuyvbp7dnzaxug\gradle-9.2.1\bin\gradle.bat` | 脚本 `:48`、`:72-73`；裁决 A6 / 开放项 O1（`temp/issue-12/adjudications.md:14`、`:20`）。根因：根 `.gitignore:12` 的 `!gradle/wrapper/gradle-wrapper.jar` 只反选仓库根，`mod/gtnh/...` 仍被 `*.jar` 吃掉 |
 | 2 | `web/node_modules` 未装 | `:syncWeb` 失败（它要跑 `npm run build:workbench`），而 `processResources dependsOn syncWeb` ⇒ 任务图直接失败 | **二者都要排除**：`-x syncWeb -x processResources`（探针不依赖 web 产物）；或先 `npm ci` | `mod/gtnh/build.gradle.kts:19-24`、`:47-49`；脚本 `:146-147`、`:154`；开放项 O2 |
 | 3 | `runClient` 是**独占资源** | 同树两个客户端抢 Gradle 锁 / 端口 / 世界存档 | 起客户端前做进程检查并**直接判退出 4**；判据必须限定「本工作树」——**不能**用 `-Dgradlestart.bouncerClient`（那是 gtnhconvention 注入给**所有** GTNH 客户端的，实测会误报其它项目的客户端） | 脚本 `:103-114`；根 `AGENTS.md`「独占串行」 |
-| 4 | CoFH MCP conf 缺失 | 启动阶段**静默挂住**且日志无输出（`ObfMapping$MCPRemapper.confDirectoryGuess → JFileChooser`） | 启动**前**做硬前置：扫 `%USERPROFILE%\.gradle` / `%GRADLE_USER_HOME%` / `C:\gradle-cache` 下的 `caches/minecraft/net/minecraftforge/forge/*/unpacked/conf`，判据不是「目录存在」而是**里面真有 `*.srg`** | 脚本 `:75-90`；`docs/plan/probe-export-pipeline.md` §6.1 |
+| 4 | CoFH MCP conf 缺失 | 启动阶段**静默挂住**且日志无输出（`ObfMapping$MCPRemapper.confDirectoryGuess → JFileChooser`） | 启动**前**做硬前置：扫 `%USERPROFILE%\.gradle` / `%GRADLE_USER_HOME%` / `C:\gradle-cache` 下的 `caches/minecraft/net/minecraftforge/forge/*/unpacked/conf`，判据不是「目录存在」而是**里面真有 `*.srg`** | 脚本 `:75-90`；历史导出管线报告 §6.1（issue #51 / git 历史） |
 | 5 | 陈旧结果未清 | 「读不到本轮结果」会退化成**读到上一轮结果** = 静默通过 | 起客户端前删本轮结果与 `sde_*` 陈旧产物 | 脚本 `:92-101` |
 | 6 | 想改模式却去改 `build.gradle.kts` | 改构建文件影响面大，且与「一进程一模式」冲突 | 经 `JAVA_TOOL_OPTIONS` 注入 JVM 属性；跑完复原 | 脚本 `:148-159`、`:174` |
 

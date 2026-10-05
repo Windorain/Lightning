@@ -1,8 +1,9 @@
 /**
  * pure/partStats.ts — P2.3 统计引擎（物品粒度 + 三级配置 + 三视图）。
  *
- * 契约：`docs/plan/format-parts-contract.md`（§5 类型键与物品身份、§9 统计默认值与 StatsEntry）。
- * 计划：`docs/plan/non-full-cube-parts-plan.md` §4 P2.3。
+ * 契约：`docs/contracts/format-parts-contract.md`（§5 类型键与物品身份；**§9 已于部件轮决策 C 废弃**——
+ * 取代口径见 §2.2 物品索引表与 §9 的兼容口径：旧 `statsTemplate`/`statsOverride` 读取后静默忽略）。
+ * 过程性计划已按 #51 裁决删除；判据真源 = `docs/contracts/format-parts-contract.md`。
  *
  * 纯函数、零框架依赖：输入 = 部件数据 + 宿主计数 + 规则，输出 = 清单行；UI 只负责呈现。
  * No side effects: no Vue refs, no DOM, no I/O, no mutation of arguments.

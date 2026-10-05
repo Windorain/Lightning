@@ -138,6 +138,16 @@ public final class MaterialKeyResolver {
 
     /**
      * 由四边形在图集中的 UV 质心解析 {@code materialKey}，将顶点 UV 重映射为 sprite 局部 [0,1]，并写回 {@code q}。
+     * <p>
+     * <b>调用纪律：每个四边形只能调用它一次。</b>本方法会<b>就地把顶点 UV 从图集坐标改写为 sprite 局部 [0,1]</b>
+     * （重算后的顶点列表覆盖 {@code q.vertices}）并把结果写回 {@code q.materialKey}（另写
+     * {@code q.materialUsesStandaloneTexture} / {@code q.materialAtlasKind}）。第二次调用会把这些<b>局部</b> UV 当作
+     * <b>图集</b> UV 再解析一次（质心落进别的 atlas 小格 / 非图集 bind 分支），结果退化成 {@code "unknown"} 或错纹，
+     * 且是不可逆的——原始图集 UV 已被覆盖。
+     * <p>
+     * <b>正确顺序 = 先挂材质、再用 {@code q.materialKey} 算内容键</b>：几何/内容签名（
+     * {@code MeshCaptureService.CaptureToolkit#geometryOf} → 顶点 UV 与 {@code materialIndex} 都进签名）必须在
+     * 材质挂好之后取，否则签名里留下的是图集 UV、与后续重算结果对不上（跨运行"同内容不同签名"的典型来源）。
      *
      * @return 与 {@link #normalizeMaterialKey} 一致的材质键，供采样器表注册
      */

@@ -1,8 +1,8 @@
 /**
  * P2.3 统计引擎单测（pure/partStats）。
  *
- * 契约：`docs/plan/format-parts-contract.md` §5（计数单位 = 可合成物品、typeKey = 合并键）、
- * §9（三级配置）；计划 §4 P2.3 硬约束。规则/存储拍板见 pure/partStats.ts 文件头（留白 #6）。
+ * 契约：`docs/contracts/format-parts-contract.md` §5（计数单位 = 可合成物品、typeKey = 合并键）、
+ * §9（三级配置，**已废弃**——兼容口径 = 读取后静默忽略）；计划 §4 P2.3 硬约束。规则/存储拍板见 pure/partStats.ts 文件头（留白 #6）。
  * fixture 数值断言在 render/interaction/__tests__/partStatsAdapter.test.ts（需要适配层桥接）。
  */
 import { describe, it, expect } from 'vitest'

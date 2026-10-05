@@ -28,7 +28,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  *
  * <p>
  * 对 P0.2 同款探针结构逐格跑 {@link PartCapturePipeline#collectParts}（已注册三族 tier-1 提供者），
- * 导出的部件清单与 P0.2 探针记录（{@code docs/plan/probe-family-apis.md} §1.6/§2.6/§3.6，p02-run-2）
+ * 导出的部件清单与历史族 API 探针记录（§1.6/§2.6/§3.6，p02-run-2；原文见 issue #51 / git 历史）
  * 逐格核对 localId / typeKey / 盒 / 物品身份 / 来源四元组：
  *
  * <ol>
