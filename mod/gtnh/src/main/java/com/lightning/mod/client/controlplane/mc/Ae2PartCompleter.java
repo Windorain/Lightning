@@ -106,6 +106,27 @@ public final class Ae2PartCompleter implements TeCompleter {
                 .param("ae2-part 什么都没声明", "params.parts", "至少给一条 parts[] 或 facades[]（每条 {item, meta?, side}）");
         }
         TileEntity te = world.getTileEntity(x, y, z);
+        if (te == null) {
+            // 权威放置兜底（contract §6.5）：空缆块会在首个 tick 自毁（TileCableBus.onReady:176-185），
+            // 「block 步放缆 + te 步加件」之间存在跨 tick 竞态（验收轮实测偶发 CP-STATE-001）——
+            // 这里发现缆块缺失就自己补放，setBlock 创建 TE 与本步加件同 tick，竞态归零。
+            net.minecraft.block.Block present = world.getBlock(x, y, z);
+            if (present != null && !present.isAir(world, x, y, z)) {
+                throw new CpException(
+                    ErrorCodes.STATE,
+                    "该位置不是 AE2 部件宿主（" + x + "," + y + "," + z + " 被 "
+                        + net.minecraft.item.Item.itemRegistry.getNameForObject(present)
+                        + " 占用）：先清场或调整用例坐标");
+            }
+            net.minecraft.block.Block cable = cpw.mods.fml.common.registry.GameRegistry
+                .findBlock("appliedenergistics2", "tile.BlockCableBus");
+            if (cable == null) {
+                throw CpException
+                    .param("AE2 缆块注册名查不到（appliedenergistics2:tile.BlockCableBus）", "params.parts", "模组版本不符？");
+            }
+            world.setBlock(x, y, z, cable, 0, 3);
+            te = world.getTileEntity(x, y, z);
+        }
         if (te == null || !hostClass.isInstance(te)) {
             throw new CpException(
                 ErrorCodes.STATE,
@@ -115,10 +136,10 @@ public final class Ae2PartCompleter implements TeCompleter {
                     + ","
                     + z
                     + " 实际 "
-                    + (te == null ? "没有 TE"
+                    + (te == null ? "没有 TE（已尝试权威补放缆块仍失败）"
                         : te.getClass()
                             .getName())
-                    + "）：缆块需由本步之前的 block 步先放（AE2 的空缆块会自毁，两步必须同 tick）");
+                    + "）：可用 block 步先放缆块，或让本步缺缆时自动补放");
         }
         int added = 0;
         int skipped = 0;

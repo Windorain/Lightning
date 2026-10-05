@@ -467,7 +467,7 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行�
   | `x1`（裸管） | `te-x1-iso-north`=`/connections/NORTH` false、`te-x1-iso-west`=`/connections/WEST` false、`te-x1-iso-init`=`/initialized` true | `img-x1-size` / `img-x1-not-uniform`（`persp-row.png` 1280×720 + 非纯色） |
   | `x2`（两管互联） | `te-x2-pair-east`=`@65 /connections/EAST` true | `img-x2-size` / `img-x2-not-uniform`（同上，互连的可见性） |
   | `x3`（管+箱） | `te-x3-pair-west`=`@66 /connections/WEST` true、`te-x3-chest-east`=`@66 /connections/EAST` true、`te-x3-down`=`@66 /connections/DOWN` false、`te-x3-pipe-type`=`@66 /pipeType` | `img-x3-size` / `img-x3-not-uniform`（同上） |
-  | `scene` | —（由 x1..x3 覆盖；全场景可见性由图像轨单独承担） | `img-scene-size` / `img-scene-not-uniform`（`persp-front.png`） |
+  | `scene` | —（由 x1..x3 覆盖；全场景可见性由图像轨单独承担） | `img-scene-size` / `img-scene-not-uniform`（`persp-front.png`，**`maxSameColorRatio=0.10`——决定性阈值**，见下方「图像轨阈值标定方法」） |
 
 - `variants`：`neg-x1-iso-north-flipped` 把 `criteria[0].expect` 由 `false` 改成 `true`（只动判据、不动 world/build），
   `expectCriteriaRed=["te-x1-iso-north"]`；
@@ -482,6 +482,17 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行�
 
 因此同一处可视特性一定是「运行期说什么 + 图像证明看得见」成对出现——只写运行期轨等于只证明世界状态对、
 没证明渲染结果对（case-file.md §5 的双轨齐备口径）。
+
+**图像轨阈值标定方法（PR-3 验收轮 a2 实战教训，后续用例必须照做）**：`image-not-uniform` 的默认
+`0.98` 只挡「纯黑/纯白假图」，**挡不住「机位朝向错、画面里只有天空渐变」的空转绿**（a2 首轮 LP 两机位
+yaw 算错背对场景，0.98 阈值下照样全绿——目验截图才擒获）。规矩有三：
+1. **截图必须目验**（首轮验收至少一次），确认画面里真的有场景；
+2. **决定性阈值 = 场景实测值与「同机位纯天空实测值」之间的中值并留余量**——本用例的标定：
+   `persp-front` 贴近取景（管排占画面主体）实测主色占比 **0.0746**（场景在）、纯天空对照档
+   **0.137~0.151** ⇒ 阈值 **0.10**（两侧余量均 ≥25%）；`persp-row` 主色 0.1208 与纯天空档拉不开
+   安全间距 ⇒ 它的 `not-uniform` 保持 0.98，只承担「黑屏防线 + 形态留档」，**决定性判据
+   集中在 `img-scene-not-uniform`**，不在每个配对判据上都假装有精度；
+3. 每个锚点用例至少要有**一条**这种「贴近取景 + 决定性阈值」的判据。
 
 ### 10.3 `cases/ae2-parts.json`（AE2 部件锚点 + K1 门控对照）
 
