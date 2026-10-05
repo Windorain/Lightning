@@ -1,0 +1,171 @@
+{
+  "schema": "lightning.case/1",
+  "id": "lp-pipe-row",
+  "label": "控制面 PR-3 锚点：LP 四管横排——裸管/两管互联/管+箱 三种连接形态，双轨判据（TE 运行期态 + 图像）",
+  "world": {
+    "folder": "cp_lp_pipe_row",
+    "seed": 20261006,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "build": [
+    { "op": "clear", "from": [62, 10, 62], "to": [70, 16, 68] },
+
+    { "op": "te", "at": [64, 12, 64], "completer": "lp-pipe", "params": { "pipe": "LogisticsPipes:item.PipeItemsBasicLogistics" } },
+    { "op": "te", "at": [65, 12, 64], "completer": "lp-pipe", "params": { "pipe": "LogisticsPipes:item.PipeItemsBasicLogistics" } },
+    { "op": "te", "at": [66, 12, 64], "completer": "lp-pipe", "params": { "pipe": "LogisticsPipes:item.PipeItemsBasicLogistics" } },
+
+    { "op": "block", "at": [67, 12, 64], "id": "minecraft:chest", "meta": 3 },
+    { "op": "te", "at": [67, 12, 64], "completer": "vanilla", "params": {} },
+
+    { "op": "wait", "ticks": 20 }
+  ],
+  "capture": {
+    "lighting": "natural",
+    "renderMode": "本色",
+    "worldTime": 6000
+  },
+  "cameras": [
+    {
+      "name": "persp-row",
+      "pos": [63.5, 15.5, 70.5],
+      "yaw": 25.5,
+      "pitch": 21.7,
+      "projection": { "type": "perspective", "fov": 70 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "persp-front",
+      "pos": [65.5, 14.5, 69.5],
+      "yaw": 0.0,
+      "pitch": 14.3,
+      "projection": { "type": "perspective", "fov": 70 },
+      "resolution": [1280, 720]
+    }
+  ],
+  "criteria": [
+    {
+      "id": "te-x1-iso-north",
+      "type": "te-state-equals",
+      "params": { "at": [64, 12, 64], "key": "/connections/NORTH" },
+      "expect": false
+    },
+    {
+      "id": "te-x1-iso-init",
+      "type": "te-state-equals",
+      "params": { "at": [64, 12, 64], "key": "/initialized" },
+      "expect": true
+    },
+    {
+      "id": "te-x2-pair-east",
+      "type": "te-state-equals",
+      "params": { "at": [65, 12, 64], "key": "/connections/EAST" },
+      "expect": true
+    },
+    {
+      "id": "te-x1-iso-west",
+      "type": "te-state-equals",
+      "params": { "at": [64, 12, 64], "key": "/connections/WEST" },
+      "expect": false
+    },
+    {
+      "id": "te-x3-pair-west",
+      "type": "te-state-equals",
+      "params": { "at": [66, 12, 64], "key": "/connections/WEST" },
+      "expect": true
+    },
+    {
+      "id": "te-x3-chest-east",
+      "type": "te-state-equals",
+      "params": { "at": [66, 12, 64], "key": "/connections/EAST" },
+      "expect": true
+    },
+    {
+      "id": "te-x3-down",
+      "type": "te-state-equals",
+      "params": { "at": [66, 12, 64], "key": "/connections/DOWN" },
+      "expect": false
+    },
+    {
+      "id": "te-x3-pipe-type",
+      "type": "te-state-equals",
+      "params": { "at": [66, 12, 64], "key": "/pipeType" },
+      "expect": "LogisticsPipes:item.PipeItemsBasicLogistics"
+    },
+
+    {
+      "id": "img-x1-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/persp-row.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-x1-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/persp-row.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "img-x2-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/persp-row.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-x2-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/persp-row.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "img-x3-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/persp-row.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-x3-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/persp-row.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "img-scene-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/persp-front.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-scene-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/persp-front.png", "maxSameColorRatio": 0.98 }
+    },
+
+    {
+      "id": "world-hash",
+      "type": "world-hash-equals",
+      "params": {}
+    },
+    {
+      "id": "observation-exists",
+      "type": "artifact-exists",
+      "params": { "path": "observation.json" }
+    }
+  ],
+  "variants": [
+    {
+      "id": "neg-x1-iso-north-flipped",
+      "mutate": [
+        {
+          "op": "replace",
+          "path": "/criteria/0/expect",
+          "value": true
+        }
+      ],
+      "expectCriteriaRed": ["te-x1-iso-north"]
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "world/scene-manifest.json", "role": "scene-manifest" },
+      { "path": "shots/persp-row.png", "role": "shot" },
+      { "path": "shots/persp-front.png", "role": "shot" }
+    ]
+  }
+}
