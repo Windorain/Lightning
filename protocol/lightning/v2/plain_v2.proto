@@ -76,7 +76,7 @@ message PartItem {
 
 // 部件来源四元组
 message PartSource {
-  string family = 1;                  // "ae2" | "enderio" | "fmp" | "generic" | "inferred"
+  string family = 1;                  // 落盘枚举恒为 "ae2" | "eio" | "fmp" | "generic" | "inferred"（契约 §3/§10.2；旧文档里的 "enderio" 为历史写法，按 "eio" 读）
   bool fallback = 2;                  // 是否兜底（族权威=false）
   string box_provenance = 3;          // "both" | "collision-derived-visual" | "visual-only" | "collision-only" | "degenerate"
   int32 tier = 4;                     // 1=族权威 2=通用盒 3=几何推断
