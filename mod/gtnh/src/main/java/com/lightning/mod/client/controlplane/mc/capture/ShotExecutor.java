@@ -342,6 +342,7 @@ public final class ShotExecutor {
             switch (phase) {
                 case 0:
                     warmUp(run);
+                    phase = 1;
                     return null;
                 case 1:
                     if (run.settle < 0) {
