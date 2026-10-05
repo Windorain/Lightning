@@ -17,9 +17,10 @@ package com.lightning.mod.client.controlplane.mc.capture;
  *
  * <h2>两个覆写面的分工</h2>
  * <ul>
- * <li>{@link #begin} / {@link #end}：framebuffer 的创建尺寸（{@code updateFramebufferSize} 的入口）；</li>
- * <li>{@code ProjectionOverride.viewportWidth()} / {@code viewportHeight()}：GL 视口尺寸
- * （{@code renderWorld}/{@code updateCameraAndRender} 里 {@code glViewport} 的入口）。</li>
+ * <li>{@link #begin} / {@link #end}：framebuffer 的创建尺寸（{@code updateFramebufferSize} 的入口，
+ * 由 mixin 读取 {@link #width()}/{@link #height()}）；</li>
+ * <li>GL 视口尺寸：{@code Minecraft.updateCameraAndRender}/{@code renderWorld} 里的 {@code glViewport}
+ * 同样由 mixin 改写成 {@link #width()}/{@link #height()}。</li>
  * </ul>
  *
  * <p>
@@ -59,7 +60,7 @@ public final class FramebufferOverride {
      *
      * <p>
      * 只登记尺寸，<b>不</b>动 {@code mc.displayWidth}——那一步由
-     * {@link ShotExecutor#applyBufferSize} 负责（它同时要把「先保存真实尺寸」这件事做掉，
+     * {@code ShotExecutor.FrameScope#arm} 负责（它同时要把「先保存真实尺寸」这件事做掉，
      * 否则还原时无真值可用）。
      */
     public static void begin(int w, int h) {

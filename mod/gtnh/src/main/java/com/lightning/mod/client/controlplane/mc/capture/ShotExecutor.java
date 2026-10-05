@@ -145,11 +145,18 @@ public final class ShotExecutor {
         void onProgress(double fraction, String message);
     }
 
-    /** 一个机位的执行状态。 */
+    /**
+     * 一个机位的执行状态。
+     *
+     * <p>
+     * 网格（{@link TilePlan}）在 {@code onBegin} 时用<b>当时的真实窗口尺寸</b>算一次并保存下来：
+     * 之后无论 {@code mc.displayWidth} 被覆写成多少，本机位的网格与分片尺寸都不再变化——这正是
+     * r3 事故（执行器 2×2 vs 投影覆写 1×1）要修掉的「同一件事算两遍、且输入不同源」。
+     */
     private static final class CameraRun {
 
         private final CameraSpec spec;
-        /** 有效 tile 网格（可能因像素比例自动追加划分，见 {@link TilePlan}）。 */
+        /** 有效 tile 网格（唯一网格定义点；可能因像素比例自动追加划分，见 {@link TilePlan}）。 */
         private final TilePlan plan;
         /** 逐 tile 读回的整图（null 元素 = 该 tile 失败）。 */
         private final BufferedImage[][] tiles;
@@ -158,111 +165,20 @@ public final class ShotExecutor {
         private int attempts;
         /** 本机位渲染期是否隐藏过玩家（meta 留痕；见类注释「拍摄帧内隐藏玩家」）。 */
         private boolean playerHidden;
+        /**
+         * 最后一次 arm 时投影覆写的参数快照（meta 留痕）。
+         *
+         * <p>
+         * 必须在 {@link FrameScope#arm} 里取：{@code finishCamera} 跑在 tile 作用域关闭之后，
+         * 那时 {@link ProjectionOverride#disarm()} 已经执行，现场去问只会拿到 {@code none}。
+         */
+        private String projectionApplied = "none";
         private final JsonObject result = new JsonObject();
 
         CameraRun(CameraSpec spec, int baseW, int baseH) {
             this.spec = spec;
-            this.plan = TilePlan.of(spec, baseW, baseH);
-            this.tiles = new BufferedImage[plan.gridRows][plan.gridCols];
-        }
-    }
-
-    /**
-     * 单个机位的渲染分片计划（投影偏移 tiling 的有效网格）。
-     *
-     * <p>
-     * 网格口径与 {@link ProjectionOverride#resolveGrid} <b>同源</b>（投影覆写自己也用那份代码）：
-     * 投影偏移法要求「每片的渲染像素恰好等于它在整图里的格位」，因此分片尺寸由网格反推，
-     * 不允许两边各算一套。{@link #matches} 在每次 arm 之后核对一次，不一致即判渲染故障
-     * （宁可失败，也不出一张网格对不上却看着正常的图）。
-     *
-     * <p>
-     * 需要知道的语义：<b>tile 段的意思是「把几个低分辨率渲染拼成一张图」</b>——每片的渲染分辨率
-     * 由网格决定（{@code resolution/cols × resolution/rows}），拼起来才是请求分辨率。声明 2×2 而
-     * 「每片分辨率 : 真实窗口」的像素比在 x/y 上不一致时，有效网格会按像素比<b>追加</b>分片；
-     * {@code shot-meta} 里 {@code tile.cols/rows} 记实际网格、{@code requestedCols/requestedRows}
-     * 记声明值，事后一眼能看出有没有被改写。
-     */
-    private static final class TilePlan {
-
-        private final boolean tiled;
-        private final int gridCols;
-        private final int gridRows;
-        private final int pieceW;
-        private final int pieceH;
-        private final int extraW;
-        private final int extraH;
-
-        private TilePlan(boolean tiled, int gridCols, int gridRows, int totalW, int totalH) {
-            this.tiled = tiled;
-            this.gridCols = Math.max(1, gridCols);
-            this.gridRows = Math.max(1, gridRows);
-            this.pieceW = totalW / this.gridCols;
-            this.pieceH = totalH / this.gridRows;
-            this.extraW = totalW - pieceW * this.gridCols;
-            this.extraH = totalH - pieceH * this.gridRows;
-        }
-
-        static TilePlan of(CameraSpec spec, int baseW, int baseH) {
-            int reqCols = Math.max(1, spec.tileCols());
-            int reqRows = Math.max(1, spec.tileRows());
-            int renderW = Math.max(1, spec.width() / reqCols);
-            int renderH = Math.max(1, spec.height() / reqRows);
-            int[] extra = ProjectionOverride.resolveGrid(renderW, renderH, baseW, baseH);
-            int cols = reqCols * extra[0];
-            int rows = reqRows * extra[1];
-            return new TilePlan(cols > 1 || rows > 1, cols, rows, spec.width(), spec.height());
-        }
-
-        int gridCols() {
-            return gridCols;
-        }
-
-        int gridRows() {
-            return gridRows;
-        }
-
-        boolean tiled() {
-            return tiled;
-        }
-
-        /** 该列分片的渲染宽（余数归末列）。 */
-        int spanX(int col) {
-            return col == gridCols - 1 ? pieceW + extraW : pieceW;
-        }
-
-        /** 该行分片的渲染高（余数归末行）。 */
-        int spanY(int row) {
-            return row == gridRows - 1 ? pieceH + extraH : pieceH;
-        }
-
-        /** 该列分片在整图中的像素起点。 */
-        int offsetX(int col) {
-            return pieceW * col;
-        }
-
-        /** 该行分片在整图中的像素起点。 */
-        int offsetY(int row) {
-            return pieceH * row;
-        }
-
-        /** 该列分片在整图中的像素跨度（= 渲染宽）。 */
-        int frameSpanX(int col) {
-            return spanX(col);
-        }
-
-        /** 该行分片在整图中的像素跨度（= 渲染高）。 */
-        int frameSpanY(int row) {
-            return spanY(row);
-        }
-
-        boolean matches(int cols, int rows) {
-            return gridCols == cols && gridRows == rows;
-        }
-
-        /** 留痕文本。 */
-        String describe() {
-            return gridCols + "x" + gridRows + (tiled ? "" : " (single)");
+            this.plan = TilePlan.of(spec.width(), spec.height(), spec.tileCols(), spec.tileRows(), baseW, baseH);
+            this.tiles = new BufferedImage[plan.rows()][plan.cols()];
         }
     }
 
@@ -431,12 +347,13 @@ public final class ShotExecutor {
     /** 渲染下一个 tile；全部完成返回 true。 */
     private boolean renderNextTile(CameraRun run) {
         CameraSpec spec = run.spec;
-        int total = run.plan.gridCols() * run.plan.gridRows();
+        TilePlan plan = run.plan;
+        int total = plan.tileCount();
         if (run.tileIndex >= total) {
             return true;
         }
-        int col = run.tileIndex % run.plan.gridCols() + 1;
-        int row = run.tileIndex / run.plan.gridCols() + 1;
+        int col = run.tileIndex % plan.cols() + 1;
+        int row = run.tileIndex / plan.cols() + 1;
         try {
             BufferedImage image = renderAndRead(run, col, row);
             run.tiles[row - 1][col - 1] = image;
@@ -471,8 +388,8 @@ public final class ShotExecutor {
         Minecraft mc = in.mc;
         CameraSpec spec = run.spec;
         TilePlan plan = run.plan;
-        int bufW = plan.spanX(col - 1);
-        int bufH = plan.spanY(row - 1);
+        int bufW = plan.spanX(col);
+        int bufH = plan.spanY(row);
         if (!settingsSaved) {
             savedFov = mc.gameSettings.fovSetting;
             savedThirdPerson = mc.gameSettings.thirdPersonView;
@@ -613,27 +530,27 @@ public final class ShotExecutor {
             framebuffer.bindFramebuffer(true);
             framebuffer.framebufferClear();
             double farPlane = Math.max(256.0d, mc.gameSettings.renderDistanceChunks * 16.0d * 2.0d);
+            // 投影覆写只接收「本机位的 TilePlan + 本片格位 + 本片 framebuffer 尺寸」：
+            // 网格与真实窗口尺寸的关系早在 CameraRun 构造时（onBegin 的真实窗口）就结算完了，
+            // 这里不再传窗口尺寸，投影侧也就没有任何「自己再算一遍网格」的输入（r3 事故修法）。
             ProjectionOverride.arm(
                 spec.isOrtho() ? ProjectionOverride.TYPE_ORTHO : ProjectionOverride.TYPE_PERSPECTIVE,
                 spec.fov(),
                 spec.orthoHeight(),
-                baseWidth,
-                baseHeight,
                 bufW,
                 bufH,
-                plan.spanX(col - 1),
-                plan.spanY(row - 1),
+                plan,
                 col,
                 row,
                 farPlane);
             // 网格自检：执行器的分片计划必须与投影覆写解出的有效网格一致，否则会出现
             // 「每片都对、拼起来错」的静默错图（比渲染失败更难查），故当场判失败。
+            // 修法后两边同源（都是 plan 这一个实例），本检查退化为防御性断言：它挡的是
+            // 「将来有人在某一侧重算网格」这类回归，故保留。
             if (!plan.matches(ProjectionOverride.effectiveTileCols(), ProjectionOverride.effectiveTileRows())) {
                 throw new CpException(
                     ErrorCodes.EXEC_FAILED,
-                    "tile 网格自检失败：执行器 " + plan.gridCols()
-                        + "x"
-                        + plan.gridRows()
+                    "tile 网格自检失败：执行器 " + plan.describe()
                         + " vs 投影覆写 "
                         + ProjectionOverride.effectiveTileCols()
                         + "x"
@@ -651,6 +568,8 @@ public final class ShotExecutor {
                         "base",
                         baseWidth + "x" + baseHeight));
             }
+            // 投影参数快照要在覆写态内取（finishCamera 跑在作用域关闭之后，那时已是 none）
+            run.projectionApplied = ProjectionOverride.describe();
             savedRenderViewEntity = mc.renderViewEntity;
             mc.renderViewEntity = camera;
             armed = true;
@@ -740,8 +659,8 @@ public final class ShotExecutor {
         r.addProperty("playerHidden", Boolean.valueOf(run.playerHidden));
         r.addProperty("worldTime", in.mc.theWorld == null ? -1L : in.mc.theWorld.getWorldTime());
         r.addProperty("tile", Boolean.valueOf(plan.tiled()));
-        r.addProperty("tileCols", plan.gridCols());
-        r.addProperty("tileRows", plan.gridRows());
+        r.addProperty("tileCols", plan.cols());
+        r.addProperty("tileRows", plan.rows());
         r.addProperty("requestedTileCols", spec.tileCols());
         r.addProperty("requestedTileRows", spec.tileRows());
         r.addProperty("tileOverlap", Double.valueOf(spec.tileOverlap()));
@@ -782,13 +701,15 @@ public final class ShotExecutor {
             meta.addProperty("worldTime", Json.optLong(r, "worldTime", -1L));
             meta.add("resolution", resolutionJson(composed.getWidth(), composed.getHeight()));
             meta.add("requestedResolution", resolutionJson(spec.width(), spec.height()));
-            meta.add("renderBufferResolution", resolutionJson(plan.spanX(0), plan.spanY(0)));
+            meta.add("renderBufferResolution", resolutionJson(plan.pieceWidth(), plan.pieceHeight()));
             meta.addProperty("projection", spec.projection());
-            meta.addProperty("projectionApplied", ProjectionOverride.describe());
+            // 投影实际生效的参数快照：必须在覆写态内取（见 CameraRun#projectionApplied）。
+            // 这里若现场去问 ProjectionOverride，作用域早已关闭，只会得到 none。
+            meta.addProperty("projectionApplied", run.projectionApplied);
             meta.addProperty("cameraHeldDuringRender", Boolean.valueOf(cameraHeldDuringRender));
             JsonObject tile = new JsonObject();
-            tile.addProperty("cols", plan.gridCols());
-            tile.addProperty("rows", plan.gridRows());
+            tile.addProperty("cols", plan.cols());
+            tile.addProperty("rows", plan.rows());
             tile.addProperty("requestedCols", spec.tileCols());
             tile.addProperty("requestedRows", spec.tileRows());
             tile.addProperty("overlap", Double.valueOf(spec.tileOverlap()));
@@ -815,7 +736,7 @@ public final class ShotExecutor {
                 Integer.valueOf(composed.getWidth()),
                 Integer.valueOf(composed.getHeight()),
                 Json.optString(r, "bytes", "0"),
-                plan.tiled() ? plan.gridCols() + "x" + plan.gridRows() : "no");
+                plan.tiled() ? plan.describe() : "no");
         } catch (Throwable t) {
             r.addProperty("ok", Boolean.FALSE);
             r.addProperty("error", describe(t));
@@ -880,10 +801,11 @@ public final class ShotExecutor {
         int h = spec.height();
         TilePlan plan = run.plan;
         BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-        for (int row = 0; row < plan.gridRows(); row++) {
-            int spanH = plan.spanY(row);
-            for (int col = 0; col < plan.gridCols(); col++) {
-                int spanW = plan.spanX(col);
+        // TilePlan 的格位一律 1 起（与投影覆写同口径），这里循环变量 0 起，故 +1 使用
+        for (int row = 0; row < plan.rows(); row++) {
+            int spanH = plan.spanY(row + 1);
+            for (int col = 0; col < plan.cols(); col++) {
+                int spanW = plan.spanX(col + 1);
                 BufferedImage tile = run.tiles[row][col];
                 if (tile == null) {
                     throw new IOException("tile(" + (col + 1) + "," + (row + 1) + ") 缺失，无法拼接");
@@ -903,7 +825,7 @@ public final class ShotExecutor {
                             + spanH
                             + "（投影偏移法下 overlap 不参与像素装配，尺寸必须严格相等）");
                 }
-                paste(out, tile, plan.offsetX(col), plan.offsetY(row));
+                paste(out, tile, plan.offsetX(col + 1), plan.offsetY(row + 1));
             }
         }
         return out;

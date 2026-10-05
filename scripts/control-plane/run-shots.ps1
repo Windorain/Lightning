@@ -800,6 +800,14 @@ try {
         Add-Assertion 'B6e tiles 单片命名' $false 'B1 run 目录未定位'
     } else {
         $shotsDir = Join-Path $b1RunDir 'shots'
+        if ($caseCameras.Count -eq 0) {
+            # 用例读不到/cameras 为空时 foreach 一次不进会全绿——显式兜底
+            Add-Assertion 'B6a 机位 PNG 存在且非空' $false '用例 cameras 表为空（case 读取失败？），B6 系列无对象可核'
+            Add-Assertion 'B6b meta.json 渲染留痕' $false '同上'
+            Add-Assertion 'B6c PNG 实读尺寸' $false '同上'
+            Add-Assertion 'B6d tiles 片数' $false '同上'
+            Add-Assertion 'B6e tiles 单片命名' $false '同上'
+        } else {
         $pngProblems = @()
         $metaProblems = @()
         $sizeProblems = @()
@@ -880,6 +888,7 @@ try {
         Add-Assertion 'B6c PNG 实读尺寸' ($sizeProblems.Count -eq 0) $(if ($sizeProblems.Count -eq 0) { '三张整图 PNG 头实读尺寸 == 声明（独立于 meta 自证）' } else { $sizeProblems -join '; ' })
         Add-Assertion 'B6d 拼接片数' ($tileProblems.Count -eq 0) $(if ($tileProblems.Count -eq 0) { ("tiles/ 片数 == meta.tile.cols×rows；{0}" -f ($tiledDetail -join '；')) } else { $tileProblems -join '; ' })
         Add-Assertion 'B6e 拼接片命名' ($nameProblems.Count -eq 0) $(if ($nameProblems.Count -eq 0) { '单片命名 == r<row>c<col>.png（ShotExecutor.tileName，1 起）' } else { $nameProblems -join '; ' })
+        }
     }
 
     # -----------------------------------------------------------------------
