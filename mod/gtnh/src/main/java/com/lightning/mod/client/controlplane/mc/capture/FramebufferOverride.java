@@ -19,8 +19,12 @@ package com.lightning.mod.client.controlplane.mc.capture;
  * <ul>
  * <li>{@link #begin} / {@link #end}：framebuffer 的创建尺寸（{@code updateFramebufferSize} 的入口，
  * 由 mixin 读取 {@link #width()}/{@link #height()}）；</li>
- * <li>GL 视口尺寸：{@code Minecraft.updateCameraAndRender}/{@code renderWorld} 里的 {@code glViewport}
- * 同样由 mixin 改写成 {@link #width()}/{@link #height()}。</li>
+ * <li>GL 视口尺寸：<b>不需要第二处覆写</b>——{@code EntityRenderer.renderWorld} 每帧的
+ * {@code GL11.glViewport(0, 0, mc.displayWidth, mc.displayHeight)} 读的就是
+ * {@code mc.displayWidth/Height}，而 {@code ShotExecutor.FrameScope#arm} 在 {@link #begin} 的同一段里
+ * 把这两个字段指向覆写尺寸 ⇒ 视口自动与 framebuffer 同尺寸。
+ * （本类曾配一条「拦 {@code glViewport} 的 mixin」，它因 LWJGL 无 MCP 映射从未注入成功，已删除；
+ * 详见 {@code MixinMinecraftResolution} 类注释的「历史」段。）</li>
  * </ul>
  *
  * <p>
@@ -86,34 +90,5 @@ public final class FramebufferOverride {
         width = 0;
         height = 0;
         ProjectionOverride.disarm();
-    }
-
-    /** 渲染覆写态下的 framebuffer 宽（供 mixin 建 FBO 用）。 */
-    public static int framebufferWidth() {
-        return width;
-    }
-
-    /** 见 {@link #framebufferWidth}。 */
-    public static int framebufferHeight() {
-        return height;
-    }
-
-    /**
-     * 当前应该使用的 GL 视口宽度。
-     *
-     * @param displayWidth 当前 {@code mc.displayWidth}
-     */
-    public static int visibleWidth(int displayWidth) {
-        return isActive() ? width : displayWidth;
-    }
-
-    /** 当前应该使用的 GL 视口高度。 */
-    public static int visibleHeight(int displayHeight) {
-        return isActive() ? height : displayHeight;
-    }
-
-    /** 留痕文本。 */
-    public static String describe() {
-        return isActive() ? width + "x" + height : "none";
     }
 }

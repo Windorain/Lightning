@@ -60,7 +60,7 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * {@code artifacts} 出现两条同内容记录，事后无从判断以哪份为准（原先中间帧还不登记，等于白占一份磁盘与
  * 一个语义）。单片命名仍是 {@code r<row>c<col>.png}（1 起），与 meta 的 {@code tile.cols/rows} 对齐。
  *
- * <h2>拍摄帧内隐藏玩家（模型挡住了，手持物没有）</h2>
+ * <h2>拍摄帧内隐藏玩家（模型与手持物两条路都要堵）</h2>
  * {@code RenderGlobal.renderEntities} 只跳过 {@code mc.renderViewEntity} <b>自己</b>
  * （反编译源 {@code RenderGlobal.java:524}：{@code entity != this.mc.renderViewEntity || ...}），
  * 而注入的相机不是玩家 ⇒ 稳定化在场景旁的<b>玩家模型</b>会进每个机位的画面。故每片渲染的作用域里
@@ -71,15 +71,18 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * {@code EntityPlayer.java:2380-2391}）；只有玩家属于「可互见隐身」的队伍时才会退化成 15% alpha 剪影。
  *
  * <p>
- * <b>已知残留（r4 修黑后实测，未修）</b>：{@code setInvisible} 只挡「模型」，
- * 挡不住<b>手持物/装备</b>——{@code RendererLivingEntity.doRender:229} 的
- * {@code this.renderEquippedItems(...)} 在隐身判断<b>之外</b>无条件调用（隐身判断只在它上方的
- * {@code renderModel:307-328} 里），而 {@code RenderPlayer.renderEquippedItems} 会把手里的物品
- * 整个画出来。真机实测（persp-main 1280×720）：玩家手上那本 TConstruct 手册以<b>不透明</b>像素出现在
- * 每个机位里（ortho-top 俯视图里就压在石条上，取样色 {@code b89560/9c814a/715c38}，远超 15% alpha
- * 与背景混合的量级），{@code playerHidden=true} 因此只保证「人形不在画面里」，不保证「玩家身上的东西
- * 不在画面里」。彻底的修法是拦渲染路径而不是改玩家标志（例如在 {@code RendererLivingEntity.doRender}
- * 的 HEAD 上按「本帧是否处于拍摄作用域」取消），属于独立改动，本轮不并入。
+ * {@code setInvisible} 只挡「模型」，挡不住<b>手持物/装备</b>：{@code RendererLivingEntity.doRender:229}
+ * 的 {@code renderEquippedItems(...)} 在隐身判断<b>之外</b>无条件调用（隐身判断只在它上方的
+ * {@code renderModel:307-328} 里），{@code RenderPlayer.renderEquippedItems:182-187} 会把手里的物品
+ * 整个画出来（r4 真机实测：玩家手上那本 TConstruct 手册以<b>不透明</b>像素出现在每个机位里，
+ * 俯视正交机位里压在石条上，采样色 {@code b89560/9c814a/715c38}，远超 15% alpha 与背景混合的量级）。
+ * 修法不是逐件拦，而是在渲染入口取消整个人：{@code MixinRendererLivingEntityShot} 在
+ * {@code RendererLivingEntity.doRender} 的 HEAD 处按「本帧是否处于拍摄作用域」并且
+ * 「被渲染实体 == {@code mc.thePlayer}」取消整段渲染（作用域判定 = {@link CaptureRenderState}，
+ * 装备/护甲/手持物随之一起消失；机制、调用链与副作用逐条排查见该类注释）。
+ * 两条拦法互补：{@code setInvisible} 负责影子（{@code Render.java:313} 的 {@code !isInvisible()}）
+ * 与旁人视角的剪影分支，mixin 负责手持物。{@code playerHidden} 字段因此仍然只记录
+ * 「本帧确实把玩家置为隐身」（它是 {@code setInvisible} 的留痕，不是「画面上一定没有人」的证明）。
  *
  * <h2>视点口径（{@code effectiveEyePos}）</h2>
  * 机位声明的 {@code pos} 经 {@link VirtualCamera}（{@code yOffset = 1.62}）后就是实际视点
@@ -249,7 +252,7 @@ public final class ShotExecutor {
     /** 被改过的 gameSettings 原值（帧末还原）。 */
     private float savedFov;
     private int savedThirdPerson;
-    /** 拍摄帧里被置真的 {@code hideGUI} 原值（挡住手持物/选择框，见 {@code renderAndRead}）。 */
+    /** 拍摄帧里被置真的 {@code hideGUI} 原值（挡住<b>第一人称</b>手持物/选择框，见 {@code renderAndRead}）。 */
     private boolean savedHideGui;
     private boolean settingsSaved;
 
@@ -370,7 +373,22 @@ public final class ShotExecutor {
         Minecraft mc = in.mc;
         CameraSpec spec = run.spec;
         if (in.capture != null && in.capture.hasWorldTime() && mc.theWorld != null) {
-            mc.theWorld.setWorldTime(in.capture.worldTime());
+            // 光照基准必须设在服务端世界：客户端 setWorldTime 会被集成服务端每 20 tick 的
+            // S03PacketTimeUpdate 覆写回服务器时间（真机实证 worldTime 在拂晓/正午间随机跳，
+            // 同用例亮度可差 2/3——契约「worldTime 决定拍摄光照基准」因此曾是空话）。
+            // 与 world.info 同源教训：世界真相在 MinecraftServer 侧。客户端同步设一次只是
+            // 让本帧立即生效，服务端设定后下一次广播会把它巩固下来。
+            long t = in.capture.worldTime();
+            try {
+                net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+                if (server != null && server.worldServers != null && server.worldServers.length > 0
+                    && server.worldServers[0] != null) {
+                    server.worldServers[0].setWorldTime(t);
+                }
+            } catch (Throwable tErr) {
+                warn("服务端 worldTime 设定失败（光照基准可能漂移）: " + tErr);
+            }
+            mc.theWorld.setWorldTime(t);
         }
         double[] pos = spec.pos();
         camera.place(pos[0], pos[1], pos[2], spec.yaw(), spec.pitch());
@@ -820,8 +838,9 @@ public final class ShotExecutor {
         r.addProperty("lighting", CameraSpecs.resolveLighting(spec, in.capture));
         r.addProperty("lightingApplied", Boolean.FALSE);
         r.addProperty("playerHidden", Boolean.valueOf(run.playerHidden));
-        // 手持物/选择框在本帧被 hideGUI 挡掉（见 renderAndRead）：画面里不该有第一人称持物，
-        // 否则「本色」取证图会被道具模型占掉一角。
+        // 第一人称手持物/选择框在本帧被 hideGUI 挡掉（见 renderAndRead）：画面里不该有第一人称持物，
+        // 否则「本色」取证图会被道具模型占掉一角。注意这是**另一条**路径：第三人称玩家模型手里的东西
+        // 由 MixinRendererLivingEntityShot 取消整段 doRender 来解决（见类注释「拍摄帧内隐藏玩家」）。
         r.addProperty("guiHidden", Boolean.TRUE);
         r.addProperty("worldTime", in.mc.theWorld == null ? -1L : in.mc.theWorld.getWorldTime());
         r.addProperty("tile", Boolean.valueOf(plan.tiled()));

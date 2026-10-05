@@ -14,7 +14,8 @@
     "MixinTextureManagerBindCapture",
     "MixinResourceManagerReload",
     "MixinEntityRendererProjection",
-    "MixinMinecraftResolution"
+    "MixinMinecraftResolution",
+    "MixinRendererLivingEntityShot"
   ],
   "server": []
 }
