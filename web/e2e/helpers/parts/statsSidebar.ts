@@ -1,20 +1,23 @@
 /**
  * P2.5 部件断言包 —— 统计侧栏 DOM 读取/驱动 helper（零替身）。
  *
- * 观测面 = `BlockStatsSidebar.vue`（P2.4）渲染的生产 DOM：
- *  - 部件模式工具条 `.nei-stats-toolbar`（无部件旧文件**不渲染**，拍板退化）；
- *  - 视图切换 `[data-stats-view-btn="parts|hosts|custom"]`（`aria-selected` = 激活）；
- *  - 配置来源徽标 `.nei-stats-prov-pill`（`data-stats-source` = builtin /
- *    document-default / document-override / viewer-local）；
- *  - provenance 面板 `[data-stats-provenance]` 的逐字段行 `[data-stats-prov-field]`；
- *  - 行 `.nei-slot-row`：部件模式带 `data-stats-row-key` / `data-stats-row-kind` /
- *    `data-stats-icon-key`（**图标键**，部件行 = 物品身份键，宿主行 = 宿主键），
- *    旧路径行无 data 属性（DOM 零新增退化的直接证据）；
+ * 观测面 = `BlockStatsSidebar.vue` 渲染的生产 DOM（**B-3 / 决策 C 后的形态**）：
+ *  - 行 `.nei-slot-row`：**只有物品行一种**，带 `data-stats-row-key`（= 物品身份键
+ *    `registry:damage[#nbt]`）与 `data-stats-icon-key`（= 行键恒等）；
+ *    旧文件退化路径的行**无任何 data 属性**（DOM 零新增退化的直接证据）；
+ *  - 「N 个无物品部件未计入清单」提示行 `[data-stats-itemless]`；
  *  - 行图标槽 `.nei-slot-preview-icon`：`BlockSlotPreview` 只在缓存条目 ready 时挂 canvas
  *    ⇒ "槽内有 canvas" = 该图标键解析出了图标（F2 嵌入纹理通道的生产可观测结果，
  *    见 `readStatsRowIcons` / `waitStatsRowIcons`）。
  *
- * 驱动 = 生产按钮的真实 `click()`（DOM 事件注入）；不触碰 src 内部函数。
+ * ── B-4 收口（Gitea #37 顺手项，B-3 遗留）──────────────────────────────
+ * B-3 已把「视图切换工具条 / 视图按钮 / 配置来源徽标 / provenance 面板 / 分组标题」整套
+ * 移除（决策 C）。本文件曾按**已移除的 UI** 写有 `switchStatsView` / `readProvenance` /
+ * `viewButtons` / `pill` / `data-stats-row-kind` 等读取与驱动：这些选择器在生产 DOM 里
+ * 恒不存在（`row-kind` 属性 B-3 起根本不渲染），按其写的断言**永远不可能通过**——是
+ * 确定性坏断言，已删除。契约 §9 的兼容口径（旧文档携带 `statsTemplate`/`statsOverride`
+ * ⇒ 静默忽略）改由**移除锁**观测：`legacyToolbar` / `readLegacyStatsUiAbsent`。
+ * 侧栏的「有部件 / 无部件」活性判据 = 行上有无 `data-stats-row-key`。
  */
 
 import { expect, type Page } from '@playwright/test'
@@ -22,18 +25,31 @@ import { pollUntil } from '../multiblock'
 import { WIKI_EMBED } from './hover'
 
 export const STATS_SIDEBAR = `${WIKI_EMBED} .nei-sidebar`
-export const STATS_TOOLBAR = `${WIKI_EMBED} .nei-stats-toolbar`
-export const STATS_VIEW_BTN = (view: string) => `${WIKI_EMBED} [data-stats-view-btn="${view}"]`
-export const STATS_PILL = `${WIKI_EMBED} .nei-stats-prov-pill`
-export const STATS_PROV_PANEL = `${WIKI_EMBED} [data-stats-provenance]`
 export const STATS_ROWS = `${WIKI_EMBED} .nei-slot-row`
 
+// ---------------------------------------------------------------------------
+// 移除锁选择器（B-3 / 决策 C 之后必须恒不存在；负向断言用）
+// ---------------------------------------------------------------------------
+
+/** 已移除的视图切换工具条（`switchStatsView`/`readProvenance` 的宿主，B-3 整套移除）。 */
+export const STATS_TOOLBAR = `${WIKI_EMBED} .nei-stats-toolbar`
+/** 已移除的配置来源徽标；`data-stats-source` 取值曾为 builtin/document-default/… */
+export const STATS_PILL = `${WIKI_EMBED} .nei-stats-prov-pill`
+/** 已移除的 provenance 逐字段面板及其行。 */
+export const STATS_PROV_PANEL = `${WIKI_EMBED} [data-stats-provenance]`
+export const STATS_PROV_FIELD = `${WIKI_EMBED} [data-stats-prov-field]`
+/** 已移除的「清除本机修改」按钮。 */
+export const STATS_RESET_LOCAL = `${WIKI_EMBED} [data-stats-reset-local]`
+/** 已移除的视图切换按钮（曾按 id 取 parts|hosts|custom）与分组标题。 */
+export const STATS_VIEW_BTN = `${WIKI_EMBED} [data-stats-view-btn]`
+export const STATS_GROUP_TITLE = `${WIKI_EMBED} [data-stats-group-title]`
+/** 行 kind 属性（B-3 起不存在：左栏只有物品行一种）。 */
+export const STATS_ROW_KIND = `${WIKI_EMBED} [data-stats-row-kind]`
+
 export interface StatsRowObservation {
-  /** 行身份键（部件 = typeKey / 物品身份键；宿主 = 宿主键）。旧路径行 = null。 */
+  /** 行身份键（物品行 = 物品身份键 `registry:damage[#nbt]`）。旧路径行 = null。 */
   key: string | null
-  /** 'part' | 'host' | null（旧路径行无此属性）。 */
-  kind: string | null
-  /** 图标键（P2.4 图标断言的观测点）。旧路径行 = null。 */
+  /** 图标键（P2.4 图标断言的观测点；与 `key` 恒等）。旧路径行 = null。 */
   iconKey: string | null
   /** 显示名（`.nei-slot-name`）。 */
   name: string
@@ -46,12 +62,13 @@ export interface StatsRowObservation {
 export interface StatsSidebarObservation {
   present: boolean
   collapsed: boolean
-  /** 部件模式工具条是否渲染（无部件旧文件必须为 false）。 */
-  toolbar: boolean
-  /** 视图按钮（id + 激活态）。 */
-  viewButtons: Array<{ id: string; active: boolean }>
-  /** 配置来源徽标（不存在 = 旧路径）。 */
-  pill: { text: string; source: string | null } | null
+  /**
+   * 已移除的视图切换工具条是否出现。**必须恒为 false**。
+   *
+   * 保留该字段而非直接删：它同时是「统计栏确实渲染了（不是空跑）」的活性判据 ——
+   * 组件若整体没挂载，本字段与 `rows` 会一起为空，负向断言才不会假绿。
+   */
+  legacyToolbar: boolean
   /** 「N 个无物品部件未计入清单」提示行（无 ⇒ null）。 */
   itemless: string | null
   rows: StatsRowObservation[]
@@ -62,28 +79,19 @@ export async function readStatsSidebar(page: Page): Promise<StatsSidebarObservat
   return await page.evaluate(() => {
     const sidebar = document.querySelector('.wb-wiki-embed .nei-sidebar')
     if (!sidebar) {
-      return { present: false, collapsed: false, toolbar: false, viewButtons: [], pill: null, itemless: null, rows: [] }
+      return { present: false, collapsed: false, legacyToolbar: false, itemless: null, rows: [] }
     }
     const rows = [...sidebar.querySelectorAll('.nei-slot-row')].map((r) => ({
       key: r.getAttribute('data-stats-row-key'),
-      kind: r.getAttribute('data-stats-row-kind'),
       iconKey: r.getAttribute('data-stats-icon-key'),
       name: (r.querySelector('.nei-slot-name')?.textContent ?? '').trim(),
       sub: (r.querySelector('.nei-slot-id')?.textContent ?? '').trim(),
       qty: (r.querySelector('.nei-slot-qty')?.textContent ?? '').trim(),
     }))
-    const pillEl = sidebar.querySelector('.nei-stats-prov-pill')
     return {
       present: true,
       collapsed: sidebar.classList.contains('nei-sidebar--collapsed'),
-      toolbar: !!sidebar.querySelector('.nei-stats-toolbar'),
-      viewButtons: [...sidebar.querySelectorAll('[data-stats-view-btn]')].map((b) => ({
-        id: b.getAttribute('data-stats-view-btn') ?? '',
-        active: b.getAttribute('aria-selected') === 'true',
-      })),
-      pill: pillEl
-        ? { text: (pillEl.textContent ?? '').trim(), source: pillEl.getAttribute('data-stats-source') }
-        : null,
+      legacyToolbar: !!sidebar.querySelector('.nei-stats-toolbar'),
       itemless: sidebar.querySelector('[data-stats-itemless]')?.textContent?.trim() ?? null,
       rows,
     }
@@ -128,105 +136,56 @@ export async function readStatsSidebarSettled(page: Page, timeout = 30_000): Pro
   return await pollUntil(() => expandSidebarSelfHealing(page), '统计侧栏展开态读数', timeout)
 }
 
+// ---------------------------------------------------------------------------
+// 移除锁读取（B-3 / 决策 C：视图切换与三级配置 UI 已整套移除）
+// ---------------------------------------------------------------------------
+
+export interface LegacyStatsUiObservation {
+  /** 侧栏是否挂载（活性；false ⇒ 其余字段的 false 不构成证据）。 */
+  present: boolean
+  /** 移除组件的出现次数（全部必须为 0）。 */
+  counts: {
+    toolbar: number
+    viewButtons: number
+    pill: number
+    provenancePanel: number
+    provenanceFields: number
+    resetLocal: number
+    groupTitles: number
+    rowKind: number
+  }
+  /** 侧栏仍未读写的本机配置键（`lightning:stats:v1:*`；残留必须原样留存、无新增）。 */
+  legacyLocalKeys: string[]
+}
+
 /**
- * 切统计视图（生产按钮真实 click）。等待激活态落定后返回最新侧栏观测。
- * 视图切换会写查看者本地层（localStorage）—— provenance 断言依赖这一生产语义。
+ * 读「B-3 已移除 UI」的存在性（负向断言 + 兼容兜底观测）。
+ *
+ * 契约 §9 兼容口径：旧文档/本机残留的 `statsTemplate` / `statsOverride` / localStorage
+ * 配置 ⇒ 读取后**静默忽略**。可判定的生产形态 = 这些配置入口一个都不渲染，
+ * 且 `lightning:stats:v1:*` 残留键一字未动（既不清除也不新增）。
  */
-export async function switchStatsView(
-  page: Page,
-  view: 'parts' | 'hosts' | 'custom',
-  timeout = 15_000,
-): Promise<StatsSidebarObservation> {
-  // 轮询内自愈：窄布局重挂载可能把侧栏折回（见 expandSidebarSelfHealing），
-  // 因此「展开 → 按钮在 → 点击 → 激活」整个链条都放进取值条件里。
-  // 重复点击同一视图按钮是幂等的（setView 写同值，不影响断言）。
-  const trace: string[] = []
-  try {
-    return await pollUntil(
-      async () => {
-        const s = await expandSidebarSelfHealing(page)
-        if (!s || !s.toolbar) {
-          trace.push(`not-ready collapsed=${s?.collapsed} toolbar=${s?.toolbar}`)
-          return null
-        }
-        const btn = page.locator(STATS_VIEW_BTN(view))
-        if ((await btn.count()) === 0) {
-          trace.push('btn-missing')
-          return null
-        }
-        // dispatchEvent 而非 click()：800px 嵌入预览在移动视口被裁（同折叠按钮的口径）
-        await btn.dispatchEvent('click')
-        const after = await readStatsSidebar(page)
-        const storage = await page.evaluate(
-          (prefix) => {
-            const out: string[] = []
-            for (let i = 0; i < localStorage.length; i++) {
-              const k = localStorage.key(i)!
-              if (k.startsWith(prefix)) out.push(`${k}=${localStorage.getItem(k)}`)
-            }
-            return out
-          },
-          'lightning:stats:v1:',
-        )
-        const active = after.viewButtons.find((b) => b.id === view)?.active === true && !after.collapsed
-        if (!active) {
-          trace.push(
-            `clicked-not-active active=${after.viewButtons.find((b) => b.active)?.id ?? 'none'} ` +
-              `collapsed=${after.collapsed} storage=${JSON.stringify(storage)}`,
-          )
-        }
-        return active ? after : null
-      },
-      `统计视图切换到 ${view}`,
-      timeout,
-    )
-  } catch (e) {
-    throw new Error(
-      `${(e as Error).message}\n[switchStatsView trace] ${trace.slice(-6).join(' | ') || '<empty>'}`,
-    )
-  }
-}
-
-export interface ProvenanceObservation {
-  /** 徽标（常驻） */
-  pill: { text: string; source: string | null } | null
-  /** 展开面板逐字段行（field → source/text）；未展开 = null */
-  panel: Array<{ field: string; source: string | null; sourceText: string }> | null
-  /** 「清除本机修改」按钮是否存在 */
-  hasReset: boolean
-}
-
-/** 读配置来源（徽标 + 可选展开面板）。`openPanel=true` 时先点徽标展开（生产 click）。 */
-export async function readProvenance(page: Page, openPanel: boolean, timeout = 15_000): Promise<ProvenanceObservation> {
-  if (openPanel) {
-    // 窄布局自愈：先保证展开态且徽标存在，再点徽标展开 provenance 面板
-    await pollUntil(
-      async () => {
-        const s = await expandSidebarSelfHealing(page)
-        if (!s || !s.pill) return null
-        await page.locator(STATS_PILL).dispatchEvent('click')
-        const panel = page.locator(STATS_PROV_PANEL)
-        return (await panel.count()) > 0 ? s : null
-      },
-      'provenance 面板展开',
-      timeout,
-    )
-  }
+export async function readLegacyStatsUiAbsent(page: Page): Promise<LegacyStatsUiObservation> {
   return await page.evaluate(() => {
-    const pillEl = document.querySelector('.wb-wiki-embed .nei-stats-prov-pill')
-    const panelEl = document.querySelector('.wb-wiki-embed [data-stats-provenance]')
+    const count = (sel: string): number => document.querySelectorAll(sel).length
+    const keys: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!
+      if (k.startsWith('lightning:stats:v1:')) keys.push(k)
+    }
     return {
-      pill: pillEl
-        ? { text: (pillEl.textContent ?? '').trim(), source: pillEl.getAttribute('data-stats-source') }
-        : null,
-      panel: panelEl
-        ? [...panelEl.querySelectorAll('[data-stats-prov-field]')].map((r) => ({
-            field: r.getAttribute('data-stats-prov-field') ?? '',
-            source: r.getAttribute('data-stats-prov-source'),
-            sourceText: (r.querySelector('.nei-stats-prov-source')?.textContent ?? '').trim(),
-          }))
-        : null,
-      hasReset: !!document.querySelector('.wb-wiki-embed [data-stats-reset-local]'),
+      present: !!document.querySelector('.wb-wiki-embed .nei-sidebar'),
+      counts: {
+        toolbar: count('.wb-wiki-embed .nei-stats-toolbar'),
+        viewButtons: count('.wb-wiki-embed [data-stats-view-btn]'),
+        pill: count('.wb-wiki-embed .nei-stats-prov-pill'),
+        provenancePanel: count('.wb-wiki-embed [data-stats-provenance]'),
+        provenanceFields: count('.wb-wiki-embed [data-stats-prov-field]'),
+        resetLocal: count('.wb-wiki-embed [data-stats-reset-local]'),
+        groupTitles: count('.wb-wiki-embed [data-stats-group-title]'),
+        rowKind: count('.wb-wiki-embed [data-stats-row-kind]'),
+      },
+      legacyLocalKeys: keys.sort(),
     }
   })
 }
@@ -238,9 +197,7 @@ export async function readProvenance(page: Page, openPanel: boolean, timeout = 1
 export interface StatsRowIconObservation {
   /** 行身份键（同 `StatsRowObservation.key`）。 */
   key: string | null
-  /** 'part' | 'host' | null。 */
-  kind: string | null
-  /** 图标键（部件行 = 物品身份键 `registry:damage[#nbt]`）。 */
+  /** 图标键（物品行 = 物品身份键 `registry:damage[#nbt]`）。 */
   iconKey: string | null
   /**
    * 图标槽内是否已挂**就绪 canvas**。
@@ -264,7 +221,6 @@ export async function readStatsRowIcons(page: Page): Promise<StatsRowIconObserva
       const canvas = r.querySelector('.nei-slot-preview-icon canvas') as HTMLCanvasElement | null
       return {
         key: r.getAttribute('data-stats-row-key'),
-        kind: r.getAttribute('data-stats-row-kind'),
         iconKey: r.getAttribute('data-stats-icon-key'),
         hasCanvas: !!canvas,
         canvasWidth: canvas?.width ?? 0,
@@ -275,8 +231,11 @@ export async function readStatsRowIcons(page: Page): Promise<StatsRowIconObserva
 }
 
 /**
- * 等「图标键在给定集合内的**部件行**」全部渲染出 canvas（图标烘焙是异步的：base64 解码
+ * 等「图标键在给定集合内的**物品行**」全部渲染出 canvas（图标烘焙是异步的：base64 解码
  * 在 `BlockIconCache` 的串行队列里）。
+ *
+ * 「物品行」判据 = 行带 `data-stats-row-key`（B-3 后左栏行键只有物品身份键一种；
+ * 旧的 `data-stats-row-kind` 属性已随决策 C 移除，不得再作为判据）。
  *
  * 超时**抛错并列出仍无 canvas 的行**（含键），不静默返回 —— 调用方据此判定
  * "嵌入纹理通道没接通"还是"某个键没有纹理来源"。
@@ -292,15 +251,15 @@ export async function waitStatsRowIcons(
   let last: StatsRowIconObservation[] = []
   for (;;) {
     last = await readStatsRowIcons(page)
-    const partRows = last.filter((r) => r.kind === 'part')
-    const pending = partRows.filter(
+    const itemRows = last.filter((r) => r.key !== null)
+    const pending = itemRows.filter(
       (r) => r.iconKey !== null && covered.has(r.iconKey) && !r.hasCanvas,
     )
-    if (partRows.length > 0 && pending.length === 0) return last
+    if (itemRows.length > 0 && pending.length === 0) return last
     if (Date.now() > deadline) {
       throw new Error(
-        `P3.1：等待部件行图标就位超时（${timeout}ms）—— 仍有 ${pending.length} 行无 canvas：` +
-          `${pending.map((r) => r.iconKey).join(', ') || '<部件行尚未渲染>'}` +
+        `P3.1：等待物品行图标就位超时（${timeout}ms）—— 仍有 ${pending.length} 行无 canvas：` +
+          `${pending.map((r) => r.iconKey).join(', ') || '<物品行尚未渲染>'}` +
           `\n  最后读数：${JSON.stringify(last.slice(0, 6))}${last.length > 6 ? ` …（共 ${last.length} 行）` : ''}`,
       )
     }
