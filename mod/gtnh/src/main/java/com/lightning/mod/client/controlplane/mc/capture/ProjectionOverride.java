@@ -5,6 +5,8 @@ import java.nio.FloatBuffer;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 
+import com.lightning.mod.client.controlplane.mc.CpLog;
+
 /**
  * 渲染帧的投影矩阵覆写（contract.md §4.2.3/§4.2.4）。
  *
@@ -52,6 +54,8 @@ public final class ProjectionOverride {
     public static final double NEAR_PLANE = 0.05d;
 
     private static final FloatBuffer MATRIX = BufferUtils.createFloatBuffer(16);
+    /** 自证日志用的投影矩阵暂存（只在 {@link #loadProjection} 里用）。 */
+    private static final FloatBuffer PROBE = BufferUtils.createFloatBuffer(16);
     private static final float[] SCRATCH = new float[16];
 
     private ProjectionOverride() {}
@@ -137,7 +141,23 @@ public final class ProjectionOverride {
         tileRow = Math.max(1, Math.min(tilePlan.rows(), row));
         farPlane = far > NEAR_PLANE ? far : 256.0d;
         magnification = tilePlan.tiled() ? tilePlan.targetHeight() / (double) tilePlan.spanY(tileRow) : 1.0d;
+        probed = false;
     }
+
+    /**
+     * 本次 {@link #arm} 是否已输出过「投影覆写自证」日志（{@link #loadProjection} 里消费）。
+     *
+     * <p>
+     * 存在的理由：投影覆写<b>是否真的落到 GL 的投影栈</b>这件事，曾经在两轮真机验收里都是靠推理
+     * 判断的，而实际答案是「没落到」（矩阵模式写错，真机事故 B2）。留一条日志，让下一个人一眼看到
+     * 「改前/改后的投影矩阵」和「写的时候当前栈是哪个」，不必再猜。
+     *
+     * <p>
+     * 节流口径：<b>每次 {@link #arm}（= 每机位每 tile）一条</b>。一次三机位取证最多 机位×片数 条
+     * （当前用例 1+1+4=6 条），不会刷屏，而每片的位移量（{@code m8/m9}）恰好各不相同，逐片留痕
+     * 才看得出「四片真的不是同一张图」。
+     */
+    private static boolean probed;
 
     /** 退出覆写态（GL 状态随即由 EntityRenderer 的下一帧自己重置）。 */
     public static void disarm() {
@@ -187,6 +207,16 @@ public final class ProjectionOverride {
      * 「读回 + 改写 + 写回」而不是「自己从零算一个」，是为了继承原版已经处理过的立体（anaglyph）
      * 与相机缩放（cameraZoom）项；tiling 只改写 {@code m[0]/m[5]/m[8]/m[9]} 四个元素，
      * 其余元素原样保留（1×1 时四个元素都不变，即分辨率覆写路径与本覆写无关）。
+     *
+     * <h2>为什么写回前必须显式切到 {@code GL_PROJECTION}（真机事故）</h2>
+     * {@code glLoadMatrix} 作用于<b>当前矩阵栈</b>，而注入点（{@code setupCameraTransform} 的
+     * {@code RETURN}）处当前栈是 {@code GL_MODELVIEW}——反编译源 {@code EntityRenderer.java:658-682}：
+     * 该方法先把矩阵模式切成 {@code GL_PROJECTION} 写完透视矩阵，随后的
+     * {@code GL11.glMatrixMode(GL11.GL_MODELVIEW)}（:682）交给 {@code orientCamera} 摆相机，
+     * 到 {@code RETURN} 时模式仍是 MODELVIEW。裸 {@code glLoadMatrix} 因此（a）改了模型视图而不是投影
+     * （真机实测：覆写前后投影矩阵逐位相同，正交机位也仍是透视矩阵），（b）把「投影矩阵」写进了
+     * 模型视图，摧毁世界段的相机变换——症状是画面里只剩天空/雾色与第一人称手持物（{@code renderHand}
+     * 自己重建两个矩阵，所以它反而正常），而所有机位、所有 tile 长得一模一样。
      */
     public static void applyToCurrentProjectionMatrix() {
         if (!armed) {
@@ -196,10 +226,7 @@ public final class ProjectionOverride {
         GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, MATRIX);
         MATRIX.get(SCRATCH);
         magnification = TileProjection.applyPerspectiveTile(SCRATCH, plan, tileCol, tileRow, bufferWidth, bufferHeight);
-        MATRIX.clear();
-        MATRIX.put(SCRATCH);
-        MATRIX.flip();
-        GL11.glLoadMatrix(MATRIX);
+        loadProjection(SCRATCH);
     }
 
     /**
@@ -215,10 +242,65 @@ public final class ProjectionOverride {
         }
         float[] m = TileProjection.orthoMatrix(orthoHeight, bufferWidth, bufferHeight, NEAR_PLANE, farPlane);
         magnification = TileProjection.applyOrthoTile(m, plan, tileCol, tileRow, bufferWidth, bufferHeight);
+        loadProjection(m);
+    }
+
+    /**
+     * 把矩阵写进投影栈，并把矩阵模式还原成 {@code GL_MODELVIEW}（调用点的后续渲染依赖它）。
+     *
+     * <p>
+     * 模式必须<b>进出成对</b>：进入时显式切到 {@code GL_PROJECTION}（否则写的是当前栈，见
+     * {@link #applyToCurrentProjectionMatrix} 的说明），写完立刻切回 {@code GL_MODELVIEW}——
+     * {@code EntityRenderer.renderWorld} 紧接着就用模型视图画天空/地形/实体。
+     *
+     * <p>
+     * 每次 {@link #arm} 的<b>第一次</b>写入顺带输出一条自证日志（改前/改后的投影矩阵 + 写入前后的
+     * 当前栈），见 {@link #probed}。
+     */
+    private static void loadProjection(float[] m) {
+        boolean probe = !probed;
+        probed = true;
+        int modeBefore = 0;
+        float m0Before = 0.0f;
+        float m5Before = 0.0f;
+        if (probe) {
+            modeBefore = GL11.glGetInteger(GL11.GL_MATRIX_MODE);
+            PROBE.clear();
+            GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, PROBE);
+            m0Before = PROBE.get(0);
+            m5Before = PROBE.get(5);
+        }
+        GL11.glMatrixMode(GL11.GL_PROJECTION);
         MATRIX.clear();
         MATRIX.put(m);
         MATRIX.flip();
         GL11.glLoadMatrix(MATRIX);
+        int modeAfterLoad = GL11.glGetInteger(GL11.GL_MATRIX_MODE);
+        GL11.glMatrixMode(GL11.GL_MODELVIEW);
+        if (probe) {
+            PROBE.clear();
+            GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, PROBE);
+            CpLog.info(
+                "投影覆写自证（一次性）：%s | 写入时矩阵模式=%s（写入后=%s，随后切回 MODELVIEW）| GL 投影矩阵 m0 %.5f→%.5f m5 %.5f→%.5f",
+                describe(),
+                matrixModeName(modeBefore),
+                matrixModeName(modeAfterLoad),
+                Double.valueOf(m0Before),
+                Double.valueOf(PROBE.get(0)),
+                Double.valueOf(m5Before),
+                Double.valueOf(PROBE.get(5)));
+        }
+    }
+
+    /** GL 矩阵模式的日志用名（{@code GL_MODELVIEW}/{@code GL_PROJECTION}/其它值）。 */
+    private static String matrixModeName(int mode) {
+        if (mode == GL11.GL_MODELVIEW) {
+            return "GL_MODELVIEW";
+        }
+        if (mode == GL11.GL_PROJECTION) {
+            return "GL_PROJECTION";
+        }
+        return "mode#" + mode;
     }
 
     /** 当前是否正交覆写（mixin 据此决定走哪条矩阵路径）。 */

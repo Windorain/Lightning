@@ -16,19 +16,26 @@ import com.lightning.mod.client.controlplane.mc.capture.ProjectionOverride;
  * {@code EntityRenderer.setupCameraTransform(float, int)} 是<b>每帧唯一</b>把世界投影矩阵写进 GL 的地方：
  * 
  * <pre>
- * GL11.glMatrixMode(GL_PROJECTION);
+ * GL11.glMatrixMode(GL_PROJECTION);   // :658
  * GL11.glLoadIdentity();
  * ... anaglyph / cameraZoom 平移 ...
- * Project.gluPerspective(fov, (float)mc.displayWidth / mc.displayHeight, 0.05F, farPlane * 2.0F);
- * GL11.glMatrixMode(GL_MODELVIEW);
- * ... orientCamera（相机位置与朝向来自 mc.renderViewEntity）...
+ * Project.gluPerspective(fov, (float)mc.displayWidth / mc.displayHeight, 0.05F, farPlane * 2.0F);  // :673
+ * GL11.glMatrixMode(GL11.GL_MODELVIEW);   // :682
+ * ... hurtCamera / viewBobbing / 传送门效果 ...
+ * this.orientCamera(partialTicks);   // :715（相机位置与朝向来自 mc.renderViewEntity）
  * </pre>
  * 
- * 在它的 {@code RETURN} 点，投影栈顶正好是「原版透视矩阵」，而 MODELVIEW 还没被
- * {@code orientCamera} 动过——此时替换投影栈顶，既拿到原版已经算好的立体/缩放平移量，
- * 又不会打乱模型视图矩阵。冻结分支（{@code bug-fix}）的 {@code IngameShotCapture} 走的是
- * 「挪玩家 + {@code gameSettings.fovSetting}」路线，没有投影覆写能力；本类是在 controlplane 包内
- * 按契约重写的注入点。
+ * 在它的 {@code RETURN} 点，投影栈顶正好是「原版透视矩阵」，MODELVIEW 也已经由 {@code orientCamera}
+ * 摆成世界段的相机变换——此时替换投影栈顶，既拿到原版已经算好的立体/缩放平移量，又不会打乱模型视图矩阵。
+ * 冻结分支（{@code bug-fix}）的 {@code IngameShotCapture} 走的是「挪玩家 + {@code gameSettings.fovSetting}」
+ * 路线，没有投影覆写能力；本类是在 controlplane 包内按契约重写的注入点。
+ *
+ * <p>
+ * <b>注意（真机事故 B2）</b>：到 {@code RETURN} 时 GL 的<b>当前矩阵栈是 MODELVIEW</b>（上面的 :682），
+ * 所以 {@link ProjectionOverride} 必须自己 {@code glMatrixMode(GL_PROJECTION)} 才能把矩阵写进投影栈，
+ * 写完再切回 MODELVIEW。裸 {@code glLoadMatrix} 会写进模型视图矩阵：投影没被改（正交机位仍是透视矩阵），
+ * 相机变换却被投影矩阵覆盖，画面只剩下天空/雾色与第一人称手持物。事故现象、实测数值与修法见
+ * {@link ProjectionOverride#applyToCurrentProjectionMatrix()} 的类内说明。
  *
  * <p>
  * 正交机位（{@code projection.type=ortho}）在这里不再复用原版矩阵，而是整块换成

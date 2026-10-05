@@ -3,6 +3,8 @@ package com.lightning.mod.client.controlplane.mc.capture;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,6 +18,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.EntityRenderer;
 import net.minecraft.client.shader.Framebuffer;
 import net.minecraft.util.ScreenShotHelper;
+
+import org.lwjgl.BufferUtils;
+import org.lwjgl.opengl.GL11;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -55,7 +60,7 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * {@code artifacts} 出现两条同内容记录，事后无从判断以哪份为准（原先中间帧还不登记，等于白占一份磁盘与
  * 一个语义）。单片命名仍是 {@code r<row>c<col>.png}（1 起），与 meta 的 {@code tile.cols/rows} 对齐。
  *
- * <h2>拍摄帧内隐藏玩家</h2>
+ * <h2>拍摄帧内隐藏玩家（模型挡住了，手持物没有）</h2>
  * {@code RenderGlobal.renderEntities} 只跳过 {@code mc.renderViewEntity} <b>自己</b>
  * （反编译源 {@code RenderGlobal.java:524}：{@code entity != this.mc.renderViewEntity || ...}），
  * 而注入的相机不是玩家 ⇒ 稳定化在场景旁的<b>玩家模型</b>会进每个机位的画面。故每片渲染的作用域里
@@ -64,6 +69,17 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * 不写服务端实体、不动世界状态。渲染侧生效点是 {@code RendererLivingEntity.renderModel:307-328}：
  * 隐身时走「不画」分支（托管世界无队伍 ⇒ {@code EntityPlayer.isInvisibleToPlayer} 返回 true，
  * {@code EntityPlayer.java:2380-2391}）；只有玩家属于「可互见隐身」的队伍时才会退化成 15% alpha 剪影。
+ *
+ * <p>
+ * <b>已知残留（r4 修黑后实测，未修）</b>：{@code setInvisible} 只挡「模型」，
+ * 挡不住<b>手持物/装备</b>——{@code RendererLivingEntity.doRender:229} 的
+ * {@code this.renderEquippedItems(...)} 在隐身判断<b>之外</b>无条件调用（隐身判断只在它上方的
+ * {@code renderModel:307-328} 里），而 {@code RenderPlayer.renderEquippedItems} 会把手里的物品
+ * 整个画出来。真机实测（persp-main 1280×720）：玩家手上那本 TConstruct 手册以<b>不透明</b>像素出现在
+ * 每个机位里（ortho-top 俯视图里就压在石条上，取样色 {@code b89560/9c814a/715c38}，远超 15% alpha
+ * 与背景混合的量级），{@code playerHidden=true} 因此只保证「人形不在画面里」，不保证「玩家身上的东西
+ * 不在画面里」。彻底的修法是拦渲染路径而不是改玩家标志（例如在 {@code RendererLivingEntity.doRender}
+ * 的 HEAD 上按「本帧是否处于拍摄作用域」取消），属于独立改动，本轮不并入。
  *
  * <h2>视点口径（{@code effectiveEyePos}）</h2>
  * 机位声明的 {@code pos} 经 {@link VirtualCamera}（{@code yOffset = 1.62}）后就是实际视点
@@ -88,6 +104,36 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * （不删除，只标记）——否则上一轮的图会被当成本轮证据。</li>
  * </ul>
  *
+ * <h2>为什么每片都必须重新绑定 framebuffer（纯黑事故 B1 的根因与修法）</h2>
+ * 手工渲染这一条路径上，{@code bindFramebuffer} 必须出现在 {@code framebufferClear()} <b>之后</b>：
+ * {@code Framebuffer.framebufferClear()} 的最后一句是 {@code unbindFramebuffer()}（反编译源
+ * {@code Framebuffer.java:265-279}），它把渲染目标切回默认 framebuffer（窗口）。而读回走的是
+ * {@code ScreenShotHelper} 的 {@code glGetTexImage(framebufferMc.framebufferTexture)}（反编译源
+ * {@code ScreenShotHelper.java:71-79}，{@code fboEnable=true} 时的唯一路径），读的是那张纹理。
+ * 于是「渲染写窗口、读回读 FBO 纹理」时，纹理里只有创建期的清屏色——{@code Minecraft.java:510} 把
+ * {@code framebufferColor} 设成 {@code (0,0,0,0)}，于是每个 PNG、每个 tile 都恒为纯黑（真机实测：
+ * 1280×720 全 0，2759 字节；4 个 tile 各 1586 字节，且四片 sha256 相同），且 GL 不报错、
+ * {@code cameraHeldDuringRender} 为 true、任何全链路判据（尺寸/片数/命名/注入/无异常）都能全绿——
+ * 只有 {@code image-not-uniform} 会红。游戏自身路径不受影响：它在 {@code Minecraft.java:1052} 是在
+ * {@code bindFramebuffer} 之后直接调 {@code updateCameraAndRender}，中间没有清屏调用。
+ *
+ * <p>
+ * 该缺陷对「FBO 未绑定」这类排查有极强的误导性：{@code arm} 里确实<b>写了</b>
+ * {@code bindFramebuffer(true)} 与 {@code framebufferClear()}，读代码像是绑过的。防空手段是把
+ * 「帧结束时到底绑着哪个 framebuffer」变成日志（{@link FrameScope#probeRenderTarget} 的一次性
+ * 自证：绑定名 + 视口 + 两个读回目标的中心像素 + {@code glGetError}）。实测（未修版）：
+ * {@code GL_FRAMEBUFFER_BINDING=0 framebufferObject=1 viewport=[0,0,1280,720] glGetError=0 |
+ * 渲染后当前写目标中心像素=#00bcd5ff | framebufferMc 纹理中心像素=#00000000}——帧确实画出了内容，
+ * 只是画在窗口（0）而不是 framebufferMc（1）上；修后同一条日志两侧一致，且 PNG 从 2759 字节变
+ * 13k/14k/39k 字节、主色占比 90.2% &lt; 0.98 阈值。
+ *
+ * <h2>投影覆写必须自己切矩阵栈（纯黑事故 B2）</h2>
+ * 修完 FBO 绑定后画面已非黑，但三个机位的图<b>仍然长得一模一样</b>（2×2 的四片 sha256 逐位相同）。
+ * 原因是 {@link ProjectionOverride} 的写入点（{@code setupCameraTransform} 的 {@code RETURN}）
+ * 当前矩阵栈是 MODELVIEW 而不是 PROJECTION，裸 {@code glLoadMatrix} 既没改到投影、又把相机变换
+ * 覆盖掉了。推导、实测与修法见 {@link ProjectionOverride#applyToCurrentProjectionMatrix()} 与
+ * {@link MixinEntityRendererProjection} 的类注释。
+ *
  * <h2>禁止视口拼接</h2>
  * tile 全部靠 {@link ProjectionOverride} 的投影偏移实现，<b>从不</b>移动 GL 视口：
  * {@code EntityRenderer.renderWorld} 每帧强制 {@code glViewport(0,0,displayWidth,displayHeight)}，
@@ -106,6 +152,9 @@ public final class ShotExecutor {
 
     /** 渲染故障时的重试上限（每机位每 tile 一次机会）。 */
     private static final int MAX_ATTEMPTS = 2;
+
+    /** {@code GL_FRAMEBUFFER_BINDING}（EXT 与核心同值 0x8CA6）：当前绑定的 framebuffer 名。 */
+    private static final int GL_FRAMEBUFFER_BINDING = 0x8CA6;
 
     /** 执行输入。 */
     public static final class Input {
@@ -200,6 +249,8 @@ public final class ShotExecutor {
     /** 被改过的 gameSettings 原值（帧末还原）。 */
     private float savedFov;
     private int savedThirdPerson;
+    /** 拍摄帧里被置真的 {@code hideGUI} 原值（挡住手持物/选择框，见 {@code renderAndRead}）。 */
+    private boolean savedHideGui;
     private boolean settingsSaved;
 
     /** 渲染注入前的 {@code mc.renderViewEntity}（try/finally 必还原）。 */
@@ -218,6 +269,9 @@ public final class ShotExecutor {
      * 「悄悄变成玩家视角」——这种静默错图最难查。故每次渲染后核验一次并落 meta，异常即告警。
      */
     private boolean cameraHeldDuringRender = true;
+
+    /** 渲染目标自证日志是否已输出（一次拍摄只输出一次，见 {@link FrameScope#probeRenderTarget}）。 */
+    private boolean renderTargetProbed;
 
     private VirtualCamera camera;
 
@@ -393,6 +447,7 @@ public final class ShotExecutor {
         if (!settingsSaved) {
             savedFov = mc.gameSettings.fovSetting;
             savedThirdPerson = mc.gameSettings.thirdPersonView;
+            savedHideGui = mc.gameSettings.hideGUI;
             settingsSaved = true;
         }
         // 投影参数：正交机位自己算矩阵，透视机位把 FOV 交给原版管线（再由覆写做像素级偏移）
@@ -400,6 +455,12 @@ public final class ShotExecutor {
             mc.gameSettings.fovSetting = clampFov(spec.fov());
         }
         mc.gameSettings.thirdPersonView = 0;
+        // 关掉 HUD 级渲染：renderWorld 末尾的 renderHand → renderItemInFirstPerson 会把<b>手持物</b>
+        // 画进每一张取证图（真机实测：TConstruct 手册占满右下角；而它因为自己重建投影/模型视图矩阵，
+        // 反而比身后的世界还清楚）。hideGUI 是这条路径上的开关（反编译源 EntityRenderer.java:794 的
+        // `!this.mc.gameSettings.hideGUI`），顺带关掉方块选择框（:1325 同一开关）。它是玩家设置，
+        // 与 fovSetting/thirdPersonView 一样在 close() 里还原。
+        mc.gameSettings.hideGUI = true;
         String renderMode = CameraSpecs.resolveRenderMode(spec, in.capture);
         String lighting = CameraSpecs.resolveLighting(spec, in.capture);
         if (CaptureSpec.RENDER_MODE_LIT.equals(renderMode) || CaptureSpec.LIGHTING_NEUTRAL_FLAT.equals(lighting)) {
@@ -529,6 +590,12 @@ public final class ShotExecutor {
             Framebuffer framebuffer = mc.getFramebuffer();
             framebuffer.bindFramebuffer(true);
             framebuffer.framebufferClear();
+            // 必须重新绑定：framebufferClear() 的末尾是 unbindFramebuffer()（反编译源
+            // Framebuffer.java:278），它把渲染目标踢回<b>默认 framebuffer（窗口）</b>。少了这一次
+            // 绑定，整帧就画进窗口，而读回读的是 framebufferMc 的纹理——那张纹理自创建起只被
+            // framebufferColor（Minecraft.java:510 设为全 0 黑）清过 ⇒ 截图/单片像素恒为纯黑，
+            // 且 GL 不报错、渲染不留痕（r4 事故根因，见类注释「为什么每片都必须重新绑定」）。
+            framebuffer.bindFramebuffer(true);
             double farPlane = Math.max(256.0d, mc.gameSettings.renderDistanceChunks * 16.0d * 2.0d);
             // 投影覆写只接收「本机位的 TilePlan + 本片格位 + 本片 framebuffer 尺寸」：
             // 网格与真实窗口尺寸的关系早在 CameraRun 构造时（onBegin 的真实窗口）就结算完了，
@@ -587,6 +654,101 @@ public final class ShotExecutor {
                             .getName())
                         + "（机位可能没生效，请核对 shots/<name>.png）");
             }
+            // 渲染目标自证（每次拍摄只输出一次，见 probeRenderTarget）：
+            // 「这一帧画进了哪个 framebuffer」与「读回的那份中心像素是什么」当场落日志——
+            // r4 事故里这两个问题都没有任何留痕，只能靠事后体量（PNG 2759 字节）反推。
+            if (!renderTargetProbed) {
+                renderTargetProbed = true;
+                probeRenderTarget(framebuffer, bufW, bufH, spec, col, row);
+            }
+        }
+
+        /**
+         * 渲染目标自证：把「帧画进了哪个 framebuffer / 读回那份是不是全黑」落成一条一次性日志。
+         *
+         * <h2>为什么需要它（r4 事故）</h2>
+         * 截图纯黑时，「渲染黑」与「读回黑」在结果上完全一样（都是 PNG 全 0），而全链路判据
+         * （尺寸/片数/命名/相机注入/无异常）可以<b>全绿</b>——r4 就是这样：3 机位绿灯、PNG 全黑。
+         * 本探针把两者的分界点直接写下来：
+         * <ol>
+         * <li>{@code glGetInteger(GL_FRAMEBUFFER_BINDING)}：帧结束时绑定的 framebuffer 名。
+         * 与 {@code framebufferMc.framebufferObject} 不等 ⇒ 帧画去了别处（窗口），读回必然不是它；</li>
+         * <li>{@code glGetInteger(GL_VIEWPORT)}：证实视口覆写（{@code MixinMinecraftResolution} 的
+         * {@code glViewport} 重定向 + {@code FramebufferOverride}）确实生效；</li>
+         * <li>采样「当前绑定」与「framebufferMc 纹理」两个 framebuffer 的中心像素：
+         * 前者有内容、后者全 0 = 渲染没进 FBO（读回黑）；两者都全 0 = 渲染本身是黑的；</li>
+         * <li>{@code glGetError}：GL 错误码（framebufferClear 丢绑定时为 0——这条路径静默）。</li>
+         * </ol>
+         *
+         * <p>
+         * 只在采样到结构性缺陷（绑定名不符）时告警；像素全黑只记录不告警——「画面该不该有内容」
+         * 是<b>用例判据</b>（{@code image-not-uniform}）的职责，渲染层对空场景（虚空世界、夜里、
+         * 镜头埋进方块）无权判红。采样改不动渲染结果：读回不写 GL 状态，只重置一次
+         * {@code GL_PACK_ALIGNMENT}（{@code ScreenShotHelper} 自己也会设）。
+         */
+        private void probeRenderTarget(Framebuffer framebuffer, int bufW, int bufH, CameraSpec spec, int col, int row) {
+            try {
+                int binding = GL11.glGetInteger(GL_FRAMEBUFFER_BINDING);
+                int glError = GL11.glGetError();
+                IntBuffer viewport = BufferUtils.createIntBuffer(4);
+                GL11.glGetInteger(GL11.GL_VIEWPORT, viewport);
+                int cx = Math.max(0, Math.min(bufW, framebuffer.framebufferTextureWidth) / 2 - 1);
+                int cy = Math.max(0, Math.min(bufH, framebuffer.framebufferTextureHeight) / 2 - 1);
+                int here = samplePixel(cx, cy);
+                framebuffer.bindFramebuffer(false);
+                int inFbo = samplePixel(cx, cy);
+                CpLog.info(
+                    "渲染目标自证（一次性，机位 %s tile %d,%d）：GL_FRAMEBUFFER_BINDING=%d framebufferObject=%d viewport=[%d,%d,%d,%d] glGetError=%d"
+                        + " | 渲染后当前写目标中心像素=%s | framebufferMc 纹理中心像素=%s",
+                    spec.name(),
+                    Integer.valueOf(col),
+                    Integer.valueOf(row),
+                    Integer.valueOf(binding),
+                    Integer.valueOf(framebuffer.framebufferObject),
+                    Integer.valueOf(viewport.get(0)),
+                    Integer.valueOf(viewport.get(1)),
+                    Integer.valueOf(viewport.get(2)),
+                    Integer.valueOf(viewport.get(3)),
+                    Integer.valueOf(glError),
+                    hexPixel(here),
+                    hexPixel(inFbo));
+                if (binding != framebuffer.framebufferObject) {
+                    warnOnce(
+                        "渲染目标自证失败：帧结束时绑定的是 framebuffer " + binding
+                            + "，不是 framebufferMc("
+                            + framebuffer.framebufferObject
+                            + ")——这一帧画进了别处，读回的纹理不会有本帧内容（r4 纯黑事故的口径）");
+                }
+            } catch (Throwable t) {
+                CpLog.warn("渲染目标自证探针失败（不影响拍摄）: %s", String.valueOf(t));
+            }
+        }
+
+        /** 读一个像素（{@code x,y} 为 framebuffer 坐标，左下原点），返回 {@code ARGB}；失败返回 0。 */
+        private int samplePixel(int x, int y) {
+            try {
+                ByteBuffer pixel = BufferUtils.createByteBuffer(4);
+                GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
+                GL11.glReadPixels(x, y, 1, 1, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixel);
+                int r = pixel.get(0) & 0xFF;
+                int g = pixel.get(1) & 0xFF;
+                int b = pixel.get(2) & 0xFF;
+                int a = pixel.get(3) & 0xFF;
+                return (a << 24) | (r << 16) | (g << 8) | b;
+            } catch (Throwable t) {
+                return 0;
+            }
+        }
+
+        /** 像素的十六进制文本（{@code #AARRGGBB}，日志用）。 */
+        private String hexPixel(int argb) {
+            String hex = Integer.toHexString(argb);
+            StringBuilder sb = new StringBuilder("#");
+            for (int i = hex.length(); i < 8; i++) {
+                sb.append('0');
+            }
+            return sb.append(hex)
+                .toString();
         }
 
         /**
@@ -635,6 +797,7 @@ public final class ShotExecutor {
                 if (settingsSaved) {
                     mc.gameSettings.fovSetting = savedFov;
                     mc.gameSettings.thirdPersonView = savedThirdPerson;
+                    mc.gameSettings.hideGUI = savedHideGui;
                 }
             } catch (Throwable t) {
                 CpLog.error(t, "还原渲染状态失败（已尽力还原 displayWidth/投影/renderViewEntity/玩家可见性）");
@@ -657,6 +820,9 @@ public final class ShotExecutor {
         r.addProperty("lighting", CameraSpecs.resolveLighting(spec, in.capture));
         r.addProperty("lightingApplied", Boolean.FALSE);
         r.addProperty("playerHidden", Boolean.valueOf(run.playerHidden));
+        // 手持物/选择框在本帧被 hideGUI 挡掉（见 renderAndRead）：画面里不该有第一人称持物，
+        // 否则「本色」取证图会被道具模型占掉一角。
+        r.addProperty("guiHidden", Boolean.TRUE);
         r.addProperty("worldTime", in.mc.theWorld == null ? -1L : in.mc.theWorld.getWorldTime());
         r.addProperty("tile", Boolean.valueOf(plan.tiled()));
         r.addProperty("tileCols", plan.cols());
@@ -695,6 +861,7 @@ public final class ShotExecutor {
             // 原版第一人称相机固有的 0.1 格常量不随声明变化，故不进这个字段
             meta.add("effectiveEyePos", vec3(spec.pos()));
             meta.addProperty("playerHidden", Boolean.valueOf(run.playerHidden));
+            meta.addProperty("guiHidden", Boolean.TRUE);
             meta.addProperty("renderMode", Json.optString(r, "renderMode", null));
             meta.addProperty("lighting", Json.optString(r, "lighting", null));
             meta.addProperty("lightingApplied", Boolean.FALSE);
@@ -753,6 +920,7 @@ public final class ShotExecutor {
             if (settingsSaved && mc != null && mc.gameSettings != null) {
                 mc.gameSettings.fovSetting = savedFov;
                 mc.gameSettings.thirdPersonView = savedThirdPerson;
+                mc.gameSettings.hideGUI = savedHideGui;
             }
             if (mc != null && (mc.displayWidth != baseWidth || mc.displayHeight != baseHeight)) {
                 mc.displayWidth = baseWidth;
