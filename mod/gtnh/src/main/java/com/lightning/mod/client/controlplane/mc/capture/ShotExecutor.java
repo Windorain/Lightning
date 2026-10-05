@@ -38,21 +38,50 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * <li>{@code WARMUP}：设 worldTime（如指定）→ 相机就位 → 客户端世界 {@code getBlock} 触碰
  * 机位所在区块，逼出区块加载/网格重建（相机在未加载区块里会拍到空气）；</li>
  * <li>{@code SETTLE}：等 {@link #SETTLE_TICKS} 个 tick，让区块网格与 TESR 出帧、光照收敛；</li>
- * <li>{@code RENDER}/{@code READBACK}（每个 tile 一次）：分辨率覆写 → 注入相机与投影 →
- * 直接调 {@code EntityRenderer.renderWorld} 渲一帧 → {@code ScreenShotHelper} 落 PNG → 还原；</li>
- * <li>{@code COMPOSE}：拼接机位把各 tile 按 overlap 裁边后拼成整图，并保留 {@code <name>.tiles/}；</li>
- * <li>收尾写 {@code shots/<name>.meta.json}（schema {@code lightning.shot-meta/1}）并登记产物。</li>
+ * <li>{@code RENDER}/{@code READBACK}（每个 tile 一次）：分辨率覆写 → 隐藏玩家 → 注入相机与投影 →
+ * 直接调 {@code EntityRenderer.renderWorld} 渲一帧 → {@code ScreenShotHelper} 落 PNG → 还原
+ * （玩家可见性、投影、{@code renderViewEntity}、framebuffer 尺寸都在 {@link FrameScope} 的
+ * try/finally 里还原）；</li>
+ * <li>{@code COMPOSE}：拼接机位把各 tile 按<b>格位</b>像素级拼成整图（投影偏移法下 overlap 不参与
+ * 像素装配，见 {@link #compose}），并保留 {@code <name>.tiles/}；</li>
+ * <li>收尾写 {@code shots/<name>.meta.json}（schema {@code lightning.shot-meta/1}）并登记产物：
+ * 整图 {@code role=shot}、拼接单片 {@code role=shot-tile}、meta {@code role=shot-meta}。</li>
  * </ol>
+ *
+ * <h2>每片像素只存一份（拼接机位）</h2>
+ * 拼接机位的单片<b>直接</b>落在 {@code shots/<name>.tiles/r<row>c<col>.png}（{@link #shoot} 的落点），
+ * 它既是「可单独核对接缝的原始帧」也是唯一产物，登记 {@code role=shot-tile}。不再往 {@code shots/}
+ * 另写一份 {@code <name>-r<row>c<col>.png} 中间帧：同一批像素两处落盘只会让 run manifest 与动作结果的
+ * {@code artifacts} 出现两条同内容记录，事后无从判断以哪份为准（原先中间帧还不登记，等于白占一份磁盘与
+ * 一个语义）。单片命名仍是 {@code r<row>c<col>.png}（1 起），与 meta 的 {@code tile.cols/rows} 对齐。
+ *
+ * <h2>拍摄帧内隐藏玩家</h2>
+ * {@code RenderGlobal.renderEntities} 只跳过 {@code mc.renderViewEntity} <b>自己</b>
+ * （反编译源 {@code RenderGlobal.java:524}：{@code entity != this.mc.renderViewEntity || ...}），
+ * 而注入的相机不是玩家 ⇒ 稳定化在场景旁的<b>玩家模型</b>会进每个机位的画面。故每片渲染的作用域里
+ * {@code mc.thePlayer.setInvisible(true)}、finally 还原原值，逐机位 meta 记 {@code playerHidden}。
+ * {@code setInvisible} 只改客户端实体 dataWatcher 的显示标志（{@code Entity.setInvisible} → {@code setFlag(5)}），
+ * 不写服务端实体、不动世界状态。渲染侧生效点是 {@code RendererLivingEntity.renderModel:307-328}：
+ * 隐身时走「不画」分支（托管世界无队伍 ⇒ {@code EntityPlayer.isInvisibleToPlayer} 返回 true，
+ * {@code EntityPlayer.java:2380-2391}）；只有玩家属于「可互见隐身」的队伍时才会退化成 15% alpha 剪影。
+ *
+ * <h2>视点口径（{@code effectiveEyePos}）</h2>
+ * 机位声明的 {@code pos} 经 {@link VirtualCamera}（{@code yOffset = 1.62}）后就是实际视点
+ * （推导见 {@link VirtualCamera} 类注释），逐机位 meta 用 {@code effectiveEyePos} 把这条口径写成字段
+ * （= 声明 {@code pos}）；原版第一人称相机固有的 0.1 格常量不随声明变化，故不进这个字段。
  *
  * <h2>为什么直接调 {@code renderWorld} 而不是等游戏自己渲</h2>
  * 游戏每帧只渲染一次、且相机是玩家。要在<b>同一 tick 内</b>连续拿到 N 个机位 × M 个 tile 的帧，
  * 必须自己驱动渲染。1.7.10 单机里 tick 线程 == 渲染线程，因此这种「自己渲」与游戏自身的渲染
  * 在同一线程上串行，不存在并发改 GL 状态的问题（contract §4.2.5 的线程口径）。
  *
- * <h2>ScreenShotHelper 的三个已知坑（冻结分支实测，逐条规避）</h2>
+ * <h2>ScreenShotHelper 的三个已知坑（逐条规避）</h2>
  * <ul>
- * <li>第一参是<b>父目录</b>、不是文件路径：内部自己 {@code new File(gameDir, "screenshots")}，
- * 因此传 {@code mc.mcDataDir}、第二参传 {@code <name>.png}；</li>
+ * <li>第一参是<b>游戏目录</b>，既不是文件路径也不是我们的产物目录：helper 内部自己拼
+ * {@code new File(gameDir, "screenshots")}（反编译源 {@code ScreenShotHelper.java:50}），
+ * 传 {@code mc.mcDataDir} 时文件落在 {@code <mcDataDir>/screenshots/}。故落盘分两步：先让 helper 写它
+ * 自己的目录，再 move 进 run 目录的 {@code shots/}（{@link #shoot} 对「helper 的落点」与
+ * 「直接写产物目录」两个候选都探测一次，兜住补丁/环境差异）；</li>
  * <li>失败也返回非 null（返回的是可点击的错误文本组件，异常被吞进日志）：判据只能是
  * <b>目标文件存在且 size &gt; 0</b>；</li>
  * <li>同名旧文件会被直接覆盖/复用：按快门<b>前</b>先把同名旧图改名进 {@code <name>.png.trash-<ts>}
@@ -127,6 +156,8 @@ public final class ShotExecutor {
         private int tileIndex;
         private int settle = -1;
         private int attempts;
+        /** 本机位渲染期是否隐藏过玩家（meta 留痕；见类注释「拍摄帧内隐藏玩家」）。 */
+        private boolean playerHidden;
         private final JsonObject result = new JsonObject();
 
         CameraRun(CameraSpec spec, int baseW, int baseH) {
@@ -463,7 +494,7 @@ public final class ShotExecutor {
 
         FrameScope scope = new FrameScope();
         try {
-            scope.arm(spec, plan, bufW, bufH, col, row);
+            scope.arm(spec, plan, bufW, bufH, col, row, run);
             File produced = shoot(bufW, bufH, spec, plan, col, row);
             BufferedImage image = ImageIO.read(produced);
             if (image == null) {
@@ -474,12 +505,9 @@ public final class ShotExecutor {
                     "读回尺寸与预期不符: " + image.getWidth() + "x" + image.getHeight() + " != " + bufW + "x" + bufH);
             }
             if (plan.tiled()) {
-                // 保留 tile 原始帧（拼接证据，可事后单独核对接缝）
-                Path tilesDir = tilesDir(spec.name());
-                Files.createDirectories(tilesDir);
-                Path tileFile = tilesDir.resolve(tileName(col, row));
-                ImageIO.write(image, "png", tileFile.toFile());
-                register(rel(tileFile), "shot-tile");
+                // 单片由 shoot() 直接落在 <name>.tiles/r<row>c<col>.png，这里只登记（每片像素只存一份，
+                // 不再往 shots/ 另写同名中间帧；见类注释「每片像素只存一份」）
+                register(rel(produced.toPath()), "shot-tile");
             }
             return image;
         } finally {
@@ -487,36 +515,75 @@ public final class ShotExecutor {
         }
     }
 
-    /** 按快门：落 PNG（校验文件存在且非空），返回产物文件。 */
+    /**
+     * 按快门：落 PNG（校验文件存在且非空），返回产物文件。
+     *
+     * <p>
+     * 落点：拼接机位 = {@code shots/<name>.tiles/r<row>c<col>.png}（与 tile 网格逐片对应），
+     * 非拼接机位 = {@code shots/<name>.png}（随后由 {@link #finishCamera} 覆盖为拼接/整图产物，
+     * 两者像素相同）。之所以要经 helper 自己的目录中转一步，见类注释「ScreenShotHelper 的三个已知坑」。
+     */
     private File shoot(int bufW, int bufH, CameraSpec spec, TilePlan plan, int col, int row) throws Exception {
         Minecraft mc = in.mc;
-        File dir = shotsDir().toFile();
-        if (!dir.isDirectory() && !dir.mkdirs()) {
-            throw new IOException("截图目录无法创建: " + dir.getAbsolutePath());
-        }
-        String baseName = plan.tiled() ? spec.name() + "-r" + row + "c" + col : spec.name();
-        File staging = new File(dir, baseName + STAGING_SUFFIX + ".png");
-        if (staging.exists() && !staging.delete() && staging.exists()) {
-            throw new IOException("临时截图删除失败: " + staging.getAbsolutePath());
-        }
-        // 坑 1：第一参是父目录（helper 自己拼 screenshots/），第二参才是文件名
-        ScreenShotHelper.saveScreenshot(mc.mcDataDir, staging.getName(), bufW, bufH, mc.getFramebuffer());
+        Path targetPath = plan.tiled() ? tilesDir(spec.name()).resolve(tileName(col, row))
+            : shotsDir().resolve(spec.name() + ".png");
+        Files.createDirectories(targetPath.getParent());
+        String stagingName = stagingName(spec, col, row);
+        // helper 的实际落点（<mcDataDir>/screenshots/）与「直接写产物目录」的兜底落点：两处都清残留
+        File helperFile = new File(screenshotsDirOfHelper(mc), stagingName);
+        File fallbackFile = shotsDir().resolve(stagingName)
+            .toFile();
+        clearStale(helperFile);
+        clearStale(fallbackFile);
+        // 坑 1：第一参是游戏目录（helper 自己拼 screenshots/），第二参才是文件名
+        ScreenShotHelper.saveScreenshot(mc.mcDataDir, stagingName, bufW, bufH, mc.getFramebuffer());
         // 坑 2：失败也返回非 null ⇒ 判据只能是「文件存在且 size > 0」
-        if (!staging.isFile() || staging.length() <= 0L) {
-            throw new IOException("截图调用返回了但文件不存在或为空: " + staging.getAbsolutePath());
+        File staged = isUsable(helperFile) ? helperFile : isUsable(fallbackFile) ? fallbackFile : null;
+        if (staged == null) {
+            throw new IOException(
+                "截图调用返回了但文件不存在或为空: " + helperFile.getAbsolutePath() + " / " + fallbackFile.getAbsolutePath());
         }
-        File target = new File(dir, baseName + ".png");
+        File target = targetPath.toFile();
         // 坑 3：同名旧文件先改名标记（不删除）
         if (target.exists()) {
-            File trash = new File(dir, baseName + ".png.trash-" + System.currentTimeMillis());
+            File trash = new File(target.getParentFile(), target.getName() + ".trash-" + System.currentTimeMillis());
             Files.move(target.toPath(), trash.toPath(), StandardCopyOption.REPLACE_EXISTING);
             CpLog.info("同名旧图已标记（不删除）: %s → %s", target.getName(), trash.getName());
         }
-        Files.move(staging.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        if (!target.isFile() || target.length() <= 0L) {
+        Files.move(staged.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        if (!isUsable(target)) {
             throw new IOException("截图落盘后校验失败: " + target.getAbsolutePath());
         }
         return target;
+    }
+
+    /**
+     * 中转临时截图名（{@code <name>-r<row>c<col>.partial.png}）。
+     *
+     * <p>
+     * 固定用「机位名 + 行列 + .partial」，既不与最终产物（{@code <name>.png} / {@code tiles/r<row>c<col>.png}）
+     * 同名，也不与 {@link #finishCamera} 拼图用的 {@code <name>.partial.png} 撞名。
+     */
+    private static String stagingName(CameraSpec spec, int col, int row) {
+        return spec.name() + "-r" + row + "c" + col + STAGING_SUFFIX + ".png";
+    }
+
+    /** {@code ScreenShotHelper} 实际写文件的目录：{@code <mcDataDir>/screenshots}。 */
+    private static File screenshotsDirOfHelper(Minecraft mc) {
+        File base = mc == null || mc.mcDataDir == null ? new File(".") : mc.mcDataDir;
+        return new File(base, "screenshots");
+    }
+
+    /** 临时截图残留清理（上次异常退出可能留下同名临时件）。 */
+    private static void clearStale(File f) throws IOException {
+        if (f.exists() && !f.delete() && f.exists()) {
+            throw new IOException("临时截图删除失败: " + f.getAbsolutePath());
+        }
+    }
+
+    /** 文件存在且非空——{@code ScreenShotHelper} 的唯一可用判据（见类注释坑 2）。 */
+    private static boolean isUsable(File f) {
+        return f != null && f.isFile() && f.length() > 0L;
     }
 
     /** 一个 tile 的覆写作用域（enter/exit 成对，异常路径也必还原）。 */
@@ -524,7 +591,11 @@ public final class ShotExecutor {
 
         private boolean armed;
 
-        private void arm(CameraSpec spec, TilePlan plan, int bufW, int bufH, int col, int row) throws Exception {
+        /** 隐藏前的玩家可见性（null = 本帧没动过，close 不还原）。 */
+        private Boolean savedPlayerInvisible;
+
+        private void arm(CameraSpec spec, TilePlan plan, int bufW, int bufH, int col, int row, CameraRun run)
+            throws Exception {
             Minecraft mc = in.mc;
             // framebuffer 尺寸覆写：先按目标尺寸建 FBO，再把 displayWidth/Height 指向同一尺寸。
             // 尺寸没变时不重建（同机位相邻 tile 尺寸一致；重建一次要重新分配纹理与深度缓冲）。
@@ -582,6 +653,9 @@ public final class ShotExecutor {
             savedRenderViewEntity = mc.renderViewEntity;
             mc.renderViewEntity = camera;
             armed = true;
+            // 隐藏真实玩家（只动客户端显示标志）：renderEntities 只跳过 renderViewEntity 自己，
+            // 不隐藏就会把稳定化在场景旁的玩家模型拍进每个机位（见类注释「拍摄帧内隐藏玩家」）
+            run.playerHidden |= hidePlayer(mc);
             EntityRenderer renderer = mc.entityRenderer;
             renderer.renderWorld(partialTicks(), System.nanoTime());
             // 渲染后核验：相机没有被渲染路径内的其它逻辑改回玩家
@@ -595,9 +669,33 @@ public final class ShotExecutor {
             }
         }
 
+        /**
+         * 隐藏真实玩家（只动客户端实体 dataWatcher 的显示标志，不碰服务端实体/世界状态）。
+         *
+         * @return 是否确实处于「玩家不可见」状态（玩家本来就隐形也算）
+         */
+        private boolean hidePlayer(Minecraft mc) {
+            if (mc.thePlayer == null) {
+                warnOnce("世界中没有玩家实体，无法在拍摄帧里隐藏玩家模型");
+                return false;
+            }
+            savedPlayerInvisible = Boolean.valueOf(mc.thePlayer.isInvisible());
+            mc.thePlayer.setInvisible(true);
+            return true;
+        }
+
+        /** 还原玩家可见性（先于其它渲染态还原：这是最容易被用户直接看到的副作用）。 */
+        private void restorePlayerVisibility(Minecraft mc) {
+            if (savedPlayerInvisible != null && mc.thePlayer != null) {
+                mc.thePlayer.setInvisible(savedPlayerInvisible.booleanValue());
+            }
+            savedPlayerInvisible = null;
+        }
+
         private void close() {
             Minecraft mc = in.mc;
             try {
+                restorePlayerVisibility(mc);
                 ProjectionOverride.disarm();
                 FramebufferOverride.end();
                 if (armed && savedRenderViewEntity instanceof net.minecraft.entity.EntityLivingBase) {
@@ -619,10 +717,11 @@ public final class ShotExecutor {
                     mc.gameSettings.thirdPersonView = savedThirdPerson;
                 }
             } catch (Throwable t) {
-                CpLog.error(t, "还原渲染状态失败（已尽力还原 displayWidth/投影/renderViewEntity）");
+                CpLog.error(t, "还原渲染状态失败（已尽力还原 displayWidth/投影/renderViewEntity/玩家可见性）");
             } finally {
                 armed = false;
                 savedRenderViewEntity = null;
+                savedPlayerInvisible = null;
             }
         }
     }
@@ -637,6 +736,7 @@ public final class ShotExecutor {
         r.addProperty("renderMode", CameraSpecs.resolveRenderMode(spec, in.capture));
         r.addProperty("lighting", CameraSpecs.resolveLighting(spec, in.capture));
         r.addProperty("lightingApplied", Boolean.FALSE);
+        r.addProperty("playerHidden", Boolean.valueOf(run.playerHidden));
         r.addProperty("worldTime", in.mc.theWorld == null ? -1L : in.mc.theWorld.getWorldTime());
         r.addProperty("tile", Boolean.valueOf(plan.tiled()));
         r.addProperty("tileCols", plan.gridCols());
@@ -671,6 +771,10 @@ public final class ShotExecutor {
             meta.addProperty("runId", in.run == null ? null : in.run.runId());
             meta.addProperty("camera", spec.name());
             meta.add("spec", spec.toJson());
+            // 口径声明：yOffset=1.62 之后声明 pos 就是实际视点（推导见 VirtualCamera 类注释）；
+            // 原版第一人称相机固有的 0.1 格常量不随声明变化，故不进这个字段
+            meta.add("effectiveEyePos", vec3(spec.pos()));
+            meta.addProperty("playerHidden", Boolean.valueOf(run.playerHidden));
             meta.addProperty("renderMode", Json.optString(r, "renderMode", null));
             meta.addProperty("lighting", Json.optString(r, "lighting", null));
             meta.addProperty("lightingApplied", Boolean.FALSE);
@@ -931,6 +1035,15 @@ public final class ShotExecutor {
         JsonArray a = new JsonArray();
         Json.add(a, Integer.valueOf(w));
         Json.add(a, Integer.valueOf(h));
+        return a;
+    }
+
+    /** {@code [x,y,z]}（meta 的 {@code effectiveEyePos} 用，与 {@code spec.pos} 同形）。 */
+    private static JsonArray vec3(double[] v) {
+        JsonArray a = new JsonArray();
+        Json.add(a, Double.valueOf(v[0]));
+        Json.add(a, Double.valueOf(v[1]));
+        Json.add(a, Double.valueOf(v[2]));
         return a;
     }
 

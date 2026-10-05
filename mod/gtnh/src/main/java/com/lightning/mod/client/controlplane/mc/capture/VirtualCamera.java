@@ -15,17 +15,60 @@ import net.minecraft.world.World;
  * （{@code TileCableBus.getMaxRenderDistanceSquared()=900.0}，30 方块）是拿相机坐标算的，
  * 相机在 30 格内就渲染，在 30 格外就不渲染，与玩家在哪无关。
  *
+ * <h2>视点数学：为什么 {@code yOffset} 必须是 1.62，而不是 0</h2>
+ * 1.7.10 的视点由 {@code EntityRenderer.orientCamera} 的这几句 GL 变换决定（反编译源
+ * {@code mod/gtnh/build/rfg/minecraft-src/java/net/minecraft/client/renderer/EntityRenderer.java}）：
+ *
+ * <pre>
+ * f1 = entitylivingbase.yOffset - 1.62F; // :555
+ * d1 = posY - f1; // :557（:647 对 f1/d1 再算一遍，供雾与云用）
+ * GL11.glTranslatef(0, 0, -0.1F); // :636 非第三人称、非睡眠分支
+ * GL11.glRotatef(pitch, 1, 0, 0); // :641
+ * GL11.glRotatef(yaw + 180, 0, 1, 0); // :642
+ * GL11.glTranslatef(0, f1, 0); // :645
+ * </pre>
+ *
+ * <p>
+ * 场景几何的坐标是「世界坐标 − renderPos」（{@code WorldRenderer}/{@code RenderManager} 各自减掉），
+ * 因此视点就是「在 renderPos 相对坐标里映射到相机原点」的那个点，解
+ * {@code T(0,0,-0.1)·Rx(pitch)·Ry(yaw+180)·T(0,f1,0)·g = 0} 得：
+ *
+ * <pre>
+ * g = R⁻¹·(0,0,0.1) − (0, f1, 0)   ⇒   g_y = posY − f1 = posY − (yOffset − 1.62)
+ * </pre>
+ *
+ * <p>
+ * 于是：{@code yOffset = 0} 时视点比声明 {@code pos} <b>高 1.62 格</b>（旧注释把这段读成
+ * 「视点 = posY + yOffset」并据此把 yOffset 归零，漏掉了 {@code orientCamera} 的 −1.62 常数项，
+ * 结论正好相反——机位留痕的 {@code camera.pos} 与实际取景差 1.62 格）；
+ * {@code yOffset = 1.62} 时 {@code f1 = 0}，<b>视点 y == 声明 pos.y</b>。
+ * 换用 1.62 后残留的只有原版第一人称相机也有的 0.1 常量（世界 −Z 方向的
+ * {@code glTranslatef(0,0,-0.1F)}，进相机系后等价于「沿视线后退 0.1 格」，玩家镜头同样如此）：
+ * 它与机位声明无关、不随 {@code pos} 变化，故留痕口径以声明 {@code pos} 为准
+ * （{@code shots/<name>.meta.json} 的 {@code effectiveEyePos}）。
+ *
  * <h2>关键的三个覆写</h2>
  * <ul>
- * <li>{@link #getEyeHeight()} 返回 <b>0</b>：{@code EntityRenderer.orientCamera} 里
- * {@code f1 = yOffset - 1.62F} 之后把 {@code -f1} 加到视点 y 上，等价于「视点 = posY + yOffset」。
- * yOffset 归零后，相机视点精确等于我们给的 {@code pos}，不需要再猜整合包的怪眼高
- * （冻结分支实测本包 {@code getEyeHeight()=0.12}），也不会引入半格偏差。
- * 后文 {@code renderWorld} 里 {@code ActiveRenderInfo.updateRenderInfo} 还会把玩家眼高加回投影原点，
- * 但相机在副本上渲染、玩家原体不动，两者互不影响。</li>
+ * <li>{@link #getEyeHeight()} 返回 <b>0</b>：{@code pos} 本身已经是眼位（上面的 yOffset=1.62 抵消了
+ * {@code orientCamera} 的 −1.62 常数项），所以「相对 pos 的眼高」必须是 0；否则任何走
+ * {@code posY + getEyeHeight()} 的路径（如 {@code EntityRenderer.getMouseOver} 的射线原点）
+ * 会把视点再抬高一次。两条路径各管各的：{@code orientCamera} 只读 {@code yOffset} 字段，
+ * 从不读 {@code getEyeHeight()}。</li>
  * <li>{@link #onEntityUpdate()} 空实现：替身不进世界 tick，不会位移、不会掉血、不会发声音；</li>
  * <li>{@link #canBeCollidedWith()} / {@code isEntityAlive()} 给渲染器一个「无害实体」的语义。</li>
  * </ul>
+ *
+ * <p>
+ * 旁注：{@code renderWorld} 里的 {@code ActiveRenderInfo.updateRenderInfo(mc.thePlayer, ...)}
+ * （{@code EntityRenderer.java:1235}）不参与视点计算——它拿 {@code gluUnProject} 从当前 GL 矩阵反解
+ * 视线在近平面上的世界坐标（{@code objectX/Y/Z}），因此自动跟随注入相机；它只从真实玩家取 rotation
+ * （影响粒子/公告板的朝向，不影响机位取景）。
+ *
+ * <p>
+ * 已知副作用：{@code Entity.setPosition}（{@code Entity.java:345-352}）把 {@code yOffset} 从 boundingBox
+ * 的 y 里减掉，所以替身的包围盒落在 {@code pos − (0, 1.62, 0)}。替身从不加入世界、不被任何实体渲染
+ * 路径遍历（它不在 {@code world.loadedEntityList} 里），这份包围盒没有消费方；记在这里只是免得下次
+ * 有人动 yOffset 时被它吓到。
  *
  * <h2>prev 值必须与当前值一致</h2>
  * {@code orientCamera} 会对 {@code prevPosX..posX}、{@code prevRotationYaw..rotationYaw} 做
@@ -33,6 +76,15 @@ import net.minecraft.world.World;
  * 实测症状是「图里什么都没有」。因此 {@link #place} 每次把 prev 与当前值一起写。
  */
 public final class VirtualCamera extends EntityLivingBase {
+
+    /**
+     * 替身的 {@code yOffset}：正好抵消 {@code orientCamera} 的 {@code -1.62F} 常数项。
+     *
+     * <p>
+     * 数值就是玩家眼高（{@code EntityPlayer.getEyeHeight() = 1.62F}）。改这个值等于整体平移所有机位
+     * 的取景（每改 1.0 就是 1 格），改之前先读类注释的「视点数学」。
+     */
+    public static final float ENTITY_Y_OFFSET = 1.62F;
 
     /** 相机位置（渲染期有效）。 */
     private double camX;
@@ -44,8 +96,9 @@ public final class VirtualCamera extends EntityLivingBase {
      */
     public VirtualCamera(World world) {
         super(world);
-        // yOffset=0 ⇒ orientCamera 的 (yOffset - 1.62F) 修正后视点 == 我们给的 pos
-        this.yOffset = 0.0F;
+        // yOffset = 1.62F ⇒ orientCamera 的 f1 = yOffset - 1.62F = 0 ⇒ 视点 == 声明 pos
+        // （旧实现把 yOffset 归零，等于让视点比声明 pos 高 1.62 格；见类注释「视点数学」）
+        this.yOffset = ENTITY_Y_OFFSET;
         this.setSize(0.0F, 0.0F);
         this.noClip = true;
         // 渲染期不需要碰撞/重力/下落
@@ -60,7 +113,7 @@ public final class VirtualCamera extends EntityLivingBase {
      * 把相机放到指定位置与朝向（位置/朝向/prev 值一并写）。
      *
      * @param x     世界坐标 x
-     * @param y     视点 y（相机位置即视点，因为 yOffset=0）
+     * @param y     视点 y（{@code pos} 即眼位，见类注释「视点数学」）
      * @param z     世界坐标 z
      * @param yaw   偏航角（度）
      * @param pitch 俯仰角（度）
@@ -111,7 +164,9 @@ public final class VirtualCamera extends EntityLivingBase {
         // 故意为空：本实体只在渲染期存在，任何世界 tick 副作用（位移、饥饿、AI、音效）都不该发生
     }
 
-    /** 视点高度为 0：相机位置即视点（见类注释）。 */
+    /**
+     * 相对 {@code pos} 的眼高为 0：{@code pos} 本身即眼位（见类注释「视点数学」与「关键的三个覆写」）。
+     */
     @Override
     public float getEyeHeight() {
         return 0.0F;
