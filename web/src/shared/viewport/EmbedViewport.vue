@@ -18,7 +18,21 @@ import { bindMultiblockMeshSync, useMultiblockChannels } from '@/shared/viewport
 import { availableDockTabs, defaultDockTab, resolveDockTab, type ViewportDockTab } from '@/shared/viewport/dockTabs'
 import { blockRefFromViewportHover } from '@/runtime/hover'
 import { createEmbedSidebarOutlineMasks } from '@/runtime/embedSidebarOutline'
-import { getBlockGeometry, getPartMaskGeometry, gridCenterWorld } from '@/context/queries'
+import { createEmbedItemOutlineMasks } from '@/runtime/embedItemOutline'
+import {
+  getBlockGeometry,
+  getPartMaskGeometry,
+  gridCenterWorld,
+  currentFrameKey,
+} from '@/context/queries'
+import { buildItemHitIndex, type ItemHitIndex } from '@/pure/itemIndex'
+import {
+  EMPTY_ITEM_SELECTION,
+  applyItemRowClick,
+  clearItemSelection,
+  type ItemSelectionState,
+} from '@/pure/itemSelection'
+import { OUTLINE_MASK_LIMIT } from '@/pure/outlineLimits'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import { createHoverHandler } from '@/handlers/hoverHandler'
@@ -120,7 +134,19 @@ watch(() => ctx.getDoc().value, () => {
   didInitCamera.value = false
 })
 
+/**
+ * 旧文件（宿主清单）选中：单值，单击切换。
+ * B-5 的**物品行**选择不走这里——见下方 `itemSelection`（集合 + 锚点）。
+ */
 const selectedBlockId = ref<string | null>(null)
+
+/** B-5：左栏物品行选择（集合语义 + 锚点；语义实现 = `pure/itemSelection.ts`） */
+const itemSelection = shallowRef<ItemSelectionState>(EMPTY_ITEM_SELECTION)
+const selectedItemKeys = computed<ReadonlySet<string>>(() => itemSelection.value.selected)
+const selectionAnchor = computed<string | null>(() => itemSelection.value.anchor)
+
+/** B-2 落盘 `itemIndex` 的反查索引（消费点；旧文件缺省 ⇒ 空表 ⇒ 全部行"没有对应方块"） */
+const itemHitIndex = computed<ItemHitIndex>(() => buildItemHitIndex(structureDefinition.value))
 
 /** 勿用 ref：深度响应式会代理 Mesh，破坏 Three.js 矩阵访问 */
 const sidebarExtraMasks = shallowRef<THREE.Mesh[]>([])
@@ -133,6 +159,36 @@ const { rebuildSelectionMasks } = createEmbedSidebarOutlineMasks({
   masksRef: sidebarExtraMasks,
 })
 
+/**
+ * B-5：选中物品键集合 → mask。与 `rebuildSelectionMasks` 写入**同一个** `sidebarExtraMasks`
+ * 通道（`drw.bindSelectionOutline` 的 `extraMaskMeshes`），因此呈现与 hover 完全一致。
+ */
+const { rebuildItemSelectionMasks, plan: itemOutlinePlan } = createEmbedItemOutlineMasks({
+  definitionRef: vpSlot.definition,
+  masksRef: sidebarExtraMasks,
+  indexRef: () => itemHitIndex.value,
+  frameRef: () => currentFrameKey(ctx),
+  getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
+  gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
+  getPartMaskGeometry: (ref) => getPartMaskGeometry(ctx, ref),
+})
+
+/**
+ * 两条高亮路径**互斥**（部件文件走物品行、旧文件走宿主行），物品路径优先：
+ * 切换路径时先清空另一条，避免上一份 mask 残留叠加（两个 builder 共用同一个 mask 槽）。
+ * 定义变化（换帧/换文档）也要重算——命中下标是相对当前渲染定义解析的。
+ */
+function rebuildOutline(): void {
+  const keys = selectedItemKeys.value
+  if (keys.size > 0) {
+    rebuildSelectionMasks(null)
+    rebuildItemSelectionMasks(keys)
+    return
+  }
+  rebuildItemSelectionMasks(null)
+  rebuildSelectionMasks(selectedBlockId.value)
+}
+
 // ---- Tooltip text (extracted composable) ----
 const { tooltipText, neiTooltipMap, showMetaHint } = useEmbedTooltip({
   hoverRef: hover,
@@ -142,11 +198,55 @@ const { tooltipText, neiTooltipMap, showMetaHint } = useEmbedTooltip({
   docRef: ctx.getDoc(),
 })
 
+/**
+ * 左栏点选（B-5）：
+ *  - 物品行 → 经典多选（单击/Ctrl/Shift/Ctrl+Shift，语义在 `pure/itemSelection.ts`）；
+ *  - 旧文件宿主行 → 单击切换（`selectedBlockId`，registryId 匹配路径**逐项不变**）；
+ *  - 两条路径互斥：谁被点击谁生效，另一条被清空（避免残留高亮）。
+ */
 function onSidebarSelectBlock(blockId: string): void {
+  itemSelection.value = EMPTY_ITEM_SELECTION
   selectedBlockId.value = selectedBlockId.value === blockId ? null : blockId
 }
 
-watch(selectedBlockId, (id) => { rebuildSelectionMasks(id) })
+function onSidebarSelectItem(payload: {
+  key: string; order: readonly string[]; ctrl: boolean; shift: boolean
+}): void {
+  selectedBlockId.value = null
+  itemSelection.value = applyItemRowClick(itemSelection.value, payload.key, payload.order, {
+    ctrl: payload.ctrl,
+    shift: payload.shift,
+  })
+}
+
+/** Esc / 点左栏空白 = 清空（#38）；两条路径一并清掉 */
+function onSidebarClearSelection(): void {
+  selectedBlockId.value = null
+  itemSelection.value = clearItemSelection()
+}
+
+watch([selectedBlockId, itemSelection, vpSlot.definition], rebuildOutline)
+
+/**
+ * 选择状态提示（#38「不得静默失效」的呈现面）：
+ *  - 无对应项 / 归属不在当前帧：说明"选了也不会亮"以及为什么；
+ *  - 命中截断：命中总数超过描边通道上限 ⇒ 说明只亮了多少；
+ *  - `drw.outlineMaskStats.dropped > 0`：**通道级**收口（旧路径大命中集也走这条）。
+ */
+const selectionNotice = computed<string | null>(() => {
+  const parts: string[] = []
+  const p = itemOutlinePlan.value
+  if (p.selectedCount > 0) {
+    if (p.unresolvedCount > 0) parts.push(`${p.unresolvedCount} 项没有对应方块（已选中，不高亮）`)
+    if (p.offFrameCount > 0) parts.push(`${p.offFrameCount} 项的对应方块不在当前帧`)
+    if (p.truncated) parts.push(`命中 ${p.totalHits} 处，仅高亮前 ${p.shownHits} 处`)
+  }
+  const st = drw.outlineMaskStats.value
+  if (st.dropped > 0) {
+    parts.push(`高亮命中 ${st.total} 处超出上限 ${OUTLINE_MASK_LIMIT}，仅显示前 ${st.shown} 处`)
+  }
+  return parts.length > 0 ? parts.join('；') : null
+})
 
 function toggleFullscreen(): void {
   if (document.fullscreenElement) {
@@ -331,11 +431,17 @@ onBeforeUnmount(() => {
         :entries="blockStatsEntries" :cache="blockIconCache"
         :collapsed="sidebarCollapsed"
         :selected-block-id="selectedBlockId"
+        :selected-item-keys="selectedItemKeys"
+        :selection-anchor="selectionAnchor"
+        :item-index="itemHitIndex"
+        :selection-notice="selectionNotice"
         :tooltip-map="neiTooltipMap"
         :part-icon-textures="partIconTextures"
         @tooltip-hover="onSidebarTooltipHover"
         @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
         @select-block="onSidebarSelectBlock"
+        @select-item="onSidebarSelectItem"
+        @clear-selection="onSidebarClearSelection"
       />
       <div class="wm-viewport-column">
         <RenderEngineHost

@@ -11,8 +11,8 @@
  *  2. **红色必须来自断言，而不是解析失败**：每个用例先断言篡改副本仍正常加载
  *     （`injectSceneDocumentOk` 内部已断言 `docLoaded === true`），再用
  *     `captureAsyncFailure` 验证**断言确实抛出**。
- *  3. **证伪必须定向**：计数篡改只打红被篡改的物品行计数断言（同视图内未篡改行仍绿，
- *     见下方「定向性」注释 —— B-3 后宿主视图已不存在，定向性判据随之改写）；
+ *  3. **证伪必须定向**：计数篡改只打红被篡改的物品行计数断言（行集/顺序与同视图内
+ *     未篡改行仍绿 —— B-3 后宿主视图已不存在，定向性判据由"同页另一行不受影响"承担）；
  *     displayName 篡改只打红该部件的 tooltip/行名断言（同格另一部件仍绿）。
  */
 
@@ -102,17 +102,18 @@ test.describe('P2.5 证伪 · 篡改计数 → 统计断言必红', () => {
     expect(err, '计数篡改后统计断言必须抛出（必红）').not.toBeNull()
     console.log(`[P2.5] 证伪（计数 3→5）→ 断言红：${(err as Error).message.split('\n')[0]}`)
 
-    // ── 定向性：未被篡改的行（Fence 不受共享池 partLists[0] 影响）仍必须全绿 ──
-    //
-    // B-4 收口：原「切宿主视图 ⇒ 旧口径行集不动」用 B-3（决策 C）已整套移除的视图切换
-    // 驱动（`switchStatsView` 已删，宿主视图已不存在）⇒ 该定向性断言无法再以原形态成立。
-    // 改为**同视图内的定向性**（语义等价且更贴近当前契约）：篡改的污染面必须只落在
-    // 被篡改的物品行上，未篡改行逐项不变。
-    const fenceRow = dirty.rows.find((r) => r.key === 'minecraft:fence:0')
+    // ── 定向性：篡改只动 Stone Slab 的计数 —— 行集/顺序与同视图内未篡改行必须不随之变化 ──
+    //    （B-3 决策 C 已整套移除「宿主视图」切换（`switchStatsView` 已删）⇒ 原「切宿主视图 ⇒
+    //    旧口径行集不动」的定向性无法以原形态成立；改由同视图内定向性承担（语义等价且更贴近
+    //    当前契约）：篡改的污染面只落在被篡改的物品行上，未篡改行逐项不变。）
     expect(
-      [fenceRow?.name, fenceRow?.qty],
-      '未篡改行（Fence）不受共享池篡改影响',
-    ).toEqual(['Fence', '1'])
+      dirty.rows.map((r) => r.key),
+      '行集/顺序不因计数篡改而变化（slab 5 件仍居首）',
+    ).toEqual(['minecraft:stone_slab:0', 'minecraft:fence:0'])
+    expect(
+      dirty.rows.filter((r) => r.key !== 'minecraft:stone_slab:0').map((r) => [r.name, r.qty]),
+      '物品计数篡改不影响其它物品行（定向性）',
+    ).toEqual([['Fence', '1']])
 
     // 解析级对照：篡改后的部件数据沿 Grid API 透出（证明红来自数据而非管线崩坏）
     const cells = await readPartsObservation(page)

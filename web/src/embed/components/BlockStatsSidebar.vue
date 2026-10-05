@@ -42,6 +42,7 @@ import {
   type ItemStatsResult,
 } from '@/pure/partStats'
 import { buildItemStatsInput } from '@/render/interaction/partStatsAdapter'
+import { isItemUnresolved, type ItemHitIndex } from '@/pure/itemIndex'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition } from '@/render/schema/types'
 
@@ -57,6 +58,17 @@ const props = defineProps<{
   layerPreview?: LayerPreviewMode
   /** 部件物品图标纹理（物品身份键 → base64 PNG；P1.7/P1.8 嵌入纹理体系接入点，本轮 fixture 无） */
   partIconTextures?: Record<string, string> | null
+  /**
+   * B-5：**选中物品键集合**（物品行选中态的唯一数据位，取代单值语义）。
+   * 仅物品行读它；旧文件宿主行仍读 `selectedBlockId`（`registryId` 匹配路径逐项不变）。
+   */
+  selectedItemKeys?: ReadonlySet<string> | null
+  /** B-5：Shift 区间锚点行键（行内细标记，纯呈现；语义在 `pure/itemSelection.ts`） */
+  selectionAnchor?: string | null
+  /** B-5：物品索引反查表（`buildItemHitIndex` 产物）——无对应方块的行内标记判据 */
+  itemIndex?: ItemHitIndex | null
+  /** B-5：选择状态提示（无对应项 / 命中截断）；缺省 ⇒ 不渲染提示行 */
+  selectionNotice?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -66,7 +78,17 @@ const emit = defineEmits<{
       blockId: string; clientX: number; clientY: number; source: 'sidebar'
     } | null,
   ]
+  /** 旧文件宿主行点选（payload = 宿主键，逐项不变；单击切换由上层实现） */
   'select-block': [blockId: string]
+  /**
+   * B-5：物品行点选。payload 只携带**事实**（行键 + 当前可见顺序 + 修饰键），
+   * 选择语义（单击/Ctrl/Shift/Ctrl+Shift）由 `pure/itemSelection.ts` 在上层裁决。
+   */
+  'select-item': [
+    payload: { key: string; order: readonly string[]; ctrl: boolean; shift: boolean },
+  ]
+  /** B-5：清空选择（Esc / 点左栏空白；仅物品模式发出） */
+  'clear-selection': []
 }>()
 
 // ---------------------------------------------------------------------------
@@ -166,6 +188,9 @@ const RUBBER_K = 36
 let resizeObs: ResizeObserver | null = null
 let pullPointerId = -1
 let pullStartClientY = 0
+/** 最近一次 pointerdown 的位置：用于把"拖拽手势"与"点空白"区分开（见 `onGridClick`） */
+let clickStartX = 0
+let clickStartY = 0
 
 function rubberOffset(deltaY: number): number {
   const sign = Math.sign(deltaY) || 1
@@ -203,6 +228,8 @@ function onGridPointerDown(e: PointerEvent): void {
   if (!el || e.button !== 0) return
   pullPointerId = e.pointerId
   pullStartClientY = e.clientY
+  clickStartX = e.clientX
+  clickStartY = e.clientY
   isPullDragging.value = false
   const inner = el.firstElementChild as HTMLElement | null
   inner?.classList.remove('nei-sidebar-grid-inner--snap')
@@ -281,10 +308,12 @@ onMounted(() => {
     resizeObs = new ResizeObserver(() => resetPull(false))
     resizeObs.observe(el)
   }
+  document.addEventListener('keydown', onDocumentKeydown)
 })
 
 onBeforeUnmount(() => {
   resizeObs?.disconnect()
+  document.removeEventListener('keydown', onDocumentKeydown)
 })
 
 function onRowPointerEnter(e: PointerEvent, blockId: string): void {
@@ -298,6 +327,58 @@ function onRowPointerLeave(): void {
 }
 function onRowClick(blockId: string): void {
   emit('select-block', blockId)
+}
+
+// ---------------------------------------------------------------------------
+// B-5：物品行点选（经典多选）
+// ---------------------------------------------------------------------------
+
+/** 当前左栏**可见顺序**（物品行键数组；区间选择在它上面生效，#7 §5 硬约束） */
+function visibleItemOrder(): string[] {
+  return statsResult.value?.rows.map((r) => r.key) ?? []
+}
+
+/** 物品行点击：只上报事实（修饰键 + 可见顺序），语义由上层 `pure/itemSelection.ts` 裁决 */
+function onItemRowClick(e: MouseEvent, key: string): void {
+  emit('select-item', {
+    key,
+    order: visibleItemOrder(),
+    ctrl: e.ctrlKey || e.metaKey,
+    shift: e.shiftKey,
+  })
+}
+
+/** 行是否选中（集合语义；旧路径的 `selectedBlockId` 单值语义不参与） */
+function isItemRowSelected(key: string): boolean {
+  return props.selectedItemKeys?.has(key) === true
+}
+
+/** 该物品**没有对应方块**（索引无条目 / 显式无对应）⇒ 行内标记 + "可选中、不高亮"提示 */
+function isUnresolvedItem(key: string): boolean {
+  return isItemUnresolved(props.itemIndex, key)
+}
+
+/**
+ * 点左栏空白 = 清空选择（#38）。判定方式：命中链上不存在 `.nei-slot-row`
+ * （行、行内图标与文本都算"点行"，其余算空白）。
+ *
+ * 拖拽手势不算"点空白"：滚动/下拉回弹结束时浏览器同样会派发 click，
+ * 故与最近一次 pointerdown 的位置比较（位移 > 4px ⇒ 视为拖拽，不清空）。
+ * 仅在物品模式（`statsResult`）生效——旧文件宿主清单路径逐项不变（不引入新交互）。
+ */
+function onGridClick(e: MouseEvent): void {
+  if (!statsResult.value) return
+  if (Math.hypot(e.clientX - clickStartX, e.clientY - clickStartY) > 4) return
+  const t = e.target as HTMLElement | null
+  if (t?.closest('.nei-slot-row')) return
+  emit('clear-selection')
+}
+
+/** Esc = 清空选择（同一路径；同样只在物品模式生效） */
+function onDocumentKeydown(e: KeyboardEvent): void {
+  if (e.key !== 'Escape') return
+  if (!statsResult.value) return
+  emit('clear-selection')
 }
 
 function formatBlockId(id: string): string {
@@ -378,6 +459,7 @@ function edgeGlowOpacity(active: boolean): number {
         @pointermove="onGridPointerMove"
         @pointerup="endPull"
         @pointercancel="endPull"
+        @click="onGridClick"
       >
         <div
           class="nei-sidebar-grid-inner nei-sidebar-grid-inner--snap"
@@ -386,8 +468,8 @@ function edgeGlowOpacity(active: boolean): number {
         >
           <!--
             部件模式：只列物品行（引擎 StatsRow 原样呈现；行键 = 图标键 = 物品身份键，
-            名称 = 游戏内显示名）。悬停/点选事件照发（payload = 物品身份键）——
-            B-4 物品 TooltipBox / B-5 有对应规则时点选高亮在此接入。
+            名称 = 游戏内显示名）。悬停事件照发（payload = 物品身份键）；
+            点选（B-5）= 经典多选，选中态为**集合语义**（`selectedItemKeys`）。
           -->
           <template v-if="statsResult">
             <div
@@ -395,17 +477,32 @@ function edgeGlowOpacity(active: boolean): number {
               class="nei-stats-itemless"
               data-stats-itemless
             >{{ statsResult.itemlessPartCount }} 个无物品部件未计入清单</div>
+            <!-- B-5：选择状态提示（无对应项 / 命中截断）——不得静默失效 -->
+            <div
+              v-if="selectionNotice"
+              class="nei-stats-notice"
+              data-stats-selection-notice
+              role="status"
+            >{{ selectionNotice }}</div>
             <div
               v-for="row in statsResult.rows"
               :key="row.key"
               class="nei-slot-row"
-              :class="{ 'nei-slot-row--collapsed': collapsed }"
+              :class="{
+                'nei-slot-row--collapsed': collapsed,
+                'nei-slot-row--selected': isItemRowSelected(row.key),
+                'nei-slot-row--unresolved': isUnresolvedItem(row.key),
+                'nei-slot-row--anchor': selectionAnchor === row.key,
+              }"
               :data-stats-row-key="row.key"
               :data-stats-icon-key="row.iconKey"
+              :data-stats-selected="isItemRowSelected(row.key) ? 'true' : 'false'"
+              :data-stats-unresolved="isUnresolvedItem(row.key) ? 'true' : 'false'"
+              :data-stats-anchor="selectionAnchor === row.key ? 'true' : 'false'"
               @pointerenter="onRowPointerEnter($event, row.key)"
               @pointermove="onRowPointerMove($event, row.key)"
               @pointerleave="onRowPointerLeave"
-              @click="onRowClick(row.key)"
+              @click="onItemRowClick($event, row.key)"
               :title="collapsed ? rowLabel(row) : undefined"
             >
               <BlockSlotPreview
@@ -415,7 +512,15 @@ function edgeGlowOpacity(active: boolean): number {
               />
               <template v-if="!collapsed">
                 <div class="nei-slot-info">
-                  <div class="nei-slot-name">{{ rowLabel(row) }}</div>
+                  <div class="nei-slot-name">
+                    {{ rowLabel(row) }}<span
+                      v-if="isUnresolvedItem(row.key)"
+                      class="nei-slot-unresolved-dot"
+                      data-stats-unresolved-dot
+                      title="没有对应方块"
+                      aria-label="没有对应方块"
+                    />
+                  </div>
                   <div class="nei-slot-id">{{ rowSubLabel(row) }}</div>
                 </div>
                 <span class="nei-slot-qty">{{ formatCount(row.count) }}</span>
@@ -545,6 +650,20 @@ function edgeGlowOpacity(active: boolean): number {
   border: 1px dashed var(--nei-border-panel);
 }
 
+/*
+ * B-5 选择状态提示（无对应项 / 命中截断）：与行同宽的一条窄带，颜色取警告色
+ * ——"有话说但不阻断操作"（不得静默失效的呈现面）。
+ */
+.nei-stats-notice {
+  margin: 2px 4px;
+  padding: 3px 6px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--nei-warn-text);
+  background: var(--nei-bg-panel);
+  border: 1px dashed var(--nei-border-panel);
+}
+
 .nei-sidebar-empty {
   display: flex;
   flex-direction: column;
@@ -656,6 +775,54 @@ function edgeGlowOpacity(active: boolean): number {
 }
 .nei-slot-row--selected {
   background: var(--nei-accent-glow);
+}
+/*
+ * B-5 选中态（集合语义）与"无对应方块"标记共存：
+ *  - `--unresolved`：行内色点（见 `.nei-slot-unresolved-dot`）+ 左侧警示细条
+ *    ——该行可选中，但**永远不会亮**；混选时逐项可辨认（#38 硬约束）。
+ *  - `--selected.--unresolved`：换成"选中但不会亮"的虚线边框，与"已选中且会亮"区分。
+ *  - `--anchor`：Shift 区间锚点，左侧 2px 强调条（不改行内布局）。
+ */
+.nei-slot-row--unresolved {
+  position: relative;
+}
+.nei-slot-row--unresolved::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--nei-warn-text);
+  opacity: 0.75;
+}
+.nei-slot-row--anchor {
+  position: relative;
+}
+.nei-slot-row--anchor::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--nei-accent);
+}
+.nei-slot-row--selected.nei-slot-row--unresolved {
+  background: var(--nei-bg-hover);
+  box-shadow: inset 0 0 0 1px var(--nei-warn-text);
+}
+.nei-slot-unresolved-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  vertical-align: middle;
+  background: var(--nei-warn-text);
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4);
+}
+.nei-slot-row--collapsed .nei-slot-unresolved-dot {
+  display: none;
 }
 .nei-slot-row--collapsed {
   box-sizing: border-box;

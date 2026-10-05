@@ -17,12 +17,19 @@
 | 文件 | 作用 |
 |------|------|
 | `helpers/parts/hover.ts` | Wiki 工作区切入（生产 WorkspaceTabs DOM click）、格内局部坐标 → 正交相机投影 → `pointermove` 注入、悬停状态/tooltip DOM 读取 |
-| `helpers/parts/statsSidebar.ts` | 统计侧栏 DOM 读取（物品行 `data-stats-row-key`/`data-stats-icon-key`、`[data-stats-itemless]` 提示行、**行图标槽 canvas**）、窄布局自愈展开、**B-3 移除锁读取**（视图切换/徽标/provenance 入口计数 + `lightning:stats:v1:*` 残留键） |
+| `helpers/parts/statsSidebar.ts` | 统计侧栏 DOM 读取（物品行键/图标键/**B-5 选中态 / 无对应标记 / 锚点 / 会话提示**、`[data-stats-itemless]` 提示行、窄布局自愈展开、**稳定性等待**）、**B-5 点选驱动**（`clickStatsRow` / `clickStatsBlank` / `pressStatsEscape`）、**行图标槽 canvas**、**B-3 移除锁读取**（视图切换/徽标/provenance 入口计数 + `lightning:stats:v1:*` 残留键） |
 | `helpers/parts/fixtures.ts` | fixture 只读读取、内存深拷贝、**几何增强**（双绕组面追加）、textureBlobs 归一化、解析级部件观测（Grid API；含盒快照与 `properties`） |
 | `helpers/parts/realExport.ts` | **P3.1**：真实产物/oracle 读入与定位（`PARTS_ACCEPTANCE_DIR`）、`grid:[zi,ri,ci]` 格映射、**探针候选点推导**、`probePartHover`/`probeAnyOfParts`、运行时定义根字段存活观测 |
-| `../../parts-hover-stats.spec.ts` | P2.5 主断言包：加载解析 / 悬停 / 统计物品清单 + **B-3 移除锁**（视图切换/徽标/provenance 入口不存在、残留本机配置不读写）/ 图标键 / 无部件回归 |
+| `../../parts-hover-stats.spec.ts` | P2.5 主断言包：加载解析 / 悬停 / 统计（物品清单 + 无对应标记）+ **B-3 移除锁**（视图切换/徽标/provenance 入口不存在、残留本机配置不读写）/ 图标键 / 无部件回归 |
+| `../../parts-item-select-b5.spec.ts` | **B-5 主断言包**：点选物品行 → **生产描边通道** mask（部件级 / 并集 / 无对应不高亮 / 多选语义 / 证伪） |
 | `../../parts-falsification.spec.ts` | P2.5 证伪：篡改计数 / displayName 的内存副本 → 对应断言必红 + 定向对照仍绿 |
 | `../../parts-real-export.spec.ts` | **P3.1 主断言包（真实产物）**：加载渲染 / 解析级逐格与 oracle 一致 / 单盒区悬停 / AE2 同格多部件不同 tooltip / 满方块回归 / 统计与 `expectedCounts` 精确比对 / **F1F2 修复锁（正向）** / degraded_all 档位与统计 |
+
+> **⚠️ 已移除 UI 的断言不留**（B-3 决策 C 移除了「视图切换工具条 / 视图按钮 / 配置来源徽标 /
+> provenance 面板 / 宿主行」；B-4/B-5 接手物品行的悬停说明与点选）。本目录与三个 spec 中
+> 面向这些 UI 的读取器与断言**已整套删除**（`switchStatsView` / `readProvenance` /
+> `toolbar` / `viewButtons` / `pill` / `data-stats-row-kind`）——留着就是确定性坏断言。
+> 现行可读面见 `statsSidebar.ts` 文件头。
 
 ## 2. 为什么经 Wiki 工作区（EmbedPreview）
 
@@ -50,9 +57,13 @@ src 侧后门。
 3. **mobile 窄布局自动折叠振荡（实现发现，不代修）**：展开侧栏 → 嵌入根宽
    361→445px → profile tiny→narrow → 生产 watcher ~50ms 内再折叠。展开按钮
    在该带宽带自失效；窄布局折叠本身是 embed-mobile.spec 锁定的预期。
-   因此**展开态统计交互（行文本/移除锁读数）仅 desktop 跑**
+   因此**展开态统计交互（行文本 / 移除锁读数 / B-5 点选）仅 desktop 跑**
    （`EXPANDED_SIDEBAR_DESKTOP_ONLY`），mobile 跑解析级 + 悬停（不依赖展开态）。
    P3.1 包同此口径（AE2 同格多部件需多轮候选试探，另记一条 desktop-only 理由）。
+   **B-5 追加实测**：装配期重挂载会连 **EmbedViewport 自身**一起重建（`sidebarCollapsed`
+   被重置即证据），视口侧的选择状态随之归零 ⇒ 过早驱动点选会被静默吞掉。故
+   `waitStatsSidebarStable`（连续两次读数一致）是 `clickStatsRow` 的前置条件；
+   B-5 主断言包用它在每次点选前越过该窗口。
 4. **B-3（决策 C）后的收口（B-4 顺手项）**：视图切换工具条 / 视图按钮 / 配置来源徽标 /
    provenance 面板 / 分组标题整套移除后，本包原有的 `switchStatsView` / `readProvenance` /
    `viewButtons` / `pill` / `data-stats-row-kind` 读取全部指向**已不存在的 DOM** —— 按它们写的

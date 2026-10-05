@@ -437,6 +437,9 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
     ).toBe(EXPECTED_COUNTS_TOTAL)
 
     // ── 默认视图 = 物品清单，行/计数与 oracle 精确一致 ──
+    //    （B-3 决策 C 已移除"视图切换工具条 / 视图按钮 / 配置来源徽标 / provenance 面板"：
+    //     此处不再有它们的断言——读已移除的 UI 只会造出确定性坏断言；工具条的不存在
+    //     由下面的移除锁计数断言锁定。）
     expect(s.legacyToolbar, 'B-3：已移除的视图切换工具条不渲染').toBe(false)
     const rowsByKey = new Map(s.rows.map((r) => [r.key!, r]))
     expect(s.rows.length, '统计行数 = oracle 条目数（无多行/少行）').toBe(ORACLE_FULL.expectedCounts.length)
@@ -459,7 +462,9 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
     // ── 名称与图标键：名称取部件显示名（文件自带），图标键 = 物品身份键 ──
     const names = displayNamesByTypeKey(FULL)
     for (const r of s.rows) {
-      expect(r.key, 'B-3 后左栏只有物品行 ⇒ 行必须带 data-stats-row-key').not.toBeNull()
+      // 物品行带行键（B-3 后左栏只有物品行；旧文件宿主清单行无 `data-stats-row-key` ⇒ null）
+      expect(r.key, '统计行必须是物品行（带 data-stats-row-key）').not.toBeNull()
+      expect(r.iconKey, `行 ${r.key} 图标键在位`).not.toBeNull()
       const wantNames = names.get(r.key!)
       expect(wantNames, `行 ${r.key} 在导出文件里有对应部件`).toBeTruthy()
       expect([...wantNames!], `行 ${r.key} 显示名唯一`).toHaveLength(1)
@@ -467,6 +472,12 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
       // 图标键 = 物品身份键（`registry:damage[#nbt]`），不是宿主方块键（registryId / registryId@meta）
       expect(r.iconKey, `行 ${r.key} 图标键 = 物品身份键`).toBe(r.key)
     }
+
+    // ── B-5：无对应标记的分布（如实登记，不断言具体值）──
+    //    本轮 `parts-acceptance` 归档早于 B-2 的物品索引表落盘，故行上的
+    //    `data-stats-unresolved` 取值取决于归档是否带 `itemIndex`；这里只做**可读留痕**，
+    //    硬断言放在 `parts-hover-stats.spec.ts`（fixture 内联构造 itemIndex，确定可判）。
+    const unresolvedRows = s.rows.filter((r) => r.unresolved).length
 
     // ── B-3 移除锁（契约 §9 兼容口径）：视图切换 / 来源徽标 / provenance 入口都不存在 ──
     const legacyUi = await readLegacyStatsUiAbsent(page)
@@ -480,6 +491,7 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
     await page.locator('.wb-wiki-embed .nei-sidebar').screenshot({ path: path.join(SHOT_DIR, 'real-export-stats.png') })
     console.log(
       `[P3.1-L2] 真实导出统计：${s.rows.length} 行与 oracle 精确一致（共 61 件）；` +
+        `无对应标记行 ${unresolvedRows}/${s.rows.length}（归档无 itemIndex 时全标记）；会话提示「${s.notice ?? '<无>'}」；` +
         `B-3 已移除 UI 计数 = ${JSON.stringify(legacyUi.counts)}`,
     )
   })
@@ -516,6 +528,9 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
    *     —— 这是 F2 接线的生产可观测结果（`helpers/parts/statsSidebar.ts#waitStatsRowIcons`）。
    *     `iconKey` 不在纹理表里的行（实测 = FMP 的 `#mat=` 类型键与 `partIconTextures` 的
    *     物品身份键 `#<mat>` 拼写差异）走回退链，**不判红但如实登记**为 finding（见下方 payload）。
+   *
+   * 注：原 ③ 是「配置来源徽标 = `document-default`」——该 UI 已随 **B-3 决策 C** 整套移除
+   * （视图切换/徽标/provenance），故断言删除，只保留文档根字段的存活与逐值一致。
    */
   test('F1/F2 修复锁：文件带 statsTemplate/partIconTextures，真实导出链上二者均生效', async ({ page }, testInfo) => {
     test.skip(
@@ -535,7 +550,9 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
     const obs = await readDefinitionRootFields(page, WIKI_REGION)
     const s = await readStatsSidebarSettled(page)
 
-    // ── F1：运行时定义根带着**同一份**文档默认统计层 → 徽标 = 文档默认 ──
+    // ── F1：运行时定义根带着**同一份**文档默认统计层 ──
+    //    （B-3 决策 C 移除了配置来源徽标这一消费方 ⇒ 不再断言徽标；文档根字段的
+    //     存活与逐值一致仍在此正面锁定。）
     expect(obs.hasStatsTemplate, 'F1：真实导出经 StructureData 解析链后 statsTemplate 可得').toBe(true)
     expect(obs.statsTemplate, 'F1：定义根的 statsTemplate 与文件逐值一致').toEqual(FULL.statsTemplate)
     // B-3（决策 C）后 statsTemplate 的**语义已作废**：字段仍透传（F1 正向锁在上一行），
@@ -551,7 +568,7 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
 
     // 「物品行」判据 = 行带 data-stats-row-key（B-3 后无 row-kind 属性，见 compactRows 注释）
     const partRows = s.rows.filter((r) => r.key !== null)
-    expect(partRows.length, '统计侧栏渲染出部件行').toBeGreaterThan(0)
+    expect(partRows.length, '统计侧栏渲染出物品行').toBeGreaterThan(0)
     const coveredRows = partRows.filter((r) => r.iconKey !== null && fileIconKeys.includes(r.iconKey))
     expect(
       coveredRows.length,
@@ -604,6 +621,16 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
         statsOverride: (FULL.raw as Record<string, unknown>).statsOverride ?? null,
       },
       definitionRoot: obs,
+      /**
+       * B-5：侧栏选择面的当前读数（徽标/provenance 已随 B-3 决策 C 移除，不再落盘）。
+       * `unresolvedRows` 取决于归档是否带 B-2 的 `itemIndex`（本轮归档早于 B-2）——
+       * 如实留痕，硬断言在 `parts-hover-stats.spec.ts`（fixture 内联 itemIndex）。
+       */
+      statsSidebar: {
+        rows: s.rows.length,
+        unresolvedRows: s.rows.filter((r) => r.unresolved).length,
+        notice: s.notice,
+      },
       /** B-3（决策 C）后 statsTemplate 语义作废：改为登记「相关 UI 入口都不渲染」的移除锁计数。 */
       legacyStatsUiCounts: legacyUi.counts,
       statsRows: s.rows.length,
@@ -739,8 +766,10 @@ test.describe('P3.1 · 退化导出（degraded_all）：档位标记 + 统计行
     )
     expect(s.legacyToolbar, 'B-3：已移除的视图切换工具条不渲染（退化导出同为含部件文档）').toBe(false)
     expect(s.rows.length, '退化档统计行非空（推断档部件进入清单）').toBeGreaterThan(0)
+    // 行集 = 物品行（旧宿主清单行无行键）；图标键 = 物品身份键
+    // （工具条/视图按钮/徽标已随 B-3 决策 C 移除 ⇒ 不再有它们的断言）
     for (const r of s.rows) {
-      expect(r.key, `退化档行 ${r.key} 仍是物品行（带 data-stats-row-key）`).not.toBeNull()
+      expect(r.key, `退化档行 ${r.key} 是物品行（带 data-stats-row-key）`).not.toBeNull()
       expect(r.iconKey, `退化档行 ${r.key} 图标键 = 物品身份键`).toBe(r.key)
     }
 

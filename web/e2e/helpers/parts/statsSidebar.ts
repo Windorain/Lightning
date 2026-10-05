@@ -1,23 +1,27 @@
 /**
- * P2.5 部件断言包 —— 统计侧栏 DOM 读取/驱动 helper（零替身）。
+ * 部件断言包 —— 统计侧栏 DOM 读取/驱动 helper（零替身）。
  *
- * 观测面 = `BlockStatsSidebar.vue` 渲染的生产 DOM（**B-3 / 决策 C 后的形态**）：
+ * 观测面 = `BlockStatsSidebar.vue` 渲染的生产 DOM。**形态口径随 B-3（决策 C）、B-4（#37）与
+ * B-5（#38）更新**：
+ *  - B-3 移除了视图切换工具条 / 视图按钮 / 配置来源徽标 / provenance 面板 / 分组标题 / 宿主行
+ *    ⇒ 本 helper 不再有 `toolbar` / `viewButtons` / `pill` / `readProvenance` / `switchStatsView`
+ *    （读已不存在的 UI 只会造出**确定性坏断言**，故整套删除而非留着）；契约 §9 的兼容口径
+ *    （旧文档携带 `statsTemplate`/`statsOverride` ⇒ 静默忽略）改由**移除锁**观测：
+ *    `legacyToolbar` / `readLegacyStatsUiAbsent`；
  *  - 行 `.nei-slot-row`：**只有物品行一种**，带 `data-stats-row-key`（= 物品身份键
- *    `registry:damage[#nbt]`）与 `data-stats-icon-key`（= 行键恒等）；
- *    旧文件退化路径的行**无任何 data 属性**（DOM 零新增退化的直接证据）；
+ *    `registry:damage[#nbt]`）与 `data-stats-icon-key`（= 行键恒等）；旧文件退化路径的行
+ *    **无任何 data 属性**（DOM 零新增的直接证据），且**不带** B-5 的选中态/无对应数据位。
+ *    侧栏的「有部件 / 无部件」活性判据 = 行上有无 `data-stats-row-key`；
  *  - 「N 个无物品部件未计入清单」提示行 `[data-stats-itemless]`；
- *  - 行图标槽 `.nei-slot-preview-icon`：`BlockSlotPreview` 只在缓存条目 ready 时挂 canvas
- *    ⇒ "槽内有 canvas" = 该图标键解析出了图标（F2 嵌入纹理通道的生产可观测结果，
- *    见 `readStatsRowIcons` / `waitStatsRowIcons`）。
+ *  - B-5 起物品行有**选中态集合**与会话提示：`[data-stats-selected]` / `[data-stats-unresolved]`
+ *    （+ 行内色点 `[data-stats-unresolved-dot]`，title = "没有对应方块"）/ `[data-stats-anchor]`
+ *    / `[data-stats-selection-notice]`；点选驱动 = 真实 DOM `click`（含 Ctrl/Shift 修饰键）。
  *
- * ── B-4 收口（Gitea #37 顺手项，B-3 遗留）──────────────────────────────
- * B-3 已把「视图切换工具条 / 视图按钮 / 配置来源徽标 / provenance 面板 / 分组标题」整套
- * 移除（决策 C）。本文件曾按**已移除的 UI** 写有 `switchStatsView` / `readProvenance` /
- * `viewButtons` / `pill` / `data-stats-row-kind` 等读取与驱动：这些选择器在生产 DOM 里
- * 恒不存在（`row-kind` 属性 B-3 起根本不渲染），按其写的断言**永远不可能通过**——是
- * 确定性坏断言，已删除。契约 §9 的兼容口径（旧文档携带 `statsTemplate`/`statsOverride`
- * ⇒ 静默忽略）改由**移除锁**观测：`legacyToolbar` / `readLegacyStatsUiAbsent`。
- * 侧栏的「有部件 / 无部件」活性判据 = 行上有无 `data-stats-row-key`。
+ * 行图标槽 `.nei-slot-preview-icon`：`BlockSlotPreview` 只在缓存条目 ready 时挂 canvas
+ * ⇒ "槽内有 canvas" = 该图标键解析出了图标（F2 嵌入纹理通道的生产可观测结果，
+ * 见 `readStatsRowIcons` / `waitStatsRowIcons`）。
+ *
+ * 驱动 = 生产 DOM 的真实事件注入；不触碰 src 内部函数。
  */
 
 import { expect, type Page } from '@playwright/test'
@@ -26,6 +30,12 @@ import { WIKI_EMBED } from './hover'
 
 export const STATS_SIDEBAR = `${WIKI_EMBED} .nei-sidebar`
 export const STATS_ROWS = `${WIKI_EMBED} .nei-slot-row`
+export const STATS_ITEMLESS = `${WIKI_EMBED} [data-stats-itemless]`
+export const STATS_SELECTION_NOTICE = `${WIKI_EMBED} [data-stats-selection-notice]`
+
+export const statsRow = (key: string): string => `${WIKI_EMBED} [data-stats-row-key="${key}"]`
+export const statsRowDot = (key: string): string =>
+  `${WIKI_EMBED} [data-stats-row-key="${key}"] [data-stats-unresolved-dot]`
 
 // ---------------------------------------------------------------------------
 // 移除锁选择器（B-3 / 决策 C 之后必须恒不存在；负向断言用）
@@ -49,14 +59,20 @@ export const STATS_ROW_KIND = `${WIKI_EMBED} [data-stats-row-kind]`
 export interface StatsRowObservation {
   /** 行身份键（物品行 = 物品身份键 `registry:damage[#nbt]`）。旧路径行 = null。 */
   key: string | null
-  /** 图标键（P2.4 图标断言的观测点；与 `key` 恒等）。旧路径行 = null。 */
+  /** 图标键（与 `key` 恒等；P2.4 图标断言的观测点）。旧路径行 = null。 */
   iconKey: string | null
-  /** 显示名（`.nei-slot-name`）。 */
+  /** 显示名（`.nei-slot-name` 文本；无对应项的行内色点不带文本，不影响本读数）。 */
   name: string
   /** 副标题（`.nei-slot-id`，去 modid 前缀）。 */
   sub: string
   /** 计数文本（`.nei-slot-qty`）。 */
   qty: string
+  /** B-5 选中态（集合语义）。 */
+  selected: boolean
+  /** B-5「没有对应方块」（索引无条目 / 显式无对应）。 */
+  unresolved: boolean
+  /** B-5 Shift 区间锚点行。 */
+  anchor: boolean
 }
 
 export interface StatsSidebarObservation {
@@ -71,6 +87,8 @@ export interface StatsSidebarObservation {
   legacyToolbar: boolean
   /** 「N 个无物品部件未计入清单」提示行（无 ⇒ null）。 */
   itemless: string | null
+  /** B-5 选择状态提示（无对应项 / 命中截断；无 ⇒ null）。 */
+  notice: string | null
   rows: StatsRowObservation[]
 }
 
@@ -79,7 +97,7 @@ export async function readStatsSidebar(page: Page): Promise<StatsSidebarObservat
   return await page.evaluate(() => {
     const sidebar = document.querySelector('.wb-wiki-embed .nei-sidebar')
     if (!sidebar) {
-      return { present: false, collapsed: false, legacyToolbar: false, itemless: null, rows: [] }
+      return { present: false, collapsed: false, legacyToolbar: false, itemless: null, notice: null, rows: [] }
     }
     const rows = [...sidebar.querySelectorAll('.nei-slot-row')].map((r) => ({
       key: r.getAttribute('data-stats-row-key'),
@@ -87,12 +105,17 @@ export async function readStatsSidebar(page: Page): Promise<StatsSidebarObservat
       name: (r.querySelector('.nei-slot-name')?.textContent ?? '').trim(),
       sub: (r.querySelector('.nei-slot-id')?.textContent ?? '').trim(),
       qty: (r.querySelector('.nei-slot-qty')?.textContent ?? '').trim(),
+      selected: r.getAttribute('data-stats-selected') === 'true'
+        || r.classList.contains('nei-slot-row--selected'),
+      unresolved: r.getAttribute('data-stats-unresolved') === 'true',
+      anchor: r.getAttribute('data-stats-anchor') === 'true',
     }))
     return {
       present: true,
       collapsed: sidebar.classList.contains('nei-sidebar--collapsed'),
       legacyToolbar: !!sidebar.querySelector('.nei-stats-toolbar'),
       itemless: sidebar.querySelector('[data-stats-itemless]')?.textContent?.trim() ?? null,
+      notice: sidebar.querySelector('[data-stats-selection-notice]')?.textContent?.trim() ?? null,
       rows,
     }
   })
@@ -134,6 +157,79 @@ export async function waitStatsSidebarReady(page: Page, timeout = 60_000): Promi
  */
 export async function readStatsSidebarSettled(page: Page, timeout = 30_000): Promise<StatsSidebarObservation> {
   return await pollUntil(() => expandSidebarSelfHealing(page), '统计侧栏展开态读数', timeout)
+}
+
+// ---------------------------------------------------------------------------
+// B-5：物品行点选驱动（经典多选；语义见 `web/src/pure/itemSelection.ts`）
+// ---------------------------------------------------------------------------
+
+/** 行点击的修饰键（`ctrl` 同时覆盖 Cmd/Meta —— 与生产 `ctrlKey || metaKey` 同义） */
+export interface RowClickMods {
+  ctrl?: boolean
+  shift?: boolean
+}
+
+/**
+ * 等侧栏**稳定**：连续两次读数（相隔 `quietMs`）的行键序列一致。
+ *
+ * 为什么必须：装配期 `loadStructureAndResources` 重跑 → icon cache 重建 →
+ * **EmbedViewport 自身重挂载**（P2.5 实证：`sidebarCollapsed` 会被重置回初值）
+ * ⇒ 选择状态（B-5 的 `itemSelection`）一并归零。过早驱动点选，选中态会被
+ * 随后的重挂载静默吞掉（B-5 首轮实测：单击后读到"无选中"）。故**任何点选驱动
+ * 都要先越过这个窗口**；`clickStatsRow` 内部已调用本函数。
+ */
+export async function waitStatsSidebarStable(
+  page: Page,
+  quietMs = 500,
+  timeout = 30_000,
+): Promise<StatsSidebarObservation> {
+  const deadline = Date.now() + timeout
+  let last: string | null = null
+  for (;;) {
+    const s = await expandSidebarSelfHealing(page)
+    if (!s) {
+      last = null
+    } else {
+      const sig = `${s.collapsed}|${s.rows.map((r) => r.key).join(',')}`
+      if (sig === last) return s
+      last = sig
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`统计侧栏未在 ${timeout}ms 内稳定（装配期重挂载未收敛）`)
+    }
+    await page.waitForTimeout(quietMs)
+  }
+}
+
+/**
+ * 点物品行（生产 DOM 真实 `click`，带修饰键）。
+ *
+ * 为什么 `dispatchEvent` 而非 `click()`：同 `expandSidebarSelfHealing` 的窄布局裁剪理由；
+ * 派发的仍是真实 DOM click，走同一 `@click` 监听与 Vue 的修饰键快照。
+ * 点击前先等侧栏稳定（见 `waitStatsSidebarStable`），点击后等一帧让选择集与 mask 重建落定。
+ */
+export async function clickStatsRow(
+  page: Page,
+  key: string,
+  mods: RowClickMods = {},
+  timeout = 15_000,
+): Promise<StatsSidebarObservation> {
+  await pollUntil(
+    async () => {
+      const s = await expandSidebarSelfHealing(page)
+      return s && s.rows.some((r) => r.key === key) ? s : null
+    },
+    `物品行 ${key} 出现在侧栏`,
+    timeout,
+  )
+  await waitStatsSidebarStable(page, 500, timeout)
+  await page.locator(statsRow(key)).dispatchEvent('click', {
+    ctrlKey: mods.ctrl === true,
+    metaKey: false,
+    shiftKey: mods.shift === true,
+  })
+  await page.waitForTimeout(120)
+  return await readStatsSidebar(page)
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +284,28 @@ export async function readLegacyStatsUiAbsent(page: Page): Promise<LegacyStatsUi
       legacyLocalKeys: keys.sort(),
     }
   })
+}
+
+/** 点左栏空白（`Esc` 之外的第二条清空路径）。 */
+export async function clickStatsBlank(page: Page): Promise<StatsSidebarObservation> {
+  await page.locator(`${STATS_SIDEBAR} .nei-sidebar-grid`).dispatchEvent('click')
+  await page.waitForTimeout(120)
+  return await readStatsSidebar(page)
+}
+
+/** 按 Esc（清空选择；生产在 `document` 上监听）。 */
+export async function pressStatsEscape(page: Page): Promise<StatsSidebarObservation> {
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(120)
+  return await readStatsSidebar(page)
+}
+
+/**
+ * 选中行键（**按渲染顺序**，即左栏可见顺序）。
+ * 物品行固定"数量降序 / 并列键字典序"，故该数组与点击顺序无关——断言要用可见顺序写。
+ */
+export function selectedRowKeys(s: StatsSidebarObservation): string[] {
+  return s.rows.filter((r) => r.selected).map((r) => r.key ?? '')
 }
 
 // ---------------------------------------------------------------------------
