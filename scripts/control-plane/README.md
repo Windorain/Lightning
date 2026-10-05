@@ -492,15 +492,18 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行�
      `parts=[{中心缆 UNKNOWN, meta 16},{切换总线 NORTH, meta 80},{存储总线 UP, meta 220}]`
      （中心缆写在 `parts[]` **最前**：AE2 的 `canAddPart` 拿中心缆类型校验各面部件）；
   2. `block @65` 缆块 → `te @65` `parts=[{中心缆 UNKNOWN, meta 16}]`（第二根缆，制造相邻缆格）；
-  3. `block @66` = `minecraft:chest` → `te @66` `completer:"vanilla"`；
-  4. `wait 20`；
-- `capture`：同 §10.2；`cameras` 3 个 1280×720：
+  3. `block @66` = `minecraft:chest`（meta 3，按世界实写值声明） → `te @66` `completer:"vanilla"`；
+  4. **K1 器具**：`block @[64,12,90]` = `minecraft:chest`（meta 3）→ `te` `completer:"vanilla"`
+     （门控专用箱，远离 AE2 场景 26 格；清场区相应扩到 z=94）；
+  5. `wait 20`；
+- `capture`：同 §10.2；`cameras` 4 个：
 
-  | 机位 | pos | 投影 | 与缆的距离 | 作用 |
+  | 机位 | pos | 投影 | 与门控箱的距离 | 作用 |
   |---|---|---|---|---|
-  | `near` | `[70.5,15.5,69.5]` | perspective fov 70 | ≈8.7 格（**门内** <30） | 部件必被渲染 ⇒ `image-not-uniform` |
-  | `ortho-top` | `[65.0,18.0,64.0]` pitch 90 | ortho orthoHeight 12 | ≈5.5 格（**门内**） | 正交俯视的部件可见性；阈值按大范围小场景放宽（同 §9.7 留白 4） |
-  | `far` | `[105.5,13.5,64.5]` pitch 40 | perspective fov 70 | ≈41.0 格（**门外** >30） | 缆被距离门剔除 ⇒ 画面以纯色背景为主 ⇒ `image-uniform`（阈值 0.5，见 §10.7 留白 5） |
+  | `near` | `[70.5,15.5,69.5]` | perspective fov 70, 1280×720 | — | AE2 部件必被渲染 ⇒ `image-not-uniform` |
+  | `ortho-top` | `[65.0,18.0,64.0]` pitch 90 | ortho orthoHeight 12, 1280×720 | — | 正交俯视的部件可见性；阈值按大范围小场景放宽（同 §9.7 留白 4） |
+  | `gate-near` | `[64.5,13.5,120.5]` pitch 2 | perspective **fov 8**, 640×360 | ≈30.5 格（**门内** <64） | 箱必被渲染 ⇒ `image-not-uniform`（实测主色 0.757） |
+  | `far` | `[64.5,13.5,160.5]` pitch 1 | perspective **fov 5**, 640×360 | ≈70.5 格（**门外** >64） | 箱被 TESR 门剔除 ⇒ `image-uniform`（**实测主色 1.000000、colors=1**，阈值 0.95） |
 
 - `criteria`（20 条；id 第二段是目标，配对口径同 §10.2）：
 
@@ -509,25 +512,27 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行�
   | `host`（`@64` 缆 + 两部件） | `te-host-cable`=`/partClasses/UNKNOWN`、`te-host-cable-item`=`/parts/UNKNOWN`、`te-host-toggle`=`/partClasses/NORTH`、`te-host-storage`=`/partClasses/UP`、`te-host-empty-down`=`/parts/DOWN`=null | `img-host-size-near` / `img-host-not-uniform-near`、`img-host-size-ortho` / `img-host-not-uniform-ortho` |
   | `nb`（`@65` 相邻纯缆） | `te-nb-cable`=`/partClasses/UNKNOWN`、`te-nb-cable-item`=`/parts/UNKNOWN`、`te-nb-empty-east`=`/parts/EAST`=null | `img-nb-size-near` / `img-nb-not-uniform-near` |
   | `scene` | —（由 host/nb 覆盖） | `img-scene-size-near` / `img-scene-not-uniform-near` |
-  | `gate`（K1 门控） | —（门控是**渲染**判据，运行期无对应状态可断言） | `img-gate-size-far` + `img-gate-uniform-far`（`minSameColorRatio=0.5`） |
+  | `gate`（K1 门控） | —（门控是**渲染**判据，运行期无对应状态可断言） | `img-gate-size-near` + `img-gate-not-uniform-near`（门内箱在）+ `img-gate-size-far` + `img-gate-uniform-far`（门外箱失，`minSameColorRatio=0.95`） |
 
   末行是 §10.2 配对口径里**唯一允许「图像轨单独成立」**的形态：`img-gate-*` 没有 `te-gate-*` 配对，
   因为配对的强制方向是「每个 `te-*` 必须有同目标 `img-*`」（运行期结论必须有图像佐证），反向不强制。
   这也是 C4 门控要单独断言的原因——它证明的是「渲染距离门按相机坐标生效」，不是某个 TE 字段的取值。
-  加上 `world-hash` 与 `observation-exists` 共 20 条。
+  加上 `world-hash` 与 `observation-exists` 共 22 条。
 - `variants`：`neg-host-cable-class-flipped` 把 `criteria[0].expect` 改成 `PartCableSmart`，
   `expectCriteriaRed=["te-host-cable"]`；
-- `evidence.expect`：`observation.json` / `criteria.json` / `world/scene-manifest.json` / 三张机位 PNG。
+- `evidence.expect`：`observation.json` / `criteria.json` / `world/scene-manifest.json` / 四张机位 PNG。
 
-**K1 门控原理（为什么 far 机位能当门控证据）**：AE2 的 `TileCableBus.getMaxRenderDistanceSquared()`
-返回 `900.0`（源码 `appeng/tile/networking/TileCableBus.java:112-113`）⇒ **渲染距离门 = 30 格**，且它按
-**相机坐标**判定（contract §4.2.1：注入式相机而不是挪玩家，正是为了让门随相机生效）。
-因此同一场景在 `near`/`ortho`（门内）必须能看到缆与部件（非纯色），在 `far`（门外 ≈41 格）**看不见**缆
-⇒ 画面只剩背景。`image-uniform` 正是这条的判据写法：**它绿 ⇒ 门生效**；若门失效（缆在 41 格外仍被渲染），
-主色占比会从「半幅量级」掉到「门内那一档」（0.13~0.17）而判红。阈值取 `minSameColorRatio=0.5` 的理由与
-「门生效时的精确占比尚未实测」这条留白**同源，见 §10.7 留白 5**——它不是随手放宽，而是把判据定位在
-「门生效 / 门失效」两档之间。`far` 机位同时保留天空与地面（pitch 40 俯视），不是纯虚空特写——
-门控结论不能用「什么都看不到的黑屏」冒充。
+**K1 门控原理（PR-3 真机实证后的机制更正）**：1.7.10 的 TE 距离门由 `TileEntityRendererDispatcher`
+按 `renderViewEntity` 静态位置剔除 **TESR** 渲染，门值是各 TE 的 `getMaxRenderDistanceSquared()`
+（原版默认 4096=64 格）。**AE2 缆几何走 ISBRH 块层渲染、不受此门管**——`TileCableBus` 的 900.0
+（30 格）门只管其动态部件（监视器屏显等 `requireDynamicRender()` 为真的 TESR 内容），因此
+「缆在 30 格外消失」在 AE2-U rv3 上不成立（验收轮 a1 的 far 图实证：41 格外缆与箱仍渲染为一个
+黑点）。故 K1 器具改为**原版箱子**（`TileEntityChest` 走 TESR，门 = 原版默认 64 格）：玩家被
+稳定化流程恒定在门控箱 26 格处（**玩家始终在门内**），相机两次跨门——`gate-near`（30.5 格，
+门内）箱必在、`far`（70.5 格，门外）箱必失。**若门随的是玩家而非相机，两张图里箱都会在**；
+实测 far 主色占比 1.000000（colors=1）⇒ 箱确实被剔除 ⇒ 门随相机生效。窄 fov（5~8）的作用
+有二：把箱放大到可断言量级、把天空渐变压到逐像素平坦（宽 fov 下天空渐变主色占比只有 0.06~0.17，
+`image-uniform` 指标在宽 fov 天空上不可用——这是 a1 轮 6 红的真因：判据指标选型错，不是实现错）。
 
 ### 10.4 断言 C1..C7
 
@@ -536,8 +541,8 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行�
 | C1xx-a/b/c/d/e | 每用例：`case.run --tier forensic --sync` 退出码 0；`result.overall=green`；`shots.cameraCount` == 用例机位数且 `failedCount=0`；run 的 `criteria.json` 全绿且覆盖用例声明的**全部**判据 id；`evidence.json` overall=green 且期望证据 + 各机位 PNG 逐条在场 | 用例（含双轨判据/图像/证据）任一环不通过，或 run 产物自证不完整 |
 | C2 | 两个用例文件里每个 `te-state-equals` 判据都有**同目标**的图像判据（§10.2 配对口径）；**不需要客户端** | 锚点用例双轨不齐（只证世界状态、没证渲染结果）——用例缺陷 |
 | C3xx-a/b/c/d | 每用例：变体单跑退出码 0；`result.variantVerification.ok=true`；变体 run 的 `criteria.json` 里 `expectCriteriaRed` 全部变红；**其余判据仍绿** | 负对照恒绿（假绿，防不住错图/错状态）或变体求值跑偏（误伤其它判据） |
-| C4a | ae2 run 的 `near.png`/`ortho-top.png` 非空且 `image-not-uniform` 判据绿（门内机位确实看见了东西） | 门内没渲染出来（图缺失/空图/纯背景）——30 格内本该可见 |
-| C4b | ae2 run 的 `far.png` 非空且 `image-uniform`（+ 尺寸判据）绿（门外机位确实什么都没看见） | 30 格距离门没生效：缆在门外仍被渲染（K1 门控失效） |
+| C4a | ae2 run 的 `near.png`/`ortho-top.png` 非空且 `image-not-uniform` 判据绿（AE2 场景确实渲染出来了） | 场景没渲染出来（图缺失/空图/纯背景） |
+| C4b | ae2 run 的 `far.png` 非空且 `image-uniform`（+ 尺寸判据）绿（门外机位确实看不见门控箱）；`gate-near.png` 非空且 `image-not-uniform` 绿（门内机位确实看见——K1 的决定性两半：玩家恒在门内，门若随玩家则两图皆有箱） | TESR 距离门没随相机生效：箱在门外仍被渲染，或门内也不渲染（K1 门控失效/器具摆错） |
 | C4c | **独立复算** `far.png` 的主色占比 ≥ 判据的 `minSameColorRatio`（自己解 PNG：IDAT→inflate→逐行反滤波→数众数像素） | 与判据同口径但不共用实现；判据绿而这里红 ⇒ 判据实现可疑（反之亦然） |
 | C5a/a2/b/c | lp-pipe-row 连跑两次（两个 runId）：两次都退出码 0 + overall green；两次 `world/scene-manifest.json` 的 `sha256` 相等；两次 run 的 `world-hash-equals` 判据均绿 | 场景重建不幂等（世界漂移）——见 §10.7 留白 2 的已知边界 |
 | C6xx | 两用例 run 的 `evidence.json` overall=green 且期望证据逐条在场（含机位 PNG） | 证据清单缺项（截图或记账文件没落盘） |
@@ -586,7 +591,7 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1              # 29 条�
 | `Test-EvidenceComplete` | overall green 且证据在场 | overall red / `evidence.json` 缺失 |
 | `Test-ObservationTeReads` | 族名条目齐且 sha256 非空 | 无 `te.*` 条目 / 族名前缀逐字不符 / sha256 为空 |
 | `Test-ObservationCameras` | 3 机位摘要齐 | 机位数不符 + 名字/顺序不符 + `resolution` 不符 |
-| `Get-PngDominantColorRatio` | — | 合成纯色图 ratio=1、杂色图 ratio<1；真判据产物（现场 `far.png`）读数与判据引擎**逐位一致**（0.064926） |
+| `Get-PngDominantColorRatio` | — | 合成纯色图 ratio=1、杂色图 ratio<1；真判据产物（a1 轮现场 `far.png`）读数与判据引擎**逐位一致**（0.064926） |
 
 **离线还做了这些（都不起客户端）**：
 
@@ -634,18 +639,13 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1              # 29 条�
    因此「AE2 伪装板」这条锚点在当前参数形态下不可达——要么给 `facades[]` 加 NBT 字段（契约 §5 增量可容许），
    要么改用 BuildCraft 伪装板（整合包未必启用）。本用例覆盖「中心缆 + 两个部件」与「缆+箱」两种形态，
    伪装板留白待裁决。
-5. **`image-uniform` 的阈值是「半幅量级」而不是「近纯色」，且 far 机位里有玩家实体。** `far` 机位
-   （`pos=[105.5,13.5,64.5]`、pitch 40 俯视）的画面构成是「上半天空渐变 + 云 + 下半近纯色虚空」。
-   同一虚拟世界、同一口径下**已实测**的主色占比（都在「看得见场景」的门内图上，主色即天空 `#BCD5FF`）：
-   `near.png` **0.166222**、`ortho-top.png` **0.142678**、`persp-row.png` **0.147785**、
-   `persp-front.png` **0.137574**。虚空区的纯色占比按机位几何约六成，故 far 判据写
-   `minSameColorRatio=0.5`——**它拦的是「门失效」**：门一旦失效，缆与部件把纯色区打散，主色占比会掉到
-   0.2 以下（即门内图那一档）而判红。留白在于：**门生效时 far 的精确占比尚未实测**
-   （本树离线只能复算既有 run 的图，而既有 run 的 far 用的是旧机位，占比 0.132668）。
-   真机次轮请把实测值回填本处与用例注释；若实测明显高于 0.5，应把阈值收紧到「实测 − 余量」。
-   另：真实玩家实体在 `base+(0.5,1,0.5)`，`RenderGlobal.renderEntities` 只跳过 `renderViewEntity`，
-   所以 far 画面正中会有一个几像素的玩家点（先例同 §9.7 留白 3）；若将来要求 far 图严格纯背景，
-   需要先解决「拍摄期隐藏玩家实体」，那是产品裁决而不是用例侧能修的。
+5. ~~`image-uniform` 阈值与 far 机位构图~~（**已解决并回填**，本条留档）：旧 far 机位（`[105.5,13.5,64.5]`
+   pitch 40 fov 70）的画面被天空渐变+云占满，主色占比实测 0.132668——**宽 fov 下天空渐变使
+   `image-uniform` 指标不可用**（验收轮 a1 的 6 红真因：判据指标选型错，不是门失效；读图证实 41 格外
+   缆+箱仍渲染为一个黑点 ⇒ AE2 缆走 ISBRH 不受 TESR 门管）。K1 器具已改为「原版箱子 64 格 TESR 门
+   + 望远镜窄 fov 双机位」（见 §10.3 的 K1 门控原理段）：`gate-near` 实测主色 0.757580（箱在）、
+   `far` 实测 **1.000000（colors=1）**（箱失）⇒ 阈值定 0.95（「实测 − 余量」口径）。玩家隐藏已由
+   PR-2 收尾的 doRender cancel 解决，far 图不再有玩家点。
 6. **`-ChecksOnly` 不产客户端产物，因此不写 `lightning.cfg`**。它的归档里没有 `stale/`、`lightning.cfg.*`、
    客户端日志，只有 `probe-png/`、`summary.md`、`assertions.json`、`session.json` 与 `events.jsonl`（若在）。
    这条分界是刻意的：离线检查不该有副作用。

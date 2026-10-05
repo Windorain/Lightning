@@ -1,7 +1,7 @@
 {
   "schema": "lightning.case/1",
   "id": "ae2-parts",
-  "label": "控制面 PR-3 锚点：AE2 缆块 + 部件（中心缆/切换总线/存储总线）——双轨判据 + K1 三十格距离门远机位对照",
+  "label": "控制面 PR-3 锚点：AE2 缆块 + 部件（中心缆/切换总线/存储总线）——双轨判据 + K1 距离门对照（原版箱子 64 格 TESR 门，gate-near 门内箱在 / far 门外箱失）",
   "world": {
     "folder": "cp_ae2_parts",
     "seed": 20261006,
@@ -10,7 +10,7 @@
     "settleTicks": 60
   },
   "build": [
-    { "op": "clear", "from": [62, 10, 62], "to": [70, 16, 68] },
+    { "op": "clear", "from": [62, 10, 62], "to": [70, 16, 94] },
 
     { "op": "block", "at": [64, 12, 64], "id": "appliedenergistics2:tile.BlockCableBus", "meta": 0 },
     {
@@ -38,8 +38,11 @@
       }
     },
 
-    { "op": "block", "at": [66, 12, 64], "id": "minecraft:chest", "meta": 0 },
+    { "op": "block", "at": [66, 12, 64], "id": "minecraft:chest", "meta": 3 },
     { "op": "te", "at": [66, 12, 64], "completer": "vanilla", "params": {} },
+
+    { "op": "block", "at": [64, 12, 90], "id": "minecraft:chest", "meta": 3 },
+    { "op": "te", "at": [64, 12, 90], "completer": "vanilla", "params": {} },
 
     { "op": "wait", "ticks": 20 }
   ],
@@ -66,12 +69,20 @@
       "resolution": [1280, 720]
     },
     {
+      "name": "gate-near",
+      "pos": [64.5, 13.5, 120.5],
+      "yaw": 180.0,
+      "pitch": 2.0,
+      "projection": { "type": "perspective", "fov": 8.0 },
+      "resolution": [640, 360]
+    },
+    {
       "name": "far",
-      "pos": [105.5, 13.5, 64.5],
-      "yaw": 90.0,
-      "pitch": 40.0,
-      "projection": { "type": "perspective", "fov": 70 },
-      "resolution": [1280, 720]
+      "pos": [64.5, 13.5, 160.5],
+      "yaw": 180.0,
+      "pitch": 1.0,
+      "projection": { "type": "perspective", "fov": 5.0 },
+      "resolution": [640, 360]
     }
   ],
   "criteria": [
@@ -166,14 +177,24 @@
     },
 
     {
+      "id": "img-gate-size-near",
+      "type": "image-size-equals",
+      "params": { "path": "shots/gate-near.png", "width": 640, "height": 360 }
+    },
+    {
+      "id": "img-gate-not-uniform-near",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/gate-near.png", "maxSameColorRatio": 0.98 }
+    },
+    {
       "id": "img-gate-size-far",
       "type": "image-size-equals",
-      "params": { "path": "shots/far.png", "width": 1280, "height": 720 }
+      "params": { "path": "shots/far.png", "width": 640, "height": 360 }
     },
     {
       "id": "img-gate-uniform-far",
       "type": "image-uniform",
-      "params": { "path": "shots/far.png", "minSameColorRatio": 0.5 }
+      "params": { "path": "shots/far.png", "minSameColorRatio": 0.95 }
     },
 
     {
@@ -207,6 +228,7 @@
       { "path": "world/scene-manifest.json", "role": "scene-manifest" },
       { "path": "shots/near.png", "role": "shot" },
       { "path": "shots/ortho-top.png", "role": "shot" },
+      { "path": "shots/gate-near.png", "role": "shot" },
       { "path": "shots/far.png", "role": "shot" }
     ]
   }

@@ -188,8 +188,17 @@ function Test-GateCriteria($CriteriaDoc, [string]$RunDir, [string]$NearPng = 'sh
     if ($readable[$FarPng] -ne 'ok') { [void]$problems.Add("$FarPng $($readable[$FarPng])") }
     if ($map[$FarId] -ne 'green') { [void]$problems.Add("$FarId=$($map[$FarId])（须 green）") }
     if ($FarSizeId -and $map[$FarSizeId] -ne 'green') { [void]$problems.Add("$FarSizeId=$($map[$FarSizeId])（须 green）") }
+    # 门内对照半边（K1 决定性证据：玩家恒在门内，相机在门内 ⇒ 箱必须渲染；用例声明了该判据才检查）
+    [string]$GateNearPng = 'shots/gate-near.png'
+    [string]$GateNearId = 'img-gate-not-uniform-near'
+    if ($map.ContainsKey($GateNearId)) {
+        $gnFull = Join-Path $RunDir ($GateNearPng -replace '/', '\')
+        if (-not (Test-Path $gnFull -PathType Leaf)) { [void]$problems.Add("$GateNearPng 缺失") }
+        elseif ((Get-Item $gnFull).Length -le 0) { [void]$problems.Add("$GateNearPng 0 字节") }
+        if ($map[$GateNearId] -ne 'green') { [void]$problems.Add("$GateNearId=$($map[$GateNearId])（须 green）") }
+    }
     if ($problems.Count -gt 0) { return [pscustomobject]@{ ok = $false; detail = ($problems -join '; ') } }
-    return [pscustomobject]@{ ok = $true; detail = "$NearPng/$OrthoPng 在门内且 non-uniform=green；$FarPng 在门外（>30 格）且 uniform=green，三图非空" }
+    return [pscustomobject]@{ ok = $true; detail = "$NearPng/$OrthoPng 在门内且 non-uniform=green；$FarPng 在门外且 uniform=green，图均非空" }
 }
 
 # ---------------------------------------------------------------------------
