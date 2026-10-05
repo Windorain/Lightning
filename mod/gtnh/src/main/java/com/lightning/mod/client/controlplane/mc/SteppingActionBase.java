@@ -5,6 +5,7 @@ import com.lightning.mod.client.controlplane.core.ActionContext;
 import com.lightning.mod.client.controlplane.core.CpException;
 import com.lightning.mod.client.controlplane.core.ErrorCodes;
 import com.lightning.mod.client.controlplane.core.Json;
+import com.lightning.mod.client.controlplane.core.StackSummary;
 import com.lightning.mod.client.controlplane.core.SteppingAction;
 
 /**
@@ -85,17 +86,20 @@ public abstract class SteppingActionBase implements SteppingAction {
             throw e;
         } catch (Throwable t) {
             finished = true;
-            throw new CpException(
-                ErrorCodes.EXEC_FAILED,
-                "动作执行异常（阶段 " + stage + "）: " + t,
-                Json.object(
-                    "stage",
-                    stage,
-                    "stageElapsedMs",
-                    Long.valueOf(now() - stageStartedAt),
-                    "exception",
-                    t.getClass()
-                        .getName()));
+            // 包装必须带 cause：CpException 只是「契约错误载体」，真正的栈帧在被包装的 t 上。
+            // 丢掉 cause 的话下游（ActionSteppingExecutor → JobQueue）拿到的只有类名 + message，
+            // 失败日志里一个栈帧都没有——真机验收事故（case.run cameras 段首 step NPE）正是因此
+            // 只能靠猜。同时把 12 帧摘要写进 context.stack（事件流水口径，见 StackSummary）。
+            JsonObject context = Json.object(
+                "stage",
+                stage,
+                "stageElapsedMs",
+                Long.valueOf(now() - stageStartedAt),
+                "exception",
+                t.getClass()
+                    .getName());
+            context.add("stack", StackSummary.frames(t, StackSummary.DEFAULT_FRAMES));
+            throw new CpException(ErrorCodes.EXEC_FAILED, "动作执行异常（阶段 " + stage + "）: " + t, context, t);
         } finally {
             if (finished) {
                 try {

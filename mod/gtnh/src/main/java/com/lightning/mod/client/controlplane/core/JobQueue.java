@@ -131,6 +131,7 @@ public final class JobQueue {
         if (starting) {
             emit(EventStream.LEVEL_INFO, EventStream.Kinds.ACTION_START, job, "动作开始", null);
         }
+        boolean viaStepper = stepper != null;
         try {
             JsonObject result;
             if (stepper != null) {
@@ -155,9 +156,14 @@ public final class JobQueue {
             }
             emit(EventStream.LEVEL_INFO, EventStream.Kinds.ACTION_DONE, job, "动作完成", data);
         } catch (CpException e) {
-            job.markFailed(time.isoNow(), e.toErrorJson());
-            emit(EventStream.LEVEL_ERROR, EventStream.Kinds.ACTION_FAIL, job, "动作失败: " + e.detail(), e.toErrorJson());
+            JsonObject failure = failureData(e);
+            job.markFailed(time.isoNow(), failure);
+            emit(EventStream.LEVEL_ERROR, EventStream.Kinds.ACTION_FAIL, job, "动作失败: " + e.detail(), failure);
             warn("动作失败 " + job.action() + "#" + job.jobId() + ": " + e.detail());
+            if (!viaStepper) {
+                // 同步路径的失败落栈点就在这里（步进路径由 ActionSteppingExecutor 落，避免同一份栈打两遍）
+                error("动作失败 " + job.action() + "#" + job.jobId(), e);
+            }
         } catch (Throwable t) {
             JsonObject err = new JsonObject();
             err.addProperty("code", ErrorCodes.EXEC_FAILED);
@@ -167,10 +173,14 @@ public final class JobQueue {
                 "exception",
                 t.getClass()
                     .getName());
+            addStack(ctx, t);
             err.add("context", ctx);
             job.markFailed(time.isoNow(), err);
             emit(EventStream.LEVEL_ERROR, EventStream.Kinds.ACTION_FAIL, job, "动作异常: " + t, err);
             warn("动作异常 " + job.action() + "#" + job.jobId() + ": " + t);
+            if (!viaStepper) {
+                error("动作异常 " + job.action() + "#" + job.jobId(), t);
+            }
         } finally {
             synchronized (lock) {
                 if (job.isFinished()) {
@@ -217,5 +227,46 @@ public final class JobQueue {
         if (logger != null) {
             logger.accept(Contract.LOG_PREFIX + " " + message);
         }
+    }
+
+    /**
+     * 落完整异常栈（{@code FMLLog.log(Level.ERROR, t, msg)} 形态）。
+     *
+     * <p>
+     * 只有日志口本身是 {@link LogSink} 时才生效（生产装配 {@code CpLog.coreSink()} 是，
+     * 单测里的 {@code null}/lambda 不是）——探不到就退回既有的 {@link #warn} 纯文本行，
+     * 行为与改动前一致。落的是异常本身：log4j 打印 {@code Throwable} 会连同 {@code Caused by:}
+     * 链一起展开，而契约错误的 cause（{@code CpException.getCause()}）里正是真正的失败点
+     * （真机事故的 NPE 就落在 {@code Caused by:} 那一段）。
+     */
+    private void error(String message, Throwable t) {
+        if (!(logger instanceof LogSink) || t == null) {
+            return;
+        }
+        ((LogSink) logger).error(t, Contract.LOG_PREFIX + " " + message);
+    }
+
+    /**
+     * 失败事件的 data：保持 {@code {code,message,context}} 结构不变，只在 {@code context} 里追加
+     * {@code stack}（前 12 帧，见 {@link StackSummary}）。
+     *
+     * <p>
+     * 加栈的动机是一次真机事故：动作失败只有一行 message，栈帧全无，根因只能猜。
+     * 结构是<b>追加式</b>的——既有字段名、层级、类型全部不动，老消费方（断言、UI）不受影响。
+     */
+    private static JsonObject failureData(CpException e) {
+        JsonObject data = e.toErrorJson();
+        JsonObject ctx = Json.copyObject(Json.optObject(data, "context"));
+        addStack(ctx, e);
+        data.add("context", ctx);
+        return data;
+    }
+
+    /** 往 context 里追加 {@code stack}（已在时保持原样，不覆盖）。 */
+    private static void addStack(JsonObject ctx, Throwable t) {
+        if (t == null || Json.get(ctx, "stack") != null) {
+            return;
+        }
+        ctx.add("stack", StackSummary.frames(t, StackSummary.DEFAULT_FRAMES));
     }
 }

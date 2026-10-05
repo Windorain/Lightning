@@ -64,24 +64,27 @@ public final class ActionSteppingExecutor implements SteppingExecutor {
         if (actions == null) {
             throw new CpException(ErrorCodes.EXEC_FAILED, "未装配动作注册表");
         }
-        ActionRegistry.Entry entry = actions.lookup(job.action());
-        if (entry == null) {
-            throw CpException.unknown("动作 " + job.action());
-        }
-        Session session = sessions.get(job.jobId());
-        if (session == null) {
-            SteppingAction action = null;
-            if (entry.isStepping()) {
-                action = entry.newSteppingAction();
-                if (action == null) {
-                    throw new CpException(ErrorCodes.EXEC_FAILED, "步进动作工厂返回 null: " + job.action());
-                }
-            }
-            session = new Session(new ActionContext(job, job.params(), artifacts, events, logger), action);
-            sessions.put(job.jobId(), session);
-        }
-        ActionContext ctx = session.ctx;
+        ActionContext ctx = null;
+        // 首个 step 的建会话（查表/取动作实例/建上下文）也算在 try 内：那几步的失败同样是「这个作业失败了」，
+        // 必须走下面同一个失败路径（收 manifest + 落栈），否则会静默漏掉一份栈。
         try {
+            ActionRegistry.Entry entry = actions.lookup(job.action());
+            if (entry == null) {
+                throw CpException.unknown("动作 " + job.action());
+            }
+            Session session = sessions.get(job.jobId());
+            if (session == null) {
+                SteppingAction action = null;
+                if (entry.isStepping()) {
+                    action = entry.newSteppingAction();
+                    if (action == null) {
+                        throw new CpException(ErrorCodes.EXEC_FAILED, "步进动作工厂返回 null: " + job.action());
+                    }
+                }
+                session = new Session(new ActionContext(job, job.params(), artifacts, events, logger), action);
+                sessions.put(job.jobId(), session);
+            }
+            ctx = session.ctx;
             JsonObject result;
             boolean finished;
             if (entry.isStepping()) {
@@ -102,11 +105,37 @@ public final class ActionSteppingExecutor implements SteppingExecutor {
             return result == null ? new JsonObject() : result;
         } catch (Throwable t) {
             // 失败同样收尾：已产生的产物落 manifest，销毁会话（上下文 + 动作实例）防泄漏
-            if (ctx.run() != null && artifacts != null) {
+            if (ctx != null && ctx.run() != null && artifacts != null) {
                 artifacts.writeManifest(ctx.run());
             }
             sessions.remove(job.jobId());
+            fail(job, t);
             throw t;
+        }
+    }
+
+    /**
+     * 步进作业的失败落栈点。
+     *
+     * <p>
+     * <b>契约</b>：装了步进器时，{@link JobQueue} 只打一行纯文本摘要、<b>不再</b>重复落栈——
+     * 栈由本类落（见 {@link JobQueue#drainOne()} 里的 {@code viaStepper} 判定）。所以这里必须
+     * 无条件把原始 {@code Throwable} 交给日志口：改动前失败日志里只有 {@code 类名: message}，
+     * 真机事故（{@code case.run} cameras 段首 step NPE）的栈帧因此全丢，根因只能靠猜。
+     *
+     * <p>
+     * 日志口只有实现 {@link LogSink} 时才带得动栈（生产装配 {@code CpLog.coreSink()} 是，
+     * 单测里的 {@code null}/lambda 不是）；否则退回与改动前一致的纯文本一行。
+     */
+    private void fail(Job job, Throwable t) {
+        if (logger == null || t == null || job == null) {
+            return;
+        }
+        String message = Contract.LOG_PREFIX + " 动作失败 " + job.action() + "#" + job.jobId() + ": " + t;
+        if (logger instanceof LogSink) {
+            ((LogSink) logger).error(t, message);
+        } else {
+            logger.accept(message);
         }
     }
 

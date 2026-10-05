@@ -47,8 +47,10 @@ import net.minecraft.world.World;
  * 它与机位声明无关、不随 {@code pos} 变化，故留痕口径以声明 {@code pos} 为准
  * （{@code shots/<name>.meta.json} 的 {@code effectiveEyePos}）。
  *
- * <h2>关键的三个覆写</h2>
+ * <h2>关键的几处覆写</h2>
  * <ul>
+ * <li>{@link #entityInit()} 调 {@code super}：<b>缺了它整个 {@code shot.multi} 在第一个 step 就 NPE</b>
+ * （真机事故 B1，推导与栈见该方法注释）；</li>
  * <li>{@link #getEyeHeight()} 返回 <b>0</b>：{@code pos} 本身已经是眼位（上面的 yOffset=1.62 抵消了
  * {@code orientCamera} 的 −1.62 常数项），所以「相对 pos 的眼高」必须是 0；否则任何走
  * {@code posY + getEyeHeight()} 的路径（如 {@code EntityRenderer.getMouseOver} 的射线原点）
@@ -57,6 +59,36 @@ import net.minecraft.world.World;
  * <li>{@link #onEntityUpdate()} 空实现：替身不进世界 tick，不会位移、不会掉血、不会发声音；</li>
  * <li>{@link #canBeCollidedWith()} / {@code isEntityAlive()} 给渲染器一个「无害实体」的语义。</li>
  * </ul>
+ *
+ * <h2>渲染期「会被读」的方法逐条核对（watcher 审计）</h2>
+ * 替身在拍摄帧里成为 {@code mc.renderViewEntity}，下面这些方法在
+ * {@code EntityRenderer.renderWorld} 的一次调用里都可能被读。逐条结论（反编译源行号为准），
+ * 也是修复真机事故 B1 时要求确认的清单：
+ * <ul>
+ * <li>{@code getHealth()} → watcher index 6：<b>确实会被读</b>——
+ * {@code EntityRenderer.getFOVModifier:490}（{@code entityplayer.getHealth() <= 0.0F}）
+ * 经 {@code setupCameraTransform:673} 由 {@code renderWorld:1234} 调到。
+ * 由 {@link #entityInit()} 调 {@code super} 注册 index 6 解决；</li>
+ * <li>{@code isInvisible()} / {@code isSprinting()} / {@code isSneaking()} / {@code isBurning()}
+ * → watcher index 0（{@code Entity.getFlag:2122-2124}）：渲染期这些读的是<b>被渲染实体</b>而不是相机
+ * （{@code RenderGlobal.renderEntities:524} 对相机只做引用比较 + {@code isPlayerSleeping()}；
+ * 第一人称手渲染全程读 {@code mc.thePlayer}，见 {@code ItemRenderer.java:267/723}），
+ * 故对相机<b>不会被读到</b>；index 0 由 {@code Entity} 构造器注册（{@code Entity.java:218}），
+ * 补上 {@code super} 后即便被读到也不是 null；</li>
+ * <li>{@code getHeldItem()} / {@code getEquipmentInSlot(int)}：<b>覆写为 null</b>，永不触碰 watcher。
+ * 兜的是「把相机当玩家读装备」的第三方路径（{@code EntityLivingBase} 的原实现读
+ * {@code getLastActiveItems()} 数组，本类连这个也覆写成空数组）；</li>
+ * <li>{@code isRiding()}：只读 {@code ridingEntity} 字段（{@code Entity.java:2049-2051}），不碰 watcher；</li>
+ * <li>{@code isPlayerSleeping()}：<b>覆写为 false</b>（{@code EntityLivingBase} 的原实现本来就是
+ * {@code return false;}，{@code EntityLivingBase.java:1755-1758}，这里只是把「替身永远不睡」写死，
+ * 免得将来有人给它加睡觉语义而让第三人称/床镜头分支复活）。原版读它五处：
+ * {@code EntityRenderer:561/794/803}、{@code RenderGlobal:524}、{@code RenderManager:219}；</li>
+ * <li>{@code getBrightnessForRender(float)}：只查世界光照（{@code Entity.java:1209-1224}），不碰 watcher。
+ * 它只在对<b>被渲染实体</b>算光照时调用（{@code RenderManager:267}），而替身不在
+ * {@code world.loadedEntityList} 里，永远不会走到。</li>
+ * </ul>
+ * 结论：补上 {@link #entityInit()} 的 {@code super} 调用后，清单里每一条要么不碰 watcher，
+ * 要么碰的是已注册的 index（0/1/6/7/8/9），不存在「读到 null 再 {@code getObject()}」的路径。
  *
  * <p>
  * 旁注：{@code renderWorld} 里的 {@code ActiveRenderInfo.updateRenderInfo(mc.thePlayer, ...)}
@@ -192,9 +224,50 @@ public final class VirtualCamera extends EntityLivingBase {
 
     // ------------------------------------------------------------ Entity 抽象方法
 
+    /**
+     * 注册 {@code EntityLivingBase} 的基础数据监视器字段（index 6/7/8/9）。
+     *
+     * <h2>为什么这里必须调 {@code super}（真机事故复盘）</h2>
+     * 空实现曾让整个 {@code shot.multi} 在<b>第一个 step</b>就炸掉（真机验收 B1，阶段
+     * {@code case.cameras}，{@code stageElapsedMs=1}），日志只有一行没有栈的 NPE：
+     *
+     * <pre>
+     * java.lang.NullPointerException: Cannot invoke
+     *   "net.minecraft.entity.DataWatcher$WatchableObject.getObject()" because "watchableobject" is null
+     * </pre>
+     *
+     * 链条（反编译源行号为准）：
+     * <ol>
+     * <li>{@code Entity} 构造器先注册 index 0/1，再调 {@code entityInit()}
+     * （{@code Entity.java:217-220}）——{@code Entity.entityInit} 是抽象方法，注册 0/1 是在<b>构造器里
+     * 直接做的</b>，不经 {@code entityInit}；</li>
+     * <li>本类的 {@code entityInit} 是空实现 ⇒ {@code EntityLivingBase.entityInit()} 的
+     * index 7/8/9/6 从未注册（{@code EntityLivingBase.java:167-173}）；</li>
+     * <li>{@code EntityLivingBase} 构造器紧接着无条件 {@code this.setHealth(this.getMaxHealth())}
+     * （{@code EntityLivingBase.java:157}）；</li>
+     * <li>{@code setHealth} 写的是 index 6（{@code EntityLivingBase.java:814}），
+     * 而 {@code DataWatcher.updateObject} 拿到的是 {@code getWatchedObject(6) == null}，
+     * 下一句 {@code watchableobject.getObject()} 直接空指针（{@code DataWatcher.java:153}）。</li>
+     * </ol>
+     * 也就是说：<b>异常发生在本类构造器跑完之前</b>（{@code super(world)} 里），
+     * 任何「构造后自检」都拦不住它，唯一有效的修法就是让 {@code entityInit} 真的把基础字段注册上。
+     *
+     * <h2>补上 {@code super} 之后的 watcher 全貌</h2>
+     * <ul>
+     * <li>0 = flag 字节（{@code Entity.java:218}）：{@code isSprinting}(1&lt;&lt;3)、{@code isInvisible}(1&lt;&lt;5)、
+     * {@code isSneaking}(1&lt;&lt;1)、{@code isBurning}(1&lt;&lt;0) 都读它；</li>
+     * <li>1 = air（{@code Entity.java:219}）；</li>
+     * <li>6 = health、7 = 药水效果位图、8 = 药水粒子标志、9 = 身上箭数
+     * （{@code EntityLivingBase.java:167-173}）。</li>
+     * </ul>
+     * 这些值对替身没有语义（不进世界、不同步、不 tick），但<b>渲染期任何一处读到它们都不能是 null</b>——
+     * 例如 {@code EntityRenderer.getFOVModifier} 会读 {@code renderViewEntity.getHealth()}
+     * （{@code EntityRenderer.java:481-490}，经 {@code setupCameraTransform:673} 由
+     * {@code renderWorld:1234} 调用），那是同一根因下的第二个潜在 NPE 点。
+     */
     @Override
     protected void entityInit() {
-        // 无可同步的数据监视器字段
+        super.entityInit();
     }
 
     @Override
