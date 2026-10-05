@@ -111,7 +111,7 @@ $script:openItems = @(
     [ordered]@{ id = 'r2-criterion-applicability'; severity = 'info'; text = 'R2 的常数项闸门 `b·N_max ≥ 2·max(a,4096)` 在真实产物上不可满足：每文件 materialPalette+textureBlobs 池 ≈40 KB gzip（T1.4 开放项 2：未按机剪枝），而 §9.4 的 4096 B 下限按"信封头 300–400 B"设的。故 R2 的**正式判定落在契约 k 序列**（fixture 通道域 ×1/×2/×4/×8），真实序列上给出斜率/R²/边际＋补充判据（每组合边际 < 单变体完整网格、截距主要来自固定池）——不静默算通过，请调度者知悉/裁决。' },
     [ordered]@{ id = 'fixed-pool-unpruned'; severity = 'info'; text = '每份产物都带全套 materialPalette/textureBlobs（≈40 KB gzip）；T1.4 开放项 2 记录"按机剪枝可省 31–55 KB/文件"，属独立任务。' },
     [ordered]@{ id = 'sde-interop-two-sessions'; severity = 'info'; text = '/sde export 与 multiblock 导出是**同一专用世界的两次顺序客户端会话**（tick 分派优先级使单会话内无法兼跑，不改 mod 无法合并）；互不干扰判据（产物目录快照 + 基线哈希）不受影响。' },
-    [ordered]@{ id = 'gitignore-acceptance-out'; severity = 'action'; text = '`.gitignore` 未覆盖 `scripts/acceptance/.out/`（本任务写范围不含 .gitignore）→ 提交前请补一行 `scripts/acceptance/.out/`，否则运行证据（可达 100+ MB）会被 `git add -A` 带进仓库。' }
+    [ordered]@{ id = 'gitignore-acceptance-out'; severity = 'info'; text = '已解决：`.gitignore` 已含 `scripts/acceptance/.out/`，运行证据（可达 100+ MB）不会被 `git add -A` 带进仓库；本任务同时把归档文档 `volume-profile-result.md` 从仓库树移到该证据目录。' }
 )
 $script:adjudications = @(
     [ordered]@{ id = 'T3.2-control-export-via-offline-encoder'; text = 'T3.2 的对照导出走离线编码（MultiblockFactorizeTool 对捕获数据集做域子集重编码，与生产同一 Java 编码器），不做多轮游戏内对照导出（每轮 2.5min 且编码路径相同）。'; source = '调度者裁决' },
@@ -833,7 +833,9 @@ function Invoke-Report {
     # 体积曲线归档文档：样例/分段运行只写模板（不覆盖终验数据），正式验收且有曲线时写数据
     $docMode = if ($SampleFrom) { 'template' } else { 'data' }
     if (Test-Path (Join-Path $volumeDir 'volume-curve.json')) {
-        Invoke-Native -FilePath $script:nodeCmd -ArgumentList @((Join-Path $scriptDir 'volume-doc.mjs'), '--mode', $docMode, '--run-dir', $runDir, '--out', (Join-Path $repoRoot 'docs\plan\volume-profile-result.md')) `
+        # 归档文档必须落证据目录（$volumeDir 在 $runDir 内，$OutRoot 默认 scripts/acceptance/.out）：
+        # 写进仓库树会让每次验收都在 git status 里留下未跟踪文件
+        Invoke-Native -FilePath $script:nodeCmd -ArgumentList @((Join-Path $scriptDir 'volume-doc.mjs'), '--mode', $docMode, '--run-dir', $runDir, '--out', (Join-Path $volumeDir 'volume-profile-result.md')) `
             -WorkDir $repoRoot -LogPath (Join-Path $logDir 'volume-doc.log') -TimeoutSec 300 | Out-Null
     } elseif ($SampleFrom) {
         Invoke-Native -FilePath $script:nodeCmd -ArgumentList @((Join-Path $scriptDir 'volume-doc.mjs'), '--mode', 'template') `

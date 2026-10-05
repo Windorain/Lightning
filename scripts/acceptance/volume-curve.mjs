@@ -31,7 +31,7 @@
  *       [--pipeline-result <pipeline-result.json>] [--label <run-label>]
  *
  * 产物（全部落 `<out>/`）：`volume-curve.json`（机器可读，唯一真源）、`volume-curve.svg`（曲线图）、
- * `volume-curve.md`（人读表格；`docs/plan/volume-profile-result.md` 的数据来源）。
+ * `volume-curve.md`（人读表格；`scripts/acceptance/.out/volume/volume-profile-result.md` 的数据来源）。
  */
 
 import fs from 'node:fs'

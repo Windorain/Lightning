@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * 归档 T3.2 的体积曲线数据到 `docs/plan/volume-profile-result.md`。
+ * 归档 T3.2 的体积曲线数据到 `scripts/acceptance/.out/volume/volume-profile-result.md`
+ * （运行证据目录内，不入库 —— 过程性文档不落仓库树，见根级 AGENTS.md「文档与知识归置」）。
  *
  * 设计：**模板由编排生成，实际数据随终验填入** ——
  *   · `--mode template`：写"判据说明 + 表格骨架 + 填数命令"，若文件已存在则除非 `--force` 否则不动
@@ -8,7 +9,7 @@
  *   · `--mode data`：用真实 `volume-curve.json`（+ acceptance-report.json）生成完整归档文档。
  *
  * 用法：
- *   node scripts/acceptance/volume-doc.mjs --mode template [--out docs/plan/volume-profile-result.md] [--force]
+ *   node scripts/acceptance/volume-doc.mjs --mode template [--out scripts/acceptance/.out/volume/volume-profile-result.md] [--force]
  *   node scripts/acceptance/volume-doc.mjs --mode data --run-dir <runDir> [--out <doc>]
  * 退出码：0 成功；2 输入不可用。
  */
@@ -20,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 
 import { ensureDir, readJsonIfExists, rel, REPO_ROOT, writeText } from './lib/evidence.mjs'
 
-const DEFAULT_OUT = path.join(REPO_ROOT, 'docs/plan/volume-profile-result.md')
+const DEFAULT_OUT = path.join(REPO_ROOT, 'scripts/acceptance/.out/volume/volume-profile-result.md')
 
 function parseArgs(argv) {
   const out = {}
