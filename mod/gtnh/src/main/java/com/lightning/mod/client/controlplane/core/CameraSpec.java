@@ -69,7 +69,7 @@ public final class CameraSpec {
     /** 偏航角（度）。 */
     private final double yaw;
 
-    /** 俯仰角（度，负为俯视）。 */
+    /** 俯仰角（度）。原样写入 {@code rotationPitch}——MC 语义：正=俯视、负=仰视。 */
     private final double pitch;
 
     /** {@link #PROJECTION_PERSPECTIVE} 或 {@link #PROJECTION_ORTHO}。 */
@@ -318,7 +318,7 @@ public final class CameraSpec {
         double yaw = finiteOf(o, "yaw", ctx + ".yaw", 0.0d, fields);
         double pitch = finiteOf(o, "pitch", ctx + ".pitch", 0.0d, fields);
         if (pitch < -90.0d || pitch > 90.0d) {
-            fields.add(ctx + ".pitch", "须在 -90..90（度，负为俯视），收到 " + pitch);
+            fields.add(ctx + ".pitch", "须在 -90..90（度，MC 语义正=俯视），收到 " + pitch);
         }
 
         Projection proj = parseProjection(o, ctx, fields);

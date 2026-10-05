@@ -255,9 +255,9 @@ public final class ActionRegistrar {
                         + "target?, capture?, captureSession{armed,by}, baseDisplayWidth, baseDisplayHeight, "
                         + "settingsRestored, elapsedMs, warnings?, artifacts[], contractVersion}")
                 .example(
-                    "{\"cameras\":[{\"name\":\"front-top\",\"pos\":[64.5,20.0,70.5],\"yaw\":180.0,\"pitch\":-45.0,"
+                    "{\"cameras\":[{\"name\":\"front-top\",\"pos\":[64.5,20.0,70.5],\"yaw\":180.0,\"pitch\":45.0,"
                         + "\"projection\":{\"type\":\"perspective\",\"fov\":70},\"resolution\":[1920,1080]},"
-                        + "{\"name\":\"hi-res\",\"pos\":[64.5,20.0,70.5],\"yaw\":180.0,\"pitch\":-30.0,"
+                        + "{\"name\":\"hi-res\",\"pos\":[64.5,20.0,70.5],\"yaw\":180.0,\"pitch\":30.0,"
                         + "\"projection\":{\"type\":\"ortho\",\"orthoHeight\":16.0},\"resolution\":[3840,2160],"
                         + "\"tile\":{\"cols\":2,\"rows\":2,\"overlap\":0.05}}],"
                         + "\"lighting\":\"neutral-flat\",\"renderMode\":\"本色\",\"worldTime\":6000,\"confirm\":true}")

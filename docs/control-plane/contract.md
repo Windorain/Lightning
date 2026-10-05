@@ -83,7 +83,8 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 {
   "name": "front-top",                     // 机位 id，产物文件名
   "pos": [64.5, 20.0, 70.5],             // 相机世界坐标（门控位置分离：与 playerPos 各自记录）
-  "yaw": 180.0, "pitch": -45.0,
+  "yaw": 180.0, "pitch": 45.0,           // 原样写入 rotationPitch——MC 语义：正=俯视、负=仰视
+                                         // （俯拍用正 pitch；负 pitch 俯拍是文档曾写错过的口径，勿仿）
   "projection": {                          // 二选一
     "type": "perspective", "fov": 70
     // "type": "ortho", "orthoHeight": 16.0    // 正交：视高（方块数），宽按画面宽高比推
