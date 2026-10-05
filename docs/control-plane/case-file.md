@@ -86,10 +86,12 @@ PR-2 定义（相机注入、正交投影、分块超分辨率、多机位生成
 ## 8. 执行语义
 
 1. **整跑**：`POST /cp/v1/actions/case.run {file|inline, confirm:true}` → 依序执行 world→build→(capture)→(shots)→criteria→evidence。
-2. **按段**：`segments:["world","build"]` 只跑指定段；段间状态是真实世界状态（不是重放），因此**按段连跑的结果必须与整跑一致**（验收锚）。
-3. 每段产出 `segments/<name>.json`（状态、耗时、产物引用）；判据汇总 `criteria.json`；观测记录 `observation.json`。
-4. run 目录：`<mcDataDir>/controlplane/runs/<yyyyMMdd-HHmmss>-<caseId>-<jobSeq>/`（jobSeq 为数字作业序号，jobId 形态 `j<seq>`），全程只增不改；`manifest.json`（schema `lightning.cp-manifest/1`）登记全部产物的 sha256。tokens/server 内部文件 schema 分别为 `lightning.cp-tokens/1`、`lightning.cp-server/1`。
-5. 失败即停（ fail-fast ），已完成的段保留产物；`job` 结果携带失败段与错误码。
+2. **按段**：`segments:["world","build"]` 只跑指定段；段间状态是真实世界状态（不是重放），因此**按段连跑的结果必须与整跑一致**（验收锚）。判据段在新 run 中求值时，若引用的产物在本 run 不存在，必须**从当前世界状态重新产出**（如重新扫描托管区域生成 scene-manifest.json）再求值。
+3. 每段产出 `segments/<name>.json`（状态、耗时、产物引用）；**`observation.json` 必须在判据段求值之前落盘**（判据可引用它）；判据汇总 `criteria.json`。
+4. run 目录：`<mcDataDir>/controlplane/runs/<yyyyMMdd-HHmmss>-<caseId>-<jobSeq>/`（jobSeq 为数字作业序号，jobId 形态 `j<seq>`），全程只增不改；`manifest.json`（schema `lightning.cp-manifest/1`）登记全部产物的 sha256。tokens/server 内部文件 schema 分别为 `lightning.cp-tokens/1`、`lightning.cp-server/1`。`case.run` 必须把 runId 挂上作业（`GET /cp/v1/jobs/{id}` 可见）。
+5. **变体执行**：`variant:"<id>"` 只跑该变体；不带 variant 时整跑后顺带执行全部变体，结论写入结果（`variants:[{id, allExpectedRed, criteria:[...]}]`）。变体应用补丁后跑同一实现；`expectCriteriaRed` 列出的判据**必须变红**——不变红则作业判 failed（防恒绿假断言）。
+6. 失败即停（ fail-fast ），已完成的段保留产物；`job` 结果携带失败段与错误码。
+7. `world.rebuild` 结果含 `sceneManifestSha256`；`world-hash-equals` 判据的世界哈希取当前托管世界最新 scene-manifest 的规范化 sha256。
 
 ## 9. 文件解析与校验规则
 
