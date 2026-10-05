@@ -141,6 +141,8 @@ function Read-JsonFile([string]$Path) {
 # 配置：lightning.cfg 的 controlplane.enabled（写前备份、收尾还原）
 # ---------------------------------------------------------------------------
 function Enable-ControlPlaneCfg([string]$Path) {
+    # Forge Configuration 格式：分节是 `name {` ... `}`，不是 INI 的 [name]（2026-10-06 冒烟实测：
+    # 写 [controlplane] 会被 Forge 忽略并重写为默认值 ⇒ 控制面没起来）。两种形态都识别、写入用 Forge 格式。
     $lines = @()
     if (Test-Path $Path) { $lines = @(Get-Content $Path) }
     $section = ''
@@ -148,8 +150,10 @@ function Enable-ControlPlaneCfg([string]$Path) {
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
         if ($line -match '^\s*\[(.+?)\]\s*$') { $section = $Matches[1].Trim().ToLowerInvariant(); continue }
+        if ($line -match '^\s*([A-Za-z0-9_.-]+)\s*\{\s*$') { $section = $Matches[1].Trim().ToLowerInvariant(); continue }
+        if ($line -match '^\s*\}\s*$') { $section = ''; continue }
         if ($section -eq 'controlplane' -and $line -match '^\s*[BISED]:\s*enabled\s*=') {
-            $lines[$i] = 'B:enabled=true'
+            $lines[$i] = '    B:enabled=true'
             $done = $true
             break
         }
@@ -161,8 +165,9 @@ function Enable-ControlPlaneCfg([string]$Path) {
     }
     if (-not $done) {
         if ($lines.Count -gt 0 -and $lines[-1].Trim() -ne '') { $lines += '' }
-        $lines += '[controlplane]'
-        $lines += 'B:enabled=true'
+        $lines += 'controlplane {'
+        $lines += '    B:enabled=true'
+        $lines += '}'
     }
     $parent = Split-Path $Path -Parent
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
@@ -370,7 +375,7 @@ try {
         if ($cfgExisted) { Copy-Item -Force $cfgPath (Join-Path $archiveDir 'lightning.cfg.before'); Write-Ok "原值已备份" }
         else { Write-Warn2 "lightning.cfg 不存在，本次新建（收尾会移入归档，不删除）" }
         $replaced = Enable-ControlPlaneCfg $cfgPath
-        Write-Ok ("lightning.cfg 已写: {0}（{1}）" -f $cfgPath, $(if ($replaced) { '替换既有键' } else { '追加 [controlplane] B:enabled=true' }))
+        Write-Ok ("lightning.cfg 已写: {0}（{1}）" -f $cfgPath, $(if ($replaced) { '替换既有键' } else { '追加 controlplane { B:enabled=true } 分节' }))
 
         # 陈旧发现文件移开：否则会读到上一轮的 port/token（只能连到死人端口）
         $staleDir = Join-Path $archiveDir 'stale'
