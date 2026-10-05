@@ -46,6 +46,7 @@ import com.lightning.mod.client.export.TextureBlobEmbedder;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedBlockInstance;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedQuad;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedVertex;
+import com.lightning.mod.client.meshcapture.parts.ItemIndexIntegrator;
 import com.lightning.mod.client.meshcapture.parts.PartCapturePipeline;
 import com.lightning.mod.client.meshcapture.parts.PartCaptureResult;
 import com.lightning.mod.client.meshcapture.parts.PartExportIntegrator;
@@ -151,7 +152,10 @@ public final class MeshCaptureService {
                 JsonObject fr = frames.get(i)
                     .getAsJsonObject();
                 if (fr.has("structure")) {
-                    partsSinks.add(finalizeSingleStructure(fr.getAsJsonObject("structure"), samplers));
+                    // 物品索引表归属条目按帧定位（契约 §2.2）：帧下标取 frames[i].index，缺省退化为 i
+                    int frameIndex = fr.has("index") ? fr.get("index")
+                        .getAsInt() : i;
+                    partsSinks.add(finalizeSingleStructure(fr.getAsJsonObject("structure"), samplers, frameIndex));
                 }
             }
             root.add("materialPalette", samplers.toMaterialPalette());
@@ -404,14 +408,15 @@ public final class MeshCaptureService {
 
     private static PartExportIntegrator.StructureSink finalizeSingleStructure(JsonObject structure) throws Exception {
         SamplerTable samplers = new SamplerTable();
-        PartExportIntegrator.StructureSink partsSink = finalizeSingleStructure(structure, samplers);
+        PartExportIntegrator.StructureSink partsSink = finalizeSingleStructure(structure, samplers, 0);
         structure.add("materialPalette", samplers.toMaterialPalette());
         return partsSink;
     }
 
     /**
-     * P1.7 文档级收尾（契约 §9/部件图标）：文档含部件数据 ⇒ 写 {@code statsTemplate} 默认值 +
-     * {@code partIconTextures}（iconKey → base64 PNG）；无部件 ⇒ 两字段完全不产出（字节干净硬约束）。
+     * P1.7 文档级收尾（契约 §2/§2.2/§9、部件图标）：文档含部件数据 ⇒ 写 {@code statsTemplate}
+     * 默认值 + {@code partIconTextures}（iconKey → base64 PNG）+ {@code itemIndex}（物品索引表）；
+     * 无部件 ⇒ 三字段完全不产出（字节干净硬约束）。
      */
     private static void finishPartsDocument(JsonObject root, List<PartExportIntegrator.StructureSink> partsSinks) {
         if (root == null || partsSinks == null || !PartExportIntegrator.isEnabled()) {
@@ -419,10 +424,14 @@ public final class MeshCaptureService {
         }
         Map<String, PartItem> uniqueItems = new LinkedHashMap<>();
         boolean hasParts = false;
+        List<ItemIndexIntegrator.Sink> itemIndexSinks = new ArrayList<>();
         for (PartExportIntegrator.StructureSink sink : partsSinks) {
             if (sink != null && sink.hasParts()) {
                 hasParts = true;
                 uniqueItems.putAll(sink.uniquePartItems());
+            }
+            if (sink != null) {
+                itemIndexSinks.add(sink.itemIndexSink());
             }
         }
         if (!hasParts) {
@@ -430,10 +439,17 @@ public final class MeshCaptureService {
         }
         root.add("statsTemplate", PartExportIntegrator.defaultStatsTemplate());
         PartExportIntegrator.embedPartIcons(root, uniqueItems);
+        // 契约 §2.2 物品索引表：文档根级共享（World 跨帧一份）、按键去重、跨帧不重复；
+        // 无条目 ⇒ 字段不产出（与 statsTemplate/partIconTextures 同一字节干净口径）
+        JsonObject itemIndex = ItemIndexIntegrator.buildDocumentIndex(itemIndexSinks);
+        if (itemIndex != null && itemIndex.entrySet()
+            .size() > 0) {
+            root.add(ItemIndexIntegrator.FIELD, itemIndex);
+        }
     }
 
     private static PartExportIntegrator.StructureSink finalizeSingleStructure(JsonObject structure,
-        SamplerTable samplers) throws Exception {
+        SamplerTable samplers, int frameIndex) throws Exception {
         if (structure == null || !structure.has("cellGrid")) {
             return null;
         }
@@ -466,7 +482,7 @@ public final class MeshCaptureService {
 
         // P1.7：结构级部件落盘汇聚器（探针 A/B 开关关闭时为 null = 完全跳过部件采集）
         PartExportIntegrator.StructureSink partsSink = PartExportIntegrator.isEnabled()
-            ? PartExportIntegrator.newStructureSink(sizeZ, sizeRow, sizeCol)
+            ? PartExportIntegrator.newStructureSink(frameIndex, sizeZ, sizeRow, sizeCol)
             : null;
 
         validateWorldGridChunks(world, cellGrid, worldCoords);
@@ -684,6 +700,14 @@ public final class MeshCaptureService {
                     String thumbB64 = BlockThumbnailRenderer.renderToBase64PNG(b, r.meta);
                     if (thumbB64 != null && !thumbB64.isEmpty()) {
                         p.addProperty("thumbnailPNG", thumbB64);
+                    }
+                    // 契约 §2.2 层②：宿主级物品身份（Item.getItemFromBlock + damage）落盘到
+                    // blockPalette 条目——仅当本结构含部件数据时写（无部件文件字节干净硬约束）
+                    if (partsSink != null && partsSink.hasParts()) {
+                        JsonObject hostItem = ItemIndexIntegrator.hostItemIdentity(b, r.meta);
+                        if (hostItem != null) {
+                            p.add(ItemIndexIntegrator.HOST_ITEM_FIELD, hostItem);
+                        }
                     }
                 }
             } catch (Exception ignored) {
