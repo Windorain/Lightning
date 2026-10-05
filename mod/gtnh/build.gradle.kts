@@ -246,4 +246,6 @@ val gsonCompatCheck = tasks.register<JavaCompile>("gsonCompatCheck") {
 
 tasks.named("check") {
     dependsOn(gsonCompatCheck)
+    // mixin 源集也纳入验证链：mixin 写坏时 compileJava/test 仍全绿（PR-2 实测盲区）
+    dependsOn("compileMixinJava")
 }

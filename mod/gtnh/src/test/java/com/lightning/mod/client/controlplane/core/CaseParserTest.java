@@ -66,12 +66,22 @@ public class CaseParserTest {
         c.add("build", build);
 
         JsonObject capture = new JsonObject();
-        capture.addProperty("ortho", true);
+        capture.addProperty("lighting", "neutral-flat");
+        capture.addProperty("renderMode", "参与光照");
+        capture.addProperty("worldTime", 6000);
         c.add("capture", capture);
 
         JsonArray cameras = new JsonArray();
         JsonObject cam = new JsonObject();
-        cam.addProperty("id", "front");
+        cam.addProperty("name", "front");
+        cam.add("pos", doubles(64.5d, 20.0d, 70.5d));
+        cam.addProperty("yaw", 180.0d);
+        cam.addProperty("pitch", -45.0d);
+        JsonObject camProj = new JsonObject();
+        camProj.addProperty("type", "ortho");
+        camProj.addProperty("orthoHeight", 16.0d);
+        cam.add("projection", camProj);
+        cam.add("resolution", ints(1920, 1080));
         cameras.add(cam);
         c.add("cameras", cameras);
 
@@ -118,6 +128,14 @@ public class CaseParserTest {
     private static JsonArray ints(int... v) {
         JsonArray a = new JsonArray();
         for (int x : v) {
+            a.add(x);
+        }
+        return a;
+    }
+
+    private static JsonArray doubles(double... v) {
+        JsonArray a = new JsonArray();
+        for (double x : v) {
             a.add(x);
         }
         return a;
@@ -274,29 +292,41 @@ public class CaseParserTest {
     }
 
     @Test
-    public void captureAndCamerasArePassedThroughWithWarning() {
+    public void captureAndCamerasAreParsedAsRealSegments() {
         CaseFile f = new CaseParser().parse(text(caseJson()));
         assertNotNull(f.capture());
-        assertTrue(
+        assertEquals(
+            "neutral-flat",
             f.capture()
                 .getAsJsonObject()
-                .get("ortho")
-                .getAsBoolean());
+                .get("lighting")
+                .getAsString());
         assertNotNull(f.cameras());
         assertEquals(
             "front",
             f.cameras()
                 .get(0)
                 .getAsJsonObject()
-                .get("id")
+                .get("name")
                 .getAsString());
-        boolean warned = false;
+        // 段本身不再报「PR-1 透传」警告（PR-2 起是真实执行段）
         for (String w : f.warnings()) {
-            if (w.contains("v1.x")) {
-                warned = true;
-            }
+            assertFalse("不应再出现 defer 口径的警告: " + w, w.contains("v1.x"));
         }
-        assertTrue("应就 PR-2 段给出说明性警告: " + f.warnings(), warned);
+        // 规范化计划：capture/cameras 是执行段，投影二选一已展开
+        JsonObject plan = new CaseValidator().plan(f);
+        assertTrue(
+            plan.getAsJsonArray("segments")
+                .toString()
+                .contains("cameras"));
+        assertEquals(
+            "ortho",
+            plan.getAsJsonArray("cameras")
+                .get(0)
+                .getAsJsonObject()
+                .getAsJsonObject("projection")
+                .get("type")
+                .getAsString());
     }
 
     @Test
@@ -425,7 +455,7 @@ public class CaseParserTest {
             plan.get("caseSha256")
                 .getAsString());
         assertEquals(
-            4,
+            6,
             plan.getAsJsonArray("segments")
                 .size());
         assertTrue(plan.has("capture"));
@@ -689,8 +719,11 @@ public class CaseParserTest {
     public void planCarriesCriteriaTypesRegistry() {
         assertTrue(CriteriaEngine.isKnownType("artifact-exists"));
         assertTrue(CriteriaEngine.isKnownType("event-emitted"));
+        // PR-2 追加的两个图像判据
+        assertTrue(CriteriaEngine.isKnownType("image-size-equals"));
+        assertTrue(CriteriaEngine.isKnownType("image-not-uniform"));
         assertFalse(CriteriaEngine.isKnownType("nope"));
-        assertEquals(5, CriteriaEngine.TYPES.size());
+        assertEquals(7, CriteriaEngine.TYPES.size());
     }
 
     private static void assertArrayEqualsInts(int[] expected, int[] actual) {

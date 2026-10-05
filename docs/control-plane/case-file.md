@@ -45,9 +45,20 @@
 
 坐标三种写法，一律规范化为绝对坐标：绝对数组 `[x,y,z]`；`"@base"` + 同层 `offset:[dx,dy,dz]`；字符串 `"base+[dx,dy,dz]"`。`world.base` 只接受绝对数组。构建完成后运行器自动做：TE 补全（`te` 步声明的）→ `markBlockRangeForRenderUpdate` → 静置 `settleTicks`。
 
-## 4. capture / cameras 段
+## 4. capture / cameras 段（PR-2 起生效）
 
-PR-2 定义（相机注入、正交投影、分块超分辨率、多机位生成）。PR-1 解析器必须**接受并透传**这两段（`case.validate` 报"该段由契约 v1.x 提供"而非报错），保证用例文件前向兼容。
+```jsonc
+"capture": {                             // 可空：捕获会话参数（= capture.begin/end 包围 build 之后、shots 之前）
+  "lighting": "natural",                 // natural | neutral-flat（会话默认，可被机位覆盖）
+  "renderMode": "本色",                   // 本色 | 参与光照（豁免一，会话默认）
+  "worldTime": 6000                      // 可空：拍摄光照基准
+},
+"cameras": [ CameraSpec, ... ]           // 可空：机位表（CameraSpec 见 contract.md §4.1），逐个调 shot.multi 同一实现
+```
+
+- 两段都空 → 不产截图；`cameras` 非空时才需要 forensic 级 token（`case.run` 权限按内容升格：含 cameras 段的用例必须 forensic 调用）。
+- PR-1 行为（历史口径）：解析器接受并透传这两段，执行时跳过并标注 `deferred`——PR-2 起改为实际执行。
+- 每机位产物：`shots/<name>.png` + `shots/<name>.meta.json`（机位参数与实际 renderMode/lighting/worldTime）；拼接机位另产 `shots/<name>.tiles/`。
 
 ## 5. criteria 段（判据与阈值）
 
@@ -60,6 +71,8 @@ PR-2 定义（相机注入、正交投影、分块超分辨率、多机位生成
 | `json-field` | `path, pointer:"/a/b/0", expect` | JSON 产物字段等于 expect（RFC 6901 指针） |
 | `world-hash-equals` | — | 重建后场景哈希等于本 run 首次构建哈希（幂等判据） |
 | `event-emitted` | `kind, minCount` | 事件流水含指定 kind 至少 minCount 条 |
+| `image-size-equals`（PR-2） | `path, width, height` | 图像产物尺寸等于期望（读取 PNG 头，不解码全图） |
+| `image-not-uniform`（PR-2） | `path, maxSameColorRatio(默认0.98)` | 图像非纯色——主色占比 < maxSameColorRatio（防黑屏/全白假图，负对照友好） |
 
 判据结论：`{id, verdict: "green"|"red"|"error", detail}`。`error`（判据自身无法求值，如产物缺失到连断言都不能做）视同 red 但单列。
 

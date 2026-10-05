@@ -54,32 +54,15 @@ public final class CaseValidateAction implements ControlAction {
     }
 
     /**
-     * capture/cameras 段的延后说明（PR-1 只接受并透传，不解释、不执行）。
+     * 「延后段」清单（{@code deferred: contract v1.x} 口径）。
      *
      * <p>
-     * 返回 {@code [{segment, reason}]}，reason 固定含 {@code deferred: contract v1.x} 字样，
-     * 便于调用方按字符串判定——**不算失败**。
+     * PR-1 时 {@code capture}/{@code cameras} 落在这里（只接受并透传、不执行）；<b>PR-2 起两段
+     * 都是真实执行段</b>（{@link com.lightning.mod.client.controlplane.core.CaseValidator#SEGMENTS}
+     * 已含它们），因此本方法恒返回空数组。保留方法本身是为了不动既有响应结构（契约 §5：v1 内
+     * 只增不改）——调用方按「数组是否为空」判断即可，不必改代码。
      */
     public static JsonArray deferredSegments(CaseFile file) {
-        JsonArray out = new JsonArray();
-        if (file == null) {
-            return out;
-        }
-        com.google.gson.JsonElement capture = file.capture();
-        if (capture != null && capture.isJsonObject() && Json.size(capture.getAsJsonObject()) > 0) {
-            out.add(entry("capture"));
-        }
-        JsonArray cameras = file.cameras();
-        if (cameras != null && cameras.size() > 0) {
-            out.add(entry("cameras"));
-        }
-        return out;
-    }
-
-    private static JsonObject entry(String segment) {
-        JsonObject o = new JsonObject();
-        o.addProperty("segment", segment);
-        o.addProperty("reason", "deferred: contract v1.x");
-        return o;
+        return new JsonArray();
     }
 }

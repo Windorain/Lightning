@@ -13,6 +13,7 @@ import com.lightning.mod.client.controlplane.core.ErrorCodes;
 import com.lightning.mod.client.controlplane.core.EventStream;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.TimeSource;
+import com.lightning.mod.client.controlplane.mc.capture.CaptureControl;
 
 /**
  * {@code world.snapshot}（scene，步进）：托管世界快照（v1 口径 = <b>整目录复制</b>）。
@@ -58,6 +59,8 @@ public final class WorldSnapshotAction extends SteppingActionBase {
 
     @Override
     protected void onBegin(ActionContext ctx) throws Exception {
+        // 捕获会话门控（contract §4.1）：begin 之后禁止一切世界写动作，违规 CP-STATE-001
+        CaptureControl.assertWorldWriteAllowed(ctx);
         mc = WorldRuntime.mc();
         if (mc == null) {
             throw new CpException(ErrorCodes.STATE, "Minecraft 实例不可用");

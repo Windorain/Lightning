@@ -48,6 +48,25 @@ public class CpException extends RuntimeException {
         this.httpStatus = httpStatus > 0 ? httpStatus : ErrorCodes.httpStatus(this.code);
     }
 
+    /**
+     * 携带原始异常的构造：{@code cause} 挂在 {@link #getCause()} 上，让失败日志能落完整栈。
+     *
+     * <p>
+     * 契约错误（{@code CpException}）是「包装层」——例如 {@code SteppingActionBase} 把动作里冒出来的任意
+     * {@code Throwable} 包成 {@code CP-EXEC-001}。若包装时丢掉原异常，失败日志里就只剩一行
+     * {@code 类名: message}，栈帧全无：真机验收事故（{@code case.run} cameras 段首 step NPE）正是因此
+     * 只能靠猜。故包装必须带上 cause，并<b>不改变</b>原有的 message/context 口径
+     * （{@code toErrorJson()} 输出的 {@code code/message/context} 与改前逐字段一致）。
+     *
+     * @param cause 原始异常，可为 null
+     */
+    public CpException(String code, String message, JsonObject context, Throwable cause) {
+        this(code, message, context, ErrorCodes.httpStatus(code));
+        if (cause != null && cause != this && getCause() == null) {
+            initCause(cause);
+        }
+    }
+
     /** 契约错误码。 */
     public String code() {
         return code;

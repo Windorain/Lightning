@@ -19,6 +19,16 @@ public interface JobHandle {
     String action();
 
     /**
+     * 提交本作业的调用方权限级（contract.md §1.5）。
+     *
+     * <p>
+     * 动作实现需要它来做<b>按内容升格</b>的判定：{@code case.run} 的静态级是 {@code scene}，
+     * 但用例含 {@code cameras} 段时必须由 {@code forensic} 级调用方发起（case-file.md §4）——
+     * 这个判定只能在这里拿到「实际是哪一级」之后做。
+     */
+    Tier tier();
+
+    /**
      * 上报进度。
      *
      * @param fraction 0..1，越界会被夹取

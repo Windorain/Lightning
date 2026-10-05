@@ -230,7 +230,9 @@ public final class CoreEndpoints {
         JsonObject params = stripControlFields(req.body());
         Job job;
         try {
-            job = queue.submit(name, params);
+            // 调用方权限级随作业下发：case.run 含 cameras 段时按内容升格为 forensic
+            // （case-file.md §4），判定只在 tick 线程的执行期可做，故必须带上这一级。
+            job = queue.submit(name, params, req.tier());
         } catch (CpException e) {
             reject(req, e.code(), e.detail());
             throw e;
@@ -241,6 +243,18 @@ public final class CoreEndpoints {
         }
         long timeout = req.queryLong("timeoutMs", DEFAULT_SYNC_TIMEOUT_MS);
         boolean done = job.await(Math.max(0L, timeout));
+        if (done && job.state() == Job.State.FAILED) {
+            // 运行期升格失败（如 case.run 含 cameras 段但只有 scene 级）要如实回 403，
+            // 不能只在作业体内失败——否则同步调用方拿到 200 + 一个「看起来跑过了」的作业。
+            JsonObject err = job.error();
+            if (err != null && ErrorCodes.AUTH_INSUFFICIENT.equals(Json.optString(err, "code", null))) {
+                throw new CpException(
+                    ErrorCodes.AUTH_INSUFFICIENT,
+                    Json.optString(err, "message", "权限级不足"),
+                    Json.optObject(err, "context"),
+                    ErrorCodes.httpStatus(ErrorCodes.AUTH_INSUFFICIENT));
+            }
+        }
         JsonObject data = job.toJson();
         if (!done) {
             data.addProperty("timedOut", true);

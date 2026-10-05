@@ -54,6 +54,7 @@ public final class Router {
         private Map<String, String> pathParams = new LinkedHashMap<String, String>();
         private JsonObject body;
         private boolean bodyParsed;
+        private Tier tier = Tier.OBSERVE;
 
         private Request(Builder b) {
             this.method = b.method == null ? "GET" : b.method.toUpperCase(java.util.Locale.ROOT);
@@ -180,6 +181,22 @@ public final class Router {
         /** 内部：路由匹配时填写路径占位符。 */
         void setPathParams(Map<String, String> params) {
             this.pathParams = params;
+        }
+
+        /** 内部：鉴权通过后填写调用方权限级（动作据此做运行期升格检查）。 */
+        void setTier(Tier t) {
+            this.tier = t;
+        }
+
+        /**
+         * 调用方权限级（鉴权期解析出的实际级）。
+         *
+         * <p>
+         * 动作实现需要它来做<b>按内容升格</b>的判定（{@code case.run} 含 cameras 段时要求
+         * forensic）；未鉴权路径下为 {@link Tier#OBSERVE}（最保守）。
+         */
+        public Tier tier() {
+            return tier;
         }
 
         /** 请求体是否为 {@code "confirm": true}。 */
@@ -504,6 +521,8 @@ public final class Router {
                 null,
                 "application/json; charset=utf-8");
         }
+        // 调用方权限级随请求下发：动作可据此做「按内容升格」的运行期判定（case.run + cameras 段）
+        req.setTier(actual);
 
         // 4) confirm（仅可写级动作）
         if (required.isWritable() && !req.confirmed()) {
