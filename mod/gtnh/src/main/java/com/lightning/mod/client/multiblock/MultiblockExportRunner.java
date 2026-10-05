@@ -656,6 +656,13 @@ public final class MultiblockExportRunner {
         return out;
     }
 
+    // 注意（空 scope 的语义，行为未改；修复已登记 issue）：
+    // 本方法把 want 为空/null 解释为「不过滤」⇒ 一次 `scope=` 残缺或空触发文件会**静默导出全量**
+    // （枚举全量 221 台，估算 ≈32h@默认上限），而不是报错、也不是"什么都不导出"。
+    // 与之配套的变体捕获半环（VariantCaptureRunner#resolveTargets）对「空」的解释不同：空 machines
+    // 落到 DEFAULT_TARGETS（4 台代表机）。两个 runner 的空值语义不一致，于是空 scope 会造成
+    // 「导出 221 台、捕获只跑 4 台」的白跑。要修必须统一"空 = 报错"或"空 = 同一份默认子集"。
+
     // ------------------------------------------------------------------ 落盘与工具
 
     static JsonObject envelope(MultiblockFactorizer.MachineIn mi, JsonObject inner) {
@@ -683,7 +690,9 @@ public final class MultiblockExportRunner {
         o.addProperty("outputDirName", outputDirName);
         o.addProperty("globalBudgetMs", Long.valueOf(budgetMs));
         o.addProperty("includeThumbnails", Boolean.valueOf(GeometryPalette.EMITS_THUMBNAIL_PNG));
-        o.addProperty("thumbnailPNGPolicy", "恒不产出：GPU 渲染像素跨运行不稳定，违反产物逐字节幂等（契约：docs/contracts/format-multiblock-doc.md §6.3）");
+        o.addProperty(
+            "thumbnailPNGPolicy",
+            "恒不产出：GPU 渲染像素跨运行不稳定，违反产物逐字节幂等（契约：docs/contracts/format-multiblock-doc.md §6.3）");
         o.addProperty("embedTextures", Boolean.valueOf(SdeMultiblockConfig.embedTextures));
         return o;
     }

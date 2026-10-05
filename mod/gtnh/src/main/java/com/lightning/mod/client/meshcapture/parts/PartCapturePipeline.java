@@ -129,6 +129,10 @@ public final class PartCapturePipeline {
                 return PartCaptureResult.fullCube();
             }
 
+            // 方块 meta **必须读世界实际值**：meta 本身也是世界状态的产物，不是"放置时写下的那个数"。
+            // 实证：相邻两箱合并时放置写 meta=2、随后读到 meta=3 —— `BlockChest.onBlockAdded` /
+            // `unifyAdjacentChests` 会按周边不透明方块自动校正朝向 meta（同类：栅栏/楼梯/红石连接形态）。
+            // 因此取盒与物品身份都只能用 world.getBlockMetadata()，不得回落到方块物品的 damage 或缓存值。
             PartProviderContext ctx = new PartProviderContext(
                 world,
                 x,
