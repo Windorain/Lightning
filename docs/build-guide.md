@@ -42,11 +42,14 @@ GTNH 1.7.10 运行期的 gson 是 **2.2.4**（整合包打包的旧版），而 
 | 2.8+ 写法（禁止） | 2.2.4 兼容写法 |
 |---|---|
 | `JsonObject.size()` | `obj.entrySet().size()` |
-| `JsonElement.deepCopy()` | `new JsonParser().parse(e.toString())` 或手写深拷贝 |
+| `JsonObject.keySet()` | `entrySet()` 遍历 |
+| `JsonElement.deepCopy()` | 手写递归深拷贝（control-plane 里用 `Json.copy/copyObject/copyArray`；不要用 `parse(toString())` 文本往返——数字会变成 `LazilyParsedNumber`，改变 equals/哈希口径） |
 | `JsonParser.parseString/parseReader` | `new JsonParser().parse(...)` |
-| `JsonNull.INSTANCE` | `new JsonNull()` |
+| `JsonArray.add(String/Number/Boolean)` 标量重载 | `arr.add(new JsonPrimitive(v))` |
+| `JsonArray.set(int,·)` / `remove(int)` | 重建数组再替换回去 |
+
+注：`JsonNull.INSTANCE` 在 2.2.4 **存在**（javap 实证），不是雷区。
 
 **编译期护栏**：`cd mod/gtnh && ./gradlew gsonCompatCheck` —— 用 gson 2.2.4 重编译
-`client/controlplane/**` 源集，2.2.4 没有的 API 直接编译报错。新增 mod 代码若用到 gson，
-应把对应包纳入该护栏的源集（见 `mod/gtnh/build.gradle.kts` 中该 task 的定义）。
+**全部 main 源码**（已挂 `check`，`build` 也会跑），2.2.4 没有的 API 直接编译报错。
 单测 classpath 上是 gson 2.8.9，**单测抓不到这类问题**，护栏是唯一防线。

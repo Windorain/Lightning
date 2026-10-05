@@ -171,8 +171,9 @@ tasks.matching { it.name == "runClient" }.configureEach {
  *
  * 接入：`check` → `gsonCompatCheck`，故 `build` 也会跑它。
  *
- * 范围：只编译 `com.lightning.mod.client.controlplane` 子树（core + mc）。其余包（meshcapture 等）
- * 尚未纳管；扩展时把 source 目录换成对应的子集即可。
+ * 范围：mod 全部 main 源码（`src/main/java` 整树）。2026-10-06 实测全量编译仅剩
+ * MeshCaptureService 一处旧错（#56 修复随 main 合入后消除），扩围零成本；发现新错先修
+ * 再合（这是 mod 级准入线，不只是 control-plane 的事）。
  */
 val gsonCompatRuntimeVersion = "2.2.4"
 
@@ -216,10 +217,10 @@ val lightningCompileJava = tasks.named<JavaCompile>("compileJava")
 
 val gsonCompatCheck = tasks.register<JavaCompile>("gsonCompatCheck") {
     group = "verification"
-    description = "用运行期 gson 2.2.4 编译 control-plane 源码：编译期拦住 2.8+ 独有 API（NoSuchMethodError 防回归）"
+    description = "用运行期 gson 2.2.4 编译全部 main 源码：编译期拦住 2.8+ 独有 API（NoSuchMethodError 防回归）"
 
-    // 只校验 control-plane 子树（core 与 mc）
-    source = fileTree(projectDir.resolve("src/main/java/com/lightning/mod/client/controlplane")) {
+    // mod 全部 main 源码（见上方块注释「范围」）
+    source = fileTree(projectDir.resolve("src/main/java")) {
         include("**/*.java")
     }
 
