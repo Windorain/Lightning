@@ -27,6 +27,7 @@ export function createViewportManager() {
         wireframe: shallowRef(null),
         orbitTarget: ref(null),
         cameraMainKey: cameraMainKeyForRegion(id),
+        outlinePass: null,
       }
       slots.set(id, slot)
       if (!activeId.value) activeId.value = id

@@ -5,6 +5,7 @@ import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { MoveGizmo } from '@/workbench/tools/gizmos'
 import type { CameraMainKey } from '@/runtime/mainCameras'
+import type { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 
 export type LoadStatus = 'loading' | 'ok' | 'error'
 export type WorkbenchWorkspaceMode = 'sde' | 'local-file' | 'local-bundle' | 'wiki-data'
@@ -59,5 +60,11 @@ export interface ViewportSlot {
   orbitTarget: Ref<THREE.Vector3 | null>
   /** 绑定的 Main.cameras 键 */
   cameraMainKey: CameraMainKey
+  /**
+   * 该视口的描边 mask pass（`useViewportRuntime` 装配后写入）。
+   * B-1：描边粒度是 mask 几何的直接函数，暴露它是**公开观测点**（e2e 读
+   * `maskScene` 断言「同格不同部件 ⇒ mask 不同」），也是排障入口。
+   */
+  outlinePass: SelectionOutlinePass | null
 }
 

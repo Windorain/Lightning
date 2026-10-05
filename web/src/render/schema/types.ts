@@ -40,6 +40,12 @@ export interface BlockRef {
   block_state_id: string
   /** 被击中的 quad 在该体素内的索引 */
   quadIndex?: number
+  /**
+   * B-1：命中的部件 localId（契约 §4 命名空间隔离）。
+   * 缺省 = 整格引用（无部件格 / 框选、按类型选择等既有路径），描边 mask 与悬停目标
+   * 都回到整格语义；给出时描边 mask 收敛到该部件（`context/queries.ts#getPartMaskGeometry`）。
+   */
+  partLocalId?: string
   /** 命中面的世界空间法线（已归一化），用于面级别检测 */
   normal?: { x: number; y: number; z: number }
   /** 命中点的世界空间坐标，用于区分同法线的多个面 */

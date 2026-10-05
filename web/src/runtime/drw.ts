@@ -130,6 +130,11 @@ export class DRW {
     highlightOnHover: Ref<boolean>
     getBlockGeometry: (pos: { x: number; y: number; z: number }) => import('@/render/schema/types').BakedQuad[] | null
     gridCenterWorld: (pos: { x: number; y: number; z: number }) => { x: number; y: number; z: number } | null
+    /**
+     * B-1 部件级 mask 通道：`BlockRef.partLocalId` 给出时走该部件的盒几何，
+     * 否则整格几何（既有行为）。hover 描边与点选高亮共用此入口。
+     */
+    getPartMaskGeometry?: import('@/render/mesh/selectionHighlightProvider').MaskGeometrySource
     /** Embed 侧栏按 blockId 高亮等附加遮罩 */
     extraMaskMeshes?: Ref<THREE.Mesh[]> | ShallowRef<THREE.Mesh[]>
   }): void {
@@ -144,12 +149,16 @@ export class DRW {
             items,
             options.getBlockGeometry,
             options.gridCenterWorld,
+            options.getPartMaskGeometry,
           )
         }
       } else {
         const entities = new Set(items)
+        // 同格不同部件不是同一个悬停目标（B-1：部件身份参与重复判定）
         const dup = [...items].some(
-          e => e.kind === 'block' && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z,
+          e => e.kind === 'block'
+            && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z
+            && e.ref.partLocalId === hov.partLocalId,
         )
         if (!dup) entities.add({ kind: 'block', ref: hov })
         if (entities.size > 0 && entities.size <= 500) {
@@ -157,6 +166,7 @@ export class DRW {
             entities,
             options.getBlockGeometry,
             options.gridCenterWorld,
+            options.getPartMaskGeometry,
           )
         }
       }

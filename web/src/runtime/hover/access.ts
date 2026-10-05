@@ -17,6 +17,8 @@ export function blockRefFromViewportHover(ctx: Context, vb: ViewportBlockHover |
   return {
     pos: { x: vb.voxel.column, y: worldY, z: vb.voxel.zSlice },
     block_state_id: vb.blockId,
+    // B-1：悬停目标携带部件身份 ⇒ 描边 mask 收敛到该部件（缺省 = 整格，既有行为）
+    partLocalId: vb.part?.localId,
   }
 }
 

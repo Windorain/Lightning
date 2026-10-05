@@ -50,6 +50,9 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     orbitTargetRef: vpSlot.orbitTarget,
   })
 
+  // B-1：把描边 mask pass 挂到 slot 的公开观测点（e2e 读 mask 几何、排障用）
+  vpSlot.outlinePass = drw.outlinePass
+
   return {
     ctx,
     regionId,
