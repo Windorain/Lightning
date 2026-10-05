@@ -2,7 +2,7 @@
 /**
  * BlockStatsSidebar — 统计栏（P2.4 升级：部件物品清单 + 三视图切换 + 三级配置入口）。
  *
- * 契约：`docs/plan/format-parts-contract.md`（§5 物品身份、§9 三级配置）。
+ * 契约：`docs/contracts/format-parts-contract.md`（§5 物品身份、§9 三级配置）。
  * 引擎：`@/pure/partStats`（P2.3，行集/退化语义由引擎钉死，本组件只呈现）。
  *
  * ── 留白 #7 拍板登记（统计栏呈现细节，P2.4；将登记回计划 §9）──

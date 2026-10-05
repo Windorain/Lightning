@@ -487,5 +487,5 @@ node scripts\multiblock-fixtures\validate-multiblock-fixtures.mjs @f
 捕获耗时**无**实测收益（落在运行间噪声内，不夸大）。
 
 **新增开放项**（详见修复报告 §10）：① 若将来要缩略图，须用**确定性软件光栅**另行立项；
-② `docs/plan/format-multiblock-doc.md` §6.3 的「`thumbnailPNG` 原样进条目」政策与本修复冲突，需契约 owner 改写；
+② `docs/contracts/format-multiblock-doc.md` §6.3 的「`thumbnailPNG` 原样进条目」政策与本修复冲突，需契约 owner 改写；
 ③ 展开签名口径是「条目全文」，跨年代（含/不含缩略图）产物不可混用（本修复刻意不改签名定义，避免第二套口径）。

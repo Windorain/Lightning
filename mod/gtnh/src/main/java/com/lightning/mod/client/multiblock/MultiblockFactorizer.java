@@ -18,7 +18,7 @@ import com.google.gson.JsonPrimitive;
 /**
  * T1.4 因子化编码器 —— 需求 C（结构性压缩）的本体。
  * <p>
- * 契约：{@code docs/plan/format-multiblock-doc.md}。输入 = T1.3 的变体几何数据集（内存模型），
+ * 契约：{@code docs/contracts/format-multiblock-doc.md}。输入 = T1.3 的变体几何数据集（内存模型），
  * 输出 = 契约 inner body（{@code multiblock} + 根级并集 {@code blockPalette} + {@code frames}）。
  * <p>
  * <b>为什么落在 Java 侧</b>：T1.5 的 {@code /sde multiblock} 在游戏内实时调用本类（数据来自

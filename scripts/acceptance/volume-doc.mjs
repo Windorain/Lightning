@@ -40,7 +40,7 @@ function header(mode) {
     '# T3.2 体积增长曲线 —— 结果归档',
     '',
     '> **本文件的模板由编排生成**（`scripts/acceptance/volume-doc.mjs`），**实际数据随终验填入**。',
-    '> 判据真源：`docs/plan/format-multiblock-doc.md` §9.2/§9.3/§9.4（留白 #9 定稿）+ §10 对计划 §T3.2 建议式的修正。',
+    '> 判据真源：`docs/contracts/format-multiblock-doc.md` §9.2/§9.3/§9.4（留白 #9 定稿）+ §10 对计划 §T3.2 建议式的修正。',
     `> 生成时间：${new Date().toISOString()}；模式：\`${mode}\``,
     '',
     '## 判据（机器判定，λ=1.35 / R²≥0.95 / b≤2048 B/组合 / 常数项下限 4096 B）',

@@ -1,7 +1,7 @@
 /**
  * MultiblockParser — 「多方块为主」文档（`documentShape === "multiblock"`）的反序列化。
  *
- * 契约：`docs/plan/format-multiblock-doc.md`
+ * 契约：`docs/contracts/format-multiblock-doc.md`
  *  - §2.2 判别：只看文档级形态枚举量（信封 `meta.documentShape` 或裸体根级 `documentShape`）。
  *    **必须先于 V2Plain / World 判别**：多方块文档天然带 `format_version:"2.0" + frames`，
  *    会被按 format 泛匹配的 parser 抢走。注册顺序见 `parserRegistry.createParserRegistry()`。

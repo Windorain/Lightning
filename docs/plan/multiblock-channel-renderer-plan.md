@@ -109,7 +109,7 @@ Phase 3 集成与验收（串行，全部由 E 管线驱动，零人工）
   6. 与既有 gzip+base64 信封（`SceneEnvelopeBuilder`）兼容 —— 因子化在信封**之前**，信封机制不重做。
   7. 是否扩展 `protocol/`（protobuf）由执行方定；**若改动 proto，必须同步 `npm run protocol:gen` 并检查两端生成代码**。
 - **同时产出**：至少 2 份手工构造的 fixture 文件（一台多通道多方块 + 一台仅总 Tier 无具名通道的多方块），覆盖"Not set"取值，供 Phase 2 开发。
-- **产出**：`docs/plan/format-multiblock-doc.md` + fixture 文件（建议 `web/src/context/__tests__/fixtures/` 或自报位置）。
+- **产出**：`docs/contracts/format-multiblock-doc.md` + fixture 文件（建议 `web/src/context/__tests__/fixtures/` 或自报位置）。
 - **写范围**：`docs/plan/`、fixture 目录、（可选）`protocol/`。
 - **自检**：用《需求书》§4.4、§5.3 逐条打勾；fixture 被 T2.1 解析通过后方可宣布定稿。
 

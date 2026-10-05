@@ -1,7 +1,7 @@
 # Phase 3 验收编排（`npm run acceptance:multiblock`）
 
 > 计划依据：`docs/plan/multiblock-channel-renderer-plan.md` §5（Phase 3 / T3.1–T3.4）、§6（把关清单）、
-> §10（留白 #9 判据修正、风险 7 裁决）；判据真源：`docs/plan/format-multiblock-doc.md` §9/§10；
+> §10（留白 #9 判据修正、风险 7 裁决）；判据真源：`docs/contracts/format-multiblock-doc.md` §9/§10；
 > 上游半环：`docs/plan/probe-export-pipeline.md`（T1.6）、`docs/plan/probe-factorized-encoding.md`（T1.4）。
 >
 > 本目录是**交付 E「自动化验收管线」的总入口**。一条命令、零人工交互、任何一步红即非零退出。

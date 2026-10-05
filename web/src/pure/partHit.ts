@@ -1,7 +1,7 @@
 /**
  * pure/partHit.ts — 非满方块（部件）悬停命中判定的纯函数（P2.2）。
  *
- * 契约：`docs/plan/format-parts-contract.md`
+ * 契约：`docs/contracts/format-parts-contract.md`
  *  - §6.1 盒坐标系 = 0–1 方块局部、Y-up，与烘焙四边形顶点同一空间
  *    （`render/mesh/structureGeometryUVs.ts`：世界坐标 = 顶点 + (col - w/2, worldY - h/2, z - d/2)）。
  *  - §6.3 盒允许越出 [0,1]³，命中判定不裁剪（如栅栏碰撞盒 maxY=1.5）。

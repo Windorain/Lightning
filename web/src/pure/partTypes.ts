@@ -1,7 +1,7 @@
 /**
  * pure/partTypes.ts — 非满方块（部件）数据模型的纯类型与纯函数。
  *
- * 契约：`docs/plan/format-parts-contract.md`（§2 文件表达、§3 PartRecord schema、§6 盒坐标系）。
+ * 契约：`docs/contracts/format-parts-contract.md`（§2 文件表达、§3 PartRecord schema、§6 盒坐标系）。
  * No side effects: no Vue refs, no DOM, no I/O, no mutation of arguments.
  */
 

@@ -105,7 +105,7 @@ Phase 3 集成与验收（E 管线驱动，零人工）
   6. 判定标准：盒 = 整格 ⇒ 走现有路径零改动；盒 ≠ 整格 ⇒ 带盒（§6 建议，采纳为契约）；
   7. oracle 格式：按格列出期望部件（local id、类型键、物品身份、盒档位），按物品列出期望计数 —— 由 P1.8 建造器生成、P2.5/P3.1 断言消费。
 - **同时产出**：至少 2 份手工 fixture（一个含 AE2 多部件格的文件、一个单盒+满方块混存的文件），供 Phase 2 开发。
-- **产出**：`docs/plan/format-parts-contract.md` + fixture + proto 扩展（如需）。
+- **产出**：`docs/contracts/format-parts-contract.md` + fixture + proto 扩展（如需）。
 - **写范围**：`docs/plan/`、fixture 目录、`protocol/`。
 - **自检**：fixture 被 P2.1 解析通过后定稿；契约逐条打勾《需求书》§3.1–3.5。
 

@@ -1,7 +1,7 @@
 /**
  * pure/partStats.ts — P2.3 统计引擎（物品粒度 + 三级配置 + 三视图）。
  *
- * 契约：`docs/plan/format-parts-contract.md`（§5 类型键与物品身份、§9 统计默认值与 StatsEntry）。
+ * 契约：`docs/contracts/format-parts-contract.md`（§5 类型键与物品身份、§9 统计默认值与 StatsEntry）。
  * 计划：`docs/plan/non-full-cube-parts-plan.md` §4 P2.3。
  *
  * 纯函数、零框架依赖：输入 = 部件数据 + 宿主计数 + 规则，输出 = 清单行；UI 只负责呈现。

@@ -22,7 +22,7 @@ export type {
   ResourceLocator,
 }
 
-// ---- 部件（非满方块）数据模型：纯类型定义见 pure/partTypes（契约 docs/plan/format-parts-contract.md §3） ----
+// ---- 部件（非满方块）数据模型：纯类型定义见 pure/partTypes（契约 docs/contracts/format-parts-contract.md §3） ----
 export type {
   PartBox,
   PartBoxKind,

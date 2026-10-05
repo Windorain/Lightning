@@ -1,6 +1,6 @@
 # 部件 E2E 断言包 —— helpers/parts 说明（P2.5 fixture 包 + P3.1 真实导出包）
 
-> 计划依据：`docs/plan/non-full-cube-parts-plan.md` §4 P2.5 + §5 P3.1；契约：`docs/plan/format-parts-contract.md`。
+> 计划依据：`docs/plan/non-full-cube-parts-plan.md` §4 P2.5 + §5 P3.1；契约：`docs/contracts/format-parts-contract.md`。
 > 运行：
 > ```powershell
 > cd web

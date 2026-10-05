@@ -357,7 +357,7 @@ PS> Compare-Object (Get-Content ...run1.md) (Get-Content ...run2.md)   # 无输�
 
 ## 8. 格式层面体积热点（对 T0.5 有直接意义的观察）
 
-> 每条标注**证据**与**对 T0.5 的动作建议**。F1–F3、F6 建议在 T0.5 定稿时逐条回应，并把结论写进 `docs/plan/format-multiblock-doc.md`。
+> 每条标注**证据**与**对 T0.5 的动作建议**。F1–F3、F6 建议在 T0.5 定稿时逐条回应，并把结论写进 `docs/contracts/format-multiblock-doc.md`。
 
 **F1｜因子化必须发生在信封之内，且绝不能"每变体一份调色板"。**
 - 证据（真实产物，gzip 后）：`blockPalette` 68.8% + `textureBlobs` 29.6% = **98.4%**；`cellGrid` + `cellTooltipGrid` 合计 0.2%。
