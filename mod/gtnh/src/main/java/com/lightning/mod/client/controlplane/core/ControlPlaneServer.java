@@ -321,7 +321,7 @@ public final class ControlPlaneServer {
 
     /** 最近一次写入的 {@code server.json} 内容（未启动时为 null）。 */
     public synchronized JsonObject serverJson() {
-        return serverJson == null ? null : serverJson.deepCopy();
+        return serverJson == null ? null : Json.copyObject(serverJson);
     }
 
     /** 配置。 */

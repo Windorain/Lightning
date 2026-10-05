@@ -33,7 +33,7 @@ public final class CaseValidateAction implements ControlAction {
         JsonObject plan = CaseSources.plan(file);
         // 计划字段直接摊在 result 顶层：调用方只读 result.criteria / result.variants /
         // result.segments 就能核对计划，不必知道「计划嵌在哪个字段里」；同时保留一份 plan 便于整块取用。
-        JsonObject o = plan.deepCopy();
+        JsonObject o = Json.copyObject(plan);
         o.add("plan", plan);
         o.addProperty("caseId", file.id());
         o.addProperty("caseSha256", file.sha256());
@@ -66,9 +66,7 @@ public final class CaseValidateAction implements ControlAction {
             return out;
         }
         com.google.gson.JsonElement capture = file.capture();
-        if (capture != null && capture.isJsonObject()
-            && capture.getAsJsonObject()
-                .size() > 0) {
+        if (capture != null && capture.isJsonObject() && Json.size(capture.getAsJsonObject()) > 0) {
             out.add(entry("capture"));
         }
         JsonArray cameras = file.cameras();

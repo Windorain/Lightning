@@ -82,8 +82,7 @@ public final class JobQueue {
                     action,
                     job.jobId(),
                     "动作入队",
-                    job.params()
-                        .deepCopy());
+                    Json.copyObject(job.params()));
             }
             return job;
         }

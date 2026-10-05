@@ -84,7 +84,7 @@ public final class CaseValidator {
         plan.add("world", world);
         JsonArray segments = new JsonArray();
         for (String s : SEGMENTS) {
-            segments.add(s);
+            Json.add(segments, s);
         }
         plan.add("segments", segments);
         plan.add("build", build);
@@ -101,7 +101,7 @@ public final class CaseValidator {
         plan.add("evidence", ev);
         JsonArray warnArr = new JsonArray();
         for (String w : warnings) {
-            warnArr.add(w);
+            Json.add(warnArr, w);
         }
         plan.add("warnings", warnArr);
         return plan;
@@ -196,7 +196,7 @@ public final class CaseValidator {
                 default:
                     fields.add(ctx + ".op", "未知 op: " + op);
             }
-            JsonObject item = json.deepCopy();
+            JsonObject item = Json.copyObject(json);
             item.addProperty("index", i);
             out.add(item);
         }
@@ -209,9 +209,7 @@ public final class CaseValidator {
         for (int i = 0; i < criteria.size(); i++) {
             CaseFile.Criterion c = criteria.get(i);
             String ctx = "criteria[" + i + "]";
-            JsonObject params = c.params() == null ? new JsonObject()
-                : c.params()
-                    .deepCopy();
+            JsonObject params = Json.copyObject(c.params());
             String type = c.type();
             if (type == null) {
                 fields.add(ctx + ".type", "缺失");
@@ -307,7 +305,7 @@ public final class CaseValidator {
             if (!seen.add(path)) {
                 fields.add(ctx + ".path", "重复的证据路径: " + path);
             }
-            out.add(item.deepCopy());
+            out.add(Json.copyObject(item));
         }
         return out;
     }
@@ -357,13 +355,10 @@ public final class CaseValidator {
             }
             JsonObject item = new JsonObject();
             item.addProperty("id", v.id());
-            item.add(
-                "mutate",
-                v.mutate()
-                    .deepCopy());
+            item.add("mutate", Json.copy(v.mutate()));
             JsonArray red = new JsonArray();
             for (String id : v.expectCriteriaRed()) {
-                red.add(id);
+                Json.add(red, id);
             }
             item.add("expectCriteriaRed", red);
             item.addProperty("appliedSha256", mutated == null ? null : Hashing.sha256HexUtf8(Json.toJson(mutated)));

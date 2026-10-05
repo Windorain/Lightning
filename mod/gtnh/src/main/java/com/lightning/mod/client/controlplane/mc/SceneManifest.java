@@ -162,7 +162,7 @@ public final class SceneManifest {
         for (String key : new String[] { "folder", "seed", "void", "generatorOptions", "stepCount", "settleTicks" }) {
             JsonElement v = Json.get(stored, key);
             if (v != null) {
-                m.add(key, v.deepCopy());
+                m.add(key, Json.copy(v));
             }
         }
         m.add("blocks", subset.get("blocks"));
@@ -303,7 +303,7 @@ public final class SceneManifest {
         JsonArray a = new JsonArray();
         if (pos != null) {
             for (int v : pos) {
-                a.add(v);
+                Json.add(a, Integer.valueOf(v));
             }
         }
         return a;

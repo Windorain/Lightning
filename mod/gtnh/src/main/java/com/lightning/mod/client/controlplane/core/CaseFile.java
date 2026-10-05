@@ -72,7 +72,7 @@ public final class CaseFile {
             if (base != null) {
                 JsonArray a = new JsonArray();
                 for (int v : base) {
-                    a.add(v);
+                    Json.add(a, Integer.valueOf(v));
                 }
                 o.add("base", a);
             }
@@ -148,7 +148,7 @@ public final class CaseFile {
 
         /** 规范化 JSON。 */
         public JsonObject toJson() {
-            return json.deepCopy();
+            return Json.copyObject(json);
         }
     }
 
@@ -253,10 +253,10 @@ public final class CaseFile {
         public JsonObject toJson() {
             JsonObject o = new JsonObject();
             o.addProperty("id", id);
-            o.add("mutate", mutate.deepCopy());
+            o.add("mutate", Json.copy(mutate));
             JsonArray red = new JsonArray();
             for (String s : expectCriteriaRed) {
-                red.add(s);
+                Json.add(red, s);
             }
             o.add("expectCriteriaRed", red);
             return o;
@@ -299,7 +299,7 @@ public final class CaseFile {
 
     /** 原始 JSON（补丁基座；deep copy 供调用方安全修改）。 */
     public JsonObject raw() {
-        return raw.deepCopy();
+        return Json.copyObject(raw);
     }
 
     /** 原始 JSON 文本（inline 用例时为请求体里的文本，文件用例时为文件内容）。 */
@@ -359,7 +359,7 @@ public final class CaseFile {
 
     /** 期望证据清单（{@code evidence.expect}）。 */
     public JsonArray evidenceExpect() {
-        return evidenceExpect.deepCopy();
+        return Json.copyArray(evidenceExpect);
     }
 
     /** 解析期产生的警告（如 capture/cameras 透传说明）。 */
@@ -369,7 +369,7 @@ public final class CaseFile {
 
     /** 只回显原始 JSON（不做规范化）；规范化计划见 {@link CaseValidator#plan(CaseFile)}。 */
     public JsonObject toJson() {
-        return raw.deepCopy();
+        return Json.copyObject(raw);
     }
 
     private static int[] intArray(JsonArray a) {

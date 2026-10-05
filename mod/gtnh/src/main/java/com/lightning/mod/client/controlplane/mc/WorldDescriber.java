@@ -72,9 +72,9 @@ public final class WorldDescriber {
         o.addProperty("thundering", world.isThundering());
         JsonArray spawn = new JsonArray();
         if (info != null) {
-            spawn.add(info.getSpawnX());
-            spawn.add(info.getSpawnY());
-            spawn.add(info.getSpawnZ());
+            Json.add(spawn, Integer.valueOf(info.getSpawnX()));
+            Json.add(spawn, Integer.valueOf(info.getSpawnY()));
+            Json.add(spawn, Integer.valueOf(info.getSpawnZ()));
         }
         o.add("spawn", spawn);
         o.addProperty("void", isVoid(info, marker));
@@ -136,9 +136,9 @@ public final class WorldDescriber {
 
     private static JsonArray posArray(double x, double y, double z) {
         JsonArray a = new JsonArray();
-        a.add(round(x));
-        a.add(round(y));
-        a.add(round(z));
+        Json.add(a, Double.valueOf(round(x)));
+        Json.add(a, Double.valueOf(round(y)));
+        Json.add(a, Double.valueOf(round(z)));
         return a;
     }
 

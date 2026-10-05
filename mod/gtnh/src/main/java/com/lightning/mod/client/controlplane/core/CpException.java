@@ -72,7 +72,7 @@ public class CpException extends RuntimeException {
 
     /** 是否携带可用的结构化上下文。 */
     public boolean hasContext() {
-        return context != null && context.size() > 0;
+        return Json.size(context) > 0;
     }
 
     /** 取本异常对应的 {@code {"code","message","context"}} 对象（context 为空时省略字段）。 */
@@ -131,7 +131,7 @@ public class CpException extends RuntimeException {
                 cause.getClass()
                     .getName());
         }
-        CpException e = new CpException(ErrorCodes.IO, message, ctx.size() == 0 ? null : ctx);
+        CpException e = new CpException(ErrorCodes.IO, message, Json.size(ctx) == 0 ? null : ctx);
         if (cause != null) {
             e.initCause(cause);
         }

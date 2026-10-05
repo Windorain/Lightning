@@ -417,9 +417,7 @@ public final class CaseRunAction extends SteppingActionBase {
             for (int i = 0; expect != null && i < expect.size(); i++) {
                 JsonElement e = expect.get(i);
                 if (e != null && e.isJsonObject()) {
-                    items.add(
-                        e.getAsJsonObject()
-                            .deepCopy());
+                    items.add(Json.copyObject(e.getAsJsonObject()));
                 }
             }
             evidenceDoc.add("expect", items);
@@ -458,7 +456,7 @@ public final class CaseRunAction extends SteppingActionBase {
             throw new CpException(
                 ErrorCodes.EXEC_FAILED,
                 "负对照变体未按预期变红（expectCriteriaRed 未全部命中）",
-                Json.object("variants", variants.deepCopy()));
+                Json.object("variants", Json.copyArray(variants)));
         }
         return result;
     }
@@ -495,9 +493,9 @@ public final class CaseRunAction extends SteppingActionBase {
         o.addProperty("variant", variantId);
         o.add("segmentsRun", toJsonArray(segments));
         o.add("segmentsSkipped", toJsonArray(skippedSegments));
-        o.add("segments", segmentRecords.deepCopy());
+        o.add("segments", Json.copyArray(segmentRecords));
         if (deferred.size() > 0) {
-            o.add("deferred", deferred.deepCopy());
+            o.add("deferred", Json.copyArray(deferred));
             o.addProperty("deferredNote", "deferred: contract v1.x");
         }
         if (worldResult != null) {
@@ -544,7 +542,7 @@ public final class CaseRunAction extends SteppingActionBase {
         o.addProperty("observationPath", OBSERVATION_PATH);
         if (variants.size() > 0) {
             // case-file.md §8.5：变体结论写入结果 variants:[{id, allExpectedRed, criteria:[...]}]
-            o.add("variants", variants.deepCopy());
+            o.add("variants", Json.copyArray(variants));
         }
         if (variantVerification != null) {
             o.add("variantVerification", variantVerification);
@@ -552,7 +550,7 @@ public final class CaseRunAction extends SteppingActionBase {
         JsonArray warnings = Json.optArray(plan, "warnings");
         o.addProperty("warningCount", warnings == null ? 0 : warnings.size());
         if (warnings != null) {
-            o.add("warnings", warnings.deepCopy());
+            o.add("warnings", Json.copyArray(warnings));
         }
         if (failure != null) {
             o.add("failure", failure);
@@ -680,7 +678,7 @@ public final class CaseRunAction extends SteppingActionBase {
         o.addProperty("variantId", id);
         JsonArray expected = new JsonArray();
         for (String s : expectCriteriaRed) {
-            expected.add(s);
+            Json.add(expected, s);
         }
         o.add("expectCriteriaRed", expected);
         o.addProperty("evaluated", pairs != null);
@@ -700,13 +698,13 @@ public final class CaseRunAction extends SteppingActionBase {
                     }
                 }
                 if (verdict == null) {
-                    missing.add(cid);
+                    Json.add(missing, cid);
                 } else if (!CriteriaEngine.Verdicts.RED.equals(verdict)) {
-                    notRed.add(cid);
+                    Json.add(notRed, cid);
                 }
             }
             o.addProperty("allExpectedRed", notRed.size() == 0 && missing.size() == 0 && expectCriteriaRed.size() > 0);
-            o.add("criteria", pairs.deepCopy());
+            o.add("criteria", Json.copyArray(pairs));
         }
         o.add("notRed", notRed);
         o.add("missing", missing);
@@ -750,7 +748,7 @@ public final class CaseRunAction extends SteppingActionBase {
         o.addProperty("variantId", variantId);
         JsonArray expected = new JsonArray();
         for (String s : expectRed) {
-            expected.add(s);
+            Json.add(expected, s);
         }
         o.add("expectCriteriaRed", expected);
         JsonObject actual = new JsonObject();
@@ -769,18 +767,18 @@ public final class CaseRunAction extends SteppingActionBase {
                     }
                 }
                 if (verdict == null) {
-                    missing.add(id);
+                    Json.add(missing, id);
                     actual.addProperty(id, (String) null);
                 } else {
                     actual.addProperty(id, verdict);
                     if (!CriteriaEngine.Verdicts.RED.equals(verdict)) {
-                        notRed.add(id);
+                        Json.add(notRed, id);
                     }
                 }
             }
         } else {
             for (String id : expectRed) {
-                missing.add(id);
+                Json.add(missing, id);
             }
         }
         o.add("actual", actual);
@@ -892,7 +890,7 @@ public final class CaseRunAction extends SteppingActionBase {
             for (String key : new String[] { "folder", "seed", "void", "settleTicks" }) {
                 JsonElement v = Json.get(w, key);
                 if (v != null) {
-                    stub.add(key, v.deepCopy());
+                    stub.add(key, Json.copy(v));
                 }
             }
         }
@@ -1011,7 +1009,7 @@ public final class CaseRunAction extends SteppingActionBase {
             o.addProperty("durationMs", Long.valueOf(System.currentTimeMillis() - segmentStartMillis));
         }
         if (detail != null) {
-            o.add("detail", detail.deepCopy());
+            o.add("detail", Json.copyObject(detail));
         }
         segmentRecords.add(o);
         try {
@@ -1070,7 +1068,7 @@ public final class CaseRunAction extends SteppingActionBase {
     private static JsonArray toJsonArray(List<String> list) {
         JsonArray a = new JsonArray();
         for (String s : list) {
-            a.add(s);
+            Json.add(a, s);
         }
         return a;
     }

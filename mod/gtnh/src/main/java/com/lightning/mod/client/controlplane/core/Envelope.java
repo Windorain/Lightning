@@ -28,7 +28,7 @@ public final class Envelope {
         JsonObject err = new JsonObject();
         err.addProperty("code", code == null ? ErrorCodes.EXEC_FAILED : code);
         err.addProperty("message", message == null ? "" : message);
-        if (context != null && context.size() > 0) {
+        if (Json.size(context) > 0) {
             err.add("context", context);
         }
         JsonObject o = new JsonObject();

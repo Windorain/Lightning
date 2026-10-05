@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.ActionContext;
 import com.lightning.mod.client.controlplane.core.Contract;
 import com.lightning.mod.client.controlplane.core.ControlAction;
+import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.TimeSource;
 
 /**
@@ -45,10 +46,10 @@ public final class PingAction implements ControlAction {
         o.addProperty("probeActive", probe != null);
         o.addProperty("probe", probe);
         JsonArray caps = new JsonArray();
-        caps.add("world-rebuild");
-        caps.add("world-snapshot");
-        caps.add("world-rollback");
-        caps.add("case-run");
+        Json.add(caps, "world-rebuild");
+        Json.add(caps, "world-snapshot");
+        Json.add(caps, "world-rollback");
+        Json.add(caps, "case-run");
         o.add("capabilities", caps);
         return o;
     }

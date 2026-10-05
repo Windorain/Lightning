@@ -167,12 +167,12 @@ public final class SceneBuilder {
 
     /** 场景清单；未完成时为 null。 */
     public JsonObject manifest() {
-        return manifest == null ? null : manifest.deepCopy();
+        return manifest == null ? null : Json.copyObject(manifest);
     }
 
     /** 已记录的不一致（副本）。 */
     public JsonArray mismatches() {
-        return mismatches.deepCopy();
+        return Json.copyArray(mismatches);
     }
 
     /**
@@ -386,10 +386,10 @@ public final class SceneBuilder {
         m.addProperty("generatorOptions", VoidWorldPreset.GENERATOR_OPTIONS);
         m.addProperty("stepCount", steps.size());
         m.addProperty("settleTicks", settleTicks);
-        m.add("blocks", blocks.deepCopy());
+        m.add("blocks", Json.copyArray(blocks));
         m.add("tileEntities", teArr);
         if (mismatches.size() > 0) {
-            m.add("mismatches", mismatches.deepCopy());
+            m.add("mismatches", Json.copyArray(mismatches));
         }
         m.addProperty("sha256", SceneManifest.hash(m));
         manifest = m;

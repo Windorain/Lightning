@@ -83,7 +83,7 @@ public final class ObservationRecord {
 
     /** 观测记录 JSON。 */
     public JsonObject toJson() {
-        return doc.deepCopy();
+        return Json.copyObject(doc);
     }
 
     /** 观测记录 JSON 文本（缩进）。 */
@@ -137,19 +137,19 @@ public final class ObservationRecord {
 
         /** 世界与模组版本：{@code {mod, minecraft, forge, mods:[...]}}。 */
         public Builder versions(JsonObject versions) {
-            doc.add("versions", versions == null ? new JsonObject() : versions.deepCopy());
+            doc.add("versions", Json.copyObject(versions));
             return this;
         }
 
         /** 渲染相关客户端配置快照。 */
         public Builder clientConfig(JsonObject clientConfig) {
-            doc.add("clientConfig", clientConfig == null ? new JsonObject() : clientConfig.deepCopy());
+            doc.add("clientConfig", Json.copyObject(clientConfig));
             return this;
         }
 
         /** 观察条件整体覆盖（PR-2 的注入机位走这里）。 */
         public Builder observation(JsonObject observation) {
-            doc.add("observation", observation == null ? new JsonObject() : observation.deepCopy());
+            doc.add("observation", Json.copyObject(observation));
             return this;
         }
 
@@ -218,7 +218,7 @@ public final class ObservationRecord {
                 arr.add(r.toJson());
             }
             doc.add("runtimeReads", arr);
-            doc.add("artifacts", artifacts.deepCopy());
+            doc.add("artifacts", Json.copyArray(artifacts));
             return new ObservationRecord(doc);
         }
     }

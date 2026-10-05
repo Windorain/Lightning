@@ -137,9 +137,9 @@ public final class ObservationCollector {
         }
         if (mc != null && mc.thePlayer != null) {
             JsonArray pos = new JsonArray();
-            pos.add(round(mc.thePlayer.posX));
-            pos.add(round(mc.thePlayer.posY));
-            pos.add(round(mc.thePlayer.posZ));
+            Json.add(pos, Double.valueOf(round(mc.thePlayer.posX)));
+            Json.add(pos, Double.valueOf(round(mc.thePlayer.posY)));
+            Json.add(pos, Double.valueOf(round(mc.thePlayer.posZ)));
             o.add("playerPos", pos);
         }
         if (manifest != null) {
@@ -287,7 +287,7 @@ public final class ObservationCollector {
     private static JsonArray posArray(int[] p) {
         JsonArray a = new JsonArray();
         for (int v : p) {
-            a.add(v);
+            Json.add(a, Integer.valueOf(v));
         }
         return a;
     }

@@ -108,12 +108,12 @@ public final class WorldRebuildRunner {
 
     /** 已进入的世界描述；未进入时为 null。 */
     public JsonObject worldDescription() {
-        return worldDescription == null ? null : worldDescription.deepCopy();
+        return worldDescription == null ? null : Json.copyObject(worldDescription);
     }
 
     /** 场景清单；无构建段或未完成时为 null。 */
     public JsonObject manifest() {
-        return manifest == null ? null : manifest.deepCopy();
+        return manifest == null ? null : Json.copyObject(manifest);
     }
 
     /**

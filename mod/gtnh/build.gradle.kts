@@ -142,3 +142,107 @@ tasks.matching { it.name == "runClient" }.configureEach {
         }
     }
 }
+
+/**
+ * ============================ gson 运行期兼容护栏 ============================
+ *
+ * 事故（实测，非推测）：GTNH 1.7.10 运行期装载的 gson 是 **2.2.4**（Minecraft 打包的旧版），
+ * 而 `dependencies.gradle` 给编译期的是 **2.8.9**。任何 2.8 才有的 gson API 都能编译通过，
+ * 却在游戏内抛 `java.lang.NoSuchMethodError` —— control-plane 的 HTTP 端点曾因此全部 500：
+ *
+ *   java.lang.NoSuchMethodError: com.google.gson.JsonObject.size()I
+ *
+ * 同类事故此前已在 MeshCaptureService 上发生过一次（issue #56，`JsonParser.parseString` →
+ * `new JsonParser().parse(...)`）。根因是**编译期 API 版本 ≠ 运行期 API 版本**，靠 code review
+ * 拦不住，必须让编译器来拦：本任务用 gson 2.2.4 编译 control-plane 全部源码，
+ * 任何 2.2.4 不存在的 gson 方法/字段/类都会**在编译期**报错。
+ *
+ * 为什么单测拦不住：`src/test` 的 compile/runtime classpath 走 `implementation`
+ * （dependencies.gradle 的 gson 2.8.9）—— 单测里调 2.8 API 一样编译通过、一样全绿。
+ * 所以**新写的 control-plane 代码必须过 `gsonCompatCheck`**，单测绿不等于运行期安全。
+ *
+ * 已知雷区（2.2.4 缺失，历史踩点）：
+ *  - `JsonObject.size()`             → 2.8.6+；用 `entrySet().size()`
+ *  - `JsonObject.keySet()`           → 2.8+；用 `entrySet()` 遍历
+ *  - `JsonElement/JsonObject/JsonArray.deepCopy()` → 2.8.2+；用 `new JsonParser().parse(x.toString())`
+ *  - `JsonParser.parseString/parseReader`          → 2.8.6+；用 `new JsonParser().parse(...)`
+ *  - `JsonArray.set/isEmpty/remove(int)` 等         → 2.8+；手写等价循环
+ *  （`JsonNull.INSTANCE` 在 2.2.4 **存在**，不是雷区。）
+ *
+ * 接入：`check` → `gsonCompatCheck`，故 `build` 也会跑它。
+ *
+ * 范围：只编译 `com.lightning.mod.client.controlplane` 子树（core + mc）。其余包（meshcapture 等）
+ * 尚未纳管；扩展时把 source 目录换成对应的子集即可。
+ */
+val gsonCompatRuntimeVersion = "2.2.4"
+
+// 仅本 task 使用的依赖配置：钉死运行期 gson 版本（2.2.4）
+val gsonCompat: Configuration = configurations.create("gsonCompat") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    description = "GTNH 1.7.10 运行期实际装载的 gson（2.2.4），仅用于 gsonCompatCheck 的编译期 API 校验"
+}
+
+// main 编译 classpath 去掉 gson（2.8.9），交给 gsonCompat 提供 2.2.4
+val gsonCompatCompileClasspath: Configuration = configurations.create("gsonCompatCompileClasspath") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    description = "compileClasspath 去掉 gson 后的副本：gsonCompatCheck 的非 gson 编译依赖"
+    extendsFrom(configurations.getByName("compileClasspath"))
+    exclude(mapOf("group" to "com.google.code.gson", "module" to "gson"))
+}
+
+/**
+ * main 源码集**完整**编译 classpath，去掉 gson。
+ *
+ * 为什么不能只用 [gsonCompatCompileClasspath]：1.7.10 的 MC/Forge/patchedMC 是
+ * RetroFuturaGradle 直接注入到 source set 的 compileClasspath 上的（不在任何 configuration
+ * 里，`gradlew :dependencies --configuration compileClasspath` 里看不到 `net.minecraft:minecraft`），
+ * 用 configuration 重建会漏掉它们 → `程序包 net.minecraft.client 不存在`。
+ *
+ * 用文件名字过滤（而不是 configuration.exclude）就能同时覆盖「configuration 依赖」与
+ * 「直接注入的文件」。过滤条件是唯一一类需要剔除的构件：`gson-*.jar`。
+ */
+val gsonCompatMainCompileClasspath: FileCollection =
+    lightningMainSourceSet.compileClasspath.filter(
+        org.gradle.api.specs.Spec<java.io.File> { it.name.indexOf("gson-") != 0 },
+    )
+
+dependencies {
+    gsonCompat("com.google.code.gson:gson:$gsonCompatRuntimeVersion")
+}
+
+val lightningCompileJava = tasks.named<JavaCompile>("compileJava")
+
+val gsonCompatCheck = tasks.register<JavaCompile>("gsonCompatCheck") {
+    group = "verification"
+    description = "用运行期 gson 2.2.4 编译 control-plane 源码：编译期拦住 2.8+ 独有 API（NoSuchMethodError 防回归）"
+
+    // 只校验 control-plane 子树（core 与 mc）
+    source = fileTree(projectDir.resolve("src/main/java/com/lightning/mod/client/controlplane")) {
+        include("**/*.java")
+    }
+
+    // main 输出（跨包引用）+ 非 gson 的 main 编译依赖 + 运行期 gson 2.2.4
+    classpath = files(
+        gsonCompatMainCompileClasspath,
+        lightningMainSourceSet.output.classesDirs,
+        gsonCompat,
+    )
+
+    // 语言级别与 compileJava 锁步（Property 延迟求值，读到的是 convention 插件配置后的值）
+    options.release.set(lightningCompileJava.flatMap { it.options.release })
+    // 编码：compileJava 为 UTF-8（源码含中文注释）；CompileOptions.encoding 是普通 String 属性，
+    // 无法惰性继承，故显式对齐（`enableModernJavaSyntax` 未改变它）。
+    options.encoding = "UTF-8"
+    // jabel 等注解处理器与 compileJava 同源（java 插件不为自建 JavaCompile 自动接线）
+    options.annotationProcessorPath = configurations.getByName("annotationProcessor")
+    // 默认 javac 只报 100 条错误，扫荡期需要一次看全
+    options.compilerArgs.addAll(listOf("-Xmaxerrs", "1000"))
+
+    destinationDirectory.set(layout.buildDirectory.dir("classes/java/gsonCompatCheck"))
+}
+
+tasks.named("check") {
+    dependsOn(gsonCompatCheck)
+}

@@ -157,7 +157,7 @@ public final class StatusAction implements ControlAction {
                 .listRunIds();
             int from = Math.max(0, ids.size() - 5);
             for (int i = ids.size() - 1; i >= from; i--) {
-                runs.add(ids.get(i));
+                Json.add(runs, ids.get(i));
             }
             o.add("recentRuns", runs);
         }

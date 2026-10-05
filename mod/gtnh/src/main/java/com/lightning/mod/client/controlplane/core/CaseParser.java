@@ -367,7 +367,7 @@ public final class CaseParser {
         if (step.has("params") && params == null) {
             fields.add(ctx + ".params", "须为 object");
         }
-        norm.add("params", params == null ? new JsonObject() : params.deepCopy());
+        norm.add("params", Json.copyObject(params));
         return new CaseFile.Step(norm);
     }
 
@@ -392,7 +392,7 @@ public final class CaseParser {
             warnings.add("capture 段非 object，已原样透传");
         }
         warnings.add("capture 段由契约 v1.x（PR-2）提供，PR-1 原样透传不解释");
-        return capture.deepCopy();
+        return Json.copy(capture);
     }
 
     private JsonArray parseCameras(JsonObject o, List<String> warnings) {
@@ -404,7 +404,7 @@ public final class CaseParser {
             return null;
         }
         warnings.add("cameras 段由契约 v1.x（PR-2）提供，PR-1 原样透传不解释");
-        return cameras.deepCopy();
+        return Json.copyArray(cameras);
     }
 
     private List<CaseFile.Criterion> parseCriteria(JsonObject o, Fields fields, List<String> warnings) {
@@ -450,8 +450,7 @@ public final class CaseParser {
                     cid == null ? "criterion-" + i : cid,
                     type,
                     params,
-                    hasExpect ? c.get("expect")
-                        .deepCopy() : null,
+                    hasExpect ? Json.copy(c.get("expect")) : null,
                     hasExpect));
         }
         return out;
@@ -490,7 +489,7 @@ public final class CaseParser {
             if (path == null) {
                 fields.add(ctx + ".path", "必填");
             }
-            out.add(item.deepCopy());
+            out.add(Json.copyObject(item));
         }
         return out;
     }
@@ -557,7 +556,8 @@ public final class CaseParser {
     // ------------------------------------------------------------ 小工具
 
     private void checkUnknown(JsonObject o, Set<String> allowed, String prefix, Fields fields, List<String> warnings) {
-        for (String key : o.keySet()) {
+        // JsonObject.keySet() 是 gson 2.8+ API，运行期 2.2.4 没有：走 Json.keys(entrySet)
+        for (String key : Json.keys(o)) {
             if (allowed.contains(key)) {
                 continue;
             }
@@ -685,7 +685,7 @@ public final class CaseParser {
     private static JsonArray intArray(int[] v) {
         JsonArray a = new JsonArray();
         for (int x : v) {
-            a.add(x);
+            Json.add(a, Integer.valueOf(x));
         }
         return a;
     }

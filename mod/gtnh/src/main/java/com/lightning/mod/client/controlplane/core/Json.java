@@ -253,14 +253,71 @@ public final class Json {
         return e != null && e.isJsonArray() ? e.getAsJsonArray() : null;
     }
 
-    /** 深拷贝（{@link JsonElement#deepCopy()} 的 null 安全包装）。 */
+    /**
+     * 深拷贝（{@link JsonElement} 的 null 安全包装）。
+     *
+     * <p>
+     * **不要**用 {@code JsonElement.deepCopy()}：那是 gson 2.8.2+ 的 API，运行期 2.2.4 里
+     * 该方法 (a) 在 {@code JsonElement} 上是包私有的、(b) 在 {@code JsonObject}/{@code JsonArray}
+     * 上也非 public —— 调用点能编译、游戏内必崩。这里手写等价递归：
+     * 原语不可变（gson 的 {@code JsonPrimitive.deepCopy()} 同样返回 this），
+     * 对象/数组逐成员深拷。
+     */
     public static JsonElement copy(JsonElement e) {
-        return e == null ? JsonNull.INSTANCE : e.deepCopy();
+        if (e == null || e.isJsonNull()) {
+            return JsonNull.INSTANCE;
+        }
+        if (e.isJsonArray()) {
+            return copyArray(e.getAsJsonArray());
+        }
+        if (e.isJsonObject()) {
+            return copyObject(e.getAsJsonObject());
+        }
+        return e;
     }
 
-    /** 深拷贝对象。 */
+    /** 深拷贝对象；null 返回空对象。 */
     public static JsonObject copyObject(JsonObject o) {
-        return o == null ? new JsonObject() : o.deepCopy();
+        JsonObject out = new JsonObject();
+        if (o != null) {
+            for (Map.Entry<String, JsonElement> en : o.entrySet()) {
+                out.add(en.getKey(), copy(en.getValue()));
+            }
+        }
+        return out;
+    }
+
+    /** 深拷贝数组；null 返回空数组。 */
+    public static JsonArray copyArray(JsonArray a) {
+        JsonArray out = new JsonArray();
+        if (a != null) {
+            for (int i = 0; i < a.size(); i++) {
+                out.add(copy(a.get(i)));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 追加一个字符串元素。
+     *
+     * <p>
+     * {@code JsonArray.add(String)} 是 gson 2.8+ 的重载，运行期 2.2.4 只有
+     * {@code add(JsonElement)} —— 直接用会在游戏内抛 {@code NoSuchMethodError}。
+     * null 一并按 gson 的口径归一为 {@link JsonNull#INSTANCE}（而非 "值为 null 的原语"）。
+     */
+    public static void add(JsonArray a, String v) {
+        a.add(v == null ? JsonNull.INSTANCE : new JsonPrimitive(v));
+    }
+
+    /** 追加一个数值元素（{@code add(Number)} 同为 2.8+ 重载，null 同样归一为 JsonNull）。 */
+    public static void add(JsonArray a, Number v) {
+        a.add(v == null ? JsonNull.INSTANCE : new JsonPrimitive(v));
+    }
+
+    /** 追加一个布尔元素（{@code add(Boolean)} 同为 2.8+ 重载）。 */
+    public static void add(JsonArray a, boolean v) {
+        a.add(new JsonPrimitive(Boolean.valueOf(v)));
     }
 
     // ------------------------------------------------------------ 规范化
@@ -300,7 +357,7 @@ public final class Json {
             return;
         }
         JsonObject o = e.getAsJsonObject();
-        List<String> keys = new ArrayList<String>(o.keySet());
+        List<String> keys = keys(o);
         Collections.sort(keys);
         sb.append('{');
         for (int i = 0; i < keys.size(); i++) {
@@ -401,7 +458,15 @@ public final class Json {
     public static boolean isEmptyObject(JsonElement e) {
         return e != null && e.isJsonObject()
             && e.getAsJsonObject()
-                .size() == 0;
+                .entrySet()
+                .isEmpty();
+    }
+
+    /** 对象成员数（{@code JsonObject.size()} 是 2.8.6+ API，改用 entrySet）。 */
+    public static int size(JsonObject o) {
+        return o == null ? 0
+            : o.entrySet()
+                .size();
     }
 
     /** 对象转有序键列表（调试输出用）。 */
@@ -409,7 +474,13 @@ public final class Json {
         if (o == null) {
             return Collections.emptyList();
         }
-        return new ArrayList<String>(o.keySet());
+        List<String> out = new ArrayList<String>(
+            o.entrySet()
+                .size());
+        for (Map.Entry<String, JsonElement> en : o.entrySet()) {
+            out.add(en.getKey());
+        }
+        return out;
     }
 
     /** 遍历成员（等价 {@code entrySet}，收敛 import）。 */

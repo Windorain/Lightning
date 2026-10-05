@@ -97,7 +97,7 @@ public final class CaseSources {
     private static CaseFile parseInline(JsonElement inlineEl) {
         if (inlineEl.isJsonObject()) {
             JsonObject o = inlineEl.getAsJsonObject();
-            return new CaseParser().parse(o.deepCopy(), Json.toJson(o));
+            return new CaseParser().parse(Json.copyObject(o), Json.toJson(o));
         }
         if (inlineEl.isJsonPrimitive() && inlineEl.getAsJsonPrimitive()
             .isString()) {
@@ -132,7 +132,7 @@ public final class CaseSources {
         if (base != null && base.length == 3) {
             JsonArray b = new JsonArray();
             for (int v : base) {
-                b.add(v);
+                Json.add(b, Integer.valueOf(v));
             }
             world.add("base", b);
         }
@@ -155,7 +155,7 @@ public final class CaseSources {
         synthetic.addProperty("id", SYNTHETIC_CASE_ID);
         synthetic.addProperty("label", "world.rebuild build 段（合成用例，仅用于归一化）");
         synthetic.add("world", world);
-        synthetic.add("build", build.deepCopy());
+        synthetic.add("build", Json.copyArray(build));
         synthetic.add("criteria", criteria);
         synthetic.add("evidence", evidence);
 

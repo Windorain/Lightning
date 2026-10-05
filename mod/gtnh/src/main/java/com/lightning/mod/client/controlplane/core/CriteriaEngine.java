@@ -260,7 +260,7 @@ public final class CriteriaEngine {
         JsonObject detail = new JsonObject();
         JsonArray arr = new JsonArray();
         for (String m : missing) {
-            arr.add(m);
+            Json.add(arr, m);
         }
         detail.add("missing", arr);
         return verdict(

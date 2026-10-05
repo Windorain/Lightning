@@ -147,15 +147,16 @@ public final class JsonPatch {
             if (idx >= size) {
                 throw fieldError(fp + ".path", "下标越界: " + idx + " (size=" + size + ")");
             }
-            parent.remove(idx);
-            return root;
+            // JsonArray.remove(int) 是 gson 2.8+ API（运行期 2.2.4 没有）：
+            // 与下面的「按位置插入」同法——重建整数组后替换回去。
+            return replaceNode(root, parentPointer, withoutIndex(parent, idx), fp);
         }
         if (OP_REPLACE.equals(kind)) {
             if (idx >= size) {
                 throw fieldError(fp + ".path", "replace 下标越界: " + idx + " (size=" + size + ")");
             }
-            parent.set(idx, Json.copy(value));
-            return root;
+            // JsonArray.set(int, JsonElement) 同为 2.8+ API，同样走重建。
+            return replaceNode(root, parentPointer, withIndexReplaced(parent, idx, Json.copy(value)), fp);
         }
         if (idx > size) {
             throw fieldError(fp + ".path", "add 下标越界: " + idx + " (size=" + size + ")");
@@ -196,11 +197,32 @@ public final class JsonPatch {
             if (i < 0 || i >= a.size()) {
                 throw fieldError(fp + ".path", "下标越界: " + token);
             }
-            a.set(i, node);
+            // JsonArray.set(int, JsonElement) 是 2.8+ API：重建该数组并递归替换
+            return replaceNode(root, grandParentPointer, withIndexReplaced(a, i, node), fp);
         } else {
             throw fieldError(fp + ".path", "父节点既不是对象也不是数组: " + grandParentPointer);
         }
         return root;
+    }
+
+    /** 新数组 = {@code a} 去掉下标 {@code idx}（gson 2.2.4 无 {@code JsonArray.remove(int)}）。 */
+    private static JsonArray withoutIndex(JsonArray a, int idx) {
+        JsonArray out = new JsonArray();
+        for (int i = 0; i < a.size(); i++) {
+            if (i != idx) {
+                out.add(a.get(i));
+            }
+        }
+        return out;
+    }
+
+    /** 新数组 = {@code a} 的下标 {@code idx} 换成 {@code v}（gson 2.2.4 无 {@code JsonArray.set}）。 */
+    private static JsonArray withIndexReplaced(JsonArray a, int idx, JsonElement v) {
+        JsonArray out = new JsonArray();
+        for (int i = 0; i < a.size(); i++) {
+            out.add(i == idx ? v : a.get(i));
+        }
+        return out;
     }
 
     private static CpException fieldError(String field, String reason) {
