@@ -73,6 +73,10 @@
 | `event-emitted` | `kind, minCount` | 事件流水含指定 kind 至少 minCount 条 |
 | `image-size-equals`（PR-2） | `path, width, height` | 图像产物尺寸等于期望（读取 PNG 头，不解码全图） |
 | `image-not-uniform`（PR-2） | `path, maxSameColorRatio(默认0.98)` | 图像非纯色——主色占比 < maxSameColorRatio（防黑屏/全白假图，负对照友好） |
+| `te-state-equals`（PR-3，运行期轨） | `at:[x,y,z], key, expect` | 经补全器同族的 **TE 描述器**（TeDescriber，与 completer 同注册、只读不写）读取 TE 运行期状态字段（LP：renderState 连接矩阵/管型；AE2：各面部件清单），与 expect 比较；描述器输出同时进观测记录 runtimeReads（te.* 条目） |
+| `image-uniform`（PR-3，图像轨补充） | `path, minSameColorRatio(默认0.98)` | 图像近纯色——主色占比 ≥ minSameColorRatio（TE 距离门远机位：被门剔除的场景应近似纯背景） |
+
+**双轨判据口径（#41，PR-3 起对锚点用例强制）**：同一可视特性必须成对断言——运行期轨（`te-state-equals`）证「世界状态对」，图像轨（`image-not-uniform`/`image-uniform`/`image-size-equals`）证「渲染结果对」。锚点用例（LP 四管/AE2 部件）的每个 TE 可视特性两轨齐备；双轨不齐的锚点用例视为用例缺陷（验收驱动静态检查）。
 
 判据结论：`{id, verdict: "green"|"red"|"error", detail}`。`error`（判据自身无法求值，如产物缺失到连断言都不能做）视同 red 但单列。
 
