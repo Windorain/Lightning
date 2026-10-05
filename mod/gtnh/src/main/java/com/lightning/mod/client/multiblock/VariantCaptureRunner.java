@@ -288,7 +288,7 @@ public final class VariantCaptureRunner {
         notes.add(
             "缩略图：blockPalette 条目不含 thumbnailPNG（GeometryPalette.EMITS_THUMBNAIL_PNG=false）——"
                 + "GPU 渲染的缩略图跨运行像素不稳定，会同时破坏产物逐字节幂等与跨运行内容签名对齐；"
-                + "见 docs/plan/fix-thumbnail-determinism.md");
+                + "契约：docs/contracts/format-multiblock-doc.md §6.3");
         if (factsFile == null) {
             notes.add(
                 "找不到 T1.2 的 machines.json（multiblock_scan/run-NNNN/），本轮的「预期取值表/尺寸规则」断言全部缺少输入，"
@@ -1882,7 +1882,7 @@ public final class VariantCaptureRunner {
             }
         }
         o.addProperty("factsFile", factsFile == null ? "" : factsFile.getAbsolutePath());
-        o.addProperty("worldMode", "none（主菜单态 + 自带假世界；理由见 probe-run-state.md §4.4）");
+        o.addProperty("worldMode", "none（主菜单态 + 自带假世界：不进真实存档，避免存档含缺失模组时进档冲突）");
         o.addProperty(
             "stateDriving",
             "T0.3 §4.2：真实 TE 更新路径 3 tick + MTEMultiBlockBase#onPostTick 循环 + 进态三行 + isActive() 断言；"

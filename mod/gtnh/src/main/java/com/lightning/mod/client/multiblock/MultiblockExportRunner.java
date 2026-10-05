@@ -683,7 +683,7 @@ public final class MultiblockExportRunner {
         o.addProperty("outputDirName", outputDirName);
         o.addProperty("globalBudgetMs", Long.valueOf(budgetMs));
         o.addProperty("includeThumbnails", Boolean.valueOf(GeometryPalette.EMITS_THUMBNAIL_PNG));
-        o.addProperty("thumbnailPNGPolicy", "恒不产出：GPU 渲染像素跨运行不稳定，违反产物逐字节幂等（docs/plan/fix-thumbnail-determinism.md）");
+        o.addProperty("thumbnailPNGPolicy", "恒不产出：GPU 渲染像素跨运行不稳定，违反产物逐字节幂等（契约：docs/contracts/format-multiblock-doc.md §6.3）");
         o.addProperty("embedTextures", Boolean.valueOf(SdeMultiblockConfig.embedTextures));
         return o;
     }

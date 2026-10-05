@@ -1,8 +1,8 @@
 # 多方块为主文档格式契约（T0.5 定稿）
 
-> **任务**：`multiblock-channel-renderer-plan.md` T0.5「文件格式契约定稿」（核心留白）。
-> **上游输入**（按序）：[multiblock-channel-renderer-plan.md](multiblock-channel-renderer-plan.md)、[probe-channels.md](probe-channels.md)（T0.4 通道语义）、
-> [probe-run-state.md](probe-run-state.md)（T0.3 运行态裁决）、[volume-profile-baseline.md](volume-profile-baseline.md)（T0.1 体积剖析）。
+> **范围**：多方块为主文档的**格式契约**（核心留白：文件格式如何同时承载骨架、差异规则表与变体清单）。
+> **依据来源**：本契约的通道语义、运行态裁决、体积剖析结论来自治理前的过程性探针/计划文档（正文里的 `T0.x/T1.x/T2.x/T3.x`
+> 任务编号即其标识）。这些过程性文档已按 #51 裁决从仓库删除（不再入库），原文见 issue #51 与 git 历史。
 > **状态**：定稿。7 条硬约束逐条核对见 §11；3 份 fixture 由独立校验器全组合装配通过（§10）。
 > **本文件是契约**：T1.4（编码端）、T2.1（解析端）、T2.2（装配端）都按本文件实现；凡与本文件不符的实现即视为缺陷。
 
@@ -170,7 +170,7 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
    "未设置"的物理形态是**该通道键不存在**，此时该位置回落到**主通道值（总 Tier）** —— 见 §5.2。
 2. **双键消歧**：`{enum, id}`。`casing` 在 GTStructureChannels 中出现 3 次（`METAL_MACHINE_CASING`/`TIER_CASING`/`ALCHEMICAL_CASING`），
    只按 id 消歧**不安全**（三条共用同一个 `ChannelDescription` 值表，同一个 `(id, 值)` 指向不同方块；
-   证据 [probe-channels.md §2.4](probe-channels.md)）。
+   证据：历史通道探针报告 §2.4，见 issue #51 / git 历史）。
 3. **导出期断言**：同一多方块内 `id` 不得重复（当前 GT5U 满足）；违反则**导出失败并落盘原因**，不得静默改名。
 4. **`gt_hatch` 标 `kind:"hatch"`、不生成滑杆**：它只读 `hasValue` 布尔（`HatchElementBuilder:527`），
    不是取值通道（T0.4 §3.6）。`hatch` 通道**不得**出现在 `rules[].indexTable` 里。
@@ -276,7 +276,7 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
 **本轮只允许一个骨架通道**（`backbone.sizeChannel` 是单值）。理由：两个尺寸轴会引入"维度组合"，
 而 `sizeSteps` 是扁平数组，会把阶数变成乘积（回到组合展开）。
 
-- 现实中 GT5U 的 10 处尺寸型读取点**每台机器只用一条**（`height` 或 `length`，见 [probe-channels.md §3.5](probe-channels.md)），
+- 现实中 GT5U 的 10 处尺寸型读取点**每台机器只用一条**（`height` 或 `length`，见历史通道探针报告 §3.5，issue #51），
   故本限制**不损失覆盖面**。
 - **扩展位**：若将来出现真需要两个尺寸轴的机器，把 `backbone` 换成 `"kind":"sizeGrid"`、
   `sizeSteps` 改成以有序 `[stepA, stepB]` 为键的表即可；`frame.stepIndex` 变成数组。
@@ -423,7 +423,7 @@ GT 里通道值不可为 0；"未设置"的位置由**主通道值**（总 Tier�
   届时用 `multiblock.geometryEncoding` 加新取值实现（**格式已经预留了判别位**）。
 - **`thumbnailPNG` 政策**（T0.1 §8 F3 要求显式决策）：~~按既有字段原样进条目、参与签名去重~~
   **【修订 · 缩略图确定性修复后】multiblock 导出产物不携带 `thumbnailPNG`**——GPU 渲染像素跨运行不确定，
-  会破坏幂等字节一致性与签名对齐（证据：docs/plan/fix-thumbnail-determinism.md）。web 3D 渲染不使用 per-block 缩略图；
+  会破坏幂等字节一致性与签名对齐（证据：缩略图确定性修复的历史报告，见 issue #51 / git 历史）。web 3D 渲染不使用 per-block 缩略图；
   若将来需要，须确定性软件光栅另行立项并走独立 blob 池，不得进主产物条目。条目字段集合恒为
   `{registryId, meta, renderMode, geometry, occludesAdjacentFaces, nbt, tooltip}`。
 
@@ -450,7 +450,7 @@ GT 里通道值不可为 0；"未设置"的位置由**主通道值**（总 Tier�
 "couplingMode": "clamp",              // "none"（缺省）| "clamp"
 "couplings": [
   { "id": "capacitor-ge-glass", "a": "capacitor", "b": "glass", "requires": "ge",
-    "kind": "value", "source": "probe-channels.md §4.1.2" }
+    "kind": "value", "source": "coupling probe §4.1.2（历史探针报告，见 issue #51）" }
 ]
 ```
 
@@ -495,7 +495,7 @@ GT 里通道值不可为 0；"未设置"的位置由**主通道值**（总 Tier�
 > 本轮运行态轴**只承诺纹理/材质层**两态差异。以下两类**明确不覆盖**，也不得作为验收条件：
 > ① 经 shader/VAO + 延迟后处理的 TESR 活动几何（GT5U 唯一 `IMTERenderer` 多方块 `MTEExoFoundry`）；
 > ② 由真实配方运行才创建/展开的附属渲染方块（虫洞 / 激光 / 黑洞 / 纳米锻炉）。
-> 证据：[probe-run-state.md §3.2、§5](probe-run-state.md)（TESR 调用链成立但两态动态扩展四边形数均为 0）。
+> 证据：历史运行态探针报告 §3.2/§5（见 issue #51 / git 历史）——TESR 调用链成立但两态动态扩展四边形数均为 0。
 
 ---
 
@@ -844,7 +844,7 @@ node scripts/multiblock-fixtures/validate-multiblock-fixtures.mjs --all         
 | 2 | **变体键串占体积**（EBF 60 KB / 432 条） | 未压缩体积的大头之一；gzip 后影响小（键串重复度高） | 已在 §5.1 说明键是主键。若 T3.2 发现键串成为 gzip 热点，可加"通道值数组按 `channels` 顺序"的紧凑写法（`values` 从 map 改数组），**格式预留**（`values` 的读取按 `channels` 顺序即可兼容） |
 | 3 | **骨架只支持一个尺寸通道**（§4.6） | 两个尺寸轴的机器无法表达 | 当前 GT5U 无此类机器（T0.4 §3.5 实测 10 处读取点均为单通道）；扩展位已留（`sizeGrid`） |
 | 4 | **`indexAliases` 的语义边界** | 只做"整表替换"，不做"按下标范围替换" | 已足够（fixture 未用到它，但它是硬约束 4 明文要求的能力）；若 T1.4 需要区间替换，加 `indexRangeAliases`，**不要**改成表达式 |
-| 5 | **运行态只覆盖材质层** | TESR/部件展开不支持（T0.3 裁决） | 已在 `viewerSemantics.runstateCoverage` 显式声明；**不得**作为验收条件。用户若裁决追加投入，按 `probe-run-state.md §5` 立项 |
+| 5 | **运行态只覆盖材质层** | TESR/部件展开不支持（T0.3 裁决） | 已在 `viewerSemantics.runstateCoverage` 显式声明；**不得**作为验收条件。用户若裁决追加投入，按历史运行态探针报告 §5 立项（见 issue #51） |
 | 6 | **`MTELapotronicSuperCapacitor` 的挂起项** | T0.4 R9：`glassTier = BOROGLASS.getValue(trigger)+2` 疑似把下标当电压等级（变体玻璃不成立） | 不属 T0.5 范围；T1.3 比对几何时留意；如需可向上游报告 |
 | 7 | ~~**`thumbnailPNG` 的隐藏纹理成本**~~（已消解） | 每条目约 936 B 且 GPU 渲染跨运行不确定 | **已修订为不产出**（§6.3 修订条）：体积风险与幂等风险一并消除 |
 | 8 | **几何编码的长尾** | 顶点对象化是未压缩体积最大开销，但改动在渲染层 | 触发条件与实现位已定（§6.3）；届时用 `geometryEncoding` 加新取值，不破坏本契约 |

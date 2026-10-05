@@ -226,7 +226,7 @@ public final class GeometryPalette {
         o.addProperty("thumbnailPNG", EMITS_THUMBNAIL_PNG);
         o.addProperty(
             "thumbnailPNGPolicy",
-            "条目不含 thumbnailPNG：GPU 渲染的缩略图跨运行像素不稳定，会同时破坏产物逐字节幂等" + "与跨运行内容签名对齐（docs/plan/fix-thumbnail-determinism.md）");
+            "条目不含 thumbnailPNG：GPU 渲染的缩略图跨运行像素不稳定，会同时破坏产物逐字节幂等" + "与跨运行内容签名对齐（契约：docs/contracts/format-multiblock-doc.md §6.3）");
         o.addProperty("materialEntries", materialPalette.size());
         o.addProperty("textureBlobs", textureBlobs.size());
         JsonArray ur = new JsonArray();
