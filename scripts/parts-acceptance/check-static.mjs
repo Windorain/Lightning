@@ -20,7 +20,8 @@
  *       （"任何降级路径不中断导出"的产物级证据）。
  *  C. **无部件文件字节干净**（契约 §2 硬约束"无部件信息 ⇒ 行为与今天完全一致"）：
  *     - `sde_parts_acceptance_export_fullcube_only.json` 不得含
- *       `cellPartsGrid` / `partLists` / `partIconTextures` / `statsTemplate`（满方块-only 结构）；
+ *       `cellPartsGrid` / `partLists` / `partIconTextures` / `statsTemplate` / `itemIndex`
+ *       （满方块-only 结构），且**不得有任何 `blockPalette[].hostItem`**（契约 §2.2 层②：仅含部件文档写入）；
  *     - L1 的结构化结果里 `fullCubeByteClean.pass === true`（开启部件链路 vs 关闭的 sha256 相等）
  *       —— **引用其结论**，不在脚本侧重算（重算需要两次游戏内导出）。
  *  D. **旧格式兼容**（P3.2）：仓库里既有无部件 fixture（`minimal-v2.json` /
@@ -49,7 +50,7 @@ import {
   writeJson,
 } from './lib/parts-io.mjs'
 
-const PARTS_KEYS = ['cellPartsGrid', 'partLists', 'partIconTextures', 'statsTemplate', 'statsOverride']
+const PARTS_KEYS = ['cellPartsGrid', 'partLists', 'partIconTextures', 'statsTemplate', 'statsOverride', 'itemIndex']
 
 /** 取某格部件（按 cellPartsGrid 下标）。 */
 function partsAt(exportRoot, zi, ri, ci) {
@@ -221,6 +222,14 @@ function main() {
     for (const k of PARTS_KEYS) {
       if (k in doc) fullCubeByteClean.violations.push(`满方块-only 产物含部件字段 ${k}（必须字节干净）`)
     }
+    // 契约 §2.2 层②：hostItem 只允许出现在含部件数据的文档里（满方块-only ⇒ 一个调色板条目都不许带）
+    const withHostItem = (doc.blockPalette ?? []).filter((e) => e && e.hostItem !== undefined)
+    if (withHostItem.length > 0) {
+      fullCubeByteClean.violations.push(
+        `满方块-only 产物有 ${withHostItem.length} 个 blockPalette 条目带 hostItem（契约 §2.2 层②：无部件文件字节干净）`,
+      )
+    }
+    fullCubeByteClean.hostItemEntries = withHostItem.length
     fullCubeByteClean.cells = (doc.cellGrid ?? []).length
     fullCubeByteClean.blockPalette = (doc.blockPalette ?? []).length
     fullCubeByteClean.nonFullCubeCells = (() => {
@@ -316,7 +325,7 @@ function main() {
   violations.push(...l1.violations)
 
   // ── F. web 端不重放游戏逻辑 / 不重算盒（契约 §12 硬约束）──────────────────
-  const webSrc = { scanned: [], boxConstructionHits: [], gameLogicHits: [], violations: [] }
+  const webSrc = { scanned: [], boxConstructionHits: [], exempted: [], staleExemptions: [], gameLogicHits: [], violations: [] }
   const srcRoot = path.join(REPO_ROOT, 'web/src')
   const tsFiles = []
   const walk = (dir) => {
@@ -333,12 +342,33 @@ function main() {
   } else {
     walk(srcRoot)
     webSrc.scanned = tsFiles.map((f) => rel(f))
+    // 具名豁免（**唯一一处**；按**行内标记**匹配，不绑行号；`staleExemptions` 保证豁免不会变成"哑规则"）：
+    // `pure/partMask.ts` 的 `aabbOfQuadsWithinBox` 用**文件自己的 baked quads** 求 AABB 包络，
+    // 供描边 mask 的退化盒（贴面部件）可见像素与既有四边面几何一致。它是**包络构造**（kind 只是
+    // "喂给 mask 通道"的载体标记），不是 §6/§12 禁止的"重算导出语义盒"：不读世界、不调游戏取盒 API、
+    // 不参与命中与统计（几何输入全部来自文件）。规则本意是"盒必须来自文件"，故具名豁免并留痕。
+    const BOX_RULE_EXEMPTIONS = [
+      {
+        file: 'web/src/pure/partMask.ts',
+        marker: 'PartBoxMaskEnvelope',
+        rationale:
+          'mask 通道的 quads AABB 包络（几何输入 = 文件 baked quads；非 §6 语义盒重算，不参与命中/统计）',
+      },
+    ]
+    const exemptionHit = new Map()
     for (const f of tsFiles) {
       const text = fs.readFileSync(f, 'utf8')
       text.split(/\r?\n/).forEach((line, i) => {
         // 端上构造部件盒（`kind: 'visual'|'collision'` 字面量）—— 盒必须来自文件
         if (/kind:\s*['"](visual|collision)['"]/.test(line)) {
-          webSrc.boxConstructionHits.push(`${rel(f)}:${i + 1}: ${line.trim().slice(0, 120)}`)
+          const relFile = rel(f)
+          const exempt = BOX_RULE_EXEMPTIONS.find((e) => e.file === relFile && line.includes(e.marker))
+          if (exempt) {
+            exemptionHit.set(exempt.marker, true)
+            webSrc.exempted.push(`${relFile}:${i + 1}: [${exempt.marker}] ${exempt.rationale}`)
+          } else {
+            webSrc.boxConstructionHits.push(`${rel(f)}:${i + 1}: ${line.trim().slice(0, 120)}`)
+          }
         }
         // 端上调用游戏取盒 API（1.7.10 侧不存在于 web；出现即为"重放游戏逻辑"）
         if (/setBlockBounds|getSelectedBoundingBox|CollisionBoundingBox|renderAsNormalBlock/.test(line)) {
@@ -346,8 +376,19 @@ function main() {
         }
       })
     }
+    // 豁免陈旧检查：登记的标记必须**仍在**命中规则的那一行（重构/删除后豁免必须同步收敛，不留哑规则）
+    for (const e of BOX_RULE_EXEMPTIONS) {
+      if (!exemptionHit.get(e.marker)) {
+        webSrc.staleExemptions.push(
+          `${e.file} 上找不到带标记 ${e.marker} 的"端上构造部件盒"行 ⇒ 请删除该豁免`,
+        )
+      }
+    }
     if (webSrc.boxConstructionHits.length > 0) {
       webSrc.violations.push(`web 端出现部件盒构造 ${webSrc.boxConstructionHits.length} 处（盒必须来自文件，契约 §12）`)
+    }
+    if (webSrc.staleExemptions.length > 0) {
+      webSrc.violations.push(`web 端盒规则豁免已陈旧 ${webSrc.staleExemptions.length} 处（豁免必须与代码同步）`)
     }
     if (webSrc.gameLogicHits.length > 0) {
       webSrc.violations.push(`web 端出现游戏取盒 API 调用 ${webSrc.gameLogicHits.length} 处（不得重放游戏逻辑）`)
@@ -370,6 +411,10 @@ function main() {
     'message PartItem',
     'message PartSource',
     'part_type_key',
+    // B-2（契约 §2.2 / §10.2）：物品索引表与宿主级物品身份的规范名（仅作文档登记，无 Java 生成）
+    'message ItemIndexEntry',
+    'message ItemAttribution',
+    'message HostItemIdentity',
   ]
   const proto = { path: protoRel, present: fs.existsSync(protoPath), missingFields: [], violations: [] }
   if (!proto.present) {
@@ -404,7 +449,8 @@ function main() {
       `满方块字节干净 ${sections.fullCubeByteClean.pass ? 'ok' : 'FAIL'}；` +
       `旧格式兼容 ${sections.legacyNoPartsKeys.pass ? 'ok' : 'FAIL'}；` +
       `L1 结果引用 ${sections.l1ResultReference.pass ? 'ok' : 'FAIL'}；` +
-      `web 不重算盒 ${sections.webNoBoxConstruction.pass ? 'ok' : 'FAIL'}；` +
+      `web 不重算盒 ${sections.webNoBoxConstruction.pass ? 'ok' : 'FAIL'}` +
+      `（具名豁免 ${sections.webNoBoxConstruction.exempted.length} 处）; ` +
       `proto 契约字段 ${sections.protoContractFields.pass ? 'ok' : 'FAIL'}）`,
   )
   for (const v of violations) console.log(`   XX ${v}`)

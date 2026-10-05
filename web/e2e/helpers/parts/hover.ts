@@ -234,6 +234,18 @@ export async function readTooltipText(page: Page): Promise<string | null> {
 }
 
 /**
+ * TooltipBox 文本的**格式无关压缩**（比对口径）。
+ *
+ * 为什么需要：TooltipBox 文本经 `renderTooltipHtml`（游戏风格式串 → HTML）渲染，
+ * 串里的 `_..._` 会被当行内强调渲染成 `<em>` ⇒ 读回的文本**下划线消失**
+ * （实测：行键兜底文案 `minecraft:stone_slab:0` 读回 `minecraft:stoneslab:0`）。
+ * 因此"文案 = 某串"的判定只对字母数字与冒号比对，避免把渲染格式误判成内容差异。
+ */
+export function compactTooltipText(s: string): string {
+  return s.replace(/[^A-Za-z0-9:]/g, '')
+}
+
+/**
  * 悬停探测一次：在格内局部点注入 pointermove，轮询直到公开悬停状态满足
  * `expectHover`（默认：有任何方块悬停），返回悬停状态 + tooltip 文本 + 注入坐标。
  * 拾取是 rAF 合并的（`createHoverPickScheduler`），必须轮询而非定长等待。

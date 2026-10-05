@@ -325,7 +325,9 @@ export function runPartsChecklist(ctx) {
   // ── C. 计数 ───────────────────────────────────────────────────────────
   {
     const stats = caseSummary(l2Real, '默认视图行 = oracle expectedCounts')
-    const fixtureStats = caseSummary(partsFixtures, '默认视图 = 部件物品清单')
+    // 夹具侧口径（#39 阶段二校正）：B-3 决策 C 之后夹具统计行 = **物品行**，
+    // 用例标题已由「默认视图 = 部件物品清单」改为「默认视图 = 物品清单（Stone Slab×3 / Fence×1；石头不出现）；图标键 = 物品身份键」。
+    const fixtureStats = caseSummary(partsFixtures, '默认视图 = 物品清单')
     out.push(
       item(
         'parts-C-item-unit',
@@ -334,9 +336,9 @@ export function runPartsChecklist(ctx) {
           [
             { ok: verifyFull?.countsMode === 'exact' && (verifyFull?.failedChecks ?? 1) === 0, detail: `expectedCounts 精确比对：${verifyFull?.countsMode}` },
             { ok: stats.found && stats.failed === 0 && stats.passed >= 1, detail: `L2 统计精确比对用例：passed ${stats.passed} / failed ${stats.failed}` },
-            { ok: fixtureStats.found && fixtureStats.failed === 0, detail: `fixture 侧统计用例：passed ${fixtureStats.passed}` },
+            { ok: fixtureStats.found && fixtureStats.failed === 0, detail: `fixture 侧统计用例：found ${fixtureStats.found} / passed ${fixtureStats.passed} / failed ${fixtureStats.failed}` },
           ],
-          [paths.verifyFull, paths.playwrightL2],
+          [paths.verifyFull, paths.playwrightL2, paths.playwrightPartsFixtures],
         ).status,
         `真实导出统计行与 oracle expectedCounts **精确相等**（21 条 / 61 件）；一格多物按 items[].count 累加`,
         [paths.verifyFull, paths.playwrightL2],
@@ -370,23 +372,38 @@ export function runPartsChecklist(ctx) {
     )
   }
   {
-    const hosts = caseSummary(partsFixtures, '三视图切换：切宿主 = 旧口径行集')
+    // #39 阶段二校正：本条的**旧锚点**在后 B-3 树上已不存在（实测擒获，见 README finding F10）——
+    //  ① 夹具用例「三视图切换：切宿主 = 旧口径行集」已随 B-3 决策 C 删除（视图切换/来源徽标/provenance 入口全移除）；
+    //  ② L2 观测里 `statsSidebarPill` 字段已随 B-3 移除（现为 `statsSidebar` + `legacyStatsUiCounts`）。
+    // 判据语义保留（宿主清单旧口径以**物品行 + 无对应标记**形态留存、三级配置不再介入），锚点换成现存的机器证据。
+    const removalLock = caseSummary(partsFixtures, 'B-3 移除锁')
     out.push(
       item(
         'parts-C-host-view-preserved',
         '宿主清单旧口径保留为可选视图；三级配置生效且互不乱序',
         judge(
           [
-            { ok: hosts.found && hosts.failed === 0 && hosts.passed >= 1, detail: `三视图/provenance 用例：passed ${hosts.passed} / failed ${hosts.failed}` },
             {
-              ok: !!l2Observations?.statsSidebarPill?.source,
-              detail: `真实导出侧栏来源徽标=${l2Observations?.statsSidebarPill?.source}（徽标呈现）`,
+              ok: removalLock.found && removalLock.failed === 0 && removalLock.passed >= 1,
+              detail: `B-3 移除锁（残留本机配置不被读写 + 旧入口全不渲染）用例：found ${removalLock.found} / passed ${removalLock.passed} / failed ${removalLock.failed}`,
+            },
+            {
+              ok: (l2Observations?.statsSidebar?.rows ?? 0) > 0,
+              detail: `真实导出侧栏物品行 ${l2Observations?.statsSidebar?.rows ?? '?'} 行（B-3 后行集恒为物品行）`,
+            },
+            {
+              ok: (l2Observations?.statsSidebar?.unresolvedRows ?? -1) === 0,
+              detail: `真实导出"无对应"标记行 ${l2Observations?.statsSidebar?.unresolvedRows ?? '?'} 行（B-2 后硬期望 0：全量导出恒无空 attribution 键）`,
+            },
+            {
+              ok: (l2Observations?.legacyStatsUiCounts?.pill ?? -1) === 0,
+              detail: `来源徽标/pill 计数 ${l2Observations?.legacyStatsUiCounts?.pill ?? '?'}（B-3 已移除 ⇒ 恒 0）`,
             },
           ],
           [paths.playwrightPartsFixtures, paths.l2Observations],
         ).status,
-        'fixture 路径三级配置迁移用例（document-default → viewer-local → 清除）全绿；宿主视图 = 旧 countBlocksById 行集' +
-          '；真实导出路径文档默认层（F1 偏差）已修复闭环——徽标应判得 document-default',
+        '宿主清单旧口径以物品行 + "无对应"标记形态留存（B-3 决策 C：视图切换/来源徽标/provenance 入口移除）；' +
+          '残留本机三级配置键不读不写不清理（B-3 移除锁用例）',
         [paths.playwrightPartsFixtures, paths.l2Observations],
       ),
     )
@@ -640,7 +657,7 @@ export function runPartsChecklist(ctx) {
           ],
           [paths.falsification],
         ).status,
-        'oracle 篡改（计数/身份）+ 导出侧拟造缺陷（删部件/整格消失/改计数）共 5 条负对照全部非零退出；正对照绿',
+        `oracle 篡改（计数/身份/itemIndex 归属）+ 导出侧拟造缺陷（删部件/整格消失/改计数/hostItem.damage）共 ${(falsification?.controls ?? []).filter((c) => c.expectedRed).length || 7} 条负对照全部非零退出；正对照绿`,
         [paths.falsification],
       ),
     )

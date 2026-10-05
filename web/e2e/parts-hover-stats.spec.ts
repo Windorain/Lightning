@@ -24,6 +24,13 @@
  *  4. 回归断言：minimal-v2（无部件）侧栏无部件模式 UI（无 `data-stats-row-key` /
  *     选中态数据位 / 未计入提示），行集 = 旧路径；无部件文档悬停 part = null、
  *     tooltip = 宿主名。
+ *  5. **B-4（#37）物品 TooltipBox**：左栏物品行悬停 → 生产 `tooltip-hover`
+ *     （`source:'sidebar'`）→ `itemIndex.tooltip` → `.wm-tooltip-box`；空说明行 ⇒ 兜底
+ *     display 一行；索引缺条目 ⇒ 回退行键本身（不产 `"0"` 片段）。证伪见
+ *     `parts-falsification.spec.ts`（篡改 itemIndex.tooltip ⇒ 文案断言必红）。
+ *  6. **P3.5 性能登记**：600 格大网格 fixture 压到描边通道上限（599 命中）⇒
+ *     mask 截断到 `OUTLINE_MASK_LIMIT=500` + 可辨认提示「仅高亮前 500 处」；
+ *     帧时间以 40 帧 rAF 间隔采样**登记数字**（小命中 vs 大命中对照），不设脆阈值。
  *
  * ── 拍板登记（本 spec 的两处输入整备，均已上报调度者）──
  *  【几何增强副本】悬停是真实 raycast（命中三角形 → 命中点 → 部件盒）。fixture
@@ -48,7 +55,13 @@ import {
   gotoWikiPreviewWithScene,
   probeHover,
   clearWikiHover,
+  clickStatsRow,
+  compactTooltipText,
+  hoverStatsRow,
+  leaveStatsRow,
+  readOutlineMask,
   readStatsSidebarSettled,
+  readTooltipText,
   waitStatsSidebarReady,
   readLegacyStatsUiAbsent,
   readPartsFixture,
@@ -59,6 +72,7 @@ import {
   type QuadCorners,
   type StatsRowObservation,
 } from './helpers/parts'
+import { pollUntil } from './helpers/multiblock'
 
 const SHOT_DIR = path.join(import.meta.dirname, 'screenshots', 'parts')
 
@@ -402,5 +416,221 @@ test.describe('P2.5 · 回归断言（无部件文档：DOM 零新增 + 行为�
     expect(probe.hover.blockId).toBe('minecraft:gold_ore')
     expect(probe.tooltip, '满方块 tooltip = 宿主 NEI 名（P2.2 前基线逐字节一致）').toContain('Gold Ore')
     await clearWikiHover(page)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B-4（#37）：左栏物品行悬停 → 物品 TooltipBox 文案 = itemIndex.tooltip
+// ---------------------------------------------------------------------------
+
+/**
+ * B-4 覆盖点（原包只在 vitest 单测覆盖，本 spec 补**浏览器 + 生产侧栏悬停 → TooltipBox** 这一段）。
+ *
+ * 观测面：生产 DOM `pointerenter`/`pointermove`（`hoverStatsRow`）→ 生产 `tooltip-hover`
+ * （`source:'sidebar'`，payload = 物品身份键）→ `useEmbedTooltip#resolveSidebarLines` →
+ * `itemIndex.tooltip` → `.wm-tooltip-box`（`readTooltipText`）。
+ *
+ * 反同义反复：期望文案**硬编码**（不读 fixture 的 itemIndex）；篡改 fixture 的 itemIndex.tooltip
+ * ⇒ 断言必红（证伪见 `parts-falsification.spec.ts`）。
+ */
+test.describe('B-4 · 物品行悬停 → 物品 TooltipBox（itemIndex 单一数据源）', () => {
+  test('slab fixture：行悬停文案 = itemIndex.tooltip；无索引行回退行键（不产 "0"）', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-chrome', EXPANDED_SIDEBAR_DESKTOP_ONLY)
+    test.setTimeout(180_000)
+    // 注入副本：仓库 fixture 原件一字不改（B-2 的 itemIndex 由本 spec 内联构造）
+    const f = readPartsFixture('parts-singlebox-mix.v2.json')
+    ;(f as Record<string, unknown>).itemIndex = {
+      'minecraft:stone_slab:0': {
+        display: 'Stone Slab',
+        tooltip: ['Stone Slab', '下半台阶（本体）'],
+        source: 'part',
+        attribution: [{ source: 'part', frame: 0, grid: [0, 0, 0], localId: 'generic:0' }],
+      },
+      'minecraft:fence:0': {
+        display: 'Fence',
+        tooltip: [], // 空 ⇒ 消费侧兜底至少 display 一行（契约 §2.2 空值语义）
+        source: 'part',
+        attribution: [{ source: 'part', frame: 0, grid: [4, 0, 0], localId: 'generic:0' }],
+      },
+    }
+    await gotoWikiPreviewWithScene(page, f, 'parts-singlebox-mix.b4-item-tooltip.json', { requireMesh: false })
+    await waitStatsSidebarReady(page)
+
+    // ① 多行说明：TooltipBox 文案 = itemIndex.tooltip 全部行（不是宿主 NEI 名、不是行键）
+    await hoverStatsRow(page, 'minecraft:stone_slab:0')
+    const slabTip = await pollUntil(() => readTooltipText(page), 'slab 行 TooltipBox', 15_000, 40)
+    expect(slabTip, 'B-4：物品行悬停弹出 TooltipBox').not.toBeNull()
+    expect(slabTip!, 'B-4：文案含 itemIndex.tooltip 首行').toContain('Stone Slab')
+    expect(slabTip!, 'B-4：文案含 itemIndex.tooltip 第二行（完整行集，不是只有首行）').toContain('下半台阶（本体）')
+    expect(slabTip!, 'B-4：文案不得是行键本身').not.toBe('minecraft:stone_slab:0')
+    expect(slabTip!, 'B-4：不得落到旧实现的 "取最后一个冒号之后" 片段').not.toBe('0')
+    await leaveStatsRow(page, 'minecraft:stone_slab:0')
+
+    // ② 空说明行 ⇒ 可读兜底（至少 display 一行）
+    await hoverStatsRow(page, 'minecraft:fence:0')
+    const fenceTip = await pollUntil(() => readTooltipText(page), 'fence 行 TooltipBox', 15_000, 40)
+    expect(fenceTip, 'B-4：说明行为空时仍必须有可读兜底（至少 display 一行）').toContain('Fence')
+    await leaveStatsRow(page, 'minecraft:fence:0')
+
+    // ③ 无 itemIndex 的行（索引缺条目）⇒ 回退行键本身（旧行为，绝不产出片段）
+    const noIndex = readPartsFixture('parts-singlebox-mix.v2.json')
+    await gotoWikiPreviewWithScene(page, noIndex, 'parts-singlebox-mix.b4-no-item-index.json', { requireMesh: false })
+    await waitStatsSidebarReady(page)
+    await hoverStatsRow(page, 'minecraft:stone_slab:0')
+    const rawTip = await pollUntil(() => readTooltipText(page), '无索引行 TooltipBox', 15_000, 40)
+    expect(rawTip, 'B-4：索引缺条目 ⇒ 回退行键本身（不是空）').not.toBeNull()
+    expect(
+      compactTooltipText(rawTip!),
+      'B-4：回退文案 = 行键本身（`_` 会被 TooltipBox 的行内强调渲染吃掉 ⇒ 用格式无关压缩比对）',
+    ).toBe(compactTooltipText('minecraft:stone_slab:0'))
+    expect(rawTip!, 'B-4：不得落到旧实现的 "取最后一个冒号之后" 片段').not.toBe('0')
+    await leaveStatsRow(page, 'minecraft:stone_slab:0')
+    console.log(`[B-4] 物品行 TooltipBox：slab=${JSON.stringify(slabTip)} / fence=${JSON.stringify(fenceTip)} / 无索引=${JSON.stringify(rawTip)}`)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// P3.5 性能登记：大批量命中 / 多选 ⇒ 描边通道截断 + 可辨认提示（不得静默失效）
+// ---------------------------------------------------------------------------
+
+/**
+ * 构造大网格 fixture（600 格 = 599 个共享同一物品键的格 + 1 个另一物品键的格）。
+ *
+ * 目的：把「大批量命中（如石头 ×N）」与「多选」两个场景压到 `OUTLINE_MASK_LIMIT = 500` 上限附近，
+ * 断言**截断 + 提示**（B-5/#38 硬约束）并把**帧时间**做成测量登记（数字进报告，不设脆阈值）。
+ * 期望值全部硬编码（不读 fixture 反推）：599/1 命中、500 上限、提示文案。
+ */
+function bigHitFixture(): Record<string, unknown> {
+  const f = readPartsFixture('parts-ae2-multibox.v2.json')
+  const frame = (f.frames as any[])[0]
+  const st = frame.structure
+  const CABLE = 'appliedenergistics2:item.ItemMultiPart:16'
+  const TOGGLE = 'appliedenergistics2:item.ItemMultiPart:80'
+  const W = 25
+  const H = 2
+  const D = 12 // 600 格
+  const cellGrid: number[][][] = []
+  const cellPartsGrid: number[][][] = []
+  const attributions: Array<{ source: string; frame: number; grid: number[]; localId: string }> = []
+  let big = 0
+  let small = 0
+  for (let z = 0; z < D; z++) {
+    const rowG: number[][] = []
+    const rowP: number[][] = []
+    for (let r = 0; r < H; r++) {
+      const colG: number[] = []
+      const colP: number[] = []
+      for (let c = 0; c < W; c++) {
+        const isSmall = z === 0 && r === 0 && c === 0
+        colG.push(isSmall ? 2 : 1) // 调色板 1 = 线缆格；2 = 切换总线格（同一几何，仅部件池不同）
+        colP.push(isSmall ? 1 : 0)
+        if (isSmall) small++
+        else {
+          big++
+          attributions.push({ source: 'part', frame: 0, grid: [z, r, c], localId: 'ae2:UNKNOWN' })
+        }
+      }
+      rowG.push(colG)
+      rowP.push(colP)
+    }
+    cellGrid.push(rowG)
+    cellPartsGrid.push(rowP)
+  }
+  // 调色板 2 = 线缆格几何的副本（只换 registryId 以便与 1 区分追踪；不做 raycast 断言）
+  const pal2 = JSON.parse(JSON.stringify(st.blockPalette[1]))
+  st.blockPalette.push(pal2)
+  st.cellGrid = cellGrid
+  st.cellPartsGrid = cellPartsGrid
+  st.partLists = [st.partLists[0], [st.partLists[0][1]]] // [cable 部件], [toggle 部件]
+  ;(f as Record<string, unknown>).itemIndex = {
+    [CABLE]: {
+      display: 'ME Glass Cable - Fluix',
+      tooltip: ['ME Glass Cable - Fluix'],
+      source: 'part',
+      attribution: attributions,
+    },
+    [TOGGLE]: {
+      display: 'ME Toggle Bus',
+      tooltip: ['ME Toggle Bus'],
+      source: 'part',
+      attribution: [{ source: 'part', frame: 0, grid: [0, 0, 0], localId: 'ae2:NORTH' }],
+    },
+  }
+  ;(f as any).__bigSmall = { big, small }
+  return normalizeTextureBlobsForRender(f)
+}
+
+/** 采样 40 帧的帧间隔（ms）—— 帧时间测量原语（测量登记，不是断言阈值）。 */
+async function sampleFrameGaps(page: import('@playwright/test').Page): Promise<{ avg: number; max: number; n: number }> {
+  return await page.evaluate(
+    () =>
+      new Promise<{ avg: number; max: number; n: number }>((resolve) => {
+        const gaps: number[] = []
+        let last = performance.now()
+        let n = 0
+        const tick = (t: number) => {
+          gaps.push(t - last)
+          last = t
+          if (++n < 40) requestAnimationFrame(tick)
+          else {
+            const sum = gaps.reduce((a, b) => a + b, 0)
+            resolve({ avg: sum / gaps.length, max: Math.max(...gaps), n: gaps.length })
+          }
+        }
+        requestAnimationFrame(tick)
+      }),
+  )
+}
+
+test.describe('P3.5 · 大批量命中/多选：描边通道截断 + 提示 + 帧时间登记', () => {
+  test('600 格同键（599 命中）⇒ mask 截断到 500 + 提示「仅高亮前 500 处」；小命中不劣化', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-chrome', EXPANDED_SIDEBAR_DESKTOP_ONLY)
+    test.setTimeout(300_000)
+    const CABLE = 'appliedenergistics2:item.ItemMultiPart:16'
+    const TOGGLE = 'appliedenergistics2:item.ItemMultiPart:80'
+    const LIMIT = 500
+    const BIG_HITS = 599
+
+    await gotoWikiPreviewWithScene(page, bigHitFixture(), 'parts-bighit-600cells.json', { requireMesh: false })
+    await waitStatsSidebarReady(page)
+
+    // 基线：小命中（1 处）—— 先测帧时间与 mask 数（对照面）
+    const s0 = await clickStatsRow(page, TOGGLE)
+    expect(s0.notice, '小命中不截断 ⇒ 无提示').toBeNull()
+    const smallMask = await pollUntil(
+      async () => {
+        const m = await readOutlineMask(page)
+        return m.meshCount === 1 ? m : null
+      },
+      '小命中 mask = 1',
+      30_000,
+    )
+    expect(smallMask.meshCount, '小命中：1 处 ⇒ 1 块 mask（通道未失效）').toBe(1)
+    const smallFrames = await sampleFrameGaps(page)
+
+    // 大批量命中：599 处 ⇒ 截断到上限 + 可辨认提示（不得静默失效）
+    const t0 = Date.now()
+    const s1 = await clickStatsRow(page, CABLE)
+    const bigMask = await pollUntil(
+      async () => {
+        const m = await readOutlineMask(page)
+        return m.meshCount === LIMIT ? m : null
+      },
+      `大命中 mask = ${LIMIT}（截断生效）`,
+      120_000,
+    )
+    const settleMs = Date.now() - t0
+    expect(bigMask.meshCount, `599 命中 ⇒ mask 截断到 ${LIMIT}（通道上限，不静默失效）`).toBe(LIMIT)
+    expect(s1.notice, '截断必须给出可辨认提示（命中数 + 实际高亮数）').toContain('仅高亮前 500 处')
+    expect(s1.notice, '提示必须报出命中总数').toContain(String(BIG_HITS))
+    const bigFrames = await sampleFrameGaps(page)
+    // 帧时间不劣化的**测量登记**（宽松上界只为捕捉"整帧卡死"级退化，数字进报告）
+    expect(bigFrames.max, `大命中场景单帧间隔不得达到整秒级卡死（实测 ${bigFrames.max.toFixed(1)}ms）`).toBeLessThan(2000)
+
+    console.log(
+      `[P3.5-perf] 600 格 fixture：小命中(1) 帧均 ${smallFrames.avg.toFixed(2)}ms/峰 ${smallFrames.max.toFixed(2)}ms；` +
+        `大命中(${BIG_HITS}→mask ${LIMIT}) 帧均 ${bigFrames.avg.toFixed(2)}ms/峰 ${bigFrames.max.toFixed(2)}ms；` +
+        `截断落定耗时 ${settleMs}ms；提示「${s1.notice}」`,
+    )
   })
 })

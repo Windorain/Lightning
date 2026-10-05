@@ -232,6 +232,42 @@ export async function clickStatsRow(
   return await readStatsSidebar(page)
 }
 
+/**
+ * 悬停物品行（生产 DOM 真实 `pointerenter`/`pointermove`）——B-4 物品 TooltipBox 观测入口。
+ *
+ * 为什么 `dispatchEvent`：与 `clickStatsRow` 同一理由（窄布局裁剪下 `locator.hover()` 的
+ * 可点性检查会失败）；派发的仍是真实 pointer 事件，走 `@pointerenter`/`@pointermove` 监听
+ * ⇒ 生产 `tooltip-hover`（`source:'sidebar'`）→ `useEmbedTooltip#resolveSidebarLines` →
+ * `itemIndex.tooltip` → `.wm-tooltip-box`。
+ *
+ * 悬停后等一拍让 tooltip 渲染与 clamp 落定（同 `probeHover` 的 tooltip 等待口径）。
+ */
+export async function hoverStatsRow(
+  page: Page,
+  key: string,
+  timeout = 15_000,
+): Promise<void> {
+  await pollUntil(
+    async () => {
+      const s = await expandSidebarSelfHealing(page)
+      return s && s.rows.some((r) => r.key === key) ? s : null
+    },
+    `物品行 ${key} 出现在侧栏`,
+    timeout,
+  )
+  await waitStatsSidebarStable(page, 500, timeout)
+  const loc = page.locator(statsRow(key))
+  await loc.dispatchEvent('pointerenter', { clientX: 40, clientY: 200, bubbles: true })
+  await loc.dispatchEvent('pointermove', { clientX: 40, clientY: 200, bubbles: true })
+  await page.waitForTimeout(180)
+}
+
+/** 离开物品行（清 hover 态；tooltip 随之消失）。 */
+export async function leaveStatsRow(page: Page, key: string): Promise<void> {
+  await page.locator(statsRow(key)).dispatchEvent('pointerleave', { bubbles: true })
+  await page.waitForTimeout(120)
+}
+
 // ---------------------------------------------------------------------------
 // 移除锁读取（B-3 / 决策 C：视图切换与三级配置 UI 已整套移除）
 // ---------------------------------------------------------------------------

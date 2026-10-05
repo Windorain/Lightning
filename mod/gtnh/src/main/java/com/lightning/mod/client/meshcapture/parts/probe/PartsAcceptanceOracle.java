@@ -1,10 +1,12 @@
 package com.lightning.mod.client.meshcapture.parts.probe;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import net.minecraft.block.Block;
 import net.minecraft.item.Item;
@@ -100,11 +102,22 @@ final class PartsAcceptanceOracle {
         }
         root.add("cells", cellsArr);
 
+        // 契约 §2.2 扩展（#39 阶段一）：物品索引表期望 + 宿主级物品身份期望。
+        // 口径来源 = 契约 §2.2 原文规则 + 建造意图（**不是**读实现输出）：
+        // - 键 = 物品身份键（部件 typeKey 与 items[0].iconKey() 按契约 §5 同形）；
+        // - 归属层①part = 该格该部件（grid + localId）；层②host = 宿主方块自身物品身份
+        // （Item.getItemFromBlock + damage=方块 meta，契约 §2.2 层②**原文规则**，用 MC 原语独立复算）；
+        // - 层③family 本轮不实现（注册表恒空）⇒ 不产出；
+        // - display：建造意图带显示名则用（AE2/EIO 的真实 ItemStack），否则由物品身份键重建
+        // ItemStack 取显示名；带 `#nbt` 判别键的（FMP 材料变体）显示名依赖 NBT ⇒ displayChecked=false（不猜）。
+        boolean degradedRun = disabledFamilies != null && !disabledFamilies.isEmpty();
+        buildItemIndex(intents, disabledFamilies, world, degradedRun, root, bx, by, bz);
+        buildHostItems(intents, root);
+
         // expectedCounts：按 typeKey 聚合（每格每部件 itemCount 累加；display 取建造时显示名）。
         // 退化轮口径（契约缺口上报 #2 推论）：带哨兵的变换格（档 3 岛数/档 2 盒数静态不可预测）
         // 不进 expectedCounts —— countsScope=untransformed-cells-only，验证器对该 scope 做子集比对
         // （期望键精确，实际多出的键放行）；全量轮 countsScope=all-cells 双向精确。
-        boolean degradedRun = disabledFamilies != null && !disabledFamilies.isEmpty();
         root.addProperty("countsScope", degradedRun ? "untransformed-cells-only" : "all-cells");
         Map<String, long[]> counts = new LinkedHashMap<String, long[]>();
         Map<String, String> displays = new LinkedHashMap<String, String>();
@@ -196,50 +209,364 @@ final class PartsAcceptanceOracle {
         o.addProperty("expectFullCube", Boolean.valueOf(c.expectFullCube));
 
         JsonArray parts = new JsonArray();
-        if (!c.expectFullCube) {
-            boolean degraded = isFamilyCellDisabled(c, disabledFamilies);
-            if (!degraded) {
-                for (PartsAcceptanceBuilder.ExpectedPart p : c.parts) {
-                    parts.add(partJson(p));
-                }
-            } else if (allFamilyProvidersDisabled(disabledFamilies)) {
-                // 全关 ⇒ 档 3 inferred：typeKey/itemCount = 宿主 drop 身份（与 inferred 提供者同口径，实算）；
-                // localId 岛序号不静态可预测 ⇒ 通配哨兵；盒数/来源 ⇒ 不校验哨兵
-                DropIdentity drop = dropIdentity(world, c);
-                JsonObject p = new JsonObject();
-                p.addProperty("localId", LOCALID_INFERRED_WILDCARD);
-                p.addProperty("typeKey", drop.typeKey);
-                p.addProperty("itemCount", Integer.valueOf(drop.itemCount));
-                p.addProperty("boxTier", Integer.valueOf(PartSource.TIER_INFERRED));
-                p.addProperty("boxCount", Integer.valueOf(BOXCOUNT_UNCHECKED));
-                p.addProperty("boxProvenance", PROVENANCE_UNCHECKED);
-                parts.add(p);
-            } else {
-                // 部分关（如关 ae2）⇒ 档 2 通用盒：一格一个 generic:0（§4），typeKey = 宿主 drop 身份
-                DropIdentity drop = dropIdentity(world, c);
-                JsonObject p = new JsonObject();
-                p.addProperty("localId", "generic:0");
-                p.addProperty("typeKey", drop.typeKey);
-                p.addProperty("itemCount", Integer.valueOf(drop.itemCount));
-                p.addProperty("boxTier", Integer.valueOf(PartSource.TIER_GENERIC));
-                p.addProperty("boxCount", Integer.valueOf(BOXCOUNT_UNCHECKED));
-                p.addProperty("boxProvenance", PROVENANCE_UNCHECKED);
-                parts.add(p);
-            }
+        for (PartSpec p : effectiveParts(c, disabledFamilies, world)) {
+            JsonObject o2 = new JsonObject();
+            o2.addProperty("localId", p.localId);
+            o2.addProperty("typeKey", p.typeKey);
+            o2.addProperty("itemCount", Integer.valueOf(p.itemCount));
+            o2.addProperty("boxTier", Integer.valueOf(p.boxTier));
+            o2.addProperty("boxCount", Integer.valueOf(p.boxCount));
+            o2.addProperty("boxProvenance", p.boxProvenance);
+            parts.add(o2);
         }
         o.add("parts", parts);
         return o;
     }
 
-    private static JsonObject partJson(PartsAcceptanceBuilder.ExpectedPart p) {
-        JsonObject o = new JsonObject();
-        o.addProperty("localId", p.localId);
-        o.addProperty("typeKey", p.typeKey);
-        o.addProperty("itemCount", Integer.valueOf(p.itemCount));
-        o.addProperty("boxTier", Integer.valueOf(p.boxTier));
-        o.addProperty("boxCount", Integer.valueOf(p.boxCount));
-        o.addProperty("boxProvenance", p.boxProvenance);
-        return o;
+    /** 变换后的一格部件期望（供 cells[] 序列化与 itemIndex 期望共用同一份推导，杜绝两处口径漂移）。 */
+    private static final class PartSpec {
+
+        final String localId;
+        final String typeKey;
+        final int itemCount;
+        final int boxTier;
+        final int boxCount;
+        final String boxProvenance;
+
+        PartSpec(String localId, String typeKey, int itemCount, int boxTier, int boxCount, String boxProvenance) {
+            this.localId = localId;
+            this.typeKey = typeKey;
+            this.itemCount = itemCount;
+            this.boxTier = boxTier;
+            this.boxCount = boxCount;
+            this.boxProvenance = boxProvenance;
+        }
+    }
+
+    /**
+     * 一格的**有效部件期望**（含退化档位变换）：未变换 ⇒ 建造意图逐条；变换 ⇒ 档 2 单盒
+     * {@code generic:0} 或档 3 {@code inferred:*}（typeKey/itemCount = 宿主 drop 身份实算）。
+     */
+    private static List<PartSpec> effectiveParts(PartsAcceptanceBuilder.CellIntent c, Set<String> disabledFamilies,
+        World world) {
+        List<PartSpec> out = new ArrayList<PartSpec>();
+        if (c.expectFullCube) {
+            return out;
+        }
+        if (!isFamilyCellDisabled(c, disabledFamilies)) {
+            for (PartsAcceptanceBuilder.ExpectedPart p : c.parts) {
+                out.add(new PartSpec(p.localId, p.typeKey, p.itemCount, p.boxTier, p.boxCount, p.boxProvenance));
+            }
+            return out;
+        }
+        DropIdentity drop = dropIdentity(world, c);
+        if (allFamilyProvidersDisabled(disabledFamilies)) {
+            out.add(
+                new PartSpec(
+                    LOCALID_INFERRED_WILDCARD,
+                    drop.typeKey,
+                    drop.itemCount,
+                    PartSource.TIER_INFERRED,
+                    BOXCOUNT_UNCHECKED,
+                    PROVENANCE_UNCHECKED));
+        } else {
+            out.add(
+                new PartSpec(
+                    "generic:0",
+                    drop.typeKey,
+                    drop.itemCount,
+                    PartSource.TIER_GENERIC,
+                    BOXCOUNT_UNCHECKED,
+                    PROVENANCE_UNCHECKED));
+        }
+        return out;
+    }
+
+    // ------------------------------------------------------------------ 契约 §2.2 扩展（#39 阶段一）
+
+    /** 一个物品身份键的期望条目（part 归属先于 host 归属，= 契约 §2.2 权威度顺序）。 */
+    private static final class IndexEntry {
+
+        String display;
+        boolean displayChecked = true;
+        final List<JsonObject> partAttrs = new ArrayList<JsonObject>();
+        final List<JsonObject> hostAttrs = new ArrayList<JsonObject>();
+    }
+
+    /** 归属条目 JSON（{@code source}/{@code frame}/{@code grid:[zi,ri,ci]}/{@code localId?}，契约 §2.2）。 */
+    private static JsonObject attribution(String source, int zi, int ri, int ci, String localId) {
+        JsonObject a = new JsonObject();
+        a.addProperty("source", source);
+        a.addProperty("frame", Integer.valueOf(0));
+        JsonArray grid = new JsonArray();
+        grid.add(new JsonPrimitive(Integer.valueOf(zi)));
+        grid.add(new JsonPrimitive(Integer.valueOf(ri)));
+        grid.add(new JsonPrimitive(Integer.valueOf(ci)));
+        a.add("grid", grid);
+        if (localId != null) {
+            a.addProperty("localId", localId);
+        }
+        return a;
+    }
+
+    /**
+     * 物品索引表期望（契约 §2.2）：
+     * <ul>
+     * <li>键集 = 全部部件的物品身份键（{@code itemCount>0} 者；{@code itemCount=0} = {@code items:[]}
+     * 显式"无" ⇒ 该部件不产生键，与导出侧 {@code addPart} 的 early-return 同口径）；</li>
+     * <li>层① {@code part} 归属逐格逐部件；层② {@code host} 归属 = 宿主方块自身物品身份键命中的格
+     * （契约 §2.2 层②原文：只对层①已建键枚举）—— 用 MC 原语独立复算，不读实现产物；</li>
+     * <li>{@code source} = 首条归属来源（part 先入 ⇒ 非空归属的键恒为 {@code part}；本结构无
+     * {@code items[i>0]} 附加条目 ⇒ 无 {@code none} 条目）；</li>
+     * <li>{@code itemIndexScope}：全量轮 {@code exact}（键集双向精确）/ 退化轮
+     * {@code untransformed-cells-only}（在册键必在；变换格多出的键与归属放行 —— 与 {@code countsScope}
+     * 同口径）。</li>
+     * </ul>
+     */
+    private static void buildItemIndex(List<PartsAcceptanceBuilder.CellIntent> intents, Set<String> disabledFamilies,
+        World world, boolean degradedRun, JsonObject root, int bx, int by, int bz) {
+        Map<String, IndexEntry> byKey = new TreeMap<String, IndexEntry>();
+        List<String> hostHits = new ArrayList<String>();
+        for (PartsAcceptanceBuilder.CellIntent c : intents) {
+            List<PartSpec> specs = effectiveParts(c, disabledFamilies, world);
+            if (specs.isEmpty()) {
+                continue;
+            }
+            // 格下标（与 cellJson 的 grid 扩展字段同一算式：zi = z-bz；ri = (by+1)-y；ci = x-(bx+1)）
+            int zi = c.z - bz;
+            int ri = (by + 1) - c.y;
+            int ci = c.x - (bx + 1);
+            // 层② 宿主身份候选（最终只并入已建键，见契约 §2.2 层②）
+            String hostKey = hostItemKeyOf(c.host);
+            if (hostKey != null) {
+                hostHits.add(hostKey + "@" + zi + "," + ri + "," + ci);
+            }
+            for (PartSpec p : specs) {
+                if (p.itemCount <= 0) {
+                    continue; // items:[] 显式"无" ⇒ 不建键（与导出侧 addPart 同口径）
+                }
+                IndexEntry e = byKey.get(p.typeKey);
+                if (e == null) {
+                    e = new IndexEntry();
+                    e.display = displayFor(c, p);
+                    e.displayChecked = p.typeKey.indexOf('#') < 0;
+                    byKey.put(p.typeKey, e);
+                }
+                e.partAttrs.add(attribution("part", zi, ri, ci, p.localId));
+            }
+        }
+        // 层②：宿主键命中已建键 ⇒ 追加 host 归属（权威度低于 part ⇒ 落在 part 之后）
+        for (String hk : hostHits) {
+            int at = hk.lastIndexOf('@');
+            String key = hk.substring(0, at);
+            IndexEntry e = byKey.get(key);
+            if (e == null) {
+                continue;
+            }
+            String[] g = hk.substring(at + 1)
+                .split(",");
+            e.hostAttrs
+                .add(attribution("host", Integer.parseInt(g[0]), Integer.parseInt(g[1]), Integer.parseInt(g[2]), null));
+        }
+
+        JsonObject index = new JsonObject();
+        for (Map.Entry<String, IndexEntry> en : byKey.entrySet()) {
+            IndexEntry e = en.getValue();
+            JsonObject o = new JsonObject();
+            if (e.displayChecked && e.display != null) {
+                o.addProperty("display", e.display);
+            } else {
+                o.add("display", com.google.gson.JsonNull.INSTANCE);
+            }
+            o.addProperty("displayChecked", Boolean.valueOf(e.displayChecked));
+            o.addProperty("tooltipNonEmpty", Boolean.TRUE);
+            o.addProperty("source", e.partAttrs.isEmpty() ? (e.hostAttrs.isEmpty() ? "none" : "host") : "part");
+            JsonArray attrs = new JsonArray();
+            for (JsonObject a : e.partAttrs) {
+                attrs.add(a);
+            }
+            for (JsonObject a : e.hostAttrs) {
+                attrs.add(a);
+            }
+            o.add("attribution", attrs);
+            index.add(en.getKey(), o);
+        }
+        root.add("itemIndex", index);
+        root.addProperty("itemIndexScope", degradedRun ? "untransformed-cells-only" : "exact");
+        JsonObject rules = new JsonObject();
+        rules.addProperty("keySet", "exact: 文件键集 = 本表键集（双向）；untransformed-cells-only: 在册键必在，变换格多出放行");
+        rules.addProperty("displayFallback", "displayChecked=false ⇒ 只断言非空（NBT 变体：FMP 材料串显示名依赖 NBT，静态不可复算）");
+        rules.addProperty("tooltipFallback", "tooltip 非空，空 ⇒ 至少 display 一行（契约 §2.2 空值语义）");
+        rules.addProperty("sourceDerivation", "source = attribution 首条来源；空数组 ⇒ none");
+        rules.addProperty("attributionOrder", "part → host → family 分组；组内集合比对（同来源内顺序未规定）");
+        rules.addProperty("localIdWildcard", "inferred:* = 档 3 岛序号不可静态预测（退化哨兵）");
+        rules.addProperty("familyLayer", "层③族特有本轮不实现（规则注册表恒空）⇒ 不产出 family 归属");
+        root.add("itemIndexRules", rules);
+    }
+
+    /** 期望显示名：建造意图带显示名则用（真实 ItemStack），否则由物品身份键重建 ItemStack 取名。 */
+    private static String displayFor(PartsAcceptanceBuilder.CellIntent c, PartSpec p) {
+        for (PartsAcceptanceBuilder.ExpectedPart ep : c.parts) {
+            if (ep.localId.equals(p.localId) && ep.display != null && !ep.display.isEmpty()) {
+                return ep.display;
+            }
+        }
+        return displayForKey(p.typeKey);
+    }
+
+    /**
+     * 由物品身份键 {@code registry:damage[#nbt]} 重建显示名（契约 §3④ 尊重游戏内显示名）。
+     * 不可重建（注册名不在册 / 无该物品 / 抛错）⇒ 回退键本身（消费侧同一兜底口径）。
+     */
+    private static String displayForKey(String key) {
+        try {
+            int hash = key.indexOf('#');
+            String bare = hash < 0 ? key : key.substring(0, hash);
+            int colon = bare.lastIndexOf(':');
+            if (colon <= 0) {
+                return key;
+            }
+            String registry = bare.substring(0, colon);
+            int damage = Integer.parseInt(bare.substring(colon + 1));
+            Object item = Item.itemRegistry.getObject(registry);
+            if (!(item instanceof Item)) {
+                return key;
+            }
+            return new ItemStack((Item) item, 1, damage).getDisplayName();
+        } catch (Throwable t) {
+            return key;
+        }
+    }
+
+    /** 宿主身份键（契约 §2.2 层②原文：{@code Item.getItemFromBlock(block)} 的注册名 + ":" + meta）。 */
+    private static String hostItemKeyOf(String host) {
+        try {
+            int colon = host.lastIndexOf(':');
+            if (colon <= 0) {
+                return null;
+            }
+            String registry = host.substring(0, colon);
+            int meta = Integer.parseInt(host.substring(colon + 1));
+            Block b = Block.getBlockFromName(registry);
+            if (b == null) {
+                return null;
+            }
+            Item item = Item.getItemFromBlock(b);
+            if (item == null) {
+                return null; // 无物品形态（不猜）
+            }
+            String itemRegistry = Item.itemRegistry.getNameForObject(item);
+            if (itemRegistry == null) {
+                return null;
+            }
+            return itemRegistry + ":" + meta;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 宿主级物品身份期望（契约 §2.2 层②，落盘 {@code blockPalette[].hostItem}）：
+     * <ul>
+     * <li>{@code expect[宿主 registry:meta]} = {@code {registry, damage}} 字面值（
+     * 用 MC 原语按契约原文规则独立复算，与导出侧 {@code ItemIndexIntegrator} 是两条路径）；</li>
+     * <li>{@code absent} = 无物品形态的宿主（如 FMP BlockMultipart 无 ItemBlock，P1.8 实证）⇒ 字段缺席；</li>
+     * <li>{@code derive} = 运行时/静态都推不出字面值（注册名不可得）⇒ 验证器只断言
+     * "若在则 damage = 条目 meta"，并把实测值登记进 note（不猜）。</li>
+     * </ul>
+     */
+    private static void buildHostItems(List<PartsAcceptanceBuilder.CellIntent> intents, JsonObject root) {
+        JsonObject spec = new JsonObject();
+        spec.addProperty(
+            "rule",
+            "契约 §2.2 层②：blockPalette[j].hostItem = { registry: Item.getItemFromBlock(宿主方块) 的注册名, damage: 该条目 meta }；无物品形态 ⇒ 字段缺席（不猜）");
+        spec.addProperty("damageEqualsMeta", Boolean.TRUE);
+        Map<String, JsonObject> expect = new TreeMap<String, JsonObject>();
+        List<String> absent = new ArrayList<String>();
+        List<String> derive = new ArrayList<String>();
+        // 诊断证据（不参与断言；#39 阶段二）：逐宿主记录判定链的**运行时读数**，
+        // 供"同一宿主在不同轮（full vs 退化）落不同类"这类现象定性用（derive 的成因必须可查）。
+        JsonArray evidence = new JsonArray();
+        Set<String> seen = new LinkedHashSet<String>();
+        for (PartsAcceptanceBuilder.CellIntent c : intents) {
+            if (c.host == null || c.host.isEmpty() || !seen.add(c.host)) {
+                continue;
+            }
+            int colon = c.host.lastIndexOf(':');
+            String registry = colon > 0 ? c.host.substring(0, colon) : c.host;
+            int meta = colon > 0 ? Integer.parseInt(c.host.substring(colon + 1)) : 0;
+            JsonObject ev = new JsonObject();
+            ev.addProperty("host", c.host);
+            Block b = null;
+            String blockClass = null;
+            try {
+                b = Block.getBlockFromName(registry);
+                blockClass = b == null ? null
+                    : b.getClass()
+                        .getName();
+            } catch (Throwable t) {
+                ev.addProperty("blockLookupError", String.valueOf(t));
+            }
+            ev.addProperty("blockFound", Boolean.valueOf(b != null));
+            if (b != null) {
+                ev.addProperty("blockClass", blockClass);
+            }
+            if (b == null) {
+                ev.addProperty("verdict", "derive");
+                derive.add(c.host);
+                evidence.add(ev);
+                continue;
+            }
+            Item item = Item.getItemFromBlock(b);
+            ev.addProperty("itemFromBlockNull", Boolean.valueOf(item == null));
+            if (item == null) {
+                ev.addProperty("verdict", "absent");
+                absent.add(c.host);
+                evidence.add(ev);
+                continue;
+            }
+            ev.addProperty(
+                "itemClass",
+                item.getClass()
+                    .getName());
+            String itemRegistry;
+            try {
+                itemRegistry = Item.itemRegistry.getNameForObject(item);
+            } catch (Throwable t) {
+                ev.addProperty("itemRegistryError", String.valueOf(t));
+                itemRegistry = null;
+            }
+            ev.addProperty("itemRegistry", itemRegistry);
+            if (itemRegistry == null) {
+                ev.addProperty("verdict", "derive");
+                derive.add(c.host);
+                evidence.add(ev);
+                continue;
+            }
+            ev.addProperty("verdict", "expect");
+            evidence.add(ev);
+            JsonObject h = new JsonObject();
+            h.addProperty("registry", itemRegistry);
+            h.addProperty("damage", Integer.valueOf(meta));
+            expect.put(c.host, h);
+        }
+        JsonObject expectObj = new JsonObject();
+        for (Map.Entry<String, JsonObject> e : expect.entrySet()) {
+            expectObj.add(e.getKey(), e.getValue());
+        }
+        spec.add("expect", expectObj);
+        JsonArray absentArr = new JsonArray();
+        for (String s : absent) {
+            absentArr.add(new JsonPrimitive(s));
+        }
+        spec.add("absent", absentArr);
+        JsonArray deriveArr = new JsonArray();
+        for (String s : derive) {
+            deriveArr.add(new JsonPrimitive(s));
+        }
+        spec.add("derive", deriveArr);
+        spec.add("evidence", evidence);
+        root.add("hostItems", spec);
     }
 
     /** 该格是否属于被关族（格内全部部件的 localId 命名空间都在 disabledFamilies 里）。 */

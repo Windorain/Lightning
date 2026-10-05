@@ -18,6 +18,10 @@
  *    删掉一个多部件格的部件条目（实际侧缺陷）⇒ 必红；
  *  - `export-drop-cell`：把某非满格的 `cellPartsGrid` 置 -1（整格部件消失）⇒ 必红；
  *  - `export-tamper-count`：改一个部件 `items[0].count`（1→2）⇒ 必红（计数维度）；
+ *  - `oracle-tamper-itemindex-attr`（#39 阶段一）：改 oracle 一个物品键的归属 `localId`
+ *    ⇒ 必红（契约 §2.2 归属维度）；
+ *  - `export-tamper-hostitem-damage`（#39 阶段一）：改一个调色板条目的 `hostItem.damage`
+ *    ≠ 条目 meta ⇒ 必红（契约 §2.2 层② 映射数据）；
  *  - `fake-provider-tolerance`（P1.1 expB 引用）：必抛异常的假提供者已被证过；
  *    本项机器核对**探针归档证据**：expB 每格 `providerFailures` 非空、且档位结果与
  *    无该提供者的基线（expC）一致、导出流程完成 ⇒ "容错不是摆设"。
@@ -241,6 +245,39 @@ function main() {
       throw new Error('找不到可篡改的物品条目')
     },
     expectSubstring: 'expectedCounts[',
+  })
+
+  // ⑥ oracle 物品索引表归属被篡改（#39 阶段一：契约 §2.2 归属维度）
+  negative({
+    id: 'oracle-tamper-itemindex-attr',
+    intent: '篡改 canonical oracle 一个物品键的归属 localId ⇒ 必红（归属维度，契约 §2.2）',
+    tamperDir: 'oracle-tamper-itemindex-attr',
+    mutate: (oracle) => {
+      const key = Object.keys(oracle.itemIndex ?? {}).find(
+        (k) => (oracle.itemIndex[k].attribution ?? []).some((a) => a.source === 'part' && a.localId),
+      )
+      if (!key) throw new Error('oracle 无带 localId 的 part 归属可篡改')
+      const a = oracle.itemIndex[key].attribution.find((x) => x.source === 'part' && x.localId)
+      const before = a.localId
+      a.localId = `${before}-TAMPERED`
+      return `itemIndex[${key}].attribution localId ${before}→${a.localId}`
+    },
+    expectSubstring: '缺期望归属',
+  })
+
+  // ⑦ 导出侧宿主级物品身份被篡改（#39 阶段一：契约 §2.2 层② damage 恒等口径）
+  negative({
+    id: 'export-tamper-hostitem-damage',
+    intent: '改一个 blockPalette 条目的 hostItem.damage（≠ 条目 meta）⇒ 必红（层② 映射数据）',
+    tamperDir: 'export-tamper-hostitem-damage',
+    mutate: (_oracle, exportObj) => {
+      const e = (exportObj.blockPalette ?? []).find((p) => p.hostItem && typeof p.meta === 'number')
+      if (!e) throw new Error('导出无带 hostItem 的调色板条目可篡改')
+      const before = e.hostItem.damage
+      e.hostItem.damage = before + 1
+      return `blockPalette ${e.registryId}:${e.meta} hostItem.damage ${before}→${e.hostItem.damage}`
+    },
+    expectSubstring: 'hostItem.damage',
   })
   } // end negatives（--only fake-provider 时跳过）
 

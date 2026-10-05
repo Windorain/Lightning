@@ -13,7 +13,12 @@
  *  2. 逐格 oracle 比对（`verifyCells`，含退化哨兵语义）；
  *  3. `expectedCounts` 比对（`exact`；`countsScope=untransformed-cells-only` 时 `subset`，
  *     可用 `--counts-mode` 强制）；
- *  4. 池化去重证据（`--dedup-pair` 可传同构格对；缺省用 P1.8 实测的 enderio/overlay 5 导管束格对）。
+ *  4. 池化去重证据（`--dedup-pair` 可传同构格对；缺省用 P1.8 实测的 enderio/overlay 5 导管束格对）；
+ *  5. **物品索引表**（#39 阶段一扩展，`verifyItemIndex`）：契约 §2.2 —— 键集 / display /
+ *     说明行非空 / `source` 派生自 `attribution` 首条 / 归属条目逐条（part→host→family 分组，
+ *     `inferred:*` 通配，退化轮多出归属只允许落在 oracle 哨兵格）；
+ *  6. **宿主级物品身份**（同扩展，`verifyHostItems`）：`blockPalette[].hostItem` ——
+ *     字面值（vanilla）/ 无物品形态必缺席（FMP）/ 待实测（AE2·EIO）+ `damage == 条目 meta` 恒等口径。
  *
  * 用法：
  *   node scripts/parts-acceptance/verify-oracle.mjs \
@@ -38,6 +43,8 @@ import {
   verifyCells,
   verifyDedup,
   verifyExpectedCounts,
+  verifyHostItems,
+  verifyItemIndex,
   writeJson,
 } from './lib/parts-io.mjs'
 
@@ -108,6 +115,14 @@ function main() {
     : []
   const dedupChecks = verifyDedup(oracle, exportRoot, pairs)
   checks.push(...dedupChecks)
+
+  // ⑤ 物品索引表 itemIndex（契约 §2.2；B-2 落盘 → #39 阶段一验收扩展）
+  const itemIndexChecks = verifyItemIndex(oracle, exportRoot)
+  checks.push(...itemIndexChecks)
+
+  // ⑥ 宿主级物品身份 blockPalette[].hostItem（契约 §2.2 层②）
+  const hostItemChecks = verifyHostItems(oracle, exportRoot)
+  checks.push(...hostItemChecks)
 
   const summary = summarizeChecks(checks)
   const stats = exportStats(exportRoot)
@@ -184,6 +199,22 @@ function main() {
     partsWithNoItems,
     singleBoxHosts: [...singleBoxHosts].sort(),
     degenerateBoxes,
+    /** 契约 §2.2：itemIndex 键数 / 显式"无对应"键数 / 归属条目数 / 来源分布 */
+    itemIndexKeys: (() => Object.keys(exportRoot.itemIndex ?? {}).length)(),
+    itemIndexUnresolved: (() =>
+      Object.values(exportRoot.itemIndex ?? {}).filter((e) => (e?.attribution ?? []).length === 0).length)(),
+    itemIndexAttributions: (() =>
+      Object.values(exportRoot.itemIndex ?? {}).reduce((n, e) => n + (e?.attribution ?? []).length, 0))(),
+    itemIndexSources: (() => {
+      const s = new Set()
+      for (const e of Object.values(exportRoot.itemIndex ?? {})) s.add(e?.source)
+      return [...s].filter(Boolean).sort()
+    })(),
+    /** 契约 §2.2 层②：调色板条目数 / 带 hostItem 的条目数 */
+    paletteEntries: Array.isArray(exportRoot.blockPalette) ? exportRoot.blockPalette.length : 0,
+    paletteWithHostItem: Array.isArray(exportRoot.blockPalette)
+      ? exportRoot.blockPalette.filter((e) => e && e.hostItem !== undefined).length
+      : 0,
     structureViolations: struct.violations.length,
     namespaceViolations: cat(/localId|族前缀|source\.family/),
     sourceViolations: cat(/source/),
@@ -205,6 +236,19 @@ function main() {
     wildcardCells: cellChecks.wildcardCells ?? null,
     expectedCountEntries: countChecks.entries ?? null,
     keysInExport: countChecks.keysInExport ?? null,
+    /** 契约 §2.2 物品索引表核对读数（#39 阶段一扩展）。 */
+    itemIndex: {
+      scope: itemIndexChecks.scope ?? null,
+      expectedKeys: itemIndexChecks.expectedKeys ?? null,
+      actualKeys: itemIndexChecks.actualKeys ?? null,
+      attrsChecked: itemIndexChecks.attrsChecked ?? null,
+      wildcardChecked: itemIndexChecks.wildcardChecked ?? null,
+    },
+    hostItems: {
+      paletteEntries: hostItemChecks.paletteEntries ?? null,
+      withHostItem: hostItemChecks.withHostItem ?? null,
+      derived: hostItemChecks.derived ?? null,
+    },
     checks: summary.total,
     failedChecks: summary.failed,
     failures: summary.failedChecks.slice(0, 40),
@@ -217,7 +261,9 @@ function main() {
   console.log(
     `[verify-oracle] ${label}：${report.pass ? 'PASS' : 'FAIL'} —— 判据 ${report.checks} 条 / 失败 ${report.failedChecks} 条` +
       `（格 ${report.cellsChecked} 部件格 + ${report.fullCubeCells} 满方块格 + ${report.wildcardCells} 哨兵格；` +
-      `counts 口径 ${report.countsMode}）`,
+      `counts 口径 ${report.countsMode}；` +
+      `itemIndex ${report.itemIndex.actualKeys}/${report.itemIndex.expectedKeys} 键 · 归属 ${report.itemIndex.attrsChecked} 条（口径 ${report.itemIndex.scope}）；` +
+      `hostItem ${report.hostItems.withHostItem}/${report.hostItems.paletteEntries} 条调色板 + ${report.hostItems.derived} 条待实测）`,
   )
   for (const c of report.notes) console.log(`   · ${c}`)
   for (const f of report.failures) console.log(`   XX ${f}`)

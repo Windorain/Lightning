@@ -50,6 +50,22 @@ export const BOXCOUNT_UNCHECKED = -1
 export const PROVENANCE_UNCHECKED = '*'
 export const PARTS_GRID_NONE = -1
 
+/**
+ * 物品索引表（契约 §2.2）oracle 扩展的字段名与判据常量（B-2 落盘 → #39 阶段一验收扩展）。
+ *
+ * oracle 侧新增：
+ *  - root `itemIndex`：{ <物品身份键>: { display, displayChecked, tooltipNonEmpty, source, attribution[] } }
+ *  - root `itemIndexScope`：`exact`（全量轮）/ `untransformed-cells-only`（退化轮，与 countsScope 同口径）
+ *  - root `hostItems`：{ damageEqualsMeta, expect{hostKey→{registry,damage}}, absent[], derive[] }
+ */
+export const ITEM_INDEX_FIELD = 'itemIndex'
+export const HOST_ITEM_FIELD = 'hostItem'
+export const ITEM_INDEX_SCOPE_EXACT = 'exact'
+export const ITEM_INDEX_SCOPE_UNTRANSFORMED = 'untransformed-cells-only'
+/** 归属条目来源（`none` 不是条目来源，是"无条目"的汇总状态）。 */
+export const ATTRIBUTION_SOURCES = ['part', 'host', 'family']
+const SOURCE_RANK = { part: 0, host: 1, family: 2 }
+
 /** 合法族（契约 §3/§4；实测实现口径 = localId 前缀）。 */
 export const FAMILIES = ['ae2', 'eio', 'fmp', 'generic', 'inferred']
 /** 合法盒来源（契约 §6.4）。 */
@@ -500,6 +516,258 @@ export function verifyDedup(oracle, exportRoot, pairs) {
     `partLists 池条数（${st.partLists}）应 ≤ 部件格数（${st.partCells}）：去重全局生效`,
   )
   return checks
+}
+
+// ---------------------------------------------------------------------------
+// 物品索引表（契约 §2.2）—— oracle ↔ 导出文件核对（#39 阶段一扩展）
+// ---------------------------------------------------------------------------
+
+/** 归属条目身份（与 web `pure/itemIndex.ts#normalizeHits` 同一口径）。 */
+function attrKey(a) {
+  return `${a?.source}|${a?.frame}|${a?.grid?.[0]},${a?.grid?.[1]},${a?.grid?.[2]}|${a?.localId ?? ''}`
+}
+
+function isInt(v) {
+  return typeof v === 'number' && Number.isInteger(v)
+}
+
+/** oracle 里带哨兵的格（退化档 3 岛序号/盒数不可静态预测）—— 退化轮允许的多出归属只能落在这些格上。 */
+function sentinelGrids(oracle) {
+  const out = new Set()
+  for (const cell of oracle?.cells ?? []) {
+    const [zi, ri, ci] = cell.grid ?? []
+    const parts = cell.parts ?? []
+    const wild =
+      (parts.length === 1 && parts[0]?.localId === LOCAL_ID_INFERRED_WILDCARD) ||
+      parts.some((p) => p?.boxCount === BOXCOUNT_UNCHECKED)
+    if (wild) out.add(`${zi},${ri},${ci}`)
+  }
+  return out
+}
+
+/**
+ * 物品索引表核对（契约 §2.2 硬约束 + oracle 逐键期望）。
+ *
+ * 判据分两层：
+ *  A. **文件自洽**（独立于 oracle）：条目形状、`source` = 首条归属来源（空数组 ⇒ `none`）、
+ *     说明行非空（空值语义：至少 display 一行）、归属按来源权威度分组（part → host → family）
+ *     且 `(source,frame,grid,localId)` 不重复、`display` 非空；
+ *  B. **oracle 逐键比对**：键集（exact 双向 / 退化轮只要求在册键必在）、`display`（
+ *     `displayChecked:false` ⇒ 只断言非空）、`source`、归属条目（逐条匹配；
+ *     `localId:"inferred:*"` = 通配，要求该格至少一条 inferred 归属）。退化轮允许实际多出的
+ *     归属，但**只能落在 oracle 的哨兵格上**（其余位置多出 = 归属指向了错误格，判红）。
+ */
+export function verifyItemIndex(oracle, exportRoot) {
+  const checks = []
+  const push = (ok, msg) => checks.push({ ok, msg })
+  const expected = oracle?.[ITEM_INDEX_FIELD]
+  const actual = exportRoot?.[ITEM_INDEX_FIELD]
+  const scope = oracle?.itemIndexScope ?? ITEM_INDEX_SCOPE_EXACT
+  const subset = scope === ITEM_INDEX_SCOPE_UNTRANSFORMED
+
+  if (!expected || typeof expected !== 'object' || Array.isArray(expected)) {
+    push(false, `oracle 缺 ${ITEM_INDEX_FIELD} 期望（契约 §2.2 扩展；#39 阶段一）`)
+    return Object.assign(checks, { expectedKeys: 0, actualKeys: 0, attrsChecked: 0, scope })
+  }
+  if (!actual || typeof actual !== 'object' || Array.isArray(actual)) {
+    push(false, `导出文件缺 ${ITEM_INDEX_FIELD}（含部件文档必须落盘，契约 §2.2）`)
+    return Object.assign(checks, { expectedKeys: Object.keys(expected).length, actualKeys: 0, attrsChecked: 0, scope })
+  }
+
+  const expectedKeys = Object.keys(expected).sort()
+  const actualKeys = Object.keys(actual).sort()
+  const missing = expectedKeys.filter((k) => !(k in actual))
+  push(missing.length === 0, `itemIndex 缺期望键：${missing.join(', ')}`)
+  const extra = actualKeys.filter((k) => !(k in expected))
+  if (subset) {
+    if (extra.length > 0) checks.push({ ok: true, msg: `note: 退化轮 itemIndex 多出未登记键 ${extra.join(', ')}（变换格产出，口径同 countsScope）` })
+  } else {
+    push(extra.length === 0, `itemIndex 多出未登记键：${extra.join(', ')}`)
+  }
+
+  let attrsChecked = 0
+  let wildcardChecked = 0
+  const sentinels = sentinelGrids(oracle)
+
+  // ── A. 文件自洽（对实际出现的每个键）───────────────────────────────────
+  for (const key of actualKeys) {
+    const e = actual[key]
+    const at = `itemIndex[${key}]`
+    if (!e || typeof e !== 'object' || Array.isArray(e)) {
+      push(false, `${at} 必须是对象`)
+      continue
+    }
+    push(typeof e.display === 'string' && e.display.length > 0, `${at} display 必须为非空字符串（缺省兜底 = 键本身）`)
+    push(
+      Array.isArray(e.tooltip) && e.tooltip.length > 0 && e.tooltip.every((l) => typeof l === 'string'),
+      `${at} tooltip 必须为非空字符串数组（空值语义：至少 display 一行）`,
+    )
+    const attrs = Array.isArray(e.attribution) ? e.attribution : null
+    if (attrs === null) {
+      push(false, `${at} attribution 必须是数组（空数组 = 显式"无对应"）`)
+      continue
+    }
+    const wantSource = attrs.length === 0 ? 'none' : attrs[0]?.source
+    push(
+      e.source === wantSource,
+      `${at} source 必须 = attribution 首条来源（空数组 ⇒ none；期望 ${wantSource}，实际 ${e.source}）`,
+    )
+    let prevRank = -1
+    let orderOk = true
+    const seen = new Set()
+    for (let i = 0; i < attrs.length; i++) {
+      const a = attrs[i]
+      const aat = `${at}.attribution[${i}]`
+      if (!ATTRIBUTION_SOURCES.includes(a?.source)) push(false, `${aat} source 非法：${a?.source}`)
+      if (!isInt(a?.frame) || a.frame < 0) push(false, `${aat} frame 必须为非负整数（实际 ${a?.frame}）`)
+      if (!Array.isArray(a?.grid) || a.grid.length !== 3 || !a.grid.every(isInt)) {
+        push(false, `${aat} grid 必须是长度 3 的整数数组（[zSlice,row,column]）`)
+      }
+      if (a?.source === 'part' && (typeof a.localId !== 'string' || a.localId.length === 0)) {
+        push(false, `${aat} source=part 必须带 localId（部件级定位）`)
+      }
+      const rank = SOURCE_RANK[a?.source]
+      if (rank !== undefined) {
+        if (rank < prevRank) orderOk = false
+        prevRank = Math.max(prevRank, rank)
+      }
+      const id = attrKey(a)
+      if (seen.has(id)) push(false, `${aat} 归属重复（${id}）`)
+      seen.add(id)
+    }
+    push(orderOk, `${at} attribution 必须按来源权威度分组（part → host → family）`)
+  }
+
+  // ── B. oracle 逐键比对 ────────────────────────────────────────────────
+  for (const key of expectedKeys) {
+    const exp = expected[key]
+    const act = actual[key]
+    const at = `itemIndex[${key}]`
+    if (!act) continue
+    if (exp.displayChecked !== false) {
+      push(act.display === exp.display, `${at} display 应为 ${JSON.stringify(exp.display)}（实际 ${JSON.stringify(act.display)}）`)
+    }
+    push(exp.tooltipNonEmpty === false || (Array.isArray(act.tooltip) && act.tooltip.length > 0), `${at} 说明行必须非空`)
+    push(act.source === exp.source, `${at} source 应为 ${exp.source}（实际 ${act.source}）`)
+    const attrs = Array.isArray(act.attribution) ? act.attribution : []
+    const used = new Array(attrs.length).fill(false)
+    for (const want of exp.attribution ?? []) {
+      attrsChecked++
+      if (want.localId === LOCAL_ID_INFERRED_WILDCARD) {
+        wildcardChecked++
+        const hit = attrs.some(
+          (a, i) =>
+            a?.source === want.source &&
+            a?.frame === want.frame &&
+            a?.grid?.[0] === want.grid[0] &&
+            a?.grid?.[1] === want.grid[1] &&
+            a?.grid?.[2] === want.grid[2] &&
+            String(a?.localId ?? '').startsWith('inferred:'),
+        )
+        push(hit, `${at} 期望格 [${want.grid}] 至少一条 inferred:* 的 ${want.source} 归属（退化档岛序号不可预测）`)
+        continue
+      }
+      const idx = attrs.findIndex(
+        (a, i) => !used[i] && a?.source === want.source && a?.frame === want.frame && a?.grid?.[0] === want.grid[0] && a?.grid?.[1] === want.grid[1] && a?.grid?.[2] === want.grid[2] && (a?.localId ?? null) === (want.localId ?? null),
+      )
+      if (idx < 0) {
+        push(false, `${at} 缺期望归属 ${JSON.stringify(want)}`)
+      } else {
+        used[idx] = true
+        push(true, `${at} 归属 ${JSON.stringify(want)}`)
+      }
+    }
+    // 未匹配的实际归属：exact 轮一律判红；退化轮只允许落在 oracle 哨兵格
+    for (let i = 0; i < attrs.length; i++) {
+      if (used[i]) continue
+      const a = attrs[i]
+      const g = `${a?.grid?.[0]},${a?.grid?.[1]},${a?.grid?.[2]}`
+      if (subset && sentinels.has(g)) {
+        checks.push({ ok: true, msg: `note: ${at} 多出变换格归属 ${attrKey(a)}（退化轮口径放行）` })
+      } else {
+        push(false, `${at} 多出未登记归属 ${attrKey(a)}`)
+      }
+    }
+  }
+
+  return Object.assign(checks, {
+    expectedKeys: expectedKeys.length,
+    actualKeys: actualKeys.length,
+    attrsChecked,
+    wildcardChecked,
+    scope,
+  })
+}
+
+/**
+ * `blockPalette[].hostItem`（契约 §2.2 层②）核对。
+ *
+ * 口径（oracle `hostItems`）：
+ *  - `expect[<宿主 registry:meta>]`：**字面值**必须精确（registry + damage）；
+ *  - `absent[]`：无物品形态的宿主 ⇒ 字段必须缺席（不猜）；
+ *  - `derive[]`：字面值静态不可推导（宿主方块的 ItemBlock 注册名需运行时查表）⇒
+ *    只断言"若在则 damage = 该条目 meta 且 registry 非空"，并把实际观测登记进 note，
+ *    **不硬编码猜测值**（阶段二在游戏内产出实测字面值后改列 `expect`）；
+ *  - 未登记宿主 ⇒ 判红（新增宿主必须补 oracle）。
+ *  - 恒定口径：任何 `hostItem` 的 `damage` 必须等于其所在调色板条目的 `meta`。
+ */
+export function verifyHostItems(oracle, exportRoot) {
+  const checks = []
+  const push = (ok, msg) => checks.push({ ok, msg })
+  const spec = oracle?.hostItems
+  const palette = exportRoot?.blockPalette
+  if (!spec || typeof spec !== 'object') {
+    push(false, 'oracle 缺 hostItems 期望（契约 §2.2 层② 扩展；#39 阶段一）')
+    return Object.assign(checks, { paletteEntries: 0, withHostItem: 0, derived: 0 })
+  }
+  if (!Array.isArray(palette)) {
+    push(false, '导出文件缺 blockPalette（契约 §2）')
+    return Object.assign(checks, { paletteEntries: 0, withHostItem: 0, derived: 0 })
+  }
+  const expect = spec.expect ?? {}
+  const absent = new Set(spec.absent ?? [])
+  const derive = new Set(spec.derive ?? [])
+  let entries = 0
+  let withHostItem = 0
+  let derived = 0
+  const observedDerive = []
+  for (let i = 0; i < palette.length; i++) {
+    const e = palette[i]
+    if (!e || typeof e !== 'object') continue
+    const registryId = String(e.registryId ?? '')
+    if (registryId === '' || registryId === 'air' || registryId === 'minecraft:air') continue
+    entries++
+    const key = `${registryId}:${e.meta}`
+    const hostItem = e[HOST_ITEM_FIELD]
+    if (hostItem !== undefined) withHostItem++
+    if (hostItem !== undefined && spec.damageEqualsMeta !== false) {
+      push(hostItem?.damage === e.meta, `blockPalette[${i}] hostItem.damage=${hostItem?.damage} 必须 = 条目 meta=${e.meta}（契约 §2.2 层②）`)
+    }
+    if (key in expect) {
+      const want = expect[key]
+      push(hostItem !== undefined, `blockPalette[${i}] 宿主 ${key} 必须带 hostItem（契约 §2.2 层②）`)
+      if (hostItem !== undefined) {
+        push(hostItem?.registry === want.registry, `blockPalette[${i}] 宿主 ${key} hostItem.registry 应为 ${want.registry}（实际 ${hostItem?.registry}）`)
+        push(hostItem?.damage === want.damage, `blockPalette[${i}] 宿主 ${key} hostItem.damage 应为 ${want.damage}（实际 ${hostItem?.damage}）`)
+      }
+    } else if (absent.has(key)) {
+      push(hostItem === undefined, `blockPalette[${i}] 宿主 ${key} 无物品形态 ⇒ hostItem 必须缺席（不猜）`)
+    } else if (derive.has(key)) {
+      derived++
+      if (hostItem !== undefined) {
+        push(typeof hostItem.registry === 'string' && hostItem.registry.length > 0, `blockPalette[${i}] 宿主 ${key} hostItem.registry 必须为非空字符串`)
+        observedDerive.push(`${key}→${hostItem.registry}:${hostItem.damage}`)
+      } else {
+        observedDerive.push(`${key}→<缺席>`)
+      }
+    } else {
+      push(false, `blockPalette[${i}] 宿主 ${key} 未在 oracle hostItems（expect/absent/derive）登记`)
+    }
+  }
+  if (observedDerive.length > 0) {
+    checks.push({ ok: true, msg: `note: 待阶段二落字面值的宿主实测观测：${observedDerive.join(', ')}` })
+  }
+  return Object.assign(checks, { paletteEntries: entries, withHostItem, derived })
 }
 
 export function summarizeChecks(checks) {
