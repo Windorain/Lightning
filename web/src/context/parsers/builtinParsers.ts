@@ -157,7 +157,9 @@ export const StructureDataParser: DocumentParser = {
     }
 
     // 文档**根级**字段（与上面的 structure 级 cellPartsGrid/partLists 不同层级）：
-    // `materialPalette/textureBlobs/...` 沿用既有透传；部件轮根级字段见 PART_ROOT_FIELDS 清单。
+    // `materialPalette/textureBlobs/...` 沿用既有透传；部件轮根级字段见 PART_ROOT_FIELDS 清单
+    // （其中 `statsTemplate`/`statsOverride` 语义已作废（决策 C），透传目的仅是
+    // "旧文档字段读取后静默忽略"（不丢字段、不报错），不再有任何语义消费方）。
     // 旧文件无这些键 ⇒ 循环体不执行，行为零差异（字节干净同 serialize()）。
     for (const key of STRUCTURE_ROOT_FIELDS) {
       if (baked[key] !== undefined) v2[key] = baked[key]
