@@ -130,7 +130,10 @@ public final class CaseRunAction extends SteppingActionBase {
             .isEmpty()) {
             applyVariant(variantParam.trim());
         }
-        plan = new CaseValidator().plan(caseFile);
+        // 指定 variant 时 caseFile 已是补丁产物：适用性判定交给 CaseSources.resolve 在原始文件上
+        // 做过的那一遍（ENFORCE）；这里用 SKIP，否则同一补丁在本文件上必然空转 → CP-VALID-002 误报。
+        plan = new CaseValidator()
+            .plan(caseFile, variantId == null ? CaseValidator.VariantCheck.ENFORCE : CaseValidator.VariantCheck.SKIP);
         JsonArray all = Json.optArray(plan, "segments");
         JsonArray requested = ctx.optArray("segments");
         if (requested == null) {
@@ -601,7 +604,9 @@ public final class CaseRunAction extends SteppingActionBase {
         String prefix = "variants[" + id + "].mutate";
         JsonObject mutated = variant.applyTo(caseFile.raw(), prefix);
         CaseFile mutatedFile = new CaseParser().parse(mutated, Json.toJson(mutated));
-        new CaseValidator().plan(mutatedFile);
+        // 变体产物文档的二次校验：补丁适用性判定必须关掉——这份文档已经是补丁结果，
+        // 再应用同一补丁必然「什么都没改」，用 ENFORCE 会把自己的产物判成非法（见 VariantCheck）。
+        new CaseValidator().plan(mutatedFile, CaseValidator.VariantCheck.SKIP);
         caseFile = mutatedFile;
         variantId = id;
         expectRed = variant.expectCriteriaRed();
@@ -641,7 +646,8 @@ public final class CaseRunAction extends SteppingActionBase {
                     CpLog.warn("变体 %s 改动世界/构建段，整跑中未执行（请用 variant 单独跑）", v.id());
                 } else {
                     CaseFile mutatedFile = new CaseParser().parse(mutated, Json.toJson(mutated));
-                    JsonObject mutatedPlan = new CaseValidator().plan(mutatedFile);
+                    // 同上：这份文档已是补丁产物，适用性判定必须关掉，否则变体评估整段被误报跳过。
+                    JsonObject mutatedPlan = new CaseValidator().plan(mutatedFile, CaseValidator.VariantCheck.SKIP);
                     JsonObject doc = engine(ctx)
                         .evaluate(Json.optArray(mutatedPlan, "criteria"), runId(ctx) + "#" + v.id());
                     item = variantItem(v.id(), v.expectCriteriaRed(), verdictPairs(doc));

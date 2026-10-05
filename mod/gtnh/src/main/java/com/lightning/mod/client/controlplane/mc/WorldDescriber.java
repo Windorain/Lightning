@@ -21,8 +21,30 @@ import com.lightning.mod.client.controlplane.core.Json;
  * {@code cp_world.json}。「是否虚空」优先取托管标记的 {@code void} 字段，其次按
  * {@link VoidWorldPreset#isVoid(String)} 解析世界自己的 {@code generatorOptions}——
  * 后者让非托管的手工世界也能被正确描述（但描述为虚空 ≠ 可写，写操作仍然只认托管标记）。
+ *
+ * <h2>元数据取服务端世界，客户端字段取客户端世界（实测修正）</h2>
+ * 1.7.10 集成服里 {@code mc.theWorld} 是 {@code WorldClient}：它的 saveHandler 是
+ * {@code SaveHandlerMP}（目录名 {@code "none"}）、{@code WorldInfo} 是占位的
+ * {@code "MpServer"}／空 {@code generatorOptions}／{@code seed 0}。真机冒烟实测该视图把刚重建的
+ * <b>托管</b>虚空世界描述成 {@code folder:"none" / managed:false / markerPresent:false /
+ * generatorOptions:"" / seed:0}（世界明明有 {@code cp_world.json}，build 段也确实放了方块）。
+ * 因此{@code folder/marker/displayName/generatorOptions/terrainType/seed/gameType/spawn…} 一律读
+ * <b>服务端权威世界</b>（{@link WorldRuntime#serverWorld()}，即
+ * {@code MinecraftServer.getServer().worldServers[0]}，其 saveHandler 的 world directory name 与
+ * {@code WorldInfo} 才是真实存档）；玩家位置/名称、世界时间等客户端侧字段仍读 {@code mc.theWorld}。
+ *
+ * <p>
+ * 线程边界：调用点都在客户端 tick 线程的动作执行里（与 {@code WorldRuntime} 的既有口径一致），
+ * 读服务端世界对象在此是既有事实口径；取不到服务端世界（未开集成服／纯远程联机）时回落到客户端
+ * 世界，并在结果里以 {@code metaSource} 标明来源。
  */
 public final class WorldDescriber {
+
+    /** {@code metaSource} 取值：元数据来自服务端权威世界。 */
+    public static final String META_SERVER = "server";
+
+    /** {@code metaSource} 取值：无服务端世界，元数据只能来自客户端世界。 */
+    public static final String META_CLIENT = "client";
 
     private WorldDescriber() {}
 
@@ -33,9 +55,12 @@ public final class WorldDescriber {
             o.addProperty("loaded", false);
             return o;
         }
-        World world = mc.theWorld;
-        WorldInfo info = world.getWorldInfo();
-        String folder = folderOf(world);
+        World client = mc.theWorld;
+        // 元数据来源：服务端权威世界优先（见类注释）；客户端侧字段一律仍读 client
+        World server = WorldRuntime.serverWorld();
+        World meta = server == null ? client : server;
+        WorldInfo info = meta.getWorldInfo();
+        String folder = folderOf(meta);
         Path dir = folder == null ? null : ManagedWorld.worldDir(mc.mcDataDir, folder);
         boolean managed = ManagedWorld.isManaged(dir);
         JsonObject marker = managed ? ManagedWorld.readMarker(dir) : null;
@@ -43,7 +68,7 @@ public final class WorldDescriber {
         o.addProperty("loaded", true);
         o.addProperty("folder", folder);
         o.addProperty("displayName", info == null ? null : info.getWorldName());
-        o.addProperty("dimension", world.provider == null ? 0 : world.provider.dimensionId);
+        o.addProperty("dimension", client.provider == null ? 0 : client.provider.dimensionId);
         o.addProperty("managed", managed);
         o.addProperty("managedPrefix", Contract.MANAGED_WORLD_PREFIX);
         o.addProperty("markerPresent", ManagedWorld.hasMarker(dir));
@@ -66,10 +91,10 @@ public final class WorldDescriber {
             info == null || info.getGameType() == null ? null
                 : info.getGameType()
                     .getName());
-        o.addProperty("worldTime", world.getWorldTime());
-        o.addProperty("totalTime", world.getTotalWorldTime());
-        o.addProperty("raining", world.isRaining());
-        o.addProperty("thundering", world.isThundering());
+        o.addProperty("worldTime", client.getWorldTime());
+        o.addProperty("totalTime", client.getTotalWorldTime());
+        o.addProperty("raining", client.isRaining());
+        o.addProperty("thundering", client.isThundering());
         JsonArray spawn = new JsonArray();
         if (info != null) {
             Json.add(spawn, Integer.valueOf(info.getSpawnX()));
@@ -79,15 +104,44 @@ public final class WorldDescriber {
         o.add("spawn", spawn);
         o.addProperty("void", isVoid(info, marker));
         o.addProperty("markerVoid", marker != null && Json.optBool(marker, "void", false));
+        o.addProperty("metaSource", server == null ? META_CLIENT : META_SERVER);
         if (mc.thePlayer != null) {
             o.add("playerPos", posArray(mc.thePlayer.posX, mc.thePlayer.posY, mc.thePlayer.posZ));
             o.addProperty("playerName", mc.thePlayer.getCommandSenderName());
         }
-        o.addProperty("serverWorldAvailable", WorldRuntime.serverWorld() != null);
+        o.addProperty("serverWorldAvailable", server != null);
         return o;
     }
 
-    /** 当前世界的存档目录名；取不到时返回 null。 */
+    /**
+     * 当前所在世界的存档目录名（<b>服务端权威优先</b>；未加载世界时返回 null）。
+     *
+     * <p>
+     * 需要「当前在哪个托管世界」时用本方法，不要用 {@link #folderOf(World)} 直接喂
+     * {@code mc.theWorld}：客户端 {@code WorldClient} 的 saveHandler 是占位实现，
+     * 目录名只会得到 {@code "none"}（见类注释）。
+     */
+    public static String currentFolder(Minecraft mc) {
+        if (mc == null) {
+            return null;
+        }
+        World server = WorldRuntime.serverWorld();
+        if (server != null) {
+            String f = folderOf(server);
+            if (f != null && !f.isEmpty()) {
+                return f;
+            }
+        }
+        return folderOf(mc.theWorld);
+    }
+
+    /**
+     * 单个世界对象的存档目录名；取不到时返回 null。
+     *
+     * <p>
+     * 对服务端世界返回真实目录名；对客户端 {@code WorldClient} 会返回占位名（{@code "none"} 或
+     * {@code "MpServer"}）——调用方要「当前世界」请用 {@link #currentFolder(Minecraft)}。
+     */
     public static String folderOf(World world) {
         if (world == null) {
             return null;

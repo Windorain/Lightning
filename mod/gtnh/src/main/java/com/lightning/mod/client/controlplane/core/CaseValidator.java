@@ -24,6 +24,26 @@ import com.google.gson.JsonObject;
  */
 public final class CaseValidator {
 
+    /**
+     * 变体补丁适用性判定模式（{@link #plan(CaseFile, VariantCheck)}）。
+     *
+     * <h2>为什么需要两种模式</h2>
+     * 「补丁必须改变用例内容」这条判定只在<b>原始</b>用例文件上成立：空转的负对照会制造恒绿假断言，
+     * 必须拦住。但变体执行路径（{@code case.run} 的 {@code variant} 参数与整跑后的变体扫描）会
+     * <b>先</b>把补丁应用到用例上，再拿<b>产物文档</b>过一遍校验——在那份文档上补丁本来就是幂等的，
+     * 再应用一次必然「什么都没改」。同一判定用在这里就是误报（实测：冒烟 A8 的负对照
+     * {@code neg-manifest-missing} 被判成「补丁未改变用例内容」，变体评估整段被跳过，A8 假红）。
+     * 原始文件的那一遍校验由 {@code CaseSources.resolve} 用 {@link #ENFORCE} 完成，因此产物文档
+     * 这一遍用 {@link #SKIP} 是安全的。
+     */
+    public enum VariantCheck {
+
+        /** 补丁必须改变用例内容（空转即 CP-VALID-002）；用于<b>原始</b>用例文件。 */
+        ENFORCE,
+        /** 不判定适用性：文档本身已是补丁产物；用于变体执行路径的二次校验。 */
+        SKIP
+    }
+
     /** 1.7.10 世界高度范围。 */
     public static final int MIN_Y = 0;
 
@@ -60,6 +80,18 @@ public final class CaseValidator {
      * @throws CpException CP-VALID-002：存在逐字段问题
      */
     public JsonObject plan(CaseFile file) {
+        return plan(file, VariantCheck.ENFORCE);
+    }
+
+    /**
+     * 产出规范化执行计划。
+     *
+     * @param variantCheck 变体补丁适用性判定模式；文档本身已是补丁产物时用
+     *                     {@link VariantCheck#SKIP}（见该枚举的说明）
+     * @throws CpException CP-VALID-002：存在逐字段问题
+     */
+    public JsonObject plan(CaseFile file, VariantCheck variantCheck) {
+        VariantCheck check = variantCheck == null ? VariantCheck.ENFORCE : variantCheck;
         Fields fields = new Fields();
         List<String> warnings = new ArrayList<String>(file.warnings());
 
@@ -67,7 +99,7 @@ public final class CaseValidator {
         JsonArray build = validateBuild(file, fields, warnings);
         JsonArray criteria = validateCriteria(file, fields);
         JsonArray evidence = validateEvidence(file, fields);
-        JsonArray variants = validateVariants(file, criteria, fields);
+        JsonArray variants = validateVariants(file, criteria, fields, check);
         if (build.size() == 0) {
             warnings.add("build 段为空：世界将只有种子与虚空地形");
         }
@@ -310,7 +342,7 @@ public final class CaseValidator {
         return out;
     }
 
-    private JsonArray validateVariants(CaseFile file, JsonArray criteria, Fields fields) {
+    private JsonArray validateVariants(CaseFile file, JsonArray criteria, Fields fields, VariantCheck check) {
         JsonArray out = new JsonArray();
         Set<String> criteriaIds = new LinkedHashSet<String>();
         for (int i = 0; i < criteria.size(); i++) {
@@ -330,22 +362,26 @@ public final class CaseValidator {
             try {
                 mutated = v.applyTo(raw, ctx + ".mutate");
             } catch (CpException e) {
-                JsonElement fs = e.context() == null ? null
-                    : e.context()
-                        .get("fields");
-                if (fs != null && fs.isJsonArray()) {
-                    for (JsonElement fe : fs.getAsJsonArray()) {
-                        if (fe.isJsonObject()) {
-                            fields.add(
-                                Json.optString(fe.getAsJsonObject(), "field", ctx + ".mutate"),
-                                Json.optString(fe.getAsJsonObject(), "reason", "补丁非法"));
+                // SKIP 模式下补丁报错不算问题：文档已是补丁产物，remove/replace 这类补丁再应用
+                // 必然撞「目标不存在」，而原始文件那一遍（ENFORCE）已经判过它的可执行性。
+                if (check != VariantCheck.SKIP) {
+                    JsonElement fs = e.context() == null ? null
+                        : e.context()
+                            .get("fields");
+                    if (fs != null && fs.isJsonArray()) {
+                        for (JsonElement fe : fs.getAsJsonArray()) {
+                            if (fe.isJsonObject()) {
+                                fields.add(
+                                    Json.optString(fe.getAsJsonObject(), "field", ctx + ".mutate"),
+                                    Json.optString(fe.getAsJsonObject(), "reason", "补丁非法"));
+                            }
                         }
+                    } else {
+                        fields.add(ctx + ".mutate", e.detail());
                     }
-                } else {
-                    fields.add(ctx + ".mutate", e.detail());
                 }
             }
-            if (mutated != null && mutated.equals(raw)) {
+            if (check == VariantCheck.ENFORCE && mutated != null && mutated.equals(raw)) {
                 fields.add(ctx + ".mutate", "补丁未改变用例内容（负对照将是空的）");
             }
             for (String id : v.expectCriteriaRed()) {

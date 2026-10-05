@@ -61,7 +61,7 @@
 |---|---|---|
 | `core.ping` | observe | 存活回声 |
 | `core.status` | observe | 版本、世界加载态、忙闲、事件流水游标、最近作业 |
-| `world.info` | observe | 当前世界描述（folder/维度/是否托管/是否虚空）；未在世界中返回 `loaded:false` |
+| `world.info` | observe | 当前世界描述（folder/维度/是否托管/是否虚空）；未在世界中返回 `loaded:false`。元数据（folder/marker/generatorOptions/seed/gameType 等）取**服务端世界**（1.7.10 客户端 WorldClient 是占位视图，会谎报 `folder=none`），客户端字段（playerPos/worldTime 等）取客户端；响应含 `metaSource`（server\|client）标明元数据来源 |
 | `world.rebuild` | scene | **幂等重建托管世界**：卸载当前托管世界 → 删除托管存档目录 → 以固定种子建虚空世界 → 可选执行场景构建段（含 TE 状态补全）→ 静置稳定 → 返回世界描述与场景清单哈希。两次调用结果一致（哈希相等） |
 | `world.snapshot` | scene | 快照（v1 口径=整目录复制）：自动离图 → 复制存档目录到 `snapshots/<id>/`（+ 树哈希清单 JSON）→ 重进世界。快照 id：`<ts>-<folder>` |
 | `world.rollback` | scene | 回滚到指定快照（默认最近）：离图 → 快照目录整体覆盖回 → 重算树哈希与快照比对（不一致 CP-EXEC-001）→ 重进。试错不污染世界 |
@@ -109,3 +109,4 @@ PR-2 追加取证级动作（`shot.multi`、`capture.*`），PR-3 追加双轨�
 - 调用既有 runner（扫描/导出类）时必须强制其 `exit=false / cleanupTrigger=false`，禁止继承自毁退出。
 - 日志前缀 `[SDE][CP]`，沿用 FMLLog 手工前缀约定。
 - 与 `SdeWebServer`（`/sde web`，`/api/v1/*`）零共享可变状态：不同端口、不同实例、不同鉴权域。
+- **步进动作按工厂注册**（`registerStepping(desc, Supplier)`）：每个作业一个动作实例，作业内复用、收尾销毁；禁止注册有状态单例（实测事故：实例复用导致后续作业静默返回上一作业的结果）。已收尾/跨作业复用实例必须当场 CP-EXEC-001，不许静默。

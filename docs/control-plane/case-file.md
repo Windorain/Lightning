@@ -68,6 +68,7 @@ PR-2 定义（相机注入、正交投影、分块超分辨率、多机位生成
 每个变体：`{id, mutate, expectCriteriaRed: [...]}`。
 - `mutate` 是对本用例 JSON 的覆盖补丁（RFC 6902 子集：replace/add/remove on 顶层段与 build 步骤数组元素）；
 - 校验期即试算补丁：补丁失败按 `variants[i].mutate[j].path` 逐字段报错；**补丁未改变用例内容 → 校验报错**（防恒绿假断言）；`expectCriteriaRed` 必须引用已存在的判据 id；
+- 「补丁适用性」判定只对**原始用例**成立：执行期对**补丁产物文档**的再校验必须跳过该类判定（产物文档已是补丁值，再应用同一补丁必然幂等报"未改变"——实现为 `VariantCheck.ENFORCE/SKIP`，SKIP 只跳过适用性判定，其余字段校验照旧）；
 - 运行器对变体执行同一实现，断言：`expectCriteriaRed` 列出的判据**必须变红**——不变红则变体用例本身判 red（防恒绿假断言）。
 
 ## 7. evidence 段（期望证据清单）

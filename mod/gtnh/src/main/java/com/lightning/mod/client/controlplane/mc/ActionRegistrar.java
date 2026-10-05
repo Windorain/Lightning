@@ -55,10 +55,14 @@ public final class ActionRegistrar {
 
         registry.register(
             ActionDescriptor.builder("world.info", Tier.OBSERVE)
-                .description("当前世界描述；未在世界中时返回 loaded:false（不是错误）。")
+                .description(
+                    "当前世界描述；未在世界中时返回 loaded:false（不是错误）。"
+                        + " folder/managed/marker/generatorOptions/seed/gameType 等元数据取服务端权威世界"
+                        + "（集成服 WorldServer），客户端 WorldClient 的占位存档名不会出现在这里；"
+                        + " playerPos/playerName 等客户端字段取客户端世界，来源见 metaSource。")
                 .returns(
                     "{loaded, world{loaded,folder,displayName,dimension,managed,markerPresent,generatorOptions,"
-                        + "terrainType,mapFeatures,seed,worldTime,void,spawn[],playerPos[]}}")
+                        + "terrainType,mapFeatures,seed,worldTime,void,spawn[],playerPos[],metaSource}}")
                 .example("{}")
                 .since("1.0")
                 .build(),
@@ -98,7 +102,9 @@ public final class ActionRegistrar {
                         + "{\"op\":\"block\",\"at\":[65,12,64],\"id\":\"minecraft:stone\",\"meta\":0}],\"confirm\":true}")
                 .since("1.0")
                 .build(),
-            new WorldRebuildAction(runtime));
+            // 工厂注册（不是实例）：步进动作带作业级状态，每个作业必须拿新实例——
+            // 复用单例会让第二个 case.run/world.* 直接返回上一个作业的结果（实测事故）
+            () -> new WorldRebuildAction(runtime));
 
         registry.registerStepping(
             ActionDescriptor.builder("world.snapshot", Tier.SCENE)
@@ -121,7 +127,7 @@ public final class ActionRegistrar {
                 .example("{\"folder\":\"cp_demo\",\"confirm\":true}")
                 .since("1.0")
                 .build(),
-            new WorldSnapshotAction(runtime));
+            () -> new WorldSnapshotAction(runtime));
 
         registry.registerStepping(
             ActionDescriptor.builder("world.rollback", Tier.SCENE)
@@ -143,7 +149,7 @@ public final class ActionRegistrar {
                 .example("{\"snapshotId\":\"20261006-120000-cp_demo\",\"confirm\":true}")
                 .since("1.0")
                 .build(),
-            new WorldRollbackAction(runtime));
+            () -> new WorldRollbackAction(runtime));
 
         registry.register(
             ActionDescriptor.builder("case.validate", Tier.OBSERVE)
@@ -186,6 +192,6 @@ public final class ActionRegistrar {
                 .example("{\"file\":\"demo.json\",\"segments\":[\"world\",\"build\",\"criteria\"],\"confirm\":true}")
                 .since("1.0")
                 .build(),
-            new CaseRunAction(runtime));
+            () -> new CaseRunAction(runtime));
     }
 }

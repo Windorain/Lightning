@@ -19,7 +19,12 @@ import com.lightning.mod.client.controlplane.core.SteppingAction;
  * （守卫还原、临时状态回收写在这里，不要写在 {@code advance} 的返回分支上）；</li>
  * <li>总超时默认 5 分钟、阶段超时默认 2 分钟，均可由动作参数 {@code totalTimeoutMs} /
  * {@code stageTimeoutMs} 覆盖（<b>不能</b>叫 {@code timeoutMs}：那是控制面自己消费的字段，
- * 会被 {@code CoreEndpoints} 从动作参数里剔除）。</li>
+ * 会被 {@code CoreEndpoints} 从动作参数里剔除）；</li>
+ * <li><b>一个实例只服务一个作业</b>：注册时用工厂（{@code ActionRegistry.registerStepping} 的
+ * {@code Supplier} 重载），{@link com.lightning.mod.client.controlplane.core.ActionSteppingExecutor}
+ * 每作业取一次实例。子类把作业级状态放在字段里即可，不必在 {@link #onBegin} 里手工清零——
+ * 实例复用会被 {@link #step} 当场判为 {@code CP-EXEC-001}（宁可当场失败，也不要把上一次的结果
+ * 再交一次）。</li>
  * </ul>
  */
 public abstract class SteppingActionBase implements SteppingAction {
@@ -45,6 +50,7 @@ public abstract class SteppingActionBase implements SteppingAction {
 
     private boolean begun;
     private boolean finished;
+    private String begunJobId;
     private final ProgressThrottle throttle = new ProgressThrottle();
     private long startedAt;
     private long totalTimeoutMs = DEFAULT_TOTAL_TIMEOUT_MS;
@@ -55,8 +61,12 @@ public abstract class SteppingActionBase implements SteppingAction {
     @Override
     public final JsonObject step(ActionContext ctx) {
         try {
+            guardJobIdentity(ctx);
             if (!begun) {
                 begun = true;
+                begunJobId = ctx.job() == null ? null
+                    : ctx.job()
+                        .jobId();
                 startedAt = now();
                 stageStartedAt = startedAt;
                 totalTimeoutMs = positive(ctx.optLong(PARAM_TOTAL_TIMEOUT, DEFAULT_TOTAL_TIMEOUT_MS));
@@ -94,6 +104,40 @@ public abstract class SteppingActionBase implements SteppingAction {
                     CpLog.warn("动作收尾异常（阶段 %s）: %s", stage, String.valueOf(t));
                 }
             }
+        }
+    }
+
+    /**
+     * 实例复用防线（见类注释）。
+     *
+     * <p>
+     * 已收尾的实例不该再被 step；被另一个作业 step 更不行——那意味着注册表把同一个有状态实例
+     * 分给了多个作业，动作会把上一个作业的字段（段记录、runId、结论）当成自己的。此时宁可抛
+     * {@code CP-EXEC-001}，也不要静默返回上一次的结果（实测事故：后三个 {@code case.run} 的 result
+     * 与第一个逐字段相同、且没有自己的 run 目录，从结果 JSON 上看不出任何异常）。
+     */
+    private void guardJobIdentity(ActionContext ctx) {
+        String jobId = ctx == null || ctx.job() == null ? null
+            : ctx.job()
+                .jobId();
+        if (!begun) {
+            return;
+        }
+        if (finished) {
+            throw new CpException(
+                ErrorCodes.EXEC_FAILED,
+                "步进动作实例已收尾，不能再推进（作业 " + jobId + "）：每个作业须取新实例",
+                Json.object("jobId", jobId, "begunJobId", begunJobId, "stage", stage));
+        }
+        if (begunJobId != null && jobId != null && !begunJobId.equals(jobId)) {
+            throw new CpException(
+                ErrorCodes.EXEC_FAILED,
+                "步进动作实例被跨作业复用（" + begunJobId
+                    + " → "
+                    + jobId
+                    + "）："
+                    + "注册时请用工厂重载 ActionRegistry.registerStepping(descriptor, Supplier)，让每个作业拿新实例",
+                Json.object("jobId", jobId, "begunJobId", begunJobId, "stage", stage));
         }
     }
 

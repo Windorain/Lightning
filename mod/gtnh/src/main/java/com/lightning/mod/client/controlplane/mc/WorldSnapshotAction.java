@@ -67,7 +67,8 @@ public final class WorldSnapshotAction extends SteppingActionBase {
             .isEmpty()) {
             folder = requested.trim();
         } else if (mc.theWorld != null) {
-            folder = WorldDescriber.folderOf(mc.theWorld);
+            // 服务端权威优先：客户端 WorldClient 的目录名是占位 "none"，快照会对着一个不存在的世界
+            folder = WorldDescriber.currentFolder(mc);
         }
         if (folder == null || folder.isEmpty()) {
             throw new CpException(

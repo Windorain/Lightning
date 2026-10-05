@@ -84,7 +84,7 @@ public final class WorldLoader {
             }
             return true;
         }
-        CpLog.info("离开当前世界（%s）…", String.valueOf(WorldDescriber.folderOf(mc.theWorld)));
+        CpLog.info("离开当前世界（%s）…", String.valueOf(WorldDescriber.currentFolder(mc)));
         try {
             mc.displayGuiScreen(null);
             mc.loadWorld(null);
@@ -124,7 +124,8 @@ public final class WorldLoader {
         }
         if (!launched) {
             if (mc.theWorld != null) {
-                String cur = WorldDescriber.folderOf(mc.theWorld);
+                // 服务端权威优先：客户端 WorldClient 的目录名是占位 "none"，拿它比会永远不等
+                String cur = WorldDescriber.currentFolder(mc);
                 if (folder.equals(cur)) {
                     launched = true; // 已在目标世界（按段续跑场景）
                 } else {
@@ -154,7 +155,7 @@ public final class WorldLoader {
         }
         CpLog.info(
             "已进入世界 %s（等待 %d tick，服务端世界就位）",
-            String.valueOf(WorldDescriber.folderOf(mc.theWorld)),
+            String.valueOf(WorldDescriber.currentFolder(mc)),
             Integer.valueOf(waitTicks));
         return WorldDescriber.describe(mc);
     }
