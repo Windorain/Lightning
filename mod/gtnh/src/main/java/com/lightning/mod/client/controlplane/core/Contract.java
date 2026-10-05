@@ -1,0 +1,55 @@
+package com.lightning.mod.client.controlplane.core;
+
+/**
+ * 控制面契约 v1（{@code lightning.controlplane}）的不可变常量集合。
+ *
+ * <p>
+ * 常量值取自 {@code docs/control-plane/contract.md}；任何取值变更都必须与文档同步修订，
+ * 因为调用方依赖它们（URI 前缀即契约大版本，错误码只增不改义）。
+ */
+public final class Contract {
+
+    /** 契约版本（{@code GET /cp/v1/about} 的 {@code contractVersion} 字段）。 */
+    public static final String VERSION = "1.0";
+
+    /** 契约 URI 前缀，即契约大版本。 */
+    public static final String PREFIX = "/cp/v1";
+
+    /** 默认监听端口（contract.md §1.3）。 */
+    public static final int DEFAULT_PORT = 23057;
+
+    /** 默认绑定地址：仅回环。 */
+    public static final String DEFAULT_BIND = "127.0.0.1";
+
+    /** 端口回退尝试次数上限（{@code preferred + 1 .. preferred + 127}）。 */
+    public static final int MAX_PORT_ATTEMPTS = 128;
+
+    /** 日志前缀约定；core 层写出的每条日志都已带此前缀（注入的 logger 不得重复添加）。 */
+    public static final String LOG_PREFIX = "[SDE][CP]";
+
+    /** {@code tokens.json} 的 schema 标识。 */
+    public static final String SCHEMA_TOKENS = "lightning.cp-tokens/1";
+
+    /** {@code server.json} 的 schema 标识（文档未规定，属实现细节）。 */
+    public static final String SCHEMA_SERVER = "lightning.cp-server/1";
+
+    /** run 目录 {@code manifest.json} 的 schema 标识（文档未规定，属实现细节）。 */
+    public static final String SCHEMA_MANIFEST = "lightning.cp-manifest/1";
+
+    /** 判据汇总 {@code criteria.json} 的 schema 标识。 */
+    public static final String SCHEMA_CRITERIA = "lightning.criteria/1";
+
+    /** 用例文件 schema（case-file.md §1）。 */
+    public static final String SCHEMA_CASE = "lightning.case/1";
+
+    /** 观测记录 schema（observation-record.md §1）。 */
+    public static final String SCHEMA_OBSERVATION = "lightning.observation/1";
+
+    /** 托管世界元数据文件名（contract.md §6.1）。 */
+    public static final String MANAGED_WORLD_MARKER = "cp_world.json";
+
+    /** 托管世界存档目录前缀（contract.md §6.1）。 */
+    public static final String MANAGED_WORLD_PREFIX = "cp_";
+
+    private Contract() {}
+}
