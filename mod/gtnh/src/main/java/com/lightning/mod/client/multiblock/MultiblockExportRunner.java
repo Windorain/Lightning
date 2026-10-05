@@ -31,7 +31,7 @@ import cpw.mods.fml.relauncher.SideOnly;
 /**
  * T1.5 本体：**一条命令全量导出多方块文档**，每个多方块恰好一份文件。
  * <p>
- * 全流程（对应计划 §T1.5 的交付 A/B/C）：
+ * 全流程（导出管线的三段交付 A/B/C）：
  * <ol>
  * <li><b>枚举（T1.2）</b>：读 {@code multiblock_scan/run-NNNN/machines.json}（221 台的枚举 + 通道/总 Tier 事实），
  * 由命令的范围参数过滤。</li>

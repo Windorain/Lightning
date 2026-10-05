@@ -446,7 +446,7 @@ final class PartsProbePlacement {
 
     /**
      * P1.3–P1.5 验证探针的<strong>前置清场</strong>（须在 {@link #placeAll} 之前调用）：
-     * 清理 FMP 探针格（bx+7, by, bz）的跨轮堆积——已知问题（计划 §9 探针基建开放项 / P0.2 §6）：
+     * 清理 FMP 探针格（bx+7, by, bz）的跨轮堆积——已知问题（历史探针基建开放项）：
      * {@code BlockMultipart} 是普通 Block（非 BlockContainer，hasTileEntity=false），
      * 裸 {@code setBlockToAir} 不移除 TileMultipart 孤儿 tile；且<strong>服务端静默 clearParts 不同步
      * 客户端</strong>——客户端 stale tile 仍在，新一轮 addPart 同步包追加 ⇒ 部件翻倍（p13-run-1 实证
