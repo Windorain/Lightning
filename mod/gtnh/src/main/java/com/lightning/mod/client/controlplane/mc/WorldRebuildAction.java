@@ -9,6 +9,7 @@ import com.lightning.mod.client.controlplane.core.ActionContext;
 import com.lightning.mod.client.controlplane.core.CpException;
 import com.lightning.mod.client.controlplane.core.ErrorCodes;
 import com.lightning.mod.client.controlplane.core.Json;
+import com.lightning.mod.client.controlplane.mc.capture.CaptureControl;
 
 /**
  * {@code world.rebuild}（scene，步进）：幂等重建托管世界。
@@ -35,6 +36,8 @@ public final class WorldRebuildAction extends SteppingActionBase {
 
     @Override
     protected void onBegin(ActionContext ctx) throws Exception {
+        // 捕获会话门控（contract §4.1）：begin 之后禁止一切世界写动作，违规 CP-STATE-001
+        CaptureControl.assertWorldWriteAllowed(ctx);
         mc = WorldRuntime.mc();
         if (mc == null) {
             throw new CpException(ErrorCodes.STATE, "Minecraft 实例不可用");

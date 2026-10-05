@@ -499,6 +499,37 @@ public class ControlPlaneServerTest {
         assertNotNull(runId);
     }
 
+    /**
+     * 调用方权限级随作业下发（PR-2 的 {@code case.run} 运行期升格检查依赖它）。
+     *
+     * <p>
+     * 路由在鉴权期解析出实际级，交给 {@code POST /actions/{name}} 入队；动作实现（tick 线程）
+     * 通过 {@link JobHandle#tier()} 读到它，才能对「含 cameras 段的用例」做 forensic 升格判定。
+     * 这里用两个不同级的 token 各提交一次，断言作业对象上带的就是提交方那一级。
+     */
+    @Test
+    public void jobCarriesSubmitterTier() throws Exception {
+        // 观察级 token 提交 observe 级动作：作业上带观察级
+        String observeJob = submitAndWait("core.ping", "obs", "{}");
+        assertEquals(
+            Tier.OBSERVE,
+            jobs.get(observeJob)
+                .tier());
+
+        // forensic token 提交 scene 级动作：作业上带的必须是 forensic（升格检查据此放行 cameras 段）
+        String sceneJob = submitAndWait("world.rebuild", "for", "{\"confirm\":true}");
+        Job job = jobs.get(sceneJob);
+        assertNotNull(job);
+        assertEquals(Tier.FORENSIC, job.tier());
+        assertTrue(
+            job.tier()
+                .covers(Tier.SCENE));
+        // scene 级 token 不足以通过 forensic 升格
+        assertFalse(
+            Tier.parse("scene")
+                .covers(Tier.FORENSIC));
+    }
+
     @Test
     public void busyQueueRejectsSecondSubmit() throws Exception {
         // 手工占住队列（不让 tick 线程排空），再提交应当 CP-BUSY-001

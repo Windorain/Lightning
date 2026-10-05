@@ -62,6 +62,21 @@ public final class JobQueue {
      * @throws CpException CP-BUSY-001：已有动作在队或在跑
      */
     public Job submit(String action, JsonObject params) {
+        return submit(action, params, Tier.OBSERVE);
+    }
+
+    /**
+     * 入队一个动作（HTTP 线程调用），并记录提交方权限级。
+     *
+     * <p>
+     * 权限级是 {@code case.run} 运行期升格检查（含 cameras 段的用例必须 forensic 调用，
+     * case-file.md §4）的唯一数据来源：鉴权在 HTTP 线程完成，动作在 tick 线程执行，
+     * 两者的桥就是作业对象上的这个字段。
+     *
+     * @param tier 提交方权限级；null 视为 {@link Tier#OBSERVE}
+     * @throws CpException CP-BUSY-001：已有动作在队或在跑
+     */
+    public Job submit(String action, JsonObject params, Tier tier) {
         synchronized (lock) {
             if (current != null) {
                 JsonObject ctx = new JsonObject();
@@ -73,7 +88,7 @@ public final class JobQueue {
                         .id());
                 throw new CpException(ErrorCodes.BUSY, "已有动作在执行：" + current.action(), ctx);
             }
-            Job job = registry.create(action, params, time.isoNow());
+            Job job = registry.create(action, params, time.isoNow(), tier);
             current = job;
             if (events != null) {
                 events.append(

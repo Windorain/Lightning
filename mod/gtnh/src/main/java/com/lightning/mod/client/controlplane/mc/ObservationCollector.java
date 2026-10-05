@@ -8,6 +8,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.ArtifactStore;
+import com.lightning.mod.client.controlplane.core.CameraSpecs;
+import com.lightning.mod.client.controlplane.core.CaptureSpec;
 import com.lightning.mod.client.controlplane.core.CaseFile;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.ObservationRecord;
@@ -58,6 +60,15 @@ public final class ObservationCollector {
         /** PD-2 透传段落（capture/cameras）的延后说明。 */
         public JsonArray deferred;
 
+        /** PR-2：机位摘要数组（{@code observation.cameras[]}，见 observation-record.md §2.4）。 */
+        public JsonArray cameras;
+
+        /** PR-2：捕获会话参数（写入 observation.lighting/renderMode/worldTime 的实际会话默认）。 */
+        public CaptureSpec captureSpec;
+
+        /** PR-2：拍摄结果（逐机位实际参数留痕）。 */
+        public JsonObject shotResult;
+
         /** 负对照变体校验结果（可为 null）。 */
         public JsonObject variant;
 
@@ -80,9 +91,60 @@ public final class ObservationCollector {
         b.versions(VersionInfo.observationVersions());
         b.clientConfig(clientConfig(mc));
         b.observation(observation(mc, in.plan, in.manifest));
+        addCameraObservation(b, in);
         addRuntimeReads(b, in);
         addArtifacts(b, in);
         return b.build();
+    }
+
+    /**
+     * PR-2 的相机观测口径（observation-record.md §2.4）。
+     *
+     * <p>
+     * 有机位时：{@code observation.camera} 记<b>首个机位</b>（会话代表，含真实 pos/yaw/pitch/projection），
+     * {@code observation.cameras[]} 追加全部机位摘要；{@code projection} 记首个机位的投影类型。
+     * 无机位时保持 PR-1 的占位值（{@code player}/{@code perspective}）——字段一经引入不得改义。
+     *
+     * <p>
+     * {@code playerPos} 由 {@link #observation} 单独采集（门控位置分离，A3）：机位只写 camera.*，
+     * 绝不动 playerPos。
+     */
+    private static void addCameraObservation(ObservationRecord.Builder b, Input in) {
+        JsonArray cameras = in.cameras;
+        if (cameras == null || cameras.size() == 0) {
+            return;
+        }
+        JsonObject first = cameras.get(0)
+            .getAsJsonObject();
+        JsonObject camera = new JsonObject();
+        camera.addProperty("mode", "injected");
+        camera.addProperty("name", Json.optString(first, "name", null));
+        JsonElement pos = Json.get(first, "pos");
+        if (pos != null) {
+            camera.add("pos", Json.copy(pos));
+        }
+        camera.addProperty("yaw", Double.valueOf(optDouble(first, "yaw", 0.0d)));
+        camera.addProperty("pitch", Double.valueOf(optDouble(first, "pitch", 0.0d)));
+        JsonObject projection = Json.optObject(first, "projection");
+        if (projection != null) {
+            camera.add("projection", Json.copyObject(projection));
+        }
+        JsonObject observation = b.observationView();
+        if (observation != null) {
+            observation.add("camera", camera);
+            if (projection != null) {
+                observation.addProperty("projection", Json.optString(projection, "type", "perspective"));
+            }
+            if (in.captureSpec != null) {
+                observation.addProperty("lighting", CameraSpecs.resolveLighting(null, in.captureSpec));
+                observation.addProperty("renderMode", CameraSpecs.resolveRenderMode(null, in.captureSpec));
+                if (in.captureSpec.hasWorldTime()) {
+                    observation.addProperty("worldTime", in.captureSpec.worldTime());
+                }
+            }
+            observation.addProperty("cameraCount", cameras.size());
+        }
+        b.cameras(cameras);
     }
 
     /** 渲染相关客户端配置快照。 */
@@ -294,5 +356,18 @@ public final class ObservationCollector {
 
     private static double round(double v) {
         return Math.round(v * 1000.0d) / 1000.0d;
+    }
+
+    /** 数值成员（gson 2.2.4 口径：只有 optInt/optLong，故自行解析字符串形式）。 */
+    private static double optDouble(JsonObject o, String key, double def) {
+        JsonElement e = Json.get(o, key);
+        if (e == null || !e.isJsonPrimitive()) {
+            return def;
+        }
+        try {
+            return e.getAsDouble();
+        } catch (RuntimeException ex) {
+            return def;
+        }
     }
 }

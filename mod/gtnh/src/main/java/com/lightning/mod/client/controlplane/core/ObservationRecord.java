@@ -153,6 +153,63 @@ public final class ObservationRecord {
             return this;
         }
 
+        /**
+         * {@code observation} 子对象的<b>可写视图</b>（同一实例，改动即生效）。
+         *
+         * <p>
+         * 给需要「在既有观察条件上追加字段」的采集方用（如 PR-2 在 PR-1 的占位 camera/projection
+         * 之上补真实机位与 cameras[]）。返回的是内部实例而非副本——采集方按约定只做字段级增改，
+         * 不做整体替换（整体替换用 {@link #observation(JsonObject)}）。
+         */
+        public JsonObject observationView() {
+            JsonObject observation = Json.optObject(doc, "observation");
+            if (observation == null) {
+                observation = new JsonObject();
+                doc.add("observation", observation);
+            }
+            return observation;
+        }
+
+        /**
+         * 追加一条机位摘要到 {@code observation.cameras[]}（observation-record.md §2.4）。
+         *
+         * <p>
+         * 多机位口径：{@code observation.camera} 记首个机位（会话代表），本数组追加<b>全部</b>机位的
+         * {@code {name,pos,yaw,pitch,projection,resolution,tile?}} 摘要；逐机位的实际
+         * renderMode/lighting/worldTime 落 {@code shots/<name>.meta.json}。数组按追加顺序（= 机位声明序）。
+         */
+        public Builder camera(JsonObject cameraSummary) {
+            if (cameraSummary == null) {
+                return this;
+            }
+            JsonObject observation = Json.optObject(doc, "observation");
+            if (observation == null) {
+                observation = new JsonObject();
+                doc.add("observation", observation);
+            }
+            JsonArray cameras = Json.optArray(observation, "cameras");
+            if (cameras == null) {
+                cameras = new JsonArray();
+                observation.add("cameras", cameras);
+            }
+            cameras.add(Json.copyObject(cameraSummary));
+            return this;
+        }
+
+        /** 批量追加机位摘要（{@code cameras} 为 {@code cameras[]} 数组）。 */
+        public Builder cameras(JsonArray cameraSummaries) {
+            if (cameraSummaries == null) {
+                return this;
+            }
+            for (int i = 0; i < cameraSummaries.size(); i++) {
+                JsonElement e = cameraSummaries.get(i);
+                if (e != null && e.isJsonObject()) {
+                    camera(e.getAsJsonObject());
+                }
+            }
+            return this;
+        }
+
         /** 覆盖单个观察条件字段（如 {@code worldTime}/{@code lighting}/{@code renderMode}）。 */
         public Builder observationField(String name, Object value) {
             JsonObject observation = Json.optObject(doc, "observation");

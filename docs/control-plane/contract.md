@@ -98,10 +98,12 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 1. **注入式相机**：渲染时用虚拟相机实体替换 `mc.renderViewEntity`（不传送真实玩家）；TE 渲染距离门（如 AE2 电缆 30 方块，`TileCableBus.getMaxRenderDistanceSquared()=900.0`）随相机位置生效——这是注入而非挪玩家的核心理由。
 2. **门控位置分离（A3）**：`observation.playerPos` 恒为真实玩家位置，`observation.camera.pos` 为机位；两者各自记录，判据可分别断言。
 3. **正交投影**：渲染帧内替换投影矩阵，帧结束还原；透视/正交逐机位独立。
-4. **超分拼接**：投影偏移 tiling（各 tile 用偏移投影矩阵渲染后像素级拼接）；**禁止视口拼接**（`EntityRenderer` 会强制视口尺寸，tile 间接缝错）；overlap 默认 5%，拼接后裁边。
-5. **GL 线程**：shot/capture 类动作经 tick 排空后转渲染线程执行（§1.8 的 PR-2 延伸）；渲染线程故障 CP-EXEC-001 并附摘要。
-6. **光照参与开关（豁免一）**：`renderMode` 逐机位可覆盖会话默认；`本色`=不动光照管线，`参与光照`=注入中性光照（neutral-flat）使暗部可读；观测记录逐图标注实际模式。
+4. **超分拼接**：投影偏移 tiling（各 tile 用偏移投影矩阵渲染后像素级拼接）；**禁止视口拼接**（`EntityRenderer` 会强制视口尺寸，tile 间接缝错）。`resolution` 指**拼接后整图尺寸**（每片渲染尺寸 = resolution/cols × resolution/rows）；`overlap` 仅作接缝余量声明——投影偏移法下各片恰好分割整图，**不参与像素装配**；接缝可审计性靠 `<name>.tiles/` 逐片落盘。
+5. **GL 线程**：shot/capture 类动作经 tick 排空后在客户端 tick 线程执行（1.7.10 单机 tick 线程==渲染线程；需要出帧时动作自行驱动 `EntityRenderer.renderWorld`，不等游戏主循环）；渲染故障 CP-EXEC-001 并附摘要。
+6. **光照参与开关（豁免一）**：`renderMode`/`lighting` 逐机位可覆盖会话默认；**v1 仅如实留痕观测档位**（`shots/<name>.meta.json` 含 `lightingApplied:false` + warning），**不注入光照管线**——中性光照注入留待后续契约版本。
 7. **世界时刻**：`worldTime` 决定拍摄光照基准；观测记录落实际 worldTime。
+8. **`target` 参数（v1）**：仅作观察目标留痕（bbox 进观测记录），**不参与自动取景**；自动框景留待后续版本。
+9. **按内容升格的鉴权时点**：动作静态级低于内容要求时（如 scene 级 `case.run` 跑含 cameras 段的用例），鉴权期按静态级放行、**执行期**升格检查——sync 调用方得 HTTP 403 `CP-AUTH-002`，异步调用方得 failed 作业（`error.code=CP-AUTH-002`）。
 
 ## 5. 版本化规则
 

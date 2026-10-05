@@ -29,7 +29,14 @@ public final class CriteriaEngine {
 
     /** v1 判据类型注册表（顺序即文档顺序）。 */
     public static final List<String> TYPES = Collections.unmodifiableList(
-        Arrays.asList("artifact-exists", "artifact-nonempty", "json-field", "world-hash-equals", "event-emitted"));
+        Arrays.asList(
+            "artifact-exists",
+            "artifact-nonempty",
+            "json-field",
+            "world-hash-equals",
+            "event-emitted",
+            ImageCriteria.TYPE_IMAGE_SIZE_EQUALS,
+            ImageCriteria.TYPE_IMAGE_NOT_UNIFORM));
 
     /** 判据结论取值。 */
     public static final class Verdicts {
@@ -58,6 +65,12 @@ public final class CriteriaEngine {
 
     /** 见 {@link #TYPE_ARTIFACT_EXISTS}。 */
     public static final String TYPE_EVENT_EMITTED = "event-emitted";
+
+    /** 图像判据：尺寸相等（PR-2）。 */
+    public static final String TYPE_IMAGE_SIZE_EQUALS = ImageCriteria.TYPE_IMAGE_SIZE_EQUALS;
+
+    /** 图像判据：非纯色（PR-2）。 */
+    public static final String TYPE_IMAGE_NOT_UNIFORM = ImageCriteria.TYPE_IMAGE_NOT_UNIFORM;
 
     /** evidence 段核对结论的固定 id（case-file.md §7）。 */
     public static final String EVIDENCE_ID = "evidence-complete";
@@ -198,6 +211,13 @@ public final class CriteriaEngine {
         }
         boolean hasExpect = criterion.has("expect");
         JsonElement expect = hasExpect ? criterion.get("expect") : null;
+        // 图像判据的算子只拿得到相对路径，run 目录在这里注入（求值期上下文，见 ImageCriteria）。
+        // 若调用方已经指定了 run 目录（如单测直接指向夹具目录），不覆盖它——覆盖会让「判据本身」
+        // 无法脱离 run 目录单独验证。
+        boolean ownedRunDir = ImageCriteria.currentRunDir() == null;
+        if (ownedRunDir) {
+            ImageCriteria.setRunDir(run == null ? null : run.dir());
+        }
         try {
             if (type == null) {
                 return verdict(id, null, Verdicts.ERROR, "判据缺少 type");
@@ -217,11 +237,21 @@ public final class CriteriaEngine {
             if (TYPE_EVENT_EMITTED.equals(type)) {
                 return eventEmitted(id, type, params);
             }
+            if (TYPE_IMAGE_SIZE_EQUALS.equals(type)) {
+                return image(id, type, ImageCriteria.evaluateSize(params));
+            }
+            if (TYPE_IMAGE_NOT_UNIFORM.equals(type)) {
+                return image(id, type, ImageCriteria.evaluateNotUniform(params));
+            }
             return verdict(id, type, Verdicts.ERROR, "未知判据类型: " + type + "（v1 支持 " + TYPES + "）");
         } catch (CpException e) {
             return verdict(id, type, Verdicts.ERROR, "判据求值失败: " + e.detail());
         } catch (RuntimeException e) {
             return verdict(id, type, Verdicts.ERROR, "判据求值异常: " + e);
+        } finally {
+            if (ownedRunDir) {
+                ImageCriteria.clearRunDir();
+            }
         }
     }
 
@@ -386,6 +416,20 @@ public final class CriteriaEngine {
     }
 
     // ------------------------------------------------------------ 工具
+
+    /**
+     * 把图像算子的结论（{@code {verdict, detail}}）并成一条判据结论。
+     *
+     * <p>
+     * 算子只回 verdict/detail，不走 {@link #verdict} 的三参重载——红绿语义只有一处定义。
+     */
+    private static JsonObject image(String id, String type, JsonObject computed) {
+        return verdict(
+            id,
+            type,
+            Json.optString(computed, "verdict", Verdicts.ERROR),
+            Json.optString(computed, "detail", ""));
+    }
 
     private Path artifactPath(String relPath) {
         if (run == null) {

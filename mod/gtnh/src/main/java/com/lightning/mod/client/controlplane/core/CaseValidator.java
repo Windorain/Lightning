@@ -56,13 +56,24 @@ public final class CaseValidator {
     /** 1.7.10 方块 meta 取值上限。 */
     public static final int MAX_META = 15;
 
-    /** 用例执行段（case-file.md §8）。 */
+    /**
+     * 用例执行段（case-file.md §8；段序即执行序）。
+     *
+     * <p>
+     * PR-2 起 {@code capture}/{@code cameras} 不再是「延后段」，而是真实执行段：{@code capture}
+     * 段建立捕获会话（{@code capture.begin}），{@code cameras} 段逐机位拍摄，证据段收尾时释放。
+     * 因此在 {@code build} 之后、{@code criteria} 之前插入两段——{@code world→capture→build} 的
+     * 契约口径是「capture 段包住 build 之后的区间」，而会话标志对开场作业自身放行，故把 capture
+     * 排在 build 之前即可同时满足「build 在会话内」与「build 写出世界后立刻受保护」。
+     */
     public static final List<String> SEGMENTS;
 
     static {
         List<String> s = new ArrayList<String>();
         s.add("world");
+        s.add("capture");
         s.add("build");
+        s.add("cameras");
         s.add("criteria");
         s.add("evidence");
         SEGMENTS = java.util.Collections.unmodifiableList(s);
@@ -97,11 +108,17 @@ public final class CaseValidator {
 
         JsonObject world = validateWorld(file, fields);
         JsonArray build = validateBuild(file, fields, warnings);
+        JsonObject capture = validateCapture(file, fields);
+        JsonArray cameras = validateCameras(file, fields, warnings);
         JsonArray criteria = validateCriteria(file, fields);
         JsonArray evidence = validateEvidence(file, fields);
         JsonArray variants = validateVariants(file, criteria, fields, check);
         if (build.size() == 0) {
             warnings.add("build 段为空：世界将只有种子与虚空地形");
+        }
+        if (cameras != null && cameras.size() > 0) {
+            // case-file.md §4：含 cameras 段的用例必须 forensic 调用（运行期升格检查，见 CaseRunAction）
+            warnings.add("cameras 段非空：case.run 需 forensic 级 token（运行期按内容升格校验，CP-AUTH-002）");
         }
 
         fields.throwIfAny("用例执行计划非法（" + fields.size() + " 处）");
@@ -120,11 +137,11 @@ public final class CaseValidator {
         }
         plan.add("segments", segments);
         plan.add("build", build);
-        if (file.capture() != null) {
-            plan.add("capture", file.capture());
+        if (capture != null) {
+            plan.add("capture", capture);
         }
-        if (file.cameras() != null) {
-            plan.add("cameras", file.cameras());
+        if (cameras != null) {
+            plan.add("cameras", cameras);
         }
         plan.add("criteria", criteria);
         plan.add("variants", variants);
@@ -300,6 +317,30 @@ public final class CaseValidator {
                     }
                     break;
                 }
+                case CriteriaEngine.TYPE_IMAGE_SIZE_EQUALS: {
+                    requirePathParam(params, ctx, fields);
+                    requirePositiveInt(params, "width", ctx, fields);
+                    requirePositiveInt(params, "height", ctx, fields);
+                    break;
+                }
+                case CriteriaEngine.TYPE_IMAGE_NOT_UNIFORM: {
+                    requirePathParam(params, ctx, fields);
+                    if (params.has("maxSameColorRatio")) {
+                        JsonElement mr = params.get("maxSameColorRatio");
+                        if (!mr.isJsonPrimitive() || !mr.getAsJsonPrimitive()
+                            .isNumber()) {
+                            fields.add(ctx + ".params.maxSameColorRatio", "须为 0..1 的数值");
+                        } else {
+                            double v = mr.getAsDouble();
+                            if (Double.isNaN(v) || Double.isInfinite(v) || v < 0.0d || v > 1.0d) {
+                                fields.add(ctx + ".params.maxSameColorRatio", "须在 0..1，收到 " + v);
+                            }
+                        }
+                    } else {
+                        params.addProperty("maxSameColorRatio", ImageCriteria.DEFAULT_MAX_SAME_COLOR_RATIO);
+                    }
+                    break;
+                }
                 default:
                     fields.add(ctx + ".type", "未知判据类型: " + type);
             }
@@ -313,6 +354,61 @@ public final class CaseValidator {
             out.add(item);
         }
         return out;
+    }
+
+    /**
+     * {@code capture} 段（case-file.md §4）：会话默认光照/渲染模式与拍摄时刻。
+     *
+     * @return 规范化后的 capture 对象；文档未声明该段或声明为 null 时返回 null
+     */
+    private JsonObject validateCapture(CaseFile file, Fields fields) {
+        JsonElement raw = file.capture();
+        if (raw == null || raw.isJsonNull()) {
+            return null;
+        }
+        if (!raw.isJsonObject()) {
+            fields.add("capture", "须为 object {lighting?,renderMode?,worldTime?}");
+            return null;
+        }
+        JsonObject capture = raw.getAsJsonObject();
+        CaptureSpec spec = CaptureSpec.parse(capture, "capture", fields);
+        return spec == null ? null : spec.toJson();
+    }
+
+    /**
+     * {@code cameras} 段（contract.md §4.1）：机位表的解析与范围校验。
+     *
+     * <p>
+     * 与 {@code shot.multi} 执行期用的是 {@link CameraSpecs} 的同一份判定——校验器只是把
+     * 字段错误并进本次累计，不另写一套规则。
+     *
+     * @return 规范化后的机位数组；未声明返回 null
+     */
+    private JsonArray validateCameras(CaseFile file, Fields fields, List<String> warnings) {
+        JsonArray raw = file.cameras();
+        if (raw == null) {
+            return null;
+        }
+        CameraSpecs.Parsed parsed = CameraSpecs.parseArray(raw, "cameras");
+        merge(fields, parsed.fields());
+        if (parsed.specs()
+            .isEmpty()) {
+            warnings.add("cameras 段为空数组：本 run 不产截图");
+        }
+        return CameraSpecs.toJson(parsed.specs());
+    }
+
+    /** 把子解析器累计的字段错误并进本次累计。 */
+    static void merge(Fields target, Fields from) {
+        if (from == null || from.isEmpty()) {
+            return;
+        }
+        for (JsonElement e : from.toJson()) {
+            if (e != null && e.isJsonObject()) {
+                JsonObject o = e.getAsJsonObject();
+                target.add(Json.optString(o, "field", "?"), Json.optString(o, "reason", "?"));
+            }
+        }
     }
 
     private JsonArray validateEvidence(CaseFile file, Fields fields) {
@@ -414,6 +510,23 @@ public final class CaseValidator {
             return;
         }
         checkRelPath(path, ctx + ".params.path", fields);
+    }
+
+    /** 正整数参数（图像尺寸类判据用）；缺失或非法均记错。 */
+    private static void requirePositiveInt(JsonObject params, String key, String ctx, Fields fields) {
+        String field = ctx + ".params." + key;
+        if (!params.has(key)) {
+            fields.add(field, "必填（正整数像素）");
+            return;
+        }
+        JsonElement e = params.get(key);
+        if (!CameraSpec.isIntegral(e) || !CameraSpec.isFinite(e)) {
+            fields.add(field, "须为整数");
+            return;
+        }
+        if (e.getAsLong() <= 0L) {
+            fields.add(field, "须为正整数，收到 " + e.getAsLong());
+        }
     }
 
     private static void checkRelPath(String path, String field, Fields fields) {

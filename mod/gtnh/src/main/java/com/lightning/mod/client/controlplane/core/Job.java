@@ -61,6 +61,7 @@ public final class Job implements JobHandle {
     private final String action;
     private final JsonObject params;
     private final String submittedAt;
+    private final Tier tier;
     private final CountDownLatch latch = new CountDownLatch(1);
 
     private volatile State state = State.QUEUED;
@@ -73,11 +74,30 @@ public final class Job implements JobHandle {
     private volatile String runId;
 
     Job(long seq, String jobId, String action, JsonObject params, String submittedAt) {
+        this(seq, jobId, action, params, submittedAt, Tier.OBSERVE);
+    }
+
+    Job(long seq, String jobId, String action, JsonObject params, String submittedAt, Tier tier) {
         this.seq = seq;
         this.jobId = jobId;
         this.action = action;
         this.params = params == null ? new JsonObject() : params;
         this.submittedAt = submittedAt;
+        this.tier = tier == null ? Tier.OBSERVE : tier;
+    }
+
+    /**
+     * 提交本作业的调用方权限级（contract.md §1.5）。
+     *
+     * <p>
+     * 动作的<b>静态</b>权限级在 {@code ActionRegistry} 的注册项里，由路由器在鉴权期判定；
+     * 而 {@code case.run} 的权限按<b>内容</b>升格（含 cameras 段的用例必须 forensic 调用，
+     * case-file.md §4）——那只能在执行期判定，故把调用方实际权限随作业带到 tick 线程。
+     * 未显式指定时为 {@link Tier#OBSERVE}（最保守；内部/测试路径）。
+     */
+    @Override
+    public Tier tier() {
+        return tier;
     }
 
     @Override

@@ -12,7 +12,9 @@
     "MixinTessellatorCapture",
     "MixinModelRendererCapture",
     "MixinTextureManagerBindCapture",
-    "MixinResourceManagerReload"
+    "MixinResourceManagerReload",
+    "MixinEntityRendererProjection",
+    "MixinMinecraftResolution"
   ],
   "server": []
 }

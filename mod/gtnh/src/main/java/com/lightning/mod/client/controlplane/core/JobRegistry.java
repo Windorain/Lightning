@@ -42,8 +42,24 @@ public final class JobRegistry {
      * @param params 入参
      */
     public synchronized Job create(String action, JsonObject params, String submittedAt) {
+        return create(action, params, submittedAt, Tier.OBSERVE);
+    }
+
+    /**
+     * 创建并登记一个新作业（状态 queued），并记录提交方的权限级。
+     *
+     * <p>
+     * 权限级随作业带到 tick 线程：{@code case.run} 需要按用例内容做运行期升格检查
+     * （含 cameras 段的用例必须 forensic 调用），而鉴权只发生在 HTTP 线程。
+     *
+     * @param action      动作名
+     * @param params      入参
+     * @param submittedAt 入队时刻
+     * @param tier        提交方权限级，null 视为 {@link Tier#OBSERVE}
+     */
+    public synchronized Job create(String action, JsonObject params, String submittedAt, Tier tier) {
         long seq = ++lastSeq;
-        Job job = new Job(seq, "j" + seq, action, params, submittedAt);
+        Job job = new Job(seq, "j" + seq, action, params, submittedAt, tier);
         jobs.put(job.jobId(), job);
         order.addLast(job.jobId());
         while (order.size() > capacity) {

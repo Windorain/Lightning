@@ -17,6 +17,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.ActionContext;
 import com.lightning.mod.client.controlplane.core.ArtifactStore;
+import com.lightning.mod.client.controlplane.core.CameraSpecs;
+import com.lightning.mod.client.controlplane.core.CaptureSession;
+import com.lightning.mod.client.controlplane.core.CaptureSpec;
 import com.lightning.mod.client.controlplane.core.CaseFile;
 import com.lightning.mod.client.controlplane.core.CaseParser;
 import com.lightning.mod.client.controlplane.core.CaseValidator;
@@ -28,7 +31,10 @@ import com.lightning.mod.client.controlplane.core.EventStream;
 import com.lightning.mod.client.controlplane.core.Fields;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.ObservationRecord;
+import com.lightning.mod.client.controlplane.core.Tier;
 import com.lightning.mod.client.controlplane.core.TimeSource;
+import com.lightning.mod.client.controlplane.mc.capture.CaptureControl;
+import com.lightning.mod.client.controlplane.mc.capture.ShotExecutor;
 
 /**
  * {@code case.run}（scene 起，步进）：执行声明式用例。
@@ -58,8 +64,14 @@ public final class CaseRunAction extends SteppingActionBase {
     /** 段名：世界。 */
     public static final String SEG_WORLD = "world";
 
+    /** 段名：捕获会话（PR-2）。 */
+    public static final String SEG_CAPTURE = "capture";
+
     /** 段名：场景构建。 */
     public static final String SEG_BUILD = "build";
+
+    /** 段名：机位拍摄（PR-2）。 */
+    public static final String SEG_CAMERAS = "cameras";
 
     /** 段名：判据。 */
     public static final String SEG_CRITERIA = "criteria";
@@ -107,6 +119,17 @@ public final class CaseRunAction extends SteppingActionBase {
     private CriteriaEngine engine;
     private JsonObject criteriaDoc;
     private JsonObject evidenceDoc;
+
+    /** capture 段解析出的会话（PR-2）。 */
+    private CaptureSpec captureSpec;
+    private boolean captureArmed;
+    /** 本用例声明了哪些机位（cameras 段的规范化数组）。 */
+    private JsonArray captureCameras;
+
+    /** cameras 段：与 shot.multi 共用的执行器（禁止复制逻辑）。 */
+    private ShotExecutor shotExecutor;
+    private JsonObject shotResult;
+    private JsonArray cameraSummaries = new JsonArray();
 
     private boolean finalized;
     private JsonObject failure;
@@ -171,11 +194,14 @@ public final class CaseRunAction extends SteppingActionBase {
                 }
             }
         }
-        for (String s : Arrays.asList(SEG_WORLD, SEG_BUILD, SEG_CRITERIA, SEG_EVIDENCE)) {
+        for (String s : Arrays.asList(SEG_WORLD, SEG_CAPTURE, SEG_BUILD, SEG_CAMERAS, SEG_CRITERIA, SEG_EVIDENCE)) {
             if (!segments.contains(s) && !skippedSegments.contains(s)) {
                 skippedSegments.add(s);
             }
         }
+
+        // case-file.md §4：含 cameras 段的用例必须 forensic 级调用（运行期按内容升格检查）
+        assertForensicForCameras(ctx);
 
         JsonArray deferredSegments = CaseValidateAction.deferredSegments(caseFile);
         for (int i = 0; i < deferredSegments.size(); i++) {
@@ -256,7 +282,19 @@ public final class CaseRunAction extends SteppingActionBase {
 
     @Override
     protected void onFinish(ActionContext ctx) {
-        SceneSessionGuard.release(mc);
+        // 会话标志必须无泄漏地释放：动作在失败/异常路径上也会走到这里，而「世界写动作被永久封住」
+        // 比一次拍摄失败严重得多（后续所有 world.*/case.run 都会被 CP-STATE-001 拒掉）。
+        try {
+            if (captureArmed) {
+                CaptureSession.end();
+                captureArmed = false;
+                CpLog.warn("case.run 收尾：捕获会话未按段序释放，已在 onFinish 兜底释放");
+            }
+        } catch (Throwable t) {
+            CpLog.warn("case.run 释放捕获会话失败: %s", String.valueOf(t));
+        } finally {
+            SceneSessionGuard.release(mc);
+        }
     }
 
     private JsonObject advanceInternal(ActionContext ctx) throws Exception {
@@ -287,8 +325,14 @@ public final class CaseRunAction extends SteppingActionBase {
             case SEG_WORLD:
                 detail = stepWorld(ctx);
                 break;
+            case SEG_CAPTURE:
+                detail = stepCapture(ctx);
+                break;
             case SEG_BUILD:
                 detail = stepBuild(ctx);
+                break;
+            case SEG_CAMERAS:
+                detail = stepCameras(ctx);
                 break;
             case SEG_CRITERIA:
                 detail = stepCriteria(ctx);
@@ -338,6 +382,158 @@ public final class CaseRunAction extends SteppingActionBase {
         }
         worldResult = r;
         return r;
+    }
+
+    /**
+     * {@code capture} 段（case-file.md §4）：建立捕获会话（等于 {@code capture.begin}）。
+     *
+     * <h2>为什么本段在 {@code build} 之前</h2>
+     * 契约口径是「会话包围 build 之后的区间」。段序取 {@code world→capture→build→cameras→…}，
+     * 会话从 build <b>前</b>开场：这样 build 段的世界写发生在会话内（真正的加固范围最大），
+     * 而会话标志对开场作业自身放行（见 {@link CaptureSession}），所以 build 不会被自己开的会话挡住。
+     * 没有机位时本段立即释放（不产截图的用例不该留着会话标志）。
+     */
+    private JsonObject stepCapture(ActionContext ctx) throws Exception {
+        if (captureSpec == null && captureCameras == null) {
+            JsonObject raw = Json.optObject(plan, "capture");
+            captureSpec = raw == null ? CaptureSpec.empty() : CaptureSpec.parseOrThrow(raw, "capture");
+            captureCameras = Json.optArray(plan, "cameras");
+            boolean hasCameras = captureCameras != null && captureCameras.size() > 0;
+            if (hasCameras) {
+                String jobId = ctx.job() == null ? null
+                    : ctx.job()
+                        .jobId();
+                CaptureSession.begin(
+                    jobId,
+                    "case.run",
+                    TimeSource.system()
+                        .isoNow(),
+                    0L);
+                captureArmed = true;
+            }
+            ctx.emit(
+                EventStream.LEVEL_INFO,
+                EventStream.Kinds.CASE_SEGMENT,
+                hasCameras ? "捕获会话开始（case.run capture 段）" : "capture 段无机位：不建会话",
+                CaptureControl.status());
+        }
+        JsonObject detail = new JsonObject();
+        detail.addProperty("armed", Boolean.valueOf(captureArmed));
+        detail.add("session", CaptureControl.status());
+        if (captureSpec != null) {
+            detail.add("capture", captureSpec.toJson());
+            detail.addProperty("lighting", CameraSpecs.resolveLighting(null, captureSpec));
+            detail.addProperty("renderMode", CameraSpecs.resolveRenderMode(null, captureSpec));
+            detail.addProperty("worldTime", captureSpec.hasWorldTime() ? captureSpec.worldTime() : -1L);
+        }
+        return detail;
+    }
+
+    /**
+     * {@code cameras} 段（case-file.md §4）：逐机位走 {@code shot.multi} 的<b>同一实现</b>。
+     *
+     * <p>
+     * 公共执行器是 {@link ShotExecutor}：本段只负责把规范化后的机位表喂进去、逐 tick 推进、
+     * 段末释放捕获会话。任何「用例里的机位可以少做一步」的写法都会让交互路径与无人值守路径
+     * 产出不同形态的产物，这正是契约 §4 要禁止的分叉。
+     */
+    private JsonObject stepCameras(ActionContext ctx) throws Exception {
+        if (captureCameras == null) {
+            captureCameras = Json.optArray(plan, "cameras");
+        }
+        if (captureCameras == null || captureCameras.size() == 0) {
+            JsonObject detail = new JsonObject();
+            detail.addProperty("cameraCount", 0);
+            detail.addProperty("note", "cameras 段为空：未拍摄");
+            releaseCapture();
+            return detail;
+        }
+        if (shotExecutor == null) {
+            CameraSpecs.Parsed parsed = CameraSpecs.parseArray(captureCameras, "cameras");
+            parsed.throwIfAny(
+                "cameras 段非法（" + parsed.fields()
+                    .size() + " 处）");
+            if (captureSpec == null) {
+                captureSpec = CaptureSpec.empty();
+            }
+            ShotExecutor.Input in = new ShotExecutor.Input();
+            in.mc = mc;
+            in.artifacts = ctx.artifacts();
+            in.run = ctx.run();
+            in.cameras = parsed.specs();
+            in.capture = captureSpec;
+            in.target = ObservationCollector.targetBbox(plan);
+            in.jobId = ctx.job() == null ? null
+                : ctx.job()
+                    .jobId();
+            in.action = "case.run/cameras";
+            in.progress = new ShotExecutor.Progress() {
+
+                @Override
+                public void onProgress(double fraction, String message) {
+                    progress(ctx, 0.5d + 0.4d * fraction, "cameras: " + message);
+                }
+            };
+            shotExecutor = new ShotExecutor(in);
+            cameraSummaries = CameraSpecs.summaries(parsed.specs());
+            CpLog.info(
+                "case.cameras 段开始：%d 个机位（共用 shot.multi 执行器）",
+                parsed.specs()
+                    .size());
+        }
+        JsonObject result = shotExecutor.tick();
+        if (result == null) {
+            return null;
+        }
+        shotResult = result;
+        releaseCapture();
+        JsonObject detail = new JsonObject();
+        detail.addProperty("cameraCount", Json.optInt(result, "cameraCount", 0));
+        detail.addProperty("shotCount", Json.optInt(result, "shotCount", 0));
+        detail.addProperty("failedCount", Json.optInt(result, "failedCount", 0));
+        detail.add("cameras", Json.copyArray(cameraSummaries));
+        detail.add("shots", Json.optArray(result, "cameras"));
+        if (Json.optInt(result, "failedCount", 0) > 0) {
+            detail.add("warnings", shotExecutor.warnings());
+        }
+        return detail;
+    }
+
+    /** 释放捕获会话（幂等；段末与收尾路径共用）。 */
+    private void releaseCapture() {
+        if (!captureArmed) {
+            return;
+        }
+        CaptureSession.end();
+        captureArmed = false;
+    }
+
+    /**
+     * 运行期升格检查（case-file.md §4）：{@code cameras} 段非空 ⇒ 调用方必须 forensic 级。
+     *
+     * <p>
+     * 静态权限级（{@code case.run} = scene）挡不住「scene 级调用方顺手拍一堆截图」，
+     * 而截图是取证材料、比场景操作敏感。故按<b>内容</b>升格：只有带上这一级才放行，
+     * 不足即 {@code CP-AUTH-002}（不是 VALID/STATE 类错误——它是权限问题，调用方应换 token）。
+     */
+    private void assertForensicForCameras(ActionContext ctx) {
+        JsonArray cameras = Json.optArray(plan, "cameras");
+        if (cameras == null || cameras.size() == 0) {
+            return;
+        }
+        Tier actual = ctx.job() == null ? Tier.OBSERVE
+            : ctx.job()
+                .tier();
+        if (actual.covers(Tier.FORENSIC)) {
+            return;
+        }
+        JsonObject context = new JsonObject();
+        context.addProperty("required", Tier.FORENSIC.id());
+        context.addProperty("actual", actual == null ? null : actual.id());
+        context.addProperty("caseId", caseFile.id());
+        context.addProperty("cameraCount", cameras.size());
+        context.addProperty("reason", "用例含 cameras 段：case.run 权限按内容升格为 forensic（case-file.md §4）");
+        throw new CpException(ErrorCodes.AUTH_INSUFFICIENT, "含 cameras 段的用例必须 forensic 级调用", context);
     }
 
     /** {@code build} 段：{@link SceneBuilder}（与 {@code world.rebuild} 的 build 段同一实现）。 */
@@ -543,6 +739,43 @@ public final class CaseRunAction extends SteppingActionBase {
         o.add("evidence", evidence);
         o.addProperty("overall", overall());
         o.addProperty("observationPath", OBSERVATION_PATH);
+        if (shotResult != null) {
+            // 逐机位产物引用 + 实际渲染参数（契约 §4.1：结果含每机位产物引用与实际渲染参数）
+            JsonObject shots = new JsonObject();
+            shots.addProperty("executor", "shot.multi");
+            shots.addProperty("cameraCount", Json.optInt(shotResult, "cameraCount", 0));
+            shots.addProperty("shotCount", Json.optInt(shotResult, "shotCount", 0));
+            shots.addProperty("failedCount", Json.optInt(shotResult, "failedCount", 0));
+            shots.add("cameras", Json.copyArray(cameraSummaries));
+            JsonArray refs = new JsonArray();
+            JsonArray perCamera = Json.optArray(shotResult, "cameras");
+            for (int i = 0; perCamera != null && i < perCamera.size(); i++) {
+                JsonObject c = perCamera.get(i)
+                    .getAsJsonObject();
+                JsonObject ref = new JsonObject();
+                ref.addProperty("name", Json.optString(c, "name", null));
+                ref.addProperty("ok", Boolean.valueOf(Json.optBool(c, "ok", false)));
+                ref.addProperty("file", Json.optString(c, "file", null));
+                ref.addProperty("metaFile", Json.optString(c, "metaFile", null));
+                ref.addProperty("tilesDir", Json.optString(c, "tilesDir", null));
+                ref.addProperty("renderMode", Json.optString(c, "renderMode", null));
+                ref.addProperty("lighting", Json.optString(c, "lighting", null));
+                ref.addProperty("worldTime", Long.valueOf(Json.optLong(c, "worldTime", -1L)));
+                refs.add(ref);
+            }
+            shots.add("artifacts", refs);
+            o.add("shots", shots);
+        }
+        if (captureSpec != null || captureArmed) {
+            JsonObject capture = new JsonObject();
+            if (captureSpec != null) {
+                capture.add("spec", captureSpec.toJson());
+                capture.addProperty("lighting", CameraSpecs.resolveLighting(null, captureSpec));
+                capture.addProperty("renderMode", CameraSpecs.resolveRenderMode(null, captureSpec));
+            }
+            capture.addProperty("armed", Boolean.valueOf(captureArmed));
+            o.add("capture", capture);
+        }
         if (variants.size() > 0) {
             // case-file.md §8.5：变体结论写入结果 variants:[{id, allExpectedRed, criteria:[...]}]
             o.add("variants", Json.copyArray(variants));
@@ -957,6 +1190,10 @@ public final class CaseRunAction extends SteppingActionBase {
         in.deferred = deferred;
         in.variant = variantVerification;
         in.failure = failure;
+        // PR-2：注入机位摘要（observation-record.md §2.4）——camera 记首个机位，cameras[] 记全部
+        in.cameras = Json.copyArray(cameraSummaries);
+        in.captureSpec = captureSpec;
+        in.shotResult = shotResult;
         ObservationRecord record = ObservationCollector.collect(in);
         writeArtifact(ctx, OBSERVATION_PATH, record.toPrettyString(), "observation");
     }

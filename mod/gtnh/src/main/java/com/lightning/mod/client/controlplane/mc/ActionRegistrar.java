@@ -3,6 +3,9 @@ package com.lightning.mod.client.controlplane.mc;
 import com.lightning.mod.client.controlplane.core.ActionDescriptor;
 import com.lightning.mod.client.controlplane.core.ActionRegistry;
 import com.lightning.mod.client.controlplane.core.Tier;
+import com.lightning.mod.client.controlplane.mc.capture.CaptureBeginAction;
+import com.lightning.mod.client.controlplane.mc.capture.CaptureEndAction;
+import com.lightning.mod.client.controlplane.mc.capture.ShotMultiAction;
 
 /**
  * 动作注册表（contract.md §4 的 8 个动作）。
@@ -167,12 +170,16 @@ public final class ActionRegistrar {
         registry.registerStepping(
             ActionDescriptor.builder("case.run", Tier.SCENE)
                 .description(
-                    "执行用例（整跑或按段，同一实现）：world→build→criteria→evidence，逐段落 segments/<name>.json，"
-                        + "写 criteria.json / evidence.json / observation.json；含 capture/cameras 段时整段延后"
-                        + "（deferred: contract v1.x）不算失败。")
+                    "执行用例（整跑或按段，同一实现）：world→capture→build→cameras→criteria→evidence，"
+                        + "逐段落 segments/<name>.json，写 criteria.json / evidence.json / observation.json。"
+                        + "capture 段建立捕获会话（期间世界写动作被拒 CP-STATE-001），cameras 段逐机位走 shot.multi 的"
+                        + "同一实现；cameras 段非空时本动作按内容升格为 forensic（不足 CP-AUTH-002）。")
                 .optional("file", ActionDescriptor.TYPE_PATH, "用例文件：绝对路径，或相对 <mcDataDir>/controlplane/cases/")
                 .optional("inline", ActionDescriptor.TYPE_OBJECT, "内联用例（JSON 对象或用例 JSON 文本）；与 file 互斥")
-                .optional("segments", ActionDescriptor.TYPE_ARRAY, "只跑指定段：world/build/criteria/evidence 的子集")
+                .optional(
+                    "segments",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "只跑指定段：world/capture/build/cameras/criteria/evidence 的子集")
                 .optional("variant", ActionDescriptor.TYPE_STRING, "负对照变体 id：先应用补丁再跑同一实现，断言 expectCriteriaRed 全变红")
                 .optional(
                     SteppingActionBase.PARAM_TOTAL_TIMEOUT,
@@ -187,11 +194,96 @@ public final class ActionRegistrar {
                 .returns(
                     "{caseId, caseSha256, runId, variant, segmentsRun[], segmentsSkipped[], segments[{segment,status,"
                         + "durationMs,detail}], deferred[]?, world{...}, scene{sha256,blockCount,teCount,...}, "
+                        + "shots{cameraCount,shotCount,failedCount,cameras[],artifacts[{name,ok,file,metaFile,"
+                        + "renderMode,lighting,worldTime}]}?, capture{spec,lighting,renderMode,armed}?, "
                         + "criteria{path,executed,overall,counts}, evidence{path,executed,verdict,detail}, overall, "
                         + "observationPath, variantVerification?, artifacts[], artifactCount, failure?}")
                 .example("{\"file\":\"demo.json\",\"segments\":[\"world\",\"build\",\"criteria\"],\"confirm\":true}")
+                .example(
+                    "{\"file\":\"lp-pipe-row.json\",\"segments\":[\"world\",\"capture\",\"build\",\"cameras\","
+                        + "\"criteria\",\"evidence\"],\"confirm\":true}")
                 .since("1.0")
                 .build(),
             () -> new CaseRunAction(runtime));
+
+        registerForensicActions(runtime, registry);
+    }
+
+    /**
+     * PR-2 取证级动作（contract.md §4.1）：{@code shot.multi} / {@code capture.begin} / {@code capture.end}。
+     *
+     * <p>
+     * 三个动作都是 {@link Tier#FORENSIC}：截图与捕获是取证材料，比场景操作敏感。
+     * {@code shot.multi} 是步进动作（多机位 × 多 tile × 静置 tick 必然跨 tick），按工厂注册；
+     * 两个 capture 动作只翻转一个内存标志，注册为同步动作。
+     */
+    private static void registerForensicActions(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        registry.registerStepping(
+            ActionDescriptor.builder("shot.multi", Tier.FORENSIC)
+                .description(
+                    "多机位取证截图：逐机位注入虚拟相机（不挪真实玩家）与投影（透视/正交）、按需覆写渲染分辨率、"
+                        + "截帧后还原。机位带 tile 段时走投影偏移 tiling（禁止视口拼接），产物为 shots/<name>.png、"
+                        + "shots/<name>.meta.json（lightning.shot-meta/1），拼接机位另产 shots/<name>.tiles/。"
+                        + "世界时刻可选指定；TE 渲染距离门随相机位置生效。")
+                .optional(
+                    "cameras",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "机位表 [CameraSpec]（或单个 CameraSpec 对象）；CameraSpec={name,pos[x,y,z],yaw,pitch,"
+                        + "projection{type:perspective|ortho,fov|orthoHeight},resolution[w,h],tile?{cols,rows,overlap}}")
+                .optional("target", ActionDescriptor.TYPE_ARRAY, "观察目标包围盒 [[minx,miny,minz],[maxx,maxy,maxz]]（仅留痕）")
+                .optional(
+                    "lighting",
+                    ActionDescriptor.TYPE_STRING,
+                    "会话默认光照口径：natural | neutral-flat（可被逐机位覆盖；v1 不注入光照通道，仅留痕）")
+                .optional("renderMode", ActionDescriptor.TYPE_STRING, "会话默认渲染模式：本色 | 参与光照（可被逐机位覆盖）")
+                .optional("worldTime", ActionDescriptor.TYPE_INT, "拍摄光照基准（1.7.10 一天 0..23999 tick）；缺省沿用当前时刻")
+                .optional("capture", ActionDescriptor.TYPE_OBJECT, "等价于把 lighting/renderMode/worldTime 写在一个对象里")
+                .optional(
+                    SteppingActionBase.PARAM_TOTAL_TIMEOUT,
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(SteppingActionBase.DEFAULT_TOTAL_TIMEOUT_MS),
+                    TIMEOUT_DOC)
+                .optional(
+                    SteppingActionBase.PARAM_STAGE_TIMEOUT,
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(SteppingActionBase.DEFAULT_STAGE_TIMEOUT_MS),
+                    STAGE_TIMEOUT_DOC)
+                .returns(
+                    "{schema, action, runId, cameraCount, shotCount, failedCount, cameras[{name,spec,ok,file,metaFile,"
+                        + "tilesDir,width,height,renderMode,lighting,lightingApplied,worldTime,tile,tileCols,tileRows,"
+                        + "tileOverlap,error?}], artifactsByCamera[{name,ok,file,metaFile,renderMode,lighting,worldTime}], "
+                        + "target?, capture?, captureSession{armed,by}, baseDisplayWidth, baseDisplayHeight, "
+                        + "settingsRestored, elapsedMs, warnings?, artifacts[], contractVersion}")
+                .example(
+                    "{\"cameras\":[{\"name\":\"front-top\",\"pos\":[64.5,20.0,70.5],\"yaw\":180.0,\"pitch\":-45.0,"
+                        + "\"projection\":{\"type\":\"perspective\",\"fov\":70},\"resolution\":[1920,1080]},"
+                        + "{\"name\":\"hi-res\",\"pos\":[64.5,20.0,70.5],\"yaw\":180.0,\"pitch\":-30.0,"
+                        + "\"projection\":{\"type\":\"ortho\",\"orthoHeight\":16.0},\"resolution\":[3840,2160],"
+                        + "\"tile\":{\"cols\":2,\"rows\":2,\"overlap\":0.05}}],"
+                        + "\"lighting\":\"neutral-flat\",\"renderMode\":\"本色\",\"worldTime\":6000,\"confirm\":true}")
+                .since("1.1")
+                .build(),
+            () -> new ShotMultiAction(runtime));
+
+        registry.register(
+            ActionDescriptor.builder("capture.begin", Tier.FORENSIC)
+                .description(
+                    "开始捕获会话：此后一切世界写动作（world.rebuild/world.snapshot/world.rollback 与 case.run 的 build 段）"
+                        + "被拒 CP-STATE-001，直到 capture.end。重复 begin 也是 CP-STATE-001（不做隐式续期）。")
+                .returns("{schema, began, jobId, action, beganAt, armed, requiredTier, contractVersion}")
+                .example("{\"confirm\":true}")
+                .since("1.1")
+                .build(),
+            new CaptureBeginAction());
+
+        registry.register(
+            ActionDescriptor.builder("capture.end", Tier.FORENSIC)
+                .description("结束捕获会话并恢复世界写动作；未 begin 时幂等成功（返回值 idempotent=true）。")
+                .returns(
+                    "{schema, ended, wasArmed, idempotent, requestedBy, action, armed, previous{session}, requiredTier}")
+                .example("{\"confirm\":true}")
+                .since("1.1")
+                .build(),
+            new CaptureEndAction());
     }
 }

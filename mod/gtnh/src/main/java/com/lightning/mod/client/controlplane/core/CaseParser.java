@@ -167,8 +167,8 @@ public final class CaseParser {
 
         CaseFile.World world = parseWorld(o, fields, warnings);
         List<CaseFile.Step> build = parseBuild(o, world, fields, warnings);
-        JsonElement capture = parseCapture(o, warnings);
-        JsonArray cameras = parseCameras(o, warnings);
+        JsonElement capture = parseCapture(o, fields, warnings);
+        JsonArray cameras = parseCameras(o, fields, warnings);
         List<CaseFile.Criterion> criteria = parseCriteria(o, fields, warnings);
         JsonArray evidence = parseEvidence(o, fields, warnings);
         List<CaseFile.Variant> variants = parseVariants(o, fields, warnings);
@@ -383,27 +383,54 @@ public final class CaseParser {
         return new CaseFile.Step(norm);
     }
 
-    private JsonElement parseCapture(JsonObject o, List<String> warnings) {
+    /**
+     * 解析 {@code capture} 段（case-file.md §4）。
+     *
+     * <p>
+     * PR-2 起本段是<b>真实执行段</b>的参数（捕获会话默认值）：未知字段照旧报错（§9），
+     * 类型与取值范围由 {@link CaseValidator#validateCapture} 用 {@link CaptureSpec} 校验；
+     * 这里只做「须为 object + 未知字段」这一层。
+     *
+     * @return 规范化后的对象；未声明返回 null
+     */
+    private JsonObject parseCapture(JsonObject o, Fields fields, List<String> warnings) {
         JsonElement capture = Json.get(o, "capture");
         if (capture == null) {
             return null;
         }
         if (!capture.isJsonObject()) {
-            warnings.add("capture 段非 object，已原样透传");
+            fields.add("capture", "须为 object {lighting?,renderMode?,worldTime?}");
+            return null;
         }
-        warnings.add("capture 段由契约 v1.x（PR-2）提供，PR-1 原样透传不解释");
-        return Json.copy(capture);
+        JsonObject obj = capture.getAsJsonObject();
+        checkUnknown(obj, CaptureSpec.FIELDS, "capture", fields, warnings);
+        return Json.copyObject(obj);
     }
 
-    private JsonArray parseCameras(JsonObject o, List<String> warnings) {
+    /**
+     * 解析 {@code cameras} 段（机位表，contract.md §4.1）。
+     *
+     * <p>
+     * 这里只做「须为 array」与元素「须为 object」；字段级校验（机位名唯一、pos 有限值、
+     * 投影二选一、resolution 正整数、tile 1..8、overlap 0..0.5）统一由 {@link CaseValidator}
+     * 走 {@link CameraSpecs} 完成——避免解析期与校验期两套规则。
+     *
+     * @return 原样深拷的机位数组；未声明返回 null
+     */
+    private JsonArray parseCameras(JsonObject o, Fields fields, List<String> warnings) {
         JsonArray cameras = Json.optArray(o, "cameras");
         if (cameras == null) {
             if (o.has("cameras")) {
-                warnings.add("cameras 段非 array，已忽略");
+                fields.add("cameras", "须为 array（机位表 [CameraSpec]）");
             }
             return null;
         }
-        warnings.add("cameras 段由契约 v1.x（PR-2）提供，PR-1 原样透传不解释");
+        for (int i = 0; i < cameras.size(); i++) {
+            JsonElement e = cameras.get(i);
+            if (e == null || !e.isJsonObject()) {
+                fields.add("cameras[" + i + "]", "机位须为 object（CameraSpec，见 contract.md §4.1）");
+            }
+        }
         return Json.copyArray(cameras);
     }
 
