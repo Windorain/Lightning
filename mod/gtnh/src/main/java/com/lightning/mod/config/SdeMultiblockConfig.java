@@ -126,6 +126,11 @@ public final class SdeMultiblockConfig {
                 2,
                 50_000_000,
                 "单台变体数上限（安全兜底）。0/负数按 2 处理。超限时按契约 tierSample 语义抽样 + 必要时收窄通道域，" + "并在产物 notes 与失败/警告清单里如实记录。");
+            // 坑（行为修复已登记 issue，此处只记录、不改行为）：
+            // /sde multiblock limit=N 是在命令线程直接给本静态字段赋值（CommandSde 的 limit 分支），
+            // 但 MultiblockExportRunner.run() 入口会**无条件**调用 load() 重新读盘 → 该赋值立刻被这里的 getInt 覆盖，
+            // 于是 limit=N 实际不生效（导出仍按配置文件里的上限跑）。
+            // 要修必须让 run() 接受"命令侧覆盖值"并优先于本字段，而不是靠调用顺序碰运气。
             maxExportMachines = cfg
                 .getInt("maxExportMachines", "multiblock", 0, 0, 100000, "导出范围上限（单次导出的多方块台数）：0 = 不限制（全量）。上限只用于分片与试跑。");
             structuralOnly = cfg.getBoolean(

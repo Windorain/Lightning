@@ -168,6 +168,13 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
 }
 ```
 
+**通道清单的实测数量（GT5U 5.09.52.283，依据 `GTStructureChannels` 的运行时枚举）**：
+
+- 枚举常量 **30 条** = **27 替换型（`replace`）+ 2 尺寸型（`size`）+ 1 舱口布局型（`hatch`，即 `gt_hatch`）**；
+- **28 个唯一 `id`**（30 − 2，差值全部来自 `casing` 重复 3 次）；重名 id **只有 `casing`**，无其他重名；
+- 另有 **6 个 id 无书面取值域**（`en_US.lang` 无对应描述）→ 只能标 `domainSource:"probed"`。
+- **不得硬编码 30 或 27**：一切以运行时枚举为准（本契约只固定"怎么表达"，不固定"有几条"）。
+
 **四条不可妥协的规则**：
 
 1. **"未设置"（Not set）恒在域内**：`domain` 的取值集合恒为 `0..max`，**`0` 就是"未设置"**。
@@ -262,6 +269,10 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
 - **系统性换料**：把一阶骨架里所有"钴机壳"换成"钛机壳"只需一条 `{"1": 17}`，与出现多少次无关。
 
 一条规则可以**同时**做"整表替换 + 区间写入"（先替换、后写 `fill`/`setCell`）。
+
+**代价实测（取舍已量化，不是免费能力）**：同一台 EBF 的两种实现对照 —— `indexAliases` 规则版 = 5 条规则 / 108,754 B，
+编码期直接换下标版 = 4 条规则 / 108,494 B → `indexAliases` 的代价是 **+260 B（+0.24%）**，换来"旧下标 → 新下标批量替换"
+这条硬约束明文要求的能力；两条路径的逐格 diff 均为 0（等价性已验证）。故**保留 `indexAliases`**，不要为了 260 B 改回编码期直接换下标。
 
 #### 4.5.3 `guard`：条件生效（表达例外，T0.4 §5.3 的落法）
 
@@ -432,6 +443,29 @@ GT 里通道值不可为 0；"未设置"的位置由**主通道值**（总 Tier�
   若将来需要，须确定性软件光栅另行立项并走独立 blob 池，不得进主产物条目。条目字段集合恒为
   `{registryId, meta, renderMode, geometry, occludesAdjacentFaces, nbt, tooltip}`。
 
+### 6.4 两套签名口径：**去重键** 与 **对齐签名**（不要混用）
+
+本格式同时存在两把"签名"，口径与敏感字段完全不同，实现与验收都必须分清：
+
+| | ① **去重键**（调色板内合并同内容条目） | ② **对齐签名**（跨产物逐格比对） |
+|---|---|---|
+| 定义 | `MeshCaptureService#fullEqualitySignature(registryId, meta, nbt=null, geometry, tooltip=null)`（本数据集 nbt/tooltip 传 `null`） | `entrySignature(entry)` = 条目**全文**的 `canonicalJson`（对象键排序、数组保序），即 `palette.signatures[i]` |
+| 覆盖字段 | `registryId` + `meta` + **`geometrySignature`**（四边形按 quantization 后的顶点/uv/brightness/color 排序后哈希） | 条目**全部键**（含 `renderMode`、`occludesAdjacentFaces`、`nbt`、`tooltip` 等渲染性/元数据字段） |
+| 对渲染性字段 | **不敏感** —— 不在键里，故**去重永不受缩略图影响**（加/去 `thumbnailPNG` 不改变任何下标） | **敏感** —— 任一条目字段变化即签名变化 |
+| 用途 | `GeometryPalette#intern` 的全局去重；air 恒下标 0 | 展开校验文件（`palette.signatures`）与产物调色板的跨下标空间比对 |
+
+推论（实现纪律）：
+
+- **修渲染性字段漂移的正确路径是"从条目里去掉易变字段"，而不是改签名口径**。反例：`thumbnailPNG` 曾进条目，
+  剥离它才是正解（§6.3）；若改成"对齐签名忽略该字段"，就会让两套签名从此漂移、并掩盖真实的内容差异。
+- `canonicalJson` 必须**五方逐字符同口径**：mod 侧（`MultiblockExpandedVerifier#canonical`）、
+  `scripts/multiblock-fixtures/lib.mjs#canonicalJson`（`entrySignature` 即其包装）、两个 pipeline 校验器
+  （`scripts/multiblock-pipeline/verify-expanded.mjs`、`scripts/multiblock-encode/verify-encoded.mjs`）、
+  `web/e2e/helpers/multiblock/referenceGrids.ts#canonicalJson`。任一处改用别的序列化（键序/空值处理不同）都会造成假失败。
+- **推论：跨"年代"的产物不可对齐，必须同年份/同批次成对使用**。对齐签名取条目全文，而条目字段集合随实现演进而变
+  （例：`thumbnailPNG` 的移除、`occludesAdjacentFaces`/`tooltip` 的引入），旧年代的展开校验文件与新年份的产物
+  逐格比对必然全红，且**红的原因不是渲染错，而是口径不同代**。故配对规则：**展开校验文件与其产物同一轮导出**（同 run 目录）。
+
 ---
 
 ## 7. 运行态与约束
@@ -563,9 +597,28 @@ GT 里通道值不可为 0；"未设置"的位置由**主通道值**（总 Tier�
 | `C` | 单变体完整 `cellGrid` 的字节数（由骨架阶决定） |
 | `G` | 信封文件 gzip 字节数 |
 | `V` | **"组合展开"体积** = `blockPalette` × 1 + Σ<sub>v∈变体</sub> 完整 `cellGrid`（既有格式已共享调色板，故口径①） |
-| `κ` | `V / G` = **展开比**（因子化省了多少倍） |
+| `κ` | `V / G` = **展开比**（因子化省了多少倍）。**注意 κ 不是"有没有展开"的判据**，见下 |
 
-### 9.3 判定式（T3.2 直接实现；本文件附带的校验器已实现并跑通）
+**κ 的两套口径必须分清（否则数字会被读反）**：
+
+| 口径 | 定义 | 回答的问题 | 真实数据集实测（842 变体 / 4 台） |
+|---|---|---|---|
+| **κ②（字面口径，本节的记号定义）** | `V / G`（`G` 取落盘文件字节），`V` = `blockPalette`×1 + Σ完整网格，**不含材质池** | "文件比'调色板 + 全部网格'小多少倍" | 合计 **7.62×**；逐台 BBF **0.24×** / DT 1.28× / EBF 1.33× / QFT 25.11× |
+| **κ①（校验器口径）** | `(内层 − Σ网格 + Σ网格×N) / G`，即"按组合展开写文件会多大" | "若每个组合物化一份完整网格，文件会大多少倍" | 合计 **1332.76×**；逐台 BBF 1.44× / DT 131.49× / EBF 191.53× / QFT 4543.17× |
+
+**κ < 1 不代表"展开了"**：κ 的绝对值只取决于「**每变体网格字节 / 每文件常数池字节**」这个比值。
+真实产物里材质池是**每文件一份的常数**（`materialPalette` + `textureBlobs` ≈ 70 KB 未压缩 / ≈ 45 KB gzip），
+对 BBF 这种「2 变体 / 36 格」的小机器，常数池直接压过网格体积 → κ = 0.24×。这是 §9.4「常数项下限」分支的正常形态，
+**不是**每组合物化网格。
+
+真正"没有展开"的机器判据是这两条（都已在真实数据集上跑通）：
+
+- **逐格 diff = 0**：闭环验证器按 `canonicalJson(entry)` 对齐，842 个变体逐格与参考网格比对，差异 0；
+- **边际成本量级**：实测 **10–30 B/组合**（13.5 B/组合@取值轴、29 B/组合@通道轴、10→50 实测 28.1 B/组合），
+  而"每组合一份完整网格"是 **2,560–10,281 B/组合**（`perVariantGridCost`：小机器 2,560 B，DT 级 10,281 B）——
+  两者差 **2 个数量级**，这才是"没展开"的可判证据。
+
+### 9.3 判定式（编码端与验收端都按此实现；本文件附带的校验器已实现并跑通）
 
 **R1 展开比随 N 同步增长**（核心判据）：
 
