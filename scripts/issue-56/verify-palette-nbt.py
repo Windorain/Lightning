@@ -181,6 +181,14 @@ def main():
             k = palette_key(p)
             cands = gt_pool.get(k)
             if not cands:
+                # 精确键（含 meta/facing）无候选时按 registryId 兜底：
+                # 跨轮次重放同场景时方块 meta 可被原版机制改写（如熔炉 onBlockAdded 按
+                # 邻居实心块重定向），meta 不进入 TE 的 writeToNBT，不影响 NBT 比对；
+                # 兜底命中会显式注明，供判读者核对。
+                cands = [c for rk, v in gt_pool.items() if rk[0] == k[0] for c in v]
+                if cands:
+                    print("..  %s palette %s 精确键无候选，按 registryId 兜底匹配（meta/facing 跨轮差异）" % (bp, k))
+            if not cands:
                 failures.append("%s palette 条目 %s 在扫描档找不到 ground truth" % (bp, k))
                 continue
             best = None
