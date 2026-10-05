@@ -17,7 +17,8 @@
     "mod": "0.3",
     "minecraft": "1.7.10",
     "forge": "10.13.4.1614",
-    "mods": [ {"id":"logisticspipes","version":"1.5.28-GTNH"}, ... ]  // 与场景相关的模组，构建期声明
+    "mods": [ {"id":"logisticspipes","version":"1.5.28-GTNH"}, ... ],  // 只列场景相关模组（构建期声明）
+    "modsTotal": 87                      // 整合包模组总数（全量清单不进观测记录）
   },
   "clientConfig": {                    // 渲染相关客户端配置（快照）
     "fovSetting": 70, "renderDistanceChunks": 12, "fancyGraphics": true,

@@ -63,8 +63,8 @@
 | `core.status` | observe | 版本、世界加载态、忙闲、事件流水游标、最近作业 |
 | `world.info` | observe | 当前世界描述（folder/维度/是否托管/是否虚空）；未在世界中返回 `loaded:false` |
 | `world.rebuild` | scene | **幂等重建托管世界**：卸载当前托管世界 → 删除托管存档目录 → 以固定种子建虚空世界 → 可选执行场景构建段（含 TE 状态补全）→ 静置稳定 → 返回世界描述与场景清单哈希。两次调用结果一致（哈希相等） |
-| `world.snapshot` | scene | 快照：世界未加载时整目录复制；世界加载中时对托管区域做方块/meta/TE-NBT 权威读取记录为 JSON 快照。快照落 `snapshots/<id>/` 并登记哈希 |
-| `world.rollback` | scene | 回滚到指定快照（默认最近）。试错不污染：回滚后场景哈希与快照时相等 |
+| `world.snapshot` | scene | 快照（v1 口径=整目录复制）：自动离图 → 复制存档目录到 `snapshots/<id>/`（+ 树哈希清单 JSON）→ 重进世界。快照 id：`<ts>-<folder>` |
+| `world.rollback` | scene | 回滚到指定快照（默认最近）：离图 → 快照目录整体覆盖回 → 重算树哈希与快照比对（不一致 CP-EXEC-001）→ 重进。试错不污染世界 |
 | `case.validate` | observe | 解析用例文件，返回规范化执行计划（分段列表、判据、期望证据）或逐字段错误 |
 | `case.run` | scene 起 | 执行用例文件：默认整跑；`segments:[...]` 按段执行。**整跑与按段共用同一实现、同一产物形态**（验收锚）。产物为 run 目录 + 观测记录 + 判据结论 |
 
@@ -84,6 +84,8 @@ PR-2 追加取证级动作（`shot.multi`、`capture.*`），PR-3 追加双轨�
 3. **幂等重建**：`world.rebuild` 对同一用例定义产生相同世界；场景构建步骤以「清场（托管区域 setBlockToAir）→ 放置 → TE 补全 → 静置」为固定序。
 4. **TE 状态补全**（#55「设」第五项）：仅限场景构建阶段、捕获开始之前；必须经模组自身权威同步路径（如 `markBlockForUpdate` 触发 S35 description packet 摄取，或模组自己的 `initialize`/`addPart` 等 API）；**禁止**逐字段从静态数据推算回填。补全器按族注册（接口 `TeCompleter`），默认实现覆盖原版 TE；LP/AE2 族补全器随锚点场景交付。
 5. 世界快照与回滚范围**包含** TE 补全后的状态。
+6. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。
+7. **离图阻塞**：`mc.loadWorld(null)` 在 tick 线程内阻塞至集成服停机（原版「保存并退到标题」同路径），客户端会冻结数秒到数十秒——动存档目录前必须保证 region 句柄释放，这是 v1 的取舍。
 
 ## 7. 观测记录
 
@@ -101,7 +103,9 @@ PR-2 追加取证级动作（`shot.multi`、`capture.*`），PR-3 追加双轨�
   - `core/`：**零 MC 依赖**（只用 JDK + Gson），含 HTTP 服务、路由、动作注册表、作业队列、事件缓冲、错误信封、产物登记、用例文件模型与解析、判据引擎。零 MC 依赖是为了可单测（本仓 mod 无渲染环境单测能力，捕获/渲染不可无头测）。
   - `mc/`：MC 绑定层——tick 排空器、世界动作、场景构建、TE 补全器、观测记录采集、配置装配。
 - 启动：`ClientProxy.initNetwork()` 按配置启动；关闭：JVM shutdown hook（无 FML 客户端停止事件可用）。
-- 与既有触发文件自动化（`SdeClientAutomationTickHandler` 的 6 条分派）的关系：控制面排空器作为**新的独立 tick handler 注册**，不复用触发文件链；但既有探针激活期间（其 `isRequested` 为真），控制面动作返回 `CP-BUSY-001` 避让（单向避让，不改动既有探针）。
+- 与既有触发文件自动化（`SdeClientAutomationTickHandler` 的 6 条分派）的关系：控制面排空器作为**新的独立 tick handler 注册**，不复用触发文件链；既有探针激活期间（其 `isRequested` 为真）控制面 tick 层**暂停排空**——在队作业保持 queued，探针结束后自动开跑；期间打 WARN 日志 + `action-reject` 事件留痕（`data.code=CP-BUSY-001`），`about.probeActive` 暴露原因（单向避让，不改动既有探针；`CP-BUSY-001` 提交即拒仅对「已有控制面动作在队/在跑」成立）。
+- `about` 等端点的 MC 相关字段必须由 tick 线程周期快照提供（§1.8：HTTP 线程不得读 `mc.theWorld` 等 MC 状态）。
+- 进度事件节流：增量 ≥0.05 或间隔 ≥3s 放行，终值 1.0 必放行（防事件流水被逐 tick 上报灌满）。
 - 调用既有 runner（扫描/导出类）时必须强制其 `exit=false / cleanupTrigger=false`，禁止继承自毁退出。
 - 日志前缀 `[SDE][CP]`，沿用 FMLLog 手工前缀约定。
 - 与 `SdeWebServer`（`/sde web`，`/api/v1/*`）零共享可变状态：不同端口、不同实例、不同鉴权域。
