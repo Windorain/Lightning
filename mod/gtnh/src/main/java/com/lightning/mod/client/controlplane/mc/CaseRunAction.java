@@ -1038,9 +1038,37 @@ public final class CaseRunAction extends SteppingActionBase {
                 ctx.run(),
                 runtime == null ? null : runtime.events(),
                 hashSource(),
+                teSource(),
                 TimeSource.system());
         }
         return engine;
+    }
+
+    /**
+     * 运行期 TE 状态来源（{@code te-state-equals} 判据的唯一外部数据，PR-3 运行期轨）。
+     *
+     * <p>
+     * 与 {@link #hashSource()} 同一接线模式：core 只负责「拿状态 → 按 RFC 6901 指针取值 → 比较」，
+     * 「状态从哪来」由本层注入。这里把请求转给 {@link TeDescribers}——它按注册顺序问每个族描述器
+     * （LP 管道 / AE2 部件），第一个认领该 TE 的胜出；<b>没有</b>描述器认领（位置没 TE、或整合包里
+     * 没有对应模组）时返回 null，判据据此报 {@code error}（视同 red 单列）。
+     *
+     * <p>
+     * 每次求值都实读世界：判据段可能在任何时刻跑（按段续跑、变体扫描），缓存一个 TE 快照会把
+     * 「世界漂移」这件事藏起来。
+     */
+    private CriteriaEngine.RuntimeTeSource teSource() {
+        return new CriteriaEngine.RuntimeTeSource() {
+
+            @Override
+            public TeState describe(int x, int y, int z) {
+                WorldServer world = WorldRuntime.serverWorld();
+                if (world == null) {
+                    return null;
+                }
+                return TeDescribers.describe(world, x, y, z);
+            }
+        };
     }
 
     /**

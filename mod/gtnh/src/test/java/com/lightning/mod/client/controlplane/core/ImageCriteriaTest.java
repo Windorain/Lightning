@@ -273,6 +273,136 @@ public class ImageCriteriaTest {
             Json.optString(uniformVerdict, "verdict", null));
     }
 
+    // ------------------------------------------------------------ image-uniform（PR-3，反转）
+
+    /** 纯色图 → 绿（近纯色断言成立）。 */
+    @Test
+    public void uniformCriterionIsGreenOnSolidImage() throws IOException {
+        Path p = solid(48, 32, 0xFF102030, "solid.png");
+        ImageCriteria.setRunDir(p.getParent());
+        try {
+            JsonObject verdict = ImageCriteria.evaluateUniform(
+                params(
+                    "path",
+                    p.getFileName()
+                        .toString()));
+            assertEquals(
+                Json.optString(verdict, "detail", ""),
+                CriteriaEngine.Verdicts.GREEN,
+                Json.optString(verdict, "verdict", null));
+            assertTrue(
+                Json.optString(verdict, "detail", ""),
+                Json.optString(verdict, "detail", "")
+                    .contains("近似纯色"));
+        } finally {
+            ImageCriteria.clearRunDir();
+        }
+    }
+
+    /** 噪声图 → 红（画面里有结构，距离门没生效）。 */
+    @Test
+    public void uniformCriterionIsRedOnNoiseImage() throws IOException {
+        Path p = noise(64, 48, 11L, "noise.png");
+        ImageCriteria.setRunDir(p.getParent());
+        try {
+            JsonObject verdict = ImageCriteria.evaluateUniform(
+                params(
+                    "path",
+                    p.getFileName()
+                        .toString()));
+            assertEquals(CriteriaEngine.Verdicts.RED, Json.optString(verdict, "verdict", null));
+            assertTrue(
+                Json.optString(verdict, "detail", ""),
+                Json.optString(verdict, "detail", "")
+                    .contains("不够纯色"));
+        } finally {
+            ImageCriteria.clearRunDir();
+        }
+    }
+
+    /** 阈值可被 params 调低：主色 75% 的图在 0.5 阈值下算纯色，在 0.9 阈值下不算。 */
+    @Test
+    public void uniformThresholdIsHonoured() throws IOException {
+        BufferedImage img = new BufferedImage(40, 10, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 10; y++) {
+            for (int x = 0; x < 40; x++) {
+                img.setRGB(x, y, x < 30 ? 0xFF000000 : 0xFFFFFFFF);
+            }
+        }
+        Path dir = tmp.newFolder("half-uniform")
+            .toPath();
+        ImageIO.write(
+            img,
+            "png",
+            dir.resolve("half.png")
+                .toFile());
+        ImageCriteria.setRunDir(dir);
+        try {
+            JsonObject loose = params("path", "half.png");
+            loose.addProperty("minSameColorRatio", 0.5d);
+            assertEquals(
+                CriteriaEngine.Verdicts.GREEN,
+                Json.optString(ImageCriteria.evaluateUniform(loose), "verdict", null));
+            JsonObject strict = params("path", "half.png");
+            strict.addProperty("minSameColorRatio", 0.9d);
+            assertEquals(
+                CriteriaEngine.Verdicts.RED,
+                Json.optString(ImageCriteria.evaluateUniform(strict), "verdict", null));
+        } finally {
+            ImageCriteria.clearRunDir();
+        }
+    }
+
+    /** 阈值非法 / 产物缺失 → error；缺失 path → error。 */
+    @Test
+    public void uniformInvalidInputsAreErrors() {
+        JsonObject bad = params("path", "x.png");
+        bad.addProperty("minSameColorRatio", -0.1d);
+        assertEquals(
+            CriteriaEngine.Verdicts.ERROR,
+            Json.optString(ImageCriteria.evaluateUniform(bad), "verdict", null));
+        assertEquals(
+            CriteriaEngine.Verdicts.ERROR,
+            Json.optString(ImageCriteria.evaluateUniform(params("path", "missing.png")), "verdict", null));
+        assertEquals(
+            CriteriaEngine.Verdicts.ERROR,
+            Json.optString(ImageCriteria.evaluateUniform(new JsonObject()), "verdict", null));
+    }
+
+    /** 引擎接线：image-uniform 在注册表里且被正确分派（纯色图 → 绿）。 */
+    @Test
+    public void engineDispatchesImageUniform() throws IOException {
+        Path runRoot = tmp.newFolder("runs-uniform")
+            .toPath();
+        ArtifactStore store = new ArtifactStore(runRoot, TimeSource.fixed("2026-10-06T12:00:00+08:00", "t", 0L), null);
+        ArtifactStore.Run run = store.createRun("image-uniform", 1L);
+        Path png = run.dir()
+            .resolve("shots");
+        java.nio.file.Files.createDirectories(png);
+        BufferedImage img = new BufferedImage(24, 24, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 24; y++) {
+            for (int x = 0; x < 24; x++) {
+                img.setRGB(x, y, 0xFF8899AA);
+            }
+        }
+        ImageIO.write(
+            img,
+            "png",
+            png.resolve("far.png")
+                .toFile());
+
+        CriteriaEngine engine = new CriteriaEngine(store, run, null, null);
+        JsonObject criterion = new JsonObject();
+        criterion.addProperty("id", "far-uniform");
+        criterion.addProperty("type", CriteriaEngine.TYPE_IMAGE_UNIFORM);
+        criterion.add("params", params("path", "shots/far.png"));
+        JsonObject verdict = engine.evaluateOne(criterion, 0);
+        assertEquals(
+            Json.optString(verdict, "detail", ""),
+            CriteriaEngine.Verdicts.GREEN,
+            Json.optString(verdict, "verdict", null));
+    }
+
     private static JsonObject params(String k, String v) {
         JsonObject o = new JsonObject();
         o.addProperty(k, v);

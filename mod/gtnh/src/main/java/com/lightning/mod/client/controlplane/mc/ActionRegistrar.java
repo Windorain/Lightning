@@ -156,12 +156,14 @@ public final class ActionRegistrar {
 
         registry.register(
             ActionDescriptor.builder("case.validate", Tier.OBSERVE)
-                .description("解析用例文件并返回规范化执行计划（分段、展开后的判据、期望证据、警告）；不碰世界。")
+                .description(
+                    "解析用例文件并返回规范化执行计划（分段、展开后的判据、期望证据、警告）与判据类型自描述"
+                        + "（criteriaTypes[{type,since,params}]，PR-3 的两条判据 since=1.2）；不碰世界。")
                 .optional("file", ActionDescriptor.TYPE_PATH, "用例文件：绝对路径，或相对 <mcDataDir>/controlplane/cases/")
                 .optional("inline", ActionDescriptor.TYPE_OBJECT, "内联用例（JSON 对象或用例 JSON 文本）；与 file 互斥")
                 .returns(
                     "{caseId, caseSha256, source, valid, validatedAt, plan{world,segments[],build[],criteria[],"
-                        + "variants[],evidence,warnings[]}, deferred[]?}")
+                        + "variants[],evidence,warnings[]}, criteriaTypes[{type,since,params}], deferred[]?}")
                 .example("{\"file\":\"demo.json\"}")
                 .since("1.0")
                 .build(),

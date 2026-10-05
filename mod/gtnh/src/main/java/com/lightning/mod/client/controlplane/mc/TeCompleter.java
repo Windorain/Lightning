@@ -20,8 +20,16 @@ import com.google.gson.JsonObject;
  *
  * <p>
  * 补全器按族注册（{@link TeCompleters}），默认实现 {@link VanillaTeCompleter} 覆盖原版 TE；
- * {@code lp-pipe}/{@code ae2-part} 属 PR-3 交付，v1 注册表里没有它们——按契约「注册表查不到
- * completer」报 {@code CP-VALID-002}（由 {@link SceneBuilder} 落实）。
+ * {@link LpPipeCompleter}（{@code lp-pipe}）与 {@link Ae2PartCompleter}（{@code ae2-part}）随锚点场景
+ * 交付，由 {@link ModTeFamilies} 在探测到对应模组时注册（缺席即跳过并 WARN，见该类注释）。
+ * 按契约，注册表里查不到 completer 时报 {@code CP-VALID-002}（由 {@link SceneBuilder} 落实，
+ * 并附上族缺席的原因）。
+ *
+ * <p>
+ * <b>PR-3 明确（contract.md §6.5）</b>：模组族补全器经<b>模组自身的放置 API</b>完成放置与补全
+ * （LP {@code createPipe}/{@code placePipe}、AE2 {@code addPart}/{@code addFacade}），此时
+ * {@code params} 是<b>放置输入</b>（物品 id / 朝向 / 面）而<b>不是</b> NBT 逐字段回填；
+ * 该区分已写进两个模组补全器的类注释。与补全器同名的只读对偶是 {@link TeDescriber}。
  */
 public interface TeCompleter {
 

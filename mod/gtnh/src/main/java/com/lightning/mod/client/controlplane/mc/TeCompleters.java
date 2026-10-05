@@ -10,9 +10,13 @@ import java.util.Map;
  * TE 补全器注册表（按族名查表）。
  *
  * <p>
- * v1 只注册 {@code vanilla}；{@code lp-pipe}/{@code ae2-part} 随锚点场景在 PR-3 交付。
- * 调用方（{@link SceneBuilder}）在查不到时报 {@code CP-VALID-002}，并把可用族名放进
+ * 静态块只注册 {@code vanilla}（原版 TE）；模组族 {@code lp-pipe}/{@code ae2-part} 由
+ * {@link ModTeFamilies#registerAll()} 在探测到模组时补注册（契约 §6.5 的 v1.2 注册表）。
+ * 调用方（{@link SceneBuilder}）在查不到时报 {@code CP-VALID-002}，并把可用族名与缺席原因放进
  * {@code context.fields}，让用例作者一次改对。
+ *
+ * <p>
+ * 只读对偶（描述器）在并列的 {@link TeDescribers} 里按同名注册。
  */
 public final class TeCompleters {
 

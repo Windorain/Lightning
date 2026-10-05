@@ -36,7 +36,7 @@
   },
   "runtimeReads": [                    // 读取过的关键运行期状态摘要与哈希
     {"key": "world.sceneManifest", "summary": "5 blocks, 2 TE", "sha256": "..."},
-    {"key": "te.lpPipe[65,12,64].state", "summary": "...", "sha256": "..."}
+    {"key": "te.lp-pipe[65,12,64].state", "summary": "...", "sha256": "..."}
   ],
   "artifacts": [                       // 扫描数据引用与哈希
     {"path": "world/scene-manifest.json", "role": "scene-manifest", "bytes": 1234, "sha256": "..."}

@@ -19,23 +19,26 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 /**
- * 图像判据的两个算子（case-file.md §5，PR-2）：{@code image-size-equals} 与 {@code image-not-uniform}。
+ * 图像判据的三个算子（case-file.md §5）：{@code image-size-equals}、{@code image-not-uniform}
+ * 与 {@code image-uniform}（PR-3 加入，是 {@code image-not-uniform} 的正向反转）。
  *
  * <h2>为什么放在 core</h2>
- * 两个算子只读 run 目录里的 PNG，用 JDK 的 {@code javax.imageio}——没有 MC 依赖，因此可以在
+ * 三个算子只读 run 目录里的 PNG，用 JDK 的 {@code javax.imageio}——没有 MC 依赖，因此可以在
  * 纯 JVM 单测里用程序生成的 PNG 夹具覆盖（纯色图必须红、噪声图必须绿）。渲染侧的可信度最终靠
- * 这两条判据守住：截图「失败也可能返回非 null」这类坑，判据是最后一道防线。
+ * 这些判据守住：截图「失败也可能返回非 null」这类坑，判据是最后一道防线。
  *
- * <h2>两条判据的分工</h2>
+ * <h2>各判据的分工</h2>
  * <ul>
  * <li>{@code image-size-equals}：只读 PNG 头（{@link ImageReader#getWidth(int)}），不解码像素——
  * 分辨率覆写/拼接是否真的生效，用它断言；</li>
  * <li>{@code image-not-uniform}：解码像素后统计主色占比，占比 ≥ 阈值即判红——防黑屏/全白
- * 「假图」（渲染崩了、相机埋在方块里、framebuffer 没内容时都会得到纯色图）。</li>
+ * 「假图」（渲染崩了、相机埋在方块里、framebuffer 没内容时都会得到纯色图）；</li>
+ * <li>{@code image-uniform}：同一份统计的反向断言——主色占比 ≥ {@code minSameColorRatio} 判绿，
+ * 用于「远处机位应看不到 TE（渲染距离门）」这类近纯色断言（PR-3 双轨判据的图像轨）。</li>
  * </ul>
  *
  * <p>
- * 两个算子返回 {@code {verdict, detail}}（{@link CriteriaEngine.Verdicts} 的取值），由
+ * 各算子返回 {@code {verdict, detail}}（{@link CriteriaEngine.Verdicts} 的取值），由
  * {@link CriteriaEngine} 原样并入判据结论——判据的 red/green/error 语义因此只有一处定义。
  */
 public final class ImageCriteria {
@@ -46,8 +49,14 @@ public final class ImageCriteria {
     /** 判据类型：非纯色。 */
     public static final String TYPE_IMAGE_NOT_UNIFORM = "image-not-uniform";
 
+    /** 判据类型：近纯色（{@code image-not-uniform} 的反转，PR-3）。 */
+    public static final String TYPE_IMAGE_UNIFORM = "image-uniform";
+
     /** {@code maxSameColorRatio} 默认值（case-file.md §5）。 */
     public static final double DEFAULT_MAX_SAME_COLOR_RATIO = 0.98d;
+
+    /** {@code minSameColorRatio} 默认值（case-file.md §5，PR-3：与 {@code maxSameColorRatio} 同值同义反向）。 */
+    public static final double DEFAULT_MIN_SAME_COLOR_RATIO = 0.98d;
 
     /** 全图逐像素统计的像素数上限：超过则转网格采样（防大图判据拖住 tick 线程）。 */
     public static final long MAX_FULL_SCAN_PIXELS = 4L * 1024L * 1024L;
@@ -255,37 +264,54 @@ public final class ImageCriteria {
             .isEmpty()) {
             return verdict(CriteriaEngine.Verdicts.ERROR, "缺少 params.path");
         }
-        double maxRatio = DEFAULT_MAX_SAME_COLOR_RATIO;
-        JsonElement ratioEl = Json.get(params, "maxSameColorRatio");
-        if (ratioEl != null) {
-            if (!ratioEl.isJsonPrimitive() || !ratioEl.getAsJsonPrimitive()
-                .isNumber()) {
-                return verdict(CriteriaEngine.Verdicts.ERROR, "params.maxSameColorRatio 须为数值");
-            }
-            double v = ratioEl.getAsDouble();
-            if (Double.isNaN(v) || Double.isInfinite(v) || v < 0.0d || v > 1.0d) {
-                return verdict(CriteriaEngine.Verdicts.ERROR, "params.maxSameColorRatio 须在 0..1，收到 " + v);
-            }
-            maxRatio = v;
+        String maxErr = ratioError(params, "maxSameColorRatio");
+        if (maxErr != null) {
+            return verdict(CriteriaEngine.Verdicts.ERROR, maxErr);
         }
+        double maxRatio = ratio(params, "maxSameColorRatio", DEFAULT_MAX_SAME_COLOR_RATIO);
         UniformityResult r = uniformity(resolve(path));
         if (!r.readable) {
             return verdict(CriteriaEngine.Verdicts.ERROR, "无法解码图像: " + r.error + "（" + path + "）");
         }
-        String detail = String.format(
-            Locale.ROOT,
-            "%s 主色 #%08X 占 %d/%d = %.6f，阈值 %.6f，采样=%s",
-            path,
-            Integer.valueOf(r.dominantColor),
-            Integer.valueOf(r.dominantCount),
-            Integer.valueOf(r.sampled),
-            Double.valueOf(r.dominantRatio),
-            Double.valueOf(maxRatio),
-            r.strategy);
+        String detail = uniformityDetail(path, r, maxRatio);
         if (r.dominantRatio >= maxRatio) {
             return verdict(CriteriaEngine.Verdicts.RED, "图像近似纯色（黑屏/全白假图嫌疑）: " + detail);
         }
         return verdict(CriteriaEngine.Verdicts.GREEN, "图像非纯色: " + detail);
+    }
+
+    /**
+     * {@code image-uniform} 求值（PR-3，case-file.md §5）——{@code image-not-uniform} 的正向反转。
+     *
+     * <p>
+     * 语义：主色占比 <b>≥</b> {@code minSameColorRatio} 判<b>绿</b>（图像近纯色），否则红。
+     * 用途是「TE 渲染距离门」这类<b>负向可视断言</b>：远机位拍到的场景应被距离门剔除大部分
+     * （AE2 电缆 30 方块 / LP 管道 256 方块），画面因此近似纯背景——渲染门失效时画面出现结构，
+     * 主色占比下降，判据如实变红。与 {@code image-not-uniform} 共用同一份解码与主色统计口径。
+     *
+     * @param params {@code {path,minSameColorRatio?}}
+     * @return {@code {verdict, detail}}
+     */
+    public static JsonObject evaluateUniform(JsonObject params) {
+        String path = Json.optString(params, "path", null);
+        if (path == null || path.trim()
+            .isEmpty()) {
+            return verdict(CriteriaEngine.Verdicts.ERROR, "缺少 params.path");
+        }
+        String minErr = ratioError(params, "minSameColorRatio");
+        if (minErr != null) {
+            return verdict(CriteriaEngine.Verdicts.ERROR, minErr);
+        }
+        double minRatio = ratio(params, "minSameColorRatio", DEFAULT_MIN_SAME_COLOR_RATIO);
+        UniformityResult r = uniformity(resolve(path));
+        if (!r.readable) {
+            return verdict(CriteriaEngine.Verdicts.ERROR, "无法解码图像: " + r.error + "（" + path + "）");
+        }
+        String detail = uniformityDetail(path, r, minRatio);
+        if (r.dominantRatio >= minRatio) {
+            return verdict(CriteriaEngine.Verdicts.GREEN, "图像近似纯色（符合近纯色断言）: " + detail);
+        }
+        return verdict(CriteriaEngine.Verdicts.RED, "图像不够纯色（主色占比低于阈值，TE 距离门可能未生效）: " + detail);
     }
 
     // ------------------------------------------------------------ 产物路径解析
@@ -332,6 +358,49 @@ public final class ImageCriteria {
     }
 
     // ------------------------------------------------------------ 工具
+
+    /**
+     * 阈值参数校验：非法返回错误说明，合法返回 {@code null}。
+     *
+     * <p>
+     * 与 {@link CaseValidator} 的校验是同一套判定（校验期拦字段错误、求值期拦运行期取值），
+     * 两处必须一致，故集中在这里。
+     */
+    static String ratioError(JsonObject params, String key) {
+        JsonElement ratioEl = Json.get(params, key);
+        if (ratioEl == null) {
+            return null;
+        }
+        if (!ratioEl.isJsonPrimitive() || !ratioEl.getAsJsonPrimitive()
+            .isNumber()) {
+            return "params." + key + " 须为数值";
+        }
+        double v = ratioEl.getAsDouble();
+        if (Double.isNaN(v) || Double.isInfinite(v) || v < 0.0d || v > 1.0d) {
+            return "params." + key + " 须在 0..1，收到 " + v;
+        }
+        return null;
+    }
+
+    /** 取阈值参数（缺失用默认值）；假定已过 {@link #ratioError}。 */
+    static double ratio(JsonObject params, String key, double def) {
+        JsonElement e = Json.get(params, key);
+        return e == null ? def : e.getAsDouble();
+    }
+
+    /** 主色统计的人读详情（两条判据共用，保证口径一致可自证）。 */
+    private static String uniformityDetail(String path, UniformityResult r, double ratio) {
+        return String.format(
+            Locale.ROOT,
+            "%s 主色 #%08X 占 %d/%d = %.6f，阈值 %.6f，采样=%s",
+            path,
+            Integer.valueOf(r.dominantColor),
+            Integer.valueOf(r.dominantCount),
+            Integer.valueOf(r.sampled),
+            Double.valueOf(r.dominantRatio),
+            Double.valueOf(ratio),
+            r.strategy);
+    }
 
     /** 判据结论 {@code {verdict, detail}}。 */
     private static JsonObject verdict(String verdict, String detail) {
