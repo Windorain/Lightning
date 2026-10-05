@@ -1,4 +1,4 @@
-# scripts/control-plane —— 控制面脚本（PR-1）
+# scripts/control-plane —— 控制面脚本（PR-1 + PR-2）
 
 > 契约权威文档： [`docs/control-plane/contract.md`](../../docs/control-plane/contract.md)（端点/错误码/权限/端口）、
 > [`docs/control-plane/case-file.md`](../../docs/control-plane/case-file.md)（用例格式/判据注册表/变体/证据）、
@@ -13,6 +13,8 @@
 | `caller.mjs` | **无先验知识调用方**（验收锚）：只凭 `GET /cp/v1/actions` 的自描述构造调用 |
 | `cases/smoke-basic.json` | PR-1 冒烟用例（`lightning.case/1`）：虚空世界 + 3 石 + 1 箱（TE 补全）+ 负对照变体 |
 | `run-smoke.ps1` | 无人值守冒烟驱动：写配置 → 起客户端 → 依次断言 A1..A9 → 收尾归档 |
+| `cases/smoke-shots.json` | **PR-2** 取证拍摄用例：同一场景 + `capture` 段 + 3 机位（透视/正交/超分拼接）+ 图像判据 + 负对照变体（见 §9.2） |
+| `run-shots.ps1` | **PR-2** 取证拍摄验收驱动：写配置 → 起客户端 → 依次断言 B1..B7 → 收尾归档（截图原图另平铺一份，见 §9.4） |
 
 脚本只做**编排与调用**：控制面本体在 `mod/gtnh/src/main/java/com/lightning/mod/client/controlplane/`。
 脚本不直接 POST 裸请求——一切动作调用都经 `caller.mjs`（自描述驱动），便于审计「调用方是否真的读了自描述」。
@@ -220,3 +222,184 @@ pwsh -File scripts/control-plane/run-smoke.ps1 -CaseFile <path>                 
 4. **按段连跑的产物归属**：契约 §8.2 要求「按段连跑与整跑一致」，但未定义段产物是否跨 run 目录承接。
    本脚本按**并集口径**比对（段集合相等、判据结论逐条相等、整跑产物都能在并集里找到），
    并把 `manifest.json`/`observation.json` 列为「记账类允许缺」。
+
+## 9. PR-2 取证拍摄验收（`cases/smoke-shots.json` + `run-shots.ps1`）
+
+> 契约出处：[`contract.md`](../../docs/control-plane/contract.md) §4.1（`shot.multi`/`capture.*`/`CameraSpec`）、
+> §4.2（相机与渲染规则）、[`case-file.md`](../../docs/control-plane/case-file.md) §4（`capture`/`cameras`）、
+> §5（`image-size-equals`/`image-not-uniform`）、§6（负对照）。
+> 前置、启用通道、端口、`caller.mjs` 用法与退出码**与 §2/§3.1 完全一致**，本节不重复。
+
+### 9.1 `run-shots.ps1` 用法
+
+```powershell
+pwsh -File scripts/control-plane/run-shots.ps1                     # 全流程（申请到 runClient 后跑）
+pwsh -File scripts/control-plane/run-shots.ps1 -SkipClientStart    # 复用已在跑的客户端（不写配置、不停客户端）
+pwsh -File scripts/control-plane/run-shots.ps1 -KeepClient         # 跑完保留客户端现场
+pwsh -File scripts/control-plane/run-shots.ps1 -LegacyJdk          # 退回 runClientSdePipeline（默认 runClient25）
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `-CaseFile` | `cases/smoke-shots.json` | 用例文件（用例必须有 `cameras` 段与 `variants` 段，否则前置即退出 4） |
+| `-McDataDir` | `mod/gtnh/run/client` | 覆盖 mcDataDir（离线自检用） |
+| `-SkipClientStart` | 关 | 复用已在跑的客户端；要求端口在听且 `server.json`/`tokens.json` 就绪 |
+| `-KeepClient` | 关 | 不停止本脚本启动的客户端 |
+| `-EnableViaJvmProperty` | 关 | 后备启用通道（排障） |
+| `-UseModernJdk` | **开（默认行为）** | 只为与 `run-smoke.ps1` 的写法兼容而保留：给了也是默认行为（裸开关可用，不报错） |
+| `-LegacyJdk` | 关 | 退回 `runClientSdePipeline`；与默认（现代 JVM）互斥，给了它就以它为准 |
+| `-Port` | `23057` | 仅前置占用检查用（后续一律以 `server.json` 的 `port` 为准） |
+| `-ClientReadyTimeoutMin` | `5` | 等待 `server.json` 的上限 |
+| `-CaseTimeoutMs` | `900000` | 单次 `case.run` 总超时（PR-2 整跑含世界重建 + 3 机位拍摄，比 PR-1 冒烟长） |
+| `-ActionTimeoutMs` | `600000` | 单次 `world.rebuild`/`shot.multi` 总超时 |
+| `-ArchiveRoot` | `D:\Workspace\Lightning\temp\control-plane` | 归档根（本次目录 `shots-<ts>\`） |
+| `-FileParamName`/`-VariantParamName` | 空 | 参数名覆盖（默认从自描述探测；探测失败才需要显式给） |
+
+**`-CaseTimeoutMs`/`-ActionTimeoutMs` 不只是 caller 的等待上限**：脚本还会把它作为动作自身的
+`totalTimeoutMs`/`stageTimeoutMs` 传下去（**仅当该动作的自描述声明了这两个参数**，名字从 `--describe` 探测；
+阶段预算被钳到不超过总预算）。理由是 `SteppingActionBase` 的默认值只有**总 5 min / 阶段 3 min**，
+而 PR-2 整跑含「世界重建 + 3 机位拍摄」，不显式对齐就会出现「慢但正确」被判 `CP-EXEC-002` 的假红。
+
+**与 `run-smoke.ps1` 的关系**：流程骨架、`lightning.cfg` 写入（`Enable-ControlPlaneCfg`，Forge 分节格式）、
+陈旧发现文件移入 `stale/`、`Invoke-Caller`（只经 `caller.mjs`）、收尾三段（停客户端 → 还原 cfg → 归档）
+**同源**；`run-shots.ps1` 不抽公共模块而是就地复制（两个驱动各自的归档/还原路径耦合在自身脚本里，
+抽公共要再引入一个两边都加载的模块文件）。差异：断言集 B1..B7、`--tier forensic` 显式指定、
+`capture.*`/`world.rebuild`/`shot.multi` 的额外调用、归档多一份截图原图平铺、动作自身超时对齐。
+
+### 9.2 `cases/smoke-shots.json`
+
+- `world`：`folder=cp_smoke_shots`、`seed=20261006`、`void=true`、`base=[64,12,64]`、`settleTicks=60`；
+- `build`：清场 `[63,11,63]..[68,14,68]` → 3×`minecraft:stone` 横排（`base+[0,0,0]` / `@base`+`offset` / 绝对 `[66,12,64]`）
+  → 1×`minecraft:chest`（`base+[0,0,1]`）+ `te` 步 `completer:"vanilla"` → `wait 20`；
+- `capture`：`{lighting:"natural", renderMode:"本色", worldTime:6000}`（会话默认；worldTime 6000 = 正午）；
+- `cameras`（3 机位，看的是同一场景 bbox `x[64,67] y[12,13] z[64,66]`，中心 `(65.5,12.5,65.0)`）：
+
+  | 机位 | pos | yaw | pitch | 投影 | resolution | tile |
+  |---|---|---|---|---|---|---|
+  | `persp-main` | `[65.5,16.5,69.5]` | 180.0 | 41.63 | perspective fov 70 | 1280×720 | — |
+  | `ortho-top` | `[65.5,18.0,65.0]` | 180.0 | 90.0 | ortho orthoHeight 12 | 1280×720 | — |
+  | `persp-tiled` | `[68.5,16.5,68.5]` | 139.4 | 40.95 | perspective fov 70 | 1920×1080 | 2×2 overlap 0.05 |
+
+- **yaw/pitch 的算法（可复算）**：1.7.10 的视线方向
+  `d = (-sin(yaw)·cos(pitch), -sin(pitch), cos(yaw)·cos(pitch))`（`EntityLivingBase.getLook` 口径；
+  本树 `mod/gtnh/build/rfg/minecraft-src` 的 `EntityRenderer.orientCamera` 把 `rotationPitch` 原样 `glRotatef`，
+  与 AE2/Botania/BloodMagic 的 `getLook` 副本一致）。⇒ **pitch 为正才是俯视**，三机位取
+  `yaw = 180° - atan(dx/dz)`、`pitch = atan(|dy| / 水平距离)` 对准场景中心，见 §9.7 留白 1。
+- `criteria`（8 条，id 与语义）：
+
+  | id | 类型 | 断言 |
+  |---|---|---|
+  | `persp-main-size` / `ortho-top-size` | `image-size-equals` | `1280×720`（整图尺寸，拼接机位指拼接后整图） |
+  | `persp-tiled-size` | `image-size-equals` | `1920×1080` |
+  | `persp-main-not-uniform` / `persp-tiled-not-uniform` | `image-not-uniform` | 默认阈值 `0.98` |
+  | `ortho-top-not-uniform` | `image-not-uniform` | 显式 `maxSameColorRatio=0.995`（理由见 §9.7 留白 4） |
+  | `persp-main-meta-exists` | `artifact-exists` | `shots/persp-main.meta.json` |
+  | `observation-camera-injected` | `json-field` | `observation.json #/observation/camera/mode == "injected"` |
+
+- `variants`：`neg-persp-main-width` 把 `criteria[0].params.width` 改成 `9999`（**只动判据、不动 world/build**，
+  因此整跑时的变体扫描也会真实求值，`evaluated=true`），`expectCriteriaRed=["persp-main-size"]`；
+- `evidence.expect`：`observation.json` / `criteria.json` / `shots/{persp-main,ortho-top,persp-tiled}.png`
+  （缺失即 `evidence-complete` 红）。
+
+### 9.3 断言 B1..B7
+
+| id | 断言 | 红意味着 |
+|---|---|---|
+| B1/B1b/B1c | `case.run --tier forensic --sync` 退出码 0；`result.overall=green`；`shots.cameraCount==3` 且 `failedCount==0` | 取证拍摄整跑不通过（用例判据/证据任一处红），或机位没拍全 |
+| B2a | run 的 `criteria.json` 全绿且覆盖用例全部判据 id | 图像判据没满足（黑屏/纯色/尺寸不符）或判据缺失 |
+| B2b | `evidence.json` 的 `overall=green` 且 `expect` 里每条路径都在 run 目录里 | 证据清单缺项（本次缺的是截图原图或两份记账文件） |
+| B2c | `observation.json` 的 `/observation/camera/mode == injected` | 相机不是注入式（PR-1 占位值 `player` 没被覆盖） |
+| B2d | `observation.playerPos` 与 `observation.camera.pos` 至少一轴相差 > 0.5 | 门控位置分离（contract §4.2.2）没落地：机位与玩家位置被写成同一个 |
+| B2e | `observation.cameras[]` 数量与名字 == 用例声明 | 多机位摘要缺失或顺序错乱 |
+| B3a/B3b/B3c/B3d | 变体单跑退出码 0；`result.variantVerification.ok=true`；变体 run 的 `criteria.json` 里 `expectCriteriaRed` 全 `red`；其余判据仍 `green` | 负对照恒绿（假绿，防不住错图）或变体求值跑偏 |
+| B4a/B4b/B4c/B4d | `capture.begin` 退出码 0 → 会话期间 `world.rebuild` 非 0 且 `error.code=CP-STATE-001` → `capture.end` 退出码 0 且 `wasArmed=true` → 再 `world.rebuild` 退出码 0 且 `scene.sha256` 非空 | 捕获会话没封住世界写动作（取证期间世界仍在变），或会话泄漏（永久封死写动作） |
+| B5 | 含 `cameras` 段的 `case.run` 用 `--tier scene --sync`：非 0 且 `httpStatus=403` + `error.code=CP-AUTH-002` | 按内容升格（contract §4.2.9）没生效：低权限调用方顺手拿到了取证截图 |
+| B6a | 3 机位 `shots/<name>.png` 存在且 >0 字节；`shots/**/*.png` 无 0 字节 | 截图没落盘/落成空文件（`ScreenShotHelper` 失败也返回非 null，只能靠文件断言） |
+| B6b | 每机位 `meta.json` 的 `cameraHeldDuringRender=true`，`resolution`/`requestedResolution` 与用例声明一致 | 渲染期 `renderViewEntity` 被改回玩家（静默错图），或分辨率覆写没生效 |
+| B6c | 三张整图 PNG **头实读**尺寸 == 声明 | 只靠 meta 自证不够；判据 `image-size-equals` 的同一口径独立复核 |
+| B6d | 拼接机位 `shots/<name>.tiles/` 的片数 == `meta.tile.cols × rows`（**实际网格**，非声明值） | 分片丢失，或执行器/投影覆写的有效网格对不上（`requestedCols/Rows` 只记声明） |
+| B6e | 单片命名 == `r<row>c<col>.png`（1 起，`ShotExecutor.tileName`），且无 0 字节片 | 逐片留痕的命名口径变了（事后无法按行列核对接缝） |
+| B7a | `core.status` 退出码 0 且 `world.loaded=true`、`world.managed=true` | 拍摄把世界弄丢了（离开世界没重进） |
+| B7b/B7c | 收尾用同一机位规格再调一次 `shot.multi`：退出码 0、`settingsRestored=true`、`baseDisplayWidth/Height` 与 `observation.clientConfig.displayWidth/Height` 一致；新图尺寸与 meta 留痕正确 | 投影/FOV/分辨率/`renderViewEntity`/`gameSettings` 有残留（第一次拍摄污染了后续） |
+
+**退出码**：`0` 全绿；`2` 有断言红；`3` 管线级致命（`server.json` 超时 / 客户端早退）；`4` 前置检查或编排自身失败。
+**参数名自适应**：`file`（`file|case|caseFile|path|casePath`）与变体选择参数（`variant|variants|variantId|variantIds`）
+从 `case.run` 自描述探测，并记成断言 `P2 param:file` / `P3 param:variant`；自描述没有变体参数 → `P3` 红（B3 无从验证）。
+§8.2 的留白（`case.run` 如何选定单个变体）已由 PR-2 自描述落地为 `variant`。
+
+### 9.4 产物与归档（截图原图是证据）
+
+归档目录 `<ArchiveRoot>\shots-<ts>\`：
+
+| 内容 | 说明 |
+|---|---|
+| `runs/<runId>/` | 本次会话**每个** run 目录（`case.run` 整跑/变体、`world.rebuild`、`shot.multi`、`capture.*`）；`Invoke-Caller` 按「调用前后新增的 run 目录」登记，不猜「最新」 |
+| `shots-flat/` | **全部截图原图平铺**：`<runId>__<机位>.png`、`<runId>__<机位>.tiles__r<row>c<col>.png`。验收时直接当 Gitea 附件上传（AGENTS.md 铁律：证据当场落 Gitea，`temp/` 里的不算） |
+| `events.jsonl` | 事件流水副本（含 `case-segment`/`criteria-verdict`） |
+| `logs/gradle-runClient.log`、`.err` | 客户端进程 stdout/stderr |
+| `logs/fml-client-latest.log` | 客户端日志（`/cp/v1/logs/tail` 的数据源） |
+| `logs/caller-*.json` | 每次调用的作业 JSON / 错误信封（`--json-out`） |
+| `lightning.cfg.before` / `.after` / `.created-by-run-shots` | 配置原值 / 收尾值 / 新建件（新建件移入归档而非删除） |
+| `stale/` | 启动前移开的陈旧 `server.json`/`tokens.json` |
+| `assertions.json`、`summary.md`、`session.json` | 断言红绿表（机读 + 人读 + 会话摘要：用例 id、机位清单、run 目录清单、平铺张数） |
+
+`summary.md` 另附**每个 run 的逐条判据结论表**（`criteria.json` 的 id/verdict/detail），便于把红绿表与判据结论一起当附件。
+托管存档（`<mcDataDir>/saves/cp_smoke_shots`）不自动清理。
+
+### 9.5 脚本依赖的 PR-2 契约事实（对照表增量）
+
+| 脚本依赖 | 出处 |
+|---|---|
+| `shot.multi`（forensic）+ `cameras`/`target`/`lighting`/`renderMode`/`worldTime`/`capture` 参数、`since 1.1` | contract.md §4.1 |
+| `capture.begin`/`capture.end`（forensic，`{confirm:true}`；重复 begin 拒、未 begin 的 end 幂等） | contract.md §4.1 |
+| `CameraSpec = {name,pos,yaw,pitch,projection{type,fov\|orthoHeight},resolution,tile?{cols,rows,overlap}}` | contract.md §4.1 |
+| `shots/<name>.png` + `shots/<name>.meta.json`（schema `lightning.shot-meta/1`）+ 拼接机位 `shots/<name>.tiles/` | contract.md §4.1、case-file.md §4 |
+| `meta.json` 字段 `cameraHeldDuringRender`/`resolution`/`requestedResolution`/`tile{cols,rows,requestedCols,requestedRows,overlap}`/`lightingApplied` | 实现（`ShotExecutor.finishCamera`）；契约 §4.2.6 的 `lightingApplied:false` 留痕口径 |
+| `tiles/` 单片命名 `r<row>c<col>.png`（1 起） | 实现（`ShotExecutor.tileName`）；契约只规定「逐片落盘可审计」 |
+| 图像判据 `image-size-equals{path,width,height}`、`image-not-uniform{path,maxSameColorRatio?}` | case-file.md §5 |
+| `observation.camera{...}`/`cameras[]`/`playerPos`（门控位置分离） | contract.md §4.2.2、observation-record.md §2.4 |
+| 含 `cameras` 段的 `case.run` 按内容升格 → sync 得 HTTP 403 `CP-AUTH-002` | contract.md §4.2.9 |
+| `case.run` 的 `variant` 参数 + `result.variantVerification{ok,actual,notRed,missing}` | 实现（自描述 `variant`、`CaseRunAction.verifyVariant`）；case-file.md §6/§8.5 |
+| 步进动作的 `totalTimeoutMs`/`stageTimeoutMs`（默认 5 min / 3 min） | 实现（`SteppingActionBase.PARAM_*`，自描述里带 default） |
+
+### 9.6 自检记录（离线，不含客户端实测）
+
+| 自检 | 结果 |
+|---|---|
+| `node --check`（`caller.mjs` 未改）+ 用例 JSON `JSON.parse` | 通过 |
+| `run-shots.ps1` 解析检查（`[Parser]::ParseFile`） | 通过（8433 token，0 错误） |
+| `cases/smoke-shots.json` × 仓内**真实** `CaseValidator.validate`（`core/` 全量 `javac` 编译 + gson 2.2.4，临时 main） | `VALID`：8 判据 / 3 机位 / 1 变体，`variants[0].applicable=true`，`evidence` 5 项；唯一 warning 是「cameras 段非空 ⇒ 需 forensic」（预期） |
+| 同法回归 `cases/smoke-basic.json` | 仍 `VALID`，`warnings=[]` |
+| `run-shots.ps1` × 行为替身（契约面 stub：自描述 + 同步作业 + run 产物形态 + 真 PNG） | 全绿 28 条断言 → 退出 0；注入缺陷时精确变红：tiles 少一片 → `B6d`/`B6e` 红、退出 2；变体不变红 → `B3a`/`B3b`/`B3c` 红、退出 2；升格不生效 → `B5` 红、退出 2；端口不在听 → 退出 4 |
+| `run-shots.ps1` × 自描述驱动的超时对齐 | 请求体里带 `totalTimeoutMs`/`stageTimeoutMs`（B1 的 `case.run`、B4 的 `world.rebuild`、B7 的 `shot.multi`），名字先经 `--describe` 探测 |
+
+### 9.7 已知留白与实现/契约不一致（需要实现侧裁决）
+
+1. **`pitch` 符号：契约注释与 1.7.10 现实相反。** `docs/control-plane/contract.md` §4.1 的 `CameraSpec` 示例
+   （`pos [64.5,20,70.5]`、`pitch -45`）与 `CameraSpec.java` 的字段注释（`负为俯视`）都假定「负 = 俯视」，
+   而 `VirtualCamera.place()` 把 `pitch` 原样写进 `rotationPitch`，`EntityRenderer.orientCamera` 也是原样
+   `glRotatef` ⇒ 按 `getLook` 口径 `d.y = -sin(pitch)`，**负 pitch 是仰视**。本用例按「俯视场景」的真实需求取正 pitch；
+   若裁决以契约为准，实现需在注入前取负（并同步两篇文档），届时本用例三机位的 pitch 要一并翻转。
+2. **`camera.pos` 与有效视点差 1.7 格。** `EntityRenderer.orientCamera` 用 `f1 = yOffset - 1.62F` 与
+   `glTranslatef(0, f1, 0)`（非第三人称另有 `-0.1`）定位视点，而 `VirtualCamera` 把 `yOffset` 置 0 ⇒
+   有效视点 = 声明 `pos.y - 1.72`（类注释「视点 = posY + yOffset」少了 `-1.62` 常量；要「pos 即视点」应设
+   `yOffset = 1.62`）。本用例的取景角按声明 `pos` 计算，并在两种口径下都留了 ≥10° 的余量（场景始终在画面内），
+   但 `observation.camera.pos` / `meta.spec.pos` 记的是**声明值**而非有效视点——事后从留痕复算实际取景会差 1.7 格。
+3. **真实玩家实体会进画面。** `RenderGlobal.renderEntities` 只跳过 `renderViewEntity` 自己；注入相机不是玩家，
+   于是玩家稳定化位置 `base + (0.5,1,0.5)`（= 第一块石头那一格）的玩家模型会被渲染进所有机位。
+   这是 A3「门控位置分离」的必然代价（世界侧确实没动玩家），但看图的人要知道画面里那个实体是玩家，不是场景物。
+   要不要在拍摄期隐藏玩家实体（`mc.thePlayer` 走 `RenderGlobal` 的既有跳过分支之外再加一条）属产品裁决。
+4. **正交俯拍必然顶到 `image-not-uniform` 的默认阈值。** `orthoHeight=12` + 16:9 ⇒ 画面覆盖 ≈21.3×12 格；
+   场景可见面积（3 石 + 1 箱顶面，正交俯视只看顶面）≈3.8 格² ⇒ 只占画面 ≈1.5%，其余是虚空背景的**单一颜色**
+   （相机在地平线以下时 `RenderGlobal.renderSky` 用纯色面/黑盒铺底，正交下所有背景像素等距 ⇒ 无渐变）。
+   默认 `maxSameColorRatio=0.98` 对**正确**的正交俯拍图也会判红，故该判据显式写 `0.995`
+   （纯色假图仍是 `1.0` ⇒ 仍拦得住）。这是用例侧的阈值校准，不是判据类型的问题；但若后续再有「大范围小场景」
+   的正交机位，都会撞同一件事，值得在 contract §4.2 记一条「正交机位的 `image-not-uniform` 阈值按场景占比给」。
+5. **拼接机位的中间帧命名与登记。** `ShotExecutor.shoot()` 对拼接机位把每片渲染帧也落在
+   `shots/<name>-r<row>c<col>.png`（与 `shots/<name>.tiles/r<row>c<col>.png` **不同名**），且这些中间帧
+   **不登记**进 `manifest.json` / `artifacts`（`GET /cp/v1/artifacts/{runId}` 看不到）。判据与 B6 只用
+   `tiles/` 的口径；中间帧是否该登记、命名是否该与 `tiles/` 统一，留待实现侧。
+6. **`evidence-complete` 只落在 `evidence.json`。** `criteria.json` 里没有这条 id，判据集合与证据结论是两份文档。
+   因此 `run-smoke.ps1` 的 A4c（在 criteria 的 verdict map 里找 `evidence-complete`）恒为空转（有 `if` 保护，不误报红）；
+   本驱动的 B2b 直接读 `evidence.json`。
+
