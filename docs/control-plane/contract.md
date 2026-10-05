@@ -68,7 +68,40 @@
 | `case.validate` | observe | 解析用例文件，返回规范化执行计划（分段列表、判据、期望证据）或逐字段错误 |
 | `case.run` | scene 起 | 执行用例文件：默认整跑；`segments:[...]` 按段执行。**整跑与按段共用同一实现、同一产物形态**（验收锚）。产物为 run 目录 + 观测记录 + 判据结论 |
 
-PR-2 追加取证级动作（`shot.multi`、`capture.*`），PR-3 追加双轨判据动作；追加不改本表已有语义。
+PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
+
+### 4.1 取证级动作（PR-2，Refs #41）
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `shot.multi` | forensic | 多机位截图：参数 `{cameras:[CameraSpec], target?:bbox, lighting?:natural\|neutral-flat, renderMode?:本色\|参与光照, worldTime?}`。每机位产 `shots/<name>.png`（拼接机位另产 `shots/<name>.tiles/` 与 `shots/<name>.meta.json`），全部产物登记哈希；观测记录按机位更新 camera/projection/lighting/renderMode |
+| `capture.begin` / `capture.end` | forensic | 捕获会话包围：begin 后禁止一切世界写动作（违规 CP-STATE-001），end 释放；`case.run` 的 capture 段自动包围 build 之后、shots 之前的区间 |
+
+`CameraSpec`：
+
+```jsonc
+{
+  "name": "front-top",                     // 机位 id，产物文件名
+  "pos": [64.5, 20.0, 70.5],             // 相机世界坐标（门控位置分离：与 playerPos 各自记录）
+  "yaw": 180.0, "pitch": -45.0,
+  "projection": {                          // 二选一
+    "type": "perspective", "fov": 70
+    // "type": "ortho", "orthoHeight": 16.0    // 正交：视高（方块数），宽按画面宽高比推
+  },
+  "resolution": [1920, 1080],
+  "tile": { "cols": 2, "rows": 2, "overlap": 0.05 }  // 可空：超分拼接（投影偏移法，非视口拼接）
+}
+```
+
+### 4.2 相机与渲染规则（PR-2，#41 落地）
+
+1. **注入式相机**：渲染时用虚拟相机实体替换 `mc.renderViewEntity`（不传送真实玩家）；TE 渲染距离门（如 AE2 电缆 30 方块，`TileCableBus.getMaxRenderDistanceSquared()=900.0`）随相机位置生效——这是注入而非挪玩家的核心理由。
+2. **门控位置分离（A3）**：`observation.playerPos` 恒为真实玩家位置，`observation.camera.pos` 为机位；两者各自记录，判据可分别断言。
+3. **正交投影**：渲染帧内替换投影矩阵，帧结束还原；透视/正交逐机位独立。
+4. **超分拼接**：投影偏移 tiling（各 tile 用偏移投影矩阵渲染后像素级拼接）；**禁止视口拼接**（`EntityRenderer` 会强制视口尺寸，tile 间接缝错）；overlap 默认 5%，拼接后裁边。
+5. **GL 线程**：shot/capture 类动作经 tick 排空后转渲染线程执行（§1.8 的 PR-2 延伸）；渲染线程故障 CP-EXEC-001 并附摘要。
+6. **光照参与开关（豁免一）**：`renderMode` 逐机位可覆盖会话默认；`本色`=不动光照管线，`参与光照`=注入中性光照（neutral-flat）使暗部可读；观测记录逐图标注实际模式。
+7. **世界时刻**：`worldTime` 决定拍摄光照基准；观测记录落实际 worldTime。
 
 ## 5. 版本化规则
 

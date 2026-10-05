@@ -49,4 +49,5 @@
 1. **哈希口径**：`sha256` 对被引文件的字节内容计算；`runtimeReads[].sha256` 对摘要对象的规范化 JSON（键排序、无空白）计算。
 2. **不含**的东西：本文件不是日志（日志走事件流水与 log tail），不是判据结论（走 `criteria.json`）。
 3. PR-1 时 `observation.camera/projection` 为占位值（player/perspective），PR-2 起由拍摄动作填充真实机位与投影参数；字段一经引入不得改义（契约版本化规则同 contract.md §5）。
+4. **多机位口径（PR-2）**：`observation.camera` 记录**首个机位**（会话代表），`observation.cameras[]` 追加全部机位的 `{name, pos, yaw, pitch, projection, resolution, tile?}` 摘要；逐机位的实际 renderMode/lighting/worldTime 落 `shots/<name>.meta.json`（schema `lightning.shot-meta/1`），观测记录的 artifacts 引用全部机位产物。
 4. 观测记录随产物落盘、随产物归档上 Gitea；`temp/` 只放可弃副本。
