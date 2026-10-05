@@ -48,7 +48,7 @@ public final class GeometryPalette {
      * 刻意保留成常量而不是删掉字段：它是「产物无缩略图」这一契约的机器可读落点
      * （写进 {@link #statsJson()}，并在 T1.5/T1.3 的配置回报里回显），
      * 使「产物里没有 thumbnailPNG」可被判据核对，而不是靠人读代码。
-     * 完整论证与实测证据见 {@code docs/plan/fix-thumbnail-determinism.md}。
+     * 完整论证与实测证据见契约 {@code docs/contracts/format-multiblock-doc.md} §6.3（历史报告见 issue #51 / git 历史）。
      */
     public static final boolean EMITS_THUMBNAIL_PNG = false;
 

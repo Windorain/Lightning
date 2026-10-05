@@ -14,7 +14,7 @@
  *   - mod/.../client/meshcapture/MeshCaptureService.java（blockPalette / cellGrid 写出）
  *   - web/src/render/data/compactSceneDocument.ts （信封判定 / 解压）
  *
- * 设计要点（详见 docs/plan/volume-profile-baseline.md）：
+ * 设计要点（详见历史体积剖析报告，原文见 issue #51 / git 历史）：
  *   - 不重新序列化输入文件：直接扫描**原始文本**的字节区间，因此每个字节桶都能唯一归属到
  *     一个真实存在的字段路径，且 sum(桶) == 非空白字节数（有断言保证）。
  *   - gzip / base64 后体积：由 Node 内置 zlib 在同一进程内重算（gzipSync level 9 + base64），

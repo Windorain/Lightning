@@ -26,7 +26,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  * boxProvenance=both}。
  *
  * <p>
- * 反射调用链（与 P0.2 探针 {@code docs/plan/probe-family-apis.md} §3 逐跳一致，18 个方法实证同名可达；
+ * 反射调用链（逐跳与历史族 API 探针 §3 一致，18 个方法实证同名可达；
  * FMP 是 Scala 编译产物，纯运行时反射，不引用 codechicken 任何编译期类型）：
  *
  * <pre>

@@ -74,7 +74,7 @@ final class MultiblockExpandedWriter {
             "text",
             "structuralCompression=false（T1.5 配置面）：本产物是**组合展开形态**——每帧内联完整 cellGrid、"
                 + "无差异规则表，仅供体积对照/诊断，**不通过 T0.5 契约校验器**（frames[].cellGrid 是硬失败项）。");
-        n.addProperty("source", "multiblock-channel-renderer-plan.md §T1.5 配置面");
+        n.addProperty("source", "导出范围配置面（契约见 docs/contracts/format-multiblock-doc.md；过程性计划已按 #51 裁决删除）");
         notes.add(n);
         mb.add("notes", notes);
         JsonObject vs = new JsonObject();

@@ -355,7 +355,7 @@ function main() {
     mode: runState.mode ?? 'acceptance',
     scope: {
       command: runState.command ?? null,
-      plan: 'docs/plan/non-full-cube-parts-plan.md §5（P3.1–P3.4）',
+      plan: '（过程性计划已按 #51 裁决删除；契约口径见 docs/contracts/format-parts-contract.md）',
       contract: 'docs/contracts/format-parts-contract.md',
       zones: runState.zones ?? null,
       l1Runs: l1Dirs.length,

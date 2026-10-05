@@ -1,7 +1,6 @@
 # 部件验收（P3.1–P3.4）—— 一条命令跑通全闭环
 
-> 计划：`docs/plan/non-full-cube-parts-plan.md` §5（Phase 3）+ §6（调度者把关清单）
-> 契约：`docs/contracts/format-parts-contract.md`
+> 契约：`docs/contracts/format-parts-contract.md`（判据与口径真源；过程性计划已按 #51 裁决删除，原文见 issue #51 / git 历史）
 
 ## 1. 一条命令
 

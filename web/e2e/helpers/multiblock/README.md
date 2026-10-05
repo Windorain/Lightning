@@ -1,6 +1,6 @@
 # T2.6 无头渲染断言管线 —— harness 说明（第一阶段：骨架；第二阶段：通道滑杆全组合遍历；第三阶段：真实导出产物验收 T3.1/T3.3）
 
-> 计划依据：`docs/plan/multiblock-channel-renderer-plan.md` §T2.6、§5 Phase 3（E 管线的 web 半环）。
+> 依据：`docs/contracts/format-multiblock-doc.md`（E 管线的 web 半环；过程性计划已按 #51 裁决删除，原文见 git 历史）。
 > 本目录只做**测试**，不改 `web/src/`。运行：`cd web && npm run test:e2e:multiblock`（全部 multiblock spec）
 > 或 `cd web && npx playwright test multiblock-real-acceptance.spec.ts`（第三阶段）。
 >

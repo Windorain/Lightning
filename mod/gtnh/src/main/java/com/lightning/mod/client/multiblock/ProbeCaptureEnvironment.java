@@ -12,7 +12,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  * 捕获期的「渲染环境对齐」句柄：把 <b>其它模组渲染代码会去查询的客户端会话状态</b>在捕获窗口内指向
  * <b>被捕获的那个世界</b>，结束后逐项还原。
  * <p>
- * <b>为什么必须有这一步（真实 BUG 的根因，见 docs/plan/fix-texture-uv.md）</b>：GT5U 的贴图渲染
+ * <b>为什么必须有这一步（真实 BUG 的根因，见历史 UV 修复报告，原文见 issue #51 / git 历史）</b>：GT5U 的贴图渲染
  * {@code GTRenderedTexture#getExtendedFacing(x,y,z)} 查机器朝向时，用的世界是
  * <em>{@code GTMod.proxy.getThePlayer().getEntityWorld()}</em>（= {@code mc.thePlayer.worldObj}，
  * 即<b>会话玩家</b>所在世界），而不是正在渲染的那个世界的 {@code IBlockAccess}：

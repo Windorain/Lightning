@@ -1,7 +1,7 @@
 /**
  * P2.5 · 部件 E2E 断言包（fixture 驱动，接入既有多方块轮管线）。
  *
- * 计划：`docs/plan/non-full-cube-parts-plan.md` §4 P2.5；契约：`docs/contracts/format-parts-contract.md`。
+ * 契约：`docs/contracts/format-parts-contract.md`（过程性计划已按 #51 裁决删除，原文见 git 历史）。
  * 零替身五原则与多方块轮完全一致（见 `helpers/multiblock/harness.ts` 与
  * `helpers/parts/hover.ts` 文件头）：完整 WorkbenchRoot 挂载 → IO 接管
  * （OPERATOR_OPEN_SCENE + File，同生产拖拽）→ Wiki 工作区（生产 EmbedPreview =

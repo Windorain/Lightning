@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * T1.6 游戏内自动导出管线的**默认参数 + 环境前置检查**（留白 #7/#8/#10 的拍板落点，
- * 见 {@code docs/plan/probe-export-pipeline.md}）。
+ * 见历史导出管线报告（原文见 issue #51 / git 历史）。
  * <p>
  * 本类刻意**零 MC 依赖、零 client 依赖**（纯 JDK 文件系统 + 常量），因此：
  * <ul>

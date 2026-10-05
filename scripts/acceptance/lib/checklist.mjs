@@ -280,7 +280,7 @@ export const CHECKLIST = [
         na: false,
         detail: hasCasing
           ? '本子集含 casing 通道，按枚举名消歧'
-          : '本子集 5 台均无重名 id（casing 不在其中）；消歧位（enum+id 双键）由上面第 1 条机器验证，重名场景的证据见 T0.4/T0.5（probe-channels.md §2.4、format-multiblock-doc.md §4.2）',
+          : '本子集 5 台均无重名 id（casing 不在其中）；消歧位（enum+id 双键）由上面第 1 条机器验证，重名场景的证据见 docs/contracts/format-multiblock-doc.md §4.2（历史通道报告 §2.4，issue #51）',
         evidence: [ctx.paths.contractReport].filter(isFile),
       })
     },
