@@ -3,11 +3,32 @@
  *
  * runClient/runServer 额外模组：使用 runtimeOnlyNonPublishable，不写入发布 POM。
  * 版本与 GT5-Unofficial 的 api 依赖及 gradle.properties 中 gtnhRun.gt5Version 对齐。
+ *
+ * 依赖基线分层（#87/#89，Lead 裁决 2026-10-06 containment #4）：gtnhRun.runtimeProfile 一键切换——
+ *   legacy（默认）：既有基线 GT 5.09.52.283 / StructureLib 1.4.28 / GTNHLib 0.9.62，无 Angelica，
+ *         ID 扩展用 NotEnoughIds 2.1.10；ForestryMC 4.11.15；
+ *   ctm：#87 验收基线（报告人同期）GT 5.09.54.194 / StructureLib 1.4.45 / GTNHLib 0.11.52 + Angelica 2.2.16
+ *        （maven release，含 compact CTM）；GT 5.09.54.194 传递引入 EndlessIDs，故该档不装 NotEnoughIds。
+ *        GT 5.09.54.36+ 才含 antimatterglass CTM 规则，
+ *        且 CTM 机制由 Angelica 提供——两者缺一缺陷不显现。
+ *        ForestryMC 分档到 4.11.38（与 GT 5.09.54.194 的 apiElements 声明对齐，见下方林业条目注释）。
+ * 单版本仍可用 gtnhRun.gt5Version / gtnhRun.structureLibVersion / gtnhRun.gtnhLibVersion 显式覆盖。
  */
+def runtimeProfile = (project.findProperty("gtnhRun.runtimeProfile") ?: "legacy").toString()
+def profileDefaults = [
+    legacy: [gt5: "5.09.52.283", structureLib: "1.4.28", gtnhLib: "0.9.62", angelica: null, notEnoughIds: "2.1.10", forestry: "4.11.15"],
+    ctm   : [gt5: "5.09.54.194", structureLib: "1.4.45", gtnhLib: "0.11.52", angelica: "2.2.16", notEnoughIds: null, forestry: "4.11.38"],
+]
+def prof = profileDefaults[runtimeProfile]
+if (prof == null) {
+    throw new GradleException("未知 gtnhRun.runtimeProfile: ${runtimeProfile}（可选: ${profileDefaults.keySet()}）")
+}
+
 dependencies {
-    def gt5Ver = (project.findProperty("gtnhRun.gt5Version") ?: "5.09.52.283").toString()
-    // StructureLib 编译/运行版本；必须与 GT5U 声明的版本一致（GT5U 5.09.52.283 -> StructureLib 1.4.28）
-    def structureLibVer = (project.findProperty("gtnhRun.structureLibVersion") ?: "1.4.28").toString()
+    def gt5Ver = (project.findProperty("gtnhRun.gt5Version") ?: prof.gt5).toString()
+    // StructureLib 编译/运行版本；必须与 GT5U 声明的版本一致（GT5U 5.09.52.283 -> StructureLib 1.4.28；
+    // GT5U 5.09.54.194 -> StructureLib 1.4.45）
+    def structureLibVer = (project.findProperty("gtnhRun.structureLibVersion") ?: prof.structureLib).toString()
 
     implementation("com.google.code.gson:gson:2.8.9")
 
@@ -23,7 +44,7 @@ dependencies {
     //   com.cleanroommc.modularui.api.IGuiHolder                      <- IMetaTileEntity extends
     //   appeng.api.crafting.ICraftingIconProvider                     <- BlockMachines/ItemMachines 继承链
     // 版本取 `gradlew dependencies --configuration runtimeClasspath` 的实际解析结果，保证编译期/运行期锁步。
-    def gtnhLibVer = (project.findProperty("gtnhRun.gtnhLibVersion") ?: "0.9.62").toString()
+    def gtnhLibVer = (project.findProperty("gtnhRun.gtnhLibVersion") ?: prof.gtnhLib).toString()
     compileOnly("com.github.GTNewHorizons:GTNHLib:${gtnhLibVer}:dev") { transitive = false }
     compileOnly("com.github.GTNewHorizons:ModularUI2:2.3.43-1.7.10:dev") { transitive = false }
     compileOnly("com.github.GTNewHorizons:Applied-Energistics-2-Unofficial:rv3-beta-834-GTNH:dev") { transitive = false }
@@ -33,8 +54,13 @@ dependencies {
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:StructureLib:${structureLibVer}:dev")
     runtimeOnlyNonPublishable("net.industrial-craft:industrialcraft-2:2.2.828-experimental:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.68-GTNH:dev")
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:GTNHLib:0.9.20:dev")
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughIds:2.1.10:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:GTNHLib:${gtnhLibVer}:dev")
+    // NotEnoughIds 与 EndlessIDs 互斥：EndlessIDs 启动即 FATAL（"EndlessIDs replaces NotEnoughIDs!
+    // Please uninstall NotEnoughIDs!"）。ctm 档的 GT 5.09.54.194 传递引入 endlessids-mc1.7.10，
+    // ID 扩展角色由 EndlessIDs 接管，故该档不装 NotEnoughIds；legacy 档无 endlessids，行为不变。
+    if (prof.notEnoughIds != null) {
+        runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughIds:${prof.notEnoughIds}:dev")
+    }
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:ModularUI:1.3.1:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.43-1.7.10:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:waila:1.19.22:dev")
@@ -55,7 +81,14 @@ dependencies {
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:Botania:1.13.16-GTNH:dev")
 
     // 植物学：宾尼（Binnie，含 Botany / Genetics 等）；需林业（ForestryMC）作为 API 依赖
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:ForestryMC:4.11.15:dev")
+    // 林业按档分叉版本（非「有无」，故直接插值）：
+    //   ctm 档取 4.11.38 —— 与 GT 5.09.54.194 的 apiElements 声明（ForestryMC 4.11.38）对齐。
+    //   实测该 GT jar 常量池：gregtech/common/items/armor/MechArmorBase 引用
+    //   forestry.api.apiculture.IArmorApiaristMulti，而该接口 ForestryMC 4.11.30 才引入
+    //   （4.11.15 jar 无此条目）；preInit 经 LoaderGTBlockFluid 路径加载该类，缺接口即抛
+    //   NoClassDefFoundError: forestry/api/apiculture/IArmorApiaristMulti（崩溃栈帧落其 :185）。
+    //   legacy 档保持 4.11.15：实测 GT 5.09.52.283 全 jar 无该接口引用，行为不变。
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:ForestryMC:${prof.forestry}:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:Binnie:2.6.24:dev")
 
     // 物流管道（LogisticsPipes）：仅供 dev 客户端运行时放置 `logisticspipes.pipes.basic.LogisticsBlockGenericPipe`
@@ -68,4 +101,12 @@ dependencies {
     // 传递依赖由 Gradle 自动解析（已实测）：BuildCraft 7.1.60（提供 BuildCraft|Core/Transport/Silicon/Robotics，
     // LP 的 @Mod 硬依赖）、unimixins 0.2.1（提供 gtnhmixins）、NotEnoughItems 2.8.100-GTNH、ModularUI2 2.3.72-1.7.10。
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:LogisticsPipes:1.5.28-GTNH:dev")
+
+    // ctm 基线（#87 验收）：Angelica 提供 MCPatcher/CTM 实现（compact CTM 自 2.2.x 可用）；
+    // 无 Angelica 时 GT 的 CTM 规则不生效，#87 缺陷不显现。Angelica 要求 GTNHLib>=0.11.36、
+    // unimixins 0.3.1（经传递元数据自动抬升）。版本选型：maven release 2.2.16（已验证含
+    // TileOverrideImpl$CTMCompact / CompactCtmQuadProcessor）；本地缓存 2.2.22-dev 仅作备用。
+    if (prof.angelica != null) {
+        runtimeOnlyNonPublishable("com.github.GTNewHorizons:Angelica:${prof.angelica}:dev")
+    }
 }
