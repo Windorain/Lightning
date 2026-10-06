@@ -1,6 +1,7 @@
 package com.lightning.mod;
 
 import com.lightning.mod.config.SdeAutomationConfig;
+import com.lightning.mod.config.SdeControlPlaneConfig;
 import com.lightning.mod.item.SdeItems;
 import com.lightning.mod.proxy.IProxy;
 import com.lightning.mod.server.SdeServerRecordTickHandler;
@@ -28,6 +29,8 @@ public class LightningMod {
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
         SdeAutomationConfig.load(event);
+        // 控制面配置（contract.md §1.1）：默认关闭；-Dsde.controlPlane=on 可覆盖（见 SdeControlPlaneConfig）
+        SdeControlPlaneConfig.load(event);
         SdeItems.register();
     }
 

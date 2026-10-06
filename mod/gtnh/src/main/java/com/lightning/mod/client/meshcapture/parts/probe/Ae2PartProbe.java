@@ -25,7 +25,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  * P0.2 AE2 族探针（纯运行时反射，不引用 appeng 任何编译期类型）。
  *
  * <p>
- * 验证的反射调用链（逐跳见 {@code docs/plan/probe-family-apis.md}）：
+ * 验证的反射调用链（逐跳与历史族 API 探针一致，原文见 issue #51 / git 历史）：
  *
  * <pre>
  * mc.theWorld.getTileEntity(x,y,z)                     → appeng.tile.networking.TileCableBus(TESR)

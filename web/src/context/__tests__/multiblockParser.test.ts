@@ -1,7 +1,7 @@
 /**
  * T2.1 / T2.3 — 多方块为主文档：形态判别、解析、RuntimeDocument 承载、round-trip、既有 parser 回归。
  *
- * 契约：`docs/plan/format-multiblock-doc.md`
+ * 契约：`docs/contracts/format-multiblock-doc.md`
  * fixture：`./fixtures/multiblock-{ebf-2ch,tier-only,lsc-overlap}.json`（内容勿改）
  */
 import { describe, it, expect } from 'vitest'

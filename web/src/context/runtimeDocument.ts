@@ -5,7 +5,7 @@
  * Pallete 已解析为 SlotBlock，不使用原始的 palette index。
  * 序列化/反序列化分别在 serializers / parsers 中实现。
  *
- * **支持两种文档形态（互斥，见 `docs/plan/format-multiblock-doc.md` §2）**：
+ * **支持两种文档形态（互斥，见 `docs/contracts/format-multiblock-doc.md` §2）**：
  *  - **帧为主**（缺省）：`multiblock === null`，帧自带 grid（既有行为，一行未变）。
  *  - **多方块为主**（`documentShape === "multiblock"`）：`multiblock` 承载全部声明
  *    （通道清单 / 总 Tier 域 / 运行态 / 变体 / 规则表 / 骨架 / viewerSemantics），

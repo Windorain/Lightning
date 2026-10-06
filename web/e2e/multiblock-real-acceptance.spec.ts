@@ -1,8 +1,9 @@
 /**
  * T3.1 / T3.3 —— **真实导出产物**（T1.6 `/sde multiblock` 的 5 台产物 / 1262 变体）的无头验收。
  *
- * 计划依据：`docs/plan/multiblock-channel-renderer-plan.md` §5 Phase 3（T3.1 通过标准、T3.3 逐格比对）、
- * §10 判据修正（**像素断言只在真实导出产物上生效**）；产物格式见 `docs/plan/probe-export-pipeline.md` §5。
+ * 依据：`docs/contracts/format-multiblock-doc.md`（§5.4 装配算法、§6 调色板、§9 体积判定式）；
+ * 判据框架：**像素断言只在真实导出产物上生效**（合成 fixture 阶段像素只作诊断）。过程性计划与探针报告
+ * 已按 #51 裁决删除，原文见 issue #51 / git 历史。
  *
  * ## 与第二阶段（合成 fixture）spec 的区别（判据框架的变化）
  *
@@ -99,7 +100,7 @@ const SHOT_DIR = 'e2e/screenshots/multiblock-real'
 /** 单组合「装配 → mesh 重建」落定超时（真实产物实测 30~60 ms；给 30 s 余量）。 */
 const SETTLE_TIMEOUT_MS = 30_000
 
-/** T1.6 默认验收子集：5 台 / 1262 变体（`probe-export-pipeline.md` §0）。 */
+/** 默认验收子集：5 台 / 1262 变体（历史导出管线报告 §0，原文见 issue #51 / git 历史）。 */
 const EXPECTED_MACHINES = 5
 const EXPECTED_VARIANTS = 1262
 

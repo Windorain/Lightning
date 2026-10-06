@@ -35,7 +35,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  * }
  * </pre>
  * 
- * <b>为什么不进世界</b>：与 T0.3 同因（probe-run-state.md §4.4）—— 本环境既有存档含缺失模组，进档会与 FML
+ * <b>为什么不进世界</b>：与运行态探针同因（历史运行态报告 §4.4）—— 本环境既有存档含缺失模组，进档会与 FML
  * {@code StartupQuery} 确认框互锁并改写存档。扫描自带 {@link ProbeDummyWorld}，不需要真实世界。
  * 触发文件不存在时本类不产生任何行为，既有 {@code /sde export} 与自动化路径逐字节不受影响。
  */

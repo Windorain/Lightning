@@ -1,7 +1,7 @@
 /**
  * 统计适配层 + fixture 断言（B-3：纯物品清单，决策 C 落地）。
  *
- * 契约：http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6
+ * 契约：`docs/contracts/format-parts-contract.md`
  *   （§2 文件表达、§2.2 物品索引表、§9 已废弃）。
  *
  * fixture（契约 §14）：

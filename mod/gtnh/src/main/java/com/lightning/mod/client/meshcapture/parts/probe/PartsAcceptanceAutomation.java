@@ -299,7 +299,7 @@ public final class PartsAcceptanceAutomation {
         @SuppressWarnings("unchecked")
         List<EntityPlayerMP> players = server.getConfigurationManager().playerEntityList;
         EntityPlayerMP player = players.isEmpty() ? null : players.get(0);
-        // 跨轮幂等清场（FMP remPart 通道；计划 §9 探针基建开放项的既定解法）→ 建造八分区
+        // 跨轮幂等清场（FMP remPart 通道；历史探针基建开放项的既定解法）→ 建造八分区
         builder.resetWorld(world, BASE_X, BASE_Y, BASE_Z);
         builder.build(world, player, BASE_X, BASE_Y, BASE_Z);
         FMLLog.info(

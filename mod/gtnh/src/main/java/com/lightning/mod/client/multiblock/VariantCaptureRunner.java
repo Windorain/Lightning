@@ -55,7 +55,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  * </pre>
  *
  * 字段设计（T1.4 消费接口）写在 {@code report.json.dataset.fieldDesign} 与
- * {@code docs/plan/probe-variant-capture.md}。
+ * 历史变体捕获报告（原文见 issue #51 / git 历史）。
  */
 @SideOnly(Side.CLIENT)
 public final class VariantCaptureRunner {
@@ -86,7 +86,7 @@ public final class VariantCaptureRunner {
         /**
          * 已移除：{@code includeThumbnails}。调色板条目**恒不写** {@code thumbnailPNG} —— GPU 渲染的缩略图
          * 跨运行像素不稳定，会破坏产物逐字节幂等与跨运行内容签名对齐（见 {@link GeometryPalette#EMITS_THUMBNAIL_PNG}、
-         * {@code docs/plan/fix-thumbnail-determinism.md}）。
+         * 契约 {@code docs/contracts/format-multiblock-doc.md} §6.3 与历史报告）。
          */
         public boolean embedTextures = true;
         public long globalBudgetMs = DEFAULT_GLOBAL_BUDGET_MS;
@@ -288,7 +288,7 @@ public final class VariantCaptureRunner {
         notes.add(
             "缩略图：blockPalette 条目不含 thumbnailPNG（GeometryPalette.EMITS_THUMBNAIL_PNG=false）——"
                 + "GPU 渲染的缩略图跨运行像素不稳定，会同时破坏产物逐字节幂等与跨运行内容签名对齐；"
-                + "见 docs/plan/fix-thumbnail-determinism.md");
+                + "契约：docs/contracts/format-multiblock-doc.md §6.3");
         if (factsFile == null) {
             notes.add(
                 "找不到 T1.2 的 machines.json（multiblock_scan/run-NNNN/），本轮的「预期取值表/尺寸规则」断言全部缺少输入，"
@@ -885,7 +885,7 @@ public final class VariantCaptureRunner {
                     if (drive.isMultiBlockBase && !build.machineFormed) {
                         warnings.add(
                             new com.google.gson.JsonPrimitive(
-                                "mMachine=false：结构被真实放置但 checkMachine 未通过（T0.3 §4.3 的遗留项）"));
+                                "mMachine=false：结构被真实放置但 checkMachine 未通过（getStructureErrors 为空、线圈与舱口符号均通过 ⇒ 失败点落在 checkPiece，未做位级诊断；历史运行态探针的遗留项，见 issue #51）"));
                     }
                     for (String note : build.notes) {
                         warnings.add(new com.google.gson.JsonPrimitive(note));
@@ -1882,7 +1882,7 @@ public final class VariantCaptureRunner {
             }
         }
         o.addProperty("factsFile", factsFile == null ? "" : factsFile.getAbsolutePath());
-        o.addProperty("worldMode", "none（主菜单态 + 自带假世界；理由见 probe-run-state.md §4.4）");
+        o.addProperty("worldMode", "none（主菜单态 + 自带假世界：不进真实存档，避免存档含缺失模组时进档冲突）");
         o.addProperty(
             "stateDriving",
             "T0.3 §4.2：真实 TE 更新路径 3 tick + MTEMultiBlockBase#onPostTick 循环 + 进态三行 + isActive() 断言；"

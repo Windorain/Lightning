@@ -8,7 +8,7 @@
  * 且统计栏**不渲染任何部件模式 UI**（无 `data-stats-row-key` / 工具条 / 视图按钮 /
  * 来源徽标 / provenance 面板 / 分组标题 / 未计入提示）—— 这就是"旧文件 DOM 零新增"。
  *
- * 契约：http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6
+ * 契约：`docs/contracts/format-parts-contract.md`
  * （§2.2 物品索引表、§9 已废弃 = 规则能力与三级配置的废止依据）。
  *
  * 本文件是**回归锁**，不是新功能测试：它在实现改动**之前**写成并在旧实现上跑绿，

@@ -1,7 +1,7 @@
 /**
  * 统计引擎单测（pure/partStats）—— 纯物品清单（B-3 决策 C 落地）。
  *
- * 契约：http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6
+ * 契约：`docs/contracts/format-parts-contract.md`
  *   §2.2（物品索引表：**左栏行键恒等于物品身份键**）、§5（物品身份 = 计数单位 = 可合成物品）、
  *   §9（**已废弃** —— 规则能力与三级配置的移除依据）。
  *

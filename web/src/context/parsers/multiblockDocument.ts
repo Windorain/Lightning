@@ -1,5 +1,5 @@
 /**
- * MultiblockDocument — 「多方块为主」文档的类型化声明模型（契约：`docs/plan/format-multiblock-doc.md`）。
+ * MultiblockDocument — 「多方块为主」文档的类型化声明模型（契约：`docs/contracts/format-multiblock-doc.md`）。
  *
  * 职责边界：
  *  - 本模块只做「判别 + 读取 + 校验 + 类型化」，**不装配、不建 Grid**。

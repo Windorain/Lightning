@@ -12,7 +12,7 @@ dependencies {
     implementation("com.google.code.gson:gson:2.8.9")
 
     // 编译期 API（多方块导出用）：与运行期同坐标同版本，仅新增编译期可见性，运行期装配不变
-    // 决策依据：docs/plan/decision-deps-route.md §6.1
+    // 决策依据：历史依赖路线报告 §6.1（原文见 issue #51 / git 历史）
     // transitive=false：GTNH maven 上部分间接依赖（如 CodeChickenLib:1.3.0）坐标已漂移不可解析；
     // 编译只需本 jar，缺失的间接类型按需在下方逐个补 compileOnly。
     compileOnly("com.github.GTNewHorizons:GT5-Unofficial:${gt5Ver}:dev") { transitive = false }

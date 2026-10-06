@@ -42,7 +42,7 @@ export interface V2Label {
  * 已整套移除，web 端不存在消费方。此处**只保留线格式形状**（同 proto `StatsTemplate` /
  * `StatsEntry.part_type_key`：字段不删，语义作废），供解析链把旧文档根字段**透传不丢**：
  * 契约 §9 兼容口径 = 「旧文档携带 statsTemplate/statsOverride ⇒ 读取后静默忽略」。
- * 契约：http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6 §9
+ * 契约：`docs/contracts/format-parts-contract.md` §9
  */
 export interface V2StatsEntry {
   block_state_id: string
@@ -101,7 +101,7 @@ export interface V2PlainSceneDocument {
   /**
    * **旧字段（语义作废，B-3 / 决策 C）**：原"三级配置的文档默认层"已整套移除。
    * 字段仍随文档根透传（旧文档读取后**静默忽略**，不报错、不空栏），但无任何消费方。
-   * 契约 §9 兼容口径：http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6
+   * 契约 §9 兼容口径：`docs/contracts/format-parts-contract.md`
    */
   statsTemplate?: V2StatsTemplate
 }

@@ -1,7 +1,7 @@
 /**
  * `useMultiblockChannels` —— 「通道」面板的**视口本地状态**（T2.5 接线）。
  *
- * 状态归属拍板（留白 #4 配套决策，理由见 `docs/plan/decision-channel-ui.md`）：
+ * 状态归属拍板（留白 #4 配套决策，理由的历史记录见 issue #51 / git 历史）：
  * **视口本地**（每个视口各持一份 `{totalTier, values, runstate}`），不写文档、不写 ctx.main。
  *  - 写文档会经 `replaceDoc` → `structEpoch` 全量重建（含纹理重解码）+ 让 wiki 编辑判定误报"已修改"；
  *  - 两端用**同一份** composable ⇒ 行为一致（Workbench / Embed 同一实现，无分支）。

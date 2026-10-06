@@ -18,7 +18,7 @@ import com.google.gson.JsonPrimitive;
 /**
  * T1.4 因子化编码器 —— 需求 C（结构性压缩）的本体。
  * <p>
- * 契约：{@code docs/plan/format-multiblock-doc.md}。输入 = T1.3 的变体几何数据集（内存模型），
+ * 契约：{@code docs/contracts/format-multiblock-doc.md}。输入 = T1.3 的变体几何数据集（内存模型），
  * 输出 = 契约 inner body（{@code multiblock} + 根级并集 {@code blockPalette} + {@code frames}）。
  * <p>
  * <b>为什么落在 Java 侧</b>：T1.5 的 {@code /sde multiblock} 在游戏内实时调用本类（数据来自
@@ -26,7 +26,7 @@ import com.google.gson.JsonPrimitive;
  * 故编码逻辑必须在 mod 侧；离线 Node 工具只承担<b>闭环验证</b>（用参考装配器复算）。
  * 本类<b>零 MC 依赖</b>（只用 Gson + JDK），因此既能在客户端跑，也能被离线驱动直接调用。
  * <p>
- * <b>编码算法</b>（对应计划 T1.4 硬约束）：
+ * <b>编码算法</b>（编码端硬约束）：
  * <ol>
  * <li><b>尺寸型通道定骨架阶</b>：按变体网格尺寸 + 尺寸通道有效值聚类 → {@code backbone.sizeSteps}；
  * 阶数恒等于尺寸通道域长度；每阶 {@code cellGrid} 只放"所有变体都不变"的格子（替换型/运行态位置写 0 = 空）。</li>
@@ -1353,7 +1353,7 @@ public final class MultiblockFactorizer {
                 "text",
                 "数据来源（T1.3 变体几何数据集）：" + in.datasetSource
                     + "；调色板已按本机变体并集剪枝，并用 palette.renumber 规则整表重编号（契约 §6.1 第 4 条、§4.5.2）。");
-            n.addProperty("source", "probe-variant-capture.md §9.2");
+            n.addProperty("source", "历史变体捕获报告 §9.2（原文见 issue #51 / git 历史）");
             notes.add(n);
         }
         if (guardPositions > 0) {
@@ -1366,7 +1366,7 @@ public final class MultiblockFactorizer {
                     + guardRules
                     + " 条带 guard 的多组差异规则，文档标 hasScopeOverlap: true；相交通道组合（guard 通道）计数："
                     + guardKeyHistogram);
-            n.addProperty("source", "format-multiblock-doc.md §4.5.3 / probe-channels.md §2");
+            n.addProperty("source", "docs/contracts/format-multiblock-doc.md §4.5.3 / 历史通道报告 §2（issue #51）");
             notes.add(n);
         }
         // 忠实度声明（硬约束「不得靠丢弃变体换体积」的边界）：域收窄 / 总 Tier 抽样必须写进产物本身。
@@ -1383,7 +1383,7 @@ public final class MultiblockFactorizer {
                     + (c.trueDomainMax == null ? "（未知，见数据集 subsetNote）" : String.valueOf(c.trueDomainMax))
                     + "：本产物只覆盖声明域内的取值，被排除取值在真实机器上存在但本文件不代表其几何。"
                     + "收窄来源 = T1.5 的安全上限/显式抽样（组合积过大时的兜底），非编码器丢弃变体。");
-            n.addProperty("source", "multiblock-channel-renderer-plan.md §T1.5 / §7 风险 7");
+            n.addProperty("source", "历史多方块计划 §T1.5 / §7 风险 7（已按 #51 裁决删除，见 git 历史）");
             notes.add(n);
         }
         int ttSpan = in.ttMax - in.ttMin + 1;
@@ -1412,7 +1412,7 @@ public final class MultiblockFactorizer {
         JsonObject n3 = new JsonObject();
         n3.addProperty("kind", "note");
         n3.addProperty("text", "运行态轴只承诺纹理/材质层两态差异；TESR（shader/VAO）活动几何与运行中才生成的附属渲染方块本轮显式不覆盖，不得作为验收条件。");
-        n3.addProperty("source", "probe-run-state.md §3.2 / §5");
+        n3.addProperty("source", "历史运行态报告 §3.2 / §5（原文见 issue #51 / git 历史）");
         notes.add(n3);
         return notes;
     }

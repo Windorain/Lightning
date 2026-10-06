@@ -23,8 +23,7 @@ export type {
   ResourceLocator,
 }
 
-// ---- 部件（非满方块）数据模型：纯类型定义见 pure/partTypes ----
-//      契约：http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6 §3
+// ---- 部件（非满方块）数据模型：纯类型定义见 pure/partTypes（契约 docs/contracts/format-parts-contract.md §3） ----
 export type {
   PartBox,
   PartBoxKind,

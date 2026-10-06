@@ -28,7 +28,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  * boxProvenance=collision-derived-visual}。
  *
  * <p>
- * 反射调用链（与 P0.2 探针 {@code docs/plan/probe-family-apis.md} §2 逐跳一致，全部实测可达；
+ * 反射调用链（逐跳与历史族 API 探针 §2 一致，全部实测可达；
  * 纯运行时反射，不引用 crazypants/com.enderio 任何编译期类型）：
  *
  * <pre>

@@ -1,8 +1,7 @@
 /**
  * pure/partTypes.ts — 非满方块（部件）数据模型的纯类型与纯函数。
  *
- * 契约：http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6
- * （§2 文件表达、§3 PartRecord schema、§6 盒坐标系；Gitea Wiki 为权威版本）。
+ * 契约：`docs/contracts/format-parts-contract.md`（§2 文件表达、§3 PartRecord schema、§6 盒坐标系）。
  * No side effects: no Vue refs, no DOM, no I/O, no mutation of arguments.
  */
 

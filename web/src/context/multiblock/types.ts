@@ -1,5 +1,5 @@
 /**
- * 多方块契约 JSON 的类型（`docs/plan/format-multiblock-doc.md` §3–§7）。
+ * 多方块契约 JSON 的类型（`docs/contracts/format-multiblock-doc.md` §3–§7）。
  *
  * **本包只面向契约 JSON 编程**：不 import RuntimeDocument、不 import 任何 GT/StructureLib 知识。
  * 这里的接口是"文档里写了什么"的直译，不含任何游戏语义推导。

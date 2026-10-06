@@ -2,7 +2,7 @@
 /**
  * BlockStatsSidebar — 统计栏（B-3：左栏纯物品展示；无视图切换 UI + 无统计规则能力）。
  *
- * 契约：http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6
+ * 契约：`docs/contracts/format-parts-contract.md`
  *   （§2.2 物品索引表、§9 已废弃 = 规则能力与三级配置的移除依据）。
  * 引擎：`@/pure/partStats`（行集/排序/退化语义由引擎钉死，本组件只呈现）。
  *

@@ -1,10 +1,10 @@
 /**
  * pure/partStats.ts — 统计引擎：**纯物品清单**（B-3 决策 C 落地）。
  *
- * 契约：http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6
+ * 契约：`docs/contracts/format-parts-contract.md`
  *   （§2.2 物品索引表、§5 类型键与物品身份；§9「统计默认值」**已废弃** —— 规则能力与三级配置
  *    整套移除的依据即该节，原文见 git 历史）。
- * 计划：`docs/plan/non-full-cube-parts-plan.md` §4 P2.3（形态经决策 C 收窄为"纯物品清单"）。
+ * 过程性计划已按 #51 裁决删除；判据真源 = `docs/contracts/format-parts-contract.md`。
  *
  * 纯函数、零框架依赖：输入 = 部件实例平铺列表；输出 = 物品行清单；UI 只负责呈现。
  * No side effects: no Vue refs, no DOM, no I/O, no mutation of arguments.

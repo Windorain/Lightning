@@ -5,9 +5,8 @@
  *       该格 `PartRecord[]`、以及该格 palette 的整体 baked quads（既有 `getBlockGeometry` 输出）。
  * 输出：喂给 `SelectionOutlinePass` 的 mask 几何决策（quads 或盒），或 null（无格几何）。
  *
- * 契约：Gitea Wiki《部件数据契约》§3（PartRecord.boxes）/ §6（盒坐标系 =
+ * 契约：`docs/contracts/format-parts-contract.md` §3（PartRecord.boxes）/ §6（盒坐标系 =
  * 0–1 方块局部、Y-up、允许越出 [0,1]³、视觉盒与碰撞盒成对）。
- * http://127.0.0.1:3300/Lightning/lightning/wiki/%E9%83%A8%E4%BB%B6%E6%95%B0%E6%8D%AE%E5%A5%91%E7%BA%A6
  *
  * ── 通道语义（B-1 拍板，决策留痕见 issue #34 评论）──────────────────────
  * `partLocalId === undefined` ⇒ **整格通道**：几何 = 该格 palette 全部 baked quads，

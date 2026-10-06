@@ -1,7 +1,7 @@
 /**
  * P3.1 · L2 真实导出渲染断言包（**真实产物**驱动；P2.5 fixture 包的产物级复跑）。
  *
- * 计划依据：`docs/plan/non-full-cube-parts-plan.md` §5 P3.1；契约：`docs/plan/format-parts-contract.md`
+ * 契约：`docs/contracts/format-parts-contract.md`（过程性计划已按 #51 裁决删除，原文见 git 历史）
  * （§2 文件表达 / §3 五要素+来源四元组 / §6 盒坐标系 / §9 统计默认值 / §11 oracle 格式）。
  *
  * 输入 = P1.8 建造→导出产物（`scripts/parts-acceptance/.out/<label>/`，由
