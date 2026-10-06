@@ -72,6 +72,7 @@ v1.3（issue #98）追加的观察面读面动作见 §4.1；下表是 PR-1 的�
 
 PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
 **#99（收口T2）追加 6 个 L0 布景原语**（`scene.*`，见 §4.4），同样只增不改上表语义。
+**#101（收口T4）追加 9 个 L1 玩家操作**（`player.*`，见 §4.6），同样只增不改上表语义。
 
 ### 4.1 观察面读面动作（v1.3，issue #98）
 
@@ -195,6 +196,78 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 见 case-file.md §8.8。要点：**验收类固定程序的第一次世界写动作必须是 `world.rebuild`（`void:true`）**，
 不得在既有世界上续跑。`case.run` 的 `world` 段与之是**同一实现**（§6.3），二者语义不冲突。
 L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**，不能替代起手重建。
+
+### 4.6 L1 玩家操作（#101，「收口T4」）
+
+能力面三层口径见 #96 §4.1：**L0 原语**＝直接设定世界/实体/玩家/背包状态（布景、构造输入、常规回归）；
+**L1 玩家操作**＝**经由玩家路径执行**（移动、朝向、使用物品、右键、左键、放置、拾取、容器与背包收放、开关界面）；
+**L2**＝L0/L1 的有序编排，且只有 L2 允许宣称「端到端」。
+**L0 的产物不能当作 L1 的证据**（#96 §4.2）；每条结论声明它在哪一层取得，不同层的结论不互替。
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `player.move` | scene | **真实移动**：逐 tick 走原版 AABB 碰撞推进 + `EntityClientPlayerMP.sendMotionUpdates()`（客户端自己发 C03）；服务端照常校验（姿态 / moved too quickly / moved wrongly / floating），被拽回时如实报告两侧读数 |
+| `player.look` | scene | **真实转向**：分步设置客户端 yaw/pitch 并经 C03/C05 发给服务端；支持 `yaw`/`pitch`、`lookAt:[x,y,z]`、`entityId` 三形态（互斥必居其一） |
+| `player.use_item` | scene | **使用手持物品**：对空气走 `PlayerControllerMP.sendUseItem`（C08 的 `(-1,-1,-1,255)` sentinel），对方块走 `onPlayerRightClick`；观察量是**手持物品自身的变化**（count/耐久/NBT） |
+| `player.interact` | scene | **右键交互**：方块走 `onPlayerRightClick`（`onItemUseFirst` → `onBlockActivated` → `tryPlaceItemIntoWorld`），实体走 `interactWithEntitySendPacket`（C02(INTERACT)）；观察量是**交互产物**（容器被打开 / 方块被激活 / 实体被移除） |
+| `player.dig` | scene | **左键破坏**：实体走 `attackEntity`（C02(ATTACK)），方块走 `clickBlock`（C07(0)）+ `holdTicks` 内的 `onPlayerDamageBlock`（C07(2)），即原版按住左键的同一入口 |
+| `player.place_block` | scene | **放置方块**：`onPlayerRightClick` → 服务端 `activateBlockOrUseItem` → `ItemBlock.tryPlaceItemIntoWorld`；`at` 是**被右键的方块**，新方块出现在 `at` 沿 `side` 偏移一格处（原版规则） |
+| `player.pickup` | scene | **拾取掉落物**（「拿到物品」之 L1 义，裁决 4）：世界里已有掉落物 → 玩家走过去碰它，由服务端 `EntityItem.onCollideWithPlayer → InventoryPlayer.addItemStackToInventory` 收进背包 |
+| `player.slot_click` | scene | **容器与背包槽位收放**：`PlayerControllerMP.windowClick` → 本地 `Container.slotClick` + `C0EPacketClickWindow`；服务端 `processClickWindow` 跑权威 `slotClick`。**含移位点击**（`shift:true` ⇔ `clickType:1`） |
+| `player.gui` | scene | **开关玩家界面**：`inventory`（复刻原版 `keyBindInventory`：C16 + `GuiInventory`）/ `container`（复用 `player.interact` 的右键路径，服务端 `S2DPacketOpenWindow` → 客户端 `displayGuiScreen`，模组机器界面同样可用）/ `close`（`EntityClientPlayerMP.closeScreen()` = C0D）/ `open`（只读报告） |
+
+**共同口径（逐条可判定）**：
+
+1. **只走原版玩家的出口**：本组只调原版对象自己的方法——`Minecraft.playerController`
+   （`clickBlock` / `onPlayerRightClick` / `sendUseItem` / `attackEntity` /
+   `interactWithEntitySendPacket` / `windowClick` / `onPlayerDamageBlock`）与
+   `EntityClientPlayerMP`（`sendMotionUpdates` / `closeScreen` / `moveEntity`）。
+   **不自己拼 C0x 包、不直接写服务端世界或背包**。抄一份「看起来一样」的服务端逻辑会立刻与
+   真客户端行为分叉，而分叉正是 L1 要验证的东西；那也正是 §8.7 禁止的第二条能力路径。
+2. **写入门控同 L0**：九个动作开场一律过 `CaptureControl.assertWorldWriteAllowed`
+   （捕获会话期间被*别的*作业调用即 `CP-STATE-001`，§4.1 的既有口径）。
+3. **观察由服务端权威侧回读**：返回值里的 `observed` 一律按**服务端**的实读判定
+   （`serverAfter` 位置、逐格 `blockId/meta`、`openContainer`、背包逐槽），
+   客户端预测的位置/槽位只作对照（`clientAfter` / `predicted`）。
+   **客户端动了而服务端没动 = 没观察到**，不是「大体上成功」。
+4. **失败显式（§8.5）**：参数类 `CP-VALID-002`（`context.fields` 逐字段）、前置状态类 `CP-STATE-001`
+   （带「差什么、怎么补」）、原版抛出意外 `CP-EXEC-001`（带 cause，栈不丢）。
+   而「玩家路径执行了但世界没变」**不是错误**：返回 `observed:false` + `notObservedReason`
+   （逐条列可能原因）+ 逐格/逐槽回读。**不静默成功、不空转绿**——
+   「点了没反应」与「动作失败」是两件事，自述与返回值都分开说。
+5. **探索模式纪律（#96 §3，「便宜试错」的物质基础）**：L1 操作失败**不得导致进程重启或崩溃**。
+   典型负场景——对空气右键、挖不动基岩、视线未命中就左键、手空着放置、没开容器就点槽位——
+   一律返回上述形态的可解释结果或契约错误码，进程继续可用。
+   这也是本组**一次调用内跑完一小步、不注册为步进动作**的理由：调用方在两次调用之间可以自由
+   读面、截图、回滚（状态转换由请求驱动，§8.4）。
+6. **两义成对、按层标注（裁决 3/4）**：每个动作返回值带 `layer:"L1"` 与 `semantics`
+   （`walk` / `turn` / `use-item` / `interact-block` / `interact-entity` / `dig-block` / `dig-entity` /
+   `place-block` / `pickup` / `slot-move` / `gui-*`），与 L0 的 `layer:"L0"` 成对：
+
+   | 语义 | L0（`scene.*`） | L1（`player.*`） |
+   |---|---|---|
+   | 位置与朝向 | `scene.player.pose`（`semantics:"teleport"`，瞬时 + S08） | `player.move`（`"walk"`）+ `player.look`（`"turn"`） |
+   | 拿到物品 | `scene.inventory.write`（`semantics:"give"`，直接写槽位） | `player.pickup`（`"pickup"`，掉落物 → 走过去碰） |
+
+   **两者都做、两义都演示、结论注明取得层**（#96 裁决 4）。
+7. **槽号口径两义**：`player.slot_click` 的 `slot` 是**当前 `openContainer` 的界面槽号**
+   （`Slot.slotNumber`，即包里的那个，`-999` 是原版「容器外」）；`scene.inventory.write` 的
+   `slot` 是 **`InventoryPlayer` 下标**（0..8 快捷栏 / 9..35 主背包 / 36..39 盔甲）。
+   两者不同（`ContainerPlayer` 含合成格且顺序错位），**勿混用**——两条自述里都写死了这一点。
+8. **同步动作、非步进**：九个都是一次调用内做有限步（`maxTicks` / `holdTicks` 有上界），
+   不跨 tick 等世界装卸。理由见第 5 条。
+
+**范围外（裁决 3）**：**GUI 内非槽位按钮点击**（机器模式按钮、JEI 面板等）**不在本任务范围**。
+`player.gui` 只负责开/关，槽位收放由 `player.slot_click` 负责；按钮点击若 F2 教程样本实际需要，
+当场切独立单子，不混入。
+
+**平台边界（如实记录，不掩盖）**：L1 的动作在**客户端 tick 线程**执行，
+包经集成服的本地 netty `LocalChannel` 送达；服务端在**它自己线程的 tick** 里处理
+（`MinecraftServer.updateTimeLightAndEntities → networkTick`）。本组动作在读回前显式推送出站队列
+（`NetHandlerPlayClient.getNetworkManager().processReceivedPackets()`），使本地链路下服务端处理
+在同一 tick 内完成；**但服务端的 moved-too-quickly 等判定与「被拽回」只有在服务端 tick 后才可见**，
+因此移动/拾取这类需要跨 tick 收敛的动作**如实返回当前读数与 `observed`**，不强求一调到位——
+一次不成就调两次，这正是探索模式的用法。
 
 ## 5. 版本化规则
 
