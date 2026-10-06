@@ -17,6 +17,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.lightning.mod.client.controlplane.core.Hashing;
 import com.lightning.mod.core.export.PackVersionProbe;
 import com.lightning.mod.core.export.PendingDumpFiles;
 import com.lightning.mod.core.registry.GregTechMetaTileRegistry;
@@ -168,6 +169,20 @@ public final class ExportSession {
     private String lastAuthor = "server";
     private String lastGtnhVersion = "";
     private SdeSelectionMode selectionMode = SdeSelectionMode.CUBOID;
+    /**
+     * 帧缓冲世代号：每次 {@link #frameJson} 或 {@link #cellNotesByFrame} 发生结构性变化
+     * （写入帧 / 清空缓冲）时递增。
+     *
+     * <p>
+     * <b>用途（Gitea #100 派发裁决 3）</b>：供 {@code export.session} 的 {@code bufferGeneration} 字段
+     * 暴露，让调用方能用「世代号是否变化」判断缓冲有没有动过，而不必逐个比对帧哈希。
+     * 这是 C3「同会话同缓冲」机械判据的一部分（跨会话拼接产物判红）。
+     *
+     * <p>
+     * <b>纯只读增量</b>：本字段<b>不</b>改变任何命令态行为——它只在既有的写入点顺手自增，
+     * 不引入隐式清缓冲、不改变任何子命令语义（裁决 3 明确要求「只增不改」）。
+     */
+    private long bufferGeneration;
 
     private ExportSession() {}
 
@@ -480,9 +495,14 @@ public final class ExportSession {
     public Snapshot snapshot() {
         synchronized (LOCK) {
             int[] frames = new int[frameJson.size()];
+            String[] hashes = new String[frameJson.size()];
             int i = 0;
-            for (Integer k : frameJson.keySet()) {
-                frames[i++] = k == null ? 0 : k;
+            for (Map.Entry<Integer, String> e : frameJson.entrySet()) {
+                frames[i] = e.getKey() == null ? 0 : e.getKey();
+                // 帧内容 sha256（裁决 3）：C3「同会话同缓冲」机械判据用。
+                // 在锁内算：必须与 frames 数组取的是同一时刻的内容，否则世代与哈希会错配。
+                hashes[i] = Hashing.sha256HexUtf8(e.getValue());
+                i++;
             }
             return new Snapshot(
                 inSession,
@@ -495,6 +515,8 @@ public final class ExportSession {
                 pos2z,
                 activeFrame,
                 frames,
+                hashes,
+                bufferGeneration,
                 outputName,
                 structureId,
                 lastAuthor,
@@ -521,14 +543,16 @@ public final class ExportSession {
         private final Integer pos2z;
         private final int activeFrame;
         private final int[] recordedFrames;
+        private final String[] frameSha256;
+        private final long bufferGeneration;
         private final String outputName;
         private final String structureId;
         private final String lastAuthor;
         private final String lastGtnhVersion;
 
         Snapshot(boolean inSession, SdeSelectionMode selectionMode, Integer pos1x, Integer pos1y, Integer pos1z,
-            Integer pos2x, Integer pos2y, Integer pos2z, int activeFrame, int[] recordedFrames, String outputName,
-            String structureId, String lastAuthor, String lastGtnhVersion) {
+            Integer pos2x, Integer pos2y, Integer pos2z, int activeFrame, int[] recordedFrames, String[] frameSha256,
+            long bufferGeneration, String outputName, String structureId, String lastAuthor, String lastGtnhVersion) {
             this.inSession = inSession;
             this.selectionMode = selectionMode;
             this.pos1x = pos1x;
@@ -539,6 +563,8 @@ public final class ExportSession {
             this.pos2z = pos2z;
             this.activeFrame = activeFrame;
             this.recordedFrames = recordedFrames == null ? new int[0] : recordedFrames;
+            this.frameSha256 = frameSha256 == null ? new String[0] : frameSha256;
+            this.bufferGeneration = bufferGeneration;
             this.outputName = outputName;
             this.structureId = structureId;
             this.lastAuthor = lastAuthor;
@@ -607,6 +633,35 @@ public final class ExportSession {
             return recordedFrames.length;
         }
 
+        /**
+         * 逐帧内容 sha256（与 {@link #recordedFrames()} **同序**一一对应）；空数组表示尚未 record。
+         *
+         * <p>
+         * 哈希口径：该帧<b>存进缓冲的那一刻</b>的 JSON 文本的 UTF-8 字节（{@code Hashing.sha256HexUtf8}），
+         * 与 {@code observation-record.md §2.1}「对字节内容计算」一致。注意它哈希的是<b>缓冲内</b>的
+         * scan 中间态，不是落盘后经客户端 enrich 的信封——两者形态不同（见 {@code exportToFile} 注释）。
+         *
+         * <p>
+         * 用途（Gitea #100 派发裁决 3）：C3「同会话同缓冲」机械判据。跨会话拼接的产物其帧哈希
+         * 会落在不同世代/不同缓冲里，可据此判红。
+         */
+        public String[] frameSha256() {
+            String[] copy = new String[frameSha256.length];
+            System.arraycopy(frameSha256, 0, copy, 0, frameSha256.length);
+            return copy;
+        }
+
+        /**
+         * 帧缓冲世代号：缓冲每发生一次结构性变化（写入帧 / 清空）就递增。
+         *
+         * <p>
+         * 用途（裁决 3）：调用方用「世代号是否变化」判断缓冲有没有动过。它是 {@code frameSha256[]} 的
+         * 廉价伴随物——想判断「有没有动过」比哈希数组更省事，想判断「动成了什么」才需要哈希。
+         */
+        public long bufferGeneration() {
+            return bufferGeneration;
+        }
+
         /** 输出文件名（无后缀）。 */
         public String outputName() {
             return outputName;
@@ -653,6 +708,8 @@ public final class ExportSession {
             lastGtnhVersion = PackVersionProbe.tryPackVersionString();
             applyCellNotesToScanJsonLocked(scanRoot, targetFrame);
             frameJson.put(targetFrame, GSON.toJson(scanRoot));
+            // 帧缓冲世代号自增（裁决 3）：纯只读增量，不改变命令态行为
+            bufferGeneration++;
         }
     }
 
@@ -809,10 +866,17 @@ public final class ExportSession {
      *
      * <p>
      * 包可见（非 public）：不构成对外的第二条写入通道，也就不会成为 #96 §8.7 意义上的「隐藏路径」。
+     *
+     * <p>
+     * <b>必须与生产写入点逐项一致</b>：除了 {@code frameJson.put} 与同一把 {@link #LOCK}，
+     * 这里同样自增 {@link #bufferGeneration}——本单的 {@code bufferGenerationIncrementsOnEachFrameWrite}
+     * 单测正是靠这一点才在纯 JVM 下成立。若这里漏掉自增，单测覆盖的就不再是生产语义
+     * （该缺陷在本单自测中被捕获过一次，见 #100 报告）。
      */
     void registerFrameForTest(int targetFrame, String frameJsonText) {
         synchronized (LOCK) {
             frameJson.put(targetFrame, frameJsonText);
+            bufferGeneration++;
         }
     }
 
@@ -827,6 +891,7 @@ public final class ExportSession {
         synchronized (LOCK) {
             frameJson.clear();
             cellNotesByFrame.clear();
+            bufferGeneration++;
         }
     }
 

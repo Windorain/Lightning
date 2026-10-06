@@ -255,10 +255,14 @@ public final class ActionRegistrar {
                 .returns(
                     "{schema, contractVersion, inSession, selectionMode, "
                         + "selection{complete,pos1[x,y,z]|null,pos2[x,y,z]|null,min,max,sizeX?,sizeY?,sizeZ?}, "
-                        + "activeFrame, recordedFrames[], recordedFrameCount, outputName, structureId, "
-                        + "lastAuthor, lastGtnhVersion, statusLine}")
+                        + "activeFrame, recordedFrames[], recordedFrameCount, frameSha256[], bufferGeneration, "
+                        + "outputName, structureId, lastAuthor, lastGtnhVersion, statusLine}"
+                        + "。frameSha256[] 与 recordedFrames[] **同序一一对应**（帧内容 sha256，"
+                        + "口径 = 该帧进入缓冲时的 JSON 文本 UTF-8 字节），供 C3「同会话同缓冲」机械判据；"
+                        + "bufferGeneration 是缓冲世代号（写入帧/清空即递增），用于廉价判断「缓冲有没有动过」。"
+                        + "本动作不含备注内容与帧体，只有哈希与计数——需要帧体请走 export 产物。")
                 .example("{}")
-                .since("1.3")
+                .since("1.4")
                 .build(),
             new ExportSessionAction());
 
@@ -301,7 +305,7 @@ public final class ActionRegistrar {
                 .example("{\"command\":\"/sde setframe 5\",\"confirm\":true}")
                 .example("{\"command\":\"/sde record\",\"confirm\":true}")
                 .example("{\"command\":\"/sde export\",\"confirm\":true}")
-                .since("1.3")
+                .since("1.4")
                 .build(),
             new CmdExecAction());
     }

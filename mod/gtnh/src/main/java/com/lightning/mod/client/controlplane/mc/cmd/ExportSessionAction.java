@@ -104,6 +104,16 @@ public final class ExportSessionAction implements ControlAction {
         o.add("recordedFrames", frames);
         o.addProperty("recordedFrameCount", s.recordedFrameCount());
 
+        // 逐帧内容 sha256（派发裁决 3，只增不改）：与 recordedFrames 同序一一对应。
+        // 用途 = C3「同会话同缓冲」机械判据；跨会话拼接的产物其帧哈希落在不同缓冲/世代，可据此判红。
+        JsonArray hashes = new JsonArray();
+        for (String h : s.frameSha256()) {
+            Json.add(hashes, h);
+        }
+        o.add("frameSha256", hashes);
+        // 缓冲世代号：判断「缓冲有没有动过」的廉价伴随物（比逐帧哈希更省事）。
+        o.addProperty("bufferGeneration", s.bufferGeneration());
+
         // ---- 输出参数与作者 ----
         o.addProperty("outputName", s.outputName());
         o.addProperty("structureId", s.structureId());
