@@ -18,8 +18,16 @@ export const TooltipEditOperator: OperatorType = {
     const pos = props.pos as { x: number; y: number; z: number }
 
     const newDoc = doc.clone()
-    const tooltipPalette = (newDoc.tooltipPalette as string[]) ?? []
-    const cellTooltipGrid = (newDoc.cellTooltipGrid as number[][][]) ?? []
+    // #80 修复：`?? []` 曾经造出**孤儿数组**——文字 push 进局部数组后被丢弃，而网格下标
+    // 却写进了文档（悬空下标）。修复 = 变更后的两个字段一律写回 newDoc：文档缺调色板时
+    // 新建空调色板（契约 §逐格说明的成对 idioms 在写入侧对齐：tooltipPalette / cellTooltipGrid
+    // 同生共死，serialize() 只在字段为真时落盘，旧文件不受影响）。
+    const mutable = newDoc as unknown as {
+      tooltipPalette?: string[]
+      cellTooltipGrid?: number[][][]
+    }
+    const tooltipPalette = (mutable.tooltipPalette ??= [])
+    const cellTooltipGrid = (mutable.cellTooltipGrid ??= [])
 
     let idx = text ? tooltipPalette.indexOf(text) : -1
     if (idx === -1 && text) {
