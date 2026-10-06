@@ -11,10 +11,11 @@ public final class Contract {
 
     /**
      * 契约版本（{@code GET /cp/v1/about} 的 {@code contractVersion} 字段）。
-     * 1.0=PR-1 动作面；1.1=PR-2 取证动作；1.2=PR-3 双轨判据（te-state-equals/image-uniform）。
+     * 1.0=PR-1 动作面；1.1=PR-2 取证动作；1.2=PR-3 双轨判据（te-state-equals/image-uniform）；
+     * 1.3=观察面读面（issue #98：{@code read.*} 八动作）。
      * 小版本只增不改义（contract.md §5）。
      */
-    public static final String VERSION = "1.2";
+    public static final String VERSION = "1.3";
 
     /** 契约 URI 前缀，即契约大版本。 */
     public static final String PREFIX = "/cp/v1";

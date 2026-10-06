@@ -63,6 +63,28 @@ public final class ActionContext {
     }
 
     /**
+     * 派生一个「换参数、其余全共享」的上下文（v1.3，issue #98 的用例 {@code read} 段用）。
+     *
+     * <p>
+     * 用例的 {@code read} 段要执行读面动作，但每次读面有自己的 {@code params}；同时读面产出的
+     * 产物必须落<b>用例的 run 目录</b>（否则判据段看不到读数）。因此派生上下文共享
+     * job / artifacts / events / logger / <b>已开的 run</b>，只换 {@link #params()}。
+     *
+     * <p>
+     * 为什么要一个显式方法而不是让调用方自己 new：{@link ActionContext} 是 final 且构造器包私有，
+     * 而「run 共享」这件事必须由本类保证——派生上下文如果拿不到 run，
+     * 读面动作会各自 {@code beginRun} 开新 run，产物就散到别的目录里去了（实测这类缺陷表现为
+     * 「判据段找不到 read/*.json」，而读面调用本身是绿的）。
+     *
+     * @param newParams 新参数（null 视为空对象）
+     */
+    public ActionContext withParams(JsonObject newParams) {
+        ActionContext c = new ActionContext(job, newParams, artifacts, events, logger);
+        c.run = this.run;
+        return c;
+    }
+
+    /**
      * 开始一次 run（幂等）：建 run 目录并登记活动 run。
      *
      * <p>
