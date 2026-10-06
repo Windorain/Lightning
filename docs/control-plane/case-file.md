@@ -85,7 +85,7 @@
   "renderMode": "本色",                   // 本色 | 参与光照（豁免一，会话默认）
   "worldTime": 6000                      // 可空：拍摄光照基准
 },
-"cameras": [ CameraSpec, ... ]           // 可空：机位表（CameraSpec 见 contract.md §4.1），逐个调 shot.multi 同一实现
+"cameras": [ CameraSpec, ... ]           // 可空：机位表（CameraSpec 见 contract.md §4.3），逐个调 shot.multi 同一实现
 ```
 
 - 两段都空 → 不产截图；`cameras` 非空时才需要 forensic 级 token（`case.run` 权限按内容升格：含 cameras 段的用例必须 forensic 调用）。
@@ -208,6 +208,11 @@ role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直�
    任何「先探一下世界在不在、在就接着用」的写法都违反本节。
 3. **轮内清场不等于起手重建**：`scene.entity.clear`（#99）等轮内原语清实体但不清方块、不清背包、
    不重置天气时间，**不构成 hermetic 保证**，不能替代起手重建。
+4. **L1 玩家操作也是世界写动作（#101 明确）**：`player.*`（见 contract.md §4.6）会改方块、背包、
+   实体与玩家位置，因此**同样受本节约束**——它们开场一律过写入门控
+   （捕获会话期间被别的作业调用即 `CP-STATE-001`），且**不得**被当作「起手重建的替代品」：
+   程序起手仍必须是 `world.rebuild`（或 `case.run` 的 `world` 段），L1 只能发生在**其后**。
+   反向也成立：L1 的产物**不构成** hermetic 保证（走过一段路不改变「世界是不是全新的」这件事）。
 
 **留痕**：`world.rebuild` 的删除阶段落 `world-rebuild` 事件（含 folder/seed），与
 `sceneManifestSha256` 一同构成「本轮确实从新世界开始」的可审计证据链。
@@ -215,7 +220,7 @@ role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直�
 **边界（如实标注）**：本节管**世界**的 hermetic（方块/TE/实体所在的那份存档）。
 **玩家侧状态**（背包、经验、药水效果、飞行）在 1.7.10 落 `<saves>/<folder>/playerdata/`，
 **在**存档目录内，因此随 `world.rebuild` 的整目录删除一并复位。
-**客户端侧**的易失渲染状态不在此列，由捕获层的会话纪律管（契约 §4.1）。
+**客户端侧**的易失渲染状态不在此列，由捕获层的会话纪律管（契约 §4.2）。
 
 ## 9. 文件解析与校验规则
 

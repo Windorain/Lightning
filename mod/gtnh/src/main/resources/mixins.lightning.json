@@ -19,7 +19,8 @@
     "MixinResourceManagerReload",
     "MixinEntityRendererProjection",
     "MixinMinecraftResolution",
-    "MixinRendererLivingEntityShot"
+    "MixinRendererLivingEntityShot",
+    "MixinEntityPlayerMPChatTap"
   ],
   "server": []
 }
