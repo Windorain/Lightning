@@ -183,6 +183,7 @@ public final class GtMachineCompleter implements TeCompleter {
                 "找不到可用的 ItemMachines.placeBlockAt(ItemStack, EntityPlayer, World, int, int, int, int, float, float, float, int)"
                     + " —— GT 版本不符（期望 gregtech.common.blocks.ItemMachines）");
         }
+        Item receiver = placementReceiver(stack, itemMachines, metaTileId);
         // 放置者：服务端玩家（GT 用它记 owner 并按玩家朝向定正面）。没有玩家时传 null——
         // GT 对该参数处处判空（ItemMachines.java:263/273），BlockMachines.onBlockPlacedBy 经
         // GTUtility.getSideFromPlayerFacing(null) 回落到第一个合法朝向，不会抛。
@@ -190,7 +191,7 @@ public final class GtMachineCompleter implements TeCompleter {
         Object placed;
         try {
             placed = placeBlockAt.invoke(
-                null,
+                receiver,
                 stack,
                 player,
                 world,
@@ -218,6 +219,41 @@ public final class GtMachineCompleter implements TeCompleter {
                 Json.object("metaTileId", Integer.valueOf(metaTileId)));
         }
         verify(world, x, y, z, gtTile, spec, metaTileId);
+    }
+
+    /**
+     * 解析 {@code placeBlockAt} 的<b>接收者</b>：必须是「要放下的那个物品自己」。
+     *
+     * <h2>为什么这条是硬要求（#117 段二实机证伪的缺陷 D-1）</h2>
+     * {@code placeBlockAt} 是 {@code ItemBlock} 的<b>实例方法</b>，不是静态方法
+     * （GT5U {@code ItemMachines.java:59,239-241}），方法体里用到了实例字段
+     * {@code this.field_150939_a}（同文件 :249/:252/:284-286）。段一以 {@code null} 接收者
+     * 反射调用它，实机上是必现的 {@code NullPointerException}（{@code Method.invoke(null, …)}
+     * 对实例方法在 JDK 25 上直接抛 NPE）；段一的离线单测看不出来（本仓无世界环境），实机一跑即炸。
+     *
+     * <p>
+     * {@code ItemStack.getItem()} 返回的正是 {@code GameRegistry.registerBlock(this,
+     * ItemMachines.class, …)} 注册出来的那个实例（GT5U {@code api/items/GTGenericBlock.java:14-19}，
+     * 由 {@code BlockMachines.java:72} 传入 {@code ItemMachines.class}），
+     * 即「该方块自己的 ItemBlock」。
+     *
+     * @throws CpException {@code CP-EXEC-001} 当物品的 ItemBlock 不是 GT 的 {@code ItemMachines}——
+     *                     宁可显式失败，也不要一个「接收者不对」的第二次 NPE
+     */
+    static Item placementReceiver(ItemStack stack, Class<?> itemMachines, int metaTileId) {
+        Item receiver = stack == null ? null : stack.getItem();
+        if (itemMachines == null || !itemMachines.isInstance(receiver)) {
+            throw new CpException(
+                ErrorCodes.EXEC_FAILED,
+                "物品 " + ModReflect.itemId(stack)
+                    + " 的 ItemBlock 不是 "
+                    + GT_ITEM_MACHINES_CLASS
+                    + "（实际 "
+                    + ModReflect.nameOf(receiver)
+                    + "）：placeBlockAt 是 ItemBlock 的实例方法，接收者必须是该方块自己的 ItemBlock",
+                Json.object("metaTileId", Integer.valueOf(metaTileId), "itemBlock", ModReflect.nameOf(receiver)));
+        }
+        return receiver;
     }
 
     /**

@@ -7,6 +7,9 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+
 import org.junit.Test;
 
 import com.google.gson.JsonObject;
@@ -493,5 +496,53 @@ public class GtMachineFamilyTest {
     @Test
     public void inventoryWriteConstantsAreStable() {
         assertEquals(256, InventoryWriteAction.MAX_SLOTS);
+    }
+
+    // ------------------------------------------------------------ D-1：放置接收者
+
+    /**
+     * {@code placeBlockAt} 的接收者必须是<b>物品自己</b>，不能是 null。
+     *
+     * <p>
+     * <b>这条测试是 #117 段二实机缺陷 D-1 的离线回归锁。</b>段一以
+     * {@code placeBlockAt.invoke(null, …)} 调用 GT 的 <b>实例</b>方法
+     * （GT5U {@code ItemMachines.java:59,239-241}，方法体用 {@code this.field_150939_a}），
+     * 运行期必抛 {@code NullPointerException}。该缺陷在离线单测下不可见（本仓无世界环境），
+     * 实机一跑就炸；本测试把「接收者来自 {@code stack.getItem()}」这个约束钉在无世界环境也能跑的地方。
+     */
+    @Test
+    public void placementReceiverIsTheItemBlockNotNull() {
+        ItemStack stack = new ItemStack(new ItemBlockTestDouble(), 1, 421);
+        Item resolved = GtMachineCompleter.placementReceiver(stack, ItemBlockTestDouble.class, 421);
+        assertNotNull("接收者不能为 null（null 就是 D-1）", resolved);
+        assertTrue("接收者必须是物品自己（该方块自己的 ItemBlock）", resolved == stack.getItem());
+    }
+
+    /** 接收者类型不对时显式失败（CP-EXEC-001），而不是留给运行期一个裸 NPE。 */
+    @Test
+    public void placementReceiverRejectsForeignItemBlock() {
+        ItemStack stack = new ItemStack(new ItemBlockTestDouble(), 1, 421);
+        try {
+            GtMachineCompleter.placementReceiver(stack, String.class, 421);
+            fail("ItemBlock 类型不符应显式失败");
+        } catch (CpException e) {
+            assertEquals(ErrorCodes.EXEC_FAILED, e.code());
+            assertTrue("错误里要说清接收者是什么", ctxText(e).contains("ItemBlock"));
+        }
+    }
+
+    /** 最恶劣的一种：物品为空（接收者将解析成 null）也必须显式失败。 */
+    @Test
+    public void placementReceiverRejectsNullItemStack() {
+        try {
+            GtMachineCompleter.placementReceiver(null, ItemBlockTestDouble.class, 421);
+            fail("空物品栈应显式失败");
+        } catch (CpException e) {
+            assertEquals(ErrorCodes.EXEC_FAILED, e.code());
+        }
+    }
+
+    /** 测试替身：冒充 ItemBlock（本仓离线单测没有 MC 运行时，但不妨碍验证接收者解析）。 */
+    private static final class ItemBlockTestDouble extends Item {
     }
 }
