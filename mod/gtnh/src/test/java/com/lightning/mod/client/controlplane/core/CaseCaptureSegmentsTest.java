@@ -178,12 +178,12 @@ public class CaseCaptureSegmentsTest {
 
     // ------------------------------------------------------------ 用例
 
-    /** 段清单与段序（capture 在 build 之前）。 */
+    /** 段清单与段序（capture 在 build 之前；v1.3 起 read 在 build 之后、cameras 之前）。 */
     @Test
     public void segmentOrderIsContractOrder() {
         JsonObject plan = plan(caseJson());
         JsonArray segments = plan.getAsJsonArray("segments");
-        assertEquals(6, segments.size());
+        assertEquals(CaseValidator.SEGMENTS.size(), segments.size());
         assertEquals(
             "world",
             segments.get(0)
@@ -197,19 +197,22 @@ public class CaseCaptureSegmentsTest {
             segments.get(2)
                 .getAsString());
         assertEquals(
-            "cameras",
+            "read",
             segments.get(3)
                 .getAsString());
         assertEquals(
-            "criteria",
+            "cameras",
             segments.get(4)
                 .getAsString());
         assertEquals(
-            "evidence",
+            "criteria",
             segments.get(5)
                 .getAsString());
+        assertEquals(
+            "evidence",
+            segments.get(6)
+                .getAsString());
         // 规范化段清单与执行期段清单必须同源
-        assertEquals(CaseValidator.SEGMENTS.size(), segments.size());
         for (int i = 0; i < segments.size(); i++) {
             assertEquals(
                 CaseValidator.SEGMENTS.get(i),

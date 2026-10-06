@@ -20,6 +20,8 @@
 | `anchor-checks.ps1` | **PR-3** 纯检查模块：红绿判定本体（无 HTTP / 无世界 / 无归档），被驱动与自检共用（见 §10.1） |
 | `run-anchor.ps1` | **PR-3** 锚点验收驱动：写配置 → 起客户端 → 依次断言 C1..C7 → 收尾归档（见 §10.1） |
 | `run-anchor-selftest.ps1` | **PR-3** 离线行为自检：合成夹具跑 `anchor-checks.ps1` 的每条判定，验证好数据绿、坏数据精确红（见 §10.6） |
+| `cases/read-surface.json` | **v1.3（#98）** 读面锚点用例：`read` 段跑读面动作，`criteria` 用 `json-field` 直接引用其产物 + 4 个负对照变体（见 §11.2） |
+| `run-read-surface.ps1` | **v1.3（#98）** 读面验收驱动：B1（只读性）/ D1（自述完备）/ D3（默认值可见）/ D4（失败显式）/ R（哈希可复算与可互算）/ B2（读面进判据）（见 §11） |
 
 脚本只做**编排与调用**：控制面本体在 `mod/gtnh/src/main/java/com/lightning/mod/client/controlplane/`。
 脚本不直接 POST 裸请求——一切动作调用都经 `caller.mjs`（自描述驱动），便于审计「调用方是否真的读了自描述」。
@@ -665,3 +667,110 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1              # 29 条�
 6. **`-ChecksOnly` 不产客户端产物，因此不写 `lightning.cfg`**。它的归档里没有 `stale/`、`lightning.cfg.*`、
    客户端日志，只有 `probe-png/`、`summary.md`、`assertions.json`、`session.json` 与 `events.jsonl`（若在）。
    这条分界是刻意的：离线检查不该有副作用。
+
+## 11. 读面验收（`cases/read-surface.json` + `run-read-surface.ps1`，v1.3 / #98）
+
+> 契约出处：contract.md §4.1（观察面读面动作：`read.*` 八动作、哈希口径、只读/失败/产物纪律）、
+> §8.5/§8.6（失败显式、产物显式）；case-file.md §3.1（`read` 段语义与校验口径）、§5（读面输出的判据引用）。
+> 前置、启用通道、端口、`caller.mjs` 用法与退出码**与 §2/§3.1 完全一致**，本节不重复。
+
+### 11.1 `run-read-surface.ps1` 用法
+
+```powershell
+pwsh -File scripts/control-plane/run-read-surface.ps1 -SkipClientStart  # 连已获批的客户端（本脚本不启停客户端）
+pwsh -File scripts/control-plane/run-read-surface.ps1 -EvidenceDir <dir> -ActionTimeoutMs 240000
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `-McDataDir` | `mod/gtnh/run/client` | mcDataDir（`server.json`/`tokens.json` 的发现根） |
+| `-EvidenceDir` | `<repo>/../temp/cp-read/evidence` | 证据落点（每次调用的 `--json-out`、自述 dump、红绿表） |
+| `-CaseFile` | `cases/read-surface.json` | B2 用的读面用例 |
+| `-ActionTimeoutMs` | `180000` | 单次动作的总超时（`caller.mjs`），会下传给支持它的动作 |
+
+**本脚本不启停客户端**（与 `run-smoke.ps1`/`run-shots.ps1` 的差异）：读面验收需要在**两种世界状态**下测——
+在世界里（B1/B2/R）与**不在世界里**（D4 的部分条目）。启停由人/调度者按独占串行纪律安排，
+脚本只在其间做调用与断言。因此没有 `-SkipClientStart`/`-KeepClient` 这种开关。
+
+### 11.2 断言集
+
+| id | 断言 | 红意味着 |
+|---|---|---|
+| P1/P2/P3 | `server.json` 的 `port>0`、`contractVersion=1.3`、`tokens.json` 存在 | 控制面没起、或跑的是旧契约版本 |
+| D1.0/1.1/1.2 | `GET /cp/v1/actions` 返回可解析 JSON；`count≥19`；`contractVersion=1.3` | 自述端点不可用或动作目录不全 |
+| D1 `read.*` ×8 | 逐动作：`description`/`returns`/`since`/`examples`（≥1 且是对象）非空，`tier=observe`、`writable=false`，逐参数 `name`/`type`/`description`/`required` 齐备 | 自描述缺项（需求书 §8.1：没有自描述的动作视为不存在） |
+| D3 ×11 | 逐参数核对 `default` 机读可见且与实现取值一致 | 默认行为只能靠猜（§8.3） |
+| W1/W2 | `world.rebuild` 退出码 0；返回 `scene.sha256` 非空 | 起不了干净世界，后续断言无意义 |
+| B1.0/B1.99 | `read.blocks` 在**全部读面调用前后**各读一次同一区域，两次 `sha256` 相等 | **读面有副作用**（B1 的判据本体） |
+| B1 ×12 | 12 个读面调用（覆盖 8 动作 × 各自形态）逐个退出码 0 | 读面不可用 |
+| B1.100 | 存档内 `scene-manifest.json` 的 `sha256` == `world.rebuild` 返回值 | 读面改动了清单（或重建不幂等） |
+| D4.1..D4.23 | 逐条失败场景：非 0 退出、作业 `failed`、**错误码命中**、`context` 非空 | 失败不显式（§8.5 空转绿）。含 2 条**调用方侧拒绝**（空参数/未知动作）——它们测的是「自述是否足以让调用方在发请求前拦住误用」 |
+| R1 | 从 `read.blocks` 自报的 `hashInput` 手工复算 canonical 文本的 sha256，必须等于它自报的 `sha256` | 哈希不可复算（口径漂移） |
+| R2 | 按**场景清单的位置集合**从读面读数取 `blocks` + 清单自己的 `tileEntities`，组装哈希子集算 sha256，必须等于清单自报的 `sha256` | 与 `world.rebuild` 场景清单**不可互算**（需求书 §5 的读面条目原文） |
+| B2.1..B2.5 | `case.run` 退出码 0；`overall=green`；判据全绿且覆盖全部声明；runId 有；run 目录已归档 | 读面输出进不了判据（§10 B2） |
+
+**退出码**：`0` 全绿；`2` 有断言红。**注意本脚本不起客户端**，故没有「端口不在听」的退出码 4 分支。
+
+### 11.3 `cases/read-surface.json`
+
+- `world`：`folder=cp_read_surface`、`seed=20261007`、`void=true`、`base=[64,12,64]`、`settleTicks=60`；
+- `build`：清场 → 2×`minecraft:stone` + 1×`minecraft:planks:2` + 1×`minecraft:chest`(+`te` vanilla) → `wait 20`；
+- `read`：**7 步**（`read.blocks` / `read.te` / `read.block` / `read.player` / `read.overview` / `read.run` /
+  `read.diff`），各落 `read/<name>.json` 并带 `role`；
+- `criteria`：**25 条**，其中 **20 条**直接引用读面产物（`json-field` 指针指到 `/volume`、`/airCount`、
+  `/tiles/0/tile/class`、`/tiles/1/claimedFamily`（`expect:null`）、`/block/render/isTesr`、
+  `/block/harvest/*`、`/weather/raining`、`/different`、`/hashes/equal`、`/expectSource` 等）；
+- `variants`：**4 个负对照**，每个都把某条读面判据的 `expect` 翻错，`expectCriteriaRed` 指向它。
+  **四个全都必须变红**——这是「读面判据不是恒绿」的机械证明（实测：4/4 `allExpectedRed=true`）；
+- `evidence.expect`：10 项（含 7 个读面产物）。
+
+**为什么读面判据不新增判据类型**：读面要服务的是「读得全、读得准」，不是再造一套断言词汇。
+读数进判据走既有的 `json-field` + RFC 6901 指针，一处定义、一处求值（契约 §4.1 与 case-file.md §5 同口径）。
+`expect: null` 两条专测「显式缺席可断言」——它们的存在依赖于 `Json.toJson` 打开 `serializeNulls()`
+（见 §11.5 第 1 条）。
+
+### 11.4 读面验收的两种世界状态（D4 的分工）
+
+| 状态 | 覆盖 | 落点 |
+|---|---|---|
+| **在世界里** | B1（只读性）、R（哈希）、B2（读面进判据）、D4 中的参数/容器/TE 类失败 | `run-read-surface.ps1` 全量 |
+| **不在世界里**（客户端停在主菜单） | 「无世界」失败：8 个读面动作全部 `CP-STATE-001` + `context{hint,worldLoaded:false}`；`read.run` **仍然成功**（产物在磁盘上，与世界无关——这是刻意设计，不是漏判） | 需人工把客户端留在主菜单时另跑（见 §11.5 第 3 条） |
+
+### 11.5 实测擒获的缺陷与实现/契约口径（v1.3 轮次）
+
+1. **`Json.toJson` 默认丢弃显式 `null` 成员（已修）**。Gson 的 `serializeNulls` 默认关闭，
+   于是 `TeDescriber` 纪律要求的「缺席写显式 `null`」在**落盘后整个键消失**：
+   内存里判据看得见的「显式缺席」在产物里变成「键不存在」。实测症状是
+   `read/te.json` 里 `claimedFamily`/`families[].state` 两个键凭空不见，`json-field` 指针报「未命中」。
+   修法：`Json.GSON`/`GSON_PRETTY` 一律 `.serializeNulls()`。
+   **影响面**：`canonical()` 是手写序列化器、本来就输出 `null`，故**哈希口径不受影响**
+   （实测 R1/R2 在本改动前后都通过）。这属既有缺陷（`te-state-equals` 判据的 `expect:null` 断言
+   在拿**产物**比对时会踩到，拿**运行期状态**比对时不会），本单连带修掉并加锁两条 `expect:null` 判据。
+2. **`ArtifactStore.loadFromDisk` 不读回 `caseId`/`jobSeq`/`createdAt`（已修）**。
+   manifest 里本来写着它们，但磁盘还原路径只填 `artifacts`，于是重启后枚举历史 run 时
+   `caseId` 全是 null——「按 caseId 发现某个 run」对**已完成**的 run 全部失效，而恰恰那些才是要事后核对的。
+   `read.run` 的 `caseId` 过滤器因此在本单里被实测暴露（`caseId` 过滤返回 0 条）。已修并加单测断言。
+3. **动作执行期失败是「作业 failed」（HTTP 200 + 作业体），不是 HTTP 4xx**。
+   契约口径如此（`CoreEndpoints.submitAction` 只对**运行期权限升格**特判回 403）。
+   因此 D4 断言的是 `exitCode=2` + `jobState=failed` + `error.code` + `context` 非空，
+   **不**断言 `httpStatus`——按 HTTP 状态码写会造出一条恒假断言（本单首轮实测踩过：22 条 D4 全红，
+   红因是断言写错而不是实现有问题）。
+4. **`read.blocks` 的 `from`/`to` 在自述里**不**标 `required`**，但运行期必填。
+   理由与 `world.rebuild` 的既有处置逐字相同（`ActionRegistrar` 里的注释）：让「服务端的逐字段参数校验」
+   在负测试里可观测，而不是一律被 `caller.mjs` 按自述提前拦掉。自述的 `description` 明写
+   「运行期必填，缺失报 CP-VALID-002」。**这一处的取舍需要调度者认可**：
+   调用的代价是「自述不能表达『必填』」，收益是「负测试能打到服务端校验」。
+   两条负测试都保留了：`D4.1`（服务端判定）与 `D4.23`（调用方按自述拦截未知动作）。
+5. **`read.run` 是第 8 个动作（超出任务单字面的 7 类读面）**。它的存在理由是任务单原文
+   「截图读面已有 `shot.multi`，不重建，**但要确认其产物入 run 清单**」——确认需要一个**可调用的枚举读**
+   （`GET /cp/v1/artifacts/{runId}` 只回答单 run；逐 run 手工 curl 不算设施）。
+   它同时服务需求书 §8.6「产物显式 + 可通过清单端点发现与核对」。实测它确认了
+   `shot.multi` 的 `shots/*.png` + `shots/*.meta.json` 确实以 `role=shot`/`shot-meta` 登记，
+   且 `missingFiles=0`/`sizeMismatch=0`（清单与磁盘一致）。
+   **若调度者判为越界，可整动作删除**（一个文件 + 一段注册 + 两条判据，无耦合）。
+6. **未覆盖项：容器/背包里「有物品的槽位」**。本轮实测覆盖了空槽、不存在容器、非容器 TE、
+   末影箱、光标槽，但**没有一个槽里真的装着 ItemStack**——因为把物品放进容器需要 L0 写原语
+   （`#99` 的「背包与容器写入」），当前不存在。因此 `readSlot` 的 `id/meta/count/maxStackSize/
+   damage/maxDamage/displayName/nbt` 这条**非空分支**只经代码审查与单测（NBT 摘要机制本身已由
+   `read.te` 的真实箱子 NBT 充分覆盖：复合 + 列表 + 字符串 + int 四种类型都在返回值里）。
+   **本条是真实的能力边界，不是「已验收」**：`#99` 落地后应补一条「写入 → 逐槽读回」的实测。

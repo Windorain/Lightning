@@ -180,10 +180,11 @@ public final class ActionRegistrar {
         registry.registerStepping(
             ActionDescriptor.builder("case.run", Tier.SCENE)
                 .description(
-                    "执行用例（整跑或按段，同一实现）：world→capture→build→cameras→criteria→evidence，"
+                    "执行用例（整跑或按段，同一实现）：world→capture→build→read→cameras→criteria→evidence，"
                         + "逐段落 segments/<name>.json，写 criteria.json / evidence.json / observation.json。"
                         + "capture 段建立捕获会话（期间世界写动作被拒 CP-STATE-001），cameras 段逐机位走 shot.multi 的"
-                        + "同一实现；cameras 段非空时本动作按内容升格为 forensic（不足 CP-AUTH-002）。")
+                        + "同一实现；cameras 段非空时本动作按内容升格为 forensic（不足 CP-AUTH-002）。"
+                        + "read 段（v1.3）逐条执行用例声明的 read.* 动作，读数落本 run 目录供 criteria 直接引用。")
                 .optional("file", ActionDescriptor.TYPE_PATH, "用例文件：绝对路径，或相对 <mcDataDir>/controlplane/cases/")
                 .optional("inline", ActionDescriptor.TYPE_OBJECT, "内联用例（JSON 对象或用例 JSON 文本）；与 file 互斥")
                 .optional(
@@ -243,11 +244,12 @@ public final class ActionRegistrar {
             ActionDescriptor.builder(ReadBlocksAction.NAME, Tier.OBSERVE)
                 .description(
                     "区域方块读回：读闭区间区域内每一格的 {pos, id, blockId, meta, te}，"
-                        + "并给出与 world.rebuild 场景清单同口径的规范化 sha256。只读，调用前后世界不变。")
-                .param(ActionDescriptor.Param.required("from", ActionDescriptor.TYPE_ARRAY, "区域起点 [x,y,z]（闭区间，含）"))
-                .param(
-                    ActionDescriptor.Param
-                        .required("to", ActionDescriptor.TYPE_ARRAY, "区域终点 [x,y,z]（闭区间，含；须逐轴 ≥ from）"))
+                        + "并给出与 world.rebuild 场景清单同口径的规范化 sha256。只读，调用前后世界不变。"
+                        + " from/to 运行期必填（缺失报 CP-VALID-002，context.fields 逐字段）——"
+                        + "自描述不标 required，理由同 world.rebuild：让「服务端的参数校验」在负测试里可观测，"
+                        + "而不是一律被调用方按自述提前拦掉；region 与 from/to 二选一，同给且不一致报 CP-VALID-002。")
+                .optional("from", ActionDescriptor.TYPE_ARRAY, "区域起点 [x,y,z]（闭区间，含）；运行期必填，缺失报 CP-VALID-002")
+                .optional("to", ActionDescriptor.TYPE_ARRAY, "区域终点 [x,y,z]（闭区间，含，须逐轴 ≥ from）；运行期必填，缺失报 CP-VALID-002")
                 .optional(
                     "region",
                     ActionDescriptor.TYPE_OBJECT,
@@ -259,8 +261,10 @@ public final class ActionRegistrar {
                     "blocks 数组是否包含空气（blockId=0）；默认 true。注意：sha256 恒按含空气的完整区域算，不受本参数影响")
                 .optional("hash", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "是否计算 sha256 与 hashInput；默认 true")
                 .returns(
-                    "{schema, action, region{from,to,volume}, volume, blockCount, airSkipped, includeAir, ordering, "
-                        + "blocks[{pos,blockId,meta,id,te}], sha256, hashScope, hashInput{blocks:[{pos,blockId,meta}]}, readAt}")
+                    "{schema, action, region{from,to,volume}, volume, blockCount, airCount, airSkipped, includeAir, "
+                        + "ordering, blocks[{pos,blockId,meta,id,te}], sha256, hashScope, "
+                        + "hashInput{blocks:[{pos,blockId,meta}]}, readAt}；"
+                        + "airCount = 区域里的空气块数（与 includeAir 无关）；airSkipped = 因 includeAir=false 被过滤掉的块数")
                 .example("{\"from\":[64,11,64],\"to\":[70,14,70]}")
                 .example("{\"region\":{\"from\":[64,12,64],\"to\":[64,12,64]},\"includeAir\":false}")
                 .since("1.3")

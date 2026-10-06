@@ -41,6 +41,7 @@ public final class ReadBlocksAction implements ControlAction {
 
         JsonArray all = ReadSupport.readRegion(world, region);
         JsonArray blocks = includeAir ? all : nonAirOnly(all);
+        int air = countAir(all);
 
         JsonObject o = new JsonObject();
         o.addProperty("schema", "lightning.cp-read-blocks/1");
@@ -48,6 +49,9 @@ public final class ReadBlocksAction implements ControlAction {
         o.add("region", regionJson(region));
         o.addProperty("volume", region.volume);
         o.addProperty("blockCount", blocks.size());
+        // airCount = 区域里到底有多少空气（与 includeAir 无关）；
+        // airSkipped = 因 includeAir=false 而被过滤掉多少。两者含义不同，都给出。
+        o.addProperty("airCount", air);
         o.addProperty("airSkipped", all.size() - blocks.size());
         o.addProperty("includeAir", includeAir);
         o.addProperty("ordering", "x 外层、z 中层、y 内层（同一区域两次读回逐元素相同）");
@@ -82,6 +86,19 @@ public final class ReadBlocksAction implements ControlAction {
             }
         }
         return out;
+    }
+
+    /** 空气方块数（{@code blockId == 0}）。 */
+    private static int countAir(JsonArray all) {
+        int n = 0;
+        for (int i = 0; i < all.size(); i++) {
+            JsonObject b = all.get(i)
+                .getAsJsonObject();
+            if (Json.optInt(b, "blockId", 0) == 0) {
+                n++;
+            }
+        }
+        return n;
     }
 
     /** 规范化哈希输入（便于调用方自行复算；与 sha256 同源，不另起口径）。 */

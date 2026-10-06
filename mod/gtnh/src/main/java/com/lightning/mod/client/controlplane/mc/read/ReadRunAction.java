@@ -53,8 +53,28 @@ public final class ReadRunAction implements ControlAction {
         List<String> runIds;
         if (onlyRunId != null && !onlyRunId.trim()
             .isEmpty()) {
+            // 显式指定 runId 而它不存在时报错，不返回空清单：
+            // 「这个 run 不存在」与「这个 run 没有产物」含义相反，空清单会把两者混成一种
+            // （需求书 §8.5 不空转绿）。码值与 GET /cp/v1/artifacts/{runId} 同口径（CP-IO-001 + 404）。
+            String wanted = onlyRunId.trim();
+            if (store.findRun(wanted) == null) {
+                throw new CpException(
+                    ErrorCodes.IO,
+                    "run 不存在: " + wanted,
+                    Json.object(
+                        "action",
+                        NAME,
+                        "runId",
+                        wanted,
+                        "runsRoot",
+                        store.runsRoot()
+                            .toString(),
+                        "available",
+                        store.listRunIds()),
+                    404);
+            }
             runIds = new ArrayList<String>();
-            runIds.add(onlyRunId.trim());
+            runIds.add(wanted);
         } else {
             runIds = store.listRunIds();
             // 最新的在后：翻到前面（默认只回最近的 limit 个）
