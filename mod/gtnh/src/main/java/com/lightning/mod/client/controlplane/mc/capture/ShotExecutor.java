@@ -92,7 +92,7 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * <h2>为什么直接调 {@code renderWorld} 而不是等游戏自己渲</h2>
  * 游戏每帧只渲染一次、且相机是玩家。要在<b>同一 tick 内</b>连续拿到 N 个机位 × M 个 tile 的帧，
  * 必须自己驱动渲染。1.7.10 单机里 tick 线程 == 渲染线程，因此这种「自己渲」与游戏自身的渲染
- * 在同一线程上串行，不存在并发改 GL 状态的问题（contract §4.2.5 的线程口径）。
+ * 在同一线程上串行，不存在并发改 GL 状态的问题（contract §4.3.5 的线程口径）。
  *
  * <h2>ScreenShotHelper 的三个已知坑（逐条规避）</h2>
  * <ul>
@@ -140,7 +140,7 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * <h2>禁止视口拼接</h2>
  * tile 全部靠 {@link ProjectionOverride} 的投影偏移实现，<b>从不</b>移动 GL 视口：
  * {@code EntityRenderer.renderWorld} 每帧强制 {@code glViewport(0,0,displayWidth,displayHeight)}，
- * 视口拼接会被它改回去，接缝必然错位（contract §4.2.4 明令禁止）。
+ * 视口拼接会被它改回去，接缝必然错位（contract §4.3.4 明令禁止）。
  */
 public final class ShotExecutor {
 
@@ -483,7 +483,7 @@ public final class ShotExecutor {
         String renderMode = CameraSpecs.resolveRenderMode(spec, in.capture);
         String lighting = CameraSpecs.resolveLighting(spec, in.capture);
         if (CaptureSpec.RENDER_MODE_LIT.equals(renderMode) || CaptureSpec.LIGHTING_NEUTRAL_FLAT.equals(lighting)) {
-            // contract §4.2.6 的「参与光照 / 中性光照」在本版是如实留痕的<b>观测档位</b>：
+            // contract §4.3.6 的「参与光照 / 中性光照」在本版是如实留痕的<b>观测档位</b>：
             // 世界光照管线本身不做替换（v1 未引入光照注入渲染通道），逐图 meta 与
             // observation.runtimeReads 都会标注 lightingApplied=false，避免事后把
             // 「标注了参与光照」误读成「画面真的被打了中性光」。

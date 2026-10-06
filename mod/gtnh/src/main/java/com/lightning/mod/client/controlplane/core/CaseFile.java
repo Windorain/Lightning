@@ -152,6 +152,61 @@ public final class CaseFile {
         }
     }
 
+    /**
+     * 读面步骤（v1.3，case-file.md §4.1，issue #98）：{@code read} 段的一项。
+     *
+     * <p>
+     * 语义是「执行读面动作 → 结果 JSON 落 run 目录的 {@code path} → 登记为产物」。
+     * 它是「读面输出可被判据直接引用」（需求书 §10 B2）的载体：判据段随后用
+     * {@code json-field} 的 RFC 6901 指针指到这份产物上。
+     */
+    public static final class ReadStep {
+
+        private final String action;
+        private final JsonObject params;
+        private final String path;
+        private final String role;
+
+        ReadStep(String action, JsonObject params, String path, String role) {
+            this.action = action;
+            this.params = params == null ? new JsonObject() : params;
+            this.path = path;
+            this.role = role;
+        }
+
+        /** 读面动作名（必须是已注册的 {@code read.*} 动作）。 */
+        public String action() {
+            return action;
+        }
+
+        /** 动作参数（原样透传；默认值由动作实现补）。 */
+        public JsonObject params() {
+            return Json.copyObject(params);
+        }
+
+        /** run 目录内相对路径（结果落点，也是判据的 {@code params.path}）。 */
+        public String path() {
+            return path;
+        }
+
+        /** 产物角色标签；未声明时为 {@code null}（运行时按动作名派生）。 */
+        public String role() {
+            return role;
+        }
+
+        /** {@code {action, params, path, role?}}。 */
+        public JsonObject toJson() {
+            JsonObject o = new JsonObject();
+            o.addProperty("action", action);
+            o.add("params", Json.copyObject(params));
+            o.addProperty("path", path);
+            if (role != null) {
+                o.addProperty("role", role);
+            }
+            return o;
+        }
+    }
+
     /** 判据条目（case-file.md §5）。 */
     public static final class Criterion {
 
@@ -271,6 +326,7 @@ public final class CaseFile {
     private final String label;
     private final World world;
     private final List<Step> build;
+    private final List<ReadStep> read;
     private final JsonElement capture;
     private final JsonArray cameras;
     private final List<Criterion> criteria;
@@ -279,7 +335,7 @@ public final class CaseFile {
     private final List<String> warnings;
 
     CaseFile(JsonObject raw, String rawText, String schema, String id, String label, World world, List<Step> build,
-        JsonElement capture, JsonArray cameras, List<Criterion> criteria, List<Variant> variants,
+        List<ReadStep> read, JsonElement capture, JsonArray cameras, List<Criterion> criteria, List<Variant> variants,
         JsonArray evidenceExpect, List<String> warnings) {
         this.raw = raw;
         this.rawText = rawText;
@@ -289,6 +345,7 @@ public final class CaseFile {
         this.label = label;
         this.world = world;
         this.build = Collections.unmodifiableList(new ArrayList<Step>(build));
+        this.read = Collections.unmodifiableList(new ArrayList<ReadStep>(read));
         this.capture = capture;
         this.cameras = cameras;
         this.criteria = Collections.unmodifiableList(new ArrayList<Criterion>(criteria));
@@ -335,6 +392,11 @@ public final class CaseFile {
     /** 场景构建步骤（有序）。 */
     public List<Step> build() {
         return build;
+    }
+
+    /** 读面步骤（有序；v1.3 起）。空列表表示用例不产读面产物。 */
+    public List<ReadStep> read() {
+        return read;
     }
 
     /** capture 段原文（PR-1 透传），未声明时为 null。 */

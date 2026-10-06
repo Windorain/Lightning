@@ -413,7 +413,7 @@ final class PartsFamilyProviderProbe {
                 expect(
                     checks,
                     slab.items.get(0).registry.equals("ForgeMicroblock:microblock") && slab.items.get(0).damage == 4
-                        && "ProjRed|Exploration:projectred.exploration.stone"
+                        && "mat=ProjRed|Exploration:projectred.exploration.stone"
                             .equals(slab.items.get(0).nbtDiscriminator),
                     "fmp:slot0 物品身份应为 microblock:4 + mat 串（实际 " + slab.items.get(0)
                         .toJson() + "）");

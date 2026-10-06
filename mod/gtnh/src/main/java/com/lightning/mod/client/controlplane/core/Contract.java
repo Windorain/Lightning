@@ -12,7 +12,8 @@ public final class Contract {
     /**
      * 契约版本（{@code GET /cp/v1/about} 的 {@code contractVersion} 字段）。
      * 1.0=PR-1 动作面；1.1=PR-2 取证动作；1.2=PR-3 双轨判据（te-state-equals/image-uniform）；
-     * 1.3=#99 L0 布景原语（{@code scene.*}，见 contract.md §4.3）。
+     * 1.3=观察面读面 + L0 布景原语（issue #98：{@code read.*} 八动作；issue #99：{@code scene.*} 六动作，
+     * 见 contract.md §4.1/§4.4）。
      * 小版本只增不改义（contract.md §5）。
      *
      * <p>

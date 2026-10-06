@@ -1,7 +1,7 @@
 package com.lightning.mod.client.controlplane.mc.capture;
 
 /**
- * 「当前这一帧是不是取证拍摄帧」的只读查询口（contract.md §4.2；mixin 侧的判定入口）。
+ * 「当前这一帧是不是取证拍摄帧」的只读查询口（contract.md §4.3；mixin 侧的判定入口）。
  *
  * <h2>为什么需要它</h2>
  * 拍摄帧里有些渲染必须被<b>整段</b>拦掉，而拦法写在 mixin 里。mixin 不该去解析动作的执行阶段，
@@ -24,7 +24,7 @@ package com.lightning.mod.client.controlplane.mc.capture;
  * 默认路径来写（{@code MixinRendererLivingEntityShot} 即如此）。
  *
  * <h2>线程</h2>
- * 只在客户端主线程读写（1.7.10 单机里 tick 线程 == 渲染线程，见 contract §4.2.5）。
+ * 只在客户端主线程读写（1.7.10 单机里 tick 线程 == 渲染线程，见 contract §4.3.5）。
  * 与真值 {@code ProjectionOverride.armed} 保持同样的（非 volatile 的）单线程口径。
  */
 public final class CaptureRenderState {

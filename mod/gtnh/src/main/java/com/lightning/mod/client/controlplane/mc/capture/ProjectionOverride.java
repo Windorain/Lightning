@@ -8,7 +8,7 @@ import org.lwjgl.opengl.GL11;
 import com.lightning.mod.client.controlplane.mc.CpLog;
 
 /**
- * 渲染帧的投影矩阵覆写（contract.md §4.2.3/§4.2.4）。
+ * 渲染帧的投影矩阵覆写（contract.md §4.3.3/§4.3.4）。
  *
  * <h2>谁在什么时候用它</h2>
  * <ol>
@@ -35,7 +35,7 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  *
  * <h2>禁止视口拼接</h2>
  * {@code EntityRenderer.renderWorld} 每帧强制 {@code glViewport(0,0,displayWidth,displayHeight)}，
- * 视口拼接会被它改回去、接缝必然错位（contract §4.2.4 明令禁止）。本实现全程不搬视口：tiling 只改
+ * 视口拼接会被它改回去、接缝必然错位（contract §4.3.4 明令禁止）。本实现全程不搬视口：tiling 只改
  * 投影矩阵（放大 + 视锥平移），因此 {@code cols×rows} 片天然无缝。
  *
  * <h2>线程</h2>

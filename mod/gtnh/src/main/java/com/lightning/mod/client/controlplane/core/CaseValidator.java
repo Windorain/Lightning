@@ -73,11 +73,21 @@ public final class CaseValidator {
         s.add("world");
         s.add("capture");
         s.add("build");
+        s.add("read");
         s.add("cameras");
         s.add("criteria");
         s.add("evidence");
         SEGMENTS = java.util.Collections.unmodifiableList(s);
     }
+
+    /**
+     * {@code read} 段的动作名前缀（v1.3，issue #98）。
+     *
+     * <p>
+     * 只允许 {@code read.*}：读面段的语义是「读世界并落产物」，放进写动作会让
+     * 「读面只读」这条纪律失去一个可静态检查的落点（而且写动作该走 build 段）。
+     */
+    public static final String READ_ACTION_PREFIX = "read.";
 
     /** 解析并校验，返回规范化计划。 */
     public static JsonObject validate(String text) {
@@ -108,6 +118,7 @@ public final class CaseValidator {
 
         JsonObject world = validateWorld(file, fields);
         JsonArray build = validateBuild(file, fields, warnings);
+        JsonArray read = validateRead(file, fields, warnings);
         JsonObject capture = validateCapture(file, fields);
         JsonArray cameras = validateCameras(file, fields, warnings);
         JsonArray criteria = validateCriteria(file, fields);
@@ -137,6 +148,7 @@ public final class CaseValidator {
         }
         plan.add("segments", segments);
         plan.add("build", build);
+        plan.add("read", read);
         if (capture != null) {
             plan.add("capture", capture);
         }
@@ -248,6 +260,58 @@ public final class CaseValidator {
             JsonObject item = Json.copyObject(json);
             item.addProperty("index", i);
             out.add(item);
+        }
+        return out;
+    }
+
+    /**
+     * {@code read} 段（v1.3，issue #98）：读面步骤清单的校验。
+     *
+     * <p>
+     * 校验三件事：动作名已注册且以 {@code read.} 开头（读面段只放读动作）、{@code path} 是合法
+     * 的 run 目录内相对路径、同一次用例内 {@code path} 不重复（重复会让后一步静默覆盖前一步的产物，
+     * 而判据引用的是哪一份就说不清了）。
+     *
+     * <p>
+     * 动作是否「真的存在」在这里<b>查不到</b>（core 层没有动作注册表——那是 mc 层装配的东西），
+     * 因此本类只做前缀与形态判定，存在性由 {@code case.run} 的 {@code read} 段执行期判定并报
+     * {@code CP-VALID-001}。这一分工与既有的「core 校验形态、mc 校验运行期」一致。
+     */
+    private JsonArray validateRead(CaseFile file, Fields fields, List<String> warnings) {
+        JsonArray out = new JsonArray();
+        java.util.Set<String> seen = new java.util.LinkedHashSet<String>();
+        List<CaseFile.ReadStep> steps = file.read();
+        for (int i = 0; i < steps.size(); i++) {
+            CaseFile.ReadStep step = steps.get(i);
+            String ctx = "read[" + i + "]";
+            String action = step.action();
+            if (action == null || action.trim()
+                .isEmpty()) {
+                fields.add(ctx + ".action", "必填");
+            } else if (!action.startsWith(READ_ACTION_PREFIX)) {
+                fields.add(ctx + ".action", "读面段只接受 " + READ_ACTION_PREFIX + "* 动作（读面只读；写动作走 build 段），收到: " + action);
+            }
+            String path = step.path();
+            if (path == null || path.trim()
+                .isEmpty()) {
+                fields.add(ctx + ".path", "必填");
+            } else {
+                checkRelPath(path, ctx + ".path", fields);
+                if (!seen.add(path)) {
+                    fields.add(ctx + ".path", "同一次用例内读面产物路径重复: " + path + "（后一步会覆盖前一步）");
+                }
+                if ("manifest.json".equals(path) || "criteria.json".equals(path)
+                    || "evidence.json".equals(path)
+                    || "observation.json".equals(path)) {
+                    fields.add(ctx + ".path", "不得与运行器自身产物重名: " + path);
+                }
+            }
+            JsonObject item = Json.copyObject(step.toJson());
+            item.addProperty("index", i);
+            out.add(item);
+        }
+        if (steps.size() == 0) {
+            warnings.add("read 段为空：本 run 不产读面产物（criteria 不能引用 read/*.json）");
         }
         return out;
     }

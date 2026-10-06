@@ -12,6 +12,7 @@
   "label": "LP 四格管道参照",              // 展示名
   "world":    { ... },                   // 必填：世界构建方式
   "build":    [ ... ],                   // 可空：场景构建步骤
+  "read":     [ ... ],                   // 可空（v1.3，issue #98）：读面步骤
   "capture":  { ... },                   // 可空（PR-2 起）：扫描与捕获参数
   "cameras":  [ ... ],                   // 可空（PR-2 起）：机位表
   "criteria": [ ... ],                   // 必填，至少一条：判据与阈值
@@ -45,6 +46,37 @@
 
 坐标三种写法，一律规范化为绝对坐标：绝对数组 `[x,y,z]`；`"@base"` + 同层 `offset:[dx,dy,dz]`；字符串 `"base+[dx,dy,dz]"`。`world.base` 只接受绝对数组。构建完成后运行器自动做：TE 补全（`te` 步声明的）→ `markBlockRangeForRenderUpdate` → 静置 `settleTicks`。
 
+## 3.1 read 段（读面步骤，v1.3 / issue #98）
+
+每步一个对象：`{action:"read.blocks", params:{...}, path:"read/blocks.json", role?}`。
+执行该读面动作（契约 §4.1 的 `read.*`），把返回的 JSON 落 run 目录的 `path` 并登记为产物。
+段序在 `build` 之后、`cameras` 之前——读的是**成品场景**，且产物必须先落盘，`criteria` 段才引用得到。
+
+```jsonc
+"read": [
+  { "action": "read.blocks",
+    "params": { "from": [64,11,63], "to": [69,15,68], "includeAir": true },
+    "path": "read/blocks.json", "role": "read-blocks" },
+  { "action": "read.diff",
+    "params": { "expectManifestFile": "cp_demo" },
+    "path": "read/diff.json" }
+]
+```
+
+**校验口径（`case.validate` 与 `case.run` 同源）**：
+1. `action` 必填且**必须**以 `read.` 开头——读面段只放读动作（写动作走 `build` 段）；这是「读面只读」
+   这条纪律唯一的**静态可查落点**。动作是否真的已注册由 `case.run` 的 `read` 段执行期判定
+   （`CP-VALID-001`，`context.registered` 给出全部已注册动作名）。
+2. `path` 必填、必须是合法的 run 目录内相对路径（防穿越）；同一次用例内**不得重复**
+   （后一步会静默覆盖前一步，判据引用哪一份就说不清了），也不得与运行器自身产物
+   （`manifest.json`/`criteria.json`/`evidence.json`/`observation.json`）重名。
+3. 空 `read` 段给 warning（声明了但没写步骤，多半是笔误），不是错误。
+4. 读面步骤**必须是同步动作**（`read.*` 全部是）：跨 tick 的读面会读到两个世界状态。
+5. 产物落点即判据的 `params.path`；`role` 缺省时按动作名派生（`read.blocks` → `read-blocks`）。
+6. 读面步骤与 `criteria` **同一份 run 目录**（`ActionContext.withParams` 共享 run）——
+   这是「读面输出可被判据直接引用」的机械保证。
+7. 变体补丁可以改 `read` 段的 `params`（负对照「读数变了判据该红」的基础），写法同其它段（RFC 6902 子集）。
+
 ## 4. capture / cameras 段（PR-2 起生效）
 
 ```jsonc
@@ -76,6 +108,29 @@
 | `te-state-equals`（PR-3，运行期轨） | `at:[x,y,z], key, expect` | 经补全器同族的 **TE 描述器**（TeDescriber，与 completer 同注册、只读不写）读取 TE 运行期状态字段（LP：renderState 连接矩阵/管型；AE2：各面部件清单），与 expect 比较；描述器输出同时进观测记录 runtimeReads（te.* 条目） |
 | `image-uniform`（PR-3，图像轨补充） | `path, minSameColorRatio(默认0.98)` | 图像近纯色——主色占比 ≥ minSameColorRatio（TE 距离门远机位：被门剔除的场景应近似纯背景） |
 
+**读面输出的判据引用（v1.3，issue #98）**：`read.*` 动作是 `observe` 级**普通动作**，不经用例文件——
+它们由调用方在跑用例前后直接调，产物落 run 目录（`read.diff` 的 `expectManifestFile` 路径），
+再用既有的 `json-field` 判据断言。**没有**为读面新增判据类型：读面要服务的是「读得全、读得准」，
+而不是再造一套断言词汇；「读数进判据」这条链路由 `json-field` 的 RFC 6901 指针直接承担，
+一处定义、一处求值。典型形态：
+
+```jsonc
+// criteria 段：引用 read.te 的族状态（与 te-state-equals 同一棵树，同一读取口）
+{ "id": "read-te-pipe-up", "type": "json-field",
+  "params": { "path": "read/te.json", "pointer": "/tiles/0/claimedState/connections/UP" },
+  "expect": true }
+// criteria 段：引用 read.blocks 的规范化哈希（与 read.diff 的 hashes 同口径）
+{ "id": "read-blocks-hash", "type": "json-field",
+  "params": { "path": "read/blocks.json", "pointer": "/sha256" },
+  "expect": "<64 位十六进制>" }
+// criteria 段：引用 read.diff 的差异计数（0 = 与期望态逐格一致）
+{ "id": "read-diff-clean", "type": "json-field",
+  "params": { "path": "read/diff.json", "pointer": "/different" }, "expect": 0 }
+```
+
+读面产物落 run 目录的路径约定（`read.diff` 的 `expectManifestFile` 路径）：`read/diff.json`，
+role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直接引用它）。
+
 **双轨判据口径（#41，PR-3 起对锚点用例强制）**：同一可视特性必须成对断言——运行期轨（`te-state-equals`）证「世界状态对」，图像轨（`image-not-uniform`/`image-uniform`/`image-size-equals`）证「渲染结果对」。锚点用例（LP 四管/AE2 部件）的每个 TE 可视特性两轨齐备；双轨不齐的锚点用例视为用例缺陷（验收驱动静态检查）。
 
 判据结论：`{id, verdict: "green"|"red"|"error", detail}`。`error`（判据自身无法求值，如产物缺失到连断言都不能做）视同 red 但单列。
@@ -103,7 +158,7 @@
 
 ## 8. 执行语义
 
-1. **整跑**：`POST /cp/v1/actions/case.run {file|inline, confirm:true}` → 依序执行 world→build→(capture)→(shots)→criteria→evidence。
+1. **整跑**：`POST /cp/v1/actions/case.run {file|inline, confirm:true}` → 依序执行 world→build→read→(capture)→(shots)→criteria→evidence。
 2. **按段**：`segments:["world","build"]` 只跑指定段；段间状态是真实世界状态（不是重放），因此**按段连跑的结果必须与整跑一致**（验收锚）。判据段在新 run 中求值时，若引用的产物在本 run 不存在，必须**从当前世界状态重新产出**（如重新扫描托管区域生成 scene-manifest.json）再求值。
 3. 每段产出 `segments/<name>.json`（状态、耗时、产物引用；skipped/deferred 段也先落记录）；**`observation.json` 必须在判据段求值之前落盘**（判据可引用它）；判据汇总 `criteria.json`（纯判据语义），证据核对结论落 `evidence.json`（schema `lightning.cp-evidence/1`），合并结论在 `result.overall`（判据与证据任一红/错即 red）。
 4. run 目录：`<mcDataDir>/controlplane/runs/<yyyyMMdd-HHmmss>-<caseId>-<jobSeq>/`（jobSeq 为数字作业序号，jobId 形态 `j<seq>`），全程只增不改；`manifest.json`（schema `lightning.cp-manifest/1`）登记全部产物的 sha256。tokens/server 内部文件 schema 分别为 `lightning.cp-tokens/1`、`lightning.cp-server/1`。`case.run` 必须把 runId 挂上作业（`GET /cp/v1/jobs/{id}` 可见）。
