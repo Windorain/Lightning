@@ -362,9 +362,12 @@ public class GtMachineFamilyTest {
             Json.parseStrictObject(ex);
         }
         assertTrue("缺一条 battery+charge 的可复制示例", sawExample);
-        // 只增可选参数：since 与契约版本都不动（#100 已预定 1.4，避免无谓冲突）
+        // 只增可选参数：动作的引入版本不动（since 仍为 #99 的 1.3）；
+        // 契约版本随集成分支前进（#100=1.4/#101=1.5），这里只锁不变式「契约版本 ≥ 动作 since」。
         assertEquals("1.3", d.since());
-        assertEquals("1.3", Contract.VERSION);
+        assertTrue(
+            "契约版本 " + Contract.VERSION + " 必须 ≥ 动作 since " + d.since(),
+            Contract.VERSION.compareTo(d.since()) >= 0);
     }
 
     /** 脚本参数说明里每个参数都要有类型与说明（复用读面单测的同一纪律）。 */
