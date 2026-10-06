@@ -19,6 +19,9 @@ import com.lightning.mod.client.controlplane.core.ErrorCodes;
 import com.lightning.mod.client.controlplane.core.EventStream;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.mc.CpLog;
+import com.lightning.mod.client.controlplane.mc.ElectricItems;
+import com.lightning.mod.client.controlplane.mc.GtItemList;
+import com.lightning.mod.client.controlplane.mc.ModReflect;
 import com.lightning.mod.client.controlplane.mc.WorldRuntime;
 
 /**
@@ -53,6 +56,21 @@ import com.lightning.mod.client.controlplane.mc.WorldRuntime;
  * （原版自身的写入 API），写完对玩家发一次 {@code Container.detectAndSendChanges}
  * （{@code S2FPacketSetSlot}），因此客户端侧同 tick 内即可见。
  * <b>不从静态数据推算回填</b>（契约 §6.4 的既有禁令）。
+ *
+ * <h2>GT 电池与充电（#117 供电布景）</h2>
+ * 槽位条目除 {@code {id,meta,count,nbt}} 外还接受：
+ * <ul>
+ * <li>{@code battery:"Battery_RE_LV_Lithium"}——GT 自己的 {@code ItemList} 常量名，物品与 meta 由
+ * {@link com.lightning.mod.client.controlplane.mc.GtItemList} 按 GT 的清单取（不硬编码 meta）；</li>
+ * <li>{@code charge:"full"|"empty"|<EU 整数>}——经<b>物品自己的</b>电力 API
+ * （IC2 {@code IElectricItemManager}，GT 的 {@code MetaBaseItem} 自己实现了它）充放电，
+ * 见 {@link com.lightning.mod.client.controlplane.mc.ElectricItems}。</li>
+ * </ul>
+ * <b>为什么必须有 charge 而不能让用例写 nbt</b>：GT 电池的充电状态存在 NBT 键 {@code GT.ItemCharge} 上，
+ * 手写它属于契约 §6.4 禁止的「逐字段从静态数据推算回填」。{@link SlotSpec} 因此直接拒绝
+ * {@code charge} 与 {@code nbt} 同时出现（给的就是绕过该纪律的后门）。
+ * 把满充电池写进机器的充电槽后，机器由 GT 自己的 tick 取电
+ * （{@code BaseMetaTileEntity.handleInventoryDechargingServer}），本动作<b>不</b>直接改机器的 EU 缓冲。
  */
 public final class InventoryWriteAction implements ControlAction {
 
@@ -187,7 +205,8 @@ public final class InventoryWriteAction implements ControlAction {
     // ------------------------------------------------------------ 单槽写入
 
     private JsonObject writeOne(IInventory inv, JsonObject spec, int size, String where, String target) {
-        int slot = Json.optInt(spec, "slot", Integer.MIN_VALUE);
+        SlotSpec s = SlotSpec.parse(spec, where);
+        int slot = s.slot;
         if (slot == Integer.MIN_VALUE) {
             throw CpException.param("缺少 slot", where + ".slot", "必填（整数槽位下标）");
         }
@@ -202,7 +221,7 @@ public final class InventoryWriteAction implements ControlAction {
                     + "），收到 "
                     + slot);
         }
-        ItemStack stack = buildStack(spec, where);
+        ItemStack stack = buildStack(s, where);
         try {
             inv.setInventorySlotContents(slot, stack);
         } catch (Throwable t) {
@@ -216,39 +235,109 @@ public final class InventoryWriteAction implements ControlAction {
         if (stack == null) {
             o.addProperty("cleared", true);
         } else {
-            o.add("requested", stackSummary(stack));
+            o.add("requested", stackSummary(stack, s));
             ItemStack live = inv.getStackInSlot(slot);
-            o.add("actual", stackSummary(live));
+            o.add("actual", stackSummary(live, s));
             o.addProperty("matches", Boolean.valueOf(sameStack(stack, live)));
         }
         return o;
     }
 
-    /** 由 {@code {id, meta, count, nbt}} 造物品栈；{@code id} 为 null 或 {@code "air"} 表示清空该槽。 */
-    private ItemStack buildStack(JsonObject spec, String where) {
-        String id = Json.optString(spec, "id", null);
-        if (id == null || id.trim()
-            .isEmpty()
-            || "air".equalsIgnoreCase(id.trim())
-            || "minecraft:air".equalsIgnoreCase(id.trim())
-            || "0".equals(id.trim())) {
+    /**
+     * 由 {@link SlotSpec} 造物品栈；{@code clear} 为真时返回 null（清空该槽）。
+     *
+     * <p>
+     * {@code battery} 形式走 GT 自己的 {@code ItemList}（{@link GtItemList}），
+     * 之后按需经物品自己的电力 API 充放电（{@link ElectricItems}）——两条都是模组自身的权威路径，
+     * 不拼 NBT（见类注释）。
+     */
+    private ItemStack buildStack(SlotSpec s, String where) {
+        if (s.clear) {
             return null;
         }
-        Item item = EntitySpawnAction.resolveItem(id.trim(), where + ".id");
-        int meta = Json.optInt(spec, "meta", 0);
-        int count = Json.optInt(spec, "count", 1);
-        if (count < 1 || count > 64) {
-            throw CpException.param("数量非法", where + ".count", "须在 1..64（清空请用 id=air），收到 " + count);
+        ItemStack stack;
+        if (s.battery != null) {
+            stack = GtItemList.get(s.battery, 1L);
+        } else {
+            Item item = EntitySpawnAction.resolveItem(s.id, where + ".id");
+            stack = new ItemStack(item, s.count, s.meta);
+            NBTTagCompound tag = EntitySpawnAction.parseNbt(s.nbt, where + ".nbt");
+            if (tag != null) {
+                stack.setTagCompound(tag);
+            }
         }
-        if (meta < 0 || meta > 32767) {
-            throw CpException.param("meta 非法", where + ".meta", "须在 0..32767，收到 " + meta);
-        }
-        ItemStack stack = new ItemStack(item, count, meta);
-        NBTTagCompound tag = EntitySpawnAction.parseNbt(Json.optString(spec, "nbt", null), where + ".nbt");
-        if (tag != null) {
-            stack.setTagCompound(tag);
+        if (!s.charge.isNone()) {
+            applyCharge(stack, s.charge, where);
         }
         return stack;
+    }
+
+    /**
+     * 按物品自己的电力 API 充/放电，并<b>读回核对</b>是否真的到了目标电量。
+     *
+     * <p>
+     * 「充了但没充进去」必须显式失败：GT 的一次性电池（{@code mElectricStats[3] == -2}，
+     * 如 {@code Battery_SU_LV_SulfuricAcid}）只允许放电，对它们 {@code charge:"full"} 会返回 0
+     * ——静默成功会让用例署在一个从未充上电的电池上（假绿）。
+     */
+    private void applyCharge(ItemStack stack, SlotSpec.Charge charge, String where) {
+        if (!ElectricItems.available()) {
+            throw new CpException(
+                ErrorCodes.STATE,
+                "充电需要 IC2/GT 的电力物品 API，本环境不在运行期 classpath 上",
+                Json.object("item", ModReflect.itemId(stack), "charge", charge.describe()));
+        }
+        if (!ElectricItems.isElectric(stack)) {
+            throw CpException.param(
+                "该物品不是电力物品，无法充电",
+                where + ".charge",
+                "物品 " + ModReflect.itemId(stack)
+                    + " 未实现 ic2.api.item.IElectricItem 或最大电量为 0（GT 的 getTier 为 Integer.MAX_VALUE）");
+        }
+        Long beforeRaw = ElectricItems.chargeOf(stack);
+        Long maxRaw = ElectricItems.maxCharge(stack);
+        long before = beforeRaw == null ? 0L : beforeRaw.longValue();
+        long max = maxRaw == null ? 0L : maxRaw.longValue();
+        long target;
+        switch (charge.mode) {
+            case FULL:
+                target = max;
+                break;
+            case EMPTY:
+                target = 0L;
+                break;
+            case AMOUNT:
+                target = Math.min(charge.amount, max);
+                break;
+            default:
+                return;
+        }
+        if (target > before) {
+            ElectricItems.charge(stack, target - before, false);
+        } else if (target < before) {
+            ElectricItems.discharge(stack, before - target, false);
+        }
+        Long afterRaw = ElectricItems.chargeOf(stack);
+        long after = afterRaw == null ? 0L : afterRaw.longValue();
+        if (after != target) {
+            throw new CpException(
+                ErrorCodes.EXEC_FAILED,
+                "充电未达到目标电量（要求 " + target
+                    + " EU，实际 "
+                    + after
+                    + " EU，物品 "
+                    + ModReflect.itemId(stack)
+                    + "）：该物品不接受这次充放（例如 specialData=-2 的一次性电池只能放电）",
+                Json.object(
+                    "requested",
+                    Long.valueOf(target),
+                    "actual",
+                    Long.valueOf(after),
+                    "before",
+                    Long.valueOf(before),
+                    "maxCharge",
+                    Long.valueOf(max)));
+        }
     }
 
     // ------------------------------------------------------------ 读回
@@ -276,6 +365,14 @@ public final class InventoryWriteAction implements ControlAction {
     }
 
     private static JsonObject stackSummary(ItemStack stack) {
+        return stackSummary(stack, null);
+    }
+
+    /**
+     * 物品栈摘要；{@code spec} 带 {@code charge}/{@code battery} 时额外给出电力读数
+     * （「写进去的电池到底有没有电」是 #117 供电布景的可审计点）。
+     */
+    private static JsonObject stackSummary(ItemStack stack, SlotSpec spec) {
         JsonObject o = new JsonObject();
         if (stack == null || stack.getItem() == null) {
             return o;
@@ -293,6 +390,12 @@ public final class InventoryWriteAction implements ControlAction {
                     stack.getTagCompound()
                         .toString()
                         .length()));
+        }
+        if (spec != null && (spec.battery != null || !spec.charge.isNone())) {
+            o.addProperty("chargeRequested", spec.charge.describe());
+            o.addProperty("charge", ElectricItems.chargeOf(stack));
+            o.addProperty("maxCharge", ElectricItems.maxCharge(stack));
+            o.addProperty("electricTier", ElectricItems.tier(stack));
         }
         return o;
     }

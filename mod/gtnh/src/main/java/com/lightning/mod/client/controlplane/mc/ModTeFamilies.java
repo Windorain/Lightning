@@ -5,15 +5,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 模组族（LP / AE2）的补全器与描述器注册（contract.md §6.5 的 v1.2 注册表：
- * {@code vanilla} / {@code lp-pipe} / {@code ae2-part}）。
+ * 模组族（LP / AE2 / GT）的补全器与描述器注册（contract.md §6.5 的注册表：
+ * {@code vanilla} / {@code lp-pipe} / {@code ae2-part} / {@code gt-machine}）。
  *
  * <h2>不装模组也不能炸（类引用隔离）</h2>
  * 本类是控制面唯一「探测模组在不在」的地方：
  * <ul>
- * <li>两个族的补全器/描述器代码<b>一律经 {@link ModReflect} 反射</b>触达模组类型——LP 在本树只有
- * {@code runtimeOnlyNonPublishable}（编译期根本没有 LP 类型可 import），AE2 虽是 {@code compileOnly}
- * 但整合包里可以缺，硬 import 会在类加载期抛 {@code NoClassDefFoundError}，连控制面自身都起不来；</li>
+ * <li>各族的补全器/描述器代码<b>一律经 {@link ModReflect} 反射</b>触达模组类型——LP 在本树只有
+ * {@code runtimeOnlyNonPublishable}（编译期根本没有 LP 类型可 import），AE2 与 GT 虽是
+ * {@code compileOnly} 但整合包里可以缺，硬 import 会在类加载期抛 {@code NoClassDefFoundError}，
+ * 连控制面自身都起不来；</li>
  * <li>{@link #registerAll()} 先用 {@link ModReflect#allPresent} 探测，缺席就<b>跳过注册</b>并把原因记进
  * {@link #absences()}，同时打一条 WARN——注册动作本身永远成功；</li>
  * <li>缺席族的用例（{@code "completer":"lp-pipe"}）在 {@link SceneBuilder} 的 te 步上得到
@@ -36,6 +37,17 @@ public final class ModTeFamilies {
     private static final String[] AE2_CLASSES = { Ae2PartCompleter.IPART_HOST_CLASS,
         Ae2PartCompleter.TILE_CABLE_BUS_CLASS, Ae2PartCompleter.PART_PLACEMENT_CLASS };
 
+    /**
+     * GT 可用性判定所需的类。
+     *
+     * <p>
+     * 只要这四个到齐，「GT 机器放置通道」就可用：{@code ItemMachines} 是放置路径宿主，
+     * {@code BlockMachines} 是方块身份判据，{@code IGregTechTileEntity} 是「有没有 MetaTileEntity」
+     * 的判据，{@code ItemList} 是「按常量名取机器/电池」的清单入口。
+     */
+    private static final String[] GT_CLASSES = { GtMachineCompleter.GT_ITEM_MACHINES_CLASS,
+        GtMachineCompleter.GT_BLOCK_MACHINES_CLASS, GtMachineCompleter.GT_TILE_INTERFACE, GtItemList.ITEM_LIST_CLASS };
+
     private static final Map<String, String> ABSENCES = new LinkedHashMap<String, String>();
     private static volatile boolean registered;
 
@@ -56,6 +68,7 @@ public final class ModTeFamilies {
         registered = true;
         registerLp();
         registerAe2();
+        registerGt();
         CpLog.info(
             "TE 补全器族：%s；描述器族：%s%s",
             TeCompleters.names(),
@@ -114,6 +127,29 @@ public final class ModTeFamilies {
         }
         TeCompleters.register(new Ae2PartCompleter());
         TeDescribers.register(new Ae2PartDescriber());
+    }
+
+    /**
+     * GT 族（{@code gt-machine}，issue #117）。
+     *
+     * <p>
+     * 补全器走 GT 自己的机器放置路径（{@link GtMachineCompleter}），描述器读回
+     * {@code getMetaTileID()}/{@code getMetaTileEntity()}——这两件事必须同族注册：
+     * 场景清单的哈希对「空壳 vs 真机器」是盲的，只有描述器能分辨（见 {@link GtMachineDescriber}
+     * 的类注释）。
+     */
+    private static void registerGt() {
+        if (!ModReflect.allPresent(GT_CLASSES)) {
+            String reason = "GregTech (GT5-Unofficial) 不在运行期 classpath 上（缺 " + firstMissing(GT_CLASSES)
+                + "）"
+                + modLoadedHint("gregtech")
+                + "：gt-machine 族未注册";
+            ABSENCES.put(GtMachineCompleter.NAME, reason);
+            CpLog.warn("控制面：%s", reason);
+            return;
+        }
+        TeCompleters.register(new GtMachineCompleter());
+        TeDescribers.register(new GtMachineDescriber());
     }
 
     /**
