@@ -33,7 +33,9 @@ import com.lightning.mod.client.controlplane.mc.WorldRuntime;
  * <h2>选择条件</h2>
  * <ul>
  * <li>{@code box}：{@code [[minx,miny,minz],[maxx,maxy,maxz]]}，按实体包围盒中心落在盒内判定；</li>
- * <li>{@code entity}：只清该注册名（{@code EntityList} 名，如 {@code minecraft:item}）；</li>
+ * <li>{@code entity}：只清该注册名（{@code EntityList} 名；<b>1.7.10 的原生键不带
+ * {@code minecraft:} 前缀</b>，如 {@code Item}/{@code Zombie}；{@code minecraft:item} 这类现代写法
+ * 也接受——解析走 {@link RegistryNames}，宽容只发生在匹配阶段）；</li>
  * <li>{@code item}：只清掉落物里物品为该项的（可带 {@code meta}；不给 meta 即不限）；</li>
  * <li>{@code includePlayers}：是否连玩家一起清（<b>默认 false</b>——清掉自己会让后续
  * 无人值守流程卡在无玩家状态，必须是显式选择）。</li>
@@ -67,11 +69,9 @@ public final class EntityClearAction implements ControlAction {
             // 物品注册名非法必须在入口就报，而不是「过滤掉 0 个」静默成功
             EntitySpawnAction.resolveItem(itemId, "item");
         }
-        String matchEntityId = entityId;
-        if (matchEntityId != null) {
-            // 同理：不存在的实体名过滤出 0 个是假绿，入口直接拒
-            requireKnownEntity(matchEntityId);
-        }
+        // 同理：不存在的实体名过滤出 0 个是假绿，入口直接拒。
+        // 解析成注册表原始键（1.7.10 的键不带 minecraft: 前缀，实测 minecraft:item 查不到而 Item 才行）
+        String matchEntityId = entityId == null ? null : RegistryNames.resolveEntityKey(entityId, "entity");
 
         List<Entity> hits = new ArrayList<Entity>();
         for (Entity e : new ArrayList<Entity>(world.loadedEntityList)) {
@@ -84,10 +84,10 @@ public final class EntityClearAction implements ControlAction {
             if (!inBox(box, e)) {
                 continue;
             }
-            if (matchEntityId != null && !matchEntityId.equals(EntityList.getEntityString(e))) {
+            if (matchEntityId != null && !RegistryNames.sameEntity(matchEntityId, RegistryNames.entityKeyOf(e))) {
                 continue;
             }
-            if (itemId != null && !itemMatches(e, itemId, hasMeta, meta)) {
+            if (itemId != null && !EntitySpawnAction.itemMatches(e, itemId, hasMeta, meta)) {
                 continue;
             }
             hits.add(e);
@@ -149,32 +149,6 @@ public final class EntityClearAction implements ControlAction {
             && cy <= box[1][1]
             && cz >= box[0][2]
             && cz <= box[1][2];
-    }
-
-    private static boolean itemMatches(Entity e, String itemId, boolean hasMeta, int meta) {
-        if (!(e instanceof EntityItem)) {
-            return false;
-        }
-        ItemStack stack = ((EntityItem) e).getEntityItem();
-        if (stack == null || stack.getItem() == null) {
-            return false;
-        }
-        String id = Item.itemRegistry.getNameForObject(stack.getItem());
-        if (!itemId.equals(id)) {
-            return false;
-        }
-        return !hasMeta || stack.getItemDamage() == meta;
-    }
-
-    private static boolean requireKnownEntity(String entityId) {
-        Object mapped = EntityList.stringToClassMapping.get(entityId);
-        if (mapped == null) {
-            throw CpException.param(
-                "未知实体 id",
-                "entity",
-                "EntityList 里没有该注册名: " + entityId + "（如 minecraft:zombie / minecraft:item）");
-        }
-        return true;
     }
 
     private static int countRemaining(WorldServer world, boolean includePlayers) {

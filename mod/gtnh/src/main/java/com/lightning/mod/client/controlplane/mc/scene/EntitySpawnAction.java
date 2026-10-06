@@ -51,6 +51,30 @@ import com.lightning.mod.client.controlplane.mc.WorldRuntime;
  * SNBT 的字符串值可裸写（{@code {display:{Name:foo}}}），JSON 必须加引号；数字后缀
  * （{@code 1b}/{@code 1.0f}）也是 SNBT 独有。自述里写明这一点，免得调用方按 JSON 写。
  * 解析失败即 {@code CP-VALID-002} 并带 SNBT 异常原文。
+ *
+ * <h2>托管世界是虚空——四条实测事实（会让「生成了但没看见」）</h2>
+ * <ol>
+ * <li><b>没落脚的实体会坠出世界</b>：1.7.10 的 {@code Entity.outOfWorld()} 在
+ * {@code posY < -64} 时直接 {@code kill()}。虚空世界只有构建段放下的那几块方块，
+ * 停在半空的实体几秒内就没了。要实体留住，先放一块地板（{@code block} 步）再把实体放在其上方。</li>
+ * <li><b>会走路的实体会走出地板</b>：1.7.10 <b>没有 {@code NoAI} 标签</b>（那是 1.8+ 的），
+ * 用 NBT 钉住 AI 在这里无效——猪/牛会游荡，几秒内就可能走出小平台并坠落。
+ * 要稳定布景请给足够大的地板，或只放不游走的实体（掉落物、
+ * {@code ArmorStand} 之类），或把 AI 钉住这件事当作 L1 行为另行验证。</li>
+ * <li><b>同种掉落物会合并</b>：{@code EntityItem} 在 {@code combineItems} 距离内把同 item+meta
+ * 的栈并成一个。<b>因此 {@code entityCounts} 报的是「实体个数」而不是「你调了几次」</b>——
+ * 在同一坐标连调 3 次石头各 1 个，结果往往只有 1 个实体、count=3 的那一栈。</li>
+ * <li><b>玩家脚下的掉落物会被自动拾取</b>：{@code EntityItem.onUpdate} 直接调
+ * {@code player.inventory.addItemStackToInventory}。若实体生成在玩家身上，下一次玩家 tick
+ * 就进背包了——那时再清场自然是 0 个。要验证「清掉落物」，把实体放在离玩家一格以上处。</li>
+ * </ol>
+ * 另外「物品/实体 id 未知」在入口即拒（{@code CP-VALID-002}），不会静默变成 0 个。
+ *
+ * <p>
+ * <b>读回口径的边界</b>：{@code entityCounts} 读的是服务端世界的 {@code loadedEntityList}，
+ * 而服务端世界跑在自己的线程上（见 {@link L0Session} 的跨线程说明）。因此这些计数是
+ * <b>指示性快照</b>而不是原子的账目——上面四条动态行为叠加后，两次相邻调用读到的数会不同。
+ * 需要精确对账时以单次调用返回的 {@code spawned[]}/{@code removed[]} 为准（那是本动作自己造成的变化）。
  */
 public final class EntitySpawnAction implements ControlAction {
 
@@ -138,6 +162,10 @@ public final class EntitySpawnAction implements ControlAction {
      * 为这条路径准备的公开入口（{@code /summon} 用的就是它），既绕开访问控制又保证是原版语义。
      */
     private Entity spawnEntityWithNbt(WorldServer world, String entityId, NBTTagCompound tag, String where) {
+        // 1.7.10 的注册名不带 minecraft: 前缀（实测：minecraft:zombie 查不到，Zombie 才行）。
+        // 这里先把调用方给的名字解析成注册表里的原始键，再把原始键交给原版 API——
+        // 宽容只发生在匹配阶段，交给原版的一定是它的原生键，不改变原版行为。
+        String key = RegistryNames.resolveEntityKey(entityId, where + ".entity");
         Entity entity;
         if (tag != null) {
             // NBT 路径要求 id 标签，且必须与显式给的 entity 一致（不一致即调用方写错了）
@@ -145,23 +173,27 @@ public final class EntitySpawnAction implements ControlAction {
                 throw CpException.param("NBT 缺少 id 标签", where + ".nbt", "带 nbt 生成实体时，SNBT 里必须有 id:\"<实体注册名>\"");
             }
             String nbtId = tag.getString("id");
-            if (!entityId.equals(nbtId)) {
-                throw CpException
-                    .param("entity 与 nbt.id 不一致", where + ".nbt", "entity=" + entityId + "，nbt.id=" + nbtId);
+            if (!RegistryNames.sameEntity(key, nbtId)) {
+                throw CpException.param(
+                    "entity 与 nbt.id 不一致",
+                    where + ".nbt",
+                    "entity=" + entityId + "（解析为 " + key + "），nbt.id=" + nbtId);
             }
+            // createEntityFromNBT 按 id 标签自己查表，故把标签里的 id 规范成解析后的原始键
+            tag.setString("id", key);
             try {
                 entity = EntityList.createEntityFromNBT(tag, world);
             } catch (Throwable t) {
                 throw CpException.param("NBT 生成实体失败", where + ".nbt", String.valueOf(t));
             }
         } else {
-            entity = EntityList.createEntityByName(entityId, world);
+            entity = EntityList.createEntityByName(key, world);
         }
         if (entity == null) {
             throw CpException.param(
-                "未知实体 id",
+                "实体构造返回 null",
                 where + ".entity",
-                "EntityList 里没有该注册名: " + entityId + "（如 minecraft:zombie / minecraft:item）");
+                "注册名 " + key + " 已登记但 createEntityByName/createEntityFromNBT 返回 null（该实体类可能没有无参构造或构造抛异常）");
         }
         return entity;
     }
@@ -332,42 +364,77 @@ public final class EntitySpawnAction implements ControlAction {
 
     // ------------------------------------------------------------ 结果统计
 
-    /** 生成后实读：世界现有多少实体、其中本次关注的注册名/物品各多少（读面兜底）。 */
+    /**
+     * 生成后实读：世界现有多少实体，以及本次关注的注册名/物品各命中多少（读面兜底）。
+     *
+     * <p>
+     * 关注项的 key 用<b>规范化后的注册名</b>（{@link RegistryNames#normalize}）匹配——调用方写
+     * {@code minecraft:zombie} 而世界里读到的是原生 {@code Zombie}，直接字符串比较会恒得 0
+     * （假绿：明明生成成功了却报 count=0）。这里两侧都规范化，因此「关注项 → 实读计数」这条
+     * 对照链在现代写法与原生写法下都成立。
+     *
+     * <p>
+     * <b>计数口径是「实体个数」</b>，不是「调用次数」也不是「物品总数」：原版
+     * {@code EntityItem.combineItems} 会把同 item+meta 的近距离掉落物并成一个栈，因此同一坐标
+     * 连调多次同种掉落物，这里只会看到 1 个实体。要按栈总量核对请读 {@code spawned[].item.count}。
+     */
     private JsonArray entityCounts(WorldServer world, List<JsonObject> specs) {
         List<String> wanted = new ArrayList<String>();
         for (JsonObject spec : specs) {
             String id = trimToNull(Json.optString(spec, "entity", null));
-            if (id == null) {
-                id = trimToNull(Json.optString(spec, "item", null));
-                if (id != null) {
-                    id = "minecraft:item[" + id + ":" + Json.optInt(spec, "meta", 0) + "]";
+            if (!isBlank(id)) {
+                // 解析成注册表原始键，让返回值里的 key 就是世界里真实用的那个名字
+                id = RegistryNames.resolveEntityKey(id, "entities[].entity");
+            } else {
+                String item = trimToNull(Json.optString(spec, "item", null));
+                if (isBlank(item)) {
+                    continue;
                 }
+                id = "Item[" + item + ":" + Json.optInt(spec, "meta", 0) + "]";
             }
-            if (id != null && !wanted.contains(id)) {
+            if (!wanted.contains(id)) {
                 wanted.add(id);
             }
         }
         JsonArray out = new JsonArray();
-        java.util.Map<String, Integer> byName = new java.util.LinkedHashMap<String, Integer>();
+        java.util.Map<String, Integer> byKey = new java.util.LinkedHashMap<String, Integer>();
         int total = 0;
         for (Entity e : world.loadedEntityList) {
             if (e == null) {
                 continue;
             }
             total++;
-            String key = EntityList.getEntityString(e);
-            if (key == null) {
-                key = e.getClass()
-                    .getName();
-            }
-            Integer prev = byName.get(key);
-            byName.put(key, Integer.valueOf(prev == null ? 1 : prev.intValue() + 1));
+            String key = RegistryNames.entityKeyOf(e);
+            Integer prev = byKey.get(key);
+            byKey.put(key, Integer.valueOf(prev == null ? 1 : prev.intValue() + 1));
         }
         for (String key : wanted) {
             JsonObject c = new JsonObject();
             c.addProperty("key", key);
-            Integer n = byName.get(key);
-            c.addProperty("count", Integer.valueOf(n == null ? 0 : n.intValue()));
+            int n = 0;
+            if (key.startsWith("Item[")) {
+                // 掉落物按「物品 + meta」计数：注册名（Item）粒度太粗，答不出「这个石头掉了几个」
+                String itemId = key.substring("Item[".length(), key.lastIndexOf(':'));
+                int meta = Integer.parseInt(key.substring(key.lastIndexOf(':') + 1, key.length() - 1));
+                for (Entity e : world.loadedEntityList) {
+                    if (itemMatches(e, itemId, true, meta)) {
+                        n++;
+                    }
+                }
+            } else {
+                Integer exact = byKey.get(key);
+                if (exact != null) {
+                    n = exact.intValue();
+                } else {
+                    for (java.util.Map.Entry<String, Integer> en : byKey.entrySet()) {
+                        if (RegistryNames.sameEntity(en.getKey(), key)) {
+                            n += en.getValue()
+                                .intValue();
+                        }
+                    }
+                }
+            }
+            c.addProperty("count", Integer.valueOf(n));
             out.add(c);
         }
         JsonObject all = new JsonObject();
@@ -376,6 +443,22 @@ public final class EntitySpawnAction implements ControlAction {
         all.addProperty("note", "world.loadedEntityList 总数（含玩家、掉落物与模组实体）");
         out.add(all);
         return out;
+    }
+
+    /** 掉落物实体是否匹配「物品 + meta」。 */
+    static boolean itemMatches(Entity e, String itemId, boolean hasMeta, int meta) {
+        if (!(e instanceof EntityItem)) {
+            return false;
+        }
+        ItemStack stack = ((EntityItem) e).getEntityItem();
+        if (stack == null || stack.getItem() == null) {
+            return false;
+        }
+        String id = Item.itemRegistry.getNameForObject(stack.getItem());
+        if (!itemId.equals(id)) {
+            return false;
+        }
+        return !hasMeta || stack.getItemDamage() == meta;
     }
 
     private static JsonObject stackSummary(ItemStack stack) {
@@ -399,6 +482,11 @@ public final class EntitySpawnAction implements ControlAction {
         }
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.trim()
+            .isEmpty();
     }
 
     /** 读 {@code [x,y,z]}；缺失返回 null，形态非法抛 CP-VALID-002。 */

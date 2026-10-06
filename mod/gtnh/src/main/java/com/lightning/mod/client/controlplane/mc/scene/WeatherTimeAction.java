@@ -1,7 +1,6 @@
 package com.lightning.mod.client.controlplane.mc.scene;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.WorldServer;
 import net.minecraft.world.storage.WorldInfo;
 
@@ -242,11 +241,5 @@ public final class WeatherTimeAction implements ControlAction {
             CpLog.warn("读取游戏规则 %s 失败: %s", rule, String.valueOf(t));
             return null;
         }
-    }
-
-    /** 集成服是否在位（留痕用）。 */
-    static boolean serverPresent() {
-        MinecraftServer s = WorldRuntime.server();
-        return s != null;
     }
 }

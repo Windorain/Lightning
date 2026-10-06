@@ -56,9 +56,6 @@ import com.lightning.mod.client.controlplane.mc.WorldRuntime;
  */
 public final class InventoryWriteAction implements ControlAction {
 
-    /** 玩家背包的目标槽位总数（原版 {@code InventoryPlayer}：36 主背包 + 4 盔甲）。 */
-    public static final int PLAYER_SLOT_COUNT = 40;
-
     /** 单次最多写入的槽位数。 */
     public static final int MAX_SLOTS = 256;
 

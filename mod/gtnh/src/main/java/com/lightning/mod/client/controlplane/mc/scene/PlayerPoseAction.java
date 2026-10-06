@@ -46,12 +46,6 @@ import com.lightning.mod.client.controlplane.mc.WorldRuntime;
  */
 public final class PlayerPoseAction implements ControlAction {
 
-    /** y 的合法域：与 {@link EntitySpawnAction#checkPos} 同口径。 */
-    public static final double MIN_Y = -64.0d;
-
-    /** 见 {@link #MIN_Y}。 */
-    public static final double MAX_Y = 320.0d;
-
     @Override
     public JsonObject execute(ActionContext ctx) {
         Minecraft mc = WorldRuntime.mc();
@@ -78,26 +72,10 @@ public final class PlayerPoseAction implements ControlAction {
         float yaw = player.rotationYaw;
         float pitch = player.rotationPitch;
         if (ctx.has("yaw")) {
-            yaw = (float) ctx.optLong("yaw", (long) player.rotationYaw);
-            if (ctx.param("yaw")
-                .isJsonPrimitive()
-                && ctx.param("yaw")
-                    .getAsJsonPrimitive()
-                    .isNumber()) {
-                yaw = ctx.param("yaw")
-                    .getAsFloat();
-            }
+            yaw = (float) L0Session.optNumber(ctx, "yaw", player.rotationYaw);
         }
         if (ctx.has("pitch")) {
-            pitch = (float) ctx.optLong("pitch", (long) player.rotationPitch);
-            if (ctx.param("pitch")
-                .isJsonPrimitive()
-                && ctx.param("pitch")
-                    .getAsJsonPrimitive()
-                    .isNumber()) {
-                pitch = ctx.param("pitch")
-                    .getAsFloat();
-            }
+            pitch = (float) L0Session.optNumber(ctx, "pitch", player.rotationPitch);
             if (pitch < -90.0f || pitch > 90.0f) {
                 throw CpException.param("pitch 越界", "pitch", "须在 -90..90（正=俯视、负=仰视），收到 " + pitch);
             }

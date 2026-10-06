@@ -1,8 +1,5 @@
 package com.lightning.mod.client.controlplane.mc.scene;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.potion.Potion;
@@ -93,6 +90,14 @@ public final class PlayerStateAction implements ControlAction {
         applyExperience(ctx, player, applied);
         applyEffects(ctx, player, applied);
 
+        // 一项都没写 = 调用方参数写错了：可写动作不许空转绿（契约 §1.5「失败显式」）
+        if (applied.size() == 0) {
+            throw CpException.param(
+                "没有可写字段",
+                "gameType|health|experienceLevel|experienceTotal|experience|effects",
+                "至少给一个（本动作不提供只读路径；读面见 #98 的 read.* 动作）");
+        }
+
         // 背包/手持在改完之后统一刷一次容器同步：经验包只带经验、生命包只带血量，
         // 而容器槽位（含手持）走 Container.detectAndSendChanges 的 S2FPacketSetSlot。
         try {
@@ -104,9 +109,6 @@ public final class PlayerStateAction implements ControlAction {
         JsonObject after = snapshot(player);
         JsonObject o = new JsonObject();
         o.add("applied", applied);
-        if (applied.size() == 0) {
-            o.addProperty("note", "未给任何可写字段：本动作不提供只读路径（读面见 #98 的 read.* 动作）");
-        }
         o.add("before", before);
         o.add("after", after);
         o.addProperty("playerName", player.getCommandSenderName());
@@ -147,15 +149,7 @@ public final class PlayerStateAction implements ControlAction {
         if (!ctx.has("health")) {
             return;
         }
-        float want = (float) ctx.optLong("health", 0L);
-        if (ctx.param("health") != null && ctx.param("health")
-            .isJsonPrimitive()
-            && ctx.param("health")
-                .getAsJsonPrimitive()
-                .isNumber()) {
-            want = ctx.param("health")
-                .getAsFloat();
-        }
+        float want = (float) L0Session.optNumber(ctx, "health", 0.0d);
         float max = player.getMaxHealth();
         if (want < MIN_HEALTH) {
             throw CpException.param("生命值非法", "health", "须 ≥ " + MIN_HEALTH + "（0 会触发死亡流程，无人值守场景会卡在死亡界面），收到 " + want);
@@ -175,7 +169,10 @@ public final class PlayerStateAction implements ControlAction {
     }
 
     private void applyExperience(ActionContext ctx, EntityPlayerMP player, JsonArray applied) {
-        if (!ctx.has("experienceLevel") && !ctx.has("experienceTotal")) {
+        // 三个经验字段里任一单独给出都必须被接受。首轮 D4 负对照暴露的缺陷：这里原本漏判
+        // experience（经验条进度），于是「只给 experience」被误判成「没有任何可写字段」——
+        // 自述声明了该参数却用不了（D1/D4 都会判红）。
+        if (!ctx.has("experienceLevel") && !ctx.has("experienceTotal") && !ctx.has("experience")) {
             return;
         }
         JsonObject a = new JsonObject();
@@ -197,8 +194,7 @@ public final class PlayerStateAction implements ControlAction {
             a.addProperty("experienceTotal", Integer.valueOf(total));
         }
         if (ctx.has("experience")) {
-            float frac = ctx.param("experience")
-                .getAsFloat();
+            float frac = (float) L0Session.optNumber(ctx, "experience", 0.0d);
             if (frac < 0.0f || frac >= 1.0f) {
                 throw CpException.param("经验条进度非法", "experience", "须在 [0,1)（原版经验条语义），收到 " + frac);
             }
@@ -247,7 +243,10 @@ public final class PlayerStateAction implements ControlAction {
             player.addPotionEffect(effect);
             JsonObject a = new JsonObject();
             a.addProperty("field", "potion");
-            a.addProperty("id", Potion.potionTypes[potion.getId()] == null ? null : id);
+            // 回填的是**稳定名**（Potion.getName()，如 potion.nightVision）而不是调用方原样输入：
+            // 别名/数字 id 都能被解析，但返回值必须能唯一指回那个效果
+            a.addProperty("id", RegistryNames.potionNameOf(potion));
+            a.addProperty("requested", id);
             a.addProperty("potionId", Integer.valueOf(potion.getId()));
             a.addProperty("duration", Integer.valueOf(duration));
             a.addProperty("amplifier", Integer.valueOf(amplifier));
@@ -295,49 +294,17 @@ public final class PlayerStateAction implements ControlAction {
     }
 
     /**
-     * 解析药水：先按 1..31 数字 id，再按 {@code Potion.potionTypes} 的注册名匹配。
+     * 解析药水：先按 1..31 数字 id，再按名字。
      *
      * <p>
-     * 注册名来源：1.7.10 没有公开的「名字 → Potion」注册表（{@code Potion.potionTypes} 只是
-     * 下标数组），原版名在语言文件里。因此这里按 {@code net.minecraft.potion.PotionXxx} 的
-     * <b>类名</b>做一个稳定映射（去前缀、转小写、去下划线），既覆盖原版全部效果，
-     * 也不依赖语言文件与运行期本地化。
+     * <b>名字口径（首轮实机修正）</b>：原版绝大多数效果是<b>匿名内部类</b>
+     * （{@code new Potion(16, ...)}），{@code getClass().getSimpleName()} 是空串——按类名解析
+     * 必然失败（首轮 {@code night_vision} 即因此被判未知）。稳定可用的名字是
+     * {@code Potion.getName()}（{@code setPotionName("potion.nightVision")} 存下的串）。
+     * 解析与容错细节见 {@link RegistryNames#resolvePotion}。
      */
     static Potion resolvePotion(String raw, String field) {
-        String s = raw.trim();
-        try {
-            int id = Integer.parseInt(s);
-            if (id < 1 || id >= Potion.potionTypes.length || Potion.potionTypes[id] == null) {
-                throw CpException
-                    .param("未知药水 id", field, "1.." + (Potion.potionTypes.length - 1) + " 且该位已注册，收到: " + id);
-            }
-            return Potion.potionTypes[id];
-        } catch (NumberFormatException ignored) {
-            // 不是数字：按名字找
-        }
-        String want = s.toLowerCase(java.util.Locale.ROOT)
-            .replace("_", "")
-            .replace("-", "")
-            .replace(" ", "");
-        if (want.startsWith("minecraft:")) {
-            want = want.substring("minecraft:".length());
-        }
-        List<String> known = new ArrayList<String>();
-        for (Potion p : Potion.potionTypes) {
-            if (p == null) {
-                continue;
-            }
-            String cls = p.getClass()
-                .getSimpleName();
-            String key = cls.toLowerCase(java.util.Locale.ROOT)
-                .replace("potion", "")
-                .replace("_", "");
-            known.add(key + "(" + p.getId() + ")");
-            if (want.equals(key) || want.equals(cls.toLowerCase(java.util.Locale.ROOT))) {
-                return p;
-            }
-        }
-        throw CpException.param("未知药水", field, "按名字找不到效果: " + raw + "；已注册: " + known);
+        return RegistryNames.resolvePotion(raw, field);
     }
 
     // ------------------------------------------------------------ 快照
@@ -360,6 +327,12 @@ public final class PlayerStateAction implements ControlAction {
             PotionEffect e = (PotionEffect) obj;
             JsonObject eo = new JsonObject();
             eo.addProperty("potionId", Integer.valueOf(e.getPotionID()));
+            Potion p = e.getPotionID() >= 0 && e.getPotionID() < Potion.potionTypes.length
+                ? Potion.potionTypes[e.getPotionID()]
+                : null;
+            if (p != null) {
+                eo.addProperty("id", RegistryNames.potionNameOf(p));
+            }
             eo.addProperty("duration", Integer.valueOf(e.getDuration()));
             eo.addProperty("amplifier", Integer.valueOf(e.getAmplifier()));
             effects.add(eo);

@@ -249,22 +249,31 @@ public final class ActionRegistrar {
         registry.register(
             ActionDescriptor.builder("scene.entity.spawn", Tier.SCENE)
                 .description(
-                    "L0：在托管世界生成实体（含掉落物）。只作用于服务端权威世界，随后经原版实体跟踪器同步给客户端。"
-                        + "掉落物给 item（物品注册名）而不是 entity；一般实体给 entity（EntityList 注册名）。"
-                        + "entity 与 item 互斥且必须给一个。层归属：本动作是布景原语（构造「拾取」的输入），"
-                        + "不是「玩家扔出了物品」的证据——拾取属 L1（#101），两层结论不互替。")
-                .optional("entities", ActionDescriptor.TYPE_ARRAY, "实体条目数组 [entry]，逐条生成")
+                    "L0：在托管世界生成实体（含掉落物）。只作用于服务端权威世界，随后经原版实体跟踪器同步给客户端。" + "掉落物给 item（物品注册名）而不是 entity；一般实体给 entity。"
+                        + "entity 与 item 互斥且必须给一个。"
+                        + "实体名口径（1.7.10 实测）：EntityList 的原生键不带 minecraft: 前缀（Zombie / Item / XPOrb；"
+                        + "FML 模组实体是 <modId>.<name>）。现代写法 minecraft:zombie 也接受——解析会规范化后匹配，"
+                        + "查不到时错误上下文里带已注册名样本。"
+                        + "层归属：本动作是布景原语（构造「拾取」的输入），不是「玩家扔出了物品」的证据"
+                        + "——拾取属 L1（#101），两层结论不互替。")
+                .optional(
+                    "entities",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "实体条目数组 [entry]，逐条生成。entry={entity?|item?, pos?, meta?, count?, nbt?, yaw?, pitch?}；"
+                        + "entity 与 item 互斥必居其一（item=掉落物简写）。条目内默认值："
+                        + "meta=0、count=1（域 1..64）、yaw=0、pitch=0；pos 缺省用顶层 pos。"
+                        + "nbt 为 SNBT 文本：掉落物按 /give 口径（Count/Damage/tag），实体按 /summon 口径（须含 id）")
                 .optional("entity", ActionDescriptor.TYPE_OBJECT, "单个实体条目（与 entities 可同时给，追加在后）")
-                .optional("pos", ActionDescriptor.TYPE_ARRAY, "默认坐标 [x,y,z]（条目自身没给 pos 时用）")
+                .optional("pos", ActionDescriptor.TYPE_ARRAY, "默认坐标 [x,y,z]（条目自身没给 pos 时用；顶层与条目都没给 = CP-VALID-002）")
                 .returns(
-                    "{action, layer?, requested, spawnedCount, spawned[{ok,entityId,class,entityIdNum,pos,item?,nbtApplied}], "
+                    "{action, requested, spawnedCount, spawned[{ok,entityId,class,entityIdNum,pos,item?,nbtApplied}], "
                         + "failed[{index,error}], entityCounts[{key,count}], dimension, sceneReadback{present,sha256?,...}}")
                 .example(
                     "{\"entities\":[{\"item\":\"minecraft:stone\",\"meta\":0,\"count\":3,\"pos\":[64.5,13,64.5]},"
-                        + "{\"entity\":\"minecraft:zombie\",\"pos\":[66.5,13,64.5],\"yaw\":180}],\"confirm\":true}")
+                        + "{\"entity\":\"Zombie\",\"pos\":[66.5,13,64.5],\"yaw\":180}],\"confirm\":true}")
                 .example(
                     "{\"entity\":{\"entity\":\"minecraft:pig\",\"pos\":[70.5,13,70.5],"
-                        + "\"nbt\":\"{id:\\\"minecraft:pig\\\",CustomNameTag:test,NoAI:1b}\"},\"confirm\":true}")
+                        + "\"nbt\":\"{id:\\\"Pig\\\",CustomNameTag:test,NoAI:1b}\"},\"confirm\":true}")
                 .since("1.3")
                 .build(),
             new EntitySpawnAction());
@@ -278,14 +287,17 @@ public final class ActionRegistrar {
                         + "注：这是轮内清场原语，不构成 hermetic 保证（不清方块/背包/天气）——验收类固定程序的"
                         + "起世界手段仍是 world.rebuild（case-file.md §8.8）。")
                 .optional("box", ActionDescriptor.TYPE_ARRAY, "范围 [[minx,miny,minz],[maxx,maxy,maxz]]（按实体包围盒中心判定）")
-                .optional("entity", ActionDescriptor.TYPE_STRING, "只清该 EntityList 注册名（如 minecraft:item）")
+                .optional(
+                    "entity",
+                    ActionDescriptor.TYPE_STRING,
+                    "只清该 EntityList 注册名（1.7.10 原生键如 Item/Zombie；minecraft:item 也接受）")
                 .optional("item", ActionDescriptor.TYPE_STRING, "只清掉落物里物品为该项的（与 entity 互斥）")
                 .optional("meta", ActionDescriptor.TYPE_INT, "与 item 搭配：只清该 meta（不给即不限 meta）")
                 .optional("includePlayers", ActionDescriptor.TYPE_BOOL, Boolean.FALSE, "是否连玩家一起清（默认 false）")
                 .returns(
                     "{action, removedCount, removed[{entityId,class,entityIdNum,pos,item?,meta?,count?,removed}], "
                         + "selector{box,entity,item,meta,includePlayers}, remainingEntities, sceneReadback{...}}")
-                .example("{\"box\":[[63,12,63],[72,20,72]],\"entity\":\"minecraft:item\",\"confirm\":true}")
+                .example("{\"box\":[[63,12,63],[72,20,72]],\"entity\":\"Item\",\"confirm\":true}")
                 .example("{\"item\":\"minecraft:stone\",\"meta\":0,\"confirm\":true}")
                 .since("1.3")
                 .build(),
@@ -307,7 +319,11 @@ public final class ActionRegistrar {
                 .optional(
                     "effects",
                     ActionDescriptor.TYPE_ARRAY,
-                    "药水效果 [{id,duration,amplifier,ambient}]；id 可为效果名或 1..31")
+                    "药水效果 [{id,duration,amplifier,ambient}]；条目内默认值：duration=600（tick，域 ≥1）、"
+                        + "amplifier=0（域 0..255）、ambient=false。id 可为数字 id（上限 = 运行期 "
+                        + "Potion.potionTypes 长度：原版 32、GTNH 实测 256），或效果名"
+                        + "（稳定名为 Potion.getName()，如 potion.nightVision；night_vision / nightVision / "
+                        + "minecraft:night_vision 都接受）。查不到时错误上下文里带已注册名样本（含 id）")
                 .optional("clearExisting", ActionDescriptor.TYPE_BOOL, Boolean.FALSE, "先清空既有药水效果（默认 false）")
                 .returns(
                     "{action, applied[{field,...readBack}], before{...}, after{...}, playerName, dimension, sceneReadback{...}}")
@@ -327,9 +343,13 @@ public final class ActionRegistrar {
                         + "（36 靴/37 护腿/38 胸甲/39 头盔）——不是 ContainerPlayer 的界面槽号。"
                         + "target=container 用 at:[x,y,z] 指向的 IInventory 下标。id 给 air 即清空该槽。"
                         + "写入走 setInventorySlotContents + markDirty，并对玩家发一次 Container.detectAndSendChanges。")
-                .optional("target", ActionDescriptor.TYPE_STRING, "player | container（默认 player）")
+                .optional("target", ActionDescriptor.TYPE_STRING, "player", "player | container（默认 player）")
                 .optional("at", ActionDescriptor.TYPE_ARRAY, "容器坐标 [x,y,z]（target=container 时必填）")
-                .optional("slots", ActionDescriptor.TYPE_ARRAY, "槽位条目数组 [{slot,id,meta,count,nbt}]")
+                .optional(
+                    "slots",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "槽位条目数组 [{slot,id,meta,count,nbt}]；slot 必填，条目内默认值："
+                        + "meta=0、count=1（域 1..64，清空请用 id=air）、nbt 缺省即不带 NBT")
                 .optional("slot", ActionDescriptor.TYPE_OBJECT, "单个槽位条目（与 slots 可同时给，追加在后）")
                 .returns(
                     "{action, layer:\"L0\", semantics:\"give\", layerNote, target{kind,player?|at?,teClass?,size,inventoryName}, "
