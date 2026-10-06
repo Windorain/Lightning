@@ -173,6 +173,12 @@ public final class MeshCaptureService {
                 .getAsString())) {
             PartExportIntegrator.StructureSink partsSink = finalizeSingleStructure(root);
             integrateSdeCellNotesSingleBakedRoot(root);
+            // #81：与 frames 分支口径一致——无逐格说明时也产出**空** tooltipPalette
+            // （成对 idioms 产出侧对齐：cellTooltipGrid 无条件写出，tooltipPalette 不再缺省；
+            // web 写入侧据此新建条目即可存活，见 #80）。
+            if (!root.has("tooltipPalette")) {
+                root.add("tooltipPalette", new com.google.gson.JsonArray());
+            }
             List<PartExportIntegrator.StructureSink> partsSinks = new ArrayList<>();
             partsSinks.add(partsSink);
             finishPartsDocument(root, partsSinks);
