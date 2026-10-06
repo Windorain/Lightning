@@ -2,6 +2,8 @@ package com.lightning.mod.client.controlplane.mc;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.WorldServer;
 import net.minecraft.world.WorldSettings;
 import net.minecraft.world.WorldType;
 
@@ -82,6 +84,36 @@ public final class WorldLoader {
                 unloadSettleLeft--;
                 return false;
             }
+            // H2 读数点（默认关闭，-Dsde.cp.buildDiag=on；出处 #89 评论 1685）：会话内第二次重建时
+            // 服务端线程是否还活着、有没有残留的 "Server thread"——旧实例没退役就会与新世界抢 chunk。
+            if (BuildDiagnostics.diagEnabled()) {
+                MinecraftServer server = null;
+                String running;
+                try {
+                    server = MinecraftServer.getServer();
+                    running = server == null ? "<server=null>" : String.valueOf(server.isServerRunning());
+                } catch (Throwable t) {
+                    running = "<err:" + t + ">";
+                }
+                int serverThreads = -1;
+                try {
+                    serverThreads = 0;
+                    for (Thread th : Thread.getAllStackTraces()
+                        .keySet()) {
+                        String name = th == null ? null : th.getName();
+                        if (name != null && name.contains("Server thread")) {
+                            serverThreads++;
+                        }
+                    }
+                } catch (Throwable t) {
+                    serverThreads = -1;
+                }
+                CpLog.info(
+                    "离开世界完成读数（H2）：server=%s isServerRunning=%s 存活 \"Server thread\" 线程数=%s",
+                    server == null ? "null" : "id=" + System.identityHashCode(server),
+                    running,
+                    serverThreads < 0 ? "<统计失败>" : Integer.toString(serverThreads));
+            }
             return true;
         }
         CpLog.info("离开当前世界（%s）…", String.valueOf(WorldDescriber.currentFolder(mc)));
@@ -157,6 +189,17 @@ public final class WorldLoader {
             "已进入世界 %s（等待 %d tick，服务端世界就位）",
             String.valueOf(WorldDescriber.currentFolder(mc)),
             Integer.valueOf(waitTicks));
+        // H1/H2 共用读数（默认关闭，-Dsde.cp.buildDiag=on；出处 #89 评论 1685）：第二次进入时
+        // serverWorld/server 的实例 hash 是否与第一次相同——换实例 = 旧对象被替换，不换 = 旧对象复用。
+        if (BuildDiagnostics.diagEnabled()) {
+            WorldServer serverWorld = WorldRuntime.serverWorld();
+            MinecraftServer server = WorldRuntime.server();
+            CpLog.info(
+                "进入世界读数（H1/H2 共用）：folder=%s serverWorld=%s server=%s（与首次进入比对是否换了实例）",
+                folder,
+                serverWorld == null ? "null" : "id=" + System.identityHashCode(serverWorld),
+                server == null ? "null" : "id=" + System.identityHashCode(server));
+        }
         return WorldDescriber.describe(mc);
     }
 

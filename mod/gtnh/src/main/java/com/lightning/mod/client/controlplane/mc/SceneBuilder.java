@@ -385,6 +385,13 @@ public final class SceneBuilder {
                         "te",
                         Json.object("completer", spec.completer),
                         Json.object("class", SceneManifest.ABSENT)));
+                // #89 现场探针（默认关闭，-Dsde.cp.buildDiag=on；出处 #89 评论 1685）
+                if (BuildDiagnostics.diagEnabled()) {
+                    BuildDiagnostics.logFailure(
+                        "te-absent",
+                        world,
+                        "completer=" + spec.completer + " pos=" + spec.pos[0] + "," + spec.pos[1] + "," + spec.pos[2]);
+                }
             }
             JsonObject read = teRead(spec, world);
             if (read != null) {
@@ -479,6 +486,31 @@ public final class SceneBuilder {
                 liveId,
                 liveMeta,
                 String.valueOf(ok));
+            // #89 现场探针（默认关闭，-Dsde.cp.buildDiag=on；出处 #89 评论 1685）
+            if (BuildDiagnostics.diagEnabled()) {
+                BuildDiagnostics.logFailure(
+                    "block-mismatch",
+                    world,
+                    "step=" + stepIndex
+                        + " id="
+                        + id
+                        + " at="
+                        + at[0]
+                        + ","
+                        + at[1]
+                        + ","
+                        + at[2]
+                        + " setBlock="
+                        + ok
+                        + " wantId="
+                        + wantId
+                        + " wantMeta="
+                        + meta
+                        + " liveId="
+                        + liveId
+                        + " liveMeta="
+                        + liveMeta);
+            }
         }
     }
 

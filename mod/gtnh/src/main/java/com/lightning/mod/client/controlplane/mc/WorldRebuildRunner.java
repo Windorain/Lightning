@@ -35,6 +35,13 @@ import com.lightning.mod.client.controlplane.core.Json;
  * <p>
  * 幂等性：同参数两次执行的场景清单 {@code sha256} 必然相等——哈希只覆盖「世界实际状态」
  * （见 {@link SceneManifest}），而步骤与种子都是固定输入。
+ *
+ * <p>
+ * <b>可选 chunk 静默门</b>（默认关闭，#89 评论 1685 附带条件①）：设了
+ * {@code -Dsde.cp.buildChunkQuietGateTicks=N}（N&gt;0）时，构建段<b>首次</b>开始前先跨 tick 等
+ * chunk provider 安静（见 {@link BuildDiagnostics#chunkQuiet}），连续 {@link #QUIET_STREAK_REQUIRED}
+ * tick 安静才放行；累计超过 N tick 仍不安静则抛 {@code CP-EXEC-001}（响亮失败，不无限静默）。
+ * 属性未设时该子状态永不进入，行为与既有实现逐 tick 等价。
  */
 public final class WorldRebuildRunner {
 
@@ -70,6 +77,8 @@ public final class WorldRebuildRunner {
         ENTER,
         /** 场景构建。 */
         BUILD,
+        /** 场景构建前的 chunk 静默等待（仅 {@code -Dsde.cp.buildChunkQuietGateTicks=N}，N>0 时进入）。 */
+        BUILD_QUIET_WAIT,
         /** 无构建段时的静置。 */
         SETTLE,
         /** 写标记与清单。 */
@@ -82,6 +91,9 @@ public final class WorldRebuildRunner {
     private final WorldLoader loader;
     private final ActionContext ctx;
 
+    /** chunk 静默门：放行所需的连续安静 tick 数。 */
+    private static final int QUIET_STREAK_REQUIRED = 5;
+
     private Stage stage = Stage.LEAVE;
     private SceneBuilder builder;
     private int settleLeft;
@@ -90,6 +102,16 @@ public final class WorldRebuildRunner {
     private JsonObject worldMarker;
     private JsonObject manifest;
     private long contentBytes = -1L;
+
+    /** chunk 静默门是否已做过一次性入口检查（避免放行后回到 BUILD 时再次开启）。 */
+    private boolean quietGateCleared;
+
+    /** chunk 静默门已等待的 tick 数（只统计真正做了静默检查的 tick；世界未就位不计入）。 */
+    private int quietWaited;
+
+    /** chunk 静默门当前连续安静 tick 数。 */
+    private int quietStreak;
+
     private final ProgressThrottle throttle = new ProgressThrottle();
 
     public WorldRebuildRunner(Spec spec, ActionContext ctx) {
@@ -175,6 +197,21 @@ public final class WorldRebuildRunner {
                 return null;
             }
             case BUILD: {
+                // chunk 静默门（默认关闭，#89 评论 1685 附带条件①）：只在「首次进入构建」前做一次性等待，
+                // 等 chunk provider 没有加载在途再放行，避免撞上服务端线程的并发 chunk 加载（H1）。
+                int gateMax = BuildDiagnostics.quietGateMaxTicks();
+                if (builder == null && !quietGateCleared && gateMax > 0) {
+                    quietGateCleared = true;
+                    quietWaited = 0;
+                    quietStreak = 0;
+                    CpLog.info(
+                        "chunk 静默门开启：上限 %d tick，需连续 %d tick 无 chunk 加载在途",
+                        Integer.valueOf(gateMax),
+                        Integer.valueOf(QUIET_STREAK_REQUIRED));
+                    progress(0.45d, "chunk-quiet-wait 0/" + gateMax);
+                    stage = Stage.BUILD_QUIET_WAIT;
+                    return null;
+                }
                 phase(0.5d, "build-scene");
                 if (builder == null) {
                     builder = new SceneBuilder(spec.buildSteps, spec.folder, spec.seed, true, spec.settleTicks);
@@ -195,6 +232,42 @@ public final class WorldRebuildRunner {
                 }
                 manifest = m;
                 stage = Stage.MARKER;
+                return null;
+            }
+            case BUILD_QUIET_WAIT: {
+                // 门在等待途中被关掉（防御性：属性本就是启动期输入）：直接放行。
+                int gateMax = BuildDiagnostics.quietGateMaxTicks();
+                if (gateMax <= 0) {
+                    stage = Stage.BUILD;
+                    return null;
+                }
+                // 与 BUILD 分支同一取法：世界未就位就本 tick 返回、下 tick 再来，不计入等待预算。
+                WorldServer quietWorld = WorldRuntime.serverWorld();
+                if (quietWorld == null) {
+                    progress(0.45d, "chunk-quiet-wait " + quietWaited + "/" + gateMax + "（服务端世界未就位）");
+                    return null;
+                }
+                quietWaited++;
+                if (BuildDiagnostics.chunkQuiet(quietWorld)) {
+                    quietStreak++;
+                } else {
+                    quietStreak = 0;
+                }
+                if (quietStreak >= QUIET_STREAK_REQUIRED) {
+                    CpLog.info(
+                        "chunk 静默门放行：等待 %d tick 后连续 %d tick 安静",
+                        Integer.valueOf(quietWaited),
+                        Integer.valueOf(quietStreak));
+                    stage = Stage.BUILD;
+                    return null;
+                }
+                // 有界 + 响亮失败（不带 probe 的静默失败正是 #89 本身要根除的东西）。
+                if (quietWaited > gateMax) {
+                    throw new CpException(
+                        ErrorCodes.EXEC_FAILED,
+                        "chunk 静默等待超时（" + quietWaited + " tick 仍不安静）|" + BuildDiagnostics.probe(quietWorld));
+                }
+                progress(0.45d, "chunk-quiet-wait " + quietWaited + "/" + gateMax);
                 return null;
             }
             case SETTLE: {
