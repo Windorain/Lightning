@@ -36,8 +36,12 @@ public final class CameraSpec {
     /** 正交投影；{@code orthoHeight} 是视高（方块数），宽按画面宽高比推。 */
     public static final String PROJECTION_ORTHO = "ortho";
 
-    /** MC 的 FOV 滑块范围（原版 30..110，超出会被渲染器钳制）。 */
-    public static final double MIN_FOV = 30.0d;
+    /**
+     * fov 下限（度）。原版滑块范围 30..110 只钳制 {@code gameSettings.fovSetting}，而我们的投影覆写
+     * 直接写投影矩阵、不经滑块——取证望远镜机位（fov 3~10，K1 门控对照实测需要）合法。下限 5
+     * 只挡笔误（0/负值会让投影矩阵退化）。
+     */
+    public static final double MIN_FOV = 5.0d;
 
     /** 见 {@link #MIN_FOV}。 */
     public static final double MAX_FOV = 110.0d;

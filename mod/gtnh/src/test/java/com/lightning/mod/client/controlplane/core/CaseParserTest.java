@@ -722,8 +722,11 @@ public class CaseParserTest {
         // PR-2 追加的两个图像判据
         assertTrue(CriteriaEngine.isKnownType("image-size-equals"));
         assertTrue(CriteriaEngine.isKnownType("image-not-uniform"));
+        // PR-3 追加的双轨判据（运行期轨 + 图像轨）
+        assertTrue(CriteriaEngine.isKnownType("te-state-equals"));
+        assertTrue(CriteriaEngine.isKnownType("image-uniform"));
         assertFalse(CriteriaEngine.isKnownType("nope"));
-        assertEquals(7, CriteriaEngine.TYPES.size());
+        assertEquals(9, CriteriaEngine.TYPES.size());
     }
 
     private static void assertArrayEqualsInts(int[] expected, int[] actual) {

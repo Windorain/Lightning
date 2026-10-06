@@ -3,6 +3,7 @@ package com.lightning.mod.client.controlplane.mc;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.settings.GameSettings;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldServer;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -334,6 +335,87 @@ public final class ObservationCollector {
         if (in.failure != null) {
             b.read("run.failure", Json.optString(in.failure, "code", null), in.failure);
         }
+        addTeReads(b, in);
+    }
+
+    /**
+     * TE 运行期状态读数（PR-3 运行期轨，observation-record.md §1 的 {@code te.*} 条目）。
+     *
+     * <p>
+     * 键名口径沿用规范里的示例形态：{@code te.<族>[x,y,z].state}（族名 = 用例 {@code te} 步声明的
+     * completer 名，如 {@code lp-pipe}/{@code ae2-part}）。每条登记的 {@code sha256} 是对<b>描述器
+     * 输出对象</b>的规范化 JSON 计算的（{@link ObservationRecord.Builder#read(String, String, JsonElement)}
+     * 内部走 {@link ObservationRecord#hashSummary}），因此离线据本文件即可解释「这次观测看到的 TE
+     * 运行期状态是什么」。
+     *
+     * <p>
+     * 位置来自<b>规范化计划</b>的 {@code build} 段（{@code op:"te"} 步），不是场景清单——
+     * 按段续跑（没跑 build 段）时清单可能来自世界内记录，而计划里的 te 步才是「本 run 该看哪里」的
+     * 权威声明。该族没有描述器（整合包缺 LP/AE2）时整条跳过，不写假读数。
+     */
+    private static void addTeReads(ObservationRecord.Builder b, Input in) {
+        JsonArray build = in.plan == null ? null : Json.optArray(in.plan, "build");
+        WorldServer world = WorldRuntime.serverWorld();
+        for (int i = 0; build != null && i < build.size(); i++) {
+            JsonElement e = build.get(i);
+            if (e == null || !e.isJsonObject()) {
+                continue;
+            }
+            JsonObject step = e.getAsJsonObject();
+            if (!"te".equals(Json.optString(step, "op", null))) {
+                continue;
+            }
+            int[] at = ints(Json.optArray(step, "at"));
+            if (at == null) {
+                continue;
+            }
+            String family = Json.optString(step, "completer", "?");
+            if (!TeDescribers.contains(family)) {
+                continue;
+            }
+            String key = "te." + family + "[" + at[0] + "," + at[1] + "," + at[2] + "].state";
+            JsonObject state = TeDescribers.describeByFamily(family, world, at[0], at[1], at[2]);
+            if (state == null) {
+                b.read(key, "无可描述的 TE（族 " + family + " 的描述器不认领该位置）", Json.object("te", "absent", "family", family));
+            } else {
+                b.read(key, teSummary(family, state), state);
+            }
+        }
+    }
+
+    /** {@code te.*} 条目的人读摘要（族 + 关键判别字段；具体字段由各族自定，取不到就给族名）。 */
+    private static String teSummary(String family, JsonObject state) {
+        String pipe = Json.optString(state, "pipeType", null);
+        if (pipe != null) {
+            return family + " pipeType=" + pipe + " initialized=" + Json.optBool(state, "initialized", false);
+        }
+        JsonObject parts = Json.optObject(state, "parts");
+        if (parts != null) {
+            int n = 0;
+            for (java.util.Map.Entry<String, JsonElement> en : Json.entries(parts)) {
+                if (en.getValue() != null && !en.getValue()
+                    .isJsonNull()) {
+                    n++;
+                }
+            }
+            return family + " parts=" + n;
+        }
+        return family + " " + Json.toJson(state);
+    }
+
+    private static int[] ints(JsonArray a) {
+        if (a == null || a.size() != 3) {
+            return null;
+        }
+        int[] out = new int[3];
+        for (int i = 0; i < 3; i++) {
+            JsonElement v = a.get(i);
+            if (v == null || !v.isJsonPrimitive()) {
+                return null;
+            }
+            out[i] = v.getAsInt();
+        }
+        return out;
     }
 
     private static void addArtifacts(ObservationRecord.Builder b, Input in) {

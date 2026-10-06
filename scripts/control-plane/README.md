@@ -1,4 +1,4 @@
-# scripts/control-plane —— 控制面脚本（PR-1 + PR-2）
+# scripts/control-plane —— 控制面脚本（PR-1 + PR-2 + PR-3）
 
 > 契约权威文档： [`docs/control-plane/contract.md`](../../docs/control-plane/contract.md)（端点/错误码/权限/端口）、
 > [`docs/control-plane/case-file.md`](../../docs/control-plane/case-file.md)（用例格式/判据注册表/变体/证据）、
@@ -15,6 +15,11 @@
 | `run-smoke.ps1` | 无人值守冒烟驱动：写配置 → 起客户端 → 依次断言 A1..A9 → 收尾归档 |
 | `cases/smoke-shots.json` | **PR-2** 取证拍摄用例：同一场景 + `capture` 段 + 3 机位（透视/正交/超分拼接）+ 图像判据 + 负对照变体（见 §9.2） |
 | `run-shots.ps1` | **PR-2** 取证拍摄验收驱动：写配置 → 起客户端 → 依次断言 B1..B7 → 收尾归档（截图原图另平铺一份，见 §9.4） |
+| `cases/lp-pipe-row.json` | **PR-3** LP 锚点用例：四管横排（裸管/两管互联/管+箱）+ 双轨判据（`te-state-equals` + 图像）+ 负对照（见 §10.2） |
+| `cases/ae2-parts.json` | **PR-3** AE2 锚点用例：缆块 + 部件（中心缆/切换总线/存储总线）+ 双轨判据 + K1 三十格距离门远机位对照（见 §10.3） |
+| `anchor-checks.ps1` | **PR-3** 纯检查模块：红绿判定本体（无 HTTP / 无世界 / 无归档），被驱动与自检共用（见 §10.1） |
+| `run-anchor.ps1` | **PR-3** 锚点验收驱动：写配置 → 起客户端 → 依次断言 C1..C7 → 收尾归档（见 §10.1） |
+| `run-anchor-selftest.ps1` | **PR-3** 离线行为自检：合成夹具跑 `anchor-checks.ps1` 的每条判定，验证好数据绿、坏数据精确红（见 §10.6） |
 
 脚本只做**编排与调用**：控制面本体在 `mod/gtnh/src/main/java/com/lightning/mod/client/controlplane/`。
 脚本不直接 POST 裸请求——一切动作调用都经 `caller.mjs`（自描述驱动），便于审计「调用方是否真的读了自描述」。
@@ -403,3 +408,260 @@ pwsh -File scripts/control-plane/run-shots.ps1 -LegacyJdk          # 退回 runC
    因此 `run-smoke.ps1` 的 A4c（在 criteria 的 verdict map 里找 `evidence-complete`）恒为空转（有 `if` 保护，不误报红）；
    本驱动的 B2b 直接读 `evidence.json`。
 
+
+## 10. PR-3 锚点验收（`cases/lp-pipe-row.json` + `cases/ae2-parts.json` + `run-anchor.ps1`）
+
+> 契约出处：contract.md §6.3（托管世界固定完成序 + **AE2 空缆块自毁时序陷阱**）、§6.4（TE 状态补全=
+> 走模组权威同步路径）、§6.5（**补全器的权威放置职责**：`params` 是放置输入而不是 NBT 回填；v1.2 注册表
+> `vanilla`/`lp-pipe`/`ae2-part`）、§4.2.1（AE2 电缆 30 方块渲染距离门）；case-file.md §5（`te-state-equals` /
+> `image-uniform` 与**双轨判据口径**）、§8.7（清单哈希口径）。
+> 前置、启用通道、端口、`caller.mjs` 用法与退出码**与 §2/§3.1 完全一致**，本节不重复。
+
+### 10.1 `run-anchor.ps1` 用法
+
+```powershell
+pwsh -File scripts/control-plane/run-anchor.ps1                    # 全流程（申请到 runClient 后跑）
+pwsh -File scripts/control-plane/run-anchor.ps1 -SkipClientStart   # 复用已在跑的客户端（不写配置、不停客户端）
+pwsh -File scripts/control-plane/run-anchor.ps1 -KeepClient        # 跑完保留客户端现场
+pwsh -File scripts/control-plane/run-anchor.ps1 -ChecksOnly        # 只跑离线检查（C2 + 复算器自检），不起客户端
+pwsh -File scripts/control-plane/run-anchor.ps1 -LegacyJdk         # 退回 runClientSdePipeline（默认 runClient25）
+pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行为自检（合成夹具，见 §10.6）
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `-LpCaseFile` / `-Ae2CaseFile` | `cases/lp-pipe-row.json` / `cases/ae2-parts.json` | 两个锚点用例 |
+| `-McDataDir` | `mod/gtnh/run/client` | 覆盖 mcDataDir（离线自检用） |
+| `-SkipClientStart` | 关 | 复用已在跑的客户端；要求端口在听且 `server.json`/`tokens.json` 就绪 |
+| `-KeepClient` | 关 | 不停止本脚本启动的客户端 |
+| `-ChecksOnly` | 关 | **只跑离线检查**（C2 + 主色占比复算器自检）：不写配置、不起客户端、不做 C1/C3~C7 |
+| `-EnableViaJvmProperty` | 关 | 后备启用通道（排障） |
+| `-UseModernJdk` | **开（默认行为）** | 只为与 `run-smoke.ps1`/`run-shots.ps1` 写法兼容而保留 |
+| `-LegacyJdk` | 关 | 退回 `runClientSdePipeline`；与默认（现代 JVM）互斥，给了它就以它为准 |
+| `-Port` | `23057` | 仅前置占用检查用（后续一律以 `server.json` 的 `port` 为准） |
+| `-ClientReadyTimeoutMin` | `5` | 等待 `server.json` 的上限 |
+| `-CaseTimeoutMs` / `-ActionTimeoutMs` | `900000` / `600000` | `case.run` 总超时 / 动作自身超时（仅当自描述声明了 `totalTimeoutMs`/`stageTimeoutMs` 才下传，名字从 `--describe` 探测） |
+| `-ArchiveRoot` | `D:\Workspace\Lightning\temp\control-plane` | 归档根（本次目录 `anchor-<ts>\`） |
+| `-FileParamName` / `-VariantParamName` | 空 | 参数名覆盖（默认自描述探测） |
+
+**拆分口径**：驱动脚本只管「起客户端 / 调 `caller.mjs` / 归档 / 打印红绿表」；所有**红绿判定本体**在
+`anchor-checks.ps1` 的纯函数里（`Test-AnchorPairing` / `Test-VariantPrecision` / `Test-GateCriteria` /
+`Test-GateUniformRecompute` / `Test-IdempotentManifest` / `Test-EvidenceComplete` /
+`Test-ObservationTeReads` / `Test-ObservationCameras` + `Get-PngDominantColorRatio`）。
+拆出来的唯一理由是**可离线自检**：同一份判定既能被真机轮次调用，也能被 `run-anchor-selftest.ps1` 用合成夹具
+反复喂坏数据（§10.6）。这与 §9.1 里「两个驱动各自复制公共函数」的取舍不冲突——那个取舍针对的是**归档/还原路径**
+的耦合，本模块不含任何进程或归档逻辑。
+
+### 10.2 `cases/lp-pipe-row.json`（LP 四管锚点）
+
+- `world`：`folder=cp_lp_pipe_row`、`seed=20261006`、`void=true`、`base=[64,12,64]`、`settleTicks=60`；
+- `build`：清场 `[62,10,62]..[70,16,68]` → **3 根 LP 基础物流管**（`64/65/66`，全用 `te` 步 `completer:"lp-pipe"`，
+  物品注册名见 §10.5）→ `minecraft:chest`（`block` 步）+ `te` 步 `completer:"vanilla"` → `wait 20`；
+  三种连接形态：`64` 裸管（四面皆空）、`65↔66` 两管互联、`66` 管+箱（东侧接箱子）；
+- `capture`：`{lighting:"natural", renderMode:"本色", worldTime:6000}`；`cameras` 2 个 1280×720 透视机位
+  （`persp-row` 斜视看三种连接形态、`persp-front` 正面平视，两者都取正 pitch=俯视，口径同 §9.2 的 yaw/pitch 算法）；
+- `criteria`（18 条，`te-*` 8 条 + `img-*` 8 条 + `world-hash` + `observation-exists`）：
+
+  | 目标 | 运行期轨（`te-state-equals`，id 前缀 `te-`） | 图像轨（id 前缀 `img-`） |
+  |---|---|---|
+  | `x1`（裸管） | `te-x1-iso-north`=`/connections/NORTH` false、`te-x1-iso-west`=`/connections/WEST` false、`te-x1-iso-init`=`/initialized` true | `img-x1-size` / `img-x1-not-uniform`（`persp-row.png` 1280×720 + 非纯色） |
+  | `x2`（两管互联） | `te-x2-pair-east`=`@65 /connections/EAST` true | `img-x2-size` / `img-x2-not-uniform`（同上，互连的可见性） |
+  | `x3`（管+箱） | `te-x3-pair-west`=`@66 /connections/WEST` true、`te-x3-chest-east`=`@66 /connections/EAST` true、`te-x3-down`=`@66 /connections/DOWN` false、`te-x3-pipe-type`=`@66 /pipeType` | `img-x3-size` / `img-x3-not-uniform`（同上） |
+  | `scene` | —（由 x1..x3 覆盖；全场景可见性由图像轨单独承担） | `img-scene-size` / `img-scene-not-uniform`（`persp-front.png`，**`maxSameColorRatio=0.10`——决定性阈值**，见下方「图像轨阈值标定方法」） |
+
+- `variants`：`neg-x1-iso-north-flipped` 把 `criteria[0].expect` 由 `false` 改成 `true`（只动判据、不动 world/build），
+  `expectCriteriaRed=["te-x1-iso-north"]`；
+- `evidence.expect`：`observation.json` / `criteria.json` / `world/scene-manifest.json` / 两张机位 PNG。
+
+**双轨配对口径（驱动 C2 静态检查的判定规则）**：判据 id 一律是「`<轨前缀>-<目标>[-<面|机位>]`」三段形态——
+
+1. 运行期轨 id 以 **`te-`** 开头，图像轨 id 以 **`img-`** 开头；
+2. **第二段是目标名**，必须逐字相同（`te-x1-iso-north` ↔ `img-x1-*`）；
+3. 静态检查对每个 `te-state-equals` 判据要求「同目标至少存在一条 `img-*` 判据」，缺失即红；
+   第三段自由（可写面名如 `iso-north`，也可写机位名如 `-persp-row`）。
+
+因此同一处可视特性一定是「运行期说什么 + 图像证明看得见」成对出现——只写运行期轨等于只证明世界状态对、
+没证明渲染结果对（case-file.md §5 的双轨齐备口径）。
+
+**图像轨阈值标定方法（PR-3 验收轮 a2 实战教训，后续用例必须照做）**：`image-not-uniform` 的默认
+`0.98` 只挡「纯黑/纯白假图」，**挡不住「机位朝向错、画面里只有天空渐变」的空转绿**（a2 首轮 LP 两机位
+yaw 算错背对场景，0.98 阈值下照样全绿——目验截图才擒获）。规矩有三：
+1. **截图必须目验**（首轮验收至少一次），确认画面里真的有场景；
+2. **决定性阈值 = 场景实测值与「同机位纯天空实测值」之间的中值并留余量**——本用例的标定：
+   `persp-front` 贴近取景（管排占画面主体）实测主色占比 **0.0746**（场景在）、纯天空对照档
+   **0.137~0.151** ⇒ 阈值 **0.10**（两侧余量均 ≥25%）；`persp-row` 主色 0.1208 与纯天空档拉不开
+   安全间距 ⇒ 它的 `not-uniform` 保持 0.98，只承担「黑屏防线 + 形态留档」，**决定性判据
+   集中在 `img-scene-not-uniform`**，不在每个配对判据上都假装有精度；
+3. 每个锚点用例至少要有**一条**这种「贴近取景 + 决定性阈值」的判据。
+4. **主色占比对「场景覆盖率 <50%」结构性不敏感**（a2 标定实测：AE2 缆总成在 fov 70/20 下
+   场景档与纯天空档读数完全相同 0.1423/0.1422、0.2335/0.2335——场景像素颜色各异，先吃掉的是
+   非主色的天空像素）。所以「贴近取景」必须真的贴到场景占半幅以上，否则两档拉不开；
+   AE2 侧决定性判据 = `img-*-not-uniform-near`（fov 10 特写，0.15）与 `img-gate-not-uniform-near`
+   （窄 fov 门内对照，0.98 vs 门外 1.0）。
+
+### 10.3 `cases/ae2-parts.json`（AE2 部件锚点 + K1 门控对照）
+
+- `world`：`folder=cp_ae2_parts`、`seed=20261006`、`void=true`、`base=[64,12,64]`、`settleTicks=60`；
+- `build`（**时序关键**：缆块的 `block` 步与其 `te` 步同 tick 紧邻，中间不插 `wait`/`clear`——
+  契约 §6.3 的 AE2 空缆块自毁陷阱）：
+  1. `block @64` = `appliedenergistics2:tile.BlockCableBus` → **同一 tick 紧随** `te @64` `completer:"ae2-part"`：
+     `parts=[{中心缆 UNKNOWN, meta 16},{切换总线 NORTH, meta 80},{存储总线 UP, meta 220}]`
+     （中心缆写在 `parts[]` **最前**：AE2 的 `canAddPart` 拿中心缆类型校验各面部件）；
+  2. `block @65` 缆块 → `te @65` `parts=[{中心缆 UNKNOWN, meta 16}]`（第二根缆，制造相邻缆格）；
+  3. `block @66` = `minecraft:chest`（meta 3，按世界实写值声明） → `te @66` `completer:"vanilla"`；
+  4. **K1 器具**：`block @[64,12,90]` = `minecraft:chest`（meta 3）→ `te` `completer:"vanilla"`
+     （门控专用箱，远离 AE2 场景 26 格；清场区相应扩到 z=94）；
+  5. `wait 20`；
+- `capture`：同 §10.2；`cameras` 4 个：
+
+  | 机位 | pos | 投影 | 与门控箱的距离 | 作用 |
+  |---|---|---|---|---|
+  | `near` | `[68.5,13.3,68.5]` pitch 8 | perspective **fov 10**, 1280×720 | — | 缆总成必被渲染 ⇒ `image-not-uniform` **决定性阈值 0.15**（场景实测 0.1172 / 同几何纯天空 0.1804；fov 70/20 下两档实测完全相同 0.142/0.233——主色占比对 <50% 覆盖率场景结构性不敏感，必须贴近取景） |
+  | `ortho-top` | `[65.3,18.0,64.2]` pitch 90 | ortho orthoHeight 7, 1280×720 | — | 正交俯视形态留档；阈值 0.995 仅作黑屏防线（同几何两档同为 0.194，无法分离——决定性由 near 承担） |
+  | `gate-near` | `[64.5,13.5,120.5]` pitch 2 | perspective **fov 8**, 640×360 | ≈30.5 格（**门内** <64） | 箱必被渲染 ⇒ `image-not-uniform`（实测主色 0.757） |
+  | `far` | `[64.5,13.5,160.5]` pitch 1 | perspective **fov 5**, 640×360 | ≈70.5 格（**门外** >64） | 箱被 TESR 门剔除 ⇒ `image-uniform`（**实测主色 1.000000、colors=1**，阈值 0.95） |
+
+- `criteria`（20 条；id 第二段是目标，配对口径同 §10.2）：
+
+  | 目标 | 运行期轨（`te-*`） | 图像轨（`img-*`） |
+  |---|---|---|
+  | `host`（`@64` 缆 + 两部件） | `te-host-cable`=`/partClasses/UNKNOWN`、`te-host-cable-item`=`/parts/UNKNOWN`、`te-host-toggle`=`/partClasses/NORTH`、`te-host-storage`=`/partClasses/UP`、`te-host-empty-down`=`/parts/DOWN`=null | `img-host-size-near` / `img-host-not-uniform-near`、`img-host-size-ortho` / `img-host-not-uniform-ortho` |
+  | `nb`（`@65` 相邻纯缆） | `te-nb-cable`=`/partClasses/UNKNOWN`、`te-nb-cable-item`=`/parts/UNKNOWN`、`te-nb-empty-east`=`/parts/EAST`=null | `img-nb-size-near` / `img-nb-not-uniform-near` |
+  | `scene` | —（由 host/nb 覆盖） | `img-scene-size-near` / `img-scene-not-uniform-near` |
+  | `gate`（K1 门控） | —（门控是**渲染**判据，运行期无对应状态可断言） | `img-gate-size-near` + `img-gate-not-uniform-near`（门内箱在）+ `img-gate-size-far` + `img-gate-uniform-far`（门外箱失，`minSameColorRatio=0.95`） |
+
+  末行是 §10.2 配对口径里**唯一允许「图像轨单独成立」**的形态：`img-gate-*` 没有 `te-gate-*` 配对，
+  因为配对的强制方向是「每个 `te-*` 必须有同目标 `img-*`」（运行期结论必须有图像佐证），反向不强制。
+  这也是 C4 门控要单独断言的原因——它证明的是「渲染距离门按相机坐标生效」，不是某个 TE 字段的取值。
+  加上 `world-hash` 与 `observation-exists` 共 22 条。
+- `variants`：`neg-host-cable-class-flipped` 把 `criteria[0].expect` 改成 `PartCableSmart`，
+  `expectCriteriaRed=["te-host-cable"]`；
+- `evidence.expect`：`observation.json` / `criteria.json` / `world/scene-manifest.json` / 四张机位 PNG。
+
+**K1 门控原理（PR-3 真机实证后的机制更正）**：1.7.10 的 TE 距离门由 `TileEntityRendererDispatcher`
+按 `renderViewEntity` 静态位置剔除 **TESR** 渲染，门值是各 TE 的 `getMaxRenderDistanceSquared()`
+（原版默认 4096=64 格）。**AE2 缆几何走 ISBRH 块层渲染、不受此门管**——`TileCableBus` 的 900.0
+（30 格）门只管其动态部件（监视器屏显等 `requireDynamicRender()` 为真的 TESR 内容），因此
+「缆在 30 格外消失」在 AE2-U rv3 上不成立（验收轮 a1 的 far 图实证：41 格外缆与箱仍渲染为一个
+黑点）。故 K1 器具改为**原版箱子**（`TileEntityChest` 走 TESR，门 = 原版默认 64 格）：玩家被
+稳定化流程恒定在门控箱 26 格处（**玩家始终在门内**），相机两次跨门——`gate-near`（30.5 格，
+门内）箱必在、`far`（70.5 格，门外）箱必失。**若门随的是玩家而非相机，两张图里箱都会在**；
+实测 far 主色占比 1.000000（colors=1）⇒ 箱确实被剔除 ⇒ 门随相机生效。窄 fov（5~8）的作用
+有二：把箱放大到可断言量级、把天空渐变压到逐像素平坦（宽 fov 下天空渐变主色占比只有 0.06~0.17，
+`image-uniform` 指标在宽 fov 天空上不可用——这是 a1 轮 6 红的真因：判据指标选型错，不是实现错）。
+
+### 10.4 断言 C1..C7
+
+| id | 断言 | 红意味着 |
+|---|---|---|
+| C1xx-a/b/c/d/e | 每用例：`case.run --tier forensic --sync` 退出码 0；`result.overall=green`；`shots.cameraCount` == 用例机位数且 `failedCount=0`；run 的 `criteria.json` 全绿且覆盖用例声明的**全部**判据 id；`evidence.json` overall=green 且期望证据 + 各机位 PNG 逐条在场 | 用例（含双轨判据/图像/证据）任一环不通过，或 run 产物自证不完整 |
+| C2 | 两个用例文件里每个 `te-state-equals` 判据都有**同目标**的图像判据（§10.2 配对口径）；**不需要客户端** | 锚点用例双轨不齐（只证世界状态、没证渲染结果）——用例缺陷 |
+| C3xx-a/b/c/d | 每用例：变体单跑退出码 0；`result.variantVerification.ok=true`；变体 run 的 `criteria.json` 里 `expectCriteriaRed` 全部变红；**其余判据仍绿** | 负对照恒绿（假绿，防不住错图/错状态）或变体求值跑偏（误伤其它判据） |
+| C4a | ae2 run 的 `near.png`/`ortho-top.png` 非空且 `image-not-uniform` 判据绿（AE2 场景确实渲染出来了） | 场景没渲染出来（图缺失/空图/纯背景） |
+| C4b | ae2 run 的 `far.png` 非空且 `image-uniform`（+ 尺寸判据）绿（门外机位确实看不见门控箱）；`gate-near.png` 非空且 `image-not-uniform` 绿（门内机位确实看见——K1 的决定性两半：玩家恒在门内，门若随玩家则两图皆有箱） | TESR 距离门没随相机生效：箱在门外仍被渲染，或门内也不渲染（K1 门控失效/器具摆错） |
+| C4c | **独立复算** `far.png` 的主色占比 ≥ 判据的 `minSameColorRatio`（自己解 PNG：IDAT→inflate→逐行反滤波→数众数像素） | 与判据同口径但不共用实现；判据绿而这里红 ⇒ 判据实现可疑（反之亦然） |
+| C5a/a2/b/c | lp-pipe-row 连跑两次（两个 runId）：两次都退出码 0 + overall green；两次 `world/scene-manifest.json` 的 `sha256` 相等；两次 run 的 `world-hash-equals` 判据均绿 | 场景重建不幂等（世界漂移）——见 §10.7 留白 2 的已知边界 |
+| C6xx | 两用例 run 的 `evidence.json` overall=green 且期望证据逐条在场（含机位 PNG） | 证据清单缺项（截图或记账文件没落盘） |
+| C7xx（×2） | 两用例 run 的 `observation.json`：`runtimeReads` 里存在 key 以 **`te.lp-pipe[`** / **`te.ae2-part[`** 开头的条目（族名逐字口径）且其 `sha256` 非空；`observation.cameras` 数量/顺序/名字与用例一致且每项含 `pos`/`projection`/`resolution` | 运行期轨没有留痕（观测记录离线不可解释），或机位摘要缺失/串位 |
+
+**退出码**：`0` 全绿；`2` 有断言红；`3` 管线级致命（`server.json` 超时 / 客户端早退）；`4` 前置检查或编排自身失败。
+**归 port 口径、参数名自适应（`P1`/`P2`/`P3`）与 `run-shots.ps1` 相同**。
+
+### 10.5 注册名来源（源码实证——用例里每个字符串都可核对）
+
+| 用例里的字符串 | 出处（源码行号） | 运行期实证 |
+|---|---|---|
+| `LogisticsPipes:item.PipeItemsBasicLogistics` | `LogisticsPipes.java:691-694`：`createPipe()` 里 `res.setUnlocalizedName(clas.getSimpleName())`；`LogisticsBlockGenericPipe.java:882-885`：`registerPipe()` 再 `setUnlocalizedName(clas.getSimpleName())` + `GameRegistry.registerItem(item, item.getUnlocalizedName())`；`@Mod(modid="LogisticsPipes")` 在 `LogisticsPipes.java:156` | 现场探针产物 `sde_lp_te_probe_result.json` 的 `registeredPipeItems` 读到 `"registry": "LogisticsPipes:item.PipeItemsBasicLogistics"`（`LpTeRoundTripAutomation` 走 `Item.itemRegistry.getNameForObject`） |
+| `appliedenergistics2:item.ItemMultiPart` | `core/features/ItemFeatureHandler.java:67-71`：`name=="ItemPart"` → `name="ItemMultiPart"`，随后 `GameRegistry.registerItem(item, "item." + name)` | 探针产物 `PartsFamilyProviderProbe.java:182/213/230` 断言的 `typeKey` 字面量即 `appliedenergistics2:item.ItemMultiPart:<meta>` |
+| `appliedenergistics2:tile.BlockCableBus` | `core/features/AECableBusFeatureHandler.java:60-72`：`registryName = "tile." + name` → `GameRegistry.registerBlock(featured, null, registryName)` | 同上（部件格宿主 registry 名） |
+| 部件 `meta`：中心缆 16 / 切换总线 80 / 存储总线 220 | `items/parts/PartType.java:70`（`CableGlass(0, …)`，括号首参即 `baseDamage`）、`:111`（`ToggleBus(80, …)`）、`:126`（`StorageBus(220, …)`）；`ItemMultiPart.java:119`：`partDamage = mat.getBaseDamage() + varID`，`varID = AEColor.ordinal()`（`api/util/AEColor.java` 的常量声明序里 `Transparent` 在末位，ordinal 16 ⇒ 缆 `0+16=16`，总线/存储总线 varID=0 ⇒ meta 就是 `baseDamage`） | `PartsFamilyProviderProbe.java:182/213/230` 的三条字面量断言（真机跑过） |
+| `PartCableGlass` / `PartToggleBus` / `PartStorageBus`（类名） | `items/parts/PartType.java` 的 import 段（`appeng.parts.networking.PartCableGlass`、`appeng.parts.misc.PartToggleBus`、`appeng.parts.misc.PartStorageBus`）与各枚举常量的构造参数 | 描述器输出 `partClasses`（本树真实客户端首轮已实测命中，见 §10.7 留白 1） |
+
+**写法的两个坑（用例里刻意避开）**：
+
+1. **LP 管物品名带 `item.` 段**。直觉写法 `LogisticsPipes:PipeItemsBasicLogistics` 会报 `CP-VALID-002`
+   （`LpPipeCompleter.resolveItem` 走 `GameRegistry.findItem("LogisticsPipes","PipeItemsBasicLogistics")`
+   查不到）——真实注册名是 `LogisticsPipes:item.PipeItemsBasicLogistics`（上面那行实证）。
+2. **AE2 部件的物品身份含 meta**。`ModReflect.itemId(ItemStack)`（`:103-114`）在 meta≠0 时输出
+   `modid:name@meta`，而 `LpPipeDescriber`/`Ae2PartDescriber` 的 `parts` 值走同一函数 ⇒ 断言非 0 meta 的
+   部件必须写 `appliedenergistics2:item.ItemMultiPart@16` 这种形态（缆固定带 `@16`，总线/存储总线 meta 为 0
+   不带后缀）。`partClasses` 是纯类名、与 meta 无关，适合断言「这一面装的是哪种部件」。
+
+### 10.6 自检记录（离线，不含客户端实测）
+
+```powershell
+pwsh -File scripts/control-plane/run-anchor.ps1 -ChecksOnly          # C2 + 复算器自检（5 条断言）
+pwsh -File scripts/control-plane/run-anchor-selftest.ps1              # 29 条行为自检（合成夹具）
+```
+
+`run-anchor-selftest.ps1` 用合成夹具（本地生成的真 PNG：正确 CRC、24 位真彩、可控主色占比）逐条验证
+`anchor-checks.ps1` 的判定**方向正确且不会恒绿**，覆盖的坏数据情形：
+
+| 检查 | 好数据 | 坏数据（必须红） |
+|---|---|---|
+| `Test-AnchorPairing` | 配对齐 | 缺同目标图像判据 / id 不以 `te-` 开头 / 用例无 `te-state-equals` / 文档为空 |
+| `Test-VariantPrecision` | 精确命中 | 目标恒绿（假绿）/ 误伤其它判据 / `criteria.json` 缺失 |
+| `Test-GateCriteria` | 门内 non-uniform + 门外 uniform | 缆越过距离门（far 仍非纯色）/ run 目录为空 |
+| `Test-GateUniformRecompute` | 主色占比 0.970 ≥ 0.95 | 有结构图 0.800 < 0.95 / 图缺失 / 隔行 PNG（复算器返回 `$null` 不猜） |
+| `Test-IdempotentManifest` | 两次 sha256 相等 | sha256 漂移 / sha256 缺失 |
+| `Test-EvidenceComplete` | overall green 且证据在场 | overall red / `evidence.json` 缺失 |
+| `Test-ObservationTeReads` | 族名条目齐且 sha256 非空 | 无 `te.*` 条目 / 族名前缀逐字不符 / sha256 为空 |
+| `Test-ObservationCameras` | 3 机位摘要齐 | 机位数不符 + 名字/顺序不符 + `resolution` 不符 |
+| `Get-PngDominantColorRatio` | — | 合成纯色图 ratio=1、杂色图 ratio<1；真判据产物（a1 轮现场 `far.png`）读数与判据引擎**逐位一致**（0.064926） |
+
+**离线还做了这些（都不起客户端）**：
+
+| 自检 | 结果 |
+|---|---|
+| 两个用例 × 仓内**真实** `CaseValidator`（`core/` 全量 `javac` + gson 2.2.4，临时 main，口径同 §9.6） | 均 `VALID`：`lp-pipe-row` 18 判据 / 2 机位 / 变体 `applicable=true`；`ae2-parts` 20 判据 / 3 机位 / 变体 `applicable=true`；唯一 warning 是「cameras 段非空 ⇒ 需 forensic」（预期） |
+| 同法回归 §3.2/§9.2 的两个既有用例 | `smoke-basic`（4 判据）与 `smoke-shots`（8 判据、3 机位）仍 `VALID`，变体 `applicable=true` |
+| 四个 `.ps1` 解析（`[Parser]::ParseFile`） | `run-anchor.ps1` 7777 token / `anchor-checks.ps1` 3096 / `run-anchor-selftest.ps1` 2397 / `run-shots.ps1` 8500 / `run-smoke.ps1` 5714，**均 0 错误** |
+| `run-anchor.ps1 -ChecksOnly` | 5 条断言全绿、退出 0（含「复算器能读现场截图」：0.064926） |
+| `run-anchor-selftest.ps1` | 29 条自检全绿、退出 0 |
+| `run-anchor.ps1` 的 C1/C3~C7 | **未离线复核**：它们必须由真机轮次产生 run 目录后才能断言；首次验收由调度者执行 |
+
+### 10.7 已知留白与实现/契约不一致（需要实现侧裁决）
+
+1. **LP 相邻管的 `connections` 不是「几何对称」推出来的**。真机首轮实测（`cp_lp_pipe_row` 四格场景）：
+   `@64` 的 `/connections/EAST=true`、`NORTH/SOUTH/DOWN/UP=false`、`WEST=false`；而 `@65` 是
+   `EAST=true` **且 `WEST=true`**——即「西边是它刚连上的 `@64`」也报连接，于是
+   **`WEST=false` 不能由「`@65` 西侧是入口管（本该只有东侧出）」推出来**。首轮用例曾按对称性写了
+   `te-x2-pair-west`（`@65 /connections/WEST` 期望 `false`）⇒ 该判据如实判红，这是**用例假设错、不是实现错**；
+   已改为可复算的三条（`te-x1-iso-west`=`@64 /connections/WEST` false、`te-x2-pair-east`=`@65 EAST` true、
+   `te-x3-*`=`@66` 的两侧）。
+   留白在于**这份连接表的权威语义**：`LogisticsTileGenericPipe.computeConnections()`
+   （`LogisticsTileGenericPipe.java:867-893`）逐面写 `canPipeConnect(...)`，而
+   `CoreRoutedPipe.canPipeConnect`（`CoreRoutedPipe.java:1085-1091`）先过
+   `isSideBlocked`（同文件 `:1094`，内含 `getUpgradeManager().isSideDisconnected(side)` 与
+   `getRouter().isSideDisconneceted(side)`）再回落 `transport.canPipeConnect`。
+   「单机、无物流网络、两侧都是基础物流管」时这几层的合取结果就是实测值；
+   若后续要用例断言更强的连接拓扑（如「入口管不该西接」），需要把这份语义写进契约或由实现侧给出
+   「哪些面在何种网络状态下必然不连」的口径——目前契约（case-file.md §5）只说 `te-state-equals`
+   读的是「TE 描述器的运行期字段」，没说这些字段该满足什么不变式。
+2. **`world-hash-equals` 的「首建哈希」是取本轮 build 段产物还是存档内清单，由实现决定**（case-file.md §8.7
+   允许两种口径）。`cases/lp-pipe-row.json` 的 `world-hash-equals` 在真机轮次里为绿，说明当前实现是
+   「以本轮 build 产物为准」；若将来改成「读存档内清单」，C5b 的清单 sha256 相等判定仍然成立
+   （两次 run 的 `world/scene-manifest.json` 逐字节一致），但 C5c 会更依赖实现口径，届时需复看。
+3. **`minecraft:chest` 的 `meta` 会被世界改写（0 → 3）**。真机轮次的 `scene-manifest.json` 里
+   `mismatches` 有一条：`{"pos":[67,12,64],"kind":"block","requested":{"id":"minecraft:chest","meta":0},
+   "actual":{"meta":3}}`。箱子的朝向由相邻方块推导，用例声明的 `meta:0` 不是最终值；
+   这不影响幂等（两次重建都得到 3）与连接判据（箱子作为 `IInventory` 仍被 LP 管连上），
+   但**它是一条 block 步的 mismatch 留痕**——是否需要给「世界会自动改写的方块属性」留一条白名单，
+   属实现/契约口径问题（`SceneBuilder.placeBlock` 目前把「请求值≠实际值」一律记 mismatch）。
+4. **AE2 伪装板（`params.facades[]`）在本用例里刻意不用**。补全器的 facade 分支要求该物品能被
+   `PartPlacement.isFacade` 认领，而 AE2 的 `ItemFacade.createPartFromItemStack`
+   （`items/parts/ItemFacade.java:158-164`）走 `getTextureItem(is)` → 需要物品带 **NBT**（`data.getIntArray("x")`）
+   才认；`params.facades[].item` 只有注册名 + meta 两个字段（`Ae2PartCompleter.stack()`），**表达不了 NBT**。
+   因此「AE2 伪装板」这条锚点在当前参数形态下不可达——要么给 `facades[]` 加 NBT 字段（契约 §5 增量可容许），
+   要么改用 BuildCraft 伪装板（整合包未必启用）。本用例覆盖「中心缆 + 两个部件」与「缆+箱」两种形态，
+   伪装板留白待裁决。
+5. ~~`image-uniform` 阈值与 far 机位构图~~（**已解决并回填**，本条留档）：旧 far 机位（`[105.5,13.5,64.5]`
+   pitch 40 fov 70）的画面被天空渐变+云占满，主色占比实测 0.132668——**宽 fov 下天空渐变使
+   `image-uniform` 指标不可用**（验收轮 a1 的 6 红真因：判据指标选型错，不是门失效；读图证实 41 格外
+   缆+箱仍渲染为一个黑点 ⇒ AE2 缆走 ISBRH 不受 TESR 门管）。K1 器具已改为「原版箱子 64 格 TESR 门
+   + 望远镜窄 fov 双机位」（见 §10.3 的 K1 门控原理段）：`gate-near` 实测主色 0.757580（箱在）、
+   `far` 实测 **1.000000（colors=1）**（箱失）⇒ 阈值定 0.95（「实测 − 余量」口径）。玩家隐藏已由
+   PR-2 收尾的 doRender cancel 解决，far 图不再有玩家点。
+6. **`-ChecksOnly` 不产客户端产物，因此不写 `lightning.cfg`**。它的归档里没有 `stale/`、`lightning.cfg.*`、
+   客户端日志，只有 `probe-png/`、`summary.md`、`assertions.json`、`session.json` 与 `events.jsonl`（若在）。
+   这条分界是刻意的：离线检查不该有副作用。

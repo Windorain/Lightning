@@ -13,6 +13,7 @@ import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.CpException;
 import com.lightning.mod.client.controlplane.core.ErrorCodes;
 import com.lightning.mod.client.controlplane.core.Json;
+import com.lightning.mod.client.controlplane.core.ObservationRecord;
 
 import cpw.mods.fml.common.registry.GameRegistry;
 
@@ -148,6 +149,9 @@ public final class SceneBuilder {
         this.seed = seed;
         this.isVoid = isVoid;
         this.settleTicks = Math.max(0, settleTicks);
+        // 模组族补全器/描述器（lp-pipe/ae2-part）注册：幂等、缺席即跳过并 WARN（ModTeFamilies）。
+        // 放在构造里是为了「任何走场景构建的入口都保证注册表就位」（bootstrap 也已注册过一次）。
+        ModTeFamilies.registerAll();
     }
 
     /** 步骤总数（进度分母）。 */
@@ -273,10 +277,14 @@ public final class SceneBuilder {
                     String completer = Json.optString(step, "completer", null);
                     TeCompleter c = TeCompleters.get(completer);
                     if (c == null) {
+                        String absence = ModTeFamilies.absenceOf(completer);
                         throw CpException.param(
                             "未知 TE 补全器",
                             "build[" + index + "].completer",
-                            "v1 已注册: " + TeCompleters.names() + "，收到: " + completer);
+                            "已注册: " + TeCompleters.names()
+                                + "，收到: "
+                                + completer
+                                + (absence == null ? "" : "；该族缺席原因——" + absence));
                     }
                     JsonObject params = Json.optObject(step, "params");
                     TeSpec spec = new TeSpec(at, completer, params);
@@ -363,6 +371,7 @@ public final class SceneBuilder {
 
     private void finish(WorldServer world) {
         JsonArray teArr = new JsonArray();
+        JsonArray teReads = new JsonArray();
         for (TeSpec spec : teSpecs) {
             TileEntity te = world.getTileEntity(spec.pos[0], spec.pos[1], spec.pos[2]);
             String cls = te == null ? SceneManifest.ABSENT
@@ -377,6 +386,10 @@ public final class SceneBuilder {
                         Json.object("completer", spec.completer),
                         Json.object("class", SceneManifest.ABSENT)));
             }
+            JsonObject read = teRead(spec, world);
+            if (read != null) {
+                teReads.add(read);
+            }
         }
         JsonObject m = new JsonObject();
         m.addProperty("schema", SceneManifest.SCHEMA);
@@ -388,12 +401,46 @@ public final class SceneBuilder {
         m.addProperty("settleTicks", settleTicks);
         m.add("blocks", Json.copyArray(blocks));
         m.add("tileEntities", teArr);
+        if (teReads.size() > 0) {
+            m.add("teReads", teReads);
+        }
         if (mismatches.size() > 0) {
             m.add("mismatches", Json.copyArray(mismatches));
         }
         m.addProperty("sha256", SceneManifest.hash(m));
         manifest = m;
         stage = Stage.DONE;
+    }
+
+    /**
+     * 一条 te 步的描述器读数（PR-3：运行期轨的可审计留痕）。
+     *
+     * <p>
+     * 经 {@link TeDescribers#describeByFamily} 读该族 TE 的运行期状态（<b>只读</b>，与补全器同族），
+     * 落 {@code {pos, completer, state, sha256}}；{@code sha256} 是状态对象的规范化 JSON 哈希
+     * （与观测记录的 {@code runtimeReads[].sha256} 同一口径，见 observation-record.md §2.1）。
+     * 描述器没认领该位置时落 {@code {pos, completer, note}}——「读了但没认出」与「没读」要能分开看。
+     *
+     * <p>
+     * <b>不进清单哈希</b>：{@link SceneManifest#hash} 只覆盖 {@code blocks/tileEntities}
+     * （case-file.md §8 第 7 条），所以本字段是纯粹的审计信息——加它不会改变幂等判据
+     * （{@code world-hash-equals}）的取值。该族没有描述器（如整合包缺 LP）时返回 null，不写假读数。
+     */
+    private JsonObject teRead(TeSpec spec, WorldServer world) {
+        if (!TeDescribers.contains(spec.completer)) {
+            return null;
+        }
+        JsonObject state = TeDescribers.describeByFamily(spec.completer, world, spec.pos[0], spec.pos[1], spec.pos[2]);
+        JsonObject o = new JsonObject();
+        o.add("pos", SceneManifest.posArray(spec.pos));
+        o.addProperty("completer", spec.completer);
+        if (state == null) {
+            o.addProperty("note", "描述器未认领该位置的 TE（族 " + spec.completer + "）");
+            return o;
+        }
+        o.add("state", state);
+        o.addProperty("sha256", ObservationRecord.hashSummary(state));
+        return o;
     }
 
     // ------------------------------------------------------------ 基元

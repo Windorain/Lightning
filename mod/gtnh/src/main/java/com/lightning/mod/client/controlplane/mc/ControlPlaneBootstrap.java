@@ -112,6 +112,10 @@ public final class ControlPlaneBootstrap {
 
         events = new EventStream(CpPaths.eventsFile(mcDataDir), CpLog.coreSink());
 
+        // TE 补全器/描述器的模组族注册（contract.md §6.5 的 v1.2 注册表：vanilla/lp-pipe/ae2-part）。
+        // 缺席的模组只跳过注册并 WARN——注册动作本身永不失败（ModTeFamilies，全反射探测）。
+        ModTeFamilies.registerAll();
+
         // token 每次启动随机生成：不存在空 token 放行（contract §1.4）
         TokenStore tokens = TokenStore.generate();
         try {

@@ -325,19 +325,30 @@ public final class CaseValidator {
                 }
                 case CriteriaEngine.TYPE_IMAGE_NOT_UNIFORM: {
                     requirePathParam(params, ctx, fields);
-                    if (params.has("maxSameColorRatio")) {
-                        JsonElement mr = params.get("maxSameColorRatio");
-                        if (!mr.isJsonPrimitive() || !mr.getAsJsonPrimitive()
-                            .isNumber()) {
-                            fields.add(ctx + ".params.maxSameColorRatio", "须为 0..1 的数值");
-                        } else {
-                            double v = mr.getAsDouble();
-                            if (Double.isNaN(v) || Double.isInfinite(v) || v < 0.0d || v > 1.0d) {
-                                fields.add(ctx + ".params.maxSameColorRatio", "须在 0..1，收到 " + v);
-                            }
-                        }
+                    requireRatio(params, "maxSameColorRatio", ImageCriteria.DEFAULT_MAX_SAME_COLOR_RATIO, ctx, fields);
+                    break;
+                }
+                case CriteriaEngine.TYPE_IMAGE_UNIFORM: {
+                    requirePathParam(params, ctx, fields);
+                    requireRatio(params, "minSameColorRatio", ImageCriteria.DEFAULT_MIN_SAME_COLOR_RATIO, ctx, fields);
+                    break;
+                }
+                case CriteriaEngine.TYPE_TE_STATE_EQUALS: {
+                    // 运行期轨判据：at/key/expect 三者缺一不可（求值在 mc 侧，见 CaseRunAction 的注入）
+                    int[] at = ints(params, "at");
+                    if (at == null) {
+                        fields.add(ctx + ".params.at", "必填，且须为 [x,y,z] 三个整数（绝对坐标）");
                     } else {
-                        params.addProperty("maxSameColorRatio", ImageCriteria.DEFAULT_MAX_SAME_COLOR_RATIO);
+                        checkCoords(at, ctx + ".params.at", fields);
+                    }
+                    String key = Json.optString(params, "key", null);
+                    if (key == null) {
+                        fields.add(ctx + ".params.key", "必填（RFC 6901 指针，指向 TE 描述器输出，如 /connections/UP）");
+                    } else if (!key.isEmpty() && !key.startsWith("/")) {
+                        fields.add(ctx + ".params.key", "指针须以 / 开头或为空串");
+                    }
+                    if (!c.hasExpect()) {
+                        fields.add(ctx + ".expect", "te-state-equals 必填");
                     }
                     break;
                 }
@@ -527,6 +538,41 @@ public final class CaseValidator {
         if (e.getAsLong() <= 0L) {
             fields.add(field, "须为正整数，收到 " + e.getAsLong());
         }
+    }
+
+    /**
+     * 0..1 图像阈值参数（图像纯色类判据用）：缺失补默认值，非法记错。
+     *
+     * <p>
+     * 判定复用 {@link ImageCriteria#ratioError}——校验期与求值期必须是同一套规则，否则会出现
+     * 「计划校验通过、运行期判 error」的错位。
+     */
+    private static void requireRatio(JsonObject params, String key, double def, String ctx, Fields fields) {
+        if (!params.has(key)) {
+            params.addProperty(key, def);
+            return;
+        }
+        String err = ImageCriteria.ratioError(params, key);
+        if (err != null) {
+            fields.add(ctx + ".params." + key, err.replace("params." + key + " ", ""));
+        }
+    }
+
+    /** 取 {@code [x,y,z]} 整数三元组；缺失或非法返回 null。 */
+    private static int[] ints(JsonObject o, String key) {
+        JsonArray a = Json.optArray(o, key);
+        if (a == null || a.size() != 3) {
+            return null;
+        }
+        int[] out = new int[3];
+        for (int i = 0; i < 3; i++) {
+            JsonElement e = a.get(i);
+            if (e == null || !e.isJsonPrimitive() || !CameraSpec.isIntegral(e) || !CameraSpec.isFinite(e)) {
+                return null;
+            }
+            out[i] = e.getAsInt();
+        }
+        return out;
     }
 
     private static void checkRelPath(String path, String field, Fields fields) {

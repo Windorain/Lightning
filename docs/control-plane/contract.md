@@ -96,9 +96,9 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 
 ### 4.2 相机与渲染规则（PR-2，#41 落地）
 
-1. **注入式相机**：渲染时用虚拟相机实体替换 `mc.renderViewEntity`（不传送真实玩家）；TE 渲染距离门（如 AE2 电缆 30 方块，`TileCableBus.getMaxRenderDistanceSquared()=900.0`）随相机位置生效——这是注入而非挪玩家的核心理由。
+1. **注入式相机**：渲染时用虚拟相机实体替换 `mc.renderViewEntity`（不传送真实玩家）；TE 渲染距离门随相机位置生效——这是注入而非挪玩家的核心理由。**机制更正（PR-3 实证）**：1.7.10 的 TE 距离门由 `TileEntityRendererDispatcher` 按 `renderViewEntity` 静态位置剔除 **TESR** 渲染，门值是各 TE 的 `getMaxRenderDistanceSquared()`（原版默认 4096=64 格；AE2 `TileCableBus`=900.0=30 格——**但 AE2 缆几何走 ISBRH 块层渲染不受此门管，门只管其动态部件（监视器屏显）的 TESR 内容**）。因此 K1 的验收器具是**原版箱子**（64 格 TESR 门）：玩家恒定停在门内、相机近/远跨门双拍——近图箱在、远图箱失即证「门随相机而非随玩家」。
 2. **门控位置分离（A3）**：`observation.playerPos` 恒为真实玩家位置，`observation.camera.pos` 为机位；两者各自记录，判据可分别断言。
-3. **正交投影**：渲染帧内替换投影矩阵，帧结束还原；透视/正交逐机位独立。
+3. **正交投影**：渲染帧内替换投影矩阵，帧结束还原；透视/正交逐机位独立。**fov 合法域 5..110**（原版滑块的 30..110 只钳 `gameSettings.fovSetting`，投影覆写直写矩阵不经滑块；望远镜窄 fov 机位合法，K1 门控对照即用 fov 3~8）。
 4. **超分拼接**：投影偏移 tiling（各 tile 用偏移投影矩阵渲染后像素级拼接）；**禁止视口拼接**（`EntityRenderer` 会强制视口尺寸，tile 间接缝错）。`resolution` 指**拼接后整图尺寸**（每片渲染尺寸 = resolution/cols × resolution/rows）；`overlap` 仅作接缝余量声明——投影偏移法下各片恰好分割整图，**不参与像素装配**；接缝可审计性靠 `<name>.tiles/` 逐片落盘。
 5. **GL 线程**：shot/capture 类动作经 tick 排空后在客户端 tick 线程执行（1.7.10 单机 tick 线程==渲染线程；需要出帧时动作自行驱动 `EntityRenderer.renderWorld`，不等游戏主循环）；渲染故障 CP-EXEC-001 并附摘要。
 6. **光照参与开关（豁免一）**：`renderMode`/`lighting` 逐机位可覆盖会话默认；**v1 仅如实留痕观测档位**（`shots/<name>.meta.json` 含 `lightingApplied:false` + warning），**不注入光照管线**——中性光照注入留待后续契约版本。
@@ -117,11 +117,12 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 
 1. 控制面只操作**托管世界**：存档目录名以 `cp_` 前缀且内含 `cp_world.json`（`{schema:"lightning.cp-world/1", seed, void:true, createdBy}`）。对非托管世界的一切写操作拒绝（`CP-STATE-001`）。
 2. **虚空世界**：`WorldType.FLAT` + 空层预设（无基岩无土层），固定种子；构建基点由用例文件给定。
-3. **幂等重建**：`world.rebuild` 对同一用例定义产生相同世界；场景构建步骤以「清场（托管区域 setBlockToAir）→ 放置 → TE 补全 → 静置」为固定序。
+3. **幂等重建**：`world.rebuild` 对同一用例定义产生相同世界；场景构建步骤以「清场（托管区域 setBlockToAir）→ 放置 → TE 补全 → 静置」为固定序。**时序陷阱（PR-3 实证）**：AE2 空缆块会在首个 tick 自毁（`TileCableBus.onReady`）——用例中缆块的 `block` 步与其 `te` 步之间**不得插入 `wait`/`clear` 等跨 tick 步骤**，te 步必须紧随同 tick 执行（completer 对缺中心缆报 CP-STATE-001 兜底）。
 4. **TE 状态补全**（#55「设」第五项）：仅限场景构建阶段、捕获开始之前；必须经模组自身权威同步路径（如 `markBlockForUpdate` 触发 S35 description packet 摄取，或模组自己的 `initialize`/`addPart` 等 API）；**禁止**逐字段从静态数据推算回填。补全器按族注册（接口 `TeCompleter`），默认实现覆盖原版 TE；LP/AE2 族补全器随锚点场景交付。
-5. 世界快照与回滚范围**包含** TE 补全后的状态。
-6. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。
-7. **离图阻塞**：`mc.loadWorld(null)` 在 tick 线程内阻塞至集成服停机（原版「保存并退到标题」同路径），客户端会冻结数秒到数十秒——动存档目录前必须保证 region 句柄释放，这是 v1 的取舍。
+5. **补全器的权威放置职责（PR-3 明确）**：当模组的方块需要构造上下文时（LP 通用管块需 `createPipe`/`placePipe`、AE2 部件需 `addPart` 到既有缆），`te` 步的 completer 经**模组自身放置 API** 完成放置与补全；此时 `params` 声明的是**放置输入**（物品 id/朝向/面），不是 NBT 逐字段回填——该区分必须在 completer 类注释写明。**v1.2 注册表**：`vanilla` / `lp-pipe` / `ae2-part`。
+6. 世界快照与回滚范围**包含** TE 补全后的状态。
+7. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。
+8. **离图阻塞**：`mc.loadWorld(null)` 在 tick 线程内阻塞至集成服停机（原版「保存并退到标题」同路径），客户端会冻结数秒到数十秒——动存档目录前必须保证 region 句柄释放，这是 v1 的取舍。
 
 ## 7. 观测记录
 

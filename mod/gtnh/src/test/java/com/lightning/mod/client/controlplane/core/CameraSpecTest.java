@@ -302,8 +302,16 @@ public class CameraSpecTest {
     public void fovAndOrthoHeightRangesAreEnforced() {
         JsonObject c = perspective("fov-low");
         c.getAsJsonObject("projection")
-            .addProperty("fov", 5.0d);
+            .addProperty("fov", 2.0d);
         assertTrue(mentions(parse(cameras(c)), "cameras[0].projection.fov"));
+
+        JsonObject cTele = perspective("fov-telescope");
+        cTele.getAsJsonObject("projection")
+            .addProperty("fov", 5.0d);
+        assertTrue(
+            "望远镜窄 fov（>=5）合法（K1 门控对照实测需要）",
+            parse(cameras(cTele)).fields()
+                .isEmpty());
 
         JsonObject c2 = perspective("fov-high");
         c2.getAsJsonObject("projection")

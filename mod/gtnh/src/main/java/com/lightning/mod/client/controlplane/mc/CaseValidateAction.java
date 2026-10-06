@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.ActionContext;
 import com.lightning.mod.client.controlplane.core.CaseFile;
 import com.lightning.mod.client.controlplane.core.ControlAction;
+import com.lightning.mod.client.controlplane.core.CriteriaEngine;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.TimeSource;
 
@@ -50,6 +51,9 @@ public final class CaseValidateAction implements ControlAction {
         }
         JsonArray warnings = Json.optArray(plan, "warnings");
         o.addProperty("warningCount", warnings == null ? 0 : warnings.size());
+        // 判据类型的自描述（含引入版本 since）：调用方据此知道能写哪些判据类型、各自的参数形态，
+        // 不必读源码或日志。与 CriteriaEngine.TYPES 同源，PR-3 的两条判据 since=1.2。
+        o.add("criteriaTypes", CriteriaEngine.typeCatalog());
         return o;
     }
 
