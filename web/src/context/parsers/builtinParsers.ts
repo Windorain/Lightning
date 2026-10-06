@@ -99,6 +99,9 @@ export const WorldParser: DocumentParser = {
       labels: (world.labels as unknown[]) ?? [],
       textureBlobs: world.textureBlobs,
       tooltipPalette: world.tooltipPalette,
+      // #82：成对 idioms 的另一半——World 根级 cellTooltipGrid 必须随 tooltipPalette 一并搬运
+      // （契约 §2.2/§叠加层：逐格人工说明是叠加层，缺它整层说明在 web 侧消失且保存后不会回来）
+      cellTooltipGrid: world.cellTooltipGrid,
       materialPalette: world.materialPalette,
       blockPalette: world.blockPalette,
       playback: world.playback,
