@@ -18,6 +18,12 @@ import com.lightning.mod.client.meshcapture.TessellatorCaptureState;
 
 /**
  * Records vertices into {@link TessellatorCaptureState} while a capture block is active.
+ * <p>
+ * PR-1：MODELVIEW 变换门从「旧动态扩展相位」放宽为「旧动态扩展相位 或 新通道窗口基线」
+ * （{@link TessellatorCaptureState#isModelViewTransformArmed()}）——两路径互斥，旧路径行为不变。
+ * 与 {@code MixinDirectTessellatorCapture} 的去重论证：GTNHLib {@code DirectTessellator} <strong>覆写</strong>
+ * {@code addVertex}，覆写方法的调用不会进入基类方法体，故基类注入对 DirectTessellator 天然不触发，
+ * 两条录制路径不可能重复计数。
  */
 @Mixin(Tessellator.class)
 public abstract class MixinTessellatorCapture {
@@ -76,14 +82,14 @@ public abstract class MixinTessellatorCapture {
         double vx = Float.intBitsToFloat(this.rawBuffer[base]);
         double vy = Float.intBitsToFloat(this.rawBuffer[base + 1]);
         double vz = Float.intBitsToFloat(this.rawBuffer[base + 2]);
-        if (TessellatorCaptureState.isDynamicExtensionVertexRecording()) {
+        if (TessellatorCaptureState.isModelViewTransformArmed()) {
             double preX = vx;
             double preY = vy;
             double preZ = vz;
             SDE_MODELVIEW_MAT.clear();
             GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, SDE_MODELVIEW_MAT);
-            if (TessellatorCaptureState.hasDynamicPassModelViewBaseline()) {
-                TessellatorCaptureState.copyDynamicPassModelViewBaselineInverse(SDE_INV_ARR);
+            if (TessellatorCaptureState.hasActiveModelViewBaseline()) {
+                TessellatorCaptureState.copyActiveModelViewBaselineInverse(SDE_INV_ARR);
                 SDE_TMP16.clear();
                 SDE_TMP16.put(SDE_INV_ARR);
                 SDE_TMP16.flip();

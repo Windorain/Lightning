@@ -17,6 +17,7 @@ import net.minecraftforge.client.event.ClientChatReceivedEvent;
 
 import org.apache.logging.log4j.Level;
 
+import com.lightning.mod.client.meshcapture.parts.probe.CaptureChannelProbeAutomation;
 import com.lightning.mod.client.meshcapture.parts.probe.LpTeRoundTripAutomation;
 import com.lightning.mod.client.meshcapture.parts.probe.PartsAcceptanceAutomation;
 import com.lightning.mod.client.meshcapture.parts.probe.PartsProbeAutomation;
@@ -59,6 +60,13 @@ public final class SdeClientAutomationTickHandler {
         // 它自带专用世界与专用放置路径，必须排在其它探针之前；触发文件不存在时本分支零行为变化。
         if (LpTeRoundTripAutomation.isRequested(mc)) {
             LpTeRoundTripAutomation.tick(mc);
+            return;
+        }
+
+        // 「忠实复现捕获层」PR-1 验收探针（捕获通道）：触发文件 sde_capture_channel_probe.json 存在时接管本 tick。
+        // 自带专用世界与受控放置（LP 管 + 原版箱），必须排在其它探针之前；触发文件不存在时本分支零行为变化。
+        if (CaptureChannelProbeAutomation.isRequested(mc)) {
+            CaptureChannelProbeAutomation.tick(mc);
             return;
         }
 
