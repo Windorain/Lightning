@@ -43,14 +43,14 @@ import com.lightning.mod.client.controlplane.mc.ActionRegistrar;
  */
 public class PlayerActionsTest {
 
-    /** 本组八个动作的名单（L1 的完整能力面，见 contract.md §4.6）。 */
+    /** 本组九个动作的名单（L1 的完整能力面，见 contract.md §4.6）。 */
     private static final String[] PLAYER_ACTIONS = { PlayerMoveAction.NAME, PlayerLookAction.NAME, UseItemAction.NAME,
         PlayerInteractAction.NAME, PlayerDigAction.NAME, PlaceBlockAction.NAME, PlayerPickupAction.NAME,
         SlotClickAction.NAME, PlayerGuiAction.NAME };
 
     // ------------------------------------------------------------ 注册与权限级
 
-    /** 八个动作全部注册、全部 scene 级（可写 ⇒ 一律要求 confirm）。 */
+    /** 九个动作全部注册、全部 scene 级（可写 ⇒ 一律要求 confirm）。 */
     @Test
     public void playerActionsAreRegisteredAtSceneTier() {
         ActionRegistry registry = new ActionRegistry();
@@ -84,19 +84,19 @@ public class PlayerActionsTest {
         }
     }
 
-    /** L1 的引入版本是 1.4（契约 §5：新增动作带 since）。 */
+    /** L1 的引入版本是 1.5（契约 §5：新增动作带 since；分支自报 1.4 与 #100 撞号，调度者合流裁决为 1.5）。 */
     @Test
-    public void playerActionsAreSince14() {
+    public void playerActionsAreSince15() {
         ActionRegistry registry = new ActionRegistry();
         ActionRegistrar.registerAll(null, registry);
         for (String name : PLAYER_ACTIONS) {
             assertEquals(
-                name + " since 应为 1.4（#101 引入）",
-                "1.4",
+                name + " since 应为 1.5（#101 引入）",
+                "1.5",
                 registry.descriptor(name)
                     .since());
         }
-        assertEquals("契约版本应升到 1.4", "1.4", Contract.VERSION);
+        assertEquals("契约版本应升到 1.5", "1.5", Contract.VERSION);
     }
 
     /** 动作名以 {@code player.} 开头——前缀即分组（与 read./scene. 同约定）。 */
@@ -258,7 +258,7 @@ public class PlayerActionsTest {
     // ------------------------------------------------------------ 纯逻辑：参数校验
 
     /**
-     * 无世界时八个动作的前置检查必须是<b>契约错误</b>而不是裸异常。
+     * 无世界时九个动作的前置检查必须是<b>契约错误</b>而不是裸异常。
      *
      * <p>
      * 这是「探索模式纪律」（#96 §3）里<b>离线可判定</b>的那一半：动作在没有世界的环境下被调用，
@@ -268,7 +268,7 @@ public class PlayerActionsTest {
      * 实现方式说明：{@code ActionContext} 的构造器是包私有的（core 的分层设计），本测试无法伪造
      * 上下文去真调 {@code execute}。因此改用<b>结构可判定性</b>：
      * <ul>
-     * <li>八个实现类都能无参构造（注册表按实例注册同步动作）；</li>
+     * <li>九个实现类都能无参构造（注册表按实例注册同步动作）；</li>
      * <li>都实现了 {@code ControlAction}（即有 {@code execute(ActionContext)}）；</li>
      * <li>都依赖 {@link PlayerSession#requireClientPlayer} 这条公共前置——它无世界即
      * {@code CP-STATE-001}（见 {@link #playerSessionRequireClientPlayerIsTheSingleEntryPoint}）。</li>
@@ -290,7 +290,7 @@ public class PlayerActionsTest {
     }
 
     /**
-     * 公共前置只有一处实现：{@link PlayerSession}。八个动作都必须经它拿玩家——
+     * 公共前置只有一处实现：{@link PlayerSession}。九个动作都必须经它拿玩家——
      * 散落的前置检查会让「无世界时报什么」逐动作分叉，而调用方只认一种。
      */
     @Test

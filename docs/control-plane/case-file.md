@@ -85,7 +85,7 @@
   "renderMode": "本色",                   // 本色 | 参与光照（豁免一，会话默认）
   "worldTime": 6000                      // 可空：拍摄光照基准
 },
-"cameras": [ CameraSpec, ... ]           // 可空：机位表（CameraSpec 见 contract.md §4.1），逐个调 shot.multi 同一实现
+"cameras": [ CameraSpec, ... ]           // 可空：机位表（CameraSpec 见 contract.md §4.3），逐个调 shot.multi 同一实现
 ```
 
 - 两段都空 → 不产截图；`cameras` 非空时才需要 forensic 级 token（`case.run` 权限按内容升格：含 cameras 段的用例必须 forensic 调用）。
@@ -220,7 +220,7 @@ role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直�
 **边界（如实标注）**：本节管**世界**的 hermetic（方块/TE/实体所在的那份存档）。
 **玩家侧状态**（背包、经验、药水效果、飞行）在 1.7.10 落 `<saves>/<folder>/playerdata/`，
 **在**存档目录内，因此随 `world.rebuild` 的整目录删除一并复位。
-**客户端侧**的易失渲染状态不在此列，由捕获层的会话纪律管（契约 §4.1）。
+**客户端侧**的易失渲染状态不在此列，由捕获层的会话纪律管（契约 §4.2）。
 
 ## 9. 文件解析与校验规则
 

@@ -42,6 +42,32 @@ import com.lightning.mod.client.controlplane.core.Json;
  * <p>
  * {@code blockId}/{@code meta} 取<b>放置后从服务端世界读回的值</b>（而非请求值），
  * 因此 {@link #readBack} 用同一口径重读一遍即可做幂等/落盘一致性判定，无需信任任何缓存。
+ *
+ * <h2>同一 pos 的去重（issue #112：「清单语义 = 世界最终状态」）</h2>
+ * {@code SceneBuilder} 对每一次 {@code block} 构建步都追加一条清单项，于是「同一坐标被写两次」
+ * （先石头后箱子）会让清单出现两条同 pos 记录：落盘清单里既有 {@code blockId=1} 也有后来的
+ * {@code blockId=54}。{@code readBack} 按位置实读世界时两条都读成最终值（箱子），
+ * 而清单自报的 {@code sha256} 覆盖的是<b>两条</b>记录 ⇒ {@code world-hash-equals} 在
+ * 「同参无漂移」时也误判红：哈希取决于<b>构建历史</b>，而不是<b>世界最终状态</b>。
+ *
+ * <p>
+ * 因此清单条目集合的唯一口径是<b>同一 pos 后写覆盖</b>：{@link #dedupeByPos} 是这条口径的
+ * <b>唯一去重点</b>（缺陷 #112），它被三处共用、没有第二份实现：
+ * <ol>
+ * <li>{@link #manifestBlocks}/{@link #manifestTes}——清单<b>数据入口</b>：{@code SceneBuilder}
+ * 与按段续跑的清单存根都经此组装 {@code blocks}/{@code tileEntities}。放在入口的理由是
+ * 「产物自描述诚实」：落盘清单本身就不含重复 pos，而不是只在算哈希时把它掩盖掉；</li>
+ * <li>{@link #hashSubset}（经 {@link #normalizeBlocks}/{@link #normalizeTes}）——哈希归一化；</li>
+ * <li>{@link #readBack}（同经两个 normalize）——读回归一化。</li>
+ * </ol>
+ * 三者共用同一份去重，因此 {@code hash}、{@code readBack}、{@code world-hash-equals}、
+ * {@code read.blocks} 互算（issue #98 的 R2 口径）四条路径<b>天然一致</b>；而「无重复写入」的
+ * 清单经去重后逐条不变，既有场景的哈希因此逐字不变（回归锁见
+ * {@code SceneManifestTest#noDuplicateManifestHashIsUnchanged}）。
+ *
+ * <p>
+ * 归一是<b>幂等</b>的，且同时覆盖「旧版本写下的清单」「调用方经 {@code expectManifest} 递进来的
+ * 清单」这类非本类产出的输入——它们一样要在同一口径下被哈希与读回。
  */
 public final class SceneManifest {
 
@@ -208,60 +234,179 @@ public final class SceneManifest {
         return o;
     }
 
-    /** 规范化方块数组（按 pos 升序；{@code dropId} 为真时丢掉注册名，用于哈希口径）。 */
-    private static JsonArray normalizeBlocks(JsonArray src, boolean dropId) {
-        List<JsonObject> list = new ArrayList<JsonObject>();
-        if (src != null) {
-            for (int i = 0; i < src.size(); i++) {
-                JsonElement e = src.get(i);
-                if (e == null || !e.isJsonObject()) {
-                    continue;
-                }
-                JsonObject o = e.getAsJsonObject();
-                int[] pos = posOf(o);
-                if (pos == null) {
-                    continue;
-                }
-                JsonObject n = new JsonObject();
-                n.add("pos", posArray(pos));
-                n.addProperty("blockId", Json.optInt(o, "blockId", 0));
-                n.addProperty("meta", Json.optInt(o, "meta", 0));
-                if (!dropId) {
-                    String id = Json.optString(o, "id", null);
-                    if (id != null) {
-                        n.addProperty("id", id);
-                    }
-                }
-                list.add(n);
-            }
-        }
-        sortByPos(list);
+    // ------------------------------------------------------------ 同一 pos 去重（#112 唯一定义点）
+
+    /**
+     * 同一 {@code pos} <b>后写覆盖</b>的去重——issue #112 的<b>唯一定义点</b>（见类注释）。
+     *
+     * <p>
+     * 输入按声明序（= 构建历史序），输出保留每个 pos <b>首次出现</b>的槽位、取该 pos
+     * <b>最后一次出现</b>的值：清单条目集合的语义因此是「世界最终状态」，与构建历史无关。
+     * 槽位取首次出现序而不是末次，是为了让输出顺序仍是<b>声明序的确定性投影</b>
+     * （同一条构建程序永远产出同一份清单文本）。
+     *
+     * <p>
+     * 缺 {@code pos} 或 pos 非法的条目按既有归一化口径<b>跳过</b>——{@link #normalizeBlocks}/
+     * {@link #normalizeTes} 本来也跳过它们，两侧一致。
+     *
+     * <p>
+     * <b>无重复的输入逐元素原样返回</b>（同序、同对象）：这是「无重复写入场景的哈希逐字不变」
+     * 的机械保证，也是本方法可以安全地放进哈希/读回两条归一化流水线的原因。
+     * 本方法<b>不做深拷贝</b>（归一化流水线里逐条调用，拷贝会变成两遍）；需要独占副本的调用方
+     * 自行 {@link Json#copyArray}（如 {@link SceneBuilder} 把结果交给清单持有）。
+     */
+    public static JsonArray dedupeByPos(JsonArray entries) {
         JsonArray out = new JsonArray();
-        for (JsonObject o : list) {
-            out.add(o);
+        if (entries == null) {
+            return out;
+        }
+        // LinkedHashMap：首次出现的槽位固定，后续同 pos 只覆盖值（put 不改变既有槽位序）
+        java.util.LinkedHashMap<String, JsonElement> byPos = new java.util.LinkedHashMap<String, JsonElement>();
+        for (int i = 0; i < entries.size(); i++) {
+            JsonElement e = entries.get(i);
+            int[] pos = posOf(e);
+            if (pos == null) {
+                continue;
+            }
+            byPos.put(posKey(pos), e);
+        }
+        for (JsonElement e : byPos.values()) {
+            out.add(e);
         }
         return out;
     }
 
-    /** 规范化方块实体数组（按 pos 升序）。 */
-    private static JsonArray normalizeTes(JsonArray src) {
-        List<JsonObject> list = new ArrayList<JsonObject>();
+    /** 位置索引键（{@code "x,y,z"}）：去重与逐格对齐共用同一口径，不另起一种拼法。 */
+    public static String posKey(int[] pos) {
+        return pos[0] + "," + pos[1] + "," + pos[2];
+    }
+
+    /**
+     * 清单<b>数据入口</b>：把构建历史追加出来的 {@code blocks} 收敛成「世界最终状态」形态的清单条目
+     * （同一 pos 后写覆盖），字段与<b>字段序</b>同 {@link #blockEntry}，条目序仍是声明序。
+     *
+     * <p>
+     * {@link SceneBuilder} 与按段续跑的清单存根都经此组装清单的 {@code blocks}——落盘清单本身因此
+     * 不含重复 pos（产物自描述诚实），而不是只在算哈希时把重复掩盖掉。
+     */
+    public static JsonArray manifestBlocks(JsonArray appended) {
+        return normalizeByPos(appended, BLOCK_WITH_ID_MAPPER);
+    }
+
+    /** 清单<b>数据入口</b>的方块实体形态（同 {@link #manifestBlocks}，字段序同 {@link #teEntry}）。 */
+    public static JsonArray manifestTes(JsonArray appended) {
+        return normalizeByPos(appended, TE_MAPPER);
+    }
+
+    /**
+     * 条目集合的规范化入口：先按 {@link #dedupeByPos} 做「同一 pos 后写覆盖」，再交给
+     * {@code mapper} 逐条归一化字段（<b>不排序</b>，保留声明序——供清单落盘用）。
+     *
+     * <p>
+     * 这是「清单构建」与「哈希/读回归一化」共用的同一段代码——两条路径因此不可能在
+     * 「到底留哪一条」上分叉。
+     *
+     * @param src    原始条目（可为 null）
+     * @param mapper 单条归一化（返回 null 表示该条非法，跳过）
+     */
+    private static JsonArray normalizeByPos(JsonArray src, EntryMapper mapper) {
+        JsonArray list = new JsonArray();
         if (src != null) {
             for (int i = 0; i < src.size(); i++) {
-                JsonElement e = src.get(i);
-                if (e == null || !e.isJsonObject()) {
-                    continue;
+                JsonObject n = mapper.map(src.get(i));
+                if (n != null) {
+                    list.add(n);
                 }
-                JsonObject o = e.getAsJsonObject();
-                int[] pos = posOf(o);
-                if (pos == null) {
-                    continue;
-                }
-                JsonObject n = new JsonObject();
-                n.add("pos", posArray(pos));
-                n.addProperty("class", Json.optString(o, "class", ABSENT));
-                list.add(n);
             }
+        }
+        return dedupeByPos(list);
+    }
+
+    /** 单条清单项的归一化（见 {@link #normalizeByPos}）。 */
+    private interface EntryMapper {
+
+        /** 归一化一条；非法返回 null。 */
+        JsonObject map(JsonElement e);
+    }
+
+    /** 方块归一化：保留注册名（清单落盘与读回归一化用）。 */
+    private static final EntryMapper BLOCK_WITH_ID_MAPPER = new EntryMapper() {
+
+        @Override
+        public JsonObject map(JsonElement e) {
+            return blockEntryOf(e, false);
+        }
+    };
+
+    /** 方块归一化：丢掉注册名（哈希口径用，见类注释「哈希口径」）。 */
+    private static final EntryMapper BLOCK_NO_ID_MAPPER = new EntryMapper() {
+
+        @Override
+        public JsonObject map(JsonElement e) {
+            return blockEntryOf(e, true);
+        }
+    };
+
+    /** 方块实体归一化（{@code class} 缺失用 {@link #ABSENT}）。 */
+    private static final EntryMapper TE_MAPPER = new EntryMapper() {
+
+        @Override
+        public JsonObject map(JsonElement e) {
+            if (e == null || !e.isJsonObject()) {
+                return null;
+            }
+            JsonObject o = e.getAsJsonObject();
+            int[] pos = posOf(o);
+            if (pos == null) {
+                return null;
+            }
+            JsonObject n = new JsonObject();
+            n.add("pos", posArray(pos));
+            n.addProperty("class", Json.optString(o, "class", ABSENT));
+            return n;
+        }
+    };
+
+    /** 一条方块条目的归一化；非法返回 null。 */
+    private static JsonObject blockEntryOf(JsonElement e, boolean dropId) {
+        if (e == null || !e.isJsonObject()) {
+            return null;
+        }
+        JsonObject o = e.getAsJsonObject();
+        int[] pos = posOf(o);
+        if (pos == null) {
+            return null;
+        }
+        JsonObject n = new JsonObject();
+        n.add("pos", posArray(pos));
+        n.addProperty("blockId", Json.optInt(o, "blockId", 0));
+        n.addProperty("meta", Json.optInt(o, "meta", 0));
+        if (!dropId) {
+            String id = Json.optString(o, "id", null);
+            if (id != null) {
+                n.addProperty("id", id);
+            }
+        }
+        return n;
+    }
+
+    /** 规范化方块数组（去重 → 按 pos 升序；{@code dropId} 为真时丢掉注册名，用于哈希口径）。 */
+    private static JsonArray normalizeBlocks(JsonArray src, boolean dropId) {
+        return sortJsonArrayByPos(normalizeByPos(src, dropId ? BLOCK_NO_ID_MAPPER : BLOCK_WITH_ID_MAPPER));
+    }
+
+    /** 规范化方块实体数组（去重 → 按 pos 升序）。 */
+    private static JsonArray normalizeTes(JsonArray src) {
+        return sortJsonArrayByPos(normalizeByPos(src, TE_MAPPER));
+    }
+
+    /** 把条目数组按 {@code (x,y,z)} 升序排好（{@link #sortByPos} 的数组形态）。 */
+    private static JsonArray sortJsonArrayByPos(JsonArray src) {
+        List<JsonObject> list = new ArrayList<JsonObject>();
+        for (int i = 0; src != null && i < src.size(); i++) {
+            list.add(
+                src.get(i)
+                    .getAsJsonObject());
         }
         sortByPos(list);
         JsonArray out = new JsonArray();

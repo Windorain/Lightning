@@ -14,7 +14,9 @@ public final class Contract {
      * 1.0=PR-1 动作面；1.1=PR-2 取证动作；1.2=PR-3 双轨判据（te-state-equals/image-uniform）；
      * 1.3=观察面读面 + L0 布景原语（issue #98：{@code read.*} 八动作；issue #99：{@code scene.*} 六动作，
      * 见 contract.md §4.1/§4.4）；
-     * 1.4=L1 玩家操作（issue #101：{@code player.*} 八动作，见 contract.md §4.6）。
+     * 1.4=收口T3 命令通道（issue #100：{@code cmd.exec} / {@code export.session}，见 contract.md §4.5）；
+     * 1.5=L1 玩家操作（issue #101：{@code player.*} 九动作，见 contract.md §4.6；调度者撞号裁决：
+     * 本单分支自报 1.4 与 #100 撞号，合流时统一为 1.5）。
      * 小版本只增不改义（contract.md §5）。
      *
      * <p>
@@ -22,7 +24,7 @@ public final class Contract {
      * 「服务契约版本比某个动作的引入版本还旧」这种自相矛盾的目录（D1/D3 会判红）。
      * 新增动作时两处要一起改。
      */
-    public static final String VERSION = "1.4";
+    public static final String VERSION = "1.5";
 
     /** 契约 URI 前缀，即契约大版本。 */
     public static final String PREFIX = "/cp/v1";

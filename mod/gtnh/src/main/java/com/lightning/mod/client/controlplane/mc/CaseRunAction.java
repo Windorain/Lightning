@@ -1318,8 +1318,10 @@ public final class CaseRunAction extends SteppingActionBase {
             }
         }
         stub.addProperty("stepCount", steps.size());
-        stub.add("blocks", blocks);
-        stub.add("tileEntities", tes);
+        // #112：与 SceneBuilder.finish 同一口径（同一 pos 后写覆盖）——这份存根也是清单的
+        // 数据入口之一（readBack 按它的位置集合实读），不能在这里留下重复 pos。
+        stub.add("blocks", SceneManifest.manifestBlocks(blocks));
+        stub.add("tileEntities", SceneManifest.manifestTes(tes));
         return stub;
     }
 
