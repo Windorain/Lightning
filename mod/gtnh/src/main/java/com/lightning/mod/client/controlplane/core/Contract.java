@@ -12,8 +12,14 @@ public final class Contract {
     /**
      * 契约版本（{@code GET /cp/v1/about} 的 {@code contractVersion} 字段）。
      * 1.0=PR-1 动作面；1.1=PR-2 取证动作；1.2=PR-3 双轨判据（te-state-equals/image-uniform）；
-     * 1.3=观察面读面（issue #98：{@code read.*} 八动作）。
+     * 1.3=观察面读面 + L0 布景原语（issue #98：{@code read.*} 八动作；issue #99：{@code scene.*} 六动作，
+     * 见 contract.md §4.1/§4.4）。
      * 小版本只增不改义（contract.md §5）。
+     *
+     * <p>
+     * <b>不变式</b>：本值必须 ≥ 任一动作自描述的 {@code since}——否则自述端点会给出
+     * 「服务契约版本比某个动作的引入版本还旧」这种自相矛盾的目录（D1/D3 会判红）。
+     * 新增动作时两处要一起改。
      */
     public static final String VERSION = "1.3";
 

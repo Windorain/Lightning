@@ -31,7 +31,7 @@ import com.lightning.mod.client.controlplane.core.TimeSource;
  *
  * <p>
  * 位置同时给出服务端与客户端两份（{@code serverPos}/{@code clientPos}）：注入式相机
- * （{@code shot.multi}）与「门控位置分离」判据（contract §4.2.2）需要分别断言两者，
+ * （{@code shot.multi}）与「门控位置分离」判据（contract §4.3.2）需要分别断言两者，
  * 而本动作只读不判——判据在 criteria 段里写。
  */
 public final class ReadPlayerAction implements ControlAction {

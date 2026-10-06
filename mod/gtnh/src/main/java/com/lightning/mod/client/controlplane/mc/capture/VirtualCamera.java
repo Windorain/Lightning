@@ -6,7 +6,7 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.world.World;
 
 /**
- * 虚拟相机实体（contract.md §4.2.1）：渲染期替换 {@code mc.renderViewEntity} 的替身。
+ * 虚拟相机实体（contract.md §4.3.1）：渲染期替换 {@code mc.renderViewEntity} 的替身。
  *
  * <h2>为什么用「注入相机」而不是「挪玩家」</h2>
  * 被拍对象的可见性由<b>相机位置</b>决定，而 1.7.10 里这个位置来自 {@code mc.renderViewEntity}。

@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.lightning.mod.client.controlplane.mc.capture.ProjectionOverride;
 
 /**
- * 控制面取证相机的投影注入点（contract.md §4.2.3/§4.2.4）。
+ * 控制面取证相机的投影注入点（contract.md §4.3.3/§4.3.4）。
  *
  * <h2>为什么是这个点（1.7.10 没有官方 hook）</h2>
  * {@code EntityRenderer.setupCameraTransform(float, int)} 是<b>每帧唯一</b>把世界投影矩阵写进 GL 的地方：
