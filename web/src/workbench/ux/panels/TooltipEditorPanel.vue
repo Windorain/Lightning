@@ -32,8 +32,10 @@ function loadValue(): void {
   if (!item) { text.value = ''; return }
   const doc = props.ctx.getDoc().value as Record<string, any> | null
   const grid = doc?.cellTooltipGrid as number[][][] | undefined
-  const palette = doc?.tooltipPalette as string[] | undefined
-  if (!grid || !palette) { text.value = ''; return }
+  if (!grid) { text.value = ''; return }
+  // #80 修复：缺 tooltipPalette 按**空调色板**处理（写入侧会新建），不再把
+  // "调色板缺省"当"无说明层"短路——否则面板上写入的内容读不回，表现为"接受了输入"。
+  const palette = (doc?.tooltipPalette as string[] | undefined) ?? []
   const row = h.value > 0 ? h.value - 1 - item.pos.y : item.pos.y
   const idx = grid[item.pos.z]?.[row]?.[item.pos.x]
   if (idx == null || idx < 0 || idx >= palette.length) { text.value = ''; return }
