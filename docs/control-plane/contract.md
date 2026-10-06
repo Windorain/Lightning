@@ -55,7 +55,13 @@
 
 `?sync=true` 等待超时**不是错误**：返回 HTTP 202 + `{jobId, timedOut:true}`，动作继续执行。
 
-## 4. 动作清单（v1，PR-1 交付）
+## 4. 动作清单
+
+> **数量口径（D3 漂移防线）**：本表按引入批次分节；**权威动作数**以实机
+> `GET /cp/v1/actions` 的 `count` 字段为准。截至契约 **1.3** 共 **13 个**动作：
+> 本节 8 个（PR-1）+ §4.1 的 3 个取证（PR-2）+ §4.3 的 2 个命令通道（收口T3）。
+> 历史上本标题曾写「v1，PR-1 交付」而表外另有动作，导致目录与文档不一致（Gitea #97 §5-D3）——
+> 新增动作时**必须**同步本节计数。
 
 | 动作 | 级 | 语义 |
 |---|---|---|
@@ -68,7 +74,8 @@
 | `case.validate` | observe | 解析用例文件，返回规范化执行计划（分段列表、判据、期望证据）或逐字段错误 |
 | `case.run` | scene 起 | 执行用例文件：默认整跑；`segments:[...]` 按段执行。**整跑与按段共用同一实现、同一产物形态**（验收锚）。产物为 run 目录 + 观测记录 + 判据结论 |
 
-PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
+PR-2 追加取证级动作（§4.1），PR-3 追加双轨判据，收口T3 追加命令通道动作（§4.3）；
+追加不改上表已有语义。
 
 ### 4.1 取证级动作（PR-2，Refs #41）
 
@@ -76,6 +83,67 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 |---|---|---|
 | `shot.multi` | forensic | 多机位截图：参数 `{cameras:[CameraSpec], target?:bbox, lighting?:natural\|neutral-flat, renderMode?:本色\|参与光照, worldTime?}`。每机位产 `shots/<name>.png`（拼接机位另产 `shots/<name>.tiles/` 与 `shots/<name>.meta.json`），全部产物登记哈希；观测记录按机位更新 camera/projection/lighting/renderMode |
 | `capture.begin` / `capture.end` | forensic | 捕获会话包围：begin 后禁止一切世界写动作（违规 CP-STATE-001），end 释放；`case.run` 的 capture 段自动包围 build 之后、shots 之前的区间 |
+
+### 4.3 命令通道动作（收口T3，Refs #100）
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `export.session` | observe | **只读**：返回 `ExportSession` 单例态的一致性快照（会话开关/选区模式/pos1/pos2/规范化 min-max 与尺寸/活动帧/已录帧号/输出名/structureId/最近作者）。唯一触碰 `ExportSession.snapshot()`（同一临界区取全部字段）；不写状态、不碰世界与文件、不建 run 目录，世界清单哈希不变。`statusLine` 字段与 `/sde status` 打印的那一行同源同形 |
+| `cmd.exec` | scene | 在**服务端线程**执行一条**白名单内**的 `/sde` 子命令，返回该命令的真实回报文本（与游戏内手动执行同一命令逐字相同）。参数 `{command, timeoutMs?}`。白名单外一律 `CP-VALID-002` + 原因 + `context.alternatives[]` 可行替代 |
+
+#### 4.3.1 `/sde` 命令白名单（v1.3）
+
+白名单是**显式枚举**（唯一权威：`client/controlplane/mc/cmd/SdeCommandWhitelist.java`），**未登记即拒绝**——新增子命令必须显式登记，不做默认放行。
+
+**准入（15 条）**：`pos1` `pos2` `hpos1` `hpos2` `sel` `start` `end` `setname` `setframe` `setstructureid` `record` `export` `multiblock` `dump` `status`。
+其中只有 `status` 是 `observe` 级（纯只读），其余 14 条均为 `scene` 级。
+
+**排除（4 条，附理由）**：
+
+| 子命令 | 排除理由 |
+|---|---|
+| `web` / `webstop` | 内置工作区 HTTP 服务的启停，**涉及端口占用**；该服务与控制面是并列的两套 HTTP/鉴权域（本文 §9 要求零共享可变状态），经本通道放行等于开一条绕过控制面鉴权与事件流水的**隐藏能力路径**（#96 §8.7）。需要时在游戏内手动执行 |
+| `hajimi` / `hjm` | 「设输出名 → record → export → 发客户端」四步合一的**复合快捷方式**，不提供任何其余子命令没有的能力，却把四个动作压成不可分步、不可单独审计的原子操作，违反 #96 §8.2「命令不扭曲行为」。请改用 `setname` / `record` / `export` 原语组合 |
+
+#### 4.3.2 `cmd.exec` 的线程语义
+
+1. 命令在 1.7.10 集成服的 **`Server thread`** 上执行（`MinecraftServer.getCommandManager().executeCommand(...)`），与玩家在聊天框敲命令**同一路径、同一线程**；本动作不自己实现任何命令语义，不在命令前后追加或跳过任何步骤（#96 §8.2）。
+2. cp 动作在 **`Client thread`**（tick 排空）调用并**阻塞等待**回包，等待方向单一（客户端等服务端），结构上不会死锁。
+3. 命令的**发送者是真实服务端玩家**（`EntityPlayerMP`）：`/sde` 多个子命令要求其为玩家（读坐标/准星/世界/OP 权限），例如 `pos1`/`hpos1`/`record`/`export`/`multiblock`。无服务端玩家时以 `CP-STATE-001` 显式失败，**不**用假发送者制造「通道可用但什么都干不了」的假通过。
+4. **回报**取命令真实写给玩家的聊天文本（原样，含 `SDE: ` 前缀），并按序转发给玩家——玩家在聊天框看到的与手动执行完全一致。
+
+#### 4.3.3 `cmd.exec` 的失败码
+
+| 情形 | 错误码 | context |
+|---|---|---|
+| 白名单外（含 `web`/`webstop`/`hajimi`/`hjm` 与任意非 `/sde` 命令） | `CP-VALID-002` | `command`/`root`/`sub`/`decision`/`reason`/`alternatives[]`/`fields[]` |
+| 无服务端玩家（未进世界 / 集成服未起） | `CP-STATE-001` | `command`/`sub`/`hint` |
+| 等待服务端回包超时 | `CP-EXEC-002` | `command`/`sub`/`timeoutMs`/`elapsedMs` |
+| 命令在服务端抛异常 | `CP-EXEC-001` | `command`/`sub`/`exception` |
+| 参数非法（缺 `command` / 超长 / `command` 非字符串） | `CP-VALID-002` | `fields[]` |
+
+#### 4.3.4 `cmd.exec` 的审计口径
+
+每次调用（**含拒绝**）落一条 `kind=cmd-exec` 事件，`data` 携带：
+`commandText`（提交原文）、`command`（归一化文本）、`root`、`sub`、`allowed`、`decision`、`tier`、`whitelistVersion`、`timeoutMs`；
+执行类另带 `status`（`ok`/`no-server`/`timeout`/`exception`）、`executedOnThread`、`serverTick`、`elapsedMs`、`reply`（回报全文）、`artifacts[]`。
+
+**产物口径（裁决 6 → #102）**：`export` / `dump` / `multiblock` 产生的文件落在 **CWD 相对路径** `structure_exports/` 下（`runClient` 下进程 CWD == `mcDataDir`，见 #97 §5-D8），**不在** cp 的 run 目录内。`cmd.exec` 因此在结果的 `artifacts[{role,path,exists,note}]` 与事件流水里**如实登记路径与存在性，但不假造 run 清单条目**。产物统一迁入 run 目录并登记哈希清单属 **#102** 的范围（本契约版本不搬迁）。
+
+> **已知事实（如实记录，非缺陷）**：`runClient` 下服务端 `exportToFile()` 与客户端 enrich（`MeshCaptureService`）写的是**同一目录同一文件**，客户端随后覆盖服务端产物。这是 `CWD == mcDataDir` 的产物，形态依赖该巧合；换启动方式（工作目录不同）会静默产出两份不同形态的文件。收口见 #102。
+
+#### 4.3.5 `ExportSession` 的线程语义与互斥口径（裁决 13）
+
+`ExportSession` 是**进程级单例**，在集成服里被至少三条线程触碰：`Server thread`（`/sde` 命令、`SdeServerRecordScheduler` 连录/cycle）、`Client thread`（cp 动作、`ItemSde*` 工具物品、`PacketSaveCellNoteHandler`）、以及经作业队列间接触达的 HTTP 提交方（HTTP 线程本身**不**触碰它，见 §1.8）。
+
+**互斥口径**：全部**公共**读写路径在**同一个**监视器上同步——`ExportSession` 的私有静态终态 `LOCK`（`synchronized (LOCK)`，**不**用 `synchronized` 方法或 `synchronized(this)`）。这一把锁同时覆盖命令路径与 cp 路径，因此调用方无需各自加锁，也不存在「谁忘了加锁」的缺口。
+
+**故意不加锁的两处**（不是遗漏）：
+
+1. `scanToStructureJsonOnly` 的**世界扫描**：只把「读走选区六值 + 采样口径 + 结构 id」放进锁，扫描本身在锁外执行。扫描按区块遍历世界（可达数百毫秒），整段持锁会堵住服务端连录与 cp 只读快照——这正是「命令执行期间 cp 读面与世界动作不死锁」的实现依据。扫描只用拷贝出的局部坐标，与单例后续写入无共享状态。
+2. `jsonStringForScanCompare`：只序列化**调用方传入**的局部对象，不读任何字段。
+
+**快照读面**：`snapshot()` 在同一临界区内取走全部字段并返回**不可变**值对象，供 `export.session` 与 `cmd.exec` 的 `sessionAfter` 使用——逐调 getter 会拿到互相矛盾的组合（如「选区已变、帧列表还是旧的」），这是「读面必须可判定」的前提。
 
 `CameraSpec`：
 

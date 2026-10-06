@@ -45,6 +45,11 @@ public class LightningMod {
             FMLCommonHandler.instance()
                 .bus()
                 .register(new SdeServerRecordTickHandler());
+            // 命令通道的服务端 tick 排空器（Gitea #100）：必须在服务端启动时注册——
+            // 1.7.10 集成服下 ServerTickEvent 只在此之后才被派发，而事件总线只投给已注册的监听器。
+            // 惰性注册（首次执行命令时）会让命令入队后永远无人排空 ⇒ 每次调用 CP-EXEC-002 超时。
+            // 实现见 client/controlplane/mc/cmd/ServerCommandInvoker#ensureRegistered（含实机教训）。
+            com.lightning.mod.client.controlplane.mc.cmd.ServerCommandInvoker.ensureRegistered();
             sdeServerRecordTickHandlerRegistered = true;
         }
         event.registerServerCommand(new CommandSde());
