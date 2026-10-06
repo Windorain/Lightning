@@ -23,7 +23,8 @@ public class MixinForgeHooksClient_WorldRenderPass {
 
     @Inject(method = "getWorldRenderPass", at = @At("HEAD"), cancellable = true, require = 0)
     private static void sde$overrideWorldRenderPassDuringCapture(CallbackInfoReturnable<Integer> cir) {
-        if (!TessellatorCaptureState.isRecording()) return;
+        // PR-1 纯观察门控：pass 覆盖只服务旧逐格捕获；新通道录窗（真实渲染循环）绝不改写 pass。
+        if (!TessellatorCaptureState.isLegacyPerCellCapture()) return;
         int wanted = ForgeWorldRenderPassUtil.getLastSetPass();
         if (wanted >= 0) {
             cir.setReturnValue(wanted);

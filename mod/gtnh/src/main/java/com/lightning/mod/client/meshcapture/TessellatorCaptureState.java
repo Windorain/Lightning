@@ -30,10 +30,35 @@ import cpw.mods.fml.common.FMLLog;
  * </ol>
  * 使用<strong>全局</strong> {@link Frame} 而非 {@link ThreadLocal}，以便 GTNH Angelica 等
  * {@code @ThreadSafeISBRH(perThread = true)} 在<strong>工作线程</strong>写入 Tessellator 时仍能命中录制状态。
+ * <p>
+ * <strong>「忠实复现捕获层」PR-1 录窗扩展</strong>：新增 {@link CaptureChannel} 通道录窗
+ * （{@link #beginWindow}/{@link #endWindow}），供真实渲染循环内的纯观察钩子使用
+ * （区块编译 {@code WorldRenderer.updateRenderer}、TESR 逐帧 {@code renderTileEntity}）。
+ * 每个窗口维护开启时的归属键、流入四边形计数与零流入（zeroFlow）检测；顶点闭合四边形时打
+ * 通道、窗口归属键、质心分箱（{@link CaptureBinning}）与跨箱告警。窗口不允许嵌套/排队——
+ * 已有活动窗口时 {@link #beginWindow} 显式抛 {@link IllegalStateException}。
+ * 旧 API {@link #beginBlock}/{@link #endBlock} 签名与语义不变，内部记为
+ * {@link CaptureChannel#LEGACY_PER_CELL} 窗口，兼容期内零行为变化。
  */
 public final class TessellatorCaptureState {
 
     private static final Frame CAPTURE = new Frame();
+
+    static {
+        // 触发 CaptureDiagnostics 初始化：注册 sde.captureDiag.file 的退出落盘钩子
+        CaptureDiagnostics.touch();
+    }
+
+    /**
+     * 录窗总开关（「一次设定、不反复操纵」）：未打开时新通道 Mixin 不开窗、零开销零行为。
+     * 旧 LEGACY_PER_CELL 路径（beginBlock/endBlock）不受本开关影响——它由 MeshCaptureService 自行驱动。
+     */
+    private static volatile boolean windowsArmed;
+
+    /** P0 惯例：坐标系一次性自证日志（首 BLOCK_COMPILE 窗口开启 / 首顶点），每会话各打一次。 */
+    private static boolean blockCompileSelfProofWindowLogged;
+
+    private static boolean blockCompileSelfProofVertexLogged;
 
     /** {@link net.minecraft.client.model.ModelRenderer#render} 当前 scale 参数，供 glCallList 内联路径使用 */
     private static volatile float activeModelRendererScale = 0.0625F;
@@ -46,6 +71,181 @@ public final class TessellatorCaptureState {
         .parseBoolean(System.getProperty("sde.assertBlockLocalBounds", "false"));
 
     private TessellatorCaptureState() {}
+
+    // ------------------------------------------------------------------ PR-1 录窗 API
+
+    /** 打开录窗总开关（诊断会话/探针启动时调用一次）。 */
+    public static void armWindows() {
+        windowsArmed = true;
+    }
+
+    /** 新通道 Mixin 的开窗前检查：未打开时不产生任何录窗行为。 */
+    public static boolean areWindowsArmed() {
+        return windowsArmed;
+    }
+
+    /**
+     * 开启一个通道录窗。窗口嵌套/排队被拒绝：已有活动窗口时显式抛 {@link IllegalStateException}
+     * （静默叠窗会让 zeroFlow 与归属键失真）。{@link CaptureChannel#LEGACY_PER_CELL} 不允许走本 API
+     * （旧路径用 {@link #beginBlock}）。
+     *
+     * @param attrX/Y/Z 窗口归属键（BLOCK_COMPILE = 渲染器 posX/Y/Z；TESR = TE 坐标）
+     * @param tag       诊断用自由文本（如 chunk 坐标 / TE 类名）
+     */
+    public static void beginWindow(CaptureChannel channel, int attrX, int attrY, int attrZ, String tag) {
+        if (channel == null) {
+            throw new IllegalArgumentException("channel == null");
+        }
+        if (channel == CaptureChannel.LEGACY_PER_CELL) {
+            throw new IllegalArgumentException("LEGACY_PER_CELL 窗口由 beginBlock 开启，不走 beginWindow");
+        }
+        synchronized (CAPTURE) {
+            Frame f = CAPTURE;
+            if (f.active) {
+                throw new IllegalStateException(
+                    "录窗嵌套/排队被拒绝：已有活动窗口 channel=" + f.channel
+                        + " attr=("
+                        + f.attrX
+                        + ","
+                        + f.attrY
+                        + ","
+                        + f.attrZ
+                        + ") tag="
+                        + f.windowTag
+                        + "；新窗口 channel="
+                        + channel
+                        + " attr=("
+                        + attrX
+                        + ","
+                        + attrY
+                        + ","
+                        + attrZ
+                        + ") tag="
+                        + tag);
+            }
+            openWindowLocked(f, channel, attrX, attrY, attrZ, tag);
+            if (channel == CaptureChannel.BLOCK_COMPILE && !blockCompileSelfProofWindowLogged) {
+                blockCompileSelfProofWindowLogged = true;
+                String line = "[SDE][capture] BLOCK_COMPILE 首窗口开启 attr=(" + attrX
+                    + ","
+                    + attrY
+                    + ","
+                    + attrZ
+                    + ") tag="
+                    + f.windowTag;
+                logSelfProofBestEffort(line);
+            }
+        }
+    }
+
+    /**
+     * 关闭当前通道录窗并丢弃已录四边形（PR-1 默认不驻留几何，只计数）。
+     *
+     * @return 本窗口流入四边形数；当前无新通道窗口时返回 -1（容忍多余调用，不抛——渲染循环异常路径兜底）
+     */
+    public static int endWindow() {
+        return endWindowInternal(null);
+    }
+
+    /**
+     * 关闭当前通道录窗并把已录四边形移入 {@code out}（PR-2 编排层接口：MeshCaptureService 切换编排时
+     * 从录窗层取走窗口几何；PR-1 无人调用，保留给编排切换）。
+     */
+    public static int endWindowAndDrain(List<CapturedQuad> out) {
+        if (out == null) {
+            throw new IllegalArgumentException("out == null");
+        }
+        return endWindowInternal(out);
+    }
+
+    private static int endWindowInternal(List<CapturedQuad> drainTo) {
+        synchronized (CAPTURE) {
+            Frame f = CAPTURE;
+            if (!f.active || f.channel == null || f.channel == CaptureChannel.LEGACY_PER_CELL) {
+                return -1;
+            }
+            flushPartialQuad(f);
+            int count = f.windowQuadCount;
+            CaptureDiagnostics.noteWindowClosed(f.channel, f.attrX, f.attrY, f.attrZ, f.windowTag, count);
+            if (drainTo != null) {
+                drainTo.addAll(f.quadsForBlock);
+            }
+            f.quadsForBlock.clear();
+            f.active = false;
+            f.channel = null;
+            f.windowMvBaselineValid = false;
+            return count;
+        }
+    }
+
+    /**
+     * TESR 录窗开启处（{@code MixinTesrDispatcherWindow}）快照的 {@code inv(GL_MODELVIEW)}（列主序 16 项）。
+     * 与旧动态扩展基线同一份机制，只是改由录窗生命周期接入；<strong>不</strong>开启旧动态扩展相位
+     * （否则会触发 ModelRenderer display-list 改写路径，违反纯观察）。
+     */
+    public static void armWindowModelViewBaselineInverse(float[] inverseColumnMajor16) {
+        synchronized (CAPTURE) {
+            if (CAPTURE.active && inverseColumnMajor16 != null && inverseColumnMajor16.length >= 16) {
+                System.arraycopy(inverseColumnMajor16, 0, CAPTURE.windowMvBaselineInverse, 0, 16);
+                CAPTURE.windowMvBaselineValid = true;
+            }
+        }
+    }
+
+    /** 录制路径的 MODELVIEW 变换总门：旧动态扩展相位 或 窗口基线已布防（两路径互斥，不会同时为真）。 */
+    public static boolean isModelViewTransformArmed() {
+        synchronized (CAPTURE) {
+            return CAPTURE.active && (CAPTURE.dynamicExtensionVertexRecording || CAPTURE.windowMvBaselineValid);
+        }
+    }
+
+    /** 是否有可用基线逆（旧动态扩展基线优先，其次窗口基线）。 */
+    public static boolean hasActiveModelViewBaseline() {
+        synchronized (CAPTURE) {
+            return CAPTURE.active
+                && (CAPTURE.dynamicExtensionInverseMvAtRenderStartValid || CAPTURE.windowMvBaselineValid);
+        }
+    }
+
+    /** 拷贝当前生效的基线逆（列主序 16 项；旧动态扩展基线优先，其次窗口基线）。 */
+    public static void copyActiveModelViewBaselineInverse(float[] outColumnMajor16) {
+        synchronized (CAPTURE) {
+            if (CAPTURE.dynamicExtensionInverseMvAtRenderStartValid) {
+                System.arraycopy(CAPTURE.dynamicExtensionInverseMvAtRenderStart, 0, outColumnMajor16, 0, 16);
+            } else {
+                System.arraycopy(CAPTURE.windowMvBaselineInverse, 0, outColumnMajor16, 0, 16);
+            }
+        }
+    }
+
+    /**
+     * 旧逐格捕获（{@code MeshCaptureService}）语义判据：录制激活且通道为 {@link CaptureChannel#LEGACY_PER_CELL}。
+     * 新通道录窗期间本判据为 false——依赖它的 Mixin（ModelRenderer display-list 改写、渲染 pass 覆盖）
+     * 在新窗口里保持纯观察。
+     */
+    public static boolean isLegacyPerCellCapture() {
+        synchronized (CAPTURE) {
+            return CAPTURE.active && CAPTURE.channel == CaptureChannel.LEGACY_PER_CELL;
+        }
+    }
+
+    private static void openWindowLocked(Frame f, CaptureChannel channel, int attrX, int attrY, int attrZ, String tag) {
+        f.channel = channel;
+        f.attrX = attrX;
+        f.attrY = attrY;
+        f.attrZ = attrZ;
+        f.windowTag = tag != null ? tag : "";
+        f.windowQuadCount = 0;
+        f.windowMvBaselineValid = false;
+        f.lastBoundTextureKey = "";
+        f.quadsForBlock.clear();
+        f.currentQuadVerts.clear();
+        f.dynamicExtensionVertexRecording = false;
+        f.dynamicExtensionInverseMvAtRenderStartValid = false;
+        f.active = true;
+    }
+
+    // ------------------------------------------------------------------ 旧 LEGACY_PER_CELL API（语义不变）
 
     public static boolean isRecording() {
         return CAPTURE.active;
@@ -77,6 +277,15 @@ public final class TessellatorCaptureState {
             f.currentQuadVerts.clear();
             f.dynamicExtensionVertexRecording = false;
             f.dynamicExtensionInverseMvAtRenderStartValid = false;
+            // PR-1：旧路径内部记为 LEGACY_PER_CELL 窗口（归属键 = 世界方块角，tag = registryKey）。
+            // 注意：本方法故意不在 active 时抛异常——旧语义是静默重置帧（兼容期零行为变化）。
+            f.channel = CaptureChannel.LEGACY_PER_CELL;
+            f.attrX = worldBlockX;
+            f.attrY = worldBlockY;
+            f.attrZ = worldBlockZ;
+            f.windowTag = f.registryKey;
+            f.windowQuadCount = 0;
+            f.windowMvBaselineValid = false;
             f.active = true;
         }
     }
@@ -215,6 +424,14 @@ public final class TessellatorCaptureState {
                     f.blockMeta,
                     f.renderType,
                     f.quadsForBlock));
+            // PR-1：旧路径窗口事件（zeroFlow 检测与诊断聚合；finish registry 之前的流入计数）
+            CaptureDiagnostics.noteWindowClosed(
+                CaptureChannel.LEGACY_PER_CELL,
+                f.attrX,
+                f.attrY,
+                f.attrZ,
+                f.windowTag,
+                f.windowQuadCount);
             normalizeVerticesToBlockContract(f);
             f.active = false;
             target.x = f.blockX;
@@ -271,6 +488,14 @@ public final class TessellatorCaptureState {
             nq.materialAtlasKind = q.materialAtlasKind;
             nq.materialUsesStandaloneTexture = q.materialUsesStandaloneTexture;
             nq.fromDynamicExtensionPass = q.fromDynamicExtensionPass;
+            nq.channel = q.channel;
+            nq.attribX = q.attribX;
+            nq.attribY = q.attribY;
+            nq.attribZ = q.attribZ;
+            nq.binX = q.binX;
+            nq.binY = q.binY;
+            nq.binZ = q.binZ;
+            nq.crossBin = q.crossBin;
             rebuilt.add(nq);
         }
         f.quadsForBlock.clear();
@@ -398,6 +623,34 @@ public final class TessellatorCaptureState {
             if (!fr.active) {
                 return;
             }
+            if (fr.channel == CaptureChannel.BLOCK_COMPILE && !blockCompileSelfProofVertexLogged) {
+                blockCompileSelfProofVertexLogged = true;
+                String line = "[SDE][capture] BLOCK_COMPILE 首顶点自证 window=(" + fr.attrX
+                    + ","
+                    + fr.attrY
+                    + ","
+                    + fr.attrZ
+                    + ") raw=("
+                    + x
+                    + ","
+                    + y
+                    + ","
+                    + z
+                    + ") derivedWorld=("
+                    + (x - tessOffsetX)
+                    + ","
+                    + (y - tessOffsetY)
+                    + ","
+                    + (z - tessOffsetZ)
+                    + ") tessOffset=("
+                    + tessOffsetX
+                    + ","
+                    + tessOffsetY
+                    + ","
+                    + tessOffsetZ
+                    + ")";
+                logSelfProofBestEffort(line);
+            }
             String bindSnap = fr.lastBoundTextureKey != null ? fr.lastBoundTextureKey : "";
             CapturedVertex cv = new CapturedVertex(
                 x,
@@ -435,10 +688,54 @@ public final class TessellatorCaptureState {
                 CapturedQuad cq = new CapturedQuad(forQuad);
                 cq.bindTextureHint = aggregateBindHintsForQuad(forQuad);
                 cq.fromDynamicExtensionPass = fr.dynamicExtensionVertexRecording;
+                tagQuadChannelAndBin(fr, cq, forQuad);
                 fr.quadsForBlock.add(cq);
                 fr.currentQuadVerts.clear();
             }
         }
+    }
+
+    /**
+     * PR-1：给闭合四边形打通道、窗口归属键、质心分箱与跨箱告警，并计入窗口计数与诊断聚合。
+     * 分箱坐标 = 顶点去 Tessellator offset 后的输入坐标（区块编译期即世界坐标，见
+     * {@code WorldRenderer.updateRenderer} 的 {@code setTranslation(-posX,-posY,-posZ)} 实证）。
+     */
+    private static void tagQuadChannelAndBin(Frame fr, CapturedQuad cq, List<CapturedVertex> forQuad) {
+        cq.channel = fr.channel != null ? fr.channel : CaptureChannel.LEGACY_PER_CELL;
+        cq.attribX = fr.attrX;
+        cq.attribY = fr.attrY;
+        cq.attribZ = fr.attrZ;
+        int n = forQuad.size();
+        double[] xs = new double[n];
+        double[] ys = new double[n];
+        double[] zs = new double[n];
+        for (int i = 0; i < n; i++) {
+            CapturedVertex cv = forQuad.get(i);
+            xs[i] = cv.x - cv.tessOffsetX;
+            ys[i] = cv.y - cv.tessOffsetY;
+            zs[i] = cv.z - cv.tessOffsetZ;
+        }
+        CaptureBinning.Bin centroid = CaptureBinning.centroidBin(xs, ys, zs);
+        cq.binX = centroid.x;
+        cq.binY = centroid.y;
+        cq.binZ = centroid.z;
+        cq.crossBin = CaptureBinning.spansMultipleBins(xs, ys, zs);
+        fr.windowQuadCount++;
+        CaptureDiagnostics
+            .noteQuad(cq.channel, cq.attribX, cq.attribY, cq.attribZ, cq.binX, cq.binY, cq.binZ, cq.crossBin);
+    }
+
+    /**
+     * 自证日志：诊断 JSON 是耐久落点，FMLLog 只是尽力镜像——纯 JVM 环境（单测）里
+     * {@code FMLRelaunchLog.side} 未初始化会 NPE，必须吞掉（诊断通道失败不得影响宿主）。
+     */
+    private static void logSelfProofBestEffort(String line) {
+        try {
+            FMLLog.info(line);
+        } catch (Throwable ignored) {
+            // 非 FML 环境（纯 JVM 单测）：日志通道不可用，诊断 JSON 仍记录
+        }
+        CaptureDiagnostics.noteSelfProof(line);
     }
 
     private static void flushPartialQuad(Frame f) {
@@ -469,6 +766,18 @@ public final class TessellatorCaptureState {
         boolean dynamicExtensionInverseMvAtRenderStartValid;
         final List<CapturedQuad> quadsForBlock = new ArrayList<>();
         final List<CapturedVertex> currentQuadVerts = new ArrayList<>();
+        /** PR-1：当前录窗通道；{@code null} = 从未开窗（active 必为 false） */
+        CaptureChannel channel;
+        /** PR-1：窗口归属键（BLOCK_COMPILE = 渲染器段角；TESR = TE 坐标；LEGACY = 世界方块角） */
+        int attrX;
+        int attrY;
+        int attrZ;
+        String windowTag = "";
+        /** PR-1：本窗口已闭合四边形数（zeroFlow = 关窗时 == 0） */
+        int windowQuadCount;
+        /** PR-1：窗口级 MODELVIEW 基线逆（列主序），TESR 录窗开启时布防 */
+        final float[] windowMvBaselineInverse = new float[16];
+        boolean windowMvBaselineValid;
     }
 
     public static final class CapturedVertex {
@@ -525,6 +834,18 @@ public final class TessellatorCaptureState {
         public boolean materialUsesStandaloneTexture;
         /** 四边形闭合时处于动态扩展顶点录制（{@link Frame#dynamicExtensionVertexRecording}） */
         public boolean fromDynamicExtensionPass;
+        /** PR-1：流入通道（旧路径固定 {@link CaptureChannel#LEGACY_PER_CELL}） */
+        public CaptureChannel channel = CaptureChannel.LEGACY_PER_CELL;
+        /** PR-1：窗口归属键（开启窗口时的 attr 三元组） */
+        public int attribX;
+        public int attribY;
+        public int attribZ;
+        /** PR-1：质心分箱（去 Tessellator offset 后按 floor 分箱，负坐标正确下取整） */
+        public int binX;
+        public int binY;
+        public int binZ;
+        /** PR-1：跨箱告警——顶点跨多个格时为 true（归属按质心格，见 binX/Y/Z） */
+        public boolean crossBin;
 
         public CapturedQuad(List<CapturedVertex> vertices) {
             this.vertices = vertices;

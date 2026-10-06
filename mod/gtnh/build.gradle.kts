@@ -40,15 +40,23 @@ val lightningSourceSets = extensions.getByType(SourceSetContainer::class.java)
  *
  * 注意：**不**改动 `processResources dependsOn syncWeb` —— 打包/发布路径的行为保持原样，
  * 免得静默产出没有 web UI 的 jar。
+ *
+ * PR-1（capture-fidelity）补记：录窗层单测（TessellatorCaptureStateWindowTest）要直接调用
+ * 签名含 `net.minecraft.*` 类型的 API（beginBlock 的 Block 参数），故把 `main` 的
+ * **compileClasspath 配置**（纯 jar 依赖：patched MC / forge / compileOnly 模组 jar，
+ * 不含 resources 目录，与上面的 resources 解耦修法不冲突）并入 test classpath。
+ * 这不改变既有单测行为：classpath 只是变宽，既有用例不加载 MC 类。
  */
 val lightningMainSourceSet = lightningSourceSets.getByName("main")
 val lightningTestSourceSet = lightningSourceSets.getByName("test")
 val lightningTestCompileClasspath =
-    lightningMainSourceSet.output.classesDirs + configurations.getByName("testCompileClasspath")
+    lightningMainSourceSet.output.classesDirs + configurations.getByName("testCompileClasspath") +
+        lightningMainSourceSet.compileClasspath
 val lightningTestRuntimeClasspath =
     lightningTestSourceSet.output +
         lightningMainSourceSet.output.classesDirs +
-        configurations.getByName("testRuntimeClasspath")
+        configurations.getByName("testRuntimeClasspath") +
+        lightningMainSourceSet.compileClasspath
 
 lightningTestSourceSet.compileClasspath = lightningTestCompileClasspath
 lightningTestSourceSet.runtimeClasspath = lightningTestRuntimeClasspath

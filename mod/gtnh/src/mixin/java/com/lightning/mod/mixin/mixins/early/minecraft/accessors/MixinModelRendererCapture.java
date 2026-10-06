@@ -24,6 +24,10 @@ import com.lightning.mod.client.meshcapture.TessellatorCaptureState;
  * {@link ModelRenderer#compileDisplayList}，此时尚未应用 rotationPoint/旋转；若在此时录顶点，箱盖/箱体/锁扣会共用一个错误的局部原点而重合。处理方式：跳过真实编译（生成空
  * display list）、在 {@code glCallList} 处以当前矩阵内联
  * {@link ModelBox#render}，并由 {@link MixinTessellatorCapture} 做 {@code inv(M0)*M_now} 顶点变换以对齐块烘焙。
+ * <p>
+ * PR-1 纯观察门控：display-list 失效/改写路径只服务旧逐格捕获（{@link TessellatorCaptureState#isLegacyPerCellCapture()}）。
+ * 新通道录窗（BLOCK_COMPILE/TESR）期间本 Mixin 完全惰性——真实渲染循环里删 display list 会强制逐帧重编译、
+ * 内联路径会把顶点写进未在绘制态的 Tessellator.instance，二者都违反「只记录、不改变渲染行为/状态/路径」。
  */
 @Mixin(ModelRenderer.class)
 public abstract class MixinModelRendererCapture {
@@ -44,6 +48,10 @@ public abstract class MixinModelRendererCapture {
         }
         if (TessellatorCaptureState.isDynamicExtensionVertexRecording()) {
             TessellatorCaptureState.setActiveModelRendererScale(scale);
+            return;
+        }
+        if (!TessellatorCaptureState.isLegacyPerCellCapture()) {
+            // PR-1 新通道录窗：纯观察，不动 display list
             return;
         }
         if (this.compiled && this.displayList != 0) {
