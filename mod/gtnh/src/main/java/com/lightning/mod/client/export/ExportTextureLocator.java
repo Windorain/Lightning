@@ -153,13 +153,16 @@ public final class ExportTextureLocator {
      * {@code assets/&lt;ns&gt;/models/…png}，不得误加 {@code blocks/} 前缀。Botania 等使用 {@code textures/model/…}
      * （单数 {@code model/}，与 {@code models/} 不同）。GregTech {@code materialicons/…} 在
      * {@code textures/blocks/materialicons/} 与 {@code textures/items/materialicons/} 均可能出现，见
-     * {@link #texturePngResourceLocationsForBundle}。
+     * {@link #texturePngResourceLocationsForBundle}。MCPatcher/Angelica CTM tile 的图集注册名形如
+     * {@code gregtech:mcpatcher/ctm/...}，其资源在 {@code assets/<ns>/mcpatcher/...}（{@code textures/} 之外），
+     * {@code mcpatcher/} 因此也算显式根——不得补 {@code blocks/}；磁盘探测见
+     * {@link #mcpatcherResourcePathForBundle}。
      * <p>
      * 可多次调用，幂等。
      */
     private static final String[] EXPLICIT_TEXTURE_PATH_ROOTS = new String[] { "blocks/", "items/", "materialicons/",
         "models/", "model/", "entity/", "gui/", "misc/", "environment/", "font/", "map/", "painting/", "particle/",
-        "colormap/", };
+        "colormap/", "mcpatcher/", };
 
     private static boolean pathHasExplicitTextureRoot(String path) {
         for (String root : EXPLICIT_TEXTURE_PATH_ROOTS) {
@@ -241,6 +244,11 @@ public final class ExportTextureLocator {
         String ns = normalizedLocator.substring(0, colon);
         String path = normalizedLocator.substring(colon + 1);
         List<ResourceLocation> out = new ArrayList<>(2);
+        String mcpatcherPath = mcpatcherResourcePathForBundle(path);
+        if (mcpatcherPath != null) {
+            out.add(new ResourceLocation(ns, mcpatcherPath));
+            return out;
+        }
         if (path.startsWith("models/")) {
             /* 与方块纹理一致：磁盘为 assets/<ns>/textures/models/...png，非 assets/<ns>/models/... */
             out.add(new ResourceLocation(ns, "textures/" + path + ".png"));
@@ -262,5 +270,28 @@ public final class ExportTextureLocator {
             out.add(new ResourceLocation(ns, "textures/" + stripped + ".png"));
         }
         return out;
+    }
+
+    /**
+     * MCPatcher/Angelica CTM tile 的资源路径：locator path（{@code mcpatcher/ctm/...}，兼容规范化前被补过
+     * {@code blocks/} 前缀的形态）→ {@code assets/<ns>/} 下的相对路径（<b>不含</b> {@code textures/}，MCPatcher
+     * 资源按约定在 {@code textures/} 之外）；非 CTM 路径返回 {@code null}。
+     * <p>
+     * 背景：Angelica {@code TileLoader} 把 {@code assets/<ns>/mcpatcher/ctm/**} 的 tile 注册进方块图集，
+     * 渲染期 CTM 覆盖使捕获侧材质键直接取到 {@code <ns>:mcpatcher/ctm/...} 形态的 sprite 名；通用
+     * {@code textures/} 探测（含剥 {@code blocks/} 重试）永远命中不到这类资源（issue #87 根因）。
+     */
+    static String mcpatcherResourcePathForBundle(String path) {
+        if (path == null) {
+            return null;
+        }
+        String p = path;
+        if (p.startsWith("blocks/")) {
+            p = p.substring("blocks/".length());
+        }
+        if (!p.startsWith("mcpatcher/")) {
+            return null;
+        }
+        return p + ".png";
     }
 }
