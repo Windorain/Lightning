@@ -226,12 +226,12 @@ public final class ActionRegistrar {
      *
      * <h2>为什么全部是同步动作</h2>
      * 读面要求在<b>一次 tick 内</b>读完并返回：跨 tick 的读面会读到两个不同的世界状态
-     * （中间别的动作改了世界），「调用前后世界哈希不变」（B1）就无从判定。七个动作都不做
+     * （中间别的动作改了世界），「调用前后世界哈希不变」（B1）就无从判定。八个动作都不做
      * 文件等待、不排队、不重试，故注册为同步。唯一例外是 {@code read.diff} 的
      * {@code expectManifestFile} 路径要读一次磁盘——那次读也在同一 tick 内完成。
      *
      * <h2>自描述纪律</h2>
-     * 「没有自描述的动作视为不存在」（需求书 §8.1）：因此这七个的 {@code description}/
+     * 「没有自描述的动作视为不存在」（需求书 §8.1）：因此这八个的 {@code description}/
      * 逐参数 {@code description}/{@code returns}/{@code example}/{@code since} 一律写全，
      * 且默认值以 {@code default} 字段机读可见（D3）。
      *
