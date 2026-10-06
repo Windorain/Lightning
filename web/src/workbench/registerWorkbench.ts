@@ -17,7 +17,7 @@ import {
 import { TooltipEditOperator } from '@/operators/builtin/metaEditOperators'
 import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/operators/builtin/docLifecycleOperators'
 import { SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator } from '@/operators/builtin/sdeOperators'
-import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/operators/builtin/exportOperators'
+import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator, ExportShotPngOperator } from '@/operators/builtin/exportOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/operators/builtin/annotationOperators'
 import {
   SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetHoveredBlockOperator, SetHoveredAnnotationOperator,
@@ -75,6 +75,7 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   SetWorkspaceModeOperator, ResetLayoutOperator,
   SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator,
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
+  ExportShotPngOperator,
   ThemeToggleOperator, SetLanguageOperator,
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
   AnnotationBoxCommitOperator, AnnotationBoxResetOperator,

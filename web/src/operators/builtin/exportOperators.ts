@@ -4,6 +4,8 @@ import { loadStructureOrWorld } from '@/render/data/bundleResolve'
 import { downloadBlob, downloadJson } from '@/util/browser'
 import { buildStructureBundleZip } from '@/workbench/export/bundleMeshAssembly'
 import { bakeIsometricStructurePngDataUrl, dataUrlToPngBlob } from '@/workbench/exportIsometricImage'
+import { bakeShotPngDataUrl } from '@/workbench/exportShotImage'
+import { mcSpecToShotCamera, type McCameraSpec } from '@/pure/mcShotCamera'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 
 const ISO_DIRECTION_MAP: Record<string, number> = {
@@ -96,5 +98,87 @@ export const ExportIsoPngOperator: OperatorType = {
     } catch (e) {
       ctx.log.warn('导出', `等轴 PNG 导出失败: ${e}`)
     }
+  },
+}
+
+function asVec3(value: unknown, field: string): [number, number, number] {
+  if (!Array.isArray(value) || value.length !== 3) {
+    throw new Error(`${field} 必须是长度 3 的数组，实际 ${JSON.stringify(value)}`)
+  }
+  const out = value.map((v) => Number(v))
+  for (const v of out) {
+    if (!Number.isFinite(v)) throw new Error(`${field} 含非有限分量：${JSON.stringify(value)}`)
+  }
+  return [out[0]!, out[1]!, out[2]!]
+}
+
+function asFiniteNumber(value: unknown, field: string): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) throw new Error(`${field} 必须是有限数，实际 ${JSON.stringify(value)}`)
+  return n
+}
+
+function asPositiveInt(value: unknown, field: string): number {
+  const n = asFiniteNumber(value, field)
+  if (!Number.isInteger(n) || n <= 0) throw new Error(`${field} 必须是正整数，实际 ${n}`)
+  return n
+}
+
+/**
+ * 指定正交机位出图（#87 验收器具）。
+ *
+ * 与 `OPERATOR_EXPORT_ISO_PNG` 的区别：机位（落点 / 方位 / 俯仰 / 正交全高 / 分辨率）**全部由调用方给定**，
+ * 不做等轴四向、不做 AABB 自动贴合；`pos` / `yaw` / `pitch` 走 **MC 控制面口径**，
+ * 经 `pure/mcShotCamera.ts` 换算成 web 口径后出图 → 保证与游戏内 CameraSpec 同机位。
+ *
+ * props（MC 口径）：
+ *  - `pos: [x,y,z]`  MC 世界坐标相机落点
+ *  - `yaw` / `pitch`  MC 偏航 / 俯仰（度，pitch 正 = 俯视）
+ *  - `orthoHeight`    正交竖直全高（方块数）
+ *  - `width` / `height` 输出分辨率（任意，不 clamp）
+ *  - `center: [x,y,z]` **结构中心的 MC 世界坐标（必传）**——世界锚点在 web 解析链上丢失，
+ *                      只能由调用方从 SDE `scanBounds` + `cellGrid` 尺寸复原
+ *                      （见 `structureCenterFromScanBounds`）
+ *  - `name?`          文件名（`shot-<name||'unnamed'>.png`）
+ *
+ * 仅支持**普通（非多方块）文档**：多方块文档的网格是装配产物、无单一世界锚点，本器具不服务。
+ */
+export const ExportShotPngOperator: OperatorType = {
+  id: 'OPERATOR_EXPORT_SHOT_PNG',
+  label: '导出指定机位 PNG',
+  description: '按 MC 控制面 CameraSpec（指定落点/方位/俯仰/正交全高/分辨率）渲染 PNG',
+
+  poll(ctx) {
+    return ctx.getDoc().value !== null
+  },
+
+  async exec(ctx, props) {
+    const docRuntime = ctx.getDoc().value
+    if (!docRuntime) throw new Error('OPERATOR_EXPORT_SHOT_PNG：当前无文档')
+    if (docRuntime.isMultiblock) {
+      throw new Error(
+        'OPERATOR_EXPORT_SHOT_PNG：不支持「多方块为主」文档（网格为装配产物、无单一世界锚点）；本器具当前只服务单结构验收',
+      )
+    }
+    const doc = docRuntime.serialize()
+
+    const mc: McCameraSpec = {
+      pos: asVec3(props.pos, 'pos'),
+      yaw: asFiniteNumber(props.yaw, 'yaw'),
+      pitch: asFiniteNumber(props.pitch, 'pitch'),
+      orthoHeight: asFiniteNumber(props.orthoHeight, 'orthoHeight'),
+      width: asPositiveInt(props.width, 'width'),
+      height: asPositiveInt(props.height, 'height'),
+    }
+    if (mc.orthoHeight <= 0) {
+      throw new Error(`orthoHeight 必须为正，实际 ${mc.orthoHeight}`)
+    }
+    const center = asVec3(props.center, 'center')
+    const name = typeof props.name === 'string' && props.name.length > 0 ? props.name : 'unnamed'
+
+    const spec = mcSpecToShotCamera(mc, center)
+    const dataUrl = await bakeShotPngDataUrl(doc, spec)
+    const blob = dataUrlToPngBlob(dataUrl)
+    downloadBlob(`shot-${name}.png`, blob)
   },
 }
