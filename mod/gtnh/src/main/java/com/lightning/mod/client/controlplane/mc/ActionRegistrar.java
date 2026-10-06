@@ -6,6 +6,9 @@ import com.lightning.mod.client.controlplane.core.Tier;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureBeginAction;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureEndAction;
 import com.lightning.mod.client.controlplane.mc.capture.ShotMultiAction;
+import com.lightning.mod.client.controlplane.mc.cmd.CmdExecAction;
+import com.lightning.mod.client.controlplane.mc.cmd.ExportSessionAction;
+import com.lightning.mod.client.controlplane.mc.cmd.SdeCommandWhitelist;
 import com.lightning.mod.client.controlplane.mc.read.ReadBlockInfoAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadBlocksAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadDiffAction;
@@ -39,6 +42,14 @@ import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
  * （单次 tick 内完成）；世界/用例/截图动作与 PR-2 的 {@code shot.multi} 跨 tick 执行，注册为步进动作。
  * L0 组（{@code scene.*}）是同步动作——只做一次性字段写入，无跨 tick 等待。
  * 全部动作都由 {@code ActionSteppingExecutor} 执行（它同时兼容同步注册项）。
+ *
+ * <h2>动作数与契约版本（D3 漂移防线）</h2>
+ *
+ * 动作面随 PR 追加而增长：PR-1 = 8 个（1.0）、PR-2 = +3 取证（1.1）、PR-3 判据（1.2）、
+ * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、收口T3 = +2 命令通道（1.4）——当前 27 个。
+ * <b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
+ * 而实际 11 个（Gitea #97 §5-D3 判为文档漂移）。注册数可在实机经
+ * {@code GET /cp/v1/actions} 的 {@code count} 字段一步核对，改动本文件后请顺手核一次。
  */
 public final class ActionRegistrar {
 
@@ -50,7 +61,13 @@ public final class ActionRegistrar {
 
     private ActionRegistrar() {}
 
-    /** 注册全部动作。 */
+    /**
+     * 注册全部动作（PR-1 的 8 个 + PR-2 的 3 个取证 + #98 的 8 个读面 + #99 的 6 个 L0
+     * + 收口T3 的 2 个命令通道 = 27 个）。
+     *
+     * <p>
+     * 数字以实机 {@code GET /cp/v1/actions} 的 {@code count} 为权威（见类注释「动作数与契约版本」）。
+     */
     public static void registerAll(ControlPlaneRuntime runtime, ActionRegistry registry) {
         registry.register(
             ActionDescriptor.builder("core.ping", Tier.OBSERVE)
@@ -232,6 +249,90 @@ public final class ActionRegistrar {
         registerSceneActions(runtime, registry);
         registerForensicActions(runtime, registry);
         registerReadActions(runtime, registry);
+        registerCommandActions(runtime, registry);
+    }
+
+    /**
+     * 命令通道动作（Gitea #100 收口T3）：{@code cmd.exec} 与只读自查面 {@code export.session}。
+     *
+     * <p>
+     * 两者的关系是本单的设计要点：<b>设状态走命令通道（{@code cmd.exec}），验状态走只读读面
+     * （{@code export.session}）</b>。没有后者，AI 经前者设完选区/帧号之后无法自查（#97 §2.4-G2），
+     * 也就无法满足 #96 §8.1「自描述即可调用」与 §10-D2「双通道一致可判定」。
+     *
+     * <p>
+     * <b>权限级</b>：{@code cmd.exec} 注册为 {@link Tier#SCENE}（可写级 ⇒ 框架自动要求
+     * {@code "confirm": true}）；它执行的白名单条目<b>逐条</b>登记了自己的级（见
+     * {@link SdeCommandWhitelist}），动作在运行期按<b>内容</b>再做一次升格检查
+     * （{@code CmdExecAction.requireTier}）——口径同 {@code case.run} 的 cameras 段（contract.md §4.2 第 9 条）。
+     * {@code export.session} 是纯只读，注册为 {@link Tier#OBSERVE}（无 confirm、可自由轮询）。
+     */
+    private static void registerCommandActions(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        registry.register(
+            ActionDescriptor.builder("export.session", Tier.OBSERVE)
+                .description(
+                    "只读：返回 ExportSession 单例态的一致性快照（会话开关/选区模式/pos1/pos2/规范化 min-max 与尺寸/"
+                        + "活动帧/已录帧号/输出名/structureId/最近作者）。"
+                        + "用途是「经 cmd.exec 设完状态后自查」——没有它就无法判定命令是否真的生效（#97 §2.4-G2）。"
+                        + "唯一触碰的是 ExportSession.snapshot()（同一临界区取全部字段，避免逐调 getter 拿到互相矛盾的组合）；"
+                        + "不写任何状态、不碰世界与文件、不建 run 目录，故世界清单哈希不变。"
+                        + "与 /sde status 同源同形：结果的 statusLine 字段就是 /sde status 打印的那一行。")
+                .returns(
+                    "{schema, contractVersion, inSession, selectionMode, "
+                        + "selection{complete,pos1[x,y,z]|null,pos2[x,y,z]|null,min,max,sizeX?,sizeY?,sizeZ?}, "
+                        + "activeFrame, recordedFrames[], recordedFrameCount, frameSha256[], bufferGeneration, "
+                        + "outputName, structureId, lastAuthor, lastGtnhVersion, statusLine}"
+                        + "。frameSha256[] 与 recordedFrames[] **同序一一对应**（帧内容 sha256，"
+                        + "口径 = 该帧进入缓冲时的 JSON 文本 UTF-8 字节），供 C3「同会话同缓冲」机械判据；"
+                        + "bufferGeneration 是缓冲世代号（写入帧/清空即递增），用于廉价判断「缓冲有没有动过」。"
+                        + "本动作不含备注内容与帧体，只有哈希与计数——需要帧体请走 export 产物。")
+                .example("{}")
+                .since("1.4")
+                .build(),
+            new ExportSessionAction());
+
+        registry.register(
+            ActionDescriptor.builder("cmd.exec", Tier.SCENE)
+                .description(
+                    "在服务端线程执行一条白名单内的 /sde 子命令，并返回该命令的真实回报文本（与游戏内手动执行同一命令" + "逐字相同）。白名单是显式枚举（见 choices 与 exclusions），共 "
+                        + SdeCommandWhitelist.allowedSubcommands()
+                            .size()
+                        + " 条；"
+                        + "**排除 web / webstop / hajimi / hjm**（理由见 exclusions）。白名单外一律显式拒绝："
+                        + "错误码 CP-VALID-002 + 原因 + context.alternatives[] 可行替代。"
+                        + "线程语义：命令在 1.7.10 集成服的 \"Server thread\" 上执行（与玩家聊天框敲命令同一路径、同一线程），"
+                        + "cp 动作在 Client thread 提交并阻塞等待回包；两线程通过 ExportSession 的同一把私有锁互斥，"
+                        + "等待方向单一（客户端等服务端），结构上不会死锁。"
+                        + "**产物口径**：export/dump/multiblock 产生的文件落在 CWD 相对路径 structure_exports/ 下"
+                        + "（runClient 下 CWD == mcDataDir），不在 cp 的 run 目录内，故只把路径与存在性写入结果 artifacts[] 与事件流水，"
+                        + "不假造 run 清单条目；产物迁入 run 目录归 #102。"
+                        + "**回报与审计**：每次调用（含拒绝）落一条 kind=cmd-exec 事件，data 含 commandText/command/sub/"
+                        + "allowed/decision/status/reply/artifacts。")
+                .required(
+                    "command",
+                    ActionDescriptor.TYPE_STRING,
+                    "命令文本，形如 \"/sde status\" 或 \"sde pos1\"（前导 '/' 可省）。只允许 /sde 家族的白名单子命令；" + "长度上限 512 字符")
+                .optional(
+                    "timeoutMs",
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(CmdExecAction.DEFAULT_TIMEOUT_MS),
+                    "等待服务端线程回包的上限（毫秒，≤0 用默认 " + CmdExecAction.DEFAULT_TIMEOUT_MS
+                        + "）；超时抛 CP-EXEC-002 并带已耗时。注意本参数是动作自有参数，与控制面自己的 ?timeoutMs= 查询参数不同名不同义"
+                        + "（后者是 ?sync=true 的等待上限）")
+                .returns(
+                    "{schema, contractVersion, command, sub, tier, status(ok|no-server|timeout|exception), reply, "
+                        + "replies[], replyLineCount, executedOnThread, serverTick, elapsedMs, timeoutMs, senderName, "
+                        + "sessionAfter{...同 export.session}, artifacts[{role,path,exists,note}]}。"
+                        + "失败时抛：白名单外 CP-VALID-002（context.fields + context.alternatives[]）、"
+                        + "无服务端玩家 CP-STATE-001、等待超时 CP-EXEC-002、命令内部异常 CP-EXEC-001")
+                .example("{\"command\":\"/sde status\",\"confirm\":true}")
+                .example("{\"command\":\"/sde pos1\",\"confirm\":true}")
+                .example("{\"command\":\"/sde setframe 5\",\"confirm\":true}")
+                .example("{\"command\":\"/sde record\",\"confirm\":true}")
+                .example("{\"command\":\"/sde export\",\"confirm\":true}")
+                .since("1.4")
+                .build(),
+            new CmdExecAction());
     }
 
     /**
@@ -485,7 +586,7 @@ public final class ActionRegistrar {
      * <li><b>只写服务端权威世界</b>（{@code MinecraftServer.worldServers[0]}）——客户端
      * {@code WorldClient} 是只读投影，写它会被原版同步覆写（见 {@code mc.scene.L0Session}）；</li>
      * <li><b>同步一律走原版出口</b>（S2B/S06/S1F/S1D/S08/S2F…），不自造同步、不静态回填（契约 §6.4）；</li>
-     * <li><b>写入门控</b>：捕获会话期间被别的作业调用即 {@code CP-STATE-001}（契约 §4.1，既有口径）；</li>
+     * <li><b>写入门控</b>：捕获会话期间被别的作业调用即 {@code CP-STATE-001}（契约 §4.2，既有口径）；</li>
      * <li><b>返回值自带读回</b>：{@code before}/{@code after} 或逐项 {@code readBack}，外加
      * {@code sceneReadback}（按世界内最新场景清单的位置集合实读回读的规范化哈希）。
      * 读面（#98）未落地时，调用方据此自证「这次写观察到了什么变化」。</li>
@@ -660,7 +761,7 @@ public final class ActionRegistrar {
     }
 
     /**
-     * PR-2 取证级动作（contract.md §4.1）：{@code shot.multi} / {@code capture.begin} / {@code capture.end}。
+     * PR-2 取证级动作（contract.md §4.2）：{@code shot.multi} / {@code capture.begin} / {@code capture.end}。
      *
      * <p>
      * 三个动作都是 {@link Tier#FORENSIC}：截图与捕获是取证材料，比场景操作敏感。
