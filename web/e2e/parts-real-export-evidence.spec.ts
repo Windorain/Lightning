@@ -40,6 +40,10 @@ import {
   waitStatsSidebarReady,
   clickStatsRow,
   selectedRowKeys,
+  hoverStatsRow,
+  leaveStatsRow,
+  readTooltipText,
+  compactTooltipText,
   WIKI_REGION,
   type OracleDoc,
   type RealExportDoc,
@@ -190,6 +194,46 @@ test.describe('部件轮验收 · 真实导出 UI 证据（B-1/B-4/B-5 截图 + 
     console.log(
       `[EV-B5] 行1 ${first!.display}(${first!.key}) 归属 ${first!.parts.size} → mask ${m1.meshCount}；` +
         `+行2 ${second!.display}(${second!.key}) 归属 ${second!.parts.size} → 并集 mask ${m2.meshCount}`,
+    )
+  })
+
+  test('B-4 侧栏行悬停：TooltipBox 显示该物品 tooltip（#37 完成定义头条，真实导出实证）', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-chrome', '证据截图只出一份（desktop）')
+    test.setTimeout(240_000)
+    await gotoWikiPreviewWithScene(page, FULL.raw, REAL_EXPORT_FILES.full)
+    await waitStatsSidebarReady(page)
+    const itemIndex = readFileItemIndex(FULL)
+
+    // 行键取自文件（AE2 部件行；英文显示名适配 compactTooltipText 的字母数字口径）
+    const cableKey = 'appliedenergistics2:item.ItemMultiPart:16'
+    const cableEntry = itemIndex[cableKey]
+    expect(cableEntry, 'itemIndex 存在线缆键').toBeTruthy()
+
+    // ── 生产路径：行 pointerenter/move → tooltip-hover(source:'sidebar') → resolveSidebarLines → .wm-tooltip-box ──
+    await hoverStatsRow(page, cableKey)
+    const tip = await pollUntil(() => readTooltipText(page), '侧栏行悬停 TooltipBox 出现', 15_000, 40)
+    expect(tip, 'TooltipBox 必须出现（非 null）').not.toBeNull()
+    // 文案 = 文件 itemIndex 该键 tooltip（格式无关压缩比对；§ 格式码经 renderTooltipHtml 转样式不进 innerText）
+    expect(compactTooltipText(tip!), 'TooltipBox 含该物品显示名').toContain(compactTooltipText(cableEntry!.display))
+    expect(cableEntry!.tooltip.length, '文件该键 tooltip 非空').toBeGreaterThan(0)
+    expect(compactTooltipText(tip!), 'TooltipBox 文案 = 文件 itemIndex tooltip 首行').toContain(
+      compactTooltipText(cableEntry!.tooltip[0]!),
+    )
+    await shot(page, 'ev-real-b4-sidebar-row-tooltip.png', false)
+
+    // ── 回退对照：原版物品行（chest）同样出 TooltipBox，文案 = 文件 tooltip ──
+    const chestKey = 'minecraft:chest:0'
+    expect(itemIndex[chestKey], 'itemIndex 存在 chest 键').toBeTruthy()
+    await leaveStatsRow(page, cableKey)
+    await hoverStatsRow(page, chestKey)
+    const tip2 = await pollUntil(() => readTooltipText(page), 'chest 行悬停 TooltipBox 出现', 15_000, 40)
+    expect(tip2, 'chest 行 TooltipBox 必须出现').not.toBeNull()
+    expect(compactTooltipText(tip2!), 'chest TooltipBox 含显示名').toContain(compactTooltipText(itemIndex[chestKey]!.display))
+    await leaveStatsRow(page, chestKey)
+
+    console.log(
+      `[EV-B4-sidebar] ${cableKey} → TooltipBox=${JSON.stringify(tip)}；` +
+        `文件 tooltip=${JSON.stringify(cableEntry!.tooltip)}；回退对照 ${chestKey} → ${JSON.stringify(tip2)}`,
     )
   })
 
