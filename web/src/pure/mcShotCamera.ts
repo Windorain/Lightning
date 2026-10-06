@@ -108,19 +108,30 @@ export function mcSpecToShotCamera(
  *
  * `scanBounds`（`StructureDataExporter scan` 写入 `meta.scanBounds`）只记录**最小角**：
  * `minX` / `maxY` / `minZ`。网格是 `cellGrid[d][row][col]`，尺寸 `w/h/d`，
- * `row` 0 = 顶 = `maxY`，故中心公式（已互证）：
+ * `row` 0 = 顶 = `maxY`。每格在 MC 里占 1×1×1 的**半开立方体**，故格 (col,row,z) 的
+ * MC 角（最小角）为 `(minX+col, maxY-row, minZ+z)`，内容连续 AABB 为
+ * `[minX, minX+w] × [maxY-h+1, maxY+1] × [minZ, minZ+d]`，中心即：
  *
  * ```
- * C = ( minX + (w-1)/2 ,  maxY - (h-1)/2 ,  minZ + (d-1)/2 )
+ * C = ( minX + w/2 ,  maxY + 1 - h/2 ,  minZ + d/2 )
  * ```
+ *
+ * 互证（web 侧体素坐标）：`render/mesh/quadGeometry.ts` 与 `structureGeometryUVs.ts` 都把
+ * 「MC 格角」映射到 web 体素的**最小角**（`ox = col - sizeColumn/2`、`oy = voxelY - sizeRow/2`），
+ * 于是本式给出 `MC格角 − C = web 体素最小角`、
+ * `MC格角 + 0.5 − C = voxelCenterWorld(...)`（见 `pure/vec.ts`）——逐格精确成立。
+ *
+ * ⚠️ 旧实现取的是格**下标**中心 `(minX+(w-1)/2, maxY-(h-1)/2, minZ+(d-1)/2)`，三轴各**少算半格**：
+ * 调用方按它算 `pos − center` 时，相机会沿视线横移半格，出图轻微偏轴（不是正对结构轴心）。
+ * #87 验收侧已按连续 AABB 中心 `(66.5,12.5,65.5)` 出图，与本式一致。
  */
 export function structureCenterFromScanBounds(
   scanBounds: { minX: number; maxY: number; minZ: number },
   size: { w: number; h: number; d: number },
 ): [number, number, number] {
   return [
-    scanBounds.minX + (size.w - 1) / 2,
-    scanBounds.maxY - (size.h - 1) / 2,
-    scanBounds.minZ + (size.d - 1) / 2,
+    scanBounds.minX + size.w / 2,
+    scanBounds.maxY + 1 - size.h / 2,
+    scanBounds.minZ + size.d / 2,
   ]
 }

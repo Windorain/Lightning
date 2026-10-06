@@ -137,27 +137,35 @@ describe('mcPitchToWebElevationDeg：MC 俯仰 → web 仰角', () => {
 describe('structureCenterFromScanBounds：结构包围盒中心（MC 世界坐标）', () => {
   const SCAN = { minX: -492, maxY: 4, minZ: -12 }
 
-  it('3×2×1 网格手算对照：C = (-491, 3.5, -12)', () => {
-    // x: -492 + (3-1)/2 = -492 + 1   = -491
-    // y:    4 - (2-1)/2 =    4 - 0.5 = 3.5
-    // z:  -12 + (1-1)/2 =  -12 + 0   = -12
-    expect(structureCenterFromScanBounds(SCAN, { w: 3, h: 2, d: 1 })).toEqual([-491, 3.5, -12])
+  it('3×2×1 网格手算对照：C = (-490.5, 4, -11.5)', () => {
+    // x: -492 + 3/2       = -492 + 1.5 = -490.5
+    // y:    4 + 1 - 2/2   =    4 + 0   = 4
+    // z:  -12 + 1/2       =  -12 + 0.5 = -11.5
+    expect(structureCenterFromScanBounds(SCAN, { w: 3, h: 2, d: 1 })).toEqual([-490.5, 4, -11.5])
   })
 
-  it('单格结构（w=h=d=1）时中心 = scanBounds 自身', () => {
-    expect(structureCenterFromScanBounds(SCAN, { w: 1, h: 1, d: 1 })).toEqual([-492, 4, -12])
+  it('单格结构（w=h=d=1）时中心 = 该格 MC 格角 + 半格（即该格几何中心）', () => {
+    expect(structureCenterFromScanBounds(SCAN, { w: 1, h: 1, d: 1 })).toEqual([-491.5, 4.5, -11.5])
   })
 
-  it('5×3×2 手算对照：(-490, 3, -11.5)', () => {
-    expect(structureCenterFromScanBounds(SCAN, { w: 5, h: 3, d: 2 })).toEqual([-490, 3, -11.5])
+  it('5×3×2 手算对照：(-489.5, 3.5, -11)', () => {
+    expect(structureCenterFromScanBounds(SCAN, { w: 5, h: 3, d: 2 })).toEqual([-489.5, 3.5, -11])
   })
 
-  it('中心公式与体素网格坐标约定**精确**互证：逐格 MC 坐标 − C 恰为 web 体素中心', () => {
-    // web 口径：格 (col,row,z) 占 [col - w/2, col+1 - w/2] × …（见 render/mesh/quadGeometry.ts 的
-    // minX/maxX 推导；包络中心即 min = -w/2），故该格几何中心
-    //   = (col + 0.5 - w/2, y + 0.5 - h/2, z + 0.5 - d/2)，其中 y = h-1-row（cellGrid row 0 = 顶）。
+  it('#87 复现场景（scanBounds minX=64 maxY=12 minZ=64，5×1×3）→ (66.5, 12.5, 65.5)', () => {
+    // 与 #87 验收侧手工传入的 MB_SHOT_CENTER 一致（连续 AABB 中心）
+    expect(
+      structureCenterFromScanBounds({ minX: 64, maxY: 12, minZ: 64 }, { w: 5, h: 1, d: 3 }),
+    ).toEqual([66.5, 12.5, 65.5])
+  })
+
+  it('中心公式与体素网格坐标约定**精确**互证：MC 格角 − C 恰为 web 体素**最小角**', () => {
+    // web 口径（见 render/mesh/quadGeometry.ts 的 minX/maxX 与
+    // structureGeometryUVs.ts 的 ox/oy/oz）：格 (col,row,z) 占
+    //   [col - w/2, col+1 - w/2] × [voxelY - h/2, voxelY+1 - h/2] × [z - d/2, z+1 - d/2]
+    // 其中 voxelY = h-1-row（structureRowToWorldY，row 0 = 顶）。
     // MC 侧格角：x = minX + col，y = maxY - row，z = minZ + z。
-    // 本用例把「(MC 格角 − C) == web 体素中心」逐格钉死：公式若少算/多算半格，这里立刻变红。
+    // 本用例把「MC 格角 − C == web 体素最小角」逐格钉死：公式若少算/多算半格，这里立刻变红。
     const w = 3
     const h = 2
     const d = 2
@@ -165,30 +173,29 @@ describe('structureCenterFromScanBounds：结构包围盒中心（MC 世界坐�
     for (let z = 0; z < d; z++) {
       for (let row = 0; row < h; row++) {
         for (let col = 0; col < w; col++) {
-          const y = h - 1 - row
+          const voxelY = h - 1 - row
           const localX = SCAN.minX + col - C[0]
           const localY = SCAN.maxY - row - C[1]
           const localZ = SCAN.minZ + z - C[2]
-          const meshCenterX = col + 0.5 - w / 2
-          const meshCenterY = y + 0.5 - h / 2
-          const meshCenterZ = z + 0.5 - d / 2
-          expect(localX, `x col=${col}`).toBeCloseTo(meshCenterX, 9)
-          expect(localY, `y row=${row}`).toBeCloseTo(meshCenterY, 9)
-          expect(localZ, `z z=${z}`).toBeCloseTo(meshCenterZ, 9)
+          const meshMinX = col - w / 2
+          const meshMinY = voxelY - h / 2
+          const meshMinZ = z - d / 2
+          expect(localX, `x col=${col}`).toBeCloseTo(meshMinX, 9)
+          expect(localY, `y row=${row}`).toBeCloseTo(meshMinY, 9)
+          expect(localZ, `z z=${z}`).toBeCloseTo(meshMinZ, 9)
         }
       }
     }
   })
 
-  it('单格结构：公式中心 = 该格 MC 格角，格中心落在 web 原点（内容居中）', () => {
+  it('单格结构：内容几何中心落在 web 原点（内容居中）', () => {
     const C = structureCenterFromScanBounds(SCAN, { w: 1, h: 1, d: 1 })
-    // 唯一格 col=row=z=0 → MC 格角 (minX, maxY, minZ)，公式中心即该格角。
-    expect(C).toEqual([SCAN.minX, SCAN.maxY, SCAN.minZ])
-    // 该格几何中心 = 格角 +(0.5,0.5,0.5) → 减 C 后 = (0.5,0.5,0.5)；
-    // 单格时网格 w/h/d = 1，web 体素中心 = (0 + 0.5 - 1/2, …) = (0.5,0.5,0.5)，两者相同。
-    expect(SCAN.minX + 0.5 - C[0]).toBeCloseTo(0.5, 9)
-    expect(SCAN.maxY - 0.5 - C[1]).toBeCloseTo(-0.5, 9)
-    expect(SCAN.minZ + 0.5 - C[2]).toBeCloseTo(0.5, 9)
+    // 唯一格 col=row=z=0：MC 格角 (minX, maxY, minZ)，该格在 MC 里占 [格角, 格角+1)
+    // （y 向上：y=12 的方块占 [12,13)），故其几何中心 = 格角 +(0.5,0.5,0.5)。
+    // 减 C 后 = web 体素中心 (0+0.5-1/2, …) = (0,0,0) ⇒ 内容恰好居中于 web 原点。
+    expect(SCAN.minX + 0.5 - C[0]).toBeCloseTo(0, 9)
+    expect(SCAN.maxY + 0.5 - C[1]).toBeCloseTo(0, 9)
+    expect(SCAN.minZ + 0.5 - C[2]).toBeCloseTo(0, 9)
   })
 })
 

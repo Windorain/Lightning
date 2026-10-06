@@ -13,6 +13,10 @@
  *   MB_SHOT_CAMERAS          JSON 数组 [{ name, pos:[x,y,z], yaw, pitch, orthoHeight, width, height }]（MC 口径）
  *   MB_SHOT_CENTER           JSON [x,y,z]：结构中心的 MC 世界坐标（由 scanBounds + cellGrid 尺寸复原）
  *   MB_SHOT_DIR              出图目录（不存在则创建）
+ *   MB_SHOT_MIN_BBOX        （可选）每台机位的**非底色包围盒下界** JSON `{ "<camName>": { w, h } }`：
+ *                           给定时断言该机位出图的非底色包围盒不小于它——这是「内容被近/远平面裁掉、
+ *                           或结构出画」的**形状级**判据（#87 ortho-north 只出孤立一枚即由此暴露：
+ *                           横排 5 格 → w 应为 600px）。缺省不校验。
  *
  * 运行：见 `playwright.shot.config.ts` 文件头。
  */
@@ -57,6 +61,14 @@ const PRODUCT = path.resolve(requireEnv('MB_SHOT_PRODUCT'))
 const CAMERAS = parseJsonEnv<ShotCameraEnv[]>('MB_SHOT_CAMERAS', requireEnv('MB_SHOT_CAMERAS'))
 const CENTER = parseJsonEnv<[number, number, number]>('MB_SHOT_CENTER', requireEnv('MB_SHOT_CENTER'))
 const OUT_DIR = path.resolve(requireEnv('MB_SHOT_DIR'))
+
+/**
+ * 可选「轮廓下界」：`{ "<camName>": { w, h } }`。
+ * 给了就按机位断言非底色包围盒不小于它（形状级判据），不给就只跑通用的「非空白」判据。
+ */
+const MIN_BBOX: Record<string, { w: number; h: number }> | null = process.env.MB_SHOT_MIN_BBOX
+  ? parseJsonEnv<Record<string, { w: number; h: number }>>('MB_SHOT_MIN_BBOX', process.env.MB_SHOT_MIN_BBOX)
+  : null
 
 if (!fs.existsSync(PRODUCT)) {
   throw new Error(`MB_SHOT_PRODUCT 指向的文件不存在：${PRODUCT}`)
@@ -225,6 +237,27 @@ test.describe('#87 指定正交机位出图', () => {
         stats.areaRatio,
         `${cam.name}：非底色面积过小 ${JSON.stringify(stats)}`,
       ).toBeGreaterThan(2e-4)
+
+      /**
+       * 形状级判据（可选）：轮廓是「内容有没有被裁」的直接观测量。
+       * #87 ortho-north 的实际形态：横排 5 格（600×120）被近平面整面裁掉后只剩孤立一枚（120×120），
+       * 面积占比判据照样通过 —— 只查"非空白"抓不住这类缺陷，故补这一条。
+       */
+      const minBox = MIN_BBOX?.[cam.name]
+      if (minBox) {
+        expect(
+          stats.width,
+          `${cam.name}：非底色包围盒宽 ${stats.width}px < 预期下界 ${minBox.w}px（最前一层被裁 / 结构出画）stats=${JSON.stringify(stats)}`,
+        ).toBeGreaterThanOrEqual(minBox.w)
+        expect(
+          stats.height,
+          `${cam.name}：非底色包围盒高 ${stats.height}px < 预期下界 ${minBox.h}px（最前一层被裁 / 结构出画）stats=${JSON.stringify(stats)}`,
+        ).toBeGreaterThanOrEqual(minBox.h)
+        test.info().annotations.push({
+          type: 'minBbox',
+          description: `${cam.name} ≥ ${minBox.w}x${minBox.h}`,
+        })
+      }
 
       written.push(target)
       test.info().annotations.push({

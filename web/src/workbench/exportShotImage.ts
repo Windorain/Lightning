@@ -18,7 +18,7 @@ import * as THREE from 'three'
 import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
 import { resolveRenderBundle } from '@/render/data/bundleResolve'
 import { buildBlockMesh } from '@/render/mesh/blockMesh'
-import { setSymmetricOrthoFrustum } from '@/render/viewport/orthoFrustum'
+import { fitOrthoDepthToBox, setSymmetricOrthoFrustum } from '@/render/viewport/orthoFrustum'
 
 export type { ShotCameraSpec } from '@/pure/mcShotCamera'
 import type { ShotCameraSpec } from '@/pure/mcShotCamera'
@@ -154,26 +154,15 @@ export async function bakeShotPngDataUrl(
     }
     ortho.updateMatrixWorld(true)
 
-    if (!boxForFrustum.isEmpty() && Number.isFinite(boxForFrustum.min.x)) {
-      const zEps = 1e-2
-      const p = new THREE.Vector3()
-      const { min, max } = boxForFrustum
-      let minZ = Infinity
-      let maxZ = -Infinity
-      for (const x of [min.x, max.x]) {
-        for (const y of [min.y, max.y]) {
-          for (const z of [min.z, max.z]) {
-            p.set(x, y, z).applyMatrix4(ortho.matrixWorldInverse)
-            if (p.z < minZ) minZ = p.z
-            if (p.z > maxZ) maxZ = p.z
-          }
-        }
-      }
-      /** 视空间可见 z ∈ [-far, -near]（near/far 为正参量） */
-      ortho.near = Math.max(0.01, -maxZ + zEps)
-      ortho.far = Math.max(ortho.near + 0.02, -minZ + zEps)
-      ortho.updateProjectionMatrix()
-    }
+    /**
+     * near/far 由内容 AABB **向外**包住（见 {@link fitOrthoDepthToBox}）。
+     *
+     * ⚠️ 这里曾是 #87「ortho-north 只出孤立一枚」的根因：内联写法把近平面放到最近点**之后**
+     * （`-maxZ + zEps`），而轴对齐机位的贴面整面恰好落在最近点平面上 ⇒ 最前一层被整面裁掉。
+     * north 机位下被裁的正是横排 5 格唯一朝向相机的 -z 面 ⇒ 整排消失。已改为共用带正确
+     * 符号的 helper，并由 `orthoFrustum.test.ts` 钉住「box 八角不得被裁」。
+     */
+    fitOrthoDepthToBox(ortho, boxForFrustum)
 
     renderer.render(scene, ortho)
 

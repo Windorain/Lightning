@@ -11,6 +11,7 @@ import {
   STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
 } from '@/render/interaction/initialCamera'
 import { buildBlockMesh } from '@/render/mesh/blockMesh'
+import { fitOrthoDepthToBox } from '@/render/viewport/orthoFrustum'
 
 /** 四向等轴方位角（度），相邻相差 90° */
 export const ISOMETRIC_EXPORT_YAW_DEG: readonly number[] = [45, 135, 225, 315]
@@ -41,8 +42,6 @@ function fitOrthographicCameraToBox(
   let maxX = -Infinity
   let minY = Infinity
   let maxY = -Infinity
-  let minZ = Infinity
-  let maxZ = -Infinity
 
   const { min, max } = box
   for (const x of [min.x, max.x]) {
@@ -53,8 +52,6 @@ function fitOrthographicCameraToBox(
         maxX = Math.max(maxX, p.x)
         minY = Math.min(minY, p.y)
         maxY = Math.max(maxY, p.y)
-        minZ = Math.min(minZ, p.z)
-        maxZ = Math.max(maxZ, p.z)
       }
     }
   }
@@ -70,11 +67,12 @@ function fitOrthographicCameraToBox(
   camera.bottom = cy - half
   camera.top = cy + half
 
-  /** 视空间可见 z ∈ [-far, -near]（near/far 为正参量） */
-  const zEps = 1e-2
-  camera.near = Math.max(0.01, -maxZ + zEps)
-  camera.far = Math.max(camera.near + 0.02, -minZ + zEps)
-  camera.updateProjectionMatrix()
+  /**
+   * 深度范围（near/far）交给共用 helper——它保证**向外**包住 box。
+   * （此处原为同一份内联写法，含与 #87 ortho-north 同源的符号错误；斜向机位只裁掉最近角的一丝，
+   * 故未显形，但同一 bug 不该留两份。）
+   */
+  fitOrthoDepthToBox(camera, box)
 }
 
 export function dataUrlToPngBlob(dataUrl: string): Blob {
