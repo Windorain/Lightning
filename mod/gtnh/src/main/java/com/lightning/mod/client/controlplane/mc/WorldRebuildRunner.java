@@ -26,7 +26,9 @@ import com.lightning.mod.client.controlplane.core.Json;
  * <li>{@code launchIntegratedServer(folder, display, WorldSettings(seed, CREATIVE, false, false, FLAT)
  * + 空层预设)}；</li>
  * <li>等进世界（超时由动作层的阶段超时给 {@code CP-EXEC-002}）；</li>
- * <li>（可选）执行场景构建段 —— 由调用方喂入 {@link SceneBuilder}；</li>
+ * <li>（可选）执行场景构建段 —— 由调用方喂入 {@link SceneBuilder}；构建本身交给
+ * {@link ServerBuildPump} 在<b>服务端 tick 线程</b>推进（#89 根治，评论 1689），本机只逐 tick
+ * 轮询结局；</li>
  * <li>静置 {@code settleTicks}（构建段内部收尾，无构建段时本机自己等）；</li>
  * <li>写 {@code cp_world.json} 与 {@code scene-manifest.json}（存档目录 + run 目录），返回世界描述与
  * 场景清单哈希。</li>
@@ -216,13 +218,17 @@ public final class WorldRebuildRunner {
                 if (builder == null) {
                     builder = new SceneBuilder(spec.buildSteps, spec.folder, spec.seed, true, spec.settleTicks);
                     CpLog.info(
-                        "开始场景构建：%s，%d 步，静置 %d tick",
+                        "开始场景构建：%s，%d 步，静置 %d tick（提交到服务端线程执行）",
                         spec.folder,
                         Integer.valueOf(builder.stepCount()),
                         Integer.valueOf(spec.settleTicks));
+                    // #89 根治（评论 1689）：构建写服务端世界必须发生在服务端线程，故交给泵推进，
+                    // 本处只逐 tick 轮询结局（阶段名/超时/进度语义与改前一致）。
+                    ServerBuildPump.instance()
+                        .submit(builder);
                 }
-                WorldServer world = WorldRuntime.serverWorld();
-                JsonObject m = builder.tick(world);
+                JsonObject m = ServerBuildPump.instance()
+                    .poll();
                 if (m == null) {
                     int total = Math.max(1, builder.stepCount());
                     progress(

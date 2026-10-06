@@ -34,7 +34,19 @@ import cpw.mods.fml.common.registry.GameRegistry;
  * <p>
  * 本类<b>不阻塞</b>：{@link #tick} 每 tick 调用一次，处理有限量工作后返回；返回非 null 即完成。
  * 每 tick 的工作量上限（{@link #STEPS_PER_TICK}/{@link #CLEAR_BLOCKS_PER_TICK}）是为了不让一次
- * 大范围清场卡住客户端 tick 线程。
+ * 大范围清场卡住 tick 线程。
+ *
+ * <p>
+ * <b>驱动线程（#89 根治，评论 1689）</b>：{@link #tick} 只在<b>服务端 tick 线程</b>被调用
+ * （由 {@link ServerBuildPump} 逐 tick 驱动）——写服务端世界必须发生在本义线程上。构造仍发生在
+ * 客户端 tick 线程，实例经 {@code BuildJobMailbox} 的 volatile 交接点发布到服务端线程
+ * （happens-before 由那次写保证）。
+ *
+ * <p>
+ * <b>进度字段为什么是 volatile</b>：进度由调用方（客户端 tick 线程）在构建期间读
+ * （{@link #stepCount()}/{@link #doneSteps()}），推进由服务端线程做——{@link #stage} 与
+ * {@link #index} 是跨线程读的进度快照，故声明为 {@code volatile}（其余字段只在服务端线程内读写，
+ * 不加）。这只是让「读数」不撕裂，进度语义仍是近似的。
  *
  * <p>
  * 输入步骤必须<b>已归一化</b>（坐标为绝对坐标）：{@code case.run} 用
@@ -126,8 +138,9 @@ public final class SceneBuilder {
     private final JsonArray blocks = new JsonArray();
     private final JsonArray mismatches = new JsonArray();
 
-    private Stage stage = Stage.STEPS;
-    private int index;
+    private volatile Stage stage = Stage.STEPS;
+    /** 已推进到的步骤下标（进度分子）。跨线程读：客户端 tick 线程读进度，服务端线程写（见类注释）。 */
+    private volatile int index;
     private int waitLeft;
     private int teRetryLeft = TE_RETRY_TICKS;
     private int settleLeft;
