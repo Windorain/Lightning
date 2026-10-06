@@ -1,0 +1,31 @@
+name: 需求单（Request）
+about: 提案、功能请求、需求清单。用提出者的语言描述诉求，不要求可执行化；分诊由接收方完成
+title: "[Request] "
+labels: ["Type/Request", "Status/Needs Triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        需求单只管把诉求说清楚：想要什么、为什么、边界在哪。
+        聚类、泛化、拆分成可执行工作，是分诊和立项阶段的事，不必在这里完成。
+  - type: textarea
+    id: request
+    attributes:
+      label: 诉求描述
+      description: 想要什么，期望的效果是什么
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 使用场景与动机
+      description: 什么情况下需要它，解决什么痛点
+    validations:
+      required: false
+  - type: textarea
+    id: boundary
+    attributes:
+      label: 约束与边界
+      description: 明确不要什么、性能/兼容性等硬约束（如有）
+    validations:
+      required: false
