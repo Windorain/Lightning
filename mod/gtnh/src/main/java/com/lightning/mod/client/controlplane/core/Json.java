@@ -33,10 +33,34 @@ import com.google.gson.stream.JsonToken;
  */
 public final class Json {
 
+    /**
+     * 序列化用 Gson。
+     *
+     * <h2>为什么必须 {@code serializeNulls()}</h2>
+     * Gson 默认<b>丢弃</b>值为 {@code JsonNull} 的成员（{@code serializeNulls} 为 false 时的
+     * {@code JsonObject} 序列化行为，2.2.4 与 2.13.2 实测一致）。这与本项目的显式性纪律直接冲突：
+     * <ul>
+     * <li>{@code TeDescriber} 的实现纪律明写「缺席用显式 {@code null}」——否则 {@code expect: null}
+     * 这类断言会与「键名写错」混淆（求值侧把「键不存在」判红）；</li>
+     * <li>需求书 §8.5「失败显式」：读数里的「这一面是空的」与「这个字段我没读」必须分得开。</li>
+     * </ul>
+     * 实测症状（issue #98 实机验收擒获）：{@code read.te} / {@code scene-manifest.teReads} 里
+     * 显式写入的 {@code null} 成员在落盘后<b>整个键消失</b>，于是内存里判据看得见的
+     * 「显式缺席」在产物里变成了「键不存在」——同一份状态在两条路径上含义不同。
+     *
+     * <p>
+     * 打开它<b>只影响显式写 null 的成员</b>：{@link #object(Object...)} 仍在构造期跳过 null 值
+     * （「不传即省略」的可选字段惯用法照旧），{@code CpException.toErrorJson()} 等按需省略
+     * {@code context} 的写法也不受影响。{@link #canonical} 是手写序列化器、本来就输出 {@code null}，
+     * 因此哈希口径与本次改动无关（改动前后一致）。
+     */
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping()
+        .serializeNulls()
         .create();
 
+    /** 见 {@link #GSON}：缩进版同样必须 {@code serializeNulls()}。 */
     private static final Gson GSON_PRETTY = new GsonBuilder().disableHtmlEscaping()
+        .serializeNulls()
         .setPrettyPrinting()
         .create();
 
@@ -136,12 +160,12 @@ public final class Json {
 
     // ------------------------------------------------------------ 序列化
 
-    /** 紧凑 JSON 文本。 */
+    /** 紧凑 JSON 文本（显式 {@code null} 成员<b>保留</b>为 {@code null}，见 {@link #GSON}）。 */
     public static String toJson(JsonElement e) {
         return GSON.toJson(e == null ? JsonNull.INSTANCE : e);
     }
 
-    /** 缩进 JSON 文本（落盘用，便于人读与 diff）。 */
+    /** 缩进 JSON 文本（落盘用，便于人读与 diff；{@code null} 成员保留口径同 {@link #toJson}）。 */
     public static String toPretty(JsonElement e) {
         return GSON_PRETTY.toJson(e == null ? JsonNull.INSTANCE : e);
     }

@@ -76,17 +76,57 @@
 | `case.validate` | observe | 解析用例文件，返回规范化执行计划（分段列表、判据、期望证据）或逐字段错误 |
 | `case.run` | scene 起 | 执行用例文件：默认整跑；`segments:[...]` 按段执行。**整跑与按段共用同一实现、同一产物形态**（验收锚）。产物为 run 目录 + 观测记录 + 判据结论 |
 
-PR-2 追加取证级动作（§4.1），PR-3 追加双轨判据，收口T3 追加命令通道动作（§4.3）；
-追加不改上表已有语义。
+v1.3（issue #98）追加的观察面读面动作见 §4.1；v1.4（issue #100，收口T3）追加的命令通道动作见 §4.5；
+下表是 PR-1 的动作清单，追加不改已有语义。
 
-### 4.1 取证级动作（PR-2，Refs #41）
+PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
+**#99（收口T2）追加 6 个 L0 布景原语**（`scene.*`，见 §4.4），同样只增不改上表语义。
+
+### 4.1 观察面读面动作（v1.3，issue #98）
+
+「Agent 必须有『看』的能力，不只有截图」（需求书 §5）。下表八个动作**全部 `observe` 级、全部只读、
+全部同步**（一次 tick 内读完返回：跨 tick 的读面会读到两个世界状态，「调用前后世界哈希不变」就无从判定）：
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `read.blocks` | observe | **区域方块读回**：闭区间区域内每格 `{pos, id, blockId, meta, te}` + 规范化 `sha256`。参数 `{from,to}` 或 `{region:{from,to}}`，可选 `includeAir`（默认 true）、`hash`（默认 true）。哈希**恒**按「含空气的完整区域」计算（不受 `includeAir` 影响）——哈希是区域的属性，不是请求选项的属性 |
+| `read.overview` | observe | **世界概览**：维度/时间/天气/已加载区块数/实体与方块实体计数（按类型分组）/玩家清单。服务端权威世界；含 `world.info` 同一份世界身份字段 |
+| `read.player` | observe | **玩家状态**：位置（服务端与客户端各一份）、朝向与视线、生命/护甲/吸收/燃烧/氧气、饥饿、游戏模式与能力、经验、药水效果、手持与光标物品 |
+| `read.inventory` | observe | **背包与容器逐槽**：`source=player`（主背包 36 + 护甲 4 + 光标）/ `tile`（`at` 处方块实体的 `IInventory`）/ `ender`（末影箱）。逐槽 `{slot,empty,id,meta,count,maxStackSize,damage,maxDamage,displayName,nbt}` |
+| `read.te` | observe | **TE 状态**：逐位置「通用 TE 事实」（类名/是否在位/NBT 摘要）+「逐族描述器输出」（**与 `te-state-equals` 判据、观测记录 `runtimeReads` 同一个读取口**）。注册族与缺席族分列 |
+| `read.block` | observe | **方块与物品信息**：注册名/渲染类型/是否 TESR/是否 ISBRH/所需工具与等级/材质/硬度抗爆/掉落物。`at` 读世界里那一格；`block`/`item` 按注册名问注册表 |
+| `read.diff` | observe | **状态差异**：期望态（`expectInline` / `expectManifest` / `expectManifestFile`）与服务端实读**逐格 diff**，逐格给 `kinds[blockId\|meta]` 与两侧读数，并给双侧规范化 `sha256` |
+| `read.run` | observe | **run 产物清单读回**：枚举 run 并逐 run 实读磁盘 `manifest.json`，给出 `path/bytes/sha256/role` 与**磁盘一致性**（`missingFiles`/`sizeMismatch`），`shots/` 下产物单独归组——用于确认 `shot.multi` 等取证动作的产物确实进了 run 清单（§8.6 产物显式） |
+
+**哈希口径（`read.blocks` / `read.diff`）**：`sha256(canonical({"blocks":[{"pos","blockId","meta"}…]}))`，
+`blocks` 按 `(x,y,z)` 升序、`pos` 为 `[x,y,z]`，无空白、键排序（`Json.canonical`）。
+**与场景清单哈希的关系（可互算，不是恒等）**：场景清单的口径是
+`{blocks:[{pos,blockId,meta}], tileEntities:[{pos,class}]}`（case-file.md §8.7）。
+区域读回刻意**不含** `tileEntities`——含了它，「同一区域两次读回同不同」就混进了「该不该在这一格有 TE」
+这个额外变量，而该变量由 `read.te` 与场景清单各自独立回答。
+因此：读回整片区域并把结果排序后作为 `blocks`、附上同一批位置的 `tileEntities`，即得场景清单的哈希子集。
+**判据只用一处的定义**：`world-hash-equals` 的脚本口径与 `read.diff` 的 `hashes` 都由
+`ReadSupport.hashSubsetOf` 产出，不存在第二套哈希实现。
+
+**只读性（验收 B1）**：八个动作的调用前后**世界清单哈希不变**（实测，见证据）。
+只读不是靠约定：读面代码里不存在任何写世界/TE 的调用点（不出现
+`setBlock`/`setBlockToAir`/`markBlockForUpdate`/`initialize`/`addPart` 等）。
+
+**失败显式（§8.5）**：无服务端世界 → `CP-STATE-001`（上下文带 `action` 与可行补救）；
+坐标非法/范围过大/参数冲突 → `CP-VALID-002`（`context.fields` 逐字段）；
+容器不存在、TE 不存在 → `CP-STATE-001`（**不**返回空表：空容器与不存在的容器含义相反）。
+
+**产物显式（§8.6）**：`read.diff` 的 `expectManifestFile` 路径会开 run 目录并把结果落
+`read/diff.json`，登记 sha256 进 `manifest.json`；其余读面是纯内存读数，不产 run。
+
+### 4.2 取证级动作（PR-2，Refs #41）
 
 | 动作 | 级 | 语义 |
 |---|---|---|
 | `shot.multi` | forensic | 多机位截图：参数 `{cameras:[CameraSpec], target?:bbox, lighting?:natural\|neutral-flat, renderMode?:本色\|参与光照, worldTime?}`。每机位产 `shots/<name>.png`（拼接机位另产 `shots/<name>.tiles/` 与 `shots/<name>.meta.json`），全部产物登记哈希；观测记录按机位更新 camera/projection/lighting/renderMode |
 | `capture.begin` / `capture.end` | forensic | 捕获会话包围：begin 后禁止一切世界写动作（违规 CP-STATE-001），end 释放；`case.run` 的 capture 段自动包围 build 之后、shots 之前的区间 |
 
-### 4.3 命令通道动作（收口T3，Refs #100）
+### 4.5 命令通道动作（v1.4，收口T3，Refs #100）
 
 | 动作 | 级 | 语义 |
 |---|---|---|
@@ -175,7 +215,7 @@ PR-2 追加取证级动作（§4.1），PR-3 追加双轨判据，收口T3 追�
 }
 ```
 
-### 4.2 相机与渲染规则（PR-2，#41 落地）
+### 4.3 相机与渲染规则（PR-2，#41 落地）
 
 1. **注入式相机**：渲染时用虚拟相机实体替换 `mc.renderViewEntity`（不传送真实玩家）；TE 渲染距离门随相机位置生效——这是注入而非挪玩家的核心理由。**机制更正（PR-3 实证）**：1.7.10 的 TE 距离门由 `TileEntityRendererDispatcher` 按 `renderViewEntity` 静态位置剔除 **TESR** 渲染，门值是各 TE 的 `getMaxRenderDistanceSquared()`（原版默认 4096=64 格；AE2 `TileCableBus`=900.0=30 格——**但 AE2 缆几何走 ISBRH 块层渲染不受此门管，门只管其动态部件（监视器屏显）的 TESR 内容**）。因此 K1 的验收器具是**原版箱子**（64 格 TESR 门）：玩家恒定停在门内、相机近/远跨门双拍——近图箱在、远图箱失即证「门随相机而非随玩家」。
 2. **门控位置分离（A3）**：`observation.playerPos` 恒为真实玩家位置，`observation.camera.pos` 为机位；两者各自记录，判据可分别断言。
@@ -186,6 +226,56 @@ PR-2 追加取证级动作（§4.1），PR-3 追加双轨判据，收口T3 追�
 7. **世界时刻**：`worldTime` 决定拍摄光照基准；观测记录落实际 worldTime。
 8. **`target` 参数（v1）**：仅作观察目标留痕（bbox 进观测记录），**不参与自动取景**；自动框景留待后续版本。
 9. **按内容升格的鉴权时点**：动作静态级低于内容要求时（如 scene 级 `case.run` 跑含 cameras 段的用例），鉴权期按静态级放行、**执行期**升格检查——sync 调用方得 HTTP 403 `CP-AUTH-002`，异步调用方得 failed 作业（`error.code=CP-AUTH-002`）。
+
+### 4.4 L0 布景原语（#99，「收口T2」）
+
+能力面三层口径见 #96 §4.1：**L0 原语**＝直接设定世界/实体/玩家/背包状态（布景、构造输入、常规回归）；
+**L1 玩家操作**＝经玩家路径执行；**L2**＝L0/L1 的有序编排。**L0 的产物不能当作 L1 的证据**（#96 §4.2）。
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `scene.entity.spawn` | scene | 生成实体（含掉落物）。`item` 造掉落物、`entity` 造一般实体，二者互斥必居其一；可带 SNBT `nbt` |
+| `scene.entity.clear` | scene | 清除范围内实体（含掉落物）。选择条件 `box`/`entity`/`item` 取交集；`includePlayers` 默认 false |
+| `scene.player.state` | scene | 玩家游戏模式 / 生命 / 经验 / 药水效果（`before`/`after` 双快照） |
+| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给** |
+| `scene.weather.time` | scene | 设定世界权威时刻与天气（持续生效；`shot.multi.worldTime` 是拍摄基准，两义不同） |
+| `scene.player.pose` | scene | 瞬时传送/转向——L0 布景原语，与 #101 的 L1 真实移动互补、两义按层标注 |
+
+**共同口径（六条，全部可判定）**：
+
+1. **只写服务端权威世界**（`MinecraftServer.worldServers[0]`，见 `mc.scene.L0Session`）。
+   客户端 `WorldClient` 是只读投影：写它会被原版同步覆写（方块/实体/时间/天气皆然）。
+   这与 `world.rebuild` 的场景构建、`world.info` 的元数据、`shot.multi` 的光照基准同一口径。
+2. **同步一律走原版出口**：`S2BPacketChangeGameState(3)`（游戏模式）/ `S06PacketUpdateHealth`（生命）/
+   `S1FPacketSetExperience`（经验）/ `S1DPacketEntityEffect`（药水）/ `S08PacketPlayerPosLook`（传送）/
+   `S2FPacketSetSlot`（背包槽位）/ `S3PacketTimeUpdate` + `S2BPacketChangeGameState(7,8)`（时间天气）。
+   **不自造同步、不逐字段从静态数据推算回填**（§6.4 的既有禁令对 L0 同样成立）。
+3. **写入门控**：六个动作开场一律过 `CaptureControl.assertWorldWriteAllowed`——捕获会话期间被
+   *别的*作业调用即 `CP-STATE-001`（§4.1 的既有口径）。会话开场作业自身可穿透（既有语义）。
+4. **失败显式**：未知实体/物品 id、越界坐标、越界槽位、非容器方块实体、未知药水、未知天气、
+   无世界/无玩家，一律 `CP-VALID-002`（参数类，带 `context.fields`）或 `CP-STATE-001`（前置状态类），
+   **不静默过滤成 0 个**（「过滤掉 0 个」是假绿）。
+5. **返回值自带读回**：逐项 `readBack` 或 `before`/`after` 快照，外加 `sceneReadback`
+   ——按世界内最新场景清单的**位置集合**实读回读并重算规范化哈希（口径与 `world-hash-equals` 判据、
+   `SceneManifest.readBack` 同源）。读面（#98）未就绪时，这是「这次写观察到了什么变化」的兜底证据。
+   世界没有清单时 `sceneReadback.present=false` + 原因，**不算错误**（L0 不该要求「必须先 rebuild」）。
+6. **不进场景清单哈希**（除非确实改了清单登记的位置）：L0 原语只动清单之外的维度
+   （实体、玩家、背包、时间、天气），因此**不破坏 `world-hash-equals` 幂等判据**。
+   `scene.entity.clear` 与 `scene.inventory.write` 亦然（实体与背包不入清单哈希）。
+
+**两义标注（#96 裁决 3/4 的落地）**：`scene.inventory.write` 返回 `layer:"L0"` + `semantics:"give"`；
+`scene.player.pose` 返回 `layer:"L0"` + `semantics:"teleport"`。两者的 `layerNote` 字段写明
+「与 #101 的 L1 对应动作互补而不互替」。
+
+**SNBT 口径**：`nbt` 参数是 **SNBT 文本**（原版 `/give`、`/summon` 的写法，
+即 `net.minecraft.nbt.JsonToNBT`），**不是 JSON 对象**——两者语法相近但不同（SNBT 字符串值可裸写、
+有 `1b`/`1.0f` 数字后缀）。自述与示例里写死这一点。
+
+### 4.6 hermetic 纪律（起手重建世界）
+
+见 case-file.md §8.8。要点：**验收类固定程序的第一次世界写动作必须是 `world.rebuild`（`void:true`）**，
+不得在既有世界上续跑。`case.run` 的 `world` 段与之是**同一实现**（§6.3），二者语义不冲突。
+L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**，不能替代起手重建。
 
 ## 5. 版本化规则
 
@@ -202,8 +292,11 @@ PR-2 追加取证级动作（§4.1），PR-3 追加双轨判据，收口T3 追�
 4. **TE 状态补全**（#55「设」第五项）：仅限场景构建阶段、捕获开始之前；必须经模组自身权威同步路径（如 `markBlockForUpdate` 触发 S35 description packet 摄取，或模组自己的 `initialize`/`addPart` 等 API）；**禁止**逐字段从静态数据推算回填。补全器按族注册（接口 `TeCompleter`），默认实现覆盖原版 TE；LP/AE2 族补全器随锚点场景交付。
 5. **补全器的权威放置职责（PR-3 明确）**：当模组的方块需要构造上下文时（LP 通用管块需 `createPipe`/`placePipe`、AE2 部件需 `addPart` 到既有缆），`te` 步的 completer 经**模组自身放置 API** 完成放置与补全；此时 `params` 声明的是**放置输入**（物品 id/朝向/面），不是 NBT 逐字段回填——该区分必须在 completer 类注释写明。**v1.2 注册表**：`vanilla` / `lp-pipe` / `ae2-part`。
 6. 世界快照与回滚范围**包含** TE 补全后的状态。
-7. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。
+7. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。**L0 的 `scene.player.pose`（§4.4）是这条的显式化对应物**——同一件事由调用方按需触发，而不是只在进图时隐式做一次。
 8. **离图阻塞**：`mc.loadWorld(null)` 在 tick 线程内阻塞至集成服停机（原版「保存并退到标题」同路径），客户端会冻结数秒到数十秒——动存档目录前必须保证 region 句柄释放，这是 v1 的取舍。
+9. **hermetic 纪律（#99 成文）**：验收类固定程序的第一次世界写动作必须是 `world.rebuild`（`void:true`）；
+   本节的 `case.run` 的 `world` 段与之**共用同一实现**（`WorldRebuildRunner`），语义不冲突。
+   完整规则与逐条对齐表见 case-file.md §8.8；L0 的轮内清场原语**不构成** hermetic 保证（§4.6）。
 
 ## 7. 观测记录
 

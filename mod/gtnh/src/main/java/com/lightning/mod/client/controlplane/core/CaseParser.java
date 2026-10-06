@@ -42,6 +42,7 @@ public final class CaseParser {
         "label",
         "world",
         "build",
+        "read",
         "capture",
         "cameras",
         "criteria",
@@ -65,6 +66,9 @@ public final class CaseParser {
 
     /** 判据条目的允许字段。 */
     public static final Set<String> CRITERION_FIELDS = unmodifiable("id", "type", "params", "expect");
+
+    /** {@code read} 段步骤的允许字段（v1.3，issue #98）。 */
+    public static final Set<String> READ_STEP_FIELDS = unmodifiable("action", "params", "path", "role");
 
     /** 变体条目的允许字段。 */
     public static final Set<String> VARIANT_FIELDS = unmodifiable("id", "mutate", "expectCriteriaRed");
@@ -167,6 +171,7 @@ public final class CaseParser {
 
         CaseFile.World world = parseWorld(o, fields, warnings);
         List<CaseFile.Step> build = parseBuild(o, world, fields, warnings);
+        List<CaseFile.ReadStep> read = parseRead(o, fields, warnings);
         JsonElement capture = parseCapture(o, fields, warnings);
         JsonArray cameras = parseCameras(o, fields, warnings);
         List<CaseFile.Criterion> criteria = parseCriteria(o, fields, warnings);
@@ -190,6 +195,7 @@ public final class CaseParser {
             label,
             world,
             build,
+            read,
             capture,
             cameras,
             criteria,
@@ -432,6 +438,59 @@ public final class CaseParser {
             }
         }
         return Json.copyArray(cameras);
+    }
+
+    /**
+     * 解析 {@code read} 段（v1.3，issue #98）：读面步骤清单。
+     *
+     * <p>
+     * 每步 {@code {action:"read.blocks", params:{…}, path:"read/blocks.json", role?}}：
+     * 执行该读面动作，把结果 JSON 落 run 目录的 {@code path} 并登记为产物。
+     * 「读面输出可被判据直接引用」（需求书 §10 B2）的物质基础就是这一段——
+     * 没有它，读面只能由调用方在用例之外单独调，判据永远看不到读数。
+     *
+     * <p>
+     * 这里只做「须为 array + 元素须为 object + 未知字段」，字段级校验（动作名必须已注册且是
+     * {@code read.*}、path 合法且不与既有产物冲突）在 {@link CaseValidator}。
+     *
+     * @return 原样深拷的读面步骤；未声明返回空列表（不是 null：调用方按「段为空」处理）
+     */
+    private List<CaseFile.ReadStep> parseRead(JsonObject o, Fields fields, List<String> warnings) {
+        List<CaseFile.ReadStep> out = new ArrayList<CaseFile.ReadStep>();
+        if (!o.has("read")) {
+            return out;
+        }
+        JsonArray arr = Json.optArray(o, "read");
+        if (arr == null) {
+            fields.add("read", "须为 array（读面步骤 [{action,params?,path,role?}]）");
+            return out;
+        }
+        for (int i = 0; i < arr.size(); i++) {
+            String ctx = "read[" + i + "]";
+            JsonElement e = arr.get(i);
+            if (e == null || !e.isJsonObject()) {
+                fields.add(ctx, "步骤须为 object {action,params?,path,role?}");
+                continue;
+            }
+            JsonObject step = e.getAsJsonObject();
+            checkUnknown(step, READ_STEP_FIELDS, ctx, fields, warnings);
+            String action = stringOf(step, "action", ctx + ".action", fields);
+            if (action == null) {
+                fields.add(ctx + ".action", "必填（读面动作名，如 read.blocks）");
+            }
+            String path = stringOf(step, "path", ctx + ".path", fields);
+            if (path == null) {
+                fields.add(ctx + ".path", "必填（run 目录内相对路径，如 read/blocks.json）");
+            }
+            JsonObject params = Json.optObject(step, "params");
+            if (step.has("params") && params == null) {
+                fields.add(ctx + ".params", "须为 object");
+            }
+            String role = stringOf(step, "role", ctx + ".role", fields);
+            out.add(
+                new CaseFile.ReadStep(action, params == null ? new JsonObject() : Json.copyObject(params), path, role));
+        }
+        return out;
     }
 
     private List<CaseFile.Criterion> parseCriteria(JsonObject o, Fields fields, List<String> warnings) {

@@ -97,7 +97,7 @@ public final class CameraSpec {
     /** 拼接重叠比例（0..0.5），最终取默认 0.05。 */
     private final double tileOverlap;
 
-    /** 机位级 renderMode 覆盖（contract §4.2.6）；未给为 null。 */
+    /** 机位级 renderMode 覆盖（contract §4.3.6）；未给为 null。 */
     private final String renderMode;
 
     /** 机位级 lighting 覆盖；未给为 null。 */

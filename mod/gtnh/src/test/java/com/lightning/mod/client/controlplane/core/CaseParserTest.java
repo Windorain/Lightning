@@ -455,11 +455,17 @@ public class CaseParserTest {
             plan.get("caseSha256")
                 .getAsString());
         assertEquals(
-            6,
+            CaseValidator.SEGMENTS.size(),
             plan.getAsJsonArray("segments")
                 .size());
         assertTrue(plan.has("capture"));
         assertTrue(plan.has("cameras"));
+        // v1.3（issue #98）：read 段进计划，且未声明时是空数组（不是缺字段）
+        assertTrue(plan.has("read"));
+        assertEquals(
+            0,
+            plan.getAsJsonArray("read")
+                .size());
 
         JsonObject world = plan.getAsJsonObject("world");
         assertEquals(

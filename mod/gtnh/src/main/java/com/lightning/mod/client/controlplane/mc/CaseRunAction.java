@@ -70,6 +70,9 @@ public final class CaseRunAction extends SteppingActionBase {
     /** 段名：场景构建。 */
     public static final String SEG_BUILD = "build";
 
+    /** 段名：读面（v1.3，issue #98）。 */
+    public static final String SEG_READ = "read";
+
     /** 段名：机位拍摄（PR-2）。 */
     public static final String SEG_CAMERAS = "cameras";
 
@@ -331,6 +334,9 @@ public final class CaseRunAction extends SteppingActionBase {
             case SEG_BUILD:
                 detail = stepBuild(ctx);
                 break;
+            case SEG_READ:
+                detail = stepRead(ctx);
+                break;
             case SEG_CAMERAS:
                 detail = stepCameras(ctx);
                 break;
@@ -574,6 +580,135 @@ public final class CaseRunAction extends SteppingActionBase {
         detail.addProperty("manifestPath", SceneManifest.RUN_RELATIVE_PATH);
         detail.add("manifest", m);
         return detail;
+    }
+
+    /**
+     * {@code read} 段（v1.3，issue #98）：执行用例声明的读面动作，把读数落 run 目录。
+     *
+     * <h2>为什么读面要进用例</h2>
+     * 需求书 §10 B2「读面输出可被判据直接引用」。调用方在用例之外单独调读面也能拿到读数，
+     * 但判据段跑在<b>本 run 的产物</b>上，读不到那份读数——「可判定」就成了一句空话。
+     * 本段把两者的接缝封上：读面动作的返回值原样落 {@code read[i].path}，
+     * 登记进 manifest，判据段随后用 {@code json-field} 指针去断言它。
+     *
+     * <h2>与既有段的关系</h2>
+     * 段序 {@code world→capture→build→read→cameras→criteria→evidence}：读面在 build 之后
+     * （读的是成品场景）、在 criteria 之前（产物必须先落）。<b>不</b>与 {@code shot.multi} 共用
+     * 任何状态——读面不碰渲染。
+     *
+     * <h2>动作实例从哪来</h2>
+     * 从注册表取（{@code runtime.actions()}）：这样「用例声明的读面动作必须是真注册过的动作」
+     * 由查表保证，且读面动作的<b>同一份实现</b>既服务交互调用也服务用例——不存在第二条读路径
+     * （需求书 §8.7 无隐藏通道）。读面动作全部无状态，直接复用注册表里的实例。
+     */
+    private JsonObject stepRead(ActionContext ctx) throws Exception {
+        JsonArray steps = Json.optArray(plan, "read");
+        JsonArray records = new JsonArray();
+        int executed = 0;
+        if (steps != null) {
+            for (int i = 0; i < steps.size(); i++) {
+                JsonObject step = steps.get(i)
+                    .getAsJsonObject();
+                String action = Json.optString(step, "action", null);
+                String path = Json.optString(step, "path", null);
+                String role = Json.optString(step, "role", null);
+                JsonObject params = Json.optObject(step, "params");
+                com.lightning.mod.client.controlplane.core.ActionRegistry.Entry entry = runtime == null ? null
+                    : runtime.actions()
+                        .lookup(action);
+                if (entry == null) {
+                    throw new CpException(
+                        ErrorCodes.VALID_UNKNOWN,
+                        "用例 read 段引用了未注册的动作: " + action,
+                        Json.object(
+                            "field",
+                            "read[" + i + "].action",
+                            "action",
+                            action,
+                            "registered",
+                            runtime == null ? null
+                                : runtime.actions()
+                                    .names()));
+                }
+                if (entry.isStepping()) {
+                    throw CpException
+                        .param("读面步骤不许用步进动作", "read[" + i + "].action", "读面动作必须是同步动作（跨 tick 的读面会读到两个世界状态）: " + action);
+                }
+                JsonObject result;
+                try {
+                    // 派生上下文：换本步骤的参数，run/artifacts/events 仍是用例那一份
+                    // （读面产物因此落用例 run 目录，判据段才看得到——见 ActionContext#withParams）
+                    result = entry.action()
+                        .execute(ctx.withParams(params));
+                } catch (CpException e) {
+                    throw new CpException(
+                        e.code(),
+                        "读面步骤 read[" + i + "]（" + action + "）失败: " + e.detail(),
+                        e.context(),
+                        e);
+                }
+                if (result == null) {
+                    result = new JsonObject();
+                }
+                // 与 read.diff 的自落盘错开：那条路径写 read/diff.json，这里也写同一条路径时
+                // 由本段统一落一次（内容一致，后写者胜且仍登记同一 sha256）。
+                ctx.artifacts()
+                    .writeArtifact(
+                        ctx.run(),
+                        path,
+                        Json.toPretty(result)
+                            .getBytes(StandardCharsets.UTF_8),
+                        role == null ? deriveRole(action) : role);
+                JsonObject rec = new JsonObject();
+                rec.addProperty("index", i);
+                rec.addProperty("action", action);
+                rec.addProperty("path", path);
+                rec.addProperty("ok", true);
+                rec.add("params", Json.copyObject(params));
+                JsonObject shape = new JsonObject();
+                shape.addProperty("schema", Json.optString(result, "schema", null));
+                shape.addProperty(
+                    "bytes",
+                    ctx.run() == null ? 0L
+                        : ctx.run()
+                            .artifact(path) == null ? 0L
+                                : ctx.run()
+                                    .artifact(path)
+                                    .bytes());
+                shape.addProperty(
+                    "sha256",
+                    ctx.run() == null ? null
+                        : ctx.run()
+                            .artifact(path) == null ? null
+                                : ctx.run()
+                                    .artifact(path)
+                                    .sha256());
+                rec.add("artifact", shape);
+                records.add(rec);
+                executed++;
+                ctx.emit(
+                    EventStream.LEVEL_INFO,
+                    EventStream.Kinds.CASE_SEGMENT,
+                    "读面步骤完成: " + action + " → " + path,
+                    Json.object("action", action, "path", path, "index", Integer.valueOf(i)));
+            }
+        }
+        JsonObject detail = new JsonObject();
+        detail.addProperty("executed", executed);
+        detail.addProperty("declared", steps == null ? 0 : steps.size());
+        detail.add("steps", records);
+        return detail;
+    }
+
+    /** 读面产物的默认 role：由动作名的最后一段派生（{@code read.blocks} → {@code read-blocks}）。 */
+    static String deriveRole(String action) {
+        if (action == null) {
+            return "read";
+        }
+        int dot = action.indexOf('.');
+        return dot < 0 ? "read-" + action
+            : "read-" + action.substring(dot + 1)
+                .replace('.', '-');
     }
 
     /** {@code criteria} 段：core 判据引擎 + 本层注入的运行期哈希来源。 */
@@ -1183,8 +1318,10 @@ public final class CaseRunAction extends SteppingActionBase {
             }
         }
         stub.addProperty("stepCount", steps.size());
-        stub.add("blocks", blocks);
-        stub.add("tileEntities", tes);
+        // #112：与 SceneBuilder.finish 同一口径（同一 pos 后写覆盖）——这份存根也是清单的
+        // 数据入口之一（readBack 按它的位置集合实读），不能在这里留下重复 pos。
+        stub.add("blocks", SceneManifest.manifestBlocks(blocks));
+        stub.add("tileEntities", SceneManifest.manifestTes(tes));
         return stub;
     }
 

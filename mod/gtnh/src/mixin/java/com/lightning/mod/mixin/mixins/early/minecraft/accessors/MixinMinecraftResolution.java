@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.lightning.mod.client.controlplane.mc.capture.FramebufferOverride;
 
 /**
- * 渲染分辨率覆写（高分辨率截图 / tile 渲染）的注入点（contract.md §4.2.4 的「分辨率覆写」）。
+ * 渲染分辨率覆写（高分辨率截图 / tile 渲染）的注入点（contract.md §4.3.4 的「分辨率覆写」）。
  *
  * <h2>为什么必须注入 {@code updateFramebufferSize}</h2>
  * {@code Minecraft.updateFramebufferSize()} 是 framebuffer 尺寸的<b>唯一</b>来源：

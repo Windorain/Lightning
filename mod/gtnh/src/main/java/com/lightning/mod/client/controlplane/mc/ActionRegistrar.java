@@ -9,9 +9,23 @@ import com.lightning.mod.client.controlplane.mc.capture.ShotMultiAction;
 import com.lightning.mod.client.controlplane.mc.cmd.CmdExecAction;
 import com.lightning.mod.client.controlplane.mc.cmd.ExportSessionAction;
 import com.lightning.mod.client.controlplane.mc.cmd.SdeCommandWhitelist;
+import com.lightning.mod.client.controlplane.mc.read.ReadBlockInfoAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadBlocksAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadDiffAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadInventoryAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadOverviewAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadPlayerAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadRunAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadTeAction;
+import com.lightning.mod.client.controlplane.mc.scene.EntityClearAction;
+import com.lightning.mod.client.controlplane.mc.scene.EntitySpawnAction;
+import com.lightning.mod.client.controlplane.mc.scene.InventoryWriteAction;
+import com.lightning.mod.client.controlplane.mc.scene.PlayerPoseAction;
+import com.lightning.mod.client.controlplane.mc.scene.PlayerStateAction;
+import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
 
 /**
- * 动作注册表（contract.md §4 的 8 个动作）。
+ * 动作注册表（自描述是验收锚之一，见 contract.md §2 的 {@code GET /cp/v1/actions}）。
  *
  * <p>
  * 这里的自描述是验收锚之一（A9）：**无先验知识的调用方仅凭 {@code GET /cp/v1/actions} 就能完成调用**。
@@ -19,14 +33,21 @@ import com.lightning.mod.client.controlplane.mc.cmd.SdeCommandWhitelist;
  * 引入版本 {@code since}。描述与行为必须同步更新——描述错了比没有描述更糟。
  *
  * <p>
+ * 分组：PR-1 的 11 个（{@code core.*}/{@code world.*}/{@code case.*}）+ PR-2 的 3 个取证级
+ * （{@link #registerForensicActions}）+ #98 的 8 个观察面读面（{@link #registerReadActions}）
+ * + #99 的 6 个 L0 布景原语（{@link #registerSceneActions}）。
+ *
+ * <p>
  * 同步 vs 步进：{@code core.*} / {@code world.info} / {@code case.validate} 是同步动作
- * （单次 tick 内完成）；其余世界/用例动作跨 tick 执行，注册为步进动作。
+ * （单次 tick 内完成）；世界/用例/截图动作与 PR-2 的 {@code shot.multi} 跨 tick 执行，注册为步进动作。
+ * L0 组（{@code scene.*}）是同步动作——只做一次性字段写入，无跨 tick 等待。
  * 全部动作都由 {@code ActionSteppingExecutor} 执行（它同时兼容同步注册项）。
  *
  * <h2>动作数与契约版本（D3 漂移防线）</h2>
  *
  * 动作面随 PR 追加而增长：PR-1 = 8 个（1.0）、PR-2 = +3 取证（1.1）、PR-3 判据（1.2）、
- * 收口T3 = +2 命令通道（1.3）。<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
+ * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、收口T3 = +2 命令通道（1.4）——当前 27 个。
+ * <b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
  * 而实际 11 个（Gitea #97 §5-D3 判为文档漂移）。注册数可在实机经
  * {@code GET /cp/v1/actions} 的 {@code count} 字段一步核对，改动本文件后请顺手核一次。
  */
@@ -41,7 +62,8 @@ public final class ActionRegistrar {
     private ActionRegistrar() {}
 
     /**
-     * 注册全部动作（PR-1 的 8 个 + PR-2 的 3 个取证 + 收口T3 的 2 个命令通道 = 13 个）。
+     * 注册全部动作（PR-1 的 8 个 + PR-2 的 3 个取证 + #98 的 8 个读面 + #99 的 6 个 L0
+     * + 收口T3 的 2 个命令通道 = 27 个）。
      *
      * <p>
      * 数字以实机 {@code GET /cp/v1/actions} 的 {@code count} 为权威（见类注释「动作数与契约版本」）。
@@ -187,10 +209,11 @@ public final class ActionRegistrar {
         registry.registerStepping(
             ActionDescriptor.builder("case.run", Tier.SCENE)
                 .description(
-                    "执行用例（整跑或按段，同一实现）：world→capture→build→cameras→criteria→evidence，"
+                    "执行用例（整跑或按段，同一实现）：world→capture→build→read→cameras→criteria→evidence，"
                         + "逐段落 segments/<name>.json，写 criteria.json / evidence.json / observation.json。"
                         + "capture 段建立捕获会话（期间世界写动作被拒 CP-STATE-001），cameras 段逐机位走 shot.multi 的"
-                        + "同一实现；cameras 段非空时本动作按内容升格为 forensic（不足 CP-AUTH-002）。")
+                        + "同一实现；cameras 段非空时本动作按内容升格为 forensic（不足 CP-AUTH-002）。"
+                        + "read 段（v1.3）逐条执行用例声明的 read.* 动作，读数落本 run 目录供 criteria 直接引用。")
                 .optional("file", ActionDescriptor.TYPE_PATH, "用例文件：绝对路径，或相对 <mcDataDir>/controlplane/cases/")
                 .optional("inline", ActionDescriptor.TYPE_OBJECT, "内联用例（JSON 对象或用例 JSON 文本）；与 file 互斥")
                 .optional(
@@ -223,7 +246,9 @@ public final class ActionRegistrar {
                 .build(),
             () -> new CaseRunAction(runtime));
 
+        registerSceneActions(runtime, registry);
         registerForensicActions(runtime, registry);
+        registerReadActions(runtime, registry);
         registerCommandActions(runtime, registry);
     }
 
@@ -311,7 +336,432 @@ public final class ActionRegistrar {
     }
 
     /**
-     * PR-2 取证级动作（contract.md §4.1）：{@code shot.multi} / {@code capture.begin} / {@code capture.end}。
+     * 观察面读面动作（issue #98，{@code client/controlplane/mc/read/}）：全部 {@link Tier#OBSERVE}。
+     *
+     * <h2>为什么全部是同步动作</h2>
+     * 读面要求在<b>一次 tick 内</b>读完并返回：跨 tick 的读面会读到两个不同的世界状态
+     * （中间别的动作改了世界），「调用前后世界哈希不变」（B1）就无从判定。八个动作都不做
+     * 文件等待、不排队、不重试，故注册为同步。唯一例外是 {@code read.diff} 的
+     * {@code expectManifestFile} 路径要读一次磁盘——那次读也在同一 tick 内完成。
+     *
+     * <h2>自描述纪律</h2>
+     * 「没有自描述的动作视为不存在」（需求书 §8.1）：因此这八个的 {@code description}/
+     * 逐参数 {@code description}/{@code returns}/{@code example}/{@code since} 一律写全，
+     * 且默认值以 {@code default} 字段机读可见（D3）。
+     *
+     * <p>
+     * 命名取 {@code read.*}：与既有的 {@code world.info}（世界身份）、{@code shot.multi}（视觉）
+     * 分开——读面是「结构化读数」这一族，将来还会有同族动作，前缀即分组。
+     */
+    private static void registerReadActions(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        registry.register(
+            ActionDescriptor.builder(ReadBlocksAction.NAME, Tier.OBSERVE)
+                .description(
+                    "区域方块读回：读闭区间区域内每一格的 {pos, id, blockId, meta, te}，"
+                        + "并给出与 world.rebuild 场景清单同口径的规范化 sha256。只读，调用前后世界不变。"
+                        + " from/to 运行期必填（缺失报 CP-VALID-002，context.fields 逐字段）——"
+                        + "自描述不标 required，理由同 world.rebuild：让「服务端的参数校验」在负测试里可观测，"
+                        + "而不是一律被调用方按自述提前拦掉；region 与 from/to 二选一，同给且不一致报 CP-VALID-002。")
+                .optional("from", ActionDescriptor.TYPE_ARRAY, "区域起点 [x,y,z]（闭区间，含）；运行期必填，缺失报 CP-VALID-002")
+                .optional("to", ActionDescriptor.TYPE_ARRAY, "区域终点 [x,y,z]（闭区间，含，须逐轴 ≥ from）；运行期必填，缺失报 CP-VALID-002")
+                .optional(
+                    "region",
+                    ActionDescriptor.TYPE_OBJECT,
+                    "等价写法 {from:[x,y,z], to:[x,y,z]}；与 from/to 二选一，同给且不一致报 CP-VALID-002")
+                .optional(
+                    "includeAir",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.TRUE,
+                    "blocks 数组是否包含空气（blockId=0）；默认 true。注意：sha256 恒按含空气的完整区域算，不受本参数影响")
+                .optional("hash", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "是否计算 sha256 与 hashInput；默认 true")
+                .returns(
+                    "{schema, action, region{from,to,volume}, volume, blockCount, airCount, airSkipped, includeAir, "
+                        + "ordering, blocks[{pos,blockId,meta,id,te}], sha256, hashScope, "
+                        + "hashInput{blocks:[{pos,blockId,meta}]}, readAt}；"
+                        + "airCount = 区域里的空气块数（与 includeAir 无关）；airSkipped = 因 includeAir=false 被过滤掉的块数")
+                .example("{\"from\":[64,11,64],\"to\":[70,14,70]}")
+                .example("{\"region\":{\"from\":[64,12,64],\"to\":[64,12,64]},\"includeAir\":false}")
+                .since("1.3")
+                .build(),
+            new ReadBlocksAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadOverviewAction.NAME, Tier.OBSERVE)
+                .description("世界概览（服务端权威世界）：维度/时间/天气/已加载区块数/实体与方块实体计数（按类型分组）、" + "玩家清单，并附 world.info 同一份世界身份字段。只读。")
+                .optional("entities", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "是否统计实体与方块实体（关掉可省一次全表遍历）")
+                .optional(
+                    "topEntityTypes",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(10),
+                    "按类型分组返回前 N 名（降序，同数按键名升序）；0 表示不分类型")
+                .optional(
+                    "chunkRange",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "[minX,maxX,minZ,maxZ] 区块坐标（闭区间）——显式给出时才逐块列举已加载区块。"
+                        + "注意 provideChunk 对未加载区块会触发加载（读盘），故不做默认行为；区块数上限 4096")
+                .returns(
+                    "{schema, action, world{...（同 world.info）}, time{worldTime,totalWorldTime,day,timeOfDay}, "
+                        + "weather{raining,thundering,rainStrength,thunderStrength,rainTime?,thunderTime?,rainingScheduled?,thunderingScheduled?}, "
+                        + "chunks{loaded,source,listed,chunkRange?,chunkRangeNote?,chunks[]}, "
+                        + "entities{count,typeCount,byType[{type,count}],truncatedTypes,source}, "
+                        + "tileEntities{count,typeCount,byType,truncatedTypes,source}, "
+                        + "players{count,names[]}, chunkProvider{class,serverWorldAvailable}, readAt}")
+                .example("{}")
+                .example("{\"entities\":false}")
+                .since("1.3")
+                .build(),
+            new ReadOverviewAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadPlayerAction.NAME, Tier.OBSERVE)
+                .description(
+                    "玩家状态（服务端 EntityPlayerMP 权威侧）：位置（服务端与客户端各一份）、朝向与视线、生命/护甲/"
+                        + "吸收/燃烧/氧气、饥饿、游戏模式与能力、经验、药水效果、手持与光标物品。只读。")
+                .returns(
+                    "{schema, action, name, uuid?, entityId, dimension, source, "
+                        + "pos{server[3],eye[3],client?[3],clientName?}, "
+                        + "rotation{yaw,pitch,headYaw,facing,look[3]}, "
+                        + "health{health,maxHealth,absorption,armor,dead,alive,onGround,fallDistance,burning,wet,inWater,air,maxAir}, "
+                        + "food{foodLevel,saturationLevel,needsFood}?, gameMode{gameType,gameTypeId,isCreative,isAdventure,"
+                        + "allowFlying,isFlying,isCreativeMode,disableDamage,walkSpeed}, "
+                        + "experience{level,total,progress}, effects[{id,name,amplifier,duration,ambient}], "
+                        + "held{slot,main{...},cursor{item{...}}}, ping, readAt}")
+                .example("{}")
+                .since("1.3")
+                .build(),
+            new ReadPlayerAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadInventoryAction.NAME, Tier.OBSERVE)
+                .description(
+                    "背包与容器逐槽读回。source=player 读服务端玩家背包（主背包 36 + 护甲 4）；"
+                        + "source=tile 读 at 处方块实体实现的 IInventory；source=ender 读玩家末影箱。只读。"
+                        + "容器不存在报 CP-STATE-001（空容器与不存在的容器不是一回事，不返回空槽表）。")
+                .optional(
+                    "source",
+                    ActionDescriptor.TYPE_STRING,
+                    ReadInventoryAction.SOURCE_PLAYER,
+                    "player | tile | ender")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "source=tile 时必填：容器坐标 [x,y,z]（也接受 {pos:[x,y,z]}）")
+                .optional("includeEmpty", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "是否含空槽；false 只回非空槽（槽号仍是原编号，不留索引错觉）")
+                .optional("nbtMaxEntries", ActionDescriptor.TYPE_INT, Integer.valueOf(24), "逐槽 NBT 摘要的成员数上限（正整数）")
+                .returns(
+                    "{schema, action, source, inventory?{size,mainSize,armorSize,currentItem,heldSlot,slotMeaning,slots[],cursor{item}}, "
+                        + "container?{at,teClass,size,name,customName,stackLimit,slotMeaning,slots[]}, name?, owner?, readAt}；"
+                        + "每槽 {slot,empty,id?,meta?,count?,maxStackSize?,damage?,maxDamage?,displayName?,nbt?}")
+                .example("{\"source\":\"player\"}")
+                .example("{\"source\":\"tile\",\"at\":[65,12,64]}")
+                .since("1.3")
+                .build(),
+            new ReadInventoryAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadTeAction.NAME, Tier.OBSERVE)
+                .description(
+                    "方块实体状态：逐位置给「通用 TE 事实」（类名/是否在位/NBT 摘要）+「逐族描述器输出」"
+                        + "（与 te-state-equals 判据、观测记录 runtimeReads 同一个读取口，不另起一套）。只读。"
+                        + "已注册族与缺席族（模组未装）分别在 familiesRegistered / absentFamilies 里如实给出。")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "位置 [x,y,z] 或位置清单 [[x,y,z],…]；与 from/to 三选一")
+                .optional("from", ActionDescriptor.TYPE_ARRAY, "区域普查起点 [x,y,z]（体积 ≤ 4096）")
+                .optional("to", ActionDescriptor.TYPE_ARRAY, "区域普查终点 [x,y,z]")
+                .optional(
+                    "includeNbt",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.TRUE,
+                    "是否读 TE 的 NBT 摘要（writeToNBT 的受限摘要；仅供留痕，判据该断言族状态）")
+                .returns(
+                    "{schema, action, count, familiesRegistered[], absentFamilies{族:缺席原因}, "
+                        + "tiles[{pos, tile{present,blockId,meta,class?,superclass?,blockMetadata?,nbt?}, "
+                        + "claimedFamily, claimedState, families[{family,state,sha256?,note?}]}], pointerHint, readAt}")
+                .example("{\"at\":[65,12,64]}")
+                .example("{\"at\":[[65,12,64],[66,12,64]],\"includeNbt\":false}")
+                .since("1.3")
+                .build(),
+            new ReadTeAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadBlockInfoAction.NAME, Tier.OBSERVE)
+                .description(
+                    "方块与物品信息（注册名/渲染类型/是否 TESR/是否 ISBRH/所需工具与等级/材质/硬度抗爆/掉落物）。"
+                        + "三选一：at 读世界里那一格（含 TESR 判定，问的是渲染器自己的注册表）；"
+                        + "block 按注册名问方块表；item 按注册名问物品表。只读。")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "世界里的一格 [x,y,z]（读该格的方块与其实例的渲染信息）")
+                .optional("block", ActionDescriptor.TYPE_STRING, "方块注册名 modid:name（裸名按 minecraft: 处理）")
+                .optional("item", ActionDescriptor.TYPE_STRING, "物品注册名 modid:name")
+                .optional(
+                    "meta",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(0),
+                    "item/block 查询时使用的 meta（影响 unlocalizedName/工具类/放置物）")
+                .returns(
+                    "{schema, action, queryKind, block?{at?,id,blockId,meta,air,class,unlocalizedName,localizedName,"
+                        + "render{renderType,renderTypeName,renderTypeNameScope,isNormalCube,isOpaqueCube,renderBlockPass,"
+                        + "isFullBlock,lightValue,hasTileEntity,tickRandomly,tileEntity{available,present,class?,"
+                        + "hasSpecialRenderer,rendererClass?,rendererSource?},isTesr,isIsbrh,isIsbrhScope}, "
+                        + "harvest{tool,level}, material{name,liquid,solid,opaque,blocksGrass,toolNotRequired}, "
+                        + "hardness,resistance,slipperiness,lightOpacity,stepSound, drops{itemDroppedId,itemDropped,"
+                        + "quantityDropped,scope}}, item?{id,queriedId,meta,class,unlocalizedName,maxStackSize,maxDamage,"
+                        + "damageable,repairable,hasSubtypes,enchanted,toolClasses[],displayName,asBlockPlaced?}, readAt}")
+                .example("{\"at\":[65,12,64]}")
+                .example("{\"block\":\"minecraft:chest\"}")
+                .example("{\"item\":\"minecraft:diamond_pickaxe\"}")
+                .since("1.3")
+                .build(),
+            new ReadBlockInfoAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadDiffAction.NAME, Tier.OBSERVE)
+                .description(
+                    "状态差异：期望态（内联清单 / 场景清单对象 / 存档内最新场景清单）与服务端世界实读逐格 diff，"
+                        + "逐格给出 kinds[blockId|meta] 与两侧读数，并给双侧规范化 sha256。只读（不开可写段）。"
+                        + "expectManifestFile 路径会开 run 目录并把结果落 read/diff.json 登记进清单（产物显式）。")
+                .optional(
+                    "expectInline",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "内联期望 [{at:[x,y,z],id:\"minecraft:stone\",meta:0},…]（与 build 段的 block 步同形）")
+                .optional("expectManifest", ActionDescriptor.TYPE_OBJECT, "场景清单对象（与 world/scene-manifest.json 同形）")
+                .optional(
+                    "expectManifestFile",
+                    ActionDescriptor.TYPE_STRING,
+                    "托管世界目录名（cp_ 前缀）：读 saves/<folder>/scene-manifest.json")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "只比这一格 [x,y,z]（给出时忽略其余位置）")
+                .optional(
+                    "maxChanges",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(4096),
+                    "changes 数组的输出上限（超出记 truncatedChanges，不静默截断）")
+                .returns(
+                    "{schema, action, expectSource, checked, same, different, truncatedChanges, maxChanges, "
+                        + "changes[{pos,kinds[blockId|meta],expect,actual}], "
+                        + "hashes{actual,expected,equal,scope}, scope, resultPath?, resultSha256?, resultBytes?, readAt}")
+                .example(
+                    "{\"expectInline\":[{\"at\":[65,12,64],\"id\":\"minecraft:stone\",\"meta\":0}],\"expectManifestFile\":\"cp_demo\"}")
+                .example("{\"expectManifestFile\":\"cp_demo\"}")
+                .since("1.3")
+                .build(),
+            new ReadDiffAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadRunAction.NAME, Tier.OBSERVE)
+                .description(
+                    "run 产物清单读回：枚举 run 目录并逐 run 实读磁盘 manifest.json，给出产物 path/bytes/sha256/role、"
+                        + "磁盘存在性与大小一致性（missingFiles/sizeMismatch），并单独归组 shots/ 下的截图产物"
+                        + "（用于确认 shot.multi 等取证动作的产物确实进了 run 清单）。只读，不下载产物内容。")
+                .optional(
+                    "limit",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(ReadRunAction.DEFAULT_LIMIT),
+                    "返回的 run 条数上限（最新的在前）")
+                .optional("runId", ActionDescriptor.TYPE_STRING, "只读这一个 run（给出时忽略 limit）")
+                .optional(
+                    "role",
+                    ActionDescriptor.TYPE_STRING,
+                    "只保留该 role 的产物（如 shot / shot-meta / read-diff）；不影响 run 是否入选")
+                .optional("caseId", ActionDescriptor.TYPE_STRING, "只保留该 caseId 的 run")
+                .returns(
+                    "{schema, action, runsRoot, count, visited, available, limit, artifactCount, note, "
+                        + "runs[{runId,caseId,jobSeq,createdAt,dir,manifestPresent,artifacts[{path,bytes,sha256,role,"
+                        + "exists,diskBytes?,diskMismatch?}],artifactCount,missingFiles,sizeMismatch,"
+                        + "shotArtifacts[{path,role,sha256,bytes}],shotArtifactCount}], readAt}")
+                .example("{}")
+                .example("{\"role\":\"shot\",\"limit\":5}")
+                .since("1.3")
+                .build(),
+            new ReadRunAction());
+    }
+
+    /**
+     * L0 布景原语（#99，contract.md §4.4）：实体 / 玩家状态 / 背包 / 天气时间 / 位置朝向。
+     *
+     * <p>
+     * 六个动作全是 {@link Tier#SCENE} 同步动作——它们只在服务端权威世界上做一次性的字段写入
+     * （无跨 tick 等待、无世界装卸），因此不按步进注册。<b>层归属</b>按 #96 §4.1：本组是
+     * <b>L0</b>——直接设定状态、用于布景与构造输入；L0 的产物不能当作 L1（玩家操作）的证据
+     * （#96 §4.2）。带「拿到物品」语义的 {@code scene.inventory.write} 与 #101 的 L1「拾取」
+     * 是两义、两义都做、按层标注（裁决 4）；{@code scene.player.pose} 与 #101 的 L1 真实移动同理（裁决 3）。
+     *
+     * <p>
+     * 共同口径（写在每个动作的类注释里，这里只列索引）：
+     * <ul>
+     * <li><b>只写服务端权威世界</b>（{@code MinecraftServer.worldServers[0]}）——客户端
+     * {@code WorldClient} 是只读投影，写它会被原版同步覆写（见 {@code mc.scene.L0Session}）；</li>
+     * <li><b>同步一律走原版出口</b>（S2B/S06/S1F/S1D/S08/S2F…），不自造同步、不静态回填（契约 §6.4）；</li>
+     * <li><b>写入门控</b>：捕获会话期间被别的作业调用即 {@code CP-STATE-001}（契约 §4.2，既有口径）；</li>
+     * <li><b>返回值自带读回</b>：{@code before}/{@code after} 或逐项 {@code readBack}，外加
+     * {@code sceneReadback}（按世界内最新场景清单的位置集合实读回读的规范化哈希）。
+     * 读面（#98）未落地时，调用方据此自证「这次写观察到了什么变化」。</li>
+     * </ul>
+     */
+    private static void registerSceneActions(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        registry.register(
+            ActionDescriptor.builder("scene.entity.spawn", Tier.SCENE)
+                .description(
+                    "L0：在托管世界生成实体（含掉落物）。只作用于服务端权威世界，随后经原版实体跟踪器同步给客户端。" + "掉落物给 item（物品注册名）而不是 entity；一般实体给 entity。"
+                        + "entity 与 item 互斥且必须给一个。"
+                        + "实体名口径（1.7.10 实测）：EntityList 的原生键不带 minecraft: 前缀（Zombie / Item / XPOrb；"
+                        + "FML 模组实体是 <modId>.<name>）。现代写法 minecraft:zombie 也接受——解析会规范化后匹配，"
+                        + "查不到时错误上下文里带已注册名样本。"
+                        + "层归属：本动作是布景原语（构造「拾取」的输入），不是「玩家扔出了物品」的证据"
+                        + "——拾取属 L1（#101），两层结论不互替。")
+                .optional(
+                    "entities",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "实体条目数组 [entry]，逐条生成。entry={entity?|item?, pos?, meta?, count?, nbt?, yaw?, pitch?}；"
+                        + "entity 与 item 互斥必居其一（item=掉落物简写）。条目内默认值："
+                        + "meta=0、count=1（域 1..64）、yaw=0、pitch=0；pos 缺省用顶层 pos。"
+                        + "nbt 为 SNBT 文本：掉落物按 /give 口径（Count/Damage/tag），实体按 /summon 口径（须含 id）")
+                .optional("entity", ActionDescriptor.TYPE_OBJECT, "单个实体条目（与 entities 可同时给，追加在后）")
+                .optional("pos", ActionDescriptor.TYPE_ARRAY, "默认坐标 [x,y,z]（条目自身没给 pos 时用；顶层与条目都没给 = CP-VALID-002）")
+                .returns(
+                    "{action, requested, spawnedCount, spawned[{ok,entityId,class,entityIdNum,pos,item?,nbtApplied}], "
+                        + "failed[{index,error}], entityCounts[{key,count}], dimension, sceneReadback{present,sha256?,...}}")
+                .example(
+                    "{\"entities\":[{\"item\":\"minecraft:stone\",\"meta\":0,\"count\":3,\"pos\":[64.5,13,64.5]},"
+                        + "{\"entity\":\"Zombie\",\"pos\":[66.5,13,64.5],\"yaw\":180}],\"confirm\":true}")
+                .example(
+                    "{\"entity\":{\"entity\":\"minecraft:pig\",\"pos\":[70.5,13,70.5],"
+                        + "\"nbt\":\"{id:\\\"Pig\\\",CustomNameTag:test,NoAI:1b}\"},\"confirm\":true}")
+                .since("1.3")
+                .build(),
+            new EntitySpawnAction());
+
+        registry.register(
+            ActionDescriptor.builder("scene.entity.clear", Tier.SCENE)
+                .description(
+                    "L0：清除托管世界范围内的实体（含掉落物）。选择条件 box/entity/item 可组合取交集，"
+                        + "全不给即「除玩家外全清」。用原版 removeEntity（当场离场，不是打 setDead 标记）。"
+                        + "includePlayers 默认 false：清掉自己会让无人值守流程卡在无玩家状态，必须是显式选择。"
+                        + "注：这是轮内清场原语，不构成 hermetic 保证（不清方块/背包/天气）——验收类固定程序的"
+                        + "起世界手段仍是 world.rebuild（case-file.md §8.8）。")
+                .optional("box", ActionDescriptor.TYPE_ARRAY, "范围 [[minx,miny,minz],[maxx,maxy,maxz]]（按实体包围盒中心判定）")
+                .optional(
+                    "entity",
+                    ActionDescriptor.TYPE_STRING,
+                    "只清该 EntityList 注册名（1.7.10 原生键如 Item/Zombie；minecraft:item 也接受）")
+                .optional("item", ActionDescriptor.TYPE_STRING, "只清掉落物里物品为该项的（与 entity 互斥）")
+                .optional("meta", ActionDescriptor.TYPE_INT, "与 item 搭配：只清该 meta（不给即不限 meta）")
+                .optional("includePlayers", ActionDescriptor.TYPE_BOOL, Boolean.FALSE, "是否连玩家一起清（默认 false）")
+                .returns(
+                    "{action, removedCount, removed[{entityId,class,entityIdNum,pos,item?,meta?,count?,removed}], "
+                        + "selector{box,entity,item,meta,includePlayers}, remainingEntities, sceneReadback{...}}")
+                .example("{\"box\":[[63,12,63],[72,20,72]],\"entity\":\"Item\",\"confirm\":true}")
+                .example("{\"item\":\"minecraft:stone\",\"meta\":0,\"confirm\":true}")
+                .since("1.3")
+                .build(),
+            new EntityClearAction());
+
+        registry.register(
+            ActionDescriptor.builder("scene.player.state", Tier.SCENE)
+                .description(
+                    "L0：设定服务端权威玩家的游戏模式 / 生命 / 经验 / 药水效果。只改服务端 EntityPlayerMP，"
+                        + "然后走原版同步出口（S2BPacketChangeGameState(3) / S06PacketUpdateHealth / "
+                        + "S1FPacketSetExperience / S1DPacketEntityEffect），不自造同步。"
+                        + "生命下限 1.0（0 会触发死亡流程，无人值守会卡在死亡界面，故不提供）；"
+                        + "上界钳到玩家自身 getMaxHealth()。返回值带 before/after 两份实读快照。")
+                .optional("gameType", ActionDescriptor.TYPE_STRING, "survival | creative | adventure（或 0|1|2）")
+                .optional("health", ActionDescriptor.TYPE_NUMBER, "生命值（≥1.0，自动钳到 maxHealth）")
+                .optional("experienceLevel", ActionDescriptor.TYPE_INT, "经验等级（0..21863）")
+                .optional("experienceTotal", ActionDescriptor.TYPE_INT, "经验总量（≥0）")
+                .optional("experience", ActionDescriptor.TYPE_NUMBER, "经验条进度（[0,1)）")
+                .optional(
+                    "effects",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "药水效果 [{id,duration,amplifier,ambient}]；条目内默认值：duration=600（tick，域 ≥1）、"
+                        + "amplifier=0（域 0..255）、ambient=false。id 可为数字 id（上限 = 运行期 "
+                        + "Potion.potionTypes 长度：原版 32、GTNH 实测 256），或效果名"
+                        + "（稳定名为 Potion.getName()，如 potion.nightVision；night_vision / nightVision / "
+                        + "minecraft:night_vision 都接受）。查不到时错误上下文里带已注册名样本（含 id）")
+                .optional("clearExisting", ActionDescriptor.TYPE_BOOL, Boolean.FALSE, "先清空既有药水效果（默认 false）")
+                .returns(
+                    "{action, applied[{field,...readBack}], before{...}, after{...}, playerName, dimension, sceneReadback{...}}")
+                .example(
+                    "{\"gameType\":\"creative\",\"health\":20,\"experienceLevel\":30,\"experienceTotal\":1395,"
+                        + "\"effects\":[{\"id\":\"night_vision\",\"duration\":6000,\"amplifier\":0}],\"confirm\":true}")
+                .since("1.3")
+                .build(),
+            new PlayerStateAction());
+
+        registry.register(
+            ActionDescriptor.builder("scene.inventory.write", Tier.SCENE)
+                .description(
+                    "L0：逐槽写入玩家背包或世界里某容器。即「拿到物品」之「给」（裁决 4）：直接写 {id,meta,count,nbt}，"
+                        + "用于布景与构造输入；另一义「拾取」属 L1（#101），两义都做、按层标注，结论不互替。"
+                        + "target=player 用 InventoryPlayer 下标：0..8 快捷栏（0 是手持）、9..35 主背包、36..39 盔甲"
+                        + "（36 靴/37 护腿/38 胸甲/39 头盔）——不是 ContainerPlayer 的界面槽号。"
+                        + "target=container 用 at:[x,y,z] 指向的 IInventory 下标。id 给 air 即清空该槽。"
+                        + "写入走 setInventorySlotContents + markDirty，并对玩家发一次 Container.detectAndSendChanges。")
+                .optional("target", ActionDescriptor.TYPE_STRING, "player", "player | container（默认 player）")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "容器坐标 [x,y,z]（target=container 时必填）")
+                .optional(
+                    "slots",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "槽位条目数组 [{slot,id,meta,count,nbt}]；slot 必填，条目内默认值："
+                        + "meta=0、count=1（域 1..64，清空请用 id=air）、nbt 缺省即不带 NBT")
+                .optional("slot", ActionDescriptor.TYPE_OBJECT, "单个槽位条目（与 slots 可同时给，追加在后）")
+                .returns(
+                    "{action, layer:\"L0\", semantics:\"give\", layerNote, target{kind,player?|at?,teClass?,size,inventoryName}, "
+                        + "writtenCount, written[{slot,requested,actual,matches}|{slot,cleared}], readBack[{slot,stack|empty}], "
+                        + "sceneReadback{...}}")
+                .example(
+                    "{\"target\":\"player\",\"slots\":[{\"slot\":0,\"id\":\"minecraft:stone\",\"count\":64},"
+                        + "{\"slot\":9,\"id\":\"minecraft:diamond_pickaxe\",\"meta\":0,\"count\":1},"
+                        + "{\"slot\":10,\"id\":\"air\"}],\"confirm\":true}")
+                .example(
+                    "{\"target\":\"container\",\"at\":[65,12,65],\"slots\":[{\"slot\":0,\"id\":\"minecraft:torch\",\"count\":16}],"
+                        + "\"confirm\":true}")
+                .since("1.3")
+                .build(),
+            new InventoryWriteAction());
+
+        registry.register(
+            ActionDescriptor.builder("scene.weather.time", Tier.SCENE)
+                .description(
+                    "L0：设定世界的权威时刻与天气（改世界状态本身，持续生效）。" + "与 shot.multi 的 worldTime 是两义：后者是「这一次拍摄的光照基准」，本动作改的是世界，"
+                        + "会被 S03 广播给客户端并在后续任何读面/拍摄中可见。"
+                        + "设天气时同时重置 rainTime/thunderTime（1.7.10 天气是倒计时驱动的，只设 raining 会在"
+                        + "原倒计时到点时自己翻回去）；只写服务端，客户端由 S2BPacketChangeGameState(7/8) 渐入。")
+                .optional("worldTime", ActionDescriptor.TYPE_STRING, "0..23999 tick，或别名 day|noon|sunset|night|midnight")
+                .optional("weather", ActionDescriptor.TYPE_STRING, "clear | rain | thunder")
+                .optional(
+                    "duration",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(WeatherTimeAction.DEFAULT_DURATION_TICKS),
+                    "天气持续时间（tick，默认 12000 = 10 分钟）")
+                .optional("doDaylightCycle", ActionDescriptor.TYPE_BOOL, "是否让时间自然流逝（游戏规则，不传即不改）")
+                .returns(
+                    "{action, layer:\"L0\", semanticsNote, applied{worldTime?,weather?,duration?,raining?,thundering?,rainTime?,"
+                        + "thunderTime?,doDaylightCycle?}, before{...}, after{...}, clientView{...}, sceneReadback{...}}")
+                .example("{\"worldTime\":6000,\"weather\":\"clear\",\"duration\":24000,\"confirm\":true}")
+                .example("{\"worldTime\":\"midnight\",\"weather\":\"thunder\",\"duration\":6000,\"confirm\":true}")
+                .since("1.3")
+                .build(),
+            new WeatherTimeAction());
+
+        registry.register(
+            ActionDescriptor.builder("scene.player.pose", Tier.SCENE)
+                .description(
+                    "L0：瞬时设定玩家位置与朝向（布景原语，不产生位移过程）。" + "与 #101 的 L1 真实移动/转向互补而不互替（裁决 3）：要「玩家站在这里看那边」用本动作；"
+                        + "要验证「走过去这件事本身」用 L1；L0 的产物不能当 L1 的证据。"
+                        + "走原版传送出口 EntityPlayerMP.setPositionAndUpdate（S08PacketPlayerPosLook）——直接改 posX 会被"
+                        + "客户端权威的位置包覆写回。yaw：0=南/+Z、90=西/-X、180=北/-Z、270=东/+X；"
+                        + "pitch：正=俯视、负=仰视（与 shot.multi 的 CameraSpec 同口径）。"
+                        + "allowFlying 默认 true：托管世界是全虚空，顺带开通创造飞行防坠亡。")
+                .optional("pos", ActionDescriptor.TYPE_ARRAY, "目标坐标 [x,y,z]（可为小数）")
+                .optional("yaw", ActionDescriptor.TYPE_NUMBER, "水平朝向（度）")
+                .optional("pitch", ActionDescriptor.TYPE_NUMBER, "俯仰角（度，-90..90；正=俯视）")
+                .optional("allowFlying", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "顺带开通创造飞行并清零坠落距离（默认 true）")
+                .returns(
+                    "{action, layer:\"L0\", semantics:\"teleport\", layerNote, before{pos,yaw,pitch}, "
+                        + "after{pos,yaw,pitch,allowFlying,isFlying}, playerName, clientView{pos,yaw,pitch}, sceneReadback{...}}")
+                .example("{\"pos\":[64.5,13,64.5],\"yaw\":180,\"pitch\":30,\"allowFlying\":true,\"confirm\":true}")
+                .example("{\"yaw\":90,\"confirm\":true}")
+                .since("1.3")
+                .build(),
+            new PlayerPoseAction());
+    }
+
+    /**
+     * PR-2 取证级动作（contract.md §4.2）：{@code shot.multi} / {@code capture.begin} / {@code capture.end}。
      *
      * <p>
      * 三个动作都是 {@link Tier#FORENSIC}：截图与捕获是取证材料，比场景操作敏感。
@@ -369,7 +819,8 @@ public final class ActionRegistrar {
         registry.register(
             ActionDescriptor.builder("capture.begin", Tier.FORENSIC)
                 .description(
-                    "开始捕获会话：此后一切世界写动作（world.rebuild/world.snapshot/world.rollback 与 case.run 的 build 段）"
+                    "开始捕获会话：此后一切世界写动作（world.rebuild/world.snapshot/world.rollback、"
+                        + "case.run 的 build 段，以及 #99 的六个 scene.* L0 原语）"
                         + "被拒 CP-STATE-001，直到 capture.end。重复 begin 也是 CP-STATE-001（不做隐式续期）。")
                 .returns("{schema, began, jobId, action, beganAt, armed, requiredTier, contractVersion}")
                 .example("{\"confirm\":true}")

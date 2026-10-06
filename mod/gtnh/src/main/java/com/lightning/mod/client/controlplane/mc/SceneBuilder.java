@@ -399,8 +399,12 @@ public final class SceneBuilder {
         m.addProperty("generatorOptions", VoidWorldPreset.GENERATOR_OPTIONS);
         m.addProperty("stepCount", steps.size());
         m.addProperty("settleTicks", settleTicks);
-        m.add("blocks", Json.copyArray(blocks));
-        m.add("tileEntities", teArr);
+        // #112：条目集合的唯一口径是「同一 pos 后写覆盖」——本类按构建步逐条 append，
+        // 同一坐标被写两次时清单会出现两条同 pos 记录（哈希于是取决于构建历史）。
+        // 收敛点在 SceneManifest.manifestBlocks/manifestTes（哈希与读回也共用那一份去重），
+        // 因此落盘清单本身就是世界最终状态，而不只是算哈希时把它掩盖掉。
+        m.add("blocks", SceneManifest.manifestBlocks(blocks));
+        m.add("tileEntities", SceneManifest.manifestTes(teArr));
         if (teReads.size() > 0) {
             m.add("teReads", teReads);
         }
