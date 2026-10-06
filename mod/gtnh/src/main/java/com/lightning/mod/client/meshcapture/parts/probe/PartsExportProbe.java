@@ -25,6 +25,7 @@ import com.google.gson.JsonPrimitive;
 import com.lightning.mod.client.export.SceneEnvelopeBuilder;
 import com.lightning.mod.client.meshcapture.MeshCaptureService;
 import com.lightning.mod.client.meshcapture.parts.PartExportIntegrator;
+import com.lightning.mod.core.session.SdeCellCoords;
 
 import cpw.mods.fml.common.FMLLog;
 import cpw.mods.fml.relauncher.Side;
@@ -50,6 +51,10 @@ import cpw.mods.fml.relauncher.SideOnly;
  * <li><strong>幂等</strong>：同一含部件结构重复导出（两次独立 scan→baked）字节一致；</li>
  * <li><strong>信封透传</strong>：Envelope payload 解压后含 cellPartsGrid/partLists/
  * statsTemplate/partIconTextures 四字段。</li>
+ * <li><strong>成对 idioms（#81/#82，PR-2）</strong>：单一结构 scan 分支真实导出核对——无
+ * sdeCellNotes 时 {@code tooltipPalette} 必须作为<strong>空数组</strong>产出（修复前字段整体缺失，
+ * #80 写入丢文字链路的产出侧根因）；有 sdeCellNotes 时调色板收纳文本、cellTooltipGrid 指向条目、
+ * 临时字段消化移除；两态均核对信封非 frames 分支对两字段的透传。</li>
  * </ol>
  *
  * <p>
@@ -158,6 +163,9 @@ final class PartsExportProbe {
             writeArtifact(mc, "sde_parts_export_probe_runA.json", runA);
             writeArtifact(mc, "sde_parts_export_probe_baseline_enabled.json", enabledBytes);
             writeArtifact(mc, "sde_parts_export_probe_baseline_disabled.json", disabledBytes);
+
+            // ---------------- #81/#82：成对 idioms 真实导出核对（单一结构 scan 分支） ----------------
+            checkTooltipPair(mc, checks, out, stone);
         } catch (Throwable t) {
             checks.add(new JsonPrimitive("FAIL: 探针异常 " + PartsProbeReflect.describe(t)));
         }
@@ -457,6 +465,102 @@ final class PartsExportProbe {
             expect(checks, inner.has("partIconTextures"), "信封 payload 应有 partIconTextures");
         } catch (Throwable t) {
             checks.add(new JsonPrimitive("FAIL: 信封透传校验异常 " + PartsProbeReflect.describe(t)));
+        }
+    }
+
+    /**
+     * #81/#82 真实导出核对：同一格走两次真实 {@code finalizeStructureJson}（单一结构 scan 分支）。
+     * ①无 {@code sdeCellNotes}：{@code tooltipPalette} 必须作为<strong>空数组</strong>产出（#81 修复锁；
+     * 修复前字段整体缺失 ⇒ web 侧写入丢文字 + 悬空下标，见 #80）；②有 {@code sdeCellNotes}：
+     * 调色板收纳文本、网格指向条目、临时字段消化移除。两态均核对信封非 frames 分支透传（#82 回归面）。
+     */
+    private static void checkTooltipPair(Minecraft mc, JsonArray checks, JsonObject out,
+        PartsProbePlacement.Placed stone) {
+        try {
+            List<PartsProbePlacement.Placed> cols = new ArrayList<PartsProbePlacement.Placed>();
+            cols.add(stone);
+
+            // ① 无说明：#81 修复锁
+            byte[] noNotes = exportPretty(mc, cols);
+            JsonObject rootNo = new JsonParser().parse(new String(noNotes, StandardCharsets.UTF_8))
+                .getAsJsonObject();
+            expect(checks, rootNo.has("cellTooltipGrid"), "无说明导出应有 cellTooltipGrid（成对 idioms 之一）");
+            expect(checks, rootNo.has("tooltipPalette"), "#81: 无说明导出 tooltipPalette 必须产出（修复前缺失）");
+            if (rootNo.has("tooltipPalette")) {
+                expect(
+                    checks,
+                    rootNo.getAsJsonArray("tooltipPalette")
+                        .size() == 0,
+                    "#81: 无说明导出 tooltipPalette 应为空数组（与 frames 分支口径一致）");
+            }
+            writeArtifact(mc, "sde_parts_export_probe_tooltip_no_notes.json", noNotes);
+            out.addProperty("tooltipNoNotesSha256", sha256Hex(noNotes));
+
+            // ② 有说明：sdeCellNotes → 调色板 + 网格指向（键格式 "z,row,column"，见 SdeCellCoords）
+            JsonObject scan = buildScanDocument(mc, cols);
+            JsonObject notes = new JsonObject();
+            notes.addProperty(SdeCellCoords.cellKey(0, 0, 0), "探针备注:此格为石头");
+            scan.add("sdeCellNotes", notes);
+            MeshCaptureService.finalizeStructureJson(scan);
+            byte[] withNotes = PRETTY.toJson(scan)
+                .getBytes(StandardCharsets.UTF_8);
+            expect(checks, !scan.has("sdeCellNotes"), "sdeCellNotes 应被消化移除");
+            expect(
+                checks,
+                scan.has("tooltipPalette") && scan.getAsJsonArray("tooltipPalette")
+                    .size() == 1,
+                "有说明导出 tooltipPalette 应有 1 条");
+            if (scan.has("tooltipPalette")) {
+                expect(
+                    checks,
+                    "探针备注:此格为石头".equals(
+                        scan.getAsJsonArray("tooltipPalette")
+                            .get(0)
+                            .getAsString()),
+                    "调色板应收纳备注文本");
+            }
+            expect(
+                checks,
+                scan.has("cellTooltipGrid") && scan.getAsJsonArray("cellTooltipGrid")
+                    .get(0)
+                    .getAsJsonArray()
+                    .get(0)
+                    .getAsJsonArray()
+                    .get(0)
+                    .getAsInt() == 0,
+                "cellTooltipGrid 应指向调色板条目 0");
+            writeArtifact(mc, "sde_parts_export_probe_tooltip_with_notes.json", withNotes);
+            out.addProperty("tooltipWithNotesSha256", sha256Hex(withNotes));
+
+            // ③ 信封透传（非 frames 分支，#82 回归面：既有 copyIfPresent 口径不变）
+            checkTooltipEnvelope(checks, rootNo, "无说明");
+            checkTooltipEnvelope(checks, scan, "有说明");
+        } catch (Throwable t) {
+            checks.add(new JsonPrimitive("FAIL: 成对 idioms 核对异常 " + PartsProbeReflect.describe(t)));
+        }
+    }
+
+    private static void checkTooltipEnvelope(JsonArray checks, JsonObject root, String label) {
+        try {
+            JsonObject env = SceneEnvelopeBuilder.toEnvelope(root);
+            String b64 = env.get("payload")
+                .getAsString();
+            byte[] gz = Base64.getDecoder()
+                .decode(b64);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            GZIPInputStream gin = new GZIPInputStream(new ByteArrayInputStream(gz));
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = gin.read(buf)) != -1) {
+                bos.write(buf, 0, n);
+            }
+            gin.close();
+            JsonObject inner = new JsonParser().parse(new String(bos.toByteArray(), StandardCharsets.UTF_8))
+                .getAsJsonObject();
+            expect(checks, inner.has("tooltipPalette"), label + "：信封 payload 应有 tooltipPalette");
+            expect(checks, inner.has("cellTooltipGrid"), label + "：信封 payload 应有 cellTooltipGrid");
+        } catch (Throwable t) {
+            checks.add(new JsonPrimitive("FAIL: " + label + " 信封透传异常 " + PartsProbeReflect.describe(t)));
         }
     }
 

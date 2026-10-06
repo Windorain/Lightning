@@ -44,6 +44,9 @@ public final class SceneEnvelopeBuilder {
             copyIfPresent(rawFinal, inner, "blockPalette");
             copyIfPresent(rawFinal, inner, "textureBlobs");
             copyIfPresent(rawFinal, inner, "tooltipPalette");
+            // #82：成对 idioms 的另一半——frames 分支也搬 cellTooltipGrid（与非 frames 分支对齐）；
+            // copyIfPresent 天然字节干净：文档本来没有时不会凭空出现。
+            copyIfPresent(rawFinal, inner, "cellTooltipGrid");
             // P1.7（部件）：帧结构的 cellPartsGrid/partLists 随 frames 整体随行；
             // 文档级 statsTemplate/partIconTextures 仅在含部件数据时存在（copyIfPresent 天然字节干净）。
             copyIfPresent(rawFinal, inner, "statsTemplate");
