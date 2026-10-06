@@ -156,7 +156,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 | `scene.entity.spawn` | scene | 生成实体（含掉落物）。`item` 造掉落物、`entity` 造一般实体，二者互斥必居其一；可带 SNBT `nbt` |
 | `scene.entity.clear` | scene | 清除范围内实体（含掉落物）。选择条件 `box`/`entity`/`item` 取交集；`includePlayers` 默认 false |
 | `scene.player.state` | scene | 玩家游戏模式 / 生命 / 经验 / 药水效果（`before`/`after` 双快照） |
-| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给** |
+| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给**。模组权威取物/充电两种写法（#117）：`{slot,battery:"<GT ItemList 常量>"}` 由 GT 自己的清单决定物品与 meta；`{slot,battery,charge:"full"\|"empty"\|<EU>}` 经物品自己的 IC2 `IElectricItemManager` 充放电（`charge` ⟂ `nbt`，见 §6.5）。把满充 GT 电池写进机器充电槽即「给机器供电」 |
 | `scene.weather.time` | scene | 设定世界权威时刻与天气（持续生效；`shot.multi.worldTime` 是拍摄基准，两义不同） |
 | `scene.player.pose` | scene | 瞬时传送/转向——L0 布景原语，与 #101 的 L1 真实移动互补、两义按层标注 |
 
@@ -209,7 +209,9 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 2. **虚空世界**：`WorldType.FLAT` + 空层预设（无基岩无土层），固定种子；构建基点由用例文件给定。
 3. **幂等重建**：`world.rebuild` 对同一用例定义产生相同世界；场景构建步骤以「清场（托管区域 setBlockToAir）→ 放置 → TE 补全 → 静置」为固定序。**时序陷阱（PR-3 实证）**：AE2 空缆块会在首个 tick 自毁（`TileCableBus.onReady`）——用例中缆块的 `block` 步与其 `te` 步之间**不得插入 `wait`/`clear` 等跨 tick 步骤**，te 步必须紧随同 tick 执行（completer 对缺中心缆报 CP-STATE-001 兜底）。
 4. **TE 状态补全**（#55「设」第五项）：仅限场景构建阶段、捕获开始之前；必须经模组自身权威同步路径（如 `markBlockForUpdate` 触发 S35 description packet 摄取，或模组自己的 `initialize`/`addPart` 等 API）；**禁止**逐字段从静态数据推算回填。补全器按族注册（接口 `TeCompleter`），默认实现覆盖原版 TE；LP/AE2 族补全器随锚点场景交付。
-5. **补全器的权威放置职责（PR-3 明确）**：当模组的方块需要构造上下文时（LP 通用管块需 `createPipe`/`placePipe`、AE2 部件需 `addPart` 到既有缆），`te` 步的 completer 经**模组自身放置 API** 完成放置与补全；此时 `params` 声明的是**放置输入**（物品 id/朝向/面），不是 NBT 逐字段回填——该区分必须在 completer 类注释写明。**v1.2 注册表**：`vanilla` / `lp-pipe` / `ae2-part`。
+5. **补全器的权威放置职责（PR-3 明确）**：当模组的方块需要构造上下文时（LP 通用管块需 `createPipe`/`placePipe`、AE2 部件需 `addPart` 到既有缆、GT 机器方块需 `ItemMachines.placeBlockAt` 才会建 MetaTileEntity），`te` 步的 completer 经**模组自身放置 API** 完成放置与补全；此时 `params` 声明的是**放置输入**（物品 id/朝向/面），不是 NBT 逐字段回填——该区分必须在 completer 类注释写明。**v1.3 注册表**：`vanilla` / `lp-pipe` / `ae2-part` / `gt-machine`（#117 追加，同一族名同时注册补全器与描述器）。
+   - **补全器必须自带放置后验证**：`complete()` 返回 true 必须等价于「世界上真有一个可 tick 的模组方块实体」。反例（#117 的缺陷本体）：GT 机器用 `world.setBlock` 直铺只会得到一个 `mID == 0` 的空壳，其 `blockId`/`meta`/TE `class` **与真机器完全相同**——即 `world-hash-equals` 对「空壳 vs 可运行机器」是盲的。故 `gt-machine` 放置后读回 `getMetaTileID()`/`getMetaTileEntity()`，不符即 `CP-EXEC-001`；`GtMachineDescriber` 把同两项（外加 `shell` 布尔）暴露给 `read.te` 与 `te-state-equals`，负对照只能靠它判别。
+   - **充电/供电一类「模组状态注入」一律经模组自身 API**：GT 电池的充电状态存在 NBT 键 `GT.ItemCharge` 上，手写它即 §6.4 禁止的逐字段回填；`scene.inventory.write` 的 `charge` 走物品自己的 IC2 `IElectricItemManager`（GT `MetaBaseItem` 自实现之），并显式拒绝 `charge` 与 `nbt` 同时出现。**给机器供电的正确形态是把满充电池写进机器充电槽**（GT 自己的 tick 从槽里取电），而不是直接改机器的 EU 缓冲字段。
 6. 世界快照与回滚范围**包含** TE 补全后的状态。
 7. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。**L0 的 `scene.player.pose`（§4.4）是这条的显式化对应物**——同一件事由调用方按需触发，而不是只在进图时隐式做一次。
 8. **离图阻塞**：`mc.loadWorld(null)` 在 tick 线程内阻塞至集成服停机（原版「保存并退到标题」同路径），客户端会冻结数秒到数十秒——动存档目录前必须保证 region 句柄释放，这是 v1 的取舍。
