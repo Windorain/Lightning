@@ -9,6 +9,16 @@ import com.lightning.mod.client.controlplane.mc.capture.ShotMultiAction;
 import com.lightning.mod.client.controlplane.mc.cmd.CmdExecAction;
 import com.lightning.mod.client.controlplane.mc.cmd.ExportSessionAction;
 import com.lightning.mod.client.controlplane.mc.cmd.SdeCommandWhitelist;
+import com.lightning.mod.client.controlplane.mc.player.PlaceBlockAction;
+import com.lightning.mod.client.controlplane.mc.player.PlayerDigAction;
+import com.lightning.mod.client.controlplane.mc.player.PlayerGuiAction;
+import com.lightning.mod.client.controlplane.mc.player.PlayerInteractAction;
+import com.lightning.mod.client.controlplane.mc.player.PlayerLookAction;
+import com.lightning.mod.client.controlplane.mc.player.PlayerMoveAction;
+import com.lightning.mod.client.controlplane.mc.player.PlayerPickupAction;
+import com.lightning.mod.client.controlplane.mc.player.PlayerSession;
+import com.lightning.mod.client.controlplane.mc.player.SlotClickAction;
+import com.lightning.mod.client.controlplane.mc.player.UseItemAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadBlockInfoAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadBlocksAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadDiffAction;
@@ -35,7 +45,9 @@ import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
  * <p>
  * 分组：PR-1 的 11 个（{@code core.*}/{@code world.*}/{@code case.*}）+ PR-2 的 3 个取证级
  * （{@link #registerForensicActions}）+ #98 的 8 个观察面读面（{@link #registerReadActions}）
- * + #99 的 6 个 L0 布景原语（{@link #registerSceneActions}）。
+ * + #99 的 6 个 L0 布景原语（{@link #registerSceneActions}）+ #100 的 2 个命令通道
+ * （{@link #registerCommandActions}）+ #101 的 9 个 L1 玩家操作（{@link #registerPlayerActions}，
+ * {@code player.*}）。
  *
  * <p>
  * 同步 vs 步进：{@code core.*} / {@code world.info} / {@code case.validate} 是同步动作
@@ -46,8 +58,8 @@ import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
  * <h2>动作数与契约版本（D3 漂移防线）</h2>
  *
  * 动作面随 PR 追加而增长：PR-1 = 8 个（1.0）、PR-2 = +3 取证（1.1）、PR-3 判据（1.2）、
- * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、收口T3 = +2 命令通道（1.4）——当前 27 个。
- * <b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
+ * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、#100 = +2 命令通道（1.4）、#101 = +9 L1（1.5）
+ * ——当前 36 个。<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
  * 而实际 11 个（Gitea #97 §5-D3 判为文档漂移）。注册数可在实机经
  * {@code GET /cp/v1/actions} 的 {@code count} 字段一步核对，改动本文件后请顺手核一次。
  */
@@ -246,6 +258,7 @@ public final class ActionRegistrar {
                 .build(),
             () -> new CaseRunAction(runtime));
 
+        registerPlayerActions(runtime, registry);
         registerSceneActions(runtime, registry);
         registerForensicActions(runtime, registry);
         registerReadActions(runtime, registry);
@@ -333,6 +346,359 @@ public final class ActionRegistrar {
                 .since("1.4")
                 .build(),
             new CmdExecAction());
+    }
+
+    /**
+     * L1 玩家操作（issue #101，「收口T4」）：{@code client/controlplane/mc/player/}，全部 {@link Tier#SCENE}。
+     *
+     * <h2>这一组与 {@code scene.*}（L0）的区别（#96 §4.1，裁决 3）</h2>
+     * 不是「谁写的代码」，而是<b>请求从哪条路进入世界</b>：
+     * <ul>
+     * <li>{@code scene.*}（L0）：直接设定服务端权威世界的状态——{@code world.setBlock}、
+     * 直接写 {@code InventoryPlayer}、{@code setPositionAndUpdate}。快、稳、少变量，<b>布景与构造输入</b>用它。</li>
+     * <li>{@code player.*}（L1，本组）：把请求做成<b>原版客户端会发出的那个包</b>
+     * （{@code PlayerControllerMP} 的 C02/C07/C08/C09/C0E/C16 与 {@code EntityClientPlayerMP} 的 C03），
+     * 经集成服的 {@code NetHandlerPlayServer} 原样处理——距离校验、保护校验、Forge 事件、
+     * 游戏模式分支、服务端 {@code ItemInWorldManager} 与 {@code Container.slotClick} 全部照常发生。
+     * 验证「<b>玩家行为引发的行为</b>」与教程重建用它。</li>
+     * </ul>
+     * <b>两层结论不互替</b>（#96 §4.2）：{@code scene.player.pose} 的位移不是「走过去了」的证据，
+     * {@code scene.inventory.write} 的写入不是「捡起来了」的证据。每个 {@code player.*} 动作的返回值
+     * 都带 {@code layer:"L1"} 与 {@code semantics}，与 L0 的 {@code layer:"L0"} 成对。
+     *
+     * <h2>两义成对（裁决 3/4）</h2>
+     * <ul>
+     * <li><b>位置与朝向</b>：{@code scene.player.pose}（L0，{@code semantics:"teleport"}，瞬时）↔
+     * {@code player.move}（L1，{@code "walk"}，逐 tick 过原版碰撞）+ {@code player.look}（L1，{@code "turn"}）；</li>
+     * <li><b>拿到物品</b>：{@code scene.inventory.write}（L0，{@code "give"}，直接写槽）↔
+     * {@code player.pickup}（L1，{@code "pickup"}，世界里已有掉落物 → 走过去碰它）。</li>
+     * </ul>
+     *
+     * <h2>同步 vs 步进</h2>
+     * 本组八个动作都是同步动作：一次调用内做有限步（移动/挖掘/拾取在 {@code maxTicks}/{@code holdTicks}
+     * 上界内推进），不跨 tick 等待世界装卸。<b>不</b>注册为步进是有意的取舍——
+     * 步进动作的实例活在整个作业期间，而 L1 的价值恰恰是「一次次试探、随时改主意」（#96 §3 探索模式）；
+     * 一次调用内跑完一小步，调用方在两次调用之间可以自由读面、截图、回滚。
+     *
+     * <h2>探索模式纪律（#96 §3、§8.5）</h2>
+     * 本组的失败<b>一律不导致进程重启或崩溃</b>：参数类 {@code CP-VALID-002}（带 {@code context.fields}）、
+     * 前置状态类 {@code CP-STATE-001}（带「差什么、怎么补」）、原版抛出意外的
+     * {@code CP-EXEC-001}（带 cause，栈不丢）。而「玩家路径执行了但世界没变」这类
+     * <b>不是错误</b>——它返回 {@code observed:false} + {@code notObservedReason} + 逐格回读，
+     * 让调用方自己判。这是「便宜试错」的物质基础：试错的结果必须可解释，而不是把进程带走。
+     *
+     * <h2>无隐藏通道（#96 §8.7 / D5）</h2>
+     * 本组只调原版对象自己的方法——不自己拼 C0x 包、不直接写服务端世界或背包。
+     * 抄一份「看起来一样」的服务端逻辑会立刻与真客户端行为分叉，而分叉正是 L1 要验证的东西；
+     * 那也就是被禁止的第二条能力路径。
+     */
+    private static void registerPlayerActions(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        registry.register(
+            ActionDescriptor.builder(PlayerMoveAction.NAME, Tier.SCENE)
+                .description(
+                    "L1：经玩家移动路径把玩家移到目标位置（<b>不是瞬移</b>）。逐 tick 走原版 AABB 碰撞推进，"
+                        + "每步后调 EntityClientPlayerMP.sendMotionUpdates() 让原版客户端自己发 C03 位置包；"
+                        + "服务端在 NetHandlerPlayServer.processPlayer 里照常校验（非法姿态 / moved too quickly / "
+                        + "moved wrongly / floating），必要时把玩家拽回来——拽回是这条路径的真实后果，"
+                        + "返回值如实给出 serverAfter/serverBefore 两侧读数，不掩盖。"
+                        + "与 scene.player.pose（L0，瞬时传送 + S08）互补而不互替：要「玩家站在这里」用 L0，"
+                        + "要验证「走过去这件事」用本动作（#96 §4.1 裁决 3）。"
+                        + " to 与 distance 互斥必居其一；to 形态走到容差内或被方块挡住为止。"
+                        + " 撞墙时如实停手（不硬穿墙），返回 blocked:true。")
+                .optional("to", ActionDescriptor.TYPE_ARRAY, "目标位置 [x,y,z]（可为小数）；与 distance 互斥")
+                .optional("distance", ActionDescriptor.TYPE_NUMBER, "沿 direction 走的距离（格）；与 to 互斥")
+                .optional(
+                    "direction",
+                    ActionDescriptor.TYPE_STRING,
+                    "forward",
+                    "distance 形态的方向：forward | back | left | right | up | down（相对玩家当前 yaw；默认 forward）")
+                .optional(
+                    "maxTicks",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(PlayerMoveAction.DEFAULT_MAX_TICKS),
+                    "最多推进的 tick 数（1..12000）；每 tick 走 ≤" + PlayerMoveAction.STEP_PER_TICK
+                        + " 格，因此这是距离上限也是时间上限。到达容差 "
+                        + PlayerMoveAction.ARRIVE_EPSILON
+                        + " 格")
+                .optional(
+                    "allowFlying",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.FALSE,
+                    "是否顺带开通创造飞行（默认 false）——虚空世界里要竖直移动时需要")
+                .returns(
+                    "{action, layer:\"L1\", semantics:\"walk\", mode, target[3], before[3], serverBefore[3], ticks, maxTicks, "
+                        + "arrived, remaining, blocked, clientAfter[3], serverAfter[3], movedClientBlocks, "
+                        + "movedServerBlocks, arrivedServer, serverRemaining, serverSyncWaitedMs, observed, "
+                        + "notObservedReason?, pathNote, pose{pos,yaw,pitch,onGround,dimension}}；"
+                        + " observed 只看服务端权威侧位移（客户端预测动了而服务端没动 = 被拽回，不算观察到）")
+                .example("{\"to\":[70.5,13.0,64.5],\"maxTicks\":200,\"confirm\":true}")
+                .example("{\"distance\":5,\"direction\":\"forward\",\"maxTicks\":100,\"confirm\":true}")
+                .since("1.5")
+                .build(),
+            new PlayerMoveAction());
+
+        registry.register(
+            ActionDescriptor.builder(PlayerLookAction.NAME, Tier.SCENE)
+                .description(
+                    "L1：经玩家转向路径改变朝向（含看向某个点/实体）。按原版鼠标输入的口径<b>分步</b>转动"
+                        + "（每步 yaw/pitch 变化 + EntityClientPlayerMP.sendMotionUpdates() 发 C03/C05 朝向包），"
+                        + "服务端在 processPlayer 里接收并写进权威玩家的 rotationYaw/Pitch。"
+                        + "与 scene.player.pose（L0，直接写服务端朝向 + S08）互补而不互替（裁决 3）。"
+                        + " 三种形态互斥必居其一：yaw（可配 pitch）/ lookAt / entityId。"
+                        + " yaw：0=南/+Z、90=西/-X、180=北/-Z、270=东/+X；pitch：正=俯视、负=仰视（同 CameraSpec 口径）。")
+                .optional("yaw", ActionDescriptor.TYPE_NUMBER, "绝对水平朝向（度）")
+                .optional("pitch", ActionDescriptor.TYPE_NUMBER, "绝对俯仰角（度，钳到 -90..90）")
+                .optional("lookAt", ActionDescriptor.TYPE_ARRAY, "看向世界坐标点 [x,y,z]（角度由眼睛→目标算出）")
+                .optional("entityId", ActionDescriptor.TYPE_INT, "看向某个实体（眼睛→它的眼睛高度）")
+                .optional(
+                    "steps",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(1),
+                    "分几步转到位（1..200）。1=一次到位（够用且最便宜）；要演示「真实转身」给 8..20")
+                .returns(
+                    "{action, layer:\"L1\", semantics:\"turn\", mode, target[2]{yaw,pitch}, before{pos,yaw,pitch,...}, "
+                        + "after{...}, startYaw, startPitch, deltaYaw, deltaPitch, steps, achievedYawDelta, tolerance, "
+                        + "serverSyncWaitedMs, observed, notObservedReason?, pathNote, pose{...}}")
+                .example("{\"yaw\":90,\"pitch\":0,\"confirm\":true}")
+                .example("{\"lookAt\":[70.5,13.5,64.5],\"steps\":10,\"confirm\":true}")
+                .since("1.5")
+                .build(),
+            new PlayerLookAction());
+
+        registry.register(
+            ActionDescriptor.builder(UseItemAction.NAME, Tier.SCENE)
+                .description(
+                    "L1：使用手持物品（右键使用）——玩家按右键用手里东西的等价物。" + "目标分支由原版自己选：对空气用走 PlayerControllerMP.sendUseItem"
+                        + "（C08 的 (-1,-1,-1,255) sentinel，服务端进 ItemInWorldManager.tryUseItem）；"
+                        + "对方块用走 onPlayerRightClick（C08 带真实坐标与命中偏移，服务端进 activateBlockOrUseItem）。"
+                        + " 本动作的 L1 义是「玩家用了一次手里的东西」，因此<b>观察对象是手持物品自身的变化</b>"
+                        + "（count/耐久/NBT）；世界方块变化由 player.place_block 断言、方块/实体交互产物由 "
+                        + "player.interact 断言——三者不是同一动作的别名（D1：自述必须与行为一致）。"
+                        + " 手上没东西时如实报告 used:false（原版在 air 分支前有 itemstack1 != null 的门，"
+                        + "空手对空气右键不产生任何包与效果），不静默照发一个假包。")
+                .optional("mode", ActionDescriptor.TYPE_STRING, "air | block；缺省按视线自动选（命中方块即 block）")
+                .optional(
+                    "reach",
+                    ActionDescriptor.TYPE_NUMBER,
+                    Double.valueOf(PlayerSession.SERVER_REACH),
+                    "视线求交距离（格，(0,64]）；须与服务端 ItemInWorldManager.getBlockReachDistance() 口径相容"
+                        + "（服务端判定用 reach+1，默认 5.0+1=6.0）")
+                .returns(
+                    "{action, layer:\"L1\", semantics:\"use-item\", mode, branch, target{block?,side?}, sight{...}, "
+                        + "before{currentItem,main,cursor}, after{...}, used, stackChange{before,after,countDelta,"
+                        + "damageDelta,changed}, useState{before,after,changed,scope}, serverSyncWaitedMs, "
+                        + "observed, notObservedReason?, handEmpty?, pathNote, pose{...}}")
+                .example("{\"mode\":\"air\",\"confirm\":true}")
+                .example("{\"mode\":\"block\",\"confirm\":true}")
+                .since("1.5")
+                .build(),
+            new UseItemAction());
+
+        registry.register(
+            ActionDescriptor.builder(PlayerInteractAction.NAME, Tier.SCENE)
+                .description(
+                    "L1：右键交互——对方块或实体。方块分支走 PlayerControllerMP.onPlayerRightClick"
+                        + "（C08 → 服务端 activateBlockOrUseItem：onItemUseFirst → onBlockActivated → "
+                        + "tryPlaceItemIntoWorld）；实体分支走 interactWithEntitySendPacket"
+                        + "（C02PacketUseEntity(INTERACT) → 服务端 processUseEntity 的 INTERACT 分支）。"
+                        + " 与 player.use_item 共用原版出口但<b>断言不同</b>：本动作的观察量是交互产物——"
+                        + "容器被打开（openContainer 的 windowId/类名变化）、方块被激活（onBlockActivated 返回 true）、"
+                        + "实体被移除或背包总数变化。对着掉落物右键会经 EntityItem.interactFirst 把它捡起，"
+                        + "那是「右键拿起」，与 player.pickup（走过去碰到）是同一件事的两条玩家入口，结论不互替。"
+                        + " auto 形态按原版分支顺序：命中实体优先（同 Minecraft.func_147121_ag）。")
+                .optional("target", ActionDescriptor.TYPE_STRING, "auto", "auto | block | entity（默认 auto 按视线判）")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "被右键的方块 [x,y,z]（不给则用真实视线命中）")
+                .optional(
+                    "reach",
+                    ActionDescriptor.TYPE_NUMBER,
+                    Double.valueOf(PlayerSession.SERVER_REACH),
+                    "视线求交距离（格，(0,64]）")
+                .returns(
+                    "{action, layer:\"L1\", semantics:\"interact-block\"|\"interact-entity\", target, at?, side?, "
+                        + "before/after（方块分支，逐格读数）, activated, blockChanged, blockWasContainer, "
+                        + "containerOpened, container{windowIdBefore,windowIdAfter,classBefore,classAfter}, "
+                        + "entity/entityAfter（实体分支）, handled, removed, inventoryCountBefore/After, "
+                        + "serverSyncWaitedMs, observed, notObservedReason?, sight{...}, pathNote, pose{...}}")
+                .example("{\"at\":[65,12,64],\"confirm\":true}")
+                .example("{\"target\":\"auto\",\"confirm\":true}")
+                .since("1.5")
+                .build(),
+            new PlayerInteractAction());
+
+        registry.register(
+            ActionDescriptor.builder(PlayerDigAction.NAME, Tier.SCENE)
+                .description(
+                    "L1：左键破坏——攻击与挖掘同一条玩家路径（原版鼠标左键的三条路各自走原版自己的方法）。"
+                        + " 实体：（PlayerControllerMP.attackEntity，C02(ATTACK) → 服务端 processUseEntity 的 ATTACK 分支"
+                        + "跑权威攻击）。方块：（PlayerControllerMP.clickBlock，C07(0) → 服务端 "
+                        + "ItemInWorldManager.onBlockClicked——创造模式当场破坏，生存模式开始累计进度；"
+                        + "holdTicks>1 时在后续 tick 调 onPlayerDamageBlock，即原版 Minecraft.func_147115_a 按住左键时"
+                        + "每 tick 调的同一个方法，累计够了它会自己发 C07(2) 并跑 onPlayerDestroyBlock）。"
+                        + " 「挖不动基岩」是正确行为不是失败：基岩的可破坏度 <0，服务端永远不满足完成条件，"
+                        + "本动作返回 observed:false + blockUnbreakable:true + 未变化的逐格回读，"
+                        + "进程不受影响（#96 §3 探索模式纪律）。"
+                        + " 视线未命中时如实报告 miss:true（原版在 func_147116_af 里对此只置 leftClickCounter，"
+                        + "不发包也不产生效果），不静默照发一个 C07。")
+                .optional("target", ActionDescriptor.TYPE_STRING, "auto", "auto | block | entity（默认 auto 按视线判）")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "要挖的方块 [x,y,z]（不给则用真实视线命中）")
+                .optional(
+                    "holdTicks",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(PlayerDigAction.DEFAULT_HOLD_TICKS),
+                    "按住左键的 tick 数（1..1200）；生存模式挖硬方块要加大")
+                .optional(
+                    "reach",
+                    ActionDescriptor.TYPE_NUMBER,
+                    Double.valueOf(PlayerSession.SERVER_REACH),
+                    "视线求交距离（格，(0,64]）")
+                .returns(
+                    "{action, layer:\"L1\", semantics:\"dig-block\"|\"dig-entity\", target, at?, side?, before/after（逐格）, "
+                        + "destroyed, blockUnbreakable, relativeHardness, blockHardness, hardnessScope, distanceSquared, serverReachLimitSquared, "
+                        + "inServerReach, gameMode{gameType,isCreative}, heldBefore/heldAfter/heldChange, "
+                        + "victim/after/healthBefore/healthAfter/removed（实体分支）, hit?, miss?, "
+                        + "serverSyncWaitedMs, observed, notObservedReason?, sight{...}, pathNote, pose{...}}")
+                .example("{\"at\":[65,12,64],\"holdTicks\":1,\"confirm\":true}")
+                .example("{\"at\":[65,12,64],\"holdTicks\":120,\"confirm\":true}")
+                .since("1.5")
+                .build(),
+            new PlayerDigAction());
+
+        registry.register(
+            ActionDescriptor.builder(PlaceBlockAction.NAME, Tier.SCENE)
+                .description(
+                    "L1：放置方块——玩家手持方块对着某面右键。走 PlayerControllerMP.onPlayerRightClick"
+                        + "（C08PacketPlayerBlockPlacement → 服务端 processPlayerBlockPlacement 的 else 分支 "
+                        + "→ ItemInWorldManager.activateBlockOrUseItem → ItemBlock.tryPlaceItemIntoWorld）；"
+                        + "客户端本地预测与服务端权威放置两遍都由原版产生（含 canPlaceBlockAt、Forge 事件、"
+                        + "创造模式不扣物品的原版分支），本动作一处都不复制。"
+                        + " at 是<b>被右键的那个方块</b>（不是新方块的位置），side 是命中面；"
+                        + "新方块出现在 at 沿 side 偏移一格处（原版规则：side 1=顶面 ⇒ (x,y+1,z)）。"
+                        + " 不给 at 时用玩家脚下那一格的顶面（站着往脚下放）。"
+                        + " 手上不是方块物品时 CP-STATE-001（放置的前提就是手持一个方块）。")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "被右键的方块 [x,y,z]（不给则用玩家脚下那一格的地板顶面）")
+                .optional(
+                    "side",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(1),
+                    "命中的面：0=下 1=上 2=北 3=南 4=西 5=东（默认 1=顶面）")
+                .returns(
+                    "{action, layer:\"L1\", semantics:\"place-block\", at[3], side, target[3]（新方块位置）, "
+                        + "atBefore/atAfter, before/after（目标格逐格读数）, placed, blockAppeared, "
+                        + "distanceSquared, serverReachLimitSquared, inServerReach, heldItemId, "
+                        + "heldBefore/heldAfter/heldChange, heldCountBefore/After, gameMode{isCreative}, "
+                        + "serverSyncWaitedMs, observed, notObservedReason?, pathNote, pose{...}}")
+                .example("{\"confirm\":true}")
+                .example("{\"at\":[64,12,64],\"side\":1,\"confirm\":true}")
+                .since("1.5")
+                .build(),
+            new PlaceBlockAction());
+
+        registry.register(
+            ActionDescriptor.builder(PlayerPickupAction.NAME, Tier.SCENE)
+                .description(
+                    "L1：拾取掉落物——「拿到物品」之 L1 义（裁决 4）。世界里已有掉落物实体，玩家" + "<b>走过去碰它</b>，由服务端 EntityItem.onCollideWithPlayer → "
+                        + "EntityPlayer.inventory.addItemStackToInventory 收进背包。"
+                        + " 本动作不调用 addItemStackToInventory、不直接改背包——那会把它降级成 L0。"
+                        + " 它与 L0 的「给」（scene.inventory.write，layer:\"L0\" semantics:\"give\"，直接写槽位）"
+                        + "是同一件事的两义，两义都做、按层标注，<b>结论不互替</b>（#96 §4.2）："
+                        + "scene.inventory.write 的写入不是「捡起来了」的证据。"
+                        + " 构造输入的方式：先 scene.entity.spawn {item:\"minecraft:stone\",count:1,pos:[…]}（L0 布景）"
+                        + "造掉落物，再调本动作拾取——这正是「L0 构造输入、L1 验证行为」的用法（#96 §4.2）。"
+                        + " approach:false 时只等不走（用于玩家已被 L0 摆到掉落物旁边的场景）。"
+                        + " 没捡到时返回 observed:false + notObservedReason（拾取延迟未归零 / 背包满 / 走不过去 / 掉落物已消失）。")
+                .optional("entityId", ActionDescriptor.TYPE_INT, "目标掉落物的实体 id（scene.entity.spawn 的返回值里有）；与 item 二选一")
+                .optional("item", ActionDescriptor.TYPE_STRING, "按物品注册名找掉落物（如 minecraft:stone）；可配 meta")
+                .optional("meta", ActionDescriptor.TYPE_INT, "与 item 搭配：只匹配该 meta（不给即不限）")
+                .optional("approach", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "是否走过去（默认 true）；false 只等不走")
+                .optional(
+                    "maxTicks",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(PlayerPickupAction.DEFAULT_MAX_TICKS),
+                    "最多等待/推进的 tick 数（1..12000）；掉落物有 delayBeforeCanPickup（原版扔出时 40 tick）")
+                .returns(
+                    "{action, layer:\"L1\", semantics:\"pickup\", entityId, itemId, meta, stackCount, "
+                        + "poseBefore/poseAfter, ticks, maxTicks, approach, inventoryCountBefore/After, inventoryDelta, "
+                        + "itemEntityGone, picked（与 observed 同源：最终观察到拾取）, observed, inventoryBefore/inventoryAfter（逐槽非空读数）, "
+                        + "remainingItemEntities, delayBeforeCanPickup?, notObservedReason?, layerNote, pathNote, pose{...}}")
+                .example("{\"entityId\":123,\"confirm\":true}")
+                .example("{\"item\":\"minecraft:stone\",\"meta\":0,\"maxTicks\":120,\"confirm\":true}")
+                .since("1.5")
+                .build(),
+            new PlayerPickupAction());
+
+        registry.register(
+            ActionDescriptor.builder(SlotClickAction.NAME, Tier.SCENE)
+                .description(
+                    "L1：容器与背包槽位收放——开着的那个界面里逐槽移动物品。走原版玩家的唯一出口 "
+                        + "PlayerControllerMP.windowClick → 客户端本地 Container.slotClick + "
+                        + "C0EPacketClickWindow；服务端在 NetHandlerPlayServer.processClickWindow 跑权威 "
+                        + "Container.slotClick 并回 S2FPacketSetSlot/S32PacketConfirmTransaction。"
+                        + " <b>含移位点击</b>：shift:true（等价 clickType:1）即快速移动，整摞转移到对侧容器、不经光标。"
+                        + " clickType 取值（原版 Container.slotClick 的 mode）：0=pick 左键整摞交换、1=shift 快速移动、"
+                        + "2=swap 数字键交换（button 0..8）、3=clone 创造模式复制、4=throw 丢弃（button 0/1）、"
+                        + "5=drag 拖拽分发、6=pickup-all 双击合堆。"
+                        + " slot 是<b>当前 openContainer 的界面槽号</b>（Container 的 slotNumber，即包里的那个），"
+                        + "不是 InventoryPlayer 下标——两者不同（ContainerPlayer 含合成格且顺序错位、"
+                        + "ContainerChest 前 27 格是箱子后 36 格是玩家背包）。用 player.gui {gui:\"open\"} 或 "
+                        + "read.inventory 核对槽位语义；-999 是原版「容器外」的合法槽号。"
+                        + " **作用对象是当前 openContainer（它永远不是 null：原版在玩家构造时就把它设成 inventoryContainer，即玩家自己的背包容器）。**"
+                        + " 因此「没开容器」在原版里不存在——没开箱子时本动作就作用在玩家背包容器（ContainerPlayer）上。"
+                        + " 返回值用 containerClass / windowId / slotMeaning / containerIsPlayerInventory 如实说清打在哪个容器上。")
+                .optional(
+                    "clicks",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "点击步骤数组 [{slot,clickType?,button?,shift?}]，按序执行；条目内默认值："
+                        + "clickType=0（给 shift:true 则为 1）、button=0、shift=false")
+                .optional("click", ActionDescriptor.TYPE_OBJECT, "单个点击步骤（与 clicks 可同时给，追加在后）")
+                .optional("slot", ActionDescriptor.TYPE_INT, "顶层简写：等价于 clicks:[{slot}]（一次左键点击）")
+                .returns(
+                    "{action, layer:\"L1\", semantics:\"slot-move\", windowId, containerClass, slotCount, slotMeaning, "
+                        + "containerIsPlayerInventory, clickCount, clicks[{slot,clickType,button,shift,slotKind,slotInventory,predicted,slotAfter,"
+                        + "cursorAfter}], before/after{slots[{slot,id,meta,count,…}],slotCount,windowId}, "
+                        + "cursor{before,after,changed}, slotsChanged, serverSyncWaitedMs, observed, notObservedReason?, pathNote, pose{...}}")
+                .example("{\"clicks\":[{\"slot\":0,\"shift\":true}],\"confirm\":true}")
+                .example("{\"clicks\":[{\"slot\":0,\"clickType\":0},{\"slot\":27,\"clickType\":0}],\"confirm\":true}")
+                .since("1.5")
+                .build(),
+            new SlotClickAction());
+
+        registry.register(
+            ActionDescriptor.builder(PlayerGuiAction.NAME, Tier.SCENE)
+                .description(
+                    "L1：开关玩家界面（背包与机器 GUI）。 gui:inventory 复刻原版 Minecraft.runTick 的 "
+                        + "keyBindInventory 分支（C16PacketClientStatus(OPEN_INVENTORY_ACHIEVEMENT) + "
+                        + "displayGuiScreen(new GuiInventory(thePlayer))，界面根部把 openContainer 设成它的 inventorySlots）；"
+                        + "**注意：创造模式下原版打开的是 GuiContainerCreative 而不是 GuiInventory**（实机实测），"
+                        + "因此 observed 接受两者，返回值用 creatorModeInventory 如实给出是哪一个；"
+                        + " gui:container 复用 player.interact 的方块右键路径（服务端 openGui → S2DPacketOpenWindow → "
+                        + "客户端 displayGuiScreen），因此模组机器界面（GT/AE2…）同样可用，本动作不需要认识任何具体模组；"
+                        + " gui:close 走 EntityClientPlayerMP.closeScreen()（C0DPacketCloseWindow + 关界面，原版 ESC 的处理）；"
+                        + " gui:open 是只读报告（不改变任何状态），给出当前 screenClass 与 openContainer 的类名/槽数/槽位语义。"
+                        + " GuiContainer.doesGuiPauseGame() 为 false，因此界面开着时集成服照常 tick，"
+                        + "player.slot_click 可以继续工作。"
+                        + " <b>范围外</b>（裁决 3）：GUI 内非槽位按钮点击（机器模式按钮、JEI 面板等）不在本动作内；"
+                        + "若 F2 教程样本实际需要，当场切独立单子，不混入。")
+                .optional(
+                    "gui",
+                    ActionDescriptor.TYPE_STRING,
+                    "inventory | container | close | open（运行期必填；缺失报 CP-VALID-002）")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "gui:container 时必填：容器/机器方块坐标 [x,y,z]")
+                .optional(
+                    "reach",
+                    ActionDescriptor.TYPE_NUMBER,
+                    Double.valueOf(PlayerSession.SERVER_REACH),
+                    "gui:container 的视线求交距离（格，(0,64]）")
+                .returns(
+                    "{action, layer:\"L1\", semantics:\"gui-*\", gui, actionTaken, screenBefore/screenAfter/screenClass, "
+                        + "guiClass, guiIsContainer, guiPausesGame, creatorModeInventory, windowIdBefore/After, containerClassBefore/After, "
+                        + "slotCount, slotMeaning, observed, notObservedReason?, interact?（gui:container 时嵌 player.interact 的结果）, "
+                        + "pathNote, pose{...}}")
+                .example("{\"gui\":\"inventory\",\"confirm\":true}")
+                .example("{\"gui\":\"container\",\"at\":[65,12,64],\"confirm\":true}")
+                .example("{\"gui\":\"close\",\"confirm\":true}")
+                .since("1.5")
+                .build(),
+            new PlayerGuiAction());
     }
 
     /**
