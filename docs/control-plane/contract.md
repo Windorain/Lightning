@@ -69,6 +69,7 @@
 | `case.run` | scene 起 | 执行用例文件：默认整跑；`segments:[...]` 按段执行。**整跑与按段共用同一实现、同一产物形态**（验收锚）。产物为 run 目录 + 观测记录 + 判据结论 |
 
 PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
+**#99（收口T2）追加 6 个 L0 布景原语**（`scene.*`，见 §4.3），同样只增不改上表语义。
 
 ### 4.1 取证级动作（PR-2，Refs #41）
 
@@ -106,6 +107,56 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 8. **`target` 参数（v1）**：仅作观察目标留痕（bbox 进观测记录），**不参与自动取景**；自动框景留待后续版本。
 9. **按内容升格的鉴权时点**：动作静态级低于内容要求时（如 scene 级 `case.run` 跑含 cameras 段的用例），鉴权期按静态级放行、**执行期**升格检查——sync 调用方得 HTTP 403 `CP-AUTH-002`，异步调用方得 failed 作业（`error.code=CP-AUTH-002`）。
 
+### 4.3 L0 布景原语（#99，「收口T2」）
+
+能力面三层口径见 #96 §4.1：**L0 原语**＝直接设定世界/实体/玩家/背包状态（布景、构造输入、常规回归）；
+**L1 玩家操作**＝经玩家路径执行；**L2**＝L0/L1 的有序编排。**L0 的产物不能当作 L1 的证据**（#96 §4.2）。
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `scene.entity.spawn` | scene | 生成实体（含掉落物）。`item` 造掉落物、`entity` 造一般实体，二者互斥必居其一；可带 SNBT `nbt` |
+| `scene.entity.clear` | scene | 清除范围内实体（含掉落物）。选择条件 `box`/`entity`/`item` 取交集；`includePlayers` 默认 false |
+| `scene.player.state` | scene | 玩家游戏模式 / 生命 / 经验 / 药水效果（`before`/`after` 双快照） |
+| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给** |
+| `scene.weather.time` | scene | 设定世界权威时刻与天气（持续生效；`shot.multi.worldTime` 是拍摄基准，两义不同） |
+| `scene.player.pose` | scene | 瞬时传送/转向——L0 布景原语，与 #101 的 L1 真实移动互补、两义按层标注 |
+
+**共同口径（六条，全部可判定）**：
+
+1. **只写服务端权威世界**（`MinecraftServer.worldServers[0]`，见 `mc.scene.L0Session`）。
+   客户端 `WorldClient` 是只读投影：写它会被原版同步覆写（方块/实体/时间/天气皆然）。
+   这与 `world.rebuild` 的场景构建、`world.info` 的元数据、`shot.multi` 的光照基准同一口径。
+2. **同步一律走原版出口**：`S2BPacketChangeGameState(3)`（游戏模式）/ `S06PacketUpdateHealth`（生命）/
+   `S1FPacketSetExperience`（经验）/ `S1DPacketEntityEffect`（药水）/ `S08PacketPlayerPosLook`（传送）/
+   `S2FPacketSetSlot`（背包槽位）/ `S3PacketTimeUpdate` + `S2BPacketChangeGameState(7,8)`（时间天气）。
+   **不自造同步、不逐字段从静态数据推算回填**（§6.4 的既有禁令对 L0 同样成立）。
+3. **写入门控**：六个动作开场一律过 `CaptureControl.assertWorldWriteAllowed`——捕获会话期间被
+   *别的*作业调用即 `CP-STATE-001`（§4.1 的既有口径）。会话开场作业自身可穿透（既有语义）。
+4. **失败显式**：未知实体/物品 id、越界坐标、越界槽位、非容器方块实体、未知药水、未知天气、
+   无世界/无玩家，一律 `CP-VALID-002`（参数类，带 `context.fields`）或 `CP-STATE-001`（前置状态类），
+   **不静默过滤成 0 个**（「过滤掉 0 个」是假绿）。
+5. **返回值自带读回**：逐项 `readBack` 或 `before`/`after` 快照，外加 `sceneReadback`
+   ——按世界内最新场景清单的**位置集合**实读回读并重算规范化哈希（口径与 `world-hash-equals` 判据、
+   `SceneManifest.readBack` 同源）。读面（#98）未就绪时，这是「这次写观察到了什么变化」的兜底证据。
+   世界没有清单时 `sceneReadback.present=false` + 原因，**不算错误**（L0 不该要求「必须先 rebuild」）。
+6. **不进场景清单哈希**（除非确实改了清单登记的位置）：L0 原语只动清单之外的维度
+   （实体、玩家、背包、时间、天气），因此**不破坏 `world-hash-equals` 幂等判据**。
+   `scene.entity.clear` 与 `scene.inventory.write` 亦然（实体与背包不入清单哈希）。
+
+**两义标注（#96 裁决 3/4 的落地）**：`scene.inventory.write` 返回 `layer:"L0"` + `semantics:"give"`；
+`scene.player.pose` 返回 `layer:"L0"` + `semantics:"teleport"`。两者的 `layerNote` 字段写明
+「与 #101 的 L1 对应动作互补而不互替」。
+
+**SNBT 口径**：`nbt` 参数是 **SNBT 文本**（原版 `/give`、`/summon` 的写法，
+即 `net.minecraft.nbt.JsonToNBT`），**不是 JSON 对象**——两者语法相近但不同（SNBT 字符串值可裸写、
+有 `1b`/`1.0f` 数字后缀）。自述与示例里写死这一点。
+
+### 4.4 hermetic 纪律（起手重建世界）
+
+见 case-file.md §8.8。要点：**验收类固定程序的第一次世界写动作必须是 `world.rebuild`（`void:true`）**，
+不得在既有世界上续跑。`case.run` 的 `world` 段与之是**同一实现**（§6.3），二者语义不冲突。
+L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**，不能替代起手重建。
+
 ## 5. 版本化规则
 
 - URI 前缀即契约大版本：`/cp/v1`。
@@ -121,8 +172,11 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 4. **TE 状态补全**（#55「设」第五项）：仅限场景构建阶段、捕获开始之前；必须经模组自身权威同步路径（如 `markBlockForUpdate` 触发 S35 description packet 摄取，或模组自己的 `initialize`/`addPart` 等 API）；**禁止**逐字段从静态数据推算回填。补全器按族注册（接口 `TeCompleter`），默认实现覆盖原版 TE；LP/AE2 族补全器随锚点场景交付。
 5. **补全器的权威放置职责（PR-3 明确）**：当模组的方块需要构造上下文时（LP 通用管块需 `createPipe`/`placePipe`、AE2 部件需 `addPart` 到既有缆），`te` 步的 completer 经**模组自身放置 API** 完成放置与补全；此时 `params` 声明的是**放置输入**（物品 id/朝向/面），不是 NBT 逐字段回填——该区分必须在 completer 类注释写明。**v1.2 注册表**：`vanilla` / `lp-pipe` / `ae2-part`。
 6. 世界快照与回滚范围**包含** TE 补全后的状态。
-7. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。
+7. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。**L0 的 `scene.player.pose`（§4.3）是这条的显式化对应物**——同一件事由调用方按需触发，而不是只在进图时隐式做一次。
 8. **离图阻塞**：`mc.loadWorld(null)` 在 tick 线程内阻塞至集成服停机（原版「保存并退到标题」同路径），客户端会冻结数秒到数十秒——动存档目录前必须保证 region 句柄释放，这是 v1 的取舍。
+9. **hermetic 纪律（#99 成文）**：验收类固定程序的第一次世界写动作必须是 `world.rebuild`（`void:true`）；
+   本节的 `case.run` 的 `world` 段与之**共用同一实现**（`WorldRebuildRunner`），语义不冲突。
+   完整规则与逐条对齐表见 case-file.md §8.8；L0 的轮内清场原语**不构成** hermetic 保证（§4.4）。
 
 ## 7. 观测记录
 
