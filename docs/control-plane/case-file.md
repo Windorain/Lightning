@@ -76,6 +76,29 @@
 | `te-state-equals`（PR-3，运行期轨） | `at:[x,y,z], key, expect` | 经补全器同族的 **TE 描述器**（TeDescriber，与 completer 同注册、只读不写）读取 TE 运行期状态字段（LP：renderState 连接矩阵/管型；AE2：各面部件清单），与 expect 比较；描述器输出同时进观测记录 runtimeReads（te.* 条目） |
 | `image-uniform`（PR-3，图像轨补充） | `path, minSameColorRatio(默认0.98)` | 图像近纯色——主色占比 ≥ minSameColorRatio（TE 距离门远机位：被门剔除的场景应近似纯背景） |
 
+**读面输出的判据引用（v1.3，issue #98）**：`read.*` 动作是 `observe` 级**普通动作**，不经用例文件——
+它们由调用方在跑用例前后直接调，产物落 run 目录（`read.diff` 的 `expectManifestFile` 路径），
+再用既有的 `json-field` 判据断言。**没有**为读面新增判据类型：读面要服务的是「读得全、读得准」，
+而不是再造一套断言词汇；「读数进判据」这条链路由 `json-field` 的 RFC 6901 指针直接承担，
+一处定义、一处求值。典型形态：
+
+```jsonc
+// criteria 段：引用 read.te 的族状态（与 te-state-equals 同一棵树，同一读取口）
+{ "id": "read-te-pipe-up", "type": "json-field",
+  "params": { "path": "read/te.json", "pointer": "/tiles/0/claimedState/connections/UP" },
+  "expect": true }
+// criteria 段：引用 read.blocks 的规范化哈希（与 read.diff 的 hashes 同口径）
+{ "id": "read-blocks-hash", "type": "json-field",
+  "params": { "path": "read/blocks.json", "pointer": "/sha256" },
+  "expect": "<64 位十六进制>" }
+// criteria 段：引用 read.diff 的差异计数（0 = 与期望态逐格一致）
+{ "id": "read-diff-clean", "type": "json-field",
+  "params": { "path": "read/diff.json", "pointer": "/different" }, "expect": 0 }
+```
+
+读面产物落 run 目录的路径约定（`read.diff` 的 `expectManifestFile` 路径）：`read/diff.json`，
+role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直接引用它）。
+
 **双轨判据口径（#41，PR-3 起对锚点用例强制）**：同一可视特性必须成对断言——运行期轨（`te-state-equals`）证「世界状态对」，图像轨（`image-not-uniform`/`image-uniform`/`image-size-equals`）证「渲染结果对」。锚点用例（LP 四管/AE2 部件）的每个 TE 可视特性两轨齐备；双轨不齐的锚点用例视为用例缺陷（验收驱动静态检查）。
 
 判据结论：`{id, verdict: "green"|"red"|"error", detail}`。`error`（判据自身无法求值，如产物缺失到连断言都不能做）视同 red 但单列。

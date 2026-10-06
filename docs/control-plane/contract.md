@@ -68,9 +68,48 @@
 | `case.validate` | observe | 解析用例文件，返回规范化执行计划（分段列表、判据、期望证据）或逐字段错误 |
 | `case.run` | scene 起 | 执行用例文件：默认整跑；`segments:[...]` 按段执行。**整跑与按段共用同一实现、同一产物形态**（验收锚）。产物为 run 目录 + 观测记录 + 判据结论 |
 
+v1.3（issue #98）追加的观察面读面动作见 §4.1；下表是 PR-1 的动作清单，追加不改已有语义。
+
 PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
 
-### 4.1 取证级动作（PR-2，Refs #41）
+### 4.1 观察面读面动作（v1.3，issue #98）
+
+「Agent 必须有『看』的能力，不只有截图」（需求书 §5）。下表七个动作**全部 `observe` 级、全部只读、
+全部同步**（一次 tick 内读完返回：跨 tick 的读面会读到两个世界状态，「调用前后世界哈希不变」就无从判定）：
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `read.blocks` | observe | **区域方块读回**：闭区间区域内每格 `{pos, id, blockId, meta, te}` + 规范化 `sha256`。参数 `{from,to}` 或 `{region:{from,to}}`，可选 `includeAir`（默认 true）、`hash`（默认 true）。哈希**恒**按「含空气的完整区域」计算（不受 `includeAir` 影响）——哈希是区域的属性，不是请求选项的属性 |
+| `read.overview` | observe | **世界概览**：维度/时间/天气/已加载区块数/实体与方块实体计数（按类型分组）/玩家清单。服务端权威世界；含 `world.info` 同一份世界身份字段 |
+| `read.player` | observe | **玩家状态**：位置（服务端与客户端各一份）、朝向与视线、生命/护甲/吸收/燃烧/氧气、饥饿、游戏模式与能力、经验、药水效果、手持与光标物品 |
+| `read.inventory` | observe | **背包与容器逐槽**：`source=player`（主背包 36 + 护甲 4 + 光标）/ `tile`（`at` 处方块实体的 `IInventory`）/ `ender`（末影箱）。逐槽 `{slot,empty,id,meta,count,maxStackSize,damage,maxDamage,displayName,nbt}` |
+| `read.te` | observe | **TE 状态**：逐位置「通用 TE 事实」（类名/是否在位/NBT 摘要）+「逐族描述器输出」（**与 `te-state-equals` 判据、观测记录 `runtimeReads` 同一个读取口**）。注册族与缺席族分列 |
+| `read.block` | observe | **方块与物品信息**：注册名/渲染类型/是否 TESR/是否 ISBRH/所需工具与等级/材质/硬度抗爆/掉落物。`at` 读世界里那一格；`block`/`item` 按注册名问注册表 |
+| `read.diff` | observe | **状态差异**：期望态（`expectInline` / `expectManifest` / `expectManifestFile`）与服务端实读**逐格 diff**，逐格给 `kinds[blockId\|meta]` 与两侧读数，并给双侧规范化 `sha256` |
+| `read.run` | observe | **run 产物清单读回**：枚举 run 并逐 run 实读磁盘 `manifest.json`，给出 `path/bytes/sha256/role` 与**磁盘一致性**（`missingFiles`/`sizeMismatch`），`shots/` 下产物单独归组——用于确认 `shot.multi` 等取证动作的产物确实进了 run 清单（§8.6 产物显式） |
+
+**哈希口径（`read.blocks` / `read.diff`）**：`sha256(canonical({"blocks":[{"pos","blockId","meta"}…]}))`，
+`blocks` 按 `(x,y,z)` 升序、`pos` 为 `[x,y,z]`，无空白、键排序（`Json.canonical`）。
+**与场景清单哈希的关系（可互算，不是恒等）**：场景清单的口径是
+`{blocks:[{pos,blockId,meta}], tileEntities:[{pos,class}]}`（case-file.md §8.7）。
+区域读回刻意**不含** `tileEntities`——含了它，「同一区域两次读回同不同」就混进了「该不该在这一格有 TE」
+这个额外变量，而该变量由 `read.te` 与场景清单各自独立回答。
+因此：读回整片区域并把结果排序后作为 `blocks`、附上同一批位置的 `tileEntities`，即得场景清单的哈希子集。
+**判据只用一处的定义**：`world-hash-equals` 的脚本口径与 `read.diff` 的 `hashes` 都由
+`ReadSupport.hashSubsetOf` 产出，不存在第二套哈希实现。
+
+**只读性（验收 B1）**：七个动作的调用前后**世界清单哈希不变**（实测，见证据）。
+只读不是靠约定：读面代码里不存在任何写世界/TE 的调用点（不出现
+`setBlock`/`setBlockToAir`/`markBlockForUpdate`/`initialize`/`addPart` 等）。
+
+**失败显式（§8.5）**：无服务端世界 → `CP-STATE-001`（上下文带 `action` 与可行补救）；
+坐标非法/范围过大/参数冲突 → `CP-VALID-002`（`context.fields` 逐字段）；
+容器不存在、TE 不存在 → `CP-STATE-001`（**不**返回空表：空容器与不存在的容器含义相反）。
+
+**产物显式（§8.6）**：`read.diff` 的 `expectManifestFile` 路径会开 run 目录并把结果落
+`read/diff.json`，登记 sha256 进 `manifest.json`；其余读面是纯内存读数，不产 run。
+
+### 4.2 取证级动作（PR-2，Refs #41）
 
 | 动作 | 级 | 语义 |
 |---|---|---|
@@ -94,7 +133,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 }
 ```
 
-### 4.2 相机与渲染规则（PR-2，#41 落地）
+### 4.3 相机与渲染规则（PR-2，#41 落地）
 
 1. **注入式相机**：渲染时用虚拟相机实体替换 `mc.renderViewEntity`（不传送真实玩家）；TE 渲染距离门随相机位置生效——这是注入而非挪玩家的核心理由。**机制更正（PR-3 实证）**：1.7.10 的 TE 距离门由 `TileEntityRendererDispatcher` 按 `renderViewEntity` 静态位置剔除 **TESR** 渲染，门值是各 TE 的 `getMaxRenderDistanceSquared()`（原版默认 4096=64 格；AE2 `TileCableBus`=900.0=30 格——**但 AE2 缆几何走 ISBRH 块层渲染不受此门管，门只管其动态部件（监视器屏显）的 TESR 内容**）。因此 K1 的验收器具是**原版箱子**（64 格 TESR 门）：玩家恒定停在门内、相机近/远跨门双拍——近图箱在、远图箱失即证「门随相机而非随玩家」。
 2. **门控位置分离（A3）**：`observation.playerPos` 恒为真实玩家位置，`observation.camera.pos` 为机位；两者各自记录，判据可分别断言。

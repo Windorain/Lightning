@@ -6,6 +6,14 @@ import com.lightning.mod.client.controlplane.core.Tier;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureBeginAction;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureEndAction;
 import com.lightning.mod.client.controlplane.mc.capture.ShotMultiAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadBlockInfoAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadBlocksAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadDiffAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadInventoryAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadOverviewAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadPlayerAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadRunAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadTeAction;
 
 /**
  * 动作注册表（contract.md §4 的 8 个动作）。
@@ -209,6 +217,239 @@ public final class ActionRegistrar {
             () -> new CaseRunAction(runtime));
 
         registerForensicActions(runtime, registry);
+        registerReadActions(runtime, registry);
+    }
+
+    /**
+     * 观察面读面动作（issue #98，{@code client/controlplane/mc/read/}）：全部 {@link Tier#OBSERVE}。
+     *
+     * <h2>为什么全部是同步动作</h2>
+     * 读面要求在<b>一次 tick 内</b>读完并返回：跨 tick 的读面会读到两个不同的世界状态
+     * （中间别的动作改了世界），「调用前后世界哈希不变」（B1）就无从判定。七个动作都不做
+     * 文件等待、不排队、不重试，故注册为同步。唯一例外是 {@code read.diff} 的
+     * {@code expectManifestFile} 路径要读一次磁盘——那次读也在同一 tick 内完成。
+     *
+     * <h2>自描述纪律</h2>
+     * 「没有自描述的动作视为不存在」（需求书 §8.1）：因此这七个的 {@code description}/
+     * 逐参数 {@code description}/{@code returns}/{@code example}/{@code since} 一律写全，
+     * 且默认值以 {@code default} 字段机读可见（D3）。
+     *
+     * <p>
+     * 命名取 {@code read.*}：与既有的 {@code world.info}（世界身份）、{@code shot.multi}（视觉）
+     * 分开——读面是「结构化读数」这一族，将来还会有同族动作，前缀即分组。
+     */
+    private static void registerReadActions(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        registry.register(
+            ActionDescriptor.builder(ReadBlocksAction.NAME, Tier.OBSERVE)
+                .description(
+                    "区域方块读回：读闭区间区域内每一格的 {pos, id, blockId, meta, te}，"
+                        + "并给出与 world.rebuild 场景清单同口径的规范化 sha256。只读，调用前后世界不变。")
+                .param(ActionDescriptor.Param.required("from", ActionDescriptor.TYPE_ARRAY, "区域起点 [x,y,z]（闭区间，含）"))
+                .param(
+                    ActionDescriptor.Param
+                        .required("to", ActionDescriptor.TYPE_ARRAY, "区域终点 [x,y,z]（闭区间，含；须逐轴 ≥ from）"))
+                .optional(
+                    "region",
+                    ActionDescriptor.TYPE_OBJECT,
+                    "等价写法 {from:[x,y,z], to:[x,y,z]}；与 from/to 二选一，同给且不一致报 CP-VALID-002")
+                .optional(
+                    "includeAir",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.TRUE,
+                    "blocks 数组是否包含空气（blockId=0）；默认 true。注意：sha256 恒按含空气的完整区域算，不受本参数影响")
+                .optional("hash", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "是否计算 sha256 与 hashInput；默认 true")
+                .returns(
+                    "{schema, action, region{from,to,volume}, volume, blockCount, airSkipped, includeAir, ordering, "
+                        + "blocks[{pos,blockId,meta,id,te}], sha256, hashScope, hashInput{blocks:[{pos,blockId,meta}]}, readAt}")
+                .example("{\"from\":[64,11,64],\"to\":[70,14,70]}")
+                .example("{\"region\":{\"from\":[64,12,64],\"to\":[64,12,64]},\"includeAir\":false}")
+                .since("1.3")
+                .build(),
+            new ReadBlocksAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadOverviewAction.NAME, Tier.OBSERVE)
+                .description("世界概览（服务端权威世界）：维度/时间/天气/已加载区块数/实体与方块实体计数（按类型分组）、" + "玩家清单，并附 world.info 同一份世界身份字段。只读。")
+                .optional("entities", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "是否统计实体与方块实体（关掉可省一次全表遍历）")
+                .optional(
+                    "topEntityTypes",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(10),
+                    "按类型分组返回前 N 名（降序，同数按键名升序）；0 表示不分类型")
+                .optional(
+                    "chunkRange",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "[minX,maxX,minZ,maxZ] 区块坐标（闭区间）——显式给出时才逐块列举已加载区块。"
+                        + "注意 provideChunk 对未加载区块会触发加载（读盘），故不做默认行为；区块数上限 4096")
+                .returns(
+                    "{schema, action, world{...（同 world.info）}, time{worldTime,totalWorldTime,day,timeOfDay}, "
+                        + "weather{raining,thundering,rainStrength,thunderStrength,rainTime?,thunderTime?,rainingScheduled?,thunderingScheduled?}, "
+                        + "chunks{loaded,source,listed,chunkRange?,chunkRangeNote?,chunks[]}, "
+                        + "entities{count,typeCount,byType[{type,count}],truncatedTypes,source}, "
+                        + "tileEntities{count,typeCount,byType,truncatedTypes,source}, "
+                        + "players{count,names[]}, chunkProvider{class,serverWorldAvailable}, readAt}")
+                .example("{}")
+                .example("{\"entities\":false}")
+                .since("1.3")
+                .build(),
+            new ReadOverviewAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadPlayerAction.NAME, Tier.OBSERVE)
+                .description(
+                    "玩家状态（服务端 EntityPlayerMP 权威侧）：位置（服务端与客户端各一份）、朝向与视线、生命/护甲/"
+                        + "吸收/燃烧/氧气、饥饿、游戏模式与能力、经验、药水效果、手持与光标物品。只读。")
+                .returns(
+                    "{schema, action, name, uuid?, entityId, dimension, source, "
+                        + "pos{server[3],eye[3],client?[3],clientName?}, "
+                        + "rotation{yaw,pitch,headYaw,facing,look[3]}, "
+                        + "health{health,maxHealth,absorption,armor,dead,alive,onGround,fallDistance,burning,wet,inWater,air,maxAir}, "
+                        + "food{foodLevel,saturationLevel,needsFood}?, gameMode{gameType,gameTypeId,isCreative,isAdventure,"
+                        + "allowFlying,isFlying,isCreativeMode,disableDamage,walkSpeed}, "
+                        + "experience{level,total,progress}, effects[{id,name,amplifier,duration,ambient}], "
+                        + "held{slot,main{...},cursor{item{...}}}, ping, readAt}")
+                .example("{}")
+                .since("1.3")
+                .build(),
+            new ReadPlayerAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadInventoryAction.NAME, Tier.OBSERVE)
+                .description(
+                    "背包与容器逐槽读回。source=player 读服务端玩家背包（主背包 36 + 护甲 4）；"
+                        + "source=tile 读 at 处方块实体实现的 IInventory；source=ender 读玩家末影箱。只读。"
+                        + "容器不存在报 CP-STATE-001（空容器与不存在的容器不是一回事，不返回空槽表）。")
+                .optional(
+                    "source",
+                    ActionDescriptor.TYPE_STRING,
+                    ReadInventoryAction.SOURCE_PLAYER,
+                    "player | tile | ender")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "source=tile 时必填：容器坐标 [x,y,z]（也接受 {pos:[x,y,z]}）")
+                .optional("includeEmpty", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "是否含空槽；false 只回非空槽（槽号仍是原编号，不留索引错觉）")
+                .optional("nbtMaxEntries", ActionDescriptor.TYPE_INT, Integer.valueOf(24), "逐槽 NBT 摘要的成员数上限（正整数）")
+                .returns(
+                    "{schema, action, source, inventory?{size,mainSize,armorSize,currentItem,heldSlot,slotMeaning,slots[],cursor{item}}, "
+                        + "container?{at,teClass,size,name,customName,stackLimit,slotMeaning,slots[]}, name?, owner?, readAt}；"
+                        + "每槽 {slot,empty,id?,meta?,count?,maxStackSize?,damage?,maxDamage?,displayName?,nbt?}")
+                .example("{\"source\":\"player\"}")
+                .example("{\"source\":\"tile\",\"at\":[65,12,64]}")
+                .since("1.3")
+                .build(),
+            new ReadInventoryAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadTeAction.NAME, Tier.OBSERVE)
+                .description(
+                    "方块实体状态：逐位置给「通用 TE 事实」（类名/是否在位/NBT 摘要）+「逐族描述器输出」"
+                        + "（与 te-state-equals 判据、观测记录 runtimeReads 同一个读取口，不另起一套）。只读。"
+                        + "已注册族与缺席族（模组未装）分别在 familiesRegistered / absentFamilies 里如实给出。")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "位置 [x,y,z] 或位置清单 [[x,y,z],…]；与 from/to 三选一")
+                .optional("from", ActionDescriptor.TYPE_ARRAY, "区域普查起点 [x,y,z]（体积 ≤ 4096）")
+                .optional("to", ActionDescriptor.TYPE_ARRAY, "区域普查终点 [x,y,z]")
+                .optional(
+                    "includeNbt",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.TRUE,
+                    "是否读 TE 的 NBT 摘要（writeToNBT 的受限摘要；仅供留痕，判据该断言族状态）")
+                .returns(
+                    "{schema, action, count, familiesRegistered[], absentFamilies{族:缺席原因}, "
+                        + "tiles[{pos, tile{present,blockId,meta,class?,superclass?,blockMetadata?,nbt?}, "
+                        + "claimedFamily, claimedState, families[{family,state,sha256?,note?}]}], pointerHint, readAt}")
+                .example("{\"at\":[65,12,64]}")
+                .example("{\"at\":[[65,12,64],[66,12,64]],\"includeNbt\":false}")
+                .since("1.3")
+                .build(),
+            new ReadTeAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadBlockInfoAction.NAME, Tier.OBSERVE)
+                .description(
+                    "方块与物品信息（注册名/渲染类型/是否 TESR/是否 ISBRH/所需工具与等级/材质/硬度抗爆/掉落物）。"
+                        + "三选一：at 读世界里那一格（含 TESR 判定，问的是渲染器自己的注册表）；"
+                        + "block 按注册名问方块表；item 按注册名问物品表。只读。")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "世界里的一格 [x,y,z]（读该格的方块与其实例的渲染信息）")
+                .optional("block", ActionDescriptor.TYPE_STRING, "方块注册名 modid:name（裸名按 minecraft: 处理）")
+                .optional("item", ActionDescriptor.TYPE_STRING, "物品注册名 modid:name")
+                .optional(
+                    "meta",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(0),
+                    "item/block 查询时使用的 meta（影响 unlocalizedName/工具类/放置物）")
+                .returns(
+                    "{schema, action, queryKind, block?{at?,id,blockId,meta,air,class,unlocalizedName,localizedName,"
+                        + "render{renderType,renderTypeName,renderTypeNameScope,isNormalCube,isOpaqueCube,renderBlockPass,"
+                        + "isFullBlock,lightValue,hasTileEntity,tickRandomly,tileEntity{available,present,class?,"
+                        + "hasSpecialRenderer,rendererClass?,rendererSource?},isTesr,isIsbrh,isIsbrhScope}, "
+                        + "harvest{tool,level}, material{name,liquid,solid,opaque,blocksGrass,toolNotRequired}, "
+                        + "hardness,resistance,slipperiness,lightOpacity,stepSound, drops{itemDroppedId,itemDropped,"
+                        + "quantityDropped,scope}}, item?{id,queriedId,meta,class,unlocalizedName,maxStackSize,maxDamage,"
+                        + "damageable,repairable,hasSubtypes,enchanted,toolClasses[],displayName,asBlockPlaced?}, readAt}")
+                .example("{\"at\":[65,12,64]}")
+                .example("{\"block\":\"minecraft:chest\"}")
+                .example("{\"item\":\"minecraft:diamond_pickaxe\"}")
+                .since("1.3")
+                .build(),
+            new ReadBlockInfoAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadDiffAction.NAME, Tier.OBSERVE)
+                .description(
+                    "状态差异：期望态（内联清单 / 场景清单对象 / 存档内最新场景清单）与服务端世界实读逐格 diff，"
+                        + "逐格给出 kinds[blockId|meta] 与两侧读数，并给双侧规范化 sha256。只读（不开可写段）。"
+                        + "expectManifestFile 路径会开 run 目录并把结果落 read/diff.json 登记进清单（产物显式）。")
+                .optional(
+                    "expectInline",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "内联期望 [{at:[x,y,z],id:\"minecraft:stone\",meta:0},…]（与 build 段的 block 步同形）")
+                .optional("expectManifest", ActionDescriptor.TYPE_OBJECT, "场景清单对象（与 world/scene-manifest.json 同形）")
+                .optional(
+                    "expectManifestFile",
+                    ActionDescriptor.TYPE_STRING,
+                    "托管世界目录名（cp_ 前缀）：读 saves/<folder>/scene-manifest.json")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "只比这一格 [x,y,z]（给出时忽略其余位置）")
+                .optional(
+                    "maxChanges",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(4096),
+                    "changes 数组的输出上限（超出记 truncatedChanges，不静默截断）")
+                .returns(
+                    "{schema, action, expectSource, checked, same, different, truncatedChanges, maxChanges, "
+                        + "changes[{pos,kinds[blockId|meta],expect,actual}], "
+                        + "hashes{actual,expected,equal,scope}, scope, resultPath?, resultSha256?, resultBytes?, readAt}")
+                .example(
+                    "{\"expectInline\":[{\"at\":[65,12,64],\"id\":\"minecraft:stone\",\"meta\":0}],\"expectManifestFile\":\"cp_demo\"}")
+                .example("{\"expectManifestFile\":\"cp_demo\"}")
+                .since("1.3")
+                .build(),
+            new ReadDiffAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadRunAction.NAME, Tier.OBSERVE)
+                .description(
+                    "run 产物清单读回：枚举 run 目录并逐 run 实读磁盘 manifest.json，给出产物 path/bytes/sha256/role、"
+                        + "磁盘存在性与大小一致性（missingFiles/sizeMismatch），并单独归组 shots/ 下的截图产物"
+                        + "（用于确认 shot.multi 等取证动作的产物确实进了 run 清单）。只读，不下载产物内容。")
+                .optional(
+                    "limit",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(ReadRunAction.DEFAULT_LIMIT),
+                    "返回的 run 条数上限（最新的在前）")
+                .optional("runId", ActionDescriptor.TYPE_STRING, "只读这一个 run（给出时忽略 limit）")
+                .optional(
+                    "role",
+                    ActionDescriptor.TYPE_STRING,
+                    "只保留该 role 的产物（如 shot / shot-meta / read-diff）；不影响 run 是否入选")
+                .optional("caseId", ActionDescriptor.TYPE_STRING, "只保留该 caseId 的 run")
+                .returns(
+                    "{schema, action, runsRoot, count, visited, available, limit, artifactCount, note, "
+                        + "runs[{runId,caseId,jobSeq,createdAt,dir,manifestPresent,artifacts[{path,bytes,sha256,role,"
+                        + "exists,diskBytes?,diskMismatch?}],artifactCount,missingFiles,sizeMismatch,"
+                        + "shotArtifacts[{path,role,sha256,bytes}],shotArtifactCount}], readAt}")
+                .example("{}")
+                .example("{\"role\":\"shot\",\"limit\":5}")
+                .since("1.3")
+                .build(),
+            new ReadRunAction());
     }
 
     /**

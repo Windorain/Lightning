@@ -231,7 +231,7 @@ pwsh -File scripts/control-plane/run-smoke.ps1 -CaseFile <path>                 
 ## 9. PR-2 取证拍摄验收（`cases/smoke-shots.json` + `run-shots.ps1`）
 
 > 契约出处：[`contract.md`](../../docs/control-plane/contract.md) §4.1（`shot.multi`/`capture.*`/`CameraSpec`）、
-> §4.2（相机与渲染规则）、[`case-file.md`](../../docs/control-plane/case-file.md) §4（`capture`/`cameras`）、
+> §4.3（相机与渲染规则）、[`case-file.md`](../../docs/control-plane/case-file.md) §4（`capture`/`cameras`）、
 > §5（`image-size-equals`/`image-not-uniform`）、§6（负对照）。
 > 前置、启用通道、端口、`caller.mjs` 用法与退出码**与 §2/§3.1 完全一致**，本节不重复。
 
@@ -314,11 +314,11 @@ pwsh -File scripts/control-plane/run-shots.ps1 -LegacyJdk          # 退回 runC
 | B2a | run 的 `criteria.json` 全绿且覆盖用例全部判据 id | 图像判据没满足（黑屏/纯色/尺寸不符）或判据缺失 |
 | B2b | `evidence.json` 的 `overall=green` 且 `expect` 里每条路径都在 run 目录里 | 证据清单缺项（本次缺的是截图原图或两份记账文件） |
 | B2c | `observation.json` 的 `/observation/camera/mode == injected` | 相机不是注入式（PR-1 占位值 `player` 没被覆盖） |
-| B2d | `observation.playerPos` 与 `observation.camera.pos` 至少一轴相差 > 0.5 | 门控位置分离（contract §4.2.2）没落地：机位与玩家位置被写成同一个 |
+| B2d | `observation.playerPos` 与 `observation.camera.pos` 至少一轴相差 > 0.5 | 门控位置分离（contract §4.3.2）没落地：机位与玩家位置被写成同一个 |
 | B2e | `observation.cameras[]` 数量与名字 == 用例声明 | 多机位摘要缺失或顺序错乱 |
 | B3a/B3b/B3c/B3d | 变体单跑退出码 0；`result.variantVerification.ok=true`；变体 run 的 `criteria.json` 里 `expectCriteriaRed` 全 `red`；其余判据仍 `green` | 负对照恒绿（假绿，防不住错图）或变体求值跑偏 |
 | B4a/B4b/B4c/B4d | `capture.begin` 退出码 0 → 会话期间 `world.rebuild` 非 0 且 `error.code=CP-STATE-001` → `capture.end` 退出码 0 且 `wasArmed=true` → 再 `world.rebuild` 退出码 0 且 `scene.sha256` 非空 | 捕获会话没封住世界写动作（取证期间世界仍在变），或会话泄漏（永久封死写动作） |
-| B5 | 含 `cameras` 段的 `case.run` 用 `--tier scene --sync`：非 0 且 `httpStatus=403` + `error.code=CP-AUTH-002` | 按内容升格（contract §4.2.9）没生效：低权限调用方顺手拿到了取证截图 |
+| B5 | 含 `cameras` 段的 `case.run` 用 `--tier scene --sync`：非 0 且 `httpStatus=403` + `error.code=CP-AUTH-002` | 按内容升格（contract §4.3.9）没生效：低权限调用方顺手拿到了取证截图 |
 | B6a | 3 机位 `shots/<name>.png` 存在且 >0 字节；`shots/**/*.png` 无 0 字节 | 截图没落盘/落成空文件（`ScreenShotHelper` 失败也返回非 null，只能靠文件断言） |
 | B6b | 每机位 `meta.json` 的 `cameraHeldDuringRender=true`，`resolution`/`requestedResolution` 与用例声明一致 | 渲染期 `renderViewEntity` 被改回玩家（静默错图），或分辨率覆写没生效 |
 | B6c | 三张整图 PNG **头实读**尺寸 == 声明 | 只靠 meta 自证不够；判据 `image-size-equals` 的同一口径独立复核 |
@@ -359,11 +359,11 @@ pwsh -File scripts/control-plane/run-shots.ps1 -LegacyJdk          # 退回 runC
 | `capture.begin`/`capture.end`（forensic，`{confirm:true}`；重复 begin 拒、未 begin 的 end 幂等） | contract.md §4.1 |
 | `CameraSpec = {name,pos,yaw,pitch,projection{type,fov\|orthoHeight},resolution,tile?{cols,rows,overlap}}` | contract.md §4.1 |
 | `shots/<name>.png` + `shots/<name>.meta.json`（schema `lightning.shot-meta/1`）+ 拼接机位 `shots/<name>.tiles/` | contract.md §4.1、case-file.md §4 |
-| `meta.json` 字段 `cameraHeldDuringRender`/`resolution`/`requestedResolution`/`tile{cols,rows,requestedCols,requestedRows,overlap}`/`lightingApplied` | 实现（`ShotExecutor.finishCamera`）；契约 §4.2.6 的 `lightingApplied:false` 留痕口径 |
+| `meta.json` 字段 `cameraHeldDuringRender`/`resolution`/`requestedResolution`/`tile{cols,rows,requestedCols,requestedRows,overlap}`/`lightingApplied` | 实现（`ShotExecutor.finishCamera`）；契约 §4.3.6 的 `lightingApplied:false` 留痕口径 |
 | `tiles/` 单片命名 `r<row>c<col>.png`（1 起） | 实现（`ShotExecutor.tileName`）；契约只规定「逐片落盘可审计」 |
 | 图像判据 `image-size-equals{path,width,height}`、`image-not-uniform{path,maxSameColorRatio?}` | case-file.md §5 |
-| `observation.camera{...}`/`cameras[]`/`playerPos`（门控位置分离） | contract.md §4.2.2、observation-record.md §2.4 |
-| 含 `cameras` 段的 `case.run` 按内容升格 → sync 得 HTTP 403 `CP-AUTH-002` | contract.md §4.2.9 |
+| `observation.camera{...}`/`cameras[]`/`playerPos`（门控位置分离） | contract.md §4.3.2、observation-record.md §2.4 |
+| 含 `cameras` 段的 `case.run` 按内容升格 → sync 得 HTTP 403 `CP-AUTH-002` | contract.md §4.3.9 |
 | `case.run` 的 `variant` 参数 + `result.variantVerification{ok,actual,notRed,missing}` | 实现（自描述 `variant`、`CaseRunAction.verifyVariant`）；case-file.md §6/§8.5 |
 | 步进动作的 `totalTimeoutMs`/`stageTimeoutMs`（默认 5 min / 3 min） | 实现（`SteppingActionBase.PARAM_*`，自描述里带 default） |
 
@@ -399,7 +399,7 @@ pwsh -File scripts/control-plane/run-shots.ps1 -LegacyJdk          # 退回 runC
    （相机在地平线以下时 `RenderGlobal.renderSky` 用纯色面/黑盒铺底，正交下所有背景像素等距 ⇒ 无渐变）。
    默认 `maxSameColorRatio=0.98` 对**正确**的正交俯拍图也会判红，故该判据显式写 `0.995`
    （纯色假图仍是 `1.0` ⇒ 仍拦得住）。这是用例侧的阈值校准，不是判据类型的问题；但若后续再有「大范围小场景」
-   的正交机位，都会撞同一件事，值得在 contract §4.2 记一条「正交机位的 `image-not-uniform` 阈值按场景占比给」。
+   的正交机位，都会撞同一件事，值得在 contract §4.3 记一条「正交机位的 `image-not-uniform` 阈值按场景占比给」。
 5. **拼接机位的中间帧命名与登记。** `ShotExecutor.shoot()` 对拼接机位把每片渲染帧也落在
    `shots/<name>-r<row>c<col>.png`（与 `shots/<name>.tiles/r<row>c<col>.png` **不同名**），且这些中间帧
    **不登记**进 `manifest.json` / `artifacts`（`GET /cp/v1/artifacts/{runId}` 看不到）。判据与 B6 只用
@@ -413,7 +413,7 @@ pwsh -File scripts/control-plane/run-shots.ps1 -LegacyJdk          # 退回 runC
 
 > 契约出处：contract.md §6.3（托管世界固定完成序 + **AE2 空缆块自毁时序陷阱**）、§6.4（TE 状态补全=
 > 走模组权威同步路径）、§6.5（**补全器的权威放置职责**：`params` 是放置输入而不是 NBT 回填；v1.2 注册表
-> `vanilla`/`lp-pipe`/`ae2-part`）、§4.2.1（AE2 电缆 30 方块渲染距离门）；case-file.md §5（`te-state-equals` /
+> `vanilla`/`lp-pipe`/`ae2-part`）、§4.3.1（AE2 电缆 30 方块渲染距离门）；case-file.md §5（`te-state-equals` /
 > `image-uniform` 与**双轨判据口径**）、§8.7（清单哈希口径）。
 > 前置、启用通道、端口、`caller.mjs` 用法与退出码**与 §2/§3.1 完全一致**，本节不重复。
 
