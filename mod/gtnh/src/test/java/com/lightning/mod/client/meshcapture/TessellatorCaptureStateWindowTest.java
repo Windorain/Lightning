@@ -28,12 +28,14 @@ public class TessellatorCaptureStateWindowTest {
     @Before
     public void setUp() {
         TessellatorCaptureState.endWindow();
+        TessellatorCaptureState.disarmWindowDrainSink();
         CaptureDiagnostics.resetForTesting(true);
     }
 
     @After
     public void tearDown() {
         TessellatorCaptureState.endWindow();
+        TessellatorCaptureState.disarmWindowDrainSink();
         CaptureDiagnostics.resetForTesting(false);
     }
 
@@ -232,5 +234,81 @@ public class TessellatorCaptureStateWindowTest {
             1,
             ch.get("zeroFlowWindows")
                 .getAsInt());
+    }
+
+    // ---------------------------------------------------------------- drain 汇（drain-dump 路由）
+
+    /** 测试汇：记录每次回调的通道/归属键/四边形。 */
+    private static final class RecordingSink implements TessellatorCaptureState.WindowDrainSink {
+
+        private final List<String> calls = new ArrayList<>();
+        private final List<CapturedQuad> lastQuads = new ArrayList<>();
+
+        @Override
+        public void onWindowDrained(CaptureChannel channel, int attrX, int attrY, int attrZ, String tag,
+            List<CapturedQuad> quads) {
+            calls.add(channel + "@" + attrX + "," + attrY + "," + attrZ + "#" + tag);
+            lastQuads.clear();
+            lastQuads.addAll(quads);
+        }
+    }
+
+    @Test
+    public void armWindowDrainSinkRoutesTesrWindowsThroughEndWindowAndDrain() {
+        RecordingSink sink = new RecordingSink();
+        TessellatorCaptureState.armWindowDrainSink(sink);
+        assertTrue(TessellatorCaptureState.isWindowDrainArmed());
+        TessellatorCaptureState.beginWindow(CaptureChannel.TESR, 65, 12, 64, "TileEntityLogisticsPipe");
+        recordOneQuad(65.0, 12.0, 64.0);
+        assertEquals(1, TessellatorCaptureState.endWindow());
+        assertEquals(1, sink.calls.size());
+        assertEquals("TESR@65,12,64#TileEntityLogisticsPipe", sink.calls.get(0));
+        assertEquals(1, sink.lastQuads.size());
+        assertEquals(CaptureChannel.TESR, sink.lastQuads.get(0).channel);
+        assertEquals(65, sink.lastQuads.get(0).attribX);
+        // 关窗语义不变：窗口计数与几何都已交出
+        assertFalse(TessellatorCaptureState.isRecording());
+        assertEquals(
+            1,
+            CaptureDiagnostics.toJson()
+                .getAsJsonObject("channels")
+                .getAsJsonObject("TESR")
+                .get("quads")
+                .getAsInt());
+    }
+
+    @Test
+    public void armedSinkIgnoresBlockCompileAndLegacyWindows() {
+        RecordingSink sink = new RecordingSink();
+        TessellatorCaptureState.armWindowDrainSink(sink);
+        TessellatorCaptureState.beginWindow(CaptureChannel.BLOCK_COMPILE, 64, 0, 64, "chunk(4,4)");
+        recordOneQuad(65.0, 1.0, 66.0);
+        assertEquals(1, TessellatorCaptureState.endWindow());
+        TessellatorCaptureState.beginBlock(0, 0, 0, "legacy", 65, 1, 66, null, 0, 0, "minecraft:stone");
+        recordOneQuad(65.0, 1.0, 66.0);
+        TessellatorCaptureState.endBlock(new CapturedBlockInstance());
+        assertEquals(0, sink.calls.size());
+    }
+
+    @Test
+    public void zeroFlowTesrWindowStillReportsEmptyQuadList() {
+        RecordingSink sink = new RecordingSink();
+        TessellatorCaptureState.armWindowDrainSink(sink);
+        TessellatorCaptureState.beginWindow(CaptureChannel.TESR, 10, 64, -3, "TileEntityChest");
+        assertEquals(0, TessellatorCaptureState.endWindow());
+        assertEquals(1, sink.calls.size());
+        assertEquals(0, sink.lastQuads.size());
+    }
+
+    @Test
+    public void disarmedSinkLeavesEndWindowSemanticsUntouched() {
+        RecordingSink sink = new RecordingSink();
+        TessellatorCaptureState.armWindowDrainSink(sink);
+        TessellatorCaptureState.disarmWindowDrainSink();
+        assertFalse(TessellatorCaptureState.isWindowDrainArmed());
+        TessellatorCaptureState.beginWindow(CaptureChannel.TESR, 1, 2, 3, "mv");
+        recordOneQuad(1.0, 2.0, 3.0);
+        assertEquals(1, TessellatorCaptureState.endWindow());
+        assertEquals(0, sink.calls.size());
     }
 }

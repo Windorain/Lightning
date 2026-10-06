@@ -4,10 +4,14 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
+import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.init.Blocks;
 import net.minecraft.server.MinecraftServer;
@@ -18,11 +22,19 @@ import net.minecraft.world.WorldType;
 
 import org.apache.logging.log4j.Level;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.lightning.mod.client.export.TextureBlobEmbedder;
+import com.lightning.mod.client.meshcapture.CaptureChannel;
 import com.lightning.mod.client.meshcapture.CaptureDiagnostics;
+import com.lightning.mod.client.meshcapture.CaptureDumpAssembler;
+import com.lightning.mod.client.meshcapture.MeshCaptureService;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState;
+import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedBlockInstance;
+import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedQuad;
 
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.FMLLog;
@@ -47,8 +59,23 @@ import cpw.mods.fml.relauncher.SideOnly;
  * </pre>
  *
  * 触发文件（全部可选）：{@code {"label":"...", "cleanupTrigger":true, "runTicks":120,
- * "syncWaitTicks":60, "baseX":64,"baseY":12,"baseZ":64}}。
+ * "syncWaitTicks":60, "baseX":64,"baseY":12,"baseZ":64, "dumpExport":false, "dumpLatestWindowOnly":false}}。
  * 触发文件不存在时本类<strong>零行为变化</strong>（不注册任何开销）。
+ *
+ * <p>
+ * <strong>drain-dump（{@code "dumpExport":true}）</strong>：把 TESR 录窗改用
+ * {@link TessellatorCaptureState#endWindowAndDrain}（经
+ * {@link TessellatorCaptureState#armWindowDrainSink} 布防的汇）按 TE 归属格收集实录几何，装配成 web 可加载的
+ * V2 场景文档 {@code <mcDataDir>/sde_capture_channel_probe_export.json}（{@code format_version:"2.0"} +
+ * {@code frames[0].structure} 的 {@code geometryPhase:"baked"/cellGrid/blockPalette}，air 占 0 位，
+ * 根级 {@code materialPalette}/{@code textureBlobs}），并在结果 JSON 追加 {@code exportDump}
+ * （{@code path/paletteEntries/perCellQuads/sha256} + 缺格 {@code missing} + 帧口径自证）。缺省 false：
+ * 结果 JSON 既有字段与断言逐字不变；dump 段的成败不进 {@code checks[]}、不改退出码。
+ * <p>
+ * 布防时机说明：drain 汇与 {@code armWindows()} 同在 {@code init}（观察条件一次设定）。LP 管的几何只在
+ * 「该 TE 首个可见帧的 VBO 编译」流入（实测每管恰好 174 四边形，之后逐帧零流入），而客户端 TE 同步发生在
+ * {@code WAIT_SYNC} 阶段——只在 {@code RUN_FRAMES} 才布防会漏掉它，且没有任何合规手段能重触发（重触发 =
+ * 驱动渲染器，#55 禁止）。因此布防覆盖整个验收会话的真实渲染帧。
  *
  * 判据（静默漏录不可接受的落地）：
  * <ul>
@@ -65,8 +92,15 @@ public final class CaptureChannelProbeAutomation {
 
     private static final String TRIGGER_FILE = "sde_capture_channel_probe.json";
     private static final String RESULT_FILE = "sde_capture_channel_probe_result.json";
+    private static final String EXPORT_FILE = "sde_capture_channel_probe_export.json";
     private static final String WORLD_FOLDER = "sde_capture_channel_probe_world";
     private static final String WORLD_DISPLAY = "SDE Capture Channel Probe World";
+
+    /** drain-dump 场景导出的「周边空气」外扩格数（cellGrid 覆盖最小包围盒 + 1 格）。 */
+    private static final int DUMP_MARGIN = 1;
+
+    private static final Gson PRETTY = new GsonBuilder().setPrettyPrinting()
+        .create();
 
     private static final long TOTAL_TIMEOUT_MS = 8L * 60L * 1000L;
     private static final long PHASE_TIMEOUT_MS = 3L * 60L * 1000L;
@@ -102,6 +136,47 @@ public final class CaptureChannelProbeAutomation {
         }
     }
 
+    /**
+     * TESR 录窗 drain 汇：按归属键（TE 世界格）汇集实录四边形。
+     * <p>
+     * 断言/落盘判据一律以 {@link TessellatorCaptureState#endWindowAndDrain} 交出的四边形为唯一来源
+     * （#55 禁条：不从静态数据/物品渲染兜底）；空窗口（zeroFlow）只计窗口数、不产生几何。
+     */
+    private static final class WindowDrainCollector implements TessellatorCaptureState.WindowDrainSink {
+
+        @Override
+        public void onWindowDrained(CaptureChannel channel, int attrX, int attrY, int attrZ, String tag,
+            List<CapturedQuad> quads) {
+            if (channel != CaptureChannel.TESR) {
+                return;
+            }
+            drainedWindows++;
+            if (quads.isEmpty()) {
+                return;
+            }
+            drainedQuads += quads.size();
+            drainedWindowsWithFlow++;
+            String key = cellKey(attrX, attrY, attrZ);
+            List<CapturedQuad> bucket = drainedByCell.get(key);
+            if (bucket == null) {
+                bucket = new ArrayList<CapturedQuad>();
+                drainedByCell.put(key, bucket);
+            }
+            if (dumpLatestWindowOnly) {
+                // 后窗覆盖前窗：一个窗口 = 一次完整 renderTileEntity ⇒ 最后一个非空窗口即当前渲染几何
+                bucket.clear();
+            }
+            bucket.addAll(quads);
+        }
+    }
+
+    /** 非空流入窗口数（诊断：大于 1 说明该会话里几何被多次重建/重复流入）。 */
+    private static int drainedWindowsWithFlow;
+
+    private static String cellKey(int x, int y, int z) {
+        return x + "," + y + "," + z;
+    }
+
     private static boolean active;
     private static boolean finalized;
     private static Phase phase = Phase.INIT;
@@ -120,6 +195,29 @@ public final class CaptureChannelProbeAutomation {
     private static int baseX = 64;
     private static int baseY = 12;
     private static int baseZ = 64;
+
+    /**
+     * drain-dump 开关（触发文件 {@code "dumpExport":true}，<strong>缺省 false</strong>）：开启时在观察条件设定阶段
+     * 布防 {@link TessellatorCaptureState#armWindowDrainSink}，把 TESR 录窗改为
+     * {@link TessellatorCaptureState#endWindowAndDrain} 并按 TE 归属格收集每格实录几何；关闭时本类零行为变化
+     * （结果 JSON 字段与断言逐字不变）。
+     */
+    private static boolean dumpExport;
+
+    /**
+     * 可选：每格只保留<strong>最后一个非空窗口</strong>的几何（触发文件 {@code "dumpLatestWindowOnly":true}，缺省 false）。
+     * <p>
+     * 缺省（false）= 会话内累计：同一 TE 多次重建 VBO 会重复流入同一形状，累计集里出现同内容（甚至逐位相同）的
+     * 重复四边形（实测 LP 管格 522 四边形 / 214 种内容）。true = 后窗覆盖前窗：一个 TESR 窗口 = 一次完整
+     * {@code renderTileEntity}，故最后一个非空窗口即「当前实际渲染的几何」。
+     */
+    private static boolean dumpLatestWindowOnly;
+
+    /** drain-dump：归属键（TE 世界格 "{@code x,y,z}"）→ 该格实录四边形（按窗口到来顺序追加）。 */
+    private static final Map<String, List<CapturedQuad>> drainedByCell = new LinkedHashMap<>();
+
+    private static int drainedWindows;
+    private static int drainedQuads;
 
     private static final List<Placed> placed = new ArrayList<Placed>();
     private static final List<String> warnings = new ArrayList<String>();
@@ -265,12 +363,26 @@ public final class CaptureChannelProbeAutomation {
                 baseZ = o.get("baseZ")
                     .getAsInt();
             }
+            if (o.has("dumpExport")) {
+                dumpExport = o.get("dumpExport")
+                    .getAsBoolean();
+            }
+            if (o.has("dumpLatestWindowOnly")) {
+                dumpLatestWindowOnly = o.get("dumpLatestWindowOnly")
+                    .getAsBoolean();
+            }
         } catch (Throwable t) {
             warnings.add("触发文件解析失败（用默认配置继续）: " + PartsProbeReflect.describe(t));
         }
         // 观察条件一次设定：诊断会话 + 录窗总开关（此后不再反复操纵）
         CaptureDiagnostics.beginSession();
         TessellatorCaptureState.armWindows();
+        if (dumpExport) {
+            // 录窗 drain-dump：TESR 窗口关闭走 endWindowAndDrain，按 TE 归属格收集实录几何（纯观察，
+            // 不驱动任何渲染器）。与 armWindows 同为「观察条件一次设定」，此后不再改动。
+            TessellatorCaptureState.armWindowDrainSink(new WindowDrainCollector());
+            FMLLog.info("[SDE][capture-probe] drain-dump 已布防：TESR 录窗改用 endWindowAndDrain，产物 %s", EXPORT_FILE);
+        }
         // 无人值守实测坑：游戏窗口失焦时 MC 会自动打开暂停菜单（GuiIngameMenu），
         // 单机暂停 → 服务端停 tick → 放置/同步/真实帧全部停摆（探针曾在 WAIT_WORLD 卡死超时）。
         // 关掉「失焦即暂停」属于观察条件一次设定（游戏设置项，非渲染行为操纵）。
@@ -557,6 +669,9 @@ public final class CaptureChannelProbeAutomation {
             .size();
         expect(checks, proofLines > 0, "坐标系自证日志行>0（实际 " + proofLines + "）");
 
+        // drain-dump（仅在 dumpExport=true 时产出）：在 baseResult() 快照 warnings 之前完成，产物告警一并进结果 JSON
+        JsonObject exportDump = dumpExport ? produceExportDump(mc) : null;
+
         int failures = countFailures(checks);
         result = baseResult();
         result.add("placement", plan);
@@ -565,6 +680,10 @@ public final class CaptureChannelProbeAutomation {
         result.addProperty("directTessellatorHookActive", Boolean.valueOf(hookActive));
         result.addProperty("directTessellatorVertexCount", Long.valueOf(hookCount));
         result.add("checks", checks);
+        // drain-dump：结果 JSON 的既有字段与断言零变化，新增字段仅此一段
+        if (exportDump != null) {
+            result.add("exportDump", exportDump);
+        }
         result.addProperty("status", failures == 0 ? "ok" : "failed");
         result.addProperty("exitCode", Integer.valueOf(failures == 0 ? 0 : 1));
         result.add("diag", diag);
@@ -597,6 +716,188 @@ public final class CaptureChannelProbeAutomation {
             }
         }
         return total;
+    }
+
+    // ------------------------------------------------------------------ drain-dump（场景导出）
+
+    /**
+     * 把录窗 drain 到的 TESR 几何装配成 web 可加载的 V2 场景文档并落盘
+     * （{@code <mcDataDir>/sde_capture_channel_probe_export.json}）。
+     * <p>
+     * <strong>忠实边界</strong>：几何唯一来源是 {@link TessellatorCaptureState#endWindowAndDrain} 交出的窗口四边形
+     * ——录不到的格留空（cellGrid = air）并进 {@code missing}，绝不从静态数据/物品渲染兜底（#55）。
+     * <p>
+     * <strong>本段不参与断言</strong>：dump 成功/失败只反映在返回的 {@code exportDump} 段（{@code status} /
+     * {@code missing} / {@code error}），{@code checks[]} 与退出码语义与 {@code dumpExport} 关闭时完全一致。
+     */
+    private static JsonObject produceExportDump(Minecraft mc) {
+        JsonObject dump = new JsonObject();
+        dump.addProperty("geometrySource", "tesr-window-drain-only");
+        dump.addProperty("staticFallback", Boolean.FALSE);
+        dump.addProperty("drainedWindows", Integer.valueOf(drainedWindows));
+        dump.addProperty("drainedWindowsWithFlow", Integer.valueOf(drainedWindowsWithFlow));
+        dump.addProperty("drainedQuads", Integer.valueOf(drainedQuads));
+        dump.addProperty("latestWindowOnly", Boolean.valueOf(dumpLatestWindowOnly));
+        try {
+            TextureMap textureMap = mc.getTextureMapBlocks();
+            MeshCaptureService.CaptureToolkit.MaterialTable materialTable = new MeshCaptureService.CaptureToolkit.MaterialTable();
+            List<CaptureDumpAssembler.CellInput> cells = new ArrayList<CaptureDumpAssembler.CellInput>();
+
+            JsonArray cellSources = new JsonArray();
+            for (Placed p : placed) {
+                List<CapturedQuad> drained = drainedByCell.get(cellKey(p.x, p.y, p.z));
+                String registryId = "unknown";
+                int meta = 0;
+                TileEntity te = mc.theWorld == null ? null : mc.theWorld.getTileEntity(p.x, p.y, p.z);
+                Block b = mc.theWorld == null ? null : mc.theWorld.getBlock(p.x, p.y, p.z);
+                if (mc.theWorld != null) {
+                    meta = mc.theWorld.getBlockMetadata(p.x, p.y, p.z);
+                }
+                if (b != null) {
+                    String reg = Block.blockRegistry.getNameForObject(b);
+                    if (reg != null && !reg.isEmpty()) {
+                        registryId = reg;
+                    }
+                } else {
+                    warnings.add("dump：客户端该格方块为 null，registryId 记为 unknown: " + p.label);
+                }
+                JsonObject src = new JsonObject();
+                src.addProperty("label", p.label);
+                src.addProperty("kind", p.kind);
+                src.addProperty("x", Integer.valueOf(p.x));
+                src.addProperty("y", Integer.valueOf(p.y));
+                src.addProperty("z", Integer.valueOf(p.z));
+                src.addProperty("registryId", registryId);
+                src.addProperty("meta", Integer.valueOf(meta));
+                src.addProperty(
+                    "clientTeClass",
+                    te == null ? "<null>"
+                        : te.getClass()
+                            .getName());
+                src.addProperty("drainedQuads", Integer.valueOf(drained == null ? 0 : drained.size()));
+                cellSources.add(src);
+
+                // 逐格：先挂材质（CaptureToolkit.attachQuadMaterials，multiblock 烘焙同款公共门面，
+                // MeshCaptureService.java:850），再由装配器做块局部归一化 + 几何产出。
+                // 四边形外壳先复制：attach 会就地重写顶点 UV（不可逆），不许污染录窗 drain 的原始记录。
+                CapturedBlockInstance inst = new CapturedBlockInstance();
+                if (drained != null) {
+                    for (CapturedQuad q : drained) {
+                        inst.quads.add(CaptureDumpAssembler.copyQuad(q));
+                    }
+                }
+                if (!inst.quads.isEmpty()) {
+                    MeshCaptureService.CaptureToolkit.attachQuadMaterials(inst, textureMap, materialTable);
+                }
+                cells.add(new CaptureDumpAssembler.CellInput(p.label, registryId, meta, p.x, p.y, p.z, inst.quads));
+            }
+
+            int ignoredCells = 0;
+            for (String key : drainedByCell.keySet()) {
+                boolean matched = false;
+                for (Placed p : placed) {
+                    if (cellKey(p.x, p.y, p.z).equals(key)) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    ignoredCells++;
+                }
+            }
+            dump.addProperty("drainCellsOutsidePlaced", Integer.valueOf(ignoredCells));
+            dump.add("cellSources", cellSources);
+
+            CaptureDumpAssembler.Assembly assembly = CaptureDumpAssembler.assemble(cells, DUMP_MARGIN);
+
+            JsonObject root = new JsonObject();
+            root.addProperty("format_version", "2.0");
+            root.addProperty("id", "sde-capture-channel-probe/" + label);
+            JsonObject meta = new JsonObject();
+            meta.addProperty("name", "SDE Capture Channel Probe Dump (" + label + ")");
+            meta.addProperty("author", "");
+            meta.addProperty("created_at_ms", Long.valueOf(System.currentTimeMillis()));
+            meta.addProperty(
+                "description",
+                "PR-1 新通道 TESR 录窗实录几何（drain-dump；cellGrid 覆盖探针受控格 + " + DUMP_MARGIN + " 格周边空气）");
+            meta.add("tags", new JsonArray());
+            JsonObject origin = new JsonObject();
+            origin.addProperty("x", Integer.valueOf(assembly.minX));
+            origin.addProperty("y", Integer.valueOf(assembly.minY));
+            origin.addProperty("z", Integer.valueOf(assembly.minZ));
+            meta.add("origin", origin);
+            root.add("meta", meta);
+            JsonArray frames = new JsonArray();
+            JsonObject frame0 = new JsonObject();
+            frame0.addProperty("index", Integer.valueOf(0));
+            frame0.add("structure", assembly.structure);
+            frames.add(frame0);
+            root.add("frames", frames);
+            root.add("annotations", new JsonArray());
+            root.add("labels", new JsonArray());
+            // materialPalette 挂根级（与现行导出 / web fixture 同层级；textureBlobIndex 由 embedder 回填）
+            root.add("materialPalette", materialTable.toMaterialPalette());
+            String textureBlobError = null;
+            try {
+                // textureBlobs 嵌 PNG 字节的既有做法照用（根级 base64 string[]，与 web rootTextureBlobs 口径一致）
+                TextureBlobEmbedder.embedIntoDocument(root);
+            } catch (Throwable t) {
+                textureBlobError = PartsProbeReflect.describe(t);
+                warnings.add("dump：textureBlobs 嵌入失败（几何仍写出）: " + textureBlobError);
+            }
+
+            byte[] bytes = PRETTY.toJson(root)
+                .getBytes(StandardCharsets.UTF_8);
+            File out = new File(mc.mcDataDir, EXPORT_FILE);
+            Files.write(out.toPath(), bytes);
+
+            dump.addProperty("path", out.getAbsolutePath());
+            dump.addProperty("paletteEntries", Integer.valueOf(assembly.paletteEntries));
+            dump.add("perCellQuads", assembly.perCellQuads);
+            dump.addProperty("duplicateQuadsTotal", Integer.valueOf(assembly.duplicateQuads));
+            dump.addProperty("sha256", CaptureDumpAssembler.sha256Hex(bytes));
+            dump.addProperty("bytes", Integer.valueOf(bytes.length));
+            dump.addProperty("materialPaletteEntries", Integer.valueOf(materialTable.size()));
+            dump.addProperty(
+                "textureBlobs",
+                Integer.valueOf(
+                    root.has("textureBlobs") ? root.getAsJsonArray("textureBlobs")
+                        .size() : 0));
+            if (textureBlobError != null) {
+                dump.addProperty("textureBlobError", textureBlobError);
+            }
+            JsonObject grid = new JsonObject();
+            grid.addProperty("sizeX", Integer.valueOf(assembly.sizeX));
+            grid.addProperty("sizeY", Integer.valueOf(assembly.sizeY));
+            grid.addProperty("sizeZ", Integer.valueOf(assembly.sizeZ));
+            grid.addProperty("minX", Integer.valueOf(assembly.minX));
+            grid.addProperty("minY", Integer.valueOf(assembly.minY));
+            grid.addProperty("minZ", Integer.valueOf(assembly.minZ));
+            grid.addProperty("rowZeroIsTopY", Boolean.TRUE);
+            dump.add("cellGrid", grid);
+            JsonArray missing = new JsonArray();
+            for (String m : assembly.missing) {
+                missing.add(new com.google.gson.JsonPrimitive(m));
+            }
+            dump.add("missing", missing);
+            dump.addProperty("missingCount", Integer.valueOf(assembly.missing.size()));
+            dump.addProperty("status", assembly.missing.isEmpty() ? "ok" : "partial-missing-cells");
+            FMLLog.info(
+                "[SDE][capture-probe] drain-dump 已落盘 %s（palette=%d，重复四边形 %d，逐格四边形 %s，missing=%d，sha256=%s）",
+                EXPORT_FILE,
+                Integer.valueOf(assembly.paletteEntries),
+                Integer.valueOf(assembly.duplicateQuads),
+                assembly.perCellQuads.toString(),
+                Integer.valueOf(assembly.missing.size()),
+                CaptureDumpAssembler.sha256Hex(bytes));
+        } catch (Throwable t) {
+            dump.addProperty("status", "error");
+            dump.addProperty("error", PartsProbeReflect.describe(t));
+            warnings.add("dump 装配/落盘失败（不影响既有断言）: " + PartsProbeReflect.describe(t));
+        } finally {
+            TessellatorCaptureState.disarmWindowDrainSink();
+        }
+        return dump;
     }
 
     // ------------------------------------------------------------------ 小工具

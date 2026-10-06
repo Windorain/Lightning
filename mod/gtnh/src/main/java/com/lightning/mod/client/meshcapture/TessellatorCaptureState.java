@@ -140,22 +140,89 @@ public final class TessellatorCaptureState {
 
     /**
      * 关闭当前通道录窗并丢弃已录四边形（PR-1 默认不驻留几何，只计数）。
+     * <p>
+     * {@link #armWindowDrainSink} 已布防时，<strong>TESR</strong> 窗口的关闭改走
+     * {@link #endWindowAndDrain(List)} 并把「窗口归属键 + 四边形」交给汇（drain-dump）；未布防（默认）时
+     * 逐字节保持原语义。
      *
      * @return 本窗口流入四边形数；当前无新通道窗口时返回 -1（容忍多余调用，不抛——渲染循环异常路径兜底）
      */
     public static int endWindow() {
-        return endWindowInternal(null);
+        WindowDrainSink sink = windowDrainSink;
+        if (sink == null) {
+            return endWindowInternal(null);
+        }
+        // 监视器可重入（同线程）：此处持锁只为「读通道 + 关窗」原子，endWindowAndDrain 内部再取一次不构成死锁
+        synchronized (CAPTURE) {
+            Frame f = CAPTURE;
+            if (!f.active || f.channel != CaptureChannel.TESR) {
+                return endWindowInternal(null);
+            }
+            int attrX = f.attrX;
+            int attrY = f.attrY;
+            int attrZ = f.attrZ;
+            String tag = f.windowTag;
+            List<CapturedQuad> drained = new ArrayList<>();
+            int count = endWindowAndDrain(drained);
+            try {
+                sink.onWindowDrained(CaptureChannel.TESR, attrX, attrY, attrZ, tag, drained);
+            } catch (Throwable t) {
+                // 汇（探针侧）抛错绝不能影响渲染循环：吞掉并尽力留痕
+                logDrainSinkFailure(t);
+            }
+            return count;
+        }
     }
 
     /**
      * 关闭当前通道录窗并把已录四边形移入 {@code out}（PR-2 编排层接口：MeshCaptureService 切换编排时
-     * 从录窗层取走窗口几何；PR-1 无人调用，保留给编排切换）。
+     * 从录窗层取走窗口几何；PR-1 由 {@link #endWindow()} 的 drain 路由与验收探针调用）。
      */
     public static int endWindowAndDrain(List<CapturedQuad> out) {
         if (out == null) {
             throw new IllegalArgumentException("out == null");
         }
         return endWindowInternal(out);
+    }
+
+    /**
+     * TESR 录窗 drain 汇（「忠实复现捕获层」PR-1 验收探针的 drain-dump 落点，见
+     * {@code CaptureChannelProbeAutomation} 的 {@code dumpExport} 开关）。
+     * <p>
+     * 布防语义：布防后 TESR 录窗关闭走 {@link #endWindowAndDrain(List)}，把<strong>窗口归属键（TE 世界坐标）</strong>
+     * 与该窗口实录四边形交给汇；未布防时 {@link #endWindow()} 与 PR-1 原行为完全一致（几何关闭即丢，只计数）。
+     * 只对 {@link CaptureChannel#TESR} 生效：BLOCK_COMPILE 窗口数在实测会话里是 3 万+量级，驻留其四边形既无必要
+     * 也会给渲染线程添负担。
+     */
+    public interface WindowDrainSink {
+
+        void onWindowDrained(CaptureChannel channel, int attrX, int attrY, int attrZ, String tag,
+            List<CapturedQuad> quads);
+    }
+
+    /** 当前 drain 汇；{@code null} = 未布防（默认，零行为变化）。 */
+    private static volatile WindowDrainSink windowDrainSink;
+
+    /** 布防 TESR 录窗 drain 汇；{@code null} 等价于 {@link #disarmWindowDrainSink()}。 */
+    public static void armWindowDrainSink(WindowDrainSink sink) {
+        windowDrainSink = sink;
+    }
+
+    /** 撤防 drain 汇（回到「关窗即丢几何」的 PR-1 默认行为）。 */
+    public static void disarmWindowDrainSink() {
+        windowDrainSink = null;
+    }
+
+    public static boolean isWindowDrainArmed() {
+        return windowDrainSink != null;
+    }
+
+    private static void logDrainSinkFailure(Throwable t) {
+        try {
+            FMLLog.warning("[SDE][capture] 窗口 drain 汇抛错（渲染循环不受影响）: %s", String.valueOf(t));
+        } catch (Throwable ignored) {
+            // 非 FML 环境（纯 JVM 单测）：日志通道不可用
+        }
     }
 
     private static int endWindowInternal(List<CapturedQuad> drainTo) {
