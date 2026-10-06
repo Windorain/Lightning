@@ -12,6 +12,7 @@ import type {
 } from '@/pure/materialTypes'
 
 import type { PartList } from '@/pure/partTypes'
+import type { HostItemIdentity, ItemIndex } from '@/pure/itemIndex'
 
 export type {
   MaterialBlendMode,
@@ -35,11 +36,28 @@ export type {
 } from '@/pure/partTypes'
 export { PARTS_GRID_NONE, partListSignature } from '@/pure/partTypes'
 
+// ---- 物品索引表（契约 §2.2）：纯类型与反查索引见 pure/itemIndex ----
+export type {
+  HostItemIdentity,
+  ItemAttributionHit,
+  ItemAttributionSource,
+  ItemHitIndex,
+  ItemHitIndexEntry,
+  ItemIndex,
+  ItemIndexEntry,
+} from '@/pure/itemIndex'
+
 export interface BlockRef {
   pos: { x: number; y: number; z: number }
   block_state_id: string
   /** 被击中的 quad 在该体素内的索引 */
   quadIndex?: number
+  /**
+   * B-1：命中的部件 localId（契约 §4 命名空间隔离）。
+   * 缺省 = 整格引用（无部件格 / 框选、按类型选择等既有路径），描边 mask 与悬停目标
+   * 都回到整格语义；给出时描边 mask 收敛到该部件（`context/queries.ts#getPartMaskGeometry`）。
+   */
+  partLocalId?: string
   /** 命中面的世界空间法线（已归一化），用于面级别检测 */
   normal?: { x: number; y: number; z: number }
   /** 命中点的世界空间坐标，用于区分同法线的多个面 */
@@ -168,6 +186,13 @@ export interface StructureDataBaked {
    */
   partLists?: PartList[]
   /**
+   * 物品索引表（契约 §2.2，B-2）：物品身份键 → { 说明行, 归属 }。**文档根级**字段
+   * （与 `partIconTextures`/`statsTemplate` 同级，非 structure 级），跨帧共享、按键去重；
+   * 仅当文档含部件数据时写入。左栏物品行悬停说明（#5）与点选高亮归属（#7）的单一数据源。
+   * 消费入口：`@/pure/itemIndex` 的 `buildItemHitIndex`。
+   */
+  itemIndex?: ItemIndex
+  /**
    * 单文件 baked 根上的 ToolTip 文案池；`World` 文档时见根级 `World.tooltipPalette`（帧内 `structure` 不重复此字段亦可）。
    */
   tooltipPalette?: string[]
@@ -222,6 +247,11 @@ export interface BakedModelPaletteEntry {
   nbt?: JsonNbt
   thumbnailPNG?: string
   tooltip?: string[]
+  /**
+   * 宿主级物品身份（契约 §2.2 层②，B-2 落盘）：`Item.getItemFromBlock(block)` + damage。
+   * **仅当该结构含部件数据时写出**（无部件文件字节干净）；方块键 ≠ 物品键的桥接数据。
+   */
+  hostItem?: HostItemIdentity
   occludesAdjacentFaces?: boolean
   renderMode: 'BakedModel'
   geometry: BakedQuadsGeometry
@@ -265,6 +295,15 @@ export interface World {
   materialPalette?: MaterialPaletteEntry[]
   /** 根级方块调色盘，所有帧共享；cellGrid 的值直接指向此数组 */
   blockPalette?: BlockPaletteEntry[]
+  /**
+   * 根级部件轮字段（契约 §2/§2.2/§9）：部件物品图标纹理 `partIconTextures`、文档默认/覆盖统计层
+   * `statsTemplate`/`statsOverride`、物品索引表 `itemIndex` —— 真实 World 导出把它们写在 **World 根**
+   * （跨帧共享一份），帧内 `structure` 不重复。消费入口：`@/pure/itemIndex`。
+   */
+  partIconTextures?: Record<string, string>
+  statsTemplate?: Record<string, unknown>
+  statsOverride?: Record<string, unknown>
+  itemIndex?: ItemIndex
   frames: Frame[]
   playback?: { loop?: boolean; defaultFrameIndex?: number }
 }

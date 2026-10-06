@@ -43,8 +43,8 @@ export interface PartItem {
   display?: string
 }
 
-/** 来源族（契约 §4 localId 命名空间即由此派生；落盘值恒为 `eio` —— 旧写法 `enderio` 已按契约 §3/§10.2 废弃） */
-export type PartFamily = 'ae2' | 'eio' | 'fmp' | 'generic' | 'inferred'
+/** 来源族（契约 §4 localId 命名空间即由此派生） */
+export type PartFamily = 'ae2' | 'enderio' | 'fmp' | 'generic' | 'inferred'
 
 /** 盒来源标记（契约 §6.4） */
 export type PartBoxProvenance =

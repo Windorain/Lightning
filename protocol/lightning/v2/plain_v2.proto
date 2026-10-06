@@ -180,3 +180,39 @@ message StatsEntry {
   string icon_source = 3;
   string part_type_key = 4;           // 可选：部件视图条目键（= BlockPart.part_tag/typeKey）
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B-2（部件轮，Gitea #35）新增：物品索引表（契约《部件数据契约》§2.2）
+//
+// 契约口径（§10.1）：本文件是**规范 schema 文档**；两侧实现手写（Java Gson / TS 手写类型），
+// 本节只登记形状，不引入 Java 代码生成。JSON 落盘为 camelCase（字段名映射见各字段注释）。
+//
+// JSON 路径对应：
+//   * itemIndex                        → 文档根 `itemIndex`（World 文档挂 World 根，跨帧共享一份）
+//   * itemIndex[<物品身份键>]           → ItemIndexEntry；键 = `registry:damage[#nbt]`
+//   * itemIndex[k].attribution[i]      → ItemAttribution（归属定位；空数组 = 显式"无对应"）
+//   * blockPalette[j].hostItem         → HostItemIdentity（层② 宿主级物品身份，仅含部件文档写入）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 物品索引表条目（JSON：`itemIndex[<key>]`）
+message ItemIndexEntry {
+  string display = 1;                  // 显示名（JSON `display`）；缺省回退 = 物品身份键本身
+  repeated string tooltip = 2;         // 说明行（JSON `tooltip`；空 ⇒ 至少 display 一行）
+  string source = 3;                   // 归属来源（JSON `source`）："part" | "host" | "family" | "none"
+  repeated ItemAttribution attribution = 4;  // 归属定位（JSON `attribution`）
+}
+
+// 一条归属命中（JSON：`itemIndex[k].attribution[i]`）
+message ItemAttribution {
+  string source = 1;                   // "part" | "host" | "family"（层③族特有本轮只留扩展接口）
+  int32 frame = 2;                     // 帧下标（单文件文档 = 0；World 帧 = frames[i].index）
+  repeated int32 grid = 3;             // 格下标 [zSlice, row, column]（与 cellGrid/cellPartsGrid 同下标）
+  string local_id = 4;                 // 仅 source="part"：格内部件定位（= BlockPart.local_id）
+}
+
+// 宿主级物品身份（JSON：`blockPalette[j].hostItem`，层②）
+// 由 Item.getItemFromBlock(block) + damage 导出；无物品形态的方块该字段缺席（不猜）。
+message HostItemIdentity {
+  string registry = 1;                 // 物品注册名（JSON `registry`）
+  int32 damage = 2;                    // 物品 damage（JSON `damage`；= 方块 meta）
+}

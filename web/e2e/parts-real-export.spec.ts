@@ -50,6 +50,7 @@ import path from 'node:path'
 import {
   CANONICAL_ORACLE_FILES,
   REAL_EXPORT_FILES,
+  attributionKey,
   cellsOfZone,
   gridIndexOf,
   loadArchiveJson,
@@ -61,20 +62,26 @@ import {
   probePartHover,
   readCameraDirectionForCell,
   readDefinitionRootFields,
+  readFileHostItems,
+  readFileItemIndex,
   readPartsObservation,
   resolvePartsArchive,
   type GridIndex,
   type OracleCell,
   type OracleDoc,
+  type OracleItemIndexEntry,
   type RealExportDoc,
   type RealPart,
 } from './helpers/parts'
 import {
   WIKI_REGION,
   clearWikiHover,
+  compactTooltipText,
   gotoWikiPreviewWithScene,
+  hoverStatsRow,
   injectHoverAtCellLocal,
-  readProvenance,
+  leaveStatsRow,
+  readLegacyStatsUiAbsent,
   readStatsSidebarSettled,
   readTooltipText,
   readWikiHover,
@@ -109,6 +116,117 @@ const EXPECTED_COUNTS_TOTAL = 61
 /** 退化档 `countsScope=untransformed-cells-only` 的唯一在册行（火把；P1.8 实测）。 */
 const DEGRADED_SCOPE_TORCH = { typeKey: 'minecraft:torch:0', count: 12 }
 
+// ---------------------------------------------------------------------------
+// 契约 §2.2 物品索引表（#39 阶段一）—— 反同义反复锚点（硬编码）
+// ---------------------------------------------------------------------------
+
+/** itemIndex 键数（= 全部部件的物品身份键数；与 `expectedCounts` 条目数同源，P1.8 实测 21）。 */
+const ITEM_INDEX_KEYS = 21
+/** `source=part` 归属总数 = 物品件数（每部件 1 件 ⇒ 与 `EXPECTED_COUNTS_TOTAL` 恒等，独立自检）。 */
+const ITEM_INDEX_PART_ATTRS = 61
+/** `source=host` 归属总数（宿主方块自身身份命中层①键的格：下半 slab 1 + 栅栏 9）。 */
+const ITEM_INDEX_HOST_ATTRS = 10
+/** 退化档（degraded_all）itemIndex 键数（火把/石板/箱子/栅栏 + EIO 方块身份；实测 5）。 */
+const ITEM_INDEX_KEYS_DEGRADED_ALL = 5
+/**
+ * 退化档 `EnderIO:blockConduitBundle:0` 的 **host** 归属数（4 变换格各 1 条宿主归属；实测证据）。
+ * 注：**总**归属数还含岛级 part 归属（`inferred:<岛序号>`，岛数静态不可预测）⇒ 不硬编码总数。
+ */
+const DEGRADED_EIO_BUNDLE_HOST_ATTRS = 4
+
+/**
+ * 契约 §2.2 归属条目身份（与消费侧 `pure/itemIndex.ts#normalizeHits` 同口径）：
+ * `(source, frame, grid, localId)`；`localId:"inferred:*"` 视作**通配**（档 3 岛序号哨兵）。
+ */
+function attrMatches(got: { source?: string; frame?: number; grid?: number[]; localId?: string }, want: {
+  source: string
+  frame: number
+  grid: [number, number, number]
+  localId?: string
+}): boolean {
+  if (got.source !== want.source || got.frame !== want.frame) return false
+  const g = got.grid ?? []
+  if (g[0] !== want.grid[0] || g[1] !== want.grid[1] || g[2] !== want.grid[2]) return false
+  if (want.localId === 'inferred:*') return typeof got.localId === 'string' && got.localId.startsWith('inferred:')
+  return (got.localId ?? null) === (want.localId ?? null)
+}
+
+/**
+ * 文件 itemIndex ↔ oracle 期望逐键比对（返回人类可读差异列表；空数组 = 一致）。
+ *
+ * 口径（契约 §2.2）：
+ *  - `itemIndexScope=exact` ⇒ 键集**双向**精确；退化轮（`untransformed-cells-only`）⇒ 在册键必在；
+ *  - `displayChecked=false`（NBT 变体）⇒ 只断言非空；
+ *  - `source` = `attribution` 首条来源（空数组 ⇒ `none`），且归属必须按来源权威度分组；
+ *  - 说明行非空（空值语义：至少 display 一行）；
+ *  - 归属逐条匹配（多出/缺失都报；`inferred:*` 通配）。
+ */
+function diffItemIndex(oracle: OracleDoc, doc: RealExportDoc): string[] {
+  const out: string[] = []
+  const file = readFileItemIndex(doc)
+  const exp = oracle.itemIndex
+  const subset = oracle.itemIndexScope === 'untransformed-cells-only'
+  const fileKeys = Object.keys(file).sort()
+  const expKeys = Object.keys(exp).sort()
+  for (const k of expKeys) if (!(k in file)) out.push(`缺期望键 ${k}`)
+  if (!subset) for (const k of fileKeys) if (!(k in exp)) out.push(`多出未登记键 ${k}`)
+
+  for (const key of fileKeys) {
+    const e = file[key]!
+    const want: OracleItemIndexEntry | undefined = exp[key]
+    if (e.display.length === 0) out.push(`${key} display 为空（缺省兜底 = 键本身）`)
+    if (e.tooltip.length === 0) out.push(`${key} tooltip 为空（空值语义：至少 display 一行）`)
+    const wantSource = e.attribution.length === 0 ? 'none' : e.attribution[0]?.source
+    if (e.source !== wantSource) out.push(`${key} source=${e.source} 与 attribution 首条 ${wantSource} 不符`)
+    // 权威度分组（part → host → family）
+    const rank: Record<string, number> = { part: 0, host: 1, family: 2 }
+    let prev = -1
+    for (const a of e.attribution) {
+      const r = rank[a.source] ?? -1
+      if (r >= 0) {
+        if (r < prev) out.push(`${key} attribution 未按权威度分组（${a.source} 出现在更低权威度之后）`)
+        prev = Math.max(prev, r)
+      }
+    }
+    const ids = new Set<string>()
+    for (const a of e.attribution) {
+      const id = attributionKey(a)
+      if (ids.has(id)) out.push(`${key} 归属重复 ${id}`)
+      ids.add(id)
+    }
+    if (!want) continue
+    if (want.displayChecked !== false && e.display !== want.display) {
+      out.push(`${key} display=${JSON.stringify(e.display)} ≠ 期望 ${JSON.stringify(want.display)}`)
+    }
+    if (e.source !== want.source) out.push(`${key} source=${e.source} ≠ 期望 ${want.source}`)
+    const used = new Array(e.attribution.length).fill(false)
+    for (const w of want.attribution ?? []) {
+      if (w.localId === 'inferred:*') {
+        // 通配哨兵（契约 §11 档 3）：`inferred:<岛序号>` 的**条数静态不可预测**，
+        // 故 oracle 一条通配期望要**消耗该格该来源的全部岛级归属**（不能只判"存在"，
+        // 否则同一格的其余岛会被下面的循环误报"多出未登记归属"；#39 阶段二实测擒获）。
+        let consumedAny = false
+        for (let i = 0; i < e.attribution.length; i++) {
+          if (used[i]) continue
+          if (attrMatches(e.attribution[i]!, w)) {
+            used[i] = true
+            consumedAny = true
+          }
+        }
+        if (!consumedAny) out.push(`${key} 缺通配归属 ${JSON.stringify(w)}`)
+        continue
+      }
+      const idx = e.attribution.findIndex((a, i) => !used[i] && attrMatches(a, w))
+      if (idx < 0) out.push(`${key} 缺期望归属 ${JSON.stringify(w)}`)
+      else used[idx] = true
+    }
+    for (let i = 0; i < e.attribution.length; i++) {
+      if (!used[i]) out.push(`${key} 多出未登记归属 ${attributionKey(e.attribution[i]!)}`)
+    }
+  }
+  return out
+}
+
 /**
  * 契约 §4：localId 前缀 → 族（用于把 oracle 的 localId 映射回来源族）。
  *
@@ -128,9 +246,14 @@ function cellsWithParts(oracle: OracleDoc): OracleCell[] {
   return oracle.cells.filter((c) => (c.parts ?? []).length > 0)
 }
 
-/** 紧凑行形状（断言失败时 diff 可读）。 */
-function compactRows(rows: StatsRowObservation[]): Array<{ key: string | null; kind: string | null; qty: string }> {
-  return rows.map((r) => ({ key: r.key, kind: r.kind, qty: r.qty }))
+/**
+ * 紧凑行形状（断言失败时 diff 可读）。
+ *
+ * B-4 收口：B-3（决策 C）后 `data-stats-row-kind` 属性不再渲染（左栏只有物品行一种），
+ * 故 `kind` 字段已从 `StatsRowObservation` 移除 —— 行种类判据 = 行上有无 `data-stats-row-key`。
+ */
+function compactRows(rows: StatsRowObservation[]): Array<{ key: string | null; qty: string }> {
+  return rows.map((r) => ({ key: r.key, qty: r.qty }))
 }
 
 /** 部件类型键 → 该键在文件里出现过的全部显示名（应唯一）。 */
@@ -431,13 +554,11 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
       'oracle expectedCounts 总件数 = 硬编码 61',
     ).toBe(EXPECTED_COUNTS_TOTAL)
 
-    // ── 默认视图 = 部件物品清单，行/计数与 oracle 精确一致 ──
-    expect(s.toolbar, '含部件数据 ⇒ 部件模式工具条渲染').toBe(true)
-    expect(s.viewButtons.map((b) => [b.id, b.active]), '默认激活 = 部件物品视图').toEqual([
-      ['parts', true],
-      ['hosts', false],
-      ['custom', false],
-    ])
+    // ── 默认视图 = 物品清单，行/计数与 oracle 精确一致 ──
+    //    （B-3 决策 C 已移除"视图切换工具条 / 视图按钮 / 配置来源徽标 / provenance 面板"：
+    //     此处不再有它们的断言——读已移除的 UI 只会造出确定性坏断言；工具条的不存在
+    //     由下面的移除锁计数断言锁定。）
+    expect(s.legacyToolbar, 'B-3：已移除的视图切换工具条不渲染').toBe(false)
     const rowsByKey = new Map(s.rows.map((r) => [r.key!, r]))
     expect(s.rows.length, '统计行数 = oracle 条目数（无多行/少行）').toBe(ORACLE_FULL.expectedCounts.length)
     const mismatch: string[] = []
@@ -459,7 +580,9 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
     // ── 名称与图标键：名称取部件显示名（文件自带），图标键 = 物品身份键 ──
     const names = displayNamesByTypeKey(FULL)
     for (const r of s.rows) {
-      expect(r.kind, `行 ${r.key} kind=part`).toBe('part')
+      // 物品行带行键（B-3 后左栏只有物品行；旧文件宿主清单行无 `data-stats-row-key` ⇒ null）
+      expect(r.key, '统计行必须是物品行（带 data-stats-row-key）').not.toBeNull()
+      expect(r.iconKey, `行 ${r.key} 图标键在位`).not.toBeNull()
       const wantNames = names.get(r.key!)
       expect(wantNames, `行 ${r.key} 在导出文件里有对应部件`).toBeTruthy()
       expect([...wantNames!], `行 ${r.key} 显示名唯一`).toHaveLength(1)
@@ -468,22 +591,45 @@ test.describe('P3.1 · 真实导出统计：默认视图 = oracle expectedCounts
       expect(r.iconKey, `行 ${r.key} 图标键 = 物品身份键`).toBe(r.key)
     }
 
-    // ── 来源徽标（三级配置来源对用户可见）──
-    expect(s.pill, '含部件 ⇒ 配置来源徽标常驻').not.toBeNull()
+    // ── B-5 无对应标记：**新格式口径**（B-2 落盘 itemIndex 之后）──
+    //    B-2 前：归档无 `itemIndex` ⇒ 每一行都标"没有对应方块"（旧口径留痕）。
+    //    B-2 后：全量导出的 itemIndex **每个键都有 part 归属** ⇒ 无对应行数 = 0（硬断言）。
+    //    期望集合由**文件自己的** itemIndex 派生（`attribution` 为空的键 ⇒ 该行必须被标记），
+    //    与侧栏实际标记集双向比对（既有"多标"也有"漏标"两个方向）。
+    const fileIndex = readFileItemIndex(FULL)
+    const fileKeys = Object.keys(fileIndex)
     expect(
-      ['document-default', 'builtin', 'document-override', 'viewer-local'],
-      `徽标来源取值合法（实际 ${s.pill?.source}）`,
-    ).toContain(s.pill!.source)
-    expect(s.pill!.text.length, '徽标文本非空（来源对用户可见）').toBeGreaterThan(0)
-    const prov = await readProvenance(page, true)
-    expect(prov.panel, 'provenance 逐字段面板可展开').not.toBeNull()
-    expect(prov.panel!.length, 'provenance 逐字段行非空').toBeGreaterThan(0)
+      fileKeys.length,
+      '归档必须带 B-2 的 itemIndex（新格式）；若为 0 ⇒ 归档早于 B-2，须按阶段二重跑 L1 后复跑本包',
+    ).toBe(ITEM_INDEX_KEYS)
+    const unresolvedFromFile = new Set(
+      fileKeys.filter((k) => (fileIndex[k]!.attribution ?? []).length === 0),
+    )
+    const unresolvedRows = s.rows.filter((r) => r.unresolved)
+    expect(
+      unresolvedRows.map((r) => r.key).sort(),
+      `侧栏无对应标记集必须 = 文件 itemIndex 里 attribution 为空的键集（空集 ⇒ 0 行标记）`,
+    ).toEqual([...unresolvedFromFile].sort())
+    expect(
+      s.rows.filter((r) => r.key !== null && !(r.key in fileIndex)).map((r) => r.key),
+      '统计行键必须全部在 itemIndex 键集内（左栏行键 = 物品身份键，契约 §2.2 单一数据源）',
+    ).toEqual([])
+
+    // ── B-3 移除锁（契约 §9 兼容口径）：视图切换 / 来源徽标 / provenance 入口都不存在 ──
+    const legacyUi = await readLegacyStatsUiAbsent(page)
+    expect(legacyUi.present, '侧栏已挂载（前提；否则下面的 0 计数不构成证据）').toBe(true)
+    expect(legacyUi.counts, 'B-3 已移除 UI 的出现次数').toEqual({
+      toolbar: 0, viewButtons: 0, pill: 0,
+      provenancePanel: 0, provenanceFields: 0, resetLocal: 0, groupTitles: 0, rowKind: 0,
+    })
 
     fs.mkdirSync(SHOT_DIR, { recursive: true })
     await page.locator('.wb-wiki-embed .nei-sidebar').screenshot({ path: path.join(SHOT_DIR, 'real-export-stats.png') })
     console.log(
       `[P3.1-L2] 真实导出统计：${s.rows.length} 行与 oracle 精确一致（共 61 件）；` +
-        `徽标=${s.pill!.text}/${s.pill!.source}；provenance 字段 ${prov.panel!.length} 条`,
+        `itemIndex ${fileKeys.length} 键；无对应标记行 ${unresolvedRows.length}/${s.rows.length}` +
+        `（新格式：文件 attribution 为空的键 ${unresolvedFromFile.size} 个）；会话提示「${s.notice ?? '<无>'}」；` +
+        `B-3 已移除 UI 计数 = ${JSON.stringify(legacyUi.counts)}`,
     )
   })
 })
@@ -501,20 +647,27 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
    * **修复后已翻转为正向锁**（本轮，见报告 findings F1/F2 的 `expectedAfterFix`）：
    *  - **F1**：`StructureDataParser` 已把**文档根级** `statsTemplate`/`statsOverride`/`partIconTextures`
    *    透传到 v2 根（与 structure 级的 `cellPartsGrid`/`partLists` 分层，见
-   *    `web/src/context/__tests__/structureDataRootFields.test.ts`）⇒ 渲染定义根带文档默认统计层
-   *    ⇒ 侧栏来源徽标 = **文档默认**（契约 §9 三级配置第 1 级）；
+   *    `web/src/context/__tests__/structureDataRootFields.test.ts`）⇒ 渲染定义根带该字段
+   *    （**值**与文件一致 = F1 的修复锁）；
+   *    ⚠ B-3（决策 C）后 `statsTemplate` 的**语义已作废**（统计栏不再有视图切换与三级配置）
+   *    ⇒ 原「侧栏来源徽标 = 文档默认」不再是可判定的生产形态，改由移除锁断言
+   *    （`readLegacyStatsUiAbsent`：徽标/工具条/provenance 入口计数恒为 0）。字段仍必须透传
+   *    —— 这正是契约 §9「旧文档携带 ⇒ 读取后静默忽略」的前提（要读得到，才谈得上忽略）；
    *  - **F2**：`EmbedViewport.vue` 已把该根字段传给 `BlockStatsSidebar` 的 `partIconTextures`
-   *    prop ⇒ `BlockIconCache#setPartIconTextureSource` 接通嵌入纹理通道 ⇒ 部件行图标槽
+   *    prop ⇒ `BlockIconCache#setPartIconTextureSource` 接通嵌入纹理通道 ⇒ 物品行图标槽
    *    渲染出真实图标（不再恒走宿主调色板回退/占位）。
    *
    * 断言口径（正向）：
    *  ① 文件侧文档根字段在位（ground truth）；
    *  ② 运行时**渲染定义根**两字段可得的**值**与文件一致（不是"有个键就算过"）；
-   *  ③ 徽标来源 = `document-default`；
-   *  ④ **有纹理来源的部件行**（`iconKey` ∈ `partIconTextures` 键集）图标槽必须有 canvas
+   *  ③ B-3 移除锁：视图切换/徽标/provenance 入口都不渲染（`statsTemplate` 静默忽略）；
+   *  ④ **有纹理来源的物品行**（`iconKey` ∈ `partIconTextures` 键集）图标槽必须有 canvas
    *     —— 这是 F2 接线的生产可观测结果（`helpers/parts/statsSidebar.ts#waitStatsRowIcons`）。
    *     `iconKey` 不在纹理表里的行（实测 = FMP 的 `#mat=` 类型键与 `partIconTextures` 的
    *     物品身份键 `#<mat>` 拼写差异）走回退链，**不判红但如实登记**为 finding（见下方 payload）。
+   *
+   * 注：原 ③ 是「配置来源徽标 = `document-default`」——该 UI 已随 **B-3 决策 C** 整套移除
+   * （视图切换/徽标/provenance），故断言删除，只保留文档根字段的存活与逐值一致。
    */
   test('F1/F2 修复锁：文件带 statsTemplate/partIconTextures，真实导出链上二者均生效', async ({ page }, testInfo) => {
     test.skip(
@@ -534,21 +687,25 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
     const obs = await readDefinitionRootFields(page, WIKI_REGION)
     const s = await readStatsSidebarSettled(page)
 
-    // ── F1：运行时定义根带着**同一份**文档默认统计层 → 徽标 = 文档默认 ──
+    // ── F1：运行时定义根带着**同一份**文档默认统计层 ──
+    //    （B-3 决策 C 移除了配置来源徽标这一消费方 ⇒ 不再断言徽标；文档根字段的
+    //     存活与逐值一致仍在此正面锁定。）
     expect(obs.hasStatsTemplate, 'F1：真实导出经 StructureData 解析链后 statsTemplate 可得').toBe(true)
     expect(obs.statsTemplate, 'F1：定义根的 statsTemplate 与文件逐值一致').toEqual(FULL.statsTemplate)
-    expect(s.pill, '含部件 ⇒ 配置来源徽标常驻').not.toBeNull()
-    expect(
-      s.pill!.source,
-      `F1：徽标来源 = 文档默认（实际 ${s.pill!.source}/「${s.pill!.text}」；内建默认 ⇒ F1 未接通）`,
-    ).toBe('document-default')
+    // B-3（决策 C）后 statsTemplate 的**语义已作废**：字段仍透传（F1 正向锁在上一行），
+    // 但统计栏不再消费它 —— 生产形态 = 相关 UI 入口一个都不渲染（移除锁）。
+    const legacyUi = await readLegacyStatsUiAbsent(page)
+    expect(legacyUi.present, '侧栏已挂载（前提）').toBe(true)
+    expect(legacyUi.counts.pill, 'B-3：配置来源徽标不再渲染（statsTemplate 静默忽略）').toBe(0)
+    expect(legacyUi.counts.toolbar, 'B-3：视图切换工具条不再渲染').toBe(0)
 
     // ── F2：定义根带部件图标纹理表，且**已被侧栏消费**（行图标槽真的出图）──
     expect(obs.hasPartIconTextures, 'F2：真实导出经解析链后 partIconTextures 可得').toBe(true)
     expect(obs.partIconTextureKeys, 'F2：定义根纹理键数 = 文件键数').toBe(fileIconKeys.length)
 
-    const partRows = s.rows.filter((r) => r.kind === 'part')
-    expect(partRows.length, '统计侧栏渲染出部件行').toBeGreaterThan(0)
+    // 「物品行」判据 = 行带 data-stats-row-key（B-3 后无 row-kind 属性，见 compactRows 注释）
+    const partRows = s.rows.filter((r) => r.key !== null)
+    expect(partRows.length, '统计侧栏渲染出物品行').toBeGreaterThan(0)
     const coveredRows = partRows.filter((r) => r.iconKey !== null && fileIconKeys.includes(r.iconKey))
     expect(
       coveredRows.length,
@@ -601,7 +758,37 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
         statsOverride: (FULL.raw as Record<string, unknown>).statsOverride ?? null,
       },
       definitionRoot: obs,
-      statsSidebarPill: s.pill,
+      /**
+       * B-5：侧栏选择面的当前读数（徽标/provenance 已随 B-3 决策 C 移除，不再落盘）。
+       * B-2 之后（新格式）：全量导出 `itemIndex` 每键都有归属 ⇒ `unresolvedRows` 恒为 0；
+       * 该字段保留为**留痕**（硬断言在统计用例：标记集 = 文件里 attribution 为空的键集）。
+       */
+      statsSidebar: {
+        rows: s.rows.length,
+        unresolvedRows: s.rows.filter((r) => r.unresolved).length,
+        notice: s.notice,
+      },
+      /** 契约 §2.2（#39 阶段一）：itemIndex / hostItem 的文件侧读数（供报告与阶段二比对）。 */
+      itemIndex: {
+        keys: Object.keys(readFileItemIndex(FULL)).length,
+        partAttributions: Object.values(readFileItemIndex(FULL)).reduce(
+          (n, e) => n + (e.attribution ?? []).filter((a) => a.source === 'part').length,
+          0,
+        ),
+        hostAttributions: Object.values(readFileItemIndex(FULL)).reduce(
+          (n, e) => n + (e.attribution ?? []).filter((a) => a.source === 'host').length,
+          0,
+        ),
+        unresolvedKeys: Object.entries(readFileItemIndex(FULL))
+          .filter(([, e]) => (e.attribution ?? []).length === 0)
+          .map(([k]) => k),
+      },
+      hostItems: readFileHostItems(FULL).map((h) => ({
+        host: `${h.registryId}:${h.meta}`,
+        hostItem: h.hostItem,
+      })),
+      /** B-3（决策 C）后 statsTemplate 语义作废：改为登记「相关 UI 入口都不渲染」的移除锁计数。 */
+      legacyStatsUiCounts: legacyUi.counts,
       statsRows: s.rows.length,
       /** F2 消费证据：有纹理来源的部件行 → 图标槽 canvas 就位情况（生产 DOM）。 */
       partRowIcons: {
@@ -625,9 +812,184 @@ test.describe('P3.1 · 文档根字段在真实导出解析链上的存活（F1/
     console.log(
       `[P3.1-L2] F1/F2 修复锁：file.statsTemplate=${JSON.stringify(FULL.statsTemplate)} / ` +
         `file.partIconTextures=${fileIconKeys.length} 键；definition.hasStatsTemplate=${obs.hasStatsTemplate} / ` +
-        `definition.partIconTextures=${obs.hasPartIconTextures}；徽标=${s.pill?.text}/${s.pill?.source}；` +
+        `definition.partIconTextures=${obs.hasPartIconTextures}；` +
+        `B-3 移除锁计数=${JSON.stringify(legacyUi.counts)}；` +
         `图标 canvas ${payload.partRowIcons.renderedCanvas}/${coveredRows.length} 行（纹理表覆盖）；` +
         `无纹理来源 ${uncoveredKeys.length} 行：${uncoveredKeys.join(', ') || '<无>'}`,
+    )
+  })
+})
+
+// ===========================================================================
+// C3. 契约 §2.2 物品索引表（itemIndex）与宿主级物品身份（hostItem）—— #39 阶段一
+// ===========================================================================
+
+test.describe('P3.5 · 物品索引表（itemIndex）：新格式真实导出的单一数据源', () => {
+  test('全量导出：itemIndex 逐键与 oracle 一致（键集/显示名/说明行/归属来源与目标）', async () => {
+    test.setTimeout(60_000)
+    const file = readFileItemIndex(FULL)
+
+    // ── 反同义反复锚点（硬编码；不是"再读一遍 oracle"）──
+    //    键数 = expectedCounts 条目数（同一批物品身份键）；part 归属总数 = 物品件数（每部件 1 件）；
+    //    host 归属总数 = 命中层①键的宿主格数（下半 slab 1 + 栅栏 9）。
+    expect(
+      Object.keys(file).length,
+      'itemIndex 键数 = 硬编码 21（归档须为新格式：B-2 落盘 itemIndex）',
+    ).toBe(ITEM_INDEX_KEYS)
+    const attrCount = (src: string) =>
+      Object.values(file).reduce((n, e) => n + (e.attribution ?? []).filter((a) => a.source === src).length, 0)
+    expect(attrCount('part'), 'source=part 归属总数 = 物品件数 61（每部件恰一件 ⇒ 与 expectedCounts 总数恒等）').toBe(
+      ITEM_INDEX_PART_ATTRS,
+    )
+    expect(attrCount('host'), 'source=host 归属总数 = 硬编码 10（下半 slab 1 + 栅栏 9）').toBe(ITEM_INDEX_HOST_ATTRS)
+    expect(attrCount('family'), '层③族特有本轮不实现 ⇒ 零 family 归属').toBe(0)
+
+    // ── oracle 逐键比对（键集双向精确 + display/source/归属逐条）──
+    expect(
+      diffItemIndex(ORACLE_FULL, FULL),
+      'itemIndex 与 canonical oracle 差异（键集/display/说明行/来源/归属目标）',
+    ).toEqual([])
+
+    // ── 归属目标自检（独立于 oracle 的交叉验证）：每条 part 归属的格必须真的挂该 localId 的部件 ──
+    const cross: string[] = []
+    for (const [key, e] of Object.entries(file)) {
+      for (const a of e.attribution ?? []) {
+        if (a.source !== 'part') continue
+        const parts = partsAtGrid(FULL, { z: a.grid[0], row: a.grid[1], col: a.grid[2] })
+        const hit = parts.find((p) => p.localId === a.localId)
+        if (!hit) cross.push(`${key} 归属指向不存在的部件 ${a.localId}@[${a.grid}]`)
+        else if (hit.typeKey !== key) cross.push(`${key} 归属指向的部件 typeKey=${hit.typeKey} 与该键不符`)
+      }
+    }
+    expect(cross, 'part 归属必须指向该格真实存在且物品键一致的部件（归属目标自检）').toEqual([])
+
+    console.log(
+      `[P3.5] itemIndex：${Object.keys(file).length} 键 / part 归属 ${attrCount('part')} / host 归属 ${attrCount('host')}；` +
+        `oracle 差异 0 条；归属目标交叉自检 0 条`,
+    )
+  })
+
+  test('全量导出：blockPalette[].hostItem 与 oracle hostItems 逐条一致（层② 映射数据）', async () => {
+    test.setTimeout(60_000)
+    const obs = readFileHostItems(FULL)
+    const spec = ORACLE_FULL.hostItems
+    expect(spec, 'canonical oracle 必须带 hostItems 期望（#39 阶段一扩展）').not.toBeNull()
+
+    expect(
+      obs.map((o) => `${o.registryId}:${o.meta}`).sort(),
+      'oracle 未登记的宿主（新增宿主必须补 oracle hostItems）',
+    ).toEqual(
+      obs
+        .map((o) => `${o.registryId}:${o.meta}`)
+        .filter(
+          (k) => k in (spec!.expect ?? {}) || spec!.absent.includes(k) || spec!.derive.includes(k),
+        )
+        .sort(),
+    )
+
+    const mismatch: string[] = []
+    for (const o of obs) {
+      const key = `${o.registryId}:${o.meta}`
+      if (o.hostItem !== null && spec!.damageEqualsMeta !== false && o.hostItem.damage !== o.meta) {
+        mismatch.push(`${key} hostItem.damage=${o.hostItem.damage} ≠ 条目 meta=${o.meta}（契约 §2.2 层②）`)
+      }
+      const want = spec!.expect[key]
+      if (want) {
+        if (o.hostItem === null) mismatch.push(`${key} 必须有 hostItem（期望 ${want.registry}:${want.damage}）`)
+        else if (o.hostItem.registry !== want.registry || o.hostItem.damage !== want.damage) {
+          mismatch.push(`${key} hostItem=${o.hostItem.registry}:${o.hostItem.damage} ≠ 期望 ${want.registry}:${want.damage}`)
+        }
+      } else if (spec!.absent.includes(key)) {
+        if (o.hostItem !== null) mismatch.push(`${key} 无物品形态 ⇒ hostItem 必须缺席（不猜）`)
+      } else if (spec!.derive.includes(key)) {
+        // 静态不可推导（ItemBlock 注册名需运行时查表；阶段二 L1 刷新时由生成器落实测字面值）
+        if (o.hostItem !== null && o.hostItem.registry.length === 0) mismatch.push(`${key} hostItem.registry 不得为空`)
+      }
+    }
+    expect(mismatch, `hostItem 差异：\n${mismatch.join('\n')}`).toEqual([])
+
+    const withHost = obs.filter((o) => o.hostItem !== null)
+    expect(withHost.length, 'hostItem 条目数 > 0（含部件文档必须写入层② 映射）').toBeGreaterThan(0)
+    console.log(
+      `[P3.5] hostItem：${withHost.length}/${obs.length} 条调色板条目带 hostItem；` +
+        `derive（待阶段二落实测字面值）= ${(spec!.derive ?? []).join(', ')}；差异 0 条`,
+    )
+  })
+
+  test('B-4：物品行悬停 → 物品 TooltipBox 文案 = itemIndex.tooltip（不全落宿主 NEI、不产 "0"）', async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'desktop-chrome',
+      '展开态侧栏交互在 mobile 窄布局自动折叠振荡（P2.5 实证登记）；仅 desktop 跑',
+    )
+    test.setTimeout(240_000)
+    await gotoWikiPreviewWithScene(page, FULL.raw, REAL_EXPORT_FILES.full, { requireMesh: false })
+    await waitStatsSidebarReady(page)
+    const s = await readStatsSidebarSettled(page)
+    const file = readFileItemIndex(FULL)
+
+    // 取一条"说明行可判"的行：首行 ≠ 行键（真说明，不是兜底回退）且首行非空；
+    // 说明行可能多行（modded lore），只断言**首行**出现在 TooltipBox（用格式无关压缩比对，
+    // 见 `compactTooltipText`：`_` 会被 TooltipBox 的行内强调渲染吃掉）。
+    const pick = s.rows.find((r) => {
+      const e = r.key ? file[r.key] : undefined
+      return !!e && e.tooltip.length >= 1 && !!e.tooltip[0] && e.tooltip[0] !== r.key
+    })
+    expect(pick, '存在说明行可判的物品行（itemIndex.tooltip 首行 ≠ 行键）').toBeTruthy()
+    const entry = file[pick!.key!]!
+    const wantTip = entry.tooltip[0]!
+
+    await hoverStatsRow(page, pick!.key!)
+    const tip = await pollUntil(() => readTooltipText(page), `物品行 ${pick!.key} 的 TooltipBox`, 15_000, 40)
+    expect(tip, 'B-4：物品行悬停必须弹出 TooltipBox（不是静默无说明）').not.toBeNull()
+    expect(
+      compactTooltipText(tip!),
+      `B-4：文案含 itemIndex.tooltip 首行（${JSON.stringify(wantTip)}）`,
+    ).toContain(compactTooltipText(wantTip))
+    expect(compactTooltipText(tip!), 'B-4：文案不得是行键本身（未接通 itemIndex 的旧行为）').not.toBe(
+      compactTooltipText(pick!.key!),
+    )
+    expect(tip!, 'B-4：不得落到旧实现的 "取最后一个冒号之后" 片段').not.toBe('0')
+    expect(tip!, 'B-4：物品行文案不由宿主 NEI 通道产出（无部件定位后缀）').not.toContain('位于')
+    await leaveStatsRow(page, pick!.key!)
+    console.log(`[P3.5] B-4 物品行悬停：${pick!.key} → tooltip=${JSON.stringify(tip)}（itemIndex.tooltip=${JSON.stringify(entry.tooltip)}）`)
+  })
+})
+
+// ===========================================================================
+// D2. 退化导出（degraded_all）的 itemIndex（哨兵通配 + 变换格多出放行）
+// ===========================================================================
+
+test.describe('P3.5 · 退化导出 itemIndex：在册键精确 + 变换格哨兵通配', () => {
+  test('degraded_all：itemIndex 键集/归属与退化 oracle 一致（含 EIO 方块身份键）', async () => {
+    test.setTimeout(60_000)
+    const file = readFileItemIndex(DEGRADED_ALL)
+    expect(ORACLE_DEGRADED_ALL.itemIndexScope, '退化 oracle 口径 = untransformed-cells-only').toBe(
+      'untransformed-cells-only',
+    )
+    expect(Object.keys(file).length, 'degraded_all itemIndex 键数 = 硬编码 5').toBe(ITEM_INDEX_KEYS_DEGRADED_ALL)
+    // 反同义反复锚点（#39 阶段二修正）：**host 归属数**稳定 = 4 变换格（EIO 方块身份键命中层① 的宿主格）；
+    // part 归属是**岛级**的（`inferred:<岛序号>`，契约 §11 退化哨兵语义：岛数静态不可预测），
+    // 阶段一写的"总归属 8"是拿**oracle 通配条数**当文件条数 ⇒ 实测 52（4 格 × 13/9/15 个岛）必红。
+    // 故这里判「每条 part 归属都必须是 `inferred:<序号>` 形态」+「逐条对 oracle（通配）零差异」，
+    // 不硬编码岛数（F3/F5 类环境偶发会改变岛数，绑死数字会把噪声当判定力）。
+    const eioAttrs = file['EnderIO:blockConduitBundle:0']?.attribution ?? []
+    const eioHost = eioAttrs.filter((a) => a.source === 'host')
+    const eioPart = eioAttrs.filter((a) => a.source === 'part')
+    expect(eioHost.length, 'EIO 方块身份键 host 归属数 = 硬编码 4（4 个变换格各 1 条）').toBe(
+      DEGRADED_EIO_BUNDLE_HOST_ATTRS,
+    )
+    expect(
+      eioPart.length,
+      'EIO 方块身份键 part 归属数 = 变换格数 × 岛数 ≥ 4（岛级归属；岛数静态不可预测，只判下界）',
+    ).toBeGreaterThanOrEqual(DEGRADED_EIO_BUNDLE_HOST_ATTRS)
+    expect(
+      eioPart.every((a) => /^inferred:\d+$/.test(a.localId ?? '')),
+      'EIO 方块身份键的 part 归属必须全部是 inferred:<岛序号>（退化哨兵语义）',
+    ).toBe(true)
+    expect(diffItemIndex(ORACLE_DEGRADED_ALL, DEGRADED_ALL), '退化 itemIndex 与 oracle 差异').toEqual([])
+    console.log(
+      `[P3.5] degraded_all itemIndex：${Object.keys(file).length} 键（${Object.keys(file).join(', ')}）；` +
+        `EIO 方块身份键归属 ${eioAttrs.length} 条（host ${eioHost.length} + part ${eioPart.length} 岛级，通配比对 0 差异）`,
     )
   })
 })
@@ -732,10 +1094,12 @@ test.describe('P3.1 · 退化导出（degraded_all）：档位标记 + 统计行
     expect(ORACLE_DEGRADED_ALL.countsScope, '退化 oracle 口径 = untransformed-cells-only').toBe(
       'untransformed-cells-only',
     )
-    expect(s.toolbar, '退化导出仍是含部件文档 ⇒ 部件模式工具条渲染').toBe(true)
+    expect(s.legacyToolbar, 'B-3：已移除的视图切换工具条不渲染（退化导出同为含部件文档）').toBe(false)
     expect(s.rows.length, '退化档统计行非空（推断档部件进入清单）').toBeGreaterThan(0)
+    // 行集 = 物品行（旧宿主清单行无行键）；图标键 = 物品身份键
+    // （工具条/视图按钮/徽标已随 B-3 决策 C 移除 ⇒ 不再有它们的断言）
     for (const r of s.rows) {
-      expect(r.kind, `退化档行 ${r.key} 仍是部件行`).toBe('part')
+      expect(r.key, `退化档行 ${r.key} 是物品行（带 data-stats-row-key）`).not.toBeNull()
       expect(r.iconKey, `退化档行 ${r.key} 图标键 = 物品身份键`).toBe(r.key)
     }
 

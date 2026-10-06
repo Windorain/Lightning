@@ -25,6 +25,7 @@ import {
   type BlockLocalPoint,
 } from '@/pure/partHit'
 import type { PartRecord } from '@/pure/partTypes'
+import { resolvePartMaskGeometry, type PartMaskGeometry } from '@/pure/partMask'
 
 function readAnnotations(ctx: Context): Annotation[] {
   const doc = ctx.getDoc().value
@@ -183,6 +184,21 @@ export function gridCenterWorld(
   return rf.grid.centerWorld(pos)
 }
 
+/**
+ * 当前帧的**帧键**（`RuntimeFrame.index`），即 `ItemAttributionHit.frame` 的取值域。
+ *
+ * 为什么要它而不是 `getCurrentFrameIndex()`：后者是**数组下标**，前者是落盘在帧上的
+ * `index` 字段——`itemIndex` 的归属条目按后者记录（契约 §2.2）。两者在常规导出里相同，
+ * 但以落盘字段为准才是"同一坐标系"。
+ *
+ * 消费方：B-5 的物品点选高亮（`pure/itemOutlinePlan.ts#planItemOutlineHits` 的帧过滤）。
+ */
+export function currentFrameKey(ctx: Context): number {
+  const doc = ctx.getDoc().value
+  const i = ctx.getCurrentFrameIndex().value ?? 0
+  return doc?.frame(i)?.index ?? i
+}
+
 /** 列出所有材质及其纹理 dataURL */
 export function listMaterials(ctx: Context): MaterialQueryItem[] {
   const doc = ctx.getDoc().value
@@ -290,4 +306,36 @@ export function getBlockGeometry(
   } catch {
     return null
   }
+}
+
+/** 获取方块位置的部件列表（契约 §3；无部件 ⇒ null，只读视图勿改） */
+export function getPartsAt(
+  ctx: Context,
+  pos: { x: number; y: number; z: number },
+): readonly PartRecord[] | null {
+  const doc = ctx.getDoc().value
+  if (!doc) return null
+  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  if (!rf?.grid) return null
+  return rf.grid.partsAt(pos)
+}
+
+/**
+ * 「格 + 部件定位 → 该部件 mask」通道（B-1）：hover 描边与（B-5 的）点选高亮**共用**此入口。
+ *
+ * - `ref.partLocalId === undefined` ⇒ 整格几何（既有行为：无部件格、框选/按类型选择等）；
+ * - 给定 `partLocalId` 且该格有部件 ⇒ 该部件盒 union（贴面盒退化为其所辖 quads 的 AABB）；
+ * - 无几何 ⇒ null（调用方退化为格中心 1×1×1 盒，与既有实现一致）。
+ *
+ * 判定规则与理由见 `pure/partMask.ts` 文件头（含「按部件盒 vs 按 quads 归属切分」对比结论）。
+ */
+export function getPartMaskGeometry(
+  ctx: Context,
+  ref: BlockRef,
+): PartMaskGeometry | null {
+  return resolvePartMaskGeometry(
+    getPartsAt(ctx, ref.pos),
+    getBlockGeometry(ctx, ref.pos),
+    ref.partLocalId,
+  )
 }

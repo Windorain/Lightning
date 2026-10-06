@@ -14,7 +14,7 @@ import { createToolGizmoHandler } from '@/handlers/toolGizmoHandler'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
 import { createHoverHandler } from '@/handlers/hoverHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
-import { pickVoxel, pickAll, getCurrentFrame, gridCenterWorld, getBlockGeometry } from '@/context/queries'
+import { pickVoxel, pickAll, getCurrentFrame, gridCenterWorld, getBlockGeometry, getPartMaskGeometry } from '@/context/queries'
 import ToolHintsBar from '@/workbench/ux/ToolHintsBar.vue'
 import type { ToolHint } from '@/workbench/tools/tool'
 
@@ -117,6 +117,8 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
       highlightOnHover: computed(() => prefs!.highlightOnHover),
       getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
       gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
+      // B-1：格 + 部件定位 → 该部件 mask（hover 描边；B-5 点选高亮共用同一入口）
+      getPartMaskGeometry: (ref) => getPartMaskGeometry(ctx, ref),
     },
   })
 

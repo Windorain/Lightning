@@ -26,15 +26,15 @@ npm run acceptance:parts:l1                               # 只跑 L1（游戏�
 | 1 | `preflight` | gradlew / CoFH conf / node / playwright / canonical oracle 三件 / 验收工具 / L2 spec | `stages/preflight.json` |
 | 2 | `build-mod-gtnh` | `cd mod/gtnh && gradlew build` | `logs/build-mod-gtnh.log` |
 | 3 | `l1-export-oracle` | **L1**：`run-acceptance.ps1 -Runs <L1Runs>`（游戏内建造 → 全量导出 ×2 → 退化导出 ×2 → oracle ×3 → oracle↔导出逐格核对 → 归档）。**默认 `-L1Runs 1`**（跨会话 FMP stale-tile 累积见 findings F3；单轮内双导出仍提供字节级幂等证据） | `l1/<label>-l1[-rN]/` |
-| 4 | `l1-verify-oracle` | **脚本侧独立复算**：`verify-oracle.mjs` × 三个产物（full / degraded_ae2 / degraded_all） | `verify/oracle-*.json` |
-| 5 | `degradation-static` | **P3.3 判据**：推断永不当主来源 / 三档降级 / 满方块-only 字节干净 / 旧格式兼容 / web 不重算盒 / proto 契约字段 | `static-checks.json` |
+| 4 | `l1-verify-oracle` | **脚本侧独立复算**：`verify-oracle.mjs` × 三个产物（full / degraded_ae2 / degraded_all），含**物品索引表 itemIndex**（契约 §2.2）与 **`blockPalette[].hostItem`**（层②）的逐键/逐条核对 | `verify/oracle-*.json` |
+| 5 | `degradation-static` | **P3.3 判据**：推断永不当主来源 / 三档降级 / 满方块-only 字节干净（含 `itemIndex` 字段与全部 `hostItem` 缺席）/ 旧格式兼容 / web 不重算盒 / proto 契约字段（含 `ItemIndexEntry`/`ItemAttribution`/`HostItemIdentity`） | `static-checks.json` |
 | 6 | `reference-fake-provider` | **P3.4 引用**：P1.1 expB 必抛假提供者（导出完成 + 降级记录落盘 + 结果与基线一致） | `falsification/fake-provider.json` |
 | 7 | `regression-vitest` | `cd web && npx vitest run` | `logs/regression-vitest.log` |
 | 8 | `build-web` | `npm run build:web` | `logs/build-web.log` |
-| 9 | `regression-parts-fixtures` | **P2.5 断言包**（fixture：悬停/统计/图标/回归 + 证伪） | `web/parts-fixtures.json` |
+| 9 | `regression-parts-fixtures` | **P2.5 断言包**（fixture：悬停/统计/图标/回归 + B-4 物品 TooltipBox + P3.5 大批量命中性能登记 + 证伪） | `web/parts-fixtures.json` |
 | 10 | `regression-multiblock-cross` | **P3.2 多方块交叉**：`multiblock-channel-traversal.spec.ts -g 尺寸变化方向` 单用例（加载 + 通道切换） | `web/multiblock-cross.json` |
 | 11 | `l2-real-render` | **P3.1 L2**：`parts-real-export.spec.ts`（对**真实导出**的渲染/悬停/统计断言） | `web/l2-real-export.json` + `web/l2-observations.json` |
-| 12 | `falsify-negative` | **P3.4**：5 条负对照（篡改必红）+ 正对照（未篡改必绿） | `falsification/falsification.json` |
+| 12 | `falsify-negative` | **P3.4**：7 条负对照（篡改必红）+ 正对照（未篡改必绿） | `falsification/falsification.json` |
 | 13 | `idempotency` | 跨轮产物字节一致性（`-Runs 2` 时逐文件 sha256；时间戳字段除外） | `idempotency.json` |
 | 14 | `report` | `build-parts-report.mjs`：§6 清单逐条机器判定 + 举证 | `acceptance-report.json` / `.md` |
 
@@ -85,8 +85,14 @@ evidenceLayout    运行目录/阶段/日志/L1/verify/静态/证伪/web 的路�
   **AE2 区同格多部件各得各的 tooltip**、满方块格回归（`part=null`）、
   **统计默认视图行与 oracle `expectedCounts` 精确比对（21 条 / 61 件）**、
   来源徽标 + 图标键 = 物品身份键、**退化导出（degraded_all）**档位与统计子集。
+  **#39 阶段一新增**：**物品索引表 itemIndex**（键集/显示名/说明行/归属来源与目标，含归属目标
+  交叉自检"每条 part 归属指向的格必须真有该 localId 的部件"）、**`blockPalette[].hostItem`**
+  （层② 映射数据；`derive` 项在阶段二 L1 刷新后落实测字面值）、**B-4 物品行悬停 → 物品
+  TooltipBox 文案 = `itemIndex.tooltip`**、**侧栏"无对应"标记集 = 文件里 `attribution` 为空的键集**
+  （新格式下全量导出恒 0 行标记）、退化档 itemIndex 哨兵通配。
   真实产物的坐标/几何与 fixture 不同 ⇒ 探针点从**导出文件自己的部件盒**派生（见
-  `web/e2e/helpers/parts/realExport.ts`），不是硬编码。
+  `web/e2e/helpers/parts/realExport.ts`），不是硬编码；`itemIndex` 期望则来自 canonical oracle
+  （契约 §2.2 扩展字段），两者不互相替代。
 
 ### P3.2 回归
 
@@ -122,6 +128,8 @@ evidenceLayout    运行目录/阶段/日志/L1/verify/静态/证伪/web 的路�
 | `export-drop-cell` | 把某非满格 `cellPartsGrid` 置 -1（整格部件消失） | 非零退出（`应有 partLists 下标`） |
 | `export-tamper-count` | 改一个部件 `items[0].count`（1→2） | 非零退出（计数维度） |
 | `positive-control` | **不篡改** (canonical oracle, 归档导出) | 退出码 **0**（否则负对照无判定力） |
+| `itemindex-tamper-attribution`（#39 阶段一，fixture） | 篡改注入副本的 `itemIndex[k].attribution`（`localId` 换同格另一部件 / 整条清空） | 高亮集合（mask 几何 / 标记集）**必变**；主断言抛出 |
+| `itemindex-tamper-tooltip`（#39 阶段一，fixture） | 篡改注入副本的 `itemIndex[k].tooltip[0]` | 物品行 TooltipBox 文案断言**必红**；同页未篡改行仍绿（定向性） |
 | `fake-provider-tolerance`（引用） | P1.1 expB 探针归档：11 格中 10 个非满格逐格记录 `providerFailures`，且结果与无该提供者的 expC 基线**逐格一致** | 导出完成 + 静默降级 + 记录落盘 |
 
 所有篡改都发生在 `<run>/falsification/tmp/<control>/` 的**临时副本**上，`oracle/` 与归档导出只读。
@@ -162,6 +170,11 @@ evidenceLayout    运行目录/阶段/日志/L1/verify/静态/证伪/web 的路�
 | M2 | contract-text | 契约 §3 示例把 EnderIO 族写作 `enderio`，实现统一用 `eio`（localId 前缀 = `source.family` = 开关族名，三者自洽）。 |
 | M3 | known-limitation | 动画纹理物品图标的跨进程不确定性（EnderIO 导管 `.mcmeta`）；验收会话已把图集动画精灵复位帧 0，长期方案待定。 |
 | M4 | measurement | **从零生成的验收世界导出无效**：清掉验收世界后重建，建造 0 错误但客户端在 `WAIT_SYNC`（60 tick）窗口内收不到新方块 ⇒ `measured` 全格 `hostFullCube=true`、导出无 `cellPartsGrid`。⇒ `-ResetWorld` **默认关闭**（复用既有世界，自动化自带 `resetWorld` 清场 + 重建）。 |
+| F6 | **resolved** | **1.7.10 运行时加载的是旧版 Gson（2.2.4）而非 `dependencies.gradle` 声明的 2.8.9** ⇒ 任何 `JsonObject.keySet()` / `JsonObject.size()` 调用在游戏内 `NoSuchMethodError`（#39 阶段二 L1 首跑实测：`PartsAcceptanceVerifier.verifyItemIndex` 抛错，EXPORT 阶段整段中断，`full` 套件无结论、退化两轮未产出；退出码 2）。**处置**：核对链改用 `entrySet()` 遍历（2.2.4 起即存在，两个版本都可用），并在 README 记录该运行时约束；判据本身的判定力不变（同轮双导出 sha256 仍相等）。**教训**：`build.gradle` 声明的 Gson 版本**不是**运行时保证，新 API 必须按"1.7.10 随游戏分发的旧版"假设写。 |
+| F7 | **resolved（规则交集）** | **跨分支规则交集**：`check-static.mjs` 的"web 端不构造部件盒"规则（`kind: 'visual'\|'collision'` 字面量）与 B-1 的 `pure/partMask.ts`（`aabbOfQuadsWithinBox` 用**文件自己的 baked quads** 求 AABB 包络）在集成分支上交火 ⇒ 阶段 5 判红 1 处。**定性**：`partMask.ts` 那行是**包络构造**（不读世界、不调游戏取盒 API、不参与命中/统计），不是契约 §6/§12 禁止的"重算导出语义盒"⇒ **规则命中过宽**（不削弱判定力：真违例——硬编码盒字面量——仍命中）。**处置**：规则加**具名行内标记豁免**（`PartBoxMaskEnvelope`），带"标记消失即判红"的陈旧守卫，并在 `partMask.ts` 就地留注释互指；vitest `partMaskEnvelopeExemption.test.ts` 把两侧登记锁在一起。 |
+| F8 | **resolved（推导错）** | **阶段一 L2 硬编码锚点推导错**：`DEGRADED_EIO_BUNDLE_ATTRS = 8` 是拿 **oracle 通配条数**（4 格 × (1 条 `inferred:*` + 1 条 host)）当**文件条数**，而文件里 part 归属是**岛级**的（`inferred:<岛序号>`，每格岛数 9~15）⇒ 真实产物实测 **52** 条（host 4 + part 48），硬期望必红（阶段一未跑 L1，该断言从未与真实产物对撞）。**处置**：改成不变量锚点——host 归属数 = 4（硬编码）+ 每格 part 归属数 ≥ 1 且 `localId` 必为 `inferred:<序号>` + 逐条对 oracle 通配比对零差异；**不**硬编码岛数（契约 §11 明确岛数静态不可预测，F3/F5 类偶发也会改变它）。 |
+| F9 | **resolved（实现偏差：断言实现）** | **`diffItemIndex` 通配哨兵未消耗**：oracle 一条 `inferred:*` 只判"该格存在至少一条岛级归属"（`some`），**不把该格该来源的岛级归属标记为已用** ⇒ 随后"多出未登记归属"循环把同格其余岛全判红（实测 128 条误报）。同一格多来源（part/host）时必须按 `(source, frame, grid)` 消耗，不能按 localId 匹配。**处置**：通配分支改为消耗该格该来源的**全部**岛级归属（`consumedAny` 门控"至少一条"），实测差异归零。**教训**：哨兵通配语义在"存在性"与"消耗"两侧都要写对——只写前者会让正向产物恒红（或把真差异淹在噪声里）。 |
+| F10 | **resolved（清单锚点陈旧）** | **§6 清单两条的锚点在后 B-3 树上不存在**（退出码 9 的来源，`p39-b2-itemindex-r7` 实测擒获）：① `parts-C-item-unit` 引用夹具用例标题「默认视图 = 部件物品清单」，而 B-3 决策 C 后该用例改名为「默认视图 = 物品清单（Stone Slab×3 / Fence×1；石头不出现）；图标键 = 物品身份键」；② `parts-C-host-view-preserved` 引用用例「三视图切换：切宿主 = 旧口径行集」与 L2 观测字段 `statsSidebarPill.source` —— 前者的用例已随 B-3 删除、后者字段已改为 `statsSidebar` + `legacyStatsUiCounts`。两者都落 `fail`（不是 `not-run`，故退出码 9）。**定性**：判据语义未失效，**是清单引用的标题/字段陈旧**（阶段一未跑全量，两条从未与真实产物对撞）。**处置**：① 锚点改成现存夹具标题并把 found 一并纳入判据；② `parts-C-host-view-preserved` 改判"B-3 移除锁用例（残留本机配置不读不写不清理）+ 侧栏物品行非空 + `unresolvedRows==0` + `legacyStatsUiCounts.pill==0`"，判据文案同步改口径（宿主清单旧口径以**物品行 + "无对应"标记**形态留存）。另加**锚点自查工具** `scripts/parts-acceptance/check-checklist-anchors.mjs`（独立入口，非 14 阶段之一，随阶段 14 之后跑）：把清单里全部 `caseSummary(..., '标题片段')` 锚点逐一对照 `<run>/web/*.json` 两份 playwright 报告，列出缺失锚点 ⇒ 防止"清单引用了一个已改名/已删除的用例"再次静默退化成判红。`p39-b2-itemindex-r8` 实测 11/11 锚点命中。 |
 
 **F1/F2 已由 L2 的"正向锁"用例闭环**（`web/e2e/parts-real-export.spec.ts` 的修复锁用例：断言修复后的正确行为——徽标=document-default、定义根两字段与文件逐值一致、图标 canvas 逐行渲染；回退接线则必红，证伪实证见当轮记录）。F3/F5 仍为开放项（mod 侧时序偶发，编排有确定性规避）。
 
@@ -188,7 +201,53 @@ evidenceLayout    运行目录/阶段/日志/L1/verify/静态/证伪/web 的路�
    F3（跨会话 FMP 累积，偶发）使 L1 内部多轮不可靠；M4（干净世界同步窗口不足）使"清场重生成"产出无效。
    跨轮幂等改由**编排级 `-Runs 2`**（两轮各一次客户端会话 + 逐文件 sha256）承担。
 
-## 9. 历史登记（L1 轮，保留）
+## 9. oracle §11 扩展（#39 阶段一，B-2 物品索引表）
+
+契约 §2.2（B-2 落盘）之后，oracle 三件在 §11 形状上**追加四个根字段**（`PartsAcceptanceOracle`
+生成、`PartsAcceptanceVerifier`（游戏内）+ `verify-oracle.mjs`（脚本侧）双实现核对）：
+
+| 字段 | 形状 | 口径 |
+|------|------|------|
+| `itemIndex` | `{ <物品身份键>: { display, displayChecked, tooltipNonEmpty, source, attribution[] } }` | 键 = 全部部件的物品身份键（`itemCount=0` = `items:[]` 显式"无" ⇒ 不建键）；`attribution` = 层① `part`（格 + `localId`）在前、层② `host`（只有命中层①已建键的格）在后 |
+| `itemIndexScope` | `exact` \| `untransformed-cells-only` | 全量轮键集**双向精确**；退化轮在册键必在，变换格多出的键/归属放行（与 `countsScope` 同口径） |
+| `itemIndexRules` | 口径登记（不参与断言） | 键集/display 兜底/说明行兜底/`source` 派生/权威度分组/`inferred:*` 通配/层③ 不实现 |
+| `hostItems` | `{ rule, damageEqualsMeta, expect{}, absent[], derive[], evidence[] }` | 契约 §2.2 层②：`blockPalette[].hostItem = {registry: Item.getItemFromBlock(宿主方块) 的注册名, damage: 条目 meta}`；`evidence[]` = 判定链运行时读数（**不参与断言**，仅诊断留痕） |
+
+**期望值推导依据（不是"猜实现输出"）**：`PartsAcceptanceOracle` 按契约原文规则**用 MC 原语独立复算**
+（`Item.getItemFromBlock` / `ItemStack.getDisplayName` / `getItemDropped`+`damageDropped`），
+与导出侧 `ItemIndexIntegrator` 是两条代码路径；`display` 仅在**物品身份足以唯一确定显示名**时才硬校验
+（vanilla 键 = 硬编码 en_US 显示名；AE2/EIO = 建造时真实 ItemStack 显示名；FMP `#mat=` 变体 =
+`displayChecked:false`，显示名依赖 NBT、静态不可复算 ⇒ 只断言非空）。**归属逐条集合比对**
+（同来源内顺序未规定），`localId:"inferred:*"` = 档 3 岛序号通配哨兵。
+
+**三件 oracle 的期望规模（实测登记）**：
+
+| 产物 | itemIndex 键 | 归属条目 | 其中 part / host | 无对应键 | hostItems（expect / absent / derive） |
+|------|--------------|----------|------------------|----------|----------------------------------------|
+| `full` | 21 | 71 | 61 / 10 | 0 | 11 / 1 / **0** |
+| `degraded_ae2` | 12 | 57 | 47 / 10 | 0 | 11 / 1 / **0** |
+| `degraded_all` | 5 | 44 | 34 / 10 | 0 | 11 / 1 / **0** |
+
+（`full` 的 61 条 part 归属 == `expectedCounts` 总件数 61，是**独立于 oracle 的交叉自检**；
+10 条 host 归属 = 下半 slab 1 + 栅栏 9。`absent` = `ForgeMultipart:block:0`（P1.8 与阶段二两次实测
+`Item.getItemFromBlock` 均返回 null ⇒ 无物品形态，按契约"不猜"期望字段缺席）；
+`expect` 11 条 = 9 vanilla + `appliedenergistics2:tile.BlockCableBus:0` + `EnderIO:blockConduitBundle:0`。）
+
+**`hostItems.derive` 已清零（#39 阶段二落实测字面值）**：阶段一的 `derive` 两项由 L1 真实会话落定：
+
+| 宿主 | 实测读数（`hostItems.evidence[]` + 游戏内验证器独立复算） | 落类 |
+|------|------------------------------------------------------------|------|
+| `appliedenergistics2:tile.BlockCableBus:0` | `BlockCableBus`（`appeng.block.networking.BlockCableBus`）有物品形态 `appeng.block.AEBaseItemBlock`，物品注册名 = 方块注册名 | `expect`（registry=方块注册名，damage=条目 meta） |
+| `ForgeMultipart:block:0` | `codechicken.multipart.BlockMultipart` 的 `Item.getItemFromBlock == null`（无 ItemBlock） | `absent`（hostItem 必须缺席） |
+
+初轮（`p39-b2-itemindex-r1`）曾在**退化轮**把 AE2 宿主判成 `derive`（同一 JVM 会话内 full 轮判 `expect`），
+随后 `r3`/`r4` 两轮在 full 与两个退化轮**三处一致**判成 `expect` ⇒ 认定为**一次性测量抖动**（不是推导错、
+也不是实现偏差）：判定链对同一宿主在同一会话内不变量化，且游戏内验证器按同一 MC 原语在核对当时复算，
+故任何一次异常落类都会**当场判红**（不静默通过）。生成器为此追加 `hostItems.evidence[]` 诊断数组，
+把每个宿主的 `blockFound`/`blockClass`/`itemFromBlockNull`/`itemClass`/`itemRegistry`/`verdict` 落盘可查。
+**B-2 既有的两个解析链偏差锁（F1/F2）不受本扩展影响。**
+
+## 10. 历史登记（L1 轮，保留）
 
 - **oracle 格映射通道**：oracle 每格带 `zone` + `grid:[zi,ri,ci]`、root 带 `gridIndex{origin,size,rowAxis}`；
   导出文件 finalize 后不含 worldGrid ⇒ 下游据此定位 `cellPartsGrid` 下标（建议契约 §11 吸收）。

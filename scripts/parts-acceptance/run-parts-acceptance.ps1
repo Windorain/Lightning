@@ -447,8 +447,8 @@ function Invoke-L1ExportOracle {
         @{ name = 'L1 结构化结果已产出'; ok = [bool]$result; detail = "$archive" },
         @{ name = 'L1 status=ok / exitCode=0'; ok = ($result -and $result.status -eq 'ok' -and $result.exitCode -eq 0); detail = "status=$($result.status) exitCode=$($result.exitCode)" },
         @{ name = '三套件（full / degraded_ae2 / degraded_all）全绿'; ok = ($suites.Count -eq 3 -and (@($suites | Where-Object { -not $_.pass }).Count -eq 0)); detail = ($suites | ForEach-Object { "$($_.suite)=$($_.pass)" }) -join ' ' },
-        @{ name = '同轮双导出幂等（sha256 相等）'; ok = ($result -and $result.idempotencyFull.identical -eq $true); detail = if ($result) { "A=$($result.idempotencyFull.runASha256.Substring(0,12)) B=$($result.idempotencyFull.runBSha256.Substring(0,12))" } else { 'n/a' } },
-        @{ name = '满方块-only 字节干净（L1 结论）'; ok = ($result -and $result.fullCubeByteClean.pass -eq $true); detail = if ($result) { "enabled=$($result.fullCubeByteClean.enabledSha256.Substring(0,12))" } else { 'n/a' } }
+        @{ name = '同轮双导出幂等（sha256 相等）'; ok = ($result -and $result.idempotencyFull.identical -eq $true); detail = if ($result -and $result.idempotencyFull -and $result.idempotencyFull.runASha256) { "A=$($result.idempotencyFull.runASha256.Substring(0,12)) B=$($result.idempotencyFull.runBSha256.Substring(0,12))" } else { 'n/a（结果文件未记录 idempotencyFull）' } },
+        @{ name = '满方块-only 字节干净（L1 结论）'; ok = ($result -and $result.fullCubeByteClean.pass -eq $true); detail = if ($result -and $result.fullCubeByteClean -and $result.fullCubeByteClean.enabledSha256) { "enabled=$($result.fullCubeByteClean.enabledSha256.Substring(0,12))" } else { 'n/a（结果文件未记录 fullCubeByteClean）' } }
     )
     $status = Get-GateStatus $gates
     if ($status -eq 'pass') { Write-Ok "L1 全绿：$($result.intentCells) 格意图 / 三套件通过 / 幂等 + 字节干净" }

@@ -1,7 +1,8 @@
 /**
  * P2.1 — 部件（非满方块）数据解析与运行时模型测试。
  *
- * 契约：`docs/contracts/format-parts-contract.md`（§2 文件表达、§3 PartRecord schema、§12 编辑语义）
+ * 契约：`docs/contracts/format-parts-contract.md`
+ * （§2 文件表达、§3 PartRecord schema、§12 编辑语义）
  * fixture：
  *  - `e2e/fixtures/parts-ae2-multibox.v2.json`（AE2 三部件格 + 满方块）
  *  - `e2e/fixtures/parts-singlebox-mix.v2.json`（slab×2 共享 partLists + 上半 slab + 石头对照 + 栅栏越界盒）

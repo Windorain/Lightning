@@ -15,6 +15,7 @@ import {
   type DrwMeshPipeline,
 } from '@/runtime/drwMeshPipeline'
 import type { BlockRef, SelectedEntity } from '@/context/selection'
+import { OUTLINE_MASK_LIMIT, applyOutlineMaskBudget } from '@/pure/outlineLimits'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
 import { bindViewportCameraSync } from '@/runtime/viewportCamera'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
@@ -48,6 +49,17 @@ export class DRW {
   readonly blockIconCache = shallowRef<BlockIconCache | null>(null)
   readonly tooltipPalette = shallowRef<string[]>([])
   readonly outlinePass: SelectionOutlinePass
+  /**
+   * 描边通道的**上限口径观测点**（B-5 / #38 收口）：每次装配 mask 后写入
+   * `{ total, shown, dropped }`。`dropped > 0` = 命中总数超过 `OUTLINE_MASK_LIMIT`
+   * 且被截断——调用方据此给出可辨认提示（"不得静默失效"）。
+   * 只在读数变化时写入，避免与消费它的 computed 形成刷新循环。
+   */
+  readonly outlineMaskStats = ref<{ total: number; shown: number; dropped: number }>({
+    total: 0,
+    shown: 0,
+    dropped: 0,
+  })
   readonly computed: DrwComputed
   readonly textureCache: Readonly<ShallowRef<MaterialLibraryApi | null>>
 
@@ -130,6 +142,11 @@ export class DRW {
     highlightOnHover: Ref<boolean>
     getBlockGeometry: (pos: { x: number; y: number; z: number }) => import('@/render/schema/types').BakedQuad[] | null
     gridCenterWorld: (pos: { x: number; y: number; z: number }) => { x: number; y: number; z: number } | null
+    /**
+     * B-1 部件级 mask 通道：`BlockRef.partLocalId` 给出时走该部件的盒几何，
+     * 否则整格几何（既有行为）。hover 描边与点选高亮共用此入口。
+     */
+    getPartMaskGeometry?: import('@/render/mesh/selectionHighlightProvider').MaskGeometrySource
     /** Embed 侧栏按 blockId 高亮等附加遮罩 */
     extraMaskMeshes?: Ref<THREE.Mesh[]> | ShallowRef<THREE.Mesh[]>
   }): void {
@@ -139,30 +156,43 @@ export class DRW {
       const hov = options.highlightOnHover.value ? options.hoveredBlock.value : null
       let masks: THREE.Mesh[] = []
       if (!hov) {
-        if (items.size > 0 && items.size <= 500) {
+        if (items.size > 0 && items.size <= OUTLINE_MASK_LIMIT) {
           masks = this.highlightProvider.build(
             items,
             options.getBlockGeometry,
             options.gridCenterWorld,
+            options.getPartMaskGeometry,
           )
         }
       } else {
         const entities = new Set(items)
+        // 同格不同部件不是同一个悬停目标（B-1：部件身份参与重复判定）
         const dup = [...items].some(
-          e => e.kind === 'block' && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z,
+          e => e.kind === 'block'
+            && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z
+            && e.ref.partLocalId === hov.partLocalId,
         )
         if (!dup) entities.add({ kind: 'block', ref: hov })
-        if (entities.size > 0 && entities.size <= 500) {
+        if (entities.size > 0 && entities.size <= OUTLINE_MASK_LIMIT) {
           masks = this.highlightProvider.build(
             entities,
             options.getBlockGeometry,
             options.gridCenterWorld,
+            options.getPartMaskGeometry,
           )
         }
       }
-      const extra = options.extraMaskMeshes?.value ?? []
-      const all = extra.length ? [...masks, ...extra] : masks
-      this.outlinePass.setMaskMeshes(all.map((m) => toRaw(m)))
+      // `extraMaskMeshes`（Embed 侧栏点选高亮）与选择/悬停 mask **共享同一预算**：整体 ≤ 上限。
+      // B-5 之前这条通道无上限（大命中集合直接把描边通道压垮、且用户毫无察觉）——#38 收口：
+      // 超出即截断，并把 `{ total, shown, dropped }` 写到 `outlineMaskStats` 供上层提示。
+      const budget = applyOutlineMaskBudget(masks, options.extraMaskMeshes?.value ?? [])
+      const stats = { total: budget.total, shown: budget.shown, dropped: budget.dropped }
+      const prev = this.outlineMaskStats.value
+      if (prev.total !== stats.total || prev.shown !== stats.shown || prev.dropped !== stats.dropped) {
+        this.outlineMaskStats.value = stats
+      }
+
+      this.outlinePass.setMaskMeshes(budget.all.map((m) => toRaw(m)))
     }
     const sources: unknown[] = [
       options.selectionItems,

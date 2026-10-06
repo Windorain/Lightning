@@ -34,18 +34,26 @@ export interface V2Label {
 }
 
 // ============================================================
-// 统计（StatsPanel 依赖）
+// 统计（旧文档线格式：字段保留、语义已作废 —— 见下）
 // ============================================================
 
+/**
+ * **已废弃（B-3 / 决策 C）**：`statsTemplate` / `statsOverride` 的语义（三级配置 + 统计规则）
+ * 已整套移除，web 端不存在消费方。此处**只保留线格式形状**（同 proto `StatsTemplate` /
+ * `StatsEntry.part_type_key`：字段不删，语义作废），供解析链把旧文档根字段**透传不丢**：
+ * 契约 §9 兼容口径 = 「旧文档携带 statsTemplate/statsOverride ⇒ 读取后静默忽略」。
+ * 契约：`docs/contracts/format-parts-contract.md` §9
+ */
 export interface V2StatsEntry {
   block_state_id: string
   label_override?: string; icon_source?: string
-  /** 部件视图的条目键 = 部件 typeKey（契约 §9/§10.2；与 block_state_id 互斥使用） */
+  /** 旧字段（语义作废）：部件视图的条目键 = 部件 typeKey（契约 §9/§10.2；与 block_state_id 互斥使用） */
   partTypeKey?: string
 }
 
 export interface V2StatsGroup { label: string; entries: V2StatsEntry[] }
 
+/** **已废弃（B-3 / 决策 C）**：仅线格式形状，无消费方（见上） */
 export interface V2StatsTemplate {
   mode: 'auto' | 'custom'
   groups?: V2StatsGroup[]; show_others?: boolean
@@ -90,6 +98,10 @@ export interface V2PlainSceneDocument {
   meta: V2SceneMeta
   annotations?: V2AnnotationBox[]
   labels?: V2Label[]
-  /** 文档级统计默认值（契约 §9：默认 = 部件物品清单视图；三级配置的"文档默认"层） */
+  /**
+   * **旧字段（语义作废，B-3 / 决策 C）**：原"三级配置的文档默认层"已整套移除。
+   * 字段仍随文档根透传（旧文档读取后**静默忽略**，不报错、不空栏），但无任何消费方。
+   * 契约 §9 兼容口径：`docs/contracts/format-parts-contract.md`
+   */
   statsTemplate?: V2StatsTemplate
 }

@@ -143,3 +143,107 @@ describe('useEmbedTooltip — 既有门禁与旁路不变', () => {
     expect(api2.tooltipText.value).toBe('')
   })
 })
+
+// ---------------------------------------------------------------------------
+// B-4（#37）：侧栏物品行 → 物品索引表文案通道
+// ---------------------------------------------------------------------------
+
+/** 物品索引条目（契约 §2.2 落盘形态；与 mod 侧 ItemIndexIntegrator 逐字段对齐） */
+function itemEntry(display: string, tooltip: string[], withPartHit = true): Record<string, unknown> {
+  return {
+    display,
+    tooltip,
+    source: withPartHit ? 'part' : 'none',
+    attribution: withPartHit ? [{ source: 'part', frame: 0, grid: [0, 0, 0], localId: 'ae2:UP' }] : [],
+  }
+}
+
+/** 同一份 ae2 渲染定义 + 手工构造的文档根级 `itemIndex`（单元层允许直接构造根字段） */
+function defWithItemIndex(index: Record<string, unknown>): StructureDefinition {
+  return { ...(ae2Def as unknown as Record<string, unknown>), itemIndex: index } as unknown as StructureDefinition
+}
+
+function sidebarHover(blockId: string): EmbedHover {
+  return { kind: 'block', source: 'sidebar', blockId, clientX: 0, clientY: 0 }
+}
+
+const STORAGE_ITEM_KEY = 'appliedenergistics2:item.ItemMultiPart:220'
+const TOGGLE_ITEM_KEY = 'appliedenergistics2:item.ItemMultiPart:80'
+
+describe('B-4 侧栏物品行：物品身份键 → itemIndex 说明行', () => {
+  it('物品行键命中 ⇒ 文案 = 该物品 tooltip（不是 "0"、不是宿主方块名）', () => {
+    const def = defWithItemIndex({
+      [STORAGE_ITEM_KEY]: itemEntry('ME Storage Bus', ['ME Storage Bus', '§7物品说明行']),
+    })
+    const { hoverRef, api } = makeTooltip({ def })
+    hoverRef.value = sidebarHover(STORAGE_ITEM_KEY)
+    const text = api.tooltipText.value
+    expect(text).toContain('ME Storage Bus')
+    expect(text).toContain('物品说明行')
+    expect(text).not.toBe('0') // 旧实现的键错配回退产物
+    expect(text).not.toContain('Fluix') // 不是宿主方块名
+    expect(text).not.toContain('0')
+  })
+
+  it('同表不同物品键 ⇒ 不同文案（单一数据源 = itemIndex，逐键取用）', () => {
+    const def = defWithItemIndex({
+      [STORAGE_ITEM_KEY]: itemEntry('ME Storage Bus', ['ME Storage Bus']),
+      [TOGGLE_ITEM_KEY]: itemEntry('ME Toggle Bus', ['ME Toggle Bus']),
+    })
+    const { hoverRef, api } = makeTooltip({ def })
+    hoverRef.value = sidebarHover(STORAGE_ITEM_KEY)
+    const storage = api.tooltipText.value
+    hoverRef.value = sidebarHover(TOGGLE_ITEM_KEY)
+    const toggle = api.tooltipText.value
+    expect(storage).toContain('ME Storage Bus')
+    expect(toggle).toContain('ME Toggle Bus')
+    expect(storage).not.toBe(toggle)
+  })
+
+  it('空说明兜底：itemIndex 条目 tooltip 空 ⇒ 至少 display 一行（通道不掏空）', () => {
+    const def = defWithItemIndex({ [STORAGE_ITEM_KEY]: itemEntry('ME Storage Bus', []) })
+    const { hoverRef, api } = makeTooltip({ def })
+    hoverRef.value = sidebarHover(STORAGE_ITEM_KEY)
+    expect(api.tooltipText.value).toBe('ME Storage Bus')
+  })
+
+  it('显式无对应（attribution 空）⇒ 仍有 display 一行（"任何情况有话说"）', () => {
+    const def = defWithItemIndex({ [STORAGE_ITEM_KEY]: itemEntry('ME Storage Bus', [], false) })
+    const { hoverRef, api } = makeTooltip({ def })
+    hoverRef.value = sidebarHover(STORAGE_ITEM_KEY)
+    expect(api.tooltipText.value).toBe('ME Storage Bus')
+  })
+
+  it('两类键不混用：物品键不查 neiTooltipMap，宿主键仍走 NEI（旧文件宿主行不回归）', () => {
+    // 物品键**不在** blockPalette 键集里（block_registry 键 = registryId[@meta]）
+    const { hoverRef, api } = makeTooltip({ def: defWithItemIndex({}) })
+    hoverRef.value = sidebarHover(STORAGE_ITEM_KEY)
+    // 都不中 ⇒ 行键本身（旧实现的 "取最后冒号之后" 会给 "220"）
+    expect(api.tooltipText.value).toBe(STORAGE_ITEM_KEY)
+    // 宿主键（block_registry 键）⇒ NEI 既有语义不变
+    hoverRef.value = sidebarHover(CABLE_BUS)
+    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+  })
+
+  it('键巧合同形时物品索引表优先（单一数据源 = itemIndex）', () => {
+    const def = defWithItemIndex({ [CABLE_BUS]: itemEntry('物品级说明', ['物品级说明']) })
+    const { hoverRef, api } = makeTooltip({ def })
+    hoverRef.value = sidebarHover(CABLE_BUS)
+    expect(api.tooltipText.value).toBe('物品级说明')
+    expect(api.tooltipText.value).not.toContain('Fluix')
+  })
+
+  it('旧文件（无 itemIndex）⇒ 空表，宿主行语义逐字节不变', () => {
+    const { hoverRef, api } = makeTooltip({}) // ae2Def 无 itemIndex
+    expect(api.tooltipText.value).toBe('')
+    hoverRef.value = sidebarHover(CABLE_BUS)
+    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+  })
+
+  it('showHoverTooltip 门禁：侧栏物品行不受该开关影响（门禁沿用现状，只在视口路径）', () => {
+    const def = defWithItemIndex({ [STORAGE_ITEM_KEY]: itemEntry('ME Storage Bus', ['ME Storage Bus']) })
+    const { hoverRef, api } = makeTooltip({ def, showHover: false })
+    hoverRef.value = sidebarHover(STORAGE_ITEM_KEY)
+    expect(api.tooltipText.value).toBe('ME Storage Bus')
+  })
+})

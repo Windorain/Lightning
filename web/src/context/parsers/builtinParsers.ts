@@ -19,6 +19,24 @@ export { MultiblockParser }
  */
 export const SHAPE_FIRST_PARSERS: DocumentParser[] = [MultiblockParser]
 
+/**
+ * 文档**根级**部件轮字段（与 structure 级的 `cellPartsGrid`/`partLists` 不同层级）：
+ * `statsTemplate`/`statsOverride`（契约 §9 三级配置第 1/2 级）、`partIconTextures`（契约 §2 部件物品
+ * 图标纹理，P1.7 落盘）、`itemIndex`（契约 §2.2 物品索引表，B-2 落盘）都挂在**真实导出文档根**上，
+ * 两条解析链（`StructureDataParser` / `WorldParser`）必须一并透传到 v2 根 —— 否则运行时定义根缺
+ * 文档默认统计层（徽标落"内建默认"）、部件行图标无嵌入纹理源、左栏物品行查不到说明与归属。
+ * 旧文件无这些键 ⇒ 循环体不执行，行为零差异（字节干净同 serialize()）。
+ */
+const PART_ROOT_FIELDS = [
+  'statsTemplate', 'statsOverride', 'partIconTextures', 'itemIndex',
+] as const
+
+/** `StructureDataParser` 透传的**全部**文档根级字段（既有清单 + 部件轮清单）。 */
+const STRUCTURE_ROOT_FIELDS: readonly string[] = [
+  'materialPalette', 'textureBlobs', 'tooltipPalette', 'cellTooltipGrid', 'playback',
+  ...PART_ROOT_FIELDS,
+]
+
 export const V2PlainParser: DocumentParser = {
   formatName: 'V2Plain',
   detect(raw: unknown): boolean {
@@ -86,6 +104,12 @@ export const WorldParser: DocumentParser = {
       playback: world.playback,
     }
 
+    // 文档根级部件轮字段（§2.2 物品索引表 / §9 统计层 / §2 部件图标）—— 与 StructureDataParser
+    // 同一份清单：World 导出把 `itemIndex` 等写在 **World 根**（跨帧共享一份），帧内 structure 不带
+    for (const key of PART_ROOT_FIELDS) {
+      if (world[key] !== undefined) v2[key] = world[key]
+    }
+
     return RuntimeDocument.fromV2Plain(v2)
   },
 }
@@ -133,15 +157,11 @@ export const StructureDataParser: DocumentParser = {
     }
 
     // 文档**根级**字段（与上面的 structure 级 cellPartsGrid/partLists 不同层级）：
-    // `materialPalette/textureBlobs/...` 沿用既有透传；`statsTemplate`/`statsOverride`
-    // （契约 §9 三级配置第 1/2 级）与 `partIconTextures`（契约 §2 部件物品图标纹理，P1.7 落盘）
-    // 亦挂在真实导出文档根上，必须一并透传到 v2 根 —— 否则运行时定义根缺文档默认统计层
-    // （徽标落"内建默认"）且部件行图标无嵌入纹理源。
+    // `materialPalette/textureBlobs/...` 沿用既有透传；部件轮根级字段见 PART_ROOT_FIELDS 清单
+    // （其中 `statsTemplate`/`statsOverride` 语义已作废（决策 C），透传目的仅是
+    // "旧文档字段读取后静默忽略"（不丢字段、不报错），不再有任何语义消费方）。
     // 旧文件无这些键 ⇒ 循环体不执行，行为零差异（字节干净同 serialize()）。
-    for (const key of [
-      'materialPalette', 'textureBlobs', 'tooltipPalette', 'cellTooltipGrid', 'playback',
-      'statsTemplate', 'statsOverride', 'partIconTextures',
-    ] as const) {
+    for (const key of STRUCTURE_ROOT_FIELDS) {
       if (baked[key] !== undefined) v2[key] = baked[key]
     }
 
