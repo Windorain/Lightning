@@ -1,0 +1,40 @@
+name: 缺陷单（Defect）
+about: 报告观察到的错误行为。现象、期望、复现路径是核心；疑似回归请填「最后已知正常状态」
+title: "[Defect] "
+labels: ["Type/Defect", "Status/Needs Triage"]
+body:
+  - type: textarea
+    id: actual
+    attributes:
+      label: 现象
+      description: 实际观察到的行为，含截图或日志摘录（如有）
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 本来应该发生什么
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 从什么状态出发，按什么操作序列能再现；无法稳定复现也请描述触发条件
+    validations:
+      required: true
+  - type: input
+    id: last_known_good
+    attributes:
+      label: 最后已知正常状态（疑似回归时填写）
+      description: 曾经正常的提交号 / 版本 / 会话。填写后请补挂 Regression 标签
+    validations:
+      required: false
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境与版本
+      description: 提交号、相关组件版本等
+    validations:
+      required: false
