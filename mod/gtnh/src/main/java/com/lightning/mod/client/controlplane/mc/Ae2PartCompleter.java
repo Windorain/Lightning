@@ -114,7 +114,12 @@ public final class Ae2PartCompleter implements TeCompleter {
             if (present != null && !present.isAir(world, x, y, z)) {
                 throw new CpException(
                     ErrorCodes.STATE,
-                    "该位置不是 AE2 部件宿主（" + x + "," + y + "," + z + " 被 "
+                    "该位置不是 AE2 部件宿主（" + x
+                        + ","
+                        + y
+                        + ","
+                        + z
+                        + " 被 "
                         + net.minecraft.item.Item.itemRegistry.getNameForObject(present)
                         + " 占用）：先清场或调整用例坐标");
             }
