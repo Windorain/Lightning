@@ -130,9 +130,9 @@
       "params": { "path": "shots/persp-front.png", "width": 1280, "height": 720 }
     },
     {
-      "id": "img-scene-not-uniform",
+      "id": "img-scene-no-blank-frame",
       "type": "image-not-uniform",
-      "params": { "path": "shots/persp-front.png", "maxSameColorRatio": 0.1 }
+      "params": { "path": "shots/persp-front.png", "maxSameColorRatio": 0.9 }
     },
 
     {

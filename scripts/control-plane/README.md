@@ -467,7 +467,7 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行�
   | `x1`（裸管） | `te-x1-iso-north`=`/connections/NORTH` false、`te-x1-iso-west`=`/connections/WEST` false、`te-x1-iso-init`=`/initialized` true | `img-x1-size` / `img-x1-not-uniform`（`persp-row.png` 1280×720 + 非纯色） |
   | `x2`（两管互联） | `te-x2-pair-east`=`@65 /connections/EAST` true | `img-x2-size` / `img-x2-not-uniform`（同上，互连的可见性） |
   | `x3`（管+箱） | `te-x3-pair-west`=`@66 /connections/WEST` true、`te-x3-chest-east`=`@66 /connections/EAST` true、`te-x3-down`=`@66 /connections/DOWN` false、`te-x3-pipe-type`=`@66 /pipeType` | `img-x3-size` / `img-x3-not-uniform`（同上） |
-  | `scene` | —（由 x1..x3 覆盖；全场景可见性由图像轨单独承担） | `img-scene-size` / `img-scene-not-uniform`（`persp-front.png`，**`maxSameColorRatio=0.10`——决定性阈值**，见下方「图像轨阈值标定方法」） |
+  | `scene` | —（由 x1..x3 覆盖；全场景可见性由图像轨单独承担） | `img-scene-size` / `img-scene-no-blank-frame`（`persp-front.png`，**`maxSameColorRatio=0.90`——防整帧假图**，见下方「图像轨阈值标定方法」） |
 
 - `variants`：`neg-x1-iso-north-flipped` 把 `criteria[0].expect` 由 `false` 改成 `true`（只动判据、不动 world/build），
   `expectCriteriaRed=["te-x1-iso-north"]`；
@@ -491,13 +491,26 @@ yaw 算错背对场景，0.98 阈值下照样全绿——目验截图才擒获�
    `persp-front` 贴近取景（管排占画面主体）实测主色占比 **0.0746**（场景在）、纯天空对照档
    **0.137~0.151** ⇒ 阈值 **0.10**（两侧余量均 ≥25%）；`persp-row` 主色 0.1208 与纯天空档拉不开
    安全间距 ⇒ 它的 `not-uniform` 保持 0.98，只承担「黑屏防线 + 形态留档」，**决定性判据
-   集中在 `img-scene-not-uniform`**，不在每个配对判据上都假装有精度；
+   集中在 `img-scene-not-uniform`**（即重校准后的 `img-scene-no-blank-frame`，见文末记录），不在每个配对判据上都假装有精度；
 3. 每个锚点用例至少要有**一条**这种「贴近取景 + 决定性阈值」的判据。
 4. **主色占比对「场景覆盖率 <50%」结构性不敏感**（a2 标定实测：AE2 缆总成在 fov 70/20 下
    场景档与纯天空档读数完全相同 0.1423/0.1422、0.2335/0.2335——场景像素颜色各异，先吃掉的是
    非主色的天空像素）。所以「贴近取景」必须真的贴到场景占半幅以上，否则两档拉不开；
    AE2 侧决定性判据 = `img-*-not-uniform-near`（fov 10 特写，0.15）与 `img-gate-not-uniform-near`
    （窄 fov 门内对照，0.98 vs 门外 1.0）。
+
+**判据重校准记录（2026-10-06，`img-scene-not-uniform` → `img-scene-no-blank-frame`，0.10 → 0.90；
+出处 #89 评论 1669 判读 + Lead 裁决采纳方案 A）**：上面的 0.10 标定在 **原版渲染**下成立（场景在
+0.075 / 纯天空 0.137~0.151），但在 **Angelica 渲染管线**（GTNH 新基线，地平线雾带与虚空渐变层视觉
+消失、天空整片均匀天穹色）下，「场景在」读数跳到 **0.413**、「TE 丢失后」0.531，0.10 阈值必红——
+渲染差异说由 5 个旧基线样本（稳定 0.075）+ 直方图（内容像素计数两基线一致、主色同 #BCD5FF）坐实。
+重校准后意图改为**只防整帧假图**（黑/白空帧主色占比 ≈1.0，两基线同）：正常帧旧基线 0.075 /
+新基线 0.413，0.90 对两基线都保留判别间距。**已知空隙（如实记录）**：vanilla 下「机位背对场景、
+画面只有天空渐变」（0.137~0.151）在 0.90 阈值下转绿——该守卫在原版渲染下失效，由规矩 1
+「截图必须目验」承担；Angelica 下纯天空帧主色 ≈1.0 仍被抓。TE 丢失曾被本判据附带抓住（0.531），
+属错位职责，正式守卫归 `te-state-equals` 双轨判据，不因本次重校准补回。雾带消失的机制层归因
+（GLSM/FogService 哪一环）**已知未究**。AE2 用例的 `img-*-not-uniform-near`（0.15）在 Angelica
+天空下是否有同类风险，待新基线 AE2 读数出现后复核。
 
 ### 10.3 `cases/ae2-parts.json`（AE2 部件锚点 + K1 门控对照）
 
