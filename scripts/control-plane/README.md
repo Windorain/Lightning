@@ -19,7 +19,7 @@
 | `cases/ae2-parts.json` | **PR-3** AE2 锚点用例：缆块 + 部件（中心缆/切换总线/存储总线）+ 双轨判据 + K1 三十格距离门远机位对照（见 §10.3） |
 | `anchor-checks.ps1` | **PR-3** 纯检查模块：红绿判定本体（无 HTTP / 无世界 / 无归档），被驱动与自检共用（见 §10.1） |
 | `run-anchor.ps1` | **PR-3** 锚点验收驱动：写配置 → 起客户端 → 依次断言 C1..C7 → 收尾归档（见 §10.1） |
-| `run-anchor-selftest.ps1` | **PR-3** 离线行为自检：合成夹具跑 `anchor-checks.ps1` 的每条判定，验证好数据绿、坏数据精确红（见 §10.6） |
+| `run-anchor-selftest.ps1` | **PR-3** 离线行为自检：合成夹具跑 `anchor-checks.ps1` 的每条判定，验证好数据绿、坏数据精确红（见 §10.7） |
 
 脚本只做**编排与调用**：控制面本体在 `mod/gtnh/src/main/java/com/lightning/mod/client/controlplane/`。
 脚本不直接 POST 裸请求——一切动作调用都经 `caller.mjs`（自描述驱动），便于审计「调用方是否真的读了自描述」。
@@ -425,7 +425,7 @@ pwsh -File scripts/control-plane/run-anchor.ps1 -SkipClientStart   # 复用已�
 pwsh -File scripts/control-plane/run-anchor.ps1 -KeepClient        # 跑完保留客户端现场
 pwsh -File scripts/control-plane/run-anchor.ps1 -ChecksOnly        # 只跑离线检查（C2 + 复算器自检），不起客户端
 pwsh -File scripts/control-plane/run-anchor.ps1 -LegacyJdk         # 退回 runClientSdePipeline（默认 runClient25）
-pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行为自检（合成夹具，见 §10.6）
+pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行为自检（合成夹具，见 §10.7）
 ```
 
 | 参数 | 默认 | 说明 |
@@ -449,14 +449,14 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1           # 离线行�
 `Test-GateUniformRecompute` / `Test-IdempotentManifest` / `Test-EvidenceComplete` /
 `Test-ObservationTeReads` / `Test-ObservationCameras` + `Get-PngDominantColorRatio`）。
 拆出来的唯一理由是**可离线自检**：同一份判定既能被真机轮次调用，也能被 `run-anchor-selftest.ps1` 用合成夹具
-反复喂坏数据（§10.6）。这与 §9.1 里「两个驱动各自复制公共函数」的取舍不冲突——那个取舍针对的是**归档/还原路径**
+反复喂坏数据（§10.7）。这与 §9.1 里「两个驱动各自复制公共函数」的取舍不冲突——那个取舍针对的是**归档/还原路径**
 的耦合，本模块不含任何进程或归档逻辑。
 
 ### 10.2 `cases/lp-pipe-row.json`（LP 四管锚点）
 
 - `world`：`folder=cp_lp_pipe_row`、`seed=20261006`、`void=true`、`base=[64,12,64]`、`settleTicks=60`；
 - `build`：清场 `[62,10,62]..[70,16,68]` → **3 根 LP 基础物流管**（`64/65/66`，全用 `te` 步 `completer:"lp-pipe"`，
-  物品注册名见 §10.5）→ `minecraft:chest`（`block` 步）+ `te` 步 `completer:"vanilla"` → `wait 20`；
+  物品注册名见 §10.6）→ `minecraft:chest`（`block` 步）+ `te` 步 `completer:"vanilla"` → `wait 20`；
   三种连接形态：`64` 裸管（四面皆空）、`65↔66` 两管互联、`66` 管+箱（东侧接箱子）；
 - `capture`：`{lighting:"natural", renderMode:"本色", worldTime:6000}`；`cameras` 2 个 1280×720 透视机位
   （`persp-row` 斜视看三种连接形态、`persp-front` 正面平视，两者都取正 pitch=俯视，口径同 §9.2 的 yaw/pitch 算法）；
@@ -575,7 +575,25 @@ Angelica 下防纯天空空转绿**（Angelica 纯天空档预期 ≈1.0，0.90 
 有二：把箱放大到可断言量级、把天空渐变压到逐像素平坦（宽 fov 下天空渐变主色占比只有 0.06~0.17，
 `image-uniform` 指标在宽 fov 天空上不可用——这是 a1 轮 6 红的真因：判据指标选型错，不是实现错）。
 
-### 10.4 断言 C1..C7
+### 10.4 `cases/gg-antimatter-casing.json`（#87 回归锚：GG 外壳 CTM 导出材质定位）
+
+- 锚点定位：issue #87（GoodGenerator `antimatterContainmentCasing` 导出紫黑占位）的持久回归用例——
+  CTM 连通对 + 孤立枚 + 同 mod 正常对照，六轴正交。根因与验收证据链见 #87（评论 1651 根因 /
+  1918 验收 / 1919 更正）与 #89；
+- `world`：`folder=cp_gg_casing`、`seed=20261006`、`void=true`、`base=[64,12,64]`、`settleTicks=60`；
+- `build`：横排 `[64..68,12,64]` = stone | ACC | ACC（connect=block 连通对）| magneticFluxCasing |
+  gravityStabilizationCasing（同 mod 正常对照）+ 孤立 ACC `[65,12,66]`（tile 0 形态）；`wait 20`；
+- **机位构造（「瞄准结构中心」，Lead 批准）**：六机位 pos 均取在「过结构几何中心
+  G=(66.5,12.5,65.5)（内容 AABB x[64,69)×y[12,13)×z[64,67)）的视轴」上，yaw/pitch 由 pos→G 反推
+  （游戏侧 `d_mc(yaw,pitch)` 与 web 出图器具 `lookAt(G−pos)` 由构造同向）；`ortho-top` 的 pos 在 z
+  向偏 0.5 格（pitch 86.4° 而非 90°）以避开 lookAt 极点退化与 MC 极点旋向不确定；
+- 判据口径：六机位各 `image-size-equals` + `image-not-uniform`（`maxSameColorRatio=0.98`——
+  Angelica 均匀天穹下 5 格横排主色占比 ≈0.92，0.98 保留对「纯天空 ≈1.0」的判别）+
+  `world-hash` + `observation.json` 存在性；
+- 变体（负对照）：`neg-iso-acc-moved` 把孤立 ACC 挪一格（`/build/6/at` → [65,12,67]），
+  预期仅 `world-hash` 变红。
+
+### 10.5 断言 C1..C7
 
 | id | 断言 | 红意味着 |
 |---|---|---|
@@ -585,14 +603,14 @@ Angelica 下防纯天空空转绿**（Angelica 纯天空档预期 ≈1.0，0.90 
 | C4a | ae2 run 的 `near.png`/`ortho-top.png` 非空且 `image-not-uniform` 判据绿（AE2 场景确实渲染出来了） | 场景没渲染出来（图缺失/空图/纯背景） |
 | C4b | ae2 run 的 `far.png` 非空且 `image-uniform`（+ 尺寸判据）绿（门外机位确实看不见门控箱）；`gate-near.png` 非空且 `image-not-uniform` 绿（门内机位确实看见——K1 的决定性两半：玩家恒在门内，门若随玩家则两图皆有箱） | TESR 距离门没随相机生效：箱在门外仍被渲染，或门内也不渲染（K1 门控失效/器具摆错） |
 | C4c | **独立复算** `far.png` 的主色占比 ≥ 判据的 `minSameColorRatio`（自己解 PNG：IDAT→inflate→逐行反滤波→数众数像素） | 与判据同口径但不共用实现；判据绿而这里红 ⇒ 判据实现可疑（反之亦然） |
-| C5a/a2/b/c | lp-pipe-row 连跑两次（两个 runId）：两次都退出码 0 + overall green；两次 `world/scene-manifest.json` 的 `sha256` 相等；两次 run 的 `world-hash-equals` 判据均绿 | 场景重建不幂等（世界漂移）——见 §10.7 留白 2 的已知边界 |
+| C5a/a2/b/c | lp-pipe-row 连跑两次（两个 runId）：两次都退出码 0 + overall green；两次 `world/scene-manifest.json` 的 `sha256` 相等；两次 run 的 `world-hash-equals` 判据均绿 | 场景重建不幂等（世界漂移）——见 §10.8 留白 2 的已知边界 |
 | C6xx | 两用例 run 的 `evidence.json` overall=green 且期望证据逐条在场（含机位 PNG） | 证据清单缺项（截图或记账文件没落盘） |
 | C7xx（×2） | 两用例 run 的 `observation.json`：`runtimeReads` 里存在 key 以 **`te.lp-pipe[`** / **`te.ae2-part[`** 开头的条目（族名逐字口径）且其 `sha256` 非空；`observation.cameras` 数量/顺序/名字与用例一致且每项含 `pos`/`projection`/`resolution` | 运行期轨没有留痕（观测记录离线不可解释），或机位摘要缺失/串位 |
 
 **退出码**：`0` 全绿；`2` 有断言红；`3` 管线级致命（`server.json` 超时 / 客户端早退）；`4` 前置检查或编排自身失败。
 **归 port 口径、参数名自适应（`P1`/`P2`/`P3`）与 `run-shots.ps1` 相同**。
 
-### 10.5 注册名来源（源码实证——用例里每个字符串都可核对）
+### 10.6 注册名来源（源码实证——用例里每个字符串都可核对）
 
 | 用例里的字符串 | 出处（源码行号） | 运行期实证 |
 |---|---|---|
@@ -600,7 +618,7 @@ Angelica 下防纯天空空转绿**（Angelica 纯天空档预期 ≈1.0，0.90 
 | `appliedenergistics2:item.ItemMultiPart` | `core/features/ItemFeatureHandler.java:67-71`：`name=="ItemPart"` → `name="ItemMultiPart"`，随后 `GameRegistry.registerItem(item, "item." + name)` | 探针产物 `PartsFamilyProviderProbe.java:182/213/230` 断言的 `typeKey` 字面量即 `appliedenergistics2:item.ItemMultiPart:<meta>` |
 | `appliedenergistics2:tile.BlockCableBus` | `core/features/AECableBusFeatureHandler.java:60-72`：`registryName = "tile." + name` → `GameRegistry.registerBlock(featured, null, registryName)` | 同上（部件格宿主 registry 名） |
 | 部件 `meta`：中心缆 16 / 切换总线 80 / 存储总线 220 | `items/parts/PartType.java:70`（`CableGlass(0, …)`，括号首参即 `baseDamage`）、`:111`（`ToggleBus(80, …)`）、`:126`（`StorageBus(220, …)`）；`ItemMultiPart.java:119`：`partDamage = mat.getBaseDamage() + varID`，`varID = AEColor.ordinal()`（`api/util/AEColor.java` 的常量声明序里 `Transparent` 在末位，ordinal 16 ⇒ 缆 `0+16=16`，总线/存储总线 varID=0 ⇒ meta 就是 `baseDamage`） | `PartsFamilyProviderProbe.java:182/213/230` 的三条字面量断言（真机跑过） |
-| `PartCableGlass` / `PartToggleBus` / `PartStorageBus`（类名） | `items/parts/PartType.java` 的 import 段（`appeng.parts.networking.PartCableGlass`、`appeng.parts.misc.PartToggleBus`、`appeng.parts.misc.PartStorageBus`）与各枚举常量的构造参数 | 描述器输出 `partClasses`（本树真实客户端首轮已实测命中，见 §10.7 留白 1） |
+| `PartCableGlass` / `PartToggleBus` / `PartStorageBus`（类名） | `items/parts/PartType.java` 的 import 段（`appeng.parts.networking.PartCableGlass`、`appeng.parts.misc.PartToggleBus`、`appeng.parts.misc.PartStorageBus`）与各枚举常量的构造参数 | 描述器输出 `partClasses`（本树真实客户端首轮已实测命中，见 §10.8 留白 1） |
 
 **写法的两个坑（用例里刻意避开）**：
 
@@ -612,7 +630,7 @@ Angelica 下防纯天空空转绿**（Angelica 纯天空档预期 ≈1.0，0.90 
    部件必须写 `appliedenergistics2:item.ItemMultiPart@16` 这种形态（缆固定带 `@16`，总线/存储总线 meta 为 0
    不带后缀）。`partClasses` 是纯类名、与 meta 无关，适合断言「这一面装的是哪种部件」。
 
-### 10.6 自检记录（离线，不含客户端实测）
+### 10.7 自检记录（离线，不含客户端实测）
 
 ```powershell
 pwsh -File scripts/control-plane/run-anchor.ps1 -ChecksOnly          # C2 + 复算器自检（5 条断言）
@@ -645,7 +663,7 @@ pwsh -File scripts/control-plane/run-anchor-selftest.ps1              # 29 条�
 | `run-anchor-selftest.ps1` | 29 条自检全绿、退出 0 |
 | `run-anchor.ps1` 的 C1/C3~C7 | **未离线复核**：它们必须由真机轮次产生 run 目录后才能断言；首次验收由调度者执行 |
 
-### 10.7 已知留白与实现/契约不一致（需要实现侧裁决）
+### 10.8 已知留白与实现/契约不一致（需要实现侧裁决）
 
 1. **LP 相邻管的 `connections` 不是「几何对称」推出来的**。真机首轮实测（`cp_lp_pipe_row` 四格场景）：
    `@64` 的 `/connections/EAST=true`、`NORTH/SOUTH/DOWN/UP=false`、`WEST=false`；而 `@65` 是
