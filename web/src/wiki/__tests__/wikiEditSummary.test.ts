@@ -67,3 +67,85 @@ describe('wikiEditSummary', () => {
     expect(hasWikiAuditableChanges(draft)).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// #83：tooltipPalette 内容级 + cellTooltipGrid 逐项（对齐 2026-05-25 历史摘要形态）
+// ---------------------------------------------------------------------------
+
+/** 带成对 idioms 的 1×1×1 文档（root 级 tooltipPalette/cellTooltipGrid）。 */
+function docWithTooltips(palette?: string[], grid?: number[][][]): RuntimeDocument {
+  return RuntimeDocument.fromV2Plain({
+    ...MIN_V2,
+    ...(palette ? { tooltipPalette: palette } : {}),
+    ...(grid ? { cellTooltipGrid: grid } : {}),
+  } as Record<string, unknown>)!
+}
+
+describe('#83 逐格说明进入可审计判定与编辑摘要', () => {
+  it('只改 cellTooltipGrid（调色板不变）⇒ 产生逐项摘要行（修复前：摘要退化为默认值/null）', () => {
+    const baseline = docWithTooltips(['存储总线', '流体存储总线'], [[[0]]])
+    const current = docWithTooltips(['存储总线', '流体存储总线'], [[[1]]])
+
+    const draft = buildWikiEditSummaryDraft(baseline, current)
+    expect(hasWikiAuditableChanges(draft)).toBe(true)
+    const line = draft!.lines.find((l) => l.key === 'cellTooltip')
+    expect(line, 'cellTooltipGrid 变更必须成行').toBeTruthy()
+    // 下标解析为调色板文本（历史形态 `cellTooltipGrid[z][row][col]: 旧 -> 新`）
+    expect(line!.details).toEqual(['cellTooltipGrid[0][0][0]: "存储总线" -> "流体存储总线"'])
+    expect(draft!.defaultSummary).toContain('cellTooltipGrid[0][0][0]: "存储总线" -> "流体存储总线"')
+    expect(draft!.defaultSummary).not.toBe('结构工作台')
+  })
+
+  it('调色板等长改写（长度不变、内容变）⇒ 判定为变更（修复前：只比长度 ⇒ 漏判）', () => {
+    const baseline = docWithTooltips(['旧文案'], [[[0]]])
+    const current = docWithTooltips(['新文案'], [[[0]]])
+
+    const draft = buildWikiEditSummaryDraft(baseline, current)
+    expect(hasWikiAuditableChanges(draft)).toBe(true)
+    const line = draft!.lines.find((l) => l.key === 'tooltip')
+    expect(line!.details).toEqual(['tooltipPalette[0]: "旧文案" -> "新文案"'])
+    // 下标未变 ⇒ 不产生逐格行
+    expect(draft!.lines.find((l) => l.key === 'cellTooltip')).toBeUndefined()
+  })
+
+  it('历史形态对照（2026-05-25 revid 204254）：追加条目 + 新指格 ⇒ <missing> -> 文本 / "" -> 文本', () => {
+    const baseline = docWithTooltips(['存储总线'], [[[-1]]])
+    const current = docWithTooltips(['存储总线', '流体存储总线'], [[[1]]])
+
+    const draft = buildWikiEditSummaryDraft(baseline, current)
+    expect(draft!.defaultSummary).toContain('tooltipPalette[1]: <missing> -> "流体存储总线"')
+    expect(draft!.defaultSummary).toContain('cellTooltipGrid[0][0][0]: "" -> "流体存储总线"')
+  })
+
+  it('清除一格说明（指回 -1）⇒ 逐项行显示 文本 -> ""', () => {
+    const baseline = docWithTooltips(['存储总线'], [[[0]]])
+    const current = docWithTooltips(['存储总线'], [[[-1]]])
+
+    const draft = buildWikiEditSummaryDraft(baseline, current)
+    const line = draft!.lines.find((l) => l.key === 'cellTooltip')
+    expect(line!.details).toEqual(['cellTooltipGrid[0][0][0]: "存储总线" -> ""'])
+  })
+
+  it('悬空下标不掩盖：下标超出调色板 ⇒ 显示 #<idx> 原样（坏数据可见）', () => {
+    const baseline = docWithTooltips(['存储总线'], [[[0]]])
+    const current = docWithTooltips(['存储总线'], [[[7]]])
+
+    const draft = buildWikiEditSummaryDraft(baseline, current)
+    const line = draft!.lines.find((l) => l.key === 'cellTooltip')
+    expect(line!.details).toEqual(['cellTooltipGrid[0][0][0]: "存储总线" -> #7'])
+  })
+
+  it('负对照：tooltipPalette/cellTooltipGrid 都不变 ⇒ 不产生 tooltip 行', () => {
+    const baseline = docWithTooltips(['存储总线'], [[[0]]])
+    const current = docWithTooltips(['存储总线'], [[[0]]])
+    const draft = buildWikiEditSummaryDraft(baseline, current)
+    expect(draft).toBeNull()
+  })
+
+  it('负对照：无成对 idioms 的旧文档 ⇒ 不产出 tooltip 行（行为零差异）', () => {
+    const baseline = RuntimeDocument.fromV2Plain(MIN_V2 as Record<string, unknown>)!
+    const current = baseline.clone()
+    const draft = buildWikiEditSummaryDraft(baseline, current)
+    expect(draft).toBeNull()
+  })
+})
