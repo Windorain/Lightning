@@ -19,10 +19,10 @@
  *    `__tests__/blockStatsSidebar.legacyHostRows.dom.test.ts`）。
  *
  * ── 事件通道（保留；B-4/B-5 的接入点）──
- *  `tooltip-hover` / `select-block` **两条路径都在发**：物品行以**物品身份键**为 payload，
+ *  `tooltip-hover` / `select-block` / `select-item` 都在发：物品行以**物品身份键**为 payload，
  *  旧路径行以宿主 blockId 为 payload。物品行不再有 `kind === 'host'` 短路 —— 事件通道不因
- *  移除宿主行而堵死（#5 物品 TooltipBox / #7 有对应规则时点选高亮在此接入；本轮不实现其
- *  消费端：视口侧对物品键无匹配 ⇒ 不产生高亮）。
+ *  移除宿主行而堵死。#37 口径裁决：**物品行的 tooltip 触发区 = 物品图标**（图标悬停出
+ *  TooltipBox，行文本/数量区不出）；点选（B-5）保持整行。旧路径行保持整行悬停不回归。
  *  物品行**不套用** `--selected` 视觉（不引入"编辑/选中态"这类额外行 UI）：`selectedBlockId`
  *  的来源只剩旧文件退化路径（#6 §9 第 4 条）。
  *
@@ -468,8 +468,9 @@ function edgeGlowOpacity(active: boolean): number {
         >
           <!--
             部件模式：只列物品行（引擎 StatsRow 原样呈现；行键 = 图标键 = 物品身份键，
-            名称 = 游戏内显示名）。悬停事件照发（payload = 物品身份键）；
-            点选（B-5）= 经典多选，选中态为**集合语义**（`selectedItemKeys`）。
+            名称 = 游戏内显示名）。**悬停 tooltip 触发区 = 物品图标**（#37 口径裁决：
+            悬停图标出 TooltipBox，行其他区域不出）；点选（B-5）保持整行 = 经典多选，
+            选中态为**集合语义**（`selectedItemKeys`）。
           -->
           <template v-if="statsResult">
             <div
@@ -499,17 +500,23 @@ function edgeGlowOpacity(active: boolean): number {
               :data-stats-selected="isItemRowSelected(row.key) ? 'true' : 'false'"
               :data-stats-unresolved="isUnresolvedItem(row.key) ? 'true' : 'false'"
               :data-stats-anchor="selectionAnchor === row.key ? 'true' : 'false'"
-              @pointerenter="onRowPointerEnter($event, row.key)"
-              @pointermove="onRowPointerMove($event, row.key)"
-              @pointerleave="onRowPointerLeave"
               @click="onItemRowClick($event, row.key)"
               :title="collapsed ? rowLabel(row) : undefined"
             >
-              <BlockSlotPreview
-                :cache="cache"
-                :block-id="row.iconKey"
-                :count="row.count"
-              />
+              <!-- #37 口径：tooltip-hover 触发区收窄到图标（行文本区悬停不出 TooltipBox） -->
+              <span
+                class="nei-slot-icon"
+                :data-stats-icon-hover="row.key"
+                @pointerenter="onRowPointerEnter($event, row.key)"
+                @pointermove="onRowPointerMove($event, row.key)"
+                @pointerleave="onRowPointerLeave"
+              >
+                <BlockSlotPreview
+                  :cache="cache"
+                  :block-id="row.iconKey"
+                  :count="row.count"
+                />
+              </span>
               <template v-if="!collapsed">
                 <div class="nei-slot-info">
                   <div class="nei-slot-name">
@@ -766,6 +773,11 @@ function edgeGlowOpacity(active: boolean): number {
   padding: 2px 4px;
   cursor: pointer;
   transition: background 0.1s;
+}
+/* #37 口径：物品行的 tooltip 触发区 = 图标包裹元素（行其余区域不发 tooltip-hover） */
+.nei-slot-icon {
+  display: inline-flex;
+  flex: none;
 }
 .nei-slot-row:hover {
   background: var(--nei-bg-hover);

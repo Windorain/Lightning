@@ -417,6 +417,13 @@ function mountSinglebox(extra: Record<string, unknown> = {}): HTMLElement {
   return mountSidebar(runtimeDefOf(singleboxFixture), extra).el
 }
 
+/** #37 口径：物品行的 tooltip 触发区 = 图标包裹元素（行文本区不发 tooltip-hover）。 */
+function iconOf(row: HTMLElement): HTMLElement {
+  const icon = row.querySelector<HTMLElement>('[data-stats-icon-hover]')
+  expect(icon, '物品行必须有图标触发元素 [data-stats-icon-hover]').not.toBeNull()
+  return icon!
+}
+
 describe('B-5 物品行点选：事件通道（payload = 事实，语义在上层）', () => {
   it('悬停仍发 tooltip-hover（物品身份键）；点选改发 select-item（行键 + 可见顺序 + 修饰键）', () => {
     const onHover = vi.fn()
@@ -430,11 +437,11 @@ describe('B-5 物品行点选：事件通道（payload = 事实，语义在上�
     })
 
     const slab = rowByKey(el, 'minecraft:stone_slab:0')
-    slab.dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 3, clientY: 4 }))
+    iconOf(slab).dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 3, clientY: 4 }))
     expect(onHover).toHaveBeenLastCalledWith({
       blockId: 'minecraft:stone_slab:0', clientX: 3, clientY: 4, source: 'sidebar',
     })
-    slab.dispatchEvent(new MouseEvent('pointerleave', { bubbles: true }))
+    iconOf(slab).dispatchEvent(new MouseEvent('pointerleave', { bubbles: true }))
     expect(onHover).toHaveBeenLastCalledWith(null)
 
     // 单击：无修饰键
@@ -610,7 +617,7 @@ describe('B-5 清空选择：Esc 与点左栏空白', () => {
   it('无 itemIndex 且非宿主调色板键 ⇒ 回退行键本身（不再是 "0" 这类尾段片段）', () => {
     const onHover = vi.fn()
     const { el } = mountSidebar(runtimeDefOf(singleboxFixture), { onTooltipHover: onHover })
-    rowByKey(el, 'minecraft:fence:0')
+    iconOf(rowByKey(el, 'minecraft:fence:0'))
       .dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 1, clientY: 1 }))
     const payload = onHover.mock.lastCall![0] as { blockId: string }
     // 解析层（useEmbedTooltip）在两条键通道都不中时返回行键本身
@@ -655,23 +662,41 @@ function tooltipTextFor(def: StructureDefinition, blockId: string): string {
   return api.tooltipText.value
 }
 
-describe('B-4 物品行 DOM 断言（#37 硬要求两条）', () => {
-  it('断言①：物品行 emit `tooltip-hover`，payload = 物品身份键 + 指针坐标', () => {
+describe('B-4 物品行 DOM 断言（#37 硬要求两条 + 触发区收窄到图标的负向条）', () => {
+  it('断言①：悬停**图标** emit `tooltip-hover`，payload = 物品身份键 + 指针坐标', () => {
     const onHover = vi.fn()
     const { el } = mountSidebar(runtimeDefOf(singleboxFixture), { onTooltipHover: onHover })
 
     const fence = rowByKey(el, 'minecraft:fence:0')
     expect(fence.getAttribute('data-stats-icon-key')).toBe('minecraft:fence:0')
-    fence.dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 11, clientY: 22 }))
+    const icon = iconOf(fence)
+    icon.dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 11, clientY: 22 }))
     expect(onHover).toHaveBeenLastCalledWith({
       blockId: 'minecraft:fence:0', clientX: 11, clientY: 22, source: 'sidebar',
     })
 
     // 同路径的 pointermove 亦发（B-3 已删 `kind === 'host'` 短路 ⇒ 无短路残留）
-    fence.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 33, clientY: 44 }))
+    icon.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 33, clientY: 44 }))
     expect(onHover).toHaveBeenLastCalledWith({
       blockId: 'minecraft:fence:0', clientX: 33, clientY: 44, source: 'sidebar',
     })
+  })
+
+  it('断言③（负向）：悬停行**文本区/数量区**不发 tooltip-hover（触发区 = 图标，#37 口径裁决）', () => {
+    const onHover = vi.fn()
+    const { el } = mountSidebar(runtimeDefOf(singleboxFixture), { onTooltipHover: onHover })
+
+    const fence = rowByKey(el, 'minecraft:fence:0')
+    // 行文本区（名称/键）悬停：事件冒泡到行 div，但行 div 上没有 tooltip 绑定 ⇒ 零调用
+    fence.querySelector<HTMLElement>('.nei-slot-info')!
+      .dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 60, clientY: 8 }))
+    fence.querySelector<HTMLElement>('.nei-slot-name')!
+      .dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 60, clientY: 8 }))
+    fence.querySelector<HTMLElement>('.nei-slot-qty')!
+      .dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 150, clientY: 8 }))
+    // 整行 div 本身也不发（绑定已移到图标）
+    fence.dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 10, clientY: 8 }))
+    expect(onHover, '行文本区/数量区/行容器悬停都不发 tooltip-hover').not.toHaveBeenCalled()
   })
 
   it('断言②：该 hover 解析出的文案非空且含物品显示名，且不是 "0"、不是宿主方块名', () => {
@@ -684,7 +709,7 @@ describe('B-4 物品行 DOM 断言（#37 硬要求两条）', () => {
     const { el } = mountSidebar(def, { definition: def, onTooltipHover: onHover })
 
     const fence = rowByKey(el, 'minecraft:fence:0')
-    fence.dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 11, clientY: 22 }))
+    iconOf(fence).dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 11, clientY: 22 }))
 
     // 事件 payload 与解析层之间不插桩：拿 DOM 真实发出的行键去喂生产解析层
     const payload = onHover.mock.lastCall![0] as { blockId: string }

@@ -41,6 +41,7 @@ import {
   clickStatsRow,
   selectedRowKeys,
   hoverStatsRow,
+  hoverStatsRowText,
   leaveStatsRow,
   readTooltipText,
   compactTooltipText,
@@ -197,7 +198,7 @@ test.describe('部件轮验收 · 真实导出 UI 证据（B-1/B-4/B-5 截图 + 
     )
   })
 
-  test('B-4 侧栏行悬停：TooltipBox 显示该物品 tooltip（#37 完成定义头条，真实导出实证）', async ({ page }, testInfo) => {
+  test('B-4 侧栏行悬停：悬停**物品图标**出 TooltipBox（行文本区不出）；文案 = 文件 itemIndex tooltip', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', '证据截图只出一份（desktop）')
     test.setTimeout(240_000)
     await gotoWikiPreviewWithScene(page, FULL.raw, REAL_EXPORT_FILES.full)
@@ -209,9 +210,9 @@ test.describe('部件轮验收 · 真实导出 UI 证据（B-1/B-4/B-5 截图 + 
     const cableEntry = itemIndex[cableKey]
     expect(cableEntry, 'itemIndex 存在线缆键').toBeTruthy()
 
-    // ── 生产路径：行 pointerenter/move → tooltip-hover(source:'sidebar') → resolveSidebarLines → .wm-tooltip-box ──
+    // ── 生产路径：图标 pointerenter/move → tooltip-hover(source:'sidebar') → resolveSidebarLines → .wm-tooltip-box ──
     await hoverStatsRow(page, cableKey)
-    const tip = await pollUntil(() => readTooltipText(page), '侧栏行悬停 TooltipBox 出现', 15_000, 40)
+    const tip = await pollUntil(() => readTooltipText(page), '图标悬停 TooltipBox 出现', 15_000, 40)
     expect(tip, 'TooltipBox 必须出现（非 null）').not.toBeNull()
     // 文案 = 文件 itemIndex 该键 tooltip（格式无关压缩比对；§ 格式码经 renderTooltipHtml 转样式不进 innerText）
     expect(compactTooltipText(tip!), 'TooltipBox 含该物品显示名').toContain(compactTooltipText(cableEntry!.display))
@@ -219,21 +220,29 @@ test.describe('部件轮验收 · 真实导出 UI 证据（B-1/B-4/B-5 截图 + 
     expect(compactTooltipText(tip!), 'TooltipBox 文案 = 文件 itemIndex tooltip 首行').toContain(
       compactTooltipText(cableEntry!.tooltip[0]!),
     )
-    await shot(page, 'ev-real-b4-sidebar-row-tooltip.png', false)
+    await shot(page, 'ev-real-b4-sidebar-icon-tooltip.png', false)
 
-    // ── 回退对照：原版物品行（chest）同样出 TooltipBox，文案 = 文件 tooltip ──
+    // ── 负对照（#37 口径裁决）：先离开图标（真实 pointerleave → tooltip 清），
+    //    再悬停行**文本区** → TooltipBox 必须不出现 ──
+    await leaveStatsRow(page, cableKey)
+    await pollUntil(async () => ((await readTooltipText(page)) === null ? true : null), '离开图标后 TooltipBox 消失', 15_000, 40)
+    await hoverStatsRowText(page, cableKey)
+    const tipNeg = await readTooltipText(page)
+    expect(tipNeg, '行文本区悬停不出 TooltipBox（触发区 = 图标）').toBeNull()
+
+    // ── 回退对照：原版物品行（chest）图标悬停同样出 TooltipBox，文案 = 文件 tooltip ──
     const chestKey = 'minecraft:chest:0'
     expect(itemIndex[chestKey], 'itemIndex 存在 chest 键').toBeTruthy()
-    await leaveStatsRow(page, cableKey)
     await hoverStatsRow(page, chestKey)
-    const tip2 = await pollUntil(() => readTooltipText(page), 'chest 行悬停 TooltipBox 出现', 15_000, 40)
+    const tip2 = await pollUntil(() => readTooltipText(page), 'chest 行图标悬停 TooltipBox 出现', 15_000, 40)
     expect(tip2, 'chest 行 TooltipBox 必须出现').not.toBeNull()
     expect(compactTooltipText(tip2!), 'chest TooltipBox 含显示名').toContain(compactTooltipText(itemIndex[chestKey]!.display))
     await leaveStatsRow(page, chestKey)
 
     console.log(
-      `[EV-B4-sidebar] ${cableKey} → TooltipBox=${JSON.stringify(tip)}；` +
-        `文件 tooltip=${JSON.stringify(cableEntry!.tooltip)}；回退对照 ${chestKey} → ${JSON.stringify(tip2)}`,
+      `[EV-B4-sidebar] 图标悬停 ${cableKey} → TooltipBox=${JSON.stringify(tip)}；` +
+        `文件 tooltip=${JSON.stringify(cableEntry!.tooltip)}；文本区悬停负对照=${JSON.stringify(tipNeg)}；` +
+        `回退对照 ${chestKey} → ${JSON.stringify(tip2)}`,
     )
   })
 

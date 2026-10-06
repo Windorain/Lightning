@@ -233,7 +233,10 @@ export async function clickStatsRow(
 }
 
 /**
- * 悬停物品行（生产 DOM 真实 `pointerenter`/`pointermove`）——B-4 物品 TooltipBox 观测入口。
+ * 悬停物品行的**图标**（生产 DOM 真实 `pointerenter`/`pointermove`）——B-4 物品 TooltipBox 观测入口。
+ *
+ * #37 口径裁决：tooltip 触发区 = **物品图标**（`[data-stats-icon-hover]` 包裹元素），
+ * 行文本区/数量区悬停不出 TooltipBox；点选（`clickStatsRow`）保持整行。
  *
  * 为什么 `dispatchEvent`：与 `clickStatsRow` 同一理由（窄布局裁剪下 `locator.hover()` 的
  * 可点性检查会失败）；派发的仍是真实 pointer 事件，走 `@pointerenter`/`@pointermove` 监听
@@ -256,15 +259,32 @@ export async function hoverStatsRow(
     timeout,
   )
   await waitStatsSidebarStable(page, 500, timeout)
-  const loc = page.locator(statsRow(key))
+  const loc = page.locator(`[data-stats-icon-hover="${key}"]`)
   await loc.dispatchEvent('pointerenter', { clientX: 40, clientY: 200, bubbles: true })
   await loc.dispatchEvent('pointermove', { clientX: 40, clientY: 200, bubbles: true })
   await page.waitForTimeout(180)
 }
 
-/** 离开物品行（清 hover 态；tooltip 随之消失）。 */
+/** 悬停物品行的**文本区**（B-4 触发区收窄的负对照驱动：这里悬停必须不出 TooltipBox）。 */
+export async function hoverStatsRowText(page: Page, key: string, timeout = 15_000): Promise<void> {
+  await pollUntil(
+    async () => {
+      const s = await expandSidebarSelfHealing(page)
+      return s && s.rows.some((r) => r.key === key) ? s : null
+    },
+    `物品行 ${key} 出现在侧栏`,
+    timeout,
+  )
+  await waitStatsSidebarStable(page, 500, timeout)
+  const loc = page.locator(`${statsRow(key)} .nei-slot-info`)
+  await loc.dispatchEvent('pointerenter', { clientX: 200, clientY: 200, bubbles: true })
+  await loc.dispatchEvent('pointermove', { clientX: 200, clientY: 200, bubbles: true })
+  await page.waitForTimeout(180)
+}
+
+/** 离开物品行图标（清 hover 态；tooltip 随之消失）。 */
 export async function leaveStatsRow(page: Page, key: string): Promise<void> {
-  await page.locator(statsRow(key)).dispatchEvent('pointerleave', { bubbles: true })
+  await page.locator(`[data-stats-icon-hover="${key}"]`).dispatchEvent('pointerleave', { bubbles: true })
   await page.waitForTimeout(120)
 }
 
