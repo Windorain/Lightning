@@ -20,8 +20,8 @@ import com.lightning.mod.core.session.ExportSceneWriter;
  * 本测试把「自述必须与行为一致」里<b>可静态判定</b>的部分钉死：
  *
  * <ol>
- * <li><b>契约版本 1.6</b>（派发裁决：#100=1.4、#101=1.5、本单=1.6）：
- * {@code Contract.VERSION} 与三个动作的 {@code since} 都必须是 1.6；</li>
+ * <li><b>契约版本 1.7</b>（收口批次裁决：#100=1.4、#101=1.5、#103=1.6，本单与 #114/#122/#123 同批取 1.7）：
+ * {@code Contract.VERSION} 与三个动作的 {@code since} 都必须是 1.7；</li>
  * <li><b>D3 默认值可见</b>：预算与形态参数必须带字面默认值（缺 default 的 optional 参数
  * 会让调用方只能靠试错）；</li>
  * <li><b>D1 自述完备</b>：名称/权限级/说明/返回结构/示例/since 齐备，
@@ -42,15 +42,15 @@ public class ExportActionsDescriptorTest {
         return r;
     }
 
-    /** 契约版本 1.6，且三个动作的 since 都是 1.6。 */
+    /** 契约版本 1.7，且三个动作的 since 都是 1.7。 */
     @Test
-    public void exportActionsAreSince16() {
-        assertEquals("派发裁决：#102 取 1.6（#100=1.4、#101=1.5 已占）", "1.6", Contract.VERSION);
+    public void exportActionsAreSince17() {
+        assertEquals("收口批次裁决：#102 取 1.7（#100=1.4、#101=1.5、#103=1.6 已占）", "1.7", Contract.VERSION);
         ActionRegistry r = registry();
         for (String name : EXPORT_ACTIONS) {
             ActionDescriptor d = r.descriptor(name);
             assertNotNull("动作必须已注册: " + name, d);
-            assertEquals(name + " since 应为 1.6（#102 引入）", "1.6", d.since());
+            assertEquals(name + " since 应为 1.7（#102 引入）", "1.7", d.since());
         }
     }
 
@@ -223,7 +223,7 @@ public class ExportActionsDescriptorTest {
         for (String name : EXPORT_ACTIONS) {
             assertTrue("未注册: " + name, r.contains(name));
         }
-        assertTrue("动作总数应 ≥ 39（#102 后）", r.size() >= 39);
+        assertTrue("动作总数应 ≥ 40（#102 合流后）", r.size() >= 40);
     }
 
     private static String paramDoc(ActionDescriptor d, String param) {

@@ -58,14 +58,16 @@
 ## 4. 动作清单
 
 > **数量口径（D3 漂移防线）**：本表按引入批次分节；**权威动作数**以实机
-> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.6** 共 **39 个**动作：
+> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.7** 共 **40 个**动作：
 > 本节 8 个（PR-1）+ §4.1 的 8 个读面（#98）+ §4.2 的 3 个取证（PR-2）+ §4.4 的 6 个 L0（#99）
-> + §4.5 的 2 个命令通道（#100）+ §4.6 的 9 个 L1（#101）+ §4.7 的 3 个导出族（#102）。
+> + §4.5 的 2 个命令通道（#100）+ §4.6 的 9 个 L1（#101）+ §4.9 的 1 个收尾原语（#103）
+> + §4.7 的 3 个导出族（#102）。
 > 历史上本标题曾写「v1，PR-1 交付」而表外另有动作，导致目录与文档不一致（Gitea #97 §5-D3）——
 > 新增动作时**必须**同步本节计数。
 >
-> **版本沿革**：1.3 由 #98（读面）与 #99（L0）并轨占用，故 #100 取 **1.4**（裁决 1）；
-> 1.4 由 #100 占用，故 #101 取 **1.5**；1.5 由 #101 占用，故 #102 取 **1.6**。
+> **版本沿革**：1.3 由 #98（读面）与 #99（L0）并轨占用（调度者裁决）；
+> #100 取 **1.4**（撞号裁决 1）；#101 自报 1.4 与 #100 撞号，合流统一为 **1.5**；
+> #103 取 **1.6**；#102 自报 1.6 与 #103 撞号，合流统一为 **1.7**。
 > 小版本只增不改义（§5）。
 
 | 动作 | 级 | 语义 |
@@ -80,7 +82,8 @@
 | `case.run` | scene 起 | 执行用例文件：默认整跑；`segments:[...]` 按段执行。**整跑与按段共用同一实现、同一产物形态**（验收锚）。产物为 run 目录 + 观测记录 + 判据结论 |
 
 v1.3（issue #98）追加的观察面读面动作见 §4.1；v1.4（issue #100，收口T3）追加的命令通道动作见 §4.5；
-v1.5（issue #101，收口T4）追加的 L1 玩家操作见 §4.6；v1.6（issue #102，收口T5）追加的导出族见 §4.7；
+v1.5（issue #101，收口T4）追加的 L1 玩家操作见 §4.6；v1.6（issue #103，收口T6）追加的收尾原语见 §4.9；
+v1.7（issue #102，收口T5）追加的导出族见 §4.7；
 下表是 PR-1 的动作清单，追加不改已有语义。
 
 PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
@@ -155,7 +158,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 | `scene.entity.spawn` | scene | 生成实体（含掉落物）。`item` 造掉落物、`entity` 造一般实体，二者互斥必居其一；可带 SNBT `nbt` |
 | `scene.entity.clear` | scene | 清除范围内实体（含掉落物）。选择条件 `box`/`entity`/`item` 取交集；`includePlayers` 默认 false |
 | `scene.player.state` | scene | 玩家游戏模式 / 生命 / 经验 / 药水效果（`before`/`after` 双快照） |
-| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给** |
+| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给**。模组权威取物/充电两种写法（#117）：`{slot,battery:"<GT ItemList 常量>"}` 由 GT 自己的清单决定物品与 meta；`{slot,battery,charge:"full"\|"empty"\|<EU>}` 经物品自己的 IC2 `IElectricItemManager` 充放电（`charge` ⟂ `nbt`，见 §6.5）。把满充 GT 电池写进机器充电槽即「给机器供电」 |
 | `scene.weather.time` | scene | 设定世界权威时刻与天气（持续生效；`shot.multi.worldTime` 是拍摄基准，两义不同） |
 | `scene.player.pose` | scene | 瞬时传送/转向——L0 布景原语，与 #101 的 L1 真实移动互补、两义按层标注 |
 
@@ -362,7 +365,7 @@ run 由**发起方**（`cmd.exec`）持有，落点由它给出（§4.7.2-B 的�
 因此移动/拾取这类需要跨 tick 收敛的动作**如实返回当前读数与 `observed`**，不强求一调到位——
 一次不成就调两次，这正是探索模式的用法。
 
-### 4.7 导出族动作（v1.6，#102，「收口T5」）
+### 4.7 导出族动作（v1.7，#102，「收口T5」）
 
 落地 #96 §6.1 与 §10 C 族：把 `/sde export`（场景文件）、`/sde multiblock`（数据集）、`/sde dump`（注册表）
 三条链路<b>同批</b>搬迁为 cp 动作（裁决 5），产物统一迁入 run 目录并登记哈希清单（裁决 6）。
@@ -552,6 +555,65 @@ C4 要求「导出件、实拍、观测记录、世界清单哈希**同一 run**
 不得在既有世界上续跑。`case.run` 的 `world` 段与之是**同一实现**（§6.3），二者语义不冲突。
 L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**，不能替代起手重建。
 
+### 4.9 无人值守收尾原语（v1.6，#103，「收口T6」）
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `core.shutdown` | scene | **无人值守收尾原语**：读 run 的 `evidence.json` → 按约定定退出码 →（默认）延迟后结束客户端进程 |
+
+**为什么需要它（V5 的硬真空）**：老批处理设施（`MultiblockPipelineAutomation` 等）把
+「跑完 → 落结果文件 → 以退出码结束进程」做成一件事，外层脚本据此判红绿。那些设施随 #104 整体删除后，
+控制面成了唯一入口，而 `grep mc.shutdown|exitJava|exitCode` 在 `client/controlplane/` 里**零命中**
+——无人值守编排拿不到任何稳定的进程级信号，只能靠轮询 HTTP 猜「跑完了没、绿没绿」。
+
+**退出码约定（与 run 的**合并结论**对齐）**：
+
+| 码 | 含义 | 判定 |
+|---|---|---|
+| `0` | 判据全绿 | `criteria.json.overall == "green"` **且** `evidence.json.overall == "green"` |
+| `2` | 有红 | 两份里**任一**非 green（**任何**非 green 值都判 2，不是只认字面量 `red`） |
+| `3` | 设施错误 | 连「绿没绿」都读不出来：run 目录里两份结论文件都不在、非法 JSON、缺 `overall`、runId/caseId 都不可用 |
+
+**为什么读两份**：`criteria.json.overall` 是用例声明的**判据**结论，`evidence.json.overall` 是
+**期望证据核对**结论（该在场的产物在不在）——两者语义不同、**不可互替**。实机实测存在
+`criteria=red` 而 `evidence=green` 的 run（一次 `l1-orchestration` 的 2 条判据红、12 项期望产物齐备）；
+只读其一会对那次红跑返回 **0「判据全绿」**，即把红跑读成绿跑。合并规则与 `case.run` 的作业结果
+`overall` **逐字同源**（run 目录里没有持久化「合并结论」的字段，必须重新合并得出）。
+
+三个退出码值与老设施逐字相同（外层脚本可以不改）。**「结论红」与「设施坏」必须分开**——
+把两者混成一个非零码，是让自动化无法自诊断的最快方式。
+
+**退出纪律**（照抄已实测的口径）：FML 的 `FMLSecurityManager` 把非 `cpw.mods.fml.*` 发起的
+`exitVM` 权限请求直接抛 `ExitTrappedException`——自定义类里调 `Runtime.getRuntime().halt(code)`
+会被**静默拦掉**（实测：日志里一句 `FMLSecurityManager$ExitTrappedException`，进程仍以 0 退出，
+外层脚本因此把一次红跑读成绿跑）。因此：
+
+- `code == 0` ⇒ `Minecraft.shutdown()` 正常收尾（世界落盘，main 返回 0）；
+- `code != 0` ⇒ `FMLCommonHandler.instance().exitJava(code, false)`（结果文件已 flush）；
+- 两条路都先挂 120 s 安全网线程（到点 `exitJava(code, true)` 硬退），绝不挂死外层编排；
+- **绝不** `Runtime.halt` / `System.exit`。
+
+**为什么延迟退出**：本动作是 HTTP 动作，结论要经响应体回给调用方，而响应在动作返回**之后**才写；
+就地退出会把调用方吊死在一个永不来的响应上（而它正是要靠这个响应知道退出码）。因此实际退出跑在
+延迟 `delayMs`（默认 1500 ms）的守护线程里，结果里如实给 `exitScheduledInMs`。
+
+**可判定性**：`dryRun:true` 只定码不退出——用它可以在不杀进程的前提下逐条核对「码与 `evidence.overall` 对齐」。
+
+**不许编入固定程序**：本动作会让本作业后续段不再执行，`case.run` 的 `action` 段一律拒绝它
+（`CaseValidator.ACTION_FORBIDDEN`）——收尾由驱动在**整跑结束后**单独发起。
+
+### 4.10 L2 编排段（v1.6，#103）
+
+`case.run` 的用例文件新增通用 `action` 段（**段**的扩充，不是新动作）：逐条执行用例声明的任意
+**同步** cp 动作，产物落 run 目录，`expect` 非空时当场逐步断言。段序
+`world → capture → build → read → action → cameras → criteria → evidence`。
+完整口径见 [case-file.md §3.2](case-file.md)。
+
+**为什么它是 L2 的题中之义**：需求书 §4.3 把 L2 定义为「L0/L1 的**有序编排**，可重放、**逐步断言**」；
+在本段之前，用例能表达的世界写只有 `build` 段的四种构建 op（clear/block/te/wait），
+`scene.*`（L0）与 `player.*`（L1）一步也进不了固定程序——「L2 = 有序编排」这句话在代码上没有落点。
+**没有它，`tutorials/` 的教程复现程序无法表达。**
+
 ## 5. 版本化规则
 
 - URI 前缀即契约大版本：`/cp/v1`。
@@ -565,7 +627,9 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 2. **虚空世界**：`WorldType.FLAT` + 空层预设（无基岩无土层），固定种子；构建基点由用例文件给定。
 3. **幂等重建**：`world.rebuild` 对同一用例定义产生相同世界；场景构建步骤以「清场（托管区域 setBlockToAir）→ 放置 → TE 补全 → 静置」为固定序。**时序陷阱（PR-3 实证）**：AE2 空缆块会在首个 tick 自毁（`TileCableBus.onReady`）——用例中缆块的 `block` 步与其 `te` 步之间**不得插入 `wait`/`clear` 等跨 tick 步骤**，te 步必须紧随同 tick 执行（completer 对缺中心缆报 CP-STATE-001 兜底）。
 4. **TE 状态补全**（#55「设」第五项）：仅限场景构建阶段、捕获开始之前；必须经模组自身权威同步路径（如 `markBlockForUpdate` 触发 S35 description packet 摄取，或模组自己的 `initialize`/`addPart` 等 API）；**禁止**逐字段从静态数据推算回填。补全器按族注册（接口 `TeCompleter`），默认实现覆盖原版 TE；LP/AE2 族补全器随锚点场景交付。
-5. **补全器的权威放置职责（PR-3 明确）**：当模组的方块需要构造上下文时（LP 通用管块需 `createPipe`/`placePipe`、AE2 部件需 `addPart` 到既有缆），`te` 步的 completer 经**模组自身放置 API** 完成放置与补全；此时 `params` 声明的是**放置输入**（物品 id/朝向/面），不是 NBT 逐字段回填——该区分必须在 completer 类注释写明。**v1.2 注册表**：`vanilla` / `lp-pipe` / `ae2-part`。
+5. **补全器的权威放置职责（PR-3 明确）**：当模组的方块需要构造上下文时（LP 通用管块需 `createPipe`/`placePipe`、AE2 部件需 `addPart` 到既有缆、GT 机器方块需 `ItemMachines.placeBlockAt` 才会建 MetaTileEntity），`te` 步的 completer 经**模组自身放置 API** 完成放置与补全；此时 `params` 声明的是**放置输入**（物品 id/朝向/面），不是 NBT 逐字段回填——该区分必须在 completer 类注释写明。**v1.3 注册表**：`vanilla` / `lp-pipe` / `ae2-part` / `gt-machine`（#117 追加，同一族名同时注册补全器与描述器）。
+   - **补全器必须自带放置后验证**：`complete()` 返回 true 必须等价于「世界上真有一个可 tick 的模组方块实体」。反例（#117 的缺陷本体）：GT 机器用 `world.setBlock` 直铺只会得到一个 `mID == 0` 的空壳，其 `blockId`/`meta`/TE `class` **与真机器完全相同**——即 `world-hash-equals` 对「空壳 vs 可运行机器」是盲的。故 `gt-machine` 放置后读回 `getMetaTileID()`/`getMetaTileEntity()`，不符即 `CP-EXEC-001`；`GtMachineDescriber` 把同两项（外加 `shell` 布尔）暴露给 `read.te` 与 `te-state-equals`，负对照只能靠它判别。
+   - **充电/供电一类「模组状态注入」一律经模组自身 API**：GT 电池的充电状态存在 NBT 键 `GT.ItemCharge` 上，手写它即 §6.4 禁止的逐字段回填；`scene.inventory.write` 的 `charge` 走物品自己的 IC2 `IElectricItemManager`（GT `MetaBaseItem` 自实现之），并显式拒绝 `charge` 与 `nbt` 同时出现。**给机器供电的正确形态是把满充电池写进机器充电槽**（GT 自己的 tick 从槽里取电），而不是直接改机器的 EU 缓冲字段。
 6. 世界快照与回滚范围**包含** TE 补全后的状态。
 7. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。**L0 的 `scene.player.pose`（§4.4）是这条的显式化对应物**——同一件事由调用方按需触发，而不是只在进图时隐式做一次。
 8. **离图阻塞**：`mc.loadWorld(null)` 在 tick 线程内阻塞至集成服停机（原版「保存并退到标题」同路径），客户端会冻结数秒到数十秒——动存档目录前必须保证 region 句柄释放，这是 v1 的取舍。

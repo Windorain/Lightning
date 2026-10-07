@@ -74,6 +74,7 @@ public final class CaseValidator {
         s.add("capture");
         s.add("build");
         s.add("read");
+        s.add("action");
         s.add("export");
         s.add("cameras");
         s.add("criteria");
@@ -91,7 +92,7 @@ public final class CaseValidator {
     public static final String READ_ACTION_PREFIX = "read.";
 
     /**
-     * {@code export} 段的动作名前缀（v1.6，Gitea #102）。
+     * {@code export} 段的动作名前缀（v1.7，Gitea #102）。
      *
      * <p>
      * 只允许 {@code export.*}：导出段的语义是「把当前世界状态写成场景文件/注册表/数据集」，
@@ -100,7 +101,7 @@ public final class CaseValidator {
     public static final String EXPORT_ACTION_PREFIX = "export.";
 
     /**
-     * {@code export} 段<b>额外</b>允许的两个非 {@code export.*} 动作（v1.6，Gitea #102）。
+     * {@code export} 段<b>额外</b>允许的两个非 {@code export.*} 动作（v1.7，Gitea #102）。
      *
      * <h2>为什么必须开这两个口子（不是偷懒）</h2>
      *
@@ -151,6 +152,25 @@ public final class CaseValidator {
                 "record",
                 "status")));
 
+    /**
+     * {@code action} 段（v1.6，issue #103）禁止编排的动作：无人值守收尾原语。
+     *
+     * <p>
+     * {@code core.shutdown} 的语义是「本进程跑完就退出」，把它编进固定程序会让一次
+     * {@code case.run} 在跑到那一步时把整个客户端带走——后续步骤、criteria 段、evidence 段
+     * 全部作废，而调用方（无人值守驱动）拿到的是一份「跑了一半」的 run。收尾必须由驱动在
+     * <b>整跑结束后</b>单独发起（这也是它注册为 {@code confirm} 级可写动作的原因）。
+     *
+     * <p>
+     * 同族的还有「会让进程退出/重启」的动作，一律不许进编排段——判据是「该动作会不会让本作业
+     * 之后的段不再执行」，而不是「它危险不危险」（{@code world.rebuild} 同样危险，但它有返回）。
+     */
+    public static final java.util.Set<String> ACTION_FORBIDDEN = java.util.Collections
+        .unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList("core.shutdown")));
+
+    /** {@code action} 段逐步断言的单步最大条目数（防一次编排写出上万条断言）。 */
+    public static final int MAX_STEP_EXPECT = 64;
+
     /** 解析并校验，返回规范化计划。 */
     public static JsonObject validate(String text) {
         CaseFile file = new CaseParser().parse(text);
@@ -181,12 +201,17 @@ public final class CaseValidator {
         JsonObject world = validateWorld(file, fields);
         JsonArray build = validateBuild(file, fields, warnings);
         JsonArray read = validateRead(file, fields, warnings);
+        JsonArray action = validateAction(file, fields, warnings);
         JsonArray export = validateExport(file, fields, warnings);
         JsonObject capture = validateCapture(file, fields);
         JsonArray cameras = validateCameras(file, fields, warnings);
         JsonArray criteria = validateCriteria(file, fields);
         JsonArray evidence = validateEvidence(file, fields);
         JsonArray variants = validateVariants(file, criteria, fields, check);
+        // read 与 action 两段共享同一个 run 目录（都经 ActionContext.withParams 落产物），
+        // 因此跨段重名同样会让后写者静默覆盖前写者——判据引用哪一份就说不清了。
+        // 段内重名各自已判，这里只补跨段那一半（一个定义点：本方法）。
+        crossSegmentPathConflicts(read, action, fields);
         if (build.size() == 0) {
             warnings.add("build 段为空：世界将只有种子与虚空地形");
         }
@@ -212,6 +237,7 @@ public final class CaseValidator {
         plan.add("segments", segments);
         plan.add("build", build);
         plan.add("read", read);
+        plan.add("action", action);
         plan.add("export", export);
         if (capture != null) {
             plan.add("capture", capture);
@@ -381,7 +407,7 @@ public final class CaseValidator {
     }
 
     /**
-     * {@code export} 段（v1.6，Gitea #102）：导出步骤清单的校验。
+     * {@code export} 段（v1.7，Gitea #102）：导出步骤清单的校验。
      *
      * <p>
      * 校验三件事：动作名是 {@code export.*}，**或者**在
@@ -442,6 +468,64 @@ public final class CaseValidator {
         return out;
     }
 
+    /**
+     * {@code action} 段（v1.6，issue #103）：L2 编排步骤清单的校验。
+     *
+     * <h2>与 {@code read} 段的对称与差异</h2>
+     * 两段的形态逐字段相同（{@code action/params/path/role}），差别只在纪律：
+     * <ul>
+     * <li>{@code read} 段用<b>动作名前缀</b>做静态纪律（只许 {@code read.*}）；</li>
+     * <li>本段<b>不限前缀</b>（它的本职就是调 L0/L1 写动作），改用两条别的静态纪律：
+     * ①<b>禁编排收尾原语</b>（{@link #ACTION_FORBIDDEN}，见那里的说明）；
+     * ②路径不得与运行器自身产物重名、同段内不得重复、不得穿越（与 {@code read} 段同源判定）。</li>
+     * </ul>
+     *
+     * <p>
+     * 「动作是否真的已注册、是不是同步动作」在 core 层查不到（core 没有动作注册表——那是 mc 层
+     * 装配的），因此由 {@code case.run} 的 {@code action} 段执行期判定并报 {@code CP-VALID-001}
+     * （与 {@code read} 段完全同一分工）。<b>同步性必须在执行期判</b>：步进动作跨 tick，
+     * 而本段在单次 {@code advance} 里逐条跑完。
+     */
+    private JsonArray validateAction(CaseFile file, Fields fields, List<String> warnings) {
+        JsonArray out = new JsonArray();
+        Set<String> seen = new LinkedHashSet<String>();
+        List<CaseFile.ActionStep> steps = file.action();
+        for (int i = 0; i < steps.size(); i++) {
+            CaseFile.ActionStep step = steps.get(i);
+            String ctx = "action[" + i + "]";
+            String action = step.action();
+            if (action == null || action.trim()
+                .isEmpty()) {
+                fields.add(ctx + ".action", "必填");
+            } else if (ACTION_FORBIDDEN.contains(action)) {
+                fields.add(ctx + ".action", "收尾原语不得编入固定程序: " + action + "（它会让本作业后续段不再执行；收尾由驱动在整跑结束后单独发起）");
+            }
+            String path = step.path();
+            if (path == null || path.trim()
+                .isEmpty()) {
+                fields.add(ctx + ".path", "必填");
+            } else {
+                checkRelPath(path, ctx + ".path", fields);
+                if (!seen.add(path)) {
+                    fields.add(ctx + ".path", "同一次用例内编排产物路径重复: " + path + "（后一步会覆盖前一步）");
+                }
+                if ("manifest.json".equals(path) || "criteria.json".equals(path)
+                    || "evidence.json".equals(path)
+                    || "observation.json".equals(path)) {
+                    fields.add(ctx + ".path", "不得与运行器自身产物重名: " + path);
+                }
+            }
+            validateStepExpect(step, ctx, fields);
+            JsonObject item = Json.copyObject(step.toJson());
+            item.addProperty("index", i);
+            out.add(item);
+        }
+        if (steps.size() == 0) {
+            warnings.add("action 段为空：本 run 不编排任何动作（L0/L1 一步也不跑）");
+        }
+        return out;
+    }
+
     /** 从 {@code cmd.exec} 的 params 里取出 {@code /sde} 子命令（小写）；取不到返回 null。 */
     private static String sdeSubOf(JsonObject params) {
         String command = Json.optString(params, "command", null);
@@ -457,6 +541,65 @@ public final class CaseValidator {
             return null;
         }
         return parts[1].toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * 逐步断言（{@code action[i].expect}）的形态校验。
+     *
+     * <p>
+     * 形态是 {@code {RFC 6901 指针: 期望值}}——一个对象里可以放多条断言，全部必须命中。
+     * 指针必须 {@code /} 开头（{@code ""} 表示整棵结果对象）；空对象是<b>错误</b>而不是
+     * 「不断言」：写了 {@code expect:{}} 的意图必然是断言，而空断言集永远为真（恒绿假断言）。
+     * 要「不断言」就不写这个字段。
+     */
+    private void validateStepExpect(CaseFile.ActionStep step, String ctx, Fields fields) {
+        if (!step.hasExpect()) {
+            return;
+        }
+        JsonObject expect = step.expect();
+        if (expect == null || Json.size(expect) == 0) {
+            fields.add(ctx + ".expect", "不得为空对象（空断言集恒绿；要不断言就别写 expect）");
+            return;
+        }
+        if (Json.size(expect) > MAX_STEP_EXPECT) {
+            fields.add(ctx + ".expect", "单步断言上限 " + MAX_STEP_EXPECT + " 条，收到 " + Json.size(expect));
+        }
+        for (java.util.Map.Entry<String, com.google.gson.JsonElement> e : Json.entries(expect)) {
+            String pointer = e.getKey();
+            if (pointer == null || (!pointer.isEmpty() && !pointer.startsWith("/"))) {
+                fields.add(ctx + ".expect." + pointer, "指针须以 / 开头或为空串（RFC 6901），收到: " + pointer);
+            }
+        }
+    }
+
+    /**
+     * 跨段产物路径冲突（{@code read} ↔ {@code action}）。
+     *
+     * <p>
+     * 两段都经 {@link ActionContext#withParams} 把产物落<b>同一个 run 目录</b>，因此重名会让
+     * 后写者静默覆盖前写者。段内重名各自已在 {@link #validateRead}/{@link #validateAction} 判过；
+     * 这里只补跨段那一半——判据引用哪一份必须说得清。
+     */
+    private void crossSegmentPathConflicts(JsonArray read, JsonArray action, Fields fields) {
+        java.util.Set<String> readPaths = new java.util.LinkedHashSet<String>();
+        for (int i = 0; i < read.size(); i++) {
+            readPaths.add(
+                Json.optString(
+                    read.get(i)
+                        .getAsJsonObject(),
+                    "path",
+                    ""));
+        }
+        for (int i = 0; i < action.size(); i++) {
+            String path = Json.optString(
+                action.get(i)
+                    .getAsJsonObject(),
+                "path",
+                "");
+            if (!path.isEmpty() && readPaths.contains(path)) {
+                fields.add("action[" + i + "].path", "与 read 段的产物路径重名: " + path + "（两段共享同一 run 目录，后写者会静默覆盖前写者）");
+            }
+        }
     }
 
     private JsonArray validateCriteria(CaseFile file, Fields fields) {

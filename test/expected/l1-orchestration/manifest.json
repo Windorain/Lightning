@@ -1,0 +1,57 @@
+{
+  "schema": "lightning.cp-expected/1",
+  "caseId": "l1-orchestration",
+  "caseSha256": "71b254ae8f83bf688fcc68840ccb8f507d508c03b490d89cb8021de0058f6515",
+  "_comment": "l1-orchestration 的期望产物基准。这一份的基准比 read-surface 更关键：L1（player.*）的产物是**行为证据**（走过去了没、挖掉了没、放下了没），它们的值必须逐轮稳定，否则「玩家行为引发的行为」这条结论不可复算。",
+  "generatedFrom": {
+    "runId": "20261007-082628-l1-orchestration-1",
+    "secondRunId": "20261007-082652-l1-orchestration-2",
+    "world": { "folder": "cp_l1_orchestration", "seed": 20261008, "void": true, "base": [64, 12, 64], "settleTicks": 60 },
+    "contractVersion": "1.6",
+    "mod": "0.3",
+    "minecraft": "1.7.10",
+    "forge": "10.13.4.1614"
+  },
+  "comparison": "test/expected/compare-runs.mjs（唯一实现点；口径见 docs/control-plane/case-file.md §10）",
+  "exemptFields": {
+    "_source": "docs/control-plane/case-file.md §10.2 + §10.6（编排步骤专有）",
+    "settleMs": "步骤间收敛等待毫秒（#103 新增；上界由 PlayerSession 的 500ms 超时保证）",
+    "serverSyncWaitedMs": "服务端同步等待毫秒（L1 动作回读前的收尾等待）",
+    "_note": "这两个是**时间度量**——度量「等了多久」，不是「世界变成什么样」，且必然随负载浮动。其余豁免同 read-surface。"
+  },
+  "artifacts": [
+    { "path": "criteria.json", "mode": "canonical-hash-equal", "projection": "{schema, overall, counts, criteria[].{id,type,verdict}}", "expect": { "overall": "green", "counts/green": 16, "counts/red": 0, "counts/error": 0 } },
+    { "path": "evidence.json", "mode": "canonical-hash-equal", "projection": "{schema, overall, verdict}", "expect": { "overall": "green", "verdict/verdict": "green" } },
+    { "path": "world/scene-manifest.json", "mode": "canonical-hash-equal", "expect": { "seed": 20261008, "void": true, "stepCount": 10 } },
+    { "path": "observation.json", "mode": "structural-equal" },
+    { "path": "manifest.json", "mode": "structural-equal" },
+    { "path": "segments/world.json", "mode": "structural-equal" },
+    { "path": "segments/capture.json", "mode": "structural-equal" },
+    { "path": "segments/build.json", "mode": "structural-equal" },
+    { "path": "segments/read.json", "mode": "structural-equal" },
+    { "path": "segments/action.json", "mode": "structural-equal" },
+    { "path": "segments/cameras.json", "mode": "structural-equal" },
+    { "path": "segments/criteria.json", "mode": "structural-equal" },
+    { "path": "segments/evidence.json", "mode": "structural-equal" },
+    { "path": "read/blocks-placed.json", "mode": "canonical-hash-equal", "expect": { "volume": 108, "blocks/40/id": "minecraft:cobblestone", "blocks/40/blockId": 4 } },
+    { "path": "read/blocks-dug.json", "mode": "canonical-hash-equal", "expect": { "volume": 108, "blocks/40/blockId": 0, "blocks/40/id": "minecraft:air" } },
+    { "path": "read/player.json", "mode": "canonical-hash-equal" },
+    { "path": "action/0-pose.json", "mode": "canonical-hash-equal", "expect": { "layer": "L0", "semantics": "teleport", "after/isFlying": true, "after/yaw": 270.0 } },
+    { "path": "action/1-give.json", "mode": "canonical-hash-equal", "expect": { "layer": "L0", "semantics": "give", "writtenCount": 1, "readBack/0/stack/id": "minecraft:cobblestone", "readBack/0/stack/count": 64 } },
+    { "path": "action/2-move.json", "mode": "canonical-hash-equal", "expect": { "layer": "L1", "semantics": "walk", "mode": "to", "observed": true, "arrivedServer": true, "movedServerBlocks": 2.0, "serverAfter/0": 64.5, "serverAfter/2": 64.5 } },
+    { "path": "action/3-look.json", "mode": "canonical-hash-equal", "expect": { "layer": "L1", "semantics": "turn", "observed": true } },
+    { "path": "action/4-place.json", "mode": "canonical-hash-equal", "expect": { "layer": "L1", "semantics": "place-block", "observed": true, "blockAppeared": true, "heldItemId": "minecraft:cobblestone", "inServerReach": true, "target/0": 65, "target/1": 12, "target/2": 64, "side": 1 } },
+    { "path": "action/5-dig.json", "mode": "canonical-hash-equal", "expect": { "layer": "L1", "semantics": "dig-block", "observed": true, "destroyed": true, "target": "block", "before/id": "minecraft:cobblestone", "after/id": "minecraft:air", "inServerReach": true } }
+  ],
+  "_keyAssertions": {
+    "why": "这几条是本用例的**结论**所在——L1 层的证据（#96 §4.2：L0 的产物不能当 L1 的证据）：",
+    "l1-move": "action/2-move.json 的 observed=true / arrivedServer=true / movedServerBlocks=2.0：位移是**服务端权威位置**真的变了，不是客户端自己以为走了。首轮实机此处 observed=false（服务端拽回）——那次红是真实的，且它照出了编排段必须做**步骤间收敛**（见 case-file.md §3.2 的「逐步断言」）。",
+    "l1-place": "action/4-place.json 的 blockAppeared=true 且 read/blocks-placed.json 的 blocks/40/id=cobblestone：**两条独立证据**（动作自报 + 世界实读）指向同一件事。",
+    "l1-dig": "action/5-dig.json 的 destroyed=true 且 read/blocks-dug.json 的 blocks/40/blockId=0：同上。注意 before 是 cobblestone（上一步 player.place_block 放的），这条链证明了「放置 → 挖掘」两个 L1 动作在同一世界上的因果承接。"
+  },
+  "variants": [
+    { "id": "neg-dig-destroyed-flipped", "expectCriteriaRed": ["l1-dig-destroyed"] },
+    { "id": "neg-move-observed-flipped", "expectCriteriaRed": ["l1-move-observed"] },
+    { "id": "neg-place-target-flipped", "expectCriteriaRed": ["l1-world-place-target-is-cobblestone"] }
+  ]
+}

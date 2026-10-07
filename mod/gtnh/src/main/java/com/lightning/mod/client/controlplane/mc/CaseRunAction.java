@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Set;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.entity.EntityClientPlayerMP;
+import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.world.WorldServer;
 
 import com.google.gson.JsonArray;
@@ -35,6 +37,7 @@ import com.lightning.mod.client.controlplane.core.Tier;
 import com.lightning.mod.client.controlplane.core.TimeSource;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureControl;
 import com.lightning.mod.client.controlplane.mc.capture.ShotExecutor;
+import com.lightning.mod.client.controlplane.mc.player.PlayerSession;
 
 /**
  * {@code case.run}（scene 起，步进）：执行声明式用例。
@@ -72,6 +75,9 @@ public final class CaseRunAction extends SteppingActionBase {
 
     /** 段名：读面（v1.3，issue #98）。 */
     public static final String SEG_READ = "read";
+
+    /** 段名：L2 编排（v1.6，issue #103）。 */
+    public static final String SEG_ACTION = "action";
 
     /** 段名：机位拍摄（PR-2）。 */
     public static final String SEG_CAMERAS = "cameras";
@@ -200,8 +206,16 @@ public final class CaseRunAction extends SteppingActionBase {
                 }
             }
         }
-        for (String s : Arrays
-            .asList(SEG_WORLD, SEG_CAPTURE, SEG_BUILD, SEG_READ, SEG_EXPORT, SEG_CAMERAS, SEG_CRITERIA, SEG_EVIDENCE)) {
+        for (String s : Arrays.asList(
+            SEG_WORLD,
+            SEG_CAPTURE,
+            SEG_BUILD,
+            SEG_READ,
+            SEG_ACTION,
+            SEG_EXPORT,
+            SEG_CAMERAS,
+            SEG_CRITERIA,
+            SEG_EVIDENCE)) {
             if (!segments.contains(s) && !skippedSegments.contains(s)) {
                 skippedSegments.add(s);
             }
@@ -340,6 +354,9 @@ public final class CaseRunAction extends SteppingActionBase {
                 break;
             case SEG_READ:
                 detail = stepRead(ctx);
+                break;
+            case SEG_ACTION:
+                detail = stepAction(ctx);
                 break;
             case SEG_EXPORT:
                 detail = stepExport(ctx);
@@ -839,6 +856,285 @@ public final class CaseRunAction extends SteppingActionBase {
         return dot < 0 ? "read-" + action
             : "read-" + action.substring(dot + 1)
                 .replace('.', '-');
+    }
+
+    /**
+     * {@code action} 段（v1.6，issue #103）：逐条执行用例声明的<b>任意</b> cp 动作。
+     *
+     * <h2>为什么这一段是 L2 的落点</h2>
+     * 需求书 §4.3 把 L2 定义为「L0/L1 的<b>有序编排</b>，可重放、<b>逐步断言</b>」。在本段之前，
+     * 用例能表达的世界写只有 {@code build} 段的四种构建 op（clear/block/te/wait）——
+     * {@code scene.*}（L0）与 {@code player.*}（L1）一步也进不了固定程序，于是「L2 = 有序编排」
+     * 这句话在代码上没有落点（#103 前置盘点的 G3）。本段把两者的接缝封上：
+     *
+     * <ul>
+     * <li><b>有序</b>：按数组序逐条执行，段序 {@code …build→read→action→cameras…}——排在
+     * {@code read} 之后（可读成品场景）、{@code cameras} 之前（编排的世界改动必须发生在拍摄之前，
+     * 否则截图与判据说的不是同一个世界）；</li>
+     * <li><b>可重放</b>：每步的 {@code params} 逐字写死在用例文件里，{@code caseSha256} 落 run
+     * （与 {@code read} 段同一可追溯口径）；</li>
+     * <li><b>逐步断言</b>：{@code expect} 非空时<b>当场</b>按 RFC 6901 指针断言该步的结果；
+     * 没命中就当场 {@code CP-EXEC-001}——不拖到 criteria 段。这条是「逐步」二字的物质保证：
+     * 一步失败时，run 目录里留下的产物正好停在失败那一步，而不是一份「跑完了但判据红」的现场。</li>
+     * </ul>
+     *
+     * <h2>与既有段的关系（不共用状态）</h2>
+     * 动作实例从注册表取（{@code runtime.actions()}）——「用例声明的动作必须是真注册过的动作」
+     * 由查表保证，且动作的<b>同一份实现</b>既服务交互调用也服务用例（需求书 §8.7 无隐藏通道）。
+     * 派生上下文 {@link ActionContext#withParams} 共享 run，因此产物落用例的 run 目录，
+     * criteria 段随后用 {@code json-field} 指针就能引用它（与 {@code read} 段同一机制）。
+     *
+     * <h2>为什么只许同步动作</h2>
+     * 步进动作跨 tick（世界装卸、静置），而本段在<b>单次 advance</b> 里逐条跑完；放行步进动作
+     * 会让「段完成」这件事与「动作完成」脱钩（段已记 ok，动作还在跑）。执行期查
+     * {@code entry.isStepping()} 即拒（{@code CP-VALID-002}），静态层查不到（core 没有注册表）。
+     */
+    private JsonObject stepAction(ActionContext ctx) throws Exception {
+        JsonArray steps = Json.optArray(plan, "action");
+        JsonArray records = new JsonArray();
+        int executed = 0;
+        int asserted = 0;
+        if (steps != null) {
+            for (int i = 0; i < steps.size(); i++) {
+                JsonObject step = steps.get(i)
+                    .getAsJsonObject();
+                String action = Json.optString(step, "action", null);
+                String path = Json.optString(step, "path", null);
+                String role = Json.optString(step, "role", null);
+                JsonObject params = Json.optObject(step, "params");
+                com.lightning.mod.client.controlplane.core.ActionRegistry.Entry entry = runtime == null ? null
+                    : runtime.actions()
+                        .lookup(action);
+                if (entry == null) {
+                    throw new CpException(
+                        ErrorCodes.VALID_UNKNOWN,
+                        "用例 action 段引用了未注册的动作: " + action,
+                        Json.object(
+                            "field",
+                            "action[" + i + "].action",
+                            "action",
+                            action,
+                            "registered",
+                            runtime == null ? null
+                                : runtime.actions()
+                                    .names()));
+                }
+                if (entry.isStepping()) {
+                    throw CpException
+                        .param("编排步骤不许用步进动作", "action[" + i + "].action", "编排动作必须是同步动作（跨 tick 的动作无法在段内推进）: " + action);
+                }
+                JsonObject result;
+                try {
+                    // 派生上下文：换本步骤的参数，run/artifacts/events 仍是用例那一份
+                    // （产物因此落用例 run 目录，判据段才看得到——见 ActionContext#withParams）
+                    result = entry.action()
+                        .execute(ctx.withParams(params));
+                } catch (CpException e) {
+                    throw new CpException(
+                        e.code(),
+                        "编排步骤 action[" + i + "]（" + action + "）失败: " + e.detail(),
+                        e.context(),
+                        e);
+                }
+                if (result == null) {
+                    result = new JsonObject();
+                }
+                ctx.artifacts()
+                    .writeArtifact(
+                        ctx.run(),
+                        path,
+                        Json.toPretty(result)
+                            .getBytes(StandardCharsets.UTF_8),
+                        role == null ? deriveActionRole(action) : role);
+                JsonObject rec = new JsonObject();
+                rec.addProperty("index", i);
+                rec.addProperty("action", action);
+                rec.addProperty("path", path);
+                rec.addProperty("ok", true);
+                rec.add("params", Json.copyObject(params));
+                JsonObject shape = new JsonObject();
+                shape.addProperty("schema", Json.optString(result, "schema", null));
+                shape.addProperty(
+                    "bytes",
+                    ctx.run() == null ? 0L
+                        : ctx.run()
+                            .artifact(path) == null ? 0L
+                                : ctx.run()
+                                    .artifact(path)
+                                    .bytes());
+                shape.addProperty(
+                    "sha256",
+                    ctx.run() == null ? null
+                        : ctx.run()
+                            .artifact(path) == null ? null
+                                : ctx.run()
+                                    .artifact(path)
+                                    .sha256());
+                rec.add("artifact", shape);
+                // 逐步断言：本步的结果当场按指针核对，没命中即当场失败（见方法注释）
+                JsonObject expect = Json.optObject(step, "expect");
+                if (expect != null && Json.size(expect) > 0) {
+                    rec.add("assertions", assertStep(action, i, result, expect));
+                    asserted += Json.size(expect);
+                }
+                records.add(rec);
+                executed++;
+                ctx.emit(
+                    EventStream.LEVEL_INFO,
+                    EventStream.Kinds.CASE_SEGMENT,
+                    "编排步骤完成: " + action + " → " + path,
+                    Json.object("action", action, "path", path, "index", Integer.valueOf(i)));
+                // 步骤间收敛（见 settleBetweenSteps 的说明）：本段在**单次 advance** 里逐条跑完，
+                // 若不收敛，下一步读到的是上一步还没生效的世界。
+                settleBetweenSteps(ctx, action, i, steps.size() - 1, rec);
+            }
+        }
+        JsonObject detail = new JsonObject();
+        detail.addProperty("executed", executed);
+        detail.addProperty("declared", steps == null ? 0 : steps.size());
+        detail.addProperty("asserted", asserted);
+        detail.add("steps", records);
+        return detail;
+    }
+
+    /**
+     * 逐步断言（{@code action[i].expect}）：逐条按 RFC 6901 指针核对，全部命中才算这一步过。
+     *
+     * <p>
+     * 指针语义与 {@code json-field}/{@code te-state-equals} 判据<b>同一份实现</b>
+     * （{@link Json#resolvePointer}）——同一件事只有一个定义点，编排期与判据期不会分叉。
+     * 任一条不命中即 {@code CP-EXEC-001}，{@code context.assertions} 逐条给出
+     * {@code {pointer, expect, actual, ok}}（失败显式：不静默跳过、不空转绿）。
+     */
+    private JsonArray assertStep(String action, int index, JsonObject result, JsonObject expect) {
+        JsonArray out = new JsonArray();
+        JsonArray failed = new JsonArray();
+        for (java.util.Map.Entry<String, JsonElement> e : Json.entries(expect)) {
+            String pointer = e.getKey();
+            JsonElement want = e.getValue();
+            JsonElement actual = Json.resolvePointer(result, pointer);
+            boolean ok = actual != null && actual.equals(want);
+            JsonObject a = new JsonObject();
+            a.addProperty("pointer", pointer);
+            a.add("expect", Json.copy(want));
+            a.add("actual", actual == null ? com.google.gson.JsonNull.INSTANCE : Json.copy(actual));
+            a.addProperty("ok", Boolean.valueOf(ok));
+            if (!ok) {
+                JsonObject f = new JsonObject();
+                f.addProperty("pointer", pointer);
+                f.add("expect", Json.copy(want));
+                f.add("actual", actual == null ? com.google.gson.JsonNull.INSTANCE : Json.copy(actual));
+                failed.add(f);
+            }
+            out.add(a);
+        }
+        if (failed.size() > 0) {
+            throw new CpException(
+                ErrorCodes.EXEC_FAILED,
+                "编排步骤逐步断言未通过（action[" + index + "] " + action + "）：" + failed.size() + "/" + out.size() + " 条不命中",
+                Json.object(
+                    "field",
+                    "action[" + index + "].expect",
+                    "action",
+                    action,
+                    "index",
+                    Integer.valueOf(index),
+                    "assertions",
+                    out,
+                    "failed",
+                    failed));
+        }
+        return out;
+    }
+
+    /**
+     * 编排产物的默认 role：由动作名的<b>首段</b>派生（{@code player.place_block} → {@code player-place_block}）。
+     *
+     * <p>
+     * 与 {@code read} 段的 {@link #deriveRole} 不同（那条固定 {@code read-} 前缀，因为读面是一族）。
+     * 编排段能调任意族，用首段做前缀才有区分度（{@code scene-*} / {@code player-*} / …）。
+     */
+    static String deriveActionRole(String action) {
+        if (action == null) {
+            return "action";
+        }
+        return "action-" + action.replace('.', '-');
+    }
+
+    /**
+     * 步骤间收敛：等集成服把上一步发出的包处理掉，再跑下一步。
+     *
+     * <h2>为什么「逐步」必须包含这一步（#103 实机实测）</h2>
+     * 本段在**单次 {@code advance}** 里逐条跑完（同步动作不跨 tick），而 L1（{@code player.*}）
+     * 的请求是<b>包</b>：客户端发出 C03/C07/C08，服务端在<b>它自己线程的 tick</b> 里处理
+     * （{@code MinecraftServer.updateTimeLightAndEntities → networkTick}）。
+     * 因此「上一步发了包」与「下一步能读到它的后果」之间隔着服务端的一拍。
+     *
+     * <p>
+     * 实测形态（#103 首轮实机）：{@code l1-orchestration} 里 {@code scene.player.pose} 之后紧跟
+     * {@code player.move}，move 的 {@code serverBefore=[62.5,12.0,64.5]} 还是 pose <b>之前</b>的位置，
+     * 于是 move 从旧位置起算、被服务端拽回（{@code movedServerBlocks=0, observed=false}）。
+     * 而 move 内部自己的 {@code awaitServerSync()} 只保证「move 自己发的那一批」被处理——
+     * 它管不到「上一步的包还没被处理」。
+     *
+     * <p>
+     * 因此收敛点必须在本段（编排层），而不是在某个动作里：动作只知道自己的请求，
+     * 只有编排层知道「这一步之后还有下一步」。
+     *
+     * <h2>收敛多久</h2>
+     * 用 L1 自己的口径（{@link PlayerSession#DEFAULT_SERVER_SYNC_TICKS} = 2 个服务端 tick，
+     * 上限 {@link PlayerSession#DEFAULT_SERVER_SYNC_TIMEOUT_MS} = 500ms）——不另立一套等待语义。
+     * 最后一步不等（没有下一步要收敛）。等待时长写进该步的段记录（{@code settleMs}），
+     * 让「等了多久」可见而不是隐式。
+     *
+     * <p>
+     * <b>哪些步骤后要等（#103 第二轮实机修正）</b>：<b>除 {@code read.*} 之外全等</b>。
+     * 首版只对 {@code player.*} 等，结果 {@code scene.player.pose} → {@code player.move}
+     * 这个组合照样翻车：pose 走 {@code setPositionAndUpdate}（S08）把<b>服务端</b>玩家挪到新位置，
+     * 而<b>客户端</b>要收到 S08 才会跟过去；不等待时 move 拿着<b>旧</b>客户端坐标发 C03，
+     * 服务端 {@code processPlayer} 判定不符并把玩家拽回（实测 {@code movedServerBlocks=0}，
+     * 客户端反被拉走 2 格）。
+     *
+     * <p>
+     * 因此判定按「这一步有没有写」而不是「是不是 L1」：{@code scene.*} 同样会触发原版同步出口
+     * （S08/S2B/S1D/S2F…），而 {@code read.*} 是纯读（无包、无世界写），对它等待纯属白花时间——
+     * 那正是「便宜试错」要避免的。
+     *
+     * <h2>为什么是「往返」而不是「等服务端 tick」（第三轮实机修正）</h2>
+     * 只等服务端 tick 不够：{@code scene.player.pose} 的 S08 是<b>服务端→客户端</b>方向，
+     * 而「收到并应用入站包」发生在<b>客户端</b>的 tick 里
+     * （{@code Minecraft.runTick → NetHandlerPlayClient.processReceivedPackets}）。
+     * 本段跑在客户端 tick 线程上并阻塞等待——<b>客户端自己那一拍因此永远不来</b>，
+     * S08 就躺在入站队列里（实测：settle 98ms 后客户端仍在旧位置）。
+     * 故必须显式把入站队列推出去（{@link PlayerSession#completeClientRequest}：
+     * flush 入站 + 等服务端 tick），这与 L1 动作回读前的收尾是<b>同一份实现</b>，不另立一套。
+     */
+    private void settleBetweenSteps(ActionContext ctx, String action, int index, int lastIndex, JsonObject rec) {
+        if (index >= lastIndex) {
+            return;
+        }
+        if (action == null || action.startsWith("read.")) {
+            return;
+        }
+        long waited;
+        try {
+            EntityClientPlayerMP client = mc == null ? null : mc.thePlayer;
+            NetHandlerPlayClient handler = client == null ? null : client.sendQueue;
+            if (handler != null) {
+                // 往返：先把入站包推出去（应用 S08/S2B/…），再等集成服把出站包处理掉
+                waited = PlayerSession.completeClientRequest(handler);
+            } else {
+                waited = PlayerSession.awaitServerSync();
+            }
+        } catch (Throwable t) {
+            // 收敛失败不该让整跑失败：如实记 -1，由后续步骤/判据去暴露真实后果
+            CpLog.warn("编排步骤收敛等待失败（action[%d] %s）: %s", Integer.valueOf(index), action, String.valueOf(t));
+            waited = -1L;
+        }
+        rec.addProperty("settleMs", Long.valueOf(waited));
+        if (waited > 0) {
+            CpLog.info("编排步骤 action[%d]（%s）后等待服务端/客户端收敛 %d ms", Integer.valueOf(index), action, Long.valueOf(waited));
+        }
     }
 
     /** {@code criteria} 段：core 判据引擎 + 本层注入的运行期哈希来源。 */

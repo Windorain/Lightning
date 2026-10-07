@@ -183,10 +183,10 @@ public class CaseCaptureSegmentsTest {
      *
      * <p>
      * 契约口径：capture 在 build 之前（会话包住 build 之后的区间）；v1.3 起 read 在 build 之后；
-     * **v1.6（Gitea #102）起 export 在 read 之后、cameras 之前**——顺序的理由不是风格：
-     * C4 要求「导出件与实拍、观测记录同一 run」，且导出读的是<b>已构建完成</b>的世界状态，
-     * 而 cameras 段会改动渲染状态（投影/光照覆写）。先导出再拍摄，导出件反映的是「本 run 构建出的
-     * 那个世界」，而不是「拍摄过程干预后的世界」。
+     * v1.6 起 action 在 read 之后（#103）；**v1.7（Gitea #102）起 export 在 action 之后、cameras 之前**——
+     * 顺序的理由不是风格：C4 要求「导出件与实拍、观测记录同一 run」，且导出读的是<b>已构建完成</b>的
+     * 世界状态，而 cameras 段会改动渲染状态（投影/光照覆写）。先导出再拍摄，导出件反映的是
+     * 「本 run 构建出的那个世界」，而不是「拍摄过程干预后的世界」。
      */
     @Test
     public void segmentOrderIsContractOrder() {
@@ -210,21 +210,24 @@ public class CaseCaptureSegmentsTest {
             segments.get(3)
                 .getAsString());
         assertEquals(
-            "v1.6（#102）：export 在 read 之后、cameras 之前",
-            "export",
+            "action",
             segments.get(4)
                 .getAsString());
         assertEquals(
-            "cameras",
+            "export",
             segments.get(5)
                 .getAsString());
         assertEquals(
-            "criteria",
+            "cameras",
             segments.get(6)
                 .getAsString());
         assertEquals(
-            "evidence",
+            "criteria",
             segments.get(7)
+                .getAsString());
+        assertEquals(
+            "evidence",
+            segments.get(8)
                 .getAsString());
         // 规范化段清单与执行期段清单必须同源
         for (int i = 0; i < segments.size(); i++) {
