@@ -1017,6 +1017,10 @@ node scripts/control-plane/export-d2-twins.mjs --out <证据目录>
 | `run-input-acceptance-selftest.ps1` | **离线自检**：合成夹具逐条喂判定模块（好数据绿 / 坏数据精确红） | 不起客户端、不发 HTTP |
 | `cases/input-multitick.json` | G1 的跨帧输入固定程序（`action` 段含顶层 `holdTicks` 的输入步） | 当前**预期被拒**（G1 未实现）⇒ 判据记 `blocked-by-G1` |
 
+> **`extra` 段（E1/E2/E3）不新增入库用例**：E2 的 300 步填充用例由驱动**现场生成在归档目录**
+> （`<ArchiveRoot>\input-<ts>\cases\e2-queue-fill.json`），避免仓里出现巨型用例；它随归档一并留证
+> （见 §15.8）。
+
 一切动作调用**只**经 `caller.mjs`（退出码 0/1/2/3；消费 `--json-out` 文件，不解析 stdout）。
 端口**不猜**：先读 `<mcDataDir>\controlplane\server.json` 的 `port`；`-Port` 只用于点火前的占用检查。
 
@@ -1035,6 +1039,12 @@ pwsh -File scripts/control-plane/run-input-acceptance.ps1 -Stage g1    -Port 233
 
 # ④ 离线自检（不需要客户端）
 pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1
+
+# ⑤ extra 段（E1/E2/E3；先跑 pre，再复用 world 段的世界重建流程）
+pwsh -File scripts/control-plane/run-input-acceptance.ps1 -Stage extra -Port 23314
+
+# ⑥ 单条重跑（-Only 只对 -Stage extra 有效；pre 与世界准备仍会先跑）
+pwsh -File scripts/control-plane/run-input-acceptance.ps1 -Stage extra -Only E2 -Port 23314
 ```
 
 参数（与既有两个驱动的既有命名惯例一致）：
@@ -1046,7 +1056,12 @@ pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1
 | `-KeepClient` | 关 | 跑完不停客户端（保留现场） |
 | `-Port` | 23314 | **仅**前置占用检查；实调一律以 `server.json` 为准 |
 | `-ClientReadyTimeoutMin` | 8 | 等 `server.json` / `tokens.json` 的上限（分钟） |
-| `-Stage` | `all` | `all`/`pre`/`menu`/`world`/`g1`；除 `pre` 外每个 stage 都**先跑 pre** |
+| `-Stage` | `all` | `all`/`pre`/`menu`/`world`/`g1`/`extra`；除 `pre` 外每个 stage 都**先跑 pre**。`all` **不含** `extra`（保持既有行为逐条不变） |
+| `-Only` | 空 | `E1`/`E2`/`E3` 子集；**只对 `-Stage extra` 有效**（别的 stage 传它 ⇒ 退出码 4）。空 = 三条全跑 |
+| `-E1HoldTicks` | 60 | E1 两个测量窗口各持续多少 tick（对照一段、潜行一段） |
+| `-E1SettleTicks` | 30 | E1 相位间静置 tick 数（虚空 + 创造飞行，松开键后仍会滑行；不静置会把上一段余速算进下一段） |
+| `-E2FillSteps` | 300 | E2 的填充步数（必须 ≫ 键盘队列容量 256） |
+| `-E2SettleTicks` | 40 | E2 投递前静置 tick 数（让 E1 留下的飞行余速衰减，否则「零写入」会被余速撞红） |
 | `-ArchiveRoot` | `D:\Workspace\Lightning\temp\control-plane` | 归档根；本次落 `<ArchiveRoot>\input-<ts>\` |
 | `-ActionTimeoutMs` | 600000 | 单次调用（含 `case.run` / `world.rebuild` / `shot.multi`）的 sync 超时 |
 | `-ClientTimeoutMin` | 30 | 进入客户端之后的整段流水线墙钟预算（分钟）；W4 的等待轮与 G1 都受它约束 |
@@ -1112,9 +1127,20 @@ pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1
 |---|---|---|
 | `G1` | `case.validate` + `case.run{"segments":["world","action"]}` + 步骤产物 + 跑后 `input.state.held.count` | exit 0；`action` 段里确有输入步产物且能读出**跨帧推进证据**（`heldTicks>=2` 或不同步骤的 `deliveredAtTick` 有别）；跑完 `held.count==0`（失败也不留按着的键）。**未实现时**（`case.validate` 报 `action[i].holdTicks 未知字段` 一类）⇒ `blocked-by-G1`（**不是 pass，也不是实现缺陷**）；因别的理由失败 ⇒ `fail` |
 
+**stage `extra`（`-Stage extra`；pre → 托管世界重建 → E1 → E2 → E3，口径详见 §15.8）**
+
+| id | 读什么 | 通过条件（红了说明什么） |
+|---|---|---|
+| `W1` | `core.status` | **前置复用**（判据函数与 world 段同一份，不是新增判据）：`world.loaded==true` 且 `world.managed==true` |
+| `E1` | 两个相位的 `read.player` 位置 + 窗口 tick 增量 | `潜行/对照 < 0.6`（每 tick 水平位移），**且** 对照 ≥ 0.02 blocks/tick（对照不成立 ⇒ 红：只按前进也没动起来时不许判绿）。detail 带两侧位移、tick、每 tick 值与比值 |
+| `E1.readback` | 保持期间的 `input.state.held.items[]` | 两个键都在持键表里且条目带 `gameBindingPressed` 字段；回读值 true/false/null 一律**如实**进 detail（null 不判红，字段整个缺席才红） |
+| `E2` | `case.validate` + 单作业 `case.run`（300 步）+ 步骤产物的 `queueDepthAfter`/`deliveredAtTick` + 投递前后 `read.player`/`core.status` | 三态：命中 `CP-STATE-001` **且**排除易变字段后逐路径零差异 ⇒ `pass`；实测深度已达容量却仍投递成功 / 填充用例因别的错误码失败 / 填充键位被占用 ⇒ `fail`；**单作业内构造不出触发条件** ⇒ `blocked`（附最大深度、单 tick 投递率、机制出处），**绝不算 pass** |
+| `E3` | `shot.multi{gui:"screen"}` 的 `runId` + `GET /cp/v1/artifacts/{runId}` 清单 + 逐份下载复算 | 清单里能发现 `shots/<name>.png` 与 `shots/<name>.meta.json`，且**逐份**字节 sha256/bytes 与清单声明一致 ⇒ `pass`；发现不到、清单未声明 sha256（**未覆盖**）、下载失败、有产物没复核 ⇒ `fail` |
+
 **驱动自加的编排守卫**（`O.*`，不是 Lead 的判据，只为把「编排失败」与「判据红」分开）：
 `O.ping`（`core.ping` 可连）、`O.actions`（`GET /actions` 可读）、`O.rebuild`（`world.rebuild` 成功）、
 `O.gui-open`（`player.gui inventory` 成功）、`O.g1-validate`（`case.validate` 通过）、
+`O.e3-gui-open`（extra 段为 GUI 实拍开界面，成功与否不作判据）、
 `O.orchestration`（编排异常）。
 
 ### 15.4 退出码与「非全绿」的口径
@@ -1144,6 +1170,11 @@ input-<ts>/
   stale/                      点火前移开的上轮 server.json / tokens.json
   assertions.json             机读判定表（含 status/ok/detail、counts、probeNotes）
   summary.md                  人读：红绿表 + 每条 detail 里的可复核量 + 已知留白
+  cases/e2-queue-fill.json    **仅 extra 段**：现场生成的 E2 填充用例（300 步；不入库，随归档留证）
+  e3/e3-manifest.json         **仅 extra 段**：GET /cp/v1/artifacts/{runId} 的清单原文
+  e3/e3-sha256-report.json|md **仅 extra 段**：逐份「清单声明 vs 下载复算」比对表
+  e3/downloads/*              **仅 extra 段**：逐份下载下来的产物字节（已改名展平）
+  e3/e3-manifest.error.txt    **仅 extra 段**：清单拉取失败时的原始错误（失败时才有）
 ```
 
 > `temp/` 随时会被删除。**要留的证据（红绿表、作业 JSON、客户端日志）必须当场作为 ISSUE/PR 附件上 Gitea**
@@ -1155,7 +1186,7 @@ input-<ts>/
 |---|---|---|---|
 | 1 | 两个（三个）`.ps1` 语法 | `pwsh -Command "[System.Management.Automation.Language.Parser]::ParseFile(<脚本>, [ref]$null, [ref]$e)"` | 解析错误 0（逐文件） |
 | 2 | 调用方未受影响 | `node --check scripts/control-plane/caller.mjs` | 退出 0（本单未改 `caller.mjs`） |
-| 3 | 判据函数的合成夹具自检 | `pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1` | **97 条自检 0 红**：好数据绿、坏数据精确红（重投 / M7-M9 三类参数负对照 / M10 假绿 / W4 两种失败形态 / `means` 泄漏 / 能力面空目录 / 命中集占位 / G1 的 blocked 分支） |
+| 3 | 判据函数的合成夹具自检 | `pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1` | **131 条自检 0 红**：好数据绿、坏数据精确红（重投 / M7-M9 三类参数负对照 / M10 假绿 / W4 两种失败形态 / `means` 泄漏 / 能力面空目录 / 命中集占位 / G1 的 blocked 分支 / **E1 潜行无效负对照 / E2 的 blocked·fail·pass 三分支与填充键位门 / E3 的哈希不符负对照与「未声明 sha256」**） |
 | 4 | G1 用例的真实校验器校验 | 见下 | 当前**预期红**：`CP-VALID-002`「`action[0].holdTicks` 未知字段」——这正是 `blocked-by-G1` 的离线证据 |
 
 第 4 项的做法（用例校验器是 Java，PowerShell 侧没有等价实现）：加一个**一次性**测试
@@ -1192,3 +1223,143 @@ pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1   # 会把该
    「判定逻辑在好/坏数据上红绿正确」与「编排能起停、能归档、能给退出码」。
 6. **`-Stage menu` 的前提**：需要客户端停在主菜单。若 `-SkipClientStart` 复用的客户端已在世界里，
    `M0` 会红并且 M 段结论不可比（此时应改用 `-Stage world`）。
+
+### 15.8 `extra` 段：E1 / E2 / E3（#160 的三条残余判据）
+
+> 三条判据的**判定函数**都在 `input-acceptance-checks.ps1`（纯函数、无 IO），编排在
+> `run-input-acceptance.ps1` 的 `extra` 段。**编排里不内联任何判定**。
+> `-Stage extra` 的语义：`pre` → **托管世界重建**（与 `world` 段**同一个函数** `Invoke-ManagedWorldRebuild`，
+> 同一 folder/seed/void/base/settleTicks、同一 `O.rebuild` 守卫，不另起一套）→ `E1` → `E2` → `E3`。
+> `-Only E1|E2|E3` 可单条重跑（`pre` 与世界准备仍会先跑；别的 stage 传 `-Only` ⇒ 退出码 4）。
+> **`-Stage all` 不含 `extra`**：`all` 的既有行为（pre→menu→world→g1）逐条不变，需要 extra 就显式给。
+
+#### 15.8.1 E1：组合键（潜行修饰）被世界链按序消费
+
+程序（同一段流水线，非同一个 HTTP 作业——`input.key down` 立即完成且**刻意保留持键**，
+位置采样必须用别的作业，这是动作面的既定形状）：
+
+```
+input.release（卫生）→ 静置 E1SettleTicks
+对照相位：input.key{key.forward,down} → core.status(tick0) → read.player(A) → 等 E1HoldTicks →
+          read.player(B) → core.status(tick1) → input.release
+静置 E1SettleTicks（消掉对照相位的飞行余速）
+潜行相位：input.key{key.sneak,down} → input.key{key.forward,down} → core.status(tick0) →
+          read.player(A) → input.state（取 gameBindingPressed 回读）→ 等 E1HoldTicks →
+          read.player(B) → core.status(tick1) → input.state → 两键 up（先 sneak 后 forward）→ input.release
+```
+
+**通过口径**（`E1`）：`每 tick 水平位移(潜行) / 每 tick 水平位移(对照) < 0.6`，
+且 `每 tick 位移(对照) >= 0.02` blocks/tick。前者是「显著低于」，后者是**对照成立性门**
+（只按前进也没动起来时，位移比没有意义 ⇒ 红，不许因为「两边都没动」判绿）。
+
+- 下限取 0.02 的理由：MC 步行约 0.21 blocks/tick、创造飞行更高，0.02（= 1.2 blocks / 60 tick 窗口）
+  只用来把「键根本没生效（位移 ≈ 0）」排除掉，远低于任何真实移动速率 ⇒ 不会制造假红。
+
+- 阈值 0.6 的来历：MC 的潜行把移动**输入**乘 0.3（`MovementInputFromOptions.updatePlayerMoveState`），
+  0.6 是「显著低于」的判界，**不是**把 0.3 放宽到 0.6；两侧实测值都写进 detail。
+- tick 口径：位置窗口取 `[读 A 前的 core.status.world.totalTime, 读 B 后的 core.status.world.totalTime]`，
+  **窗口含两次读数各自的 tick 开销**（各约 1 tick），两侧同形 ⇒ 比值不受影响；等待轮内的实测增量
+  另记进 summary 的说明行（`Wait-ClientTicks` 的 `tickDelta`）。
+- **负对照**：只注入 `key.forward`（不加 `key.sneak`）就是上面那个对照相位。工具本身这条恒真；
+  真正被证明的是「判据函数在『潜行无效』的构造数据上会红」——由 §15.6 的离线自检完成
+  （比值 0.99 / 恰在 0.60 判界上 / 对照不动，三条都断言 `fail`）。
+- **诚实纪律**：实机若发现潜行**确实没有**让位移下降，`E1` 就是**红**；detail 里带两侧位移、tick 数、
+  每 tick 值与比值，供 Lead 定性。**禁止**把期望改成「无差别也算过」。
+
+**`E1.readback`**：保持期间的 `input.state` 里，`key.sneak` 与 `key.forward` 都必须出现在
+`held.items[]`，且每条都带 `gameBindingPressed` 字段（字段名实读：`InputStateProviderImpl.java:601`；
+动作结果面的同名回读在 `InputRuntimeImpl.java:1160`）。回读值 `true`/`false`/`null` 一律**如实**写进
+detail —— `null` 是「探针读不到」的如实结果，不判红；**字段整个缺席**才红（§3.6 第 4 条要求回读）。
+
+#### 15.8.2 E2：队列满 ⇒ `CP-STATE-001` 且零写入
+
+**机制调查结论**（逐条带出处，静态读源码 + lwjgl3ify 源码）：
+
+| 问题 | 结论 | 出处 |
+|---|---|---|
+| 是哪一条队列 | LWJGL（lwjgl3ify）的**键盘事件队列** `org.lwjglx.input.Keyboard.eventQueue`；注入入口是 §1.2 白名单里的 `Keyboard.addRawKeyEvent` | `Lwjgl3ifyInjector.java:298-315`；`D:\github\gtnh\lwjgl3ify\src\main\java\org\lwjglx\input\Keyboard.java:195/240` |
+| 容量从哪来 | `new ArrayBlockingQueue<>(256)`；设施侧常量 `KEYBOARD_QUEUE_CAPACITY = 256`（运行期**读不到**容量：`eventQueue` 不是定长数组 ⇒ 探针回退契约常量并标注来源） | `Keyboard.java:195`；`InputCapabilities.java:59`；`InputRuntimeProbe.java:271-285`；`InputStateProviderImpl.java:443-452` |
+| 深度基线 | 静态块往队列里塞了 **1 条 seed 事件**，且 `Keyboard.next()` 只在 `size() > 1` 时移除 ⇒ 深度基线恒为 1 | `Keyboard.java:228`、`Keyboard.java:318-320`；`InputCapabilities.java:68` |
+| 满时行为 | **两段式**：① 投递前**整请求原子拒绝**——`depthBefore + 本请求键盘事件数 > capacity` ⇒ 该请求所有事件逐条记 `Rejected(i, CP-STATE-001)`，一条都不投（`InputRuntimeImpl.java:336-362`）；② 若预检过了但中途注入失败 ⇒ 整条请求失败、已投递部分如实给出 `delivered`，不假装成功（`:378-392`） | `InputRuntimeImpl.java:348-362` |
+| 底层队列满会怎样 | **静默丢弃**：`addRawKeyEvent` 把 `eventQueue.add(...)` 包在 `catch (IllegalStateException ignored) {}` 里 ⇒ 注入面**不会**抛错给设施，这正是设施必须先探深度的原因 | `Keyboard.java:254-256` |
+| 已入队事件会不会被消费 | 会。MC 每 tick 的 `runTickKeyboard` 用 `Keyboard.next()` 轮询排空（`next` 只在 `size()>1` 时 remove，保留 seed 哨兵）；设施自己的记账也按「本 tick 的 runTick 已消费上一批」归零 | `Keyboard.java:314-346`；`InputRuntimeImpl.java:258-269` |
+| 单作业最多能投几条 | `JobQueue` 严格互斥、每 tick 只 `drainOne()` 一次；`input.key`/`input.mouse` 每次只投**一条**；`case.run` 的编排段虽然能在单作业内跑输入步，但驱动**每个输入步至少占一个 tick**（`advanceInternal` 在输入步完成后就 `return null` 让出本 tick） | `JobQueue.java:79-104/115-192`；`ControlPlaneTickHandler.java:80-82`；`InputKeyAction.java:257/266`；`CaseRunAction.java:1158-1191` |
+| 有没有批量入口 | 只有 `input.text`（把整串字符作为事件列表交给 `deliver`），但它在投递**之前**就被能力门拦成 `CP-STATE-001`（路由未就绪）⇒ 那条 `CP-STATE-001` 不是「队列满」 | `InputTextAction.java:75-92/121`；`InputCapabilities.TEXT_SUPPORTED` |
+
+**探针构造**：驱动先读 `input.state.keyCatalog`（运行期键位注册表实读，`InputRuntimeProbe.java:434-455`、
+`McInputHost.java:165-187`），在 `1..254` 里取**第一个不在其取值集里**的键码作为填充键
+（= 没有任何 `KeyBinding` 绑到它 ⇒ 事件即使被消费也不产生世界交互），然后**现场生成**
+`cases/e2-queue-fill.json`：`E2FillSteps`（默认 300）步 `input.key{key:<未绑定码>, action:"up"}`。
+用 `action:"up"` 是因为「抬起一个没按下的键」无害（`wasHeld:false`）且仍是写进队列的一条事件；
+**不用** `key.forward` 这类会动玩家的键，也**不用**会开界面/丢物品/改选择槽的键。
+
+**三态判定**（`E2`，全在纯函数里）：
+
+1. 命中 `CP-STATE-001` ⇒ 再用**排除易变字段后的逐路径比对**验零写入；零差异 ⇒ `pass`，
+   有差异（或观测面不完整）⇒ `fail`。
+2. 没命中，但实测 `queueDepthAfter` 最大值已达容量 ⇒ `fail`（容量预检没生效，实现缺陷）。
+3. 没命中，且填充用例因**别的**错误码失败 ⇒ `fail`（无法归因到队列满）。
+4. 没命中，深度远低于容量、单 tick 投递率被 tick 限住 ⇒ **`blocked`**（附最大深度、单 tick 投递次数、
+   `deliveredAtTick` 去重数、四条机制出处）。**这不是 pass**：`CP-STATE-001`「队列满」路径**未被覆盖**。
+
+> **按上面的机制，第 4 条就是当前实机形态**（公开动作面上单作业最多每 tick 投一条，而 MC 每 tick 排空）
+> —— 但**结论以实机实测为准**：驱动照跑 300 步，把实测最大深度写进 detail。若实机深度真的爬到 256，
+> 就会走第 1 条（甚至第 2 条），判据随之变绿或变红，不需要改代码。
+
+**「零写入」的比对口径**（**不是**整体 JSON 字符串相等）：取投递前的 `read.player` + `core.status`
+与投递后的同一对读面，做**逐路径叶子比对**，并**显式排除**下列易变字段（排除清单与理由写进 `E2` 的 detail）：
+
+| 排除的字段名 | 理由 |
+|---|---|
+| `totalTime` `worldTime` `gameTime` `dayTime` `tick` `time` | tick 计数/世界时刻：每 tick 自增，逐字比对必然不等 |
+| `serverTime` `timestamp` `createdAt` `ts` `at` `uptimeMs` `elapsedMs` `nanoTime` | 墙钟/单调钟：前后两次读必然不同 |
+| `memory` `heapUsed` `heapMax` `heapCommitted` `nonHeapUsed` `usedBytes` | JVM 内存读数：GC 自行变化，与「有没有写世界」无关 |
+| `lastSeq` `buffered` `count` `counts` `recent` `recentRuns` `pending` `busy` `currentJobId` `currentAction` `probeActive` `probe` | 控制面自身记账：前后两次读面调用本身就在改变它们（不是世界写入） |
+| `ping` `duration` | 与写入无关的易变读数：网络往返延迟 / 状态效果剩余时长每 tick 自减 |
+
+被排除的**具体路径**逐条进 detail（例如 `/status/jobs/count（控制面自身记账…）`），可逐条复核；
+`read.player` 的位置/生命/飞行态、`core.status.world.folder/loaded/managed` 等**不在排除清单里**，
+任何变化都会被逐路径抓到。
+
+#### 15.8.3 E3：产物可从既有清单发现并复核哈希
+
+程序：`player.gui{inventory}`（让 `gui:screen` 有界面可画，仅编排守卫 `O.e3-gui-open`，不作判据）→
+`shot.multi{cameras:[e3-gui], gui:"screen"}` → 取结果里的 `runId` → `player.gui{close}`（卫生）→
+`GET /cp/v1/artifacts/{runId}`（端点与权限级实读：`CoreEndpoints.java:166` 注册、tier=`OBSERVE`；
+条目形状 `{path,bytes,sha256,role}` 见 `ArtifactStore.java:74-79`）→
+对清单里 `shots/<name>.png` 与 `shots/<name>.meta.json`（**不含** `shots/<name>.tiles/`）**逐份**
+`GET /cp/v1/artifacts/{runId}/<path>` 下载字节、复算 sha256 与 bytes，与清单声明比对。
+
+- **只读 HTTP 直连的理由**：`caller.mjs` 是**动作**调用方（按自描述构造 `POST /actions/{name}`），
+  而产物清单/下载是 `GET` 只读端点、没有自描述可依；发现顺序与 `caller.mjs` 同源（先读 `server.json`
+  的 `port`、再读 `tokens.json` 的 `observe` token，**不猜端口**）。
+- `pass`：清单里能发现 PNG 与 meta，且**逐份**哈希与字节数全部一致（脚本另写
+  `e3/e3-sha256-report.md` 的比对表 + `e3/e3-sha256-report.json` 的机读记录）。
+- `fail`：发现不到 PNG / 发现不到 meta / **清单未声明 `sha256`（如实记「未覆盖」）** / 某份下载失败 /
+  有产物没被复核 / 哈希或字节数不符。
+- 证据位置：`<ArchiveRoot>\input-<ts>\e3\`（清单原文、错误文本、比对表、下载下来的原始字节）。
+
+#### 15.8.4 本节的离线证据与**已知缺口**
+
+离线自检（§15.6 第 3 项）覆盖：E1 的 6 条（含「潜行无效」「恰在判界」「对照不成立」三条负对照）、
+`E1.readback` 的 5 条、E2 的 13 条（三态 + 填充键位门 5 条 + 比对口径 2 条）、E3 的 10 条
+（含哈希不符 / 字节不符 / 未声明 sha256 / 未下载全 / tiles 不干扰），共 131 条 0 红（97 → 131）。
+
+**如实登记的缺口**：
+
+1. **E1 的「潜行是否真的让位移下降」只能实机跑出来**。静态面能证明的只有：`input.key` 的事件序进的是
+   同一条队列、`KeyBinding` 状态由事件驱动（`world` 段的 `W3` 早已证明 `key.forward` 能推动玩家）。
+   潜行系数 0.3 出自 MC 的 `MovementInputFromOptions.updatePlayerMoveState`，但**本工作区里没有
+   Minecraft 1.7.10 的反编译源码**（`D:\github\gtnh` 的 29 个仓里没有 `Minecraft`/`Forge`），
+   因此这条没有 `file:line` 可引 —— 它是**知识**而不是本仓可核事实，已如实标注。
+2. **E2 的「队列满」路径按机制不可达 ⇒ 记 `blocked`**（第 4 条分支）。这是**结论**，不是 pass，
+   也不是实现缺陷：`CP-STATE-001` 的容量预检代码在位（`InputRuntimeImpl.java:348-362`），
+   但公开动作面上没有能在单 tick 内投满 256 条的入口。
+3. **E2 的填充用例未经 `CaseValidator` 离线校验**：`case.validate` 是控制面动作（要客户端）。
+   驱动会在实机先跑 `case.validate`，未通过就走 `blocked` 分支（构造层结论）；
+   离线侧只证明了生成形状（300 步、path 唯一、每步 1 条 `expect`、文件 73 KB < `CaseParser.MAX_FILE_BYTES`
+   1 MiB、id 22 字符 < `MAX_ID_LENGTH` 64）。
+4. **E3 的清单字段依赖实机形状**：离线已用替身端点验证「清单发现 → 逐份下载 → 复算 → 比对」全链路
+   （含 {ok,data} 信封）；但 `shot.multi` 实机产出的 `shots/` 命名与 `sha256` 字段是否齐全，只能实机确认。
+   **清单若不含 `sha256`，E3 如实记「未覆盖」并红**，不改口径。
+
