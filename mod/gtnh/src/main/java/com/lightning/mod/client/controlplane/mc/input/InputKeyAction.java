@@ -51,9 +51,9 @@ public final class InputKeyAction extends SteppingActionBase {
      * 自描述。
      *
      * <p>
-     * {@code since} **故意不写**：契约 §1.4 冻结「本族动作的 since 只能写『实现合并时前进（候选 1.8）』」，
-     * 在 {@code contractVersion} 同步前进之前写入具体版本号的动作不许合并。T3 注册本动作时必须
-     * 显式 {@code .since("1.8")} 并与 {@code contractVersion}/动作计数同 PR 前进。
+     * {@code since} = {@code 1.8}：契约 §1.4 要求「写入具体版本号必须与 {@code contractVersion} 前进
+     * <b>同 PR</b>」；本批（#165）同时改了 {@code Contract.VERSION} 与两处动作计数断言，故此处写实。
+     * {@code means:"input"} 是手段归因（本动作确实经游戏输入队列投递，而非语义 API 直调）。
      */
     public static ActionDescriptor descriptor() {
         return ActionDescriptor.builder(NAME, Tier.SCENE)
@@ -76,6 +76,8 @@ public final class InputKeyAction extends SteppingActionBase {
             .example("{\"confirm\":true,\"key\":\"key.forward\",\"action\":\"down\"}")
             .example("{\"confirm\":true,\"key\":\"key.forward\",\"action\":\"tap\",\"holdTicks\":20}")
             .example("{\"confirm\":true,\"key\":17,\"action\":\"up\"}")
+            .since("1.8")
+            .means(InputCapabilities.MEANS)
             .build();
     }
 

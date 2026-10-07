@@ -31,6 +31,17 @@ public final class Contract {
      * <li>捕获通道自证诊断迁移（issue #114：{@code read.capture} 读面（§4.1）+ {@code capture.diag}
      * 布防/drain-dump（§4.11）；#104 删除老探针 {@code CaptureChannelProbeAutomation} 的前置——V4 职责真空）。</li>
      * </ul>
+     * 1.8=通用玩家输入设施（issue #160 立项 / #162 冻结 / #163/#164 实现 / #165 注册收口）：
+     * <ul>
+     * <li>输入手段族五个动作注册（{@code input.key} / {@code input.text} / {@code input.mouse} /
+     * {@code input.release} 四个 {@code scene} 级可写动作 + {@code input.state} 只读观察面），
+     * 见 contract.md §4.12 与 {@code input-contract.md}；</li>
+     * <li>{@code ActionDescriptor} 新增<b>可选</b>自描述字段 {@code means}（手段归因）。<b>不设默认值</b>：
+     * 只在承担归因义务的动作上写（本批为输入族写 {@code "input"}），缺省时该键<b>不出现</b>，
+     * 因此是 43 个既有动作自描述 JSON 的逐字节不变增量——见 {@code input-contract.md} §9.4；</li>
+     * <li>输入族返回值以 {@code means:"input"} 归因、{@code layer} 恒 {@code null}（§4.6 的
+     * {@code layer}/{@code semantics} 成对规则的<b>显式例外</b>，理由见 {@code input-contract.md} §10.3）。</li>
+     * </ul>
      * 小版本只增不改义（contract.md §5）。
      *
      * <p>
@@ -49,8 +60,14 @@ public final class Contract {
      * <b>不变式</b>：本值必须 ≥ 任一动作自描述的 {@code since}——否则自述端点会给出
      * 「服务契约版本比某个动作的引入版本还旧」这种自相矛盾的目录（D1/D3 会判红）。
      * 新增动作时两处要一起改。
+     *
+     * <p>
+     * <b>1.8 为什么算增量而不是破坏</b>：五个新动作是纯新增；{@code means} 是<b>可选</b>字段
+     * （缺省不出现，既有动作 JSON 逐字节不变）；输入族返回值是新增形态，不改任何既有动作的语义。
+     * 唯一被改动的既有契约文字是「动作计数 43→48」与「版本 1.7→1.8」，两者都是计数/版本前进，
+     * 不是语义变更。
      */
-    public static final String VERSION = "1.7";
+    public static final String VERSION = "1.8";
 
     /** 契约 URI 前缀，即契约大版本。 */
     public static final String PREFIX = "/cp/v1";

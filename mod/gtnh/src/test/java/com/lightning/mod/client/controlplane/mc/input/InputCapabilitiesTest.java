@@ -5,14 +5,20 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 import org.junit.Test;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.ActionDescriptor;
 import com.lightning.mod.client.controlplane.core.ActionRegistry;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.Tier;
 import com.lightning.mod.client.controlplane.mc.ActionRegistrar;
+import com.lightning.mod.client.controlplane.mc.input.api.InputStateProvider;
 
 /**
  * 「未实现项不得伪装成已具备」的机读防线（契约 §5.2 末条 / §11.2 第 17 条 / D-4）。
@@ -47,8 +53,6 @@ public class InputCapabilitiesTest {
     @Test
     public void notImplementedListNamesEveryKnownGap() {
         assertTrue(InputCapabilities.NOT_IMPLEMENTED.size() >= 10);
-        assertTrue(contains("未注册"));
-        assertTrue(contains("契约版本未前进"));
         assertTrue(contains("GUI 文本路由"));
         assertTrue(contains("鼠标侧队列深度"));
         assertTrue(contains("取消"));
@@ -60,28 +64,45 @@ public class InputCapabilitiesTest {
             "JSON 形态必须可用（T2-B 要直接塞进 input.state.notImplemented）",
             InputCapabilities.notImplementedJson()
                 .size() == InputCapabilities.NOT_IMPLEMENTED.size());
+        // 本批（#165）已落地的东西**不许**继续留在未实现清单里（否则能力面自相矛盾）
+        assertFalse("动作已注册 ⇒ 清单里不许再写「未注册」", contains("未注册"));
+        assertFalse("契约版本已前进 ⇒ 清单里不许再写「契约版本未前进」", contains("契约版本未前进"));
+        assertFalse("means 已实现 ⇒ 清单里不许再写它是待办", contains("means 自描述字段"));
     }
 
-    /** 未注册 ⇒ 动作目录为空数组，**不是**五个动作名；`since` 未写入具体版本（§1.4）。 */
+    /** 注册面：注册表里的输入族动作与能力真值表**必须同源**（`since` 已写入具体版本，§1.4）。 */
     @Test
-    public void actionsAreNotClaimedAsRegistered() {
-        assertFalse(InputCapabilities.ACTIONS_REGISTERED);
-        assertEquals(
-            0,
-            InputCapabilities.registeredActionsJson()
-                .size());
-        assertTrue(
-            InputCapabilities.SINCE,
-            InputCapabilities.SINCE.contains("1.8") && InputCapabilities.SINCE.contains("未写入"));
+    public void actionsAreRegisteredAndDeclaredConsistently() {
+        assertTrue(InputCapabilities.ACTIONS_REGISTERED);
+        assertEquals("1.8", InputCapabilities.SINCE);
 
-        // 装配面机械核对：本单没有往注册表里塞任何东西（动作计数仍是 43）
+        // 装配面机械核对：契约 1.8 的动作计数 = 48，且输入族五个动作确实进了注册表
         ActionRegistry registry = new ActionRegistry();
         ActionRegistrar.registerAll(null, registry);
-        assertEquals(43, registry.size());
-        assertFalse(registry.contains(InputKeyAction.NAME));
-        assertFalse(registry.contains(InputTextAction.NAME));
-        assertFalse(registry.contains(InputMouseAction.NAME));
-        assertFalse(registry.contains(InputReleaseAction.NAME));
+        assertEquals(48, registry.size());
+        assertTrue(registry.contains(InputKeyAction.NAME));
+        assertTrue(registry.contains(InputTextAction.NAME));
+        assertTrue(registry.contains(InputMouseAction.NAME));
+        assertTrue(registry.contains(InputReleaseAction.NAME));
+        assertTrue(registry.contains(InputStateProvider.ACTION_NAME));
+
+        // 能力面 `actions[]` 必须**逐字**等于注册表里实际存在的输入族动作（不许手写一份对不上的目录）
+        JsonArray declared = InputCapabilities.registeredActionsJson();
+        List<String> wanted = new ArrayList<String>();
+        for (String name : registry.names()) {
+            if (name.startsWith("input.")) {
+                wanted.add(name);
+            }
+        }
+        Collections.sort(wanted);
+        List<String> got = new ArrayList<String>();
+        for (int i = 0; i < declared.size(); i++) {
+            got.add(
+                declared.get(i)
+                    .getAsString());
+        }
+        Collections.sort(got);
+        assertEquals("input.state 的 actions[] 必须与注册表实际内容一一对应", wanted, got);
     }
 
     /** 四个动作的自描述齐备、可复制、且示例都带 {@code confirm}（可写动作照抄即能过确认门）。 */
