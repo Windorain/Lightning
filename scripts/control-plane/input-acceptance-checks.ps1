@@ -950,7 +950,7 @@ function Get-CpVolatileFieldReason {
     param([string]$Name)
     $groups = @(
         @{ why = 'tick 计数/世界时刻：每 tick 自增，逐字比对必然不等'; names = @('totalTime', 'worldTime', 'gameTime', 'dayTime', 'tick', 'time') }
-        @{ why = '墙钟/单调钟：前后两次读必然不同'; names = @('serverTime', 'timestamp', 'createdAt', 'ts', 'at', 'uptimeMs', 'elapsedMs', 'nanoTime') }
+        @{ why = '墙钟/单调钟：前后两次读必然不同（**含各读面的 `readAt` 与取证产物的 `generatedAt`**——第一轮实机就是它们把「零写入」比对撞出一条假差异：`/player/readAt` 前后必然不同，与有没有写世界无关）'; names = @('serverTime', 'timestamp', 'createdAt', 'ts', 'at', 'uptimeMs', 'elapsedMs', 'nanoTime', 'readAt', 'generatedAt', 'boundAt', 'observedAt') }
         @{ why = 'JVM 内存读数：GC 自行变化，与「有没有写世界」无关'; names = @('memory', 'heapUsed', 'heapMax', 'heapCommitted', 'nonHeapUsed', 'usedBytes') }
         @{ why = '控制面自身记账：前后两次读面调用本身就在改变它们（不是世界写入）'; names = @('lastSeq', 'buffered', 'count', 'counts', 'recent', 'recentRuns', 'pending', 'busy', 'currentJobId', 'currentAction', 'probeActive', 'probe') }
         @{ why = '与写入无关的易变读数：网络往返延迟 / 状态效果剩余时长每 tick 自减'; names = @('ping', 'duration') }
