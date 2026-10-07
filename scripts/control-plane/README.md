@@ -29,6 +29,7 @@
 | `export-d2-twins.mjs` | **v1.6（#102）** D2 覆盖另外两条孪生链路：`export.registry` ↔ `/sde dump`、`export.multiblock` ↔ `/sde multiblock`（见 §12.4） |
 | `frame-recipe-probe.mjs` | **v1.6（#102）** 诊断：找出「逐帧世界状态不同」的可用配方（触达距离 + 选区归服务端玩家，见 §12.5） |
 | `inspect-artifact.mjs` | **v1.6（#102）** 诊断：打印产物形态（顶层/inner 键、帧结构、调色板层级、provenance 配对） |
+| `evidence-catalog.mjs` | **v1.6（#102）** 证据快照：把 `GET /cp/v1/actions` 的全量自述落成 JSON（D1/D3 的静态可复核证据） |
 | `cases/export-c4.json` | **v1.6（#102）** C4 同 run 纪律用例：`export` 段把导出件与实拍/观测/世界清单放进**同一个 run** |
 
 脚本只做**编排与调用**：控制面本体在 `mod/gtnh/src/main/java/com/lightning/mod/client/controlplane/`。
