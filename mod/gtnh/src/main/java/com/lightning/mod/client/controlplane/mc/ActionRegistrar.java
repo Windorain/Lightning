@@ -9,6 +9,9 @@ import com.lightning.mod.client.controlplane.mc.capture.ShotMultiAction;
 import com.lightning.mod.client.controlplane.mc.cmd.CmdExecAction;
 import com.lightning.mod.client.controlplane.mc.cmd.ExportSessionAction;
 import com.lightning.mod.client.controlplane.mc.cmd.SdeCommandWhitelist;
+import com.lightning.mod.client.controlplane.mc.export.ExportMultiblockAction;
+import com.lightning.mod.client.controlplane.mc.export.ExportRegistryAction;
+import com.lightning.mod.client.controlplane.mc.export.ExportSceneAction;
 import com.lightning.mod.client.controlplane.mc.player.PlaceBlockAction;
 import com.lightning.mod.client.controlplane.mc.player.PlayerDigAction;
 import com.lightning.mod.client.controlplane.mc.player.PlayerGuiAction;
@@ -35,6 +38,8 @@ import com.lightning.mod.client.controlplane.mc.scene.PlayerStateAction;
 import com.lightning.mod.client.controlplane.mc.scene.TankFillAction;
 import com.lightning.mod.client.controlplane.mc.scene.TankFillSpec;
 import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
+import com.lightning.mod.config.SdeMultiblockConfig;
+import com.lightning.mod.core.session.ExportSceneWriter;
 
 /**
  * 动作注册表（自描述是验收锚之一，见 contract.md §2 的 {@code GET /cp/v1/actions}）。
@@ -49,7 +54,9 @@ import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
  * （{@link #registerForensicActions}）+ #98 的 8 个观察面读面（{@link #registerReadActions}）
  * + #99 的 6 个 L0 布景原语（{@link #registerSceneActions}）+ #100 的 2 个命令通道
  * （{@link #registerCommandActions}）+ #101 的 9 个 L1 玩家操作（{@link #registerPlayerActions}，
- * {@code player.*}）+ #103 的 1 个收尾原语（{@link #registerShutdownAction}，{@code core.shutdown}）。
+ * {@code player.*}）+ #103 的 1 个收尾原语（{@link #registerShutdownAction}，{@code core.shutdown}）
+ * + #102 的 3 个导出族（{@link #registerExportActions}，{@code export.scene} /
+ * {@code export.registry} / {@code export.multiblock}）。
  *
  * <p>
  * 同步 vs 步进：{@code core.*} / {@code world.info} / {@code case.validate} 是同步动作
@@ -61,7 +68,8 @@ import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
  *
  * 动作面随 PR 追加而增长：PR-1 = 8 个（1.0）、PR-2 = +3 取证（1.1）、PR-3 判据（1.2）、
  * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、#100 = +2 命令通道（1.4）、#101 = +9 L1（1.5）、
- * #103 = +1 收尾原语（1.6）、#122 = +1 流体注入（1.7）——当前 38 个。<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
+ * #103 = +1 收尾原语（1.6）、#102 = +3 导出族（1.7）、#122 = +1 流体注入（1.7）——当前 41 个。
+ * （#123 只改契约语义与响应字段，不新增动作。）<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
  * 而实际 11 个（Gitea #97 §5-D3 判为文档漂移）。注册数可在实机经
  * {@code GET /cp/v1/actions} 的 {@code count} 字段一步核对，改动本文件后请顺手核一次。
  */
@@ -77,7 +85,7 @@ public final class ActionRegistrar {
 
     /**
      * 注册全部动作（PR-1 的 8 个 + PR-2 的 3 个取证 + #98 的 8 个读面 + #99 的 6 个 L0
-     * + 收口T3 的 2 个命令通道 + #101 的 9 个 L1 + #103 的 1 个收尾原语 = 37 个）。
+     * + 收口T3 的 2 个命令通道 + #101 的 9 个 L1 + #103 的 1 个收尾原语 + #102 的 3 个导出族 = 40 个）。
      *
      * <p>
      * 数字以实机 {@code GET /cp/v1/actions} 的 {@code count} 为权威（见类注释「动作数与契约版本」）。
@@ -115,8 +123,8 @@ public final class ActionRegistrar {
                         + "（集成服 WorldServer），客户端 WorldClient 的占位存档名不会出现在这里；"
                         + " playerPos/playerName 等客户端字段取客户端世界，来源见 metaSource。")
                 .returns(
-                    "{loaded, world{loaded,folder,displayName,dimension,managed,markerPresent,generatorOptions,"
-                        + "terrainType,mapFeatures,seed,worldTime,void,spawn[],playerPos[],metaSource}}")
+                    "{loaded, world{loaded,folder,displayName,dimension,managed,markerPresent,markerComplete,"
+                        + "generatorOptions,terrainType,mapFeatures,seed,worldTime,void,spawn[],playerPos[],metaSource}}")
                 .example("{}")
                 .since("1.0")
                 .build(),
@@ -125,8 +133,11 @@ public final class ActionRegistrar {
         registry.registerStepping(
             ActionDescriptor.builder("world.rebuild", Tier.SCENE)
                 .description(
-                    "幂等重建托管世界：离开当前世界 → 删除托管存档目录 → 固定种子建虚空世界 → "
-                        + "可选执行 build 段 → 静置 → 写 cp_world.json 与场景清单。同参数两次执行场景哈希相等。"
+                    "幂等重建托管世界：离开当前世界 → 删除托管存档目录 → 写标记（complete:false，标记前置）→ "
+                        + "固定种子建虚空世界 → 可选执行 build 段 → 静置 → 标记收口（complete:true）并写场景清单。"
+                        + "同参数两次执行场景哈希相等。标记前置的用意：构建中途失败只留下「带标记」的残留，"
+                        + "可正常经 world.rebuild 删除重建（修复前标记只在最末阶段写，失败残留无标记、无 API 可清）。"
+                        + "标记语义见契约 §6.1：有标记=可删可重建；complete:true=可当成品复用（world.snapshot 只收后者）。"
                         + " folder 与 seed 运行期必填（缺失报 CP-VALID-002）；自描述不标 required，"
                         + "以便「缺 confirm 一律先被 CP-CONFIRM-001 拒掉」在空参数负测试里可观测。")
                 .optional("folder", ActionDescriptor.TYPE_STRING, "托管世界存档目录名（运行期必填），须以 cp_ 开头")
@@ -148,7 +159,8 @@ public final class ActionRegistrar {
                     STAGE_TIMEOUT_DOC)
                 .returns(
                     "{schema, folder, seed, void, generatorOptions, voidSpec, settleTicks, runId, world{...}, "
-                        + "marker{...}, scene{sha256,stepCount,blockCount,teCount,mismatchCount,manifestPath,manifest}, "
+                        + "marker{schema,folder,seed,void,complete,createdBy,createdAt,completedAt?}, "
+                        + "scene{sha256,stepCount,blockCount,teCount,mismatchCount,manifestPath,manifest}, "
                         + "sceneIdempotencyKey}")
                 .example(
                     "{\"folder\":\"cp_demo\",\"seed\":20261006,\"void\":true,\"base\":[64,12,64],"
@@ -162,7 +174,11 @@ public final class ActionRegistrar {
 
         registry.registerStepping(
             ActionDescriptor.builder("world.snapshot", Tier.SCENE)
-                .description("托管世界快照（v1 口径=整目录复制）：离开世界 → 复制存档目录到 controlplane/snapshots/<id>/ " + "→ 计算目录哈希清单 → 重进世界。")
+                .description(
+                    "托管世界快照（v1 口径=整目录复制）：离开世界 → 复制存档目录到 controlplane/snapshots/<id>/ " + "→ 计算目录哈希清单 → 重进世界。"
+                        + "只接受**构建完成**的托管世界（cp_world.json 的 complete:true，契约 §6.1/§6.6）："
+                        + "失败残留（complete:false）的场景可能只铺了一半，拍成快照会被 world.rollback 当作期望态扶正。"
+                        + "无标记目录同样拒绝（非托管世界，CP-STATE-001）。")
                 .optional("folder", ActionDescriptor.TYPE_STRING, "托管世界目录名；缺省用当前所在托管世界")
                 .optional("snapshotId", ActionDescriptor.TYPE_STRING, "快照 id；缺省 <yyyyMMdd-HHmmss>-<folder>")
                 .optional(
@@ -223,17 +239,21 @@ public final class ActionRegistrar {
         registry.registerStepping(
             ActionDescriptor.builder("case.run", Tier.SCENE)
                 .description(
-                    "执行用例（整跑或按段，同一实现）：world→capture→build→read→cameras→criteria→evidence，"
+                    "执行用例（整跑或按段，同一实现）：" + "world→capture→build→read→action→export→cameras→criteria→evidence（9 段，"
+                        + "权威段序 = {@code CaseValidator.SEGMENTS}），"
                         + "逐段落 segments/<name>.json，写 criteria.json / evidence.json / observation.json。"
                         + "capture 段建立捕获会话（期间世界写动作被拒 CP-STATE-001），cameras 段逐机位走 shot.multi 的"
                         + "同一实现；cameras 段非空时本动作按内容升格为 forensic（不足 CP-AUTH-002）。"
-                        + "read 段（v1.3）逐条执行用例声明的 read.* 动作，读数落本 run 目录供 criteria 直接引用。")
+                        + "read 段（v1.3）逐条执行用例声明的 read.* 动作，读数落本 run 目录供 criteria 直接引用；"
+                        + "action 段（v1.6）执行任意已注册同步动作并可逐步断言；"
+                        + "export 段（v1.7）执行导出族动作，产物落本 run 的 export/ 下并登记（C4 同 run 纪律）。")
                 .optional("file", ActionDescriptor.TYPE_PATH, "用例文件：绝对路径，或相对 <mcDataDir>/controlplane/cases/")
                 .optional("inline", ActionDescriptor.TYPE_OBJECT, "内联用例（JSON 对象或用例 JSON 文本）；与 file 互斥")
                 .optional(
                     "segments",
                     ActionDescriptor.TYPE_ARRAY,
-                    "只跑指定段：world/capture/build/cameras/criteria/evidence 的子集")
+                    "只跑指定段：world/capture/build/read/action/export/cameras/criteria/evidence 的子集"
+                        + "（组名以 CaseValidator.SEGMENTS 为准）")
                 .optional("variant", ActionDescriptor.TYPE_STRING, "负对照变体 id：先应用补丁再跑同一实现，断言 expectCriteriaRed 全变红")
                 .optional(
                     SteppingActionBase.PARAM_TOTAL_TIMEOUT,
@@ -266,6 +286,256 @@ public final class ActionRegistrar {
         registerReadActions(runtime, registry);
         registerCommandActions(runtime, registry);
         registerShutdownAction(runtime, registry);
+        registerExportActions(runtime, registry);
+    }
+
+    /**
+     * 导出族动作（Gitea #102 收口T5，契约 1.7）：{@code export.scene} / {@code export.registry} /
+     * {@code export.multiblock}。
+     *
+     * <h2>这一组的共同口径（#96 §10 C 族）</h2>
+     *
+     * <ul>
+     * <li><b>产物单一归属（裁决 6）</b>：每个动作的每份产物有且只有一个落点 = 该动作 run 目录内的相对路径，
+     * 且登记进该 run 的 {@code manifest.json}（{@code writeArtifact}/{@code registerArtifact}）。
+     * <b>不存在</b>「原地一份 + 清单引用一份」的双态；老路径 {@code structure_exports/} 在 cp 通道
+     * <b>不再被写</b>（它只服务尚未搬迁的命令通道，#104 删）。</li>
+     * <li><b>D2 双通道一致</b>：三条链路各自与命令孪生（{@code /sde export} / {@code dump} /
+     * {@code multiblock}）共用<b>同一个执行体</b>——{@code export.scene} 与命令通道共用
+     * {@code ExportSceneWriter}；{@code export.registry} 与 {@code /sde dump} 共用
+     * {@code ExportBundleClient.writeFullRegistryDump}；{@code export.multiblock} 直接调
+     * {@code MultiblockExportRunner.run}。因此一致性是机械成立的，不靠约定。</li>
+     * <li><b>D2 适用范围（补充裁决 X-11）</b>：只有这三条有命令孪生，故只有它们适用 D2。
+     * 其余动作（含 {@code export.session}）不适用——不要为它们强行造比对。</li>
+     * <li><b>帧预算（C6）</b>：{@code export.scene} 的两档预算（{@code maxFrames}/{@code maxCells}）
+     * 在<b>扫描之前</b>算，超限 {@code CP-VALID-002} + {@code context.fields}，<b>不写任何产物</b>。</li>
+     * </ul>
+     *
+     * <h2>权限级</h2>
+     *
+     * 三个都是 {@link Tier#SCENE}：它们产出的不是取证材料而是<b>场景数据</b>（与
+     * {@code SdeCommandWhitelist} 对 {@code export}/{@code multiblock}/{@code dump} 的定级一致），
+     * 且按契约 §1.6 由权限级派生要求 {@code "confirm": true}。
+     */
+    private static void registerExportActions(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        registry.registerStepping(
+            ActionDescriptor.builder(ExportSceneAction.NAME, Tier.SCENE)
+                .description(
+                    "把 ExportSession 帧缓冲导出为一份场景文件并登记进 run 清单（/sde export 的 cp 等价动作）。"
+                        + "**与命令通道共用唯一写入器**（ExportSceneWriter）⇒ D2 一致是机械成立的。"
+                        + "**在客户端 tick 线程一次写完**：不经过网络包，因此没有「服务端写一份 scan 中间态、"
+                        + "客户端 enrich 覆盖一份」的二义（#97 §5-D8 / R1-1 / R1-2 从根上消掉）。"
+                        + "**形态统一（R1-3）**：默认 shape=world ⇒ **单帧即 N=1 的多帧文档**，"
+                        + "C1（单场景文件）与 C2（多帧）因此是同一种文件、同一条消费方解析路径；"
+                        + "需要裸 StructureData 时显式 shape=structure（仅允许单帧）。"
+                        + "**帧预算**：maxFrames/maxCells 在扫描之前算，超限 CP-VALID-002 且不写任何产物。"
+                        + "**产物归属**：只落本 run 目录的 export/ 下并登记 sha256（裁决 6 单一归属）——"
+                        + "工作台 ExportsListPanel 读的 structure_exports/ 看不到它，"
+                        + "请用结果的 downloadPath 下载后喂解析器（C1 口径）。"
+                        + "**⚠ 烘焙前置（Gitea #127，必读）**：几何烘焙发生在**导出这一刻**，逐格回查"
+                        + "**当前活动世界**（`MeshCaptureService.finalizeSingleStructure`），取到空气即静默丢块；"
+                        + "而 `provenance.frameSha256` 是**缓冲内 scan 文本**的哈希 ⇒ **内容变了哈希也不变**。"
+                        + "因此「录制后改动世界 / 跨世界导出 / 录制与导出之间世界漂移」会得到内容不忠实的产物，"
+                        + "且 C2/C3 判据对该失真**全绿**。要求：**帧必须在录制时所在世界内、且世界未被改动时导出**"
+                        + "（`case.run` 的 world/export 段同 run 即是这条纪律的载体）；"
+                        + "详见 `docs/contracts/format-scene-file.md` §6.2。显式校验（记 world folder+维度并比对）"
+                        + "与按帧快照烘焙由 #127 承接，落地前不得把导出件当作「录制时刻世界状态」的证据。")
+                .optional(
+                    "name",
+                    ActionDescriptor.TYPE_STRING,
+                    "输出文件名（无后缀，会净化为 [A-Za-z0-9._-]）；缺省用 ExportSession.outputName（即 /sde setname 设的值）")
+                .optional(
+                    "frames",
+                    ActionDescriptor.TYPE_STRING,
+                    "all",
+                    "导出哪些帧：\"all\"（默认，缓冲内全部）| \"active\"（只导活动帧）| [int...]（显式帧号清单，须都在缓冲内）。"
+                        + "注意：帧号非 0 的单帧在旧实现里会走多帧文档分支，本动作默认形态恒 world，故不存在该隐式分叉")
+                .optional(
+                    "shape",
+                    ActionDescriptor.TYPE_STRING,
+                    ExportSceneWriter.Shape.WORLD.id(),
+                    "产物形态：" + ExportSceneWriter.Shape.choices()
+                        + "。world（默认）= {id,mode,frames[],playback} 多帧文档（单帧即 N=1）；structure = 裸单结构文档（仅单帧，且**不做**跨帧调色板提升）；auto = 旧隐函数（仅命令通道用于逐字节兼容，cp 不建议用）")
+                .optional(
+                    "raw",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.FALSE,
+                    "true = 写明文 documentFormat:Plain；false（默认）= gzip+base64 Envelope")
+                .optional(
+                    "includeFrames",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.TRUE,
+                    "是否另落逐帧明细 export/frames/F<n>.json（role scene-export-frame）；默认 true")
+                .optional(
+                    "maxFrames",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(ExportSceneAction.DEFAULT_MAX_FRAMES),
+                    "帧数预算（默认 " + ExportSceneAction.DEFAULT_MAX_FRAMES
+                        + "，绝对上限 "
+                        + ExportSceneAction.HARD_MAX_FRAMES
+                        + "）；超限 CP-VALID-002 + context.fields，不静默截断、不写产物")
+                .optional(
+                    "maxCells",
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(ExportSceneAction.DEFAULT_MAX_CELLS),
+                    "体素预算（默认 " + ExportSceneAction.DEFAULT_MAX_CELLS
+                        + "，跨全部帧的格子总数；单帧也单独校验）。在扫描之前算（选区尺寸 × 帧数），超限 CP-VALID-002")
+                .optional(
+                    "expectFrames",
+                    ActionDescriptor.TYPE_OBJECT,
+                    "C3 判据：显式声明本次导出应包含哪些帧 {frames:[int...]}。不符即 CP-STATE-001（带 expected/actual/extra/missing）——"
+                        + "它拦的正是跨会话拼接：动作 A 录了 F0..F2、动作 B 又录了 F9，B 导出时声明 [0,1,2] 会当场判红而不是静默产出拼接物")
+                .optional(
+                    "keepBuffer",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.TRUE,
+                    "契约 1.6 不提供隐式清缓冲（裁决 3：只增不改）；本参数恒 true 语义，传 false 只记一条 WARN，缓冲保持原样")
+                .optional(
+                    SteppingActionBase.PARAM_TOTAL_TIMEOUT,
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(SteppingActionBase.DEFAULT_TOTAL_TIMEOUT_MS),
+                    TIMEOUT_DOC)
+                .optional(
+                    SteppingActionBase.PARAM_STAGE_TIMEOUT,
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(SteppingActionBase.DEFAULT_STAGE_TIMEOUT_MS),
+                    STAGE_TIMEOUT_DOC)
+                .returns(
+                    "{schema, contractVersion, action, runId, exportId, name, shape, raw, frames, frameIndexes[], "
+                        + "bytes, sha256, path, role, includeFrames, frameArtifacts[{index,path,bytes,sha256,sourceSha256}], "
+                        + "frameArtifactCount, bufferGeneration, frameSha256{<index>:<sha256>}, selection{...}, "
+                        + "volumePerFrame, volumeTotal, keepBuffer, envelope(Envelope|Plain), downloadPath}。"
+                        + "失败时抛：帧缓冲为空/选区不完整 CP-STATE-001、expectFrames 不符 CP-STATE-001、"
+                        + "预算超限 CP-VALID-002（context.fields + computed 口径）、无世界 CP-STATE-001")
+                .example("{\"confirm\":true}")
+                .example("{\"name\":\"demo\",\"shape\":\"world\",\"includeFrames\":true,\"confirm\":true}")
+                .example("{\"frames\":[0,1,2],\"expectFrames\":{\"frames\":[0,1,2]},\"confirm\":true}")
+                .example("{\"shape\":\"structure\",\"frames\":[0],\"raw\":true,\"confirm\":true}")
+                .since("1.7")
+                .build(),
+            () -> new ExportSceneAction());
+
+        registry.registerStepping(
+            ActionDescriptor.builder(ExportRegistryAction.NAME, Tier.SCENE)
+                .description(
+                    "/sde dump 的 cp 等价动作：请求客户端生成三份注册表（block/material/model_registry.json）"
+                        + "并落**本 run 目录**的 registry/ 下，逐份登记 sha256（C5）。"
+                        + "**与命令通道共用同一个写出体**（ExportBundleClient.writeFullRegistryDump）⇒ D2 机械成立。"
+                        + "**run 由发起方持有**（裁决 7）：本动作开 run，用**内存投递单**把 run 落点显式传给客户端 tick"
+                        + "——不让客户端用 mcDataDir/CWD 重新推导。★不设计成「/sde dump 自己开 run」："
+                        + "命令跑在服务端线程，没有 ActionContext，强行开 run 会产出不属于任何作业的孤儿 run。"
+                        + "内部件 registry/dump-request.json 消费后删除且**从不登记**（避免自引用清单项）。"
+                        + "三份注册表写出后经**可解析性校验**（JSON 可解析 + 有 schemaVersion）才登记，缺一份即 CP-EXEC-001。")
+                .optional(
+                    "waitTicks",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(ExportRegistryAction.DEFAULT_WAIT_TICKS),
+                    "等待客户端消费投递单的上限（tick，默认 " + ExportRegistryAction.DEFAULT_WAIT_TICKS
+                        + " ≈ 30 s，最少 "
+                        + ExportRegistryAction.MIN_SETTLE_TICKS
+                        + "）；超时 CP-EXEC-002 + 上下文（不返回空清单）")
+                .optional(
+                    SteppingActionBase.PARAM_TOTAL_TIMEOUT,
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(SteppingActionBase.DEFAULT_TOTAL_TIMEOUT_MS),
+                    TIMEOUT_DOC)
+                .optional(
+                    SteppingActionBase.PARAM_STAGE_TIMEOUT,
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(SteppingActionBase.DEFAULT_STAGE_TIMEOUT_MS),
+                    STAGE_TIMEOUT_DOC)
+                .returns(
+                    "{schema, contractVersion, action, runId, exportRoot, artifacts[{file,path,bytes,sha256,role}], "
+                        + "artifactCount, waitedTicks, requestSeq, requestFileRemoved}。"
+                        + "失败时抛：无世界 CP-STATE-001、已有待消费投递单 CP-BUSY-001、"
+                        + "等待超时 CP-EXEC-002、写出不完整/不可解析 CP-EXEC-001")
+                .example("{\"confirm\":true}")
+                .since("1.7")
+                .build(),
+            () -> new ExportRegistryAction());
+
+        registry.registerStepping(
+            ActionDescriptor.builder(ExportMultiblockAction.NAME, Tier.SCENE)
+                .description(
+                    "/sde multiblock 的 cp 等价动作：枚举（T1.2 事实层）→ 逐台变体构建+捕获（T1.3）→ "
+                        + "因子化编码（T1.4）→ 逐台信封落盘；产物落**本 run 目录**并登记哈希清单（C5）。"
+                        + "**直接调 MultiblockExportRunner.run**（与命令通道/触发文件同一执行体）⇒ D2 机械成立。"
+                        + "**主菜单下也能跑**：捕获自带 ProbeDummyWorld，不进真实世界（与既有行为一致）。"
+                        + "**前置条件**：需要 T1.2 的枚举事实 multiblock_scan/run-NNNN/machines.json（与 /sde multiblock "
+                        + "完全同一前置——不是 cp 侧额外要求）。缺失时报 CP-STATE-001 并给出补法；本动作**不**代为发起"
+                        + "扫描（那是遍历 221 台的分钟级长跑，应由调用方显式决定）。"
+                        + "**machines 必填且不得为空**：不复刻「空 scope = 全量 221 台」这个危险默认（R3-3："
+                        + "两个 runner 对「空」的解释不同，会造成「导出 221 台、捕获只跑 4 台」的白跑）；"
+                        + "要全量请显式写 [\"all\"]。**limit 已修**（R3-1）：走 RunConfig 显式字段，"
+                        + "不再走「先赋静态字段再被 load() 覆盖」那条路。"
+                        + "**时间预算分工**：globalBudgetMs 是业务预算（超时剩余机器进 failures[]，不静默跳过）；"
+                        + "totalTimeoutMs/stageTimeoutMs 是作业看门狗——本动作天然长跑，默认把看门狗关掉（0 = 不限）。"
+                        + "**dryRun**：只做枚举+范围过滤+抽样规划+预算核算，不捕获不落盘（报告里 dryRun:true 显式标注）。")
+                .required(
+                    "machines",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "机器清单（simpleName / fqcn / slug）；[\"all\"] = 全量（枚举 221 台，默认配置下小时级）。"
+                        + "**不得为空**：空清单会让导出与捕获两个半环对「空」给出不同解释（R3-3）")
+                .optional(
+                    "limit",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(0),
+                    "台数上限（0 = 不限制；>0 时截取前 N 台）。已修 R3-1：走 RunConfig 显式字段而非被 load() 覆盖的静态字段")
+                .optional(
+                    "maxVariantsPerMachine",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(20000),
+                    "单台变体数上限（安全兜底，默认取配置文件值 " + SdeMultiblockConfig.maxVariantsPerMachine
+                        + "）；超限时按契约 tierSample 抽样 + 必要时收窄通道域，产物 notes 如实记录")
+                .optional(
+                    "maxChannelValues",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(0),
+                    "通道取值数上限（0 = 不限制，用 T1.2 事实层全量域）；收窄会牺牲忠实度，产物 notes 记录真实域")
+                .optional("structuralOnly", ActionDescriptor.TYPE_BOOL, Boolean.FALSE, "只导出结构性组合（跳过 active 运行态，变体数减半）")
+                .optional(
+                    "globalBudgetMs",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(0),
+                    "整轮业务预算（ms；0 = 用配置文件默认 4h）。超时后剩余机器进 failures[]（不静默跳过）")
+                .optional("keepDataset", ActionDescriptor.TYPE_BOOL, Boolean.TRUE, "是否保留中间数据集（默认 true，供离线复算）")
+                .optional(
+                    "dataset",
+                    ActionDescriptor.TYPE_STRING,
+                    ExportMultiblockAction.DatasetMode.MANIFEST_ONLY.id(),
+                    "数据集登记档位：" + ExportMultiblockAction.DatasetMode.choices()
+                        + "。manifest-only（默认）= 只登记身份件（manifest/palette/report）——全量 221 台的 machines/*.json "
+                        + "会产生数百条清单项，逐份下载价值低；all = 逐份登记（证据更硬、清单更长）；none = 只落磁盘不登记")
+                .optional(
+                    "dryRun",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.FALSE,
+                    "true = 只做枚举+范围过滤+抽样规划+预算核算，不捕获不落盘（报告 dryRun:true）")
+                .optional(
+                    SteppingActionBase.PARAM_TOTAL_TIMEOUT,
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(0L),
+                    "作业看门狗总超时（毫秒，默认 **0 = 不限**——本动作天然长跑，由 globalBudgetMs 兜底）；超时抛 CP-EXEC-002")
+                .optional(
+                    SteppingActionBase.PARAM_STAGE_TIMEOUT,
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(0L),
+                    "单个阶段超时（毫秒，默认 **0 = 不限**）；超时抛 CP-EXEC-002")
+                .returns(
+                    "{schema, contractVersion, action, runId, dryRun, datasetMode, outputRoot, datasetDir, "
+                        + "requestedMachines, enumeratedTotal, exportedProducts, failureCount, elapsedMs, "
+                        + "artifacts[{path,bytes,sha256,role,machine?}], artifactCount, config{...}, timing{...}, "
+                        + "failures[{machine,stage,kind,message}], samplingPlan[], notes[], report}。"
+                        + "失败时抛：machines 缺失/为空或 dataset 取值非法 CP-VALID-002、"
+                        + "客户端不可用或无 T1.2 枚举事实（multiblock_scan/run-*/machines.json）CP-STATE-001"
+                        + "（context.expected/scanDir/hint 给出补法）")
+                .example("{\"machines\":[\"MTEElectricBlastFurnace\"],\"dryRun\":true,\"confirm\":true}")
+                .example("{\"machines\":[\"all\"],\"limit\":5,\"dataset\":\"manifest-only\",\"confirm\":true}")
+                .example(
+                    "{\"machines\":[\"MTEElectricBlastFurnace\",\"MTEDistillationTower\"],\"structuralOnly\":true,\"confirm\":true}")
+                .since("1.7")
+                .build(),
+            () -> new ExportMultiblockAction());
     }
 
     /**

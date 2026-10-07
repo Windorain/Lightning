@@ -115,6 +115,11 @@ public final class VariantCaptureRunner {
          * false = 只捕获 idle（T1.5 配置面「只导出结构性组合」），此时产物只声明 idle 一态。
          */
         public boolean includeActiveRunstate = true;
+        /**
+         * <b>产物根目录的绝对路径覆盖</b>（Gitea #102）：非空时 {@code outputDirName} 被忽略，
+         * {@code runDir} 直接建在它下面。默认 null ⇒ 既有行为逐字节不变。
+         */
+        public File outputRootOverride = null;
 
         public List<Integer> sampleFor(String machineSimpleName, String channelId) {
             Map<String, List<Integer>> perMachine = channelSample.get(machineSimpleName);
@@ -128,6 +133,9 @@ public final class VariantCaptureRunner {
     }
 
     public static File outputDir(Minecraft mc, Config cfg) {
+        if (cfg != null && cfg.outputRootOverride != null) {
+            return cfg.outputRootOverride;
+        }
         String name = cfg == null || cfg.outputDirName == null
             || cfg.outputDirName.trim()
                 .isEmpty() ? OUTPUT_DIR : cfg.outputDirName.trim();
