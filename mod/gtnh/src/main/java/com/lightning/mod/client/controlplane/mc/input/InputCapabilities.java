@@ -270,10 +270,12 @@ public final class InputCapabilities {
      * 实现一项就同时删两处（本常量 + 契约 §11.2），不得只删一处（§11.2 末条）。
      *
      * <p>
-     * <b>本批（#165）删掉的四条与本批<b>不</b>删的说明</b>：动作注册、契约版本前进、
-     * {@code means} 自描述字段、{@code input.state} 注册四条已随本批落地 ⇒ 删除；
-     * 「坐标换算的实机自校准」「codepoint 通路」「G1 扩展」三条<b>不</b>因代码合入而删——
-     * 前两条要实机判据，G1 的实现由并行分支承载（合入后再删，见 Gitea #165 的收口评论）。
+     * <b>本批（#165）删掉的四条与实机验收后再删的两条</b>：动作注册、契约版本前进、
+     * {@code means} 自描述字段、{@code input.state} 注册四条随注册面落地 ⇒ 删除；
+     * 三轮独占 runClient 验收后又删两条：<b>{@code shot.*} 的 GUI 实拍面</b>
+     * （{@code gui:"screen"} 实机通过：{@code guiCapture.drawn=true} + 真实 {@code currentScreen}）
+     * 与 <b>G1 跨帧输入步</b>（{@code case.run} 的 {@code action} 段实机跑通、跨帧证据成立且无持键泄漏）。
+     * 「坐标换算实机自校准」<b>只收窄不删除</b>——两种尺度已核对，HiDPI 真实像素缩放仍未校准。
      * 「写 true 之前必须有一条实机判据」是本类的宪法，不许按「代码写完了」结账。
      */
     public static final List<String> NOT_IMPLEMENTED;
@@ -288,12 +290,10 @@ public final class InputCapabilities {
         l.add("不承诺崩溃后清理（状态随 JVM 消失）");
         l.add("轮询面不覆盖（Keyboard.isKeyDown 型判定不随队列注入变化；组合键只保证事件序）");
         l.add("input.mouse op:relative 的失焦生效未验证（消费门是 mc.inGameHasFocus && Display.isActive()）");
-        l.add("坐标换算的实机自校准未做（P0 只在 displayHeight=480 / pixelScale=1.0 上定案 Y 翻转）");
-        l.add("GUI 截图取证面不存在（shot.* 只 renderWorld + 强制 hideGUI）");
+        l.add(
+            "坐标换算的实机自校准只覆盖两种窗口/尺度上下文（854×480/scaleFactor 2 与 1898×1084/scaleFactor 4），且 Display.getPixelScaleFactor 反射读不到（落 1.0 兜底并如实告警）⇒ HiDPI 的真实像素缩放仍未单独校准");
         l.add("read.input 读面不存在（注入有没有生效缺第二观测面）");
         l.add("场景守卫会关聊天框（armed 期间每 tick displayGuiScreen(null)）");
-        l.add(
-            "§9.2 的 G1 扩展**已实现、待实机端到端验证**（case-file.md §3.2 的同步性口径、CaseValidator 白名单、CaseRunAction 段内跨 tick 推进；判据是 down→跨帧→release→读断言在真机上成立）");
         NOT_IMPLEMENTED = Collections.unmodifiableList(l);
     }
 

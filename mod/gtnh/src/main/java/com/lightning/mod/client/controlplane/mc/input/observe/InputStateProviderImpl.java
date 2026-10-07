@@ -734,7 +734,8 @@ public final class InputStateProviderImpl implements InputStateProvider {
         list.add("input.key 的 codepoint 通路未验证（只有键位那一半被实机证过）");
         list.add("read.input 读面不存在（本族唯一输入侧读面就是 input.state）");
         list.add("作业取消能力不存在；离图/断连/关服无钩子；崩溃不承诺清理");
-        list.add("坐标换算的实机自校准未做（P0 只在一组 displayHeight/pixelScale 上定案了 Y 翻转）");
+        list.add(
+            "坐标换算的实机自校准只覆盖两种窗口/尺度上下文（854×480/scaleFactor 2 与 1898×1084/scaleFactor 4）；Display.getPixelScaleFactor 反射读不到（落 1.0 兜底并如实告警）⇒ HiDPI 真实像素缩放仍未校准");
         list.add("轮询面不覆盖：Keyboard.isKeyDown / Mouse.isButtonDown 型判定不随队列注入变化");
         return list;
     }
