@@ -1191,11 +1191,10 @@ public interface InputStateProvider { JsonObject state(); }
 | 6 | **不承诺崩溃后清理** | P0 实测：进程崩溃时状态随 JVM 消失（§3.4 路径 5 只做 best-effort） |
 | 7 | **轮询面不覆盖** | `Keyboard.isKeyDown`/`Mouse.isButtonDown` 型判定（Shift/Ctrl/Alt 组合、`GuiContainer` 的 Shift 点击、NEI 快捷键、`SyncedKeybind`、MUI `Interactable`）不随队列注入变化 ⇒ 组合键只保证事件序 |
 | 8 | **`input.mouse op:relative` 的失焦生效未验证** | 消费门是 `mc.inGameHasFocus && Display.isActive()`；无人值守失焦是常态 ⇒ [未验证]，且**禁止**靠改 `displayFocused` 绕过 |
-| 9 | **坐标换算的实机自校准未做** | P0 只在一组参数（`displayHeight=480`、`pixelScale=1.0`）上定案了 Y 翻转；其它 GUI Scale / 分辨率下的换算需 `move` 的 `readback` 自校准 |
-| 10 | **GUI 截图取证面不存在** | `shot.*` 只调 `renderWorld` + 强制 `hideGUI=true`，`currentScreen` 在 capture 包零命中 ⇒ 「点开了什么界面」**无截图证据面**（T2-B 已提供 `gui:"screen"` 的 opt-in 路径，但其判据仍待实机） |
-| 11 | **`read.input` 读面不存在** | 现有 9 个 `read.*` 无一条读输入侧状态 ⇒ 「注入有没有生效」缺第二观测面（本族自带 `input.state`，但它是能力面不是业务读面） |
-| 12 | **场景守卫会关聊天框** | armed 期间每 tick `displayGuiScreen(null)` 会清掉 `GuiChat` 一类界面 ⇒ 聊天框路径在场景会话期间不可用（源码推断，**未实机验证**） |
-| 13 | **§9.2 的 G1 扩展未实现** | `case-file.md` §3.2 的同步性口径、`CaseParser`/`CaseValidator` 白名单、`CaseRunAction` 的段内跨 tick 推进**均未实现**（由并行分支承载，合入后再删本行） |
+| 9 | **坐标换算的实机自校准只覆盖两种上下文** | 已在 `854×480`（`scaleFactor 2`）与 `1898×1084`（`scaleFactor 4`）两种窗口/尺度下核对：动作回读与能力面 `observedNowGui` **两面一致且 ±1 内**。**仍未校准**的是 HiDPI 的真实像素缩放——`Display.getPixelScaleFactor` 反射读不到（落 `1.0` 兜底并如实进 `warnings`） |
+| 10 | **`read.input` 读面不存在** | 现有 9 个 `read.*` 无一条读输入侧状态 ⇒ 「注入有没有生效」缺第二观测面（本族自带 `input.state`，但它是能力面不是业务读面） |
+| 11 | **场景守卫会关聊天框** | armed 期间每 tick `displayGuiScreen(null)` 会清掉 `GuiChat` 一类界面 ⇒ 聊天框路径在场景会话期间不可用（源码推断，**未实机验证**） |
+| 12 | **组合键事件序与队列满没有独立实机判据** | §2.8 的口径已冻结为「只保证事件序」，但没有一条实机判据证明「顺序确实成立」；队列满（`CP-STATE-001` 零写入）难以定向触发 ⇒ **未测 ≠ 通过** |
 
 `【要求】` 本清单与 `input.state.notImplemented` **同源**：实现一项就同时删两处，**不得**只删一处。
 
@@ -1208,9 +1207,12 @@ public interface InputStateProvider { JsonObject state(); }
 | 3 | `ActionDescriptor` 的 `means` 自描述字段 | `ActionDescriptor.means()`（可选、不设默认值）；`contract.md` §2.2；`InputRegistrationTest#meansComesFromTheSelfDescriptionAndDoesNotLeak` |
 | 17 | `input.state` 的字段无真值来源 | `InputStateAction` 注册；`InputStateProviderImpl` 组装；该动作**已注册**（真值来源是 T2-B 的探针） |
 | 18 | `ActionDescriptor` 的字段集合无离线防线 | `InputRegistrationTest#descriptorFieldSetIsFrozenAndOnlyGainsMeansForTheInputFamily` |
+| 10 | **GUI 截图取证面不存在** | 三轮独占 runClient 验收：`shot.multi {gui:"screen"}` **通过** —— meta 里 `guiHidden=false`、`guiCapture` 1 项且 `drawn=true`、`screen=net.minecraft.client.gui.inventory.GuiContainerCreative`；默认路径 `guiHidden=true` 且**不含** `guiCapture`（W7b/W7c） |
+| 13 | **§9.2 的 G1 扩展未实现** | 三轮验收：`cases/input-multitick.json` 的 `case.validate` 通过、`case.run` 的 `action` 段跑出 4 个输入步产物、**跨帧证据**（`tap deliveredAtTick=7967 → down 7988 → up 7991`）成立、跑完 `held.count=0`（无持键泄漏） |
 
-**注意**：上表只删「已落地且有机械证据」的项。**第 9 条（实机自校准）、第 2 条（codepoint 通路）、
-第 13 条（G1）不因代码合入而删**——前两条要实机判据，第 13 条由并行分支承载。
+**注意**：上表只删「已落地**且**有实机/机械证据」的项。**第 2 条（codepoint 通路）不删**（只有键位那一半被证过）；
+**第 9 条（坐标实机自校准）只收窄不删**（两种尺度已核对，HiDPI 真实像素缩放仍未校准）；
+新增第 12 条（组合键事件序与队列满无独立实机判据）——**未测 ≠ 通过**，如实登记。
 
 ---
 
