@@ -17,10 +17,15 @@ public final class Contract {
      * 1.4=收口T3 命令通道（issue #100：{@code cmd.exec} / {@code export.session}，见 contract.md §4.5）；
      * 1.5=L1 玩家操作（issue #101：{@code player.*} 九动作，见 contract.md §4.6；调度者撞号裁决：
      * 本单分支自报 1.4 与 #100 撞号，合流时统一为 1.5）；
-     * 1.6=无人值守收尾原语（issue #103：{@code core.shutdown}，见 contract.md §4.8）；
-     * 1.7=托管世界标记前置与 {@code complete} 状态机（issue #123：{@code world.rebuild} 的标记前置 +
+     * 1.6=无人值守收尾原语（issue #103：{@code core.shutdown}，见 contract.md §4.9）；
+     * 1.7=收口批次（调度者裁决）：
+     * <ul>
+     * <li>导出与产物纪律（issue #102：{@code export.scene} / {@code export.registry} /
+     * {@code export.multiblock} 三动作，见 contract.md §4.7；本单分支自报 1.6 与 #103 撞号，合流统一为 1.7）；</li>
+     * <li>托管世界标记前置与 {@code complete} 状态机（issue #123：{@code world.rebuild} 的标记前置 +
      * {@code world.info} 新增 {@code markerComplete} 响应字段 + {@code world.snapshot} 只接受构建完成的
-     * 世界，见 contract.md §6.1/§6.6）。
+     * 世界，见 contract.md §6.1/§6.6）。</li>
+     * </ul>
      * 小版本只增不改义（contract.md §5）。
      *
      * <p>

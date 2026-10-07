@@ -75,6 +75,7 @@ public final class CaseValidator {
         s.add("build");
         s.add("read");
         s.add("action");
+        s.add("export");
         s.add("cameras");
         s.add("criteria");
         s.add("evidence");
@@ -89,6 +90,67 @@ public final class CaseValidator {
      * 「读面只读」这条纪律失去一个可静态检查的落点（而且写动作该走 build 段）。
      */
     public static final String READ_ACTION_PREFIX = "read.";
+
+    /**
+     * {@code export} 段的动作名前缀（v1.7，Gitea #102）。
+     *
+     * <p>
+     * 只允许 {@code export.*}：导出段的语义是「把当前世界状态写成场景文件/注册表/数据集」，
+     * 放进读动作会让「导出件真的落进了本 run」这条 C4 判据失去静态可查的落点。
+     */
+    public static final String EXPORT_ACTION_PREFIX = "export.";
+
+    /**
+     * {@code export} 段<b>额外</b>允许的两个非 {@code export.*} 动作（v1.7，Gitea #102）。
+     *
+     * <h2>为什么必须开这两个口子（不是偷懒）</h2>
+     *
+     * C4 要求「导出件与实拍/观测记录<b>同一 run</b>」，因此导出必须发生在用例<b>内部</b>。
+     * 但「把当前世界状态扫进指定帧」（{@code /sde record}）**只有命令通道**可达——
+     * #100 已裁决录制不提供 cp 动作（它是命令态原语，见 {@code SdeCommandWhitelist}）。
+     * 因此用例若要自己造出可导出的帧缓冲，就必须能在段内跑 {@code cmd.exec}。
+     *
+     * <p>
+     * 而 {@code /sde pos1|pos2|hpos1|hpos2} 的坐标**只来自玩家实体**（没有坐标参数），
+     * 于是「构造一个非平凡的选区」必须能移动玩家。{@code scene.player.pose}（L0，同步、确定性）
+     * 是做这件事的正确原语——{@code player.move}（L1）会走真实物理，不确定也不必要。
+     *
+     * <p>
+     * <b>为什么不是「段内放任何动作都行」</b>：那会让人把 {@code world.rebuild} 塞进导出段，
+     * 绕开段序纪律（{@code world} 必须是第一段，见 §8.8 hermetic 纪律）。
+     * 白名单把口子限死在「造帧缓冲 + 摆玩家」这两件导出<b>前置</b>事实上。
+     *
+     * <p>
+     * {@code cmd.exec} 还有第二层限制：它携带的子命令必须是**成帧类**（见
+     * {@link #EXPORT_SEGMENT_FRAMING_SUBS}）——{@code /sde export} / {@code dump} / {@code multiblock}
+     * 在段内被拒，因为它们各有专用动作（{@code export.scene} / {@code export.registry} /
+     * {@code export.multiblock}），放行等于开第二条产物路径（#96 §8.7「无隐藏通道」）。
+     */
+    public static final java.util.Set<String> EXPORT_SEGMENT_EXTRA_ACTIONS = java.util.Collections
+        .unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList("cmd.exec", "scene.player.pose")));
+
+    /**
+     * {@code export} 段内允许 {@code cmd.exec} 携带的 {@code /sde} 子命令（成帧类）。
+     *
+     * <p>
+     * 不含 {@code export} / {@code dump} / {@code multiblock}：它们有专用动作，
+     * 命令形式在段内放行会绕过「产物落 run + 登记」的纪律。
+     */
+    public static final java.util.Set<String> EXPORT_SEGMENT_FRAMING_SUBS = java.util.Collections.unmodifiableSet(
+        new java.util.LinkedHashSet<String>(
+            java.util.Arrays.asList(
+                "pos1",
+                "pos2",
+                "hpos1",
+                "hpos2",
+                "sel",
+                "start",
+                "end",
+                "setname",
+                "setframe",
+                "setstructureid",
+                "record",
+                "status")));
 
     /**
      * {@code action} 段（v1.6，issue #103）禁止编排的动作：无人值守收尾原语。
@@ -140,6 +202,7 @@ public final class CaseValidator {
         JsonArray build = validateBuild(file, fields, warnings);
         JsonArray read = validateRead(file, fields, warnings);
         JsonArray action = validateAction(file, fields, warnings);
+        JsonArray export = validateExport(file, fields, warnings);
         JsonObject capture = validateCapture(file, fields);
         JsonArray cameras = validateCameras(file, fields, warnings);
         JsonArray criteria = validateCriteria(file, fields);
@@ -175,6 +238,7 @@ public final class CaseValidator {
         plan.add("build", build);
         plan.add("read", read);
         plan.add("action", action);
+        plan.add("export", export);
         if (capture != null) {
             plan.add("capture", capture);
         }
@@ -343,6 +407,68 @@ public final class CaseValidator {
     }
 
     /**
+     * {@code export} 段（v1.7，Gitea #102）：导出步骤清单的校验。
+     *
+     * <p>
+     * 校验三件事：动作名是 {@code export.*}，**或者**在
+     * {@link #EXPORT_SEGMENT_EXTRA_ACTIONS} 白名单内（{@code cmd.exec}/{@code scene.player.pose}，
+     * 理由见该常量的注释）；{@code cmd.exec} 的子命令必须是
+     * {@link #EXPORT_SEGMENT_FRAMING_SUBS} 内的成帧类；{@code params} 是对象。
+     *
+     * <p>
+     * <b>不</b>校验落点——导出产物的相对路径由动作自己决定（run 目录的 {@code export/} 下），
+     * 段里声明落点会与动作实现产生第二处真相。存在性同 {@link #validateRead}：执行期判定。
+     */
+    private JsonArray validateExport(CaseFile file, Fields fields, List<String> warnings) {
+        JsonArray out = new JsonArray();
+        List<CaseFile.ReadStep> steps = file.export();
+        for (int i = 0; i < steps.size(); i++) {
+            CaseFile.ReadStep step = steps.get(i);
+            String ctx = "export[" + i + "]";
+            String action = step.action();
+            if (action == null || action.trim()
+                .isEmpty()) {
+                fields.add(ctx + ".action", "必填");
+            } else if (!action.startsWith(EXPORT_ACTION_PREFIX)) {
+                if (!EXPORT_SEGMENT_EXTRA_ACTIONS.contains(action)) {
+                    fields.add(
+                        ctx + ".action",
+                        "导出段只接受 " + EXPORT_ACTION_PREFIX
+                            + "* 动作或白名单内的 "
+                            + EXPORT_SEGMENT_EXTRA_ACTIONS
+                            + "（后者是造帧缓冲/摆玩家的前置事实，理由见 CaseValidator 常量注释），收到: "
+                            + action);
+                } else if ("cmd.exec".equals(action)) {
+                    // 第二层限制：只许成帧类子命令——export/dump/multiblock 各有专用动作，
+                    // 命令形式在段内放行等于开第二条产物路径（#96 §8.7 无隐藏通道）
+                    String sub = sdeSubOf(step.params());
+                    if (sub == null) {
+                        fields.add(ctx + ".params.command", "cmd.exec 在导出段内必须携带形如 \"/sde <sub>\" 的命令");
+                    } else if (!EXPORT_SEGMENT_FRAMING_SUBS.contains(sub)) {
+                        fields.add(
+                            ctx + ".params.command",
+                            "导出段内的 cmd.exec 只允许成帧类子命令 " + EXPORT_SEGMENT_FRAMING_SUBS
+                                + "；"
+                                + "/sde "
+                                + sub
+                                + " 请改用对应的专用动作"
+                                + ("export".equals(sub) ? "（export.scene）"
+                                    : "dump".equals(sub) ? "（export.registry）"
+                                        : "multiblock".equals(sub) ? "（export.multiblock）" : ""));
+                    }
+                }
+            }
+            JsonObject item = Json.copyObject(step.toJson());
+            item.addProperty("index", i);
+            out.add(item);
+        }
+        if (steps.size() == 0) {
+            warnings.add("export 段为空：本 run 不产导出件（C4「导出件与实拍/观测同 run」需要有导出步骤）");
+        }
+        return out;
+    }
+
+    /**
      * {@code action} 段（v1.6，issue #103）：L2 编排步骤清单的校验。
      *
      * <h2>与 {@code read} 段的对称与差异</h2>
@@ -398,6 +524,23 @@ public final class CaseValidator {
             warnings.add("action 段为空：本 run 不编排任何动作（L0/L1 一步也不跑）");
         }
         return out;
+    }
+
+    /** 从 {@code cmd.exec} 的 params 里取出 {@code /sde} 子命令（小写）；取不到返回 null。 */
+    private static String sdeSubOf(JsonObject params) {
+        String command = Json.optString(params, "command", null);
+        if (command == null) {
+            return null;
+        }
+        String body = command.trim();
+        if (body.startsWith("/")) {
+            body = body.substring(1);
+        }
+        String[] parts = body.split("\\s+");
+        if (parts.length < 2 || !"sde".equalsIgnoreCase(parts[0])) {
+            return null;
+        }
+        return parts[1].toLowerCase(java.util.Locale.ROOT);
     }
 
     /**

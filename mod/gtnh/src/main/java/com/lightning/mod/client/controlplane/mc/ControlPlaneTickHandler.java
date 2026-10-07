@@ -7,6 +7,7 @@ import com.lightning.mod.client.controlplane.core.EventStream;
 import com.lightning.mod.client.controlplane.core.Job;
 import com.lightning.mod.client.controlplane.core.JobQueue;
 import com.lightning.mod.client.controlplane.core.Json;
+import com.lightning.mod.client.controlplane.mc.cmd.CommandArtifactRegistrar;
 
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
@@ -51,6 +52,15 @@ public final class ControlPlaneTickHandler {
             JobQueue queue = ControlPlaneBootstrap.queue();
             if (queue == null) {
                 return;
+            }
+            // 命令通道产物的延迟登记（Gitea #102）：`/sde export` 的 baked 覆盖与 `/sde dump` 的
+            // 注册表写出都发生在本线程的**后续 tick** 上，因此只能在这里推进（不能在动作里 sleep——
+            // 那会掐死唯一的推进者，见 CommandArtifactRegistrar 类注释）。
+            // 放在避让判定**之前**：登记是纯本地文件复制，不动世界，探针激活时也应照常完成。
+            try {
+                CommandArtifactRegistrar.pump();
+            } catch (Throwable t) {
+                CpLog.warn("延迟登记推进异常（已吞掉）: %s", String.valueOf(t));
             }
             // about 的 MC 相关字段只在本线程采集（HTTP 线程绝不触碰 MC 状态，contract §1.8）
             if (++tickCounter % CpAboutSnapshot.REFRESH_INTERVAL_TICKS == 0) {

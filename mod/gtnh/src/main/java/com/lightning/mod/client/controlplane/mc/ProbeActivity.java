@@ -2,6 +2,7 @@ package com.lightning.mod.client.controlplane.mc;
 
 import net.minecraft.client.Minecraft;
 
+import com.lightning.mod.client.meshcapture.parts.probe.CaptureChannelProbeAutomation;
 import com.lightning.mod.client.meshcapture.parts.probe.LpTeRoundTripAutomation;
 import com.lightning.mod.client.meshcapture.parts.probe.PartsAcceptanceAutomation;
 import com.lightning.mod.client.meshcapture.parts.probe.PartsProbeAutomation;
@@ -41,7 +42,28 @@ public final class ProbeActivity {
         }
     }
 
+    /**
+     * 既有自动化链的激活判据（顺序 = {@code SdeClientAutomationTickHandler} 的接管优先级）。
+     *
+     * <h2>为什么必须与接管优先级<b>逐条</b>对齐（Gitea #102 / #97 §5-D6）</h2>
+     *
+     * 「单向避让」的判据是「既有探针会不会在这一 tick 动世界」。{@code SdeClientAutomationTickHandler}
+     * 按固定优先级分派，<b>任何一条</b>命中都会接管 tick；因此本表必须覆盖它的<b>全部</b>分支，
+     * 漏一条就等于「cp 与那条探针同 tick 动世界」。
+     *
+     * <p>
+     * <b>本单修掉的缺口</b>：{@code capture-channel-probe}（接管优先级第 2）此前不在表内，
+     * 于是该触发文件存在时 cp <b>不避让</b>——两套自动化同 tick 动世界，现场无法解释。
+     * 这是既有缺陷（#97 §5-D6 登记），按 #102 R2-4「搬迁期必须先修」补上。
+     *
+     * <p>
+     * 另外三条（{@code multiblock-scan} / {@code multiblock-pipeline} / {@code parts-*}）与
+     * {@code multiblock-export}/{@code variant-capture} 的关系：后两者在
+     * {@code MultiblockScanAutomation.isRequested} 里内嵌分派，因此 {@code multiblock-scan}
+     * 这一条事实上也覆盖了它们——本表不重复登记，但把这一点写在这里以免后来者以为漏了。
+     */
     private static final Probe[] PROBES = { new Probe("lp-te-round-trip", LpTeRoundTripAutomation::isRequested),
+        new Probe("capture-channel-probe", CaptureChannelProbeAutomation::isRequested),
         new Probe("multiblock-pipeline", MultiblockPipelineAutomation::isRequested),
         new Probe("multiblock-scan", MultiblockScanAutomation::isRequested),
         new Probe("run-state-probe", RunStateProbeAutomation::isRequested),

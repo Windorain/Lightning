@@ -407,6 +407,7 @@ public final class CaseFile {
     private final List<Step> build;
     private final List<ReadStep> read;
     private final List<ActionStep> action;
+    private final List<ReadStep> export;
     private final JsonElement capture;
     private final JsonArray cameras;
     private final List<Criterion> criteria;
@@ -415,8 +416,8 @@ public final class CaseFile {
     private final List<String> warnings;
 
     CaseFile(JsonObject raw, String rawText, String schema, String id, String label, World world, List<Step> build,
-        List<ReadStep> read, List<ActionStep> action, JsonElement capture, JsonArray cameras, List<Criterion> criteria,
-        List<Variant> variants, JsonArray evidenceExpect, List<String> warnings) {
+        List<ReadStep> read, List<ActionStep> action, List<ReadStep> export, JsonElement capture, JsonArray cameras,
+        List<Criterion> criteria, List<Variant> variants, JsonArray evidenceExpect, List<String> warnings) {
         this.raw = raw;
         this.rawText = rawText;
         this.sha256 = Hashing.sha256HexUtf8(rawText);
@@ -427,6 +428,7 @@ public final class CaseFile {
         this.build = Collections.unmodifiableList(new ArrayList<Step>(build));
         this.read = Collections.unmodifiableList(new ArrayList<ReadStep>(read));
         this.action = Collections.unmodifiableList(new ArrayList<ActionStep>(action));
+        this.export = Collections.unmodifiableList(new ArrayList<ReadStep>(export));
         this.capture = capture;
         this.cameras = cameras;
         this.criteria = Collections.unmodifiableList(new ArrayList<Criterion>(criteria));
@@ -483,6 +485,18 @@ public final class CaseFile {
     /** 编排步骤（有序；v1.6 起）。空列表表示用例不编排任何 cp 动作。 */
     public List<ActionStep> action() {
         return action;
+    }
+
+    /**
+     * 导出步骤（有序；v1.7 起，Gitea #102）。空列表表示用例不产导出件。
+     *
+     * <p>
+     * 复用 {@link ReadStep} 承载（字段形态一致：{@code action}+{@code params}），但 {@code path}/{@code role}
+     * 恒为 null——导出产物的落点由导出动作自己决定（run 目录的 {@code export/} 下），
+     * 段里不声明落点，避免「声明一个落点而动作写到别处」的自相矛盾。
+     */
+    public List<ReadStep> export() {
+        return export;
     }
 
     /** capture 段原文（PR-1 透传），未声明时为 null。 */
