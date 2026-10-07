@@ -3,7 +3,11 @@
 .SYNOPSIS
   issue #122（L0 流体注入原语 scene.tank.fill）验收驱动：
   D1（自述完备）/ D3（默认与边界值可见）/ D4（失败显式）/
-  A（正向注入与读回一致）/ N（负对照）/ J（配方联证）。
+  A（正向注入与读回一致）/ N（负对照）。
+
+  配方级联证（「注入真的让 GT 配方跑起来」）不在本脚本内：它由
+  cases/tank-fill-live.json 整跑 + 逐 2s 采样 read.te 的 progress/产物承担，
+  见 README §12.5 的实测记录（2026-10-07）。
 
 .DESCRIPTION
   一切动作调用经 scripts/control-plane/caller.mjs（自描述驱动），证据落 -EvidenceDir。
@@ -27,8 +31,6 @@ param(
     [int[]]$MachineAt = @(65, 12, 65),
     [string]$Fluid = "HydrochloricAcid",
     [int]$Amount = 3000,
-    # 联证：跑完整条三氯硅烷配方（需要更多时间）
-    [switch]$Recipe,
     # 只跑离线可做的 D1/D3（不起世界）；加 -InWorld 才跑注入与负对照
     [switch]$InWorld
 )
@@ -92,7 +94,7 @@ if ($d) {
     Add-Assertion "D1.1 name" ($d.name -eq $script:Action) "name=$($d.name)"
     Add-Assertion "D1.2 tier=scene" ($d.tier -eq "scene") "tier=$($d.tier)"
     Add-Assertion "D1.3 writable+confirm" ($d.writable -eq $true -and $d.confirmRequired -eq $true) "writable=$($d.writable) confirmRequired=$($d.confirmRequired)"
-    Add-Assertion "D1.4 since=1.6" ($d.since -eq "1.6") "since=$($d.since)"
+    Add-Assertion "D1.4 since=1.7" ($d.since -eq "1.7") "since=$($d.since)"
     Add-Assertion "D1.5 description 非空" (-not [string]::IsNullOrWhiteSpace($d.description)) "长度 $(@($d.description).Length)"
     Add-Assertion "D1.6 returns 非空" (-not [string]::IsNullOrWhiteSpace($d.returns)) "长度 $(@($d.returns).Length)"
     Add-Assertion "D1.7 returns 声明部分注入" ($d.returns -match "partial") "returns 含 partial（部分注入如实报告）"
@@ -205,7 +207,7 @@ foreach ($f in $failCases) {
 }
 
 if (-not $InWorld) {
-    Write-Host "  （未加 -InWorld：跳过世界内断言 A/N/J）" -ForegroundColor Yellow
+    Write-Host "  （未加 -InWorld：跳过世界内断言 A/N）" -ForegroundColor Yellow
 } else {
     # ------------------------------------------------------------ A：正向注入与读回一致
     Write-Host "== A：正向注入 + read.te 读回一致 ==" -ForegroundColor Cyan

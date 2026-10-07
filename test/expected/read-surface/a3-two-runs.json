@@ -1,0 +1,77 @@
+{
+  "schema": "lightning.cp-a3-evidence/1",
+  "caseId": "read-surface",
+  "caseSha256": "f8ec4823378f441a69eb1016e7c2a5403dc9ec22191aa231867bfd075d882f42",
+  "assertion": "A3：同一固定程序执行两次，产物结构一致（按 docs/control-plane/case-file.md §10 的成文口径）",
+  "conclusion": "green",
+  "a": {
+    "runId": "20261007-082700-read-surface-3",
+    "startedAt": "2026-10-07T08:27:00+08:00",
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 25, "red": 0, "error": 0 },
+    "artifactCount": 20
+  },
+  "b": {
+    "runId": "20261007-082708-read-surface-4",
+    "startedAt": "2026-10-07T08:27:08+08:00",
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 25, "red": 0, "error": 0 },
+    "artifactCount": 20
+  },
+  "comparison": {
+    "tool": "test/expected/compare-runs.mjs",
+    "invocation": "node test/expected/compare-runs.mjs --a <runA> --b <runB> --json-out temp/cp-assets/evidence/a3-rs-compare.json",
+    "exitCode": 0,
+    "same": 21,
+    "different": 0,
+    "overall": "green",
+    "machineReadable": "temp/cp-assets/evidence/a3-rs-compare.json"
+  },
+  "perArtifact": [
+    { "path": "criteria.json", "mode": "canonical-hash-equal", "ok": true, "note": "投影 {overall, counts, criteria[].{id,type,verdict}} 的规范化哈希相同" },
+    { "path": "evidence.json", "mode": "canonical-hash-equal", "ok": true, "note": "投影 {overall, verdict}" },
+    { "path": "world/scene-manifest.json", "mode": "canonical-hash-equal", "ok": true, "note": "整份（含 sha256 与 mismatches——两者实测可复现，故不豁免）" },
+    { "path": "observation.json", "mode": "structural-equal", "ok": true },
+    { "path": "manifest.json", "mode": "structural-equal", "ok": true },
+    { "path": "segments/world.json", "mode": "structural-equal", "ok": true },
+    { "path": "segments/capture.json", "mode": "structural-equal", "ok": true },
+    { "path": "segments/build.json", "mode": "structural-equal", "ok": true },
+    { "path": "segments/read.json", "mode": "structural-equal", "ok": true },
+    { "path": "segments/action.json", "mode": "structural-equal", "ok": true },
+    { "path": "segments/cameras.json", "mode": "structural-equal", "ok": true },
+    { "path": "segments/criteria.json", "mode": "structural-equal", "ok": true },
+    { "path": "segments/evidence.json", "mode": "structural-equal", "ok": true },
+    { "path": "read/blocks.json", "mode": "canonical-hash-equal", "ok": true, "note": "51 KB 的区域读数逐字节稳定" },
+    { "path": "read/te.json", "mode": "canonical-hash-equal", "ok": true },
+    { "path": "read/block.json", "mode": "canonical-hash-equal", "ok": true },
+    { "path": "read/player.json", "mode": "canonical-hash-equal", "ok": true },
+    { "path": "read/overview.json", "mode": "canonical-hash-equal", "ok": true, "note": "含实时时钟与已加载区块计数（两者**按路径/字段名豁免**）" },
+    { "path": "read/diff.json", "mode": "canonical-hash-equal", "ok": true },
+    { "path": "read/run.json", "mode": "presence-only", "ok": true, "note": "**自引用产物**：枚举整个 runs/ 目录，条目数随 run 数增长，不参与值比较（case-file.md §10.5）" },
+    { "path": "case.json", "mode": "structural-equal", "ok": true }
+  ],
+  "_firstAttemptFound": {
+    "note": "**首轮比对是红的（8/21 一致）**，这正是 A3 的价值——它当场照出了口径与实现的具体缺口，而不是给一个笼统的「不一致」：",
+    "findings": [
+      "criteria.json：判据结论逐条相同，只有人读 detail 里嵌了产物字节数 ⇒ 补「投影」口径（只比 {id,type,verdict}）",
+      "evidence.json：同上（只比 {overall,verdict}）",
+      "observation.json：runtimeReads[].summary 嵌 runId；artifacts[].{sha256,bytes} 随产物变化 ⇒ summary 归入「人读文字」（可比结构、不比内容）；sha256/bytes **按路径**豁免",
+      "segments/*.json：jobId 逐 run 递增 ⇒ 豁免（与 jobSeq 同源）",
+      "read/overview.json：世界时钟、天气倒计时、已加载区块计数为实时状态 ⇒ 按字段名/路径豁免",
+      "read/player.json：entityId 由服务端计数器分配 ⇒ 豁免",
+      "read/run.json：自引用产物 ⇒ 改判 presence-only",
+      "**过度豁免的纠正**：初版把 sha256/bytes 列为全局豁免字段，会连带豁免掉 world/scene-manifest.json 的 sha256——那恰恰是 hash-equal 要比的核心值。故改为**按路径**豁免，并在比对器自检里加了一条「场景清单的 sha256 必须参与比较」的断言。",
+      "**豁免最小化**：初版还豁免了 mismatches 与 teReads（taxonomy 草案的建议），实机两轮证明二者逐字可复现 ⇒ **撤回豁免**，并加断言锁住「它们参与比较」。"
+    ]
+  },
+  "evidenceFiles": [
+    "temp/cp-assets/evidence/a3-rs-compare.json",
+    "temp/cp-assets/evidence/a3-rs-1.json",
+    "temp/cp-assets/evidence/a3-rs-2.json",
+    "temp/cp-assets/evidence/baseline-rs.json"
+  ]
+}

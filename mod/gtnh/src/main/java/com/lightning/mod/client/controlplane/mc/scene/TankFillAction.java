@@ -23,7 +23,7 @@ import com.lightning.mod.client.controlplane.mc.ModReflect;
 import com.lightning.mod.client.controlplane.mc.WorldRuntime;
 
 /**
- * {@code scene.tank.fill}（scene，同步，契约 1.6）：向指定位置的机器/储罐注入流体。
+ * {@code scene.tank.fill}（scene，同步，契约 1.7）：向指定位置的机器/储罐注入流体。
  *
  * <h2>它补的是哪一块（#122 的问题本体）</h2>
  * {@code scene.inventory.write} 只碰 {@code IInventory}，而 GT 机器的流体口是<b>内部储罐</b>
@@ -270,7 +270,9 @@ public final class TankFillAction implements ControlAction {
                 + "（常见：机器还没 tick 起来 mTickTimer<=5 / 该面被 isLiquidInput 排除（正面与输出面）/ "
                 + "这台机器的配方表不收该流体 isFluidInputAllowed / 机器的输入被 mInputDisabled 关掉）";
         }
-        return "干跑也是 0，说明瓶颈在容量或流体种类" + "（常见：储罐已满、或罐里已有另一种流体——GT 的 MTEBasicTank.fill 对非同种流体直接返回 0）";
+        return "干跑也是 0，说明瓶颈在容量或流体种类" + "（常见：储罐已满；罐里已有另一种流体——GT 的 MTEBasicTank.fill 对非同种流体直接返回 0；"
+            + "这台机器的配方表不收该流体 isFluidInputAllowed → getRecipeMap().containsInput 为假，"
+            + "实机用 Lava 注空罐即是此因）";
     }
 
     // ------------------------------------------------------------ 读回

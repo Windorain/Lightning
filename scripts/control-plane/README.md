@@ -22,8 +22,8 @@
 | `run-anchor-selftest.ps1` | **PR-3** 离线行为自检：合成夹具跑 `anchor-checks.ps1` 的每条判定，验证好数据绿、坏数据精确红（见 §10.6） |
 | `cases/read-surface.json` | **v1.3（#98）** 读面锚点用例：`read` 段跑读面动作，`criteria` 用 `json-field` 直接引用其产物 + 4 个负对照变体（见 §11.2） |
 | `run-read-surface.ps1` | **v1.3（#98）** 读面验收驱动：B1（只读性）/ D1（自述完备）/ D3（默认值可见）/ D4（失败显式）/ R（哈希可复算与可互算）/ B2（读面进判据）（见 §11） |
-| `cases/tank-fill-live.json` | **v1.6（#122）** 流体注入用例：`te` 步放 LV 化学反应釜 + 4 条 `tanks` 判据 + `world-hash-equals`；负对照变体 `neg-setblock-shell`（`te` 换 `block` 直铺空壳，储罐判据必红） |
-| `run-tank-fill.ps1` | **v1.6（#122）** 流体注入验收驱动：D1（自述完备）/ D3（默认与边界值可见）/ D4（失败显式，含提交期拒绝与执行期失败两种形状）/ A（正向注入 + `read.te` 读回一致）/ N（世界内负对照）。`-InWorld` 才跑 A/N（见 §12） |
+| `cases/tank-fill-live.json` | **v1.7（#122）** 流体注入用例：`te` 步放 LV 化学反应釜 + 4 条 `tanks` 判据 + `world-hash-equals`；负对照变体 `neg-setblock-shell`（`te` 换 `block` 直铺空壳，储罐判据必红） |
+| `run-tank-fill.ps1` | **v1.7（#122）** 流体注入验收驱动：D1（自述完备）/ D3（默认与边界值可见）/ D4（失败显式，含提交期拒绝与执行期失败两种形状）/ A（正向注入 + `read.te` 读回一致）/ N（世界内负对照）。`-InWorld` 才跑 A/N（见 §12） |
 
 脚本只做**编排与调用**：控制面本体在 `mod/gtnh/src/main/java/com/lightning/mod/client/controlplane/`。
 脚本不直接 POST 裸请求——一切动作调用都经 `caller.mjs`（自描述驱动），便于审计「调用方是否真的读了自描述」。
@@ -776,7 +776,7 @@ pwsh -File scripts/control-plane/run-read-surface.ps1 -EvidenceDir <dir> -Action
    damage/maxDamage/displayName/nbt` 这条**非空分支**只经代码审查与单测（NBT 摘要机制本身已由
    `read.te` 的真实箱子 NBT 充分覆盖：复合 + 列表 + 字符串 + int 四种类型都在返回值里）。
    **本条是真实的能力边界，不是「已验收」**：`#99` 落地后应补一条「写入 → 逐槽读回」的实测。
-## 12. 流体注入验收（`cases/tank-fill-live.json` + `run-tank-fill.ps1`，v1.6 / #122）
+## 12. 流体注入验收（`cases/tank-fill-live.json` + `run-tank-fill.ps1`，v1.7 / #122）
 
 ### 12.1 用法
 
@@ -817,7 +817,7 @@ pwsh -File scripts/control-plane/run-tank-fill.ps1 -InWorld -EvidenceDir <dir> -
 满足 hermetic 纪律（第一次世界写动作必须是 `world.rebuild`）。故本脚本**会改世界**，
 不要在别人的验收世界中途跑它。
 
-### 12.5 实测记录（2026-10-07，v1.6）
+### 12.5 实测记录（2026-10-07，v1.7）
 
 | 组 | 结果 |
 |---|---|
@@ -837,3 +837,15 @@ pwsh -File scripts/control-plane/run-tank-fill.ps1 -InWorld -EvidenceDir <dir> -
 入口注 HCl 3000 后它是 `null`/`0`，配方跑完后才变成 `trichlorosilane`/`1000`。
 **拿它断言「注入成功」会把 0 误读成「没注进去」**——这是 #122 实机第二轮踩到的坑（见
 `temp/cp-tank-fill/live-verify-plan.md` §5-D2）。
+
+**「注入后读回 == 注入量」这条断言有时序敏感性（#122 独立复核成文，2026-10-07）**：若机器已具备起跑条件
+（输入物品 + 足量电量），GT 会在**配方启动那一 tick** 按 `MTEBasicMachine.checkRecipe` 的
+`isRecipeInputEqual(true, …)`（consume=true）把**物品与流体输入一次性扣掉**，此后 `read.te` 读到 `0`、
+`drainableFluid` 仍是 `null`——**这不是注入失败**。因此：
+
+- 要断言「注入了多少」，请在**机器未起跑时**读 `/tanks/tanks/<i>/amount`，或直接读 `fill` 返回值里的
+  `after.tanks[<i>].amount`（注入当刻的读数，与配方是否起跑无关）；
+- 决定性对照（实机做过）：重建世界 → **只注 3000 mB、不投任何物品/电池** → 12 s 内 4 次读回恒为
+  `hydrochloricacid_gt5u@3000`、`metaTileCapacity=16000`、`running=false` ⇒ **读路径不分叉**，
+  读到 0 只可能是配方已把它消耗掉；
+- 判据「注入是否真的发生」应取 **`fill.after` + 服务端侧配方结果**（进度/产物），而不是事后单点读罐。

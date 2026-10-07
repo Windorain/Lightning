@@ -43,6 +43,7 @@ public final class CaseParser {
         "world",
         "build",
         "read",
+        "action",
         "capture",
         "cameras",
         "criteria",
@@ -69,6 +70,9 @@ public final class CaseParser {
 
     /** {@code read} 段步骤的允许字段（v1.3，issue #98）。 */
     public static final Set<String> READ_STEP_FIELDS = unmodifiable("action", "params", "path", "role");
+
+    /** {@code action} 段步骤的允许字段（v1.6，issue #103）。 */
+    public static final Set<String> ACTION_STEP_FIELDS = unmodifiable("action", "params", "path", "role", "expect");
 
     /** 变体条目的允许字段。 */
     public static final Set<String> VARIANT_FIELDS = unmodifiable("id", "mutate", "expectCriteriaRed");
@@ -172,6 +176,7 @@ public final class CaseParser {
         CaseFile.World world = parseWorld(o, fields, warnings);
         List<CaseFile.Step> build = parseBuild(o, world, fields, warnings);
         List<CaseFile.ReadStep> read = parseRead(o, fields, warnings);
+        List<CaseFile.ActionStep> action = parseAction(o, fields, warnings);
         JsonElement capture = parseCapture(o, fields, warnings);
         JsonArray cameras = parseCameras(o, fields, warnings);
         List<CaseFile.Criterion> criteria = parseCriteria(o, fields, warnings);
@@ -196,6 +201,7 @@ public final class CaseParser {
             world,
             build,
             read,
+            action,
             capture,
             cameras,
             criteria,
@@ -489,6 +495,69 @@ public final class CaseParser {
             String role = stringOf(step, "role", ctx + ".role", fields);
             out.add(
                 new CaseFile.ReadStep(action, params == null ? new JsonObject() : Json.copyObject(params), path, role));
+        }
+        return out;
+    }
+
+    /**
+     * 解析 {@code action} 段（v1.6，issue #103）：L2 编排步骤清单。
+     *
+     * <p>
+     * 每步 {@code {action:"scene.player.pose", params:{…}, path:"action/0-pose.json", role?, expect?}}：
+     * 执行该动作，把结果 JSON 落 run 目录的 {@code path} 并登记为产物；{@code expect} 非空时
+     * <b>当场</b>按 RFC 6901 指针断言（逐步断言：该步没达成就当场失败，不会拖到 criteria 段才发现）。
+     *
+     * <p>
+     * 这里只做「须为 array + 元素须为 object + 未知字段 + 必填字段形态」；字段级校验
+     * （动作名必须已注册且为同步动作、path 合法且不与既有产物冲突、expect 指针形态）在
+     * {@link CaseValidator}。
+     *
+     * @return 原样深拷的编排步骤；未声明返回空列表（不是 null：调用方按「段为空」处理）
+     */
+    private List<CaseFile.ActionStep> parseAction(JsonObject o, Fields fields, List<String> warnings) {
+        List<CaseFile.ActionStep> out = new ArrayList<CaseFile.ActionStep>();
+        if (!o.has("action")) {
+            return out;
+        }
+        JsonArray arr = Json.optArray(o, "action");
+        if (arr == null) {
+            fields.add("action", "须为 array（编排步骤 [{action,params?,path,role?,expect?}]）");
+            return out;
+        }
+        for (int i = 0; i < arr.size(); i++) {
+            String ctx = "action[" + i + "]";
+            JsonElement e = arr.get(i);
+            if (e == null || !e.isJsonObject()) {
+                fields.add(ctx, "步骤须为 object {action,params?,path,role?,expect?}");
+                continue;
+            }
+            JsonObject step = e.getAsJsonObject();
+            checkUnknown(step, ACTION_STEP_FIELDS, ctx, fields, warnings);
+            String action = stringOf(step, "action", ctx + ".action", fields);
+            if (action == null) {
+                fields.add(ctx + ".action", "必填（任意已注册的同步动作名，如 scene.player.pose / player.place_block）");
+            }
+            String path = stringOf(step, "path", ctx + ".path", fields);
+            if (path == null) {
+                fields.add(ctx + ".path", "必填（run 目录内相对路径，如 action/0-pose.json）");
+            }
+            JsonObject params = Json.optObject(step, "params");
+            if (step.has("params") && params == null) {
+                fields.add(ctx + ".params", "须为 object");
+            }
+            String role = stringOf(step, "role", ctx + ".role", fields);
+            JsonObject expect = Json.optObject(step, "expect");
+            if (step.has("expect") && expect == null) {
+                fields.add(ctx + ".expect", "须为 object {指针: 期望值}（RFC 6901 指针 → 期望值）");
+            }
+            out.add(
+                new CaseFile.ActionStep(
+                    action,
+                    params == null ? new JsonObject() : Json.copyObject(params),
+                    path,
+                    role,
+                    expect == null ? null : Json.copyObject(expect),
+                    expect != null));
         }
         return out;
     }

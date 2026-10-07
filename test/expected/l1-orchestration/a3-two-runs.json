@@ -1,0 +1,61 @@
+{
+  "schema": "lightning.cp-a3-evidence/1",
+  "caseId": "l1-orchestration",
+  "caseSha256": "71b254ae8f83bf688fcc68840ccb8f507d508c03b490d89cb8021de0058f6515",
+  "assertion": "A3：同一固定程序执行两次，产物结构一致（按 docs/control-plane/case-file.md §10 的成文口径）",
+  "conclusion": "green",
+  "a": {
+    "runId": "20261007-082628-l1-orchestration-1",
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 16, "red": 0, "error": 0 },
+    "artifactCount": 22
+  },
+  "b": {
+    "runId": "20261007-082652-l1-orchestration-2",
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 16, "red": 0, "error": 0 },
+    "artifactCount": 22
+  },
+  "comparison": {
+    "tool": "test/expected/compare-runs.mjs",
+    "invocation": "node test/expected/compare-runs.mjs --a <runA> --b <runB> --json-out temp/cp-assets/evidence/a3-l1-compare.json",
+    "exitCode": 0,
+    "same": 23,
+    "different": 0,
+    "overall": "green",
+    "machineReadable": "temp/cp-assets/evidence/a3-l1-compare.json"
+  },
+  "secondPair": {
+    "_why": "本用例跑了**两对**（4 次）——首对在整跑**修好步骤间收敛之后**才有意义（见 _firstAttemptWasRed）。第二对是修复后的独立复跑，两对都绿：",
+    "a": "20261007-083936-l1-orchestration-1",
+    "b": "20261007-083947-l1-orchestration-2",
+    "same": 23,
+    "different": 0,
+    "comparisonFile": "temp/cp-assets/evidence/a3-l1-compare2.json"
+  },
+  "_firstAttemptWasRed": {
+    "note": "**首轮实机是红的，而且那次红是真实的、有信息量的**——它照出了「单次 advance 内逐步执行」这条设计的一个必然后果：",
+    "observed": {
+      "runId": "20261007-081044-l1-orchestration-3",
+      "symptom": "criteria=red（2 条），evidence=green——判据红而期望证据绿",
+      "detail": "player.move 的 serverBefore 还是 scene.player.pose **之前**的位置；movedServerBlocks=0、observed=false（客户端前移 2.2 格后被服务端拽回）"
+    },
+    "rootCause": "L1 的请求是包：客户端发 C03/C07/C08，服务端在它自己线程的 tick 里处理。而 action 段在**单次 advance** 里逐条跑完 ⇒ 上一步的包还没被服务端处理，下一步就已经在读了。第一步的修复（只对 player.* 等）不够——scene.player.pose 走 S08（服务端→客户端方向），而阻塞客户端 tick 线程会让客户端自己那一拍永远不来，S08 躺在入站队列里。第二步的修复是**显式把入站队列推出去**（PlayerSession.completeClientRequest：flush 入站 + 等服务端 tick），与 L1 动作回读前的收尾同一份实现。",
+    "fixedBy": "CaseRunAction.settleBetweenSteps（除 read.* 之外每步之后做一次往返收敛）",
+    "regressionLock": "本次修复的产物是「步骤间收敛 + settleMs 可见」，其行为由修复后的两次整跑（本文件 a/b 与 secondPair）覆盖"
+  },
+  "_alsoFound": {
+    "shutdownMergeRule": "**同一次实机还照出了 core.shutdown 的一个致命缺陷**：那些红色的 run 里 criteria.overall=red 而 evidence.overall=green，而 core.shutdown 初版只读 evidence.json ⇒ 它会对一次红跑返回 **0「判据全绿」**。已修（读两份、任一非绿即红，与 CaseRunAction.overall() 逐字同源），并由 ShutdownActionTest.criteriaRedWithEvidenceGreenYieldsTwo 钉死。"
+  },
+  "evidenceFiles": [
+    "temp/cp-assets/evidence/a3-l1-compare.json",
+    "temp/cp-assets/evidence/a3-l1-compare2.json",
+    "temp/cp-assets/evidence/baseline-l1.json",
+    "temp/cp-assets/evidence/l1-a3-1.json",
+    "temp/cp-assets/evidence/l1-a3-2.json"
+  ]
+}

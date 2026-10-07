@@ -40,7 +40,7 @@ import com.lightning.mod.client.controlplane.mc.GtFluids;
  *
  * <h2>为什么自描述也要断言</h2>
  * 「没有自描述的动作视为不存在」（需求书 §8.1）：{@code since}/{@code returns}/示例缺一项，
- * 无先验知识的调用方就调不出来。{@code since} 必须是 <b>1.6</b>（本动作的引入版本），
+ * 无先验知识的调用方就调不出来。{@code since} 必须是 <b>1.7</b>（本动作的引入版本，收口批次裁决），
  * 且契约版本必须 ≥ 它——否则目录自相矛盾（D1/D3 判红）。
  */
 public class TankFillFamilyTest {
@@ -371,7 +371,7 @@ public class TankFillFamilyTest {
         ActionRegistrar.registerAll(null, registry);
         ActionDescriptor d = registry.descriptor(TankFillAction.NAME);
         assertNotNull("scene.tank.fill 必须已注册", d);
-        assertEquals("1.6", d.since());
+        assertEquals("1.7", d.since());
         assertTrue("是 scene 级可写动作", d.writable());
         assertTrue(
             d.description(),
@@ -398,7 +398,7 @@ public class TankFillFamilyTest {
                 "动作 " + name + " 的 since=" + d.since() + " 高于契约版本 " + Contract.VERSION + "（自述目录会自相矛盾）",
                 since <= contract);
         }
-        assertTrue("契约版本 " + Contract.VERSION + " 必须 ≥ 本动作 since 1.6", Contract.VERSION.compareTo("1.6") >= 0);
+        assertTrue("契约版本 " + Contract.VERSION + " 必须 ≥ 本动作 since 1.7", Contract.VERSION.compareTo("1.7") >= 0);
     }
 
     /**
