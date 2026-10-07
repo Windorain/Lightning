@@ -11,6 +11,7 @@ import com.lightning.mod.client.controlplane.core.ErrorCodes;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.Tier;
 import com.lightning.mod.client.controlplane.mc.input.InputCapabilities;
+import com.lightning.mod.client.controlplane.mc.input.InputExpiryPump;
 import com.lightning.mod.client.controlplane.mc.input.InputRuntimeImpl;
 import com.lightning.mod.client.controlplane.mc.input.api.InputStateProvider;
 
@@ -145,23 +146,32 @@ public final class InputStateAction implements ControlAction {
     }
 
     /**
-     * 线程判定：运行时**已绑定** tick 线程时才给结论，未绑定时如实回 {@code null}（= 无法判定）。
+     * 线程判定：两条证据按优先级取用，都没有时如实回 {@code null}（= **无法判定**）。
+     *
+     * <ol>
+     * <li><b>运行时的 owner 线程</b>（权威）：{@link InputRuntimeImpl#onOwnerThread()} 在未绑定时返回
+     * {@code true}（它的语义是「没有别的线程占着」），直接拿来当「确实在 tick 线程上」会把「未验证」
+     * 冒充成「已验证为真」，故先看 {@code ownerThreadName() == null} 决定这条路是否可用；
+     * 绑定发生在步进输入动作的 {@code rt.tick()}。</li>
+     * <li><b>结算泵捕获的 tick 线程</b>（补充证据）：泵只由 {@code ControlPlaneTickHandler} 的
+     * {@code ClientTickEvent} 调用，因此它首次调用时的线程**按构造**就是 tick 线程。
+     * 实机 L-4 暴露过缺口：没有任何输入动作跑过时 owner 线程还没绑定，只看第 1 条会让
+     * {@code input.state} 明明在 {@code Client thread} 上却报 {@code thread.verified:false}。</li>
+     * </ol>
      *
      * <p>
-     * {@link InputRuntimeImpl#onOwnerThread()} 在未绑定时返回 {@code true}（它的语义是「没有别的线程占着」），
-     * 直接拿来当「确实在 tick 线程上」会把「未验证」冒充成「已验证为真」。
-     * 因此这里先看 {@code ownerThreadName() == null} ⇒ {@code null}，让组装侧把
-     * {@code thread.verified=false} 如实写进结果。
+     * 两条都没有（泵从未被调用、运行时从未绑定）⇒ 回 {@code null}，让组装侧把
+     * {@code thread.verified=false} 与「未判定」的理由如实写进结果——**不**猜。
      */
     static final class OwnerThreadCheck implements InputStateProviderImpl.TickThreadCheck {
 
         @Override
         public Boolean isTickThread() {
             InputRuntimeImpl rt = InputRuntimeImpl.shared();
-            if (rt == null || rt.ownerThreadName() == null) {
-                return null;
+            if (rt != null && rt.ownerThreadName() != null) {
+                return Boolean.valueOf(rt.onOwnerThread());
             }
-            return Boolean.valueOf(rt.onOwnerThread());
+            return InputExpiryPump.sameThread(InputExpiryPump.capturedTickThread(), Thread.currentThread());
         }
     }
 

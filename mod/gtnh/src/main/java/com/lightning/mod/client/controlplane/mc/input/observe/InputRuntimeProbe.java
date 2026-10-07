@@ -271,9 +271,15 @@ public final class InputRuntimeProbe implements InputStateProviderImpl.TickProbe
         try {
             Field f = keyboardClass.getField("eventQueue");
             Object queue = f.get(null);
-            if (queue instanceof java.util.Collection) {
-                b.keyboardQueueCapacity(((java.util.Collection<?>) queue).size());
+            if (queue != null && queue.getClass()
+                .isArray()) {
+                // 只有**定长数组**的 length 才是「容量」。
+                b.keyboardQueueCapacity(java.lang.reflect.Array.getLength(queue));
             }
+            // else：集合的 size() 是**当前条数**（即 depth），不是容量。
+            // 曾经这里把 ((Collection) queue).size() 当容量上报 —— 实机读数因此是 1（seed 哨兵）
+            // 而不是契约 §5.2 冻结的 256，是**量纲混淆**（depth 与 capacity 同源）。
+            // 现在**不写** capacity，交由 provider 按契约常量上报并附 source 说明（如实留痕，不猜）。
         } catch (Throwable t) {
             b.warn("读取 Keyboard.eventQueue 失败（capacity 落契约常量）: " + t);
         }

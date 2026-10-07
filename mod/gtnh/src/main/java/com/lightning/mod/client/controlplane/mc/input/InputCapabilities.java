@@ -292,7 +292,8 @@ public final class InputCapabilities {
         l.add("GUI 截图取证面不存在（shot.* 只 renderWorld + 强制 hideGUI）");
         l.add("read.input 读面不存在（注入有没有生效缺第二观测面）");
         l.add("场景守卫会关聊天框（armed 期间每 tick displayGuiScreen(null)）");
-        l.add("§9.2 的 G1 扩展未实现（case-file.md §3.2 的同步性口径、CaseValidator 白名单、CaseRunAction 段内跨 tick 推进）");
+        l.add(
+            "§9.2 的 G1 扩展**已实现、待实机端到端验证**（case-file.md §3.2 的同步性口径、CaseValidator 白名单、CaseRunAction 段内跨 tick 推进；判据是 down→跨帧→release→读断言在真机上成立）");
         NOT_IMPLEMENTED = Collections.unmodifiableList(l);
     }
 
