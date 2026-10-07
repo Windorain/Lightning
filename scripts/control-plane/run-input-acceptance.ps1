@@ -21,13 +21,17 @@
     world —— 真实世界（world.rebuild 建托管世界 cp_input_live，void:true）：W1..W8。
     g1    —— cases/input-multitick.json 的 action 段（依赖 feat/cp-input-steps 的合入）；
              未实现时输出 blocked-by-G1（**不是** pass，也不是实现缺陷）。
-    all   —— pre → menu → world → g1（默认）。
+    extra —— #160 的三条残余判据（E1 组合键 / E2 队列满 / E3 产物哈希）：
+              pre → 托管世界重建（**复用 world 段的同一实现**，不另起一套）→ E1 → E2 → E3。
+              可用 -Only E1|E2|E3 单条重跑（只对 -Stage extra 有效）。用法与口径见 README §15.8。
+    all   —— pre → menu → world → g1（默认；**不含 extra**，保持既有行为逐条不变）。
 
   判定口径的三条硬纪律（照 Lead 的验收口径，不放宽）：
     ① 负对照必须真变红：M7/M8/M9/M10 要求「非 0 退出 **且** 错误码命中」；
     ② 跳过不算 pass：M12 在会话内无法改变窗口尺寸时记 skipped-with-reason，计入 summary 的 skipped
        并让退出码非全绿；
-    ③ G1 未实现记 blocked（blocked-by-G1），同样非全绿。
+    ③ G1 未实现记 blocked（blocked-by-G1），同样非全绿。extra 段的 E2 同理：单作业内构造不出
+       「队列满」触发条件时记 blocked-with-reason（**不许**改判成 pass、也不许降级成别的断言）。
 
   退出码：0 全绿；2 有断言红（含 skipped / blocked）；3 管线级致命（server.json 超时 / 客户端早退）；
           4 前置检查或编排自身失败。
@@ -39,6 +43,14 @@
 .EXAMPLE
   # 只重跑世界段（自己起停客户端）
   pwsh -File scripts/control-plane/run-input-acceptance.ps1 -Stage world -Port 23314
+
+.EXAMPLE
+  # 只跑 extra 段（E1/E2/E3；先跑 pre，再重建托管世界）
+  pwsh -File scripts/control-plane/run-input-acceptance.ps1 -Stage extra -Port 23314
+
+.EXAMPLE
+  # 单条重跑（只跑 E2；pre 与世界准备仍会先跑）
+  pwsh -File scripts/control-plane/run-input-acceptance.ps1 -Stage extra -Only E2 -Port 23314
 
 .NOTES
   runClient 是独占资源（Gradle 锁 + 端口 + 世界存档）：用前必须按 AGENTS.md 的四步窗口纪律申请，
@@ -56,9 +68,20 @@ param(
     [int]$Port = 23314,
     # 等待 server.json / tokens.json 的上限（分钟）
     [int]$ClientReadyTimeoutMin = 8,
-    # 只跑哪个 stage（all|pre|menu|world|g1）
-    [ValidateSet('all', 'pre', 'menu', 'world', 'g1')]
+    # 只跑哪个 stage（all|pre|menu|world|g1|extra）
+    [ValidateSet('all', 'pre', 'menu', 'world', 'g1', 'extra')]
     [string]$Stage = 'all',
+    # extra 段里只跑哪几条判据（空 = E1/E2/E3 全跑）；只对 -Stage extra 有效
+    [ValidateSet('E1', 'E2', 'E3')]
+    [string[]]$Only = @(),
+    # E1 的两个测量窗口各持续多少 tick（对照与潜行各一段；每 tick 位移按窗口内的 tick 增量折算）
+    [int]$E1HoldTicks = 60,
+    # E1 相位间静置 tick 数：虚空 + 创造飞行，松开键后仍会滑行；不静置会把上一段的余速算进下一段
+    [int]$E1SettleTicks = 30,
+    # E2 的填充步数（必须 ≫ 键盘队列容量 256，才谈得上「远超容量」）
+    [int]$E2FillSteps = 300,
+    # E2 投递前静置 tick 数：让 E1 留下的飞行余速衰减掉，否则「零写入」会被余速撞红
+    [int]$E2SettleTicks = 40,
     # 归档根（默认 D:\Workspace\Lightning\temp\control-plane）
     [string]$ArchiveRoot = 'D:\Workspace\Lightning\temp\control-plane',
     # 单次动作调用（含 case.run / world.rebuild）的 sync 超时（毫秒）
@@ -376,6 +399,115 @@ function Restore-LightningCfg {
 }
 
 # ---------------------------------------------------------------------------
+# 托管世界重建：world 段与 extra 段**共用同一实现**（不另起一套）
+#   参数逐字保持 world 段既有取值（folder/seed/void/base/settleTicks），label 也保持
+#   'world-rebuild' ⇒ world 段的调用形状与证据命名一个字节都没变。
+# ---------------------------------------------------------------------------
+function Invoke-ManagedWorldRebuild {
+    $rebuildParams = @{
+        folder = 'cp_input_live'; seed = 20261008; void = $true
+        base = @(64, 12, 64); settleTicks = 60; confirm = $true
+    }
+    return (Invoke-Cp -Action 'world.rebuild' -Params $rebuildParams -Label 'world-rebuild' -Sync -Tier 'scene' -TimeoutMs $ActionTimeoutMs)
+}
+
+# 编排守卫 O.rebuild（驱动自加，不是 Lead 判据）
+function Add-ManagedWorldRebuildCheck {
+    param($Trial)
+    Add-Check (New-CpCheck 'O.rebuild' $(if ($Trial.exitCode -eq 0) { 'pass' } else { 'fail' }) "world.rebuild(cp_input_live, void) 退出码 $($Trial.exitCode)")
+}
+
+# ---------------------------------------------------------------------------
+# E3 用的只读 HTTP 直连（**只有产物清单与产物下载**走这里）
+#   为什么可以不走 caller.mjs：caller.mjs 是**动作**调用方（POST /cp/v1/actions/{name}，
+#   按自描述构造请求体），而产物清单/下载是 GET 只读端点、没有自描述可依
+#   （CoreEndpoints.java:166/173 注册；tier=OBSERVE）。发现顺序与 caller.mjs 同源：
+#   先读 server.json 拿 port，再读 tokens.json 拿 observe token，**不猜端口**。
+# ---------------------------------------------------------------------------
+function Get-CpHttpContext {
+    $info = Read-JsonFile $serverJsonPath
+    $tokens = Read-JsonFile $tokensJsonPath
+    if ($null -eq $info -or $null -eq $tokens) { return $null }
+    $port = Get-CpProp $info 'port'
+    $tok = Get-CpProp (Get-CpProp $tokens 'tokens') 'observe'
+    if ($null -eq $port -or [string]::IsNullOrWhiteSpace([string]$tok)) { return $null }
+    return [pscustomobject]@{
+        base    = ("http://127.0.0.1:{0}/cp/v1" -f $port)
+        headers = @{ Authorization = "Bearer $tok" }
+    }
+}
+
+# GET /cp/v1/artifacts/{runId} → data（清单原文同时落归档）；失败返回 $null 并落错误文本
+function Get-CpArtifactManifest {
+    param([string]$RunId, [string]$OutDir)
+    $ctx = Get-CpHttpContext
+    if ($null -eq $ctx) { return $null }
+    try {
+        $resp = Invoke-RestMethod -Uri "$($ctx.base)/artifacts/$RunId" -Headers $ctx.headers -Method Get -TimeoutSec 60
+        $data = if (Test-CpHasProp $resp 'data') { Get-CpProp $resp 'data' } else { $resp }
+        try { ($data | ConvertTo-Json -Depth 14) | Set-Content -Path (Join-Path $OutDir 'e3-manifest.json') -Encoding utf8NoBOM } catch { }
+        return $data
+    } catch {
+        try { Set-Content -Path (Join-Path $OutDir 'e3-manifest.error.txt') -Value "$_" -Encoding utf8NoBOM } catch { }
+        return $null
+    }
+}
+
+# GET /cp/v1/artifacts/{runId}/{path} → 下载字节 + 复算 sha256（返回记录，不做判定）
+function Get-CpArtifactBytes {
+    param([string]$RunId, [string]$RelPath, [string]$DestDir)
+    $ctx = Get-CpHttpContext
+    $dest = Join-Path $DestDir ($RelPath -replace '[\\/]', '__')
+    $ok = $false
+    $err = ''
+    if ($null -ne $ctx) {
+        try {
+            Invoke-WebRequest -Uri "$($ctx.base)/artifacts/$RunId/$RelPath" -Headers $ctx.headers -OutFile $dest -TimeoutSec 180 | Out-Null
+            $ok = $true
+        } catch { $err = "$_" }
+    } else {
+        $err = 'HTTP 上下文不可用（server.json/tokens.json 读不到）'
+    }
+    $sha = ''
+    $bytes = 0
+    if ($ok -and (Test-Path $dest)) {
+        $sha = (Get-FileHash -Algorithm SHA256 -Path $dest).Hash.ToLowerInvariant()
+        $bytes = (Get-Item $dest).Length
+    }
+    return [pscustomobject]@{ path = $RelPath; dest = $dest; downloadOk = $ok; actualSha256 = $sha; actualBytes = $bytes; error = $err }
+}
+
+# E2 的填充用例：**现场生成在归档目录**（300 步不进仓；避免仓里出现巨型用例）
+#   填充键位选**未绑定**的 LWJGL 键码（依据：input.state.keyCatalog 是运行期键位注册表的实读，
+#   不在其中的键码没有任何 KeyBinding 绑到它 ⇒ 事件即使被消费也不产生世界写入）。
+#   动作用 action:"up"：抬起一个没按下的键是**无害**的（wasHeld=false），且仍是「写进队列的一条事件」
+#   ⇒ 「已入队事件即使被消费也不产生世界写入」这一前提可辩护。
+function New-E2FillCaseFile {
+    param([string]$Path, [int]$KeyCode, [int]$Steps)
+    # 注意：PowerShell 变量名大小写不敏感 ⇒ 局部名不能叫 $steps（会与 [int]$Steps 同名冲突）
+    $stepList = New-Object System.Collections.ArrayList
+    for ($i = 0; $i -lt $Steps; $i++) {
+        [void]$stepList.Add([ordered]@{
+                action = 'input.key'
+                params = [ordered]@{ key = $KeyCode; action = 'up' }
+                path   = ("action/{0:d4}-up-unbound.json" -f $i)
+                role   = 'e2-filler'
+                expect = [ordered]@{ '/delivered' = 1 }
+            })
+    }
+    $doc = [ordered]@{
+        schema = 'lightning.case/1'
+        id     = 'input-queue-fill-extra'
+        label  = ("E2 队列填充探针：单个 case.run 作业内压入 {0} 条键事件（未绑定键码 {1}，全部 action=up ⇒ 功能惰性）" -f $Steps, $KeyCode)
+        action = @($stepList)
+    }
+    $parent = Split-Path $Path -Parent
+    if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    ($doc | ConvertTo-Json -Depth 8) | Set-Content -Path $Path -Encoding utf8NoBOM
+    return $Path
+}
+
+# ---------------------------------------------------------------------------
 # 前置检查（编排自身失败 ⇒ 退出码 4）
 # ---------------------------------------------------------------------------
 Write-Step "前置检查"
@@ -392,6 +524,10 @@ Write-Ok "mcDataDir: $mcDataDir"
 
 if ($Stage -in @('all', 'world', 'g1') -and -not (Test-Path $casePath)) {
     Write-Err2 "找不到 G1 用例文件: $casePath"; exit 4
+}
+
+if ($Only.Count -gt 0 -and $Stage -ne 'extra') {
+    Write-Err2 "-Only 只对 -Stage extra 有效（当前 -Stage $Stage；-Only = $($Only -join ','))"; exit 4
 }
 
 if (-not $SkipClientStart) {
@@ -566,12 +702,8 @@ try {
 
         # =============================================================== world
         if ($st -eq 'world') {
-            $rebuildParams = @{
-                folder = 'cp_input_live'; seed = 20261008; void = $true
-                base = @(64, 12, 64); settleTicks = 60; confirm = $true
-            }
-            $rb = Invoke-Cp -Action 'world.rebuild' -Params $rebuildParams -Label 'world-rebuild' -Sync -Tier 'scene' -TimeoutMs $ActionTimeoutMs
-            Add-Check (New-CpCheck 'O.rebuild' $(if ($rb.exitCode -eq 0) { 'pass' } else { 'fail' }) "world.rebuild(cp_input_live, void) 退出码 $($rb.exitCode)")
+            $rb = Invoke-ManagedWorldRebuild
+            Add-ManagedWorldRebuildCheck $rb
 
             $w1 = Invoke-Cp -Action 'core.status' -Params @{} -Label 'w1-status' -Sync -Tier 'observe'
             Add-Check (Test-InputW1WorldManaged -Trial $w1)
@@ -722,6 +854,184 @@ try {
             Add-Check (Test-InputG1CaseRun -ValidationTrial $val -RunTrial $run -HeldAfter $held -StepArtifacts $stepArtifacts -CasePath $casePath)
             continue
         }
+
+        # =============================================================== extra
+        if ($st -eq 'extra') {
+            $runE1 = ($Only.Count -eq 0) -or ($Only -contains 'E1')
+            $runE2 = ($Only.Count -eq 0) -or ($Only -contains 'E2')
+            $runE3 = ($Only.Count -eq 0) -or ($Only -contains 'E3')
+            Add-Note ("extra 段的 -Only = " + $(if ($Only.Count -eq 0) { '(空 ⇒ E1/E2/E3 全跑)' } else { ($Only -join ',') }) + "；本轮实跑 = " + (@(@('E1', 'E2', 'E3') | Where-Object { ($Only.Count -eq 0) -or ($Only -contains $_) }) -join ','))
+
+            # ---- 世界准备：复用 world 段的托管世界重建流程（同一函数、同一参数、同一 label）
+            Write-Step 'extra 世界准备（复用 world 段的 world.rebuild 流程）'
+            $rb = Invoke-ManagedWorldRebuild
+            Add-ManagedWorldRebuildCheck $rb
+            $exStatus = Invoke-Cp -Action 'core.status' -Params @{} -Label 'extra-w1-status' -Sync -Tier 'observe'
+            Add-Check (Test-InputW1WorldManaged -Trial $exStatus)
+
+            # ============================================================= E1
+            if ($runE1) {
+                Write-Step ("E1：组合键（潜行修饰）被世界链按序消费；每段窗口 {0} tick、段间静置 {1} tick" -f $E1HoldTicks, $E1SettleTicks)
+                # 卫生：先清掉可能的残留持键（幂等），再静置——虚空 + 创造飞行，松开后仍会滑行
+                $e1Rel0 = Invoke-Cp -Action 'input.release' -Params @{ confirm = $true } -Label 'e1-hygiene-release' -Sync -Tier 'scene'
+                $e1SettleA = Wait-ClientTicks -TargetTicks $E1SettleTicks -RoundSec 6 -ReadPlayerOnly -BudgetSeconds (Get-WaitBudget $E1SettleTicks)
+                Add-Note ("E1 前置：input.release 退出码 $($e1Rel0.exitCode)（卫生步骤，不作判据）；静置 {0} tick 实测增量={1}" -f $E1SettleTicks, $e1SettleA.tickDelta)
+
+                # ---- 对照相位：只按 key.forward（这就是任务书要求的负对照形态）
+                $e1PlainDown = Invoke-Cp -Action 'input.key' -Params @{ key = 'key.forward'; action = 'down'; confirm = $true } -Label 'e1-plain-down' -Sync -Tier 'scene'
+                $e1TickPlain0 = Get-ClientTick
+                $e1PlainA = Get-PlayerPos (Invoke-Cp -Action 'read.player' -Params @{} -Label 'e1-plain-pos-a' -Sync -Tier 'observe')
+                $e1WaitPlain = Wait-ClientTicks -TargetTicks $E1HoldTicks -RoundSec 8 -ReadPlayerOnly -BudgetSeconds (Get-WaitBudget $E1HoldTicks)
+                $e1PlainB = Get-PlayerPos (Invoke-Cp -Action 'read.player' -Params @{} -Label 'e1-plain-pos-b' -Sync -Tier 'observe')
+                $e1TickPlain1 = Get-ClientTick
+                $e1PlainRelease = Invoke-Cp -Action 'input.release' -Params @{ confirm = $true } -Label 'e1-plain-release' -Sync -Tier 'scene'
+                $e1PlainTicks = if ($null -ne $e1TickPlain0 -and $null -ne $e1TickPlain1) { [int]([long]$e1TickPlain1 - [long]$e1TickPlain0) } else { 0 }
+
+                # ---- 段间静置：让对照相位的余速衰减（否则会被算进潜行相位）
+                $e1SettleB = Wait-ClientTicks -TargetTicks $E1SettleTicks -RoundSec 6 -ReadPlayerOnly -BudgetSeconds (Get-WaitBudget $E1SettleTicks)
+
+                # ---- 潜行相位：key.sneak down → key.forward down（顺序即任务书要求的事件序）
+                $e1SneakDown = Invoke-Cp -Action 'input.key' -Params @{ key = 'key.sneak'; action = 'down'; confirm = $true } -Label 'e1-sneak-down' -Sync -Tier 'scene'
+                $e1FwdDown = Invoke-Cp -Action 'input.key' -Params @{ key = 'key.forward'; action = 'down'; confirm = $true } -Label 'e1-sneak-forward-down' -Sync -Tier 'scene'
+                $e1TickSneak0 = Get-ClientTick
+                $e1SneakA = Get-PlayerPos (Invoke-Cp -Action 'read.player' -Params @{} -Label 'e1-sneak-pos-a' -Sync -Tier 'observe')
+                # 保持期间的 input.state：取 held[].gameBindingPressed 的**回读值**（不是推测）
+                $e1HoldState = Invoke-Cp -Action 'input.state' -Params @{} -Label 'e1-hold-state' -Sync -Tier 'observe'
+                $e1WaitSneak = Wait-ClientTicks -TargetTicks $E1HoldTicks -RoundSec 8 -ReadPlayerOnly -BudgetSeconds (Get-WaitBudget $E1HoldTicks)
+                $e1SneakB = Get-PlayerPos (Invoke-Cp -Action 'read.player' -Params @{} -Label 'e1-sneak-pos-b' -Sync -Tier 'observe')
+                $e1TickSneak1 = Get-ClientTick
+                $e1HoldStateEnd = Invoke-Cp -Action 'input.state' -Params @{} -Label 'e1-hold-state-end' -Sync -Tier 'observe'
+                $e1SneakTicks = if ($null -ne $e1TickSneak0 -and $null -ne $e1TickSneak1) { [int]([long]$e1TickSneak1 - [long]$e1TickSneak0) } else { 0 }
+
+                # ---- 收尾：两键 up + input.release 兜底（顺序与按下相反）
+                $e1SneakUp = Invoke-Cp -Action 'input.key' -Params @{ key = 'key.sneak'; action = 'up'; confirm = $true } -Label 'e1-sneak-up' -Sync -Tier 'scene'
+                $e1FwdUp = Invoke-Cp -Action 'input.key' -Params @{ key = 'key.forward'; action = 'up'; confirm = $true } -Label 'e1-sneak-forward-up' -Sync -Tier 'scene'
+                $e1Release = Invoke-Cp -Action 'input.release' -Params @{ confirm = $true } -Label 'e1-release' -Sync -Tier 'scene'
+
+                Add-Check (Test-InputE1SneakModifier -PlainPosA $e1PlainA -PlainPosB $e1PlainB -PlainTicks $e1PlainTicks -SneakPosA $e1SneakA -SneakPosB $e1SneakB -SneakTicks $e1SneakTicks)
+                Add-Check (Test-InputE1SneakReadback -HoldTrial $e1HoldState)
+                Add-ProbeNote ("E1 保持结束时的 input.state 回读（exit={0}）：{1}" -f $e1HoldStateEnd.exitCode, (Format-CpTrial $e1HoldStateEnd))
+                Add-Note ("E1 调用退出码：plain down=$($e1PlainDown.exitCode) plain release=$($e1PlainRelease.exitCode) sneak down=$($e1SneakDown.exitCode) forward down=$($e1FwdDown.exitCode) sneak up=$($e1SneakUp.exitCode) forward up=$($e1FwdUp.exitCode) release=$($e1Release.exitCode)（调用形状，不作判据）")
+                Add-Note ("E1 的 tick 口径：位置窗口 [读 A 前的 core.status, 读 B 后的 core.status]，对照 {0} tick（等待轮内实测 {1}）、潜行 {2} tick（等待轮内实测 {3}）——窗口含两次读数各自的 tick 开销，两侧同形，比值不受影响" -f $e1PlainTicks, $e1WaitPlain.tickDelta, $e1SneakTicks, $e1WaitSneak.tickDelta)
+            }
+
+            # ============================================================= E2
+            if ($runE2) {
+                Write-Step ("E2：队列满 ⇒ CP-STATE-001 且零写入；填充 {0} 步、投递前静置 {1} tick" -f $E2FillSteps, $E2SettleTicks)
+                # 选一个**未绑定**的键码：input.state.keyCatalog 是运行期键位注册表的实读
+                # （McInputHost.java:165-187 / InputRuntimeProbe.java:434-455），不在其取值集里的键码
+                # 没有任何 KeyBinding 绑到它 ⇒ 事件即使被消费也不产生世界写入（功能惰性）。
+                $e2Pick = Invoke-Cp -Action 'input.state' -Params @{} -Label 'e2-pick-keycode' -Sync -Tier 'observe'
+                $e2Catalog = Get-CpProp (Get-CpTrialResult $e2Pick) 'keyCatalog'
+                $e2Bound = New-Object System.Collections.ArrayList
+                if ($null -ne $e2Catalog) {
+                    foreach ($prop in @($e2Catalog.PSObject.Properties)) { [void]$e2Bound.Add([int]$prop.Value) }
+                }
+                $e2FillerCode = -1
+                for ($c = 1; $c -le 254; $c++) { if (-not $e2Bound.Contains($c)) { $e2FillerCode = $c; break } }
+
+                if ($e2Bound.Count -eq 0 -or $e2FillerCode -lt 0) {
+                    # 判定仍在纯函数里：这里只把「拿不到未绑定键码」的事实交给它
+                    Add-Check (Test-InputE2QueueFullSingleJob -ValidateTrial $null -RunTrial $null -BeforeState $null -AfterState $null -StepArtifacts @() -PlannedSteps $E2FillSteps -FillerTrial $e2Pick -FillerCatalog $e2Catalog -FillerCode $e2FillerCode)
+                } else {
+                    $e2CaseDir = Join-Path $archiveDir 'cases'
+                    $e2CasePath = Join-Path $e2CaseDir 'e2-queue-fill.json'
+                    [void](New-E2FillCaseFile -Path $e2CasePath -KeyCode $e2FillerCode -Steps $E2FillSteps)
+                    Write-Ok ("E2 填充用例已现场生成（不入库）：{0}（{1} 步；未绑定键码 {2}；keyCatalog 已占用 {3} 个键码）" -f $e2CasePath, $E2FillSteps, $e2FillerCode, $e2Bound.Count)
+                    Add-Note ("E2 的填充用例由驱动现场生成在归档目录（{0}），并作为证据一并归档；未绑定键码的判定依据：它不在 input.state.keyCatalog（运行期键位注册表实读）的取值集里" -f $e2CasePath)
+
+                    $e2Val = Invoke-Cp -Action 'case.validate' -Params @{ file = $e2CasePath } -Label 'e2-validate' -Sync -Tier 'observe' -TimeoutMs 120000
+
+                    # 投递前的观测：read.player + core.status（先静置，让 E1 的飞行余速衰减）
+                    $e2Settle = Wait-ClientTicks -TargetTicks $E2SettleTicks -RoundSec 6 -ReadPlayerOnly -BudgetSeconds (Get-WaitBudget $E2SettleTicks)
+                    $e2Before = [pscustomobject]@{
+                        player = Get-CpTrialResult (Invoke-Cp -Action 'read.player' -Params @{} -Label 'e2-before-player' -Sync -Tier 'observe')
+                        status = Get-CpTrialResult (Invoke-Cp -Action 'core.status' -Params @{} -Label 'e2-before-status' -Sync -Tier 'observe')
+                    }
+                    $e2Run = Invoke-Cp -Action 'case.run' -Params @{ file = $e2CasePath; segments = @('action'); confirm = $true } -Label 'e2-run' -Sync -Tier 'scene' -TimeoutMs $ActionTimeoutMs
+                    $e2After = [pscustomobject]@{
+                        player = Get-CpTrialResult (Invoke-Cp -Action 'read.player' -Params @{} -Label 'e2-after-player' -Sync -Tier 'observe')
+                        status = Get-CpTrialResult (Invoke-Cp -Action 'core.status' -Params @{} -Label 'e2-after-status' -Sync -Tier 'observe')
+                    }
+                    # 兜底释放（本程序只投 up，理论上不产生持键）
+                    $e2Release = Invoke-Cp -Action 'input.release' -Params @{ confirm = $true } -Label 'e2-release' -Sync -Tier 'scene'
+
+                    # 收集本作业的 action 步骤产物（队列深度/投递 tick 的实测来源）
+                    $e2Artifacts = New-Object System.Collections.ArrayList
+                    foreach ($d in @($e2Run.newRuns | ForEach-Object { Join-Path $runsDir $_ })) {
+                        $actDir = Join-Path $d 'action'
+                        if (-not (Test-Path $actDir)) { continue }
+                        foreach ($f in @(Get-ChildItem -File $actDir -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+                            $doc = Read-JsonFile $f.FullName
+                            if ($null -eq $doc) { continue }
+                            [void]$e2Artifacts.Add($doc)
+                        }
+                    }
+                    Add-Note ("E2 收尾 input.release 退出码 $($e2Release.exitCode)（卫生步骤，不作判据）；静置 {0} tick 实测增量={1}；step 产物 {2} 份" -f $E2SettleTicks, $e2Settle.tickDelta, $e2Artifacts.Count)
+                    Add-Check (Test-InputE2QueueFullSingleJob -ValidateTrial $e2Val -RunTrial $e2Run -BeforeState $e2Before -AfterState $e2After -StepArtifacts $e2Artifacts -PlannedSteps $E2FillSteps -FillerTrial $e2Pick -FillerCatalog $e2Catalog -FillerCode $e2FillerCode)
+                }
+            }
+
+            # ============================================================= E3
+            if ($runE3) {
+                Write-Step 'E3：产物可从既有清单发现并复核哈希（shot.multi gui:screen）'
+                $e3Cameras = @(
+                    @{ name = 'e3-gui'; pos = @(64.5, 20.0, 70.5); yaw = 180.0; pitch = 45.0
+                        projection = @{ type = 'perspective'; fov = 70 }; resolution = @(854, 480) }
+                )
+                # 开一个真界面：否则 gui:screen 只是「拍了但没有界面」的如实读数（与 W7 同一理由）
+                $e3GuiOpen = Invoke-Cp -Action 'player.gui' -Params @{ gui = 'inventory'; confirm = $true } -Label 'e3-open-inventory' -Sync -Tier 'scene'
+                Add-Check (New-CpCheck 'O.e3-gui-open' $(if ($e3GuiOpen.exitCode -eq 0) { 'pass' } else { 'fail' }) "player.gui inventory 退出码 $($e3GuiOpen.exitCode)（编排守卫，非 Lead 判据：只是让 gui:screen 有界面可画）")
+                $e3Shot = Invoke-Cp -Action 'shot.multi' -Params @{ cameras = $e3Cameras; gui = 'screen'; confirm = $true } -Label 'e3-shot-gui' -Sync -Tier 'forensic' -TimeoutMs $ActionTimeoutMs
+                $e3GuiClose = Invoke-Cp -Action 'player.gui' -Params @{ gui = 'close'; confirm = $true } -Label 'e3-close-inventory' -Sync -Tier 'scene'
+                Add-Note "E3 卫生步骤 player.gui close 退出码 $($e3GuiClose.exitCode)（不作判据）"
+
+                $e3OutDir = Join-Path $archiveDir 'e3'
+                New-Item -ItemType Directory -Force -Path $e3OutDir, (Join-Path $e3OutDir 'downloads') | Out-Null
+                $e3RunId = [string](Get-CpProp (Get-CpTrialResult $e3Shot) 'runId')
+                $e3Manifest = Get-CpArtifactManifest -RunId $e3RunId -OutDir $e3OutDir
+                $e3Downloads = New-Object System.Collections.ArrayList
+                if ($null -ne $e3Manifest) {
+                    $e3Targets = @((Get-CpArray $e3Manifest 'artifacts') | Where-Object {
+                            $p = [string](Get-CpProp $_ 'path')
+                            ($p -match '^shots/[^/]+\.png$') -or ($p -match '^shots/[^/]+\.meta\.json$')
+                        })
+                    Write-Info ("E3 清单 runId=$e3RunId：shots/*.png 与 *.meta.json 共 {0} 份待逐份复核" -f @($e3Targets).Count)
+                    foreach ($art in $e3Targets) {
+                        $rel = [string](Get-CpProp $art 'path')
+                        $got = Get-CpArtifactBytes -RunId $e3RunId -RelPath $rel -DestDir (Join-Path $e3OutDir 'downloads')
+                        [void]$e3Downloads.Add([pscustomobject]@{
+                                path           = $rel
+                                declaredSha256 = [string](Get-CpProp $art 'sha256')
+                                declaredBytes  = Get-CpProp $art 'bytes'
+                                actualSha256   = $got.actualSha256
+                                actualBytes    = $got.actualBytes
+                                downloadOk     = $got.downloadOk
+                            })
+                        if (-not $got.downloadOk) { Write-Warn2 "E3 下载失败: $rel —— $($got.error)" }
+                    }
+                    # 复算记录（证据）：清单原文 + 逐份比对表
+                    try {
+                        $e3Downloads | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $e3OutDir 'e3-sha256-report.json') -Encoding utf8NoBOM
+                        $tbl = New-Object System.Collections.ArrayList
+                        [void]$tbl.Add('# E3 产物哈希复核（清单声明 vs 下载字节复算）')
+                        [void]$tbl.Add('')
+                        [void]$tbl.Add("- runId: $e3RunId")
+                        [void]$tbl.Add("- 清单: $(Join-Path $e3OutDir 'e3-manifest.json')")
+                        [void]$tbl.Add('')
+                        [void]$tbl.Add('| 产物 | 下载 | 复算 sha256 | 清单 sha256 | 一致 | 字节(复算/清单) |')
+                        [void]$tbl.Add('|---|---|---|---|---|---|')
+                        foreach ($r in $e3Downloads) {
+                            $same = ($r.downloadOk -and $r.actualSha256 -and ($r.actualSha256 -eq $r.declaredSha256.ToLowerInvariant()))
+                            [void]$tbl.Add(("| {0} | {1} | {2} | {3} | {4} | {5}/{6} |" -f $r.path, $r.downloadOk, $r.actualSha256, $r.declaredSha256, $same, $r.actualBytes, $r.declaredBytes))
+                        }
+                        [void]($tbl | Set-Content -Path (Join-Path $e3OutDir 'e3-sha256-report.md') -Encoding utf8NoBOM)
+                    } catch { Write-Warn2 "E3 复核表写出失败: $($_.Exception.Message)" }
+                }
+                Add-Check (Test-InputE3ArtifactHashes -Manifest $e3Manifest -Downloads $e3Downloads -RunId $e3RunId -ShotTrial $e3Shot)
+            }
+            continue
+        }
     }
 
     $counts = Get-CheckCounts
@@ -790,6 +1100,7 @@ try {
     [void]$md.AppendLine("- 控制面: port=$([string](Get-CpProp $script:serverInfo 'port')) contractVersion=$([string](Get-CpProp $script:serverInfo 'contractVersion'))")
     [void]$md.AppendLine("- stage: -Stage $Stage；实跑: $($script:stageLog -join ' → ')")
     [void]$md.AppendLine("- 参数: PumpProofTicks=$PumpProofTicks ActionTimeoutMs=$ActionTimeoutMs ClientTimeoutMin=$ClientTimeoutMin SkipClientStart=$([bool]$SkipClientStart) KeepClient=$([bool]$KeepClient)")
+    [void]$md.AppendLine("- extra 段参数: Only=$(if ($Only.Count -eq 0) { '(空=全跑)' } else { ($Only -join ',') }) E1HoldTicks=$E1HoldTicks E1SettleTicks=$E1SettleTicks E2FillSteps=$E2FillSteps E2SettleTicks=$E2SettleTicks")
     [void]$md.AppendLine("- 用例文件（G1）: ``$casePath``")
     [void]$md.AppendLine("- 位置字段探测: read.player 的坐标指针 = $script:playerPosPointer")
     [void]$md.AppendLine("- 管线致命: $fatalText")
@@ -817,6 +1128,9 @@ try {
     foreach ($n in $script:notes) { [void]$md.AppendLine("- $n") }
     foreach ($p in $script:probeNotes) { [void]$md.AppendLine("- 探针（**不作判据**）: $p") }
     [void]$md.AppendLine('- M12 需要人工改窗口尺寸才能测；会话内无法改 ⇒ 记 skipped-with-reason（不计 pass、退出码非全绿）。')
+    [void]$md.AppendLine('- extra 段（-Stage extra）的判据口径见 README §15.8：E1 判界 = 潜行每 tick 水平位移 < 对照的 0.6 倍（对照下界 0.05 blocks/tick）；E2 的填充用例由驱动现场生成在归档目录（cases/e2-queue-fill.json，不入库）；E3 用 GET /cp/v1/artifacts/{runId} 逐份复算 sha256。')
+    [void]$md.AppendLine('- extra 段里的 W1 是「托管世界已就绪」的前置**复用**（判据函数与 world 段同一份），不是新增判据；O.rebuild / O.e3-gui-open 是驱动自加的编排守卫。')
+    [void]$md.AppendLine('- E2 的「零写入」比对口径：逐路径叶子比对，显式排除 tick 计数/墙钟/JVM 内存/控制面自身记账/网络与状态效果时长等易变字段（排除清单与理由逐条写在 E2 的 detail 里），**不是**整体 JSON 字符串相等。')
     [void]$md.AppendLine('- 未跑的 stage 的判据**不出现在本表**（不是 skip、也不是 pass）；表里只有实跑过的判据。')
     [void]$md.AppendLine('- O.* 是驱动自加的编排守卫（不是 Lead 的验收判据），只为把「编排失败」与「判据红」分开。')
     if ($counts.skipped -gt 0 -or $counts.blocked -gt 0) {
