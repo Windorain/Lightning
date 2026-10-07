@@ -226,6 +226,23 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 即 `net.minecraft.nbt.JsonToNBT`），**不是 JSON 对象**——两者语法相近但不同（SNBT 字符串值可裸写、
 有 `1b`/`1.0f` 数字后缀）。自述与示例里写死这一点。
 
+`CameraSpec`（`shot.multi` 与 `case.run` 的 `cameras` 段共用；机位级 `renderMode`/`lighting`/`worldTime` 覆盖见本节第 6 条）：
+
+```jsonc
+{
+  "name": "front-top",                     // 机位 id，产物文件名
+  "pos": [64.5, 20.0, 70.5],             // 相机世界坐标（门控位置分离：与 playerPos 各自记录）
+  "yaw": 180.0, "pitch": 45.0,           // 原样写入 rotationPitch——MC 语义：正=俯视、负=仰视
+                                         // （俯拍用正 pitch；负 pitch 俯拍是文档曾写错过的口径，勿仿）
+  "projection": {                          // 二选一
+    "type": "perspective", "fov": 70
+    // "type": "ortho", "orthoHeight": 16.0    // 正交：视高（方块数），宽按画面宽高比推
+  },
+  "resolution": [1920, 1080],
+  "tile": { "cols": 2, "rows": 2, "overlap": 0.05 }  // 可空：超分拼接（投影偏移法，非视口拼接）
+}
+```
+
 ### 4.5 命令通道动作（v1.4，收口T3，Refs #100）
 
 | 动作 | 级 | 语义 |
@@ -233,7 +250,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 | `export.session` | observe | **只读**：返回 `ExportSession` 单例态的一致性快照（会话开关/选区模式/pos1/pos2/规范化 min-max 与尺寸/活动帧/已录帧号/**逐帧内容 sha256**/**缓冲世代号**/输出名/structureId/最近作者）。唯一触碰 `ExportSession.snapshot()`（同一临界区取全部字段）；不写状态、不碰世界与文件、不建 run 目录，世界清单哈希不变。`statusLine` 字段与 `/sde status` 打印的那一行同源同形 |
 | `cmd.exec` | scene | 在**服务端线程**执行一条**白名单内**的 `/sde` 子命令，返回该命令的真实回报文本（与游戏内手动执行同一命令逐字相同）。参数 `{command, timeoutMs?}`。白名单外一律 `CP-VALID-002` + 原因 + `context.alternatives[]` 可行替代 |
 
-#### 4.3.1 `/sde` 命令白名单（1.4）
+#### 4.5.1 `/sde` 命令白名单（1.4）
 
 白名单是**显式枚举**（唯一权威：`client/controlplane/mc/cmd/SdeCommandWhitelist.java`），**未登记即拒绝**——新增子命令必须显式登记，不做默认放行。
 
@@ -247,25 +264,25 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 | `web` / `webstop` | 内置工作区 HTTP 服务的启停，**涉及端口占用**；该服务与控制面是并列的两套 HTTP/鉴权域（本文 §9 要求零共享可变状态），经本通道放行等于开一条绕过控制面鉴权与事件流水的**隐藏能力路径**（#96 §8.7）。需要时在游戏内手动执行 |
 | `hajimi` / `hjm` | 「设输出名 → record → export → 发客户端」四步合一的**复合快捷方式**，不提供任何其余子命令没有的能力，却把四个动作压成不可分步、不可单独审计的原子操作，违反 #96 §8.2「命令不扭曲行为」。请改用 `setname` / `record` / `export` 原语组合 |
 
-#### 4.3.1.1 `export.session` 的 C3 判据字段（派发裁决 3：只增不改）
+#### 4.5.1.1 `export.session` 的 C3 判据字段（派发裁决 3：只增不改）
 
 为「同会话同缓冲」机械判据（#102 的 C3）补两个**只增不改**字段——**不**引入隐式清缓冲、
 **不**改变任何命令态行为：
 
 | 字段 | 口径 | 用途 |
 |---|---|---|
-| `frameSha256[]` | 与 `recordedFrames[]` **同序一一对应**；哈希对象是该帧**进入缓冲那一刻**的 JSON 文本的 UTF-8 字节（`Hashing.sha256HexUtf8`，与 observation-record.md §2.1「对字节内容计算」同口径）。注意：哈希的是**缓冲内**的 scan 中间态，**不是**落盘后经客户端 enrich 的信封（两者形态不同，见 §4.3.4） | 跨会话拼接的产物其帧哈希落在不同缓冲，可据此判红（C3 负对照） |
+| `frameSha256[]` | 与 `recordedFrames[]` **同序一一对应**；哈希对象是该帧**进入缓冲那一刻**的 JSON 文本的 UTF-8 字节（`Hashing.sha256HexUtf8`，与 observation-record.md §2.1「对字节内容计算」同口径）。注意：哈希的是**缓冲内**的 scan 中间态，**不是**落盘后经客户端 enrich 的信封（两者形态不同，见 §4.5.4） | 跨会话拼接的产物其帧哈希落在不同缓冲，可据此判红（C3 负对照） |
 | `bufferGeneration` | 帧缓冲每发生一次结构性变化（写入帧 / 清空）即递增的世代号 | 廉价判断「缓冲有没有动过」（比逐帧哈希更省事）；想判断「动成了什么」才需要 `frameSha256[]` |
 
 
-#### 4.3.2 `cmd.exec` 的线程语义
+#### 4.5.2 `cmd.exec` 的线程语义
 
 1. 命令在 1.7.10 集成服的 **`Server thread`** 上执行（`MinecraftServer.getCommandManager().executeCommand(...)`），与玩家在聊天框敲命令**同一路径、同一线程**；本动作不自己实现任何命令语义，不在命令前后追加或跳过任何步骤（#96 §8.2）。
 2. cp 动作在 **`Client thread`**（tick 排空）调用并**阻塞等待**回包，等待方向单一（客户端等服务端），结构上不会死锁。
 3. 命令的**发送者是真实服务端玩家**（`EntityPlayerMP`）：`/sde` 多个子命令要求其为玩家（读坐标/准星/世界/OP 权限），例如 `pos1`/`hpos1`/`record`/`export`/`multiblock`。无服务端玩家时以 `CP-STATE-001` 显式失败，**不**用假发送者制造「通道可用但什么都干不了」的假通过。
 4. **回报**取命令真实写给玩家的聊天文本（原样，含 `SDE: ` 前缀），并按序转发给玩家——玩家在聊天框看到的与手动执行完全一致。
 
-#### 4.3.3 `cmd.exec` 的失败码
+#### 4.5.3 `cmd.exec` 的失败码
 
 | 情形 | 错误码 | context |
 |---|---|---|
@@ -275,7 +292,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 | 命令在服务端抛异常 | `CP-EXEC-001` | `command`/`sub`/`exception` |
 | 参数非法（缺 `command` / 超长 / `command` 非字符串） | `CP-VALID-002` | `fields[]` |
 
-#### 4.3.4 `cmd.exec` 的审计口径
+#### 4.5.4 `cmd.exec` 的审计口径
 
 每次调用（**含拒绝**）落一条 `kind=cmd-exec` 事件，`data` 携带：
 `commandText`（提交原文）、`command`（归一化文本）、`root`、`sub`、`allowed`、`decision`、`tier`、`whitelistVersion`、`timeoutMs`；
@@ -297,7 +314,7 @@ run 由**发起方**（`cmd.exec`）持有，落点由它给出（§4.7.2-B 的�
 > `CWD == mcDataDir` 的产物，形态依赖该巧合；换启动方式（工作目录不同）会静默产出两份不同形态的文件。
 > cp 通道（`export.scene`）**回避这条链**（客户端一次写完，不经过网络包），从根上消掉二义。
 
-#### 4.3.5 `ExportSession` 的线程语义与互斥口径（裁决 13）
+#### 4.5.5 `ExportSession` 的线程语义与互斥口径（裁决 13）
 
 `ExportSession` 是**进程级单例**，在集成服里被至少三条线程触碰：`Server thread`（`/sde` 命令、`SdeServerRecordScheduler` 连录/cycle）、`Client thread`（cp 动作、`ItemSde*` 工具物品、`PacketSaveCellNoteHandler`）、以及经作业队列间接触达的 HTTP 提交方（HTTP 线程本身**不**触碰它，见 §1.8）。
 
@@ -309,23 +326,6 @@ run 由**发起方**（`cmd.exec`）持有，落点由它给出（§4.7.2-B 的�
 2. `jsonStringForScanCompare`：只序列化**调用方传入**的局部对象，不读任何字段。
 
 **快照读面**：`snapshot()` 在同一临界区内取走全部字段并返回**不可变**值对象，供 `export.session` 与 `cmd.exec` 的 `sessionAfter` 使用——逐调 getter 会拿到互相矛盾的组合（如「选区已变、帧列表还是旧的」），这是「读面必须可判定」的前提。
-
-`CameraSpec`：
-
-```jsonc
-{
-  "name": "front-top",                     // 机位 id，产物文件名
-  "pos": [64.5, 20.0, 70.5],             // 相机世界坐标（门控位置分离：与 playerPos 各自记录）
-  "yaw": 180.0, "pitch": 45.0,           // 原样写入 rotationPitch——MC 语义：正=俯视、负=仰视
-                                         // （俯拍用正 pitch；负 pitch 俯拍是文档曾写错过的口径，勿仿）
-  "projection": {                          // 二选一
-    "type": "perspective", "fov": 70
-    // "type": "ortho", "orthoHeight": 16.0    // 正交：视高（方块数），宽按画面宽高比推
-  },
-  "resolution": [1920, 1080],
-  "tile": { "cols": 2, "rows": 2, "overlap": 0.05 }  // 可空：超分拼接（投影偏移法，非视口拼接）
-}
-```
 
 ### 4.6 L1 玩家操作（v1.5，#101，「收口T4」）
 
@@ -562,7 +562,7 @@ B 导出时声明 `expectFrames:{frames:[0,1,2]}` ⇒ 判红（`extra:[9]`）。
 
 C4 要求「导出件、实拍、观测记录、世界清单哈希**同一 run**，且该 run 内世界清单哈希唯一」。
 若导出只能在用例之外单独调 `export.scene`，它必然落在**另一个** run 里——该判据对导出件就永远不成立。
-因此 `case.run` 增加 `export` 段（**v1.6 起**）：
+因此 `case.run` 增加 `export` 段（**v1.7 起**，与 §4.7 整节及 `ActionRegistrar.java:257` 的 `since` 口径一致）：
 
 ```jsonc
 {
@@ -604,7 +604,7 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 
 | 动作 | 级 | 语义 |
 |---|---|---|
-| `core.shutdown` | scene | **无人值守收尾原语**：读 run 的 `evidence.json` → 按约定定退出码 →（默认）延迟后结束客户端进程 |
+| `core.shutdown` | scene | **无人值守收尾原语**：读 run 的**两份结论**（`criteria.json` 与 `evidence.json` 的 `overall`，**任一非绿即红**）→ 按约定定退出码 →（默认）延迟后结束客户端进程。**只读 `evidence.json` 会把红跑读成绿跑**（实机存在 `criteria=red` / `evidence=green` 的 run），详见本节末的退出码表 |
 
 **为什么需要它（V5 的硬真空）**：老批处理设施（`MultiblockPipelineAutomation` 等）把
 「跑完 → 落结果文件 → 以退出码结束进程」做成一件事，外层脚本据此判红绿。那些设施随 #104 整体删除后，
@@ -642,7 +642,7 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 就地退出会把调用方吊死在一个永不来的响应上（而它正是要靠这个响应知道退出码）。因此实际退出跑在
 延迟 `delayMs`（默认 1500 ms）的守护线程里，结果里如实给 `exitScheduledInMs`。
 
-**可判定性**：`dryRun:true` 只定码不退出——用它可以在不杀进程的前提下逐条核对「码与 `evidence.overall` 对齐」。
+**可判定性**：`dryRun:true` 只定码不退出——用它可以在不杀进程的前提下逐条核对「码与**两份结论**（`criteria.json` + `evidence.json`）对齐」。
 
 **不许编入固定程序**：本动作会让本作业后续段不再执行，`case.run` 的 `action` 段一律拒绝它
 （`CaseValidator.ACTION_FORBIDDEN`）——收尾由驱动在**整跑结束后**单独发起。

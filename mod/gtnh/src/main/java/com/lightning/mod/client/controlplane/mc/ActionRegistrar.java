@@ -53,7 +53,7 @@ import com.lightning.mod.core.session.ExportSceneWriter;
  * 引入版本 {@code since}。描述与行为必须同步更新——描述错了比没有描述更糟。
  *
  * <p>
- * 分组：PR-1 的 11 个（{@code core.*}/{@code world.*}/{@code case.*}）+ PR-2 的 3 个取证级
+ * 分组：PR-1 的 8 个（{@code core.*}/{@code world.*}/{@code case.*}）+ PR-2 的 3 个取证级
  * （{@link #registerForensicActions}）+ #98 的 8 个观察面读面（{@link #registerReadActions}）
  * + #99 的 6 个 L0 布景原语（{@link #registerSceneActions}）+ #100 的 2 个命令通道
  * （{@link #registerCommandActions}）+ #101 的 9 个 L1 玩家操作（{@link #registerPlayerActions}，
@@ -1310,8 +1310,11 @@ public final class ActionRegistrar {
                 .optional(
                     "channel",
                     ActionDescriptor.TYPE_STRING,
-                    "只回这一个通道（大小写不敏感；all 或 * 或省略 = 不过滤）。取值须为 " + CaptureDiagSession.channelNames()
-                        + " 之一，未知值报 CP-VALID-002（不静默回全通道——那会让笔误看起来像「这个通道确实是空的」）")
+                    "all",
+                    "只回这一个通道（大小写不敏感；all 或 * 或省略 = 不过滤，**三者等价**）。取值须为 " + CaptureDiagSession.channelNames()
+                        + " 之一，未知值报 CP-VALID-002（不静默回全通道——那会让笔误看起来像「这个通道确实是空的」）。"
+                        + "**D3**：缺省在机读侧写作 default=\"all\"（= 不过滤）；返回值的 channelFilter 也一律写 \"all\"，"
+                        + "故读数不因「显式传 all」与「省略」而不同")
                 .optional(
                     "events",
                     ActionDescriptor.TYPE_BOOL,
@@ -1520,7 +1523,11 @@ public final class ActionRegistrar {
                         + "会被 S03 广播给客户端并在后续任何读面/拍摄中可见。"
                         + "设天气时同时重置 rainTime/thunderTime（1.7.10 天气是倒计时驱动的，只设 raining 会在"
                         + "原倒计时到点时自己翻回去）；只写服务端，客户端由 S2BPacketChangeGameState(7/8) 渐入。")
-                .optional("worldTime", ActionDescriptor.TYPE_STRING, "0..23999 tick，或别名 day|noon|sunset|night|midnight")
+                .optional(
+                    "worldTime",
+                    ActionDescriptor.TYPE_STRING,
+                    "0..23999 tick，或别名 day|noon|sunset|night|midnight；写字符串（如 \"6000\" 或别名）。"
+                        + "实现另接受 JSON 数字 tick（兼容兜底），但**以字符串为自述类型**——数字形态是兼容路径，不是承诺面")
                 .optional("weather", ActionDescriptor.TYPE_STRING, "clear | rain | thunder")
                 .optional(
                     "duration",
@@ -1531,7 +1538,7 @@ public final class ActionRegistrar {
                 .returns(
                     "{action, layer:\"L0\", semanticsNote, applied{worldTime?,weather?,duration?,raining?,thundering?,rainTime?,"
                         + "thunderTime?,doDaylightCycle?}, before{...}, after{...}, clientView{...}, sceneReadback{...}}")
-                .example("{\"worldTime\":6000,\"weather\":\"clear\",\"duration\":24000,\"confirm\":true}")
+                .example("{\"worldTime\":\"6000\",\"weather\":\"clear\",\"duration\":24000,\"confirm\":true}")
                 .example("{\"worldTime\":\"midnight\",\"weather\":\"thunder\",\"duration\":6000,\"confirm\":true}")
                 .since("1.3")
                 .build(),
