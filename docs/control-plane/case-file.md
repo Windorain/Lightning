@@ -370,6 +370,16 @@ role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直�
 
 **留痕**：`world.rebuild` 的删除阶段落 `world-rebuild` 事件（含 folder/seed），与
 `sceneManifestSha256` 一同构成「本轮确实从新世界开始」的可审计证据链。
+**标记前置另落两条 `world-rebuild` 事件**（v1.7，#123）：`标记已前置（构建中）`（`complete:false`）
+与 `托管世界重建完成` —— 于是「这一次构建有没有走到收口」在事件流水里可判，
+不必去读盘上的标记文件。
+
+5. **「重建完成」由标记的 `complete` 表达（v1.7，#123）**：`case.run` 的 `world` 段**不**收口
+   （`complete:false`），由随后的 `build` 段在场景铺好、清单落盘后收口（`complete:true`）；
+   用例没有 `build` 段时 `world` 段自己收口。故「世界是不是构建完成的成品」以 `cp_world.json` 的
+   `complete` 为准（`world.info` 的 `markerComplete` 可直接读），**不**以「跑没跑过 world 段」为准。
+   `complete:false` 的世界可删可重建但不可复用（不得被 `world.snapshot` 拍成快照）——
+   完整语义与两个判据见 contract.md §6.1/§6.6。
 
 **边界（如实标注）**：本节管**世界**的 hermetic（方块/TE/实体所在的那份存档）。
 **玩家侧状态**（背包、经验、药水效果、飞行）在 1.7.10 落 `<saves>/<folder>/playerdata/`，
