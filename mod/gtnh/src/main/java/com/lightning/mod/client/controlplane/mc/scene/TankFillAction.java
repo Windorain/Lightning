@@ -284,6 +284,14 @@ public final class TankFillAction implements ControlAction {
      * 而 GT 的 {@code MTEBasicMachine} 覆写了它（{@code MTEBasicMachineWithRecipe.java:487-498}，
      * 只列「有输入/输出流体槽」的那些罐），因此它<b>未必</b>等于 {@code getFluid} 那个「主罐」。
      * 把两者并列，读回就不会因为「取哪个罐」这个选择而失真。
+     *
+     * <p>
+     * <b>单值读数从 MTE 读而不是从方块实体读</b>（#122 实机首轮证伪的缺陷 D-1）：
+     * {@code getFluid}/{@code getFluidAmount} 只在 {@code MTEBasicTank} 上（{@code :195,200}）；
+     * 而方块实体的 {@code getCapacity()} 返回的是 <b>EU 缓冲容量</b>
+     * （{@code BaseMetaTileEntity.java:1997-1999} = {@code (int) min(MAX, getEUCapacity())}，LV=2048），
+     * 不是储罐容量（16000）——从方块实体读会<b>静默给出一个错的数字</b>。
+     * 与 {@code GtMachineDescriber.tanks} 同一口径（两处读同一份状态，不能分叉）。
      */
     private static JsonObject tankReadback(IFluidHandler handler, ForgeDirection side, TileEntity te) {
         JsonObject o = new JsonObject();
@@ -301,20 +309,27 @@ public final class TankFillAction implements ControlAction {
         o.add("tanks", tanks);
         o.addProperty("tankCount", Integer.valueOf(tanks.size()));
 
-        // GT 侧单值读数（经 GT 的 public getter；非 GT 方块实体时为显式 null）
-        Object fluid = ModReflect.call(te, "getFluid");
+        // GT 侧单值读数：宿主是 MTE（见方法注释的 D-1），非 GT/空壳 → 显式 null。
+        // 命名口实见 GtMachineDescriber.tanks 的 D-2 说明：MTEBasicMachine 的
+        // getFluid/getFluidAmount 指的是「可排出/输出」那一侧，不是输入储罐；
+        // 输入侧的权威读数是上面的逐罐 tanks[]。
+        Object metaTile = ModReflect.call(te, "getMetaTileEntity");
+        Object fluid = ModReflect.call(metaTile, "getFluid");
         if (fluid instanceof FluidStack) {
             FluidStack fs = (FluidStack) fluid;
-            o.addProperty("fluid", GtFluids.registryName(fs.getFluid()));
-            o.addProperty("fluidAmount", Integer.valueOf(fs.amount));
+            o.addProperty("drainableFluid", GtFluids.registryName(fs.getFluid()));
+            o.addProperty("drainableFluidAmount", Integer.valueOf(fs.amount));
         } else {
-            o.addProperty("fluid", (String) null);
-            o.addProperty("fluidAmount", Integer.valueOf(0));
+            o.addProperty("drainableFluid", (String) null);
+            o.addProperty("drainableFluidAmount", Integer.valueOf(0));
         }
-        Object amt = ModReflect.call(te, "getFluidAmount");
-        o.addProperty("fluidAmountGetter", amt instanceof Number ? Integer.valueOf(((Number) amt).intValue()) : null);
-        Object cap = ModReflect.call(te, "getCapacity");
-        o.addProperty("capacity", cap instanceof Number ? Integer.valueOf(((Number) cap).intValue()) : null);
+        Object amt = ModReflect.call(metaTile, "getFluidAmount");
+        o.addProperty(
+            "drainableFluidAmountGetter",
+            amt instanceof Number ? Integer.valueOf(((Number) amt).intValue()) : null);
+        // MTE 的 getCapacity() 才是储罐容量（MTEBasicMachineWithRecipe.java:482-484 返回 mTankCapacity）
+        Object cap = ModReflect.call(metaTile, "getCapacity");
+        o.addProperty("metaTileCapacity", cap instanceof Number ? Integer.valueOf(((Number) cap).intValue()) : null);
         return o;
     }
 

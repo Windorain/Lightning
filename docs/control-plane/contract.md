@@ -192,9 +192,22 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 
 **储罐读回（#122）**：`scene.tank.fill` 的返回值自带注入前后的 `before`/`after`（逐罐
 `{index,present,capacity,fluid,amount,empty}` + GT 侧单值读数），用例侧的读回走 `read.te` 的
-`tanks` 字段（`GtMachineDescriber` 暴露 `getTankInfo` 与 `getFluid`/`getFluidAmount`/`getCapacity`）
+`tanks` 字段（`GtMachineDescriber` 暴露 `getTankInfo` 与 GT 侧单值读数）
 ——与 `te-state-equals` 判据**同一棵树、同一读取口**。`scene.tank.fill` 是「机器里有没有这个流体」
 的证据，**不是**「玩家/管道把流体运进来了」的证据（后者属 L1/L2）。
+
+**读数口径三条（#122 实机证伪后成文，读错会造出假绿）**：
+
+1. **输入侧的权威读数是逐罐 `tanks[]`（`/tanks/tanks/<i>/amount`）**。断言「注入进去了多少」用它。
+2. **`drainableFluid`/`drainableFluidAmount` 是「输出/可排出」那一侧**，不是输入罐：
+   `MTEBasicTank.getFluid() → getDrainableStack()`（`:195-197`），
+   而 `MTEBasicMachine.getDrainableStack() → mFluidOut`（`:455-457`）。
+   实机实测：入口注 HCl 3000 后它是 `null`/`0`，配方跑完后才变成 `trichlorosilane`/`1000`。
+   **不要**拿它断言「注入成功」——0 会被误读成「没注进去」。
+3. **容量取 `/tanks/metaTileCapacity`（= MTE 的 `mTankCapacity`，LV 化学反应釜 = 16000），
+   不要取方块实体的 `getCapacity()`**——后者返回 `(int) min(MAX, getEUCapacity())`
+   （`BaseMetaTileEntity.java:1997-1999`）= **EU 缓冲容量 2048**，是一个「看起来像储罐容量」的错数字
+   （#122 实机首轮实测到的 D-1）。
 
 **SNBT 口径**：`nbt` 参数是 **SNBT 文本**（原版 `/give`、`/summon` 的写法，
 即 `net.minecraft.nbt.JsonToNBT`），**不是 JSON 对象**——两者语法相近但不同（SNBT 字符串值可裸写、

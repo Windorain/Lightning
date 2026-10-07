@@ -27,12 +27,30 @@
     { "id": "tank-capacity-is-16000", "type": "te-state-equals",
       "params": { "at": [65,12,65], "key": "/tanks/capacity" }, "expect": 16000 },
     { "id": "tank-empty-before-fill", "type": "te-state-equals",
-      "params": { "at": [65,12,65], "key": "/tanks/fluidAmount" }, "expect": 0 },
+      "params": { "at": [65,12,65], "key": "/tanks/tanks/0/amount" }, "expect": 0 },
+    { "id": "tank-input-tank-is-empty-flag", "type": "te-state-equals",
+      "params": { "at": [65,12,65], "key": "/tanks/tanks/0/empty" }, "expect": true },
+    { "id": "tank-mte-capacity-is-16000", "type": "te-state-equals",
+      "params": { "at": [65,12,65], "key": "/tanks/metaTileCapacity" }, "expect": 16000 },
     { "id": "world-hash-equals", "type": "world-hash-equals", "params": {} },
     { "id": "observation-exists", "type": "artifact-exists",
       "params": { "path": "observation.json" } }
   ],
-  "variants": [],
+  "variants": [
+    {
+      "id": "neg-setblock-shell",
+      "mutate": [
+        { "op": "replace", "path": "/build/1",
+          "value": { "op": "block", "at": [65,12,65],
+                     "id": "gregtech:gt.blockmachines", "meta": 1 } }
+      ],
+      "expectCriteriaRed": [
+        "tank-machine-not-shell",
+        "tank-machine-meta-tile-id",
+        "tank-mte-capacity-is-16000"
+      ]
+    }
+  ],
   "evidence": {
     "expect": [
       { "path": "observation.json", "role": "observation" },

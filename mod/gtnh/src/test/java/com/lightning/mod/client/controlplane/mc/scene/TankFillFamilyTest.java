@@ -502,6 +502,112 @@ public class TankFillFamilyTest {
         assertEquals("只增可选字段：动作的引入版本不动（#99 的 1.3）", "1.3", d.since());
     }
 
+    // ------------------------------------------------------------ D-1：储罐单值读数的宿主
+    //
+    // #122 实机首轮证伪的缺陷 D-1：储罐单值读数（fluid/fluidAmount/容量）最初从「方块实体」
+    // 反射取，而 getFluid/getFluidAmount 的宿主是 MetaTileEntity（MTEBasicTank.java:195,200），
+    // 方块实体上根本没有；更坏的是方块实体上**确实有**一个 getCapacity()，但它返回
+    // (int) min(MAX, getEUCapacity())（BaseMetaTileEntity.java:1997-1999），即 **EU 缓冲容量
+    // 2048** 而不是储罐容量 16000——于是实机读出一个「看起来像储罐容量、实际是 EU 容量」的数字
+    // （静默给错数，比缺席更坏）。
+    //
+    // 下面两条是**GT 源码事实核对**（不是行为测试）：它们对 GT 源码做文本断言，锁住
+    // 「为什么必须从 MTE 读」这条推理的前提。本仓离线单测的 classpath 上没有 GT
+    // （compileOnly 且只对 main 可见，见 build.gradle.kts），反射拿不到类，故只能查源码文本。
+    //
+    // **局限（如实标注）**：GT 源码不在本机时这两条跳过（return），不伪造结论。
+    // 真正的行为回归锁是实机证据（temp/cp-tank-fill/evidence/21-readte-after-fill.json：
+    // 修复前 fluidAmount=null / capacityGetter=2048；修复后 fluidAmount=3000 / capacityGetter=16000）。
+
+    /**
+     * {@code getFluid}/{@code getFluidAmount} 只声明在 {@code MTEBasicTank} 上，
+     * <b>不在</b>方块实体（{@code BaseMetaTileEntity}）上——从方块实体读必然得到 null。
+     */
+    @Test
+    public void fluidGettersLiveOnMetaTileEntityNotOnBaseTileEntity() throws Exception {
+        java.nio.file.Path gt = gtSourceRoot();
+        if (gt == null) {
+            return; // GT 源码不在本机：跳过（见本节局限说明），不伪造结论
+        }
+        String base = readSource(gt.resolve("gregtech/api/metatileentity/BaseMetaTileEntity.java"));
+        String tank = readSource(gt.resolve("gregtech/api/metatileentity/implementations/MTEBasicTank.java"));
+        assertTrue("MTEBasicTank 应当声明 getFluid()（储罐单值读数的宿主）", tank.contains("public FluidStack getFluid()"));
+        assertTrue("MTEBasicTank 应当声明 getFluidAmount()", tank.contains("public int getFluidAmount()"));
+        assertFalse(
+            "BaseMetaTileEntity 不应声明 getFluid()——若声明了，D-1 的成因描述需要复核",
+            base.contains("public FluidStack getFluid()"));
+        assertFalse("BaseMetaTileEntity 不应声明 getFluidAmount()", base.contains("public int getFluidAmount()"));
+    }
+
+    /**
+     * 方块实体的 {@code getCapacity()} 返回 <b>EU 容量</b>而不是储罐容量——D-1 会「静默给错数」的成因。
+     *
+     * <p>
+     * GT 源码原文：{@code return (int) Math.min(Integer.MAX_VALUE, getEUCapacity());}
+     * （{@code BaseMetaTileEntity.java:1997-1999}）。储罐容量在 MTE 上
+     * （{@code MTEBasicMachineWithRecipe.java:482-484} 返回 {@code this.mTankCapacity}）。
+     * 两者在 LV 化学反应釜上分别是 2048 与 16000（实机实测）。
+     */
+    @Test
+    public void baseTileEntityGetCapacityIsEuCapacityNotTankCapacity() throws Exception {
+        java.nio.file.Path gt = gtSourceRoot();
+        if (gt == null) {
+            return; // GT 源码不在本机：跳过（见本节局限说明）
+        }
+        String base = readSource(gt.resolve("gregtech/api/metatileentity/BaseMetaTileEntity.java"));
+        assertTrue(
+            "BaseMetaTileEntity.getCapacity() 应返回 EU 容量（getEUCapacity）——这是 D-1 的成因",
+            base.contains("public int getCapacity()")
+                && base.contains("return (int) Math.min(Integer.MAX_VALUE, getEUCapacity());"));
+        String machine = readSource(
+            gt.resolve("gregtech/api/metatileentity/implementations/MTEBasicMachineWithRecipe.java"));
+        assertTrue(
+            "MTEBasicMachineWithRecipe.getCapacity() 应返回 this.mTankCapacity（真正的储罐容量）",
+            machine.contains("public int getCapacity()") && machine.contains("return this.mTankCapacity;"));
+    }
+
+    /**
+     * D-2：{@code MTEBasicMachine} 的 {@code getFluid}/{@code getFluidAmount} 指的是
+     * <b>输出/可排出</b>那一侧，不是输入储罐——字段名必须带 {@code drainable} 前缀才不会误读。
+     *
+     * <p>
+     * 源码链：{@code MTEBasicTank.getFluid() → getDrainableStack()}（{@code :195-197}），
+     * 而 {@code MTEBasicMachine.getDrainableStack() → mFluidOut}（{@code :455-457}）。
+     * 实机实测（#122 段二第二轮）：注完 HCl 3000 后 {@code fluid=null/fluidAmount=0}
+     * （输入罐在 {@code tanks[0]}，输出罐确实是空的），配方跑完后变成
+     * {@code trichlorosilane/1000}——<b>我最初「应为 3000」的期望本身是错的</b>。
+     * 这条测试把该语义锁成源码事实，免得后人再按「主罐」去理解它。
+     */
+    @Test
+    public void metaTileMachineFluidGetterIsTheDrainableSide() throws Exception {
+        java.nio.file.Path gt = gtSourceRoot();
+        if (gt == null) {
+            return; // GT 源码不在本机：跳过（见本节局限说明）
+        }
+        String tank = readSource(gt.resolve("gregtech/api/metatileentity/implementations/MTEBasicTank.java"));
+        assertTrue(
+            "MTEBasicTank.getFluid() 应转调 getDrainableStack()（D-2 的成因）",
+            tank.contains("public FluidStack getFluid()") && tank.contains("return getDrainableStack();"));
+        String machine = readSource(gt.resolve("gregtech/api/metatileentity/implementations/MTEBasicMachine.java"));
+        assertTrue(
+            "MTEBasicMachine.getDrainableStack() 应返回 mFluidOut（输出侧，不是 mFluid 输入侧）",
+            machine.contains("public FluidStack getDrainableStack()") && machine.contains("return mFluidOut;"));
+        // 对照：输入侧存在另一个字段 mFluid（MTEBasicTank 的 fillable stack），两者不是同一个东西
+        assertTrue(
+            "MTEBasicTank 的输入侧应是 mFluid/getFillableStack（与 drainable 分开）",
+            tank.contains("public FluidStack getFillableStack()"));
+    }
+
+    /** GT 源码根（工作区约定路径 {@code D:\github\gtnh\GT5-Unofficial}）；不在时返回 null。 */
+    private static java.nio.file.Path gtSourceRoot() {
+        java.nio.file.Path p = java.nio.file.Paths.get("D:\\github\\gtnh\\GT5-Unofficial\\src\\main\\java");
+        return java.nio.file.Files.isDirectory(p) ? p : null;
+    }
+
+    private static String readSource(java.nio.file.Path p) throws Exception {
+        return new String(java.nio.file.Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     // ------------------------------------------------------------ 工具
 
     private static JsonObject params(String fluid, Object amount, String side) {

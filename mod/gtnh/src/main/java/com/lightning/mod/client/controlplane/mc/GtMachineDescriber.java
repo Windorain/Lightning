@@ -47,11 +47,11 @@ import com.google.gson.JsonObject;
  *                 "charge":100000,"maxCharge":100000,"chargeFull":true,"electricTier":1}, ... ]
  *   },
  *   "tanks": {
- *     "present": true, "count": 2, "capacity": 16000, "fluidAmount": 3000,
- *     "fluid": "hydrochloricacid_gt5u", "fluidAmountGetter": 3000,
+ *     "present": true, "count": 2, "capacity": 16000,
  *     "tanks": [ {"index":0,"present":true,"capacity":16000,"empty":false,
  *                 "fluid":"hydrochloricacid_gt5u","amount":3000,"localizedName":"Hydrochloric Acid"},
- *                {"index":1,"present":true,"capacity":16000,"empty":true,"amount":0,"fluid":null} ]
+ *                {"index":1,"present":true,"capacity":16000,"empty":true,"amount":0,"fluid":null} ],
+ *     "drainableFluid": null, "drainableFluidAmount": 0, "metaTileCapacity": 16000
  *   }
  * }
  * </pre>
@@ -60,12 +60,15 @@ import com.google.gson.JsonObject;
  * {@code scene.tank.fill} 把流体注入 {@code MTEBasicTank.mFluid}（经 {@code IFluidHandler}），
  * 那份状态<b>不在槽位表里</b>——只看 {@code inventory} 无法判定「注入到底进没进去」。
  * 因此本描述器把 {@code getTankInfo}（Forge 标准面，逐罐 {@code {fluid,amount,capacity}}）与
- * GT 侧单值读数 {@code getFluid}/{@code getFluidAmount}/{@code getCapacity} 一起暴露，
- * 且两处都读：{@code MTEBasicMachine} 覆写了 {@code getTankInfo}
+ * GT 侧单值读数一起暴露，且两处都读：{@code MTEBasicMachine} 覆写了 {@code getTankInfo}
  * （{@code MTEBasicMachineWithRecipe.java:487-498}），只列「有输入/输出流体槽」的那些罐，
- * 未必等于 {@code getFluid} 返回的那个主罐。并列之后，
- * {@code te-state-equals} 的 {@code key} 可以直接指到 {@code /tanks/fluidAmount} 断言注入量，
+ * 未必等于 {@code getFluid} 返回的那个罐。并列之后，
+ * {@code te-state-equals} 的 {@code key} 可以直接指到 {@code /tanks/tanks/0/amount} 断言注入量，
  * 与 {@code scene.tank.fill} 的返回值出自<b>同一个读取口</b>（分叉是这类设施最贵的一类缺陷）。
+ *
+ * <p>
+ * <b>输入侧请断言 {@code /tanks/tanks/<i>N</i>/amount}，不要断言 {@code /tanks/drainableFluid*}：
+ * 后者是「可排出/输出」那一侧</b>（见 {@code tanks} 方法里的 D-2 说明）。
  *
  * <h2>为什么读「充电槽」而不只是「槽里有什么」</h2>
  * GT 的机器充电槽是<b>条件生效</b>的：{@code MTEBasicMachine.onPostTick} 每 tick 重算
@@ -142,7 +145,7 @@ public final class GtMachineDescriber implements TeDescriber {
         o.addProperty("frontFacing", string(ModReflect.call(te, "getFrontFacing")));
         o.addProperty("active", bool(ModReflect.call(te, "isActive")));
         o.add("inventory", inventory(te, metaTile));
-        o.add("tanks", tanks(te));
+        o.add("tanks", tanks(te, metaTile));
         return o;
     }
 
@@ -210,6 +213,20 @@ public final class GtMachineDescriber implements TeDescriber {
      * （{@code MTEBasicMachine.java:455-457} 覆写为 {@code mFluidOut}，即<b>输出</b>罐）。
      * 因此「主罐」这个词在 GT 机器上是有歧义的，两个来源都读才不至于因为取哪个罐而失真。
      *
+     * <h2>⚠ 单值读数必须从 <b>MetaTileEntity</b> 读，不能从方块实体读（实机证伪的缺陷 D-1）</h2>
+     * 三个 getter 的宿主是 <b>MTE</b> 而不是 TE：
+     * <ul>
+     * <li>{@code getFluid()}/{@code getFluidAmount()} 只在
+     * {@code MTEBasicTank}（{@code MTEBasicTank.java:195,200}）上——方块实体没有它们；</li>
+     * <li>{@code BaseMetaTileEntity.getCapacity()} <b>确实存在</b>，但它返回的是
+     * {@code (int) min(MAX, getEUCapacity())}（{@code BaseMetaTileEntity.java:1997-1999}）——
+     * 即 <b>EU 缓冲容量（LV 机器 = 2048）而不是储罐容量（16000）</b>。</li>
+     * </ul>
+     * 从方块实体读的后果是：{@code fluid}/{@code fluidAmount} 恒为显式 null，
+     * 而 {@code capacityGetter} 报出一个「看起来像储罐容量、实际是 EU 容量」的 2048——
+     * 后者尤其坏，它<b>静默给出一个错的数字</b>而不是缺席（#122 实机首轮实测到）。
+     * 故单值读数一律从 {@code getMetaTileEntity()} 取；MTE 不在位（空壳）时给显式 null。
+     *
      * <h2>只读纪律</h2>
      * 只调 GT/Forge 的 public getter（{@code getTankInfo}/{@code getFluid}/{@code getFluidAmount}/
      * {@code getCapacity}），<b>不</b>调 {@code fill}/{@code drain}、不读 NBT 猜状态
@@ -217,10 +234,10 @@ public final class GtMachineDescriber implements TeDescriber {
      *
      * <h2>非 GT 的 {@code IFluidHandler}</h2>
      * {@code getTankInfo} 是 Forge 的标准面，任何 {@code IFluidHandler} 都有；GT 侧的单值读数则可能
-     * 全为显式 null（该 TE 不是 GT 机器时 {@code ModReflect.call} 返回 null）。
+     * 全为显式 null（该 TE 不是 GT 机器时 {@code getMetaTileEntity()} 为 null）。
      * 这两件事分开表达：{@code present} 说「有没有储罐读数」，单值字段的 null 说「GT 侧有没有」。
      */
-    private static JsonObject tanks(TileEntity te) {
+    private static JsonObject tanks(TileEntity te, Object metaTile) {
         JsonObject o = new JsonObject();
         JsonArray tanks = new JsonArray();
         int capacity = 0;
@@ -282,18 +299,35 @@ public final class GtMachineDescriber implements TeDescriber {
         o.addProperty("capacity", anyCapacity ? Integer.valueOf(capacity) : null);
         o.add("tanks", tanks);
 
-        // GT 侧单值读数（非 GT 方块实体 → 显式 null）
-        Object fluid = ModReflect.call(te, "getFluid");
+        // GT 侧单值读数：宿主是 MTE（见方法注释的 D-1），非 GT/空壳 → 显式 null。
+        //
+        // ⚠ 命名口实（D-2，实机第二轮证伪的「我的期望本身是错的」那一处）：
+        // MTEBasicMachine 覆写 getDrainableStack() 返回 mFluidOut（:455-457），
+        // 而 MTEBasicTank.getFluid() 就是 getDrainableStack()（:195-197）⇒
+        // **MTEBasicMachine 的 getFluid/getFluidAmount 指的是「可排出/输出」那一侧，不是输入储罐**。
+        // 实机实测：注完 HCl 3000 后这两个读数是 null/0（输入罐在 tanks[0]，输出罐确实是空的）；
+        // 配方跑完后变成 trichlorosilane/1000。故字段名必须带 drainable 前缀——
+        // 叫 fluid 会让下游把「输入罐已注入」误读成「没注进去」。
+        // **输入侧的唯一权威读数是逐罐的 tanks[]（来自 getTankInfo）。**
+        Object fluid = ModReflect.call(metaTile, "getFluid");
         if (fluid instanceof net.minecraftforge.fluids.FluidStack) {
             net.minecraftforge.fluids.FluidStack fs = (net.minecraftforge.fluids.FluidStack) fluid;
-            o.addProperty("fluid", com.lightning.mod.client.controlplane.mc.GtFluids.registryName(fs.getFluid()));
+            o.addProperty(
+                "drainableFluid",
+                com.lightning.mod.client.controlplane.mc.GtFluids.registryName(fs.getFluid()));
+            o.addProperty("drainableFluidAmount", Integer.valueOf(fs.amount));
         } else {
-            o.addProperty("fluid", (String) null);
+            o.addProperty("drainableFluid", (String) null);
+            o.addProperty("drainableFluidAmount", Integer.valueOf(0));
         }
-        Object amount = ModReflect.call(te, "getFluidAmount");
-        o.addProperty("fluidAmount", amount instanceof Number ? Integer.valueOf(((Number) amount).intValue()) : null);
-        Object cap = ModReflect.call(te, "getCapacity");
-        o.addProperty("capacityGetter", cap instanceof Number ? Integer.valueOf(((Number) cap).intValue()) : null);
+        Object amount = ModReflect.call(metaTile, "getFluidAmount");
+        o.addProperty(
+            "drainableFluidAmountGetter",
+            amount instanceof Number ? Integer.valueOf(((Number) amount).intValue()) : null);
+        // getCapacity() 在 MTE 上才是储罐容量（MTEBasicMachineWithRecipe.java:482-484 返回 mTankCapacity）；
+        // 在方块实体上它返回 EU 容量（2048），是 D-1 的来源。
+        Object cap = ModReflect.call(metaTile, "getCapacity");
+        o.addProperty("metaTileCapacity", cap instanceof Number ? Integer.valueOf(((Number) cap).intValue()) : null);
         return o;
     }
 

@@ -1190,8 +1190,11 @@ public final class ActionRegistrar {
                         + "filled = IFluidHandler.fill 的实际返回值（部分注入如实报告，partial:true）；"
                         + "dryRunFillable = 一次 fill(...,false) 干跑的结果（不改状态），用来把「返回 0」的两种原因分开"
                         + "（干跑>0 而实注 0 ⇒ GT 的运行期门；干跑 0 ⇒ 容量/流体种类）。"
-                        + "before/after 含逐罐 {index,present,capacity,fluid,amount,empty} 与 GT 侧单值读数"
-                        + "（fluid/fluidAmount/capacity）。注入量为 0 报 CP-EXEC-001（附候选原因与前后读数）；"
+                        + "before/after 含逐罐 {index,present,capacity,fluid,amount,empty}（**输入侧的权威读数**，"
+                        + "断言注入量请用它）与 GT 侧单值读数（drainableFluid/drainableFluidAmount 是"
+                        + "**输出/可排出**那一侧——MTEBasicMachine 的 getFluid 就是 getDrainableStack，"
+                        + "入口注 HCl 时它是 null/0，配方跑完后才变成产物；metaTileCapacity 是真正的储罐容量）。"
+                        + "注入量为 0 报 CP-EXEC-001（附候选原因与前后读数）；"
                         + "非流体处理器/无方块实体报 CP-STATE-001；未知流体报 CP-VALID-002")
                 .example("{\"at\":[65,12,65],\"fluid\":\"HydrochloricAcid\",\"amount\":3000,\"confirm\":true}")
                 .example(
