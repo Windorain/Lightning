@@ -15,7 +15,7 @@
   "capture":  { ... },                   // 可空（PR-2 起）：扫描与捕获参数
   "build":    [ ... ],                   // 可空：场景构建步骤
   "read":     [ ... ],                   // 可空（v1.3，issue #98）：读面步骤
-  "action":   [ ... ],                   // 可空（v1.6，issue #103）：L2 编排步骤（任意 cp 动作）
+  "action":   [ ... ],                   // 可空（v1.6，issue #103）：L2 编排步骤（任意 cp 动作；v1.8 起含输入族跨 tick 步）
   "export":   [ ... ],                   // 可空（v1.7，issue #102）：导出步骤
   "cameras":  [ ... ],                   // 可空（PR-2 起）：机位表
   "criteria": [ ... ],                   // 必填，至少一条：判据与阈值
@@ -119,17 +119,70 @@ world → capture → build → read → action → export → cameras → crite
 ]
 ```
 
-**语义**：执行该动作（契约 §4 的**任意已注册同步动作**）→ 结果 JSON 落 run 目录的 `path` 并登记为产物
+**语义**：执行该动作（契约 §4 的**任意已注册同步动作**，外加下面这个唯一的跨 tick 例外）→ 结果 JSON 落 run 目录的 `path` 并登记为产物
 → `expect` 非空时**当场**逐步断言。
+
+### 跨帧的输入固定程序（v1.8 / G1，issue #165）
+
+**本段的默认语义是「在单次 `advance` 内逐条跑完」**（所以放行要装卸世界的步进动作会让「段完成」
+与「动作完成」脱钩）。输入族是唯一的例外——不推进它，「注入输入 → 推进 N tick → 读后果」
+在用例里**无法表达**：
+
+```jsonc
+"action": [
+  { "action": "input.key",
+    "params": { "key": "key.forward", "action": "tap" },
+    "holdTicks": 20,                        // 顶层：与 params 并列（D-3），不是动作参数
+    "path": "action/0-hold-w.json", "role": "input-hold-forward",
+    "expect": { "/delivered": 2 } },
+  { "action": "input.key",     "params": { "key": "key.forward", "action": "down" }, "path": "action/1-down.json" },
+  { "action": "input.state",   "params": { }, "path": "action/2-held.json",
+    "expect": { "/held/count": 1 } },       // 释放前的读断言：看得到「未释放」态
+  { "action": "input.release", "params": { }, "path": "action/3-release.json" },
+  { "action": "input.state",   "params": { }, "path": "action/4-released.json",
+    "expect": { "/held/count": 0 } }        // 释放之后的读断言
+]
+```
+
+**规则（逐条可判定）**：
+
+1. **例外只对一个集合开**：`CaseValidator.ACTION_STEPPING_INPUT_ACTIONS` = `input.key` / `input.mouse`。
+   其它步进动作仍拒（`CP-VALID-002`）——段语义是「一次 advance 里跑完」，放行要装卸世界的那类动作
+   会让「段完成」与「动作完成」脱钩。
+2. **一次 tick 只推进一次**：在飞的输入步每次 `advance` 恰好被推进一步。未完成即让出本 tick
+   （不 sleep、不忙等、不在段内循环到完成）；**完成也到此为止**——每个输入步至少占一个 tick，
+   于是「按下」与紧随其后的读断言天然隔着帧边界，不会挤进同一次 `advance`。
+   与之相对，**相邻的同步步骤仍在同一 tick 内连跑**（这是本段 G1 之前就有的语义）：若某处需要
+   额外的帧边界，就在那里插入一个输入步（它至少占一 tick）。
+3. **完成前不进入下一步骤**：后续步骤（含读断言）不抢跑。
+4. **`holdTicks` 写在步骤对象顶层**（与 `params` 并列，D-3）：精确整数 `1..1200`。
+   `1` = 同一次调用内 down+up；`≥2` = 第 `holdTicks` 个 tick 抬起。**不写**即
+   「显式定义的单次推进」——动作自己的缺省（`1`）说了算，执行器**不补**任何隐式持有量。
+5. **输入族步进步的 `params` 内不得出现 `holdTicks`**：只写在 `params` 内、或两处都写，都是
+   `CP-VALID-002`（真值来源不明）。顶层→动作参数的翻译由执行器做，那是**唯一**的翻译点。
+   这条只约束输入族步进步：`params` 是**动作自己的**参数空间，别的动作可能有同名参数
+   （如 `player.dig` 的 `params.holdTicks`），校验器不越过动作边界去否决它们。
+6. **不适用字段显式拒绝，绝不静默忽略**：同步动作写 `holdTicks`；`input.key` 的 `action` 不是
+   `tap`；`input.mouse` 的 `op` 不是 `click`——三种都在 `case.validate` 期即报 `CP-VALID-002`
+   并给出字段上下文（`action[i].holdTicks` / `action[i].params.holdTicks`）。
+7. **输入步不走步骤间收敛**（§10.7 的 `settleBetweenSteps`）：它的「等」是 tick 推进，不是墙钟等待。
+8. **收尾必须释放所持按下态**：段内失败、阶段超时、段异常三条路径都会释放（失败现场释放一次，
+   `case.run` 的 `onFinish` 兜底再调一次，幂等）。释放走 `input.release` 的**同一实现**（无隐藏通道）；
+   该动作未注册时记一条 warn 事件，并由设施对每个持有点的 1200 tick 到期自动抬起兜底（D-4）。
+   `down` 刻意保留持有，因此**没有**显式 `input.release` 的固定程序不会留下永久按下的键。
+9. **段产物形态不变**：`segments/action.json` 的字段集合与每条步骤记录的字段集合都**不**因这一点增量
+   而改变（`settleMs`/`assertions` 本就是可缺省的）；输入步的 tick 推进明细落在**该步自己的**
+   `action/N-*.json`（即该动作的返回值）。**没有输入步的用例走的是同一条代码路径与同一组语句**，
+   记录字段集合逐个不变（契约 §9.2 回归面第 7 条的口径），A3 基准不失效。
 
 ### 与 read 段的对称与差异
 
 | 项 | `read` 段（v1.3） | `action` 段（v1.6） |
 |---|---|---|
-| 步骤形态 | `{action, params, path, role?}` | `{action, params, path, role?, expect?}` |
+| 步骤形态 | `{action, params, path, role?}` | `{action, params, path, role?, expect?, holdTicks?}` |
 | 动作名前缀 | **只许 `read.*`**（读面只读的静态落点） | **不限**（本职就是调 L0/L1 写动作） |
-| 静态纪律 | 前缀 + 路径纪律 | ①禁编排收尾原语（见下）②路径纪律 |
-| 同步性 | 静态声明为只许同步 | **执行期**判定（core 没有注册表） |
+| 静态纪律 | 前缀 + 路径纪律 | ①禁编排收尾原语（见下）②路径纪律③`holdTicks` 的位置与取值域 |
+| 同步性 | 静态声明为只许同步 | **执行期**判定（core 没有注册表）：同步动作 + 输入族步进动作（`input.key`/`input.mouse`），后者按「跨帧的输入固定程序」推进 |
 | 产物落点 | 同一 run 目录（`ActionContext.withParams` 共享 run） | 同左 |
 
 ### 校验口径（`case.validate` 与 `case.run` 同源）
@@ -142,9 +195,10 @@ world → capture → build → read → action → export → cameras → crite
    - **空对象是错误**（空断言集恒绿——恒绿假断言是明确要防的失效模式）；要不断言就别写这个字段；
    - 指针必须 `/` 开头（`""` = 整棵结果对象，与 `json-field` 同口径）；单步上限 64 条；
    - 求值走 `Json.resolvePointer`——**与 `json-field`/`te-state-equals` 判据同一份实现**，不另起一套指针语义。
-4. 动作是否真的已注册、是不是同步动作，由 `case.run` 的 `action` 段**执行期**判定
-   （`CP-VALID-001`，`context.registered` 给出全部已注册动作名）；步进动作一律拒（`CP-VALID-002`）——
-   本段在单次 `advance` 里逐条跑完，放行跨 tick 的动作会让「段完成」与「动作完成」脱钩。
+4. 动作是否真的已注册、是同步还是步进，由 `case.run` 的 `action` 段**执行期**判定
+   （`CP-VALID-001`，`context.registered` 给出全部已注册动作名）。同步动作逐条跑完；
+   **非输入族**的步进动作一律拒（`CP-VALID-002`）——放行跨 tick 的它们会让「段完成」与
+   「动作完成」脱钩；输入族步进动作（`input.key` / `input.mouse`）按「跨帧的输入固定程序」推进。
 5. 产物落点即判据的 `params.path`；`role` 缺省时按动作名派生（`player.place_block` → `action-player-place_block`）。
 6. 变体补丁可以改 `action` 段的 `params`（负对照「编排参数变了判据该红」的基础），写法同其它段。
 
@@ -507,8 +561,8 @@ A3 的成文口径不是一次写成的。本单实机跑了三轮，前两轮�
 
 ### 10.7 步骤间收敛（`action` 段专有，v1.6 / #103）
 
-`action` 段在**单次 `advance`** 里逐条跑完（其成员必须是同步动作），而 L1（`player.*`）
-的请求是**包**：客户端发出 C03/C07/C08，服务端在它自己线程的 tick 里处理
+`action` 段在**单次 `advance`** 里逐条跑完（其成员是同步动作，v1.8 起另有输入族步进动作这一例外，
+见 §3.2），而 L1（`player.*`）的请求是**包**：客户端发出 C03/C07/C08，服务端在它自己线程的 tick 里处理
 （`MinecraftServer.updateTimeLightAndEntities → networkTick`）。因此「上一步发了包」与
 「下一步能读到它的后果」之间隔着服务端的一拍；**更微妙的是 `scene.*` 也走同步出口**
 （如 `scene.player.pose` 的 S08 是服务端→客户端方向），而本段阻塞在客户端 tick 线程上——
@@ -517,6 +571,9 @@ A3 的成文口径不是一次写成的。本单实机跑了三轮，前两轮�
 **因此本段在每步之后做一次往返收敛**（`PlayerSession.completeClientRequest`：
 flush 入站包 + 等服务端 tick，与 L1 动作回读前的收尾同一份实现），`read.*` 除外（纯读）。
 等待时长写进该步的段记录 `settleMs`（失败记 −1），让「等了多久」**可见**而不是隐式。
+
+**输入族步进步不走这条路**（§3.2 规则 7）：它是墙钟等待，而输入步要的「等」是**tick 推进**——
+既有的收敛实现不得用于输入步（契约 §9.2 第 4 条）。输入步因此不写 `settleMs`。
 
 **这是「逐步」二字的题中之义**：没有它，「第 N 步的结果」就不是「第 N 步做完之后的世界」，
 逐步断言会系统性地假红（实机形态：`player.move` 的 `serverBefore` 还是上一步之前的位置，

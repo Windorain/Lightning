@@ -171,6 +171,36 @@ public final class CaseValidator {
     /** {@code action} 段逐步断言的单步最大条目数（防一次编排写出上万条断言）。 */
     public static final int MAX_STEP_EXPECT = 64;
 
+    /**
+     * {@code action} 段<b>额外</b>允许在段内跨 tick 推进的输入族步进动作（v1.8 / G1，input-contract.md §9.2）。
+     *
+     * <h2>为什么开这个口子（不是放宽纪律）</h2>
+     * 本段原先<b>一律</b>拒绝步进动作（{@code CaseRunAction} 的执行期判据），理由是「本段在单次
+     * {@code advance} 里逐条跑完，放行跨 tick 的动作会让『段完成』与『动作完成』脱钩」。那条理由对
+     * <b>非输入族</b>仍成立（{@code world.rebuild} 一类要装卸世界，段内推进它等于把段语义变成作业语义）。
+     *
+     * <p>
+     * 输入族不同：它的跨 tick 是<b>被请求的持有</b>（{@code holdTicks}），推进一次只做一件事
+     * （投递首段事件 / 结算到期），且必须在客户端 tick 线程上被逐 tick 推进——不推进它，
+     * 「注入输入 → 推进 N tick → 读后果」就<b>无法在用例里表达</b>（契约 §9.2 的问题陈述）。
+     * 因此例外只对<b>已注册</b>的这两条开：非输入族的步进动作仍 {@code CP-VALID-002}。
+     *
+     * <p>
+     * 这个集合是<b>唯一</b>来源：{@link CaseRunAction} 的执行期白名单直接取它，不另抄一份名单
+     * （同一件事只有一个定义点，校验期与执行期不会分叉）。
+     */
+    public static final java.util.Set<String> ACTION_STEPPING_INPUT_ACTIONS = java.util.Collections
+        .unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList("input.key", "input.mouse")));
+
+    /** 步骤对象顶层的跨 tick 持有 tick 数字段（G1 / D-3；与 {@code params} 并列，不在其内）。 */
+    public static final String FIELD_HOLD_TICKS = "holdTicks";
+
+    /**
+     * {@code holdTicks} 取值上限（契约 §3.2 的「单键/单按钮持有上限」；与 {@code player.dig} 的
+     * {@code MAX_HOLD_TICKS} 同值——同一动作面不许有两套上界）。下界恒为 1。
+     */
+    public static final int MAX_STEP_HOLD_TICKS = 1200;
+
     /** 解析并校验，返回规范化计划。 */
     public static JsonObject validate(String text) {
         CaseFile file = new CaseParser().parse(text);
@@ -483,8 +513,13 @@ public final class CaseValidator {
      * <p>
      * 「动作是否真的已注册、是不是同步动作」在 core 层查不到（core 没有动作注册表——那是 mc 层
      * 装配的），因此由 {@code case.run} 的 {@code action} 段执行期判定并报 {@code CP-VALID-001}
-     * （与 {@code read} 段完全同一分工）。<b>同步性必须在执行期判</b>：步进动作跨 tick，
-     * 而本段在单次 {@code advance} 里逐条跑完。
+     * （与 {@code read} 段完全同一分工）。<b>同步性必须在执行期判</b>：步进动作跨 tick。
+     *
+     * <h2>v1.8 / G1 的增量：输入族步进动作可以进编排段</h2>
+     * 例外集合是 {@link #ACTION_STEPPING_INPUT_ACTIONS}（{@code input.key} / {@code input.mouse}），
+     * 其余步进动作仍拒。跨 tick 的持有量由步骤对象<b>顶层</b>的 {@link #FIELD_HOLD_TICKS} 表达
+     * （D-3），取值域与适用性见 {@link #validateStepHoldTicks}——<b>不适用字段一律显式拒绝</b>，
+     * 绝不静默忽略。
      */
     private JsonArray validateAction(CaseFile file, Fields fields, List<String> warnings) {
         JsonArray out = new JsonArray();
@@ -500,6 +535,7 @@ public final class CaseValidator {
             } else if (ACTION_FORBIDDEN.contains(action)) {
                 fields.add(ctx + ".action", "收尾原语不得编入固定程序: " + action + "（它会让本作业后续段不再执行；收尾由驱动在整跑结束后单独发起）");
             }
+            validateStepHoldTicks(step, ctx, fields);
             String path = step.path();
             if (path == null || path.trim()
                 .isEmpty()) {
@@ -524,6 +560,99 @@ public final class CaseValidator {
             warnings.add("action 段为空：本 run 不编排任何动作（L0/L1 一步也不跑）");
         }
         return out;
+    }
+
+    /**
+     * 步骤对象顶层 {@code holdTicks}（G1 / D-3）的取值域与适用性校验。
+     *
+     * <h2>它在哪、为什么在那</h2>
+     * 位置是<b>步骤对象顶层</b>（与 {@code params} 并列），不是动作参数：跨 tick 是<b>编排</b>的
+     * 属性——同一个动作在交互路径上被调一次、在固定程序里被跨帧持有，差别在编排侧，不在动作侧。
+     * 因此<b>输入族步进步</b>的 {@code params} 内出现 {@code holdTicks} 一律报错（两处都写 ⇒
+     * 真值来源不明，input-contract.md §9.2 第 2 条）。
+     *
+     * <p>
+     * <b>这条规则的适用面只到输入族</b>：{@code params} 是<b>动作自己的参数空间</b>，别的动作可能有
+     * 同名参数（实测：{@code player.dig} 的 {@code params.holdTicks} 是它自己的合法动作参数，
+     * 回归资产 {@code test/cases/regression/l1-orchestration.json} 正在用）。把「params 里不许有
+     * holdTicks」推广到全部动作，等于用一个编排层的字段名去否决别的动作的参数域——那是越界，
+     * 会让既有用例凭空非法。
+     *
+     * <h2>为什么「不适用」必须是错误</h2>
+     * 写在<b>同步动作</b>上的 {@code holdTicks} 没有真值来源：同步动作不跨 tick，段内也不为它推进，
+     * 静默忽略会让作者以为「它确实持有了 20 tick」。同类还有「{@code input.key} 的 {@code action}
+     * 不是 {@code tap}」「{@code input.mouse} 的 {@code op} 不是 {@code click}」——动作实现自己
+     * 也会拒（input-contract §2.2 第 6 条），这里提前到静态层，让 {@code case.validate} 就能查出，
+     * 不必等到跑起来。
+     *
+     * <p>
+     * 取值域：精确整数 {@code 1..}{@link #MAX_STEP_HOLD_TICKS}（{@code 1} = 同一次调用内 down+up）。
+     * 小数（{@code 1.5}）、字符串数字、布尔一律拒绝（{@link Json#integralRejectReason}，
+     * 与全仓 {@code TYPE_INT} 的严格口径同源，Gitea #131）。
+     */
+    private void validateStepHoldTicks(CaseFile.ActionStep step, String ctx, Fields fields) {
+        JsonObject params = step.params();
+        String action = step.action();
+        boolean inputStepping = action != null && ACTION_STEPPING_INPUT_ACTIONS.contains(action);
+        boolean inParams = Json.get(params, FIELD_HOLD_TICKS) != null;
+        if (inputStepping && inParams) {
+            // 只对**输入族步进步**判这一条：`params` 是动作自己的参数空间，其它动作可能有同名参数
+            // （实测：`player.dig` 自己的 `params.holdTicks` 是它的合法动作参数，回归资产 l1-orchestration 在用）。
+            fields.add(
+                ctx + ".params." + FIELD_HOLD_TICKS,
+                "输入族步进的 " + FIELD_HOLD_TICKS
+                    + " 只能写在步骤对象顶层（与 params 并列，D-3）"
+                    + (step.hasHoldTicks() ? "；两处都写会让真值来源不明" : "；写在 params 内会让位置与真值来源不一致"));
+        }
+        if (!step.hasHoldTicks()) {
+            return;
+        }
+        JsonElement raw = step.holdTicks();
+        if (!inputStepping) {
+            fields.add(
+                ctx + "." + FIELD_HOLD_TICKS,
+                "不适用：跨 tick 持有只对输入族步进动作 " + ACTION_STEPPING_INPUT_ACTIONS
+                    + " 有效，同步动作的「等一拍」由步骤间收敛承担（settleMs）；收到 action="
+                    + action);
+            return;
+        }
+        String typeReason = Json.integralRejectReason(raw);
+        if (typeReason != null) {
+            fields.add(ctx + "." + FIELD_HOLD_TICKS, "须为精确整数 1.." + MAX_STEP_HOLD_TICKS + "：" + typeReason);
+            return;
+        }
+        long value;
+        try {
+            value = new java.math.BigDecimal(raw.getAsString()).longValueExact();
+        } catch (RuntimeException ex) {
+            fields.add(ctx + "." + FIELD_HOLD_TICKS, "超出可表示范围: " + raw.getAsString());
+            return;
+        }
+        if (value < 1L || value > (long) MAX_STEP_HOLD_TICKS) {
+            fields.add(
+                ctx + "." + FIELD_HOLD_TICKS,
+                "越界：须在 1.." + MAX_STEP_HOLD_TICKS
+                    + "（1=同一次调用内 down+up；上限与 player.dig 的 MAX_HOLD_TICKS 同口径），收到 "
+                    + value);
+            return;
+        }
+        // 取值域内的「不适用」：动作自己的参数域决定了它能不能持有
+        if ("input.key".equals(action)) {
+            String keyAction = Json.optString(params, "action", null);
+            if (!"tap".equals(keyAction)) {
+                fields.add(
+                    ctx + "." + FIELD_HOLD_TICKS,
+                    "不适用：input.key 只有 action=tap 会持有（action=" + String.valueOf(keyAction)
+                        + " 要么不持有、要么立即收口）；要跨帧持有请写 action=tap");
+            }
+        } else if ("input.mouse".equals(action)) {
+            String op = Json.optString(params, "op", null);
+            if (!"click".equals(op)) {
+                fields.add(
+                    ctx + "." + FIELD_HOLD_TICKS,
+                    "不适用：input.mouse 只有 op=click 会持有（op=" + String.valueOf(op) + "）；要跨帧持有请写 op=click");
+            }
+        }
     }
 
     /** 从 {@code cmd.exec} 的 params 里取出 {@code /sde} 子命令（小写）；取不到返回 null。 */
