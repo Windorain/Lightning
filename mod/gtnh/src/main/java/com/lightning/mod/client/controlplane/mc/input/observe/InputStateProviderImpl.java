@@ -8,6 +8,7 @@ import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.Contract;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.TimeSource;
+import com.lightning.mod.client.controlplane.mc.input.InputCoordinateMath;
 import com.lightning.mod.client.controlplane.mc.input.api.InputRuntime;
 import com.lightning.mod.client.controlplane.mc.input.api.InputStateProvider;
 import com.lightning.mod.client.controlplane.mc.input.api.InputStateSnapshot;
@@ -33,18 +34,19 @@ import com.lightning.mod.client.controlplane.mc.input.api.InputStateSnapshot;
  * 而是返回 {@code ok:false} 的失败体（契约 §6.2「在非 tick 线程上被误用」的形态）。
  *
  * <h2>没有真值来源的字段（§5.2 的「不许用默认值伪装」）</h2>
- * 契约 §5.2 列出的字段里，下列项<b>在当前接口面下没有真值来源</b>，本类因此把它们如实落进
+ * 契约 §5.2 列出的字段里，下列项<b>没有真值来源</b>，本类因此把它们如实落进
  * {@code notImplemented}（而不是填 0 / {@code []} / {@code false}）：
  * <ol>
- * <li>{@code queues.deliveredThisJob}、{@code queues.deliveredThisSession}：
- * {@link InputStateSnapshot}（Lead 已落定的 api/ 面，只读）<b>不暴露</b>投递计数；</li>
- * <li>{@code queues.mouseDepth}：{@code Mouse} 的队列深度<b>没有</b>公开探针（契约 §11.2 第 6 条），
- * 值固定为 {@code "unobservable"}——这一项是<b>如实的真值</b>，不是占位；</li>
- * <li>{@code held[].jobId}、{@code held[].heldTicks}、{@code held[].expiresInTicks}：
- * {@link InputStateSnapshot} 只给「持有的键位描述名 / 按钮」两个扁平清单，不给归属作业与期限。
- * 本类仍逐条输出 {@code kind}/{@code id}/{@code gameBindingPressed}（后者是本类按 §3.6 第 4 条
- * <b>回读</b> {@code KeyBinding.pressed} 得到的），缺的字段<b>不出现</b>。</li>
+ * <li>{@code queues.mouseDepth}：{@code Mouse} 的队列深度<b>没有</b>公开探针（契约 §11.2 第 6 条）。
+ * 本类把它落成 {@code "unobservable"}——这一项是<b>如实的真值</b>，不是占位：真值由
+ * {@link InputStateSnapshot#mouseDepth()} 给出（{@link InputStateSnapshot#DEPTH_UNOBSERVABLE} =
+ * 「不可观测」，**不是** 0）；将来若某后端能给出真实深度，本类直接把它写成数字，无需改判据。</li>
  * </ol>
+ * <p>
+ * #165 起，原先在这张清单里的 {@code queues.deliveredThisJob}/{@code queues.deliveredThisSession}
+ * 与 {@code held[].jobId}/{@code held[].heldTicks}/{@code held[].expiresInTicks} 已由
+ * {@link InputStateSnapshot} 的只增方法提供了真值来源，故从清单里<b>删除</b>并如实暴露
+ * （实现一项删一处，不留漂移）。
  */
 public final class InputStateProviderImpl implements InputStateProvider {
 
@@ -59,6 +61,16 @@ public final class InputStateProviderImpl implements InputStateProvider {
 
     /** 键盘队列的静态 seed 哨兵条数（lwjgl3ify {@code Keyboard.java:228} 的静态初始化各一条）。 */
     public static final int KEYBOARD_SEED_BASELINE = 1;
+
+    /**
+     * {@code queues.mouseDepth} 的契约字符串形态：{@code Mouse} 无公开队列深度探针。
+     *
+     * <p>
+     * 与 {@code InputStateSnapshot.DEPTH_UNOBSERVABLE}（{@code -1}）是同一件事的两种形态：
+     * 接口用 {@code -1}（数字域里「读不到」），响应体用契约 §5.2 冻结的 {@code "unobservable"}。
+     * 两者都<b>不</b>是 0。
+     */
+    public static final String MOUSE_DEPTH_UNOBSERVABLE = "unobservable";
 
     /** 本族返回的错误码清单（§6.1：<b>不</b>新增码，复用既有四个）。 */
     public static final String[] ERRORS = { "CP-VALID-002", "CP-STATE-001", "CP-EXEC-002", "CP-CONFIRM-001" };
@@ -165,7 +177,7 @@ public final class InputStateProviderImpl implements InputStateProvider {
         data.add("wheel", wheelJson());
         data.add("consumer", consumerJson(o, runtime));
         data.add("hitSet", hitSetJson());
-        data.add("queues", queuesJson(o, gaps));
+        data.add("queues", queuesJson(o, runtime, gaps));
         data.add("held", heldJson(runtime, o));
         data.add("physical", physicalJson(o, runtime));
         data.add("lifecycle", lifecycleJson());
@@ -393,9 +405,17 @@ public final class InputStateProviderImpl implements InputStateProvider {
      * <p>
      * {@code keyboardDepth} 是<b>队列含 seed 哨兵</b>的口径（lwjgl3ify {@code Keyboard.next()} 的
      * 判据是 {@code size() > 1}），故同时给出 {@code keyboardSeedBaseline}；读不到时落 {@code null}。
-     * {@code mouseDepth} 恒为 {@code "unobservable"}（§11.2 第 6 条，是真值不是占位）。
+     * {@code mouseDepth} 恒为 {@code "unobservable"}（§11.2 第 6 条，是真值不是占位）：真值来自
+     * {@link InputStateSnapshot#mouseDepth()}，本类只把
+     * {@link InputStateSnapshot#DEPTH_UNOBSERVABLE} 翻译成契约的字符串形态——**不**翻译成 0。
+     *
+     * <p>
+     * 投递计数（§5.2 的 {@code deliveredThisJob}/{@code deliveredThisSession}）与
+     * {@code deliveredJobId} 一并给出：计数不给归属作业就无从判读（同一个数换个作业含义完全不同）。
+     * 读不到（运行时未装配、快照抛异常、或运行时自己报 {@link InputStateSnapshot#COUNT_UNKNOWN}）时
+     * 落 {@code null} + 说明，<b>不</b>写 0 冒充「本会话一条都没投递」。
      */
-    private static JsonObject queuesJson(TickObservation o, List<String> gaps) {
+    private static JsonObject queuesJson(TickObservation o, InputRuntime runtime, List<String> gaps) {
         JsonObject q = new JsonObject();
         if (o.keyboardDepthReadable()) {
             q.addProperty("keyboardDepth", o.keyboardQueueDepth);
@@ -410,11 +430,61 @@ public final class InputStateProviderImpl implements InputStateProvider {
             q.addProperty("keyboardCapacity", CONTRACT_KEYBOARD_CAPACITY);
             q.addProperty("keyboardCapacitySource", "契约 §5.2 的常量（运行期未能实读 eventQueue 容量）");
         }
-        q.addProperty("mouseDepth", "unobservable");
-        q.addProperty("mouseDepthNote", "Mouse 的队列深度没有公开探针 ⇒ 鼠标侧「已投递」不可独立复核（契约 §4.1/§11.2 第 6 条）");
-        // 投递计数：InputStateSnapshot（只读 api/）不暴露 ⇒ 不出现，进 notImplemented
-        gaps.add("queues.deliveredThisJob / queues.deliveredThisSession：InputStateSnapshot 不暴露投递计数（api/ 只读面）");
+        // 鼠标队列深度：真值 = 不可观测（无公开探针）。字符串形态是契约冻结值，数字只出现在真读得到时。
+        InputStateSnapshot snap = safeSnapshot(runtime);
+        int mouseDepth = snap == null ? InputStateSnapshot.DEPTH_UNOBSERVABLE : snap.mouseDepth();
+        if (mouseDepth == InputStateSnapshot.DEPTH_UNOBSERVABLE) {
+            q.addProperty("mouseDepth", MOUSE_DEPTH_UNOBSERVABLE);
+            q.addProperty(
+                "mouseDepthNote",
+                "Mouse 的队列深度没有公开探针 ⇒ 鼠标侧「已投递」不可独立复核（契约 §4.1/§11.2 第 6 条）；" + "本字段是「不可观测」的真值，**不是** 0");
+        } else {
+            q.addProperty("mouseDepth", mouseDepth);
+            q.addProperty("mouseDepthSource", "InputStateSnapshot.mouseDepth()（该运行时给出了真实探针）");
+        }
+        addDeliveryCounts(q, snap, gaps);
         return q;
+    }
+
+    /** 投递计数：只增字段（§5.2 的 {@code deliveredThisJob}/{@code deliveredThisSession} + 归属作业）。 */
+    private static void addDeliveryCounts(JsonObject q, InputStateSnapshot snap, List<String> gaps) {
+        String jobId = snap == null ? null : snap.lastJobId();
+        if (jobId == null) {
+            q.addProperty("deliveredJobId", (String) null);
+        } else {
+            q.addProperty("deliveredJobId", jobId);
+        }
+        addCount(q, "deliveredThisJob", snap, true, gaps);
+        addCount(q, "deliveredThisSession", snap, false, gaps);
+        q.addProperty(
+            "deliveredScope",
+            "设施写进事件队列的事件数（含到期/释放路径由设施自动投递的抬起事件）；被幂等抑制（重复 down）与整条拒绝的事件不计" + "（契约 §4.1 的「已投递」定义）");
+    }
+
+    /** 落一个计数字段：无真值（无运行时 / 快照读不到 / 运行时报 {@code COUNT_UNKNOWN}）时落 {@code null} + 说明。 */
+    private static void addCount(JsonObject q, String field, InputStateSnapshot snap, boolean perJob,
+        List<String> gaps) {
+        if (snap == null) {
+            q.addProperty(field, (Long) null);
+            q.addProperty(field + "Note", "运行时未装配（或快照读取失败）⇒ 投递计数无真值来源（不写 0 冒充）");
+            gaps.add("queues." + field + "：运行时未装配 ⇒ 无真值（本字段落 null，不是 0）");
+            return;
+        }
+        long v = perJob ? snap.deliveredThisJob() : snap.deliveredThisSession();
+        if (v == InputStateSnapshot.COUNT_UNKNOWN) {
+            q.addProperty(field, (Long) null);
+            String note;
+            if (!perJob) {
+                note = "运行时未提供该计数（COUNT_UNKNOWN）";
+            } else if (snap.lastJobId() == null) {
+                note = "本会话尚无投递 ⇒ 没有可归属的作业（lastJobId 为 null）：这是「不可归属」，不是「投了 0 条」";
+            } else {
+                note = "运行时未提供作业 " + snap.lastJobId() + " 的计数（COUNT_UNKNOWN）";
+            }
+            q.addProperty(field + "Note", note);
+            return;
+        }
+        q.addProperty(field, v);
     }
 
     /**
@@ -424,6 +494,12 @@ public final class InputStateProviderImpl implements InputStateProvider {
      * §3.6 第 4 条要求 {@code gameBindingPressed} <b>回读</b>该键对应 {@code KeyBinding} 的
      * {@code pressed}——本探针把「实际按键的绑定描述名 → pressed」一并读回，本方法按名匹配填字段。
      * <b>不</b>做「检测到不一致就重投」（那是明令禁止的雪崩路径）。
+     *
+     * <p>
+     * 逐条明细（#165 起的只增字段）：{@code jobId}/{@code heldTicks}/{@code expiresInTicks} 的真值
+     * 来自 {@link InputStateSnapshot#heldDetails()}（T2-A 的持键表本来是唯一的持有真值来源，
+     * {@code jobId} 与 {@code expiresAtTick} 一直在表里）。快照给不出明细时（{@code null}）本类
+     * <b>如实标注</b>{@code detailsReadable:false} 并把三个字段落 {@code null}——不写 0。
      */
     private static JsonObject heldJson(InputRuntime runtime, TickObservation o) {
         JsonObject h = new JsonObject();
@@ -432,31 +508,79 @@ public final class InputStateProviderImpl implements InputStateProvider {
         if (snap == null) {
             h.addProperty("count", 0);
             h.add("items", items);
+            h.addProperty("detailsReadable", Boolean.FALSE);
             h.addProperty("note", "运行时未装配 ⇒ 无持键真值（count=0 是「未知」的诚实空态，非「已确认无持有」）");
             return h;
         }
-        List<String> keys = snap.heldKeys();
-        for (int i = 0; keys != null && i < keys.size(); i++) {
-            String id = keys.get(i);
-            JsonObject item = new JsonObject();
-            item.addProperty("kind", "key");
-            item.addProperty("id", id);
-            item.addProperty("gameBindingPressed", pressedFor(id, o));
-            items.add(item);
-        }
-        List<Integer> buttons = snap.heldButtons();
-        for (int i = 0; buttons != null && i < buttons.size(); i++) {
-            Integer id = buttons.get(i);
-            JsonObject item = new JsonObject();
-            item.addProperty("kind", "button");
-            item.addProperty("id", id == null ? null : String.valueOf(id));
-            item.addProperty("gameBindingPressed", (Boolean) null);
-            item.addProperty("gameBindingPressedNote", "鼠标按钮没有 KeyBinding 对应物（轮询面，本族不覆盖）");
-            items.add(item);
+        List<InputStateSnapshot.HeldDetail> details = snap.heldDetails();
+        if (details == null) {
+            // 快照给不出逐条明细（旧实现/自建实现）：仍然如实给出「谁被持有」，但 jobId/heldTicks/
+            // expiresInTicks 落 **null** 并整块标注不可读——绝不用 0 冒充「刚按下、1200 tick 后到期」。
+            appendFlat(snap.heldKeys(), true, items, o);
+            appendFlat(snap.heldButtons(), false, items, o);
+            h.addProperty("detailsReadable", Boolean.FALSE);
+            h.addProperty(
+                "detailsNote",
+                "本快照未提供逐条持有明细（heldDetails() == null）⇒ jobId/heldTicks/expiresInTicks 不可读，落 null 而不是 0");
+        } else {
+            for (int i = 0; i < details.size(); i++) {
+                InputStateSnapshot.HeldDetail d = details.get(i);
+                if (d == null) {
+                    continue;
+                }
+                JsonObject item = new JsonObject();
+                item.addProperty("kind", d.kind());
+                item.addProperty("id", d.id());
+                item.addProperty("jobId", d.jobId());
+                item.addProperty("heldTicks", d.heldTicks());
+                item.addProperty("expiresInTicks", d.expiresInTicks());
+                addBindingReadback(item, d.kind(), d.id(), o);
+                items.add(item);
+            }
+            h.addProperty("detailsReadable", Boolean.TRUE);
         }
         h.addProperty("count", items.size());
         h.add("items", items);
         return h;
+    }
+
+    /** 明细不可得时的兜底：由扁平清单给出 {@code kind}/{@code id}，三个明细字段显式落 {@code null}。 */
+    private static void appendFlat(List<?> ids, boolean keys, JsonArray items, TickObservation o) {
+        for (int i = 0; ids != null && i < ids.size(); i++) {
+            Object raw = ids.get(i);
+            if (raw == null) {
+                continue;
+            }
+            String id = String.valueOf(raw);
+            JsonObject item = new JsonObject();
+            item.addProperty(
+                "kind",
+                keys ? InputStateSnapshot.HeldDetail.KIND_KEY : InputStateSnapshot.HeldDetail.KIND_BUTTON);
+            item.addProperty("id", id);
+            item.addProperty("jobId", (String) null);
+            item.addProperty("heldTicks", (Long) null);
+            item.addProperty("expiresInTicks", (Long) null);
+            addBindingReadback(
+                item,
+                keys ? InputStateSnapshot.HeldDetail.KIND_KEY : InputStateSnapshot.HeldDetail.KIND_BUTTON,
+                id,
+                o);
+            items.add(item);
+        }
+    }
+
+    /**
+     * {@code gameBindingPressed}：§3.6 第 4 条要求<b>回读</b>该键对应 {@code KeyBinding} 的
+     * {@code pressed}（本探针把「描述名 → pressed」一并读回，本方法按名匹配）。
+     * 鼠标按钮没有绑定对应物 ⇒ {@code null} + 说明。<b>不</b>做「检测到不一致就重投」。
+     */
+    private static void addBindingReadback(JsonObject item, String kind, String id, TickObservation o) {
+        if (InputStateSnapshot.HeldDetail.KIND_KEY.equals(kind)) {
+            item.addProperty("gameBindingPressed", pressedFor(id, o));
+        } else {
+            item.addProperty("gameBindingPressed", (Boolean) null);
+            item.addProperty("gameBindingPressedNote", "鼠标按钮没有 KeyBinding 对应物（轮询面，本族不覆盖）");
+        }
     }
 
     /**
