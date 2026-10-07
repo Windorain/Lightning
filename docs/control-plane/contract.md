@@ -58,15 +58,17 @@
 ## 4. 动作清单
 
 > **数量口径（D3 漂移防线）**：本表按引入批次分节；**权威动作数**以实机
-> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.6** 共 **37 个**动作：
-> 本节 8 个（PR-1）+ §4.1 的 8 个读面 + §4.2 的 3 个取证 + §4.4 的 6 个 L0 + §4.5 的 2 个命令通道
-> + §4.6 的 9 个 L1 + §4.8 的 1 个收尾原语。
+> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.7** 共 **39 个**动作：
+> 本节 8 个（PR-1）+ §4.1 的 9 个读面 + §4.2 的 3 个取证 + §4.4 的 6 个 L0 + §4.5 的 2 个命令通道
+> + §4.6 的 9 个 L1 + §4.8 的 1 个收尾原语 + §4.10 的 1 个捕获诊断（`capture.diag`）。
 > 历史上本标题曾写「v1，PR-1 交付」而表外另有动作，导致目录与文档不一致（Gitea #97 §5-D3）——
 > 新增动作时**必须**同步本节计数。
 >
 > **版本撞号裁决（#100 派发裁决 1）**：1.3 由 #98（读面）与 #99（L0）并轨占用，故本单取 **1.4**。
-> **1.6 的撞号（#103 派发裁决）**：#102（导出）与本单同时预定 1.6——本单只给 `core.shutdown` 用
+> **1.6 的撞号（#103 派发裁决）**：#102（导出）与 #103 同时预定 1.6——本单只给 `core.shutdown` 用
 > `since=1.6`；合流时由调度者统一（若 #102 先合、本单后合则本单升 1.7，以 merge 时裁决为准）。
+> **1.7 的撞号（#114 派发裁决）**：#102 也预定 1.7——#114 按派发指令以 `since=1.7` 写，
+> 撞号由调度者在合流时统一。
 
 | 动作 | 级 | 语义 |
 |---|---|---|
@@ -88,7 +90,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 
 ### 4.1 观察面读面动作（v1.3，issue #98）
 
-「Agent 必须有『看』的能力，不只有截图」（需求书 §5）。下表八个动作**全部 `observe` 级、全部只读、
+「Agent 必须有『看』的能力，不只有截图」（需求书 §5）。下表九个动作**全部 `observe` 级、全部只读、
 全部同步**（一次 tick 内读完返回：跨 tick 的读面会读到两个世界状态，「调用前后世界哈希不变」就无从判定）：
 
 | 动作 | 级 | 语义 |
@@ -101,6 +103,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 | `read.block` | observe | **方块与物品信息**：注册名/渲染类型/是否 TESR/是否 ISBRH/所需工具与等级/材质/硬度抗爆/掉落物。`at` 读世界里那一格；`block`/`item` 按注册名问注册表 |
 | `read.diff` | observe | **状态差异**：期望态（`expectInline` / `expectManifest` / `expectManifestFile`）与服务端实读**逐格 diff**，逐格给 `kinds[blockId\|meta]` 与两侧读数，并给双侧规范化 `sha256` |
 | `read.run` | observe | **run 产物清单读回**：枚举 run 并逐 run 实读磁盘 `manifest.json`，给出 `path/bytes/sha256/role` 与**磁盘一致性**（`missingFiles`/`sizeMismatch`），`shots/` 下产物单独归组——用于确认 `shot.multi` 等取证动作的产物确实进了 run 清单（§8.6 产物显式） |
+| `read.capture` | observe | **捕获通道自证诊断读数**（v1.7，#114）：三通道计数（`channels.*.windows/quads/zeroFlowWindows`）、`directTessellatorHookActive`、按格归属（`quadsByAttr`/`quadsByBin`）、逐窗口 zeroFlow 事件、自证日志。数据源是 `CaptureDiagnostics.toJson()` 唯一落点。可选 `channel`（默认 all）、`events`（默认 true）、`maxEvents`（默认 64，上限 512）。**未采集是显式空态**（`collectionState`）而不是编造数据——详见 §4.10 |
 
 **哈希口径（`read.blocks` / `read.diff`）**：`sha256(canonical({"blocks":[{"pos","blockId","meta"}…]}))`，
 `blocks` 按 `(x,y,z)` 升序、`pos` 为 `[x,y,z]`，无空白、键排序（`Json.canonical`）。
@@ -112,7 +115,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 **判据只用一处的定义**：`world-hash-equals` 的脚本口径与 `read.diff` 的 `hashes` 都由
 `ReadSupport.hashSubsetOf` 产出，不存在第二套哈希实现。
 
-**只读性（验收 B1）**：八个动作的调用前后**世界清单哈希不变**（实测，见证据）。
+**只读性（验收 B1）**：九个动作的调用前后**世界清单哈希不变**（实测，见证据）。
 只读不是靠约定：读面代码里不存在任何写世界/TE 的调用点（不出现
 `setBlock`/`setBlockToAir`/`markBlockForUpdate`/`initialize`/`addPart` 等）。
 
@@ -411,6 +414,45 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 在本段之前，用例能表达的世界写只有 `build` 段的四种构建 op（clear/block/te/wait），
 `scene.*`（L0）与 `player.*`（L1）一步也进不了固定程序——「L2 = 有序编排」这句话在代码上没有落点。
 **没有它，`tutorials/` 的教程复现程序无法表达。**
+
+### 4.10 捕获通道自证诊断（v1.7，#114，「V4 职责迁移」）
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `capture.diag` | observe | **捕获通道自证诊断的布防/撤防与 drain-dump**：`arm:true`（默认）布防录窗 + 诊断会话；`arm:false` 撤防（**不清计数、不清 drain 汇**）；`dump:true` 把 TESR 录窗 drain 到的实录几何装配成 web V2 场景文档落 run（`capture/diag-dump.json`，登记 sha256 进清单） |
+
+**为什么存在（V4 硬真空）**：「忠实复现捕获层」的核心承诺是**静默漏录不可接受**——录窗开着但零几何流入必须可检测。这份自证此前只由老设施 `CaptureChannelProbeAutomation` 承载（触发文件驱动、进程自毁退出），而 `CaptureDiagnostics` 在 `client/controlplane/` 下**零对应物**（实测 `grep CaptureDiagnostics` 0 命中）。#104 要整体删除老探针，删之前必须先落地这条能力，否则「录窗通道到底录到了没有」再没有可读口径。
+
+**两个动作的分工（为什么不是一件事）**：
+
+| 半边 | 动作 | 有副作用吗 | 为什么这样切 |
+|---|---|---|---|
+| 读 | `read.capture`（§4.1） | 无 | 「读面调用前后世界不变」（B1）靠的正是无副作用；把布防塞进读面会让这条纪律名存实亡。读数因此可**自由轮询**，包括捕获会话进行中 |
+| 写 | `capture.diag`（本节） | 有（只改**观察条件**） | 翻转录窗总开关、开诊断会话、布防 TESR drain 汇——都不改世界、不改画面、不驱动渲染 |
+
+**权限级为什么是 `observe`**：本动作只把「尺子架起来」，连一帧都不渲（对比 `shot.multi` 是 `forensic`——它真的注入相机与投影去渲帧）。若提到 `scene`，则「采集诊断」会带上 `confirm:true`，而它在无人值守流程里恰恰是**排障第一步**——排障工具不该比被测对象更难拿。
+
+**与 `capture.begin`/`capture.end` 的区别（两者正交，不是同一件事）**：后者是**世界写封锁**（取证期间世界不得漂移，`CP-STATE-001` 拦别的作业写世界）；本动作是**观察条件布防**（录窗与诊断计数）。可以只开诊断不封锁世界（排障），也可以只封锁世界不采诊断（既有 `case.run` capture 段）。因此 `capture.diag` **不碰** `CaptureSession`，也**不被**它拦。
+
+**忠实边界（#55 禁条，与老探针逐字同源）**：drain-dump 的几何**唯一**来源是 `TessellatorCaptureState.endWindowAndDrain` 交出的窗口四边形；录不到的格留空（`cellGrid` = air）并进 `assembly.missing` 显式列出，**绝不**从静态数据/物品渲染兜底。`staticFallback` 恒为 `false` 且写进产物。
+
+**产物显式（§8.6）**：dump 产物落**本次调用开的 run 目录**并登记 sha256 进 `manifest.json`——这是对老探针的一处**收紧**：老探针写在 `<mcDataDir>/sde_capture_channel_probe_export.json`（run 清单外，归档工作树即消失），控制面产物可经 `GET /cp/v1/artifacts/{runId}` 发现、可下载、可核对。
+
+**负对照：未采集必须显式空态（不编造数据）**：全 0 有两种**相反**含义——「没采过」与「采到了零流入」。`read.capture` 因此给出 `collectionState`：
+
+| 取值 | 含义 |
+|---|---|
+| `not-collected` | 从未布防过诊断会话 ⇒ 全部计数为 0，且 `note` 明写「这是未采集的空态，不是采集到零流入」 |
+| `collecting` | 正在采（此态下的 0 才是「采到零流入」） |
+| `collected-then-disarmed` | 采过并已撤防 ⇒ 计数是**已采到的真实证据**（撤防不清计数） |
+
+三者都不抛异常（未采集是合法状态，不是错误），但含义在读数里分得开——「空转绿」的反面不是「一律报错」，而是「如实说明这个 0 是什么」。
+
+**`directTessellatorHookActive=false` 何时是缺陷**：它证明的是 `MixinDirectTessellatorCapture` 活着（见过 DirectTessellator 顶点），**不是**诊断在开（录窗外也置位）。无 DirectTessellator 流量的会话（纯方块/TESR 场景）保持 `false` 是**正确行为**；硬判据只在「本会话确实制造了 LP 管等 DirectTessellator 流量」的场景成立（`hookScope` 字段在读数里写明了这条）。
+
+**为什么需要 `disarmWindows()` 的「待兑现」语义**：两个开窗 Mixin 的 `RETURN` 注入点都以 `areWindowsArmed()` 为门（未布防即提前返回）。若在窗口**开着**的时候把开关就地置假，那次关闭会被跳过，`CAPTURE.active` 永远为真，此后每一次 `beginWindow` 都抛「录窗嵌套/排队被拒绝」——一次撤防把整条录窗通道打死，且现场只留下一条看不出因果的异常。故 `capture.diag {arm:false}` 撞上在飞窗口时只挂「待兑现」标记（`windowsDisarmPending:true` 如实回报），由该窗口关闭时兑现。
+
+**#104 删除口径（本节的验收用途）**：老探针承载的四件事全部有归属——①三通道计数/zeroFlow/按格归属 → `read.capture`；②`directTessellatorHookActive` → `read.capture`（同一字段、同一数据源）；③诊断会话布防 → `capture.diag {arm:true}`；④drain-dump → `capture.diag {dump:true}`。老探针独有的「专用世界 + 受控放置 + 玩家面向」不属于本职责，已由 `world.rebuild` / `te` 步 / `scene.player.pose` 覆盖（#104 删除矩阵 A-2.3）。
 
 ## 5. 版本化规则
 

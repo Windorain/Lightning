@@ -4,6 +4,8 @@ import com.lightning.mod.client.controlplane.core.ActionDescriptor;
 import com.lightning.mod.client.controlplane.core.ActionRegistry;
 import com.lightning.mod.client.controlplane.core.Tier;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureBeginAction;
+import com.lightning.mod.client.controlplane.mc.capture.CaptureDiagAction;
+import com.lightning.mod.client.controlplane.mc.capture.CaptureDiagSession;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureEndAction;
 import com.lightning.mod.client.controlplane.mc.capture.ShotMultiAction;
 import com.lightning.mod.client.controlplane.mc.cmd.CmdExecAction;
@@ -21,6 +23,7 @@ import com.lightning.mod.client.controlplane.mc.player.SlotClickAction;
 import com.lightning.mod.client.controlplane.mc.player.UseItemAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadBlockInfoAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadBlocksAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadCaptureAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadDiffAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadInventoryAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadOverviewAction;
@@ -47,7 +50,9 @@ import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
  * （{@link #registerForensicActions}）+ #98 的 8 个观察面读面（{@link #registerReadActions}）
  * + #99 的 6 个 L0 布景原语（{@link #registerSceneActions}）+ #100 的 2 个命令通道
  * （{@link #registerCommandActions}）+ #101 的 9 个 L1 玩家操作（{@link #registerPlayerActions}，
- * {@code player.*}）+ #103 的 1 个收尾原语（{@link #registerShutdownAction}，{@code core.shutdown}）。
+ * {@code player.*}）+ #103 的 1 个收尾原语（{@link #registerShutdownAction}，{@code core.shutdown}）
+ * + #114 的 2 个捕获诊断（{@link #registerReadActions} 里的 {@code read.capture} 与
+ * {@link #registerCaptureDiagAction} 的 {@code capture.diag}）。
  *
  * <p>
  * 同步 vs 步进：{@code core.*} / {@code world.info} / {@code case.validate} 是同步动作
@@ -59,7 +64,8 @@ import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
  *
  * 动作面随 PR 追加而增长：PR-1 = 8 个（1.0）、PR-2 = +3 取证（1.1）、PR-3 判据（1.2）、
  * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、#100 = +2 命令通道（1.4）、#101 = +9 L1（1.5）、
- * #103 = +1 收尾原语（1.6）——当前 37 个。<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
+ * #103 = +1 收尾原语（1.6）、#114 = +2 捕获诊断（1.7，{@code read.capture} + {@code capture.diag}）
+ * ——当前 39 个。<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
  * 而实际 11 个（Gitea #97 §5-D3 判为文档漂移）。注册数可在实机经
  * {@code GET /cp/v1/actions} 的 {@code count} 字段一步核对，改动本文件后请顺手核一次。
  */
@@ -75,7 +81,8 @@ public final class ActionRegistrar {
 
     /**
      * 注册全部动作（PR-1 的 8 个 + PR-2 的 3 个取证 + #98 的 8 个读面 + #99 的 6 个 L0
-     * + 收口T3 的 2 个命令通道 + #101 的 9 个 L1 + #103 的 1 个收尾原语 = 37 个）。
+     * + 收口T3 的 2 个命令通道 + #101 的 9 个 L1 + #103 的 1 个收尾原语
+     * + #114 的 2 个捕获诊断（1 个读面 + 1 个布防动作）= 39 个）。
      *
      * <p>
      * 数字以实机 {@code GET /cp/v1/actions} 的 {@code count} 为权威（见类注释「动作数与契约版本」）。
@@ -262,6 +269,7 @@ public final class ActionRegistrar {
         registerSceneActions(runtime, registry);
         registerForensicActions(runtime, registry);
         registerReadActions(runtime, registry);
+        registerCaptureDiagAction(runtime, registry);
         registerCommandActions(runtime, registry);
         registerShutdownAction(runtime, registry);
     }
@@ -777,12 +785,12 @@ public final class ActionRegistrar {
      *
      * <h2>为什么全部是同步动作</h2>
      * 读面要求在<b>一次 tick 内</b>读完并返回：跨 tick 的读面会读到两个不同的世界状态
-     * （中间别的动作改了世界），「调用前后世界哈希不变」（B1）就无从判定。八个动作都不做
+     * （中间别的动作改了世界），「调用前后世界哈希不变」（B1）就无从判定。九个动作都不做
      * 文件等待、不排队、不重试，故注册为同步。唯一例外是 {@code read.diff} 的
      * {@code expectManifestFile} 路径要读一次磁盘——那次读也在同一 tick 内完成。
      *
      * <h2>自描述纪律</h2>
-     * 「没有自描述的动作视为不存在」（需求书 §8.1）：因此这八个的 {@code description}/
+     * 「没有自描述的动作视为不存在」（需求书 §8.1）：因此这九个的 {@code description}/
      * 逐参数 {@code description}/{@code returns}/{@code example}/{@code since} 一律写全，
      * 且默认值以 {@code default} 字段机读可见（D3）。
      *
@@ -1005,6 +1013,57 @@ public final class ActionRegistrar {
                 .since("1.3")
                 .build(),
             new ReadRunAction());
+
+        registry.register(
+            ActionDescriptor.builder(ReadCaptureAction.NAME, Tier.OBSERVE)
+                .description(
+                    "渲染几何捕获通道的自证诊断读数（issue #114，V4 职责迁移）。"
+                        + "回答四件事：①**三通道计数** channels.{BLOCK_COMPILE,TESR,FMP_DYNAMIC,LEGACY_PER_CELL} 各自的 "
+                        + "windows/quads/zeroFlowWindows；②**zeroFlow**（关窗时四边形数 == 0 的窗口数，逐通道 + 逐窗口事件）；"
+                        + "③**directTessellatorHookActive**（MixinDirectTessellatorCapture 是否见过 DirectTessellator 顶点）；"
+                        + "④**按格归属** quadsByAttr（通道 × 窗口归属格）与 quadsByBin（质心分箱）。"
+                        + "数据源是 CaptureDiagnostics.toJson() 这一份唯一落点，本动作不新建第二套计数。"
+                        + "**只读**：不布防、不清零、不写世界、不落 run 产物（要布防走 capture.diag），"
+                        + "因此可在任何时刻自由轮询，包括捕获会话进行中。"
+                        + "**负对照（未采集显式空态，不编造数据）**：全 0 有两种相反含义——"
+                        + "collectionState=\"not-collected\"（从未布防，计数为 0 是「没采」）与 \"collecting\" 下的 0（「采到零流入」），"
+                        + "两者在读数里分得开；\"collected-then-disarmed\" 表示计数是撤防前采到的真实证据（撤防不清计数）。")
+                .optional(
+                    "channel",
+                    ActionDescriptor.TYPE_STRING,
+                    "只回这一个通道（大小写不敏感；all 或 * 或省略 = 不过滤）。取值须为 " + CaptureDiagSession.channelNames()
+                        + " 之一，未知值报 CP-VALID-002（不静默回全通道——那会让笔误看起来像「这个通道确实是空的」）")
+                .optional(
+                    "events",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.TRUE,
+                    "是否返回逐窗口事件表 windowEvents（zeroFlow 的逐条证据）；缺省 true。false 时只回聚合计数，结果更小")
+                .optional(
+                    "maxEvents",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(ReadCaptureAction.DEFAULT_MAX_EVENTS),
+                    "windowEvents 的返回条数上限，0.." + ReadCaptureAction.MAX_EVENTS_LIMIT
+                        + "；0 = 只要聚合计数。超出部分记 windowEventsTruncated（不静默截断）")
+                .returns(
+                    "{schema, action, diagnosticsSchema, collected, everCollected, collectionState, channelFilter, "
+                        + "channelFilterApplied, channels{<CHANNEL>:{windows,quads,zeroFlowWindows}}, channelsReturned[], "
+                        + "channelsScope, directTessellatorHookActive, directTessellatorVertexCount, hookZeroFlowWarningIssued, "
+                        + "crossBinQuads, droppedWindowEvents, hookScope, quadsByAttr[{channel,x,y,z,quads}], quadsByAttrCount, "
+                        + "quadsByBin[{channel,x,y,z,quads}], quadsByBinCount, byAttrScope, selfProofLines[], selfProofLineCount, "
+                        + "session{armed,everArmed,armedAt,diagnosticsSessionEnabled,diagnosticsFileTarget,windowsArmed,"
+                        + "windowsDisarmPending,drainDumpArmed,drainSinkAttached,latestWindowOnly,drainWindows,"
+                        + "drainWindowsWithFlow,drainQuads,drainCells}, windowEvents[{seq,channel,attrX,attrY,attrZ,tag,"
+                        + "quadCount,zeroFlow}], windowEventsReturned, windowEventsAvailable, windowEventsLimit, "
+                        + "windowEventsTruncated, windowEventsScope, note?, readAt}。"
+                        + "本动作不抛失败码：未采集、未布防、无 DirectTessellator 流量都是合法状态，由 "
+                        + "collectionState/note 如实说明（「空转绿」的反面不是「一律报错」，而是「如实说明这个 0 是什么」）")
+                .example("{}")
+                .example("{\"channel\":\"TESR\"}")
+                .example("{\"channel\":\"BLOCK_COMPILE\",\"events\":false}")
+                .example("{\"events\":true,\"maxEvents\":16}")
+                .since("1.7")
+                .build(),
+            new ReadCaptureAction());
     }
 
     /**
@@ -1288,5 +1347,104 @@ public final class ActionRegistrar {
                 .since("1.1")
                 .build(),
             new CaptureEndAction());
+    }
+
+    /**
+     * 捕获通道自证诊断（issue #114，V4 职责迁移）：{@code capture.diag}（observe，布防/撤防 + drain-dump）。
+     *
+     * <h2>为什么两个动作分列两个注册组</h2>
+     * 读的那一半（{@code read.capture}）进 {@link #registerReadActions}——它是读面，
+     * 「只读、可自由轮询、调用前后世界不变」这套纪律与其余九个读面逐字相同；
+     * 写的那一半（本方法）有副作用（翻转录窗总开关、开诊断会话、布防 drain 汇），
+     * 因此不能混进读面组，否则「读面只读」这条纪律就名存实亡。
+     *
+     * <h2>为什么不是 forensic（与 {@code shot.multi} 同组）</h2>
+     * 见 {@link CaptureDiagAction} 类注释「权限级」：它只改<b>观察条件</b>（录窗计数开关），
+     * 不驱动渲染、不改世界、不改画面。{@code shot.multi} 之所以是 forensic，是因为它真的
+     * 注入相机与投影去渲帧；本动作连一帧都不渲——它只是「把尺子架起来」。
+     *
+     * <h2>V4 职责真空的关闭口径（#104 终检引用）</h2>
+     * 老探针 {@code CaptureChannelProbeAutomation} 承载的四件事全部有归属：
+     * ①三通道计数/zeroFlow/按格归属 → {@code read.capture}；②{@code directTessellatorHookActive}
+     * → {@code read.capture}（同一字段，同一 {@code CaptureDiagnostics} 数据源）；
+     * ③诊断会话布防 → 本动作 {@code arm:true}；④drain-dump 场景文档 → 本动作 {@code dump:true}
+     * （产物落 run 目录并登记哈希，比老探针写在 mcDataDir 根下更严）。
+     * 老探针独有的「专用世界 + 受控放置 + 玩家面向」不属于本职责，已由
+     * {@code world.rebuild} / {@code te} 步 / {@code scene.player.pose} 覆盖（#104 删除矩阵 A-2.3）。
+     */
+    private static void registerCaptureDiagAction(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        registry.register(
+            ActionDescriptor.builder(CaptureDiagAction.NAME, Tier.OBSERVE)
+                .description(
+                    "捕获通道自证诊断的布防/撤防与 drain-dump（issue #114，V4 职责迁移）。"
+                        + "**只改观察条件，不改世界、不驱动渲染、不改画面**——它让录窗层开始计数（几何仍关闭即丢），"
+                        + "可选把 TESR 录窗的实录几何接住并装配成 web 可加载的 V2 场景文档。"
+                        + "三种形态（同一动作按参数分支）：① arm:true（默认）布防录窗 + 诊断会话；"
+                        + "② arm:false 撤防（**不清计数、不清 drain 汇**——已采到的证据必须仍可读可 dump）；"
+                        + "③ dump:true 在布防态下把 drain 汇装配落 run（capture/diag-dump.json，登记 sha256 进清单）。"
+                        + "读数走 read.capture（同一份 CaptureDiagnostics 数据源，不建第二套计数）。"
+                        + "与 capture.begin/capture.end **不是同一件事**：后者是「世界写封锁」（取证期间世界不得漂移），"
+                        + "本动作是「观察条件布防」；两者正交，本动作不碰 CaptureSession、也不被它拦。"
+                        + "dump 的忠实边界：几何唯一来源是 TessellatorCaptureState.endWindowAndDrain 交出的窗口四边形，"
+                        + "录不到的格留空（cellGrid=air）并进 assembly.missing，**绝不**从静态数据/物品渲染兜底"
+                        + "（staticFallback 恒为 false 且写进产物）。")
+                .optional(
+                    "arm",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.TRUE,
+                    "true=布防（录窗 + 诊断会话）；false=撤防（计数与 drain 汇保留，不清）")
+                .optional(
+                    "reset",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.TRUE,
+                    "布防时是否清零诊断计数（true=从零开始采本轮）。撤防与 dump 形态下本参数无效果")
+                .optional(
+                    "drainDump",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.FALSE,
+                    "布防时是否同时布防 TESR 录窗 drain 汇（把 TESR 窗口关闭改为 endWindowAndDrain 并把实录几何交给汇）。"
+                        + "缺省 false = 只计数不驻留几何（BLOCK_COMPILE 窗口在实测会话里是 3 万+量级，驻留其几何既无必要也添负担；"
+                        + "drain 只对 TESR 生效）。要 dump 必须开它")
+                .optional(
+                    "latestWindowOnly",
+                    ActionDescriptor.TYPE_BOOL,
+                    Boolean.FALSE,
+                    "drain 汇是否「每格只保留最后一个非空窗口」的几何（一个窗口 = 一次完整 renderTileEntity ⇒ 最后那个即当前渲染几何）。"
+                        + "缺省 false = 全量累计（保留重复流入，重复量由 assembly.duplicateQuads 如实暴露）")
+                .optional("dump", ActionDescriptor.TYPE_BOOL, Boolean.FALSE, "是否在本调用内装配并落 drain-dump 产物（会开 run 目录）")
+                .optional(
+                    "at",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "dump 的格清单 [[x,y,z],…]（**含录不到的格**——它们如实进 assembly.missing）。"
+                        + "不给时取 drain 汇里实际有几何的格：两者语义不同，前者能表达「这一格本该有几何却没有」，"
+                        + "后者只能说「这些格采到了几何」；要判漏录必须用前者。上限 "
+                        + CaptureDiagSession.MAX_DUMP_CELLS
+                        + " 格")
+                .optional(
+                    "margin",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(CaptureDiagAction.DEFAULT_DUMP_MARGIN),
+                    "dump 的 cellGrid 相对最小包围盒外扩的格数（「周边空气」），0.." + CaptureDiagSession.MAX_DUMP_MARGIN)
+                .returns(
+                    "{schema, action, requiredTier, armed, reset, drainDumpRequested, "
+                        + "sessionBefore{armed,everArmed,armedAt,diagnosticsSessionEnabled,diagnosticsFileTarget,windowsArmed,"
+                        + "windowsDisarmPending,drainDumpArmed,drainSinkAttached,latestWindowOnly,drainWindows,"
+                        + "drainWindowsWithFlow,drainQuads,drainCells}, session{...同上}, "
+                        + "dump?{runId,path,role,bytes,sha256,latestWindowOnly,margin,cellCount,assembly{paletteEntries,"
+                        + "duplicateQuads,perCellQuads,missing,missingCount,status,materialPaletteEntries,textureBlobs,"
+                        + "cellGrid{sizeX,sizeY,sizeZ,minX,minY,minZ,rowZeroIsTopY},geometrySource,staticFallback,cells},"
+                        + "cellSources[{label,x,y,z,registryId,meta,clientTeClass,drainedQuads}],warnings[],format,fidelity}, "
+                        + "diagnostics{directTessellatorHookActive,directTessellatorVertexCount,channels{...},note}, readBackHint, readAt}。"
+                        + "失败时抛：dump 无格可装配 CP-STATE-001（带 drain 汇状态与补救提示，不返回空产物）、"
+                        + "at/margin 形态非法 CP-VALID-002、客户端世界不可用 CP-STATE-001（dump 要问世界要 registryId）、"
+                        + "装配异常 CP-EXEC-001（带 cause）")
+                .example("{\"arm\":true,\"reset\":true}")
+                .example("{\"arm\":true,\"drainDump\":true,\"reset\":true}")
+                .example("{\"dump\":true,\"at\":[[64,12,64],[65,12,64],[66,12,64]],\"margin\":1}")
+                .example("{\"dump\":true}")
+                .example("{\"arm\":false}")
+                .since("1.7")
+                .build(),
+            new CaptureDiagAction());
     }
 }

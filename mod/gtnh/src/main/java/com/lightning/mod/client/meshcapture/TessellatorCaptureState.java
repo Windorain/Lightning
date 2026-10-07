@@ -55,6 +55,18 @@ public final class TessellatorCaptureState {
      */
     private static volatile boolean windowsArmed;
 
+    /**
+     * 「撤防请求待生效」：{@link #disarmWindows()} 撞上在飞窗口时置位，由该窗口关闭时兑现。
+     *
+     * <p>
+     * 为什么需要它：两个开窗 Mixin 的 {@code RETURN} 注入点都以
+     * {@link #areWindowsArmed()} 为门（未布防即提前返回）。若在窗口<b>开着</b>的时候把开关就地置假，
+     * 那次关闭会被跳过，{@code CAPTURE.active} 永远为真，此后每一次 {@link #beginWindow} 都抛
+     * 「录窗嵌套/排队被拒绝」——一次撤防把整条录窗通道打死，且现场只留下一条看不出因果的异常。
+     * 故撤防必须等窗口自然关闭后再兑现。
+     */
+    private static volatile boolean windowsDisarmPending;
+
     /** P0 惯例：坐标系一次性自证日志（首 BLOCK_COMPILE 窗口开启 / 首顶点），每会话各打一次。 */
     private static boolean blockCompileSelfProofWindowLogged;
 
@@ -76,7 +88,35 @@ public final class TessellatorCaptureState {
 
     /** 打开录窗总开关（诊断会话/探针启动时调用一次）。 */
     public static void armWindows() {
+        windowsDisarmPending = false;
         windowsArmed = true;
+    }
+
+    /**
+     * 撤防录窗总开关（控制面 {@code capture.diag} 的 {@code arm:false} 走这里）。
+     *
+     * <p>
+     * <b>不在飞窗口上就地撤防</b>：{@code CAPTURE.active} 为真时只挂「待兑现」标记，
+     * 由该窗口关闭时（{@link #endWindowInternal}）兑现——理由见 {@link #windowsDisarmPending}。
+     * 无在飞窗口时立即置假。
+     *
+     * @return 是否已经生效（false = 有在飞窗口，撤防已排定但尚未兑现）
+     */
+    public static boolean disarmWindows() {
+        synchronized (CAPTURE) {
+            if (CAPTURE.active) {
+                windowsDisarmPending = true;
+                return false;
+            }
+            windowsDisarmPending = false;
+            windowsArmed = false;
+            return true;
+        }
+    }
+
+    /** 是否有撤防请求尚未兑现（在飞窗口关闭时自动兑现）。 */
+    public static boolean isWindowDisarmPending() {
+        return windowsDisarmPending;
     }
 
     /** 新通道 Mixin 的开窗前检查：未打开时不产生任何录窗行为。 */
@@ -186,8 +226,8 @@ public final class TessellatorCaptureState {
     }
 
     /**
-     * TESR 录窗 drain 汇（「忠实复现捕获层」PR-1 验收探针的 drain-dump 落点，见
-     * {@code CaptureChannelProbeAutomation} 的 {@code dumpExport} 开关）。
+     * TESR 录窗 drain 汇（控制面 {@code capture.diag} 的 {@code drainDump:true} 走这里，
+     * 见 {@code client/controlplane/mc/capture/CaptureDiagAction}）。
      * <p>
      * 布防语义：布防后 TESR 录窗关闭走 {@link #endWindowAndDrain(List)}，把<strong>窗口归属键（TE 世界坐标）</strong>
      * 与该窗口实录四边形交给汇；未布防时 {@link #endWindow()} 与 PR-1 原行为完全一致（几何关闭即丢，只计数）。
@@ -241,6 +281,11 @@ public final class TessellatorCaptureState {
             f.active = false;
             f.channel = null;
             f.windowMvBaselineValid = false;
+            // 撤防兑现点：disarmWindows() 撞上在飞窗口时挂的标记在此消费（见 windowsDisarmPending）
+            if (windowsDisarmPending) {
+                windowsDisarmPending = false;
+                windowsArmed = false;
+            }
             return count;
         }
     }
