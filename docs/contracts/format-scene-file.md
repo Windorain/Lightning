@@ -126,6 +126,7 @@ else { /* World 多帧 */ }
 | `tooltipPalette` | array | 逐格说明字符串池 |
 | `materialPalette` | array | 材质表 |
 | `textureBlobs` | object | 纹理 blob |
+| `captureWorld` | object | **录制时所在世界的身份** `{folder, dimension}`（Gitea #127；scan 中间态写入，烘焙后保留，见 §6.2） |
 | `provenance` / `exportId` | object / string | **仅 cp 通道**（§6） |
 
 **烘焙终态的硬约束**：`cellTypes` 与 `worldGrid` 是 **scan 中间态专有**字段，烘焙后**必须消失**
@@ -189,6 +190,7 @@ cp 通道与命令通道的**默认**写出都是 Envelope：
   "recordedFrames": [0,1,2],        // 快照里的全部已录帧号（升序）
   "frameSha256": { "0":"…", "1":"…", "2":"…" },  // 帧号 → 内容 sha256
   "selection": { …同 export.session.selection… },
+  "captureWorld": { "folder": "cp_demo", "dimension": 0 },  // 录制时所在世界（Gitea #127，§6.2）
   "frameIndex": 1                   // 仅逐帧明细产物（export/frames/F<n>.json）有
 }
 ```
@@ -218,38 +220,60 @@ cp 通道与命令通道的**默认**写出都是 Envelope：
 B 导出时声明 `expectFrames:{frames:[0,1,2]}` ⇒ 判红（`extra:[9]`）。
 **不要**用 `start`/`end` 之间构造负对照——缓冲不清空，那样构造不出「跨会话」。
 
-### 6.2 烘焙前置：帧必须在**录制时所在的世界**内导出（Gitea #127）
+### 6.2 烘焙与「录制时所在的世界」（Gitea #127）
 
-**这是调用方必须满足的前置，不是可选优化。** 几何烘焙（`geometryPhase: scan → baked`）发生在
-**导出那一刻**：`MeshCaptureService.finalizeSingleStructure` 逐格用 `world.getBlock(世界坐标)` 回查
-**当前活动世界**，取到空气就把该格 `remapped=0` **静默丢掉**（不报错、不告警）。而帧缓冲里存的是
-**scan 中间态**（`cellTypes` + 指世界坐标的 `worldGrid`）。
+**口径（改造后，1.7 内收紧）**：
 
-由此得到一条必须写明的口径：
+> **每帧产物内容 = 该帧录制时刻的世界状态**，与「导出时刻的活动世界」无关。
+> 录制世界身份（存档目录名 `folder` + 维度 `dimension`）在**录制时刻**记进帧（`captureWorld`），
+> 导出时在**烘焙之前**与活动世界比对：不符即 `CP-STATE-001` 显式失败，**不写任何产物**。
 
-> **每帧产物内容 = 导出时刻活动世界在录制坐标处的方块**，而不是「该帧录制时刻的世界状态」。
-> 因此「录制之后世界被改动 / 换了世界 / 换了存档再导出」会得到**内容不同的产物**，
-> 而 `provenance.frameSha256`（口径见上：**缓冲内 scan 文本**的哈希）**一字不变**。
+**为什么必须有这条**（改造前的失真，本单的起点）：
 
-后果与判据边界：
+- 帧缓冲里存的是 **scan 中间态**（`cellTypes` + 指世界坐标的 `worldGrid`），烘焙（`scan → baked`）发生在
+  **导出那一刻**；
+- 改造前 `MeshCaptureService.finalizeSingleStructure` 逐格 `world.getBlock(世界坐标)` 回查**当前活动世界**，
+  空气即 `remapped=0` **静默丢块**（不报错、不告警、不进 `context`）；
+- 而 `provenance.frameSha256` 哈希的是**缓冲内的 scan 文本**（见上）⇒ 同一份缓冲、同一帧，
+  换一个世界导出会得到**内容不同**的产物，而哈希**一字不变** ⇒ C2/C3 判据**必然全绿**。
+
+**改造后的三条落地（判据侧 + 实现侧）**：
+
+| | 落点 | 行为 |
+|---|---|---|
+| ① 记录身份 | `StructureScan`（录制时刻） | 帧 JSON 增 `captureWorld: {folder, dimension}`（记的是**服务端权威世界**）；取不到目录名时如实写 `folder: null` |
+| ② 显式校验（判据侧） | `export.scene` 的 `onBegin`，**开 run 之前** | 全部选中帧必须记着**同一个**可解析的身份，且与导出时刻活动世界逐字段相同；否则 `CP-STATE-001` + `expected`/`actual`/`problemFrame`/`hint`，**不写任何产物** |
+| ③ 按扫描身份烘焙（实现侧） | `MeshCaptureService.finalizeSingleStructure` | 逐格以 `cellTypes[ti]`（`registryId`/`meta`/`tileNbt`）决定**保留哪些格、用什么身份渲染**；活动世界该坐标是**另一个非空气方块**即 `CP-STATE-001`（不静默丢、不静默换块） |
+
+纯判定（可离线锁死，见 `ScanCellResolution`）：
+
+| 扫描身份 | 活动世界该坐标 | 判定 |
+|---|---|---|
+| 空气 | 任意 | `SCAN_AIR`：无内容可保留（**不是**丢块） |
+| 方块 A | **空气** | `KEEP_SCAN_IDENTITY`：**按扫描身份保留**（世界在录制后被改动 ⇒ 忠实还原录制内容，绝不静默消失） |
+| 方块 A | 方块 A | `KEEP_SCAN_IDENTITY` |
+| 方块 A | 方块 B（非空气） | **`WORLD_MISMATCH` ⇒ `CP-STATE-001`**（「该按谁渲染」无唯一答案，显式失败） |
+| 认不出的注册名 | 任意 | **`SCAN_UNRESOLVED` ⇒ `CP-STATE-001`** |
+
+`meta` 恒取扫描值（GT 机器格的 `meta` 是 mID 而不是世界 metadata——这条改造前事实上也成立，现在显式化）；
+渲染仍用活动 world 实例（`RenderBlocks`/TE/贴图需要），但「保留哪些格、用什么身份」只来自扫描。
+副本 TE 的来源同样是**扫描 NBT**（活动 TE 只提供坐标与多部件判定的加速信息，可为 null），
+因此「该格在活动世界里已被清空」时仍能按扫描身份连同 TE 一起忠实还原。
+
+**产物可读性**：`provenance.captureWorld`（根级与逐帧明细各一份）与结果里的 `captureWorld` 是同一事实，
+消费方不必读日志即可回答「这份产物是哪个世界录的」。
+
+**受影响面（改造后）**：
 
 | | 说明 |
 |---|---|
-| C2/C3 覆盖不到 | 它比对的是「缓冲内 scan 哈希」，不是「落盘后经烘焙的内容」⇒ 这类失真下判据**仍然全绿** |
-| 受影响用法 | 录制后改动世界再导、跨世界/跨存档导出、录制与导出之间世界漂移（长时间缓冲） |
-| 不受影响用法 | **同世界内录完即导**（`export-acceptance.mjs` 的口径）：扫描与烘焙看到同一个世界，产物忠实 |
-| 复现 | `node temp/cp-export/verify2/repro-bake-follows-live-world.mjs`（同帧 `frameSha256=de180a1d…`，非 0 格数 1 → 0 → 1） |
+| 仍会失败（**显式**） | 跨世界/跨维度导出、同坐标被改成**另一个方块**、扫描身份认不出（模组缺失）、帧没有身份（本契约之前的缓冲或手工构造的帧） |
+| 不再失真 | 录制后世界被改动（该格被清空）：按录制内容忠实还原；世界漂移在日志里计一条 `worldChangedCells` 事实 |
+| 不受影响 | **同世界内录完即导**（`export-acceptance.mjs` 的口径）；命令通道 `/sde export` 同样走按扫描身份烘焙（它没有 ② 那一步——服务端写 scan 与客户端烘焙本来就在同一次流程里） |
 
-**修复与裁决**（调度者，2026-10-07，详见 #127）：
-
-1. **本契约与动作自述声明该前置**（本条，随本 PR 落地）；
-2. **判据侧加显式校验**：把「录制时所在世界（folder + 维度）」记进帧/provenance，导出时比对，不符即
-   `CP-STATE-*` 显式报错（对照 `expectFrames` 的同一手法）——由 **#127** 承接；
-3. **实现侧按帧快照烘焙**（`ScanBackedBlockAccess` 已具备按 `cellTypes` 取块的能力）才是「逐帧存各自录制
-   时刻状态」真正成立的前提——由 #127 承接，属捕获层改动。
-
-⚠️ 在此之前，**凡把导出件当作「录制时刻世界状态的证据」的判据都不成立**；要用导出件做证据，
-请保证「录制 → 导出」在同一世界内、且世界未被改动（`case.run` 的 `export` 段与 `world` 段同 run 即为这一纪律的载体）。
+⚠️ 残留边界（如实登记）：`frameSha256` 仍然哈希**缓冲内 scan 文本**，而不是落盘后的烘焙正文——
+本单让「产物内容只取决于录制时刻」，但没有让 `frameSha256` 覆盖烘焙结果。要把导出件当作
+「录制时刻世界状态」的证据，仍需「录制 → 导出在同一世界内」这条纪律（现在它**被机械校验**，不靠自觉）。
 
 ---
 

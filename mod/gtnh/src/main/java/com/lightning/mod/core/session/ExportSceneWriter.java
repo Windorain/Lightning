@@ -340,6 +340,32 @@ public final class ExportSceneWriter {
      */
     public static JsonObject provenance(String exportId, String runId, Shape shape, long bufferGeneration,
         int[] recordedFrames, String[] frameSha256, boolean inSession, JsonObject selection) {
+        return provenance(
+            exportId,
+            runId,
+            shape,
+            bufferGeneration,
+            recordedFrames,
+            frameSha256,
+            inSession,
+            selection,
+            null);
+    }
+
+    /**
+     * 构造溯源对象（含<b>录制世界身份</b>，Gitea #127）。
+     *
+     * <p>
+     * {@code captureWorld} 是 {@code {folder, dimension}}：帧缓冲里每帧的录制世界身份（见
+     * {@link CaptureWorldIdentity}）。它让「这份产物是哪一帧在哪个世界录的」与哈希一样成为
+     * <b>产物内可读的事实</b>——改造前 {@code frameSha256} 只哈希缓冲内的 scan 文本，
+     * 产物内容随导出时刻的世界变化而哈希不变，消费方无从察觉。
+     *
+     * @param captureWorld 录制世界身份对象（{@code {folder, dimension}}）；null = 不写（命令通道与
+     *                     既有单测走这条 ⇒ 产物正文逐字节不变）
+     */
+    public static JsonObject provenance(String exportId, String runId, Shape shape, long bufferGeneration,
+        int[] recordedFrames, String[] frameSha256, boolean inSession, JsonObject selection, JsonObject captureWorld) {
         JsonObject o = new JsonObject();
         o.addProperty("schema", SCHEMA_PROVENANCE);
         o.addProperty("exportId", exportId);
@@ -364,6 +390,10 @@ public final class ExportSceneWriter {
         o.add("frameSha256", hashes);
         if (selection != null) {
             o.add("selection", selection);
+        }
+        if (captureWorld != null) {
+            // #127：录制世界身份进 provenance（产物内可读，不依赖日志）
+            o.add(CaptureWorldIdentity.FIELD, captureWorld);
         }
         return o;
     }

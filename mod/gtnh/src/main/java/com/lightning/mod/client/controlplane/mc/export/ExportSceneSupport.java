@@ -13,6 +13,7 @@ import com.lightning.mod.client.controlplane.core.ErrorCodes;
 import com.lightning.mod.client.controlplane.core.EventStream;
 import com.lightning.mod.client.controlplane.core.Fields;
 import com.lightning.mod.client.controlplane.core.Json;
+import com.lightning.mod.core.session.CaptureWorldIdentity;
 import com.lightning.mod.core.session.ExportSceneWriter;
 import com.lightning.mod.core.session.ExportSession;
 
@@ -103,17 +104,14 @@ public final class ExportSceneSupport {
         return out.isEmpty() ? "export" : out;
     }
 
-    /** 整数预算参数：非法或超天花板一律 CP-VALID-002（不静默钳到上限）。 */
+    /** 整数预算参数：非法或超天花板一律 CP-VALID-002（不静默钳到上限，也不静默截断小数）。 */
     public static int requireBudget(ActionContext ctx, String field, int def, int hard) {
         JsonElement e = ctx.param(field);
         if (e == null || e.isJsonNull()) {
             return def;
         }
-        if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive()
-            .isNumber()) {
-            throw CpException.param("预算参数类型不符", field, "须为整数（默认 " + def + "）");
-        }
-        int v = e.getAsInt();
+        // Gitea #131：这里原先是 e.getAsInt()（1.5 → 1 静默截断）——TYPE_INT 参数的取值必须走严格口径
+        int v = Json.strictIntElement(e, field);
         if (v <= 0) {
             throw CpException.param("预算参数非法", field, "须为正整数（默认 " + def + "），收到 " + v);
         }
@@ -129,11 +127,7 @@ public final class ExportSceneSupport {
         if (e == null || e.isJsonNull()) {
             return def;
         }
-        if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive()
-            .isNumber()) {
-            throw CpException.param("预算参数类型不符", field, "须为整数（默认 " + def + "）");
-        }
-        long v = e.getAsLong();
+        long v = Json.strictLongElement(e, field);
         if (v <= 0) {
             throw CpException.param("预算参数非法", field, "须为正整数（默认 " + def + "），收到 " + v);
         }
@@ -253,6 +247,93 @@ public final class ExportSceneSupport {
         return o;
     }
 
+    // ------------------------------------------------------------ 录制世界身份（Gitea #127）
+
+    /**
+     * 选中帧集合的「录制世界身份」检查（<b>纯函数</b>，不碰 MC）。
+     *
+     * <p>
+     * 口径：全部选中帧必须记着<b>同一个</b>世界身份（存档目录名 + 维度）。任何一帧缺字段、形态坏掉，
+     * 或各帧之间不一致，都返回带原因的 {@link CaptureWorldCheck#problem}——调用方据此显式失败，
+     * <b>不写任何产物</b>。跨世界拼帧与「手工构造的帧」因此不可能混进产物。
+     */
+    public static CaptureWorldCheck captureWorldOf(Map<Integer, String> selected) {
+        CaptureWorldIdentity common = null;
+        int commonFrame = -1;
+        if (selected == null || selected.isEmpty()) {
+            return new CaptureWorldCheck(null, "没有选中任何帧", -1);
+        }
+        for (Map.Entry<Integer, String> e : selected.entrySet()) {
+            CaptureWorldIdentity id = frameCaptureWorld(e.getValue());
+            if (id == null) {
+                return new CaptureWorldCheck(
+                    null,
+                    "帧 F" + e.getKey() + " 没有录制世界身份（缺 " + CaptureWorldIdentity.FIELD + "）：几何烘焙按世界坐标读方块，没有身份就无法保证产物忠实",
+                    e.getKey()
+                        .intValue());
+            }
+            if (common == null) {
+                common = id;
+                commonFrame = e.getKey();
+            } else if (!common.equals(id)) {
+                return new CaptureWorldCheck(
+                    null,
+                    "选中帧来自不同世界：F" + commonFrame
+                        + " 录于 "
+                        + common.describe()
+                        + "，F"
+                        + e.getKey()
+                        + " 录于 "
+                        + id.describe(),
+                    e.getKey()
+                        .intValue());
+            }
+        }
+        return new CaptureWorldCheck(common, null, -1);
+    }
+
+    /** 从单帧 JSON 文本里取录制世界身份；缺字段或形态坏掉返回 null。 */
+    public static CaptureWorldIdentity frameCaptureWorld(String frameJsonText) {
+        if (frameJsonText == null) {
+            return null;
+        }
+        try {
+            JsonElement e = new com.google.gson.JsonParser().parse(frameJsonText);
+            if (!e.isJsonObject()) {
+                return null;
+            }
+            return CaptureWorldIdentity.parse(
+                e.getAsJsonObject()
+                    .get(CaptureWorldIdentity.FIELD));
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    /** {@link #captureWorldOf} 的结果：一致的身份，或「为什么不能导出」。 */
+    public static final class CaptureWorldCheck {
+
+        /** 全部选中帧一致的世界身份；{@code problem != null} 时为 null。 */
+        public final CaptureWorldIdentity identity;
+
+        /** 不一致/缺失的原因；一致时为 null。 */
+        public final String problem;
+
+        /** 出问题的帧号；不适用时为 -1。 */
+        public final int problemFrame;
+
+        CaptureWorldCheck(CaptureWorldIdentity identity, String problem, int problemFrame) {
+            this.identity = identity;
+            this.problem = problem;
+            this.problemFrame = problemFrame;
+        }
+
+        /** 身份对象（provenance 用）；problem 非空时为 null。 */
+        public JsonObject toJson() {
+            return identity == null ? null : identity.toJson();
+        }
+    }
+
     // ------------------------------------------------------------ 选区
 
     /** 选区对象（与 {@code export.session.selection} 同形；供溯源与结果引用）。 */
@@ -277,6 +358,16 @@ public final class ExportSceneSupport {
 
     /** 逐帧明细产物的溯源（单帧形态；帧号写进溯源，C3 判据据此发现跨次拼接）。 */
     public static JsonObject frameProvenance(String exportId, int frameIndex, ExportSession.Snapshot s) {
+        return frameProvenance(exportId, frameIndex, s, null);
+    }
+
+    /**
+     * 逐帧明细产物的溯源（含该帧的录制世界身份，Gitea #127）。
+     *
+     * @param captureWorld 该帧的录制世界身份（{@code {folder, dimension}}）；null = 不写
+     */
+    public static JsonObject frameProvenance(String exportId, int frameIndex, ExportSession.Snapshot s,
+        JsonObject captureWorld) {
         JsonObject p = ExportSceneWriter.provenance(
             exportId,
             exportId == null || exportId.indexOf('#') < 0 ? null : exportId.substring(0, exportId.indexOf('#')),
@@ -285,7 +376,8 @@ public final class ExportSceneSupport {
             new int[] { frameIndex },
             new String[] { hashOf(s, frameIndex) },
             s != null && s.inSession(),
-            selectionJson(s));
+            selectionJson(s),
+            captureWorld);
         p.addProperty("frameIndex", frameIndex);
         return p;
     }
@@ -349,13 +441,13 @@ public final class ExportSceneSupport {
         Fields fields = new Fields();
         for (int i = 0; i < want.size(); i++) {
             JsonElement e = want.get(i);
-            if (e == null || !e.isJsonPrimitive()
-                || !e.getAsJsonPrimitive()
-                    .isNumber()) {
-                fields.add("expectFrames.frames[" + i + "]", "须为整数帧号");
+            // Gitea #131：帧号是 int（{@code provenance.recordedFrames} 的键），1.5 不得静默截断成 1
+            String why = Json.integralRejectReason(e);
+            if (why != null) {
+                fields.add("expectFrames.frames[" + i + "]", "须为精确整数帧号：" + why);
                 continue;
             }
-            expect.add(Integer.valueOf(e.getAsInt()));
+            expect.add(Integer.valueOf(Json.strictIntElement(e, "expectFrames.frames[" + i + "]")));
         }
         fields.throwIfAny("expectFrames 参数非法");
         if (!expect.equals(got)) {

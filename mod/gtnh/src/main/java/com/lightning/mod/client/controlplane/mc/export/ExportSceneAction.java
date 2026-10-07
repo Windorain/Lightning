@@ -18,8 +18,10 @@ import com.lightning.mod.client.controlplane.core.ErrorCodes;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.mc.CpLog;
 import com.lightning.mod.client.controlplane.mc.SteppingActionBase;
+import com.lightning.mod.client.controlplane.mc.WorldDescriber;
 import com.lightning.mod.client.controlplane.mc.WorldRuntime;
 import com.lightning.mod.client.meshcapture.MeshCaptureService;
+import com.lightning.mod.core.session.CaptureWorldIdentity;
 import com.lightning.mod.core.session.ExportSceneWriter;
 import com.lightning.mod.core.session.ExportSession;
 
@@ -131,6 +133,11 @@ public final class ExportSceneAction extends SteppingActionBase {
     private boolean includeFrames;
     private boolean keepBuffer;
     private JsonObject expectFramesParam;
+    /**
+     * 选中帧一致的<b>录制世界身份</b>（Gitea #127；在 {@code onBegin} 里与活动世界比对通过后才取值）。
+     * 写进产物 {@code provenance.captureWorld}，让「这份产物是哪个世界录的」成为产物内可读的事实。
+     */
+    private CaptureWorldIdentity captureWorld;
 
     // ---- 阶段状态 ----
     private JsonObject document;
@@ -227,6 +234,10 @@ public final class ExportSceneAction extends SteppingActionBase {
         // ---- 6) expectFrames（C3 显式声明：调用方说清这次导出该包含哪些帧） ----
         ExportSceneSupport.assertExpectFrames(expectFramesParam, selected);
 
+        // ---- 6.5) 录制世界身份（Gitea #127 第 2 条）：烘焙前比对，不一致即显式失败且**不写任何产物** ----
+        // 放在 beginRun 之前是有意的：失败路径连 run 目录都不留，杜绝「失败却落了半成品」。
+        this.captureWorld = assertCaptureWorldMatchesLive(selected);
+
         // ---- 7) run + 导出标识 ----
         ArtifactStore.Run run = ctx.beginRun("export-scene");
         this.exportId = run.runId() + "#" + outName;
@@ -261,6 +272,70 @@ public final class ExportSceneAction extends SteppingActionBase {
         enterStage("scan");
     }
 
+    /**
+     * 录制世界身份与「导出时刻活动世界」的显式比对（Gitea #127 第 2 条）。
+     *
+     * <p>
+     * 判据（三条，任一不成立即 {@code CP-STATE-001} + {@code expected}/{@code actual}/{@code hint}，
+     * <b>不写任何产物</b>）：
+     * <ol>
+     * <li>全部选中帧记着同一个录制世界身份（跨世界拼帧当场判红）；</li>
+     * <li>该身份可解析（存档目录名拿得到——「不可校验」不放行，否则判据退化成盲区）；</li>
+     * <li>它与导出时刻活动世界<b>逐字段相同</b>（目录名 + 维度）。</li>
+     * </ol>
+     *
+     * <p>
+     * 这一条拦的正是 #127 的三态复现：同一份缓冲、同一帧，换到另一个世界再导出——
+     * 改造前会静默产出全空气的产物而 {@code frameSha256} 一字不变。现在它在烘焙之前就失败。
+     *
+     * @return 选中帧一致的录制世界身份（用于写进 provenance）
+     */
+    private CaptureWorldIdentity assertCaptureWorldMatchesLive(Map<Integer, String> selected) {
+        ExportSceneSupport.CaptureWorldCheck check = ExportSceneSupport.captureWorldOf(selected);
+        CaptureWorldIdentity live = liveWorldIdentity();
+        String reason = check.problem != null ? check.problem
+            : CaptureWorldIdentity.mismatchReason(check.identity, live);
+        if (reason == null) {
+            return check.identity;
+        }
+        JsonObject ctx = Json.object(
+            "action",
+            NAME,
+            "stage",
+            "pre-bake",
+            "frames",
+            ExportSceneSupport.frameList(selected),
+            "expected",
+            check.identity == null ? null : check.identity.toJson(),
+            "actual",
+            live == null ? null : live.toJson(),
+            "problemFrame",
+            check.problemFrame < 0 ? null : Integer.valueOf(check.problemFrame),
+            "hint",
+            "几何烘焙按世界坐标读方块，因此**帧必须在录制时所在的世界（同目录、同维度）内导出**：" + "先 world.rebuild 回该托管世界再导，或重新在该世界里 record 这几帧。"
+                + "本动作不写任何产物（不会留下半成品或内容失真的导出件）。详见 "
+                + "docs/contracts/format-scene-file.md §6.2（Gitea #127）");
+        throw new CpException(ErrorCodes.STATE, "导出前置不满足：" + reason, ctx);
+    }
+
+    /**
+     * 导出时刻活动世界的身份。
+     *
+     * <p>
+     * 目录名必须走服务端权威世界（{@code WorldDescriber.currentFolder} 的口径）：客户端
+     * {@code WorldClient} 的 saveHandler 是占位实现，直接读它只会得到 {@code none}——那样比对会
+     * 「永远不相等」，把判据变成噪声。
+     */
+    private static CaptureWorldIdentity liveWorldIdentity() {
+        Minecraft mc = WorldRuntime.mc();
+        if (mc == null || mc.theWorld == null) {
+            return null;
+        }
+        String folder = WorldDescriber.currentFolder(mc);
+        int dim = mc.theWorld.provider == null ? 0 : mc.theWorld.provider.dimensionId;
+        return CaptureWorldIdentity.of(folder, dim);
+    }
+
     /** 帧选择：{@code frames} 三形态（{@code "all"} / {@code "active"} / {@code [int...]}）。 */
     private Map<Integer, String> selectFrames(ActionContext ctx) {
         com.google.gson.JsonElement e = ctx.param("frames");
@@ -286,13 +361,13 @@ public final class ExportSceneAction extends SteppingActionBase {
                 com.lightning.mod.client.controlplane.core.Fields fields = new com.lightning.mod.client.controlplane.core.Fields();
                 for (int i = 0; i < a.size(); i++) {
                     com.google.gson.JsonElement v = a.get(i);
-                    if (v == null || !v.isJsonPrimitive()
-                        || !v.getAsJsonPrimitive()
-                            .isNumber()) {
-                        fields.add("frames[" + i + "]", "须为整数帧号");
+                    // Gitea #131：帧号是 int；1.5 / "1" / true 都不得静默转换（原先是 getAsInt() + isNumber 粗检）
+                    String why = com.lightning.mod.client.controlplane.core.Json.integralRejectReason(v);
+                    if (why != null) {
+                        fields.add("frames[" + i + "]", "须为精确整数帧号：" + why);
                         continue;
                     }
-                    int f = v.getAsInt();
+                    int f = com.lightning.mod.client.controlplane.core.Json.strictIntElement(v, "frames[" + i + "]");
                     if (f < 0) {
                         fields.add("frames[" + i + "]", "帧号须 ≥ 0，收到 " + f);
                         continue;
@@ -369,7 +444,9 @@ public final class ExportSceneAction extends SteppingActionBase {
                 snap.recordedFrames(),
                 snap.frameSha256(),
                 snap.inSession(),
-                ExportSceneSupport.selectionJson(snap));
+                ExportSceneSupport.selectionJson(snap),
+                // #127：录制世界身份进 provenance（产物内可读；判据不依赖日志）
+                captureWorld == null ? null : captureWorld.toJson());
             this.document = ExportSceneWriter.buildDocument(meta, frames, shape, prov, exportId);
             enterStage("bake");
             progress(ctx, 0.15d, "文档已合并（" + frames.size() + " 帧）");
@@ -408,11 +485,18 @@ public final class ExportSceneAction extends SteppingActionBase {
 
             if (includeFrames) {
                 for (Map.Entry<Integer, String> e : frames.entrySet()) {
+                    // 逐帧明细的溯源带该帧自己的录制世界身份（#127）；形态坏掉时不写（onBegin 已校验过，
+                    // 走到这里说明形态是好的——这里只是「拿不到就不编造」的兜底）
+                    CaptureWorldIdentity frameWorld = ExportSceneSupport.frameCaptureWorld(e.getValue());
                     JsonObject single = ExportSceneWriter.buildDocument(
                         metaOf(),
                         java.util.Collections.singletonMap(e.getKey(), e.getValue()),
                         ExportSceneWriter.Shape.STRUCTURE,
-                        ExportSceneSupport.frameProvenance(exportId, e.getKey(), snap),
+                        ExportSceneSupport.frameProvenance(
+                            exportId,
+                            e.getKey(),
+                            snap,
+                            frameWorld == null ? null : frameWorld.toJson()),
                         exportId);
                     MeshCaptureService.finalizeStructureJson(single);
                     byte[] fb = ExportSceneWriter.serialize(single, raw);
@@ -453,6 +537,10 @@ public final class ExportSceneAction extends SteppingActionBase {
             result.addProperty("bufferGeneration", snap.bufferGeneration());
             result.add("frameSha256", ExportSceneSupport.hashArray(snap, frames));
             result.add("selection", ExportSceneSupport.selectionJson(snap));
+            // #127：录制世界身份（= 导出时刻活动世界，onBegin 已比对通过）机读可判定
+            if (captureWorld != null) {
+                result.add(CaptureWorldIdentity.FIELD, captureWorld.toJson());
+            }
             result.addProperty("volumePerFrame", volumePerFrame);
             result.addProperty("volumeTotal", volumeTotal);
             result.addProperty("keepBuffer", keepBuffer);
@@ -463,7 +551,10 @@ public final class ExportSceneAction extends SteppingActionBase {
                 "形态统一（R1-3）：单帧即 N=1 的多帧文档（shape=world）。产物只落本 run 目录（裁决 6 单一归属），"
                     + "工作台 ExportsListPanel 读的 structure_exports/ 看不到它——经 downloadPath 下载后喂解析器（C1）。"
                     + "C3 判据：同一产物内全部帧的 exportId 必须一致，且 provenance.recordedFrames/frameSha256 必须与 "
-                    + "export.session 同源同序。");
+                    + "export.session 同源同序。"
+                    + "C7 判据（#127）：帧必须在录制时所在世界（同目录同维度）内导出——provenance.captureWorld 记的是"
+                    + "录制世界的身份，且烘焙按**扫描身份**逐格取身份（活动世界与扫描身份冲突即 CP-STATE-001），"
+                    + "因此产物内容只取决于录制时刻，不随导出时刻的世界变化。");
 
             ctx.emit(
                 com.lightning.mod.client.controlplane.core.EventStream.LEVEL_INFO,

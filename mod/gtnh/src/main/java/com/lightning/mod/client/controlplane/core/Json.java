@@ -228,7 +228,15 @@ public final class Json {
         return e != null && e.isJsonPrimitive() ? e.getAsString() : def;
     }
 
-    /** 取整数成员，缺失/类型不符返回默认值。 */
+    /**
+     * 取整数成员，缺失/类型不符返回默认值。
+     *
+     * <p>
+     * <b>这是「宽容读」</b>（读自己写出来的 JSON 时用）：值不是数字时拿默认值，是数字时按 gson 语义取值。
+     * <b>不得</b>用它读调用方传来的参数——gson 的 {@code getAsInt()} 会把 {@code 1.5} 截断成 {@code 1}、
+     * 把 {@code "3"} 解析成 {@code 3}、把 {@code true} 当成 {@code 1}，且<b>不抛异常</b>
+     * （Gitea #131：静默强转）。参数一律走 {@link #strictInt(JsonObject, String, int)}。
+     */
     public static int optInt(JsonObject o, String key, int def) {
         JsonElement e = get(o, key);
         if (e == null || !e.isJsonPrimitive()) {
@@ -241,7 +249,9 @@ public final class Json {
         }
     }
 
-    /** 取长整数成员，缺失/类型不符返回默认值。 */
+    /**
+     * 取长整数成员，缺失/类型不符返回默认值（与 {@link #optInt} 同为「宽容读」，理由见该方法的说明）。
+     */
     public static long optLong(JsonObject o, String key, long def) {
         JsonElement e = get(o, key);
         if (e == null || !e.isJsonPrimitive()) {
@@ -252,6 +262,173 @@ public final class Json {
         } catch (RuntimeException ex) {
             return def;
         }
+    }
+
+    // ------------------------------------------------------------ TYPE_INT 严格取值（Gitea #131）
+
+    /**
+     * 严格取整数成员（{@code TYPE_INT} 语义，Gitea #131 的裁决口径）。
+     *
+     * <h2>接受 / 拒绝（这是契约可见行为，与 {@code contract.md} §2.1 的对照表逐行一致）</h2>
+     *
+     * <table>
+     * <caption>TYPE_INT 取值口径</caption>
+     * <tr>
+     * <td>接受</td>
+     * <td>{@code 3}、{@code 3.0}、{@code -7}（JSON 数值且<b>值精确为整数</b>，在 int 范围内）</td>
+     * </tr>
+     * <tr>
+     * <td>接受</td>
+     * <td>键不存在，或值为 JSON {@code null} ⇒ 用默认值（= 「未提供」，与 {@code ActionContext.has} 同口径）</td>
+     * </tr>
+     * <tr>
+     * <td>拒绝</td>
+     * <td>非整数数值 {@code 1.5} / {@code -0.5}、布尔 {@code true}、字符串 {@code "3"}、超 int 范围</td>
+     * </tr>
+     * </table>
+     *
+     * <p>
+     * 为什么不用 gson 的 {@code getAsInt()}：它经 {@code LazilyParsedNumber.intValue()} / {@code BigDecimal}
+     * 直接<b>截断</b>（{@code 1.5 → 1}）、把字符串<b>解析</b>（{@code "3" → 3}）、把布尔<b>当 1</b>，且不抛异常
+     * ⇒ 「调用方写了 1.5、动作按 1 执行、回报 1」，是一处全动作面的静默失真。本方法把「类型即判据」显式化：
+     * 不做任何隐式转换，值不合就 {@code CP-VALID-002}，并在 {@code context.fields} 里逐项说明
+     * 「收到的值与类型、期望类型、为什么拒绝」，另带 {@code hint}。
+     *
+     * @param o   JSON 对象
+     * @param key 成员名（错误消息与 context 里都用它作字段名）
+     * @param def 未提供（缺键或 JSON null）时的默认值
+     * @throws CpException CP-VALID-002：值存在但不是精确整数
+     */
+    public static int strictInt(JsonObject o, String key, int def) {
+        JsonElement e = get(o, key);
+        if (e == null) {
+            return def;
+        }
+        return strictIntElement(e, key);
+    }
+
+    /** 严格取长整数成员；口径与 {@link #strictInt} 相同，只是范围是 long。 */
+    public static long strictLong(JsonObject o, String key, long def) {
+        JsonElement e = get(o, key);
+        if (e == null) {
+            return def;
+        }
+        return strictLongElement(e, key);
+    }
+
+    /**
+     * 严格整数（元素形态）：合法返回其值，否则抛 {@code CP-VALID-002}。
+     *
+     * <p>
+     * 供「参数不是顶层成员」的场景使用（如 {@code frames:[int...]} 的元素、{@code expectFrames.frames[]}）。
+     */
+    public static int strictIntElement(JsonElement e, String field) {
+        String why = integralRejectReason(e);
+        if (why != null) {
+            throw intParamError(field, e, why, "int");
+        }
+        try {
+            return new BigDecimal(e.getAsString()).intValueExact();
+        } catch (ArithmeticException | NumberFormatException ex) {
+            throw intParamError(field, e, "超出 int 可表示范围", "int");
+        }
+    }
+
+    /** 严格长整数（元素形态）：口径与 {@link #strictIntElement} 相同。 */
+    public static long strictLongElement(JsonElement e, String field) {
+        String why = integralRejectReason(e);
+        if (why != null) {
+            throw intParamError(field, e, why, "int");
+        }
+        try {
+            return new BigDecimal(e.getAsString()).longValueExact();
+        } catch (ArithmeticException | NumberFormatException ex) {
+            throw intParamError(field, e, "超出 long 可表示范围", "int");
+        }
+    }
+
+    /**
+     * 「为什么这个值不是一个精确整数」；合法时返回 {@code null}。
+     *
+     * <p>
+     * 存在的理由：有些调用点要<b>累加</b>逐字段错误后一次性抛出（{@code Fields} 口径，见
+     * {@code export.scene} 的 {@code frames[]} 校验），不能一遇错就抛。本方法给它们一个可累加的判据，
+     * 判定规则与 {@link #strictIntElement} <b>共用同一处实现</b>（不另抄一份规则）。
+     */
+    public static String integralRejectReason(JsonElement e) {
+        if (e == null || e.isJsonNull()) {
+            return "缺失";
+        }
+        if (!e.isJsonPrimitive()) {
+            return "期望 JSON 数值（精确整数），收到 " + typeName(e);
+        }
+        JsonPrimitive p = e.getAsJsonPrimitive();
+        if (p.isBoolean()) {
+            return "期望 JSON 数值（精确整数），收到布尔 " + e.getAsString() + "（布尔不做 0/1 转换）";
+        }
+        if (p.isString()) {
+            return "期望 JSON 数值（精确整数），收到字符串 \"" + e.getAsString() + "\"（字符串不做解析）";
+        }
+        BigDecimal bd;
+        try {
+            bd = new BigDecimal(e.getAsString());
+        } catch (RuntimeException ex) {
+            return "期望 JSON 数值（精确整数），收到无法按十进制精确表示的数值 " + e.getAsString();
+        }
+        if (bd.stripTrailingZeros()
+            .scale() > 0) {
+            return "期望精确整数，收到带小数的数值 " + e.getAsString() + "（不做截断）";
+        }
+        return null;
+    }
+
+    /** 参数类型不符的 {@code CP-VALID-002}（context.fields 含 field/reason/received/receivedType/expected + hint）。 */
+    private static CpException intParamError(String field, JsonElement received, String reason, String expected) {
+        JsonObject f = new JsonObject();
+        f.addProperty("field", field);
+        f.addProperty("reason", reason);
+        f.addProperty("received", received == null ? null : received.toString());
+        f.addProperty("receivedType", typeName(received));
+        f.addProperty("expected", expected);
+        JsonArray fields = new JsonArray();
+        fields.add(f);
+        JsonObject ctx = new JsonObject();
+        ctx.add("fields", fields);
+        ctx.addProperty(
+            "hint",
+            "TYPE_INT 参数要求 JSON 数值且值精确为整数（如 3 / 3.0）；不接受小数、字符串数字与布尔（契约 §2.1，Gitea #131）。" + "确实需要小数请改用声明为 number 的参数");
+        return new CpException(
+            ErrorCodes.VALID_PARAM,
+            "参数类型不符: " + field
+                + " 期望 "
+                + expected
+                + "（精确整数），收到 "
+                + (received == null ? "null" : received.toString())
+                + "（类型 "
+                + typeName(received)
+                + "）",
+            ctx);
+    }
+
+    /** JSON 值的类型名（错误上下文用；不用 gson 的 {@code JsonElement} 类名，人读优先）。 */
+    public static String typeName(JsonElement e) {
+        if (e == null || e.isJsonNull()) {
+            return "null";
+        }
+        if (e.isJsonArray()) {
+            return "array";
+        }
+        if (e.isJsonObject()) {
+            return "object";
+        }
+        JsonPrimitive p = e.getAsJsonPrimitive();
+        if (p.isBoolean()) {
+            return "boolean";
+        }
+        if (p.isString()) {
+            return "string";
+        }
+        return "number";
     }
 
     /** 取布尔成员，缺失/类型不符返回默认值。 */

@@ -192,14 +192,26 @@ public final class ActionContext {
         return Json.optBool(params, name, def);
     }
 
-    /** 取整数参数，缺失或类型不符用默认值。 */
+    /**
+     * 取整数参数（{@code TYPE_INT} 语义，<b>严格</b>）：缺失或显式 {@code null} 用默认值；
+     * 非整数数值（{@code 1.5}）、布尔、字符串（{@code "3"}）、超 int 范围一律 {@code CP-VALID-002}
+     * 并逐字段说明「收到的值与类型、期望类型、hint」。
+     *
+     * <p>
+     * <b>Gitea #131 的落点</b>：改造前这里走 gson 的宽松取值（{@code 1.5 → 1}、{@code "3" → 3}、
+     * {@code true → 1}，都不抛异常），于是「调用方写 1.5、动作按 1 执行」没有任何提示。本仓一切
+     * {@code TYPE_INT} 参数都经本方法（或 {@link Json#strictInt}）取值 ⇒ 收紧点只有一处，
+     * 全动作面机械可验。接受/拒绝对照表见 {@code docs/control-plane/contract.md} §2.1。
+     */
     public int optInt(String name, int def) {
-        return Json.optInt(params, name, def);
+        return Json.strictInt(params, name, def);
     }
 
-    /** 取长整数参数，缺失或类型不符用默认值。 */
+    /**
+     * 取长整数参数；口径与 {@link #optInt} 相同（同样不做截断/解析/布尔转换，见 Gitea #131）。
+     */
     public long optLong(String name, long def) {
-        return Json.optLong(params, name, def);
+        return Json.strictLong(params, name, def);
     }
 
     /** 取对象参数；必填缺失或类型不符抛 CP-VALID-002。 */
