@@ -58,8 +58,8 @@
 ## 4. 动作清单
 
 > **数量口径（D3 漂移防线）**：本表按引入批次分节；**权威动作数**以实机
-> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.7** 共 **40 个**动作：
-> 本节 8 个（PR-1）+ §4.1 的 8 个读面（#98）+ §4.2 的 3 个取证（PR-2）+ §4.4 的 6 个 L0（#99）
+> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.7** 共 **41 个**动作：
+> 本节 8 个（PR-1）+ §4.1 的 8 个读面（#98）+ §4.2 的 3 个取证（PR-2）+ §4.4 的 7 个 L0（#99/#122）
 > + §4.5 的 2 个命令通道（#100）+ §4.6 的 9 个 L1（#101）+ §4.9 的 1 个收尾原语（#103）
 > + §4.7 的 3 个导出族（#102）。
 > 历史上本标题曾写「v1，PR-1 交付」而表外另有动作，导致目录与文档不一致（Gitea #97 §5-D3）——
@@ -68,7 +68,7 @@
 > **版本沿革**：1.3 由 #98（读面）与 #99（L0）并轨占用（调度者裁决）；
 > #100 取 **1.4**（撞号裁决 1）；#101 自报 1.4 与 #100 撞号，合流统一为 **1.5**；
 > #103 取 **1.6**；**收口批次裁决**：#102/#114/#122/#123 四单并行、各自开号必然撞号
-> （#102 自报 1.6 与 #103 冲突），统一取 **1.7**；并禁止出现 `1.10` 这类值
+> （#122 自报 1.6 与 #103 冲突），统一取 **1.7**；并禁止出现 `1.10` 这类值
 > （版本按字符串/浮点比较，`1.10` 会排到 `1.6` 之前）。
 > 小版本只增不改义（§5）。
 
@@ -93,8 +93,9 @@ v1.7（收口批次，调度者裁决）追加的导出族见 §4.7（issue #102
 PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
 **#99（收口T2）追加 6 个 L0 布景原语**（`scene.*`，见 §4.4），同样只增不改上表语义。
 **#101（收口T4）追加 9 个 L1 玩家操作**（`player.*`，见 §4.6），同样只增不改上表语义。
+**#122 追加 1 个 L0 流体注入原语**（`scene.tank.fill`，见 §4.4），同样只增不改上表语义。
 **#102（收口T5）追加 3 个导出族动作**（`export.scene`/`export.registry`/`export.multiblock`，见 §4.7），
-同样只增不改上表语义；本单同时把 `cmd.exec` 的 `artifacts[]` 升级为「登记进 run 清单（带 sha256）」。
+同样只增不改上表语义；该单同时把 `cmd.exec` 的 `artifacts[]` 升级为「登记进 run 清单（带 sha256）」。
 
 ### 4.1 观察面读面动作（v1.3，issue #98）
 
@@ -152,7 +153,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 8. **`target` 参数（v1）**：仅作观察目标留痕（bbox 进观测记录），**不参与自动取景**；自动框景留待后续版本。
 9. **按内容升格的鉴权时点**：动作静态级低于内容要求时（如 scene 级 `case.run` 跑含 cameras 段的用例），鉴权期按静态级放行、**执行期**升格检查——sync 调用方得 HTTP 403 `CP-AUTH-002`，异步调用方得 failed 作业（`error.code=CP-AUTH-002`）。
 
-### 4.4 L0 布景原语（#99，「收口T2」）
+### 4.4 L0 布景原语（#99，「收口T2」；#122 追加流体注入）
 
 能力面三层口径见 #96 §4.1：**L0 原语**＝直接设定世界/实体/玩家/背包状态（布景、构造输入、常规回归）；
 **L1 玩家操作**＝经玩家路径执行；**L2**＝L0/L1 的有序编排。**L0 的产物不能当作 L1 的证据**（#96 §4.2）。
@@ -162,9 +163,10 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 | `scene.entity.spawn` | scene | 生成实体（含掉落物）。`item` 造掉落物、`entity` 造一般实体，二者互斥必居其一；可带 SNBT `nbt` |
 | `scene.entity.clear` | scene | 清除范围内实体（含掉落物）。选择条件 `box`/`entity`/`item` 取交集；`includePlayers` 默认 false |
 | `scene.player.state` | scene | 玩家游戏模式 / 生命 / 经验 / 药水效果（`before`/`after` 双快照） |
-| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给**。模组权威取物/充电两种写法（#117）：`{slot,battery:"<GT ItemList 常量>"}` 由 GT 自己的清单决定物品与 meta；`{slot,battery,charge:"full"\|"empty"\|<EU>}` 经物品自己的 IC2 `IElectricItemManager` 充放电（`charge` ⟂ `nbt`，见 §6.5）。把满充 GT 电池写进机器充电槽即「给机器供电」 |
+| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给**。模组权威取物/充电三种写法（#117/#122）：`{slot,battery:"<GT ItemList 常量>"}` 由 GT 自己的清单决定物品与 meta；`{slot,battery,charge:"full"\|"empty"\|<EU>}` 经物品自己的 IC2 `IElectricItemManager` 充放电（`charge` ⟂ `nbt`，见 §6.5）；**#122 追加** `{slot,material:"<GT 材料名>",prefix:"<OrePrefixes 形态名>"}` 由 GT 自己的 ore dict 统一化路径产出物品与 meta（`material` ⟂ `id`/`battery`/`meta`）。把满充 GT 电池写进机器充电槽即「给机器供电」 |
 | `scene.weather.time` | scene | 设定世界权威时刻与天气（持续生效；`shot.multi.worldTime` 是拍摄基准，两义不同） |
 | `scene.player.pose` | scene | 瞬时传送/转向——L0 布景原语，与 #101 的 L1 真实移动互补、两义按层标注 |
+| `scene.tank.fill` | scene | **流体注入**（#122）：`{at,fluid,amount,side?}`，经 `IFluidHandler.fill` 向指定位置的机器/储罐注入流体。补的是「拿到物品」碰不到的那一半——`scene.inventory.write` 只碰 `IInventory`，而 GT 机器的流体口是内部储罐（`MTEBasicTank.mFluid`），槽位表里没有流体槽。`filled` = `fill` 的实际返回值（**部分注入如实报告**，`partial:true`）；`dryRunFillable` = 一次 `fill(...,false)` 干跑（不改状态），把「返回 0」的两种原因分开。`fluid` 接受 Forge 注册名或 GT 材料名（`_GT5U` 后缀不敏感）；`amount` 无默认值 |
 
 **共同口径（六条，全部可判定）**：
 
@@ -175,7 +177,11 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
    `S1FPacketSetExperience`（经验）/ `S1DPacketEntityEffect`（药水）/ `S08PacketPlayerPosLook`（传送）/
    `S2FPacketSetSlot`（背包槽位）/ `S3PacketTimeUpdate` + `S2BPacketChangeGameState(7,8)`（时间天气）。
    **不自造同步、不逐字段从静态数据推算回填**（§6.4 的既有禁令对 L0 同样成立）。
-3. **写入门控**：六个动作开场一律过 `CaptureControl.assertWorldWriteAllowed`——捕获会话期间被
+   `scene.tank.fill`（#122）走**模组/原版自身的注入 API** `IFluidHandler.fill`——
+   GT 的 `BaseMetaTileEntity` 自己实现它（`IGregTechTileEntity extends IFluidHandler`），
+   **不**直接写 `MTEBasicTank.mFluid` 字段（那是逐字段回填，与「给机器供电必须把电池写进充电槽
+   而不是改 EU 缓冲」同一条纪律）。
+3. **写入门控**：七个动作开场一律过 `CaptureControl.assertWorldWriteAllowed`——捕获会话期间被
    *别的*作业调用即 `CP-STATE-001`（§4.1 的既有口径）。会话开场作业自身可穿透（既有语义）。
 4. **失败显式**：未知实体/物品 id、越界坐标、越界槽位、非容器方块实体、未知药水、未知天气、
    无世界/无玩家，一律 `CP-VALID-002`（参数类，带 `context.fields`）或 `CP-STATE-001`（前置状态类），
@@ -189,8 +195,28 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
    `scene.entity.clear` 与 `scene.inventory.write` 亦然（实体与背包不入清单哈希）。
 
 **两义标注（#96 裁决 3/4 的落地）**：`scene.inventory.write` 返回 `layer:"L0"` + `semantics:"give"`；
-`scene.player.pose` 返回 `layer:"L0"` + `semantics:"teleport"`。两者的 `layerNote` 字段写明
+`scene.player.pose` 返回 `layer:"L0"` + `semantics:"teleport"`；
+`scene.tank.fill`（#122）返回 `layer:"L0"` + `semantics:"fill"`。三者的 `layerNote` 字段写明
 「与 #101 的 L1 对应动作互补而不互替」。
+
+**储罐读回（#122）**：`scene.tank.fill` 的返回值自带注入前后的 `before`/`after`（逐罐
+`{index,present,capacity,fluid,amount,empty}` + GT 侧单值读数），用例侧的读回走 `read.te` 的
+`tanks` 字段（`GtMachineDescriber` 暴露 `getTankInfo` 与 GT 侧单值读数）
+——与 `te-state-equals` 判据**同一棵树、同一读取口**。`scene.tank.fill` 是「机器里有没有这个流体」
+的证据，**不是**「玩家/管道把流体运进来了」的证据（后者属 L1/L2）。
+
+**读数口径三条（#122 实机证伪后成文，读错会造出假绿）**：
+
+1. **输入侧的权威读数是逐罐 `tanks[]`（`/tanks/tanks/<i>/amount`）**。断言「注入进去了多少」用它。
+2. **`drainableFluid`/`drainableFluidAmount` 是「输出/可排出」那一侧**，不是输入罐：
+   `MTEBasicTank.getFluid() → getDrainableStack()`（`:195-197`），
+   而 `MTEBasicMachine.getDrainableStack() → mFluidOut`（`:455-457`）。
+   实机实测：入口注 HCl 3000 后它是 `null`/`0`，配方跑完后才变成 `trichlorosilane`/`1000`。
+   **不要**拿它断言「注入成功」——0 会被误读成「没注进去」。
+3. **容量取 `/tanks/metaTileCapacity`（= MTE 的 `mTankCapacity`，LV 化学反应釜 = 16000），
+   不要取方块实体的 `getCapacity()`**——后者返回 `(int) min(MAX, getEUCapacity())`
+   （`BaseMetaTileEntity.java:1997-1999`）= **EU 缓冲容量 2048**，是一个「看起来像储罐容量」的错数字
+   （#122 实机首轮实测到的 D-1）。
 
 **SNBT 口径**：`nbt` 参数是 **SNBT 文本**（原版 `/give`、`/summon` 的写法，
 即 `net.minecraft.nbt.JsonToNBT`），**不是 JSON 对象**——两者语法相近但不同（SNBT 字符串值可裸写、
@@ -644,6 +670,8 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 5. **补全器的权威放置职责（PR-3 明确）**：当模组的方块需要构造上下文时（LP 通用管块需 `createPipe`/`placePipe`、AE2 部件需 `addPart` 到既有缆、GT 机器方块需 `ItemMachines.placeBlockAt` 才会建 MetaTileEntity），`te` 步的 completer 经**模组自身放置 API** 完成放置与补全；此时 `params` 声明的是**放置输入**（物品 id/朝向/面），不是 NBT 逐字段回填——该区分必须在 completer 类注释写明。**v1.3 注册表**：`vanilla` / `lp-pipe` / `ae2-part` / `gt-machine`（#117 追加，同一族名同时注册补全器与描述器）。
    - **补全器必须自带放置后验证**：`complete()` 返回 true 必须等价于「世界上真有一个可 tick 的模组方块实体」。反例（#117 的缺陷本体）：GT 机器用 `world.setBlock` 直铺只会得到一个 `mID == 0` 的空壳，其 `blockId`/`meta`/TE `class` **与真机器完全相同**——即 `world-hash-equals` 对「空壳 vs 可运行机器」是盲的。故 `gt-machine` 放置后读回 `getMetaTileID()`/`getMetaTileEntity()`，不符即 `CP-EXEC-001`；`GtMachineDescriber` 把同两项（外加 `shell` 布尔）暴露给 `read.te` 与 `te-state-equals`，负对照只能靠它判别。
    - **充电/供电一类「模组状态注入」一律经模组自身 API**：GT 电池的充电状态存在 NBT 键 `GT.ItemCharge` 上，手写它即 §6.4 禁止的逐字段回填；`scene.inventory.write` 的 `charge` 走物品自己的 IC2 `IElectricItemManager`（GT `MetaBaseItem` 自实现之），并显式拒绝 `charge` 与 `nbt` 同时出现。**给机器供电的正确形态是把满充电池写进机器充电槽**（GT 自己的 tick 从槽里取电），而不是直接改机器的 EU 缓冲字段。
+   - **流体注入同理（#122）**：`scene.tank.fill` 走 `IFluidHandler.fill`（1.7.10 的标准流体交互入口，GT 的 `BaseMetaTileEntity` 自实现之），**不**直接写 `MTEBasicTank.mFluid` 字段。走 `fill` 的额外好处是 GT 自己的门槛全部照常生效（机器是否已 tick 起 `mTickTimer > 5`、输入面是否合法 `isLiquidInput(side)`、该流体是否被这台机器的配方表接受 `isFluidInputAllowed → getRecipeMap().containsInput`、容量与既有流体是否同种），本动作只如实报告它返回的数字。**`fill` 的返回语义是「实际注入了多少 mB」**，故 0 与部分注入都是正常返回值：本动作对 0 报 `CP-EXEC-001`（附候选原因与前后读数，不让「一点没进去」伪装成成功），对部分注入如实返回 `filled`/`partial:true`/`notFilled`（容量不足是正常场景，判红会让「尽量灌满」无法表达）。
+   - **物品形态同理（#122）**：配方输入绝大多数是**材料形态**（三氯硅烷配方要 `dust × Silicon`），而 `ItemList` 里没有 `Silicon` 这类常量。`scene.inventory.write` 的 `material`+`prefix` 因此走 GT 自己的 `OrePrefixes.getPrefix(name)` + `Materials.get(name)` + `GTOreDictUnificator.get(prefix, material, amount)`——**与 GT 配方加载器同一路径**，故「用例投进去的东西」与「配方认的东西」不可能不一致；`material` ⟂ `id`/`battery`/`meta`（meta 是「材料子 id + 形态位」编码出来的实现细节，手写它等于绕过模组路径）。
 6. 世界快照与回滚范围**包含** TE 补全后的状态。**因此 `world.snapshot` 只接受 `complete:true` 的世界**（v1.7，#123）：失败残留的场景可能只铺了一半，拍成快照会被 `world.rollback` 当作「期望态」扶正，判据再也看不见那个缺口。
 7. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。**L0 的 `scene.player.pose`（§4.4）是这条的显式化对应物**——同一件事由调用方按需触发，而不是只在进图时隐式做一次。
 8. **离图阻塞**：`mc.loadWorld(null)` 在 tick 线程内阻塞至集成服停机（原版「保存并退到标题」同路径），客户端会冻结数秒到数十秒——动存档目录前必须保证 region 句柄释放，这是 v1 的取舍。

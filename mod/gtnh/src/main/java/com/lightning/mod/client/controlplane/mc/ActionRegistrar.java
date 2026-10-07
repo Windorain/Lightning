@@ -35,6 +35,8 @@ import com.lightning.mod.client.controlplane.mc.scene.EntitySpawnAction;
 import com.lightning.mod.client.controlplane.mc.scene.InventoryWriteAction;
 import com.lightning.mod.client.controlplane.mc.scene.PlayerPoseAction;
 import com.lightning.mod.client.controlplane.mc.scene.PlayerStateAction;
+import com.lightning.mod.client.controlplane.mc.scene.TankFillAction;
+import com.lightning.mod.client.controlplane.mc.scene.TankFillSpec;
 import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
 import com.lightning.mod.config.SdeMultiblockConfig;
 import com.lightning.mod.core.session.ExportSceneWriter;
@@ -66,8 +68,8 @@ import com.lightning.mod.core.session.ExportSceneWriter;
  *
  * 动作面随 PR 追加而增长：PR-1 = 8 个（1.0）、PR-2 = +3 取证（1.1）、PR-3 判据（1.2）、
  * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、#100 = +2 命令通道（1.4）、#101 = +9 L1（1.5）、
- * #103 = +1 收尾原语（1.6）、#102 = +3 导出族（1.7）——当前 40 个。
- * <b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
+ * #103 = +1 收尾原语（1.6）、#102 = +3 导出族（1.7）、#122 = +1 流体注入（1.7）——当前 41 个。
+ * （#123 只改契约语义与响应字段，不新增动作。）<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
  * 而实际 11 个（Gitea #97 §5-D3 判为文档漂移）。注册数可在实机经
  * {@code GET /cp/v1/actions} 的 {@code count} 字段一步核对，改动本文件后请顺手核一次。
  */
@@ -1278,14 +1280,15 @@ public final class ActionRegistrar {
     }
 
     /**
-     * L0 布景原语（#99，contract.md §4.4）：实体 / 玩家状态 / 背包 / 天气时间 / 位置朝向。
+     * L0 布景原语（#99，contract.md §4.4）：实体 / 玩家状态 / 背包 / 天气时间 / 位置朝向 / 流体注入。
      *
      * <p>
-     * 六个动作全是 {@link Tier#SCENE} 同步动作——它们只在服务端权威世界上做一次性的字段写入
+     * 七个动作全是 {@link Tier#SCENE} 同步动作——它们只在服务端权威世界上做一次性的字段写入
      * （无跨 tick 等待、无世界装卸），因此不按步进注册。<b>层归属</b>按 #96 §4.1：本组是
      * <b>L0</b>——直接设定状态、用于布景与构造输入；L0 的产物不能当作 L1（玩家操作）的证据
      * （#96 §4.2）。带「拿到物品」语义的 {@code scene.inventory.write} 与 #101 的 L1「拾取」
      * 是两义、两义都做、按层标注（裁决 4）；{@code scene.player.pose} 与 #101 的 L1 真实移动同理（裁决 3）。
+     * {@code scene.tank.fill}（#122）补的是同一族的<b>流体</b>一侧：背包写入碰不到 {@code IFluidHandler}。
      *
      * <p>
      * 共同口径（写在每个动作的类注释里，这里只列索引）：
@@ -1402,7 +1405,12 @@ public final class ActionRegistrar {
                         + "charge 给 \"full\"/\"empty\"/EU 整数并按物品自己的电力 API（IC2 IElectricItemManager）充放电"
                         + "——把满充 GT 电池写进机器充电槽即 #117 的供电布景。"
                         + "charge 与 nbt 互斥：充电状态必须经模组自身的电力 API 写入，手写 GT.ItemCharge 那种 NBT 键"
-                        + "属于契约 §6.4 禁止的逐字段回填；charge 还要求 count=1（GT 的电力物品在 stackSize != 1 时拒绝充放）。")
+                        + "属于契约 §6.4 禁止的逐字段回填；charge 还要求 count=1（GT 的电力物品在 stackSize != 1 时拒绝充放）。"
+                        + "条目另支持第三种模组权威写法（#122，配方输入）：material 给 GT 材料名"
+                        + "（如 Silicon / HydrochloricAcid），prefix 给 GT 的形态名（OrePrefixes 字段名，如 dust / cell），"
+                        + "物品与 meta 由 GT 自己的 ore dict 统一化路径产出——配方输入绝大多数是材料形态，"
+                        + "而 ItemList 里没有 Silicon 这类常量，写 id+meta 就得自己算 meta 编码。"
+                        + "material 与 id/battery 互斥，且与 meta 互斥。")
                 .optional("target", ActionDescriptor.TYPE_STRING, "player", "player | container（默认 player）")
                 .optional(
                     "at",
@@ -1411,9 +1419,10 @@ public final class ActionRegistrar {
                 .optional(
                     "slots",
                     ActionDescriptor.TYPE_ARRAY,
-                    "槽位条目数组 [{slot,id,meta,count,nbt}] 或 [{slot,battery,charge}]；slot 必填，条目内默认值："
-                        + "meta=0、count=1（域 1..64，清空请用 id=air；用 charge 时须为 1）、nbt 缺省即不带 NBT。"
-                        + "battery 与 id 互斥；charge 与 nbt 互斥")
+                    "槽位条目数组 [{slot,id,meta,count,nbt}] / [{slot,battery,charge}] / [{slot,material,prefix,count}]；"
+                        + "slot 必填，条目内默认值：meta=0、count=1（域 1..64，清空请用 id=air；用 charge 时须为 1）、"
+                        + "nbt 缺省即不带 NBT。battery 与 id 互斥；material 与 id/battery/meta 互斥且必配 prefix；"
+                        + "charge 与 nbt 互斥")
                 .optional("slot", ActionDescriptor.TYPE_OBJECT, "单个槽位条目（与 slots 可同时给，追加在后）")
                 .returns(
                     "{action, layer:\"L0\", semantics:\"give\", layerNote, target{kind,player?|at?,teClass?,size,inventoryName}, "
@@ -1430,6 +1439,10 @@ public final class ActionRegistrar {
                 .example(
                     "{\"target\":\"container\",\"at\":[65,12,65],\"slots\":[{\"slot\":1,"
                         + "\"battery\":\"Battery_RE_LV_Lithium\",\"charge\":\"full\"}],\"confirm\":true}")
+                .example(
+                    "{\"target\":\"container\",\"at\":[65,12,65],\"slots\":["
+                        + "{\"slot\":5,\"material\":\"Silicon\",\"prefix\":\"dust\",\"count\":1},"
+                        + "{\"slot\":6,\"material\":\"Empty\",\"prefix\":\"cell\",\"count\":2}],\"confirm\":true}")
                 .since("1.3")
                 .build(),
             new InventoryWriteAction());
@@ -1479,6 +1492,58 @@ public final class ActionRegistrar {
                 .since("1.3")
                 .build(),
             new PlayerPoseAction());
+
+        registry.register(
+            ActionDescriptor.builder(TankFillAction.NAME, Tier.SCENE)
+                .description(
+                    "L0：向指定位置的机器/储罐注入流体（经 net.minecraftforge.fluids.IFluidHandler.fill，"
+                        + "1.7.10 流体交互的标准入口，GT 的 BaseMetaTileEntity 自己实现它）。"
+                        + "补的是「拿到物品」碰不到的那一半：scene.inventory.write 只碰 IInventory，"
+                        + "而 GT 机器的流体口是内部储罐（MTEBasicTank.mFluid），槽位表里没有流体槽——"
+                        + "三氯硅烷配方（Si dust + 2 Empty Cell + HCl 3000 mB）缺本动作时无法端到端跑通。"
+                        + "走 fill 的额外好处是 GT 自己的门槛全部照常生效（机器是否已 tick 起、该面是否可注入、"
+                        + "该流体是否被这台机器的配方表接受、容量与既有流体是否同种），本动作只如实报告它返回的数字。"
+                        + "层归属：本动作是 L0 布景原语（semantics:\"fill\"），是「机器里有没有这个流体」的证据，"
+                        + "不是「玩家/管道把流体运进来了」的证据（后者属 L1/L2，两层结论不互替）。"
+                        + "读回走 read.te 的 tanks 字段（与 te-state-equals 判据同一棵树）。")
+                .optional("at", ActionDescriptor.TYPE_ARRAY, "目标坐标 [x,y,z]（机器/储罐所在格）；运行期必填")
+                .optional(
+                    "fluid",
+                    ActionDescriptor.TYPE_STRING,
+                    "流体名（必填）：Forge 流体注册名（权威身份，如 hydrochloricacid_gt5u）或 GT 材料名"
+                        + "（如 HydrochloricAcid）——两条都接受。GT 的材料流体按材料名小写注册，"
+                        + "带 _GT5U 后缀的材料（避开与别模组撞名的那些）会差一个后缀，故解析时剥掉后缀做匹配。"
+                        + "查不到报 CP-VALID-002 并附已注册名样本，不静默回落到水/空气")
+                .optional(
+                    "amount",
+                    ActionDescriptor.TYPE_INT,
+                    "注入量 mB（必填，1.." + TankFillSpec.MAX_AMOUNT + "）。不给默认值：漏写量必须显式失败，" + "否则「漏写」会静默变成一次真实注入")
+                .optional(
+                    "side",
+                    ActionDescriptor.TYPE_STRING,
+                    TankFillSpec.DEFAULT_SIDE,
+                    "注入面 DOWN|UP|NORTH|SOUTH|WEST|EAST（默认 UP，与 gt-machine 的放置面同口径）。" + "带盖的机器只有特定面能进流体，那种场景必须显式给面")
+                .returns(
+                    "{action, layer:\"L0\", semantics:\"fill\", layerNote, "
+                        + "target{at,teClass,block,fluidHandler,gtMachine,side}, "
+                        + "requested{fluid,fluidRequested,amount,localizedName}, "
+                        + "filled, dryRunFillable, notFilled, complete, partial, before{...}, after{...}, sceneReadback{...}}。"
+                        + "filled = IFluidHandler.fill 的实际返回值（部分注入如实报告，partial:true）；"
+                        + "dryRunFillable = 一次 fill(...,false) 干跑的结果（不改状态），用来把「返回 0」的两种原因分开"
+                        + "（干跑>0 而实注 0 ⇒ GT 的运行期门；干跑 0 ⇒ 容量/流体种类）。"
+                        + "before/after 含逐罐 {index,present,capacity,fluid,amount,empty}（**输入侧的权威读数**，"
+                        + "断言注入量请用它）与 GT 侧单值读数（drainableFluid/drainableFluidAmount 是"
+                        + "**输出/可排出**那一侧——MTEBasicMachine 的 getFluid 就是 getDrainableStack，"
+                        + "入口注 HCl 时它是 null/0，配方跑完后才变成产物；metaTileCapacity 是真正的储罐容量）。"
+                        + "注入量为 0 报 CP-EXEC-001（附候选原因与前后读数）；"
+                        + "非流体处理器/无方块实体报 CP-STATE-001；未知流体报 CP-VALID-002")
+                .example("{\"at\":[65,12,65],\"fluid\":\"HydrochloricAcid\",\"amount\":3000,\"confirm\":true}")
+                .example(
+                    "{\"at\":[65,12,65],\"fluid\":\"hydrochloricacid_gt5u\",\"amount\":3000,\"side\":\"UP\","
+                        + "\"confirm\":true}")
+                .since("1.7")
+                .build(),
+            new TankFillAction());
     }
 
     /**

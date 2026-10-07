@@ -22,9 +22,10 @@ import com.lightning.mod.client.controlplane.core.Json;
  * { "slot": 1, "id": "minecraft:torch", "meta": 0, "count": 16, "nbt": "{...}" }
  * { "slot": 1, "id": "air" }                                  // 清空该槽
  * { "slot": 1, "battery": "Battery_RE_LV_Lithium", "charge": "full" }   // #117 供电布景
+ * { "slot": 5, "material": "Silicon", "prefix": "dust", "count": 1 }    // #122 配方输入
  * </pre>
  *
- * <h2>两条互斥纪律（#117 新增，都是「失败显式」而非静默修正）</h2>
+ * <h2>三条互斥纪律（#117 新增两条 + #122 新增一条，都是「失败显式」而非静默修正）</h2>
  * <ol>
  * <li>{@code battery} ⟂ {@code id}：{@code battery} 走 GT 自己的 {@code ItemList} 取栈
  * （见 {@link com.lightning.mod.client.controlplane.mc.GtItemList}），再给 {@code id} 就自相矛盾；</li>
@@ -33,6 +34,12 @@ import com.lightning.mod.client.controlplane.core.Json;
  * 「看起来对、实际从未经过模组序列化路径」。要满充电池必须走 {@code charge}（经物品自己的
  * {@code IElectricItemManager}，由模组自己写 NBT）。同时给 {@code nbt} 等于给了一条绕过该纪律的后门，
  * 故直接拒绝。</li>
+ * <li><b>#122 新增</b>：{@code material}+{@code prefix} 走 GT 自己的材料/形态表
+ * （{@link com.lightning.mod.client.controlplane.mc.GtStacks}），因此与 {@code id}、{@code battery}
+ * 都互斥，且 {@code meta} 也互斥（meta 由「材料 + 形态」编码出来，是 GT 的实现细节）。
+ * <b>为什么需要它</b>：配方输入绝大多数是材料形态（三氯硅烷配方要 {@code dust × Silicon}），
+ * 而 {@code ItemList} 里<b>没有</b> {@code Silicon} 这类常量——只靠 {@code id}+{@code meta}
+ * 就得让用例自己算 meta 编码，那既不可读也不稳（GT 调编码即失效）。</li>
  * </ol>
  *
  * <p>
@@ -50,6 +57,12 @@ public final class SlotSpec {
 
     /** 参数名：GT ItemList 常量名（电池等）。 */
     public static final String PARAM_BATTERY = "battery";
+
+    /** 参数名：GT 材料名（#122，配方输入）。 */
+    public static final String PARAM_MATERIAL = "material";
+
+    /** 参数名：GT 物品形态名（{@code OrePrefixes} 的字段名，如 {@code dust}；#122）。 */
+    public static final String PARAM_PREFIX = "prefix";
 
     /** 参数名：meta/damage。 */
     public static final String PARAM_META = "meta";
@@ -177,6 +190,12 @@ public final class SlotSpec {
     /** GT ItemList 常量名；未给时为 null。 */
     public final String battery;
 
+    /** GT 材料名（#122）；未给时为 null。 */
+    public final String material;
+
+    /** GT 形态名（#122）；未给时为 null。 */
+    public final String prefix;
+
     /** meta/damage。 */
     public final int meta;
 
@@ -189,12 +208,14 @@ public final class SlotSpec {
     /** 充电口径。 */
     public final Charge charge;
 
-    private SlotSpec(int slot, boolean clear, String id, String battery, int meta, int count, String nbt,
-        Charge charge) {
+    private SlotSpec(int slot, boolean clear, String id, String battery, String material, String prefix, int meta,
+        int count, String nbt, Charge charge) {
         this.slot = slot;
         this.clear = clear;
         this.id = id;
         this.battery = battery;
+        this.material = material;
+        this.prefix = prefix;
         this.meta = meta;
         this.count = count;
         this.nbt = nbt;
@@ -230,13 +251,35 @@ public final class SlotSpec {
 
         String rawId = trimmed(Json.optString(e, PARAM_ID, null));
         String battery = trimmed(Json.optString(e, PARAM_BATTERY, null));
+        String material = trimmed(Json.optString(e, PARAM_MATERIAL, null));
+        String prefix = trimmed(Json.optString(e, PARAM_PREFIX, null));
         String nbt = Json.get(e, PARAM_NBT) == null ? null : Json.optString(e, PARAM_NBT, null);
         Charge charge = Charge.parse(Json.get(e, PARAM_CHARGE), where);
+        boolean metaPresent = Json.get(e, PARAM_META) != null;
         int meta = Json.optInt(e, PARAM_META, 0);
         int count = Json.optInt(e, PARAM_COUNT, 1);
 
         if (rawId != null && battery != null) {
             fields.add(where + "." + PARAM_BATTERY, "与 " + PARAM_ID + " 互斥（battery 自己决定物品）");
+        }
+        // #122：material 是第三种「由模组自己决定物品」的写法（材料 + 形态 → GT 的 ore dict 产出）。
+        // 它与前两种都互斥，且 meta 也互斥——meta 是「材料子 id + 形态位」编码出来的实现细节。
+        if (material != null && rawId != null) {
+            fields.add(where + "." + PARAM_MATERIAL, "与 " + PARAM_ID + " 互斥（material 自己决定物品）");
+        }
+        if (material != null && battery != null) {
+            fields.add(where + "." + PARAM_MATERIAL, "与 " + PARAM_BATTERY + " 互斥（两者都自己决定物品）");
+        }
+        if (material != null && metaPresent) {
+            fields.add(
+                where + "." + PARAM_META,
+                "与 " + PARAM_MATERIAL + " 互斥：meta 由「材料 + 形态」经 GT 自己的 ore dict 编码产出，不要另给");
+        }
+        if (material != null && prefix == null) {
+            fields.add(where + "." + PARAM_PREFIX, "给 " + PARAM_MATERIAL + " 时必填（GT 的形态名，如 dust / cell / ingot）");
+        }
+        if (prefix != null && material == null) {
+            fields.add(where + "." + PARAM_MATERIAL, "给 " + PARAM_PREFIX + " 时必填（形态必须配一个材料）");
         }
         if (!charge.isNone() && nbt != null) {
             fields.add(
@@ -244,7 +287,7 @@ public final class SlotSpec {
                 "与 " + PARAM_CHARGE + " 互斥：充电状态必须经物品自己的电力 API 写入（契约 §6.4 禁止逐字段 NBT 回填），" + "nbt 会绕过这条纪律");
         }
 
-        boolean clear = battery == null && (rawId == null || isAir(rawId));
+        boolean clear = material == null && battery == null && (rawId == null || isAir(rawId));
         if (clear) {
             // 清空条目：count/meta/nbt 与「把槽清成空」无关，沿用既有语义直接忽略（不收紧既有校验）。
             // 但 charge 不能忽略——「要一格满充电池」与「清空这一格」矛盾，静默忽略会造出假绿。
@@ -260,7 +303,7 @@ public final class SlotSpec {
             if (count < 1 || count > MAX_COUNT) {
                 fields.add(where + "." + PARAM_COUNT, "须在 1.." + MAX_COUNT + "（清空请用 id=air），收到 " + count);
             }
-            if (meta < 0 || meta > MAX_META) {
+            if (metaPresent && (meta < 0 || meta > MAX_META)) {
                 fields.add(where + "." + PARAM_META, "须在 0.." + MAX_META + "，收到 " + meta);
             }
         }
@@ -269,8 +312,10 @@ public final class SlotSpec {
         return new SlotSpec(
             slot == null ? Integer.MIN_VALUE : slot.intValue(),
             clear,
-            clear || battery != null ? null : rawId,
+            clear || battery != null || material != null ? null : rawId,
             battery,
+            material,
+            prefix,
             meta,
             count,
             nbt,

@@ -21,12 +21,21 @@ public final class Contract {
      * 1.7=收口批次（调度者裁决）：
      * <ul>
      * <li>导出与产物纪律（issue #102：{@code export.scene} / {@code export.registry} /
-     * {@code export.multiblock} 三动作，见 contract.md §4.7；本单分支自报 1.6 与 #103 撞号，合流统一为 1.7）；</li>
+     * {@code export.multiblock} 三动作，见 contract.md §4.7）；</li>
      * <li>托管世界标记前置与 {@code complete} 状态机（issue #123：{@code world.rebuild} 的标记前置 +
      * {@code world.info} 新增 {@code markerComplete} 响应字段 + {@code world.snapshot} 只接受构建完成的
-     * 世界，见 contract.md §6.1/§6.6）。</li>
+     * 世界，见 contract.md §6.1/§6.6）；</li>
+     * <li>L0 流体注入（issue #122：{@code scene.tank.fill}，见 contract.md §4.4；同一批的
+     * {@code scene.inventory.write} 追加 {@code material}+{@code prefix} 条目形态——只增可选字段、
+     * 不改既有语义，故该动作 {@code since} 仍为 1.3）。</li>
      * </ul>
      * 小版本只增不改义（contract.md §5）。
+     *
+     * <p>
+     * <b>撞号提示（如实留痕）</b>：#102/#114/#122/#123 四单并行，各自开号必然撞号（#122 自报 1.6，
+     * 与 #103 的 1.6 冲突）。四单同为「只增」，撞号不产生语义冲突，但 {@code contractVersion}
+     * 只能有一个值——由调度者统一裁决为 <b>1.7</b>（并禁止出现 {@code 1.10} 这类值：
+     * 版本按字符串/浮点比较，{@code 1.10} 会排到 {@code 1.6} 之前）。
      *
      * <p>
      * <b>1.7 为什么算增量而不是破坏</b>：新增的是响应字段与一个新的世界状态（构建中的
