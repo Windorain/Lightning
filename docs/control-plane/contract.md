@@ -744,6 +744,21 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 
 **#104 删除口径（本节的验收用途）**：老探针承载的四件事全部有归属——①三通道计数/zeroFlow/按格归属 → `read.capture`；②`directTessellatorHookActive` → `read.capture`（同一字段、同一数据源）；③诊断会话布防 → `capture.diag {arm:true}`；④drain-dump → `capture.diag {dump:true}`。老探针独有的「专用世界 + 受控放置 + 玩家面向」不属于本职责，已由 `world.rebuild` / `te` 步 / `scene.player.pose` 覆盖（#104 删除矩阵 A-2.3）。
 
+### 4.12 输入手段族（`input.*`）：接口已冻结、**尚未实现**（Gitea #162）
+
+**本节只是指针**：输入手段族的接口形状、生命周期、执行语义、能力发现、错误语义、状态迁移表与集成协议，
+全部冻结在 **`docs/control-plane/input-contract.md`**；覆盖矩阵、旁路清单（**不可达**项）与负对照目录在
+**`docs/control-plane/input-coverage.md`**。本节不复制其内容，避免同一规则两处漂移。
+
+**当前状态（调用方必须知道）**：
+
+- 五个动作（`input.key` / `input.text` / `input.mouse` / `input.release` / `input.state`）**均未注册**
+  ⇒ `GET /cp/v1/actions` 的 `count` 仍是**43**，调用它们得 `CP-VALID-001`；
+- **`contractVersion` 仍为 `1.7`**；`since` 在实现合并时前进（候选 `1.8`）——本契约的冻结**不等于**能力可用；
+- 输入手段与 `layer`（L0/L1/L2）是**两个维度**：输入成功 ≠ 操作目标正确 ≠ 流程成立。本族返回值以
+  `means:"input"` 归因，`layer` 为 `null`（**§4.6 的 `layer`/`semantics` 成对规则在此登记为显式例外**，
+  理由见 `input-contract.md` §12.1 D-1）。
+
 ## 5. 版本化规则
 
 - URI 前缀即契约大版本：`/cp/v1`。
