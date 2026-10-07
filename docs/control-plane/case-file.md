@@ -52,7 +52,7 @@ world → capture → build → read → action → cameras → criteria → evi
 |---|---|---|
 | `clear` | `from:[x,y,z], to:[x,y,z]` | 托管区域清场（setBlockToAir） |
 | `block` | `at:[x,y,z], id:"minecraft:stone", meta:0` | 放置方块 |
-| `te` | `at:[x,y,z], completer:"vanilla"\|"lp-pipe"\|"ae2-part", params:{...}` | TE 状态补全（权威同步路径，contract.md §6.4）；`completer` 必须在注册表中 |
+| `te` | `at:[x,y,z], completer:"vanilla"\|"lp-pipe"\|"ae2-part"\|"gt-machine", params:{...}` | TE 状态补全（权威同步路径，contract.md §6.4）；`completer` 必须在注册表中。`gt-machine`（#117）的 `params` 是放置输入：`{machine:"Machine_LV_ChemicalReactor"}`（GT `ItemList` 常量名，首选）或 `{item:"gregtech:gt.blockmachines", meta:421}`（显式 MetaTileEntity id，须 > 0），可选 `side`（DOWN\|UP\|NORTH\|SOUTH\|WEST\|EAST，默认 UP）。补全器自带放置与放置后读回验证（读回 `mID == 0` 的空壳即 `CP-EXEC-001`），故用例**不要**先用 `block` 步铺 GT 机器方块；给机器供电用 §3 之外的 `scene.inventory.write`（`battery` + `charge:"full"` 写进机器充电槽） |
 | `wait` | `ticks:N` | 等待 N tick（同步/渲染稳定） |
 
 坐标三种写法，一律规范化为绝对坐标：绝对数组 `[x,y,z]`；`"@base"` + 同层 `offset:[dx,dy,dz]`；字符串 `"base+[dx,dy,dz]"`。`world.base` 只接受绝对数组。构建完成后运行器自动做：TE 补全（`te` 步声明的）→ `markBlockRangeForRenderUpdate` → 静置 `settleTicks`。

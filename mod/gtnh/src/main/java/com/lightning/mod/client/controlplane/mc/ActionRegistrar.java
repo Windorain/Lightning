@@ -1126,19 +1126,30 @@ public final class ActionRegistrar {
                         + "target=player 用 InventoryPlayer 下标：0..8 快捷栏（0 是手持）、9..35 主背包、36..39 盔甲"
                         + "（36 靴/37 护腿/38 胸甲/39 头盔）——不是 ContainerPlayer 的界面槽号。"
                         + "target=container 用 at:[x,y,z] 指向的 IInventory 下标。id 给 air 即清空该槽。"
-                        + "写入走 setInventorySlotContents + markDirty，并对玩家发一次 Container.detectAndSendChanges。")
+                        + "写入走 setInventorySlotContents + markDirty，并对玩家发一次 Container.detectAndSendChanges。"
+                        + "条目另支持两种模组权威取物/充电写法（#117）：battery 给 GT 的 ItemList 常量名"
+                        + "（如 Battery_RE_LV_Lithium，物品与 meta 由 GT 自己的清单决定，不硬编码数字），"
+                        + "charge 给 \"full\"/\"empty\"/EU 整数并按物品自己的电力 API（IC2 IElectricItemManager）充放电"
+                        + "——把满充 GT 电池写进机器充电槽即 #117 的供电布景。"
+                        + "charge 与 nbt 互斥：充电状态必须经模组自身的电力 API 写入，手写 GT.ItemCharge 那种 NBT 键"
+                        + "属于契约 §6.4 禁止的逐字段回填；charge 还要求 count=1（GT 的电力物品在 stackSize != 1 时拒绝充放）。")
                 .optional("target", ActionDescriptor.TYPE_STRING, "player", "player | container（默认 player）")
-                .optional("at", ActionDescriptor.TYPE_ARRAY, "容器坐标 [x,y,z]（target=container 时必填）")
+                .optional(
+                    "at",
+                    ActionDescriptor.TYPE_ARRAY,
+                    "容器坐标 [x,y,z]（target=container 时必填；接受 GT 机器方块实体这类 IInventory）")
                 .optional(
                     "slots",
                     ActionDescriptor.TYPE_ARRAY,
-                    "槽位条目数组 [{slot,id,meta,count,nbt}]；slot 必填，条目内默认值："
-                        + "meta=0、count=1（域 1..64，清空请用 id=air）、nbt 缺省即不带 NBT")
+                    "槽位条目数组 [{slot,id,meta,count,nbt}] 或 [{slot,battery,charge}]；slot 必填，条目内默认值："
+                        + "meta=0、count=1（域 1..64，清空请用 id=air；用 charge 时须为 1）、nbt 缺省即不带 NBT。"
+                        + "battery 与 id 互斥；charge 与 nbt 互斥")
                 .optional("slot", ActionDescriptor.TYPE_OBJECT, "单个槽位条目（与 slots 可同时给，追加在后）")
                 .returns(
                     "{action, layer:\"L0\", semantics:\"give\", layerNote, target{kind,player?|at?,teClass?,size,inventoryName}, "
                         + "writtenCount, written[{slot,requested,actual,matches}|{slot,cleared}], readBack[{slot,stack|empty}], "
-                        + "sceneReadback{...}}")
+                        + "sceneReadback{...}}；条目带 battery/charge 时 requested/actual 另含 "
+                        + "chargeRequested/charge/maxCharge/electricTier（电池真的充上了没有，读回可见）")
                 .example(
                     "{\"target\":\"player\",\"slots\":[{\"slot\":0,\"id\":\"minecraft:stone\",\"count\":64},"
                         + "{\"slot\":9,\"id\":\"minecraft:diamond_pickaxe\",\"meta\":0,\"count\":1},"
@@ -1146,6 +1157,9 @@ public final class ActionRegistrar {
                 .example(
                     "{\"target\":\"container\",\"at\":[65,12,65],\"slots\":[{\"slot\":0,\"id\":\"minecraft:torch\",\"count\":16}],"
                         + "\"confirm\":true}")
+                .example(
+                    "{\"target\":\"container\",\"at\":[65,12,65],\"slots\":[{\"slot\":1,"
+                        + "\"battery\":\"Battery_RE_LV_Lithium\",\"charge\":\"full\"}],\"confirm\":true}")
                 .since("1.3")
                 .build(),
             new InventoryWriteAction());

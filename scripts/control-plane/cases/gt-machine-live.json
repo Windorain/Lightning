@@ -1,0 +1,58 @@
+{
+  "schema": "lightning.case/1",
+  "id": "gt-machine-live",
+  "label": "#117 段二实机：LV 化学反应釜经 gt-machine 补全器权威放置——运行期轨判据 + 负对照变体（setBlock 直铺空壳必红）",
+  "world": {
+    "folder": "cp_gt117_case",
+    "seed": 20261006,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "build": [
+    { "op": "clear", "from": [63, 11, 63], "to": [70, 16, 70] },
+    { "op": "te", "at": [65, 12, 65],
+      "completer": "gt-machine",
+      "params": { "machine": "Machine_LV_ChemicalReactor", "side": "UP" } }
+  ],
+  "criteria": [
+    { "id": "gt-machine-meta-tile-id", "type": "te-state-equals",
+      "params": { "at": [65,12,65], "key": "/metaTileId" }, "expect": 421 },
+    { "id": "gt-machine-not-shell", "type": "te-state-equals",
+      "params": { "at": [65,12,65], "key": "/shell" }, "expect": false },
+    { "id": "gt-machine-meta-tile-present", "type": "te-state-equals",
+      "params": { "at": [65,12,65], "key": "/metaTilePresent" }, "expect": true },
+    { "id": "gt-machine-class", "type": "te-state-equals",
+      "params": { "at": [65,12,65], "key": "/metaTileClass" },
+      "expect": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe" },
+    { "id": "gt-machine-eu-capacity", "type": "te-state-equals",
+      "params": { "at": [65,12,65], "key": "/euCapacity" }, "expect": 2048 },
+    { "id": "gt-machine-inventory-size", "type": "te-state-equals",
+      "params": { "at": [65,12,65], "key": "/inventory/size" }, "expect": 10 },
+    { "id": "world-hash-equals", "type": "world-hash-equals", "params": {} },
+    { "id": "observation-exists", "type": "artifact-exists",
+      "params": { "path": "observation.json" } }
+  ],
+  "variants": [
+    {
+      "id": "neg-setblock-shell",
+      "mutate": [
+        { "op": "replace", "path": "/build/1",
+          "value": { "op": "block", "at": [65,12,65],
+                     "id": "gregtech:gt.blockmachines", "meta": 1 } }
+      ],
+      "expectCriteriaRed": [
+        "gt-machine-meta-tile-id",
+        "gt-machine-not-shell",
+        "gt-machine-meta-tile-present"
+      ]
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "world/scene-manifest.json", "role": "scene-manifest" }
+    ]
+  }
+}
