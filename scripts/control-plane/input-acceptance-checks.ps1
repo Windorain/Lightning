@@ -1235,7 +1235,18 @@ function Test-InputE2QueueFullSingleJob {
     }
 
     if ((Get-CpTrialExit $ValidateTrial) -ne 0) {
-        return (New-CpBlocked 'E2' ("blocked：E2 的填充用例未被校验器接受 ⇒ 探针构造失败（这是构造层结论，不是「队列满」的实测结论，既不算 pass 也不算实现缺陷）: " + (Format-CpTrial $ValidateTrial) + "；$statTxt"))
+        # 【首轮实机教训】只打 shape/state/code 不够定位：首轮就是这样把「用例缺 world/criteria/evidence」
+        # 这条真正的原因丢在了 caller 日志里，摘要只显示一个 CP-VALID-002。这里把校验器的
+        # **消息 + 逐字段上下文**一并带进 detail，让构造失败自证。
+        $verr = Get-CpTrialError $ValidateTrial
+        $vmsg = Format-CpValue (Get-CpProp $verr 'message')
+        $vctx = Get-CpProp $verr 'context'
+        $vfields = ''
+        if ($null -ne $vctx) {
+            $farr = Get-CpProp $vctx 'fields'
+            if ($null -ne $farr) { $vfields = "；校验器逐字段: " + (Format-CpValue $farr) }
+        }
+        return (New-CpBlocked 'E2' ("blocked：E2 的填充用例未被校验器接受 ⇒ 探针构造失败（这是构造层结论，不是「队列满」的实测结论，既不算 pass 也不算实现缺陷）: " + (Format-CpTrial $ValidateTrial) + "；校验器消息: $vmsg$vfields；$statTxt"))
     }
     $runCode = Get-CpTrialErrorCode $RunTrial
 
