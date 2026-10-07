@@ -17,6 +17,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.CpException;
 import com.lightning.mod.client.controlplane.mc.capture.ShotExecutor;
+import com.lightning.mod.client.controlplane.mc.input.InputCapabilities;
 import com.lightning.mod.client.controlplane.mc.input.api.DeliverResult;
 import com.lightning.mod.client.controlplane.mc.input.api.InputRuntime;
 import com.lightning.mod.client.controlplane.mc.input.api.InputStateSnapshot;
@@ -894,5 +895,51 @@ public class InputStateProviderImplTest {
         assertTrue(
             ne.getAsJsonArray()
                 .size() >= 5);
+    }
+
+    // ------------------------------------------------------------ 单一真值来源（#166）
+
+    /**
+     * 【#166 DR-9 守卫】{@code input.state.notImplemented} 必须**至少包含**能力真值表
+     * （{@link InputCapabilities#NOT_IMPLEMENTED}）的每一条。
+     *
+     * <p>
+     * 这条断言的存在理由：修复前实际输出走的是**第三份**字面清单
+     * （{@code InputStateProviderImpl.frozenNotImplemented()}，6 条），与 §11.2（12 条）、
+     * {@code InputCapabilities}（11 条）都不同源 —— 于是「实现一项就同时删两处」这条规则
+     * 无论怎么遵守都会留下漂移。把基换回任意别的清单（或让基不再被并入）本用例立刻变红。
+     */
+    @Test
+    public void notImplementedIsSupersetOfTheCapabilityTruthTable() {
+        JsonObject d = state(richProbe(), new Rt(new Snap("world", 1, null, null)));
+        String actual = d.getAsJsonArray("notImplemented")
+            .toString();
+        assertTrue("能力真值表不得为空（空表说明基被换成了别的东西）", InputCapabilities.NOT_IMPLEMENTED.size() >= 10);
+        for (String entry : InputCapabilities.NOT_IMPLEMENTED) {
+            assertTrue("input.state.notImplemented 必须逐条包含能力真值表的条目（缺失 ⇒ 两处不同源）：" + entry, actual.contains(entry));
+        }
+        // 动态缺口必须仍然被追加（探针读不到的那些；本探测满配 ⇒ 只剩队列计数那条不需要）
+        assertFalse("满配探测 + 有运行时 ⇒ 不应出现 injectors 白名单缺口", actual.contains("白名单"));
+    }
+
+    /**
+     * 【#166 DR-8 守卫】{@code input.state.errors} 与能力真值表**同一份**，且不含对本族已不适用的
+     * {@code CP-VALID-001}（§6.1：v1.8 起五个动作已注册，该码不再是本族的可达失败）。
+     *
+     * <p>
+     * 修复前：实际输出 4 条（本地字面数组），{@code InputCapabilities.errorsJson()} 5 条含
+     * {@code CP-VALID-001}，且后者在生产路径**无人调用** ⇒ 同一个量两处真相，其中之一永远在说谎。
+     */
+    @Test
+    public void errorsComeFromTheCapabilityTruthTable() {
+        JsonObject d = state(richProbe(), new Rt(new Snap("world", 1, null, null)));
+        JsonArray actual = d.getAsJsonArray("errors");
+        JsonArray expected = InputCapabilities.errorsJson();
+        assertEquals("两处必须同源（同一条数与同一顺序）", expected.toString(), actual.toString());
+        assertFalse(
+            "CP-VALID-001 对本族已不适用（§6.1）：不许出现在错误码清单里",
+            expected.toString()
+                .contains("CP-VALID-001"));
+        assertEquals(4, expected.size());
     }
 }

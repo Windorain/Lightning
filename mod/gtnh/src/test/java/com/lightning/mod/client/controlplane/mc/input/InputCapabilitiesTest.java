@@ -60,6 +60,10 @@ public class InputCapabilitiesTest {
         assertTrue(contains("轮询面"));
         assertTrue(contains("relative"));
         assertTrue(contains("自校准"));
+        // 【#166 DR-2 / DR-9】两条必须登记在**唯一**清单里（文档 §11.2 同步，见
+        // InputCapabilitiesDocParityTest 的条数守卫）
+        assertTrue("滚轮符号未实机校准必须进未实现清单（§2.7 第 2 条的义务未完成）", contains("滚轮符号"));
+        assertTrue("组合键事件序与队列满无独立实机判据必须进未实现清单（未测 ≠ 通过）", contains("组合键事件序"));
         assertTrue(
             "JSON 形态必须可用（T2-B 要直接塞进 input.state.notImplemented）",
             InputCapabilities.notImplementedJson()
@@ -218,14 +222,21 @@ public class InputCapabilitiesTest {
         assertEquals(5, InputCapabilities.INJECTORS.size());
         assertEquals("Keyboard.addRawKeyEvent", InputCapabilities.INJECTORS.get(0));
         assertEquals("Mouse.addWheelEvent", InputCapabilities.INJECTORS.get(4));
+        // 【#166 DR-8】错误码清单是**单一真值来源**（input.state.errors 直接取它）：
+        // 4 条，且不含对本族已不适用的 CP-VALID-001（§6.1：v1.8 起五个动作已注册）。
         assertEquals(
-            5,
+            4,
             InputCapabilities.errorsJson()
                 .size());
         assertTrue(
             InputCapabilities.errorsJson()
                 .toString()
                 .contains("CP-VALID-002"));
+        assertFalse(
+            "CP-VALID-001 是 T1 冻结期的历史形态，对本族不再适用（§6.1）",
+            InputCapabilities.errorsJson()
+                .toString()
+                .contains("CP-VALID-001"));
         assertFalse(
             "本族不新增错误码",
             InputCapabilities.errorsJson()

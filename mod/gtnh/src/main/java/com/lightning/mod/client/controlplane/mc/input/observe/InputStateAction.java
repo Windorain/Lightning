@@ -73,17 +73,23 @@ public final class InputStateAction implements ControlAction {
                     + "快照必须在客户端 tick 线程取得；非 tick 线程误用返回 CP-STATE-001（不是 ok:true 里套错误）。"
                     + "means:\"input\"，layer 为 null（输入手段与 L0/L1/L2 正交，见 input-contract.md §10）")
             .returns(
-                "implemented/family/means/runtime{mc,forge,lwjgl3ify,backend,injectors[]}/actions[]/"
-                    + "keyCatalog{name→keyCode}/keyCodeRange[?,?]/pollSurface/text{supported,ranges[],delivery,"
-                    + "unsupportedBehavior,route{world,gui}}/coordinates{space,scaledWidth,scaledHeight,displayWidth,"
-                    + "displayHeight,pixelScale,yFlip,selfCalibrated}/wheel{unit,integerOnly,sign,amountMax}/"
-                    + "consumer{chain,currentScreen,allowUserInput,displayActive,inGameHasFocus,worldChainActive}/"
+                "implemented/family/means/state{idle|holding|releasing|faulted}/"
+                    + "runtime{mc,forge,lwjgl3ify,backend,injectors[],contractVersion}/actions[]/"
+                    + "keyCatalog{name→keyCode}/keyCodeRange[?,?]（读不到时为 null）/pollSurface/"
+                    + "text{supported,ranges[],delivery,unsupportedBehavior,route{world,gui,verified,note?}}/"
+                    + "coordinates{space,scaledWidth,scaledHeight,displayWidth,displayHeight,pixelScale,yFlip,"
+                    + "selfCalibrated,selfCalibratedNote?,selfCalibration{...}}/"
+                    + "wheel{unit,integerOnly,sign,amountMax,signVerified,signNote}/"
+                    + "consumer{chain,currentScreen,allowUserInput,displayActive,inGameHasFocus,captureArmed}/"
                     + "hitSet{minSettleTicks,note}/queues{keyboardDepth,keyboardSeedBaseline,keyboardCapacity,"
                     + "mouseDepth,deliveredThisJob,deliveredThisSession}/held{count,items[{kind,id,jobId,heldTicks,"
-                    + "expiresInTicks,gameBindingPressed}]}/physical{concurrent}/lifecycle{cleanupPaths[],crash,"
-                    + "worldUnload,cancel}/limits{holdTicksMax,wheelAmountMax,minSettleTicks}/capabilities{...}/"
-                    + "thread{name,verified}/errors[]/notImplemented[]/warnings[]?。"
-                    + "失败时抛 CP-STATE-001（非 tick 线程误用，context 含 thread/requiredThread/hint）")
+                    + "expiresInTicks,gameBindingPressed}]}/physical{concurrent,mouseConcurrent}/"
+                    + "lifecycle{cleanupPaths[],crash,worldUnload,cancel}/limits{holdTicksMax,wheelAmountMax,"
+                    + "minSettleTicks}/capabilities{requiresConfirm,tier,consumerChainReadOwner,hitSetOwner,rollback,"
+                    + "wheelSignCalibration,pollSurfaceCovered}/thread{snapshotThread,requiredThread,verified,note?}/"
+                    + "errors[4 条：CP-VALID-002/CP-STATE-001/CP-EXEC-002/CP-CONFIRM-001]/"
+                    + "notImplemented[]（与契约 §11.2 同源，另附本次探针读不到才知道的动态缺口）/warnings[]?。"
+                    + "失败时抛 CP-STATE-001（非 tick 线程误用，context 含 thread/requiredThread/state/hint）")
             .example("{}")
             .since("1.8")
             .means(InputCapabilities.MEANS)

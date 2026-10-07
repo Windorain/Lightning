@@ -49,6 +49,23 @@ public final class CaptureSession {
         return holder != null;
     }
 
+    /**
+     * {@link #isArmed()} 的**不抛**形态（{@code captureArmed} 的单一实现点）。
+     *
+     * <p>
+     * 【#166 DR-12】{@code input.state} 与四个可写动作的 {@code consumer.captureArmed} 都从这里取值：
+     * 同一个量只有一处实现，且这里吞掉一切异常回 {@code false}——能力/结果面**不得**因为一次
+     * 状态读取失败而把整个响应体打断（异常在这里只意味着「判不出布防」⇒ 如实回未布防是唯一
+     * 不回滚能力的取值，且该字段在契约里是「供调用方自行决定是否在取证期间注入」的提示，不是门）。
+     */
+    public static boolean isArmedSafely() {
+        try {
+            return isArmed();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** 开场者作业 id；未开场返回 null。 */
     public static String armedByJobId() {
         Holder h = holder;

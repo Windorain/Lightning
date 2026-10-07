@@ -72,7 +72,8 @@ public final class InputKeyAction extends SteppingActionBase {
             .returns(
                 "means/semantics/layer(null)/key/keyCode/action/holdTicks/heldTicks/delivered/events/deliveredAtTick/"
                     + "queueDepthAfter/alreadyHeld/wasHeld/held{count,items[gameBindingPressed]}/autoReleased[]/released[]/"
-                    + "physicalConcurrent/consumer{chain,currentScreen,allowUserInput,displayActive,inGameHasFocus}/consumed{observed:null}")
+                    + "physicalConcurrent/consumer{chain,currentScreen,allowUserInput,displayActive,inGameHasFocus,"
+                    + "worldChainActive,captureArmed}/consumed{observed:null}")
             .example("{\"confirm\":true,\"key\":\"key.forward\",\"action\":\"down\"}")
             .example("{\"confirm\":true,\"key\":\"key.forward\",\"action\":\"tap\",\"holdTicks\":20}")
             .example("{\"confirm\":true,\"key\":17,\"action\":\"up\"}")

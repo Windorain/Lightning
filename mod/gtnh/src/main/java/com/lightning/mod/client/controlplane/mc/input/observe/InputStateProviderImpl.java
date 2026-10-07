@@ -73,8 +73,10 @@ public final class InputStateProviderImpl implements InputStateProvider {
      */
     public static final String MOUSE_DEPTH_UNOBSERVABLE = "unobservable";
 
-    /** 本族返回的错误码清单（§6.1：<b>不</b>新增码，复用既有四个）。 */
-    public static final String[] ERRORS = { "CP-VALID-002", "CP-STATE-001", "CP-EXEC-002", "CP-CONFIRM-001" };
+    /** 本族返回的错误码清单（§6.1：<b>不</b>新增码）。 */
+    // 【#166 DR-8】已删除本地字面数组：错误码的**单一真值来源**是 InputCapabilities.errorsJson()
+    // （此前这里另有一份 4 条字面表、InputCapabilities 里又有 5 条含已废弃 CP-VALID-001 的版本
+    // ⇒ 同一个量两处真相，且生产路径只走这一份、那份永远无人调）。
 
     /** 持有上限（tick；§3.2 与 {@code player.dig} 的 {@code MAX_HOLD_TICKS} 同值）。 */
     public static final int HOLD_TICKS_MAX = 1200;
@@ -168,13 +170,16 @@ public final class InputStateProviderImpl implements InputStateProvider {
         data.addProperty("implemented", Boolean.valueOf(implemented));
         data.addProperty("family", FAMILY);
         data.addProperty("means", MEANS);
+        // 【#166 DR-11】契约 §7 要求本端点**必报** state（含 faulted）：此前完全没有该字段，
+        // 态只嵌在 hint 字符串里 ⇒ 调用方无法机读「本族现在能不能接活」。
+        addState(data, runtime);
         data.add("runtime", runtimeJson(o, gaps));
         data.add("actions", actionsJson(implemented));
         data.add("keyCatalog", keyCatalogJson(o, implemented));
         data.add("keyCodeRange", keyCodeRangeJson(o, gaps));
         data.addProperty("pollSurface", pollSurfaceText());
         data.add("text", textJson(o));
-        data.add("coordinates", coordinatesJson(o));
+        data.add("coordinates", coordinatesJson(o, runtime));
         data.add("wheel", wheelJson());
         data.add("consumer", consumerJson(o, runtime));
         data.add("hitSet", hitSetJson());
@@ -186,8 +191,17 @@ public final class InputStateProviderImpl implements InputStateProvider {
         data.add("capabilities", capabilitiesJson());
         data.add("thread", threadJson(o, tickThread));
         data.add("errors", errorsJson());
-        gaps.addAll(frozenNotImplemented());
-        data.add("notImplemented", strings(gaps));
+        // 【#166 DR-9】未实现清单的唯一基 = InputCapabilities.NOT_IMPLEMENTED（与契约 §11.2 同源），
+        // 之后**追加**本次探针读不到才知道的动态缺口（去重、保序）。此前这里并入的是
+        // frozenNotImplemented() —— 一份 6 条的字面清单，于是 §11.2 / InputCapabilities /
+        // 实际输出三处条数与措辞都不同源，「实现一项删两处」的规则因此形同虚设。
+        List<String> all = new ArrayList<String>(InputCapabilities.NOT_IMPLEMENTED);
+        for (String gap : gaps) {
+            if (!all.contains(gap)) {
+                all.add(gap);
+            }
+        }
+        data.add("notImplemented", strings(all));
         if (!o.warnings.isEmpty()) {
             data.add("warnings", strings(o.warnings));
         }
@@ -319,7 +333,7 @@ public final class InputStateProviderImpl implements InputStateProvider {
      * （{@code readbackEvent}）——只有后者与 {@code input.mouse op:move} 的请求值同空间、可判等。
      * 这条口径若写错，{@code move} 的 {@code readback} 会「投递对了却对不上」（差一次翻转）。
      */
-    private static JsonObject coordinatesJson(TickObservation o) {
+    private static JsonObject coordinatesJson(TickObservation o, InputRuntime runtime) {
         InputScaleContext ctx = o.context;
         JsonObject c = ctx == null ? new JsonObject() : ctx.toJson();
         if (ctx == null) {
@@ -327,11 +341,24 @@ public final class InputStateProviderImpl implements InputStateProvider {
             c.addProperty("yFlip", InputCoordinateMath.Y_FLIP);
             c.addProperty("note", "本次未取到坐标上下文（无法实读 Display/ScaledResolution）");
         }
+        // 【#166 DR-6】顶层 selfCalibrated 与 input.mouse 的 coordinates.selfCalibrated 必须是**同一个量**，
+        // 真值只有一处（运行时最近一次 move 的读回结论）。此前这里硬编码 false ⇒ 某次 move 真的自校准
+        // 成功时，能力面仍在说 false（与已修的 L-1 同类的「同一量两处真相」）。
+        // 三态：null = 本会话尚无 move ⇒ 落 false 但**必须**同时给出说明（「未校准」≠「校准失败」）。
+        InputStateSnapshot forCalibration = safeSnapshot(runtime);
+        Boolean calibrated = forCalibration == null ? null : forCalibration.lastMoveCalibrated();
+        c.addProperty("selfCalibrated", Boolean.TRUE.equals(calibrated));
+        if (calibrated == null) {
+            c.addProperty("selfCalibratedNote", "no-move-yet：本会话尚无 input.mouse op:move 的读回结论 ⇒ false 表示「未校准」，不是「校准失败」");
+        }
         JsonObject calibration = new JsonObject();
         calibration.addProperty("readbackSource", "Mouse.getX/getY（当前光标态口径；与 getEventX/Y 同值域 = displayHeight - sdlY）");
         calibration.addProperty("tolerance", 1);
         calibration.addProperty("compareSpace", InputCoordinateMath.SPACE_EVENT_QUEUE);
-        calibration.addProperty("selfCalibrated", Boolean.FALSE);
+        calibration.addProperty(
+            "selfCalibrated",
+            calibrated == null ? "未校准（本会话尚无 move；不是校准失败）"
+                : (calibrated.booleanValue() ? "true（最近一次 move 的读回落在 ±1 内）" : "false（最近一次 move 的读回超出 ±1）"));
         calibration.addProperty("reason", "坐标换算的实机自校准归 input.mouse op:move（T2-A 的 readback）；input.state 只提供换算参数与口径");
         if (o.mouseReadable()) {
             JsonObject raw = new JsonObject();
@@ -654,24 +681,13 @@ public final class InputStateProviderImpl implements InputStateProvider {
     /** {@code lifecycle}：五条承诺路径 + 三条「不承诺」（§3.4 必须机读暴露）。 */
     private static JsonObject lifecycleJson() {
         JsonObject l = new JsonObject();
-        JsonArray paths = new JsonArray();
-        paths.add(cleanupPath("normal-completion", "promised"));
-        paths.add(cleanupPath("action-exception", "promised"));
-        paths.add(cleanupPath("step-timeout", "promised"));
-        paths.add(cleanupPath("explicit-release", "promised"));
-        paths.add(cleanupPath("process-exit", "best-effort"));
-        l.add("cleanupPaths", paths);
-        l.addProperty("crash", "not-promised");
-        l.addProperty("worldUnload", "no-hook");
-        l.addProperty("cancel", "unavailable");
+        // 【#166】路径表同样只留一处字面值：真值在能力真值表（此前本方法自带一份等价副本，
+        // 两份字面值迟早会漂——与 DR-8/DR-9 同类的「两处真相」）。
+        l.add("cleanupPaths", InputCapabilities.cleanupPathsJson());
+        l.addProperty("crash", InputCapabilities.CRASH);
+        l.addProperty("worldUnload", InputCapabilities.WORLD_UNLOAD);
+        l.addProperty("cancel", InputCapabilities.CANCEL);
         return l;
-    }
-
-    private static JsonObject cleanupPath(String id, String strength) {
-        JsonObject o = new JsonObject();
-        o.addProperty("id", id);
-        o.addProperty("strength", strength);
-        return o;
     }
 
     /** {@code limits}：与 {@link #HOLD_TICKS_MAX} 等处同源。 */
@@ -720,24 +736,26 @@ public final class InputStateProviderImpl implements InputStateProvider {
     }
 
     private static JsonArray errorsJson() {
-        JsonArray arr = new JsonArray();
-        for (String code : ERRORS) {
-            arr.add(new com.google.gson.JsonPrimitive(code));
-        }
-        return arr;
+        // 【#166 DR-8】单一真值来源：能力真值表的那一份（4 条，不含已废弃的 CP-VALID-001）。
+        return InputCapabilities.errorsJson();
     }
 
-    /** §11.2 里**属于 T2-B 观察面**的未实现/未验证项（与契约同源，实现一项删一处）。 */
-    private static List<String> frozenNotImplemented() {
-        List<String> list = new ArrayList<String>();
-        list.add("GUI 文本路由未打通（P0 实测：addCharEvent 与「键事件自带 codepoint」两条都未到达）");
-        list.add("input.key 的 codepoint 通路未验证（只有键位那一半被实机证过）");
-        list.add("read.input 读面不存在（本族唯一输入侧读面就是 input.state）");
-        list.add("作业取消能力不存在；离图/断连/关服无钩子；崩溃不承诺清理");
-        list.add(
-            "坐标换算的实机自校准只覆盖两种窗口/尺度上下文（854×480/scaleFactor 2 与 1898×1084/scaleFactor 4）；Display.getPixelScaleFactor 反射读不到（落 1.0 兜底并如实告警）⇒ HiDPI 真实像素缩放仍未校准");
-        list.add("轮询面不覆盖：Keyboard.isKeyDown / Mouse.isButtonDown 型判定不随队列注入变化");
-        return list;
+    /**
+     * {@code state}：运行时状态机当前态（契约 §7 / #166 DR-11）。
+     *
+     * <p>
+     * 真值来自 {@link InputStateSnapshot#stateName()}（运行时自己产生）；**没有**真值时不写猜值：
+     * 落 {@code null} + 说明——{@code "idle"} 是最像默认值的那个值，猜它等于把「未知」卖成「空闲」。
+     */
+    private static void addState(JsonObject data, InputRuntime runtime) {
+        InputStateSnapshot snap = safeSnapshot(runtime);
+        String name = snap == null ? null : snap.stateName();
+        if (name == null) {
+            data.addProperty("state", (String) null);
+            data.addProperty("stateNote", "当前态无真值来源（运行时未装配、快照读取失败，或本快照不提供状态）⇒ 落 null，不猜成 idle（契约 §7）");
+            return;
+        }
+        data.addProperty("state", name);
     }
 
     // ------------------------------------------------------------ 失败与工具
@@ -753,6 +771,16 @@ public final class InputStateProviderImpl implements InputStateProvider {
             Thread.currentThread()
                 .getName());
         ctx.addProperty("requiredThread", "client-tick");
+        // 【#166 DR-11】契约 §7：失败信封的 context.state 给出**当前态**。本失败路径是实例方法、
+        // 拿得到注入的运行时 ⇒ 能给就给；拿不到（未装配/快照读不到）落 null + 说明，不猜。
+        InputStateSnapshot snap = safeSnapshot(runtime);
+        String state = snap == null ? null : snap.stateName();
+        if (state == null) {
+            ctx.addProperty("state", (String) null);
+            ctx.addProperty("stateNote", "当前态无真值来源（运行时未装配或快照读取失败）⇒ 不猜成 idle（契约 §7）");
+        } else {
+            ctx.addProperty("state", state);
+        }
         ctx.addProperty("hint", "HTTP 线程不得读 MC 状态（contract.md §9）");
         err.add("context", ctx);
         JsonObject o = new JsonObject();
@@ -822,10 +850,7 @@ public final class InputStateProviderImpl implements InputStateProvider {
 
     /** 捕获会话是否布防（{@code captureArmed}；D-2 裁定：布防期间不拒输入，只如实报告）。 */
     private static boolean isCaptureArmed() {
-        try {
-            return com.lightning.mod.client.controlplane.core.CaptureSession.isArmed();
-        } catch (Throwable t) {
-            return false;
-        }
+        // 【#166 DR-12】取值点收敛到 CaptureSession（四个可写动作的 consumer.captureArmed 同源）。
+        return com.lightning.mod.client.controlplane.core.CaptureSession.isArmedSafely();
     }
 }

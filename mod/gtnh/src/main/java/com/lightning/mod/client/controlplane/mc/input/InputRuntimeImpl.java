@@ -120,7 +120,16 @@ public final class InputRuntimeImpl implements InputRuntime {
     private List<ReleasedDetail> lastReleased = new ArrayList<ReleasedDetail>();
     private final List<AutoRelease> autoReleasedLog = new ArrayList<AutoRelease>();
 
-    private boolean selfCalibrated;
+    /**
+     * 最近一次 {@code move} 的自校准结论（§2.4 第 3/4 条）。
+     *
+     * <p>
+     * 【#166 DR-6】**三态**而不是两态：{@code null} = 本会话尚无 {@code move}（未校准），
+     * {@code TRUE}/{@code FALSE} = 最近一次 move 的读回结论。此前只有 {@code boolean}（缺省 false），
+     * 于是「还没 move 过」与「move 了但对不上」在机读面上不可区分，且能力面把该量硬编码成 false
+     * ⇒ 同一个量两处真相。
+     */
+    private Boolean lastMoveCalibrated;
 
     private InputRuntimeImpl(InputHost host, InputSink sink) {
         this.host = host;
@@ -727,6 +736,33 @@ public final class InputRuntimeImpl implements InputRuntime {
         return r;
     }
 
+    /**
+     * <b>进程正常退出</b>专用的尽力释放（契约 §3.4 路径 5，{@code best-effort}）。
+     *
+     * <h2>为什么它不能直接复用 {@link #releaseAll()}</h2>
+     * {@link #releaseAll()} 带 {@link #assertOwnerThread()}：JVM shutdown hook 跑在
+     * {@code lightning-controlplane-shutdown} 线程上，而运行时的唯一写入者按 §9.3 被冻结为**客户端 tick 线程**
+     * ⇒ 退出时直接调 {@code releaseAll()} 在「真的持有按键」这一唯一有意义的场景下**必然抛**
+     * （{@code ownerThread} 已被 tick 线程绑定）。那等于「自述说 best-effort，代码却从来没有真的投递过」。
+     * 故本条显式跳过 owner 线程断言与绑定，只复用**同一份**释放实现（{@link #releaseMatching}）。
+     *
+     * <h2>诚实边界（不得据此把 §3.4 路径 5 说成承载更多）</h2>
+     * <ul>
+     * <li>退出路径上 {@code runTick} 可能已经不再跑 ⇒ 投递进队列的抬起事件**不保证被消费**；
+     * 且本设施从不触碰 SDL 物理态（§3.5 禁令）⇒ 退出后**没有任何跨进程残留需要在退出时清理**，
+     * 该路径的价值是「不把队列留在一个本设施造成的按下态里」，不是「救回用户桌面」；</li>
+     * <li>不在 tick 线程上写队列 ⇒ 与客户端线程理论上存在竞争窗口；调用方**必须**整段 try/catch
+     * 吞异常（见 {@code core/ControlPlaneServer} 的 shutdown hook），失败只 WARN、不影响退出。</li>
+     * </ul>
+     *
+     * <p>
+     * 持键表为空时它是纯 no-op（且不读任何 MC 状态）；有持键时逐条投递抬起，失败只记进 {@code faulted}
+     * （退出中不再有人读该状态）。
+     */
+    public ReleaseResult releaseAllForShutdown() {
+        return releaseMatching(null);
+    }
+
     private ReleaseResult releaseMatching(String jobId) {
         long tick = host.clientTick();
         List<ReleasedDetail> details = new ArrayList<ReleasedDetail>();
@@ -835,7 +871,8 @@ public final class InputRuntimeImpl implements InputRuntime {
             now,
             lastJobId,
             deliveredThisJobCount(),
-            deliveredThisSession);
+            deliveredThisSession,
+            lastMoveCalibrated);
     }
 
     /** {@code held.items[].jobId/heldTicks/expiresInTicks} 的真值：最近一次投递的作业累计计数。 */
@@ -858,10 +895,11 @@ public final class InputRuntimeImpl implements InputRuntime {
         private final String lastJobId;
         private final long deliveredThisJob;
         private final long deliveredThisSession;
+        private final Boolean lastMoveCalibrated;
 
         Snapshot(String consumerChain, int keyboardQueueDepth, List<String> heldKeys, List<Integer> heldButtons,
             List<InputStateSnapshot.HeldDetail> held, State state, long tick, String lastJobId, long deliveredThisJob,
-            long deliveredThisSession) {
+            long deliveredThisSession, Boolean lastMoveCalibrated) {
             this.consumerChain = consumerChain;
             this.keyboardQueueDepth = keyboardQueueDepth;
             this.heldKeys = Collections.unmodifiableList(new ArrayList<String>(heldKeys));
@@ -872,6 +910,7 @@ public final class InputRuntimeImpl implements InputRuntime {
             this.lastJobId = lastJobId;
             this.deliveredThisJob = deliveredThisJob;
             this.deliveredThisSession = deliveredThisSession;
+            this.lastMoveCalibrated = lastMoveCalibrated;
         }
 
         @Override
@@ -943,10 +982,17 @@ public final class InputRuntimeImpl implements InputRuntime {
             return heldButtons;
         }
 
-        /** 设施状态名。 */
+        /** 设施状态名（小写，与 §7 的态名同文；契约 §7 要求 {@code input.state} 必报它）。 */
+        @Override
         public String stateName() {
             return state.name()
                 .toLowerCase(Locale.ROOT);
+        }
+
+        /** 最近一次 {@code move} 的自校准结论（{@code null} = 尚无 move；#166 DR-6 的单一实现点）。 */
+        @Override
+        public Boolean lastMoveCalibrated() {
+            return lastMoveCalibrated;
         }
 
         /** 快照取的 tick。 */
@@ -1090,12 +1136,23 @@ public final class InputRuntimeImpl implements InputRuntime {
 
     /** 最近一次 {@code move} 的读回是否落在 ±1 内（自校准，§2.4 第 3/4 条）。 */
     public boolean selfCalibrated() {
-        return selfCalibrated;
+        return Boolean.TRUE.equals(lastMoveCalibrated);
+    }
+
+    /**
+     * 最近一次 {@code move} 的自校准结论，**保留「尚无 move」这一态**（{@code null}）。
+     *
+     * <p>
+     * 【#166 DR-6】{@code input.mouse} 与 {@code input.state} 两个端点的 {@code selfCalibrated}
+     * 都从这一个实现点取值（快照 {@link InputStateSnapshot#lastMoveCalibrated()} 转发它）。
+     */
+    public Boolean lastMoveCalibrated() {
+        return lastMoveCalibrated;
     }
 
     /** 记录一次 {@code move} 的自校准结论（由动作层在回读后调用）。 */
     public void recordCalibration(boolean calibrated) {
-        this.selfCalibrated = calibrated;
+        this.lastMoveCalibrated = Boolean.valueOf(calibrated);
     }
 
     /** 当前换算参数（每次现取，尺寸随窗口/界面变化）。 */

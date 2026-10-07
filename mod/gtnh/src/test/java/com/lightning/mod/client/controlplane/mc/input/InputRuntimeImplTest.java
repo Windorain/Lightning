@@ -569,6 +569,52 @@ public class InputRuntimeImplTest {
         assertTrue(captured[0] instanceof IllegalStateException);
     }
 
+    /**
+     * 【#166 DR-3 守卫】契约 §3.4 路径 5（进程正常退出 ⇒ 尽力投递抬起）必须有**真能做事的**入口：
+     * 退出钩子不在 tick 线程上，而 {@link InputRuntimeImpl#releaseAll()} 带 owner 线程断言
+     * ⇒ 直接调它在「真的持有按键」这一唯一有意义的场景下必然抛（等于自述说 best-effort、代码却从未投递）。
+     * {@link InputRuntimeImpl#releaseAllForShutdown()} 是专供退出路径的同一份释放实现（不带该断言）。
+     *
+     * <p>
+     * 本用例同时钉住两条相反的要求：**退出路径必须能释放**，且**不能**为此放宽 tick 线程纪律
+     * （{@code releaseAll()} 跨线程仍然必须抛）。
+     */
+    @Test
+    public void shutdownReleaseWorksOffTheTickThreadWithoutLooseningThreadDiscipline() throws Exception {
+        // 先在本线程投递按下并按 tick 语义绑定 owner 线程
+        rt.deliver(one(InputEvent.key("key.forward", 17, true, Integer.valueOf(0))), "j1");
+        assertEquals(
+            1,
+            rt.snapshot()
+                .heldKeys()
+                .size());
+        final ReleaseResult[] released = new ReleaseResult[1];
+        final Throwable[] refused = new Throwable[1];
+        Thread hook = new Thread(new Runnable() {
+
+            @Override
+            public void run() {
+                try {
+                    rt.releaseAll();
+                } catch (Throwable t) {
+                    refused[0] = t;
+                }
+                released[0] = rt.releaseAllForShutdown();
+            }
+        }, "lightning-controlplane-shutdown");
+        hook.start();
+        hook.join();
+        assertNotNull("退出路径不得放宽 tick 线程纪律：跨线程的 releaseAll() 仍必须抛", refused[0]);
+        assertTrue(refused[0] instanceof IllegalStateException);
+        assertNotNull("退出路径必须有真能投递抬起的入口", released[0]);
+        assertEquals("退出时的尽力释放必须真的抬起持键", 1, released[0].released);
+        assertEquals("抬起事件必须写进队列（设施能观测到的最后一步）", "key:17:up", sink.writes.get(sink.writes.size() - 1));
+        assertFalse(
+            "释放后不许留持键",
+            rt.snapshot()
+                .hasHeld());
+    }
+
     /** 未实现清单与边界声明必须能机读（T2-B 组装 `input.state.notImplemented` 取它）。 */
     @Test
     public void boundaryAndNotImplementedAreMachineReadable() {
