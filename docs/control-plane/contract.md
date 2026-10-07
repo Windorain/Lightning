@@ -58,17 +58,19 @@
 ## 4. 动作清单
 
 > **数量口径（D3 漂移防线）**：本表按引入批次分节；**权威动作数**以实机
-> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.7** 共 **39 个**动作：
-> 本节 8 个（PR-1）+ §4.1 的 9 个读面 + §4.2 的 3 个取证 + §4.4 的 6 个 L0 + §4.5 的 2 个命令通道
-> + §4.6 的 9 个 L1 + §4.8 的 1 个收尾原语 + §4.10 的 1 个捕获诊断（`capture.diag`）。
+> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.7** 共 **43 个**动作：
+> 本节 8 个（PR-1）+ §4.1 的 9 个读面（#98 的 8 + #114 的 `read.capture`）+ §4.2 的 3 个取证（PR-2）
+> + §4.4 的 7 个 L0（#99/#122）+ §4.5 的 2 个命令通道（#100）+ §4.6 的 9 个 L1（#101）
+> + §4.9 的 1 个收尾原语（#103）+ §4.7 的 3 个导出族（#102）+ §4.11 的 1 个捕获诊断（`capture.diag`）。
 > 历史上本标题曾写「v1，PR-1 交付」而表外另有动作，导致目录与文档不一致（Gitea #97 §5-D3）——
 > 新增动作时**必须**同步本节计数。
 >
-> **版本撞号裁决（#100 派发裁决 1）**：1.3 由 #98（读面）与 #99（L0）并轨占用，故本单取 **1.4**。
-> **1.6 的撞号（#103 派发裁决）**：#102（导出）与 #103 同时预定 1.6——本单只给 `core.shutdown` 用
-> `since=1.6`；合流时由调度者统一（若 #102 先合、本单后合则本单升 1.7，以 merge 时裁决为准）。
-> **1.7 的撞号（#114 派发裁决）**：#102 也预定 1.7——#114 按派发指令以 `since=1.7` 写，
-> 撞号由调度者在合流时统一。
+> **版本沿革**：1.3 由 #98（读面）与 #99（L0）并轨占用（调度者裁决）；
+> #100 取 **1.4**（撞号裁决 1）；#101 自报 1.4 与 #100 撞号，合流统一为 **1.5**；
+> #103 取 **1.6**；**收口批次裁决**：#102/#114/#122/#123 四单并行、各自开号必然撞号
+> （#114 与 #102 同报 1.7、#122 自报 1.6 与 #103 冲突），统一取 **1.7**；
+> 并禁止出现 `1.10` 这类值（版本按字符串/浮点比较，`1.10` 会排到 `1.6` 之前）。
+> 小版本只增不改义（§5）。
 
 | 动作 | 级 | 语义 |
 |---|---|---|
@@ -82,11 +84,18 @@
 | `case.run` | scene 起 | 执行用例文件：默认整跑；`segments:[...]` 按段执行。**整跑与按段共用同一实现、同一产物形态**（验收锚）。产物为 run 目录 + 观测记录 + 判据结论 |
 
 v1.3（issue #98）追加的观察面读面动作见 §4.1；v1.4（issue #100，收口T3）追加的命令通道动作见 §4.5；
+v1.5（issue #101，收口T4）追加的 L1 玩家操作见 §4.6；v1.6（issue #103，收口T6）追加的收尾原语见 §4.9；
+v1.7（收口批次，调度者裁决）追加的导出族见 §4.7（issue #102）；同一批次里**不新增动作**的契约增量
+（托管世界标记前置与 `complete` 状态机、`world.info` 的 `markerComplete`、`world.snapshot` 只接受成品）
+见 §6.1/§6.6（issue #123）；
 下表是 PR-1 的动作清单，追加不改已有语义。
 
 PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
 **#99（收口T2）追加 6 个 L0 布景原语**（`scene.*`，见 §4.4），同样只增不改上表语义。
 **#101（收口T4）追加 9 个 L1 玩家操作**（`player.*`，见 §4.6），同样只增不改上表语义。
+**#122 追加 1 个 L0 流体注入原语**（`scene.tank.fill`，见 §4.4），同样只增不改上表语义。
+**#102（收口T5）追加 3 个导出族动作**（`export.scene`/`export.registry`/`export.multiblock`，见 §4.7），
+同样只增不改上表语义；该单同时把 `cmd.exec` 的 `artifacts[]` 升级为「登记进 run 清单（带 sha256）」。
 
 ### 4.1 观察面读面动作（v1.3，issue #98）
 
@@ -145,7 +154,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 8. **`target` 参数（v1）**：仅作观察目标留痕（bbox 进观测记录），**不参与自动取景**；自动框景留待后续版本。
 9. **按内容升格的鉴权时点**：动作静态级低于内容要求时（如 scene 级 `case.run` 跑含 cameras 段的用例），鉴权期按静态级放行、**执行期**升格检查——sync 调用方得 HTTP 403 `CP-AUTH-002`，异步调用方得 failed 作业（`error.code=CP-AUTH-002`）。
 
-### 4.4 L0 布景原语（#99，「收口T2」）
+### 4.4 L0 布景原语（#99，「收口T2」；#122 追加流体注入）
 
 能力面三层口径见 #96 §4.1：**L0 原语**＝直接设定世界/实体/玩家/背包状态（布景、构造输入、常规回归）；
 **L1 玩家操作**＝经玩家路径执行；**L2**＝L0/L1 的有序编排。**L0 的产物不能当作 L1 的证据**（#96 §4.2）。
@@ -155,9 +164,10 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 | `scene.entity.spawn` | scene | 生成实体（含掉落物）。`item` 造掉落物、`entity` 造一般实体，二者互斥必居其一；可带 SNBT `nbt` |
 | `scene.entity.clear` | scene | 清除范围内实体（含掉落物）。选择条件 `box`/`entity`/`item` 取交集；`includePlayers` 默认 false |
 | `scene.player.state` | scene | 玩家游戏模式 / 生命 / 经验 / 药水效果（`before`/`after` 双快照） |
-| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给**。模组权威取物/充电两种写法（#117）：`{slot,battery:"<GT ItemList 常量>"}` 由 GT 自己的清单决定物品与 meta；`{slot,battery,charge:"full"\|"empty"\|<EU>}` 经物品自己的 IC2 `IElectricItemManager` 充放电（`charge` ⟂ `nbt`，见 §6.5）。把满充 GT 电池写进机器充电槽即「给机器供电」 |
+| `scene.inventory.write` | scene | 逐槽写入玩家背包或世界容器（`{slot,id,meta,count,nbt}`）——「拿到物品」之**给**。模组权威取物/充电三种写法（#117/#122）：`{slot,battery:"<GT ItemList 常量>"}` 由 GT 自己的清单决定物品与 meta；`{slot,battery,charge:"full"\|"empty"\|<EU>}` 经物品自己的 IC2 `IElectricItemManager` 充放电（`charge` ⟂ `nbt`，见 §6.5）；**#122 追加** `{slot,material:"<GT 材料名>",prefix:"<OrePrefixes 形态名>"}` 由 GT 自己的 ore dict 统一化路径产出物品与 meta（`material` ⟂ `id`/`battery`/`meta`）。把满充 GT 电池写进机器充电槽即「给机器供电」 |
 | `scene.weather.time` | scene | 设定世界权威时刻与天气（持续生效；`shot.multi.worldTime` 是拍摄基准，两义不同） |
 | `scene.player.pose` | scene | 瞬时传送/转向——L0 布景原语，与 #101 的 L1 真实移动互补、两义按层标注 |
+| `scene.tank.fill` | scene | **流体注入**（#122）：`{at,fluid,amount,side?}`，经 `IFluidHandler.fill` 向指定位置的机器/储罐注入流体。补的是「拿到物品」碰不到的那一半——`scene.inventory.write` 只碰 `IInventory`，而 GT 机器的流体口是内部储罐（`MTEBasicTank.mFluid`），槽位表里没有流体槽。`filled` = `fill` 的实际返回值（**部分注入如实报告**，`partial:true`）；`dryRunFillable` = 一次 `fill(...,false)` 干跑（不改状态），把「返回 0」的两种原因分开。`fluid` 接受 Forge 注册名或 GT 材料名（`_GT5U` 后缀不敏感）；`amount` 无默认值 |
 
 **共同口径（六条，全部可判定）**：
 
@@ -168,7 +178,11 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
    `S1FPacketSetExperience`（经验）/ `S1DPacketEntityEffect`（药水）/ `S08PacketPlayerPosLook`（传送）/
    `S2FPacketSetSlot`（背包槽位）/ `S3PacketTimeUpdate` + `S2BPacketChangeGameState(7,8)`（时间天气）。
    **不自造同步、不逐字段从静态数据推算回填**（§6.4 的既有禁令对 L0 同样成立）。
-3. **写入门控**：六个动作开场一律过 `CaptureControl.assertWorldWriteAllowed`——捕获会话期间被
+   `scene.tank.fill`（#122）走**模组/原版自身的注入 API** `IFluidHandler.fill`——
+   GT 的 `BaseMetaTileEntity` 自己实现它（`IGregTechTileEntity extends IFluidHandler`），
+   **不**直接写 `MTEBasicTank.mFluid` 字段（那是逐字段回填，与「给机器供电必须把电池写进充电槽
+   而不是改 EU 缓冲」同一条纪律）。
+3. **写入门控**：七个动作开场一律过 `CaptureControl.assertWorldWriteAllowed`——捕获会话期间被
    *别的*作业调用即 `CP-STATE-001`（§4.1 的既有口径）。会话开场作业自身可穿透（既有语义）。
 4. **失败显式**：未知实体/物品 id、越界坐标、越界槽位、非容器方块实体、未知药水、未知天气、
    无世界/无玩家，一律 `CP-VALID-002`（参数类，带 `context.fields`）或 `CP-STATE-001`（前置状态类），
@@ -182,8 +196,28 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
    `scene.entity.clear` 与 `scene.inventory.write` 亦然（实体与背包不入清单哈希）。
 
 **两义标注（#96 裁决 3/4 的落地）**：`scene.inventory.write` 返回 `layer:"L0"` + `semantics:"give"`；
-`scene.player.pose` 返回 `layer:"L0"` + `semantics:"teleport"`。两者的 `layerNote` 字段写明
+`scene.player.pose` 返回 `layer:"L0"` + `semantics:"teleport"`；
+`scene.tank.fill`（#122）返回 `layer:"L0"` + `semantics:"fill"`。三者的 `layerNote` 字段写明
 「与 #101 的 L1 对应动作互补而不互替」。
+
+**储罐读回（#122）**：`scene.tank.fill` 的返回值自带注入前后的 `before`/`after`（逐罐
+`{index,present,capacity,fluid,amount,empty}` + GT 侧单值读数），用例侧的读回走 `read.te` 的
+`tanks` 字段（`GtMachineDescriber` 暴露 `getTankInfo` 与 GT 侧单值读数）
+——与 `te-state-equals` 判据**同一棵树、同一读取口**。`scene.tank.fill` 是「机器里有没有这个流体」
+的证据，**不是**「玩家/管道把流体运进来了」的证据（后者属 L1/L2）。
+
+**读数口径三条（#122 实机证伪后成文，读错会造出假绿）**：
+
+1. **输入侧的权威读数是逐罐 `tanks[]`（`/tanks/tanks/<i>/amount`）**。断言「注入进去了多少」用它。
+2. **`drainableFluid`/`drainableFluidAmount` 是「输出/可排出」那一侧**，不是输入罐：
+   `MTEBasicTank.getFluid() → getDrainableStack()`（`:195-197`），
+   而 `MTEBasicMachine.getDrainableStack() → mFluidOut`（`:455-457`）。
+   实机实测：入口注 HCl 3000 后它是 `null`/`0`，配方跑完后才变成 `trichlorosilane`/`1000`。
+   **不要**拿它断言「注入成功」——0 会被误读成「没注进去」。
+3. **容量取 `/tanks/metaTileCapacity`（= MTE 的 `mTankCapacity`，LV 化学反应釜 = 16000），
+   不要取方块实体的 `getCapacity()`**——后者返回 `(int) min(MAX, getEUCapacity())`
+   （`BaseMetaTileEntity.java:1997-1999`）= **EU 缓冲容量 2048**，是一个「看起来像储罐容量」的错数字
+   （#122 实机首轮实测到的 D-1）。
 
 **SNBT 口径**：`nbt` 参数是 **SNBT 文本**（原版 `/give`、`/summon` 的写法，
 即 `net.minecraft.nbt.JsonToNBT`），**不是 JSON 对象**——两者语法相近但不同（SNBT 字符串值可裸写、
@@ -244,9 +278,21 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 `commandText`（提交原文）、`command`（归一化文本）、`root`、`sub`、`allowed`、`decision`、`tier`、`whitelistVersion`、`timeoutMs`；
 执行类另带 `status`（`ok`/`no-server`/`timeout`/`exception`）、`executedOnThread`、`serverTick`、`elapsedMs`、`reply`（回报全文）、`artifacts[]`。
 
-**产物口径（裁决 6 → #102）**：`export` / `dump` / `multiblock` 产生的文件落在 **CWD 相对路径** `structure_exports/` 下（`runClient` 下进程 CWD == `mcDataDir`，见 #97 §5-D8），**不在** cp 的 run 目录内。`cmd.exec` 因此在结果的 `artifacts[{role,path,exists,note}]` 与事件流水里**如实登记路径与存在性，但不假造 run 清单条目**。产物统一迁入 run 目录并登记哈希清单属 **#102** 的范围（本契约版本不搬迁）。
+**产物口径（裁决 6，v1.6 起由 #102 落地）**：`export` / `dump` 的产物由 `cmd.exec` **复制/登记进它自己 run**
+的 `cmd-exec/` 子目录并登记 sha256（`artifacts[{role,path,exists,registered,sha256,bytes,note}]`）——
+run 由**发起方**（`cmd.exec`）持有，落点由它给出（§4.7.2-B 的投递单）。因此 C5
+「命令通道产生的场景文件同样可发现可核对」成立，且 D2 两侧都有哈希可比。
+`multiblock` 是异步长跑（客户端 tick 在主菜单后执行），不在 `cmd.exec` 的等待窗口内，故它如实给
+`registered:false` + 原因（要它进清单请用 `export.multiblock`）。
 
-> **已知事实（如实记录，非缺陷）**：`runClient` 下服务端 `exportToFile()` 与客户端 enrich（`MeshCaptureService`）写的是**同一目录同一文件**，客户端随后覆盖服务端产物。这是 `CWD == mcDataDir` 的产物，形态依赖该巧合；换启动方式（工作目录不同）会静默产出两份不同形态的文件。收口见 #102。
+> **搬迁前的口径（#100，已废止）**：产物落 CWD 相对路径 `structure_exports/`，`cmd.exec` 只声明
+> `{role,path,exists,note}` 而不登记 run 清单条目。老路径 `structure_exports/` 在 v1.6 仍服务
+> 尚未搬迁的命令通道，其删除归 #104。
+>
+> **已知事实（如实记录，非缺陷）**：`runClient` 下服务端 `exportToFile()` 与客户端 enrich
+> （`MeshCaptureService`）写的是**同一目录同一文件**，客户端随后覆盖服务端产物。这是
+> `CWD == mcDataDir` 的产物，形态依赖该巧合；换启动方式（工作目录不同）会静默产出两份不同形态的文件。
+> cp 通道（`export.scene`）**回避这条链**（客户端一次写完，不经过网络包），从根上消掉二义。
 
 #### 4.3.5 `ExportSession` 的线程语义与互斥口径（裁决 13）
 
@@ -350,13 +396,197 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 因此移动/拾取这类需要跨 tick 收敛的动作**如实返回当前读数与 `observed`**，不强求一调到位——
 一次不成就调两次，这正是探索模式的用法。
 
-### 4.7 hermetic 纪律（起手重建世界）
+### 4.7 导出族动作（v1.7，#102，「收口T5」）
+
+落地 #96 §6.1 与 §10 C 族：把 `/sde export`（场景文件）、`/sde multiblock`（数据集）、`/sde dump`（注册表）
+三条链路<b>同批</b>搬迁为 cp 动作（裁决 5），产物统一迁入 run 目录并登记哈希清单（裁决 6）。
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `export.scene` | scene | 把 `ExportSession` 帧缓冲导出为一份场景文件并登记（`/sde export` 的 cp 等价）。**客户端 tick 线程一次写完**（不经网络包 ⇒ 无「服务端写一份、客户端覆盖一份」的二义）。形态默认 `shape:"world"` = **单帧即 N=1 的多帧文档**（R1-3 口径唯一）。帧预算在扫描前算，超限 `CP-VALID-002` 且不写产物 |
+| `export.registry` | scene | `/sde dump` 的 cp 等价：请求客户端生成三份注册表并落**本 run 目录**的 `registry/`，逐份登记（`/sde dump` 是唯一必须新增机制的一条，见下） |
+| `export.multiblock` | scene | `/sde multiblock` 的 cp 等价：枚举 → 逐台变体捕获 → 因子化编码 → 逐台信封；产物落**本 run 目录**并登记 |
+
+#### 4.7.1 产物单一归属（裁决 6）
+
+每个动作的每份产物**有且只有一个**落点 = 该动作 run 目录内的相对路径，且登记进该 run 的 `manifest.json`。
+**不存在**「原地一份 + 清单引用一份」的双态。cp 通道**不写** CWD 相对路径，也**不写**老路径
+`structure_exports/`——老路径只服务尚未搬迁的命令通道，其删除归 #104。
+
+| 动作 | 产物（run 目录内相对路径） | role |
+|---|---|---|
+| `export.scene` | `export/<name>.json` | `scene-export` |
+| `export.scene`（逐帧明细） | `export/frames/F<n>.json` | `scene-export-frame` |
+| `export.registry` | `registry/block_registry.json` / `material_registry.json` / `model_registry.json` | `registry-block` / `registry-material` / `registry-model` |
+| `export.multiblock` | `export/<slug>.multiblock.json` | `multiblock` |
+| `export.multiblock`（报告） | `export/report.json` | `multiblock-report` |
+| `export.multiblock`（数据集） | `export/_dataset/run-NNNN/**` | `multiblock-dataset` |
+| `cmd.exec`（命令产物） | `cmd-exec/<name>.json` | `cmd-scene-file` / `registry-*` |
+
+**内部件不进清单**：`export.registry` 的投递单 `registry/dump-request.json` 在消费后**删除**且**从不登记**
+——否则清单里会出现「一个指向自己的条目」这种自引用怪象。
+
+**已知影响（如实登记，裁决 4 的附带影响面）**：工作台 `ExportsListPanel`
+（`web/src/workbench/components/ExportsListPanel.vue`）读的是 `structure_exports/`，
+因此**看不到 cp 通道产物**。C1 的验收方式相应改为「经 `GET /cp/v1/artifacts/{runId}/{path}` 下载产物
+→ 喂给工作台/Wiki 解析器」（`export.scene` 结果的 `downloadPath` 就是这个 URL）。
+`SdeWebServer` 是 `/sde web` 的老设施（裁决 2 已排除它入白名单），其归宿由 #104 裁决，不在 v1.6 范围。
+
+#### 4.7.2 三条链路的目标数据流（搬迁后）
+
+**A. `export.scene`（替代服务端写 + 网络包 + 客户端 enrich 三段式）**
+
+```
+HTTP thread  → 解析/鉴权/入队（§1.8：绝不触碰 MC）
+Client thread → ActionSteppingExecutor → ExportSceneAction
+   onBegin  : ctx.beginRun("export-scene") → 读 ExportSession.bufferSnapshot()
+              （帧体 + 帧号 + 逐帧 sha256 + 世代号 + 选区 + 身份字段，全在同一临界区取走）
+              显式校验：会话/选区完整? 帧预算? expectFrames?
+   stage=scan  : ExportSceneWriter.buildDocument（唯一合并实现；形态由 shape 决定）
+   stage=bake  : MeshCaptureService.finalizeStructureJson（客户端能力，天然可调用）
+   stage=write : ArtifactStore.writeArtifact(run, "export/<name>.json", bytes, "scene-export")
+                 + 可选逐帧明细 export/frames/F<n>.json
+   onFinish : 释放（缓冲**不**被清——契约 1.6 不提供隐式清缓冲）
+```
+
+**关键事实**：`/sde export` 需要「服务端写 scan 中间态 → 投给客户端烘焙」是因为**命令跑在服务端线程**，
+而烘焙（`finalizeStructureJson`）是 `@SideOnly(CLIENT)`。cp 动作本来就跑在**客户端 tick 线程**，
+因此扫描与烘焙在同一次动作内顺序完成——这条推断由 #102 的最小实验实测确认（见证据目录）。
+
+**B. `export.registry`（唯一必须新增机制的一条）**
+
+```
+Client thread → ExportRegistryAction
+   onBegin    : ctx.beginRun("export-registry")
+                RegistryDumpDelivery.request(runId, <run>/registry, "export.registry")   ← 内存投递单
+                内部件 registry/dump-request.json 落盘（**不登记**）
+   stage=wait-client : 等 ExportBundleClient.tickConsumePendingDumpIfAny 消费（客户端 tick 轮询）
+   stage=verify      : 三份存在 + 非空 + 可解析（有 schemaVersion）
+   stage=register    : 逐份 registerArtifact（role registry-*）
+   onFinish   : 释放未消费的投递单（否则一次超时会让后续调用永远撞 CP-BUSY-001）
+```
+
+**★ 反模式（不要这么做）**：不要设计成「`/sde dump` 自己开一个 run」。命令通道跑在 `Server thread`，
+它**没有** `ActionContext`/`JobHandle`，拿不到 runId 也开不了 cp run；强行开 run 会产出「不属于任何
+cp 作业」的孤儿 run，违反 §1.8 与 #96 §8.7。正确形态是 **run 由发起方持有**：
+
+- cp 通道：`export.registry` 开 run → 投递单指向该 run → 客户端写进去 → 动作登记；
+- 命令通道：`cmd.exec {command:"/sde dump"}` → `cmd.exec` 开 run（`caseId="cmd-exec"`）→ 投递单指向该 run
+  → 产物同样进清单（C5 达成），且两条通道写的是**同一个写出体**
+  （`ExportBundleClient.writeFullRegistryDump`），满足 D2。
+
+**投递单优先序**：内存单槽**优先**，老文件路径 `structure_exports/pending_dump.json` **兜底**
+（只服务尚未搬迁的命令通道）。两条路都收敛到同一个写出体。
+
+**C. `export.multiblock`（复用既有执行体，只改落点与登记）**
+
+```
+Client thread → ExportMultiblockAction（步进）
+   onBegin  : ctx.beginRun("export-multiblock")
+              RunConfig.outputRootOverride = <run>/export
+   export   : MultiblockExportRunner.run(mc, rc)   ← 与 /sde multiblock 同一执行体
+              （含 T1.3 数据集，同样落 run 目录：cap.outputRootOverride）
+   register : 逐台信封（multiblock）/ report.json（multiblock-report）/ 数据集（multiblock-dataset，按 dataset 档位）
+```
+
+**主菜单下也能跑**：捕获路径自带 `ProbeDummyWorld`（不进真实世界），与既有
+`MultiblockExportAutomation` 的行为一致——自述里写明这一点，不假装要求世界。
+
+**产物字节幂等**：产物**不含** `runId`/时间戳/绝对路径（格式契约硬约束，
+`docs/contracts/format-multiblock-doc.md` §6.3），故两次运行产物可逐字节比对（A3）。
+
+#### 4.7.3 帧预算（C6）
+
+`export.scene` 两档预算，都在**扫描之前**算（选区尺寸 × 帧数即可推算体积），超限一律 `CP-VALID-002`
++ `context.fields`，**不写任何产物**——不静默截断、不写爆：
+
+| 预算 | 参数 | 默认 | 绝对上限 | 超限 context |
+|---|---|---|---|---|
+| 帧数 | `maxFrames` | **64** | **256**（= `SdeServerRecordScheduler.MAX_CONSECUTIVE_RECORD_TICKS`） | `fields[field=frames]` = 「实际 N 帧 > 上限 M（不静默截断）」 |
+| 体素 | `maxCells` | **2,000,000** | 48³×64 | `fields[field=maxCells]`（单帧与总量分别校验） |
+
+`context` 另含可复算口径：`frames`/`maxFrames`/`volumePerFrame`/`volumeTotal`/`maxCells`/`computed`（算式文本）。
+
+**为什么必须扫描前算**：`frameJson` 存的是每帧一份完整 scan JSON 字符串，导出瞬间内存约 3 倍膨胀
+（帧字符串 + 帧对象树 + 合并文档）。256 帧 × 大型选区足以打爆堆。
+
+`export.multiblock` 的预算**沿用既有实现**（不新造）：`globalBudgetMs`（默认 4h）是**业务预算**
+（超时后剩余机器进 `failures[]`，不静默跳过）；`maxVariantsPerMachine`（默认 20000）是单台安全兜底，
+超限按契约 tierSample 抽样 + 必要时收窄通道域，产物 `notes` 如实记录真实域。
+`totalTimeoutMs`/`stageTimeoutMs` 是**作业看门狗**，与业务预算分工明确。
+
+#### 4.7.4 形态统一（R1-3，派发裁决 5）
+
+`export.scene` 的 `shape` 参数（`world` | `structure` | `auto`）：
+
+- **默认 `world`**：恒 `{id,mode,frames[],playback}`，**单帧即 N=1 的多帧文档** ⇒ C1（单场景文件）
+  与 C2（多帧）产出的是**同一种文件**、共用一条消费方解析路径；
+- `structure`：恒裸单结构（仅允许单帧）。**注意两态不可互替**——`liftBlockPaletteToRoot`
+  （跨帧调色板全局去重）只在 World 分支做；
+- `auto`：旧隐函数（`{0}` → 单结构；否则 World）。**仅命令通道 `/sde export`** 用于逐字节保留既有行为。
+
+搬迁前该判据是**帧号的隐函数**，`setframe 5 后 record 一次`（N=1 但键=5）会产出多帧形态——
+调用方无法从参数预知产物是哪种文件，C1 与 C2 可能各自绿却是两种文件（假绿）。本契约把它显式化。
+完整字段表见 [format-scene-file.md](../contracts/format-scene-file.md)。
+
+#### 4.7.5 C3「同会话同缓冲」判据
+
+`ExportSession` 是进程级单例，`frameJson` **从不因 `startSession`/`endSession` 清空**
+（两者只翻一个 boolean）⇒ **「同会话」不可由 `inSession` 判定**，必须靠：
+
+1. **动作侧**：`export.scene` 在 `onBegin` 经 `ExportSession.bufferSnapshot()` 在**同一临界区**取走
+   帧体 + 帧号 + 逐帧哈希 + 世代号 ⇒ 产物内部自洽（不会出现「帧体是新的、哈希是旧的」）；
+2. **产物侧**：cp 通道写 `provenance` + `exportId`（命令通道不写）——
+   全部 `frames[i].exportId` 必须彼此相等且等于根级 `exportId`；
+   `provenance.frameSha256` 必须与导出前经 `export.session` 读到的逐帧哈希同源同序；
+3. **调用方侧**：`expectFrames` 参数（显式声明这次导出应包含哪些帧）不符即 `CP-STATE-001`，
+   带 `expected`/`actual`/`extra`/`missing`。
+
+**负对照构造**（C3 判红的验收方式）：动作 A 录 F0..F2 并导出；动作 B（**跨次动作**）再录 F9；
+B 导出时声明 `expectFrames:{frames:[0,1,2]}` ⇒ 判红（`extra:[9]`）。
+**不要**用 `start`/`end` 之间构造负对照——缓冲不清空，那样构造不出「跨会话」。
+
+#### 4.7.6 `case.run` 的 `export` 段（C4 同 run 纪律）
+
+C4 要求「导出件、实拍、观测记录、世界清单哈希**同一 run**，且该 run 内世界清单哈希唯一」。
+若导出只能在用例之外单独调 `export.scene`，它必然落在**另一个** run 里——该判据对导出件就永远不成立。
+因此 `case.run` 增加 `export` 段（**v1.6 起**）：
+
+```jsonc
+{
+  "export": [
+    { "action": "export.scene", "params": { "name": "demo", "shape": "world" } }
+  ]
+}
+```
+
+- **段位**：`world → capture → build → read → export → cameras → criteria → evidence`
+  （导出在 `read` 之后、`cameras` 之前：拍摄会覆写投影/光照，不该影响导出件反映的世界状态）；
+- **前缀限制**：段里只接受 `export.*` 动作；
+- **不声明落点**：段里**不**接受 `path`/`role`——落点由导出动作决定，声明它会产生第二处真相。
+
+#### 4.7.7 D2 适用范围（补充裁决 X-11）
+
+双通道一致性**只适用于有命令孪生的 `/sde` 承重族动作**——即本节的三个：
+
+| 动作 | 命令孪生 | 一致性为何机械成立 |
+|---|---|---|
+| `export.scene` | `/sde export` | 共用 `ExportSceneWriter`（唯一合并与序列化实现） |
+| `export.registry` | `/sde dump` | 共用 `ExportBundleClient.writeFullRegistryDump`（唯一写出体） |
+| `export.multiblock` | `/sde multiblock` | 直接调 `MultiblockExportRunner.run`（同一执行体） |
+
+**其余动作在自述与验收中标注「D2 不适用」**，不强行造比对。比对口径见
+[dual-channel-consistency.md](dual-channel-consistency.md) §2.2：
+**不做文件逐字节比对**——解 Envelope → 取 inner → 语义子树规范化 JSON 的 sha256
+（gzip 头含 MTIME，且 cp 通道多了 `provenance`）。
+
+### 4.8 hermetic 纪律（起手重建世界）
 
 见 case-file.md §8.8。要点：**验收类固定程序的第一次世界写动作必须是 `world.rebuild`（`void:true`）**，
 不得在既有世界上续跑。`case.run` 的 `world` 段与之是**同一实现**（§6.3），二者语义不冲突。
 L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**，不能替代起手重建。
 
-### 4.8 无人值守收尾原语（v1.6，#103，「收口T6」）
+### 4.9 无人值守收尾原语（v1.6，#103，「收口T6」）
 
 | 动作 | 级 | 语义 |
 |---|---|---|
@@ -403,7 +633,7 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 **不许编入固定程序**：本动作会让本作业后续段不再执行，`case.run` 的 `action` 段一律拒绝它
 （`CaseValidator.ACTION_FORBIDDEN`）——收尾由驱动在**整跑结束后**单独发起。
 
-### 4.9 L2 编排段（v1.6，#103）
+### 4.10 L2 编排段（v1.6，#103）
 
 `case.run` 的用例文件新增通用 `action` 段（**段**的扩充，不是新动作）：逐条执行用例声明的任意
 **同步** cp 动作，产物落 run 目录，`expect` 非空时当场逐步断言。段序
@@ -415,11 +645,11 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 `scene.*`（L0）与 `player.*`（L1）一步也进不了固定程序——「L2 = 有序编排」这句话在代码上没有落点。
 **没有它，`tutorials/` 的教程复现程序无法表达。**
 
-### 4.10 捕获通道自证诊断（v1.7，#114，「V4 职责迁移」）
+### 4.11 捕获通道自证诊断（v1.7，#114，「V4 职责迁移」）
 
 | 动作 | 级 | 语义 |
 |---|---|---|
-| `capture.diag` | observe | **捕获通道自证诊断的布防/撤防与 drain-dump**：`arm:true`（默认）布防录窗 + 诊断会话；`arm:false` 撤防（**不清计数、不清 drain 汇**）；`dump:true` 把 TESR 录窗 drain 到的实录几何装配成 web V2 场景文档落 run（`capture/diag-dump.json`，登记 sha256 进清单）。**三态会话处置**：`dump:true` 且未显式给 `arm` 时缺省是 `unchanged`——既不重新布防（会清零抹掉现场）也不撤防（会停掉正在进行的采集），只读已采到的证据 |
+| `capture.diag` | observe | **捕获通道自证诊断的布防/撤防与 drain-dump**：未给 `arm` 时缺省布防录窗 + 诊断会话（**例外**：`dump:true` 且未给 `arm` ⇒ 缺省「不动」`unchanged`——该缺省**取决于调用形态**，故 `arm`/`reset` 刻意不声明 `default`，实际生效值由返回值 `sessionMode` 机读）；`arm:false` 撤防（**不清计数、不清 drain 汇**）；`dump:true` 把 TESR 录窗 drain 到的实录几何装配成 web V2 场景文档落 run（`capture/diag-dump.json`，登记 sha256 进清单）。**三态会话处置**：`dump:true` 且未显式给 `arm` 时缺省是 `unchanged`——既不重新布防（会清零抹掉现场）也不撤防（会停掉正在进行的采集），只读已采到的证据 |
 
 **三态会话处置的必要性（实机擒获的缺陷）**：`sessionMode` 有 `arm` / `disarm` / `unchanged` 三个取值，因为「dump 时该怎么办」有第三种正确答案。若 `{"dump":true}` 沿用 `arm:true` 的缺省，它会**顺手重新布防**并因 `reset` 缺省为 true 而清零计数——调用方以为只是把已采到的几何落盘，实际把刚采到的现场抹了；反过来把缺省改成 `arm:false` 同样错——那会把**正在进行的采集停掉**。故缺省必须是「不动」（`unchanged`，返回值里 `sessionTouched:false` 如实回报），`reset` 缺省随之 = `(sessionMode == arm)`。两条缺省规则都是纯函数（`CaptureDiagAction.resolveSessionMode` / `resolveResetDefault`），可离线逐值锁死。
 
@@ -465,19 +695,32 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 
 ## 6. 托管世界规则（C4 落地）
 
-1. 控制面只操作**托管世界**：存档目录名以 `cp_` 前缀且内含 `cp_world.json`（`{schema:"lightning.cp-world/1", seed, void:true, createdBy}`）。对非托管世界的一切写操作拒绝（`CP-STATE-001`）。
+1. 控制面只操作**托管世界**：存档目录名以 `cp_` 前缀且内含 `cp_world.json`（`{schema:"lightning.cp-world/1", seed, void:true, complete, createdBy}`）。对非托管世界的一切写操作拒绝（`CP-STATE-001`）。
+   - **标记前置与 `complete` 状态机（v1.7，#123）**：标记在**世界建好之后立刻**写（带 `complete:false`），构建全部成功后改写为 `complete:true`。理由是修复前标记只在最末阶段写，build 阶段失败即留下「有世界文件、无标记」的残留，**没有任何 API 能清掉**（#117 段二 D-2，只能手工删目录）。
+   - **两个判据必须分清**（这是本节的核心，消费方一律照此判读）：
+     | 判据 | 含义 | 消费点 |
+     |---|---|---|
+     | **有标记**（不论 `complete`） | 「曾经开始过」⇒ **可以删、可以重建** | `assertDeletable`（删除二次确认）、`world.rebuild` 的前置检查、`world.rollback` |
+     | **`complete:true`** | 「构建完成的成品」⇒ **可以当成品复用** | `world.snapshot` 的整目录复制 |
+   - **`complete:false` 的语义**：**「曾经开始过、可以删可以重建，但不得当作构建完成的世界复用」**——场景可能只铺了一半（build 段中途失败）、TE 补全可能未完成、场景清单可能缺失或过期。拒绝复用时错误理由必须分得开：无标记 = 「非托管世界」（安全拒绝），有标记但未完成 = 「构建未完成的世界」（可用性拒绝，提示重跑重建即可修好）。
+   - **安全属性不回退（负对照）**：无标记的目录仍然**一律拒绝**删除与重建前置检查，修法放宽的只是「带标记但未完成」。
+   - **向后兼容**：本字段引入前的标记无 `complete` 键（那时的标记只在构建完成后才写），故**缺键按 `true` 读**；形态坏掉的取值（null/字符串/数字）按**未完成**读（失败显式，不猜）。
+   - **只读暴露**：`world.info` 的 `markerComplete` 给出该世界是否为构建完成的成品（`managed`/`markerPresent` 仍只回答「是不是托管目录」）。
 2. **虚空世界**：`WorldType.FLAT` + 空层预设（无基岩无土层），固定种子；构建基点由用例文件给定。
 3. **幂等重建**：`world.rebuild` 对同一用例定义产生相同世界；场景构建步骤以「清场（托管区域 setBlockToAir）→ 放置 → TE 补全 → 静置」为固定序。**时序陷阱（PR-3 实证）**：AE2 空缆块会在首个 tick 自毁（`TileCableBus.onReady`）——用例中缆块的 `block` 步与其 `te` 步之间**不得插入 `wait`/`clear` 等跨 tick 步骤**，te 步必须紧随同 tick 执行（completer 对缺中心缆报 CP-STATE-001 兜底）。
 4. **TE 状态补全**（#55「设」第五项）：仅限场景构建阶段、捕获开始之前；必须经模组自身权威同步路径（如 `markBlockForUpdate` 触发 S35 description packet 摄取，或模组自己的 `initialize`/`addPart` 等 API）；**禁止**逐字段从静态数据推算回填。补全器按族注册（接口 `TeCompleter`），默认实现覆盖原版 TE；LP/AE2 族补全器随锚点场景交付。
 5. **补全器的权威放置职责（PR-3 明确）**：当模组的方块需要构造上下文时（LP 通用管块需 `createPipe`/`placePipe`、AE2 部件需 `addPart` 到既有缆、GT 机器方块需 `ItemMachines.placeBlockAt` 才会建 MetaTileEntity），`te` 步的 completer 经**模组自身放置 API** 完成放置与补全；此时 `params` 声明的是**放置输入**（物品 id/朝向/面），不是 NBT 逐字段回填——该区分必须在 completer 类注释写明。**v1.3 注册表**：`vanilla` / `lp-pipe` / `ae2-part` / `gt-machine`（#117 追加，同一族名同时注册补全器与描述器）。
    - **补全器必须自带放置后验证**：`complete()` 返回 true 必须等价于「世界上真有一个可 tick 的模组方块实体」。反例（#117 的缺陷本体）：GT 机器用 `world.setBlock` 直铺只会得到一个 `mID == 0` 的空壳，其 `blockId`/`meta`/TE `class` **与真机器完全相同**——即 `world-hash-equals` 对「空壳 vs 可运行机器」是盲的。故 `gt-machine` 放置后读回 `getMetaTileID()`/`getMetaTileEntity()`，不符即 `CP-EXEC-001`；`GtMachineDescriber` 把同两项（外加 `shell` 布尔）暴露给 `read.te` 与 `te-state-equals`，负对照只能靠它判别。
    - **充电/供电一类「模组状态注入」一律经模组自身 API**：GT 电池的充电状态存在 NBT 键 `GT.ItemCharge` 上，手写它即 §6.4 禁止的逐字段回填；`scene.inventory.write` 的 `charge` 走物品自己的 IC2 `IElectricItemManager`（GT `MetaBaseItem` 自实现之），并显式拒绝 `charge` 与 `nbt` 同时出现。**给机器供电的正确形态是把满充电池写进机器充电槽**（GT 自己的 tick 从槽里取电），而不是直接改机器的 EU 缓冲字段。
-6. 世界快照与回滚范围**包含** TE 补全后的状态。
+   - **流体注入同理（#122）**：`scene.tank.fill` 走 `IFluidHandler.fill`（1.7.10 的标准流体交互入口，GT 的 `BaseMetaTileEntity` 自实现之），**不**直接写 `MTEBasicTank.mFluid` 字段。走 `fill` 的额外好处是 GT 自己的门槛全部照常生效（机器是否已 tick 起 `mTickTimer > 5`、输入面是否合法 `isLiquidInput(side)`、该流体是否被这台机器的配方表接受 `isFluidInputAllowed → getRecipeMap().containsInput`、容量与既有流体是否同种），本动作只如实报告它返回的数字。**`fill` 的返回语义是「实际注入了多少 mB」**，故 0 与部分注入都是正常返回值：本动作对 0 报 `CP-EXEC-001`（附候选原因与前后读数，不让「一点没进去」伪装成成功），对部分注入如实返回 `filled`/`partial:true`/`notFilled`（容量不足是正常场景，判红会让「尽量灌满」无法表达）。
+   - **物品形态同理（#122）**：配方输入绝大多数是**材料形态**（三氯硅烷配方要 `dust × Silicon`），而 `ItemList` 里没有 `Silicon` 这类常量。`scene.inventory.write` 的 `material`+`prefix` 因此走 GT 自己的 `OrePrefixes.getPrefix(name)` + `Materials.get(name)` + `GTOreDictUnificator.get(prefix, material, amount)`——**与 GT 配方加载器同一路径**，故「用例投进去的东西」与「配方认的东西」不可能不一致；`material` ⟂ `id`/`battery`/`meta`（meta 是「材料子 id + 形态位」编码出来的实现细节，手写它等于绕过模组路径）。
+6. 世界快照与回滚范围**包含** TE 补全后的状态。**因此 `world.snapshot` 只接受 `complete:true` 的世界**（v1.7，#123）：失败残留的场景可能只铺了一半，拍成快照会被 `world.rollback` 当作「期望态」扶正，判据再也看不见那个缺口。
 7. **玩家稳定化**：虚空世界进图后允许对玩家做最小稳定化（传送到构建基点上方、创造飞行，防坠亡卡死无人值守流程）；只动玩家实体，不进场景清单与哈希。**L0 的 `scene.player.pose`（§4.4）是这条的显式化对应物**——同一件事由调用方按需触发，而不是只在进图时隐式做一次。
 8. **离图阻塞**：`mc.loadWorld(null)` 在 tick 线程内阻塞至集成服停机（原版「保存并退到标题」同路径），客户端会冻结数秒到数十秒——动存档目录前必须保证 region 句柄释放，这是 v1 的取舍。
 9. **hermetic 纪律（#99 成文）**：验收类固定程序的第一次世界写动作必须是 `world.rebuild`（`void:true`）；
    本节的 `case.run` 的 `world` 段与之**共用同一实现**（`WorldRebuildRunner`），语义不冲突。
    完整规则与逐条对齐表见 case-file.md §8.8；L0 的轮内清场原语**不构成** hermetic 保证（§4.6）。
+10. **重建固定序（v1.7 起含标记前置）**：离开 → 删除（二次确认）→ **标记前置（写 `complete:false`）** → 建/进世界 → build 段 → 静置 → **标记收口（改写 `complete:true`）** + 写场景清单。前置点必须在**进世界之前**：`launchIntegratedServer` 一启动集成服就会写 `level.dat` 与 region，前置点若在其之后，仍会漏出「有世界文件、无标记」的窗口（正是 #123 要消灭的状态）。`case.run` 的 `world` 段落在 `MARKER` 阶段**不收口**（`markComplete=false`），由随后的 build 段收口——否则 build 失败会留下「标记说完成、场景只铺了一半」的世界。
 
 ## 7. 观测记录
 

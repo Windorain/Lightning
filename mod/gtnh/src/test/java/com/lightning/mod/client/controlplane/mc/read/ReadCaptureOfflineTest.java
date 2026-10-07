@@ -843,7 +843,7 @@ public class ReadCaptureOfflineTest {
     public void registeredActionCountMatchesDocumentedNumber() {
         ActionRegistry registry = new ActionRegistry();
         ActionRegistrar.registerAll(null, registry);
-        assertEquals("契约 1.7 的动作数（ActionRegistrar/contract.md 的注释写的是 39，两处必须一致）", 39, registry.size());
+        assertEquals("契约 1.7 的动作数（ActionRegistrar/contract.md 的注释写的是 43，两处必须一致）", 43, registry.size());
     }
 
     /** 契约版本必须 ≥ 任一动作的 since（否则自述端点会给出自相矛盾的目录，D1/D3 判红）。 */

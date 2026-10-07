@@ -14,6 +14,7 @@
   "build":    [ ... ],                   // 可空：场景构建步骤
   "read":     [ ... ],                   // 可空（v1.3，issue #98）：读面步骤
   "action":   [ ... ],                   // 可空（v1.6，issue #103）：L2 编排步骤（任意 cp 动作）
+  "export":   [ ... ],                   // 可空（v1.7，issue #102）：导出步骤
   "capture":  { ... },                   // 可空（PR-2 起）：扫描与捕获参数
   "cameras":  [ ... ],                   // 可空（PR-2 起）：机位表
   "criteria": [ ... ],                   // 必填，至少一条：判据与阈值
@@ -52,7 +53,7 @@ world → capture → build → read → action → cameras → criteria → evi
 |---|---|---|
 | `clear` | `from:[x,y,z], to:[x,y,z]` | 托管区域清场（setBlockToAir） |
 | `block` | `at:[x,y,z], id:"minecraft:stone", meta:0` | 放置方块 |
-| `te` | `at:[x,y,z], completer:"vanilla"\|"lp-pipe"\|"ae2-part"\|"gt-machine", params:{...}` | TE 状态补全（权威同步路径，contract.md §6.4）；`completer` 必须在注册表中。`gt-machine`（#117）的 `params` 是放置输入：`{machine:"Machine_LV_ChemicalReactor"}`（GT `ItemList` 常量名，首选）或 `{item:"gregtech:gt.blockmachines", meta:421}`（显式 MetaTileEntity id，须 > 0），可选 `side`（DOWN\|UP\|NORTH\|SOUTH\|WEST\|EAST，默认 UP）。补全器自带放置与放置后读回验证（读回 `mID == 0` 的空壳即 `CP-EXEC-001`），故用例**不要**先用 `block` 步铺 GT 机器方块；给机器供电用 §3 之外的 `scene.inventory.write`（`battery` + `charge:"full"` 写进机器充电槽） |
+| `te` | `at:[x,y,z], completer:"vanilla"\|"lp-pipe"\|"ae2-part"\|"gt-machine", params:{...}` | TE 状态补全（权威同步路径，contract.md §6.4）；`completer` 必须在注册表中。`gt-machine`（#117）的 `params` 是放置输入：`{machine:"Machine_LV_ChemicalReactor"}`（GT `ItemList` 常量名，首选）或 `{item:"gregtech:gt.blockmachines", meta:421}`（显式 MetaTileEntity id，须 > 0），可选 `side`（DOWN\|UP\|NORTH\|SOUTH\|WEST\|EAST，默认 UP）。补全器自带放置与放置后读回验证（读回 `mID == 0` 的空壳即 `CP-EXEC-001`），故用例**不要**先用 `block` 步铺 GT 机器方块；给机器供电用 §3 之外的 `scene.inventory.write`（`battery` + `charge:"full"` 写进机器充电槽）；**给机器注流体用 `scene.tank.fill`**（#122，contract.md §4.4；`scene.inventory.write` 只碰 `IInventory`，碰不到 `IFluidHandler`）——读回走 `read.te` 的 `tanks` 字段 |
 | `wait` | `ticks:N` | 等待 N tick（同步/渲染稳定） |
 
 坐标三种写法，一律规范化为绝对坐标：绝对数组 `[x,y,z]`；`"@base"` + 同层 `offset:[dx,dy,dz]`；字符串 `"base+[dx,dy,dz]"`。`world.base` 只接受绝对数组。构建完成后运行器自动做：TE 补全（`te` 步声明的）→ `markBlockRangeForRenderUpdate` → 静置 `settleTicks`。
@@ -158,6 +159,46 @@ world → capture → build → read → action → cameras → criteria → evi
 编排段可以把 L0（`scene.*`）与 L1（`player.*`）混编，但**两层的结论不互替**：
 L0 的产物不能当 L1 的证据。用例作者应在 `label` 或资产索引行里写明「本程序在哪一层取得结论」，
 判据的 id 也应带上层前缀（`l0-*`/`l1-*`）以便机械区分。
+
+## 3.3 export 段（导出步骤，v1.7 / issue #102）
+
+每步一个对象：`{action:"export.scene", params:{...}}`。执行该导出动作（契约 §4.7 的 `export.*`），
+产物落**本用例的 run 目录**并登记哈希——**落点由导出动作决定，段里不声明**。
+
+```jsonc
+"export": [
+  { "action": "export.scene",
+    "params": { "name": "lp-pipe-row", "shape": "world", "frames": "all" } }
+]
+```
+
+**为什么需要独立一段（C4「同 run 纪律」）**：C4 要求「导出件、实拍、观测记录、世界清单哈希**同一 run**，
+且该 run 内世界清单哈希唯一」。若导出只能在用例之外单独调 `export.scene`，它必然落在**另一个** run 里
+——那么「同一 run 内世界清单哈希唯一」这条判据对导出件就永远不成立。
+
+**段位**：`world → capture → build → read → action → export → cameras → criteria → evidence`。
+`export` 在 `action` 之后、`cameras` 之前——先编排与读世界、再固化产物、最后拍摄。
+顺序的理由不是风格：`cameras` 段会覆写投影/光照/渲染状态，导出件该反映的是「本 run 构建出的那个世界」，
+而不是「拍摄过程干预后的世界」。
+
+**校验口径（`case.validate` 与 `case.run` 同源）**：
+
+1. `action` 必填且**必须**以 `export.` 开头——导出段只放导出动作（与 `read` 段限 `read.*` 同一思路：
+   段语义靠前缀静态可查）。动作是否真的已注册由 `case.run` 的执行期判定（`CP-VALID-001`）。
+2. 段里**不**接受 `path`/`role`（未知字段即 `CP-VALID-002`）：落点由导出动作决定，
+   段里再声明一个会产生**第二处真相**（已实测过的形态：声明一个落点而动作写到别处）。
+3. 空 `export` 段给 warning（不是错误）——不是每个用例都要产导出件；但该 warning 会点明
+   C4 的后果，避免缺口无声。
+4. 导出动作**可以是步进动作**（与 `read` 段相反）：`export.scene` 跨阶段推进，且它在 `onBegin`
+   **一次性取走**帧缓冲快照，因此跨 tick 不引入撕裂。`case.run` 的 `export` 段在段内循环推进到完成
+   （上限 `MAX_EXPORT_STEPS`），产物因此落**用例自己的 run 目录**（不是子作业的 run）。
+5. 产物落点与 role 见 contract.md §4.7.1；判据用 `artifact-exists` / `artifact-nonempty` /
+   `json-field` 指向 `/cp/v1/artifacts/{runId}/{path}` 里的那份文件。
+6. 变体补丁可以改 `export` 段的 `params`（负对照「导出形态/帧集变了判据该红」的基础）。
+
+> **`frames` 与 `expectFrames`**：`frames:"all"` 导出缓冲内全部帧；`expectFrames:{frames:[0,1,2]}`
+> 是 C3「同会话同缓冲」的调用方侧判据——不符即 `CP-STATE-001`（带 `extra`/`missing`），
+> 拦的正是跨会话拼接。完整口径见 [format-scene-file.md](../contracts/format-scene-file.md) §6。
 
 ## 4. capture / cameras 段（PR-2 起生效）
 
@@ -329,6 +370,16 @@ role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直�
 
 **留痕**：`world.rebuild` 的删除阶段落 `world-rebuild` 事件（含 folder/seed），与
 `sceneManifestSha256` 一同构成「本轮确实从新世界开始」的可审计证据链。
+**标记前置另落两条 `world-rebuild` 事件**（v1.7，#123）：`标记已前置（构建中）`（`complete:false`）
+与 `托管世界重建完成` —— 于是「这一次构建有没有走到收口」在事件流水里可判，
+不必去读盘上的标记文件。
+
+5. **「重建完成」由标记的 `complete` 表达（v1.7，#123）**：`case.run` 的 `world` 段**不**收口
+   （`complete:false`），由随后的 `build` 段在场景铺好、清单落盘后收口（`complete:true`）；
+   用例没有 `build` 段时 `world` 段自己收口。故「世界是不是构建完成的成品」以 `cp_world.json` 的
+   `complete` 为准（`world.info` 的 `markerComplete` 可直接读），**不**以「跑没跑过 world 段」为准。
+   `complete:false` 的世界可删可重建但不可复用（不得被 `world.snapshot` 拍成快照）——
+   完整语义与两个判据见 contract.md §6.1/§6.6。
 
 **边界（如实标注）**：本节管**世界**的 hermetic（方块/TE/实体所在的那份存档）。
 **玩家侧状态**（背包、经验、药水效果、飞行）在 1.7.10 落 `<saves>/<folder>/playerdata/`，
