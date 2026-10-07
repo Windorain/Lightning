@@ -107,7 +107,32 @@ function fatal(msg, extra = {}) {
   finish(2, { fatal: msg });
 }
 
-// --------------------------------------------------------------------------- 前置（无人值守纪律）
+// --------------------------------------------------------------------------- 前置（无人值守纪律 + 设施配置）
+
+/**
+ * 读控制面配置（`server.json` / `tokens.json`）。
+ *
+ * <p>这两份文件由 runClient 起来后才写，因此**必须在 main() 里、在无人值守前置之后**读：
+ * 原先写在模块顶层（import 期）会先于任何判据执行，文件缺失时抛未捕获的 ENOENT 栈，
+ * 既不是 exit 2 也没有可读的「前置不满足」报告——README 里「不满足时 exit 2 且不进入任何步骤」
+ * 那句在「客户端还没起来」这个最常见的离线场景下反而是假的。
+ */
+function loadFacilityConfig() {
+  const cpDir = path.join(mcDir, 'controlplane');
+  const readJson = (name) => {
+    const p = path.join(cpDir, name);
+    if (!fs.existsSync(p)) {
+      fatal(`找不到 ${p}：控制面尚未在本树写过配置（runClient 还没起来？先点火再跑本驱动）`, { path: p });
+    }
+    try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
+    catch (e) { fatal(`${p} 不是合法 JSON：${e.message}`, { path: p }); }
+  };
+  const srv = readJson('server.json');
+  const tk = readJson('tokens.json').tokens ?? {};
+  if (!srv.port) fatal('server.json 缺 port：无法定位控制面', { srv });
+  if (!tk.observe || !tk.scene) fatal('tokens.json 缺 observe/scene 令牌：无法发请求', { tokenTiers: Object.keys(tk) });
+  return { srv, tk };
+}
 
 function assertUnattendedDiscipline() {
   const options = path.join(mcDir, 'options.txt');
@@ -129,10 +154,16 @@ function assertUnattendedDiscipline() {
 
 // --------------------------------------------------------------------------- HTTP
 
-const server = JSON.parse(fs.readFileSync(path.join(mcDir, 'controlplane', 'server.json'), 'utf8'));
-const tokens = JSON.parse(fs.readFileSync(path.join(mcDir, 'controlplane', 'tokens.json'), 'utf8')).tokens;
-const BASE = `http://${server.bind ?? '127.0.0.1'}:${server.port}/cp/v1`;
-console.log(`[info] ${BASE}（contractVersion=${server.contractVersion ?? '(未报)'}）`);
+// 由 initFacility() 在 main() 的前置检查之后赋值（模块顶层读会在离线时抛未捕获异常，见上）。
+let BASE = null;
+let tokens = null;
+
+function initFacility() {
+  const { srv, tk } = loadFacilityConfig();
+  tokens = tk;
+  BASE = `http://${srv.bind ?? '127.0.0.1'}:${srv.port}/cp/v1`;
+  console.log(`[info] ${BASE}（contractVersion=${srv.contractVersion ?? '(未报)'}，bind=${srv.bind ?? '127.0.0.1'}，port=${srv.port}）`);
+}
 
 async function call(action, params, tier = 'scene', timeoutMs = 300000) {
   const body = tier === 'observe' ? { ...params } : { ...params, confirm: true };
@@ -163,6 +194,35 @@ async function download(runId, rel) {
   return await res.text();
 }
 
+/** 某 run 登记的产物数（null = 查不到）。「不写产物」= 0。 */
+async function artifactCount(runId) {
+  const res = await fetch(`${BASE}/artifacts/${runId}`, { headers: { Authorization: `Bearer ${tokens.observe}` } });
+  if (!res.ok) return null;
+  const j = await res.json();
+  return j?.data?.count ?? (j?.data?.artifacts ?? []).length;
+}
+
+/**
+ * 某 run 目录 `export/` 下的落盘文件（相对路径）。
+ *
+ * <p>直接看盘而不是只看登记表：防「写了文件但没登记」这种更隐蔽的失真。run 目录本身
+ * （`manifest.json` 等记账件）**不算产物**——它是 run 的基础设施，不是可被消费方当真的导出件。
+ */
+function exportFilesOnDisk(runId) {
+  const root = path.join(mcDir, 'controlplane', 'runs', runId);
+  const out = [];
+  const walk = (d) => {
+    if (!fs.existsSync(d)) return;
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else out.push(path.relative(root, p).split(path.sep).join('/'));
+    }
+  };
+  walk(path.join(root, 'export'));
+  return out;
+}
+
 /** Envelope → {meta, inner}；Plain → {meta: doc, inner: doc}。 */
 function unwrap(doc) {
   if (doc && doc.documentFormat === 'Envelope' && typeof doc.payload === 'string') {
@@ -181,6 +241,28 @@ const nonAirOf = (grid) => Object.entries(counts(grid)).filter(([k]) => k !== '0
 
 // --------------------------------------------------------------------------- 场景原语
 
+/**
+ * 步进动作（SteppingActionBase）的作业看门狗。
+ *
+ * <p>`SteppingActionBase` 默认**总 5 min / 阶段 3 min**，超时抛 `CP-EXEC-002`。`world.rebuild` 要
+ * 起集成服并载入一个 GTNH 世界（首次建世界尤其慢），很容易越过默认值 ⇒ 会把「慢但正确」误判成
+ * 失败（AGENTS.md/SKILL「步进动作默认超时很短，长跑动作要显式下传」）。这里显式放宽看门狗，
+ * **不放松任何判据**：放宽的只是「等多久」，红/绿口径一字未动。
+ */
+const REBUILD_TOTAL_MS = 20 * 60 * 1000;
+const REBUILD_STAGE_MS = 15 * 60 * 1000;
+const REBUILD_HTTP_MS = REBUILD_TOTAL_MS + 60 * 1000;
+const EXPORT_TOTAL_MS = 10 * 60 * 1000;
+const EXPORT_STAGE_MS = 8 * 60 * 1000;
+const EXPORT_HTTP_MS = EXPORT_TOTAL_MS + 60 * 1000;
+
+/** 统一的世界重建入口（带看门狗参数）。 */
+const rebuildWorld = (folder, extra = {}) => call(
+  'world.rebuild',
+  { folder, void: true, seed: SEED, totalTimeoutMs: REBUILD_TOTAL_MS, stageTimeoutMs: REBUILD_STAGE_MS, ...extra },
+  'scene',
+  REBUILD_HTTP_MS);
+
 const setInventory = (item) => call('scene.inventory.write', { slots: Array.from({ length: 9 }, (_, s) => ({ slot: s, ...item })) });
 const poseAbove = (t) => call('scene.player.pose', { pos: [t[0] + 0.5, t[1] + 1.0, t[2] + 0.5], yaw: 0, pitch: 90 });
 
@@ -196,7 +278,19 @@ async function selectCuboid(p1, p2) {
 /** 导出 F0 并取回「产物内可见的事实」（不抛：把失败也如实带回给判据）。 */
 async function exportFrame0(label, extraParams = {}) {
   const before = await runIds();
-  const ex = await call('export.scene', { name: `bt-${label}`, shape: 'world', frames: [0], expectFrames: { frames: [0] }, ...extraParams });
+  const ex = await call(
+    'export.scene',
+    {
+      name: `bt-${label}`,
+      shape: 'world',
+      frames: [0],
+      expectFrames: { frames: [0] },
+      totalTimeoutMs: EXPORT_TOTAL_MS,
+      stageTimeoutMs: EXPORT_STAGE_MS,
+      ...extraParams,
+    },
+    'scene',
+    EXPORT_HTTP_MS);
   const after = await runIds();
   const newRuns = [...after].filter((x) => !before.has(x));
   const out = { label, ok: ex.ok, runId: ex.runId ?? null, error: ex.error ?? null, newRuns };
@@ -222,6 +316,7 @@ async function exportFrame0(label, extraParams = {}) {
 
 async function main() {
   assertUnattendedDiscipline();
+  initFacility();
 
   const catalogRes = await fetch(`${BASE}/actions`, { headers: { Authorization: `Bearer ${tokens.observe}` } });
   const catalog = (await catalogRes.json()).data ?? {};
@@ -232,7 +327,7 @@ async function main() {
   check('S0.contract.actionCount', '43（动作计数口径不变）', R.actionCount, R.actionCount === 43);
 
   // ---------------- A. 正对照：世界 A 内录完即导 ----------------
-  const rbA = await call('world.rebuild', { folder: WORLD_A, void: true, seed: SEED });
+  const rbA = await rebuildWorld(WORLD_A);
   if (!rbA.ok) fatal(`world.rebuild ${WORLD_A} 失败: ${JSON.stringify(rbA.error)}`);
   const base = rbA.data.base ?? [64, 12, 64];
   const [bx, by, bz] = base;
@@ -264,7 +359,7 @@ async function main() {
   const hashA = inA.provenanceFrameSha256?.['0'] ?? null;
 
   // ---------------- B. 负对照：换到世界 B 再导同一帧（#127 三态复现） ----------------
-  const rbB = await call('world.rebuild', { folder: WORLD_B, void: true, seed: SEED });
+  const rbB = await rebuildWorld(WORLD_B);
   if (!rbB.ok) fatal(`world.rebuild ${WORLD_B} 失败: ${JSON.stringify(rbB.error)}`);
   logStep({ step: 'rebuild-B', folder: WORLD_B, base: rbB.data.base ?? null });
 
@@ -279,7 +374,7 @@ async function main() {
   check('B7.noArtifact', '不落任何产物（run 数不增）', inB.newRuns, Array.isArray(inB.newRuns) && inB.newRuns.length === 0);
 
   // ---------------- C. 同 folder 内容被清空后导出：不得静默丢块 ----------------
-  const rbA2 = await call('world.rebuild', { folder: WORLD_A, void: true, seed: SEED });
+  const rbA2 = await rebuildWorld(WORLD_A);
   if (!rbA2.ok) fatal(`world.rebuild ${WORLD_A}（第二次，同 folder）失败: ${JSON.stringify(rbA2.error)}`);
   logStep({ step: 'rebuild-A-again', folder: WORLD_A, base: rbA2.data.base ?? null });
   const inA2 = await exportFrame0('A-same-folder-cleared');
@@ -299,7 +394,22 @@ async function main() {
   check('D1.export.blockIdentityConflictFails', '同坐标被换成另一个方块 ⇒ 必须显式失败（不许静默换块）', { ok: inD.ok, code: inD.error?.code ?? null }, inD.ok === false);
   check('D2.error.code', 'CP-STATE-001', inD.error?.code ?? null, inD.error?.code === 'CP-STATE-001');
   check('D3.error.cell', '错误上下文点名该格与两侧身份', inD.error?.context ?? null, !!inD.error?.context?.cell && !!inD.error?.context?.expected && !!inD.error?.context?.actual);
-  check('D4.noArtifact', '不落任何产物（run 数不增）', inD.newRuns, Array.isArray(inD.newRuns) && inD.newRuns.length === 0);
+  // D4 —— 注意判据口径（实机首跑纠正）：(b) 与 (d) 的**失败点不同**，因此「不落产物」的机械形态也不同。
+  //   (b) 失败在 `stage: pre-bake`（在 `ctx.beginRun` 之前，见 ExportSceneAction.java:239 vs :242）
+  //       ⇒ 连 run 目录都不开 ⇒ 正确判据是「run 数不增」（B7）。
+  //   (d) 失败在 `stage: bake`（烘焙逐格时才暴露身份冲突）⇒ run 已经开了（成功路径需要一个落盘点），
+  //       所以**不能**拿「run 数不增」当判据——那不是被测行为，是失败点的必然结果。
+  //   真正要守的不变量是「**不写任何产物**」：登记的产物数 = 0，且 run 目录 `export/` 下零文件
+  //   （只看登记表不够——一并看盘，防「写了没登记」）。run 目录自身的 `manifest.json` 是记账件，
+  //   不是产物。这条**比旧口径更严**：它同时排除了「产物没登记但已落盘」。
+  const dRuns = Array.isArray(inD.newRuns) ? inD.newRuns : [];
+  const dArtifacts = [];
+  for (const id of dRuns) dArtifacts.push({ runId: id, registered: await artifactCount(id), exportFiles: exportFilesOnDisk(id) });
+  check(
+    'D4.noArtifactWritten',
+    '不写任何产物：新 run 的登记产物数为 0 且 export/ 下零文件（run 目录本身是记账基础设施，不是产物）',
+    { newRuns: dRuns, perRun: dArtifacts },
+    dArtifacts.every((x) => x.registered === 0 && x.exportFiles.length === 0));
 
   // ---------------- S. #131 实机回归（TYPE_INT 不再静默强转） ----------------
   if (!skipIntChecks) {
