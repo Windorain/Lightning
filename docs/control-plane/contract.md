@@ -154,6 +154,9 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 8. **`target` 参数（v1）**：仅作观察目标留痕（bbox 进观测记录），**不参与自动取景**；自动框景留待后续版本。
 9. **按内容升格的鉴权时点**：动作静态级低于内容要求时（如 scene 级 `case.run` 跑含 cameras 段的用例），鉴权期按静态级放行、**执行期**升格检查——sync 调用方得 HTTP 403 `CP-AUTH-002`，异步调用方得 failed 作业（`error.code=CP-AUTH-002`）。
 
+> **引用口径（2026-10 收口核对）**：本节九条是**编号列表项**，不是 `####` 小节 ⇒ **不存在** `§4.3.1`/`§4.3.2`/… 这样的锚点。仓库另有一批注释与文档写「contract §4.3.x」（源码如 `CameraSpec.java:100`、`ReadPlayerAction.java:34`、`CaptureDiagSession.java:42`、`CaptureRenderState.java:27`、`CameraSpecs.java:121`、`ShotExecutor.java:143`，文档如 `scripts/control-plane/README.md:330/334/379`）——那些编号在本契约里**没有对应标题**，正确指向是本节的列表项 1..9（或 §4.5.x 的命令通道小节）。
+> **本单（#105）只订正了 §4.5 下被错编成 `4.3.x` 的六个小节标题**（现为 §4.5.1…§4.5.5）与指向它们的引用；上述批注释引用**未逐一改**（横跨源码/脚本/多份文档，且是既存缺陷、非本单引入）——登记为开放项，待新单统一（相关需求单 #136）。
+
 ### 4.4 L0 布景原语（#99，「收口T2」；#122 追加流体注入）
 
 能力面三层口径见 #96 §4.1：**L0 原语**＝直接设定世界/实体/玩家/背包状态（布景、构造输入、常规回归）；
@@ -569,8 +572,10 @@ C4 要求「导出件、实拍、观测记录、世界清单哈希**同一 run**
 }
 ```
 
-- **段位**：`world → capture → build → read → export → cameras → criteria → evidence`
-  （导出在 `read` 之后、`cameras` 之前：拍摄会覆写投影/光照，不该影响导出件反映的世界状态）；
+- **段位**：`export` 排在 `read`/`action` 之后、`cameras` 之前——**完整九段执行序不在本契约复述**，
+  唯一字面副本在 [case-file.md §1](case-file.md)，源码权威是 `CaseValidator.SEGMENTS`（`CaseValidator.java:69-83`）；
+  本节只约束 `export` 的**相对位置**（导出在 `read`/`action` 之后、`cameras` 之前：
+  拍摄会覆写投影/光照/渲染状态，不该影响导出件反映的世界状态）；
 - **前缀限制**：段里只接受 `export.*` 动作；
 - **不声明落点**：段里**不**接受 `path`/`role`——落点由导出动作决定，声明它会产生第二处真相。
 
@@ -645,8 +650,9 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 ### 4.10 L2 编排段（v1.6，#103）
 
 `case.run` 的用例文件新增通用 `action` 段（**段**的扩充，不是新动作）：逐条执行用例声明的任意
-**同步** cp 动作，产物落 run 目录，`expect` 非空时当场逐步断言。段序
-`world → capture → build → read → action → cameras → criteria → evidence`。
+**同步** cp 动作，产物落 run 目录，`expect` 非空时当场逐步断言。段序为九段固定序
+（唯一字面副本见 [case-file.md §1](case-file.md)，权威 `CaseValidator.SEGMENTS`；
+`action` 夹在 `read` 与 `export` 之间）。
 完整口径见 [case-file.md §3.2](case-file.md)。
 
 **为什么它是 L2 的题中之义**：需求书 §4.3 把 L2 定义为「L0/L1 的**有序编排**，可重放、**逐步断言**」；
