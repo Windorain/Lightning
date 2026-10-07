@@ -79,20 +79,22 @@ public final class MeshCaptureService {
     private MeshCaptureService() {}
 
     /**
-     * TE 捕获模式。默认（以及除 {@code inplace} 外的任何值）=「副本 TE」：按扫描 NBT 造一份副本 TE 注入后处理
-     * 渲染，<strong>世界活动 TE 全程零写入</strong>。
+     * TE 捕获模式：**只剩「副本 TE」一条路**（按扫描 NBT 造一份副本 TE 注入后处理渲染，
+     * <strong>世界活动 TE 全程零写入</strong>）。
+     *
      * <p>
-     * {@code -Dsde.teCaptureMode=inplace} 恢复 issue #12 之前的旧行为（备份活动 TE → 就地
-     * {@code readFromNBT(扫描 NBT)} → finally 回滚），<strong>仅供 issue #12 复现/证伪的负对照使用，严禁默认
-     * 启用</strong>：LogisticsPipes 的 {@code LogisticsTileGenericPipe.readFromNBT} 非幂等（每次读 NBT 都重建
-     * pipe，而 {@code bindPipe()} 有 {@code if (pipeBound) return;} 一次性绑定守卫），第二次及以后读 NBT 建出的
-     * pipe 永远绑不上容器（{@code pipe.container} 永久为 null）→ 导出结束后正常渲染 NPE 崩溃客户端；读备份回滚
-     * 同样修不回来（再读一次 NBT 只会再建一个绑不上的 pipe）。
+     * Gitea #104 删除了老逃生开关 {@code -Dsde.teCaptureMode=inplace}（负对照专用）：issue #12 的
+     * 缺陷已由副本路径永久修复，负对照的调用方（{@code LpTeRoundTripAutomation} /
+     * {@code PartsExportProbe}）也随 #104 整体删除 ⇒ 开关没有任何合法的使用者，
+     * 留着就是 E1「无逃生开关」的残留。删掉的是<b>开关与 inplace 分支</b>，副本路径（生产路径）不变。
+     *
+     * <p>
+     * 为什么 inplace 从来不能是生产路径（历史实证，保留以免后人重开）：LogisticsPipes 的
+     * {@code LogisticsTileGenericPipe.readFromNBT} 非幂等（每次读 NBT 都重建 pipe，而
+     * {@code bindPipe()} 有 {@code if (pipeBound) return;} 一次性绑定守卫），第二次及以后读 NBT 建出的
+     * pipe 永远绑不上容器（{@code pipe.container} 永久为 null）→ 导出结束后正常渲染 NPE 崩溃客户端；
+     * 读备份回滚同样修不回来（再读一次 NBT 只会再建一个绑不上的 pipe）。
      */
-    private static final boolean TE_CAPTURE_INPLACE = "inplace".equals(
-        System.getProperty("sde.teCaptureMode", "copy")
-            .trim()
-            .toLowerCase(Locale.ROOT));
 
     public static void enrichExportFile(File file) throws Exception {
         if (!file.isFile()) {
@@ -657,7 +659,6 @@ public final class MeshCaptureService {
                     TileEntity teForCapture = world.getTileEntity(wx, wy, wz);
                     boolean teIsMultipart = false;
                     TileEntity teForRender = teForCapture;
-                    NBTTagCompound legacyInplaceBackup = null;
                     if (vs.tileNbt != null && !vs.tileNbt.hasNoTags()) {
                         // 以下两步均为只读：判定/诊断只读活动 TE 的类，不写任何字段
                         if (teForCapture != null) {
@@ -667,25 +668,22 @@ public final class MeshCaptureService {
                             // 活动 TE 不在（世界被改动）：只凭扫描 NBT 的 id 判多部件（FMP 写 "savedMultipart"）
                             teIsMultipart = MultipartNbtStateUtil.isMultipartNbt(vs.tileNbt);
                         }
-                        if (TE_CAPTURE_INPLACE && teForCapture != null) {
-                            // 负对照（-Dsde.teCaptureMode=inplace；issue #12 复现/证伪专用，严禁默认启用）：
-                            // 旧行为 = 备份活动 TE → 就地 readFromNBT(扫描 NBT) → finally 回滚
-                            legacyInplaceBackup = new NBTTagCompound();
-                            teForCapture.writeToNBT(legacyInplaceBackup);
-                            applyTileNbtInPlace(teForCapture, vs.tileNbt, teIsMultipart);
-                        } else {
-                            // 副本创建失败时返回 null：该格显式跳过 TE 渲染，绝不回退查活动 TE
-                            teForRender = createCaptureTileEntityCopy(
-                                world,
-                                vs.tileNbt,
-                                teForCapture,
-                                wx,
-                                wy,
-                                wz,
-                                teIsMultipart);
-                        }
+                        // #104 之后只剩副本路径（-Dsde.teCaptureMode=inplace 就地改写路径已随 #104 整体
+                        // 删除，负对照调用方 LpTeRoundTripAutomation / PartsExportProbe 亦已删除 ⇒ 无逃生开关）：
+                        // 副本创建失败时返回 null，该格显式跳过 TE 渲染，绝不回退查活动 TE
+                        // （活动 TE 全程零写入是 issue #12 的修复本体）。
+                        teForRender = createCaptureTileEntityCopy(
+                            world,
+                            vs.tileNbt,
+                            teForCapture,
+                            wx,
+                            wy,
+                            wz,
+                            teIsMultipart);
                     }
-                    try {
+                    // #104：老 try/finally 只剩 inplace 负对照的回滚段，随该分支一并删除；
+                    // 这里保留原来的作用域（裸块）以免局部变量外泄。
+                    {
                         TessellatorCaptureState
                             .beginBlock(wx, wy, wz, label, wx, wy, wz, b, blockMeta, renderType, vs.registryId);
                         Tessellator tess = Tessellator.instance;
@@ -776,11 +774,6 @@ public final class MeshCaptureService {
                                         String.valueOf(t));
                                 }
                             }
-                        }
-                    } finally {
-                        if (legacyInplaceBackup != null) {
-                            // 只有 inplace 负对照路径需要回滚；默认副本路径对活动 TE 零写入，故无回滚段
-                            restoreTileEntityInPlace(teForCapture, legacyInplaceBackup, teIsMultipart);
                         }
                     }
                 }
@@ -931,35 +924,6 @@ public final class MeshCaptureService {
         return toApply;
     }
 
-    /**
-     * 旧行为（{@code -Dsde.teCaptureMode=inplace} 负对照专用，严禁默认启用）：对<strong>活动 TE</strong>就地
-     * {@code readFromNBT(扫描 NBT)}。LP 等模组的 readFromNBT 非幂等，就地改写会永久改坏世界里的 TE
-     * （Gitea issue #12），此处刻意保留原样以便复现/证伪该缺陷。
-     */
-    private static void applyTileNbtInPlace(TileEntity te, NBTTagCompound tileNbt, boolean teIsMultipart) {
-        NBTTagCompound toApply = captureNbtWithCoords(tileNbt, te, te.xCoord, te.yCoord, te.zCoord);
-        try {
-            te.readFromNBT(toApply);
-        } catch (Throwable ignored) {
-            /* 个别模组 NBT 不兼容时仍走原 TE */
-        }
-        if (teIsMultipart) {
-            MultipartNbtStateUtil.loadPartStatesFromNbt(te, toApply);
-        }
-    }
-
-    /** 旧行为（inplace 负对照专用）的回滚：把备份 NBT 读回活动 TE（对非幂等 readFromNBT 同样修不回来）。 */
-    private static void restoreTileEntityInPlace(TileEntity te, NBTTagCompound backup, boolean teIsMultipart) {
-        try {
-            te.readFromNBT(backup);
-        } catch (Throwable ignored) {
-            /* 尽力恢复 */
-        }
-        if (teIsMultipart) {
-            MultipartNbtStateUtil.loadPartStatesFromNbt(te, backup);
-        }
-    }
-
     private static JsonObject emptyGeometryJson() {
         JsonObject geometry = new JsonObject();
         geometry.addProperty("encoding", "bakedQuadsJsonV1");
@@ -969,8 +933,9 @@ public final class MeshCaptureService {
 
     /**
      * T1.3 公共捕获工具：把「条目内容签名」与「烘焙几何条目构造」两件设施以<strong>纯新增</strong>的方式提升为公共
-     * 工具，供 {@code com.lightning.mod.client.multiblock} 的变体捕获复用，避免 {@code StateGeometryCapture} 那种
-     * 「按同口径重写一份」造成两套签名长期漂移（T0.3 移交建议 #2）。
+     * 工具，供 {@code com.lightning.mod.client.multiblock} 的变体捕获复用，避免「按同口径重写一份」造成两套签名长期漂移
+     * （T0.3 移交建议 #2）。#104 之前 {@code StateGeometryCapture} 正是那个「重写一份」（第二套捕获实现，
+     * 违反 E4①），它已按 V12 裁决整体删除；唯一捕获口径就是本类。
      * <p>
      * <b>零行为改动</b>：本嵌套类只做转发，不修改任何既有方法的可见性或实现；既有 {@code finalizeStructureJson} /
      * {@code liftBlockPaletteToRoot} 路径逐字节不变。

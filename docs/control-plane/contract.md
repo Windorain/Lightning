@@ -532,8 +532,17 @@ Client thread → ExportMultiblockAction（步进）
    register : 逐台信封（multiblock）/ report.json（multiblock-report）/ 数据集（multiblock-dataset，按 dataset 档位）
 ```
 
-**主菜单下也能跑**：捕获路径自带 `ProbeDummyWorld`（不进真实世界），与既有
-`MultiblockExportAutomation` 的行为一致——自述里写明这一点，不假装要求世界。
+**主菜单下也能跑**：捕获路径自带 `ProbeDummyWorld`（不进真实世界），与 #104 之前那条触发文件
+驱动的入口（`MultiblockExportAutomation`，已随 #104 删除）的行为一致——自述里写明这一点，
+不假装要求世界。
+
+**前置枚举事实（V11 已知缺口，必须与本节一起读）**：本动作**硬依赖**
+`multiblock_scan/run-NNNN/machines.json`（T1.2 的枚举事实层）。产出它的 `MultiblockScanRunner`
+按 V11 裁决**保留**（它是生产件），但 #104 删除了它唯一的触发入口
+（`MultiblockScanAutomation` + `sde_multiblock_scan.json`），而 cp 侧**没有**对应的自描述动作
+⇒ **当前没有任何自描述通道可以生成该枚举事实**，本动作在没有存量 `machines.json` 的机器上
+必然报 `CP-STATE-001`。这是 #104 **显式登记**的已知缺口（不是静默遗漏），
+建议补一个自描述入口（如 `export.enumerate`）。
 
 **产物字节幂等**：产物**不含** `runId`/时间戳/绝对路径（格式契约硬约束，
 `docs/contracts/format-multiblock-doc.md` §6.3），故两次运行产物可逐字节比对（A3）。
@@ -735,6 +744,12 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 - v1 内只允许**增量**：新增动作、新增可选参数、新增响应字段均可；不得改已有字段语义、不得删字段、不得收紧默认值。
 - 破坏变更开 `/cp/v2`，旧版本至少保留一个里程碑周期。
 - 每个动作描述含 `since`（引入的契约小版本，如 `1.0`）；`GET /cp/v1/about` 报 `contractVersion`。
+- **变更记录（Gitea #104，「收口T7」）：`probeActive` / `probe` 的语义变更（显式例外，需评审确认）**
+  - **形状不变**：字段名、类型、位置与 `core.ping` / `core.status` / `about` 的返回结构一字未动，故 `contractVersion` **不升**（仍 1.7）。
+  - **语义变更**：`probeActive` 旧义 = 「老触发文件自动化链是否激活」；新义 = 「**控制面自身忙闲**」（有作业在队/在跑）。`probe` 旧义 = 激活中的老探针名；新义 = **恒为 `null`**。
+  - **为什么必须变**：老一代批处理设施（10 个自动化入口 + `client/automation/SdeClientAutomationTickHandler` 接管链 + 9 个触发文件 + 5 个专用世界目录）已随 #104 **整体删除** ⇒ 旧义的真值来源不复存在，字段若维持旧义就恒为 `false`/`null`，成为一个只会误导调用方的空字段。
+  - **规则冲突的如实登记**：本节上文写「v1 内不得改已有字段语义」。#104 的裁决者（Gitea #104 最新裁决评论，V7）明确选择「保留字段、改语义」，理由是删字段同样是破坏性变更且 `CP-BUSY-001` 口径仍需要这个字段。**本例外是显式登记的，不是漏改**；若评审认为必须严守 v1 语义冻结，则唯一合规做法是开 `/cp/v2`（成本远高于收益，因为旧义已无真值来源）。自述（`GET /cp/v1/actions` 的 `core.ping` / `core.status` 描述）已同步写明新义与「老探针设施已随 #104 删除」。
+  - **`CP-BUSY-001` 仍存在**，但只对「已有控制面动作在队/在跑」的提交成立（`JobQueue.submit`，HTTP 线程判定），与 tick 排空无关（§9）。
 
 ## 6. 托管世界规则（C4 落地）
 
@@ -781,7 +796,8 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
   - `core/`：**零 MC 依赖**（只用 JDK + Gson），含 HTTP 服务、路由、动作注册表、作业队列、事件缓冲、错误信封、产物登记、用例文件模型与解析、判据引擎。零 MC 依赖是为了可单测（本仓 mod 无渲染环境单测能力，捕获/渲染不可无头测）。
   - `mc/`：MC 绑定层——tick 排空器、世界动作、场景构建、TE 补全器、观测记录采集、配置装配。
 - 启动：`ClientProxy.initNetwork()` 按配置启动；关闭：JVM shutdown hook（无 FML 客户端停止事件可用）。
-- 与既有触发文件自动化（`SdeClientAutomationTickHandler` 的 6 条分派）的关系：控制面排空器作为**新的独立 tick handler 注册**，不复用触发文件链；既有探针激活期间（其 `isRequested` 为真）控制面 tick 层**暂停排空**——在队作业保持 queued，探针结束后自动开跑；期间打 WARN 日志 + `action-reject` 事件留痕（`data.code=CP-BUSY-001`），`about.probeActive` 暴露原因（单向避让，不改动既有探针；`CP-BUSY-001` 提交即拒仅对「已有控制面动作在队/在跑」成立）。
+- 与**老触发文件自动化**的关系（Gitea #104 之后）：老一代批处理设施 —— 10 个自动化入口、`client/automation/SdeClientAutomationTickHandler` 的接管链、9 个触发文件约定、5 个专用世界目录 —— 已**整体删除**。控制面是当前**唯一**驱动世界的自动化，因此**不存在**「与别的自动化链争 tick」的情形，`ControlPlaneTickHandler` 里也**没有**避让分支（原先的「既有探针激活 ⇒ 暂停排空」判据已随真值来源一并删除；留一个永不成立的判据就是死代码）。
+- `probeActive` / `probe` 仍然存在，语义见 §5 的变更记录：`probeActive` = **控制面自身忙闲**（有作业在队/在跑），`probe` **恒为 `null`**。`CP-BUSY-001` 只对「已有控制面动作在队/在跑」的**提交**成立（`JobQueue.submit`，HTTP 线程判定）；tick 排空**不得**以「忙」为门 —— 步进作业正是靠每 tick 的 `drainOne()` 推进，以忙为门会把 running 作业冻结到超时。
 - `about` 等端点的 MC 相关字段必须由 tick 线程周期快照提供（§1.8：HTTP 线程不得读 `mc.theWorld` 等 MC 状态）。
 - 进度事件节流：增量 ≥0.05 或间隔 ≥3s 放行，终值 1.0 必放行（防事件流水被逐 tick 上报灌满）。
 - 调用既有 runner（扫描/导出类）时必须强制其 `exit=false / cleanupTrigger=false`，禁止继承自毁退出。

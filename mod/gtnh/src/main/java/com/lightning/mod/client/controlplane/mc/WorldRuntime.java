@@ -15,7 +15,7 @@ import net.minecraft.world.storage.WorldInfo;
  * 只有前者是权威侧，TE 补全的 S35 摄取也只在服务端世界成立。
  *
  * <p>
- * 沿用既有探针（{@code LpTeRoundTripAutomation#place}）的调用约定：在客户端 tick 线程内直接触碰
+ * 沿用既有探针（{@code LpTeRoundTripAutomation#place}，已随 Gitea #104 删除）的调用约定：在客户端 tick 线程内直接触碰
  * 服务端世界对象。1.7.10 的集成服里这是既有事实口径，代价是跨线程访问——因此每次访问都先判空、
  * 每次动作后都留静置 tick，让服务端线程收敛。
  */

@@ -1,6 +1,5 @@
 package com.lightning.mod;
 
-import com.lightning.mod.config.SdeAutomationConfig;
 import com.lightning.mod.config.SdeControlPlaneConfig;
 import com.lightning.mod.item.SdeItems;
 import com.lightning.mod.proxy.IProxy;
@@ -28,7 +27,8 @@ public class LightningMod {
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
-        SdeAutomationConfig.load(event);
+        // 老批处理设施（触发文件驱动的自动化链与其 SdeAutomationConfig）已随 Gitea #104 整体删除，
+        // 故不再装载 sde_automation.cfg；控制面配置是唯一的自动化配置面。
         // 控制面配置（contract.md §1.1）：默认关闭；-Dsde.controlPlane=on 可覆盖（见 SdeControlPlaneConfig）
         SdeControlPlaneConfig.load(event);
         SdeItems.register();

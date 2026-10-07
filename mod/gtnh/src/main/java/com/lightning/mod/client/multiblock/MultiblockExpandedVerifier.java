@@ -14,7 +14,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
-import com.lightning.mod.config.SdeMultiblockPipelineConfig;
 
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
@@ -66,6 +65,22 @@ import cpw.mods.fml.relauncher.SideOnly;
 @SideOnly(Side.CLIENT)
 public final class MultiblockExpandedVerifier {
 
+    /**
+     * 展开形态校验文件子目录（相对产物目录）。
+     *
+     * <p>
+     * 出处：原在 {@code config/SdeMultiblockPipelineConfig}（老管线配置类，承载
+     * {@code sde_multiblock_pipeline.json} 触发文件与 {@code sde_pipeline_world} 专用世界）。
+     * Gitea #104 删除了那个类（E1：无触发文件约定、无专用世界目录），而这三个常量是
+     * {@code expanded/} 产物形态的一部分、且**本类是它们唯一的使用者**，故就地保留。
+     * <b>值不得改动</b>：它决定 {@code expanded/} 下的文件布局，改了 web 侧的逐格比对会找不到文件。
+     */
+    public static final String EXPANDED_SUBDIR = "expanded";
+    /** 展开清单文件名（见 {@link #EXPANDED_SUBDIR} 的出处说明）。 */
+    public static final String EXPANDED_MANIFEST = "_manifest.json";
+    /** 展开形态 schema 标识（见 {@link #EXPANDED_SUBDIR} 的出处说明）。 */
+    public static final String EXPANDED_SCHEMA = "lightning.multiblock.expanded/1";
+
     private MultiblockExpandedVerifier() {}
 
     /** 一次抽样。 */
@@ -89,7 +104,7 @@ public final class MultiblockExpandedVerifier {
      */
     static JsonObject write(File outDir, JsonObject exportReport, int randomSamples) throws Exception {
         long t0 = System.currentTimeMillis();
-        File expandedDir = new File(outDir, SdeMultiblockPipelineConfig.EXPANDED_SUBDIR);
+        File expandedDir = new File(outDir, EXPANDED_SUBDIR);
         if (!expandedDir.isDirectory() && !expandedDir.mkdirs()) {
             throw new IllegalStateException("无法创建展开校验目录: " + expandedDir.getAbsolutePath());
         }
@@ -152,7 +167,7 @@ public final class MultiblockExpandedVerifier {
                 MultiblockExportRunner.writeJson(f, doc);
                 JsonObject row = new JsonObject();
                 row.addProperty("variant", s.variant.key);
-                row.addProperty("file", SdeMultiblockPipelineConfig.EXPANDED_SUBDIR + "/" + fileName);
+                row.addProperty("file", EXPANDED_SUBDIR + "/" + fileName);
                 row.add("why", strings(s.why));
                 JsonObject dims = doc.getAsJsonObject("dims");
                 row.add("dims", dims);
@@ -177,7 +192,7 @@ public final class MultiblockExpandedVerifier {
                 totalSamples++;
 
                 JsonObject fileRow = new JsonObject();
-                fileRow.addProperty("file", SdeMultiblockPipelineConfig.EXPANDED_SUBDIR + "/" + fileName);
+                fileRow.addProperty("file", EXPANDED_SUBDIR + "/" + fileName);
                 fileRow.addProperty("slug", slug);
                 fileRow.addProperty("bytes", Long.valueOf(f.length()));
                 fileRow.addProperty("sha256", VariantCaptureRunner.sha256Hex(MultiblockExportRunner.readText(f)));
@@ -189,7 +204,7 @@ public final class MultiblockExpandedVerifier {
 
         // ---- 清单（抽样清单本身也是交付物之一） ----
         JsonObject manifest = new JsonObject();
-        manifest.addProperty("schema", SdeMultiblockPipelineConfig.EXPANDED_SCHEMA);
+        manifest.addProperty("schema", EXPANDED_SCHEMA);
         manifest.addProperty("task", "T1.6 展开形态校验文件（ground-truth cellGrid，供 T3.3 与 web 装配逐格 diff）");
         manifest.addProperty("generatedAtEpochMs", Long.valueOf(System.currentTimeMillis()));
         manifest.addProperty(
@@ -219,14 +234,11 @@ public final class MultiblockExpandedVerifier {
         totals.addProperty("samples", Integer.valueOf(totalSamples));
         totals.addProperty("files", Integer.valueOf(allFiles.size()));
         manifest.add("totals", totals);
-        MultiblockExportRunner
-            .writeJson(new File(expandedDir, SdeMultiblockPipelineConfig.EXPANDED_MANIFEST), manifest);
+        MultiblockExportRunner.writeJson(new File(expandedDir, EXPANDED_MANIFEST), manifest);
 
         JsonObject summary = new JsonObject();
         summary.addProperty("dir", expandedDir.getAbsolutePath());
-        summary.addProperty(
-            "manifest",
-            expandedDir.getAbsolutePath() + File.separator + SdeMultiblockPipelineConfig.EXPANDED_MANIFEST);
+        summary.addProperty("manifest", expandedDir.getAbsolutePath() + File.separator + EXPANDED_MANIFEST);
         summary.addProperty("machines", Integer.valueOf(machineRows.size()));
         summary.addProperty("samples", Integer.valueOf(totalSamples));
         summary.addProperty("files", Integer.valueOf(allFiles.size()));
@@ -245,7 +257,7 @@ public final class MultiblockExpandedVerifier {
     private static JsonObject emptySummary(File outDir, File expandedDir, JsonObject exportReport, long t0)
         throws Exception {
         JsonObject manifest = new JsonObject();
-        manifest.addProperty("schema", SdeMultiblockPipelineConfig.EXPANDED_SCHEMA);
+        manifest.addProperty("schema", EXPANDED_SCHEMA);
         manifest.addProperty("generatedAtEpochMs", Long.valueOf(System.currentTimeMillis()));
         manifest.addProperty("task", "T1.6 展开形态校验文件（本轮 0 产物，无 ground-truth 可抽）");
         manifest.addProperty(
@@ -258,14 +270,11 @@ public final class MultiblockExpandedVerifier {
         totals.addProperty("samples", Integer.valueOf(0));
         totals.addProperty("files", Integer.valueOf(0));
         manifest.add("totals", totals);
-        MultiblockExportRunner
-            .writeJson(new File(expandedDir, SdeMultiblockPipelineConfig.EXPANDED_MANIFEST), manifest);
+        MultiblockExportRunner.writeJson(new File(expandedDir, EXPANDED_MANIFEST), manifest);
 
         JsonObject summary = new JsonObject();
         summary.addProperty("dir", expandedDir.getAbsolutePath());
-        summary.addProperty(
-            "manifest",
-            expandedDir.getAbsolutePath() + File.separator + SdeMultiblockPipelineConfig.EXPANDED_MANIFEST);
+        summary.addProperty("manifest", expandedDir.getAbsolutePath() + File.separator + EXPANDED_MANIFEST);
         summary.addProperty("machines", Integer.valueOf(0));
         summary.addProperty("samples", Integer.valueOf(0));
         summary.addProperty("files", Integer.valueOf(0));
@@ -287,7 +296,7 @@ public final class MultiblockExpandedVerifier {
         int w = h == 0 ? 0 : grid[0][0].length;
 
         JsonObject doc = new JsonObject();
-        doc.addProperty("schema", SdeMultiblockPipelineConfig.EXPANDED_SCHEMA);
+        doc.addProperty("schema", EXPANDED_SCHEMA);
         doc.addProperty("variant", s.variant.key);
         JsonObject dims = new JsonObject();
         dims.addProperty("w", Integer.valueOf(w));

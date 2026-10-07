@@ -72,10 +72,13 @@ preflight ─▶ build-mod-gtnh ─▶ falsify-mod-negative ─▶ export-multib
           互不干扰（同世界、两次会话）  （+ manifest）
 ```
 
-**为什么 `/sde export` 与 multiblock 是两个客户端会话**：`SdeClientAutomationTickHandler` 的分派顺序是
-「T1.6 管线触发文件 → T1.2 扫描 → T0.3 探针 → 通用指令文件队列」，管线触发文件存在时**直接 return**，
-故同一次会话内无法既跑 multiblock 管线又跑指令文件队列。调度者裁决的「同世界先后执行」因此落为
-**同一专用世界（`sde_pipeline_world`）的两次顺序会话**；互不干扰判据（产物目录哈希快照 + 基线哈希）不受影响。
+> **Gitea #104 后本阶段已退役（not-run）**：它原先驱动的老批处理设施 ——
+> `SdeClientAutomationTickHandler`（客户端 tick 接管链）、`sde_automation_commands.txt`（通用指令文件队列）、
+> 专用世界 `sde_pipeline_world`、gradle 任务 `runClientSdePipeline` —— **全部随 #104 整体删除**。
+> 因此「同世界两次顺序会话」这个前提本身已不存在（控制面只做 `cp_` 前缀托管世界）。
+> 编排里的 `Invoke-SdeInterop` 保留为**显式的 not-run 阶段**（如实写出退役与原因，不伪装成通过、也不继续空转）。
+> 等价能力（`/sde export` 与多方块产物互不干扰）改由 cp 的 `export.scene` / `export.multiblock` + 判据引擎承载；
+> 把本阶段改写为 cp 驱动属跟进单范围。
 
 ---
 
