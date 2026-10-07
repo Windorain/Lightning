@@ -10,12 +10,13 @@
   "schema": "lightning.case/1",          // 必填，精确匹配
   "id": "lp-pipe-row",                    // 必填，[a-z0-9-]+，run 目录名组成部分
   "label": "LP 四格管道参照",              // 展示名
+  // 以下键按「执行序」排列（段序见本节末）：JSON 对象键无序，但文档按执行序写以免读者误读
   "world":    { ... },                   // 必填：世界构建方式
+  "capture":  { ... },                   // 可空（PR-2 起）：扫描与捕获参数
   "build":    [ ... ],                   // 可空：场景构建步骤
   "read":     [ ... ],                   // 可空（v1.3，issue #98）：读面步骤
   "action":   [ ... ],                   // 可空（v1.6，issue #103）：L2 编排步骤（任意 cp 动作）
   "export":   [ ... ],                   // 可空（v1.7，issue #102）：导出步骤
-  "capture":  { ... },                   // 可空（PR-2 起）：扫描与捕获参数
   "cameras":  [ ... ],                   // 可空（PR-2 起）：机位表
   "criteria": [ ... ],                   // 必填，至少一条：判据与阈值
   "variants": [ ... ],                   // 可空：负对照变体
@@ -23,15 +24,24 @@
 }
 ```
 
-**段序即执行序**（`CaseValidator.SEGMENTS`，v1.6）：
+**段序即执行序**（v1.7，含 `export` 段后为九段）：
+
+> **段序的唯一权威 = 源码 `controlplane/core/CaseValidator.java` 的 `SEGMENTS`**（`CaseValidator.java:69-83`，
+> 按 `world`/`capture`/`build`/`read`/`action`/`export`/`cameras`/`criteria`/`evidence` 顺序逐条添加）。
+> **本节是文档里唯一的段序字面副本**；本文件其他小节与 `contract.md` 只引本节，不复述段序——
+> 复述过一次就漂移过一次（2026-10 收口核对实测：文档里曾有 6 种写法只有 2 种对，其中一种还臆造了段名 `shots`，
+> 照它写 `segments:["shots"]` 会当场得 `CP-VALID-002`，见 Gitea #105 / #136）。
+> 段序漂移的机械守卫见 `mod/gtnh/src/test/java/com/lightning/mod/client/controlplane/core/CaseSegmentOrderDocTest.java`
+> （断言 `SEGMENTS` 与全仓 `docs/` 的段序串一致）。
 
 ```
-world → capture → build → read → action → cameras → criteria → evidence
+world → capture → build → read → action → export → cameras → criteria → evidence
 ```
 
-`action` 排在 `read` 之后、`cameras` 之前，两条都有理由：读面读的是**成品场景**（编排要改世界就该发生在读数之后，
-否则读数说的是改动前的世界而调用方以为它说的是当前的）；截图与判据必须说**同一个世界**（编排若排在拍摄之后，
-截图里的世界与 `criteria` 段读到的世界就不是一回事了）。
+`action` 排在 `read` 之后、`export` 之前：读面读的是**成品场景**（编排要改世界就该发生在读数之后，
+否则读数说的是改动前的世界而调用方以为它说的是当前的）；`export` 排在 `cameras` 之前——截图段会覆写投影/光照/渲染状态，
+导出件该反映的是「本 run 构建出的那个世界」，而不是「拍摄过程干预后的世界」；截图与判据必须说**同一个世界**
+（编排若排在拍摄之后，截图里的世界与 `criteria` 段读到的世界就不是一回事了）。
 
 ## 2. world 段
 
@@ -176,8 +186,7 @@ L0 的产物不能当 L1 的证据。用例作者应在 `label` 或资产索引�
 且该 run 内世界清单哈希唯一」。若导出只能在用例之外单独调 `export.scene`，它必然落在**另一个** run 里
 ——那么「同一 run 内世界清单哈希唯一」这条判据对导出件就永远不成立。
 
-**段位**：`world → capture → build → read → action → export → cameras → criteria → evidence`。
-`export` 在 `action` 之后、`cameras` 之前——先编排与读世界、再固化产物、最后拍摄。
+**段位**：`export` 排在 `action` 之后、`cameras` 之前（九段执行序见 §1，权威 `CaseValidator.SEGMENTS`）。
 顺序的理由不是风格：`cameras` 段会覆写投影/光照/渲染状态，导出件该反映的是「本 run 构建出的那个世界」，
 而不是「拍摄过程干预后的世界」。
 
@@ -312,7 +321,9 @@ role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直�
 
 ## 8. 执行语义
 
-1. **整跑**：`POST /cp/v1/actions/case.run {file|inline, confirm:true}` → 依序执行 world→build→read→(capture)→(shots)→criteria→evidence。
+1. **整跑**：`POST /cp/v1/actions/case.run {file|inline, confirm:true}` → 按 §1 的**九段执行序**依次执行
+   （段序即执行序，权威 `CaseValidator.SEGMENTS`；**没有 `shots` 段**——截图属 `cameras` 段，
+   `shots/` 只是机位产物的落点目录名，照 `shots` 写 `segments:[...]` 会得 `CP-VALID-002`）。
 2. **按段**：`segments:["world","build"]` 只跑指定段；段间状态是真实世界状态（不是重放），因此**按段连跑的结果必须与整跑一致**（验收锚）。判据段在新 run 中求值时，若引用的产物在本 run 不存在，必须**从当前世界状态重新产出**（如重新扫描托管区域生成 scene-manifest.json）再求值。
 3. 每段产出 `segments/<name>.json`（状态、耗时、产物引用；skipped/deferred 段也先落记录）；**`observation.json` 必须在判据段求值之前落盘**（判据可引用它）；判据汇总 `criteria.json`（纯判据语义），证据核对结论落 `evidence.json`（schema `lightning.cp-evidence/1`），合并结论在 `result.overall`（判据与证据任一红/错即 red）。
 4. run 目录：`<mcDataDir>/controlplane/runs/<yyyyMMdd-HHmmss>-<caseId>-<jobSeq>/`（jobSeq 为数字作业序号，jobId 形态 `j<seq>`），全程只增不改；`manifest.json`（schema `lightning.cp-manifest/1`）登记全部产物的 sha256。tokens/server 内部文件 schema 分别为 `lightning.cp-tokens/1`、`lightning.cp-server/1`。`case.run` 必须把 runId 挂上作业（`GET /cp/v1/jobs/{id}` 可见）。
@@ -346,7 +357,7 @@ role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直�
 | 实现 | `WorldRebuildRunner`（`CaseRunAction.stepWorld`，见 §2） | 要求走 `world.rebuild` | 否——**同一实现**，契约 §6.3 明写「共用同一实现」 |
 | 语义 | 卸载 → 删目录 → 建虚空世界（**只重建世界**，构建步在 `build` 段） | 起手换掉世界 | 否——正是纪律要的那一步 |
 | `void` | §2 必填且只许 `true` | 要求 `void:true` | 否——口径一致 |
-| 段序 | `world → capture → build → cameras → criteria → evidence`（§1、§8.1） | 要求 world 在**第一次世界写之前** | 否——`world` 是首段 |
+| 段序 | 九段固定序（§1，权威 `CaseValidator.SEGMENTS`） | 要求 world 在**第一次世界写之前** | 否——`world` 是首段 |
 | 产物 | 写 run 内 `world/scene-manifest.json` + 存档内 `scene-manifest.json` | 不涉及 | 否 |
 | 幂等 | 同参两次 `sceneManifestSha256` 相等 | 跨轮可比的前提正是它 | 否——纪律依赖它成立 |
 

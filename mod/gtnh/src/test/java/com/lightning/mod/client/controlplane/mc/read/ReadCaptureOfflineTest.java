@@ -343,6 +343,36 @@ public class ReadCaptureOfflineTest {
         }
     }
 
+    /**
+     * 自述声明的 {@code channel} 缺省值（{@code "all"}）必须与「省略」**逐字段等价**（Gitea #105 F6）。
+     *
+     * <p>
+     * 这是给 D3 补 default 的**风险对价**：自述一旦声明 {@code default:"all"}，按自述物化 default 的调用方
+     * （本仓 {@code caller.mjs} 规则 3）会把 {@code channel:"all"} 真的塞进请求体。若实现把「显式 all」
+     * 与「省略」分开对待（例如 {@code channelFilterApplied} 变 true、或 channels 表少一个通道），
+     * 那这次「补上机读默认值」就等于悄悄改了一次行为。本用例把两者钉成同一份读数。
+     */
+    @Test
+    public void explicitAllChannelIsIndistinguishableFromOmitted() {
+        CaptureDiagnostics.resetForTesting(true);
+        CaptureDiagnostics.noteWindowClosed(CaptureChannel.TESR, 64, 12, 64, "pipe", 4);
+        CaptureDiagnostics.noteWindowClosed(CaptureChannel.BLOCK_COMPILE, 64, 0, 64, "chunk(4,4)", 30);
+        CaptureDiagnostics.noteQuad(CaptureChannel.TESR, 64, 12, 64, 64, 12, 64, false);
+
+        JsonObject diag = CaptureDiagnostics.toJson();
+        // 省略 channel ⇒ 动作侧取到的就是 null（见 ReadCaptureAction：ctx.optString("channel", null)）
+        JsonObject omitted = ReadCaptureAction.buildReadback(diag, true, true, null, true, 64);
+        // 显式 "all" ⇒ 经 normalizeChannel 折成 null 后走同一条路
+        JsonObject explicitAll = ReadCaptureAction
+            .buildReadback(diag, true, true, CaptureDiagSession.normalizeChannel("all"), true, 64);
+
+        assertNull("显式 all 必须与省略一样折成「不过滤」", CaptureDiagSession.normalizeChannel("all"));
+        assertEquals("显式 all 与省略的读数必须逐字段相同", Json.toJson(omitted), Json.toJson(explicitAll));
+        assertEquals("all", str(explicitAll, "channelFilter"));
+        assertFalse("不过滤时 channelFilterApplied 必须是 false", bool(explicitAll, "channelFilterApplied"));
+        assertEquals("四通道一个都不少", 4, Json.size(obj(explicitAll, "channels")));
+    }
+
     // ------------------------------------------------------------ 会话布防/撤防
 
     /** 布防：录窗开、会话开、drain 汇按需挂上；状态快照如实回报。 */
@@ -786,6 +816,12 @@ public class ReadCaptureOfflineTest {
             ReadCaptureAction.NAME,
             "maxEvents",
             Integer.valueOf(ReadCaptureAction.DEFAULT_MAX_EVENTS));
+        // channel 的缺省是「不过滤」，且它**不**取决于调用形态 ⇒ 必须机读可见（Gitea #105 的 F6：
+        // 此前只有说明文字写了「省略 = 不过滤」，default 字段缺席 ⇒ D3「默认值机读可见」判红，
+        // 而 contract.md:115 已经写了「默认 all」）。
+        // 「all」与「省略」在实现里走同一条路（normalizeChannel 把 all/*/空 都折成 null），
+        // 因此声明的 default 不会改变行为——下面的 allEqualsOmitted 用例把这一点也钉住。
+        assertDefault(registry, ReadCaptureAction.NAME, "channel", "all");
         assertDefault(registry, CaptureDiagAction.NAME, "drainDump", Boolean.FALSE);
         assertDefault(registry, CaptureDiagAction.NAME, "latestWindowOnly", Boolean.FALSE);
         assertDefault(registry, CaptureDiagAction.NAME, "dump", Boolean.FALSE);
@@ -794,10 +830,7 @@ public class ReadCaptureOfflineTest {
             CaptureDiagAction.NAME,
             "margin",
             Integer.valueOf(CaptureDiagAction.DEFAULT_DUMP_MARGIN));
-        // 无默认值的可选参数（channel / at）不得凭空写 default
-        assertNull(
-            "channel 是「不传即全通道」，不该有 default 值",
-            findParam(registry, ReadCaptureAction.NAME, "channel").defaultValue());
+        // 无默认值的可选参数（at）不得凭空写 default
         assertNull(
             "at 是「不传即取 drain 到的格」，不该有 default 值",
             findParam(registry, CaptureDiagAction.NAME, "at").defaultValue());
