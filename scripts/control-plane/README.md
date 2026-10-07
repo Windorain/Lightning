@@ -22,6 +22,8 @@
 | `run-anchor-selftest.ps1` | **PR-3** 离线行为自检：合成夹具跑 `anchor-checks.ps1` 的每条判定，验证好数据绿、坏数据精确红（见 §10.6） |
 | `cases/read-surface.json` | **v1.3（#98）** 读面锚点用例：`read` 段跑读面动作，`criteria` 用 `json-field` 直接引用其产物 + 4 个负对照变体（见 §11.2） |
 | `run-read-surface.ps1` | **v1.3（#98）** 读面验收驱动：B1（只读性）/ D1（自述完备）/ D3（默认值可见）/ D4（失败显式）/ R（哈希可复算与可互算）/ B2（读面进判据）（见 §11） |
+| `cases/tank-fill-live.json` | **v1.6（#122）** 流体注入用例：`te` 步放 LV 化学反应釜 + 4 条 `tanks` 判据 + `world-hash-equals`；负对照变体 `neg-setblock-shell`（`te` 换 `block` 直铺空壳，储罐判据必红） |
+| `run-tank-fill.ps1` | **v1.6（#122）** 流体注入验收驱动：D1（自述完备）/ D3（默认与边界值可见）/ D4（失败显式，含提交期拒绝与执行期失败两种形状）/ A（正向注入 + `read.te` 读回一致）/ N（世界内负对照）。`-InWorld` 才跑 A/N（见 §12） |
 
 脚本只做**编排与调用**：控制面本体在 `mod/gtnh/src/main/java/com/lightning/mod/client/controlplane/`。
 脚本不直接 POST 裸请求——一切动作调用都经 `caller.mjs`（自描述驱动），便于审计「调用方是否真的读了自描述」。
@@ -774,3 +776,64 @@ pwsh -File scripts/control-plane/run-read-surface.ps1 -EvidenceDir <dir> -Action
    damage/maxDamage/displayName/nbt` 这条**非空分支**只经代码审查与单测（NBT 摘要机制本身已由
    `read.te` 的真实箱子 NBT 充分覆盖：复合 + 列表 + 字符串 + int 四种类型都在返回值里）。
    **本条是真实的能力边界，不是「已验收」**：`#99` 落地后应补一条「写入 → 逐槽读回」的实测。
+## 12. 流体注入验收（`cases/tank-fill-live.json` + `run-tank-fill.ps1`，v1.6 / #122）
+
+### 12.1 用法
+
+```powershell
+# 连已获批的客户端（本脚本不启停客户端）
+pwsh -File scripts/control-plane/run-tank-fill.ps1                 # 只跑离线可做的 D1/D3
+pwsh -File scripts/control-plane/run-tank-fill.ps1 -InWorld        # 加跑 A（正向+读回）与 N（负对照）
+pwsh -File scripts/control-plane/run-tank-fill.ps1 -InWorld -EvidenceDir <dir> -ActionTimeoutMs 240000
+```
+
+参数：`-MachineAt`（默认 `65,12,65`）、`-Fluid`（默认 `HydrochloricAcid`）、`-Amount`（默认 3000）。
+
+### 12.2 断言集
+
+| 组 | 条数 | 说明 |
+|---|---|---|
+| D1 | 12 | 自述完备：name/tier/since/description/returns/逐参数四要素/示例可复制；**returns 必须点出 `partial` 与 `dryRunFillable`**（这两个字段是「部分注入如实报告」与「零注入原因区分」的机读落点） |
+| D3 | 7 | 默认与边界值机读可见：`side` 默认 `UP`、`amount` 上界 1000000、`amount`/`fluid` **无**默认值（漏写必须显式失败） |
+| D4 | 12 | 失败显式：缺 confirm / 缺 amount / 缺 fluid / 未知流体 / 未知面 / 量 0·负·非整数·超界 / at 形态非法 / 2 条调用方侧拒绝 |
+| A | 11 | 正向：`filled==amount`、`complete && !partial`、`layer:"L0"`+`semantics:"fill"`、逐罐读数==filled、**`read.te` 读回量与 `filled` 一致**（验收判据一）、容量 16000、非空壳 |
+| N | 3 | 负对照：非容器位置 `CP-STATE-001`、超容量**部分注入如实报告**（`partial:true`，不是错误）、部分注入后恰好满 |
+
+### 12.3 D4 的两种失败形状（**两种都合格**，别只认一种）
+
+本脚本首版只认「执行期失败」，把 `CP-CONFIRM-001` 误判成红。契约 §3 的既有口径是**两种形状**：
+
+1. **提交期拒绝**：HTTP 4xx + `error.code` + `context`——请求根本没变成作业。
+   实测：缺 `confirm` → HTTP 400 `CP-CONFIRM-001`，`context={action,tier,requiredField}`。
+2. **执行期失败**：HTTP 200 + 作业 `state=failed` + 非 0 退出 + `error.code` + `context`
+   ——动作跑起来之后的前置/参数类错误（`CoreEndpoints` 只对运行期权限升格特判回 403）。
+   实测：缺 `amount` / 未知流体 / 未知面 / 量越界 → `state=failed` + `CP-VALID-002`。
+
+判据是「错误码命中 + `context` 非空 + 确实是失败」，**不是**「HTTP 一定是 200」或「一定是作业体」。
+
+### 12.4 世界内断言的前置
+
+`-InWorld` 会先跑一次 `world.rebuild`（`folder=cp_tank122_script`，含 `te` 步放机器）——
+满足 hermetic 纪律（第一次世界写动作必须是 `world.rebuild`）。故本脚本**会改世界**，
+不要在别人的验收世界中途跑它。
+
+### 12.5 实测记录（2026-10-07，v1.6）
+
+| 组 | 结果 |
+|---|---|
+| D1 / D3 / D4 / A / N | **46 条全绿**（`通过 46，失败 0`），退出码 0 |
+| `case.run tank-fill-live`（整跑） | `overall=green`，8 条判据全绿，0 红 0 error |
+| `case.run` + `variant=neg-setblock-shell` | `variantVerification.ok=true`——3 条期望判据全红（`shell` true / `metaTileId` 0 / `metaTileCapacity` null），`world-hash-equals` 仍绿（哈希对空壳盲，负对照只能靠描述器） |
+
+### 12.6 读数口径（读错会造出假绿，实机证伪后成文）
+
+| 想断言什么 | 该读哪里 | **不要**读哪里 |
+|---|---|---|
+| 注入了多少 | `/tanks/tanks/<i>/amount`（逐罐，输入侧的权威读数） | ~~`/tanks/fluid`~~ |
+| 储罐容量 | `/tanks/metaTileCapacity`（MTE 的 `mTankCapacity`，LV 化学反应釜 = 16000） | ~~方块实体的 `getCapacity()`~~（那是 **EU 容量 2048**） |
+| 产物流体 | `/tanks/tanks/<i>/fluid`（输出罐）或 `/tanks/drainableFluid` | — |
+
+`/tanks/drainableFluid`/`drainableFluidAmount` 指的是「输出/可排出」那一侧（`MTEBasicMachine.getDrainableStack() → mFluidOut`）：
+入口注 HCl 3000 后它是 `null`/`0`，配方跑完后才变成 `trichlorosilane`/`1000`。
+**拿它断言「注入成功」会把 0 误读成「没注进去」**——这是 #122 实机第二轮踩到的坑（见
+`temp/cp-tank-fill/live-verify-plan.md` §5-D2）。
