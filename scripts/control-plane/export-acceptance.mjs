@@ -148,7 +148,17 @@ async function main() {
 
   const ping = await call('core.ping', {}, { tier: 'observe' });
   if (!ping.ok) throw new Error(`控制面不可用: ${JSON.stringify(ping.error)}`);
-  record('env', server.contractVersion === '1.6', { contractVersion: server.contractVersion }, `contractVersion=${server.contractVersion}（期望 1.6）`);
+  // env gate：契约版本必须 ≥ 导出族引入版本。**不写死等号**——版本号是全局单调量，
+  // 后续每一单都会把它推高（#103 已占 1.6，导出族按撞号裁决取 1.7；将来还会更高），
+  // 写死具体值等于让每次合流都把这条 gate 判红（合流后实测：唯一红项就是这个等号）。
+  const CONTRACT_MIN = 1.7;
+  const contractVersionNum = Number.parseFloat(server.contractVersion);
+  record(
+    'env',
+    Number.isFinite(contractVersionNum) && contractVersionNum >= CONTRACT_MIN,
+    { contractVersion: server.contractVersion, contractMin: CONTRACT_MIN },
+    `contractVersion=${server.contractVersion}（要求 ≥ ${CONTRACT_MIN}：导出族自 1.7 起引入）`
+  );
 
   // ---------- 起手：hermetic 虚空重建（C4 的「同世界」纪律） ----------
   const FOLDER = 'cp_export_acc';

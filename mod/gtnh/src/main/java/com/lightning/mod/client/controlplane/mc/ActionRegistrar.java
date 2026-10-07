@@ -229,17 +229,21 @@ public final class ActionRegistrar {
         registry.registerStepping(
             ActionDescriptor.builder("case.run", Tier.SCENE)
                 .description(
-                    "执行用例（整跑或按段，同一实现）：world→capture→build→read→cameras→criteria→evidence，"
+                    "执行用例（整跑或按段，同一实现）：" + "world→capture→build→read→action→export→cameras→criteria→evidence（9 段，"
+                        + "权威段序 = {@code CaseValidator.SEGMENTS}），"
                         + "逐段落 segments/<name>.json，写 criteria.json / evidence.json / observation.json。"
                         + "capture 段建立捕获会话（期间世界写动作被拒 CP-STATE-001），cameras 段逐机位走 shot.multi 的"
                         + "同一实现；cameras 段非空时本动作按内容升格为 forensic（不足 CP-AUTH-002）。"
-                        + "read 段（v1.3）逐条执行用例声明的 read.* 动作，读数落本 run 目录供 criteria 直接引用。")
+                        + "read 段（v1.3）逐条执行用例声明的 read.* 动作，读数落本 run 目录供 criteria 直接引用；"
+                        + "action 段（v1.6）执行任意已注册同步动作并可逐步断言；"
+                        + "export 段（v1.7）执行导出族动作，产物落本 run 的 export/ 下并登记（C4 同 run 纪律）。")
                 .optional("file", ActionDescriptor.TYPE_PATH, "用例文件：绝对路径，或相对 <mcDataDir>/controlplane/cases/")
                 .optional("inline", ActionDescriptor.TYPE_OBJECT, "内联用例（JSON 对象或用例 JSON 文本）；与 file 互斥")
                 .optional(
                     "segments",
                     ActionDescriptor.TYPE_ARRAY,
-                    "只跑指定段：world/capture/build/cameras/criteria/evidence 的子集")
+                    "只跑指定段：world/capture/build/read/action/export/cameras/criteria/evidence 的子集"
+                        + "（组名以 CaseValidator.SEGMENTS 为准）")
                 .optional("variant", ActionDescriptor.TYPE_STRING, "负对照变体 id：先应用补丁再跑同一实现，断言 expectCriteriaRed 全变红")
                 .optional(
                     SteppingActionBase.PARAM_TOTAL_TIMEOUT,
@@ -317,7 +321,15 @@ public final class ActionRegistrar {
                         + "**帧预算**：maxFrames/maxCells 在扫描之前算，超限 CP-VALID-002 且不写任何产物。"
                         + "**产物归属**：只落本 run 目录的 export/ 下并登记 sha256（裁决 6 单一归属）——"
                         + "工作台 ExportsListPanel 读的 structure_exports/ 看不到它，"
-                        + "请用结果的 downloadPath 下载后喂解析器（C1 口径）。")
+                        + "请用结果的 downloadPath 下载后喂解析器（C1 口径）。"
+                        + "**⚠ 烘焙前置（Gitea #127，必读）**：几何烘焙发生在**导出这一刻**，逐格回查"
+                        + "**当前活动世界**（`MeshCaptureService.finalizeSingleStructure`），取到空气即静默丢块；"
+                        + "而 `provenance.frameSha256` 是**缓冲内 scan 文本**的哈希 ⇒ **内容变了哈希也不变**。"
+                        + "因此「录制后改动世界 / 跨世界导出 / 录制与导出之间世界漂移」会得到内容不忠实的产物，"
+                        + "且 C2/C3 判据对该失真**全绿**。要求：**帧必须在录制时所在世界内、且世界未被改动时导出**"
+                        + "（`case.run` 的 world/export 段同 run 即是这条纪律的载体）；"
+                        + "详见 `docs/contracts/format-scene-file.md` §6.2。显式校验（记 world folder+维度并比对）"
+                        + "与按帧快照烘焙由 #127 承接，落地前不得把导出件当作「录制时刻世界状态」的证据。")
                 .optional(
                     "name",
                     ActionDescriptor.TYPE_STRING,

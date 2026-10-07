@@ -616,8 +616,9 @@ public final class CaseRunAction extends SteppingActionBase {
      * 登记进 manifest，判据段随后用 {@code json-field} 指针去断言它。
      *
      * <h2>与既有段的关系</h2>
-     * 段序 {@code world→capture→build→read→cameras→criteria→evidence}：读面在 build 之后
-     * （读的是成品场景）、在 criteria 之前（产物必须先落）。<b>不</b>与 {@code shot.multi} 共用
+     * 段序 {@code world→capture→build→read→action→export→cameras→criteria→evidence}：读面在 build 之后
+     * （读的是成品场景）、在 criteria 之前（产物必须先落）；{@code action}/{@code export} 段
+     * （v1.6/v1.7）也排在 criteria 之前——凡要判据引用的产物都必须先落盘。<b>不</b>与 {@code shot.multi} 共用
      * 任何状态——读面不碰渲染。
      *
      * <h2>动作实例从哪来</h2>
