@@ -84,7 +84,16 @@ public class PlayerActionsTest {
         }
     }
 
-    /** L1 的引入版本是 1.5（契约 §5：新增动作带 since；分支自报 1.4 与 #100 撞号，调度者合流裁决为 1.5）。 */
+    /**
+     * L1 的引入版本是 1.5（契约 §5：新增动作带 since；分支自报 1.4 与 #100 撞号，调度者合流裁决为 1.5）。
+     *
+     * <p>
+     * <b>契约版本断言改用「不低于」</b>：历史上这里写过 {@code assertEquals("1.5", Contract.VERSION)}，
+     * 但那是<b>时点钉死</b>——每来一个后续单（#102 起）都会撞上它，逼人改测试而不是改判断。
+     * 真正要守的不变式是「契约版本至少覆盖 #101 的引入版本」（§5 只增不改义），
+     * 精确值由「契约版本不变式」那条测试（{@code contractVersionCoversEveryActionSince}）与
+     * 各单自己的 {@code since} 测试共同保证。
+     */
     @Test
     public void playerActionsAreSince15() {
         ActionRegistry registry = new ActionRegistry();

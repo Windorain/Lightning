@@ -22,6 +22,15 @@
 | `run-anchor-selftest.ps1` | **PR-3** 离线行为自检：合成夹具跑 `anchor-checks.ps1` 的每条判定，验证好数据绿、坏数据精确红（见 §10.6） |
 | `cases/read-surface.json` | **v1.3（#98）** 读面锚点用例：`read` 段跑读面动作，`criteria` 用 `json-field` 直接引用其产物 + 4 个负对照变体（见 §11.2） |
 | `run-read-surface.ps1` | **v1.3（#98）** 读面验收驱动：B1（只读性）/ D1（自述完备）/ D3（默认值可见）/ D4（失败显式）/ R（哈希可复算与可互算）/ B2（读面进判据）（见 §11） |
+| `export-minimal-experiment.mjs` | **v1.6（#102）** 最小实验：证伪「扫描 + 烘焙可在同一 cp 动作内完成」这条**推断**（见 §12.1） |
+| `export-acceptance.mjs` | **v1.6（#102）** 导出族验收驱动：C1..C6 + D2/D3/D5 一次跑全，产出机器可读报告（见 §12.2） |
+| `export-check.mjs` | **v1.6（#102）** 单份场景文件检查器：把产物喂给 **web 侧真实解析器**（C1 的机械判据），并核对帧集/exportId/逐帧哈希（见 §12.3） |
+| `export-d2-compare.mjs` | **v1.6（#102）** D2 双通道对照：语义子树规范化哈希比对（**不做字节比对**，口径见 `dual-channel-consistency.md` §2.2） |
+| `export-d2-twins.mjs` | **v1.6（#102）** D2 覆盖另外两条孪生链路：`export.registry` ↔ `/sde dump`、`export.multiblock` ↔ `/sde multiblock`（见 §12.4） |
+| `frame-recipe-probe.mjs` | **v1.6（#102）** 诊断：找出「逐帧世界状态不同」的可用配方（触达距离 + 选区归服务端玩家，见 §12.5） |
+| `inspect-artifact.mjs` | **v1.6（#102）** 诊断：打印产物形态（顶层/inner 键、帧结构、调色板层级、provenance 配对） |
+| `evidence-catalog.mjs` | **v1.6（#102）** 证据快照：把 `GET /cp/v1/actions` 的全量自述落成 JSON（D1/D3 的静态可复核证据） |
+| `cases/export-c4.json` | **v1.6（#102）** C4 同 run 纪律用例：`export` 段把导出件与实拍/观测/世界清单放进**同一个 run** |
 
 脚本只做**编排与调用**：控制面本体在 `mod/gtnh/src/main/java/com/lightning/mod/client/controlplane/`。
 脚本不直接 POST 裸请求——一切动作调用都经 `caller.mjs`（自描述驱动），便于审计「调用方是否真的读了自描述」。
@@ -768,9 +777,128 @@ pwsh -File scripts/control-plane/run-read-surface.ps1 -EvidenceDir <dir> -Action
    `shot.multi` 的 `shots/*.png` + `shots/*.meta.json` 确实以 `role=shot`/`shot-meta` 登记，
    且 `missingFiles=0`/`sizeMismatch=0`（清单与磁盘一致）。
    **若调度者判为越界，可整动作删除**（一个文件 + 一段注册 + 两条判据，无耦合）。
-6. **未覆盖项：容器/背包里「有物品的槽位」**。本轮实测覆盖了空槽、不存在容器、非容器 TE、
-   末影箱、光标槽，但**没有一个槽里真的装着 ItemStack**——因为把物品放进容器需要 L0 写原语
-   （`#99` 的「背包与容器写入」），当前不存在。因此 `readSlot` 的 `id/meta/count/maxStackSize/
-   damage/maxDamage/displayName/nbt` 这条**非空分支**只经代码审查与单测（NBT 摘要机制本身已由
-   `read.te` 的真实箱子 NBT 充分覆盖：复合 + 列表 + 字符串 + int 四种类型都在返回值里）。
-   **本条是真实的能力边界，不是「已验收」**：`#99` 落地后应补一条「写入 → 逐槽读回」的实测。
+## 12. 导出族验收（v1.6 / #102，「收口T5」）
+
+> 契约： [`docs/control-plane/contract.md`](../../docs/control-plane/contract.md) §4.7（导出族动作）、
+> [`docs/contracts/format-scene-file.md`](../../docs/contracts/format-scene-file.md)（场景文件格式契约）、
+> [`docs/control-plane/dual-channel-consistency.md`](../../docs/control-plane/dual-channel-consistency.md)（D2 口径）。
+> 上游：#96 §6.1/§10 C 族与 D2、#102 裁决 5/6/7 与补充裁决 X-11。
+
+### 12.1 最小实验（先行，证伪一条推断）
+
+`migration-design.md` §6 末段要求：在铺开搬迁之前，用最小实验证伪一次
+「**扫描 + 烘焙可在同一 cp 动作内完成**」这条推断——它的依据只是「cp 动作跑在 Client thread」
+与 `MeshCaptureService` 的 `@SideOnly(CLIENT)` 标注，是**推断**而非事实。
+
+```powershell
+node scripts/control-plane/export-minimal-experiment.mjs --json-out <证据目录>\E1E2.json
+```
+
+它分两步：**E1** 经 `export.session` 读回命令通道（服务端线程）设的选区/帧号——证明跨线程可见；
+**E2** 调一次 `export.scene`，读回产物并断言每帧 `geometryPhase=baked`、根级 `blockPalette` 非空、
+scan 专有字段（`cellTypes`/`worldGrid`）已清理。
+
+> **判据位置的实测更正**：World 形态下 `blockPalette` 被 `liftBlockPaletteToRoot` **提到根级**，
+> 帧内**必然没有** `blockPalette`（那是 Structure 形态的形态）。第一版脚本断言「帧内有 blockPalette」
+> 从而误判——**断言必须对准形态契约**（`format-scene-file.md` §2.3），不能凭直觉。
+
+### 12.2 一次跑全（C1..C6 + D2/D3/D5）
+
+```powershell
+node scripts/control-plane/export-acceptance.mjs --out <证据目录>
+```
+
+| 判据 | 做法 |
+|---|---|
+| C1 | 产物经 `GET /cp/v1/artifacts/{runId}/{path}` 下载后喂给 **web 侧真实解析器**（见 §12.3） |
+| C2 | 逐帧录 N≥3（每帧先改世界状态）后导出，逐帧哈希与 `export.session.frameSha256` 配对比对；另断言改过状态的帧内容两两不同 |
+| C3 | 正例：全部帧 `exportId` 一致、`provenance` 在位；**负例**：跨次动作追加一帧后用 `expectFrames` 声明原帧集 ⇒ 必须 `CP-STATE-001` |
+| C4 | `case.run` 的 `export` 段（v1.6）：导出件 + 实拍 + 观测记录 + 世界清单**同一 run** |
+| C5 | 逐份下载核对清单 `sha256`；断言清单内路径全是 run 相对路径 |
+| C6 | `maxFrames` 超限 ⇒ `CP-VALID-002` + `context.fields` + `computed`，且 `bufferGeneration` 不变（不写爆、不动缓冲） |
+| D2 | `export.scene` vs `cmd.exec {/sde export}`：形态一致 + 语义子树哈希一致（见 §12.4） |
+| D3 | 三个新动作的关键参数默认值在自述里可见；`since ≤ contractVersion` |
+| D5 | `/sde web` 经 `cmd.exec` 被拒（带 `alternatives`）；动作命名空间封闭 |
+
+### 12.3 单份场景文件检查器（C1 的机械判据）
+
+```powershell
+node scripts/control-plane/export-check.mjs <file.json> --session-json <export.session 快照> `
+     --expect-shape world --expect-frames 0,1,2,9 --json-out <证据>\C1-web-parser.json
+```
+
+**它不自己实现解析器**：用 esbuild 现场把 `web/src/` 的真实模块捆成临时 ESM（不改 `web/` 下任何文件），
+跑既有消费方的真实入口链：`readEnvelopeLayers` → **`normalizeEnvelopeToPlain`** → `WorldParser.detect/parse`
+→ `RuntimeDocument`。
+
+> **两个实测教训（都写进脚本注释）**：
+> 1. **不能直接对 `inner` 调 `WorldParser.detect`**：Envelope 的 `id`/`label`/`playback` 在 **meta 里**，
+>    inner 只有体数据，而 `detect` 要求 `typeof d.id === 'string'` ⇒ 必然 false。
+>    正解是既有消费方的真实路径 `normalizeEnvelopeToPlain`（把 meta 折进根）。
+> 2. **判据只看 `webConsumerOk`，不能看子进程退出码**：该检查器内部还会跑 C2/C3 断言，
+>    它非零退出不代表「解析不了这份文件」（第一版驱动就因此把 C1 误判成红）。
+
+### 12.4 D2 双通道对照
+
+```powershell
+node scripts/control-plane/export-d2-compare.mjs <命令通道产物> <API 通道产物> --label export `
+     --json-out <证据>\D2-compare.json --byte-ok
+node scripts/control-plane/export-d2-twins.mjs --out <证据目录>
+```
+
+- **`export`**：`export-acceptance.mjs` 已覆盖（D2-3a 形态 / D2-3b 语义子树哈希 / D2-3e 字节「仅记录、不作判据」）。
+- **`dump`**：`export-d2-twins.mjs` 比三份注册表的**内容**——两侧共用
+  `ExportBundleClient.writeFullRegistryDump`，且产物**不含**路径/时间戳 ⇒ **可逐字节比**（实测一致）。
+- **`multiblock`**：两侧共用 `MultiblockExportRunner.run`，但 `/sde multiblock` 是**异步长跑**
+  （`cmd.exec` 拿不到字节），且这条管线有**上游前置** `multiblock_scan/run-NNNN/machines.json`。
+  缺前置时本脚本把判据转为「前置缺失是否被**显式且可执行**地报出来」（`CP-STATE-001` +
+  `context.expected/scanDir/hint`）——这本身就是 C6 口径在「缺前提」上的落地。
+
+> **为什么 D2 不做字节比对**（除 `dump` 这类逐字节幂等产物外）：gzip 头含 MTIME，且 cp 通道多了
+> `provenance`/`exportId`（C3 判据字段）。**拿字节相等当判据会把搬迁误判成不一致。**
+> 口径 = 解 Envelope → 取 inner → **剔除** `provenance`/`exportId` → 语义子树规范化 JSON 的 sha256。
+
+### 12.5 三个必须知道的实机口径（本单踩出来的）
+
+1. **`/sde pos1|pos2` 的坐标只来自服务端玩家实体**（没有坐标参数）⇒ 想构造任意 AABB，
+   唯一手段是先用 `scene.player.pose` 把玩家摆到角点。回报里的坐标是 `floor(玩家坐标)`
+   并标注「脚下方块」⇒ 要以 `(a,b,c)` 为选区角，玩家站在 `(a+0.5, b+1, c+0.5)`。
+   **回报用的是全角括号** `（513, 6, -647，脚下方块）` —— 半角正则匹配不到（踩过）。
+2. **`player.place_block` 受触达距离约束（约 4.5 格）**，且**动作 ok + `read.block`（客户端侧）看得到**
+   **≠ 服务端世界真的有**：服务端在 `NetHandlerPlayServer` 侧拒绝时，`/sde record`（服务端扫描）
+   依旧扫出全空气。**唯一可信的判据是服务端侧产物**（导出件里的 `cellGrid`/`blockPalette`）。
+   正解 = 每次放置前把玩家摆到目标格正上方（目标格 = 脚下一格，距离 1）。
+3. **命令通道产物要「延迟登记」才拿到终态**（见 §12.6）。
+
+### 12.6 命令通道产物的延迟登记（`CommandArtifactRegistrar`）
+
+`cmd.exec` 是**同步动作**，但它两条产物链在命令返回时都**还不是终态**：
+
+| 链路 | 为什么不是终态 | 终态的机械判据 |
+|---|---|---|
+| `/sde export` | 服务端线程先写 `geometryPhase=scan` 中间态并投包，客户端**下一个 tick** 才覆盖为 `baked`+Envelope | JSON 里出现 `documentFormat`（Envelope/Plain/Raw） |
+| `/sde dump` | 三份注册表由**客户端 tick** 写出 | 投递单已消费 **且** 三份文件都在 |
+
+**不能靠「在动作里 sleep 等」**：`cmd.exec` 跑在**客户端 tick 线程**，而那正是唯一能推进这两件事的线程
+——在动作里阻塞 = 掐死推进者 ⇒ **构造性死锁**（第一版就是这么写的，实测表现为「等待客户端写出注册表超时」）。
+正解 = 排进 `CommandArtifactRegistrar` 队列并立即返回（结果里如实写 `deferred:true`），
+由 `ControlPlaneTickHandler` 每 tick 推进，成为终态后复制进 run + 登记 sha256 + 补写 manifest。
+超时则**如实登记当时的字节**并附 `phase` 说明（不静默成功、不假装是终态）；登记事件落 `cp-export` 流水。
+
+> **这一条把 D2 从「比不了」变成「比得了」**：延迟登记之前，命令通道登记下来的是 scan 半成品
+> （实测 `geometryPhase=scan` + `cellTypes`/`worldGrid`），与 cp 通道的 baked 产物**本就不同形态**
+> ⇒ D2 必然判红且红得没有意义。登记终态后两侧语义子树哈希**实测相等**。
+
+## 13. 已知留白（#102 如实登记）
+
+1. **`export.multiblock` 实机未验**：本机没有 `multiblock_scan/run-*/machines.json`（T1.2 的产物），
+   而跑那轮枚举扫描是遍历 221 台的分钟级长跑，未在本单执行。因此它的**产物形态与幂等性（A3）未经实机验证**；
+   已验证的是：注册正确、自述完备、缺前置时**显式可执行**地报 `CP-STATE-001`
+   （`context.expected/scanDir/hint` 三件齐），以及命令通道侧如实声明未登记。
+2. **工作台 `ExportsListPanel` 看不到 cp 产物**：它读 `structure_exports/`，而 cp 通道按裁决 6
+   只写 run 目录。C1 的验收方式相应为「经 `GET /cp/v1/artifacts/{runId}/{path}` 下载后喂给解析器」。
+   老路径的删除归 **#104**。
+3. **`/sde dump` 的 `pending_dump.json` 仍在老路径**：内存投递单优先把它重定向到 run 目录，
+   但服务端线程写的那份老文件仍会落地（命令通道既有行为）。删它归 #104。
+4. **`web/node_modules` 是 C1 证据的前置**：本树冷启动时缺失，须先 `cd web; npm ci`。
+   脚本已把「缺失」降级为 C1 的 **warning + `webConsumerOk=null`**（不假装解析通过，也不静默当绿）。

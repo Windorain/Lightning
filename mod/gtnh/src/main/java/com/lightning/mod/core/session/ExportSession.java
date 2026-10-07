@@ -14,7 +14,6 @@ import net.minecraft.entity.player.EntityPlayerMP;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
-import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.lightning.mod.client.controlplane.core.Hashing;
@@ -760,14 +759,107 @@ public final class ExportSession {
     }
 
     /**
+     * 帧缓冲的一次一致性读取（Gitea #102）：既给 {@code export.session} 用的元数据，也给导出用的
+     * <b>帧体</b>（已并入逐格备注）。
+     *
+     * <h2>为什么必须与 {@link #snapshot()} 分开一个方法</h2>
+     *
+     * {@code snapshot()} 刻意<b>不含帧体</b>（帧体可达数十 MB，读面不该背它）。但 cp 的
+     * {@code export.scene} 动作需要帧体，且必须在<b>同一临界区</b>内同时取走「帧体 + 帧号 + 逐帧哈希 +
+     * 世代号 + 选区 + 身份字段」——分两次取会拿到互相矛盾的组合（动作跑到一半、命令刚 record 完一帧，
+     * 于是产物的 {@code frames[]} 与 {@code provenance.frameSha256} 对不上，这正是 R3-2 的竞态窗口）。
+     *
+     * <p>
+     * 本方法因此是 cp 导出路径的<b>唯一</b>入口：一次持锁取走全部所需状态，返回不可变值对象。
+     * 逐帧哈希口径与 {@code snapshot()} 逐字一致（缓冲内<b>原始</b>文本的 UTF-8 sha256，不是备注并入后的），
+     * 否则 {@code export.session.frameSha256} 与产物溯源会对不上。
+     */
+    public Buffer bufferSnapshot() {
+        synchronized (LOCK) {
+            int[] frames = new int[frameJson.size()];
+            String[] hashes = new String[frameJson.size()];
+            Map<Integer, String> bodies = new TreeMap<>();
+            int i = 0;
+            for (Map.Entry<Integer, String> e : frameJson.entrySet()) {
+                int idx = e.getKey() == null ? 0 : e.getKey();
+                frames[i] = idx;
+                hashes[i] = Hashing.sha256HexUtf8(e.getValue());
+                bodies.put(idx, patchFrameJsonForExportLocked(idx, e.getValue()));
+                i++;
+            }
+            Snapshot snap = new Snapshot(
+                inSession,
+                selectionMode,
+                pos1x,
+                pos1y,
+                pos1z,
+                pos2x,
+                pos2y,
+                pos2z,
+                activeFrame,
+                frames,
+                hashes,
+                bufferGeneration,
+                outputName,
+                structureId,
+                lastAuthor,
+                lastGtnhVersion);
+            return new Buffer(snap, bodies);
+        }
+    }
+
+    /**
+     * {@link #bufferSnapshot()} 的返回值：元数据快照 + 帧体（均不可变副本）。
+     *
+     * <p>
+     * {@code framesJson} 的键是帧号（升序，{@code TreeMap} 语义），值是<b>已并入该帧逐格备注</b>的
+     * JSON 文本（与 {@code exportToFile} 写出的正文同源）——导出侧因此不必再持锁重算备注。
+     */
+    public static final class Buffer {
+
+        private final Snapshot snapshot;
+        private final Map<Integer, String> framesJson;
+
+        Buffer(Snapshot snapshot, Map<Integer, String> framesJson) {
+            this.snapshot = snapshot;
+            this.framesJson = java.util.Collections.unmodifiableMap(new TreeMap<>(framesJson));
+        }
+
+        /** 元数据快照（选区/活动帧/帧号/哈希/世代/身份字段）。 */
+        public Snapshot snapshot() {
+            return snapshot;
+        }
+
+        /** 帧号 → 已并入备注的帧 JSON 文本（升序）。 */
+        public Map<Integer, String> framesJson() {
+            return framesJson;
+        }
+
+        /** 帧数。 */
+        public int size() {
+            return framesJson.size();
+        }
+    }
+
+    /**
      * 写出结构 JSON 到 {@code structure_exports}（仅场景数据；注册表请用 {@link #requestRegistryDump()}）。
      *
      * <p>
-     * <b>产物路径事实（Gitea #97 §5-D8，本单如实回报）</b>：这里是<b>CWD 相对路径</b>
+     * <b>产物路径事实（Gitea #97 §5-D8）</b>：这里是<b>CWD 相对路径</b>
      * {@code structure_exports/}，而 {@code runClient} 下进程 CWD 恰等于 {@code mcDataDir}，
      * 于是它与客户端 enrich 写的 {@code new File(mcDataDir,"structure_exports")}（{@code MeshCaptureService}）
-     * <b>指向同一目录、同一文件</b>——服务端先写、客户端随后覆盖。产物纪律收口（迁入 run 目录并入哈希清单）
-     * 归 #102，本单只如实描述、不搬迁。
+     * <b>指向同一目录、同一文件</b>——服务端先写、客户端随后覆盖。
+     *
+     * <p>
+     * <b>#102 的改动（口径）</b>：本方法现在把「帧集合 → 文档」与「文档 → 字节」两段交给
+     * {@link ExportSceneWriter}（<b>唯一</b>实现），并用 {@link ExportSceneWriter.Shape#AUTO} 形态，
+     * 使本命令通道的行为<b>逐字节不变</b>——{@code AUTO} 就是原来的隐函数
+     * （{@code frameJson.size()==1 && containsKey(0)} → 单结构；否则 World 多帧）。
+     * cp 通道（{@code export.scene}）走同一个写入器，但形态恒 {@code world}（R1-3 形态分叉统一），
+     * 且落点是它自己的 run 目录、带哈希登记（裁决 6 单一归属）。
+     *
+     * <p>
+     * 老路径 {@code structure_exports/} 在 #102 阶段<b>只服务尚未搬迁的命令通道</b>，其删除归 #104。
      */
     public String exportToFile() throws IOException {
         synchronized (LOCK) {
@@ -775,43 +867,24 @@ public final class ExportSession {
             if (!dir.exists() && !dir.mkdirs()) {
                 throw new IOException("无法创建目录: " + dir.getAbsolutePath());
             }
-            File out = new File(dir, outputName + ".json");
-
             if (frameJson.isEmpty()) {
                 throw new IllegalStateException("无缓冲数据，请先 record");
             }
+            ExportSceneWriter.Meta meta = new ExportSceneWriter.Meta();
+            meta.structureId = structureId;
+            meta.label = structureId;
+            meta.author = lastAuthor;
+            meta.gtnhVersion = lastGtnhVersion;
+            meta.description = null;
 
-            if (frameJson.size() == 1 && frameJson.containsKey(0)) {
-                String json = patchFrameJsonForExportLocked(0, frameJson.get(0));
-                writeUtf8(out, json);
-            } else {
-                JsonObject worldDocument = new JsonObject();
-                worldDocument.addProperty("id", structureId);
-                worldDocument.addProperty("mode", "multiblock");
-                worldDocument.addProperty("label", structureId);
-                worldDocument.addProperty("author", lastAuthor);
-                worldDocument.addProperty("gtnhVersion", lastGtnhVersion);
-                worldDocument.add("description", JsonNull.INSTANCE);
-                worldDocument.add("tooltipPalette", new JsonArray());
-                JsonArray frames = new JsonArray();
-                JsonParser parser = new JsonParser();
-                for (Map.Entry<Integer, String> e : frameJson.entrySet()) {
-                    JsonObject fr = new JsonObject();
-                    fr.addProperty("index", e.getKey());
-                    JsonObject nested = parser.parse(patchFrameJsonForExportLocked(e.getKey(), e.getValue()))
-                        .getAsJsonObject();
-                    fr.add("structure", nested);
-                    frames.add(fr);
-                }
-                worldDocument.add("frames", frames);
-                JsonObject playback = new JsonObject();
-                playback.addProperty("loop", false);
-                playback.addProperty("defaultFrameIndex", 0);
-                worldDocument.add("playback", playback);
-
-                writeUtf8(out, GSON.toJson(worldDocument));
+            Map<Integer, String> bodies = new TreeMap<>();
+            for (Map.Entry<Integer, String> e : frameJson.entrySet()) {
+                bodies.put(e.getKey(), patchFrameJsonForExportLocked(e.getKey(), e.getValue()));
             }
-
+            // 命令通道：不传 provenance/exportId ⇒ 产物正文与搬迁前逐字节一致（有单测锁这一点）
+            JsonObject doc = ExportSceneWriter.buildDocument(meta, bodies, ExportSceneWriter.Shape.AUTO, null, null);
+            String json = GSON.toJson(doc);
+            File out = ExportSceneWriter.writeTextTo(dir, outputName, json);
             return out.getAbsolutePath();
         }
     }

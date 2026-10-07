@@ -1,5 +1,6 @@
 package com.lightning.mod.client.controlplane.mc.cmd;
 
+import java.io.File;
 import java.util.List;
 
 import net.minecraft.entity.player.EntityPlayerMP;
@@ -124,6 +125,14 @@ public final class CmdExecAction implements ControlAction {
 
         ServerCommandInvoker.Result r = ServerCommandInvoker.execute(parsed.normalized, player, timeoutMs);
 
+        // run 归属（#102 裁决 6/7）：命令通道的产物同样要进 run 清单（C5）。
+        // run 由**发起方**持有——这里就是发起方（cmd.exec 自己开 run，caseId="cmd-exec"）。
+        // 只有会产出文件的子命令才开 run（否则每次只读命令都留一个空 run 目录，污染产物面）。
+        com.lightning.mod.client.controlplane.core.ArtifactStore.Run run = null;
+        if (PRODUCING_SUBS.contains(parsed.sub)) {
+            run = ctx.beginRun("cmd-exec");
+        }
+
         JsonObject result = new JsonObject();
         result.addProperty("schema", "lightning.cp-cmd-exec/1");
         result.addProperty("contractVersion", Contract.VERSION);
@@ -136,6 +145,7 @@ public final class CmdExecAction implements ControlAction {
                     .id());
         result.addProperty("status", r.status());
         result.addProperty("reply", r.replyText());
+        result.addProperty("runId", run == null ? null : run.runId());
 
         JsonArray replies = new JsonArray();
         for (String line : r.replies()) {
@@ -155,7 +165,7 @@ public final class CmdExecAction implements ControlAction {
         // 这是附加字段（不是替代）——export.session 仍是唯一的结构化读面，此处只是省一次往返。
         result.add("sessionAfter", ExportSessionAction.snapshotJson());
 
-        JsonArray artifacts = artifactsFor(parsed.sub, r);
+        JsonArray artifacts = artifactsFor(parsed.sub, r, ctx, run);
         result.add("artifacts", artifacts);
 
         JsonObject data = auditData(raw, parsed, true, entry, timeoutMs);
@@ -368,49 +378,178 @@ public final class CmdExecAction implements ControlAction {
     public static final String WHITELIST_VERSION = "1";
 
     /**
-     * 声明本次命令会/已产生哪些文件产物（任务单「调用与产物如实入 run 审计」）。
+     * 声明本次命令会/已产生哪些文件产物，并把它们<b>排进 run 清单的延迟登记队列</b>（Gitea #102 裁决 6）。
+     *
+     * <h2>从「声明」升级为「登记」（本单的改动点）</h2>
+     *
+     * #100 的口径是「如实声明 {@code {role,path,exists,note}}，但不假造 run 清单条目」——因为产物
+     * 落在 CWD 相对的 {@code structure_exports/} 下，与 cp run 无关。D2 要两侧都有哈希可比，
+     * 因此本单把它升级为：<b>把实际产出的文件写进 {@code cmd.exec} 自己 run 的 {@code cmd-exec/}
+     * 子目录并登记 sha256</b>（复制而不是引用：run 目录必须自洽可下载，
+     * {@code GET /cp/v1/artifacts/{runId}/{path}} 只服务 run 目录内的路径）。
+     *
+     * <h2>为什么是「延迟」而不是「立刻复制」（本单第一版实测踩的坑）</h2>
+     *
+     * 命令通道的两类产物在命令返回时<b>都还不是终态</b>：
+     *
+     * <ul>
+     * <li><b>{@code export}</b>：服务端线程先写一份 {@code geometryPhase=scan} 中间态并投网络包，
+     * 客户端在<b>下一个 tick</b> 才用 enrich 覆盖写同名文件。命令返回时复制 = 复制到<b>半成品</b>
+     * （实测：登记下来的产物 {@code geometryPhase=scan}、带 {@code cellTypes}/{@code worldGrid}，
+     * 与 cp 通道的 baked 产物语义不同 ⇒ D2 必然判红，且红得没有意义）。</li>
+     * <li><b>{@code dump}</b>：三份注册表由<b>客户端 tick</b>写出，命令返回时还不存在。</li>
+     * </ul>
      *
      * <p>
-     * 只对确实产出文件的子命令给出条目，其余返回空数组——<b>不</b>为「看起来完整」而编造路径。
-     * 路径是 <b>CWD 相对路径</b>（{@code runClient} 下 CWD == mcDataDir，见 #97 §5-D8），
-     * 与 cp run 目录无关；是否真的落盘由 {@code exists} 字段如实给出（命令可能因无选区/无帧而失败）。
+     * 而 {@code cmd.exec} 跑在<b>客户端 tick 线程</b>——那正是唯一能推进上面两件事的线程。
+     * 在动作里等（sleep/自旋）＝ 掐死推进者 ⇒ <b>构造性死锁</b>（本单第一版正是这么写的，
+     * 实测表现为「等待客户端写出注册表超时」）。因此改为：<b>排进
+     * {@link CommandArtifactRegistrar} 队列并立即返回</b>，由 {@code ControlPlaneTickHandler}
+     * 每 tick 推进一步，直到文件已是终态（或超过截止时刻，那时如实登记当时的字节 + phase 说明）。
+     *
+     * <p>
+     * 结果里因此如实写 {@code registered:false, deferred:true, deadlineTicks:N}——
+     * <b>不假装登记已完成</b>；登记实际发生后，清单与 {@code cp-export} 事件里能看到带 sha256 的条目。
+     *
+     * <p>
+     * <b>拿不到字节的子命令</b>（{@code multiblock}）如实给 {@code registered:false} + 原因
+     * ——它是异步长跑（客户端 tick 在主菜单后执行），且落点是配置项决定的目录，不在本动作的登记面内。
+     * 要它进清单请用 {@code export.multiblock}（长跑 + 逐份登记）。
      */
-    private static JsonArray artifactsFor(String sub, ServerCommandInvoker.Result r) {
+    private static JsonArray artifactsFor(String sub, ServerCommandInvoker.Result r, ActionContext ctx,
+        com.lightning.mod.client.controlplane.core.ArtifactStore.Run run) {
         JsonArray arr = new JsonArray();
         if ("export".equals(sub)) {
             // 产物路径要等命令跑完才知道（outputName 可被 setname 改过）：从回报里读回权威路径。
             String path = firstMatch(r.replyText(), "已写出场景文件: ");
+            if (path == null) {
+                addArtifact(
+                    arr,
+                    "scene-file",
+                    "<cwd>/structure_exports/<outputName>.json",
+                    false,
+                    null,
+                    null,
+                    "命令回报里没有「已写出场景文件: 」行——命令语义失败（无选区/无帧），本次无产物");
+                return arr;
+            }
+            File src = new File(path);
+            String rel = "cmd-exec/" + src.getName();
+            if (run == null) {
+                addArtifact(arr, "scene-file", path, src.isFile(), null, null, "未开 run（无可登记目标），只声明路径");
+                return arr;
+            }
+            // 延迟登记：等客户端 enrich 把它覆盖成 Envelope（或显式 Plain/Raw）后再复制。
+            CommandArtifactRegistrar.enqueue(
+                new CommandArtifactRegistrar.SceneFile(
+                    src,
+                    run.runId(),
+                    rel,
+                    CommandArtifactRegistrar.DEFAULT_DEADLINE_TICKS));
             addArtifact(
                 arr,
                 "scene-file",
-                path != null ? path : "<cwd>/structure_exports/<outputName>.json",
-                path != null,
-                "命令回报中的绝对路径（客户端 enrich 随后会覆盖同名文件，见 cmd.exec 自述）");
-        } else if ("dump".equals(sub)) {
+                rel,
+                src.isFile(),
+                null,
+                null,
+                "已排入延迟登记（deferred）：服务端先写 scan 中间态，客户端下一个 tick 用 enrich 覆盖为 baked+Envelope；"
+                    + "等它成为终态后复制进 run 并登记 sha256（见 cp-export 事件与 run 清单）");
+            return arr;
+        }
+        if ("dump".equals(sub)) {
             String root = firstMatch(r.replyText(), "全量 block_registry.json / material_registry.json: ");
+            if (run == null) {
+                addArtifact(
+                    arr,
+                    "registry-dump-request",
+                    root != null ? root : "<cwd>/structure_exports",
+                    root != null,
+                    null,
+                    null,
+                    "未开 run（无可登记目标），只声明 pending_dump.json 落点");
+                return arr;
+            }
+            // 把投递单落点改到本 run（裁决 7：run 由发起方持有）。
+            // 注意：服务端线程刚写的 pending_dump.json 仍在老路径（CWD 相对）——它是命令通道的既有行为；
+            // 这里追加一条**内存投递单**，客户端优先消费它（内存单槽优先），于是注册表落进本 run。
+            File dumpDir = run.resolve("cmd-exec")
+                .toFile();
+            if (!dumpDir.isDirectory() && !dumpDir.mkdirs()) {
+                addArtifact(
+                    arr,
+                    "registry-dump-request",
+                    root,
+                    root != null,
+                    null,
+                    null,
+                    "无法创建 run 内 dump 目录: " + dumpDir);
+                return arr;
+            }
+            com.lightning.mod.core.export.RegistryDumpDelivery.Request req = com.lightning.mod.core.export.RegistryDumpDelivery
+                .request(run.runId(), dumpDir, "cmd-exec");
+            if (req == null) {
+                addArtifact(arr, "registry-dump-request", root, root != null, null, null, "已有待消费的注册表投递单，本次未登记");
+                return arr;
+            }
+            CommandArtifactRegistrar.enqueue(
+                new CommandArtifactRegistrar.RegistryFiles(
+                    req,
+                    dumpDir,
+                    new String[] { "block_registry.json", "material_registry.json", "model_registry.json" },
+                    run.runId(),
+                    "cmd-exec",
+                    CommandArtifactRegistrar.DEFAULT_DEADLINE_TICKS));
             addArtifact(
                 arr,
                 "registry-dump-request",
-                root != null ? root : "<cwd>/structure_exports",
-                root != null,
-                "pending_dump.json 落盘位置；实际注册表 JSON 由客户端下一 tick 生成");
-        } else if ("multiblock".equals(sub)) {
+                "cmd-exec/",
+                false,
+                null,
+                null,
+                "已排入延迟登记（deferred）：三份注册表由客户端 tick 消费投递单后写出，写成后逐份登记 sha256" + "（见 cp-export 事件与 run 清单）");
+            return arr;
+        }
+        if ("multiblock".equals(sub)) {
             addArtifact(
                 arr,
                 "multiblock-dataset",
                 "<cwd>/<config:outputDirName>/",
                 false,
-                "多方块数据集由客户端 tick 在主菜单后异步执行，#100 只登记请求；产物路径以配置项 outputDirName 为准");
+                null,
+                null,
+                "多方块数据集由客户端 tick 异步执行（主菜单后），且落点由配置项 outputDirName 决定 ⇒"
+                    + "不在本动作的登记面内；要产物进 run 清单请用 export.multiblock（长跑 + 逐份登记）");
+            return arr;
         }
         return arr;
     }
 
-    private static void addArtifact(JsonArray arr, String role, String path, boolean exists, String note) {
+    /** 会产出文件的子命令（只有这些才开 run）。 */
+    private static final java.util.Set<String> PRODUCING_SUBS = new java.util.HashSet<String>(
+        java.util.Arrays.asList("export", "dump", "multiblock"));
+
+    private static void addArtifact(JsonArray arr, String role, String path, boolean exists, String sha256, Long bytes,
+        String note) {
         JsonObject o = new JsonObject();
         o.addProperty("role", role);
         o.addProperty("path", path);
         o.addProperty("exists", exists);
-        o.addProperty("note", note);
+        if (sha256 != null) {
+            o.addProperty("sha256", sha256);
+        }
+        if (bytes != null) {
+            o.addProperty("bytes", bytes.longValue());
+        }
+        o.addProperty("registered", sha256 != null && exists);
+        if (note != null) {
+            o.addProperty("note", note);
+        }
+        if (sha256 == null && note != null && note.contains("延迟登记")) {
+            // 显式区分「声明了但还没登记」与「登记失败」：调用方据此决定是等还是查错误
+            o.addProperty("deferred", true);
+            o.addProperty("deadlineTicks", CommandArtifactRegistrar.DEFAULT_DEADLINE_TICKS);
+        }
         arr.add(o);
     }
 

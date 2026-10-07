@@ -135,6 +135,9 @@ public final class CaseRunAction extends SteppingActionBase {
     /** 本用例声明了哪些机位（cameras 段的规范化数组）。 */
     private JsonArray captureCameras;
 
+    /** 段名（v1.6，Gitea #102）。 */
+    public static final String SEG_EXPORT = "export";
+
     /** cameras 段：与 shot.multi 共用的执行器（禁止复制逻辑）。 */
     private ShotExecutor shotExecutor;
     private JsonObject shotResult;
@@ -203,8 +206,16 @@ public final class CaseRunAction extends SteppingActionBase {
                 }
             }
         }
-        for (String s : Arrays
-            .asList(SEG_WORLD, SEG_CAPTURE, SEG_BUILD, SEG_READ, SEG_ACTION, SEG_CAMERAS, SEG_CRITERIA, SEG_EVIDENCE)) {
+        for (String s : Arrays.asList(
+            SEG_WORLD,
+            SEG_CAPTURE,
+            SEG_BUILD,
+            SEG_READ,
+            SEG_ACTION,
+            SEG_EXPORT,
+            SEG_CAMERAS,
+            SEG_CRITERIA,
+            SEG_EVIDENCE)) {
             if (!segments.contains(s) && !skippedSegments.contains(s)) {
                 skippedSegments.add(s);
             }
@@ -346,6 +357,9 @@ public final class CaseRunAction extends SteppingActionBase {
                 break;
             case SEG_ACTION:
                 detail = stepAction(ctx);
+                break;
+            case SEG_EXPORT:
+                detail = stepExport(ctx);
                 break;
             case SEG_CAMERAS:
                 detail = stepCameras(ctx);
@@ -602,8 +616,9 @@ public final class CaseRunAction extends SteppingActionBase {
      * 登记进 manifest，判据段随后用 {@code json-field} 指针去断言它。
      *
      * <h2>与既有段的关系</h2>
-     * 段序 {@code world→capture→build→read→cameras→criteria→evidence}：读面在 build 之后
-     * （读的是成品场景）、在 criteria 之前（产物必须先落）。<b>不</b>与 {@code shot.multi} 共用
+     * 段序 {@code world→capture→build→read→action→export→cameras→criteria→evidence}：读面在 build 之后
+     * （读的是成品场景）、在 criteria 之前（产物必须先落）；{@code action}/{@code export} 段
+     * （v1.6/v1.7）也排在 criteria 之前——凡要判据引用的产物都必须先落盘。<b>不</b>与 {@code shot.multi} 共用
      * 任何状态——读面不碰渲染。
      *
      * <h2>动作实例从哪来</h2>
@@ -709,6 +724,129 @@ public final class CaseRunAction extends SteppingActionBase {
         detail.add("steps", records);
         return detail;
     }
+
+    /**
+     * {@code export} 段（v1.6，Gitea #102）：逐条执行用例声明的导出动作，产物落<b>本用例的 run 目录</b>。
+     *
+     * <h2>为什么必须有这一段（C4）</h2>
+     *
+     * C4 要求「导出件、实拍、观测记录、世界清单哈希<b>同一 run</b>，且该 run 内世界清单哈希唯一」。
+     * 若导出只能在用例之外单独调 {@code export.scene}，它必然落在另一个 run 里——C4 对导出件就永远
+     * 不成立。本段让导出成为用例的一段，与 {@code read}/{@code cameras} 共享同一个 run 目录与观测记录。
+     *
+     * <h2>与 {@code read} 段的差别</h2>
+     *
+     * 导出动作是<b>步进</b>动作（{@code export.scene} 跨阶段推进），而读面段刻意拒绝步进动作
+     * （「跨 tick 的读面会读到两个世界状态」）。导出段的语义恰恰相反：它本来就跨 tick，且它读的
+     * 是<b>缓冲快照</b>（{@code export.scene} 在 onBegin 一次取走全部状态），因此跨 tick 不引入撕裂。
+     * 但 cp 的动作执行器是<b>按作业</b>排空的——用例作业本身正在跑，无法在它内部再起一个子作业。
+     * 因此本段直接调动作实例的 {@code step}，循环到完成为止，并把它当作「本段的一部分」计时。
+     *
+     * <p>
+     * 产物路径由动作决定（run 目录的 {@code export/} 下），本段不声明落点——段里声明落点会与动作
+     * 实现产生第二处真相。段记录里回显动作返回的 {@code path}/{@code sha256}，判据据此引用。
+     */
+    private JsonObject stepExport(ActionContext ctx) throws Exception {
+        JsonArray steps = Json.optArray(plan, "export");
+        JsonArray records = new JsonArray();
+        int executed = 0;
+        if (steps != null) {
+            for (int i = 0; i < steps.size(); i++) {
+                JsonObject step = steps.get(i)
+                    .getAsJsonObject();
+                String action = Json.optString(step, "action", null);
+                JsonObject params = Json.optObject(step, "params");
+                com.lightning.mod.client.controlplane.core.ActionRegistry.Entry entry = runtime == null ? null
+                    : runtime.actions()
+                        .lookup(action);
+                if (entry == null) {
+                    throw new CpException(
+                        ErrorCodes.VALID_UNKNOWN,
+                        "用例 export 段引用了未注册的动作: " + action,
+                        Json.object(
+                            "field",
+                            "export[" + i + "].action",
+                            "action",
+                            action,
+                            "registered",
+                            runtime == null ? null
+                                : runtime.actions()
+                                    .names()));
+                }
+                JsonObject result;
+                try {
+                    if (entry.isStepping()) {
+                        // 步进导出动作：在本段内循环推进到完成（每个作业一个新实例——
+                        // 用例作业只有一个，故这里取一次实例并在本段内复用，符合实例的作业级语义）
+                        com.lightning.mod.client.controlplane.core.SteppingAction sub = entry.newSteppingAction();
+                        if (sub == null) {
+                            throw new CpException(ErrorCodes.EXEC_FAILED, "步进动作工厂返回 null: " + action);
+                        }
+                        ActionContext derived = ctx.withParams(params == null ? new JsonObject() : params);
+                        result = null;
+                        for (int guard = 0; guard < MAX_EXPORT_STEPS && result == null; guard++) {
+                            result = sub.step(derived);
+                        }
+                        if (result == null) {
+                            throw new CpException(
+                                ErrorCodes.EXEC_TIMEOUT,
+                                "导出步骤 export[" + i + "]（" + action + "）在 " + MAX_EXPORT_STEPS + " 次推进内未完成",
+                                Json.object("field", "export[" + i + "].action", "action", action));
+                        }
+                    } else {
+                        result = entry.action()
+                            .execute(ctx.withParams(params == null ? new JsonObject() : params));
+                    }
+                } catch (CpException e) {
+                    throw new CpException(
+                        e.code(),
+                        "导出步骤 export[" + i + "]（" + action + "）失败: " + e.detail(),
+                        e.context(),
+                        e);
+                }
+                if (result == null) {
+                    result = new JsonObject();
+                }
+                JsonObject rec = new JsonObject();
+                rec.addProperty("index", i);
+                rec.addProperty("action", action);
+                rec.addProperty("ok", true);
+                rec.add("params", Json.copyObject(params));
+                rec.addProperty("runId", Json.optString(result, "runId", runId(ctx)));
+                rec.addProperty("path", Json.optString(result, "path", null));
+                rec.addProperty("sha256", Json.optString(result, "sha256", null));
+                rec.addProperty("bytes", Json.optLong(result, "bytes", -1L));
+                rec.addProperty("shape", Json.optString(result, "shape", null));
+                rec.addProperty("frames", Json.optInt(result, "frames", 0));
+                rec.add("frameIndexes", Json.copyArray(Json.optArray(result, "frameIndexes")));
+                rec.addProperty("artifactCount", Json.optInt(result, "artifactCount", 0));
+                records.add(rec);
+                executed++;
+                ctx.emit(
+                    EventStream.LEVEL_INFO,
+                    EventStream.Kinds.CASE_SEGMENT,
+                    "导出步骤完成: " + action + " → " + Json.optString(result, "path", "?"),
+                    Json.object(
+                        "action",
+                        action,
+                        "path",
+                        Json.optString(result, "path", null),
+                        "sha256",
+                        Json.optString(result, "sha256", null),
+                        "index",
+                        Integer.valueOf(i)));
+            }
+        }
+        JsonObject detail = new JsonObject();
+        detail.addProperty("executed", executed);
+        detail.addProperty("declared", steps == null ? 0 : steps.size());
+        detail.add("steps", records);
+        detail.addProperty("note", "导出件落本 run 目录（C4 同 run 纪律）；落点由导出动作决定，段内不声明 path");
+        return detail;
+    }
+
+    /** 单个导出步骤的最大推进次数（防步进动作卡死；正常 export.scene 是 3 阶段）。 */
+    public static final int MAX_EXPORT_STEPS = 200;
 
     /** 读面产物的默认 role：由动作名的最后一段派生（{@code read.blocks} → {@code read-blocks}）。 */
     static String deriveRole(String action) {

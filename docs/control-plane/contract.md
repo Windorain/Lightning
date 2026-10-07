@@ -58,15 +58,17 @@
 ## 4. 动作清单
 
 > **数量口径（D3 漂移防线）**：本表按引入批次分节；**权威动作数**以实机
-> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.6** 共 **37 个**动作：
-> 本节 8 个（PR-1）+ §4.1 的 8 个读面 + §4.2 的 3 个取证 + §4.4 的 6 个 L0 + §4.5 的 2 个命令通道
-> + §4.6 的 9 个 L1 + §4.8 的 1 个收尾原语。
+> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.7** 共 **40 个**动作：
+> 本节 8 个（PR-1）+ §4.1 的 8 个读面（#98）+ §4.2 的 3 个取证（PR-2）+ §4.4 的 6 个 L0（#99）
+> + §4.5 的 2 个命令通道（#100）+ §4.6 的 9 个 L1（#101）+ §4.9 的 1 个收尾原语（#103）
+> + §4.7 的 3 个导出族（#102）。
 > 历史上本标题曾写「v1，PR-1 交付」而表外另有动作，导致目录与文档不一致（Gitea #97 §5-D3）——
 > 新增动作时**必须**同步本节计数。
 >
-> **版本撞号裁决（#100 派发裁决 1）**：1.3 由 #98（读面）与 #99（L0）并轨占用，故本单取 **1.4**。
-> **1.6 的撞号（#103 派发裁决）**：#102（导出）与本单同时预定 1.6——本单只给 `core.shutdown` 用
-> `since=1.6`；合流时由调度者统一（若 #102 先合、本单后合则本单升 1.7，以 merge 时裁决为准）。
+> **版本沿革**：1.3 由 #98（读面）与 #99（L0）并轨占用（调度者裁决）；
+> #100 取 **1.4**（撞号裁决 1）；#101 自报 1.4 与 #100 撞号，合流统一为 **1.5**；
+> #103 取 **1.6**；#102 自报 1.6 与 #103 撞号，合流统一为 **1.7**。
+> 小版本只增不改义（§5）。
 
 | 动作 | 级 | 语义 |
 |---|---|---|
@@ -80,11 +82,15 @@
 | `case.run` | scene 起 | 执行用例文件：默认整跑；`segments:[...]` 按段执行。**整跑与按段共用同一实现、同一产物形态**（验收锚）。产物为 run 目录 + 观测记录 + 判据结论 |
 
 v1.3（issue #98）追加的观察面读面动作见 §4.1；v1.4（issue #100，收口T3）追加的命令通道动作见 §4.5；
+v1.5（issue #101，收口T4）追加的 L1 玩家操作见 §4.6；v1.6（issue #103，收口T6）追加的收尾原语见 §4.9；
+v1.7（issue #102，收口T5）追加的导出族见 §4.7；
 下表是 PR-1 的动作清单，追加不改已有语义。
 
 PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改上表已有语义。
 **#99（收口T2）追加 6 个 L0 布景原语**（`scene.*`，见 §4.4），同样只增不改上表语义。
 **#101（收口T4）追加 9 个 L1 玩家操作**（`player.*`，见 §4.6），同样只增不改上表语义。
+**#102（收口T5）追加 3 个导出族动作**（`export.scene`/`export.registry`/`export.multiblock`，见 §4.7），
+同样只增不改上表语义；本单同时把 `cmd.exec` 的 `artifacts[]` 升级为「登记进 run 清单（带 sha256）」。
 
 ### 4.1 观察面读面动作（v1.3，issue #98）
 
@@ -241,9 +247,21 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 `commandText`（提交原文）、`command`（归一化文本）、`root`、`sub`、`allowed`、`decision`、`tier`、`whitelistVersion`、`timeoutMs`；
 执行类另带 `status`（`ok`/`no-server`/`timeout`/`exception`）、`executedOnThread`、`serverTick`、`elapsedMs`、`reply`（回报全文）、`artifacts[]`。
 
-**产物口径（裁决 6 → #102）**：`export` / `dump` / `multiblock` 产生的文件落在 **CWD 相对路径** `structure_exports/` 下（`runClient` 下进程 CWD == `mcDataDir`，见 #97 §5-D8），**不在** cp 的 run 目录内。`cmd.exec` 因此在结果的 `artifacts[{role,path,exists,note}]` 与事件流水里**如实登记路径与存在性，但不假造 run 清单条目**。产物统一迁入 run 目录并登记哈希清单属 **#102** 的范围（本契约版本不搬迁）。
+**产物口径（裁决 6，v1.6 起由 #102 落地）**：`export` / `dump` 的产物由 `cmd.exec` **复制/登记进它自己 run**
+的 `cmd-exec/` 子目录并登记 sha256（`artifacts[{role,path,exists,registered,sha256,bytes,note}]`）——
+run 由**发起方**（`cmd.exec`）持有，落点由它给出（§4.7.2-B 的投递单）。因此 C5
+「命令通道产生的场景文件同样可发现可核对」成立，且 D2 两侧都有哈希可比。
+`multiblock` 是异步长跑（客户端 tick 在主菜单后执行），不在 `cmd.exec` 的等待窗口内，故它如实给
+`registered:false` + 原因（要它进清单请用 `export.multiblock`）。
 
-> **已知事实（如实记录，非缺陷）**：`runClient` 下服务端 `exportToFile()` 与客户端 enrich（`MeshCaptureService`）写的是**同一目录同一文件**，客户端随后覆盖服务端产物。这是 `CWD == mcDataDir` 的产物，形态依赖该巧合；换启动方式（工作目录不同）会静默产出两份不同形态的文件。收口见 #102。
+> **搬迁前的口径（#100，已废止）**：产物落 CWD 相对路径 `structure_exports/`，`cmd.exec` 只声明
+> `{role,path,exists,note}` 而不登记 run 清单条目。老路径 `structure_exports/` 在 v1.6 仍服务
+> 尚未搬迁的命令通道，其删除归 #104。
+>
+> **已知事实（如实记录，非缺陷）**：`runClient` 下服务端 `exportToFile()` 与客户端 enrich
+> （`MeshCaptureService`）写的是**同一目录同一文件**，客户端随后覆盖服务端产物。这是
+> `CWD == mcDataDir` 的产物，形态依赖该巧合；换启动方式（工作目录不同）会静默产出两份不同形态的文件。
+> cp 通道（`export.scene`）**回避这条链**（客户端一次写完，不经过网络包），从根上消掉二义。
 
 #### 4.3.5 `ExportSession` 的线程语义与互斥口径（裁决 13）
 
@@ -347,13 +365,197 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 因此移动/拾取这类需要跨 tick 收敛的动作**如实返回当前读数与 `observed`**，不强求一调到位——
 一次不成就调两次，这正是探索模式的用法。
 
-### 4.7 hermetic 纪律（起手重建世界）
+### 4.7 导出族动作（v1.7，#102，「收口T5」）
+
+落地 #96 §6.1 与 §10 C 族：把 `/sde export`（场景文件）、`/sde multiblock`（数据集）、`/sde dump`（注册表）
+三条链路<b>同批</b>搬迁为 cp 动作（裁决 5），产物统一迁入 run 目录并登记哈希清单（裁决 6）。
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `export.scene` | scene | 把 `ExportSession` 帧缓冲导出为一份场景文件并登记（`/sde export` 的 cp 等价）。**客户端 tick 线程一次写完**（不经网络包 ⇒ 无「服务端写一份、客户端覆盖一份」的二义）。形态默认 `shape:"world"` = **单帧即 N=1 的多帧文档**（R1-3 口径唯一）。帧预算在扫描前算，超限 `CP-VALID-002` 且不写产物 |
+| `export.registry` | scene | `/sde dump` 的 cp 等价：请求客户端生成三份注册表并落**本 run 目录**的 `registry/`，逐份登记（`/sde dump` 是唯一必须新增机制的一条，见下） |
+| `export.multiblock` | scene | `/sde multiblock` 的 cp 等价：枚举 → 逐台变体捕获 → 因子化编码 → 逐台信封；产物落**本 run 目录**并登记 |
+
+#### 4.7.1 产物单一归属（裁决 6）
+
+每个动作的每份产物**有且只有一个**落点 = 该动作 run 目录内的相对路径，且登记进该 run 的 `manifest.json`。
+**不存在**「原地一份 + 清单引用一份」的双态。cp 通道**不写** CWD 相对路径，也**不写**老路径
+`structure_exports/`——老路径只服务尚未搬迁的命令通道，其删除归 #104。
+
+| 动作 | 产物（run 目录内相对路径） | role |
+|---|---|---|
+| `export.scene` | `export/<name>.json` | `scene-export` |
+| `export.scene`（逐帧明细） | `export/frames/F<n>.json` | `scene-export-frame` |
+| `export.registry` | `registry/block_registry.json` / `material_registry.json` / `model_registry.json` | `registry-block` / `registry-material` / `registry-model` |
+| `export.multiblock` | `export/<slug>.multiblock.json` | `multiblock` |
+| `export.multiblock`（报告） | `export/report.json` | `multiblock-report` |
+| `export.multiblock`（数据集） | `export/_dataset/run-NNNN/**` | `multiblock-dataset` |
+| `cmd.exec`（命令产物） | `cmd-exec/<name>.json` | `cmd-scene-file` / `registry-*` |
+
+**内部件不进清单**：`export.registry` 的投递单 `registry/dump-request.json` 在消费后**删除**且**从不登记**
+——否则清单里会出现「一个指向自己的条目」这种自引用怪象。
+
+**已知影响（如实登记，裁决 4 的附带影响面）**：工作台 `ExportsListPanel`
+（`web/src/workbench/components/ExportsListPanel.vue`）读的是 `structure_exports/`，
+因此**看不到 cp 通道产物**。C1 的验收方式相应改为「经 `GET /cp/v1/artifacts/{runId}/{path}` 下载产物
+→ 喂给工作台/Wiki 解析器」（`export.scene` 结果的 `downloadPath` 就是这个 URL）。
+`SdeWebServer` 是 `/sde web` 的老设施（裁决 2 已排除它入白名单），其归宿由 #104 裁决，不在 v1.6 范围。
+
+#### 4.7.2 三条链路的目标数据流（搬迁后）
+
+**A. `export.scene`（替代服务端写 + 网络包 + 客户端 enrich 三段式）**
+
+```
+HTTP thread  → 解析/鉴权/入队（§1.8：绝不触碰 MC）
+Client thread → ActionSteppingExecutor → ExportSceneAction
+   onBegin  : ctx.beginRun("export-scene") → 读 ExportSession.bufferSnapshot()
+              （帧体 + 帧号 + 逐帧 sha256 + 世代号 + 选区 + 身份字段，全在同一临界区取走）
+              显式校验：会话/选区完整? 帧预算? expectFrames?
+   stage=scan  : ExportSceneWriter.buildDocument（唯一合并实现；形态由 shape 决定）
+   stage=bake  : MeshCaptureService.finalizeStructureJson（客户端能力，天然可调用）
+   stage=write : ArtifactStore.writeArtifact(run, "export/<name>.json", bytes, "scene-export")
+                 + 可选逐帧明细 export/frames/F<n>.json
+   onFinish : 释放（缓冲**不**被清——契约 1.6 不提供隐式清缓冲）
+```
+
+**关键事实**：`/sde export` 需要「服务端写 scan 中间态 → 投给客户端烘焙」是因为**命令跑在服务端线程**，
+而烘焙（`finalizeStructureJson`）是 `@SideOnly(CLIENT)`。cp 动作本来就跑在**客户端 tick 线程**，
+因此扫描与烘焙在同一次动作内顺序完成——这条推断由 #102 的最小实验实测确认（见证据目录）。
+
+**B. `export.registry`（唯一必须新增机制的一条）**
+
+```
+Client thread → ExportRegistryAction
+   onBegin    : ctx.beginRun("export-registry")
+                RegistryDumpDelivery.request(runId, <run>/registry, "export.registry")   ← 内存投递单
+                内部件 registry/dump-request.json 落盘（**不登记**）
+   stage=wait-client : 等 ExportBundleClient.tickConsumePendingDumpIfAny 消费（客户端 tick 轮询）
+   stage=verify      : 三份存在 + 非空 + 可解析（有 schemaVersion）
+   stage=register    : 逐份 registerArtifact（role registry-*）
+   onFinish   : 释放未消费的投递单（否则一次超时会让后续调用永远撞 CP-BUSY-001）
+```
+
+**★ 反模式（不要这么做）**：不要设计成「`/sde dump` 自己开一个 run」。命令通道跑在 `Server thread`，
+它**没有** `ActionContext`/`JobHandle`，拿不到 runId 也开不了 cp run；强行开 run 会产出「不属于任何
+cp 作业」的孤儿 run，违反 §1.8 与 #96 §8.7。正确形态是 **run 由发起方持有**：
+
+- cp 通道：`export.registry` 开 run → 投递单指向该 run → 客户端写进去 → 动作登记；
+- 命令通道：`cmd.exec {command:"/sde dump"}` → `cmd.exec` 开 run（`caseId="cmd-exec"`）→ 投递单指向该 run
+  → 产物同样进清单（C5 达成），且两条通道写的是**同一个写出体**
+  （`ExportBundleClient.writeFullRegistryDump`），满足 D2。
+
+**投递单优先序**：内存单槽**优先**，老文件路径 `structure_exports/pending_dump.json` **兜底**
+（只服务尚未搬迁的命令通道）。两条路都收敛到同一个写出体。
+
+**C. `export.multiblock`（复用既有执行体，只改落点与登记）**
+
+```
+Client thread → ExportMultiblockAction（步进）
+   onBegin  : ctx.beginRun("export-multiblock")
+              RunConfig.outputRootOverride = <run>/export
+   export   : MultiblockExportRunner.run(mc, rc)   ← 与 /sde multiblock 同一执行体
+              （含 T1.3 数据集，同样落 run 目录：cap.outputRootOverride）
+   register : 逐台信封（multiblock）/ report.json（multiblock-report）/ 数据集（multiblock-dataset，按 dataset 档位）
+```
+
+**主菜单下也能跑**：捕获路径自带 `ProbeDummyWorld`（不进真实世界），与既有
+`MultiblockExportAutomation` 的行为一致——自述里写明这一点，不假装要求世界。
+
+**产物字节幂等**：产物**不含** `runId`/时间戳/绝对路径（格式契约硬约束，
+`docs/contracts/format-multiblock-doc.md` §6.3），故两次运行产物可逐字节比对（A3）。
+
+#### 4.7.3 帧预算（C6）
+
+`export.scene` 两档预算，都在**扫描之前**算（选区尺寸 × 帧数即可推算体积），超限一律 `CP-VALID-002`
++ `context.fields`，**不写任何产物**——不静默截断、不写爆：
+
+| 预算 | 参数 | 默认 | 绝对上限 | 超限 context |
+|---|---|---|---|---|
+| 帧数 | `maxFrames` | **64** | **256**（= `SdeServerRecordScheduler.MAX_CONSECUTIVE_RECORD_TICKS`） | `fields[field=frames]` = 「实际 N 帧 > 上限 M（不静默截断）」 |
+| 体素 | `maxCells` | **2,000,000** | 48³×64 | `fields[field=maxCells]`（单帧与总量分别校验） |
+
+`context` 另含可复算口径：`frames`/`maxFrames`/`volumePerFrame`/`volumeTotal`/`maxCells`/`computed`（算式文本）。
+
+**为什么必须扫描前算**：`frameJson` 存的是每帧一份完整 scan JSON 字符串，导出瞬间内存约 3 倍膨胀
+（帧字符串 + 帧对象树 + 合并文档）。256 帧 × 大型选区足以打爆堆。
+
+`export.multiblock` 的预算**沿用既有实现**（不新造）：`globalBudgetMs`（默认 4h）是**业务预算**
+（超时后剩余机器进 `failures[]`，不静默跳过）；`maxVariantsPerMachine`（默认 20000）是单台安全兜底，
+超限按契约 tierSample 抽样 + 必要时收窄通道域，产物 `notes` 如实记录真实域。
+`totalTimeoutMs`/`stageTimeoutMs` 是**作业看门狗**，与业务预算分工明确。
+
+#### 4.7.4 形态统一（R1-3，派发裁决 5）
+
+`export.scene` 的 `shape` 参数（`world` | `structure` | `auto`）：
+
+- **默认 `world`**：恒 `{id,mode,frames[],playback}`，**单帧即 N=1 的多帧文档** ⇒ C1（单场景文件）
+  与 C2（多帧）产出的是**同一种文件**、共用一条消费方解析路径；
+- `structure`：恒裸单结构（仅允许单帧）。**注意两态不可互替**——`liftBlockPaletteToRoot`
+  （跨帧调色板全局去重）只在 World 分支做；
+- `auto`：旧隐函数（`{0}` → 单结构；否则 World）。**仅命令通道 `/sde export`** 用于逐字节保留既有行为。
+
+搬迁前该判据是**帧号的隐函数**，`setframe 5 后 record 一次`（N=1 但键=5）会产出多帧形态——
+调用方无法从参数预知产物是哪种文件，C1 与 C2 可能各自绿却是两种文件（假绿）。本契约把它显式化。
+完整字段表见 [format-scene-file.md](../contracts/format-scene-file.md)。
+
+#### 4.7.5 C3「同会话同缓冲」判据
+
+`ExportSession` 是进程级单例，`frameJson` **从不因 `startSession`/`endSession` 清空**
+（两者只翻一个 boolean）⇒ **「同会话」不可由 `inSession` 判定**，必须靠：
+
+1. **动作侧**：`export.scene` 在 `onBegin` 经 `ExportSession.bufferSnapshot()` 在**同一临界区**取走
+   帧体 + 帧号 + 逐帧哈希 + 世代号 ⇒ 产物内部自洽（不会出现「帧体是新的、哈希是旧的」）；
+2. **产物侧**：cp 通道写 `provenance` + `exportId`（命令通道不写）——
+   全部 `frames[i].exportId` 必须彼此相等且等于根级 `exportId`；
+   `provenance.frameSha256` 必须与导出前经 `export.session` 读到的逐帧哈希同源同序；
+3. **调用方侧**：`expectFrames` 参数（显式声明这次导出应包含哪些帧）不符即 `CP-STATE-001`，
+   带 `expected`/`actual`/`extra`/`missing`。
+
+**负对照构造**（C3 判红的验收方式）：动作 A 录 F0..F2 并导出；动作 B（**跨次动作**）再录 F9；
+B 导出时声明 `expectFrames:{frames:[0,1,2]}` ⇒ 判红（`extra:[9]`）。
+**不要**用 `start`/`end` 之间构造负对照——缓冲不清空，那样构造不出「跨会话」。
+
+#### 4.7.6 `case.run` 的 `export` 段（C4 同 run 纪律）
+
+C4 要求「导出件、实拍、观测记录、世界清单哈希**同一 run**，且该 run 内世界清单哈希唯一」。
+若导出只能在用例之外单独调 `export.scene`，它必然落在**另一个** run 里——该判据对导出件就永远不成立。
+因此 `case.run` 增加 `export` 段（**v1.6 起**）：
+
+```jsonc
+{
+  "export": [
+    { "action": "export.scene", "params": { "name": "demo", "shape": "world" } }
+  ]
+}
+```
+
+- **段位**：`world → capture → build → read → export → cameras → criteria → evidence`
+  （导出在 `read` 之后、`cameras` 之前：拍摄会覆写投影/光照，不该影响导出件反映的世界状态）；
+- **前缀限制**：段里只接受 `export.*` 动作；
+- **不声明落点**：段里**不**接受 `path`/`role`——落点由导出动作决定，声明它会产生第二处真相。
+
+#### 4.7.7 D2 适用范围（补充裁决 X-11）
+
+双通道一致性**只适用于有命令孪生的 `/sde` 承重族动作**——即本节的三个：
+
+| 动作 | 命令孪生 | 一致性为何机械成立 |
+|---|---|---|
+| `export.scene` | `/sde export` | 共用 `ExportSceneWriter`（唯一合并与序列化实现） |
+| `export.registry` | `/sde dump` | 共用 `ExportBundleClient.writeFullRegistryDump`（唯一写出体） |
+| `export.multiblock` | `/sde multiblock` | 直接调 `MultiblockExportRunner.run`（同一执行体） |
+
+**其余动作在自述与验收中标注「D2 不适用」**，不强行造比对。比对口径见
+[dual-channel-consistency.md](dual-channel-consistency.md) §2.2：
+**不做文件逐字节比对**——解 Envelope → 取 inner → 语义子树规范化 JSON 的 sha256
+（gzip 头含 MTIME，且 cp 通道多了 `provenance`）。
+
+### 4.8 hermetic 纪律（起手重建世界）
 
 见 case-file.md §8.8。要点：**验收类固定程序的第一次世界写动作必须是 `world.rebuild`（`void:true`）**，
 不得在既有世界上续跑。`case.run` 的 `world` 段与之是**同一实现**（§6.3），二者语义不冲突。
 L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**，不能替代起手重建。
 
-### 4.8 无人值守收尾原语（v1.6，#103，「收口T6」）
+### 4.9 无人值守收尾原语（v1.6，#103，「收口T6」）
 
 | 动作 | 级 | 语义 |
 |---|---|---|
@@ -400,7 +602,7 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 **不许编入固定程序**：本动作会让本作业后续段不再执行，`case.run` 的 `action` 段一律拒绝它
 （`CaseValidator.ACTION_FORBIDDEN`）——收尾由驱动在**整跑结束后**单独发起。
 
-### 4.9 L2 编排段（v1.6，#103）
+### 4.10 L2 编排段（v1.6，#103）
 
 `case.run` 的用例文件新增通用 `action` 段（**段**的扩充，不是新动作）：逐条执行用例声明的任意
 **同步** cp 动作，产物落 run 目录，`expect` 非空时当场逐步断言。段序
