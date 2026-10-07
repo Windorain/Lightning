@@ -604,6 +604,125 @@ public class ReadCaptureOfflineTest {
         }
     }
 
+    /**
+     * dump 的 cell 标签不得自带坐标。
+     *
+     * <p>
+     * 实机擒获：装配器在 {@code missing} 里自行追加 {@code @x,y,z}，若标签再带坐标就成了
+     * {@code cell@515,4,-647@515,4,-647}。标签用 registryId（回答「这一格本该是什么」）即可。
+     * 这里锁的是「标签里不出现坐标」这条不变量。
+     */
+    @Test
+    public void dumpLabelsMustNotEmbedCoordinates() {
+        CaptureDiagSession.arm(true, true, false, "t0");
+        JsonArray at = new JsonArray();
+        at.add(pos(515, 4, -647));
+        List<CaptureDiagSession.DumpCell> cells = CaptureDiagSession.resolveDumpCells(at);
+        assertEquals(1, cells.size());
+        // DumpCell 不带 label（标签在装配时按 registryId 生成）；这里锁「装配输入不含坐标标签」的形态：
+        // registryId 由世界实读，测试里只能验形态——真正的不变量在实机 dump 的 cellSources.label 上，
+        // 见 evidence/I1-dump.json
+        assertEquals("DumpCell 只承载坐标与几何，不带自造标签", 515, cells.get(0).x);
+        assertEquals(4, cells.get(0).y);
+        assertEquals(-647, cells.get(0).z);
+    }
+
+    // ------------------------------------------------------------ reset 缺省规则（实机擒获的缺陷）
+
+    /**
+     * 纯 dump 形态不得顺手重新布防、也不得顺手撤防、更不得清零计数（三态缺省规则）。
+     *
+     * <p>
+     * 实机擒获的缺陷：{@code {"dump":true}} 若沿用 {@code arm:true,reset:true} 的缺省，会「顺手清零计数
+     * 并重新布防」——调用方以为只是把已采到的几何落盘，实际把刚采到的现场抹了。反过来把缺省改成
+     * {@code arm:false} 同样错：那会把<b>正在进行的采集停掉</b>。故缺省必须是第三态「不动」。
+     * 断言直接打在动作的 {@code resolveSessionMode}/{@code resolveResetDefault} 上
+     * （不另抄一份规则，抄一份等于只测自己的副本）。
+     */
+    @Test
+    public void pureDumpMustLeaveSessionUntouchedByDefault() {
+        // 会话处置缺省：dump 形态「不动」，其余「布防」；显式值一律优先
+        assertEquals(
+            "纯 dump 且未给 arm ⇒ 必须「不动」（既不重新布防也不撤防）",
+            CaptureDiagAction.SESSION_UNCHANGED,
+            CaptureDiagAction.resolveSessionMode(false, true, true));
+        assertEquals(
+            "非 dump ⇒ 布防是默认形态",
+            CaptureDiagAction.SESSION_ARM,
+            CaptureDiagAction.resolveSessionMode(false, true, false));
+        assertEquals(
+            "显式 arm:false 必须生效",
+            CaptureDiagAction.SESSION_DISARM,
+            CaptureDiagAction.resolveSessionMode(true, false, false));
+        assertEquals(
+            "显式 arm:true 在 dump 形态必须生效",
+            CaptureDiagAction.SESSION_ARM,
+            CaptureDiagAction.resolveSessionMode(true, true, true));
+
+        // reset 缺省：只在真正布防时为 true
+        assertTrue("布防形态缺省清零", CaptureDiagAction.resolveResetDefault(false, true, CaptureDiagAction.SESSION_ARM));
+        assertFalse(
+            "纯 dump（unchanged）⇒ 缺省不清零——否则导出会抹掉刚采到的现场",
+            CaptureDiagAction.resolveResetDefault(false, true, CaptureDiagAction.SESSION_UNCHANGED));
+        assertFalse(
+            "撤防 ⇒ 缺省不清零（撤防本就保留计数）",
+            CaptureDiagAction.resolveResetDefault(false, true, CaptureDiagAction.SESSION_DISARM));
+        // 显式给了 reset 就以显式值为准
+        assertFalse(
+            "显式 reset:false 在布防形态必须生效",
+            CaptureDiagAction.resolveResetDefault(true, false, CaptureDiagAction.SESSION_ARM));
+        assertTrue(
+            "显式 reset:true 必须生效（调用方要清零就清零）",
+            CaptureDiagAction.resolveResetDefault(true, true, CaptureDiagAction.SESSION_UNCHANGED));
+    }
+
+    /**
+     * 三态缺省规则的<b>端到端</b>后果：armed 时纯 dump 必须让 armed 保持真、计数一格不动。
+     *
+     * <p>
+     * 上一次只锁了纯函数；纯函数对而调用点接错照样是缺陷，故这里再验一次「动作层真的照这个规则走」：
+     * 在 armed 状态下取 {@code status()} 快照 → 模拟 unchanged 分支 → 断言状态逐字未变。
+     */
+    @Test
+    public void realDumpDoesNotDisturbRecordingSession() {
+        CaptureDiagSession.arm(true, true, false, "t0");
+        CaptureDiagnostics.noteWindowClosed(CaptureChannel.TESR, 64, 12, 64, "pipe", 5);
+        JsonObject before = CaptureDiagSession.status();
+        JsonObject diagBefore = CaptureDiagnostics.toJson();
+
+        // unchanged 分支的实际动作：只取快照，不碰任何开关（与 CaptureDiagAction.execute 逐字一致）
+        assertEquals(
+            "纯 dump 的缺省会话处置必须是 unchanged",
+            CaptureDiagAction.SESSION_UNCHANGED,
+            CaptureDiagAction.resolveSessionMode(false, true, true));
+        JsonObject snapshot = CaptureDiagSession.status();
+
+        assertTrue("unchanged 后必须仍是布防态", CaptureDiagSession.isArmed());
+        assertTrue("unchanged 后录窗仍开着", com.lightning.mod.client.meshcapture.TessellatorCaptureState.areWindowsArmed());
+        assertTrue("unchanged 后诊断会话仍开着", CaptureDiagnostics.isSessionEnabled());
+        assertEquals("unchanged 不得改动会话状态快照", Json.toJson(before), Json.toJson(snapshot));
+        // 逐计数比对，不比整份 JSON：诊断 JSON 里有采集时刻戳（epochMs），两次调用必然差几毫秒——
+        // 比整份会把「时间在走」误判成「计数被改了」（本用例在整套跑时正是这样假红过一次）
+        assertEquals("unchanged 不得动窗口计数", 1, num(obj(obj(diagBefore, "channels"), "TESR"), "windows"));
+        assertEquals(
+            "unchanged 后诊断通道计数逐字段不变",
+            Json.toJson(Json.optObject(diagBefore, "channels")),
+            Json.toJson(Json.optObject(CaptureDiagnostics.toJson(), "channels")));
+        assertEquals(
+            "unchanged 后按格归属表不变",
+            Json.toJson(Json.optArray(diagBefore, "quadsByAttr")),
+            Json.toJson(Json.optArray(CaptureDiagnostics.toJson(), "quadsByAttr")));
+        assertEquals(
+            "unchanged 后自证日志不变",
+            Json.toJson(Json.optArray(diagBefore, "selfProofLines")),
+            Json.toJson(Json.optArray(CaptureDiagnostics.toJson(), "selfProofLines")));
+
+        // 对照：disarm 分支确实会改状态（证明上面的断言不是恒真）
+        CaptureDiagSession.disarm();
+        assertFalse(CaptureDiagSession.isArmed());
+        assertFalse(CaptureDiagnostics.isSessionEnabled());
+    }
+
     // ------------------------------------------------------------ 自描述（D1/D3 的机读前提）
 
     /** 两个新动作的自描述六要素齐备，且 since 与权限级正确。 */

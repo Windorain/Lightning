@@ -419,7 +419,9 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 
 | 动作 | 级 | 语义 |
 |---|---|---|
-| `capture.diag` | observe | **捕获通道自证诊断的布防/撤防与 drain-dump**：`arm:true`（默认）布防录窗 + 诊断会话；`arm:false` 撤防（**不清计数、不清 drain 汇**）；`dump:true` 把 TESR 录窗 drain 到的实录几何装配成 web V2 场景文档落 run（`capture/diag-dump.json`，登记 sha256 进清单） |
+| `capture.diag` | observe | **捕获通道自证诊断的布防/撤防与 drain-dump**：`arm:true`（默认）布防录窗 + 诊断会话；`arm:false` 撤防（**不清计数、不清 drain 汇**）；`dump:true` 把 TESR 录窗 drain 到的实录几何装配成 web V2 场景文档落 run（`capture/diag-dump.json`，登记 sha256 进清单）。**三态会话处置**：`dump:true` 且未显式给 `arm` 时缺省是 `unchanged`——既不重新布防（会清零抹掉现场）也不撤防（会停掉正在进行的采集），只读已采到的证据 |
+
+**三态会话处置的必要性（实机擒获的缺陷）**：`sessionMode` 有 `arm` / `disarm` / `unchanged` 三个取值，因为「dump 时该怎么办」有第三种正确答案。若 `{"dump":true}` 沿用 `arm:true` 的缺省，它会**顺手重新布防**并因 `reset` 缺省为 true 而清零计数——调用方以为只是把已采到的几何落盘，实际把刚采到的现场抹了；反过来把缺省改成 `arm:false` 同样错——那会把**正在进行的采集停掉**。故缺省必须是「不动」（`unchanged`，返回值里 `sessionTouched:false` 如实回报），`reset` 缺省随之 = `(sessionMode == arm)`。两条缺省规则都是纯函数（`CaptureDiagAction.resolveSessionMode` / `resolveResetDefault`），可离线逐值锁死。
 
 **为什么存在（V4 硬真空）**：「忠实复现捕获层」的核心承诺是**静默漏录不可接受**——录窗开着但零几何流入必须可检测。这份自证此前只由老设施 `CaptureChannelProbeAutomation` 承载（触发文件驱动、进程自毁退出），而 `CaptureDiagnostics` 在 `client/controlplane/` 下**零对应物**（实测 `grep CaptureDiagnostics` 0 命中）。#104 要整体删除老探针，删之前必须先落地这条能力，否则「录窗通道到底录到了没有」再没有可读口径。
 

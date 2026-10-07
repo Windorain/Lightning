@@ -66,19 +66,71 @@ public final class CaptureDiagAction implements ControlAction {
     /** 周边空气外扩格数的默认值（与老探针的 DUMP_MARGIN 同值）。 */
     public static final int DEFAULT_DUMP_MARGIN = 1;
 
+    /** 会话处置：布防。 */
+    public static final String SESSION_ARM = "arm";
+
+    /** 会话处置：撤防。 */
+    public static final String SESSION_DISARM = "disarm";
+
+    /** 会话处置：<b>不动</b>（纯 dump 的缺省——只读已采到的证据，不碰观察条件）。 */
+    public static final String SESSION_UNCHANGED = "unchanged";
+
+    /**
+     * 会话处置的缺省规则（<b>纯函数</b>，可离线逐值锁死）。
+     *
+     * <p>
+     * 三态而不是布尔，因为「dump 时该怎么办」有第三种正确答案：{@code {"dump":true}} 的字面意图是
+     * 「把已采到的几何落盘」——它既不该顺手重新布防（会因 reset 缺省为 true 而清零，把刚采到的
+     * 现场抹掉），也不该顺手撤防（会把正在进行的采集停掉）。故：
+     * <ul>
+     * <li>调用方显式给了 {@code arm} ⇒ 按显式值 {@link #SESSION_ARM}/{@link #SESSION_DISARM}；</li>
+     * <li>纯 dump（{@code dump:true} 且未给 {@code arm}）⇒ {@link #SESSION_UNCHANGED}；</li>
+     * <li>其余 ⇒ {@link #SESSION_ARM}（布防是默认形态）。</li>
+     * </ul>
+     *
+     * @param armGiven 调用方是否显式给了 {@code arm}
+     * @param armValue 显式值（{@code armGiven} 为 false 时忽略）
+     * @param dump     是否 dump
+     */
+    public static String resolveSessionMode(boolean armGiven, boolean armValue, boolean dump) {
+        if (armGiven) {
+            return armValue ? SESSION_ARM : SESSION_DISARM;
+        }
+        return dump ? SESSION_UNCHANGED : SESSION_ARM;
+    }
+
+    /**
+     * {@code reset} 的缺省规则（<b>纯函数</b>，可离线逐值锁死）。
+     *
+     * <p>
+     * 清零只在真正布防时有意义：撤防本就<b>不清</b>计数，不动会话更不该清；报 {@code true} 只会让
+     * 调用方以为撤防/导出会清零。
+     *
+     * @param resetGiven 调用方是否显式给了 {@code reset}
+     * @param resetValue 显式值（{@code resetGiven} 为 false 时忽略）
+     * @param mode       实际生效的会话处置（{@link #resolveSessionMode} 的产物）
+     */
+    public static boolean resolveResetDefault(boolean resetGiven, boolean resetValue, String mode) {
+        if (resetGiven) {
+            return resetValue;
+        }
+        return SESSION_ARM.equals(mode);
+    }
+
     @Override
     public JsonObject execute(ActionContext ctx) {
-        boolean arm = ctx.optBool("arm", true);
-        boolean reset = ctx.optBool("reset", true);
+        boolean dump = ctx.optBool("dump", false);
         boolean drainDump = ctx.optBool("drainDump", false);
         boolean latestWindowOnly = ctx.optBool("latestWindowOnly", false);
-        boolean dump = ctx.optBool("dump", false);
+        String mode = resolveSessionMode(ctx.has("arm"), ctx.optBool("arm", true), dump);
+        boolean arm = SESSION_ARM.equals(mode);
+        boolean reset = resolveResetDefault(ctx.has("reset"), ctx.optBool("reset", true), mode);
         int margin = ctx.optInt("margin", DEFAULT_DUMP_MARGIN);
         if (margin < 0 || margin > CaptureDiagSession.MAX_DUMP_MARGIN) {
             throw CpException
                 .param("margin 越界", "margin", "须在 0.." + CaptureDiagSession.MAX_DUMP_MARGIN + "，收到 " + margin);
         }
-        // 前置校验：dump 形态下的参数错误必须在布防之前报出来（否则一次参数笔误会顺带改观察条件）
+        // 前置校验：dump 形态下的参数错误必须在动观察条件之前报出来（否则一次参数笔误会顺带改观察条件）
         JsonArray at = ctx.optArray("at");
         List<CaptureDiagSession.DumpCell> cells = null;
         if (dump) {
@@ -89,19 +141,29 @@ public final class CaptureDiagAction implements ControlAction {
         o.addProperty("schema", CaptureDiagSession.SCHEMA);
         o.addProperty("action", NAME);
         o.addProperty("requiredTier", Tier.OBSERVE.id());
+        o.addProperty("sessionMode", mode);
+        o.addProperty("resetRequested", Boolean.valueOf(reset));
+        o.addProperty(
+            "defaultRule",
+            "会话处置缺省：dump:true 且未显式给 arm ⇒ unchanged（既不重新布防也不撤防——纯导出不动观察条件）；"
+                + "其余 ⇒ arm。reset 缺省：显式值优先，否则 = (会话处置 == arm)（撤防与 unchanged 都不清零）");
 
         JsonObject sessionBefore;
-        if (arm) {
+        if (SESSION_ARM.equals(mode)) {
             sessionBefore = CaptureDiagSession.arm(
                 reset,
                 drainDump,
                 latestWindowOnly,
                 TimeSource.system()
                     .isoNow());
-        } else {
+        } else if (SESSION_DISARM.equals(mode)) {
             sessionBefore = CaptureDiagSession.disarm();
+        } else {
+            // unchanged：只取快照，不碰录窗开关、不开/关诊断会话、不动 drain 汇
+            sessionBefore = CaptureDiagSession.status();
         }
-        o.addProperty("armed", Boolean.valueOf(arm));
+        o.addProperty("armed", Boolean.valueOf(CaptureDiagSession.isArmed()));
+        o.addProperty("sessionTouched", Boolean.valueOf(!SESSION_UNCHANGED.equals(mode)));
         o.addProperty("reset", Boolean.valueOf(reset));
         o.addProperty("drainDumpRequested", Boolean.valueOf(drainDump));
         o.add("sessionBefore", sessionBefore);
@@ -110,10 +172,11 @@ public final class CaptureDiagAction implements ControlAction {
         ctx.emit(
             EventStream.LEVEL_INFO,
             EventStream.Kinds.CASE_SEGMENT,
-            arm ? "捕获诊断会话布防（录窗 + 诊断计数" + (drainDump ? " + TESR drain 汇" : "") + "）" : "捕获诊断会话撤防（计数与 drain 汇保留）",
+            SESSION_ARM.equals(mode) ? "捕获诊断会话布防（录窗 + 诊断计数" + (drainDump ? " + TESR drain 汇" : "") + "）"
+                : SESSION_DISARM.equals(mode) ? "捕获诊断会话撤防（计数与 drain 汇保留）" : "捕获诊断会话未改动（纯 dump）",
             Json.object(
-                "armed",
-                Boolean.valueOf(arm),
+                "sessionMode",
+                mode,
                 "reset",
                 Boolean.valueOf(reset),
                 "drainDump",

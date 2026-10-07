@@ -538,7 +538,7 @@ public final class CaptureDiagSession {
                         "dump：客户端该格方块为 null，registryId 记为 unknown @" + cellKey(c.x, c.y, c.z)));
             }
             JsonObject src = new JsonObject();
-            src.addProperty("label", "cell@" + cellKey(c.x, c.y, c.z));
+            src.addProperty("label", registryId);
             src.addProperty("x", Integer.valueOf(c.x));
             src.addProperty("y", Integer.valueOf(c.y));
             src.addProperty("z", Integer.valueOf(c.z));
@@ -561,17 +561,10 @@ public final class CaptureDiagSession {
             if (!inst.quads.isEmpty()) {
                 MeshCaptureService.CaptureToolkit.attachQuadMaterials(inst, textureMap, materialTable);
             }
-            // 标签口径：老探针用受控放置的 label（pipe-1/chest-1），控制面没有「放置计划」这一层，
-            // 故用世界格坐标作标签——它是 dump 格清单里唯一稳定且不依赖调用方命名的身份
-            inputs.add(
-                new CaptureDumpAssembler.CellInput(
-                    "cell@" + cellKey(c.x, c.y, c.z),
-                    registryId,
-                    meta,
-                    c.x,
-                    c.y,
-                    c.z,
-                    inst.quads));
+            // 标签口径：老探针用受控放置的 label（pipe-1/chest-1），控制面没有「放置计划」这一层。
+            // 用 registryId 作标签：它回答「这一格本该是什么」；装配器在 missing 里会自行追加
+            // `@x,y,z`，故标签里**不能**再带坐标（带了就成 `cell@515,4,-647@515,4,-647`，实机捕获）
+            inputs.add(new CaptureDumpAssembler.CellInput(registryId, registryId, meta, c.x, c.y, c.z, inst.quads));
         }
 
         // 装配器对空 cells 抛 IllegalArgumentException（契约是「不产空产物」）；

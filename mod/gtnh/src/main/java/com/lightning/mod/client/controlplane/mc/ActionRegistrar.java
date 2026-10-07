@@ -1392,12 +1392,19 @@ public final class ActionRegistrar {
                     "arm",
                     ActionDescriptor.TYPE_BOOL,
                     Boolean.TRUE,
-                    "true=布防（录窗 + 诊断会话）；false=撤防（计数与 drain 汇保留，不清）")
+                    "true=布防（录窗 + 诊断会话）；false=撤防（计数与 drain 汇保留，不清）。"
+                        + "**缺省值取决于调用形态（三态）**：dump:true 且未显式给 arm 时为「不动」——既不重新布防"
+                        + "也不撤防（「把已采到的几何落盘」不该改观察条件；重新布防会清零抹掉现场，撤防会停掉正在进行的采集）；"
+                        + "其余为 true。显式给 arm 时一律以显式值为准；实际生效值在返回值 sessionMode 里")
                 .optional(
                     "reset",
                     ActionDescriptor.TYPE_BOOL,
                     Boolean.TRUE,
-                    "布防时是否清零诊断计数（true=从零开始采本轮）。撤防与 dump 形态下本参数无效果")
+                    "布防时是否清零诊断计数。**缺省 = (sessionMode == arm)**：真正布防时 true（「从零开始采本轮」），"
+                        + "撤防或纯 dump（不动）时 false（撤防本就保留计数；纯 dump 不动观察条件，"
+                        + "否则「我只想把已采到的几何落盘」会清零计数并把刚采到的现场抹掉——实机复现的缺陷）。"
+                        + "显式给 reset 时一律以显式值为准；实际生效值在返回值 resetRequested 里，"
+                        + "不以本字段的 default 为唯一依据")
                 .optional(
                     "drainDump",
                     ActionDescriptor.TYPE_BOOL,
@@ -1426,7 +1433,8 @@ public final class ActionRegistrar {
                     Integer.valueOf(CaptureDiagAction.DEFAULT_DUMP_MARGIN),
                     "dump 的 cellGrid 相对最小包围盒外扩的格数（「周边空气」），0.." + CaptureDiagSession.MAX_DUMP_MARGIN)
                 .returns(
-                    "{schema, action, requiredTier, armed, reset, drainDumpRequested, "
+                    "{schema, action, requiredTier, sessionMode(arm|disarm|unchanged), armed, sessionTouched, "
+                        + "reset, resetRequested, defaultRule, drainDumpRequested, "
                         + "sessionBefore{armed,everArmed,armedAt,diagnosticsSessionEnabled,diagnosticsFileTarget,windowsArmed,"
                         + "windowsDisarmPending,drainDumpArmed,drainSinkAttached,latestWindowOnly,drainWindows,"
                         + "drainWindowsWithFlow,drainQuads,drainCells}, session{...同上}, "
