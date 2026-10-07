@@ -7,6 +7,7 @@ import com.lightning.mod.client.controlplane.mc.capture.CaptureBeginAction;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureDiagAction;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureDiagSession;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureEndAction;
+import com.lightning.mod.client.controlplane.mc.capture.ShotExecutor;
 import com.lightning.mod.client.controlplane.mc.capture.ShotMultiAction;
 import com.lightning.mod.client.controlplane.mc.cmd.CmdExecAction;
 import com.lightning.mod.client.controlplane.mc.cmd.ExportSessionAction;
@@ -1706,6 +1707,16 @@ public final class ActionRegistrar {
                     "会话默认光照口径：natural | neutral-flat（可被逐机位覆盖；v1 不注入光照通道，仅留痕）")
                 .optional("renderMode", ActionDescriptor.TYPE_STRING, "会话默认渲染模式：本色 | 参与光照（可被逐机位覆盖）")
                 .optional("worldTime", ActionDescriptor.TYPE_INT, "拍摄光照基准（1.7.10 一天 0..23999 tick）；缺省沿用当前时刻")
+                .optional(
+                    "gui",
+                    ActionDescriptor.TYPE_STRING,
+                    ShotExecutor.GUI_NONE,
+                    "**GUI 实拍开关**（缺省 none = 只渲染世界，保持既有行为**逐字节可比**）：none / screen。"
+                        + "screen 时把 currentScreen **也画进同一个 framebuffer**（走游戏自己的绘制路径，含 "
+                        + "DrawScreenEvent.Pre/Post），因此每机位 meta 里 `guiHidden=false` 且多出 `guiCapture[]`；"
+                        + "none 时 meta 里 `guiHidden=true` 且**不含** `guiCapture` 键。"
+                        + "开了它会让该 meta 的 sha 变化——这是刻意的（产物内容确实不同），不是回归。"
+                        + "取值域外/未知取值一律 CP-VALID-002（不静默忽略）")
                 .optional("capture", ActionDescriptor.TYPE_OBJECT, "等价于把 lighting/renderMode/worldTime 写在一个对象里")
                 .optional(
                     SteppingActionBase.PARAM_TOTAL_TIMEOUT,
@@ -1718,11 +1729,11 @@ public final class ActionRegistrar {
                     Long.valueOf(SteppingActionBase.DEFAULT_STAGE_TIMEOUT_MS),
                     STAGE_TIMEOUT_DOC)
                 .returns(
-                    "{schema, action, runId, cameraCount, shotCount, failedCount, cameras[{name,spec,ok,file,metaFile,"
-                        + "tilesDir,width,height,renderMode,lighting,lightingApplied,worldTime,tile,tileCols,tileRows,"
-                        + "tileOverlap,error?}], artifactsByCamera[{name,ok,file,metaFile,renderMode,lighting,worldTime}], "
-                        + "target?, capture?, captureSession{armed,by}, baseDisplayWidth, baseDisplayHeight, "
-                        + "settingsRestored, elapsedMs, warnings?, artifacts[], contractVersion}")
+                    "{schema, action, runId, gui, cameraCount, shotCount, failedCount, cameras[{name,spec,ok,file,metaFile,"
+                        + "tilesDir,width,height,renderMode,lighting,lightingApplied,worldTime,guiHidden,guiCapture[]?,"
+                        + "tile,tileCols,tileRows,tileOverlap,error?}], artifactsByCamera[{name,ok,file,metaFile,renderMode,"
+                        + "lighting,worldTime}], target?, capture?, captureSession{armed,by}, baseDisplayWidth, "
+                        + "baseDisplayHeight, settingsRestored, elapsedMs, warnings?, artifacts[], contractVersion}")
                 .example(
                     "{\"cameras\":[{\"name\":\"front-top\",\"pos\":[64.5,20.0,70.5],\"yaw\":180.0,\"pitch\":45.0,"
                         + "\"projection\":{\"type\":\"perspective\",\"fov\":70},\"resolution\":[1920,1080]},"

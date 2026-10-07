@@ -82,7 +82,8 @@ public final class InputMouseAction extends SteppingActionBase {
                 "means/semantics/layer(null)/op/requested{space,x,y|dx,dy}/delivered(int，全族同一类型)/"
                     + "deliveredGeometry{space,x,y,pixelScale,...}(仅 move)/events/deliveredAtTick/queueDepthAfter/"
                     + "readback{mouseX,mouseY,guiX,guiY,withinTolerance}"
-                    + "(仅 move)/hitSet{state,minSettleTicks}/held{...}/autoReleased[]/released[]/physicalConcurrent"
+                    + "(仅 move)/hitSet{state,appliesTo:this-move|preceding-move,minSettleTicks,note}"
+                    + "(move/down/up/click/wheel 均有；relative 是视角增量，无命中集)/held{...}/autoReleased[]/released[]/physicalConcurrent"
                     + "(鼠标侧恒 unobservable)/consumer{...}/consumed{observed:null}")
             .example("{\"confirm\":true,\"op\":\"move\",\"x\":426,\"y\":321}")
             .example("{\"confirm\":true,\"op\":\"wheel\",\"amount\":-1}")
@@ -475,6 +476,7 @@ public final class InputMouseAction extends SteppingActionBase {
             o.add("readback", readback == null ? new JsonObject() : readback);
             JsonObject hit = new JsonObject();
             hit.addProperty("state", "stale");
+            hit.addProperty("appliesTo", "this-move");
             hit.addProperty("minSettleTicks", InputCapabilities.MIN_SETTLE_TICKS);
             hit.addProperty(
                 "note",
@@ -494,6 +496,20 @@ public final class InputMouseAction extends SteppingActionBase {
                 "消费门 = mc.inGameHasFocus && Display.isActive() ⇒ 失焦时不承诺生效；本族不重路由、不改 displayFocused（§2.3 第 2 条）");
         } else {
             o.addProperty("delivered", deliveredTotal);
+            // 【缺陷修复（实机验收 L-W6b）】`hitSet` 原先只在 op=move 分支出现，而自描述的 `returns`
+            // 是**全族**口径 ⇒ 无先验知识的调用方在 down/click 上读不到命中集状态，只能靠源码猜。
+            // 这里给出与 move 同一口径的诚实答案：本动作只保证事件已投递，**不**声称命中了什么；
+            // `appliesTo` 区分「描述的是本次 move」与「描述的是此前那一次 move」——不做区分，
+            // down 的读数会被误读成「本动作自己已校准」。
+            JsonObject hit = new JsonObject();
+            hit.addProperty("state", "stale");
+            hit.addProperty("appliesTo", "preceding-move");
+            hit.addProperty("minSettleTicks", InputCapabilities.MIN_SETTLE_TICKS);
+            hit.addProperty(
+                "note",
+                "本动作只保证事件已投递，不声称命中：GUI 命中集每帧重建 ⇒ 命中取决于此前的 move 与 ≥" + InputCapabilities.MIN_SETTLE_TICKS
+                    + " tick 静置；未先 move 就 down/click，落到的是上一次的位置");
+            o.add("hitSet", hit);
             if ("wheel".equals(op)) {
                 o.addProperty("amount", amount);
                 o.addProperty("sign", InputCapabilities.WHEEL_SIGN);
