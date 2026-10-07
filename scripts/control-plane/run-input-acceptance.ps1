@@ -495,11 +495,33 @@ function New-E2FillCaseFile {
                 expect = [ordered]@{ '/delivered' = 1 }
             })
     }
+    # 【首轮实机教训】`lightning.case/1` 的 **`world` / `criteria` / `evidence` 是必填**：
+    # 首轮生成的用例只带 schema/id/label/action，`case.validate` 当场 `CP-VALID-002`
+    # （「world 必填且须为 object；criteria 必填；evidence 必填」）⇒ E2 走进「构造失败」的 blocked，
+    # 一条判据都没取到。三个字段在此补齐；`world` 用与 extra/world 段同一份托管世界参数
+    # （本探针只跑 action 段，`world` 只是元数据，不会被重建）。
     $doc = [ordered]@{
-        schema = 'lightning.case/1'
-        id     = 'input-queue-fill-extra'
-        label  = ("E2 队列填充探针：单个 case.run 作业内压入 {0} 条键事件（未绑定键码 {1}，全部 action=up ⇒ 功能惰性）" -f $Steps, $KeyCode)
-        action = @($stepList)
+        schema   = 'lightning.case/1'
+        id       = 'input-queue-fill-extra'
+        label    = ("E2 队列填充探针：单个 case.run 作业内压入 {0} 条键事件（未绑定键码 {1}，全部 action=up ⇒ 功能惰性）" -f $Steps, $KeyCode)
+        world    = [ordered]@{
+            folder      = 'cp_input_live'
+            seed        = 20261008
+            void        = $true
+            base        = @(64, 12, 64)
+            settleTicks = 60
+        }
+        action   = @($stepList)
+        criteria = @(
+            [ordered]@{
+                id     = 'e2-filler-artifact-present'
+                type   = 'artifact-nonempty'
+                params = [ordered]@{ path = ("action/{0:d4}-up-unbound.json" -f 0) }
+            }
+        )
+        evidence = [ordered]@{
+            expect = @([ordered]@{ path = ("action/{0:d4}-up-unbound.json" -f 0); role = 'e2-filler' })
+        }
     }
     $parent = Split-Path $Path -Parent
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
@@ -1128,7 +1150,7 @@ try {
     foreach ($n in $script:notes) { [void]$md.AppendLine("- $n") }
     foreach ($p in $script:probeNotes) { [void]$md.AppendLine("- 探针（**不作判据**）: $p") }
     [void]$md.AppendLine('- M12 需要人工改窗口尺寸才能测；会话内无法改 ⇒ 记 skipped-with-reason（不计 pass、退出码非全绿）。')
-    [void]$md.AppendLine('- extra 段（-Stage extra）的判据口径见 README §15.8：E1 判界 = 潜行每 tick 水平位移 < 对照的 0.6 倍（对照下界 0.05 blocks/tick）；E2 的填充用例由驱动现场生成在归档目录（cases/e2-queue-fill.json，不入库）；E3 用 GET /cp/v1/artifacts/{runId} 逐份复算 sha256。')
+    [void]$md.AppendLine('- extra 段（-Stage extra）的判据口径见 README §15.8：E1 判界 = 潜行每 tick 水平位移 < 对照的 0.6 倍（对照下界 0.02 blocks/tick，与 input-acceptance-checks.ps1 的 MinPlainPerTick 默认值同源）；E2 的填充用例由驱动现场生成在归档目录（cases/e2-queue-fill.json，不入库）；E3 用 GET /cp/v1/artifacts/{runId} 逐份复算 sha256。')
     [void]$md.AppendLine('- extra 段里的 W1 是「托管世界已就绪」的前置**复用**（判据函数与 world 段同一份），不是新增判据；O.rebuild / O.e3-gui-open 是驱动自加的编排守卫。')
     [void]$md.AppendLine('- E2 的「零写入」比对口径：逐路径叶子比对，显式排除 tick 计数/墙钟/JVM 内存/控制面自身记账/网络与状态效果时长等易变字段（排除清单与理由逐条写在 E2 的 detail 里），**不是**整体 JSON 字符串相等。')
     [void]$md.AppendLine('- 未跑的 stage 的判据**不出现在本表**（不是 skip、也不是 pass）；表里只有实跑过的判据。')
