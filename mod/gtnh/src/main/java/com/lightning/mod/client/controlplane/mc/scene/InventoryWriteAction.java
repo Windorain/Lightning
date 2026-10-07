@@ -21,6 +21,7 @@ import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.mc.CpLog;
 import com.lightning.mod.client.controlplane.mc.ElectricItems;
 import com.lightning.mod.client.controlplane.mc.GtItemList;
+import com.lightning.mod.client.controlplane.mc.GtStacks;
 import com.lightning.mod.client.controlplane.mc.ModReflect;
 import com.lightning.mod.client.controlplane.mc.WorldRuntime;
 
@@ -247,9 +248,10 @@ public final class InventoryWriteAction implements ControlAction {
      * 由 {@link SlotSpec} 造物品栈；{@code clear} 为真时返回 null（清空该槽）。
      *
      * <p>
-     * {@code battery} 形式走 GT 自己的 {@code ItemList}（{@link GtItemList}），
-     * 之后按需经物品自己的电力 API 充放电（{@link ElectricItems}）——两条都是模组自身的权威路径，
-     * 不拼 NBT（见类注释）。
+     * 三条「由模组自己决定物品」的路都是模组自身的权威路径，不拼 NBT / 不算 meta（见类注释）：
+     * {@code battery} 走 GT 的 {@code ItemList}（{@link GtItemList}），
+     * {@code material}+{@code prefix} 走 GT 的材料/形态表（{@link GtStacks}），
+     * 之后按需经物品自己的电力 API 充放电（{@link ElectricItems}）。
      */
     private ItemStack buildStack(SlotSpec s, String where) {
         if (s.clear) {
@@ -258,6 +260,8 @@ public final class InventoryWriteAction implements ControlAction {
         ItemStack stack;
         if (s.battery != null) {
             stack = GtItemList.get(s.battery, 1L);
+        } else if (s.material != null) {
+            stack = GtStacks.resolve(s.material, s.prefix, s.count, where);
         } else {
             Item item = EntitySpawnAction.resolveItem(s.id, where + ".id");
             stack = new ItemStack(item, s.count, s.meta);

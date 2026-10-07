@@ -45,9 +45,27 @@ import com.google.gson.JsonObject;
  *     "slots": [ {"slot":0,"empty":true},
  *                {"slot":1,"empty":false,"id":"gregtech:gt.metaitem.01@32518","meta":32518,"count":1,
  *                 "charge":100000,"maxCharge":100000,"chargeFull":true,"electricTier":1}, ... ]
+ *   },
+ *   "tanks": {
+ *     "present": true, "count": 2, "capacity": 16000, "fluidAmount": 3000,
+ *     "fluid": "hydrochloricacid_gt5u", "fluidAmountGetter": 3000,
+ *     "tanks": [ {"index":0,"present":true,"capacity":16000,"empty":false,
+ *                 "fluid":"hydrochloricacid_gt5u","amount":3000,"localizedName":"Hydrochloric Acid"},
+ *                {"index":1,"present":true,"capacity":16000,"empty":true,"amount":0,"fluid":null} ]
  *   }
  * }
  * </pre>
+ *
+ * <h2>储罐读回（#122 追加）：为什么必须有它</h2>
+ * {@code scene.tank.fill} 把流体注入 {@code MTEBasicTank.mFluid}（经 {@code IFluidHandler}），
+ * 那份状态<b>不在槽位表里</b>——只看 {@code inventory} 无法判定「注入到底进没进去」。
+ * 因此本描述器把 {@code getTankInfo}（Forge 标准面，逐罐 {@code {fluid,amount,capacity}}）与
+ * GT 侧单值读数 {@code getFluid}/{@code getFluidAmount}/{@code getCapacity} 一起暴露，
+ * 且两处都读：{@code MTEBasicMachine} 覆写了 {@code getTankInfo}
+ * （{@code MTEBasicMachineWithRecipe.java:487-498}），只列「有输入/输出流体槽」的那些罐，
+ * 未必等于 {@code getFluid} 返回的那个主罐。并列之后，
+ * {@code te-state-equals} 的 {@code key} 可以直接指到 {@code /tanks/fluidAmount} 断言注入量，
+ * 与 {@code scene.tank.fill} 的返回值出自<b>同一个读取口</b>（分叉是这类设施最贵的一类缺陷）。
  *
  * <h2>为什么读「充电槽」而不只是「槽里有什么」</h2>
  * GT 的机器充电槽是<b>条件生效</b>的：{@code MTEBasicMachine.onPostTick} 每 tick 重算
@@ -124,6 +142,7 @@ public final class GtMachineDescriber implements TeDescriber {
         o.addProperty("frontFacing", string(ModReflect.call(te, "getFrontFacing")));
         o.addProperty("active", bool(ModReflect.call(te, "isActive")));
         o.add("inventory", inventory(te, metaTile));
+        o.add("tanks", tanks(te));
         return o;
     }
 
@@ -177,6 +196,113 @@ public final class GtMachineDescriber implements TeDescriber {
                 charge != null && max != null && max.longValue() > 0L && charge.longValue() >= max.longValue()));
         o.addProperty("electricTier", ElectricItems.tier(stack));
         return o;
+    }
+
+    // ------------------------------------------------------------ 储罐（#122）
+
+    /**
+     * 储罐读数：逐罐（{@code getTankInfo}）+ GT 侧单值读数（{@code getFluid}/{@code getFluidAmount}/
+     * {@code getCapacity}）。
+     *
+     * <h2>为什么两处都读（不是冗余）</h2>
+     * {@code MTEBasicMachine} 覆写了 {@code getTankInfo}（{@code MTEBasicMachineWithRecipe.java:487-498}），
+     * 只列「有输入/输出流体槽」的罐；而 {@code getFluid} 返回的是 {@code getDrainableStack()}
+     * （{@code MTEBasicMachine.java:455-457} 覆写为 {@code mFluidOut}，即<b>输出</b>罐）。
+     * 因此「主罐」这个词在 GT 机器上是有歧义的，两个来源都读才不至于因为取哪个罐而失真。
+     *
+     * <h2>只读纪律</h2>
+     * 只调 GT/Forge 的 public getter（{@code getTankInfo}/{@code getFluid}/{@code getFluidAmount}/
+     * {@code getCapacity}），<b>不</b>调 {@code fill}/{@code drain}、不读 NBT 猜状态
+     * （见类注释与 {@link TeDescriber} 的实现纪律）。
+     *
+     * <h2>非 GT 的 {@code IFluidHandler}</h2>
+     * {@code getTankInfo} 是 Forge 的标准面，任何 {@code IFluidHandler} 都有；GT 侧的单值读数则可能
+     * 全为显式 null（该 TE 不是 GT 机器时 {@code ModReflect.call} 返回 null）。
+     * 这两件事分开表达：{@code present} 说「有没有储罐读数」，单值字段的 null 说「GT 侧有没有」。
+     */
+    private static JsonObject tanks(TileEntity te) {
+        JsonObject o = new JsonObject();
+        JsonArray tanks = new JsonArray();
+        int capacity = 0;
+        boolean anyCapacity = false;
+        String presentError = null;
+        // 用 ForgeDirection.UNKNOWN（-1）读：GT 的 getTankInfo 对 UNKNOWN 不做「面」过滤
+        // （BaseMetaTileEntity.java:1928-1934），因此它给出的是「这台机器有几个罐」的完整视图。
+        Object infos;
+        try {
+            infos = te instanceof net.minecraftforge.fluids.IFluidHandler
+                ? ((net.minecraftforge.fluids.IFluidHandler) te)
+                    .getTankInfo(net.minecraftforge.common.util.ForgeDirection.UNKNOWN)
+                : null;
+        } catch (Throwable t) {
+            presentError = ModReflect.describe(t);
+            infos = null;
+        }
+        if (infos instanceof net.minecraftforge.fluids.FluidTankInfo[]) {
+            net.minecraftforge.fluids.FluidTankInfo[] arr = (net.minecraftforge.fluids.FluidTankInfo[]) infos;
+            for (int i = 0; i < arr.length; i++) {
+                net.minecraftforge.fluids.FluidTankInfo info = arr[i];
+                JsonObject t = new JsonObject();
+                t.addProperty("index", Integer.valueOf(i));
+                if (info == null) {
+                    t.addProperty("present", Boolean.FALSE);
+                    tanks.add(t);
+                    continue;
+                }
+                t.addProperty("present", Boolean.TRUE);
+                t.addProperty("capacity", Integer.valueOf(info.capacity));
+                if (info.capacity > 0 && !anyCapacity) {
+                    capacity = info.capacity;
+                    anyCapacity = true;
+                }
+                net.minecraftforge.fluids.FluidStack fs = info.fluid;
+                if (fs == null || fs.getFluid() == null) {
+                    t.addProperty("empty", Boolean.TRUE);
+                    t.addProperty("amount", Integer.valueOf(0));
+                    t.addProperty("fluid", (String) null);
+                } else {
+                    t.addProperty("empty", Boolean.FALSE);
+                    t.addProperty(
+                        "fluid",
+                        com.lightning.mod.client.controlplane.mc.GtFluids.registryName(fs.getFluid()));
+                    t.addProperty("amount", Integer.valueOf(fs.amount));
+                    t.addProperty("localizedName", localizedName(fs.getFluid()));
+                }
+                tanks.add(t);
+            }
+        }
+        // 用 size() > 0 而不是 isEmpty()：JsonArray.isEmpty() 是 gson 2.8+ API，
+        // 运行期 FML 实载 2.2.4，编译期 classpath 是 2.8.9——写成 isEmpty() 编译能过、
+        // 运行期 NoSuchMethodError（本仓已三次同族事故，见 mod-dev 技能的 gson 陷阱条）。
+        o.addProperty("present", Boolean.valueOf(tanks.size() > 0));
+        if (presentError != null) {
+            o.addProperty("tankInfoError", presentError);
+        }
+        o.addProperty("count", Integer.valueOf(tanks.size()));
+        o.addProperty("capacity", anyCapacity ? Integer.valueOf(capacity) : null);
+        o.add("tanks", tanks);
+
+        // GT 侧单值读数（非 GT 方块实体 → 显式 null）
+        Object fluid = ModReflect.call(te, "getFluid");
+        if (fluid instanceof net.minecraftforge.fluids.FluidStack) {
+            net.minecraftforge.fluids.FluidStack fs = (net.minecraftforge.fluids.FluidStack) fluid;
+            o.addProperty("fluid", com.lightning.mod.client.controlplane.mc.GtFluids.registryName(fs.getFluid()));
+        } else {
+            o.addProperty("fluid", (String) null);
+        }
+        Object amount = ModReflect.call(te, "getFluidAmount");
+        o.addProperty("fluidAmount", amount instanceof Number ? Integer.valueOf(((Number) amount).intValue()) : null);
+        Object cap = ModReflect.call(te, "getCapacity");
+        o.addProperty("capacityGetter", cap instanceof Number ? Integer.valueOf(((Number) cap).intValue()) : null);
+        return o;
+    }
+
+    private static String localizedName(net.minecraftforge.fluids.Fluid fluid) {
+        try {
+            return fluid.getLocalizedName();
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     // ------------------------------------------------------------ 工具

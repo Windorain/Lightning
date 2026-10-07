@@ -96,7 +96,9 @@ public class PlayerActionsTest {
                 registry.descriptor(name)
                     .since());
         }
-        assertEquals("契约版本应升到 1.5", "1.5", Contract.VERSION);
+        // 契约版本随集成分支前进（#122 = 1.6）；这里只锁不变式「契约版本 ≥ 动作 since」，
+        // 不锁死具体取值——否则每加一个动作都要来改别人的测试（#117 合流时的同一裁决）。
+        assertTrue("契约版本 " + Contract.VERSION + " 必须 ≥ 1.5（L1 的引入版本）", Contract.VERSION.compareTo("1.5") >= 0);
     }
 
     /** 动作名以 {@code player.} 开头——前缀即分组（与 read./scene. 同约定）。 */
