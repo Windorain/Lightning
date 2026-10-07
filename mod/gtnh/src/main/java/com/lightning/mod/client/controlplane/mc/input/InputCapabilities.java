@@ -294,10 +294,24 @@ public final class InputCapabilities {
             "坐标换算的实机自校准只覆盖两种窗口/尺度上下文（854×480/scaleFactor 2 与 1898×1084/scaleFactor 4），且 Display.getPixelScaleFactor 反射读不到（落 1.0 兜底并如实告警）⇒ HiDPI 的真实像素缩放仍未单独校准");
         l.add("read.input 读面不存在（注入有没有生效缺第二观测面）");
         l.add("场景守卫会关聊天框（armed 期间每 tick displayGuiScreen(null)）");
+        // 【#166 DR-9】第 12 条原先**只在文档 §11.2 一边存在**（Java 侧漏登记）⇒ 两边条数不同源。
+        // 措辞按契约 §11.2 第 12 行写实：口径已冻结，但**没有判据** ⇒ 未测 ≠ 通过。
+        l.add("组合键事件序与队列满没有独立实机判据（口径已冻结为只保证事件序，但没有一条实机判据证明顺序确实成立；队列满 CP-STATE-001 零写入难以定向触发）");
+        // 【#166 DR-2】滚轮符号口径：§2.7 第 2 条把「实机校准后写死」写成实现的义务，实现如实报
+        // signVerified:false ⇒ 这是一条**未验证项**，必须与文档 §11.2 同步登记（原先两边都漏）。
+        l.add(
+            "滚轮符号口径未实机校准（input.state.wheel.signVerified:false：契约 §2.7 第 2 条要求的「由原版 changeCurrentItem 行为实机校准后写死」未完成，不得据该符号下方向判据）");
         NOT_IMPLEMENTED = Collections.unmodifiableList(l);
     }
 
-    /** 未实现清单的 JSON 形态（{@code input.state.notImplemented}）。 */
+    /**
+     * 未实现清单的 JSON 形态（{@code input.state.notImplemented} 的**唯一基**）。
+     *
+     * <p>
+     * 【#166 DR-9】本方法是清单的**单一真值来源**：装配侧以 {@link #NOT_IMPLEMENTED} 为基础，
+     * 再追加**动态**缺口（探针读不到时才知道的那些）。此前装配侧自带第三份字面清单
+     * （{@code InputStateProviderImpl.frozenNotImplemented()}）⇒ 三处不同源，删一处仍不同源。
+     */
     public static JsonArray notImplementedJson() {
         JsonArray a = new JsonArray();
         for (String s : NOT_IMPLEMENTED) {
@@ -326,10 +340,17 @@ public final class InputCapabilities {
         return a;
     }
 
-    /** 本族会返回的错误码清单（§6.1：不新增错误码）。 */
+    /**
+     * 本族会返回的错误码清单（§6.1：不新增错误码）。
+     *
+     * <p>
+     * 【#166 DR-8】本方法是错误码的**单一真值来源**，装配侧直接取它（此前装配侧另有一份
+     * {@code InputStateProviderImpl.ERRORS} 字面数组 ⇒ 两处不同源）。<b>不含 {@code CP-VALID-001}</b>：
+     * §6.1 明说 v1.8 起五个动作已注册，该码对本族**不再适用**（它是 T1 冻结期的历史形态，
+     * 只留在 §6.2 的「失败 5」示例里说明「注册前调用会得到什么」）。
+     */
     public static JsonArray errorsJson() {
         JsonArray a = new JsonArray();
-        Json.add(a, "CP-VALID-001");
         Json.add(a, "CP-VALID-002");
         Json.add(a, "CP-STATE-001");
         Json.add(a, "CP-EXEC-002");

@@ -246,8 +246,15 @@
 1. `move` 的 `x/y` 是**绝对 GUI 坐标**；`relative` 的 `dx/dy` 是**相对世界视角增量**。
    二者**不可互换**、**不同时出现**（§2.3 的禁用表）。
 2. `【要求】` 返回值里的字段名必须能自证口径：`move` 回 `requested.space = "gui-scaled"` 与
-   `delivered.space = "sdl-window"`；`relative` 回 `requested.space = "world-look-delta"`。
+   `deliveredGeometry.space = "sdl-window"`；`relative` 回 `requested.space = "world-look-delta"`。
    调用方只看 JSON 就能判断自己给的是哪一套。
+3. `【要求】`（**§6.2 早期示例的勘误，v1.8 起为正文口径**）`delivered` 在**全族**恒为
+   **整数计数**（它的定义处是 §4.1 第 1/2 条：「写进队列的事件数」）；`move` 的坐标回显因此**不**放在
+   `delivered` 里，而是放在并列的 `deliveredGeometry`（`{space:"sdl-window", x, y, pixelScale,
+   displayWidth, displayHeight}`）。理由：同一个字段两种类型会让机器消费者无从解析，而
+   `delivered` 的语义在 §4.1 已经冻结；坐标回显是另一件事（自校准用的换算结果）。
+   `【实测】` §6.2 的 `move` 成功示例**曾**把 `delivered` 写成坐标对象 —— 那是契约自身的不一致，
+   本批已按实现改为「整数 + `deliveredGeometry`」，两处口径从此只有一个。
 
 ### 2.6 按钮编号
 
@@ -258,8 +265,13 @@
 ### 2.7 滚轮单位与方向
 
 1. 单位 = **档（notch）**，`amount` 为**非零整数**；`0` 一律 `CP-VALID-002`（零档无意义，不许当 no-op 绿）。
-2. 符号口径由 `input.state.wheel.sign` 声明（本单候选 `"positive=backward"`，实现时必须由
-   原版 `changeCurrentItem` 的行为实机校准后写死）。
+2. 符号口径由 `input.state.wheel.sign` 声明（`"positive=backward"`），**实现时必须由
+   原版 `changeCurrentItem` 的行为实机校准后写死**。
+   `【未实现】`（v1.8 现状，#166 DR-2）该义务**未完成**：`input.state.wheel` 同时给出
+   `signVerified:false` + `signNote`（「符号口径尚未由原版 `changeCurrentItem` 的实机行为校准」）
+   ⇒ 调用方**不得**据 `sign` 下方向判据（正档究竟是不是「向后/向下」还没有实机判据）。
+   该缺口与「组合键事件序与队列满无独立实机判据」并列登记在 §11.2（第 12/13 条），
+   并**必须**同时出现在 `input.state.notImplemented`（同源，见 §11.2 末条）。
 3. `|amount| > 8` 一律 `CP-VALID-002`（防一次请求灌爆界面滚动；上界由 `input.state.limits.wheelAmountMax` 给出）。
 
 ### 2.8 拖动 / 组合键 / 重复 / 顺序
@@ -353,17 +365,27 @@
 
 | # | 路径 | 触发点 | 设施行为 | 承诺强度 |
 |---|---|---|---|---|
-| 1 | **正常完成** | 同步动作 `execute` 正常返回 / 步进动作 `advance` 返回非 null | 收尾里释放**本作业**全部持键 | **承诺** |
+| 1 | **正常完成** | 同步动作 `execute` 正常返回 / 步进动作 `advance` 返回非 null | 收尾里释放**本作业**全部持键 —— **例外**：`action:"down"` / `op:"down"` **刻意保留**该持有点（否则 `down` 没有意义，§9.3 第 1′ 条），它的释放由路径 4 或 1200 tick 到期承担 | **承诺**（`down` 的保留见右栏例外） |
 | 2 | **动作异常** | `execute`/`advance` 抛 `CpException` 或意外异常 | 失败收尾路径同样释放本作业持键 | **承诺** |
 | 3 | **步进超时** | `checkTimeouts` 抛 `CP-EXEC-002` | 同路径 2 | **承诺** |
 | 4 | **显式 `input.release`** | 调用方显式请求 | 立即全清（跨作业），幂等 | **承诺** |
-| 5 | **进程正常退出** | JVM shutdown hook（现有 `ControlPlaneServer.installShutdownHook`） | 尽力投递抬起事件 | **尽力**（退出中 `runTick` 可能不再跑，事件不保证被消费） |
+| 5 | **进程正常退出** | JVM shutdown hook（现有 `ControlPlaneServer.installShutdownHook`） | 尽力投递抬起事件（`【实测，v1.8】` 落点：钩子的清理段 → `InputRuntimeImpl.releaseAllForShutdown()`） | **尽力**（退出中 `runTick` 可能不再跑，事件不保证被消费） |
 | — | **进程崩溃** | — | `【实测】` 状态随 JVM 消失 | **不承诺** |
 | — | **离图 / 断连 / 关服（进程未退出）** | — | `【实测】` **无任何可用钩子**（`ClientDisconnect`/`WorldEvent`/`onWorldUnload`/`unloadWorld`/`FMLServerStoppingEvent` 全零命中）⇒ 不可能有迁移 | **不承诺** |
 | — | **作业被取消** | — | `【实测】` **无取消能力**（`core` 层零 `cancel`、端点表无取消端点、HTTP 同步超时不取消作业）⇒ 该路径**不存在** | **不存在** |
 
 `【要求】` 上表必须在 `input.state.lifecycle.cleanupPaths` 里机读暴露（含 `crash:"not-promised"`、
 `worldUnload:"no-hook"`），使调用方**不可能**误以为崩溃/离图会被清理。
+
+`【实测，v1.8 起路径 5 有代码】（#166 DR-3）` 此前 `installShutdownHook()` 的钩子**只调 `stop()`**，
+而上表与 `cleanupPaths` 都宣称「进程正常退出 ⇒ 尽力投递抬起」⇒ 机读面宣称了一条没有代码的路径。
+现状：钩子在同一条既有线程上先跑清理段（`ControlPlaneServer.runShutdownCleanup()`，整段 `try/catch`
+吞掉一切异常、只 WARN 一次），清理体由 `mc/ControlPlaneBootstrap` 注册为
+`InputRuntimeImpl.shared().releaseAllForShutdown()`（经**唯一**释放实现投递抬起）。
+`【禁令】` 该清理体**不得**新增 `ClientTickEvent` 订阅者、**不得**抢线程、**不得**在主线程外碰 GL。
+`【实测边界】` `releaseAll()` 带 tick 线程断言（§9.3 第 2 条的所有权），退出钩子不在该线程上
+⇒ 退出路径必须走 `releaseAllForShutdown()`（同一份释放实现，只跳过线程断言）；这不放宽线程纪律：
+`releaseAll()` 跨线程**仍然**必须抛。
 
 ### 3.5 只清设施所持状态
 
@@ -441,8 +463,13 @@
 
 ### 4.4 完成屏障
 
-1. `【要求】` 动作的「完成」= **事件已投递** + `delivered` == 请求的事件数。
+1. `【要求】` 动作的「完成」= **事件已投递** + `delivered` == **实际投递**的事件数。
    事件数与请求数不等 ⇒ 逐条给 `rejected`，并**整条请求失败**（不许部分成功还报绿）。
+   `【要求】`（#166 DR-5：与 §3.3 的字面冲突按本节收敛）「实际投递」是**扣除被幂等抑制者之后的**条数：
+   重复 `down` 一个已在持键表里的键 ⇒ 不投第二条件按下事件、`delivered` 少一条但**仍然成功**
+   （§3.3 的幂等语义优先），抑制情形由 `alreadyHeld` / `wasHeld` 单列，调用方据它们区分
+   「首次按下」与「本就按着」。因此判据的准确表述是：
+   **成功 ⟺ 请求的每一条事件都「投递了或被幂等抑制」，且没有一条被 `rejected`**。
 2. `【要求】` **没有**「等消费者处理完」的屏障——现有设施不具备该能力。
    需要跨 tick 收敛的调用方必须显式表达（`holdTicks` + 独立读面 + `criteria`）。
 3. `【要求】` 队列满（`Keyboard.eventQueue` 容量 256）⇒ `CP-STATE-001`，`context` 带
@@ -475,25 +502,29 @@
 | 字段 | 类型 | 语义 |
 |---|---|---|
 | `implemented` | `bool` | 本族是否已实现。v1.8 起由**运行时真值**给出（注册完成 ⇒ `true`）；`false` 时下面每一个能力字段都必须自洽（见本节末条） |
+| `state` | `string \| null` | （#166 DR-11）运行时状态机当前态：`"idle"` / `"holding"` / `"releasing"` / `"faulted"`（§7）。真值来自运行时快照；**读不到时为 `null` + `stateNote`**（不猜 `"idle"`——那会把「未知」卖成「空闲」） |
 | `family` | `string` | 恒 `"input"` |
 | `means` | `string` | 恒 `"input"`（手段归因，与 `layer`/`semantics` 并列，见 §10 第 3 条） |
-| `runtime` | `object` | `{mc, forge, lwjgl3ify, backend, injectors[]}`；`injectors` 列出实际可用的五个入口名 |
+| `runtime` | `object` | `{mc, forge, lwjgl3ify, backend, injectors[], contractVersion}`；`injectors` 列出实际可用的五个入口名（只有逐个 `Class.forName` 解析成功才计入，不足五个时 `notImplemented` 追加说明） |
 | `actions` | `array` | 已注册的输入动作名（v1.8 起为五个动作名）；`implemented:false` 时为空数组，**不是** `["input.key", ...]` |
 | `keyCatalog` | `object` | 键位目录：`{ name → keyCode }`，**运行时注册表实读** |
-| `keyCodeRange` | `[int,int]` | 合法 LWJGL 键码闭区间 |
+| `keyCodeRange` | `[int,int] \| null` | 合法 LWJGL 键码闭区间。**`null` = `Keyboard.KEY_*` 常量集实读不到**（不写猜值），此时 `notImplemented` 追加一条说明（#166 DR-14） |
 | `pollSurface` | `string` | `"not-covered"` + 说明：轮询面（`Keyboard.isKeyDown` 等）不受本族影响（§2.0） |
-| `text` | `object` | `{supported, ranges:[{from,to}], delivery:"per-character", unsupportedBehavior:"explicit-fail", route:{world, gui}}` |
-| `coordinates` | `object` | `{space:"gui-scaled-request / sdl-window-delivered", scaledWidth, scaledHeight, displayWidth, displayHeight, pixelScale, yFlip:"eventY = displayHeight - sdlY", selfCalibrated:bool}` |
-| `wheel` | `object` | `{unit:"notch", integerOnly:true, sign:"positive=backward", amountMax:8}` |
-| `consumer` | `object` | `{chain:"gui"\|"world"\|"none", currentScreen, allowUserInput, displayActive, inGameHasFocus, captureArmed}` |
+| `text` | `object` | `{supported, ranges:[{from,to}], delivery:"per-character", unsupportedBehavior:"explicit-fail", route:{world, gui, verified, note?}}` |
+| `coordinates` | `object` | `{space:"gui-scaled-request / sdl-window-delivered", scaledWidth, scaledHeight, displayWidth, displayHeight, pixelScale, yFlip:"eventY = displayHeight - sdlY", selfCalibrated:bool, selfCalibratedNote?, selfCalibration{...}}`。`selfCalibrated` 与 `input.mouse` 的 `coordinates.selfCalibrated`（以及 `move` 返回体的顶层 `selfCalibrated`）是**同一个量**：运行时最近一次 `move` 回读是否落在 ±1 内；**尚无 move 时为 `false` 并附 `selfCalibratedNote:"no-move-yet：…"`**（「未校准」≠「校准失败」，#166 DR-6） |
+| `wheel` | `object` | `{unit:"notch", integerOnly:true, sign:"positive=backward", amountMax:8, signVerified:false, signNote}`；`signVerified:false` = §2.7 第 2 条的实机校准义务**未完成**（缺口登记在 §11.2 第 13 条，不得据此下方向判据） |
+| `consumer` | `object` | `{chain:"gui"\|"world"\|"none", currentScreen, allowUserInput, displayActive, inGameHasFocus, captureArmed}`（`chain` 读不到时 `null` + `chainNote`） |
 | `hitSet` | `object` | `{minSettleTicks:2, note:"GUI 命中集每帧重建；move 后须等 ≥2 tick 再 down"}` |
-| `queues` | `object` | `{keyboardDepth, keyboardSeedBaseline:1, keyboardCapacity:256, mouseDepth:"unobservable", deliveredThisJob, deliveredThisSession}` |
+| `queues` | `object` | `{keyboardDepth, keyboardSeedBaseline:1, keyboardCapacity:256, mouseDepth:"unobservable", deliveredThisJob, deliveredThisSession}`（`keyboardDepth` 读不到、计数无真值时落 `null` + 说明；`deliveredThisJob` 归属作业见 `deliveredJobId`） |
 | `held` | `object` | `{count, items:[{kind, id, jobId, heldTicks, expiresInTicks, gameBindingPressed}]}` |
-| `physical` | `object` | `{concurrent:"true\|false\|unobservable(鼠标侧)"}` |
-| `lifecycle` | `object` | `{cleanupPaths:[{id, strength:"promised\|best-effort"}], crash:"not-promised", worldUnload:"no-hook", cancel:"unavailable"}` |
+| `physical` | `object` | `{concurrent, mouseConcurrent, keyboardProbe, keyboardSeedBaseline, reason, mouseNote}`。`concurrent` 的取值域 = `true` \| `false` \| `"unobservable"` \| **`"unobservable（键盘队列深度探针不可用）"`**（键盘侧探针读不到时的**如实**取值，与鼠标侧的恒 `"unobservable"` 分列，`mouseConcurrent` 恒 `"unobservable"`；#166 DR-7） |
+| `lifecycle` | `object` | `{cleanupPaths:[{id, strength:"promised\|best-effort"}], crash:"not-promised", worldUnload:"no-hook", cancel:"unavailable"}`（路径 5 的实现落点见 §3.4） |
 | `limits` | `object` | `{holdTicksMax:1200, wheelAmountMax:8, minSettleTicks:2}` |
-| `errors` | `array` | 本族会返回的错误码清单（§6.1） |
-| `notImplemented` | `array` | 本族已冻结但未实现/未验证的项（与 §11.2 同源） |
+| `capabilities` | `object` | （#166 DR-10，只增字段）本端点的**契约常量**声明（不是运行期读数）：`{requiresConfirm:false, tier:"observe", consumerChainReadOwner, hitSetOwner, rollback:"none", wheelSignCalibration:"pending-machine-check", pollSurfaceCovered:false}` |
+| `thread` | `object` | （#166 DR-10，只增字段）本快照在哪个线程取的：`{snapshotThread, requiredThread:"client-tick", verified, note?}`；判定口不可用时 `verified:false` + `note`（「未验证」≠「已验证为假」） |
+| `errors` | `array` | 本族会返回的错误码清单（§6.1）：**4 条** = `CP-VALID-002` / `CP-STATE-001` / `CP-EXEC-002` / `CP-CONFIRM-001`。**不含 `CP-VALID-001`**（v1.8 起本族已注册，该码不再适用）。真值唯一来源 = `InputCapabilities.errorsJson()`（#166 DR-8） |
+| `notImplemented` | `array` | 本族已冻结但未实现/未验证的项（与 §11.2 同源，v1.8 后 **13 条**），**再追加**本次探针读不到才知道的动态缺口（如 `runtime.injectors` 不足五个、`keyCodeRange` 读不到、投递计数无真值）；去重、保序（#166 DR-9） |
+| `warnings` | `array` | **仅当非空时出现**：探针自身的诊断（如「`Keyboard` 类不可解析」「`Display.getPixelScaleFactor` 读不到」） |
 
 `【要求】` 字段只增不改；新增字段必须同步本节表格。
 `【要求】` `implemented:false` 时，`actions` 为空、`keyCatalog` 为空对象、`text.ranges` 为空、
@@ -506,6 +537,10 @@
 > `keyCatalog`/`coordinates`/`held` 有真值来源、`notImplemented` 已按本批删去四项。
 > 下面这份 JSON 保留下来是因为它是**未实现态的自洽样例**（每个能力字段都为空/为假，
 > 且 `notImplemented` 非空）——「未实现不许伪装成已具备」这条判据需要一个可对照的实例。
+> **只增字段未列进本示例**（#166 起）：`state`、`capabilities`、`thread`、`warnings`（仅非空时出现）；
+> 本示例的 `coordinates.selfCalibrated` 形状与现实现一致（顶层布尔），差别只在取值：
+> 未实现态恒 `false`，实现态由运行时**最近一次 `move` 的回读结论**给出（尚无 move 时 `false` +
+> `selfCalibratedNote`）。
 
 ```jsonc
 {
@@ -781,16 +816,27 @@
   "data": {
     "means": "input", "semantics": "mouse", "op": "move",
     "requested": { "space": "gui-scaled", "x": 426, "y": 322 },
-    "delivered": { "space": "sdl-window", "x": 426.0, "y": 158.0, "pixelScale": 1.0,
-                   "displayWidth": 854, "displayHeight": 480 },
-    "readback": { "mouseX": 426, "mouseY": 322 },
+    "delivered": 1,
+    "deliveredGeometry": { "space": "sdl-window", "x": 426.0, "y": 158.0, "pixelScale": 1.0,
+                           "displayWidth": 854, "displayHeight": 480 },
+    "readback": { "space": "gui-scaled-observed", "requestedX": 426, "requestedY": 322,
+                  "tolerancePx": 1, "mouseX": 426, "mouseY": 322, "guiX": 426.0, "guiY": 322.0,
+                  "withinTolerance": true, "pixelScaleApplied": false },
+    "selfCalibrated": true,
     "deliveredAtTick": 18422,
-    "hitSet": { "state": "stale", "minSettleTicks": 2,
+    "hitSet": { "state": "stale", "appliesTo": "this-move", "minSettleTicks": 2,
                 "note": "本动作只保证坐标已投递；GUI 命中集每帧重建，≥2 tick 后才可能命中" },
+    "consumer": { "chain": "world", "currentScreen": null, "allowUserInput": true,
+                  "displayActive": false, "inGameHasFocus": true,
+                  "worldChainActive": true, "captureArmed": false },
     "physicalConcurrent": "unobservable"
   }
 }
 ```
+
+> `delivered` 是**整数**（§4.1 的定义），坐标回显在 `deliveredGeometry`（§2.5 第 3 条的勘误口径）；
+> `selfCalibrated` 是本次 move 的回读结论（§2.4 第 4 条），它同时出现在 `input.state.coordinates` 的
+> 顶层（两处同一个实现点，见 §5.2）。
 
 失败 1｜`op` 与参数不匹配：
 
@@ -886,8 +932,12 @@
   "error": { "code": "CP-STATE-001",
              "message": "输入状态快照必须在客户端 tick 线程取得",
              "context": { "thread": "cp-http-worker", "requiredThread": "client-tick",
+                          "state": "holding",
                           "hint": "HTTP 线程不得读 MC 状态（contract.md §9）" } } }
 ```
+
+> `context.state` 是 §7 要求「必须显式失败时给出当前态」的落点（#166 DR-11）；运行时未装配或快照读不到时
+> 它落 `null` 并附 `stateNote`（不猜 `"idle"`）。
 
 ---
 
@@ -929,6 +979,13 @@
 4. **`faulted`**：设施所持状态与实际队列不一致（队列被外部清空、投递中断、超时/异常路径里抬起投递失败）。
    进入 `faulted` 必须发一条事件流水（`kind:"action-fail"` 或既有的 `input-fault` 子类，沿用 `contract.md` §8 的 `kind` 只增不改义）。
 5. `【要求】` 状态机是**每进程唯一**的，不按作业分实例；持有条目按作业归属（§3.1）。
+6. `【已履行，v1.8】（#166 DR-11）` 「必须显式失败」的当前态有了两个机读落点：`input.state` 成功体
+   必报顶层 `state`（§5.2），`input.state` 的线程失败形态在 `context.state` 给出当前态（§6.2）。
+   **诚实边界（未做，不得读成已做）**：**投递类**失败信封（`input.key`/`input.mouse`/`input.text`/
+   `input.release` 因 `faulted`/队列满/参数错而失败时那个 `error.context`）里，当前态仍只出现在
+   `context.hint` 的 `state=faulted, reason=…` **文本**中，**没有**单列的 `context.state` 字段
+   —— 那需要把运行时态传进四个动作的错误构造点（`InputSupport.fromRejections`），
+   属本单范围外的接口改动，已登记为 §12.2 的暂存项。
 
 ---
 
@@ -1093,8 +1150,12 @@ public interface InputStateProvider { JsonObject state(); }
    完整裁决、代价与诚实边界见 §12.1 **D-7**。
 2. `【禁令】` 三方**都不得**新增 `ClientTickEvent` 订阅者（现有设施的最省冲突路径就是「零新共享文件」；
    新增订阅者会与 `ControlPlaneTickHandler` 的排空顺序耦合）。
-3. `【要求】` 作业异常时的释放挂在失败收尾路径上（`ActionSteppingExecutor` 的失败分支），**不**挂 JVM hook；
-   JVM hook（进程级兜底）归 T3，且只做 `best-effort`（§3.4 路径 5）。
+3. `【要求】`（#166 DR-13：落点按实现改正）作业的释放挂在**步进动作基类的收尾回调**上，即
+   `mc/SteppingActionBase.java` 的 `finally → onFinish(ctx)`（三条路径——正常完成/异常/超时——
+   **统一**覆盖；`input.key`/`input.mouse` 各自的 `onFinish` 调 `releaseJob`）。
+   `core/ActionSteppingExecutor` 的 `catch` 分支里**没有**释放调用，文档此前把落点写成那里是错的
+   ——效果不是变弱而是更强（成功路径也被收尾覆盖），但逐字对账必须指向真实落点。
+   `【要求】` **不**挂 JVM hook 作为作业级释放手段；JVM hook（进程级兜底）只做 `best-effort`（§3.4 路径 5）。
 4. `【要求】` `deliver` 必须**非阻塞**：队列满时立即 `CP-STATE-001`，不许在 tick 线程上等队列腾空。
 5. `【要求】` 四个 🔴 共享文件（`ActionRegistrar` / `ActionDescriptor` / `CaseRunAction` / `CaseValidator`）
    **同一时刻只允许一方改动**；T2-A 与 T2-B 的并行前提正是「都不改这四个」。
@@ -1195,6 +1256,7 @@ public interface InputStateProvider { JsonObject state(); }
 | 10 | **`read.input` 读面不存在** | 现有 9 个 `read.*` 无一条读输入侧状态 ⇒ 「注入有没有生效」缺第二观测面（本族自带 `input.state`，但它是能力面不是业务读面） |
 | 11 | **场景守卫会关聊天框** | armed 期间每 tick `displayGuiScreen(null)` 会清掉 `GuiChat` 一类界面 ⇒ 聊天框路径在场景会话期间不可用（源码推断，**未实机验证**） |
 | 12 | **组合键事件序与队列满没有独立实机判据** | §2.8 的口径已冻结为「只保证事件序」，但没有一条实机判据证明「顺序确实成立」；队列满（`CP-STATE-001` 零写入）难以定向触发 ⇒ **未测 ≠ 通过** |
+| 13 | **滚轮符号口径未实机校准**（#166 DR-2） | §2.7 第 2 条把「由原版 `changeCurrentItem` 的行为实机校准后写死」写成实现的义务，而 `input.state.wheel` 如实报 `signVerified:false` + `signNote`（该义务未完成）⇒ 正档/负档的方向**没有判据**，调用方不得据 `sign` 下方向判据；补判据前不得删本条 |
 
 `【要求】` 本清单与 `input.state.notImplemented` **同源**：实现一项就同时删两处，**不得**只删一处。
 
@@ -1213,6 +1275,11 @@ public interface InputStateProvider { JsonObject state(); }
 **注意**：上表只删「已落地**且**有实机/机械证据」的项。**第 2 条（codepoint 通路）不删**（只有键位那一半被证过）；
 **第 9 条（坐标实机自校准）只收窄不删**（两种尺度已核对，HiDPI 真实像素缩放仍未校准）；
 新增第 12 条（组合键事件序与队列满无独立实机判据）——**未测 ≠ 通过**，如实登记。
+`【#166 追加】` 新增第 13 条（滚轮符号未实机校准，DR-2）：它原先**只在源码里**被声明为未验证
+（`input.state.wheel.signVerified:false`），文档与 Java 清单**两边都漏** ⇒ 现在两边同时登记。
+`【同源，机械防线】` §11.2 的条数与 `InputCapabilities.NOT_IMPLEMENTED` 的条数由离线测试
+`InputCapabilitiesDocParityTest` 强制相等（只改一边即红）；`input.state.notImplemented` 必须
+**逐条包含**该清单（`InputStateProviderImplTest#notImplementedIsSupersetOfTheCapabilityTruthTable`）。
 
 ---
 
@@ -1223,7 +1290,7 @@ public interface InputStateProvider { JsonObject state(); }
 | # | 议题 | 裁决 | 理由（可复核） |
 |---|---|---|---|
 | D-1 | `input.*` 返回值是否带 `layer` | **不带**（值 `null`），只带 `means:"input"` + `semantics` | 输入手段与 L0/L1/L2 **正交**；填一个不对应的 L 值比 `null` 更误导判据。`contract.md` §4.6 的「`layer`/`semantics` 成对」规则在此登记为**显式例外**（首个） |
-| D-2 | 捕获会话（`captureArmed`）期间是否拒 `input.*` | **不拒**，只如实报告 `consumer.captureArmed` | 输入不写世界，且主菜单/暂停菜单的 GUI 输入是合法场景（此时世界未加载）；「拒」会凭一个未验证的担忧砍掉合法能力。**风险登记**：取证期间注入可能扰动画面，由调用方据 `captureArmed` 自行决定 |
+| D-2 | 捕获会话（`captureArmed`）期间是否拒 `input.*` | **不拒**，只如实报告 `consumer.captureArmed` | 输入不写世界，且主菜单/暂停菜单的 GUI 输入是合法场景（此时世界未加载）；「拒」会凭一个未验证的担忧砍掉合法能力。**风险登记**：取证期间注入可能扰动画面，由调用方据 `captureArmed` 自行决定。`【#166 DR-12 收口】` 该字段此前**只**在 `input.state.consumer` 里，四个可写动作的 `consumer` 读不到 ⇒ 补偿措施对绝大多数调用方落空；现在四个可写动作与 `input.state` **同源**（`CaptureSession`）都报它 |
 | D-3 | G1 的 `holdTicks` 位置 | **动作步对象顶层**（与 `params` 并列；出现在 `params` 内即 `CP-VALID-002`） | 与既有 `case-file.md` 里步进语义的归属一致：跨 tick 是**编排**属性，不是动作参数 |
 | D-4 | 持键是否允许「无限期直到显式 release」 | **不允许**。单条目上限 1200 tick，到期自动抬起并报 `autoReleased` | 「无期限持有」叠加「现有设施无取消能力」= 不可回收状态；宁可到期自动收口并如实报告 |
 | D-5 | 覆盖矩阵的表格形态 | 接受「状态/消费点合并一格」的 6 列主表 + 清理件附加表 | 可读性优先；行数与覆盖项在 `input-coverage.md` §2.2 有核对 |
@@ -1244,14 +1311,16 @@ public interface InputStateProvider { JsonObject state(); }
 | 暂存项 | 负责人 | 退出阶段 |
 |---|---|---|
 | ~~`input.*` 五个动作「已冻结未实现」~~ **已于 v1.8 退出** | T3（#165） | **已完成**：五个动作注册 + 契约版本前进到 1.8 + 计数注释/两处断言同步 + §11.2 对应行删除（见 §11.3） |
-| `case-file.md` §3.2 的同步性口径未改写 | T3 持有者（共享文件单一持有者） | T3 合入同批改写并跑 §9.2 的 8 条回归面（由并行分支承载，**尚未退出**） |
-| ~~`input.state.notImplemented` 占位字段~~ **已于 v1.8 退出** | T3（#165） | **已完成**：按「实现一项删一处」与 §11.2 同步（`InputCapabilities.NOT_IMPLEMENTED` 删 4 条；`InputStateProviderImpl.frozenNotImplemented()` 删「契约版本未前进」一条） |
+| ~~`case-file.md` §3.2 的同步性口径未改写~~ **已于 v1.8 退出**（#166 DR-16 据实改正：本条此前仍写「尚未退出」，属过期表述） | T3 持有者（共享文件单一持有者） | **已完成**：`case-file.md:122-201` 已改写为 G1 跨帧输入步的固定程序（例外集合 `:149`、步骤顶层 `holdTicks` `:158`、段语义 `:185`），§9.2 的 8 条回归面由 `CaseActionHoldTicksTest` 与实机轮次承载 |
+| ~~`input.state.notImplemented` 占位字段~~ **已于 v1.8 退出** | T3（#165） | **已完成**：按「实现一项删一处」与 §11.2 同步（`InputCapabilities.NOT_IMPLEMENTED` 删 4 条；`InputStateProviderImpl.frozenNotImplemented()` 删「契约版本未前进」一条）。`【#166 DR-9】`该第三份字面清单**已整份删除**：现在 `input.state.notImplemented` 的唯一基是 `InputCapabilities.NOT_IMPLEMENTED`（余下只追加动态缺口） |
+| 投递类失败信封的 `context.state` 未单列（§7 第 6 条的诚实边界） | T2-A 持有者（`InputRuntime` / 动作层错误构造点） | **下一批**：`InputSupport.fromRejections` 需要拿到当前态才能补该字段；在此之前调用方从 `context.hint` 的 `state=…` 文本读（§7 第 6 条已如实登记） |
 
 ### 12.3 T1 收口判据（本单关闭条件，逐条可判定）
 
 1. 两份契约文件在集成分支可读，且 `contract.md` §4 有指向它们的**指针**（不复制内容）；
 2. 契约对**已实证/未实现/不可达**三态无混淆（§11.2 的未实现清单与 P0 判据一一对应；v1.8 后为 13 条，
-   已完成项移入 §11.3 并附机械证据）；
+   已完成项移入 §11.3 并附机械证据）；**#166 起该条数与 `InputCapabilities.NOT_IMPLEMENTED` 由
+   `InputCapabilitiesDocParityTest` 强制相等（只改一边即红）**；
 3. 下游可分叉：T2-A / T2-B / T3 的边界（§9）明确到「谁拥有哪些文件」，且四个共享文件同一时刻只有一个持有者；
 4. 全量测试仍绿（本单只增文档；若文档守卫测试解析了新文件，必须一并处理）；
 5. **新增交付项**（D-6②）：「`input.*` 返回值字段集合」与「`ActionDescriptor` 的 `means` 字段」各配一条离线断言——随 T2-A 合并，不留在本单。

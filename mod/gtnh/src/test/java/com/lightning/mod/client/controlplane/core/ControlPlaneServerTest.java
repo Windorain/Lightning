@@ -731,6 +731,36 @@ public class ControlPlaneServerTest {
         assertFalse(server.isRunning());
     }
 
+    /**
+     * 【#166 DR-3 守卫】既有 shutdown hook 的清理段：注册的 best-effort 清理**必须被执行**，
+     * 且它的异常**不得**逃出去（退出路径上任何异常都会阻止 {@code stop()} 与 JVM 退出）。
+     *
+     * <p>
+     * 修复前不存在该清理段（钩子只调 {@code stop()}），而机读面与契约 §3.4 路径 5 都宣称
+     * 「进程正常退出 ⇒ 尽力投递抬起」⇒ 自述说了一条没有代码的路径。
+     */
+    @Test
+    public void shutdownCleanupRunsBestEffortAndSwallowsFailures() {
+        // 未注册 ⇒ 纯 no-op（不许抛）
+        server.runShutdownCleanup();
+
+        final int[] calls = new int[1];
+        server.setShutdownCleanup(new Runnable() {
+
+            @Override
+            public void run() {
+                calls[0]++;
+                throw new IllegalStateException("退出清理故意失败（best-effort：只 WARN，不阻断退出）");
+            }
+        });
+        server.runShutdownCleanup();
+        assertEquals("注册的清理必须被执行", 1, calls[0]);
+
+        // 异常不得逃出，且 stop() 仍然可用（钩子体里的顺序是 清理 → stop）
+        server.stop();
+        assertFalse(server.isRunning());
+    }
+
     @Test
     public void portFallbackSkipsBusyPreferredPort() throws Exception {
         ServerSocket busy = new ServerSocket();

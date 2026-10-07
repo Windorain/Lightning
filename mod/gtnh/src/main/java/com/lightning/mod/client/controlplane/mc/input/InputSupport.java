@@ -9,6 +9,7 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.lightning.mod.client.controlplane.core.ActionContext;
+import com.lightning.mod.client.controlplane.core.CaptureSession;
 import com.lightning.mod.client.controlplane.core.CpException;
 import com.lightning.mod.client.controlplane.core.ErrorCodes;
 import com.lightning.mod.client.controlplane.core.Fields;
@@ -95,6 +96,10 @@ final class InputSupport {
         c.addProperty("inGameHasFocus", host.inGameHasFocus());
         // 只增字段：界面允许时 GUI 链与世界链**同时**消费，一个 chain 值描述不了这种双活形态
         c.addProperty("worldChainActive", host.worldChainActive());
+        // 【#166 DR-12】D-2 的补偿措施要求**如实报告**取证会话是否布防（布防期间不拒输入，
+        // 由调用方据本字段自行决定要不要注入）。该量在四个可写动作的返回体里此前**读不到**
+        // ⇒「补偿措施」对绝大多数调用方落空。取值与 input.state 同一实现点（CaptureSession）。
+        c.addProperty("captureArmed", CaptureSession.isArmedSafely());
         return c;
     }
 

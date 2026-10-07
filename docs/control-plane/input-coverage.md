@@ -19,12 +19,23 @@
 | 手段归因字段 | `means:"input"` —— 动作返回值里声明「本条结论由输入路径取得」（对应 P0 缺口 G4，字段落点见正稿） |
 
 **动作族的边界（本文件口径）**：`input.release` 是**独立的释放/清理族**（不是 `input.key` 的参数分支），
-因为释放承担「清 `KeyBinding.pressed`、清 GUI 拖拽残余、清 `Input.held`」三类清理，
-与「按下」在时序上有独立的跨帧要求（见 §3、§5）。
+因为释放有**自己的**跨帧与所有权语义：它只投递「**本设施**投递过、且仍在持键表里」的抬起事件
+（跨作业、幂等），**不**碰 SDL 物理态、**不**调 `KeyBinding.unPressAllKeys()`、**不**清任何非本设施
+投递的事件（见 `input-contract.md` §3.5 的三条禁令与 `mc/input/InputReleaseAction.java:16-22`）。
+`【#166 DR-A13 更正】` 本节原写「释放承担『清 `KeyBinding.pressed`、清 GUI 拖拽残余、清 `Input.held`』
+三类清理」——那是**原版进 GUI** 的语义（`unPressAllKeys`），与本设施的实现**相反**：
+设施只能清自己放进事件队列的东西（`mc/input/InputReleaseAction.java:38-41` 的自述、
+`contract.md` §4.6 同口径）。
 
 ### 0.2 行号与路径口径（**本文件不产生新行号**）
 
 本文件所有 `文件:行号` **转引自**下列 P0 已完成的只读研究报告与实机日志，行号一律沿用其原值：
+
+> `【#166 加注】` 下表是 **P0 探查阶段（`feat/cp-input-probe`）的作业记录**，不是长期可复核证据：
+> `temp/` 按工作区铁律**随时会被删除**，届时这些路径与行号都不可复核。**长期证据在 Gitea**：
+> P0 报告与实机日志已作为 **#161 的附件**上传，本族注册/收口的三轮实机验收证据在 **#165**；
+> 需要复核时以平台附件为准，**不得**依赖 `temp/` 路径长期有效。另外：本文件的行号锚点只对
+> **1.7.10 + 本文 §1.1 的版本组合**有效（换版本即整表失效，见 §8.1 第 2 行）。
 
 | 代号 | 来源 | 用途 |
 |---|---|---|
@@ -280,7 +291,7 @@
 | **EnderIO** | `IoConfigRenderer.java:151`、`GuiEnderface.java:175`、`GuiButtonIoConfig.java:43`、`ItemFilterLimited.java:215`（+`:216` `Mouse.isButtonDown`） | GUI 轮询 | `PV:C11.1`、`PV:C11.2` |
 | **Botania** | `CorporeaAutoCompleteHandler.java:90`、`PageShedding.java:111,117`、`PageRecipe.java:89,136` | HUD / 书页翻动 | `PV:C11.1`、`PV:C11.2` |
 | **StructureLib / BlockRenderer6343 / WirelessRedstone-CBE / BloodMagic / Translocators / ForgeMultipart** | `StructureLib\...\ItemConstructableTrigger.java:51`、`StructureLib\...\GuiScrollableList.java:341,349`、`BlockRenderer6343\...\GuiMultiblockHandler.java:351-353`、`WirelessRedstone-CBE\...\RedstoneEtherClientAddons.java:72`、`BloodMagic\...\ItemRitualDiviner.java:72`、`Translocators\...\CraftingGridKeyHandler.java:28-31`、`ForgeMultipart\...\ControlKeyModifier.scala:51-52` | 混合 | `PV:C11.1`、`PV:C11.2` |
-| **本 mod（Lightning）** | `MOD` 全树 `Keyboard.` **2 命中**（`GuiSdeCellNote.java:36/52`，`enableRepeatEvents`）、`Mouse.` **0 命中** | **本 mod 目前没有任何键鼠注入代码** | `FA:7.2`、`PL:3.11` |
+| **本 mod（Lightning）** | **注入实现已存在**：`mc/input/Lwjgl3ifyInjector.java:23-31`（§1.2 白名单五入口）、`mc/input/InputSink.java`、`mc/input/InputRuntimeImpl.java`（投递/持键/释放），动作面 `input.key/mouse/text/release/state`（`mc/ActionRegistrar.java:351-357`） | **本表列的是「消费侧读取者」**：本 mod 没有直接读 SDL 物理态的代码；它只写事件队列（因此本行是「本设施自己」的那一格，不是缺口） | `input-contract.md` §1.2/§2.0；`FA:7.2`、`PL:3.11`（P0 时的读数：当时确实零注入代码，`Keyboard.` 2 命中/`Mouse.` 0 命中——**历史读数，已被 #165 实现取代**） |
 
 **相对位移读取者的单独一行**：`Mouse.getDX/getDY` 的**唯一**消费点是 `MouseHelper.java:39-40`，
 调用链唯一（`EntityRenderer.java:1041` → `:1061/1065`），而 `MouseHelper` 的 grab/ungrab 调用点只有
@@ -340,7 +351,7 @@
 | N-03 | **去掉关键组合键** | 对需要修饰键才改写语义的操作（Shift 点击整摞 / Alt 槽位 / Ctrl 丢弃），**只注入基础点击、不注入修饰键** | 语义**不升级**：`GuiContainer.java:405/632` 的 `Keyboard.isKeyDown(42/54)` 为 false ⇒ 走普通点击分支；`Minecraft.java:1990-1993 dropOneItem(isCtrlKeyDown())` 走非 Ctrl 分支 | **预期红**，且这正是 §5.2 P-01 的直接应用：修饰键走**物理态**，队列注入**改不了它** ⇒ 若要「Shift 点击」成立，**必须**另配物理态手段或改用动作级入口（`player.slot_click` 的 `shift:true`，见 `contract.md` §4.6 第 7 条） |
 | N-04 | **用 L0 代替关键动作** | 用 `scene.player.pose`（`contract.md` §4.4，`layer:"L0"`，`semantics:"teleport"`）代替 `player.move`/`input.*`，或直接用 `scene.inventory.write` 代替「走过去捡」 | 返回值 `layer` 必须是 `"L0"`；`means` **不得**为 `"input"`；**该产物不得被当作 L1/输入路径的证据**（`contract.md` §4.6 第 1 条与 `#96 §4.2`） | 已有实机使用：`R6:29 E5b0.playerPosedNearMachine`（用 `scene.player.pose` 凑距离，**明确不是**输入路径证据） |
 | N-05 | **只调 `KeyBinding.setKeyBindState`**（**已实证的判别器**） | 不投队列，直接 `KeyBinding.setKeyBindState(code,true/false)`（±`onTick`） | **Forge `InputEvent.KeyInputEvent` 计数恒 0** ⇒ 这是「绕过输入管线」的**判别器**；同时贴 `Keyboard.getEventKey()` 的原版逐键分支（ESC→`displayInGameMenu` `:1878-1881`、F1 `:1921`、F3 `:1926`、F3+H 系列 `:1883-1919`、F11 着色器 `:1867`、调试分析器 `:1950/1957`）与 `func_152348_aa` 全链路**全部漏掉** | **实机已证**：正例 `E1.forgeKeyInputEventPosted` 计数=1（`R5:36`/`R6:54`）；负例 `E1b.keybindingBypassesForgeEvent` 计数=**0**（`R5:39`/`R6:57`）；机制本身确证生效 `E1b.keybindingMechanismSetsState`（`R5:38`/`R6:56`） |
-| N-06 | **持键不释放（泄漏检测）** | 只发 PRESS（键盘）或只发 press（鼠标），跨多个 tick 后**不发** RELEASE/release；随后读状态 | **必须能在指定 tick 数内检出并清理**：`KeyBinding.pressed` 恒 true 且 `getIsKeyPressed()` 恒 true（`pressed` 与 `pressTime` 是 `KeyBinding.java:24-25` 的静态注册表字段，**跨作业残留**）；MUI2 `Input.held`(`ModularPanel.java:940-949`) 永真、`lastPressed` 卡住、`onMouseTapped`(`:478`) 后续失效；MUI1 `lastClicked`(`ModularPanel` 同构，`ModularGui.java:71-72`) 悬空 | 现有唯一清理点是 `unPressAllKeys()`(`Minecraft.java:1400`)，而它的调用点**唯一**且只在 `setIngameNotInFocus()` 里（`PV:A4`/`PV:A6`）⇒ **没有任何「作业结束即清键」的钩子**（`FA:G2`：无世界卸载/断连回调；`FA:4.4` 列出仅 3 个清理钩子） |
+| N-06 | **持键不释放（泄漏检测）** | 只发 PRESS（键盘）或只发 press（鼠标），跨多个 tick 后**不发** RELEASE/release；随后读状态 | **必须能在指定 tick 数内检出并清理**：`KeyBinding.pressed` 恒 true 且 `getIsKeyPressed()` 恒 true（`pressed` 与 `pressTime` 是 `KeyBinding.java:24-25` 的静态注册表字段，**跨作业残留**）；MUI2 `Input.held`(`ModularPanel.java:940-949`) 永真、`lastPressed` 卡住、`onMouseTapped`(`:478`) 后续失效；MUI1 `lastClicked`(`ModularPanel` 同构，`ModularGui.java:71-72`) 悬空 | `【#166 DR-A11 更正】` 本行原写「**没有任何『作业结束即清键』的钩子**」（`FA:G2`）——那是 P0 时的读数，**已被实现取代**：「作业结束即清键」**已有三条**落点：①显式 `input.release`（跨作业全清，`mc/input/InputReleaseAction.java:11-27`）；②作业收尾释放本作业（`mc/SteppingActionBase.java:103-111` 的 `finally → onFinish` + `InputKeyAction.java:214-224`）；③单条目 1200 tick 到期自动抬起（`mc/input/InputExpiryPump.java:69-84` ← 既有 `ControlPlaneTickHandler` 每 tick 一击，D-7）。**仍然成立的两条**（不得删）：离图/断连/关服**无钩子**、崩溃后**不承诺**清理（`mc/input/InputCapabilities.java:289-290`，`input-contract.md` §11.2 第 5/6 条）。**实机依据**：三轮 #165 验收跑完 `held.count=0`（无持键泄漏，`input-contract.md` §11.3） |
 | N-07 | **不移动就点击**（坐标沿用上次位置） | 开屏后**不发** `addMoveEvent`，直接 `addButtonEvent(0,true)` | 点到**上次** `latestX/latestY`（或真实光标位置）⇒ 命中集不含目标；`PL:3.3` 明确「注入点击前必须先 `addMoveEvent` 把光标位置放到目标」；`PL:3.5` 进一步指出合成按键事件的 `getEventX/Y` **必然是** `latestX/latestY` | 与 N-02 的区别：N-02 是「移了但移错」，N-07 是「根本没移」 |
 | N-08 | **不等帧就点击**（时序负对照） | 位置与按下**在同一帧/tick 内**连发 | MUI2：按下时用的是**上一帧** `hovering`（`PG:4.3`）⇒ 命中集不含目标；MUI1：用的是**上一 tick** 的 `hoveredWidgets`（`PG:2.5`）⇒ 同上 | **实机正例**（分开时序）`R6:41 E5e.clickHitTargetWidget` **仍为红**（因界面未开、命中集为空）⇒ 该正例当前**未取得**，无法与 N-08 形成有效对照 |
 | N-09 | **对着不存在的目标注入** | 目标控件不在当前界面里（或界面根本没开），其余时序/坐标流程照跑 | 注入**不得**报成功：`found=false` + `hovering=[]` + `getTopHovering.isTarget=False`；返回值 `observed:false` + `notObservedReason`（`contract.md` §4.6 第 4 条） | **实机形态已观察到（红）**：`R6:36 E5d.targetLocated`、`R6:41 E5e.clickHitTargetWidget`、`R6:32 E5b.mui2ScreenClass` |
@@ -349,8 +360,11 @@
 ### 6.1 负对照的可判定性要求（元口径）
 
 1. 每条负对照**必须有独立的观测面**（读面动作或控件自身状态），**不得**用动作自己的返回值自证 ——
-   现有 9 个 `read.*` **没有一条读输入侧状态**（`FA:G6`）⇒ 每条负对照要么依赖控件自身同步值
-   （如 `E5e.valueChangedByGenericClick` 读的 `fluidAutoOutput` 前后值），要么必须**先补一个输入侧读面**。
+   `【#166 DR-A14 更正】` P0 时「现有 9 个 `read.*` **没有一条读输入侧状态**（`FA:G6`）⇒ …
+   要么**先补一个输入侧读面**」这条缺口**已落地**：输入侧读面由 `input.state` 承担
+   （`mc/input/observe/InputStateAction.java`，注册见 `mc/ActionRegistrar.java:357`）。
+   **字面后半句仍真**：`read.*` 族**仍**不含输入侧读面（`read.input` 缺口见 `input-contract.md`
+   §11.2 第 10 条）——它是**能力面**，不是业务读面（用它自证业务后果仍然违规）。
 2. 「红了」必须能**归因到具体环节**：`E5c/E5d/E5e/E5f/E5g` 的日志正是这个形态
    （`R6:33-47` 逐环节打 `screenClass`/`found`/`hovering`/`前后值`），这是负对照目录的**写法样板**。
 3. 负对照**不得**依赖「进程重启」或「重新开世界」——探索模式纪律要求失败**不得导致进程重启或崩溃**
@@ -408,8 +422,8 @@
 | **`E5e.valueChangedByGenericClick`** | **未通过** | `R6:42` | `fluidAutoOutput` 同步值前后都为空 ⇒ **无法判定值是否变化** |
 | `E5f.blankPointFound` | 未通过 | `R6:44` | 面板 area 为空、试了 0 个候选点 ⇒ **N-02 负对照无从判定** |
 | `E5g.serverNbtNotJudgeable` | 已证（**信息项，非判据**） | `R6:47` | `read.te` 的 24 键/深度上限**没给出** `mFluidTransfer`；服务端侧判据以 `E5e.valueChangedByGenericClick` 为准 |
-| `S0.probeActionRegistered` | 已证 | `R5:10`、`R6:10` | 动作数=44（`43 + debug.input.probe`）；含 `debug.input.probe=True` |
-| `S0.contractVersion` | 已证 | `R5:11`、`R6:11` | contractVersion=1.7 |
+| `S0.probeActionRegistered` | 已证 | `R5:10`、`R6:10` | **历史读数（P0 探查器械）**：动作数=44（`43 + debug.input.probe`）；含 `debug.input.probe=True`。**复核结论（#166）**：探查器械 `debug.input.probe` **未入正稿**（本树零命中），契约 1.8 的正稿口径 = **48**（`ActionRegistrar.java:109` + `ReadCaptureOfflineTest.java:879` + `InputCapabilitiesTest.java:82` 三处一致） |
+| `S0.contractVersion` | 已证 | `R5:11`、`R6:11` | **历史读数**：采集时为 `contractVersion=1.7`。**复核结论（#166）**：现值 **1.8**（`core/Contract.java:70`）；本节读数**保留原值**不改写（§8.3 只增不改语义） |
 | `W0.worldRebuild` | 已证 | `R5:13`、`R6:13` | 退出码=0；虚空托管世界 `cp_input_probe` |
 | `pre.pauseOnLostFocus` | 已证 | `R5:3`、`R6:3` | options.txt 已钉 `false`（失焦仍 tick） |
 | `S2.portReleased` | 已证 | `R5:50`、`R6:68` | port=23315 released=True |
@@ -429,7 +443,7 @@
 | **`1731 handleInput()` 是否真把队列读空**（`PV:F` 第 2 项、`PL:5` 第 2 项） | 未执行 ⇒ §3.4 第 5 条的 `[推断]` 保持 `未验证` |
 | **`ActionPerformedEvent` 的 post 是否足以让 mod 按钮逻辑满意**（`PV:F` 第 12 项） | 未执行 |
 | **MUI1 的 ≥2 tick 时序**、**MUI2 的 ≥2 帧时序** | `PG:9.4` 第 1/2 项**未执行**；`R6:41` 的红是**界面未开**造成的，**不能**当作时序结论的证据 |
-| **实机动作数=44 与 `FA` 静态的 43 一致** | 实机=44（`debug.input.probe`）⇒ 与 `FA:2.2` 的 43 差 1，差额已由探查器械解释，但**正稿入库时的计数口径需复核** |
+| **实机动作数=44 与 `FA` 静态的 43 一致** | 实机=44（`debug.input.probe`）⇒ 与 `FA:2.2` 的 43 差 1，差额已由探查器械解释。**复核结论（#166）**：该「需复核」项**已闭环**——正稿动作数口径 = **48**（`mc/ActionRegistrar.java:109`；`ReadCaptureOfflineTest.java:879`；`InputCapabilitiesTest.java:82`），探查器械 `debug.input.probe` 未入正稿（本树零命中）。本条按 P0 读数保留 |
 
 ---
 
@@ -443,7 +457,7 @@
 | **Minecraft / Forge 升级** | 矩阵 A 全部行号（本文件所有行号**一次性失效**）；`Minecraft.java:1771` 闸门是否存在、`:1731` 与 `:1776/1837` 顺序；`KeyBinding.pressed` 是否仍被 `unPressAllKeys` 清 | 重跑 `PV` 的检索式；核对 `PV:0.1` 的四条「版本前提纠正」是否仍成立 | `PV:0.1`、`PV:A2` |
 | **MUI1 / MUI2 升级** | `PG:0.2` 的**运行期 vs 源码版本差**是否扩大；`PG:3.0`/`PG:2.0` 已核对的方法签名清单；MUI2 的 `GuiScreenMixin` 是否仍在 jar 内且仍用 `@Redirect`；命中集重建节奏（MUI2 每 frame / MUI1 每 tick） | `javap -p -classpath <运行期 jar> <被引用类>` 逐方法核签；重跑 `PG:9.4` 第 1/2/7 项 | `PG:0.2`、`PG:3.0`、`PG:9.4` |
 | **出现新消费链**（新模组、或旧模组新增输入读取） | §5.1 的分 mod 清单是否新增行；§5.2 的判据三段式是否需要新增行；矩阵 C 是否出现**第四条链路** | 用 `PV:C11` 的两条检索式在新模组树上重跑：`Keyboard.isKeyDown|Mouse.isButtonDown`（物理态）与 `InputEvent|GuiScreenEvent` 订阅（事件队列）；命中即必须补进 §5.1/§5.2 | `PV:C11` 开篇原则、`PV:C10.2` |
-| **出现新动作族 / 新参数** | 本文件 §0.1 的术语表；矩阵 A 的行数（§2.2）；动作总数口径（`FA:2.2` = 43 静态 / 实机 44） | 对照正稿 `input-contract.md` 的动作族定义；核 `ActionRegistrar.java` 的 `ActionDescriptor.builder(` 计数与 `ReadCaptureOfflineTest.java:876-880` 的断言 | `FA:2.2`、`FA:G8` |
+| **出现新动作族 / 新参数** | 本文件 §0.1 的术语表；矩阵 A 的行数（§2.2）；动作总数口径（**契约 1.8 = 48**：`ActionRegistrar.java:109` / `ReadCaptureOfflineTest.java:879` / `InputCapabilitiesTest.java:82` 三处一致；`FA:2.2` 的「43 静态 / 实机 44」是 **P0 时的读数**，其中实机 44 = 43 + 未入正稿的 `debug.input.probe`） | 对照正稿 `input-contract.md` 的动作族定义；核 `ActionRegistrar.java` 的 `ActionDescriptor.builder(` 计数与 `ReadCaptureOfflineTest.java:879`、`InputCapabilitiesTest.java:82` 的断言 | `FA:2.2`、`FA:G8` |
 
 ### 8.2 矩阵与实现怎么对账（「把矩阵逐行关联到代码、版本与测试」）
 
@@ -468,11 +482,11 @@
 
 | 现有防线 | 位置 | 与本文件的关系 |
 |---|---|---|
-| 动作计数断言 | `ReadCaptureOfflineTest.java:876-880`（`assertEquals(43, registry.size())`） | 新增 `input.*` 动作族**必须**同 PR 改此断言与 `contract.md` 的计数文字（`FA:8.6` 列为 🔴 共享文件） |
-| 契约版本 ≥ 每个 `since` | `ReadCaptureOfflineTest.java:883-893` | 新动作族的 `since` 必须 ≤ `Contract.VERSION` |
+| 动作计数断言 | `ReadCaptureOfflineTest.java:879`（`assertEquals(48, registry.size())`；**契约 1.8 的口径**）与 `InputCapabilitiesTest.java:82`（同值，另断言输入族五条都在注册表里） | 新增 `input.*` 动作族**必须**同 PR 改这两条断言与 `contract.md` 的计数文字（`FA:8.6` 列为 🔴 共享文件）。**历史注**：本行原写 `ReadCaptureOfflineTest.java:876-880` 的 `assertEquals(43, …)`——那是 P0 时的读数，已随 #165 变为 48 |
+| 契约版本 ≥ 每个 `since` | `ReadCaptureOfflineTest.java:883-893`；`InputRegistrationTest.java:140-143` | 新动作族的 `since` 必须 ≤ `Contract.VERSION` |
 | 段序文档一致 | `CaseSegmentOrderDocTest` | 本文件**不新增段**，不影响 |
-| **缺口：字段集合无断言** | `FA:G8` —— 没有「某动作的字段集合 == 期望集合」的断言 | `means:"input"` 与 `input.*` 的字段集合**当前不会被任何离线测试拦住** ⇒ 建议随正稿新增一条字段集合断言（**这是需要 Lead 裁决的接口改动，不在本文件范围内**） |
-| A3 基准 | `test/expected/compare-runs.mjs:242`（`read|action` 走 `canonical-hash-equal`） | 新增输入侧读面动作**必须**新增对应基准，否则下一次实机重放会红（`FA:6.3`） |
+| **字段集合断言（原缺口已闭环）** | `FA:G8` 的缺口**已交付**：`src/test/java/.../mc/input/InputRegistrationTest.java:35-37`（自述交付项）、`:51-70`（字段集合常量）、`:184-209`（逐动作断言「既有动作逐字不变、输入族只多 `means`」）；`contract.md:103-106` 已引用 | 原写「**当前不会被任何离线测试拦住** ⇒ 建议随正稿新增一条字段集合断言（需 Lead 裁决）」——**已完成**，不再需要裁决 |
+| A3 基准 | `test/expected/compare-runs.mjs:242`（`read|action` 走 `canonical-hash-equal`） | 新增输入侧读面动作**必须**新增对应基准，否则下一次实机重放会红（`FA:6.3`）。**#166 现状（如实登记）**：`test/expected/` 下**没有**任何输入侧基准（四个 caseId + `compare-runs.mjs`，`input.*` 零命中）；输入侧验收走 `scripts/control-plane/run-input-acceptance.ps1` + `cases/input-multitick.json`（P0/R5/R6 与三轮 #165 验收），**不入** A3 基准 ⇒ 本条规则对本族**未生效**。是「显式豁免」还是「补基准」属验收口径，**待 Lead 裁决**（不在本文件范围内） |
 
 ### 8.3 本文件自身的维护边界
 

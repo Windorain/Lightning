@@ -109,6 +109,36 @@ public interface InputStateSnapshot {
         return (k != null && !k.isEmpty()) || (b != null && !b.isEmpty());
     }
 
+    // ------------------------------------------------------------------ 只增（#166 交付项）
+
+    /**
+     * 运行时状态机的当前态名（契约 §7：{@code "idle"} | {@code "holding"} | {@code "releasing"} | {@code "faulted"}）。
+     *
+     * <p>
+     * 【#166 DR-11】契约 §7 要求 {@code input.state} **必报** {@code state}（含 {@code faulted}），
+     * 本条是它的真值来源；此前 {@code input.state} 根本没有该字段，态只嵌在 {@code hint} 字符串里。
+     *
+     * @return 态名（小写，与 §7 的态名同文）；<b>{@code null}</b> = 本快照不提供状态真值
+     *         （消费方必须如实标注不可读，**不得**猜成 {@code "idle"}——那会把「未知」卖成「空闲」）
+     */
+    default String stateName() {
+        return null;
+    }
+
+    /**
+     * 最近一次 {@code input.mouse op:move} 的自校准结论（读回是否落在 ±1 内，契约 §2.4 第 3/4 条）。
+     *
+     * <p>
+     * 【#166 DR-6】{@code input.mouse} 与 {@code input.state} 的 {@code coordinates.selfCalibrated}
+     * 必须是**同一个量**（原先能力面把它硬编码成 {@code false}，与动作返回体两处真相）。
+     *
+     * @return {@code TRUE}/{@code FALSE} = 最近一次 move 的读回结论；<b>{@code null}</b> = 本会话
+     *         **尚无 move**（「未校准」而不是「校准失败」——两者不可混同，消费方应据此给出说明）
+     */
+    default Boolean lastMoveCalibrated() {
+        return null;
+    }
+
     /** 空快照（未实现/无运行时时的显式空态，不是「有状态但读不出来」）。 */
     static InputStateSnapshot empty() {
         return new InputStateSnapshot() {
