@@ -17,15 +17,24 @@ public final class Contract {
      * 1.4=收口T3 命令通道（issue #100：{@code cmd.exec} / {@code export.session}，见 contract.md §4.5）；
      * 1.5=L1 玩家操作（issue #101：{@code player.*} 九动作，见 contract.md §4.6；调度者撞号裁决：
      * 本单分支自报 1.4 与 #100 撞号，合流时统一为 1.5）；
-     * 1.6=无人值守收尾原语（issue #103：{@code core.shutdown}，见 contract.md §4.8）。
+     * 1.6=无人值守收尾原语（issue #103：{@code core.shutdown}，见 contract.md §4.8）；
+     * 1.7=托管世界标记前置与 {@code complete} 状态机（issue #123：{@code world.rebuild} 的标记前置 +
+     * {@code world.info} 新增 {@code markerComplete} 响应字段 + {@code world.snapshot} 只接受构建完成的
+     * 世界，见 contract.md §6.1/§6.6）。
      * 小版本只增不改义（contract.md §5）。
+     *
+     * <p>
+     * <b>1.7 为什么算增量而不是破坏</b>：新增的是响应字段与一个新的世界状态（构建中的
+     * {@code complete:false}）。既有世界（旧代码建的标记无 {@code complete} 键 ⇒ 按完成读）行为逐字不变，
+     * {@code world.snapshot} 的接受集合因此没有缩小；被新拒的只有「本次构建尚未收口的世界」——
+     * 那个状态在 1.7 之前根本不存在（那时它是「无标记」，本来就被拒）。
      *
      * <p>
      * <b>不变式</b>：本值必须 ≥ 任一动作自描述的 {@code since}——否则自述端点会给出
      * 「服务契约版本比某个动作的引入版本还旧」这种自相矛盾的目录（D1/D3 会判红）。
      * 新增动作时两处要一起改。
      */
-    public static final String VERSION = "1.6";
+    public static final String VERSION = "1.7";
 
     /** 契约 URI 前缀，即契约大版本。 */
     public static final String PREFIX = "/cp/v1";

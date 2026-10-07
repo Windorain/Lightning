@@ -113,8 +113,8 @@ public final class ActionRegistrar {
                         + "（集成服 WorldServer），客户端 WorldClient 的占位存档名不会出现在这里；"
                         + " playerPos/playerName 等客户端字段取客户端世界，来源见 metaSource。")
                 .returns(
-                    "{loaded, world{loaded,folder,displayName,dimension,managed,markerPresent,generatorOptions,"
-                        + "terrainType,mapFeatures,seed,worldTime,void,spawn[],playerPos[],metaSource}}")
+                    "{loaded, world{loaded,folder,displayName,dimension,managed,markerPresent,markerComplete,"
+                        + "generatorOptions,terrainType,mapFeatures,seed,worldTime,void,spawn[],playerPos[],metaSource}}")
                 .example("{}")
                 .since("1.0")
                 .build(),
@@ -123,8 +123,11 @@ public final class ActionRegistrar {
         registry.registerStepping(
             ActionDescriptor.builder("world.rebuild", Tier.SCENE)
                 .description(
-                    "幂等重建托管世界：离开当前世界 → 删除托管存档目录 → 固定种子建虚空世界 → "
-                        + "可选执行 build 段 → 静置 → 写 cp_world.json 与场景清单。同参数两次执行场景哈希相等。"
+                    "幂等重建托管世界：离开当前世界 → 删除托管存档目录 → 写标记（complete:false，标记前置）→ "
+                        + "固定种子建虚空世界 → 可选执行 build 段 → 静置 → 标记收口（complete:true）并写场景清单。"
+                        + "同参数两次执行场景哈希相等。标记前置的用意：构建中途失败只留下「带标记」的残留，"
+                        + "可正常经 world.rebuild 删除重建（修复前标记只在最末阶段写，失败残留无标记、无 API 可清）。"
+                        + "标记语义见契约 §6.1：有标记=可删可重建；complete:true=可当成品复用（world.snapshot 只收后者）。"
                         + " folder 与 seed 运行期必填（缺失报 CP-VALID-002）；自描述不标 required，"
                         + "以便「缺 confirm 一律先被 CP-CONFIRM-001 拒掉」在空参数负测试里可观测。")
                 .optional("folder", ActionDescriptor.TYPE_STRING, "托管世界存档目录名（运行期必填），须以 cp_ 开头")
@@ -146,7 +149,8 @@ public final class ActionRegistrar {
                     STAGE_TIMEOUT_DOC)
                 .returns(
                     "{schema, folder, seed, void, generatorOptions, voidSpec, settleTicks, runId, world{...}, "
-                        + "marker{...}, scene{sha256,stepCount,blockCount,teCount,mismatchCount,manifestPath,manifest}, "
+                        + "marker{schema,folder,seed,void,complete,createdBy,createdAt,completedAt?}, "
+                        + "scene{sha256,stepCount,blockCount,teCount,mismatchCount,manifestPath,manifest}, "
                         + "sceneIdempotencyKey}")
                 .example(
                     "{\"folder\":\"cp_demo\",\"seed\":20261006,\"void\":true,\"base\":[64,12,64],"
@@ -160,7 +164,11 @@ public final class ActionRegistrar {
 
         registry.registerStepping(
             ActionDescriptor.builder("world.snapshot", Tier.SCENE)
-                .description("托管世界快照（v1 口径=整目录复制）：离开世界 → 复制存档目录到 controlplane/snapshots/<id>/ " + "→ 计算目录哈希清单 → 重进世界。")
+                .description(
+                    "托管世界快照（v1 口径=整目录复制）：离开世界 → 复制存档目录到 controlplane/snapshots/<id>/ " + "→ 计算目录哈希清单 → 重进世界。"
+                        + "只接受**构建完成**的托管世界（cp_world.json 的 complete:true，契约 §6.1/§6.6）："
+                        + "失败残留（complete:false）的场景可能只铺了一半，拍成快照会被 world.rollback 当作期望态扶正。"
+                        + "无标记目录同样拒绝（非托管世界，CP-STATE-001）。")
                 .optional("folder", ActionDescriptor.TYPE_STRING, "托管世界目录名；缺省用当前所在托管世界")
                 .optional("snapshotId", ActionDescriptor.TYPE_STRING, "快照 id；缺省 <yyyyMMdd-HHmmss>-<folder>")
                 .optional(

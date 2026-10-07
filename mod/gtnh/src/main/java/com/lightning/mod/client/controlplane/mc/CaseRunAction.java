@@ -370,7 +370,16 @@ public final class CaseRunAction extends SteppingActionBase {
 
     // ------------------------------------------------------------ 各段
 
-    /** {@code world} 段：同 {@code world.rebuild} 的实现（{@link WorldRebuildRunner}），不带构建段。 */
+    /**
+     * {@code world} 段：同 {@code world.rebuild} 的实现（{@link WorldRebuildRunner}），不带构建段。
+     *
+     * <p>
+     * <b>本段不收口标记</b>（{@code markComplete=false}，#123）：本段后面还有独立的 {@code build} 段，
+     * 场景尚未铺。若本段就把标记写成 {@code complete:true}，随后的 build 段失败会留下
+     * 「标记说完成、场景只铺了一半」的世界——下游（{@code world.snapshot} 的成品复用门）会误判为
+     * 可复用。收口点因此落在 build 段成功之后（见 {@link #stepBuild}）；用例没有 build 段时，
+     * 本段就是完整的世界重建，此时如实收口（下面按 {@code segments} 判定）。
+     */
     private JsonObject stepWorld(ActionContext ctx) throws Exception {
         if (runner == null) {
             JsonObject w = Json.optObject(plan, "world");
@@ -382,6 +391,10 @@ public final class CaseRunAction extends SteppingActionBase {
             spec.buildSteps = new JsonArray();
             // 后面还有 build 段时不在本段静置：build 段收尾会按 settleTicks 静置（避免双倍等待）
             spec.settleTicks = segments.contains(SEG_BUILD) ? 0 : Json.optInt(w, "settleTicks", 60);
+            boolean hasBuild = segments.contains(SEG_BUILD) && Json.optArray(plan, "build") != null
+                && Json.optArray(plan, "build")
+                    .size() > 0;
+            spec.markComplete = !hasBuild;
             WorldRebuildRunner.assertManagedIfExists(mc.mcDataDir, spec.folder);
             runner = new WorldRebuildRunner(spec, ctx);
         }
@@ -581,6 +594,25 @@ public final class CaseRunAction extends SteppingActionBase {
         ctx.artifacts()
             .writeArtifact(run, SceneManifest.RUN_RELATIVE_PATH, bytes, "scene-manifest");
         SceneManifestStore.write(mc.mcDataDir, folder, m);
+        // 标记收口（#123）：world 段特意留了 complete:false，到本段（场景已铺好、清单已落）才允许
+        // 把世界宣告为「构建完成的成品」。这一步失败即本段失败，标记保持 false —— 那正是失败残留
+        // 应有的状态（可删可重建、不可复用）；故它不能放在 try 里被吞掉。
+        Path worldDir = ManagedWorld.worldDir(mc.mcDataDir, folder);
+        // 先显式断言「目录是托管的」，把「按段续跑跑到一个非托管目录上」这条路的错误信息说清楚：
+        // 写场景清单本身就是对该存档目录的世界写，契约 §6.1 只许写托管世界。若这里直接落到
+        // promoteMarker 的拒绝上，调用方看到的会是「标记收口失败」这句实现内部的话，
+        // 而根因多半是「segments 没包含 world 段、folder 又不是托管世界」。
+        try {
+            ManagedWorld.assertManaged(worldDir, folder, "case.run 的 build 段");
+        } catch (CpException e) {
+            throw new CpException(
+                e.code(),
+                e.detail() + "（build 段的场景清单要写进该存档目录；请把 world 段一并跑，或让 folder 指向托管世界）",
+                e.context(),
+                e);
+        }
+        ManagedWorld.promoteMarker(worldDir, folder, seed, true);
+        CpLog.info("build 段完成，标记已收口（complete:true）: %s", folder);
         JsonObject detail = new JsonObject();
         detail.addProperty("sha256", Json.optString(m, "sha256", null));
         detail.addProperty("stepCount", Json.optInt(m, "stepCount", 0));
