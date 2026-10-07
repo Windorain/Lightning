@@ -786,8 +786,6 @@ public class ReadCaptureOfflineTest {
             ReadCaptureAction.NAME,
             "maxEvents",
             Integer.valueOf(ReadCaptureAction.DEFAULT_MAX_EVENTS));
-        assertDefault(registry, CaptureDiagAction.NAME, "arm", Boolean.TRUE);
-        assertDefault(registry, CaptureDiagAction.NAME, "reset", Boolean.TRUE);
         assertDefault(registry, CaptureDiagAction.NAME, "drainDump", Boolean.FALSE);
         assertDefault(registry, CaptureDiagAction.NAME, "latestWindowOnly", Boolean.FALSE);
         assertDefault(registry, CaptureDiagAction.NAME, "dump", Boolean.FALSE);
@@ -803,6 +801,41 @@ public class ReadCaptureOfflineTest {
         assertNull(
             "at 是「不传即取 drain 到的格」，不该有 default 值",
             findParam(registry, CaptureDiagAction.NAME, "at").defaultValue());
+        // arm/reset 的缺省**取决于调用形态**，任何单一 JSON 值都是谎话。
+        // 更要紧的是：客户端会按自述把 default 物化进请求体（本仓 caller.mjs:311-312），
+        // 写死 default:true 会让「纯导出」被当成「显式布防」——实机正是这样把三态逻辑架空的。
+        assertNull(
+            "arm 的缺省取决于调用形态，不得声明单一 default（会被客户端物化而架空三态语义）",
+            findParam(registry, CaptureDiagAction.NAME, "arm").defaultValue());
+        assertNull(
+            "reset 的缺省取决于调用形态，不得声明单一 default",
+            findParam(registry, CaptureDiagAction.NAME, "reset").defaultValue());
+    }
+
+    /**
+     * 机读可判定性（D3 的强化）：缺省取决于形态的参数，其<b>实际生效值</b>必须出现在返回值自述里。
+     *
+     * <p>
+     * 这是「不声明 default」这一让步的补偿：调用方失去了从 default 字段预判的能力，
+     * 就必须能从结果里读到实际发生了什么。否则「不声明 default」会退化成「不可判定」。
+     */
+    @Test
+    public void formDependentDefaultsAreMachineReadableInResult() {
+        ActionRegistry registry = new ActionRegistry();
+        ActionRegistrar.registerAll(null, registry);
+        String returns = registry.descriptor(CaptureDiagAction.NAME)
+            .returns();
+        for (String field : new String[] { "sessionMode", "sessionTouched", "resetRequested", "reset", "armed",
+            "defaultRule" }) {
+            assertTrue("返回值自述里必须列出 " + field + "（缺省取决于形态 ⇒ 实际值必须机读可判定）", returns.contains(field));
+        }
+        // sessionMode 的三个取值必须可枚举（调用方要能穷举判定）
+        String desc = registry.descriptor(CaptureDiagAction.NAME)
+            .description();
+        for (String mode : new String[] { CaptureDiagAction.SESSION_ARM, CaptureDiagAction.SESSION_DISARM,
+            CaptureDiagAction.SESSION_UNCHANGED }) {
+            assertTrue("动作说明或返回值自述里必须能查到 sessionMode 取值 " + mode, desc.contains(mode) || returns.contains(mode));
+        }
     }
 
     /** 动作数口径：契约注释里的数字必须与实注册数一致（D3 漂移防线）。 */
