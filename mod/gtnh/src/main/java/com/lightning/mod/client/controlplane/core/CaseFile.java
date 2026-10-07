@@ -230,14 +230,17 @@ public final class CaseFile {
         private final String role;
         private final JsonObject expect;
         private final boolean hasExpect;
+        private final JsonElement holdTicks;
 
-        ActionStep(String action, JsonObject params, String path, String role, JsonObject expect, boolean hasExpect) {
+        ActionStep(String action, JsonObject params, String path, String role, JsonObject expect, boolean hasExpect,
+            JsonElement holdTicks) {
             this.action = action;
             this.params = params == null ? new JsonObject() : params;
             this.path = path;
             this.role = role;
             this.expect = expect;
             this.hasExpect = hasExpect;
+            this.holdTicks = holdTicks == null || holdTicks.isJsonNull() ? null : holdTicks;
         }
 
         /** 动作名（任意已注册的同步动作，{@code read.*} 与 {@code scene.*}/{@code player.*} 都算）。 */
@@ -270,7 +273,23 @@ public final class CaseFile {
             return hasExpect;
         }
 
-        /** {@code {action, params, path, role?, expect?}}。 */
+        /**
+         * 步骤对象<b>顶层</b>的 {@code holdTicks}（v1.8 / G1，input-contract.md §9.2 / D-3）；未声明返回 null。
+         *
+         * <p>
+         * 这里是<b>原样承载</b>：本访问器不判类型也不判取值域（那是 {@link CaseValidator} 的事），
+         * 因此非法值也会被原样读出来——调用方必须先过校验，或自行按 {@link CaseValidator} 的口径判。
+         */
+        public JsonElement holdTicks() {
+            return holdTicks == null ? null : Json.copy(holdTicks);
+        }
+
+        /** 是否声明了顶层 {@code holdTicks}（缺失或 JSON null 均为未声明）。 */
+        public boolean hasHoldTicks() {
+            return holdTicks != null;
+        }
+
+        /** {@code {action, params, path, role?, expect?, holdTicks?}}。 */
         public JsonObject toJson() {
             JsonObject o = new JsonObject();
             o.addProperty("action", action);
@@ -281,6 +300,9 @@ public final class CaseFile {
             }
             if (hasExpect) {
                 o.add("expect", Json.copyObject(expect));
+            }
+            if (holdTicks != null) {
+                o.add("holdTicks", Json.copy(holdTicks));
             }
             return o;
         }

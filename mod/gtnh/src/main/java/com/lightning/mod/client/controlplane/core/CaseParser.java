@@ -72,8 +72,22 @@ public final class CaseParser {
     /** {@code read} 段步骤的允许字段（v1.3，issue #98）。 */
     public static final Set<String> READ_STEP_FIELDS = unmodifiable("action", "params", "path", "role");
 
-    /** {@code action} 段步骤的允许字段（v1.6，issue #103）。 */
-    public static final Set<String> ACTION_STEP_FIELDS = unmodifiable("action", "params", "path", "role", "expect");
+    /**
+     * {@code action} 段步骤的允许字段（v1.6，issue #103；v1.8 / G1 起增 {@code holdTicks}）。
+     *
+     * <p>
+     * {@code holdTicks} 是<b>步骤对象顶层</b>的编排属性（input-contract.md §9.2 第 1 条 / D-3），
+     * 与 {@code params} 并列：跨 tick 是<b>编排</b>的事，不是动作参数的事。因此它不是
+     * 「动作参数里的一个键」，而是步骤字段——在这里开白名单，在 {@link CaseValidator} 判取值域
+     * 与适用性（本类只做「字段名/类型」那一半，见类注释的分工）。
+     */
+    public static final Set<String> ACTION_STEP_FIELDS = unmodifiable(
+        "action",
+        "params",
+        "path",
+        "role",
+        "expect",
+        "holdTicks");
 
     /** {@code export} 段步骤的允许字段（v1.7，Gitea #102）。 */
     public static final Set<String> EXPORT_STEP_FIELDS = unmodifiable("action", "params");
@@ -607,6 +621,10 @@ public final class CaseParser {
             if (step.has("expect") && expect == null) {
                 fields.add(ctx + ".expect", "须为 object {指针: 期望值}（RFC 6901 指针 → 期望值）");
             }
+            // v1.8 / G1（input-contract.md §9.2 / D-3）：holdTicks 是步骤对象顶层的编排属性，
+            // 这里只**原样承载**（缺失/JSON null 即未声明）。取值域（精确整数、1..1200、只对输入族
+            // 步进动作、不适用字段必须显式拒绝）全部在 CaseValidator 一处判定——同一条规则不在两处分叉。
+            JsonElement holdTicks = Json.get(step, "holdTicks");
             out.add(
                 new CaseFile.ActionStep(
                     action,
@@ -614,7 +632,8 @@ public final class CaseParser {
                     path,
                     role,
                     expect == null ? null : Json.copyObject(expect),
-                    expect != null));
+                    expect != null,
+                    holdTicks == null ? null : Json.copy(holdTicks)));
         }
         return out;
     }
