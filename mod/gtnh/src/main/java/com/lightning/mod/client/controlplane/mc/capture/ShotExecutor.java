@@ -23,7 +23,9 @@ import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.lightning.mod.client.controlplane.core.ArtifactStore;
 import com.lightning.mod.client.controlplane.core.CameraSpec;
 import com.lightning.mod.client.controlplane.core.CameraSpecs;
@@ -1471,19 +1473,52 @@ public final class ShotExecutor {
      * 校验并归一化 {@code gui} 参数（唯一的取值域判定点；越域即 {@code CP-VALID-002}）。
      *
      * <p>
-     * 缺省（{@code null} 或空串）归一成 {@link #GUI_NONE}。不适用/未知取值一律显式拒绝——
-     * 「静默忽略不适用字段」是本仓已定的失效模式。
+     * 缺省（{@code null} / {@link com.google.gson.JsonNull} / 空串）归一成 {@link #GUI_NONE}。
+     * 不适用/未知取值一律显式拒绝——「静默忽略不适用字段」是本仓已定的失效模式。
      *
-     * @param raw 原始参数值（可为 null）
+     * <h2>为什么必须显式处理 {@link JsonElement}（实机缺陷修复，Gitea #165 / #164）</h2>
+     * 生产调用路径传进来的是 {@code Json.get(params, "gui")} 的**返回值**，即 gson 的
+     * {@link JsonPrimitive}，而<b>不是</b> {@code String}。原实现直接
+     * {@code String.valueOf(raw)}：对 {@code JsonPrimitive("screen")} 得到的是它的
+     * <b>JSON 表示</b>{@code "\"screen\""}（带引号）⇒ 永远落在取值域外 ⇒
+     * <b>{@code gui:"screen"} 从来就不可能被接受</b>（离线测试只喂 {@code String}，因此全绿；
+     * 这正是「测试全绿但能力不可用」的形态，由实机验收判据 W7b 擒获）。
+     *
+     * <p>
+     * 修法：显式按类型解包，并且**拒绝非字符串标量**（数字/布尔不许静默强转成字符串——
+     * {@code contract.md} §2.1 的「类型即判据，不做隐式转换」）。非标量（对象/数组）同样显式拒绝。
+     *
+     * @param raw 原始参数值（可为 {@code null}；{@code String} 与 {@link JsonElement} 两种形态都接受）
      * @return {@link #GUI_NONE} 或 {@link #GUI_SCREEN}
-     * @throws CpException CP-VALID-002：取值域外
+     * @throws CpException CP-VALID-002：取值域外、类型不符（非标量/非字符串）
      */
     public static String resolveGuiMode(Object raw) {
         if (raw == null) {
             return GUI_NONE;
         }
-        String v = String.valueOf(raw)
-            .trim();
+        String v;
+        if (raw instanceof JsonElement) {
+            JsonElement e = (JsonElement) raw;
+            if (e.isJsonNull()) {
+                return GUI_NONE;
+            }
+            if (!e.isJsonPrimitive()) {
+                throw CpException.param(
+                    "参数取值非法: gui",
+                    "gui",
+                    "gui 只接受字符串；收到 " + (e.isJsonObject() ? "对象" : "数组") + "（只许 " + guiChoices() + "）");
+            }
+            JsonPrimitive p = e.getAsJsonPrimitive();
+            if (!p.isString()) {
+                throw CpException
+                    .param("参数取值非法: gui", "gui", "gui 只接受字符串；收到非字符串标量 " + p + "（本仓禁止静默强转，见 contract.md §2.1）");
+            }
+            v = p.getAsString()
+                .trim();
+        } else {
+            v = String.valueOf(raw)
+                .trim();
+        }
         if (v.isEmpty()) {
             return GUI_NONE;
         }
@@ -1492,6 +1527,11 @@ public final class ShotExecutor {
                 return m;
             }
         }
+        throw CpException.param("参数取值非法: gui", "gui", "只许 " + guiChoices() + "（收到 \"" + v + "\"）");
+    }
+
+    /** {@code gui} 的取值域（人读形式，供拒绝消息用）。 */
+    private static String guiChoices() {
         StringBuilder sb = new StringBuilder();
         for (String m : GUI_MODES) {
             if (sb.length() > 0) {
@@ -1499,7 +1539,7 @@ public final class ShotExecutor {
             }
             sb.append(m);
         }
-        throw CpException.param("参数取值非法: gui", "gui", "只许 " + sb + "（收到 \"" + v + "\"）");
+        return sb.toString();
     }
 
     /** 供诊断：当前 shots 目录（未关联 run 时返回 null）。 */
