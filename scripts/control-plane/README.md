@@ -1012,7 +1012,7 @@ node scripts/control-plane/export-d2-twins.mjs --out <证据目录>
 
 | 文件 | 职责 | 不含什么 |
 |---|---|---|
-| `input-acceptance-checks.ps1` | **纯判定模块**：一条判据一个函数，输入是「作业 JSON / 错误信封 / 读面 JSON / 描述符 JSON」，输出 `@{id;ok;status;detail}`（`status = pass | fail | skipped | blocked`） | 无 HTTP、无进程、不读文件、不归档、不打印 |
+| `input-acceptance-checks.ps1` | **纯判定模块**：一条判据一个函数，输入是「作业 JSON / 错误信封 / 读面 JSON / 描述符 JSON」，输出 `@{id;ok;status;detail}`（`status` = `pass`/`fail`/`skipped`/`blocked`） | 无 HTTP、无进程、不读文件、不归档、不打印 |
 | `run-input-acceptance.ps1` | **编排**：写 cfg → 钉 `pauseOnLostFocus` → 起客户端 → 等 `server.json` → 按 stage 调 `caller.mjs` → 归档 → 红绿表 → 退出码 | 不自己判红绿（判定全在被 dot-source 的模块里） |
 | `run-input-acceptance-selftest.ps1` | **离线自检**：合成夹具逐条喂判定模块（好数据绿 / 坏数据精确红） | 不起客户端、不发 HTTP |
 | `cases/input-multitick.json` | G1 的跨帧输入固定程序（`action` 段含顶层 `holdTicks` 的输入步） | 当前**预期被拒**（G1 未实现）⇒ 判据记 `blocked-by-G1` |
@@ -1046,7 +1046,7 @@ pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1
 | `-KeepClient` | 关 | 跑完不停客户端（保留现场） |
 | `-Port` | 23314 | **仅**前置占用检查；实调一律以 `server.json` 为准 |
 | `-ClientReadyTimeoutMin` | 8 | 等 `server.json` / `tokens.json` 的上限（分钟） |
-| `-Stage` | `all` | `all | pre | menu | world | g1`；除 `pre` 外每个 stage 都**先跑 pre** |
+| `-Stage` | `all` | `all`/`pre`/`menu`/`world`/`g1`；除 `pre` 外每个 stage 都**先跑 pre** |
 | `-ArchiveRoot` | `D:\Workspace\Lightning\temp\control-plane` | 归档根；本次落 `<ArchiveRoot>\input-<ts>\` |
 | `-ActionTimeoutMs` | 600000 | 单次调用（含 `case.run` / `world.rebuild` / `shot.multi`）的 sync 超时 |
 | `-ClientTimeoutMin` | 30 | 进入客户端之后的整段流水线墙钟预算（分钟）；W4 的等待轮与 G1 都受它约束 |
