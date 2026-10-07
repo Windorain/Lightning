@@ -14,7 +14,7 @@ import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
  * T1.3：把<strong>一个变体</strong>的假世界机器驱动到「待机 / 运行」两态，并在进入指定状态后<strong>断言
  * {@code isActive()}</strong>，再交给几何捕获。
  * <p>
- * 与 T0.3 的 {@link RunStateDriver} 的关系：机制完全相同（同一组 public 字段 + 同一条
+ * 与 T0.3 运行态探针驱动的关系（该类已随 Gitea #104 按 V12 裁决删除）：机制完全相同（同一组 public 字段 + 同一条
  * {@code onPostTick} 服务端分支 + 同一道公开逃生门），差异只在<strong>用途与覆盖面</strong>：
  * T0.3 是「一次探针 + 全程 trace」，本类是「逐变体、可停、两态各一次断言」，且把
  * {@code activeMechanism} 直接记进变体产物（计划硬约束 4）。此外本类按 {@code IMetaTileEntity} 的公开接口

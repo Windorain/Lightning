@@ -13,7 +13,7 @@ import net.minecraftforge.common.config.Configuration;
  * 完成时才生效；一旦生效，产物 {@code notes} 与被收窄通道的 {@code notes} 都会如实记录
  * 「真实域 / 被排除的取值」。
  * <p>
- * <b>为什么在本类里懒加载</b>：既有 {@link SdeAutomationConfig} 由 {@code LightningMod} 在
+ * <b>为什么在本类里懒加载</b>：既有的老自动化配置类（{@code SdeAutomationConfig}，已随 Gitea #104 删除）曾由 {@code LightningMod} 在
  * {@code preInit} 用 {@code event.getSuggestedConfigurationFile()} 装载；T1.5 的写范围不含
  * {@code LightningMod}，故改为**首次使用时按显式路径装载**（客户端侧调用者手上有
  * {@code mc.mcDataDir}），避免在 common 侧猜数据目录。

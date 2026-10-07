@@ -101,7 +101,11 @@ public final class ActionRegistrar {
     public static void registerAll(ControlPlaneRuntime runtime, ActionRegistry registry) {
         registry.register(
             ActionDescriptor.builder("core.ping", Tier.OBSERVE)
-                .description("存活回声：确认控制面在跑、版本是否匹配、既有探针是否占用本客户端。")
+                .description(
+                    "存活回声：确认控制面在跑、版本是否匹配、控制面自身是否忙。" + "probeActive/probe 的语义随 Gitea #104 变更——老探针设施（触发文件驱动的"
+                        + "批处理自动化：10 个入口类 + tick 接管链）已随 #104 整体删除，"
+                        + "因此 probeActive 现表达**控制面自身忙闲**（有作业在队/在跑），"
+                        + "probe 恒为 null（不再有「激活中的老探针名」）。")
                 .returns(
                     "{pong:true, contractVersion, prefix, versions{mod,minecraft,forge,modsTotal}, serverTime, "
                         + "uptimeMs, busy, probeActive, probe, capabilities[]}")
@@ -112,7 +116,9 @@ public final class ActionRegistrar {
 
         registry.register(
             ActionDescriptor.builder("core.status", Tier.OBSERVE)
-                .description("现场总览：版本、世界加载态、忙闲、事件流水游标、最近作业、快照与路径。")
+                .description(
+                    "现场总览：版本、世界加载态、忙闲、事件流水游标、最近作业、快照与路径。" + "probeActive/probe 的语义随 Gitea #104 变更（老探针设施已整体删除）："
+                        + "probeActive = 控制面自身忙闲，probe 恒为 null。")
                 .returns(
                     "{contractVersion, versions{...}, world{...}, server{running,port,bind,uptimeMs}, busy, "
                         + "currentJobId, currentAction, pending, probeActive, probe, managedWorld, "

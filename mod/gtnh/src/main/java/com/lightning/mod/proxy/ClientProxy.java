@@ -6,7 +6,6 @@ import net.minecraftforge.common.MinecraftForge;
 import org.apache.logging.log4j.Level;
 
 import com.lightning.mod.client.SelectionClientState;
-import com.lightning.mod.client.automation.SdeClientAutomationTickHandler;
 import com.lightning.mod.client.controlplane.mc.ControlPlaneBootstrap;
 import com.lightning.mod.client.export.ExportBundleTickHandler;
 import com.lightning.mod.client.gui.GuiSdeCellNote;
@@ -41,12 +40,12 @@ public class ClientProxy extends CommonProxy {
         MinecraftForge.EVENT_BUS.register(new SelectionBoxRenderer());
         MinecraftForge.EVENT_BUS.register(new WandHighlightRenderer());
         // ClientTickEvent（1.7.10）由 FML 总线派发，勿注册到 MinecraftForge.EVENT_BUS。
+        // 老批处理接管链（触发文件驱动的 7+1 条分派）已随 Gitea #104 整体删除，
+        // 这里不再注册 SdeClientAutomationTickHandler；客户端侧只剩两个 tick handler：
+        // ExportBundleTickHandler（/sde dump 的注册表写出）与控制面排空器。
         FMLCommonHandler.instance()
             .bus()
             .register(new ExportBundleTickHandler());
-        FMLCommonHandler.instance()
-            .bus()
-            .register(new SdeClientAutomationTickHandler());
         // 控制面（contract.md §9）：默认关闭；启用时装配 HTTP 服务并注册自己的 tick 排空器。
         // 启动失败只记日志，不影响客户端其余初始化。
         if (SdeControlPlaneConfig.isEnabled()) {

@@ -12,14 +12,11 @@
     "protocol:lint":     "cd protocol && buf lint",
     "protocol:breaking": "cd protocol && buf breaking --against '.git#branch=main'",
 
-    "multiblock:export":          "pwsh -NoProfile -File scripts/multiblock-pipeline/run-pipeline.ps1",
     "multiblock:verify-expanded": "node scripts/multiblock-pipeline/verify-expanded.mjs",
     "multiblock:compare-runs":    "node scripts/multiblock-pipeline/compare-runs.mjs",
     "multiblock:selfcheck":       "pwsh -NoProfile -File scripts/multiblock-pipeline/selfcheck.ps1",
 
     "acceptance:multiblock":      "pwsh -NoProfile -File scripts/acceptance/run-acceptance.ps1",
-    "acceptance:parts":           "pwsh -NoProfile -File scripts/parts-acceptance/run-parts-acceptance.ps1",
-    "acceptance:parts:l1":        "pwsh -NoProfile -File scripts/parts-acceptance/run-acceptance.ps1",
     "acceptance:volume-doc":      "node scripts/acceptance/volume-doc.mjs"
   }
 }

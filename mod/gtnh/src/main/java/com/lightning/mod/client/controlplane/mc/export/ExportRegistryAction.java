@@ -181,7 +181,7 @@ public final class ExportRegistryAction extends SteppingActionBase {
                             "exportRoot",
                             registryDirAbs,
                             "hint",
-                            "确认已进世界（world.info.loaded=true）且没有既有探针激活（about.probeActive）；"
+                            "确认已进世界（world.info.loaded=true）且控制面自身空闲（about.probeActive；#104 后该字段表达控制面自身忙闲）；"
                                 + "探针激活时控制面 tick 层单向避让，不排空作业"),
                         null);
                 }

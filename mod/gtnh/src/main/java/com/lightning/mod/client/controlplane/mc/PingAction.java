@@ -14,8 +14,13 @@ import com.lightning.mod.client.controlplane.core.TimeSource;
  * {@code core.ping}（observe，同步）：存活回声。
  *
  * <p>
- * 返回值里带契约版本、版本串与「既有探针是否激活」——调用方据此判断这台客户端是不是
- * 正被别的自动化链占用，以及版本是否匹配（版本不符时不该继续调用场景动作）。
+ * 返回值里带契约版本、版本串与控制面忙闲（{@code probeActive}）——调用方据此判断这台客户端是不是
+ * 正被别的作业占用，以及版本是否匹配（版本不符时不该继续调用场景动作）。
+ *
+ * <p>
+ * {@code probeActive}/{@code probe} 的语义随 Gitea #104 变更（老探针设施整体删除）：字段保留、
+ * 形状不变，{@code probeActive} 现表达<b>控制面自身忙闲</b>，{@code probe} <b>恒为 null</b>。
+ * 见 {@link ProbeActivity}。
  */
 public final class PingAction implements ControlAction {
 
@@ -42,9 +47,8 @@ public final class PingAction implements ControlAction {
                 .uptimeMillis() : 0L);
         o.addProperty("busy", runtime != null && runtime.busy());
         Minecraft mc = WorldRuntime.mc();
-        String probe = ProbeActivity.firstActive(mc);
-        o.addProperty("probeActive", probe != null);
-        o.addProperty("probe", probe);
+        o.addProperty("probeActive", ProbeActivity.any(mc));
+        o.addProperty("probe", ProbeActivity.firstActive(mc));
         JsonArray caps = new JsonArray();
         Json.add(caps, "world-rebuild");
         Json.add(caps, "world-snapshot");
