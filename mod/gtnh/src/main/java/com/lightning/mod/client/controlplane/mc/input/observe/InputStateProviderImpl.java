@@ -8,6 +8,7 @@ import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.Contract;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.TimeSource;
+import com.lightning.mod.client.controlplane.mc.input.InputCapabilities;
 import com.lightning.mod.client.controlplane.mc.input.InputCoordinateMath;
 import com.lightning.mod.client.controlplane.mc.input.api.InputRuntime;
 import com.lightning.mod.client.controlplane.mc.input.api.InputStateProvider;
@@ -220,21 +221,30 @@ public final class InputStateProviderImpl implements InputStateProvider {
     }
 
     /**
-     * {@code actions}：已注册的输入动作名。
+     * {@code actions}：**已注册**的输入动作名（§5.2）。
      *
      * <p>
-     * §5.2 明确：未实现时空数组，<b>不是</b> {@code ["input.key", ...]}。「哪些输入动作已注册」的真值
-     * 在 {@code ActionRegistry}（T3 的装配面），不属本包；因此运行时在场时本字段也只能给出「本族是否
-     * 已实现」这一层的形态，<b>不</b>凭运行时存在就编出动作名清单。
+     * 真值在能力真值表 {@link InputCapabilities}（由注册面与 `InputRegistrationTest` 双向对齐），
+     * 本包只**消费**、不自行编造。§5.2 末条的自洽要求：`implemented:false` 时必须是空数组。
+     *
+     * <p>
+     * 【实机缺陷 L-3】此处原先恒返回空数组（理由是「动作名的真值在 ActionRegistry，不属本包」），
+     * 结果是 `implemented:true` 与 `actions:[]` 同时出现，且 `notImplemented` 把调用方推去读
+     * `/cp/v1/actions` —— 与 §5.1 第 4 条「本动作是本族**唯一**的能力声明口」直接冲突。
      */
     private static JsonArray actionsJson(boolean implemented) {
+        // §5.2：`actions` 是「**已注册**的输入动作名」，真值在本族的**能力真值表** {@link InputCapabilities}；
+        // 那张表由注册面（T3）与 `InputRegistrationTest` 双向对齐，本包只**消费**、不自行编造。
+        //
+        // 【缺陷修复（实机 L-3）】这里原先恒返回空数组，并把调用方推去读 `/cp/v1/actions` ——
+        // 那与 §5.1 第 4 条「本动作是本族**唯一**的能力声明口」直接冲突：能力面自称
+        // `implemented:true` 却报不出任何动作名，等于能力发现面在最需要它的时候说谎。
+        // 现在：只有「运行时在场」且「本族已注册」才给清单；否则保持空数组（§5.2 末条的自洽要求）。
         JsonArray arr = new JsonArray();
-        if (!implemented) {
+        if (!implemented || !InputCapabilities.ACTIONS_REGISTERED) {
             return arr;
         }
-        // 运行时在场 ≠ 动作已注册（注册归 T3，见 §9.3 的所有权表）：这里保持空数组，
-        // 并由 notImplemented 说明「动作名清单的真值在 ActionRegistry」。
-        return arr;
+        return InputCapabilities.registeredActionsJson();
     }
 
     /**
@@ -424,11 +434,23 @@ public final class InputStateProviderImpl implements InputStateProvider {
             q.addProperty("keyboardDepthNote", "Keyboard.getNumKeyboardEvents 未取到（探针不可用）");
         }
         q.addProperty("keyboardSeedBaseline", KEYBOARD_SEED_BASELINE);
-        if (o.keyboardQueueCapacity > 0) {
+        // 容量：契约 §5.2 冻结 **256**。运行期**没有**容量探针——`Keyboard.eventQueue` 在 lwjgl3ify 里
+        // 是集合，它的 `size()` 是**当前条数**（= keyboardDepth），不是容量。因此只接受「定长数组 length」
+        // 作为实读容量，且容量**必然**大于 seed 基线（否则那个读数不可能是容量）。
+        //
+        // 【缺陷修复（实机 L-2）】原先判据是 `> 0`，于是集合 size()（实测 1 = seed 哨兵）被当成容量上报，
+        // 与契约冻结的 256 冲突。现在不合理的读数一律落契约常量，并把**原始读数**如实留在
+        // `keyboardCapacityRawRead` 里（既不冒充，也不隐藏）。
+        if (o.keyboardQueueCapacity > KEYBOARD_SEED_BASELINE) {
             q.addProperty("keyboardCapacity", o.keyboardQueueCapacity);
+            q.addProperty("keyboardCapacitySource", "运行期实读（定长数组 length）");
         } else {
             q.addProperty("keyboardCapacity", CONTRACT_KEYBOARD_CAPACITY);
-            q.addProperty("keyboardCapacitySource", "契约 §5.2 的常量（运行期未能实读 eventQueue 容量）");
+            q.addProperty("keyboardCapacitySource", "契约 §5.2 的冻结常量（运行期无容量探针：Keyboard.eventQueue 是集合，size() 是当前条数而非容量）");
+            if (o.keyboardQueueCapacity > 0) {
+                q.addProperty("keyboardCapacityRawRead", o.keyboardQueueCapacity);
+                q.addProperty("keyboardCapacityRawReadNote", "该实测值不是容量口径（疑似当前条数），按契约常量上报并在此留痕");
+            }
         }
         // 鼠标队列深度：真值 = 不可观测（无公开探针）。字符串形态是契约冻结值，数字只出现在真读得到时。
         InputStateSnapshot snap = safeSnapshot(runtime);

@@ -45,6 +45,18 @@ public final class InputExpiryPump {
     /** 失败只报一次（tick 路径上刷屏会淹没日志）。 */
     private static volatile boolean warned;
 
+    /**
+     * 首次调用本泵的线程 = **客户端 tick 线程**（本泵只由 {@code ControlPlaneTickHandler} 的
+     * {@code ClientTickEvent} 调用）。它是本设施里唯一一个「按构造保证是 tick 线程」的线程证据。
+     *
+     * <p>
+     * 用途见 {@link #sameThread}：观察面需要判定「当前是否在 tick 线程上」，而运行时的
+     * {@code ownerThread} 只在**步进输入动作**跑过 {@code rt.tick()} 之后才绑定——只看它会让
+     * {@code input.state} 在还没有任何输入动作时报告 {@code thread.verified:false}
+     * （实机 L-4：明明在 `Client thread` 上却答「未验证」）。本字段是该判定的补充证据。
+     */
+    private static volatile Thread tickThread;
+
     private InputExpiryPump() {}
 
     /**
@@ -55,6 +67,9 @@ public final class InputExpiryPump {
      * 先把本 tick 的作业推进完，再由本泵收口它留下的到期项。
      */
     public static void tick() {
+        if (tickThread == null) {
+            tickThread = Thread.currentThread();
+        }
         try {
             InputRuntimeImpl rt = InputRuntimeImpl.shared();
             if (rt != null) {
@@ -66,6 +81,32 @@ public final class InputExpiryPump {
                 CpLog.warn("输入持键的到期结算不可用（只报一次）：%s。持键将只能靠 input.release 或作业收尾释放", String.valueOf(t));
             }
         }
+    }
+
+    /** 已捕获的 tick 线程（{@code null} = 本泵从未被调用 ⇒ **无法判定**，不是「不是 tick 线程」）。 */
+    public static Thread capturedTickThread() {
+        return tickThread;
+    }
+
+    /**
+     * 纯判定（可离线单测）：{@code captured == null} ⇒ {@code null}（**无法判定**），否则按同一线程比较。
+     *
+     * <p>
+     * 刻意返回 {@code Boolean} 而不是 {@code boolean}：把「未验证」与「已验证为假」混成一个值
+     * 会让 {@code input.state.thread.verified} 说假话（§11.2 第 17 条禁止的默认类）。
+     */
+    public static Boolean sameThread(Thread captured, Thread current) {
+        return captured == null ? null : Boolean.valueOf(captured == current);
+    }
+
+    /**
+     * 测试专用：直接设定捕获线程（避免在离线 JVM 里为了一条断言去构造运行时单例）。
+     *
+     * <p>
+     * 传 {@code null} 可复位。除单测外**不得**调用它——生产路径的捕获发生在 {@link #tick()}。
+     */
+    static void captureForTest(Thread t) {
+        tickThread = t;
     }
 
     /** 测试/诊断用：泵是否已经报过失败。 */
