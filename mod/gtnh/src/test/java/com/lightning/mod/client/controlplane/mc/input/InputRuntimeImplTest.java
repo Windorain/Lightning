@@ -434,6 +434,118 @@ public class InputRuntimeImplTest {
                 .getAsBoolean());
     }
 
+    /**
+     * 快照的只增字段（#165）：逐条持有明细（{@code jobId}/{@code heldTicks}/{@code expiresInTicks}）、
+     * 投递计数、以及「鼠标队列深度 = 不可观测」的真值表达。
+     */
+    @Test
+    public void snapshotCarriesHeldDetailsAndDeliveryCounts() {
+        rt.deliver(one(InputEvent.key("key.forward", 17, true, Integer.valueOf(0))), "j1");
+        host.advanceTick();
+        host.advanceTick();
+        InputStateSnapshot snap = rt.snapshot();
+
+        assertEquals("j1", snap.lastJobId());
+        assertEquals(1L, snap.deliveredThisJob());
+        assertEquals(1L, snap.deliveredThisSession());
+        // 鼠标侧没有公开队列深度探针 ⇒ 真值是「不可观测」，**不是** 0
+        assertEquals(InputStateSnapshot.DEPTH_UNOBSERVABLE, snap.mouseDepth());
+
+        List<InputStateSnapshot.HeldDetail> details = snap.heldDetails();
+        assertNotNull(details);
+        assertEquals(1, details.size());
+        InputStateSnapshot.HeldDetail d = details.get(0);
+        assertEquals(InputStateSnapshot.HeldDetail.KIND_KEY, d.kind());
+        assertEquals("key.forward", d.id());
+        assertEquals("j1", d.jobId());
+        assertEquals(2L, d.heldTicks());
+        assertEquals(InputCapabilities.HOLD_TICKS_MAX - 2L, d.expiresInTicks());
+        // 扁平视图与明细同源（同一趟循环派生，不许打架）
+        assertEquals(
+            "key.forward",
+            snap.heldKeys()
+                .get(0));
+        assertTrue(
+            snap.heldButtons()
+                .isEmpty());
+    }
+
+    /** 从未投递 ⇒ 没有可归属的作业：{@code deliveredThisJob} 落 {@code COUNT_UNKNOWN}（不是 0）。 */
+    @Test
+    public void countsWithoutAnyJobAreUnknownNotZero() {
+        InputStateSnapshot snap = rt.snapshot();
+        assertNull(snap.lastJobId());
+        assertEquals(InputStateSnapshot.COUNT_UNKNOWN, snap.deliveredThisJob());
+        // 会话计数有真值：确实还没投过任何事件 ⇒ 0 是真读数，不是编造
+        assertEquals(0L, snap.deliveredThisSession());
+        assertEquals(
+            InputStateSnapshot.COUNT_UNKNOWN,
+            InputStateSnapshot.empty()
+                .deliveredThisSession());
+        assertNull(
+            InputStateSnapshot.empty()
+                .heldDetails());
+        assertEquals(
+            InputStateSnapshot.DEPTH_UNOBSERVABLE,
+            InputStateSnapshot.empty()
+                .mouseDepth());
+        assertFalse(
+            InputStateSnapshot.empty()
+                .hasHeld());
+    }
+
+    /**
+     * 投递计数把释放/到期路径自动投递的抬起事件也算进去（契约 §4.1 的「已投递」= 写进队列）；
+     * 被幂等抑制的重复 {@code down} 不计。
+     */
+    @Test
+    public void deliveryCountsIncludeAutoReleaseUps() {
+        rt.deliver(one(InputEvent.key("key.forward", 17, true, Integer.valueOf(0))), "j1");
+        assertEquals(1L, rt.deliveredThisSession());
+        // 重复 down 被幂等抑制 ⇒ 队列里没有第二条事件 ⇒ 计数不动
+        rt.deliver(one(InputEvent.key("key.forward", 17, true, Integer.valueOf(0))), "j1");
+        assertEquals(1L, rt.deliveredThisSession());
+
+        assertTrue(rt.planExpiry("j1", InputRuntimeImpl.HOLD_KEY, "key.forward", 1));
+        rt.tick();
+        assertEquals(1, sink.count("key:17:up"));
+        assertEquals("按下 + 到期抬起 = 2 条写进队列", 2L, rt.deliveredThisSession());
+        assertEquals(2L, rt.deliveredForJob("j1"));
+        assertEquals(
+            2L,
+            rt.snapshot()
+                .deliveredThisSession());
+        assertEquals(
+            2L,
+            rt.snapshot()
+                .deliveredThisJob());
+    }
+
+    /** {@code expiresInTicks} 到 0 就不再为负（过期但尚未被结算的窗口里也不许报负数）。 */
+    @Test
+    public void expiresInTicksNeverGoesNegative() {
+        rt.deliver(one(InputEvent.key("key.forward", 17, true, Integer.valueOf(0))), "j1");
+        rt.heldEntries()
+            .get(0).expiresAtTick = 1L;
+        host.advanceTick();
+        host.advanceTick();
+        InputStateSnapshot.HeldDetail d = rt.snapshot()
+            .heldDetails()
+            .get(0);
+        assertEquals(0L, d.expiresInTicks());
+        assertEquals(2L, d.heldTicks());
+
+        // 负入参同样夹到 0（构造器即真值边界）
+        InputStateSnapshot.HeldDetail clamped = new InputStateSnapshot.HeldDetail(
+            InputStateSnapshot.HeldDetail.KIND_KEY,
+            "k",
+            null,
+            -5L,
+            -3L);
+        assertEquals(0L, clamped.heldTicks());
+        assertEquals(0L, clamped.expiresInTicks());
+    }
+
     /** 线程纪律：首次调用绑定 tick 线程，之后跨线程调用必须**显式失败**（HTTP 线程不得碰 MC 状态）。 */
     @Test
     public void crossThreadUseIsRefused() throws Exception {

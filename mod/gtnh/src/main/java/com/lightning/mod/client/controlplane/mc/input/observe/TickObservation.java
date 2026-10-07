@@ -45,7 +45,10 @@ public final class TickObservation {
     /** 实读 {@code Mouse.getY()}（显示像素）；{@link #UNREADABLE} = 读不到。 */
     public final int mouseY;
 
-    /** 回读的 GUI 缩放坐标 X（{@link InputCoordinateMath#scaledMouse}）；{@link #UNREADABLE} = 读不到。 */
+    /**
+     * 回读的 GUI 缩放坐标 X（由 {@code com.lightning.mod.client.controlplane.mc.input.InputCoordinateMath#scaledMouse}
+     * 算出）；{@link #UNREADABLE} = 读不到。
+     */
     public final int mouseGuiX;
 
     /** 回读的 GUI 缩放坐标 Y。 */

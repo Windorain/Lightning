@@ -42,12 +42,35 @@ public class InputStateProviderImplTest {
         private final int depth;
         private final List<String> keys;
         private final List<Integer> buttons;
+        /** {@code null} = 本快照给不出逐条明细（{@link InputStateSnapshot#heldDetails()} 的「不可得」形态）。 */
+        private final List<HeldDetail> details;
+        private final String lastJobId;
+        private final long deliveredThisJob;
+        private final long deliveredThisSession;
 
+        /** 便捷构造：无明细、无投递真值（计数落 {@link InputStateSnapshot#COUNT_UNKNOWN}）。 */
         Snap(String chain, int depth, List<String> keys, List<Integer> buttons) {
+            this(
+                chain,
+                depth,
+                keys,
+                buttons,
+                null,
+                null,
+                InputStateSnapshot.COUNT_UNKNOWN,
+                InputStateSnapshot.COUNT_UNKNOWN);
+        }
+
+        Snap(String chain, int depth, List<String> keys, List<Integer> buttons, List<HeldDetail> details,
+            String lastJobId, long deliveredThisJob, long deliveredThisSession) {
             this.chain = chain;
             this.depth = depth;
             this.keys = keys;
             this.buttons = buttons;
+            this.details = details;
+            this.lastJobId = lastJobId;
+            this.deliveredThisJob = deliveredThisJob;
+            this.deliveredThisSession = deliveredThisSession;
         }
 
         @Override
@@ -68,6 +91,32 @@ public class InputStateProviderImplTest {
         @Override
         public List<Integer> heldButtons() {
             return buttons == null ? new ArrayList<Integer>() : buttons;
+        }
+
+        @Override
+        public int mouseDepth() {
+            // 真值 = 不可观测（Mouse 无公开队列深度探针）；**不是** 0
+            return DEPTH_UNOBSERVABLE;
+        }
+
+        @Override
+        public String lastJobId() {
+            return lastJobId;
+        }
+
+        @Override
+        public long deliveredThisJob() {
+            return deliveredThisJob;
+        }
+
+        @Override
+        public long deliveredThisSession() {
+            return deliveredThisSession;
+        }
+
+        @Override
+        public List<HeldDetail> heldDetails() {
+            return details;
         }
     }
 
@@ -119,7 +168,9 @@ public class InputStateProviderImplTest {
             .keyboardQueueDepth(1)
             .keyboardQueueCapacity(256)
             .mouse(426, 322)
-            .mouseGui(426, 322)
+            // 回读值 = InputRuntimeProbe 用唯一实现算出的 GUI 行：854x480 1:1 下 Mouse.getY()=322
+            // ⇒ guiY = 480 - 322*480/480 - 1 = 157（#165 收敛前那份镜像实现给的是 322，是错值）
+            .mouseGui(426, 157)
             .currentScreen(null, null)
             .inGameHasFocus(Boolean.TRUE)
             .displayActive(Boolean.FALSE)
@@ -150,7 +201,7 @@ public class InputStateProviderImplTest {
     /** 满配时字段齐、状态自洽：实读值原样出现，seed 基线与口径文本同在。 */
     @Test
     public void fullProbeExposesRealReadings() {
-        JsonObject d = state(richProbe(), new Rt(new Snap("world", 1, null, null)));
+        JsonObject d = state(richProbe(), new Rt(new Snap("world", 1, null, null, null, "j7", 3L, 9L)));
         assertTrue(
             d.get("implemented")
                 .getAsBoolean());
@@ -181,6 +232,22 @@ public class InputStateProviderImplTest {
             "unobservable",
             d.getAsJsonObject("queues")
                 .get("mouseDepth")
+                .getAsString());
+        // 投递计数（#165 起有真值来源）：真值原样给出，并附归属作业
+        assertEquals(
+            3L,
+            d.getAsJsonObject("queues")
+                .get("deliveredThisJob")
+                .getAsLong());
+        assertEquals(
+            9L,
+            d.getAsJsonObject("queues")
+                .get("deliveredThisSession")
+                .getAsLong());
+        assertEquals(
+            "j7",
+            d.getAsJsonObject("queues")
+                .get("deliveredJobId")
                 .getAsString());
         assertEquals(
             "world",
@@ -296,9 +363,12 @@ public class InputStateProviderImplTest {
             426,
             gui.get("x")
                 .getAsInt());
-        // 1:1 上下文 ⇒ 回读 GUI y == 事件行 y == 322（P0 锚点：注入 SDL 322 读回 322）
+        // 1:1 上下文（854x480、pixelScale=1）下 Mouse.getY()=322 ⇒ GUI 行 157
+        // （guiY = scaledHeight - mouseY*S*scaledHeight/displayHeight - 1，与 EntityRenderer 同式）。
+        // 【实测锚点】注入 SDL 322 ⇒ 事件行 158 ⇒ GUI 行 321：322 在这里是**SDL** 值而不是 GUI 行；
+        // #165 收敛前观察侧把事件行当 GUI 行，报的正是 322（错值），故这条断言是收敛的回归锁。
         assertEquals(
-            322,
+            157,
             gui.get("y")
                 .getAsInt());
         assertTrue(
@@ -358,6 +428,15 @@ public class InputStateProviderImplTest {
             "unobservable",
             q.get("mouseDepth")
                 .getAsString());
+        // 投递计数：无运行时 ⇒ **null**（不是 0：「本会话一条都没投」是编造），并给出无真值的说明
+        assertTrue(
+            q.get("deliveredThisJob")
+                .isJsonNull());
+        assertTrue(
+            q.get("deliveredThisSession")
+                .isJsonNull());
+        assertTrue(q.has("deliveredThisJobNote"));
+        assertTrue(q.has("deliveredThisSessionNote"));
 
         assertEquals(
             "unobservable",
@@ -467,16 +546,35 @@ public class InputStateProviderImplTest {
 
     // ------------------------------------------------------------ 持键回读
 
-    /** 持键条目给 kind/id/gameBindingPressed（回读），不出现没有真值的期限字段。 */
+    /**
+     * 持键条目给全 §5.2 的字段：{@code kind}/{@code id}/{@code jobId}/{@code heldTicks}/
+     * {@code expiresInTicks}/{@code gameBindingPressed}（#165 起后三项有真值来源）。
+     */
     @Test
-    public void heldItemsCarryBindingReadbackOnly() {
+    public void heldItemsCarryOwnerAndExpiry() {
         TickObservation.Builder probe = richProbe().keyPressed("key.forward", Boolean.TRUE);
-        InputRuntime rt = new Rt(new Snap("world", 1, Arrays.asList("key.forward"), Arrays.asList(Integer.valueOf(0))));
+        List<InputStateSnapshot.HeldDetail> details = new ArrayList<InputStateSnapshot.HeldDetail>();
+        details.add(
+            new InputStateSnapshot.HeldDetail(InputStateSnapshot.HeldDetail.KIND_KEY, "key.forward", "j1", 5L, 1195L));
+        details.add(new InputStateSnapshot.HeldDetail(InputStateSnapshot.HeldDetail.KIND_BUTTON, "0", "j2", 2L, 1198L));
+        InputRuntime rt = new Rt(
+            new Snap(
+                "world",
+                1,
+                Arrays.asList("key.forward"),
+                Arrays.asList(Integer.valueOf(0)),
+                details,
+                "j1",
+                1L,
+                1L));
         JsonObject held = state(probe, rt).getAsJsonObject("held");
         assertEquals(
             2,
             held.get("count")
                 .getAsInt());
+        assertTrue(
+            held.get("detailsReadable")
+                .getAsBoolean());
         JsonArray items = held.getAsJsonArray("items");
         JsonObject key = items.get(0)
             .getAsJsonObject();
@@ -488,12 +586,21 @@ public class InputStateProviderImplTest {
             "key.forward",
             key.get("id")
                 .getAsString());
+        assertEquals(
+            "j1",
+            key.get("jobId")
+                .getAsString());
+        assertEquals(
+            5L,
+            key.get("heldTicks")
+                .getAsLong());
+        assertEquals(
+            1195L,
+            key.get("expiresInTicks")
+                .getAsLong());
         assertTrue(
             key.get("gameBindingPressed")
                 .getAsBoolean());
-        assertFalse(key.has("expiresInTicks"));
-        assertFalse(key.has("heldTicks"));
-        assertFalse(key.has("jobId"));
         JsonObject btn = items.get(1)
             .getAsJsonObject();
         assertEquals(
@@ -504,8 +611,54 @@ public class InputStateProviderImplTest {
             "0",
             btn.get("id")
                 .getAsString());
+        assertEquals(
+            "j2",
+            btn.get("jobId")
+                .getAsString());
+        assertEquals(
+            1198L,
+            btn.get("expiresInTicks")
+                .getAsLong());
         assertTrue(
             btn.get("gameBindingPressed")
+                .isJsonNull());
+    }
+
+    /**
+     * 快照给不出逐条明细（{@code heldDetails() == null}）时：仍然报「谁被持有」，但
+     * {@code jobId}/{@code heldTicks}/{@code expiresInTicks} 落 <b>null</b> 并整块标注不可读——
+     * <b>不</b>用 0 冒充「刚按下、1200 tick 后到期」。
+     */
+    @Test
+    public void heldItemsWithoutDetailsAreMarkedUnreadableNotZero() {
+        InputRuntime rt = new Rt(new Snap("world", 1, Arrays.asList("key.forward"), Arrays.asList(Integer.valueOf(0))));
+        JsonObject held = state(richProbe(), rt).getAsJsonObject("held");
+        assertFalse(
+            held.get("detailsReadable")
+                .getAsBoolean());
+        assertTrue(
+            held.get("detailsNote")
+                .getAsString()
+                .contains("heldDetails"));
+        assertEquals(
+            2,
+            held.get("count")
+                .getAsInt());
+        JsonObject key = held.getAsJsonArray("items")
+            .get(0)
+            .getAsJsonObject();
+        assertEquals(
+            "key.forward",
+            key.get("id")
+                .getAsString());
+        assertTrue(
+            key.get("jobId")
+                .isJsonNull());
+        assertTrue(
+            key.get("heldTicks")
+                .isJsonNull());
+        assertTrue(
+            key.get("expiresInTicks")
                 .isJsonNull());
     }
 
@@ -517,6 +670,9 @@ public class InputStateProviderImplTest {
             0,
             held.get("count")
                 .getAsInt());
+        assertFalse(
+            held.get("detailsReadable")
+                .getAsBoolean());
         assertTrue(
             held.get("note")
                 .getAsString()
@@ -539,6 +695,43 @@ public class InputStateProviderImplTest {
             d.getAsJsonObject("held")
                 .get("count")
                 .getAsInt());
+        // 快照读不到 ⇒ 计数也不许落 0
+        assertTrue(
+            d.getAsJsonObject("queues")
+                .get("deliveredThisSession")
+                .isJsonNull());
+    }
+
+    /**
+     * {@code runtime == null}（未装配）：计数与明细一律「不可读」——<b>不</b>落 0、<b>不</b>把
+     * {@code mouseDepth} 当成 0。
+     */
+    @Test
+    public void nullRuntimeIsNotTreatedAsZeroState() {
+        JsonObject d = state(richProbe(), null);
+        JsonObject q = d.getAsJsonObject("queues");
+        assertTrue(
+            q.get("deliveredThisJob")
+                .isJsonNull());
+        assertTrue(
+            q.get("deliveredThisSession")
+                .isJsonNull());
+        assertTrue(
+            q.get("deliveredJobId")
+                .isJsonNull());
+        assertEquals(
+            "unobservable",
+            q.get("mouseDepth")
+                .getAsString());
+        JsonObject held = d.getAsJsonObject("held");
+        assertEquals(
+            0,
+            held.get("count")
+                .getAsInt());
+        assertFalse(
+            held.get("detailsReadable")
+                .getAsBoolean());
+        assertTrue(held.has("note"));
     }
 
     // ------------------------------------------------------------ 线程

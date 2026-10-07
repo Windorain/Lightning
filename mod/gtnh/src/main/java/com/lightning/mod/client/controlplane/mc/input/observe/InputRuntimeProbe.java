@@ -10,6 +10,8 @@ import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.settings.GameSettings;
 import net.minecraft.client.settings.KeyBinding;
 
+import com.lightning.mod.client.controlplane.mc.input.InputCoordinateMath;
+
 import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.ModContainer;
 
@@ -224,7 +226,7 @@ public final class InputRuntimeProbe implements InputStateProviderImpl.TickProbe
             b.warn("构造 ScaledResolution 失败: " + t);
         }
         if (scaledWidth <= 0 || scaledHeight <= 0) {
-            // ScaledResolution 失败时退回纯算术（同一算法，见 InputCoordinateMath），并留痕
+            // ScaledResolution 失败时退回纯算术（同一算法，见 mc.input.InputCoordinateMath 的唯一实现点），并留痕
             int[] s = InputCoordinateMath.scaledSize(displayWidth, displayHeight, guiScale);
             scaledWidth = s[0];
             scaledHeight = s[1];
@@ -303,7 +305,15 @@ public final class InputRuntimeProbe implements InputStateProviderImpl.TickProbe
         }
     }
 
-    /** 鼠标显示坐标与 GUI 缩放回读（{@code Mouse.getX/getY}）。 */
+    /**
+     * 鼠标显示坐标与 GUI 缩放回读（{@code Mouse.getX/getY}）。
+     *
+     * <p>
+     * 回读口径由 {@link InputCoordinateMath} 唯一实现（#165 收敛）：{@code Mouse.getX/getY} 是
+     * LWJGL2 左下原点口径，GUI 行是左上原点，故 {@code guiY = scaledHeight - mouseY * S * scaledHeight / displayHeight - 1}。
+     * 收敛前本探针走的是观察侧那份镜像式子（同一组数在 1:1 上下文回读出 {@code 158}，而真值与
+     * 实机请求值是 {@code 321}）——{@code observedNowGui} 由此从错值改为真值。
+     */
     private void readMouse(TickObservation.Builder b, InputScaleContext ctx) {
         if (mouseClass == null) {
             return;
@@ -326,8 +336,14 @@ public final class InputRuntimeProbe implements InputStateProviderImpl.TickProbe
         if (mx == TickObservation.UNREADABLE || ctx == null) {
             return;
         }
-        int[] scaled = InputCoordinateMath
-            .scaledMouse(mx, my, ctx.scaledWidth, ctx.scaledHeight, ctx.displayWidth, ctx.displayHeight);
+        int[] scaled = InputCoordinateMath.scaledMouse(
+            mx,
+            my,
+            ctx.scaledWidth,
+            ctx.scaledHeight,
+            ctx.displayWidth,
+            ctx.displayHeight,
+            ctx.pixelScale);
         if (scaled != null) {
             b.mouseGui(scaled[0], scaled[1]);
         }

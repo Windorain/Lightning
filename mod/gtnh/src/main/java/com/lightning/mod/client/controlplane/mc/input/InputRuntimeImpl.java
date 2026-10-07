@@ -92,7 +92,13 @@ public final class InputRuntimeImpl implements InputRuntime {
     /** 持键表：键 = {@code kind|id}（物理上一个键/按钮只可能有一条），值自带作业归属。 */
     private final Map<String, HeldEntry> held = new LinkedHashMap<String, HeldEntry>();
 
-    /** 本次会话累计投递的事件数。 */
+    /**
+     * 本会话（进程内）累计<b>已投递</b>的事件数（口径见 {@link #deliveredThisSession()}）。
+     *
+     * <p>
+     * 累加点就是**写进队列的那一刻**：{@code deliver()} 的批内成功条数，以及释放/到期路径里
+     * {@code injectUp()} 写出的抬起事件（详见 {@link #noteDelivered}）。
+     */
     private long deliveredThisSession;
 
     /** 按作业累计投递的事件数。 */
@@ -397,11 +403,7 @@ public final class InputRuntimeImpl implements InputRuntime {
         }
         lastOutcomes = outcomes;
         lastRejections = rejected;
-        deliveredThisSession += delivered;
-        if (jobId != null) {
-            Long prev = deliveredByJob.get(jobId);
-            deliveredByJob.put(jobId, Long.valueOf((prev == null ? 0L : prev.longValue()) + delivered));
-        }
+        noteDelivered(jobId, delivered);
         lastJobId = jobId;
         pendingKeyboardEvents += injectedKeyboard;
 
@@ -446,6 +448,34 @@ public final class InputRuntimeImpl implements InputRuntime {
         r.constraintHint = hint;
         reconcileState();
         return r;
+    }
+
+    /**
+     * 投递计数：**写进队列的那一刻**累加（会话累计 + 按作业累计）。
+     *
+     * <p>
+     * 两个调用点就是本设施仅有的两条投递路径：{@link #deliver}（请求驱动，按批内成功条数）与
+     * {@link #injectUp}（释放/到期路径由设施自动投递的抬起事件，按条）。被幂等抑制的重复 {@code down}
+     * 与整条拒绝的事件不计——它们没有写进队列。
+     *
+     * <p>
+     * 为什么把释放路径也算进来：契约 §4.1 对「已投递」的定义就是「事件已写入
+     * {@code Keyboard.eventQueue} / 鼠标队列」。一次 {@code tap}/{@code click} 的抬起由到期机制投递，
+     * 若不计，{@code deliveredThisSession} 会比实际写进队列的事件数少（消费者据此判「两条都发出去了吗」
+     * 会得到错答案）。{@code DeliverResult.delivered} 仍是**单次请求**的条数，语义不变。
+     *
+     * @param jobId 归属作业（{@code null} = 只累加会话计数）
+     * @param count 本次写进队列的条数
+     */
+    private void noteDelivered(String jobId, int count) {
+        if (count <= 0) {
+            return;
+        }
+        deliveredThisSession += count;
+        if (jobId != null) {
+            Long prev = deliveredByJob.get(jobId);
+            deliveredByJob.put(jobId, Long.valueOf((prev == null ? 0L : prev.longValue()) + count));
+        }
     }
 
     /** 按持键表把状态机收敛到一致（idle/holding）；faulted 只能由释放复位（§7）。 */
@@ -760,6 +790,8 @@ public final class InputRuntimeImpl implements InputRuntime {
                 // 鼠标侧没有深度探针 ⇒ 只维护设施自己的记账（不可独立复核，§3.6 第 3 条）
                 pendingMouseEvents++;
             }
+            // 抬起也是「写进队列的事件」（契约 §4.1）：计入会话与作业的投递计数
+            noteDelivered(e.jobId, 1);
             return null;
         } catch (InputInjectionException ex) {
             return ex.getMessage();
@@ -775,20 +807,42 @@ public final class InputRuntimeImpl implements InputRuntime {
         long now = host.clientTick();
         List<String> keys = new ArrayList<String>();
         List<Integer> buttons = new ArrayList<Integer>();
+        List<InputStateSnapshot.HeldDetail> details = new ArrayList<InputStateSnapshot.HeldDetail>(held.size());
+        // 三个视图在**同一趟循环**里从同一份持键表派生（同一 tick 的读数）：任何一个视图都不会与另一个
+        // 打架；#165 新增的 jobId/heldTicks/expiresInTicks 也从这里出，不再另算一遍。
         for (HeldEntry e : held.values()) {
             if (HOLD_KEY.equals(e.kind)) {
                 keys.add(e.id);
             } else {
                 buttons.add(e.button);
             }
+            details.add(
+                new InputStateSnapshot.HeldDetail(
+                    e.kind,
+                    e.id,
+                    e.jobId,
+                    now - e.heldSinceTick,
+                    // 到期即抬起（expireDue）；剩余 tick 不许为负：快照只报「还有多久到期」
+                    Math.max(0L, e.expiresAtTick - now)));
         }
         return new Snapshot(
             host.consumerChain(),
             host.keyboardReadable() ? host.keyboardQueueDepth() : -1,
             keys,
             buttons,
+            details,
             state,
-            now);
+            now,
+            lastJobId,
+            deliveredThisJobCount(),
+            deliveredThisSession);
+    }
+
+    /** {@code held.items[].jobId/heldTicks/expiresInTicks} 的真值：最近一次投递的作业累计计数。 */
+    private long deliveredThisJobCount() {
+        String job = lastJobId;
+        // 没有作业 ⇒ 计数不可归属（不是「投了 0 条」）：如实给 COUNT_UNKNOWN，由消费方落 null
+        return job == null ? InputStateSnapshot.COUNT_UNKNOWN : deliveredForJob(job);
     }
 
     /** 只读快照实现（多带几个只增的只读访问器，供动作层与 T2-B 组装结果）。 */
@@ -798,17 +852,26 @@ public final class InputRuntimeImpl implements InputRuntime {
         private final int keyboardQueueDepth;
         private final List<String> heldKeys;
         private final List<Integer> heldButtons;
+        private final List<InputStateSnapshot.HeldDetail> held;
         private final State state;
         private final long tick;
+        private final String lastJobId;
+        private final long deliveredThisJob;
+        private final long deliveredThisSession;
 
         Snapshot(String consumerChain, int keyboardQueueDepth, List<String> heldKeys, List<Integer> heldButtons,
-            State state, long tick) {
+            List<InputStateSnapshot.HeldDetail> held, State state, long tick, String lastJobId, long deliveredThisJob,
+            long deliveredThisSession) {
             this.consumerChain = consumerChain;
             this.keyboardQueueDepth = keyboardQueueDepth;
             this.heldKeys = Collections.unmodifiableList(new ArrayList<String>(heldKeys));
             this.heldButtons = Collections.unmodifiableList(new ArrayList<Integer>(heldButtons));
+            this.held = Collections.unmodifiableList(new ArrayList<InputStateSnapshot.HeldDetail>(held));
             this.state = state;
             this.tick = tick;
+            this.lastJobId = lastJobId;
+            this.deliveredThisJob = deliveredThisJob;
+            this.deliveredThisSession = deliveredThisSession;
         }
 
         @Override
@@ -825,6 +888,49 @@ public final class InputRuntimeImpl implements InputRuntime {
         @Override
         public int keyboardQueueDepth() {
             return keyboardQueueDepth;
+        }
+
+        /**
+         * 鼠标事件队列深度：恒 {@link InputStateSnapshot#DEPTH_UNOBSERVABLE}（真值 = 不可观测）。
+         *
+         * <p>
+         * {@code org.lwjglx.input.Mouse} 没有公开的队列深度探针（对照物：
+         * {@code Keyboard.getNumKeyboardEvents()}）⇒ 鼠标侧「已投递」只能由本设施记账、不可独立复核
+         * （契约 §3.6 第 3 条 / §11.2 第 6 条）。本方法因此<b>不</b>返回 0——{@code 0} 会被读成
+         * 「队列空 ⇒ 没有积压」，那是编造。
+         */
+        @Override
+        public int mouseDepth() {
+            return DEPTH_UNOBSERVABLE;
+        }
+
+        @Override
+        public String lastJobId() {
+            return lastJobId;
+        }
+
+        /**
+         * 最近一次投递的作业累计已投递事件数。
+         *
+         * <p>
+         * 口径见 {@link InputRuntimeImpl#deliveredThisSession()}：本设施写进事件队列的事件数（含到期/
+         * 释放路径自动投递的抬起事件）；被幂等抑制与整条拒绝的不计。没有归属作业时为
+         * {@link InputStateSnapshot#COUNT_UNKNOWN}（**不是** 0）。
+         */
+        @Override
+        public long deliveredThisJob() {
+            return deliveredThisJob;
+        }
+
+        /** 见 {@link InputRuntimeImpl#deliveredThisSession()}。 */
+        @Override
+        public long deliveredThisSession() {
+            return deliveredThisSession;
+        }
+
+        @Override
+        public List<InputStateSnapshot.HeldDetail> heldDetails() {
+            return held;
         }
 
         @Override
@@ -911,12 +1017,29 @@ public final class InputRuntimeImpl implements InputRuntime {
         return false;
     }
 
-    /** 本次会话累计投递的事件数。 */
+    /**
+     * 本会话（进程内）累计<b>已投递</b>的事件数。
+     *
+     * <p>
+     * 口径（契约 §4.1 的「已投递」= 事件已写入 {@code Keyboard.eventQueue} / 鼠标队列）：
+     * 统计本设施<b>自己写进队列</b>的事件——{@code input.*} 请求投递成功的条数，**加上**释放/到期路径
+     * 由设施自动投递的抬起事件（{@link #injectUp}）。被幂等抑制的重复 {@code down}、整条拒绝、
+     * 队列满被拒的事件都不计（它们没有写进队列）。累加点见 {@link #noteDelivered}。
+     *
+     * <p>
+     * <b>这里数的是「已投递」不是「已处理」</b>（§4.1 第 1 条的禁令）：它只证明事件进了队列。
+     */
     public long deliveredThisSession() {
         return deliveredThisSession;
     }
 
-    /** 某作业累计投递的事件数（无记录返回 0）。 */
+    /**
+     * 某作业累计<b>已投递</b>的事件数（口径同 {@link #deliveredThisSession()}；无记录返回 0）。
+     *
+     * <p>
+     * 无记录返回 {@code 0} 是「该作业确实没投过任何事件」；「连作业都没有」（{@code null}）在
+     * 快照里表达为 {@link InputStateSnapshot#COUNT_UNKNOWN}，两者不可混同。
+     */
     public long deliveredForJob(String jobId) {
         Long v = jobId == null ? null : deliveredByJob.get(jobId);
         return v == null ? 0L : v.longValue();
@@ -997,30 +1120,46 @@ public final class InputRuntimeImpl implements InputRuntime {
         return pendingMouseEvents;
     }
 
-    /** 持键表的 JSON 形态（§5.2 {@code held}；{@code gameBindingPressed} 是回读值，不是推测）。 */
+    /**
+     * 持键表的 JSON 形态（§5.2 {@code held}；{@code gameBindingPressed} 是回读值，不是推测）。
+     *
+     * <p>
+     * 逐条明细（{@code jobId}/{@code heldTicks}/{@code expiresInTicks}）取自 {@link #snapshot()} 的
+     * {@link InputStateSnapshot#heldDetails()}——**同一份派生**，本方法不再自己算一遍 tick 差
+     * （两处各算一次就是「同一个量两个真相」的老路）。{@code keyCode}/{@code button}/{@code expiresAtTick}
+     * 是动作结果面特有的字段，仍从持键表条目取。
+     */
     public JsonObject heldJson() {
-        long now = host.clientTick();
         JsonObject o = new JsonObject();
-        o.addProperty("count", held.size());
+        List<InputStateSnapshot.HeldDetail> details = snapshot().heldDetails();
+        if (details == null) {
+            o.addProperty("count", 0);
+            o.add("items", new JsonArray());
+            return o;
+        }
+        o.addProperty("count", details.size());
         JsonArray items = new JsonArray();
-        for (HeldEntry e : held.values()) {
+        for (InputStateSnapshot.HeldDetail d : details) {
+            HeldEntry e = held.get(holdKey(d.kind(), d.id()));
             JsonObject it = new JsonObject();
-            it.addProperty("kind", e.kind);
-            it.addProperty("id", e.id);
-            if (e.keyCode != null) {
+            it.addProperty("kind", d.kind());
+            it.addProperty("id", d.id());
+            if (e != null && e.keyCode != null) {
                 it.addProperty("keyCode", e.keyCode);
             }
-            if (e.button != null) {
+            if (e != null && e.button != null) {
                 it.addProperty("button", e.button);
             }
-            it.addProperty("jobId", e.jobId);
-            it.addProperty("heldTicks", now - e.heldSinceTick);
-            it.addProperty("expiresAtTick", e.expiresAtTick);
-            it.addProperty("expiresInTicks", Math.max(0L, e.expiresAtTick - now));
+            it.addProperty("jobId", d.jobId());
+            it.addProperty("heldTicks", d.heldTicks());
+            if (e != null) {
+                it.addProperty("expiresAtTick", e.expiresAtTick);
+            }
+            it.addProperty("expiresInTicks", d.expiresInTicks());
             // §3.6 第 4 条：进 GUI 会 unPressAllKeys，逻辑持有与游戏内绑定态会分叉 ⇒ **回读**该值
             it.addProperty(
                 "gameBindingPressed",
-                e.keyCode == null ? null : Boolean.valueOf(host.keyBindingPressed(e.keyCode.intValue())));
+                e == null || e.keyCode == null ? null : Boolean.valueOf(host.keyBindingPressed(e.keyCode.intValue())));
             items.add(it);
         }
         o.add("items", items);

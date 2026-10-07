@@ -4,23 +4,33 @@ import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.Json;
 
 /**
- * GUI 缩放坐标 → framebuffer 像素 → SDL 窗口坐标 → 事件队列口径的**纯函数**换算（契约 §2.4）。
+ * 一次坐标换算的<b>上下文值对象</b>（契约 §2.4 / §5.2）：它只持有「这次换算用的是哪组参数」
+ * 以及回显用的 JSON，全部算术都<b>委托</b>给 {@link InputCoordinateMath}。
+ *
+ * <h2>职责边界（#165 收敛后）</h2>
+ * 本类<b>不再自己算任何换算</b>：{@code framebufferX/Y}、{@code injectX/Y}、
+ * {@code expectedEventX/Y}、{@code guiXFromMouse}/{@code guiYFromMouse} 全是
+ * {@link InputCoordinateMath} 同名分量的一行委托。这么做的理由是一条真实事故：同一份换算曾经在
+ * 本类与 {@code mc.input.observe.InputCoordinateMath} 各写一遍，而观察面那份的回读口径是<b>镜像</b>的
+ * （把 LWJGL2 左下原点的 {@code Mouse.getY()} 当成了左上原点的事件行），于是「报告的读数」与
+ * 「判据的读数」长期不一致——详见 {@link InputCoordinateMath} 类注释的收敛小节。
  *
  * <h2>三个坐标系（不能混用）</h2>
  * <ol>
  * <li><b>GUI 缩放坐标</b>（{@code move} 的唯一入参口径）：原点左上、Y 向下，与
  * {@code GuiScreen.mouseClicked(mouseX, mouseY, ...)} 收到的一致；</li>
- * <li><b>framebuffer 像素</b>：{@code mc.displayWidth/displayHeight} 口径；</li>
- * <li><b>SDL 窗口坐标</b>（{@code Mouse.addMoveEvent} 吃的口径）：原点左下、Y 向上，
+ * <li><b>framebuffer 像素</b>：{@code mc.displayWidth/displayHeight} 口径，同时也是
+ * {@code Mouse.getY()} 的值域（LWJGL2 左下原点）；</li>
+ * <li><b>SDL 窗口坐标</b>（{@code Mouse.addMoveEvent} 吃的口径）：原点左上、Y 向下，
  * 且要除以像素密度 {@code Display.getPixelScaleFactor()}。</li>
  * </ol>
  *
- * <h2>换算链（逐式，全部回显给调用方以自校准）</h2>
+ * <h2>换算链（实现见 {@link InputCoordinateMath}，此处只是同一份式子的自述）</h2>
  *
  * <pre>
  * fbX   = round(guiX * displayWidth / scaledWidth)
  * fbY   = round(displayHeight - (guiY + 1) * displayHeight / scaledHeight)
- * sdlX  = fbX / S                                   （S = pixelScale）
+ * sdlX  = fbX / S                                    （S = pixelScale）
  * sdlY  = displayHeight - fbY / S
  * eventX = sdlX                 （P0 实机定案：eventX = injectX）
  * eventY = displayHeight - sdlY （P0 实机定案：eventY = displayHeight - injectY）
@@ -39,14 +49,11 @@ import com.lightning.mod.client.controlplane.core.Json;
  *
  * <p>
  * <b>诚实的边界</b>：{@code pixelScale != 1}（HiDPI）下的口径**未实机校准**（契约 §11.2 第 12 条）。
- * 本类因此把 {@code S} 显式带进读回换算（{@link #guiXFromMouse}/{@link #guiYFromMouse} 先把观测值
+ * 换算因此把 {@code S} 显式带进读回表达式（{@link #guiXFromMouse}/{@link #guiYFromMouse} 先把观测值
  * 乘回 framebuffer 口径再走 vanilla 正换算），并把 {@code pixelScale}、两级来源与
  * {@code selfCalibrated} 一并回显——调用方可以仅凭返回值核对，而不是相信本类的注释。
  */
 public final class InputCoordinates {
-
-    /** 换算不可用（屏幕尺寸/PixelScale 取不到）时的哨兵刻度。 */
-    private static final double ASSUMED_PIXEL_SCALE = 1.0D;
 
     private final int scaledWidth;
     private final int scaledHeight;
@@ -80,20 +87,26 @@ public final class InputCoordinates {
      */
     public static InputCoordinates of(int scaledWidth, int scaledHeight, int displayWidth, int displayHeight,
         double pixelScale, String scaledSource, String pixelScaleSource) {
-        double s = pixelScale > 0.0D ? pixelScale : ASSUMED_PIXEL_SCALE;
         return new InputCoordinates(
             scaledWidth,
             scaledHeight,
             displayWidth,
             displayHeight,
-            s,
+            InputCoordinateMath.effectivePixelScale(pixelScale),
             scaledSource,
             pixelScaleSource);
     }
 
     /** 不可用态（尺寸非法/未取到）：任何换算方法都会抛 {@link IllegalStateException}，绝不静默给 0。 */
     public static InputCoordinates unavailable(String why) {
-        return new InputCoordinates(0, 0, 0, 0, ASSUMED_PIXEL_SCALE, "unavailable: " + why, "unavailable: " + why);
+        return new InputCoordinates(
+            0,
+            0,
+            0,
+            0,
+            InputCoordinateMath.ASSUMED_PIXEL_SCALE,
+            "unavailable: " + why,
+            "unavailable: " + why);
     }
 
     /** 换算是否可用（尺寸与像素密度齐备）。 */
@@ -156,37 +169,40 @@ public final class InputCoordinates {
         }
     }
 
-    /** GUI X → framebuffer X（{@code round(guiX * displayWidth / scaledWidth)}）。 */
+    /** GUI X → framebuffer X（委托 {@link InputCoordinateMath#framebufferX}）。 */
     public int framebufferX(double guiX) {
         requireUsable();
-        return (int) Math.round(guiX * (double) displayWidth / (double) scaledWidth);
+        return InputCoordinateMath.framebufferX(guiX, scaledWidth, displayWidth);
     }
 
-    /** GUI Y → framebuffer Y（{@code round(displayHeight - (guiY+1) * displayHeight / scaledHeight)}）。 */
+    /** GUI Y → framebuffer Y（委托 {@link InputCoordinateMath#framebufferY}）。 */
     public int framebufferY(double guiY) {
         requireUsable();
-        return (int) Math
-            .round((double) displayHeight - (guiY + 1.0D) * (double) displayHeight / (double) scaledHeight);
+        return InputCoordinateMath.framebufferY(guiY, scaledHeight, displayHeight);
     }
 
     /** GUI X → SDL 窗口 X（{@code fbX / S}）。 */
     public double injectX(double guiX) {
-        return (double) framebufferX(guiX) / pixelScale;
+        requireUsable();
+        return InputCoordinateMath.sdlXFromFramebuffer(framebufferX(guiX), pixelScale);
     }
 
-    /** GUI Y → SDL 窗口 Y（{@code displayHeight - fbY / S}，原点左下、Y 向上）。 */
+    /** GUI Y → SDL 窗口 Y（{@code displayHeight - fbY / S}，原点左上、Y 向下）。 */
     public double injectY(double guiY) {
-        return (double) displayHeight - (double) framebufferY(guiY) / pixelScale;
+        requireUsable();
+        return InputCoordinateMath.sdlYFromFramebuffer(framebufferY(guiY), displayHeight, pixelScale);
     }
 
     /** 投递后**预期**的事件队列 X（P0 定案：{@code eventX = injectX}）。 */
     public double expectedEventX(double guiX) {
-        return injectX(guiX);
+        requireUsable();
+        return InputCoordinateMath.eventXFromFramebuffer(framebufferX(guiX), pixelScale);
     }
 
     /** 投递后**预期**的事件队列 Y（P0 定案：{@code eventY = displayHeight - injectY}）。 */
     public double expectedEventY(double guiY) {
-        return (double) displayHeight - injectY(guiY);
+        requireUsable();
+        return InputCoordinateMath.eventYFromFramebuffer(framebufferY(guiY), pixelScale);
     }
 
     /**
@@ -197,7 +213,7 @@ public final class InputCoordinates {
      */
     public double guiXFromMouse(double mouseX) {
         requireUsable();
-        return mouseX * pixelScale * (double) scaledWidth / (double) displayWidth;
+        return InputCoordinateMath.guiXFromEventX(mouseX, scaledWidth, displayWidth, pixelScale);
     }
 
     /**
@@ -208,7 +224,7 @@ public final class InputCoordinates {
      */
     public double guiYFromMouse(double mouseY) {
         requireUsable();
-        return (double) scaledHeight - mouseY * pixelScale * (double) scaledHeight / (double) displayHeight - 1.0D;
+        return InputCoordinateMath.guiYFromEventY(mouseY, scaledHeight, displayHeight, pixelScale);
     }
 
     /** 两个 GUI 坐标是否在 ±1 整数量化内相等（§2.4 第 4 条的 `move` 成功判据）。 */
@@ -261,6 +277,7 @@ public final class InputCoordinates {
             "formulas",
             "fbX=round(guiX*displayWidth/scaledWidth); fbY=round(displayHeight-(guiY+1)*displayHeight/scaledHeight); "
                 + "sdlX=fbX/S; sdlY=displayHeight-fbY/S; eventX=sdlX; eventY=displayHeight-sdlY");
+        o.addProperty("mathOwner", InputCoordinateMath.class.getName());
         o.addProperty(
             "hiDpiNote",
             "pixelScale!=1 的口径未实机校准（契约 §11.2 第 12 条）：读回换算把观测值乘回 framebuffer 口径后再走 vanilla 正换算，"

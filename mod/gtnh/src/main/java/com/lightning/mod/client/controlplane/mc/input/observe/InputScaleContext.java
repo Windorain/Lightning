@@ -1,6 +1,7 @@
 package com.lightning.mod.client.controlplane.mc.input.observe;
 
 import com.google.gson.JsonObject;
+import com.lightning.mod.client.controlplane.mc.input.InputCoordinateMath;
 
 /**
  * 坐标上下文（缩放 / 显示尺寸 / guiScale）的<b>不可变指纹</b>与失效判定（Gitea #162 §2.4、§5.2）。
