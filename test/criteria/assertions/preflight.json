@@ -1,0 +1,65 @@
+{
+  "schema": "lightning.cp-criteria-set/1",
+  "id": "preflight",
+  "kind": "preflight",
+  "title": "重放前置：服务发现、契约版本、token、动作自描述存在性",
+  "requiresCase": null,
+  "requiresCaseNote": "本判据集不针对某一用例：它判的是「设施能不能跑」，因此 runsRoot 与 casesRoot 由驱动给出，不绑定用例",
+  "inputContract": {
+    "reads": [
+      "<mcDataDir>/controlplane/server.json → port/bind/contractVersion",
+      "<mcDataDir>/controlplane/tokens.json → tokens.{observe,scene,forensic}",
+      "GET /cp/v1/about → contractVersion/enabled/busy",
+      "GET /cp/v1/actions → count/contractVersion/actions[]"
+    ],
+    "produces": "机读断言表（本文件 id 逐条）+ 人读表",
+    "order": "严格按 assertions[] 顺序：端口 → token → about → actions"
+  },
+  "assertions": [
+    {
+      "id": "preflight-port-discoverable",
+      "target": "<mcDataDir>/controlplane/server.json",
+      "expr": "port 为正整数且 bind 为回环地址",
+      "expect": "port > 0 && bind == \"127.0.0.1\"",
+      "failSemantics": "设施错误（CP-EXIT-3）：客户端没起或控制面未启用——不是用例红",
+      "source": "run-read-surface.ps1 P1；run-smoke.ps1 P1-P3；run-shots.ps1 P1-P3；run-anchor.ps1 P1-P3"
+    },
+    {
+      "id": "preflight-contract-version-match",
+      "target": "GET /cp/v1/about → contractVersion",
+      "expr": "contractVersion 与调用方期望值相等",
+      "expect": "contractVersion == <expected>",
+      "failSemantics": "设施错误：版本不匹配说明客户端与调用方不是同一份契约——继续跑得到的结论不可比",
+      "source": "run-read-surface.ps1 P2"
+    },
+    {
+      "id": "preflight-tokens-present",
+      "target": "<mcDataDir>/controlplane/tokens.json",
+      "expr": "三级 token 齐备且非空",
+      "expect": "tokens.observe/tokens.scene/tokens.forensic 均为非空字符串",
+      "failSemantics": "设施错误：缺 token 则任何动作都 CP-AUTH-001，红绿无从谈起",
+      "source": "run-smoke.ps1 P2；run-shots.ps1 P2"
+    },
+    {
+      "id": "preflight-actions-describe-all",
+      "target": "GET /cp/v1/actions",
+      "expr": "count 与 actions 数组长度相等，且每个动作的 name/tier/params/returns/since 齐备",
+      "expect": "count == actions.length && 每个动作六要素非空",
+      "failSemantics": "D1 判红：无自描述的动作视为不存在（需求书 §8.1）",
+      "source": "run-read-surface.ps1 D1；run-smoke.ps1 A9 前置"
+    },
+    {
+      "id": "preflight-expected-actions-present",
+      "target": "GET /cp/v1/actions → actions[].name",
+      "expr": "本次要用的动作名全部在目录里",
+      "expect": "每个 <requiredAction> ∈ actions[].name",
+      "failSemantics": "设施错误：动作面不齐（客户端版本旧或装配失败）",
+      "source": "run-read-surface.ps1 D1 的逐动作比对"
+    }
+  ],
+  "falsification": {
+    "kind": "synthetic-fixture",
+    "how": "把 server.json 的 port 改成 0（或删掉 tokens.json 的一个键）后跑本判据集，对应断言必须变红且**只**它变红",
+    "record": "见 test/criteria/README.md §3 的负对照记录"
+  }
+}

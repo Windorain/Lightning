@@ -47,7 +47,7 @@ import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
  * （{@link #registerForensicActions}）+ #98 的 8 个观察面读面（{@link #registerReadActions}）
  * + #99 的 6 个 L0 布景原语（{@link #registerSceneActions}）+ #100 的 2 个命令通道
  * （{@link #registerCommandActions}）+ #101 的 9 个 L1 玩家操作（{@link #registerPlayerActions}，
- * {@code player.*}）。
+ * {@code player.*}）+ #103 的 1 个收尾原语（{@link #registerShutdownAction}，{@code core.shutdown}）。
  *
  * <p>
  * 同步 vs 步进：{@code core.*} / {@code world.info} / {@code case.validate} 是同步动作
@@ -58,8 +58,8 @@ import com.lightning.mod.client.controlplane.mc.scene.WeatherTimeAction;
  * <h2>动作数与契约版本（D3 漂移防线）</h2>
  *
  * 动作面随 PR 追加而增长：PR-1 = 8 个（1.0）、PR-2 = +3 取证（1.1）、PR-3 判据（1.2）、
- * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、#100 = +2 命令通道（1.4）、#101 = +9 L1（1.5）
- * ——当前 36 个。<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
+ * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、#100 = +2 命令通道（1.4）、#101 = +9 L1（1.5）、
+ * #103 = +1 收尾原语（1.6）——当前 37 个。<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
  * 而实际 11 个（Gitea #97 §5-D3 判为文档漂移）。注册数可在实机经
  * {@code GET /cp/v1/actions} 的 {@code count} 字段一步核对，改动本文件后请顺手核一次。
  */
@@ -75,7 +75,7 @@ public final class ActionRegistrar {
 
     /**
      * 注册全部动作（PR-1 的 8 个 + PR-2 的 3 个取证 + #98 的 8 个读面 + #99 的 6 个 L0
-     * + 收口T3 的 2 个命令通道 = 27 个）。
+     * + 收口T3 的 2 个命令通道 + #101 的 9 个 L1 + #103 的 1 个收尾原语 = 37 个）。
      *
      * <p>
      * 数字以实机 {@code GET /cp/v1/actions} 的 {@code count} 为权威（见类注释「动作数与契约版本」）。
@@ -263,6 +263,77 @@ public final class ActionRegistrar {
         registerForensicActions(runtime, registry);
         registerReadActions(runtime, registry);
         registerCommandActions(runtime, registry);
+        registerShutdownAction(runtime, registry);
+    }
+
+    /**
+     * 无人值守收尾原语（issue #103，V5 裁决）：{@code core.shutdown}。
+     *
+     * <h2>为什么它在 {@code core.*} 组而不是新开一族</h2>
+     * 它管的是<b>进程</b>，与 {@code core.ping}/{@code core.status} 同域（进程级事实）；而
+     * 「跑完就退出 + 退出码」是无人值守编排的收尾动作，不是场景能力。命名因此是 {@code core.shutdown}
+     * 而不是 {@code world.}/{@code case.}/{@code scene.} 族。
+     *
+     * <h2>权限级</h2>
+     * {@link Tier#SCENE}（可写级 ⇒ 框架自动要求 {@code "confirm": true}）。理由不是「它改了世界」
+     * （它不改），而是「它结束进程」——比任何世界写都不可逆，必须过同一道确认门
+     * （{@code CP-CONFIRM-001}）。这条也让「交互模式下误调」在参数层就被挡住。
+     *
+     * <h2>不注册为步进</h2>
+     * 同步动作：定码是纯读盘 + 纯计算，退出排在守护线程里（见 {@link ShutdownAction}）。
+     * 因此它也不会被 {@code case.run} 的 {@code action} 段接受——但那不是因为「步进」，
+     * 而是它被 {@code CaseValidator.ACTION_FORBIDDEN} 明确挡在编排之外（收尾必须由驱动单独发起）。
+     */
+    private static void registerShutdownAction(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        registry.register(
+            ActionDescriptor.builder(ShutdownAction.NAME, Tier.SCENE)
+                .description(
+                    "无人值守收尾原语：读 run 的**结论**（`criteria.json` 与 `evidence.json` ← 两份的 overall，任一非绿即红）"
+                        + " → 按约定定退出码 →（默认）延迟后结束客户端进程。"
+                        + "退出码约定 **0=判据全绿 / 2=有红 / 3=设施错误**，与 run 的合并结论对齐——"
+                        + "这是外层无人值守脚本唯一的稳定进程级信号（老批处理设施删除后 cp 侧原本是真空，见 #103 V5 裁决）。"
+                        + "**为什么读两份**：`criteria.json.overall` 是用例声明的**判据**结论，`evidence.json.overall` 是**期望证据核对**"
+                        + "结论，两者语义不同、不可互替（实机实测存在 criteria=red 而 evidence=green 的 run）。只读其一会把一次红跑"
+                        + "报成「判据全绿」——那正是本动作最不该犯的错。合并规则与 `case.run` 的 `overall` 逐字同源。"
+                        + "**退出纪律**：0 走 Minecraft.shutdown() 正常收尾，非 0 走 FMLCommonHandler.exitJava(code,false)；"
+                        + "两条路都先挂 120s 安全网（到点 exitJava(code,true) 硬退）。**绝不** Runtime.halt/System.exit——"
+                        + "FML 的 FMLSecurityManager 会把非 cpw.mods.fml 发起的 exitVM 静默拦成 ExitTrappedException，"
+                        + "进程仍以 0 退出（实测事故），外层脚本会把红跑读成绿跑。"
+                        + "**为什么延迟**：本动作的结论要经 HTTP 响应回给调用方，而响应在动作返回之后才写；就地退出会把调用方"
+                        + "吊死在一个永不来的响应上。故实际退出跑在延迟 "
+                        + ShutdownAction.DEFAULT_DELAY_MS
+                        + "ms 的守护线程里，结果里如实给 exitScheduledInMs。"
+                        + "**可判定性**：dryRun:true 只定码不退出，用它可以在不杀进程的前提下逐条核对「码与 run 结论对齐」。"
+                        + "**不许编入固定程序**：本动作会让本作业后续段不再执行，case.run 的 action 段一律拒绝它"
+                        + "（CaseValidator.ACTION_FORBIDDEN）——收尾由驱动在整跑结束后单独发起。")
+                .optional("runId", ActionDescriptor.TYPE_STRING, "要读结论的 run 目录名（缺省时按 caseId 找该用例最新的 run）")
+                .optional(
+                    "caseId",
+                    ActionDescriptor.TYPE_STRING,
+                    "按用例 id 找最新 run（与 runId 二选一；都没有且没给 code 即设施错误 code=3）")
+                .optional("code", ActionDescriptor.TYPE_INT, "显式退出码：给出即不再读 run 结论（0/2/3 为约定码；其它值按调用方自己的口径，结果里会如实标注）")
+                .optional("dryRun", ActionDescriptor.TYPE_BOOL, Boolean.FALSE, "只定码与报告，不排定退出（默认 false = 真的退）")
+                .optional(
+                    "delayMs",
+                    ActionDescriptor.TYPE_INT,
+                    Long.valueOf(ShutdownAction.DEFAULT_DELAY_MS),
+                    "排定退出前的延迟（毫秒，默认 " + ShutdownAction.DEFAULT_DELAY_MS + "）——留足时间让 HTTP 响应写回调用方；0 = 尽快（仍经守护线程，不是就地退）")
+                .optional("reason", ActionDescriptor.TYPE_STRING, "退出原因（写进结果与事件，便于审计）")
+                .returns(
+                    "{schema, action, contractVersion, code, codeMeaning, source, runOverall, criteriaOverall, "
+                        + "evidenceOverall, runId, caseId, "
+                        + "evidencePath, detail?, reason?, exitCodeConvention, dryRun, exitScheduled, "
+                        + "exitScheduledInMs?, watchdogMs?, exitPath?}。"
+                        + "source 取值：explicit（显式给码）/ run-overall（按 run 结论：criteria.json 与 evidence.json 合并）/ "
+                        + "caseId-lookup | runs-root | none（读不出来 ⇒ code=3 设施错误）。"
+                        + "失败时抛：run 读不出来不抛异常而是 code=3（本动作的职责就是如实报设施错误）；"
+                        + "code 越界 CP-VALID-002")
+                .example("{\"runId\":\"20261007-120000-cp-smoke-basic-12\",\"confirm\":true}")
+                .example("{\"caseId\":\"read-surface\",\"dryRun\":true,\"confirm\":true}")
+                .example("{\"code\":2,\"reason\":\"外部驱动已判定红\",\"confirm\":true}")
+                .since("1.6")
+                .build(),
+            new ShutdownAction());
     }
 
     /**

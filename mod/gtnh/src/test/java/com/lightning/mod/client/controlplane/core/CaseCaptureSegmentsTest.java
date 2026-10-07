@@ -178,7 +178,10 @@ public class CaseCaptureSegmentsTest {
 
     // ------------------------------------------------------------ 用例
 
-    /** 段清单与段序（capture 在 build 之前；v1.3 起 read 在 build 之后、cameras 之前）。 */
+    /**
+     * 段清单与段序（capture 在 build 之前；v1.3 起 read 在 build 之后；
+     * v1.6 起 action 在 read 之后、cameras 之前）。
+     */
     @Test
     public void segmentOrderIsContractOrder() {
         JsonObject plan = plan(caseJson());
@@ -201,16 +204,20 @@ public class CaseCaptureSegmentsTest {
             segments.get(3)
                 .getAsString());
         assertEquals(
-            "cameras",
+            "action",
             segments.get(4)
                 .getAsString());
         assertEquals(
-            "criteria",
+            "cameras",
             segments.get(5)
                 .getAsString());
         assertEquals(
-            "evidence",
+            "criteria",
             segments.get(6)
+                .getAsString());
+        assertEquals(
+            "evidence",
+            segments.get(7)
                 .getAsString());
         // 规范化段清单与执行期段清单必须同源
         for (int i = 0; i < segments.size(); i++) {
