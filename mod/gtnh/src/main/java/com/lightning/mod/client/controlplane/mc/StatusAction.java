@@ -75,9 +75,9 @@ public final class StatusAction implements ControlAction {
                 : runtime.queue()
                     .pendingCount());
 
-        String probe = ProbeActivity.firstActive(mc);
-        o.addProperty("probeActive", probe != null);
-        o.addProperty("probe", probe);
+        // #104 后语义：老探针设施已整体删除，本字段现表达**控制面自身忙闲**；probe 恒为 null。
+        o.addProperty("probeActive", ProbeActivity.any(mc));
+        o.addProperty("probe", ProbeActivity.firstActive(mc));
         o.addProperty("managedWorld", mc != null && mc.theWorld != null && Json.optBool(world, "managed", false));
 
         if (runtime != null && runtime.events() != null) {

@@ -19,7 +19,6 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.lightning.mod.client.export.SceneEnvelopeBuilder;
 import com.lightning.mod.config.SdeMultiblockConfig;
@@ -54,7 +53,6 @@ import cpw.mods.fml.relauncher.SideOnly;
 @SideOnly(Side.CLIENT)
 public final class MultiblockExportRunner {
 
-    public static final String TRIGGER_FILE = "sde_multiblock.json";
     public static final String SCHEMA = "lightning.multiblock.export/1";
     public static final String REPORT_FILE = "export-report.json";
     /** 中间数据集子目录（相对产物目录）。 */
@@ -68,13 +66,23 @@ public final class MultiblockExportRunner {
 
     // ------------------------------------------------------------------ 运行配置
 
-    /** 一次导出的运行参数（来自触发文件或 {@code /sde multiblock} 的范围参数）。 */
+    /** 一次导出的运行参数（来自 {@code /sde multiblock} 命令或 cp 的 {@code export.multiblock} 动作）。 */
     public static final class RunConfig {
 
         /** 范围：simpleName 或 fqcn；空 = 全部（受 {@link #maxExportMachines} 约束）。 */
         public final List<String> machines = new ArrayList<String>();
         /** 显式通道抽样（机 simpleName → 通道 id → 0..K 连续前缀）；缺省走自动规划。 */
         public final Map<String, Map<String, List<Integer>>> channelSample = new LinkedHashMap<String, Map<String, List<Integer>>>();
+        /**
+         * 自毁退出 / 删触发文件：<b>老触发文件通道的遗留开关</b>（见 {@link VariantCaptureRunner.Config} 的同类字段）。
+         *
+         * <p>
+         * #104 之前由 {@code sde_multiblock.json} 给出、由 {@code MultiblockExportAutomation} 消费；
+         * 该通道与 {@code readConfig(mc)} 已随 #104 删除，因此这里不再有写入者。
+         * 保留是因为控制面通道按 contract.md §9 的纪律显式置 false
+         * （{@code ExportMultiblockAction} 的 {@code rc.exit=false / rc.cleanupTrigger=false}），
+         * 而这条纪律需要字段存在才能表达。
+         */
         public boolean exit = true;
         public boolean cleanupTrigger = true;
         /** -1 = 用配置默认值。 */
@@ -85,20 +93,20 @@ public final class MultiblockExportRunner {
         public long globalBudgetMs = -1;
         public String outputDirName = "";
         public boolean keepDataset = true;
-        /** 请求者（命令）/来源（触发文件），写进报告。 */
-        public String requestedBy = "trigger-file";
+        /** 请求者 / 来源，写进报告（cp 通道写 {@code cp:export.multiblock}）。 */
+        public String requestedBy = "direct";
         /**
          * <b>产物根目录的绝对路径覆盖</b>（Gitea #102 的 cp 通道用）。
          *
          * <p>
-         * 既有两条通道（触发文件 / {@code /sde multiblock} 命令）的落点都是
-         * {@code <mcDataDir>/<outputDirName>}——那是「老路径」，其删除归 #104。
+         * #104 之前既有两条通道（触发文件 / {@code /sde multiblock} 命令）的落点都是
+         * {@code <mcDataDir>/<outputDirName>}；触发文件通道已随 #104 删除，命令通道保留。
          * cp 的 {@code export.multiblock} 动作要求产物落<b>它自己的 run 目录</b>（裁决 6 单一归属），
          * 而 run 目录是绝对路径，无法用「相对 mcDataDir 的目录名」表达。因此本字段为
          * cp 通道提供覆盖口：非空时 {@code outputDirName} 被忽略，产物根直接用它。
          *
          * <p>
-         * 默认 null ⇒ 既有两条通道的行为<b>逐字节不变</b>。
+         * 默认 null ⇒ 命令通道的落点行为<b>逐字节不变</b>。
          */
         public java.io.File outputRootOverride = null;
         /**
@@ -111,74 +119,16 @@ public final class MultiblockExportRunner {
         public boolean writeOutputs = true;
     }
 
-    public static File triggerFile(Minecraft mc) {
-        return new File(mc.mcDataDir, TRIGGER_FILE);
-    }
-
-    public static RunConfig readConfig(Minecraft mc) {
-        RunConfig c = new RunConfig();
-        File f = triggerFile(mc);
-        if (!f.isFile()) return c;
-        try {
-            JsonObject o = new JsonParser().parse(VariantCaptureRunner.readText(f))
-                .getAsJsonObject();
-            if (o.has("exit")) c.exit = o.get("exit")
-                .getAsBoolean();
-            if (o.has("cleanupTrigger")) c.cleanupTrigger = o.get("cleanupTrigger")
-                .getAsBoolean();
-            if (o.has("maxVariantsPerMachine")) c.maxVariantsPerMachine = o.get("maxVariantsPerMachine")
-                .getAsInt();
-            if (o.has("maxChannelValues")) c.maxChannelValues = o.get("maxChannelValues")
-                .getAsInt();
-            if (o.has("maxExportMachines")) c.maxExportMachines = o.get("maxExportMachines")
-                .getAsInt();
-            if (o.has("structuralOnly")) c.structuralOnly = o.get("structuralOnly")
-                .getAsBoolean() ? 1 : 0;
-            if (o.has("globalBudgetMs")) c.globalBudgetMs = o.get("globalBudgetMs")
-                .getAsLong();
-            if (o.has("outputDirName")) c.outputDirName = o.get("outputDirName")
-                .getAsString();
-            if (o.has("keepDataset")) c.keepDataset = o.get("keepDataset")
-                .getAsBoolean();
-            if (o.has("requestedBy")) c.requestedBy = o.get("requestedBy")
-                .getAsString();
-            if (o.has("machines") && o.get("machines")
-                .isJsonArray()) {
-                for (JsonElement e : o.getAsJsonArray("machines")) c.machines.add(e.getAsString());
-            }
-            if (o.has("channelSample") && o.get("channelSample")
-                .isJsonObject()) {
-                for (Map.Entry<String, JsonElement> me : o.getAsJsonObject("channelSample")
-                    .entrySet()) {
-                    if (!me.getValue()
-                        .isJsonObject()) continue;
-                    Map<String, List<Integer>> perMachine = new LinkedHashMap<String, List<Integer>>();
-                    for (Map.Entry<String, JsonElement> ce : me.getValue()
-                        .getAsJsonObject()
-                        .entrySet()) {
-                        if (!ce.getValue()
-                            .isJsonArray()) continue;
-                        List<Integer> vals = new ArrayList<Integer>();
-                        for (JsonElement ve : ce.getValue()
-                            .getAsJsonArray()) vals.add(Integer.valueOf(ve.getAsInt()));
-                        perMachine.put(ce.getKey(), vals);
-                    }
-                    c.channelSample.put(me.getKey(), perMachine);
-                }
-            }
-        } catch (Throwable t) {
-            FMLLog.warning("[SDE][T1.5] 触发文件解析失败，使用默认配置: %s", t.toString());
-        }
-        return c;
-    }
-
     // ------------------------------------------------------------------ 主流程
 
-    /** 触发文件入口（无人值守）。 */
-    public static JsonObject run(Minecraft mc) throws Exception {
-        return run(mc, readConfig(mc));
-    }
-
+    /**
+     * 用**显式运行配置**跑一轮导出。
+     *
+     * <p>
+     * <b>无触发文件入口</b>：{@code run(Minecraft)} 与 {@code readConfig(Minecraft)} 已随 Gitea #104
+     * 删除（老触发文件通道 {@code sde_multiblock.json} 不再存在）。本方法是唯一入口，
+     * 调用方是 {@code /sde multiblock} 的客户端半环与 cp 的 {@code export.multiblock} 动作。
+     */
     public static JsonObject run(Minecraft mc, RunConfig rc) throws Exception {
         SdeMultiblockConfig.load(new File(new File(mc.mcDataDir, "config"), "sde_multiblock.cfg"));
         long started = System.currentTimeMillis();
@@ -825,9 +775,35 @@ public final class MultiblockExportRunner {
         o.addProperty("stage", stage);
         o.addProperty("kind", kind);
         o.addProperty("message", message == null ? "" : message);
-        if (t != null) o.addProperty("failure", MultiblockScanAutomation.describeChain(t));
+        if (t != null) o.addProperty("failure", describeChain(t));
         o.addProperty("atEpochMs", Long.valueOf(System.currentTimeMillis()));
         return o;
+    }
+
+    /**
+     * 异常链 + 栈顶若干帧写成一段文本：失败必须可诊断，不能只留一句「失败了」。
+     *
+     * <p>
+     * 出处：Gitea #104 之前由 {@code MultiblockScanAutomation.describeChain} 提供；那个类（连同
+     * 老触发文件入口）已随 #104 删除，而本类是那条口径的**生产消费方**（{@code export-report.json}
+     * 的 {@code failures[].failure} 字段），故把这段与实现无关的诊断原语就地保留在消费方，
+     * 逐字节保持同一输出格式。
+     */
+    private static String describeChain(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        Throwable cur = t;
+        int guard = 0;
+        while (cur != null && guard++ < 8) {
+            if (sb.length() > 0) sb.append("\n<- caused by ");
+            sb.append(cur.toString());
+            StackTraceElement[] st = cur.getStackTrace();
+            for (int i = 0; i < Math.min(st.length, 6); i++) {
+                sb.append("\n    at ")
+                    .append(st[i]);
+            }
+            cur = cur.getCause();
+        }
+        return sb.toString();
     }
 
     private static String machineOf(JsonObject failureEntry) {

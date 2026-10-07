@@ -18,7 +18,7 @@ import cpw.mods.fml.relauncher.SideOnly;
 /**
  * T1.2 多方块扫描的 JSON 小工具：统一「数组即字段」的写法与落盘编码（UTF-8 + 2 空格缩进）。
  * <p>
- * 与 T0.3 的 {@link RunStateProbeRunner#writeJson} 同口径（同一 Gson 配置），但在此独立一份，
+ * 与已随 #104 删除的 T0.3 运行态探针同口径（同一 Gson 配置），但在此独立一份，
  * 避免 T1.2 反向依赖 T0.3 的落盘布局。
  */
 @SideOnly(Side.CLIENT)

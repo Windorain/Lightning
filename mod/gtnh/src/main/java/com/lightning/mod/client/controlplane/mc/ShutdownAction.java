@@ -23,7 +23,7 @@ import cpw.mods.fml.common.FMLCommonHandler;
  * 进程退出码，然后结束客户端。
  *
  * <h2>为什么需要它（V5 的硬真空）</h2>
- * 老批处理设施（{@code MultiblockPipelineAutomation} 等）把「跑完 → 落结果文件 → 以退出码结束进程」
+ * 老批处理设施（{@code MultiblockPipelineAutomation} 等，已随 Gitea #104 删除）把「跑完 → 落结果文件 → 以退出码结束进程」
  * 做成一件事，外层脚本据此判红绿。那些设施随 #104 整体删除后，控制面成了唯一入口，而
  * {@code grep mc.shutdown|exitJava|exitCode} 在 {@code client/controlplane/} 里<b>零命中</b>
  * ——无人值守编排拿不到任何稳定的进程级信号，只能靠轮询 HTTP 猜「跑完了没、绿没绿」。

@@ -60,8 +60,17 @@ import com.lightning.mod.config.SdeMultiblockConfig;
  *
  * <h2>无世界也能跑（R2-3 的取舍）</h2>
  *
- * 本动作的捕获路径自带 {@code ProbeDummyWorld}（不进真实世界），因此主菜单下也能执行——与既有
- * {@code MultiblockExportAutomation} 的行为一致。自述里写明这一点，不假装要求世界。
+ * 本动作的捕获路径自带 {@code ProbeDummyWorld}（不进真实世界），因此主菜单下也能执行——
+ * 这与 #104 之前那条触发文件驱动的入口（{@code MultiblockExportAutomation}，已随 #104 删除）
+ * 的行为一致。自述里写明这一点，不假装要求世界。
+ *
+ * <h2>前置枚举事实与已知缺口（V11）</h2>
+ *
+ * 本动作<b>硬依赖</b> {@code multiblock_scan/run-NNNN/machines.json}（T1.2 的枚举事实层）。
+ * 产出它的 {@code MultiblockScanRunner} 按 V11 裁决保留（是生产件），但 #104 删除了它唯一的
+ * 触发入口（{@code MultiblockScanAutomation} + {@code sde_multiblock_scan.json}），
+ * 而 cp 侧<b>没有</b>对应的自描述动作 ⇒ 目前没有自描述通道可以生成该事实。
+ * 这是 #104 <b>显式登记</b>的已知缺口，不是静默遗漏（见 #104 交付报告）。
  */
 public final class ExportMultiblockAction extends SteppingActionBase {
 
@@ -303,11 +312,10 @@ public final class ExportMultiblockAction extends SteppingActionBase {
                     new File(mc.mcDataDir, com.lightning.mod.client.multiblock.MultiblockScanRunner.OUTPUT_DIR)
                         .getAbsolutePath(),
                     "hint",
-                    "先跑一次 T1.2 枚举扫描（写 "
-                        + new File(mc.mcDataDir, com.lightning.mod.client.multiblock.MultiblockScanRunner.TRIGGER_FILE)
-                            .getName()
-                        + "，或经 /sde multiblock 的触发文件路径），再调用本动作；"
-                        + "本动作不代为发起扫描（那是分钟级长跑，应由调用方显式决定）",
+                    "先产出一份 T1.2 枚举事实（multiblock_scan/run-*/machines.json），再调用本动作；" + "本动作不代为发起扫描（那是分钟级长跑，应由调用方显式决定）。"
+                        + "⚠️ Gitea #104 已删除老触发文件入口（sde_multiblock_scan.json + MultiblockScanAutomation），"
+                        + "当前**没有**任何自描述动作可以生成该枚举事实——这是 #104 显式登记的已知缺口（V11），"
+                        + "见 #104 交付报告「已知缺口与新单建议」；在那之前只能借助已有磁盘上的 machines.json。",
                     "note",
                     "命令通道 /sde multiblock 有同一前置条件——这不是 cp 侧的额外要求，而是同一条管线的同一个上游"));
         }

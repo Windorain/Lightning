@@ -156,7 +156,7 @@ public final class LpPipeDescriber implements TeDescriber {
      *
      * <p>
      * 走 {@link ModReflect#itemId(Item)}（{@code Item.itemRegistry} 是 1.7.10 的权威物品注册表）——
-     * LP 自己也走它取管道注册名（{@code LpTeRoundTripAutomation} 的候选清单）。
+     * LP 自己也走它取管道注册名（#104 之前由 {@code LpTeRoundTripAutomation} 的候选清单消费，该类已删除）。
      */
     static String itemId(Object item) {
         return item instanceof Item ? ModReflect.itemId((Item) item) : null;
