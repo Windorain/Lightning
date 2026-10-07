@@ -417,6 +417,12 @@ $cmpClean = Compare-CpStateModuloVolatile -Before $e2Before -After $e2After
 Check 'E2 口径：易变字段被显式排除后差异为 0' ($cmpClean.diffs.Count -eq 0) ("diffs={0} skipped={1}（{2}）" -f $cmpClean.diffs.Count, $cmpClean.skipped.Count, (($cmpClean.skipped | Select-Object -First 3) -join '; '))
 $cmpDirty = Compare-CpStateModuloVolatile -Before $e2Before -After (New-E2State -X 66.5 -TotalTime 1300 -Ping 25 -JobCount 10 -EventSeq 105 -Buffered 1)
 Check 'E2 口径：真实位移差异被逐路径抓到' ($cmpDirty.diffs.Count -gt 0) ("diffs={0}: {1}" -f $cmpDirty.diffs.Count, (($cmpDirty.diffs | Select-Object -First 3) -join ' | '))
+# 【首轮实机教训】读面的 readAt 是墙钟：第一轮 E2 的「零写入」比对就是被 /player/readAt 撞出一条假差异。
+# 只差 readAt 的两份状态必须判「零差异」，否则 E2 一旦真走到 pass 分支就会因假红而翻车（同类于 Gitea #169）。
+$cmpReadAt = Compare-CpStateModuloVolatile -Before ([pscustomobject]@{ player = [pscustomobject]@{ readAt = '2026-10-08T01:20:15.3704717+08:00'; x = 64.5 } }) -After ([pscustomobject]@{ player = [pscustomobject]@{ readAt = '2026-10-08T01:20:32.2192540+08:00'; x = 64.5 } })
+Check 'E2 口径：只差 readAt（墙钟）⇒ 判零差异（假红守卫）' ($cmpReadAt.diffs.Count -eq 0) ("diffs={0} skipped={1}" -f $cmpReadAt.diffs.Count, $cmpReadAt.skipped.Count)
+$cmpReadAtReal = Compare-CpStateModuloVolatile -Before ([pscustomobject]@{ player = [pscustomobject]@{ readAt = 'a'; x = 64.5 } }) -After ([pscustomobject]@{ player = [pscustomobject]@{ readAt = 'b'; x = 65.5 } })
+Check 'E2 口径：readAt 之外的同伴字段差异仍被抓到' ($cmpReadAtReal.diffs.Count -eq 1) ("diffs={0}: {1}" -f $cmpReadAtReal.diffs.Count, ($cmpReadAtReal.diffs -join ' | '))
 
 # 填充键位门：填充键必须是**未绑定**键码（否则「事件被消费也不写世界」的前提不可辩护）
 $e2PickOk = New-DoneTrial 'e2-pick' (New-StateResult)
