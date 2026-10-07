@@ -21,6 +21,7 @@ import com.lightning.mod.client.controlplane.core.ActionRegistry;
 import com.lightning.mod.client.controlplane.core.CpException;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.Tier;
+import com.lightning.mod.client.controlplane.core.TimeSource;
 import com.lightning.mod.client.controlplane.mc.ActionRegistrar;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureDiagAction;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureDiagSession;
@@ -48,6 +49,16 @@ import com.lightning.mod.client.meshcapture.CaptureDiagnostics;
  * 经 {@link Json} 包装取默认值。
  */
 public class ReadCaptureOfflineTest {
+
+    /** 注入给 {@code buildReadback} 的固定时钟（Gitea #169）：让「逐字节等价」这条判据确定性成立。 */
+    private static final TimeSource FIXED_CLOCK = TimeSource
+        .fixed("2026-10-08T00:00:00.123+08:00", "20261008-000000", 0L);
+
+    /** 与之对应的 {@code readAt} 期望值（用于证明该字段真的来自注入的时钟）。 */
+    private static final String FIXED_CLOCK_ISO = "2026-10-08T00:00:00.123+08:00";
+
+    /** 另一个固定时钟：用于证明 {@code readAt} 不是常量（负对照）。 */
+    private static final String OTHER_CLOCK_ISO = "2026-10-08T00:00:01.000+08:00";
 
     @Before
     public void setUp() {
@@ -351,6 +362,14 @@ public class ReadCaptureOfflineTest {
      * （本仓 {@code caller.mjs} 规则 3）会把 {@code channel:"all"} 真的塞进请求体。若实现把「显式 all」
      * 与「省略」分开对待（例如 {@code channelFilterApplied} 变 true、或 channels 表少一个通道），
      * 那这次「补上机读默认值」就等于悄悄改了一次行为。本用例把两者钉成同一份读数。
+     *
+     * <h2>为什么必须注入时钟（Gitea #169）</h2>
+     * 本用例此前直接比较整份 JSON，而 {@code readAt} 是墙钟读数 ⇒ 两次调用必然取到不同值。
+     * 实测该假红的形状（2026-10-08，t4a 树全量构建）：两份读数**只差 readAt**，
+     * {@code expected:<...T00:36:21.09[49049]+08:00> but was:<...T00:36:21.09[5911]+08:00>}；
+     * 同一份代码在另一棵树（integration @ 66a680c，00:23:33 那轮）却全绿
+     * ⇒ 该判据的成败取决于**测试 JVM 的墙钟精度**，与实现无关，是**环境相关的假红**。
+     * 注入固定时钟后本判据变成确定性的、且更强：连 {@code readAt} 一起要求逐字节相同。
      */
     @Test
     public void explicitAllChannelIsIndistinguishableFromOmitted() {
@@ -361,16 +380,38 @@ public class ReadCaptureOfflineTest {
 
         JsonObject diag = CaptureDiagnostics.toJson();
         // 省略 channel ⇒ 动作侧取到的就是 null（见 ReadCaptureAction：ctx.optString("channel", null)）
-        JsonObject omitted = ReadCaptureAction.buildReadback(diag, true, true, null, true, 64);
+        JsonObject omitted = ReadCaptureAction.buildReadback(diag, true, true, null, true, 64, FIXED_CLOCK);
         // 显式 "all" ⇒ 经 normalizeChannel 折成 null 后走同一条路
         JsonObject explicitAll = ReadCaptureAction
-            .buildReadback(diag, true, true, CaptureDiagSession.normalizeChannel("all"), true, 64);
+            .buildReadback(diag, true, true, CaptureDiagSession.normalizeChannel("all"), true, 64, FIXED_CLOCK);
 
         assertNull("显式 all 必须与省略一样折成「不过滤」", CaptureDiagSession.normalizeChannel("all"));
-        assertEquals("显式 all 与省略的读数必须逐字段相同", Json.toJson(omitted), Json.toJson(explicitAll));
+        assertEquals(
+            "显式 all 与省略的读数必须<b>逐字节</b>相同（含 readAt——固定时钟下它是确定值）",
+            Json.toJson(omitted),
+            Json.toJson(explicitAll));
         assertEquals("all", str(explicitAll, "channelFilter"));
         assertFalse("不过滤时 channelFilterApplied 必须是 false", bool(explicitAll, "channelFilterApplied"));
         assertEquals("四通道一个都不少", 4, Json.size(obj(explicitAll, "channels")));
+
+        // ---- 负对照 1：readAt 必须真的来自注入的时钟（不是被剔掉、也不是常量） ----
+        assertEquals("readAt 必须等于注入时钟的值", FIXED_CLOCK_ISO, str(explicitAll, "readAt"));
+        JsonObject otherClock = ReadCaptureAction.buildReadback(
+            diag,
+            true,
+            true,
+            null,
+            true,
+            64,
+            TimeSource.fixed(OTHER_CLOCK_ISO, "20261008-000001", 1000L));
+        assertEquals("换时钟后 readAt 必须跟着变", OTHER_CLOCK_ISO, str(otherClock, "readAt"));
+
+        // ---- 负对照 2：本比较不是恒绿的——把「过滤生效」的读数拿来比，必须不相等 ----
+        JsonObject filtered = ReadCaptureAction.buildReadback(diag, true, true, "TESR", true, 64, FIXED_CLOCK);
+        assertFalse(
+            "本比较必须能抓到真实差异（否则这条判据是空转的）",
+            Json.toJson(omitted)
+                .equals(Json.toJson(filtered)));
     }
 
     // ------------------------------------------------------------ 会话布防/撤防

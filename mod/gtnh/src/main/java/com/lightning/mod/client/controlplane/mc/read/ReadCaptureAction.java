@@ -104,6 +104,11 @@ public final class ReadCaptureAction implements ControlAction {
      * 而不是只能靠实机观察。本方法也是「读数只此一处定义」的落点：
      * {@code capture.diag} 的即时回读与实机验收都引用它。
      *
+     * <p>
+     * 本重载把时间源固定为 {@link TimeSource#system()}（生产路径）。需要逐字段等价的离线判据
+     * （例如「显式 all 与省略等价」）请用下面带 {@code clock} 的重载——{@code readAt} 是墙钟读数，
+     * 两次调用天然不同，直接比较整份 JSON 会得到与实现无关的假红（Gitea #169）。
+     *
      * @param diag           {@link CaptureDiagnostics#toJson()} 的产物
      * @param sessionEnabled 诊断会话当前是否开着
      * @param everArmed      是否曾被布防过（区分「从未采集」与「采集过又撤防」）
@@ -113,6 +118,33 @@ public final class ReadCaptureAction implements ControlAction {
      */
     static JsonObject buildReadback(JsonObject diag, boolean sessionEnabled, boolean everArmed, String channelFilter,
         boolean includeEvents, int maxEvents) {
+        return buildReadback(
+            diag,
+            sessionEnabled,
+            everArmed,
+            channelFilter,
+            includeEvents,
+            maxEvents,
+            TimeSource.system());
+    }
+
+    /**
+     * 同 {@link #buildReadback(JsonObject, boolean, boolean, String, boolean, int)}，但时间戳取自传入的时间源。
+     *
+     * <h2>为什么时间源是可注入的（Gitea #169）</h2>
+     * {@code readAt} 是<b>墙钟</b>：两次调用必然取到不同的值（实测差异仅此一处）。于是
+     * 「两次读数必须逐字段相同」这类判据若直接比较整份 JSON，就会在毫秒/微秒边界上随机变红——
+     * 这是<b>与实现无关的假红</b>，会把「全量测试」这道闸门变成不可判定。
+     *
+     * <p>
+     * 两条退路都不能接受：① 在测试里把 {@code readAt} 剔除再比——那样连「字段消失了」都测不出；
+     * ② 放宽判据——那正是本仓明令禁止的「为了让结果好看而放宽口径」。正解是把时间源变成参数：
+     * 判据可以要求<b>逐字节相同</b>（含 {@code readAt} 等于注入的固定值），同时生产路径行为逐字节不变。
+     *
+     * @param clock 产生 {@code readAt} 的时间源；生产路径传 {@link TimeSource#system()}
+     */
+    static JsonObject buildReadback(JsonObject diag, boolean sessionEnabled, boolean everArmed, String channelFilter,
+        boolean includeEvents, int maxEvents, TimeSource clock) {
         String state = sessionEnabled ? STATE_COLLECTING : everArmed ? STATE_DISARMED : STATE_NOT_COLLECTED;
 
         JsonObject o = new JsonObject();
@@ -238,10 +270,7 @@ public final class ReadCaptureAction implements ControlAction {
                     + "若本会话只有方块/TESR 几何（无 DirectTessellator 流量），false 是正确行为——见 hookScope");
         }
 
-        o.addProperty(
-            "readAt",
-            TimeSource.system()
-                .isoNow());
+        o.addProperty("readAt", clock.isoNow());
         return o;
     }
 

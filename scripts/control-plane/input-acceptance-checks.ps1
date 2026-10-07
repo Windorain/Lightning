@@ -927,3 +927,412 @@ function Test-InputG1CaseRun {
     return (New-CpPass 'G1' $d)
 }
 
+# ===========================================================================
+# Stage extra（E1/E2/E3）
+#   E1 组合键（潜行修饰）被世界链按序消费
+#   E2 队列满 ⇒ CP-STATE-001 且零写入
+#   E3 产物可从既有清单发现并复核哈希
+#
+# 纪律与上面各段逐条相同：纯函数、无 IO、status ∈ {pass,fail,skipped,blocked}；
+# skipped / blocked 都不是 pass。本段的**取舍理由**（哪些是判据、哪些只是证据）写在
+# scripts/control-plane/README.md §15.8。
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 状态比对口径：显式排除易变字段（**不做**「整体 JSON 字符串相等」）
+#
+# 为什么必须按字段名显式排除：E2 要断言的是「投递前后世界/玩家状态逐字相同」，
+# 而观测面里天然混着每 tick 自增的计数、墙钟、GC 读数与**探针自身调用**在推进的记账
+# ——把它们算进去会让判据「一撞就红」；反过来整串相等又会被一个易变字段掩盖真实写入。
+# 因此这里的口径是：**逐路径叶子比对 + 显式排除清单**，且被排除的路径逐条进 detail。
+# ---------------------------------------------------------------------------
+function Get-CpVolatileFieldReason {
+    param([string]$Name)
+    $groups = @(
+        @{ why = 'tick 计数/世界时刻：每 tick 自增，逐字比对必然不等'; names = @('totalTime', 'worldTime', 'gameTime', 'dayTime', 'tick', 'time') }
+        @{ why = '墙钟/单调钟：前后两次读必然不同'; names = @('serverTime', 'timestamp', 'createdAt', 'ts', 'at', 'uptimeMs', 'elapsedMs', 'nanoTime') }
+        @{ why = 'JVM 内存读数：GC 自行变化，与「有没有写世界」无关'; names = @('memory', 'heapUsed', 'heapMax', 'heapCommitted', 'nonHeapUsed', 'usedBytes') }
+        @{ why = '控制面自身记账：前后两次读面调用本身就在改变它们（不是世界写入）'; names = @('lastSeq', 'buffered', 'count', 'counts', 'recent', 'recentRuns', 'pending', 'busy', 'currentJobId', 'currentAction', 'probeActive', 'probe') }
+        @{ why = '与写入无关的易变读数：网络往返延迟 / 状态效果剩余时长每 tick 自减'; names = @('ping', 'duration') }
+    )
+    foreach ($g in $groups) {
+        if (@($g.names) -contains $Name) { return [string]$g.why }
+    }
+    return $null
+}
+
+function Get-CpChildNames {
+    param($Node)
+    if ($null -eq $Node) { return @() }
+    if ($Node -is [System.Collections.IDictionary]) { return @($Node.Keys | ForEach-Object { [string]$_ }) }
+    if ($Node -is [System.Management.Automation.PSCustomObject]) { return @($Node.PSObject.Properties.Name) }
+    return @()
+}
+
+function Test-CpNodeIsMap {
+    param($Node)
+    return ($Node -is [System.Collections.IDictionary]) -or ($Node -is [System.Management.Automation.PSCustomObject])
+}
+
+function Test-CpNodeIsList {
+    param($Node)
+    if ($Node -is [string]) { return $false }
+    return ($Node -is [System.Array]) -or ($Node -is [System.Collections.IList])
+}
+
+# 递归逐路径比对；$Diffs / $Skipped 是调用方给的 ArrayList（原地追加）
+function Compare-CpNodeModuloVolatile {
+    param($Before, $After, [string]$Path, $Diffs, $Skipped, $Seen)
+    $hasB = $null -ne $Before
+    $hasA = $null -ne $After
+    if (-not $hasB -and -not $hasA) { return }
+    if ($hasB -ne $hasA) {
+        [void]$Diffs.Add(("$Path = 仅单侧存在（before=$(Format-CpValue $Before) after=$(Format-CpValue $After)）"))
+        return
+    }
+    if ((Test-CpNodeIsMap $Before) -or (Test-CpNodeIsMap $After)) {
+        if (-not ((Test-CpNodeIsMap $Before) -and (Test-CpNodeIsMap $After))) {
+            [void]$Diffs.Add(("$Path = 类型不同（before=$(Format-CpValue $Before) after=$(Format-CpValue $After)）"))
+            return
+        }
+        $names = New-Object System.Collections.ArrayList
+        foreach ($n in (Get-CpChildNames $Before)) { if (-not $names.Contains($n)) { [void]$names.Add($n) } }
+        foreach ($n in (Get-CpChildNames $After)) { if (-not $names.Contains($n)) { [void]$names.Add($n) } }
+        foreach ($n in $names) {
+            $child = if ([string]::IsNullOrEmpty($Path)) { "/$n" } else { "$Path/$n" }
+            $why = Get-CpVolatileFieldReason $n
+            if ($null -ne $why) {
+                if (-not $Seen.Contains($child)) { [void]$Seen.Add($child); [void]$Skipped.Add("$child（$why）") }
+                continue
+            }
+            $cb = Test-CpHasProp $Before $n
+            $ca = Test-CpHasProp $After $n
+            if ($cb -ne $ca) {
+                [void]$Diffs.Add(("$child = 仅单侧存在（before=$(Format-CpValue (Get-CpProp $Before $n)) after=$(Format-CpValue (Get-CpProp $After $n))）"))
+                continue
+            }
+            Compare-CpNodeModuloVolatile (Get-CpProp $Before $n) (Get-CpProp $After $n) $child $Diffs $Skipped $Seen
+        }
+        return
+    }
+    if ((Test-CpNodeIsList $Before) -or (Test-CpNodeIsList $After)) {
+        if (-not ((Test-CpNodeIsList $Before) -and (Test-CpNodeIsList $After))) {
+            [void]$Diffs.Add(("$Path = 类型不同（before=$(Format-CpValue $Before) after=$(Format-CpValue $After)）"))
+            return
+        }
+        $ba = @($Before)
+        $aa = @($After)
+        if ($ba.Count -ne $aa.Count) {
+            [void]$Diffs.Add(("$Path = 数组长度不同（before=$($ba.Count) after=$($aa.Count)）"))
+            return
+        }
+        for ($i = 0; $i -lt $ba.Count; $i++) {
+            Compare-CpNodeModuloVolatile $ba[$i] $aa[$i] ("$Path/$i") $Diffs $Skipped $Seen
+        }
+        return
+    }
+    if ("$Before" -ne "$After") {
+        [void]$Diffs.Add(("$Path = before=$(Format-CpValue $Before) after=$(Format-CpValue $After)"))
+    }
+}
+
+# 状态比对入口：返回 @{ diffs[]; skipped[] }（diffs 为空 = 排除易变字段后逐路径相同）
+function Compare-CpStateModuloVolatile {
+    param($Before, $After)
+    $diffs = New-Object System.Collections.ArrayList
+    $skipped = New-Object System.Collections.ArrayList
+    $seen = New-Object System.Collections.ArrayList
+    Compare-CpNodeModuloVolatile $Before $After '' $diffs $skipped $seen
+    return [pscustomobject]@{ diffs = @($diffs); skipped = @($skipped) }
+}
+
+# 比对结果的两行摘要（detail 复用；不参与判红绿）
+function Format-CpStateCompare {
+    param($Compare, [int]$MaxDiffs = 8, [int]$MaxSkips = 12)
+    $dt = if ($Compare.diffs.Count -eq 0) { '差异 0 条' } else { "差异 $($Compare.diffs.Count) 条: " + (($Compare.diffs | Select-Object -First $MaxDiffs) -join ' | ') }
+    $st = "排除易变路径 $($Compare.skipped.Count) 条: " + (($Compare.skipped | Select-Object -First $MaxSkips) -join '; ')
+    return "$dt；$st"
+}
+
+# ---------------------------------------------------------------------------
+# E1：组合键（潜行修饰）被世界链按序消费
+#
+#   正例口径：潜行+前进的**每 tick 水平位移**必须显著低于「只按前进」的对照
+#             （潜行/对照 < MaxSneakPerTickRatio，默认 0.6；MC 的潜行输入系数是 0.3，
+#              0.6 只用作「显著低于」的判界，不是把 0.3 放宽到 0.6）。
+#   负对照：构造数据里潜行无效（两者每 tick 位移相当）⇒ **必须红**（见离线自检）。
+#   对照不成立（只按前进也不动）⇒ 红：那说明键没生效，本判据无从比较，
+#            绝不许因为「两边都没动」而判绿。
+# ---------------------------------------------------------------------------
+function Test-InputE1SneakModifier {
+    param(
+        $PlainPosA, $PlainPosB, [int]$PlainTicks = 0,
+        $SneakPosA, $SneakPosB, [int]$SneakTicks = 0,
+        [double]$MaxSneakPerTickRatio = 0.6,
+        [double]$MinPlainPerTick = 0.02
+    )
+    $dPlain = Get-CpHorizontalDistance $PlainPosA $PlainPosB
+    $dSneak = Get-CpHorizontalDistance $SneakPosA $SneakPosB
+    $plainTxt = if ($null -eq $dPlain) { 'N/A' } else { "{0:N3}" -f [double]$dPlain }
+    $sneakTxt = if ($null -eq $dSneak) { 'N/A' } else { "{0:N3}" -f [double]$dSneak }
+    $common = ("对照（只按 key.forward）: A={0} B={1} 水平位移={2} tick={3}；潜行+前进: A={4} B={5} 水平位移={6} tick={7}" -f `
+        (Format-CpValue $PlainPosA), (Format-CpValue $PlainPosB), $plainTxt, $PlainTicks,
+        (Format-CpValue $SneakPosA), (Format-CpValue $SneakPosB), $sneakTxt, $SneakTicks)
+    if ($null -eq $dPlain -or $null -eq $dSneak) {
+        return (New-CpFail 'E1' ("坐标不可解析 ⇒ 无法判定位移（不是「无差别也算过」）；$common"))
+    }
+    if ($PlainTicks -le 0 -or $SneakTicks -le 0) {
+        return (New-CpFail 'E1' ("tick 增量不可用（对照 $PlainTicks / 潜行 $SneakTicks）⇒ 无法折算每 tick 位移；$common"))
+    }
+    $plainPerTick = [double]$dPlain / [double]$PlainTicks
+    $sneakPerTick = [double]$dSneak / [double]$SneakTicks
+    $ratio = if ($plainPerTick -gt 0) { $sneakPerTick / $plainPerTick } else { $null }
+    $ratioTxt = if ($null -eq $ratio) { '(对照为 0，比值无定义)' } else { "{0:N3}" -f [double]$ratio }
+    $d = ("{0}；每 tick 水平位移：对照={1:N4} 潜行={2:N4}；潜行/对照={3}（判界 < {4}）；对照下界要求 >= {5}" -f `
+        $common, $plainPerTick, $sneakPerTick, $ratioTxt, $MaxSneakPerTickRatio, $MinPlainPerTick)
+    if ($plainPerTick -lt $MinPlainPerTick) {
+        return (New-CpFail 'E1' ("对照组每 tick 位移 {0:N4} < {1} ⇒ 对照不成立（只按前进也没动起来，键没生效）⇒ 本判据无从比较，不许判绿；{2}" -f $plainPerTick, $MinPlainPerTick, $d))
+    }
+    if ($sneakPerTick -ge ($MaxSneakPerTickRatio * $plainPerTick)) {
+        return (New-CpFail 'E1' ("潜行**没有**让位移下降（每 tick 位移未低于对照的 $MaxSneakPerTickRatio 倍）：$d"))
+    }
+    return (New-CpPass 'E1' ("潜行让每 tick 位移下降到对照的 $ratioTxt（判界 < $MaxSneakPerTickRatio）：$d"))
+}
+
+# ---------------------------------------------------------------------------
+# E1.readback：保持期间的 input.state 必须**如实回读** held[].gameBindingPressed
+#   字段名出处：InputStateProviderImpl.java:601（item.addProperty("gameBindingPressed", pressedFor(id, o))）
+#              InputRuntimeImpl.java:1160（动作结果面的同名回读）
+#   本判据只要求「两个键都在持键表里」且「每个条目都带该字段」——
+#   回读值是 true/false/null 都如实进 detail（null = 探针读不到，不判红：
+#   那是**如实**，不是缺失；字段整个缺席才是缺失）。
+# ---------------------------------------------------------------------------
+function Test-InputE1SneakReadback {
+    param($HoldTrial, [string[]]$WantIds = @('key.sneak', 'key.forward'))
+    if ((Get-CpTrialExit $HoldTrial) -ne 0) {
+        return (New-CpFail 'E1.readback' ("保持期间 input.state 未成功（gameBindingPressed 取不到）: " + (Format-CpTrial $HoldTrial)))
+    }
+    $res = Get-CpTrialResult $HoldTrial
+    if ($null -eq $res) { return (New-CpFail 'E1.readback' 'input.state 的 result 字段缺席') }
+    $held = Get-CpProp $res 'held'
+    $items = Get-CpArray $held 'items'
+    $count = Get-CpProp $held 'count'
+    $parts = New-Object System.Collections.ArrayList
+    $problems = New-Object System.Collections.ArrayList
+    foreach ($want in @($WantIds)) {
+        $hit = @($items | Where-Object { [string](Get-CpProp $_ 'id') -eq $want })
+        if ($hit.Count -eq 0) {
+            [void]$parts.Add("$want=(不在持键表里)")
+            [void]$problems.Add("held.items 里没有 $want（保持期间程序没有真的按下该键）")
+            continue
+        }
+        $it = $hit[0]
+        if (-not (Test-CpHasProp $it 'gameBindingPressed')) {
+            [void]$parts.Add("$want=(无 gameBindingPressed 字段)")
+            [void]$problems.Add("$want 的 held 条目没有 gameBindingPressed 字段（§3.6 第 4 条要求回读，不许省略）")
+            continue
+        }
+        $note = [string](Get-CpProp $it 'gameBindingPressedNote')
+        [void]$parts.Add(("$want.gameBindingPressed={0}{1}" -f (Format-CpValue (Get-CpProp $it 'gameBindingPressed')), $(if ([string]::IsNullOrWhiteSpace($note)) { '' } else { "（$note）" })))
+    }
+    $d = ("held.count={0}（要求 >= {1}）；回读: {2}" -f (Format-CpValue $count), @($WantIds).Count, ($parts -join '; '))
+    $countNum = if ($null -eq $count) { -1 } else { [int]$count }
+    if ($countNum -lt @($WantIds).Count) { [void]$problems.Add("held.count=$countNum < $(@($WantIds).Count)（保持期间两个键都该在持键表里）") }
+    if ($problems.Count -gt 0) { return (New-CpFail 'E1.readback' (($problems -join '；') + "；$d")) }
+    return (New-CpPass 'E1.readback' $d)
+}
+
+# ---------------------------------------------------------------------------
+# E2：单作业内压入远超容量的键事件 ⇒ 队列满 ⇒ CP-STATE-001 且零写入
+#
+#   ⚠ 本判据的**触发条件**在公开动作面上是否可达，本身就是结论的一部分（见 README §15.8）。
+#   三条分支：
+#     ① 用例构造被校验器拒 ⇒ blocked（构造层拒绝，不是「队列满」的实测结论）
+#     ② 错误码命中 CP-STATE-001 ⇒ 判据成立：再用「排除易变字段后的逐路径比对」验零写入
+#     ③ 未被拒 ⇒ 只有当「实测深度已达容量却仍投递成功」才是 fail（实现缺陷）；
+#        否则 blocked-with-reason（触发条件不可达），**绝不改判成 pass**，
+#        也**绝不**降级成别的更容易绿的断言。
+# ---------------------------------------------------------------------------
+function Get-CpQueueFillStats {
+    param($StepArtifacts)
+    $depths = New-Object System.Collections.ArrayList
+    $ticks = New-Object System.Collections.ArrayList
+    $steps = 0
+    foreach ($a in @($StepArtifacts)) {
+        $steps++
+        $d = Get-CpProp $a 'queueDepthAfter'
+        if ($null -ne $d) { [void]$depths.Add([int]$d) }
+        $t = Get-CpProp $a 'deliveredAtTick'
+        if ($null -ne $t) { [void]$ticks.Add([long]$t) }
+    }
+    $maxDepth = $null
+    if ($depths.Count -gt 0) { $maxDepth = [int](($depths | Measure-Object -Maximum).Maximum) }
+    $distinct = @($ticks | Sort-Object -Unique)
+    $maxPerTick = 0
+    if ($ticks.Count -gt 0) {
+        $g = $ticks | Group-Object
+        $maxPerTick = [int](($g | Measure-Object -Property Count -Maximum).Maximum)
+    }
+    return [pscustomobject]@{
+        steps                 = $steps
+        depthSamples          = $depths.Count
+        maxDepth              = $maxDepth
+        tickSamples           = $ticks.Count
+        distinctTicks         = $distinct.Count
+        maxDeliveriesPerTick  = $maxPerTick
+        firstTick             = $(if ($distinct.Count -gt 0) { $distinct[0] } else { $null })
+        lastTick              = $(if ($distinct.Count -gt 0) { $distinct[-1] } else { $null })
+    }
+}
+
+function Test-InputE2QueueFullSingleJob {
+    param(
+        $ValidateTrial, $RunTrial, $BeforeState, $AfterState, $StepArtifacts,
+        [int]$PlannedSteps = 300,
+        [int]$KeyCapacity = 256,
+        # 填充键位门（可选）：驱动选用的未绑定键码 + 它的依据（input.state.keyCatalog 实读）
+        $FillerTrial = $null, $FillerCatalog = $null, [int]$FillerCode = -1
+    )
+    $stats = Get-CpQueueFillStats $StepArtifacts
+    $cmp = Compare-CpStateModuloVolatile $BeforeState $AfterState
+    $cmpTxt = Format-CpStateCompare $cmp
+    $statesUsable = ($null -ne $BeforeState) -and ($null -ne $AfterState) `
+        -and ($null -ne (Get-CpProp $BeforeState 'player')) -and ($null -ne (Get-CpProp $AfterState 'player')) `
+        -and ($null -ne (Get-CpProp $BeforeState 'status')) -and ($null -ne (Get-CpProp $AfterState 'status'))
+    $statTxt = ("填充步 {0}（计划 {1}，容量 {2}）；step 产物 {3} 份；queueDepthAfter 实测最大值={4}（样本 {5}）；deliveredAtTick 去重={6}、单 tick 最多投递 {7} 次" -f `
+        $stats.steps, $PlannedSteps, $KeyCapacity, $stats.steps, (Format-CpValue $stats.maxDepth), $stats.depthSamples, $stats.distinctTicks, $stats.maxDeliveriesPerTick)
+    $watchTxt = "投递前后状态比对（read.player + core.status）：$cmpTxt"
+    if (-not $statesUsable) { $watchTxt = "投递前后状态比对：**观测面不完整**（read.player/core.status 有一侧读不到）⇒ 零写入无从验证；$cmpTxt" }
+
+    # ⓪ 填充键位门：填充键必须是**未绑定**键码。否则「已入队事件即使被消费也不产生世界写入」
+    #    这一前提不可辩护 —— 而不做这个辩护就等于用会动玩家的键去撞队列，判据本身失去意义。
+    if ($null -ne $FillerTrial) {
+        $fillerWhy = $null
+        if ((Get-CpTrialExit $FillerTrial) -ne 0) {
+            $fillerWhy = "取键位目录的 input.state 未成功: " + (Format-CpTrial $FillerTrial)
+        } else {
+            $boundCount = 0
+            $occupied = $false
+            if ($null -ne $FillerCatalog) {
+                foreach ($p in @($FillerCatalog.PSObject.Properties)) {
+                    $boundCount++
+                    if ([int]$p.Value -eq $FillerCode) { $occupied = $true }
+                }
+            }
+            if ($boundCount -eq 0) {
+                $fillerWhy = 'input.state.keyCatalog 为空（运行期键位注册表读不到）⇒ 无法判定某键码是否未绑定'
+            } elseif ($FillerCode -lt 1 -or $FillerCode -gt 254) {
+                $fillerWhy = "0..254 里找不到未被 keyCatalog 占用的键码（目录 $boundCount 项，候选=$FillerCode）"
+            } elseif ($occupied) {
+                return (New-CpFail 'E2' ("驱动选用的填充键码 $FillerCode 已被运行期 KeyBinding 占用（keyCatalog $boundCount 项里命中）⇒ 填充事件可能产生世界交互，前提不成立（编排缺陷）：$statTxt"))
+            } elseif ($boundCount -gt 0) {
+                $statTxt = ("填充键码 {0}（未绑定：不在 keyCatalog 的 {1} 个取值里）；" -f $FillerCode, $boundCount) + $statTxt
+            }
+        }
+        if ($null -ne $fillerWhy) {
+            return (New-CpBlocked 'E2' ("blocked：填充键位不可用 ⇒ 无法构造功能惰性的填充事件（「已入队事件即使被消费也不产生世界写入」这一前提不可辩护，本判据不做）：$fillerWhy；$statTxt"))
+        }
+    }
+
+    if ((Get-CpTrialExit $ValidateTrial) -ne 0) {
+        return (New-CpBlocked 'E2' ("blocked：E2 的填充用例未被校验器接受 ⇒ 探针构造失败（这是构造层结论，不是「队列满」的实测结论，既不算 pass 也不算实现缺陷）: " + (Format-CpTrial $ValidateTrial) + "；$statTxt"))
+    }
+    $runCode = Get-CpTrialErrorCode $RunTrial
+
+    # ② 判据成立路径
+    if ("$runCode" -eq 'CP-STATE-001') {
+        if (-not $statesUsable) {
+            return (New-CpFail 'E2' ("拒绝码命中 CP-STATE-001，但投递前后的观测面不完整 ⇒ 「零写入」无法验证（不许当成功）：$watchTxt；$statTxt"))
+        }
+        if ($cmp.diffs.Count -gt 0) {
+            return (New-CpFail 'E2' ("拒绝码命中 CP-STATE-001，但投递前后状态**不是**零写入 ⇒ 队列满路径有副作用：$watchTxt；$statTxt"))
+        }
+        return (New-CpPass 'E2' ("CP-STATE-001（队列满拒绝）且投递前后零写入（$cmpTxt）；$statTxt"))
+    }
+
+    # ③ 未被拒
+    if ($null -ne $stats.maxDepth -and [int]$stats.maxDepth -ge $KeyCapacity) {
+        return (New-CpFail 'E2' ("实测键盘队列深度已达容量 $KeyCapacity 却仍投递成功（未被 CP-STATE-001 拒绝，违反契约 §4.4 第 3 条的容量预检）：$statTxt"))
+    }
+    if ((Get-CpTrialExit $RunTrial) -ne 0) {
+        return (New-CpFail 'E2' ("填充用例失败且错误码 '$runCode' 不是 CP-STATE-001 ⇒ 无法归因到队列满: " + (Format-CpTrial $RunTrial) + "；$statTxt"))
+    }
+    $why = @(
+        "① 计划 $PlannedSteps 条 ≫ 容量 $KeyCapacity"
+        "② queueDepthAfter 实测最大值=$(Format-CpValue $stats.maxDepth)（远低于容量）⇒ 设施容量预检的判据 depthBefore + 本请求条数 > capacity 从未成立"
+        "③ 单 tick 最多投递 $($stats.maxDeliveriesPerTick) 条、deliveredAtTick 去重 $($stats.distinctTicks) 个 ⇒ 投递速率被「编排段里每个输入步至少占一个 tick」限住（CaseRunAction.java:1190-1191），而 MC 每 tick 排空键盘队列（lwjgl3ify Keyboard.next()）"
+        "④ 公开动作面上唯一的批量入口 input.text 在投递**之前**就被能力门以 CP-STATE-001（路由未就绪）拦下（InputTextAction.java:75/121）⇒ 那条 CP-STATE-001 不是「队列满」"
+    )
+    return (New-CpBlocked 'E2' ("blocked：单作业内**无法构造**触发条件（CP-STATE-001「队列满」路径未被覆盖，这不是 pass）。判定依据：" + ($why -join '；') + "。$statTxt；$watchTxt"))
+}
+
+# ---------------------------------------------------------------------------
+# E3：产物可从既有清单发现并复核哈希
+#   判据：GET /cp/v1/artifacts/{runId} 的清单里能发现 shots/<name>.png 与
+#         shots/<name>.meta.json；**逐份**下载字节、复算 sha256，与清单声明的 sha256/bytes 比对，
+#         全部一致才算 pass（至少要有一条 PNG 与一条 meta —— 由下载覆盖数保证）。
+#   清单不含 sha256 字段 ⇒ 如实记「未覆盖」并**红**（不许含糊成 pass）。
+#   字段出处：CoreEndpoints.java:304-323（清单 {runId,caseId,jobSeq,createdAt,artifacts[],count}）
+#             ArtifactStore.java:74-79（条目 {path,bytes,sha256,role}）
+# ---------------------------------------------------------------------------
+function Test-InputE3ArtifactHashes {
+    param($Manifest, $Downloads, [string]$RunId = '', $ShotTrial = $null)
+    $shotTxt = if ($null -eq $ShotTrial) { '' } else { ("shot.multi: " + (Format-CpTrial $ShotTrial) + "；") }
+    if ($null -eq $Manifest) {
+        return (New-CpFail 'E3' ("GET /cp/v1/artifacts/{runId} 的清单读不到（产物发现面不可用）；${shotTxt}runId='" + $RunId + "'"))
+    }
+    $arts = Get-CpArray $Manifest 'artifacts'
+    $rid = if ([string]::IsNullOrWhiteSpace($RunId)) { [string](Get-CpProp $Manifest 'runId') } else { $RunId }
+    $png = @($arts | Where-Object { [string](Get-CpProp $_ 'path') -match '^shots/[^/]+\.png$' })
+    $meta = @($arts | Where-Object { [string](Get-CpProp $_ 'path') -match '^shots/[^/]+\.meta\.json$' })
+    $listed = ("清单 runId={0} count={1}；可发现 shots/*.png={2} 份、shots/*.meta.json={3} 份" -f `
+        $rid, (Format-CpValue (Get-CpProp $Manifest 'count')), $png.Count, $meta.Count)
+    if ($png.Count -lt 1) { return (New-CpFail 'E3' ("清单里发现不到 shots/*.png ⇒ 产物发现面不成立；$listed")) }
+    if ($meta.Count -lt 1) { return (New-CpFail 'E3' ("清单里发现不到 shots/*.meta.json ⇒ 产物发现面不成立；$listed")) }
+
+    $declaredPng = @($png | Where-Object { -not [string]::IsNullOrWhiteSpace([string](Get-CpProp $_ 'sha256')) })
+    $declaredMeta = @($meta | Where-Object { -not [string]::IsNullOrWhiteSpace([string](Get-CpProp $_ 'sha256')) })
+    if ($declaredPng.Count -eq 0 -or $declaredMeta.Count -eq 0) {
+        return (New-CpFail 'E3' ("清单**未声明** sha256（未覆盖哈希字段）⇒ 本判据不可判，如实记为「未覆盖」：png 声明 {0}/{1}、meta 声明 {2}/{3}；$listed" -f `
+                $declaredPng.Count, $png.Count, $declaredMeta.Count, $meta.Count))
+    }
+
+    $rows = New-Object System.Collections.ArrayList
+    $bad = New-Object System.Collections.ArrayList
+    $okPng = 0
+    $okMeta = 0
+    foreach ($dl in @($Downloads)) {
+        $p = [string](Get-CpProp $dl 'path')
+        $isPng = $p -match '^shots/[^/]+\.png$'
+        $isMeta = $p -match '^shots/[^/]+\.meta\.json$'
+        if (-not ($isPng -or $isMeta)) { continue }
+        $dec = [string](Get-CpProp $dl 'declaredSha256')
+        $act = [string](Get-CpProp $dl 'actualSha256')
+        $dlOk = ((Get-CpProp $dl 'downloadOk') -eq $true)
+        $decBytes = Get-CpProp $dl 'declaredBytes'
+        $actBytes = Get-CpProp $dl 'actualBytes'
+        $hashOk = $dlOk -and (-not [string]::IsNullOrWhiteSpace($act)) -and ($act.ToLowerInvariant() -eq $dec.ToLowerInvariant())
+        $bytesOk = ($null -ne $decBytes) -and ($null -ne $actBytes) -and ([long]$decBytes -eq [long]$actBytes)
+        $actShort = if ([string]::IsNullOrWhiteSpace($act)) { '(无)' } else { $act.Substring(0, [math]::Min(12, $act.Length)) + '…' }
+        $decShort = if ([string]::IsNullOrWhiteSpace($dec)) { '(无)' } else { $dec.Substring(0, [math]::Min(12, $dec.Length)) + '…' }
+        [void]$rows.Add(("{0}: 下载={1} 复算={2} 清单={3} 哈希一致={4} 字节 {5}/{6}" -f `
+                $p, $dlOk, $actShort, $decShort, $hashOk, (Format-CpValue $actBytes), (Format-CpValue $decBytes)))
+        if ($hashOk -and $bytesOk) {
+            if ($isPng) { $okPng++ } else { $okMeta++ }
+        } else {
+            [void]$bad.Add("$p（下载=$dlOk 哈希一致=$hashOk 字节一致=$bytesOk 复算=$(Format-CpValue $act) 清单=$(Format-CpValue $dec)）")
+        }
+    }
+    $missing = ($png.Count + $meta.Count) - $rows.Count
+    if ($missing -gt 0) { [void]$bad.Add("有 $missing 份 shots/*.png|*.meta.json 没有被下载复核（逐份比对不完整）") }
+    $table = ($rows | Select-Object -First 6) -join ' | '
+    $d = ("$listed；逐份比对 $($rows.Count) 份（PNG 一致 $okPng、meta 一致 $okMeta）：$table")
+    if ($bad.Count -gt 0) {
+        return (New-CpFail 'E3' (($bad -join '；') + "；$d"))
+    }
+    if ($okPng -lt 1 -or $okMeta -lt 1) {
+        return (New-CpFail 'E3' ("至少各需一条 PNG 与一条 meta 比对成功（实测 PNG $okPng / meta $okMeta）；$d"))
+    }
+    return (New-CpPass 'E3' ("清单可发现且逐份哈希复算全部一致（PNG $okPng 份、meta $okMeta 份）：$d"))
+}
+

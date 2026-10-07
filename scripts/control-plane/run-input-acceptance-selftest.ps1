@@ -329,6 +329,147 @@ Expect 'G1 没有步骤产物'        (Test-InputG1CaseRun -ValidationTrial $val
 Expect 'G1 case.run 因别的理由失败 ⇒ fail（不是 blocked）' (Test-InputG1CaseRun -ValidationTrial $valOk -RunTrial (New-FailedTrial 'g1-run' 'CP-EXEC-001' '世界重建失败') -HeldAfter $held0 -StepArtifacts @()) 'fail'
 
 # ---------------------------------------------------------------------------
+# Stage extra 的夹具（E1/E2/E3）
+# ---------------------------------------------------------------------------
+# E2 的「投递前后状态」夹具：除易变字段（tick/墙钟/ping/控制面记账）外逐字相同
+function New-E2State {
+    param([double]$X = 64.5, [long]$TotalTime = 1000, [int]$Ping = 12, [int]$JobCount = 7, [int]$EventSeq = 99, [int]$Buffered = 3)
+    return [pscustomobject]@{
+        player = [pscustomobject]@{
+            name = 'Dev'; pos = @($X, 13.0, 64.5); health = 20.0; fallDistance = 0.0
+            game   = [pscustomobject]@{ isFlying = $true; allowFlying = $true; gameType = 'creative' }
+            effects = @(); ping = $Ping
+        }
+        status = [pscustomobject]@{
+            world  = [pscustomobject]@{ folder = 'cp_input_live'; loaded = $true; managed = $true; totalTime = $TotalTime }
+            busy   = $false
+            jobs   = [pscustomobject]@{ count = $JobCount; lastSeq = 42; recent = @('a', 'b') }
+            events = [pscustomobject]@{ lastSeq = $EventSeq; buffered = $Buffered; capacity = 512 }
+        }
+    }
+}
+function New-E2FillArtifacts {
+    param([int]$Steps = 300, [int]$BaseTick = 5000, [int]$Depth = 2, [int]$CapacityDepthAt = -1, [int]$CapacityDepth = 256)
+    $list = New-Object System.Collections.ArrayList
+    for ($i = 0; $i -lt $Steps; $i++) {
+        $d = $Depth
+        if ($CapacityDepthAt -ge 0 -and $i -eq $CapacityDepthAt) { $d = $CapacityDepth }
+        [void]$list.Add([pscustomobject]@{ action = 'input.key'; delivered = 1; deliveredAtTick = ($BaseTick + $i); queueDepthAfter = $d; __artifact = "action/$i-fill.json" })
+    }
+    return @($list)
+}
+function New-E3Artifact([string]$Path, [long]$Bytes, [string]$Sha, [string]$Role = 'shot') {
+    return [pscustomobject]@{ path = $Path; bytes = $Bytes; sha256 = $Sha; role = $Role }
+}
+function New-E3Download([string]$Path, [string]$DeclaredSha, [long]$DeclaredBytes, [string]$ActualSha, [long]$ActualBytes, [bool]$DownloadOk = $true) {
+    return [pscustomobject]@{ path = $Path; declaredSha256 = $DeclaredSha; declaredBytes = $DeclaredBytes; actualSha256 = $ActualSha; actualBytes = $ActualBytes; downloadOk = $DownloadOk }
+}
+# 保持期间的 input.state（E1.readback 夹具）
+function New-HoldStateResult {
+    param($SneakPressed = $true, $ForwardPressed = $false, [switch]$DropForward, [switch]$DropField)
+    $items = New-Object System.Collections.ArrayList
+    $sneak = [pscustomobject]@{ kind = 'key'; id = 'key.sneak'; keyCode = 42; jobId = 'j-sneak'; heldTicks = 12; expiresInTicks = 1188 }
+    if (-not $DropField) { $sneak | Add-Member -NotePropertyName gameBindingPressed -NotePropertyValue $SneakPressed -Force }
+    [void]$items.Add($sneak)
+    if (-not $DropForward) {
+        $fwd = [pscustomobject]@{ kind = 'key'; id = 'key.forward'; keyCode = 17; jobId = 'j-fwd'; heldTicks = 10; expiresInTicks = 1190 }
+        $fwd | Add-Member -NotePropertyName gameBindingPressed -NotePropertyValue $ForwardPressed -Force
+        [void]$items.Add($fwd)
+    }
+    return [pscustomobject]@{ implemented = $true; held = [pscustomobject]@{ count = @($items).Count; items = @($items) } }
+}
+
+Write-Host '-- E1 组合键（潜行修饰）' -ForegroundColor DarkCyan
+$e1PlainA = @(64.5, 13.0, 64.5); $e1PlainB = @(76.5, 13.0, 64.5)   # 60 tick 走 12.0 ⇒ 0.20/tick
+$e1SneakB = @(68.1, 13.0, 64.5)                                    # 60 tick 走 3.6 ⇒ 0.06/tick（比值 0.30）
+Expect 'E1 潜行使位移下降到 0.30 倍 ⇒ pass' (Test-InputE1SneakModifier -PlainPosA $e1PlainA -PlainPosB $e1PlainB -PlainTicks 60 -SneakPosA $e1PlainA -SneakPosB $e1SneakB -SneakTicks 60) 'pass'
+# 负对照（**必须真变红**）：潜行无效 ⇒ 两边每 tick 位移相当
+Expect 'E1 负对照：潜行无效（比值 0.99）⇒ fail' (Test-InputE1SneakModifier -PlainPosA $e1PlainA -PlainPosB $e1PlainB -PlainTicks 60 -SneakPosA $e1PlainA -SneakPosB @(76.4, 13.0, 64.5) -SneakTicks 60) 'fail'
+# 判界就在 0.6 上：0.60 倍不许算过
+Expect 'E1 恰在判界上（比值 0.60）⇒ fail' (Test-InputE1SneakModifier -PlainPosA $e1PlainA -PlainPosB $e1PlainB -PlainTicks 60 -SneakPosA $e1PlainA -SneakPosB @(71.7, 13.0, 64.5) -SneakTicks 60) 'fail'
+# 对照不成立（只按前进也没动）⇒ fail（不许因为「两边都没动」判绿）
+Expect 'E1 对照不成立（对照也几乎不动）⇒ fail' (Test-InputE1SneakModifier -PlainPosA @(64.5, 13.0, 64.5) -PlainPosB @(64.6, 13.0, 64.5) -PlainTicks 60 -SneakPosA @(64.5, 13.0, 64.5) -SneakPosB @(64.5, 13.0, 64.5) -SneakTicks 60) 'fail'
+Expect 'E1 坐标不可解析 ⇒ fail' (Test-InputE1SneakModifier -PlainPosA $null -PlainPosB $e1PlainB -PlainTicks 60 -SneakPosA $e1PlainA -SneakPosB $e1SneakB -SneakTicks 60) 'fail'
+Expect 'E1 tick 增量为 0 ⇒ fail' (Test-InputE1SneakModifier -PlainPosA $e1PlainA -PlainPosB $e1PlainB -PlainTicks 0 -SneakPosA $e1PlainA -SneakPosB $e1SneakB -SneakTicks 60) 'fail'
+
+Write-Host '-- E1.readback held[].gameBindingPressed' -ForegroundColor DarkCyan
+Expect 'E1.readback 两键都在且带回读字段' (Test-InputE1SneakReadback -HoldTrial (New-DoneTrial 'hold' (New-HoldStateResult -SneakPressed $true -ForwardPressed $true))) 'pass'
+Expect 'E1.readback 回读为 false（如实，不判红）' (Test-InputE1SneakReadback -HoldTrial (New-DoneTrial 'hold' (New-HoldStateResult -SneakPressed $false -ForwardPressed $false))) 'pass'
+Expect 'E1.readback 缺 gameBindingPressed 字段 ⇒ fail' (Test-InputE1SneakReadback -HoldTrial (New-DoneTrial 'hold' (New-HoldStateResult -DropField))) 'fail'
+Expect 'E1.readback 少了 forward 条目 ⇒ fail' (Test-InputE1SneakReadback -HoldTrial (New-DoneTrial 'hold' (New-HoldStateResult -DropForward))) 'fail'
+Expect 'E1.readback input.state 调用失败 ⇒ fail' (Test-InputE1SneakReadback -HoldTrial (New-FailedTrial 'hold' 'CP-STATE-001' '运行时未装配')) 'fail'
+
+Write-Host '-- E2 队列满（三条分支 + 负对照）' -ForegroundColor DarkCyan
+$e2ValOk = New-DoneTrial 'e2-validate' ([pscustomobject]@{ valid = $true })
+$e2RunOk = New-DoneTrial 'e2-run' ([pscustomobject]@{ overall = 'green' })
+$e2Before = New-E2State -TotalTime 1000 -Ping 12 -JobCount 7 -EventSeq 99 -Buffered 3
+$e2After = New-E2State -TotalTime 1300 -Ping 25 -JobCount 10 -EventSeq 105 -Buffered 1
+Expect 'E2 300 步 ≫ 容量但深度只到 2 ⇒ blocked（不是 pass）' (Test-InputE2QueueFullSingleJob -ValidateTrial $e2ValOk -RunTrial $e2RunOk -BeforeState $e2Before -AfterState $e2After -StepArtifacts (New-E2FillArtifacts -Steps 300 -Depth 2) -PlannedSteps 300) 'blocked'
+Expect 'E2 深度确实到过容量却仍投递成功 ⇒ fail' (Test-InputE2QueueFullSingleJob -ValidateTrial $e2ValOk -RunTrial $e2RunOk -BeforeState $e2Before -AfterState $e2After -StepArtifacts (New-E2FillArtifacts -Steps 300 -Depth 2 -CapacityDepthAt 250 -CapacityDepth 256) -PlannedSteps 300) 'fail'
+$e2Rejected = New-FailedTrial 'e2-run' 'CP-STATE-001' '键盘事件队列已满，拒绝投递（不做静默丢弃）'
+Expect 'E2 命中 CP-STATE-001 且零写入 ⇒ pass' (Test-InputE2QueueFullSingleJob -ValidateTrial $e2ValOk -RunTrial $e2Rejected -BeforeState $e2Before -AfterState $e2After -StepArtifacts @() -PlannedSteps 300) 'pass'
+# 负对照（**必须真变红**）：拒绝码对了，但前后状态有真实写入（玩家动了）
+Expect 'E2 负对照：命中 CP-STATE-001 但有真实写入 ⇒ fail' (Test-InputE2QueueFullSingleJob -ValidateTrial $e2ValOk -RunTrial $e2Rejected -BeforeState $e2Before -AfterState (New-E2State -X 66.5 -TotalTime 1300 -Ping 25 -JobCount 10 -EventSeq 105 -Buffered 1) -StepArtifacts @() -PlannedSteps 300) 'fail'
+Expect 'E2 用例未通过校验 ⇒ blocked' (Test-InputE2QueueFullSingleJob -ValidateTrial (New-FailedTrial 'e2-validate' 'CP-VALID-002' 'action[0].key 未知字段') -RunTrial $e2RunOk -BeforeState $e2Before -AfterState $e2After -StepArtifacts @() -PlannedSteps 300) 'blocked'
+Expect 'E2 因别的错误码失败 ⇒ fail（不是 blocked）' (Test-InputE2QueueFullSingleJob -ValidateTrial $e2ValOk -RunTrial (New-FailedTrial 'e2-run' 'CP-EXEC-002' '步进超时') -BeforeState $e2Before -AfterState $e2After -StepArtifacts @() -PlannedSteps 300) 'fail'
+# 状态比对的**口径**本身：易变字段必须被排除，真实差异必须被抓到
+$cmpClean = Compare-CpStateModuloVolatile -Before $e2Before -After $e2After
+Check 'E2 口径：易变字段被显式排除后差异为 0' ($cmpClean.diffs.Count -eq 0) ("diffs={0} skipped={1}（{2}）" -f $cmpClean.diffs.Count, $cmpClean.skipped.Count, (($cmpClean.skipped | Select-Object -First 3) -join '; '))
+$cmpDirty = Compare-CpStateModuloVolatile -Before $e2Before -After (New-E2State -X 66.5 -TotalTime 1300 -Ping 25 -JobCount 10 -EventSeq 105 -Buffered 1)
+Check 'E2 口径：真实位移差异被逐路径抓到' ($cmpDirty.diffs.Count -gt 0) ("diffs={0}: {1}" -f $cmpDirty.diffs.Count, (($cmpDirty.diffs | Select-Object -First 3) -join ' | '))
+
+# 填充键位门：填充键必须是**未绑定**键码（否则「事件被消费也不写世界」的前提不可辩护）
+$e2PickOk = New-DoneTrial 'e2-pick' (New-StateResult)
+$e2Cat = [pscustomobject]@{ 'key.forward' = 17; 'key.sneak' = 42; 'key.jump' = 57 }
+Expect 'E2 填充键位门：未绑定键码 87 ⇒ 不因键位原因红' (Test-InputE2QueueFullSingleJob -ValidateTrial $e2ValOk -RunTrial $e2RunOk -BeforeState $e2Before -AfterState $e2After -StepArtifacts (New-E2FillArtifacts -Steps 300 -Depth 2) -PlannedSteps 300 -FillerTrial $e2PickOk -FillerCatalog $e2Cat -FillerCode 87) 'blocked'
+Expect 'E2 负对照：填充键码已被 KeyBinding 占用 ⇒ fail' (Test-InputE2QueueFullSingleJob -ValidateTrial $e2ValOk -RunTrial $e2RunOk -BeforeState $e2Before -AfterState $e2After -StepArtifacts (New-E2FillArtifacts -Steps 300 -Depth 2) -PlannedSteps 300 -FillerTrial $e2PickOk -FillerCatalog $e2Cat -FillerCode 17) 'fail'
+Expect 'E2 填充键位门：找不到未绑定键码 ⇒ blocked' (Test-InputE2QueueFullSingleJob -ValidateTrial $null -RunTrial $null -BeforeState $null -AfterState $null -StepArtifacts @() -PlannedSteps 300 -FillerTrial $e2PickOk -FillerCatalog $e2Cat -FillerCode -1) 'blocked'
+Expect 'E2 填充键位门：keyCatalog 为空 ⇒ blocked（未绑定不可判）' (Test-InputE2QueueFullSingleJob -ValidateTrial $null -RunTrial $null -BeforeState $null -AfterState $null -StepArtifacts @() -PlannedSteps 300 -FillerTrial $e2PickOk -FillerCatalog ([pscustomobject]@{}) -FillerCode 87) 'blocked'
+Expect 'E2 填充键位门：input.state 取不到 ⇒ blocked' (Test-InputE2QueueFullSingleJob -ValidateTrial $null -RunTrial $null -BeforeState $null -AfterState $null -StepArtifacts @() -PlannedSteps 300 -FillerTrial (New-FailedTrial 'e2-pick' 'CP-STATE-001' '未装配') -FillerCatalog $null -FillerCode -1) 'blocked'
+
+Write-Host '-- E3 产物发现与哈希复核' -ForegroundColor DarkCyan
+$e3ShaPng = 'a' * 64
+$e3ShaMeta = 'b' * 64
+$e3Manifest = [pscustomobject]@{
+    runId = '20261008-120000-shot-e3'; caseId = 'shot'; jobSeq = 12; createdAt = '2026-10-08T12:00:00Z'
+    count = 3
+    artifacts = @(
+        (New-E3Artifact 'shots/gui-live.png' 20480 $e3ShaPng 'shot'),
+        (New-E3Artifact 'shots/gui-live.meta.json' 1024 $e3ShaMeta 'shot-meta'),
+        (New-E3Artifact 'manifest.json' 512 ('c' * 64) 'manifest')
+    )
+}
+$e3DlOk = @(
+    (New-E3Download 'shots/gui-live.png' $e3ShaPng 20480 $e3ShaPng 20480),
+    (New-E3Download 'shots/gui-live.meta.json' $e3ShaMeta 1024 $e3ShaMeta 1024)
+)
+Expect 'E3 清单可发现且逐份哈希一致 ⇒ pass' (Test-InputE3ArtifactHashes -Manifest $e3Manifest -Downloads $e3DlOk) 'pass'
+# 负对照（**必须真变红**）：下载字节与清单哈希不符
+$e3DlBad = @(
+    (New-E3Download 'shots/gui-live.png' $e3ShaPng 20480 ('d' * 64) 20480),
+    (New-E3Download 'shots/gui-live.meta.json' $e3ShaMeta 1024 $e3ShaMeta 1024)
+)
+Expect 'E3 负对照：哈希不符 ⇒ fail' (Test-InputE3ArtifactHashes -Manifest $e3Manifest -Downloads $e3DlBad) 'fail'
+Expect 'E3 字节数不符 ⇒ fail' (Test-InputE3ArtifactHashes -Manifest $e3Manifest -Downloads @((New-E3Download 'shots/gui-live.png' $e3ShaPng 20480 $e3ShaPng 20000), $e3DlOk[1])) 'fail'
+Expect 'E3 下载失败 ⇒ fail' (Test-InputE3ArtifactHashes -Manifest $e3Manifest -Downloads @((New-E3Download 'shots/gui-live.png' $e3ShaPng 20480 '' 0 $false), $e3DlOk[1])) 'fail'
+Expect 'E3 未下载全（逐份比对不完整）⇒ fail' (Test-InputE3ArtifactHashes -Manifest $e3Manifest -Downloads @($e3DlOk[0])) 'fail'
+$e3NoHash = [pscustomobject]@{ runId = 'r1'; count = 2; artifacts = @(
+        (New-E3Artifact 'shots/a.png' 10 $null 'shot'),
+        (New-E3Artifact 'shots/a.meta.json' 10 '' 'shot-meta')) }
+Expect 'E3 清单未声明 sha256 ⇒ fail（如实记「未覆盖」）' (Test-InputE3ArtifactHashes -Manifest $e3NoHash -Downloads @()) 'fail'
+$e3NoPng = [pscustomobject]@{ runId = 'r1'; count = 1; artifacts = @((New-E3Artifact 'shots/a.meta.json' 10 $e3ShaMeta 'shot-meta')) }
+Expect 'E3 清单里没有 PNG ⇒ fail' (Test-InputE3ArtifactHashes -Manifest $e3NoPng -Downloads @()) 'fail'
+$e3NoMeta = [pscustomobject]@{ runId = 'r1'; count = 1; artifacts = @((New-E3Artifact 'shots/a.png' 10 $e3ShaPng 'shot')) }
+Expect 'E3 清单里没有 meta.json ⇒ fail' (Test-InputE3ArtifactHashes -Manifest $e3NoMeta -Downloads @()) 'fail'
+Expect 'E3 清单读不到 ⇒ fail' (Test-InputE3ArtifactHashes -Manifest $null -Downloads @()) 'fail'
+# 只看 shots/ 下的产物：tiles 子目录与它目录的产物不参与本判据
+$e3Tiles = [pscustomobject]@{ runId = 'r1'; count = 3; artifacts = @(
+        (New-E3Artifact 'shots/a.png' 10 $e3ShaPng 'shot'),
+        (New-E3Artifact 'shots/a.meta.json' 10 $e3ShaMeta 'shot-meta'),
+        (New-E3Artifact 'shots/a.tiles/r0c0.png' 10 ('e' * 64) 'shot-tile')) }
+Expect 'E3 tiles 子目录不干扰（仍 pass）' (Test-InputE3ArtifactHashes -Manifest $e3Tiles -Downloads $e3DlOk) 'pass'
+
+# ---------------------------------------------------------------------------
 # 归档 + 红绿表
 # ---------------------------------------------------------------------------
 $failed = @($script:results | Where-Object { -not $_.ok })

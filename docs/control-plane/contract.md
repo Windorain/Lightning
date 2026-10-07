@@ -213,7 +213,7 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 
 | 动作 | 级 | 语义 |
 |---|---|---|
-| `shot.multi` | forensic | 多机位截图：参数 `{cameras:[CameraSpec], target?:bbox, lighting?:natural\|neutral-flat, renderMode?:本色\|参与光照, worldTime?}`。每机位产 `shots/<name>.png`（拼接机位另产 `shots/<name>.tiles/` 与 `shots/<name>.meta.json`），全部产物登记哈希；观测记录按机位更新 camera/projection/lighting/renderMode |
+| `shot.multi` | forensic | 多机位截图：参数 `{cameras:[CameraSpec], target?:bbox, lighting?:natural\|neutral-flat, renderMode?:本色\|参与光照, worldTime?, gui?:"none"\|"screen"}`。每机位产 `shots/<name>.png`（拼接机位另产 `shots/<name>.tiles/` 与 `shots/<name>.meta.json`），全部产物登记哈希；观测记录按机位更新 camera/projection/lighting/renderMode。**`gui`（v1.8 起，Gitea #164）**：缺省 `"none"` = 不拍 GUI（只拍世界，返回 `guiHidden:true`）；`"screen"` = 拍**真实 framebuffer GUI 画面**（返回 `guiHidden:false`，并在 `guiCapture[]` 里登记产物）。该参数是**字符串**、不是布尔：取值域外（含布尔、数字、对象）一律 `CP-VALID-002`——它曾因 gson `JsonPrimitive` 被当 `String` 而**从未真正可用**（#193），故此处显式写明口径 |
 | `capture.begin` / `capture.end` | forensic | 捕获会话包围：begin 后禁止一切世界写动作（违规 CP-STATE-001），end 释放；`case.run` 的 capture 段自动包围 build 之后、shots 之前的区间 |
 
 ### 4.3 相机与渲染规则（PR-2，#41 落地）
@@ -464,6 +464,15 @@ run 由**发起方**（`cmd.exec`）持有，落点由它给出（§4.7.2-B 的�
 **范围外（裁决 3）**：**GUI 内非槽位按钮点击**（机器模式按钮、JEI 面板等）**不在本任务范围**。
 `player.gui` 只负责开/关，槽位收放由 `player.slot_click` 负责；按钮点击若 F2 教程样本实际需要，
 当场切独立单子，不混入。
+
+> **【重裁，2026-10-08，Gitea #166】** 上面这条是**对 L1 `player.*` 这一组的范围裁剪**，
+> **不是平台能力结论**：它成立的唯一理由是「本组没有输入手段」，而该理由已随**通用输入族**
+> （`input.mouse` 的绝对 GUI 坐标 `move` + `click`，见 §4.12）消失 ⇒
+> **该「范围外」不再约束通用输入**。但两句限制仍然成立，且必须分开陈述：
+> ① **能定位并投递点击 ≠ 命中 MUI widget**——GUI 命中集**每帧重建**，`move` 后须等 ≥2 tick（§4.12、`input-contract.md` §2.3/§2.4）；
+> ② **命中 ≠ 业务后果发生**——后者必须由实机判据给出，不得由「注入成功」推定。
+> 因此**本组（`player.*`）的裁剪保持不变**（仍然只有这九个动作、仍然不做按钮点击），
+> GUI 按钮点击改由通用输入族承载；本条不放宽任何既有判据。
 
 **平台边界（如实记录，不掩盖）**：L1 的动作在**客户端 tick 线程**执行，
 包经集成服的本地 netty `LocalChannel` 送达；服务端在**它自己线程的 tick** 里处理
@@ -808,7 +817,7 @@ L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**�
 - 破坏变更开 `/cp/v2`，旧版本至少保留一个里程碑周期。
 - 每个动作描述含 `since`（引入的契约小版本，如 `1.0`）；`GET /cp/v1/about` 报 `contractVersion`。
 - **变更记录（Gitea #104，「收口T7」）：`probeActive` / `probe` 的语义变更（显式例外，需评审确认）**
-  - **形状不变**：字段名、类型、位置与 `core.ping` / `core.status` / `about` 的返回结构一字未动，故 `contractVersion` **不升**（仍 1.7）。
+  - **形状不变**：字段名、类型、位置与 `core.ping` / `core.status` / `about` 的返回结构一字未动，故 `contractVersion` **不升**（**当时**为 1.7；当前版本是 **1.8**，由 #165 的输入手段族引入——见 §4 的版本沿革与会话 `about` 的实读）。
   - **语义变更**：`probeActive` 旧义 = 「老触发文件自动化链是否激活」；新义 = 「**控制面自身忙闲**」（有作业在队/在跑）。`probe` 旧义 = 激活中的老探针名；新义 = **恒为 `null`**。
   - **为什么必须变**：老一代批处理设施（10 个自动化入口 + `client/automation/SdeClientAutomationTickHandler` 接管链 + 9 个触发文件 + 5 个专用世界目录）已随 #104 **整体删除** ⇒ 旧义的真值来源不复存在，字段若维持旧义就恒为 `false`/`null`，成为一个只会误导调用方的空字段。
   - **规则冲突的如实登记**：本节上文写「v1 内不得改已有字段语义」。#104 的裁决者（Gitea #104 最新裁决评论，V7）明确选择「保留字段、改语义」，理由是删字段同样是破坏性变更且 `CP-BUSY-001` 口径仍需要这个字段。**本例外是显式登记的，不是漏改**；若评审认为必须严守 v1 语义冻结，则唯一合规做法是开 `/cp/v2`（成本远高于收益，因为旧义已无真值来源）。自述（`GET /cp/v1/actions` 的 `core.ping` / `core.status` 描述）已同步写明新义与「老探针设施已随 #104 删除」。
