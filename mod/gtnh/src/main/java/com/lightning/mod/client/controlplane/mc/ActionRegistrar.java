@@ -341,14 +341,18 @@ public final class ActionRegistrar {
                         + "**产物归属**：只落本 run 目录的 export/ 下并登记 sha256（裁决 6 单一归属）——"
                         + "工作台 ExportsListPanel 读的 structure_exports/ 看不到它，"
                         + "请用结果的 downloadPath 下载后喂解析器（C1 口径）。"
-                        + "**⚠ 烘焙前置（Gitea #127，必读）**：几何烘焙发生在**导出这一刻**，逐格回查"
-                        + "**当前活动世界**（`MeshCaptureService.finalizeSingleStructure`），取到空气即静默丢块；"
-                        + "而 `provenance.frameSha256` 是**缓冲内 scan 文本**的哈希 ⇒ **内容变了哈希也不变**。"
-                        + "因此「录制后改动世界 / 跨世界导出 / 录制与导出之间世界漂移」会得到内容不忠实的产物，"
-                        + "且 C2/C3 判据对该失真**全绿**。要求：**帧必须在录制时所在世界内、且世界未被改动时导出**"
-                        + "（`case.run` 的 world/export 段同 run 即是这条纪律的载体）；"
-                        + "详见 `docs/contracts/format-scene-file.md` §6.2。显式校验（记 world folder+维度并比对）"
-                        + "与按帧快照烘焙由 #127 承接，落地前不得把导出件当作「录制时刻世界状态」的证据。")
+                        + "**录制世界纪律（Gitea #127，已从「前置声明」升级为「显式校验 + 按扫描身份烘焙」）**："
+                        + "① 录制时把「所在世界（存档目录名 folder + 维度）」记进帧（`captureWorld`），"
+                        + "`onBegin` 在**开 run 之前**与导出时刻的活动世界比对，不符即 CP-STATE-001"
+                        + "（带 expected/actual/hint，**不写任何产物**）；"
+                        + "② 几何烘焙逐格以**扫描身份**（`cellTypes[ti]` 的 registryId/meta/NBT）决定「保留哪些格、"
+                        + "用什么身份渲染」，活动世界该坐标与扫描身份冲突（另一个非空气方块）即显式失败——"
+                        + "既不静默丢块、也不静默换块；"
+                        + "③ 每帧录制世界身份同时写进 `provenance.captureWorld` 与结果 `captureWorld`，"
+                        + "「这份产物是哪个世界录的」机读可判定。"
+                        + "因此「录制后世界被改动」不再产生内容失真的产物：该格按录制内容忠实还原，"
+                        + "而 `provenance.frameSha256`（缓冲内 scan 文本的哈希）与落盘内容首次同源可验。"
+                        + "详见 `docs/contracts/format-scene-file.md` §6.2。")
                 .optional(
                     "name",
                     ActionDescriptor.TYPE_STRING,
@@ -357,7 +361,8 @@ public final class ActionRegistrar {
                     "frames",
                     ActionDescriptor.TYPE_STRING,
                     "all",
-                    "导出哪些帧：\"all\"（默认，缓冲内全部）| \"active\"（只导活动帧）| [int...]（显式帧号清单，须都在缓冲内）。"
+                    "导出哪些帧：\"all\"（默认，缓冲内全部）| \"active\"（只导活动帧）| [int...]（显式帧号清单，须都在缓冲内；"
+                        + "元素必须是**精确整数**，1.5 这类小数报 CP-VALID-002 而不是被截断，见契约 §2.1）。"
                         + "注意：帧号非 0 的单帧在旧实现里会走多帧文档分支，本动作默认形态恒 world，故不存在该隐式分叉")
                 .optional(
                     "shape",
@@ -413,8 +418,10 @@ public final class ActionRegistrar {
                     "{schema, contractVersion, action, runId, exportId, name, shape, raw, frames, frameIndexes[], "
                         + "bytes, sha256, path, role, includeFrames, frameArtifacts[{index,path,bytes,sha256,sourceSha256}], "
                         + "frameArtifactCount, bufferGeneration, frameSha256{<index>:<sha256>}, selection{...}, "
+                        + "captureWorld{folder,dimension}, "
                         + "volumePerFrame, volumeTotal, keepBuffer, envelope(Envelope|Plain), downloadPath}。"
-                        + "失败时抛：帧缓冲为空/选区不完整 CP-STATE-001、expectFrames 不符 CP-STATE-001、"
+                        + "失败时抛：帧缓冲为空/选区不完整/录制世界与导出世界不符/选中帧来自不同世界 CP-STATE-001、"
+                        + "expectFrames 不符 CP-STATE-001、烘焙遇世界身份冲突（扫描身份 vs 活动世界）CP-STATE-001、"
                         + "预算超限 CP-VALID-002（context.fields + computed 口径）、无世界 CP-STATE-001")
                 .example("{\"confirm\":true}")
                 .example("{\"name\":\"demo\",\"shape\":\"world\",\"includeFrames\":true,\"confirm\":true}")

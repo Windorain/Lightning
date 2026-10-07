@@ -18,6 +18,7 @@ import com.google.gson.JsonPrimitive;
 import com.lightning.mod.core.export.PackVersionProbe;
 import com.lightning.mod.core.sampling.IBlockSampler;
 import com.lightning.mod.core.sampling.VoxelSample;
+import com.lightning.mod.core.session.CaptureWorldIdentity;
 
 /**
  * 选区扫描 → 中间态（{@code geometryPhase=scan}）：仅逻辑 {@code cellTypes}、{@code cellGrid}、
@@ -77,6 +78,16 @@ public final class StructureScan {
         JsonObject src = new JsonObject();
         src.addProperty("note", "StructureDataExporter scan");
         root.add("source", src);
+
+        // Gitea #127 第 2 条：在**录制时刻**记下「这帧是哪个世界录的」（存档目录名 + 维度）。
+        // 几何烘焙发生在导出那一刻，改造前逐格回查当前活动世界 ⇒ 跨世界/事后导出会静默丢块而
+        // provenance.frameSha256（缓冲内 scan 文本的哈希）一字不变。记下身份后，export.scene 可以在
+        // 烘焙之前显式比对并在不一致时报 CP-STATE-001（不写任何产物）。
+        // 解析不出目录名时也照写（folder:null）——「不可校验」本身是事实，导出侧会显式拒绝而不是放行。
+        CaptureWorldIdentity captureWorld = CaptureWorldIdentity.ofWorld(world);
+        if (captureWorld != null) {
+            root.add(CaptureWorldIdentity.FIELD, captureWorld.toJson());
+        }
 
         JsonArray cellTypes = new JsonArray();
         for (VoxelSample s : paletteList) {

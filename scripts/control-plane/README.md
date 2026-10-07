@@ -33,6 +33,8 @@
 | `inspect-artifact.mjs` | **v1.7（#102）** 诊断：打印产物形态（顶层/inner 键、帧结构、调色板层级、provenance 配对） |
 | `evidence-catalog.mjs` | **v1.7（#102）** 证据快照：把 `GET /cp/v1/actions` 的全量自述落成 JSON（D1/D3 的静态可复核证据） |
 | `cases/export-c4.json` | **v1.7（#102）** C4 同 run 纪律用例：`export` 段把导出件与实拍/观测/世界清单放进**同一个 run** |
+| `caller-defaults.test.mjs` | **v1.7（#126）** 调用器缺省口径回归（`node:test`，离线零依赖）：缺省不物化、显式 `false`/`0`/`null`/`""` 原样保留 |
+| `bake-truth-acceptance.mjs` | **v1.7（#127 + #131）** 实机验收驱动：烘焙忠实性（同世界正对照 / 跨世界负对照 / 同 folder 改内容 / 同坐标换块）+ `TYPE_INT` 实机回归；先证明 `pauseOnLostFocus:false` 再谈其他 |
 
 脚本只做**编排与调用**：控制面本体在 `mod/gtnh/src/main/java/com/lightning/mod/client/controlplane/`。
 脚本不直接 POST 裸请求——一切动作调用都经 `caller.mjs`（自描述驱动），便于审计「调用方是否真的读了自描述」。
@@ -81,11 +83,15 @@ node caller.mjs <actionName> [paramsJson] [options]
 
 1. 动作必须存在于自描述里，否则本地报错退出（不发出请求）；
 2. 必填参数缺失 → 本地报错并列出该动作的完整参数表；
-3. 未提供的选填参数按自描述的 `default` 补齐；
-4. 参数名不在自描述里 → 本地报错（`--allow-unknown-params` 可直传）；
-5. `confirm` 由**权限级**派生（`confirmRequired` / `tier` ∈ {scene, forensic}），不是动作私有知识；
-6. 动作的知识（名称/参数/类型/必填/默认/权限级/是否需确认）**全部**来自 `GET /cp/v1/actions`；
+3. **未提供的选填参数不写进请求体**（交给服务端缺省逻辑；Gitea #126 之前会按自描述 `default` 代填，
+   那会让「调用方没给」与「调用方给的就是默认值」不可分，把「缺省取决于调用形态」的参数架空）；
+4. 调用方显式给的值原样保留（`false` / `0` / `null` / `""` 都不做 falsy 判断）；
+5. 参数名不在自描述里 → 本地报错（`--allow-unknown-params` 可直传）；
+6. `confirm` 由**权限级**派生（`confirmRequired` / `tier` ∈ {scene, forensic}），不是动作私有知识；
+7. 动作的知识（名称/参数/类型/必填/默认/权限级/是否需确认）**全部**来自 `GET /cp/v1/actions`；
    脚本里唯一的非自描述常量是契约级控制字段（`confirm`/`sync`/`timeoutMs`）与信封形态 `{ok,data|error}`。
+
+> 缺省口径的回归：`node scripts/control-plane/caller-defaults.test.mjs`（三态可区分：缺省 / 显式值 / 显式 `false`）。
 
 **退出码**：`0` = 作业 `done`；`1` = 调用错误（HTTP 4xx/5xx、本地用法错误、动作不存在）；
 `2` = 作业 `failed`；`3` = 超时（作业仍在跑，未取消）。
@@ -225,6 +231,8 @@ pwsh -File scripts/control-plane/run-smoke.ps1 -CaseFile <path>                 
 | `node --check caller.mjs` | 通过 |
 | `pwsh` 解析检查（`[Parser]::ParseFile`） | 通过 |
 | `caller.mjs` × 契约替身（自描述驱动、默认值补齐、自动 confirm、异步轮询、同步超时转轮询、错误信封、退出码 0/1/2/3） | 全部符合约定 |
+| `caller-defaults.test.mjs`（#126） | `node:test` 9/9 通过（缺省不写入请求体、显式 false/0/null/"" 原样保留、JSON 往返不变、缺必填/未声明参数仍报错） |
+| `bake-truth-acceptance.mjs` | `node --check` 通过；前置（`pauseOnLostFocus:false`）不满足时 exit 2 且不进入任何步骤（离线可验） |
 | `cases/smoke-basic.json` × 仓内真实 `CaseValidator.validate` | `VALID`，`warnings=[]`，判据/变体/坐标规范化符合预期 |
 | `run-smoke.ps1` × 行为替身（A1..A9 全绿；负对照恒绿 → A8 红；端口不在听 → 退出 4） | 全绿退出 0 / 红退出 2 / 前置失败退出 4 |
 

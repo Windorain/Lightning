@@ -37,6 +37,9 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import com.lightning.mod.client.controlplane.core.CpException;
+import com.lightning.mod.client.controlplane.core.ErrorCodes;
+import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.export.BlockThumbnailRenderer;
 import com.lightning.mod.client.export.ExportTextureLocator;
 import com.lightning.mod.client.export.MaterialAnimationJson;
@@ -56,6 +59,7 @@ import com.lightning.mod.client.meshcapture.postrender.MeshCaptureBlockPostRende
 import com.lightning.mod.client.meshcapture.primary.BlockPrimaryCaptureContext;
 import com.lightning.mod.client.meshcapture.primary.BlockPrimaryCaptureRegistry;
 import com.lightning.mod.core.sampling.VoxelSample;
+import com.lightning.mod.core.session.ScanCellResolution;
 import com.lightning.mod.core.session.SdeCellCoords;
 import com.lightning.mod.mixin.interfaces.accessors.TextureMapAccessor;
 
@@ -531,6 +535,10 @@ public final class MeshCaptureService {
         Map<Integer, List<String>> tooltipForFinal = new HashMap<>();
         int nextFinal = 1;
         int[][][] remapped = new int[sizeZ][sizeRow][sizeCol];
+        // #127：活动世界该格已是空气、但扫描身份有块的格数（= 「世界在录制后被改动」的显式计数）。
+        // 它不改变产物语义（仍按扫描身份保留），只是把「这次导出发生过世界漂移」写进日志，
+        // 让「产物按录制内容忠实还原」这件事可观察，而不是静默发生。
+        int worldChangedCells = 0;
 
         for (int zi = 0; zi < sizeZ; zi++) {
             for (int ri = 0; ri < sizeRow; ri++) {
@@ -540,19 +548,100 @@ public final class MeshCaptureService {
                         remapped[zi][ri][ci] = 0;
                         continue;
                     }
+                    if (ti < 0 || ti >= cellTypes.length) {
+                        throw new CpException(
+                            ErrorCodes.STATE,
+                            "扫描身份越界：cellGrid[" + zi
+                                + "]["
+                                + ri
+                                + "]["
+                                + ci
+                                + "]="
+                                + ti
+                                + " 不在 cellTypes[0.."
+                                + (cellTypes.length - 1)
+                                + "] 之内（帧数据坏了）",
+                            Json.object(
+                                "action",
+                                "export.scene",
+                                "stage",
+                                "bake",
+                                "index",
+                                Integer.valueOf(ti),
+                                "cellTypesSize",
+                                Integer.valueOf(cellTypes.length),
+                                "hint",
+                                "该帧的 cellGrid/cellTypes 不自洽；请重新 record（不要手工拼帧）"));
+                    }
                     VoxelSample vs = cellTypes[ti];
                     int wx = worldCoords[zi][ri][ci][0];
                     int wy = worldCoords[zi][ri][ci][1];
                     int wz = worldCoords[zi][ri][ci][2];
 
-                    Block b = world.getBlock(wx, wy, wz);
-                    if (b == null || b == Blocks.air) {
+                    // ---------------------------------------------------------------- Gitea #127 第 3 条
+                    // 「保留哪些格、用什么身份」一律来自**扫描身份**（cellTypes[ti]），不再由活动世界的
+                    // 回查结果决定。改造前是 `Block b = world.getBlock(...); if (b == air) remapped = 0`
+                    // ——空气即静默丢块，于是同一帧、同一 frameSha256 的产物内容会随「导出时人在哪个世界」
+                    // 变化（跨世界/事后导出/世界漂移都会踩到，而 C2/C3 判据全绿）。
+                    // 判定是纯函数（ScanCellResolution），与「渲染仍用活动 world 实例」互不矛盾。
+                    Block scanBlock = Block.getBlockFromName(vs.registryId);
+                    boolean scanResolvable = scanBlock != null && scanBlock != Blocks.air;
+                    Block liveBlock = world.getBlock(wx, wy, wz);
+                    boolean liveIsAir = liveBlock == null || liveBlock == Blocks.air;
+                    String liveRegistryId = liveIsAir ? null : registryIdOf(liveBlock);
+                    ScanCellResolution.Verdict verdict = ScanCellResolution
+                        .decide(vs.registryId, scanResolvable, liveIsAir, liveRegistryId);
+                    if (verdict == ScanCellResolution.Verdict.SCAN_AIR) {
+                        // 扫描身份就是空气：没有可保留的内容，不是丢块
                         remapped[zi][ri][ci] = 0;
                         continue;
                     }
+                    if (verdict == ScanCellResolution.Verdict.SCAN_UNRESOLVED) {
+                        throw new CpException(
+                            ErrorCodes.STATE,
+                            "扫描身份无法解析：registryId=" + vs.registryId + " 在方块注册表里找不到（该模组缺失或标本被改）",
+                            Json.object(
+                                "action",
+                                "export.scene",
+                                "stage",
+                                "bake",
+                                "cell",
+                                cellJson(wx, wy, wz),
+                                "expected",
+                                Json.object("registryId", vs.registryId, "meta", Integer.valueOf(vs.meta)),
+                                "hint",
+                                "本格按扫描身份渲染需要该方块；缺方块时不许静默丢块、也不许换块——" + "请在装有该模组的客户端导出（或重新录制）"));
+                    }
+                    if (verdict == ScanCellResolution.Verdict.WORLD_MISMATCH) {
+                        // 活动世界该坐标是另一个非空气方块：不许静默丢、也不许静默换块 ⇒ 显式报错，不写产物
+                        throw new CpException(
+                            ErrorCodes.STATE,
+                            "烘焙遇世界身份冲突：录制时该格是 " + vs.registryId + "，导出时刻活动世界是 " + liveRegistryId,
+                            Json.object(
+                                "action",
+                                "export.scene",
+                                "stage",
+                                "bake",
+                                "cell",
+                                cellJson(wx, wy, wz),
+                                "expected",
+                                Json.object("registryId", vs.registryId, "meta", Integer.valueOf(vs.meta)),
+                                "actual",
+                                Json.object("registryId", liveRegistryId),
+                                "hint",
+                                "帧内容按录制时刻的世界生效；该坐标已被改成别的方块 ⇒ 无法判定该用哪个身份，" + "故显式失败而不是静默换块。若该帧确实录于这个世界，请把该格还原为录制时的方块"
+                                    + "（或重新 record）；本动作不写任何产物"));
+                    }
+                    // KEEP_SCAN_IDENTITY：身份与 meta 都取自扫描（meta 尤其重要：GT 机器格的 meta 是 mID，
+                    // 不是世界 metadata；改造前那行 `vs != null ? vs.meta : world.getBlockMetadata(...)`
+                    // 实际也总是走扫描侧，这里把它显式化）
+                    Block b = scanBlock;
+                    if (liveIsAir) {
+                        worldChangedCells++;
+                    }
                     String label = captureLabel(vs, b, world, wx, wy, wz);
                     CapturedBlockInstance inst = new CapturedBlockInstance();
-                    int blockMeta = vs != null ? vs.meta : world.getBlockMetadata(wx, wy, wz);
+                    int blockMeta = vs.meta;
                     int renderType = b.getRenderType();
 
                     // Gitea issue #12：**不得**对世界活动 TE 做 readFromNBT。LogisticsPipes 等模组的
@@ -561,15 +650,24 @@ public final class MeshCaptureService {
                     // 于是第二次及以后读 NBT 建出的 pipe 永远绑不上容器（container 永久为 null）→ 导出结束后
                     // 正常渲染 NPE 崩溃客户端；"读备份回滚"也修不回来（再读一次只会再建一个绑不上的 pipe）。
                     // 默认路径：活动 TE 全程零写入，改为按扫描 NBT 造一份「副本 TE」注入后处理渲染。
+                    //
+                    // #127：副本 TE 的**来源是扫描 NBT**，因此活动 TE 只是「可用的加速/降级信息」，不是前提：
+                    // 该格在活动世界里已被清空（teForCapture == null）时，仍按扫描 NBT 造副本，
+                    // 否则「按扫描身份保留」会退化成「保留了块但丢了 TE 渲染」这种更隐蔽的失真。
                     TileEntity teForCapture = world.getTileEntity(wx, wy, wz);
                     boolean teIsMultipart = false;
                     TileEntity teForRender = teForCapture;
                     NBTTagCompound legacyInplaceBackup = null;
-                    if (teForCapture != null && vs != null && vs.tileNbt != null) {
+                    if (vs.tileNbt != null && !vs.tileNbt.hasNoTags()) {
                         // 以下两步均为只读：判定/诊断只读活动 TE 的类，不写任何字段
-                        teIsMultipart = MultipartNbtStateUtil.isTileMultipart(teForCapture);
-                        MultipartNbtStateUtil.diagnoseReadFromNbtOverride(teForCapture);
-                        if (TE_CAPTURE_INPLACE) {
+                        if (teForCapture != null) {
+                            teIsMultipart = MultipartNbtStateUtil.isTileMultipart(teForCapture);
+                            MultipartNbtStateUtil.diagnoseReadFromNbtOverride(teForCapture);
+                        } else {
+                            // 活动 TE 不在（世界被改动）：只凭扫描 NBT 的 id 判多部件（FMP 写 "savedMultipart"）
+                            teIsMultipart = MultipartNbtStateUtil.isMultipartNbt(vs.tileNbt);
+                        }
+                        if (TE_CAPTURE_INPLACE && teForCapture != null) {
                             // 负对照（-Dsde.teCaptureMode=inplace；issue #12 复现/证伪专用，严禁默认启用）：
                             // 旧行为 = 备份活动 TE → 就地 readFromNBT(扫描 NBT) → finally 回滚
                             legacyInplaceBackup = new NBTTagCompound();
@@ -577,7 +675,14 @@ public final class MeshCaptureService {
                             applyTileNbtInPlace(teForCapture, vs.tileNbt, teIsMultipart);
                         } else {
                             // 副本创建失败时返回 null：该格显式跳过 TE 渲染，绝不回退查活动 TE
-                            teForRender = createCaptureTileEntityCopy(world, vs.tileNbt, teForCapture, teIsMultipart);
+                            teForRender = createCaptureTileEntityCopy(
+                                world,
+                                vs.tileNbt,
+                                teForCapture,
+                                wx,
+                                wy,
+                                wz,
+                                teIsMultipart);
                         }
                     }
                     try {
@@ -682,6 +787,13 @@ public final class MeshCaptureService {
             }
         }
 
+        // #127：把「按扫描身份烘焙」这件事与其副作用显式留痕（世界漂移不改变语义，但必须可观察）
+        if (worldChangedCells > 0) {
+            FMLLog.info(
+                "[SDE] 烘焙按**扫描身份**完成：%d 格在活动世界里已是空气（世界在录制后被改动）——这些格按录制内容忠实还原，未丢弃",
+                Integer.valueOf(worldChangedCells));
+        }
+
         JsonArray blockPalette = new JsonArray();
         blockPalette.add(airBlockPaletteEntry());
         for (int fi = 1; fi < nextFinal; fi++) {
@@ -767,13 +879,20 @@ public final class MeshCaptureService {
      * <p>
      * 任何失败（含制出的副本类型不符）一律返回 {@code null}，捕获继续，后处理策略对 null 会跳过该格——
      * 绝不回退到活动 TE（那等于把"当前世界状态"烤进导出，且与旧就地路径的失败语义不再一致）。
+     * <p>
+     * <b>#127：副本的来源是扫描 NBT，不是活动 TE</b>。{@code liveTe} 只提供两件「可选加速信息」——
+     * 坐标（缺省用 {@code wx/wy/wz}）与多部件判定（缺省按 NBT 的 id 判）——因此该格在活动世界里
+     * 已被清空时（{@code liveTe == null}）仍然能造出副本，「按扫描身份保留」才不至于退化成
+     * 「保留了块、丢了 TE 渲染」这种更隐蔽的失真。
      *
-     * @param teIsMultipart 是否多部件格（判定基于活动 TE 的类，只读）
+     * @param liveTe        活动世界该格的 TE（可为 null；**只读**，绝不写回）
+     * @param wx/wy/wz      该格世界坐标（{@code liveTe} 为 null 时的坐标来源）
+     * @param teIsMultipart 是否多部件格（活动 TE 在时基于其类判定，不在时基于扫描 NBT 的 id）
      */
     private static TileEntity createCaptureTileEntityCopy(World world, NBTTagCompound tileNbt, TileEntity liveTe,
-        boolean teIsMultipart) {
+        int wx, int wy, int wz, boolean teIsMultipart) {
         try {
-            NBTTagCompound toApply = captureNbtWithCoords(tileNbt, liveTe);
+            NBTTagCompound toApply = captureNbtWithCoords(tileNbt, liveTe, wx, wy, wz);
             // 1.7.10 静态工厂：按 NBT 的 "id" 建实例并 readFromNBT（扫描 NBT 来自 writeToNBT，含 id）
             TileEntity copyTe = TileEntity.createAndLoadEntity(toApply);
             if (teIsMultipart && !MultipartNbtStateUtil.isTileMultipart(copyTe)) {
@@ -796,12 +915,19 @@ public final class MeshCaptureService {
         }
     }
 
-    /** 扫描 NBT 的副本 + 该格 x/y/z 三键（与旧就地逻辑补键行为一致，不动原 NBT）。 */
-    private static NBTTagCompound captureNbtWithCoords(NBTTagCompound tileNbt, TileEntity liveTe) {
+    /**
+     * 扫描 NBT 的副本 + 该格 x/y/z 三键（与旧就地逻辑补键行为一致，不动原 NBT）。
+     *
+     * <p>
+     * 坐标优先取活动 TE（旧行为逐字不变），活动 TE 不在时取扫描格的世界坐标（#127：世界被改动后
+     * 该格仍要按扫描身份渲染，坐标不能凭空消失）。
+     */
+    private static NBTTagCompound captureNbtWithCoords(NBTTagCompound tileNbt, TileEntity liveTe, int wx, int wy,
+        int wz) {
         NBTTagCompound toApply = (NBTTagCompound) tileNbt.copy();
-        toApply.setInteger("x", liveTe.xCoord);
-        toApply.setInteger("y", liveTe.yCoord);
-        toApply.setInteger("z", liveTe.zCoord);
+        toApply.setInteger("x", liveTe != null ? liveTe.xCoord : wx);
+        toApply.setInteger("y", liveTe != null ? liveTe.yCoord : wy);
+        toApply.setInteger("z", liveTe != null ? liveTe.zCoord : wz);
         return toApply;
     }
 
@@ -811,7 +937,7 @@ public final class MeshCaptureService {
      * （Gitea issue #12），此处刻意保留原样以便复现/证伪该缺陷。
      */
     private static void applyTileNbtInPlace(TileEntity te, NBTTagCompound tileNbt, boolean teIsMultipart) {
-        NBTTagCompound toApply = captureNbtWithCoords(tileNbt, te);
+        NBTTagCompound toApply = captureNbtWithCoords(tileNbt, te, te.xCoord, te.yCoord, te.zCoord);
         try {
             te.readFromNBT(toApply);
         } catch (Throwable ignored) {
@@ -1205,6 +1331,31 @@ public final class MeshCaptureService {
         GameRegistry.UniqueIdentifier uid = GameRegistry.findUniqueIdentifierFor(b);
         String id = uid == null ? b.getUnlocalizedName() : uid.toString();
         return id + '\0' + "meta:" + world.getBlockMetadata(wx, wy, wz);
+    }
+
+    /**
+     * 活动世界方块的注册名（#127 的身份比对用）。
+     *
+     * <p>
+     * 规则与采样器 {@code PolicyBackedBlockSampler}/{@code DefaultBlockSampler} <b>逐字一致</b>
+     * （{@code GameRegistry.findUniqueIdentifierFor} 优先，缺失回落 {@code "unknown:" + unlocalizedName}）——
+     * 两侧不同源就没法比，这会变成一个「永远不相等」的假报错源。
+     */
+    private static String registryIdOf(Block b) {
+        if (b == null) {
+            return null;
+        }
+        GameRegistry.UniqueIdentifier uid = GameRegistry.findUniqueIdentifierFor(b);
+        return uid == null ? ("unknown:" + b.getUnlocalizedName()) : uid.toString();
+    }
+
+    /** 错误上下文里的格坐标（{@code [x,y,z]}，与结果里其它坐标字段同形）。 */
+    private static JsonArray cellJson(int x, int y, int z) {
+        JsonArray a = new JsonArray();
+        a.add(new JsonPrimitive(Integer.valueOf(x)));
+        a.add(new JsonPrimitive(Integer.valueOf(y)));
+        a.add(new JsonPrimitive(Integer.valueOf(z)));
+        return a;
     }
 
     private static int[][][] parseCellGrid(JsonArray cellGridJson) {
