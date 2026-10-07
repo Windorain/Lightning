@@ -40,7 +40,7 @@ public final class InputTextAction implements ControlAction {
     /** 动作名。 */
     public static final String NAME = "input.text";
 
-    /** {@code since} 说明同 {@link InputKeyAction#descriptor()}（契约 §1.4：T3 注册时写 1.8）。 */
+    /** {@code since}/{@code means} 口径同 {@link InputKeyAction#descriptor()}（本批 #165 写入 1.8）。 */
     public static ActionDescriptor descriptor() {
         return ActionDescriptor.builder(NAME, Tier.SCENE)
             .description(
@@ -54,6 +54,8 @@ public final class InputTextAction implements ControlAction {
                 "means/semantics/layer(null)/text/delivered/events[{kind:char,char,codepoint}]/deliveredAtTick/"
                     + "consumer{...}/consumed{observed:null}；能力未就绪时无成功形态（CP-STATE-001）")
             .example("{\"confirm\":true,\"text\":\"hi\"}")
+            .since("1.8")
+            .means(InputCapabilities.MEANS)
             .build();
     }
 

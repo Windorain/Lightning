@@ -31,7 +31,7 @@ public final class InputReleaseAction implements ControlAction {
     /** 动作名。 */
     public static final String NAME = "input.release";
 
-    /** {@code since} 说明同 {@link InputKeyAction#descriptor()}（契约 §1.4：T3 注册时写 1.8）。 */
+    /** {@code since}/{@code means} 口径同 {@link InputKeyAction#descriptor()}（本批 #165 写入 1.8）。 */
     public static ActionDescriptor descriptor() {
         return ActionDescriptor.builder(NAME, Tier.SCENE)
             .description(
@@ -44,6 +44,8 @@ public final class InputReleaseAction implements ControlAction {
                     + "delivered=抬起事件数/deliveredAtTick/lifecyclePath=explicit-release/stateBefore/stateAfter/"
                     + "held{count,items}/consumer{...}/consumed{observed:null}")
             .example("{\"confirm\":true}")
+            .since("1.8")
+            .means(InputCapabilities.MEANS)
             .build();
     }
 

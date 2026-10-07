@@ -193,7 +193,7 @@ public class IntParamStrictnessTest {
                 }
             }
         }
-        assertTrue("一个 TYPE_INT 参数都没扫到 ⇒ 判据是空转的（契约 1.7 的 43 个动作里必有）", checked > 0);
+        assertTrue("一个 TYPE_INT 参数都没扫到 ⇒ 判据是空转的（契约 1.8 的 48 个动作里必有）", checked > 0);
     }
 
     /**

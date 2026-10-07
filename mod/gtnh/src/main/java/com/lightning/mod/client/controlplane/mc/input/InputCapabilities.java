@@ -7,6 +7,7 @@ import java.util.List;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.Json;
+import com.lightning.mod.client.controlplane.mc.input.api.InputStateProvider;
 
 /**
  * 输入手段族（{@code input.*}）的**能力真值表**（Gitea #162 冻结件 §5.2 / §11.2 的机读落点）。
@@ -256,25 +257,29 @@ public final class InputCapabilities {
 
     // ------------------------------------------------------------------ 未实现清单（§11.2 同源）
 
-    /** 本族动作是否已注册（T3 的活儿；本单未注册 ⇒ 调用得 {@code CP-VALID-001}）。 */
-    public static final boolean ACTIONS_REGISTERED = false;
+    /** 本族动作是否已注册（Gitea #165 已注册 ⇒ 调用不再得 {@code CP-VALID-001}）。 */
+    public static final boolean ACTIONS_REGISTERED = true;
 
-    /** {@code since} 的当前真相（§1.4：写入具体版本号必须与 {@code contractVersion} 同 PR 前进）。 */
-    public static final String SINCE = "实现合并时前进（候选 1.8）；本单未写入（契约 §1.4）";
+    /** {@code since} 的当前真相（§1.4：与 {@code contractVersion} 前进同 PR 写入，本批为 {@code 1.8}）。 */
+    public static final String SINCE = "1.8";
 
     /**
      * 已冻结但**未实现/未验证**的项（§11.2 同源摘录）。
      *
      * <p>
      * 实现一项就同时删两处（本常量 + 契约 §11.2），不得只删一处（§11.2 末条）。
+     *
+     * <p>
+     * <b>本批（#165）删掉的四条与本批<b>不</b>删的说明</b>：动作注册、契约版本前进、
+     * {@code means} 自描述字段、{@code input.state} 注册四条已随本批落地 ⇒ 删除；
+     * 「坐标换算的实机自校准」「codepoint 通路」「G1 扩展」三条<b>不</b>因代码合入而删——
+     * 前两条要实机判据，G1 的实现由并行分支承载（合入后再删，见 Gitea #165 的收口评论）。
+     * 「写 true 之前必须有一条实机判据」是本类的宪法，不许按「代码写完了」结账。
      */
     public static final List<String> NOT_IMPLEMENTED;
 
     static {
         List<String> l = new ArrayList<String>();
-        l.add("五个动作均未注册（GET /cp/v1/actions 的 count 仍为 43）");
-        l.add("契约版本未前进（仍 1.7）；since 待实现合并时取 1.8");
-        l.add("ActionDescriptor 的 means 自描述字段（显式待办）");
         l.add("GUI 文本路由未打通（P0 实测：addCharEvent 与键事件自带 codepoint 两条都未到达）");
         l.add("input.key 的 codepoint 通路未验证（只有键位那一半被实机证过）");
         l.add("鼠标侧队列深度无公开探针 ⇒ 鼠标的「已投递」不可独立复核、physicalConcurrent 鼠标侧只能 unobservable");
@@ -288,7 +293,6 @@ public final class InputCapabilities {
         l.add("read.input 读面不存在（注入有没有生效缺第二观测面）");
         l.add("场景守卫会关聊天框（armed 期间每 tick displayGuiScreen(null)）");
         l.add("§9.2 的 G1 扩展未实现（case-file.md §3.2 的同步性口径、CaseValidator 白名单、CaseRunAction 段内跨 tick 推进）");
-        l.add("input.state 尚未注册（观察面字段由 T2-B 组装；本运行时只给出真值源）");
         NOT_IMPLEMENTED = Collections.unmodifiableList(l);
     }
 
@@ -301,7 +305,14 @@ public final class InputCapabilities {
         return a;
     }
 
-    /** 动作目录（未注册 ⇒ 空数组，**不是** {@code ["input.key", ...]}；§5.2）。 */
+    /**
+     * 动作目录（§5.2：已注册的输入动作名；未注册时为空数组，**不是** {@code ["input.key", ...]}）。
+     *
+     * <p>
+     * {@code input.state} 的名字取自 {@link InputStateProvider#ACTION_NAME}（{@code api} 面）——
+     * 刻意<b>不</b> import {@code mc.input.observe.InputStateAction}：那会让下层 {@code input}
+     * 反向依赖上层 {@code observe}。名字只有一处真值，本表只是它的一个消费点。
+     */
     public static JsonArray registeredActionsJson() {
         JsonArray a = new JsonArray();
         if (ACTIONS_REGISTERED) {
@@ -309,6 +320,7 @@ public final class InputCapabilities {
             Json.add(a, InputTextAction.NAME);
             Json.add(a, InputMouseAction.NAME);
             Json.add(a, InputReleaseAction.NAME);
+            Json.add(a, InputStateProvider.ACTION_NAME);
         }
         return a;
     }

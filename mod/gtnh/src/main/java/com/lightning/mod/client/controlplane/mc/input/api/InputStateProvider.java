@@ -17,6 +17,16 @@ import com.google.gson.JsonObject;
  */
 public interface InputStateProvider {
 
+    /**
+     * 动作名（Gitea #165 注册）。
+     *
+     * <p>
+     * 常量放在 {@code api} 包而不是某个实现类里：观察面动作（{@code mc.input.observe.InputStateAction}，
+     * 上层）与能力真值表（{@code mc.input.InputCapabilities}，下层）都要用它，而
+     * <b>下层不得反向依赖上层</b>。放在双方都允许依赖的 {@code api} 面，动作名就只有一处真值。
+     */
+    String ACTION_NAME = "input.state";
+
     /** 组装 {@code input.state} 的响应体（在客户端 tick 线程调用）。 */
     JsonObject state();
 }

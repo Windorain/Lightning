@@ -10,11 +10,16 @@
 > 实现合并时：`contract.md` §4 新增一节（候选 `§4.12 输入手段族`）并同步动作计数，`case-file.md` §3.2
 > 按 §9.2 改写同步性口径，本文随之降级为**实现说明的引用件**。
 >
-> **本分支状态（必须逐条读完再读下文）**：本文冻结的**五个动作全部未实现**——未注册、无描述符、
-> `GET /cp/v1/actions` 的 `count` 仍为 **43**；**契约版本不前进**（仍 `1.7`）。
-> 理由是仓里有两道机械断言: `ReadCaptureOfflineTest` 断言动作总数 `43`，并断言
-> `contractVersion >= 每个动作的 since`。本单若写入 `since` 或宣称已实现，两道断言当场红。
-> 故全文 `since` 一律写「**实现合并时前进（候选 `1.8`）**」；文末 §11.2 是**未实现清单**（逐条）。
+> **状态（v1.8 起：已实现、已注册；下列历史段落保留以免「当时的判据」被抹掉）**：
+> 本文冻结的五个动作**已注册**（`GET /cp/v1/actions` 的 `count` = **48**），`contractVersion` = **1.8**，
+> 五个动作的 `since` 均写实为 `1.8`。实现合并在 Gitea #165，注册与计数同步见 §1.4。
+> 文末 §11.2 是**仍未实现/未验证**的清单（逐条，已按本批删除已完成项）。
+> 本文现在同时是**实现说明的引用件**（`contract.md` §4.12 指向它）。
+>
+> **历史记录（T1 冻结时的形态，勿删）**：冻结时五个动作全部未实现——未注册、无描述符，
+> `count` 为 `43`、`contractVersion` 为 `1.7`；当时仓里有两道机械断言（`ReadCaptureOfflineTest` 断言总数、
+> 并断言 `contractVersion >= 每个动作的 since`），因此 T1 若写入 `since` 或宣称已实现会当场判红，
+> 故全文 `since` 当时一律写「**实现合并时前进（候选 `1.8`）**」。
 >
 > **标注法**：`【实测】` = P0 已实机证实或源码逐行可证（不重复推导过程）；`【要求】` = 本契约对实现的
 > **义务**（可实现性由 T2 自证）；`【未实现】` = 本单冻结但未实现/未验证；`【禁令】` = 明令禁止的做法。
@@ -86,11 +91,14 @@
 
 ### 1.4 与契约版本的关系
 
-1. `【要求】` 本族动作的 `since` 只能写「实现合并时前进（候选 `1.8`）」；**写入具体版本号的动作在
-   `contractVersion` 同步前进之前一律不许合并**（否则动作计数与版本单调两道断言红）。
-2. `【要求】` 实现合并那一次提交必须同时改：`ActionRegistrar` 的计数注释（「43 个」字面）、
-   `contract.md` §4 的计数与新增小节、`ReadCaptureOfflineTest` 的 `assertEquals(43, ...)`、`Contract.VERSION`。
-   四处**同一 PR**，缺一即红。
+1. `【已履行】` 本族五个动作的 `since` 写实为 **`1.8`**（Gitea #165），且与 `contractVersion` 前进**同批**——
+   原来的写法是「只能写『实现合并时前进（候选 `1.8`）』，写入具体版本号的动作在 `contractVersion` 同步前进
+   之前一律不许合并」（否则动作计数与版本单调两道断言红）。
+2. `【已履行】` 实现合并那一次提交**同时**改了：`ActionRegistrar` 的计数注释（「43 个」→「48 个」字面）、
+   `contract.md` §4 的计数与新增小节（§4.12）、**两处**动作计数断言
+   （`ReadCaptureOfflineTest` 与 `InputCapabilitiesTest`）、`Contract.VERSION`（1.7→1.8）。
+   <b>注意 T1 原文只列了三处</b>（漏了 `InputCapabilitiesTest` 的动作计数与 `ACTIONS_REGISTERED` 断言），
+   本批据实补上——照 T1 原文改会漏一处而当场红。
 3. `【要求】` 版本按字符串/浮点比较 ⇒ 禁止出现 `1.10` 这类值（会排到 `1.6` 之前）。
 
 ### 1.5 不承诺清单（本期范围外，逐条）
@@ -466,11 +474,11 @@
 
 | 字段 | 类型 | 语义 |
 |---|---|---|
-| `implemented` | `bool` | 本族是否已实现。`【未实现】` 本单恒 `false`；T2-A 合并后由运行时真值给出 |
+| `implemented` | `bool` | 本族是否已实现。v1.8 起由**运行时真值**给出（注册完成 ⇒ `true`）；`false` 时下面每一个能力字段都必须自洽（见本节末条） |
 | `family` | `string` | 恒 `"input"` |
 | `means` | `string` | 恒 `"input"`（手段归因，与 `layer`/`semantics` 并列，见 §10 第 3 条） |
 | `runtime` | `object` | `{mc, forge, lwjgl3ify, backend, injectors[]}`；`injectors` 列出实际可用的五个入口名 |
-| `actions` | `array` | 已注册的输入动作名（未实现时为空数组，**不是** `["input.key", ...]`） |
+| `actions` | `array` | 已注册的输入动作名（v1.8 起为五个动作名）；`implemented:false` 时为空数组，**不是** `["input.key", ...]` |
 | `keyCatalog` | `object` | 键位目录：`{ name → keyCode }`，**运行时注册表实读** |
 | `keyCodeRange` | `[int,int]` | 合法 LWJGL 键码闭区间 |
 | `pollSurface` | `string` | `"not-covered"` + 说明：轮询面（`Keyboard.isKeyDown` 等）不受本族影响（§2.0） |
@@ -492,7 +500,12 @@
 `held.count` 为 0、`notImplemented` **非空**——「未实现」必须在**每一个**能力字段上自洽，
 不许用默认值把未知伪装成「已具备但当前为 0」。
 
-### 5.3 一份**真实形状**的示例响应（本单状态：未实现）
+### 5.3 一份**真实形状**的示例响应（T1 冻结时的形态：未实现）
+
+> **字段形状仍有效，取值已变**：v1.8 起 `implemented` 为 `true`、`actions` 为五个动作名、
+> `keyCatalog`/`coordinates`/`held` 有真值来源、`notImplemented` 已按本批删去四项。
+> 下面这份 JSON 保留下来是因为它是**未实现态的自洽样例**（每个能力字段都为空/为假，
+> 且 `notImplemented` 非空）——「未实现不许伪装成已具备」这条判据需要一个可对照的实例。
 
 ```jsonc
 {
@@ -574,7 +587,7 @@
 | `CP-STATE-001` | 409 | 前置状态不满足：**能力未就绪**（如 `input.text` 路由未通）、**队列满**、**faulted 态**下的请求 |
 | `CP-EXEC-002` | 504 | 步进动作超时（`holdTicks` 跨 tick 推进被总/阶段超时打断）；`context` 带 `stage`/`stageElapsedMs` |
 | `CP-CONFIRM-001` | 400 | 可写动作缺 `"confirm": true`（`scene` 级一律要求；`input.state` 是 `observe`，**不要求**） |
-| `CP-VALID-001` | 404 | 本分支的**当前真相**：五个动作未注册 ⇒ 未注册动作即未知动作 |
+| `CP-VALID-001` | 404 | **T1 冻结期的历史形态**（当时五个动作未注册 ⇒ 未知动作）。v1.8 起五个动作已注册，该码对本族**不再适用** |
 
 `【要求】` 判决理由必须写进自述：**不引入新码**是因为上表四类已把「参数错 / 状态不满足 / 执行超时 /
 确认缺失」四类穷尽；「投递成功但没生效」不是错误（如实报告的 `consumer` + 独立读面即可判读），
@@ -685,7 +698,8 @@
 }
 ```
 
-失败 5｜本分支的当前真相（未实现 ⇒ 未注册 ⇒ 未知动作）：
+失败 5｜**T1 冻结期的历史形态**（当时未实现 ⇒ 未注册 ⇒ 未知动作）。v1.8 起 `input.key` 已注册，
+本形态**不再是**本族的可达失败；保留它只为说明「注册前调用会得到什么」：
 
 ```json
 {
@@ -694,8 +708,7 @@
     "code": "CP-VALID-001",
     "message": "未知动作: input.key",
     "context": { "registered": ["core.ping", "core.status", "world.info", "...共 43 个"],
-                 "hint": "输入手段族在 feat/cp-input-contract 上尚未实现（见 input-contract.md §11.2 第 1 条）" }
-  }
+                 "hint": "输入手段族在 feat/cp-input-contract 上尚未实现（见 input-contract.md §11.2 第 1 条）" }  }
 }
 ```
 
@@ -1028,7 +1041,7 @@
 |---|---|---|
 | **T2-A（运行时）** | `InputRuntime` 单实例：投递、持键表、`releaseJob`/`releaseAll`、`snapshot`；新包目录（如 `mc/input/`）；投递层的反射/依赖选型 | 不注册动作、不改 `ActionRegistrar`/`ActionDescriptor`/`CaseRunAction`；不读世界状态做业务断言 |
 | **T2-B（观察）** | `InputStateProvider` 的**实现**（字段组装）、只读探针（`Keyboard.getNumKeyboardEvents()`、`Mouse.getX/getY` 回读、`KeyBinding` 回读）、消费链观察、`physicalConcurrent` 的键盘侧判定 | **不写队列**（只读）、不注册动作、不改 §9.2 的 `CaseRunAction` 扩展 |
-| **T3（集成）** | 五个描述符与 `registerInputActions(...)`（`ActionRegistrar` 是动作面唯一装配点）、`CaseValidator` 白名单、`CaseRunAction` 的 G1 扩展、`ActionDescriptor.means`（**显式待办**）、`contract.md` §4 新小节与计数、`case-file.md` §3.2 改写、动作计数与版本断言同步 | 不实现投递与观察的细节 |
+| **T3（集成）** | 五个描述符与 `registerInputActions(...)`（`ActionRegistrar` 是动作面唯一装配点）、`CaseValidator` 白名单、`CaseRunAction` 的 G1 扩展、`ActionDescriptor.means`（**v1.8 已履行**，可选字段、不设默认值）、`contract.md` §4 新小节与计数、`case-file.md` §3.2 改写、动作计数与版本断言同步 | 不实现投递与观察的细节 |
 
 **冻结的数据结构**（T2-A 与 T3 的接口面；T2-B 只读消费）：
 
@@ -1067,8 +1080,17 @@ public interface InputStateProvider { JsonObject state(); }
 
 **线程与完成回调**：
 
-1. `【要求】` **唯一** tick 驱动 = 步进动作的每 tick `advance`（现有 `SteppingActionBase`）；
+1. `【要求】` **作业推进**的唯一 tick 驱动 = 步进动作的每 tick `advance`（现有 `SteppingActionBase`）；
    **唯一**完成回调 = `SteppingActionBase.onFinish(ctx)`（三条路径都调）。
+1′. `【D-7 修订，v1.8】` **到期结算**不能只依赖上面那条推进。`input.key action:"down"` 这类作业
+   **立即完成却刻意保留持键**（否则 `down` 没有意义），此时没有任何步进动作在跑 ⇒ `expiresAtTick`
+   到了也**没有人结算**，键会一直按着，直到下一次任意输入交互顺带结算为止。这不是计时问题
+   （`host.clientTick()` 有墙钟兜底），而是「没人去结算」——「不允许无限期持有」（§3.2）在空闲期不成立。
+   故**输入持键的到期结算**额外由**既有的** `ControlPlaneTickHandler` 每客户端 tick 调一次幂等的
+   `InputExpiryPump.tick()`：它只调 `expireDue()`，**不**推进 `advanceTick()`（避免同 tick 双推进
+   让 `drivenTicks` 不可解释）。
+   这**不**违反第 2 条【禁令】：它不是新增 `ClientTickEvent` 订阅者，只是复用既有那一拍。
+   完整裁决、代价与诚实边界见 §12.1 **D-7**。
 2. `【禁令】` 三方**都不得**新增 `ClientTickEvent` 订阅者（现有设施的最省冲突路径就是「零新共享文件」；
    新增订阅者会与 `ControlPlaneTickHandler` 的排空顺序耦合）。
 3. `【要求】` 作业异常时的释放挂在失败收尾路径上（`ActionSteppingExecutor` 的失败分支），**不**挂 JVM hook；
@@ -1081,12 +1103,15 @@ public interface InputStateProvider { JsonObject state(); }
 
 1. `【要求】` **返回值侧**的 `means:"input"` 已在本契约冻结（§10 第 3 条），**与** `layer`/`semantics` **并列，
    不替代**。
-2. `【未实现】` `ActionDescriptor` 新增**自描述**字段（候选名 `means`）作为**显式待办**，
-   **不在本单实现**——避免留下一个没有真值来源的空壳字段。
-3. `【要求】` 实现该待办时的**风险登记**（必须同 PR 处理）：`ActionDescriptor` 是字段与 JSON 形态的唯一来源，
-   改它会影响**全部 43 个动作**的自描述 JSON ⇒ 牵动 `ReadSurfaceTest`、`ExportActionsDescriptorTest`
-   与全部 A3 基准（`canonical-hash-equal` 只豁免 `artifacts/*/sha256`）。现有防线**不**覆盖「字段集合」，
-   所以这个改动**不会被离线测试拦住**，只会被下次实机重放拦住——必须在 PR 描述里显式声明影响面。
+2. `【已履行，v1.8】` `ActionDescriptor` 新增**可选**自描述字段 `means`。
+   **实现方式使原来的风险登记不再成立**：字段**不设默认值**——`null` 时自描述 JSON 里
+   **不出现**该键，故既有 43 个动作的 JSON **逐字节不变**（不必牵动 `ReadSurfaceTest`、
+   `ExportActionsDescriptorTest` 与 A3 基准）。只有输入族写它（值 `"input"`）；
+   「缺省 = 未声明，**不**推断成任何默认值」已写进 `contract.md` §2.2 的硬规则。
+3. `【已履行，v1.8】` 原文「现有防线**不**覆盖字段集合，这个改动不会被离线测试拦住」的缺口**已补**：
+   `InputRegistrationTest` 逐动作断言**字段集合**（既有动作必须逐字不变，输入族只多 `means` 一个键）。
+   因此「给 `means` 加个默认值」这类会**静默**改变 43 个动作 JSON 的改动，现在会被离线测试当场拦住
+   （旧 §11.2 第 18 条由此关闭）。
 
 ---
 
@@ -1158,26 +1183,34 @@ public interface InputStateProvider { JsonObject state(); }
 
 | # | 未实现项 | 判据/影响 |
 |---|---|---|
-| 1 | **五个动作全部未实现** | 未注册、无描述符；`GET /cp/v1/actions` 的 `count` 仍 **43**；调用 `input.*` 得 `CP-VALID-001` |
-| 2 | **契约版本未前进**（仍 `1.7`）、`since` 未写入 | 候选 `1.8`；写入前不许合并（动作计数 + 版本单调两道断言） |
-| 3 | **`ActionDescriptor` 的 `means` 自描述字段** | 显式待办（§9.4）；返回值侧的 `means:"input"` 已冻结，描述符侧未实现 |
-| 4 | **GUI 文本路由未打通** | P0 实测：`GuiChat.fieldText` 可读且为空，`addCharEvent` 与「键事件自带 codepoint」两条都未到达 ⇒ `input.text` 的 `ranges` 为空、`supported:false`、`route:{world:false,gui:false}` |
-| 5 | **`input.key` 的 codepoint 通路未验证** | 只有键位那一半被实机证过；「同一事件自带字符」未证 ⇒ 在 `input.state.notImplemented` 里单列 |
-| 6 | **键盘侧队列深度的鼠标侧对应物不存在** | `Mouse` 无公开深度探针 ⇒ 鼠标的「已投递」不可独立复核、`physicalConcurrent` 鼠标侧只能 `"unobservable"` |
-| 7 | **无取消能力** | `core` 层零 `cancel`、端点表无取消端点 ⇒ §7 的「作业取消 ⇒ 释放」路径**不存在** |
-| 8 | **无世界卸载/断连/关服钩子** | `ClientDisconnect`/`WorldEvent`/`onWorldUnload`/`unloadWorld`/`FMLServerStoppingEvent` 全零命中 ⇒ 离图**不**触发释放，契约**不承诺** |
-| 9 | **不承诺崩溃后清理** | P0 实测：进程崩溃时状态随 JVM 消失 |
-| 10 | **轮询面不覆盖** | `Keyboard.isKeyDown`/`Mouse.isButtonDown` 型判定（Shift/Ctrl/Alt 组合、`GuiContainer` 的 Shift 点击、NEI 快捷键、`SyncedKeybind`、MUI `Interactable`）不随队列注入变化 ⇒ 组合键只保证事件序 |
-| 11 | **`input.mouse op:relative` 的失焦生效未验证** | 消费门是 `mc.inGameHasFocus && Display.isActive()`；无人值守失焦是常态 ⇒ [未验证]，且**禁止**靠改 `displayFocused` 绕过 |
-| 12 | **坐标换算的实机自校准未做** | P0 只在一组参数（`displayHeight=480`、`pixelScale=1.0`）上定案了 Y 翻转；其它 GUI Scale / 分辨率下的换算需 `move` 的 `readback` 自校准 |
-| 13 | **GUI 截图取证面不存在** | `shot.*` 只调 `renderWorld` + 强制 `hideGUI=true`，`currentScreen` 在 capture 包零命中 ⇒ 「点开了什么界面」**无截图证据面** |
-| 14 | **`read.input` 读面不存在** | 现有 9 个 `read.*` 无一条读输入侧状态 ⇒ 「注入有没有生效」缺第二观测面 |
-| 15 | **场景守卫会关聊天框** | armed 期间每 tick `displayGuiScreen(null)` 会清掉 `GuiChat` 一类界面 ⇒ 聊天框路径在场景会话期间不可用（源码推断，**未实机验证**） |
-| 16 | **§9.2 的 G1 扩展未实现** | `case-file.md` §3.2 的同步性口径、`CaseValidator` 白名单、`CaseRunAction` 的段内跨 tick 推进**均未实现** |
-| 17 | **`input.state` 的字段无真值来源** | 未实现 ⇒ `keyCatalog`/`coordinates`/`held` 全为占位；**不许**用默认值伪装成「已具备」 |
-| 18 | **`ActionDescriptor` 的字段集合无离线防线** | 现有断言只钉动作总数、版本单调、逐参数默认值 ⇒ 新增字段不会被离线测试拦住，只会被下次实机 A3 重放拦住（§9.4 第 3 条） |
+| 1 | **GUI 文本路由未打通** | P0 实测：`GuiChat.fieldText` 可读且为空，`addCharEvent` 与「键事件自带 codepoint」两条都未到达 ⇒ `input.text` 的 `ranges` 为空、`supported:false`、`route:{world:false,gui:false}`，任何非空请求 `CP-STATE-001` |
+| 2 | **`input.key` 的 codepoint 通路未验证** | 只有键位那一半被实机证过；「同一事件自带字符」未证 ⇒ 在 `input.state.notImplemented` 里单列 |
+| 3 | **键盘侧队列深度的鼠标侧对应物不存在** | `Mouse` 无公开深度探针 ⇒ 鼠标的「已投递」不可独立复核、`physicalConcurrent` 鼠标侧只能 `"unobservable"` |
+| 4 | **无取消能力** | `core` 层零 `cancel`、端点表无取消端点 ⇒ §7 的「作业取消 ⇒ 释放」路径**不存在** |
+| 5 | **无世界卸载/断连/关服钩子** | `ClientDisconnect`/`WorldEvent`/`onWorldUnload`/`unloadWorld`/`FMLServerStoppingEvent` 全零命中 ⇒ 离图**不**触发释放，契约**不承诺** |
+| 6 | **不承诺崩溃后清理** | P0 实测：进程崩溃时状态随 JVM 消失（§3.4 路径 5 只做 best-effort） |
+| 7 | **轮询面不覆盖** | `Keyboard.isKeyDown`/`Mouse.isButtonDown` 型判定（Shift/Ctrl/Alt 组合、`GuiContainer` 的 Shift 点击、NEI 快捷键、`SyncedKeybind`、MUI `Interactable`）不随队列注入变化 ⇒ 组合键只保证事件序 |
+| 8 | **`input.mouse op:relative` 的失焦生效未验证** | 消费门是 `mc.inGameHasFocus && Display.isActive()`；无人值守失焦是常态 ⇒ [未验证]，且**禁止**靠改 `displayFocused` 绕过 |
+| 9 | **坐标换算的实机自校准未做** | P0 只在一组参数（`displayHeight=480`、`pixelScale=1.0`）上定案了 Y 翻转；其它 GUI Scale / 分辨率下的换算需 `move` 的 `readback` 自校准 |
+| 10 | **GUI 截图取证面不存在** | `shot.*` 只调 `renderWorld` + 强制 `hideGUI=true`，`currentScreen` 在 capture 包零命中 ⇒ 「点开了什么界面」**无截图证据面**（T2-B 已提供 `gui:"screen"` 的 opt-in 路径，但其判据仍待实机） |
+| 11 | **`read.input` 读面不存在** | 现有 9 个 `read.*` 无一条读输入侧状态 ⇒ 「注入有没有生效」缺第二观测面（本族自带 `input.state`，但它是能力面不是业务读面） |
+| 12 | **场景守卫会关聊天框** | armed 期间每 tick `displayGuiScreen(null)` 会清掉 `GuiChat` 一类界面 ⇒ 聊天框路径在场景会话期间不可用（源码推断，**未实机验证**） |
+| 13 | **§9.2 的 G1 扩展未实现** | `case-file.md` §3.2 的同步性口径、`CaseParser`/`CaseValidator` 白名单、`CaseRunAction` 的段内跨 tick 推进**均未实现**（由并行分支承载，合入后再删本行） |
 
 `【要求】` 本清单与 `input.state.notImplemented` **同源**：实现一项就同时删两处，**不得**只删一处。
+
+### 11.3 v1.8（#165）在本表里删掉了什么
+
+| 旧 # | 已完成的项 | 证据（可复核） |
+|---|---|---|
+| 1 | 五个动作全部未实现 | `ActionRegistrar.registerInputActions`；`GET /cp/v1/actions` 的 `count` 48；`InputRegistrationTest` |
+| 2 | 契约版本未前进、`since` 未写入 | `Contract.VERSION = "1.8"`；五个描述符 `.since("1.8")` |
+| 3 | `ActionDescriptor` 的 `means` 自描述字段 | `ActionDescriptor.means()`（可选、不设默认值）；`contract.md` §2.2；`InputRegistrationTest#meansComesFromTheSelfDescriptionAndDoesNotLeak` |
+| 17 | `input.state` 的字段无真值来源 | `InputStateAction` 注册；`InputStateProviderImpl` 组装；该动作**已注册**（真值来源是 T2-B 的探针） |
+| 18 | `ActionDescriptor` 的字段集合无离线防线 | `InputRegistrationTest#descriptorFieldSetIsFrozenAndOnlyGainsMeansForTheInputFamily` |
+
+**注意**：上表只删「已落地且有机械证据」的项。**第 9 条（实机自校准）、第 2 条（codepoint 通路）、
+第 13 条（G1）不因代码合入而删**——前两条要实机判据，第 13 条由并行分支承载。
 
 ---
 
@@ -1193,6 +1226,7 @@ public interface InputStateProvider { JsonObject state(); }
 | D-4 | 持键是否允许「无限期直到显式 release」 | **不允许**。单条目上限 1200 tick，到期自动抬起并报 `autoReleased` | 「无期限持有」叠加「现有设施无取消能力」= 不可回收状态；宁可到期自动收口并如实报告 |
 | D-5 | 覆盖矩阵的表格形态 | 接受「状态/消费点合并一格」的 6 列主表 + 清理件附加表 | 可读性优先；行数与覆盖项在 `input-coverage.md` §2.2 有核对 |
 | D-6 | 负对照的独立观测面（原 G6）与自描述字段集合防线（原 G8） | ① **G6 由本族 `input.state` 承担**（它就是输入侧读面，已冻结字段）；②「`input.*` 返回值与 `ActionDescriptor` 的**字段集合断言**」列为 **T2/T3 交付项**（见 §12.3），不留在「未实现」里当借口 | 没有独立观测面的负对照等于自证；没有字段集合断言则契约漂移只能靠下次实机 A3 才发现 |
+| D-7 | 持键的**到期结算**是否只由步进动作的 `advance` 驱动（§9.3 第 1 条） | **不**。到期结算**额外**由**既有的** `ControlPlaneTickHandler` 每客户端 tick 调一次幂等的 `InputExpiryPump.tick()`（它只调 `expireDue()`，**不**推进 `advanceTick()`） | §9.3 第 1 条把「唯一 tick 驱动」冻结为步进 `advance`，但 `input.key action:"down"` **立即完成却刻意保留持键** ⇒ 此时没有任何步进动作在跑 ⇒ `expiresAtTick` 到了**没人结算**，键会一直按着，直到下一次任意输入交互顺带结算。这不是计时问题（`host.clientTick()` 有墙钟兜底），而是**没人结算**——D-4 的「不允许无限期持有」在空闲期因此不成立。**不违反 §9.3 第 2 条**：它不是新增 `ClientTickEvent` 订阅者，只是复用既有那一拍。**代价登记**：泵在第一个客户端 tick 上会首次构造运行时单例（一次性、微秒级），构造失败时只 WARN 一次并如实认为「到期结算不可用」，不刷屏、不假装在跑。**边界（不因本裁决变绿）**：崩溃（状态随 JVM 消失）与离图/断连（无钩子）两种情形仍不承诺——它们继续留在 §11.2 |
 
 ### 12.2 退役与删除验收（工作区 AGENTS.md「架构替换的退役纪律」#171 的落地）
 
@@ -1207,14 +1241,15 @@ public interface InputStateProvider { JsonObject state(); }
 
 | 暂存项 | 负责人 | 退出阶段 |
 |---|---|---|
-| `input.*` 五个动作「已冻结未实现」 | T2-A/T2-B 执行者 | T3（#165）合入时：动作注册 + 契约版本前进 + §11.2 对应行删除，三者同批 |
-| `case-file.md` §3.2 的同步性口径未改写 | T3 持有者（共享文件单一持有者） | T3 合入同批改写并跑 §9.2 的 8 条回归面 |
-| `input.state.notImplemented` 占位字段 | T2-B | T3 合入时按「实现一项删一处」与 §11.2 同步 |
+| ~~`input.*` 五个动作「已冻结未实现」~~ **已于 v1.8 退出** | T3（#165） | **已完成**：五个动作注册 + 契约版本前进到 1.8 + 计数注释/两处断言同步 + §11.2 对应行删除（见 §11.3） |
+| `case-file.md` §3.2 的同步性口径未改写 | T3 持有者（共享文件单一持有者） | T3 合入同批改写并跑 §9.2 的 8 条回归面（由并行分支承载，**尚未退出**） |
+| ~~`input.state.notImplemented` 占位字段~~ **已于 v1.8 退出** | T3（#165） | **已完成**：按「实现一项删一处」与 §11.2 同步（`InputCapabilities.NOT_IMPLEMENTED` 删 4 条；`InputStateProviderImpl.frozenNotImplemented()` 删「契约版本未前进」一条） |
 
 ### 12.3 T1 收口判据（本单关闭条件，逐条可判定）
 
 1. 两份契约文件在集成分支可读，且 `contract.md` §4 有指向它们的**指针**（不复制内容）；
-2. 契约对**已实证/未实现/不可达**三态无混淆（§11.2 十八条未实现清单与 P0 判据一一对应）；
+2. 契约对**已实证/未实现/不可达**三态无混淆（§11.2 的未实现清单与 P0 判据一一对应；v1.8 后为 13 条，
+   已完成项移入 §11.3 并附机械证据）；
 3. 下游可分叉：T2-A / T2-B / T3 的边界（§9）明确到「谁拥有哪些文件」，且四个共享文件同一时刻只有一个持有者；
 4. 全量测试仍绿（本单只增文档；若文档守卫测试解析了新文件，必须一并处理）；
 5. **新增交付项**（D-6②）：「`input.*` 返回值字段集合」与「`ActionDescriptor` 的 `means` 字段」各配一条离线断言——随 T2-A 合并，不留在本单。

@@ -20,8 +20,9 @@ import com.lightning.mod.core.session.ExportSceneWriter;
  * 本测试把「自述必须与行为一致」里<b>可静态判定</b>的部分钉死：
  *
  * <ol>
- * <li><b>契约版本 1.7</b>（收口批次裁决：#100=1.4、#101=1.5、#103=1.6，本单与 #114/#122/#123 同批取 1.7）：
- * {@code Contract.VERSION} 与三个动作的 {@code since} 都必须是 1.7；</li>
+ * <li><b>契约版本不得低于本族 since</b>：{@code Contract.VERSION} 由各批一起向前推进
+ * （#102 引入时为 1.7；#165 输入族把它推到 1.8），而三个导出动作的 {@code since} <b>恒为 1.7</b>
+ * （引入版本不随批次变化）；</li>
  * <li><b>D3 默认值可见</b>：预算与形态参数必须带字面默认值（缺 default 的 optional 参数
  * 会让调用方只能靠试错）；</li>
  * <li><b>D1 自述完备</b>：名称/权限级/说明/返回结构/示例/since 齐备，
@@ -42,10 +43,11 @@ public class ExportActionsDescriptorTest {
         return r;
     }
 
-    /** 契约版本 1.7，且三个动作的 since 都是 1.7。 */
+    /** 三个导出动作的 {@code since} 恒为 1.7；契约版本必须 ≥ 它（当前 1.8，由 #165 输入族推进）。 */
     @Test
     public void exportActionsAreSince17() {
-        assertEquals("收口批次裁决：#102 取 1.7（#100=1.4、#101=1.5、#103=1.6 已占）", "1.7", Contract.VERSION);
+        assertEquals("契约版本（1.8 由 #165 输入族推进；#102 引入时为 1.7）——本断言只钉「导入版本不被改写」这件事的对照面", "1.8", Contract.VERSION);
+        assertTrue("契约版本必须 ≥ 1.7", Contract.VERSION.compareTo("1.7") >= 0);
         ActionRegistry r = registry();
         for (String name : EXPORT_ACTIONS) {
             ActionDescriptor d = r.descriptor(name);

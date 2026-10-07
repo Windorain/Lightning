@@ -590,7 +590,6 @@ public final class InputStateProviderImpl implements InputStateProvider {
         list.add("作业取消能力不存在；离图/断连/关服无钩子；崩溃不承诺清理");
         list.add("坐标换算的实机自校准未做（P0 只在一组 displayHeight/pixelScale 上定案了 Y 翻转）");
         list.add("轮询面不覆盖：Keyboard.isKeyDown / Mouse.isButtonDown 型判定不随队列注入变化");
-        list.add("契约版本未前进（仍 " + Contract.VERSION + "）；五个 input.* 动作由 T3 注册");
         return list;
     }
 

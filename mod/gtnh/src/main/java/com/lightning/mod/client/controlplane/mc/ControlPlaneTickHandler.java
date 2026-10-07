@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 
 import com.lightning.mod.client.controlplane.core.JobQueue;
 import com.lightning.mod.client.controlplane.mc.cmd.CommandArtifactRegistrar;
+import com.lightning.mod.client.controlplane.mc.input.InputExpiryPump;
 
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
@@ -31,6 +32,17 @@ import cpw.mods.fml.relauncher.Side;
  * <p>
  * 契约字段 {@code probeActive} / {@code probe} 仍在（{@link ProbeActivity}），语义改为
  * 「控制面自身忙闲」，形状不变。
+ *
+ * <h2>本 tick 里的第二件事：输入持键的到期结算（D-7）</h2>
+ *
+ * {@link InputExpiryPump#tick()} 在作业排空**之后**结算一次输入的到期持键。它修的是
+ * {@code input-contract.md} §9.3 第 1 条（「唯一 tick 驱动 = 步进动作的 advance」）留下的一条实际漏洞：
+ * {@code input.key action:"down"} 这类作业**立即完成却刻意保留持键**，此时没有任何步进动作在跑，
+ * 到期项因此永远没人结算——键会一直按着（§3.2 的「不允许无限期持有」在空闲期不成立）。
+ *
+ * <p>
+ * 它<b>不是</b>新订阅者（§9.3 第 2 条的【禁令】只禁新增 {@code ClientTickEvent} 订阅者），
+ * 而是复用本处理器已有的那一拍；D-7 的完整理由与代价见 {@link InputExpiryPump} 的类注释。
  */
 public final class ControlPlaneTickHandler {
 
@@ -68,6 +80,9 @@ public final class ControlPlaneTickHandler {
             if (queue.drainOne()) {
                 CpAboutSnapshot.refresh(mc);
             }
+            // 输入持键的到期结算（D-7）：排在作业排空**之后**——先把本 tick 的作业推进完，
+            // 再由本泵收口它留下的到期项（幂等；无持有时是空操作，失败只 WARN 一次不刷屏）
+            InputExpiryPump.tick();
         } catch (Throwable t) {
             CpLog.error(t, "控制面 tick 排空异常（已吞掉，不影响游戏）");
         }

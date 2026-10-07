@@ -54,7 +54,7 @@ public final class InputMouseAction extends SteppingActionBase {
     /** 动作名。 */
     public static final String NAME = "input.mouse";
 
-    /** {@code since} 说明同 {@link InputKeyAction#descriptor()}（契约 §1.4：T3 注册时写 1.8）。 */
+    /** {@code since}/{@code means} 口径同 {@link InputKeyAction#descriptor()}（本批 #165 写入 1.8）。 */
     public static ActionDescriptor descriptor() {
         return ActionDescriptor.builder(NAME, Tier.SCENE)
             .description(
@@ -87,6 +87,8 @@ public final class InputMouseAction extends SteppingActionBase {
             .example("{\"confirm\":true,\"op\":\"move\",\"x\":426,\"y\":321}")
             .example("{\"confirm\":true,\"op\":\"wheel\",\"amount\":-1}")
             .example("{\"confirm\":true,\"op\":\"click\",\"button\":0,\"holdTicks\":2}")
+            .since("1.8")
+            .means(InputCapabilities.MEANS)
             .build();
     }
 

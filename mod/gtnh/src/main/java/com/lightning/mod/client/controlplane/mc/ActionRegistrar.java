@@ -14,6 +14,11 @@ import com.lightning.mod.client.controlplane.mc.cmd.SdeCommandWhitelist;
 import com.lightning.mod.client.controlplane.mc.export.ExportMultiblockAction;
 import com.lightning.mod.client.controlplane.mc.export.ExportRegistryAction;
 import com.lightning.mod.client.controlplane.mc.export.ExportSceneAction;
+import com.lightning.mod.client.controlplane.mc.input.InputKeyAction;
+import com.lightning.mod.client.controlplane.mc.input.InputMouseAction;
+import com.lightning.mod.client.controlplane.mc.input.InputReleaseAction;
+import com.lightning.mod.client.controlplane.mc.input.InputTextAction;
+import com.lightning.mod.client.controlplane.mc.input.observe.InputStateAction;
 import com.lightning.mod.client.controlplane.mc.player.PlaceBlockAction;
 import com.lightning.mod.client.controlplane.mc.player.PlayerDigAction;
 import com.lightning.mod.client.controlplane.mc.player.PlayerGuiAction;
@@ -75,10 +80,16 @@ import com.lightning.mod.core.session.ExportSceneWriter;
  * 动作面随 PR 追加而增长：PR-1 = 8 个（1.0）、PR-2 = +3 取证（1.1）、PR-3 判据（1.2）、
  * #98 = +8 读面（1.3）、#99 = +6 L0（1.3）、#100 = +2 命令通道（1.4）、#101 = +9 L1（1.5）、
  * #103 = +1 收尾原语（1.6）、#102 = +3 导出族（1.7）、#122 = +1 流体注入（1.7）、
- * #114 = +2 捕获诊断（1.7，{@code read.capture} + {@code capture.diag}）——当前 43 个。
+ * #114 = +2 捕获诊断（1.7，{@code read.capture} + {@code capture.diag}）、
+ * #160/#163/#164/#165 = +5 通用玩家输入（1.8，见 {@link #registerInputActions}）——当前 48 个。
  * （#123 只改契约语义与响应字段，不新增动作。）<b>本注释里的数字必须与实际注册数一致</b>——历史上这里曾写「8 个」
  * 而实际 11 个（Gitea #97 §5-D3 判为文档漂移）。注册数可在实机经
  * {@code GET /cp/v1/actions} 的 {@code count} 字段一步核对，改动本文件后请顺手核一次。
+ *
+ * <p>
+ * <b>两道机械断言与计数同生共死</b>：{@code ReadCaptureOfflineTest} 与
+ * {@code InputCapabilitiesTest} 各自断言注册总数。改本文件的计数时必须同时改它们，
+ * 否则「注释写 48、实际 43」这类漂移会以测试全绿的形式存活到下个里程碑。
  */
 public final class ActionRegistrar {
 
@@ -93,7 +104,8 @@ public final class ActionRegistrar {
     /**
      * 注册全部动作（PR-1 的 8 个 + PR-2 的 3 个取证 + #98 的 8 个读面 + #99 的 6 个 L0
      * + 收口T3 的 2 个命令通道 + #101 的 9 个 L1 + #103 的 1 个收尾原语 + #102 的 3 个导出族
-     * + #122 的 1 个流体注入 + #114 的 2 个捕获诊断（1 个读面 + 1 个布防动作）= 43 个）。
+     * + #122 的 1 个流体注入 + #114 的 2 个捕获诊断（1 个读面 + 1 个布防动作）
+     * + #165 的 5 个通用玩家输入 = 48 个）。
      *
      * <p>
      * 数字以实机 {@code GET /cp/v1/actions} 的 {@code count} 为权威（见类注释「动作数与契约版本」）。
@@ -302,6 +314,46 @@ public final class ActionRegistrar {
         registerCommandActions(runtime, registry);
         registerShutdownAction(runtime, registry);
         registerExportActions(runtime, registry);
+        registerInputActions(runtime, registry);
+    }
+
+    /**
+     * 通用玩家输入族（Gitea #160 立项 / #162 冻结 / #163+#164 实现 / #165 注册，契约 1.8）：
+     * {@code input.key} / {@code input.mouse} / {@code input.text} / {@code input.release} /
+     * {@code input.state}。契约正文见 {@code docs/control-plane/input-contract.md}，
+     * 覆盖矩阵与旁路清单见 {@code docs/control-plane/input-coverage.md}。
+     *
+     * <h2>注册形态逐个说清（这三类形态不一样，混用会出事）</h2>
+     * <ul>
+     * <li>{@code input.key} / {@code input.mouse} 是<b>步进动作，且必须走工厂注册</b>：它们的作业级状态
+     * （持有表、到期时刻、已投递计数）挂在<b>实例</b>上，复用单例会让第二个作业直接读到上一个作业的结果
+     * （本仓已有实测事故）。{@code tap}/{@code click} 的 {@code holdTicks} 天然跨 tick，必须每 tick 被推进一次。</li>
+     * <li>{@code input.text} / {@code input.release} 是<b>同步动作</b>：逐字符投递与全清清理都在一次调用内完成。
+     * （{@code input.text} 在当前能力未就绪时**必然** CP-STATE-001——这是刻意的，不许有假绿。）</li>
+     * <li>{@code input.state} 是 {@code observe} 级同步动作：只读快照，无 {@code confirm} 门，可自由轮询。
+     * 它是本族<b>唯一</b>的能力声明口。</li>
+     * </ul>
+     *
+     * <h2>为什么 {@code since} 写实值 1.8（而不是继续留「待前进」）</h2>
+     * {@code input-contract.md} §1.4 的硬要求：写入具体版本号必须与 {@code contractVersion} 前进<b>同 PR</b>。
+     * 本批同时改了 {@code Contract.VERSION}（1.7→1.8）与两处动作计数断言
+     * （{@code ReadCaptureOfflineTest} 与 {@code InputCapabilitiesTest}，43→48）。
+     * <b>不许</b>只改其中一处：注释、注册数、断言三处必须同批移动，否则漂移会以测试全绿的形式存活。
+     *
+     * <h2>手段归因（{@code means}）</h2>
+     * 五个动作都写 {@code means:"input"}（{@code input-contract.md} §10.3）：它们确实是把事件投进
+     * <b>游戏自己的输入队列</b>、由游戏路由，而不是语义 API 直调。{@code ActionDescriptor} 的
+     * {@code means} 是<b>可选</b>字段且**不设默认值**，只有本族写它 ⇒ 既有动作的自描述 JSON 逐字节不变。
+     */
+    private static void registerInputActions(ControlPlaneRuntime runtime, ActionRegistry registry) {
+        // 步进 + 工厂：作业级持有状态必须一个作业一个实例
+        registry.registerStepping(InputKeyAction.descriptor(), () -> new InputKeyAction());
+        registry.registerStepping(InputMouseAction.descriptor(), () -> new InputMouseAction());
+        // 同步：投递 / 清理在一次调用内完成
+        registry.register(InputTextAction.descriptor(), new InputTextAction());
+        registry.register(InputReleaseAction.descriptor(), new InputReleaseAction());
+        // 只读观察面：observe 级、无 confirm、可自由轮询
+        registry.register(InputStateAction.descriptor(), new InputStateAction());
     }
 
     /**
