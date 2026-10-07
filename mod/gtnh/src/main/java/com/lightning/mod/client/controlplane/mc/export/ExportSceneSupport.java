@@ -103,17 +103,14 @@ public final class ExportSceneSupport {
         return out.isEmpty() ? "export" : out;
     }
 
-    /** 整数预算参数：非法或超天花板一律 CP-VALID-002（不静默钳到上限）。 */
+    /** 整数预算参数：非法或超天花板一律 CP-VALID-002（不静默钳到上限，也不静默截断小数）。 */
     public static int requireBudget(ActionContext ctx, String field, int def, int hard) {
         JsonElement e = ctx.param(field);
         if (e == null || e.isJsonNull()) {
             return def;
         }
-        if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive()
-            .isNumber()) {
-            throw CpException.param("预算参数类型不符", field, "须为整数（默认 " + def + "）");
-        }
-        int v = e.getAsInt();
+        // Gitea #131：这里原先是 e.getAsInt()（1.5 → 1 静默截断）——TYPE_INT 参数的取值必须走严格口径
+        int v = Json.strictIntElement(e, field);
         if (v <= 0) {
             throw CpException.param("预算参数非法", field, "须为正整数（默认 " + def + "），收到 " + v);
         }
@@ -129,11 +126,7 @@ public final class ExportSceneSupport {
         if (e == null || e.isJsonNull()) {
             return def;
         }
-        if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive()
-            .isNumber()) {
-            throw CpException.param("预算参数类型不符", field, "须为整数（默认 " + def + "）");
-        }
-        long v = e.getAsLong();
+        long v = Json.strictLongElement(e, field);
         if (v <= 0) {
             throw CpException.param("预算参数非法", field, "须为正整数（默认 " + def + "），收到 " + v);
         }
@@ -349,13 +342,13 @@ public final class ExportSceneSupport {
         Fields fields = new Fields();
         for (int i = 0; i < want.size(); i++) {
             JsonElement e = want.get(i);
-            if (e == null || !e.isJsonPrimitive()
-                || !e.getAsJsonPrimitive()
-                    .isNumber()) {
-                fields.add("expectFrames.frames[" + i + "]", "须为整数帧号");
+            // Gitea #131：帧号是 int（{@code provenance.recordedFrames} 的键），1.5 不得静默截断成 1
+            String why = Json.integralRejectReason(e);
+            if (why != null) {
+                fields.add("expectFrames.frames[" + i + "]", "须为精确整数帧号：" + why);
                 continue;
             }
-            expect.add(Integer.valueOf(e.getAsInt()));
+            expect.add(Integer.valueOf(Json.strictIntElement(e, "expectFrames.frames[" + i + "]")));
         }
         fields.throwIfAny("expectFrames 参数非法");
         if (!expect.equals(got)) {

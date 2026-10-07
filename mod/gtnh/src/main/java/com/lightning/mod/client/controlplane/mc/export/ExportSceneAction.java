@@ -286,13 +286,13 @@ public final class ExportSceneAction extends SteppingActionBase {
                 com.lightning.mod.client.controlplane.core.Fields fields = new com.lightning.mod.client.controlplane.core.Fields();
                 for (int i = 0; i < a.size(); i++) {
                     com.google.gson.JsonElement v = a.get(i);
-                    if (v == null || !v.isJsonPrimitive()
-                        || !v.getAsJsonPrimitive()
-                            .isNumber()) {
-                        fields.add("frames[" + i + "]", "须为整数帧号");
+                    // Gitea #131：帧号是 int；1.5 / "1" / true 都不得静默转换（原先是 getAsInt() + isNumber 粗检）
+                    String why = com.lightning.mod.client.controlplane.core.Json.integralRejectReason(v);
+                    if (why != null) {
+                        fields.add("frames[" + i + "]", "须为精确整数帧号：" + why);
                         continue;
                     }
-                    int f = v.getAsInt();
+                    int f = com.lightning.mod.client.controlplane.core.Json.strictIntElement(v, "frames[" + i + "]");
                     if (f < 0) {
                         fields.add("frames[" + i + "]", "帧号须 ≥ 0，收到 " + f);
                         continue;
