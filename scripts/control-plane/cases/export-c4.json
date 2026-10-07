@@ -1,0 +1,88 @@
+{
+  "schema": "lightning.case/1",
+  "id": "cp-export-c4",
+  "label": "#102 收口T5 · C4 同 run 纪律：导出件 + 实拍 + 观测记录 + 世界清单哈希同一 run",
+  "world": {
+    "folder": "cp_export_c4",
+    "seed": 20261007,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 20
+  },
+  "build": [
+    { "op": "clear", "from": [64, 11, 64], "to": [70, 15, 70] },
+    { "op": "block", "at": "base+[0,0,0]", "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": "base+[0,0,1]", "id": "minecraft:chest", "meta": 0 },
+    { "op": "te", "at": "base+[0,0,1]", "completer": "vanilla", "params": {} },
+    { "op": "wait", "ticks": 20 }
+  ],
+  "read": [
+    {
+      "action": "read.blocks",
+      "params": { "from": [63, 11, 63], "to": [66, 14, 66], "includeAir": false },
+      "path": "read/blocks.json",
+      "role": "read-blocks"
+    }
+  ],
+  "export": [
+    { "action": "cmd.exec", "params": { "command": "/sde sel cuboid" } },
+    { "action": "scene.player.pose", "params": { "pos": [65.5, 13.0, 65.5], "yaw": 0.0, "pitch": 90.0 } },
+    { "action": "cmd.exec", "params": { "command": "/sde pos1" } },
+    { "action": "scene.player.pose", "params": { "pos": [68.5, 16.0, 68.5], "yaw": 0.0, "pitch": 90.0 } },
+    { "action": "cmd.exec", "params": { "command": "/sde pos2" } },
+    { "action": "cmd.exec", "params": { "command": "/sde start" } },
+    { "action": "cmd.exec", "params": { "command": "/sde setframe 0" } },
+    { "action": "cmd.exec", "params": { "command": "/sde record" } },
+    {
+      "action": "export.scene",
+      "params": { "name": "c4-scene", "shape": "world", "includeFrames": true }
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "pos": [66.5, 14.0, 68.5],
+      "yaw": 180.0,
+      "pitch": 20.0,
+      "projection": { "type": "perspective", "fov": 70 },
+      "resolution": [640, 360]
+    }
+  ],
+  "criteria": [
+    {
+      "id": "scene-manifest-exists",
+      "type": "artifact-exists",
+      "params": { "path": "world/scene-manifest.json" }
+    },
+    {
+      "id": "observation-nonempty",
+      "type": "artifact-nonempty",
+      "params": { "path": "observation.json", "minBytes": 1 }
+    },
+    {
+      "id": "observation-schema",
+      "type": "json-field",
+      "params": { "path": "observation.json", "pointer": "/schema" },
+      "expect": "lightning.observation/1"
+    },
+    {
+      "id": "read-blocks-exists",
+      "type": "artifact-exists",
+      "params": { "path": "read/blocks.json" }
+    },
+    {
+      "id": "case-segment-emitted",
+      "type": "event-emitted",
+      "params": { "kind": "case-segment", "minCount": 1 }
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "world/scene-manifest.json", "role": "scene-manifest" },
+      { "path": "read/blocks.json", "role": "read-blocks" },
+      { "path": "export/c4-scene.json", "role": "scene-export" }
+    ]
+  }
+}

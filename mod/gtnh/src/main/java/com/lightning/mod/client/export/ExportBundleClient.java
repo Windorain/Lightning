@@ -22,6 +22,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.lightning.mod.client.registry.BlockRegistryPolicies;
 import com.lightning.mod.core.export.PendingDumpFiles;
+import com.lightning.mod.core.export.RegistryDumpDelivery;
 import com.lightning.mod.core.registry.GregTechMetaTileRegistry;
 import com.lightning.mod.mixin.interfaces.accessors.TextureMapAccessor;
 
@@ -55,12 +56,50 @@ public final class ExportBundleClient {
     private ExportBundleClient() {}
 
     /**
-     * 每客户端 tick：若存在服务端写入的 {@link PendingDumpFiles#FILE_NAME} 则消费并写出全量注册表，然后删除该文件。
+     * 每客户端 tick：消费一次注册表 dump 请求，写出全量注册表。
+     *
+     * <h2>两条来源（#102 裁决 7：内存单槽优先，老文件路径兜底）</h2>
+     *
+     * <ol>
+     * <li><b>内存投递单</b>（{@link RegistryDumpDelivery}）：cp 通道走这条。落点由<b>发起方</b>
+     * （{@code export.registry} 动作 / {@code cmd.exec}）给出——run 目录，绝对路径，客户端不推导。
+     * 这是 C5「命令通道产生的场景文件同样可发现」的实现依据：run 由发起方持有，
+     * 投递单把落点显式传过来。</li>
+     * <li><b>老文件路径</b>（{@code structure_exports/pending_dump.json}）：命令通道兜底走这条。
+     * 落点 {@code exportRoot} 由服务端线程算（CWD 相对），与任何 run 无关——这正是 C5 判红的地方，
+     * 其删除归 #104。</li>
+     * </ol>
+     *
+     * <p>
+     * 两条路最终都收敛到 {@link #writeFullRegistryDump(File)}——<b>同一个写出体</b>，
+     * 因此 D2「同语义经 API 与经命令执行结果一致」在 dump 链路上是机械成立的，不靠约定。
      */
     public static void tickConsumePendingDumpIfAny(Minecraft mc) {
         if (mc == null || mc.theWorld == null) {
             return;
         }
+        // ① 内存单槽优先（cp 通道；落点由发起方给出）
+        RegistryDumpDelivery.Request req = RegistryDumpDelivery.consume();
+        if (req != null) {
+            try {
+                writeFullRegistryDump(req.exportRoot());
+                RegistryDumpDelivery.finish(req, null);
+                if (mc.thePlayer != null) {
+                    mc.thePlayer.addChatMessage(
+                        new ChatComponentText(
+                            "SDE: 全量注册表已写入 run 目录: " + req.exportRoot()
+                                .getAbsolutePath()));
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                RegistryDumpDelivery.finish(req, String.valueOf(e));
+                if (mc.thePlayer != null) {
+                    mc.thePlayer.addChatMessage(new ChatComponentText("SDE: dump 失败 — " + e.getMessage()));
+                }
+            }
+            return;
+        }
+        // ② 老文件路径兜底（仅命令通道）
         // 优先游戏目录；次选 JVM 当前工作目录（仅开发/特殊启动器场景，与 mcDataDir 可能不一致）
         File[] pendingDumpCandidates = new File[] {
             new File(mc.mcDataDir, "structure_exports/" + PendingDumpFiles.FILE_NAME),

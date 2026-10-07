@@ -43,6 +43,7 @@ public final class CaseParser {
         "world",
         "build",
         "read",
+        "export",
         "capture",
         "cameras",
         "criteria",
@@ -69,6 +70,9 @@ public final class CaseParser {
 
     /** {@code read} 段步骤的允许字段（v1.3，issue #98）。 */
     public static final Set<String> READ_STEP_FIELDS = unmodifiable("action", "params", "path", "role");
+
+    /** {@code export} 段步骤的允许字段（v1.6，Gitea #102）。 */
+    public static final Set<String> EXPORT_STEP_FIELDS = unmodifiable("action", "params");
 
     /** 变体条目的允许字段。 */
     public static final Set<String> VARIANT_FIELDS = unmodifiable("id", "mutate", "expectCriteriaRed");
@@ -172,6 +176,7 @@ public final class CaseParser {
         CaseFile.World world = parseWorld(o, fields, warnings);
         List<CaseFile.Step> build = parseBuild(o, world, fields, warnings);
         List<CaseFile.ReadStep> read = parseRead(o, fields, warnings);
+        List<CaseFile.ReadStep> export = parseExport(o, fields, warnings);
         JsonElement capture = parseCapture(o, fields, warnings);
         JsonArray cameras = parseCameras(o, fields, warnings);
         List<CaseFile.Criterion> criteria = parseCriteria(o, fields, warnings);
@@ -196,6 +201,7 @@ public final class CaseParser {
             world,
             build,
             read,
+            export,
             capture,
             cameras,
             criteria,
@@ -489,6 +495,57 @@ public final class CaseParser {
             String role = stringOf(step, "role", ctx + ".role", fields);
             out.add(
                 new CaseFile.ReadStep(action, params == null ? new JsonObject() : Json.copyObject(params), path, role));
+        }
+        return out;
+    }
+
+    /**
+     * 解析 {@code export} 段（v1.6，Gitea #102）：导出步骤清单。
+     *
+     * <h2>为什么需要独立一段（C4 同 run 纪律）</h2>
+     *
+     * C4 要求「导出件、实拍、观测记录、世界清单哈希<b>同一 run</b>」。若导出只能在用例之外单独调
+     * {@code export.scene}，它必然落在<b>另一个</b> run 里——那样「同一 run 内世界清单哈希唯一」
+     * 这条判据就永远无法对导出件成立。因此导出必须是用例的一段：跑在 {@code read} 之后、
+     * {@code cameras} 之前（先有世界读数与场景，再导出与拍摄），落进用例自己的 run 目录。
+     *
+     * <p>
+     * 每步 {@code {action:"export.scene", params:{…}}}：动作名限 {@code export.*} 前缀
+     * （与 {@code read} 段限 {@code read.*} 同一思路：段语义靠前缀静态可查）。
+     * 产物路径由动作自己决定（落 run 目录的 {@code export/} 下），故本段<b>不</b>接受 {@code path}
+     * ——避免「声明一个落点而动作写到别处」这种自相矛盾。
+     *
+     * @return 原样深拷的导出步骤；未声明返回空列表
+     */
+    private List<CaseFile.ReadStep> parseExport(JsonObject o, Fields fields, List<String> warnings) {
+        List<CaseFile.ReadStep> out = new ArrayList<CaseFile.ReadStep>();
+        if (!o.has("export")) {
+            return out;
+        }
+        JsonArray arr = Json.optArray(o, "export");
+        if (arr == null) {
+            fields.add("export", "须为 array（导出步骤 [{action,params?}]）");
+            return out;
+        }
+        for (int i = 0; i < arr.size(); i++) {
+            String ctx = "export[" + i + "]";
+            JsonElement e = arr.get(i);
+            if (e == null || !e.isJsonObject()) {
+                fields.add(ctx, "步骤须为 object {action,params?}");
+                continue;
+            }
+            JsonObject step = e.getAsJsonObject();
+            checkUnknown(step, EXPORT_STEP_FIELDS, ctx, fields, warnings);
+            String action = stringOf(step, "action", ctx + ".action", fields);
+            if (action == null) {
+                fields.add(ctx + ".action", "必填（导出动作名，如 export.scene）");
+            }
+            JsonObject params = Json.optObject(step, "params");
+            if (step.has("params") && params == null) {
+                fields.add(ctx + ".params", "须为 object");
+            }
+            out.add(
+                new CaseFile.ReadStep(action, params == null ? new JsonObject() : Json.copyObject(params), null, null));
         }
         return out;
     }

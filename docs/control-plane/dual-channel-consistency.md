@@ -4,6 +4,11 @@
 > **上游判据**：#96 §8.2「命令不扭曲行为」、§10-D2「同语义经 API 与经命令执行结果一致，可复算」。
 > **本文是方法定义，不是执行记录**——本单只交付「怎么比、比什么、什么算通过」，
 > 实际对照记录由 #102 在导出能力搬迁完成后产出。
+>
+> **适用范围（#102 补充裁决 X-11）**：D2 **只适用于有命令孪生的 `/sde` 承重族动作**——
+> 即 `export.scene` ↔ `/sde export`、`export.registry` ↔ `/sde dump`、
+> `export.multiblock` ↔ `/sde multiblock`（contract.md §4.7.7）。**其余动作在自述与验收中标注
+> 「D2 不适用」**，不强行造比对。本文件 §3 的六条判据只对上述三条成立。
 
 ---
 
@@ -69,6 +74,18 @@
 > **#102 注意**：若产物纪律搬迁（写进 run 目录、进哈希清单）改变了字节，**不得**把「字节哈希相等」
 > 当作 D2 判据——那会把「搬迁」误判成「不一致」。判据锚定的是**语义**，不是字节。
 
+### 2.2.1 三条链路的语义子树定义（#102 落地）
+
+| 链路 | 语义子树 | 备注 |
+|---|---|---|
+| `export` | 解 Envelope → `inner.frames[].structure`（World 形态）或整个 inner（Structure 形态）。**排除** `meta.provenance` / `meta.exportId` / `frames[].exportId` | cp 通道多了这三个字段（C3 判据用），它不是语义 |
+| `dump` | `block_registry.json` / `material_registry.json` / `model_registry.json` 三份**整份** inner | 两份写出体相同，且都不含路径/时间戳 |
+| `multiblock` | 逐台信封解出来的 inner（`MultiblockFactorizer` 的 `innerBody`） | 产物本身**不含** runId/时间戳/绝对路径 ⇒ 两次运行逐字节相同（A3），故这条**可以**做文件字节比对 |
+
+**为什么 `multiblock` 能字节比对而 `export` 不能**：多方块产物有「逐字节幂等」硬约束
+（`docs/contracts/format-multiblock-doc.md` §6.3，刻意不写 `run-NNNN` 路径）；而场景文件在 cp 通道
+会带 `provenance`（含 `runId`/`exportId`），两次运行必然不同。
+
 ### 2.3 口径三：并发口径（裁决 13 的必比项）
 
 **要求**：D2 的比对必须在**两条通道并发**时仍然成立。这是 #100 裁决 13（`ExportSession` 加锁）
@@ -132,6 +149,11 @@ cp 动作在 `Client thread`，二者**本来就并行**。
 **#100 自评**：D2 的**方法**已定义（本文），D2-2/D2-4/D2-5/D2-6 所依赖的实现已交付并有实机证据；
 D2-1（API 侧等价动作）与 D2-3（第二条产物通道）**明确留给 #102**——这是任务单「双通道一致性测试方法
 已定义…供 #102 执行 D2 验收」的字面要求。
+
+**#102 自评（收口T5，2026-10-07）**：D2-3 的第二条产物通道已交付（`export.scene`/`export.registry`/
+`export.multiblock`），三条链路各自与命令孪生**共用同一个执行体**（见 contract.md §4.7.7）——
+因此「一致性」不是靠约定对齐，而是「同一段代码 + 不同落点」。执行记录与证据见
+`temp/cp-export/evidence/`（对照脚本 `scripts/control-plane/export-d2-compare.mjs`）。
 
 ---
 

@@ -16,7 +16,9 @@ public final class Contract {
      * 见 contract.md §4.1/§4.4）；
      * 1.4=收口T3 命令通道（issue #100：{@code cmd.exec} / {@code export.session}，见 contract.md §4.5）；
      * 1.5=L1 玩家操作（issue #101：{@code player.*} 九动作，见 contract.md §4.6；调度者撞号裁决：
-     * 本单分支自报 1.4 与 #100 撞号，合流时统一为 1.5）。
+     * 本单分支自报 1.4 与 #100 撞号，合流时统一为 1.5）；
+     * 1.6=收口T5 导出与产物纪律（issue #102：{@code export.scene} / {@code export.registry} /
+     * {@code export.multiblock} 三动作，见 contract.md §4.7；派发裁决：本单取 1.6，#101 已占 1.5）。
      * 小版本只增不改义（contract.md §5）。
      *
      * <p>
@@ -24,7 +26,7 @@ public final class Contract {
      * 「服务契约版本比某个动作的引入版本还旧」这种自相矛盾的目录（D1/D3 会判红）。
      * 新增动作时两处要一起改。
      */
-    public static final String VERSION = "1.5";
+    public static final String VERSION = "1.6";
 
     /** 契约 URI 前缀，即契约大版本。 */
     public static final String PREFIX = "/cp/v1";
