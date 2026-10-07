@@ -207,6 +207,85 @@ public final class CaseFile {
         }
     }
 
+    /**
+     * 编排步骤（v1.6，case-file.md §3.2）：{@code action} 段的一项。
+     *
+     * <p>
+     * 语义是「<b>执行用例声明的任意 cp 动作</b> → 结果 JSON 落 run 目录的 {@code path} → 登记为产物
+     * →（可选）当场逐步断言」。它是 #96 §4.3「L2 = L0/L1 的<b>有序编排</b>」在代码上的落点：
+     * 没有它，固定程序只能表达 {@code build} 段的四种构建 op，L0（{@code scene.*}）与
+     * L1（{@code player.*}）动作一步也进不了用例，{@code tutorials/} 的教程复现程序无从表达。
+     *
+     * <p>
+     * 与 {@link ReadStep} 的差别只有一条：本步骤的 {@code action} <b>不限前缀</b>——读面段是
+     * 「只读」纪律的静态落点（只许 {@code read.*}），而编排段的本职就是调写动作。因此编排段改用
+     * <b>另一条</b>静态纪律：只许<b>同步</b>动作（步进动作跨 tick，无法在段内推进），
+     * 且不许是收尾原语 {@code core.shutdown}（见 {@code CaseValidator#ACTION_FORBIDDEN}）。
+     */
+    public static final class ActionStep {
+
+        private final String action;
+        private final JsonObject params;
+        private final String path;
+        private final String role;
+        private final JsonObject expect;
+        private final boolean hasExpect;
+
+        ActionStep(String action, JsonObject params, String path, String role, JsonObject expect, boolean hasExpect) {
+            this.action = action;
+            this.params = params == null ? new JsonObject() : params;
+            this.path = path;
+            this.role = role;
+            this.expect = expect;
+            this.hasExpect = hasExpect;
+        }
+
+        /** 动作名（任意已注册的同步动作，{@code read.*} 与 {@code scene.*}/{@code player.*} 都算）。 */
+        public String action() {
+            return action;
+        }
+
+        /** 动作参数（原样透传；默认值由动作实现补）。 */
+        public JsonObject params() {
+            return Json.copyObject(params);
+        }
+
+        /** run 目录内相对路径（结果落点，也是判据的 {@code params.path}）。 */
+        public String path() {
+            return path;
+        }
+
+        /** 产物角色标签；未声明时为 {@code null}（运行时按动作名派生）。 */
+        public String role() {
+            return role;
+        }
+
+        /** 逐步断言（RFC 6901 指针 → 期望值）；未声明时为 null。 */
+        public JsonObject expect() {
+            return expect == null ? null : Json.copyObject(expect);
+        }
+
+        /** 是否声明了逐步断言（区分「未声明」与「声明为空对象」）。 */
+        public boolean hasExpect() {
+            return hasExpect;
+        }
+
+        /** {@code {action, params, path, role?, expect?}}。 */
+        public JsonObject toJson() {
+            JsonObject o = new JsonObject();
+            o.addProperty("action", action);
+            o.add("params", Json.copyObject(params));
+            o.addProperty("path", path);
+            if (role != null) {
+                o.addProperty("role", role);
+            }
+            if (hasExpect) {
+                o.add("expect", Json.copyObject(expect));
+            }
+            return o;
+        }
+    }
+
     /** 判据条目（case-file.md §5）。 */
     public static final class Criterion {
 
@@ -327,6 +406,7 @@ public final class CaseFile {
     private final World world;
     private final List<Step> build;
     private final List<ReadStep> read;
+    private final List<ActionStep> action;
     private final JsonElement capture;
     private final JsonArray cameras;
     private final List<Criterion> criteria;
@@ -335,8 +415,8 @@ public final class CaseFile {
     private final List<String> warnings;
 
     CaseFile(JsonObject raw, String rawText, String schema, String id, String label, World world, List<Step> build,
-        List<ReadStep> read, JsonElement capture, JsonArray cameras, List<Criterion> criteria, List<Variant> variants,
-        JsonArray evidenceExpect, List<String> warnings) {
+        List<ReadStep> read, List<ActionStep> action, JsonElement capture, JsonArray cameras, List<Criterion> criteria,
+        List<Variant> variants, JsonArray evidenceExpect, List<String> warnings) {
         this.raw = raw;
         this.rawText = rawText;
         this.sha256 = Hashing.sha256HexUtf8(rawText);
@@ -346,6 +426,7 @@ public final class CaseFile {
         this.world = world;
         this.build = Collections.unmodifiableList(new ArrayList<Step>(build));
         this.read = Collections.unmodifiableList(new ArrayList<ReadStep>(read));
+        this.action = Collections.unmodifiableList(new ArrayList<ActionStep>(action));
         this.capture = capture;
         this.cameras = cameras;
         this.criteria = Collections.unmodifiableList(new ArrayList<Criterion>(criteria));
@@ -397,6 +478,11 @@ public final class CaseFile {
     /** 读面步骤（有序；v1.3 起）。空列表表示用例不产读面产物。 */
     public List<ReadStep> read() {
         return read;
+    }
+
+    /** 编排步骤（有序；v1.6 起）。空列表表示用例不编排任何 cp 动作。 */
+    public List<ActionStep> action() {
+        return action;
     }
 
     /** capture 段原文（PR-1 透传），未声明时为 null。 */

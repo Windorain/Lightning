@@ -96,7 +96,22 @@ public class PlayerActionsTest {
                 registry.descriptor(name)
                     .since());
         }
-        assertEquals("契约版本应升到 1.5", "1.5", Contract.VERSION);
+    }
+
+    /**
+     * 契约版本只增不减（#103 起 L1 不再是最高版本：1.6 = {@code core.shutdown}）。
+     *
+     * <p>
+     * 这条断言从「版本号逐字等于 1.5」改成「不低于 1.5」，理由是版本号是<b>全局单调量</b>：
+     * 后续每一单都会把它推高，把某个批次的值写死在这里，等于让每一次新增动作都去改别的单的测试
+     * ——那正是「文档/测试漂移」的温床。真正要守的不变式有两条，都已单独断言：
+     * {@code Contract.VERSION ≥ max(动作 since)}（{@link #contractVersionCoversEveryActionSince}）
+     * 与「本组动作的 since 恒为 1.5」（{@link #playerActionsAreSince15}）。
+     */
+    @Test
+    public void contractVersionIsMonotonic() {
+        double v = Double.parseDouble(Contract.VERSION);
+        assertTrue("契约版本不得低于 1.5（L1 引入版本）", v >= 1.5d);
     }
 
     /** 动作名以 {@code player.} 开头——前缀即分组（与 read./scene. 同约定）。 */

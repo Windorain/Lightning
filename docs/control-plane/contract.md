@@ -58,12 +58,15 @@
 ## 4. 动作清单
 
 > **数量口径（D3 漂移防线）**：本表按引入批次分节；**权威动作数**以实机
-> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.4** 共 **13 个**动作：
-> 本节 8 个（PR-1）+ §4.1 的 3 个取证（PR-2）+ §4.3 的 2 个命令通道（收口T3）。
+> `GET /cp/v1/actions` 的 `count` 字段为准。契约 **1.6** 共 **37 个**动作：
+> 本节 8 个（PR-1）+ §4.1 的 8 个读面 + §4.2 的 3 个取证 + §4.4 的 6 个 L0 + §4.5 的 2 个命令通道
+> + §4.6 的 9 个 L1 + §4.8 的 1 个收尾原语。
 > 历史上本标题曾写「v1，PR-1 交付」而表外另有动作，导致目录与文档不一致（Gitea #97 §5-D3）——
 > 新增动作时**必须**同步本节计数。
 >
 > **版本撞号裁决（#100 派发裁决 1）**：1.3 由 #98（读面）与 #99（L0）并轨占用，故本单取 **1.4**。
+> **1.6 的撞号（#103 派发裁决）**：#102（导出）与本单同时预定 1.6——本单只给 `core.shutdown` 用
+> `since=1.6`；合流时由调度者统一（若 #102 先合、本单后合则本单升 1.7，以 merge 时裁决为准）。
 
 | 动作 | 级 | 语义 |
 |---|---|---|
@@ -349,6 +352,65 @@ PR-2 追加取证级动作（下表），PR-3 追加双轨判据；追加不改�
 见 case-file.md §8.8。要点：**验收类固定程序的第一次世界写动作必须是 `world.rebuild`（`void:true`）**，
 不得在既有世界上续跑。`case.run` 的 `world` 段与之是**同一实现**（§6.3），二者语义不冲突。
 L0 的轮内清场原语（`scene.entity.clear`）**不构成 hermetic 保证**，不能替代起手重建。
+
+### 4.8 无人值守收尾原语（v1.6，#103，「收口T6」）
+
+| 动作 | 级 | 语义 |
+|---|---|---|
+| `core.shutdown` | scene | **无人值守收尾原语**：读 run 的 `evidence.json` → 按约定定退出码 →（默认）延迟后结束客户端进程 |
+
+**为什么需要它（V5 的硬真空）**：老批处理设施（`MultiblockPipelineAutomation` 等）把
+「跑完 → 落结果文件 → 以退出码结束进程」做成一件事，外层脚本据此判红绿。那些设施随 #104 整体删除后，
+控制面成了唯一入口，而 `grep mc.shutdown|exitJava|exitCode` 在 `client/controlplane/` 里**零命中**
+——无人值守编排拿不到任何稳定的进程级信号，只能靠轮询 HTTP 猜「跑完了没、绿没绿」。
+
+**退出码约定（与 run 的**合并结论**对齐）**：
+
+| 码 | 含义 | 判定 |
+|---|---|---|
+| `0` | 判据全绿 | `criteria.json.overall == "green"` **且** `evidence.json.overall == "green"` |
+| `2` | 有红 | 两份里**任一**非 green（**任何**非 green 值都判 2，不是只认字面量 `red`） |
+| `3` | 设施错误 | 连「绿没绿」都读不出来：run 目录里两份结论文件都不在、非法 JSON、缺 `overall`、runId/caseId 都不可用 |
+
+**为什么读两份**：`criteria.json.overall` 是用例声明的**判据**结论，`evidence.json.overall` 是
+**期望证据核对**结论（该在场的产物在不在）——两者语义不同、**不可互替**。实机实测存在
+`criteria=red` 而 `evidence=green` 的 run（一次 `l1-orchestration` 的 2 条判据红、12 项期望产物齐备）；
+只读其一会对那次红跑返回 **0「判据全绿」**，即把红跑读成绿跑。合并规则与 `case.run` 的作业结果
+`overall` **逐字同源**（run 目录里没有持久化「合并结论」的字段，必须重新合并得出）。
+
+三个退出码值与老设施逐字相同（外层脚本可以不改）。**「结论红」与「设施坏」必须分开**——
+把两者混成一个非零码，是让自动化无法自诊断的最快方式。
+
+**退出纪律**（照抄已实测的口径）：FML 的 `FMLSecurityManager` 把非 `cpw.mods.fml.*` 发起的
+`exitVM` 权限请求直接抛 `ExitTrappedException`——自定义类里调 `Runtime.getRuntime().halt(code)`
+会被**静默拦掉**（实测：日志里一句 `FMLSecurityManager$ExitTrappedException`，进程仍以 0 退出，
+外层脚本因此把一次红跑读成绿跑）。因此：
+
+- `code == 0` ⇒ `Minecraft.shutdown()` 正常收尾（世界落盘，main 返回 0）；
+- `code != 0` ⇒ `FMLCommonHandler.instance().exitJava(code, false)`（结果文件已 flush）；
+- 两条路都先挂 120 s 安全网线程（到点 `exitJava(code, true)` 硬退），绝不挂死外层编排；
+- **绝不** `Runtime.halt` / `System.exit`。
+
+**为什么延迟退出**：本动作是 HTTP 动作，结论要经响应体回给调用方，而响应在动作返回**之后**才写；
+就地退出会把调用方吊死在一个永不来的响应上（而它正是要靠这个响应知道退出码）。因此实际退出跑在
+延迟 `delayMs`（默认 1500 ms）的守护线程里，结果里如实给 `exitScheduledInMs`。
+
+**可判定性**：`dryRun:true` 只定码不退出——用它可以在不杀进程的前提下逐条核对「码与 `evidence.overall` 对齐」。
+
+**不许编入固定程序**：本动作会让本作业后续段不再执行，`case.run` 的 `action` 段一律拒绝它
+（`CaseValidator.ACTION_FORBIDDEN`）——收尾由驱动在**整跑结束后**单独发起。
+
+### 4.9 L2 编排段（v1.6，#103）
+
+`case.run` 的用例文件新增通用 `action` 段（**段**的扩充，不是新动作）：逐条执行用例声明的任意
+**同步** cp 动作，产物落 run 目录，`expect` 非空时当场逐步断言。段序
+`world → capture → build → read → action → cameras → criteria → evidence`。
+完整口径见 [case-file.md §3.2](case-file.md)。
+
+**为什么它是 L2 的题中之义**：需求书 §4.3 把 L2 定义为「L0/L1 的**有序编排**，可重放、**逐步断言**」；
+在本段之前，用例能表达的世界写只有 `build` 段的四种构建 op（clear/block/te/wait），
+`scene.*`（L0）与 `player.*`（L1）一步也进不了固定程序——「L2 = 有序编排」这句话在代码上没有落点。
+**没有它，`tutorials/` 的教程复现程序无法表达。**
 
 ## 5. 版本化规则
 
