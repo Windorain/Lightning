@@ -27,7 +27,9 @@ public final class Contract {
      * 世界，见 contract.md §6.1/§6.6）；</li>
      * <li>L0 流体注入（issue #122：{@code scene.tank.fill}，见 contract.md §4.4；同一批的
      * {@code scene.inventory.write} 追加 {@code material}+{@code prefix} 条目形态——只增可选字段、
-     * 不改既有语义，故该动作 {@code since} 仍为 1.3）。</li>
+     * 不改既有语义，故该动作 {@code since} 仍为 1.3）；</li>
+     * <li>捕获通道自证诊断迁移（issue #114：{@code read.capture} 读面（§4.1）+ {@code capture.diag}
+     * 布防/drain-dump（§4.11）；#104 删除老探针 {@code CaptureChannelProbeAutomation} 的前置——V4 职责真空）。</li>
      * </ul>
      * 小版本只增不改义（contract.md §5）。
      *
