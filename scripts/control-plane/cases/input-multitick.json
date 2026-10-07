@@ -1,0 +1,71 @@
+{
+  "schema": "lightning.case/1",
+  "id": "input-multitick",
+  "label": "输入手段族跨帧固定程序（G1：action 段的输入步）",
+  "world": {
+    "folder": "cp_input_multitick",
+    "seed": 20261008,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "action": [
+    {
+      "action": "input.key",
+      "params": { "key": "key.forward", "action": "tap" },
+      "holdTicks": 20,
+      "path": "action/0-tap-forward-20.json",
+      "role": "input-tap-forward-20",
+      "expect": { "/delivered": 2, "/holdTicks": 20, "/action": "tap" }
+    },
+    {
+      "action": "input.key",
+      "params": { "key": "key.forward", "action": "down" },
+      "holdTicks": 10,
+      "path": "action/1-down-forward-10.json",
+      "role": "input-down-forward-10",
+      "expect": { "/delivered": 1, "/action": "down" }
+    },
+    {
+      "action": "input.key",
+      "params": { "key": "key.forward", "action": "up" },
+      "path": "action/2-up-forward.json",
+      "role": "input-up-forward",
+      "expect": { "/delivered": 1, "/action": "up" }
+    },
+    {
+      "action": "input.release",
+      "params": {},
+      "path": "action/3-release.json",
+      "role": "input-release",
+      "expect": { "/alreadyIdle": true, "/count": 0 }
+    }
+  ],
+  "criteria": [
+    {
+      "id": "in-tap-cross-frame-delivered",
+      "type": "json-field",
+      "params": { "path": "action/0-tap-forward-20.json", "pointer": "/delivered" },
+      "expect": 2
+    },
+    {
+      "id": "in-no-held-leak",
+      "type": "json-field",
+      "params": { "path": "action/3-release.json", "pointer": "/alreadyIdle" },
+      "expect": true
+    },
+    {
+      "id": "in-step-artifact-present",
+      "type": "artifact-nonempty",
+      "params": { "path": "action/1-down-forward-10.json" }
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "action/0-tap-forward-20.json", "role": "input-tap-forward-20" },
+      { "path": "action/1-down-forward-10.json", "role": "input-down-forward-10" },
+      { "path": "action/2-up-forward.json", "role": "input-up-forward" },
+      { "path": "action/3-release.json", "role": "input-release" }
+    ]
+  }
+}

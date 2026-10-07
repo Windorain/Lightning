@@ -1001,3 +1001,194 @@ node scripts/control-plane/export-d2-twins.mjs --out <证据目录>
    但服务端线程写的那份老文件仍会落地（命令通道既有行为）。删它归 #104。
 4. **`web/node_modules` 是 C1 证据的前置**：本树冷启动时缺失，须先 `cd web; npm ci`。
    脚本已把「缺失」降级为 C1 的 **warning + `webConsumerOk=null`**（不假装解析通过，也不静默当绿）。
+
+## 15. 输入手段族实机验收（`input.*` / `run-input-acceptance.ps1`，v1.8 / #160 族）
+
+> 本节是**只在末尾追加**的一节；上面的 1..14 节一字未动。
+> 契约正文在 `docs/control-plane/input-contract.md`（§2 输入表示 / §3 生命周期 / §5 能力发现 /
+> §6 错误语义 / §9.2 G1 扩展），逐参数一律以 `GET /cp/v1/actions` 的自描述为唯一权威。
+
+### 15.1 三个文件 + 一份用例（职责分离）
+
+| 文件 | 职责 | 不含什么 |
+|---|---|---|
+| `input-acceptance-checks.ps1` | **纯判定模块**：一条判据一个函数，输入是「作业 JSON / 错误信封 / 读面 JSON / 描述符 JSON」，输出 `@{id;ok;status;detail}`（`status = pass | fail | skipped | blocked`） | 无 HTTP、无进程、不读文件、不归档、不打印 |
+| `run-input-acceptance.ps1` | **编排**：写 cfg → 钉 `pauseOnLostFocus` → 起客户端 → 等 `server.json` → 按 stage 调 `caller.mjs` → 归档 → 红绿表 → 退出码 | 不自己判红绿（判定全在被 dot-source 的模块里） |
+| `run-input-acceptance-selftest.ps1` | **离线自检**：合成夹具逐条喂判定模块（好数据绿 / 坏数据精确红） | 不起客户端、不发 HTTP |
+| `cases/input-multitick.json` | G1 的跨帧输入固定程序（`action` 段含顶层 `holdTicks` 的输入步） | 当前**预期被拒**（G1 未实现）⇒ 判据记 `blocked-by-G1` |
+
+一切动作调用**只**经 `caller.mjs`（退出码 0/1/2/3；消费 `--json-out` 文件，不解析 stdout）。
+端口**不猜**：先读 `<mcDataDir>\controlplane\server.json` 的 `port`；`-Port` 只用于点火前的占用检查。
+
+### 15.2 用法
+
+```powershell
+# ① 复用已在跑的客户端（需先按窗口纪律获批；不启停、不改 cfg）
+pwsh -File scripts/control-plane/run-input-acceptance.ps1 -SkipClientStart -Port 23314
+
+# ② 自己起停客户端（会写 cfg 并备份原值，跑完还原/归档）
+pwsh -File scripts/control-plane/run-input-acceptance.ps1 -Port 23314
+
+# ③ 只重跑某一段（pre 会先跑：它是门）
+pwsh -File scripts/control-plane/run-input-acceptance.ps1 -Stage world -Port 23314
+pwsh -File scripts/control-plane/run-input-acceptance.ps1 -Stage g1    -Port 23314
+
+# ④ 离线自检（不需要客户端）
+pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1
+```
+
+参数（与既有两个驱动的既有命名惯例一致）：
+
+| 参数 | 默认 | 语义 |
+|---|---|---|
+| `-McDataDir` | `<repo>\mod\gtnh\run\client` | mcDataDir（含 `controlplane/`、`config/`、`options.txt`） |
+| `-SkipClientStart` | 关 | 复用已在跑的客户端：不写 cfg、不起进程、不停进程（**钉选项仍执行**） |
+| `-KeepClient` | 关 | 跑完不停客户端（保留现场） |
+| `-Port` | 23314 | **仅**前置占用检查；实调一律以 `server.json` 为准 |
+| `-ClientReadyTimeoutMin` | 8 | 等 `server.json` / `tokens.json` 的上限（分钟） |
+| `-Stage` | `all` | `all | pre | menu | world | g1`；除 `pre` 外每个 stage 都**先跑 pre** |
+| `-ArchiveRoot` | `D:\Workspace\Lightning\temp\control-plane` | 归档根；本次落 `<ArchiveRoot>\input-<ts>\` |
+| `-ActionTimeoutMs` | 600000 | 单次调用（含 `case.run` / `world.rebuild` / `shot.multi`）的 sync 超时 |
+| `-ClientTimeoutMin` | 30 | 进入客户端之后的整段流水线墙钟预算（分钟）；W4 的等待轮与 G1 都受它约束 |
+| `-PumpProofTicks` | 1300 | W4 的等待 tick 数（必须 ≥ 持键上限 1200） |
+| `-CaseFile` | `cases\input-multitick.json` | G1 用的用例（绝对路径） |
+| `-RepoRoot` | `scripts\control-plane\..\..` | 仓根覆盖（自检/异位调用用） |
+
+**点火前置（缺一不可，脚本自己会做前两件）**：① `web/node_modules` 存在（`runClient` 依赖 `syncWeb→vite`）；
+② 调 `drive-session.ps1 -RunDir <mcDataDir> -Tag input -PinOnly` 钉 `options.txt` 的
+`pauseOnLostFocus:false`（**必须先钉再启动**：MC 只在启动时读 `options.txt`）；
+③ `runClient` 是独占资源，用前按 `AGENTS.md` 的四步窗口纪律申请。
+
+### 15.3 断言表（id → 读什么 → 通过条件；红了说明什么）
+
+**stage `pre`（前置；任一红 ⇒ 立即退出 2 且不进后续 stage）**
+
+| id | 读什么 | 通过条件（红了说明什么） |
+|---|---|---|
+| `P0` | `<mcDataDir>\options.txt` 全文 | **恰有一行** `pauseOnLostFocus:false`（缺失/为 true/两行冲突/空文件都红）。这是「无人值守失焦仍持续 tick」的**前置证明** |
+| `P1` | `server.json` | `contractVersion == "1.8"`（客户端起的是旧契约 ⇒ 后面所有输入族断言都不成立） |
+| `P2` | `caller.mjs --actions` | `count == 48`；五个 `input.*` 都在；`input.key/mouse/text/release` 的 `tier=scene`、`writable=true`、`confirmRequired=true`、`since=1.8`、`means=input`；`input.state` 的 `tier=observe`、`writable=false`、`since=1.8`、`means=input` |
+| `P3` | 同上（G8 实机面） | 除五个 `input.*` 外，其余 **43** 个动作的自描述 JSON 里**不含 `means` 键**（可选字段不许用默认值冒充「已声明」） |
+
+**stage `menu`（主菜单，无世界；不做任何世界断言）**
+
+| id | 读什么 | 通过条件（红了说明什么） |
+|---|---|---|
+| `M0` | `core.status.world.loaded` | 前提守卫（**驱动自加**，非 Lead 判据）：`loaded != true`。已进世界时菜单段断言不可比 |
+| `M1` | `input.key{down}` 的 `result` | exit 0、`delivered==1`、`held.count==1`、`held.items[0].jobId` 非空 |
+| `M2` | 紧接着同一条 `down` | exit 0、`alreadyHeld==true`、`delivered==0`（**重投即红**）、`held.count` 仍为 1 |
+| `M3` | 两次 `input.release` | 第一次 `count>=1`；第二次 `count==0` 且 `alreadyIdle==true`（幂等不是错误） |
+| `M4` | `input.key{tap,holdTicks:1}` | exit 0、`delivered==2`（同 tick down+up） |
+| `M5` | `input.key{tap,holdTicks:5}` | exit 0、`delivered==2`、`heldTicks>=5`（`autoReleased[].heldTicks`，退到 `released[]`）；两者都读不到 ⇒ 红（跨帧持有量不可复核） |
+| `M6` | `input.mouse{wheel,amount:1}` | exit 0、`delivered==1` |
+| `M7` | `input.mouse{wheel,amount:0}` | **非 0 退出 且 `error.code=="CP-VALID-002"`**（零档不许当 no-op 绿） |
+| `M8` | `input.key{tap,holdTicks:1201}` | 非 0 且 `CP-VALID-002`（持有上限 1200） |
+| `M9` | `input.key{down,holdTicks:3}` | 非 0 且 `CP-VALID-002`（不适用字段必须显式拒绝，不许静默忽略） |
+| `M10` | `input.text{text:"hi"}` | 非 0 且 `CP-STATE-001`（文本路由两路未打通 ⇒ 不许 `delivered:N` 的假绿） |
+| `M11` | `input.state` 的 `result` | exit 0；`implemented==true`；`family=="input"`；`actions` **恰为**五个 `input.*`；`keyCatalog` 非空且「键位名→整数键码」；`keyCodeRange` 是 `[0,255]` 这类**真实整数区间**（null/占位/长度不为 2 即红）；`queues.mouseDepth=="unobservable"`（不许编 0）；`held.count==0` |
+| `M12` | 两次 `input.state.coordinates` 指纹 | 会话内**无法**改变窗口尺寸 ⇒ `skipped-with-reason`（**不是 pass**，summary 写明「需要人工改窗口尺寸才能测」）；若指纹确有变化 ⇒ pass |
+
+**stage `world`（`world.rebuild` 建托管世界 `cp_input_live`，`void:true`）**
+
+| id | 读什么 | 通过条件（红了说明什么） |
+|---|---|---|
+| `W1` | `core.status` | `world.loaded==true` 且 `world.managed==true`（`cp_` 前缀的托管世界） |
+| `W2` | `input.key{tap,holdTicks:20}` | exit 0、`delivered==2`；`consumer.displayActive` / `inGameHasFocus` **存在且是布尔**（**不要求为 true**——失焦是无人值守的常态；`null` 表示探针不可读 ⇒ 不「如实」） |
+| `W3` | `read.player.pos` A/B | `horizontalDistance(A,B) > 0.5`（键真的让玩家动起来了；**W4 的正对照，必须先过**） |
+| `W4` | `read.player.pos` A/B/C | `dist(A,B) > 0.5` **且** `dist(B,C) < 0.1`；两个位移都写进 detail。**等待期间只调 `read.player`**（任何 `input.*` 调用都会先结算到期，会让「泵抬起的」与「读的时候才抬起的」不可区分） |
+| `W4.evidence` | 等待期间的 `core.status.world.totalTime` 增量 | `>= PumpProofTicks`（**驱动自加的证据充分性门**：等得不够时 `dist(B,C)` 小只能说明玩家因别的原因停下 ⇒ 防假绿） |
+| `W5` | `input.mouse{op:move}` 的 `readback` | exit 0、`withinTolerance==true`、且 `guiX/guiY` 与请求值差 ≤1（坐标取 `input.state.coordinates.scaledWidth/Height` 中点） |
+| `W6a` | 拖动四步（move→down→move→up） | 四条都 exit 0 |
+| `W6b` | `down` 的 `result` | `hitSet.state` 是**真值**（字段缺席 / 空串 / `unimplemented`/`placeholder`/`未实现` 一类占位都红） |
+| `W7a` | `shot.multi --describe` | 自描述里**声明**了 `gui` 参数且取值域说明含 `screen`（没声明 ⇒ 无先验知识调用方**开不了** GUI 实拍） |
+| `W7b` | 带 `gui:"screen"` 的 `shot.multi` | 每机位 `guiHidden==false` 且 `guiCapture` 非空数组（正路径前会先 `player.gui inventory` 开一个真界面，免得「拍了但没有界面」也算绿） |
+| `W7c` | **不带** `gui` 的 `shot.multi` | 每机位 `guiHidden==true` 且**不含** `guiCapture` 键（默认路径逐字节不变） |
+| `W8a` | `input.key` 两键 down 后的结果 | 键盘侧 `physicalConcurrent` 是**布尔**（`"unobservable"` 一类字符串即红） |
+| `W8b` | `input.mouse{wheel}` 的结果 | 鼠标侧 `physicalConcurrent == "unobservable"`（不许编造 false/true） |
+
+**stage `g1`（依赖 `feat/cp-input-steps` 的合入）**
+
+| id | 读什么 | 通过条件（红了说明什么） |
+|---|---|---|
+| `G1` | `case.validate` + `case.run{"segments":["world","action"]}` + 步骤产物 + 跑后 `input.state.held.count` | exit 0；`action` 段里确有输入步产物且能读出**跨帧推进证据**（`heldTicks>=2` 或不同步骤的 `deliveredAtTick` 有别）；跑完 `held.count==0`（失败也不留按着的键）。**未实现时**（`case.validate` 报 `action[i].holdTicks 未知字段` 一类）⇒ `blocked-by-G1`（**不是 pass，也不是实现缺陷**）；因别的理由失败 ⇒ `fail` |
+
+**驱动自加的编排守卫**（`O.*`，不是 Lead 的判据，只为把「编排失败」与「判据红」分开）：
+`O.ping`（`core.ping` 可连）、`O.actions`（`GET /actions` 可读）、`O.rebuild`（`world.rebuild` 成功）、
+`O.gui-open`（`player.gui inventory` 成功）、`O.g1-validate`（`case.validate` 通过）、
+`O.orchestration`（编排异常）。
+
+### 15.4 退出码与「非全绿」的口径
+
+| 码 | 含义 |
+|---|---|
+| `0` | 全绿（**只有** pass） |
+| `2` | 有断言红；**或**有 `skipped` / `blocked`（跳过与阻塞都不算 pass） |
+| `3` | 管线级致命：等 `server.json` 超时 / 客户端进程早退 |
+| `4` | 前置检查或编排自身失败（缺 `gradlew`/`node`/`web/node_modules`/`caseFile`、端口被占、钉选项失败、`server.json` 不可读…） |
+
+`pre` 段任一红 ⇒ **立即**退出 2，后续 stage 一步都不跑（表里只有跑过的判据；未跑的 stage 的判据
+**不出现在表里**，既不算 skip 也不算 pass）。
+
+### 15.5 归档（`<ArchiveRoot>\input-<ts>\`）
+
+```
+input-<ts>/
+  runs/<runId>/               每次调用新增的 run 目录（world.rebuild/case.run/shot.multi…全量复制）
+  runs-all/                   仅当定位不到单个 run 目录时的兜底整目录复制
+  logs/caller-*.json          每次 caller.mjs 的 --json-out（机读作业 JSON / 错误信封）
+  logs/gradle-runClient.log   .err 客户端启动日志
+  logs/fml-client-latest.log  客户端日志
+  events.jsonl                控制面事件流水
+  lightning.cfg.before/.after cfg 备份与跑后快照（`-SkipClientStart` 时只有 .after）
+  options.txt.after           钉选项后的 options.txt 快照
+  stale/                      点火前移开的上轮 server.json / tokens.json
+  assertions.json             机读判定表（含 status/ok/detail、counts、probeNotes）
+  summary.md                  人读：红绿表 + 每条 detail 里的可复核量 + 已知留白
+```
+
+> `temp/` 随时会被删除。**要留的证据（红绿表、作业 JSON、客户端日志）必须当场作为 ISSUE/PR 附件上 Gitea**
+> ——归档只是便于当场排查，不等于留证（`AGENTS.md` 铁律 5）。
+
+### 15.6 离线自检（本节的自检表）
+
+| # | 自检项 | 命令 | 判定 |
+|---|---|---|---|
+| 1 | 两个（三个）`.ps1` 语法 | `pwsh -Command "[System.Management.Automation.Language.Parser]::ParseFile(<脚本>, [ref]$null, [ref]$e)"` | 解析错误 0（逐文件） |
+| 2 | 调用方未受影响 | `node --check scripts/control-plane/caller.mjs` | 退出 0（本单未改 `caller.mjs`） |
+| 3 | 判据函数的合成夹具自检 | `pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1` | **97 条自检 0 红**：好数据绿、坏数据精确红（重投 / M7-M9 三类参数负对照 / M10 假绿 / W4 两种失败形态 / `means` 泄漏 / 能力面空目录 / 命中集占位 / G1 的 blocked 分支） |
+| 4 | G1 用例的真实校验器校验 | 见下 | 当前**预期红**：`CP-VALID-002`「`action[0].holdTicks` 未知字段」——这正是 `blocked-by-G1` 的离线证据 |
+
+第 4 项的做法（用例校验器是 Java，PowerShell 侧没有等价实现）：加一个**一次性**测试
+`mod/gtnh/src/test/java/com/lightning/mod/client/controlplane/core/TmpInputMultitickCaseValidateTest.java`
+把 `CaseValidator.validate` 的结论落成 JSON 到 `D:\Workspace\Lightning\temp\cp-input-acceptance\case-validate.json`，跑
+
+```powershell
+cd mod\gtnh; .\gradlew.bat test --tests '*TmpInputMultitickCaseValidateTest*' --console=plain
+pwsh -File scripts/control-plane/run-input-acceptance-selftest.ps1   # 会把该报告并入自检报告（不作判据）
+```
+
+**该临时测试提交前必须删除**（不许把临时校验件留在树里）；`run-input-acceptance-selftest.ps1` 只把
+它的报告当**附注**并入（`不作判据`），删掉它之后第 3 项仍然全绿。
+
+### 15.7 已知留白（如实登记）
+
+1. **M12 需要人工参与**：脚本无法改窗口尺寸，会话内两次 `coordinates` 指纹相同 ⇒ 记
+   `skipped-with-reason`，summary 会写「需要人工改窗口尺寸才能测」。人工改窗口后重跑 world 段即转 pass。
+2. **W4 的等待口径**：等待循环内**只**发 `read.player`（严格口径）；tick 记账用**轮边界**的一次
+   `core.status.world.totalTime`（它不触碰输入运行时，不会顺带结算到期）。等待有墙钟预算
+   （名义 5 倍：`tick × 0.25s`，下限 30s，且不超过 `-ClientTimeoutMin`）——预算只兜住
+   「客户端根本没 tick」这类病态，不参与判据。`W4.evidence` 用的是
+   **真实世界 tick 增量**——比实现里 `McInputHost.clientTick()` 的「max(被驱动 tick, 墙钟折算)」
+   更严格（墙钟兜底会**提前**收口），因此它是防假绿而不是放宽。
+3. **`input.state.actions` 的实机真值未经本单验证**：静态读源码发现
+   `InputStateProviderImpl.assemble` 用**本包内**的 `actionsJson(implemented)`（恒空数组），
+   而 `InputCapabilities.registeredActionsJson()`（T3-A 新增）**没有生产调用点** ⇒ 若实机如此，`M11` 会红。
+   本单只写驱动、不改 mod 代码，故**如实保留该判据**（红了就是红的）。
+4. **`W6b`、`W7a` 同理**：静态读源码发现 `input.mouse op=down` 的返回里没有 `hitSet` 字段
+   （只有 `op=move` 有），而 `shot.multi` 的自描述**未声明** `gui` 参数（`ShotMultiAction` 却读它）⇒
+   两条判据当前预期红。驱动**不放宽**它们，只在 `W7b` 旁附一条 `--allow-unknown-params` 的
+   **非判据探针**，如实记录底层实现能不能画 GUI。
+5. **未离线验证的部分**：所有真机断言（`M*`/`W*`/`G1` 的取值）都只能实机跑出来；本单只证明
+   「判定逻辑在好/坏数据上红绿正确」与「编排能起停、能归档、能给退出码」。
+6. **`-Stage menu` 的前提**：需要客户端停在主菜单。若 `-SkipClientStart` 复用的客户端已在世界里，
+   `M0` 会红并且 M 段结论不可比（此时应改用 `-Stage world`）。
