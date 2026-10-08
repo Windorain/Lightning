@@ -476,6 +476,285 @@ $e3Tiles = [pscustomobject]@{ runId = 'r1'; count = 3; artifacts = @(
 Expect 'E3 tiles 子目录不干扰（仍 pass）' (Test-InputE3ArtifactHashes -Manifest $e3Tiles -Downloads $e3DlOk) 'pass'
 
 # ---------------------------------------------------------------------------
+# E3.content 的夹具：**现场生成**合法 PNG（纯 PowerShell 写出，不引外部图片文件）
+#   编码只用 BCL：zlib 头 + **存储块**（BTYPE=00，无压缩 deflate）+ adler32 + 真实 CRC32；
+#   与 run-anchor.ps1 的 Write-ProbePng 同一套做法（那边用 DeflateStream，这边用存储块，
+#   两边都不依赖 System.Drawing）。
+#   filterType 支持 0-4：走标准**正向滤波**，用来证明被测解码侧真的把 filter 反回来了。
+# ---------------------------------------------------------------------------
+$script:testCrcTable = $null
+function Get-TestCrc32([byte[]]$Data) {
+    if ($null -eq $script:testCrcTable) {
+        $t = New-Object int64[] 256
+        for ($n = 0; $n -lt 256; $n++) {
+            $c = [int64]$n
+            for ($k = 0; $k -lt 8; $k++) {
+                if (($c -band 1) -ne 0) { $c = [int64]3988292384 -bxor ($c -shr 1) } else { $c = $c -shr 1 }
+            }
+            $t[$n] = $c
+        }
+        $script:testCrcTable = $t
+    }
+    $crc = [int64]4294967295
+    foreach ($b in $Data) {
+        $idx = [int](($crc -bxor [int64]$b) -band [int64]255)
+        $crc = ($script:testCrcTable[$idx] -bxor ($crc -shr 8)) -band [int64]4294967295
+    }
+    return [uint32](($crc -bxor [int64]4294967295) -band [int64]4294967295)
+}
+function Get-TestAdler32([byte[]]$Data) {
+    $a = 1; $b = 0
+    foreach ($v in $Data) {
+        $a = ($a + [int]$v) % 65521
+        $b = ($b + $a) % 65521
+    }
+    return [int64]$b * 65536 + [int64]$a
+}
+
+# 把「逐像素样本数组 + 宽高」编码成 PNG（颜色型 2 = RGB / 6 = RGBA）
+function Write-TestPng {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][int]$Width,
+        [Parameter(Mandatory = $true)][int]$Height,
+        [Parameter(Mandatory = $true)][byte[]]$Pixels,
+        [int]$ColorType = 2,
+        [int]$FilterType = 0
+    )
+    $channels = if ($ColorType -eq 6) { 4 } else { 3 }
+    $stride = $Width * $channels
+    $raw = New-Object byte[] (($stride + 1) * $Height)
+    $off = 0
+    for ($y = 0; $y -lt $Height; $y++) {
+        $raw[$off] = [byte]$FilterType; $off++
+        for ($i = 0; $i -lt $stride; $i++) {
+            $x = [int]$Pixels[$y * $stride + $i]
+            $a = if ($i -ge $channels) { [int]$Pixels[$y * $stride + $i - $channels] } else { 0 }
+            $b = if ($y -gt 0) { [int]$Pixels[($y - 1) * $stride + $i] } else { 0 }
+            $c = if ($i -ge $channels -and $y -gt 0) { [int]$Pixels[($y - 1) * $stride + $i - $channels] } else { 0 }
+            switch ($FilterType) {
+                0 { }
+                1 { $x = ($x - $a) -band 0xFF }
+                2 { $x = ($x - $b) -band 0xFF }
+                3 { $x = ($x - [int](($a + $b) / 2)) -band 0xFF }
+                4 {
+                    $p = $a + $b - $c
+                    $pa = [math]::Abs($p - $a); $pb = [math]::Abs($p - $b); $pc = [math]::Abs($p - $c)
+                    $pr = if ($pa -le $pb -and $pa -le $pc) { $a } elseif ($pb -le $pc) { $b } else { $c }
+                    $x = ($x - $pr) -band 0xFF
+                }
+                default { throw "不支持的夹具 filter 类型 $FilterType" }
+            }
+            $raw[$off] = [byte]$x; $off++
+        }
+    }
+    # zlib 流：CMF/FLG + 存储块序列 + adler32（大端）
+    $z = New-Object System.Collections.Generic.List[byte]
+    $z.Add([byte]0x78); $z.Add([byte]0x01)
+    $p = 0
+    while ($p -lt $raw.Length) {
+        $n = [int][math]::Min(65535, $raw.Length - $p)
+        $z.Add([byte]$(if ($p + $n -ge $raw.Length) { 1 } else { 0 }))
+        $z.Add([byte]($n -band 0xFF)); $z.Add([byte](($n -shr 8) -band 0xFF))
+        $inv = (-bnot $n) -band 0xFFFF
+        $z.Add([byte]($inv -band 0xFF)); $z.Add([byte](($inv -shr 8) -band 0xFF))
+        for ($i = 0; $i -lt $n; $i++) { $z.Add($raw[$p + $i]) }
+        $p += $n
+    }
+    $adler = Get-TestAdler32 $raw
+    foreach ($sh in @(24, 16, 8, 0)) { $z.Add([byte](($adler -shr $sh) -band 0xFF)) }
+
+    $out = New-Object System.Collections.Generic.List[byte]
+    foreach ($b in @(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)) { $out.Add([byte]$b) }
+    $chunk = {
+        param([string]$Type, [byte[]]$Data)
+        $body = New-Object System.Collections.Generic.List[byte]
+        foreach ($b in [System.Text.Encoding]::ASCII.GetBytes($Type)) { $body.Add($b) }
+        foreach ($b in $Data) { $body.Add($b) }
+        $len = $Data.Length
+        foreach ($sh in @(24, 16, 8, 0)) { $out.Add([byte](($len -shr $sh) -band 0xFF)) }
+        foreach ($b in $body) { $out.Add($b) }
+        $crc = Get-TestCrc32 $body.ToArray()
+        foreach ($sh in @(24, 16, 8, 0)) { $out.Add([byte](($crc -shr $sh) -band 0xFF)) }
+    }
+    $ihdr = New-Object System.Collections.Generic.List[byte]
+    foreach ($sh in @(24, 16, 8, 0)) { $ihdr.Add([byte](($Width -shr $sh) -band 0xFF)) }
+    foreach ($sh in @(24, 16, 8, 0)) { $ihdr.Add([byte](($Height -shr $sh) -band 0xFF)) }
+    $ihdr.Add([byte]8); $ihdr.Add([byte]$ColorType); $ihdr.Add([byte]0); $ihdr.Add([byte]0); $ihdr.Add([byte]0)
+    & $chunk 'IHDR' $ihdr.ToArray()
+    & $chunk 'IDAT' $z.ToArray()
+    & $chunk 'IEND' (New-Object byte[] 0)
+    [System.IO.File]::WriteAllBytes($Path, $out.ToArray())
+}
+
+# 渐变底：唯一色数远超 1（刻意贴近「背景是渐变」的实机情形，也是既有 image-uniform 判据判绿的那种帧）
+function New-TestFrame {
+    param([int]$Width, [int]$Height, [int]$Channels = 3)
+    $px = New-Object byte[] ($Width * $Height * $Channels)
+    for ($y = 0; $y -lt $Height; $y++) {
+        for ($x = 0; $x -lt $Width; $x++) {
+            $i = ($y * $Width + $x) * $Channels
+            $px[$i] = [byte]((40 + $x) -band 0xFF)
+            $px[$i + 1] = [byte]((90 + $y) -band 0xFF)
+            $px[$i + 2] = [byte]((150 + $x + $y) -band 0xFF)
+            if ($Channels -eq 4) { $px[$i + 3] = [byte]255 }
+        }
+    }
+    return , $px
+}
+
+# 在样本数组上画一个实心矩形（模拟「这一帧多画了界面」的那块像素）
+function Set-TestRect {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Pixels,
+        [Parameter(Mandatory = $true)][int]$Width,
+        [Parameter(Mandatory = $true)][int]$Channels,
+        [int]$X0 = 0, [int]$Y0 = 0, [int]$W = 1, [int]$H = 1,
+        [int]$R = 250, [int]$G = 250, [int]$B = 250
+    )
+    for ($y = $Y0; $y -lt ($Y0 + $H); $y++) {
+        for ($x = $X0; $x -lt ($X0 + $W); $x++) {
+            $i = ($y * $Width + $x) * $Channels
+            $Pixels[$i] = [byte]$R; $Pixels[$i + 1] = [byte]$G; $Pixels[$i + 2] = [byte]$B
+            if ($Channels -eq 4) { $Pixels[$i + 3] = [byte]255 }
+        }
+    }
+}
+
+Write-Host '-- E3.content GUI 实拍帧 vs 同机位 gui:none 对照帧' -ForegroundColor DarkCyan
+$e3cDir = Join-Path $outDir 'e3-content'
+New-Item -ItemType Directory -Force -Path $e3cDir | Out-Null
+$e3cW = 64; $e3cH = 48                                       # 3072 像素
+$e3cBase = New-TestFrame -Width $e3cW -Height $e3cH
+$e3cSame = [byte[]]$e3cBase.Clone()                          # 与对照帧完全相同（Gitea #205 现象）
+$e3cRect = [byte[]]$e3cBase.Clone()
+Set-TestRect -Pixels $e3cRect -Width $e3cW -Channels 3 -X0 20 -Y0 16 -W 24 -H 16   # 384/3072 = 12.5%
+$e3cTiny = [byte[]]$e3cBase.Clone()
+Set-TestRect -Pixels $e3cTiny -Width $e3cW -Channels 3 -X0 30 -Y0 20 -W 2 -H 1      # 2/3072 = 0.065%
+$pE3Base = Join-Path $e3cDir 'gui-none.png'
+$pE3Same = Join-Path $e3cDir 'gui-screen-same.png'
+$pE3Rect = Join-Path $e3cDir 'gui-screen-rect.png'
+$pE3Tiny = Join-Path $e3cDir 'gui-screen-tiny.png'
+Write-TestPng -Path $pE3Base -Width $e3cW -Height $e3cH -Pixels $e3cBase
+Write-TestPng -Path $pE3Same -Width $e3cW -Height $e3cH -Pixels $e3cSame
+Write-TestPng -Path $pE3Rect -Width $e3cW -Height $e3cH -Pixels $e3cRect
+Write-TestPng -Path $pE3Tiny -Width $e3cW -Height $e3cH -Pixels $e3cTiny
+
+# ① 本判据的存在理由：两帧逐字节相同 ⇒ fail，且红文本必须点出「没有改到任何像素」
+$e3cRSame = Test-InputGuiFrameContent -ScreenPng $pE3Same -ControlPng $pE3Base -Detail 'runId=20261008-gui camera=gui-live'
+Expect 'E3.content 两帧逐字节相同 ⇒ fail' $e3cRSame 'fail'
+Check 'E3.content 相同帧的红文本点出「逐字节相同 ⇒ 界面绘制没有改到任何像素」' `
+    (($e3cRSame.detail -match '逐字节相同') -and ($e3cRSame.detail -match '没有改到任何像素')) ([string]$e3cRSame.detail)
+
+# ② 中部有显著矩形差异（384/3072 = 12.5%）⇒ pass
+$e3cRRect = Test-InputGuiFrameContent -ScreenPng $pE3Rect -ControlPng $pE3Base
+Expect 'E3.content 中部矩形差异 12.5% ⇒ pass' $e3cRRect 'pass'
+Check 'E3.content 正例的差异计数逐像素精确（384/3072）' (($e3cRRect.detail -match '差异像素 384/3072')) ([string]$e3cRRect.detail)
+
+# ③ 负对照（**必须真变红**）：只差 2 像素（0.065% < 0.5%）⇒ fail，防止「有点差异就放行」
+Expect 'E3.content 负对照：差异仅 2 像素（0.065%）⇒ fail' (Test-InputGuiFrameContent -ScreenPng $pE3Tiny -ControlPng $pE3Base) 'fail'
+
+# ④ 对照帧 / screen 帧路径不存在 ⇒ fail（读不出不是「无差异」）
+Expect 'E3.content 对照帧路径不存在 ⇒ fail' (Test-InputGuiFrameContent -ScreenPng $pE3Rect -ControlPng (Join-Path $e3cDir 'gui-none-missing.png')) 'fail'
+Expect 'E3.content screen 帧路径不存在 ⇒ fail' (Test-InputGuiFrameContent -ScreenPng (Join-Path $e3cDir 'gui-screen-missing.png') -ControlPng $pE3Base) 'fail'
+
+# ⑤ 尺寸不同 ⇒ fail
+$pE3Other = Join-Path $e3cDir 'gui-screen-32x24.png'
+Write-TestPng -Path $pE3Other -Width 32 -Height 24 -Pixels (New-TestFrame -Width 32 -Height 24)
+Expect 'E3.content 两帧尺寸不同 ⇒ fail' (Test-InputGuiFrameContent -ScreenPng $pE3Other -ControlPng $pE3Base) 'fail'
+
+# ⑥ 无法解码的文件：文本改名 .png / 截断的 PNG ⇒ fail
+$pE3Text = Join-Path $e3cDir 'gui-screen-not-a-png.png'
+Set-Content -Path $pE3Text -Value 'this file is not a PNG at all, just text renamed to .png' -Encoding utf8NoBOM
+Expect 'E3.content 文本改名 .png（解不开）⇒ fail' (Test-InputGuiFrameContent -ScreenPng $pE3Text -ControlPng $pE3Base) 'fail'
+$pE3Trunc = Join-Path $e3cDir 'gui-screen-truncated.png'
+$e3cFull = [System.IO.File]::ReadAllBytes($pE3Rect)
+[System.IO.File]::WriteAllBytes($pE3Trunc, [byte[]]$e3cFull[0..([int]($e3cFull.Length / 2))])
+Expect 'E3.content 截断的 PNG ⇒ fail（读不出像素）' (Test-InputGuiFrameContent -ScreenPng $pE3Trunc -ControlPng $pE3Base) 'fail'
+
+# ⑦ 判界在 0.5 上：差异恰为 4/800 = 0.500% ⇒ pass（用 >=，不许把恰好达标算红）
+$e3cBW = 40; $e3cBH = 20                                     # 800 像素
+$e3cBBase = New-TestFrame -Width $e3cBW -Height $e3cBH
+$e3cBEdge = [byte[]]$e3cBBase.Clone()
+Set-TestRect -Pixels $e3cBEdge -Width $e3cBW -Channels 3 -X0 10 -Y0 8 -W 4 -H 1
+$pE3BBase = Join-Path $e3cDir 'bound-none.png'
+$pE3BEdge = Join-Path $e3cDir 'bound-screen-4px.png'
+Write-TestPng -Path $pE3BBase -Width $e3cBW -Height $e3cBH -Pixels $e3cBBase
+Write-TestPng -Path $pE3BEdge -Width $e3cBW -Height $e3cBH -Pixels $e3cBEdge
+$e3cREdge = Test-InputGuiFrameContent -ScreenPng $pE3BEdge -ControlPng $pE3BBase
+Expect 'E3.content 差异恰在阈值上（4/800 = 0.500%）⇒ pass' $e3cREdge 'pass'
+Check 'E3.content 判界口径是 >=（恰好达标不许算红）' (($e3cREdge.detail -match '差异像素 4/800')) ([string]$e3cREdge.detail)
+
+# ⑧ RGBA（颜色型 6）也必须能解码，结果与 RGB 同内容一致
+$e3cRgbaBase = New-TestFrame -Width $e3cW -Height $e3cH -Channels 4
+$e3cRgbaRect = [byte[]]$e3cRgbaBase.Clone()
+Set-TestRect -Pixels $e3cRgbaRect -Width $e3cW -Channels 4 -X0 20 -Y0 16 -W 24 -H 16
+$pE3RgbaBase = Join-Path $e3cDir 'rgba-none.png'
+$pE3RgbaRect = Join-Path $e3cDir 'rgba-screen-rect.png'
+Write-TestPng -Path $pE3RgbaBase -Width $e3cW -Height $e3cH -Pixels $e3cRgbaBase -ColorType 6
+Write-TestPng -Path $pE3RgbaRect -Width $e3cW -Height $e3cH -Pixels $e3cRgbaRect -ColorType 6
+$e3cRRgba = Test-InputGuiFrameContent -ScreenPng $pE3RgbaRect -ControlPng $pE3RgbaBase
+Expect 'E3.content RGBA（颜色型 6）也能解码 ⇒ pass' $e3cRRgba 'pass'
+Check 'E3.content RGBA 解码后的差异计数与 RGB 一致（384/3072）' (($e3cRRgba.detail -match '差异像素 384/3072')) ([string]$e3cRRgba.detail)
+
+# ⑨ filter 0-4（含 Paeth）都必须能反回来：同一张图换 filter 编码，判据结论与差异计数必须不变
+foreach ($e3cFt in 0..4) {
+    $pE3F = Join-Path $e3cDir "gui-screen-filter$e3cFt.png"
+    Write-TestPng -Path $pE3F -Width $e3cW -Height $e3cH -Pixels $e3cRect -FilterType $e3cFt
+    $rF = Test-InputGuiFrameContent -ScreenPng $pE3F -ControlPng $pE3Base
+    Expect "E3.content filter=$e3cFt 编码的帧 ⇒ pass" $rF 'pass'
+    Check "E3.content filter=$e3cFt 反 filter 后差异计数仍为 384/3072（反 filter 正确）" `
+        (($rF.detail -match '差异像素 384/3072')) ([string]$rF.detail)
+}
+
+# ---------------------------------------------------------------------------
+# E3.draw：界面绘制自证（同一帧内 changedPixels；mod 自述侧）
+#   三条必须区分开的形态：#205 现场（0 改动）、旧版 mod（无该字段 = 未覆盖）、绘制失败（drawn=false）
+# ---------------------------------------------------------------------------
+Write-Host '-- E3.draw 界面绘制自证（同帧内 changedPixels）' -ForegroundColor DarkCyan
+
+$e3dCapOk = [pscustomobject]@{ mode = 'screen'; screen = 'net.minecraft.client.gui.inventory.GuiContainerCreative'
+    drawn = $true; changedPixels = 1500; frameHashBefore = 'aaaa1111bbbb2222'; frameHashAfter = 'cccc3333dddd4444'
+    windowFramebufferCenterPixel = '#00ffffff'
+}
+$e3dMetaOk = [pscustomobject]@{ schema = 'lightning.shot-meta/1'; camera = 'e3-gui'; guiHidden = $false; guiCapture = @($e3dCapOk) }
+Expect 'E3.draw drawn=true 且 changedPixels>0 ⇒ pass' (Test-InputGuiDrawLanded -ScreenMeta $e3dMetaOk -RunId 'r1') 'pass'
+
+$e3dCapZero = [pscustomobject]@{ mode = 'screen'; screen = 'net.minecraft.client.gui.inventory.GuiContainerCreative'
+    drawn = $true; changedPixels = 0; frameHashBefore = 'b4c145befb740428'; frameHashAfter = 'b4c145befb740428'
+    windowFramebufferCenterPixel = '#00ffffff'
+}
+$e3dMetaZero = [pscustomobject]@{ schema = 'lightning.shot-meta/1'; camera = 'e3-gui'; guiHidden = $false; guiCapture = @($e3dCapZero) }
+$e3dRZero = Test-InputGuiDrawLanded -ScreenMeta $e3dMetaZero
+Expect 'E3.draw #205 现场形态：changedPixels=0 ⇒ fail' $e3dRZero 'fail'
+Check 'E3.draw 零改动的红文本点出「没有改变本帧任何一个像素」' `
+    (([string]$e3dRZero.detail) -match '没有改变本帧任何一个像素') ([string]$e3dRZero.detail)
+
+# 旧版 mod 的产物没有这门自证字段 ⇒ 如实记「未覆盖」，不许因「没报错」含糊成 pass
+$e3dCapNoField = [pscustomobject]@{ mode = 'screen'; screen = 'net.minecraft.client.gui.inventory.GuiContainerCreative'; drawn = $true }
+$e3dMetaNoField = [pscustomobject]@{ schema = 'lightning.shot-meta/1'; camera = 'e3-gui'; guiHidden = $false; guiCapture = @($e3dCapNoField) }
+$e3dRNoField = Test-InputGuiDrawLanded -ScreenMeta $e3dMetaNoField
+Expect 'E3.draw 全部条目无 changedPixels 字段 ⇒ fail（未覆盖不等于通过）' $e3dRNoField 'fail'
+Check 'E3.draw 未覆盖的红文本点出「未覆盖」' (([string]$e3dRNoField.detail) -match '未覆盖') ([string]$e3dRNoField.detail)
+
+$e3dCapNotDrawn = [pscustomobject]@{ mode = 'screen'; screen = 'net.minecraft.client.gui.inventory.GuiContainerCreative'
+    drawn = $false; changedPixels = 10
+}
+Expect 'E3.draw drawn=false（绘制未成功）⇒ fail' `
+    (Test-InputGuiDrawLanded -ScreenMeta ([pscustomobject]@{ guiCapture = @($e3dCapNotDrawn) })) 'fail'
+
+# 多机位：只要有一条没改到像素就红（不许用「另一条有改动」把整批判绿）
+$e3dMetaMixed = [pscustomobject]@{ guiCapture = @(
+        [pscustomobject]@{ screen = 'A'; drawn = $true; changedPixels = 900 },
+        [pscustomobject]@{ screen = 'B'; drawn = $true; changedPixels = 0 }
+    ) }
+Expect 'E3.draw 多机位里一条零改动 ⇒ fail' (Test-InputGuiDrawLanded -ScreenMeta $e3dMetaMixed) 'fail'
+
+Expect 'E3.draw guiCapture 缺席/为空 ⇒ fail' `
+    (Test-InputGuiDrawLanded -ScreenMeta ([pscustomobject]@{ guiHidden = $true })) 'fail'
+Expect 'E3.draw shot meta 读不出（$null）⇒ fail' (Test-InputGuiDrawLanded -ScreenMeta $null) 'fail'
+
+# ---------------------------------------------------------------------------
 # 归档 + 红绿表
 # ---------------------------------------------------------------------------
 $failed = @($script:results | Where-Object { -not $_.ok })

@@ -996,7 +996,7 @@ try {
 
             # ============================================================= E3
             if ($runE3) {
-                Write-Step 'E3：产物可从既有清单发现并复核哈希（shot.multi gui:screen）'
+                Write-Step 'E3：产物可从既有清单发现并复核哈希 + 界面确实进了帧（gui:screen vs 同机位 gui:none 对照）'
                 $e3Cameras = @(
                     @{ name = 'e3-gui'; pos = @(64.5, 20.0, 70.5); yaw = 180.0; pitch = 45.0
                         projection = @{ type = 'perspective'; fov = 70 }; resolution = @(854, 480) }
@@ -1005,6 +1005,9 @@ try {
                 $e3GuiOpen = Invoke-Cp -Action 'player.gui' -Params @{ gui = 'inventory'; confirm = $true } -Label 'e3-open-inventory' -Sync -Tier 'scene'
                 Add-Check (New-CpCheck 'O.e3-gui-open' $(if ($e3GuiOpen.exitCode -eq 0) { 'pass' } else { 'fail' }) "player.gui inventory 退出码 $($e3GuiOpen.exitCode)（编排守卫，非 Lead 判据：只是让 gui:screen 有界面可画）")
                 $e3Shot = Invoke-Cp -Action 'shot.multi' -Params @{ cameras = $e3Cameras; gui = 'screen'; confirm = $true } -Label 'e3-shot-gui' -Sync -Tier 'forensic' -TimeoutMs $ActionTimeoutMs
+                # 对照帧（#205）：同一机位、界面**仍开着**，只差 gui 参数。缺陷态下这两帧曾逐字节相同
+                # ⇒「界面进了帧」这台判据是独立于 mod 自述的那一半（mod 自述由 Test-InputGuiDrawLanded 读 meta 断言）。
+                $e3Control = Invoke-Cp -Action 'shot.multi' -Params @{ cameras = $e3Cameras; gui = 'none'; confirm = $true } -Label 'e3-shot-control' -Sync -Tier 'forensic' -TimeoutMs $ActionTimeoutMs
                 $e3GuiClose = Invoke-Cp -Action 'player.gui' -Params @{ gui = 'close'; confirm = $true } -Label 'e3-close-inventory' -Sync -Tier 'scene'
                 Add-Note "E3 卫生步骤 player.gui close 退出码 $($e3GuiClose.exitCode)（不作判据）"
 
@@ -1050,6 +1053,17 @@ try {
                         [void]($tbl | Set-Content -Path (Join-Path $e3OutDir 'e3-sha256-report.md') -Encoding utf8NoBOM)
                     } catch { Write-Warn2 "E3 复核表写出失败: $($_.Exception.Message)" }
                 }
+                # ---- #205：界面到底有没有进帧（两条判据，各自独立成证）
+                #   ① mod 自述侧：screen 帧 meta 的 guiCapture[].changedPixels（**同一帧内**绘制前后的改动像素数）
+                #   ② 独立侧：screen 帧与同机位 gui:none 对照帧的真实像素差异（不采信任何自述字段）
+                $e3DrawMeta = Read-JsonFile (Join-Path $e3OutDir 'downloads\shots__e3-gui.meta.json')
+                Add-Check (Test-InputGuiDrawLanded -ScreenMeta $e3DrawMeta -RunId $e3RunId)
+                $e3CtrlDir = Join-Path $e3OutDir 'control-downloads'
+                New-Item -ItemType Directory -Force -Path $e3CtrlDir | Out-Null
+                $e3ControlRunId = [string](Get-CpProp (Get-CpTrialResult $e3Control) 'runId')
+                $e3ControlPng = Get-CpArtifactBytes -RunId $e3ControlRunId -RelPath 'shots/e3-gui.png' -DestDir $e3CtrlDir
+                Add-Check (Test-InputGuiFrameContent -ScreenPng (Join-Path $e3OutDir 'downloads\shots__e3-gui.png') -ControlPng $e3ControlPng.dest -Detail "screen runId=$e3RunId / control runId=$e3ControlRunId / 机位 e3-gui（界面全程开着，只差 gui 参数）")
+                Add-Note "E3 对照帧 runId=$e3ControlRunId（gui:none，界面仍开着）；界面绘制自证字段见 screen 帧 meta 的 guiCapture[].changedPixels / glStateBefore / glStateAfter"
                 Add-Check (Test-InputE3ArtifactHashes -Manifest $e3Manifest -Downloads $e3Downloads -RunId $e3RunId -ShotTrial $e3Shot)
             }
             continue
