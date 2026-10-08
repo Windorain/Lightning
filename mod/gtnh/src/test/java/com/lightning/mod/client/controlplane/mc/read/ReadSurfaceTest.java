@@ -205,6 +205,27 @@ public class ReadSurfaceTest {
         assertNull(ReadSupport.nbtSummary(null));
     }
 
+    /**
+     * 🔴 数组**必须给值**（2026-10-09 实机教训）：1.7.10 的 NBTTagByteArray/NBTTagIntArray 的
+     * toString 是 "[6 bytes]" / "[3 ints]"——只有长度没有值，于是 EIO 的 conModes（byte[6] = 逐面 IO 模式）
+     * 读出来是一串无信息文本，调用方回落默认值、把"改过了"误判成"没改"。
+     */
+    @Test
+    public void nbtSummaryExposesArrayValues() {
+        net.minecraft.nbt.NBTTagCompound tag = new net.minecraft.nbt.NBTTagCompound();
+        tag.setByteArray("conModes", new byte[] { 1, 1, 2, 3 });
+        tag.setIntArray("externalConnections", new int[] { 4, 5 });
+        JsonObject v = ReadSupport.nbtSummary(tag, 4, 32).getAsJsonObject("value").getAsJsonObject("members");
+        JsonArray bytes = v.getAsJsonObject("conModes").getAsJsonArray("values");
+        JsonArray ints = v.getAsJsonObject("externalConnections").getAsJsonArray("values");
+        assertEquals(4, bytes.size());                 // byte 数组应逐元素给值
+        assertEquals(1, bytes.get(0).getAsInt());
+        assertEquals(3, bytes.get(3).getAsInt());
+        assertEquals(2, ints.size());                  // int 数组应逐元素给值
+        assertEquals(4, ints.get(0).getAsInt());
+        assertEquals(5, ints.get(1).getAsInt());
+    }
+
     // ------------------------------------------------------------ diff 种类
 
     /** 完全一致时报空 kinds。 */

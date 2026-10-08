@@ -11,7 +11,9 @@ import net.minecraft.block.Block;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTBase;
+import net.minecraft.nbt.NBTTagByteArray;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagIntArray;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.world.WorldServer;
@@ -667,6 +669,33 @@ public final class ReadSupport {
         o.addProperty("value", s.length() > 200 ? s.substring(0, 200) : s);
         if (s.length() > 200) {
             o.addProperty("truncated", true);
+        }
+        // 🔴 数组**必须给值**（2026-10-09 实机）：1.7.10 的 NBTTagByteArray/NBTTagIntArray
+        // 的 toString 是 "[6 bytes]" / "[3 ints]" —— 只有长度、没有值，
+        // 于是 conModes（byte[6]，EIO 的逐面 IO 模式）读出来是一串无信息的文本，
+        // 调用方被迫回落默认值、把"改过了"误判成"没改"。这里如实摊平 values。
+        if (tag instanceof NBTTagByteArray) {
+            com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+            try {
+                for (byte b : ((NBTTagByteArray) tag).func_150292_c()) {
+                    arr.add(Integer.valueOf(b));
+                }
+            } catch (Throwable ignored) {
+                // 取值失败就不给 values（宁缺勿假）
+            }
+            o.add("values", arr);
+            o.addProperty("valuesNote", "byte 数组的逐元素值（toString 只给长度，故单列）");
+        } else if (tag instanceof NBTTagIntArray) {
+            com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+            try {
+                for (int i : ((NBTTagIntArray) tag).func_150302_c()) {
+                    arr.add(Integer.valueOf(i));
+                }
+            } catch (Throwable ignored) {
+                // 同上
+            }
+            o.add("values", arr);
+            o.addProperty("valuesNote", "int 数组的逐元素值（toString 只给长度，故单列）");
         }
         return o;
     }
