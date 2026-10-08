@@ -6,7 +6,7 @@
  * 编排为「同世界先后执行 `/sde export` 与 multiblock 导出」。本工具负责**跑完之后**的全部断言：
  *   1. `/sde export` 产物 SHA-256 = 基线（证据链：`scripts/multiblock-pipeline/.out/fix-thumb/sde_export_smoke.*.json`）；
  *   2. multiblock 产物目录在本阶段**逐字节未变**（两套产物目录互不影响）；
- *   3. 客户端日志证明加载的是**同一专用世界**（`sde_pipeline_world`），而不是玩家存档；
+ *   3. 客户端日志证明加载的是**同一专用世界**（世界名由 `--world` 显式给出），而不是玩家存档；
  *   4. 产物形态仍是既有 `/sde export` 形态（`base64(gzip(json))` 信封 + `blockPalette` + 缩略图字段在位）。
  *
  * 用法（两段式，编排按此调用）：
@@ -14,7 +14,7 @@
  *        --multiblock-exports <dir> --structure-exports <dir>
  *   node scripts/acceptance/interop-check.mjs compare  --run-dir <run> \
  *        --multiblock-exports <dir> --structure-exports <dir> \
- *        --log <client log> [--world sde_pipeline_world] [--baseline a,b,c] [--runs f1,f2]
+ *        --log <client log> --world <名称> [--baseline a,b,c] [--runs f1,f2]
  * 退出码：0 = 全绿；1 = 有硬失败；2 = 输入不可用。
  */
 
@@ -108,7 +108,13 @@ function main() {
     console.error(`缺少阶段前快照：${beforePath}`)
     process.exit(2)
   }
-  const world = String(args.world ?? 'sde_pipeline_world')
+  // Gitea #104：老专用世界 `sde_pipeline_world` 已随老批处理设施整体删除，故不再有缺省世界名；
+  // 世界名必须由调用方显式给出（原先的编排阶段 `sde-export-interop` 也已退役，见 run-acceptance.ps1）。
+  if (!args.world) {
+    console.error('缺少 --world：老专用世界（sde_pipeline_world）已随 #104 删除，世界名必须显式给出')
+    process.exit(2)
+  }
+  const world = String(args.world)
   const logPath = args.log ? path.resolve(args.log) : null
   const logText = logPath && fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : ''
 

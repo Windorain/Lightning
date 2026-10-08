@@ -83,7 +83,11 @@ public final class WorldSnapshotAction extends SteppingActionBase {
             throw CpException.param("托管世界目录名非法", "folder", "须以 " + ManagedWorld.PREFIX + " 开头: " + folder);
         }
         Path dir = ManagedWorld.requireManagedFolder(mc.mcDataDir, folder, "folder");
-        ManagedWorld.assertManaged(dir, folder, "world.snapshot");
+        // 快照的 v1 口径是「整目录复制」，复制的是**成品世界**（契约 §6.6：快照范围包含 TE 补全后的
+        // 状态）。因此这里必须是可用性边界（complete:true），不能只断言「是托管目录」——
+        // 否则 #123 的失败残留（complete:false，场景可能只铺了一半）会被拍成一份「看似正常的快照」，
+        // 日后 world.rollback 拿它回滚就把半个场景扶正成了「期望态」，判据再也看不见那个缺口。
+        ManagedWorld.assertCompleteWorld(dir, folder, "world.snapshot");
 
         String id = ctx.optString("snapshotId", null);
         if (id == null || id.trim()

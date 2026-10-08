@@ -23,6 +23,8 @@ public final class CpAboutSnapshot {
     public static final int REFRESH_INTERVAL_TICKS = 20;
 
     private static volatile boolean refreshed;
+    /** 控制面自身忙闲（#104 后 {@code probeActive} 的真值来源，见 {@link ProbeActivity}）。 */
+    private static volatile boolean probeActive;
     private static volatile String probe;
     private static volatile boolean worldLoaded;
     private static volatile boolean managedWorld;
@@ -34,9 +36,10 @@ public final class CpAboutSnapshot {
 
     /** tick 线程调用：重新采集快照。 */
     public static void refresh(Minecraft mc) {
-        String active = ProbeActivity.firstActive(mc);
         JsonObject w = WorldDescriber.describe(mc);
-        probe = active;
+        // #104：老探针设施已整体删除，probe 恒为 null；probeActive 改为「控制面自身忙闲」。
+        probe = ProbeActivity.firstActive(mc);
+        probeActive = ProbeActivity.any(mc);
         worldLoaded = Json.optBool(w, "loaded", false);
         managedWorld = Json.optBool(w, "managed", false);
         worldFolder = Json.optString(w, "folder", null);
@@ -48,7 +51,7 @@ public final class CpAboutSnapshot {
 
     /** HTTP 线程调用：把快照字段补进 about 对象。 */
     public static void contribute(JsonObject about) {
-        about.addProperty("probeActive", probe != null);
+        about.addProperty("probeActive", probeActive);
         about.addProperty("probe", probe);
         about.addProperty("worldLoaded", worldLoaded);
         about.addProperty("managedWorld", managedWorld);

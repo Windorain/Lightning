@@ -18,8 +18,8 @@ import com.google.gson.JsonObject;
  * <p>
  * 覆盖三件事：
  * <ol>
- * <li>段序与段清单（{@code world→capture→build→cameras→criteria→evidence}）——capture 必须在 build 之前，
- * 否则「build 阶段世界未受保护」；</li>
+ * <li>段序与段清单（{@code world→capture→build→read→export→cameras→criteria→evidence}）——capture 必须在
+ * build 之前，否则「build 阶段世界未受保护」；</li>
  * <li>{@code capture}/{@code cameras} 的字段校验走 {@link CameraSpecs}/{@link CaptureSpec} 同一份判定
  * （错误字段名逐条可核对）；</li>
  * <li>与负对照（{@link CaseValidator.VariantCheck}）的交互：补丁改到 cameras/capture 段时，
@@ -178,7 +178,16 @@ public class CaseCaptureSegmentsTest {
 
     // ------------------------------------------------------------ 用例
 
-    /** 段清单与段序（capture 在 build 之前；v1.3 起 read 在 build 之后、cameras 之前）。 */
+    /**
+     * 段清单与段序。
+     *
+     * <p>
+     * 契约口径：capture 在 build 之前（会话包住 build 之后的区间）；v1.3 起 read 在 build 之后；
+     * v1.6 起 action 在 read 之后（#103）；**v1.7（Gitea #102）起 export 在 action 之后、cameras 之前**——
+     * 顺序的理由不是风格：C4 要求「导出件与实拍、观测记录同一 run」，且导出读的是<b>已构建完成</b>的
+     * 世界状态，而 cameras 段会改动渲染状态（投影/光照覆写）。先导出再拍摄，导出件反映的是
+     * 「本 run 构建出的那个世界」，而不是「拍摄过程干预后的世界」。
+     */
     @Test
     public void segmentOrderIsContractOrder() {
         JsonObject plan = plan(caseJson());
@@ -201,16 +210,24 @@ public class CaseCaptureSegmentsTest {
             segments.get(3)
                 .getAsString());
         assertEquals(
-            "cameras",
+            "action",
             segments.get(4)
                 .getAsString());
         assertEquals(
-            "criteria",
+            "export",
             segments.get(5)
                 .getAsString());
         assertEquals(
-            "evidence",
+            "cameras",
             segments.get(6)
+                .getAsString());
+        assertEquals(
+            "criteria",
+            segments.get(7)
+                .getAsString());
+        assertEquals(
+            "evidence",
+            segments.get(8)
                 .getAsString());
         // 规范化段清单与执行期段清单必须同源
         for (int i = 0; i < segments.size(); i++) {

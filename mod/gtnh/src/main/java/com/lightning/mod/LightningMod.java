@@ -1,6 +1,5 @@
 package com.lightning.mod;
 
-import com.lightning.mod.config.SdeAutomationConfig;
 import com.lightning.mod.config.SdeControlPlaneConfig;
 import com.lightning.mod.item.SdeItems;
 import com.lightning.mod.proxy.IProxy;
@@ -28,7 +27,8 @@ public class LightningMod {
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
-        SdeAutomationConfig.load(event);
+        // 老批处理设施（触发文件驱动的自动化链与其 SdeAutomationConfig）已随 Gitea #104 整体删除，
+        // 故不再装载 sde_automation.cfg；控制面配置是唯一的自动化配置面。
         // 控制面配置（contract.md §1.1）：默认关闭；-Dsde.controlPlane=on 可覆盖（见 SdeControlPlaneConfig）
         SdeControlPlaneConfig.load(event);
         SdeItems.register();
@@ -45,6 +45,11 @@ public class LightningMod {
             FMLCommonHandler.instance()
                 .bus()
                 .register(new SdeServerRecordTickHandler());
+            // 命令通道的服务端 tick 排空器（Gitea #100）：必须在服务端启动时注册——
+            // 1.7.10 集成服下 ServerTickEvent 只在此之后才被派发，而事件总线只投给已注册的监听器。
+            // 惰性注册（首次执行命令时）会让命令入队后永远无人排空 ⇒ 每次调用 CP-EXEC-002 超时。
+            // 实现见 client/controlplane/mc/cmd/ServerCommandInvoker#ensureRegistered（含实机教训）。
+            com.lightning.mod.client.controlplane.mc.cmd.ServerCommandInvoker.ensureRegistered();
             sdeServerRecordTickHandlerRegistered = true;
         }
         event.registerServerCommand(new CommandSde());

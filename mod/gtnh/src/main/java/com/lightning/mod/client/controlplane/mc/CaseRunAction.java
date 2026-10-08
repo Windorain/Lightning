@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Set;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.entity.EntityClientPlayerMP;
+import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.world.WorldServer;
 
 import com.google.gson.JsonArray;
@@ -31,10 +33,12 @@ import com.lightning.mod.client.controlplane.core.EventStream;
 import com.lightning.mod.client.controlplane.core.Fields;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.ObservationRecord;
+import com.lightning.mod.client.controlplane.core.SteppingAction;
 import com.lightning.mod.client.controlplane.core.Tier;
 import com.lightning.mod.client.controlplane.core.TimeSource;
 import com.lightning.mod.client.controlplane.mc.capture.CaptureControl;
 import com.lightning.mod.client.controlplane.mc.capture.ShotExecutor;
+import com.lightning.mod.client.controlplane.mc.player.PlayerSession;
 
 /**
  * {@code case.run}（scene 起，步进）：执行声明式用例。
@@ -72,6 +76,9 @@ public final class CaseRunAction extends SteppingActionBase {
 
     /** 段名：读面（v1.3，issue #98）。 */
     public static final String SEG_READ = "read";
+
+    /** 段名：L2 编排（v1.6，issue #103）。 */
+    public static final String SEG_ACTION = "action";
 
     /** 段名：机位拍摄（PR-2）。 */
     public static final String SEG_CAMERAS = "cameras";
@@ -128,6 +135,25 @@ public final class CaseRunAction extends SteppingActionBase {
     private boolean captureArmed;
     /** 本用例声明了哪些机位（cameras 段的规范化数组）。 */
     private JsonArray captureCameras;
+
+    /**
+     * {@code action} 段的步骤推进器（v1.8 / G1）：跨 tick 的输入步在它里面推进，
+     * 收尾释放也经它（见 {@link ActionStepDriver#finish}）。
+     */
+    private ActionStepDriver actionDriver;
+
+    /**
+     * 输入族「全清所持按下态」的动作名（v1.8 / G1）。
+     *
+     * <p>
+     * 段内失败/阶段超时/段异常的释放路径<b>经这个动作</b>走，而不是直接 import 输入运行时的实现：
+     * 释放因此与用例作者能写的 {@code input.release} 步骤是<b>同一份实现</b>（需求书 §8.7
+     * 无隐藏通道），且本文件不必耦合 {@code mc/input} 的内部结构（那是 T2-A 的面）。
+     */
+    public static final String INPUT_RELEASE_ACTION = "input.release";
+
+    /** 段名（v1.6，Gitea #102）。 */
+    public static final String SEG_EXPORT = "export";
 
     /** cameras 段：与 shot.multi 共用的执行器（禁止复制逻辑）。 */
     private ShotExecutor shotExecutor;
@@ -197,7 +223,16 @@ public final class CaseRunAction extends SteppingActionBase {
                 }
             }
         }
-        for (String s : Arrays.asList(SEG_WORLD, SEG_CAPTURE, SEG_BUILD, SEG_CAMERAS, SEG_CRITERIA, SEG_EVIDENCE)) {
+        for (String s : Arrays.asList(
+            SEG_WORLD,
+            SEG_CAPTURE,
+            SEG_BUILD,
+            SEG_READ,
+            SEG_ACTION,
+            SEG_EXPORT,
+            SEG_CAMERAS,
+            SEG_CRITERIA,
+            SEG_EVIDENCE)) {
             if (!segments.contains(s) && !skippedSegments.contains(s)) {
                 skippedSegments.add(s);
             }
@@ -297,7 +332,61 @@ public final class CaseRunAction extends SteppingActionBase {
             CpLog.warn("case.run 释放捕获会话失败: %s", String.valueOf(t));
         } finally {
             SceneSessionGuard.release(mc);
+            // G1 的释放路径（input-contract §3.4 路径 1/2/3）：本段碰过输入设施就全清所持按下态——
+            // 失败/阶段超时/段异常三条路径都会经过本方法（SteppingActionBase.step 的 finally），
+            // 因此「步进动作被中途抛弃」不会留下按下的键。幂等：正常完成路径重复调用无害。
+            if (actionDriver != null) {
+                try {
+                    actionDriver.finish(ctx, failure != null);
+                } catch (Throwable t) {
+                    CpLog.warn("case.run 收尾释放输入所持按下态失败: %s", String.valueOf(t));
+                }
+            }
         }
+    }
+
+    /**
+     * 释放本段碰过的输入设施所持按下态（G1 的收尾路径；幂等）。
+     *
+     * <h2>为什么经注册表走 {@code input.release}，而不是直接调输入运行时</h2>
+     * ①用例作者能写的释放步骤就是它，收尾释放走同一份实现 ⇒ 不存在第二条释放语义（无隐藏通道）；
+     * ②本文件因此不必耦合 {@code mc/input} 的内部结构。未注册时记一条 warn 事件并如实说明兜底：
+     * 设施对每个持有点都有 1200 tick 的到期自动抬起（D-4），因此<b>不会</b>留下永久按下的键。
+     */
+    private void releaseInputState(ActionContext ctx, String reason) {
+        if (actionDriver == null || actionDriver.inputSteps() == 0 || runtime == null || ctx == null) {
+            // 本段没碰过输入设施（G1 之前的全部用例）：一个字节的行为都不变
+            return;
+        }
+        com.lightning.mod.client.controlplane.core.ActionRegistry.Entry entry = runtime.actions()
+            .lookup(INPUT_RELEASE_ACTION);
+        if (entry == null || entry.isStepping() || entry.action() == null) {
+            ctx.emit(
+                EventStream.LEVEL_WARN,
+                EventStream.Kinds.CASE_SEGMENT,
+                "输入步收尾未释放：本树未注册 " + INPUT_RELEASE_ACTION + "（持有点由设施的 1200 tick 到期自动抬起兜底，D-4）",
+                Json.object(
+                    "action",
+                    INPUT_RELEASE_ACTION,
+                    "reason",
+                    reason,
+                    "inputSteps",
+                    Integer.valueOf(actionDriver.inputSteps())));
+            return;
+        }
+        JsonObject r = entry.action()
+            .execute(ctx.withParams(new JsonObject()));
+        ctx.emit(
+            EventStream.LEVEL_INFO,
+            EventStream.Kinds.CASE_SEGMENT,
+            "输入步收尾释放: " + INPUT_RELEASE_ACTION,
+            Json.object(
+                "reason",
+                reason,
+                "inputSteps",
+                Integer.valueOf(actionDriver.inputSteps()),
+                "released",
+                Integer.valueOf(Json.optInt(r, "count", -1))));
     }
 
     private JsonObject advanceInternal(ActionContext ctx) throws Exception {
@@ -337,6 +426,12 @@ public final class CaseRunAction extends SteppingActionBase {
             case SEG_READ:
                 detail = stepRead(ctx);
                 break;
+            case SEG_ACTION:
+                detail = stepAction(ctx);
+                break;
+            case SEG_EXPORT:
+                detail = stepExport(ctx);
+                break;
             case SEG_CAMERAS:
                 detail = stepCameras(ctx);
                 break;
@@ -360,7 +455,16 @@ public final class CaseRunAction extends SteppingActionBase {
 
     // ------------------------------------------------------------ 各段
 
-    /** {@code world} 段：同 {@code world.rebuild} 的实现（{@link WorldRebuildRunner}），不带构建段。 */
+    /**
+     * {@code world} 段：同 {@code world.rebuild} 的实现（{@link WorldRebuildRunner}），不带构建段。
+     *
+     * <p>
+     * <b>本段不收口标记</b>（{@code markComplete=false}，#123）：本段后面还有独立的 {@code build} 段，
+     * 场景尚未铺。若本段就把标记写成 {@code complete:true}，随后的 build 段失败会留下
+     * 「标记说完成、场景只铺了一半」的世界——下游（{@code world.snapshot} 的成品复用门）会误判为
+     * 可复用。收口点因此落在 build 段成功之后（见 {@link #stepBuild}）；用例没有 build 段时，
+     * 本段就是完整的世界重建，此时如实收口（下面按 {@code segments} 判定）。
+     */
     private JsonObject stepWorld(ActionContext ctx) throws Exception {
         if (runner == null) {
             JsonObject w = Json.optObject(plan, "world");
@@ -372,6 +476,10 @@ public final class CaseRunAction extends SteppingActionBase {
             spec.buildSteps = new JsonArray();
             // 后面还有 build 段时不在本段静置：build 段收尾会按 settleTicks 静置（避免双倍等待）
             spec.settleTicks = segments.contains(SEG_BUILD) ? 0 : Json.optInt(w, "settleTicks", 60);
+            boolean hasBuild = segments.contains(SEG_BUILD) && Json.optArray(plan, "build") != null
+                && Json.optArray(plan, "build")
+                    .size() > 0;
+            spec.markComplete = !hasBuild;
             WorldRebuildRunner.assertManagedIfExists(mc.mcDataDir, spec.folder);
             runner = new WorldRebuildRunner(spec, ctx);
         }
@@ -571,6 +679,25 @@ public final class CaseRunAction extends SteppingActionBase {
         ctx.artifacts()
             .writeArtifact(run, SceneManifest.RUN_RELATIVE_PATH, bytes, "scene-manifest");
         SceneManifestStore.write(mc.mcDataDir, folder, m);
+        // 标记收口（#123）：world 段特意留了 complete:false，到本段（场景已铺好、清单已落）才允许
+        // 把世界宣告为「构建完成的成品」。这一步失败即本段失败，标记保持 false —— 那正是失败残留
+        // 应有的状态（可删可重建、不可复用）；故它不能放在 try 里被吞掉。
+        Path worldDir = ManagedWorld.worldDir(mc.mcDataDir, folder);
+        // 先显式断言「目录是托管的」，把「按段续跑跑到一个非托管目录上」这条路的错误信息说清楚：
+        // 写场景清单本身就是对该存档目录的世界写，契约 §6.1 只许写托管世界。若这里直接落到
+        // promoteMarker 的拒绝上，调用方看到的会是「标记收口失败」这句实现内部的话，
+        // 而根因多半是「segments 没包含 world 段、folder 又不是托管世界」。
+        try {
+            ManagedWorld.assertManaged(worldDir, folder, "case.run 的 build 段");
+        } catch (CpException e) {
+            throw new CpException(
+                e.code(),
+                e.detail() + "（build 段的场景清单要写进该存档目录；请把 world 段一并跑，或让 folder 指向托管世界）",
+                e.context(),
+                e);
+        }
+        ManagedWorld.promoteMarker(worldDir, folder, seed, true);
+        CpLog.info("build 段完成，标记已收口（complete:true）: %s", folder);
         JsonObject detail = new JsonObject();
         detail.addProperty("sha256", Json.optString(m, "sha256", null));
         detail.addProperty("stepCount", Json.optInt(m, "stepCount", 0));
@@ -592,8 +719,9 @@ public final class CaseRunAction extends SteppingActionBase {
      * 登记进 manifest，判据段随后用 {@code json-field} 指针去断言它。
      *
      * <h2>与既有段的关系</h2>
-     * 段序 {@code world→capture→build→read→cameras→criteria→evidence}：读面在 build 之后
-     * （读的是成品场景）、在 criteria 之前（产物必须先落）。<b>不</b>与 {@code shot.multi} 共用
+     * 段序 {@code world→capture→build→read→action→export→cameras→criteria→evidence}：读面在 build 之后
+     * （读的是成品场景）、在 criteria 之前（产物必须先落）；{@code action}/{@code export} 段
+     * （v1.6/v1.7）也排在 criteria 之前——凡要判据引用的产物都必须先落盘。<b>不</b>与 {@code shot.multi} 共用
      * 任何状态——读面不碰渲染。
      *
      * <h2>动作实例从哪来</h2>
@@ -700,6 +828,129 @@ public final class CaseRunAction extends SteppingActionBase {
         return detail;
     }
 
+    /**
+     * {@code export} 段（v1.6，Gitea #102）：逐条执行用例声明的导出动作，产物落<b>本用例的 run 目录</b>。
+     *
+     * <h2>为什么必须有这一段（C4）</h2>
+     *
+     * C4 要求「导出件、实拍、观测记录、世界清单哈希<b>同一 run</b>，且该 run 内世界清单哈希唯一」。
+     * 若导出只能在用例之外单独调 {@code export.scene}，它必然落在另一个 run 里——C4 对导出件就永远
+     * 不成立。本段让导出成为用例的一段，与 {@code read}/{@code cameras} 共享同一个 run 目录与观测记录。
+     *
+     * <h2>与 {@code read} 段的差别</h2>
+     *
+     * 导出动作是<b>步进</b>动作（{@code export.scene} 跨阶段推进），而读面段刻意拒绝步进动作
+     * （「跨 tick 的读面会读到两个世界状态」）。导出段的语义恰恰相反：它本来就跨 tick，且它读的
+     * 是<b>缓冲快照</b>（{@code export.scene} 在 onBegin 一次取走全部状态），因此跨 tick 不引入撕裂。
+     * 但 cp 的动作执行器是<b>按作业</b>排空的——用例作业本身正在跑，无法在它内部再起一个子作业。
+     * 因此本段直接调动作实例的 {@code step}，循环到完成为止，并把它当作「本段的一部分」计时。
+     *
+     * <p>
+     * 产物路径由动作决定（run 目录的 {@code export/} 下），本段不声明落点——段里声明落点会与动作
+     * 实现产生第二处真相。段记录里回显动作返回的 {@code path}/{@code sha256}，判据据此引用。
+     */
+    private JsonObject stepExport(ActionContext ctx) throws Exception {
+        JsonArray steps = Json.optArray(plan, "export");
+        JsonArray records = new JsonArray();
+        int executed = 0;
+        if (steps != null) {
+            for (int i = 0; i < steps.size(); i++) {
+                JsonObject step = steps.get(i)
+                    .getAsJsonObject();
+                String action = Json.optString(step, "action", null);
+                JsonObject params = Json.optObject(step, "params");
+                com.lightning.mod.client.controlplane.core.ActionRegistry.Entry entry = runtime == null ? null
+                    : runtime.actions()
+                        .lookup(action);
+                if (entry == null) {
+                    throw new CpException(
+                        ErrorCodes.VALID_UNKNOWN,
+                        "用例 export 段引用了未注册的动作: " + action,
+                        Json.object(
+                            "field",
+                            "export[" + i + "].action",
+                            "action",
+                            action,
+                            "registered",
+                            runtime == null ? null
+                                : runtime.actions()
+                                    .names()));
+                }
+                JsonObject result;
+                try {
+                    if (entry.isStepping()) {
+                        // 步进导出动作：在本段内循环推进到完成（每个作业一个新实例——
+                        // 用例作业只有一个，故这里取一次实例并在本段内复用，符合实例的作业级语义）
+                        com.lightning.mod.client.controlplane.core.SteppingAction sub = entry.newSteppingAction();
+                        if (sub == null) {
+                            throw new CpException(ErrorCodes.EXEC_FAILED, "步进动作工厂返回 null: " + action);
+                        }
+                        ActionContext derived = ctx.withParams(params == null ? new JsonObject() : params);
+                        result = null;
+                        for (int guard = 0; guard < MAX_EXPORT_STEPS && result == null; guard++) {
+                            result = sub.step(derived);
+                        }
+                        if (result == null) {
+                            throw new CpException(
+                                ErrorCodes.EXEC_TIMEOUT,
+                                "导出步骤 export[" + i + "]（" + action + "）在 " + MAX_EXPORT_STEPS + " 次推进内未完成",
+                                Json.object("field", "export[" + i + "].action", "action", action));
+                        }
+                    } else {
+                        result = entry.action()
+                            .execute(ctx.withParams(params == null ? new JsonObject() : params));
+                    }
+                } catch (CpException e) {
+                    throw new CpException(
+                        e.code(),
+                        "导出步骤 export[" + i + "]（" + action + "）失败: " + e.detail(),
+                        e.context(),
+                        e);
+                }
+                if (result == null) {
+                    result = new JsonObject();
+                }
+                JsonObject rec = new JsonObject();
+                rec.addProperty("index", i);
+                rec.addProperty("action", action);
+                rec.addProperty("ok", true);
+                rec.add("params", Json.copyObject(params));
+                rec.addProperty("runId", Json.optString(result, "runId", runId(ctx)));
+                rec.addProperty("path", Json.optString(result, "path", null));
+                rec.addProperty("sha256", Json.optString(result, "sha256", null));
+                rec.addProperty("bytes", Json.optLong(result, "bytes", -1L));
+                rec.addProperty("shape", Json.optString(result, "shape", null));
+                rec.addProperty("frames", Json.optInt(result, "frames", 0));
+                rec.add("frameIndexes", Json.copyArray(Json.optArray(result, "frameIndexes")));
+                rec.addProperty("artifactCount", Json.optInt(result, "artifactCount", 0));
+                records.add(rec);
+                executed++;
+                ctx.emit(
+                    EventStream.LEVEL_INFO,
+                    EventStream.Kinds.CASE_SEGMENT,
+                    "导出步骤完成: " + action + " → " + Json.optString(result, "path", "?"),
+                    Json.object(
+                        "action",
+                        action,
+                        "path",
+                        Json.optString(result, "path", null),
+                        "sha256",
+                        Json.optString(result, "sha256", null),
+                        "index",
+                        Integer.valueOf(i)));
+            }
+        }
+        JsonObject detail = new JsonObject();
+        detail.addProperty("executed", executed);
+        detail.addProperty("declared", steps == null ? 0 : steps.size());
+        detail.add("steps", records);
+        detail.addProperty("note", "导出件落本 run 目录（C4 同 run 纪律）；落点由导出动作决定，段内不声明 path");
+        return detail;
+    }
+
+    /** 单个导出步骤的最大推进次数（防步进动作卡死；正常 export.scene 是 3 阶段）。 */
+    public static final int MAX_EXPORT_STEPS = 200;
+
     /** 读面产物的默认 role：由动作名的最后一段派生（{@code read.blocks} → {@code read-blocks}）。 */
     static String deriveRole(String action) {
         if (action == null) {
@@ -709,6 +960,530 @@ public final class CaseRunAction extends SteppingActionBase {
         return dot < 0 ? "read-" + action
             : "read-" + action.substring(dot + 1)
                 .replace('.', '-');
+    }
+
+    /**
+     * {@code action} 段（v1.6，issue #103）：逐条执行用例声明的<b>任意</b> cp 动作。
+     *
+     * <h2>为什么这一段是 L2 的落点</h2>
+     * 需求书 §4.3 把 L2 定义为「L0/L1 的<b>有序编排</b>，可重放、<b>逐步断言</b>」。在本段之前，
+     * 用例能表达的世界写只有 {@code build} 段的四种构建 op（clear/block/te/wait）——
+     * {@code scene.*}（L0）与 {@code player.*}（L1）一步也进不了固定程序，于是「L2 = 有序编排」
+     * 这句话在代码上没有落点（#103 前置盘点的 G3）。本段把两者的接缝封上：
+     *
+     * <ul>
+     * <li><b>有序</b>：按数组序逐条执行，段序 {@code …build→read→action→cameras…}——排在
+     * {@code read} 之后（可读成品场景）、{@code cameras} 之前（编排的世界改动必须发生在拍摄之前，
+     * 否则截图与判据说的不是同一个世界）；</li>
+     * <li><b>可重放</b>：每步的 {@code params} 逐字写死在用例文件里，{@code caseSha256} 落 run
+     * （与 {@code read} 段同一可追溯口径）；</li>
+     * <li><b>逐步断言</b>：{@code expect} 非空时<b>当场</b>按 RFC 6901 指针断言该步的结果；
+     * 没命中就当场 {@code CP-EXEC-001}——不拖到 criteria 段。这条是「逐步」二字的物质保证：
+     * 一步失败时，run 目录里留下的产物正好停在失败那一步，而不是一份「跑完了但判据红」的现场。</li>
+     * </ul>
+     *
+     * <h2>与既有段的关系（不共用状态）</h2>
+     * 动作实例从注册表取（{@code runtime.actions()}）——「用例声明的动作必须是真注册过的动作」
+     * 由查表保证，且动作的<b>同一份实现</b>既服务交互调用也服务用例（需求书 §8.7 无隐藏通道）。
+     * 派生上下文 {@link ActionContext#withParams} 共享 run，因此产物落用例的 run 目录，
+     * criteria 段随后用 {@code json-field} 指针就能引用它（与 {@code read} 段同一机制）。
+     *
+     * <h2>v1.8 / G1：输入族步进动作可以在段内跨 tick 推进</h2>
+     * 原先本段一律拒绝步进动作（理由对<b>非输入族</b>仍成立：段语义是「一次 advance 里跑完」，
+     * 放行要装卸世界的那类动作会让「段完成」与「动作完成」脱钩）。G1（input-contract.md §9.2）
+     * 只对 {@link CaseValidator#ACTION_STEPPING_INPUT_ACTIONS}（{@code input.key} / {@code input.mouse}）
+     * 开一个口子——不推进它们，「注入输入 → 推进 N tick → 读后果」在用例里<b>无法表达</b>。
+     *
+     * <p>
+     * 推进与收尾的四条纪律都落在 {@link ActionStepDriver}：一次 tick 只推进一次（不 sleep / 不忙等）、
+     * 完成前不进入下一步骤、输入步不走 {@code settleBetweenSteps} 的墙钟等待、失败/超时/段异常都走
+     * {@link ActionStepDriver#finish} 释放本段所持按下态。{@code holdTicks} 写在步骤对象<b>顶层</b>
+     * （D-3），由驱动翻译成动作参数（{@code params} 内的 {@code holdTicks} 在静态层即被拒）。
+     */
+    private JsonObject stepAction(ActionContext ctx) throws Exception {
+        if (actionDriver == null) {
+            actionDriver = new ActionStepDriver(
+                runtime == null ? null : runtime.actions(),
+                this::settleBetweenSteps,
+                this::releaseInputState);
+        }
+        return actionDriver.advance(ctx, Json.optArray(plan, "action"));
+    }
+
+    /**
+     * {@code action} 段的步骤推进器（v1.8 / G1，input-contract.md §9.2）。
+     *
+     * <h2>为什么把它从段执行体里拆出来</h2>
+     * 「一次 tick 只推进一次」这条纪律必须在<b>没有 Minecraft 的环境里</b>可判定：段执行体的其它部分
+     * （步骤间收敛、MC 状态）都挂在客户端线程上，离线测不了「1 tick = 1 step」。拆出来之后推进器只依赖
+     * {@link ActionRegistry}/{@link SteppingAction}/{@link ActionContext} 这些 core 面，
+     * 单测可以直接驱动它，并数清每次 {@code advance} 到底调了几次 {@code step()}。
+     *
+     * <h2>推进纪律（逐条可判定）</h2>
+     * <ol>
+     * <li>{@link #advance} 对<b>在飞</b>的输入步恰好调一次 {@code step()}；它返回 null 即让出本 tick；</li>
+     * <li>输入步完成后<b>本 tick 到此为止</b>（下一步骤下个 tick 开始）——每个输入步至少占一个 tick，
+     * 于是「按下」与「紧随其后的读断言」天然隔着帧边界，不会挤进同一次 advance；</li>
+     * <li>同步步骤的行为与 G1 之前逐字相同：同一 tick 内按数组序跑完、每步落产物、{@code expect}
+     * 当场断言、非末步做步骤间收敛；</li>
+     * <li>输入步<b>不</b>做步骤间收敛——那段等待是墙钟等待（{@code Thread.sleep} 量级），
+     * 契约 §9.2 明令不得用于输入步；输入步的「等」= tick 推进；</li>
+     * <li>失败/超时/段异常都经 {@link #finish} 释放（幂等）；只有本段真的碰过输入设施才调释放钩子
+     * （没碰过 ⇒ 一个字节的行为都不变，A3 基准不失效）。</li>
+     * </ol>
+     */
+    public static final class ActionStepDriver {
+
+        /** 步骤间收敛钩子（mc 层注入 {@code settleBetweenSteps}；离线测试可注入 no-op 或记录器）。 */
+        public interface Settle {
+
+            void settle(ActionContext ctx, String action, int index, int lastIndex, JsonObject rec);
+        }
+
+        /** 输入步收尾释放钩子（mc 层注入 {@code releaseInputState}）。 */
+        public interface Releaser {
+
+            void release(ActionContext ctx, String reason);
+        }
+
+        private final com.lightning.mod.client.controlplane.core.ActionRegistry registry;
+        private final Settle settle;
+        private final Releaser releaser;
+
+        private JsonArray steps;
+        private final JsonArray records = new JsonArray();
+        private int index;
+        private int executed;
+        private int asserted;
+        private int inputSteps;
+
+        /** 在飞的输入步实例（跨 tick 复用；完成或收尾后清空）。 */
+        private SteppingAction inFlight;
+        private ActionContext inFlightCtx;
+        private int inFlightIndex = -1;
+        private String inFlightAction;
+        private int inFlightTicks;
+
+        /** 是否已收尾（{@link #finish} 幂等：段内失败路径与 onFinish 会各调一次）。 */
+        private boolean finished;
+
+        public ActionStepDriver(com.lightning.mod.client.controlplane.core.ActionRegistry registry, Settle settle,
+            Releaser releaser) {
+            this.registry = registry;
+            this.settle = settle;
+            this.releaser = releaser;
+        }
+
+        /** 在飞输入步的下标；无在飞返回 −1。 */
+        public int inFlightIndex() {
+            return inFlightIndex;
+        }
+
+        /** 在飞输入步已推进的 tick 数（「1 tick = 1 推进」的机械计数）。 */
+        public int inFlightTicks() {
+            return inFlightTicks;
+        }
+
+        /** 本段执行过的输入族步进步数（0 ⇒ 本段没碰输入设施，收尾无须释放）。 */
+        public int inputSteps() {
+            return inputSteps;
+        }
+
+        /**
+         * 推进一次（每个客户端 tick 恰好调一次）。
+         *
+         * @return 段全部步骤完成时返回段记录详情；未完成返回 null（下个 tick 继续）
+         */
+        public JsonObject advance(ActionContext ctx, JsonArray declared) throws Exception {
+            try {
+                return advanceInternal(ctx, declared);
+            } catch (Throwable t) {
+                // 段内失败（步骤异常 / 断言不命中 / 参数非法 / 未注册动作）：**当场**释放本段所持按下态。
+                // 收尾层（CaseRunAction.onFinish）还会再调一次 finish——它是幂等的，重复调用是安全的。
+                finish(ctx, true);
+                throw t;
+            }
+        }
+
+        private JsonObject advanceInternal(ActionContext ctx, JsonArray declared) throws Exception {
+            if (steps == null) {
+                steps = declared == null ? new JsonArray() : declared;
+            }
+            while (index < steps.size() && inFlight == null) {
+                JsonObject step = steps.get(index)
+                    .getAsJsonObject();
+                String action = Json.optString(step, "action", null);
+                JsonObject params = Json.optObject(step, "params");
+                com.lightning.mod.client.controlplane.core.ActionRegistry.Entry entry = registry == null ? null
+                    : registry.lookup(action);
+                if (entry == null) {
+                    throw new CpException(
+                        ErrorCodes.VALID_UNKNOWN,
+                        "用例 action 段引用了未注册的动作: " + action,
+                        Json.object(
+                            "field",
+                            "action[" + index + "].action",
+                            "action",
+                            action,
+                            "registered",
+                            registry == null ? null : registry.names()));
+                }
+                if (!entry.isStepping()) {
+                    // 同步步骤：与 G1 之前逐字相同的路径（同一 tick 内继续往下跑）
+                    JsonObject result;
+                    try {
+                        // 派生上下文：换本步骤的参数，run/artifacts/events 仍是用例那一份
+                        // （产物因此落用例 run 目录，判据段才看得到——见 ActionContext#withParams）
+                        result = entry.action()
+                            .execute(ctx.withParams(params));
+                    } catch (CpException e) {
+                        throw new CpException(
+                            e.code(),
+                            "编排步骤 action[" + index + "]（" + action + "）失败: " + e.detail(),
+                            e.context(),
+                            e);
+                    }
+                    record(ctx, step, action, params, result, index, false);
+                    index++;
+                    continue;
+                }
+                if (!CaseValidator.ACTION_STEPPING_INPUT_ACTIONS.contains(action)) {
+                    throw CpException.param(
+                        "编排步骤不许用非输入族的步进动作",
+                        "action[" + index + "].action",
+                        "编排动作必须是同步动作，或 G1 允许在段内跨 tick 推进的输入族步进动作 " + CaseValidator.ACTION_STEPPING_INPUT_ACTIONS
+                            + "（跨 tick 的其它动作无法在单次 advance 的段语义里推进）: "
+                            + action);
+                }
+                openStep(ctx, entry, step, params, action);
+            }
+            if (inFlight == null) {
+                return detail();
+            }
+            // 在飞的输入步：**本 tick 只推进一次**（不 sleep、不忙等、不在段内循环到完成）
+            inFlightTicks++;
+            JsonObject result;
+            try {
+                result = inFlight.step(inFlightCtx);
+            } catch (CpException e) {
+                throw new CpException(
+                    e.code(),
+                    "编排步骤 action[" + inFlightIndex + "]（" + inFlightAction + "）失败: " + e.detail(),
+                    e.context(),
+                    e);
+            }
+            if (result == null) {
+                return null;
+            }
+            int done = inFlightIndex;
+            String doneAction = inFlightAction;
+            JsonObject doneStep = steps.get(done)
+                .getAsJsonObject();
+            JsonObject doneParams = Json.optObject(doneStep, "params");
+            inFlight = null;
+            inFlightCtx = null;
+            inFlightIndex = -1;
+            inFlightAction = null;
+            inFlightTicks = 0;
+            record(ctx, doneStep, doneAction, doneParams, result, done, true);
+            index++;
+            // 输入步至少占一个 tick：本 tick 到此为止，下一步骤下个 tick 开始（后续读断言不抢跑）
+            return null;
+        }
+
+        /** 开一个输入步（取实例 + 建派生上下文 + 把顶层 {@code holdTicks} 翻译进动作参数）。 */
+        private void openStep(ActionContext ctx, com.lightning.mod.client.controlplane.core.ActionRegistry.Entry entry,
+            JsonObject step, JsonObject params, String action) {
+            if (Json.get(params, CaseValidator.FIELD_HOLD_TICKS) != null) {
+                throw CpException.param(
+                    "holdTicks 只能写在步骤对象顶层",
+                    "action[" + index + "].params." + CaseValidator.FIELD_HOLD_TICKS,
+                    "两处都写会让真值来源不明（D-3 / input-contract.md §9.2 第 2 条）：请删掉 params 里的那一份");
+            }
+            SteppingAction sub = entry.newSteppingAction();
+            if (sub == null) {
+                throw new CpException(ErrorCodes.EXEC_FAILED, "步进动作工厂返回 null: " + action);
+            }
+            inFlight = sub;
+            inFlightCtx = ctx.withParams(derivedParams(step, params));
+            inFlightIndex = index;
+            inFlightAction = action;
+            inFlightTicks = 0;
+            inputSteps++;
+        }
+
+        /**
+         * 步骤参数 → 动作参数：把<b>顶层</b>的 {@code holdTicks} 翻译进 {@code params}（D-3 的唯一翻译点）。
+         *
+         * <p>
+         * 位置在上层、值在动作层，因此必须有这一处显式翻译：用例作者写的是编排属性（跨 tick 持有
+         * 多少拍），动作实现读的是自己的参数（{@code input.key}/{@code input.mouse} 的
+         * {@code holdTicks}）。未写顶层 {@code holdTicks} 时<b>不注入</b>任何默认值——动作自己的
+         * 缺省（{@code 1}）说了算，驱动不隐式跨帧。
+         */
+        static JsonObject derivedParams(JsonObject step, JsonObject params) {
+            JsonObject p = Json.copyObject(params);
+            JsonElement hold = Json.get(step, CaseValidator.FIELD_HOLD_TICKS);
+            if (hold != null) {
+                p.add(CaseValidator.FIELD_HOLD_TICKS, Json.copy(hold));
+            }
+            return p;
+        }
+
+        /** 记一步：落产物 + 逐步断言 + 段记录 + 事件（输入步不做步骤间收敛）。 */
+        private void record(ActionContext ctx, JsonObject step, String action, JsonObject params, JsonObject result,
+            int i, boolean inputStep) {
+            String path = Json.optString(step, "path", null);
+            String role = Json.optString(step, "role", null);
+            JsonObject r = result == null ? new JsonObject() : result;
+            ctx.artifacts()
+                .writeArtifact(
+                    ctx.run(),
+                    path,
+                    Json.toPretty(r)
+                        .getBytes(StandardCharsets.UTF_8),
+                    role == null ? deriveActionRole(action) : role);
+            JsonObject rec = new JsonObject();
+            rec.addProperty("index", i);
+            rec.addProperty("action", action);
+            rec.addProperty("path", path);
+            rec.addProperty("ok", true);
+            rec.add("params", Json.copyObject(params));
+            JsonObject shape = new JsonObject();
+            shape.addProperty("schema", Json.optString(r, "schema", null));
+            shape.addProperty(
+                "bytes",
+                ctx.run() == null ? 0L
+                    : ctx.run()
+                        .artifact(path) == null ? 0L
+                            : ctx.run()
+                                .artifact(path)
+                                .bytes());
+            shape.addProperty(
+                "sha256",
+                ctx.run() == null ? null
+                    : ctx.run()
+                        .artifact(path) == null ? null
+                            : ctx.run()
+                                .artifact(path)
+                                .sha256());
+            rec.add("artifact", shape);
+            // 逐步断言：本步的结果当场按指针核对，没命中即当场失败（见 assertStep 的说明）
+            JsonObject expect = Json.optObject(step, "expect");
+            if (expect != null && Json.size(expect) > 0) {
+                rec.add("assertions", assertStep(action, i, r, expect));
+                asserted += Json.size(expect);
+            }
+            records.add(rec);
+            executed++;
+            ctx.emit(
+                EventStream.LEVEL_INFO,
+                EventStream.Kinds.CASE_SEGMENT,
+                "编排步骤完成: " + action + " → " + path,
+                Json.object("action", action, "path", path, "index", Integer.valueOf(i)));
+            if (inputStep) {
+                // 输入步的「等待」由 tick 推进表达；墙钟等待（settleBetweenSteps 的 Thread.sleep 路径）
+                // 契约 §9.2 第 4 条明令不得用于输入步。
+                return;
+            }
+            // 步骤间收敛（见 settleBetweenSteps 的说明）：本段在**单次 advance** 里逐条跑完同步步骤，
+            // 若不收敛，下一步读到的是上一步还没生效的世界。
+            if (settle != null) {
+                settle.settle(ctx, action, i, steps.size() - 1, rec);
+            }
+        }
+
+        /**
+         * 收尾（成功/失败/超时/段异常四条路径都会到）：释放本段碰过的输入设施所持按下态（幂等）。
+         *
+         * <p>
+         * 只在<b>本段真的碰过输入设施</b>（{@link #inputSteps()} &gt; 0）或有步进实例在飞时才调释放
+         * 钩子：没碰过输入设施的用例（G1 之前的全部用例）因此一个字节的行为都不变。
+         *
+         * @param failed true = 失败/超时路径
+         */
+        public void finish(ActionContext ctx, boolean failed) {
+            if (finished) {
+                // 幂等：段内失败路径已经释放过一次，onFinish 再调一次不再重复投递释放
+                return;
+            }
+            finished = true;
+            boolean touched = inputSteps > 0 || inFlight != null;
+            if (inFlight != null) {
+                CpLog.warn(
+                    "输入步未完成即收尾（action[%d] %s，已推进 %d tick）: 释放本段所持按下态",
+                    Integer.valueOf(inFlightIndex),
+                    inFlightAction,
+                    Integer.valueOf(inFlightTicks));
+            }
+            inFlight = null;
+            inFlightCtx = null;
+            inFlightIndex = -1;
+            inFlightAction = null;
+            inFlightTicks = 0;
+            if (!touched || releaser == null) {
+                return;
+            }
+            try {
+                releaser.release(ctx, failed ? "failed" : "segment-end");
+            } catch (Throwable t) {
+                // 释放失败不得让收尾再抛：持有点还有设施的 1200 tick 到期机制兜底（D-4）
+                CpLog.warn("输入步收尾释放失败: %s", String.valueOf(t));
+            }
+        }
+
+        private JsonObject detail() {
+            JsonObject detail = new JsonObject();
+            detail.addProperty("executed", executed);
+            detail.addProperty("declared", steps == null ? 0 : steps.size());
+            detail.addProperty("asserted", asserted);
+            detail.add("steps", records);
+            return detail;
+        }
+    }
+
+    /**
+     * 逐步断言（{@code action[i].expect}）：逐条按 RFC 6901 指针核对，全部命中才算这一步过。
+     *
+     * <p>
+     * 指针语义与 {@code json-field}/{@code te-state-equals} 判据<b>同一份实现</b>
+     * （{@link Json#resolvePointer}）——同一件事只有一个定义点，编排期与判据期不会分叉。
+     * 任一条不命中即 {@code CP-EXEC-001}，{@code context.assertions} 逐条给出
+     * {@code {pointer, expect, actual, ok}}（失败显式：不静默跳过、不空转绿）。
+     */
+    /**
+     * 逐步断言的实现（静态：段推进器 {@link ActionStepDriver} 也要用，而推进器刻意不持有
+     * {@code CaseRunAction} 实例——它必须能在没有 Minecraft 的环境里被单测直接驱动）。
+     */
+    private static JsonArray assertStep(String action, int index, JsonObject result, JsonObject expect) {
+        JsonArray out = new JsonArray();
+        JsonArray failed = new JsonArray();
+        for (java.util.Map.Entry<String, JsonElement> e : Json.entries(expect)) {
+            String pointer = e.getKey();
+            JsonElement want = e.getValue();
+            JsonElement actual = Json.resolvePointer(result, pointer);
+            boolean ok = actual != null && actual.equals(want);
+            JsonObject a = new JsonObject();
+            a.addProperty("pointer", pointer);
+            a.add("expect", Json.copy(want));
+            a.add("actual", actual == null ? com.google.gson.JsonNull.INSTANCE : Json.copy(actual));
+            a.addProperty("ok", Boolean.valueOf(ok));
+            if (!ok) {
+                JsonObject f = new JsonObject();
+                f.addProperty("pointer", pointer);
+                f.add("expect", Json.copy(want));
+                f.add("actual", actual == null ? com.google.gson.JsonNull.INSTANCE : Json.copy(actual));
+                failed.add(f);
+            }
+            out.add(a);
+        }
+        if (failed.size() > 0) {
+            throw new CpException(
+                ErrorCodes.EXEC_FAILED,
+                "编排步骤逐步断言未通过（action[" + index + "] " + action + "）：" + failed.size() + "/" + out.size() + " 条不命中",
+                Json.object(
+                    "field",
+                    "action[" + index + "].expect",
+                    "action",
+                    action,
+                    "index",
+                    Integer.valueOf(index),
+                    "assertions",
+                    out,
+                    "failed",
+                    failed));
+        }
+        return out;
+    }
+
+    /**
+     * 编排产物的默认 role：由动作名的<b>首段</b>派生（{@code player.place_block} → {@code player-place_block}）。
+     *
+     * <p>
+     * 与 {@code read} 段的 {@link #deriveRole} 不同（那条固定 {@code read-} 前缀，因为读面是一族）。
+     * 编排段能调任意族，用首段做前缀才有区分度（{@code scene-*} / {@code player-*} / …）。
+     */
+    static String deriveActionRole(String action) {
+        if (action == null) {
+            return "action";
+        }
+        return "action-" + action.replace('.', '-');
+    }
+
+    /**
+     * 步骤间收敛：等集成服把上一步发出的包处理掉，再跑下一步。
+     *
+     * <h2>为什么「逐步」必须包含这一步（#103 实机实测）</h2>
+     * 本段在**单次 {@code advance}** 里逐条跑完（同步动作不跨 tick），而 L1（{@code player.*}）
+     * 的请求是<b>包</b>：客户端发出 C03/C07/C08，服务端在<b>它自己线程的 tick</b> 里处理
+     * （{@code MinecraftServer.updateTimeLightAndEntities → networkTick}）。
+     * 因此「上一步发了包」与「下一步能读到它的后果」之间隔着服务端的一拍。
+     *
+     * <p>
+     * 实测形态（#103 首轮实机）：{@code l1-orchestration} 里 {@code scene.player.pose} 之后紧跟
+     * {@code player.move}，move 的 {@code serverBefore=[62.5,12.0,64.5]} 还是 pose <b>之前</b>的位置，
+     * 于是 move 从旧位置起算、被服务端拽回（{@code movedServerBlocks=0, observed=false}）。
+     * 而 move 内部自己的 {@code awaitServerSync()} 只保证「move 自己发的那一批」被处理——
+     * 它管不到「上一步的包还没被处理」。
+     *
+     * <p>
+     * 因此收敛点必须在本段（编排层），而不是在某个动作里：动作只知道自己的请求，
+     * 只有编排层知道「这一步之后还有下一步」。
+     *
+     * <h2>收敛多久</h2>
+     * 用 L1 自己的口径（{@link PlayerSession#DEFAULT_SERVER_SYNC_TICKS} = 2 个服务端 tick，
+     * 上限 {@link PlayerSession#DEFAULT_SERVER_SYNC_TIMEOUT_MS} = 500ms）——不另立一套等待语义。
+     * 最后一步不等（没有下一步要收敛）。等待时长写进该步的段记录（{@code settleMs}），
+     * 让「等了多久」可见而不是隐式。
+     *
+     * <p>
+     * <b>哪些步骤后要等（#103 第二轮实机修正）</b>：<b>除 {@code read.*} 之外全等</b>。
+     * 首版只对 {@code player.*} 等，结果 {@code scene.player.pose} → {@code player.move}
+     * 这个组合照样翻车：pose 走 {@code setPositionAndUpdate}（S08）把<b>服务端</b>玩家挪到新位置，
+     * 而<b>客户端</b>要收到 S08 才会跟过去；不等待时 move 拿着<b>旧</b>客户端坐标发 C03，
+     * 服务端 {@code processPlayer} 判定不符并把玩家拽回（实测 {@code movedServerBlocks=0}，
+     * 客户端反被拉走 2 格）。
+     *
+     * <p>
+     * 因此判定按「这一步有没有写」而不是「是不是 L1」：{@code scene.*} 同样会触发原版同步出口
+     * （S08/S2B/S1D/S2F…），而 {@code read.*} 是纯读（无包、无世界写），对它等待纯属白花时间——
+     * 那正是「便宜试错」要避免的。
+     *
+     * <h2>为什么是「往返」而不是「等服务端 tick」（第三轮实机修正）</h2>
+     * 只等服务端 tick 不够：{@code scene.player.pose} 的 S08 是<b>服务端→客户端</b>方向，
+     * 而「收到并应用入站包」发生在<b>客户端</b>的 tick 里
+     * （{@code Minecraft.runTick → NetHandlerPlayClient.processReceivedPackets}）。
+     * 本段跑在客户端 tick 线程上并阻塞等待——<b>客户端自己那一拍因此永远不来</b>，
+     * S08 就躺在入站队列里（实测：settle 98ms 后客户端仍在旧位置）。
+     * 故必须显式把入站队列推出去（{@link PlayerSession#completeClientRequest}：
+     * flush 入站 + 等服务端 tick），这与 L1 动作回读前的收尾是<b>同一份实现</b>，不另立一套。
+     */
+    private void settleBetweenSteps(ActionContext ctx, String action, int index, int lastIndex, JsonObject rec) {
+        if (index >= lastIndex) {
+            return;
+        }
+        if (action == null || action.startsWith("read.")) {
+            return;
+        }
+        long waited;
+        try {
+            EntityClientPlayerMP client = mc == null ? null : mc.thePlayer;
+            NetHandlerPlayClient handler = client == null ? null : client.sendQueue;
+            if (handler != null) {
+                // 往返：先把入站包推出去（应用 S08/S2B/…），再等集成服把出站包处理掉
+                waited = PlayerSession.completeClientRequest(handler);
+            } else {
+                waited = PlayerSession.awaitServerSync();
+            }
+        } catch (Throwable t) {
+            // 收敛失败不该让整跑失败：如实记 -1，由后续步骤/判据去暴露真实后果
+            CpLog.warn("编排步骤收敛等待失败（action[%d] %s）: %s", Integer.valueOf(index), action, String.valueOf(t));
+            waited = -1L;
+        }
+        rec.addProperty("settleMs", Long.valueOf(waited));
+        if (waited > 0) {
+            CpLog.info("编排步骤 action[%d]（%s）后等待服务端/客户端收敛 %d ms", Integer.valueOf(index), action, Long.valueOf(waited));
+        }
     }
 
     /** {@code criteria} 段：core 判据引擎 + 本层注入的运行期哈希来源。 */
@@ -1318,8 +2093,10 @@ public final class CaseRunAction extends SteppingActionBase {
             }
         }
         stub.addProperty("stepCount", steps.size());
-        stub.add("blocks", blocks);
-        stub.add("tileEntities", tes);
+        // #112：与 SceneBuilder.finish 同一口径（同一 pos 后写覆盖）——这份存根也是清单的
+        // 数据入口之一（readBack 按它的位置集合实读），不能在这里留下重复 pos。
+        stub.add("blocks", SceneManifest.manifestBlocks(blocks));
+        stub.add("tileEntities", SceneManifest.manifestTes(tes));
         return stub;
     }
 

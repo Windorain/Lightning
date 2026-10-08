@@ -45,12 +45,25 @@ import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
  * 
  * <b>为什么 machines.json 必须逐字节可复现</b>：它是 T1.3/T1.4 的输入事实层，也是「同环境两次运行结果一致」这条
  * 自检的机器判据 —— {@code summary.json.machinesJsonSha256} 就是它的内容哈希。
+ *
+ * <h2>入口的去向（Gitea #104 / V11）</h2>
+ *
+ * 老触发文件通道（{@code <mcDataDir>/sde_multiblock_scan.json} → {@code MultiblockScanAutomation}
+ * 接管 tick → 调本类的 {@code run(mc)}）已随 #104 <b>整体删除</b>：触发文件常量、{@code triggerFile()}、
+ * {@code readConfig()} 与 {@code exit}/{@code cleanupTrigger} 两个自毁语义字段一并移除。
+ *
+ * <p>
+ * <b>本类本体保留</b>（V11 裁决：枚举是生产件——{@code export.multiblock} 经
+ * {@link VariantMachineFacts#findLatestFacts} 硬依赖本类产出的 {@code machines.json}）。
+ * 但#104 之后<b>没有任何自描述通道可以触发本类</b>：{@code export.multiblock} 的前置枚举事实
+ * 没有任何 cp 动作可以生成。这是 #104 显式登记的<b>已知缺口</b>（不是遗漏），
+ * 建议补一个自描述入口（如 {@code export.enumerate}）；在那之前，本类的 {@code run(mc)}
+ * 只能由测试/开发代码直接调用。
  */
 @SideOnly(Side.CLIENT)
 public final class MultiblockScanRunner {
 
     public static final String OUTPUT_DIR = "multiblock_scan";
-    public static final String TRIGGER_FILE = "sde_multiblock_scan.json";
 
     /** 逐台机器的探测预算上限（毫秒）；超时只影响该台，记为失败，不静默跳过。 */
     public static final long DEFAULT_PER_MACHINE_BUDGET_MS = 30_000L;
@@ -63,16 +76,18 @@ public final class MultiblockScanRunner {
         return new File(mc.mcDataDir, OUTPUT_DIR);
     }
 
-    public static File triggerFile(Minecraft mc) {
-        return new File(mc.mcDataDir, TRIGGER_FILE);
-    }
-
     // ------------------------------------------------------------------ config
 
+    /**
+     * 扫描参数。
+     *
+     * <p>
+     * #104 之前另有 {@code exit}（跑完 {@code mc.shutdown()}）与 {@code cleanupTrigger}（跑完删触发文件）
+     * 两个字段——它们是**自毁自动化**语义，随老入口一并删除。控制面侧的退出由 {@code core.shutdown}
+     * （#103）承担，不继承任何 runner 的自毁行为。
+     */
     public static final class Config {
 
-        public boolean exit = true;
-        public boolean cleanupTrigger = true;
         public int limit = -1;
         public boolean channels = true;
         public boolean tiers = true;
@@ -81,52 +96,16 @@ public final class MultiblockScanRunner {
         public List<String> onlyClasses = new ArrayList<String>();
     }
 
-    public static Config readConfig(Minecraft mc) {
-        Config c = new Config();
-        File f = triggerFile(mc);
-        if (!f.isFile()) return c;
-        try (InputStreamReader r = new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8)) {
-            StringBuilder sb = new StringBuilder();
-            char[] buf = new char[2048];
-            int n;
-            while ((n = r.read(buf)) > 0) {
-                sb.append(buf, 0, n);
-            }
-            String text = sb.toString()
-                .trim();
-            if (text.isEmpty()) return c;
-            JsonObject o = new JsonParser().parse(text)
-                .getAsJsonObject();
-            if (o.has("exit")) c.exit = o.get("exit")
-                .getAsBoolean();
-            if (o.has("cleanupTrigger")) c.cleanupTrigger = o.get("cleanupTrigger")
-                .getAsBoolean();
-            if (o.has("limit")) c.limit = o.get("limit")
-                .getAsInt();
-            if (o.has("channels")) c.channels = o.get("channels")
-                .getAsBoolean();
-            if (o.has("tiers")) c.tiers = o.get("tiers")
-                .getAsBoolean();
-            if (o.has("perMachineBudgetMs")) c.perMachineBudgetMs = o.get("perMachineBudgetMs")
-                .getAsLong();
-            if (o.has("globalBudgetMs")) c.globalBudgetMs = o.get("globalBudgetMs")
-                .getAsLong();
-            if (o.has("onlyClasses") && o.get("onlyClasses")
-                .isJsonArray()) {
-                for (com.google.gson.JsonElement e : o.getAsJsonArray("onlyClasses")) {
-                    c.onlyClasses.add(e.getAsString());
-                }
-            }
-        } catch (Throwable t) {
-            FMLLog.warning("[SDE][T1.2] 触发文件解析失败，使用默认配置: %s", t.toString());
-        }
-        return c;
-    }
-
     // ------------------------------------------------------------------ 主流程
 
+    /**
+     * 跑一轮枚举（默认参数）。
+     *
+     * <p>
+     * <b>当前无触发通道</b>：老触发文件入口已随 #104 删除，见类注释「入口的去向」。
+     */
     public static JsonObject run(Minecraft mc) throws Exception {
-        Config cfg = readConfig(mc);
+        Config cfg = new Config();
         long started = System.currentTimeMillis();
         File dir = outputDir(mc);
         if (!dir.isDirectory() && !dir.mkdirs()) {

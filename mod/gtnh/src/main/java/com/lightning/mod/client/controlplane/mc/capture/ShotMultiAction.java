@@ -31,8 +31,41 @@ import com.lightning.mod.client.controlplane.mc.WorldRuntime;
  * <ul>
  * <li>{@code cameras}：机位表（必填，{@code [CameraSpec]} 或单个 CameraSpec 对象）；</li>
  * <li>{@code target}：观察目标包围盒（可选，仅留痕进观测记录/结果）；</li>
- * <li>{@code lighting}/{@code renderMode}/{@code worldTime}：会话默认（可选，可被机位覆盖）。</li>
+ * <li>{@code lighting}/{@code renderMode}/{@code worldTime}：会话默认（可选，可被机位覆盖）；</li>
+ * <li>{@code gui}：GUI 取证模式（可选，{@code "none"}（默认）或 {@code "screen"}，取值域外
+ * {@code CP-VALID-002}）。见下「GUI 取证怎么开、开了会变什么」。</li>
  * </ul>
+ *
+ * <h2>GUI 取证怎么开、开了会变什么（issue #164 / T2-B）</h2>
+ * <b>开启</b>：{@code {"cameras": [...], "gui": "screen", "confirm": true}}。开了之后，每个 tile 的
+ * 渲染帧在 {@code renderWorld} 之后由<b>游戏自己</b>把 {@code mc.currentScreen} 画进同一个
+ * framebuffer（含 {@code DrawScreenEvent.Pre/Post}，与 {@code EntityRenderer.updateCameraAndRender}
+ * 的界面段逐条同构），随后照常走 {@code ScreenShotHelper} 读回 + {@code ArtifactStore} 登记 +
+ * 哈希链。不新建截图服务、不合成像素、不直调任何控件回调。
+ *
+ * <p>
+ * <b>{@code gui="none"}（默认）时行为逐字节不变</b>：不读 {@code currentScreen}、不改
+ * {@code GuiScreen.width/height}、不发 {@code DrawScreenEvent}，产物仍只有
+ * {@code shots/<name>.png} / {@code shots/<name>.tiles/**} / {@code shots/<name>.meta.json}，
+ * 且 meta/结果不多一个键 ⇒ 既有 A3 基准（{@code test/expected/**}）不受影响。
+ *
+ * <p>
+ * <b>{@code gui="screen"} 时新增的可选字段与对旧哈希/判据的影响</b>（逐条，勿省）：
+ * <ol>
+ * <li>{@code shots/<name>.meta.json} 新增 {@code guiCapture: [...]} 并把 {@code guiHidden} 从
+ * {@code true} 改为 {@code false}；每机位结果新增同名字段。⇒ <b>该 meta 产物的 sha256 变</b>
+ * （{@code ArtifactStore.registerArtifact} 对文件字节算哈希）⇒ 若用过 {@code gui="screen"} 重跑
+ * 同用例，其 {@code manifest.json} 的 {@code shots/<name>.meta.json} 条目哈希与旧基准不同。
+ * 这是「产物内容确实变了」的正确表现，<b>不是</b>需要豁免的噪声：判据是「默认路径不得变」，
+ * 而默认路径（{@code gui} 缺省）不写这个键。</li>
+ * <li>{@code test/expected} 基准的比对规则里 {@code artifacts} 的 sha256 有局部豁免
+ * （{@code compare-runs.mjs}），而 {@code shots/} 按产品形态属逐字节比较面 ⇒ 若某个用例文件
+ * 主动写了 {@code gui:"screen"}，它的基准必须重生成；这是用例作者的显式选择，不是本动作的默认行为。</li>
+ * <li>{@code ImageCriteria}（{@code image-not-uniform} 一类）阈值不受影响，但画面里多出的界面像素
+ * 会改主色占比 ⇒ 开了 GUI 的机位若同时挂图像判据，阈值需按预期界面重新标定。本动作<b>不</b>自动放宽任何判据。</li>
+ * <li>{@code case.run} 的 {@code cameras} 段共用本执行器，但段产物形态不变（{@code segments/cameras.json}
+ * 的字段集合不动）；GUI 取证的逐片读数落在 {@code shots/<name>.meta.json} 与机位结果里。</li>
+ * </ol>
  */
 public final class ShotMultiAction extends SteppingActionBase {
 
@@ -43,6 +76,9 @@ public final class ShotMultiAction extends SteppingActionBase {
     private JsonArray target;
     private ShotExecutor executor;
     private JsonObject executorResult;
+
+    /** 解析后的 GUI 取证模式（缺省 {@link ShotExecutor#GUI_NONE}）。 */
+    private String guiMode = ShotExecutor.GUI_NONE;
 
     /** 进度回调（lambda 里不能用 this，故显式持有 ctx）。 */
     private ActionContext progressCtx;
@@ -63,6 +99,8 @@ public final class ShotMultiAction extends SteppingActionBase {
                 .size() + " 处）");
         capture = mergeSessionDefaults(ctx.params());
         target = Json.optArray(ctx.params(), "target");
+        // gui 只认字面 "none"/"screen"（缺省 none）；取值域外当场 CP-VALID-002，不静默忽略
+        guiMode = ShotExecutor.resolveGuiMode(Json.get(ctx.params(), "gui"));
         ArtifactStore.Run run = ctx.beginRun("shot-multi");
         if (run == null) {
             throw new CpException(ErrorCodes.STATE, "无法创建 run 目录");
@@ -78,6 +116,7 @@ public final class ShotMultiAction extends SteppingActionBase {
             : ctx.job()
                 .jobId();
         in.action = "shot.multi";
+        in.guiCapture = guiMode;
         in.progress = new ShotExecutor.Progress() {
 
             @Override
@@ -170,6 +209,9 @@ public final class ShotMultiAction extends SteppingActionBase {
             ref.addProperty("lighting", Json.optString(c, "lighting", null));
             ref.addProperty("worldTime", Long.valueOf(Json.optLong(c, "worldTime", -1L)));
             ref.addProperty("tile", Boolean.valueOf(Json.optBool(c, "tile", false)));
+            if (Json.get(c, "guiCapture") != null) {
+                ref.add("guiCapture", Json.copy(Json.get(c, "guiCapture")));
+            }
             refs.add(ref);
         }
         result.add("artifactsByCamera", refs);
@@ -185,6 +227,7 @@ public final class ShotMultiAction extends SteppingActionBase {
                     .artifactsJson());
         }
         result.addProperty("contractVersion", com.lightning.mod.client.controlplane.core.Contract.VERSION);
+        result.addProperty("gui", guiMode);
         return result;
     }
 

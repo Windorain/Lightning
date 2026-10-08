@@ -84,7 +84,7 @@ $falsifyDir = Join-Path $runDir 'falsification'
 $exportsArchive = Join-Path $runDir 'exports'
 $pipelineOutRoot = Join-Path $repoRoot 'scripts\multiblock-pipeline\.out'
 $liveExportsDir = Join-Path $mcDataDir 'sde_multiblock_exports'
-$livePipelineResult = Join-Path $mcDataDir 'sde_multiblock_pipeline_result.json'
+# #104：$livePipelineResult（sde_multiblock_pipeline_result.json）已删除——产出它的老管线随 #104 整体删除。
 $structureExportsDir = Join-Path $mcDataDir 'structure_exports'
 $fixtureOutReport = Join-Path $repoRoot 'scripts\multiblock-fixtures\.out\validation-report.json'
 
@@ -721,84 +721,34 @@ function Invoke-FalsifyOffline {
 }
 
 # ---------------------------------------------------------------------------
-# 阶段：/sde export 互不干扰（同世界，两次客户端会话）
+# 阶段：/sde export 互不干扰（**已随 Gitea #104 退役**）
 # ---------------------------------------------------------------------------
+#
+# 本阶段原先驱动的是**老批处理设施**：`sde_automation_commands.txt`（通用指令文件队列）+
+# 客户端 tick 接管链（`SdeClientAutomationTickHandler`）+ 专用世界 `sde_pipeline_world` +
+# gradle 任务 `runClientSdePipeline`。这些**全部随 #104 整体删除**：
+#
+#   * `config/SdeAutomationConfig`（指令文件配置）与 `SdeClientAutomationTickHandler` 已删除；
+#   * 5 个专用世界目录约定（含 `sde_pipeline_world`）已删除，控制面只做 `cp_` 前缀托管世界；
+#   * `sde_automation_commands.txt` 不再有任何消费者。
+#
+# 按删除矩阵 §8-H1#6 的处置（「保留总入口骨架，替换阶段」），本函数**保留为显式的 not-run 阶段**：
+# 报告里如实写出「退役 + 原因」，既不静默跳过（那会伪装成通过），也不继续驱动已删除的设施
+# （那会让脚本写一个没人消费的触发文件后静默空转——正是 #104 说的「驱动不会因代码删除而报错」）。
+#
+# **等价能力**：`/sde export` 与多方块导出的产物互不干扰判据，已由控制面的
+# `export.scene` / `export.multiblock` + 判据引擎（`world-hash-equals` / `json-field`）承载，
+# 见 `docs/control-plane/contract.md` §4.7 与 `scripts/control-plane/export-acceptance.mjs`。
+# 本函数的替换版本属跟进单范围（不在 #104「删除 + 终检」的范围内）。
 function Invoke-SdeInterop {
     $t0 = Get-Date
-    $log = Join-Path $logDir 'sde-export-interop.log'
-    $cfgPath = Join-Path $mcDataDir 'config\lightning.cfg'
-    $cmdFile = Join-Path $mcDataDir 'sde_automation_commands.txt'
-    $snapshotBefore = Join-Path $interopDir 'snapshot-before.json'
-    $reportPath = Join-Path $interopDir 'interop.json'
-    Write-Step '/sde export 互不干扰（同世界先后执行 /sde export 与 multiblock 导出）'
-
-    if (-not (Test-Path $cfgPath)) {
-        Invoke-StageSkipped 'sde-export-interop' '/sde export 互不干扰' "找不到 $cfgPath（先跑一次客户端生成配置）"
-        return
-    }
-
-    # ① 阶段前快照（两套产物目录）
-    $snapR = Invoke-Native -FilePath $script:nodeCmd -ArgumentList @((Join-Path $scriptDir 'interop-check.mjs'), 'snapshot', '--out', $snapshotBefore, '--multiblock-exports', $liveExportsDir, '--structure-exports', $structureExportsDir) `
-        -WorkDir $repoRoot -LogPath (Join-Path $logDir 'interop-snapshot.log') -TimeoutSec 600
-
-    # ② 备份配置 + 开自动进世界（**运行时配置**，run/ 已被 gitignore；结束时原样还原）
-    $cfgBackup = Join-Path $interopDir 'lightning.cfg.bak'
-    Copy-Item -Force $cfgPath $cfgBackup
-    $cfgText = Get-Content $cfgPath -Raw
-    $cfgNew = $cfgText -replace 'B:autoLoadFirstSingleplayerWorld=false', 'B:autoLoadFirstSingleplayerWorld=true'
-    $cfgNew = $cfgNew -replace 'B:cleanupCommandFileAfterRun=true', 'B:cleanupCommandFileAfterRun=false'
-    Set-Content -Path $cfgPath -Value $cfgNew -Encoding utf8NoBOM
-    $cfgPatched = ($cfgNew -ne $cfgText)
-
-    # ③ 写指令文件（与 fix-thumb 证据链同一固定选区：tp 到地面方块内 → pos1/pos2 确定性非空气选区）
-    $cmds = @(
-        'sde start',
-        'sde setname sde_export_smoke',
-        'sde setstructureid lightning.smoke.thumbnail',
-        'tp 964 3 -933',
-        'sde pos1',
-        'sde pos2',
-        'sde record',
-        'sde export',
-        'sde status',
-        'sde status',
-        'sde status',
-        'sde status',
-        'sde status'
-    )
-    Set-Content -Path $cmdFile -Value ($cmds -join "`n") -Encoding utf8NoBOM
-    # 让专用世界成为"最近游玩"（若排序依赖 level.dat 时间戳则据此置顶）
-    $levelDat = Join-Path $mcDataDir 'saves\sde_pipeline_world\level.dat'
-    if (Test-Path $levelDat) { (Get-Item $levelDat).LastWriteTime = Get-Date }
-
-    $r = $null
-    $compareExit = -1
-    try {
-        $r = Invoke-Native -FilePath $script:gradlew -ArgumentList @('runClientSdePipeline', '--console=plain', '-q') -WorkDir $modDir -LogPath $log -TimeoutSec ($SdeInteropTimeoutMinutes * 60)
-        $cmpR = Invoke-Native -FilePath $script:nodeCmd -ArgumentList @((Join-Path $scriptDir 'interop-check.mjs'), 'compare', '--run-dir', $runDir, '--multiblock-exports', $liveExportsDir, '--structure-exports', $structureExportsDir, '--log', $log) `
-            -WorkDir $repoRoot -LogPath (Join-Path $logDir 'interop-compare.log') -TimeoutSec 600
-        $compareExit = $cmpR.exitCode
-    } finally {
-        Copy-Item -Force $cfgBackup $cfgPath
-        if (Test-Path $cmdFile) { Remove-Item -Force $cmdFile }
-    }
-
-    $report = if (Test-Path $reportPath) { Get-Content $reportPath -Raw | ConvertFrom-Json } else { $null }
-    $gates = @(
-        @{ name = '客户端进程退出码 0'; ok = ($r -and $r.exitCode -eq 0); detail = "exit=$(if ($r) { $r.exitCode } else { 'n/a' })" },
-        @{ name = '快照/比对脚本均已跑'; ok = ($snapR.exitCode -eq 0); detail = "snapshot=$($snapR.exitCode) compare=$compareExit" },
-        @{ name = '/sde export 产物哈希 = 基线'; ok = ($report -and $report.hashMatch); detail = "hashMatch=$(if ($report) { $report.hashMatch } else { 'n/a' })" },
-        @{ name = 'multiblock 产物目录逐字节未变'; ok = ($report -and $null -eq $report.multiblockExports.diff); detail = "diff=$(if ($report) { ($report.multiblockExports.diff | ConvertTo-Json -Compress) } else { 'n/a' })" },
-        @{ name = '加载的是专用世界'; ok = ($report -and $report.worldObserved -eq $report.world); detail = "observed=$(if ($report) { $report.worldObserved } else { 'n/a' })" },
-        @{ name = '配置面已原样还原'; ok = (Test-Path $cfgBackup); detail = $cfgBackup }
-    )
-    $status = Get-GateStatus $gates
-    if ($status -eq 'pass') { Write-Ok '/sde export 互不干扰全绿（产物与基线一致 + multiblock 目录未变）' } else { Write-Err2 '/sde export 互不干扰红' }
-    return Write-StageFragment -Id 'sde-export-interop' -Name '/sde export 互不干扰（同世界先后执行，基线哈希 + 目录隔离）' `
-        -Command 'gradlew runClientSdePipeline（指令文件：sde start/setname/tp 964 3 -933/pos1/pos2/record/export/status×5）' `
-        -Status $status -ExitCode $(if ($r) { $r.exitCode } else { -1 }) -DurationMs ([int]((Get-Date) - $t0).TotalMilliseconds) `
-        -StartedAt $t0.ToString('o') -EndedAt (Get-Date).ToString('o') -Gates $gates -Artifacts @($reportPath, $snapshotBefore) -Evidence @($log, $cfgBackup) `
-        -Data @{ report = $report; configPatched = $cfgPatched; compareExit = $compareExit }
+    Write-Step '/sde export 互不干扰（已随 #104 退役，不再驱动老设施）'
+    $reason = '老设施已随 Gitea #104 整体删除：sde_automation_commands.txt（通用指令文件队列）、'
+    $reason += 'SdeClientAutomationTickHandler（客户端 tick 接管链）、专用世界 sde_pipeline_world 均不存在；'
+    $reason += '等价能力改由 cp 的 export.scene / export.multiblock + 判据承载（跟进单：把本阶段改写为 cp 驱动）。'
+    Write-Warn2 "sde-export-interop 退役：$reason"
+    Invoke-StageSkipped 'sde-export-interop' '/sde export 互不干扰（#104 后退役）' $reason
+    return
 }
 
 # ---------------------------------------------------------------------------
@@ -980,7 +930,7 @@ if ($DryRun) {
         'web-assembly-cross-check  node scripts/multiblock-encode/verify-web-parser.mjs <encoded> <dataset>',
         'static-checks         node scripts/acceptance/static-checks.mjs',
         'falsify-offline-negative  node scripts/acceptance/falsification.mjs',
-        'sde-export-interop    gradlew runClientSdePipeline（/sde export 指令文件）+ interop-check.mjs',
+        'sde-export-interop    【#104 后退役】原为 gradlew runClientSdePipeline（/sde export 指令文件）；等价能力见 cp export.scene/export.multiblock',
         'evidence-screenshots  node scripts/acceptance/screenshots.mjs archive',
         'report                node scripts/acceptance/build-report.mjs'
     ) | ForEach-Object { Write-Host "   - $_" }

@@ -1,0 +1,89 @@
+{
+  "schema": "lightning.case/1",
+  "id": "input-multitick",
+  "label": "输入手段族跨帧固定程序（G1：action 段的输入步）",
+  "world": {
+    "folder": "cp_input_multitick",
+    "seed": 20261008,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "action": [
+    {
+      "action": "input.key",
+      "params": { "key": "key.forward", "action": "tap" },
+      "holdTicks": 20,
+      "path": "action/0-tap-forward-20.json",
+      "role": "input-tap-forward-20",
+      "expect": { "/delivered": 2, "/holdTicks": 20, "/action": "tap" }
+    },
+    {
+      "action": "input.key",
+      "params": { "key": "key.jump", "action": "down" },
+      "path": "action/1-down-jump.json",
+      "role": "input-down-jump",
+      "expect": { "/delivered": 1, "/action": "down", "/held/count": 1 }
+    },
+    {
+      "action": "core.status",
+      "params": {},
+      "path": "action/2-status-while-held.json",
+      "role": "status-while-held"
+    },
+    {
+      "action": "input.key",
+      "params": { "key": "key.jump", "action": "up" },
+      "path": "action/3-up-jump.json",
+      "role": "input-up-jump",
+      "expect": { "/delivered": 1, "/wasHeld": true, "/action": "up" }
+    },
+    {
+      "action": "input.release",
+      "params": {},
+      "path": "action/4-release.json",
+      "role": "input-release",
+      "expect": { "/count": 0, "/alreadyIdle": true }
+    }
+  ],
+  "criteria": [
+    {
+      "id": "in-tap-stephold-delivered",
+      "type": "json-field",
+      "params": { "path": "action/0-tap-forward-20.json", "pointer": "/delivered" },
+      "expect": 2
+    },
+    {
+      "id": "in-held-across-frames",
+      "type": "json-field",
+      "params": { "path": "action/1-down-jump.json", "pointer": "/held/count" },
+      "expect": 1
+    },
+    {
+      "id": "in-release-is-idempotent-after-explicit-up",
+      "type": "json-field",
+      "params": { "path": "action/4-release.json", "pointer": "/alreadyIdle" },
+      "expect": true
+    },
+    {
+      "id": "in-up-released-a-facility-hold",
+      "type": "json-field",
+      "params": { "path": "action/3-up-jump.json", "pointer": "/wasHeld" },
+      "expect": true
+    },
+    {
+      "id": "in-later-step-artifact-present",
+      "type": "artifact-nonempty",
+      "params": { "path": "action/2-status-while-held.json" }
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "action/0-tap-forward-20.json", "role": "input-tap-forward-20" },
+      { "path": "action/1-down-jump.json", "role": "input-down-jump" },
+      { "path": "action/2-status-while-held.json", "role": "status-while-held" },
+      { "path": "action/3-up-jump.json", "role": "input-up-jump" },
+      { "path": "action/4-release.json", "role": "input-release" }
+    ]
+  }
+}

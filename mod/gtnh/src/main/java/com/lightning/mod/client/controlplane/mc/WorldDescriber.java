@@ -104,6 +104,11 @@ public final class WorldDescriber {
         o.add("spawn", spawn);
         o.addProperty("void", isVoid(info, marker));
         o.addProperty("markerVoid", marker != null && Json.optBool(marker, "void", false));
+        // #123：managed/markerPresent 回答「是不是托管目录」，markerComplete 回答「构建完成了没有」。
+        // 三者分开是因为语义不同（contract.md §6.1）：失败残留是 managed=true / markerPresent=true /
+        // markerComplete=false——它可以删可以重建，但不可当成品复用。旧标记（无 complete 键）
+        // 按 true 读（ManagedWorld.markerComplete 的向后兼容口径）。
+        o.addProperty("markerComplete", ManagedWorld.markerComplete(marker));
         o.addProperty("metaSource", server == null ? META_CLIENT : META_SERVER);
         if (mc.thePlayer != null) {
             o.add("playerPos", posArray(mc.thePlayer.posX, mc.thePlayer.posY, mc.thePlayer.posZ));

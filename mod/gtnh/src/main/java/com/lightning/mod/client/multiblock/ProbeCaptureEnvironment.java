@@ -64,8 +64,9 @@ import cpw.mods.fml.relauncher.SideOnly;
  * {@code mc.renderViewEntity}（1.7.10 实现读 prevRotationYaw 等），主菜单态为 null 会让 TESR 补画整条 NPE
  * 被吞掉，因此仍在为 null 时临时挂上探针假玩家。
  * <p>
- * <b>写范围隔离</b>：本类只被 {@code client/multiblock/} 的探针捕获入口（{@link VariantGeometryBakery}、
- * {@link StateGeometryCapture}）使用；既有 {@code /sde export} 路径（{@code MeshCaptureService#finalizeSingleStructure}）
+ * <b>写范围隔离</b>：本类只被 {@code client/multiblock/} 的捕获入口（{@link VariantGeometryBakery}）使用
+ * （原先的另一个使用者 {@code StateGeometryCapture} 已随 Gitea #104 按 V12 裁决删除）；
+ * 既有 {@code /sde export} 路径（{@code MeshCaptureService#finalizeSingleStructure}）
  * 不引用本类、一字未动 —— 它捕获的方块本就在玩家的世界里，玩家的世界就是被渲染的世界，无需对齐。
  * <p>
  * <b>证伪方式</b>（证明验收手段真能检出该类镜像）：把本类 {@code begin(...)} 里

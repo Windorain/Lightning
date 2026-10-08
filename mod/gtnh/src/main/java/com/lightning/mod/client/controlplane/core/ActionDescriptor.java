@@ -17,6 +17,19 @@ import com.google.gson.JsonSyntaxException;
  * 一次动作调用所需的全部信息都在本对象里：名称、权限级、参数（名称/类型/必填/默认/说明）、
  * 返回结构说明、调用示例、引入版本 {@code since}。目标是「无先验知识的调用方仅凭自描述即可完成调用」，
  * 因此实现新动作时描述必须与行为同步更新。
+ *
+ * <h2>{@code means}（手段归因）是**可选**字段——缺省 = 未声明，不推断</h2>
+ * 手段归因回答「谁把这件事做进去的」：语义 API 直调，还是把事件投进游戏的输入队列
+ * （{@code input.*} 族，见 {@code input-contract.md} §10.3）。它与返回值侧的
+ * {@code means}/{@code layer}/{@code semantics} **并列**，不替代。
+ *
+ * <p>
+ * 本字段**只在承担了归因义务的动作上写**。不写 <b>≠</b> 语义上等于某个默认值——把「未声明」读成
+ * 「已具备」的默认类正是本仓明令禁止的（{@code input-contract.md} §11.2 第 17 条）。因此本字段
+ * <b>不设默认值</b>：{@code null} 时 {@link #toJson()} 里<b>不出现</b> {@code means} 键，
+ * 从而对既有 43 个动作的自描述 JSON 是<b>逐字节无影响</b>的（Gitea #162 §9.4 登记的那条风险
+ * 因此不成立，不必牵动 A3 基准与字段集合防线）。若将来要为既有动作逐条裁决归因，
+ * 那是一次独立改动，不能靠一个批量默认值就地完成。
  */
 public final class ActionDescriptor {
 
@@ -120,6 +133,7 @@ public final class ActionDescriptor {
     private final String returns;
     private final JsonArray examples;
     private final String since;
+    private final String means;
 
     private ActionDescriptor(Builder b) {
         this.name = b.name;
@@ -129,6 +143,7 @@ public final class ActionDescriptor {
         this.returns = b.returns;
         this.examples = b.examples;
         this.since = b.since;
+        this.means = b.means;
     }
 
     /** 新建构造器。 */
@@ -171,6 +186,16 @@ public final class ActionDescriptor {
         return since;
     }
 
+    /**
+     * 手段归因（{@code null} = <b>未声明</b>，不等于任何默认值）。
+     *
+     * <p>
+     * 目前只有输入族写 {@code "input"}；其余动作未声明。契约禁止把缺省读成某个默认值。
+     */
+    public String means() {
+        return means;
+    }
+
     /** 是否可写级（scene 及以上）：决定调用体必须带 {@code "confirm": true}。 */
     public boolean writable() {
         return tier != null && tier.isWritable();
@@ -192,6 +217,10 @@ public final class ActionDescriptor {
         o.addProperty("returns", returns == null ? "" : returns);
         o.add("examples", examples == null ? new JsonArray() : examples);
         o.addProperty("since", since == null ? Contract.VERSION : since);
+        // means 是可选字段：null（未声明）时**不出现该键**，既有动作的 JSON 因此逐字节不变
+        if (means != null) {
+            o.addProperty("means", means);
+        }
         return o;
     }
 
@@ -224,6 +253,7 @@ public final class ActionDescriptor {
         private String returns = "";
         private JsonArray examples = new JsonArray();
         private String since = Contract.VERSION;
+        private String means;
 
         private Builder(String name, Tier tier) {
             this.name = name;
@@ -289,6 +319,18 @@ public final class ActionDescriptor {
         /** 引入的契约小版本。 */
         public Builder since(String v) {
             this.since = v == null ? Contract.VERSION : v;
+            return this;
+        }
+
+        /**
+         * 声明手段归因（见类注释：可选，缺省 = 未声明）。
+         *
+         * <p>
+         * 只有真正承担了归因义务的动作才写它。写 {@code "input"} 意味着「本动作经由游戏输入队列投递」。
+         * 传 {@code null} 等价于不声明（不会写入默认值）。
+         */
+        public Builder means(String v) {
+            this.means = v;
             return this;
         }
 

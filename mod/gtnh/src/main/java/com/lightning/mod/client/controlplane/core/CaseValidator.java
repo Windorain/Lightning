@@ -74,6 +74,8 @@ public final class CaseValidator {
         s.add("capture");
         s.add("build");
         s.add("read");
+        s.add("action");
+        s.add("export");
         s.add("cameras");
         s.add("criteria");
         s.add("evidence");
@@ -88,6 +90,116 @@ public final class CaseValidator {
      * 「读面只读」这条纪律失去一个可静态检查的落点（而且写动作该走 build 段）。
      */
     public static final String READ_ACTION_PREFIX = "read.";
+
+    /**
+     * {@code export} 段的动作名前缀（v1.7，Gitea #102）。
+     *
+     * <p>
+     * 只允许 {@code export.*}：导出段的语义是「把当前世界状态写成场景文件/注册表/数据集」，
+     * 放进读动作会让「导出件真的落进了本 run」这条 C4 判据失去静态可查的落点。
+     */
+    public static final String EXPORT_ACTION_PREFIX = "export.";
+
+    /**
+     * {@code export} 段<b>额外</b>允许的两个非 {@code export.*} 动作（v1.7，Gitea #102）。
+     *
+     * <h2>为什么必须开这两个口子（不是偷懒）</h2>
+     *
+     * C4 要求「导出件与实拍/观测记录<b>同一 run</b>」，因此导出必须发生在用例<b>内部</b>。
+     * 但「把当前世界状态扫进指定帧」（{@code /sde record}）**只有命令通道**可达——
+     * #100 已裁决录制不提供 cp 动作（它是命令态原语，见 {@code SdeCommandWhitelist}）。
+     * 因此用例若要自己造出可导出的帧缓冲，就必须能在段内跑 {@code cmd.exec}。
+     *
+     * <p>
+     * 而 {@code /sde pos1|pos2|hpos1|hpos2} 的坐标**只来自玩家实体**（没有坐标参数），
+     * 于是「构造一个非平凡的选区」必须能移动玩家。{@code scene.player.pose}（L0，同步、确定性）
+     * 是做这件事的正确原语——{@code player.move}（L1）会走真实物理，不确定也不必要。
+     *
+     * <p>
+     * <b>为什么不是「段内放任何动作都行」</b>：那会让人把 {@code world.rebuild} 塞进导出段，
+     * 绕开段序纪律（{@code world} 必须是第一段，见 §8.8 hermetic 纪律）。
+     * 白名单把口子限死在「造帧缓冲 + 摆玩家」这两件导出<b>前置</b>事实上。
+     *
+     * <p>
+     * {@code cmd.exec} 还有第二层限制：它携带的子命令必须是**成帧类**（见
+     * {@link #EXPORT_SEGMENT_FRAMING_SUBS}）——{@code /sde export} / {@code dump} / {@code multiblock}
+     * 在段内被拒，因为它们各有专用动作（{@code export.scene} / {@code export.registry} /
+     * {@code export.multiblock}），放行等于开第二条产物路径（#96 §8.7「无隐藏通道」）。
+     */
+    public static final java.util.Set<String> EXPORT_SEGMENT_EXTRA_ACTIONS = java.util.Collections
+        .unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList("cmd.exec", "scene.player.pose")));
+
+    /**
+     * {@code export} 段内允许 {@code cmd.exec} 携带的 {@code /sde} 子命令（成帧类）。
+     *
+     * <p>
+     * 不含 {@code export} / {@code dump} / {@code multiblock}：它们有专用动作，
+     * 命令形式在段内放行会绕过「产物落 run + 登记」的纪律。
+     */
+    public static final java.util.Set<String> EXPORT_SEGMENT_FRAMING_SUBS = java.util.Collections.unmodifiableSet(
+        new java.util.LinkedHashSet<String>(
+            java.util.Arrays.asList(
+                "pos1",
+                "pos2",
+                "hpos1",
+                "hpos2",
+                "sel",
+                "start",
+                "end",
+                "setname",
+                "setframe",
+                "setstructureid",
+                "record",
+                "status")));
+
+    /**
+     * {@code action} 段（v1.6，issue #103）禁止编排的动作：无人值守收尾原语。
+     *
+     * <p>
+     * {@code core.shutdown} 的语义是「本进程跑完就退出」，把它编进固定程序会让一次
+     * {@code case.run} 在跑到那一步时把整个客户端带走——后续步骤、criteria 段、evidence 段
+     * 全部作废，而调用方（无人值守驱动）拿到的是一份「跑了一半」的 run。收尾必须由驱动在
+     * <b>整跑结束后</b>单独发起（这也是它注册为 {@code confirm} 级可写动作的原因）。
+     *
+     * <p>
+     * 同族的还有「会让进程退出/重启」的动作，一律不许进编排段——判据是「该动作会不会让本作业
+     * 之后的段不再执行」，而不是「它危险不危险」（{@code world.rebuild} 同样危险，但它有返回）。
+     */
+    public static final java.util.Set<String> ACTION_FORBIDDEN = java.util.Collections
+        .unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList("core.shutdown")));
+
+    /** {@code action} 段逐步断言的单步最大条目数（防一次编排写出上万条断言）。 */
+    public static final int MAX_STEP_EXPECT = 64;
+
+    /**
+     * {@code action} 段<b>额外</b>允许在段内跨 tick 推进的输入族步进动作（v1.8 / G1，input-contract.md §9.2）。
+     *
+     * <h2>为什么开这个口子（不是放宽纪律）</h2>
+     * 本段原先<b>一律</b>拒绝步进动作（{@code CaseRunAction} 的执行期判据），理由是「本段在单次
+     * {@code advance} 里逐条跑完，放行跨 tick 的动作会让『段完成』与『动作完成』脱钩」。那条理由对
+     * <b>非输入族</b>仍成立（{@code world.rebuild} 一类要装卸世界，段内推进它等于把段语义变成作业语义）。
+     *
+     * <p>
+     * 输入族不同：它的跨 tick 是<b>被请求的持有</b>（{@code holdTicks}），推进一次只做一件事
+     * （投递首段事件 / 结算到期），且必须在客户端 tick 线程上被逐 tick 推进——不推进它，
+     * 「注入输入 → 推进 N tick → 读后果」就<b>无法在用例里表达</b>（契约 §9.2 的问题陈述）。
+     * 因此例外只对<b>已注册</b>的这两条开：非输入族的步进动作仍 {@code CP-VALID-002}。
+     *
+     * <p>
+     * 这个集合是<b>唯一</b>来源：{@link CaseRunAction} 的执行期白名单直接取它，不另抄一份名单
+     * （同一件事只有一个定义点，校验期与执行期不会分叉）。
+     */
+    public static final java.util.Set<String> ACTION_STEPPING_INPUT_ACTIONS = java.util.Collections
+        .unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList("input.key", "input.mouse")));
+
+    /** 步骤对象顶层的跨 tick 持有 tick 数字段（G1 / D-3；与 {@code params} 并列，不在其内）。 */
+    public static final String FIELD_HOLD_TICKS = "holdTicks";
+
+    /**
+     * {@code holdTicks} 取值上限（契约 §3.2 的「单键/单按钮持有上限」；与 {@code player.dig} 的
+     * {@code MAX_HOLD_TICKS} 同值——同一动作面不许有两套上界）。下界恒为 1。
+     */
+    public static final int MAX_STEP_HOLD_TICKS = 1200;
 
     /** 解析并校验，返回规范化计划。 */
     public static JsonObject validate(String text) {
@@ -119,11 +231,17 @@ public final class CaseValidator {
         JsonObject world = validateWorld(file, fields);
         JsonArray build = validateBuild(file, fields, warnings);
         JsonArray read = validateRead(file, fields, warnings);
+        JsonArray action = validateAction(file, fields, warnings);
+        JsonArray export = validateExport(file, fields, warnings);
         JsonObject capture = validateCapture(file, fields);
         JsonArray cameras = validateCameras(file, fields, warnings);
         JsonArray criteria = validateCriteria(file, fields);
         JsonArray evidence = validateEvidence(file, fields);
         JsonArray variants = validateVariants(file, criteria, fields, check);
+        // read 与 action 两段共享同一个 run 目录（都经 ActionContext.withParams 落产物），
+        // 因此跨段重名同样会让后写者静默覆盖前写者——判据引用哪一份就说不清了。
+        // 段内重名各自已判，这里只补跨段那一半（一个定义点：本方法）。
+        crossSegmentPathConflicts(read, action, fields);
         if (build.size() == 0) {
             warnings.add("build 段为空：世界将只有种子与虚空地形");
         }
@@ -149,6 +267,8 @@ public final class CaseValidator {
         plan.add("segments", segments);
         plan.add("build", build);
         plan.add("read", read);
+        plan.add("action", action);
+        plan.add("export", export);
         if (capture != null) {
             plan.add("capture", capture);
         }
@@ -314,6 +434,301 @@ public final class CaseValidator {
             warnings.add("read 段为空：本 run 不产读面产物（criteria 不能引用 read/*.json）");
         }
         return out;
+    }
+
+    /**
+     * {@code export} 段（v1.7，Gitea #102）：导出步骤清单的校验。
+     *
+     * <p>
+     * 校验三件事：动作名是 {@code export.*}，**或者**在
+     * {@link #EXPORT_SEGMENT_EXTRA_ACTIONS} 白名单内（{@code cmd.exec}/{@code scene.player.pose}，
+     * 理由见该常量的注释）；{@code cmd.exec} 的子命令必须是
+     * {@link #EXPORT_SEGMENT_FRAMING_SUBS} 内的成帧类；{@code params} 是对象。
+     *
+     * <p>
+     * <b>不</b>校验落点——导出产物的相对路径由动作自己决定（run 目录的 {@code export/} 下），
+     * 段里声明落点会与动作实现产生第二处真相。存在性同 {@link #validateRead}：执行期判定。
+     */
+    private JsonArray validateExport(CaseFile file, Fields fields, List<String> warnings) {
+        JsonArray out = new JsonArray();
+        List<CaseFile.ReadStep> steps = file.export();
+        for (int i = 0; i < steps.size(); i++) {
+            CaseFile.ReadStep step = steps.get(i);
+            String ctx = "export[" + i + "]";
+            String action = step.action();
+            if (action == null || action.trim()
+                .isEmpty()) {
+                fields.add(ctx + ".action", "必填");
+            } else if (!action.startsWith(EXPORT_ACTION_PREFIX)) {
+                if (!EXPORT_SEGMENT_EXTRA_ACTIONS.contains(action)) {
+                    fields.add(
+                        ctx + ".action",
+                        "导出段只接受 " + EXPORT_ACTION_PREFIX
+                            + "* 动作或白名单内的 "
+                            + EXPORT_SEGMENT_EXTRA_ACTIONS
+                            + "（后者是造帧缓冲/摆玩家的前置事实，理由见 CaseValidator 常量注释），收到: "
+                            + action);
+                } else if ("cmd.exec".equals(action)) {
+                    // 第二层限制：只许成帧类子命令——export/dump/multiblock 各有专用动作，
+                    // 命令形式在段内放行等于开第二条产物路径（#96 §8.7 无隐藏通道）
+                    String sub = sdeSubOf(step.params());
+                    if (sub == null) {
+                        fields.add(ctx + ".params.command", "cmd.exec 在导出段内必须携带形如 \"/sde <sub>\" 的命令");
+                    } else if (!EXPORT_SEGMENT_FRAMING_SUBS.contains(sub)) {
+                        fields.add(
+                            ctx + ".params.command",
+                            "导出段内的 cmd.exec 只允许成帧类子命令 " + EXPORT_SEGMENT_FRAMING_SUBS
+                                + "；"
+                                + "/sde "
+                                + sub
+                                + " 请改用对应的专用动作"
+                                + ("export".equals(sub) ? "（export.scene）"
+                                    : "dump".equals(sub) ? "（export.registry）"
+                                        : "multiblock".equals(sub) ? "（export.multiblock）" : ""));
+                    }
+                }
+            }
+            JsonObject item = Json.copyObject(step.toJson());
+            item.addProperty("index", i);
+            out.add(item);
+        }
+        if (steps.size() == 0) {
+            warnings.add("export 段为空：本 run 不产导出件（C4「导出件与实拍/观测同 run」需要有导出步骤）");
+        }
+        return out;
+    }
+
+    /**
+     * {@code action} 段（v1.6，issue #103）：L2 编排步骤清单的校验。
+     *
+     * <h2>与 {@code read} 段的对称与差异</h2>
+     * 两段的形态逐字段相同（{@code action/params/path/role}），差别只在纪律：
+     * <ul>
+     * <li>{@code read} 段用<b>动作名前缀</b>做静态纪律（只许 {@code read.*}）；</li>
+     * <li>本段<b>不限前缀</b>（它的本职就是调 L0/L1 写动作），改用两条别的静态纪律：
+     * ①<b>禁编排收尾原语</b>（{@link #ACTION_FORBIDDEN}，见那里的说明）；
+     * ②路径不得与运行器自身产物重名、同段内不得重复、不得穿越（与 {@code read} 段同源判定）。</li>
+     * </ul>
+     *
+     * <p>
+     * 「动作是否真的已注册、是不是同步动作」在 core 层查不到（core 没有动作注册表——那是 mc 层
+     * 装配的），因此由 {@code case.run} 的 {@code action} 段执行期判定并报 {@code CP-VALID-001}
+     * （与 {@code read} 段完全同一分工）。<b>同步性必须在执行期判</b>：步进动作跨 tick。
+     *
+     * <h2>v1.8 / G1 的增量：输入族步进动作可以进编排段</h2>
+     * 例外集合是 {@link #ACTION_STEPPING_INPUT_ACTIONS}（{@code input.key} / {@code input.mouse}），
+     * 其余步进动作仍拒。跨 tick 的持有量由步骤对象<b>顶层</b>的 {@link #FIELD_HOLD_TICKS} 表达
+     * （D-3），取值域与适用性见 {@link #validateStepHoldTicks}——<b>不适用字段一律显式拒绝</b>，
+     * 绝不静默忽略。
+     */
+    private JsonArray validateAction(CaseFile file, Fields fields, List<String> warnings) {
+        JsonArray out = new JsonArray();
+        Set<String> seen = new LinkedHashSet<String>();
+        List<CaseFile.ActionStep> steps = file.action();
+        for (int i = 0; i < steps.size(); i++) {
+            CaseFile.ActionStep step = steps.get(i);
+            String ctx = "action[" + i + "]";
+            String action = step.action();
+            if (action == null || action.trim()
+                .isEmpty()) {
+                fields.add(ctx + ".action", "必填");
+            } else if (ACTION_FORBIDDEN.contains(action)) {
+                fields.add(ctx + ".action", "收尾原语不得编入固定程序: " + action + "（它会让本作业后续段不再执行；收尾由驱动在整跑结束后单独发起）");
+            }
+            validateStepHoldTicks(step, ctx, fields);
+            String path = step.path();
+            if (path == null || path.trim()
+                .isEmpty()) {
+                fields.add(ctx + ".path", "必填");
+            } else {
+                checkRelPath(path, ctx + ".path", fields);
+                if (!seen.add(path)) {
+                    fields.add(ctx + ".path", "同一次用例内编排产物路径重复: " + path + "（后一步会覆盖前一步）");
+                }
+                if ("manifest.json".equals(path) || "criteria.json".equals(path)
+                    || "evidence.json".equals(path)
+                    || "observation.json".equals(path)) {
+                    fields.add(ctx + ".path", "不得与运行器自身产物重名: " + path);
+                }
+            }
+            validateStepExpect(step, ctx, fields);
+            JsonObject item = Json.copyObject(step.toJson());
+            item.addProperty("index", i);
+            out.add(item);
+        }
+        if (steps.size() == 0) {
+            warnings.add("action 段为空：本 run 不编排任何动作（L0/L1 一步也不跑）");
+        }
+        return out;
+    }
+
+    /**
+     * 步骤对象顶层 {@code holdTicks}（G1 / D-3）的取值域与适用性校验。
+     *
+     * <h2>它在哪、为什么在那</h2>
+     * 位置是<b>步骤对象顶层</b>（与 {@code params} 并列），不是动作参数：跨 tick 是<b>编排</b>的
+     * 属性——同一个动作在交互路径上被调一次、在固定程序里被跨帧持有，差别在编排侧，不在动作侧。
+     * 因此<b>输入族步进步</b>的 {@code params} 内出现 {@code holdTicks} 一律报错（两处都写 ⇒
+     * 真值来源不明，input-contract.md §9.2 第 2 条）。
+     *
+     * <p>
+     * <b>这条规则的适用面只到输入族</b>：{@code params} 是<b>动作自己的参数空间</b>，别的动作可能有
+     * 同名参数（实测：{@code player.dig} 的 {@code params.holdTicks} 是它自己的合法动作参数，
+     * 回归资产 {@code test/cases/regression/l1-orchestration.json} 正在用）。把「params 里不许有
+     * holdTicks」推广到全部动作，等于用一个编排层的字段名去否决别的动作的参数域——那是越界，
+     * 会让既有用例凭空非法。
+     *
+     * <h2>为什么「不适用」必须是错误</h2>
+     * 写在<b>同步动作</b>上的 {@code holdTicks} 没有真值来源：同步动作不跨 tick，段内也不为它推进，
+     * 静默忽略会让作者以为「它确实持有了 20 tick」。同类还有「{@code input.key} 的 {@code action}
+     * 不是 {@code tap}」「{@code input.mouse} 的 {@code op} 不是 {@code click}」——动作实现自己
+     * 也会拒（input-contract §2.2 第 6 条），这里提前到静态层，让 {@code case.validate} 就能查出，
+     * 不必等到跑起来。
+     *
+     * <p>
+     * 取值域：精确整数 {@code 1..}{@link #MAX_STEP_HOLD_TICKS}（{@code 1} = 同一次调用内 down+up）。
+     * 小数（{@code 1.5}）、字符串数字、布尔一律拒绝（{@link Json#integralRejectReason}，
+     * 与全仓 {@code TYPE_INT} 的严格口径同源，Gitea #131）。
+     */
+    private void validateStepHoldTicks(CaseFile.ActionStep step, String ctx, Fields fields) {
+        JsonObject params = step.params();
+        String action = step.action();
+        boolean inputStepping = action != null && ACTION_STEPPING_INPUT_ACTIONS.contains(action);
+        boolean inParams = Json.get(params, FIELD_HOLD_TICKS) != null;
+        if (inputStepping && inParams) {
+            // 只对**输入族步进步**判这一条：`params` 是动作自己的参数空间，其它动作可能有同名参数
+            // （实测：`player.dig` 自己的 `params.holdTicks` 是它的合法动作参数，回归资产 l1-orchestration 在用）。
+            fields.add(
+                ctx + ".params." + FIELD_HOLD_TICKS,
+                "输入族步进的 " + FIELD_HOLD_TICKS
+                    + " 只能写在步骤对象顶层（与 params 并列，D-3）"
+                    + (step.hasHoldTicks() ? "；两处都写会让真值来源不明" : "；写在 params 内会让位置与真值来源不一致"));
+        }
+        if (!step.hasHoldTicks()) {
+            return;
+        }
+        JsonElement raw = step.holdTicks();
+        if (!inputStepping) {
+            fields.add(
+                ctx + "." + FIELD_HOLD_TICKS,
+                "不适用：跨 tick 持有只对输入族步进动作 " + ACTION_STEPPING_INPUT_ACTIONS
+                    + " 有效，同步动作的「等一拍」由步骤间收敛承担（settleMs）；收到 action="
+                    + action);
+            return;
+        }
+        String typeReason = Json.integralRejectReason(raw);
+        if (typeReason != null) {
+            fields.add(ctx + "." + FIELD_HOLD_TICKS, "须为精确整数 1.." + MAX_STEP_HOLD_TICKS + "：" + typeReason);
+            return;
+        }
+        long value;
+        try {
+            value = new java.math.BigDecimal(raw.getAsString()).longValueExact();
+        } catch (RuntimeException ex) {
+            fields.add(ctx + "." + FIELD_HOLD_TICKS, "超出可表示范围: " + raw.getAsString());
+            return;
+        }
+        if (value < 1L || value > (long) MAX_STEP_HOLD_TICKS) {
+            fields.add(
+                ctx + "." + FIELD_HOLD_TICKS,
+                "越界：须在 1.." + MAX_STEP_HOLD_TICKS
+                    + "（1=同一次调用内 down+up；上限与 player.dig 的 MAX_HOLD_TICKS 同口径），收到 "
+                    + value);
+            return;
+        }
+        // 取值域内的「不适用」：动作自己的参数域决定了它能不能持有
+        if ("input.key".equals(action)) {
+            String keyAction = Json.optString(params, "action", null);
+            if (!"tap".equals(keyAction)) {
+                fields.add(
+                    ctx + "." + FIELD_HOLD_TICKS,
+                    "不适用：input.key 只有 action=tap 会持有（action=" + String.valueOf(keyAction)
+                        + " 要么不持有、要么立即收口）；要跨帧持有请写 action=tap");
+            }
+        } else if ("input.mouse".equals(action)) {
+            String op = Json.optString(params, "op", null);
+            if (!"click".equals(op)) {
+                fields.add(
+                    ctx + "." + FIELD_HOLD_TICKS,
+                    "不适用：input.mouse 只有 op=click 会持有（op=" + String.valueOf(op) + "）；要跨帧持有请写 op=click");
+            }
+        }
+    }
+
+    /** 从 {@code cmd.exec} 的 params 里取出 {@code /sde} 子命令（小写）；取不到返回 null。 */
+    private static String sdeSubOf(JsonObject params) {
+        String command = Json.optString(params, "command", null);
+        if (command == null) {
+            return null;
+        }
+        String body = command.trim();
+        if (body.startsWith("/")) {
+            body = body.substring(1);
+        }
+        String[] parts = body.split("\\s+");
+        if (parts.length < 2 || !"sde".equalsIgnoreCase(parts[0])) {
+            return null;
+        }
+        return parts[1].toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * 逐步断言（{@code action[i].expect}）的形态校验。
+     *
+     * <p>
+     * 形态是 {@code {RFC 6901 指针: 期望值}}——一个对象里可以放多条断言，全部必须命中。
+     * 指针必须 {@code /} 开头（{@code ""} 表示整棵结果对象）；空对象是<b>错误</b>而不是
+     * 「不断言」：写了 {@code expect:{}} 的意图必然是断言，而空断言集永远为真（恒绿假断言）。
+     * 要「不断言」就不写这个字段。
+     */
+    private void validateStepExpect(CaseFile.ActionStep step, String ctx, Fields fields) {
+        if (!step.hasExpect()) {
+            return;
+        }
+        JsonObject expect = step.expect();
+        if (expect == null || Json.size(expect) == 0) {
+            fields.add(ctx + ".expect", "不得为空对象（空断言集恒绿；要不断言就别写 expect）");
+            return;
+        }
+        if (Json.size(expect) > MAX_STEP_EXPECT) {
+            fields.add(ctx + ".expect", "单步断言上限 " + MAX_STEP_EXPECT + " 条，收到 " + Json.size(expect));
+        }
+        for (java.util.Map.Entry<String, com.google.gson.JsonElement> e : Json.entries(expect)) {
+            String pointer = e.getKey();
+            if (pointer == null || (!pointer.isEmpty() && !pointer.startsWith("/"))) {
+                fields.add(ctx + ".expect." + pointer, "指针须以 / 开头或为空串（RFC 6901），收到: " + pointer);
+            }
+        }
+    }
+
+    /**
+     * 跨段产物路径冲突（{@code read} ↔ {@code action}）。
+     *
+     * <p>
+     * 两段都经 {@link ActionContext#withParams} 把产物落<b>同一个 run 目录</b>，因此重名会让
+     * 后写者静默覆盖前写者。段内重名各自已在 {@link #validateRead}/{@link #validateAction} 判过；
+     * 这里只补跨段那一半——判据引用哪一份必须说得清。
+     */
+    private void crossSegmentPathConflicts(JsonArray read, JsonArray action, Fields fields) {
+        java.util.Set<String> readPaths = new java.util.LinkedHashSet<String>();
+        for (int i = 0; i < read.size(); i++) {
+            readPaths.add(
+                Json.optString(
+                    read.get(i)
+                        .getAsJsonObject(),
+                    "path",
+                    ""));
+        }
+        for (int i = 0; i < action.size(); i++) {
+            String path = Json.optString(
+                action.get(i)
+                    .getAsJsonObject(),
+                "path",
+                "");
+            if (!path.isEmpty() && readPaths.contains(path)) {
+                fields.add("action[" + i + "].path", "与 read 段的产物路径重名: " + path + "（两段共享同一 run 目录，后写者会静默覆盖前写者）");
+            }
+        }
     }
 
     private JsonArray validateCriteria(CaseFile file, Fields fields) {

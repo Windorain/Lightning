@@ -42,6 +42,26 @@ public final class MultipartNbtStateUtil {
     }
 
     /**
+     * 扫描 NBT 是否描述一个多部件格（<b>不看活动 TE</b>）。
+     *
+     * <p>
+     * Gitea #127：几何烘焙改为按<b>扫描身份</b>决定保留哪些格之后，活动世界该格的 TE 可能已经不在
+     * （世界在录制后被清空）。此时「是不是多部件」只能从 NBT 自己判——FMP 把每个多部件 TE 的
+     * {@code id} 写成 {@code "savedMultipart"}（见 {@link #createMultipartCopyFromNbt} 的说明）。
+     * 判据刻意做窄：只认这个 id，不猜「有 parts 标签就是多部件」（非 FMP 的 TE 也可能有同名标签）。
+     */
+    public static boolean isMultipartNbt(NBTTagCompound nbt) {
+        if (nbt == null) {
+            return false;
+        }
+        try {
+            return "savedMultipart".equals(nbt.getString("id"));
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
      * 用 {@code nbt} 中的 parts 数据更新 TE 各 part 的内部状态。
      * {@code te.readFromNBT(nbt)} 已由调用方执行（设置 x/y/z 等基础字段）。
      */

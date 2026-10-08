@@ -4,7 +4,18 @@
  * 与 `fixtures.ts` 的分工：
  *  - `fixtures.ts`：手工 fixture（P0.4 交付，几何从简）的读取/变形/几何增强；
  *  - 本文件：**真实产物**（`scripts/parts-acceptance/.out/<label>/sde_parts_acceptance_export_*.json`
- *    + canonical oracle `scripts/parts-acceptance/oracle/`）。真实产物的几何/坐标/部件清单
+ *    + canonical oracle `scripts/parts-acceptance/oracle/`）。
+ *
+ *    ⚠️ **Gitea #104（V10）之后本条链已断，尚未修复**：产出这些产物的老器具
+ *    （`PartsAcceptanceAutomation` / `PartsAcceptanceBuilder` / `PartsAcceptanceOracle` /
+ *    `PartsAcceptanceVerifier`）与 `scripts/parts-acceptance/` 编排层已**整体删除**，
+ *    oracle 基准已迁入 `test/expected/parts-acceptance/`（见那里的 README）。cp 侧目前**没有**
+ *    部件导出动作，也无 EnderIO/FMP 的 `te` 补全器（V13 → #116），因此本文件在补齐之前
+ *    **读不到任何新产物**（`.out/` 目录本就不入库，改动前后同样不可跑）。
+ *    这是 #104 显式登记的已知缺口 + 跟进单建议，**不是静默遗漏**：保留本文件是为了保住
+ *    「真实产物 vs 合成 fixture」的双通道结构，待 cp 侧有部件导出后再接回顾。
+ *
+ *    真实产物的几何/坐标/部件清单
  *    与 fixture 完全不同（15×2×13 世界、36 格意图、26 个 partLists 池），因此**期望值与探针点
  *    都从产物 + oracle 派生**，不硬编码。
  *

@@ -1,0 +1,118 @@
+{
+  "schema": "lightning.case/1",
+  "id": "cp-smoke-shots",
+  "label": "控制面 PR-2 验收：虚空托管世界 + 3 石 + 1 箱，三机位取证拍摄（透视/正交/超分拼接）",
+  "world": {
+    "folder": "cp_smoke_shots",
+    "seed": 20261006,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "build": [
+    { "op": "clear", "from": [63, 11, 63], "to": [68, 14, 68] },
+    { "op": "block", "at": "base+[0,0,0]", "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": "@base", "offset": [1, 0, 0], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [66, 12, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": "base+[0,0,1]", "id": "minecraft:chest", "meta": 0 },
+    { "op": "te", "at": "base+[0,0,1]", "completer": "vanilla", "params": {} },
+    { "op": "wait", "ticks": 20 }
+  ],
+  "capture": {
+    "lighting": "natural",
+    "renderMode": "本色",
+    "worldTime": 6000
+  },
+  "cameras": [
+    {
+      "name": "persp-main",
+      "pos": [65.5, 16.5, 69.5],
+      "yaw": 180.0,
+      "pitch": 41.63,
+      "projection": { "type": "perspective", "fov": 70 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "ortho-top",
+      "pos": [65.5, 18.0, 65.0],
+      "yaw": 180.0,
+      "pitch": 90.0,
+      "projection": { "type": "ortho", "orthoHeight": 12.0 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "persp-tiled",
+      "pos": [68.5, 16.5, 68.5],
+      "yaw": 139.4,
+      "pitch": 40.95,
+      "projection": { "type": "perspective", "fov": 70 },
+      "resolution": [1920, 1080],
+      "tile": { "cols": 2, "rows": 2, "overlap": 0.05 }
+    }
+  ],
+  "criteria": [
+    {
+      "id": "persp-main-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/persp-main.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "persp-main-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/persp-main.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "ortho-top-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/ortho-top.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "ortho-top-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/ortho-top.png", "maxSameColorRatio": 0.995 }
+    },
+    {
+      "id": "persp-tiled-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/persp-tiled.png", "width": 1920, "height": 1080 }
+    },
+    {
+      "id": "persp-tiled-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/persp-tiled.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "persp-main-meta-exists",
+      "type": "artifact-exists",
+      "params": { "path": "shots/persp-main.meta.json" }
+    },
+    {
+      "id": "observation-camera-injected",
+      "type": "json-field",
+      "params": { "path": "observation.json", "pointer": "/observation/camera/mode" },
+      "expect": "injected"
+    }
+  ],
+  "variants": [
+    {
+      "id": "neg-persp-main-width",
+      "mutate": [
+        {
+          "op": "replace",
+          "path": "/criteria/0/params/width",
+          "value": 9999
+        }
+      ],
+      "expectCriteriaRed": ["persp-main-size"]
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "shots/persp-main.png", "role": "shot" },
+      { "path": "shots/ortho-top.png", "role": "shot" },
+      { "path": "shots/persp-tiled.png", "role": "shot" }
+    ]
+  }
+}

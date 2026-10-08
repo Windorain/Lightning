@@ -1,0 +1,234 @@
+{
+  "schema": "lightning.case/1",
+  "id": "l1-orchestration",
+  "label": "L2 编排：L0 布景 + L1 玩家操作（走→转身→放置→挖掉），逐步断言，结论取自 L1 层",
+  "world": {
+    "folder": "cp_l1_orchestration",
+    "seed": 20261008,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "build": [
+    { "op": "clear", "from": [60, 10, 61], "to": [72, 15, 68] },
+    { "op": "block", "at": [61, 11, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [62, 11, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [63, 11, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [64, 11, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [65, 11, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [66, 11, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [67, 11, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [68, 11, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "wait", "ticks": 20 }
+  ],
+  "action": [
+    {
+      "action": "scene.player.pose",
+      "params": { "pos": [62.5, 12.0, 64.5], "yaw": 270.0, "pitch": 0.0, "allowFlying": true },
+      "path": "action/0-pose.json",
+      "role": "scene-player-pose",
+      "expect": { "/layer": "L0", "/semantics": "teleport", "/after/isFlying": true }
+    },
+    {
+      "action": "scene.inventory.write",
+      "params": {
+        "target": "player",
+        "slots": [{ "slot": 0, "id": "minecraft:cobblestone", "meta": 0, "count": 64 }]
+      },
+      "path": "action/1-give.json",
+      "role": "scene-inventory-write",
+      "expect": {
+        "/layer": "L0",
+        "/semantics": "give",
+        "/writtenCount": 1,
+        "/readBack/0/stack/id": "minecraft:cobblestone",
+        "/readBack/0/stack/count": 64
+      }
+    },
+    {
+      "action": "player.move",
+      "params": { "to": [64.5, 12.0, 64.5], "maxTicks": 200 },
+      "path": "action/2-move.json",
+      "role": "player-move",
+      "expect": { "/layer": "L1", "/semantics": "walk", "/mode": "to" }
+    },
+    {
+      "action": "player.look",
+      "params": { "yaw": 270.0, "pitch": 0.0, "steps": 1 },
+      "path": "action/3-look.json",
+      "role": "player-look",
+      "expect": { "/layer": "L1", "/semantics": "turn" }
+    },
+    {
+      "action": "player.place_block",
+      "params": { "at": [65, 11, 64], "side": 1 },
+      "path": "action/4-place.json",
+      "role": "player-place-block",
+      "expect": {
+        "/layer": "L1",
+        "/semantics": "place-block",
+        "/heldItemId": "minecraft:cobblestone",
+        "/target": [65, 12, 64]
+      }
+    },
+    {
+      "action": "read.blocks",
+      "params": { "from": [62, 11, 63], "to": [70, 13, 66], "includeAir": true, "hash": true },
+      "path": "read/blocks-placed.json",
+      "role": "read-blocks",
+      "expect": { "/volume": 108, "/blocks/40/id": "minecraft:cobblestone" }
+    },
+    {
+      "action": "player.dig",
+      "params": { "at": [65, 12, 64], "holdTicks": 1 },
+      "path": "action/5-dig.json",
+      "role": "player-dig",
+      "expect": {
+        "/layer": "L1",
+        "/semantics": "dig-block",
+        "/before/id": "minecraft:cobblestone",
+        "/target": "block"
+      }
+    },
+    {
+      "action": "read.blocks",
+      "params": { "from": [62, 11, 63], "to": [70, 13, 66], "includeAir": true, "hash": true },
+      "path": "read/blocks-dug.json",
+      "role": "read-blocks",
+      "expect": { "/volume": 108, "/blocks/40/blockId": 0 }
+    },
+    {
+      "action": "read.player",
+      "params": {},
+      "path": "read/player.json",
+      "role": "read-player",
+      "expect": { "/dimension": 0 }
+    }
+  ],
+  "criteria": [
+    {
+      "id": "l1-move-observed",
+      "type": "json-field",
+      "params": { "path": "action/2-move.json", "pointer": "/observed" },
+      "expect": true
+    },
+    {
+      "id": "l1-move-server-side-displacement",
+      "type": "json-field",
+      "params": { "path": "action/2-move.json", "pointer": "/arrivedServer" },
+      "expect": true
+    },
+    {
+      "id": "l1-place-appeared",
+      "type": "json-field",
+      "params": { "path": "action/4-place.json", "pointer": "/blockAppeared" },
+      "expect": true
+    },
+    {
+      "id": "l1-place-observed",
+      "type": "json-field",
+      "params": { "path": "action/4-place.json", "pointer": "/observed" },
+      "expect": true
+    },
+    {
+      "id": "l1-place-in-server-reach",
+      "type": "json-field",
+      "params": { "path": "action/4-place.json", "pointer": "/inServerReach" },
+      "expect": true
+    },
+    {
+      "id": "l1-dig-destroyed",
+      "type": "json-field",
+      "params": { "path": "action/5-dig.json", "pointer": "/destroyed" },
+      "expect": true
+    },
+    {
+      "id": "l1-dig-observed",
+      "type": "json-field",
+      "params": { "path": "action/5-dig.json", "pointer": "/observed" },
+      "expect": true
+    },
+    {
+      "id": "l1-dig-in-server-reach",
+      "type": "json-field",
+      "params": { "path": "action/5-dig.json", "pointer": "/inServerReach" },
+      "expect": true
+    },
+    {
+      "id": "l1-world-place-target-is-cobblestone",
+      "type": "json-field",
+      "params": { "path": "read/blocks-placed.json", "pointer": "/blocks/40/id" },
+      "expect": "minecraft:cobblestone"
+    },
+    {
+      "id": "l1-world-place-target-blockid",
+      "type": "json-field",
+      "params": { "path": "read/blocks-placed.json", "pointer": "/blocks/40/blockId" },
+      "expect": 4
+    },
+    {
+      "id": "l1-world-dig-target-is-air",
+      "type": "json-field",
+      "params": { "path": "read/blocks-dug.json", "pointer": "/blocks/40/blockId" },
+      "expect": 0
+    },
+    {
+      "id": "l1-world-region-volume",
+      "type": "json-field",
+      "params": { "path": "read/blocks-dug.json", "pointer": "/volume" },
+      "expect": 108
+    },
+    {
+      "id": "l1-read-artifacts-exist",
+      "type": "artifact-exists",
+      "params": { "path": "read/blocks-dug.json" }
+    },
+    {
+      "id": "l1-orchestration-artifacts-exist",
+      "type": "artifact-exists",
+      "params": { "path": "action/5-dig.json" }
+    },
+    {
+      "id": "scene-manifest-exists",
+      "type": "artifact-exists",
+      "params": { "path": "world/scene-manifest.json" }
+    },
+    {
+      "id": "world-hash-idempotent",
+      "type": "world-hash-equals"
+    }
+  ],
+  "variants": [
+    {
+      "id": "neg-dig-destroyed-flipped",
+      "mutate": [{ "op": "replace", "path": "/criteria/5/expect", "value": false }],
+      "expectCriteriaRed": ["l1-dig-destroyed"]
+    },
+    {
+      "id": "neg-move-observed-flipped",
+      "mutate": [{ "op": "replace", "path": "/criteria/0/expect", "value": false }],
+      "expectCriteriaRed": ["l1-move-observed"]
+    },
+    {
+      "id": "neg-place-target-flipped",
+      "mutate": [{ "op": "replace", "path": "/criteria/8/expect", "value": "minecraft:stone" }],
+      "expectCriteriaRed": ["l1-world-place-target-is-cobblestone"]
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "world/scene-manifest.json", "role": "scene-manifest" },
+      { "path": "action/0-pose.json", "role": "scene-player-pose" },
+      { "path": "action/1-give.json", "role": "scene-inventory-write" },
+      { "path": "action/2-move.json", "role": "player-move" },
+      { "path": "action/3-look.json", "role": "player-look" },
+      { "path": "action/4-place.json", "role": "player-place-block" },
+      { "path": "action/5-dig.json", "role": "player-dig" },
+      { "path": "read/blocks-placed.json", "role": "read-blocks" },
+      { "path": "read/blocks-dug.json", "role": "read-blocks" },
+      { "path": "read/player.json", "role": "read-player" }
+    ]
+  }
+}
