@@ -1,9 +1,12 @@
 <#
   run-input-acceptance.ps1 的纯判定模块（输入手段族实机验收）
   ============================================================================
-  这里只放「读 JSON / 比数值 / 判红绿」的纯函数：**不碰客户端、不发 HTTP、不起进程、不归档、不读文件**。
+  这里只放「读 JSON / 比数值 / 判红绿」的纯函数：**不碰客户端、不发 HTTP、不起进程、不归档**。
   输入一律是**已经落到内存里的纯数据**（作业 JSON / 错误信封 / 读面 JSON / 描述符 JSON），
   输出一律是 @{ id; ok; status; detail }（status = pass | fail | skipped | blocked）。
+  **唯一例外**：E3.content（Test-InputGuiFrameContent）按 Lead 定的签名收**本地帧路径**，
+  故必须读文件；但它只做**本地字节级**解码（BCL，禁 System.Drawing），不碰客户端/HTTP/归档，
+  仍可离线自检，口径与其余各段逐条相同（读不出 ⇒ fail，绝不当 pass）。
 
   为什么这样拆（照 anchor-checks.ps1 的既有拆法）：
     ① 同一份判定逻辑既能被驱动脚本用于真机轮次，也能被 run-input-acceptance-selftest.ps1
@@ -1345,5 +1348,269 @@ function Test-InputE3ArtifactHashes {
         return (New-CpFail 'E3' ("至少各需一条 PNG 与一条 meta 比对成功（实测 PNG $okPng / meta $okMeta）；$d"))
     }
     return (New-CpPass 'E3' ("清单可发现且逐份哈希复算全部一致（PNG $okPng 份、meta $okMeta 份）：$d"))
+}
+
+# ---------------------------------------------------------------------------
+# E3.content：GUI 实拍帧必须与**同机位的 gui:"none" 对照帧**在像素层面显著不同
+#
+#   存在理由（Gitea #205，2026-10-08 现场实测）：同一机位、同一时刻的两次 shot.multi，
+#   一次 gui:"screen"（meta 里 drawn=true、screen=GuiContainerCreative）、一次 gui:"none"，
+#   两张 PNG **逐字节相同**（53514 字节、sha256 一致）——即「界面被画了」这句自述在像素层面
+#   完全不成立。而既有图像判据（image-uniform：唯一色数 / 主色占比）对这一点是**瞎的**：
+#   那张背景渐变图的唯一色数是 348，会照判绿。
+#   本判据换观测面：**不看单帧的内部结构，只看「有界面」与「无界面」两帧的差**。
+#   两帧相同或差异不足 ⇒ 该帧不能作为「画面里有界面」的证据 ⇒ fail（不可判不等于通过）。
+#
+#   口径：
+#     - 两帧都必须能读出像素；文件不存在 / 不是 PNG / 解不开 / 位深或颜色型不支持 ⇒ fail，
+#       且 detail 必须说清**是哪一种**（负对照的铁律：读不出不是「无差异」）；
+#     - 尺寸不同 ⇒ fail（逐像素比较不可判，同样不是「有差异」）；
+#     - 逐像素比 RGB：单通道差 <= 8 视为相同（容忍编解码/抖动噪声）；
+#       差异像素占比 = 差异像素数 / 总像素数 × 100；
+#     - 占比 >= MinDiffPct ⇒ pass，否则 fail；红绿两侧都给出实测占比、阈值与两帧尺寸；
+#     - 两帧**逐字节相同**时单独给一条更明白的 fail 文本（「界面绘制没有改到任何像素」）。
+#
+#   为什么不用 System.Drawing：脚本要在受限/headless 环境下也能跑。解码只用 BCL，
+#   与 run-anchor.ps1 的 Write-ProbePng / anchor-checks.ps1 的 Get-PngDominantColorRatio 同一套
+#   做法：IDAT 是 zlib 流 ⇒ 跳 2 字节 CMF/FLG 头后用 DeflateStream 解 raw deflate，再逐行反 filter。
+# ---------------------------------------------------------------------------
+
+# PNG → 逐像素 RGB（本地字节级解码，只用 BCL；不依赖 System.Drawing）
+#   返回 @{ ok; reason; width; height; rgb }；rgb = 逐像素 RGB 三元组（长度 = width*height*3）。
+#   支持：8 位、非隔行、颜色型 0/2/4/6（灰度 / RGB / 灰度+A / RGBA）；filter 0-4 全覆盖；
+#   其余情形一律 ok=$false 且 reason 说明是哪一种（调用方据此判 red，不许把 $null 读成「无差异」）。
+function Read-CpPngRgb {
+    param([string]$Path)
+    $bad = { param([string]$Why) return [pscustomobject]@{ ok = $false; reason = $Why; width = 0; height = 0; rgb = $null } }
+    if ([string]::IsNullOrWhiteSpace($Path)) { return (& $bad '路径为空') }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return (& $bad "文件不存在或不是普通文件") }
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+    } catch {
+        return (& $bad ("读文件失败: " + $_.Exception.Message))
+    }
+    if ($bytes.Length -lt 8) { return (& $bad ("文件只有 $($bytes.Length) 字节，不是 PNG")) }
+    foreach ($i in 0..7) {
+        if ([int]$bytes[$i] -ne @(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)[$i]) {
+            return (& $bad 'PNG 签名不符（这不是 PNG 文件）')
+        }
+    }
+
+    $pos = 8
+    $width = 0; $height = 0; $depth = 0; $colorType = 0; $interlace = 0
+    $haveIhdr = $false
+    $idat = New-Object System.Collections.Generic.List[byte]
+    while ($pos + 8 -le $bytes.Length) {
+        $len = ([int64]$bytes[$pos] -shl 24) + ([int64]$bytes[$pos + 1] -shl 16) + ([int64]$bytes[$pos + 2] -shl 8) + [int64]$bytes[$pos + 3]
+        $type = [System.Text.Encoding]::ASCII.GetString($bytes, $pos + 4, 4)
+        $dataStart = $pos + 8
+        if ($len -lt 0 -or ($dataStart + $len + 4) -gt $bytes.Length) { return (& $bad "chunk $type 越界（文件被截断）") }
+        if ($type -eq 'IHDR') {
+            if ($len -lt 13) { return (& $bad 'IHDR 长度不足 13 字节') }
+            $width = ([int]$bytes[$dataStart] -shl 24) + ([int]$bytes[$dataStart + 1] -shl 16) + ([int]$bytes[$dataStart + 2] -shl 8) + [int]$bytes[$dataStart + 3]
+            $height = ([int]$bytes[$dataStart + 4] -shl 24) + ([int]$bytes[$dataStart + 5] -shl 16) + ([int]$bytes[$dataStart + 6] -shl 8) + [int]$bytes[$dataStart + 7]
+            $depth = [int]$bytes[$dataStart + 8]
+            $colorType = [int]$bytes[$dataStart + 9]
+            $interlace = [int]$bytes[$dataStart + 12]
+            $haveIhdr = $true
+        } elseif ($type -eq 'IDAT') {
+            for ($i = 0; $i -lt $len; $i++) { [void]$idat.Add($bytes[$dataStart + $i]) }
+        } elseif ($type -eq 'IEND') {
+            break
+        }
+        $pos = $dataStart + $len + 4
+    }
+    if (-not $haveIhdr -or $width -le 0 -or $height -le 0) { return (& $bad 'IHDR 缺失或尺寸非法') }
+    if ($depth -ne 8) { return (& $bad "位深 $depth（只支持 8 位）") }
+    if ($interlace -ne 0) { return (& $bad '隔行（Adam7）不支持') }
+    $channels = switch ($colorType) { 0 { 1 } 2 { 3 } 4 { 2 } 6 { 4 } default { 0 } }
+    if ($channels -eq 0) { return (& $bad "颜色型 $colorType（只支持 0/2/4/6）") }
+    if ($idat.Count -eq 0) { return (& $bad '没有 IDAT 数据（文件里没有像素）') }
+
+    $ms = New-Object System.IO.MemoryStream(, $idat.ToArray())
+    $out = New-Object System.IO.MemoryStream
+    $raw = $null
+    try {
+        # PNG 的 IDAT 是 zlib 流：跳过 2 字节头（CMF/FLG）；尾部 adler32 由 DeflateStream 自然忽略
+        [void]$ms.Seek(2, [System.IO.SeekOrigin]::Begin)
+        $ds = New-Object System.IO.Compression.DeflateStream($ms, [System.IO.Compression.CompressionMode]::Decompress)
+        try { $ds.CopyTo($out) } finally { $ds.Dispose() }
+        $raw = $out.ToArray()
+    } catch {
+        return (& $bad ("zlib/deflate 解压失败: " + $_.Exception.Message))
+    } finally {
+        $ms.Dispose(); $out.Dispose()
+    }
+
+    $stride = $width * $channels
+    $need = ($stride + 1) * $height
+    if ($raw.Length -lt $need) { return (& $bad "解压后数据不足：需要 $need 字节、实得 $($raw.Length)（文件截断）") }
+
+    $rgb = New-Object byte[] ($width * $height * 3)
+    $prev = New-Object byte[] $stride
+    $cur = New-Object byte[] $stride
+    $off = 0
+    $o = 0
+    for ($y = 0; $y -lt $height; $y++) {
+        $ft = [int]$raw[$off]; $off++                       # 行首 filter 字节
+        if ($ft -gt 4) { return (& $bad "第 $y 行的 filter 类型 $ft 未知（只支持 0-4）") }
+        [Array]::Copy($raw, $off, $cur, 0, $stride); $off += $stride
+        for ($i = 0; $i -lt $stride; $i++) {
+            $a = if ($i -ge $channels) { [int]$cur[$i - $channels] } else { 0 }
+            $b = [int]$prev[$i]
+            $c = if ($i -ge $channels) { [int]$prev[$i - $channels] } else { 0 }
+            $x = [int]$cur[$i]
+            switch ($ft) {
+                0 { }
+                1 { $x = ($x + $a) -band 0xFF }
+                2 { $x = ($x + $b) -band 0xFF }
+                3 { $x = ($x + [int](($a + $b) / 2)) -band 0xFF }
+                4 {
+                    $p = $a + $b - $c
+                    $pa = [math]::Abs($p - $a); $pb = [math]::Abs($p - $b); $pc = [math]::Abs($p - $c)
+                    $pr = if ($pa -le $pb -and $pa -le $pc) { $a } elseif ($pb -le $pc) { $b } else { $c }
+                    $x = ($x + $pr) -band 0xFF
+                }
+            }
+            $cur[$i] = [byte]$x
+        }
+        for ($x0 = 0; $x0 -lt $width; $x0++) {
+            $base = $x0 * $channels
+            if ($channels -ge 3) {
+                $rgb[$o] = $cur[$base]; $rgb[$o + 1] = $cur[$base + 1]; $rgb[$o + 2] = $cur[$base + 2]
+            } else {
+                $rgb[$o] = $cur[$base]; $rgb[$o + 1] = $cur[$base]; $rgb[$o + 2] = $cur[$base]
+            }
+            $o += 3
+        }
+        $tmp = $prev; $prev = $cur; $cur = $tmp
+    }
+    return [pscustomobject]@{ ok = $true; reason = ''; width = $width; height = $height; rgb = $rgb }
+}
+
+function Test-InputGuiFrameContent {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScreenPng,     # gui=screen 帧（本地 PNG 路径）
+        [Parameter(Mandatory = $true)][string]$ControlPng,    # 同机位 gui=none 对照帧（本地 PNG 路径）
+        [double]$MinDiffPct = 0.5,                            # 差异像素占比下限（百分数）
+        [string]$Detail = ''                                  # 追加到判据文本的上下文（runId/机位/路径等）
+    )
+    $tol = 8   # 单通道容差：<= 8 视为相同（容忍编解码/抖动噪声）
+    $ctx = ''
+    if (-not [string]::IsNullOrWhiteSpace($Detail)) { $ctx = "；$Detail" }
+
+    $screen = Read-CpPngRgb $ScreenPng
+    if (-not $screen.ok) {
+        return (New-CpFail 'E3.content' ("gui=screen 帧读不出像素（$ScreenPng）: $($screen.reason) ⇒ 「画面里有界面」在像素层面不可判，不可判不等于通过$ctx"))
+    }
+    $control = Read-CpPngRgb $ControlPng
+    if (-not $control.ok) {
+        return (New-CpFail 'E3.content' ("gui=none 对照帧读不出像素（$ControlPng）: $($control.reason) ⇒ 没有对照帧就没有「界面画进了这一帧」的证据，不可判不等于通过$ctx"))
+    }
+    $sizeTxt = ("两帧尺寸: gui=screen {0}x{1}、gui=none {2}x{3}" -f $screen.width, $screen.height, $control.width, $control.height)
+    if ($screen.width -ne $control.width -or $screen.height -ne $control.height) {
+        return (New-CpFail 'E3.content' ("两帧尺寸不同 ⇒ 逐像素比较不可判（不是「有差异」）: $sizeTxt$ctx"))
+    }
+
+    $total = [long]$screen.width * [long]$screen.height
+    $sr = $screen.rgb; $cr = $control.rgb
+    $diff = 0
+    for ($i = 0; $i -lt $total; $i++) {
+        $k = $i * 3
+        if ([math]::Abs([int]$sr[$k] - [int]$cr[$k]) -gt $tol -or `
+            [math]::Abs([int]$sr[$k + 1] - [int]$cr[$k + 1]) -gt $tol -or `
+            [math]::Abs([int]$sr[$k + 2] - [int]$cr[$k + 2]) -gt $tol) { $diff++ }
+    }
+    $pct = 0.0
+    if ($total -gt 0) { $pct = ([double]$diff / [double]$total) * 100.0 }
+    $core = ("差异像素 {0}/{1} = {2:N3}%（阈值 {3:N3}%，单通道容差 {4}）；{5}" -f $diff, $total, $pct, $MinDiffPct, $tol, $sizeTxt)
+
+    # 逐字节相同（Gitea #205 的现场形态）必须单独点名，不能只落进「占比 0」的通用分支
+    $sameBytes = $false
+    $bytes = 0
+    try {
+        $sb = [System.IO.File]::ReadAllBytes($ScreenPng)
+        $cb = [System.IO.File]::ReadAllBytes($ControlPng)
+        $bytes = $sb.Length
+        $sameBytes = [System.Collections.StructuralComparisons]::StructuralEqualityComparer.Equals($sb, $cb)
+    } catch { $sameBytes = $false }
+    if ($sameBytes) {
+        $sha = ''
+        try { $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $ScreenPng).Hash.ToLowerInvariant() } catch { $sha = '(sha256 复算失败)' }
+        return (New-CpFail 'E3.content' ("两帧**逐字节相同**（$bytes 字节、sha256=$sha 两份一致）⇒ 界面绘制没有改到任何像素，「让游戏自己把 GUI 画进这一帧」在像素层面完全不成立 ⇒ 本帧不能作为「画面里有界面」的证据；$core$ctx"))
+    }
+    if ($diff -eq 0) {
+        return (New-CpFail 'E3.content' ("两帧解码后像素逐点相同（文件字节不同，但没有任何像素差值超过容差 $tol）⇒ 界面绘制没有改到任何像素；$core$ctx"))
+    }
+    if ($pct -lt $MinDiffPct) {
+        return (New-CpFail 'E3.content' ("差异不足（负对照：不是「有点差异就放行」）：$core ⇒ 这点差异不能证明画面里有界面$ctx"))
+    }
+    return (New-CpPass 'E3.content' ("GUI 实拍帧与同机位 gui=none 对照帧在像素层面显著不同（界面确已改到像素）：$core$ctx"))
+}
+
+# ---------------------------------------------------------------------------
+# E3.draw：界面绘制**自证**——同一帧内「绘制前 → 绘制后」确实改到了像素
+#
+#   与 E3.content 的分工：E3.content 是**独立侧**（不采信任何自述字段，只比两张真实 PNG）；
+#   本判据是**自述侧**（读 shot meta 的 guiCapture[]）。它比「拿一张图猜有没有界面」强的地方在于
+#   观测面是**同一帧内**绘制调用前后的整帧指纹与改动像素数（ShotExecutor.appendGuiDrawProbe）：
+#   不受「两次拍摄之间世界自己在动」这类跨帧噪声影响——跨帧那一路在动态场景里可能因为别的原因
+#   产生差异而假绿，本判据不会。两条都过才叫「界面进了帧」。
+#
+#   口径（字段出处：ShotExecutor.java 的 appendGuiDrawProbe）：
+#     - meta 读不出 / guiCapture 缺席或为空 ⇒ fail（不可判不等于通过）；
+#     - 逐条：drawn 必须为 true 且 changedPixels 必须是 > 0 的数 ⇒ 记一条正例；
+#       changedPixels == 0 ⇒ fail（**#205 的现场形态**：调用正常返回、GL 状态前后一致、
+#       glGetError=0，而像素零改动——「调用成功」绝不等于「像素改了」）；
+#     - changedPixels 字段**整个缺席**（旧版 mod 的产物）⇒ 如实记「未覆盖」并 fail，
+#       绝不因为「没报错」而含糊成 pass；
+#     - 帧指纹与窗口 framebuffer 中心像素只进 detail 摘录，不参与判红绿（它们是判别根因的证据）。
+# ---------------------------------------------------------------------------
+function Test-InputGuiDrawLanded {
+    param(
+        [Parameter(Mandatory = $false)]$ScreenMeta,   # shots/<name>.meta.json 解析后的对象
+        [string]$RunId = '',
+        [string]$Detail = ''
+    )
+    $ctx = ''
+    if (-not [string]::IsNullOrWhiteSpace($RunId)) { $ctx += "；runId=$RunId" }
+    if (-not [string]::IsNullOrWhiteSpace($Detail)) { $ctx += "；$Detail" }
+    if ($null -eq $ScreenMeta) {
+        return (New-CpFail 'E3.draw' ("shot meta 读不出（不可判不等于通过）：gui=screen 帧的 shots/<name>.meta.json 缺席或不可解析 ⇒ 「界面确实画进了像素」无从断言$ctx"))
+    }
+    $caps = @(Get-CpArray $ScreenMeta 'guiCapture')
+    if ($caps.Count -lt 1) {
+        return (New-CpFail 'E3.draw' ("meta 里没有 guiCapture[] ⇒ 本次拍摄没有开 gui:screen（或该版 mod 没有这门留痕）⇒ 界面是否进帧无从断言$ctx"))
+    }
+    $lines = New-Object System.Collections.ArrayList
+    $missing = 0; $zero = 0; $notDrawn = 0; $ok = 0
+    foreach ($c in $caps) {
+        $drawn = Get-CpProp $c 'drawn'
+        $ch = Get-CpProp $c 'changedPixels'
+        $screen = [string](Get-CpProp $c 'screen')
+        $hashB = [string](Get-CpProp $c 'frameHashBefore')
+        $hashA = [string](Get-CpProp $c 'frameHashAfter')
+        $win = [string](Get-CpProp $c 'windowFramebufferCenterPixel')
+        if ($null -eq $ch) {
+            $missing++
+            [void]$lines.Add("screen=$screen drawn=$drawn changedPixels=<缺席>（该版 mod 没有这门自证字段）")
+            continue
+        }
+        if ($drawn -ne $true) { $notDrawn++ }
+        if ([double]$ch -le 0) { $zero++ }
+        if ($drawn -eq $true -and [double]$ch -gt 0) { $ok++ }
+        [void]$lines.Add("screen=$screen drawn=$drawn changedPixels=$ch 帧指纹 $hashB→$hashA 窗口中心像素=$win")
+    }
+    $d = ($lines -join ' | ')
+    if ($missing -eq $caps.Count) {
+        return (New-CpFail 'E3.draw' ("所有 guiCapture 条目都没有 changedPixels 字段 ⇒ 该版 mod 未覆盖「界面是否真的改到像素」⇒ 如实记未覆盖（不许因「没报错」含糊成 pass）：$d$ctx"))
+    }
+    if ($zero -gt 0) {
+        return (New-CpFail 'E3.draw' ("界面绘制**没有改变本帧任何一个像素**（changedPixels=0）⇒ 「让游戏画 currentScreen」在像素层面不成立，该帧不能作为 GUI 实拍证据（Gitea #205 的现场形态）：$d$ctx"))
+    }
+    if ($notDrawn -gt 0) {
+        return (New-CpFail 'E3.draw' ("有 guiCapture 条目 drawn≠true（界面绘制未成功：异常或 currentScreen 为空都属此列）：$d$ctx"))
+    }
+    return (New-CpPass 'E3.draw' ("界面绘制在本帧内确实改到了像素（drawn=true 且 changedPixels>0，逐机位自证）：$d$ctx"))
 }
 

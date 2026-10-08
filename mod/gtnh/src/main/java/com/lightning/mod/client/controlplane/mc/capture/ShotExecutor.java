@@ -314,6 +314,11 @@ public final class ShotExecutor {
     /** 渲染目标自证日志是否已输出（一次拍摄只输出一次，见 {@link FrameScope#probeRenderTarget}）。 */
     private boolean renderTargetProbed;
 
+    /**
+     * 「界面绘制自证」是否已经输出过（每次执行器只打一条，见 {@link #captureScreen}）。
+     */
+    private boolean guiDrawProbed;
+
     private VirtualCamera camera;
 
     public ShotExecutor(Input input) {
@@ -557,6 +562,233 @@ public final class ShotExecutor {
     }
 
     /**
+     * 读整帧 RGBA（当前绑定的读目标，左下原点）；失败返回 {@code null}（探针不改变渲染结果）。
+     */
+    private static byte[] readFrameRgba(int w, int h) {
+        try {
+            int width = Math.max(1, w);
+            int height = Math.max(1, h);
+            ByteBuffer buf = BufferUtils.createByteBuffer(width * height * 4);
+            GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
+            GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buf);
+            byte[] out = new byte[width * height * 4];
+            buf.get(out);
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 帧指纹（FNV-1a 64 位）。
+     *
+     * <p>
+     * 刻意不用 {@code MessageDigest}：本探针只需要「两次读回是否逐字节相同」这一个判断，
+     * 用不依赖 JCA provider 的确定性散列更省事，且失败面更小（加密散列在取证链里的位置见
+     * {@code ArtifactStore} 的 sha256，那是产物清单的职责，不是这里的）。
+     */
+    private static String frameHash(byte[] rgba) {
+        if (rgba == null) {
+            return "n/a";
+        }
+        long h = 0xcbf29ce484222325L;
+        for (byte b : rgba) {
+            h ^= (b & 0xFFL);
+            h *= 0x100000001b3L;
+        }
+        String hex = Long.toHexString(h);
+        StringBuilder sb = new StringBuilder();
+        for (int i = hex.length(); i < 16; i++) {
+            sb.append('0');
+        }
+        return sb.append(hex)
+            .toString();
+    }
+
+    /** 两次读回之间有多少像素不同；无法比较（任一为 null 或尺寸不同）返回 -1。 */
+    private static int countChangedPixels(byte[] a, byte[] b) {
+        if (a == null || b == null || a.length != b.length) {
+            return -1;
+        }
+        int n = 0;
+        for (int i = 0; i + 3 < a.length; i += 4) {
+            if (a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2] || a[i + 3] != b[i + 3]) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** 读一个像素（当前绑定读目标；左下原点），返回 {@code #AARRGGBB}；失败返回 {@code n/a}。 */
+    private static String readPixelHex(int x, int y) {
+        try {
+            ByteBuffer pixel = BufferUtils.createByteBuffer(4);
+            GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
+            GL11.glReadPixels(x, y, 1, 1, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixel);
+            int r = pixel.get(0) & 0xFF;
+            int g = pixel.get(1) & 0xFF;
+            int b = pixel.get(2) & 0xFF;
+            int a = pixel.get(3) & 0xFF;
+            int argb = (a << 24) | (r << 16) | (g << 8) | b;
+            String hex = Integer.toHexString(argb);
+            StringBuilder sb = new StringBuilder("#");
+            for (int i = hex.length(); i < 8; i++) {
+                sb.append('0');
+            }
+            return sb.append(hex)
+                .toString();
+        } catch (Throwable t) {
+            return "n/a";
+        }
+    }
+
+    /** 一个 GL 能力开关的文本（{@code on/off}）。 */
+    private static String glBool(int cap) {
+        try {
+            return GL11.glGetBoolean(cap) ? "on" : "off";
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    /**
+     * GL 状态快照：只取与「手工驱动渲染后还能不能把东西画进本 framebuffer」直接相关的那几项。
+     *
+     * <p>
+     * 这组状态是「界面画了但画面里没有」这类事故的分界点：{@code colorMask=0000}、空的
+     * {@code scissorBox}、恒失败的模板测试、或绘制期被换掉的 {@code binding}，都会让
+     * {@code drawScreen} 正常返回、GL 不报错、而像素一个都不改。
+     */
+    private static String glStateSnapshot() {
+        try {
+            int binding = GL11.glGetInteger(GL_FRAMEBUFFER_BINDING);
+            IntBuffer vp = BufferUtils.createIntBuffer(4);
+            GL11.glGetInteger(GL11.GL_VIEWPORT, vp);
+            ByteBuffer mask = BufferUtils.createByteBuffer(4);
+            GL11.glGetBoolean(GL11.GL_COLOR_WRITEMASK, mask);
+            IntBuffer sbox = BufferUtils.createIntBuffer(4);
+            GL11.glGetInteger(GL11.GL_SCISSOR_BOX, sbox);
+            // glGetError 会清标志，故放在最后读
+            int err = GL11.glGetError();
+            return "binding=" + binding
+                + " viewport=["
+                + vp.get(0)
+                + ","
+                + vp.get(1)
+                + ","
+                + vp.get(2)
+                + ","
+                + vp.get(3)
+                + "] colorMask="
+                + (mask.get(0) & 1)
+                + (mask.get(1) & 1)
+                + (mask.get(2) & 1)
+                + (mask.get(3) & 1)
+                + " scissorTest="
+                + glBool(GL11.GL_SCISSOR_TEST)
+                + " scissorBox=["
+                + sbox.get(0)
+                + ","
+                + sbox.get(1)
+                + ","
+                + sbox.get(2)
+                + ","
+                + sbox.get(3)
+                + "] depthTest="
+                + glBool(GL11.GL_DEPTH_TEST)
+                + " depthMask="
+                + glBool(GL11.GL_DEPTH_WRITEMASK)
+                + " blend="
+                + glBool(GL11.GL_BLEND)
+                + " alphaTest="
+                + glBool(GL11.GL_ALPHA_TEST)
+                + " stencilTest="
+                + glBool(GL11.GL_STENCIL_TEST)
+                + " cullFace="
+                + glBool(GL11.GL_CULL_FACE)
+                + " lighting="
+                + glBool(GL11.GL_LIGHTING)
+                + " tex2d="
+                + glBool(GL11.GL_TEXTURE_2D)
+                + " glError="
+                + err;
+        } catch (Throwable t) {
+            return "n/a (" + t + ")";
+        }
+    }
+
+    /**
+     * 界面绘制自证：把「让游戏画 {@code currentScreen} 这一步到底有没有改到本帧像素」写进产物与日志。
+     *
+     * <h2>为什么需要它（#205 事故）</h2>
+     * 真机实测出现过这样一组产物：同一个机位、同一时刻，{@code gui:"screen"} 与 {@code gui:"none"}
+     * 两次拍摄的 PNG <b>逐字节相同</b>（sha256 一致、53514 字节），而 meta 里 {@code drawn=true}、
+     * {@code screen=GuiContainerCreative}、{@code DrawScreenEvent.Pre} 未被 cancel、无异常记录——
+     * 也就是说「界面被画了」这句自述在像素层面完全不成立，而全链路判据（尺寸/片数/命名/哈希/无异常）
+     * 照样全绿。r4 纯黑事故的教训是「渲染黑与读回黑不可区分」，这里是同一类失效模式的另一面：
+     * <b>「调用返回正常」与「像素确实改了」不可区分</b>。
+     *
+     * <p>
+     * 本探针把分界点直接写下来：绘制前/后的<b>整帧指纹</b>与<b>改动像素数</b>、两端的 GL 状态快照
+     * （绑定、colorMask、scissor、深度、模板…）、以及未被绑定的<b>窗口 framebuffer</b> 中心像素
+     * （用于区分「画去了窗口」与「压根没画进去」）。这些字段进 meta 的 {@code guiCapture[]}，
+     * 因此「画面里到底有没有界面」第一次有了可复核的机读证据，而不是只看 {@code drawn} 这一个布尔。
+     *
+     * <p>
+     * 采样不写 GL 状态（只重置一次 {@code GL_PACK_ALIGNMENT}，{@code ScreenShotHelper} 自己也会设），
+     * 故不改变渲染结果；失败的探针只记 {@code n/a}，绝不把拍摄判失败。
+     */
+    private void appendGuiDrawProbe(JsonObject rec, String cameraName, int bufW, int bufH, byte[] frameBefore,
+        String stateBefore) {
+        try {
+            byte[] frameAfter = readFrameRgba(bufW, bufH);
+            int total = bufW * bufH;
+            int changed = countChangedPixels(frameBefore, frameAfter);
+            rec.addProperty("frameHashBefore", frameHash(frameBefore));
+            rec.addProperty("frameHashAfter", frameHash(frameAfter));
+            rec.addProperty("changedPixels", Integer.valueOf(changed));
+            rec.addProperty(
+                "changedRatioPct",
+                Double.valueOf(changed < 0 || total <= 0 ? -1.0d : (changed * 100.0d) / total));
+            rec.addProperty("glStateBefore", stateBefore);
+            rec.addProperty("glStateAfter", glStateSnapshot());
+            // 「画去哪了」的另一半：窗口 framebuffer 的中心像素。绑 0 → 采样 → 绑回，两侧都在 finally 里复位。
+            String windowPixel = "n/a";
+            Framebuffer fb = in.mc == null ? null : in.mc.getFramebuffer();
+            if (fb != null) {
+                try {
+                    fb.unbindFramebuffer();
+                    windowPixel = readPixelHex(bufW / 2, bufH / 2);
+                } finally {
+                    fb.bindFramebuffer(false);
+                }
+            }
+            rec.addProperty("windowFramebufferCenterPixel", windowPixel);
+            if (!guiDrawProbed) {
+                guiDrawProbed = true;
+                CpLog.info(
+                    "界面绘制自证（一次性，机位 %s）：帧指纹 %s → %s，改动像素 %d/%d（%.4f%%）" + " | 窗口 framebuffer 中心像素=%s | 绘制前：%s | 绘制后：%s",
+                    cameraName,
+                    frameHash(frameBefore),
+                    frameHash(frameAfter),
+                    Integer.valueOf(changed),
+                    Integer.valueOf(total),
+                    Double.valueOf(changed < 0 || total <= 0 ? -1.0d : (changed * 100.0d) / total),
+                    windowPixel,
+                    stateBefore,
+                    glStateSnapshot());
+            }
+            if (changed == 0) {
+                warnOnce(
+                    "gui=screen 的界面绘制没有改变本帧任何一个像素（改动像素 0）⇒ 该帧不能作为「画面里有界面」的证据；"
+                        + "逐字段自证见 meta 的 guiCapture[]，根因口径见 Gitea #205");
+            }
+        } catch (Throwable t) {
+            CpLog.warn("界面绘制自证探针失败（不影响拍摄）: %s", String.valueOf(t));
+        }
+    }
+
+    /**
      * 真 GUI 取证：把 {@code mc.currentScreen} 让<b>游戏自己</b>画进当前 framebuffer（opt-in）。
      *
      * <h2>为什么这样写（对齐原版渲染路径）</h2>
@@ -610,9 +842,21 @@ public final class ShotExecutor {
         int savedHeight = screen.height;
         boolean sizeRewritten = false;
         try {
-            // 让界面的 width/height 与本帧 framebuffer 自洽（原版的等价量是当前窗口尺寸）
-            int sw = Math.max(1, bufW);
-            int sh = Math.max(1, bufH);
+            // 【#205 根因修法】与游戏自身同源：GUI/HUD 的**正交投影**由 setupOverlayRendering() 建立。
+            // 游戏在 renderWorld 之后先画 HUD（GuiIngame.renderGameOverlay 开头就调它）、再画界面；
+            // 本执行器按设计跳过 HUD（见方法注释「为什么不开 HUD」）⇒ 这一步必须自己补上。
+            // 缺它时 drawScreen 发出的几何落在**相机投影**下、整段被视锥裁掉：调用正常返回、
+            // GL 状态前后完全一致、glGetError=0、像素零改动——实测 changedPixels=0、帧指纹前后相同
+            // （自证探针见 appendGuiDrawProbe；现场数据与根因口径见 Gitea #205）。
+            in.mc.entityRenderer.setupOverlayRendering();
+            // 界面尺寸吃的是**缩放后**尺寸（ScaledResolution），不是 framebuffer 像素尺寸：
+            // 原实现把 buffer 尺寸写进 screen.width/height，与上面同属「把像素尺寸当界面尺寸」的口径错。
+            net.minecraft.client.gui.ScaledResolution sr = new net.minecraft.client.gui.ScaledResolution(
+                in.mc,
+                Math.max(1, bufW),
+                Math.max(1, bufH));
+            int sw = Math.max(1, sr.getScaledWidth());
+            int sh = Math.max(1, sr.getScaledHeight());
             screen.width = sw;
             screen.height = sh;
             sizeRewritten = true;
@@ -633,6 +877,9 @@ public final class ShotExecutor {
             mouse.addProperty("source", "Mouse.getX/getY（渲染帧口径，与 EntityRenderer.java:1077-1078 同源；命中集读的是同一路）");
             rec.add("mouse", mouse);
             rec.addProperty("partialTicks", Double.valueOf(partialTicks()));
+            // 界面绘制自证（#205）：绘制前取整帧指纹与 GL 状态，绘制后再取一次并在 meta 里给出改动像素数
+            byte[] frameBefore = readFrameRgba(bufW, bufH);
+            String stateBefore = glStateSnapshot();
             boolean canceled = false;
             net.minecraftforge.client.event.GuiScreenEvent.DrawScreenEvent.Pre pre = new net.minecraftforge.client.event.GuiScreenEvent.DrawScreenEvent.Pre(
                 screen,
@@ -658,6 +905,7 @@ public final class ShotExecutor {
                     guiMouseY,
                     partialTicks()));
             rec.addProperty("drawn", Boolean.TRUE);
+            appendGuiDrawProbe(rec, run.spec.name(), bufW, bufH, frameBefore, stateBefore);
         } catch (Throwable t) {
             rec.addProperty("drawn", Boolean.FALSE);
             rec.addProperty("error", describe(t));
@@ -669,7 +917,10 @@ public final class ShotExecutor {
             }
         }
         if (sizeRewritten) {
-            rec.addProperty("notes", "本帧临时把 screen.width/height 改为本片 framebuffer 尺寸以自洽，已在 finally 还原；" + "控件自身状态未改动");
+            rec.addProperty(
+                "notes",
+                "本帧用 setupOverlayRendering() 建立界面正交投影，并把 screen.width/height 临时改为本片 framebuffer 的**缩放后**尺寸（ScaledResolution 口径）以自洽，已在 finally 还原；"
+                    + "控件自身状态未改动");
         }
         run.guiCaptureJson.add(rec);
     }
