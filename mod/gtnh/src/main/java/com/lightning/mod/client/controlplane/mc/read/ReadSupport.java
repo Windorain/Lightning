@@ -507,16 +507,37 @@ public final class ReadSupport {
      * <b>同一次会话内</b>可判等；这是摘要，不是跨会话的规范化哈希口径，已在返回值里写明）。
      */
     public static JsonObject nbtSummary(NBTTagCompound tag) {
+        return nbtSummary(tag, NBT_MAX_DEPTH, NBT_MAX_ENTRIES);
+    }
+
+    /**
+     * NBT 摘要（**深度与每层条数都可指定**）。
+     *
+     * <p>
+     * 由来（2026-10-09 实机）：默认摘要限深 3，而 EIO 的 {@code TileConduitBundle} 把**逐面状态**
+     * 放在第 4 层 —— {@code conduits[0].conduit.{connections, externalConnections, conModes, extRM.<DIR>}}。
+     * 于是「逐面 IO 模式 / 红石模式」在默认摘要里**恰好差一层读不到**，调用方被迫拿射线命中、
+     * 摘要哈希这类间接量去猜状态。<b>这是读面不完备，正解是把深度变成参数</b>：
+     * {@code read.te {..., "nbtDepth": 6}} 就能把逐面状态读成一等读数。
+     *
+     * @param maxDepth   摘要深度上限（0 = 只读根一层）；夹到 [0, {@link #NBT_MAX_DEPTH_ALLOWED}]
+     * @param maxEntries 每个复合/列表的成员上限；夹到 [1, {@link #NBT_MAX_ENTRIES_ALLOWED}]
+     */
+    public static JsonObject nbtSummary(NBTTagCompound tag, int maxDepth, int maxEntries) {
         if (tag == null) {
             return null;
         }
+        int depth = Math.max(0, Math.min(NBT_MAX_DEPTH_ALLOWED, maxDepth));
+        int entries = Math.max(1, Math.min(NBT_MAX_ENTRIES_ALLOWED, maxEntries));
         JsonObject o = new JsonObject();
         o.addProperty("type", Integer.valueOf(tag.getId()));
         o.addProperty("typeName", nbtTypeName(tag.getId()));
         o.addProperty("size", Integer.valueOf(nbtKeys(tag).size()));
         o.addProperty("sha256", com.lightning.mod.client.controlplane.core.Hashing.sha256HexUtf8(nbtRaw(tag)));
         o.addProperty("hashScope", "value.toString() 的 utf-8 字节（会话内可判等；成员序不跨会话保证）");
-        JsonObject value = nbtValue(tag, 0, NBT_MAX_ENTRIES);
+        o.addProperty("maxDepth", Integer.valueOf(depth));
+        o.addProperty("maxEntries", Integer.valueOf(entries));
+        JsonObject value = nbtValue(tag, 0, entries, depth);
         o.add("value", value);
         o.addProperty("truncated", Json.optBool(value, "truncated", false));
         return o;
@@ -531,11 +552,17 @@ public final class ReadSupport {
         }
     }
 
-    /** NBT 摘要的深度上限。 */
+    /** NBT 摘要的深度上限（**默认值**；调用方可用 nbtDepth 覆盖，见 {@link #nbtSummary(NBTTagCompound, int, int)}）。 */
     public static final int NBT_MAX_DEPTH = 3;
 
-    /** 每个复合/列表在摘要里的成员数上限。 */
+    /** 每复合/列表的成员数上限（**默认值**；调用方可用 nbtMaxEntries 覆盖）。 */
     public static final int NBT_MAX_ENTRIES = 24;
+
+    /** 调用方可请求的最深摘要（硬顶：再深只是变慢，不设顶会让一次读面变成任意大的载荷）。 */
+    public static final int NBT_MAX_DEPTH_ALLOWED = 12;
+
+    /** 调用方可请求的最多成员数（硬顶）。 */
+    public static final int NBT_MAX_ENTRIES_ALLOWED = 256;
 
     /**
      * NBT 摘要的结构化部分（深度与条数都受限）。
@@ -545,7 +572,7 @@ public final class ReadSupport {
      * 超过 {@code maxEntries} 或 {@code NBT_MAX_DEPTH} 时置 {@code truncated:true}——
      * <b>截断是显式的</b>，调用方永远知道手里的摘要是全的还是缺的。
      */
-    private static JsonObject nbtValue(NBTBase tag, int depth, int maxEntries) {
+    private static JsonObject nbtValue(NBTBase tag, int depth, int maxEntries, int maxDepth) {
         JsonObject o = new JsonObject();
         if (tag == null) {
             o.addProperty("type", 0);
@@ -558,7 +585,7 @@ public final class ReadSupport {
         if (tag instanceof NBTTagCompound) {
             List<String> keys = nbtKeys((NBTTagCompound) tag);
             o.addProperty("size", Integer.valueOf(keys.size()));
-            if (depth >= NBT_MAX_DEPTH) {
+            if (depth >= maxDepth) {
                 if (keys.size() > 0) {
                     o.addProperty("truncated", true);
                 }
@@ -577,7 +604,7 @@ public final class ReadSupport {
                 } catch (Throwable ignored) {
                     // 单成员读取失败不升级成整次读面失败；该键以 null 类型出现（可见而非静默消失）
                 }
-                members.add(k, nbtValue(child, depth + 1, maxEntries));
+                members.add(k, nbtValue(child, depth + 1, maxEntries, maxDepth));
             }
             o.add("members", members);
             return o;
@@ -588,7 +615,7 @@ public final class ReadSupport {
             o.addProperty("size", Integer.valueOf(count));
             o.addProperty("elementType", Integer.valueOf(safeListElementType(l)));
             o.addProperty("elementTypeName", nbtTypeName(safeListElementType(l)));
-            if (depth >= NBT_MAX_DEPTH) {
+            if (depth >= maxDepth) {
                 if (count > 0) {
                     o.addProperty("truncated", true);
                 }
@@ -611,7 +638,7 @@ public final class ReadSupport {
                     } catch (Throwable ignored) {
                         // 留空复合
                     }
-                    items.add(nbtValue(c, depth + 1, maxEntries));
+                    items.add(nbtValue(c, depth + 1, maxEntries, maxDepth));
                 } else {
                     JsonObject item = new JsonObject();
                     item.addProperty("type", Integer.valueOf(et));

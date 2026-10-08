@@ -337,6 +337,10 @@ public class ReadSurfaceTest {
         assertDefault(registry, ReadInventoryAction.NAME, "includeEmpty", Boolean.TRUE);
         assertDefault(registry, ReadInventoryAction.NAME, "nbtMaxEntries", Integer.valueOf(24));
         assertDefault(registry, ReadTeAction.NAME, "includeNbt", Boolean.TRUE);
+        // 读面完备性（2026-10-09 实机）：默认限深 3 时 EIO 的逐面状态（第 4 层）读不到 ⇒ 加了这两个参数；
+        // 自述里的默认值必须与 ReadSupport 的常量一致，否则「默认值」这层承诺就是假的
+        assertDefault(registry, ReadTeAction.NAME, "nbtDepth", Integer.valueOf(ReadSupport.NBT_MAX_DEPTH));
+        assertDefault(registry, ReadTeAction.NAME, "nbtMaxEntries", Integer.valueOf(ReadSupport.NBT_MAX_ENTRIES));
         assertDefault(registry, ReadBlockInfoAction.NAME, "meta", Integer.valueOf(0));
         assertDefault(registry, ReadDiffAction.NAME, "maxChanges", Integer.valueOf(4096));
         assertDefault(registry, ReadRunAction.NAME, "limit", Integer.valueOf(ReadRunAction.DEFAULT_LIMIT));

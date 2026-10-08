@@ -50,6 +50,11 @@ public final class ReadTeAction implements ControlAction {
         WorldServer world = ReadSupport.requireServerWorld(NAME);
         int[][] positions = positionsOf(ctx);
         boolean includeNbt = ctx.optBool("includeNbt", true);
+        // 读面完备性（2026-10-09 实机）：默认摘要限深 3，而 EIO 的 TileConduitBundle 把**逐面状态**放在第 4 层
+        // （conduits[0].conduit.{connections, externalConnections, conModes, extRM.<DIR>}）⇒ 默认摘要**差一层读不到**。
+        // 这是读面不完备，正解是把深度/条数做成参数：read.te {nbtDepth:6} 即可把逐面状态读成一等读数。
+        int nbtDepth = ctx.optInt("nbtDepth", ReadSupport.NBT_MAX_DEPTH);
+        int nbtMaxEntries = ctx.optInt("nbtMaxEntries", ReadSupport.NBT_MAX_ENTRIES);
 
         JsonObject o = new JsonObject();
         o.addProperty("schema", "lightning.cp-read-te/1");
@@ -66,7 +71,7 @@ public final class ReadTeAction implements ControlAction {
 
         JsonArray tiles = new JsonArray();
         for (int[] pos : positions) {
-            tiles.add(readOne(world, pos, includeNbt));
+            tiles.add(readOne(world, pos, includeNbt, nbtDepth, nbtMaxEntries));
         }
         o.add("tiles", tiles);
 
@@ -84,7 +89,7 @@ public final class ReadTeAction implements ControlAction {
     // ------------------------------------------------------------ 单个位置
 
     /** 读一个位置：通用事实 + 逐族描述器输出。 */
-    private static JsonObject readOne(WorldServer world, int[] pos, boolean includeNbt) {
+    private static JsonObject readOne(WorldServer world, int[] pos, boolean includeNbt, int nbtDepth, int nbtMaxEntries) {
         JsonObject o = new JsonObject();
         o.add("pos", ReadSupport.posArray(pos));
 
@@ -101,7 +106,7 @@ public final class ReadTeAction implements ControlAction {
             tile.addProperty("superclass", superclassOf(te));
             tile.addProperty("blockMetadata", Integer.valueOf(te.getBlockMetadata()));
             if (includeNbt) {
-                tile.add("nbt", nbtOf(te));
+                tile.add("nbt", nbtOf(te, nbtDepth, nbtMaxEntries));
             }
         }
         o.add("tile", tile);
@@ -159,11 +164,11 @@ public final class ReadTeAction implements ControlAction {
      * 判据该断言的是族描述器的运行期状态（{@code TeDescriber} 的实现纪律明写「不猜 NBT」）。
      * 因此本字段在使用上与 {@code families[].state} 分开看待。
      */
-    private static JsonObject nbtOf(TileEntity te) {
+    private static JsonObject nbtOf(TileEntity te, int maxDepth, int maxEntries) {
         try {
             net.minecraft.nbt.NBTTagCompound tag = new net.minecraft.nbt.NBTTagCompound();
             te.writeToNBT(tag);
-            return ReadSupport.nbtSummary(tag);
+            return ReadSupport.nbtSummary(tag, maxDepth, maxEntries);
         } catch (Throwable t) {
             JsonObject err = new JsonObject();
             err.addProperty("error", String.valueOf(t));
