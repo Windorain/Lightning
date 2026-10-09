@@ -205,6 +205,27 @@ public class ReadSurfaceTest {
         assertNull(ReadSupport.nbtSummary(null));
     }
 
+    /**
+     * 🔴 数组**必须给值**（2026-10-09 实机教训）：1.7.10 的 NBTTagByteArray/NBTTagIntArray 的
+     * toString 是 "[6 bytes]" / "[3 ints]"——只有长度没有值，于是 EIO 的 conModes（byte[6] = 逐面 IO 模式）
+     * 读出来是一串无信息文本，调用方回落默认值、把"改过了"误判成"没改"。
+     */
+    @Test
+    public void nbtSummaryExposesArrayValues() {
+        net.minecraft.nbt.NBTTagCompound tag = new net.minecraft.nbt.NBTTagCompound();
+        tag.setByteArray("conModes", new byte[] { 1, 1, 2, 3 });
+        tag.setIntArray("externalConnections", new int[] { 4, 5 });
+        JsonObject v = ReadSupport.nbtSummary(tag, 4, 32).getAsJsonObject("value").getAsJsonObject("members");
+        JsonArray bytes = v.getAsJsonObject("conModes").getAsJsonArray("values");
+        JsonArray ints = v.getAsJsonObject("externalConnections").getAsJsonArray("values");
+        assertEquals(4, bytes.size());                 // byte 数组应逐元素给值
+        assertEquals(1, bytes.get(0).getAsInt());
+        assertEquals(3, bytes.get(3).getAsInt());
+        assertEquals(2, ints.size());                  // int 数组应逐元素给值
+        assertEquals(4, ints.get(0).getAsInt());
+        assertEquals(5, ints.get(1).getAsInt());
+    }
+
     // ------------------------------------------------------------ diff 种类
 
     /** 完全一致时报空 kinds。 */
@@ -337,6 +358,10 @@ public class ReadSurfaceTest {
         assertDefault(registry, ReadInventoryAction.NAME, "includeEmpty", Boolean.TRUE);
         assertDefault(registry, ReadInventoryAction.NAME, "nbtMaxEntries", Integer.valueOf(24));
         assertDefault(registry, ReadTeAction.NAME, "includeNbt", Boolean.TRUE);
+        // 读面完备性（2026-10-09 实机）：默认限深 3 时 EIO 的逐面状态（第 4 层）读不到 ⇒ 加了这两个参数；
+        // 自述里的默认值必须与 ReadSupport 的常量一致，否则「默认值」这层承诺就是假的
+        assertDefault(registry, ReadTeAction.NAME, "nbtDepth", Integer.valueOf(ReadSupport.NBT_MAX_DEPTH));
+        assertDefault(registry, ReadTeAction.NAME, "nbtMaxEntries", Integer.valueOf(ReadSupport.NBT_MAX_ENTRIES));
         assertDefault(registry, ReadBlockInfoAction.NAME, "meta", Integer.valueOf(0));
         assertDefault(registry, ReadDiffAction.NAME, "maxChanges", Integer.valueOf(4096));
         assertDefault(registry, ReadRunAction.NAME, "limit", Integer.valueOf(ReadRunAction.DEFAULT_LIMIT));

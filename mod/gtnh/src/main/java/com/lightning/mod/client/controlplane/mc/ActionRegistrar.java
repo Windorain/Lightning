@@ -38,6 +38,7 @@ import com.lightning.mod.client.controlplane.mc.read.ReadInventoryAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadOverviewAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadPlayerAction;
 import com.lightning.mod.client.controlplane.mc.read.ReadRunAction;
+import com.lightning.mod.client.controlplane.mc.read.ReadSupport;
 import com.lightning.mod.client.controlplane.mc.read.ReadTeAction;
 import com.lightning.mod.client.controlplane.mc.scene.EntityClearAction;
 import com.lightning.mod.client.controlplane.mc.scene.EntitySpawnAction;
@@ -1253,12 +1254,33 @@ public final class ActionRegistrar {
                     ActionDescriptor.TYPE_BOOL,
                     Boolean.TRUE,
                     "是否读 TE 的 NBT 摘要（writeToNBT 的受限摘要；仅供留痕，判据该断言族状态）")
+                .optional(
+                    "nbtDepth",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(ReadSupport.NBT_MAX_DEPTH),
+                    "NBT 摘要的**深度上限**（默认 " + ReadSupport.NBT_MAX_DEPTH
+                        + "，硬顶 "
+                        + ReadSupport.NBT_MAX_DEPTH_ALLOWED
+                        + "）。读面完备性参数：有些模组把状态放在第 4 层"
+                        + "（例：EIO 的 conduits[0].conduit.conModes/extRM.<DIR> 是逐面状态），"
+                        + "默认深度差一层读不到，调用方会被迫去猜；显式给 6~8 即可直接读到。"
+                        + "越界不报错、按硬顶夹取，并在返回的 nbt.maxDepth 里如实回显生效值")
+                .optional(
+                    "nbtMaxEntries",
+                    ActionDescriptor.TYPE_INT,
+                    Integer.valueOf(ReadSupport.NBT_MAX_ENTRIES),
+                    "每个复合/列表在摘要里的**成员上限**（默认 " + ReadSupport.NBT_MAX_ENTRIES
+                        + "，硬顶 "
+                        + ReadSupport.NBT_MAX_ENTRIES_ALLOWED
+                        + "）；生效值回显在 nbt.maxEntries")
                 .returns(
                     "{schema, action, count, familiesRegistered[], absentFamilies{族:缺席原因}, "
-                        + "tiles[{pos, tile{present,blockId,meta,class?,superclass?,blockMetadata?,nbt?}, "
+                        + "tiles[{pos, tile{present,blockId,meta,class?,superclass?,blockMetadata?,"
+                        + "nbt?{type,typeName,size,sha256,hashScope,maxDepth,maxEntries,value,truncated}}, "
                         + "claimedFamily, claimedState, families[{family,state,sha256?,note?}]}], pointerHint, readAt}")
                 .example("{\"at\":[65,12,64]}")
                 .example("{\"at\":[[65,12,64],[66,12,64]],\"includeNbt\":false}")
+                .example("{\"at\":[57,12,60],\"nbtDepth\":6}")
                 .since("1.3")
                 .build(),
             new ReadTeAction());
