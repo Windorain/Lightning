@@ -246,14 +246,52 @@ describe('P1 内核隔离：新内核不得依赖任何旧层（#1 负对照「�
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. 旧层不得反向依赖新内核（依赖方向无环）
+// 2. 旧层反向依赖新内核：**只允许已登记的迁移边**
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('依赖方向无环：旧层目前**尚未**反向依赖新内核（否则"新层已生效"是假的）', () => {
-  it('旧层文件里没有指向内核文件的导入（当前实况：0 条）', () => {
+/**
+ * 已登记的"旧层 → 新内核"迁移边（P4 首次出现）。
+ *
+ * ## 为什么必须显式登记，而不是把断言放宽
+ *
+ * 这条闸门存在的理由是「有人在用"新层"给旧路径续命」（文件头原文）。
+ * 但它同时挡不住另一件事：**合法的迁移**也需要旧文件 import 新层 ——
+ * 否则替代机制永远无法被消费。
+ *
+ * ⇒ 正确的处理不是"删断言"或"放宽为空"，而是把"哪一条旧→新依赖是**已批准**的"
+ * 变成显式事实。于是：
+ *  - 未登记的旧→新依赖仍然判红（闸门不放宽）；
+ *  - 已登记的每条都必须**真实存在**（登记本身不许腐烂成"曾经有过"）；
+ *  - 每条都要写明**理由与退出阶段**（供 P11 终局审计逐条核销）。
+ *
+ * 与 #250 R-WK-01 的关系：R-WK-01 要求"替代方提供替代接口与删除点清单"，
+ * 本表就是那些清单在**依赖方向**上的镜像 —— 谁开始消费新接口、什么时候退出。
+ */
+const APPROVED_LEGACY_TO_KERNEL_EDGES = [
+  Object.freeze({
+    from: 'src/workbench/ux/panels/MaterialGallery.vue',
+    to: 'domain/materials',
+    reason:
+      'P4 删除 useMaterialAnimation（每面板独立 RAF + elapsed 累积）后，材质缩略图的帧采样改吃统一时间纯采样器；这是 B5 #11 的替代机制首次被真实消费者使用（#252 的替代验收要求"被至少两个真实消费者证明"，此为业务侧消费者一例）',
+    exitStage:
+      'P6（工作台/编辑面板重写）把该面板迁到 editors/ 层时，此边随文件迁移自然消失；P11 终局审计应核销本行',
+  }),
+  Object.freeze({
+    from: 'src/application/commands.ts',
+    to: 'domain/animation',
+    reason:
+      '内核层内依赖（application → domain），非旧层依赖；列入此表仅为让"命令面到动画面"的接缝在架构清单里可见',
+    exitStage: 'P11 终局审计：此边属新层内部依赖，永久保留',
+    internalToKernel: true,
+  }),
+]
+
+describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {
+  it('旧层文件里指向内核的导入只允许出现在 APPROVED_LEGACY_TO_KERNEL_EDGES 里', () => {
     // 说明：旧层**将来**会迁到新层（上述归口批次），届时这条断言会随迁移一起改。
     // 现在它是"新内核已建成但尚未被旧代码反向依赖"的事实记录 ——
-    // 若有旧文件开始 import 内核，说明有人在用"新层"给旧路径续命，必须显式登记而非静默。
+    // 若有旧文件开始 import 内核，说明有人在用"新层"给旧路径续命 —— 必须出现在
+    // `APPROVED_LEGACY_TO_KERNEL_EDGES` 里（显式登记，不得静默）。
     //
     // ## 判定面是**文件级**：来源必须是**旧层**，不能是"不在 KERNEL_FILES 里的任何文件"
     //
@@ -269,6 +307,9 @@ describe('依赖方向无环：旧层目前**尚未**反向依赖新内核（否
     // 不是"用新层给旧路径续命"。故判定改为：**来源落在 OLD_LAYERS 才算旧**。
     const { facts } = loadGraph()
     const kernelNoExt = new Set(KERNEL_FILES.map((f) => f.replace(/\.(ts|tsx|mts|vue)$/, '')))
+    const approved = new Set(
+      APPROVED_LEGACY_TO_KERNEL_EDGES.filter((e) => e.internalToKernel !== true).map((e) => `${e.from}→${e.to}`),
+    )
     const reverse = []
     for (const f of facts) {
       const fromRel = path.relative(SRC_ROOT, f.fromFile).replace(/[\\/]+/g, '/')
@@ -277,10 +318,63 @@ describe('依赖方向无环：旧层目前**尚未**反向依赖新内核（否
       if (!isOldLayerTarget(fromRel.replace(/\.(ts|tsx|mts|vue)$/, ''))) continue
       const target = resolveTarget(f)
       if (target !== null && kernelNoExt.has(target)) {
-        reverse.push(`${f.fromRel}:${f.line}  → ${f.specifier}`)
+        const key = `src/${fromRel}→${target}`
+        if (approved.has(key)) continue
+        reverse.push(`${f.fromRel}:${f.line}  → ${f.specifier}（未登记的旧→新依赖）`)
       }
     }
-    expect(reverse, `旧层反向依赖内核（须登记为迁移，不得静默）:\n${reverse.join('\n')}`).toEqual([])
+    expect(
+      reverse,
+      `旧层反向依赖内核但未登记（须先登记理由与退出阶段，不得静默）:\n${reverse.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('每条已登记边都**真实存在**（登记不得腐烂）', () => {
+    const { facts } = loadGraph()
+    const kernelNoExt = new Set(KERNEL_FILES.map((f) => f.replace(/\.(ts|tsx|mts|vue)$/, '')))
+    const kernelInternal = new Set(APPROVED_LEGACY_TO_KERNEL_EDGES.filter((e) => e.internalToKernel === true).map((e) => e.to))
+    const present = new Set<string>()
+    for (const f of facts) {
+      const fromRel = path.relative(SRC_ROOT, f.fromFile).replace(/[\\/]+/g, '/')
+      const target = resolveTarget(f)
+      if (target === null) continue
+      if (!kernelNoExt.has(target)) continue
+      present.add(`src/${fromRel}→${target}`)
+      void kernelInternal
+    }
+    for (const e of APPROVED_LEGACY_TO_KERNEL_EDGES) {
+      if (e.internalToKernel === true) continue
+      expect(present, `登记的迁移边 ${e.from}→${e.to} 已不存在 —— 请同步核销登记（P11 审计依赖它的准确性）`).toContain(
+        `${e.from}→${e.to}`,
+      )
+      expect(e.reason.length, `${e.from}→${e.to} 必须写明理由`).toBeGreaterThan(20)
+      expect(e.exitStage, `${e.from}→${e.to} 必须写明退出阶段`).toMatch(/P\d+/)
+    }
+  })
+
+  it('**负对照**：未登记的旧→新依赖仍判红（闸门没有因为"有登记表"而失效）', () => {
+    // 合成一条未经登记的旧层文件 → 内核文件的导入，走**同一个**判定逻辑。
+    const kernelNoExt = new Set(KERNEL_FILES.map((f) => f.replace(/\.(ts|tsx|mts|vue)$/, '')))
+    const approved = new Set(
+      APPROVED_LEGACY_TO_KERNEL_EDGES.filter((e) => e.internalToKernel !== true).map((e) => `${e.from}→${e.to}`),
+    )
+    const injected = [
+      {
+        fromFile: path.join(SRC_ROOT, 'runtime', 'renderEngine.ts'),
+        fromRel: 'src/runtime/renderEngine.ts',
+        fromSrcRel: 'runtime/renderEngine.ts',
+        specifier: '@/application/evaluation',
+        kind: 'import',
+        isTypeOnly: false,
+        line: 1,
+        column: 1,
+        syntax: "import { evaluateScene } from '@/application/evaluation'",
+      },
+    ]
+    const hits = injected
+      .map((f) => ({ f, target: resolveTarget(f) }))
+      .filter(({ f, target }) => target !== null && kernelNoExt.has(target) && !approved.has(`src/${f.fromSrcRel}→${target}`))
+    expect(hits, '未登记的旧→新依赖必须判红').toHaveLength(1)
   })
 
   it('反空洞真 + 负对照：内核确实被**新层**依赖，而注入一条旧层导入会被抓到', () => {

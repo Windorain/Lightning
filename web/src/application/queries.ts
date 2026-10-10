@@ -25,6 +25,15 @@ import { err, ok, missingTarget, unsupportedOperation, type Result } from '@/dom
 import { samePropertyRef, type EntityRef, type PropertyRef, type Version } from '@/domain/identity'
 import { effectiveTransform, type EditContext, type SelectionState, type TimeValue } from '@/domain/editing'
 import { findObject, findObjectData, objectsInOrder, type ObjectData, type Scene, type SceneObject, type Transform } from '@/domain/scene'
+import {
+  authoredValue,
+  findTrack,
+  propertyKey,
+  resolveEffectiveValue,
+  sampleTrack,
+  type EffectiveValueLayer,
+  type TrackValue,
+} from '@/domain/animation'
 import type { Document } from '@/domain/document'
 import type { ApplicationState } from './state'
 import { localPropertyOf } from './contracts'
@@ -201,6 +210,14 @@ export function queryLease(state: ApplicationState, documentId: string): Result<
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 有效值查询（P4：把「有效值优先级」接到读面上）
+//
+// 机制与 `staged` 层由 P2 的 `EffectiveSources` 承载（`application/properties`）；
+// P4 负责供给另外两层：`preview`（编辑上下文手动预览值）与 `trackSampled`
+// （已启用轨道的时间采样）。**不存在第二套有效值实现** —— 见下方 `readProperty`。
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 属性查询 —— 描述与读取**全部来自 RNA 注册表**（#250 GF-5 收敛项 1/2）
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -267,12 +284,71 @@ export function readProperty(
   if (!doc) return err(missingTarget({ documentId: ctx.documentId }))
   const access = kernelAccessOf(doc, contextId, ALL_CAPABILITIES, true)
   if (mode === 'authored') return readRnaProperty(kernelPropertyRegistry().registry, ref, 'authored', access)
-  // 有效值：交互暂存是**唯一**的覆盖来源（P4 的轨道/预览层经 `effectiveSources` 扩展）。
-  const staged = ref.owner.kind === 'object' ? stagedValueOf(ctx, doc, ref) : undefined
-  return readRnaProperty(kernelPropertyRegistry().registry, ref, 'effective', access, staged === undefined ? {} : { staged })
+  // 有效值四层（#249 §7）：`authored`（RNA `readRaw`）→ `preview` → `trackSampled` → `staged`。
+  // P2 提供机制与 `staged` 层；**P4 提供 `preview` 与 `trackSampled`** 两层，
+  // 于是"读有效值"仍只有一处实现（不新增第二套优先级）。
+  const sources = effectiveSourcesOf(ctx, doc, ref)
+  return readRnaProperty(kernelPropertyRegistry().registry, ref, 'effective', access, sources)
 }
 
 /**
+
+/**
+ * **有效值来源的层供给**（P4 的接缝面，`#255`）。
+ *
+ * ## 为什么在这里而不是在 `properties.ts`
+ *
+ * `properties.ts` 是 RNA 的**机制**层（优先级与校验），它不该知道"轨道存在哪"；
+ * "轨道存在 `doc.animation`、通道手动值存在 `ctx.channelValues`"是本内核的
+ * **状态事实**，归本文件（读面接线）。于是机制与状态的边界与 P2 的
+ * `kernelAccessOf`（事实供给）同形。
+ *
+ * ## 只供给**有值**的层
+ *
+ * 可选字段缺省 = "该层没有值"。**不**用 `undefined` 显式占位后仍传键 ——
+ * `resolveEffectiveValue` 判的是 `sources.x !== undefined`，多传一个 `undefined`
+ * 与不传等价，但传 `null` 会被当作"有值且值为 null"（合法属性值），两者语义不同。
+ */
+function effectiveSourcesOf(ctx: EditContext, doc: Document, ref: PropertyRef): EffectiveSources {
+  const sources: { preview?: PropertyValue; trackSampled?: PropertyValue; staged?: PropertyValue } = {}
+
+  // ② 编辑上下文手动预览值（通道面；`EditContext.channelValues` 按通道键索引）
+  const channelKey = channelKeyOf(ref.property)
+  if (channelKey !== null && ctx.channelValues[channelKey] !== undefined) {
+    sources.preview = ctx.channelValues[channelKey]
+  }
+
+  // ③ 已启用轨道的时间采样（给定时间直接求值，无累积量）
+  const track = findTrack(doc.animation, ref)
+  if (track && track.enabled) {
+    const sampled = sampleTrack(track, ctx.time)
+    if (sampled.ok) sources.trackSampled = sampled.value.value as PropertyValue
+    // 采样失败（非法轨道）**不**吞掉：让 `authored` 层的结果如实返回，
+    // 而轨道数据本身的合法性由 `insertKeyframe` 在写入点保证。
+  }
+
+  // ④ 活动编辑操作的暂存覆盖
+  if (ref.owner.kind === 'object') {
+    const staged = stagedValueOf(ctx, doc, ref)
+    if (staged !== undefined) sources.staged = staged
+  }
+
+  return sources
+}
+
+/**
+ * 通道键提取：限定式属性 ID `<objectTypeId>.channel.<key>` 与未限定的 `channel.<key>`
+ * 都要认（前者是 RNA 限定式口径，后者是 `domain/multiblock#channelToPropertyRef` 的
+ * 内容拥有者口径 —— 多方块通道不是内核注册对象类型）。
+ */
+function channelKeyOf(property: string): string | null {
+  const marker = 'channel.'
+  const at = property.indexOf(marker)
+  if (at === -1) return null
+  // 只接受"开头"或"紧跟一个点"的形态，避免命中 `xchannel.y` 这类子串。
+  if (at !== 0 && property[at - 1] !== '.') return null
+  return property.slice(at + marker.length)
+}
  * 交互相对于该属性的暂存值（`mode === 'effective'` 的输入）。
  *
  * 暂存按**对象**记录（`interaction.overrides[objectId]` 是一整个 `Transform`），
@@ -362,6 +438,16 @@ export interface WorkspaceQueries {
 export interface InteractionQueries {
   readonly state: () => Result<InteractionQuery>
   readonly effectiveTransform: (objectId: string) => Result<Transform>
+  /**
+   * **有效属性值**（P4 增补）—— 四层优先级的唯一读面入口。
+   *
+   * 与 `effectiveTransform` 的关系：后者是"只要变换、只要暂存那两层"的窄查询
+   * （P1 为 A05 引入）；本方法覆盖完整优先级（含轨道采样与发布默认值）。
+   * 保留两个入口而不是合并成一个，是因为 `effectiveTransform` 的返回类型是
+   * `Transform`（整变换）而本方法按 `PropertyRef` 逐属性 ——
+   * 合并会让"取整变换"退化成多次属性查询，属于用接口美观换性能。
+   */
+  readonly effectiveProperty: (ref: PropertyRef) => Result<EffectivePropertyValue>
   readonly selection: () => Result<SelectionState>
   readonly context: () => Result<ContextSummary>
 }
@@ -423,6 +509,7 @@ export function captureReadView(state: ApplicationState, documentId: string, con
     interaction: Object.freeze({
       state: () => queryInteraction(state, contextId),
       effectiveTransform: (objectId: string) => queryEffectiveTransform(state, contextId, objectId),
+      effectiveProperty: (ref: PropertyRef) => queryEffectiveProperty(state, contextId, ref),
       selection: () => querySelection(state, contextId),
       context: () => queryContext(state, contextId),
     }),

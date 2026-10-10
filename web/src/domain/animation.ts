@@ -717,11 +717,21 @@ export type ParameterConstraint =
       readonly kind: 'custom'
       readonly id: string
       readonly keys: readonly string[]
-      readonly check: (candidate: Readonly<Record<string, number>>) => boolean
+      readonly check: (candidate: ParameterCandidate) => boolean
       readonly labelKey?: string
     }
 
-export type ParameterCandidate = Readonly<Record<string, number>>
+/**
+ * 候选参数值。
+ *
+ * 允许 `string` 的理由：枚举型参数（如"运行态 id"）的合法域是字符串。
+ * 只允许 `number` 会逼调用方为字符串枚举另造一套校验器 —— 那正是
+ * #249 §7 禁止的"另建专用"形态。数值通道的**取值**仍由
+ * `domain/multiblock` 的 `validateChannelValues` 收窄为 `number`
+ * （职责分层：通用参数校验 vs 通道取值校验）。
+ */
+export type ParameterValue = number | string
+export type ParameterCandidate = Readonly<Record<string, ParameterValue>>
 
 export interface ValidatedParameters {
   readonly values: ParameterCandidate
@@ -764,7 +774,7 @@ export function validateParameterSet(
     if (c.kind === 'range') {
       const v = candidate[c.key]
       if (v === undefined) continue
-      if (!Number.isFinite(v) || v < c.min || v > c.max) {
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < c.min || v > c.max) {
         return err(
           invalidValue({
             reason: 'parameterOutOfRange',
@@ -793,6 +803,12 @@ export function validateParameterSet(
       const a = candidate[c.a]
       const b = candidate[c.b]
       if (a === undefined || b === undefined) continue
+      // 耦合是**数值**关系；非数值参与耦合即声明/数据不匹配，显式拒绝而非静默跳过。
+      if (typeof a !== 'number' || typeof b !== 'number') {
+        return err(
+          invalidValue({ reason: 'parameterCouplingRequiresNumbers', constraint: id, a: c.a, b: c.b }),
+        )
+      }
       const holds =
         c.requires === 'ge' ? a >= b : c.requires === 'le' ? a <= b : a === b
       if (!holds) {

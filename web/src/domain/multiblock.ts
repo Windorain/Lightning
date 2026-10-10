@@ -40,6 +40,7 @@ import {
   validateParameterSet,
   type AnimationTrack,
   type EffectiveValueLayer,
+  type ParameterCandidate,
   type ParameterConstraint,
   type TimeValue,
   type TrackValue,
@@ -155,12 +156,12 @@ export function channelConstraints(set: ChannelSet): readonly ParameterConstrain
       if (d.kind === 'integer') {
         out.push(
           Object.freeze({
-            kind: 'custom',
+            kind: 'custom' as const,
             id: `integer:${ch.key}`,
             keys: Object.freeze([ch.key]),
-            check: (c: Readonly<Record<string, number>>) => {
+            check: (c: ParameterCandidate) => {
               const v = c[ch.key]
-              return v === undefined || Number.isInteger(v)
+              return v === undefined || (typeof v === 'number' && Number.isInteger(v))
             },
           }),
         )
@@ -170,10 +171,10 @@ export function channelConstraints(set: ChannelSet): readonly ParameterConstrain
     } else if (d.kind === 'boolean') {
       out.push(
         Object.freeze({
-          kind: 'custom',
+          kind: 'custom' as const,
           id: `boolean:${ch.key}`,
           keys: Object.freeze([ch.key]),
-          check: (c: Readonly<Record<string, number>>) => {
+          check: (c: ParameterCandidate) => {
             const v = c[ch.key]
             return v === undefined || v === 0 || v === 1
           },
@@ -201,9 +202,12 @@ export function validateChannelValues(
       return err(invalidValue({ reason: 'channelNotDeclared', channel: key, channelSet: set.id }))
     }
   }
-  const v = validateParameterSet(channelConstraints(set), provided)
+  // 通道取值统一是数值（#249 §3.3 的滑杆语义）；通用校验器接受 `number | string`
+  // 是为枚举型参数而设，通道面在这里收窄，职责分层不混。
+  const candidate: ParameterCandidate = provided
+  const v = validateParameterSet(channelConstraints(set), candidate)
   if (!v.ok) return v
-  return ok(v.value.values)
+  return ok(v.value.values as Readonly<Record<string, number>>)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -42,10 +42,8 @@ import {
 import {
   EvaluationInstance,
   identityForNode,
-  isPendingEvaluationRequest,
   nodesAffectedByResourceChange,
   sceneReadView,
-  type PendingEvaluationRequest,
 } from '@/runtime/evaluation'
 import { timeValue } from '@/domain/animation'
 import { propertyKey } from '@/domain/animation'

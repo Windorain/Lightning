@@ -583,10 +583,10 @@ describe('多通道耦合约束（#249 §7：对**完整候选参数集**纯校�
   it('自定义约束失败也是可诊断的 InvalidValue', () => {
     const custom: readonly ParameterConstraint[] = Object.freeze([
       Object.freeze({
-        kind: 'custom',
+        kind: 'custom' as const,
         id: 'sum-under-10',
         keys: Object.freeze(['a', 'b']),
-        check: (c: Readonly<Record<string, number>>) => (c.a ?? 0) + (c.b ?? 0) <= 10,
+        check: (c: Readonly<Record<string, number | string>>) => ((c.a as number) ?? 0) + ((c.b as number) ?? 0) <= 10,
       }),
     ])
     expect(validateParameterSet(custom, { a: 4, b: 5 }).ok).toBe(true)
