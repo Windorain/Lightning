@@ -30,7 +30,7 @@ import { parseContent } from '@/domain/textContent'
 /** 挂载一个真实 ContentText；可选地在其**上层** provide 报告口（模拟 HostProvider）。 */
 function mountContentText(
   props: Record<string, unknown>,
-  reporter?: (issues: readonly { code: string }[]) => void,
+  reporter?: (issues: readonly { code: string; tag?: string; attribute?: string }[]) => void,
 ): { el: HTMLElement; unmount: () => void } {
   const host = document.createElement('div')
   document.body.appendChild(host)
