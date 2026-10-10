@@ -45,4 +45,30 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  server: {
+    /**
+     * 让 dev server 的 watcher **不监视**非应用目录与原子写暂存目录。
+     *
+     * 存在理由（实测事故，2026-10-11 本单 B6 基线首跑 + 二跑）：在 e2e 运行期间
+     * 向 `web/` 写入文件（编辑源码、或写入 `web/tests/**`），vite 的 chokidar watcher
+     * 会去 watch 写入过程中的 `<name>.<pid>.<uuid>.tmpdir/<name>.tmp` 暂存条目，
+     * 在 Windows 上抛 `EBUSY: resource busy or locked, watch ...` —— 该错误**终止 vite 进程**，
+     * 于是同一次 e2e 运行的后半段全部 `net::ERR_CONNECTION_REFUSED` 假红
+     * （两次实测都因此各产生 8 条假红、4 条被掩盖的真红）。
+     *
+     * 哪些目录不监视：
+     *  - `tests/`、`test-results/`、`e2e/screenshots/`：不是应用源码，不由 dev server 提供、
+     *    不参与 HMR，监视它们只有风险没有收益；
+     *  - `**\/*.tmpdir\/**`：**任何**工具的原子写暂存目录（编辑器、DSH 文件工具、其它 agent）。
+     *    这条是通用的：谁在跑 e2e 时改了 `web/` 下的文件，都不该让服务崩掉。
+     */
+    watch: {
+      ignored: [
+        '**/tests/**',
+        '**/test-results/**',
+        '**/e2e/screenshots/**',
+        '**/*.tmpdir/**',
+      ],
+    },
+  },
 })
