@@ -40,7 +40,7 @@ import {
   WikiSaveAsOperator,
   CopyWikiEmbedOperator,
 } from '@/operators/builtin/wikiOperators'
-import { isWikiHostProfile } from '@/runtime/hostProfile'
+import { CAPABILITY } from '@/composition/modules'
 import { selectTool, moveTool } from '@/workbench/tools/toolDefs'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { boxTool, boxFullTool, BoxGizmo, AnnotationBoxCommitOperator, AnnotationBoxResetOperator } from '@/workbench/tools/boxTool'
@@ -90,13 +90,20 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   CopyWikiEmbedOperator,
 ]
 
+/**
+ * 把 SDE 相关 operator 的 `poll` 收窄到"本外壳**没有** Wiki 上传能力"时才可用。
+ *
+ * B5 #7：旧实现是 `if (isWikiHostProfile()) return false`（模块级宿主反查）。
+ * 现在问的是能力 —— SDE（外部 JAR 连接）与 Wiki 上传是两条互斥的文档来源，
+ * 这个互斥是**装配**的后果，不是"宿主叫什么"的后果。
+ */
 function disableOnWikiProfile(op: OperatorType): OperatorType {
   if (!op.poll) return op
   const origPoll = op.poll.bind(op)
   return {
     ...op,
     poll(ctx) {
-      if (isWikiHostProfile()) return false
+      if (ctx.hasCapability(CAPABILITY.WIKI_UPLOAD)) return false
       return origPoll(ctx)
     },
   }

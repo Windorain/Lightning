@@ -50,7 +50,14 @@ import { bumpTopology, elementRefOf, meshData, meshFromPayload } from '@/domain/
 // 夹具：打开一个含网格对象的内核文档（全程经公开命令，不手搓状态）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 打开文档并加一个网格对象；返回编辑器与网格对象 id。 */
+/**
+ * 打开文档并加一个网格对象；返回编辑器与网格对象 id。
+ *
+ * 变基合流（P6 × P3）：`meshSize` 由 `AddObjectCommand` 的具名字段
+ * 移入**开放参数通道** `params`（P6 的 A21 处置：核心不认识任何单类型字段名，
+ * 否则每加一个类型都要回来改命令类型 —— `annotationShape` 同批一并移入 `params.shape`）。
+ * 本处只改**实参拼写**，断言与语义一律不变。
+ */
 function openWithMesh(meshSize?: number): { e: Editor; oid: string } {
   const e = new Editor()
   e.submit({ kind: 'openDocument', documentId: 'doc-1', contextId: 'ctx-1' })
@@ -58,7 +65,7 @@ function openWithMesh(meshSize?: number): { e: Editor; oid: string } {
     kind: 'addObject',
     contextId: 'ctx-1',
     objectType: 'mesh',
-    ...(meshSize === undefined ? {} : { meshSize }),
+    ...(meshSize === undefined ? {} : { params: { meshSize } }),
   })
   e.drain()
   const oid = Object.keys(e.snapshot().docs['doc-1'].scene.objects)[0]
@@ -437,7 +444,7 @@ describe('`addObject` 网格面与能力裁剪', () => {
   it('网格尺寸非法 ⇒ 显式 InvalidValue.reason=badBoxSize（不压成"id 冲突"）', () => {
     const e = new Editor()
     e.submit({ kind: 'openDocument', documentId: 'doc-1', contextId: 'ctx-1' })
-    const ticket = e.submit({ kind: 'addObject', contextId: 'ctx-1', objectType: 'mesh', meshSize: -1 })
+    const ticket = e.submit({ kind: 'addObject', contextId: 'ctx-1', objectType: 'mesh', params: { meshSize: -1 } })
     e.drain()
     const outcome = e.settlement(ticket)
     expect(outcome?.status).toBe('rejected')

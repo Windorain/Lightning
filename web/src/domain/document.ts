@@ -54,7 +54,9 @@ import {
   sceneObject,
   objectData,
   withObject,
+  createObjectOfType,
   defaultObjectTypes,
+  type ObjectFactoryTable,
   type Scene,
   type ObjectTypeRegistry,
   type Transform,
@@ -500,6 +502,29 @@ export function addBlockObject(
   )
 }
 
+/**
+ * **造对象 + 放入场景**（经**执行输入的工厂表**；核心不为对象类型开 switch —— A21）。
+ *
+ * 这是 `application/commands.ts` 的 `addObject` 命令唯一的构造入口。
+ * 与上面三个 `add*Object` 的关系：那三个是**具体类型**的便捷构造
+ * （供测试与适配器直接使用，语义等价于 `DEFAULT_OBJECT_FACTORIES` 里各类型的工厂）；
+ * 本函数是**开放类型**的入口（新增类型只需注册工厂，不改这里）。
+ *
+ * `factories` 由调用方从 `ExecutionInputs.objectFactories` 取出 ——
+ * 工厂是**执行输入**（能力），不是文档状态（内容）。见 `domain/scene` 的
+ * `ObjectTypeDescriptor` 注释里对那次实测修正的说明。
+ */
+export function addObjectOfType(
+  scene: Scene,
+  factories: ObjectFactoryTable,
+  type: string,
+  init: { objectId: string; dataId: string; name?: string; params?: Readonly<Record<string, unknown>> },
+): Scene | null {
+  const built = createObjectOfType(factories, type, init)
+  if (built === null) return null
+  return withObject(scene, built.object, built.data)
+}
+
 /** 在场景里放一个注解框对象。 */
 export function addAnnotationObject(
   scene: Scene,
@@ -534,6 +559,16 @@ export function addCameraObject(
     ),
   )
 }
+
+export {
+  DEFAULT_OBJECT_FACTORIES,
+  createObjectOfType,
+  withObject,
+  type ObjectFactory,
+  type ObjectFactoryTable,
+  type ObjectCreateInit,
+  type ObjectCreation,
+} from './scene'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 网格对象（#254 P3）

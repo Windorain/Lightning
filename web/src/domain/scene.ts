@@ -33,7 +33,7 @@
  */
 
 import { digestOf, type EntityRef, type Version } from './identity'
-import { topologyVersionOf, type MeshPayload } from './geometry'
+import { topologyVersionOf, unitBoxMesh, type Deformation, type MeshPayload } from './geometry'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 数学值（#249 §19.2：右手、Y-up；保留仿射表达能力）
@@ -280,6 +280,23 @@ export function emptyScene(id: string): Scene {
  * 「内核不得依赖旧层」与分层公共出口约束）。`domain` 这里能做的只有"声明资格"，
  * 而"资格"本身已经由 RNA 描述承载得更完整（含单位、值域、采样钩子）——
  * 留一份查不到的清单只会成为第二个漂移源。
+ *
+ * ## 为什么这里**只有数据**，没有 `create`（P6 / #257）
+ *
+ * P6 第一次实现时把"造对象"的工厂函数（`create`）放进了本描述符。
+ * `pureDomain.test.ts` 立刻判红：`structuredClone(openDocumentState())` 抛
+ * `DataCloneError` —— 因为 `Document.types` 是**应用状态的一部分**，
+ * 而应用状态必须是**可克隆、可重放**的（A04「无需 DOM/GPU 重放」）。
+ * 把函数塞进状态会同时破坏三件事：
+ *   1. A04 的重放（记录无法序列化）；
+ *   2. A02 的纯性判据（"相同显式输入 ⇒ 相同结果"无法对状态做结构比较）；
+ *   3. #249 §2.1「`read` 不导出…文档实例字段」——函数是运行期句柄。
+ *
+ * ⇒ 本类型只描述**数据**（可序列化）；"怎么造一个该类型的对象"是
+ * **构造工厂**，属执行输入（见 `application/commands.ts` 的
+ * `ExecutionInputs.objectFactories`）——这正是 #249 §5.3 的规定：
+ * 「需要时间、身份分配、**能力**、随机种子时，作为输入或状态传入」。
+ * 工厂是"能力"，不是"内容"。
  */
 export interface ObjectTypeDescriptor {
   readonly type: ObjectTypeId
@@ -290,12 +307,49 @@ export interface ObjectTypeDescriptor {
 }
 
 /**
- * 内核三类对象的能力表。
+ * 内核对象类型的能力表。
  *
  * `editable` 只表达"该类型的载荷是否属内容编辑面"这一**类型级**事实；
  * **逐属性的**可写性由 RNA 的 `evaluateEditability` 按当前状态求值
  * （契约 §5.1：动态可编辑性，不是静态 readonly 开关）。
  */
+/** 造对象的显式输入（`params` 由各类型自己解释）。 */
+export interface ObjectCreateInit {
+  readonly objectId: string
+  readonly dataId: string
+  readonly name?: string
+  readonly params?: Readonly<Record<string, unknown>>
+}
+
+/** 造对象的结果（对象 + 它的数据）。 */
+export interface ObjectCreation {
+  readonly object: SceneObject
+  readonly data: ObjectData
+}
+
+/**
+ * 某个对象类型的**构造工厂**（执行输入；不进文档状态 —— 见 `ObjectTypeDescriptor` 注释）。
+ *
+ * ## 为什么返回 `Result<ObjectCreation> | null` 而**不是** `ObjectCreation | null`
+ *
+ * 两种"失败"必须区分（#249 §5「不能用默认值掩盖缺失」）：
+ *  - **`null`** = **本装配不认识这个类型**（表里没有该类型的工厂）
+ *    ⇒ 调用方报 `UnsupportedOperation`（能力缺失，不是输入有问题）；
+ *  - **`Result.err`** = 类型认识，但**本次构造失败**且原因**结构化**
+ *    ⇒ 调用方原样透出该错误。
+ *
+ * P6 变基合流时由 #254（P3）的真实需求补足：`mesh` 的构造会校验几何参数，
+ * 失败原因是**多种**的（`badBoxSize` / 尺寸非有限 / id 冲突），
+ * 而 `geometryCommand.test.ts` 明文断言「网格尺寸非法 ⇒ 显式
+ * `InvalidValue.reason=badBoxSize`（**不压成"id 冲突"**）」。
+ * 若工厂只返回 `null`，`badBoxSize` 会被压成 `UnsupportedOperation`，
+ * 该断言即判红 —— 也会丢掉"为什么失败"这一最有用的诊断。
+ */
+export type ObjectFactory = (init: ObjectCreateInit) => Result<ObjectCreation> | null
+
+/** 对象类型 id → 构造工厂。装配层按贡献装配它，经 `ExecutionInputs` 传入。 */
+export type ObjectFactoryTable = Readonly<Record<ObjectTypeId, ObjectFactory>>
+
 const DEFAULT_TYPES: readonly ObjectTypeDescriptor[] = Object.freeze([
   Object.freeze({ type: 'block', dataKind: 'blockGrid', editable: true }),
   Object.freeze({ type: 'annotation', dataKind: 'annotation', editable: true }),
@@ -319,12 +373,90 @@ const DEFAULT_TYPES: readonly ObjectTypeDescriptor[] = Object.freeze([
   Object.freeze({ type: 'mesh', dataKind: 'mesh', editable: true }),
 ])
 
+/**
+ * **内置对象类型的构造工厂**（装配层的默认集合）。
+ *
+ * 新增对象类型 = 在本表加一条（由贡献方提供），核心**不**为类型开 switch（A21）。
+ * 这些条目就是原先 `add*Object` 各分支的函数体的开放化形式。
+ *
+ * ## 变基合流（P6 × P3 #254）
+ *
+ * P3 交付 `mesh` 类型时，给 `AddObjectCommand` 加了 `'mesh'` 到**封闭联合**与一个
+ * `meshSize` 具名字段 —— 这恰好复现了 A21 要禁止的形态（每加一个类型都要回来改核心）。
+ * 合流采用 P6 已批准的开放通道：`objectType: string` + `params`，
+ * `meshSize` 移入 `params.meshSize`（与 `annotationShape` → `params.shape` 同一处置）。
+ */
+export const DEFAULT_OBJECT_FACTORIES: ObjectFactoryTable = Object.freeze({
+  block: (init) => {
+    const cells = (init.params?.cells ?? {}) as Readonly<Record<string, string>>
+    return ok({
+      object: sceneObject({ id: init.objectId, type: 'block', dataId: init.dataId, ...(init.name === undefined ? {} : { name: init.name }) }),
+      data: objectData(init.dataId, { kind: 'blockGrid', cells }, 'document'),
+    })
+  },
+  annotation: (init) => {
+    const shape = (init.params?.shape ?? 'box') as 'box' | 'point' | 'line' | 'text' | 'face'
+    const text = init.params?.text
+    const payload = typeof text === 'string' ? { kind: 'annotation' as const, shape, text } : { kind: 'annotation' as const, shape }
+    return ok({
+      object: sceneObject({ id: init.objectId, type: 'annotation', dataId: init.dataId, ...(init.name === undefined ? {} : { name: init.name }) }),
+      data: objectData(init.dataId, payload, 'document'),
+    })
+  },
+  camera: (init) => {
+    const projection = (init.params?.projection ?? 'perspective') as 'perspective' | 'orthographic'
+    const fov = typeof init.params?.fov === 'number' ? init.params.fov : 50
+    const clipStart = typeof init.params?.clipStart === 'number' ? init.params.clipStart : 0.1
+    const clipEnd = typeof init.params?.clipEnd === 'number' ? init.params.clipEnd : 1000
+    return ok({
+      object: sceneObject({ id: init.objectId, type: 'camera', dataId: init.dataId, ...(init.name === undefined ? {} : { name: init.name }) }),
+      data: objectData(init.dataId, { kind: 'camera', projection, fov, clipStart, clipEnd }, 'document'),
+    })
+  },
+  /**
+   * 逻辑网格（#254 P3）。
+   *
+   * 构造会**校验**几何参数，故必须透出结构化失败（见 `ObjectFactory` 注释）：
+   * `unitBoxMesh` 对非法尺寸返回 `InvalidValue.reason='badBoxSize'`，这里原样返回。
+   */
+  mesh: (init) => {
+    const size = typeof init.params?.meshSize === 'number' ? init.params.meshSize : 1
+    const deformation = init.params?.deformation as Deformation | undefined
+    const mesh = unitBoxMesh(init.dataId, size, deformation)
+    if (!mesh.ok) return mesh
+    return ok({
+      object: sceneObject({ id: init.objectId, type: 'mesh', dataId: init.dataId, ...(init.name === undefined ? {} : { name: init.name }) }),
+      data: objectData(init.dataId, { kind: 'mesh', mesh: mesh.value }, 'document'),
+    })
+  },
+})
+
 export type ObjectTypeRegistry = Readonly<Record<ObjectTypeId, ObjectTypeDescriptor>>
 
 export function defaultObjectTypes(): ObjectTypeRegistry {
   const out: Record<string, ObjectTypeDescriptor> = {}
   for (const d of DEFAULT_TYPES) out[d.type] = d
   return Object.freeze(out)
+}
+
+/**
+ * 用**执行输入里的构造工厂**造一个对象 + 数据
+ * （唯一入口；核心不为类型开 switch —— A21）。
+ *
+ * 返回 `null` 表示该类型没有工厂（= 本装配不认识它）。
+ * 返回 `Result.err` 表示类型认识但构造失败（原因结构化）。
+ * 政策（前者 ⇒ `UnsupportedOperation`、后者 ⇒ 原样透出）由调用方定，不在本函数。
+ *
+ * 注意该函数**不**把工厂存进任何状态 —— 工厂是输入，用完即弃。
+ */
+export function createObjectOfType(
+  factories: ObjectFactoryTable,
+  type: ObjectTypeId,
+  init: ObjectCreateInit,
+): Result<ObjectCreation> | null {
+  const factory = Object.prototype.hasOwnProperty.call(factories, type) ? factories[type] : undefined
+  if (typeof factory !== 'function') return null
+  return factory(init)
 }
 
 /**

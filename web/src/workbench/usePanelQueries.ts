@@ -2,7 +2,7 @@ import { computed, watch } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { ScreenRoot } from '@/runtime/screenRoot'
 import { SpaceType, RegionType } from '@/runtime/screenTypes'
-import { isWikiHostProfile } from '@/runtime/hostProfile'
+import { CAPABILITY } from '@/composition/modules'
 import { relayout } from '@/workbench/ux/layout'
 
 /**
@@ -42,7 +42,9 @@ export function usePanelQueries(ctx: Context, screen: ScreenRoot) {
   )
 
   const wikiMwReady = computed(() => {
-    if (!isWikiHostProfile()) return false
+    // B5 #7：旧实现是 `if (!isWikiHostProfile()) return false`。
+    // 现在问能力：只有装配了 Wiki 上传的外壳才有 Wiki 就绪状态。
+    if (!ctx.hasCapability(CAPABILITY.WIKI_UPLOAD)) return false
     return ctx.wm.chrome.wikiUi?.mwReady.value ?? false
   })
 

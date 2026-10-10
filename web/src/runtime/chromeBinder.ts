@@ -26,7 +26,7 @@ export function bindChromeDom(
   }
 
   const onKeydown = (e: KeyboardEvent): void => {
-    if (shouldSkipWorkbenchDocumentKeydown(e)) return
+    if (shouldSkipWorkbenchDocumentKeydown(e, ctx.pageKeyboard)) return
     if (isEditingTarget(e.target)) return
     ed.setActiveRegion(CHROME_REGION)
     ed.dispatch(e, { regionId: CHROME_REGION })

@@ -16,7 +16,8 @@ import { HostBase } from '@/runtime/host'
 import { REGION } from '@/runtime/regionIds'
 import { autoConnectSde } from '@/runtime/host/workbenchBoot'
 import { bootWikiWorkbench } from '@/runtime/host/wikiWorkbenchBoot'
-import { isWikiHostProfile, setHostProfile, type HostProfile } from '@/runtime/hostProfile'
+import { CAPABILITY } from '@/composition/modules'
+import type { ShellRuntime } from '@/composition/shell'
 import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 import {
   WORKBENCH_PANELS,
@@ -30,7 +31,15 @@ export interface WorkbenchHostDeps {
   editHistory: UndoManager
   toolRegistry: ToolRegistry
   tool: ToolSettings
-  profile?: HostProfile
+  /**
+   * 外壳运行实例（装配结果 + 宿主端口）。
+   *
+   * B5 #7：旧接口是 `profile?: HostProfile`，实现里 `setHostProfile(deps.profile)`
+   * 写一个**模块级全局**，之后 19 处消费点反查它。
+   * 现在传的是**装配结果本身** —— 能力从它派生、宿主端口从它取，
+   * 没有任何模块级可变状态。
+   */
+  shell: ShellRuntime
 }
 
 export interface WorkbenchHostResult {
@@ -38,6 +47,7 @@ export interface WorkbenchHostResult {
   ctx: Context
   screen: ScreenRoot
   services: WorkbenchServices
+  shell: ShellRuntime
 }
 
 export class WorkbenchHost extends HostBase {
@@ -60,7 +70,9 @@ export class WorkbenchHost extends HostBase {
   }
 
   async start(): Promise<void> {
-    if (isWikiHostProfile()) {
+    // B5 #7：旧实现是 `if (isWikiHostProfile()) { await bootWikiWorkbench(...); return }`。
+    // 现在按**能力**分流 —— "这个外壳有没有 Wiki 上传面"决定启动哪套引导。
+    if (this.ctx.hasCapability(CAPABILITY.WIKI_UPLOAD)) {
       await bootWikiWorkbench(this.ctx)
       return
     }
@@ -76,8 +88,7 @@ export class WorkbenchHost extends HostBase {
 }
 
 export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResult {
-  setHostProfile(deps.profile ?? 'desktop')
-  const { selection, editHistory, toolRegistry, tool } = deps
+  const { selection, editHistory, toolRegistry, tool, shell } = deps
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
   const wm = new WM(logCenter)
@@ -107,7 +118,8 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
     },
   }
 
-  const ctx = new Context(main, wm, logCenter, viewports, screen, services)
+  // 能力与宿主端口**显式**从装配结果传入 Context（旧实现经模块级全局反查）
+  const ctx = new Context(main, wm, logCenter, viewports, screen, services, shell.assembly.capabilities, shell.pageKeyboard)
   main.bindOperatorFacade(() => ctx)
 
   const host = new WorkbenchHost(main, ctx, wm, screen, services)
@@ -125,5 +137,5 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   selection.bindLog(ctx.log)
   editHistory.bindLog(ctx.log)
 
-  return { host, ctx, screen, services }
+  return { host, ctx, screen, services, shell }
 }

@@ -86,7 +86,7 @@ export function bindViewportDom(
 
   if (options?.documentKeydown !== false) {
     const onKeydown = (e: KeyboardEvent): void => {
-      if (shouldSkipWorkbenchDocumentKeydown(e)) return
+      if (shouldSkipWorkbenchDocumentKeydown(e, ctx.pageKeyboard)) return
       if (isEditingTarget(e.target)) return
       ed.dispatch(e, { regionId })
     }

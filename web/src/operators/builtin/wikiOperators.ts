@@ -2,7 +2,7 @@ import type { OperatorType } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import { buildEnvelopePackage } from '@/pure/envelope'
 import { isWikiApiAvailable, previewUploadPlan } from '@/wiki/mwApiAdapter'
-import { isWikiHostProfile } from '@/runtime/hostProfile'
+import { CAPABILITY } from '@/composition/modules'
 import {
   buildWikiEditSummaryDraft,
   hasWikiAuditableChanges,
@@ -20,8 +20,10 @@ export const WikiPickAndLoadOperator: OperatorType = {
   label: '从 Wiki 加载',
   description: '搜索并载入 Data:Structures 结构',
 
-  poll() {
-    return isWikiHostProfile() && isWikiApiAvailable()
+  poll(ctx) {
+    // B5 #7：旧实现是 `isWikiHostProfile() && ...`（模块级宿主反查）。
+    // 现在问的是**能力**：只有装配了 `wiki.upload` 的外壳才具备 Wiki 上传面。
+    return ctx.hasCapability(CAPABILITY.WIKI_UPLOAD) && isWikiApiAvailable()
   },
 
   invoke(ctx) {
@@ -35,7 +37,7 @@ export const WikiSaveConfirmOperator: OperatorType = {
   id: 'OPERATOR_WIKI_SAVE_CONFIRM',
   label: '保存到 Wiki（确认）',
   poll(ctx) {
-    if (!isWikiHostProfile()) return false
+    if (!ctx.hasCapability(CAPABILITY.WIKI_UPLOAD)) return false
     if (ctx.getDocumentBinding().value.sourceId !== 'wiki-data') return false
     const draft = buildWikiEditSummaryDraft(
       ctx.getDocumentBinding().value.saveBaseline,
@@ -73,7 +75,7 @@ export const WikiSaveAsOperator: OperatorType = {
   id: 'OPERATOR_WIKI_SAVE_AS',
   label: '另存为 Wiki 结构',
   poll(ctx) {
-    return isWikiHostProfile() && ctx.getDoc().value != null && isWikiApiAvailable()
+    return ctx.hasCapability(CAPABILITY.WIKI_UPLOAD) && ctx.getDoc().value != null && isWikiApiAvailable()
   },
 
   invoke(ctx) {

@@ -31,10 +31,6 @@
  */
 
 import {
-  addAnnotationObject,
-  addBlockObject,
-  addCameraObject,
-  addMeshObject,
   beginSave,
   completeSave,
   createDocument,
@@ -48,6 +44,9 @@ import {
   type SaveLedger,
   type SaveOutcome,
 } from '@/domain/document'
+// A21：对象构造入口直接取自 `domain/scene`（不经 `domain/document` 转出口 ——
+// 契约 §7.3 规则 1 禁 barrel；同层具名导入是常态）。
+import { DEFAULT_OBJECT_FACTORIES, createObjectOfType, withObject } from '@/domain/scene'
 import {
   acquireLease,
   beginInteraction,
@@ -156,11 +155,35 @@ export interface SetTransformCommand {
 export interface AddObjectCommand {
   readonly kind: 'addObject'
   readonly contextId: string
-  readonly objectType: 'block' | 'annotation' | 'camera' | 'mesh'
+  /**
+   * 对象类型 id（`ObjectTypeId` = `string`，**不是**封闭联合）。
+   *
+   * ## 为什么这里必须开放（P6 实测修正；变基合流时由 #254 的真实需求再次印证）
+   *
+   * P6 初版写的是 `'block' | 'annotation' | 'camera'` 三元联合。A21 的判据
+   * （「通过现有贡献接口新增类型，**而非改核心**」）把它抓了出来 ——
+   * 那个联合让"新增 `text` 类型"必须回来改**命令类型的定义**，
+   * 即核心仍需为每个新类型改动。
+   *
+   * **变基合流印证**：P3（#254）交付 `mesh` 时，正是回到这个联合里加了 `'mesh'`、
+   * 并加了一个 `meshSize` 具名字段 —— 同一形态的第二次出现。
+   * 合流采用开放通道：`meshSize` 移入 `params.meshSize`。
+   *
+   * 现在它是开放字符串，合法性由**类型描述表**在运行时判定
+   * （`domain/scene#typeDescriptor` + `createObjectOfType`）：
+   * 表里没有该类型 ⇒ `UnsupportedOperation`，而不是编译期封闭。
+   * 这正是 #249 §13 末段要求的："新增属性类型之外的普通对象类型"不得需要改核心。
+   */
+  readonly objectType: string
   readonly name?: string
-  readonly annotationShape?: 'box' | 'point' | 'line' | 'text' | 'face'
-  /** 网格尺寸（仅 `objectType: 'mesh'`；缺省 1 场景单位）。 */
-  readonly meshSize?: number
+  /**
+   * 类型特有的构造参数（**唯一**的开放通道）。
+   *
+   * 各类型自己的字段（注释形状 `shape`、网格尺寸 `meshSize`、相机投影…）
+   * 一律经这里传入，核心**不**认识任何单类型特有的字段名 ——
+   * 那会让"新增一个类型"变成"回来改命令类型"，即 A21 要禁止的形态。
+   */
+  readonly params?: Readonly<Record<string, unknown>>
 }
 
 export interface DeleteObjectCommand {
@@ -365,6 +388,21 @@ export interface ExecutionInputs {
    * —— 契约 §3.2 要求「必须可由**运行时**拒绝，不只靠 UI 隐藏按钮」（A15 负对照）。
    */
   readonly capabilities: readonly string[]
+  /**
+   * **对象类型构造工厂**（A21 的落点；#249 §5.3「需要…能力…时，作为输入或状态传入」）。
+   *
+   * ## 为什么它在输入里而不在 `Document`
+   *
+   * P6 首次实现把工厂放进了 `Document.types` 的描述符里，`pureDomain.test.ts`
+   * 立刻判红：`structuredClone(openDocumentState())` 抛 `DataCloneError`
+   * —— 应用状态必须可克隆、可重放（A04），而函数是运行期句柄。
+   * 契约 §2.1 也要求「`read` 不导出…文档实例字段」。
+   *
+   * ⇒ 工厂是**执行输入**（能力），不是**状态**（内容）。
+   * 缺省取内置三类（`DEFAULT_OBJECT_FACTORIES`），使 P1 的行为逐字不变；
+   * 装配层可以覆盖它来加载贡献的类型（见 `composition`）。
+   */
+  readonly objectFactories?: import('@/domain/scene').ObjectFactoryTable
   /** 该次执行的关联 id（供诊断，不参与语义）。 */
   readonly correlationId?: string
 }
@@ -381,7 +419,7 @@ export const ALL_CAPABILITIES: readonly string[] = Object.freeze([
 export const VIEWER_CAPABILITIES: readonly string[] = Object.freeze(['interaction.begin'])
 
 export function defaultExecutionInputs(capabilities: readonly string[] = ALL_CAPABILITIES): ExecutionInputs {
-  return Object.freeze({ capabilities })
+  return Object.freeze({ capabilities, objectFactories: DEFAULT_OBJECT_FACTORIES })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -480,7 +518,7 @@ export function reduceCommand(state: ApplicationState, command: Command, env: Ex
     case 'publishDefault':
       return reducePublishDefault(state, command)
     case 'addObject':
-      return reduceAddObject(state, command)
+      return reduceAddObject(state, command, env)
     case 'deleteObject':
       return reduceDeleteObject(state, command)
     case 'setTransform':
@@ -622,7 +660,7 @@ function reduceSetChannelValue(state: ApplicationState, cmd: SetChannelValueComm
 // 对象增删
 // ─────────────────────────────────────────────────────────────────────────────
 
-function reduceAddObject(state: ApplicationState, cmd: AddObjectCommand): Transition {
+function reduceAddObject(state: ApplicationState, cmd: AddObjectCommand, env: ExecutionInputs): Transition {
   const found = contextAndDoc(state, cmd.contextId)
   if (!found.ok) return rejected(state, found.error)
   const { ctx, doc } = found.value
@@ -633,36 +671,34 @@ function reduceAddObject(state: ApplicationState, cmd: AddObjectCommand): Transi
   const a2 = allocateId(a1.next, 'data')
   const ref = objectRef(a1.id, a2.next.counter)
   const scene = doc.scene
-  let nextScene: Scene | null
-  if (cmd.objectType === 'mesh') {
-    // 网格（#254 P3）：构造会校验几何参数，故失败原因是**多种**的
-    // （尺寸非法 / id 冲突），不压成同一个 `null`（#249 §5「不能用默认值掩盖缺失」）。
-    const made = addMeshObject(scene, {
-      objectId: a1.id,
-      dataId: a2.id,
-      ...(cmd.name === undefined ? {} : { name: cmd.name }),
-      ...(cmd.meshSize === undefined ? {} : { size: cmd.meshSize }),
-    })
-    if (!made.ok) return rejected(state, made.error)
-    nextScene = made.value
-  } else {
-    switch (cmd.objectType) {
-      case 'block':
-        nextScene = addBlockObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
-        break
-      case 'annotation':
-        nextScene = addAnnotationObject(scene, {
-          objectId: a1.id,
-          dataId: a2.id,
-          ...(cmd.name === undefined ? {} : { name: cmd.name }),
-          ...(cmd.annotationShape === undefined ? {} : { shape: cmd.annotationShape }),
-        })
-        break
-      case 'camera':
-        nextScene = addCameraObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
-        break
-    }
-  }
+  /**
+   * **唯一**的对象构造入口：经**执行输入**里的工厂表
+   * （`domain/scene#createObjectOfType`），核心**不**为对象类型开 switch
+   * （#249 §13 A21：「扩展验证要求通过现有贡献接口新增类型，而非改核心 switch」）。
+   *
+   * P6 实测修正两处：
+   *  1. 初版这里是 `switch (cmd.objectType)` 三分支；A21 判据抓出后改为查表；
+   *  2. 第二版把工厂塞进 `Document.types`，`pureDomain.test.ts` 抓到
+   *     `structuredClone` 抛错（状态必须可克隆 ⇒ 函数不能进状态），
+   *     故最终把它移到 `ExecutionInputs.objectFactories`（能力，不是内容）。
+   *
+   * 变基合流（× P3 #254）：P3 的 `mesh` 需要**结构化失败**
+   * （`badBoxSize` 与 id 冲突不可压成同一个结果），故工厂返回
+   * `Result<ObjectCreation> | null` —— `null` = 类型不认识、`err` = 构造失败。
+   */
+  const built = createObjectOfType(env.objectFactories ?? DEFAULT_OBJECT_FACTORIES, cmd.objectType, {
+    objectId: a1.id,
+    dataId: a2.id,
+    ...(cmd.name === undefined ? {} : { name: cmd.name }),
+    params: Object.freeze({ ...(cmd.params ?? {}) }),
+  })
+  // 没有该类型的工厂 ⇒ 本装配不认识它。这是 `UnsupportedOperation`（能力缺失），
+  // 不是 `InvalidValue`（输入本身没问题）—— 契约 §3.2 的触发条件表。
+  if (built === null) return rejected(state, unsupportedOperation({ objectType: cmd.objectType, kind: 'addObject' }))
+  // 类型认识但构造失败 ⇒ **原样透出结构化错误**（例如 `badBoxSize`），
+  // 不压成 `null`/`idCollision`（#249 §5「不能用默认值掩盖缺失」）。
+  if (!built.ok) return rejected(state, built.error)
+  const nextScene = withObject(scene, built.value.object, built.value.data)
   if (nextScene === null) return rejected(state, invalidValue({ reason: 'idCollision', objectId: a1.id }))
 
   const write = withScene(doc, nextScene)
