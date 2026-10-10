@@ -71,16 +71,18 @@ export const LAYER_DESTINATIONS = [
   {
     layer: 'runtime',
     legacySources: ['runtime'],
-    note: '**撞名**：旧 runtime/ 是求值+会话实现，新 runtime/ 是执行批次/调度/效果',
-    // 新实现的**显式**路径（P1 登记 execution/scheduling/effects，P4 追加 evaluation，P9 追加 exportJob）
+    note: '**撞名**：旧 runtime/ 是求值+会话实现，新 runtime/ 是执行批次/调度/效果/求值/生命周期/导出作业',
+    // 新实现的**显式**路径
+    // （P1 登记 execution/scheduling/effects；P4 追加 evaluation；P6 追加 lifecycle；P9 追加 exportJob）
     activeSubpaths: [
       'runtime/execution.ts',
       'runtime/scheduling.ts',
       'runtime/effects.ts',
       'runtime/evaluation.ts',
+      'runtime/lifecycle.ts',
       'runtime/exportJob.ts',
     ],
-    /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议是业务规则，不是呈现。 */
+    /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议、求值判定、资源记账与导出作业是业务规则，不是呈现。 */
     corePurity: true,
   },
   { layer: 'presentation', legacySources: ['render', 'shared'], note: '求值场景→渲染数据 → 现 render/' },

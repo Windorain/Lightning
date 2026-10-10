@@ -25,13 +25,25 @@
  * （账本上少了一笔，回收后自然为 0）。声明在注册表里使它可以被审查。
  */
 
-import type { Component } from 'vue'
 import type { EditorTypeId } from '@/domain/workspace'
 
-export interface EditorTypeRegistration<C extends Component = Component> {
+export interface EditorTypeRegistration {
   readonly editorType: EditorTypeId
-  /** 该类型的真实组件；`null` = 本装配里无实现（显示明确状态，不留空壳）。 */
-  readonly component: C | null
+  /**
+   * 该类型的真实组件。
+   *
+   * ## 注册时**不给**组件，由调用方注入（P6 实测修正）
+   *
+   * 初版让 `builtinEditors.ts` 直接 `import WorkbenchViewport from
+   * '@/workbench/components/WorkbenchViewport.vue'` —— 边界扫描立刻判红
+   * （`gate/no-private-cross-layer`：新层导入旧层深度 3 的实现）。
+   * 现在这里只声明"该类型需要什么样的组件"（`componentSlot`），
+   * 真组件由外壳在挂载时按 **region/类型 → 组件** 的映射给出。
+   *
+   * 于是 `editors/` 层**零依赖**旧 `workbench/`，而"类型 → 组件"的绑定
+   * 仍是装配的事（不是核心 `switch`）。
+   */
+  readonly componentSlot?: string
   /**
    * 挂载时必须 acquire 的资源种类。
    *
@@ -61,7 +73,6 @@ export class EditorTypeRegistry {
   get(editorType: EditorTypeId): EditorTypeRegistration | undefined {
     return this.byType.get(editorType)
   }
-
   /** 已注册的类型 id（稳定排序，供对账与诊断）。 */
   list(): readonly EditorTypeId[] {
     return Object.freeze([...this.byType.keys()].sort())
@@ -72,9 +83,9 @@ export class EditorTypeRegistry {
     return this.byType.get(editorType)?.resources ?? Object.freeze([])
   }
 
-  /** 该类型的组件（未注册时为 `null` ⇒ `AreaHost` 显示明确状态）。 */
-  componentOf(editorType: EditorTypeId): Component | null {
-    return this.byType.get(editorType)?.component ?? null
+  /** 该类型的组件槽位名（未注册时为 `null`）。调用方据此从**自己的**映射取组件。 */
+  componentSlotOf(editorType: EditorTypeId): string | null {
+    return this.byType.get(editorType)?.componentSlot ?? null
   }
 }
 

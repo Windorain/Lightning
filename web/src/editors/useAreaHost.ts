@@ -64,7 +64,6 @@ import {
 import type { DomainError } from '@/domain/errors'
 import { createLifecycleLedger, type LifecycleLedger } from '@/runtime/lifecycle'
 import { createEditorTypeRegistry, type EditorTypeRegistry } from './areaRegistry'
-
 /** 布局命令的结果（成功/失败都用同一种形状报告，便于 UI 显示结构化原因）。 */
 export interface LayoutCommandResult {
   readonly ok: boolean

@@ -560,16 +560,6 @@ export function addCameraObject(
   )
 }
 
-export {
-  DEFAULT_OBJECT_FACTORIES,
-  createObjectOfType,
-  withObject,
-  type ObjectFactory,
-  type ObjectFactoryTable,
-  type ObjectCreateInit,
-  type ObjectCreation,
-} from './scene'
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 网格对象（#254 P3）
 // ─────────────────────────────────────────────────────────────────────────────

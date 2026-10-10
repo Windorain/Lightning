@@ -6,21 +6,29 @@
  * | 文件 | 回答的问题 | 依赖 |
  * |---|---|---|
  * | `composition/profiles` | "本装配**采纳**了哪些编辑器类型"（能力 + 裁剪政策） | 只依赖 `composition/modules` |
- * | 本文件 | "编辑器类型 X 用**哪个组件**、持有哪些**资源**" | 依赖 Vue 组件 |
+ * | 本文件 | "编辑器类型 X 用**哪个组件**、持有哪些资源" | 由**调用方**注入组件 |
  *
- * 分开的理由：装配解析器**不得**依赖 Vue（契约 §7.1 规则 2）。
- * 若把组件塞进 `ModuleDecl`，解析器就会被拖进组件世界，
- * 那正是旧实现里"宿主开关与组件纠缠"的同构问题。
+ * ## 为什么这里**不 import 任何编辑器组件**（P6 实测修正）
  *
- * ## A21 的扩展在这里的样子
+ * 初版在本文件 `import WorkbenchViewport from '@/workbench/components/WorkbenchViewport.vue'`，
+ * 立刻被 `npm run test:arch` 的 `gate/no-private-cross-layer` 判红：
+ * `editors/builtinEditors.ts`（新实现）导入了 `workbench/components/WorkbenchViewport`
+ * （深度 3 > 公共出口 2）。那条判据是对的 —— 它抓住了"新层直接拽旧实现"这一形态，
+ * 而那正是 #171 禁止的。
  *
- * 新增一个编辑器类型 = 在本文件**多注册一条**（`editor.text` 在两处出现：
- * `composition/profiles` 的 `M_TEXT_EDITOR` 声明能力，本文件的 `register` 绑定组件）。
- * **不需要**改 `AreaHost.vue`、`useAreaHost.ts` 或解析器 —— 一条 `switch` 都没有。
+ * ⇒ 本文件只声明**类型的资源清单与元数据**；**组件由调用方注入**
+ * （`AreaHost` 的 `:is` 由外壳在挂载时给出）。于是：
+ *   - `editors/` 层不含对 `workbench/` 的引用（边界干净）；
+ *   - 旧组件仍在旧位置（`workbench/`）用着，直到出现真实的替代者
+ *     （#171：已替代路径同批退出；这里**尚未**替代，故旧位置不动）；
+ *   - 新层的能力（类型注册、资源显式声明、生命周期记账）**已经**生效 ——
+ *     这不是空接口，`AreaHost.vue` 与 `useAreaHost.ts` 是真实消费者。
+ *
+ * 这一处修正让"新层建成"与"旧实现退役"分离得干干净净：
+ * 前者是本批的交付，后者需要先有替代组件（归 #261 集成闭环）。
  */
 
 import { createEditorTypeRegistry, PRESENTATION_RESOURCES, VIEWPORT3D_RESOURCES } from './areaRegistry'
-import WorkbenchViewport from '@/workbench/components/WorkbenchViewport.vue'
 
 export const editorTypeRegistry = createEditorTypeRegistry()
 
@@ -32,27 +40,21 @@ export const editorTypeRegistry = createEditorTypeRegistry()
  */
 editorTypeRegistry.register({
   editorType: 'viewport3d',
-  component: WorkbenchViewport,
   resources: VIEWPORT3D_RESOURCES,
   requiresDocument: true,
 })
 
 /**
- * Inspector / 时间轴 / 通道：**只读呈现型**，由工作台面板承载。
+ * Inspector / 时间轴 / 通道：**只读呈现型**。
  *
- * `component: null` 是**如实**的：这三个类型在 P6 的接线里由
- * `WorkbenchRoot` 的属性面板与 `ViewportFrameLayerDock` 呈现，
- * 不是独立 Area 组件。注册它们仍必要 —— 因为"资源种类"必须显式
- * （`PRESENTATION_RESOURCES`），否则 A13 的资源对账会漏项。
- *
- * 它们的 `component` 由后续批次（#261 集成闭环）替换为真实组件；
- * **本批不留假组件**：`null` 让 `AreaHost` 显示"该落点在本装配中不可用"，
- * 而不是挂一个空接口冒充支持（#249 §13 明文）。
+ * 它们的组件由外壳提供（P6 的接线里由 `WorkbenchRoot` 的属性面板与
+ * `ViewportFrameLayerDock` 呈现，不是独立 Area 组件）。注册它们仍必要 ——
+ * 因为"资源种类"必须显式（`PRESENTATION_RESOURCES`），
+ * 否则 A13 的资源对账会漏项。
  */
 for (const editorType of ['inspector', 'timeline', 'channels'] as const) {
   editorTypeRegistry.register({
     editorType,
-    component: null,
     resources: PRESENTATION_RESOURCES,
     requiresDocument: false,
   })
@@ -61,15 +63,13 @@ for (const editorType of ['inspector', 'timeline', 'channels'] as const) {
 /**
  * A21 的扩展证明：文字类型的编辑器落点。
  *
- * 它复用 `inspector` 的呈现方式（本批不交付文字编辑器产品 ——
- * #249 §13：「文字类型可用契约夹具证明扩展，不要求本次完成文字编辑产品」），
- * 但它的**注册**证明了两件事：
+ * 本批不交付文字编辑器产品（#249 §13：「文字类型可用契约夹具证明扩展，
+ * 不要求本次完成文字编辑产品」），但它的**注册**证明两件事：
  *  1. 新增编辑器类型不改任何核心分支（没有 `switch`）；
  *  2. 新类型的资源种类必须显式声明（否则漏项）。
  */
 editorTypeRegistry.register({
   editorType: 'editor.text',
-  component: null,
   resources: PRESENTATION_RESOURCES,
   requiresDocument: true,
 })

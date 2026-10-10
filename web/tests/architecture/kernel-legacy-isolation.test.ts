@@ -37,16 +37,38 @@ import { describe, expect, it } from 'vitest'
 import { buildModuleGraph, WEB_ROOT, SRC_ROOT, extractImports } from './module-graph.mjs'
 
 /**
- * 新内核的文件清单，相对 `src/`。
+ * 新内核的文件清单（P1 交付；P3/P4/P6 陆续追加），相对 `src/`。
  *
  * 与 `boundary-rules.mjs` 的 `LAYER_DESTINATIONS.runtime.activeSubpaths` 同源 ——
  * 两处都列同一批文件是**故意**的：若哪天有人新增 `runtime/xxx.ts` 而忘了登记，
  * 本文件与扫描器会**同时**不覆盖它（而不是一处覆盖一处漏），
  * 由 `kernel-file-registry.test` 那条断言逼着两处一起改。
  *
+ * P3（#254）追加：`domain/geometry.ts`、`domain/geometryEditing.ts`、
+ * `domain/spatial.ts`、`domain/anchor.ts`、`domain/selection.ts`。
+ *
  * P4（#255）追加：`domain/animation.ts`、`domain/materials.ts`、`domain/multiblock.ts`
  * （domain 为整层迁移，故不需登记进 `activeSubpaths`，但必须在此被隔离闸门覆盖）、
  * `application/evaluation.ts`、`runtime/evaluation.ts`。
+ *
+ * ## P6（#257）追加的登记项
+ *
+ * - `domain/workspace.ts` —— Area 分割树/编辑器类型/固定目标/绑定的纯状态转移。
+ *   它与 `domain/` 其余文件同属**整层迁移**（`domain` 无 `activeSubpaths`），
+ *   故本表是它的**判据面**（整层迁移的层由目录本身表达执行面，
+ *   但内核隔离这条闸门需要显式清单才能判"它有没有偷用旧层"）。
+ * - `runtime/lifecycle.ts` —— 实例与归属资源的记账（P6 登记进 `activeSubpaths`）。
+ *
+ * P9（#260）追加：`runtime/exportJob.ts`（导出作业，登记进 `activeSubpaths`）
+ * 与 `adapters/**` 的格式/存储/宿主适配实现。`adapters/` 是 #249 §4 的目标分层之一，
+ * 其新实现同样必须被"内核不得依赖旧层"这条闸门覆盖（它们**不是**旧层，
+ * 但也不在旧层的"可以自由引用实现"之列）。
+ *
+ * `composition/` 与 `editors/` **不在本表**：它们不是"内核"（纯核心），
+ * 而是装配根与接线层 —— `composition` 的边界由 `GATE_RULES` 直接覆盖
+ * （它是整层新目录，无撞名），`editors` 属呈现侧（允许 Vue/DOM）。
+ * 把它们塞进本表会误用"内核不得依赖旧层"这条判据：
+ * `editors/` 按设计要与旧组件世界打交道（它**由外壳注入**组件，自己不 import）。
  */
 const KERNEL_FILES = [
   'domain/identity.ts',
@@ -64,6 +86,8 @@ const KERNEL_FILES = [
   'domain/animation.ts',
   'domain/materials.ts',
   'domain/multiblock.ts',
+  // P6（#257）工作区/Area
+  'domain/workspace.ts',
   'application/state.ts',
   'application/commands.ts',
   'application/queries.ts',
@@ -75,6 +99,7 @@ const KERNEL_FILES = [
   'runtime/scheduling.ts',
   'runtime/effects.ts',
   'runtime/evaluation.ts',
+  'runtime/lifecycle.ts',
   'runtime/exportJob.ts',
   // P9（#260）保存目标适配：写入串行化 + 远端条件版本（A16 适配器层）
   'adapters/saveTarget/coordinator.ts',
@@ -104,9 +129,22 @@ const KERNEL_FILES = [
  *
  * 判定用**前缀**匹配：`runtime` 会命中 `runtime/renderEngine.ts`，
  * 但**不会**命中 `runtime/execution.ts`（它在 `KERNEL_FILES` 里，见 `isOldLayerTarget`）。
+ *
+ * ## 为什么判据以"来源是否落在本表"为准，而不是"来源 ∉ `KERNEL_FILES`"（P2/GF-5 收敛）
+ *
+ * 「旧层反向依赖内核」的原意是：**旧**实现不得靠 import 新内核续命
+ * （#171「新门面包旧核心」的静态指纹）。
+ *
+ * 若按"来源 ∉ `KERNEL_FILES` ⇒ 旧"判定，那么**任何未登记进内核清单的新层实现**
+ * 都会被误判为旧层 —— P6 新建的 `composition/`（装配根，契约 §7 明文允许引用实现）
+ * 与 `editors/`（呈现侧接线）首跑即产生三条这类假红；
+ * P5 的 `presentation/**` 也踩过同一坑。
+ *
+ * ⇒ 判据统一为：**来源落在 `OLD_LAYERS` 才算旧**。这比"枚举新层豁免"
+ * 更稳：以后任何新层都不需要回来改这条判据（P6 初版就是枚举 `NEW_LAYERS`，
+ * 已随合流撤掉 —— 两套排除机制不该并存）。
  */
-const OLD_LAYERS = [
-  'pure',
+const OLD_LAYERS = [  'pure',
   'context',
   'operators',
   'handlers',
@@ -330,6 +368,10 @@ describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已�
     // 使 `presentation/compileScene.ts` 直接 import `@/domain/errors` ——
     // 这正是"类型单一来源"的应有结果（向下依赖，层深 2，符合公共出口约束），
     // 不是"用新层给旧路径续命"。故判定改为：**来源落在 OLD_LAYERS 才算旧**。
+    //
+    // P6 合流时同样受益：`composition/**`（装配根）与 `editors/**`（呈现侧接线）
+    // 引用内核是设计使然（契约 §7），落在本判据下**天然不算旧层**，
+    // 无需另立"新层豁免清单"（P6 初版的 `NEW_LAYERS` 已随合流删除）。
     const { facts } = loadGraph()
     const kernelNoExt = new Set(KERNEL_FILES.map((f) => f.replace(/\.(ts|tsx|mts|vue)$/, '')))
     const approved = new Set(
@@ -443,6 +485,17 @@ describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已�
       return t !== null && kernelNoExt.has(t)
     })
     expect(flagged, '旧层 import 内核必须判红').toHaveLength(1)
+  })
+
+  it('**反空洞真**：本判据确实在**执行面**上跑过（内核文件之间真有被 import 的目标）', () => {
+    // 上一条的"0 条"只有在"判据确实能命中内核文件"时才有意义。
+    // 这里从**内核文件自己**的方向验证：内核之间的导入会被 `kernelNoExt` 命中。
+    const { kernelImports } = loadGraph()
+    const kernelNoExt = new Set(KERNEL_FILES.map((f) => f.replace(/\.(ts|tsx|mts|vue)$/, '')))
+    const internalHits = kernelImports
+      .map((f) => resolveTarget(f))
+      .filter((t) => t !== null && kernelNoExt.has(t))
+    expect(internalHits.length, '内核文件之间必须有真实 import（否则上一条的 0 是空转）').toBeGreaterThan(5)
   })
 })
 

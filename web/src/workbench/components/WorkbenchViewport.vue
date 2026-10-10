@@ -201,6 +201,20 @@ function onDrop(e: DragEvent) {
 onMounted(() => {
   void drw.loadStructureAndResources()
 })
+/**
+ * 卸载：**顺序是语义的一部分**（B5 #10；A13「关闭后实例/监听/作业回基线」）。
+ *
+ *  1. `detachViewport(region)` —— 走 `host` 的登记表调 `attachViewport` 的 unbind，
+ *     它现在会 `ed.unregisterRegion(region)` + `ctx.viewports.reset(region)`
+ *     （P6 实测补：旧实现这两步都没有，卸载后槽位留着已 dispose 的句柄，
+ *      使经 `__vm__` 观测面的消费者读到**陈旧成功**）；
+ *  2. `_alive = false` —— 让迟到的 rAF 回调不再碰 overlay；
+ *  3. `unframeHook()` —— 摘掉逐帧钩子；
+ *  4. `drw.dispose()` —— 释放 GPU/DOM 资源（此时 DOM 仍有效，故必须在这之前）。
+ *
+ * 注意第 1 步必须在第 4 步**之前**：`reset` 只清槽位，真正的 dispose 归这里；
+ * 反过来做会让"槽位已清但资源没还"与"资源已还但槽位还在"两种状态各出现一次。
+ */
 onBeforeUnmount(() => {
   host.detachViewport(VIEWPORT_REGION_ID)
   _alive = false

@@ -48,7 +48,13 @@ const props = defineProps<{
   instanceId: string | null
   /** 该编辑器类型声明的资源种类（挂载时逐一 acquire）。 */
   resources: readonly string[]
-  /** 真实编辑器组件（由装配/注册表给出 —— 核心不为类型开 switch）。 */
+  /**
+   * 真实编辑器组件。
+   *
+   * **由调用方（外壳）注入**，不是 `editors/` 层去 import：
+   * 本层不得依赖旧 `workbench/` 实现（`gate/no-private-cross-layer` 判据），
+   * 而"类型 → 组件"的绑定本属装配，不属核心。`null` = 本装配没有它的实现。
+   */
   editor: Component | null
   /** 账本（由父层持有；本组件只写它的新值）。 */
   ledger: LifecycleLedger
