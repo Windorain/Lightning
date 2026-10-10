@@ -331,7 +331,7 @@ function passthrough(children: readonly ContentNode[]): ContentNode {
 }
 
 /** 把一个收束的帧变成节点；`link` 未通过协议审计 ⇒ 退化为纯文本容器。 */
-function buildNode(f: Frame, state: ParseState): ContentNode | null {
+function buildNode(f: Frame): ContentNode | null {
   const kids = mergeText(f.children)
   switch (f.kind) {
     case 'strong': case 'em': case 'del': case 'underline': case 'code':
@@ -412,7 +412,7 @@ function parseMarkup(input: string, state: ParseState): ContentNode[] {
   const closeTo = (index: number): void => {
     while (stack.length - 1 >= index) {
       const f = stack.pop()!
-      const built = buildNode(f, state)
+      const built = buildNode(f)
       if (built && stack.length > 0) stack[stack.length - 1]!.children.push(built)
     }
   }
@@ -503,7 +503,7 @@ function parseMarkup(input: string, state: ParseState): ContentNode[] {
 
     if (tag.selfClosing) {
       const f = stack.pop()!
-      const built = buildNode(f, state)
+      const built = buildNode(f)
       if (built) top().children.push(built)
     }
   }

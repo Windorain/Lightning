@@ -235,7 +235,7 @@ describe('A32 负对照：未处理字符串直传 innerHTML/v-html 必须判红
         } else if (n.type === 'list') {
           const l = document.createElement(n.ordered ? 'ol' : 'ul')
           host.appendChild(l)
-          n.items.forEach((item) => { const li = document.createElement('li'); l.appendChild(li) })
+          n.items.forEach(() => { const li = document.createElement('li'); l.appendChild(li) })
         } else {
           const el = document.createElement(n.type === 'color' ? 'span' : n.type === 'underline' ? 'u' : n.type)
           host.appendChild(el)

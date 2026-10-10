@@ -201,6 +201,40 @@ export interface DiagnosticRecorder extends DiagnosticsReadView {
 }
 
 /**
+ * 把记录器收窄成**运行期真的只读**的读面（#259 A35 J1）。
+ *
+ * ## 为什么不能只靠 TypeScript 的类型标注
+ *
+ * `Context.getDiagnostics(): DiagnosticsReadView` 的标注会让**编译器**拒绝
+ * `ctx.getDiagnostics().record(...)`，但运行期返回的仍是同一个
+ * `DiagnosticRecorder` 对象 —— 属性还在，`typeof d.record === 'function'` 为真。
+ * 于是任何 `as any` / JS 调用方（含 e2e 的 `page.evaluate`、宿主页面脚本）
+ * 都能顺手写诊断。而 #249 §19.9 的原话是「**诊断接口本身无写权限**」——
+ * 那是一条**运行期**性质，不是类型标注性质。
+ *
+ * 本批 e2e（真实浏览器）正是靠"断言运行期形态"抓出了这个差距：
+ * `诊断接口只读：返回对象上无 record/clear 等写方法` 一度判红。
+ *
+ * ## 实现
+ *
+ * 返回一个**新对象**，只搬运查询方法，完全不携带 `record`。
+ * `capacity`/`totalRecorded` 用 getter 转发 ⇒ 读面是**活视图**
+ * （后续写入仍可见），不是快照拷贝。
+ */
+export function asReadOnlyDiagnostics(recorder: DiagnosticRecorder): DiagnosticsReadView {
+  return Object.freeze({
+    get capacity() { return recorder.capacity },
+    get totalRecorded() { return recorder.totalRecorded },
+    size: () => recorder.size(),
+    all: () => recorder.all(),
+    byChannel: (channel: DiagnosticChannel) => recorder.byChannel(channel),
+    byCode: (code: DiagnosticReasonCode) => recorder.byCode(code),
+    byCorrelation: (correlation: DiagnosticCorrelation) => recorder.byCorrelation(correlation),
+    snapshot: () => recorder.snapshot(),
+  })
+}
+
+/**
  * 创建有界诊断记录器。
  *
  * 环形缓冲语义：写满后新记录覆盖最旧记录；`totalRecorded` 持续增长（用于证明

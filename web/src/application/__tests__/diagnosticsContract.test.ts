@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest'
 import {
   PARAM_VALUE_MAX,
   REDACTED,
+  asReadOnlyDiagnostics,
   createDiagnosticRecorder,
   diagnosticReasonKey,
   formatDiagnosticRecord,
@@ -292,6 +293,38 @@ describe('A35 生产最小信息：不记录凭据或完整文档', () => {
 })
 
 describe('A35 只读读面：诊断接口本身无写权限（J1）', () => {
+  it('`asReadOnlyDiagnostics` 在**运行期**真的没有 record（不只是类型标注）', () => {
+    const clock = fixedClock()
+    const rec = createDiagnosticRecorder({ capacity: 4, now: clock.now })
+    rec.record({ channel: 'command', code: 'command.received', params: {}, correlation: {} })
+
+    const ro = asReadOnlyDiagnostics(rec)
+    // 关键：类型标注会骗人，`in` / `typeof` 不会
+    expect('record' in ro).toBe(false)
+    expect((ro as unknown as Record<string, unknown>).record).toBeUndefined()
+    expect(typeof ro.size).toBe('function')
+    expect(ro.size()).toBe(1)
+
+    // 活的只读视图：后续写入（经内部记录器）仍可被读面看到
+    rec.record({ channel: 'command', code: 'command.applied', params: {}, correlation: {} })
+    expect(ro.size()).toBe(2)
+    expect(ro.totalRecorded).toBe(2)
+
+    // 冻结：调用方无法给自己的读面加写方法
+    expect(Object.isFrozen(ro)).toBe(true)
+  })
+
+  it('读面与记录器是**两个对象**（读面不泄漏内部记录器引用）', () => {
+    const clock = fixedClock()
+    const rec = createDiagnosticRecorder({ capacity: 4, now: clock.now })
+    const ro = asReadOnlyDiagnostics(rec)
+    expect(ro).not.toBe(rec as unknown)
+    // 读面上任何属性都不指向记录器本身
+    for (const v of Object.values(ro as unknown as Record<string, unknown>)) {
+      expect(v).not.toBe(rec as unknown)
+    }
+  })
+
   it('读面类型上不存在写方法（add/record/clear 均不在读面上）', () => {
     const clock = fixedClock()
     const rec = createDiagnosticRecorder({ capacity: 4, now: clock.now })

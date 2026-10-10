@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import type { Tool } from '@/workbench/tools/tool'
 import { useToolRegistry } from '@/workbench/tools/registry'
 import TrustedIcon from '@/editors/TrustedIcon.vue'
-import { trustedIcon, type TrustedIconKey, type TrustedIconState } from '@/domain/trustedIcon'
+import { trustedIcon, type TrustedIconKey } from '@/domain/trustedIcon'
 
 /**
  * 工具 → 可信图标键。
