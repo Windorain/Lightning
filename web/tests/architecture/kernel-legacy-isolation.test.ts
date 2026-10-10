@@ -332,7 +332,6 @@ describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已�
   it('每条已登记边都**真实存在**（登记不得腐烂）', () => {
     const { facts } = loadGraph()
     const kernelNoExt = new Set(KERNEL_FILES.map((f) => f.replace(/\.(ts|tsx|mts|vue)$/, '')))
-    const kernelInternal = new Set(APPROVED_LEGACY_TO_KERNEL_EDGES.filter((e) => e.internalToKernel === true).map((e) => e.to))
     const present = new Set<string>()
     for (const f of facts) {
       const fromRel = path.relative(SRC_ROOT, f.fromFile).replace(/[\\/]+/g, '/')
@@ -340,10 +339,16 @@ describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已�
       if (target === null) continue
       if (!kernelNoExt.has(target)) continue
       present.add(`src/${fromRel}→${target}`)
-      void kernelInternal
     }
     for (const e of APPROVED_LEGACY_TO_KERNEL_EDGES) {
-      if (e.internalToKernel === true) continue
+      if (e.internalToKernel === true) {
+        // 内核内部依赖：断言它**是**新层内部（from 也是内核文件），
+        // 否则这条登记会把一条真实的旧→新依赖伪装成"内部边"。
+        expect(KERNEL_FILES, `${e.from}→${e.to} 标为内核内部边，但其发起方不在内核文件表内`).toContain(
+          e.from.replace(/^src\//, ''),
+        )
+        continue
+      }
       expect(present, `登记的迁移边 ${e.from}→${e.to} 已不存在 —— 请同步核销登记（P11 审计依赖它的准确性）`).toContain(
         `${e.from}→${e.to}`,
       )
