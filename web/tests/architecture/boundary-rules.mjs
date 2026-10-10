@@ -320,24 +320,160 @@ export const GATE_RULES = [
 /**
  * #249 §15 十三条退役矩阵的**批次归属**。
  *
- * 键 = 退役条目的稳定 slug；值 = 负责批次（对应执行单）与退出阶段。
- * 与 `docs/retirement-matrix` 附件、Gitea #251 B5 附件同源 —— 三处必须一致，
- * 改动必须同 PR 改（否则又是"规则只存在于评论里 ≈ 不存在"）。
+ * 键 = 退役条目的稳定 slug；`entries` = 该 slug 覆盖的 §15 行号（1–13）；
+ * `owners` = 负责批次列表（每条含 `p` / `issue` / 职责面 `scope`）。
+ *
+ * ## P 编号 ↔ issue 号的权威对应（**不得凭记忆写**）
+ *
+ * #250「执行单与依赖」表 + 各执行单标题共同确定：**`P<N> = #(251+N)`**。
+ * 实测（2026-10-11 经 Gitea API 逐单核对标题）：
+ *
+ * | P | issue | 职责 |
+ * |---|---|---|
+ * | P0 | #251 | 基线盘点、契约冻结、边界设施 |
+ * | P1 | #252 | 文档状态域与统一执行协议 |
+ * | P2 | #253 | RNA：属性描述、寻址与受控命令读面 |
+ * | P3 | #254 | 几何、坐标关系与固定拓扑形变 |
+ * | P4 | #255 | 统一动画求值、依赖图与纹理序列 |
+ * | P5 | #256 | 呈现编译、GPU 合批与资源生命周期 |
+ * | P6 | #257 | **工作区、Area 生命周期与模块装配** |
+ * | P7 | #258 | **输入路由、焦点与文本草稿** |
+ * | P8 | #259 | 内容边界、实例配置隔离与结构化诊断 |
+ * | P9 | #260 | 持久化、固定快照导出与恢复 |
+ * | P10 | #261 | 集成闭环与交叉验收 |
+ * | P11 | #262 | 退役审计、全量回归、性能门槛与复杂度对账 |
+ *
+ * **本映射由 `boundary-scan.test.ts` 逐条断言 `P<N>` 与 `#(251+N)` 一致**：
+ * 初版曾把若干条写错（#7/#10 误记 P7/#258；#12 的两个面互换；#13 误记 P10/#260），
+ * 属"凭记忆填编号"的错位。加断言后该类错误无法再通过测试（这正是 #249 §14
+ * 「负对照必须证明确实破坏了目标保证」在**文档对账**上的同类应用）。
+ *
+ * 文档侧同源副本见 #251 B5 附件；两者互为镜像，改动必须同批双改。
  */
 export const RETIREMENT_OWNERS = {
-  'raw-authority-object': { batch: 'P1 (#252)', exitStage: 'P1 交付同批', role: 'P1 执行者' },
-  'runtime-document-triple-duty': { batch: 'P4 (#255)', exitStage: 'P4 交付同批', role: 'P4 执行者' },
-  'ui-proxy-dispatch': { batch: 'P2 (#253)', exitStage: 'P2 交付同批', role: 'P2 执行者' },
-  'per-viewport-staging': { batch: 'P1 (#252)', exitStage: 'P1 交付同批', role: 'P1 执行者' },
-  'manual-refresh-chain': { batch: 'P5 (#256)', exitStage: 'P5 交付同批', role: 'P5 执行者' },
-  'multi-raf-business': { batch: 'P1 (#252)', exitStage: 'P1 交付同批', role: 'P1 执行者' },
-  'workbench-embed-fork': { batch: 'P7 (#258)', exitStage: 'P7 交付同批', role: 'P7 执行者' },
-  'frame-sequence-as-animation': { batch: 'P4 (#255)', exitStage: 'P4 交付同批', role: 'P4 执行者' },
-  'grid-coord-as-identity': { batch: 'P3 (#254)', exitStage: 'P3 交付同批', role: 'P3 执行者' },
-  'component-mount-lifetime': { batch: 'P8 (#259)', exitStage: 'P8 交付同批', role: 'P8 执行者' },
-  'material-viewport-tick': { batch: 'P4 (#255)', exitStage: 'P4 交付同批', role: 'P4 执行者' },
-  'scattered-text-and-global-lang': { batch: 'P9 (#260)', exitStage: 'P9 交付同批', role: 'P9 执行者' },
-  'exporter-borrows-live-viewport': { batch: 'P10 (#261)', exitStage: 'P10 交付同批', role: 'P10 执行者' },
+  'raw-authority-object': {
+    entries: [1],
+    owners: [{ p: 'P1', issue: 252, duty: '文档状态域与统一执行协议', scope: '只读查询能力 + 命令客户端' }],
+    exitStage: 'P1 交付同批',
+    role: 'P1 执行者',
+  },
+  'runtime-document-triple-duty': {
+    entries: [2],
+    owners: [
+      { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '求值面（类型化文档 + 求值场景）' },
+      { p: 'P9', issue: 260, duty: '持久化、固定快照导出与恢复', scope: '文件面（文件适配、持久化）' },
+    ],
+    exitStage: 'P9 交付同批（求值面 P4 分离，文件面 P9 收口）',
+    role: 'P4 执行者（求值与文档解耦）；P9 执行者（文件适配收口）',
+  },
+  'ui-proxy-dispatch': {
+    entries: [3],
+    owners: [{ p: 'P2', issue: 253, duty: 'RNA：属性描述、寻址与受控命令读面', scope: 'RNA 引用 + 受控纯属性命令' }],
+    exitStage: 'P2 交付同批',
+    role: 'P2 执行者',
+  },
+  'per-viewport-staging': {
+    entries: [4],
+    owners: [{ p: 'P1', issue: 252, duty: '文档状态域与统一执行协议', scope: 'EditContext 与有效读面' }],
+    exitStage: 'P1 交付同批',
+    role: 'P1 执行者',
+  },
+  'manual-refresh-chain': {
+    entries: [5],
+    owners: [{ p: 'P5', issue: 256, duty: '呈现编译、GPU 合批与资源生命周期', scope: '依赖图自动失效' }],
+    exitStage: 'P5 交付同批',
+    role: 'P5 执行者',
+  },
+  'multi-raf-business': {
+    entries: [6],
+    owners: [
+      { p: 'P1', issue: 252, duty: '文档状态域与统一执行协议', scope: '业务推进收敛到统一执行协议' },
+      { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '材质独立 RAF 播放循环并入统一时间' },
+    ],
+    exitStage: 'P1 交付同批（材质 RAF 由 P4 收口）',
+    role: 'P1 执行者（业务 RAF）；P4 执行者（useMaterialAnimation 独立循环）',
+  },
+  'workbench-embed-fork': {
+    entries: [7],
+    owners: [{ p: 'P6', issue: 257, duty: '工作区、Area 生命周期与模块装配', scope: '公共功能模块 + profile + 外壳' }],
+    exitStage: 'P6 交付同批',
+    role: 'P6 执行者',
+  },
+  'frame-sequence-as-animation': {
+    entries: [8],
+    owners: [{ p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '场景 + 通用动画轨道' }],
+    exitStage: 'P4 交付同批',
+    role: 'P4 执行者',
+  },
+  'grid-coord-as-identity': {
+    entries: [9],
+    owners: [{ p: 'P3', issue: 254, duty: '几何、坐标关系与固定拓扑形变', scope: '对象/元素引用与来源映射' }],
+    exitStage: 'P3 交付同批',
+    role: 'P3 执行者',
+  },
+  'component-mount-lifetime': {
+    entries: [10],
+    owners: [
+      { p: 'P6', issue: 257, duty: '工作区、Area 生命周期与模块装配', scope: 'Area/EditorInstance 生命周期（A13 为其验收）' },
+      { p: 'P8', issue: 259, duty: '内容边界、实例配置隔离与结构化诊断', scope: '挂载期全局写入属实例配置隔离' },
+    ],
+    // 主责归 P6：A13（分割/切换/关闭/恢复 100 次、状态不靠隐藏组件存活）是 P6 的验收。
+    // P8 副责仅覆盖 shellSettings.setLang 这类"挂载期写全局配置"，故不作为退出阶段。
+    exitStage: 'P6 交付同批（实例配置面由 P8 收口）',
+    role: 'P6 执行者（生命周期主责）；P8 执行者（实例配置面）',
+  },
+  'material-viewport-tick': {
+    entries: [11],
+    owners: [{ p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '统一时间绑定与纹理序列纯采样' }],
+    exitStage: 'P4 交付同批',
+    role: 'P4 执行者',
+  },
+  'scattered-text-and-global-lang': {
+    entries: [12],
+    owners: [
+      { p: 'P8', issue: 259, duty: '内容边界、实例配置隔离与结构化诊断', scope: '公共文本边界与实例配置隔离' },
+      { p: 'P7', issue: 258, duty: '输入路由、焦点与文本草稿', scope: '纯输入路由' },
+    ],
+    exitStage: 'P8 交付同批（输入路由面由 P7 收口）',
+    role: 'P8 执行者（文本/配置）；P7 执行者（输入路由）',
+  },
+  'exporter-borrows-live-viewport': {
+    entries: [13],
+    owners: [{ p: 'P9', issue: 260, duty: '持久化、固定快照导出与恢复', scope: '固定快照导出作业、共同求值与呈现' }],
+    exitStage: 'P9 交付同批',
+    role: 'P9 执行者',
+  },
+}
+
+/** `P<N> = #(251+N)` —— 权威映射公式（#250 表格 + 各执行单标题）。 */
+export const P_TO_ISSUE_OFFSET = 251
+
+/**
+ * 权威**职责名**表（逐字取自 #250「执行单与依赖」表 / 各执行单标题）。
+ *
+ * 为什么必须把职责名也编码进来：P↔issue 的**算术**一致并不能发现"职责写错批"。
+ * 初版的 #7（工作台/嵌入分叉）写作 `P7 (#258)` —— 算术上 P7=#258 成立，
+ * 但 P7 的职责是**输入路由**而非 Area 生命周期，属"P 与 issue 配对正确、职责张冠李戴"。
+ * 只有把"哪个 P 负责什么"也变成断言对象，这类错位才能被测出来。
+ */
+export const P_DUTIES = {
+  P1: '文档状态域与统一执行协议',
+  P2: 'RNA：属性描述、寻址与受控命令读面',
+  P3: '几何、坐标关系与固定拓扑形变',
+  P4: '统一动画求值、依赖图与纹理序列',
+  P5: '呈现编译、GPU 合批与资源生命周期',
+  P6: '工作区、Area 生命周期与模块装配',
+  P7: '输入路由、焦点与文本草稿',
+  P8: '内容边界、实例配置隔离与结构化诊断',
+  P9: '持久化、固定快照导出与恢复',
+  P10: '集成闭环与交叉验收',
+  P11: '退役审计、全量回归、性能门槛与复杂度对账',
+}
+
+/** 从 `'P6'` 解析出编号 6（供断言核对 issue 号）。 */
+export function parsePBatch(p) {
+  const m = /^P(\d+)$/.exec(p)
+  return m ? Number(m[1]) : null
 }
 
 /**

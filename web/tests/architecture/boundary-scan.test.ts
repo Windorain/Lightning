@@ -19,8 +19,11 @@ import { describe, expect, it } from 'vitest'
 import {
   GATE_RULES,
   LAYERS,
+  P_DUTIES,
+  P_TO_ISSUE_OFFSET,
   RETIREMENT_OWNERS,
   collectLegacyDebt,
+  parsePBatch,
   resolveGateLayers,
   resolveInternalTarget,
   topLayer,
@@ -165,9 +168,63 @@ describe('A01 设施在当前树上的实况（含空洞真的显式披露）', 
     expect(entries).toHaveLength(13)
     for (const [slug, owner] of entries) {
       expect(slug, 'slug 必须是非空稳定标识').toMatch(/^[a-z0-9-]+$/)
-      expect(owner.batch, `${slug} 缺负责批次`).toMatch(/^P\d+ \(#\d+\)$/)
-      expect(owner.exitStage, `${slug} 缺退出阶段`).toMatch(/^P\d+ 交付同批$/)
-      expect(owner.role, `${slug} 缺负责人角色`).toMatch(/执行者$/)
+      expect(owner.entries.length, `${slug} 必须标注覆盖的 §15 行号`).toBeGreaterThan(0)
+      expect(owner.owners.length, `${slug} 必须至少有一个负责批次`).toBeGreaterThan(0)
+      expect(owner.exitStage, `${slug} 缺退出阶段`).toMatch(/^P\d+ 交付同批/)
+      expect(owner.role, `${slug} 缺负责人角色`).toMatch(/执行者/)
+    }
+  })
+
+  it('**P 编号 ↔ issue 号 ↔ 职责名 三者一致**（#250 权威映射；#(251+N)）', () => {
+    // 三重断言的理由：只查"P<N> ↔ #(251+N)"的**算术**一致，发现不了
+    // "P 与 issue 配对正确、但职责张冠李戴"这类错位 ——
+    // 初版 #7（工作台/嵌入分叉）写成 `P7 (#258)`，算术成立，但 P7 的职责是
+    // **输入路由**而非 Area 生命周期。故职责名必须同为客户端的断言对象。
+    for (const [slug, owner] of Object.entries(RETIREMENT_OWNERS)) {
+      for (const o of owner.owners) {
+        const p = parsePBatch(o.p)
+        expect(p, `${slug} 的批次号 ${o.p} 必须形如 PN`).not.toBeNull()
+        // ① P ↔ issue
+        expect(
+          o.issue,
+          `${slug}：${o.p} 必须对应 #${P_TO_ISSUE_OFFSET + p}，实得 #${o.issue}`,
+        ).toBe(P_TO_ISSUE_OFFSET + p)
+        // ② P ↔ 职责名（逐字对 #250 表）
+        expect(
+          o.duty,
+          `${slug}：${o.p} 的职责应为「${P_DUTIES[o.p]}」，实得「${o.duty}」`,
+        ).toBe(P_DUTIES[o.p])
+      }
+    }
+  })
+
+  it('P_DUTIES 表覆盖 P1–P11 且与被断言引用的批次名一一对应（防表本身写错）', () => {
+    expect(Object.keys(P_DUTIES)).toEqual([
+      'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11',
+    ])
+    // 职责名必须与 #250「执行单与依赖」表逐字一致（本表是那份表的机器可读副本）
+    expect(P_DUTIES.P6).toBe('工作区、Area 生命周期与模块装配')
+    expect(P_DUTIES.P7).toBe('输入路由、焦点与文本草稿')
+    expect(P_DUTIES.P8).toBe('内容边界、实例配置隔离与结构化诊断')
+    expect(P_DUTIES.P9).toBe('持久化、固定快照导出与恢复')
+    expect(P_DUTIES.P10).toBe('集成闭环与交叉验收')
+    expect(P_DUTIES.P11).toBe('退役审计、全量回归、性能门槛与复杂度对账')
+  })
+
+  it('十三条 §15 行号被完整且不重复地覆盖（1..13）', () => {
+    const covered = Object.values(RETIREMENT_OWNERS)
+      .flatMap((o) => o.entries)
+      .sort((a, b) => a - b)
+    expect(covered).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+  })
+
+  it('批次归属落在 #250 表内（P1–P11 = #252–#262），不含 P0 或越界', () => {
+    for (const [slug, owner] of Object.entries(RETIREMENT_OWNERS)) {
+      for (const o of owner.owners) {
+        const p = parsePBatch(o.p)
+        expect(p, `${slug}: ${o.p} 越界（退役只由 P1–P11 承担，P0 不执行退役）`).toBeGreaterThanOrEqual(1)
+        expect(p, `${slug}: ${o.p} 越界`).toBeLessThanOrEqual(11)
+      }
     }
   })
 })
