@@ -110,19 +110,58 @@ export const MATH_CONTRACT = Object.freeze({
   unitScaleEps: 1e-9,
 })
 
-export function approxVec3(a: Vec3, b: Vec3, eps = MATH_CONTRACT.positionEps): boolean {
+export function approxVec3(a: Vec3, b: Vec3, eps: number = MATH_CONTRACT.positionEps): boolean {
+  // `NaN` 必须判**不等**：`Math.abs(NaN - NaN) <= eps` 是 false，故这里天然正确；
+  // 但显式写出来是为了让"NaN 与自身也必须不等"成为**有意**的语义而非巧合
+  // （见 `mathContract.test.ts > 非有限值不被容限比较吞掉`）。
+  if (!Number.isFinite(a.x) || !Number.isFinite(a.y) || !Number.isFinite(a.z)) return false
+  if (!Number.isFinite(b.x) || !Number.isFinite(b.y) || !Number.isFinite(b.z)) return false
   return Math.abs(a.x - b.x) <= eps && Math.abs(a.y - b.y) <= eps && Math.abs(a.z - b.z) <= eps
 }
 
-/** 两个四元数是否在容限内表达同一旋转（`q` 与 `-q` 是同一旋转，故两向都比）。 */
-export function approxQuat(a: Quat, b: Quat, eps = MATH_CONTRACT.rotationEps): boolean {
+/**
+ * 两个四元数是否在容限内表达同一旋转（`q` 与 `-q` 是同一旋转，故两向都比）。
+ *
+ * 非有限输入判不等（与 {@link approxVec3} 同一政策）。
+ */
+export function approxQuat(a: Quat, b: Quat, eps: number = MATH_CONTRACT.rotationEps): boolean {
+  for (const v of [a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w]) if (!Number.isFinite(v)) return false
   const same = Math.abs(a.x - b.x) <= eps && Math.abs(a.y - b.y) <= eps && Math.abs(a.z - b.z) <= eps && Math.abs(a.w - b.w) <= eps
   if (same) return true
   return Math.abs(a.x + b.x) <= eps && Math.abs(a.y + b.y) <= eps && Math.abs(a.z + b.z) <= eps && Math.abs(a.w + b.w) <= eps
 }
 
-export function approxNumber(a: number, b: number, eps = MATH_CONTRACT.positionEps): boolean {
+/** 两个标量是否在容限内相等（非有限输入判不等，理由同 {@link approxVec3}）。 */
+export function approxNumber(a: number, b: number, eps: number = MATH_CONTRACT.positionEps): boolean {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false
   return Math.abs(a - b) <= eps
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 显式命名的取整工具（**唯一**允许出现 `Math.floor` 的地方）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 把标量吸附到给定的像素/网格格距。
+ *
+ * ## 为什么它单独存在，而不是"顺手取整"
+ *
+ * #254 E3 要求「**不任意四舍五入到整数**」。要满足这条，光靠"我们没写取整"是不够的
+ * —— 那无法被检查。故把它变成一条**结构事实**：
+ *
+ *  - 本模块里 `Math.floor` **只**出现在本函数（由 `mathContract.test.ts` 的静态判据
+ *    逐字断言）；
+ *  - 函数名 `pixelSnap` 显式说明它的语义是**像素吸附**（呈现侧的需求），
+ *    不是坐标求值；
+ *  - 没有**任何**求值路径（`toAffine` / `worldMatrix` / `transformPoint` / …）
+ *    调用它。
+ *
+ * 于是"坐标被取整"这件事要么不发生，要么**必须**经过一个名字就写着"我在吸附
+ * 到像素格"的函数 —— 后者在 review 时无法被误认成普通数学。
+ */
+export function pixelSnap(value: number, gridSize: number): number {
+  if (!(gridSize > 0) || !Number.isFinite(gridSize)) return value
+  return Math.floor(value / gridSize + 0.5) * gridSize
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -148,7 +187,23 @@ export const COORDINATE_CONVENTION = Object.freeze({
    * 把它变成一条可执行断言而不是注释。
    */
   forward: Object.freeze({ x: 0, y: 0, z: -1 }),
-})
+} satisfies CoordinateConvention)
+
+/**
+ * 坐标约定的**形状**（比 {@link COORDINATE_CONVENTION} 的推断类型宽）。
+ *
+ * 存在的理由：{@link isRightHandedYUp} 必须能接受一个**违反**约定的输入 ——
+ * 否则"负对照"在类型层面就写不出来，而 #249 §14 要求负对照必须能真的破坏目标保证。
+ * 用一个显式接口（而不是 `typeof COORDINATE_CONVENTION`）使判据接受任何符合形状的
+ * 约定，从而可被证伪。
+ */
+export interface CoordinateConvention {
+  readonly handedness: 'right' | 'left'
+  readonly up: 'x' | 'y' | 'z'
+  readonly right: Vec3
+  readonly upVector: Vec3
+  readonly forward: Vec3
+}
 
 export function cross(a: Vec3, b: Vec3): Vec3 {
   return Object.freeze({
@@ -176,7 +231,7 @@ export function norm(v: Vec3): number {
  *
  * 若有人把 `forward` 改成 `+z`（左手系的常见笔误），第 3 条立刻判 false。
  */
-export function isRightHandedYUp(conv = COORDINATE_CONVENTION): boolean {
+export function isRightHandedYUp(conv: CoordinateConvention = COORDINATE_CONVENTION): boolean {
   const { right, upVector, forward } = conv
   const unit = MATH_CONTRACT.unitScaleEps
   if (!approxNumber(norm(right), 1, unit) || !approxNumber(norm(upVector), 1, unit) || !approxNumber(norm(forward), 1, unit)) return false

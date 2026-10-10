@@ -57,8 +57,8 @@ import {
   withScene,
   undo,
   redo,
-  type Scene,
 } from '@/domain/document'
+import type { Scene } from '@/domain/scene'
 import { isDataShared, objectsSharingData } from '@/domain/scene'
 import { elementRef, type ElementRef } from '@/domain/identity'
 
@@ -382,7 +382,7 @@ describe('退役 #9（grid-coord-as-identity）：身份必须经来源映射，
   })
 
   it('**负对照**：把局部序号当身份 ⇒ 重新分批后"身份"指向了另一个对象（判红）', () => {
-    const { scene, a, b } = sharedPair()
+    const { scene, a } = sharedPair()
     const map1 = buildGeometrySourceMap(scene)
     const reordered: Scene = Object.freeze({ ...scene, order: Object.freeze([...scene.order].reverse()) })
     const map2 = buildGeometrySourceMap(reordered)
