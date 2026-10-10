@@ -204,23 +204,34 @@ onMounted(() => {
 /**
  * 卸载：**顺序是语义的一部分**（B5 #10；A13「关闭后实例/监听/作业回基线」）。
  *
- *  1. `detachViewport(region)` —— 走 `host` 的登记表调 `attachViewport` 的 unbind，
- *     它现在会 `ed.unregisterRegion(region)` + `ctx.viewports.reset(region)`
- *     （P6 实测补：旧实现这两步都没有，卸载后槽位留着已 dispose 的句柄，
- *      使经 `__vm__` 观测面的消费者读到**陈旧成功**）；
+ *  1. `host.detachViewport(region)` —— 走 `host` 的登记表调 `attachViewport` 的 unbind
+ *     （移除 DOM 监听、解开 overlay）。**不**负责归零槽位：那个 unbind 也会在
+ *     "重挂前的 detach"里被调用（`HostBase.attachViewport` → `detachViewport`
+ *     → `attachViewport` 的既有行为），在那儿归零会抹掉 `definition`/`outlinePass`
+ *     这类 **DRW 拥有**的状态，而重挂不会重建它们 —— P6 实测由
+ *     `multiblock-channel-traversal.spec.ts` 的"尺寸变化方向"判红
+ *     （`tier-only tt=1 渲染收敛` 20s 超时；基线同 spec 通过）。
  *  2. `_alive = false` —— 让迟到的 rAF 回调不再碰 overlay；
  *  3. `unframeHook()` —— 摘掉逐帧钩子；
- *  4. `drw.dispose()` —— 释放 GPU/DOM 资源（此时 DOM 仍有效，故必须在这之前）。
+ *  4. `drw.dispose()` —— 释放 GPU/DOM 资源（此时 DOM 仍有效，故必须在这之前）；
+ *  5. **真正的拆解点**：注销 region 系统（模态栈回基线）+ 归零并移除视口槽位。
+ *     归零后 `ctx.viewports.get(region)` 为 `undefined`，于是经 `__vm__` 观测面的
+ *     读取（`readContentMesh` / `waitForRenderedGrid` / `readDefinitionRootFields` /
+ *     `readCameraDirectionForCell`）不再把**已 dispose 的句柄**读成"还在"。
  *
- * 注意第 1 步必须在第 4 步**之前**：`reset` 只清槽位，真正的 dispose 归这里；
- * 反过来做会让"槽位已清但资源没还"与"资源已还但槽位还在"两种状态各出现一次。
+ * 第 1 步必须在第 4 步之前（dispose 需要 DOM 仍有效）；第 5 步在最后
+ * （它依赖前几步已停掉所有还会写槽位的活动源）。
  */
 onBeforeUnmount(() => {
   host.detachViewport(VIEWPORT_REGION_ID)
   _alive = false
   unframeHook?.()
   unframeHook = null
+  ctx.wm.events.unregisterRegion(VIEWPORT_REGION_ID)
   drw.dispose()
+  // 归零并移除槽位（`EmbedViewport` 侧由 `unregisterRegion` + `drw.dispose()` 承担；
+  // 槽位归零是 P6 追加的，用于消除经 `__vm__` 观测面的**陈旧成功**读取）
+  ctx.viewports.unregister(VIEWPORT_REGION_ID)
 })
 </script>
 

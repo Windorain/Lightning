@@ -96,19 +96,19 @@ export function bindViewportDom(
 
   return () => {
     for (const u of unsubs) u()
-    /**
-     * **注销 region 系统**（B5 #10 的资源基线；P6 实测补）。
-     *
-     * 旧实现只移除 DOM 监听与 handler 链，`_regionSystems` 里那条 region
-     * **永久留存** —— 于是"卸载后监听/作业回到基线"不成立：
-     *  - `modalStack` 里的模态操作符不会被 `onExit`（`unregisterRegion` 才会调）；
-     *  - `getActiveRegion()` 仍可能指向一个已死的 region，键盘路由继续把它当目标。
-     *
-     * 放在这里（而不是调用方）的理由：`registerRegion` 是本函数**自己**调的
-     * （见上方），故注销也应由本函数对称负责 —— 让调用方配对是"少一次调用"的
-     * 经典来源（本批实测：`attachViewport` 的 unbind 原先就漏了这一步）。
-     */
-    ed.unregisterRegion(regionId)
+    // P6 实测：**不**在此 `ed.unregisterRegion(regionId)`。
+    //
+    // 本 unbind 会被"重挂前的 detach"调用一次
+    // （`HostBase.attachViewport` → `detachViewport` → `attachViewport`），
+    // 而 `unregisterRegion` 会**清掉整条 region 系统**（含 `modalStack` 的
+    // `onExit` 与 handler 链），于是同一视口重挂时会丢掉前一次建立的
+    // region 状态 —— 与槽位归零同一个坑（`multiblock-channel-traversal`
+    // "尺寸变化方向" 20s 收敛超时即由此暴露）。
+    //
+    // `registerRegion` 是幂等的（`if (!this._regionSystems.has(...))`），
+    // 故保留 region 系统不会泄漏条目：同一 region 反复重挂只注册一次。
+    // 真正的注销点在组件卸载（`WorkbenchViewport.onBeforeUnmount` →
+    // `ctx.viewports.unregister` 之外，由该文件按需显式调 `unregisterRegion`）。
   }
 }
 

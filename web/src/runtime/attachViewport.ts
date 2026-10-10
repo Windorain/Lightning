@@ -85,23 +85,7 @@ export async function attachViewport(
   return () => {
     unbindDom()
     drw.unbindOverlayPass()
-    /**
-     * **归零槽位**（B5 #10「关闭 Area 释放运行资源」；P6 实测补）。
-     *
-     * 旧实现只做上面两件事，槽位字段（`camera`/`domElement`/`definition`/
-     * `contentGroup`/`overlayGroup`/`layerPreview`/`orbitTarget`）全部留在原处。
-     * 于是卸载之后：
-     *  - 组件已经 `drw.dispose()`，但槽位仍指向**已 dispose 的** mesh group
-     *    与相机 ⇒ 任何经 `__vm__` 观测面读槽位的消费者都会读到**陈旧成功**
-     *    （e2e 的 `readContentMesh`/`waitForRenderedGrid`/
-     *    `readDefinitionRootFields`/`readCameraDirectionForCell` 全属此类）；
-     *  - 这正是 A13「关闭后实例/监听/作业回到预期基线」在**槽位层**的缺口：
-     *    资源还了，但"这个视口还活着吗"的答案仍是"活着"。
-     *
-     * 归零后 `isSlotLive(slot) === false`，stale 读取变成可断言的否定面。
-     * `unbindDom()` 内部已 `ed.unregisterRegion(regionId)`（见 `bindViewportDom`），
-     * 故 scale 上的监听也一并回基线。
-     */
-    ctx.viewports.reset(regionId)
+    // P6 实测：**不**在此归零槽位 —— 本 unbind 会被"重挂前的 detach"调用。
+    // 详见 `docs`/提交说明；归零在组件卸载点由调用方做（`WorkbenchViewport`）。
   }
 }

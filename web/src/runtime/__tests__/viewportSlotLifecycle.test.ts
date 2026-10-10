@@ -147,3 +147,69 @@ describe('**负对照**：判据必须能区分"归零"与"未归零"', () => {
     expect(isSlotLive(slot), '两者齐备才算活').toBe(true)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. 重挂路径（P6 实测回归的固定）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('**重挂不得清掉 DRW 拥有的状态**（P6 实测回归的固定断言）', () => {
+  /**
+   * 这次回归的形状：`HostBase.attachViewport` 的顺序是
+   * `detachViewport(region)` → `attachViewport(...)` —— 同一个 region
+   * **再次就绪时会先调上一次的 unbind**。
+   *
+   * 若把"归零槽位"放进那个 unbind，重挂时会抹掉**由 DRW / useViewportRuntime
+   * 写入而 attach 不重建**的字段：
+   *  - `definition`（真正的写入者在 DRW 解析路径；attach 里是自赋值）；
+   *  - `outlinePass`（`useViewportRuntime` 在组件 setup 时写一次）。
+   *
+   * 实测症状：`multiblock-channel-traversal.spec.ts` 的"尺寸变化方向"在同一页
+   * 连续注入两份文档（EBF → tier-only）时，第二份的收敛轮询永远等不到
+   * （`tier-only tt=1 渲染收敛` 20s 超时）。基线同 spec 通过（已复跑确证）。
+   *
+   * 本用例把"detach 不得归零"固定下来。
+   */
+  it('模拟 detach→attach 重挂：`register` 返回同一槽位，DRW 字段不被清', () => {
+    const vp = createViewportManager()
+    const slot = vp.register('r-viewport')
+    fakeAttach(slot)
+    const definitionBefore = slot.definition.value
+    const outlineBefore = slot.outlinePass
+
+    // 重挂路径的 detach 部分：**只**解绑 DOM 与 overlay
+    // （等价于 `attachViewport` 的 unbind 现在所做之事 —— 它不再碰槽位）
+    const detachOnly = (): void => {
+      /* unbindDom(); drw.unbindOverlayPass(); —— 均不碰 slot.* */
+    }
+    detachOnly()
+
+    // 重挂的 attach 部分：`register` 幂等返回同一槽位（不重建、不清空）
+    const again = vp.register('r-viewport')
+    expect(again, '重挂必须复用同一槽位身份').toBe(slot)
+    expect(again.definition.value, 'DRW 拥有的 definition 不得在重挂路径上被清').toBe(definitionBefore)
+    expect(again.outlinePass, 'outlinePass 不得在重挂路径上被清').toBe(outlineBefore)
+    expect(isSlotLive(again), '重挂后槽位仍是活的').toBe(true)
+  })
+
+  it('**负对照**：若把归零放进 detach（本次回归的形态）⇒ DRW 字段被抹掉', () => {
+    const vp = createViewportManager()
+    const slot = vp.register('r-viewport')
+    fakeAttach(slot)
+    // 回归形态：detach 里调 reset
+    resetSlot(slot)
+    const again = vp.register('r-viewport')
+    expect(again.definition.value, '这就是回归：重挂后 definition 已空 ⇒ 收敛轮询永远等不到').toBeNull()
+    expect(again.outlinePass).toBeNull()
+    // 而 attachViewport 不会重建它们（definition 来自 DRW 解析路径、
+    // outlinePass 来自组件 setup），故第二份文档的渲染定义永不更新。
+  })
+
+  it('真拆解点（组件卸载）则必须归零并移除 —— 两面都要成立', () => {
+    const vp = createViewportManager()
+    const slot = vp.register('r-viewport')
+    fakeAttach(slot)
+    vp.unregister('r-viewport')
+    expect(vp.get('r-viewport'), '卸载后槽位必须被移除（陈旧成功变为 undefined）').toBeUndefined()
+    expect(isSlotLive(slot), '持有旧引用的观测面也看到已归零').toBe(false)
+  })
+})
