@@ -37,9 +37,9 @@ import { describe, expect, it } from 'vitest'
 import { buildModuleGraph, WEB_ROOT, SRC_ROOT, extractImports } from './module-graph.mjs'
 
 /**
- * 新内核的文件清单（P1 交付；P3/P4/P6 陆续追加），相对 `src/`。
+ * 新内核的文件清单（P1 交付；P3/P4/P6/P9/P7 陆续追加），相对 `src/`。
  *
- * 与 `boundary-rules.mjs` 的 `LAYER_DESTINATIONS.runtime.activeSubpaths` 同源 ——
+ * 与 `boundary-rules.mjs` 的 `LAYER_DESTINATIONS.*.activeSubpaths` 同源 ——
  * 两处都列同一批文件是**故意**的：若哪天有人新增 `runtime/xxx.ts` 而忘了登记，
  * 本文件与扫描器会**同时**不覆盖它（而不是一处覆盖一处漏），
  * 由 `kernel-file-registry.test` 那条断言逼着两处一起改。
@@ -69,8 +69,26 @@ import { buildModuleGraph, WEB_ROOT, SRC_ROOT, extractImports } from './module-g
  * （它是整层新目录，无撞名），`editors` 属呈现侧（允许 Vue/DOM）。
  * 把它们塞进本表会误用"内核不得依赖旧层"这条判据：
  * `editors/` 按设计要与旧组件世界打交道（它**由外壳注入**组件，自己不 import）。
+ *
+ * ## P7（#258）增量与登记理由
+ *
+ * | 文件 | 层 | 为什么算"新实现" |
+ * |---|---|---|
+ * | `domain/input.ts` | `domain` | 纯输入路由（#249 §19.1） |
+ * | `domain/textDraft.ts` | `domain` | 文本草稿三态机（#249 §19.1） |
+ * | `application/inputCommands.ts` | `application` | 统一命令入口（#249 §19.1） |
+ * | `runtime/inputSession.ts` | `runtime` | 输入会话（纯核心，**不得**碰 DOM） |
+ * | `runtime/inputPort.ts` | `runtime` | 呈现层声明显式状态的端口 |
+ * | `adapters/inputFacts.ts` | `adapters` | DOM 事实提取 + 平台同步动作 |
+ * | `adapters/inputBinding.ts` | `adapters` | 事件绑定 + 单一挂载点断言 |
+ * | `adapters/shellDom.ts` | `adapters` | 外壳 DOM 事实（从已删的 `wiki/wikiInputShield.ts` 搬出） |
+ *
+ * 注意 `runtime/inputSession.ts` **不在** `adapters/` —— 它属 `corePurity`，
+ * 由 `gate/core-no-dom-globals` 保证它不碰 `document`。事件到事实的翻译在
+ * `adapters/inputFacts`：这不是"为了过闸门而挪文件"，而是 #249 §9 明文要求
+ * 「浏览器适配器只进行事实提取与平台同步动作」。
  */
-const KERNEL_FILES = [
+export const KERNEL_FILES = [
   'domain/identity.ts',
   'domain/errors.ts',
   'domain/scene.ts',
@@ -122,6 +140,16 @@ const KERNEL_FILES = [
   'adapters/host/hostCapabilities.ts',
   'adapters/host/artifactTransport.ts',
   'adapters/host/buildManifest.ts',
+  // P7（#258）输入路由/焦点/文本草稿：纯路由、草稿三态机、统一命令入口、
+  // 输入会话（纯核心）、输入端口、浏览器输入适配器与外壳 DOM 事实
+  'domain/input.ts',
+  'domain/textDraft.ts',
+  'application/inputCommands.ts',
+  'runtime/inputSession.ts',
+  'runtime/inputPort.ts',
+  'adapters/inputFacts.ts',
+  'adapters/inputBinding.ts',
+  'adapters/shellDom.ts',
 ]
 
 /**
@@ -196,8 +224,10 @@ function readSource(absPath) {
 
 function loadGraph() {
   const { files, facts } = buildModuleGraph()
+  // P7（#258）：P7 的输入适配器已登记进 `KERNEL_FILES`，故 `kernelAbs` 只需该表。
+  // （P7 初版另立了 `INPUT_ADAPTER_FILES`/`newLayerFiles`；合流后统一到 KERNEL_FILES，
+  //  避免"两处清单"这一 P1 明确要避免的形态 —— 见本文件头"两处都列同一批文件是故意的"。）
   const kernelAbs = new Set(KERNEL_FILES.map((rel) => path.join(SRC_ROOT, rel)))
-  // **生产**导入事实：与 `scan-boundaries.mjs` 同一口径。
   // 测试文件可以（也应当）为了断言而 import 内核 —— 若把它们算进反向依赖，
   // 判据会把"测试证明新层可用"误报成"旧层依赖新层"（P1 首跑实测到的假红）。
   const prodFacts = facts.filter((f) => isProductionRel(path.relative(SRC_ROOT, f.fromFile).replace(/[\\/]+/g, '/')))
@@ -221,7 +251,7 @@ function resolveTarget(f) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('P1 内核隔离：新内核不得依赖任何旧层（#1 负对照「新 facade 内调用旧 runtime」的可执行半边）', () => {
-  it(`${KERNEL_FILES.length} 个内核文件的**全部**内部导入都落在新层内（无一条指向旧目录）`, () => {
+  it(`${KERNEL_FILES.length} 个内核文件（含 P7 输入面）的**全部**内部导入都落在新层内（无一条指向旧目录）`, () => {
     const { kernelImports } = loadGraph()
     const violations = []
     for (const f of kernelImports) {
@@ -346,6 +376,38 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       '内核层内依赖（application → domain），非旧层依赖；列入此表仅为让"命令面到动画面"的接缝在架构清单里可见',
     exitStage: 'P11 终局审计：此边属新层内部依赖，永久保留',
     internalToKernel: true,
+  }),
+  // ── P7（#258）输入面：旧外壳/旧配置消费新输入内核 ──────────────────────────
+  //
+  // P7 把"输入路由"建成新内核（`domain/input` + `runtime/inputSession` +
+  // `application/inputCommands`），但**消费者**仍是 P7 当时的旧外壳
+  // （`WorkbenchRoot.vue` 与 `workbench/inputHotkeys.ts`）。
+  // P6/P2 已重写工作台与面板，这批边在 P10 集成时随旧外壳退场而消失。
+  Object.freeze({
+    from: 'src/runtime/wm.ts',
+    to: 'runtime/inputPort',
+    reason:
+      'WM 持有输入端口字段（呈现层声明焦点/弹窗/控件绑定等**显式状态**的唯一入口）；`runtime` 是撞名层，故本边需登记',
+    exitStage: 'P10 集成：新外壳装配接管 `wm.inputPort` 后，本边随 wm 的旧字段退场；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/workbench/WorkbenchRoot.vue',
+    to: 'composition/assembleInput',
+    reason:
+      'P7 的旧外壳挂载输入面装配根（`assembleInput`）——这是"新内核被真实消费者使用"的唯一落点，不登记就等于新层未生效',
+    exitStage: 'P10 集成：新外壳接管输入装配后删除本行；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/workbench/inputHotkeys.ts',
+    to: 'domain/input',
+    reason: '工作台快捷键**配置表**类型化（`HotkeyBinding`）；配置归新外壳的模块贡献后消失',
+    exitStage: 'P10 集成：键表迁入新外壳的模块贡献；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/workbench/inputHotkeys.ts',
+    to: 'application/inputCommands',
+    reason: '旧 operator 转发实现 `CommandSink` 端口（逐条列明转发项，未接通命令显式拒绝）',
+    exitStage: 'P10 集成：换成 `editorCommandSink(editor)` 后删除本行；P11 核销',
   }),
 ]
 
@@ -631,6 +693,155 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 4.5 全局键盘监听：只许一条（#12 输入面退役的可执行验收，P7 = #258）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * **尚未迁移**的全局 `keydown` 监听（逐条登记，含归属批次与理由）。
+ *
+ * ## 为什么要有这张表
+ *
+ * #12（输入面）要退役的正是"各处组件自己的 `window.addEventListener('keydown')`"。
+ * P7 删掉了其中四条（`wikiInputShield` / `chromeBinder` / `viewportBinder` /
+ * 设置抽屉），并建立了**唯一**挂载点 `adapters/inputBinding`。
+ *
+ * 巡检发现**第五条**：`embed/components/BlockStatsSidebar.vue` 也自挂了一条
+ * document keydown（只为 Escape 清空选择）。它属**嵌入外壳**的输入面 ——
+ * 嵌入侧的输入装配归 P9/P11，故 P7 **不**擅自改它的行为。
+ *
+ * 不修**不等于**不登记：一张没人核对的"待办"会退化成"永远不做"。
+ * 故把它列在这里，并由下面的断言保证：
+ *  - 清单里的每条**确实**存在（否则就是过期条目，必须删）；
+ *  - 清单**外**不得出现新的全局 keydown（否则判红 —— 那才是"再长一条"的入口）。
+ */
+const REGISTERED_GLOBAL_KEYDOWN = [
+  Object.freeze({
+    file: 'embed/components/BlockStatsSidebar.vue',
+    batch: 'P9/P11',
+    reason: '嵌入侧 Escape 清空选择；嵌入外壳的输入装配（`EmbedRoot`）归 P9/P11，P7 只装配工作台',
+  }),
+]
+
+/**
+ * **允许**的全局键盘监听（与"待迁移"区分开）。
+ *
+ * ## 为什么 `adapters/shellDom.ts` 不是违规
+ *
+ * 该监听**不判定接收者**：它只调 `event.stopPropagation()`，用于 Wiki 宿主下
+ * 阻止工作台子树的按键继续冒泡到宿主页面（#249 §9 的"平台同步动作"）。
+ * 它不读 `key`、不选命令、不影响谁能收到 —— 归属判定仍只由 `inputBinding` 那一条做。
+ *
+ * 判据因此按**行为**区分，而不是按"有没有 addEventListener"：
+ *  - 违规定义 = 监听里出现 `key`/`code` 判定、`preventDefault`、或命令分发；
+ *  - 允许 = 只做 `stopPropagation`（纯事件边界）。
+ * 下面用一个**可执行**的检查落实这个区分，而不是靠注释声明。
+ */
+const ALLOWED_PROPAGATION_ONLY_LISTENERS = ['adapters/shellDom.ts']
+
+/** 该监听是否只做冒泡边界（不含按键判定/默认行为干预）。 */
+function isPropagationOnlyListener(file, line) {
+  const text = readSource(path.join(SRC_ROOT, file)).split('\n')
+  // 回调可能在注册行**之前**定义（`const onKeydown = ... ; addEventListener(...)`），
+  // 也可能内联在注册行**之后** —— 故两侧都取一段。
+  const slice = text.slice(Math.max(0, line - 1 - 8), line + 10).join('\n')
+  const touchesKey = /\b(key|code)\s*[=!]==|switch\s*\(\s*\w*\.(key|code)|preventDefault\(/.test(slice)
+  const stopsPropagation = /stopPropagation\(/.test(slice)
+  return stopsPropagation && !touchesKey
+}
+
+/** 扫全部生产源码，找 `addEventListener('keydown'|'keyup'...)`。 */
+function scanGlobalKeydownListeners() {
+  const out = []
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name === '__tests__' || entry.name === 'node_modules') continue
+        walk(full)
+        continue
+      }
+      if (!/\.(ts|vue)$/.test(entry.name)) continue
+      const rel = path.relative(SRC_ROOT, full).replace(/[\\/]+/g, '/')
+      const lines = readSource(full).split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i]
+        // 只算**代码**（注释里记录"删掉了旧监听"是允许且有价值的）
+        const trimmed = raw.trim()
+        if (trimmed.startsWith('*') || trimmed.startsWith('//') || trimmed.startsWith('/*')) continue
+        if (/addEventListener\(\s*['"`]keydown['"`]/.test(raw) || /addEventListener\(\s*['"`]keyup['"`]/.test(raw)) {
+          out.push({ file: rel, line: i + 1, text: trimmed })
+        }
+      }
+    }
+  }
+  walk(SRC_ROOT)
+  return out
+}
+
+describe('全局 keyboard 监听清单：唯一挂载点之外必须逐条登记（#12 输入面退役）', () => {
+  it('登记表**外**不得出现新的全局 keydown/keyup 监听（多一条即判红）', () => {
+    const found = scanGlobalKeydownListeners()
+    const registeredFiles = new Set(REGISTERED_GLOBAL_KEYDOWN.map((e) => e.file))
+    // 唯一挂载点自己（`adapters/inputBinding`）是**被允许**的那一条
+    const allowed = new Set(['adapters/inputBinding.ts', ...registeredFiles, ...ALLOWED_PROPAGATION_ONLY_LISTENERS])
+    const unregistered = found.filter((f) => !allowed.has(f.file))
+    expect(
+      unregistered.map((f) => `${f.file}:${f.line}  ${f.text}`),
+      '出现未登记的全局键盘监听（必须迁入 `adapters/inputBinding` 的唯一挂载点，或在此逐条登记归属批次）',
+    ).toEqual([])
+  })
+
+  it('冒泡边界型监听必须**确实**只做 stopPropagation（不得偷偷变成路由）', () => {
+    // 反空洞真：`ALLOWED_PROPAGATION_ONLY_LISTENERS` 不能是"免检白名单"，
+    // 否则有人把路由逻辑塞进那个文件就绕过了上面的判据。
+    const found = scanGlobalKeydownListeners()
+    for (const file of ALLOWED_PROPAGATION_ONLY_LISTENERS) {
+      const hits = found.filter((f) => f.file === file)
+      expect(hits.length, `${file} 应登记在案（否则白名单条目已过期）`).toBeGreaterThan(0)
+      for (const h of hits) {
+        expect(
+          isPropagationOnlyListener(h.file, h.line),
+          `${file}:${h.line} 只允许做 stopPropagation；一旦出现 key 判定/preventDefault 就必须迁入唯一挂载点`,
+        ).toBe(true)
+      }
+    }
+  })
+
+  it('反空洞真：唯一挂载点**确实**挂了 keydown（否则上一条"0 未登记"是空转）', () => {
+    const found = scanGlobalKeydownListeners()
+    expect(
+      found.some((f) => f.file === 'adapters/inputBinding.ts'),
+      '唯一挂载点必须真实注册 keydown',
+    ).toBe(true)
+  })
+
+  it('登记表里**没有**已消失的条目（迁移完成后必须同批删表）', () => {
+    const found = scanGlobalKeydownListeners()
+    const present = new Set(found.map((f) => f.file))
+    const stale = REGISTERED_GLOBAL_KEYDOWN.filter((e) => !present.has(e.file)).map(
+      (e) => `${e.file}（登记于 ${e.batch}）`,
+    )
+    expect(stale, `登记表里有已不存在的监听（收口后必须同批删除登记）:\n${stale.join('\n')}`).toEqual([])
+  })
+
+  it('P7 已删的四条监听**不再**复活（文档注释提及是允许的，代码不得有）', () => {
+    const found = scanGlobalKeydownListeners()
+    for (const rel of [
+      'wiki/wikiInputShield.ts',
+      'runtime/chromeBinder.ts',
+      'runtime/viewportBinder.ts',
+      'workbench/components/WorkbenchSettingsDrawer.vue',
+      'workbench/components/WikiModalsHost.vue',
+    ]) {
+      expect(
+        found.filter((f) => f.file === rel).map((f) => `${f.file}:${f.line}`),
+        `${rel} 的全局键盘监听已迁入唯一挂载点，不得复活`,
+      ).toEqual([])
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 5. 内核文件登记表与边界扫描器同源
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -665,6 +876,35 @@ describe('内核文件登记表', () => {
     const adapterKernel = KERNEL_FILES.filter((f) => f.startsWith('adapters/')).sort()
     expect(adapterKernel.length, 'P9 必须至少登记一个 adapters 新实现（保存目标适配）').toBeGreaterThan(0)
     expect(dest.activeSubpaths.slice().sort()).toEqual(adapterKernel)
+    // 适配器**不**是纯核心（它们本来就该碰 DOM —— #249 §4 规则 4「实现端口」）。
+    // P7（#258）的输入事实提取/事件绑定/外壳 DOM 事实都在此列。
+    expect(dest.corePurity ?? false, '适配器不得被登记为纯核心（否则 DOM 提取无处可放）').toBe(false)
+  })
+
+  it('P7 输入面文件都在闸门执行面内，且**不**被当成纯核心（两层不能混）', async () => {
+    const rules = await import('./boundary-rules.mjs')
+    const { active } = rules.resolveGateLayers(SRC_ROOT)
+    const core = rules.corePurityFileSet(SRC_ROOT)
+    const inputAdapters = ['adapters/inputFacts.ts', 'adapters/inputBinding.ts', 'adapters/shellDom.ts']
+    for (const rel of inputAdapters) {
+      expect(active, `${rel} 必须在闸门执行面内`).toContain(rel)
+      expect(core.has(rel), `${rel} 不得被当成纯核心（它按设计要碰 DOM）`).toBe(false)
+    }
+  })
+
+  it('P7 新增的纯核心文件（domain/input、domain/textDraft、application/inputCommands、runtime/inputSession/inputPort）都在纯核心集合里', async () => {
+    const rules = await import('./boundary-rules.mjs')
+    const core = rules.corePurityFileSet(SRC_ROOT)
+    for (const rel of [
+      'domain/input.ts',
+      'domain/textDraft.ts',
+      'application/inputCommands.ts',
+      'runtime/inputSession.ts',
+      'runtime/inputPort.ts',
+    ]) {
+      expect(core.has(rel), `${rel} 必须受 core-no-vue-three / core-no-dom-globals 约束`).toBe(true)
+    }
+  })
   })
 
   it('扫描器报告的闸门执行面**包含**全部内核文件（防"登记了但没被扫"）', async () => {

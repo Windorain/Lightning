@@ -71,9 +71,10 @@ export const LAYER_DESTINATIONS = [
   {
     layer: 'runtime',
     legacySources: ['runtime'],
-    note: '**撞名**：旧 runtime/ 是求值+会话实现，新 runtime/ 是执行批次/调度/效果/求值/生命周期/导出作业',
+    note: '**撞名**：旧 runtime/ 是求值+会话实现，新 runtime/ 是执行批次/调度/效果/求值/生命周期/导出作业/输入会话',
     // 新实现的**显式**路径
-    // （P1 登记 execution/scheduling/effects；P4 追加 evaluation；P6 追加 lifecycle；P9 追加 exportJob）
+    // （P1 登记 execution/scheduling/effects；P4 追加 evaluation；P6 追加 lifecycle；
+    //  P9 追加 exportJob；P7 追加 inputSession/inputPort）
     activeSubpaths: [
       'runtime/execution.ts',
       'runtime/scheduling.ts',
@@ -81,8 +82,10 @@ export const LAYER_DESTINATIONS = [
       'runtime/evaluation.ts',
       'runtime/lifecycle.ts',
       'runtime/exportJob.ts',
+      'runtime/inputSession.ts',
+      'runtime/inputPort.ts',
     ],
-    /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议、求值判定、资源记账与导出作业是业务规则，不是呈现。 */
+    /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议、求值判定、资源记账、导出作业与输入路由是业务规则，不是呈现。 */
     corePurity: true,
   },
   { layer: 'presentation', legacySources: ['render', 'shared'], note: '求值场景→渲染数据 → 现 render/' },
@@ -94,10 +97,13 @@ export const LAYER_DESTINATIONS = [
     note:
       '宿主端口实现 → 现散在 util/ + wiki/。**P9（#260）起为部分迁移层**：' +
       '本批新建的保存目标适配（写入串行化 + 远端条件版本）与后续文件/存储适配按 activeSubpaths 登记；' +
-      '其余 util/ 旧实现仍是遗留债务。',
+      '其余 util/ 旧实现仍是遗留债务。**P7（#258）追加输入适配器**：' +
+      '唯一允许碰 DOM 输入事件的地方（#249 §4 规则 4「实现端口」）。',
     // P9 登记：保存目标适配（串行化 + 条件版本）、恢复副本存储、文件/工程/发布格式、
     // 宿主产物适配（能力矩阵/manifest/宿主传输）。全部为**新增**适配器实现；
     // `util/` 等旧对应物仍不在执行面内（部分迁移）。
+    // P7 登记：输入事实提取、输入事件绑定、外壳 DOM 事实。
+    // 不声明 `corePurity` —— 适配器本来就该碰 DOM。
     activeSubpaths: [
       'adapters/saveTarget/coordinator.ts',
       'adapters/storage/memory.ts',
@@ -115,9 +121,18 @@ export const LAYER_DESTINATIONS = [
       'adapters/host/hostCapabilities.ts',
       'adapters/host/artifactTransport.ts',
       'adapters/host/buildManifest.ts',
+      'adapters/inputFacts.ts',
+      'adapters/inputBinding.ts',
+      'adapters/shellDom.ts',
     ],
   },
-  { layer: 'composition', legacySources: [], note: '装配（无旧对应物，本次新建）' },
+  {
+    layer: 'composition',
+    legacySources: [],
+    note: '装配（无旧对应物，本次新建）',
+    // P7（#258）登记输入面装配根；P6 已登记新装配根（下方条目如有重叠以 81f6873 为准）。
+    activeSubpaths: ['composition/assembleInput.ts'],
+  },
   { layer: 'entries', legacySources: ['main*.ts'], note: '薄启动入口 → 现 src/main*.ts 在根' },
 ]
 
