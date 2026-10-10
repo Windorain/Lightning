@@ -102,8 +102,14 @@ export class Context {
   getDoc(): Ref<RuntimeDocument | null> {
     return this.main.doc
   }
-  getStructEpoch(): Ref<number> {
-    return this.main.structEpoch
+  /**
+   * 内容**重读请求**（原 `getStructEpoch()`）。
+   *
+   * 它不是"重建版本"：呈现层会重读内容并自行判断要不要重建
+   * （见 `presentation/contentSignal` 与 `runtime/drwMeshPipeline` 文件头）。
+   */
+  getContentRefreshTick(): Ref<number> {
+    return this.main.contentRefreshTick
   }
   getCurrentFrameIndex(): Ref<number> {
     return this.main.currentFrameIndex

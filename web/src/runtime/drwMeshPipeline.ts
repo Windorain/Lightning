@@ -1,5 +1,29 @@
 /**
  * DRW 内部 mesh/材质/帧管线（不 import Context，只订阅 Ref）。
+ *
+ * ## 本文件的退役改造（#249 §15 第 5 条，本批 P5）
+ *
+ * **被删除**：`structEpochRef` 观察者 + `rebuildAll()` 全量失效。
+ *
+ * 旧形状是「`structEpoch` 自增 ⇒ `rebuildAll()`（清空全部 mesh 缓存 + 重解码全部纹理 +
+ * 重建资源 + 重建 mesh）」。它有两个不可接受的后果，且都已被实测（G1/A11）：
+ *  - 改一个注解文字 ⇒ 全量重建方块几何（G1 判红）；
+ *  - 移动方块 ⇒ 连纹理一起重解码（`bindMultiblockMeshSync` 不得不**手工绕开**
+ *    `rebuildAll` 只调 `loadStructureAndResources()` + `rebuildContentMesh()`，
+ *    那正是 §15 要删的"调用方手动刷新、版本补丁"）。
+ *
+ * **替代物**：`contentRefreshTick` 只表示"内容**可能**变了，请重读"。本文件用
+ * `presentation/contentIdentity` 从数据算出身份，再按 `RebuildPlan` **分范围**执行：
+ *
+ * | 计划位 | 执行的动作 | 旧全量行为 |
+ * |---|---|---|
+ * | `reloadResources` | 释放并重建纹理/图标缓存 | 每次都做 |
+ * | `resolveStructure` | 重解结构定义 + 图标缓存 | 每次都做 |
+ * | `rebuildGeometry` | 重建 mesh | 每次都做 |
+ * | `syncAnnotations` | 同步注解叠加层 | 每次都做（且 mesh 重建是副作用） |
+ *
+ * 于是「改注解」只做最后一项、「移动方块」不碰纹理 —— 两条都由**内容身份**决定，
+ * 不由任何调用方声明。
  */
 import { computed, ref, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
@@ -27,6 +51,9 @@ import {
   MC_ITEM_SLOT_BAKE_REVISION,
   summarizeBlocksForCache,
 } from '@/render/interaction/blockSlotBaker'
+import { createContentSignal } from '@/presentation/contentSignal'
+import type { RebuildPlan } from '@/presentation/contentIdentity'
+import { readContentIdentity } from '@/runtime/presentationAdapter'
 
 function formatError(err: unknown): string {
   return formatUnknownError(err)
@@ -53,8 +80,13 @@ export interface DrwMeshPipelineDeps {
   framesPlaybackIsPlaying: Ref<boolean>
   blockIconCacheOptions: { sizePx?: number; orthoHalf?: number }
   initialWorldFrameIndex?: number
-  /** structEpoch 递增 → 触发 rebuildAll（外部文档刷新时） */
-  structEpochRef: Ref<number>
+  /**
+   * **内容重读请求**（原 `structEpochRef` 的位置）。
+   *
+   * 语义是"内容**可能**变了"——本管线重读内容并自己判断（见文件头）。
+   * 计数本身不参与判定，因此无论它怎么变，内容没变就**不会**重建。
+   */
+  contentRefreshTickRef: Ref<number>
   /** overlay pass 可见性（Embed 偏好等）；默认始终显示 */
   showAnnotationsRef?: Ref<boolean>
   /** 主场景深度注解根（ViewportSlot，供拾取） */
@@ -85,9 +117,15 @@ export interface DrwMeshPipeline {
   unbindOverlayPass(): void
   setCurrentWorldFrame(index: number): Promise<void>
   disposeCachesAndLibrary(): void
-  /** 清空缓存后重新加载结构 + 重建 mesh（替代原 reloadFromConfig） */
-  rebuildAll(): Promise<void>
-  /** 注册 structEpoch 内部 watch；须在 registerScene 之后调用 */
+  /**
+   * 按**内容身份**应用一次内容重读（原 `rebuildAll()` 的位置）。
+   *
+   * 返回本次实际执行的 `RebuildPlan`；内容未变时返回 `null`（**什么都不做**）。
+   * 这是 `contentRefreshTick` 观察者的唯一执行体，也是"无手动刷新"的实现落点：
+   * 调用方只能请求重读，不能指定重建范围。
+   */
+  applyContentRefresh(source: string): Promise<RebuildPlan | null>
+  /** 注册内容重读观察者；须在 registerScene 之后调用 */
   init(): void
   /** 解构 init 注册的 watch */
   dispose(): void
@@ -100,7 +138,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   const {
     docRef, loadStatus, meshBusy, blockIconCache, tooltipPalette,
     structureDefinition, mainMeshGroup, sceneRef, worldFrameIndex, layerWorldY,
-    framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex, structEpochRef, setFrameIndex, setFramesPlayback,
+    framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex, contentRefreshTickRef, setFrameIndex, setFramesPlayback,
     showAnnotationsRef: showAnnotationsRefIn,
     worldAnnotationGroupRef,
     toolsOverlayGroupRef,
@@ -287,11 +325,13 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
 
   const worldMeshCache = new Map<string, WorldMeshEntry>()
   let nonWorldMeshDispose: (() => void) | null = null
-  let stopStructEpochWatch: (() => void) | null = null
+  let stopContentRefreshWatch: (() => void) | null = null
   let stopFrameIndexWatch: (() => void) | null = null
   let stopPlaybackWatch: (() => void) | null = null
   let stopLayerWorldYWatch: (() => void) | null = null
   let suppressFrameIndexWatch = false
+  /** 资源缺失时的一次性恢复哨兵（避免"解码持续失败 ⇒ 无限递归"）。 */
+  let resourceRecoveryRetry = false
 
   // ---- Computed ----
   const worldFrameCount = computed(() => docRef.value?.frameCount ?? 0)
@@ -348,10 +388,22 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
 
     const lib = textureCache.value
     if (!lib || lib.isDisposed()) {
-      console.warn('[drw] presentContentMesh: textureCache not ready, triggering rebuildAll')
-      void rebuildAll().catch(e => {
-        console.error('[drw] rebuildAll (from presentContentMesh) failed:', e)
-      })
+      // 资源缓存不在了（被释放/从未建立）但内容身份**没变** —— 这不是"内容变化"，
+      // 因此**不**走内容信号（走了也会正确地返回 null）。这里做的是**资源恢复**：
+      // 重解一次（`loadStructureAndResources` 会在缓存缺失时重新解码）后重试呈现。
+      // 用一次性哨兵避免"解码持续失败 ⇒ 无限递归"。
+      if (!resourceRecoveryRetry) {
+        resourceRecoveryRetry = true
+        console.warn('[drw] presentContentMesh: textureCache 不可用，正在恢复资源后重试')
+        void runMesh(async () => {
+          await loadStructureAndResources()
+          resourceRecoveryRetry = false
+          if (loadStatus.value === 'ok') await presentContentMesh()
+        }).catch((e: unknown) => {
+          resourceRecoveryRetry = false
+          console.error('[drw] presentContentMesh: 资源恢复失败', e)
+        })
+      }
       return
     }
 
@@ -503,10 +555,10 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       { flush: 'post' },
     )
 
-    stopStructEpochWatch?.()
-    stopStructEpochWatch = watch(structEpochRef, () => {
-      void rebuildAll().catch(e => {
-        console.error('[drw] rebuildAll (structEpoch watch) failed:', e)
+    stopContentRefreshWatch?.()
+    stopContentRefreshWatch = watch(contentRefreshTickRef, () => {
+      void applyContentRefresh('content-refresh-tick').catch(e => {
+        console.error('[drw] content refresh failed:', e)
         loadStatus.value = 'error'
       })
     })
@@ -584,13 +636,56 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     return runMesh(() => presentContentMesh())
   }
 
-  async function rebuildAll(): Promise<void> {
-    clearAllMeshStorage()
-    disposeIconCache()
-    textureCache.value?.dispose()
-    textureCache.value = null
-    await loadStructureAndResources()
-    if (loadStatus.value === 'ok') await rebuildContentMesh()
+  /**
+   * 内容信号 —— 本管线的 `structEpoch` 替代物（见文件头）。
+   *
+   * 读取面是 `readContentIdentity()`（从文档/帧/分层/已解析定义机械派生摘要）。
+   * **注意**：机位、选择、布局都不在读取面的入参里，因此它们**不可能**触发任何重建 ——
+   * 这是 A11 的结构性保证，不依赖任何调用方的自觉。
+   */
+  const contentSignal = createContentSignal(() =>
+    readContentIdentity({
+      doc: docRef.value,
+      frameIndex: worldFrameIndex.value,
+      layerPreview: layerPreviewMode.value,
+      definition: structureDefinition.value,
+    }),
+  )
+
+  /**
+   * 按**内容身份**应用一次内容重读（原 `rebuildAll()` 的位置）。
+   *
+   * 三件事按 `RebuildPlan` 分范围执行，**并串行化**（`runMesh`）以免两条重建链并发：
+   *
+   * 1. `reloadResources` ⇒ 释放纹理缓存与图标缓存，强制重新解码（换纹理/换文档）；
+   * 2. `resolveStructure` ⇒ 重解结构定义（换帧/改网格/改多方块取值）；
+   * 3. `rebuildGeometry` ⇒ 重建 mesh；
+   * 4. `syncAnnotations` ⇒ 同步注解叠加层。
+   *
+   * 内容未变 ⇒ 返回 `null` 且**不做任何事**（旧 `rebuildAll` 在这里必然全量重建）。
+   */
+  async function applyContentRefresh(source: string): Promise<RebuildPlan | null> {
+    const revision = contentSignal.republish(source)
+    if (revision === null) return null
+    const plan = revision.plan
+
+    return runMesh(async () => {
+      if (plan.reloadResources) {
+        disposeIconCache()
+        textureCache.value?.dispose()
+        textureCache.value = null
+      }
+      if (plan.resolveStructure || plan.reloadResources) {
+        // 重解结构：加载路径本身会（在缓存已释放时）重新解码纹理
+        await loadStructureAndResources()
+      }
+      if (plan.rebuildGeometry && loadStatus.value === 'ok') {
+        await presentContentMesh()
+      } else if (plan.syncAnnotations) {
+        await syncAnnotations()
+      }
+      return plan
+    })
   }
 
   function disposeCachesAndLibrary(): void {
@@ -611,8 +706,8 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   function dispose(): void {
     stopAnnotationPassWatch?.()
     stopAnnotationPassWatch = null
-    stopStructEpochWatch?.()
-    stopStructEpochWatch = null
+    stopContentRefreshWatch?.()
+    stopContentRefreshWatch = null
     stopFrameIndexWatch?.()
     stopFrameIndexWatch = null
     stopPlaybackWatch?.()
@@ -629,7 +724,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     unbindOverlayPass,
     setCurrentWorldFrame,
     disposeCachesAndLibrary,
-    rebuildAll,
+    applyContentRefresh,
     init,
     dispose,
     textureCache,

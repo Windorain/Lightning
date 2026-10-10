@@ -24,7 +24,8 @@ export type { DrwComputed } from '@/runtime/drwMeshPipeline'
 
 export interface DRWDeps {
   docRef: Ref<RuntimeDocument | null>
-  structEpochRef: Ref<number>
+  /** 内容重读请求（原 `structEpochRef`；语义见 `drwMeshPipeline` 文件头） */
+  contentRefreshTickRef: Ref<number>
   currentFrameIndex: Ref<number>
   layerWorldY: Ref<number>
   framesPlaybackIsPlaying: Ref<boolean>
@@ -84,7 +85,7 @@ export class DRW {
       framesPlaybackIsPlaying: deps.framesPlaybackIsPlaying,
       blockIconCacheOptions: deps.blockIconCacheOptions ?? {},
       initialWorldFrameIndex: deps.initialWorldFrameIndex,
-      structEpochRef: deps.structEpochRef,
+      contentRefreshTickRef: deps.contentRefreshTickRef,
       setFrameIndex: deps.setFrameIndex,
       setFramesPlayback: deps.setFramesPlayback,
       showAnnotationsRef: deps.showAnnotationsRef,
@@ -116,6 +117,15 @@ export class DRW {
 
   rebuildContentMesh(): Promise<void> {
     return this._mesh.rebuildContentMesh()
+  }
+
+  /**
+   * 按**内容身份**应用一次内容重读（原 `rebuildAll()` 的位置）。
+   *
+   * 返回本次的 `RebuildPlan`；内容未变 ⇒ `null`（什么都不做）。
+   */
+  applyContentRefresh(source = 'manual'): Promise<import('@/presentation/contentIdentity').RebuildPlan | null> {
+    return this._mesh.applyContentRefresh(source)
   }
 
   bindOverlayPass(overlayPassGroup: THREE.Group): void {

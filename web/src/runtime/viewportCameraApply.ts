@@ -12,6 +12,20 @@ import {
 /**
  * INIT / RESET：有 embed_initial_view 快照则整包恢复；
  * 有 mesh 时精确 fit；否则 fallback 到安全默认值。
+ *
+ * ## 退役改造（#249 §15 第 1 条「原始权威对象」的渲染消费侧，P5）
+ *
+ * **被删除**：`applyViewportCameraFromMainInitial` 兼容别名（`export const` 转发）。
+ * 它的名字里带 `Main`，是"以 `Main` 为权威"时代的遗留导出，且已无生产调用者
+ * （`git grep applyViewportCameraFromMainInitial` 只剩它自己的定义）。
+ * 保留它等于在渲染链上留一个指向旧权威名字的兼容门面 —— §15 明令禁止。
+ *
+ * **接缝声明**：本函数仍读 `ctx.main.cameras[key]` / `ctx.main.embedInitialView`
+ * （上述 `ctx.main.*` 读面归口 **P1 的 `EditorClient`**，由 Lead 委托的第 2 条要求）。
+ * P1 的 `ReadView` 目前**没有**相机/embed 初始视图查询（只有 objects/properties/
+ * workspace/interaction 四组），故此处无法改经读面而不伪造一个不存在的查询；
+ * 若强改，就变成"新 facade 内调用旧 runtime"（#1 自身负对照要判红的形态）。
+ * 归口批次与退出阶段见 #256 汇报；不由本批半成品替换。
  */
 export function applyViewportCameraFromDocumentInitial(
   ctx: Context,
@@ -62,6 +76,3 @@ export function applyViewportCameraFromDocumentInitial(
   // 3. Fallback — 安全默认值
   camRef.value = resolveInitialViewportCamera({ definition: def })
 }
-
-/** @deprecated 使用 applyViewportCameraFromDocumentInitial */
-export const applyViewportCameraFromMainInitial = applyViewportCameraFromDocumentInitial
