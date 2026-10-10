@@ -80,10 +80,11 @@ export function reportContentIssues(
 /**
  * 为运行时准备内容诊断接线 —— 供 `WM` 构造时调用。
  *
- * 返回值是"报告函数"，供呈现边界（`editors/ContentText.vue` 的 `onIssues`）
- * 在解析出拒绝事实时调用。把它做成闭包（而不是让 ContentText 直接持有记录器）
- * 的理由：`editors/` 是纯呈现层，不应依赖 `runtime/` 的实现；
- * 依赖方向是 runtime → editors（传回调），不是 editors → runtime。
+ * 返回值是"报告函数"，由 `HostProvider` 经 `editors/contentBoundary.ts` 的
+ * `contentIssueReporterKey` **注入**给呈现组件。把它做成闭包
+ * （而不是让 `ContentText` 直接持有记录器）的理由：`editors/` 是呈现层，
+ * 不应依赖 `runtime/` 的实现；依赖方向是 runtime → editors（注入回调），
+ * 不是 editors → runtime。
  */
 export function createContentBoundaryDiagnostics(
   recorder: DiagnosticRecorder,

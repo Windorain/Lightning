@@ -29,8 +29,9 @@
  * 这是"允许了链接"的必要配套，不是可选修饰。
  */
 <script lang="ts">
-import { computed, defineComponent, h, type PropType, type VNode } from 'vue'
-import { parseContent, parseContentLines, type ContentMode, type ContentNode } from '@/domain/textContent'
+import { computed, defineComponent, h, watchEffect, type PropType, type VNode } from 'vue'
+import { parseContent, parseContentLines, type ContentIssue, type ContentMode, type ContentNode } from '@/domain/textContent'
+import { reportContentIssuesSafely, useContentIssueReporter } from '@/editors/contentBoundary'
 
 /**
  * 节点类型 → 元素标签。
@@ -105,18 +106,33 @@ export default defineComponent({
     as: { type: String as PropType<'div' | 'span' | 'p'>, default: 'div' },
   },
   setup(props) {
-    const parsed = computed(() => {
-      if (props.nodes) return { nodes: props.nodes, text: '' }
+    // 内容拒绝事实的报告口（由 runtime 注入；无注入时静默 —— 见 contentBoundary.ts）。
+    // 依赖方向是 runtime → editors：本组件**不**知道诊断记录器的存在。
+    const reportIssues = useContentIssueReporter()
+
+    const parsed = computed<{ nodes: readonly ContentNode[]; text: string; issues: readonly ContentIssue[] }>(() => {
+      if (props.nodes) return { nodes: props.nodes, text: '', issues: [] }
       if (props.lines) {
         const r = parseContentLines(props.lines, props.mode)
-        return { nodes: r.nodes, text: r.text }
+        return { nodes: r.nodes, text: r.text, issues: r.issues }
       }
       const r = parseContent(props.text ?? '', props.mode)
-      return { nodes: r.nodes, text: r.text }
+      return { nodes: r.nodes, text: r.text, issues: r.issues }
     })
 
     /** 纯文本投影：`aria-label`、e2e 文案对账用（与视觉内容同源）。 */
     const plain = computed(() => parsed.value.text || (props.text ?? ''))
+
+    /**
+     * 报告被拒绝的构造（#259 A35：内容拒绝也要可观测）。
+     *
+     * 放在 `watchEffect` 里而不是渲染函数体内：渲染函数可能因父组件更新而重跑，
+     * 在里面记录会让同一份内容被重复记入诊断（噪声，并挤掉其它通道）。
+     * `watchEffect` 只在 `parsed` 真正变化时触发。
+     */
+    watchEffect(() => {
+      reportContentIssuesSafely(reportIssues, parsed.value.issues)
+    })
 
     return () =>
       h(

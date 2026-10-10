@@ -6,7 +6,6 @@ import type { ShellSettings } from '@/runtime/shellSettings'
 import type { WikiUiState } from '@/runtime/wikiUi'
 import { createShellSettings, type CreateShellSettingsOptions } from '@/runtime/shellSettings'
 import { createDiagnosticRecorder, type DiagnosticRecorder } from '@/application/diagnostics'
-import { createContentBoundaryDiagnostics } from '@/runtime/contentDiagnostics'
 
 export interface WMChrome {
   contextMenuOpen?: Ref<boolean>
@@ -42,7 +41,7 @@ export class WM {
       capacity: diagnosticsOptions?.capacity ?? 512,
       now: diagnosticsOptions?.now ?? (() => Date.now()),
     })
-    // 内容边界拒绝事实 → 诊断通道（#259：内容拒绝也要可观测，不只是丢弃）
-    createContentBoundaryDiagnostics(this.diagnostics)
+    // 内容拒绝事实 → 诊断通道的**报告函数**由 HostProvider 注入给呈现边界
+    // （见 runtime/HostProvider.vue 与 editors/contentBoundary.ts）。
   }
 }
