@@ -125,15 +125,40 @@ describe('A01 设施在当前树上的实况（含空洞真的显式披露）', 
     const { present: gateLayers, legacyCollisions } = resolveGateLayers(SRC_ROOT)
     const ctx = { srcRoot: SRC_ROOT, webRoot: WEB_ROOT, gateLayers, layerCollisions: legacyCollisions }
 
-    // 本批（P0）不建新层 ⇒ 执行面为空，闸门"绿"是空洞真。#249 §4。
-    expect(gateLayers).toEqual([])
+    // ── 不变量 1：执行面只由 #249 §4 的目标分层构成 ──
+    // 本断言**不钉住某一批次的目录快照**。P0 建 0 层（执行面为空 ⇒ 闸门"绿"是**空洞真**，
+    // 必须被显式标出，见不变量 3）；P2 建成 `application/`+`editors/` 后执行面即非空，
+    // 闸门"绿"才开始构成"边界已生效"的证据。#249 §4 / #253「新层目录成为闸门执行面」。
+    expect(gateLayers.length).toBeGreaterThanOrEqual(0)
+    for (const layer of gateLayers) expect(LAYERS).toContain(layer)
 
+    // ── 不变量 2：闸门规则 0 finding（无论执行面是否为空）──
     for (const rule of GATE_RULES) {
       expect(rule.check(productionFacts, ctx), `规则 ${rule.id} 不应有 finding`).toEqual([])
     }
     const astIndex = buildAstIndex(productionFiles)
     expect(rulesWithAst().flatMap((r) => r.checkWithAst(astIndex, ctx))).toEqual([])
     expect(productionFiles.length).toBeGreaterThan(200)
+
+    // ── 不变量 3：空洞真必须被**如实披露**，不得冒充"边界已生效" ──
+    // 与 `scan-boundaries.mjs` 用同一口径计算 `evaluatedFiles`（逐条规则、按执行面过滤）。
+    const evaluatedFor = (rule: { layerDependent?: boolean }) =>
+      rule.layerDependent === true
+        ? productionFiles.filter((f) =>
+            gateLayers.includes(topLayer(path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/'))),
+          ).length
+        : productionFiles.length
+    for (const rule of GATE_RULES) {
+      const vacuous = rule.layerDependent === true && evaluatedFor(rule) === 0
+      if (vacuous) {
+        // 空洞真只允许出现在"执行面真的为空"时；两者必须一致。
+        expect(gateLayers, '执行面为空才是空洞真').toEqual([])
+      }
+    }
+    // 有执行面 ⇒ 该面内至少有一个生产文件被真正受检（否则"绿"仍是空洞真）。
+    if (gateLayers.length > 0) {
+      expect(evaluatedFor({ layerDependent: true })).toBeGreaterThan(0)
+    }
   })
 
   it('目录名撞车被识别：旧 runtime/ 不得被当成新 runtime 层（防假绿）', () => {
