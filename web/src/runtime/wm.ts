@@ -4,6 +4,7 @@ import type { createLogCenter } from '@/logging/LogCenter'
 import type { ContextMenuItem } from '@/workbench/ux/contextMenu'
 import type { ShellSettings } from '@/runtime/shellSettings'
 import type { WikiUiState } from '@/runtime/wikiUi'
+import type { InputPort } from '@/runtime/inputPort'
 import { createShellSettings, type CreateShellSettingsOptions } from '@/runtime/shellSettings'
 import { createDiagnosticRecorder, type DiagnosticRecorder } from '@/application/diagnostics'
 
@@ -29,6 +30,47 @@ export class WM {
    */
   readonly diagnostics: DiagnosticRecorder
   readonly chrome: WMChrome = {}
+  /**
+   * **输入端口**（P7 #258）：呈现层声明焦点/弹窗/控件绑定等**显式状态**的唯一入口。
+   *
+   * 为什么放在 `WM` 而不加在 `Context` 上：它是**外壳级**的（`WM` 本来就持有事件
+   * 分发器与 chrome 状态），而 `Context` 是 #249 §2.3 点名要退役的"万能 Context"——
+   * 继续往它上面加字段正是那一条禁止的方向。
+   *
+   * 装配层（`WorkbenchRoot`）在启动时注入实现。未注入时 `requireInputPort()` 抛错 ——
+   * **不**静默降级成一个什么都不做的空端口：那会让"输入没生效"表现为"点了没反应"。
+   */
+  inputPort: InputPort | null = null
+
+  /**
+   * **属性提交落点注册表**（P7 #258）：`controlId` → "把完整合法的领域值写进旧文档"。
+   *
+   * ## 为什么需要它，以及它为什么是**临时**的
+   *
+   * 草稿三态机判出 `complete` 后要落到领域上。P1 的落点是 `setProperty` 命令
+   * （经 `Editor.submit`）；但工作台的**真实文档**仍是旧 `RuntimeDocument`
+   * （P1 已知缺口，归口 P10），`RNAWidget` 的 `descriptor.set(owner, value)` 才是
+   * 今天真正的写点。
+   *
+   * 若在 `application/inputCommands` 里直接调它，`application` 就得认识
+   * 呈现层的 widget —— 那是分层倒置。故由**呈现层登记自己的写点**，
+   * 命令层只发 `draft.commit`，装配层按 `controlId` 找到落点。
+   *
+   * P10 把真实文档换成 P1 的类型化文档后，本表整个删除，
+   * `draft.commit` 直接映射成 `setProperty`（`application/inputCommands` 已有该分支）。
+   *
+   * 登记边见 `tests/architecture/kernel-legacy-isolation.test.ts` 的
+   * `REGISTERED_LEGACY_CONSUMERS`（**不得静默**）。
+   */
+  readonly applyPropertyRegistry = new Map<string, (value: number | string) => void>()
+
+  /** 取输入端口；未装配即抛（不静默降级）。 */
+  requireInputPort(): InputPort {
+    if (this.inputPort === null) {
+      throw new Error('输入端口尚未装配：装配层须在启动时注入 wm.inputPort（P7 #258）')
+    }
+    return this.inputPort
+  }
 
   constructor(
     log?: ReturnType<typeof createLogCenter>,

@@ -130,7 +130,20 @@ export function createInputCommandBindings(parts: {
 // 解析意图 → 命令
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 本层处理的命令 ID 全集（**显式列明**，不拦截所有键 —— #249 §19.1）。 */
+/**
+ * 本层处理的命令 ID 全集（**显式列明**，不拦截所有键 —— #249 §19.1）。
+ *
+ * ## 为什么没有 `local.*`
+ *
+ * Area 快捷表里的"旧 operator 转发"项（`local.g` 一类，见
+ * `workbench/inputHotkeys.ts`）**不**在 `resolveIntent` 里映射成 P1 命令 ——
+ * 它们不写文档（切工具、开合面板、全选），映射成 `Command` 会凭空造出
+ * 一批"看起来进写通路、实际不做领域事"的假命令，正是 #249 §13
+ * 「不允许暴露假成功控件或空接口」要禁止的形态。
+ *
+ * 它们的归属由 `runtime/inputSession` 的**局部动作处理器**认领；
+ * 若某条没人认领，`unhandledLocalActions` 会记下它（**不静默失败**）。
+ */
 export const INPUT_COMMAND_IDS = Object.freeze([
   'edit.undo',
   'edit.redo',
@@ -150,6 +163,13 @@ export const INPUT_COMMAND_IDS = Object.freeze([
 ] as const)
 
 export type InputCommandId = (typeof INPUT_COMMAND_IDS)[number]
+
+/** `local.` 前缀：**不经本层映射**，由输入会话的局部动作处理器认领。 */
+export const LOCAL_COMMAND_PREFIX = 'local.'
+
+export function isLocalCommandId(commandId: string): boolean {
+  return commandId.startsWith(LOCAL_COMMAND_PREFIX)
+}
 
 /**
  * 解析结果。

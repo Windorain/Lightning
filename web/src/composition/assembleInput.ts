@@ -1,0 +1,128 @@
+/**
+ * `runtime/assembleInput` —— **输入面的装配根**：把 P1 执行器、P7 输入会话与浏览器适配器
+ * 拼成可用的整体（#249 §4 规则 5「装配根可以引用实现并注册」；§10；P7 = #258）。
+ *
+ * ## 为什么装配要单独一个模块
+ *
+ * `WorkbenchRoot.vue` 已经承担了 UI 编排。把"建 Editor、注入能力、挂事件绑定、
+ * 暴露 e2e 探针"塞进组件的 `onMounted` 会让三件事混在一起，且**无法被单测覆盖**
+ * （组件挂载需要完整 DOM 与 Three）。
+ *
+ * 本模块是**纯装配**：不做政策判断、不持有业务状态、可被单测直接调用
+ * （见 `src/runtime/__tests__/inputAssembly.test.ts` 的挂卸平衡与单一挂载点断言）。
+ *
+ * ## 与 P1 的接线
+ *
+ * 输入产出的是 `CommandIntent`（P7 的 ID 空间：`edit.undo`、`tool.beginInteraction`…）。
+ * `resolveIntent`（`application/inputCommands`）把它映射成 P1 的 `Command`；
+ * 命令经 `Editor.submit` / `Editor.executeNow` 进入**唯一写通路** `reduceCommand`。
+ *
+ * `Editor` 实例由装配方传入（P10 会把它与文档装载接上；P7 只保证输入链路到达执行器）。
+ */
+
+import { createInputSession, type InputSession } from '@/runtime/inputSession'
+import { createInputPort, type InputPort } from '@/runtime/inputPort'
+import { createInputBinding, type HitTest, type InputBinding } from '@/adapters/inputBinding'
+import type { HotkeyBinding } from '@/domain/input'
+import type { CommandSink, ControlBinding, InteractionBinding } from '@/application/inputCommands'
+
+export interface AssembleInputOptions {
+  /**
+   * 命令接收端口（P1 `EditorClient` 的最小子集）。
+   *
+   * ## 为什么是端口而不是直接要一个 `Editor`
+   *
+   * 工作台当前的**真实文档**仍是旧 `RuntimeDocument`（P1 已知缺口：72 个生产文件读它，
+   * 归口 P10 集成把真实文档换成 P1 的类型化文档）。因此今天产品侧交给输入面的
+   * `sink` 是"把具名命令 ID 转发到既有 operator 入口"的实现，
+   * 而**测试**交给它的是真正的 P1 `Editor`（`editorCommandSink`）。
+   *
+   * 这条分界是**显式且逐条列明**的（见 `workbench/inputHotkeys.ts`），
+   * 不是"新门面包旧核心"：命令 ID 空间、幂等账本、可用性查询、路由优先级
+   * 全部是 P7 的新实现，只有"最终落到哪个执行器"这一个点由装配层选择。
+   * P10 把该点换成 `editorCommandSink(editor)` 即完成收口。
+   */
+  readonly sink: CommandSink
+  /** 能力集合（profile 裁剪；由装配层决定）。 */
+  readonly capabilities: readonly string[]
+  /** "坐标 → Area"的判定（Area 布局知识由 P6 的装配提供）。 */
+  readonly hitTest: HitTest
+  /** Area 快捷键表（配置；#258「快捷键具体映射表属配置」）。 */
+  readonly areaHotkeys?: readonly HotkeyBinding[]
+  /** 应用快捷键表（**显式列明**，不拦截所有键）。 */
+  readonly appHotkeys?: readonly HotkeyBinding[]
+  readonly controls?: readonly ControlBinding[]
+  readonly interactions?: readonly InteractionBinding[]
+  /** 挂载点（缺省 `document`）。 */
+  readonly keyTarget?: Document | HTMLElement
+  readonly pointerTarget?: Document | HTMLElement
+  /** 该绑定的所有者名（用于单一挂载点断言与诊断）。 */
+  readonly owner: string
+  /**
+   * 局部动作（`local.*` 与 `modal.close` 一类**不写文档**的动作）。
+   *
+   * 由装配层逐条提供 —— 不得用"兜底 switch"实现（那正是旧 `keymapHandler` 的形态）。
+   * 未登记的 `local.*` 会进 `unhandledLocalActions` 诊断，**不静默**。
+   */
+  readonly localActions?: Readonly<Record<string, () => void>>
+  /** 页面恢复回调。 */
+  readonly onResume?: (input: { resumeBaseline: number; droppedTicks: number }) => void
+}
+
+export interface AssembledInput {
+  readonly session: InputSession
+  readonly port: InputPort
+  readonly binding: InputBinding
+  dispose(): void
+}
+
+/**
+ * 装配输入面。
+ *
+ * `claim` 默认 `true`：装配即声明"我是唯一的 document keydown 持有者"。
+ * 第二个装配（例如误在嵌入预览里再建一次）会**抛错**而不是与第一个静默打架 ——
+ * 这是 A22「两个 handler 各启动操作」在装配层的结构防御。
+ */
+export function assembleInput(options: AssembleInputOptions, claim = true): AssembledInput {
+  const session = createInputSession({
+    sink: options.sink,
+    capabilities: () => options.capabilities,
+    ...(options.areaHotkeys === undefined ? {} : { areaHotkeys: options.areaHotkeys }),
+    ...(options.appHotkeys === undefined ? {} : { appHotkeys: options.appHotkeys }),
+  })
+  for (const c of options.controls ?? []) session.bindControl(c)
+  for (const i of options.interactions ?? []) session.bindInteraction(i)
+
+  const port = createInputPort(session)
+  session.setCapabilities(() => options.capabilities)
+
+  // 局部动作：逐条登记；未登记的 `local.*` 进 `unhandledLocalActions`（不静默失败）。
+  session.setLocalActionHandler((commandId, params) => {
+    const action = options.localActions?.[commandId]
+    if (action) {
+      action()
+      return true
+    }
+    const modalScopeId = typeof params.scopeId === 'string' ? params.scopeId : null
+    if (commandId === 'modal.close' && modalScopeId !== null) return port.closeModalScope(modalScopeId)
+    return false
+  })
+
+  const binding = createInputBinding({
+    session,
+    hitTest: options.hitTest,
+    ...(options.keyTarget === undefined ? {} : { keyTarget: options.keyTarget }),
+    ...(options.pointerTarget === undefined ? {} : { pointerTarget: options.pointerTarget }),
+    ...(options.onResume === undefined ? {} : { onResume: options.onResume }),
+  })
+  if (claim) binding.claimExclusive(options.owner)
+
+  return {
+    session,
+    port,
+    binding,
+    dispose() {
+      binding.dispose()
+    },
+  }
+}

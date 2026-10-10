@@ -51,6 +51,7 @@ import {
   type InputRoutingState,
   type KeyFact,
   type ModalScopeState,
+  type ParamValue,
   type PointerFact,
   type PointerRoutingDecision,
   type RoutingDecision,
@@ -76,6 +77,7 @@ import {
   createInputCommandBindings,
   dispatchIntent,
   EMPTY_DISPATCH_LEDGER,
+  isLocalCommandId,
   type CommandSink,
   type ControlBinding,
   type DispatchLedger,
@@ -125,6 +127,9 @@ export interface PlatformActionRequest {
   readonly captureRegionId: string | null
 }
 
+/** 局部动作处理器（**平台动作**，不产生领域命令）。 */
+export type LocalActionHandler = (commandId: string, params: Readonly<Record<string, ParamValue>>) => boolean
+
 /** 一次事件处理的完整产出。 */
 export interface InputEventResult {
   readonly token: number
@@ -171,6 +176,19 @@ export interface InputSession {
   textProjection(controlId: string): ReturnType<typeof draftProjection> | null
   /** 分配事件 token（适配器每条 DOM 事件取一个）。 */
   nextToken(): number
+  /**
+   * 局部动作处理器（**平台动作**，不产生领域命令）。
+   *
+   * 覆盖面：`modal.close`（Escape 关闭弹窗）一类"只影响呈现/焦点"的动作。
+   * 处理器返回 `true` 表示已处理；返回 `false` 表示本层不认（记入诊断，不静默）。
+   *
+   * 为什么不是组件各自挂 window 监听：那正是 `wikiInputShield.bindWikiModalEscape`
+   * 的形态（第三条 capture keydown）。集中在这里后，#249 §19.1 的"Enter/Escape
+   * 不重复消费"由**同一个** token 去重表保证。
+   */
+  setLocalActionHandler(handler: LocalActionHandler): void
+  /** 未被任何局部处理器认领的动作（诊断：防止"命令发出去没人接"的静默失败）。 */
+  readonly unhandledLocalActions: readonly string[]
   readonly trace: readonly InputTraceEntry[]
   readonly counters: InputCounters
   readonly routing: InputRoutingState
@@ -217,10 +235,31 @@ export function createInputSession(options: InputSessionOptions): InputSession {
 
   function dispatch(intent: CommandIntent | null, eventToken: number): DispatchOutcome | null {
     if (intent === null) return null
+    // `local.*` 是**旧 operator / UI 切换**的转发项，不经 `application/inputCommands`
+    // 的领域映射（它们不写文档）。直接交给局部动作处理器；无人认领即记录（不静默）。
+    if (isLocalCommandId(intent.commandId)) {
+      const handled = localActionHandler !== null && localActionHandler(intent.commandId, intent.params)
+      if (!handled) noteUnhandled(intent.commandId, eventToken)
+      return Object.freeze({ status: 'local', commandId: intent.commandId, params: intent.params, ledger })
+    }
     const outcome = dispatchIntent(sink, ledger, eventToken, intent, bindings, { capabilities: capabilitySource() })
     ledger = outcome.ledger
+    // 局部动作（`local`）**不产生领域命令**，但要交给平台动作处理器执行
+    // （例如 Escape → 关闭弹窗）。未认领的动作记入诊断而不是静默丢弃。
+    if (outcome.status === 'local') {
+      const handled = localActionHandler !== null && localActionHandler(outcome.commandId, outcome.params)
+      if (!handled) noteUnhandled(outcome.commandId, eventToken)
+    }
     return outcome
   }
+
+  function noteUnhandled(commandId: string, eventToken: number): void {
+    unhandledLocalActions.push(`${commandId}@${eventToken}`)
+    if (unhandledLocalActions.length > 64) unhandledLocalActions.splice(0, unhandledLocalActions.length - 64)
+  }
+
+  let localActionHandler: LocalActionHandler | null = null
+  const unhandledLocalActions: string[] = []
 
   /** 草稿效果 → 领域命令。`commit` 是**唯一**触碰领域的形状。 */
   function runTextEffects(effects: readonly TextDraftEffect[], eventToken: number): readonly DispatchOutcome[] {
@@ -490,6 +529,12 @@ export function createInputSession(options: InputSessionOptions): InputSession {
     textProjection(controlId) {
       const c = text.controls[controlId]
       return c ? draftProjection(c) : null
+    },
+    setLocalActionHandler(handler) {
+      localActionHandler = handler
+    },
+    get unhandledLocalActions() {
+      return Object.freeze([...unhandledLocalActions])
     },
     nextToken,
     get trace() {

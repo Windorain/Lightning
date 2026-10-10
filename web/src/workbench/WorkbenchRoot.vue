@@ -75,11 +75,14 @@ import WikiModalsHost from '@/workbench/components/WikiModalsHost.vue'
 import MenubarFullscreenButton from '@/workbench/components/MenubarFullscreenButton.vue'
 import MenubarWikiStatus from '@/workbench/components/MenubarWikiStatus.vue'
 import {
-  bindWikiWorkbenchKeyBubble,
+  bindWorkbenchKeyBubbleOnWikiHost,
   getFloatingUiTeleportTarget,
   getWorkbenchAppElement,
-} from '@/wiki/wikiInputShield'
+} from '@/adapters/shellDom'
 import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
+import { ALL_CAPABILITIES } from '@/application/commands'
+import { assembleInput, type AssembledInput } from '@/composition/assembleInput'
+import { workbenchCommandSink, workbenchInputHotkeys } from '@/workbench/inputHotkeys'
 
 // ── 装配（B5 #7 的替代物：profile 是值，不是模块级全局）────────────────────
 import { CAPABILITY } from '@/composition/modules'
@@ -152,11 +155,73 @@ ctx.wm.chrome.hideContextMenu = () => hideContextMenu(contextMenu)
 
 let unbindChrome: (() => void) | null = null
 let unbindWikiKeyBubble: (() => void) | null = null
+let inputAssembly: AssembledInput | null = null
 const floatingUiTeleportTo = ref<HTMLElement | 'body'>('body')
 
 function refreshFloatingUiTeleport(): void {
-  // B5 #7：旧实现内部 `isWikiHostProfile()`；现在传**端口**（`shell.pageKeyboard`）
+  // B5 #7：旧实现内部 `isWikiHostProfile()`；现在传**端口**（`shell.pageKeyboard`）。
+  // P7 合流裁决：保留 P6 的端口形状，**不**回退成 `isWikiHost` 布尔 —— 见
+  // `adapters/shellDom.ts` 文件头"宿主差异是端口，不是宿主名"。
   floatingUiTeleportTo.value = getFloatingUiTeleportTarget(shell.pageKeyboard)
+}
+
+/**
+ * 装配 P7 输入面（**唯一**的 document 事件挂载点）。
+ *
+ * ## B5 退役矩阵 #12（输入面）的装配侧删除记录
+ *
+ * 删除前，键盘由**两条** `document` capture 监听分别处理：
+ * `bindChromeDom`（本组件在下面调用）与 `bindViewportDom`（各视口的
+ * `host.attachViewport`）。两者都先问 `wikiInputShield` 的全局布尔、再问
+ * `isEditingTarget(event.target)`，然后各自 `dispatch`。
+ *
+ * 现在键盘只有**一个**入口：本函数建的 `InputBinding`。`bindChromeDom` 保留
+ * 的只是鼠标位置事实（见 `runtime/chromeBinder.ts` 的文件头）。
+ *
+ * 若有人再加一条 `keydown`，`claimExclusive` 会抛错，e2e 的挂载计数也会失败。
+ */
+function assembleWorkbenchInput(): void {
+  const hotkeys = workbenchInputHotkeys(ctx)
+  inputAssembly = assembleInput({
+    // P10 收口点：把老 operator 转发换成 `editorCommandSink(editor)` 即完成
+    // "输入 → P1 唯一写通路"的最后一跳。当前实现逐条列明转发项，
+    // 未接通的命令 ID 显式 `UnsupportedOperation`（不静默丢弃）。
+    sink: workbenchCommandSink(ctx),
+    // 工作台 profile 具备全部能力（查看器 profile 的裁剪归 P9/P11 的装配）
+    capabilities: ALL_CAPABILITIES,
+    // "坐标 → Area"：用命中元素所属的 region 容器（`data-wm-region`）判定。
+    // Area 布局的权威归属是 P6；P7 只消费这个事实。
+    hitTest: (x, y, target) => {
+      if (target instanceof Element) {
+        const owner = target.closest('[data-wm-region]') as HTMLElement | null
+        const rid = owner?.dataset.wmRegion
+        if (rid) return rid
+      }
+      if (typeof document !== 'undefined') {
+        const el = document.elementFromPoint(x, y)
+        const holder = el?.closest('[data-wm-region]') as HTMLElement | null
+        return holder?.dataset.wmRegion ?? null
+      }
+      return null
+    },
+    areaHotkeys: hotkeys.areaHotkeys,
+    appHotkeys: hotkeys.appHotkeys,
+    localActions: hotkeys.localActions,
+    owner: 'workbench',
+    onResume: ({ resumeBaseline, droppedTicks }) => {
+      // 恢复**不**追赶：只把基线记进诊断（#249 §9）。绝不在此补跑历史 tick。
+      ctx.log.info('输入', `页面恢复：基线=${Math.round(resumeBaseline)}ms 丢弃 ${droppedTicks} tick`)
+    },
+  })
+  ctx.wm.inputPort = inputAssembly.port
+  // e2e/诊断探针（只读；不含任何领域状态）
+  ;(window as any).__p7_input__ = {
+    counters: () => inputAssembly?.session.counters,
+    trace: () => inputAssembly?.session.trace,
+    modalScopeId: () => inputAssembly?.session.routing.modal.scopeId ?? null,
+    textProjection: (controlId: string) => inputAssembly?.session.textProjection(controlId) ?? null,
+    unhandledLocalActions: () => inputAssembly?.session.unhandledLocalActions ?? [],
+  }
 }
 
 /**
@@ -186,12 +251,16 @@ provide('workbenchSettingsOpen', settingsOpen)
 const viewportWorkspace = computed(() => workspace.value === 'preview' || workspace.value === 'wiki')
 
 onMounted(async () => {
+  // 输入面**先**装配：宿主启动期间的按键也应走同一条路由
+  assembleWorkbenchInput()
   unbindChrome = bindChromeDom(ctx, createChromeKeymapHandler(CHROME_REGION, () => ctx))
   await host.start()
   refreshFloatingUiTeleport()
-  if (wikiHost) {
+  // B5 #7 保留：宿主差异走**端口**（`shell.pageKeyboard`）而不是宿主名。
+  // 端口为 `null`（= 无宿主接管页面键盘）时该函数自身不安装任何监听。
+  {
     const app = getWorkbenchAppElement()
-    if (app) unbindWikiKeyBubble = bindWikiWorkbenchKeyBubble(app)
+    if (app) unbindWikiKeyBubble = bindWorkbenchKeyBubbleOnWikiHost(app, shell.pageKeyboard)
   }
   document.addEventListener('fullscreenchange', refreshFloatingUiTeleport)
 })
@@ -201,6 +270,10 @@ onBeforeUnmount(() => {
   unbindChrome = null
   unbindWikiKeyBubble?.()
   unbindWikiKeyBubble = null
+  inputAssembly?.dispose()
+  inputAssembly = null
+  if (ctx.wm.inputPort !== null) ctx.wm.inputPort = null
+  delete (window as any).__p7_input__
   document.removeEventListener('fullscreenchange', refreshFloatingUiTeleport)
 })
 

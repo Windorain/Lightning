@@ -130,8 +130,11 @@ export const LAYER_DESTINATIONS = [
     layer: 'composition',
     legacySources: [],
     note: '装配（无旧对应物，本次新建）',
-    // P7（#258）登记输入面装配根；P6 已登记新装配根（下方条目如有重叠以 81f6873 为准）。
-    activeSubpaths: ['composition/assembleInput.ts'],
+    // **不**声明 `activeSubpaths`：`composition/` 是**整层新目录**（无撞名），
+    // 整层都是闸门执行面。P7 曾为登记 `assembleInput.ts` 而打算加 activeSubpaths ——
+    // 那会**收窄**执行面、把 P6/P9 已建的 `modules.ts`/`profiles.ts`/`resolver.ts`/
+    // `seams.ts`/`shell.ts` 排除在 `corePurity` 之外（静默回归）。
+    // 见 `resolveGateLayers`：`activeSubpaths` 缺省 = 整目录纳入。
   },
   { layer: 'entries', legacySources: ['main*.ts'], note: '薄启动入口 → 现 src/main*.ts 在根' },
 ]
