@@ -42,7 +42,14 @@ const { extractGlobalRefs } = require_(path.join(process.cwd(), 'tests', 'archit
   extractGlobalRefs: (absPath: string) => { name: string; line: number }[]
 }
 
-/** 纯核心层（A02/A01 的判定面，逐条对应 `LAYER_DESTINATIONS` 的 `corePurity`）。 */
+/**
+ * 纯核心层（A02/A01 的判定面，逐条对应 `LAYER_DESTINATIONS` 的 `corePurity`）。
+ *
+ * P4（#255）追加六个文件。**为什么 P4 的新层必须进这张表**：纯性（不读全局时钟/
+ * 随机/DOM/IO、不改输入）是本批最容易被破坏的性质 —— 动画与求值天然想读
+ * `performance.now()`、想累积 `elapsed += delta`。列表不覆盖它们，
+ * 等于把"最容易违约的地方"排除在判据之外。
+ */
 const PURE_CORE_FILES = [
   'domain/identity.ts',
   'domain/errors.ts',
@@ -55,12 +62,18 @@ const PURE_CORE_FILES = [
   'domain/spatial.ts',
   'domain/anchor.ts',
   'domain/selection.ts',
+  // P4（#255）：时间/轨道/采样、纹理序列纯采样、通道装配 —— 同为纯核心
+  'domain/animation.ts',
+  'domain/materials.ts',
+  'domain/multiblock.ts',
   'application/state.ts',
   'application/commands.ts',
   'application/queries.ts',
+  'application/evaluation.ts',
   'runtime/execution.ts',
   'runtime/scheduling.ts',
   'runtime/effects.ts',
+  'runtime/evaluation.ts',
 ]
 
 const WEB_SRC_ROOT = path.join(process.cwd(), 'src')

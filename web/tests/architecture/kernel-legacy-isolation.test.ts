@@ -37,12 +37,16 @@ import { describe, expect, it } from 'vitest'
 import { buildModuleGraph, WEB_ROOT, SRC_ROOT, extractImports } from './module-graph.mjs'
 
 /**
- * 新内核（P1 交付）的文件清单，相对 `src/`。
+ * 新内核的文件清单，相对 `src/`。
  *
  * 与 `boundary-rules.mjs` 的 `LAYER_DESTINATIONS.runtime.activeSubpaths` 同源 ——
  * 两处都列同一批文件是**故意**的：若哪天有人新增 `runtime/xxx.ts` 而忘了登记，
  * 本文件与扫描器会**同时**不覆盖它（而不是一处覆盖一处漏），
  * 由 `kernel-file-registry.test` 那条断言逼着两处一起改。
+ *
+ * P4（#255）追加：`domain/animation.ts`、`domain/materials.ts`、`domain/multiblock.ts`
+ * （domain 为整层迁移，故不需登记进 `activeSubpaths`，但必须在此被隔离闸门覆盖）、
+ * `application/evaluation.ts`、`runtime/evaluation.ts`。
  */
 const KERNEL_FILES = [
   'domain/identity.ts',
@@ -56,12 +60,18 @@ const KERNEL_FILES = [
   'domain/spatial.ts',
   'domain/anchor.ts',
   'domain/selection.ts',
+  // P4（#255）时间/轨道/采样、纹理序列、通道装配 + 求值面
+  'domain/animation.ts',
+  'domain/materials.ts',
+  'domain/multiblock.ts',
   'application/state.ts',
   'application/commands.ts',
   'application/queries.ts',
+  'application/evaluation.ts',
   'runtime/execution.ts',
   'runtime/scheduling.ts',
   'runtime/effects.ts',
+  'runtime/evaluation.ts',
 ]
 
 /**
@@ -414,14 +424,18 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
         'closeDocument',
         'commitInteraction',
         'deleteObject',
+        'insertKeyframe',
         'openDocument',
+        'publishDefault',
         'redo',
+        'removeKeyframe',
         'save',
         'saveCompleted',
         'select',
         'setChannelValue',
         'setProperty',
         'setTime',
+        'setTrackEnabled',
         'setTransform',
         'undo',
         'updateInteraction',
