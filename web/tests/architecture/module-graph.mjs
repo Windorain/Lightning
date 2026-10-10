@@ -279,8 +279,39 @@ export function extractGlobalRefs(absPath) {
     return false
   }
 
+  /**
+   * 该 `Identifier` 是否是**声明位置的名字**（而非对自由变量的引用）。
+   *
+   * P1 补：一个接口/类型字面量里的**成员名**也是声明，不是引用 ——
+   * `readonly document: () => Result<T>` 里的 `document` 只是在描述一个成员，
+   * 读它不会碰 DOM。此前只排除了属性访问与对象字面量键，于是 **P1 新建的
+   * `application/queries.ts` 被自己的 DOM 闸门判红**（`workspace.document()` 的签名）。
+   * 那条 finding 是**假红**：声明位置不可能读 `document` 全局。
+   *
+   * 判定必须精确到"名字位"，否则会把真正危险的形态一起漏掉 ——
+   * `document.body`（属性访问的**对象**侧）与裸 `document` 仍会被抓到，
+   * 见 `boundary-scan-negative-control.test.ts` 的对照用例。
+   */
+  const isDeclaredName = (node) => {
+    const p = node.parent
+    if (!p) return false
+    if (ts.isPropertySignature(p) && p.name === node) return true
+    if (ts.isMethodSignature(p) && p.name === node) return true
+    if (ts.isPropertyDeclaration(p) && p.name === node) return true
+    if (ts.isMethodDeclaration(p) && p.name === node) return true
+    if (ts.isGetAccessorDeclaration(p) && p.name === node) return true
+    if (ts.isSetAccessorDeclaration(p) && p.name === node) return true
+    if (ts.isEnumMember(p) && p.name === node) return true
+    if (ts.isImportSpecifier(p) && p.propertyName === node) return true
+    if (ts.isExportSpecifier(p) && (p.propertyName === node || p.name === node)) return true
+    // 接口/类/类型别名的**名字**本身（`interface Document {}`）也不是引用
+    if (ts.isInterfaceDeclaration(p) && p.name === node) return true
+    if (ts.isTypeAliasDeclaration(p) && p.name === node) return true
+    return false
+  }
+
   const visit = (node) => {
-    if (ts.isIdentifier(node) && !declared.has(node.text) && !isMemberName(node)) {
+    if (ts.isIdentifier(node) && !declared.has(node.text) && !isMemberName(node) && !isDeclaredName(node)) {
       const { line, character } = sf.getLineAndCharacterOfPosition(node.getStart(sf))
       const p = node.parent
       refs.push({

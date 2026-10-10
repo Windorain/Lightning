@@ -38,17 +38,17 @@ import {
   LAYERS,
   RETIREMENT_OWNERS,
   collectLegacyDebt,
+  corePurityFileSet,
+  isGateFile,
   resolveGateLayers,
   topLayer,
 } from './boundary-rules.mjs'
-import { buildAstIndex, buildModuleGraph, WEB_ROOT } from './module-graph.mjs'
+import { buildAstIndex, buildModuleGraph, WEB_ROOT, SRC_ROOT } from './module-graph.mjs'
 
 const argv = process.argv.slice(2)
 const asJson = argv.includes('--json')
 const outIdx = argv.indexOf('--out')
 const outPath = outIdx >= 0 ? argv[outIdx + 1] : null
-
-const SRC_ROOT = path.join(WEB_ROOT, 'src')
 
 function isProductionRel(rel) {
   if (rel.startsWith('..')) return false
@@ -65,18 +65,20 @@ function main() {
   const productionFiles = files.filter(produced)
   const productionFacts = facts.filter((f) => produced(f.fromFile))
 
-  const { present: gateLayers, absent, legacyCollisions } = resolveGateLayers(SRC_ROOT)
-  const ctx = { srcRoot: SRC_ROOT, webRoot: WEB_ROOT, gateLayers, layerCollisions: legacyCollisions }
+  const { active, absent, legacyCollisions } = resolveGateLayers(SRC_ROOT)
+  const gateFiles = new Set(active)
+  const coreFiles = corePurityFileSet(SRC_ROOT)
+  const ctx = { srcRoot: SRC_ROOT, webRoot: WEB_ROOT, gateFiles, gateLayers: LAYERS, coreFiles, layerCollisions: legacyCollisions }
+
+  const isGate = (f) => isGateFile(path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/'), gateFiles)
 
   // ── 闸门 ──
   const gateReports = []
   const findings = []
   for (const rule of GATE_RULES) {
-    const evaluatedFiles = rule.layerDependent
-      ? productionFiles.filter((f) =>
-          gateLayers.includes(topLayer(path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/'))),
-        ).length
-      : productionFiles.length
+    const evaluatedFiles = rule.needsAst
+      ? productionFiles.filter(isGate).length
+      : productionFiles.filter((f) => (rule.id.includes('core-no') ? coreFiles.has(path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/')) : isGate(f))).length
     const hits = rule.check(productionFacts, ctx)
     findings.push(...hits)
     gateReports.push({
@@ -85,7 +87,7 @@ function main() {
       criterion: rule.criterion,
       findings: hits.length,
       evaluatedFiles,
-      vacuous: rule.layerDependent === true && evaluatedFiles === 0,
+      vacuous: evaluatedFiles === 0,
     })
   }
 
@@ -98,9 +100,7 @@ function main() {
     const rec = gateReports.find((r) => r.id === rule.id)
     if (rec) {
       rec.findings = hits.length
-      rec.evaluatedFiles = productionFiles.filter((f) =>
-        gateLayers.includes(topLayer(path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/'))),
-      ).length
+      rec.evaluatedFiles = productionFiles.filter((f) => coreFiles.has(path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/'))).length
       rec.vacuous = rec.evaluatedFiles === 0
     }
   }
@@ -130,7 +130,7 @@ function main() {
     importFacts: productionFacts.length,
     factsByKind,
     externalByPackage,
-    gateLayers,
+    gateFiles: active,
     absentLayers: absent,
     layerCollisions: legacyCollisions,
     layerDestinations: LAYER_DESTINATIONS,
@@ -164,7 +164,8 @@ function renderText(r) {
   L.push(`web 根              : ${r.webRoot}`)
   L.push(`源文件              : ${r.sourceFiles}（生产文件 ${r.productionFiles}）`)
   L.push(`导入事实            : ${r.importFacts}  ${JSON.stringify(r.factsByKind)}`)
-  L.push(`闸门执行面（新分层）: ${r.gateLayers.length ? r.gateLayers.join(', ') : '(无)'}`)
+  L.push(`闸门执行面（新实现文件）: ${r.gateFiles.length ? `${r.gateFiles.length} 个` : '(无)'}`)
+  for (const g of r.gateFiles) L.push(`  · src/${g}`)
   L.push(`尚未建成的目标分层  : ${r.absentLayers.join(', ') || '(无)'}`)
   if (r.layerCollisions.length) {
     L.push(`目录名撞车（不算新层）:`)
@@ -180,7 +181,7 @@ function renderText(r) {
     L.push(`        finding ${rule.findings}｜受检文件 ${rule.evaluatedFiles}`)
     if (rule.vacuous) {
       L.push('        ⚠ 受检文件 = 0：本规则在当前目录结构下**无执行面**，"绿"是空洞真，')
-      L.push('          不构成"边界已生效"的证据。P1 建层后本标记自动消失。')
+      L.push('          不构成"边界已生效"的证据。建层后本标记自动消失。')
     }
   }
   L.push('')
