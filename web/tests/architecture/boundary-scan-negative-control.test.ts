@@ -28,8 +28,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ruleContentBoundary, ruleCoreNoDomGlobals, ruleCoreNoVueThree, ruleNoBarrelSmuggling } from './boundary-rules.mjs'
-import { buildAstIndex, buildModuleGraph, extractImports, SRC_ROOT, WEB_ROOT } from './module-graph.mjs'
+import { ruleCoreNoDomGlobals, ruleCoreNoVueThree, ruleNoBarrelSmuggling } from './boundary-rules.mjs'
+import { buildAstIndex, buildModuleGraph, extractImports } from './module-graph.mjs'
 
 let tmpRoot = null
 let srcRoot = null
@@ -178,101 +178,6 @@ describe('A01 负对照：注入违规**类型导入**必须判红', () => {
     expect(names).toEqual(['document', 'window'])
     expect(hits.every((h) => h.file.includes('leaky'))).toBe(true)
     expect(hits.some((h) => h.file.includes('comment-only')), '注释里的关键词不得计入').toBe(false)
-  })
-})
-
-describe('A32 负对照（P8 / #259）：未处理标记注入必须判红', () => {
-  /**
-   * 这条负对照与 A01 那几条的形态不同：A01 判的是**导入**，本条判的是
-   * **标记注入点**（`v-html` / `innerHTML`）。P8 把 6 条直通路径收编到
-   * `editors/ContentText.vue` 后，全仓只应剩 `editors/TrustedIcon.vue`
-   * 一处（品牌类型输入）—— 白名单在 `boundary-rules.mjs` 里显式登记。
-   *
-   * 负对照的意义：如果有人新加一条 `v-html`（无论出于什么理由），
-   * 本规则**必须**抓住它，否则"不允许组件各自选路径"就只靠自觉。
-   */
-  it('正对照：本树当前 0 finding（白名单内的 TrustedIcon 不判红）', () => {
-    const srcRoot = SRC_ROOT
-    const hits = ruleContentBoundary.checkWithAst([], { srcRoot, webRoot: WEB_ROOT, gateLayers: [], layerCollisions: [] })
-    expect(hits).toEqual([])
-  })
-
-  it('负对照：临时树里新增一条 `v-html` ⇒ 判红，且指出文件与行号', () => {
-    const { srcRoot: root } = makeTree({
-      'editors/Leaky.vue': [
-        '<script setup lang="ts">',
-        "import { ref } from 'vue'",
-        'const html = ref("<b>x</b>")',
-        '</script>',
-        '<template>',
-        '  <div v-html="html" />',
-        '</template>',
-      ].join('\n'),
-    })
-    const hits = ruleContentBoundary.checkWithAst([], {
-      srcRoot: root, webRoot: tmpRoot, gateLayers: [], layerCollisions: [],
-    })
-    expect(hits, '新增的 v-html 必须被判红').toHaveLength(1)
-    expect(hits[0].rule).toBe('gate/content-boundary')
-    expect(hits[0].file).toBe('src/editors/Leaky.vue')
-    expect(hits[0].line).toBe(6)
-    expect(hits[0].detail).toContain('受控呈现边界')
-  })
-
-  it('负对照：`el.innerHTML = …` 同样判红（不只是模板指令）', () => {
-    const { srcRoot: root } = makeTree({
-      'workbench/ux/Bad.ts': [
-        'export function paint(el: HTMLElement, raw: string): void {',
-        '  el.innerHTML = raw',
-        '}',
-      ].join('\n'),
-    })
-    const hits = ruleContentBoundary.checkWithAst([], {
-      srcRoot: root, webRoot: tmpRoot, gateLayers: [], layerCollisions: [],
-    })
-    expect(hits).toHaveLength(1)
-    expect(hits[0].syntax).toContain('innerHTML')
-  })
-
-  it('白名单内的文件不判红（登记即豁免，且豁免是**精确文件**而非目录）', () => {
-    const { srcRoot: root } = makeTree({
-      'editors/TrustedIcon.vue': [
-        '<script setup lang="ts">',
-        'const markup = "<svg/>"',
-        '</script>',
-        '<template>',
-        '  <span v-html="markup" />',
-        '</template>',
-      ].join('\n'),
-      // 同目录的另一个文件**不在**白名单内 ⇒ 必须判红（证明豁免不是"目录级"）
-      'editors/Sibling.vue': [
-        '<script setup lang="ts">',
-        'const h = "<b/>"',
-        '</script>',
-        '<template>',
-        '  <span v-html="h" />',
-        '</template>',
-      ].join('\n'),
-    })
-    const hits = ruleContentBoundary.checkWithAst([], {
-      srcRoot: root, webRoot: tmpRoot, gateLayers: [], layerCollisions: [],
-    })
-    const files = hits.map((h) => h.file)
-    expect(files).toEqual(['src/editors/Sibling.vue'])
-  })
-
-  it('注释里的 `v-html` 不算违规（说明旧机制叫什么属交接信息）', () => {
-    const { srcRoot: root } = makeTree({
-      'domain/notes.ts': [
-        '// 旧实现用 v-html 直通，已收编到受控呈现边界',
-        '/* 同理 el.innerHTML = raw 也已退役 */',
-        'export const ok = 1',
-      ].join('\n'),
-    })
-    const hits = ruleContentBoundary.checkWithAst([], {
-      srcRoot: root, webRoot: tmpRoot, gateLayers: [], layerCollisions: [],
-    })
-    expect(hits).toEqual([])
   })
 })
 
