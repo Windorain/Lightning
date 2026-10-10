@@ -14,7 +14,7 @@ import { hostKey } from '@/runtime/host'
 import type { Host } from '@/runtime/host'
 import { resolveEmbedViewportRegionId, resolveEmbedViewerPreferences } from '@/runtime/embedViewportRegion'
 import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
-import { bindMultiblockMeshSync, useMultiblockChannels } from '@/shared/viewport/useMultiblockChannels'
+import { useMultiblockChannels } from '@/shared/viewport/useMultiblockChannels'
 import { availableDockTabs, defaultDockTab, resolveDockTab, type ViewportDockTab } from '@/shared/viewport/dockTabs'
 import { blockRefFromViewportHover } from '@/runtime/hover'
 import { createEmbedSidebarOutlineMasks } from '@/runtime/embedSidebarOutline'
@@ -66,7 +66,7 @@ const prefs = resolveEmbedViewerPreferences(ctx)
  */
 const mb = useMultiblockChannels(ctx)
 const {
-  isMultiblock, renderDoc, revision,
+  isMultiblock, renderDoc,
   panel: channelPanel,
   setTier: setChannelTier, setChannelValue, setRunstate: setChannelRunstate,
 } = mb
@@ -294,8 +294,9 @@ const activeTab = computed<ViewportDockTab>({
   set: (v: ViewportDockTab) => { _preferredTab.value = v },
 })
 
-// ---- 多方块接线：取值变化 → 装配产物 → DRW 重新解析 + 重建 mesh ----
-bindMultiblockMeshSync(revision, drw)
+// ---- 多方块接线：取值变化经 `ctx.main.requestContentRefresh()` 触发内容重读 ----
+// （原 `bindMultiblockMeshSync(revision, drw)` 已删除：那是"调用方挑该调哪两个函数"的
+//  手工重建链，属 #249 §15 第 5 条删除验收范围。重建范围由呈现层按内容身份决定。）
 /** 渲染定义随装配刷新：让 `vpSlot.definition` 始终等于"当前渲染的网格"（公开观测点） */
 watch(structureDefinition, (d) => { vpSlot.definition.value = d ?? null }, { flush: 'post' })
 

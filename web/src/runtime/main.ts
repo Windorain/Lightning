@@ -15,12 +15,6 @@ import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { RNARegistry } from '@/shared/types'
 import type { ParserRegistryImpl } from '@/context/parserRegistry'
 import { createParserRegistry } from '@/context/parserRegistry'
-export interface ReplaceDocOptions {
-  /** 默认 true；注解等仅改顶层集合时设为 false，避免全量 mesh 重建 */
-  bumpStructEpoch?: boolean
-  /** 默认：仅在新文档或 id 变化时重置帧索引 */
-  resetFrameIndex?: boolean
-}
 
 export interface MainRegistries {
   operators: OperatorRegistry
@@ -38,9 +32,33 @@ export interface MainRegistries {
 
 export class Main {
   readonly doc: Ref<RuntimeDocument | null> = ref(null)
-  readonly structEpoch = ref(0)
   readonly currentFrameIndex = ref(0)
   readonly framesPlaybackIsPlaying = ref(false)
+
+  /**
+   * **内容重读请求**（#249 §15 第 5 条的替代物；原 `structEpoch` 的位置）。
+   *
+   * ## 它与被删除的 `structEpoch` 的本质差别
+   *
+   * | | `structEpoch`（已删） | 本字段 |
+   * |---|---|---|
+   * | 语义 | "我认为该重建了" | "内容可能变了，请**你自己读**" |
+   * | 携带信息 | 无（只有次数） | 无 —— 但它**不是判据**，只是触发器 |
+   * | 谁做判定 | 调用方（推版本） | 呈现层（比较内容身份） |
+   * | 能否伪造"没变" | 能（`bumpStructEpoch: false`） | **不能**（没有设值入口） |
+   *
+   * 关键点：这个计数的**唯一**作用是让呈现层去重读内容。它不参与任何"该不该重建"的判定 ——
+   * 判定全部由 `presentation/contentIdentity` 从数据算出。因此"非内容版本冒充内容变化"
+   * （§15 第 5 条的删除判据）在结构上不再可能：无论本计数怎么变，内容没变就**不会**重建。
+   *
+   * ## 为什么还需要它（而不是只 watch 文档引用）
+   *
+   * 因为 legacy 的编辑路径**原地修改**网格（`Grid.moveBlock` 等），文档对象引用不变，
+   * 单纯的 `watch(docRef)` 察觉不到。这个显式请求覆盖该情形；它是过渡设施，
+   * 由 P1（#252）的受控提交收口为"提交即产生新版本"（届时本字段随之删除）。
+   */
+  readonly contentRefreshTick = ref(0)
+
   readonly registries: MainRegistries
   readonly cameras: Record<CameraMainKey, Ref<ViewportCameraState | null>>
   /** 文档 `meta.embed_initial_view` 的运行时镜像（加载/同步后写入） */
@@ -80,21 +98,35 @@ export class Main {
     )
   }
 
-  replaceDoc(doc: RuntimeDocument | null, options?: ReplaceDocOptions): void {
+  /**
+   * 替换文档。
+   *
+   * 与旧实现的差别：**没有** `bumpStructEpoch` 选项。判断"要不要重建"不是调用方的职权 ——
+   * 呈现层会从文档内容算出身份并自行决定（`presentation/contentIdentity`）。
+   * `resetFrameIndex` 保留：帧索引是**视图状态**，不属于内容判定。
+   */
+  replaceDoc(doc: RuntimeDocument | null, options?: { resetFrameIndex?: boolean }): void {
     const prev = this.doc.value
     this.doc.value = doc
-    if (options?.bumpStructEpoch !== false) {
-      this.structEpoch.value += 1
-    }
     const newDocument = prev === null || (doc !== null && prev?.id !== doc.id)
     const resetFrame = options?.resetFrameIndex ?? newDocument
     if (doc && resetFrame) {
       this.currentFrameIndex.value = 0
     }
+    // 文档引用变了，呈现层需重读内容（这是"内容可能变了"的请求，不是判定）
+    this.contentRefreshTick.value += 1
   }
 
-  bumpEpoch(): void {
-    this.structEpoch.value += 1
+  /**
+   * 请求呈现层**重读内容**（原 `bumpEpoch()` 的位置）。
+   *
+   * 用于原地修改文档/网格后（legacy 编辑路径）通知呈现层。与 `bumpEpoch()` 的区别：
+   *  - 没有"重建"这一含义 —— 它只请求重读；
+   *  - 调用方无法表达"这次不用重建"（旧 `bumpStructEpoch: false` 正是这种补丁）；
+   *  - 内容没变时呈现层**什么也不做**（旧机制必然全量重建）。
+   */
+  requestContentRefresh(): void {
+    this.contentRefreshTick.value += 1
   }
 }
 

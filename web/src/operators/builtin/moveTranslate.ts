@@ -326,7 +326,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                ctx.main.bumpEpoch()
+                ctx.main.requestContentRefresh()
               },
               undo: () => {
                 for (const m of moves) grid.moveBlock(m.to, m.from)
@@ -343,7 +343,7 @@ export const MoveOperator: OperatorType = {
                     : item
                 })
                 sel.items.value = new Set(newItems)
-                ctx.main.bumpEpoch()
+                ctx.main.requestContentRefresh()
               },
             })
           }
