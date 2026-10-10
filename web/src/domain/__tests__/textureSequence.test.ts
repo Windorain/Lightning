@@ -343,6 +343,99 @@ describe('A28 texture-instance-resource：相位按实例生效、资源不复�
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// A27 的命名负对照：「各视口累加 delta」必须与纯采样判然不同
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('A27 负对照「各视口累加 delta」（#255 验收清单明文点名的一项）', () => {
+  /**
+   * 旧机制的**忠实复刻**（不是"随手抛错"）：两个视口各自持有一个累积器，
+   * 每次绘制把"距上一帧的 dt"加进去，用累积量定位帧。
+   *
+   * 这正是 `useMaterialAnimation` 与 `render/materials/simpleMaterialLibrary` 的形态
+   * （`elapsed += delta` / `accMs += dtMs`）。把复刻放在测试里，是为了让
+   * "新实现与旧机制**行为不同**"成为一个可断言的事实 —— 否则"我们换掉了它"
+   * 只是口头声明。
+   */
+  function makeAccumulatingViewport(frames: readonly { index: number; durationSeconds: number }[]) {
+    let acc = 0
+    let current = 0
+    return {
+      /** 每次"绘制"推进一次（视口自己的时钟）。 */
+      tick(deltaSeconds: number): number {
+        acc += deltaSeconds
+        const dur = frames[current].durationSeconds
+        while (acc >= dur) {
+          acc -= dur
+          current = (current + 1) % frames.length
+        }
+        return frames[current].index
+      },
+      get position(): number {
+        return acc
+      },
+    }
+  }
+
+  const FRAMES = [
+    { index: 0, durationSeconds: 1 },
+    { index: 1, durationSeconds: 2 },
+    { index: 2, durationSeconds: 0.5 },
+  ] as const
+
+  it('**负对照**：累加 delta 会在**帧边界**上漂移，使同一时刻得到不同帧', () => {
+    // 累积法的病灶不是"总和算错"，而是**浮点求和顺序/分块不同 ⇒ 边界判定不同**。
+    // 这解释了为什么"各视口累加 delta"必然让双视口不一致：
+    // 每个视口按**自己的**绘制节奏分块累加，于是同一个时刻在边界上分道扬镳。
+    const whole = makeAccumulatingViewport(FRAMES)
+    const chunked = makeAccumulatingViewport(FRAMES)
+
+    // 两者都推进"逻辑上的 1.0 秒"（第 1 项 [0,1) 的边界）
+    whole.tick(1.0)
+    for (let i = 0; i < 10; i++) chunked.tick(0.1)
+
+    // 浮点求和：十次 0.1 之和是 0.9999999999999999 < 1.0 ⇒ 分块者仍在第 0 项。
+    expect(0.1 * 10, '这里记录的是浮点事实本身').toBeCloseTo(1, 12)
+    expect(
+      whole.tick(0) === chunked.tick(0),
+      '累加 delta 在边界上漂移：同一时刻得到不同帧 —— 这就是要判红的形态',
+    ).toBe(false)
+    expect(whole.tick(0)).toBe(1)
+    expect(chunked.tick(0)).toBe(0)
+  })
+
+  it('新实现**不**具有该病灶：同一时间恒同帧，与如何到达无关', () => {
+    const seq = seqUneven()
+    // 新实现的时间是**显式值**（`TimeValue`），不是累加出来的数：
+    // 因此"一次给 1.0"与"分十次给到 1.0"到达的是**同一个**时间 ⇒ 同一帧。
+    const atBoundary = sample(seq, 1)
+    expect(atBoundary.frame, 't=1.0 恰在边界 ⇒ 半开区间取下一项').toBe(1)
+    // 无论之前求过多少次、什么顺序（没有状态被累积）
+    for (let i = 0; i < 10; i++) sample(seq, i * 0.1)
+    expect(sample(seq, 1), '到达路径不影响结果（无累积状态）').toEqual(atBoundary)
+  })
+
+  it('新实现：同一场景时间下两消费者**恒**相同（与绘制节奏无关）', () => {
+    const seq = seqUneven()
+    const atSameTime = (): readonly unknown[] => [sample(seq, 2.1), sample(seq, 2.1)]
+    const [x, y] = atSameTime()
+    expect(x, '同一时间的两份样本必须逐位相同').toEqual(y)
+    // 无论中间"绘制"过多少次、以什么节奏（新实现里绘制不改变时间来源）
+    for (let i = 0; i < 37; i++) sample(seq, i * 0.17)
+    expect(sample(seq, 2.1), '穿插任意多次采样后，同一时间仍是同一结果').toEqual(x)
+  })
+
+  it('跳帧（直接给时间）与"累加到该时间"在新实现下**同结果**（旧机制下会不同）', () => {
+    const seq = seqUneven()
+    // 跳帧：直接求 t=3.2
+    const jumped = sample(seq, 3.2)
+    // "累加"到 3.2（新实现里这只是一串不同时间的采样，最后一次落在 3.2）
+    let last = sample(seq, 0)
+    for (let t = 0.1; t <= 3.2 + 1e-9; t += 0.1) last = sample(seq, Math.min(t, 3.2))
+    expect(last).toEqual(jumped)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 时间绑定：runtime 是显式可选能力
 // ─────────────────────────────────────────────────────────────────────────────
 
