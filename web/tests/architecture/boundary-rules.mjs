@@ -305,12 +305,153 @@ export const ruleNoPrivateCrossLayer = {
   },
 }
 
-/** 闸门规则集 —— 全部必须 0 finding。 */
+// ─────────────────────────────────────────────────────────────────────────────
+// 闸门规则 5：外部内容只能经受控呈现边界进 DOM（P8 / #259 A32）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 允许出现标记注入的**唯一**位置白名单（`web/` 相对路径）。
+ *
+ * 为什么这条规则必须存在：`inspection of innerHTML/v-html` 是**唯一**能
+ * 静态判定的"外部内容直通"指纹。P8 把 6 条直通路径收编后，全仓应只剩
+ * `editors/TrustedIcon.vue` 一处 —— 它的输入是品牌类型 `TrustedIconTemplate`
+ * （只能由 `domain/trustedIcon.ts` 的可信构造口产出），不是外部文本。
+ *
+ * 这条白名单是**精确**的（不是"某目录下都可以"）：新增一条即必须在
+ * 本文件显式登记理由，否则扫描判红。这正是 #259「不允许组件各自选路径」
+ * 的静态执行面。
+ */
+export const CONTENT_MARKUP_ALLOWLIST = [
+  {
+    file: 'src/editors/TrustedIcon.vue',
+    because: '可信编译期图标（品牌类型 TrustedIconTemplate 的唯一消费者）；内联 SVG 必须经标记注入才能渲染',
+  },
+]
+
+/** 匹配 `v-html` 绑定 / `innerHTML` / `outerHTML` / `insertAdjacentHTML` 赋值。 */
+const MARKUP_INJECTION_RE = /\bv-html\b|\.\s*innerHTML\s*=|\.\s*outerHTML\s*=|insertAdjacentHTML\s*\(/
+
+export const ruleContentBoundary = {
+  id: 'gate/content-boundary',
+  title: '外部内容只能经受控呈现边界进 DOM（不收编即判红）',
+  criterion: '#259 A32「未处理字符串直传 innerHTML/v-html 判红」；#249 §19.6',
+  layerDependent: false,
+  /**
+   * **必须为 true**：`scan-boundaries.mjs` 只对 `needsAst` 的规则调用
+   * `checkWithAst`。少了这一行，规则在报告里会显示"受检文件 0"式的**假绿**
+   * —— 本规则初版正是如此（扫描器报绿，而同批的负对照测试却抓到真违规，
+   * 两者不一致才暴露出来）。`boundary-scan.test.ts` 因此额外断言
+   * "每条 needsAst 规则都真的被判据覆盖"。
+   */
+  needsAst: true,
+  check() {
+    return []
+  },
+  /**
+   * 扫标记注入点。
+   *
+   * 覆盖面：`v-html`（模板指令）与 `innerHTML` / `outerHTML` /
+   * `insertAdjacentHTML`（脚本里的命令式注入）。前者只在 `.vue` 模板里，
+   * 后两者在脚本里 —— 所以本规则按**整文件**扫，而不是只看 script 块。
+   *
+   * 注释处理是本规则的关键细节：
+   *  - **必须**剥掉注释，否则"文档里说明旧机制叫什么"会被判违规，
+   *    逼着实现者删掉交接信息（把治理手段变成知识损失）；
+   *  - 剥注释要**跨行**（块注释、HTML 注释），逐行判断 `trim().startsWith('*')`
+   *    会漏掉 `<!-- \n v-html \n -->` 这类跨行注释（实测假红）。
+   */
+  checkWithAst(_astIndex, ctx) {
+    const bad = []
+    for (const rel of collectProductionSourceFiles(ctx.srcRoot)) {
+      if (CONTENT_MARKUP_ALLOWLIST.some((a) => a.file === `src/${rel}`)) continue
+      const text = fs.readFileSync(path.join(ctx.srcRoot, rel), 'utf8')
+      const code = stripCommentsForScan(text)
+      const lines = code.split('\n')
+      lines.forEach((line, i) => {
+        if (!MARKUP_INJECTION_RE.test(line)) return
+        const trimmed = line.trim()
+        bad.push({
+          rule: ruleContentBoundary.id,
+          title: ruleContentBoundary.title,
+          criterion: ruleContentBoundary.criterion,
+          file: `src/${rel}`,
+          line: i + 1,
+          column: 1,
+          specifier: 'v-html/innerHTML',
+          kind: 'markup-injection',
+          isTypeOnly: false,
+          syntax: trimmed.slice(0, 160),
+          detail:
+            '外部内容必须以受控呈现边界（editors/ContentText）+ 允许列表（domain/textContent）呈现；'
+            + '若确需保留标记注入，在 boundary-rules.mjs 的 CONTENT_MARKUP_ALLOWLIST 登记理由',
+        })
+      })
+    }
+    return bad
+  },
+}
+
+/**
+ * 剥掉注释，让扫描只看**可执行/可渲染的代码**。
+ *
+ * 必须跨行处理三类注释：
+ *  - `/* … *​/`（块注释，本项目文档块大量使用）；
+ *  - `// …`（行注释，注意别误伤 `https://`）；
+ *  - `<!-- … -->`（`.vue` 模板注释）。
+ *
+ * 为什么不能逐行 `trim().startsWith('*')`：那会漏掉模板里的多行 HTML 注释
+ * （`<!--` 与 `-->` 各占一行、内容行不以 `*` 开头），既产生假红，又让
+ * "在注释里保留交接说明"这条正当做法失效。替换字符保留换行，
+ * 因此报告里的行号仍对得上真实文件。
+ */
+function stripCommentsForScan(text) {
+  return text
+    .replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
+}
+
+/** 收集 `src/` 下的生产源文件（相对 `src/`，正斜杠）—— 排除测试与声明文件。 */
+function collectProductionSourceFiles(srcRoot) {
+  const out = []
+  const walk = (dir, rel) => {
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const childRel = rel === '' ? e.name : `${rel}/${e.name}`
+      if (e.isDirectory()) {
+        if (e.name === '__tests__' || e.name === 'node_modules') continue
+        walk(path.join(dir, e.name), childRel)
+        continue
+      }
+      if (!/\.(ts|tsx|mts|vue)$/.test(e.name)) continue
+      if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(e.name)) continue
+      if (/\.d\.ts$/.test(e.name)) continue
+      out.push(childRel)
+    }
+  }
+  walk(srcRoot, '')
+  return out.sort()
+}
+
+/**
+ * 闸门规则集 —— 全部必须 0 finding。
+ *
+ * 规则 5（`content-boundary-gate`）由 **P8（#259）** 新增：它是"新层目录成为闸门
+ * 执行面后 0 finding"这条要求的落地观察点之一 —— P8 建了 `domain/`、`application/`、
+ * `editors/`，于是前四条规则从"空洞真"变成真实执行面，同时新增本规则把
+ * "外部内容只能经受控边界进 DOM"变成静态事实。
+ */
 export const GATE_RULES = [
   ruleCoreNoVueThree,
   ruleNoBarrelSmuggling,
   ruleNoPrivateCrossLayer,
   ruleCoreNoDomGlobals,
+  ruleContentBoundary,
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────

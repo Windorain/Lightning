@@ -7,6 +7,7 @@ import RNAWidget from './RNAWidget.vue'
 import OperatorBtn from './OperatorBtn.vue'
 import UIMenu from './UIMenu.vue'
 import ToolTipPreview from './ToolTipPreview.vue'
+import ContentText from '@/editors/ContentText.vue'
 import type { Component } from 'vue'
 
 const widgetRegistry: Record<string, Component> = {
@@ -36,8 +37,11 @@ function renderItem(item: UILayoutItem, prefix: string, index: number): VNode {
       return h(OperatorBtn, { opId: item.id, label: item.label, icon: item.icon, title: item.title, operatorProps: item.props, 'data-layout-id': layoutId })
     case 'label': {
       const cls = item.class ?? 'ux-label'
-      if (item.html) {
-        return h('span', { class: cls, 'data-layout-id': layoutId, innerHTML: item.text })
+      if (item.content) {
+        // 声明式格式化内容：走**公共受控呈现边界**（Markdown + MC 码 → 受控节点）。
+        // 旧实现是 `h('span', { innerHTML: item.text })` —— 任意字符串直通 DOM 标记，
+        // 这是 #259 A32 退役的 6 条直通路径之一（`innerHTML`）。
+        return h(ContentText, { class: cls, text: item.text, mode: 'mc', 'data-layout-id': layoutId })
       }
       return h('span', { class: cls, 'data-layout-id': layoutId }, item.text)
     }

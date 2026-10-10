@@ -99,8 +99,11 @@ export const ThemeToggleOperator: OperatorType = {
 
   exec(ctx) {
     if (ctx.isEmbed()) return
+    // 只改**本实例**设置（#259 A33）：旧实现在这里写 `wm.settings.theme`，
+    // 而当时的 shellSettings 会把值落到 `document.documentElement` 与全局存储键上，
+    // 于是同页另一个实例被迫同主题。现在写入的是实例作用域设置。
     const shell = ctx.getShellSettings()
-    shell.theme.value = shell.theme.value === 'dark' ? 'light' : 'dark'
+    shell.setTheme(shell.theme.value === 'dark' ? 'light' : 'dark')
   },
 }
 
@@ -114,7 +117,7 @@ export const SetLanguageOperator: OperatorType = {
   exec(ctx, props) {
     const lang = props.lang as 'zh' | 'en'
     if (lang !== 'zh' && lang !== 'en') return
-    if (!ctx.isEmbed()) ctx.getShellSettings().lang.value = lang
+    if (!ctx.isEmbed()) ctx.getShellSettings().setLang(lang)
   },
 }
 

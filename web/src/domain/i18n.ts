@@ -1,37 +1,40 @@
 /**
- * 轻量 i18n：从 localStorage 读取语言设置，提供 t() 翻译函数。
+ * 语言与翻译（纯层；#249 §19.7）。
+ *
+ * ## 这里**没有**"活动语言"这个全局状态
+ *
+ * 旧实现（`config/i18n.ts`）有一个模块级 `activeLang`，由
+ * `bindI18nLang(wm.settings.lang)` 在挂载期改写，`t()` 再去读它。后果是
+ * **同页第二个实例挂载时会改掉第一个实例的语言** —— 这正是 A33 的负对照
+ * 「模块级 activeLang…覆盖所有实例」。
+ *
+ * 本模块只提供**纯翻译函数**：`translate(key, lang)` 把语言作为**显式输入**。
+ * "当前实例用什么语言"由实例自己的设置对象持有（见 `domain/instanceSettings.ts`），
+ * 不在这里、也不在任何模块级可变量里。
  */
-import { ref, type Ref } from 'vue'
 
-export type Lang = 'zh' | 'en'
+import type { AppLanguage } from './instanceSettings'
 
-const LS_KEY = 'wsr-wb-lang'
+export type Lang = AppLanguage
 
-/** 默认 ref；Workbench 启动后由 bindI18nLang(wm.settings.lang) 接管 */
-export const currentLang: Ref<Lang> = ref(loadLang())
+/** 应用默认语言（仅在调用方没有给出默认时使用）。 */
+export const DEFAULT_LANG: Lang = 'zh'
 
-let activeLang: Ref<Lang> = currentLang
+/** 支持的语言清单（用于设置 UI 与校验）。 */
+export const SUPPORTED_LANGS: readonly Lang[] = ['zh', 'en']
 
-/** 绑定 WM shell 语言为 t() 唯一读源 */
-export function bindI18nLang(lang: Ref<Lang>): void {
-  activeLang = lang
-  currentLang.value = lang.value
+/** 是否为受支持语言（纯校验；不读存储、不抛异常）。 */
+export function isSupportedLang(value: unknown): value is Lang {
+  return value === 'zh' || value === 'en'
 }
 
-function loadLang(): Lang {
-  try { const v = localStorage.getItem(LS_KEY); if (v === 'zh' || v === 'en') return v } catch { /* */ }
-  return 'zh'
-}
-
-/** Set runtime language. NOTE: also persists to localStorage. */
-export function setLang(v: Lang): void {
-  activeLang.value = v
-  if (activeLang !== currentLang) currentLang.value = v
-  try { localStorage.setItem(LS_KEY, v) } catch { /* */ }
-}
-
-/** 翻译字典 */
-const dict: Record<string, Record<Lang, string>> = {
+/**
+ * 翻译字典。
+ *
+ * 键是**稳定标识**（不是中文文案），与 #249 §19.7「RNA 描述保留翻译键」
+ * 同一口径：改语言不改键，改键才是契约变更。
+ */
+const DICT: Readonly<Record<string, Readonly<Record<Lang, string>>>> = {
   'file': { zh: '文件', en: 'File' },
   'edit': { zh: '编辑', en: 'Edit' },
   'view': { zh: '视图', en: 'View' },
@@ -112,9 +115,22 @@ const dict: Record<string, Record<Lang, string>> = {
   'iconClearMustBeHex': { zh: '图标 clearColor 须为 #RRGGBB', en: 'Icon clearColor must be #RRGGBB' },
 }
 
-/** 获取翻译文本 */
-export function t(key: string): string {
-  const entry = dict[key]
+/** 字典的键清单（供测试对账"键未随语言改变"）。 */
+export const TRANSLATION_KEYS: readonly string[] = Object.keys(DICT)
+
+/**
+ * 纯翻译：`key` + `lang` → 文案。
+ *
+ * **找不到键时回退为键本身**（不是空串、不是英文）：这样"缺键"在 UI 上可见，
+ * 且断言可以稳定地引用键。语言不是受支持值时回退应用默认语言。
+ */
+export function translate(key: string, lang: Lang): string {
+  const entry = DICT[key]
   if (!entry) return key
-  return entry[activeLang.value] ?? key
+  return entry[lang] ?? entry[DEFAULT_LANG] ?? key
+}
+
+/** 该键是否存在于字典（诊断/测试用）。 */
+export function hasTranslation(key: string): boolean {
+  return key in DICT
 }

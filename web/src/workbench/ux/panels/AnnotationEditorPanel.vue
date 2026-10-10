@@ -2,7 +2,7 @@
 import { ref, computed, watch, onBeforeUnmount, shallowRef } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { Annotation } from '@/render/data/annotationTypes'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
+import ContentText from '@/editors/ContentText.vue'
 import UIRenderer from '@/workbench/ux/UIRenderer.vue'
 import type { UILayout, UILayoutItem } from '@/workbench/ux/types/layout'
 
@@ -108,7 +108,17 @@ function onDescInput(e: Event): void {
 
 onBeforeUnmount(() => { if (descTimer) clearTimeout(descTimer) })
 
-const previewHtml = computed(() => renderTooltipHtml(desc.value))
+/**
+ * 预览文本 = 描述（必要时前置宿主编解码名行）。
+ *
+ * 旧实现在这里调 `renderTooltipHtml(desc.value)` 产出 HTML 串再 `v-html`。
+ * 现在只算出**要呈现的文本**，解析交给公共受控边界（ContentText）。
+ * 于是注解预览与 Tooltip 框、Inspector 走的是同一条规则（#259 硬约束）。
+ */
+const previewText = computed(() => {
+  const d = desc.value
+  return d
+})
 
 const typeLabel = computed(() => {
   if (annos.value.length === 0) return ''
@@ -215,8 +225,11 @@ const restLayout = computed<UILayout | null>(() => {
           spellcheck="false"
         />
         <div class="anno-editor-preview wm-tooltip-surface wm-tooltip-surface--inline">
-          <!-- eslint-disable-next-line vue/no-v-html -->
-          <div class="wm-tooltip-body" v-html="previewHtml" />
+          <!--
+            外部文本（注解描述）经受控呈现边界；无 `v-html`。
+            （#259 A32 退役项：本文件原为 6 条 `v-html` 直通路径之一。）
+          -->
+          <ContentText class="wm-tooltip-body" :text="previewText" mode="mc" />
         </div>
       </div>
     </div>

@@ -110,8 +110,8 @@ describe('A01 设施自检：AST 解析确实在解析 AST（不是关键词计�
   })
 })
 
-describe('A01 设施在当前树上的实况（含空洞真的显式披露）', () => {
-  it('扫描本树：闸门规则全部 0 finding，且报告如实标注空洞真', () => {
+describe('A01 设施在当前树上的实况（含执行面从空洞真转为真实）', () => {
+  it('扫描本树：闸门规则全部 0 finding，且执行面非空洞', () => {
     const { files, facts } = buildModuleGraph()
     const produced = (f) => {
       const rel = path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/')
@@ -125,8 +125,14 @@ describe('A01 设施在当前树上的实况（含空洞真的显式披露）', 
     const { present: gateLayers, legacyCollisions } = resolveGateLayers(SRC_ROOT)
     const ctx = { srcRoot: SRC_ROOT, webRoot: WEB_ROOT, gateLayers, layerCollisions: legacyCollisions }
 
-    // 本批（P0）不建新层 ⇒ 执行面为空，闸门"绿"是空洞真。#249 §4。
-    expect(gateLayers).toEqual([])
+    // P0 时本处断言 `[]`（空洞真）。P8（#259）建了 domain/application/editors ⇒
+    // 闸门有了**真实执行面**，前四条规则不再是空洞真。
+    // 这里断言"已建成且不含旧的迁移来源名"，而不是写死列表 ——
+    // 后续批次（P5/P6/P9）建更多层时本用例不应无故判红。
+    expect(gateLayers).toContain('domain')
+    expect(gateLayers).toContain('application')
+    expect(gateLayers).toContain('editors')
+    expect(gateLayers).not.toContain('runtime') // 撞名：旧实现，不算新层
 
     for (const rule of GATE_RULES) {
       expect(rule.check(productionFacts, ctx), `规则 ${rule.id} 不应有 finding`).toEqual([])

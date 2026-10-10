@@ -76,8 +76,17 @@ export interface UILabel {
   kind: 'label'
   text: string
   icon?: string
-  /** Render text as innerHTML instead of text content (for tooltip preview etc.) */
-  html?: boolean
+  /**
+   * Render text as sanitized content instead of plain text (for tooltip preview etc.).
+   *
+   * 改动（#259 A32）：旧字段名是 `html`，语义是"把 `text` 原样当 HTML 注入"
+   * （`UIRenderer` 里 `h('span', { innerHTML: item.text })`）。那是一条
+   * **声明式的 HTML 直通**：任何进入 layout 的字符串都能变成标记。
+   * 现在该开关的含义收窄为"经公共受控呈现边界解析（Markdown + MC 码 → 受控节点）"，
+   * 不再存在 innerHTML 通路。字段改名为 `content`，使旧调用点必须显式改动
+   * （避免"字段还在、语义已换"的静默迁移）。
+   */
+  content?: boolean
   /** Override default CSS class */
   class?: string
 }

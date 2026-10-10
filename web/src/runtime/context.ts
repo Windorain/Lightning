@@ -117,6 +117,22 @@ export class Context {
     return this.wm.settings
   }
 
+  /**
+   * 本实例的翻译（#259 A33）。
+   *
+   * 消费**本实例** `wm.settings.lang`，没有模块级"活动语言"。
+   * 在渲染/计算上下文里调用时会读到 `lang.value`，因此语言切换能触发重渲染；
+   * 同页另一实例的切换**不**影响这里（它有自己的 `wm`）。
+   */
+  t(key: string): string {
+    return this.wm.settings.t(key)
+  }
+
+  /** 本实例的 DOM 作用域标识（供 `id`/`for`/ARIA 引用加后缀，防同页撞车）。 */
+  getScopeId(): string {
+    return this.wm.settings.scopeId
+  }
+
   getSession(): WorkbenchSession | EmbedSession {
     if (!this.screen) throw new Error('screen not available')
     return this.screen.session
