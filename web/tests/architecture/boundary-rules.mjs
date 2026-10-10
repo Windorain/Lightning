@@ -39,13 +39,43 @@ import path from 'node:path'
 /**
  * #249 §4 目标分层，及其**当前代码里的旧对应物**。
  *
- * `legacySources` 用于：(1) 判断该层的"新实现"是否已存在；(2) 在报告中说明迁移来源，
- * 供 #249 §15 退役矩阵的批次对账。
+ * `legacySources` 用于：(1) 在报告中说明迁移来源，供 #249 §15 退役矩阵的批次对账；
+ * (2) 判断"目录存在"是否等于"新层已建成"。
+ *
+ * ## `activeSubpaths` —— 部分迁移层（#250 裁决 2026-10-11，P1 落地）
+ *
+ * 一个层如果**旧实现与新实现同处一个目录**，就不能再用"整个目录"当执行面。
+ * 本工程现有两处：
+ *
+ * | 层 | 情形 |
+ * |---|---|
+ * | `domain` | 旧对应物是 `pure/` + `context/`（**不同目录**），故无此问题 |
+ * | `application` | 旧对应物是 `operators/` + `handlers/` + `events/`（**不同目录**），同上 |
+ * | `runtime` | **撞名**：`web/src/runtime/` 既装旧实现（`renderEngine.ts`/`sessionStore.ts`/`chromeBinder.ts` 等 38 个文件），又要装新的执行/调度/效果三件套 |
+ *
+ * ⇒ 对 `runtime` 这类层，用 `activeSubpaths` **显式列出新实现的路径**；
+ * 只有这些路径属于闸门执行面，其余（旧根文件、`host/`、`hover/`…）是遗留债务。
+ *
+ * ### 为什么是"白名单新路径"而不是"黑名单旧路径"
+ *
+ * 旧 runtime 根目录下的**文件**与新 runtime 根目录下的**文件**同名空间重叠
+ * （都是 `runtime/*.ts`），黑名单无法表达"这些根文件是旧、那三个根文件是新"。
+ * 白名单还把"P1 阶段拥有边界扫描清单"（#250）变成显式事实：新增新实现路径必须登记，
+ * 不登记的文件默认**不算**已迁移 —— 宁可少判（旧文件不因撞名误红），
+ * 也不让一个未登记的文件悄悄冒充新边界。
  */
 export const LAYER_DESTINATIONS = [
   { layer: 'domain', legacySources: ['pure', 'context'], note: '纯业务模型/规则 → 现散在 pure/ + context/' },
   { layer: 'application', legacySources: ['operators', 'handlers', 'events'], note: '命令/查询/属性 → 现散在 operators/ + handlers/' },
-  { layer: 'runtime', legacySources: ['runtime'], note: '**撞名**：旧 runtime/ 是求值+会话实现，新 runtime/ 是执行批次/调度' },
+  {
+    layer: 'runtime',
+    legacySources: ['runtime'],
+    note: '**撞名**：旧 runtime/ 是求值+会话实现，新 runtime/ 是执行批次/调度/效果',
+    // 新实现的**显式**路径（P1 登记；`runtime/host`、`runtime/hover` 与其余根文件仍是旧实现）
+    activeSubpaths: ['runtime/execution.ts', 'runtime/scheduling.ts', 'runtime/effects.ts'],
+    /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议是业务规则，不是呈现。 */
+    corePurity: true,
+  },
   { layer: 'presentation', legacySources: ['render', 'shared'], note: '求值场景→渲染数据 → 现 render/' },
   { layer: 'editors', legacySources: ['workbench', 'viewer', 'embed'], note: '编辑器组件 → 现 workbench/ + viewer/' },
   { layer: 'shells', legacySources: ['workbench', 'embed'], note: '外壳/装配根 → 现混在 workbench/ + embed/' },
@@ -58,32 +88,115 @@ export const LAYER_DESTINATIONS = [
 export const LAYERS = LAYER_DESTINATIONS.map((d) => d.layer)
 
 /**
- * **闸门执行面**：一个目录只有满足下面两条才算"新层已建成"：
- *  1. 目录存在；
- *  2. 未被登记为任何目标分层的 `legacySources` —— 即它不是旧实现的迁移来源。
+ * **闸门执行面的判定**。
  *
- * 例：`runtime/` 存在但被登记为 `runtime` 层的 legacySource ⇒ **不算**闸门执行面。
- * 一个真正的新 `domain/` 目录（无 legacySource 命中）⇒ 算。
+ * 三态（#250 裁决 2026-10-11 起）：
+ *  1. `active`：该层的新实现**路径集合**（`src/<层>/…` 或 `activeSubpaths`）；
+ *  2. `absent`：目录不存在，无执行面；
+ *  3. `collision`：目录存在但**整个目录都不是**新实现（纯撞名，例如 P0 时的 `runtime/`）。
+ *
+ * ## `activeSubpaths` 的语义（部分迁移层）
+ *
+ * 未声明 `activeSubpaths` 的层：目录存在 ⇒ 整层是执行面（`domain`/`application` 的常态）。
+ * 已声明 `activeSubpaths` 的层：**只有列出的路径**是执行面；目录下的其余文件是遗留债务。
+ * 这样 `runtime/` 的 38 个旧文件不会因撞名被判红，而 `runtime/execution.ts` 等真实新实现
+ * **确实**受 `core-no-vue-three` / `core-no-dom-globals` / `no-private-cross-layer` 约束。
+ *
+ * 返回 `{ active, absent, legacyCollisions, collisionLayers }`。
+ * `active` 是**文件路径集合**（相对 `src/`，`'domain/scene.ts'`），
+ * 因为"执行面"的粒度已经不能总是"一整层"。
  */
 export function resolveGateLayers(srcRoot) {
-  const legacyNames = new Set()
-  for (const d of LAYER_DESTINATIONS) for (const s of d.legacySources) legacyNames.add(s)
-  const present = []
+  const active = []
   const absent = []
   const legacyCollisions = []
-  for (const layer of LAYERS) {
+  const collisionLayers = []
+  for (const dest of LAYER_DESTINATIONS) {
+    const layer = dest.layer
     const dir = path.join(srcRoot, layer)
     if (!fs.existsSync(dir)) {
       absent.push(layer)
       continue
     }
-    if (legacyNames.has(layer)) {
+    const subpaths = Array.isArray(dest.activeSubpaths) ? dest.activeSubpaths : null
+    if (subpaths === null) {
+      // 整层迁移完成（或本无旧对应物）⇒ 目录内全部生产文件是执行面
+      for (const rel of collectLayerFiles(srcRoot, layer)) active.push(rel)
+      continue
+    }
+    if (subpaths.length === 0) {
+      // 目录存在但尚未开始迁移：整个目录是旧实现（这正是 P0 时 runtime/ 的情形）
       legacyCollisions.push({ layer, because: '目录名与目标分层相同，但已登记为旧实现的迁移来源' })
-    } else {
-      present.push(layer)
+      collisionLayers.push(layer)
+      continue
+    }
+    // 部分迁移：只把登记的路径纳入执行面
+    const present = []
+    for (const p of subpaths) if (fs.existsSync(path.join(srcRoot, p))) present.push(p)
+    if (present.length === 0) {
+      legacyCollisions.push({ layer, because: '目录名与目标分层相同，但已登记的 activeSubpaths 均不存在' })
+      collisionLayers.push(layer)
+      continue
+    }
+    active.push(...present)
+  }
+  return { active, absent, legacyCollisions, collisionLayers }
+}
+
+/** 递归列出 `src/<layer>/` 下的生产源文件（相对 `src/`，正斜杠）。 */
+function collectLayerFiles(srcRoot, layer) {
+  const out = []
+  const walk = (dir) => {
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) {
+        if (e.name === 'node_modules' || e.name === '__tests__') continue
+        walk(full)
+      } else if (/\.(ts|tsx|mts|vue)$/.test(e.name)) {
+        if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(e.name) || /\.d\.ts$/.test(e.name)) continue
+        out.push(path.relative(srcRoot, full).replace(/[\\/]+/g, '/'))
+      }
     }
   }
-  return { present, absent, legacyCollisions }
+  walk(path.join(srcRoot, layer))
+  return out
+}
+
+/**
+ * 「纯核心」层的**前缀**集合。
+ *
+ * 不是所有闸门执行面都要禁 Vue/Three/DOM：`runtime` 里将来会有 `runtime/evaluation`
+ * 的接线（P4），`presentation`/`editors` 层**必须**能用 Three/Vue。
+ * ⇒ 「禁 Vue/Three/DOM」的判定面由 `LAYER_DESTINATIONS[*].corePurity` 显式声明，
+ * 而不是把所有新层一刀切。
+ */
+export function corePurityFileSet(srcRoot) {
+  const { active } = resolveGateLayers(srcRoot)
+  const core = []
+  for (const dest of LAYER_DESTINATIONS) {
+    if (dest.corePurity !== true && dest.layer !== 'domain' && dest.layer !== 'application') continue
+    for (const rel of active) {
+      if (rel === dest.layer || rel.startsWith(`${dest.layer}/`)) core.push(rel)
+    }
+  }
+  return new Set(core)
+}
+
+/** 某个 `src/` 相对路径是否落在闸门执行面内（两侧都剥离扩展名后比较）。 */
+export function isGateFile(rel, gateFiles) {
+  const strip = (p) => p.replace(/\.(ts|tsx|mts|vue)$/, '')
+  const want = strip(rel)
+  for (const g of gateFiles) {
+    if (g === rel) return true
+    if (strip(g) === want) return true
+  }
+  return false
 }
 
 /** 非相对、非别名说明符 —— 视为**外部包**（node_modules）。 */
@@ -144,7 +257,7 @@ function mkFinding(rule, fact, detail, extra = {}) {
 
 export const ruleCoreNoVueThree = {
   id: 'gate/core-no-vue-three',
-  title: '纯核心层（domain/application）不得依赖 Vue / Three',
+  title: '纯核心层（domain/application，及声明 corePurity 的新执行面）不得依赖 Vue / Three',
   criterion: '#249 §4 导入规则 1/2/6；§14 A01',
   layerDependent: true,
   check(facts, ctx) {
@@ -155,15 +268,18 @@ export const ruleCoreNoVueThree = {
       // 目标可能是外部包（`vue`），此时 resolveInternalTarget 返回 null ——
       // 若用"目标层"判定就会把最常见的一种违规（从 domain 直接 import vue）
       // 整类漏掉。这条 bug 正是由 A01 负对照测试抓出来的。
-      const layer = topLayer(f.fromSrcRel)
-      if (layer !== 'domain' && layer !== 'application') continue
+      //
+      // P1：判定面从"层名前缀"升级为 `ctx.coreFiles`（**文件级**白名单）——
+      // 因为 runtime/ 是部分迁移层，只有登记的新文件属纯核心，
+      // 旧根文件（renderEngine 等）不得因撞名被判红。
+      if (!ctx.coreFiles.has(f.fromSrcRel)) continue
       const cls = classifyExternal(f.specifier)
       if (cls === 'vue' || cls === 'three') {
         bad.push(
           mkFinding(
             ruleCoreNoVueThree,
             f,
-            `${layer} 层导入了 ${cls}${f.isTypeOnly ? '（**类型导入**，同样计入 —— §4 规则 6）' : ''}`,
+            `${topLayer(f.fromSrcRel)} 层（新实现）导入了 ${cls}${f.isTypeOnly ? '（**类型导入**，同样计入 —— §4 规则 6）' : ''}`,
           ),
         )
       }
@@ -194,7 +310,7 @@ const DOM_GLOBALS = new Set([
 
 export const ruleCoreNoDomGlobals = {
   id: 'gate/core-no-dom-globals',
-  title: '纯核心层（domain/application）不得引用 DOM / 浏览器全局',
+  title: '纯核心层（domain/application，及声明 corePurity 的新执行面）不得引用 DOM / 浏览器全局',
   criterion: '#249 §4 规则 1/2；§14 A02「注入全局时间读取」',
   needsAst: true,
   layerDependent: true,
@@ -208,8 +324,7 @@ export const ruleCoreNoDomGlobals = {
       // 后者取决于建索引时传入的 webRoot，临时树与真实树会给出不同形态，
       // 从而让规则在测试里静默失配（这条正是被 A01 负对照抓出来的）。
       const srcRel = path.relative(ctx.srcRoot, rec.abs).replace(/[\\/]+/g, '/')
-      const layer = topLayer(srcRel)
-      if (layer !== 'domain' && layer !== 'application') continue
+      if (!ctx.coreFiles.has(srcRel)) continue
       for (const hit of rec.globalRefs) {
         if (!DOM_GLOBALS.has(hit.name)) continue
         bad.push({
@@ -223,7 +338,7 @@ export const ruleCoreNoDomGlobals = {
           kind: 'global-reference',
           isTypeOnly: false,
           syntax: hit.syntax,
-          detail: `${layer} 层引用了浏览器全局 ${hit.name}`,
+          detail: `${topLayer(srcRel)} 层（新实现）引用了浏览器全局 ${hit.name}`,
         })
       }
     }
@@ -250,10 +365,14 @@ export const ruleNoBarrelSmuggling = {
       if (APPROVED_BARRELS.some((b) => b.file === f.fromRel)) continue
       const target = resolveInternalTarget(f, ctx.srcRoot)
       if (target === null) continue
-      const fromLayer = topLayer(f.fromSrcRel)
-      const toLayer = topLayer(target)
+      const fromIsGate = isGateFile(f.fromSrcRel, ctx.gateFiles)
+      const toIsGate = isGateFile(`${target}.ts`, ctx.gateFiles) || isGateFile(target, ctx.gateFiles)
       // 只在**新分层**上判定（旧目录的转出口计入债务清单，不在此判红）。
-      if (!ctx.gateLayers.includes(fromLayer) && !ctx.gateLayers.includes(toLayer)) continue
+      //
+      // P1 起判定面是**文件级**：一个"旧→旧"的转出口（例如 workbench/ux/types/index.ts
+      // 转出口旧的 runtime/）不得因 `runtime` 层名而判红 —— 它的两端都是旧实现。
+      // 反之，"新文件 → 任意跨目录转出口"必须判红。
+      if (!fromIsGate && !toIsGate) continue
       const fromDir = path.dirname(f.fromRel)
       const toDir = path.dirname(`src/${target}`).replace(/[\\/]+/g, '/')
       if (fromDir === toDir) continue
@@ -278,25 +397,30 @@ export const MAX_PUBLIC_EXPORT_DEPTH = 2
 
 export const ruleNoPrivateCrossLayer = {
   id: 'gate/no-private-cross-layer',
-  title: '跨层导入必须经公共出口，禁止钻进别的层的私有实现',
-  criterion: '#249 §4 导入规则 6',
+  title: '新实现跨层导入必须经公共出口，禁止钻进别的层的私有实现',
+  criterion: '#249 §4 导入规则 6；契约 §7.3 规则 2（公共出口最大深度 2）',
   layerDependent: true,
   check(facts, ctx) {
     const bad = []
     for (const f of facts) {
       const t = resolveInternalTarget(f, ctx.srcRoot)
       if (t === null) continue
-      const layer = topLayer(t)
-      if (!ctx.gateLayers.includes(layer)) continue
       const fromLayer = topLayer(f.fromSrcRel)
-      if (fromLayer === layer) continue // 层内导入不受此规则约束
+      const toLayer = topLayer(t)
+      if (fromLayer === toLayer) continue // 层内导入不受此规则约束
+      // **判定面在"发起方"**：只有新实现（登记在案的执行面文件）才受公共出口约束。
+      // 旧→旧 的深导入是 #249 §15 的遗留债务（由负责批次退役，见 RETIREMENT_OWNERS），
+      // 不是本批新边界的 finding —— 否则撞名的 runtime/ 会凭空产生假红
+      // （P0/P1 实测：`embed/EmbedRoot.vue`、`workbench/WorkbenchRoot.vue`、
+      //  `workbench/components/WorkbenchViewport.vue` 导入 `runtime/host/*`）。
+      if (!isGateFile(f.fromSrcRel, ctx.gateFiles)) continue
       const depth = t.split('/').length
       if (depth > MAX_PUBLIC_EXPORT_DEPTH) {
         bad.push(
           mkFinding(
             ruleNoPrivateCrossLayer,
             f,
-            `跨层导入了 ${layer} 层深于公共出口的实现（${t}，深度 ${depth} > ${MAX_PUBLIC_EXPORT_DEPTH}）`,
+            `新实现跨层导入了 ${toLayer} 层深于公共出口的实现（${t}，深度 ${depth} > ${MAX_PUBLIC_EXPORT_DEPTH}）`,
           ),
         )
       }
@@ -323,6 +447,27 @@ export const GATE_RULES = [
  * 键 = 退役条目的稳定 slug；`entries` = 该 slug 覆盖的 §15 行号（1–13）；
  * `owners` = 负责批次列表（每条含 `p` / `issue` / 职责面 `scope`）。
  *
+ * ## P1（#252）退出阶段的修正（#250 裁决 2026-10-11）
+ *
+ * 契约与执行单原本把 `#1`/`#4`/`#6`（业务面）的退出阶段写成「P1 交付同批」。
+ * 实测后由 Lead 裁决修正为：**替代机制 P1 交付 + 消费者归口批次同批删除 +
+ * P11（#262）终局零引用审计**。理由（P1 实测证据）：
+ *
+ *  - `web/src/runtime/main.ts` 的 `structEpoch`/`currentFrameIndex`/`framesPlaybackIsPlaying`
+ *    等 Ref 有 **72 个生产文件、74 处 `.main.*` 访问**（其中 13 处是真·裸 Ref 读写）；
+ *  - 这些消费者读的是旧 `RuntimeDocument`（frames/grid/parts/playback），
+ *    而 P1 的新 scene 模型只有 block/annotation/camera 三类对象（#252 明文），
+ *    **无法承载**旧文档语义 ⇒ 任何"迁移"都只能是新门面包旧核心，
+ *    恰是 `#171` 明令禁止、且 `#1` 自身负对照（「新 facade 内调用旧 runtime ⇒ 判红」）要判红的形态。
+ *  - 同理 `#4`（`shared/viewport/useMultiblockChannels.ts` 每视口暂存）的消费者是
+ *    `WorkbenchViewport.vue`/`EmbedViewport.vue` 与 multiblock e2e 族（P6/P4 领地）；
+ *    `#6` 的业务 RAF 是 `runtime/renderEngine.ts`（P5）与
+ *    `workbench/ux/panels/useMaterialAnimation.ts`（P4，B5 已定）。
+ *
+ * ⇒ P1 承担的可执行形式是：**替代机制建成且被两个真实消费者证明**
+ * + `kernel-legacy-isolation.test.ts` 闸门（新层零 import 旧层、无兼容门面）
+ * + 本表列明暂存登记供 #262 对账。终局判据（B5）不变。
+ *
  * ## P 编号 ↔ issue 号的权威对应（**不得凭记忆写**）
  *
  * #250「执行单与依赖」表 + 各执行单标题共同确定：**`P<N> = #(251+N)`**。
@@ -348,14 +493,21 @@ export const GATE_RULES = [
  * 属"凭记忆填编号"的错位。加断言后该类错误无法再通过测试（这正是 #249 §14
  * 「负对照必须证明确实破坏了目标保证」在**文档对账**上的同类应用）。
  *
- * 文档侧同源副本见 #251 B5 附件；两者互为镜像，改动必须同批双改。
+ * 文档侧同源副本见 #251 B5 附件；两者互为镜像，改动必须同批双改（B5 修正由 P1 同步）。
  */
 export const RETIREMENT_OWNERS = {
   'raw-authority-object': {
     entries: [1],
-    owners: [{ p: 'P1', issue: 252, duty: '文档状态域与统一执行协议', scope: '只读查询能力 + 命令客户端' }],
-    exitStage: 'P1 交付同批',
-    role: 'P1 执行者',
+    owners: [
+      { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '材质/通道的 ctx.main 消费者退出' },
+      { p: 'P5', issue: 256, duty: '呈现编译、GPU 合批与资源生命周期', scope: '渲染链的 structEpoch/Ref 消费者退出' },
+      { p: 'P6', issue: 257, duty: '工作区、Area 生命周期与模块装配', scope: '工作台/嵌入组件与 Context 消费者退出' },
+      { p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账', scope: 'Main/Context 旧导出零引用终局审计' },
+    ],
+    exitStage: 'P1 交付替代（EditorClient 读面 + 命令客户端，消费者归口 P4/P5/P6）→ P11 终局审计',
+    role: 'P1 执行者（替代机制）；P4/P5/P6 执行者（消费者删除）；P11 执行者（终局审计）',
+    // 「替代机制 P1 交付」这一半在本批完成，故标记为部分交付（#250 裁决 2026-10-11）。
+    p1Delivered: '替代机制',
   },
   'runtime-document-triple-duty': {
     entries: [2],
@@ -374,9 +526,14 @@ export const RETIREMENT_OWNERS = {
   },
   'per-viewport-staging': {
     entries: [4],
-    owners: [{ p: 'P1', issue: 252, duty: '文档状态域与统一执行协议', scope: 'EditContext 与有效读面' }],
-    exitStage: 'P1 交付同批',
-    role: 'P1 执行者',
+    owners: [
+      { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '通道取值/暂存并入 EditContext' },
+      { p: 'P6', issue: 257, duty: '工作区、Area 生命周期与模块装配', scope: 'useMultiblockChannels 的每视口副本退出' },
+      { p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账', scope: '每视口暂存零残留终局审计' },
+    ],
+    exitStage: 'P1 交付替代（EditContext 与有效读面，消费者归口 P4/P6）→ P11 终局审计',
+    role: 'P1 执行者（替代机制）；P4/P6 执行者（消费者删除）；P11 执行者（终局审计）',
+    p1Delivered: '替代机制',
   },
   'manual-refresh-chain': {
     entries: [5],
@@ -387,11 +544,13 @@ export const RETIREMENT_OWNERS = {
   'multi-raf-business': {
     entries: [6],
     owners: [
-      { p: 'P1', issue: 252, duty: '文档状态域与统一执行协议', scope: '业务推进收敛到统一执行协议' },
-      { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '材质独立 RAF 播放循环并入统一时间' },
+      { p: 'P5', issue: 256, duty: '呈现编译、GPU 合批与资源生命周期', scope: 'renderEngine tick/layoutResizeRAF 归口渲染批次' },
+      { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: 'useMaterialAnimation 独立播放循环并入统一时间' },
+      { p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账', scope: '业务 RAF 零残留终局审计' },
     ],
-    exitStage: 'P1 交付同批（材质 RAF 由 P4 收口）',
-    role: 'P1 执行者（业务 RAF）；P4 执行者（useMaterialAnimation 独立循环）',
+    exitStage: 'P1 交付替代（统一执行协议与完成事件，消费者归口 P4/P5）→ P11 终局审计',
+    role: 'P1 执行者（替代机制）；P4/P5 执行者（消费者删除）；P11 执行者（终局审计）',
+    p1Delivered: '替代机制',
   },
   'workbench-embed-fork': {
     entries: [7],
@@ -497,19 +656,18 @@ export function collectLegacyDebt(facts, ctx, astIndex) {
     if (f.kind === 'export-from') {
       const target = resolveInternalTarget(f, ctx.srcRoot)
       if (target === null) continue
-      const fromLayer = topLayer(f.fromRel.replace(/^src\//, ''))
-      const toLayer = topLayer(target)
+      const fromIsGate = isGateFile(f.fromSrcRel, ctx.gateFiles)
+      const toIsGate = isGateFile(`${target}.ts`, ctx.gateFiles) || isGateFile(target, ctx.gateFiles)
+      if (fromIsGate || toIsGate) continue // 闸门规则已覆盖（见 ruleNoBarrelSmuggling）
       const fromDir = path.dirname(f.fromRel)
       const toDir = path.dirname(`src/${target}`).replace(/[\\/]+/g, '/')
       if (fromDir === toDir) continue
-      // 闸门规则已覆盖新层；这里只收旧目录的。
-      if (ctx.gateLayers.includes(fromLayer) || ctx.gateLayers.includes(toLayer)) continue
       debt['legacy-barrel-reexport'].push({
         file: f.fromRel,
         line: f.line,
         specifier: f.specifier,
-        fromLayer,
-        toLayer,
+        fromLayer: topLayer(f.fromSrcRel),
+        toLayer: topLayer(target),
         syntax: f.syntax,
       })
     } else if (f.kind === 'dynamic-import' && f.specifier.startsWith('«')) {

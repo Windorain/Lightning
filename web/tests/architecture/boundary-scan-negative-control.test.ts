@@ -47,17 +47,26 @@ function makeTree(files) {
   return { tmpRoot, srcRoot }
 }
 
-/** 在临时树上跑规则（走与 scan-boundaries.mjs 相同的路径）。 */
+/**
+ * 在临时树上跑规则（走与 `scan-boundaries.mjs` 相同的路径）。
+ *
+ * P1 起 ctx 的执行面是**文件级**（`gateFiles`）而非层名前缀，
+ * 故这里按"全部生产文件都是新实现"构造 —— 这正是负对照想要的：
+ * 判据本身（不是登记表）必须在违规时判红。
+ */
 function run(files, rule) {
   const { srcRoot: root } = makeTree(files)
   const { files: scanned, facts } = buildModuleGraph(root)
+  const gateFiles = new Set(scanned.filter((f) => /\.(ts|tsx|mts|vue)$/.test(f)).map((f) => path.relative(root, f).replace(/[\\/]+/g, '/')))
   const ctx = {
     srcRoot: root,
     webRoot: tmpRoot,
+    gateFiles,
     gateLayers: ['domain', 'application'],
+    coreFiles: gateFiles,
     layerCollisions: [],
   }
-  return { hits: rule.check(facts, ctx), scanned, facts, root }
+  return { hits: rule.check(facts, ctx), scanned, facts, root, ctx }
 }
 
 beforeEach(() => {
@@ -154,25 +163,15 @@ describe('A01 负对照：注入违规**类型导入**必须判红', () => {
 
   it('负对照 6：domain 层引用浏览器全局 `document` 判红（AST 级，非关键词）', () => {
     const { srcRoot: root } = makeTree({
-      'domain/leaky.ts': [
-        'export function f(): number {',
-        '  return document.body.clientWidth',
-        '}',
-      ].join('\n'),
-      'application/leaky2.ts': [
-        'export function g(): string {',
-        '  return window.location.href',
-        '}',
-      ].join('\n'),
+      'domain/leaky.ts': ['export function f(): number {', '  return document.body.clientWidth', '}'].join('\n'),
+      'application/leaky2.ts': ['export function g(): string {', '  return window.location.href', '}'].join('\n'),
       // 这个文件**在注释里**提到 document/window，不得被计入（证明是 AST 而非关键词计数）
-      'domain/comment-only.ts': [
-        '// 这里提到 document 与 window，但从未引用它们',
-        'export const ok = 1',
-      ].join('\n'),
+      'domain/comment-only.ts': ['// 这里提到 document 与 window，但从未引用它们', 'export const ok = 1'].join('\n'),
     })
     const { files } = buildModuleGraph(root)
     const astIndex = buildAstIndex(files)
-    const ctx = { srcRoot: root, webRoot: tmpRoot, gateLayers: ['domain', 'application'], layerCollisions: [] }
+    const gateFiles = new Set(files.map((f) => path.relative(root, f).replace(/[\\/]+/g, '/')))
+    const ctx = { srcRoot: root, webRoot: tmpRoot, gateFiles, gateLayers: ['domain', 'application'], coreFiles: gateFiles, layerCollisions: [] }
     const hits = ruleCoreNoDomGlobals.checkWithAst(astIndex, ctx)
     const names = hits.map((h) => h.specifier).sort()
     expect(names).toEqual(['document', 'window'])
@@ -190,7 +189,8 @@ describe('A01 负对照的元保证：判据不是"恒红"也不是"恒绿"', ()
     }
     const { srcRoot: root } = makeTree(files)
     const { files: scanned, facts } = buildModuleGraph(root)
-    const ctx = { srcRoot: root, webRoot: tmpRoot, gateLayers: ['domain', 'application'], layerCollisions: [] }
+    const gateFiles = new Set(scanned.map((f) => path.relative(root, f).replace(/[\\/]+/g, '/')))
+    const ctx = { srcRoot: root, webRoot: tmpRoot, gateFiles, gateLayers: ['domain', 'application'], coreFiles: gateFiles, layerCollisions: [] }
     for (const rule of [ruleCoreNoVueThree, ruleNoBarrelSmuggling]) {
       expect(rule.check(facts, ctx), `${rule.id} 不应在合规样本上判红`).toEqual([])
     }
@@ -229,7 +229,8 @@ describe('A01 设施对非生产文件的态度（避免把测试文件计入边
       return true
     }
     const prodFacts = buildModuleGraph(root).facts.filter((f) => isProd(f.fromFile))
-    const ctx = { srcRoot: root, webRoot: tmpRoot, gateLayers: ['domain'], layerCollisions: [] }
+    const gateFiles = new Set(files.filter(isProd).map((f) => path.relative(root, f).replace(/[\\/]+/g, '/')))
+    const ctx = { srcRoot: root, webRoot: tmpRoot, gateFiles, gateLayers: ['domain'], coreFiles: gateFiles, layerCollisions: [] }
     expect(files.length).toBe(2)
     expect(ruleCoreNoVueThree.check(prodFacts, ctx), '测试文件里的 three 导入不得计入生产边界').toEqual([])
   })
