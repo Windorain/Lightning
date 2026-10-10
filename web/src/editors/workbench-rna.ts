@@ -81,6 +81,7 @@ import {
   rejectionSummary,
   resolveInspectorTargets,
   sceneKindOf,
+  contractKindOf,
 } from './workbench-inspector'
 import type { InspectorModel } from './inspector'
 import { createWorkbenchInspectorLayouts } from './workbench-inspector'
@@ -181,9 +182,14 @@ export function resolveRefs(ctx: Context, desc: PropertyDescriptor): readonly Pr
     return refs
   }
 
-  if (kind === 'shellSettings' || kind === 'toolSettings') {
-    refs.push({ owner: { kind: kind as string, id: kind as string }, property: desc.id })
-    return refs
+  // 非场景对象（发布配置 = workspace、工具参数 = editContext）：
+  // owner.kind 取契约 §1.1 的种类，id 用对象类型 ID（本批每类只有一个实例）。
+  if (objectType) {
+    const ownerKind = contractKindOf(objectType.id)
+    if (ownerKind !== 'object') {
+      refs.push({ owner: { kind: ownerKind, id: objectType.id }, property: desc.id })
+      return refs
+    }
   }
 
   return refs
@@ -199,9 +205,12 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
   const objectType = desc ? workbenchRegistry().registry.objectType(desc.objectTypeId) : undefined
   // 局部名必须用 `objectTypeId` 剥离（属性 ID 形如 `lightning.block.pos`）。
   const local = localPropertyOf(ref.property, desc?.objectTypeId)
-  const kind = objectType ? sceneKindOf(objectType.id) : null
+  // 场景对象种类（block/annotation）—— 只用于"是不是场景对象"的分支。
+  const sceneKind = objectType ? sceneKindOf(objectType.id) : null
+  // 契约 §1.1 的 owner kind —— 用于非场景对象的分支（document/workspace/editContext/asset）。
+  const ownerKind = objectType ? contractKindOf(objectType.id) : null
 
-  if (kind === 'block') {
+  if (sceneKind === 'block') {
     const doc = ctx.getDoc().value
     const grid = doc?.frame(0)?.grid
     if (!grid) return err(domainError('MissingTarget', { reason: 'no-frame', objectId: ref.owner.id }))
@@ -225,7 +234,7 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
     }
   }
 
-  if (kind === 'annotation') {
+  if (sceneKind === 'annotation') {
     const doc = ctx.getDoc().value
     const list = (doc?.annotations ?? []) as Record<string, unknown>[]
     const a = list.find((x) => x.id === ref.owner.id)
@@ -235,7 +244,7 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
     return ok(v)
   }
 
-  if (kind === 'document') {
+  if (ownerKind === 'document') {
     const doc = ctx.getDoc().value
     if (!doc) return err(domainError('MissingTarget', { reason: 'no-document' }))
     switch (local) {
@@ -262,7 +271,7 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
     }
   }
 
-  if (kind === 'shellSettings') {
+  if (ownerKind === 'workspace') {
     const pub = ctx.main.embedPublish.value as unknown as Record<string, unknown>
     const features = (pub.features ?? {}) as Record<string, unknown>
     const FEATURE_KEYS: Record<string, string> = {
@@ -283,7 +292,7 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
     return err(domainError('MissingTarget', { reason: 'property-not-registered', property: ref.property }))
   }
 
-  if (kind === 'toolSettings') {
+  if (ownerKind === 'editContext') {
     const tool = ctx.getToolSettings()
     switch (local) {
       case 'replaceBrush':
@@ -301,7 +310,7 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
     }
   }
 
-  if (kind === 'asset') {
+  if (ownerKind === 'asset') {
     return err(domainError('ReadOnly', { reason: 'query-result', property: ref.property }))
   }
 
@@ -324,6 +333,7 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
   // 局部名必须用 `objectTypeId` 剥离（属性 ID 形如 `lightning.block.pos`）。
   const local = localPropertyOf(ref.property, desc?.objectTypeId)
   const kind = objectType ? sceneKindOf(objectType.id) : null
+  const ownerKind = objectType ? contractKindOf(objectType.id) : null
   const doc = ctx.getDoc().value
   const multiblockReadOnly = isMultiblockGenerated(doc)
 
@@ -354,12 +364,14 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
     })
   }
 
-  if (kind === 'document') {
+  if (ownerKind === 'document') {
     if (!doc) return factsOf({ exists: false })
     return factsOf({ exists: true, generated: multiblockReadOnly, holdsLease: !multiblockReadOnly })
   }
 
-  if (kind === 'shellSettings' || kind === 'toolSettings') {
+  // 非文档拥有的面：发布配置（workspace）/ 工具参数（editContext）/ 材质视图（asset）。
+  // 它们不因文档是多方块生成而只读。
+  if (ownerKind === 'workspace' || ownerKind === 'editContext' || ownerKind === 'asset') {
     return factsOf({ exists: true, holdsLease: true })
   }
 

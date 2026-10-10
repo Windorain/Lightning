@@ -186,6 +186,34 @@ describe('冻结 #2 owner.kind 只用契约 §1.1 实体种类', () => {
     expect(ownerKindBlock.test(src)).toBe(false)
   })
 
+  it('本批修复：声明与分支都用契约 §1.1 的种类（无 `shellSettings`/`toolSettings` 自造种类）', () => {
+    const src = read('src/editors/workbench-inspector.ts')
+    const rna = read('src/editors/workbench-rna.ts')
+    // 自造种类已从**声明**里消除：发布配置 ⇒ workspace、工具参数 ⇒ editContext。
+    expect(src).toMatch(/id: OBJECT_TYPE\.publishConfig,\s*\n\s*ownerKind: 'workspace'/)
+    expect(src).toMatch(/id: OBJECT_TYPE\.toolSettings,\s*\n\s*ownerKind: 'editContext'/)
+    expect(src).not.toMatch(/ownerKind: 'shellSettings'/)
+    expect(src).not.toMatch(/ownerKind: 'toolSettings'/)
+    // 分支也不再按自造种类判（否则那些分支是死代码 —— 本批实测抓到过这个问题）。
+    expect(rna).not.toMatch(/kind === 'shellSettings'/)
+    expect(rna).not.toMatch(/kind === 'toolSettings'/)
+    // 有**唯一**映射点把 objectTypeId 映到 §1.1 的种类。
+    expect(src).toMatch(/export function contractKindOf/)
+  })
+
+  it('**实测**：注册表实际用的是 `contracts.ts` 的**开放**联合（GF-5 相关第二处未收敛）', () => {
+    // P1 `domain/identity` 的 `EntityOwnerKind` 已符合 §1.1（封闭八种）；
+    // P2 `contracts.ts` 那份仍是开放联合（带 `| (string & {})`），
+    // 且 `properties.ts`（RNA 注册表）import 的正是**后者** ——
+    // 故注册表并未受 P1 封闭联合约束。这是 GF-5 未通过的第二处证据。
+    const contracts = read('src/application/contracts.ts')
+    const identity = read('src/domain/identity.ts')
+    const idStart = identity.indexOf('export type EntityOwnerKind')
+    expect(identity.slice(idStart, identity.indexOf(';', idStart))).not.toMatch(/string\s*&\s*\{\}/)
+    expect(contracts).toMatch(/string\s*&\s*\{\}/)
+    expect(read('src/application/properties.ts')).toMatch(/type EntityOwnerKind[\s\S]{0,200}from '\.\/contracts'/)
+  })
+
   it('声明里的 ownerKind 不再出现 `block`/`annotation`（它们是 objectType）', () => {
     const src = read('src/editors/workbench-inspector.ts')
     const decls = [...src.matchAll(/id: OBJECT_TYPE\.\w+,\s*\n\s*ownerKind: '([a-zA-Z]+)'/g)].map((m) => m[1]!)
@@ -455,11 +483,33 @@ describe('GF-5 未通过项的证据：重复权威定义（现状计数）', ()
     expect(measured.SetPropertyCommand.length).toBeGreaterThan(1)
   })
 
-  it('`application/contracts.ts` 已收敛为**薄再出口**（无本地类型定义体）', () => {
+  it('`application/contracts.ts` **仍是**第二份契约定义（GF-5 未收敛，实测计数）', () => {
     const src = read('src/application/contracts.ts')
-    // 本批已达成：contracts.ts 不再定义契约类型（但 P1 侧仍有重复，见上一条）。
-    expect(src).not.toMatch(/export\s+interface\s+\w+/)
-    expect(src).not.toMatch(/export\s+type\s+\w+\s*=\s*\{/)
+    // 实测（本批 **未** 达成"薄再出口"）：contracts.ts 仍本地定义
+    //   Result / EntityOwnerKind / EntityRef / ElementRef / PropertyId /
+    //   PropertyRef / Version / ChangeSummary / DomainErrorCode / WouldBlockReason /
+    //   DomainError / CommandOutcome
+    // 与 P1 的 `domain/errors`（Result/DomainError/八码/WouldBlockReason）
+    // 与 `domain/identity`（EntityRef/PropertyRef/Version/ChangeSummary）
+    // **同名同义各一份**。这是 GF-5 未通过的第二处证据。
+    const localTypes = [...src.matchAll(/^export\s+(?:type|interface)\s+(\w+)/gm)].map((m) => m[1]!)
+    expect(localTypes).toContain('EntityRef')
+    expect(localTypes).toContain('PropertyRef')
+    expect(localTypes).toContain('Version')
+    expect(localTypes).toContain('DomainError')
+    expect(localTypes).toContain('Result')
+    // 若哪天收敛完成（本文件改为纯再出口），这条断言会失败 ——
+    // 那正是提醒把它改成 `expect(localTypes).toEqual([])`。
+    expect(localTypes.length).toBeGreaterThan(0)
+  })
+
+  it('P2 的 `propertyRef` 与 P1 `domain/identity` 的同名函数并存（第三处重复）', () => {
+    // 两处都叫 `propertyRef`、签名兼容但实现不同（一个 Object.freeze，一个不冻）。
+    // 这是"名义上同一概念、实际两份实现"的典型 —— 冻结靠测试钉住现状。
+    const p2 = read('src/application/properties.ts')
+    const p1 = read('src/domain/identity.ts')
+    expect(p2).toMatch(/export function propertyRef\(/)
+    expect(p1).toMatch(/export function propertyRef\(/)
   })
 })
 

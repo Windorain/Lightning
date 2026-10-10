@@ -94,7 +94,7 @@ export type ObjectTypeId = (typeof OBJECT_TYPE)[keyof typeof OBJECT_TYPE]
  *
  * ## 冻结 #2 的落地（#250）
  *
- * 契约 §1.1 的 `EntityOwnerKind` 是**实体种类**的封闭清单（`document`/`scene`/`object`/
+ * 契约 §1.1 的 `EntityOwnerKind` 是**实体种类**的清单（`document`/`scene`/`object`/
  * `objectData`/`editContext`/`workspace`/`asset`/`evaluation`）。方块和注解都是**场景对象**，
  * 故它们的 `owner.kind` 一律是 `'object'`。
  *
@@ -103,12 +103,33 @@ export type ObjectTypeId = (typeof OBJECT_TYPE)[keyof typeof OBJECT_TYPE]
  * 塞进 `owner.kind` 曾让 `EntityOwnerKind` 变成开放联合（`| (string & {})`），
  * 于是「实体种类」这个契约概念失去可检查含义 —— 这正是冻结 #2 要修掉的。
  *
- * 本函数是「objectTypeId → 场景对象种类」的**唯一**映射点：需要按种类分支时
- * （选目标、读原始值、算事实）用它，不再读 `ownerKind`。
+ * 本函数只回答"**是不是场景对象、是哪种**"，返回 `null` 表示不是场景对象
+ * （文档元数据、壳设置、工具参数等）。要取契约 §1.1 的 owner kind 时用
+ * {@link contractKindOf} —— 两件事不要混在一处判。
  */
 export function sceneKindOf(objectTypeId: string): 'block' | 'annotation' | null {
   if (objectTypeId === OBJECT_TYPE.block) return 'block'
   return objectTypeId.startsWith('lightning.annotation.') ? 'annotation' : null
+}
+
+/**
+ * 对象类型 → 契约 §1.1 的 owner kind（**唯一**映射点）。
+ *
+ * 为什么需要它：`sceneKindOf` 只区分场景对象的两种；而壳设置/工具参数/文档元数据
+ * 不是场景对象，它们各自的 owner kind 必须落在 §1.1 清单内 —— 按契约 §6 所有权表：
+ *  - 发布配置（视口尺寸 / 背景 / 特征开关）属**工作区**面（Area 与固定目标）⇒ `workspace`；
+ *  - 工具会话参数（画笔 / 吸附 / 拖拽灵敏度）属**活动工具**面 ⇒ `editContext`；
+ *  - 文档元数据 ⇒ `document`；材质视图是资源查询面 ⇒ `asset`。
+ *
+ * 早先把它们写成 `'shellSettings'`/`'toolSettings'` 是**自造种类**：既不在 §1.1 里，
+ * 又逼 `EntityOwnerKind` 开逃生口（`contracts.ts` 里那份开放联合即由此而来）。
+ */
+export function contractKindOf(objectTypeId: string): EntityOwnerKind {
+  if (sceneKindOf(objectTypeId) !== null) return 'object'
+  if (objectTypeId === OBJECT_TYPE.sceneMetadata) return 'document'
+  if (objectTypeId === OBJECT_TYPE.publishConfig) return 'workspace'
+  if (objectTypeId === OBJECT_TYPE.toolSettings) return 'editContext'
+  return 'asset'
 }
 
 /** 拥有者种类 → 实体引用（面板与命令共用同一构造口径）。 */
@@ -376,7 +397,7 @@ export const SCENE_METADATA_DECL: ObjectTypeDecl = {
  */
 export const PUBLISH_CONFIG_DECL: ObjectTypeDecl = {
   id: OBJECT_TYPE.publishConfig,
-  ownerKind: 'shellSettings',
+  ownerKind: 'workspace',
   display: { labelKey: 'objectType.publishConfig', fallback: '发布配置' },
   properties: [
     decl({ id: 'viewWidth', valueType: 'number', unit: PX, animatable: false, display: { labelKey: 'publish.viewWidth', fallback: '视口宽度', decimals: 0 }, domain: numberRange(200, 2000, true, 10) }),
@@ -400,7 +421,7 @@ export const PUBLISH_CONFIG_DECL: ObjectTypeDecl = {
  */
 export const TOOL_SETTINGS_DECL: ObjectTypeDecl = {
   id: OBJECT_TYPE.toolSettings,
-  ownerKind: 'toolSettings',
+  ownerKind: 'editContext',
   display: { labelKey: 'objectType.toolSettings', fallback: '工具设置' },
   properties: [
     decl({ id: 'generateType', valueType: 'string', animatable: false, display: { labelKey: 'tool.generateType', fallback: '生成类型' }, domain: { kind: 'text', multiline: false } }),
