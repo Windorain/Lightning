@@ -240,7 +240,28 @@ export interface PointerCaptureOwnership {
  * （接线层写错也绕不过去）。
  */
 export interface InputRoutingState {
+  /**
+   * 当前作用域（栈顶）。`NO_MODAL` 表示无弹窗。
+   *
+   * 与 `modalStack` 的关系：`modal` 恒等于栈顶（或 `NO_MODAL`）。
+   * 保留它是因为**绝大多数判据只关心当前作用域**（键盘归属、指针阻断），
+   * 让它们读 `state.modal` 比读 `stack[stack.length-1]` 更直白、也更难写错。
+   */
   readonly modal: ModalScopeState
+  /**
+   * 已打开的作用域**栈**（底部在前）。
+   *
+   * ## 为什么必须是栈，而不是单个槽位
+   *
+   * 单个槽位有一个结构性缺陷：后开的弹窗**覆盖**先开的，关闭后者时前者
+   * 无从恢复。旧实现（`wikiInputShield` 的模块级 `let wikiModalOpen`）正是这个形态，
+   * 只不过退化成一个布尔，连"哪个作用域"都表达不了。
+   *
+   * 真实场景要求嵌套：设置抽屉里再点"保存到 Wiki"（Wiki 弹窗），
+   * 或在 Wiki 弹窗里再开结构选择器。关掉内层必须**回到外层**，
+   * 而不是"一律变回无弹窗"（P7 首跑 e2e 实测：单槽位下关掉内层直接变 `null`）。
+   */
+  readonly modalStack: readonly ModalScopeState[]
   readonly textFocus: TextFocusState
   readonly interaction: ActiveInteractionState | null
   /** 最后命中的 Area（键盘落到哪个 Area 的快捷键表）。 */
@@ -274,6 +295,7 @@ export function createInputRoutingState(parts: {
 } = {}): InputRoutingState {
   return Object.freeze({
     modal: NO_MODAL,
+    modalStack: Object.freeze([]) as readonly ModalScopeState[],
     textFocus: NO_TEXT_FOCUS,
     interaction: null,
     activeRegionId: parts.activeRegionId ?? null,
@@ -886,6 +908,36 @@ export function applyVisibilityChange(state: InputRoutingState, input: Visibilit
 
 export function withModal(state: InputRoutingState, modal: ModalScopeState): InputRoutingState {
   return createRoutingState(state, { modal })
+}
+
+/**
+ * 打开一个作用域（**压栈**）。
+ *
+ * 若同 id 的作用域已在栈里，先移除再压顶 —— 语义是"把它提到最前"，
+ * 而不是重复登记（避免同一弹窗重开后栈里留两份）。
+ */
+export function pushModalScope(state: InputRoutingState, modal: ModalScopeState): InputRoutingState {
+  const without = state.modalStack.filter((m) => m.scopeId !== modal.scopeId)
+  const stack = Object.freeze([...without, modal])
+  return createRoutingState(state, { modalStack: stack, modal })
+}
+
+/**
+ * 关闭一个作用域（**出栈**）。
+ *
+ * `scopeId` 必须在栈里，否则状态不变（返回 `null` 表示"不是我们开的"，
+ * 调用方据此报告而不是静默改状态）。关掉**非栈顶**的作用域时，
+ * 栈顶保持不变（内层仍在前台），只是那一层被移除。
+ */
+export function popModalScope(
+  state: InputRoutingState,
+  scopeId: string,
+): { readonly state: InputRoutingState; readonly removed: boolean } | null {
+  const idx = state.modalStack.findIndex((m) => m.scopeId === scopeId)
+  if (idx < 0) return null
+  const stack = Object.freeze(state.modalStack.filter((_, i) => i !== idx))
+  const top = stack.length > 0 ? stack[stack.length - 1]! : NO_MODAL
+  return { state: createRoutingState(state, { modalStack: stack, modal: top }), removed: true }
 }
 
 export function modalOpened(input: {

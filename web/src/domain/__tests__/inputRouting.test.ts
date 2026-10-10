@@ -32,6 +32,9 @@ import {
   createInputRoutingState,
   matchHotkey,
   modalOpened,
+  MODAL_CLOSED,
+  popModalScope,
+  pushModalScope,
   NO_MODAL,
   releasePointerCapture,
   routeKeyboardKey,
@@ -494,5 +497,86 @@ describe('路由状态转移：显式、纯、不改输入', () => {
     withActiveRegion(s, 'r-other')
     const after = JSON.stringify({ modal: s.modal, text: s.textFocus, region: s.activeRegionId })
     expect(after).toBe(before)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 弹窗作用域**栈**（P7 #258）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('弹窗作用域按 id 压栈：关掉内层必须回到外层（取代旧的模块级全局布尔）', () => {
+  it('**负对照**（单槽位形态）：后开的作用域会**顶掉**先开的，关闭后无从恢复', () => {
+    // 这一条把"为什么必须是栈"变成可执行判据：用单槽位语义（`withModal` 直接覆盖）
+    // 走一遍同样的序列，结果就是"关掉内层 ⇒ 一律变空"——正是要退役的形态。
+    let s = baseState()
+    s = withModal(s, modalOpened({ scopeId: 'outer' }))
+    s = withModal(s, modalOpened({ scopeId: 'inner' }))
+    // 单槽位下"关闭 inner"只能把整个 modal 清掉 ⇒ outer 丢失
+    const single = withModal(s, MODAL_CLOSED)
+    expect(single.modal.scopeId, '单槽位形态：关掉内层后外层丢失（这就是要退役的行为）').toBeNull()
+  })
+
+  it('压栈：栈顶恒为最后打开的作用域，且栈里保留全部历史', () => {
+    let s = baseState()
+    s = pushModalScope(s, modalOpened({ scopeId: 'outer' }))
+    expect(s.modal.scopeId).toBe('outer')
+    s = pushModalScope(s, modalOpened({ scopeId: 'inner' }))
+    expect(s.modal.scopeId, '栈顶 = 最后打开的').toBe('inner')
+    expect(s.modalStack.map((m) => m.scopeId), '栈里保留全部历史（底部在前）').toEqual(['outer', 'inner'])
+  })
+
+  it('出栈：关掉内层**回到外层**（不是一律变 null）', () => {
+    let s = baseState()
+    s = pushModalScope(s, modalOpened({ scopeId: 'outer' }))
+    s = pushModalScope(s, modalOpened({ scopeId: 'inner' }))
+    const r1 = popModalScope(s, 'inner')!
+    expect(r1.removed).toBe(true)
+    expect(r1.state.modal.scopeId, '关掉内层 ⇒ 回到外层').toBe('outer')
+    expect(r1.state.modalStack.map((m) => m.scopeId)).toEqual(['outer'])
+
+    const r2 = popModalScope(r1.state, 'outer')!
+    expect(r2.state.modal.scopeId, '关掉最后一层 ⇒ 无弹窗').toBeNull()
+    expect(r2.state.modal, '无弹窗时恒等于 NO_MODAL（可机械对账）').toEqual(NO_MODAL)
+    expect(r2.state.modalStack).toEqual([])
+  })
+
+  it('关掉**非栈顶**作用域：栈顶不受影响（内层仍在前台）', () => {
+    let s = baseState()
+    s = pushModalScope(s, modalOpened({ scopeId: 'outer' }))
+    s = pushModalScope(s, modalOpened({ scopeId: 'inner' }))
+    const r = popModalScope(s, 'outer')!
+    expect(r.state.modal.scopeId, '移除底层不得改变前台作用域').toBe('inner')
+    expect(r.state.modalStack.map((m) => m.scopeId)).toEqual(['inner'])
+  })
+
+  it('关闭**不在栈里**的作用域 ⇒ 返回 null（不动状态，不静默改）', () => {
+    const s = pushModalScope(baseState(), modalOpened({ scopeId: 'outer' }))
+    expect(popModalScope(s, 'never-opened'), '陌生 id 不得静默清空弹窗').toBeNull()
+  })
+
+  it('同 id 重开 ⇒ 提到栈顶而不是重复登记', () => {
+    let s = baseState()
+    s = pushModalScope(s, modalOpened({ scopeId: 'a' }))
+    s = pushModalScope(s, modalOpened({ scopeId: 'b' }))
+    s = pushModalScope(s, modalOpened({ scopeId: 'a' }))
+    expect(s.modalStack.map((m) => m.scopeId), '不得出现重复条目').toEqual(['b', 'a'])
+    expect(s.modal.scopeId).toBe('a')
+  })
+
+  it('模态优先级只看**栈顶**：内层阻断背景 ⇒ 背景快捷键收不到', () => {
+    let s = baseState()
+    s = withActiveRegion(s, 'r-viewport')
+    s = pushModalScope(s, modalOpened({ scopeId: 'inner', blocksBackground: true }))
+    const r = routeKeyboardKey(s, key({ key: 'g' }))
+    expect(r.decision.level, '内层阻断 ⇒ 键盘被模态层收下').toBe('modal')
+    expect(r.decision.intent, '不得启动 Area 工具').toBeNull()
+  })
+
+  it('内层**不**阻断背景 ⇒ 落回 Area 层（非阻断弹窗可共存）', () => {
+    let s = baseState()
+    s = withActiveRegion(s, 'r-viewport')
+    s = pushModalScope(s, modalOpened({ scopeId: 'popover', blocksBackground: false }))
+    const r = routeKeyboardKey(s, key({ key: 'g' }))
+    expect(r.decision.level, '非阻断弹窗 ⇒ 不吞掉所有键').toBe('area')
   })
 })

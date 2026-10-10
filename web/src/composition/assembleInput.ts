@@ -1,29 +1,34 @@
 /**
- * `runtime/assembleInput` —— **输入面的装配根**：把 P1 执行器、P7 输入会话与浏览器适配器
- * 拼成可用的整体（#249 §4 规则 5「装配根可以引用实现并注册」；§10；P7 = #258）。
+ * `composition/assembleInput` —— **输入面的装配根**：把 P1 执行器、P7 输入会话与浏览器适配器
+ * 拼成可用的整体（#249 §4 规则 5「`composition/modules` 是装配根，可以引用实现并注册」；
+ * §10；P7 = #258）。
  *
  * ## 为什么装配要单独一个模块
  *
- * `WorkbenchRoot.vue` 已经承担了 UI 编排。把"建 Editor、注入能力、挂事件绑定、
+ * `WorkbenchRoot.vue` 已经承担了 UI 编排。把"建会话、注入能力、挂事件绑定、
  * 暴露 e2e 探针"塞进组件的 `onMounted` 会让三件事混在一起，且**无法被单测覆盖**
  * （组件挂载需要完整 DOM 与 Three）。
  *
  * 本模块是**纯装配**：不做政策判断、不持有业务状态、可被单测直接调用
- * （见 `src/runtime/__tests__/inputAssembly.test.ts` 的挂卸平衡与单一挂载点断言）。
+ * （见 `src/composition/__tests__/assembleInput.test.ts` 的挂卸平衡与
+ * 单一挂载点断言）。
  *
  * ## 与 P1 的接线
  *
  * 输入产出的是 `CommandIntent`（P7 的 ID 空间：`edit.undo`、`tool.beginInteraction`…）。
  * `resolveIntent`（`application/inputCommands`）把它映射成 P1 的 `Command`；
- * 命令经 `Editor.submit` / `Editor.executeNow` 进入**唯一写通路** `reduceCommand`。
+ * 命令经 `sink.submit` / `sink.executeNow` 进入**唯一写通路** `reduceCommand`。
  *
- * `Editor` 实例由装配方传入（P10 会把它与文档装载接上；P7 只保证输入链路到达执行器）。
+ * `sink` 由装配方提供：产品侧当前是"具名命令 ID → 既有 operator"的转发表
+ * （P10 收口点，见 `workbench/inputHotkeys.ts` 的 `workbenchCommandSink`），
+ * 测试侧是 `editorCommandSink(editor)`（真正的 P1 执行器）。
  */
 
-import { createInputSession, type InputSession } from '@/runtime/inputSession'
+import { createInputSession, type InputEventResult, type InputSession } from '@/runtime/inputSession'
 import { createInputPort, type InputPort } from '@/runtime/inputPort'
 import { createInputBinding, type HitTest, type InputBinding } from '@/adapters/inputBinding'
 import type { HotkeyBinding } from '@/domain/input'
+import type { TextDraftEffect } from '@/domain/textDraft'
 import type { CommandSink, ControlBinding, InteractionBinding } from '@/application/inputCommands'
 
 export interface AssembleInputOptions {
@@ -52,6 +57,14 @@ export interface AssembleInputOptions {
   /** 应用快捷键表（**显式列明**，不拦截所有键）。 */
   readonly appHotkeys?: readonly HotkeyBinding[]
   readonly controls?: readonly ControlBinding[]
+  /**
+   * 装配**之前**已挂载的控件声明（晚绑定汇合）。
+   *
+   * Vue 子是先于父 `onMounted` 挂载的，故属性面板里的控件会先于本装配运行
+   * （P7 首跑 e2e 实测：控件因此从未登记，提交报 `unboundControl`）。
+   * 装配层把它们从 `WM.pendingControlBindings` 传进来排空。
+   */
+  readonly pendingControls?: readonly ControlBinding[]
   readonly interactions?: readonly InteractionBinding[]
   /** 挂载点（缺省 `document`）。 */
   readonly keyTarget?: Document | HTMLElement
@@ -67,6 +80,21 @@ export interface AssembleInputOptions {
   readonly localActions?: Readonly<Record<string, () => void>>
   /** 页面恢复回调。 */
   readonly onResume?: (input: { resumeBaseline: number; droppedTicks: number }) => void
+  /**
+   * 每条事件处理后的观测回调（诊断探针 + 呈现层镜像刷新）。
+   *
+   * **只读**语义：回调不得改写路由状态（改写必须经 `InputPort` 的方法）。
+   * `RNAWidget` 用它把草稿投影刷进呈现镜像 —— 那是"读会话、写展示"，
+   * 不是第二条状态权威（见该组件 `syncDraftMirror` 的说明）。
+   */
+  readonly onEvent?: (result: InputEventResult) => void
+  /**
+   * 文本状态推进的通知（与 `onEvent` 互补）。
+   *
+   * 文本路径返回 `TextDraftEffect[]` 而非 `InputEventResult`；若不单独报，
+   * 输入过程中的草稿与"非法草稿"提示就不会刷新（P7 首跑 e2e 实测到的缺陷）。
+   */
+  readonly onTextEffects?: (controlId: string, effects: readonly TextDraftEffect[]) => void
 }
 
 export interface AssembledInput {
@@ -96,6 +124,10 @@ export function assembleInput(options: AssembleInputOptions, claim = true): Asse
   const port = createInputPort(session)
   session.setCapabilities(() => options.capabilities)
 
+  // **晚绑定汇合**：控件可能早于本装配挂载（Vue 子先父后），
+  // 它们把声明暂存在 `pendingControlBindings`，此处排空。
+  for (const c of options.pendingControls ?? []) session.bindControl(c)
+
   // 局部动作：逐条登记；未登记的 `local.*` 进 `unhandledLocalActions`（不静默失败）。
   session.setLocalActionHandler((commandId, params) => {
     const action = options.localActions?.[commandId]
@@ -114,6 +146,8 @@ export function assembleInput(options: AssembleInputOptions, claim = true): Asse
     ...(options.keyTarget === undefined ? {} : { keyTarget: options.keyTarget }),
     ...(options.pointerTarget === undefined ? {} : { pointerTarget: options.pointerTarget }),
     ...(options.onResume === undefined ? {} : { onResume: options.onResume }),
+    ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
+    ...(options.onTextEffects === undefined ? {} : { onTextEffects: options.onTextEffects }),
   })
   if (claim) binding.claimExclusive(options.owner)
 

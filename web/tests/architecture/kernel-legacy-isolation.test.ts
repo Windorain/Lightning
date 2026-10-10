@@ -409,6 +409,44 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
     reason: '旧 operator 转发实现 `CommandSink` 端口（逐条列明转发项，未接通命令显式拒绝）',
     exitStage: 'P10 集成：换成 `editorCommandSink(editor)` 后删除本行；P11 核销',
   }),
+  // ── P7（#258）输入面：旧外壳/旧配置消费新输入内核 ──────────────────────────
+  //
+  // P7 把"输入路由"建成新内核（`domain/input` + `runtime/inputSession` +
+  // `application/inputCommands`），但**消费者**是当时的旧外壳
+  // （`WorkbenchRoot.vue` 与 `workbench/inputHotkeys.ts`）。
+  // 登记这些边的意义：新层**确实被真实消费者使用**（否则"新层已建成但不生效"
+  // 是假完成），同时保证"旧路径偷偷依赖新层续命"与"按计划迁移"可区分。
+  Object.freeze({
+    from: 'src/composition/assembleInput.ts',
+    to: 'runtime/inputPort',
+    reason: 'P7 输入面装配根建输入端口；装配根引用各层实现是设计使然（契约 §7）',
+    exitStage: 'P10 集成：新外壳装配接管后随本文件迁移；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/runtime/wm.ts',
+    to: 'runtime/inputPort',
+    reason:
+      'WM 持有输入端口字段（呈现层声明焦点/弹窗/控件绑定等**显式状态**的唯一入口）；`runtime` 是撞名层，故本边需登记',
+    exitStage: 'P10 集成：新外壳装配接管 `wm.inputPort` 后，本边随 wm 的旧字段退场；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/runtime/wm.ts',
+    to: 'application/inputCommands',
+    reason: '`WM.pendingControlBindings` 的元素类型（P7 晚绑定汇合点：控件先于输入装配挂载）',
+    exitStage: 'P10 集成：新外壳用惰性登记取代晚绑定队列后删除本行；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/workbench/WorkbenchRoot.vue',
+    to: 'adapters/shellDom',
+    reason: '外壳 DOM 事实（浮层 Teleport 目标 / Wiki 宿主按键冒泡）由旧外壳消费',
+    exitStage: 'P10 集成：新外壳接管后删除本行；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/workbench/WorkbenchRoot.vue',
+    to: 'adapters/inputBinding',
+    reason: '读 `exclusiveKeydownOwners()` 作为 A22「只挂一条 document keydown」的**结构证据**',
+    exitStage: 'P10 集成：断言随 e2e 探针迁入新外壳后删除本行；P11 核销',
+  }),
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {

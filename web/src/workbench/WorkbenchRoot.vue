@@ -82,6 +82,7 @@ import {
 import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
 import { ALL_CAPABILITIES } from '@/application/commands'
 import { assembleInput, type AssembledInput } from '@/composition/assembleInput'
+import { exclusiveKeydownOwners } from '@/adapters/inputBinding'
 import { workbenchCommandSink, workbenchInputHotkeys } from '@/workbench/inputHotkeys'
 
 // ── 装配（B5 #7 的替代物：profile 是值，不是模块级全局）────────────────────
@@ -180,6 +181,25 @@ function refreshFloatingUiTeleport(): void {
  *
  * 若有人再加一条 `keydown`，`claimExclusive` 会抛错，e2e 的挂载计数也会失败。
  */
+/**
+ * 草稿镜像回填入口。
+ *
+ * 输入事件由本装配的 **document 级**监听消费（唯一挂载点），组件拿不到返回值，
+ * 故由装配层在每次事件后回调各控件的镜像刷新。镜像只由**只读投影**写入
+ * （`RNAWidget.syncDraftMirror`），不是第二份权威。
+ *
+ * 用 `window` 上的注册表而不是 Vue `provide/inject`：`RNAWidget` 由深层面板
+ * 动态渲染，装配层拿不到它们的实例；而这张表只是"谁想被通知"的登记簿。
+ */
+const DRAFT_MIRROR_HOOK_KEY = Symbol.for('lightning.p7.draftMirrorHook')
+
+function refreshDraftMirrors(): void {
+  const hooks = (window as unknown as Record<PropertyKey, unknown>)[DRAFT_MIRROR_HOOK_KEY] as
+    | Map<string, (id: string) => void>
+    | undefined
+  if (hooks) for (const fn of hooks.values()) fn('')
+}
+
 function assembleWorkbenchInput(): void {
   const hotkeys = workbenchInputHotkeys(ctx)
   inputAssembly = assembleInput({
@@ -189,6 +209,9 @@ function assembleWorkbenchInput(): void {
     sink: workbenchCommandSink(ctx),
     // 工作台 profile 具备全部能力（查看器 profile 的裁剪归 P9/P11 的装配）
     capabilities: ALL_CAPABILITIES,
+    // 晚绑定汇合：属性面板里的控件先于本装配挂载（Vue 子先父后），
+    // 它们的声明暂存在待接管队列里，此处排空（否则提交报 `unboundControl`）。
+    pendingControls: [...ctx.wm.pendingControlBindings],
     // "坐标 → Area"：用命中元素所属的 region 容器（`data-wm-region`）判定。
     // Area 布局的权威归属是 P6；P7 只消费这个事实。
     hitTest: (x, y, target) => {
@@ -208,6 +231,12 @@ function assembleWorkbenchInput(): void {
     appHotkeys: hotkeys.appHotkeys,
     localActions: hotkeys.localActions,
     owner: 'workbench',
+    onEvent: () => {
+      refreshDraftMirrors()
+    },
+    onTextEffects: () => {
+      refreshDraftMirrors()
+    },
     onResume: ({ resumeBaseline, droppedTicks }) => {
       // 恢复**不**追赶：只把基线记进诊断（#249 §9）。绝不在此补跑历史 tick。
       ctx.log.info('输入', `页面恢复：基线=${Math.round(resumeBaseline)}ms 丢弃 ${droppedTicks} tick`)
@@ -219,8 +248,14 @@ function assembleWorkbenchInput(): void {
     counters: () => inputAssembly?.session.counters,
     trace: () => inputAssembly?.session.trace,
     modalScopeId: () => inputAssembly?.session.routing.modal.scopeId ?? null,
+    textFocus: () => inputAssembly?.session.routing.textFocus ?? null,
     textProjection: (controlId: string) => inputAssembly?.session.textProjection(controlId) ?? null,
     unhandledLocalActions: () => inputAssembly?.session.unhandledLocalActions ?? [],
+    boundControlIds: () => inputAssembly?.session.boundControlIds ?? [],
+    pendingControlIds: () => ctx.wm.pendingControlBindings.map((b) => b.controlId),
+    applyRegistryIds: () => [...ctx.wm.applyPropertyRegistry.keys()],
+    // **结构证据**：谁持有唯一的 document keydown。长度 >1 说明有人违反了 A22。
+    keydownOwners: () => exclusiveKeydownOwners(),
   }
 }
 

@@ -17,10 +17,26 @@
  * 现在改问外壳能力：`shell.adjustableLayout === false` ⇒ 该外壳是固定布局
  * （嵌入/查看器）⇒ 用 `height: 100%` 而不是 `100vh`。
  * 语义更准：判据是"这个外壳是否可调整布局"，不是"构建时是不是 wiki"。
+ *
+ * ## `data-wm-region`（P7 #258）
+ *
+ * 每个 Area 容器标出自己对应的 **region id**（`runtime/regionIds`）。
+ * 这是"指针命中哪个 Area"的**权威事实来源**：`hitTest`（`composition/assembleInput`）
+ * 沿 `event.target.closest('[data-wm-region]')` 读它，纯路由据此决定接收者。
+ *
+ * 为什么不让适配器自己推导：`elementFromPoint` 只给 DOM 元素，"这个元素属于哪个
+ * Area"是布局事实（#249 §4 把布局归 `presentation`/`shells`，路由归 `domain`）。
+ * 用属性显式标注，就把这层知识从"猜 DOM 类名"变成"读显式声明" ——
+ * 与 #249 §19.1「路由函数根据显式状态决定接收者」同一口径。
+ *
+ * 标注前 `hitTest` 恒返回 `null`：指针事件的 region 为 `none`，
+ * 于是按 pointerId 的捕获**永不登记**（`d.regionId === null`），
+ * A22 的捕获类断言只能假绿（P7 首跑 e2e 实测）。
  */
 import { useSlots } from 'vue'
 import { useContext } from '@/runtime/context'
 import { useShell } from '@/composition/shell'
+import { REGION } from '@/runtime/regionIds'
 import { usePanelResize } from './panelResize'
 
 const ctx = useContext()
@@ -46,16 +62,16 @@ const fillsHost = !shell.adjustableLayout
     :class="{ 'wb-shell--dragging': dragging, 'wb-shell--fills-host': fillsHost }"
     v-bind="ctx.getShellSettings().scopeAttrs"
   >
-    <header class="wb-menubar">
+    <header class="wb-menubar" :data-wm-region="REGION.WORKBENCH_HEADER">
       <slot name="menubar" />
     </header>
 
-    <nav class="wb-workspace-tabs">
+    <nav class="wb-workspace-tabs" :data-wm-region="REGION.WORKBENCH_HEADER">
       <slot name="workspace-tabs" />
     </nav>
 
     <div class="wb-main">
-      <main class="wb-viewport">
+      <main class="wb-viewport" :data-wm-region="REGION.WORKBENCH_VIEWPORT">
         <slot name="tool-shelf" />
         <slot name="viewport" />
       </main>
@@ -69,12 +85,17 @@ const fillsHost = !shell.adjustableLayout
         tabindex="-1"
       />
 
-      <aside v-if="hasProperties()" class="wb-properties" :style="{ width: `${rightWidth}px` }">
+      <aside
+        v-if="hasProperties()"
+        class="wb-properties"
+        :data-wm-region="REGION.WORKBENCH_PROPS"
+        :style="{ width: `${rightWidth}px` }"
+      >
         <slot name="properties" />
       </aside>
     </div>
 
-    <footer class="wb-statusbar">
+    <footer class="wb-statusbar" :data-wm-region="REGION.CHROME">
       <slot name="statusbar" />
     </footer>
   </div>

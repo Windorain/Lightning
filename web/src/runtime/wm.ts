@@ -5,6 +5,7 @@ import type { ContextMenuItem } from '@/workbench/ux/contextMenu'
 import type { ShellSettings } from '@/runtime/shellSettings'
 import type { WikiUiState } from '@/runtime/wikiUi'
 import type { InputPort } from '@/runtime/inputPort'
+import type { ControlBinding } from '@/application/inputCommands'
 import { createShellSettings, type CreateShellSettingsOptions } from '@/runtime/shellSettings'
 import { createDiagnosticRecorder, type DiagnosticRecorder } from '@/application/diagnostics'
 
@@ -63,6 +64,25 @@ export class WM {
    * `REGISTERED_LEGACY_CONSUMERS`（**不得静默**）。
    */
   readonly applyPropertyRegistry = new Map<string, (value: number | string) => void>()
+
+  /**
+   * **待接管**的控件绑定（晚绑定汇合点）。
+   *
+   * ## 为什么需要它（P7 首跑 e2e 实测到的真实缺陷）
+   *
+   * Vue 的挂载顺序是**子先父后**：属性面板里的 `RNAWidget` 在
+   * `WorkbenchRoot.onMounted`（真到那一刻才 `assembleInput` 并写 `wm.inputPort`）
+   * **之前**就挂载完了。若组件在 `onMounted` 里直接 `wm.inputPort.bindControl(...)`，
+   * 读到的必然是 `null` —— 结果是控件**从未**登记，提交时报
+   * `UnsupportedOperation: reason=unboundControl`（实测轨迹原文）。
+   *
+   * 这个集合是"控件先到、端口后到"的汇合点：
+   *  - 端口未就绪 ⇒ 控件把声明放这里；
+   *  - 装配完成 ⇒ `assembleInput` 排空它并逐条 `bindControl`。
+   *
+   * 晚挂载的控件（切面板 tab 才渲染）走直连路径，不进这里。
+   */
+  readonly pendingControlBindings: ControlBinding[] = []
 
   /** 取输入端口；未装配即抛（不静默降级）。 */
   requireInputPort(): InputPort {

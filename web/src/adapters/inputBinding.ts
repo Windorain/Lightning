@@ -32,6 +32,7 @@
 import { applyPlatformActions, isPageHidden, nowMs, readKeyFact, readPointerFact } from './inputFacts'
 import type { InputSession, PlatformActionRequest } from '@/runtime/inputSession'
 import type { InputEventResult } from '@/runtime/inputSession'
+import type { TextDraftEffect } from '@/domain/textDraft'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 挂载点与配置
@@ -58,6 +59,13 @@ export interface InputBindingOptions {
   readonly onResume?: (input: { resumeBaseline: number; droppedTicks: number }) => void
   /** 每条事件处理后的观测回调（诊断/探针）。 */
   readonly onEvent?: (result: InputEventResult) => void
+  /**
+   * 文本状态推进的通知（**只读**；不带政策）。
+   *
+   * 文本路径返回 `TextDraftEffect[]` 而非 `InputEventResult`，故需要单独的
+   * 通知通道让呈现层刷新草稿镜像与提示（见 `reportTextEffects` 的说明）。
+   */
+  readonly onTextEffects?: (controlId: string, effects: readonly TextDraftEffect[]) => void
 }
 
 export interface InputBinding {
@@ -196,7 +204,7 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
       session.blurCurrentTextFocus('focus-switch', token)
       return
     }
-    session.registerTextControl(
+    const effects = session.registerTextControl(
       {
         controlId,
         kind: kindOf(controlId),
@@ -205,13 +213,39 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
       },
       token,
     )
+    // 交点是**状态推进**，呈现层必须知道（否则镜像不刷新）。
+    // 焦点事件没有 `RoutingDecision`，故单独报一条：`onEvent` 的消费者
+    // （`RNAWidget.syncDraftMirror`）只关心"会话推进了"，不解读结论。
+    reportTextEffects(controlId, effects, null)
   }
 
   function onFocusOut(event: Event): void {
     if (!mounted) return
     const controlId = ownerOf(event.target)
     if (controlId === null) return
-    session.blurTextControl(controlId, 'blur', session.nextToken())
+    const effects = session.blurTextControl(controlId, 'blur', session.nextToken())
+    reportTextEffects(controlId, effects, null)
+  }
+
+  /**
+   * 呈现层镜像刷新（**只读**通知，不携带任何政策）。
+   *
+   * 为什么文本路径需要它而键盘路径不需要：键盘路径的结论经
+   * `InputEventResult.decision` 传回，装配层能读到；而文本状态推进
+   * （`registerTextControl` / `applyTextInput` / 组合事件）返回的是
+   * `TextDraftEffect[]`，装配层的 `onEvent` 拿不到 —— 若不显式报，
+   * 界面上的草稿与提示就不会更新（P7 首跑 e2e 实测：输入 `-` 后提示不可见）。
+   */
+  function reportTextEffects(
+    controlId: string,
+    effects: readonly TextDraftEffect[],
+    result: InputEventResult | null,
+  ): void {
+    if (result !== null) {
+      options.onEvent?.(result)
+      return
+    }
+    options.onTextEffects?.(controlId, effects)
   }
 
   function controlElement(controlId: string): HTMLElement | null {
@@ -223,6 +257,7 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
     const controlId = ownerOf(event.target)
     if (controlId === null) return
     session.compositionStart(controlId, session.nextToken())
+    options.onTextEffects?.(controlId, Object.freeze([]))
   }
 
   function onCompositionUpdate(event: Event): void {
@@ -230,6 +265,7 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
     const controlId = ownerOf(event.target)
     if (controlId === null) return
     session.compositionUpdate(controlId, (event as CompositionEvent).data, session.nextToken())
+    options.onTextEffects?.(controlId, Object.freeze([]))
   }
 
   function onCompositionEnd(event: Event): void {
@@ -238,6 +274,7 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
     if (controlId === null) return
     // 只解除组合态；提交由随后的事件决定（避免 compositionend 与 input 双重提交）
     session.compositionEnd(controlId, (event as CompositionEvent).data, session.nextToken())
+    options.onTextEffects?.(controlId, Object.freeze([]))
   }
 
   function onInput(event: Event): void {
@@ -246,7 +283,8 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
     if (controlId === null) return
     const target = event.target
     if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-    session.applyTextInput(controlId, target.value, session.nextToken())
+    const effects = session.applyTextInput(controlId, target.value, session.nextToken())
+    options.onTextEffects?.(controlId, effects)
   }
 
   // ── 可见性（事实；政策在 `domain/input`）──────────────────────────────

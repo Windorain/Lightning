@@ -36,7 +36,8 @@ import {
   bindPointerCapture,
   createInputRoutingState,
   modalOpened,
-  MODAL_CLOSED,
+  popModalScope,
+  pushModalScope,
   NO_TEXT_FOCUS,
   releasePointerCapture,
   routeKeyboardKey,
@@ -44,7 +45,6 @@ import {
   withActiveRegion,
   withHotkeys,
   withInteraction,
-  withModal,
   withTextFocus,
   type CommandIntent,
   type HotkeyBinding,
@@ -73,6 +73,7 @@ import {
   type TextLayerState,
 } from '@/domain/textDraft'
 import type { EditorClient } from './execution'
+import type { DomainError } from '@/domain/errors'
 import {
   createInputCommandBindings,
   dispatchIntent,
@@ -93,7 +94,16 @@ import {
 /** 单条事件的观测记录（**证据**；e2e 探针与诊断读它）。 */
 export interface InputTraceEntry {
   readonly token: number
-  readonly source: 'key' | 'pointer' | 'composition' | 'focus' | 'visibility'
+  readonly source: 'key' | 'pointer' | 'composition' | 'focus' | 'visibility' | 'command'
+  /**
+   * 键事件的细分（**必须**有，否则证据无法区分 keydown / keyup）。
+   *
+   * P7 首跑实测的教训：trace 只记 `source: 'key'` 时，"最后一次键事件"取到的是
+   * **keyup**（层级恒为 `none`、无意图），于是"焦点在文本控件 ⇒ 层级是 text"这类
+   * 断言会拿到 `none` 而误判为缺陷。把 `keydown`/`keyup` 显式分开，
+   * 证据才可机械对账。
+   */
+  readonly kind: 'keydown' | 'keyup' | 'pointer' | 'composition' | 'focus' | 'visibility' | 'command'
   readonly level: string | null
   readonly receiver: string | null
   readonly commandId: string | null
@@ -103,8 +113,10 @@ export interface InputTraceEntry {
 
 /** A22 的可观测计数（测试据它断言"只启动一次"）。 */
 export interface InputCounters {
-  /** 已处理的键事件数。 */
+  /** 已处理的 **keydown** 数（`keyup` 另计 —— 否则"一次按键"会被算成两次）。 */
   readonly keyEvents: number
+  /** 已处理的 keyup 数（只作诊断；不产生命令意图）。 */
+  readonly keyUpEvents: number
   /** 因 token 已消费 / 模态启动已消费而被**抑制**的事件数。 */
   readonly suppressedDuplicates: number
   /** 已启动的模态操作数（A22：每个事件至多 +1）。 */
@@ -112,6 +124,15 @@ export interface InputCounters {
   /** 指针捕获登记数 / 解除数（须平衡）。 */
   readonly capturesAcquired: number
   readonly capturesReleased: number
+  /**
+   * 捕获丢失事件数（**只**数真正持有过的 pointer；未持有的另计）。
+   *
+   * 单独计数是为了让"捕获丢失按政策取消"有可判别据：
+   * 若把每个 pointer 事件都算成释放，`capturesReleased` 会虚高、
+   * 判据失去意义（P7 首跑实测到的缺陷，见文件头）。
+   */
+  readonly captureLostOwned: number
+  readonly captureLostNotOwned: number
   /** IME 组合期间被拦下的可打印键数（A25 负对照的反面证据）。 */
   readonly imeSuppressedShortcuts: number
 }
@@ -189,6 +210,8 @@ export interface InputSession {
   setLocalActionHandler(handler: LocalActionHandler): void
   /** 未被任何局部处理器认领的动作（诊断：防止"命令发出去没人接"的静默失败）。 */
   readonly unhandledLocalActions: readonly string[]
+  /** 已登记的控件 id（诊断：`unboundControl` 的对照面）。 */
+  readonly boundControlIds: readonly string[]
   readonly trace: readonly InputTraceEntry[]
   readonly counters: InputCounters
   readonly routing: InputRoutingState
@@ -217,10 +240,13 @@ export function createInputSession(options: InputSessionOptions): InputSession {
   const trace: InputTraceEntry[] = []
   const counters = {
     keyEvents: 0,
+    keyUpEvents: 0,
     suppressedDuplicates: 0,
     modalStarts: 0,
     capturesAcquired: 0,
     capturesReleased: 0,
+    captureLostOwned: 0,
+    captureLostNotOwned: 0,
     imeSuppressedShortcuts: 0,
   }
 
@@ -240,6 +266,7 @@ export function createInputSession(options: InputSessionOptions): InputSession {
     if (isLocalCommandId(intent.commandId)) {
       const handled = localActionHandler !== null && localActionHandler(intent.commandId, intent.params)
       if (!handled) noteUnhandled(intent.commandId, eventToken)
+      recordDispatchTrace(intent.commandId, 'local', eventToken, null)
       return Object.freeze({ status: 'local', commandId: intent.commandId, params: intent.params, ledger })
     }
     const outcome = dispatchIntent(sink, ledger, eventToken, intent, bindings, { capabilities: capabilitySource() })
@@ -250,7 +277,52 @@ export function createInputSession(options: InputSessionOptions): InputSession {
       const handled = localActionHandler !== null && localActionHandler(outcome.commandId, outcome.params)
       if (!handled) noteUnhandled(outcome.commandId, eventToken)
     }
+    recordDispatchTrace(
+      intent.commandId,
+      outcome.status,
+      eventToken,
+      outcome.status === 'rejected' ? outcome.error : null,
+    )
     return outcome
+  }
+
+  /**
+   * 记录**实际分发**的结果。
+   *
+   * 为什么必须有：路由轨迹只说明"判定谁是接收者"，不说明"命令是否真的发出去了"。
+   * 缺了它，"Enter 是否只提交一次""提交是否被拒绝"这类断言只能靠界面副作用反推，
+   * 而界面副作用要等一帧、可能被别的路径掩盖（P7 首跑 e2e 实测：Enter 的提交
+   * 在轨迹里看不见，只能看到 `text-enter` 的路由结论）。
+   *
+   * 与路由轨迹**同一条数组**：A22 要判的是"一个事件 → 至多一条命令"，
+   * 两者必须在同一时间线上才能机械对账。故 `source` 用 `'command'` 区分。
+   */
+  function recordDispatchTrace(
+    commandId: string,
+    status: DispatchOutcome['status'],
+    eventToken: number,
+    error: DomainError | null,
+  ): void {
+    // 拒绝时**必须**带结构化参数（`DomainError.params`），否则"为什么被拒"不可诊断：
+    // 只有错误码时 `UnsupportedOperation` 无法区分 `unboundControl` /
+    // `commandNotWiredToLegacyDocument` / `controlNotRegistered`，
+    // 而这三者的修法完全不同（P7 首跑 e2e 实测到的证据缺口）。
+    const detail =
+      error === null
+        ? ''
+        : `:${error.code}:${Object.entries(error.params)
+            .map(([k, v]) => `${k}=${String(v)}`)
+            .join(',')}`
+    record({
+      token: eventToken,
+      source: 'command',
+      kind: 'command',
+      level: 'command',
+      receiver: commandId,
+      commandId,
+      reason: error === null ? `dispatched:${status}` : `rejected:${status}${detail}`,
+      startedModal: false,
+    })
   }
 
   function noteUnhandled(commandId: string, eventToken: number): void {
@@ -284,7 +356,10 @@ export function createInputSession(options: InputSessionOptions): InputSession {
 
   return {
     handleKey(fact) {
-      counters.keyEvents += 1
+      // `keyup` 与 `keydown` **分开计数**：一次按键 = 一次 keydown + 一次 keyup。
+      // 若都算进 `keyEvents`，"一次按键只被处理一次"的判据会恒为 2（P7 首跑实测）。
+      if (fact.kind === 'keyup') counters.keyUpEvents += 1
+      else counters.keyEvents += 1
       const before = routing
       const r = routeKeyboardKey(before, fact)
       routing = r.state
@@ -326,6 +401,7 @@ export function createInputSession(options: InputSessionOptions): InputSession {
       record({
         token: fact.token,
         source: 'key',
+        kind: fact.kind,
         level: d.level,
         receiver: d.receiver,
         commandId: d.intent?.commandId ?? null,
@@ -348,6 +424,10 @@ export function createInputSession(options: InputSessionOptions): InputSession {
     },
 
     handlePointer(fact) {
+      // 捕获归属的**变更前快照**：`routePointer` 可能自己把归属删掉
+      // （浏览器先派发 `lostpointercapture`，随后的 up 就看不到 owned 状态），
+      // 故释放计数必须按状态差分算，不能只看决策的 `captureAction`。
+      const beforeCaptures = routing.pointerCaptures
       const r = routePointer(routing, fact)
       routing = r.state
       const d = r.decision
@@ -356,26 +436,49 @@ export function createInputSession(options: InputSessionOptions): InputSession {
       let captureReleased = false
 
       if (d.captureAction === 'capture' && fact.kind === 'down') {
+        // 捕获**按 pointerId 登记**，与"有没有活动交互"无关（#249 §19.1
+        // 「按 pointerId 判定指针捕获」）。此前只在 `interaction !== null` 时登记，
+        // 于是工作台（产品侧尚未声明活动交互）**从不**登记捕获 ——
+        // `captured-pointer-single-route` 永远不会出现（P7 首跑 e2e 实测）。
         const interaction = routing.interaction
-        if (interaction !== null && d.regionId !== null) {
+        if (d.regionId !== null) {
           routing = bindPointerCapture(routing, {
             pointerId: fact.pointerId,
             regionId: d.regionId,
-            contextId: interaction.contextId,
-            tool: interaction.tool,
-            startedModal: true,
+            contextId: interaction?.contextId ?? '',
+            tool: interaction?.tool ?? '',
+            startedModal: interaction !== null,
           })
           counters.capturesAcquired += 1
           captureRegistered = true
         }
       }
       if (d.captureAction === 'release' && (fact.kind === 'up' || fact.kind === 'cancel')) {
+        // 平台侧显式释放（决策要求时）。**计数**不在这里做 —— 见下面的状态差分。
         routing = releasePointerCapture(routing, fact.pointerId)
-        counters.capturesReleased += 1
-        captureReleased = true
       }
+      // 捕获丢失**只**数真正持有过的 pointer：否则每个 pointer 事件都会虚增释放数，
+      // "丢失按政策取消"就失去可判别据（P7 首跑实测：`capturesReleased` 被 hover 事件刷到 4）。
       if (fact.kind === 'capture-lost') {
-        counters.capturesReleased += 1
+        if (d.reason === 'capture-lost-cancel') counters.captureLostOwned += 1
+        else counters.captureLostNotOwned += 1
+      }
+
+      // 捕获登记/释放**按状态差分计数**，而不是按"哪条分支跑了"。
+      //
+      // 为什么必须差分：`routePointer` 在 `captured === false` 的 `up` 上
+      // **已经**把该 pointer 从 `pointerCaptures` 里删掉了（见 `domain/input`
+      // 的捕获丢失分支）。于是"释放"有**两条**产生路径：
+      //  (a) 决策带 `captureAction: 'release'`；
+      //  (b) 决策不带，但 `routePointer` 已把归属删掉（浏览器先派发了
+      //      `lostpointercapture`，随后的 up 就看不到 owned 状态）。
+      // 只数 (a) 会让 `released` 恒为 0、登记与释放永不配平
+      // （P7 首跑 e2e 实测：`acquired=1 released=0`）。
+      // 差分同时覆盖两条路径，且不会重复计数（状态里本来就没有的就减不出增量）。
+      const capturesBefore = Object.keys(beforeCaptures).length
+      const capturesAfter = Object.keys(routing.pointerCaptures).length
+      if (capturesAfter < capturesBefore) {
+        counters.capturesReleased += capturesBefore - capturesAfter
         captureReleased = true
       }
 
@@ -391,6 +494,7 @@ export function createInputSession(options: InputSessionOptions): InputSession {
       record({
         token: fact.token,
         source: 'pointer',
+        kind: 'pointer',
         level: d.receiverKind,
         receiver: d.receiver,
         commandId: d.intent?.commandId ?? null,
@@ -431,10 +535,15 @@ export function createInputSession(options: InputSessionOptions): InputSession {
       capabilitySource = source
     },
     openModal(scope) {
-      routing = withModal(routing, modalOpened(scope))
+      // **压栈**：后开的作用域成为栈顶，先开的保留在栈里
+      // （关掉内层要能回到外层 —— 单槽位会丢失外层，见 `InputRoutingState.modalStack`）。
+      routing = pushModalScope(routing, modalOpened(scope))
     },
     closeModal(scopeId) {
-      if (routing.modal.scopeId === scopeId) routing = withModal(routing, MODAL_CLOSED)
+      // **出栈**：只移除指定作用域；若它是栈顶，栈顶回落到前一个。
+      // `popModalScope` 返回 `null` 表示"这个 id 不在栈里" —— 不动状态（不静默）。
+      const r = popModalScope(routing, scopeId)
+      if (r !== null) routing = r.state
     },
     bindControl(binding) {
       const controls = { ...bindings.controls, [binding.controlId]: Object.freeze({ ...binding }) }
@@ -517,6 +626,7 @@ export function createInputSession(options: InputSessionOptions): InputSession {
       record({
         token: nextToken(),
         source: 'visibility',
+        kind: 'visibility',
         level: null,
         receiver: null,
         commandId: null,
@@ -535,6 +645,9 @@ export function createInputSession(options: InputSessionOptions): InputSession {
     },
     get unhandledLocalActions() {
       return Object.freeze([...unhandledLocalActions])
+    },
+    get boundControlIds() {
+      return Object.freeze(Object.keys(bindings.controls))
     },
     nextToken,
     get trace() {
