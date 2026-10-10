@@ -89,15 +89,39 @@ export const OBJECT_TYPE = {
 
 export type ObjectTypeId = (typeof OBJECT_TYPE)[keyof typeof OBJECT_TYPE]
 
+/**
+ * 场景对象**种类**（`'block'` / `'annotation'`）—— 由 objectTypeId 推导，**不是** owner.kind。
+ *
+ * ## 冻结 #2 的落地（#250）
+ *
+ * 契约 §1.1 的 `EntityOwnerKind` 是**实体种类**的封闭清单（`document`/`scene`/`object`/
+ * `objectData`/`editContext`/`workspace`/`asset`/`evaluation`）。方块和注解都是**场景对象**，
+ * 故它们的 `owner.kind` 一律是 `'object'`。
+ *
+ * 「这是方块还是注解」是**对象类型**（objectType）的差别，由物体自己的
+ * `objectTypeId`（`lightning.block` vs `lightning.annotation.box`）表达。把 `'block'`
+ * 塞进 `owner.kind` 曾让 `EntityOwnerKind` 变成开放联合（`| (string & {})`），
+ * 于是「实体种类」这个契约概念失去可检查含义 —— 这正是冻结 #2 要修掉的。
+ *
+ * 本函数是「objectTypeId → 场景对象种类」的**唯一**映射点：需要按种类分支时
+ * （选目标、读原始值、算事实）用它，不再读 `ownerKind`。
+ */
+export function sceneKindOf(objectTypeId: string): 'block' | 'annotation' | null {
+  if (objectTypeId === OBJECT_TYPE.block) return 'block'
+  return objectTypeId.startsWith('lightning.annotation.') ? 'annotation' : null
+}
+
 /** 拥有者种类 → 实体引用（面板与命令共用同一构造口径）。 */
 export function documentOwner(): EntityRef {
   return { kind: 'document', id: 'document' }
 }
+/** 方块对象引用（冻结 #2：场景对象 owner.kind 一律 `'object'`）。 */
 export function blockOwner(pos: { x: number; y: number; z: number }): EntityRef {
-  return { kind: 'block', id: `${pos.x},${pos.y},${pos.z}` }
+  return { kind: 'object', id: `${pos.x},${pos.y},${pos.z}` }
 }
+/** 注解对象引用（冻结 #2：同上；注解 ID 是稳定 ID）。 */
 export function annotationOwner(id: string): EntityRef {
-  return { kind: 'annotation', id }
+  return { kind: 'object', id }
 }
 export function globalOwner(kind: EntityOwnerKind, id: string): EntityRef {
   return { kind, id }
@@ -148,7 +172,7 @@ const RATIO = { kind: 'ratio' as const }
  */
 export const BLOCK_DECL: ObjectTypeDecl = {
   id: OBJECT_TYPE.block,
-  ownerKind: 'block',
+  ownerKind: 'object',
   display: { labelKey: 'objectType.block', fallback: '方块' },
   properties: [
     decl({
@@ -245,7 +269,7 @@ function annotationCommon(): PropertyDecl[] {
 
 export const ANNOTATION_BOX_DECL: ObjectTypeDecl = {
   id: OBJECT_TYPE.annotationBox,
-  ownerKind: 'annotation',
+  ownerKind: 'object',
   display: { labelKey: 'objectType.annotation.box', fallback: '包围盒注解' },
   properties: [
     ...annotationCommon(),
@@ -267,7 +291,7 @@ export const ANNOTATION_BOX_DECL: ObjectTypeDecl = {
 
 export const ANNOTATION_POINT_DECL: ObjectTypeDecl = {
   id: OBJECT_TYPE.annotationPoint,
-  ownerKind: 'annotation',
+  ownerKind: 'object',
   display: { labelKey: 'objectType.annotation.point', fallback: '标记点注解' },
   properties: [
     ...annotationCommon(),
@@ -279,7 +303,7 @@ export const ANNOTATION_POINT_DECL: ObjectTypeDecl = {
 
 export const ANNOTATION_LINE_DECL: ObjectTypeDecl = {
   id: OBJECT_TYPE.annotationLine,
-  ownerKind: 'annotation',
+  ownerKind: 'object',
   display: { labelKey: 'objectType.annotation.line', fallback: '线段注解' },
   properties: [
     ...annotationCommon(),
@@ -291,7 +315,7 @@ export const ANNOTATION_LINE_DECL: ObjectTypeDecl = {
 
 export const ANNOTATION_TEXT_DECL: ObjectTypeDecl = {
   id: OBJECT_TYPE.annotationText,
-  ownerKind: 'annotation',
+  ownerKind: 'object',
   display: { labelKey: 'objectType.annotation.text', fallback: '文本注解' },
   properties: [
     ...annotationCommon(),
@@ -303,16 +327,16 @@ export const ANNOTATION_TEXT_DECL: ObjectTypeDecl = {
       id: 'linkedAnnotationId',
       valueType: 'reference',
       animatable: false,
-      referenceType: 'annotation',
+      referenceType: 'object',
       display: { labelKey: 'annotation.linked', fallback: '关联注解', descriptionFallback: '未解析时显示为缺失引用' },
-      domain: { kind: 'reference', ownerKind: 'annotation' },
+      domain: { kind: 'reference', ownerKind: 'object' },
     }),
   ],
 }
 
 export const ANNOTATION_FACE_DECL: ObjectTypeDecl = {
   id: OBJECT_TYPE.annotationFace,
-  ownerKind: 'annotation',
+  ownerKind: 'object',
   display: { labelKey: 'objectType.annotation.face', fallback: '选面注解' },
   properties: [
     ...annotationCommon(),

@@ -162,7 +162,7 @@ export const DOMAIN_ERROR_CODES = [
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number]
 
 /** `WouldBlockError.params.reason` 的取值域（含 GF-1 的 `reentrant`）。 */
-export type WouldBlockReason = 'busy' | 'reentrant' | 'queued-incompatible'
+export type WouldBlockReason = 'busy' | 'reentrant' | 'incompatibleQueued'
 
 /**
  * 结构化错误（契约 §3.2）。

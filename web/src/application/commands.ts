@@ -679,10 +679,24 @@ function reduceSetProperty(state: ApplicationState, cmd: SetPropertyCommand): Tr
 
   // ── 阶段 1：对**全部**目标做只读校验（此处不写任何东西） ──
   // 契约 §3.3：「一个目标不可改即**整体拒绝**并列明原因，不静默部分成功」。
+  //
+  // 冻结 #5（#250）：拒绝必须**逐目标列明原因**，不只报第一个失败目标。
+  // 理由：多选批次里三个目标各有各的不可改原因时，只报第一个会让调用方
+  // 「改掉第一个再重试 ⇒ 又撞第二个」，用户看到的是挤牙膏式报错。
+  //
+  // 单目标失败时仍**原样透出**该错误（分类、params 与收敛前逐字节相同）——
+  // 这保证既有调用方（`rejectCancelNoop` / `executionProtocol`）的分支不受影响。
+  const failures: { ref: PropertyRef; error: DomainError }[] = []
   for (const ref of cmd.refs) {
     const e = validatePropertyWrite(doc, ref, driven)
-    if (e) return rejected(state, e)
+    if (e) failures.push({ ref, error: e })
   }
+  // **统一形态**（冻结 #5）：无论单目标还是多目标，拒绝都带
+  // `failedTargets`/`totalTargets`/`reasons`/`homogeneous` ——
+  // 与 P2 的 `applySetProperty`（`aggregateFailure`）逐字段一致。
+  // 若单目标走"原样透出"、多目标走"聚合"，调用方就要按目标数分支，
+  // 而"为什么被拒"的读取方式会随选择数量变化 —— 那正是冻结 #5 要消除的。
+  if (failures.length > 0) return rejected(state, aggregatePropertyFailures(failures, cmd.refs.length))
 
   // ── 阶段 2：全量应用 ──
   const lease = acquireFor(state, doc.id, cmd.contextId)
@@ -720,6 +734,44 @@ function reduceSetProperty(state: ApplicationState, cmd: SetPropertyCommand): Tr
     leases: Object.freeze({ ...state.leases, [doc.id]: lease.value }),
   })
   return applied(next, write.version, changes)
+}
+
+/**
+ * 多目标写拒绝的**逐目标**聚合（冻结 #5，#250）。
+ *
+ * 形态与 P2 的 `aggregateFailure`（`application/property-commands.ts`）**一致**：
+ * 首错决定 `code`，`params` 里带 `failedTargets`/`totalTargets`/`reasons`/`homogeneous`。
+ * 两处同形态是刻意的 —— 面板侧要显示的拒绝原因与命令侧返回的必须是同一份，
+ * 否则「UI 说为什么拒绝」与「核心说为什么拒绝」会漂移。
+ *
+ * `reasons` 用 `ownerId.property=Code:reason` 的稳定诊断键拼接（不拼自然语言，
+ * 契约 §19.7 要求错误参数结构化、可本地化）。
+ */
+function aggregatePropertyFailures(
+  failures: readonly { ref: PropertyRef; error: DomainError }[],
+  totalTargets: number,
+): DomainError {
+  const first = failures[0]!.error
+  const reasons = failures
+    .map((f) => `${f.ref.owner.id}.${f.ref.property}=${diagnosticKeyOf(f.error)}`)
+    .join(';')
+  const homogeneous = failures.every((f) => f.error.code === first.code)
+  return {
+    code: first.code,
+    params: Object.freeze({
+      ...first.params,
+      failedTargets: failures.length,
+      totalTargets,
+      reasons,
+      homogeneous: homogeneous ? 1 : 0,
+    }),
+  }
+}
+
+/** 稳定诊断键：`Code:reason`（reason 缺省时只留码）。 */
+function diagnosticKeyOf(error: DomainError): string {
+  const reason = error.params.reason
+  return reason === undefined ? error.code : `${error.code}:${String(reason)}`
 }
 
 /** 对象是否可写（存在 + 非只读内容来源）。返回 `null` 表示可写。 */

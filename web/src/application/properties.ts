@@ -78,10 +78,20 @@ export type ReferenceValue = Readonly<{ kind: EntityOwnerKind; id: string }>
 export type ExtensionValue = Readonly<Record<string, unknown>>
 
 /**
- * RNA 值。**没有 `null`**：缺失用 `MissingTarget` 表达（契约 §3.1「不能用默认值掩盖缺失」），
- * 多选值不同用显式的 `'mixed'` 哨兵（§5.2「不用 null 兼表」）。
+ * RNA 值。#250 冻结（GF-5 第 4 项）：
+ *
+ * - **含 `null`** —— 单值属性的"显式空"是合法值（P1 原有 `PropertyValue` 即含 `null`，
+ *   合流取其并集）。但**只有声明了 `nullable: true` 的描述**才接受 `null`；
+ *   其余描述收到 `null` 返回 `InvalidValue`（值域问题，不是 `UnsupportedOperation`）。
+ *   这条区分必要：允许 `null` 不等于允许**任何**属性被置空
+ *   （`block.pos = null` 无意义，而 `annotation.linkedAnnotationId = null` 有意义）。
+ * - **多选"值不同"仍用显式 `'mixed'` 哨兵**（契约 §5.2 明文「不用 null 兼表」）。
+ *   ⇒ `null`（单值置空）与 `'mixed'`（多选不一致）是**两个不同的东西** ——
+ *   这正是 §5.2 选择理由要防的混淆：若用 `null` 兼表，
+ *   「值是 null」与「多选值不同」不可区分。
  */
 export type PropertyValue =
+  | null
   | number
   | string
   | boolean
@@ -173,6 +183,14 @@ export interface PropertyDecl {
   readonly readOnly?: boolean
   /** 声明级只读的结构化原因参数（供诊断与本地化）。 */
   readonly readOnlyReason?: string
+  /**
+   * 是否接受 `null` 作为**显式空值**（#250 GF-5 第 4 项）。
+   *
+   * 缺省 `false` ⇒ 写入 `null` 返回 `InvalidValue`。
+   * 只有「空值本身有语义」的属性才声明它（如 `annotation.linkedAnnotationId`、
+   * 可选的 `block.tooltip`）。
+   */
+  readonly nullable?: boolean
 }
 
 /** 对象类型声明 —— 属性按 `'<objectTypeId>.<propertyId>'` 反查（`describe` 的键）。 */
@@ -204,6 +222,8 @@ export type PropertyDescriptor = Readonly<{
   readOnly: boolean
   readOnlyReason?: string
   defaultValue?: PropertyValue
+  /** 接受 `null` 作为显式空值（见 `PropertyDecl.nullable`）。 */
+  nullable: boolean
 }>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -605,6 +625,7 @@ export function createPropertyRegistry(options?: {
           display: p.display,
           readOnly: p.readOnly === true,
           ...(p.readOnlyReason ? { readOnlyReason: p.readOnlyReason } : {}),
+          nullable: p.nullable === true,
           ...(p.defaultValue !== undefined ? { defaultValue: p.defaultValue } : {}),
         })
       }

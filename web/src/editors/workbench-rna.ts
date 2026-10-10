@@ -80,6 +80,7 @@ import {
   factsOf,
   rejectionSummary,
   resolveInspectorTargets,
+  sceneKindOf,
 } from './workbench-inspector'
 import type { InspectorModel } from './inspector'
 import { createWorkbenchInspectorLayouts } from './workbench-inspector'
@@ -143,19 +144,21 @@ export function selectionOf(ctx: Context): PanelSelection {
  */
 export function resolveRefs(ctx: Context, desc: PropertyDescriptor): readonly PropertyRef[] {
   const objectType = workbenchRegistry().registry.objectType(desc.objectTypeId)
-  const kind = objectType?.ownerKind
+  // 冻结 #2：'block'/'annotation' 是**场景对象种类**（由 objectTypeId 推出），
+  // 不是 owner.kind —— 后者的场景对象一律 'object'。
+  const kind = objectType ? sceneKindOf(objectType.id) : null
   const refs: PropertyRef[] = []
 
   if (kind === 'block') {
     for (const e of ctx.getSelection().items.value) {
       if (e.kind !== 'block') continue
       const p = e.ref.pos
-      refs.push({ owner: { kind: 'block', id: `${p.x},${p.y},${p.z}` }, property: desc.id })
+      refs.push({ owner: { kind: 'object', id: `${p.x},${p.y},${p.z}` }, property: desc.id })
     }
     // 无选中但有悬停方块 ⇒ 以悬停为单目标（与注解面板的悬停语义一致）
     if (refs.length === 0) {
       const h = ctx.getHoveredBlock().value
-      if (h) refs.push({ owner: { kind: 'block', id: `${h.pos.x},${h.pos.y},${h.pos.z}` }, property: desc.id })
+      if (h) refs.push({ owner: { kind: 'object', id: `${h.pos.x},${h.pos.y},${h.pos.z}` }, property: desc.id })
     }
     return refs
   }
@@ -163,11 +166,11 @@ export function resolveRefs(ctx: Context, desc: PropertyDescriptor): readonly Pr
   if (kind === 'annotation') {
     for (const e of ctx.getSelection().items.value) {
       if (e.kind !== 'annotation') continue
-      refs.push({ owner: { kind: 'annotation', id: e.id }, property: desc.id })
+      refs.push({ owner: { kind: 'object', id: e.id }, property: desc.id })
     }
     if (refs.length === 0) {
       const hid = ctx.getHoveredAnnotationId().value
-      if (hid) refs.push({ owner: { kind: 'annotation', id: hid }, property: desc.id })
+      if (hid) refs.push({ owner: { kind: 'object', id: hid }, property: desc.id })
     }
     return refs
   }
@@ -196,7 +199,7 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
   const objectType = desc ? workbenchRegistry().registry.objectType(desc.objectTypeId) : undefined
   // 局部名必须用 `objectTypeId` 剥离（属性 ID 形如 `lightning.block.pos`）。
   const local = localPropertyOf(ref.property, desc?.objectTypeId)
-  const kind = objectType?.ownerKind
+  const kind = objectType ? sceneKindOf(objectType.id) : null
 
   if (kind === 'block') {
     const doc = ctx.getDoc().value
@@ -320,7 +323,7 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
   const objectType = desc ? workbenchRegistry().registry.objectType(desc.objectTypeId) : undefined
   // 局部名必须用 `objectTypeId` 剥离（属性 ID 形如 `lightning.block.pos`）。
   const local = localPropertyOf(ref.property, desc?.objectTypeId)
-  const kind = objectType?.ownerKind
+  const kind = objectType ? sceneKindOf(objectType.id) : null
   const doc = ctx.getDoc().value
   const multiblockReadOnly = isMultiblockGenerated(doc)
 

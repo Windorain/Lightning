@@ -360,6 +360,28 @@ function validateIncoming(
   value: PropertyValue,
   ref: PropertyRef,
 ): Result<PropertyValue> {
+  // `null` 的受理权在**描述**，不在值类型 handler（#250 GF-5 第 4 项）。
+  // 理由：`null` 有没有意义是**属性**的性质（`linkedAnnotationId = null` 有意义，
+  // `pos = null` 无意义），不是值类型的性质。未声明 `nullable` 的属性被置空时
+  // 返回 `InvalidValue`（**值域**问题）而非 `UnsupportedOperation`（能力/实现问题）——
+  // 这个区分让调用方的分支稳定：值错就改值，能力缺就换 profile。
+  if (value === null) {
+    if (!desc.nullable) {
+      return err(
+        domainError('InvalidValue', {
+          reason: 'not-nullable',
+          property: desc.id,
+          valueType: desc.valueType,
+        }),
+      )
+    }
+    if (ref.component !== undefined) {
+      return err(
+        domainError('InvalidValue', { reason: 'component-of-null', property: desc.id, component: ref.component }),
+      )
+    }
+    return ok(null)
+  }
   const handler = registry.valueTypeHandler(desc.valueType)
   if (!handler) {
     return err(domainError('UnsupportedOperation', { reason: 'unknown-value-type', valueType: desc.valueType }))
