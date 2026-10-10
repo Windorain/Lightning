@@ -55,6 +55,13 @@ export interface SeamRegistration {
 /**
  * 当下登记在案的接缝。**新增双轨必须在此登记**（否则 `test:arch` 会因
  * `boundary-scan.test.ts` 的"登记项字段完整"+数量对账而提醒）。
+ *
+ * P6（#257）按 R-WK-01 归口义务在此登记 `per-viewport-channel-staging`
+ * （该文件属 P6 区；相位按 R-WK-03 归 #261）。
+ * P6 自己**已核销**的两条（模块级宿主开关、组件挂载决定状态寿命）
+ * **不**登记进本表 —— 本表语义是"双轨**剩余**数、只应减少"，
+ * 把已退役项塞进来会违背该口径；那两条改由
+ * `composition/__tests__/seams.test.ts` 的**回归断言**把守（防被改回去）。
  */
 export const SEAMS: readonly SeamRegistration[] = Object.freeze([
   Object.freeze({
@@ -139,6 +146,39 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
     exitCondition:
       '`src/application/exportPlan.ts` 的 `deriveAssetNeeds()` 由已装配的图元来源产出非空清单（不再在未装配时返回空），且 `src/runtime/exportJob.ts` 的作业按该清单解析资源。届时删除本条登记。',
+  }),
+  /**
+   * P6（#257）登记：**每视口通道暂存**（B5 #4 的消费者面）。
+   *
+   * 归口依据：R-WK-01 实施细则「跨区旧文件的退役删除由**文件所在区批次**执行，
+   * 语义替代方提供替代接口与删除点清单」—— 该文件属 P6 区。
+   *
+   * 相位（R-WK-03 修正，2026-10-11）：删除前置条件是**内核接线生产**，
+   * 目标批次由 P6 改为 **#261（P10 集成闭环）**。
+   * 依据：本表登记时实测「新内核尚未接线生产」——
+   * `web/src` 下 `new Editor(` 零生产构造、`runtime/evaluation.ts` 零导入者、
+   * 没有任何生产调用方推进 `EditContext` 时间（`advanceContextTime` 零生产调用方），
+   * 生产入口（`workbench/WorkbenchRoot.vue`、`dev/DevApp.vue`、
+   * `runtime/host/workbenchHost.ts`）均不 import 内核。
+   * ⇒ 内核未接线的状态下把消费者迁到 `EditContext`，会得到"读面永远静止"的**行为回退**
+   * （通道取值改动不再驱动重建）；那是 #171 禁止的"留半成品"，故整组闭环归 #261。
+   */
+  Object.freeze({
+    id: 'per-viewport-channel-staging',
+    files: Object.freeze([
+      'src/shared/viewport/useMultiblockChannels.ts',
+      'src/shared/viewport/EmbedViewport.vue',
+      'src/workbench/components/WorkbenchViewport.vue',
+    ]),
+    newTrack:
+      '通道取值归 **P1 的 `EditContext.channelValues`**（同一编辑上下文的所有 Area 读到同一份值，#249 §3.3/§3.4）+ **P4（#255）的统一通道求值面**（`application/evaluation.ts` 纯求值、装配是纯函数、失效由依赖图自动传播，无调用方手动 refresh）',
+    oldTrack:
+      '`shared/viewport/useMultiblockChannels.ts` 的**每视口暂存副本**：每个视口自持 `state`（总 Tier / 通道取值 / 运行态）、`revision` 计数与 `bindMultiblockMeshSync()` 的手工链式刷新。这正是 B5 矩阵 #4「每视口独立暂存、重复选择副本」与「手动链式刷新」两条 slug 的共同消费者面 —— 于是"同上下文所有 Area 可见的有效读面"并不存在（每个视口只能读到自己那份）。',
+    blocker:
+      '**内核尚未接线生产**（R-WK-03）：#261（P10 集成闭环）需先完成宿主驱动接线，把 `EditorClient`/求值面/时间推进接进生产入口，随后消费者迁移与字段删除才有语义。实测（模块图级，非目视）：`new Editor(` 在生产代码零构造、`runtime/evaluation.ts` 零导入者、`advanceContextTime` 零生产调用方。此状态下来替换只能是半成品（读面静止）或把旧实现搬进新层（#171 禁止）。',
+    owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
+    exitCondition:
+      '删除 `src/shared/viewport/useMultiblockChannels.ts`（其每视口 `state`/`revision`/`bindMultiblockMeshSync` 一并消失），通道取值改经 `EditContext.channelValues`、装配经 `application/evaluation.ts` 的纯求值；届时删除本条登记。',
   }),
 ])
 
