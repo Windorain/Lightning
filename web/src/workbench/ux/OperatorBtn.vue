@@ -28,7 +28,7 @@ function onClick() {
     :title="title ?? label"
     @click="onClick"
   >
-    <span v-if="icon" class="ux-icon" v-html="icon"></span>
+    <span v-if="icon" class="ux-icon">{{ icon }}</span>
     <template v-if="label">{{ label }}</template>
   </button>
 </template>

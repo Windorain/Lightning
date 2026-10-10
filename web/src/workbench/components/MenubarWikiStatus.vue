@@ -3,9 +3,10 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useContext } from '@/runtime/context'
 import { isWikiHostProfile } from '@/runtime/hostProfile'
 import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
-import { t } from '@/config/i18n'
 
 const ctx = useContext()
+/** 本实例的翻译（#259 A33：消费本实例语言，无模块级全局读源）。 */
+const t = ctx.t
 const ready = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
