@@ -925,6 +925,49 @@ export function isDriven(state: AnimationState, ref: PropertyRef): boolean {
   return t !== undefined && t.enabled
 }
 
+/**
+ * 结构属性的**声明值类型**。
+ *
+ * 为什么需要它：`insertKeyframe` 若只从"传进来的值"推断类型，那么往
+ * `transform.position`（vec3）插一个数字会被推断成 `integer` 轨道而**通过**校验 ——
+ * 于是文档里出现一条"目标属性是向量、轨道值却是标量"的轨道，每次采样都得到
+ * 一个无法应用到属性上的值。这属于"把坏数据存进文档"，必须在写入点拒绝。
+ *
+ * 类型来源是**属性本身**（RNA 描述在 P2 落地；此处覆盖本批三类对象的已动画属性），
+ * 不是值。P2 引入完整 RNA 后，本函数应由描述表替代 —— 那时它仍然是"查描述"，
+ * 判据不变、调用方不变。
+ */
+export function declaredValueType(property: string): TrackValueType | undefined {
+  switch (property) {
+    case 'transform.position':
+    case 'transform.scale':
+    case 'transform.pivot':
+      return 'vec3'
+    case 'transform.rotation':
+      return 'quat'
+    case 'name':
+      return 'string'
+    case 'visible':
+      return 'boolean'
+    case 'projection.fov':
+    case 'projection.clipStart':
+    case 'projection.clipEnd':
+      return 'number'
+    default:
+      return undefined
+  }
+}
+
+/**
+ * 校验"值与属性声明类型"是否相容；`undefined` 表示该属性未登记类型
+ * （交由调用方决定 `UnsupportedOperation`，本函数不猜）。
+ */
+export function checkValueAgainstProperty(property: string, value: TrackValue): DomainError | null {
+  const declared = declaredValueType(property)
+  if (declared === undefined) return null
+  return checkValueType(declared, value)
+}
+
 /** 两个轨道目标是否相同（转发 `samePropertyRef`，供测试与下游对账）。 */
 export const sameTrackTarget = samePropertyRef
 

@@ -115,13 +115,18 @@ export interface AsyncEvaluationCompletion {
 /**
  * 依赖图实例。
  *
- * 它**只**持有三样东西：图声明、缓存、绑定代数。
- * 没有任何"脏标记集合""待刷新队列""版本补丁表"—— 那些正是 #249 §15 第 5 条
+ * 它**只**持有四样东西：图声明、缓存、逐节点身份、绑定代数与在途请求。
+ * 没有"脏标记集合""待刷新队列""版本补丁表"—— 那些正是 #249 §15 第 5 条
  * 要退役的形态（"非内容版本不得冒充内容变化"）。
  *
  * `inFlight` 记录在途异步请求，用于"过期不得覆盖 + 资源必须回收"的记账：
  * 每个进入 in-flight 的请求在结算时必须得到一个明确结局（接纳或回收）。
  */
+interface CacheEntry {
+  readonly identity: string
+  readonly value: unknown
+}
+
 export class EvaluationInstance {
   private cache: EvaluationCache = emptyEvaluationCache()
   private bindingGeneration = 0
@@ -175,10 +180,14 @@ export class EvaluationInstance {
     const r = evaluateScene(source, ctx)
     if (!r.ok) return r
     this.cache = r.value.cache
+    // 记下本轮逐节点身份：异步请求的发起与接纳都以它为依据。
+    this.latestIdentities = r.value.identities
 
     // 收集本轮出现的异步请求（由节点 compute 产出），并登记为在途。
+    //
     // 只看**本轮真正重算过**的节点：命中缓存的节点不会再次产出同一请求
-    // （否则每轮都会重复发起同一个昂贵计算）。
+    // （否则每轮都会重复发起同一个昂贵计算）。身份取自产物里的 `identities`
+    // ——它是 `nodeIdentity` 的**同一次**计算，接线层不自己重算（两边重算会漂移）。
     const recomputed = new Set(r.value.stats.recomputedNodes)
     const pending: PendingEvaluationRequest[] = []
     for (const object of r.value.objects) {
@@ -187,16 +196,25 @@ export class EvaluationInstance {
       const request: PendingEvaluationRequest = Object.freeze({
         kind: 'pendingEvaluation',
         nodeId: object.objectId,
-        identity: object.payload.identity,
+        identity: r.value.identities[object.objectId] ?? object.payload.identity,
         correlationId: object.payload.correlationId,
       })
       pending.push(request)
-      this.inFlight.set(request.correlationId, Object.freeze({
-        nodeId: request.nodeId,
-        identity: request.identity,
-        bindingGeneration: this.bindingGeneration,
-        correlationId: request.correlationId,
-      }))
+      // **不覆盖**已在案的同一 `correlationId`。
+      //
+      // 为什么：若后来的求值用同一个 correlationId 覆盖了在途记录，那么**较早那次**
+      // 请求的迟到结果就会拿"新的身份"去比对，从而被判为 `current` 并被接纳 ——
+      // 旧结果覆盖新结果，正是 #249 §7 明文禁止的形态。
+      // 保留先到的那条记录，使旧请求的迟到结果必然被判 `staleIdentity`。
+      // （正常情况下 correlationId 由发起方保证唯一；这条是纵深防御。）
+      if (!this.inFlight.has(request.correlationId)) {
+        this.inFlight.set(request.correlationId, Object.freeze({
+          nodeId: request.nodeId,
+          identity: request.identity,
+          bindingGeneration: this.bindingGeneration,
+          correlationId: request.correlationId,
+        }))
+      }
     }
 
     return ok(
@@ -217,7 +235,12 @@ export class EvaluationInstance {
    *    这不是"建议"—— `#249` §7 明文「已获取资源必须回收」，把它做成返回值
    *    让"忘了 dispose"在类型上显形。
    *
-   * 未被接纳时同时把它从在途表中移除（它有了结局），使 in-flight 计数可对账
+   * 判据用**最近一次求值产出的身份**（`latestIdentities`）与发起时的身份比对：
+   * 若这期间发生过使该节点失效的求值，身份必然不同 ⇒ `staleIdentity`。
+   * 这就是"过期结果不得覆盖新结果"（#249 §7 + A12 负对照）的落地方式 ——
+   * 判据是**版本化事实**，不是时间戳或"谁后到谁赢"。
+   *
+   * 未被接纳时同样把它从在途表移除（它有了结局），使 in-flight 计数可对账
    * （A19/A12 的"活跃计数回基线"依赖这类显式结算）。
    */
   admitAsyncResult(completion: AsyncEvaluationCompletion): AdmitDecisionWithRelease {
@@ -227,77 +250,72 @@ export class EvaluationInstance {
       return Object.freeze({ admitted: false, release: true, reason: 'nodeUnknown', unknown: true })
     }
 
-    // 该请求所依据的**当前**身份：重新计算（版本可能已经变了）。
-    const currentIdentity = this.currentIdentityOf(completion.request.nodeId, completion.request.identity)
-    const decision: AdmitNodeDecision = admitNodeResult(
-      this.options.graph,
-      known,
-      {
-        identity: currentIdentity,
-        bindingGeneration: this.bindingGeneration,
-      },
-    )
+    // 该节点**当前**的身份：由最近一次求值给出。若期间没有重算过该节点，
+    // 说明它的输入没变，身份自然相符（不是"没检查"）。
+    const currentIdentity = this.latestIdentities[completion.request.nodeId] ?? known.identity
+    const decision: AdmitNodeDecision = admitNodeResult(this.options.graph, known, {
+      identity: currentIdentity,
+      bindingGeneration: this.bindingGeneration,
+      cancelled: this.cancelledNodes.has(completion.request.correlationId),
+    })
     this.inFlight.delete(completion.request.correlationId)
+    this.cancelledNodes.delete(completion.request.correlationId)
 
     if (!decision.admitted) {
       return Object.freeze({ admitted: false, release: decision.release, reason: decision.reason, unknown: false })
     }
     // 接纳：把结果写入缓存（以**发起时**的身份为键）。
-    // 走到这里 `currentIdentity === known.identity`（admitNodeResult 已判定），
-    // 故写入不会覆盖更新的结果 —— 这正是"过期结果不得覆盖新结果"的落点。
-    const entries: Record<string, { identity: string; value: unknown }> = { ...this.cache.entries }
-    entries[completion.request.nodeId] = Object.freeze({ identity: known.identity, value: completion.outcome.kind === 'success' ? completion.outcome.data : null })
+    // 走到这里 `currentIdentity === known.identity`（`admitNodeResult` 已判定），
+    // 故写入不会覆盖更新的结果。
+    const entries: Record<string, CacheEntry> = { ...this.cache.entries }
+    entries[completion.request.nodeId] = Object.freeze({
+      identity: known.identity,
+      value: completion.outcome.kind === 'success' ? completion.outcome.data : null,
+    })
     this.cache = Object.freeze({ entries: Object.freeze(entries) })
     return Object.freeze({ admitted: true, release: false, reason: 'current', unknown: false })
   }
 
-  /**
-   * 当前身份。
-   *
-   * 接线层**无法**凭自己重算真实身份（它需要当前的版本/成员快照）。
-   * 故这里采用"已知身份 + 未变"的保守语义：若调用方在 `evaluate` 之后又推进过
-   * 版本快照，必须调用 `noteVersionAdvance()` 主动标记，使身份不再匹配。
-   *
-   * 为什么不做成"自动重算"：那需要接线层持有最新快照并在异步回调时重放求值，
-   * 等于把"求值"藏进接纳路径 —— 政策就漏进接线了。显式标记让
-   * "什么使结果过期"成为一个可枚举的事实。
-   */
-  private currentIdentityOf(nodeId: string, fallback: string): string {
-    if (this.staleNodes.has(nodeId)) return `stale:${fallback}`
-    return fallback
-  }
-
-  /** 已被新版本超越的节点（其异步结果必须被拒绝）。 */
-  private readonly staleNodes = new Set<string>()
+  /** 最近一次求值产出的逐节点身份（过期判定的依据）。 */
+  private latestIdentities: Readonly<Record<string, string>> = Object.freeze({})
 
   /**
-   * 标记"该节点所依据的输入已经前进"。
+   * 显式取消一个在途请求（取消是**协议**，不等于"等它返回后丢掉"）。
    *
-   * 调用方（宿主）在版本/集合/时间变化后调用它 —— 通常紧接一次新的 `evaluate()`。
-   * 这里**不**接收版本值：只需知道"变了"，具体身份由下一次 `evaluate` 重新计算。
+   * 与 `runtime/effects` 的 Job 状态机同一政策：`cancelRequested` 是独立相位。
+   * 在求值面上，取消表现为"该请求的结果回来后必被拒且要求回收"。
    */
-  noteVersionAdvance(nodeIds?: readonly string[]): void {
-    if (nodeIds === undefined) {
-      for (const n of this.options.graph.nodes) this.staleNodes.add(n.id)
-      return
-    }
-    for (const id of nodeIds) this.staleNodes.add(id)
+  cancelAsync(correlationId: string): boolean {
+    if (!this.inFlight.has(correlationId)) return false
+    this.cancelledNodes.add(correlationId)
+    return true
   }
 
-  /** 清空缓存并复位过期标记（用于"资源清单整体换版"这类粗粒度场景，也供测试对账）。 */
+  /** 已显式取消的在途请求。 */
+  private readonly cancelledNodes = new Set<string>()
+
+  /**
+   * 清空缓存（**不是**"刷新"）。
+   *
+   * 注意命名：它不叫 `refresh`/`invalidate`，因为它不是"让某个东西重新算"的业务动作 ——
+   * 它是"丢弃可丢弃的派生缓存"（契约 §6 所有权表：求值缓存"可丢弃、不保存为权威"）。
+   * 丢弃之后**下一次求值**照常按版本输入判定要重算什么；本方法不指定任何节点。
+   */
   clearCache(): void {
     this.cache = emptyEvaluationCache()
-    this.staleNodes.clear()
+    this.latestIdentities = Object.freeze({})
   }
 
   /**
    * 丢弃**所有**在途请求并要求回收（文档关闭 / 取消导出）。
    *
-   * 返回被丢弃的请求数，供调用方核对"资源确实被回收"（A12「旧资源释放」）。
+   * 返回被丢弃的请求，供调用方核对"资源确实被回收"（A12「旧资源释放」）。
+   * 推进绑定代数使任何**未在案**的迟到回调也无法命中当前绑定（契约 §6.1）。
    */
   discardInFlight(): readonly AsyncNodeRequest[] {
     const dropped = [...this.inFlight.values()]
     this.inFlight.clear()
+    this.cancelledNodes.clear()
     this.bindingGeneration += 1
     return Object.freeze(dropped)
   }
@@ -356,9 +374,12 @@ export function sceneReadView(graph: EvaluationGraphDeclaration, facts: SceneFac
 }
 
 /**
- * 计算某节点的身份（供宿主在发起异步请求时记录依据）。
+ * 计算某节点的身份（供宿主在**图外**发起异步请求时记录依据）。
  *
- * 这是"发起时记下依据"的唯一入口：宿主不应自己拼身份字符串。
+ * `upstreamIdentities` 必须由调用方给出：`nodeIdentity` 把上游身份折进身份
+ * （否则下游节点会拿旧上游结果，见该函数注释）。宿主若在**求值之后**单独发起请求，
+ * 应从 `EvaluationOutcome.evaluated.identities` 原样取用，而不是自己重算 ——
+ * 两边各算一次会漂移。
  */
 export function identityForNode(
   graph: EvaluationGraphDeclaration,
@@ -366,10 +387,11 @@ export function identityForNode(
   key: EvaluationKey,
   versions: VersionSnapshot,
   members: MemberSnapshot,
+  upstreamIdentities: Readonly<Record<string, string>> = {},
 ): Result<string> {
   const node = graph.nodes.find((n) => n.id === nodeId)
   if (!node) return err(unsupportedOperation({ reason: 'nodeNotDeclared', node: nodeId }))
-  return ok(nodeIdentity(node, key, versions, members))
+  return ok(nodeIdentity(node, key, versions, members, upstreamIdentities))
 }
 
 /** 资源清单变化 ⇒ 受影响节点（供宿主 `noteVersionAdvance` 精确调用，不做全量失效）。 */

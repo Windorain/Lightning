@@ -70,6 +70,8 @@ import {
 } from '@/domain/editing'
 import {
   animationDrivenKeys,
+  checkValueAgainstProperty,
+  declaredValueType,
   findTrack,
   insertKeyframe,
   propertyKey,
@@ -1237,10 +1239,16 @@ function reduceInsertKeyframe(state: ApplicationState, cmd: InsertKeyframeComman
   if (!lease.ok) return rejected(state, lease.error)
 
   const existing = findTrack(doc.animation, cmd.target)
-  const valueType = cmd.valueType ?? existing?.valueType ?? inferValueType(cmd.value)
+  // 类型优先取**属性声明**（`declaredValueType`），其次已有轨道，最后才由值推断。
+  // 顺序不能颠倒：只从值推断会让"往 vec3 属性插一个数字"变成合法操作。
+  const valueType = cmd.valueType ?? declaredValueType(cmd.target.property) ?? existing?.valueType ?? inferValueType(cmd.value)
   const interpolation = cmd.interpolation ?? existing?.interpolation ?? defaultInterpolationFor(valueType)
   const legalValues = cmd.legalValues ?? existing?.legalValues
   const quantization = cmd.quantization ?? existing?.quantization
+
+  // 值与属性声明类型不符 ⇒ 在写入点拒绝（不把坏数据存进文档）
+  const typeError = checkValueAgainstProperty(cmd.target.property, cmd.value)
+  if (typeError) return rejected(state, typeError)
 
   const base: AnimationTrack =
     existing ??

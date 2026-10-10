@@ -44,7 +44,7 @@
  */
 
 import { invalidValue, unsupportedOperation, type DomainError, type Result, ok, err } from '@/domain/errors'
-import { canonicalize } from '@/domain/identity'
+import { canonicalize, contentDigest } from '@/domain/identity'
 import type { TimeValue } from '@/domain/animation'
 import type { AssetId } from '@/domain/materials'
 
@@ -389,30 +389,84 @@ export function emptyEvaluationCache(): EvaluationCache {
   return Object.freeze({ entries: Object.freeze({}) })
 }
 
-/** 一个节点的缓存身份（可外部断言：解释"为什么这个节点重算了"）。 */
+/**
+ * 一个节点的缓存身份（可外部断言：解释"为什么这个节点重算了"）。
+ *
+ * ## 两条来自实测的设计决定（都由 A11 的用例抓出来，不是先验推理）
+ *
+ * ### 1. 身份 = **声明的东西**，不含全局粗粒度键
+ *
+ * 初版把 `EvaluationKey` 的粗粒度维度（`documentVersion` / `parameterVersion` /
+ * `stagedTransactionVersion` / `contentResourceVersions`）折进**每个**节点的身份。
+ * 那会让 A11 直接失败，而且是必然失败：
+ *
+ *  - 「只改注解描述」在真实文档里**会**推进 `documentVersion`（注解文本是内容）；
+ *  - 于是每个节点（含方块几何）的身份都变 ⇒ 几何重算 ⇒ A11 要求为 0 的那个数 > 0。
+ *
+ * 更根本的问题：全局粗粒度键正是 **#249 §15 第 5 条要退役的形态**
+ * （`structEpoch` / `renderViewRevision` 一类"一个数代表什么都可能变了"）。
+ * 把它放进节点身份，等于让最粗的粒度决定所有节点的重建 —— 就是旧机制的复刻。
+ *
+ * ⇒ 节点身份只由**它自己声明**的东西构成：`versionInputs`（细粒度版本源）、
+ * `collectionDeps`（集合成员）、上游身份、以及显式声明的 `timeDependent`。
+ * 需要整份文档粒度的节点，可以显式声明 `scene`/`document` 这类版本源
+ * （见 `sceneVersionSources`）—— 那是**显式选择粗粒度**，不是被强加。
+ *
+ * ### 2. 必须把**上游身份**折进来
+ *
+ * 初版不含上游身份。于是：`pick.index` 依赖 `geometry.block`，但它自己
+ * `versionInputs: []` ⇒ 几何重算了、拾取的身份没变 ⇒ 拾取命中缓存、配旧几何。
+ * 那正是 #249 §7 明文禁止的「新描边配旧几何」。
+ *
+ * 修法不是"让下游随便声明一个版本输入"（那要求维护一张与依赖边重复的表，
+ * 漏一处就静默错），而是**让依赖边本身构成身份**：上游身份变 ⇒ 下游身份变。
+ * 这让"显式依赖声明"（#249 §7）真正成为失效传播的唯一来源 ——
+ * 删掉一条依赖边，那条传播就真的断了（A11 负对照「删除依赖边」判红的就是它）。
+ *
+ * `upstreamIdentities` 由 `pull()` 递归给出，故这里不重复遍历图。
+ */
 export function nodeIdentity(
   node: EvaluationNodeDeclaration,
   key: EvaluationKey,
   versions: VersionSnapshot,
   members: MemberSnapshot,
+  upstreamIdentities: Readonly<Record<string, string>> = {},
 ): string {
   const versionValues: Record<string, number> = {}
   for (const v of [...node.versionInputs].sort()) versionValues[v] = versionOf(versions, v)
   const memberValues: Record<string, readonly string[]> = {}
   for (const c of [...(node.collectionDeps ?? [])].sort()) memberValues[c] = [...membersOf(members, c)].sort()
-  // 时间**只在**声明 timeDependent 时进入身份 —— 否则播放动画会让几何节点失效。
+  // 上游身份按 `deps` 声明顺序取（声明顺序是图的一部分，不是偶然的遍历顺序）。
+  const upstream: Record<string, string> = {}
+  for (const d of node.deps) upstream[d] = upstreamIdentities[d] ?? ''
+  // 时间**只在**声明 timeDependent 时进入身份 —— 否则播放动画会让几何节点失效
+  // （#249 §7「动画改变采样参数，不重建基础几何」）。
   const timePart = node.timeDependent === true ? key.time : null
-  return canonicalize({
-    // 结构键里**不含** viewProjection（机位变化不得使几何重算）。
-    documentVersion: key.documentVersion,
-    scene: key.scene,
-    parameterVersion: key.parameterVersion,
-    stagedTransactionVersion: key.stagedTransactionVersion ?? null,
-    time: timePart,
-    contentResourceVersions: key.contentResourceVersions,
-    versionValues,
-    memberValues,
-  })
+  return canonicalize({ versionValues, memberValues, upstream, time: timePart })
+}
+
+/**
+ * 把 `EvaluationKey` 的粗粒度维度翻译成**可选**的版本源。
+ *
+ * 用途有两个：
+ *  1. 让"需要整份文档粒度"的节点（例如文档级摘要、导出预检）能**显式**声明它；
+ *  2. 让"用粗粒度冒充内容变化"成为一个**可构造**的形态 ——
+ *     A11 的负对照正是拿它把方块几何节点喂成旧机制的样子（`scene`/`document`），
+ *     从而证明"改注解 ⇒ 几何重建数 0"不是空转。
+ *
+ * 注意 `viewProjection` **不**在这里出现：机位不是版本源，节点无法声明依赖它，
+ * 因此机位变化在类型层面就不能使任何结构节点失效（契约 §4 明文）。
+ */
+export function sceneVersionSources(key: EvaluationKey): Readonly<Record<VersionSourceId, number>> {
+  const out: Record<VersionSourceId, number> = {
+    document: key.documentVersion,
+    scene: key.scene === '' ? 0 : 1,
+    parameters: key.parameterVersion,
+    staged: key.stagedTransactionVersion ?? 0,
+  }
+  // 资源清单：按内容版本摘要（同一批 assetId+版本 ⇒ 同一个数）。
+  out.resources = contentDigest(canonicalize(key.contentResourceVersions))
+  return Object.freeze(out)
 }
 
 export interface EvaluationStats {
@@ -437,6 +491,8 @@ export interface EvaluationResult {
   readonly outputs: Readonly<Record<string, unknown>>
   /** 全部求值过的节点结果（供拾取/来源映射对应**同一次**求值，#249 §7）。 */
   readonly all: Readonly<Record<string, unknown>>
+  /** 各节点本轮的身份（异步发起与接纳判据的唯一来源）。 */
+  readonly identities: Readonly<Record<string, string>>
   readonly cache: EvaluationCache
   readonly stats: EvaluationStats
 }
@@ -462,6 +518,7 @@ export function evaluateGraph(
   const nextEntries: Record<string, CacheEntry> = { ...cache.entries }
   const all: Record<string, unknown> = {}
   const outputs: Record<string, unknown> = {}
+  const identities: Record<string, string> = {}
   const recomputedNodes: string[] = []
   const recomputedByDomain: Record<string, number> = {}
   let visited = 0
@@ -476,13 +533,16 @@ export function evaluateGraph(
     visited += 1
 
     const upstream: Record<string, unknown> = {}
+    const upstreamIdentities: Record<string, string> = {}
     for (const d of node.deps) {
       const r = pull(d)
       if (!r.ok) return r
       upstream[d] = r.value
+      upstreamIdentities[d] = identities[d] ?? ''
     }
 
-    const identity = nodeIdentity(node, key, versions, members)
+    const identity = nodeIdentity(node, key, versions, members, upstreamIdentities)
+    identities[id] = identity
     const cached = nextEntries[id]
     if (cached !== undefined && cached.identity === identity) {
       cacheHits += 1
@@ -515,6 +575,10 @@ export function evaluateGraph(
       key,
       outputs: Object.freeze(outputs),
       all: Object.freeze(all),
+      // 各节点本轮的身份：接线层据此发起异步请求并判别过期（`admitNodeResult`）。
+      // 放在产物里（而不是让接线层自己重算）是为了让"依据什么发起"与
+      // "依据什么接纳"必然是**同一个**计算，不会两边漂移。
+      identities: Object.freeze(identities),
       cache: Object.freeze({ entries: Object.freeze(nextEntries) }),
       stats: Object.freeze({
         visited,
@@ -641,6 +705,14 @@ export interface EvaluatedScene {
   readonly sources: Readonly<Record<string, string>>
   readonly stats: EvaluationStats
   /**
+   * 各节点本轮的身份。
+   *
+   * 它是接线层发起异步请求的依据（`runtime/evaluation` 的 `PendingEvaluationRequest.identity`
+   * 就是从这里取的），也是接纳判定的比对对象。放在产物里（而不是让接线层自己重算）
+   * 使"依据什么发起"与"依据什么接纳"必然是**同一个**计算 —— 两边各算一次会漂移。
+   */
+  readonly identities: Readonly<Record<string, string>>
+  /**
    * 本轮求值后的缓存。
    *
    * 它出现在求值产物里是**接线需要**，不是消费者契约：`evaluateScene` 是**纯**函数，
@@ -698,6 +770,7 @@ export function evaluateScene(source: SceneReadView, context: EvaluationContext)
       objects: Object.freeze(objects),
       sources: Object.freeze(sources),
       stats: evaluated.value.stats,
+      identities: evaluated.value.identities,
       cache: evaluated.value.cache,
     }),
   )
