@@ -24,10 +24,12 @@ import { describe, expect, it } from 'vitest'
 import {
   AXIS_PROFILE_SAMPLES,
   COORDINATE_CONVENTION,
+  DEFAULT_GRID_CONSTRAINT,
   DEFAULT_PIVOT_STRATEGY,
   MATH_CONTRACT,
   affineFromRows,
   applyAxisProfile,
+  applyGridConstraint,
   approxNumber,
   approxQuat,
   approxVec3,
@@ -48,6 +50,7 @@ import {
   scaleAffine,
   selectionPivot,
   shearMagnitude,
+  snapPositionInWorld,
   toAffine,
   transformDirection,
   transformPoint,
@@ -871,6 +874,104 @@ function normalizeQuat(q: { x: number; y: number; z: number; w: number }) {
   const l = Math.hypot(q.x, q.y, q.z, q.w)
   return Object.freeze({ x: q.x / l, y: q.y / l, z: q.z / l, w: q.w / l })
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 网格约束纯策略（#249 §3.1：「对象变换**可离开整数网格**；需要网格约束的
+// 工具**显式**采用纯策略」）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('A26 网格约束是**显式纯策略**（对象变换本身可离开整数网格）', () => {
+  it('默认**无约束**：0.5 这样的小数位置原样保留（不静默吸附）', () => {
+    const p = Object.freeze({ x: 0.5, y: -1.25, z: 3.7 })
+    const r = applyGridConstraint(p, DEFAULT_GRID_CONSTRAINT)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value, '默认策略必须原样返回 —— 不得隐式吸附').toEqual(p)
+    expect(r.value).toBe(p)
+  })
+
+  it('**显式** `snap` 策略才吸附，且三个分量都吸附', () => {
+    const r = applyGridConstraint(Object.freeze({ x: 0.4, y: 1.6, z: -0.6 }), Object.freeze({ kind: 'snap', gridSize: 1, space: 'local' }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value).toEqual({ x: 0, y: 2, z: -1 })
+  })
+
+  it('格距任意正数都生效（不假定整数格距 —— MC 的 1 格只是默认映射，不是硬编码）', () => {
+    const r = applyGridConstraint(Object.freeze({ x: 0.3, y: 0, z: 0 }), Object.freeze({ kind: 'snap', gridSize: 0.5, space: 'local' }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.x).toBeCloseTo(0.5, 12)
+  })
+
+  it('**负对照（不做静默夹取）**：非法格距 ⇒ 显式拒绝，**不**退化成"无约束"', () => {
+    for (const gridSize of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const r = applyGridConstraint(Object.freeze({ x: 0.5, y: 0, z: 0 }), Object.freeze({ kind: 'snap', gridSize, space: 'local' }))
+      expect(r.ok, `gridSize=${gridSize} 必须拒绝`).toBe(false)
+      if (r.ok) continue
+      expect(r.error.code).toBe('InvalidValue')
+      expect(r.error.params.reason).toBe('badGridSize')
+    }
+  })
+
+  it('世界空间吸附：在**局部**格上吸附后再换回世界（故父的**非均匀**缩放被如实体现）', () => {
+    const scene = parentChild()
+    // C 的父 P = 平移(10,0,0) + 绕 Y 转 90° + 缩放(2,1,1) ⇒ W_C(l) = (lz+10, ly, −2(lx+1))
+    // 取局部 (0.6, 0.4, 0.4) ⇒ 世界目标 (10.4, 0.4, −3.2)
+    const worldTarget = Object.freeze({ x: 10.4, y: 0.4, z: -3.2 })
+    const r = snapPositionInWorld(scene, 'C', worldTarget, Object.freeze({ kind: 'snap', gridSize: 1, space: 'world' }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    // 局部吸附到 (1,0,0) ⇒ 回到世界 (10, 0, −4)
+    expect(approxVec3(r.value, Object.freeze({ x: 10, y: 0, z: -4 }), 1e-9)).toBe(true)
+
+    // 换回局部后确实落在整数格上
+    const inv = worldMatrixInverse(scene, 'C')
+    if (!inv.ok) throw new Error('fixture')
+    const localSnapped = transformPoint(inv.value, r.value)
+    for (const c of [localSnapped.x, localSnapped.y, localSnapped.z]) {
+      expect(Math.abs(c - Math.round(c)), '局部坐标落在整数格上').toBeLessThan(1e-9)
+    }
+
+    // **关键区别**：直接对世界坐标取整会得到 (10, 0, −3) ≠ (10, 0, −4)
+    const naiveWorld = Object.freeze({ x: Math.round(worldTarget.x), y: Math.round(worldTarget.y), z: Math.round(worldTarget.z) })
+    expect(approxVec3(r.value, naiveWorld, 1e-9), '世界空间吸附 ≠ 直接对世界坐标取整').toBe(false)
+
+    // 且**不存在**单一世界格距能复现该结果：父的缩放是非均匀的
+    // （局部 x 走 1 步 ⇒ 世界 z 走 2；局部 y 走 1 步 ⇒ 世界 y 走 1）
+    const w = worldMatrix(scene, 'C')
+    if (!w.ok) throw new Error('fixture')
+    const stepX = transformPoint(w.value, Object.freeze({ x: 1, y: 0, z: 0 }))
+    const origin = transformPoint(w.value, Object.freeze({ x: 0, y: 0, z: 0 }))
+    const stepY = transformPoint(w.value, Object.freeze({ x: 0, y: 1, z: 0 }))
+    expect(Math.abs(stepX.z - origin.z), '局部 x 一步 ⇒ 世界 z 两步').toBeCloseTo(2, 12)
+    expect(Math.abs(stepY.y - origin.y), '局部 y 一步 ⇒ 世界 y 一步').toBeCloseTo(1, 12)
+    expect(Math.abs(stepX.z - origin.z)).not.toBeCloseTo(Math.abs(stepY.y - origin.y), 6)
+  })
+
+  it('**负对照**：用错入口（局部策略送进世界吸附）⇒ 显式拒绝，不"顺手"按局部处理', () => {
+    const scene = parentChild()
+    const r = snapPositionInWorld(scene, 'C', Object.freeze({ x: 1, y: 1, z: 1 }), Object.freeze({ kind: 'snap', gridSize: 1, space: 'local' }))
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error.params.reason).toBe('notWorldSpaceConstraint')
+  })
+
+  it('世界吸附遇奇异父链 ⇒ 透传显式拒绝（不返回近似值）', () => {
+    const scene = parentChild()
+    const singular = Object.freeze({
+      ...scene,
+      objects: Object.freeze({
+        ...scene.objects,
+        P: Object.freeze({ ...scene.objects['P'], transform: Object.freeze({ ...scene.objects['P'].transform, scale: Object.freeze({ x: 0, y: 1, z: 1 }) }) }),
+      }),
+    })
+    const r = snapPositionInWorld(singular, 'C', Object.freeze({ x: 1, y: 1, z: 1 }), Object.freeze({ kind: 'snap', gridSize: 1, space: 'world' }))
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error.params.reason).toBe('singularTransform')
+  })
+})
 
 /** 恒等旋转/缩放 + 指定平移的变换（夹具用）。 */
 function IDENTITY_TRANSFORM_AT(x: number, y: number, z: number) {

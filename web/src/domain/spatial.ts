@@ -833,6 +833,96 @@ export function checkAxisProfileSamples(samples: readonly AxisProfileSample[] = 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 网格约束纯策略（**工具参数**；对象变换本身可离开整数网格）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 网格约束策略（#249 §3.1 末段）。
+ *
+ * > 「对象变换**可离开整数网格**；需要网格约束的工具**显式**采用**纯策略**」。
+ *
+ * 两条语义要点，都体现在类型里：
+ *
+ * 1. **默认无约束**（`{ kind: 'none' }`）：变换可以落在任意实数位置。
+ *    若把"吸附到整数格"做成求值或写入路径的隐含行为，那么"移动到一个
+ *    0.5 的位置"就会静默变成 0 或 1 —— 那正是 #249 §7 禁止的
+ *    「悄悄夹取并宣称目标已实现」的同族失真。
+ * 2. 吸附是**工具参数**（与 {@link PivotStrategy} 同一政策）：它只影响
+ *    **该次操作**产出的候选值，不写进对象、不改变历史语义，也不构成
+ *    第二套几何算法 —— 它复用 {@link pixelSnap} 这一个取整实现点。
+ *
+ * 不提供"吸附到最近顶点/边"这类**依赖几何**的策略：那需要网格查询输入，
+ * 属后续工具（本批不造"看着能跑"的近似版）。
+ */
+export type GridConstraint =
+  | { readonly kind: 'none' }
+  | {
+      readonly kind: 'snap'
+      /** 格距（场景单位）；必须为正有限数。 */
+      readonly gridSize: number
+      /**
+       * 约束施加在哪个空间。
+       *
+       * `'local'` = 对象自身空间（父链不参与）；`'world'` = 世界空间
+       * （需要父链求值与逆变换，父链奇异时**显式拒绝**）。
+       * 两者不可混同：在有父对象时它们给出不同结果，而"哪个才是用户意图"
+       * 只能由工具声明 —— 故它是**显式**输入。
+       */
+      readonly space: 'local' | 'world'
+    }
+
+/** 默认策略：无网格约束（对象变换可离开整数网格）。 */
+export const DEFAULT_GRID_CONSTRAINT: GridConstraint = Object.freeze({ kind: 'none' })
+
+/**
+ * 施加网格约束于一个**位置**（纯函数）。
+ *
+ * 返回 `Result`：`snap` 策略的 `gridSize` 非正/非有限时显式拒绝（不静默当作
+ * "无约束"，那会让"我明明开了吸附"与"没开"不可区分）。
+ *
+ * `space` 只在本函数里作**声明性**校验（`world` 空间的实际换算是调用方经
+ * 世界矩阵做的），因为本函数拿不到场景 —— 需要世界空间吸附的调用方应先用
+ * {@link worldMatrixInverse} 换到局部、吸附、再用 {@link worldMatrix} 换回，
+ * 三步都是既有的纯函数。
+ */
+export function applyGridConstraint(position: Vec3, constraint: GridConstraint): Result<Vec3> {
+  if (constraint.kind === 'none') return ok(position)
+  if (!Number.isFinite(constraint.gridSize) || constraint.gridSize <= 0) {
+    return err(invalidValue({ reason: 'badGridSize', gridSize: constraint.gridSize }))
+  }
+  return ok(
+    Object.freeze({
+      x: pixelSnap(position.x, constraint.gridSize),
+      y: pixelSnap(position.y, constraint.gridSize),
+      z: pixelSnap(position.z, constraint.gridSize),
+    }),
+  )
+}
+
+/**
+ * 世界空间网格吸附（三步都是既有纯函数；父链奇异即透传显式拒绝）。
+ *
+ * 为什么不把这三步合并进一个"魔法"函数：`space: 'world'` 的组合语义
+ * （换到局部 → 吸附 → 换回世界）本身就是契约的一部分，摊开写使每一步
+ * 都可被单独断言；合并会让"在哪一步吸附"变成一个不可测的实现细节。
+ */
+export function snapPositionInWorld(scene: Scene, objectId: string, worldTarget: Vec3, constraint: GridConstraint): Result<Vec3> {
+  if (constraint.kind === 'none') return ok(worldTarget)
+  if (constraint.space !== 'world') {
+    // 调用方用错了入口：显式拒绝，不"顺手"按局部处理（那会给出静默错误的结果）
+    return err(invalidValue({ reason: 'notWorldSpaceConstraint', space: constraint.space }))
+  }
+  const inv = worldMatrixInverse(scene, objectId)
+  if (!inv.ok) return inv
+  const local = transformPoint(inv.value, worldTarget)
+  const snapped = applyGridConstraint(local, constraint)
+  if (!snapped.ok) return snapped
+  const w = worldMatrix(scene, objectId)
+  if (!w.ok) return w
+  return ok(transformPoint(w.value, snapped.value))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 内部
 // ─────────────────────────────────────────────────────────────────────────────
 
