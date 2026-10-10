@@ -50,6 +50,12 @@ const KERNEL_FILES = [
   'domain/scene.ts',
   'domain/document.ts',
   'domain/editing.ts',
+  // P3（#254）几何、坐标关系与固定拓扑形变
+  'domain/geometry.ts',
+  'domain/geometryEditing.ts',
+  'domain/spatial.ts',
+  'domain/anchor.ts',
+  'domain/selection.ts',
   'application/state.ts',
   'application/commands.ts',
   'application/queries.ts',
@@ -127,7 +133,7 @@ function resolveTarget(f) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('P1 内核隔离：新内核不得依赖任何旧层（#1 负对照「新 facade 内调用旧 runtime」的可执行半边）', () => {
-  it('11 个内核文件的**全部**内部导入都落在新层内（无一条指向旧目录）', () => {
+  it(`${KERNEL_FILES.length} 个内核文件的**全部**内部导入都落在新层内（无一条指向旧目录）`, () => {
     const { kernelImports } = loadGraph()
     const violations = []
     for (const f of kernelImports) {

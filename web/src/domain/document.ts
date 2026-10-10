@@ -45,15 +45,19 @@ import {
   type EntityRef,
   type Version,
 } from './identity'
+import { err, invalidValue, missingTarget, ok, type Result } from './errors'
+import { unitBoxMesh, type Deformation } from './geometry'
 import {
   emptyScene,
   findObject,
+  findObjectData,
   sceneObject,
   objectData,
   withObject,
   defaultObjectTypes,
   type Scene,
   type ObjectTypeRegistry,
+  type Transform,
 } from './scene'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -452,6 +456,59 @@ export function addCameraObject(
       'document',
     ),
   )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 网格对象（#254 P3）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 在场景里放一个网格对象。
+ *
+ * 与另外三个构造子的区别：网格的载荷是**结果类型**（`unitBoxMesh` 会校验拓扑），
+ * 故本函数返回 `Result` 而不是 `Scene | null` —— 一个失败原因不同的构造不该
+ * 被压成同一个 `null`（#249 §5「不能用默认值掩盖缺失」的同族要求：
+ * 也不该用同一个哨兵值掩盖不同的失败）。
+ */
+export function addMeshObject(
+  scene: Scene,
+  init: {
+    objectId: string
+    dataId: string
+    name?: string
+    transform?: Transform
+    size?: number
+    deformation?: Deformation
+  },
+): Result<Scene> {
+  const mesh = unitBoxMesh(init.dataId, init.size ?? 1, init.deformation)
+  if (!mesh.ok) return mesh
+  const data = objectData(init.dataId, Object.freeze({ kind: 'mesh' as const, mesh: mesh.value }), 'document')
+  const obj = sceneObject({
+    id: init.objectId,
+    type: 'mesh',
+    dataId: init.dataId,
+    ...(init.name === undefined ? {} : { name: init.name }),
+    ...(init.transform === undefined ? {} : { transform: init.transform }),
+  })
+  const next = withObject(scene, obj, data)
+  if (next === null) return err(invalidValue({ reason: 'idCollision', objectId: init.objectId, dataId: init.dataId }))
+  return ok(next)
+}
+
+/**
+ * 让一个网格对象**共享**另一对象的几何数据（A07 的夹具构造用）。
+ *
+ * 这是"共享"的**唯一**构造入口：共享关系由显式调用建立，不是巧合的别名。
+ * 于是"共享几何默认按对象独立编辑"的测试可以精确控制共享的发生时机。
+ */
+export function shareMeshData(scene: Scene, objectId: string, sourceObjectId: string): Result<Scene> {
+  const obj = findObject(scene, objectId)
+  if (!obj) return err(missingTarget({ objectId }))
+  const src = findObject(scene, sourceObjectId)
+  if (!src) return err(missingTarget({ objectId: sourceObjectId }))
+  if (!findObjectData(scene, src.dataId)) return err(missingTarget({ dataId: src.dataId }))
+  return ok(Object.freeze({ ...scene, objects: Object.freeze({ ...scene.objects, [objectId]: Object.freeze({ ...obj, dataId: src.dataId }) }) }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

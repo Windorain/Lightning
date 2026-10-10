@@ -34,6 +34,7 @@ import {
   addAnnotationObject,
   addBlockObject,
   addCameraObject,
+  addMeshObject,
   beginSave,
   completeSave,
   createDocument,
@@ -101,6 +102,8 @@ import {
   type Transform,
   type Vec3,
 } from '@/domain/scene'
+import { MESH_VERTEX_POSITION_PROPERTY, meshFromPayload, type MeshData } from '@/domain/geometry'
+import { commitGeometryEdit } from '@/domain/geometryEditing'
 import type { ApplicationState, EffectRequest } from './state'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,9 +134,11 @@ export interface SetTransformCommand {
 export interface AddObjectCommand {
   readonly kind: 'addObject'
   readonly contextId: string
-  readonly objectType: 'block' | 'annotation' | 'camera'
+  readonly objectType: 'block' | 'annotation' | 'camera' | 'mesh'
   readonly name?: string
   readonly annotationShape?: 'box' | 'point' | 'line' | 'text' | 'face'
+  /** 网格尺寸（仅 `objectType: 'mesh'`；缺省 1 场景单位）。 */
+  readonly meshSize?: number
 }
 
 export interface DeleteObjectCommand {
@@ -536,21 +541,33 @@ function reduceAddObject(state: ApplicationState, cmd: AddObjectCommand): Transi
   const ref = objectRef(a1.id, a2.next.counter)
   const scene = doc.scene
   let nextScene: Scene | null
-  switch (cmd.objectType) {
-    case 'block':
-      nextScene = addBlockObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
-      break
-    case 'annotation':
-      nextScene = addAnnotationObject(scene, {
-        objectId: a1.id,
-        dataId: a2.id,
-        ...(cmd.name === undefined ? {} : { name: cmd.name }),
-        ...(cmd.annotationShape === undefined ? {} : { shape: cmd.annotationShape }),
-      })
-      break
-    case 'camera':
-      nextScene = addCameraObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
-      break
+  if (cmd.objectType === 'mesh') {
+    const made = addMeshObject(scene, {
+      objectId: a1.id,
+      dataId: a2.id,
+      ...(cmd.name === undefined ? {} : { name: cmd.name }),
+      ...(cmd.meshSize === undefined ? {} : { size: cmd.meshSize }),
+    })
+    // 网格构造有**多种**失败原因（尺寸非法/id 冲突），故转化为显式错误而不压成 null
+    if (!made.ok) return rejected(state, made.error)
+    nextScene = made.value
+  } else {
+    switch (cmd.objectType) {
+      case 'block':
+        nextScene = addBlockObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
+        break
+      case 'annotation':
+        nextScene = addAnnotationObject(scene, {
+          objectId: a1.id,
+          dataId: a2.id,
+          ...(cmd.name === undefined ? {} : { name: cmd.name }),
+          ...(cmd.annotationShape === undefined ? {} : { shape: cmd.annotationShape }),
+        })
+        break
+      case 'camera':
+        nextScene = addCameraObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
+        break
+    }
   }
   if (nextScene === null) return rejected(state, invalidValue({ reason: 'idCollision', objectId: a1.id }))
 
@@ -807,6 +824,29 @@ function applyPropertyValue(scene: Scene, ref: PropertyRef, value: PropertyValue
     objects[obj.id] = Object.freeze({ ...obj, transform: next })
     return Object.freeze({ ...scene, objects: Object.freeze(objects) })
   }
+  if (ref.property === MESH_VERTEX_POSITION_PROPERTY) {
+    // 网格顶点写（#254 P3）：走**同一条** `setProperty` 路由 —— 契约 §5.2 的唯一写通路。
+    // 元素身份与拓扑版本已在 `validatePropertyWrite` 校验过（版本不符 ⇒ 此前已 reject）。
+    if (!ref.element) return null
+    if (!isVec3(value)) return null
+    const data = findObjectData(scene, obj.dataId)
+    if (!data) return null
+    const mesh = meshFromPayload(data.payload)
+    if (!mesh) return null
+    const cur = meshTopologyVertex(mesh, ref.element.elementId)
+    if (cur === null) return null
+    const committed = commitGeometryEdit(scene, [
+      {
+        objectId: obj.id,
+        vertex: ref.element.elementId,
+        // 语义：新位置是**绝对值**（属性写的通常含义），故位移 = 新值 − 当前值。
+        // 共享几何的分离在 `commitGeometryEdit` 内部按"仅影响目标对象"完成（A07）。
+        delta: Object.freeze({ x: value.x - cur.x, y: value.y - cur.y, z: value.z - cur.z }),
+      },
+    ])
+    if (!committed.ok) return null
+    return committed.value.scene
+  }
   if (ref.property.startsWith('projection.') || ref.property === 'annotation.text') {
     const data = findObjectData(scene, obj.dataId)
     if (!data) return null
@@ -848,6 +888,12 @@ function isVec3(v: PropertyValue): v is Vec3 {
 }
 function isQuat(v: PropertyValue): v is Quat {
   return typeof v === 'object' && v !== null && 'x' in v && 'y' in v && 'z' in v && 'w' in v
+}
+
+/** 取网格里某顶点的当前位置；不存在返回 `null`（调用方按 `MissingTarget` 处理）。 */
+function meshTopologyVertex(mesh: MeshData, vertexId: string): Vec3 | null {
+  for (const v of mesh.topology.vertices) if (v.id === vertexId) return v.position
+  return null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
