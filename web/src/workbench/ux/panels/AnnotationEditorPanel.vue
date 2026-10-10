@@ -49,7 +49,7 @@ watch(
   () => [
     props.ctx.getSelection().items.value,
     props.ctx.getDoc().value,
-    props.ctx.getStructEpoch().value,
+    props.ctx.getContentRefreshTick().value,
     props.ctx.getHoveredAnnotationId().value,
   ] as const,
   () => {

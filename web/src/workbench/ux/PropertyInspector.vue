@@ -60,7 +60,7 @@ const version = ref(0)
 watch(
   () => [
     props.ctx.getDoc().value,
-    props.ctx.getStructEpoch().value,
+    props.ctx.getContentRefreshTick().value,
     props.ctx.getSelection().items.value,
     props.ctx.getHoveredAnnotationId().value,
     props.ctx.getHoveredBlock().value,

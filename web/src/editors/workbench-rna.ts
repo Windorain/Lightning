@@ -102,7 +102,7 @@ export function createWorkbenchPropertyRegistry(): { registry: PropertyRegistry;
 /** 读运行时版本（`documentVersion` 用结构纪元 + 帧索引的组合，内容版本用 `structEpoch`）。 */
 export function versionOf(ctx: Context): Version {
   return {
-    documentVersion: ctx.getStructEpoch().value,
+    documentVersion: ctx.getContentRefreshTick().value,
     contentVersion: ctx.getCurrentFrameIndex().value,
   }
 }
@@ -333,7 +333,7 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
       exists,
       generated: multiblockReadOnly,
       holdsLease: !multiblockReadOnly,
-      contentVersion: ctx.getStructEpoch().value,
+      contentVersion: ctx.getContentRefreshTick().value,
     })
   }
 
@@ -347,7 +347,7 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
       generated: false,
       locked,
       holdsLease: true,
-      contentVersion: ctx.getStructEpoch().value,
+      contentVersion: ctx.getContentRefreshTick().value,
     })
   }
 
@@ -484,7 +484,7 @@ export function submitPropertyWrite(
   // 文档内容变化 ⇒ 经具名写回路径（`replaceDoc` 会 bump 结构纪元，触发重绘）。
   const nextDoc = transition.candidate.document
   if (nextDoc !== state.document) {
-    ctx.main.replaceDoc(nextDoc, { bumpStructEpoch: true, resetFrameIndex: false })
+    ctx.main.replaceDoc(nextDoc, { resetFrameIndex: false })
   }
   applyShellState(ctx, state, transition.candidate)
   return transition.outcome

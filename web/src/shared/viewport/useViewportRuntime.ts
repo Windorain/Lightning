@@ -32,7 +32,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
 
   const drw = new DRW({
     docRef,
-    structEpochRef: ctx.getStructEpoch(),
+    contentRefreshTickRef: ctx.getContentRefreshTick(),
     currentFrameIndex: ctx.main.currentFrameIndex,
     layerWorldY: ctx.getLayerWorldY(),
     framesPlaybackIsPlaying: ctx.main.framesPlaybackIsPlaying,
