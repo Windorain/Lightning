@@ -37,12 +37,11 @@
  * 函数只按 `objectId` 索引，从不比较名字或坐标。
  */
 
-import { err, missingTarget, ok, staleReference, invalidValue, type Result } from './errors'
+import { err, invalidValue, missingTarget, ok, staleReference } from './errors'
 import type { ElementRef } from './identity'
-import { resolveElement, type GeometryElementKind } from './geometry'
+import { elementPosition, meshFromPayload, resolveElement, type GeometryElementKind } from './geometry'
 import { transformPoint, worldMatrix, type Affine } from './spatial'
 import { findObject, findObjectData, type Scene, type Vec3 } from './scene'
-import { meshFromPayload } from './geometry'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 锚点目标
@@ -157,7 +156,10 @@ export function resolveAnchor(scene: Scene, anchor: AnchorTarget, lastValidWorld
 
   const w = worldMatrix(scene, anchor.objectId)
   if (!w.ok) return unresolved('objectMissing', { objectId: anchor.objectId, cause: w.error.code }, lastValidWorld)
-  const localPos = resolveElementPosition(el.value)
+  // 元素局部位置取 `domain/geometry#elementPosition`（**单一实现点**）：
+  // 顶点=自身、边=中点、面=质心。在本文件重写一份会让"锚点位置"与
+  // "选择/呈现用的元素位置"在某些种类上悄悄分歧。
+  const localPos = elementPosition(el.value)
   return Object.freeze({ status: 'resolved' as const, world: transformPoint(w.value, localPos), from: 'geometryElement' as const })
 }
 
@@ -170,27 +172,7 @@ function unresolved(reason: AnchorUnresolvedReason, detail: Record<string, strin
   })
 }
 
-/** 从解析出的元素取局部位置（顶点/边中点/面质心 —— 与 `domain/geometry#elementPosition` 同源语义）。 */
-function resolveElementPosition(el: ReturnType<typeof resolveElement> extends Result<infer T> ? T : never): Vec3 {
-  if (el.kind === 'vertex') return el.vertex.position
-  if (el.kind === 'edge') {
-    return Object.freeze({
-      x: (el.a.position.x + el.b.position.x) / 2,
-      y: (el.a.position.y + el.b.position.y) / 2,
-      z: (el.a.position.z + el.b.position.z) / 2,
-    })
-  }
-  let x = 0
-  let y = 0
-  let z = 0
-  for (const v of el.vertices) {
-    x += v.position.x
-    y += v.position.y
-    z += v.position.z
-  }
-  const n = el.vertices.length
-  return Object.freeze({ x: x / n, y: y / n, z: z / n })
-}
+/** 从解析出的元素取局部位置由 `domain/geometry#elementPosition` 提供（单一实现点）。 */
 
 /**
  * 呈现用位置：解析成功用当前值；未解析**且**有历史值时用历史值。
