@@ -40,6 +40,7 @@ import {
   err,
   ok,
 } from '@/application/contracts'
+import { localPropertyOf } from '@/application/contracts'
 import {
   type CapabilityId,
   type PropertyAccess,
@@ -67,7 +68,6 @@ import {
 import {
   type DocumentState,
   createWorkbenchWritePorts,
-  localPropertyOf,
 } from './property-writers'
 import {
   type InspectorContextInputs,
@@ -192,9 +192,10 @@ export function resolveRefs(ctx: Context, desc: PropertyDescriptor): readonly Pr
 
 /** 读一个属性的原始值（**不校验**；校验由 RNA 核心统一做）。 */
 export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
-  const local = localPropertyOf(ref.property)
   const desc = workbenchRegistry().registry.descriptor(ref.property)
   const objectType = desc ? workbenchRegistry().registry.objectType(desc.objectTypeId) : undefined
+  // 局部名必须用 `objectTypeId` 剥离（属性 ID 形如 `lightning.block.pos`）。
+  const local = localPropertyOf(ref.property, desc?.objectTypeId)
   const kind = objectType?.ownerKind
 
   if (kind === 'block') {
@@ -315,9 +316,10 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
  *  - `holdsLease`：本批没有并发租约（P1 的职责）⇒ true，但同样是显式输入而非省略。
  */
 export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
-  const local = localPropertyOf(ref.property)
   const desc = workbenchRegistry().registry.descriptor(ref.property)
   const objectType = desc ? workbenchRegistry().registry.objectType(desc.objectTypeId) : undefined
+  // 局部名必须用 `objectTypeId` 剥离（属性 ID 形如 `lightning.block.pos`）。
+  const local = localPropertyOf(ref.property, desc?.objectTypeId)
   const kind = objectType?.ownerKind
   const doc = ctx.getDoc().value
   const multiblockReadOnly = isMultiblockGenerated(doc)
@@ -557,7 +559,7 @@ export function buildField(
   const edit: FieldEditState = refs.length === 0
     ? { kind: 'readOnly', reason: domainError('MissingTarget', { reason: 'no-selection', property: desc.id }) }
     : editStateOf(workbenchRegistry().registry, ref, accessOfContext(ctx))
-  const local = localPropertyOf(desc.id)
+  const local = localPropertyOf(desc.id, desc.objectTypeId)
   const field = buildFieldViewModel(workbenchRegistry().registry, ref, {
     descriptor: desc,
     value,
@@ -625,7 +627,7 @@ export function rnaCoverage(): readonly { propertyId: string; objectTypeId: stri
       out.push({
         propertyId: desc.id,
         objectTypeId: objectType.id,
-        inLayout: inSpec.has(localPropertyOf(desc.id)),
+        inLayout: inSpec.has(localPropertyOf(desc.id, objectType.id)),
       })
     }
   }

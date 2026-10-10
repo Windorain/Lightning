@@ -37,7 +37,13 @@ const props = defineProps<{ field: FieldViewModel }>()
 
 const emit = defineEmits<{
   /** 草稿文本变化（**不**提交）。 */
-  (e: 'update:draft', text: string): void
+  /**
+   * 草稿文本变化（**不**提交）。
+   *
+   * 事件名是 `draft`，**不是** `update:draft` —— 后者是 Vue `v-model` 的保留约定，
+   * 用它会与「草稿 ≠ 已提交值」的语义冲突（本组件刻意不是 v-model）。
+   */
+  (e: 'draft', text: string): void
   /** 请求提交当前草稿（是否可提交由父级按 `draftState` 判定）。 */
   (e: 'commit'): void
   /** 请求提交一个**已解析**的值（boolean/枚举/滑块/色板/分量这些无草稿的控件）。 */
@@ -53,6 +59,8 @@ const focused = ref(false)
 const kind = computed(() => props.field.control.kind)
 const isMixed = computed(() => props.field.value.kind === 'mixed')
 const isReadOnly = computed(() => props.field.edit.kind === 'readOnly')
+/** 数值类控件（走数字键盘与 `spinbutton` 语义，但仍用 `type=text` 保留中间草稿）。 */
+const isNumeric = computed(() => kind.value === 'number' || kind.value === 'stepper' || kind.value === 'slider')
 /** 只读原因（结构化，不是布尔）—— 呈现端只做展示，不重新判定。 */
 const readOnlyReason = computed(() => (props.field.edit.kind === 'readOnly' ? props.field.edit.reason : null))
 
@@ -98,7 +106,7 @@ function componentValue(index: number): number {
 }
 
 function onText(e: Event): void {
-  emit('update:draft', (e.target as HTMLInputElement | HTMLTextAreaElement).value)
+  emit('draft', (e.target as HTMLInputElement | HTMLTextAreaElement).value)
 }
 
 /**
@@ -254,12 +262,24 @@ watch(
       />
 
       <!-- 默认（number/stepper/text/reference）：草稿 + 显式提交 -->
+      <!--
+        数值用 `type="text"` + `inputmode="decimal"`，**不用** `type="number"`。
+        原因（jsdom 与真实浏览器同此行为）：`type=number` 会把 `-`、`1.` 这类中间态
+        读成空串（`value === ''`、`valueAsNumber === NaN`），于是「草稿」拿不到用户
+        敲的原文 —— 而 #249 §19.1 要求中间态**保留并可提示**（旧实现正是因此把
+        `1.` 静默变成 `1`）。`inputmode` 保证移动端弹数字键盘，
+        `role="spinbutton"` + `aria-value*` 保证无障碍语义（D2.5 #31）。
+      -->
       <input
         v-else
-        :type="kind === 'number' || kind === 'stepper' ? 'number' : 'text'"
+        type="text"
+        :inputmode="isNumeric ? 'decimal' : undefined"
+        :role="isNumeric ? 'spinbutton' : undefined"
+        :aria-valuemin="isNumeric ? field.control.min : undefined"
+        :aria-valuemax="isNumeric ? field.control.max : undefined"
         class="ux-field-text"
+        :class="{ 'ux-field-text--mono': kind === 'reference' }"
         :value="textValue"
-        :step="field.control.step"
         :placeholder="isMixed ? '— 混合 —' : ''"
         spellcheck="false"
         @input="onText"

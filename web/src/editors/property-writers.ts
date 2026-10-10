@@ -61,11 +61,18 @@ export type DocumentState = Readonly<{
   shell: Readonly<Record<string, unknown>>
 }>
 
-/** 属性 ID → 对象类型内的局部 ID（`lightning.block.pos` → `pos`）。 */
-export function localPropertyOf(propertyId: string): string {
-  const dot = propertyId.indexOf('.')
-  return dot === -1 ? propertyId : propertyId.slice(dot + 1)
-}
+/**
+ * 属性 ID → 对象类型内的**局部** ID（实现唯一在 `application/contracts`）。
+ *
+ * 这里 `import` 而非 `export { … } from`：写入函数体里要用它，
+ * 而 re-export **不**在当前模块建立本地绑定（`TS2304: Cannot find name`）。
+ *
+ * 必须传 `objectTypeId`：属性 ID 形如 `lightning.block.pos`，而对象类型 ID **自带点**，
+ * 「取第一个点之后」会得到 `block.pos`（错，正确是 `pos`）。
+ */
+import { localPropertyOf } from '@/application/contracts'
+
+export { localPropertyOf }
 
 /** 拥有者 ID（`x,y,z`）→ 位置。 */
 export function parsePos(id: string): { x: number; y: number; z: number } {
@@ -139,7 +146,7 @@ export function writeBlockProperty(
   }
   const doc = state.document.clone()
 
-  switch (localPropertyOf(ref.property)) {
+  switch (localPropertyOf(ref.property, _context.descriptor.objectTypeId)) {
     case 'id': {
       const parsed = parseBlockStateId(String(value))
       if (!parsed) {
@@ -190,7 +197,7 @@ export function writeAnnotationProperty(
   const list = doc.annotations as unknown as { id?: string }[]
   const at = list.findIndex((a) => a.id === ref.owner.id)
   if (at === -1) return err(domainError('MissingTarget', { reason: 'annotation-absent', objectId: ref.owner.id }))
-  const local = localPropertyOf(ref.property)
+  const local = localPropertyOf(ref.property, _context.descriptor.objectTypeId)
   const next: Record<string, unknown> = { ...(list[at] as unknown as Record<string, unknown>) }
   if (ref.component !== undefined) {
     const name = ['x', 'y', 'z', 'w'][ref.component]
@@ -219,7 +226,7 @@ export function writeSceneMetadataProperty(
   _context: Readonly<{ descriptor: PropertyDescriptor; env: PropertyWriteEnv }>,
 ): Result<DocumentState> {
   const doc = state.document.clone()
-  const local = localPropertyOf(ref.property)
+  const local = localPropertyOf(ref.property, _context.descriptor.objectTypeId)
   const meta = doc.meta as Record<string, unknown>
   switch (local) {
     case 'name':
@@ -255,9 +262,12 @@ export function writeShellProperty(
   state: DocumentState,
   ref: PropertyRef,
   value: PropertyValue,
-  _context?: Readonly<{ descriptor: PropertyDescriptor; env: PropertyWriteEnv }>,
+  context: Readonly<{ descriptor: PropertyDescriptor; env: PropertyWriteEnv }>,
 ): Result<DocumentState> {
-  const local = localPropertyOf(ref.property)
+  // `context` **不是可选**的：局部属性名必须靠 `descriptor.objectTypeId` 剥离前缀，
+  // 缺了就只剩「按最后一个点切」的猜测。把可选参数写成必填，让「忘了传」在类型上失败，
+  // 而不是让属性名静默解错（`lightning.publishConfig.viewWidth` → `publishConfig.viewWidth`）。
+  const local = localPropertyOf(ref.property, context.descriptor.objectTypeId)
   const shell = { ...state.shell }
   const current = (shell[ref.owner.kind] ?? {}) as Record<string, unknown>
   shell[ref.owner.kind] = { ...current, [local]: value }

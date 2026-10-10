@@ -244,10 +244,40 @@ export function samePropertyRef(a: PropertyRef, b: PropertyRef): boolean {
   return ea.elementId === eb.elementId && ea.topologyVersion === eb.topologyVersion
 }
 
-/** 稳定序列化（引用 → 字符串）：供去重、菜单/命令参数描述与诊断关联共用一份口径。 */
+/**
+ * 稳定序列化（引用 → 字符串）：供去重、菜单/命令参数描述与诊断关联共用一份口径。
+ *
+ * 属性 ID 形如 `<objectTypeId>.<localId>`，而 **`objectTypeId` 自身含点**
+ * （`lightning.block`、`lightning.annotation.text`）。因此本函数只做**拼接**，
+ * 绝不对 `property` 做「按点切分」—— 切分需要知道 `objectTypeId`，
+ * 那是注册表的事实，不是字符串的形状（见 `localPropertyOf` 的同类陷阱）。
+ */
 export function formatPropertyRef(ref: PropertyRef): string {
-  const parts = [`${ref.owner.kind}:${ref.owner.id}`, ref.property]
-  if (ref.element) parts.push(`@${ref.element.elementId}#${ref.element.topologyVersion}`)
-  if (ref.component !== undefined) parts.push(`[${ref.component}]`)
-  return parts.join('.')
+  let s = `${ref.owner.kind}:${ref.owner.id}.${ref.property}`
+  if (ref.element) s += `@${ref.element.elementId}#${ref.element.topologyVersion}`
+  if (ref.component !== undefined) s += `[${ref.component}]`
+  return s
+}
+
+/**
+ * 属性 ID → 对象类型内的**局部** ID。
+ *
+ * ## 为什么必须传 `objectTypeId`（这里踩过一次真坑）
+ *
+ * 属性 ID 是 `<objectTypeId>.<localId>`，而对象类型 ID **自带点**
+ * （`lightning.block`、`lightning.annotation.text`）。于是
+ * 「取第一个点之后的部分」会把 `lightning.block.pos` 解成 **`block.pos`**（错），
+ * 正确结果是 `pos`。这个错误不会抛异常 —— 它让每个属性读面都变成 `MissingTarget`，
+ * 进而让「无业务变化」被误判为「有变化」（A08-7 的失败即由此而来）。
+ *
+ * 故本函数**优先**用 `objectTypeId` 做前缀剥离（唯一权威做法）；
+ * 只在调用方拿不到 `objectTypeId` 时退回「最后一个点」，并假设 `localId` 不含点
+ * （本批全部声明满足此假设）。
+ */
+export function localPropertyOf(propertyId: string, objectTypeId?: string): string {
+  if (objectTypeId !== undefined && objectTypeId !== '' && propertyId.startsWith(`${objectTypeId}.`)) {
+    return propertyId.slice(objectTypeId.length + 1)
+  }
+  const dot = propertyId.lastIndexOf('.')
+  return dot === -1 ? propertyId : propertyId.slice(dot + 1)
 }

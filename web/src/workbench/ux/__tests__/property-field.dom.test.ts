@@ -1,0 +1,429 @@
+// @vitest-environment jsdom
+/**
+ * **属性控件的交互契约**（#253 P2；#249 §19.1 显示值/编辑草稿/可提交值分离、D1/D2 界面要求）。
+ *
+ * ## 这些用例在锁什么（以及为什么必须用 DOM）
+ *
+ * 前两个测试文件锁的是**纯逻辑**（描述、路由、原子性）。本文件锁的是**呈现层**的三条
+ * 用户可见契约 —— 它们只在真实 DOM 事件序列下才成立：
+ *
+ *  1. **中间草稿不写文档**：输入 `-` / `1.` / 空串时**不得**提交（旧实现每字符提交一次，
+ *     于是「1.」会被 `Number('1.')` 变成 1 写下去，用户输入的中间态被静默吞掉）；
+ *  2. **非法草稿保留并提示**，不暗中强制转换（校验判据来自 RNA 核心，不是组件自己写）；
+ *  3. **只读字段不可聚焦且带结构化原因**（不是「能输入但没反应」——
+ *     旧 `RNAWidget` 对 `material.*` / `annotation.created_at` 就是那样）。
+ *
+ * 事件全部用**真实用户事件**（`input`/`blur`/`keydown`），不从组件内部状态反读期望；
+ * 期望值硬编码。
+ */
+
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createApp, type App } from 'vue'
+import PropertyField from '@/workbench/ux/PropertyField.vue'
+import { createPropertyRegistry, describeProperty } from '@/application/properties'
+import { buildFieldViewModel, type FieldViewModel } from '@/editors/property-controls'
+import type { PropertyRef } from '@/application/contracts'
+
+// ── 夹具（与组件同源：字段模型由 RNA 纯函数造，不手工拼） ──────────────────────
+
+const OBJECT_TYPE = 'ui.thing'
+
+function makeRegistry() {
+  const reg = createPropertyRegistry()
+  reg.registerObjectType({
+    id: OBJECT_TYPE,
+    ownerKind: 'object',
+    display: { labelKey: 'obj.ui', fallback: 'UI' },
+    properties: [
+      {
+        id: 'count',
+        valueType: 'number',
+        animatable: true,
+        unit: { kind: 'count', symbolKey: 'unit.pcs', symbolFallback: '件' },
+        display: { labelKey: 'ui.count', fallback: '数量', decimals: 2 },
+        // **硬**约束 + 上下界齐全 ⇒ 渲染成 `slider`（D1.1 #6 的步长来源用例）。
+        domain: { kind: 'number', min: 0, max: 100, hard: true, step: 5 },
+      },
+      {
+        id: 'plain',
+        valueType: 'number',
+        animatable: false,
+        display: { labelKey: 'ui.plain', fallback: '数值' },
+        // 推荐域（非硬约束）⇒ 渲染成文本框，草稿/提交语义可测。
+        domain: { kind: 'number', min: 0, max: 100, hard: false, step: 1 },
+      },
+      {
+        id: 'mode',
+        valueType: 'enum',
+        animatable: false,
+        display: { labelKey: 'ui.mode', fallback: '模式' },
+        domain: {
+          kind: 'enum',
+          items: [
+            { value: 'fast', display: { labelKey: 'm.fast', fallback: '快速' } },
+            { value: 'slow', display: { labelKey: 'm.slow', fallback: '慢速' } },
+          ],
+        },
+      },
+      {
+        id: 'enabled',
+        valueType: 'boolean',
+        animatable: false,
+        display: { labelKey: 'ui.enabled', fallback: '启用' },
+      },
+      {
+        id: 'offset',
+        valueType: 'vec3',
+        animatable: true,
+        display: { labelKey: 'ui.offset', fallback: '偏移' },
+      },
+      {
+        id: 'tint',
+        valueType: 'color',
+        animatable: false,
+        display: { labelKey: 'ui.tint', fallback: '色调' },
+      },
+      {
+        id: 'stamp',
+        valueType: 'string',
+        animatable: false,
+        readOnly: true,
+        readOnlyReason: 'timestamp',
+        display: { labelKey: 'ui.stamp', fallback: '时间戳' },
+      },
+    ],
+  })
+  return reg
+}
+
+const owner: PropertyRef['owner'] = { kind: 'object', id: 'U1' }
+
+/**
+ * 本文件只锁**字段模型 → DOM** 这一段：字段模型的读状态由显式值给出，
+ * 读面本身的判据在 `rna-contract.test.ts` 覆盖，不在这里重复。
+ * 于是 DOM 用例的期望值全部硬编码，不依赖读面实现。
+ *
+ * （`access`/`PropertyAccess` 是上一版夹具的残留：它被 `fieldFor` 用来造
+ * `readRaw`，但字段模型已经直接收显式值，故整段删除而非留作未用代码。）
+ */
+
+/** 造一个字段模型（走 RNA 纯函数，与真实面板同一路径）。 */
+function fieldFor(
+  reg: ReturnType<typeof makeRegistry>,
+  localId: string,
+  value: unknown,
+  opts: { draft?: string | null } = {},
+): FieldViewModel {
+  const propertyId = `${OBJECT_TYPE}.${localId}`
+  const d = describeProperty(reg, { owner, property: propertyId })
+  if (!d.ok) throw new Error(`describe failed: ${JSON.stringify(d.error)}`)
+  const ref: PropertyRef = { owner, property: propertyId }
+  return buildFieldViewModel(reg, ref, {
+    descriptor: d.value,
+    value: { kind: 'value', value: value as never },
+    edit: { kind: 'editable' },
+    draft: opts.draft ?? null,
+  })
+}
+
+function readonlyFieldFor(
+  reg: ReturnType<typeof makeRegistry>,
+  localId: string,
+  value: unknown,
+): FieldViewModel {
+  const propertyId = `${OBJECT_TYPE}.${localId}`
+  const d = describeProperty(reg, { owner, property: propertyId })
+  if (!d.ok) throw new Error('describe failed')
+  return buildFieldViewModel(reg, { owner, property: propertyId }, {
+    descriptor: d.value,
+    value: { kind: 'value', value: value as never },
+    edit: { kind: 'readOnly', reason: { code: 'ReadOnly', params: { reason: 'timestamp', property: propertyId } } },
+  })
+}
+
+// ── 挂载工具 ─────────────────────────────────────────────────────────────────
+
+let app: App | null = null
+let host: HTMLElement | null = null
+
+function mount(field: FieldViewModel) {
+  const events: { kind: string; payload?: unknown }[] = []
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  host = container
+  app = createApp(PropertyField, {
+    field,
+    onDraft: (t: string) => events.push({ kind: 'draft', payload: t }),
+    onCommit: () => events.push({ kind: 'commit' }),
+    onCommitValue: (v: unknown) => events.push({ kind: 'commit-value', payload: v }),
+    onCommitComponent: (i: number, v: number) => events.push({ kind: 'component', payload: [i, v] }),
+    onCancel: () => events.push({ kind: 'cancel' }),
+  })
+  app.mount(container)
+  return { root: container, events }
+}
+
+beforeEach(() => {
+  app = null
+  host = null
+  document.body.innerHTML = ''
+})
+
+function teardown(): void {
+  app?.unmount()
+  host?.remove()
+}
+
+function fire(el: Element, type: string, init: Record<string, unknown> = {}): void {
+  const e = new Event(type, { bubbles: true, cancelable: true })
+  Object.assign(e, init)
+  el.dispatchEvent(e)
+}
+
+// ── 用例 ─────────────────────────────────────────────────────────────────────
+
+describe('控件：草稿不提交（#249 §19.1）', () => {
+  it('键入**中间态**只发 `draft`，不发 `commit`', () => {
+    const reg = makeRegistry()
+    const { root, events } = mount(fieldFor(reg, 'plain', 10))
+    const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
+    expect(input).toBeTruthy()
+
+    for (const text of ['-', '1.', '']) {
+      events.length = 0
+      input.value = text
+      fire(input, 'input')
+      expect(events.map((e) => e.kind), `草稿 ${JSON.stringify(text)} 不得提交`).toEqual(['draft'])
+    }
+    teardown()
+  })
+
+  it('**失焦**在非法草稿上也不提交（保留草稿 + 显示原因）', () => {
+    const reg = makeRegistry()
+    // 草稿 `abc` 对 number 非法 ⇒ `draftState === 'invalid'`
+    const field = fieldFor(reg, 'plain', 10, { draft: 'abc' })
+    expect(field.draftState.state).toBe('invalid')
+    const { root, events } = mount(field)
+    const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
+    fire(input, 'blur')
+    expect(events.filter((e) => e.kind === 'commit-value')).toHaveLength(0)
+    // 提示必须可见（不静默吞输入）
+    expect(root.querySelector('.ux-field-problem')?.textContent).toContain('InvalidValue')
+    teardown()
+  })
+
+  it('**Enter** 请求提交；**Escape** 请求取消（单次消费，不重复）', () => {
+    const reg = makeRegistry()
+    const { root, events } = mount(fieldFor(reg, 'plain', 10, { draft: '20' }))
+    const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
+
+    fire(input, 'keydown', { key: 'Enter' })
+    expect(events.filter((e) => e.kind === 'commit')).toHaveLength(1)
+
+    events.length = 0
+    fire(input, 'keydown', { key: 'Escape' })
+    expect(events.map((e) => e.kind)).toEqual(['cancel'])
+    teardown()
+  })
+
+  it('多行文本里 Enter **不**提交（换行优先）', () => {
+    const reg = createPropertyRegistry()
+    reg.registerObjectType({
+      id: 'ui.multi',
+      ownerKind: 'object',
+      display: { labelKey: 'ui.multi', fallback: 'M' },
+      properties: [
+        {
+          id: 'body',
+          valueType: 'string',
+          animatable: false,
+          display: { labelKey: 'ui.body', fallback: '正文' },
+          domain: { kind: 'text', multiline: true },
+        },
+      ],
+    })
+    const d = describeProperty(reg, { owner, property: 'ui.multi.body' })
+    if (!d.ok) throw new Error('desc')
+    const field = buildFieldViewModel(reg, { owner, property: 'ui.multi.body' }, {
+      descriptor: d.value,
+      value: { kind: 'value', value: 'line1' },
+      edit: { kind: 'editable' },
+      draft: 'line1',
+    })
+    const { root, events } = mount(field)
+    const ta = root.querySelector<HTMLTextAreaElement>('textarea')!
+    expect(ta).toBeTruthy()
+    fire(ta, 'keydown', { key: 'Enter' })
+    expect(events.filter((e) => e.kind === 'commit')).toHaveLength(0)
+    teardown()
+  })
+})
+
+describe('控件：只读字段不可聚焦且带结构化原因', () => {
+  it('只读字段渲染为不可聚焦元素，并带 `data-readonly-code`/`data-readonly-reason`', () => {
+    const reg = makeRegistry()
+    const { root } = mount(readonlyFieldFor(reg, 'stamp', '2026-01-01'))
+    const el = root.querySelector('.ux-field-readonly')!
+    expect(el).toBeTruthy()
+    expect(el.getAttribute('tabindex')).toBe('-1')
+    expect(el.getAttribute('data-readonly-code')).toBe('ReadOnly')
+    expect(el.getAttribute('data-readonly-reason')).toBe('timestamp')
+    // **没有**可输入的控件（「能输入但没反应」是旧实现的形态）
+    expect(root.querySelector('input')).toBeNull()
+    expect(root.querySelector('textarea')).toBeNull()
+    expect(root.querySelector('select')).toBeNull()
+    teardown()
+  })
+})
+
+describe('控件：值类型驱动的控件选择（D1 的界面要求）', () => {
+  it('boolean 用原生可聚焦控件（`input[type=checkbox]` + `role=switch`）', () => {
+    const reg = makeRegistry()
+    const { root } = mount(fieldFor(reg, 'enabled', true))
+    const cb = root.querySelector<HTMLInputElement>('input[type=checkbox]')!
+    expect(cb).toBeTruthy()
+    expect(cb.getAttribute('role')).toBe('switch')
+    expect(cb.getAttribute('aria-checked')).toBe('true')
+    teardown()
+  })
+
+  it('boolean 点选发出 `commit-value`（不是草稿提交）', () => {
+    const reg = makeRegistry()
+    const { root, events } = mount(fieldFor(reg, 'enabled', false))
+    const cb = root.querySelector<HTMLInputElement>('input[type=checkbox]')!
+    cb.checked = true
+    fire(cb, 'change')
+    expect(events).toEqual([{ kind: 'commit-value', payload: true }])
+    teardown()
+  })
+
+  it('枚举用 `select`，选项显示**本地化标签**而不是原始值', () => {
+    const reg = makeRegistry()
+    const { root } = mount(fieldFor(reg, 'mode', 'fast'))
+    const sel = root.querySelector<HTMLSelectElement>('select.ux-field-select')!
+    expect(sel).toBeTruthy()
+    const labels = [...sel.options].map((o) => o.textContent?.trim())
+    expect(labels).toEqual(['快速', '慢速'])
+    expect([...sel.options].map((o) => o.value)).toEqual(['fast', 'slow'])
+    teardown()
+  })
+
+  it('数值域声明为滑块时，`step` 来自描述符（不按 range/100 猜）', () => {
+    const reg = makeRegistry()
+    const reg2 = createPropertyRegistry()
+    reg2.registerObjectType({
+      id: 'ui.slider',
+      ownerKind: 'object',
+      display: { labelKey: 'ui.s', fallback: 'S' },
+      properties: [
+        {
+          id: 'v',
+          valueType: 'number',
+          animatable: false,
+          display: { labelKey: 'ui.v', fallback: 'V' },
+          domain: { kind: 'number', min: 0, max: 1, hard: true, step: 0.05 },
+        },
+      ],
+    })
+    const d = describeProperty(reg2, { owner, property: 'ui.slider.v' })
+    if (!d.ok) throw new Error('desc')
+    const field = buildFieldViewModel(reg2, { owner, property: 'ui.slider.v' }, {
+      descriptor: d.value,
+      value: { kind: 'value', value: 0.5 },
+      edit: { kind: 'editable' },
+    })
+    const { root } = mount(field)
+    const range = root.querySelector<HTMLInputElement>('input[type=range]')!
+    expect(range).toBeTruthy()
+    expect(range.getAttribute('step')).toBe('0.05')
+    expect(range.getAttribute('min')).toBe('0')
+    expect(range.getAttribute('max')).toBe('1')
+    void reg
+    teardown()
+  })
+
+  it('向量渲染**逐分量**输入，改动发 `commit-component`（分量寻址）', () => {
+    const reg = makeRegistry()
+    const { root, events } = mount(fieldFor(reg, 'offset', { x: 1, y: 2, z: 3 }))
+    const comps = root.querySelectorAll<HTMLInputElement>('.ux-field-comp-input')
+    expect(comps).toHaveLength(3)
+    expect([...comps].map((c) => c.value)).toEqual(['1', '2', '3'])
+    comps[1]!.value = '9'
+    fire(comps[1]!, 'change')
+    expect(events).toEqual([{ kind: 'component', payload: [1, 9] }])
+    teardown()
+  })
+
+  it('颜色有取色器 + 十六进制文本框；单位符号随描述显示', () => {
+    const reg = makeRegistry()
+    const { root } = mount(fieldFor(reg, 'tint', '#aabbcc'))
+    expect(root.querySelector('input[type=color]')).toBeTruthy()
+    expect(root.querySelector('.ux-field-text--mono')).toBeTruthy()
+
+    const countField = fieldFor(reg, 'count', 10)
+    const mounted = mount(countField)
+    expect(mounted.root.querySelector('.ux-field-unit')?.textContent?.trim()).toBe('件')
+    teardown()
+    mounted.root.remove()
+    app?.unmount()
+  })
+})
+
+describe('控件：多选混合值（D6 属性区不消失）', () => {
+  it('混合值显示「混合」并**不**预填任何一方的值', () => {
+    const reg = makeRegistry()
+    const d = describeProperty(reg, { owner, property: `${OBJECT_TYPE}.plain` })
+    if (!d.ok) throw new Error('desc')
+    const field = buildFieldViewModel(reg, { owner, property: `${OBJECT_TYPE}.plain` }, {
+      descriptor: d.value,
+      value: { kind: 'mixed', refs: [{ owner, property: `${OBJECT_TYPE}.plain` }] },
+      edit: { kind: 'editable' },
+    })
+    const { root, events } = mount(field)
+    expect(root.querySelector('.ux-field')?.getAttribute('data-mixed')).toBe('1')
+    const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
+    // 不预填首项值（旧实现用「首项值」冒充全体并广播覆盖）
+    expect(input.value).toBe('—')
+    // 仍可输入统一值（属性区没有因多选而消失）
+    input.value = '42'
+    fire(input, 'input')
+    expect(events.some((e) => e.kind === 'draft' && e.payload === '42')).toBe(true)
+    teardown()
+  })
+
+  it('混合态的 boolean 用 `aria-checked="mixed"`（三态，不是二态猜测）', () => {
+    const reg = makeRegistry()
+    const d = describeProperty(reg, { owner, property: `${OBJECT_TYPE}.enabled` })
+    if (!d.ok) throw new Error('desc')
+    const field = buildFieldViewModel(reg, { owner, property: `${OBJECT_TYPE}.enabled` }, {
+      descriptor: d.value,
+      value: { kind: 'mixed', refs: [{ owner, property: `${OBJECT_TYPE}.enabled` }] },
+      edit: { kind: 'editable' },
+    })
+    const { root } = mount(field)
+    const cb = root.querySelector<HTMLInputElement>('input[type=checkbox]')!
+    expect(cb.getAttribute('aria-checked')).toBe('mixed')
+    teardown()
+  })
+})
+
+describe('控件：拒绝原因可见（不得静默失败）', () => {
+  it('字段带 `rejection` 时渲染结构化原因', () => {
+    const reg = makeRegistry()
+    const d = describeProperty(reg, { owner, property: `${OBJECT_TYPE}.count` })
+    if (!d.ok) throw new Error('desc')
+    const field = buildFieldViewModel(reg, { owner, property: `${OBJECT_TYPE}.count` }, {
+      descriptor: d.value,
+      value: { kind: 'value', value: 10 },
+      edit: { kind: 'editable' },
+      rejection: { code: 'ReadOnly', params: { reason: 'generated-owner' } },
+    })
+    const { root } = mount(field)
+    const problem = root.querySelector('.ux-field-problem')!
+    expect(problem.textContent).toContain('ReadOnly')
+    expect(problem.textContent).toContain('generated-owner')
+    expect(problem.getAttribute('data-problem')).toBe('rejected')
+    teardown()
+  })
+})
+

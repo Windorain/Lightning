@@ -60,6 +60,24 @@ export type ColorValue = string
 export type ReferenceValue = Readonly<{ kind: EntityOwnerKind; id: string }>
 
 /**
+ * **扩展值**：注册方自有形状（如「时长」「表达式」「引用+偏移」）。
+ *
+ * ## 为什么 `PropertyValue` 必须是**开放**联合（这是 D4 的硬要求）
+ *
+ * 初版把 `PropertyValue` 写成封闭联合（`number | string | boolean | Vec3 | Quat | Color | Ref | string[]`），
+ * 结果 `PropertyValueTypeHandler<V extends PropertyValue>` 让**新增一种值类型**
+ * 必须回头改 `application/properties.ts` —— 那正是 D4「不得要求改核心」禁止的事。
+ * 这个矛盾由 `editors/__tests__/rna-extension.test.ts` 的**类型检查**当场抓出
+ * （注册 `duration` 值时 `TS2344: does not satisfy the constraint 'PropertyValue'`）。
+ *
+ * 修法：联合里保留一个开放臂。结构化类型下 `Vec3`/`Quat`/`ReferenceValue`
+ * 都天然满足 `Readonly<Record<string, unknown>>`，故闭合类型仍按各自分支收窄；
+ * 新类型只需满足「是一个只读记录」。校验责任在**该类型的 handler**（它必须
+ * `validate()` 出具体形状），核心对扩展形状零知识。
+ */
+export type ExtensionValue = Readonly<Record<string, unknown>>
+
+/**
  * RNA 值。**没有 `null`**：缺失用 `MissingTarget` 表达（契约 §3.1「不能用默认值掩盖缺失」），
  * 多选值不同用显式的 `'mixed'` 哨兵（§5.2「不用 null 兼表」）。
  */
@@ -72,6 +90,7 @@ export type PropertyValue =
   | ColorValue
   | ReferenceValue
   | readonly string[]
+  | ExtensionValue
 
 /**
  * 值类型 ID。**开放集**（`string`）—— D4 要求新增类型不改核心，
@@ -830,13 +849,32 @@ export function readAuthoredValue(
   return readComponent(desc, validated.value, ref)
 }
 
+/**
+ * 读面的**值快照**：把校验通过的值复制成调用方无法回写底层的一份。
+ *
+ * ## 为什么读面必须复制（这是一个真 bug，被 A08-2 的用例抓出）
+ *
+ * `readRaw` 的原始值通常直接来自文档/状态（`grid.at(pos)?.name`、注解记录里的对象、
+ * vec3 分量…）。若把这个引用原样交给调用方，则 UI 侧「就地改一个分量再回写」
+ * （旧 `RNAWidget` 对 vector 正是这么做的：`v.x = ...; setValue(v)`）会**绕过 clone、
+ * undo 与版本**——因为 `v` 就是文档里的那个对象。
+ *
+ * 契约 §2.2 明文要求读面不暴露可变底层，故读面统一返回复制件：
+ * 标量原样返回（本来就不可变），对象/数组做浅层复制（本批值类型的成员都是标量）。
+ */
+function snapshotValue(value: PropertyValue): PropertyValue {
+  if (Array.isArray(value)) return [...value]
+  if (typeof value === 'object' && value !== null) return { ...(value as Record<string, unknown>) } as PropertyValue
+  return value
+}
+
 /** 分量读：整体读回后取分量（分量是**视图**，不是第二份权威）。 */
 function readComponent(
   desc: PropertyDescriptor,
   value: PropertyValue,
   ref: PropertyRef,
 ): Result<PropertyValue> {
-  if (ref.component === undefined) return ok(value)
+  if (ref.component === undefined) return ok(snapshotValue(value))
   const name = componentName(desc.valueType, ref.component)
   if (!name) return err(domainError('MissingTarget', { reason: 'component-not-addressable', property: desc.id }))
   const rec = value as unknown as Record<string, number>

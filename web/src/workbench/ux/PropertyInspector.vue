@@ -193,7 +193,7 @@ void inject(contextKey, null)
           <PropertyField
             v-if="fieldFor(row.field.descriptor.id)"
             :field="fieldFor(row.field.descriptor.id)!"
-            @update:draft="(t: string) => onDraft(row.field.descriptor, t)"
+            @draft="(t: string) => onDraft(row.field.descriptor, t)"
             @commit="() => onCommit(row.field.descriptor)"
             @commit-value="(v: unknown) => onCommitValue(row.field.descriptor, v)"
             @commit-component="(i: number, v: number) => onCommitComponent(row.field.descriptor, i, v)"
