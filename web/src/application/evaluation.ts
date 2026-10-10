@@ -834,5 +834,153 @@ export function requireEvaluationCapability(
   return err(unsupportedOperation({ reason: 'evaluationCapabilityMissing', capability: required }))
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 默认场景求值图（呈现消费接口；呈现实现归 P5 #256）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 由文档状态构造默认场景求值图。
+ *
+ * ## 为什么这个函数必须存在（而不是"让 P5 自己写"）
+ *
+ * #255 的退出边界明文：「**呈现消费接口在本单定义**，呈现实现归 #256」。
+ * 一个没有默认图的 `evaluateScene` 只是机制，消费者拿不到能用的产物 ——
+ * 那正是 #249 §13 禁止的"空接口"。
+ *
+ * ## 图的形状由**所有权事实**决定，不是随手挑的
+ *
+ * | 节点域 | 消费的版本源 | 为什么 |
+ * |---|---|---|
+ * | `geometry`（每对象数据） | `data:<dataId>`（**细粒度**） | 只有该数据的内容版本变了才重建（A11 的核心） |
+ * | `annotation`（每注解数据） | `data:<dataId>` | 注解描述变化**不得**重建方块几何 |
+ * | `camera`（每相机数据） | `data:<dataId>` | 相机参数属文档；观察视角不在此（§3.1） |
+ * | `channel`（每通道） | `param:<key>` + `timeDependent` | 通道吃参数版本与时间（#249 §7） |
+ * | `texture`（每序列） | `res:<assetId>` | 资源按内容身份（§19.3 + A28） |
+ * | `picking`（汇合） | 依赖上游（**不含** versionInputs） | 拾取必须对应同一次求值（§7「不得新描边配旧几何」） |
+ *
+ * **没有任何节点声明 `document`/`parameters` 这类粗粒度源** —— 那是旧
+ * `structEpoch` 口径，会让"只改注解"重建方块几何（A11 负对照的形态）。
+ *
+ * ## 为什么 `picking` 用 `deps` 而不是自己声明版本源
+ *
+ * 见 `nodeIdentity` 的注释 2：依赖边本身构成身份。让拾取自己再列一遍版本源，
+ * 等于维护一张与依赖边重复的表 —— 漏一处就静默配旧几何。
+ */
+export interface SceneGraphFacts {
+  /** 每个对象的 `{ objectId, dataId, domain }`（域决定节点归组与失效面）。 */
+  readonly objects: readonly {
+    readonly objectId: string
+    readonly dataId: string
+    readonly domain: EvaluationDomain
+    /** 该数据的来源内容版本（进 `data:<dataId>` 版本源）。 */
+    readonly dataVersion: number
+  }[]
+  /** 通道：键 + 参数版本。 */
+  readonly channels?: readonly { readonly key: string; readonly parameterVersion: number }[]
+  /** 纹理序列：资源 id + 内容版本。 */
+  readonly textures?: readonly { readonly assetId: string; readonly contentVersion: string }[]
+  /** 每个对象的几何负载（由呈现消费者解释；本层只做"值"的传递）。 */
+  readonly geometryOf?: (objectId: string) => unknown
+  readonly annotationOf?: (objectId: string) => unknown
+  readonly cameraOf?: (objectId: string) => unknown
+}
+
+export function defaultSceneGraph(facts: SceneGraphFacts): EvaluationGraphDeclaration {
+  const nodes: EvaluationNodeDeclaration[] = []
+  const outputs: string[] = []
+
+  for (const o of facts.objects) {
+    const nodeId = objectNodeId(o.domain, o.objectId)
+    const loader =
+      o.domain === 'annotation' ? facts.annotationOf : o.domain === 'camera' ? facts.cameraOf : facts.geometryOf
+    nodes.push({
+      id: nodeId,
+      domain: o.domain,
+      deps: [],
+      // **细粒度**：只有该数据的内容版本变化才失效。
+      versionInputs: [`data:${o.dataId}`],
+      // 几何/注解/相机**不**吃时间：播放动画不得让它们重算（#249 §7）。
+      timeDependent: false,
+      compute: () => ok(Object.freeze({ objectId: o.objectId, payload: loader ? loader(o.objectId) : null })),
+    })
+    outputs.push(nodeId)
+  }
+
+  for (const ch of facts.channels ?? []) {
+    nodes.push({
+      id: `channel:${ch.key}`,
+      domain: 'channel',
+      deps: [],
+      versionInputs: [`param:${ch.key}`],
+      // 通道吃时间（#249 §7：通道动画的时间采样）。
+      timeDependent: true,
+      compute: (input) => ok(Object.freeze({ objectId: ch.key, parameterVersion: versionOf(input.versions, `param:${ch.key}`), time: input.key.time })),
+    })
+    outputs.push(`channel:${ch.key}`)
+  }
+
+  for (const t of facts.textures ?? []) {
+    nodes.push({
+      id: `texture:${t.assetId}`,
+      domain: 'texture',
+      deps: [],
+      // 资源按**内容身份**（§19.3 + A28）；URL 不参与。
+      versionInputs: [`res:${t.assetId}`],
+      // 纹理序列吃时间（采样按时间）。
+      timeDependent: true,
+      compute: (input) => ok(Object.freeze({ objectId: t.assetId, contentVersion: t.contentVersion, time: input.key.time })),
+    })
+    outputs.push(`texture:${t.assetId}`)
+  }
+
+  // 拾取/来源映射节点：消费全部对象节点 ⇒ 自动随它们失效（对应同次求值）。
+  const objectNodeIds = facts.objects.map((o) => objectNodeId(o.domain, o.objectId))
+  nodes.push({
+    id: 'picking:index',
+    domain: 'picking',
+    deps: objectNodeIds,
+    versionInputs: [],
+    timeDependent: false,
+    compute: (input) =>
+      ok(
+        Object.freeze({
+          objectId: 'picking:index',
+          // 来源映射：节点 id → 文档对象 id（#249 §7「几何、拾取和对象来源映射必须对应同次求值」）
+          sources: Object.freeze(
+            Object.fromEntries(objectNodeIds.map((n) => [n, (input.upstream[n] as { objectId?: string } | undefined)?.objectId ?? n])),
+          ),
+        }),
+      ),
+  })
+  outputs.push('picking:index')
+
+  return Object.freeze({ id: 'scene-default', nodes: Object.freeze(nodes), outputs: Object.freeze(outputs) })
+}
+
+/** 对象节点 id（域 + 对象 id，稳定且可反查）。 */
+export function objectNodeId(domain: EvaluationDomain, objectId: string): string {
+  return `${domain}:${objectId}`
+}
+
+/**
+ * 把 `SceneGraphFacts` 需要的版本源整理出来（供宿主接线；纯）。
+ *
+ * 与 `sceneVersionSources` 的关系：后者是**粗粒度**可选项（只有显式需要整份文档
+ * 粒度的节点才该用），本函数产出的 `data:` / `param:` / `res:` 才是默认图的输入。
+ */
+export function graphVersionSnapshot(
+  facts: SceneGraphFacts,
+  extra: Readonly<Record<VersionSourceId, number>> = {},
+): VersionSnapshot {
+  const values: Record<VersionSourceId, number> = { ...extra }
+  for (const o of facts.objects) values[`data:${o.dataId}`] = o.dataVersion
+  for (const c of facts.channels ?? []) values[`param:${c.key}`] = c.parameterVersion
+  for (const t of facts.textures ?? []) {
+    // 内容版本（字符串）⇒ 一个稳定的数（内容身份摘要，非 URL）。
+    values[`res:${t.assetId}`] = contentDigest(t.contentVersion)
+  }
+  return versionSnapshot(values)
+}
+
 /** 未使用占位：保持 `DomainError` 可达（下游 `import type`）。 */
 export type { DomainError }

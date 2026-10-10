@@ -15,11 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   detectDependencyCycle,
+  defaultSceneGraph,
   diffKeyDimensions,
   emptyEvaluationCache,
   evaluateGraph,
   evaluateScene,
   evaluationKeyId,
+  graphVersionSnapshot,
   memberSnapshot,
   nodeIdentity,
   resourceVersionsChanged,
@@ -37,6 +39,7 @@ import {
   type EvaluationGraphDeclaration,
   type EvaluationKey,
   type EvaluationNodeDeclaration,
+  type SceneGraphFacts,
   type SceneReadView,
 } from '@/application/evaluation'
 import {
@@ -812,6 +815,130 @@ describe('runtime/evaluation 接线（缓存跨轮复用 + 在途请求记账）
     expect(affected).toContain('channel.tier')
     expect(affected, '几何节点不得因纹理资源换版而失效').not.toContain('geometry.block')
     expect(nodesAffectedByResourceChange(makeGraph(), { 'a': 'v1' }, { 'a': 'v1' })).toHaveLength(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 默认场景图：A11 在**真实图形状**上的证据（呈现消费接口，实现归 P5）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('默认场景图：A11 在真实图形状上成立（#255「呈现消费接口在本单定义」）', () => {
+  const FACTS: SceneGraphFacts = Object.freeze({
+    objects: Object.freeze([
+      Object.freeze({ objectId: 'o-block', dataId: 'd-block', domain: 'geometry' as const, dataVersion: 1 }),
+      Object.freeze({ objectId: 'o-anno', dataId: 'd-anno', domain: 'annotation' as const, dataVersion: 1 }),
+      Object.freeze({ objectId: 'o-cam', dataId: 'd-cam', domain: 'camera' as const, dataVersion: 1 }),
+    ]),
+    channels: Object.freeze([Object.freeze({ key: 'tier', parameterVersion: 1 })]),
+    textures: Object.freeze([Object.freeze({ assetId: 'tex-lava', contentVersion: 'v1' })]),
+  })
+
+  function evaluateFacts(facts: SceneGraphFacts, key: EvaluationKey, cache = emptyEvaluationCache()) {
+    const graph = defaultSceneGraph(facts)
+    const r = evaluateGraph(graph, key, graphVersionSnapshot(facts), memberSnapshot({}), cache)
+    if (!r.ok) throw new Error(`求值失败: ${r.error.code} ${JSON.stringify(r.error.params)}`)
+    return { graph, result: r.value }
+  }
+
+  it('图结构正确：细粒度版本源、无粗粒度源、拾取经依赖边汇合', () => {
+    const graph = defaultSceneGraph(FACTS)
+    const valid = validateGraph(graph)
+    expect(valid.ok, `默认图必须自洽: ${valid.ok ? '' : JSON.stringify(valid.error.params)}`).toBe(true)
+    expect(graph.nodes).toHaveLength(6) // 3 对象 + 1 通道 + 1 纹理 + 1 拾取
+    // 几何/注解/相机吃 `data:<id>`，**不**吃时间
+    const geo = graph.nodes.find((n) => n.id === 'geometry:o-block')
+    expect(geo?.versionInputs).toEqual(['data:d-block'])
+    expect(geo?.timeDependent).toBe(false)
+    // 通道与纹理吃时间
+    expect(graph.nodes.find((n) => n.id === 'channel:tier')?.timeDependent).toBe(true)
+    expect(graph.nodes.find((n) => n.id === 'texture:tex-lava')?.timeDependent).toBe(true)
+    // 拾取无自己的版本源，靠 deps
+    const pick = graph.nodes.find((n) => n.id === 'picking:index')
+    expect(pick?.versionInputs).toEqual([])
+    expect(pick?.deps.length).toBe(3)
+    // **没有任何节点**声明粗粒度源（旧 structEpoch 口径的指纹）
+    for (const n of graph.nodes) {
+      for (const v of n.versionInputs) {
+        expect(['document', 'scene', 'parameters', 'staged', 'resources'], `${n.id} 不得声明粗粒度源 ${v}`).not.toContain(v)
+      }
+    }
+  })
+
+  it('**只改注解数据** ⇒ 方块几何重建数 0、注解重建 1、拾取跟随（A11 判据原文）', () => {
+    const key = keyFor(BASE_FACTS)
+    const first = evaluateFacts(FACTS, key)
+    expect(first.result.stats.recomputedByDomain.geometry).toBe(1)
+
+    const changed: SceneGraphFacts = Object.freeze({
+      ...FACTS,
+      objects: Object.freeze([
+        FACTS.objects[0],
+        Object.freeze({ ...FACTS.objects[1], dataVersion: 2 }),
+        FACTS.objects[2],
+      ]),
+    })
+    const { result } = evaluateFacts(changed, key, first.result.cache)
+    expect(result.stats.recomputedByDomain.geometry ?? 0, '只改注解 ⇒ 方块几何重建数必须为 0').toBe(0)
+    expect(result.stats.recomputedByDomain.annotation, '注解必须重算').toBe(1)
+    expect(result.stats.recomputedByDomain.picking, '拾取必须跟随（同次求值）').toBe(1)
+    expect(result.stats.recomputedByDomain.camera ?? 0).toBe(0)
+    expect(result.stats.recomputedByDomain.channel ?? 0).toBe(0)
+  })
+
+  it('**只改机位** ⇒ 零重算（默认图里根本没声明相机版本以外的结构源）', () => {
+    const key = keyFor(BASE_FACTS)
+    const first = evaluateFacts(FACTS, key)
+    const movedKey = keyFor(BASE_FACTS, { viewProjection: Object.freeze({ camera: 'ortho', localDisplay: 'all' }) })
+    const { result } = evaluateFacts(FACTS, movedKey, first.result.cache)
+    expect(result.stats.recomputed, '只改机位不得让任何结构节点重算').toBe(0)
+  })
+
+  it('**播放（时间前进）** ⇒ 几何/注解/相机零重算，只有 timeDependent 节点跟随', () => {
+    const key = keyFor(BASE_FACTS)
+    const first = evaluateFacts(FACTS, key)
+    const t1 = keyFor(BASE_FACTS, { time: timeValue(30, 20) })
+    const { result } = evaluateFacts(FACTS, t1, first.result.cache)
+    expect(result.stats.recomputedByDomain.geometry ?? 0).toBe(0)
+    expect(result.stats.recomputedByDomain.annotation ?? 0).toBe(0)
+    expect(result.stats.recomputedByDomain.camera ?? 0).toBe(0)
+    expect(result.stats.recomputedByDomain.channel, '通道吃时间').toBe(1)
+    expect(result.stats.recomputedByDomain.texture, '纹理序列吃时间').toBe(1)
+    // 拾取不随时间变（它不依赖通道/纹理）⇒ 不重算
+    expect(result.stats.recomputedByDomain.picking ?? 0).toBe(0)
+  })
+
+  it('**替换纹理资源**（内容版本变） ⇒ 只重算纹理节点（A28）', () => {
+    const key = keyFor(BASE_FACTS)
+    const first = evaluateFacts(FACTS, key)
+    const changed: SceneGraphFacts = Object.freeze({
+      ...FACTS,
+      textures: Object.freeze([Object.freeze({ assetId: 'tex-lava', contentVersion: 'v2' })]),
+    })
+    const { result } = evaluateFacts(changed, key, first.result.cache)
+    expect(result.stats.recomputedByDomain.texture, '资源内容版本变化 ⇒ 纹理节点重算').toBe(1)
+    expect(result.stats.recomputedByDomain.geometry ?? 0, '换纹理不得重建几何').toBe(0)
+    expect(result.stats.recomputedByDomain.channel ?? 0).toBe(0)
+  })
+
+  it('来源映射与几何对应**同一次**求值（#249 §7「不得新描边配旧几何」）', () => {
+    const key = keyFor(BASE_FACTS)
+    const { graph, result } = evaluateFacts(FACTS, key)
+    const src = sceneReadView(graph, {
+      sceneId: 'scene-1',
+      documentVersion: 1,
+      time: timeValue(0, 20),
+      parameterVersion: 1,
+      contentResourceVersions: Object.freeze({}),
+      versions: graphVersionSnapshot(FACTS).values,
+      members: {},
+    })
+    const evaluated = evaluateScene(src, { bindingGeneration: 0, cache: result.cache })
+    expect(evaluated.ok).toBe(true)
+    if (!evaluated.ok) return
+    // 来源映射必须指向文档对象 id（产物里没有内部 `all` 字段 —— 它不对外，见契约 §6）
+    expect(evaluated.value.sources['geometry:o-block'], '来源映射必须指向文档对象 id').toBe('o-block')
+    expect(evaluated.value.sources['annotation:o-anno']).toBe('o-anno')
+    expect(evaluated.value.sources['camera:o-cam']).toBe('o-cam')
   })
 })
 
