@@ -55,12 +55,22 @@ export interface UIScroll {
 
 export type UILayoutItem = UILayout | UIProperty | UIOperator | UILabel | UISeparator | UIMenu | UIWidget
 
+/**
+ * 属性占位项。
+ *
+ * **`widget?` 字段已删除**（#253 P2，退役 #3）：布局里写死控件名，与
+ * `PropertyDescriptor.uiWidget` 构成两处「控件名进核心」的入口（#251 B7 的 E-4：
+ * 该字段**零读者** —— `pure/layout.ts` 从不读它，`RNAWidget` 也不读）。
+ * 控件选择现由 `@/editors/property-controls` 的 `modelFor(desc)` 从 RNA 描述求值。
+ *
+ * 本项保留在布局类型里仅为兼容只读片段表达；真正的属性行由 `PropertyInspector`
+ * 从 RNA 声明生成（`ReadonlyLayout` **不实现** `property` 分支）。
+ */
 export interface UIProperty {
   kind: 'property'
   rnaPath: string
   label: string
   icon?: string
-  widget?: 'text' | 'number' | 'slider' | 'stepper' | 'stepper-compact' | 'checkbox' | 'dropdown' | 'color' | 'vector'
 }
 
 export interface UIOperator {

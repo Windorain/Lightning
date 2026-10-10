@@ -9,7 +9,7 @@ import { inject, provide } from 'vue'
 import type { SelectionContext } from '@/context/selection'
 import type { UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
-import type { Rect, RNARegistry } from '@/shared/types'
+import type { Rect } from '@/shared/types'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { Main } from '@/runtime/main'
 import type { WM } from '@/runtime/wm'
@@ -173,9 +173,15 @@ export class Context {
   getToolRegistry(): ToolRegistry {
     return this.workbench?.toolRegistry ?? embedUnavailable('toolRegistry')
   }
-  getRna(): RNARegistry {
-    return this.workbench?.rna ?? embedUnavailable('rna')
-  }
+  /**
+   * 属性访问（#253 P2）。
+   *
+   * 旧接口 `getRna(): RNARegistry` 返回一个**自带 `get`/`set` 闭包**的结构注册表 ——
+   * 那正是「调用方拿到闭包直接改内存」的旁路写面（契约 §5.2 禁止；退役 #3）。
+   * 新形态不向 `Context` 暴露任何属性访问器：属性读面与写面都在
+   * `@/editors/workbench-rna`（以 `Context` 为显式输入构造 `PropertyAccess`），
+   * 因此「在任意位置 `ctx.getRna().resolve(...).set(...)`」这条路**在类型上不存在**。
+   */
   getUi(): { boundsOfByOperator(opId: string): Rect[]; boundsOfByRNAPath(rnaPath: string): Rect[] } {
     return this.workbench?.ui ?? embedUnavailable('ui')
   }

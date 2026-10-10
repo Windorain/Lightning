@@ -12,7 +12,6 @@ import type { OperatorRegistry } from '@/operators/operatorRegistry'
 import { wrapOperatorRegistry } from '@/operators/operatorRegistry'
 import type { Context } from '@/runtime/context'
 import type { ToolRegistry } from '@/workbench/tools/registry'
-import type { RNARegistry } from '@/shared/types'
 import type { ParserRegistryImpl } from '@/context/parserRegistry'
 import { createParserRegistry } from '@/context/parserRegistry'
 export interface ReplaceDocOptions {
@@ -32,7 +31,11 @@ export interface MainRegistries {
     register(op: import('@/operators/operatorType').OperatorType): void
   }
   tools: ToolRegistry | null
-  rna: RNARegistry | null
+  /**
+   * **已删除**（#253 P2，退役 #3）：旧的 `rna: RNARegistry | null` 曾在 Main 上挂一份
+   * 自带 `get`/`set` 闭包的属性描述。属性描述现在是数据（`@/application/properties`），
+   * 由 `@/editors/workbench-rna` 按需构造，不挂在 Main 上。
+   */
   parsers: ParserRegistryImpl
 }
 
