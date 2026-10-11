@@ -180,7 +180,7 @@ function productionFiles(): string[] {
 describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
   const ENTRY_ID = 'per-viewport-channel-staging'
 
-  it('`per-viewport-channel-staging` 已按 `SeamRegistration` 形状登记（owner = P10/#261）', () => {
+  it('`per-viewport-channel-staging` 已按 `SeamRegistration` 形状登记（owner = P10b/#282，R-WK-04）', () => {
     const entry = seamById(ENTRY_ID)
     expect(entry, `P6 的开放接缝必须登记在 SEAMS 里（id=${ENTRY_ID}）`).toBeTruthy()
     if (!entry) return
@@ -191,10 +191,14 @@ describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
     expect(entry.oldTrack).toBeTruthy()
     expect(entry.blocker).toBeTruthy()
     expect(entry.exitCondition).toBeTruthy()
-    // 相位按 R-WK-03：目标批次是 #261（P10），不是 P6
-    expect(entry.owner.p).toBe('P10')
-    expect(entry.owner.issue).toBe(261)
-    expect(entry.owner.duty).toBe('集成闭环与交叉验收')
+    // ## 相位（R-WK-03 → **R-WK-04 修正**）
+    //
+    // R-WK-03 把目标批次从 P6 改为 #261（P10），理由是"删除前置条件是内核接线生产"。
+    // #261 完成了**时间/播放面**的接线，但实测发现本条的退出还多一个前置：
+    // **文档内容面**（视口渲染文档须是内核场景的派生）—— 而内核 `Document`
+    // 不承载 `frames`/`cellGrid`/`multiblock`。故 R-WK-04 把本条改归 **#282（P10b）**。
+    expect(entry.owner.p).toBe('P10b')
+    expect(entry.owner.issue).toBe(282)
     // 退出条件必须点名 `files` 里的文件（与 `boundary-scan` 同款判据）
     expect(entry.files.some((f) => entry.exitCondition.includes(f))).toBe(true)
   })
@@ -291,10 +295,15 @@ describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
       (rel) => rel === '<injected>' || codeOf(rel).includes('new Editor('),
     )
     expect(withSecond.length, '第二个构造点必须使"恰好一处"判红').toBeGreaterThan(1)
-    // 且**登记表自己的说明文字**（字符串里的 `new Editor(`）不得被误判为构造点
-    // —— 这正是首跑实测到的假红，`codeOf` 剥字符串后消失。
-    expect(codeOf('composition/seams.ts').includes('new Editor('), '文案里的提及不算构造点').toBe(false)
-    expect(codeText('composition/seams.ts').includes('new Editor('), '而原始文本里确实有这段说明（证明上面那条不是空转）').toBe(true)
+    // 且**登记表自己的说明文字**（字符串/注释里的符号名）不得被误判为使用点
+    // —— 这正是首跑实测到的假红，`codeOf` 剥字符串与注释后消失。
+    //
+    // 锚点从 `new Editor(` 换成 `EditContext`：R-WK-04 后 `seams.ts` 的 blocker
+    // 改写为"文档内容面归 #282"，不再逐字提到 `new Editor(`。锚点必须选
+    // **当下确实存在**的一段说明，否则这条反空洞真自己会变成空转
+    // （实测：改写 blocker 后本条判红 —— 它正确地抓到了"锚点已失效"）。
+    expect(codeOf('composition/seams.ts').includes('EditContext'), '文案里的提及不算使用点').toBe(false)
+    expect(codeText('composition/seams.ts').includes('EditContext'), '而原始文本里确实有这段说明（证明上面那条不是空转）').toBe(true)
   })
 })
 

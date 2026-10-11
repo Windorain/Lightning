@@ -407,7 +407,13 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/workbench/components/WorkbenchViewport.vue',
     ]),
     group: 'multiblock-channel-staging',
-    groupAreaNotes: '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。',
+    groupAreaNotes:
+      '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。'
+      + '**R-WK-04（#250，2026-10-11）**：本条的**文档内容面**（视口本地通道取值迁到'
+      + ' `EditContext.channelValues` 并让渲染消费装配结果）归 **#282（P10b 批次）** —— '
+      + '它需要"旧文档 → 内核场景"装配，而该装配未交付（#261 实测：内核 `Document` 不承载'
+      + ' `frames`/`cellGrid`/`textureBlobs`/`multiblock`）。故本条在 #261 保持 `pending`，'
+      + '不伪造"已迁移"。',
     replacement: Object.freeze([
       'web/src/domain/editing.ts#channelValues',
       'web/src/domain/editing.ts#withChannelValue',
@@ -416,7 +422,7 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/domain/multiblock.ts#channelStepTrack',
     ]),
     exitStage:
-      'P6 视口组件重写同批删除（文件本体归 P6；P4 提供替代接口 —— 通道取值属 EditContext、装配是纯函数、写权逐通道判定）',
+      'P6 视口组件重写同批删除（文件本体归 P6；P4 提供替代接口 —— 通道取值属 EditContext、装配是纯函数、写权逐通道判定）；**实际执行归 #282（R-WK-04）**：前置是"旧文档 → 内核场景"装配',
   }),
   Object.freeze({
     matrixSlug: 'manual-refresh-chain',
@@ -432,13 +438,16 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/workbench/components/WorkbenchViewport.vue',
     ]),
     group: 'multiblock-channel-staging',
-    groupAreaNotes: '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。',
+    groupAreaNotes:
+      '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。'
+      + '**R-WK-04（#250）**：文档内容面归 **#282（P10b）** —— 见同组上一条的完整说明。',
     replacement: Object.freeze([
       'web/src/application/evaluation.ts#evaluateGraph',
       'web/src/application/evaluation.ts#nodeIdentity',
       'web/src/runtime/evaluation.ts#EvaluationInstance',
     ]),
-    exitStage: 'P6 视口重写同批删除（失效由依赖图自动传播，无调用方手动 refresh）',
+    exitStage:
+      'P6 视口重写同批删除（失效由依赖图自动传播，无调用方手动 refresh）；**实际执行归 #282（R-WK-04）**',
     areaOverrideReason:
       'B5 矩阵该 slug 归口 P5（"依赖图自动失效"），但承载"手动链式刷新"的文件 `shared/viewport/useMultiblockChannels.ts` 属 P6 区（R-WK-01 comment 4875 实施细则）。实际分派：依赖图能力 P4 已交付，该文件删除随 P6 视口重写；清单如实登记这一区归属差异供 Lead 排合并顺序',
   }),
@@ -522,7 +531,15 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/runtime/execution.ts#EditorClient',
       'web/src/application/evaluation.ts#EvaluationKey',
     ]),
-    exitStage: 'P10（#261）集成闭环同批退出：内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线；另接缝 B 需先补齐读面（`ReadView` 现无相机/embed 初始视图查询）→ P11 终局零引用审计',
+    exitStage:
+      '**R-WK-04（#250，2026-10-11）裁决：本条的文档内容面归 #282（P10b 批次）**。'
+      + '#261 已完成的部分：宿主驱动接线（`runtime/kernelSession` + `composition/kernelRuntime`）'
+      + '与 `ReadView` 读面补齐（相机组 + 播放读面）；`getCurrentFrameIndex` 声明位/引用位已全树归零'
+      + '（帧下标改为时间派生）。**未完成的部分**：`getDoc()` 本身及其 31 个消费者 —— '
+      + '把工作台文档内容迁到内核 `Document` 需要"旧文档 → 内核场景"装配，'
+      + '而该装配未交付（#261 实测：内核 `Document` 只承载 block/annotation/camera/mesh，'
+      + '不承载 `frames`/`cellGrid`/`textureBlobs`/`materialPalette`/`multiblock`/`meta`）。'
+      + '故本条保持 `pending`，不伪造"已迁移"；#282 交付该装配后本条随其删除 → P11 终局零引用审计',
     areaOverrideReason: 'R-WK-03：本条的渲染侧读面（`getDoc`/`getCurrentFrameIndex` 消费者）归 P5，但删除前置条件是"内核接线进生产"（#261）；接缝 B 另需先由 P9/#261 补齐相机与 embed 初始视图读面，否则迁移消费者只能伪造不存在的查询（=#1 负对照要判红的形态）',
   }),
 ])

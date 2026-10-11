@@ -76,10 +76,10 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     oldTrack:
       '实时工作台的面板写路径仍落在**旧运行时文档**上：`editors/workbench-rna.ts` 的 `submitPropertyWrite`/`documentStateOf` 经 `ctx.getDoc()` 读文档，而 `runtime/context.ts` 的 `getDoc()` 类型是旧 `RuntimeDocument`（`getDoc(): Ref<RuntimeDocument | null>`），再包成 `DocumentState` 传给 `applySetProperty`。机制已是同一套（同一个 RNA 表与同一个原子写路由），但**数据模型**仍是旧的 `RuntimeDocument` 而非内核的 `Scene`/`Document`。',
     blocker:
-      '把实时工作台从 `RuntimeDocument` 迁到内核 `Document`/`ApplicationState` 属**工作区/Area 装配**面（`boundary-rules.mjs` 的 `RETIREMENT_OWNERS["runtime-document-triple-duty"]` 归口 P4/P9；面积/外壳归 P6），不在 #253 的退出边界内（#253 退出边界：不做 Area/外壳）。',
-    owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
+      '**R-WK-04（#250，2026-10-11）**：把实时工作台从 `RuntimeDocument` 迁到内核 `Document` 需要"旧文档 → 内核场景"装配 —— #261 实测内核 `Document` 只承载 block/annotation/camera/mesh，不承载 `frames`/`cellGrid`/`textureBlobs`/`materialPalette`/`multiblock`/`meta`，而渲染链（21 个 `render/` 文件）按后者工作；全树没有任何生产代码从旧场景文件构造内核 `Scene`。故该装配是**架构新增**而非集成收口，归 **#282（P10b）**。#261 已完成的是宿主驱动接线与 `ReadView` 读面补齐（相机组 + 播放读面），见 `runtime/kernelSession`。',
+    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
     exitCondition:
-      '`src/runtime/context.ts` 的 `getDoc()` 不再返回 `RuntimeDocument`（类型改为内核 `Document`），且 `src/editors/workbench-rna.ts` 的 `documentStateOf` 直接由内核 `Document` 构造 `DocumentState`（不再有 `RuntimeDocument`）。届时删除本条登记。',
+      '`src/runtime/context.ts` 的 `getDoc()` 不再返回 `RuntimeDocument`（类型改为内核 `Document`），且 `src/editors/workbench-rna.ts` 的 `documentStateOf` 直接由内核 `Document` 构造 `DocumentState`（不再有 `RuntimeDocument`）。届时删除本条登记。**执行批次：#282（R-WK-04）**。',
   }),
   /**
    * P9（#260）登记：**固定快照导出已交付，旧导出器仍在服役**。
@@ -109,10 +109,10 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     oldTrack:
       '旧导出器仍在生产路径上：`workbench/exportIsometricImage.ts` 与 `workbench/export/bundleMeshAssembly.ts` 从**正在操作的视口**取景（必要时临时改机位再恢复），命令入口在 `operators/builtin/exportOperators.ts`，面板在 `workbench/components/ExportWorkspace.vue`；A29 负对照「导出借用并旋转实时相机」描述的正是这条轨道。',
     blocker:
-      '内核→生产接线（宿主创建 Editor、按帧注入时间输入、渲染消费求值结果）是 #261 的核心内容（R-WK-03），而旧导出器的**消费者**（导出命令与面板）位于生产旧路径上。接线完成前删除旧导出器 = 能力停摆且无替代。',
-    owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
+      '**R-WK-04（#250，2026-10-11）**：旧导出器的消费者经 `ctx.getDoc().value?.serialize()` 读**旧文档内容**（`operators/builtin/exportOperators.ts` 四个命令全部如此）⇒ 删除它需要"旧文档 → 内核场景"装配，而该装配未交付（#261 实测：内核 `Document` 只承载 block/annotation/camera/mesh，不承载 `frames`/`cellGrid`/`textureBlobs`/`materialPalette`/`meta`）。#261 已完成的接线是**时间/播放/帧下标面**（`runtime/kernelSession` + `composition/kernelRuntime`），不含文档内容面。故本条归 **#282（P10b）**。',
+    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
     exitCondition:
-      '`src/workbench/export/bundleMeshAssembly.ts` 与 `src/workbench/exportIsometricImage.ts` 被删除，且 `src/operators/builtin/exportOperators.ts` 的导出命令改由 `src/runtime/exportJob.ts` 的 `ExportJob` 承担（不再从实时视口取景）。届时删除本条登记。',
+      '`src/workbench/export/bundleMeshAssembly.ts` 与 `src/workbench/exportIsometricImage.ts` 被删除，且 `src/operators/builtin/exportOperators.ts` 的导出命令改由 `src/runtime/exportJob.ts` 的 `ExportJob` 承担（不再从实时视口取景）。届时删除本条登记。**执行批次：#282（R-WK-04）**。',
   }),
   /**
    * P9（#260）登记：**导出资源清单的产出方式**尚未接线。
@@ -142,10 +142,10 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     oldTrack:
       '旧导出器（`workbench/export/bundleMeshAssembly.ts`）在烘焙时直接从旧文档与纹理库取资源：没有"必需/可选"的声明，也没有内容版本参与的就绪判定，故"缺资源"表现为烘焙结果里少一块而不是预检失败。',
     blocker:
-      '"文档场景 → 呈现图元（`EvaluatedPrimitive[]`）"的装配属 P10/#261 的集成闭环内容（内核尚未接线进生产，R-WK-03）；P9 交付的是**清单的形状、规范化与预检判据**，不是图元装配。',
-    owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
+      '**R-WK-04（#250）**：`deriveAssetNeeds()` 需要"文档场景 → 呈现图元（`EvaluatedPrimitive[]`）"的装配，而这属**文档内容面** —— 与 `raw-authority-object` 同一前置（内核 `Document` 不承载旧文档内容）。#261 已完成宿主驱动接线与时间/播放面，但图元装配未交付。故本条归 **#282（P10b）**。',
+    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
     exitCondition:
-      '`src/application/exportPlan.ts` 的 `deriveAssetNeeds()` 由已装配的图元来源产出非空清单（不再在未装配时返回空），且 `src/runtime/exportJob.ts` 的作业按该清单解析资源。届时删除本条登记。',
+      '`src/application/exportPlan.ts` 的 `deriveAssetNeeds()` 由已装配的图元来源产出非空清单（不再在未装配时返回空），且 `src/runtime/exportJob.ts` 的作业按该清单解析资源。届时删除本条登记。**执行批次：#282（R-WK-04）**。',
   }),
   /**
    * P6（#257）登记：**每视口通道暂存**（B5 #4 的消费者面）。
@@ -175,10 +175,10 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     oldTrack:
       '`shared/viewport/useMultiblockChannels.ts` 的**每视口暂存副本**：每个视口自持 `state`（总 Tier / 通道取值 / 运行态）、`revision` 计数与 `bindMultiblockMeshSync()` 的手工链式刷新。这正是 B5 矩阵 #4「每视口独立暂存、重复选择副本」与「手动链式刷新」两条 slug 的共同消费者面 —— 于是"同上下文所有 Area 可见的有效读面"并不存在（每个视口只能读到自己那份）。',
     blocker:
-      '**内核尚未接线生产**（R-WK-03）：#261（P10 集成闭环）需先完成宿主驱动接线，把 `EditorClient`/求值面/时间推进接进生产入口，随后消费者迁移与字段删除才有语义。实测（模块图级，非目视）：`new Editor(` 在生产代码零构造、`runtime/evaluation.ts` 零导入者、`advanceContextTime` 零生产调用方。此状态下来替换只能是半成品（读面静止）或把旧实现搬进新层（#171 禁止）。',
-    owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
+      '**R-WK-04（#250）**：`EditContext` 侧的通道取值读面（`channelValues`/`withChannelValue`）与纯装配（`domain/multiblock`）**已在 P4/P10 交付**，本批（#261）也完成了宿主驱动接线；但"删掉每视口暂存副本、渲染改吃装配结果"需要**文档内容面**（视口渲染文档 = 内核场景的派生），而该装配未交付（内核 `Document` 不承载 `frames`/`cellGrid`/`multiblock`）。故本条归 **#282（P10b）**。',
+    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
     exitCondition:
-      '删除 `src/shared/viewport/useMultiblockChannels.ts`（其每视口 `state`/`revision`/`bindMultiblockMeshSync` 一并消失），通道取值改经 `EditContext.channelValues`、装配经 `application/evaluation.ts` 的纯求值；届时删除本条登记。',
+      '删除 `src/shared/viewport/useMultiblockChannels.ts`（其每视口 `state`/`revision`/`bindMultiblockMeshSync` 一并消失），通道取值改经 `EditContext.channelValues`、装配经 `application/evaluation.ts` 的纯求值；届时删除本条登记。**执行批次：#282（R-WK-04）**。',
   }),
   /**
    * P7（#258）登记：**草稿权威已收敛到输入层，但 P2 的会话镜像仍在**。
@@ -218,10 +218,10 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     oldTrack:
       '`PanelSession.drafts`（`editors/workbench-rna.ts` 的 `buildField` 读它产生 `FieldViewModel.draft`/`draftState`，`editors/property-controls.ts` 的 `parseDraft` 做第二次解析）。**现状**：仅作呈现镜像，不再决定提交时机、不再是提示来源。',
     blocker:
-      '让 `FieldViewModel` 直接以输入层投影为草稿来源，需要呈现层的字段模型持有 `InputPort`（或由装配层注入投影函数）。这属 R-WK-03（#250）划定的**内核→生产接线**面：真实文档与 `EditorClient` 尚未接入生产（`new Editor(` 在生产零构造），故字段模型此刻没有"由内核驱动的草稿源"可依赖；先删镜像会得到"字段读不到草稿"的回退。',
-    owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
+      '**R-WK-04（#250）**：让 `FieldViewModel` 以输入层投影为草稿来源，需要"内核驱动文档"这一半 —— 而 #261 交付的是**时间/播放面**（`runtime/kernelSession`），文档内容面未迁移（内核 `Document` 不承载工作台文档内容）。#261 已把**提交时机与判定**单一化（Lead 裁决 B），残留的只是呈现镜像。故本条归 **#282（P10b）**。',
+    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
     exitCondition:
-      '`src/editors/workbench-rna.ts` 的 `buildField` 不再读 `session.drafts`（草稿改由输入层投影提供），且 `src/editors/property-controls.ts` 的 `parseDraft` 不再被呈现路径调用（判定只在 `src/domain/textDraft.ts`）；届时删除本条登记。',
+      '`src/editors/workbench-rna.ts` 的 `buildField` 不再读 `session.drafts`（草稿改由输入层投影提供），且 `src/editors/property-controls.ts` 的 `parseDraft` 不再被呈现路径调用（判定只在 `src/domain/textDraft.ts`）；届时删除本条登记。**执行批次：#282（R-WK-04）**。',
   }),
 ])
 

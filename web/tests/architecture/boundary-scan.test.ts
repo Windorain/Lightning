@@ -346,8 +346,27 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     expect(seams.SEAMS.length, '本批至少登记一条（属性写双轨）').toBeGreaterThan(0)
   })
 
-  it('每条接缝字段完整，且 `owner` 是 P1–P11 内的真实批次', async () => {
+  it('每条接缝字段完整，且 `owner` 是**已登记的真实批次**（P1–P11 或 P10b）', async () => {
     const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    /**
+     * **P10b（#282）**：R-WK-04（#250，2026-10-11）新设的批次。
+     *
+     * ## 为什么它不在 `P_TO_ISSUE_OFFSET` 的算术表里
+     *
+     * `P<N> → #(251+N)` 是 #250 立项时给 **P1–P11** 定的映射。P10b 是本批
+     * （#261）执行中实测发现"文档内容面无法在 P10 内完成"后由 Lead **新设**的
+     * 续接批次（R-WK-04），它的 issue 号不落在那条算术序列上。
+     *
+     * ## 为什么不把它写成 `P10`（那会是一条假绿）
+     *
+     * 若把这几条接缝的 owner 写成 `P10`，本条断言会通过，但登记表就在说
+     * "P10 会做这件事"——而 P10（#261）**已明确不做**（R-WK-04 裁决）。
+     * 那正是本工程反复禁止的"用登记表掩盖实际未交付"。
+     * ⇒ 显式登记 P10b 及其 issue/职责，并让它接受**同一套**一致性检查。
+     */
+    const EXTRA_BATCHES: Readonly<Record<string, { readonly issue: number; readonly duty: string }>> = Object.freeze({
+      P10b: Object.freeze({ issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
+    })
     for (const s of SEAMS) {
       expect(s.id, 'id 必须是非空 kebab-case 稳定标识').toMatch(/^[a-z0-9-]+$/)
       expect(s.files.length, `${s.id} 必须列出涉及文件`).toBeGreaterThan(0)
@@ -355,8 +374,15 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
       expect(s.oldTrack, `${s.id} 缺旧轨描述`).toBeTruthy()
       expect(s.blocker, `${s.id} 缺"为何本批不能退"的具体阻塞`).toBeTruthy()
       expect(s.exitCondition, `${s.id} 缺退出条件`).toBeTruthy()
+      const extra = EXTRA_BATCHES[s.owner.p]
+      if (extra !== undefined) {
+        // 新设批次：P↔issue↔职责名三者仍必须自洽（与 P1–P11 同一口径）
+        expect(s.owner.issue, `${s.id}：${s.owner.p} 必须对应 #${extra.issue}`).toBe(extra.issue)
+        expect(s.owner.duty, `${s.id}：${s.owner.p} 的职责应为「${extra.duty}」`).toBe(extra.duty)
+        continue
+      }
       const p = parsePBatch(s.owner.p)
-      expect(p, `${s.id} 的 owner.p 必须形如 PN`).not.toBeNull()
+      expect(p, `${s.id} 的 owner.p 必须形如 PN（或已登记的续接批次 ${Object.keys(EXTRA_BATCHES).join('/')}）`).not.toBeNull()
       expect(p!).toBeGreaterThanOrEqual(1)
       expect(p!).toBeLessThanOrEqual(11)
       // P ↔ issue ↔ 职责名三者一致（与 RETIREMENT_OWNERS 同一套判据）
