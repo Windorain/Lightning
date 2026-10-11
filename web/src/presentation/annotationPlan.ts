@@ -150,6 +150,16 @@ export type AnnotationSkipReason =
   | 'incompleteGeometry'
   /** 坐标含非有限分量（几何契约 §1：非有限值不参与几何）。 */
   | 'nonFinite'
+  /**
+   * 该形状的**呈现尺寸**缺失（当前只有 point 的 `size`）。
+   *
+   * ## 为什么它是独立原因（而不是并进 `incompleteGeometry`）
+   *
+   * 两者的处置不同：`incompleteGeometry` 是"该形状**画不出来**"（缺 min/max ⇒ 没有盒），
+   * 而本项是"形状齐了、**尺寸没给**"。把它并进去会让诊断说不出"缺的是尺寸"
+   * —— 而本项的存在理由正是**精确**：见下方 `point` 分支的说明（#289 P10d D3b 裁决 D4-a）。
+   */
+  | 'missingSize'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 呈现缺省（政策，不是文档内容）
@@ -179,7 +189,13 @@ export const DEFAULT_BOX_FRAME_THICKNESS = 0.04
  * 加字段不需要 #250 契约流程 —— `annotationPlan` 是本批（#289）自己的交付物。
  */
 export const DEFAULT_BOX_WIREFRAME_THICKNESS = 0.02
-export const DEFAULT_POINT_SIZE = 0.3
+// ⚠️ 这里**曾**有 `DEFAULT_POINT_SIZE = 0.3`，本批（#289 D3b 裁决 D4-a）**删除**。
+//
+// 删除理由不是"没人用了"，而是**留着它会邀请错误的默认行为回来**：
+// legacy 的 `_buildPoint` 对 `size` **没有兜底**（`annotationMeshProvider:195`
+// 直接 `a.size * 0.1`），故缺 `size` ⇒ NaN 几何 ⇒ 屏幕上无输出；而 0.3 会画出
+// 一个可见的点。法是"跳过 + 诊断"（见 `compileAnnotations` 的 point 分支）。
+// 保留一个用不到的常量，下一个人会以为"缺省就该是 0.3"。
 export const DEFAULT_LINE_THICKNESS = 0.05
 export const DEFAULT_TEXT_FONT_SIZE = 14
 /**
@@ -285,13 +301,46 @@ export function compileAnnotations(inputs: readonly AnnotationInput[]): Annotati
         skipped.push({ objectId: a.objectId, reason: 'nonFinite', detail: 'point 的 pos 含非有限分量' })
         continue
       }
+      // ## 缺 `size` ⇒ **跳过 + 结构化诊断**（#289 P10d D3b 裁决 D4-a）
+      //
+      // ### 为什么不是"给个默认值"
+      //
+      // legacy 的 `_buildPoint`（`annotationMeshProvider:195`）**没有兜底**：
+      // 它直接取 `a.size * 0.1`。故 `size` 缺失时渲染出的是 **`NaN` 几何**
+      // —— 在屏幕上等于**什么都没画**。
+      //
+      // 第一版这里回落到 `DEFAULT_POINT_SIZE = 0.3`，那会让它**画出一个可见的点**。
+      // 两种行为在屏幕上不同（无输出 vs 有点），故"给默认值"是**偷渡视觉变更**，
+      // 而"有没有东西"比样式差异更重（不能夹在架构迁移里）。
+      //
+      // ### 为什么也不是"把 legacy 的 NaN 照搬"
+      //
+      // 照搬会把缺陷**固化成判据**，且向 `Float32Array` 写 `NaN` 是隐雷
+      // （NaN 会污染下游的包围盒/拾取计算，表现为"某处莫名不工作"）。
+      //
+      // ### 取第三条：**都不画，但把原因说出来**
+      //
+      // 跳过 ⇒ 屏幕结果与 legacy **逐像素一致**（都是无输出）；
+      // 结构化诊断 ⇒ 缺陷**可见**（不静默）。判据因此是精确的
+      // （"缺 size ⇒ 无输出 + 诊断在位"），不是"例外清单"。
+      //
+      // 将来若有人想给 point 补默认值，那是**独立的视觉政策裁决**，不在本批范围。
+      const size = g.size
+      if (typeof size !== 'number' || !Number.isFinite(size)) {
+        skipped.push({
+          objectId: a.objectId,
+          reason: 'missingSize',
+          detail: 'point 缺 `size`（或非有限）⇒ 不产出图元；legacy 同输入渲染 NaN 几何（屏幕上亦无输出）',
+        })
+        continue
+      }
       primitives.push(
         Object.freeze({
           kind: 'point' as const,
           objectId: a.objectId,
           pos: Object.freeze(pos) as readonly [number, number, number],
           icon: g.icon ?? 'diamond',
-          size: typeof g.size === 'number' && Number.isFinite(g.size) ? g.size : DEFAULT_POINT_SIZE,
+          size,
           color,
           opacity,
           overlay,

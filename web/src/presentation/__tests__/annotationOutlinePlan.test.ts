@@ -20,7 +20,6 @@ import { describe, expect, it } from 'vitest'
 import {
   ANNOTATION_OVERLAY_RENDER_ORDER,
   DEFAULT_BOX_FILL_OPACITY,
-  DEFAULT_POINT_SIZE,
   compileAnnotations,
   partitionAnnotationPrimitives,
   type AnnotationInput,
@@ -93,13 +92,27 @@ describe('注解编译：按形状读它该读的字段', () => {
     expect(out.skipped[0]!.detail).toContain('max')
   })
 
-  it('point：读 `icon`/`size`，未声明时用呈现缺省', () => {
+  it('point：读 `icon`/`size`；**缺 `size` ⇒ 跳过 + 诊断**（D4-a 裁决）', () => {
+    // ⚠️ 本条原先断言"未声明时用呈现缺省 `DEFAULT_POINT_SIZE`"。那**已被裁决推翻**：
+    // legacy 的 `_buildPoint` 没有兜底（`annotationMeshProvider:195` 直接 `a.size * 0.1`），
+    // 故缺 `size` 时它渲染 NaN 几何 —— 屏幕上**无输出**。回落成 0.3 会画出一个可见的点，
+    // 那是**偷渡视觉变更**（"有没有东西"比样式差异更重）。
+    // ⇒ 取"跳过 + 结构化诊断"：屏幕结果与 legacy 逐像素一致（都无输出），且缺陷可见。
     const out = compileAnnotations([anno({ objectId: 'p', shape: 'point', geometry: { pos: { x: 1, y: 2, z: 3 } } })])
+    expect(out.primitives, '缺 size ⇒ 不产出图元（与 legacy 的 NaN 无绘制一致）').toEqual([])
+    expect(out.skipped[0]!.reason, '但必须**显式**报出，不静默').toBe('missingSize')
+    expect(out.skipped[0]!.detail, '诊断要说清"缺的是尺寸"').toContain('size')
+  })
+
+  it('point：**有** `size` ⇒ 原样使用（不覆盖调用方给的数）', () => {
+    const out = compileAnnotations([
+      anno({ objectId: 'p', shape: 'point', geometry: { pos: { x: 1, y: 2, z: 3 }, size: 0.75 } }),
+    ])
     const p = out.primitives[0]!
     if (p.kind !== 'point') throw new Error('narrow')
     expect(p.pos).toEqual([1, 2, 3])
-    expect(p.icon).toBe('diamond')
-    expect(p.size).toBe(DEFAULT_POINT_SIZE)
+    expect(p.icon, '未声明 icon 时仍用缺省（icon 有 legacy 兜底）').toBe('diamond')
+    expect(p.size, '显式 size 必须原样保留').toBe(0.75)
   })
 
   it('line：**一个点不算线** ⇒ `incompleteGeometry`（退化的线是缺陷，不是空线）', () => {
