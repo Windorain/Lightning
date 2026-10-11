@@ -640,6 +640,7 @@ export function gridPayload(
   readonly cells: Readonly<Record<string, string>>
   readonly geometry: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry: Readonly<Record<string, string>>
+  readonly cellPalette: Readonly<Record<string, string>>
   readonly palette: readonly BlockPaletteEntry[]
   readonly cellContent: CellContentTable
   readonly assembled: AssembledPalette
@@ -661,6 +662,7 @@ export function gridPayload(
     cells: Object.freeze(cells),
     geometry: assembled.assets,
     cellGeometry: assembled.cellGeometry,
+    cellPalette: assembled.cellPalette,
     palette: assembled.palette,
     cellContent: normalizeCellContent(content),
     assembled,
@@ -759,6 +761,7 @@ function blockGridPayload(payload: {
   readonly cells: Readonly<Record<string, string>>
   readonly geometry: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry: Readonly<Record<string, string>>
+  readonly cellPalette: Readonly<Record<string, string>>
   readonly palette: readonly BlockPaletteEntry[]
   readonly cellContent: CellContentTable
 }): ObjectDataPayload {
@@ -768,12 +771,17 @@ function blockGridPayload(payload: {
     cellContent?: CellContentTable
     geometry?: Readonly<Record<string, BlockGeometryAsset>>
     cellGeometry?: Readonly<Record<string, string>>
+    cellPalette?: Readonly<Record<string, string>>
     palette?: readonly BlockPaletteEntry[]
   } = { kind: 'blockGrid', cells: payload.cells }
   if (Object.keys(payload.cellContent).length > 0) out.cellContent = payload.cellContent
   if (Object.keys(payload.geometry).length > 0) out.geometry = payload.geometry
   if (Object.keys(payload.cellGeometry).length > 0) out.cellGeometry = payload.cellGeometry
-  if (payload.palette.length > 0) out.palette = Object.freeze([...payload.palette].sort((a, b) => a.assetId.localeCompare(b.assetId) || a.registryId.localeCompare(b.registryId) || a.meta - b.meta))
+  if (Object.keys(payload.cellPalette).length > 0) out.cellPalette = payload.cellPalette
+  // 调色板**不排序**：它的顺序是**文件的下标分区**（渲染侧同调色板剔除按条目判），
+  // 排序会让"哪个格子用哪个条目"的对应关系失效。去重与顺序都由
+  // `kernelPaletteAssembly` 按源顺序给出。
+  if (payload.palette.length > 0) out.palette = payload.palette
   return Object.freeze(out)
 }
 

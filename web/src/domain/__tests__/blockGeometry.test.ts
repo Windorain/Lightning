@@ -27,6 +27,7 @@ import {
   blockGeometryId,
   decodeBlockGeometry,
   encodeBlockGeometry,
+  blockPaletteEntryKey,
   normalizePalette,
   paletteSharingStats,
   type BlockPaletteEntry,
@@ -294,6 +295,25 @@ describe('调色板：按内容去重、跨条目共享几何', () => {
     const b = entry('minecraft:stone', 0, [quad(0), quad(0)])
     const out = normalizePalette([a, b])
     expect(out.length, '几何不同必须保留两条（否则渲染结果回退）').toBe(2)
+  })
+
+  it('**负对照**：同几何但条目内容不同（`nbt` 位置特异）⇒ **不合并**', () => {
+    // 本批实测（真实信封夹具）：4 组"几何相同但条目不同"的条目（idx 5/6/7/8 等），
+    // 差异在**位置特异**的 `nbt`（真实导出把 x/y/z 写进 nbt）。
+    // 第一版只按 `(registryId, meta, assetId)` 去重 ⇒ 68 塌成 61 ⇒ 渲染三角形
+    // 4882 → 4862（渲染侧同调色板剔除按**条目**判，见 `blockPaletteEntryKey` 的注释）。
+    const a = entry('minecraft:stone', 0, [quad(0)], { nbt: Object.freeze({ x: 1, y: 2, z: 3 }) })
+    const b = entry('minecraft:stone', 0, [quad(0)], { nbt: Object.freeze({ x: 4, y: 5, z: 6 }) })
+    expect(a.assetId, '前提：两条几何相同（assetId 相等）').toBe(b.assetId)
+    expect(blockPaletteEntryKey(a), '内容键必须区分它们').not.toBe(blockPaletteEntryKey(b))
+    expect(normalizePalette([a, b]).length, '条目内容不同必须保留两条').toBe(2)
+  })
+
+  it('`occludesAdjacentFaces` 进内容键（它改变邻面剔除，故是**内容**）', () => {
+    const a = entry('minecraft:stone', 0, [quad(0)], { occludesAdjacentFaces: true })
+    const b = entry('minecraft:stone', 0, [quad(0)], { occludesAdjacentFaces: false })
+    expect(blockPaletteEntryKey(a)).not.toBe(blockPaletteEntryKey(b))
+    expect(normalizePalette([a, b]).length).toBe(2)
   })
 
   it('`assetId` 相同 ⇒ 两条目指向**同一份**几何对象（真共享，不是深拷贝巧合）', () => {

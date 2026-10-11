@@ -49,7 +49,7 @@ import { structureRowToWorldY } from '@/pure/vec'
 import { AIR_PALETTE_INDEX } from '@/context/runtimeDocument'
 import { PARTS_GRID_NONE, partListSignature } from '@/pure/partTypes'
 import type { DocumentContent } from '@/domain/content'
-import { encodeBlockGeometry, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
+import { blockPaletteEntryKey, encodeBlockGeometry, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
 import type { CellContentTable } from '@/domain/cellContent'
 import { findObject, findObjectData, objectsInOrder, type Scene, type SceneObject } from '@/domain/scene'
 
@@ -125,6 +125,13 @@ export interface GridProjectionInput {
   readonly geometry?: Readonly<Record<string, BlockGeometryAsset>>
   /** 逐格 → `assetId`；缺省 = 该网格无几何资产。 */
   readonly cellGeometry?: Readonly<Record<string, string>>
+  /**
+   * 逐格 → **调色板条目内容键**（`blockPaletteEntryKey`）；缺省 = 无该信息。
+   *
+   * 有它 ⇒ 调色板按"逐格实际用到的条目"**精确重建**（下标分区与源一致）；
+   * 无它 ⇒ 回落到按 `(名称尾段, meta, assetId)` 匹配的**显式降级**。
+   */
+  readonly cellPalette?: Readonly<Record<string, string>>
   /** 类型化调色板条目（含呈现提示）；缺省 = 无（几何由生产按身份现算）。 */
   readonly palette?: readonly BlockPaletteEntry[]
   /** 逐格内容（部件 / 逐格说明）；缺省 = 无。 */
@@ -176,6 +183,7 @@ export function projectGridCells(input: GridProjectionInput): ProjectedGrid {
   const assets = input.geometry ?? {}
   const typedPalette = input.palette ?? []
   const cellContent = input.cellContent ?? {}
+  const cellPalette = input.cellPalette ?? {}
 
   // 先解析全部单元，求包围盒（尺寸由内容决定，不由调用方声明 —— 与"形态由内容决定"同一纪律）。
   const parsed: { x: number; y: number; z: number; name: string; meta: number; key: string }[] = []
@@ -206,26 +214,56 @@ export function projectGridCells(input: GridProjectionInput): ProjectedGrid {
 
   /** 类型化条目按 `(registryId, meta, assetId)` 索引（几何内容进身份，见上）。 */
   const typedByKey = new Map<string, BlockPaletteEntry>()
-  for (const e of typedPalette) typedByKey.set(`${e.registryId}\u0000${e.meta}\u0000${e.assetId}`, e)
-  /** 类型化条目按 `(registryId, meta)` 索引 —— 用于**几何未知**时的呈现提示回落。 */
+  /** 类型化条目按 **`assetId`** 索引 —— **主**查找键（见 {@link paletteEntryFor} 的说明）。 */
+  const typedByAsset = new Map<string, BlockPaletteEntry>()
+  /** 类型化条目按 `(name 尾段, meta)` 索引（旧 GF-7 编码丢命名空间时的兜底，见下）。 */
   const typedByNameMeta = new Map<string, BlockPaletteEntry>()
+  /**
+   * 类型化条目按**内容键**索引（`blockPaletteEntryKey`）。
+   *
+   * 这是**精确**查找：`cellPalette` 给的就是内容键，故投影侧不需要任何猜测。
+   * 它也是"文件的分区块状态槽"能逐格复现的唯一通路（见
+   * `domain/scene#ObjectDataPayload.cellPalette` 的字段注释）。
+   */
+  const typedByEntryKey = new Map<string, BlockPaletteEntry>()
   for (const e of typedPalette) {
-    const k = `${e.registryId}\u0000${e.meta}`
+    typedByKey.set(`${e.registryId}\u0000${e.meta}\u0000${e.assetId}`, e)
+    if (!typedByEntryKey.has(blockPaletteEntryKey(e))) typedByEntryKey.set(blockPaletteEntryKey(e), e)
+    if (e.assetId !== '' && !typedByAsset.has(e.assetId)) typedByAsset.set(e.assetId, e)
+    // GF-7 的单元值编码是 `minecraft:<name>:<meta>`，而 `<name>` 是**截去命名空间**的
+    // （`blockCellValue` 用 `registryId` 首个冒号之后的部分，与生产
+    // `BlockRef.block_state_id` 同口径）。故反向查找必须按"尾段 + meta"匹配，
+    // 否则 `appliedenergistics2:tile.BlockCableBus` 永远命中不到。
+    const colon = e.registryId.indexOf(':')
+    const tail = colon >= 0 ? e.registryId.slice(colon + 1) : e.registryId
+    const k = `${tail}\u0000${e.meta}`
     if (!typedByNameMeta.has(k)) typedByNameMeta.set(k, e)
   }
 
   // 调色板：按首次出现顺序编号（下标 0 保留给 air）—— 稳定且可复现。
+  //
+  // ## 下标分区必须与**源**一致（本批实测抓出的真实回退）
+  //
+  // 见 `domain/blockGeometry#blockPaletteEntryKey` 的注释：渲染侧的同调色板邻面剔除
+  // 按 **palette 下标**判「是不是同一方块类型」。故"把本该分开的条目合并"
+  // 会改变剔除结果（实测 4882 → 4862）。
+  // ⇒ 去重键优先用 `cellPalette` 给出的**条目内容键**（精确、无猜测）。
   const blockPalette: Record<string, unknown>[] = [airPaletteEntry()]
   const indexOfCell = new Map<string, number>()
   const indexOf = (name: string, meta: number, cellKey: string): number => {
-    const registryId = `minecraft:${name}`
+    const entryKey = cellPalette[cellKey]
     const assetId = cellGeometry[cellKey] ?? ''
-    const dedupeKey = `${registryId}\u0000${meta}\u0000${assetId}`
+    const dedupeKey =
+      entryKey !== undefined && entryKey !== '' ? `k:${entryKey}` : `f:minecraft:${name}\u0000${meta}\u0000${assetId}`
     const hit = indexOfCell.get(dedupeKey)
     if (hit !== undefined) return hit
     const idx = blockPalette.length
     indexOfCell.set(dedupeKey, idx)
-    blockPalette.push(paletteEntryFor(registryId, meta, assetId, assets, typedByKey, typedByNameMeta))
+    const typed =
+      entryKey !== undefined && entryKey !== '' ? typedByEntryKey.get(entryKey) ?? null : null
+    blockPalette.push(
+      paletteEntryFor(`minecraft:${name}`, meta, assetId, assets, typedByKey, typedByAsset, typedByNameMeta, typed),
+    )
     return idx
   }
 
@@ -314,11 +352,25 @@ function paletteEntryFor(
   assetId: string,
   assets: Readonly<Record<string, BlockGeometryAsset>>,
   typedByKey: ReadonlyMap<string, BlockPaletteEntry>,
+  typedByAsset: ReadonlyMap<string, BlockPaletteEntry>,
   typedByNameMeta: ReadonlyMap<string, BlockPaletteEntry>,
+  typedExact?: BlockPaletteEntry | null,
 ): Record<string, unknown> {
+  const tail = registryId.indexOf(':') >= 0 ? registryId.slice(registryId.indexOf(':') + 1) : registryId
+  // 查找顺序是判据的一部分（本批实测抓出过两处真实丢失）：
+  //  ⓪ **内容键精确命中**（`cellPalette` 给出时）：投影侧不做任何猜测。
+  //  ① `assetId`（**主**回落键）：几何身份是内容派生的，故它唯一确定"哪一条类型化条目"。
+  //     用它是**必须**的 —— GF-7 的单元值编码 `minecraft:<name>:<meta>` 会**丢掉命名空间**
+  //     （`appliedenergistics2:tile.BlockCableBus` → `minecraft:tile.BlockCableBus`），
+  //     故按 `registryId` 精确匹配永远命中不到（实测：`occludesAdjacentFaces` 11 → 0）。
+  //  ② 精确三元组：`assetId` 为空（无几何条目）时回落。
+  //  ③ `(name 尾段, meta)`：最后的兜底（同一几何内容在多条同名条目间共享时用）。
   const typed =
+    typedExact ??
+    (assetId === '' ? undefined : typedByAsset.get(assetId)) ??
     typedByKey.get(`${registryId}\u0000${meta}\u0000${assetId}`) ??
-    typedByNameMeta.get(`${registryId}\u0000${meta}`) ??
+    typedByKey.get(`minecraft:${tail}\u0000${meta}\u0000${assetId}`) ??
+    typedByNameMeta.get(`${tail}\u0000${meta}`) ??
     null
   const out: Record<string, unknown> = {
     registryId,
@@ -574,7 +626,8 @@ export function projectMultiblockBody(declaration: KernelDeclarationProjection):
       e.assetId,
       declaration.assets,
       new Map([[`${e.registryId}\u0000${e.meta}\u0000${e.assetId}`, e]]),
-      new Map([[`${e.registryId}\u0000${e.meta}`, e]]),
+      new Map(e.assetId === '' ? [] : [[e.assetId, e]]),
+      new Map([[`${e.registryId.slice(e.registryId.indexOf(':') + 1)}\u0000${e.meta}`, e]]),
     ),
   )
   // **不写 `frames`** —— 见 {@link mergeDeclarationFrames} 的说明：
@@ -629,6 +682,7 @@ function gridProjectionInputOf(payload: {
   readonly cells: Readonly<Record<string, string>>
   readonly geometry?: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry?: Readonly<Record<string, string>>
+  readonly cellPalette?: Readonly<Record<string, string>>
   readonly palette?: readonly BlockPaletteEntry[]
   readonly cellContent?: CellContentTable
 }): GridProjectionInput {
@@ -636,11 +690,13 @@ function gridProjectionInputOf(payload: {
     cells: Readonly<Record<string, string>>
     geometry?: Readonly<Record<string, BlockGeometryAsset>>
     cellGeometry?: Readonly<Record<string, string>>
+    cellPalette?: Readonly<Record<string, string>>
     palette?: readonly BlockPaletteEntry[]
     cellContent?: CellContentTable
   } = { cells: payload.cells }
   if (payload.geometry !== undefined) out.geometry = payload.geometry
   if (payload.cellGeometry !== undefined) out.cellGeometry = payload.cellGeometry
+  if (payload.cellPalette !== undefined) out.cellPalette = payload.cellPalette
   if (payload.palette !== undefined) out.palette = payload.palette
   if (payload.cellContent !== undefined) out.cellContent = payload.cellContent
   return out

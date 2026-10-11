@@ -595,9 +595,47 @@ export interface BlockPaletteEntry {
   readonly tooltip?: readonly string[]
 }
 
-/** 由资产身份与方块身份合成调色板条目的**稳定键**（供联合表去重；**不是**身份本身）。 */
-export function blockPaletteEntryKey(entry: Pick<BlockPaletteEntry, 'registryId' | 'meta' | 'assetId'>): string {
-  return `${entry.registryId}\u0000${entry.meta}\u0000${entry.assetId}`
+/**
+ * 调色板条目的**内容键**（去重与逐格引用都用它）。
+ *
+ * ## 为什么必须含**全部**区分字段（本批实测抓出的一处真实回退）
+ *
+ * 第一版只按 `(registryId, meta, assetId)` 去重。实测（真实信封夹具）：
+ * 68 条目塌成 **61**，而**渲染三角形数从 4882 变成 4862**
+ * （`composition/__tests__/renderCutoverParity.test.ts` 的"完整内核链"判红抓出）。
+ *
+ * 成因在渲染侧的**同调色板邻面剔除**（`render/mesh/structureGeometryCore.ts:145`）：
+ * 「两个相邻体素是同一方块类型」的判据是 **palette 下标相等**（`nidx === paletteIndex`）。
+ * ⇒ 文件里"几何相同但条目不同"的格子**不会**互相剔除共面；合并它们就多剔除了 20 个
+ * 四边形（`4862 = 4882 - 20`）。
+ *
+ * 而那些条目为什么不同？实测：它们的 `nbt` 是**位置特异**的
+ * （真实导出把 `x`/`y`/`z` 写进 `nbt`），故逐条目内容各不相同 ——
+ * 即文件的分区判据是**条目全部内容**，不是"方块身份 + 几何"。
+ *
+ * ⇒ 内容键含全部区分字段。这既是最忠实的去重判据（同内容才合并），
+ * 也让"文件的分区"与"内核的去重"成为**同一条**判据（不存在两套规则）。
+ *
+ * `nbt`/`tooltip` 用 `JSON.stringify`：它们是**任意嵌套**的纯数据，且此处只用于
+ * **比较**（不做身份摘要、不进 `digestOf`），故稳定性要求只是"同一对象两次串化相同"。
+ */
+export function blockPaletteEntryKey(
+  entry: Pick<
+    BlockPaletteEntry,
+    'registryId' | 'meta' | 'assetId' | 'renderMode' | 'occludesAdjacentFaces' | 'facing' | 'nbt' | 'thumbnail' | 'tooltip'
+  >,
+): string {
+  return [
+    entry.registryId,
+    entry.meta,
+    entry.assetId,
+    entry.renderMode,
+    entry.occludesAdjacentFaces === true ? '1' : '0',
+    entry.facing ?? '-',
+    entry.nbt === undefined ? '-' : JSON.stringify(entry.nbt),
+    entry.thumbnail ?? '-',
+    entry.tooltip === undefined ? '-' : JSON.stringify(entry.tooltip),
+  ].join('\u0000')
 }
 
 /**

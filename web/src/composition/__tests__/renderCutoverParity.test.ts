@@ -47,7 +47,8 @@ import zlib from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
 import { projectGridCells, projectToRuntimeDocument } from '@/composition/kernelProjection'
-import { createParserRegistry } from '@/context/parserRegistry'
+import { createParserRegistry, type ParserRegistryImpl } from '@/context/parserRegistry'
+import { V2PlainParser, WorldParser, StructureDataParser, createEnvelopeParser } from '@/context/parsers/builtinParsers'
 import { assembleSelection, type MultiblockInnerDocument } from '@/context/multiblock'
 import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
 import { fixturePath, readJson } from '@/context/__tests__/multiblockFixtureIo.mjs'
@@ -59,6 +60,25 @@ import {
   collectStructureGeometryPiecesPure,
   type BakedQuadGeometryPiece,
 } from '@/render/mesh/structureGeometryCore'
+
+/**
+ * **生产解析器注册**（与 `runtime/host/workbenchHost.ts:108-111` 同一份清单与顺序）。
+ *
+ * ## 为什么不能只用 `createParserRegistry()`
+ *
+ * 那个便利函数只预置 `SHAPE_FIRST_PARSERS`（多方块判别器）—— 真正的四类内置 parser
+ * 由**宿主**按历史顺序追加（`parserRegistry.ts` 的文件头逐字说明）。
+ * 而真实信封是 `documentFormat: 'Envelope'`，需要 `createEnvelopeParser(registry)`
+ * 才能解包。⇒ 本函数复刻宿主的注册顺序，使"真实帧为主文档"能走**真实**入口。
+ */
+function productionParserRegistry(): ParserRegistryImpl {
+  const parsers = createParserRegistry()
+  parsers.register(V2PlainParser)
+  parsers.register(createEnvelopeParser(parsers))
+  parsers.register(WorldParser)
+  parsers.register(StructureDataParser)
+  return parsers
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 真实信封夹具（帧为主；`web/e2e/fixtures/`）
@@ -177,7 +197,7 @@ function beforeDefinition(inner: Record<string, unknown>): StructureDefinition {
  */
 async function beforeMultiblockDefinition(name: string): Promise<StructureDefinition> {
   const envelope = readJson(fixturePath(name)) as Record<string, unknown>
-  const parsed = await createParserRegistry().detectAndParse(envelope)
+  const parsed = await productionParserRegistry().detectAndParse(envelope)
   const doc = parsed.document!
   const inner = doc.multiblockSource as MultiblockInnerDocument
   const outcome = assembleSelection(inner, {})
@@ -209,7 +229,7 @@ async function beforeMultiblockDefinition(name: string): Promise<StructureDefini
  */
 async function afterDefinition(name: string): Promise<StructureDefinition> {
   const envelope = readJson(fixturePath(name)) as Record<string, unknown>
-  const parsed = await createParserRegistry().detectAndParse(envelope)
+  const parsed = await productionParserRegistry().detectAndParse(envelope)
   const layers = await readEnvelopeLayers(envelope as never)
   const assembled = unwrap(assembleKernelDocument({ doc: parsed.document!, plainRoot: layers.plain }))
   const mb = assembled.multiblock!
@@ -245,7 +265,7 @@ async function afterDefinition(name: string): Promise<StructureDefinition> {
  */
 async function assertGeometryFromTypedAssets(name: string): Promise<{ entries: number; withGeometry: number }> {
   const envelope = readJson(fixturePath(name)) as Record<string, unknown>
-  const parsed = await createParserRegistry().detectAndParse(envelope)
+  const parsed = await productionParserRegistry().detectAndParse(envelope)
   const layers = await readEnvelopeLayers(envelope as never)
   const assembled = unwrap(assembleKernelDocument({ doc: parsed.document!, plainRoot: layers.plain }))
   const objectId = assembled.frameObjects[0]!
@@ -261,6 +281,7 @@ async function assertGeometryFromTypedAssets(name: string): Promise<{ entries: n
     cells: payload.cells,
     geometry: payload.geometry,
     cellGeometry: payload.cellGeometry,
+    cellPalette: payload.cellPalette,
     palette: payload.palette,
     cellContent: payload.cellContent,
   })
@@ -303,7 +324,42 @@ describe('P10d · 多方块夹具：切换前后逐格/逐三角形一致', () =
 })
 
 describe('P10d · 真实信封（帧为主）：33 个重名条目仍逐位一致', () => {
-  it('原始几何 vs 类型化资产重编码：逐格/逐三角形相同且**三角形数非 0**', async () => {
+  it('**完整内核链**：真实信封经 装配 → 投影 后仍是 4882 三角形且逐位相同', async () => {
+    // 本条是 P10d 的**最强证据**：它不是"只走几何承载那一段"，而是让**真实帧为主文档**
+    // 走完整生产链 —— 文件 → 生产解析器 → `assembleKernelDocument`（内核承载）
+    // → `projectKernelDocument`（从类型化内容重建）→ `resolveRenderBundle` → 几何核心。
+    //
+    // 与 `multiblock-*` 那组的分工：那组的文档形态是"多方块为主"（网格是装配产物）；
+    // 本条的形态是"帧为主"（几何**就在文件里**）—— 即 P10c 实测里
+    // "几何无处可逃"的那种形态（没有内层 body 可回显）。
+    const envelope = JSON.parse(
+      fs.readFileSync(ENVELOPE_FIXTURE, 'utf8').replace(/\r\n/g, '\n'),
+    ) as Record<string, unknown>
+    const parsed = await productionParserRegistry().detectAndParse(envelope)
+    expect(parsed.document, '真实信封应能被生产解析器读入').not.toBeNull()
+    const layers = await readEnvelopeLayers(envelope as never)
+    const assembled = unwrap(assembleKernelDocument({ doc: parsed.document!, plainRoot: layers.plain }))
+    expect(assembled.frameObjects.length, '帧为主文档应装配出帧网格对象').toBeGreaterThan(0)
+
+    // **before**：切换前的渲染输入 = 原始 JSON 定义（几何直接来自文件）。
+    const inner = readEnvelopeInner()
+    const before = beforeDefinition(inner)
+    const fa = fingerprint(before)
+    expect(fa.triangleCount, '真实信封必须有 4882 量级的真实三角形').toBeGreaterThan(4000)
+
+    // **after**：走完整内核链。
+    const { doc } = projectToRuntimeDocument({ scene: assembled.scene, content: assembled.content })
+    const after = beforeDefinition({ ...(doc.serialize() as Record<string, unknown>) })
+    const fb = fingerprint(after)
+    const diff = firstDifference(fa, fb)
+    expect(diff, `真实信封经完整内核链后几何必须逐位相同（首个差异：${diff ?? '无'}）`).toBeNull()
+    console.log(
+      `[P10d] 完整链 structuredata-exported-envelope: palette=${(inner.blockPalette as unknown[]).length} ` +
+        `pieces=${fb.pieceCount} triangles=${fb.triangleCount} diff=${diff ?? 'none'}`,
+    )
+  })
+
+  it('几何承载那一段的隔离证明：原始几何 vs 类型化资产重编码**逐位相同**且三角形数非 0', async () => {
     const inner = readEnvelopeInner()
     const before = beforeDefinition(inner)
 

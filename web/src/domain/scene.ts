@@ -203,6 +203,26 @@ export type ObjectDataPayload =
        */
       readonly cellGeometry?: Readonly<Record<string, string>>
       /**
+       * 逐格 → **调色板条目内容键**（`blockPaletteEntryKey`）。键与 `cells` 同一套。
+       *
+       * ## 为什么它必须存在（哪怕 `cells` 已经写了方块身份）
+       *
+       * `cells` 的值是 GF-7 编码的 `minecraft:<name>:<meta>` —— 它**丢掉了命名空间**
+       * （`appliedenergistics2:tile.BlockCableBus` → `minecraft:tile.BlockCableBus`），
+       * 且**无法区分"同 name:meta 同几何但条目内容不同"的方块**。
+       *
+       * 而后者是**载荷承重**的：渲染侧的同调色板邻面剔除按 **palette 下标**判
+       * 「是不是同一方块类型」（`render/mesh/structureGeometryCore.ts:145`），
+       * 故"合并本该分开的条目"会改变剔除结果（实测：4882 → 4862 三角形）。
+       *
+       * ⇒ 逐格显式携带"用了哪个**条目**"，于是投影侧不需要任何猜测/回落。
+       * 这是**文件的分区块状态槽**这一格式语义的类型化承载 —— 不是"用下标当身份"
+       * （条目身份由**内容键**给出，与下标无关；下标只是投影时的压缩手段）。
+       *
+       * 缺省 = 载荷没有该信息（旧形态），投影侧走名称/几何匹配的**显式降级**。
+       */
+      readonly cellPalette?: Readonly<Record<string, string>>
+      /**
        * 该网格实际使用的**调色板条目**（按内容去重后的稳定序）。
        *
        * 与 `geometry` 的分工：目录回答"资产长什么样"，本字段回答"这份网格引用了

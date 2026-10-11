@@ -44,7 +44,7 @@
  * 它只做映射：不决定"要不要重建"、不持有状态、不做 IO。
  */
 
-import { decodeBlockGeometry, blockGeometryAsset, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
+import { blockPaletteEntryKey, decodeBlockGeometry, blockGeometryAsset, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
 import { cellContent, type CellContent, type PartRecord } from '@/domain/cellContent'
 import { cellPositionKey } from '@/domain/cellPosition'
 import type { Grid, PaletteEntryMeta } from '@/context/grid'
@@ -54,6 +54,15 @@ import type { AssemblyDiagnostic } from './kernelAssembly'
 export interface AssembledPalette {
   /** 逐格 → `assetId`（键与方块单元同一套；**只含**真的是烘焙几何的格）。 */
   readonly cellGeometry: Readonly<Record<string, string>>
+  /**
+   * 逐格 → **调色板条目内容键**（`blockPaletteEntryKey`）。
+   *
+   * 见 `domain/scene#ObjectDataPayload` 的 `cellPalette` 字段注释：文件的
+   * **分区块状态槽**是载荷承重的（渲染侧同调色板剔除按条目判），而 GF-7 的单元值
+   * 编码（`minecraft:<name>:<meta>`）表达不了它（丢命名空间、且同 name:meta 同几何
+   * 但条目不同的方块分不开）。故逐格显式承载。
+   */
+  readonly cellPalette: Readonly<Record<string, string>>
   /** 资产目录（`assetId` → 资产）。多格同 id ⇒ 一份资产（A07 的共享前提）。 */
   readonly assets: Readonly<Record<string, BlockGeometryAsset>>
   /** 该网格引用的调色板条目（按内容去重后的稳定序）。 */
@@ -104,6 +113,7 @@ export function assemblePaletteContent(
   const cache = grid.getPaletteCache()
   const assets: Record<string, BlockGeometryAsset> = {}
   const cellGeometry: Record<string, string> = {}
+  const cellPalette: Record<string, string> = {}
   const content: Record<string, CellContent> = {}
   const diagnostics: AssemblyDiagnostic[] = []
 
@@ -111,6 +121,8 @@ export function assemblePaletteContent(
   const entryByKey = new Map<string, BlockPaletteEntry>()
   /** 调色板下标 → `assetId`（`''` = 无几何）。 */
   const assetIdByIndex = new Map<number, string>()
+  /** 调色板下标 → 该下标对应的**条目内容键**（`''` = 无缓存条目的编辑新增方块）。 */
+  const entryKeyByIndex = new Map<number, string>()
   /** 已被解过码的下标（同一份缓存条目只解一次 —— 多格共享时避免重复解码）。 */
   const decoded = new Set<number>()
   let paletteIndexes = 0
@@ -121,27 +133,34 @@ export function assemblePaletteContent(
   const indexOfBlock = (b: { readonly paletteIndex?: number }): number | undefined =>
     typeof b.paletteIndex === 'number' ? b.paletteIndex : undefined
 
-  /** 取（或建）某调色板下标对应的类型化条目；返回其 `assetId`（`''` = 无几何）。 */
-  const resolveIndex = (index: number, pos: { x: number; y: number; z: number }): string => {
-    const hit = assetIdByIndex.get(index)
-    if (hit !== undefined) return hit
+  /** 取（或建）某调色板下标对应的类型化条目；返回其 `assetId` 与**内容键**。 */
+  const resolveIndex = (index: number, pos: { x: number; y: number; z: number }): { assetId: string; entryKey: string } => {
+    const hit = entryKeyByIndex.get(index)
+    if (hit !== undefined) {
+      return { assetId: assetIdByIndex.get(index) ?? '', entryKey: hit }
+    }
     paletteIndexes += 1
     const meta = cache.get(`#${index}`) as PaletteEntryMeta | undefined
     if (meta === undefined) {
       // 编辑新增的方块无缓存条目（`renderMode: 'BlockModel'`，几何由生产按身份现算）。
       // **显式**登记为无几何条目，不伪造一个空几何。
       assetIdByIndex.set(index, '')
-      return ''
+      entryKeyByIndex.set(index, '')
+      return { assetId: '', entryKey: '' }
     }
     const entry = entryFromLegacy(index, meta, decoded, diagnostics, diag, pos)
-    const key = `${entry.registryId}\u0000${entry.meta}\u0000${entry.assetId}`
+    // 去重键用**条目全部内容**（`blockPaletteEntryKey`）——本批实测：只按
+    // (registryId, meta, assetId) 会合并本该分开的条目，从而改变渲染侧的
+    // 同调色板邻面剔除结果（4882 → 4862 三角形）。见该函数的注释。
+    const key = blockPaletteEntryKey(entry)
     if (!entryByKey.has(key)) entryByKey.set(key, entry)
     if (entry.geometry !== null) {
       withGeometry += 1
       if (!Object.prototype.hasOwnProperty.call(assets, entry.assetId)) assets[entry.assetId] = entry.geometry
     }
     assetIdByIndex.set(index, entry.assetId)
-    return entry.assetId
+    entryKeyByIndex.set(index, key)
+    return { assetId: entry.assetId, entryKey: key }
   }
 
   grid.forEach((pos, block) => {
@@ -149,8 +168,10 @@ export function assemblePaletteContent(
     const cellKey = cellPositionKey(pos)
     const index = indexOfBlock(block)
     if (index !== undefined) {
-      const assetId = resolveIndex(index, pos)
-      if (assetId !== '') cellGeometry[cellKey] = assetId
+      const resolved = resolveIndex(index, pos)
+      if (resolved.assetId !== '') cellGeometry[cellKey] = resolved.assetId
+      // 逐格条目键：**无条件**记录（无几何的条目也要能投影回它的呈现提示）
+      cellPalette[cellKey] = resolved.entryKey
     }
 
     // ── 逐格内容（**部件**）──────────────────────────────────────────────
@@ -177,6 +198,7 @@ export function assemblePaletteContent(
 
   return Object.freeze({
     cellGeometry: Object.freeze(cellGeometry),
+    cellPalette: Object.freeze(cellPalette),
     assets: Object.freeze(assets),
     palette: Object.freeze([...entryByKey.values()]),
     cellContent: Object.freeze(content),
