@@ -40,8 +40,26 @@ import { unwrap } from '@/domain/errors'
 import { partListSignature, PARTS_GRID_NONE } from '@/pure/partTypes'
 import { structureRowToWorldY } from '@/pure/vec'
 import { readJson } from '@/context/__tests__/multiblockFixtureIo.mjs'
+import { createParserRegistry, type ParserRegistryImpl } from '@/context/parserRegistry'
+import { V2PlainParser, WorldParser, StructureDataParser, createEnvelopeParser } from '@/context/parsers/builtinParsers'
+import fs from 'node:fs'
 import path from 'node:path'
 
+/**
+ * **生产解析器注册**（与 `runtime/host/workbenchHost.ts:108-111` 同一份清单与顺序）。
+ *
+ * `createParserRegistry()` 只预置 `SHAPE_FIRST_PARSERS`；四类内置 parser 由**宿主**
+ * 按历史顺序追加。真实信封是 `documentFormat: 'Envelope'`，需要
+ * `createEnvelopeParser(registry)` 才能解包 ⇒ 本函数复刻宿主注册顺序。
+ */
+function productionParserRegistry(): ParserRegistryImpl {
+  const parsers = createParserRegistry()
+  parsers.register(V2PlainParser)
+  parsers.register(createEnvelopeParser(parsers))
+  parsers.register(WorldParser)
+  parsers.register(StructureDataParser)
+  return parsers
+}
 const PARTS_FIXTURES = ['parts-singlebox-mix.v2.json', 'parts-ae2-multibox.v2.json'] as const
 
 /** 读一份 V2Plain 部件夹具（经**生产解析器**，不手工构造 `RuntimeDocument`）。 */
@@ -148,6 +166,37 @@ describe('P10d · 部件：内核承载与投影往返', () => {
 })
 
 describe('P10d · 逐格说明：`-1` 哨兵被吸收进"字段缺席"', () => {
+  it('**真实信封夹具**的 tooltip 池（16 条 / 7×6×19 网格）真的进了内核', async () => {
+    // P10c 实测登记的缺口之一是「tooltip 池（`tooltipPalette`/`cellTooltipGrid`）：
+    // 真实信封 tooltipPalette=16 ⇒ 投影产物**缺失**」。本用例证明它现在**在**内核里。
+    const envelope = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), 'e2e', 'fixtures', 'structuredata-exported-envelope.json'),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+    ) as Record<string, unknown>
+    // 走**生产解析器注册**（与 `runtime/host/workbenchHost.ts` 同一份清单与顺序）。
+    const parsers = productionParserRegistry()
+    const doc = (await parsers.detectAndParse(envelope)).document
+    expect(doc, '真实信封应能被读入').not.toBeNull()
+    expect((doc!.tooltipPalette as unknown[] | undefined)?.length, '真实信封的 tooltipPalette 应为 16 条').toBe(16)
+    expect(doc!.cellTooltipGrid, '真实信封应有逐格说明网格').toBeDefined()
+
+    const assembled = unwrap(assembleKernelDocument({ doc: doc! }))
+    const objectId = assembled.frameObjects[0]!
+    const data = assembled.scene.data[assembled.scene.objects[objectId]!.dataId]!
+    if (data.payload.kind !== 'blockGrid') throw new Error('不是 blockGrid')
+    const content = data.payload.cellContent ?? {}
+    const withTip = Object.keys(content).filter((k) => content[k]!.tooltip !== undefined)
+    expect(withTip.length, '内核逐格内容必须含带说明的格（P10c 实测此处为"缺失"）').toBeGreaterThan(0)
+    // 逐条说明都是**非空字符串**（`-1`/越界已被吸收，不是空串占位）
+    for (const k of withTip) {
+      expect(typeof content[k]!.tooltip, `${k} 的说明必须是字符串`).toBe('string')
+      expect(content[k]!.tooltip, `${k} 的说明不得为空串（空串是"显式空"，与真实文案不同）`).not.toBe('')
+    }
+    console.log(`[P10d] 真实信封 tooltip 池：palette=16 网格 7×6×19 ⇒ 内核带说明的格 ${withTip.length}`)
+  })
+
   it('构造一份带 `cellTooltipGrid` 的文档：经内核往返后逐格文本按**世界坐标**对位', async () => {
     // 用真实信封的 `tooltipPalette` 形态（16 条）合成一份 2×2×1 的最小文档。
     // 目的是让"下标网格 → 世界坐标"这条翻转**可判定**：高度 2 时
