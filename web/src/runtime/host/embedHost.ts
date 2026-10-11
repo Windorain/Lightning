@@ -50,7 +50,6 @@ export function createEmbedHost(
   const main = new Main({
     operators: registry,
     tools: null,
-    rna: null,
   })
 
   if (bootstrap?.structureBase) {

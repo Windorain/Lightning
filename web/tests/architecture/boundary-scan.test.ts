@@ -163,12 +163,57 @@ describe('A01 设施在当前树上的实况（含空洞真的显式披露）', 
     expect([...gateFiles]).toContain('application/diagnostics.ts')
     expect([...gateFiles]).toContain('editors/ContentText.vue')
 
+    // ── 不变量 1b：执行面只由 #249 §4 的目标分层构成 ──
+    // P2（#253）在 P1 的文件级口径上补一条：`gateFiles` 的每一项都必须落在某个
+    // 目标分层的 `src/<层>/` 前缀下。这防的是「执行面里混进一个不属于任何层的路径」
+    // （例如误把 `pure/x.ts` 登记成新实现）——那种项会让闸门在错误的面上判绿。
+    // 注：**不**断言「执行面为空」（那是 P0 的目录快照，已被 P1 的文件级口径取代）；
+    // 空洞真的披露义务由不变量 3 承担。
+    for (const f of gateFiles) {
+      const layer = topLayer(f)
+      expect(LAYERS, `执行面路径 ${f} 必须属于目标分层之一`).toContain(layer)
+    }
+
+    // ── 不变量 2：闸门规则 0 finding（无论执行面是否为空）──
     for (const rule of GATE_RULES) {
       expect(rule.check(productionFacts, ctx), `规则 ${rule.id} 不应有 finding`).toEqual([])
     }
     const astIndex = buildAstIndex(productionFiles)
     expect(GATE_RULES.filter((r) => r.needsAst).flatMap((r) => r.checkWithAst(astIndex, ctx))).toEqual([])
     expect(productionFiles.length).toBeGreaterThan(200)
+
+    // ── 不变量 3：空洞真必须被**如实披露**，不得冒充"边界已生效" ──
+    //
+    // P1 把执行面升级为**文件级**（`gateFiles`）后，「空洞」的含义也随之变化：
+    // 不再是「执行面为空」，而是「**某条规则实际受检的文件数为 0**」。
+    // 与 `scan-boundaries.mjs` 用**同一口径**计算 `evaluatedFiles`
+    // （`ruleCoreNoVueThree`/`ruleCoreNoDomGlobals` 按 `coreFiles` 过滤，
+    // 其余规则按 `isGateFile` 过滤），故这里的结论与扫描器报告逐项一致。
+    const evaluatedFor = (rule: { id: string; layerDependent?: boolean }) => {
+      if (rule.layerDependent !== true) return productionFiles.length
+      return productionFiles.filter((f) => {
+        const rel = path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/')
+        // 纯核心规则（禁 Vue/Three/DOM）以 `coreFiles` 为判定面；其余以 `gateFiles`。
+        const coreOnly = rule.id === 'gate/core-no-vue-three' || rule.id === 'gate/core-no-dom-globals'
+        return coreOnly ? ctx.coreFiles.has(rel) : isGateFile(rel, gateFiles)
+      }).length
+    }
+    for (const rule of GATE_RULES) {
+      const vacuous = rule.layerDependent === true && evaluatedFor(rule) === 0
+      if (vacuous) {
+        // 空洞真只允许出现在「该规则的判定面**真的**没有任何生产文件」时。
+        // 本树非空洞（见下方断言），故此分支是**不可能被走到**的兜底 ——
+        // 一旦某批把执行面登记错了导致某规则变空洞，这里会立刻炸出来。
+        expect(gateFiles.size, `规则 ${rule.id} 空洞 ⇒ 该规则的判定面必须确实为空`).toBe(0)
+      }
+    }
+    // 关键断言（**非空洞**）：本树至少有一条执行面文件被真正受检，
+    // 且 P2 新建的 `application/`、`editors/` 都在执行面内 ——
+    // 于是「闸门全绿」构成"边界已生效"的证据，而不是空洞真。
+    expect(gateFiles.size, '执行面必须非空').toBeGreaterThan(0)
+    expect(evaluatedFor({ id: 'gate/no-barrel-smuggling', layerDependent: true })).toBeGreaterThan(0)
+    expect([...gateFiles]).toContain('application/properties.ts')
+    expect([...gateFiles]).toContain('editors/property-controls.ts')
   })
 
   it('目录名撞车被识别：旧 runtime/ 的未登记文件不得被当成新实现（防假绿）', () => {
@@ -273,6 +318,91 @@ describe('A01 设施在当前树上的实况（含空洞真的显式披露）', 
 describe('A01 目标分层清单与 #249 §4 一致', () => {
   it('LAYERS 覆盖 #249 §4 的全部九个分层', () => {
     expect(LAYERS).toEqual(['domain', 'application', 'runtime', 'presentation', 'editors', 'shells', 'adapters', 'composition', 'entries'])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 暂存双轨登记（#250 GF-5 收敛项 4）：`composition/seams.ts`
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退出条件', () => {
+  it('`composition/seams.ts` 存在且可加载（装配层承载接缝声明）', async () => {
+    const seams = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    expect(Array.isArray(seams.SEAMS), '`SEAMS` 必须是数组').toBe(true)
+    expect(seams.SEAMS.length, '本批至少登记一条（属性写双轨）').toBeGreaterThan(0)
+  })
+
+  it('每条接缝字段完整，且 `owner` 是 P1–P11 内的真实批次', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    for (const s of SEAMS) {
+      expect(s.id, 'id 必须是非空 kebab-case 稳定标识').toMatch(/^[a-z0-9-]+$/)
+      expect(s.files.length, `${s.id} 必须列出涉及文件`).toBeGreaterThan(0)
+      expect(s.newTrack, `${s.id} 缺新轨描述`).toBeTruthy()
+      expect(s.oldTrack, `${s.id} 缺旧轨描述`).toBeTruthy()
+      expect(s.blocker, `${s.id} 缺"为何本批不能退"的具体阻塞`).toBeTruthy()
+      expect(s.exitCondition, `${s.id} 缺退出条件`).toBeTruthy()
+      const p = parsePBatch(s.owner.p)
+      expect(p, `${s.id} 的 owner.p 必须形如 PN`).not.toBeNull()
+      expect(p!).toBeGreaterThanOrEqual(1)
+      expect(p!).toBeLessThanOrEqual(11)
+      // P ↔ issue ↔ 职责名三者一致（与 RETIREMENT_OWNERS 同一套判据）
+      expect(s.owner.issue, `${s.id}：${s.owner.p} 必须对应 #${P_TO_ISSUE_OFFSET + p!}`).toBe(P_TO_ISSUE_OFFSET + p!)
+      expect(s.owner.duty, `${s.id}：${s.owner.p} 的职责应为「${P_DUTIES[s.owner.p]}」`).toBe(P_DUTIES[s.owner.p])
+    }
+  })
+
+  it('退出条件是**可判定的**：不得是"迁移完成后"这类空话（含文件名或可测断言）', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    for (const s of SEAMS) {
+      // 空话清单：这些短语无法核对，出现即判红。
+      for (const vague of ['完成后', '后续处理', '待定', 'TODO', '视情况']) {
+        expect(s.exitCondition, `${s.id} 的退出条件含空话「${vague}」`).not.toContain(vague)
+      }
+      // 必须指名**可核对的对象**：至少一个涉及文件在退出条件里被点名。
+      const named = s.files.some((f: string) => s.exitCondition.includes(f))
+      expect(named, `${s.id} 的退出条件必须点名可核对的产物（文件路径）`).toBe(true)
+    }
+  })
+
+  it('**反空洞真**：登记的旧轨在代码里**确实存在**（否则登记表是空转）', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    const entry = SEAMS.find((s: { id: string }) => s.id === 'kernel-property-write-dual-track')
+    expect(entry, '必须登记属性写双轨').toBeTruthy()
+
+    // 旧轨的**真实证据**：`workbench-rna.ts` 经 `ctx.getDoc()` 读文档，
+    // 而 `getDoc()` 的类型是 `RuntimeDocument`（旧模型）。故要两处一起看：
+    //  ① 面板侧确实经 `getDoc()` 取文档（旧模型的读入口）；
+    const rna = fs.readFileSync(path.join(SRC_ROOT, 'editors', 'workbench-rna.ts'), 'utf8')
+    const codeOnly = rna
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+      .join('\n')
+    expect(codeOnly, '`workbench-rna.ts` 必须仍经 `ctx.getDoc()` 读旧文档').toContain('ctx.getDoc()')
+    //  ② 该入口的类型确实是 `RuntimeDocument`（在 `runtime/context.ts` 声明）。
+    const ctxSrc = fs.readFileSync(path.join(SRC_ROOT, 'runtime', 'context.ts'), 'utf8')
+    expect(ctxSrc, '`getDoc()` 的类型必须仍是旧 `RuntimeDocument`（旧轨的类型面）').toMatch(
+      /getDoc\(\):\s*Ref<RuntimeDocument \| null>/,
+    )
+
+    // 登记项声明的阻塞点也必须真实：内核侧写入口已在（新轨已交付）。
+    expect(
+      fs.existsSync(path.join(SRC_ROOT, 'application', 'kernel-properties.ts')),
+      '新轨（内核属性注册）必须已交付，否则"双轨"说法不成立',
+    ).toBe(true)
+    // 且新轨**真的**被 `reduceSetProperty` 用上（不是"有个文件摆着"）。
+    const commands = fs.readFileSync(path.join(SRC_ROOT, 'application', 'commands.ts'), 'utf8')
+    expect(commands, '新轨必须真实接入命令层').toContain('kernelPropertyRegistry()')
+  })
+
+  it('**负对照**：未登记的接缝判据能抓到"旧轨仍在但没有登记"', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    const claim = (oldTrackPresent: boolean, registered: boolean): boolean =>
+      oldTrackPresent && !registered // 「有旧轨但没登记」= 违规
+    expect(claim(true, false), '有旧轨且未登记 ⇒ 必须判红').toBe(true)
+    expect(claim(true, true), '有旧轨且已登记 ⇒ 不判红').toBe(false)
+    expect(claim(false, false), '无旧轨 ⇒ 不判红').toBe(false)
+    // 现实核对：当下确实是"有旧轨 + 已登记"。
+    expect(SEAMS.some((s: { id: string }) => s.id === 'kernel-property-write-dual-track')).toBe(true)
   })
 })
 

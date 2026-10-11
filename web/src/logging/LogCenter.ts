@@ -10,6 +10,7 @@
 import { ref, shallowRef } from 'vue'
 import type { Context } from '@/runtime/context'
 import { getFrameBlocks } from '@/context/queries'
+import { describeForDiagnostics, rnaCoverage } from '@/editors/workbench-rna'
 
 export const LOG_LEVEL = {
   DEBUG:    1,
@@ -446,13 +447,28 @@ export function installUnifiedLogApi(ctx: Context): void {
     getGizmoPosition: () => logCenter.getGizmoPosition(),
     getCameraState: () => logCenter.getCameraState(),
 
-    // RNA
-    getRNA: (path: string) => {
-      const desc = ctx.getRna().resolve(path)
-      if (!desc) return null
-      return { value: desc.get({}), type: desc.type, label: desc.label }
+    // RNA（#253 P2）
+    //
+    // 旧的这一对是**失真的观测面**（#251 B7 的 E-9）：
+    //  - `getRNA` 调 `desc.get({})` —— 传空对象当 owner，对任何真实属性都取不到值；
+    //  - `listRNA` 调 `registry.list?.()`，而 registry **没有** `list`，故**恒返回 `[]`**。
+    //    自动化验收拿到一个假空集，还以为「没有属性」。
+    //
+    // 新实现直接问 RNA 覆盖度与逐属性诊断面（`describeForDiagnostics`），
+    // 于是「有多少属性、哪些没有布局位置、此刻为何只读」都是**真事实**。
+    getRNA: (propertyId: string) => {
+      const d = describeForDiagnostics(ctx, propertyId)
+      if (!d) return null
+      return {
+        value: d.value,
+        type: d.valueType,
+        label: propertyId,
+        readOnlyReason: d.liveReadOnlyReason,
+        mixed: d.mixed,
+        targets: d.targets,
+      }
     },
-    listRNA: () => (ctx.getRna() as any).list?.() ?? [],
+    listRNA: () => rnaCoverage().map((c) => ({ path: c.propertyId, objectType: c.objectTypeId, inLayout: c.inLayout })),
 
     // Operators
     listOperators: () => ctx.getOperators().all().map((o: any) => ({ id: o.id, label: o.label })),

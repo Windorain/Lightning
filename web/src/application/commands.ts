@@ -72,7 +72,6 @@ import {
   missingTarget,
   ok,
   readOnly,
-  staleReference,
   unsupportedOperation,
   versionConflict,
   type DomainError,
@@ -81,7 +80,6 @@ import {
 import {
   allocateId,
   changeSummary,
-  digestOf,
   entityRef,
   objectRef,
   sameContent,
@@ -91,34 +89,35 @@ import {
   type PropertyRef,
   type Version,
 } from '@/domain/identity'
-import {
-  findObject,
-  findObjectData,
-  sameTransform,
-  type ObjectDataPayload,
-  type Quat,
-  type Scene,
-  type Transform,
-  type Vec3,
-} from '@/domain/scene'
+import { findObject, findObjectData, sameTransform, type Scene, type Transform, type Vec3 } from '@/domain/scene'
 import type { ApplicationState, EffectRequest } from './state'
+import { applySetProperty, type SetPropertyCommand } from './property-commands'
+import { type PropertyValue } from './properties'
+import { kernelAccessOf, kernelPropertyRegistry, kernelWritePorts } from './kernel-properties'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 命令（封闭判别联合 —— 唯一写通路的类型级保证）
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type PropertyValue = number | string | boolean | Vec3 | Quat | null
+/**
+ * 属性值 —— **唯一权威是 `application/properties`**（#250 GF-5 收敛项 1）。
+ *
+ * 本文件曾本地定义 `PropertyValue = number | string | boolean | Vec3 | Quat | null`，
+ * 那是转录期与 P2 并行的产物。收敛后本文件**不再定义**任何属性值类型：
+ * 它只 import RNA 侧的定义，于是「值类型」不可能出现两个不兼容版本
+ * （两个版本会让「同一个值在写路由与值 handler 眼里合法性不同」）。
+ */
+export type { PropertyValue }
 
-/** 属性写命令（契约 §5.2 `SetPropertyCommand` 的落地）。 */
-export interface SetPropertyCommand {
-  readonly kind: 'setProperty'
-  readonly contextId: string
-  /** 多选 = **原子批次**：一个目标不可改即整体拒绝（契约 §3.3）。 */
-  readonly refs: readonly PropertyRef[]
-  /** `'mixed'` 显式表达多选混合值，不用 `null` 兼表（契约 §5.2）。 */
-  readonly value: PropertyValue | 'mixed'
-  readonly expectedVersion?: Version
-}
+/**
+ * 属性写命令（契约 §5.2 `SetPropertyCommand`）—— **唯一权威是 `application/property-commands`**。
+ *
+ * 本文件曾本地定义一份（含 `contextId`/`expectedVersion`）。收敛后唯一权威在
+ * `property-commands.ts`：那里是 RNA 的公开命令类型，面板/脚本/命令搜索共用同一个定义。
+ * `reduceSetProperty` 从命令的 `refs[0].owner` 解析文档，不再要求命令携带 `contextId`
+ * —— 文档由**引用**决定，不由调用方另填一个可能与引用矛盾的字段决定。
+ */
+export type { SetPropertyCommand }
 
 export interface SetTransformCommand {
   readonly kind: 'setTransform'
@@ -398,7 +397,7 @@ export function reduceCommand(state: ApplicationState, command: Command, env: Ex
     case 'setTransform':
       return reduceSetTransform(state, command)
     case 'setProperty':
-      return reduceSetProperty(state, command)
+      return reduceSetProperty(state, command, env)
     case 'beginInteraction':
       return reduceBeginInteraction(state, command)
     case 'updateInteraction':
@@ -668,48 +667,77 @@ function reduceSetTransform(state: ApplicationState, cmd: SetTransformCommand): 
 // 属性写（唯一写路由 + 多选原子性）
 // ─────────────────────────────────────────────────────────────────────────────
 
-function reduceSetProperty(state: ApplicationState, cmd: SetPropertyCommand): Transition {
-  const found = contextAndDoc(state, cmd.contextId)
-  if (!found.ok) return rejected(state, found.error)
-  const { ctx, doc } = found.value
+/**
+ * 属性写 —— 路由到 **RNA 注册表**（#250 GF-5 收敛项 2：`reduceCommand` 成为唯一写入口）。
+ *
+ * ## 本函数在收敛前后做的事（这是 GF-5 的核心差别）
+ *
+ * **收敛前**：本函数自带一整套**内联属性词汇** ——
+ * `validatePropertyWrite` 里的 `isStructuralProperty('name'|'visible')` +
+ * `doc.types[obj.type].animatableProperties.includes(...)` 白名单，
+ * 以及 `applyPropertyValue` 里对 `'name'`/`'visible'`/`'transform.*'`/`'projection.*'`/
+ * `'annotation.text'` 的 `switch`。属性语义因此有**两套**（P1 的内联表 + P2 的 RNA 表），
+ * 且两套描述的属性集合不相交。
+ *
+ * **收敛后**：本函数**零属性词汇**。它只做三件事：
+ *  1. 从引用解析出文档与绑定的上下文（文档由**引用**决定，不由调用方另填字段决定）；
+ *  2. 把注册表、写端口、显式访问环境交给 `applySetProperty` —— 后者按 RNA 描述
+ *     算可编辑性、校验值、逐目标聚合失败；
+ *  3. 把纯转移结果映射成 `Transition` 并记历史。
+ *
+ * 于是「新增一种内置属性类型」或「新增一个普通对象类型」只需经
+ * `registerValueType`/`registerObjectType` 注册 —— 本函数**必须改**这件事不再成立，
+ * 那正是 D4 的证明路径。
+ *
+ * ## 为什么上下文从文档反查（而不是命令携带 `contextId`）
+ *
+ * 契约 §1.1 方向 8：「不提供跨文档编辑事务」⇒ 一条命令只作用于**一个**文档。
+ * 而 `contextId` 若由调用方另填，就存在"引用指向文档 A、contextId 指向文档 B"
+ * 的矛盾输入，必须额外校验两者一致。让上下文**由目标文档唯一确定**消除了这类
+ * 矛盾输入的存在空间 —— 一致性由构造保证，不靠校验兜。
+ */
+function reduceSetProperty(state: ApplicationState, cmd: SetPropertyCommand, env: ExecutionInputs): Transition {
+  // 空引用是**调用方缺陷**（没有目标就没有属性写），显式拒绝而不是静默 unchanged。
   if (cmd.refs.length === 0) return rejected(state, invalidValue({ reason: 'noTargets' }))
   if (cmd.value === 'mixed') return rejected(state, invalidValue({ reason: 'mixedHasNoConcreteValue' }))
 
-  const driven = animationDriven(doc)
+  const target = resolvePropertyDocument(state, cmd.refs)
+  if (!target.ok) return rejected(state, target.error)
+  const { doc, ctx } = target.value
 
-  // ── 阶段 1：对**全部**目标做只读校验（此处不写任何东西） ──
-  // 契约 §3.3：「一个目标不可改即**整体拒绝**并列明原因，不静默部分成功」。
-  for (const ref of cmd.refs) {
-    const e = validatePropertyWrite(doc, ref, driven)
-    if (e) return rejected(state, e)
-  }
-
-  // ── 阶段 2：全量应用 ──
-  const lease = acquireFor(state, doc.id, cmd.contextId)
+  const lease = acquireFor(state, doc.id, ctx.id)
   if (!lease.ok) return rejected(state, lease.error)
 
-  let scene = doc.scene
-  const changed: PropertyRef[] = []
-  for (const ref of cmd.refs) {
-    const next = applyPropertyValue(scene, ref, cmd.value)
-    if (next === null) {
-      // 校验已排除已知失败；走到这里说明校验有缺口 ⇒ 仍**整体拒绝**（绝不部分成功）。
-      return rejected(state, invalidValue({ reason: 'applyFailedAfterValidation', property: ref.property, objectId: ref.owner.id }))
-    }
-    if (!propertyActuallyChanged(doc.scene, next, ref)) continue
-    scene = next
-    changed.push(ref)
+  const { registry, errors } = kernelPropertyRegistry()
+  if (errors.length > 0) {
+    // 内核注册表构造失败是**装配缺陷**，必须显式暴露（不得静默降级为"属性不存在"）。
+    return rejected(state, unsupportedOperation({ reason: 'kernel-registry-invalid', detail: String(errors[0]!.params.reason ?? errors[0]!.code) }))
   }
-  if (changed.length === 0) return unchanged(state, doc.version)
 
-  const write = withScene(doc, scene)
-  const changes = changeSummary({ changedProperties: changed, structurallyShared: true })
-  const withHistory = recordHistory(write.doc, {
-    label: cmd.refs.length > 1 ? `set ${cmd.refs.length} properties` : `set ${cmd.refs[0].property}`,
+  const access = kernelAccessOf(doc, ctx.id, env.capabilities, true)
+  const write = applySetProperty<Document>({
+    registry,
+    ports: kernelWritePorts(),
+    state: doc,
+    command: cmd,
+    env: { baseVersion: doc.version, currentVersion: doc.version },
+    access,
+  })
+
+  if (write.outcome.status === 'rejected') return rejected(state, write.outcome.error, doc.version)
+  if (write.outcome.status === 'unchanged') return unchanged(state, doc.version)
+
+  // 写端口返回的候选文档**已**经 `withScene` 推进过版本（内容身份判据在 `domain/document`），
+  // 故此处直接取它的版本 —— 不再二次 `withScene`（那会重复摘要计算且掩盖"谁推进了版本"）。
+  const nextDoc = write.candidate as Document
+  const changed = write.outcome.changes.changedProperties
+  const changes = changeSummary({ changedProperties: changed, structurallyShared: write.outcome.changes.structurallyShared })
+  const withHistory = recordHistory(nextDoc, {
+    label: cmd.refs.length > 1 ? `set ${cmd.refs.length} properties` : `set ${cmd.refs[0]!.property}`,
     beforeScene: doc.scene,
     beforeVersion: doc.version,
-    afterScene: scene,
-    afterVersion: write.version,
+    afterScene: nextDoc.scene,
+    afterVersion: nextDoc.version,
     changes,
     selectionBefore: ctx.selection.selected,
     selectionAfter: ctx.selection.selected,
@@ -719,8 +747,50 @@ function reduceSetProperty(state: ApplicationState, cmd: SetPropertyCommand): Tr
     docs: Object.freeze({ ...state.docs, [doc.id]: withHistory }),
     leases: Object.freeze({ ...state.leases, [doc.id]: lease.value }),
   })
-  return applied(next, write.version, changes)
+  return applied(next, nextDoc.version, changes)
 }
+
+/**
+ * 从属性引用解析「目标文档 + 绑定该文档的编辑上下文」。
+ *
+ * 判据（顺序即优先级）：
+ *  1. 引用必须指向 `object` 拥有者 —— 编辑上下文属性有具名命令（`setTime`/`setChannelValue`），
+ *     不经通用属性写承载；
+ *  2. 对象必须**恰好**存在于一个打开的文档里 —— 找不到是 `MissingTarget`，
+ *     出现在多个文档里是身份歧义（`InvalidValue`，不静默取第一个）；
+ *  3. 该文档必须有绑定的编辑上下文 —— 没有则无租约可申请（`DocumentBusy`）。
+ */
+function resolvePropertyDocument(
+  state: ApplicationState,
+  refs: readonly PropertyRef[],
+): Result<{ doc: Document; ctx: EditContext }> {
+  const unsupportedKind = refs.find((r) => r.owner.kind !== 'object')
+  if (unsupportedKind) {
+    return err(unsupportedOperation({ ownerKind: unsupportedKind.owner.kind, property: unsupportedKind.property }))
+  }
+  const first = refs[0]!
+
+  const matches: { doc: Document; ctx: EditContext }[] = []
+  for (const ctx of Object.values(state.contexts)) {
+    const doc = getDoc(state, ctx.documentId)
+    if (!doc) continue
+    if (findObject(doc.scene, first.owner.id)) matches.push({ doc, ctx })
+  }
+  if (matches.length === 0) return err(missingTarget({ objectId: first.owner.id, property: first.property }))
+  if (matches.length > 1) {
+    return err(invalidValue({ reason: 'ambiguous-target-document', objectId: first.owner.id, docs: matches.map((m) => m.doc.id).join(',') }))
+  }
+  return ok(matches[0]!)
+}
+
+/**
+ * 多目标写拒绝的逐目标聚合 —— **已迁至** `application/property-commands.ts` 的 `aggregateFailure`。
+ *
+ * 本文件曾有自己的 `aggregatePropertyFailures`，与 RNA 侧的 `aggregateFailure` 同名同义
+ * （同样拼 `failedTargets`/`totalTargets`/`reasons`/`homogeneous`）。两份聚合必然漂移，
+ * 而漂移的后果是「UI 说为什么拒绝」与「核心说为什么拒绝」不一致 ——
+ * 正是冻结 #5 要消除的。收敛后 `reduceSetProperty` 直接把结果透出，不再二次聚合。
+ */
 
 /** 对象是否可写（存在 + 非只读内容来源）。返回 `null` 表示可写。 */
 function writeGuard(doc: Document, objectId: string): DomainError | null {
@@ -732,123 +802,24 @@ function writeGuard(doc: Document, objectId: string): DomainError | null {
   return null
 }
 
-/**
- * 单目标写校验（顺序即优先级）：目标存在 → 引用未过期 → 有写权 → 类型支持 → 非动画驱动。
- *
- * 返回 `null` 表示可写。
- */
-function validatePropertyWrite(doc: Document, ref: PropertyRef, driven: ReadonlySet<string>): DomainError | null {
-  if (ref.owner.kind !== 'object') {
-    // 编辑上下文属性不经 `setProperty` 承载（它们有具名命令 setTime/setChannelValue）
-    return unsupportedOperation({ ownerKind: ref.owner.kind, property: ref.property })
-  }
-  const obj = findObject(doc.scene, ref.owner.id)
-  if (!obj) return missingTarget({ objectId: ref.owner.id, property: ref.property })
-  const data = findObjectData(doc.scene, obj.dataId)
-  if (!data) return missingTarget({ dataId: obj.dataId, property: ref.property })
-  // 内容版本不匹配 ⇒ StaleReference（契约 §1.1 负对照：用坐标/批次序号当身份的引用必须失效）
-  if (ref.owner.contentVersion !== undefined && ref.owner.contentVersion !== data.contentVersion) {
-    return staleReference({ objectId: ref.owner.id, expected: ref.owner.contentVersion, actual: data.contentVersion })
-  }
-  // 子元素引用：拓扑版本不符即 StaleReference（契约 §1.2「不得静默猜配」）
-  if (ref.element && ref.element.topologyVersion !== data.topologyVersion) {
-    return staleReference({
-      objectId: ref.owner.id,
-      elementId: ref.element.elementId,
-      expected: ref.element.topologyVersion,
-      actual: data.topologyVersion,
-    })
-  }
-  // 写权按**拥有者/内容来源**判定，不用文档级布尔（#249 §3.3）
-  if (data.source === 'content') return readOnly({ owner: data.source, objectId: ref.owner.id, property: ref.property })
-  const desc = Object.prototype.hasOwnProperty.call(doc.types, obj.type) ? doc.types[obj.type] : undefined
-  if (!desc) return unsupportedOperation({ objectType: obj.type, property: ref.property })
-  if (!desc.animatableProperties.includes(ref.property) && !isStructuralProperty(ref.property)) {
-    return unsupportedOperation({ property: ref.property, objectType: obj.type })
-  }
-  // #249 §7：编辑被轨道驱动的属性时**默认显式拒绝**普通基础值写入（A10 负对照）
-  if (driven.has(`${ref.owner.id}\u0000${ref.property}`)) {
-    return readOnly({ owner: 'animationTrack', objectId: ref.owner.id, property: ref.property, reason: 'animationDriven' })
-  }
-  return null
-}
-
-/** 结构属性（由对象本身拥有，不由类型描述枚举）。 */
-function isStructuralProperty(p: string): boolean {
-  return p === 'name' || p === 'visible'
-}
-
-/** 应用一个属性值，返回新场景或 `null`（不支持的目标/值形态）。 */
-function applyPropertyValue(scene: Scene, ref: PropertyRef, value: PropertyValue): Scene | null {
-  if (ref.owner.kind !== 'object') return null
-  const obj = findObject(scene, ref.owner.id)
-  if (!obj) return null
-  const objects = { ...scene.objects }
-
-  if (ref.property === 'name') {
-    if (typeof value !== 'string') return null
-    objects[obj.id] = Object.freeze({ ...obj, name: value })
-    return Object.freeze({ ...scene, objects: Object.freeze(objects) })
-  }
-  if (ref.property === 'visible') {
-    if (typeof value !== 'boolean') return null
-    objects[obj.id] = Object.freeze({ ...obj, visible: value })
-    return Object.freeze({ ...scene, objects: Object.freeze(objects) })
-  }
-  if (ref.property.startsWith('transform.')) {
-    const t = obj.transform
-    const field = ref.property.slice('transform.'.length)
-    let next: Transform | null = null
-    if (field === 'position' && isVec3(value)) next = Object.freeze({ ...t, position: value })
-    else if (field === 'scale' && isVec3(value)) next = Object.freeze({ ...t, scale: value })
-    else if (field === 'pivot' && isVec3(value)) next = Object.freeze({ ...t, pivot: value })
-    else if (field === 'rotation' && isQuat(value)) next = Object.freeze({ ...t, rotation: value })
-    if (next === null) return null
-    objects[obj.id] = Object.freeze({ ...obj, transform: next })
-    return Object.freeze({ ...scene, objects: Object.freeze(objects) })
-  }
-  if (ref.property.startsWith('projection.') || ref.property === 'annotation.text') {
-    const data = findObjectData(scene, obj.dataId)
-    if (!data) return null
-    let payload: ObjectDataPayload
-    if (ref.property.startsWith('projection.')) {
-      if (data.payload.kind !== 'camera') return null
-      const field = ref.property.slice('projection.'.length)
-      if (typeof value !== 'number') return null
-      if (field === 'fov') payload = Object.freeze({ ...data.payload, fov: value })
-      else if (field === 'clipStart') payload = Object.freeze({ ...data.payload, clipStart: value })
-      else if (field === 'clipEnd') payload = Object.freeze({ ...data.payload, clipEnd: value })
-      else return null
-    } else {
-      if (data.payload.kind !== 'annotation') return null
-      if (typeof value !== 'string') return null
-      payload = Object.freeze({ ...data.payload, text: value })
-    }
-    const nextData = Object.freeze({ ...data, payload, contentVersion: digestOf(payload) })
-    return Object.freeze({ ...scene, data: Object.freeze({ ...scene.data, [data.id]: nextData }) })
-  }
-  return null
-}
-
-function propertyActuallyChanged(before: Scene, after: Scene, ref: PropertyRef): boolean {
-  if (ref.owner.kind !== 'object') return false
-  const b = findObject(before, ref.owner.id)
-  const a = findObject(after, ref.owner.id)
-  if (!b || !a) return true
-  if (ref.property === 'name') return b.name !== a.name
-  if (ref.property === 'visible') return b.visible !== a.visible
-  if (ref.property.startsWith('transform.')) return !sameTransform(b.transform, a.transform)
-  const bd = findObjectData(before, b.dataId)
-  const ad = findObjectData(after, a.dataId)
-  return bd?.contentVersion !== ad?.contentVersion
-}
-
-function isVec3(v: PropertyValue): v is Vec3 {
-  return typeof v === 'object' && v !== null && 'x' in v && 'y' in v && 'z' in v && !('w' in v)
-}
-function isQuat(v: PropertyValue): v is Quat {
-  return typeof v === 'object' && v !== null && 'x' in v && 'y' in v && 'z' in v && 'w' in v
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// 已删除的内联属性词汇（#250 GF-5 收敛项 2 —— 退役记录，不是注释掉的代码）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 本文件曾有 5 个函数承载**内核侧的属性语义**，它们是"`reduceCommand` 不是唯一写入口"
+// 的直接原因（属性词汇在两处各有一份，且两套集合不相交）：
+//
+// | 已删除 | 原职责 | 现在的唯一归属 |
+// |---|---|---|
+// | `validatePropertyWrite` | 内联白名单：`name`/`visible` + `doc.types[type].animatableProperties` | RNA 描述 + `evaluateEditability`（`properties.ts`）|
+// | `isStructuralProperty` | 把 `name`/`visible` 当"结构属性"特例放行 | 注册表里的**普通声明**（`kernel-properties.ts`）|
+// | `applyPropertyValue` | 对 `'name'`/`'visible'`/`'transform.*'`/`'projection.*'`/`'annotation.text'` 的 `switch` | 值 handler 校验 + 写端口（`kernel-properties.ts`）|
+// | `propertyActuallyChanged` | 按属性名逐个判"是否真变了" | 值 handler 的 `equals`（D5 的唯一判据）|
+// | `aggregatePropertyFailures` | 第二份多选失败聚合（与 P2 的 `aggregateFailure` 同名同义）| `aggregateFailure`（`property-commands.ts`）|
+//
+// 连同 `isVec3`/`isQuat`（只在 `applyPropertyValue` 里用的形状判定）与本地
+// `animationDriven`（被 `kernel-properties.ts` 的 `kernelDrivenProperties` 取代）一并删除。
+// 这些**不留兼容包装**：留着"以防万一"的包装正是 #171 说的"新门面包旧核心"。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 交互
@@ -1104,18 +1075,13 @@ function sameSelection(a: SelectionState, b: SelectionState): boolean {
 }
 
 /**
- * 动画轨道索引（键 = `ownerId\0property`）。
+ * 动画轨道索引 —— **已迁至** `application/kernel-properties.ts` 的 `kernelDrivenProperties`。
  *
- * P1 只提供**判定入口**；轨道数据由 P4（#255）填充到 `Document`。
- * 对空轨道返回空集，故"未实现"不会伪装成"该拒绝"。
+ * 迁移理由：它服务的 `validatePropertyWrite` 已删除，而"哪些属性被轨道驱动"是
+ * **RNA 可编辑性求值的状态事实**（`TargetFacts.drivenByTrack`），归 `propertyAccess` 的
+ * 构造处（`kernelAccessOf`）提供，不再由命令层各算一份 —— 两份轨道索引必然漂移，
+ * 而漂移会让"动画驱动的属性被拒绝"在两条路径上给出不同答案（A10 负对照）。
  */
-function animationDriven(doc: Document): ReadonlySet<string> {
-  const tracks = (doc as unknown as { tracks?: readonly { ownerId: string; property: string }[] }).tracks
-  const out = new Set<string>()
-  if (!tracks) return out
-  for (const t of tracks) out.add(`${t.ownerId}\u0000${t.property}`)
-  return out
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 便捷构造（供接线层与测试；不构成第二写通路 —— 它也是走 reduceCommand）

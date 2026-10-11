@@ -1,6 +1,5 @@
 import type { OperatorType } from '@/operators/operatorType'
 import type { OperatorRegistry } from '@/operators/operatorRegistry'
-import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA, materialRNA } from '@/workbench/ux/rna'
 import {
   blockInspectorPanel, toolShelfPanel,
   transformPanel, sceneInfoPanel,
@@ -51,7 +50,7 @@ import { textTool, TextGizmo } from '@/workbench/tools/textTool'
 import { faceTool, FaceGizmo } from '@/workbench/tools/faceTool'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { ViewportManager } from '@/runtime/viewportManager'
-import type { Main } from '@/runtime/main'
+import { unhandledWritableTypes } from '@/editors/workbench-rna'
 import type { PanelDeclaration } from '@/workbench/ux/types/panel'
 import type { ToolSettings } from '@/runtime/contextAccess'
 
@@ -117,15 +116,20 @@ export function registerWorkbenchOperators(registry: OperatorRegistry): void {
   }
 }
 
-export function registerWorkbenchRna(main: Main): void {
-  const rna = createRNARegistry()
-  rna.register(blockRNA)
-  rna.register(toolSettingsRNA)
-  rna.register(sceneMetaRNA)
-  rna.register(wikiConfigRNA)
-  rna.register(annotationRNA)
-  rna.register(materialRNA)
-  main.registries.rna = rna
+/**
+ * RNA 注册（#253 P2）。
+ *
+ * 旧实现 `registerWorkbenchRna(main)` 造一个 `RNAStruct` 注册表并塞进 `main.registries.rna`；
+ * 那份描述自带 `get`/`set` 闭包与 `uiWidget` 控件名（契约 §5.1/§5.2 禁止）。
+ *
+ * 新形态：属性描述由 `@/editors/workbench-rna` 的 `workbenchRegistry()` **按需构造**
+ * （对象类型声明是数据，不是往 `Main` 上挂的可变注册表），因此 `main.registries.rna`
+ * 与 `context.getRna()` 一并不再需要。本函数保留为**装配期的自检入口**：
+ * 校验「声明的可写对象类型都有写入端口」——即启动期就能发现装配缺陷，
+ * 而不是等到用户点某个控件时才发现 `UnsupportedOperation`。
+ */
+export function validateWorkbenchRna(): readonly string[] {
+  return unhandledWritableTypes()
 }
 
 export function registerWorkbenchTools(

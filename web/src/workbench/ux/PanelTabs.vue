@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, type Component } from 'vue'
-import UIRenderer from './UIRenderer.vue'
-import type { RNARegistry } from './rna/types'
+import ReadonlyLayout from './ReadonlyLayout.vue'
 import type { UILayout } from './types/layout'
 
 export interface PanelTabItem {
@@ -15,9 +14,20 @@ export interface PanelTabItem {
 
 const props = defineProps<{
   panels: PanelTabItem[]
-  rna: RNARegistry
   ctx?: unknown
 }>()
+
+/**
+ * 具名命令的执行口（面板容器持有上下文）。
+ *
+ * 这里只执行**具名命令**；属性写入一律经属性面板 → 唯一写路由，
+ * 故容器不需要 RNA 注册表，也不传 owner（退役 #3：owner 绑定分派已删除）。
+ */
+const emit = defineEmits<{ (e: 'operator', id: string, props?: Record<string, unknown>): void }>()
+
+function onOperator(id: string, p?: Record<string, unknown>): void {
+  emit('operator', id, p)
+}
 
 const activeId = ref<string | null>(null)
 
@@ -67,12 +77,13 @@ function selectTab(id: string): void {
         v-if="activePanel?.component"
         :is="activePanel.component"
         :ctx="ctx"
+        :title="activePanel.label"
+        :fragment="activePanel.layout"
       />
-      <UIRenderer
+      <ReadonlyLayout
         v-else-if="activePanel"
         :layout="activePanel.layout"
-        :rna="rna"
-        :owner="activePanel.owner"
+        @operator="(id: string, p?: Record<string, unknown>) => onOperator(id, p)"
       />
     </div>
   </div>
