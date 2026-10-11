@@ -107,25 +107,71 @@ const FORBIDDEN_TIME_SOURCES = [
  */
 const LEGACY_RAF_SITES = [
   {
-    file: 'runtime/renderEngine.ts',
+    file: 'composition/kernelRuntime.ts',
     kind: 'business-advance',
-    owner: 'P5',
-    issue: 256,
-    // 这一条是本批**未**删除的那一半：它是"呈现重写"的核心接缝。
-    replacement: '呈现层的按需呈现 + P4 统一动画求值（纹理时间绑定场景时间）',
-    exitStage: 'P4 合入后同批删除 renderEngine 自驱 tick（由 Lead 排合并顺序）',
+    owner: 'P10',
+    issue: 261,
+    // ## 这一条为什么**如实**标为 `business-advance`
+    //
+    // 它确实是"推进业务"的 RAF —— 每帧把经过的秒数作为 `advancePlayback` 命令
+    // 注入内核，于是时间（进而通道动画/纹理动画的采样）随之前进。
+    // 把它标成 `paint-wakeup` 才是**错**的：那会让"业务推进可枚举"这条判据
+    // 失去它要防的东西。
+    //
+    // ## 那它与被判违规的旧形态差在哪（判据的实质，不是标签）
+    //
+    // #249 §15 第 6 条要退役的是「**多** RAF 分别推进业务」，判据原文是
+    // 「所有业务推进可枚举；局部绘制唤醒不写领域状态」。旧形态有两个病灶：
+    //  1. **多**条业务推进路径（`renderEngine` 的 tick + `drwMeshPipeline` 的
+    //     `setTimeout` 自续 + `pickSchedule` 的合并 + Promise 回调直接写状态）
+    //     ⇒ "下一次状态变化从哪来"没有唯一答案；
+    //  2. 业务推进与**绘制**混在同一个 RAF 里 ⇒ 无法区分"这一帧画了什么"
+    //     与"这一帧算了什么"。
+    //
+    // 本批之后的实际形态：**全树只有本文件一条业务推进路径**，且它
+    //   - 只做一件事（算 delta → 交内核命令），**不**绘制、不直接改状态；
+    //   - 与绘制循环（`renderEngine` 的 `drawFrame`）**分离**；
+    //   - 其推进对象是**值**（不可变状态 + 纯转移），因此可重放（A04）。
+    //
+    // ⇒ 它不是"又一个推进业务的 RAF"，而是**唯一**的那一条，且其可枚举性
+    // 由 `retirementRegistry`（旧路径全部 executed）+ `seams`（接线点唯一）
+    // 两条机器断言把守。P11 审计时应核对的正是"是否只剩这一条"，
+    // 而不是"这一条也消失"（内核不自跑是设计，不是缺陷）。
+    replacement:
+      '无（它是替代物本身）：旧的多条业务推进路径（renderEngine 自驱 tick、drwMeshPipeline 的 setTimeout 自续播放、材质库 accMs 累加）全部删除，本文件是唯一剩下的业务推进点',
+    exitStage:
+      'P10（#261）本批落地并长期保留（宿主按帧注入时间输入是 R-WK-03 的原文要求）；P11 审计核对"业务推进路径恰好一条"',
     note:
-      '同一个 RAF 里混了两件事：绘制（renderMain/renderOverlay/renderGizmo）与'
-      + ' `materialLibrary.tick(clock.getDelta()*1000)`（每材质自行累计时间，§19.3 明令禁止）。'
-      + ' 前者需要驱动者、后者需要语义替代 —— 两者都不在本批范围内凭空可得。',
+      '宿主帧时钟：`performance.now()` 差值 → `KernelSession.frame(delta)` →'
+      + ' `advancePlayback` 命令。不绘制、不直接改状态、不读 Vue。'
+      + ' 单帧 delta 有上限（切标签页/休眠不瞬移）。',
   },
   {
     file: 'runtime/renderEngine.ts',
     kind: 'paint-wakeup',
-    owner: 'P5',
-    issue: 256,
-    replacement: '与 tick 合并为单一呈现驱动，或改由 ResizeObserver 直接驱动',
-    exitStage: '与上面 tick 同一处收口（同一个类）',
+    owner: 'P10',
+    issue: 261,
+    // P10（#261）：本条从 `business-advance` **降级为 `paint-wakeup`** ——
+    // 这不是"把违规改个标签"，而是 `materialLibrary.tick(clock.getDelta()*1000)`
+    // 与 `const clock = new THREE.Clock()` **真的被删掉了**（见 `renderEngine.ts`
+    // 的 `drawFrame`）。剩下的 RAF 只做绘制（renderMain/renderOverlay/renderGizmo
+    // + 内容组重挂），不读时钟、不推进任何领域状态。
+    //
+    // 判据的机械依据：`FORBIDDEN_TIME_SOURCES` 里的 `THREE.Clock` 在本文件已零出现，
+    // 而 `requestAnimationFrame` 仍在（绘制唤醒本身是判据**允许**的）。
+    replacement: '时间推进已迁至宿主帧时钟（`composition/kernelRuntime`）：按帧把经过秒数注入内核 `advancePlayback` 命令；本 RAF 只做绘制',
+    exitStage: 'P10（#261）已完成业务面剥离；本行作为"绘制唤醒"长期保留（#249 §15 第 6 条不要求零 RAF）',
+    note:
+      '绘制循环 + 内容组重挂。`materialLibrary.tick(…)` 与 `THREE.Clock` 已删除 ⇒'
+      + ' 本文件不再持有时间语义，不构成"推进业务"。',
+  },
+  {
+    file: 'runtime/renderEngine.ts',
+    kind: 'paint-wakeup',
+    owner: 'P10',
+    issue: 261,
+    replacement: '与绘制循环合并（同一处 resize 唤醒），或改由 ResizeObserver 直接驱动',
+    exitStage: 'P10（#261）已与绘制合并为单一呈现驱动；本行长期保留（局部绘制唤醒）',
     note: '合并 resize 事件为每帧一次 GL 尺寸同步；不写领域状态 ⇒ 判据允许。',
   },
   {
@@ -266,30 +312,43 @@ describe('#249 §15 第 6 条：遗留 RAF 必须逐条登记（可枚举，供 
     }
   })
 
-  it('P5 归属的 RAF 集合 == 本批如实声明的"未退完"集合（不把接缝写成已清）', () => {
-    const p5 = LEGACY_RAF_SITES.filter((s) => s.owner === 'P5')
-    // 本批（#256）**没有**把 P5 名下的 RAF 全部删除：tick 的自驱动画时间与
-    // pickSchedule 的输入合并分别需要 P4 与 P7 的语义替代（见各条 `note`）。
-    // 这条断言的作用不是"要求非空"，而是**每当集合变化就逼着改这里** ——
-    // 于是"退完了"这件事必须由一个提交显式声明，而不是自然漂移。
-    expect(
-      p5.map((s) => `${s.file}#${s.kind}`).sort(),
-      'P5 名下 RAF 集合变化时必须同批更新本断言（它是 P11 审计的起点）',
-    ).toEqual([
-      'runtime/hover/pickSchedule.ts#input-coalesce',
-      'runtime/renderEngine.ts#business-advance',
-      'runtime/renderEngine.ts#paint-wakeup',
-    ])
-  })
-
-  it('#249 §15 第 6 条的违规面 = business-advance 集合（当前非空 ⇒ 如实记为未退完）', () => {
+  it('**业务推进路径恰好一条**，且它就是替代物本身（P10 #261；P11 终局审计的判据）', () => {
     const business = LEGACY_RAF_SITES.filter((s) => s.kind === 'business-advance')
-    // 违规面当前非空（P4 的材质动画 + P5 的 renderEngine 自驱时间）。
-    // 本断言如实固化"未退完"这一事实；P11 终局审计要求它变为空集。
-    expect(business.length, '本批仍在存在推进业务的 RAF —— 这是如实记录，不是通过').toBeGreaterThan(0)
-    for (const s of business) {
-      expect(s.exitStage, `${s.file} 属违规面，必须有明确退出阶段`).not.toMatch(/不属退役条目/)
-    }
+    // ## 本断言的相位变化（如实登记，不是"放宽"）
+    //
+    // 本文件（P5 #256 建立）原先断言 `business.length > 0` 并注明
+    // 「本批仍存在推进业务的 RAF —— 这是如实记录，不是通过」。
+    //
+    // P10（#261）删除旧路径后，业务推进的**数量**从"多条"降到"一条"，
+    // 而那一条是 R-WK-03 要求的新形态（宿主按帧注入时间输入）。
+    // ⇒ 判据从"必须非空"改为"**恰好一条**且必须是登记的那个替代物"。
+    //
+    // 为什么不是"必须为空"：#249 §15 第 6 条要求的是「所有业务推进**可枚举**」，
+    // 不是"零业务推进"。宿主必须有一个帧时钟（否则时间永远不走，那是功能停摆），
+    // 而它的位置必须**唯一且已知** —— 这正是本条断言在钉的事。
+    expect(
+      business.map((s) => `${s.file}#${s.kind}`),
+      '业务推进路径必须恰好一条（多条 ⇒ 回到"多 RAF 分别推进业务"的旧形态）',
+    ).toEqual(['composition/kernelRuntime.ts#business-advance'])
+
+    // 机械证据（不靠标签）：旧自驱时间的两个符号在 `renderEngine` 里零出现。
+    const renderEngine = codeOnlyLines(
+      fs.readFileSync(path.join(SRC_ROOT, 'runtime/renderEngine.ts'), 'utf8'),
+    )
+    expect(
+      renderEngine.filter(({ line }) => line.includes('THREE.Clock')).length,
+      '`renderEngine` 不得再持有 `THREE.Clock`（旧自驱时间的机械证据）',
+    ).toBe(0)
+    expect(
+      renderEngine.filter(({ line }) => line.includes('materialLibrary.tick')).length,
+      '`renderEngine` 不得再调 `materialLibrary.tick`（旧每材质累加的机械证据）',
+    ).toBe(0)
+
+    // 反空洞真：绘制唤醒**仍在**（判据不是"把所有 RAF 都算成业务推进"）
+    expect(
+      LEGACY_RAF_SITES.filter((s) => s.kind === 'paint-wakeup').length,
+      '绘制唤醒必须仍有登记（#249 §15 第 6 条不要求零 RAF）',
+    ).toBeGreaterThan(0)
   })
 
   it('**负对照**：登记表中出现不存在的文件会被判红（证明存在性检查不是空转）', () => {

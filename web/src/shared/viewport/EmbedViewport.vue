@@ -73,7 +73,7 @@ const {
 
 const {
   drw, vpSlot, loadStatus, meshBusy, blockIconCache, tooltipPalette,
-  structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY, framesPlaybackIsPlaying,
+  structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY, isPlaying,
   computed: drwComputed, materialLibrary,
 } = useViewportRuntime({
   ctx,
@@ -472,7 +472,7 @@ onBeforeUnmount(() => {
       :has-world-multi-frame="hasWorldMultiFrame"
       :world-frame-index="worldFrameIndex"
       :world-frame-count="worldFrameCount"
-      :frames-playback-is-playing="framesPlaybackIsPlaying"
+      :is-playing="isPlaying"
       :mesh-busy="meshBusy"
       :grid-height="gridHeight"
       :layer-world-y="layerWorldY"

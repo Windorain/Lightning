@@ -32,6 +32,7 @@ import type { DiagnosticsReadView } from '@/application/diagnostics'
 import { asReadOnlyDiagnostics } from '@/application/diagnostics'
 import type { ScreenRoot, RegionNode } from '@/runtime/screenRoot'
 import { REGION } from '@/runtime/regionIds'
+import type { KernelSession } from '@/runtime/kernelSession'
 
 function embedUnavailable(name: string): never {
   throw new Error(`embed: ${name} not available`)
@@ -91,6 +92,26 @@ export class Context {
      * 现在它是构造参数，于是"同一个函数在不同装配下的行为"可从调用点读出。
      */
     readonly pageKeyboard: import('@/composition/shell').PageKeyboardClaim | null = null,
+    /**
+     * **本运行实例的内核会话**（#261 / R-WK-03：内核接线的落点）。
+     *
+     * ## 为什么它是构造参数而不是模块级单例
+     *
+     * 旧实现把"权威状态"挂在一个全局可反查的位置（`Main` 上的 Vue Ref、
+     * 或 B5 #7 那个模块级 `hostProfile`）。那让"同页两个实例"必然互相污染。
+     * 会话是**实例**的：工作台有它自己的工作台会话，嵌入有它自己的嵌入会话，
+     * 两者的时间/播放/文档互不可见 —— 这正是 #249 §19.7「语言/主题/偏好按实例隔离」
+     * 在**状态**层的同族要求。
+     *
+     * ## 为什么允许 `null`
+     *
+     * `Context` 也被一些**非交互**路径构造（诊断脚本、装配测试）。
+     * `null` 表示"这个实例没有内核会话" ⇒ 所有内核读面显式不可用
+     * （`requireKernelSession` 抛错），而**不是**静默退化成一个空会话
+     * —— 后者会让"忘了接线"表现为"时间永远静止"，那正是接缝 B 的 blocker 原文
+     * 描述的行为回退形态。
+     */
+    readonly kernel: KernelSession | null = null,
   ) {
     // 绑到实例的 `this`：调用点会 `const t = ctx.t`（见字段文档）。
     this.t = (key: string) => this.wm.settings.t(key)
@@ -150,6 +171,63 @@ export class Context {
     return this.main.doc
   }
   /**
+   * **内核会话**（#261 / R-WK-03）。
+   *
+   * ## 它与 `getDoc()` 的关系（这是本批最重要的一处说明）
+   *
+   * 两者此刻**并存**，且分工明确、各有退出条件：
+   *  - `getDoc()` 是**文档内容**的读面（旧 `RuntimeDocument`）。工作台的
+   *    文档内容迁移（`kernel-property-write-dual-track` 接缝的退出条件）
+   *    需要 `ReadView` 的相机/embed 初始视图读面 + 属性写链迁移，
+   *    本批补齐了读面但**未**完成内容迁移 ⇒ 该接缝仍登记在案；
+   *  - 本方法是**时间 / 播放 / 帧下标**的读面。这一条本批**已完成**迁移：
+   *    旧 `Main.currentFrameIndex` / `Main.framesPlaybackIsPlaying` 两个
+   *    Vue Ref 已被删除，全部消费者改吃本会话（见 `retirementRegistry` 的
+   *    `world-frame-playback` 组，相位已翻 `executed`）。
+   *
+   * ⇒ 两件事**不是**同一件未竟工作的两半：播放/时间面已收口，
+   * 文档内容面仍开着。把它们混为一谈会让"播放已迁移"被误读成"迁移没做"。
+   *
+   * 未接线时抛错（**失败关闭**）：调用方若在没有会话的实例上调它，
+   * 应立刻得到明确的失败，而不是一个"永远静止"的静默退化。
+   */
+  requireKernelSession(): KernelSession {
+    if (this.kernel === null) {
+      throw new Error('Context: 本实例没有内核会话（装配未接线，见 #261 / R-WK-03）')
+    }
+    return this.kernel
+  }
+
+  /** 是否有内核会话（供装配自检与诊断；不抛错）。 */
+  hasKernelSession(): boolean {
+    return this.kernel !== null
+  }
+
+  /**
+   * **帧时钟**（外壳级；P10 #261）。
+   *
+   * ## 为什么它在 `Context` 上而不是每个视口自己起
+   *
+   * 时间属**共享** `EditContext`（#249 §3.4）：两个 Area 必须看到同一时间
+   * （A05「两视口有效坐标相同」）。若每个视口各起一个帧时钟，同一时间会被
+   * 推进两次（第二个视口让时间走两倍）—— 那是"双视口各播各的"的另一种形态。
+   *
+   * ⇒ 时钟归外壳，视口只**订阅**它（`onFrame`）并在自己那一帧变化时重绘。
+   *
+   * 由外壳在挂载时设置（`composition/kernelRuntime#createFrameClock`）；
+   * `null` = 尚未设置（组件挂载早于外壳装配），此时视口退化为"静态第一帧"。
+   */
+  private frameClock: import('@/composition/kernelRuntime').FrameClock | null = null
+
+  setFrameClock(clock: import('@/composition/kernelRuntime').FrameClock | null): void {
+    this.frameClock = clock
+  }
+
+  getFrameClock(): import('@/composition/kernelRuntime').FrameClock | null {
+    return this.frameClock
+  }
+
+  /**
    * 内容**重读请求**（原 `getStructEpoch()`）。
    *
    * 它不是"重建版本"：呈现层会重读内容并自行判断要不要重建
@@ -158,8 +236,47 @@ export class Context {
   getContentRefreshTick(): Ref<number> {
     return this.main.contentRefreshTick
   }
-  getCurrentFrameIndex(): Ref<number> {
-    return this.main.currentFrameIndex
+  /**
+   * **已删除**（P10 #261，退役 B5 #1 `raw-authority-object` 的
+   * `getCurrentFrameIndex` 条目）：旧实现返回 `Ref<number>` —— 一个**可写**的
+   * 帧下标权威（`return this.main.currentFrameIndex`），于是每个调用点都能
+   * 直接 `.value = i` 改帧，与时间无关。
+   *
+   * ## 替代读面（按用途分三处，各自有明确的权威）
+   *
+   * | 用途 | 新读面 | 为什么 |
+   * |---|---|---|
+   * | 呈现要知道"当前画第几帧" | `requireKernelSession().frameIndex()` | 派生值，与时间同源 |
+   * | 呈现/面板要知道"场景时间" | `requireKernelSession().playback().time` | 时间的唯一权威 |
+   * | 选择/拾取要知道"当前帧的网格" | `ctx.getDoc().value?.frame(i)` | **文档内容**仍是旧 `RuntimeDocument`（该迁移未完成，见 `requireKernelSession` 的说明） |
+   *
+   * 第三行是本条与"文档内容迁移"的分界：帧**下标**（时间面）已迁到内核，
+   * 帧**内容**（网格数据）仍读旧文档。混为一谈会让"下标已迁移"被误读成
+   * "内容也迁移了"。
+   */
+  /**
+   * 当前帧下标（**只读**；P10 #261）。
+   *
+   * ## 与旧 `getCurrentFrameIndex(): Ref<number>` 的差别（这是本条的全部要点）
+   *
+   * | | 旧 | 新 |
+   * |---|---|---|
+   * | 返回 | `Ref<number>`（**可写**权威） | `number`（**派生**值快照） |
+   * | 谁能改 | 任何拿到 Ref 的人（`.value = i`） | 只能经 `setTime`/`seekFrame` 命令 |
+   * | 与时间的关系 | 无关（独立权威） | 由 `EditContext.time` 派生 |
+   *
+   * 消费者（`context/queries.ts`、`runtime/hover/access.ts` 等）用它**选帧内容**
+   * （`doc.frame(i)` 取网格）。它们只需要一个数，不需要可写句柄 ——
+   * 给 Ref 正是旧机制让"帧下标有多个写入者"的入口。
+   *
+   * ## 无会话时返回 0（而不是抛错）
+   *
+   * 这些消费者是**读**路径（拾取、统计、悬停）。无会话的装配里退化为
+   * "总看第一帧"是正确的（静态呈现），而不是让拾取整条链崩掉。
+   * 写面（operator）则用 `requireKernelSession()` 显式失败 —— 见其说明。
+   */
+  getFrameIndex(): number {
+    return this.kernel?.frameIndex() ?? 0
   }
 
   /** 按 region 取 Main 逻辑相机 */

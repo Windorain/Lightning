@@ -11,7 +11,7 @@ import type { PartTooltipInfo } from '@/pure/tooltipResolution'
 export function blockRefFromViewportHover(ctx: Context, vb: ViewportBlockHover | null): BlockRef | null {
   if (!vb) return null
   const doc = ctx.getDoc().value
-  const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc?.frame(ctx.getFrameIndex())
   const h = rf?.grid?.height ?? 0
   const worldY = h > 0 ? structureRowToWorldY(vb.voxel.row, h) : vb.voxel.row
   return {
@@ -70,7 +70,7 @@ export function setRegionHoverBlock(ctx: Context, regionId: string, block: Block
     return
   }
   const doc = ctx.getDoc().value
-  const grid = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)?.grid
+  const grid = doc?.frame(ctx.getFrameIndex())?.grid
   const h = grid?.height ?? 0
   const row = h > 0 ? h - 1 - block.pos.y : block.pos.y
   hover.setViewportBlock({

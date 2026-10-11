@@ -7,7 +7,7 @@ import type { Context } from '@/runtime/context'
 function makeMockCtx(doc: RuntimeDocument | null): Context {
   return {
     getDoc: () => ref(doc),
-    getCurrentFrameIndex: () => ref(0),
+    getFrameIndex: () => 0,
     getSelection: () => ({ items: { value: new Set() } }),
     getViewport: () => ({
       camera: ref(null),

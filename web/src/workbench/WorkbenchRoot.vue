@@ -88,6 +88,7 @@ import { workbenchCommandSink, workbenchInputHotkeys } from '@/workbench/inputHo
 // ── 装配（B5 #7 的替代物：profile 是值，不是模块级全局）────────────────────
 import { CAPABILITY } from '@/composition/modules'
 import { createShellRuntimeForProfile, resolveShellProfile, shellKey, type ShellRuntime } from '@/composition/shell'
+import { useKernelFrameLoop } from '@/composition/useKernelFrameLoop'
 import { editorTypeRegistry } from '@/editors/builtinEditors'
 
 /**
@@ -114,6 +115,11 @@ const tool = createToolSettings()
 const { host, ctx, screen: defaultScreen } = createWorkbenchHost({
   selection, editHistory, toolRegistry, tool, shell,
 })
+
+// **内核帧循环**（P10 #261 / R-WK-03）：宿主按帧向内核注入时间输入。
+// 挂载即开始、卸载即停止（`onMounted`/`onBeforeUnmount`），不留幽灵推进。
+// 它替代的是旧 `renderEngine` 里那个"绘制 + 业务 tick 混在一起"的 RAF。
+useKernelFrameLoop(ctx)
 
 ctx.wm.chrome.wikiUi = createWikiUiState()
 if (wikiHost) {

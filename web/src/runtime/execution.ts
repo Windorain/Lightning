@@ -498,7 +498,7 @@ export class Editor implements EditorClient {
       }
       case 'context': {
         const ctx = this.state.contexts[query.contextId]
-        return ctx ? { id: ctx.id, documentId: ctx.documentId, time: ctx.time, channelValues: ctx.channelValues, activeTool: ctx.activeTool } : null
+        return ctx ? { id: ctx.id, documentId: ctx.documentId, time: ctx.time, channelValues: ctx.channelValues, activeTool: ctx.activeTool, playing: ctx.playing, rate: ctx.playbackRate } : null
       }
     }
   }

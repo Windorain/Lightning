@@ -51,7 +51,7 @@ export const SDELoadExportOperator: OperatorType = {
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
       ctx.main.replaceDoc( result.document)
-      ctx.getCurrentFrameIndex().value = 0
+      ctx.requireKernelSession().seekFrame(0)
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
@@ -74,7 +74,7 @@ export const SDELoadWorkspaceOperator: OperatorType = {
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
       ctx.main.replaceDoc( result.document)
-      ctx.getCurrentFrameIndex().value = 0
+      ctx.requireKernelSession().seekFrame(0)
       ctx.log.info('场景加载', 'SDE workspace', { frames: result.document.frameCount })
     } else {
       ctx.main.replaceDoc( null)

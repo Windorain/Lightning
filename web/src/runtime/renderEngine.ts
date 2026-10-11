@@ -26,6 +26,46 @@ export interface RenderEngineOptions {
 
 /**
  * WebGL 视口引擎：场景、RAF、resize。不监听 DOM 指针（hover 走 WM）。
+ *
+ * ## P10 #261 退役改造（B5 #6 `multi-raf-business` / #11 `material-viewport-tick`）
+ *
+ * ## 被删除的机制
+ *
+ * 旧 `mount()` 里的 RAF **同时**做两件事：
+ *
+ * ```ts
+ * const clock = new THREE.Clock()
+ * const tick = () => {
+ *   requestAnimationFrame(tick)
+ *   opts.materialLibrary.tick(clock.getDelta() * 1000)   // ← 业务：每材质自行累计时间
+ *   for (const hook of this.frameHooks) hook()            // ← 业务：视口帧钩子
+ *   vp.renderMain(); vp.renderOverlay(…); vp.renderGizmo() // ← 绘制
+ * }
+ * ```
+ *
+ * 那是 #249 §15 第 6 条要退役的"多 RAF 分别推进业务"的**最典型形态**：
+ * 全树唯一的帧时钟在绘制循环里，于是"业务推进可枚举"不成立
+ * （没人能列出"下一次纹理动画推进从哪来"）。
+ *
+ * ## 替代（**本文件不再持有时间语义**）
+ *
+ *  - **时间**：`EditContext.time`（内核）→ `sceneSeconds()` →
+ *    `materialLibrary.setSceneTime(seconds)`。谁调用见下一条；
+ *  - **推进**：宿主的帧时钟（`composition/kernelRuntime`）每帧注入 delta，
+ *    并在 `onFrame` 里更新材质库的场景时间 —— **不**在本 RAF 里；
+ *  - **本 RAF 只做绘制**：`renderMain` / `renderOverlay` / `renderGizmo`
+ *    与内容组重挂。它**不**读时钟、**不**推进任何业务状态。
+ *
+ * ## `frameHooks` 的语义收窄（一条真实的口径变化）
+ *
+ * 旧钩子在"材质 tick **之后**、绘制**之前**"执行，于是钩子可以依赖
+ * "动画已经推进"这一事实。新形态下动画推进**不在本循环里**（它在宿主的
+ * 帧时钟里），故钩子不再保证"动画已推进"。
+ *
+ * 唯一的消费者（`WorkbenchViewport.vue` 的 `updateOverlay`）不依赖动画状态
+ * ——它只同步 overlay 场景的可见性/尺寸。⇒ 这个收窄**不**造成行为回退。
+ * 若将来有钩子确实需要"动画已推进"，正确做法是订阅宿主的 `FrameClock.onFrame`
+ * （那里有明确的顺序保证），而不是回到"在绘制循环里偷偷推进业务"。
  */
 export class RenderEngine {
   private renderer: View3DRenderer | null = null
@@ -95,10 +135,18 @@ export class RenderEngine {
     applySizeFromEl()
     vp.initComposer(mainScene)
 
-    const clock = new THREE.Clock()
-    const tick = () => {
-      this.animationId = requestAnimationFrame(tick)
-      opts.materialLibrary.tick(clock.getDelta() * 1000)
+    /**
+     * **绘制循环**（P10 #261：不再持有时间语义）。
+     *
+     * 与旧实现的逐行差别：删掉了 `const clock = new THREE.Clock()` 与
+     * `opts.materialLibrary.tick(clock.getDelta() * 1000)`。剩下的是纯粹的
+     * 绘制 + 内容组重挂 —— 时间推进归宿主的帧时钟（见类头说明）。
+     *
+     * 函数名从 `tick` 改为 `drawFrame`：旧名字暗示"这一帧推进了什么"，
+     * 而它现在**只画不算**。名字与职责一致，读者才不会以为时间还在这里走。
+     */
+    const drawFrame = () => {
+      this.animationId = requestAnimationFrame(drawFrame)
       for (const hook of this.frameHooks) {
         try { hook() } catch (e) { console.error('[RenderEngine] frameHook', e) }
       }
@@ -111,7 +159,7 @@ export class RenderEngine {
       vp.renderOverlay(overlayScene)
       vp.renderGizmo()
     }
-    tick()
+    drawFrame()
 
     this.renderer = vp
     this.mainScene = mainScene

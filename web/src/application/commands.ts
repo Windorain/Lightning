@@ -49,6 +49,7 @@ import {
 import { DEFAULT_OBJECT_FACTORIES, createObjectOfType, withObject } from '@/domain/scene'
 import {
   acquireLease,
+  advancePlayback,
   beginInteraction,
   cancelInteraction,
   clearSelection,
@@ -59,6 +60,8 @@ import {
   selectOne,
   updateInteraction,
   withChannelValue,
+  withPlaybackRate,
+  withPlaying,
   withTime,
   type DocumentLease,
   type EditContext,
@@ -229,6 +232,62 @@ export interface SetTimeCommand {
   readonly time: TimeValue
 }
 
+/**
+ * 开始/停止播放（R-WK-03 内核缺口补齐；替代旧 `OPERATOR_TOGGLE_FRAME_PLAYBACK`
+ * 直写 `Main.framesPlaybackIsPlaying`）。
+ *
+ * ## 为什么是具名命令而不是"通用上下文写"
+ *
+ * 播放开关是**业务事实**（时间要不要自己走），它有自己的拒绝条件与自己的读面。
+ * 用一个 `patchContext` 之类的通用写命令承载它，会让"哪些上下文字段可写"
+ * 变成运行期才知道的事 —— 那正是契约 §5.2 要消除的形态（封闭判别联合）。
+ *
+ * ## 不碰时间
+ *
+ * #249 §3.3「停止播放保留当前时间」⇒ 本命令**只**翻开关。
+ * 需要同时定位时，调用方另发 `setTime`（两条命令各自可断言）。
+ */
+export interface SetPlayingCommand {
+  readonly kind: 'setPlaying'
+  readonly contextId: string
+  readonly playing: boolean
+}
+
+/**
+ * 设置常量播放倍率（#249 §19.3：速度是**常量**，本批不接受轨道驱动的速度）。
+ *
+ * 拒绝：非有限或负（`InvalidValue`）。`0` 合法 —— 等于"playing 但时间不动"。
+ */
+export interface SetPlaybackRateCommand {
+  readonly kind: 'setPlaybackRate'
+  readonly contextId: string
+  readonly rate: number
+}
+
+/**
+ * **按注入的经过秒数推进播放时间**（宿主按帧注入时间输入的唯一落点）。
+ *
+ * ## 为什么它是命令，而不是宿主编排直接改状态
+ *
+ * 契约 §5.2 要求"所有权威变化经同一条 `reduceCommand`"。若宿主编排自己
+ * `ctx.time = advanceTime(...)`，就出现了一条**绕过唯一写通路**的状态变更，
+ * 于是 A03「所有权威变化只在更新阶段」与 A04「相同输入可重放」都不再成立
+ * （重放日志里不会有这次推进，重放结果必然不同）。
+ *
+ * ## `deltaSeconds` 是**输入**，不是从时钟读的
+ *
+ * 宿主从 RAF 帧时钟算出 delta 后作为命令参数传入；纯转移不读墙钟（#249 §2.1）。
+ * 这使"同一时间 ⇒ 同一样本"（A09/A27）与"跳帧 = 直接 `setTime`"共用同一条求值路径。
+ *
+ * 暂停或倍率为 0 ⇒ `unchanged`（**不**产生版本推进，也不产生历史）。
+ */
+export interface AdvancePlaybackCommand {
+  readonly kind: 'advancePlayback'
+  readonly contextId: string
+  /** 自上一帧经过的**逻辑**秒数（由宿主的帧时钟给出）。 */
+  readonly deltaSeconds: number
+}
+
 export interface SetChannelValueCommand {
   readonly kind: 'setChannelValue'
   readonly contextId: string
@@ -327,6 +386,9 @@ export type Command =
   | CancelInteractionCommand
   | SelectCommand
   | SetTimeCommand
+  | SetPlayingCommand
+  | SetPlaybackRateCommand
+  | AdvancePlaybackCommand
   | SetChannelValueCommand
   | InsertKeyframeCommand
   | RemoveKeyframeCommand
@@ -350,6 +412,9 @@ export type ImmediateCommand = Extract<
   Command,
   | { kind: 'select' }
   | { kind: 'setTime' }
+  | { kind: 'setPlaying' }
+  | { kind: 'setPlaybackRate' }
+  | { kind: 'advancePlayback' }
   | { kind: 'setChannelValue' }
   | { kind: 'setProperty' }
   | { kind: 'setTransform' }
@@ -507,6 +572,12 @@ export function reduceCommand(state: ApplicationState, command: Command, env: Ex
       return reduceSelect(state, command)
     case 'setTime':
       return reduceSetTime(state, command)
+    case 'setPlaying':
+      return reduceSetPlaying(state, command)
+    case 'setPlaybackRate':
+      return reduceSetPlaybackRate(state, command)
+    case 'advancePlayback':
+      return reduceAdvancePlayback(state, command)
     case 'setChannelValue':
       return reduceSetChannelValue(state, command)
     case 'insertKeyframe':
@@ -646,8 +717,71 @@ function reduceSetTime(state: ApplicationState, cmd: SetTimeCommand): Transition
   return applied(withContext(state, withTime(ctx, cmd.time)), doc.version, changeSummary({ structurallyShared: true }))
 }
 
-function reduceSetChannelValue(state: ApplicationState, cmd: SetChannelValueCommand): Transition {
+// ─────────────────────────────────────────────────────────────────────────────
+// 播放状态（R-WK-03：归 EditContext；替代旧 Main 播放 Ref）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 开始/停止播放。
+ *
+ * 三条语义要点（各自对应一条会被静默违反的约束）：
+ *  1. **不碰时间** —— #249 §3.3「停止播放保留当前时间」；定位是 `setTime` 的职责。
+ *  2. **不推进文档版本** —— 播放是 `EditContext` 的从属事实（§3.4），
+ *     与 `setTime` 同一口径（"动画播放不增加文档版本"，#249 §7）。
+ *  3. **幂等** —— 已经是该状态 ⇒ `unchanged`（不因"新建了上下文容器"记 applied）。
+ */
+function reduceSetPlaying(state: ApplicationState, cmd: SetPlayingCommand): Transition {
   const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+  const next = withPlaying(ctx, cmd.playing)
+  if (next === ctx) return unchanged(state, doc.version)
+  return applied(withContext(state, next), doc.version, changeSummary({ structurallyShared: true }))
+}
+
+/**
+ * 设置常量播放倍率。
+ *
+ * 非法值（非有限、负）⇒ `InvalidValue`，**不**夹取（#249 §7「不悄悄夹取」）。
+ * `0` 合法：它表达"playing 但时间不动"，与"暂停"是两件不同的事
+ * （`domain/animation#Playhead` 对两者有同一区分）。
+ */
+function reduceSetPlaybackRate(state: ApplicationState, cmd: SetPlaybackRateCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+  if (!Number.isFinite(cmd.rate) || cmd.rate < 0) {
+    return rejected(state, invalidValue({ reason: 'playbackRateMustBeNonNegative', rate: String(cmd.rate) }))
+  }
+  const next = withPlaybackRate(ctx, cmd.rate)
+  if (next === ctx) return unchanged(state, doc.version)
+  return applied(withContext(state, next), doc.version, changeSummary({ structurallyShared: true }))
+}
+
+/**
+ * 按注入的经过秒数推进播放时间（宿主帧时钟的唯一落点）。
+ *
+ * 拒绝：非有限 delta（`InvalidValue`）—— 一个 `NaN` delta 会让时间变成 `NaN`，
+ * 而 `NaN` 时间会让之后每次采样都失败且**无从诊断来源**。
+ *
+ * 暂停 / 倍率为 0 ⇒ `unchanged`（`advancePlayback` 返回原引用）。
+ * 这条让"没在播放时宿主仍每帧发推进命令"成为**无副作用**的行为 ——
+ * 宿主不必自己判断要不要发（判断会变成第二份播放状态判据）。
+ */
+function reduceAdvancePlayback(state: ApplicationState, cmd: AdvancePlaybackCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+  if (!Number.isFinite(cmd.deltaSeconds)) {
+    return rejected(state, invalidValue({ reason: 'playbackDeltaNotFinite', delta: String(cmd.deltaSeconds) }))
+  }
+  const next = advancePlayback(ctx, cmd.deltaSeconds)
+  if (next === ctx) return unchanged(state, doc.version)
+  // 时间属 EditContext：推进它**不**推进 documentVersion（#249 §7）。
+  return applied(withContext(state, next), doc.version, changeSummary({ structurallyShared: true }))
+}
+
+function reduceSetChannelValue(state: ApplicationState, cmd: SetChannelValueCommand): Transition {  const found = contextAndDoc(state, cmd.contextId)
   if (!found.ok) return rejected(state, found.error)
   const { ctx, doc } = found.value
   if (!Number.isFinite(cmd.value)) return rejected(state, invalidValue({ reason: 'notFinite', channel: cmd.channel, value: String(cmd.value) }))

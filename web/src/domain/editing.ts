@@ -63,16 +63,19 @@ import { documentEntityRef, type Document } from './document'
  * 既有的 `fps: 20` 写法仍然完全合法（见 `frameRateOf`）。故不存在"旧值变成非法"的迁移问题。
  */
 import {
+  advancePlayhead,
   advanceTime,
+  createPlayhead,
   framesPerSecond,
   sameTime,
   timeValue,
   type FrameRate,
   type FrameRateSpec,
+  type Playhead,
   type TimeValue,
 } from './animation'
 
-export type { FrameRate, FrameRateSpec, TimeValue }
+export type { FrameRate, FrameRateSpec, Playhead, TimeValue }
 
 export const TIME_ZERO: TimeValue = Object.freeze({ frame: 0, fps: 20 })
 
@@ -124,6 +127,29 @@ export interface EditContext {
   readonly documentId: string
   readonly selection: SelectionState
   readonly time: TimeValue
+  /**
+   * **是否正在播放**（R-WK-03 裁决 2026-10-11：播放状态归 `EditContext`，不归宿主）。
+   *
+   * ## 为什么归 `EditContext` 而不是宿主（P10 落点，替代旧 `Main.framesPlaybackIsPlaying`）
+   *
+   * #249 §3.4 把**时间**归编辑上下文，§1.1 方向 7 要求同一上下文的多个 Area
+   * **共享当前时间**；播放是时间的**从属事实**（"时间要不要自己走"），
+   * 不是某个视口的私有属性。把它放宿主（或放视口）会直接得到
+   * 「双视口各播各的」—— 那正是 A05「两视口有效坐标相同」要判红的形态。
+   *
+   * ## 它与 `time` 的关系（**不是**第二份时间权威）
+   *
+   * `time` 仍是时间的**唯一**权威；本字段只说"它是否随注入的 delta 前进"。
+   * 二者由 {@link playheadOf} 合成一个 `Playhead` 视图（`domain/animation` 的类型），
+   * 因此不存在"两处各存一份时间"的可能。
+   */
+  readonly playing: boolean
+  /**
+   * 常量播放倍率（1 = 原速）。`0` 合法 —— 等于"playing 但时间不动"，
+   * 与 `domain/animation#Playhead.rate` 同一语义（#249 §19.3：速度是常量，
+   * 本批**不**接受轨道驱动的速度）。
+   */
+  readonly playbackRate: number
   /** 通道取值（手动预览值属编辑上下文，#249 §3.3）。 */
   readonly channelValues: Readonly<Record<string, number>>
   readonly activeTool: string | null
@@ -137,6 +163,9 @@ export function createEditContext(id: string, documentId: string): EditContext {
     documentId,
     selection: EMPTY_SELECTION,
     time: TIME_ZERO,
+    // 默认**暂停**（#249 §7「默认暂停随场景」）：新建上下文不会自己开始走时间。
+    playing: false,
+    playbackRate: 1,
     channelValues: Object.freeze({}),
     activeTool: null,
     interaction: null,
@@ -449,6 +478,74 @@ export function advanceContextTime(ctx: EditContext, deltaSeconds: number): Edit
 export function seekContextTime(ctx: EditContext, time: TimeValue): EditContext {
   return Object.freeze({ ...ctx, time })
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 播放状态（R-WK-03：归 EditContext；替代旧 `Main.framesPlaybackIsPlaying`）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 把 `EditContext` 的时间与播放状态**合成**一个 `Playhead` 视图。
+ *
+ * ## 为什么是"合成视图"而不是在 `EditContext` 上再存一个 `Playhead`
+ *
+ * `domain/animation#Playhead` 自带 `time` 字段。若 `EditContext` 也持一个 `Playhead`，
+ * 就有了**两份时间**（`ctx.time` 与 `ctx.playhead.time`）—— 二者一旦漂移，
+ * "同一上下文所有 Area 看到同一时间"（#249 §1.1 方向 7）就只是巧合。
+ * ⇒ 本函数每次从 `ctx.time` + `playing` + `playbackRate` **现算**，
+ * 使 `Playhead` 恒为派生值，`ctx.time` 保持唯一权威。
+ *
+ * 反向的落点见 {@link withPlayhead}：它把推进结果**只**写回 `time`，
+ * 因此"用 `Playhead` 推进"不会引入第二个存储位置。
+ */
+export function playheadOf(ctx: EditContext): Playhead {
+  return createPlayhead(ctx.time, ctx.playing, ctx.playbackRate)
+}
+
+/**
+ * 用 `Playhead` 的推进结果更新上下文（**只**取 `time`；`playing`/`rate` 由调用方显式给）。
+ *
+ * `playing` 与 `rate` 刻意不从 `playhead` 取：`advancePlayhead` 会把它们原样带回，
+ * 从那里取等于让"这次推进"隐式决定播放开关 —— 而开关是**命令**的职责
+ * （`setPlaying` / `setPlaybackRate`），不是推进的副作用。
+ */
+export function withPlayhead(ctx: EditContext, playhead: Playhead): EditContext {
+  return ctx.time === playhead.time ? ctx : Object.freeze({ ...ctx, time: playhead.time })
+}
+
+/**
+ * 开始/停止播放。**不碰时间**（#249 §3.3「停止播放保留当前时间」）。
+ *
+ * 幂等：已经是该状态 ⇒ 返回**原引用**（使"未变化不得谎报推进"可断言）。
+ */
+export function withPlaying(ctx: EditContext, playing: boolean): EditContext {
+  if (ctx.playing === playing) return ctx
+  return Object.freeze({ ...ctx, playing })
+}
+
+/**
+ * 设置常量播放倍率。
+ *
+ * 非法值（非有限、负）⇒ 返回**原引用**（拒绝零残留；判据在命令层给出结构化错误，
+ * 本函数是纯转移，不产出诊断 —— 与 `withPlaying` 同一分工）。
+ */
+export function withPlaybackRate(ctx: EditContext, rate: number): EditContext {
+  if (!Number.isFinite(rate) || rate < 0) return ctx
+  if (ctx.playbackRate === rate) return ctx
+  return Object.freeze({ ...ctx, playbackRate: rate })
+}
+
+/**
+ * 推进播放时间（**按注入的经过秒数**）。
+ *
+ * 这是"宿主按帧注入时间输入"的唯一落点：`deltaSeconds` 是**显式输入**，
+ * 本函数不读墙钟（#249 §2.1）。暂停或倍率为 0 时返回原引用 ⇒
+ * "没播放就不动"是结构事实，不靠调用方自觉。
+ */
+export function advancePlayback(ctx: EditContext, deltaSeconds: number): EditContext {
+  if (!ctx.playing || ctx.playbackRate === 0 || !Number.isFinite(deltaSeconds)) return ctx
+  return withPlayhead(ctx, advancePlayhead(playheadOf(ctx), deltaSeconds))
+}
+
 
 /**
  * 暂存事务版本。

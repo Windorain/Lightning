@@ -42,7 +42,7 @@ export async function documentLoadPipeline(
     ctx.main.replaceDoc(result.document)
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
     hydrateMainEmbedInitialViewFromDoc(ctx.main)
-    ctx.getCurrentFrameIndex().value = 0
+    ctx.requireKernelSession().seekFrame(0)
     const totalBlocks = result.document.frames.reduce(
       (sum, f) => sum + (f.grid?.count() ?? 0),
       0,

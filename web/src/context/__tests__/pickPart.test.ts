@@ -7,7 +7,7 @@
  *  - 格内未命中任何部件盒 ⇒ null（回退宿主）
  *  - 栅栏越界盒（maxY=1.5）经碰撞盒回退命中
  *
- * ctx 仅取 getDoc()/getCurrentFrameIndex()，测试用最小手工实例（非渲染路径替身）。
+ * ctx 仅取 getDoc()/getFrameIndex()，测试用最小手工实例（非渲染路径替身）。
  */
 import { describe, it, expect } from 'vitest'
 import { ref } from 'vue'
@@ -25,7 +25,7 @@ type Json = Record<string, unknown>
 function ctxFor(doc: RuntimeDocument): Context {
   return {
     getDoc: () => ref(doc),
-    getCurrentFrameIndex: () => ref(0),
+    getFrameIndex: () => 0,
   } as unknown as Context
 }
 

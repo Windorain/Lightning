@@ -6,7 +6,7 @@
  *  - 给出且该格有部件 ⇒ 该部件盒 union（AE2 同格三部件各自不同）；
  *  - 未知 localId / 无部件数据 / 无几何 ⇒ 回退整格 / null（不劣化）。
  *
- * ctx 只取 getDoc()/getCurrentFrameIndex()，与 `pickPart.test.ts` 同口径的最小手工实例。
+ * ctx 只取 getDoc()/getFrameIndex()，与 `pickPart.test.ts` 同口径的最小手工实例。
  */
 import { describe, it, expect } from 'vitest'
 import { ref } from 'vue'
@@ -23,7 +23,7 @@ type Json = Record<string, unknown>
 function ctxFor(doc: RuntimeDocument): Context {
   return {
     getDoc: () => ref(doc),
-    getCurrentFrameIndex: () => ref(0),
+    getFrameIndex: () => 0,
   } as unknown as Context
 }
 

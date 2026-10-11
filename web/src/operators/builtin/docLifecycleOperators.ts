@@ -96,7 +96,7 @@ export const OpenSceneOperator: OperatorType = {
       ctx.main.replaceDoc(result.document)
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       hydrateMainEmbedInitialViewFromDoc(ctx.main)
-      ctx.getCurrentFrameIndex().value = 0
+      ctx.requireKernelSession().seekFrame(0)
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
@@ -147,7 +147,7 @@ export const LoadBuiltinSceneOperator: OperatorType = {
       ctx.main.replaceDoc(result.document)
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       hydrateMainEmbedInitialViewFromDoc(ctx.main)
-      ctx.getCurrentFrameIndex().value = 0
+      ctx.requireKernelSession().seekFrame(0)
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {

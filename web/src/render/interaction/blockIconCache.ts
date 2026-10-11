@@ -396,7 +396,18 @@ export class BlockIconCache {
 
       renderer.setClearColor(this.opts.clearColor, this.opts.clearAlpha)
       renderer.setSize(s, s, false)
-      this.library.tick(16)
+      // **P10 #261**：旧实现是 `this.library.tick(16)` —— 在烘焙前把材质库的
+      // 时间**前推 16ms**（一个"拍脑袋"的固定 dt，目的是让图标不总是第一帧）。
+      // 那属于被退役的 `material-tick` 机制（每材质累计 tick）。
+      //
+      // 替代：在**定义好的烘焙时间**做一次纯采样。取 0 秒是刻意的 ——
+      // 图标是**静态缩略图**，它不该随播放位置变化（否则同一方块在不同时刻
+      // 烘焙出不同图标，缓存键就无法表达"这份图标代表什么"）。
+      // 采样到 0 秒 ⇒ 图标恒显示时长轴上第 0 秒对应的帧，与播放无关。
+      //
+      // 这与 `bakeRevisionKey`（`setRevisionKey` 设的缓存键）是同一政策的两半：
+      // 键说"这份图标由哪些输入决定"，而本行说"那些输入里时间取哪个值"。
+      this.library.setSceneTime(0)
       renderer.render(scene, cam)
 
       const src = renderer.domElement

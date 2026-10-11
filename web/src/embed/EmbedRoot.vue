@@ -6,6 +6,7 @@ import { ref, watch } from 'vue'
 import type { EmbedBootstrapOptions } from '@/embed/embedContract'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { createEmbedHost } from '@/runtime/host/embedHost'
+import { useKernelFrameLoop } from '@/composition/useKernelFrameLoop'
 import HostProvider from '@/runtime/HostProvider.vue'
 import EmbedViewport from '@/shared/viewport/EmbedViewport.vue'
 import { buildEmbedSettingsFromBootstrap } from '@/viewer/viewerConfig'
@@ -23,6 +24,10 @@ const { host, ctx } = createEmbedHost(settings, {
   workbenchEdit: props.bootstrap.workbenchEdit,
   handlers: props.bootstrap.handlers,
 })
+
+// **内核帧循环**（P10 #261 / R-WK-03）：嵌入外壳同样由宿主按帧注入时间。
+// 与工作台各自独立（时间属共享 EditContext ⇒ 同页两实例各播各的互不影响）。
+useKernelFrameLoop(ctx)
 
 const loadError = ref('')
 

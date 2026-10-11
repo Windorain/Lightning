@@ -119,6 +119,8 @@ export const KERNEL_FILES = [
   'runtime/evaluation.ts',
   'runtime/lifecycle.ts',
   'runtime/exportJob.ts',
+  // P10（#261）内核→生产接线：宿主侧会话（时间/播放/帧下标的读面与写面）
+  'runtime/kernelSession.ts',
   // P9（#260）保存目标适配：写入串行化 + 远端条件版本（A16 适配器层）
   'adapters/saveTarget/coordinator.ts',
   // P9（#260）恢复副本存储适配（A31）：内存端口 + 浏览器薄适配
@@ -471,6 +473,69 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       '字段只声明**草稿种类**（`DraftKind`）；草稿权威（三态机）在输入层。本边是"呈现读核心类型"的最小面',
     exitStage: 'P10 集成：字段模型自带草稿种类后删除本行；P11 核销',
   }),
+  // ── P10（#261）内核→生产接线：宿主创建会话并持有它（R-WK-03 的核心内容）──
+  //
+  // ## 这三条边为什么必须存在，以及它们**不**是"半成品替换"
+  //
+  // R-WK-03 的裁决依据是「内核在生产代码零调用方」。本批把内核接进生产，
+  // 于是**必然**出现"旧层文件引用内核"的三条边 —— 它们正是裁决要求的接线本身：
+  //
+  //  - `runtime/context.ts`：实例持有会话（读面/写面的送达点）；
+  //  - `runtime/host/workbenchHost.ts`：工作台宿主**创建**会话；
+  //  - `runtime/host/embedHost.ts`：嵌入宿主创建会话（能力来自嵌入 profile）。
+  //
+  // 与"半成品替换"的区别是**可判定的**：接线的两端都是新实现
+  // （会话 → 内核执行协议），旧机制（`Main` 的两个播放 Ref +
+  // `drwMeshPipeline` 的 `setTimeout` 播放调度 + 材质库的 `accMs` 累加器）
+  // 在**同一批**被删除，而不是留在那里继续服役。删除后
+  // `retirementRegistry` 的 `world-frame-playback` 与 `material-tick` 两组
+  // 相位翻 `executed` 并由机器断言把守（全树 0 命中）。
+  //
+  // ⇒ 退出阶段是"P10 本批"而不是"某个未来批次"：这三条边**不**代表未竟工作，
+  // 它们代表接线已落地。P11 审计时应核对的是"旧机制确实零引用"，
+  // 而不是"这三条边消失"—— 会话是内核的**生产入口**，它本就该被宿主引用。
+  Object.freeze({
+    from: 'src/runtime/context.ts',
+    to: 'runtime/kernelSession',
+    reason:
+      '运行实例持有内核会话（构造参数，非模块级单例）——这是"实例隔离"（#249 §19.7）与"内核接线进生产"（R-WK-03）的共同落点；会话提供时间/播放/帧下标的读面与写面',
+    exitStage:
+      'P10（#261）本批接线落地，永久保留（会话是内核的生产入口）；P11 审计核对的是旧机制零引用，不是本边消失',
+  }),
+  Object.freeze({
+    from: 'src/runtime/host/workbenchHost.ts',
+    to: 'runtime/kernelSession',
+    reason:
+      '工作台宿主**创建**内核会话（R-WK-03「宿主创建 Editor」的落点）；能力集合取自同一装配结果（`shell.assembly.capabilities`），故 profile 裁剪对内核同样生效',
+    exitStage: 'P10（#261）本批接线落地，永久保留（宿主创建会话是 R-WK-03 的原文要求）；P11 核销旧机制',
+  }),
+  Object.freeze({
+    from: 'src/runtime/host/embedHost.ts',
+    to: 'runtime/kernelSession',
+    reason:
+      '嵌入宿主创建自己的内核会话（能力来自嵌入 profile ⇒ 无内容编辑能力，A15 的运行时拒绝在嵌入侧同样成立）；与工作台会话互不可见 ⇒ 同页两实例状态隔离',
+    exitStage: 'P10（#261）本批接线落地，永久保留；P11 核销旧机制',
+  }),
+  // ── P10（#261）材质时间：渲染侧消费纯采样（`material-tick` 组的替代面）──
+  //
+  // 这条边是 `material-tick` 组退役的**替代证据**：三处旧机制（`renderEngine` 的
+  // `materialLibrary.tick`、材质库的 `accMs` 累加、图标缓存的 `library.tick(16)`）
+  // 被删除后，渲染侧必须有一条**真实的**新路径接住"帧条该显示哪一帧"。
+  // 它就是 `domain/materials#sampleStripFrameAt` —— 与 `MaterialGallery.vue`
+  // 消费 `sampleTextureSequence` 是同一族（统一时间纯采样），
+  // 故本条与 P4 那条 `MaterialGallery → domain/materials` 是同一条政策的两个消费者。
+  //
+  // 为什么不是"把旧实现搬进新层"：消费的是**纯函数**（时间进、帧出，无状态），
+  // 而旧实现是材质库私有的 `accMs` 累加器 —— 前者可被"同一时间 ⇒ 同一结果"
+  // 断言，后者不能。见 `simpleMaterialLibrary.ts` 文件头的逐条对照表。
+  Object.freeze({
+    from: 'src/render/materials/simpleMaterialLibrary.ts',
+    to: 'domain/materials',
+    reason:
+      '材质库改为**无状态纯采样**：`setSceneTime(seconds)` 经 `sampleStripFrameAt` 把场景时间映射成帧条偏移（替代旧 `accMs` 累加器 + `registerTick` 回调）；这是 `material-tick` 组退役的替代机制被真实消费者使用',
+    exitStage:
+      'P10（#261）本批落地，永久保留（渲染侧消费统一时间纯采样是目标形态，不是过渡）；P11 审计核对旧累加器零引用',
+  }),
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {
@@ -720,6 +785,7 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
     expect(unique).toEqual(
       [
         'addObject',
+        'advancePlayback',
         'beginInteraction',
         'cancelInteraction',
         'closeDocument',
@@ -734,6 +800,8 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
         'saveCompleted',
         'select',
         'setChannelValue',
+        'setPlaybackRate',
+        'setPlaying',
         'setProperty',
         'setTime',
         'setTrackEnabled',
@@ -745,7 +813,15 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
     // **唯一性**：属性写命令恰好一个（不是"清单里有 setProperty 就算过"）。
     // `setChannelValue` 是**编辑上下文**的具名命令（通道取值），不经通用属性写，
     // 且它写的是 context 而不是属性值 —— 故不在这一组里。
-    const propertyWrites = unique.filter((k) => /set(Property|Field|Value)|patch|assign|merge|apply/i.test(k))
+    //
+    // `setPlaying`/`setPlaybackRate`/`advancePlayback`（P10 补齐的播放命令）同样
+    // **不**属这一组：它们写的是 `EditContext` 的播放状态与时间，不是属性值。
+    // 注意它们名字里的 `set`/`advance` 会被下面的正则命中 —— 判据因此必须
+    // **按语义列举**而不是"含 set 就算属性写"：把播放命令误算成属性写会
+    // 让"通用属性写恰好一个"这条断言以假红的形式失败，而那个红没有意义。
+    const propertyWrites = unique.filter(
+      (k) => /set(Property|Field|Value)|patch|assign|merge|apply/i.test(k),
+    )
     expect(propertyWrites, '通用属性写命令必须恰好是 `setProperty`').toEqual(['setProperty'])
     // 明确的负面清单：这些名字一旦出现就意味着"暴露任意字段 patch"
     for (const banned of ['patch', 'setField', 'assign', 'merge', 'applyPatch']) {

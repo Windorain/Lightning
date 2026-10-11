@@ -58,7 +58,7 @@ function openWikiDataPage() {
     </span>
     <span class="sb-spacer" />
     <span v-if="hasWorldMultiFrame" class="sb-item">
-      Frame {{ (ctx.getCurrentFrameIndex().value ?? 0) + 1 }} / {{ frameCount }}
+      Frame {{ (ctx.getFrameIndex()) + 1 }} / {{ frameCount }}
     </span>
   </div>
 </template>

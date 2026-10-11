@@ -1,0 +1,329 @@
+/**
+ * `runtime/kernelSession` —— **宿主侧的内核会话**：把 P1 执行协议接进生产
+ * （R-WK-03 裁决：内核→生产接线是 #261 的核心内容）。
+ *
+ * ## 本模块解决什么（它替代的旧机制）
+ *
+ * R-WK-03 的侦察结论是「内核在生产代码**零调用方**」：`new Editor(` 零生产构造、
+ * `runtime/evaluation.ts` 零导入者、没有任何生产调用方推进 `EditContext` 时间。
+ * 于是**播放与纹理动画的生产唯一来源**是待删的旧机制：
+ * `drwMeshPipeline` 的 `setTimeout` 自续播放调度 + `renderEngine` 里
+ * `materialLibrary.tick(clock.getDelta())` 的每材质累加器 + `Main` 上的两个 Vue Ref。
+ *
+ * 本模块把那三者的**权威**搬进内核：
+ *
+ * | 旧机制 | 本模块的替代 |
+ * |---|---|
+ * | `Main.framesPlaybackIsPlaying`（Vue Ref） | `EditContext.playing`（值；经 `setPlaying` 命令写） |
+ * | `Main.currentFrameIndex`（Vue Ref） | **派生值**：由 `EditContext.time` + 帧时长轴算出（见 {@link KernelSession.frameIndex}） |
+ * | `drwMeshPipeline` 的 `setTimeout` 自续 | 宿主**按帧**调用 {@link KernelSession.frame} 注入经过秒数 |
+ * | `materialLibrary.tick(delta)` 累加 | 时间进 `EditContext.time`，采样是纯函数（`domain/materials`） |
+ *
+ * ## 三条硬要求及其落点
+ *
+ * ### 1. 宿主创建 `Editor`，内核不自跑（A03）
+ * 本模块**没有** `requestAnimationFrame` / `setTimeout` / `setInterval` ——
+ * 它是 `runtime` 层（`corePurity: true`），连 Vue 都不能 import。
+ * 帧时钟在 `composition/kernelRuntime`（装配层），本模块只提供
+ * {@link KernelSession.frame} 这个**被调用**的入口。
+ *
+ * ### 2. 时间输入是**显式**的（#249 §9「时钟以输入注入」）
+ * {@link KernelSession.frame} 接收 `deltaSeconds` 并把它作为
+ * `advancePlayback` 命令的参数提交 —— 纯转移因此不读墙钟，
+ * 且"同一时间 ⇒ 同一样本"（A09/A27）与"跳帧 = 直接定位"共用一条求值路径。
+ *
+ * ### 3. 读面是**推**的，不是每帧重建（A03「发布版本内一致」）
+ * 构造时 `observe({kind:'context'})` 订阅一次；每次权威变化由内核**投递**
+ * 一份一致快照。于是"渲染消费求值结果"不需要每帧重新 `read()` 一个完整 `ReadView`
+ * （那是每帧一次的对象分配风暴），也不会读到"新时间配旧播放开关"的组合
+ * —— 投递的值来自**同一个**不可变状态。
+ *
+ * ## 与 A3（文档内容迁移）的分工
+ *
+ * 本模块接的是**编辑上下文与时间/播放**这条线（R-WK-03 明列的内核缺口）。
+ * 工作台的**文档内容**此刻仍是旧 `RuntimeDocument`（`context.getDoc()`），
+ * 故帧声明（帧数、每帧时长）由宿主经 {@link KernelSession.bindFrameSource} 注入 ——
+ * 这是一条**显式登记**的适配接缝，不是"内核偷偷读旧文档"：
+ * 内核只接受 `count()` / `durationsMs()` 两个纯值提供者，不认识 `RuntimeDocument`。
+ */
+
+import { Editor, type CommandTicket, type QuerySpec } from './execution'
+import type { Command } from '@/application/commands'
+import type { InputSource } from './scheduling'
+import type { ReadView } from '@/application/queries'
+import { defaultExecutionInputs } from '@/application/commands'
+import type { ObjectFactoryTable } from '@/domain/scene'
+import { sampleStripFrameAt, stripTimeline, type StripTimeline } from '@/domain/materials'
+import { framesPerSecond, type TimeValue } from '@/domain/animation'
+import { TIME_ZERO } from '@/domain/editing'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 稳定身份（单一来源）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 内核文档 id。
+ *
+ * ## 为什么是一个**常量**而不是"每次随机"
+ *
+ * `ReadScope` 与 `QuerySpec` 都按 id 寻址；重放记录（A04）也按 id 对齐。
+ * 若每次构造换一个随机 id，同一份输入流在两次运行里会产生不同的语义摘要
+ * —— 于是"相同输入可重放"就不再成立。
+ *
+ * 单文档是本批的口径（`ApplicationState` 支持多文档，但工作台/嵌入各只开一个）；
+ * 多文档接线时这两个常量应改为按工作区生成的稳定 id（那时重放要对齐工作区 id）。
+ */
+export const KERNEL_DOCUMENT_ID = 'doc-1'
+
+/** 内核编辑上下文 id（时间/播放/选择的归属；同一实例内唯一）。 */
+export const KERNEL_CONTEXT_ID = 'ctx-1'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 对外类型
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 播放读面（内核 `ReadView.interaction.playback()` 的投影）。
+ *
+ * `time` 与 `playing` 来自**同一份**内核状态，故不存在"开关说在播、时间却是旧的"。
+ */
+export interface KernelPlayback {
+  readonly playing: boolean
+  readonly rate: number
+  readonly time: TimeValue
+}
+
+/**
+ * 帧声明提供者（**显式适配接缝**）。
+ *
+ * 两个方法都必须是**纯值读取**：内核不持有文档、不认识 `RuntimeDocument`、
+ * 也不在内部缓存它们的结果（每次问、每次用）。
+ *
+ * 为什么是函数而不是"数组参数"：帧声明会随文档替换而变化（打开另一份文件），
+ * 传数组会要求宿主在每次换文档时重新调 `bindFrameSource` 并保证不漏 ——
+ * 而漏一次就得到"渲染按旧帧表选帧"的静默错误。函数形式让"总是读当前值"
+ * 成为结构事实。
+ */
+export interface FrameSource {
+  /** 帧总数。 */
+  count(): number
+  /** 每帧的停留时长（毫秒）；长度不足时缺项按 `1` 处理。 */
+  durationsMs(): readonly number[]
+}
+
+export interface KernelSessionOptions {
+  /** 文档 id（内核身份空间）。 */
+  readonly documentId: string
+  /** 编辑上下文 id（时间/播放/选择都挂在这里）。 */
+  readonly contextId: string
+  /** 能力集合（profile 裁剪；来自装配结果）。 */
+  readonly capabilities: readonly string[]
+  /** 身份前缀（进 `IdState`，使重放可复现）。 */
+  readonly prefix?: string
+  /** 对象类型构造工厂（装配层可覆盖以加载贡献类型）。 */
+  readonly objectFactories?: ObjectFactoryTable
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 会话
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 一个运行实例的内核会话。
+ *
+ * 一个外壳（工作台 / 嵌入 / wiki 工作台）持有一个会话；它**不**是模块级单例
+ * （那正是 B5 #7 要退役的形态），由宿主在装配时创建并注入 `Context`。
+ */
+export class KernelSession {
+  private readonly editor: Editor
+  readonly documentId: string
+  readonly contextId: string
+  private readonly disposeObserver: () => void
+
+  /**
+   * 最近一次内核投递的播放快照。
+   *
+   * 初值取 `TIME_ZERO` + 暂停：它**不是**一个"猜的默认值"，而是
+   * `createEditContext` 的真实初值（`domain/editing` 里写死的那三个）。
+   * 订阅回调会立刻投递一次当前值（`Editor.observe` 的首次投递），故初值
+   * 只在构造与首次投递之间可见。
+   */
+  private playbackSnapshot: KernelPlayback = Object.freeze({
+    playing: false,
+    rate: 1,
+    time: TIME_ZERO,
+  })
+
+  /** 帧声明提供者；缺省"无帧"（0 帧 ⇒ 帧下标恒 0）。 */
+  private frameSource: FrameSource = { count: () => 0, durationsMs: () => [] }
+
+  constructor(opts: KernelSessionOptions) {
+    this.documentId = opts.documentId
+    this.contextId = opts.contextId
+    this.editor = new Editor({ prefix: opts.prefix ?? 'wk' })
+    // 执行输入来自**装配结果**（能力裁剪），不是内核默认的全能力 ——
+    // A15「运行时绕 UI 发编辑命令被拒绝」的第二道落点就在这里。
+    // `objectFactories` 缺省时由 `defaultExecutionInputs` 给内置三类；
+    // 装配层要加载贡献类型时显式覆盖。
+    this.editor.setExecutionInputs(
+      opts.objectFactories === undefined
+        ? defaultExecutionInputs(opts.capabilities)
+        : { capabilities: opts.capabilities, objectFactories: opts.objectFactories },
+    )
+    // 打开文档 + 上下文（一条命令，与 `openDocumentState` 同一入口）。
+    this.editor.submit({ kind: 'openDocument', documentId: opts.documentId, contextId: opts.contextId })
+    this.editor.drain()
+    // 订阅上下文快照：时间/播放/通道的变化由内核**推**过来。
+    const query: QuerySpec = { kind: 'context', contextId: opts.contextId }
+    this.disposeObserver = this.editor.observe(query, (value: unknown) => {
+      const v = value as {
+        time?: TimeValue
+        playing?: boolean
+        rate?: number
+      } | null
+      if (v === null) return
+      this.playbackSnapshot = Object.freeze({
+        playing: v.playing === true,
+        rate: typeof v.rate === 'number' ? v.rate : 1,
+        time: v.time ?? TIME_ZERO,
+      })
+    })
+  }
+
+  /** 绑定帧声明提供者（宿主在文档加载/替换后设置一次；提供者自身读当前值）。 */
+  bindFrameSource(source: FrameSource): void {
+    this.frameSource = source
+  }
+
+  // ── 读面 ─────────────────────────────────────────────────────────────────
+
+  /** 捕获一个一致版本的只读视图（契约 §2.2）。 */
+  read(): ReadView {
+    return this.editor.read({ documentId: this.documentId, contextId: this.contextId })
+  }
+
+  /** 当前播放快照（由内核投递，**不**每次重建）。 */
+  playback(): KernelPlayback {
+    return this.playbackSnapshot
+  }
+
+  /**
+   * 当前世界帧下标 —— **派生值**，不是独立状态。
+   *
+   * ## 为什么派生（旧 `Main.currentFrameIndex` 是一个可被任意写的 Ref）
+   *
+   * 旧形态下帧下标是**独立权威**：它由 `OPERATOR_SET_FRAME_INDEX` 直接写，
+   * 与时间无关。于是"播放到第 5 帧"与"时间是第几帧"可以互相矛盾 ——
+   * 而两者本该是同一件事（帧下标 = 时间落在帧时长轴的哪一段）。
+   *
+   * 现在唯一权威是 `EditContext.time`；帧下标由它经**离散阶跃采样**
+   * （`domain/materials#sampleStripFrameAt`，与 `domain/animation#sampleTrack`
+   * 的 `step` 策略同一语义）算出。于是：
+   *  - 拖动定位与连续播放必然一致（同一条求值路径，#249 §7）；
+   *  - 两个 Area 读到**同一个**帧下标（时间属共享 `EditContext`，A05）；
+   *  - "跳帧"就是 `setTime`，不需要第二条写通路。
+   *
+   * ## 时长轴
+   *
+   * 每帧占 `durationMs`（缺省 50ms = 1 MC tick，与旧
+   * `DEFAULT_WORLD_FRAME_DWELL_MS` 同一常量口径）。因此"帧停留多久"仍是
+   * 文档声明的事实，只是现在它**参与时间→帧的映射**，而不是驱动一个定时器。
+   */
+  frameIndex(): number {
+    const n = this.frameSource.count()
+    if (n <= 0) return 0
+    const timeline = this.timeline()
+    if (timeline.frameIndices.length === 0) return 0
+    const fps = framesPerSecond(this.playbackSnapshot.time.fps)
+    const seconds = fps > 0 ? this.playbackSnapshot.time.frame / fps : 0
+    return sampleStripFrameAt(timeline, seconds * 1000)
+  }
+
+  /** 帧总数（转发帧声明；供呈现判断"是否多帧"）。 */
+  frameCount(): number {
+    return Math.max(0, this.frameSource.count())
+  }
+
+  /** 帧时长轴（毫秒整数；每项 `> 0`）。 */
+  private timeline(): StripTimeline {
+    const n = this.frameSource.count()
+    if (n <= 0) return stripTimeline([], [])
+    const durations = this.frameSource.durationsMs()
+    const indices: number[] = []
+    const durs: number[] = []
+    for (let i = 0; i < n; i++) {
+      indices.push(i)
+      durs.push(durations[i] ?? 0)
+    }
+    return stripTimeline(indices, durs)
+  }
+
+  // ── 写面（全部经唯一写通路） ──────────────────────────────────────────────
+
+  /** 提交一条命令（**接收不等于已生效**；契约 §1.5）。 */
+  submit(command: Command, source: InputSource = 'command'): CommandTicket {
+    return this.editor.submit(command, source)
+  }
+
+  /** 推进到队列排空（有界）。 */
+  drain(): void {
+    this.editor.drain()
+  }
+
+  /**
+   * **宿主按帧注入时间输入并驱动批次**（R-WK-03 的"按帧注入时间输入"）。
+   *
+   * 一次调用做两件事，顺序不可颠倒：
+   *  1. 提交 `advancePlayback(deltaSeconds)` —— 时间推进是**输入**，不是副作用；
+   *  2. `drain()` 把队列（含本帧由事件产生的其它命令）在一个有界批次里结算。
+   *
+   * 暂停时 `advancePlayback` 判 `unchanged`（`advancePlayback` 返回原引用），
+   * 故"没在播放时宿主仍每帧调用"是**无副作用**的 ——
+   * 宿主因此不必自己判断要不要发（那个判断会变成第二份播放状态判据）。
+   */
+  frame(deltaSeconds: number): void {
+    this.editor.submit({ kind: 'advancePlayback', contextId: this.contextId, deltaSeconds }, 'timer')
+    this.editor.drain()
+  }
+
+  /** 开始/停止播放（**不碰时间**；#249 §3.3「停止播放保留当前时间」）。 */
+  setPlaying(playing: boolean): void {
+    this.editor.submit({ kind: 'setPlaying', contextId: this.contextId, playing })
+    this.editor.drain()
+  }
+
+  /** 设置常量播放倍率。 */
+  setPlaybackRate(rate: number): void {
+    this.editor.submit({ kind: 'setPlaybackRate', contextId: this.contextId, rate })
+    this.editor.drain()
+  }
+
+  /** 定位时间（拖动/跳帧/倒退）。**不**改播放开关。 */
+  seekTime(time: TimeValue): void {
+    this.editor.submit({ kind: 'setTime', contextId: this.contextId, time })
+    this.editor.drain()
+  }
+
+  /** 定位到帧下标（按帧时长轴换算成时间，再走 `setTime`）。 */
+  seekFrame(index: number): void {
+    const n = this.frameSource.count()
+    if (n <= 0) return
+    const fps = framesPerSecond(this.playbackSnapshot.time.fps)
+    const timeline = this.timeline()
+    const target = ((Math.floor(index) % n) + n) % n
+    let ms = 0
+    for (let i = 0; i < target; i++) ms += timeline.durationMs[i] ?? 0
+    const seconds = ms / 1000
+    this.seekTime({ frame: seconds * fps, fps: this.playbackSnapshot.time.fps })
+  }
+
+  /** 释放订阅（外壳卸载时调用；**不**释放内核状态 —— 状态是值，由 GC 处理）。 */
+  dispose(): void {
+    this.disposeObserver()
+  }
+}
+
+/** 构造一个会话（便利函数；装配层用）。 */
+export function createKernelSession(opts: KernelSessionOptions): KernelSession {
+  return new KernelSession(opts)
+}

@@ -137,7 +137,7 @@ const DEFAULT_FRAME_MS = 50
 function sceneSeconds(): number {
   const doc = ctx.getDoc().value
   if (!doc || doc.frameCount === 0) return 0
-  const index = Math.min(Math.max(ctx.getCurrentFrameIndex().value, 0), doc.frameCount - 1)
+  const index = Math.min(Math.max(ctx.getFrameIndex(), 0), doc.frameCount - 1)
   let ms = 0
   for (let i = 0; i < index; i++) {
     const d = doc.frame(i)?.durationMs
@@ -259,7 +259,7 @@ onUnmounted(() => {
 
 // 场景时间变化（跳帧）⇒ 立即重画一次。**这是本组件唯一的播放驱动**：
 // 时间只由帧下标决定，故不需要（也不应有）rAF 循环。
-watch(() => ctx.getCurrentFrameIndex().value, () => paintAll())
+watch(() => ctx.getFrameIndex(), () => paintAll())
 
 // ---- Keyboard navigation ----
 const gridEl = ref<HTMLElement | null>(null)
