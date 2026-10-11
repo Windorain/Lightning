@@ -14,6 +14,7 @@
 
 import { h, type VNode } from 'vue'
 import ContentText from '@/editors/ContentText.vue'
+import UIMenu from './UIMenu.vue'
 import type { UILayout, UILayoutItem, LayoutWithItems } from './types/layout'
 
 const props = defineProps<{ layout: UILayout }>()
@@ -58,6 +59,38 @@ function renderItem(item: UILayoutItem, prefix: string, index: number): VNode {
     case 'property':
       // **不实现**：属性行只能由 PropertyInspector 从 RNA 生成。
       return h('span', { class: 'ux-label', 'data-layout-id': layoutId }, '(property 需由属性面板生成)')
+    /**
+     * `kind: 'menu'` —— 下拉菜单（#282 P10b 实测修正）。
+     *
+     * ## 这是补一个**真实缺陷**，不是新功能
+     *
+     * `menuBar.ts` 的 File/Edit/View 三项都是 `kind: 'menu'`，但本渲染器此前
+     * **没有这一支** ⇒ 落进 `default: return h('span', {}, '')` ⇒ **整个菜单栏
+     * 渲染成空 span**（File/Edit/View 三个按钮不可见、点不到）。
+     *
+     * 唯一曾渲染菜单的 `UIRenderer.vue` 在 `66c0002`（P2 面板接生成式 Inspector）
+     * 被删除，`UIMenu.vue` 因此**零引用**（只剩 `ux/index.ts` 的转出口）。
+     * 于是"菜单栏是空的"从那时起就成立，而没有任何测试断言它 ——
+     * 本批（Area 产品接线要经菜单暴露分割命令）才暴露出来。
+     *
+     * ## 为什么 `menu` 不进 `isContainer`
+     *
+     * `isContainer` 的成员是"**布局**容器"（row/column/box/panel/scroll），它们的
+     * 子项是 `UILayoutItem`。而 `menu` 的子项是**菜单项**（`UIOperator`/`UILabel`/
+     * `UISeparator`），语义与渲染都不同（点击展开、下拉定位）。故它走 `switch`
+     * 分支交给 `UIMenu` 自己渲染，而不是被当作布局容器递归。
+     *
+     * 具名命令的调用仍由 `UIMenu` 经 `ctx.getOperators().invoke` 完成 ——
+     * 与本文件 `operator` 分支的 `emit('operator', …)` 是**两条**合法入口
+     * （前者是菜单项的既有实现，后者是本文件对父级的回调），都不是字段写入。
+     */
+    case 'menu':
+      return h(UIMenu, {
+        label: item.label,
+        ...(item.icon === undefined ? {} : { icon: item.icon }),
+        items: item.items,
+        'data-layout-id': layoutId,
+      })
     default:
       return h('span', {}, '')
   }

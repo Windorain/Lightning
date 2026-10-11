@@ -74,17 +74,43 @@ function resolveDirection(props: OperatorProperties): SplitDirection {
 }
 
 /**
- * 分配新 Area / Split 的稳定 id（**显式输入**）。
+ * ## ⚠️ 为什么每条命令都实现 `exec`（而不是只实现 `invoke`）—— P10b 实测修正
  *
- * ## 为什么这里**不**自己造 id
+ * `operatorRegistry` 的两条入口是**分开**的：
  *
- * `useAreaHost.split()` 已经负责 id 分配（`nextAreaId`/`nextSplitId`，内部按
- * "未使用的 id"顺延），且它的规则与 `domain/workspace` 的"纯函数不造 id"
- * （#249 §2.1）一致 —— id 由**接线层**作为显式输入传进纯转移。
+ * | 入口 | 调用谁 | 谁在用 |
+ * |---|---|---|
+ * | `exec(ctx, id, props)` | **只**调 `op.exec` | 菜单、快捷键、`ctx.getOperators().exec`、测试 |
+ * | `invoke(ctx, id, props, event, regionId)` | `op.invoke` → `modal` | 指针/键盘交互（模态） |
  *
- * 本文件若再实现一遍 id 生成，就会出现**两份**"下一个 Area 叫什么"的规则
- * （漂移风险），且 `split()` 的 `opts` 根本不接受外部 id。故这里不重复造它。
+ * 初版只实现 `invoke` ⇒ 菜单点击与 `exec` **静默什么都不做**（`exec` 里
+ * `if (op.exec)` 为假，直接跳过，连日志都没有）。实测症状：
+ * `exec('OPERATOR_AREA_SPLIT')` 返回 `undefined`、`areaIds` 仍是 `['a1']`，
+ * 而**直接调 session 的同一操作**成功（`{ok:true}`、`a1→a2`）。
+ *
+ * 布局命令是**一次性**动作（不进入模态、不需要指针事件），故 `exec` 是正确入口；
+ * `invoke` 一并提供，使菜单项与交互式调用**走同一实现**（不漂移）。
  */
+
+/** 分割（`exec` 与 `invoke` 共用同一实现，避免两条入口行为漂移）。 */
+function doSplit(ctx: Context, props: OperatorProperties): typeof OP_RESULT.FINISHED | typeof OP_RESULT.CANCELLED {
+  const session = ctx.hasAreaSession() ? ctx.requireAreaSession() : null
+  if (session === null) return fail(ctx, 'splitArea', 'no area session')
+  const areaId = resolveAreaId(ctx, props)
+  if (areaId === null) return fail(ctx, 'splitArea', 'no target area')
+
+  const direction = resolveDirection(props)
+  // 新 Area 的类型固定为 `viewport3d`：本批的验收对象是"分割出第二个 **3D** Area"
+  // （A05/A17 产品级判据的前提）。要分割成别的类型请用 `setEditorType` 命令。
+  const result = session.split(areaId, direction, { editorType: 'viewport3d' })
+  if (!result.ok) return fail(ctx, 'splitArea', result.error)
+
+  // 新 Area 成为活动区：用户刚"分割"，下一步操作的自然对象是新视口。
+  const created = session.areaIds.value
+  const newest = created[created.length - 1]
+  if (newest !== undefined) session.setActive(newest)
+  return OP_RESULT.FINISHED
+}
 
 export const SplitAreaOperator: OperatorType = {
   id: 'OPERATOR_AREA_SPLIT',
@@ -101,24 +127,32 @@ export const SplitAreaOperator: OperatorType = {
     return ctx.hasAreaSession()
   },
 
-  invoke(ctx, props) {
-    const session = ctx.hasAreaSession() ? ctx.requireAreaSession() : null
-    if (session === null) return fail(ctx, 'splitArea', 'no area session')
-    const areaId = resolveAreaId(ctx, props)
-    if (areaId === null) return fail(ctx, 'splitArea', 'no target area')
-
-    const direction = resolveDirection(props)
-    // 新 Area 的类型固定为 `viewport3d`：本批的验收对象是"分割出第二个 **3D** Area"
-    // （A05/A17 产品级判据的前提）。要分割成别的类型请用 `setEditorType` 命令。
-    const result = session.split(areaId, direction, { editorType: 'viewport3d' })
-    if (!result.ok) return fail(ctx, 'splitArea', result.error)
-
-    // 新 Area 成为活动区：用户刚"分割"，下一步操作的自然对象是新视口。
-    const created = session.areaIds.value
-    const newest = created[created.length - 1]
-    if (newest !== undefined) session.setActive(newest)
-    return OP_RESULT.FINISHED
+  exec(ctx, props) {
+    doSplit(ctx, props)
   },
+
+  invoke(ctx, props) {
+    return doSplit(ctx, props)
+  },
+}
+
+/** 合并（`exec` 与 `invoke` 共用）。 */
+function doMerge(ctx: Context, props: OperatorProperties): typeof OP_RESULT.FINISHED | typeof OP_RESULT.CANCELLED {
+  const session = ctx.hasAreaSession() ? ctx.requireAreaSession() : null
+  if (session === null) return fail(ctx, 'mergeArea', 'no area session')
+  const areaId = resolveAreaId(ctx, props)
+  if (areaId === null) return fail(ctx, 'mergeArea', 'no target area')
+
+  const result = session.merge(areaId)
+  if (!result.ok) return fail(ctx, 'mergeArea', result.error)
+
+  // 被释放的实例如实报告（A13「关闭 Area 释放运行资源」的可测量事实）
+  if (result.disposedInstances !== undefined && result.disposedInstances.length > 0) {
+    ctx.log.info('Area 布局', `合并 ${areaId} 释放实例：${result.disposedInstances.join(', ')}`)
+  }
+  const remaining = session.areaIds.value[0]
+  if (remaining !== undefined) session.setActive(remaining)
+  return OP_RESULT.FINISHED
 }
 
 export const MergeAreaOperator: OperatorType = {
@@ -130,23 +164,29 @@ export const MergeAreaOperator: OperatorType = {
     return ctx.hasAreaSession()
   },
 
-  invoke(ctx, props) {
-    const session = ctx.hasAreaSession() ? ctx.requireAreaSession() : null
-    if (session === null) return fail(ctx, 'mergeArea', 'no area session')
-    const areaId = resolveAreaId(ctx, props)
-    if (areaId === null) return fail(ctx, 'mergeArea', 'no target area')
-
-    const result = session.merge(areaId)
-    if (!result.ok) return fail(ctx, 'mergeArea', result.error)
-
-    // 被释放的实例如实报告（A13「关闭 Area 释放运行资源」的可测量事实）
-    if (result.disposedInstances !== undefined && result.disposedInstances.length > 0) {
-      ctx.log.info('Area 布局', `合并 ${areaId} 释放实例：${result.disposedInstances.join(', ')}`)
-    }
-    const remaining = session.areaIds.value[0]
-    if (remaining !== undefined) session.setActive(remaining)
-    return OP_RESULT.FINISHED
+  exec(ctx, props) {
+    doMerge(ctx, props)
   },
+
+  invoke(ctx, props) {
+    return doMerge(ctx, props)
+  },
+}
+
+/** 切换区域编辑器类型（`exec` 与 `invoke` 共用）。 */
+function doSetEditorType(ctx: Context, props: OperatorProperties): typeof OP_RESULT.FINISHED | typeof OP_RESULT.CANCELLED {
+  const session = ctx.hasAreaSession() ? ctx.requireAreaSession() : null
+  if (session === null) return fail(ctx, 'setEditorType', 'no area session')
+  const areaId = resolveAreaId(ctx, props)
+  if (areaId === null) return fail(ctx, 'setEditorType', 'no target area')
+  const editorType = props.editorType
+  if (typeof editorType !== 'string' || editorType.length === 0) {
+    return fail(ctx, 'setEditorType', 'missing editorType')
+  }
+
+  const result = session.setEditorType(areaId, editorType)
+  if (!result.ok) return fail(ctx, 'setEditorType', result.error)
+  return OP_RESULT.FINISHED
 }
 
 export const SetAreaEditorTypeOperator: OperatorType = {
@@ -158,20 +198,27 @@ export const SetAreaEditorTypeOperator: OperatorType = {
     return ctx.hasAreaSession()
   },
 
-  invoke(ctx, props) {
-    const session = ctx.hasAreaSession() ? ctx.requireAreaSession() : null
-    if (session === null) return fail(ctx, 'setEditorType', 'no area session')
-    const areaId = resolveAreaId(ctx, props)
-    if (areaId === null) return fail(ctx, 'setEditorType', 'no target area')
-    const editorType = props.editorType
-    if (typeof editorType !== 'string' || editorType.length === 0) {
-      return fail(ctx, 'setEditorType', 'missing editorType')
-    }
-
-    const result = session.setEditorType(areaId, editorType)
-    if (!result.ok) return fail(ctx, 'setEditorType', result.error)
-    return OP_RESULT.FINISHED
+  exec(ctx, props) {
+    doSetEditorType(ctx, props)
   },
+
+  invoke(ctx, props) {
+    return doSetEditorType(ctx, props)
+  },
+}
+
+/** 调整分割比例（`exec` 与 `invoke` 共用）。 */
+function doSetRatio(ctx: Context, props: OperatorProperties): typeof OP_RESULT.FINISHED | typeof OP_RESULT.CANCELLED {
+  const session = ctx.hasAreaSession() ? ctx.requireAreaSession() : null
+  if (session === null) return fail(ctx, 'setSplitRatio', 'no area session')
+  const splitId = props.splitId
+  const ratio = props.ratio
+  if (typeof splitId !== 'string' || typeof ratio !== 'number') {
+    return fail(ctx, 'setSplitRatio', 'missing splitId/ratio')
+  }
+  const result = session.setRatio(splitId, ratio)
+  if (!result.ok) return fail(ctx, 'setSplitRatio', result.error)
+  return OP_RESULT.FINISHED
 }
 
 export const SetAreaSplitRatioOperator: OperatorType = {
@@ -183,17 +230,12 @@ export const SetAreaSplitRatioOperator: OperatorType = {
     return ctx.hasAreaSession()
   },
 
+  exec(ctx, props) {
+    doSetRatio(ctx, props)
+  },
+
   invoke(ctx, props) {
-    const session = ctx.hasAreaSession() ? ctx.requireAreaSession() : null
-    if (session === null) return fail(ctx, 'setSplitRatio', 'no area session')
-    const splitId = props.splitId
-    const ratio = props.ratio
-    if (typeof splitId !== 'string' || typeof ratio !== 'number') {
-      return fail(ctx, 'setSplitRatio', 'missing splitId/ratio')
-    }
-    const result = session.setRatio(splitId, ratio)
-    if (!result.ok) return fail(ctx, 'setSplitRatio', result.error)
-    return OP_RESULT.FINISHED
+    return doSetRatio(ctx, props)
   },
 }
 

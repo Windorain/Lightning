@@ -68,6 +68,27 @@ const {
 /**
  * 下方栏 tab：可用性与默认项走两端共用的纯逻辑（`dockTabs`），
  * Workbench 侧帧控制/分层预览恒被允许（是否显示帧 tab 仍由多帧与否决定）。
+ *
+ * ## ⚠️ "用户选择" 与 "默认" 必须分开（#282 P10b 实测修正）
+ *
+ * 旧实现是 `const _preferredTab = ref(defaultDockTab(availability))` —— 默认值在
+ * **setup 时求值一次**。那在"本组件只在文档已存在时挂载"（旧 `v-if` 守卫）的前提下
+ * 恰好正确：挂载时 `hasWorldMultiFrame` 已是真值。
+ *
+ * Area 产品接线后本组件由 `AreaHost` 挂载（**文档之前**就存在），于是：
+ *
+ *  1. setup 时 `hasWorldMultiFrame === false` ⇒ 可用列表 `['layer']` ⇒ 默认落 `'layer'`；
+ *  2. 文档到达后可用列表变 `['frame','layer']`，但 `resolveDockTab('layer', …)`
+ *     因 `'layer'` 仍在列表里而**保留它** ⇒ 帧控制 tab 永不成为默认。
+ *
+ * 实测症状：`multiblock-frame-regression.spec.ts` 的
+ * `FRAME_SLIDER = 'input[aria-label^="当前帧"]'` 找不到元素（该 spec 在
+ * 相机键提交上通过、在 Area 接线提交上失败）—— 这正是"跨批回归"的形态。
+ *
+ * 修法：`_userTab` 只记**用户显式选择**（`null` = 没选过）。没选过时 active 直接
+ * 取 `defaultDockTab(可用列表)` —— 那正是 `dockTabs.ts` 对"默认 tab"的定义
+ * （"可用列表中优先级最高者"），于是"文档形态决定默认 tab"与**挂载时机**解耦。
+ * 选过之后仍走 `resolveDockTab`（首选不可用时回落到最高优先级，不残留空 panel）。
  */
 const dockTabAvailability = computed(() => ({
   showFrameTab: true,
@@ -76,10 +97,14 @@ const dockTabAvailability = computed(() => ({
   showChannelsTab: isMultiblock.value,
 }))
 const dockTabs = computed(() => availableDockTabs(dockTabAvailability.value))
-const _preferredTab = ref<ViewportDockTab>(defaultDockTab(dockTabAvailability.value))
+/** 用户**显式**选择过的 tab；`null` = 尚未选择 ⇒ 跟随默认（文档形态驱动）。 */
+const _userTab = ref<ViewportDockTab | null>(null)
 const activeTab = computed<ViewportDockTab>({
-  get: () => resolveDockTab(_preferredTab.value, dockTabs.value),
-  set: (v: ViewportDockTab) => { _preferredTab.value = v },
+  get: () =>
+    _userTab.value === null
+      ? defaultDockTab(dockTabAvailability.value)
+      : resolveDockTab(_userTab.value, dockTabs.value),
+  set: (v: ViewportDockTab) => { _userTab.value = v },
 })
 
 // ---- 多方块接线：取值变化 → 装配产物 → DRW 重新解析 + 重建 mesh ----
@@ -213,9 +238,37 @@ function onDrop(e: DragEvent) {
   ctx.getOperators().exec('OPERATOR_OPEN_SCENE', { file })
 }
 
+/**
+ * 挂载即尝试装载；**文档后到时重新装载**（#282 P10b 实测修正）。
+ *
+ * ## 为什么必须 watch 文档（而不是只在 `onMounted` 装载一次）
+ *
+ * 旧形态下本组件由父级 `v-if="ctx.getDoc().value"` 守卫（`WorkbenchRoot`），
+ * 于是它**只在文档已存在时**才挂载 ⇒ 挂载时的 `loadStructureAndResources()`
+ * 必然能拿到文档。
+ *
+ * Area 产品接线后，本组件由 `AreaHost` 挂载 —— 它在**文档之前**就存在
+ * （Area 是布局的投影，与文档无关）。此时 `loadStructureAndResources()` 拿到
+ * `doc === null`，按 `drwMeshPipeline` 的逻辑置 `loadStatus = 'error'`，
+ * 而**没有任何东西会再重试** ⇒ 视口永久停在占位态。
+ *
+ * 实测症状：注入场景后 `doc: true` 但 `.vc-viewport` 计数为 0、`wv-placeholder` 为 1。
+ *
+ * ⇒ 文档从"无"变"有"时必须重装。`loadStructureAndResources` 自身是幂等且
+ * 保留视口状态的（`preserveViewport = loadStatus === 'ok'`），故重复调用安全。
+ */
 onMounted(() => {
   void drw.loadStructureAndResources()
 })
+
+watch(
+  () => ctx.getDoc().value,
+  (doc, prev) => {
+    // 只在"从无到有"时重装：文档**替换**（有→有）由 DRW 自己的文档订阅处理，
+    // 在这里再装一次会与它竞争（两条装载路径同时改 `loadStatus`）。
+    if (doc !== null && (prev === null || prev === undefined)) void drw.loadStructureAndResources()
+  },
+)
 /**
  * 卸载：**顺序是语义的一部分**（B5 #10；A13「关闭后实例/监听/作业回基线」）。
  *

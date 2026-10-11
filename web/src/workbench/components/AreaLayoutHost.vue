@@ -46,7 +46,7 @@
  * - **不**自己存布局；
  * - **不**询问宿主名（读能力/装配结果，不读 profile）。
  */
-import { computed, onBeforeUnmount, provide } from 'vue'
+import { computed, onBeforeUnmount, provide, watch } from 'vue'
 import type { Component } from 'vue'
 import { collectAreas, type AreaNode } from '@/domain/workspace'
 import type { AreaHostApi } from '@/editors/useAreaHost'
@@ -99,33 +99,73 @@ const COMPONENT_BY_TYPE: Readonly<Record<string, Component>> = Object.freeze({
 /** 根 Area（装配期静态声明的那个）——它复用既有 region，保证单视口零回归。 */
 const ROOT_AREA_ID = collectAreas(host.workspace.value.layout)[0]?.id ?? 'a1'
 
+/**
+ * 某 Area 的 region id（**纯函数**，不碰屏幕树）。
+ *
+ * 根 Area 复用 `REGION.WORKBENCH_VIEWPORT`（`r-viewport`）⇒ 单视口装配的行为与
+ * 既有 e2e / `__vm__` 观测面**逐字一致**（零回归）；分割出的 Area 用
+ * `r-viewport-<areaId>` ⇒ 各自一份机位与视口槽位（A05「保持独立观察视角」）。
+ */
 function regionIdFor(areaId: string): string {
   return areaId === ROOT_AREA_ID ? REGION.WORKBENCH_VIEWPORT : `${REGION.WORKBENCH_VIEWPORT}-${areaId}`
 }
 
-/**
- * 按需向 Screen 树登记 region（幂等），返回其 id。
- *
- * 对所有 Area 统一登记（不只是 viewport3d）：登记幂等且成本极低，于是
- * "把某 Area 切成 viewport3d"时 region **已就绪** —— 不需要在类型切换的瞬间
- * 做一次可能失败的登记（那时若失败，该视口就没有机位/输入域）。
- */
-function ensureRegion(areaId: string): string {
-  const rid = regionIdFor(areaId)
-  const screen = ctx.getScreenRoot()
-  const fn = (screen as unknown as { ensureViewportRegion?: (r: string, a: string) => unknown } | null)?.ensureViewportRegion
-  if (typeof fn === 'function') fn.call(screen, rid, areaId)
-  return rid
-}
-
 const areas = computed<readonly AreaNode[]>(() => collectAreas(host.workspace.value.layout))
+
+/**
+ * **分配并绑定编辑器实例 id**（#282 P10b 实测修正 —— 这是"零视口"回归的根因）。
+ *
+ * ## 为什么必须有这一步
+ *
+ * `AreaHost` 只在 `instanceId !== null` 时挂载编辑器组件，否则显示
+ * "该落点在本装配中不可用"空态。而 `AreaNode.instanceId` 由 `createArea`
+ * 硬编码为 `null`（`domain/workspace.ts`），`splitArea` 建新 Area 也走
+ * `createArea` ⇒ **永远是 `null`**。
+ *
+ * `useAreaHost.allocateInstanceId` 是"分配 id"的公开入口，但**全树零调用方**：
+ * 唯一会绑定的路径是 `AreaHost` 的 `instance-open` 事件，而该事件只在 `open()`
+ * 里发出，`open()` 又在 `id === null` 时提前返回 —— **死锁**。
+ *
+ * ⇒ 由本组件（渲染树的拥有者）显式分配并绑定：它是"谁渲染这个 Area"的答案，
+ * 故也是"谁给它一个实例"的答案。这与 `useAreaHost` 文件头所述"实例 id 的分配
+ * 是**显式输入**"（#249 §2.1）一致 —— 分配者就是接线层。
+ *
+ * ## 幂等
+ *
+ * 已有 id 的 Area **不重分配**（重分配会让 `AreaHost` 的 `:key` 变化 ⇒ 组件被
+ * 重建 ⇒ 视口与 WebGL 上下文被无谓销毁重建）。`bindInstance` 对"值未变"也自行 no-op。
+ *
+ * ## 时机（两个"不能在渲染期做"的事都在这里）
+ *
+ * `immediate: true` 让**首次渲染前**就绑好 id（否则首帧渲染的是空态）；之后每次
+ * 布局变化（分割/合并/切类型）重新对账。切类型时
+ * `domain/workspace#setEditorType` 把 `instanceId` 置回 `null`（表示"要新实例"），
+ * 于是这里再分配一个新 id ⇒ `AreaHost` 关旧开新（A13「切类型释放旧实例」）。
+ *
+ * region 登记与实例绑定**同一时机**（都依赖"当前有哪些 Area"），且都在 watch 里
+ * 而不是渲染函数里 —— 渲染期改屏幕树是 Vue 反模式。
+ */
+watch(
+  areas,
+  (list) => {
+    for (const a of list) {
+      if (a.instanceId === null) host.bindInstance(a.id, host.allocateInstanceId(a.editorType))
+    }
+    const screen = ctx.getScreenRoot()
+    const ensure = (screen as unknown as { ensureViewportRegion?: (r: string) => unknown } | null)?.ensureViewportRegion
+    if (typeof ensure === 'function') {
+      for (const a of list) ensure.call(screen, regionIdFor(a.id))
+    }
+  },
+  { immediate: true },
+)
 
 function instanceIdOf(areaId: string): string | null {
   return areas.value.find((a) => a.id === areaId)?.instanceId ?? null
 }
 
 const viewContext: AreaViewContext = {
-  regionIdFor: ensureRegion,
+  regionIdFor,
   instanceIdOf,
   componentFor: (editorType) => COMPONENT_BY_TYPE[editorType] ?? null,
   resourcesOf: (editorType) => host.registry.resourcesOf(editorType),

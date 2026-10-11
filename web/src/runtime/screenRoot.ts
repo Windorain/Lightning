@@ -107,18 +107,25 @@ export class ScreenRoot {
    * 的共同键（见 `mainCameras#cameraMainKeyForRegion` 的说明）。共用一个 region
    * 会让两个视口共享机位与槽位，那正是 A05 判红的形态。
    *
-   * ## 幂等
+   * ## ⚠️ 两个 id 空间**不同**（P10b 实测修正）
    *
-   * 已有该 region 时**返回它**（不重建）—— 重挂同一个 Area 不应重置 viewer 偏好
-   * 或 hover 状态。这与 `ViewportManager.register(id)` 的幂等语义一致。
+   * 初版按 `areaId` 在本类的 `areas` 里查找并 push —— 但本类的 Area id 是
+   * **屏幕树**的（`'viewport-area'`/`'properties-area'`），而调用方给的是
+   * **`domain/workspace`** 的（`'a1'`/`'a2'`）。两者**永不相交**：
    *
-   * ## 输入域 id 与 region id 相同
+   *  - 根 Area 只是**碰巧**能用 —— `regionIdFor('a1') === REGION.WORKBENCH_VIEWPORT`
+   *    已在 `_byId` 里，故提前返回；
+   *  - 第一次分割（`'a2'`）时查找失败 ⇒ 抛 `未知 area`（**渲染期崩溃**）。
    *
-   * `wmInputId` 取 region id：`hitTest` 经 `data-wm-region` 读出的就是 region id
-   * （`WorkbenchRoot` 的 hitTest 实现），故两者同值才让"指针命中哪个 Area"与
-   * "事件路由到哪个输入域"是同一个事实。**不**复用 `REGION.WORKBENCH_VIEWPORT`。
+   * 现在改为挂到**承载视口的那个屏幕 Area**（`spaceType === SpaceType.VIEW_3D`，
+   * 全树唯一）—— 于是调用方不再需要知道屏幕树的命名。
+   *
+   * ## 调用时机：**不**在渲染函数里
+   *
+   * 渲染期改屏幕树是 Vue 反模式（`reindex()` 会在依赖收集过程中改被依赖的结构）。
+   * 调用方（`AreaLayoutHost`）在 `watch(..., { immediate: true })` 里登记。
    */
-  ensureViewportRegion(regionId: string, areaId: string): RegionNode {
+  ensureViewportRegion(regionId: string): RegionNode {
     const existing = this._byId.get(regionId)
     if (existing) return existing
     const node = createRegionNode(regionId, RegionType.MAIN, {
@@ -130,14 +137,13 @@ export class ScreenRoot {
         hover: createViewportHoverState(),
       },
     })
-    const area = this.areas.find(a => a.id === areaId)
-    if (area) {
-      area.regions.push(node)
-    } else {
-      // 找不到宿主 Area：**不静默吞** —— 加进 popup 区会让它可见但语义错位。
-      // 抛错是响亮的（调用方传了错的 areaId，那是编程错误）。
-      throw new Error(`ensureViewportRegion: 未知 area ${areaId}`)
+    const area = this.areas.find((a) => a.spaceType === SpaceType.VIEW_3D)
+    if (area === undefined) {
+      // 没有 3D 屏幕 Area 是**装配缺陷**（本方法只应由工作台外壳调用）——
+      // 响亮失败，不静默把视口 region 挂到属性区（那会让输入路由错位）。
+      throw new Error(`ensureViewportRegion: 本屏幕树没有 VIEW_3D Area（region ${regionId}）`)
     }
+    area.regions.push(node)
     this.reindex()
     return node
   }
