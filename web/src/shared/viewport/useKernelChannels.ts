@@ -40,6 +40,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
+import type { MultiblockDecl } from '@/context/runtimeDocument'
 import {
   assembleForSelection,
   buildChannelPanelModel,
@@ -88,29 +89,39 @@ const RUNSTATE_KEY = '$runstate'
  *  - 运行态 ↔ `$runstate`（**下标**，因为数值域只能表达序数）；
  *  - 逐通道 ↔ 同名键（直通）。
  *
- * ## 未设置的键不伪造
+ * ## ⚠️ 必须以**声明初值**为底再叠加内核取值（P10b 实测修正）
  *
- * 内核里没有的键**不**填默认值（`decl` 的初值由 `initialMultiblockSelection` 给，
- * 只在"完全没设过"时使用）—— 否则"用户设了 0"与"没设过"不可区分（#249 §19.3）。
+ * 契约 §5.1 明文：「变体声明值**每个通道都有**（未设置写 0）」——
+ * 即 `values` 必须是**完整**表，不是"只有用户碰过的键"。
+ *
+ * 初版直接返回内核里的键 ⇒ 用户只设了 `coil` 时 `values = {coil: 2}`，
+ * 缺 `height`/`glass` 等 ⇒ `multiblockVariantKey` 算出**不同的键**，
+ * 面板 `data-mb-variant` 与期望不符、渲染收敛到错误的变体。
+ * 实测由 `multiblock-channel-traversal.spec.ts`（全 552 组合）判红。
+ *
+ * 正解：先取 `initialMultiblockSelection(decl)`（它按契约填满所有通道，
+ * 总档位取 `domain.default ?? max` 并吸附抽样、运行态取声明首项），
+ * 再用内核取值**覆盖** —— 于是"没设过"与"设过 0"仍可区分（内核里没有的键
+ * 保持声明初值，而不是被强制成 0）。
  */
 function projectSelection(
-  decl: { runstates: readonly { readonly id: string }[]; totalTierDomain: { readonly min: number; readonly max: number } } | null,
+  decl: MultiblockDecl,
   values: Readonly<Record<string, number>>,
 ): MultiblockSelectionState {
-  if (decl === null) return { totalTier: 1, values: {}, runstate: '' }
+  const base = initialMultiblockSelection(decl)
   const runstateIndex = values[RUNSTATE_KEY]
   const runstate =
     typeof runstateIndex === 'number' && decl.runstates[runstateIndex] !== undefined
       ? decl.runstates[runstateIndex].id
-      : ''
+      : base.runstate
   const totalTier = values[TOTAL_TIER_KEY]
-  const perChannel: Record<string, number> = {}
+  const perChannel: Record<string, number> = { ...base.values }
   for (const [k, v] of Object.entries(values)) {
     if (k === TOTAL_TIER_KEY || k === RUNSTATE_KEY) continue
     perChannel[k] = v
   }
   return {
-    totalTier: typeof totalTier === 'number' ? totalTier : 1,
+    totalTier: typeof totalTier === 'number' ? totalTier : base.totalTier,
     values: perChannel,
     runstate,
   }
@@ -188,9 +199,9 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
   const selection = computed<MultiblockSelectionState>(() => {
     const d = decl.value
     if (d === null) return { totalTier: 1, values: {}, runstate: '' }
-    // 内核里**一个键都没有** ⇒ 用声明初值（"没设过"的语义）；
-    // 否则按内核取值投影（用户设过的值，含 0，必须原样保留）。
-    if (Object.keys(mirror.value).length === 0) return initialMultiblockSelection(d)
+    // **总是**投影：`projectSelection` 以声明初值为底再叠加内核取值 ——
+    // 故"内核里一个键都没有"时它自然返回声明初值（不需要单独分支）。
+    // 单独分支会让"用户设过 0"与"没设过"在两条不同代码路径上处理（易漂移）。
     return projectSelection(d, mirror.value)
   })
 
