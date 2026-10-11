@@ -21,13 +21,27 @@
  *
  * ## 本组件不认识「写到哪里」
  *
- * 它**不接收 setter 闭包**，也不认识文档/命令。它只发三个**意图**：
- * `draft`（草稿变了）、`commit`（请提交当前草稿）、`cancel`（还原）。
- * 合法性判定与提交由父级用纯函数完成（`canCommitDraft` / `tryCommit`），
- * 因此「拒绝后不得报告 applied」在 UI 层无法被绕过 —— 组件根本没有写的能力。
+ * 它**不接收 setter 闭包**，也不认识文档/命令。它只发两个**意图**：
+ * `commit-value`（提交一个已解析值）与 `commit-component`（提交某分量）——
+ * 都是"无草稿语义"的控件（boolean/枚举/滑块/色板/向量）。
  *
- * 这是契约 §5.2「唯一写路由」在组件层的**结构性**形态：不是靠约定不写旁路，
- * 而是这里没有可用的旁路。
+ * 文本类控件的草稿**不经过父级**：输入层（`runtime/inputSession`）判定完整合法后
+ * 产出 `draft.commit`，命令层映射成 `setProperty`，落点由 `PropertyInspector` 登记
+ * 进 `WM.applyPropertyRegistry`。故组件层**没有**任何可写旁路
+ * （契约 §5.2「唯一写路由」在组件层的**结构性**形态：不是靠约定不写旁路，
+ * 而是这里没有可用的旁路）。
+ *
+ * ## P10c（#286）：`draft`/`commit`/`cancel` 三个 emit 已删除
+ *
+ * 它们曾是 P2 那套"父级存草稿、父级判合法性"的接口。三个都已是死轨：
+ *  - `commit`/`cancel` **从来没有发出点**（全树零 `emit('commit')`/`emit('cancel')`），
+ *    父级的 `@commit`/`@cancel` 处理器不可达；
+ *  - `draft` 只喂给 `PanelSession.drafts` 这份镜像，而镜像的写键与读键不同
+ *    （写 `localPropertyOf(desc.id)`＝`tooltip`，读 `localIdOf`＝`block.tooltip`），
+ *    生产 84 个属性无一命中 ⇒ 镜像从不影响渲染。
+ *
+ * 现在文本变化只由输入层消费（`adapters/inputBinding` 的 `input` 监听），
+ * 显示文本读 `textProjection`。退役登记见 `composition/seams.ts`。
  *
  * ## 草稿权威 = `domain/textDraft`（P7 #258 合流后）
  *
@@ -63,21 +77,10 @@ import type { DraftKind } from '@/domain/textDraft'
 const props = defineProps<{ field: FieldViewModel }>()
 
 const emit = defineEmits<{
-  /**
-   * 草稿文本变化（**不**提交）。
-   *
-   * 事件名是 `draft`，**不是** `update:draft` —— 后者是 Vue `v-model` 的保留约定，
-   * 用它会与「草稿 ≠ 已提交值」的语义冲突（本组件刻意不是 v-model）。
-   */
-  (e: 'draft', text: string): void
-  /** 请求提交当前草稿（是否可提交由父级按 `draftState` 判定）。 */
-  (e: 'commit'): void
   /** 请求提交一个**已解析**的值（boolean/枚举/滑块/色板/分量这些无草稿的控件）。 */
   (e: 'commit-value', value: unknown): void
   /** 请求提交某个向量分量（`component` 寻址）。 */
   (e: 'commit-component', index: number, value: number): void
-  /** 还原草稿（Escape）。 */
-  (e: 'cancel'): void
 }>()
 
 const ctx = inject<Context | null>(contextKey, null)
@@ -131,20 +134,22 @@ function projection(): { draft: string; status: string; reason: string | null; c
 }
 
 /**
- * 显示文本：**输入层投影优先**（P7 权威），否则回落到 P2 的字段视图模型。
+ * 显示文本：**输入层投影优先**（P7 权威），投影不可用时用 P2 的 `displayText`。
  *
- * 为什么两源：`draftKind === null` 的控件（toggle/dropdown/slider）不走草稿，
- * 它们的显示值只由 P2 的 `field.displayText`/`scalarValue` 提供。
- * 走草稿的控件则以输入层为准 —— 那是"非法草稿原样保留"的可见证据。
+ * ## 为什么还留回落（P10c #286 之后）
+ *
+ * `draftKind !== null` 但控件**尚未登记**时 `textProjection` 返回 `null`
+ * （会话以 `focusin` 事实驱动），此时显示的是已提交值的格式化文本 —— 正是
+ * "还没开始编辑"的正确显示。回落**不再**读草稿镜像（那份镜像已删除），
+ * 故这里不可能出现"两个真相"。
  */
 const shownText = computed(() => {
-  if (draftKind.value === null) return props.field.draft ?? props.field.displayText
   const p = projection()
   if (p !== null && p.draft !== '') return p.draft
-  return props.field.draft ?? props.field.displayText
+  return props.field.displayText
 })
 
-/** 非法/中间态提示：**输入层**的原因码优先（P7 权威），否则用 P2 的结构化拒绝原因。 */
+/** 非法/中间态提示：**输入层**的原因码（P7 权威；投影不可用即无草稿）。 */
 const inputProblem = computed(() => {
   if (draftKind.value === null) return ''
   const p = projection()
@@ -155,32 +160,20 @@ const inputProblem = computed(() => {
 /**
  * 非法草稿/拒绝原因的**可见提示**（不静默吞输入）。
  *
- * ## 权威归属：输入层优先，**不可用**时回落 P2
+ * ## 权威归属：解析级取输入层，写入拒绝取 P2
  *
- * "投影可用"指输入端口存在**且**该控件已被登记（`textProjection` 非 null）。
- * 两者都成立时，解析级结论**只**取输入层 —— 否则会出现"两个解析器各判一次"
- * （域约束宽严/`required` 语义可能给出不同结论），界面就可能显示一条
- * 并不来自权威路径的错误。
- *
- * 投影不可用时回落 P2 的 `draftState`：这覆盖两种真实情形 ——
- *  (a) 控件尚未获得焦点（会话里还没有它的草稿），此时 P2 的草稿镜像
- *      是唯一可见信号；
- *  (b) 组件被单独挂载（如 DOM 单测、或将来不经输入层的宿主），
- *      此时若强行只认投影，"非法草稿"就**完全不可见** —— 那是把
- *      "单一权威"做成了"静默吞输入"，恰好违反 #249 §19.1 的提示要求。
+ * 解析级结论（草稿是否合法/中间态）**只**取输入层投影 —— 否则会出现"两个解析器
+ * 各判一次"（域约束宽严/`required` 语义可能给出不同结论），界面就可能显示一条
+ * 并不来自权威路径的错误。P10c（#286）删除了 P2 的 `draftState` 回落分支：
+ * 那份镜像的写键与读键在生产里无一命中，回落在真实页面中从未生效。
  *
  * 写入被**拒绝**的原因始终取 P2（唯一写路由的真实结论），与解析级提示不同。
  */
 const problemText = computed(() => {
-  if (draftKind.value !== null && projection() !== null) {
+  if (draftKind.value !== null) {
     if (inputProblem.value !== '') return inputProblem.value
     const e = props.field.rejection
     if (!e) return ''
-    const r = e.params.reason
-    return r === undefined ? e.code : `${e.code}: ${String(r)}`
-  }
-  if (props.field.draftState.state === 'invalid') {
-    const e = props.field.draftState.error
     const r = e.params.reason
     return r === undefined ? e.code : `${e.code}: ${String(r)}`
   }
@@ -191,11 +184,7 @@ const problemText = computed(() => {
 })
 
 const problemKind = computed(() => {
-  if (draftKind.value !== null && projection() !== null) {
-    if (inputProblem.value !== '') return 'invalid'
-    return props.field.rejection ? 'rejected' : ''
-  }
-  if (props.field.draftState.state === 'invalid') return 'invalid'
+  if (draftKind.value !== null && inputProblem.value !== '') return 'invalid'
   return props.field.rejection ? 'rejected' : ''
 })
 
@@ -250,27 +239,20 @@ const scalarValue = computed<string | number | boolean>(() => {
 })
 
 /**
- * 草稿文本变化的**镜像**通知（不提交）。
+ * 文本变化**不再由本组件转发**（P10c #286）。
  *
- * ## 它为什么还在，以及它为什么不是权威
+ * 旧实现有 `onText` → `emit('draft', …)`，把变化交给父级写进
+ * `PanelSession.drafts` 这份镜像。镜像已删除（写键 `tooltip` 与读键
+ * `block.tooltip` 在生产键空间无一命中，从不影响渲染）。
  *
- * 草稿的权威是输入层（`textProjection`）。但父级 `PropertyInspector` 的
- * `PanelSession.drafts` 仍被 `buildField` 读取（`rejection` 的落点也在那里），
- * 故此处继续把变化**转发**给父级作为镜像。
+ * 文本输入现在只由输入层的**唯一** document 级监听消费
+ * （`adapters/inputBinding` 的 `input` → `InputSession.applyTextInput`），
+ * 判定在 `domain/textDraft`。本组件只声明 `data-input-*` 事实。
  *
- * 呈现侧**不读**这份镜像（`shownText` 以投影为准），所以两处不一致时
- * 以投影为准、不会出现"两个真相"。剩余口径已登记在
- * `composition/seams.ts`（`property-draft-dual-track`，负责人 P10）。
- */
-function onText(e: Event): void {
-  emit('draft', (e.target as HTMLInputElement | HTMLTextAreaElement).value)
-}
-
-/**
- * 失焦**不再由本组件处理**。
+ * ## 失焦也不由本组件处理
  *
  * 失焦的提交时机属输入层（`commitOn: 'enter-or-blur'` 的政策在
- * `domain/textDraft.settleControl`）。本组件若也发一次 `commit`，
+ * `domain/textDraft.settleControl`）。本组件若也发一次提交，
  * 同一次失焦会被两处各提交一次 —— 那正是 A22/A25 要防的"重复消费"。
  * 实际的失焦提交由 `adapters/inputBinding` 的 `focusout` → `blurTextControl` 完成。
  */
@@ -412,7 +394,6 @@ const textFacts = computed(() => {
           class="ux-field-text ux-field-text--mono"
           :value="shownText"
           spellcheck="false"
-          @input="onText"
         />
       </template>
 
@@ -423,7 +404,6 @@ const textFacts = computed(() => {
         class="ux-field-textarea"
         :value="shownText"
         spellcheck="false"
-        @input="onText"
       />
 
       <!-- 字符串列表（分隔符来自描述符）：混合态留空提示而非预填首项值 -->
@@ -434,7 +414,6 @@ const textFacts = computed(() => {
         class="ux-field-text"
         :value="isMixed ? '' : shownText"
         :placeholder="isMixed ? '— 混合 —' : ''"
-        @input="onText"
       />
 
       <!-- 默认（number/stepper/text/reference）：草稿 + 显式提交 -->
@@ -459,7 +438,6 @@ const textFacts = computed(() => {
         :value="shownText"
         :placeholder="isMixed ? '— 混合 —' : ''"
         spellcheck="false"
-        @input="onText"
       />
 
       <span v-if="field.control.unit?.symbolFallback" class="ux-field-unit">{{

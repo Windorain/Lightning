@@ -58,9 +58,6 @@ import {
   readMultiValue,
 } from '@/application/property-commands'
 import {
-  DEFAULT_EDIT_POLICY,
-  type EditPolicy,
-  type EditSession,
   type FieldEditState,
   type FieldValueState,
   buildFieldViewModel,
@@ -597,15 +594,34 @@ function applyShellState(ctx: Context, before: DocumentState, after: DocumentSta
 // 6. 字段视图模型（面板渲染的唯一输入）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 面板会话状态（草稿 + 拒绝原因）——按属性 ID 索引，跨重渲染保留。 */
+/**
+ * 面板会话状态（**仅**提交被拒绝的结构化原因）——按属性 ID 索引，跨重渲染保留。
+ *
+ * ## P10c（#286）退役：`drafts` 呈现镜像已删除
+ *
+ * 本类型曾同时携带 `drafts`（每个字段一份草稿文本的**镜像**）与 `sessions`
+ * （`EditSession` 表）。两者都是 P7（#258）之前那套"P2 自己解析草稿"的残留，
+ * 与输入层的三态机并存 —— 正是 `composition/seams.ts` 的
+ * `property-draft-session-mirror` 登记的那条双轨。
+ *
+ * 本批删除，判据是接缝自己写下的退出条件（`buildField` 不再读 `session.drafts`）
+ * 加上两处实测：
+ *
+ *  - 镜像的**写键与读键不同**（写 `localPropertyOf(desc.id)`＝`tooltip`；
+ *    `editors/inspector.ts` 与卸载 flush 读 `localIdOf`＝`block.tooltip`），
+ *    生产 84 个属性**无一命中** ⇒ 喂模型与 flush 的路本就不通；
+ *  - `sessions` 从未被写入使用（`createPanelSession` 之外的唯一命中是 LogCenter
+ *    的同名局部变量，与本类型无关）。
+ *
+ * 留下的是**唯一**那条真实需要跨重渲染保留的状态：拒绝原因（写路由的真实结论，
+ * 见 D5「拒绝后不得报告成功」）。
+ */
 export type PanelSession = {
-  drafts: Record<string, string | null>
   rejections: Record<string, DomainError>
-  sessions: Record<string, EditSession>
 }
 
 export function createPanelSession(): PanelSession {
-  return { drafts: {}, rejections: {}, sessions: {} }
+  return { rejections: {} }
 }
 
 /** 多选读面 → 字段读状态（显式混合值）。 */
@@ -642,7 +658,6 @@ export function buildField(
     descriptor: desc,
     value,
     edit,
-    draft: session.drafts[local] ?? null,
     rejection: session.rejections[local] ?? null,
   })
   return field
@@ -667,9 +682,6 @@ export function commitFieldComponent(
   return submitPropertyWrite(ctx, refs, value, `set:${desc.id}[${index}]`)
 }
 
-export { DEFAULT_EDIT_POLICY }
-export type { EditPolicy }
-
 /** 面板生成式模型的输入（把 ctx 事实一次性收齐，之后交给纯函数）。 */
 export function inspectorInputs(ctx: Context, session: PanelSession): InspectorContextInputs {
   const targets = resolveInspectorTargets(selectionOf(ctx))
@@ -679,7 +691,6 @@ export function inspectorInputs(ctx: Context, session: PanelSession): InspectorC
     targets,
     access: accessOfContext(ctx),
     readField: (refs) => readMultiValue(workbenchRegistry().registry, refs, 'authored', accessOfContext(ctx)),
-    drafts: session.drafts,
     rejections: session.rejections,
   }
 }

@@ -38,7 +38,6 @@ import {
   workbenchRegistry,
 } from '@/editors/workbench-rna'
 import { localPropertyOf } from '@/editors/property-writers'
-import { canCommitDraft } from '@/editors/property-controls'
 import type { InspectorModel } from '@/editors/inspector'
 import { buildInspector } from '@/editors/workbench-rna'
 
@@ -105,12 +104,19 @@ function fieldFor(propertyId: string) {
   return buildField(props.ctx, desc, session)
 }
 
-/** 草稿变化的**镜像**（呈现侧权威是输入层投影；此镜像供 P2 的会话/拒绝原因使用）。 */
-function onDraft(desc: PropertyDescriptor, text: string): void {
-  const local = localPropertyOf(desc.id)
-  session.drafts[local] = text
-  session.rejections[local] = undefined as never
-}
+/** 草稿变化的**镜像**：P10c（#286）起已删除，本回调随之退役。
+ *
+ * ## 为什么可以删（实测，不是判断）
+ *
+ * 这里曾把 `PropertyField` 的 `draft` 事件写进 `session.drafts[local]`。
+ * 但那条镜像的**写键与读键不同**：本文件写 `localPropertyOf(desc.id)`（= `tooltip`），
+ * 而 `editors/inspector.ts` 的 `makeRow` 与卸载 flush 读 `localIdOf`（= `block.tooltip`）
+ * —— 生产 84 个属性无一命中，故镜像从未喂到模型；唯一同键读取点 `buildField`
+ * 又只被这条镜像链消费，环上没有生产行为。
+ *
+ * 草稿的唯一权威是输入层：`domain/textDraft`（判定）+ `runtime/inputSession`（时序），
+ * 呈现读 `InputPort.textProjection`。接缝登记见 `composition/seams.ts`。
+ */
 
 /**
  * 把每个可编辑属性登记为**输入层的提交落点**。
@@ -142,16 +148,6 @@ function registerCommitSink(desc: PropertyDescriptor): void {
   })
 }
 
-/** 提交当前草稿：仅在**完整合法**时提交（非法草稿保留并提示）。 */
-function onCommit(desc: PropertyDescriptor): void {
-  const local = localPropertyOf(desc.id)
-  const field = buildField(props.ctx, desc, session)
-  if (!canCommitDraft(field)) return
-  if (field.draftState.state !== 'complete') return
-  const outcome = commitFieldValue(props.ctx, desc, field.draftState.value)
-  applyOutcome(local, outcome)
-}
-
 /** 提交一个已解析值（boolean/枚举/滑块/色板）。 */
 function onCommitValue(desc: PropertyDescriptor, value: unknown): void {
   const local = localPropertyOf(desc.id)
@@ -166,47 +162,42 @@ function onCommitComponent(desc: PropertyDescriptor, index: number, value: numbe
   applyOutcome(local, outcome)
 }
 
-function onCancel(desc: PropertyDescriptor): void {
-  const local = localPropertyOf(desc.id)
-  session.drafts[local] = null
-}
-
 /**
- * 结算：`applied` ⇒ 清草稿与拒绝原因；`rejected` ⇒ **保留草稿**并记录原因
- * （拒绝后不得报告成功，D5）；`unchanged` ⇒ 清草稿（无业务变化，不是失败）。
+ * 结算：`applied`/`unchanged` ⇒ 清拒绝原因；`rejected` ⇒ **记录原因**（拒绝后不得
+ * 报告成功，D5）。
+ *
+ * P10c（#286）：`session.drafts` 已删，故这里不再清草稿 —— 草稿由输入层持有，
+ * 非法/中间态的**可见提示**来自 `InputPort.textProjection`（呈现侧读面）。
  */
 function applyOutcome(local: string, outcome: { status: string; error?: unknown }): void {
   if (outcome.status === 'rejected') {
     session.rejections[local] = outcome.error as never
     return
   }
-  session.drafts[local] = null
   session.rejections[local] = undefined as never
 }
 
 /**
- * 卸载前 flush：把**完整合法**的草稿提交掉。
+ * 卸载前清理提交落点登记。
  *
- * 旧实现的 `onBeforeUnmount` 只 `clearTimeout`，正在等待 debounce 的文本直接丢失
- * （#251 B7 的 C-11/D2.1 #23）。这里改为显式提交。
+ * ## P10c（#286）：草稿 flush 循环已删除
+ *
+ * 旧实现在这里遍历模型、把 `session.drafts[row.localId]` 里"完整合法"的草稿提交掉。
+ * 但那段代码读的键是 `row.localId`（`localIdOf` ⇒ `block.tooltip`），
+ * 而镜像写入用的键是 `localPropertyOf(desc.id)`（⇒ `tooltip`）——**两键在生产键空间
+ * 里无一命中**（84/84 不等），故 flush 体从未执行过一次。
+ *
+ * "卸载不丢字"这条能力**仍然成立**，只是归属变了：文本控件的失焦/关闭由输入层结算
+ * （`domain/textDraft.blurControl`：`blur`/`focus-switch`/`enter` 经 `settleControl`
+ * 提交，`close`/`target-invalid` 取消并还原），`PropertyField` 卸载时
+ * `unbindControl` 也会以 `target-invalid` 结算。判据在
+ * `domain/__tests__/textDraft.test.ts` 的焦点切换/禁用集与 e2e `input-routing.spec.ts`。
  */
 onBeforeUnmount(() => {
   // 清理提交落点登记：本面板卸载后 `field:*` 不应再被解析（否则命令会打到
   // 一个已经不在界面上的字段，表现为"改了没反应"）。
   for (const id of registeredSinkIds) props.ctx.wm.applyPropertyRegistry.delete(id)
   registeredSinkIds.clear()
-  for (const section of model.value.sections) {
-    for (const row of section.rows) {
-      const draft = session.drafts[row.localId]
-      if (draft === null || draft === undefined) continue
-      const desc = descriptorOf(row.field.descriptor.id)
-      if (!desc) continue
-      const field = buildField(props.ctx, desc, session)
-      if (!canCommitDraft(field) || field.draftState.state !== 'complete') continue
-      commitFieldValue(props.ctx, desc, field.draftState.value)
-      session.drafts[row.localId] = null
-    }
-  }
 })
 
 /** 面板标题：多选时显示数量（不隐藏属性区 —— D6）。 */
@@ -248,11 +239,8 @@ void inject(contextKey, null)
           <PropertyField
             v-if="fieldFor(row.field.descriptor.id)"
             :field="fieldFor(row.field.descriptor.id)!"
-            @draft="(t: string) => onDraft(row.field.descriptor, t)"
-            @commit="() => onCommit(row.field.descriptor)"
             @commit-value="(v: unknown) => onCommitValue(row.field.descriptor, v)"
             @commit-component="(i: number, v: number) => onCommitComponent(row.field.descriptor, i, v)"
-            @cancel="() => onCancel(row.field.descriptor)"
           />
         </template>
       </section>

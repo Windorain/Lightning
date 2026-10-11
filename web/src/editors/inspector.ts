@@ -157,9 +157,19 @@ export type InspectorInputs = Readonly<{
   readField: (refs: readonly PropertyRef[]) => FieldValueState
   /** 求值一个属性的可编辑性（结构化原因）。 */
   editField: (ref: PropertyRef) => FieldEditState
-  /** 当前会话的草稿（属性 ID → 草稿文本）；`undefined` 表示未在编辑。 */
-  drafts?: Readonly<Record<string, string | null>>
-  /** 上一次拒绝原因（属性 ID → 原因）。 */
+  /**
+   * 上一次拒绝原因（属性 ID → 原因）。
+   *
+   * ## P10c（#286）：`drafts` 输入已删除
+   *
+   * 这里曾有 `drafts?: Record<string, string | null>`，把 `PanelSession.drafts`
+   * 这份**呈现镜像**灌进字段模型。镜像已随输入层单一权威（P7 #258）的收口删除：
+   * 草稿判定与时序唯一在 `domain/textDraft` + `runtime/inputSession`，
+   * 呈现读 `InputPort.textProjection`。
+   *
+   * 详见 `composition/seams.ts`（接缝 `property-draft-session-mirror` 已核销）
+   * 与 `editors/workbench-rna.ts` 的 `PanelSession` 说明。
+   */
   rejections?: Readonly<Record<string, DomainError>>
   controls?: ControlRegistry
 }>
@@ -252,7 +262,6 @@ function makeRow(
   const edit: FieldEditState = primary
     ? inputs.editField(primary)
     : { kind: 'readOnly', reason: noTargets(desc.id) }
-  const draft = inputs.drafts?.[localId]
   const rejection = inputs.rejections?.[localId]
   const ref: PropertyRef = primary ?? { owner: { kind: 'document', id: '' }, property: desc.id }
   const field = buildFieldViewModel(
@@ -262,7 +271,6 @@ function makeRow(
       descriptor: desc,
       value,
       edit,
-      draft: draft ?? null,
       rejection: rejection ?? null,
     },
     inputs.controls,

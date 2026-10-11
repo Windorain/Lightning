@@ -18,33 +18,33 @@
  * 不认识任何对象类型；专用控件经 `ControlRegistry.register` 覆盖（#253「复杂控件可自定义
  * 但不绕过读写契约」），核心没有任何 `switch (objectType)`。
  *
- * ## 交互暂存（D1.1 #2/#3、D2.1 #20/#23）
+ * ## 交互暂存：**已随 P10c（#286）整段退役**，判定与时序唯一在输入层
  *
- * 旧实现是「`@input` 每敲一个字符提交一次」（`RNAWidget.vue:95,105,120`），
- * 且两处 debounce 各自实现、卸载时只清定时器**不 flush**（丢字）。
- * 本文件把提交时机变成**纯状态机**：
+ * 本文件曾提供第二套草稿机制：`PanelSession.drafts` 的解析镜像
+ * （`FieldViewModel.draft`/`draftState`，由 `parseDraft` 解析）以及一套纯状态机
+ * （`EditSession`/`EditPolicy`/`beginEdit`/`updateDraft`/`tryCommit`/`canCommitDraft`）。
  *
- * ```
- * idle --begin--> editing --updateDraft--> editing(draft) --commit--> idle
- *                    |                                        └--reject--> editing(draft, reason)
- *                    └--cancel--> idle
- * ```
+ * 它们**已是死轨**，本批按 #171 退役纪律删除（不留兼容旁路）：
  *
- * 政策（作为数据，不是散落的组件回调）：
- *  - `intermediate` 草稿**不提交**（`-`、`1.`、`` 、中文组合中间态）；
- *  - `commitOnBlur`：失焦时提交**完整合法**草稿；非法草稿保留并提示，**不暗中强制转换**；
- *  - `flushPendingOnUnmount`：卸载前把待提交的完整合法草稿提交（旧实现丢字的那条）；
- *  - 拒绝 ⇒ **草稿不丢**、原因可见、文档不变（#249 §8「被拒绝的操作保持文档、历史与
- *    保存脏状态不变，诊断可以改变」）。
+ *  - **判定**：草稿三态的唯一权威是 `domain/textDraft.ts`（含 IME 门、域下传、token 去重）；
+ *  - **提交时机**：唯一入口是输入层 `domain/textDraft.settleControl` 产出的 `commit` 效果
+ *    → `draft.commit` → `application/inputCommands.resolveIntent` → 唯一写路由；
+ *  - **呈现**：组件读 `InputPort.textProjection`（只读投影），不自己存草稿。
  *
- * 纯：无 Vue/Three/DOM/IO/时钟；`commit` 需要的写入委托给调用方传入的 `submit`
- * （**不是** setter 闭包 —— 它是「把一次命令交给唯一写路由」的动作，
- * 与契约 §5.2「调用方不传任意 setter 闭包」不冲突：这里传的是命令执行意图，
- * 目标与值仍是 `PropertyRef` + 值）。
+ * 删除而不是保留的理由（实测，不是判断）：镜像的**写键与读键不同**
+ * （`PropertyInspector.onDraft` 写 `localPropertyOf(desc.id)`＝`tooltip`，而
+ * `inspectors/inspector.ts` 的 `makeRow` 与卸载 flush 读 `localIdOf`＝`block.tooltip`），
+ * 生产键空间 84 个属性**无一命中** ⇒ 镜像喂给模型与 flush 的路径本就不通；
+ * 唯一活路是 `buildField` 的同键读取，而 `buildField` 反过来只被
+ * `FieldViewModel.draft` 这条链消费 —— 环上没有任何生产行为。
+ *
+ * 保留的只是**控件模型**（`ControlModel`/`ControlRegistry`/`modelFor`/`formatValue`
+ * 系）与**字段视图模型**（`FieldViewModel`，现已不含草稿字段）。
+ *
+ * 纯：无 Vue/Three/DOM/IO/时钟。
  */
 
 import {
-  type CommandOutcome,
   type DomainError,
   type EntityRef,
   type PropertyRef,
@@ -59,7 +59,6 @@ import {
   MIXED_VALUE,
   componentName,
   formatValue,
-  parseDraft,
 } from '@/application/properties'
 // `propertyRef` 的唯一权威是 `domain/identity`（#250 GF-5 收敛：RNA 侧那份已删）。
 import { propertyRef } from '@/domain/identity'
@@ -305,21 +304,11 @@ export type FieldViewModel = Readonly<{
   display: FieldDisplay
   value: FieldValueState
   edit: FieldEditState
-  /** 当前草稿文本（`null` 表示未在编辑）。 */
-  draft: string | null
-  /** 草稿的解析状态（`intermediate` / `invalid` 决定是否允许提交）。 */
-  draftState: FieldDraftState
   /** 上一次提交被拒绝的结构化原因（呈现给用户；`null` 表示没有）。 */
   rejection: DomainError | null
   /** 展示文本（多选混合值是 `—`；不掩盖错误）。 */
   displayText: string
 }>
-
-export type FieldDraftState =
-  | Readonly<{ state: 'none' }>
-  | Readonly<{ state: 'intermediate' }>
-  | Readonly<{ state: 'invalid'; error: DomainError }>
-  | Readonly<{ state: 'complete'; value: PropertyValue }>
 
 export function fieldDisplayOf(desc: PropertyDescriptor): FieldDisplay {
   return {
@@ -338,22 +327,10 @@ export function buildFieldViewModel(
     descriptor: PropertyDescriptor
     value: FieldValueState
     edit: FieldEditState
-    draft?: string | null
     rejection?: DomainError | null
   }>,
   controls?: ControlRegistry,
 ): FieldViewModel {
-  const draft = input.draft ?? null
-  const draftState: FieldDraftState =
-    draft === null
-      ? { state: 'none' }
-      : (() => {
-          const parsed = parseDraft(registry, input.descriptor, draft)
-          if (parsed.state === 'complete') return { state: 'complete', value: parsed.value } as const
-          if (parsed.state === 'intermediate') return { state: 'intermediate' } as const
-          return { state: 'invalid', error: parsed.error } as const
-        })()
-
   const displayText =
     input.value.kind === 'value'
       ? formatValue(registry, input.descriptor, input.value.value)
@@ -368,158 +345,13 @@ export function buildFieldViewModel(
     display: fieldDisplayOf(input.descriptor),
     value: input.value,
     edit: input.edit,
-    draft,
-    draftState,
     rejection: input.rejection ?? null,
     displayText,
   }
 }
 
-/** 可选提交判据：只有**完整合法**草稿才允许提交（`intermediate`/`invalid` 都不允许）。 */
-export function canCommitDraft(field: FieldViewModel): boolean {
-  return field.draftState.state === 'complete' && field.edit.kind === 'editable'
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. 编辑会话（纯状态机）
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** 一次属性编辑会话的状态。 */
-export type EditSession = Readonly<{
-  ref: PropertyRef
-  /** 起始草稿（用于 Escape 还原）。 */
-  initialDraft: string
-  draft: string
-  /** 是否处于「编辑中」（聚焦且已 begin）。 */
-  editing: boolean
-  /** 待提交标记：`commitOnBlur` 场景下由 `markPending` 置位。 */
-  pendingCommit: boolean
-  lastRejection: DomainError | null
-}>
-
-/** 编辑政策（数据，不是散落在组件里的回调）。 */
-export type EditPolicy = Readonly<{
-  /** 键入期间就尝试提交（旧行为）—— 默认 **false**（D1.1 #3 要求显式提交时机）。 */
-  commitWhileTyping: boolean
-  /** 失焦时提交完整合法草稿。 */
-  commitOnBlur: boolean
-  /** Enter 提交。 */
-  commitOnEnter: boolean
-  /** Escape 取消并还原草稿。 */
-  cancelOnEscape: boolean
-  /** 卸载/失活前 flush 待提交草稿（旧实现丢字的那条，D2.1 #23）。 */
-  flushPendingOnUnmount: boolean
-}>
-
-/**
- * 默认政策：键入只改草稿；Enter/blur 提交；Escape 还原；卸载前 flush。
- *
- * 与旧实现的差别（逐条对应 #251 B7 的 E-11 / C-11 / C-04）：
- *  - 不再每字符提交一次（不会 20 字 20 条 undo）；
- *  - 卸载前 flush（不丢字）；
- *  - Escape 显式还原。
- */
-export const DEFAULT_EDIT_POLICY: EditPolicy = {
-  commitWhileTyping: false,
-  commitOnBlur: true,
-  commitOnEnter: true,
-  cancelOnEscape: true,
-  flushPendingOnUnmount: true,
-}
-
-/** 开启编辑会话。 */
-export function beginEdit(ref: PropertyRef, displayText: string): EditSession {
-  return {
-    ref,
-    initialDraft: displayText,
-    draft: displayText,
-    editing: true,
-    pendingCommit: false,
-    lastRejection: null,
-  }
-}
-
-/** 更新草稿（键入）。`commitWhileTyping` 由调用方决定是否随后 `tryCommit`。 */
-export function updateDraft(session: EditSession, draft: string, commitWhileTyping: boolean): EditSession {
-  return {
-    ...session,
-    draft,
-    pendingCommit: session.pendingCommit || commitWhileTyping,
-    lastRejection: null,
-  }
-}
-
-/** 标记「有未提交的完整合法草稿」（失焦/卸载前用）。 */
-export function markPending(session: EditSession): EditSession {
-  return { ...session, pendingCommit: true }
-}
-
-/** 取消：还原初始草稿，清除待提交与拒绝原因。 */
-export function cancelEdit(session: EditSession): EditSession {
-  return { ...session, draft: session.initialDraft, editing: false, pendingCommit: false, lastRejection: null }
-}
-
-/**
- * 提交的结果：**成功** ⇒ 会话结束（`editing=false`，草稿同步为提交后的显示值）；
- * **被拒绝** ⇒ 会话保留、草稿不丢、原因可见；**无变化** ⇒ 会话结束但**不报告 applied**。
- */
-export type CommitResult =
-  | Readonly<{ kind: 'committed'; session: EditSession; outcome: CommandOutcome }>
-  | Readonly<{ kind: 'unchanged'; session: EditSession; outcome: CommandOutcome }>
-  | Readonly<{ kind: 'rejected'; session: EditSession; error: DomainError }>
-  | Readonly<{ kind: 'not-committable'; session: EditSession; reason: 'intermediate' | 'invalid' | 'read-only' }>
-
-/**
- * 提交草稿 —— 纯函数；真正的写入由 `submit` 完成（把命令交给**唯一写路由**）。
- *
- * 三条纪律：
- *  1. `intermediate` / `invalid` 草稿**不提交**，也不强制转换（#249 §19.1）；
- *  2. 只读字段不提交（`not-committable`，`read-only`），且**保留原因**；
- *  3. `rejected` 时 `session.lastRejection` 被设置、`draft` 不变 —— 于是「拒绝后不得报告
- *     applied」在**会话层**与**命令层**（`CommandOutcome`）两处都成立（D5）。
- */
-export function tryCommit(
-  session: EditSession,
-  field: FieldViewModel,
-  submit: (ref: PropertyRef, value: PropertyValue) => CommandOutcome,
-): CommitResult {
-  if (field.edit.kind !== 'editable') {
-    return {
-      kind: 'not-committable',
-      session: { ...session, lastRejection: field.edit.reason },
-      reason: 'read-only',
-    }
-  }
-  if (field.draftState.state === 'intermediate') {
-    return { kind: 'not-committable', session, reason: 'intermediate' }
-  }
-  if (field.draftState.state === 'invalid') {
-    return { kind: 'not-committable', session: { ...session, lastRejection: field.draftState.error }, reason: 'invalid' }
-  }
-  if (field.draftState.state !== 'complete') {
-    // `none`：没有草稿可提交（例如控件尚未 begin）。
-    return { kind: 'not-committable', session, reason: 'intermediate' }
-  }
-  const outcome = submit(session.ref, field.draftState.value)
-  if (outcome.status === 'rejected') {
-    return { kind: 'rejected', session: { ...session, lastRejection: outcome.error }, error: outcome.error }
-  }
-  if (outcome.status === 'unchanged') {
-    return {
-      kind: 'unchanged',
-      session: { ...session, editing: false, pendingCommit: false, lastRejection: null },
-      outcome,
-    }
-  }
-  return {
-    kind: 'committed',
-    session: { ...session, editing: false, pendingCommit: false, lastRejection: null },
-    outcome,
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. 多选批次构造（控件侧）
+// 4. 多选批次构造（控件侧）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -547,7 +379,7 @@ export function batchIntent(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. 坐标轴/分量标签（D1.6 #16；与 `component` 寻址同源）
+// 5. 坐标轴/分量标签（D1.6 #16；与 `component` 寻址同源）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 分量下标 → 标签。**与 `componentName` 同源**，避免两处各写一份轴名。 */
@@ -563,7 +395,7 @@ export function componentRef(owner: EntityRef, property: string, component: numb
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7. 显示回退（翻译键 + 回退文字；语言不影响逻辑）
+// 6. 显示回退（翻译键 + 回退文字；语言不影响逻辑）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 语言 → 展示文本（**回退文字**优先于键；实例呈现决定语言）。 */
