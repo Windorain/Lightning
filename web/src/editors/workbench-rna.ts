@@ -466,6 +466,31 @@ export function documentStateOf(ctx: Context): DocumentState {
  *
  * 第 3 步是「拒绝后不得报告 applied」的落地：`rejected`/`unchanged` 时**什么都不写**，
  * 于是文档、历史与脏状态不变（契约 §5.2）。
+ *
+ * ---------------------------------------------------------------------------
+ * ⚠️ **暂存双轨，负责人 P10/#261，退出于工作台迁移**
+ * ---------------------------------------------------------------------------
+ *
+ * 本函数是当下唯一还落在**旧运行时文档**上的写路径，`composition/seams.ts` 里
+ * 以 `kernel-property-write-dual-track` 登记在案：
+ *
+ *  - **机制已收敛**：属性语义查同一个 RNA 注册表，写入走同一个 `applySetProperty`
+ *    原子路由（多选一失败整批拒、逐目标原因）。这就是 #253 的交付面。
+ *  - **数据模型未收敛**：此处读的是 `ctx.getDoc()` 返回的 `RuntimeDocument`
+ *    （`documentStateOf` 把它包成 `{version, document, shell}`），
+ *    而不是内核的 `domain/document.ts` 的 `Document`/`application/state.ts` 的
+ *    `ApplicationState`。
+ *
+ * **为什么本批不退**：把实时工作台从 `RuntimeDocument` 迁到内核 `Document`
+ * 需要先改工作区/Area 的装配（外壳、视口、选中集的宿主），
+ * 那是 P6/P10 的面，超出 #253 的退出边界（#253 不做 Area/外壳）。在迁移完成前
+ * 强行改这里会让实时工作台失效，属"为让判据变绿而破坏能力"。
+ *
+ * **退出条件**（可静态核对，见 `seams.ts`）：本文件不再出现 `RuntimeDocument`，
+ * 且 `DocumentState.document` 直接由内核 `Document` 构造。届时删除本条登记与本注释。
+ *
+ * 注意**不存在**的旁路：本文件里没有任何 `descriptor.set(owner, v)` 式内存直写，
+ * 也没有按属性名前缀选 operator 的分派（退役 #3 的三条旧写路径均已删除）。
  */
 export function submitPropertyWrite(
   ctx: Context,

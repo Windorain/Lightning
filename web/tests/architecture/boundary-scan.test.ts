@@ -316,6 +316,91 @@ describe('A01 目标分层清单与 #249 §4 一致', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 暂存双轨登记（#250 GF-5 收敛项 4）：`composition/seams.ts`
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退出条件', () => {
+  it('`composition/seams.ts` 存在且可加载（装配层承载接缝声明）', async () => {
+    const seams = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    expect(Array.isArray(seams.SEAMS), '`SEAMS` 必须是数组').toBe(true)
+    expect(seams.SEAMS.length, '本批至少登记一条（属性写双轨）').toBeGreaterThan(0)
+  })
+
+  it('每条接缝字段完整，且 `owner` 是 P1–P11 内的真实批次', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    for (const s of SEAMS) {
+      expect(s.id, 'id 必须是非空 kebab-case 稳定标识').toMatch(/^[a-z0-9-]+$/)
+      expect(s.files.length, `${s.id} 必须列出涉及文件`).toBeGreaterThan(0)
+      expect(s.newTrack, `${s.id} 缺新轨描述`).toBeTruthy()
+      expect(s.oldTrack, `${s.id} 缺旧轨描述`).toBeTruthy()
+      expect(s.blocker, `${s.id} 缺"为何本批不能退"的具体阻塞`).toBeTruthy()
+      expect(s.exitCondition, `${s.id} 缺退出条件`).toBeTruthy()
+      const p = parsePBatch(s.owner.p)
+      expect(p, `${s.id} 的 owner.p 必须形如 PN`).not.toBeNull()
+      expect(p!).toBeGreaterThanOrEqual(1)
+      expect(p!).toBeLessThanOrEqual(11)
+      // P ↔ issue ↔ 职责名三者一致（与 RETIREMENT_OWNERS 同一套判据）
+      expect(s.owner.issue, `${s.id}：${s.owner.p} 必须对应 #${P_TO_ISSUE_OFFSET + p!}`).toBe(P_TO_ISSUE_OFFSET + p!)
+      expect(s.owner.duty, `${s.id}：${s.owner.p} 的职责应为「${P_DUTIES[s.owner.p]}」`).toBe(P_DUTIES[s.owner.p])
+    }
+  })
+
+  it('退出条件是**可判定的**：不得是"迁移完成后"这类空话（含文件名或可测断言）', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    for (const s of SEAMS) {
+      // 空话清单：这些短语无法核对，出现即判红。
+      for (const vague of ['完成后', '后续处理', '待定', 'TODO', '视情况']) {
+        expect(s.exitCondition, `${s.id} 的退出条件含空话「${vague}」`).not.toContain(vague)
+      }
+      // 必须指名**可核对的对象**：至少一个涉及文件在退出条件里被点名。
+      const named = s.files.some((f: string) => s.exitCondition.includes(f))
+      expect(named, `${s.id} 的退出条件必须点名可核对的产物（文件路径）`).toBe(true)
+    }
+  })
+
+  it('**反空洞真**：登记的旧轨在代码里**确实存在**（否则登记表是空转）', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    const entry = SEAMS.find((s: { id: string }) => s.id === 'kernel-property-write-dual-track')
+    expect(entry, '必须登记属性写双轨').toBeTruthy()
+
+    // 旧轨的**真实证据**：`workbench-rna.ts` 经 `ctx.getDoc()` 读文档，
+    // 而 `getDoc()` 的类型是 `RuntimeDocument`（旧模型）。故要两处一起看：
+    //  ① 面板侧确实经 `getDoc()` 取文档（旧模型的读入口）；
+    const rna = fs.readFileSync(path.join(SRC_ROOT, 'editors', 'workbench-rna.ts'), 'utf8')
+    const codeOnly = rna
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+      .join('\n')
+    expect(codeOnly, '`workbench-rna.ts` 必须仍经 `ctx.getDoc()` 读旧文档').toContain('ctx.getDoc()')
+    //  ② 该入口的类型确实是 `RuntimeDocument`（在 `runtime/context.ts` 声明）。
+    const ctxSrc = fs.readFileSync(path.join(SRC_ROOT, 'runtime', 'context.ts'), 'utf8')
+    expect(ctxSrc, '`getDoc()` 的类型必须仍是旧 `RuntimeDocument`（旧轨的类型面）').toMatch(
+      /getDoc\(\):\s*Ref<RuntimeDocument \| null>/,
+    )
+
+    // 登记项声明的阻塞点也必须真实：内核侧写入口已在（新轨已交付）。
+    expect(
+      fs.existsSync(path.join(SRC_ROOT, 'application', 'kernel-properties.ts')),
+      '新轨（内核属性注册）必须已交付，否则"双轨"说法不成立',
+    ).toBe(true)
+    // 且新轨**真的**被 `reduceSetProperty` 用上（不是"有个文件摆着"）。
+    const commands = fs.readFileSync(path.join(SRC_ROOT, 'application', 'commands.ts'), 'utf8')
+    expect(commands, '新轨必须真实接入命令层').toContain('kernelPropertyRegistry()')
+  })
+
+  it('**负对照**：未登记的接缝判据能抓到"旧轨仍在但没有登记"', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    const claim = (oldTrackPresent: boolean, registered: boolean): boolean =>
+      oldTrackPresent && !registered // 「有旧轨但没登记」= 违规
+    expect(claim(true, false), '有旧轨且未登记 ⇒ 必须判红').toBe(true)
+    expect(claim(true, true), '有旧轨且已登记 ⇒ 不判红').toBe(false)
+    expect(claim(false, false), '无旧轨 ⇒ 不判红').toBe(false)
+    // 现实核对：当下确实是"有旧轨 + 已登记"。
+    expect(SEAMS.some((s: { id: string }) => s.id === 'kernel-property-write-dual-track')).toBe(true)
+  })
+})
+
 describe('说明符解析（规则的前提）', () => {
   it('@/ 别名与相对路径都能解析到 src 相对路径；外部包返回 null', () => {
     const mk = (specifier) => ({
