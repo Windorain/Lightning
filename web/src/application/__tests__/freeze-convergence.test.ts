@@ -33,7 +33,34 @@ import { err, ok, type Result } from '@/domain/errors'
 
 
 const ROOT = process.cwd()
-const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 'utf8')
+
+/**
+ * 读源码并**归一化行尾为 LF**。
+ *
+ * ## 为什么必须归一化（2026-10-11 合流事故）
+ *
+ * 本仓 `core.autocrlf=true`：**新鲜检出是 CRLF**（实测 `properties.ts` 1331 处 CRLF、
+ * 0 处裸 LF），而执行者工具直接写出的工作树文件常是 LF。此处曾只做
+ * `readFileSync(..., 'utf8')`，于是当断言里出现 `\n\n` 这类**裸换行字面量**时：
+ *
+ *  - 在 LF 树上绿；
+ *  - 在 CRLF 树上**必红**（`\n\n` 永不匹配 `\r\n\r\n`）。
+ *
+ * 这是 **EOL 脆性**（EOL fragility）：判据本身与"内容"无关，却随检出口径变化，
+ * 于是"本机绿"与"CI/新鲜工作树红"分歧。事故现场：集成树 `96b2e3b` 上
+ * `freeze-convergence.test.ts:303` 的 `\n\n` 失配。
+ *
+ * ## 为什么在最底层归一化（而不是逐条改正则）
+ *
+ * 逐条改 `\r?\n` 只堵住**已知**的几处；本文件后续新增任何裸 `\n` 断言都会重新引入
+ * 同一缺陷。在**唯一读入口**归一化后，"进入断言的文本"恒定是 LF，
+ * 于是"用 `\n` 写字面量"在本文件里重新成为安全操作 —— 一处治本。
+ *
+ * 注意：这**不**改变被断言文件的真实 EOL（不写回），只改变断言看到的视图。
+ * 故它不会掩盖"某文件被误改成 CRLF/LF"这类问题 —— 那不属于本文件的判据面。
+ */
+const read = (rel: string): string =>
+  readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n')
 
 /**
  * 去掉注释后的**代码文本**（供"某符号是否仍在代码里"的判定）。
