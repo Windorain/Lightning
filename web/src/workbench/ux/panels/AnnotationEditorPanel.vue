@@ -25,7 +25,7 @@
 import { computed, ref, watch } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { Annotation } from '@/render/data/annotationTypes'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
+import ContentText from '@/editors/ContentText.vue'
 import PropertyInspector from '@/workbench/ux/PropertyInspector.vue'
 
 const props = defineProps<{ ctx: Context }>()
@@ -59,13 +59,18 @@ watch(
 )
 
 /**
- * 描述预览：读**已提交**的描述（不是本地草稿）。
+ * 描述预览文本：读**已提交**的描述（不是本地草稿）。
  *
  * 旧实现里预览用本地 `desc` 而写入走 200ms debounce，于是「预览已经变了但文档还没变」
  * 是个用户可见的不一致窗口。现在预览跟随文档（提交后立即一致），
  * 草稿态由 `PropertyField` 自己管理。
+ *
+ * 呈现侧：只算出**要呈现的文本**，解析交给公共受控边界（`ContentText`）——
+ * 不再产 HTML 串再 `v-html`（#259 A32 退役项：本文件原为 6 条直通路径之一；
+ * 旧的 `pure/renderTooltipHtml.ts` 已随 P8 退役删除）。
+ * 于是注解预览与 Tooltip 框、Tooltip 编辑预览走同一条规则。
  */
-const previewHtml = computed(() => renderTooltipHtml(annos.value[0]?.description ?? ''))
+const previewText = computed(() => annos.value[0]?.description ?? '')
 
 const typeLabel = computed(() => {
   if (annos.value.length === 0) return ''
@@ -87,10 +92,13 @@ function deleteSelected(): void {
       <span class="anno-editor-type">{{ typeLabel }}</span>
     </div>
 
-    <!-- 描述预览（呈现功能；描述本身是 RNA 属性，由下方属性面板渲染与提交） -->
+    <!--
+      描述预览（呈现功能；描述本身是 RNA 属性，由下方属性面板渲染与提交）。
+      外部文本（注解描述）经受控呈现边界；**无 `v-html`**。
+      （#259 A32 退役项：本文件原为 6 条 `v-html` 直通路径之一。）
+    -->
     <div class="anno-editor-preview wm-tooltip-surface wm-tooltip-surface--inline">
-      <!-- eslint-disable-next-line vue/no-v-html -->
-      <div class="wm-tooltip-body" v-html="previewHtml" />
+      <ContentText class="wm-tooltip-body" :text="previewText" mode="mc" />
     </div>
 
     <!-- 全部注解属性（含 description）：生成式，写入经唯一写路由 -->

@@ -13,6 +13,7 @@
  */
 
 import { h, type VNode } from 'vue'
+import ContentText from '@/editors/ContentText.vue'
 import type { UILayout, UILayoutItem, LayoutWithItems } from './types/layout'
 
 const props = defineProps<{ layout: UILayout }>()
@@ -30,7 +31,11 @@ function renderItem(item: UILayoutItem, prefix: string, index: number): VNode {
   switch (item.kind) {
     case 'label': {
       const cls = item.class ?? 'ux-label'
-      if (item.html) return h('span', { class: cls, 'data-layout-id': layoutId, innerHTML: item.text })
+      // 声明式格式化内容：走**公共受控呈现边界**（Markdown + MC 码 → 受控节点）。
+      // 旧实现是 `h('span', { innerHTML: item.text })` —— 任意字符串直通 DOM 标记，
+      // 是 #259 A32 退役的直通路径之一。字段 `html` 已改名 `content`（P8，语义收窄为
+      // "经受控边界解析"）；本文件是 P8 改名时漏掉的调用点，由合流类型检查抓出。
+      if (item.content) return h(ContentText, { class: cls, text: item.text, mode: 'mc', 'data-layout-id': layoutId })
       return h('span', { class: cls, 'data-layout-id': layoutId }, item.text)
     }
     case 'separator':

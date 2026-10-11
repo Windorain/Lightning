@@ -157,6 +157,11 @@ describe('A01 设施在当前树上的实况（含空洞真的显式披露）', 
     expect([...gateFiles]).toContain('runtime/execution.ts')
     expect([...gateFiles]).toContain('domain/document.ts')
     expect([...gateFiles]).toContain('application/commands.ts')
+    // P8（#259）新增的层同样进入执行面：内容边界与诊断契约所在的 domain/、
+    // application/、editors/ 都必须被闸门实际检验（不能只是目录存在）。
+    expect([...gateFiles]).toContain('domain/textContent.ts')
+    expect([...gateFiles]).toContain('application/diagnostics.ts')
+    expect([...gateFiles]).toContain('editors/ContentText.vue')
 
     // ── 不变量 1b：执行面只由 #249 §4 的目标分层构成 ──
     // P2（#253）在 P1 的文件级口径上补一条：`gateFiles` 的每一项都必须落在某个

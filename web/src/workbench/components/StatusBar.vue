@@ -8,10 +8,11 @@ import { useContext } from '@/runtime/context'
 import { isWikiHostProfile } from '@/runtime/hostProfile'
 import { buildWikiDataPageUrl, displayNameFromLocator } from '@/wiki/wikiUrls'
 import { buildWikiEditSummaryDraft, hasWikiAuditableChanges } from '@/wiki/wikiEditSummary'
-import { t } from '@/config/i18n'
 
 const ctx = useContext()
 const log = ctx.log
+/** 本实例的翻译（#259 A33：消费本实例语言，无模块级全局读源）。 */
+const t = ctx.t
 
 const frameCount = computed(() => ctx.getDoc().value?.frameCount ?? 0)
 const hasWorldMultiFrame = computed(() => frameCount.value > 1)

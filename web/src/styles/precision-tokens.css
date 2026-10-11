@@ -74,7 +74,19 @@
   --wb-radius-full: 10px;
 }
 
-[data-wb-theme="light"] {
+/**
+ * 亮色覆盖。
+ *
+ * `[data-lk-theme]` 是 **P8（#259 A33）** 新增的**实例作用域**选择器：
+ * 自定义属性沿 DOM 继承，因此把该属性放在**实例根元素**上时，
+ * 同页两个实例各自解析出各自的变量值 —— 而 `[data-wb-theme]`（文档根）
+ * 是全页一份，第二个实例挂载即覆盖第一个。
+ *
+ * 两者并存：旧属性仍由既有外壳/宿主设置，不改变现有行为；
+ * 实例作用域是新增的可选路径。
+ */
+[data-wb-theme="light"],
+[data-lk-theme="light"] {
   --wb-bg-deepest: #dee4ea;
   --wb-bg-surface: #eaeef3;
   --wb-bg-elevated: #f2f5f8;

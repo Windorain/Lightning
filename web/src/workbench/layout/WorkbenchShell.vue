@@ -15,9 +15,15 @@ const wikiEmbed = import.meta.env.VITE_HOST_PROFILE === 'wiki'
 </script>
 
 <template>
+  <!--
+    实例作用域属性（#259 A33）：主题/语言落在**实例根元素**，自定义属性沿 DOM 继承，
+    于是同页两个工作台实例各持一份。旧路径写 `document.documentElement`
+    （全页一份）会让第二个挂载的实例改掉第一个的呈现。
+  -->
   <div
     class="wb-shell"
     :class="{ 'wb-shell--dragging': dragging, 'wb-shell--wiki-embed': wikiEmbed }"
+    v-bind="ctx.getShellSettings().scopeAttrs"
   >
     <header class="wb-menubar">
       <slot name="menubar" />

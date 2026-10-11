@@ -5,9 +5,10 @@ import { copyTextToClipboard } from '@/util/browser'
 import { bakeIsometricStructurePngDataUrl } from '@/workbench/exportIsometricImage'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { useContext } from '@/runtime/context'
-import { t } from '@/config/i18n'
 
 const ctx = useContext()
+/** 本实例的翻译（语言来自本实例设置，不是模块级全局读源；#259 A33）。 */
+const t = ctx.t
 const doc = computed(() => ctx.getDoc().value?.serialize() ?? null)
 const baseName = computed(() => doc.value ? sceneStableStringIdFromDocument(doc.value) : 'scene')
 const showSdeSave = computed(() => ctx.getWorkspaceMode().value === 'sde' && ctx.getConnection().apiBase.length > 0)

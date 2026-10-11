@@ -4,7 +4,10 @@
  */
 defineProps<{ modelValue: 'preview' | 'wiki' | 'export' | 'materials' }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: 'preview' | 'wiki' | 'export' | 'materials'): void }>()
-import { t } from '@/config/i18n'
+import { useContext } from '@/runtime/context'
+
+/** 本实例的翻译（#259 A33：消费本实例语言，无模块级全局读源）。 */
+const t = useContext().t
 
 const tabs = [
   { id: 'preview' as const },

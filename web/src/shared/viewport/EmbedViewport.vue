@@ -387,7 +387,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="wmRoot" class="wm-root" :class="layoutClass">
+  <!--
+    实例作用域属性（#259 A33）：`data-lk-theme`/`data-lk-lang` 落在**实例根元素**上，
+    自定义属性沿 DOM 继承 ⇒ 同页多实例各持主题/语言。旧路径把主题写到
+    `document.documentElement`（全页一份），那是"模块级/全局写入改变所有实例"。
+  -->
+  <div ref="wmRoot" class="wm-root" :class="layoutClass" v-bind="ctx.getShellSettings().scopeAttrs">
     <!-- Title bar -->
     <header v-if="showTitle" class="wm-titlebar">
       <div class="wm-titlebar-left">
@@ -487,7 +492,15 @@ onBeforeUnmount(() => {
       <span class="wm-status-text">{{ statusSummary }}</span>
     </div>
 
-    <ToolTipBox v-if="hover && tooltipText" :text="tooltipText" :client-x="hover.clientX" :client-y="hover.clientY" :offset="prefs.tooltipOffset" />
+    <!-- Tooltip Teleport 到 body ⇒ 脱离实例根的继承链，须显式传本实例主题（#259 A33） -->
+    <ToolTipBox
+      v-if="hover && tooltipText"
+      :text="tooltipText"
+      :client-x="hover.clientX"
+      :client-y="hover.clientY"
+      :offset="prefs.tooltipOffset"
+      :theme="ctx.getShellSettings().theme.value"
+    />
 
     <EmbedSettingsPanel :show="showSettingsPanel" :prefs="prefs" @close="showSettingsPanel = false" />
   </div>
