@@ -234,8 +234,30 @@ Scene → SceneObject.dataId → ObjectData.payload(kind: 'mesh') → MeshData
 - `ObjectData.contentVersion` 用键序稳定的 `digestOf`（原 `JSON.stringify` 会因
   键序不同而误判"仍脏"）；
 - 顶点写走**既有** `setProperty` 路由（`PropertyRef.element` 承载子元素寻址），
-  **不**新加命令 —— 故 `application/commands.ts#validatePropertyWrite` 里那条
-  「版本不符 ⇒ `StaleReference`」**自动**覆盖几何，不需要第二条校验通路。
+  **不**新加命令。
+
+### 8.1 合流后（GF-5 收敛，P2 #253）的落点更正
+
+P2 的 GF-5 收敛把属性语义的唯一权威从 `commands.ts` 的内联白名单移到 **RNA 注册表**，
+故上一条里"由 `commands.ts#validatePropertyWrite` 自动覆盖"的表述**已失效**。
+当前的正确落点：
+
+| 面 | 落点 | 说明 |
+|---|---|---|
+| 属性声明（含 `vertexPosition`） | `application/kernel-properties.ts` 的 `KERNEL_OBJECT_TYPES` | 走公开注册路径；`vertexPosition` 标 `animatable: false` |
+| 元素引用过期判定 | `application/properties.ts#staleReason(ref, facts)` | `facts.topologyVersion` ← `ObjectData.topologyVersion`（即本模块 §8 第 1 条的导出值） |
+| 顶点写应用 | `kernel-properties.ts#applyKernelPropertyValue` | 交给 `commitGeometryEdit`（按对象独立编辑，A07） |
+| 顶点读面 | `kernel-properties.ts#readRawKernelValue` | **必需**：`applySetProperty` 的"无变化 ⇒ unchanged"（D5）依赖它；缺读面会把"写相同值"误报 `applied` |
+| 类型能力（`dataKind`/`editable`） | `domain/scene.ts` 的 `DEFAULT_TYPES` | `domain/` 不得 import `application/`，故此处**必须**单独登记 `mesh` |
+
+**两处登记是分工而非重复**：`domain` 侧供能力/呈现查询，RNA 侧供逐属性描述与值域。
+任一缺失都表现为**显式失败**（类型级查询判未知 / 属性写判 `property-not-registered`），
+不是静默半可用。
+
+**A08 原子性不变量在新形态下的承担者**：`applySetProperty` 的三阶段
+（① 全量预检 → ② 无变化判定 → ③ 单次提交）。本模块的 `vertexPosition` 写
+**不新增**第二个校验入口 —— 过期判定统一由 `staleReason` 在预检阶段完成，
+写应用只在**已通过预检**的引用上执行。
 
 ---
 
@@ -244,3 +266,4 @@ Scene → SceneObject.dataId → ObjectData.payload(kind: 'mesh') → MeshData
 | 版本 | 日期 | 条目 | 依据 |
 |---|---|---|---|
 | v1 | 2026-10-11 | 首次冻结：容限表、右手 Y-up 判据、仿射/剪切/逆、枢轴两类语义、父链与集合、轴序 profile 与固定样本、与 P1 的接入关系 | #249 §3.1/§3.2/§14 A07/A26/§19.2；#254 正文与验收 E1/E2/E3 |
+| v1.1 | 2026-10-11 | §8.1 新增：合流 GF-5 收敛后的落点更正（属性声明/过期判定/写应用/读面/两处登记分工、A08 承担者） | P2 #253 合入 `integration/web-kernel` @ `96b2e3b`；#250 收敛裁决 |

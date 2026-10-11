@@ -77,7 +77,7 @@
 | 共享判定的单一实现点 | `objectsSharingData` / `isDataShared` | `domain/scene.ts` |
 | 拓扑版本（供 `ObjectData`） | `topologyVersionOf(payload)` | `domain/geometry.ts` |
 | 具名 MC 身份键（与坐标无关） | `blockCellIdentityKey` | `domain/geometry.ts` |
-| 顶点写（唯一写路由） | `setProperty` + `PropertyRef.element`（属性 `mesh.vertexPosition`） | `application/commands.ts` |
+| 顶点写（唯一写路由） | `setProperty` + `PropertyRef.element`（属性 `mesh.vertexPosition`） | 路由在 `application/commands.ts`；**应用**在 `application/kernel-properties.ts` 的 `applyKernelPropertyValue` / 读面在 `readRawKernelValue`（合流 GF-5 收敛后属性语义归 RNA 注册表 —— 见 `web-kernel-geometry-contract.md` §8.1） |
 
 ---
 
@@ -107,7 +107,8 @@ P3 的写权边界是 `web/src/domain/`、`web/src/application/`、`web/tests/ar
 1. **P3 没有改 `render/` 的任何文件**：上表所有旧消费者原样保留。故"退役 #9 已完成"
    **不成立** —— 成立的是"退役 #9 的**语义替代已交付且被测试证明**，删除点已定位"。
 2. **P3 的替代实现尚未被生产路径消费**：`domain/geometry` 的消费者目前只有本批测试
-   与 `application/commands.ts` 的顶点写。生产渲染路径改用来源映射是 **P5** 的活。
+   与内核属性写（`application/kernel-properties.ts` 的 `mesh.vertexPosition`）。
+   生产渲染路径改用来源映射是 **P5** 的活。
 3. **`Grid` 的格坐标仍用于结构语义**（`context/grid.ts`）：格坐标作为"结构内的位置"
    是**正当**的（它就是位置）；本条的退役对象是"格坐标**兼任对象身份**"。
    两者不可混为一谈 —— 故清单里没有把 `grid.ts` 列为删除点。
@@ -119,3 +120,4 @@ P3 的写权边界是 `web/src/domain/`、`web/src/application/`、`web/tests/ar
 | 版本 | 日期 | 条目 | 依据 |
 |---|---|---|---|
 | v1 | 2026-10-11 | 首次交付：D1/D2/D3 删除点、替代语义索引、未迁移消费者诚实账、P11 终局判据 | #249 §15 第 9 条 + §14 A07/A18；#254 委派约束（跨区旧文件不直接动） |
+| v1.1 | 2026-10-11 | 替代语义索引更正"顶点写"落点（路由在 `commands.ts`、应用与读面在 `kernel-properties.ts`），并同步 §4 诚实边界第 2 条 | 合流 GF-5 收敛（P2 #253 @ `96b2e3b`） |
