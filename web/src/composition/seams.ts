@@ -74,6 +74,72 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     exitCondition:
       '`src/runtime/context.ts` 的 `getDoc()` 不再返回 `RuntimeDocument`（类型改为内核 `Document`），且 `src/editors/workbench-rna.ts` 的 `documentStateOf` 直接由内核 `Document` 构造 `DocumentState`（不再有 `RuntimeDocument`）。届时删除本条登记。',
   }),
+  /**
+   * P9（#260）登记：**固定快照导出已交付，旧导出器仍在服役**。
+   *
+   * 这是 B5 退役矩阵第 13 条（`exporter-borrows-live-viewport`）在**代码现状**上的形态：
+   * 替代机制（内核侧固定快照导出作业）已交付且可静态核对，但它的**消费面**
+   * （工作台的导出命令与面板）仍走旧导出器 —— 而旧导出器借用实时视口正是要退役的行为。
+   *
+   * 为什么本批不删旧导出器：按 R-WK-03（#250 裁决 2026-10-11），**内核→生产接线**
+   * （宿主创建 Editor、按帧注入时间输入、渲染消费求值结果）是 #261 的核心内容；
+   * 因为内核尚未接线，旧导出器此刻是生产唯一路径，删除即能力停摆且无替代
+   * （#171 明令禁止的半成品替换形态）。
+   */
+  Object.freeze({
+    id: 'export-borrows-live-viewport-dual-track',
+    files: Object.freeze([
+      'src/domain/captureSpec.ts',
+      'src/application/exportPlan.ts',
+      'src/runtime/exportJob.ts',
+      'src/workbench/export/bundleMeshAssembly.ts',
+      'src/workbench/exportIsometricImage.ts',
+      'src/operators/builtin/exportOperators.ts',
+      'src/workbench/components/ExportWorkspace.vue',
+    ]),
+    newTrack:
+      '内核侧固定快照导出（#260）：`domain/captureSpec` 把取景复制成 `CameraSpec` 值、把采样时间算成冻结的 `CaptureTime` 序列；`application/exportPlan` 组装**不可变**请求并在预检处默认失败；`runtime/exportJob` 的离屏端口只有 `acquire/renderFrame/release`（**没有**取实时相机/视口的方法）。静态判据见 `web/tests/architecture/export-purity.test.ts`。',
+    oldTrack:
+      '旧导出器仍在生产路径上：`workbench/exportIsometricImage.ts` 与 `workbench/export/bundleMeshAssembly.ts` 从**正在操作的视口**取景（必要时临时改机位再恢复），命令入口在 `operators/builtin/exportOperators.ts`，面板在 `workbench/components/ExportWorkspace.vue`；A29 负对照「导出借用并旋转实时相机」描述的正是这条轨道。',
+    blocker:
+      '内核→生产接线（宿主创建 Editor、按帧注入时间输入、渲染消费求值结果）是 #261 的核心内容（R-WK-03），而旧导出器的**消费者**（导出命令与面板）位于生产旧路径上。接线完成前删除旧导出器 = 能力停摆且无替代。',
+    owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
+    exitCondition:
+      '`src/workbench/export/bundleMeshAssembly.ts` 与 `src/workbench/exportIsometricImage.ts` 被删除，且 `src/operators/builtin/exportOperators.ts` 的导出命令改由 `src/runtime/exportJob.ts` 的 `ExportJob` 承担（不再从实时视口取景）。届时删除本条登记。',
+  }),
+  /**
+   * P9（#260）登记：**导出资源清单的产出方式**尚未接线。
+   *
+   * A29 要求「产物对应 S0 与**资源清单**」，且「缺必需资源时预检失败」。预检本身
+   * 已交付且被测试覆盖（`src/application/__tests__/snapshotExport.test.ts` 的预检组），
+   * 但**清单从哪来**这一步还没有生产调用方：
+   *
+   *  - 新轨：请求携带显式资源清单（`normalizeAssetNeeds`）或由已装配的导入器反推；
+   *  - 旧轨：旧导出器（`workbench/export/bundleMeshAssembly.ts`）直接从旧文档与
+   *    纹理库取资源，**不经过**任何"必需/可选 + 内容版本"的清单；
+   *  - 缺口：`application/exportPlan.ts` 的 `deriveAssetNeeds()` 在未装配时返回空清单，
+   *    并在函数注释里**显式登记**该事实（不伪造图元、不假装"无需资源"）。
+   *
+   * 这条接缝的存在使 P11 的终局审计能机械核对"资源清单是否仍靠手列/靠旧路径取"。
+   */
+  Object.freeze({
+    id: 'export-asset-manifest-unwired',
+    files: Object.freeze([
+      'src/application/exportPlan.ts',
+      'src/runtime/exportJob.ts',
+      'src/presentation/compileScene.ts',
+      'src/workbench/export/bundleMeshAssembly.ts',
+    ]),
+    newTrack:
+      '导出请求的 `assets` 是显式清单（`ExportAssetNeed[]`：稳定资源 ID + 内容版本 + 必需/可选 + 获取位置），由 `normalizeAssetNeeds()` 单点规范化；预检经 `presentation/assetState.preflightRequiredAssets()` 判必需资源是否就绪（五态，不把占位当完整）。',
+    oldTrack:
+      '旧导出器（`workbench/export/bundleMeshAssembly.ts`）在烘焙时直接从旧文档与纹理库取资源：没有"必需/可选"的声明，也没有内容版本参与的就绪判定，故"缺资源"表现为烘焙结果里少一块而不是预检失败。',
+    blocker:
+      '"文档场景 → 呈现图元（`EvaluatedPrimitive[]`）"的装配属 P10/#261 的集成闭环内容（内核尚未接线进生产，R-WK-03）；P9 交付的是**清单的形状、规范化与预检判据**，不是图元装配。',
+    owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
+    exitCondition:
+      '`src/application/exportPlan.ts` 的 `deriveAssetNeeds()` 由已装配的图元来源产出非空清单（不再在未装配时返回空），且 `src/runtime/exportJob.ts` 的作业按该清单解析资源。届时删除本条登记。',
+  }),
 ])
 
 /** 按 id 取登记项（未登记返回 `undefined`，由调用方决定是缺口还是缺陷）。 */

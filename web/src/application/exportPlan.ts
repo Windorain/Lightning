@@ -34,7 +34,7 @@ import {
   err,
 } from '@/domain/errors'
 import { canonicalize, digestOf, type Version } from '@/domain/identity'
-import type { AnimationState } from '@/domain/animation'
+import { animationDrivenKeys, type AnimationState } from '@/domain/animation'
 import {
   captureCapabilityLoss,
   freezeExportRequest,
@@ -268,6 +268,145 @@ export function assetManifestDigest(assets: readonly ExportAssetNeed[]): number 
       .map((a) => `${a.assetId}@${a.contentVersion}:${a.required ? 'req' : 'opt'}`)
       .sort()
       .join('\u0000'),
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// K1：发布前能力检查（逐项报告不支持的几何 / 变形 / 文字 / 轨道）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * **发布目标的能力声明**（由目标格式/profile 显式给出，不由本层猜）。
+ *
+ * 为什么必须显式声明：#249 §12「发布前做能力检查：不支持的几何、变形、文字或轨道
+ * **逐项报告**」。若本层自己"知道"某个格式能表达什么，就会出现第二个
+ * "格式能力"真源，与适配器漂移。⇒ 声明进、报告出，**判定是纯函数**。
+ */
+export interface PublishCapabilities {
+  /** 目标格式能表达的几何类别（整数格整格方块之外还要什么，显式列出）。 */
+  readonly geometry: readonly string[]
+  /** 能表达的变形方式（旧整数格结构格式只有 `'none'`）。 */
+  readonly deformations: readonly string[]
+  /** 能否表达自由文字（注解文本）。 */
+  readonly canExpressText: boolean
+  /** 能否表达旋转/缩放/显式枢轴（旧整数格结构格式不能）。 */
+  readonly canExpressTransformExtras: boolean
+  /**
+   * 能承载动画的属性 ID 集合（`'all'` = 目标格式承载全部轨道）。
+   *
+   * 语义是**发布格式**的能力，不是内核的可动画性（后者归 RNA 的
+   * `PropertyDescriptor.animatable`，见契约 §5.1）。
+   */
+  readonly animatableProperties: readonly string[] | 'all'
+}
+
+/** 一项"目标格式表达不了"的事实（结构化；稳定原因码 + 归属对象）。 */
+export interface CapabilityReportItem {
+  readonly category: 'geometry' | 'deformation' | 'text' | 'track'
+  /** 稳定原因码（语言无关 —— #249 §19.7）。 */
+  readonly reason:
+    | 'LegacyExportUnsupportedTransform'
+    | 'LegacyExportUnsupportedPivot'
+    | 'LegacyExportUnsupportedDeformation'
+    | 'PublishTextUnsupported'
+    | 'PublishTrackUnsupported'
+  /** 相关对象 ID（无对象语义的项为空串）。 */
+  readonly objectId: string
+  readonly detail: Readonly<Record<string, string | number>>
+}
+
+/**
+ * **发布前能力检查**（K1）—— 逐项报告不支持的几何 / 变形 / 文字 / 轨道。
+ *
+ * 三类判定的来源**各不相同**，这是刻意的（避免"一处判据包打天下"）：
+ *  1. **几何 / 变形**：来自 P3 交付的 `legacyExportDiagnostics()`（经请求的
+ *     `capabilityLoss` 带来）—— 本函数**不重新判定**"什么算不可表达"；
+ *  2. **文字**：注解对象携带非空 `text` 且目标格式声明 `canExpressText === false`；
+ *  3. **轨道**：已启用轨道（`animationDrivenKeys` 的判据）的目标属性不在目标的
+ *     `animatableProperties` 里。
+ *
+ * 空数组 = 目标格式能完全表达这次快照 ⇒ 可以按"无损失"导出。
+ */
+export function capabilityReport(request: ExportRequest, target: PublishCapabilities): readonly CapabilityReportItem[] {
+  const out: CapabilityReportItem[] = []
+
+  // ① 几何 / 变形（P3 的判定结果，只是**归类**，不是重判）
+  for (const loss of request.capabilityLoss) {
+    const category: CapabilityReportItem['category'] = loss.code === 'LegacyExportUnsupportedDeformation' ? 'deformation' : 'geometry'
+    if (category === 'deformation' && target.deformations.includes('none') === false) continue
+    if (category === 'geometry' && target.canExpressTransformExtras) continue
+    out.push(
+      Object.freeze({
+        category,
+        reason: loss.code,
+        objectId: loss.objectId,
+        detail: Object.freeze({ dataId: loss.dataId, ...loss.detail }),
+      }),
+    )
+  }
+
+  // ② 文字：注解对象的文本
+  if (!target.canExpressText) {
+    for (const objectId of request.payload.scene.order) {
+      const obj = request.payload.scene.objects[objectId]
+      if (!obj || obj.type !== 'annotation') continue
+      const data = request.payload.scene.data[obj.dataId]
+      if (!data || data.payload.kind !== 'annotation') continue
+      if (data.payload.text === undefined || data.payload.text === '') continue
+      out.push(
+        Object.freeze({
+          category: 'text' as const,
+          reason: 'PublishTextUnsupported' as const,
+          objectId,
+          detail: Object.freeze({ textLength: data.payload.text.length, shape: data.payload.shape }),
+        }),
+      )
+    }
+  }
+
+  // ③ 轨道：已启用轨道里目标格式承载不了的属性
+  if (target.animatableProperties !== 'all') {
+    const allowed = new Set(target.animatableProperties)
+    for (const key of animationDrivenKeys(request.payload.animation)) {
+      // 轨道键是 `owner\0property#component/element`；能力声明按**属性 ID** 比对，
+      // 故只取属性段（与 `domain/animation.propertyKey` 的拼接规则同源）。
+      const property = trackPropertyOf(key)
+      if (allowed.has(property)) continue
+      out.push(
+        Object.freeze({
+          category: 'track' as const,
+          reason: 'PublishTrackUnsupported' as const,
+          objectId: '',
+          detail: Object.freeze({ property, trackKey: key }),
+        }),
+      )
+    }
+  }
+
+  // 稳定排序：同类按 objectId/reason，使报告可逐次对账。
+  return Object.freeze(
+    out.sort((a, b) => a.category.localeCompare(b.category) || a.objectId.localeCompare(b.objectId) || a.reason.localeCompare(b.reason)),
+  )
+}
+
+/** 从轨道键里取属性 ID（`domain/animation.propertyKey` 的拼接规则的**读**侧，不重定义拼接）。 */
+function trackPropertyOf(key: string): string {
+  const nul = key.indexOf('\u0000')
+  if (nul === -1) return key
+  const rest = key.slice(nul + 1)
+  const cut = rest.search(/[#/]/)
+  return cut === -1 ? rest : rest.slice(0, cut)
+}
+
+/** 能力报告 → 预检诊断（阻塞判据与"逐项报告"共用一份事实，不各自判定）。 */
+export function capabilityDiagnostics(items: readonly CapabilityReportItem[]): readonly ExportDiagnostic[] {
+  return Object.freeze(
+    items.map((i) =>
+      Object.freeze({
+        code: 'ExportCapabilityUnsupported' as const,
+        detail: Object.freeze({ category: i.category, reason: i.reason, objectId: i.objectId, ...i.detail }),
+      }),
+    ),
   )
 }
 

@@ -48,6 +48,8 @@ import {
   type RenderedFrame,
 } from '@/application/exportPlan'
 import { ExportJob, refuseWhenBlocked, type OffscreenRenderPort } from '@/runtime/exportJob'
+import { Editor } from '@/runtime/execution'
+import { canonicalize } from '@/domain/identity'
 import { addBlockObject, addCameraObject, createDocument, withScene } from '@/domain/document'
 import { EMPTY_ANIMATION } from '@/domain/animation'
 import { findObject } from '@/domain/scene'
@@ -468,6 +470,67 @@ describe('A29：作业生命周期 —— 进度、取消必释放、失败不�
     expect(state.releases).toBe(1)
   })
 
+  it('**产物对应 S0 与资源清单**：编码器看到的请求载荷/资源清单逐字段等于捕获时的值', async () => {
+    const doc = sceneWithBlocks(2)
+    const captured = doc.version.contentVersion
+    const needs = normalizeAssetNeeds([{ assetId: 'tex/a', contentVersion: 'v9', required: false, locator: 'a.png' }])
+    const req = requestOf({ doc, assets: needs, spec: specOf({ frameCount: 2 }) })
+
+    let seenVersion: number | undefined
+    let seenAssets: readonly string[] = []
+    let seenFrames: readonly number[] = []
+    const inspecting: EncoderPort = {
+      supportedKinds: ['image'],
+      async encode(input) {
+        seenVersion = input.request.payload.version.contentVersion
+        seenAssets = input.request.assets.map((a) => `${a.assetId}@${a.contentVersion}`)
+        seenFrames = input.rendered.map((f) => f.time.index)
+        return { ok: true, value: new Uint8Array([input.rendered.length]) }
+      },
+    }
+    const job = new ExportJob({ request: req, kind: 'image', port: fakePort().port, encoder: inspecting })
+    const outcome = await job.run()
+    expect(outcome.status).toBe('completed')
+    expect(seenVersion, '产物必须对应捕获的 S0').toBe(captured)
+    expect(seenAssets, '资源清单必须逐条等于请求里的清单').toEqual(['tex/a@v9'])
+    expect(seenFrames, '渲染帧必须覆盖固定采样序列的**全部**索引').toEqual([0, 1])
+
+    // 捕获之后继续编辑 ⇒ 编码器看到的仍是 S0（而不是"最新文档"）
+    const s2 = addBlockObject(doc.scene, { objectId: 'later', dataId: 'dl' })!
+    const doc1 = withScene(doc, s2).doc
+    expect(doc1.version.contentVersion).not.toBe(captured)
+    expect(req.payload.version.contentVersion, '请求里的 S0 不因后续编辑改变').toBe(captured)
+  })
+
+  it('**取消后编辑器状态亦不变**（与"导出不改变工作区"合起来覆盖 A29 的取消条款）', async () => {
+    const e = new Editor()
+    e.submit({ kind: 'openDocument', documentId: 'doc-1', contextId: 'ctx-1' })
+    e.drain()
+    e.submit({ kind: 'addObject', contextId: 'ctx-1', objectType: 'block' })
+    e.drain()
+    e.submit({ kind: 'setTime', contextId: 'ctx-1', time: { frame: 3, fps: 20 } })
+    e.drain()
+    const before = canonicalize(e.snapshot())
+    const doc = e.snapshot().docs['doc-1']!
+
+    const req = requestOf({ doc: { ...doc } as never, spec: specOf({ frameCount: 8 }) })
+    const { port, state } = fakePort()
+    let job: ExportJob
+    const cancelPort: OffscreenRenderPort = {
+      ...port,
+      renderFrame(r, i) {
+        if (i === 1) job.cancel()
+        return port.renderFrame(r, i)
+      },
+    }
+    job = new ExportJob({ request: req, kind: 'image', port: cancelPort, encoder: okEncoder() })
+    const outcome = await job.run()
+    expect(outcome.status).toBe('cancelled')
+    expect(state.releases, '取消释放离屏资源').toBe(1)
+    expect(canonicalize(e.snapshot()), '取消不得改动工作区状态').toBe(before)
+    expect(e.snapshot().contexts['ctx-1']!.time.frame).toBe(3)
+  })
+
   it('预检不过 ⇒ 作业**不分配**离屏资源、不渲染、不产出（默认失败而非假成功）', async () => {
     const { port, state } = fakePort()
     const job = new ExportJob({ request: requestOf(), kind: 'image', port }) // 无 encoder
@@ -577,6 +640,61 @@ describe('A29 × A36 接缝：预检直接消费 P5 的资源状态面（不另�
     expect(pre.status).toBe('ready')
     void vi
     void findObject
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 七、与 P1 编辑器实例的行为级接缝：导出**不改**工作区时间/选择/机位
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('A29 × P1 执行协议：跑完一次导出作业后编辑器状态逐字段不变', () => {
+  it('编辑器快照的规范化字符串在导出前后**逐字节相同**（时间/选择/文档都不被导出改动）', async () => {
+    const e = new Editor()
+    e.submit({ kind: 'openDocument', documentId: 'doc-1', contextId: 'ctx-1' })
+    e.drain()
+    e.submit({ kind: 'addObject', contextId: 'ctx-1', objectType: 'block', name: 'A' })
+    e.submit({ kind: 'addObject', contextId: 'ctx-1', objectType: 'annotation', name: 'B' })
+    e.drain()
+    // 设定一个**非零**工作区时间（导出的采样序列与它无关，且导出不得改动它）
+    e.submit({ kind: 'setTime', contextId: 'ctx-1', time: { frame: 7, fps: 20 } })
+    e.drain()
+    const objectId = e.snapshot().docs['doc-1']!.scene.order[0]!
+    e.submit({ kind: 'select', contextId: 'ctx-1', target: { kind: 'object', id: objectId } })
+    e.drain()
+
+    const before = canonicalize(e.snapshot())
+    const doc = e.snapshot().docs['doc-1']!
+
+    // 从编辑器状态**捕获**一份请求（复制成值），再跑作业
+    const req = requestOf({
+      doc: { ...doc } as never,
+      spec: specOf({ frameCount: 2, mapping: { source: 'scene', startFrame: 100, stepFrames: 5 } }),
+    })
+    const { port } = fakePort()
+    const job = new ExportJob({ request: req, kind: 'image', port, encoder: okEncoder() })
+    const outcome = await job.run()
+    expect(outcome.status).toBe('completed')
+
+    // 编辑器状态**一个字段都没变**（含时间与选择）
+    expect(canonicalize(e.snapshot()), '导出不得改动工作区状态（A29 原文）').toBe(before)
+    expect(e.snapshot().contexts['ctx-1']!.time.frame, '导出的采样时间不得写回工作区时间').toBe(7)
+    expect(e.snapshot().contexts['ctx-1']!.selection.active?.id).toBe(objectId)
+    // 导出的采样序列仍是捕获时那份（起点 100、步长 5），与工作区时间 7 无关
+    expect(req.frames.map((f) => f.time.frame)).toEqual([100, 105])
+  })
+
+  it('**负对照**：把导出采样写回工作区时间的对照实现会被上一条判据抓到', () => {
+    const e = new Editor()
+    e.submit({ kind: 'openDocument', documentId: 'doc-1', contextId: 'ctx-1' })
+    e.drain()
+    e.submit({ kind: 'setTime', contextId: 'ctx-1', time: { frame: 7, fps: 20 } })
+    e.drain()
+    const before = canonicalize(e.snapshot())
+
+    // 对照实现：导出前"顺手把工作区时间对齐到采样起点"（旧导出器改机位/改帧的做法同族）
+    e.submit({ kind: 'setTime', contextId: 'ctx-1', time: { frame: 100, fps: 20 } })
+    e.drain()
+    expect(canonicalize(e.snapshot()), '对照实现确实改动了工作区状态（这就是负对照）').not.toBe(before)
   })
 })
 

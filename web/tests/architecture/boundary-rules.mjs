@@ -530,9 +530,14 @@ export const RETIREMENT_OWNERS = {
     owners: [
       { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '求值面（类型化文档 + 求值场景）' },
       { p: 'P9', issue: 260, duty: '持久化、固定快照导出与恢复', scope: '文件面（文件适配、持久化）' },
+      { p: 'P10', issue: 261, duty: '集成闭环与交叉验收', scope: '旧 RuntimeDocument 生产消费者的接线退出（R-WK-03）' },
     ],
-    exitStage: 'P9 交付同批（求值面 P4 分离，文件面 P9 收口）',
-    role: 'P4 执行者（求值与文档解耦）；P9 执行者（文件适配收口）',
+    // P9（#260）执行登记：文件面**适配器**已交付（`adapters/files` 的工程/发布/旧格式编解码 +
+    // A20 验收），但旧 `RuntimeDocument` 的**生产消费者**（`runtime/context.getDoc()`、
+    // `workbench/**` 读写链、序列化调用点）退出需要内核先接线进生产 ——
+    // 该前置由 R-WK-03（#250 裁决 2026-10-11）归入 **P10/#261**，故本条的终局删除不在 P9 同批。
+    exitStage: 'P9 交付同批（求值面 P4 分离，文件面 P9 适配器收口）→ 生产消费者接线退出归 P10/#261（R-WK-03）→ P11 终局审计',
+    role: 'P4 执行者（求值与文档解耦）；P9 执行者（文件适配器，不桥接旧路径）；P10 执行者（生产接线后删除旧序列化/读取链）；P11 执行者（终局审计）',
   },
   'ui-proxy-dispatch': {
     entries: [3],
@@ -614,9 +619,21 @@ export const RETIREMENT_OWNERS = {
   },
   'exporter-borrows-live-viewport': {
     entries: [13],
-    owners: [{ p: 'P9', issue: 260, duty: '持久化、固定快照导出与恢复', scope: '固定快照导出作业、共同求值与呈现' }],
-    exitStage: 'P9 交付同批',
-    role: 'P9 执行者',
+    owners: [
+      { p: 'P9', issue: 260, duty: '持久化、固定快照导出与恢复', scope: '固定快照导出作业、共同求值与呈现' },
+      { p: 'P10', issue: 261, duty: '集成闭环与交叉验收', scope: '旧导出器（workbench/export* + exportIsometricImage + GIF/OBJ 命令）删除' },
+    ],
+    // P9（#260）执行登记：**内核侧替代机制已交付且可加载**（`domain/captureSpec` +
+    // `application/exportPlan` + `runtime/exportJob`，静态证据见
+    // `tests/architecture/export-purity.test.ts`：离屏端口方法集合封闭、导出层不得 import
+    // 实时视口/相机实现、不得 import 旧导出器）。
+    //
+    // 但**旧导出器的删除**不在 P9 同批：其消费面在生产旧路径上（`operators/builtin/exportOperators.ts`、
+    // `operators/builtin/materialOperators.ts`、`workbench/components/ExportWorkspace.vue`
+    // 与 `workbench/export/` 48 文件），而按 R-WK-03（#250 裁决 2026-10-11）内核未接线进生产时
+    // 删除旧路径 = 能力停摆且无替代。⇒ 删除归 P10/#261 与接线同批。
+    exitStage: 'P9 交付同批（内核侧固定快照导出机制）→ 旧导出器删除随生产接线归 P10/#261（R-WK-03）→ P11 终局审计',
+    role: 'P9 执行者（替代机制）；P10 执行者（接线后删除旧导出器）；P11 执行者（终局审计）',
   },
 }
 
