@@ -115,6 +115,38 @@ function scanProductionFor(needles: readonly string[]): string[] {
   return hits
 }
 
+/**
+ * 按**标识符边界**正则扫描生产代码（与 `scanProductionFor` 同一扫描面与剥注释规则）。
+ *
+ * 与子串匹配的区别是本批实测出来的：查 `HostProfile` 子串会命中 P9 无关的
+ * `HostProfileSpec`；用 `HostProfile(?![A-Za-z0-9_])` 只命中裸标识符。
+ * 判定原则：**"提到某前缀" ≠ "使用某标识符"**。
+ */
+function scanProductionIdentifiers(pattern: RegExp): string[] {
+  const srcRoot = path.join(import.meta.dirname, '..', '..')
+  const hits: string[] = []
+  const walk = (dir: string): void => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === '__tests__') continue
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) {
+        walk(full)
+        continue
+      }
+      if (!/\.(ts|tsx|mts|vue)$/.test(e.name)) continue
+      if (/\.d\.ts$/.test(e.name)) continue
+      const code = fs
+        .readFileSync(full, 'utf8')
+        .split('\n')
+        .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+        .join('\n')
+      if (pattern.test(code)) hits.push(`${path.relative(srcRoot, full).replace(/\\/g, '/')}: ${pattern}`)
+    }
+  }
+  walk(srcRoot)
+  return hits
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // A14 正常路径
 // ─────────────────────────────────────────────────────────────────────────────
@@ -675,9 +707,38 @@ describe('模块不反向依赖 profile 或宿主名；组件不询问宿主名'
     ).toBe(false)
   })
 
-  it('全 `src/` 生产代码里**零** `isWikiHostProfile` / `getHostProfile` / `setHostProfile` / `HostProfile` 引用', () => {
-    const hits = scanProductionFor(['isWikiHostProfile', 'getHostProfile', 'setHostProfile', 'HostProfile'])
-    expect(hits, `旧宿主开关必须零引用（B5 #7 删除验收）：\n${hits.join('\n')}`).toEqual([])
+  it('全 `src/` 生产代码里**零** `isWikiHostProfile` / `getHostProfile` / `setHostProfile` / 旧 `HostProfile` 标识符引用', () => {
+    // ## 变基合流（× P9 #260）：从"子串匹配"改为"**标识符边界**匹配"
+    //
+    // 初版查裸子串 `HostProfile`，于是 P9 交付的 `adapters/host/hostCapabilities.ts` 里
+    // **无关的新类型** `HostProfileSpec` / `HostProfileId` / `HostProfileUnknown`
+    // 被判成"旧宿主开关残留" —— 那是**假红**："提到某前缀"≠"使用旧标识符"。
+    // 实测该文件里**裸** `HostProfile`（后面不接字母/数字/_）出现 **0** 次。
+    //
+    // 判据改为：三个旧函数名（本身已是完整标识符）+ 裸 `HostProfile` 标识符。
+    // 这样 `HostProfileSpec` 不再命中，而真正的旧标识符仍会被抓到（负对照在下一条）。
+    const hits = scanProductionFor(['isWikiHostProfile', 'getHostProfile', 'setHostProfile'])
+    const bareHostProfile = scanProductionIdentifiers(/HostProfile(?![A-Za-z0-9_])/)
+    expect(
+      [...hits, ...bareHostProfile],
+      `旧宿主开关必须零引用（B5 #7 删除验收）：\n${[...hits, ...bareHostProfile].join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('**负对照**：上述"标识符边界"判据能抓到真正的旧标识符，而放过 P9 的新类型名', () => {
+    const matcher = (s: string): boolean => /HostProfile(?![A-Za-z0-9_])/.test(s)
+    // 真正的旧标识符必须被抓到
+    expect(matcher('const x = HostProfile'), '裸 HostProfile 必须判红').toBe(true)
+    expect(matcher('hostProfile: HostProfile;'), '类型位置的裸 HostProfile 必须判红').toBe(true)
+    expect(matcher('let HostProfile = 1'), '赋值位置的裸 HostProfile 必须判红').toBe(true)
+    // P9 的无关新类型必须放过（否则就是本批实测到的假红）
+    expect(matcher('HostProfileSpec'), 'HostProfileSpec 不得判红').toBe(false)
+    expect(matcher('HostProfileId'), 'HostProfileId 不得判红').toBe(false)
+    expect(matcher('HostProfileUnknown'), 'HostProfileUnknown 不得判红').toBe(false)
+    // 并核对现实：P9 的文件里确实只有那三个新类型，没有裸标识符
+    const p9 = fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'adapters', 'host', 'hostCapabilities.ts'), 'utf8')
+    expect(p9.includes('HostProfileSpec'), 'P9 的新类型确实存在（证明上一条不是空转）').toBe(true)
+    expect(matcher(p9), 'P9 的文件里不得有裸 HostProfile 标识符').toBe(false)
   })
 
   it('旧**环境变量名**只允许出现在 `composition/shell.ts` 的**一处**已登记迁移窗口（带退出条件）', () => {
