@@ -106,6 +106,21 @@ function isProductionRel(rel) {
   return true
 }
 
+/**
+ * 读源码并**归一化行尾为 LF**（EOL 脆性的治本处，见 `freeze-convergence.test.ts` 的长注释）。
+ *
+ * 本仓 `core.autocrlf=true` ⇒ 新鲜检出是 CRLF、执行者工具写出的工作树常是 LF。
+ * 本文件当下这几条断言（`matchAll(/readonly kind: …/)`、`indexOf('}>')`）恰好不依赖
+ * `\n` 字面量，**但**「恰好安全」不是判据 —— 后续任何人加一句 `indexOf('\n\n')`
+ * 或 `/\n\n/` 就会重新引入同一缺陷。统一走本入口使"读到的文本恒为 LF"成为文件级前提。
+ *
+ * 2026-10-11 合流事故：集成树 `96b2e3b` 上 `freeze-convergence.test.ts:303` 因
+ * `\n\n` 失配判红（该测试在 LF 树上绿）。
+ */
+function readSource(absPath) {
+  return fs.readFileSync(absPath, 'utf8').replace(/\r\n/g, '\n')
+}
+
 function loadGraph() {
   const { files, facts } = buildModuleGraph()
   const kernelAbs = new Set(KERNEL_FILES.map((rel) => path.join(SRC_ROOT, rel)))
@@ -315,7 +330,7 @@ describe('无兼容门面：#1 删除验收「旧导出删除」的静态面', (
     const forbidden = ['RuntimeDocument', 'structEpoch', 'renderViewRevision', 'ref(']
     const hits = []
     for (const rel of KERNEL_FILES) {
-      const text = fs.readFileSync(path.join(SRC_ROOT, rel), 'utf8')
+      const text = readSource(path.join(SRC_ROOT, rel))
       for (const needle of forbidden) {
         // 只检查**代码文本**（注释里解释"退役了旧机制"是允许且有价值的）
         const codeOnly = text
@@ -348,7 +363,7 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
     const banned = ['new Proxy', 'Object.defineProperty', '__defineSetter__', 'Object.defineProperties']
     const hits = []
     for (const rel of KERNEL_FILES) {
-      const text = fs.readFileSync(path.join(SRC_ROOT, rel), 'utf8')
+      const text = readSource(path.join(SRC_ROOT, rel))
       for (const needle of banned) {
         if (text.includes(needle)) hits.push(`${rel}: ${needle}`)
       }
@@ -377,12 +392,12 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
     // 让"属性写命令"从此无人检查），而是**两处都读**：契约的命令联合横跨
     // "命令总表"（`commands.ts`）与"RNA 公开命令"（`property-commands.ts`）。
     const readKinds = (rel: string): string[] => {
-      const text = fs.readFileSync(path.join(SRC_ROOT, rel), 'utf8')
+      const text = readSource(path.join(SRC_ROOT, rel))
       return [...text.matchAll(/readonly kind: '([a-zA-Z]+)'/g)].map((m) => m[1])
     }
     /** `property-commands.ts` 的 `SetPropertyCommand` 用 `Readonly<{ kind: … }>`（无 `readonly` 前缀）。 */
     const setPropertyKinds = (): string[] => {
-      const text = fs.readFileSync(path.join(SRC_ROOT, 'application/property-commands.ts'), 'utf8')
+      const text = readSource(path.join(SRC_ROOT, 'application/property-commands.ts'))
       const start = text.indexOf('export type SetPropertyCommand')
       expect(start, '`SetPropertyCommand` 必须定义在 `property-commands.ts`').toBeGreaterThan(-1)
       const block = text.slice(start, text.indexOf('}>', start))
