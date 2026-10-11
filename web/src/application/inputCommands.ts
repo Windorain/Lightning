@@ -313,7 +313,15 @@ export function resolveIntent(
           return err(invalidValue({ reason: 'outOfRange', controlId, max: binding.max, value }))
         }
       }
-      const command: Command = { kind: 'setProperty', contextId: binding.contextId, refs: Object.freeze([binding.ref]), value }
+      // P2（GF-5 收敛）：`SetPropertyCommand` 的**唯一权威**是
+      // `application/property-commands`，它**不再携带 `contextId`** ——
+      // `reduceSetProperty` 从 `refs[0].owner` 解析目标文档
+      // （见 `application/commands.ts:138` 的收敛说明）。
+      //
+      // P7 合流适配：不再自己塞 `contextId`。控件绑定里的 `contextId` 仍保留，
+      // 因为它服务于**输入侧**的语义（哪个编辑上下文声明了这个控件，
+      // 供交互/可用性判定用），而不是命令的字段。
+      const command: Command = { kind: 'setProperty', refs: Object.freeze([binding.ref]), value }
       return ok({ kind: 'command', command, queue: false, commandId: intent.commandId })
     }
 

@@ -390,13 +390,10 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       'WM 持有输入端口字段（呈现层声明焦点/弹窗/控件绑定等**显式状态**的唯一入口）；`runtime` 是撞名层，故本边需登记',
     exitStage: 'P10 集成：新外壳装配接管 `wm.inputPort` 后，本边随 wm 的旧字段退场；P11 核销',
   }),
-  Object.freeze({
-    from: 'src/workbench/WorkbenchRoot.vue',
-    to: 'composition/assembleInput',
-    reason:
-      'P7 的旧外壳挂载输入面装配根（`assembleInput`）——这是"新内核被真实消费者使用"的唯一落点，不登记就等于新层未生效',
-    exitStage: 'P10 集成：新外壳接管输入装配后删除本行；P11 核销',
-  }),
+  // `WorkbenchRoot.vue → composition/assembleInput` **不登记**：
+  // `composition/` 按 P6 的设计**不在 KERNEL_FILES**（它是装配根，不是纯核心；
+  // 边界由 `GATE_RULES` 直接覆盖）。故那条边不是"旧层 → 内核"，本表不收
+  // （本表的每条都必须指向内核文件，否则"真实存在"检查会判它腐烂）。
   Object.freeze({
     from: 'src/workbench/inputHotkeys.ts',
     to: 'domain/input',
@@ -443,9 +440,21 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
   }),
   Object.freeze({
     from: 'src/workbench/WorkbenchRoot.vue',
+    to: 'application/commands',
+    reason: '旧外壳读能力集合常量（`ALL_CAPABILITIES`）交给 P7 输入装配（P2/P6 的 profile 装配尚未覆盖该常量）',
+    exitStage: 'P10 集成：新外壳按 profile 装配能力后删除本行；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/workbench/WorkbenchRoot.vue',
     to: 'adapters/inputBinding',
     reason: '读 `exclusiveKeydownOwners()` 作为 A22「只挂一条 document keydown」的**结构证据**',
     exitStage: 'P10 集成：断言随 e2e 探针迁入新外壳后删除本行；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/workbench/inputHotkeys.ts',
+    to: 'domain/errors',
+    reason: '未接通旧 operator 的命令 ID 显式返回 `UnsupportedOperation`（**不**静默丢弃）',
+    exitStage: 'P10 集成：命令全部接通新写通路后删除本行；P11 核销',
   }),
 ]
 
@@ -942,7 +951,6 @@ describe('内核文件登记表', () => {
     ]) {
       expect(core.has(rel), `${rel} 必须受 core-no-vue-three / core-no-dom-globals 约束`).toBe(true)
     }
-  })
   })
 
   it('扫描器报告的闸门执行面**包含**全部内核文件（防"登记了但没被扫"）', async () => {
