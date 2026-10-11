@@ -115,13 +115,45 @@ async function gotoWorkbenchWithInput(page: Page): Promise<void> {
  *
  * 走的是既有 e2e 的**生产注入路径**（`injectSceneDocumentOk` → 应用真实装载流程），
  * 不是替身。
+ *
+ * ## 为什么带一次重试（已知基础设施竞态，非本层缺陷）
+ *
+ * `page.evaluate` 偶发 `Execution context was destroyed, most likely because of
+ * a navigation` —— 页面在注入**进行中**被整页重载（Vite 首次发现新依赖会
+ * 触发一次 full reload；`OPERATOR_RESET_LAYOUT` 亦会 `location.reload()`）。
+ *
+ * 这是**既有**竞态：基线 `f850691` 的全量日志里同样出现 7 次。本批新增的
+ * 5 条 A25 用例都要注入场景，于是暴露面变大 —— 修法不是"少注入"，
+ * 而是让注入在整页重载后**重来一次**（重载后 `__vm_ready__` 会重新置位，
+ * 重试是幂等的：注入本身不改仓库文件、不改 fixture 原件）。
+ *
+ * 重试只在"上下文被销毁"这一种错误上发生；断言失败与真实解析错误
+ * **不**重试（否则会把真红洗成假绿）。
  */
 async function gotoWorkbenchWithScene(page: Page): Promise<void> {
   await gotoWorkbenchWithInput(page)
   const fixture = path.join(import.meta.dirname, 'fixtures', 'minimal-v2.json')
   const json = JSON.parse(fs.readFileSync(fixture, 'utf8')) as Record<string, unknown>
-  await injectSceneDocumentOk(page, json, 'minimal-v2.json')
-  await waitForViewportMounted(page)
+
+  let lastErr: unknown = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await injectSceneDocumentOk(page, json, 'minimal-v2.json')
+      await waitForViewportMounted(page)
+      return
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err)
+      // 只对"整页重载打断了注入"重试；其余（含断言）原样抛出。
+      if (!msg.includes('Execution context was destroyed')) throw err
+      lastErr = err
+      // 等新上下文就绪再重来
+      await page.waitForFunction(() => (window as any).__vm_ready__ === true, undefined, { timeout: 90_000 })
+      await page.waitForFunction(() => typeof window.__p7_input__?.counters === 'function', undefined, {
+        timeout: 30_000,
+      })
+    }
+  }
+  throw lastErr
 }
 
 /**
