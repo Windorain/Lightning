@@ -1,4 +1,46 @@
 <script setup lang="ts">
+/**
+ * `WorkbenchRoot` —— 工作台外壳根组件（#249 §10；B5 退役矩阵 #7 + #10 主责）。
+ *
+ * ## 本组件退役的两个旧机制
+ *
+ * ### #10：组件挂载决定编辑状态寿命（旧 `v-show` 保活）
+ *
+ * 旧模板（本文件的历史版本）：
+ *
+ * ```vue
+ * <WorkbenchShell v-show="workspace === 'preview' || workspace === 'wiki'"> ... </WorkbenchShell>
+ * <WorkbenchShell v-if="workspace === 'export'"> ... </WorkbenchShell>
+ * <WorkbenchShell v-if="workspace === 'materials'"> ... </WorkbenchShell>
+ * ```
+ *
+ * `v-show` 把 preview/wiki 那个 shell **永久保活**在 DOM 里，
+ * 于是"切走再切回状态还在"靠的是组件从没被卸载。
+ * 后果两条：切到导出/材质时一个隐藏的 3D 视口仍在跑渲染循环；
+ * 而"关闭 Area 释放运行资源"根本没有发生的机会（没有东西被关闭）。
+ *
+ * 现在：**只有一个工作区在 DOM 里**（`v-if` + `:key`），
+ * 且切换时走 `AreaHost` 的显式生命周期（关旧实例 → 还资源 → 开新实例）。
+ * 「切回恢复」由 `Workspace.layout` 的 `localState` 承载 —— 状态不在组件里。
+ *
+ * ### #7：公共功能模块 + profile + 外壳（旧宿主开关）
+ *
+ * 旧实现读 `import.meta.env.VITE_HOST_PROFILE` 并把结果交给
+ * `createWorkbenchHost({ profile })`，后者写一个**模块级全局**；
+ * 19 处消费点随后用 `isWikiHostProfile()` 反查。
+ *
+ * 现在：本组件从 `composition/shell` 取 `ShellRuntime`（装配结果），
+ * 交给 `createWorkbenchHost({ shell })`，并 `provide(shellKey, shell)`。
+ * **差异只有一处**：`shell.has(CAPABILITY.WIKI_UPLOAD)` 决定 Wiki 相关的
+ * 布尔与钩子（Wiki 键冒泡、浮层挂载目标），而不是"宿主是不是 wiki"。
+ *
+ * ## 为什么 `window.__vm__` 保留
+ *
+ * `e2e/helpers/**` 的观测面依赖它（`e2e/helpers/multiblock/README.md` 明列）。
+ * 它是**公开观测面**，不是内部状态 —— 与 #249 §5「`read` 不导出内部状态」
+ * 不冲突：这里导出的是那些 helper 已经依赖的**既有公开面**，
+ * 且本批不改它的形状（改形状会让全量 e2e 大面积假红，而那不是本批的目标）。
+ */
 import { onMounted, onBeforeUnmount, provide, ref, computed, watch } from 'vue'
 
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
@@ -39,8 +81,25 @@ import {
 } from '@/wiki/wikiInputShield'
 import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
 
-const hostProfile =
-  import.meta.env.VITE_HOST_PROFILE === 'wiki' ? ('wiki' as const) : ('desktop' as const)
+// ── 装配（B5 #7 的替代物：profile 是值，不是模块级全局）────────────────────
+import { CAPABILITY } from '@/composition/modules'
+import { createShellRuntimeForProfile, resolveShellProfile, shellKey, type ShellRuntime } from '@/composition/shell'
+import { editorTypeRegistry } from '@/editors/builtinEditors'
+
+/**
+ * 解析本构建的外壳 profile 并构造运行实例。
+ *
+ * 模块级**常量**（不是 `let`）：它在组件之外只读一次，
+ * 且没有任何模块能改写它 —— 这正是与旧 `hostProfile` 的差别。
+ */
+const shell: ShellRuntime = createShellRuntimeForProfile(resolveShellProfile(), {
+  floatingUiScope: () => getWorkbenchAppElement(),
+})
+provide(shellKey, shell)
+
+const wikiHost = shell.has(CAPABILITY.WIKI_UPLOAD)
+/** 该外壳是否有可调整 Area 布局（旧实现靠 `VITE_HOST_PROFILE` 判断）。 */
+const adjustableLayout = shell.adjustableLayout
 
 const selection = createSelectionContext()
 const editHistory = provideEditHistory(256)
@@ -49,13 +108,15 @@ const toolRegistry = provideToolRegistry()
 // 共享 VM 组装
 const tool = createToolSettings()
 const { host, ctx, screen: defaultScreen } = createWorkbenchHost({
-  selection, editHistory, toolRegistry, tool, profile: hostProfile,
+  selection, editHistory, toolRegistry, tool, shell,
 })
 
 ctx.wm.chrome.wikiUi = createWikiUiState()
-if (hostProfile === 'wiki') {
+if (wikiHost) {
   ctx.wm.chrome.wikiUi.mwReady.value = isWikiApiAvailable()
 }
+
+provide('editorTypeRegistry', editorTypeRegistry)
 
 const { activeToolshelfPanels, activePropertiesPanels, activeHeaderPanels } = usePanelQueries(ctx, defaultScreen)
 
@@ -94,22 +155,41 @@ let unbindWikiKeyBubble: (() => void) | null = null
 const floatingUiTeleportTo = ref<HTMLElement | 'body'>('body')
 
 function refreshFloatingUiTeleport(): void {
-  floatingUiTeleportTo.value = getFloatingUiTeleportTarget()
+  // B5 #7：旧实现内部 `isWikiHostProfile()`；现在传**端口**（`shell.pageKeyboard`）
+  floatingUiTeleportTo.value = getFloatingUiTeleportTarget(shell.pageKeyboard)
 }
 
-const workspace = ref<'preview' | 'wiki' | 'export' | 'materials'>('preview')
+/**
+ * 工作区选择。
+ *
+ * `workspace` 的取值集合来自**装配**而不是硬编码：
+ * 有内容编辑能力才给"导出/材质"这类工作台专属工作区；
+ * 查看器/无界面装配下 `workspaces` 只有它自己该有的那一个。
+ */
+const workspaces = computed<readonly WorkbenchWorkspace[]>(() => {
+  const all: WorkbenchWorkspace[] = ['preview', 'wiki', 'export', 'materials']
+  // 无可调整布局 ⇒ 只保留"文档 + 通道/时间"这一份固定布局（#257 明文）
+  if (!adjustableLayout) return Object.freeze(['preview'] as const)
+  return Object.freeze(all)
+})
+const workspace = ref<WorkbenchWorkspace>(workspaces.value[0] ?? 'preview')
+watch(workspaces, (list) => {
+  if (!list.includes(workspace.value)) workspace.value = list[0] ?? 'preview'
+})
 watch(workspace, (v) => {
   void ctx.getOperators().exec('OPERATOR_APPLY_SETTINGS', { uiWorkspace: v })
 }, { immediate: true })
 const settingsOpen = ref(false)
 provide('workbenchSettingsOpen', settingsOpen)
 
+/** 只有 `preview` / `wiki` 两个工作区承载 3D 视口与属性面板（同旧口径）。 */
+const viewportWorkspace = computed(() => workspace.value === 'preview' || workspace.value === 'wiki')
 
 onMounted(async () => {
   unbindChrome = bindChromeDom(ctx, createChromeKeymapHandler(CHROME_REGION, () => ctx))
   await host.start()
   refreshFloatingUiTeleport()
-  if (hostProfile === 'wiki') {
+  if (wikiHost) {
     const app = getWorkbenchAppElement()
     if (app) unbindWikiKeyBubble = bindWikiWorkbenchKeyBubble(app)
   }
@@ -123,7 +203,6 @@ onBeforeUnmount(() => {
   unbindWikiKeyBubble = null
   document.removeEventListener('fullscreenchange', refreshFloatingUiTeleport)
 })
-
 
 // VM 句柄：测试层通过 window.__vm__ 访问公开观测面
 ;(window as any).__vm__ = ctx
@@ -141,132 +220,146 @@ ctx.log.injectStateRefs({
     redoLabel: editHistory.redoLabel.value,
   }),
 })
+
+/** 工作区标签（导出/材质是工作台专属；查看器装配下 `workspaces` 里没有它们）。 */
+type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
 </script>
 
 <template>
   <HostProvider :host="host" :ctx="ctx">
-  <WorkbenchShell v-show="workspace === 'preview' || workspace === 'wiki'">
-    <template #menubar>
-      <div class="wb-menubar-inner">
-        <ReadonlyLayout
-          v-for="panel in activeHeaderPanels"
-          :key="panel.id"
-          :layout="panel.layout"
-          @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
-        />
-        <MenubarWikiStatus />
-        <MenubarFullscreenButton />
-      </div>
-    </template>
-    <template #workspace-tabs>
-      <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
-    </template>
-    <template v-if="workspace !== 'wiki' && !toolshelfCollapsed" #tool-shelf>
-      <div class="wb-toolshelf">
-        <template v-for="panel in activeToolshelfPanels" :key="panel.id">
-          <component v-if="panel.component" :is="panel.component" :ctx="ctx" />
+    <!--
+      #10：`v-show` → `v-if` + `:key`。
+      只有一个工作区在 DOM 里；切换即**卸载旧组件**（不是隐藏它）。
+      `:key="workspace"` 保证切换工作区时组件被真正重建 ——
+      于是"切换时旧视口的渲染循环/监听/作业确实结束了"，
+      而"切回状态还在"只能来自 `Workspace` 的 `localState`（不在组件里）。
+
+      变基合流（× P2 #253）：面板渲染改经 `ReadonlyLayout` + `@operator`
+      （P2 的只读呈现面），应用 P6 的显式生命周期与 `adjustableLayout` 闸门。
+    -->
+    <WorkbenchShell v-if="viewportWorkspace" :key="`ws-${workspace}`">
+      <template #menubar>
+        <div class="wb-menubar-inner">
           <ReadonlyLayout
-            v-else
+            v-for="panel in activeHeaderPanels"
+            :key="panel.id"
             :layout="panel.layout"
             @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
           />
-        </template>
-      </div>
-    </template>
-    <template #viewport>
-      <WorkbenchViewport v-if="workspace === 'preview' && ctx.getDoc().value" />
-      <div v-else-if="workspace === 'wiki' && ctx.getDoc().value" class="wb-wiki-embed">
-        <EmbedPreview :settings="embedSettings" :style="{ width: `${embedPublish.viewWidth}px`, height: `${embedPublish.viewHeight}px` }" />
-      </div>
-    </template>
-    <template v-if="!propsCollapsed" #properties>
-      <PanelTabs :panels="activePropertiesPanels" :ctx="ctx" @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)" />
-    </template>
-    <template #statusbar>
-      <StatusBar />
-    </template>
-  </WorkbenchShell>
-
-  <WorkbenchShell v-if="workspace === 'export'">
-    <template #menubar>
-      <div class="wb-menubar-inner">
-        <ReadonlyLayout
-          v-for="panel in activeHeaderPanels"
-          :key="panel.id"
-          :layout="panel.layout"
-          @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
-        />
-        <MenubarWikiStatus />
-        <MenubarFullscreenButton />
-      </div>
-    </template>
-    <template #workspace-tabs>
-      <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
-    </template>
-    <template #viewport>
-      <ExportWorkspace />
-    </template>
-    <template #statusbar>
-      <StatusBar />
-    </template>
-  </WorkbenchShell>
-
-  <WorkbenchShell v-if="workspace === 'materials'">
-    <template #menubar>
-      <div class="wb-menubar-inner">
-        <ReadonlyLayout
-          v-for="panel in activeHeaderPanels"
-          :key="panel.id"
-          :layout="panel.layout"
-          @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
-        />
-        <MenubarWikiStatus />
-        <MenubarFullscreenButton />
-      </div>
-    </template>
-    <template #workspace-tabs>
-      <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
-    </template>
-    <template #viewport>
-      <MaterialGallery />
-    </template>
-    <template #statusbar>
-      <StatusBar />
-    </template>
-  </WorkbenchShell>
-
-  <WorkbenchSettingsDrawer />
-
-  <!-- ContextMenu floating overlay -->
-  <Teleport :to="floatingUiTeleportTo">
-    <Transition name="menu-pop">
-      <div
-        v-if="ctx.wm.chrome.contextMenuOpen?.value ?? false"
-        class="context-menu-overlay"
-        @click="hideContextMenu(contextMenu)"
-        @contextmenu.prevent
-      >
-        <div
-          class="context-menu-popup"
-          :style="{ left: (ctx.wm.chrome.contextMenuPosition?.value.x ?? 0) + 'px', top: (ctx.wm.chrome.contextMenuPosition?.value.y ?? 0) + 'px' }"
-          @click.stop
-        >
-          <template v-for="(item, i) in ((ctx.wm.chrome.contextMenuItems ?? []) as ContextMenuItem[])" :key="i">
-            <hr v-if="item.kind === 'separator'" class="cm-sep" />
-            <span v-else-if="item.kind === 'label'" class="cm-label">{{ item.label }}</span>
-            <button
-              v-else-if="item.kind === 'operator'"
-              class="cm-item"
-              @click="invokeContextMenuItem(item); hideContextMenu(contextMenu)"
-            >
-              <span v-if="item.icon" class="cm-icon">{{ item.icon }}</span>
-              {{ item.label }}
-            </button>
+          <MenubarWikiStatus />
+          <MenubarFullscreenButton />
+        </div>
+      </template>
+      <!-- 布局编辑命令按装配裁剪：固定布局外壳（查看器/嵌入）不给工作区标签 -->
+      <template v-if="adjustableLayout" #workspace-tabs>
+        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
+      </template>
+      <template v-if="workspace !== 'wiki' && !toolshelfCollapsed" #tool-shelf>
+        <div class="wb-toolshelf">
+          <template v-for="panel in activeToolshelfPanels" :key="panel.id">
+            <component v-if="panel.component" :is="panel.component" :ctx="ctx" />
+            <ReadonlyLayout
+              v-else
+              :layout="panel.layout"
+              @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
+            />
           </template>
         </div>
-      </div>
-    </Transition>
-  </Teleport>
+      </template>
+      <template #viewport>
+        <WorkbenchViewport v-if="workspace === 'preview' && ctx.getDoc().value" />
+        <div v-else-if="workspace === 'wiki' && ctx.getDoc().value" class="wb-wiki-embed">
+          <EmbedPreview :settings="embedSettings" :style="{ width: `${embedPublish.viewWidth}px`, height: `${embedPublish.viewHeight}px` }" />
+        </div>
+      </template>
+      <template v-if="!propsCollapsed" #properties>
+        <PanelTabs :panels="activePropertiesPanels" :ctx="ctx" @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)" />
+      </template>
+      <template #statusbar>
+        <StatusBar />
+      </template>
+    </WorkbenchShell>
+
+    <WorkbenchShell v-else-if="workspace === 'export'" :key="`ws-${workspace}`">
+      <template #menubar>
+        <div class="wb-menubar-inner">
+          <ReadonlyLayout
+            v-for="panel in activeHeaderPanels"
+            :key="panel.id"
+            :layout="panel.layout"
+            @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
+          />
+          <MenubarWikiStatus />
+          <MenubarFullscreenButton />
+        </div>
+      </template>
+      <template #workspace-tabs>
+        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
+      </template>
+      <template #viewport>
+        <ExportWorkspace />
+      </template>
+      <template #statusbar>
+        <StatusBar />
+      </template>
+    </WorkbenchShell>
+
+    <WorkbenchShell v-else-if="workspace === 'materials'" :key="`ws-${workspace}`">
+      <template #menubar>
+        <div class="wb-menubar-inner">
+          <ReadonlyLayout
+            v-for="panel in activeHeaderPanels"
+            :key="panel.id"
+            :layout="panel.layout"
+            @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
+          />
+          <MenubarWikiStatus />
+          <MenubarFullscreenButton />
+        </div>
+      </template>
+      <template #workspace-tabs>
+        <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
+      </template>
+      <template #viewport>
+        <MaterialGallery />
+      </template>
+      <template #statusbar>
+        <StatusBar />
+      </template>
+    </WorkbenchShell>
+
+    <WorkbenchSettingsDrawer />
+
+    <!-- ContextMenu floating overlay -->
+    <Teleport :to="floatingUiTeleportTo">
+      <Transition name="menu-pop">
+        <div
+          v-if="ctx.wm.chrome.contextMenuOpen?.value ?? false"
+          class="context-menu-overlay"
+          @click="hideContextMenu(contextMenu)"
+          @contextmenu.prevent
+        >
+          <div
+            class="context-menu-popup"
+            :style="{ left: (ctx.wm.chrome.contextMenuPosition?.value.x ?? 0) + 'px', top: (ctx.wm.chrome.contextMenuPosition?.value.y ?? 0) + 'px' }"
+            @click.stop
+          >
+            <template v-for="(item, i) in ((ctx.wm.chrome.contextMenuItems ?? []) as ContextMenuItem[])" :key="i">
+              <hr v-if="item.kind === 'separator'" class="cm-sep" />
+              <span v-else-if="item.kind === 'label'" class="cm-label">{{ item.label }}</span>
+              <button
+                v-else-if="item.kind === 'operator'"
+                class="cm-item"
+                @click="invokeContextMenuItem(item); hideContextMenu(contextMenu)"
+              >
+                <span v-if="item.icon" class="cm-icon">{{ item.icon }}</span>
+                {{ item.label }}
+              </button>
+            </template>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
     <WikiModalsHost v-if="ctx.wm.chrome.wikiUi" :ctx="ctx" />
   </HostProvider>
 </template>

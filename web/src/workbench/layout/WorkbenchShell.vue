@@ -2,16 +2,37 @@
 /**
  * Workbench 主布局壳：Blender 风格 3 列。
  * 通过 named slots 让父组件控制各区域的内容与 props。
+ *
+ * ## B5 #7：`VITE_HOST_PROFILE` 的最后一处组件级读取已退役
+ *
+ * 旧实现（本文件的历史版本）：
+ *
+ * ```ts
+ * const wikiEmbed = import.meta.env.VITE_HOST_PROFILE === 'wiki'
+ * ```
+ *
+ * 这是**组件在询问宿主名**（#249 §10 明文禁止），而且它把"嵌入进来时高度要
+ * 撑满容器而不是 100vh"这件**布局事实**绑死在构建期常量上。
+ *
+ * 现在改问外壳能力：`shell.adjustableLayout === false` ⇒ 该外壳是固定布局
+ * （嵌入/查看器）⇒ 用 `height: 100%` 而不是 `100vh`。
+ * 语义更准：判据是"这个外壳是否可调整布局"，不是"构建时是不是 wiki"。
  */
 import { useSlots } from 'vue'
 import { useContext } from '@/runtime/context'
+import { useShell } from '@/composition/shell'
 import { usePanelResize } from './panelResize'
 
 const ctx = useContext()
+const shell = useShell()
 const { rightWidth, startRightDrag, dragging } = usePanelResize(ctx)
 const slots = useSlots()
 const hasProperties = () => !!slots.properties
-const wikiEmbed = import.meta.env.VITE_HOST_PROFILE === 'wiki'
+/**
+ * 固定布局（不可调整 Area 布局）的外壳填满宿主容器；可调整布局的用 `100vh`。
+ * 判据来自**装配结果**（`shellLayouts.adjustableLayout`），不是宿主名。
+ */
+const fillsHost = !shell.adjustableLayout
 </script>
 
 <template>
@@ -22,7 +43,7 @@ const wikiEmbed = import.meta.env.VITE_HOST_PROFILE === 'wiki'
   -->
   <div
     class="wb-shell"
-    :class="{ 'wb-shell--dragging': dragging, 'wb-shell--wiki-embed': wikiEmbed }"
+    :class="{ 'wb-shell--dragging': dragging, 'wb-shell--fills-host': fillsHost }"
     v-bind="ctx.getShellSettings().scopeAttrs"
   >
     <header class="wb-menubar">
@@ -72,8 +93,9 @@ const wikiEmbed = import.meta.env.VITE_HOST_PROFILE === 'wiki'
 }
 .wb-shell--dragging * { cursor: col-resize !important; }
 
-/* 灰机词条内嵌：填满 wsw-inline__app，不用 100vh 盖住 Wiki 顶栏 */
-.wb-shell--wiki-embed {
+/* 灰机词条内嵌 / 查看器外壳：填满宿主容器，不用 100vh 盖住 Wiki 顶栏。
+   判据是**装配**（固定布局外壳），不是构建期宿主名 —— 见 script 注释。 */
+.wb-shell--fills-host {
   height: 100%;
   min-height: 480px;
   max-height: none;

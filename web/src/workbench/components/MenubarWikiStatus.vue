@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useContext } from '@/runtime/context'
-import { isWikiHostProfile } from '@/runtime/hostProfile'
+import { useShell } from '@/composition/shell'
+import { CAPABILITY } from '@/composition/modules'
 import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
 
 const ctx = useContext()
 /** 本实例的翻译（#259 A33：消费本实例语言，无模块级全局读源）。 */
 const t = ctx.t
+const shell = useShell()
+/**
+ * B5 #7：旧实现是模板里直接调 `isWikiHostProfile()`（**组件询问宿主名** ——
+ * #249 §10 明文禁止）。现在模板只看这个**能力派生**的布尔：
+ * 问的是"本外壳有没有 Wiki 上传面"，不是"宿主叫什么"。
+ */
+const showWikiStatus = shell.has(CAPABILITY.WIKI_UPLOAD)
 const ready = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -30,7 +38,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <span v-if="isWikiHostProfile()" class="wb-menubar-wiki-status" :class="{ 'wb-menubar-wiki-status--ok': ready }">
+  <span v-if="showWikiStatus" class="wb-menubar-wiki-status" :class="{ 'wb-menubar-wiki-status--ok': ready }">
     {{ ready ? t('wikiReady') : t('wikiLoginRequired') }}
   </span>
 </template>

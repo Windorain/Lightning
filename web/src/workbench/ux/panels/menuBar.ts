@@ -2,7 +2,7 @@ import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '@/runtime/screenTypes'
 import type { UILayout, UIOperator, UILabel, UISeparator } from '../types/layout'
-import { isWikiHostProfile } from '@/runtime/hostProfile'
+import { CAPABILITY } from '@/composition/modules'
 import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
 
 export const menuBarPanel: PanelDeclaration = {
@@ -19,7 +19,9 @@ export const menuBarPanel: PanelDeclaration = {
     const t = ctx.t
     const lang = ctx.getShellSettings().lang.value
     const conn = ctx.getConnection().connected
-    const wikiHost = isWikiHostProfile()
+    // B5 #7：旧实现是 `const wikiHost = isWikiHostProfile()`（模块级宿主反查）。
+    // 现在问能力 —— "这个外壳是否有 Wiki 上传面"决定菜单项，而不是"宿主叫什么"。
+    const wikiHost = ctx.hasCapability(CAPABILITY.WIKI_UPLOAD)
     const wikiUi = ctx.wm.chrome.wikiUi
     const wikiFileOps = wikiHost && (wikiUi?.mwReady.value ?? isWikiApiAvailable())
 

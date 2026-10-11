@@ -5,11 +5,13 @@
 import { computed } from 'vue'
 import { LOG_LEVEL } from '@/logging/LogCenter'
 import { useContext } from '@/runtime/context'
-import { isWikiHostProfile } from '@/runtime/hostProfile'
+import { useShell } from '@/composition/shell'
+import { CAPABILITY } from '@/composition/modules'
 import { buildWikiDataPageUrl, displayNameFromLocator } from '@/wiki/wikiUrls'
 import { buildWikiEditSummaryDraft, hasWikiAuditableChanges } from '@/wiki/wikiEditSummary'
 
 const ctx = useContext()
+const shell = useShell()
 const log = ctx.log
 /** 本实例的翻译（#259 A33：消费本实例语言，无模块级全局读源）。 */
 const t = ctx.t
@@ -17,7 +19,9 @@ const t = ctx.t
 const frameCount = computed(() => ctx.getDoc().value?.frameCount ?? 0)
 const hasWorldMultiFrame = computed(() => frameCount.value > 1)
 
-const wikiHost = computed(() => isWikiHostProfile())
+// B5 #7：旧实现是 `isWikiHostProfile()`（组件在问宿主名 —— #249 §10 明文禁止）。
+// 现在问**能力**：只有装配了 Wiki 上传的外壳才显示 Wiki 绑定行。
+const wikiHost = computed(() => shell.has(CAPABILITY.WIKI_UPLOAD))
 const binding = computed(() => ctx.getDocumentBinding().value)
 const wikiName = computed(() =>
   binding.value.sourceId === 'wiki-data' && binding.value.locator

@@ -54,10 +54,57 @@ export class Context {
     readonly viewports: ViewportManager,
     readonly screen: ScreenRoot | null,
     readonly workbench: WorkbenchServices | null,
+    /**
+     * **本运行实例具备的能力集合**（来自装配解析结果，见 `composition/shell`）。
+     *
+     * ## 它替代了什么（B5 退役矩阵 #7）
+     *
+     * 旧实现里"我这个实例是不是 wiki 宿主"的答案是
+     * `runtime/hostProfile.ts` 的**模块级可变单例**（`let hostProfile`），
+     * 任何模块都能 `isWikiHostProfile()` 反查 —— 包括组件（#249 §10 明文禁止
+     * "组件询问宿主名称"）与非组件的 operator `poll()`。
+     *
+     * 现在能力是 `Context` 的**构造参数**：一个实例有什么能力是**显式的**，
+     * 且它来自装配结果（`Assembly.capabilities`），不是来自"当前宿主叫什么"。
+     * 默认空集：**失败关闭** —— 忘了传能力会少做事，不会静默多做。
+     */
+    /**
+     * **本运行实例具备的能力集合**（来自装配解析结果，见 `composition/shell`）。
+     *
+     * ## 它替代了什么（B5 退役矩阵 #7）
+     *
+     * 旧实现里"我这个实例是不是 wiki 宿主"的答案是
+     * `runtime/hostProfile.ts` 的**模块级可变单例**（`let hostProfile`），
+     * 任何模块都能 `isWikiHostProfile()` 反查 —— 包括组件（#249 §10 明文禁止
+     * "组件询问宿主名称"）与非组件的 operator `poll()`。
+     *
+     * 现在能力是 `Context` 的**构造参数**：一个实例有什么能力是**显式的**，
+     * 且它来自装配结果（`Assembly.capabilities`），不是来自"当前宿主叫什么"。
+     * 默认空集：**失败关闭** —— 忘了传能力会少做事，不会静默多做。
+     */
+    readonly capabilities: readonly string[] = Object.freeze([]),
+    /**
+     * **页面级键盘接管端口**（来自外壳装配；见 `composition/shell` 的 `PageKeyboardClaim`）。
+     *
+     * `null` = 没有宿主接管页面键盘（独立页面/嵌入）。
+     * 旧实现里这个事实写成 `isWikiHostProfile()` 的模块级反查；
+     * 现在它是构造参数，于是"同一个函数在不同装配下的行为"可从调用点读出。
+     */
+    readonly pageKeyboard: import('@/composition/shell').PageKeyboardClaim | null = null,
   ) {
     // 绑到实例的 `this`：调用点会 `const t = ctx.t`（见字段文档）。
     this.t = (key: string) => this.wm.settings.t(key)
     this.readOnlyDiagnostics = asReadOnlyDiagnostics(this.wm.diagnostics)
+  }
+
+  /**
+   * 本实例是否具备某能力。
+   *
+   * 这是**唯一**的分叉依据：调用方问"我能不能做 X"，
+   * 而不是"我是谁"。名字（宿主名/profile 名）在 `Context` 上**不可读**。
+   */
+  hasCapability(capability: string): boolean {
+    return this.capabilities.includes(capability)
   }
 
   isEmbed(): boolean {

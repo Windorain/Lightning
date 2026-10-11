@@ -86,7 +86,7 @@ export function bindViewportDom(
 
   if (options?.documentKeydown !== false) {
     const onKeydown = (e: KeyboardEvent): void => {
-      if (shouldSkipWorkbenchDocumentKeydown(e)) return
+      if (shouldSkipWorkbenchDocumentKeydown(e, ctx.pageKeyboard)) return
       if (isEditingTarget(e.target)) return
       ed.dispatch(e, { regionId })
     }
@@ -96,6 +96,19 @@ export function bindViewportDom(
 
   return () => {
     for (const u of unsubs) u()
+    // P6 实测：**不**在此 `ed.unregisterRegion(regionId)`。
+    //
+    // 本 unbind 会被"重挂前的 detach"调用一次
+    // （`HostBase.attachViewport` → `detachViewport` → `attachViewport`），
+    // 而 `unregisterRegion` 会**清掉整条 region 系统**（含 `modalStack` 的
+    // `onExit` 与 handler 链），于是同一视口重挂时会丢掉前一次建立的
+    // region 状态 —— 与槽位归零同一个坑（`multiblock-channel-traversal`
+    // "尺寸变化方向" 20s 收敛超时即由此暴露）。
+    //
+    // `registerRegion` 是幂等的（`if (!this._regionSystems.has(...))`），
+    // 故保留 region 系统不会泄漏条目：同一 region 反复重挂只注册一次。
+    // 真正的注销点在组件卸载（`WorkbenchViewport.onBeforeUnmount` →
+    // `ctx.viewports.unregister` 之外，由该文件按需显式调 `unregisterRegion`）。
   }
 }
 

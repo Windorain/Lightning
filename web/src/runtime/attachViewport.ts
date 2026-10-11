@@ -85,5 +85,7 @@ export async function attachViewport(
   return () => {
     unbindDom()
     drw.unbindOverlayPass()
+    // P6 实测：**不**在此归零槽位 —— 本 unbind 会被"重挂前的 detach"调用。
+    // 详见 `docs`/提交说明；归零在组件卸载点由调用方做（`WorkbenchViewport`）。
   }
 }

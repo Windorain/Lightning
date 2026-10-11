@@ -35,6 +35,37 @@ export const WIKI_EMBED = '.wb-wiki-embed'
 /** 视口 tooltip（`ToolTipBox.vue`，Teleport 到 body）。 */
 export const TOOLTIP_BOX = '.wm-tooltip-box'
 
+/**
+ * Wiki 预览里**作用域化**的视口选择器。
+ *
+ * `.vc-viewport` 是**全文档**类名：工作台视口（`WorkbenchViewport`，
+ * region `r-viewport`）与 Wiki 预览视口（`EmbedViewport`，region
+ * `r-wiki-preview`）都用它。P6 之前只有前者会被 `v-show` 保活，
+ * 后者按 `v-if` 挂卸；P6 把保活改成显式生命周期后两端的挂载语义一致，
+ * 于是"取第一个"的含混必须消除 —— 判据要的是"Wiki 嵌入里的那个"。
+ */
+export const WIKI_VIEWPORT = `${WIKI_EMBED} .vc-viewport`
+
+/**
+ * 截取 **Wiki 预览视口**（P6 e2e 审计的 must-fix #1）。
+ *
+ * ## 为什么不能用 `page.locator('.vc-viewport').first()`
+ *
+ * `.first()` 有一个致命性质：**它从不在多重匹配时报错**，而是静默取
+ * DOM 顺序第一个。这正是 AGENTS.md 记录的那次事故：
+ * `parts-outline-b1.spec.ts` 的 `.vc-viewport').first()` 在 `v-show` 保活下
+ * 选到了 `display:none` 的工作台视口，`locator.screenshot()` 于是在
+ * actionability 上等 → **180s 超时**。
+ *
+ * 作用域化之外还要**断言唯一性**：作用域内若仍有两个匹配，说明 Wiki 工作区里
+ * 真出现了两个视口 —— 那是需要响亮报错的结构问题，不是"随便挑一个"。
+ */
+export async function screenshotWikiViewport(page: Page, path: string): Promise<void> {
+  const vp = page.locator(WIKI_VIEWPORT)
+  await expect(vp, 'Wiki 预览必须恰好有一个视口（不得靠 .first() 静默挑选）').toHaveCount(1)
+  await vp.screenshot({ path })
+}
+
 // ---------------------------------------------------------------------------
 // 入口：Workbench → 注入场景 → Wiki 工作区就绪
 // ---------------------------------------------------------------------------
@@ -51,11 +82,21 @@ export async function waitWikiViewportReady(
   timeout = 60_000,
   requireMesh = true,
 ): Promise<void> {
-  await expect(page.locator(`${WIKI_EMBED} .vc-viewport canvas`)).toBeVisible({ timeout })
+  // 作用域化（P6）：问的是"Wiki 嵌入里的 canvas"，不是"全文档第一个 canvas"
+  await expect(page.locator(`${WIKI_VIEWPORT} canvas`)).toBeVisible({ timeout })
   await page.waitForFunction(
     (rid) => {
       const ctx = (window as any).__vm__
       const slot = ctx?.viewports?.get(rid)
+      /**
+       * P6：除"字段非空"外，还要求槽位**活着**。
+       *
+       * 旧实现卸载视口时只解绑监听，不清槽位 —— 于是 `camera`/`definition`/
+       * `domElement` 都还指向已 dispose 的句柄，本等待会对**一个死视口**成立。
+       * `runtime/viewportManager.ts` 现在在卸载时归零槽位，并导出判据
+       * `isSlotLive`（= `camera` 与 `domElement` 同时非空）。
+       * 这里就用那个判据的等价形式（页面内不能 import 模块，故内联同一条件）。
+       */
       return !!slot?.camera?.value && !!slot?.definition?.value && !!slot?.domElement?.value
     },
     WIKI_REGION,
