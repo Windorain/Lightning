@@ -811,7 +811,11 @@ export function readOnlyDiagnostics(
   const out: { property: string; reason: string }[] = []
   for (const kind of [...new Set(registry.objectTypes().map((o) => o.ownerKind))]) {
     for (const desc of registry.describeOwnerKind(kind)) {
-      const ref: PropertyRef = { owner: { kind: desc.objectTypeId, id: desc.objectTypeId }, property: desc.id }
+      // `owner.kind` 是**实体种类**（契约 §1.1），不是 `objectTypeId` ——
+      // 两者曾在此处混用而未被发现，因为冻结前 `EntityOwnerKind` 是开放联合
+      // （`| (string & {})`）把 `objectTypeId` 也吞下了。冻结 #2 收敛为闭合联合后
+      // 类型检查当场抓出该混用：`kind` 必须取对象类型的 `ownerKind`。
+      const ref: PropertyRef = { owner: { kind, id: desc.objectTypeId }, property: desc.id }
       const e = evaluateEditability(registry, ref, access)
       if (!e.editable) {
         out.push({ property: desc.id, reason: rejectionSummary(e.reason ?? domainError('ReadOnly', {})) })

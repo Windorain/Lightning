@@ -32,7 +32,6 @@ import {
   evaluateEditability,
   formatValue,
   parseDraft,
-  propertyRef,
   readProperty,
   type ExtensionValue,
   type ObjectTypeDecl,
@@ -43,6 +42,8 @@ import {
   type TargetFacts,
   type ValueContext,
 } from '@/application/properties'
+// `propertyRef` 的唯一权威是 `domain/identity`（#250 GF-5 收敛：RNA 侧那份已删）。
+import { propertyRef } from '@/domain/identity'
 import {
   applySetProperty,
   createPropertyWritePorts,

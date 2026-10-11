@@ -35,6 +35,8 @@ import {
   type PropertyRef,
   type Version,
 } from '@/application/contracts'
+// `propertyRef` 的唯一权威是 `domain/identity`（#250 GF-5 收敛：RNA 侧那份已删）。
+import { propertyRef } from '@/domain/identity'
 import {
   CAP_PROPERTY_WRITE,
   createCommandCatalog,
@@ -43,7 +45,6 @@ import {
   evaluateEditability,
   formatValue,
   parseDraft,
-  propertyRef,
   readProperty,
   type ObjectTypeDecl,
   type PropertyAccess,

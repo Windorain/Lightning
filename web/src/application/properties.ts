@@ -35,7 +35,6 @@ import {
   type DomainError,
   type DomainErrorCode,
   type EntityOwnerKind,
-  type EntityRef,
   type PropertyId,
   type PropertyRef,
   type Result,
@@ -1296,22 +1295,14 @@ export function filterCommands(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 11. 引用构造与工具
+// 11. 引用工具
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** 造一个属性引用（值语义；不夹带任何实例）。 */
-export function propertyRef(
-  owner: EntityRef,
-  property: PropertyId,
-  extra?: { element?: PropertyRef['element']; component?: number },
-): PropertyRef {
-  return {
-    owner,
-    property,
-    ...(extra?.element ? { element: extra.element } : {}),
-    ...(extra?.component !== undefined ? { component: extra.component } : {}),
-  }
-}
+//
+// **`propertyRef` 已迁出本文件**（#250 GF-5 收敛）：本模块曾有第二份 `propertyRef`
+// 与 `domain/identity.ts` 的同名函数并存（一个 `Object.freeze`、一个不冻）。
+// 两处构造同名同义的引用必然漂移，而漂移会让"同一引用"在相等判定上给出不同答案
+// （`samePropertyRef` 依赖 `element`/`component` 逐字段可比）。
+// 唯一权威现为 `domain/identity` 的 `propertyRef`。
 
 /** 引用列表去重（保序）—— 多选批次里同一个目标只写一次。 */
 export function dedupeRefs(refs: readonly PropertyRef[]): readonly PropertyRef[] {

@@ -34,8 +34,7 @@ import type {
   PresentationInputs,
 } from './evaluationKey'
 import type { InvalidationPlan } from './invalidationPlan'
-import type { DomainError, Result } from './result'
-import { err, ok } from './result'
+import { err, missingTarget, ok, type DomainError, type Result } from '@/domain/errors'
 
 /**
  * 一次编译的**世代身份**。
@@ -134,7 +133,7 @@ export function compileScene(
   invalidation?: InvalidationPlan,
 ): Result<CompiledScene> {
   if (inputs.key.scene === '') {
-    return err('MissingTarget', { what: 'scene' })
+    return err(missingTarget({ what: 'scene' }))
   }
 
   const skipped: { objectId: string; reason: SkipReason }[] = []

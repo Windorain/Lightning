@@ -120,7 +120,9 @@ describe('A06 reject：被拒绝的操作保持文档/历史/脏状态不变', (
     expect(stateSnapshot(e2)).toEqual(before)
 
     // **同文档内**的可编辑对象仍必须可写 —— 这是契约 §3.2 的负对照要求
-    const t2 = e2.submit({ kind: 'setProperty', contextId: 'ctx-1', refs: [{ owner: { kind: 'object', id: 'o-writable' }, property: 'name' }], value: 'renamed' })
+    // 属性 ID 是**限定式**（`<objectTypeId>.<localId>`，冻结 #1）：
+    // `o-writable` 由 `addBlockObject` 造出，故其 name 属性是 `block.name`。
+    const t2 = e2.submit({ kind: 'setProperty', refs: [{ owner: { kind: 'object', id: 'o-writable' }, property: 'block.name' }], value: 'renamed' })
     e2.drain()
     const out2 = e2.settlement(t2)
     expect(out2?.status, `同文档内可编辑对象必须仍可写（不得退化成文档级布尔）；实得 ${JSON.stringify(out2)}`).toBe('applied')

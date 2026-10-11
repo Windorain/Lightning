@@ -13,14 +13,13 @@
  * 本文件只读源码文本 + 调用纯函数，不起组件、不连运行时。
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CAP_PROPERTY_WRITE,
   createPropertyRegistry,
   describeProperty,
-  propertyRef,
   type ObjectTypeDecl,
   type PropertyAccess,
   type PropertyRegistry,
@@ -28,12 +27,51 @@ import {
 } from '@/application/properties'
 import { localPropertyOf, domainError, type EntityRef as ContractEntityRef } from '@/application/contracts'
 import { applySetProperty, createPropertyWritePorts, type PropertyWritePorts } from '@/application/property-commands'
-import { PROPERTY_OBJECT_TYPES as WORKBENCH_OBJECT_TYPES } from '@/editors/workbench-inspector'
+import { propertyRef } from '@/domain/identity'
+import { kernelPropertyRegistry } from '@/application/kernel-properties'
 import { err, ok, type Result } from '@/domain/errors'
 
 
 const ROOT = process.cwd()
 const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 'utf8')
+
+/**
+ * 去掉注释后的**代码文本**（供"某符号是否仍在代码里"的判定）。
+ *
+ * 为什么必须去注释：本批在退役处写了**记录性注释**（"本文件曾有 X，现已迁至 Y"），
+ * 裸正则会把注释里的 `propertyRef(`／`animatableProperties` 当成"代码 still 有" ——
+ * 那是**假红**。反过来，若注释里留着实现，去注释也会掩盖它，故本函数只用于
+ * "符号是否仍被定义/使用"的判定，**定义点**判定另有一套（见 `productionDefinitionsOf`）。
+ */
+const stripComments = (src: string): string =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+
+/**
+ * 全树**生产代码**文件清单（`web/src/**` 去掉 `__tests__` 与 `*.test.ts`）。
+ *
+ * 为什么要枚举全树而不是核对一份手写清单：手写清单只能证明"我列的那些文件里没有重复"，
+ * 而 GF-5 的验收要求是"全树只有一份定义"。多出的第四份定义若出现在没被列到的文件里，
+ * 清单式断言会放过它 —— 那是**空洞真**（#251「未实现的测试名称不得报告通过」的同类）。
+ */
+const PRODUCTION_FILES: readonly string[] = (() => {
+  const src = path.join(ROOT, 'src')
+  const out: string[] = []
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      const full = path.join(dir, entry)
+      if (statSync(full).isDirectory()) {
+        if (entry === '__tests__' || entry === 'node_modules') continue
+        walk(full)
+        continue
+      }
+      if (!/\.ts$/.test(entry)) continue
+      if (/\.test\.ts$/.test(entry)) continue
+      out.push(path.relative(ROOT, full).replace(/\\/g, '/'))
+    }
+  }
+  walk(src)
+  return Object.freeze(out)
+})()
 
 // ── 夹具 ────────────────────────────────────────────────────────────────────
 
@@ -201,17 +239,24 @@ describe('冻结 #2 owner.kind 只用契约 §1.1 实体种类', () => {
     expect(src).toMatch(/export function contractKindOf/)
   })
 
-  it('**实测**：注册表实际用的是 `contracts.ts` 的**开放**联合（GF-5 相关第二处未收敛）', () => {
-    // P1 `domain/identity` 的 `EntityOwnerKind` 已符合 §1.1（封闭八种）；
-    // P2 `contracts.ts` 那份仍是开放联合（带 `| (string & {})`），
-    // 且 `properties.ts`（RNA 注册表）import 的正是**后者** ——
-    // 故注册表并未受 P1 封闭联合约束。这是 GF-5 未通过的第二处证据。
-    const contracts = read('src/application/contracts.ts')
+  it('冻结 #2 类型级收敛：注册表用的是 `domain/identity` 的**封闭**联合（无开放逃生口）', () => {
+    // 收敛前：P1 `domain/identity` 是封闭八种，而 P2 `contracts.ts` 自带一份**开放**联合
+    // （带 `| (string & {})`），且 `properties.ts`（RNA 注册表）import 的正是后者 ——
+    // 于是 `owner.kind` 可以塞进任意字符串（`readOnlyDiagnostics` 就曾把 `objectTypeId`
+    // 塞进 `kind`，类型检查看不出来）。
+    //
+    // 收敛后全树只有 `domain/identity` 一份 `EntityOwnerKind`，`properties.ts` 从
+    // `./contracts` 拿到的是**再导出**的同一定义。本断言把这件事测在类型来源上。
     const identity = read('src/domain/identity.ts')
+    const contracts = read('src/application/contracts.ts')
     const idStart = identity.indexOf('export type EntityOwnerKind')
-    expect(identity.slice(idStart, identity.indexOf(';', idStart))).not.toMatch(/string\s*&\s*\{\}/)
-    expect(contracts).toMatch(/string\s*&\s*\{\}/)
+    expect(identity.slice(idStart, identity.indexOf('\n\n', idStart))).not.toMatch(/string\s*&\s*\{\}/)
+    // contracts.ts 改为再导出后**不再**自带定义（连 `(string & {})` 也不该在这里出现）。
+    expect(contracts).not.toMatch(/export type EntityOwnerKind\s*=/)
+    expect(contracts).not.toMatch(/string\s*&\s*\{\}/)
+    // 注册表经 `contracts` 拿到的就是 identity 那一份（再导出，不是第二个定义）。
     expect(read('src/application/properties.ts')).toMatch(/type EntityOwnerKind[\s\S]{0,200}from '\.\/contracts'/)
+    expect(contracts).toMatch(/export type \{[^}]*EntityOwnerKind[^}]*\}/)
   })
 
   it('声明里的 ownerKind 不再出现 `block`/`annotation`（它们是 objectType）', () => {
@@ -410,167 +455,224 @@ describe('冻结 #5 多选拒绝：整体拒绝且逐目标列明原因', () => 
 })
 
 // ════════════════════════════════════════════════════════════════════════════
-// 单一权威：**当前实测**（GF-5 未通过项的证据，不是判据放宽）
+// GF-5 **已收敛**：全树单一权威定义（本节由"断言现状"翻转为"断言目标态"）
 // ════════════════════════════════════════════════════════════════════════════
 //
-// 本节的断言**刻意断言现状而非目标态**，因为「全树单一 `PropertyValue`/
-// `PropertyDescriptor`/`SetPropertyCommand` 定义」这一条**尚未达成**：
-// P1 的 `commands.ts`/`queries.ts` 仍各有自己的定义，且它们描述的是
-// **另一套文档模型**（`Scene`：`name`/`visible`/`transform.*`）——
-// 与 P2 的 RNA 声明（描述仍在使用中的 `RuntimeDocument`：`id`/`pos`/`tooltip`）
-// **不是同一批属性**。把两套合并需要先决定用哪套文档模型作权威，
-// 而把实时工作台从 `RuntimeDocument` 迁到 P1 的 `ApplicationState` 是
-// P6（#257）的所有权面（见 `boundary-rules.mjs` 的 `RETIREMENT_OWNERS`）。
+// 本节原先把"重复定义仍在"测成事实（GF-5 的量化证据）。#250 裁决本批收敛后，
+// 断言翻转为**目标态**：每个契约类型在全树**恰好一份**定义。
 //
-// 按契约 §8 第 3 条：**缺口只影响本批次某条验收 ⇒ 该条报"未通过"并注明缺口编号**，
-// 其余条目照常交付；**不得**为让判据变绿而自行放宽或用近似实现顶替。
-// 故此处把现状**测出来并计数**（作为 GF-5 的量化证据），
-// 真到收敛那天，这个断言会因为"定义数变少"而失败 —— 那正是提醒把它改成 `toBe(1)`。
+// 覆盖面是**生产代码**（`web/src/**` 去掉 `__tests__`）—— 测试夹具自己造窄化替身
+// 是允许的（它们不构成第二权威，没有生产消费者指向它们），但生产文件一个都不许有。
 
-describe('GF-5 未通过项的证据：重复权威定义（现状计数）', () => {
-  const SRC_FILES = [
-    'src/application/contracts.ts',
-    'src/application/properties.ts',
-    'src/application/property-commands.ts',
-    'src/application/commands.ts',
-    'src/application/queries.ts',
-    'src/domain/errors.ts',
-    'src/domain/identity.ts',
-    'src/runtime/execution.ts',
-  ]
+describe('GF-5 已收敛：全树单一权威定义', () => {
+  /**
+   * 去掉注释与 import/再导出后的**代码文本**。
+   *
+   * 为什么必须去注释：本批在退役处写了**记录性注释**（"本文件曾有 X，现已迁至 Y"），
+   * 裸正则会把注释里的 `propertyRef(`/`animatableProperties` 当成"代码still有"——
+   * 那是**假红**。反过来，若注释里留着实现，去注释也会掩盖它 —— 故本函数只用于
+   * "符号是否仍被定义/使用"的判定，定义点判定另有 `productionDefinitionsOf`。
+   */
+  function codeOf(src: string): string {
+    return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+  }
 
-  function definitionsOf(name: string): string[] {
+  /** 全树生产文件的 `export type/interface X = …` 定义点。 */
+  function productionDefinitionsOf(name: string): string[] {
     const out: string[] = []
-    for (const f of SRC_FILES) {
+    for (const rel of PRODUCTION_FILES) {
       let src: string
       try {
-        src = read(f)
+        src = read(rel)
       } catch {
         continue
       }
-      // 只看**定义**，不看 import / 再出口。
-      const stripped = src
+      // 去掉 import 与 `export {...} from`（再导出**不算**定义）。
+      const stripped = codeOf(src)
         .replace(/^import[\s\S]*?from\s+'[^']*'\s*$/gm, '')
-        .replace(/^export\s+(type\s+)?\{[^}]*\}\s*from\s+'[^']*'\s*$/gm, '')
+        .replace(/^export\s+(?:type\s+)?\{[^}]*\}\s*from\s+'[^']*'\s*$/gm, '')
       if (
         new RegExp(`export\\s+interface\\s+${name}\\b`).test(stripped) ||
         new RegExp(`export\\s+type\\s+${name}\\s*=`).test(stripped)
       ) {
-        out.push(f)
+        out.push(rel)
       }
     }
     return out
   }
 
-  it('`PropertyValue` / `PropertyDescriptor` / `SetPropertyCommand` 的定义点计数（目标：各 1）', () => {
-    const measured = {
-      PropertyValue: definitionsOf('PropertyValue'),
-      PropertyDescriptor: definitionsOf('PropertyDescriptor'),
-      SetPropertyCommand: definitionsOf('SetPropertyCommand'),
+  /** 单行形态的 `export type X = …`（`Result<T>` 带泛型参数，故单独判）。 */
+  function productionsDeclaring(name: string): string[] {
+    const out: string[] = []
+    for (const rel of PRODUCTION_FILES) {
+      let src: string
+      try {
+        src = read(rel)
+      } catch {
+        continue
+      }
+      const stripped = codeOf(src).replace(/^import[\s\S]*?from\s+'[^']*'\s*$/gm, '')
+      if (new RegExp(`export\\s+type\\s+${name}\\s*(<[^>]*>)?\\s*=`).test(stripped)) out.push(rel)
     }
-    // 当前实测（GF-5）：
-    //   PropertyValue      = contracts + properties + commands + queries
-    //   PropertyDescriptor = properties + queries
-    //   SetPropertyCommand = commands + property-commands
-    // 断言"至少存在一份权威定义"（保证本文件不是空转），
-    // 并把**多份**作为证据记录下来（不在这里判绿/判红）。
-    for (const [name, files] of Object.entries(measured)) {
-      expect(files.length, `${name} 至少要有一份定义`).toBeGreaterThanOrEqual(1)
-    }
-    // 收敛后应改为 `expect(files).toHaveLength(1)`；现在把现状固化，
-    // 使"谁在什么时候少了一份"在 diff 里可见。
-    expect(measured.PropertyDescriptor.length).toBeGreaterThan(1)
-    expect(measured.SetPropertyCommand.length).toBeGreaterThan(1)
+    return out
+  }
+
+  for (const name of [
+    'PropertyValue',
+    'PropertyDescriptor',
+    'SetPropertyCommand',
+    'EntityRef',
+    'ElementRef',
+    'PropertyRef',
+    'PropertyId',
+    'EntityOwnerKind',
+    'Version',
+    'ChangeSummary',
+    'DomainError',
+    'DomainErrorCode',
+    'WouldBlockReason',
+    'CommandOutcome',
+  ]) {
+    it(`\`${name}\` 在全树生产代码里**恰好一份**定义`, () => {
+      const defs = productionDefinitionsOf(name)
+      expect(defs, `${name} 的定义点应恰好 1 处，实测：${defs.join(', ') || '（无）'}`).toHaveLength(1)
+    })
+  }
+
+  it('`Result` 在全树生产代码里**恰好一份**定义（带泛型参数，单独判）', () => {
+    const defs = productionsDeclaring('Result')
+    expect(defs, `Result 的定义点应恰好 1 处，实测：${defs.join(', ') || '（无）'}`).toHaveLength(1)
   })
 
-  it('`application/contracts.ts` **仍是**第二份契约定义（GF-5 未收敛，实测计数）', () => {
+  it('`application/contracts.ts` 是**再导出**，不再本地定义任何契约类型', () => {
     const src = read('src/application/contracts.ts')
-    // 实测（本批 **未** 达成"薄再出口"）：contracts.ts 仍本地定义
-    //   Result / EntityOwnerKind / EntityRef / ElementRef / PropertyId /
-    //   PropertyRef / Version / ChangeSummary / DomainErrorCode / WouldBlockReason /
-    //   DomainError / CommandOutcome
-    // 与 P1 的 `domain/errors`（Result/DomainError/八码/WouldBlockReason）
-    // 与 `domain/identity`（EntityRef/PropertyRef/Version/ChangeSummary）
-    // **同名同义各一份**。这是 GF-5 未通过的第二处证据。
-    const localTypes = [...src.matchAll(/^export\s+(?:type|interface)\s+(\w+)/gm)].map((m) => m[1]!)
-    expect(localTypes).toContain('EntityRef')
-    expect(localTypes).toContain('PropertyRef')
-    expect(localTypes).toContain('Version')
-    expect(localTypes).toContain('DomainError')
-    expect(localTypes).toContain('Result')
-    // 若哪天收敛完成（本文件改为纯再出口），这条断言会失败 ——
-    // 那正是提醒把它改成 `expect(localTypes).toEqual([])`。
-    expect(localTypes.length).toBeGreaterThan(0)
+    // 允许的定义只有"无家可归"的 `CommandOutcome`（它属命令结算，
+    // 不属身份也不属错误）；其余契约类型一律再导出。
+    const localTypes = [...codeOf(src).matchAll(/^export\s+(?:type|interface)\s+(\w+)/gm)].map((m) => m[1]!)
+    expect(localTypes.sort()).toEqual(['CommandOutcome'])
+    // 再导出的类型必须覆盖引用与错误两侧（否则消费方会各自找地方定义）。
+    for (const re of [
+      /export type \{[^}]*EntityRef[^}]*\}/,
+      /export type \{[^}]*Version[^}]*\}/,
+      /export type \{[^}]*DomainError[^}]*\}/,
+      /export type \{[^}]*Result[^}]*\}/,
+    ]) {
+      expect(src).toMatch(re)
+    }
   })
 
-  it('P2 的 `propertyRef` 与 P1 `domain/identity` 的同名函数并存（第三处重复）', () => {
-    // 两处都叫 `propertyRef`、签名兼容但实现不同（一个 Object.freeze，一个不冻）。
-    // 这是"名义上同一概念、实际两份实现"的典型 —— 冻结靠测试钉住现状。
-    const p2 = read('src/application/properties.ts')
-    const p1 = read('src/domain/identity.ts')
-    expect(p2).toMatch(/export function propertyRef\(/)
+  it('`propertyRef` 只有 `domain/identity` 一份实现（RNA 侧不再重复）', () => {
+    const p1 = codeOf(read('src/domain/identity.ts'))
+    const p2 = codeOf(read('src/application/properties.ts'))
     expect(p1).toMatch(/export function propertyRef\(/)
+    // 收敛前 `properties.ts` 有第二份 `propertyRef`（一个 freeze、一个不冻）。
+    expect(p2).not.toMatch(/export function propertyRef\(/)
+  })
+
+  it('`reduceSetProperty` 不再有内联属性词汇（白名单/switch 已删）', () => {
+    const commands = codeOf(read('src/application/commands.ts'))
+    // 收敛前的内联面：`isStructuralProperty`、`applyPropertyValue` 的 switch、
+    // `doc.types[...].animatableProperties` 白名单、第二份失败聚合。
+    expect(commands).not.toMatch(/function isStructuralProperty/)
+    expect(commands).not.toMatch(/function applyPropertyValue/)
+    expect(commands).not.toMatch(/function validatePropertyWrite/)
+    expect(commands).not.toMatch(/animatableProperties/)
+    expect(commands).not.toMatch(/function aggregatePropertyFailures/)
+    // 收敛后它把注册表交给 RNA 的 `applySetProperty`（单一写路由）。
+    expect(commands).toMatch(/applySetProperty<Document>/)
+    expect(commands).toMatch(/kernelPropertyRegistry\(\)/)
+  })
+
+  it('`queries.ts` 不再有 `STRUCTURAL_DESCRIPTORS` 或窄化的描述/值/可编辑性类型', () => {
+    const queries = codeOf(read('src/application/queries.ts'))
+    expect(queries).not.toMatch(/STRUCTURAL_DESCRIPTORS/)
+    // 三个类型改为再导出 RNA 的权威定义。
+    expect(read('src/application/queries.ts')).toMatch(/export type \{ PropertyDescriptor \}/)
+    expect(read('src/application/queries.ts')).toMatch(/export type \{ PropertyValue \}/)
+    expect(read('src/application/queries.ts')).toMatch(/export type \{ Editability \}/)
+    // 窄化的可编辑性联合（`kind: 'editable'|'readOnly'|'missing'`）已删。
+    expect(queries).not.toMatch(/readonly kind: 'editable'/)
   })
 })
 
 // ════════════════════════════════════════════════════════════════════════════
-// GF-5 缺口本身的可复现证据
+// 内核属性词汇**已进入** RNA 注册表（GF-5 收敛项 2）
 // ════════════════════════════════════════════════════════════════════════════
+//
+// 收敛前实测：P1 `reduceSetProperty` 会写的 10 个属性 ID（`name`/`visible`/
+// `transform.*`/`projection.*`/`annotation.text`）在 P2 的 RNA 注册表里
+// **0 个可解析** —— 因为两边描述的是两套不相交的文档模型，且 P1 的属性语义
+// 是内联在命令里的白名单。
+//
+// 收敛后：内核侧（`domain/scene` 的 `Scene` 模型）的属性按限定式 ID
+// **注册进 RNA 表**（`application/kernel-properties.ts`），`reduceSetProperty`
+// 零属性词汇、只路由。故原先"0/10"的测量现在必须全部可解析。
 
-describe('GF-5 缺口的可复现证据：两套文档模型的属性词汇不相交', () => {
-  it('**机械测量**：P1 写面的 10 个属性 ID 在 P2 注册表里 0 个可解析', () => {
-    // 这是 GF-5 的核心证据：不是"风格不一致"，而是**两个模型没有交集**。
-    // P1 `reduceSetProperty` 实际会写的属性（从 `commands.ts` 抄出）：
-    const p1Writable = [
-      'name',
-      'visible',
-      'transform.position',
-      'transform.rotation',
-      'transform.scale',
-      'transform.pivot',
-      'projection.fov',
-      'projection.clipStart',
-      'projection.clipEnd',
-      'annotation.text',
-    ]
-    // P2 的注册表（真实声明，非夹具）：
-    const reg = createPropertyRegistry()
-    for (const decl of WORKBENCH_OBJECT_TYPES) reg.registerObjectType(decl)
+describe('GF-5 收敛：内核属性词汇已注册进 RNA 表（原先实测 0/10）', () => {
+  /** 内核写面**实际支持**的属性（限定式 ID）——与 `scene.ts` 的字段一一对应。 */
+  const KERNEL_WRITABLE = [
+    'block.name',
+    'block.visible',
+    'block.transform.position',
+    'block.transform.rotation',
+    'block.transform.scale',
+    'block.transform.pivot',
+    'annotation.text',
+    'camera.projection.fov',
+    'camera.projection.clipStart',
+    'camera.projection.clipEnd',
+  ]
 
-    // 逐个尝试"把 P1 的 obj.type 当 objectTypeId"的几种合理拼法。
-    const resolved: string[] = []
-    for (const p of p1Writable) {
-      const attempts = [`block.${p}`, `annotation.${p}`, `camera.${p}`, p]
-      if (attempts.some((id) => describeProperty(reg, propertyRef(owner('x'), id)).ok)) resolved.push(p)
+  it('**机械测量**：内核写面的 10 个属性 ID 在 RNA 注册表里**全部**可解析', () => {
+    for (const id of KERNEL_WRITABLE) {
+      const d = describeProperty(kernelPropertyRegistry().registry, propertyRef(owner('o1'), id))
+      expect(d.ok, `内核属性 ${id} 必须在 RNA 注册表里可解析`).toBe(true)
     }
-    // 实测 0 —— 若哪天大于 0，说明两套模型开始汇合，本断言与 GF-5 状态都要更新。
-    expect({ resolved, count: resolved.length }).toEqual({ resolved: [], count: 0 })
+    expect(KERNEL_WRITABLE).toHaveLength(10)
   })
 
-  it('P1 的 `Scene` 对象类型 `annotation`/`camera` 在 P2 声明里没有对应', () => {
-    // P2 的注解被拆成 5 个 objectType（按 shape），相机根本没有声明。
-    const ids = WORKBENCH_OBJECT_TYPES.map((d) => d.id)
-    expect(ids).not.toContain('annotation')
-    expect(ids).not.toContain('camera')
-    expect(ids).toContain('lightning.annotation.box')
+  it('负对照：**未注册**的属性仍然被拒（收敛不是"什么都能解析"）', () => {
+    const reg = kernelPropertyRegistry().registry
+    for (const bad of ['block.nope', 'camera.text', 'annotation.projection.fov', 'nope', 'name']) {
+      expect(describeProperty(reg, propertyRef(owner('o1'), bad)).ok, `${bad} 不得可解析`).toBe(false)
+    }
   })
 
-  it('P1 `reduceCommand` 写的属性词 ≠ P2 RNA 声明的属性词', () => {
-    const p1 = read('src/application/commands.ts')
+  it('限定式 ID：`<objectTypeId>.<localId>`，且 objectTypeId 是 `domain/scene` 的类型字面量', () => {
+    const decls = kernelPropertyRegistry().registry.objectTypes().map((d) => d.id)
+    expect(decls.sort()).toEqual(['annotation', 'block', 'camera'])
+    // 属性 ID 的第一段就是 objectTypeId（冻结 #1 的限定形式）。
+    for (const id of KERNEL_WRITABLE) {
+      const objectTypeId = id.slice(0, id.indexOf('.'))
+      expect(decls).toContain(objectTypeId)
+    }
+  })
+
+  it('`commands.ts` 的内联属性词汇已删除（白名单/switch 不再是第二权威）', () => {
+    // 只看**代码**：本文件在退役处留了记录性注释（列出被删函数与现归属），
+    // 裸正则会把注释里的名字当成"代码still有"。去注释后再判，避免假红。
+    const p1 = stripComments(read('src/application/commands.ts'))
+    expect(p1).not.toMatch(/isStructuralProperty/)
+    expect(p1).not.toMatch(/animatableProperties/)
+    expect(p1).not.toMatch(/function applyPropertyValue/)
+    expect(p1).not.toMatch(/function validatePropertyWrite/)
+    expect(p1).not.toMatch(/function aggregatePropertyFailures/)
+    // 收敛后它经 RNA 注册表路由。
+    expect(p1).toMatch(/applySetProperty<Document>/)
+    expect(p1).toMatch(/kernelPropertyRegistry\(\)/)
+  })
+
+  it('工作台面板声明仍是**独立**注册表（双轨登记：负责人 P10/#261，退出于工作台迁移）', () => {
+    // 本批**不**合并面板旧轨（#253 退出边界：不做 Area/外壳）。
+    // 但两条轨道现在共用**同一套 RNA 机制**（同一个 `registerObjectType`/
+    // `applySetProperty`），差别只在文档模型与声明内容 —— 这是"暂存双轨"的
+    // 明确定义：机制已统一，数据模型待迁移。
     const p2 = read('src/editors/workbench-inspector.ts')
-    // P1 侧（`Scene` 模型）：name / visible / transform.* / projection.*
-    expect(p1).toMatch(/ref\.property === 'name'/)
-    expect(p1).toMatch(/startsWith\('transform\.'\)/)
-    // P2 侧（`RuntimeDocument` 模型）：id / pos / tooltip / cellTooltip
-    expect(p2).toMatch(/id: 'tooltip'/)
-    expect(p2).toMatch(/id: 'cellTooltip'/)
-    // 负对照：P1 的 `transform.position` **没有**出现在 P2 的声明里。
-    expect(p2).not.toMatch(/id: 'transform\.position'/)
-  })
-
-  it('实时工作台仍读旧 `RuntimeDocument`（P1 核心未被实时应用实例化）', () => {
-    // P1 的 `Editor`/`EditorClient` 在生产代码里**零实例化**。
-    const runtime = read('src/runtime/context.ts')
-    expect(runtime).toMatch(/getDoc\(\): Ref<RuntimeDocument \| null>/)
+    expect(p2).toMatch(/PROPERTY_OBJECT_TYPES/)
+    expect(p2).toMatch(/lightning\.block/)
+    // 旧轨登记：面板侧写路径仍是 `submitPropertyWrite`（→ `applySetProperty`）。
+    const rna = read('src/editors/workbench-rna.ts')
+    expect(rna).toMatch(/export function submitPropertyWrite/)
+    expect(rna).toMatch(/applySetProperty<DocumentState>/)
   })
 })
