@@ -29,6 +29,7 @@
  */
 
 import { invalidValue, type Result, ok, err } from '@/domain/errors'
+import type { Vec3 } from '@/domain/scene'
 import { mcCellToScene } from './mcAxisProfile'
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -263,8 +264,8 @@ function fillGrid(shape: readonly [number, number, number], value: number): read
  * 一条具名转发函数表达同一件事，且**不带**那条禁令要防的形态 ——
  * 它是本模块**新增**的行为，不是把别处的实现偷偷挂上本模块的公开面。
  */
-export function cellGridIndexToScene(z: number, row: number, col: number, sizeRow: number): number {
-  return mcCellToScene(z, row, col, sizeRow)
+export function cellGridIndexToScene(col: number, row: number, zSlice: number, rowCount: number): Vec3 {
+  return mcCellToScene(col, row, zSlice, rowCount)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
