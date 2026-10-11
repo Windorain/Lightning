@@ -52,6 +52,7 @@ import path from 'node:path'
  * | `domain` | 旧对应物是 `pure/` + `context/`（**不同目录**），故无此问题 |
  * | `application` | 旧对应物是 `operators/` + `handlers/` + `events/`（**不同目录**），同上 |
  * | `runtime` | **撞名**：`web/src/runtime/` 既装旧实现（`renderEngine.ts`/`sessionStore.ts`/`chromeBinder.ts` 等 38 个文件），又要装新的执行/调度/效果三件套 |
+ * | `adapters` | 旧对应物是 `util/` + `config/` + `wiki/`（**不同目录**），但 P9（#260）起该层**开始**有实现（保存目标/文件/存储适配），故也登记 `activeSubpaths` |
  *
  * ⇒ 对 `runtime` 这类层，用 `activeSubpaths` **显式列出新实现的路径**；
  * 只有这些路径属于闸门执行面，其余（旧根文件、`host/`、`hover/`…）是遗留债务。
@@ -71,15 +72,49 @@ export const LAYER_DESTINATIONS = [
     layer: 'runtime',
     legacySources: ['runtime'],
     note: '**撞名**：旧 runtime/ 是求值+会话实现，新 runtime/ 是执行批次/调度/效果',
-    // 新实现的**显式**路径（P1 登记 execution/scheduling/effects，P4 追加 evaluation）
-    activeSubpaths: ['runtime/execution.ts', 'runtime/scheduling.ts', 'runtime/effects.ts', 'runtime/evaluation.ts'],
+    // 新实现的**显式**路径（P1 登记 execution/scheduling/effects，P4 追加 evaluation，P9 追加 exportJob）
+    activeSubpaths: [
+      'runtime/execution.ts',
+      'runtime/scheduling.ts',
+      'runtime/effects.ts',
+      'runtime/evaluation.ts',
+      'runtime/exportJob.ts',
+    ],
     /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议是业务规则，不是呈现。 */
     corePurity: true,
   },
   { layer: 'presentation', legacySources: ['render', 'shared'], note: '求值场景→渲染数据 → 现 render/' },
   { layer: 'editors', legacySources: ['workbench', 'viewer', 'embed'], note: '编辑器组件 → 现 workbench/ + viewer/' },
   { layer: 'shells', legacySources: ['workbench', 'embed'], note: '外壳/装配根 → 现混在 workbench/ + embed/' },
-  { layer: 'adapters', legacySources: ['util', 'config', 'wiki', 'dev'], note: '宿主端口实现 → 现散在 util/ + wiki/' },
+  {
+    layer: 'adapters',
+    legacySources: ['util', 'config', 'wiki', 'dev'],
+    note:
+      '宿主端口实现 → 现散在 util/ + wiki/。**P9（#260）起为部分迁移层**：' +
+      '本批新建的保存目标适配（写入串行化 + 远端条件版本）与后续文件/存储适配按 activeSubpaths 登记；' +
+      '其余 util/ 旧实现仍是遗留债务。',
+    // P9 登记：保存目标适配（串行化 + 条件版本）、恢复副本存储、文件/工程/发布格式、
+    // 宿主产物适配（能力矩阵/manifest/宿主传输）。全部为**新增**适配器实现；
+    // `util/` 等旧对应物仍不在执行面内（部分迁移）。
+    activeSubpaths: [
+      'adapters/saveTarget/coordinator.ts',
+      'adapters/storage/memory.ts',
+      'adapters/storage/browser.ts',
+      'adapters/files/fidelityRecord.ts',
+      'adapters/files/legacyShape.ts',
+      'adapters/files/legacyFields.ts',
+      'adapters/files/plainCodec.ts',
+      'adapters/files/envelopeCodec.ts',
+      'adapters/files/versionMigration.ts',
+      'adapters/files/mcAxisProfile.ts',
+      'adapters/files/projectFormat.ts',
+      'adapters/files/documentBinding.ts',
+      'adapters/files/publishFormat.ts',
+      'adapters/host/hostCapabilities.ts',
+      'adapters/host/artifactTransport.ts',
+      'adapters/host/buildManifest.ts',
+    ],
+  },
   { layer: 'composition', legacySources: [], note: '装配（无旧对应物，本次新建）' },
   { layer: 'entries', legacySources: ['main*.ts'], note: '薄启动入口 → 现 src/main*.ts 在根' },
 ]
@@ -514,9 +549,14 @@ export const RETIREMENT_OWNERS = {
     owners: [
       { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '求值面（类型化文档 + 求值场景）' },
       { p: 'P9', issue: 260, duty: '持久化、固定快照导出与恢复', scope: '文件面（文件适配、持久化）' },
+      { p: 'P10', issue: 261, duty: '集成闭环与交叉验收', scope: '旧 RuntimeDocument 生产消费者的接线退出（R-WK-03）' },
     ],
-    exitStage: 'P9 交付同批（求值面 P4 分离，文件面 P9 收口）',
-    role: 'P4 执行者（求值与文档解耦）；P9 执行者（文件适配收口）',
+    // P9（#260）执行登记：文件面**适配器**已交付（`adapters/files` 的工程/发布/旧格式编解码 +
+    // A20 验收），但旧 `RuntimeDocument` 的**生产消费者**（`runtime/context.getDoc()`、
+    // `workbench/**` 读写链、序列化调用点）退出需要内核先接线进生产 ——
+    // 该前置由 R-WK-03（#250 裁决 2026-10-11）归入 **P10/#261**，故本条的终局删除不在 P9 同批。
+    exitStage: 'P9 交付同批（求值面 P4 分离，文件面 P9 适配器收口）→ 生产消费者接线退出归 P10/#261（R-WK-03）→ P11 终局审计',
+    role: 'P4 执行者（求值与文档解耦）；P9 执行者（文件适配器，不桥接旧路径）；P10 执行者（生产接线后删除旧序列化/读取链）；P11 执行者（终局审计）',
   },
   'ui-proxy-dispatch': {
     entries: [3],
@@ -598,9 +638,21 @@ export const RETIREMENT_OWNERS = {
   },
   'exporter-borrows-live-viewport': {
     entries: [13],
-    owners: [{ p: 'P9', issue: 260, duty: '持久化、固定快照导出与恢复', scope: '固定快照导出作业、共同求值与呈现' }],
-    exitStage: 'P9 交付同批',
-    role: 'P9 执行者',
+    owners: [
+      { p: 'P9', issue: 260, duty: '持久化、固定快照导出与恢复', scope: '固定快照导出作业、共同求值与呈现' },
+      { p: 'P10', issue: 261, duty: '集成闭环与交叉验收', scope: '旧导出器（workbench/export* + exportIsometricImage + GIF/OBJ 命令）删除' },
+    ],
+    // P9（#260）执行登记：**内核侧替代机制已交付且可加载**（`domain/captureSpec` +
+    // `application/exportPlan` + `runtime/exportJob`，静态证据见
+    // `tests/architecture/export-purity.test.ts`：离屏端口方法集合封闭、导出层不得 import
+    // 实时视口/相机实现、不得 import 旧导出器）。
+    //
+    // 但**旧导出器的删除**不在 P9 同批：其消费面在生产旧路径上（`operators/builtin/exportOperators.ts`、
+    // `operators/builtin/materialOperators.ts`、`workbench/components/ExportWorkspace.vue`
+    // 与 `workbench/export/` 48 文件），而按 R-WK-03（#250 裁决 2026-10-11）内核未接线进生产时
+    // 删除旧路径 = 能力停摆且无替代。⇒ 删除归 P10/#261 与接线同批。
+    exitStage: 'P9 交付同批（内核侧固定快照导出机制）→ 旧导出器删除随生产接线归 P10/#261（R-WK-03）→ P11 终局审计',
+    role: 'P9 执行者（替代机制）；P10 执行者（接线后删除旧导出器）；P11 执行者（终局审计）',
   },
 }
 
