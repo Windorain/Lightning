@@ -449,8 +449,10 @@ describe('A15 · viewer-pruning：查看器构建无内容编辑面，播放/通
     const state = openDocumentState('doc1', 'ctx1')
     const env = { capabilities: capabilitiesOf(viewer) }
 
-    // 直接构造内容编辑命令 —— 完全绕过任何 UI
-    const setProp = reduceCommand(state, { kind: 'setProperty', contextId: 'ctx1', refs: [{ owner: { kind: 'object', id: 'ghost' }, property: 'name' }], value: 'x' }, env)
+    // 直接构造内容编辑命令 —— 完全绕过任何 UI。
+    // 变基合流（× P2 #253）：`setProperty` 已改由命令自带的 `refs` 定位拥有者
+    // （不再有 `contextId` 字段）—— 这里按合流后的命令形状构造。
+    const setProp = reduceCommand(state, { kind: 'setProperty', refs: [{ owner: { kind: 'object', id: 'ghost' }, property: 'name' }], value: 'x' }, env)
     expect(setProp.status, '运行期必须拒绝内容编辑，而不是"UI 没给按钮"').toBe('rejected')
     if (setProp.status === 'rejected') expect(setProp.error.code).toBe('UnsupportedOperation')
 
@@ -514,7 +516,13 @@ describe('A21 · extension-proof：经贡献接口新增文字类型与专用控
     // 从 `DEFAULT_TYPES` 的声明区间里抽每个类型描述符的 `type:` 字面量。
     const block = src.slice(src.indexOf('const DEFAULT_TYPES'), src.indexOf('export type ObjectTypeRegistry'))
     const types = [...block.matchAll(/type: '([a-zA-Z0-9_]+)'/g)].map((m) => m[1])
-    expect(new Set(types), '核心的三类对象').toEqual(new Set(['annotation', 'block', 'camera']))
+    // 变基合流（× P3 #254）：`mesh` 由 P3 合法加入 DEFAULT_TYPES（`domain` 的能力表），
+    // 故**类型集合本身**不是 A21 的判据 —— A21 判的是"**扩展类型**（如 `text`）
+    // 不得需要改核心"。这里改为：核心里有的类型必须是**内核自有的**那几类，
+    // 而扩展类型（`text`）无论如何都不许出现。
+    expect(new Set(types), '核心的对象类型必须是内核自有类型（block/annotation/camera + P3 的 mesh）').toEqual(
+      new Set(['annotation', 'block', 'camera', 'mesh']),
+    )
     expect(types, 'A21 **负对照**：若 `text` 进了 DEFAULT_TYPES，说明扩展必须改核心 ⇒ 判红').not.toContain('text')
   })
 
@@ -541,24 +549,28 @@ describe('A21 · extension-proof：经贡献接口新增文字类型与专用控
     const scene = fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'domain', 'scene.ts'), 'utf8')
     const descBlock = scene.slice(scene.indexOf('export interface ObjectTypeDescriptor'), scene.indexOf('export type ObjectTypeRegistry'))
     expect(descBlock.includes('create'), 'ObjectTypeDescriptor 不得携带工厂函数（状态必须可克隆）').toBe(false)
-    // 且内置工厂表有且只有三类（`text` 不在核心）
+    // 且内置工厂表只覆盖**内核自有类型**（`text` 不在核心 —— 合流后含 P3 的 `mesh`）
     const factoryBlock = scene.slice(scene.indexOf('export const DEFAULT_OBJECT_FACTORIES'), scene.indexOf('export type ObjectTypeRegistry'))
     const factoryKeys = [...factoryBlock.matchAll(/^\s{2}([a-zA-Z0-9_]+): \(init\)/gm)].map((m) => m[1])
-    expect(factoryKeys.sort(), '内置工厂表 = 核心三类').toEqual(['annotation', 'block', 'camera'])
+    expect(factoryKeys.sort(), '内置工厂表 = 内核自有类型（合流后含 P3 的 mesh）').toEqual(['annotation', 'block', 'camera', 'mesh'])
+    expect(factoryKeys, 'A21 负对照：扩展类型不得出现在内置工厂表').not.toContain('text')
   })
 
   it('**A21 端到端**：注册一个新对象类型的工厂后，`addObject` 命令**不改核心**即可建出它', async () => {
     // 这条是 A21 的**行为**判据（不是静态扫描）：贡献 → 执行输入的工厂表 → 命令生效。
     const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
     const { DEFAULT_OBJECT_FACTORIES, sceneObject, objectData } = await import('@/domain/scene')
+    const { ok } = await import('@/domain/errors')
     // 造一个"新类型"的工厂（等价于 `objects.text` 贡献的那一条，但独立构造，
-    // 以证明**不需要**核心认识它的名字）
+    // 以证明**不需要**核心认识它的名字）。
+    // 工厂契约为 `Result<ObjectCreation> | null`（`null`=类型不认识、`err`=构造失败）。
     const probeFactories = {
       ...DEFAULT_OBJECT_FACTORIES,
-      text: (init: { objectId: string; dataId: string; name?: string; params?: Readonly<Record<string, unknown>> }) => ({
-        object: sceneObject({ id: init.objectId, type: 'text', dataId: init.dataId, ...(init.name === undefined ? {} : { name: init.name }) }),
-        data: objectData(init.dataId, { kind: 'annotation' as const, shape: 'text' as const, text: String(init.params?.text ?? '') }),
-      }),
+      text: (init: { objectId: string; dataId: string; name?: string; params?: Readonly<Record<string, unknown>> }) =>
+        ok({
+          object: sceneObject({ id: init.objectId, type: 'text', dataId: init.dataId, ...(init.name === undefined ? {} : { name: init.name }) }),
+          data: objectData(init.dataId, { kind: 'annotation' as const, shape: 'text' as const, text: String(init.params?.text ?? '') }),
+        }),
     }
     const state = openDocumentState('doc1', 'ctx1')
     const docId = Object.keys(state.docs)[0]

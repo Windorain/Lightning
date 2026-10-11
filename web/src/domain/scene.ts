@@ -33,6 +33,7 @@
  */
 
 import { digestOf, type EntityRef, type Version } from './identity'
+import { ok, type Result } from './errors'
 import { topologyVersionOf, unitBoxMesh, type Deformation, type MeshPayload } from './geometry'
 
 // ─────────────────────────────────────────────────────────────────────────────
