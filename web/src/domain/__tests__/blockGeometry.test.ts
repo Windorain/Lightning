@@ -53,7 +53,10 @@ interface FixtureInner {
 /** 读真实信封夹具的内层 body（base64/gzip 两形态都处理，与生产解析器同口径）。 */
 function readEnvelopeInner(rel: string): FixtureInner {
   const p = path.join(process.cwd(), rel)
-  const env = JSON.parse(fs.readFileSync(p, 'utf8')) as { payload: string }
+  // 读入口归一化行尾（铁律 6；`crlf-hygiene` 闸门要求）。
+  // 本文件读的是夹具 JSON 而非源码，归一化不改 JSON 语义 ——
+  // 但保持"每个读入口都显式声明行尾口径"这条纪律，闸门才有意义。
+  const env = JSON.parse(fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')) as { payload: string }
   const buf = Buffer.from(env.payload, 'base64')
   const text = buf[0] === 0x1f && buf[1] === 0x8b ? zlib.gunzipSync(buf).toString('utf8') : buf.toString('utf8')
   return JSON.parse(text) as FixtureInner

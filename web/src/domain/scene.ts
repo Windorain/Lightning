@@ -103,16 +103,6 @@ export function sameTransform(a: Transform, b: Transform): boolean {
 export type DataSource = 'document' | 'content'
 
 /**
- * 单元格位置与稳定键的**再导出**。
- *
- * 定义在 `domain/cellPosition`（见那里的文件头：为什么单独一个模块 —— 避免
- * `scene → cellContent → scene` 的环）。此处再导出使既有消费者（`domain/document`、
- * `composition/**`）不必知道模块划分的变化。
- */
-export type { CellPosition } from './cellPosition'
-export { cellPositionKey, cellContentKeyOf, parseCellPositionKey } from './cellPosition'
-
-/**
  * 注解的**呈现几何参数**（#289 P10d：从旧注解模型搬进内核）。
  *
  * ## 本类型替代什么

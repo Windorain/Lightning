@@ -68,7 +68,10 @@ const ENVELOPE_FIXTURE = path.join(process.cwd(), 'e2e', 'fixtures', 'structured
 
 /** 读真实信封的内层 body（base64 或 base64(gzip)，与生产解包同口径）。 */
 function readEnvelopeInner(): Record<string, unknown> {
-  const env = JSON.parse(fs.readFileSync(ENVELOPE_FIXTURE, 'utf8')) as { payload: string }
+  // 读入口归一化行尾（铁律 6；`crlf-hygiene` 闸门要求）。
+  // 本文件读的是夹具 JSON 而非源码，归一化不改 JSON 语义 ——
+  // 但保持"每个读入口都显式声明行尾口径"这条纪律，闸门才有意义。
+  const env = JSON.parse(fs.readFileSync(ENVELOPE_FIXTURE, 'utf8').replace(/\r\n/g, '\n')) as { payload: string }
   const buf = Buffer.from(env.payload, 'base64')
   const text = buf[0] === 0x1f && buf[1] === 0x8b ? zlib.gunzipSync(buf).toString('utf8') : buf.toString('utf8')
   return JSON.parse(text) as Record<string, unknown>

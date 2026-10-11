@@ -107,6 +107,7 @@ import {
 import { EMPTY_ANIMATION, type AnimationState } from '@/domain/animation'
 import { err, invalidValue, ok, type Result } from '@/domain/errors'
 import { normalizeCellContent, type CellContent, type CellContentTable } from '@/domain/cellContent'
+import { cellPositionKey } from '@/domain/cellPosition'
 import { blockGeometryAsset, decodeBlockGeometry, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
 import {
   objectData,
@@ -576,7 +577,9 @@ const CORE_EXTRA_BAG_KEY = '_extra'
  * 形态选定并**显式登记为 GF-4**（回 #250 裁决），不私自扩展契约语义。
  */
 export function blockCellKey(x: number, y: number, z: number): string {
-  return `${x},${y},${z}`
+  // **转发** `domain/cellPosition` 的实现（GF-7 的键格式唯一定义点，见那里的文件头）。
+  // 本函数保留三名参数形态：它是 GF-7 的公开口径，既有调用点与测试都按它写。
+  return cellPositionKey({ x, y, z })
 }
 
 /** 方块值格式（见 {@link blockCellKey} 的说明）。 */
