@@ -59,6 +59,21 @@ function formatError(err: unknown): string {
   return formatUnknownError(err)
 }
 
+/**
+ * 帧下标取模归一（纯；把任意整数折进 `[0, n)`）。
+ *
+ * 保留在本文件（而不是挪进内核）的理由：它是**呈现侧**的归一化 ——
+ * 内核派生的帧下标已经是合法的（离散阶跃采样恒落在定义域内），
+ * 这里归一化的是"呈现请求"里可能越界的原始值（例如 `seekFrame(999)`）。
+ * 两者职责不同：内核保证**产出**合法，呈现保证**请求**合法。
+ */
+function normalizeWorldFrameListIndex(w: { frames: unknown[] }, raw: number): number {
+  const n = w.frames.length
+  if (n === 0) return 0
+  const i = Math.floor(raw)
+  return ((i % n) + n) % n
+}
+
 interface WorldMeshEntry {
   group: THREE.Group
   dispose: () => void
@@ -75,9 +90,22 @@ export interface DrwMeshPipelineDeps {
   structureDefinition: ShallowRef<StructureDefinition | null>
   mainMeshGroup: ShallowRef<THREE.Group | null>
   sceneRef: ShallowRef<THREE.Scene | null>
-  worldFrameIndex: Ref<number>
+  /**
+   * **世界帧下标**（P10 #261：由内核会话提供的**派生**值，不再是 `Main` 上的 Ref）。
+   *
+   * 它是一个**只读**的 getter，不是 `Ref` —— 这一点是刻意的：
+   * 旧形态下本管线可以（也确实）直接写这个 Ref（`worldFrameIndex.value = idx`），
+   * 于是"谁在推进帧"有两个答案（本管线的 `setCurrentWorldFrame` 与 operator）。
+   * 现在帧下标由 `EditContext.time` 派生，唯一的写路径是 `setTime` 命令
+   * （经 `setFrameIndex` 注入）—— 本管线只能**读**。
+   *
+   * 为什么是函数而不是 `Ref`：若给一个 `computed`，Vue 的响应式依赖收集会
+   * 让本管线在每次时间变化时被唤醒（包括"时间在动但帧没变"的那些次）。
+   * 函数形式让"什么时候读"由调用点决定，与旧 `worldFrameIndex.value` 的
+   * 读取时机一致（换帧路径 + 缓存键 + 内容身份）。
+   */
+  worldFrameIndex: () => number
   layerWorldY: Ref<number>
-  framesPlaybackIsPlaying: Ref<boolean>
   blockIconCacheOptions: { sizePx?: number; orthoHalf?: number }
   initialWorldFrameIndex?: number
   /**
@@ -93,10 +121,26 @@ export interface DrwMeshPipelineDeps {
   worldAnnotationGroupRef?: ShallowRef<THREE.Group | null>
   /** overlay pass 内工具预览根（ViewportSlot） */
   toolsOverlayGroupRef?: ShallowRef<THREE.Group | null>
-  /** 换帧时经 Operator 写入（避免 DRW 直改 ref） */
-  setFrameIndex?: (index: number) => void | Promise<void>
-  /** 停/启播放时经 Operator 写入 */
-  setFramesPlayback?: (playing: boolean) => void | Promise<void>
+  /**
+   * 换帧（P10 #261）：写**时间**，不是写帧下标。
+   *
+   * 语义变化是本质的：旧接口 `setFrameIndex(index)` 直接写一个独立权威
+   * （`Main.currentFrameIndex`），于是"帧"与"时间"可以互相矛盾。
+   * 新接口 `seekFrame(index)` 经 `setTime` 命令按帧时长轴换算成时间 ——
+   * 于是"跳到第 3 帧"与"播放到第 3 帧"落在**同一个**时间值上（A09）。
+   *
+   * `worldFrameIndex` 提供的 getter 会随这次写而变化（它是派生值）。
+   */
+  seekFrame?: (index: number) => void | Promise<void>
+  /**
+   * 时间是否在前进（P10 #261：替代旧的 `framesPlaybackIsPlaying` Ref）。
+   *
+   * 本管线用它做的唯一判断是"要不要在换帧后继续等待下一帧"——
+   * 而那个等待现在是**宿主的帧时钟**（`composition/kernelRuntime`）的事，
+   * 不是本管线的定时器。故本字段只用于**呈现侧**的显示（播放按钮状态）
+   * 与"是否继续跟随"的观测，不驱动任何调度。
+   */
+  isPlaying?: () => boolean
 }
 
 export interface DrwComputed {
@@ -115,7 +159,21 @@ export interface DrwMeshPipeline {
   /** 绑定 RenderEngine overlay pass 根 Group（注解层由 DRW 独占子树） */
   bindOverlayPass(group: THREE.Group): void
   unbindOverlayPass(): void
+  /**
+   * 请求内核把时间定位到某帧（**唯一**换帧入口）。
+   *
+   * 它**不**改本地帧下标（那是派生值）—— 改时间就是改帧。
+   */
   setCurrentWorldFrame(index: number): Promise<void>
+  /**
+   * 按给定帧下标解析 bundle 并呈现（**呈现**；不改帧下标）。
+   *
+   * 与 `setCurrentWorldFrame` 的分工：后者是"请求换帧"（写面），
+   * 本方法是"把某一帧画出来"（读面 + 绘制）。宿主的帧时钟在观测到
+   * 帧下标变化时调本方法 —— 于是"谁决定换帧"（内核时间）与
+   * "谁负责画"（呈现）在类型上是两件事。
+   */
+  presentWorldFrame(index: number): Promise<void>
   disposeCachesAndLibrary(): void
   /**
    * 按**内容身份**应用一次内容重读（原 `rebuildAll()` 的位置）。
@@ -138,7 +196,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   const {
     docRef, loadStatus, meshBusy, blockIconCache, tooltipPalette,
     structureDefinition, mainMeshGroup, sceneRef, worldFrameIndex, layerWorldY,
-    framesPlaybackIsPlaying, blockIconCacheOptions, initialWorldFrameIndex, contentRefreshTickRef, setFrameIndex, setFramesPlayback,
+    blockIconCacheOptions, initialWorldFrameIndex, contentRefreshTickRef, seekFrame,
     showAnnotationsRef: showAnnotationsRefIn,
     worldAnnotationGroupRef,
     toolsOverlayGroupRef,
@@ -146,10 +204,13 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
 
   const showAnnotationsRef = showAnnotationsRefIn ?? ref(true)
 
-  function stopPlayback(): void {
-    if (setFramesPlayback) void Promise.resolve(setFramesPlayback(false))
-    else framesPlaybackIsPlaying.value = false
-  }
+  /**
+   * 当前帧下标 —— **每次现读**（派生值）。
+   *
+   * 不缓存在局部变量里：帧下标由 `EditContext.time` 派生，
+   * 缓存它就会重新引入"两个权威"（缓存值与真值可以漂移）。
+   */
+  const frameIndex = (): number => worldFrameIndex()
 
   // === 内部纹理缓存，从 doc.textureBlobs 构建 ===
   const textureCache = shallowRef<MaterialLibraryApi | null>(null)
@@ -326,10 +387,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   const worldMeshCache = new Map<string, WorldMeshEntry>()
   let nonWorldMeshDispose: (() => void) | null = null
   let stopContentRefreshWatch: (() => void) | null = null
-  let stopFrameIndexWatch: (() => void) | null = null
-  let stopPlaybackWatch: (() => void) | null = null
   let stopLayerWorldYWatch: (() => void) | null = null
-  let suppressFrameIndexWatch = false
   /** 资源缺失时的一次性恢复哨兵（避免"解码持续失败 ⇒ 无限递归"）。 */
   let resourceRecoveryRetry = false
 
@@ -378,7 +436,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
 
   function worldMeshKey(): string {
     const y = layerWorldY.value
-    return `${worldFrameIndex.value}:${y < 0 ? 'a' : `y${y}`}`
+    return `${frameIndex()}:${y < 0 ? 'a' : `y${y}`}`
   }
 
   async function presentContentMesh(): Promise<void> {
@@ -464,70 +522,43 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     blockIconCache.value = null
   }
 
-  // ---- 帧播放控制 ----
-  const DEFAULT_WORLD_FRAME_DWELL_MS = 50
-  function normalizeWorldFrameListIndex(w: { frames: unknown[] }, raw: number): number {
-    const n = w.frames.length
-    if (n === 0) return 0
-    const i = Math.floor(raw)
-    return ((i % n) + n) % n
-  }
+  // ---- 帧播放（P10 #261：专用播放调度器已删除） ----
+  //
+  // 本文件原有一个自续 `setTimeout` 链（`scheduleNextWorldFrameStep` /
+  // `clearWorldPlaybackSchedule` / `worldPlaybackTimeoutId` /
+  // `dwellMsForCurrentWorldFrame`）按索引推进世界帧。它已在本批删除，
+  // 退役判据与替代关系见 `retirementRegistry` 的
+  // `frame-sequence-as-animation` 条目（相位 `executed`）。
+  //
+  // 现状：本文件**没有任何定时器**；帧下标由 `EditContext.time` 经离散阶跃
+  // 采样**派生**（`worldFrameIndex()`），推进归宿主帧时钟
+  // （`composition/kernelRuntime`）。
 
-  let worldPlaybackTimeoutId: ReturnType<typeof setTimeout> | null = null
-
-  function clearWorldPlaybackSchedule(): void {
-    if (worldPlaybackTimeoutId !== null) {
-      clearTimeout(worldPlaybackTimeoutId)
-      worldPlaybackTimeoutId = null
-    }
-  }
-
-  function dwellMsForCurrentWorldFrame(): number {
-    const doc = docRef.value
-    if (!doc || doc.frameCount === 0) return DEFAULT_WORLD_FRAME_DWELL_MS
-    const f = doc.frame(worldFrameIndex.value)
-    const d = f?.durationMs
-    if (typeof d === 'number' && Number.isFinite(d) && d > 0) return d
-    return DEFAULT_WORLD_FRAME_DWELL_MS
-  }
-
-  function scheduleNextWorldFrameStep(): void {
-    clearWorldPlaybackSchedule()
-    if (!framesPlaybackIsPlaying.value) return
-
-    const doc = docRef.value
-    if (!doc || doc.frameCount < 2) return
-    const n = doc.frameCount
-    const delay = dwellMsForCurrentWorldFrame()
-    const fromIndex = worldFrameIndex.value
-
-    worldPlaybackTimeoutId = setTimeout(() => {
-      worldPlaybackTimeoutId = null
-      if (!framesPlaybackIsPlaying.value) return
-      let next = fromIndex + 1
-      if (next >= n) next = 0
-      const advance = setFrameIndex
-        ? () => Promise.resolve(setFrameIndex(next))
-        : () => setCurrentWorldFrame(next)
-      void advance().then(() => {
-        if (framesPlaybackIsPlaying.value) scheduleNextWorldFrameStep()
-      }).catch(() => { stopPlayback() })
-    }, delay)
-  }
-
-  /** 多帧：按索引解析 bundle 并呈现结构 mesh（唯一换帧入口） */
+  /**
+   * 换帧（**唯一**入口）：请求内核把时间定位到某帧。
+   *
+   * 它**不**直接改任何本地状态 —— 帧下标是派生值，改时间就是改帧。
+   * `seekFrame` 由接线层注入（内部经 `setTime` 命令）。
+   */
   async function setCurrentWorldFrame(rawNext: number): Promise<void> {
+    const doc = docRef.value
+    if (!doc || doc.frameCount === 0) return
+    if (seekFrame) {
+      await Promise.resolve(seekFrame(rawNext))
+      return
+    }
+    // 没有接线（例如单测直接构造本管线）：显式不做，**不**静默假装换帧成功。
+    console.warn('[drw] setCurrentWorldFrame: 未注入 seekFrame（内核会话未接线）')
+  }
+
+  /** 由帧下标解析 bundle 并呈现结构 mesh（**呈现**，不改帧下标）。 */
+  async function presentWorldFrame(index: number): Promise<void> {
     const doc = docRef.value
     if (!doc || doc.frameCount === 0) return
     return runMesh(async () => {
       const plain = doc.serialize()
       if (!isWorldDocument(plain) || plain.frames.length === 0) return
-      const idx = normalizeWorldFrameListIndex(plain, rawNext)
-      if (worldFrameIndex.value !== idx) {
-        suppressFrameIndexWatch = true
-        worldFrameIndex.value = idx
-        suppressFrameIndexWatch = false
-      }
+      const idx = normalizeWorldFrameListIndex(plain, index)
 
       const resolved: RenderBundleResolveResult = resolveRenderBundle({ document: plain }, idx)
       structureDefinition.value = resolved.definition
@@ -563,15 +594,16 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       })
     })
 
-    stopFrameIndexWatch?.()
-    stopFrameIndexWatch = watch(worldFrameIndex, (idx, prev) => {
-      if (suppressFrameIndexWatch || idx === prev) return
-      const doc = docRef.value
-      if (!doc || doc.frameCount < 2) return
-      const plain = doc.serialize()
-      if (!isWorldDocument(plain) || plain.frames.length === 0) return
-      void setCurrentWorldFrame(idx)
-    })
+    // **帧下标观察者已删除**（P10 #261）：旧实现 watch 一个 `Ref<number>`
+    // （`Main.currentFrameIndex`），在它变化时换 mesh。现在帧下标是**派生值**
+    // （`frameIndex()`），没有可 watch 的独立源 —— 换帧由宿主的帧时钟
+    // （`composition/kernelRuntime` 的 `onFrame`）在**观测到帧下标变化**时
+    // 调 `presentWorldFrame(index)` 驱动。
+    //
+    // 这不是"把 watch 挪了个地方"：旧 watch 的语义是"有人写了帧下标 ⇒ 重绘"，
+    // 而写入者可能不是播放（operator、加载路径都写）；新语义是"内核的时间
+    // 落在另一帧上 ⇒ 重绘"，判据只有一个（时间），且**不存在**"写了但没生效"
+    // 的中间态（时间是不可变值，一次发布就是一次一致快照）。
 
     stopLayerWorldYWatch?.()
     stopLayerWorldYWatch = watch(layerWorldY, () => {
@@ -587,31 +619,30 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       })
     })
 
-    stopPlaybackWatch?.()
-    stopPlaybackWatch = watch(framesPlaybackIsPlaying, (playing) => {
-      if (playing) scheduleNextWorldFrameStep()
-      else clearWorldPlaybackSchedule()
-    })
+    // **播放观察者已删除**（P10 #261）：旧实现 watch `framesPlaybackIsPlaying`
+    // 并在它为真时启动 `scheduleNextWorldFrameStep()` 的 `setTimeout` 自续链。
+    // 现在"时间要不要走"是 `EditContext.playing`，由内核的 `advancePlayback`
+    // 命令在**宿主注入 delta 时**判定 —— 本管线不再有可启动的调度器。
   }
 
   async function loadStructureAndResources(): Promise<void> {
     const preserveViewport = loadStatus.value === 'ok'
-    clearWorldPlaybackSchedule()
-    stopPlayback()
     clearAllMeshStorage()
     if (!preserveViewport) loadStatus.value = 'loading'
     try {
       const doc = docRef.value
       if (!doc) { loadStatus.value = 'error'; return }
       const plain = doc.serialize()
-      const frameIdx = preserveViewport ? worldFrameIndex.value : initialWorldFrameIndex
+      const frameIdx = preserveViewport ? frameIndex() : initialWorldFrameIndex
       const resolved: RenderBundleResolveResult = resolveRenderBundle(
         { document: plain },
         frameIdx,
       )
-      if (!preserveViewport) {
-        if (resolved.worldFrameIndex !== undefined) worldFrameIndex.value = resolved.worldFrameIndex
-        else worldFrameIndex.value = 0
+      // 非保留路径：按解析结果**定位时间**（帧下标是派生值 ⇒ 定位就是 seekFrame）。
+      // 旧实现直接写 `worldFrameIndex.value`（一个独立权威）；现在没有可写的
+      // 帧下标，只有可写的时间 —— 这正是"时间唯一权威"在加载路径上的落点。
+      if (!preserveViewport && seekFrame) {
+        await Promise.resolve(seekFrame(resolved.worldFrameIndex ?? 0))
       }
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
@@ -646,7 +677,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   const contentSignal = createContentSignal(() =>
     readContentIdentity({
       doc: docRef.value,
-      frameIndex: worldFrameIndex.value,
+      frameIndex: frameIndex(),
       layerPreview: layerPreviewMode.value,
       definition: structureDefinition.value,
     }),
@@ -689,8 +720,6 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   }
 
   function disposeCachesAndLibrary(): void {
-    clearWorldPlaybackSchedule()
-    stopPlayback()
     unbindOverlayPass()
     clearAllMeshStorage()
     mainMeshGroup.value = null
@@ -699,7 +728,8 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     textureCache.value = null
     structureDefinition.value = null
     tooltipPalette.value = []
-    worldFrameIndex.value = 0
+    // **不再重置帧下标**（P10 #261）：它是派生值，没有可写的本地状态。
+    // "把帧归零"现在是 `setTime` 的职责（内核侧），由宿主在换文档时显式发出。
     sceneRef.value = null
   }
 
@@ -708,10 +738,6 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     stopAnnotationPassWatch = null
     stopContentRefreshWatch?.()
     stopContentRefreshWatch = null
-    stopFrameIndexWatch?.()
-    stopFrameIndexWatch = null
-    stopPlaybackWatch?.()
-    stopPlaybackWatch = null
     stopLayerWorldYWatch?.()
     stopLayerWorldYWatch = null
   }
@@ -723,6 +749,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     bindOverlayPass,
     unbindOverlayPass,
     setCurrentWorldFrame,
+    presentWorldFrame,
     disposeCachesAndLibrary,
     applyContentRefresh,
     init,

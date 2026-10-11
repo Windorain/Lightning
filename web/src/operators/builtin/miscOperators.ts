@@ -14,7 +14,26 @@ function setNested(obj: Record<string, unknown>, path: string, value: unknown): 
   cur[parts[parts.length - 1]!] = value
 }
 
-// ──────────────────────────── 帧切换 ────────────────────────────
+// ──────────────────────────── 帧切换（P10 #261：改走内核命令） ────────────────────────────
+//
+// ## 本组 operator 的退役改造（B5 #8 `frame-sequence-as-animation`；R-WK-03 明列）
+//
+// 旧实现**直接写** `Main` 上的两个 Vue Ref：
+//
+// ```ts
+// exec(ctx, _props) { ctx.main.currentFrameIndex.value = … }          // 独立权威
+// exec(ctx)         { ctx.main.framesPlaybackIsPlaying.value = !… }   // 驱动 setTimeout 自续链
+// ```
+//
+// 那是 #249 §2.1 禁止的"旁路写入"：写的是权威本身，且**绕过**唯一写通路
+// （`reduceCommand`），于是 A03「所有权威变化只在更新阶段」与
+// A04「相同输入可重放」都不成立（重放日志里不会有这次写入）。
+//
+// 现在它们提交**命令**：帧下标由 `EditContext.time` 派生（`seekFrame` 定位时间），
+// 播放开关归 `EditContext.playing`（`setPlaying`）。于是：
+//  - operator 只是"命令的 UI 入口"，不再持有权威；
+//  - 两个 Area 读同一份时间/播放（A05）；
+//  - 重放日志里能看到这些变化。
 
 export const SetFrameIndexOperator: OperatorType = {
   id: 'OPERATOR_SET_FRAME_INDEX',
@@ -28,7 +47,8 @@ export const SetFrameIndexOperator: OperatorType = {
   exec(ctx, _props) {
     const index = _props.index as number
     const i = Math.floor(index)
-    ctx.main.currentFrameIndex.value = Number.isFinite(i) && i >= 0 ? i : 0
+    // 经内核会话定位时间（帧下标随之派生）。非法值夹到 0，与旧行为一致。
+    ctx.requireKernelSession().seekFrame(Number.isFinite(i) && i >= 0 ? i : 0)
   },
 }
 
@@ -40,7 +60,9 @@ export const ToggleFramePlaybackOperator: OperatorType = {
     return doc !== null && doc.frameCount > 1
   },
   exec(ctx) {
-    ctx.main.framesPlaybackIsPlaying.value = !ctx.main.framesPlaybackIsPlaying.value
+    // 播放状态归 `EditContext`（R-WK-03）⇒ 读当前值再翻转，经命令写回。
+    const kernel = ctx.requireKernelSession()
+    kernel.setPlaying(!kernel.playback().playing)
   },
 }
 
@@ -52,7 +74,21 @@ export const SetFramePlaybackOperator: OperatorType = {
     return doc !== null && doc.frameCount > 1
   },
   exec(ctx, props) {
-    ctx.main.framesPlaybackIsPlaying.value = Boolean(props.playing)
+    ctx.requireKernelSession().setPlaying(Boolean(props.playing))
+  },
+}
+
+export const SetFramePlaybackRateOperator: OperatorType = {
+  id: 'OPERATOR_SET_FRAME_PLAYBACK_RATE',
+  label: '设置帧播放倍率',
+  description: '设置常量播放倍率（1 = 原速；0 = 暂停推进但保留播放状态）',
+  poll(ctx) {
+    return ctx.getDoc().value !== null
+  },
+  exec(ctx, props) {
+    const rate = Number(props.rate)
+    if (!Number.isFinite(rate) || rate < 0) return
+    ctx.requireKernelSession().setPlaybackRate(rate)
   },
 }
 
@@ -168,7 +204,8 @@ export const SetWorkspaceModeOperator: OperatorType = {
     // 仅设置抽屉手动切换时清空场景；加载管线在写入文档后切模式，不可清 doc
     if (props.resetDocument === true) {
       ctx.main.replaceDoc(null)
-      ctx.main.currentFrameIndex.value = 0
+      // 帧归零现在是"定位时间"（帧下标是派生值）—— 换文档时由宿主显式发出。
+      ctx.requireKernelSession().seekFrame(0)
       ctx.getLocalFileName().value = null
     }
     ctx.getWorkspaceMode().value = mode

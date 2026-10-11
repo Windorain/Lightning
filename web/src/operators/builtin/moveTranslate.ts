@@ -298,7 +298,7 @@ export const MoveOperator: OperatorType = {
 
         if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
           const doc = ctx.getDoc().value
-          const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
+          const rf = doc?.frame(ctx.getFrameIndex())
           const grid = rf?.grid
           if (grid) {
             const moves = s._initialPositions.map(initPos => ({

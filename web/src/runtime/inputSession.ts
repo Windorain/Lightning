@@ -169,6 +169,14 @@ export interface InputSessionOptions {
   readonly areaHotkeys?: readonly HotkeyBinding[]
   readonly appHotkeys?: readonly HotkeyBinding[]
   readonly traceLimit?: number
+  /**
+   * **当前编辑上下文 id**（装配层注入；P10 #261）。
+   *
+   * 缺省 `null` = 不注入 ⇒ 需要 `contextId` 的命令（`edit.undo`/`edit.redo`/
+   * `tool.beginInteraction`…）会以 `missingParam` 被**显式拒绝**（不是静默失败）。
+   * 装配层应在会话建立时给出（见 `InputSession.setActiveContext`）。
+   */
+  readonly contextId?: string
 }
 
 export interface InputSession {
@@ -178,6 +186,18 @@ export interface InputSession {
   setActiveRegion(regionId: string | null): void
   setHotkeys(area: readonly HotkeyBinding[], app: readonly HotkeyBinding[]): void
   setCapabilities(source: () => readonly string[]): void
+  /**
+   * 设置**当前编辑上下文 id**（换文档/换工作区时由装配层调用）。
+   *
+   * 它只影响"需要 `contextId` 的命令能否解析"这一件事 —— 不写任何领域状态。
+   */
+  setActiveContext(contextId: string | null): void
+  /**
+   * 按命令 ID 分发一次（菜单/工具栏等**显式 UI 入口**；与键盘事件同一条路径）。
+   *
+   * 见实现处的说明：它不是第二条写通路 —— 它复用同一个 `dispatch`。
+   */
+  invokeCommand(commandId: string, params?: Readonly<Record<string, ParamValue>>): DispatchOutcome | null
   openModal(scope: { scopeId: string; blocksBackground?: boolean; confirmOnEnter?: boolean; textControlIds?: readonly string[]; focusId?: string | null }): void
   closeModal(scopeId: string): void
   bindControl(binding: ControlBinding): void
@@ -259,17 +279,78 @@ export function createInputSession(options: InputSessionOptions): InputSession {
     return nextTok++
   }
 
+  /**
+   * **当前编辑上下文 id**（P10 #261 补齐 P7→P10 的接线缺口）。
+   *
+   * ## 为什么需要它（一处真实的功能缺口，不是便利）
+   *
+   * `resolveIntent` 对 `edit.undo`/`edit.redo` 要求 `params.contextId`；而
+   * `WORKBENCH_APP_HOTKEYS` 的两条绑定**没有** params，快捷键路由
+   * （`domain/input` 第 5 级）也不注入它。实测（本批探针）：
+   *
+   * ```
+   * resolveIntent({ commandId: 'edit.undo', params: {} }, …)
+   *   → InvalidValue{ reason: 'missingParam', param: 'contextId' }
+   * ```
+   *
+   * 也就是说 **Ctrl+Z 撤销在工作台里从未真正生效**（它被解析层拒绝，
+   * 表现为"按了没反应"）。P7 的注释把这件事记为"P10 接入多文档后改为按活动
+   * 上下文解析"——本批正是那个接入点，故在此补齐。
+   *
+   * ## 为什么由**会话**注入而不是让每个绑定自己写 params
+   *
+   * 绑定的 params 是**配置**（键位表），而"当前上下文是哪个"是**运行期事实**
+   * （换文档/换工作区就变）。写进配置表会让"Ctrl+Z 绑到哪个上下文"冻结在
+   * 装配时刻 —— 那正是 #249 §19.1「可用性与业务执行分离」要避免的形态
+   * （配置里出现运行期状态）。
+   *
+   * 注入**只补缺**：绑定自己写了 `contextId` 时以它为准（那是显式意图）。
+   */
+  let activeContextId: string | null = options.contextId ?? null
+
+  function withActiveContext(intent: CommandIntent): CommandIntent {
+    if (activeContextId === null) return intent
+    if (intent.params.contextId !== undefined) return intent
+    return { commandId: intent.commandId, params: { ...intent.params, contextId: activeContextId } }
+  }
+
+  /**
+   * 按**命令 ID** 分发一次（供菜单/工具栏一类的**显式 UI 入口**）。
+   *
+   * ## 为什么需要它，以及它为什么不是第二条写通路
+   *
+   * 菜单项与快捷键必须是**同一个命令**（#249 §19.1 明文：旧实现里
+   * 快捷键用 `'undo'`、菜单用 `'OPERATOR_UNDO'`，同一个命令三个名字，
+   * 无法做命令搜索、也无法审计"谁还能触发撤销"）。
+   *
+   * 本方法走的是**与键盘事件完全相同**的那条路径：同一个 `dispatch` →
+   * 同一个 `resolveIntent` → 同一个 `dispatchIntent` → 同一个 `CommandSink`。
+   * 它唯一多做的事是分配一个 token（UI 点击没有 DOM 事件 token）。
+   * 于是"菜单与快捷键结论一致"不是靠两处各写一遍，而是因为**只有一条路**。
+   *
+   * 可用性也走同一条查询（`dispatchIntent` 内部经
+   * `evaluateCommandAvailability`）⇒ 菜单不会显示一个点了没反应的项。
+   */
+  function invokeCommand(commandId: string, params: Readonly<Record<string, ParamValue>> = {}): DispatchOutcome | null {
+    const token = nextToken()
+    return dispatch({ commandId, params }, token)
+  }
+
   function dispatch(intent: CommandIntent | null, eventToken: number): DispatchOutcome | null {
     if (intent === null) return null
+    // 补注入当前上下文（只补缺；见 `withActiveContext` 的说明）。
+    // **唯一**注入点：键盘、指针、菜单命令三条入口都经本函数 ⇒
+    // "哪些命令拿到 contextId"不可能因入口不同而不同。
+    const filled = withActiveContext(intent)
     // `local.*` 是**旧 operator / UI 切换**的转发项，不经 `application/inputCommands`
     // 的领域映射（它们不写文档）。直接交给局部动作处理器；无人认领即记录（不静默）。
-    if (isLocalCommandId(intent.commandId)) {
-      const handled = localActionHandler !== null && localActionHandler(intent.commandId, intent.params)
-      if (!handled) noteUnhandled(intent.commandId, eventToken)
-      recordDispatchTrace(intent.commandId, 'local', eventToken, null)
-      return Object.freeze({ status: 'local', commandId: intent.commandId, params: intent.params, ledger })
+    if (isLocalCommandId(filled.commandId)) {
+      const handled = localActionHandler !== null && localActionHandler(filled.commandId, filled.params)
+      if (!handled) noteUnhandled(filled.commandId, eventToken)
+      recordDispatchTrace(filled.commandId, 'local', eventToken, null)
+      return Object.freeze({ status: 'local', commandId: filled.commandId, params: filled.params, ledger })
     }
-    const outcome = dispatchIntent(sink, ledger, eventToken, intent, bindings, { capabilities: capabilitySource() })
+    const outcome = dispatchIntent(sink, ledger, eventToken, filled, bindings, { capabilities: capabilitySource() })
     ledger = outcome.ledger
     // 局部动作（`local`）**不产生领域命令**，但要交给平台动作处理器执行
     // （例如 Escape → 关闭弹窗）。未认领的动作记入诊断而不是静默丢弃。
@@ -278,7 +359,7 @@ export function createInputSession(options: InputSessionOptions): InputSession {
       if (!handled) noteUnhandled(outcome.commandId, eventToken)
     }
     recordDispatchTrace(
-      intent.commandId,
+      filled.commandId,
       outcome.status,
       eventToken,
       outcome.status === 'rejected' ? outcome.error : null,
@@ -642,6 +723,10 @@ export function createInputSession(options: InputSessionOptions): InputSession {
     },
     setLocalActionHandler(handler) {
       localActionHandler = handler
+    },
+    invokeCommand,
+    setActiveContext(contextId) {
+      activeContextId = contextId
     },
     get unhandledLocalActions() {
       return Object.freeze([...unhandledLocalActions])

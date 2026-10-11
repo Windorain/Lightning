@@ -101,11 +101,49 @@ export function createWorkbenchPropertyRegistry(): { registry: PropertyRegistry;
   return { registry, errors }
 }
 
-/** 读运行时版本（`documentVersion` 用结构纪元 + 帧索引的组合，内容版本用 `structEpoch`）。 */
+/**
+ * 读运行时版本（旧文档桥的版本映射；见 `composition/seams.ts` 的
+ * `kernel-property-write-dual-track` 接缝）。
+ *
+ * ## P10 #261 修正：`contentVersion` **不再**取帧下标
+ *
+ * 旧实现是：
+ *
+ * ```ts
+ * contentVersion: ctx.getCurrentFrameIndex().value   // ← 帧下标当内容版本
+ * ```
+ *
+ * 那是**语义错误**，且在本批之前不可见：帧下标当时是一个"只有显式换帧才变"
+ * 的独立权威，于是它恰好表现为一个粗粒度的内容计数器。本批把帧下标改为
+ * 由 `EditContext.time` **派生**之后，这个错误立刻显形 ——
+ * **播放会让 `contentVersion` 每帧都变**，于是：
+ *  - `isDirty` 判"内容与保存基线不同" ⇒ 播放把文档标脏（违反 #249 §7）；
+ *  - `pushHistory` 的 `sameContent` 判据被播放推进 ⇒ 产生幽灵历史（违反 A06）。
+ *
+ * ⇒ 改用 `contentRefreshTick`：它是**内容确实变了**的唯一信号
+ * （`Main.replaceDoc` 与 `Main.requestContentRefresh` 都 bump 它，
+ * 而播放**不**碰它）。于是"播放不弄脏文档"重新成立。
+ *
+ * ## 这是**有损**映射，且如实登记（不假装它等价于内核版本）
+ *
+ * 内核的 `Version` 要求 `documentVersion` 单调推进、`contentVersion` 是
+ * **内容摘要**（用于与保存基线比较相等）。本函数两者都取同一个粗粒度计数器，
+ * 因此：
+ *  - ✅ "内容变 ⇒ 版本变"成立（该计数器只在内容变化时变）；
+ *  - ❌ "内容回到已提交状态 ⇒ contentVersion 相等"**不**成立
+ *    （计数器只增不减，撤销回原内容后仍不相等）。
+ *
+ * 后者是这条接缝的真实代价：它由接缝的退出（工作台文档迁到内核
+ * `Document`，届时版本由 `domain/document#withContent` 的**内容身份**给出）
+ * 一并消除。在那之前，`contentVersion` 在这条旧桥上只是"变过没有"的标记，
+ * 而**不是**内容身份 —— 本注释是这一事实的唯一登记点，避免下游误以为
+ * 它可以用来判"内容是否回到基线"。
+ */
 export function versionOf(ctx: Context): Version {
+  const tick = ctx.getContentRefreshTick().value
   return {
-    documentVersion: ctx.getContentRefreshTick().value,
-    contentVersion: ctx.getCurrentFrameIndex().value,
+    documentVersion: tick,
+    contentVersion: tick,
   }
 }
 
@@ -524,7 +562,7 @@ export function submitPropertyWrite(
   // 文档内容变化 ⇒ 经具名写回路径（`replaceDoc` 会 bump 结构纪元，触发重绘）。
   const nextDoc = transition.candidate.document
   if (nextDoc !== state.document) {
-    ctx.main.replaceDoc(nextDoc, { resetFrameIndex: false })
+    ctx.main.replaceDoc(nextDoc)
   }
   applyShellState(ctx, state, transition.candidate)
   return transition.outcome

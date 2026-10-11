@@ -26,15 +26,22 @@ export interface DRWDeps {
   docRef: Ref<RuntimeDocument | null>
   /** 内容重读请求（原 `structEpochRef`；语义见 `drwMeshPipeline` 文件头） */
   contentRefreshTickRef: Ref<number>
-  currentFrameIndex: Ref<number>
+  /**
+   * 世界帧下标（P10 #261：**派生**值的只读 getter，不再是 `Ref`）。
+   *
+   * 见 `DrwMeshPipelineDeps.worldFrameIndex` 的说明：帧下标由
+   * `EditContext.time` 派生，本层只能读。
+   */
+  worldFrameIndex: () => number
   layerWorldY: Ref<number>
-  framesPlaybackIsPlaying: Ref<boolean>
   structureDefinition: ShallowRef<StructureDefinition | null>
   mainMeshGroup: ShallowRef<THREE.Group | null>
   blockIconCacheOptions?: { sizePx?: number; orthoHalf?: number }
   initialWorldFrameIndex?: number
-  setFrameIndex?: (index: number) => void | Promise<void>
-  setFramesPlayback?: (playing: boolean) => void | Promise<void>
+  /** 换帧（经 `setTime` 命令定位时间；见 `DrwMeshPipelineDeps.seekFrame`）。 */
+  seekFrame?: (index: number) => void | Promise<void>
+  /** 时间是否在前进（呈现侧观测；不驱动任何调度）。 */
+  isPlaying?: () => boolean
   showAnnotationsRef?: Ref<boolean>
   worldAnnotationGroupRef?: ShallowRef<THREE.Group | null>
   toolsOverlayGroupRef?: ShallowRef<THREE.Group | null>
@@ -80,14 +87,13 @@ export class DRW {
       structureDefinition: deps.structureDefinition,
       mainMeshGroup: deps.mainMeshGroup,
       sceneRef: this.sceneRef,
-      worldFrameIndex: deps.currentFrameIndex,
+      worldFrameIndex: deps.worldFrameIndex,
       layerWorldY: deps.layerWorldY,
-      framesPlaybackIsPlaying: deps.framesPlaybackIsPlaying,
       blockIconCacheOptions: deps.blockIconCacheOptions ?? {},
       initialWorldFrameIndex: deps.initialWorldFrameIndex,
       contentRefreshTickRef: deps.contentRefreshTickRef,
-      setFrameIndex: deps.setFrameIndex,
-      setFramesPlayback: deps.setFramesPlayback,
+      seekFrame: deps.seekFrame,
+      isPlaying: deps.isPlaying,
       showAnnotationsRef: deps.showAnnotationsRef,
       worldAnnotationGroupRef: deps.worldAnnotationGroupRef,
       toolsOverlayGroupRef: deps.toolsOverlayGroupRef,
@@ -117,6 +123,26 @@ export class DRW {
 
   rebuildContentMesh(): Promise<void> {
     return this._mesh.rebuildContentMesh()
+  }
+
+  /**
+   * 请求内核换帧（**唯一**换帧入口；经 `setTime` 命令）。
+   *
+   * 旧形态是 `setFrameIndex(index)` 直接写 `Main.currentFrameIndex` ——
+   * 一个与时间无关的独立权威。现在它定位时间，帧下标随之派生。
+   */
+  setCurrentWorldFrame(index: number): Promise<void> {
+    return this._mesh.setCurrentWorldFrame(index)
+  }
+
+  /**
+   * 呈现给定帧（宿主的帧时钟在观测到帧下标变化时调用）。
+   *
+   * 与 `setCurrentWorldFrame` 的分工见 `DrwMeshPipeline` 的接口说明：
+   * 前者是"请求换帧"（写面），本方法是"把某一帧画出来"（呈现）。
+   */
+  presentWorldFrame(index: number): Promise<void> {
+    return this._mesh.presentWorldFrame(index)
   }
 
   /**

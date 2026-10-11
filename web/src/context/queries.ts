@@ -58,7 +58,7 @@ function scenePickBase(ctx: Context, regionId?: string): Omit<ScenePickParams, '
 
 function gridHeight(ctx: Context): number {
   const doc = ctx.getDoc().value
-  const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc?.frame(ctx.getFrameIndex())
   return rf?.grid?.height ?? 0
 }
 
@@ -110,7 +110,7 @@ export interface PartPick {
 export function pickPartForScenePick(ctx: Context, picked: ScenePickBlock): PartPick | null {
   if (!picked.point) return null
   const doc = ctx.getDoc().value
-  const rf = doc?.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc?.frame(ctx.getFrameIndex())
   const grid = rf?.grid
   if (!grid || grid.height <= 0) return null
   const worldY = structureRowToWorldY(picked.row, grid.height)
@@ -147,7 +147,7 @@ export function pickAll(ctx: Context, event: PointerEvent, regionId?: string) {
 export function getCurrentFrame(ctx: Context): Frame | null {
   const doc = ctx.getDoc().value
   if (!doc) return null
-  const idx = ctx.getCurrentFrameIndex().value ?? 0
+  const idx = ctx.getFrameIndex()
   const rf = doc.frame(idx)
   if (!rf) return null
   return { index: rf.index, label: rf.label }
@@ -157,7 +157,7 @@ export function getCurrentFrame(ctx: Context): Frame | null {
 export function getFrameBlocks(ctx: Context): BlockRef[] {
   const doc = ctx.getDoc().value
   if (!doc) return []
-  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc.frame(ctx.getFrameIndex())
   if (!rf?.grid) return []
   return rf.grid.blocks().map(({ pos, block }) => ({
     pos: { x: pos.x, y: pos.y, z: pos.z },
@@ -179,7 +179,7 @@ export function gridCenterWorld(
 ): { x: number; y: number; z: number } | null {
   const doc = ctx.getDoc().value
   if (!doc) return null
-  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc.frame(ctx.getFrameIndex())
   if (!rf?.grid) return null
   return rf.grid.centerWorld(pos)
 }
@@ -195,7 +195,7 @@ export function gridCenterWorld(
  */
 export function currentFrameKey(ctx: Context): number {
   const doc = ctx.getDoc().value
-  const i = ctx.getCurrentFrameIndex().value ?? 0
+  const i = ctx.getFrameIndex()
   return doc?.frame(i)?.index ?? i
 }
 
@@ -242,7 +242,7 @@ export function getMaterialUsageCounts(ctx: Context): Record<string, number> {
   const counts: Record<string, number> = {}
   const doc = ctx.getDoc().value
   if (!doc) return counts
-  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc.frame(ctx.getFrameIndex())
   if (!rf?.grid) return counts
   rf.grid.forEach((_pos, block) => {
     if (block.paletteIndex !== undefined) {
@@ -258,7 +258,7 @@ export function getBlockTypeStats(ctx: Context): Record<string, BlockTypeStat> {
   const stats: Record<string, BlockTypeStat> = {}
   const doc = ctx.getDoc().value
   if (!doc) return stats
-  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc.frame(ctx.getFrameIndex())
   if (!rf?.grid) return stats
   rf.grid.forEach((_pos, block) => {
     const id = `minecraft:${block.name}:${block.meta}`
@@ -279,7 +279,7 @@ export function getBlockPaletteEntry(
 ) {
   const doc = ctx.getDoc().value
   if (!doc) return null
-  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc.frame(ctx.getFrameIndex())
   if (!rf?.grid) return null
   const block = rf.grid.at(pos)
   if (!block || block.paletteIndex === undefined) return null
@@ -294,7 +294,7 @@ export function getBlockGeometry(
 ) {
   const doc = ctx.getDoc().value
   if (!doc) return null
-  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc.frame(ctx.getFrameIndex())
   if (!rf?.grid) return null
   const block = rf.grid.at(pos)
   if (!block || block.paletteIndex === undefined) return null
@@ -315,7 +315,7 @@ export function getPartsAt(
 ): readonly PartRecord[] | null {
   const doc = ctx.getDoc().value
   if (!doc) return null
-  const rf = doc.frame(ctx.getCurrentFrameIndex().value ?? 0)
+  const rf = doc.frame(ctx.getFrameIndex())
   if (!rf?.grid) return null
   return rf.grid.partsAt(pos)
 }

@@ -35,12 +35,26 @@ export function mount(
     return
   }
 
-  // 主题：options.ui.theme > html[data-nei-theme] > 默认 'dark'
-  const theme =
-    options.ui?.theme ??
-    (document.documentElement.dataset.neiTheme as 'light' | 'dark' | undefined) ??
-    'dark'
-  document.documentElement.dataset.neiTheme = theme
+  // **主题不再写全局**（P10 #261，收口 F1；#259 A33 的同一政策）。
+  //
+  // 旧实现是：
+  //   const theme = options.ui?.theme ?? document.documentElement.dataset.neiTheme ?? 'dark'
+  //   document.documentElement.dataset.neiTheme = theme      // ← 挂载期写全局
+  //
+  // 那有三个问题，第三个是同页多实例才会暴露的：
+  //  1. **挂载期副作用**：`mount()` 本该只挂组件，却改了文档根属性；
+  //  2. **写的是全局**：`data-nei-theme` 在 `documentElement` 上，全页一份；
+  //  3. **同页两实例互相覆盖**：第二个 `mount()` 用**自己的** theme 覆盖第一个，
+  //     于是先挂的那个被迫换了主题（F1 的原始描述）。
+  //
+  // 现在的落点：`EmbedViewport` 的**实例根元素**上写 `data-lk-theme`
+  // （`ctx.getShellSettings().scopeAttrs`）。自定义属性沿 DOM 继承，
+  // 故每个实例解析出自己的变量值，互不影响。
+  //
+  // 主题来源优先级不变（`options.ui.theme` > 实例偏好 > 文档根的既有属性 > `dark`）：
+  // `options.ui.theme` 经 `EmbedRoot` → `buildEmbedSettingsFromBootstrap` 进实例设置；
+  // 文档根属性的读取在 `shellSettings.ts` 的迁移路径里（那里**只读不写**）。
+  // ⇒ 读取是"继承宿主页面的意图"，写入是"本实例的解析结果"；读取不产生覆盖。
 
   const mountEl = el as HTMLElement
   ensureMobileFitHost(mountEl)

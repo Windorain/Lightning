@@ -99,12 +99,24 @@ export async function waitForRenderedGrid(page: Page, timeout = 60_000): Promise
   )
 }
 
-/** 等到当前帧索引为 `index`（公开观测点 `ctx.getCurrentFrameIndex()`）。 */
+/**
+ * 等到当前帧索引为 `index`。
+ *
+ * ## P10 #261：观测点从 `ctx.getCurrentFrameIndex().value` 改为 `ctx.getFrameIndex()`
+ *
+ * 旧观测点返回一个**可写** `Ref<number>`（`Main.currentFrameIndex`），本批已删除。
+ * 新观测点是**只读派生**访问器（`Context.getFrameIndex()`）—— 它由
+ * `EditContext.time` 经离散阶跃采样算出。
+ *
+ * 对 e2e 的意义是**判据更强了**：旧观测点只能证明"某个 Ref 被写成了 i"
+ * （写入者可能是 operator，也可能不是播放）；新观测点证明的是
+ * "**内核的时间**落在第 i 帧上"。后者才是 T2.6「播放推进」真正要断言的事。
+ */
 export async function waitForFrameIndex(page: Page, index: number, timeout = 30_000): Promise<void> {
   await page.waitForFunction(
     (i) => {
       const ctx = (window as any).__vm__
-      return !!ctx && ctx.getCurrentFrameIndex().value === i
+      return !!ctx && ctx.getFrameIndex() === i
     },
     index,
     { timeout },
@@ -729,7 +741,7 @@ export async function readViewportState(page: Page): Promise<ViewportObservation
   return await page.evaluate(() => {
     const ctx = (window as any).__vm__
     return {
-      frameIndex: ctx.getCurrentFrameIndex().value,
+      frameIndex: ctx.getFrameIndex(),
       layerWorldY: ctx.getLayerWorldY().value,
       docFrameCount: ctx.getDoc().value?.frameCount ?? 0,
     }

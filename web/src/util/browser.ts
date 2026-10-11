@@ -2,8 +2,39 @@
  * 浏览器专用下载/剪贴板工具。仅在浏览器环境可用。
  */
 
+/**
+ * **谁写文件**：尾换行口径（P10 #261 收口 P9 G-2）。
+ *
+ * ## 问题（P9 #260 登记的原话）
+ *
+ * > 尾换行口径：`util/browser.ts:6` 的 `downloadJson` 补 `\n`，mod 侧不补
+ * > ⇒ B-1「Plain 逐字节」在两个写出路径上口径不同。**需 P10 明确"谁写文件"**。
+ *
+ * ## 裁决：两条路径**各自正确**，因为它们写的是不同的东西
+ *
+ * | 写出路径 | 谁写 | 尾换行 | 为什么 |
+ * |---|---|---|---|
+ * | **命令通道产物** | mod 侧 `ExportSceneWriter.serialize(raw=true)` | **无** | B-1 的逐字节判据对象是**命令通道产物**；mod 侧是权威写出方，浏览器不能改写它的字节 |
+ * | **浏览器下载** | 本文件的 `downloadJson` | **有** | 它是**人类下载**（另存为 .json 后用编辑器打开）：无尾换行会让 POSIX 工具把"无换行结尾"当异常，且 diff 会显示 `\ No newline at end of file` |
+ *
+ * 两者**不冲突**：判据只约束命令通道产物（`PLAIN_SERIALIZATION.trailingNewline: false`
+ * 是那条路径的常量，见 `adapters/files/plainCodec`）。浏览器下载**不是**那条路径，
+ * 它的产物**不参与** B-1 逐字节对账。
+ *
+ * ## 为什么这个区分必须**显式**（而不是"各写各的，看起来也没错"）
+ *
+ * 因为它此前是**隐含**的：两条路径都产出 `.json`，谁也没写"我这条要不要尾换行、
+ * 为什么"。于是任何一方改动（例如为了过某个 lint 去掉 `\n`）都会**静默**改变
+ * 一条路径的字节口径，而没人知道它是否属于 B-1 的判据面。
+ * ⇒ 本常量把"浏览器下载写尾换行"变成**声明**，并由测试钉住
+ * （见 `util/__tests__/downloadJsonNewline.test.ts`）。
+ */
+export const BROWSER_DOWNLOAD_TRAILING_NEWLINE = true
+
 export function downloadJson(baseName: string, obj: unknown, pretty?: boolean): void {
-  const text = `${pretty ? JSON.stringify(obj, null, 2) : JSON.stringify(obj)}\n`
+  const body = pretty ? JSON.stringify(obj, null, 2) : JSON.stringify(obj)
+  // 见 `BROWSER_DOWNLOAD_TRAILING_NEWLINE`：浏览器下载路径**写**尾换行。
+  const text = BROWSER_DOWNLOAD_TRAILING_NEWLINE ? `${body}\n` : body
   downloadBlob(`${baseName}.json`, new Blob([text], { type: 'application/json' }))
 }
 

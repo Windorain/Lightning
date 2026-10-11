@@ -18,6 +18,7 @@ import { autoConnectSde } from '@/runtime/host/workbenchBoot'
 import { bootWikiWorkbench } from '@/runtime/host/wikiWorkbenchBoot'
 import { CAPABILITY } from '@/composition/modules'
 import type { ShellRuntime } from '@/composition/shell'
+import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
 import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 import {
   WORKBENCH_PANELS,
@@ -119,7 +120,23 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   }
 
   // 能力与宿主端口**显式**从装配结果传入 Context（旧实现经模块级全局反查）
-  const ctx = new Context(main, wm, logCenter, viewports, screen, services, shell.assembly.capabilities, shell.pageKeyboard)
+  // 内核会话（#261 / R-WK-03）：宿主创建 Editor，能力来自同一装配结果。
+  const kernel = createKernelSession({
+    documentId: KERNEL_DOCUMENT_ID,
+    contextId: KERNEL_CONTEXT_ID,
+    capabilities: shell.assembly.capabilities,
+  })
+  const ctx = new Context(
+    main,
+    wm,
+    logCenter,
+    viewports,
+    screen,
+    services,
+    shell.assembly.capabilities,
+    shell.pageKeyboard,
+    kernel,
+  )
   main.bindOperatorFacade(() => ctx)
 
   const host = new WorkbenchHost(main, ctx, wm, screen, services)

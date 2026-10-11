@@ -188,6 +188,114 @@ export interface ContextSummary {
   readonly activeTool: string | null
 }
 
+/**
+ * **播放状态读面**（R-WK-03 内核缺口补齐）。
+ *
+ * ## 为什么是独立查询组，而不是塞进 `ContextSummary`
+ *
+ * `ContextSummary` 的语义是"这个上下文当前长什么样"（值快照）；
+ * 播放读面要回答的是"时间在不在走、以什么倍率走、走完这一段之后到哪"
+ * —— 后者是**驱动者**（宿主帧编排）的输入，不是呈现的展示字段。
+ * 混进 `ContextSummary` 会让每个展示型消费者都被迫携带播放语义。
+ *
+ * ## `playing` 与 `time` 的一致性
+ *
+ * `time` 与 `playing` 都从**同一个** `EditContext` 读，故不存在
+ * "读到 playing=true 却配一个旧时间"的组合（`captureReadView` 闭包的是
+ * 同一份不可变状态）。
+ */
+export interface PlaybackQuery {
+  readonly playing: boolean
+  readonly rate: number
+  readonly time: TimeValue
+}
+
+export function queryPlayback(state: ApplicationState, contextId: string): Result<PlaybackQuery> {
+  const ctx = ctxOf(state, contextId)
+  if (!ctx) return err(missingTarget({ contextId }))
+  return ok({ playing: ctx.playing, rate: ctx.playbackRate, time: ctx.time })
+}
+
+/**
+ * **相机读面**（接缝 B；R-WK-03 明列的 `ReadView` 缺口）。
+ *
+ * ## 为什么相机是"文档相机"而不是"观察视角"
+ *
+ * #249 §3.1 把两者分开：**相机参数**（投影/fov/裁剪面）属**文档**，
+ * **观察视角**（yaw/elevation/distance）属 **3D 编辑器实例**（各实例独立）。
+ * `ReadView` 是**文档与上下文**的读面 —— 它没有、也不该有"哪个视口在看"
+ * 这个参数。故本查询只回答"文档里这个相机对象声明了什么"。
+ *
+ * 观察视角的读面在接线层（`runtime/viewportCamera`），不在这里 ——
+ * 把它加进来会让"两视口机位独立"无法表达（同一 `ReadView` 只有一个机位）。
+ *
+ * ## 为什么现在补它（P10 的删除前置）
+ *
+ * `raw-authority-object` 接缝的消费者里有 embed 初始视角一族
+ * （`context/captureEmbedInitialView.ts`、`operators/builtin/embedInitialViewOperators.ts`），
+ * 它们要读"文档里有没有一个相机、它的参数是什么"。缺这条查询时，
+ * 迁移只能伪造一个不存在的读面 —— 那正是 #1 负对照要判红的形态。
+ * 补齐后这些消费者才有真实的新读面可依赖。
+ */
+export interface CameraProjection {
+  readonly objectId: string
+  readonly name: string
+  readonly projection: 'perspective' | 'orthographic'
+  readonly fov: number
+  readonly clipStart: number
+  readonly clipEnd: number
+}
+
+export function queryCamera(state: ApplicationState, documentId: string, objectId: string): Result<CameraProjection> {
+  const doc = docOf(state, documentId)
+  if (!doc) return err(missingTarget({ documentId }))
+  const obj = findObject(doc.scene, objectId)
+  if (!obj) return err(missingTarget({ objectId }))
+  const data = findObjectData(doc.scene, obj.dataId)
+  if (!data || data.payload.kind !== 'camera') return err(missingTarget({ dataId: obj.dataId, objectId }))
+  const p = data.payload
+  return ok(
+    Object.freeze({
+      objectId: obj.id,
+      name: obj.name,
+      projection: p.projection,
+      fov: p.fov,
+      clipStart: p.clipStart,
+      clipEnd: p.clipEnd,
+    }),
+  )
+}
+
+/**
+ * 文档里的**相机对象**清单（稳定顺序）。
+ *
+ * 与 `objects.list()` 的关系：后者返回全部对象投影（含写权、变换），
+ * 本查询只回答"哪些对象是相机" —— embed 初始视角一族要的正是这件事，
+ * 让它们去 `objects.list()` 里逐条按 `type` 过滤会把"什么是相机"
+ * 这条判据复制到每个消费者（而判据必须只有一个来源）。
+ */
+export function queryCameras(state: ApplicationState, documentId: string): Result<readonly CameraProjection[]> {
+  const doc = docOf(state, documentId)
+  if (!doc) return err(missingTarget({ documentId }))
+  const out: CameraProjection[] = []
+  for (const obj of objectsInOrder(doc.scene)) {
+    const data = findObjectData(doc.scene, obj.dataId)
+    if (!data || data.payload.kind !== 'camera') continue
+    const p = data.payload
+    out.push(
+      Object.freeze({
+        objectId: obj.id,
+        name: obj.name,
+        projection: p.projection,
+        fov: p.fov,
+        clipStart: p.clipStart,
+        clipEnd: p.clipEnd,
+      }),
+    )
+  }
+  return ok(Object.freeze(out))
+}
+
 export function queryContext(state: ApplicationState, contextId: string): Result<ContextSummary> {
   const ctx = ctxOf(state, contextId)
   if (!ctx) return err(missingTarget({ contextId }))
@@ -503,6 +611,31 @@ export interface InteractionQueries {
   readonly effectiveProperty: (ref: PropertyRef) => Result<EffectivePropertyValue>
   readonly selection: () => Result<SelectionState>
   readonly context: () => Result<ContextSummary>
+  /**
+   * **播放状态**（R-WK-03 补齐的内核缺口；见 `PlaybackQuery`）。
+   *
+   * 归本组（而非 `workspace`）的理由：播放是**上下文**的从属事实
+   * （与 `context`/`selection`/`effectiveProperty` 同域），
+   * 而 `workspace` 组承载文档身份与保存状态。
+   */
+  readonly playback: () => Result<PlaybackQuery>
+}
+
+/**
+ * 文档相机查询组（接缝 B：`ReadView` 的相机读面）。
+ *
+ * ## 为什么相机单独成组而不是并进 `ObjectQueries`
+ *
+ * `ObjectQueries` 回答"有哪些对象、它是什么"（通用对象读面）；
+ * 相机读面回答的是**类型特定能力**（投影/fov/裁剪面）——
+ * #249 §13 第 1 条要求"统一对象身份与**类型特定能力**可演示"。
+ * 把类型特定字段摊进通用投影，等于让 `ObjectProjection` 变成
+ * "所有类型的字段并集"（那正是 A21 禁止的"核心为每个新类型加字段"）。
+ * 单独成组后，新增类型只需贡献自己的读面组，不动通用投影。
+ */
+export interface CameraQueries {
+  readonly list: () => Result<readonly CameraProjection[]>
+  readonly get: (objectId: string) => Result<CameraProjection>
 }
 
 /**
@@ -528,6 +661,13 @@ export interface ReadView {
   readonly properties: PropertyQueries
   readonly workspace: WorkspaceQueries
   readonly interaction: InteractionQueries
+  /**
+   * **类型特定能力读面：相机**（接缝 B）。
+   *
+   * 与 `interaction.playback` 一样，它是 P10 为退役 `raw-authority-object`
+   * 消费者而补的真实读面 —— 缺它时消费者只能伪造查询。
+   */
+  readonly cameras: CameraQueries
 }
 
 /**
@@ -565,6 +705,11 @@ export function captureReadView(state: ApplicationState, documentId: string, con
       effectiveProperty: (ref: PropertyRef) => queryEffectiveProperty(state, contextId, ref),
       selection: () => querySelection(state, contextId),
       context: () => queryContext(state, contextId),
+      playback: () => queryPlayback(state, contextId),
+    }),
+    cameras: Object.freeze({
+      list: () => queryCameras(state, documentId),
+      get: (objectId: string) => queryCamera(state, documentId, objectId),
     }),
   })
   return ok(view)

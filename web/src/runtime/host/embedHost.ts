@@ -20,6 +20,7 @@ import { HostBase } from '@/runtime/host'
 import { logCenter } from '@/logging/LogCenter'
 import { capabilitiesOf } from '@/composition/resolver'
 import type { ShellRuntime } from '@/composition/shell'
+import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
 
 export class EmbedHost extends HostBase {
   readonly log = logCenter
@@ -45,7 +46,13 @@ export function createEmbedHost(
 ): { host: EmbedHost; ctx: Context; shell: ShellRuntime } {
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
-  const wm = new WM(logCenter, { surface: 'embed' })
+  // 主题是**实例**设置（P10 #261 F1）：宿主指定的主题经这里进本实例，
+  // 落在实例根元素的 `data-lk-theme` 上 —— 不再写 `document.documentElement`
+  // （那会让同页两实例互相覆盖）。
+  const wm = new WM(logCenter, {
+    surface: 'embed',
+    ...(settings.theme === undefined ? {} : { initialTheme: settings.theme }),
+  })
 
   const screen = createEmbedScreenRoot(createToolSettings(), {
     initialLayerWorldY: settings.initialLayerWorldY,
@@ -71,7 +78,24 @@ export function createEmbedHost(
   parsers.register(StructureDataParser)
 
   const runtime = shell ?? { ...EMPTY_SHELL, profileId: 'embed' as const }
-  const ctx = new Context(main, wm, logCenter, viewports, screen, null, capabilitiesOf(runtime.assembly), runtime.pageKeyboard)
+  // 内核会话（#261 / R-WK-03）：嵌入外壳同样由宿主创建 Editor，
+  // 能力来自**嵌入 profile** 的装配结果（无内容编辑能力 ⇒ 运行时拒绝，A15）。
+  const kernel = createKernelSession({
+    documentId: KERNEL_DOCUMENT_ID,
+    contextId: KERNEL_CONTEXT_ID,
+    capabilities: capabilitiesOf(runtime.assembly),
+  })
+  const ctx = new Context(
+    main,
+    wm,
+    logCenter,
+    viewports,
+    screen,
+    null,
+    capabilitiesOf(runtime.assembly),
+    runtime.pageKeyboard,
+    kernel,
+  )
   main.bindOperatorFacade(() => ctx, true)
 
   for (const inputId of screen.wmInputRegionIds()) {

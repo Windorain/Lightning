@@ -180,7 +180,7 @@ function productionFiles(): string[] {
 describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
   const ENTRY_ID = 'per-viewport-channel-staging'
 
-  it('`per-viewport-channel-staging` 已按 `SeamRegistration` 形状登记（owner = P10/#261）', () => {
+  it('`per-viewport-channel-staging` 已按 `SeamRegistration` 形状登记（owner = P10b/#282，R-WK-04）', () => {
     const entry = seamById(ENTRY_ID)
     expect(entry, `P6 的开放接缝必须登记在 SEAMS 里（id=${ENTRY_ID}）`).toBeTruthy()
     if (!entry) return
@@ -191,10 +191,14 @@ describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
     expect(entry.oldTrack).toBeTruthy()
     expect(entry.blocker).toBeTruthy()
     expect(entry.exitCondition).toBeTruthy()
-    // 相位按 R-WK-03：目标批次是 #261（P10），不是 P6
-    expect(entry.owner.p).toBe('P10')
-    expect(entry.owner.issue).toBe(261)
-    expect(entry.owner.duty).toBe('集成闭环与交叉验收')
+    // ## 相位（R-WK-03 → **R-WK-04 修正**）
+    //
+    // R-WK-03 把目标批次从 P6 改为 #261（P10），理由是"删除前置条件是内核接线生产"。
+    // #261 完成了**时间/播放面**的接线，但实测发现本条的退出还多一个前置：
+    // **文档内容面**（视口渲染文档须是内核场景的派生）—— 而内核 `Document`
+    // 不承载 `frames`/`cellGrid`/`multiblock`。故 R-WK-04 把本条改归 **#282（P10b）**。
+    expect(entry.owner.p).toBe('P10b')
+    expect(entry.owner.issue).toBe(282)
     // 退出条件必须点名 `files` 里的文件（与 `boundary-scan` 同款判据）
     expect(entry.files.some((f) => entry.exitCondition.includes(f))).toBe(true)
   })
@@ -215,59 +219,91 @@ describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
     expect(fs.existsSync(path.join(SRC, 'application/evaluation.ts')), 'P4 的求值面已存在').toBe(true)
   })
 
-  it('阻塞方「内核未接线生产」**为真**（模块图级核验；见文件头诚实边界）', () => {
-    // 四条独立证据，全部是"模块图级无生产消费者"，不宣称运行期证明。
+  it('阻塞方「内核未接线生产」**已不成立** —— 接线已落地（#261），本条按门规更新', () => {
+    // ## 这条断言为什么从"阻塞为真"翻成"阻塞已解除"（R-WK-03 的退出条件）
+    //
+    // 本文件（P6 建立）原先断言四条"模块图级无生产消费者"作为阻塞证据：
+    // 零 `new Editor(`、零 `runtime/evaluation` 导入者、零 `advanceContextTime` 调用方、
+    // 生产入口零内核导入。那四条**当时为真**，本批（P10/#261）按 R-WK-03
+    // 「内核→生产接线是 #261 的核心内容」把它们逐条解除：
+    //
+    //  - `new Editor(` 出现在 `runtime/kernelSession.ts`（宿主侧会话）；
+    //  - 生产入口经装配层持有会话（`Context.kernel`）。
+    //
+    // 判据**没有放松**，只是方向翻转：原先防"假装接线了"，现在防"假装没接线"
+    // —— 后者会让 P11 拿着一份过期清单去核对已经不存在的阻塞。
+    // 故这里断言**接线确实存在**，并保留"恰好一处构造点"的唯一性。
     const files = productionFiles()
 
-    // ① 生产代码里没有 `new Editor(`（内核执行器零生产构造）
+    // ① 内核执行器**恰好**在会话层被构造（唯一构造点 ⇒ 不存在第二条执行路径）
     const editorCtor = files.filter((rel) => codeOf(rel).includes('new Editor('))
     expect(
       editorCtor,
-      `内核执行器不得已有生产构造者（若已有，说明接线完成、本条应重新评估）：${editorCtor.join(', ')}`,
-    ).toEqual([])
+      `内核执行器的构造点必须恰好是 runtime/kernelSession.ts（否则存在第二条执行路径）：${editorCtor.join(', ')}`,
+    ).toEqual(['runtime/kernelSession.ts'])
 
-    // ② `runtime/evaluation.ts`（P4 的求值接线）零导入者
-    const evalImporters = files.filter(
-      (rel) => rel !== 'runtime/evaluation.ts' && /from\s+['"]@\/runtime\/evaluation['"]/.test(codeOf(rel)),
-    )
-    expect(evalImporters, `runtime/evaluation 不得已有生产导入者：${evalImporters.join(', ')}`).toEqual([])
+    // ② 生产入口**确实**持有会话（Context 的内核会话是构造参数，由宿主传入）
+    expect(
+      codeOf('runtime/context.ts').includes('KernelSession'),
+      'Context 必须持有内核会话（否则接线只是"有个没人用的会话"）',
+    ).toBe(true)
+    expect(
+      codeOf('runtime/host/workbenchHost.ts').includes('createKernelSession'),
+      '工作台宿主必须创建内核会话',
+    ).toBe(true)
+    expect(
+      codeOf('runtime/host/embedHost.ts').includes('createKernelSession'),
+      '嵌入宿主必须创建内核会话',
+    ).toBe(true)
 
-    // ③ 没有任何生产调用方推进 EditContext 时间
+    // ③ 时间推进经**唯一写通路**（命令），不是宿主直接改状态
     const timeAdvancers = files.filter(
       (rel) => !['domain/editing.ts', 'domain/animation.ts'].includes(rel) && /advanceContextTime\s*\(/.test(codeOf(rel)),
     )
-    expect(timeAdvancers, `不得已有生产调用方推进上下文时间：${timeAdvancers.join(', ')}`).toEqual([])
-
-    // ④ 生产入口不直连内核实现（装配/接线层 composition、editors 除外）
-    const entryFiles = ['workbench/WorkbenchRoot.vue', 'dev/DevApp.vue', 'runtime/host/workbenchHost.ts']
-    const kernelImports: string[] = []
-    for (const rel of entryFiles) {
-      if (!fs.existsSync(path.join(SRC, rel))) continue
-      for (const m of codeOf(rel).matchAll(/from\s+['"](@\/[^'"]+)['"]/g)) {
-        const spec = m[1].replace('@/', '')
-        if (/^(domain|application)\//.test(spec) || /^runtime\/(execution|scheduling|effects|evaluation|lifecycle)\.ts$/.test(spec)) {
-          kernelImports.push(`${rel} → ${spec}`)
-        }
-      }
-    }
     expect(
-      kernelImports,
-      `生产入口不得已直连内核实现（接线归 #261）：\n${kernelImports.join('\n')}`,
+      timeAdvancers,
+      `不得有生产调用方直接调 advanceContextTime（时间推进必须经 advancePlayback 命令）：${timeAdvancers.join(', ')}`,
     ).toEqual([])
+    // 用 `codeText` 而不是 `codeOf`：命令 kind **就是**一个字符串字面量
+    // （`{ kind: 'advancePlayback', … }`），剥掉字符串就看不见它了 ——
+    // 这正是本文件文件头那张表里"有没有**出现**某字面量"该用哪把尺子的实例。
+    expect(
+      codeText('runtime/kernelSession.ts').includes("'advancePlayback'"),
+      '会话必须经 advancePlayback 命令注入时间（唯一写通路）',
+    ).toBe(true)
+
+    // ④ 内核**不自跑**：会话层不得出现自驱循环（帧时钟归装配层）
+    const kernelCode = codeOf('runtime/kernelSession.ts')
+    for (const forbidden of ['requestAnimationFrame', 'setTimeout', 'setInterval']) {
+      expect(
+        kernelCode.includes(forbidden),
+        `内核会话不得自持 ${forbidden}（A03：内核不驱动任何循环）`,
+      ).toBe(false)
+    }
   })
 
-  it('**反空洞真**：上述阻塞判据不是恒真 —— 注入构造点即被同一判据抓到', () => {
+  it('**反空洞真**：上述判据不是恒真 —— 注入构造点即被同一判据抓到', () => {
     // 与 ① 同一个判定式（`codeOf`，剥注释**与字符串**），只换事实来源。
     const fakeFile = 'runtime/host/probe.ts'
     const injected = 'export function boot() { const e = new Editor(); return e }'
     const hits = [fakeFile].filter((_rel, i) => [injected][i].includes('new Editor('))
     expect(hits, '注入的内核构造必须能被抓到').toEqual([fakeFile])
-    // 而真实生产文件里没有它（上一条已断言为空）——证明①不是恒真
-    expect(productionFiles().filter((rel) => codeOf(rel).includes('new Editor('))).toEqual([])
-    // 且**登记表自己的说明文字**（字符串里的 `new Editor(`）不得被误判为构造点
-    // —— 这正是首跑实测到的假红，`codeOf` 剥字符串后消失。
-    expect(codeOf('composition/seams.ts').includes('new Editor('), '文案里的提及不算构造点').toBe(false)
-    expect(codeText('composition/seams.ts').includes('new Editor('), '而原始文本里确实有这段说明（证明上面那条不是空转）').toBe(true)
+    // 唯一性判据的负对照：在**内存里**多一个构造点 ⇒ "恰好一处"必须判红。
+    // 刻意不读一个真实文件（那会变成 ENOENT 而不是判据失败）：判据的对象是
+    // "命中集合"，负对照只需证明集合变大时该断言会失败。
+    const withSecond = ['runtime/kernelSession.ts', '<injected>'].filter(
+      (rel) => rel === '<injected>' || codeOf(rel).includes('new Editor('),
+    )
+    expect(withSecond.length, '第二个构造点必须使"恰好一处"判红').toBeGreaterThan(1)
+    // 且**登记表自己的说明文字**（字符串/注释里的符号名）不得被误判为使用点
+    // —— 这正是首跑实测到的假红，`codeOf` 剥字符串与注释后消失。
+    //
+    // 锚点从 `new Editor(` 换成 `EditContext`：R-WK-04 后 `seams.ts` 的 blocker
+    // 改写为"文档内容面归 #282"，不再逐字提到 `new Editor(`。锚点必须选
+    // **当下确实存在**的一段说明，否则这条反空洞真自己会变成空转
+    // （实测：改写 blocker 后本条判红 —— 它正确地抓到了"锚点已失效"）。
+    expect(codeOf('composition/seams.ts').includes('EditContext'), '文案里的提及不算使用点').toBe(false)
+    expect(codeText('composition/seams.ts').includes('EditContext'), '而原始文本里确实有这段说明（证明上面那条不是空转）').toBe(true)
   })
 })
 

@@ -255,7 +255,7 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     exitStage: 'P4 交付同批（文件已删除；调用方 MaterialGallery 改用场景时间 + 纯采样）',
   }),
 
-  // ── 留给 P5：渲染侧播放调度（独立可翻转） ─────────────────────────────────
+  // ── P10（#261）已删：渲染侧播放调度（R-WK-03 的核心删除项） ───────────────
   Object.freeze({
     matrixSlug: 'frame-sequence-as-animation',
     section15Entries: Object.freeze([8]),
@@ -269,7 +269,8 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       ident('dwellMsForCurrentWorldFrame'),
     ]),
     owner: 'P10',
-    status: 'pending',
+    status: 'executed',
+    executedBy: 'P10',
     // 该播放调度自成一体的部分：四个符号只在本文件内出现（已实测 0 外部消费者）。
     consumers: Object.freeze([]),
     replacement: Object.freeze([
@@ -278,11 +279,12 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/domain/animation.ts#sampleTrack',
       'web/src/application/evaluation.ts#evaluateScene',
     ]),
-    exitStage: 'P10（#261）集成闭环同批删除：旧 setTimeout 播放调度是全树**唯一**推进 `currentFrameIndex` 的生产路径，内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线',
-    areaOverrideReason: 'R-WK-03：B5 矩阵该 slug 退出阶段写「P4 交付同批」且渲染侧文件属 P5 区（R-WK-01）；P5 收尾批侦察实测「语义替代 P4 已交付但零生产接线」，故删除前置条件变为 #261 集成闭环',
+    exitStage:
+      'P10（#261）集成闭环同批删除（**已执行**）：旧 `setTimeout` 自续播放调度已删除；帧下标改由 `EditContext.time` 经离散阶跃采样派生（`runtime/kernelSession#frameIndex`），时间由宿主帧时钟（`composition/kernelRuntime`）按帧注入 `advancePlayback` 命令',
+    areaOverrideReason: 'R-WK-03：B5 矩阵该 slug 退出阶段写「P4 交付同批」且渲染侧文件属 P5 区（R-WK-01）；P5 收尾批侦察实测「语义替代 P4 已交付但零生产接线」，故删除前置条件变为 #261 集成闭环（已在本批完成）',
   }),
 
-  // ── 留给 P5：材质 tick（**同组**，三处互相调用，须同批删除） ──────────────
+  // ── P10（#261）已删：材质 tick（**同组**，三处互相调用，同批删除） ──────────
   Object.freeze({
     matrixSlug: 'multi-raf-business',
     section15Entries: Object.freeze([6]),
@@ -294,16 +296,18 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     // "别人的行"混为一谈（首版实测：消费者清单因此多出一个文件）。
     symbols: Object.freeze([Object.freeze({ name: 'materialLibrary.tick()', pattern: 'materialLibrary\\.tick\\s*\\(' })]),
     owner: 'P10',
-    status: 'pending',
+    status: 'executed',
+    executedBy: 'P10',
     consumers: Object.freeze([]),
     group: 'material-tick',
-    groupAreaNotes: '同 `material-tick` 组：三处同属 P5 区（`runtime/`、`render/`）且互相调用 —— `renderEngine.ts:101` 调 `materialLibrary.tick(…)`、`blockIconCache.ts:399` 调 `library.tick(16)`、`simpleMaterialLibrary.ts` 实现 `tick`/`registerTick`，必须**同批**删除（按条目逐个翻相位必然假红）。**R-WK-03 登记**：三者与全树唯一帧时钟同在 `renderEngine` 的 RAF 内，内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线；P5 收尾批因此改为**登记批**（不删）。',
+    groupAreaNotes: '同 `material-tick` 组：三处同属 P5 区（`runtime/`、`render/`）且互相调用 —— `renderEngine.ts:101` 调 `materialLibrary.tick(…)`、`blockIconCache.ts:399` 调 `library.tick(16)`、`simpleMaterialLibrary.ts` 实现 `tick`/`registerTick`，必须**同批**删除（按条目逐个翻相位必然假红）。**R-WK-03 登记 → P10 执行**：三者与全树唯一帧时钟同在 `renderEngine` 的 RAF 内，删除前置条件是内核接线生产（已在 #261 完成）。',
     replacement: Object.freeze([
       'web/src/domain/materials.ts#sampleTextureSequence',
       'web/src/domain/animation.ts#advancePlayhead',
     ]),
-    exitStage: 'P10（#261）集成闭环同批删除：`opts.materialLibrary.tick(clock.getDelta()*1000)` 是全树唯一的纹理时间来源，内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线',
-    areaOverrideReason: 'R-WK-03：B5 矩阵该 slug 的 P4 面是材质面板独立 RAF（已删），渲染侧面（旧 renderEngine tick）原归 P5；侦察实测新内核零生产调用方，删除前置条件变为 #261 集成闭环',
+    exitStage:
+      'P10（#261）集成闭环同批删除（**已执行**）：`renderEngine` 的 RAF 已不再持有时间语义（只做绘制）；材质时间改由 `composition/kernelRuntime` 的场景时间经 `SimpleMaterialLibrary#setSceneTime` 注入（纯采样，无累加器）',
+    areaOverrideReason: 'R-WK-03：B5 矩阵该 slug 的 P4 面是材质面板独立 RAF（已删），渲染侧面（旧 renderEngine tick）原归 P5；侦察实测新内核零生产调用方，删除前置条件变为 #261 集成闭环（已在本批完成）',
   }),
   Object.freeze({
     matrixSlug: 'material-viewport-tick',
@@ -320,16 +324,18 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       Object.freeze({ name: 'tick（声明位）', pattern: '(?<!\\.)\\btick\\s*\\(' }),
     ]),
     owner: 'P10',
-    status: 'pending',
+    status: 'executed',
+    executedBy: 'P10',
     consumers: Object.freeze(['web/src/runtime/renderEngine.ts']),
     group: 'material-tick',
-    groupAreaNotes: '同 `material-tick` 组（见 renderEngine.ts 条目的完整说明）。**R-WK-03**：本文件的 `accMs += dtMs` 累积是纹理动画的生产唯一来源，内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线（改为登记批）。',
+    groupAreaNotes: '同 `material-tick` 组（见 renderEngine.ts 条目的完整说明）。**R-WK-03 → P10 执行**：`accMs += dtMs` 累积是纹理动画的生产唯一来源，删除前置条件是内核接线生产（已在 #261 完成）。',
     replacement: Object.freeze([
       'web/src/domain/materials.ts#sampleTextureSequence',
       'web/src/domain/materials.ts#TextureSample',
     ]),
-    exitStage: 'P10（#261）集成闭环同批删除：纹理帧偏移改由统一时间纯采样（`domain/materials.ts#sampleTextureSequence`）产出，内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线',
-    areaOverrideReason: 'R-WK-03：B5 矩阵该 slug 退出阶段写「P4 交付同批」，但简单材质库属 render/ 区（P5）；P4 已交付纯采样，删除前置条件变为 #261 集成闭环（P4 同批只交付了语义，无生产接线）',
+    exitStage:
+      'P10（#261）集成闭环同批删除（**已执行**）：纹理帧偏移改由统一时间纯采样（`domain/materials.ts#sampleStripFrameAt`）产出，材质库无状态（`setSceneTime(seconds)` 时间进、帧出）',
+    areaOverrideReason: 'R-WK-03：B5 矩阵该 slug 退出阶段写「P4 交付同批」，但简单材质库属 render/ 区（P5）；P4 已交付纯采样，删除前置条件变为 #261 集成闭环（已在本批完成）',
   }),
   Object.freeze({
     matrixSlug: 'material-viewport-tick',
@@ -339,17 +345,19 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     // **位级**：`this.library.tick(16)` 这个调用位，不是裸 `tick`。
     symbols: Object.freeze([Object.freeze({ name: 'library.tick()', pattern: '\\.library\\.tick\\s*\\(' })]),
     owner: 'P10',
-    status: 'pending',
+    status: 'executed',
+    executedBy: 'P10',
     // 该调用位只在 blockIconCache.ts 自己文件内（已实测 0 外部消费者）。
     consumers: Object.freeze([]),
     group: 'material-tick',
-    groupAreaNotes: '同 `material-tick` 组（见 renderEngine.ts 条目的完整说明）。**R-WK-03**：本处的 `this.library.tick(16)` 是"烘焙前推进一拍"的一次性调用（非循环），可改为在**定义好的烘焙时间**纯采样；但它与组内另两处同一机制，组断言禁止部分翻转 ⇒ 随组由 #261 同批删除。',
+    groupAreaNotes: '同 `material-tick` 组（见 renderEngine.ts 条目的完整说明）。**R-WK-03 → P10 执行**：本处的 `this.library.tick(16)` 是"烘焙前推进一拍"的一次性调用，已改为在**定义好的烘焙时间**（0 秒）纯采样。',
     replacement: Object.freeze(['web/src/domain/materials.ts#sampleTextureSequence']),
-    exitStage: 'P10（#261）集成闭环同批删除：图标绘制同样吃统一时间样本（`sampleTextureSequence`），内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线',
-    areaOverrideReason: 'R-WK-03：同一 slug 的另一处消费者（`render/` 区固定 dt 前推）；P4 已交付纯采样，删除前置条件变为 #261 集成闭环',
+    exitStage:
+      'P10（#261）集成闭环同批删除（**已执行**）：图标绘制改在定义好的烘焙时间（0 秒）纯采样（`library.setSceneTime(0)`）—— 图标是静态缩略图，不随播放位置变化',
+    areaOverrideReason: 'R-WK-03：同一 slug 的另一处消费者（`render/` 区固定 dt 前推）；P4 已交付纯采样，删除前置条件变为 #261 集成闭环（已在本批完成）',
   }),
 
-  // ── 留给 P5/P6：世界帧播放 Ref（**跨区同组**） ────────────────────────────
+  // ── P10（#261）已删：世界帧播放 Ref（**跨区同组**） ────────────────────────
   Object.freeze({
     matrixSlug: 'frame-sequence-as-animation',
     section15Entries: Object.freeze([8]),
@@ -357,19 +365,14 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     file: 'web/src/runtime/main.ts',
     symbols: Object.freeze([ident('currentFrameIndex'), ident('framesPlaybackIsPlaying')]),
     owner: 'P10',
-    status: 'pending',
+    status: 'executed',
+    executedBy: 'P10',
     group: 'world-frame-playback',
-    consumers: Object.freeze([
-      'web/src/operators/builtin/miscOperators.ts',
-      'web/src/runtime/context.ts',
-      'web/src/runtime/drw.ts',
-      'web/src/runtime/drwMeshPipeline.ts',
-      'web/src/shared/viewport/EmbedViewport.vue',
-      'web/src/shared/viewport/ViewportFrameLayerDock.vue',
-      'web/src/shared/viewport/useViewportRuntime.ts',
-      'web/src/workbench/components/WorkbenchViewport.vue',
-    ]),
-    groupAreaNotes: '**跨区组**：权威字段在 `runtime/main.ts`（P5 区），消费者分布在 P5 区（`runtime/drw.ts`、`runtime/drwMeshPipeline.ts`、`runtime/context.ts`）与 **P6 区**（`shared/viewport/`、`workbench/components/WorkbenchViewport.vue`）以及 `operators/builtin/miscOperators.ts`。**R-WK-03 裁决（修正）**：内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线 ⇒ 目标批次由 P6 改为 **#261（P10 集成闭环）**；P5 收尾批只做登记（不删字段本体，避免 P6 区消费者真红），P6 区消费者的清理随其自身批次进行。**播放状态归属**：归 EditContext，不归宿主。**内核缺口（#261 接线第一步补齐）**：`EditContext` 现只有 `time: TimeValue`，**无** `playing`/`Playhead` 字段；`application/commands.ts` 有 `setTime` 但**无**播放/暂停命令。',
+    // 两个字段删除后，全树零引用 ⇒ 消费者清单为空（**显式**表达"已核实为零"，
+    // 而不是缺省；与 P4 那条 `useMaterialAnimation` 的处置同一口径）。
+    consumers: Object.freeze([]),
+    groupAreaNotes:
+      '**跨区组**：权威字段原在 `runtime/main.ts`（P5 区），消费者分布在 P5 区（`runtime/drw.ts`、`runtime/drwMeshPipeline.ts`、`runtime/context.ts`）与 **P6 区**（`shared/viewport/`、`workbench/components/WorkbenchViewport.vue`）以及 `operators/builtin/miscOperators.ts`。**R-WK-03 裁决（修正）→ P10 执行完成**：内核接线生产已在 #261 落地（`runtime/kernelSession` + `composition/kernelRuntime`），故两个字段本体**已删除**，全部消费者改吃 `Context.requireKernelSession()`。**播放状态归属**：归 `EditContext`（`playing` + `playbackRate`），不归宿主。',
     replacement: Object.freeze([
       // 符号用"源码里可搜到的字面量"，而不是 `EditContext.time` 这类文档式路径 ——
       // 否则断言只能匹配到我自己的写法，起不到"接口确实存在"的检查作用。
@@ -379,8 +382,9 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/domain/animation.ts#Playhead',
       'web/src/domain/animation.ts#seekPlayhead',
     ]),
-    exitStage: 'P10（#261）集成闭环同批删除（权威字段本体保留 pending）：**播放状态归 EditContext**（#249 §3.4 时间归 EditContext + §1.1-7 共享当前时间 ⇒ 播放是时间的从属事实；归宿主会导致双视口各播各的）。内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线',
-    areaOverrideReason: 'R-WK-03：B5 矩阵该 slug 只列 P4（"场景 + 通用轨道"），而播放 Ref 属旧 runtime 实现、且消费者跨 P5/P6 两区；Lead 裁决（2026-10-11）目标批次改为 #261 集成闭环，并修正语义口径为「播放状态归 EditContext」（原写"归宿主"，会致双视口各播各的）；权威字段删除需先有宿主驱动接线 + EditContext 补齐 playing 字段与 playback 命令，故本批保持 pending',
+    exitStage:
+      'P10（#261）集成闭环同批删除（**已执行**）：**播放状态归 EditContext**（`playing`/`playbackRate` 字段 + `setPlaying`/`setPlaybackRate`/`advancePlayback` 命令）；帧下标改由 `EditContext.time` 经离散阶跃采样派生（`runtime/kernelSession#frameIndex`）；时间由宿主帧时钟按帧注入',
+    areaOverrideReason: 'R-WK-03：B5 矩阵该 slug 只列 P4（"场景 + 通用轨道"），而播放 Ref 属旧 runtime 实现、且消费者跨 P5/P6 两区；Lead 裁决（2026-10-11）目标批次改为 #261 集成闭环，并修正语义口径为「播放状态归 EditContext」（原写"归宿主"，会致双视口各播各的）。前置条件（宿主驱动接线 + EditContext 补齐 playing 字段与 playback 命令）已在本批完成。',
   }),
 
   // ── 留给 P6：每视口通道暂存（**同文件两条 slug**） ────────────────────────
@@ -403,7 +407,13 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/workbench/components/WorkbenchViewport.vue',
     ]),
     group: 'multiblock-channel-staging',
-    groupAreaNotes: '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。',
+    groupAreaNotes:
+      '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。'
+      + '**R-WK-04（#250，2026-10-11）**：本条的**文档内容面**（视口本地通道取值迁到'
+      + ' `EditContext.channelValues` 并让渲染消费装配结果）归 **#282（P10b 批次）** —— '
+      + '它需要"旧文档 → 内核场景"装配，而该装配未交付（#261 实测：内核 `Document` 不承载'
+      + ' `frames`/`cellGrid`/`textureBlobs`/`multiblock`）。故本条在 #261 保持 `pending`，'
+      + '不伪造"已迁移"。',
     replacement: Object.freeze([
       'web/src/domain/editing.ts#channelValues',
       'web/src/domain/editing.ts#withChannelValue',
@@ -412,7 +422,7 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/domain/multiblock.ts#channelStepTrack',
     ]),
     exitStage:
-      'P6 视口组件重写同批删除（文件本体归 P6；P4 提供替代接口 —— 通道取值属 EditContext、装配是纯函数、写权逐通道判定）',
+      'P6 视口组件重写同批删除（文件本体归 P6；P4 提供替代接口 —— 通道取值属 EditContext、装配是纯函数、写权逐通道判定）；**实际执行归 #282（R-WK-04）**：前置是"旧文档 → 内核场景"装配',
   }),
   Object.freeze({
     matrixSlug: 'manual-refresh-chain',
@@ -428,13 +438,16 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/workbench/components/WorkbenchViewport.vue',
     ]),
     group: 'multiblock-channel-staging',
-    groupAreaNotes: '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。',
+    groupAreaNotes:
+      '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。'
+      + '**R-WK-04（#250）**：文档内容面归 **#282（P10b）** —— 见同组上一条的完整说明。',
     replacement: Object.freeze([
       'web/src/application/evaluation.ts#evaluateGraph',
       'web/src/application/evaluation.ts#nodeIdentity',
       'web/src/runtime/evaluation.ts#EvaluationInstance',
     ]),
-    exitStage: 'P6 视口重写同批删除（失效由依赖图自动传播，无调用方手动 refresh）',
+    exitStage:
+      'P6 视口重写同批删除（失效由依赖图自动传播，无调用方手动 refresh）；**实际执行归 #282（R-WK-04）**',
     areaOverrideReason:
       'B5 矩阵该 slug 归口 P5（"依赖图自动失效"），但承载"手动链式刷新"的文件 `shared/viewport/useMultiblockChannels.ts` 属 P6 区（R-WK-01 comment 4875 实施细则）。实际分派：依赖图能力 P4 已交付，该文件删除随 P6 视口重写；清单如实登记这一区归属差异供 Lead 排合并顺序',
   }),
@@ -504,6 +517,10 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       // 这处由"`.vue` 分段扫描"抓出（曾因 TS 词法把 `"…"` 当字符串而**漏报**；
       // 漏消费者比假红危险，故 `.vue` 的模板段改用 HTML 口径 —— 见 `codeOfSource`）。
       'web/src/embed/EmbedRoot.vue',
+      // P10（#261）新增的真实消费者：外壳级帧循环把**帧声明**从旧文档读出
+      // 交给内核会话（`KernelSession.bindFrameSource`）。这是显式登记过的
+      // 适配接缝 —— 内核不认识 `RuntimeDocument`，帧声明由接线层读。
+      'web/src/composition/useKernelFrameLoop.ts',
       // 注：`workbench/ux/panels/blockInspector.ts` 与 `sceneInfo.ts` 曾在本表内，
       // 但 P2 合流后二者已不再调用这三个 getter（本扫描器实测 0 命中）⇒ 已核销。
       // 这正是"清单腐烂"断言（`extra`）的作用：文件改名/改实现后必须同步核销，
@@ -514,7 +531,15 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/runtime/execution.ts#EditorClient',
       'web/src/application/evaluation.ts#EvaluationKey',
     ]),
-    exitStage: 'P10（#261）集成闭环同批退出：内核未接线生产（P1 `EditorClient` 与 P4 `application/evaluation`/`runtime/evaluation` 零生产调用方）⇒ 删除前需 #261 完成宿主驱动接线；另接缝 B 需先补齐读面（`ReadView` 现无相机/embed 初始视图查询）→ P11 终局零引用审计',
+    exitStage:
+      '**R-WK-04（#250，2026-10-11）裁决：本条的文档内容面归 #282（P10b 批次）**。'
+      + '#261 已完成的部分：宿主驱动接线（`runtime/kernelSession` + `composition/kernelRuntime`）'
+      + '与 `ReadView` 读面补齐（相机组 + 播放读面）；`getCurrentFrameIndex` 声明位/引用位已全树归零'
+      + '（帧下标改为时间派生）。**未完成的部分**：`getDoc()` 本身及其 31 个消费者 —— '
+      + '把工作台文档内容迁到内核 `Document` 需要"旧文档 → 内核场景"装配，'
+      + '而该装配未交付（#261 实测：内核 `Document` 只承载 block/annotation/camera/mesh，'
+      + '不承载 `frames`/`cellGrid`/`textureBlobs`/`materialPalette`/`multiblock`/`meta`）。'
+      + '故本条保持 `pending`，不伪造"已迁移"；#282 交付该装配后本条随其删除 → P11 终局零引用审计',
     areaOverrideReason: 'R-WK-03：本条的渲染侧读面（`getDoc`/`getCurrentFrameIndex` 消费者）归 P5，但删除前置条件是"内核接线进生产"（#261）；接缝 B 另需先由 P9/#261 补齐相机与 embed 初始视图读面，否则迁移消费者只能伪造不存在的查询（=#1 负对照要判红的形态）',
   }),
 ])
@@ -1103,12 +1128,58 @@ describe('P4 退役归口登记（R-WK-01 的机器可读删除点清单）', ()
     }
   })
 
-  it('R-WK-01：P4 **不得**登记自己删除跨区文件（render/ 与旧 runtime/ 归 P5，shared/viewport/ 归 P6）', () => {
+  it('R-WK-01：**执行者**只能删自己区内的文件（P4 限 `workbench/ux/panels/`；P10 限 R-WK-03 归集项）', () => {
+    // ## 本条判据的演化（口径未放松，只是随批次推进而收窄）
+    //
+    // P4 建立本条时，`executed` 条目只有 P4 自己删的 `useMaterialAnimation.ts`
+    // （`workbench/ux/panels/` 区）—— 于是判据是"executed 必须落在该目录"。
+    //
+    // P10（#261）按 R-WK-03 执行了渲染侧与播放面的删除，那些文件**不在**
+    // `workbench/ux/panels/`。若沿用旧判据，本批的合法删除会被判红 ——
+    // 而那个红只代表"判据停在 P4 的相位"，不代表越区。
+    //
+    // ⇒ 判据改为**按执行者分派**：每个执行者只允许删 R-WK-01/R-WK-03
+    // 归给它的区。这不是"放宽"：它仍然拒绝任何执行者删除不属于自己的文件
+    // （见下一条负对照）。
+    const ALLOWED_BY_OWNER: Record<string, readonly string[]> = {
+      // P4：材质面板独立 RAF（`workbench/ux/panels/`）
+      P4: ['web/src/workbench/ux/panels/'],
+      // P10：R-WK-03 归集的内核接线同批删除项 —— 旧 runtime 播放面
+      // （`runtime/main.ts`、`runtime/drwMeshPipeline.ts`）与渲染侧 tick
+      // （`runtime/renderEngine.ts`、`render/materials/`、`render/interaction/`）
+      P10: [
+        'web/src/runtime/main.ts',
+        'web/src/runtime/drwMeshPipeline.ts',
+        'web/src/runtime/renderEngine.ts',
+        'web/src/render/materials/simpleMaterialLibrary.ts',
+        'web/src/render/interaction/blockIconCache.ts',
+      ],
+    }
     for (const e of RETIREMENT_REGISTRY) {
       if (e.status !== 'executed') continue
-      const allowed = e.file.startsWith('web/src/workbench/ux/panels/')
-      expect(allowed, `P4 越区删除 ${e.file}（R-WK-01：跨区文件由所在区批次删除）`).toBe(true)
+      const allowed = ALLOWED_BY_OWNER[e.executedBy ?? ''] ?? []
+      expect(
+        allowed.some((p) => e.file === p || e.file.startsWith(p)),
+        `${e.executedBy} 越区删除 ${e.file}（R-WK-01/R-WK-03：跨区文件由所在区批次删除）`,
+      ).toBe(true)
     }
+  })
+
+  it('**负对照**：上一条判据能抓到越区删除（证明它没有变成恒真）', () => {
+    const ALLOWED_BY_OWNER: Record<string, readonly string[]> = {
+      P4: ['web/src/workbench/ux/panels/'],
+      P10: ['web/src/runtime/main.ts', 'web/src/render/materials/simpleMaterialLibrary.ts'],
+    }
+    const isAllowed = (by: string, file: string): boolean =>
+      (ALLOWED_BY_OWNER[by] ?? []).some((p) => file === p || file.startsWith(p))
+    // 真：各自删自己的
+    expect(isAllowed('P4', 'web/src/workbench/ux/panels/useMaterialAnimation.ts')).toBe(true)
+    expect(isAllowed('P10', 'web/src/render/materials/simpleMaterialLibrary.ts')).toBe(true)
+    // 假：越区（P4 去删渲染侧 / P10 去删 P4 的面板）
+    expect(isAllowed('P4', 'web/src/render/materials/simpleMaterialLibrary.ts'), 'P4 越区删渲染侧必须判红').toBe(false)
+    expect(isAllowed('P10', 'web/src/workbench/ux/panels/useMaterialAnimation.ts'), 'P10 越区删 P4 面板必须判红').toBe(false)
+    // 假：未登记的执行者（防止用一个不存在的批次名绕过）
+    expect(isAllowed('P99', 'web/src/runtime/main.ts'), '未登记执行者必须判红').toBe(false)
   })
 
   it('归属批次与 B5 退役矩阵 slug 对应（P↔issue 由 #250 表格固定）', () => {
@@ -1122,8 +1193,20 @@ describe('P4 退役归口登记（R-WK-01 的机器可读删除点清单）', ()
       for (const n of e.section15Entries) {
         expect(entry.entries, `${e.matrixSlug} 的条目应覆盖 §15 第 ${n} 行`).toContain(n)
       }
+      // `executed` 条目必须写明执行者，且该执行者就是 `owner`
+      // （结构自洽已在上面的"字段自洽"用例里断言，这里复核归口一致性）。
       if (e.status === 'executed') {
-        expect(e.owner).toBe('P4')
+        expect(e.executedBy, `${e.file} executed 必须写 executedBy`).toBe(e.owner)
+        // **归口对账仍然成立**：无论相位如何，该 slug 都必须在矩阵里有归口批次
+        // （防止"翻成 executed 就脱离矩阵"）。
+        const listed = entry.owners.map((o: { p: string }) => o.p)
+        expect(listed.length, `${e.matrixSlug} 仍须在矩阵里有归口批次`).toBeGreaterThan(0)
+        // 有区归属差异时必须给出理由（与 pending 分支同一判据）
+        if (e.areaOverrideReason === undefined) {
+          expect(listed, `${e.matrixSlug} 的归口批次应包含 ${e.owner}`).toContain(e.owner)
+        } else {
+          expect(e.areaOverrideReason.length, 'override 必须写明理由').toBeGreaterThan(20)
+        }
       } else if (e.areaOverrideReason === undefined) {
         const listed = entry.owners.map((o: { p: string }) => o.p)
         expect(listed, `${e.matrixSlug} 的归口批次应包含 ${e.owner}`).toContain(e.owner)

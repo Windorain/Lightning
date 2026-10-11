@@ -84,6 +84,8 @@ export const LAYER_DESTINATIONS = [
       'runtime/exportJob.ts',
       'runtime/inputSession.ts',
       'runtime/inputPort.ts',
+      // P10（#261）：内核→生产接线的宿主侧会话（R-WK-03 的核心内容）
+      'runtime/kernelSession.ts',
     ],
     /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议、求值判定、资源记账、导出作业与输入路由是业务规则，不是呈现。 */
     corePurity: true,

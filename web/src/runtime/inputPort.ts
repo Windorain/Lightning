@@ -60,6 +60,29 @@ export interface InputPort {
   /** 分配事件 token（组件做命令式调用时用；事件驱动的路径由适配器分配）。 */
   nextToken(): number
   /**
+   * 按**命令 ID** 分发一次（菜单/工具栏等显式 UI 入口；P10 #261 收口）。
+   *
+   * ## 为什么它可以出现在端口上，而 `submit`/`executeNow` 不行
+   *
+   * 端口的设计纪律是"**不**暴露写通路"（见文件头）。本方法看起来像是例外，
+   * 但它**不是**：它不接受 `Command`，只接受**命令 ID**（P7 的命名空间，
+   * 如 `edit.undo`），并把它交给与键盘事件**完全相同**的那条路由
+   * （`InputSession.invokeCommand` → 同一个 `dispatch` → 同一个
+   * `resolveIntent` → 同一个 `CommandSink`）。
+   *
+   * 换句话说：调用方**无法**用它构造一条绕过 `resolveIntent` 的领域命令 ——
+   * 它只能"请求一个已登记的命令 ID"。未登记的 ID 会被显式拒绝
+   * （`UnsupportedOperation`），不静默。
+   *
+   * ## 为什么菜单需要它（而不是继续用 operator ID）
+   *
+   * 旧实现里同一个"撤销"有三个名字：快捷键 `'undo'`、菜单 `'OPERATOR_UNDO'`、
+   * P7 命令空间 `'edit.undo'`。三者无法互相审计（"谁还能触发撤销"没有单一答案），
+   * 且菜单的可用性判定与快捷键各写一遍 ⇒ 可以出现"快捷键禁用但菜单可点"。
+   * 收敛到命令 ID 后，两者共用同一个 `evaluateCommandAvailability`。
+   */
+  invokeCommand(commandId: string, params?: Readonly<Record<string, string | number | boolean>>): void
+  /**
    * 订阅"会话推进了"（**只读**通知）。
    *
    * ## 为什么是必需的，而不是可选的便利
@@ -113,6 +136,9 @@ export function createInputPort(session: InputSession): InputPortHandle {
     },
     nextToken() {
       return session.nextToken()
+    },
+    invokeCommand(commandId, params) {
+      session.invokeCommand(commandId, params)
     },
     openModalScope(decl) {
       session.openModal({

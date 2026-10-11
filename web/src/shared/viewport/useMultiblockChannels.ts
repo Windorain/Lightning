@@ -73,7 +73,7 @@ export function useMultiblockChannels(ctx: Context): MultiblockChannelControls {
     if (!d) return null
     // 帧为主文档：原样返回（渲染路径行为零变化）
     if (!d.isMultiblock) return d
-    const current = ctx.getCurrentFrameIndex().value ?? 0
+    const current = ctx.getFrameIndex()
     return buildMultiblockRenderView(d, outcome.value?.result ?? null, current)
   })
 

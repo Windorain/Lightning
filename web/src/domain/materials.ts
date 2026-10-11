@@ -422,3 +422,101 @@ export function sampleTextureInstance(
 export function frameBlendAllowed(seq: TextureSequence): boolean {
   return seq.frameBlendAllowed === true
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 帧条（texture strip）的**统一离散阶跃采样**（P10：#249 §7「通道动画复用通用
+// 属性、轨道和采样策略（离散值阶跃），不另建专用播放循环」）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 一帧在帧条里的**停留时长**（毫秒）。
+ *
+ * 与 {@link SequenceFrame.duration} 的关系：后者是**有理秒**（精确判定用），
+ * 前者是渲染侧帧条换算用的毫秒整数。两者由 {@link frameDurationsMs} 从**同一个**
+ * 输入派生，故不会各自解释同一份 mcmeta。
+ */
+export interface StripTimeline {
+  /** 每个播放项的帧下标（指向纹理竖条内的位置）。 */
+  readonly frameIndices: readonly number[]
+  /** 与 `frameIndices` 一一对应的停留毫秒（恒 `> 0`）。 */
+  readonly durationMs: readonly number[]
+}
+
+/**
+ * 帧条的**离散阶跃**时间轴。
+ *
+ * ## 为什么需要它（以及它替代了什么）
+ *
+ * 旧机制（`render/materials/simpleMaterialLibrary.ts` 的 `applyAnimatedStrip`）
+ * 自持一个 `accMs` 累加器：每帧 `accMs += dtMs`，再用
+ * `while (accMs >= dur)` 消费整段时长并前推 `frameSeq`。那是 #249 §7 与 §19.3
+ * 明令禁止的"材质/视口自行累计 tick"——它的两个可观测后果：
+ *  - **跳帧不一致**：同一时刻，"连续播放到 t" 与 "直接定位到 t" 会因累加器
+ *    在边界上的不同历史而给出不同帧（旧实现的 `while` 在边界上停在本帧）；
+ *  - **无时间权威**：时间不在 `EditContext` 上，故两个 Area 各播各的。
+ *
+ * 本函数把"帧条"表达成**通用离散阶跃采样**的输入（`frameIndices` + `durationMs`），
+ * 于是渲染侧可以直接用 {@link sampleStripFrameAt} —— 时间进、帧下标出，
+ * **没有累加器、没有循环句柄**，且与 `domain/animation#sampleTrack` 的 `step`
+ * 策略同一语义（半开区间、边界取下一项）。
+ *
+ * ## 边界语义（与 `sampleTextureSequence` 一致，逐条可测）
+ *
+ *  - **半开区间**：`[start, start+duration)` 归本项；`t` 恰在边界 ⇒ **下一项**；
+ *  - **循环**：按总时长取模（末尾回起点）；
+ *  - **负时间**：`((t % T) + T) % T`，与 `t = T-1` 等价；
+ *  - **非循环**：早于 0 取首项、晚于总时长取末项（钳制，不外推）。
+ */
+export function sampleStripFrameAt(timeline: StripTimeline, timeMs: number): number {
+  const n = timeline.frameIndices.length
+  if (n === 0) return 0
+  const total = totalDurationMs(timeline)
+  if (total <= 0) return timeline.frameIndices[0] ?? 0
+
+  let t = Number.isFinite(timeMs) ? Math.floor(timeMs) : 0
+  // 取模回正（负数取模在 JS 里保持符号，必须显式回正 —— 与 `sampleTextureSequence` 同法）。
+  t = ((t % total) + total) % total
+
+  let start = 0
+  for (let i = 0; i < n; i++) {
+    const end = start + timeline.durationMs[i]!
+    if (t < end) return timeline.frameIndices[i] ?? 0
+    start = end
+  }
+  // 理论不可达（t < total 且区间完整覆盖 [0,total)）；到达则取末项而不是猜。
+  return timeline.frameIndices[n - 1] ?? 0
+}
+
+/** 帧条总时长（毫秒）。 */
+export function totalDurationMs(timeline: StripTimeline): number {
+  let acc = 0
+  for (const d of timeline.durationMs) acc += d
+  return acc
+}
+
+/**
+ * 由 mcmeta 形态的**原始**帧时长构造时间轴（毫秒整数，`<= 0` 回落到 `1`）。
+ *
+ * ## 为什么非法时长在这里**回落**而不是拒绝（与 `parseTextureSequence` 的分工）
+ *
+ * `parseTextureSequence` 是**核心序列**的解析：它面对的是"用户声明的序列"，
+ * 非法时长必须显式拒绝（#249 §19.3「零/负时长及非法索引在解析/校验时拒绝」）。
+ *
+ * 本函数面对的是**外部格式（mcmeta）的解释**：mcmeta 允许省略时长
+ * （用 `defaultFrametimeTicks`）、也允许写出 `0`（Minecraft 自身把它当 1 tick）。
+ * 那是**适配器可以做的归一化** —— 与 `domain/materials` 文件头里
+ * "适配器可以做的归一化"同一口径。故这里回落成 `1` 毫秒，
+ * **不**把外部格式的宽松解释升级成核心的拒绝。
+ */
+export function stripTimeline(
+  frameIndices: readonly number[],
+  durationMs: readonly number[],
+): StripTimeline {
+  const durations: number[] = []
+  for (let i = 0; i < frameIndices.length; i++) {
+    const raw = durationMs[i]
+    durations.push(typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1)
+  }
+  return Object.freeze({ frameIndices: Object.freeze([...frameIndices]), durationMs: Object.freeze(durations) })
+}
+

@@ -88,6 +88,7 @@ import { workbenchCommandSink, workbenchInputHotkeys } from '@/workbench/inputHo
 // ── 装配（B5 #7 的替代物：profile 是值，不是模块级全局）────────────────────
 import { CAPABILITY } from '@/composition/modules'
 import { createShellRuntimeForProfile, resolveShellProfile, shellKey, type ShellRuntime } from '@/composition/shell'
+import { useKernelFrameLoop } from '@/composition/useKernelFrameLoop'
 import { editorTypeRegistry } from '@/editors/builtinEditors'
 
 /**
@@ -115,6 +116,11 @@ const { host, ctx, screen: defaultScreen } = createWorkbenchHost({
   selection, editHistory, toolRegistry, tool, shell,
 })
 
+// **内核帧循环**（P10 #261 / R-WK-03）：宿主按帧向内核注入时间输入。
+// 挂载即开始、卸载即停止（`onMounted`/`onBeforeUnmount`），不留幽灵推进。
+// 它替代的是旧 `renderEngine` 里那个"绘制 + 业务 tick 混在一起"的 RAF。
+useKernelFrameLoop(ctx)
+
 ctx.wm.chrome.wikiUi = createWikiUiState()
 if (wikiHost) {
   ctx.wm.chrome.wikiUi.mwReady.value = isWikiApiAvailable()
@@ -137,11 +143,27 @@ const lastMousePosition = ref<{ x: number; y: number } | null>(null)
 const ADD_MENU_ITEMS: ContextMenuItem[] = [
   { kind: 'label', label: '生成', icon: '＋' },
   { kind: 'separator', label: '' },
-  { kind: 'operator', label: '撤销 (Ctrl+Z)', opId: 'OPERATOR_UNDO' },
-  { kind: 'operator', label: '重做 (Ctrl+Shift+Z)', opId: 'OPERATOR_REDO' },
+  // P10 #261：菜单项改用 **P7 命令空间 ID**（不再用 `OPERATOR_UNDO`/`OPERATOR_REDO`）。
+  // 与快捷键（`WORKBENCH_APP_HOTKEYS` 的 `edit.undo`/`edit.redo`）**同一个 ID**
+  // ⇒ 命令搜索可见、可用性判定只有一处（`evaluateCommandAvailability`）。
+  { kind: 'operator', label: '撤销 (Ctrl+Z)', commandId: 'edit.undo' },
+  { kind: 'operator', label: '重做 (Ctrl+Shift+Z)', commandId: 'edit.redo' },
 ]
 
 function invokeContextMenuItem(item: ContextMenuItem) {
+  // 首选：经输入端口按**命令 ID** 分发（与键盘同一条路由）。
+  if (item.commandId) {
+    const port = ctx.wm.inputPort
+    if (port) {
+      port.invokeCommand(item.commandId, item.props as Record<string, string | number | boolean> | undefined)
+      return
+    }
+    // 端口尚未装配（极早的菜单调用）：显式记录而不是静默丢弃 ——
+    // 静默丢弃会表现为"点了菜单没反应"，而那是 #249 §13 禁止的假成功控件形态。
+    ctx.log.warn('菜单', `输入端口尚未装配，命令 ${item.commandId} 未分发`)
+    return
+  }
+  // 兼容：仍在迁移中的旧 operator 项（**逐条**，不得新增）。
   if (item.opId) {
     ctx.getOperators().invoke(item.opId, item.props ?? {})
   }
@@ -230,6 +252,10 @@ function assembleWorkbenchInput(): void {
     areaHotkeys: hotkeys.areaHotkeys,
     appHotkeys: hotkeys.appHotkeys,
     localActions: hotkeys.localActions,
+    // P10 #261：注入当前编辑上下文 —— 需要 `contextId` 的命令（`edit.undo`/
+    // `edit.redo`）才可解析。此前 `WORKBENCH_APP_HOTKEYS` 不带 params，
+    // 实测被 `resolveIntent` 以 `missingParam` 拒绝 ⇒ Ctrl+Z 从未真正生效。
+    contextId: ctx.requireKernelSession().contextId,
     owner: 'workbench',
     onEvent: () => {
       refreshDraftMirrors()

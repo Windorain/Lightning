@@ -26,7 +26,7 @@ type Json = Record<string, unknown>
 function ctxFor(doc: RuntimeDocument): Context {
   return {
     getDoc: () => ref(doc),
-    getCurrentFrameIndex: () => ref(0),
+    getFrameIndex: () => 0,
   } as unknown as Context
 }
 

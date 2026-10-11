@@ -74,6 +74,21 @@ export interface EmbedSettings {
   loadingMessage: string
   okMessage: (modelId: string) => string
   debug: boolean
+  /**
+   * 宿主指定的主题（P10 #261，收口 F1）。
+   *
+   * ## 为什么它必须进 `EmbedSettings` 而不是被 `mount()` 写进全局
+   *
+   * 旧 `mount()` 直接 `document.documentElement.dataset.neiTheme = theme` ——
+   * 全页一份，同页两实例互相覆盖（F1）。现在它是**本实例**的初始设置，
+   * 经 `createEmbedHost` → `createShellSettings({ initialTheme })` →
+   * 实例根元素的 `data-lk-theme`。
+   *
+   * 缺省 `undefined` = "不指定，走实例偏好/宿主页属性/默认 dark 那条既有优先级"
+   * —— 不是"默认 light"，也不是"默认 dark"：那两者都由 `shellSettings` 决定，
+   * 本字段只表达"宿主**显式**要求了什么"。
+   */
+  theme?: 'light' | 'dark'
 }
 
 /** 从 View3DConfig 提取 EmbedSettings */
@@ -102,6 +117,8 @@ export function buildEmbedSettingsFromBootstrap(parts: {
     loadingMessage?: string
     okMessage?: (modelId: string) => string
     debug?: boolean
+    /** 宿主指定的主题（P10 #261 F1：进实例设置，不写全局）。 */
+    theme?: 'light' | 'dark'
   }
   features?: Partial<View3DFeatures>
 }): EmbedSettings {
@@ -120,6 +137,8 @@ export function buildEmbedSettingsFromBootstrap(parts: {
     loadingMessage: ui.loadingMessage ?? defaultEmbedUi.loadingMessage,
     okMessage: ui.okMessage ?? defaultEmbedUi.okMessage,
     debug: ui.debug ?? defaultEmbedUi.debug,
+    // P10 #261（F1）：宿主显式指定的主题进**实例**设置，不再写文档根。
+    ...(ui.theme === undefined ? {} : { theme: ui.theme }),
   }
 }
 

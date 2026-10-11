@@ -18,7 +18,20 @@ const props = withDefaults(defineProps<{
   hasWorldMultiFrame: boolean
   worldFrameIndex: number
   worldFrameCount: number
-  framesPlaybackIsPlaying: boolean
+  /**
+   * 时间是否在前进（**呈现输入**）。
+   *
+   * ## 为什么这个 prop 不叫 `framesPlaybackIsPlaying`（P10 #261 改名）
+   *
+   * 旧名字与**被删除的权威字段**（`Main.framesPlaybackIsPlaying`）逐字同名。
+   * 那不只是"名字撞了"——它让退役审计的判据（按标识符扫描）无法区分
+   * "旧权威还在"与"某组件恰好用了同一个词描述自己的显示状态"。
+   * 一个**呈现**输入不该借用**领域权威**的名字：本组件只关心
+   * "要不要把播放按钮画成按下态"，它不拥有、也不判定"时间在不在走"。
+   *
+   * 改名后判据可以干净地归零，而本组件的行为一字未变。
+   */
+  isPlaying: boolean
   meshBusy: boolean
   gridHeight: number
   layerWorldY: number
@@ -119,13 +132,13 @@ const emit = defineEmits<{
     <div v-if="showFramePanel" class="vp-dock__panel vp-dock__panel--active">
       <WorldFramePlayerControls
         :has-world-multi-frame="hasWorldMultiFrame"
-        :is-playing="framesPlaybackIsPlaying"
+        :is-playing="isPlaying"
         @toggle="emit('togglePlayback')"
       />
       <WorldFrameScrubber
         :has-world-multi-frame="hasWorldMultiFrame"
         :frame-count="worldFrameCount"
-        :is-playing="framesPlaybackIsPlaying"
+        :is-playing="isPlaying"
         :mesh-busy="meshBusy"
         :world-frame-index="worldFrameIndex"
         @toggle-playback="emit('togglePlayback')"

@@ -164,7 +164,9 @@ function makePanelCtx(initialDoc: unknown) {
   const items = ref<unknown[]>([])
   const ctx = {
     getDoc: () => docRef,
-    getCurrentFrameIndex: () => frameRef,
+    // P10 #261：帧下标改为**只读派生**访问器（旧 `getCurrentFrameIndex(): Ref<number>`
+    // 是可写权威，已删除）。测试替身随之只提供读面。
+    getFrameIndex: () => frameRef.value,
     getSelection: () => ({ items }),
     getOperators: () => ({
       invoke: (id: string, props?: Record<string, unknown>) => {

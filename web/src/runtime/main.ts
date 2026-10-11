@@ -35,8 +35,29 @@ export interface MainRegistries {
 
 export class Main {
   readonly doc: Ref<RuntimeDocument | null> = ref(null)
-  readonly currentFrameIndex = ref(0)
-  readonly framesPlaybackIsPlaying = ref(false)
+  /**
+   * **已删除**（P10 #261，退役 B5 #8 `frame-sequence-as-animation`）：
+   * `currentFrameIndex` 与 `framesPlaybackIsPlaying` 两个 Vue Ref。
+   *
+   * ## 它们被什么替代（R-WK-03：播放状态归 `EditContext`）
+   *
+   * | 旧字段 | 新归属 |
+   * |---|---|
+   * | `currentFrameIndex: Ref<number>` | **派生值**：`KernelSession.frameIndex()` —— 由 `EditContext.time` 经离散阶跃采样（`domain/materials#sampleStripFrameAt`）算出，**不是**独立权威 |
+   * | `framesPlaybackIsPlaying: Ref<boolean>` | `EditContext.playing`（经 `setPlaying` 命令写） |
+   *
+   * ## 为什么两个字段必须一起删（而不是留一个过渡）
+   *
+   * 旧形态下"帧下标"与"时间"是**两个独立权威**：帧下标由
+   * `OPERATOR_SET_FRAME_INDEX` 直接写，与时间无关，于是"播放到第 5 帧"
+   * 与"时间是第几帧"可以互相矛盾；而播放开关是驱动一个 `setTimeout` 自续链的
+   * **唯一**输入（`drwMeshPipeline` 的 `scheduleNextWorldFrameStep`）。
+   * 留任一个都会让"时间是不是唯一权威"变成一个含糊的问题 ——
+   * 而它必须是明确的（A09「同时间同结果」/ A05「两视口读同一份」都依赖它）。
+   *
+   * 消费面全部迁到 `Context.requireKernelSession()`；见
+   * `retirementRegistry` 的 `world-frame-playback` 组（相位 `executed`）。
+   */
 
   /**
    * **内容重读请求**（#249 §15 第 5 条的替代物；原 `structEpoch` 的位置）。
@@ -104,18 +125,16 @@ export class Main {
   /**
    * 替换文档。
    *
-   * 与旧实现的差别：**没有** `bumpStructEpoch` 选项。判断"要不要重建"不是调用方的职权 ——
-   * 呈现层会从文档内容算出身份并自行决定（`presentation/contentIdentity`）。
-   * `resetFrameIndex` 保留：帧索引是**视图状态**，不属于内容判定。
+   * 与旧实现的差别：
+   *  - **没有** `bumpStructEpoch` 选项（判断"要不要重建"不是调用方的职权 ——
+   *    呈现层会从文档内容算出身份并自行决定，`presentation/contentIdentity`）；
+   *  - **没有** `resetFrameIndex` 选项（P10 #261）：帧下标不再是本对象的字段，
+   *    而是由 `EditContext.time` 派生的值 ⇒ 换文档时"重置帧"就是
+   *    "把时间定位到 0"，那是 `setTime` 命令的职责，不是文档替换的副作用。
+   *    调用方若需要重置，显式发 `setTime`（见 `pipeline.ts` 的加载路径）。
    */
-  replaceDoc(doc: RuntimeDocument | null, options?: { resetFrameIndex?: boolean }): void {
-    const prev = this.doc.value
+  replaceDoc(doc: RuntimeDocument | null): void {
     this.doc.value = doc
-    const newDocument = prev === null || (doc !== null && prev?.id !== doc.id)
-    const resetFrame = options?.resetFrameIndex ?? newDocument
-    if (doc && resetFrame) {
-      this.currentFrameIndex.value = 0
-    }
     // 文档引用变了，呈现层需重读内容（这是"内容可能变了"的请求，不是判定）
     this.contentRefreshTick.value += 1
   }
