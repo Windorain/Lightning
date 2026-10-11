@@ -2,7 +2,6 @@ import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '@/runtime/screenTypes'
 import type { UILayout, UIOperator, UILabel, UISeparator } from '../types/layout'
-import { t } from '@/config/i18n'
 import { isWikiHostProfile } from '@/runtime/hostProfile'
 import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
 
@@ -15,6 +14,9 @@ export const menuBarPanel: PanelDeclaration = {
   poll(): boolean { return true },
 
   layout(ctx: Context): UILayout {
+    // 本实例的翻译（#259 A33）：标签在每次 layout() 求值时按**本实例**语言生成，
+    // 语言变化会让面板重算 —— 不再经模块级 activeLang 影响别的实例。
+    const t = ctx.t
     const lang = ctx.getShellSettings().lang.value
     const conn = ctx.getConnection().connected
     const wikiHost = isWikiHostProfile()

@@ -367,7 +367,7 @@ describe('#250 裁决：替代机制（EditorClient 读面 + 统一执行协议�
     expect(canonicalize(ta.value), '两个视口的有效读面必须相同（A05 原文）').toBe(canonicalize(tb.value))
     expect(ta.value.position.x, '读到的是**暂存**值（不是文档基础值）').toBe(4)
     // 基础值仍是 0（未提交）—— 证明读到的是有效值而非文档值
-    const authored = viewportA.properties.read({ owner: { kind: 'object', id: oid }, property: 'transform.position' }, 'authored')
+    const authored = viewportA.properties.read({ owner: { kind: 'object', id: oid }, property: 'block.transform.position' }, 'authored')
     expect(authored.ok).toBe(true)
     if (authored.ok) expect((authored.value as { x: number }).x).toBe(0)
 
@@ -391,7 +391,7 @@ describe('#250 裁决：替代机制（EditorClient 读面 + 统一执行协议�
     if (!list.ok) return
     const cam = list.value[0]
 
-    const desc = view.properties.describe({ owner: { kind: 'object', id: cam.id }, property: 'transform.position' })
+    const desc = view.properties.describe({ owner: { kind: 'object', id: cam.id }, property: 'camera.transform.position' })
     expect(desc.ok).toBe(true)
     if (desc.ok) {
       expect(desc.value.valueType).toBe('vec3')
@@ -399,9 +399,9 @@ describe('#250 裁决：替代机制（EditorClient 读面 + 统一执行协议�
       // RNA 描述不得出现控件类型名（契约 §5.1）
       expect(canonicalize(desc.value)).not.toContain('control')
     }
-    const eff = view.properties.editability({ owner: { kind: 'object', id: cam.id }, property: 'transform.position' })
+    const eff = view.properties.editability({ owner: { kind: 'object', id: cam.id }, property: 'camera.transform.position' })
     expect(eff.ok).toBe(true)
-    if (eff.ok) expect(eff.value.kind, '可编辑性返回结构化原因').toBe('editable')
+    if (eff.ok) expect(eff.value.editable, '可编辑性返回结构化原因（editable + because）').toBe(true)
 
     // **无第二写通路**：ReadView 上不存在任何可写动词或字段袋
     const readViewKeys = [...Object.keys(view), ...Object.keys(view.objects), ...Object.keys(view.properties), ...Object.keys(view.workspace), ...Object.keys(view.interaction)]
@@ -420,9 +420,9 @@ describe('#250 裁决：替代机制（EditorClient 读面 + 统一执行协议�
       view.interaction.state(),
       view.interaction.context(),
       view.interaction.selection(),
-      view.properties.describe({ owner: { kind: 'object', id: cam.id }, property: 'name' }),
-      view.properties.read({ owner: { kind: 'object', id: cam.id }, property: 'name' }, 'authored'),
-      view.properties.editability({ owner: { kind: 'object', id: cam.id }, property: 'name' }),
+      view.properties.describe({ owner: { kind: 'object', id: cam.id }, property: 'camera.name' }),
+      view.properties.read({ owner: { kind: 'object', id: cam.id }, property: 'camera.name' }, 'authored'),
+      view.properties.editability({ owner: { kind: 'object', id: cam.id }, property: 'camera.name' }),
     ]
     const stateShaped: string[] = []
     const walk = (v: unknown, pathStr: string, depth: number): void => {

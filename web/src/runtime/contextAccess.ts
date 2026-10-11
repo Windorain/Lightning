@@ -30,11 +30,18 @@ import type { DocumentBinding } from '@/workbench/document/types'
 export type AppTheme = 'dark' | 'light'
 export type AppLanguage = 'zh' | 'en'
 
-/** WM 壳层持久偏好（主题、语言） */
-export interface ShellSettings {
-  theme: Ref<AppTheme>
-  lang: Ref<AppLanguage>
-}
+/**
+ * WM 壳层偏好（主题、语言）—— **实例作用域**。
+ *
+ * 改动（#259 A33）：本接口原先是这里独立定义的 `{ theme: Ref; lang: Ref }`，
+ * 与 `runtime/shellSettings.ts` 的实际实现**两份定义**。P8 把实现改成实例作用域
+ * （`t()`、`scopeId`、`scopeAttrs`、`setLang`/`setTheme`）后，两份定义必须合一 ——
+ * 否则调用点按旧类型写 `settings.lang.value = x`（绕过实例 setter）也能通过类型检查，
+ * 而运行期并不生效（`lang` 是内部 ref，赋值不再触发持久化路径）。
+ *
+ * ⇒ 现在从实现处**单一定义、单一导出**：消费者只看到一份契约。
+ */
+export type { ShellSettings, CreateShellSettingsOptions } from '@/runtime/shellSettings'
 
 /** 工具会话参数（笔刷等） */
 export interface ToolSettings {

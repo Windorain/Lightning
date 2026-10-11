@@ -21,7 +21,7 @@ import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 import {
   WORKBENCH_PANELS,
   registerWorkbenchOperators,
-  registerWorkbenchRna,
+  validateWorkbenchRna,
   registerWorkbenchTools,
 } from '@/workbench/registerWorkbench'
 
@@ -87,7 +87,6 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   const main = new Main({
     operators: registry,
     tools: toolRegistry,
-    rna: null,
   })
 
   const parsers = main.registries.parsers
@@ -96,13 +95,12 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   parsers.register(WorldParser)
   parsers.register(StructureDataParser)
 
-  registerWorkbenchRna(main)
+  void validateWorkbenchRna()
 
   const services: WorkbenchServices = {
     selection,
     editHistory,
     toolRegistry,
-    rna: main.registries.rna!,
     ui: {
       boundsOfByOperator: (opId: string) => boundsOfByOperator(opId),
       boundsOfByRNAPath: (rnaPath: string) => boundsOfByRNAPath(rnaPath),

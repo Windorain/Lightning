@@ -2,36 +2,18 @@
 import { ref } from 'vue'
 import type { Tool } from '@/workbench/tools/tool'
 import { useToolRegistry } from '@/workbench/tools/registry'
-type IconState = 'inactive' | 'active' | 'hover'
+import TrustedIcon from '@/editors/TrustedIcon.vue'
+import { trustedIcon, type TrustedIconKey } from '@/domain/trustedIcon'
 
-const stateColors: Record<IconState, string> = {
-  inactive: '#56728a',
-  active: '#4dabf7',
-  hover: '#c5d8e8',
-}
-
-const icons = {
-  select: `<svg viewBox="0 0 24 24" fill="none" stroke="__COLOR__" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l6 16 2-6 6-2z"/></svg>`,
-
-  move: `<svg viewBox="0 0 24 24" fill="none" stroke="__COLOR__" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20"/><path d="M8 4l4-2 4 2M8 20l4 2 4-2M4 8l-2 4 2 4M20 8l2 4-2 4"/></svg>`,
-
-  box: `<svg viewBox="0 0 24 24" fill="none" stroke="__COLOR__" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 12h18M12 3v18"/></svg>`,
-
-  point: `<svg viewBox="0 0 24 24" fill="none" stroke="__COLOR__" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" stroke-dasharray="3 2"/></svg>`,
-
-  line: `<svg viewBox="0 0 24 24" fill="none" stroke="__COLOR__" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20L20 4"/><circle cx="4" cy="20" r="1.5" fill="__COLOR__" stroke="none"/><circle cx="20" cy="4" r="1.5" fill="__COLOR__" stroke="none"/></svg>`,
-
-  text: `<svg viewBox="0 0 24 24" fill="none" stroke="__COLOR__" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M12 7v14"/><path d="M6 21h12"/><path d="M7 3h10l-1 4H8z"/></svg>`,
-} as const
-
-type ToolIconId = keyof typeof icons
-
-function toolIcon(id: ToolIconId, state: IconState = 'inactive'): string {
-  const color = stateColors[state]
-  return icons[id].replace(/__COLOR__/g, color)
-}
-
-const iconMap: Record<string, ToolIconId> = {
+/**
+ * 工具 → 可信图标键。
+ *
+ * 旧实现在本文件内联了一份 `icons` 表 + `toolIcon()` 拼串，然后 `<span v-html>`。
+ * 模板与颜色表已上移到 `domain/trustedIcon.ts`（**可信编译期图标的专门来源**），
+ * 本文件只做"工具 id → 登记键"的映射，并消费品牌类型。
+ * 于是本文件不再有 `v-html`，也无法把任意字符串当图标注入。
+ */
+const iconMap: Record<string, TrustedIconKey> = {
   select: 'select',
   move: 'move',
   'annotation-box': 'box',
@@ -39,6 +21,11 @@ const iconMap: Record<string, ToolIconId> = {
   'annotation-point': 'point',
   'annotation-line': 'line',
   'annotation-text': 'text',
+}
+
+/** 未知工具 id ⇒ 回退 `select`（可信构造口内部也有一层回退）。 */
+function iconKeyFor(toolId: string | undefined): TrustedIconKey {
+  return (toolId !== undefined ? iconMap[toolId] : undefined) ?? 'select'
 }
 
 const props = defineProps<{
@@ -127,7 +114,10 @@ function onFlyoutLeave(): void {
       @pointerup="onPointerUp"
       @pointerleave="onPointerUp"
     >
-      <span class="tg-icon" v-html="toolIcon(iconMap[activeMember?.id ?? members[0]?.id] ?? 'select', 'active')" />
+      <TrustedIcon
+        class="tg-icon"
+        :icon="trustedIcon(iconKeyFor(activeMember?.id ?? members[0]?.id), 'active')"
+      />
     </button>
     <div v-if="hasMultiple && flyoutOpen" class="tg-flyout" @mouseleave="onFlyoutLeave">
       <div class="tg-flyout-header">{{ activeMember?.label ?? members[0]?.label }}</div>
@@ -138,7 +128,10 @@ function onFlyoutLeave(): void {
         :class="{ 'tg-flyout-item--active': registry.activeTool.value?.id === t.id }"
         @click="activateTool(t.id)"
       >
-        <span class="tg-flyout-icon" v-html="toolIcon(iconMap[t.id] ?? 'select', registry.activeTool.value?.id === t.id ? 'active' : 'inactive')" />
+        <TrustedIcon
+          class="tg-flyout-icon"
+          :icon="trustedIcon(iconKeyFor(t.id), registry.activeTool.value?.id === t.id ? 'active' : 'inactive')"
+        />
         <span class="tg-flyout-label">{{ t.label }}</span>
       </button>
     </div>

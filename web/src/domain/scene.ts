@@ -33,7 +33,7 @@
  */
 
 import { digestOf, type EntityRef, type Version } from './identity'
-import { topologyVersionOf, MESH_VERTEX_POSITION_PROPERTY, type MeshPayload } from './geometry'
+import { topologyVersionOf, type MeshPayload } from './geometry'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 数学值（#249 §19.2：右手、Y-up；保留仿射表达能力）
@@ -265,29 +265,58 @@ export function emptyScene(id: string): Scene {
 // 类型能力（贡献式，无核心 switch）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 对象类型的能力描述。由类型贡献方注册，核心只查表。 */
-export interface ObjectTypeDescriptor {  readonly type: ObjectTypeId
+/**
+ * 对象类型的能力描述。由类型贡献方注册，核心只查表。
+ *
+ * ## 本批（#250 GF-5 收敛）删除了 `animatableProperties` 白名单
+ *
+ * 该字段原本是一份"哪些属性可动画"的字符串清单，作为写面的**内联白名单**被
+ * `application/commands.ts` 的 `validatePropertyWrite` 消费。收敛后属性语义的
+ * 唯一权威是 RNA 注册表（`application/properties.ts` 的 `PropertyDescriptor.animatable`），
+ * 该函数连同白名单一起删除，于是这个字段**零生产消费者**。
+ *
+ * 为什么是删除而不是"改成查 RNA 注册表"：`domain/` **不得** import `application/`
+ * （依赖方向单向向下，见 `tests/architecture/kernel-legacy-isolation.test.ts` 的
+ * 「内核不得依赖旧层」与分层公共出口约束）。`domain` 这里能做的只有"声明资格"，
+ * 而"资格"本身已经由 RNA 描述承载得更完整（含单位、值域、采样钩子）——
+ * 留一份查不到的清单只会成为第二个漂移源。
+ */
+export interface ObjectTypeDescriptor {
+  readonly type: ObjectTypeId
   /** 该类型数据载荷种类。 */
   readonly dataKind: ObjectDataKind
   /** 该类型是否参与"内容编辑"（相机参数属于文档，但观察视角不属于 —— §3.1）。 */
   readonly editable: boolean
-  /** 该类型的属性 ID 集合（RNA 描述由 P2 提供；此处只声明资格）。 */
-  readonly animatableProperties: readonly string[]
 }
 
+/**
+ * 内核三类对象的能力表。
+ *
+ * `editable` 只表达"该类型的载荷是否属内容编辑面"这一**类型级**事实；
+ * **逐属性的**可写性由 RNA 的 `evaluateEditability` 按当前状态求值
+ * （契约 §5.1：动态可编辑性，不是静态 readonly 开关）。
+ */
 const DEFAULT_TYPES: readonly ObjectTypeDescriptor[] = Object.freeze([
-  Object.freeze({ type: 'block', dataKind: 'blockGrid', editable: true, animatableProperties: Object.freeze(['transform.position', 'transform.rotation', 'transform.scale']) }),
-  Object.freeze({ type: 'annotation', dataKind: 'annotation', editable: true, animatableProperties: Object.freeze(['transform.position', 'transform.rotation', 'transform.scale']) }),
-  Object.freeze({ type: 'camera', dataKind: 'camera', editable: true, animatableProperties: Object.freeze(['projection.fov', 'projection.clipStart', 'projection.clipEnd', 'transform.position', 'transform.rotation']) }),
+  Object.freeze({ type: 'block', dataKind: 'blockGrid', editable: true }),
+  Object.freeze({ type: 'annotation', dataKind: 'annotation', editable: true }),
+  Object.freeze({ type: 'camera', dataKind: 'camera', editable: true }),
   /**
    * 网格对象（#254 P3）。
    *
-   * 它必须**登记**在类型表里：`application/commands.ts#validatePropertyWrite` 对
-   * 未登记类型返回 `UnsupportedOperation`（不静默当作可写）。故新增一种载荷而
-   * 忘记登记类型，会表现为"该对象完全不可编辑"—— 这是一个**显式失败**，
-   * 而不是静默半可用。
+   * ## 为什么必须在**两处**登记
+   *
+   * 收敛（#250 GF-5）之后「类型登记」分成两件事，缺一即表现为**显式失败**：
+   *
+   * | 登记处 | 承载的事实 | 缺失后果 |
+   * |---|---|---|
+   * | 本表（`domain/scene`） | `dataKind` / `editable`（能力与呈现查询） | 类型级能力查询判为未知 |
+   * | RNA 注册表（`application/kernel-properties.ts`） | 逐属性描述与值域 | 属性写被判 `property-not-registered` |
+   *
+   * 两处都登记是**有意**的，不是重复：`domain/` 不得 import `application/`
+   * （依赖单向向下），故能力表无法"查 RNA 得到"；而 RNA 需要单位/值域，
+   * 也不该由 `domain` 的字符串清单承担。分工的判据是**谁需要该事实**。
    */
-  Object.freeze({ type: 'mesh', dataKind: 'mesh', editable: true, animatableProperties: Object.freeze(['transform.position', 'transform.rotation', 'transform.scale', MESH_VERTEX_POSITION_PROPERTY]) }),
+  Object.freeze({ type: 'mesh', dataKind: 'mesh', editable: true }),
 ])
 
 export type ObjectTypeRegistry = Readonly<Record<ObjectTypeId, ObjectTypeDescriptor>>

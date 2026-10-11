@@ -191,7 +191,7 @@ function recordSession(): { editor: Editor; log: ReplayLog; initial: ReturnType<
   e.submit({ kind: 'openDocument', documentId: 'doc-1', contextId: 'ctx-1' })
   e.submit({ kind: 'addObject', contextId: 'ctx-1', objectType: 'block', name: 'A' })
   e.submit({ kind: 'addObject', contextId: 'ctx-1', objectType: 'annotation', name: 'B' })
-  e.submit({ kind: 'setProperty', contextId: 'ctx-1', refs: [{ owner: { kind: 'object', id: 'wk-object-1' }, property: 'name' }], value: 'renamed' })
+  e.submit({ kind: 'setProperty', refs: [{ owner: { kind: 'object', id: 'wk-object-1' }, property: 'block.name' }], value: 'renamed' })
   e.submit({ kind: 'setTime', contextId: 'ctx-1', time: { frame: 5, fps: 20 } })
   // 拒绝路径：目标不存在
   e.submit({ kind: 'deleteObject', contextId: 'ctx-1', objectId: 'nope' })

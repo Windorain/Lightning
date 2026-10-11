@@ -1,7 +1,18 @@
+/**
+ * **场景信息**面板 —— 生成式属性面板（#253 P2）。
+ *
+ * 旧版本手写 7 条 `kind: 'property'`（`scenemetadata.*`），每条都要有人记得加进这个
+ * 布局函数 —— 「新加属性忘了加进面板 ⇒ 属性静默消失」正是 #251 B7 的 E-6 记录的
+ * 死属性成因（11/50 条登记属性没有 UI 入口）。新形态：属性由
+ * `lightning.sceneMetadata` 声明生成，布局规格只决定**分节与顺序**，
+ * 漏配的行会被自动补齐并在 `generatedRows` 里标记出来。
+ */
+
 import type { Context } from '@/runtime/context'
 import type { PanelDeclaration } from '../types/panel'
 import { SpaceType, RegionType } from '@/runtime/screenTypes'
 import type { UILayout } from '../types/layout'
+import PropertyInspector from '../PropertyInspector.vue'
 
 export const sceneInfoPanel: PanelDeclaration = {
   id: 'scene-info-panel',
@@ -10,24 +21,14 @@ export const sceneInfoPanel: PanelDeclaration = {
   regionType: RegionType.MAIN,
   workspaces: ['preview', 'wiki'],
 
-  poll(): boolean { return true },
-  owner(ctx: Context): unknown { return ctx.getDoc().value },
+  poll(): boolean {
+    return true
+  },
+
+  component: PropertyInspector,
+
   layout(_ctx: Context): UILayout {
-    return {
-      kind: 'column', align: false, items: [
-        { kind: 'box', label: '元数据', items: [
-          { kind: 'property', rnaPath: 'scenemetadata.name', label: '名称' },
-          { kind: 'property', rnaPath: 'scenemetadata.author', label: '作者' },
-          { kind: 'property', rnaPath: 'scenemetadata.description', label: '描述', widget: 'text' },
-          { kind: 'property', rnaPath: 'scenemetadata.tags', label: '标签' },
-          { kind: 'property', rnaPath: 'scenemetadata.origin', label: '原点' },
-        ]},
-        { kind: 'separator' },
-        { kind: 'box', label: '系统信息', items: [
-          { kind: 'property', rnaPath: 'scenemetadata.created_at', label: '创建时间' },
-          { kind: 'property', rnaPath: 'scenemetadata.format_version', label: '格式版本' },
-        ]},
-      ],
-    }
+    // 属性行由 `PropertyInspector` 生成；本面板没有额外诊断片段。
+    return { kind: 'column', align: false, items: [] }
   },
 }

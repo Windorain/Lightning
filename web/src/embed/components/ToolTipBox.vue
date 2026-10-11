@@ -1,18 +1,25 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
+import ContentText from '@/editors/ContentText.vue'
 
 const props = defineProps<{
   text: string
   clientX: number
   clientY: number
   offset?: number
+  /**
+   * 本实例的主题（#259 A33）。
+   *
+   * 为什么需要它：本组件 `Teleport` 到 `body`，**脱离**实例根的 DOM 继承链，
+   * 因此读不到实例根上的 `data-lk-theme`。旧实现把这个信息放在
+   * `document.documentElement`（全局），于是同页两实例无法各持主题；
+   * 新形态由调用方把本实例主题显式传下来。
+   */
+  theme?: 'dark' | 'light'
 }>()
 
 const root = ref<HTMLElement | null>(null)
 const boxStyle = ref<Record<string, string>>({ left: '0px', top: '0px' })
-
-const html = computed(() => renderTooltipHtml(props.text))
 
 const pad = computed(() => props.offset ?? 12)
 
@@ -55,9 +62,19 @@ watch(
 
 <template>
   <Teleport to="body">
-    <div ref="root" class="wm-tooltip-box wm-tooltip-surface" role="tooltip" :style="boxStyle">
-      <!-- eslint-disable-next-line vue/no-v-html -->
-      <div class="wm-tooltip-body" v-html="html" />
+    <div
+      ref="root"
+      class="wm-tooltip-box wm-tooltip-surface"
+      role="tooltip"
+      :data-lk-theme="theme ?? 'dark'"
+      :style="boxStyle"
+    >
+      <!--
+        外部文本经**受控呈现边界**（ContentText → domain/textContent）。
+        这里没有 `v-html`：节点由允许列表产出，组件只按 `type` 分派元素。
+        （#259 A32 退役项：本文件原为 6 条 `v-html` 直通路径之一。）
+      -->
+      <ContentText class="wm-tooltip-body" :text="text" mode="mc" />
     </div>
   </Teleport>
 </template>

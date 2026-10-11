@@ -230,7 +230,10 @@
 }
 
 /* ---- Daylight / Light Theme ---- */
-[data-nei-theme="light"] {
+/* `[data-lk-theme]`：P8（#259 A33）新增的**实例作用域**选择器（沿 DOM 继承，
+   同页多实例各持主题）；`[data-nei-theme]`（文档根）保留为既有路径。 */
+[data-nei-theme="light"],
+[data-lk-theme="light"] {
   /* Panel hierarchy */
   --nei-bg-deep: #b0b0b0;
   --nei-bg-panel: #c6c6c6;

@@ -9,8 +9,7 @@
  * 另有 poll（上下文检查）和 cancel（外部中断清理）。
  */
 import type { Context } from '@/runtime/context'
-import type { ReplaceDocOptions } from '@/runtime/main'
-import type { PropertyDescriptor } from '@/workbench/ux/rna/types'
+import type { PropertyDecl } from '@/application/properties'
 
 /** 操作符属性容器（对标 Blender operator properties） */
 export type OperatorProperties = Record<string, unknown>
@@ -29,12 +28,10 @@ export interface OperatorType {
   id: string
   label: string
   description?: string
-  /** RNA 属性定义（对标 Blender operator RNA properties），用于未来自动 UI 生成 */
-  properties?: PropertyDescriptor[]
+  /** RNA 属性**声明**（数据，非 get/set 闭包）—— 与属性面板共用同一描述协议 */
+  properties?: PropertyDecl[]
   /** 是否自动包裹 undo */
   flagUndo?: boolean
-  /** undo/redo 时 replaceDoc 选项（默认全量 structEpoch） */
-  undoReplaceDocOptions?: ReplaceDocOptions
   /** 无交互执行 */
   exec?(ctx: Context, props: OperatorProperties): void
   /** 初始化交互，返回模态状态 */

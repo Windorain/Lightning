@@ -19,37 +19,16 @@ export interface Rect {
 }
 
 // ---------------------------------------------------------------------------
-// RNA types (shared between embed and workbench)
+// RNA 类型已迁出（#253 P2，退役 #3）
 // ---------------------------------------------------------------------------
-
-export type RNAPropType =
-  | 'string' | 'number' | 'boolean' | 'enum' | 'color' | 'vector3'
-
-export interface PropertyDescriptor {
-  name: string
-  type: RNAPropType
-  label: string
-  description: string
-  default: unknown
-  min?: number
-  max?: number
-  enumItems?: string[]
-  update?: string
-  uiWidget?: 'text' | 'number' | 'slider' | 'stepper' | 'stepper-compact' | 'checkbox' | 'dropdown' | 'color' | 'vector'
-  get(owner: unknown): unknown
-  set(owner: unknown, value: unknown): void
-}
-
-export interface RNAStruct {
-  name: string
-  description: string
-  properties: PropertyDescriptor[]
-}
-
-export interface RNARegistry {
-  structs: Map<string, RNAStruct>
-  register(struct: RNAStruct): void
-  resolve(path: string): PropertyDescriptor | null
-  widgetFor(prop: PropertyDescriptor): string
-}
+//
+// 旧此处定义 `RNAPropType` / `PropertyDescriptor`(含 `get`/`set` 闭包与 `uiWidget` 控件名)
+// / `RNAStruct` / `RNARegistry`。三者的问题（#251 B7 证据，契约 §5.1/§5.2）：
+//  1. 描述里带 `get`/`set` **闭包** ⇒ 调用方拿到「直接改内存」的旁路写面（禁止）；
+//  2. 描述里带 `uiWidget` **控件名** ⇒ 换控件必须改核心（RNA 不得认识控件）；
+//  3. `update?: string` 零读者；`enumItems: string[]` 无法表达「值 ≠ 显示名」。
+//
+// 新的属性描述在 `@/application/properties`（数据、无闭包、无控件名），
+// 由 `@/editors/workbench-inspector` 贡献具体对象类型，`@/editors/workbench-rna`
+// 接到活上下文。旧类型同批删除，**不留兼容别名**（#171 退役纪律）。
 

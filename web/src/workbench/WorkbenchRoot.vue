@@ -22,7 +22,7 @@ import { createWorkbenchHost } from '@/runtime/host/workbenchHost'
 
 import { bindChromeDom, CHROME_REGION } from '@/runtime/chromeBinder'
 import { createChromeKeymapHandler } from '@/handlers/chromeKeymapHandler'
-import UIRenderer from '@/workbench/ux/UIRenderer.vue'
+import ReadonlyLayout from '@/workbench/ux/ReadonlyLayout.vue'
 import PanelTabs from '@/workbench/ux/PanelTabs.vue'
 
 import { createContextMenu, showContextMenu, hideContextMenu, type ContextMenuItem } from '@/workbench/ux/contextMenu'
@@ -148,13 +148,11 @@ ctx.log.injectStateRefs({
   <WorkbenchShell v-show="workspace === 'preview' || workspace === 'wiki'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand"><svg class="wb-brand-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>LIGHTNING</span>
-        <UIRenderer
+        <ReadonlyLayout
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
           :layout="panel.layout"
-          :rna="ctx.getRna()"
-          :owner="panel.owner"
+          @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
         />
         <MenubarWikiStatus />
         <MenubarFullscreenButton />
@@ -166,8 +164,12 @@ ctx.log.injectStateRefs({
     <template v-if="workspace !== 'wiki' && !toolshelfCollapsed" #tool-shelf>
       <div class="wb-toolshelf">
         <template v-for="panel in activeToolshelfPanels" :key="panel.id">
-          <component v-if="panel.component" :is="panel.component" />
-          <UIRenderer v-else :layout="panel.layout" :rna="ctx.getRna()" :owner="panel.owner" />
+          <component v-if="panel.component" :is="panel.component" :ctx="ctx" />
+          <ReadonlyLayout
+            v-else
+            :layout="panel.layout"
+            @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
+          />
         </template>
       </div>
     </template>
@@ -178,7 +180,7 @@ ctx.log.injectStateRefs({
       </div>
     </template>
     <template v-if="!propsCollapsed" #properties>
-      <PanelTabs :panels="activePropertiesPanels" :rna="ctx.getRna()" :ctx="ctx" />
+      <PanelTabs :panels="activePropertiesPanels" :ctx="ctx" @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)" />
     </template>
     <template #statusbar>
       <StatusBar />
@@ -188,13 +190,11 @@ ctx.log.injectStateRefs({
   <WorkbenchShell v-if="workspace === 'export'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand"><svg class="wb-brand-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>LIGHTNING</span>
-        <UIRenderer
+        <ReadonlyLayout
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
           :layout="panel.layout"
-          :rna="ctx.getRna()"
-          :owner="panel.owner"
+          @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
         />
         <MenubarWikiStatus />
         <MenubarFullscreenButton />
@@ -214,13 +214,11 @@ ctx.log.injectStateRefs({
   <WorkbenchShell v-if="workspace === 'materials'">
     <template #menubar>
       <div class="wb-menubar-inner">
-        <span class="wb-brand"><svg class="wb-brand-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>LIGHTNING</span>
-        <UIRenderer
+        <ReadonlyLayout
           v-for="panel in activeHeaderPanels"
           :key="panel.id"
           :layout="panel.layout"
-          :rna="ctx.getRna()"
-          :owner="panel.owner"
+          @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
         />
         <MenubarWikiStatus />
         <MenubarFullscreenButton />

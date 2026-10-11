@@ -24,7 +24,6 @@ import type { StructureDefinition } from '@/render/schema/types'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { buildItemHitIndex } from '@/pure/itemIndex'
 import { resolvePreviewTooltipText, resolveViewportTooltipChain } from '@/pure/tooltipResolution'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
 import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 
 export function useEmbedTooltip(deps: {
@@ -110,8 +109,13 @@ export function useEmbedTooltip(deps: {
           })
         }
         // Sidebar: 物品身份键先查物品索引表（B-4），宿主键回退 NEI（旧文件宿主行语义不变）
+        //
+        // 这里返回**原始文本行**（以 `\n` 连接），不再返回 HTML 串：
+        // 旧实现是 `itemLines.map(renderTooltipHtml).join('\n')`，把格式解析
+        // 提前到解析层并与「该显示哪几行」这个领域问题混在一起。
+        // 现在呈现格式由受控边界（`editors/ContentText.vue`，逐行模式）统一决定（#259 A32）。
         const itemLines = resolveSidebarLines(h.blockId)
-        if (itemLines.length > 0) return itemLines.map(l => renderTooltipHtml(l)).join('\n')
+        if (itemLines.length > 0) return itemLines.join('\n')
         return h.blockId
       }
 

@@ -251,29 +251,14 @@ export function regionAt(
   return null
 }
 
-/** Infer the UI widget type from a property descriptor */
-export function widgetFor(prop: {
-  uiWidget?: string
-  type: string
-  enumItems?: unknown[]
-  min?: unknown
-  max?: unknown
-}): string {
-  if (prop.uiWidget) return prop.uiWidget
-  switch (prop.type) {
-    case 'string':
-      return prop.enumItems && prop.enumItems.length > 0 ? 'dropdown' : 'text'
-    case 'number':
-      return prop.min != null && prop.max != null ? 'slider' : 'number'
-    case 'boolean':
-      return 'checkbox'
-    case 'color':
-      return 'color'
-    case 'enum':
-      return 'dropdown'
-    case 'vector3':
-      return 'vector'
-    default:
-      return 'text'
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// `widgetFor()` 已删除（#253 P2，退役 #3）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 旧此处有 `widgetFor(prop)`：按 `uiWidget` / `type` / `min`/`max` 猜控件名。
+// 它与 `RNAWidget.vue` 的 `inferWidget()` 是**同一逻辑的两份实现**（#251 B7 的 E-8），
+// 而它的唯一调用方 `registry.widgetFor()` 是一个**没有任何调用者的死接口**。
+//
+// 控件选择现在是 `@/editors/property-controls` 的 `modelFor(desc)`（全仓库唯一一处），
+// 依据是 RNA 描述的值类型与合法域 —— RNA 描述里**不再有控件名**（契约 §5.1）。
+

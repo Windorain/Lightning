@@ -42,8 +42,9 @@ import {
   type Transition,
 } from '@/application/commands'
 import { captureReadView, type ReadView } from '@/application/queries'
+import type { CommandOutcome } from '@/application/contracts'
 import { emptyApplicationState, type ApplicationState } from '@/application/state'
-import { canonicalize, type ChangeSummary, type Version } from '@/domain/identity'
+import { canonicalize, type Version } from '@/domain/identity'
 import { type DomainError, wouldBlock } from '@/domain/errors'
 import {
   DEFAULT_BUDGET,
@@ -65,11 +66,16 @@ export interface CommandTicket {
   readonly commandId: string
 }
 
-/** 契约 §3.1。 */
-export type CommandOutcome =
-  | { readonly status: 'applied'; readonly version: Version; readonly changes: ChangeSummary }
-  | { readonly status: 'unchanged'; readonly version: Version }
-  | { readonly status: 'rejected'; readonly error: DomainError }
+/**
+ * 契约 §3.1 —— `CommandOutcome` 的**唯一权威是 `application/contracts`**。
+ *
+ * 本文件曾本地定义一份（与 `contracts.ts` 的同名同义并存）。收敛后只再导出：
+ * `CommandOutcome` 是命令结算的**契约类型**，它的分类（applied/unchanged/rejected）
+ * 与构造子（`appliedOutcome`/`unchangedOutcome`/`rejectedOutcome`）必须与
+ * RNA 侧（`property-commands.ts` 用的那套）**逐个字段相同** ——
+ * 两处各定义一份，`toOutcome` 的映射就可能少一个字段而无人发现。
+ */
+export type { CommandOutcome }
 
 /** 契约 §2.2 —— `ReadView` 在 `application/queries` 落地（此处只做类型出口）。 */
 export type { ReadView }

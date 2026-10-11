@@ -27,6 +27,18 @@ import { effectiveTransform, type EditContext, type SelectionState, type TimeVal
 import { findObject, findObjectData, objectsInOrder, type ObjectData, type Scene, type SceneObject, type Transform } from '@/domain/scene'
 import type { Document } from '@/domain/document'
 import type { ApplicationState } from './state'
+import { localPropertyOf } from './contracts'
+import {
+  describeProperty as describeRnaProperty,
+  evaluateEditability as evaluateRnaEditability,
+  readProperty as readRnaProperty,
+  type Editability,
+  type PropertyValue,
+  type PropertyDescriptor,
+  type ReadMode,
+} from './properties'
+import { kernelAccessOf, kernelPropertyRegistry } from './kernel-properties'
+import { ALL_CAPABILITIES } from './commands'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 查询函数（显式接受状态；纯）
@@ -189,105 +201,126 @@ export function queryLease(state: ApplicationState, documentId: string): Result<
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 属性查询（骨架；类型描述来源是 P2 的 RNA）
+// 属性查询 —— 描述与读取**全部来自 RNA 注册表**（#250 GF-5 收敛项 1/2）
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface PropertyDescriptor {
-  readonly id: string
-  readonly valueType: 'number' | 'vec3' | 'quat' | 'string' | 'boolean' | 'enum' | 'color' | 'reference'
-  readonly unit?: string
-  readonly animatable: boolean
-  readonly display: { readonly labelKey: string; readonly fallback?: string }
-}
+/**
+ * `PropertyDescriptor` —— **唯一权威是 `application/properties`**。
+ *
+ * 本文件曾本地定义一份窄化版本（`valueType` 是封闭的 8 项联合、没有 `domain`/`nullable`），
+ * 与 RNA 的完整描述**同名不同义**。那不是"两处实现同一个概念"，而是
+ * **两套不兼容的描述**：按 `queries.ts` 的定义，`number` 与 `vec3` 之外的信息无法表达
+ * （单位、合法域、引用类型、可空性），UI 只能拿到描述的一半。
+ * 收敛后本文件只再导出 RNA 的定义。
+ */
+export type { PropertyDescriptor }
 
-/** 结构属性的最小描述（不预造 P2 的 RNA 注册表）。 */
-const STRUCTURAL_DESCRIPTORS: Readonly<Record<string, PropertyDescriptor>> = Object.freeze({
-  name: Object.freeze({ id: 'name', valueType: 'string', animatable: false, display: Object.freeze({ labelKey: 'property.name', fallback: 'Name' }) }),
-  visible: Object.freeze({ id: 'visible', valueType: 'boolean', animatable: false, display: Object.freeze({ labelKey: 'property.visible', fallback: 'Visible' }) }),
-  'transform.position': Object.freeze({
-    id: 'transform.position',
-    valueType: 'vec3',
-    unit: 'm',
-    animatable: true,
-    display: Object.freeze({ labelKey: 'property.transform.position', fallback: 'Location' }),
-  }),
-  'transform.rotation': Object.freeze({
-    id: 'transform.rotation',
-    valueType: 'quat',
-    animatable: true,
-    display: Object.freeze({ labelKey: 'property.transform.rotation', fallback: 'Rotation' }),
-  }),
-  'transform.scale': Object.freeze({
-    id: 'transform.scale',
-    valueType: 'vec3',
-    animatable: true,
-    display: Object.freeze({ labelKey: 'property.transform.scale', fallback: 'Scale' }),
-  }),
-})
+/**
+ * `PropertyValue` —— **唯一权威是 `application/properties`**。
+ *
+ * 本文件曾本地定义一份（缺 `ColorValue`/`ReferenceValue`/`string[]`/`ExtensionValue`），
+ * 使"读面能返回的值"比"写面能接受的值"窄 —— 扩展类型的值经读面会被类型系统判为非法。
+ */
+export type { PropertyValue }
+
+/**
+ * 结构属性的描述**来自注册表**，不再是本文件的第二份表。
+ *
+ * 本文件曾有 `STRUCTURAL_DESCRIPTORS`（`name`/`visible`/`transform.position|rotation|scale`
+ * 五条的硬编码描述），与 RNA 注册表并存。它已被删除：
+ * `describeProperty` 现在查 `kernelPropertyRegistry()`，
+ * 于是「未注册属性返回 `UnsupportedOperation`」与「已注册属性的单位/域/动画资格」
+ * 来自**同一份权威**，不再有两套描述谁先命中的问题。
+ *
+ * 注意 `transform.pivot` 就在这次收敛中暴露了旧表的缺口：旧表没有它，
+ * 而 RNA 声明有 —— 旧实现下 `describe('transform.pivot')` 会报"未注册"，
+ * 尽管写面（`applyPropertyValue`）确实支持它。这个不一致正是"两份描述"的必然结果。
+ */
 
 export function describeProperty(state: ApplicationState, ref: PropertyRef): Result<PropertyDescriptor> {
   const resolved = resolvePropertyTarget(state, ref)
   if (!resolved.ok) return resolved
-  const desc = STRUCTURAL_DESCRIPTORS[ref.property]
-  if (!desc) {
-    // 未登记属性一律显式 UnsupportedOperation —— 不返回假描述（#249 §13 禁止假成功）
-    return err(unsupportedOperation({ property: ref.property, ownerId: ref.owner.id }))
-  }
-  return ok(desc)
+  // 描述由 RNA 注册表解析（含 objectTypeId 与 owner.kind 的一致性校验）。
+  return describeRnaProperty(kernelPropertyRegistry().registry, ref)
 }
 
 /** `authored` = 文档基础值；`effective` = 经暂存/动画覆盖后的有效值（契约 §2.2 显式二选一）。 */
-export type PropertyReadMode = 'authored' | 'effective'
+export type PropertyReadMode = ReadMode
 
-export type PropertyValue = number | string | boolean | null | Readonly<{ x: number; y: number; z: number }> | Readonly<{ x: number; y: number; z: number; w: number }>
-
-export function readProperty(state: ApplicationState, contextId: string, ref: PropertyRef, mode: PropertyReadMode): Result<PropertyValue> {
+/**
+ * 读一个属性值 —— 经**同一份** RNA 值 handler（含分量寻址与有效值优先级）。
+ *
+ * `mode === 'effective'` 时的覆盖层来自编辑上下文的交互暂存（`interaction.overrides`），
+ * 与 `interaction.effectiveTransform` 共用同一状态，因此两个读面不可能给出互相矛盾的有效值。
+ */
+export function readProperty(
+  state: ApplicationState,
+  contextId: string,
+  ref: PropertyRef,
+  mode: PropertyReadMode,
+): Result<PropertyValue> {
   const resolved = resolvePropertyTarget(state, ref)
   if (!resolved.ok) return resolved
   const ctx = ctxOf(state, contextId)
   if (!ctx) return err(missingTarget({ contextId }))
   const doc = docOf(state, ctx.documentId)
   if (!doc) return err(missingTarget({ documentId: ctx.documentId }))
-
-  const obj = findObject(doc.scene, ref.owner.id)
-  if (!obj) return err(missingTarget({ objectId: ref.owner.id }))
-
-  if (ref.property === 'name') return ok(obj.name)
-  if (ref.property === 'visible') return ok(obj.visible)
-  if (ref.property.startsWith('transform.')) {
-    const t = mode === 'effective' ? (effectiveTransform(ctx, doc.scene, obj.id) ?? obj.transform) : obj.transform
-    const field = ref.property.slice('transform.'.length)
-    if (field === 'position') return ok(t.position)
-    if (field === 'scale') return ok(t.scale)
-    if (field === 'rotation') return ok(t.rotation)
-    if (field === 'pivot') return ok(t.pivot)
-    return err(unsupportedOperation({ property: ref.property }))
-  }
-  return err(unsupportedOperation({ property: ref.property, ownerId: ref.owner.id }))
+  const access = kernelAccessOf(doc, contextId, ALL_CAPABILITIES, true)
+  if (mode === 'authored') return readRnaProperty(kernelPropertyRegistry().registry, ref, 'authored', access)
+  // 有效值：交互暂存是**唯一**的覆盖来源（P4 的轨道/预览层经 `effectiveSources` 扩展）。
+  const staged = ref.owner.kind === 'object' ? stagedValueOf(ctx, doc, ref) : undefined
+  return readRnaProperty(kernelPropertyRegistry().registry, ref, 'effective', access, staged === undefined ? {} : { staged })
 }
 
-/** 可编辑性：**结构化原因**，不是布尔（契约 §2.2：「`editability` 返回结构化原因」）。 */
-export type Editability =
-  | { readonly kind: 'editable' }
-  | { readonly kind: 'readOnly'; readonly owner: string; readonly reason: string }
-  | { readonly kind: 'missing'; readonly target: string }
+/**
+ * 交互相对于该属性的暂存值（`mode === 'effective'` 的输入）。
+ *
+ * 暂存按**对象**记录（`interaction.overrides[objectId]` 是一整个 `Transform`），
+ * 故只有 `transform.*` 属性能从中取值；其余属性无暂存层，读面回落到基础值。
+ */
+function stagedValueOf(ctx: EditContext, doc: Document, ref: PropertyRef): PropertyValue | undefined {
+  if (ctx.interaction === null) return undefined
+  const override = ctx.interaction.overrides[ref.owner.id]
+  if (!override) return undefined
+  const local = localPropertyOf(ref.property, ref.owner.kind === 'object' ? objectTypeOf(doc, ref.owner.id) : undefined)
+  if (!local.startsWith('transform.')) return undefined
+  const field = local.slice('transform.'.length) as 'position' | 'rotation' | 'scale' | 'pivot'
+  return override[field]
+}
+
+/** 对象在文档里的类型（供 `localPropertyOf` 剥离限定前缀时的 objectTypeId）。 */
+function objectTypeOf(doc: Document, objectId: string): string | undefined {
+  return findObject(doc.scene, objectId)?.type
+}
+
+/**
+ * 可编辑性 —— 由**当前状态与能力**求值（#249 §6），走 RNA 的同一函数。
+ *
+ * 本文件曾有第二个 `editability`（返回 `{kind: 'editable'|'readOnly'|'missing'}`），
+ * 与 RNA 的 `{editable, reason, because}` **形态不同**。两个可编辑性求值必然漂移，
+ * 且窄形态丢掉了 `because`（参与求值的动态事实）—— 那正是 A08「动态性」判据要断言的东西。
+ * 收敛后本文件再导出 RNA 的 `Editability`，`ReadView` 的 `properties.editability`
+ * 返回同一形态。
+ */
+export type { Editability }
 
 export function editability(state: ApplicationState, ref: PropertyRef): Result<Editability> {
-  if (ref.owner.kind !== 'object') {
-    return ok({ kind: 'readOnly', owner: ref.owner.kind, reason: 'notAnObjectProperty' })
-  }
-  // 目标不存在时**不**用 `editability` 报错（它是"可编辑性查询"，不是存在性查询）
-  const doc = firstDocument(state)
+  const resolved = resolvePropertyTarget(state, ref)
+  if (!resolved.ok) return resolved
+  const ctx = contextOfOwner(state, ref)
+  const doc = ctx ? docOf(state, ctx.documentId) : firstDocument(state)
   if (!doc) return err(missingTarget({ documentId: ref.owner.id }))
-  const obj = findObject(doc.scene, ref.owner.id)
-  if (!obj) return ok({ kind: 'missing', target: ref.owner.id })
-  const data = findObjectData(doc.scene, obj.dataId)
-  if (!data) return ok({ kind: 'missing', target: obj.dataId })
-  if (data.source === 'content') return ok({ kind: 'readOnly', owner: data.source, reason: 'contentOwned' })
-  if (!STRUCTURAL_DESCRIPTORS[ref.property]) {
-    return ok({ kind: 'readOnly', owner: 'rna', reason: 'propertyNotRegistered' })
+  const access = kernelAccessOf(doc, ctx?.id ?? '', ALL_CAPABILITIES, true)
+  return ok(evaluateRnaEditability(kernelPropertyRegistry().registry, ref, access))
+}
+
+/** 该引用所属文档上绑定的编辑上下文（用于租约与暂存事实）。 */
+function contextOfOwner(state: ApplicationState, ref: PropertyRef): EditContext | undefined {
+  for (const ctx of Object.values(state.contexts)) {
+    const doc = docOf(state, ctx.documentId)
+    if (doc && ref.owner.kind === 'object' && findObject(doc.scene, ref.owner.id)) return ctx
   }
-  return ok({ kind: 'editable' })
+  return undefined
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -229,18 +229,71 @@ describe('依赖方向无环：旧层目前**尚未**反向依赖新内核（否
     // 说明：旧层**将来**会迁到新层（上述归口批次），届时这条断言会随迁移一起改。
     // 现在它是"新内核已建成但尚未被旧代码反向依赖"的事实记录 ——
     // 若有旧文件开始 import 内核，说明有人在用"新层"给旧路径续命，必须显式登记而非静默。
+    //
+    // ## 判定面是**文件级**：来源必须是**旧层**，不能是"不在 KERNEL_FILES 里的任何文件"
+    //
+    // 初版按"来源 ∉ KERNEL_FILES ⇒ 旧"判定。那在只有 P1 那 11 个文件算新层时成立；
+    // 但 `boundary-rules.mjs` 的登记表此后已陆续纳入 P5 的 `presentation/**` 等新层实现，
+    // 于是"新层 → 新层"的导入（`presentation/compileScene.ts → @/domain/errors`）
+    // 会被误判成"旧层反向依赖内核" —— 那是**假红**（与 P1 在 `boundary-rules.mjs`
+    // 里把同一条判据改成文件级时踩到的是同一类问题）。
+    //
+    // 本批（GF-5 收敛）删除了 `presentation/result.ts` 的第二份契约定义，
+    // 使 `presentation/compileScene.ts` 直接 import `@/domain/errors` ——
+    // 这正是"类型单一来源"的应有结果（向下依赖，层深 2，符合公共出口约束），
+    // 不是"用新层给旧路径续命"。故判定改为：**来源落在 OLD_LAYERS 才算旧**。
     const { facts } = loadGraph()
     const kernelNoExt = new Set(KERNEL_FILES.map((f) => f.replace(/\.(ts|tsx|mts|vue)$/, '')))
     const reverse = []
     for (const f of facts) {
       const fromRel = path.relative(SRC_ROOT, f.fromFile).replace(/[\\/]+/g, '/')
       if (KERNEL_FILES.includes(fromRel)) continue
+      // **来源**必须是旧层（用判据自身的旧层定义，不靠"不在内核清单里"反推）。
+      if (!isOldLayerTarget(fromRel.replace(/\.(ts|tsx|mts|vue)$/, ''))) continue
       const target = resolveTarget(f)
       if (target !== null && kernelNoExt.has(target)) {
         reverse.push(`${f.fromRel}:${f.line}  → ${f.specifier}`)
       }
     }
     expect(reverse, `旧层反向依赖内核（须登记为迁移，不得静默）:\n${reverse.join('\n')}`).toEqual([])
+  })
+
+  it('反空洞真 + 负对照：内核确实被**新层**依赖，而注入一条旧层导入会被抓到', () => {
+    // 反空洞真：收敛后 `presentation/**`（新层）确实 import 内核 ——
+    // 若这一条不成立，"旧层零反向依赖"可能只是"没人 import 内核"。
+    const { facts } = loadGraph()
+    const kernelNoExt = new Set(KERNEL_FILES.map((f) => f.replace(/\.(ts|tsx|mts|vue)$/, '')))
+    const newLayerDependents = facts.filter((f) => {
+      const fromRel = path.relative(SRC_ROOT, f.fromFile).replace(/[\\/]+/g, '/')
+      if (KERNEL_FILES.includes(fromRel)) return false
+      if (isOldLayerTarget(fromRel.replace(/\.(ts|tsx|mts|vue)$/, ''))) return false
+      const t = resolveTarget(f)
+      return t !== null && kernelNoExt.has(t)
+    })
+    expect(
+      newLayerDependents.length,
+      '新层之间存在真实的内核依赖（否则"旧层零反向依赖"是空洞真）',
+    ).toBeGreaterThan(0)
+
+    // 负对照：同一判据对**旧层**来源必须判红（证明它不是恒绿）。
+    const injected = [
+      {
+        fromFile: path.join(SRC_ROOT, 'render', 'someLegacyModule.ts'),
+        fromRel: 'render/someLegacyModule.ts',
+        specifier: '@/domain/errors',
+        kind: 'import',
+        isTypeOnly: false,
+        line: 1,
+        column: 1,
+        syntax: "import { err } from '@/domain/errors'",
+      },
+    ]
+    const flagged = injected.filter((f) => {
+      if (!isOldLayerTarget(f.fromRel.replace(/\.(ts|tsx|mts|vue)$/, ''))) return false
+      const t = resolveTarget(f)
+      return t !== null && kernelNoExt.has(t)
+    })
+    expect(flagged, '旧层 import 内核必须判红').toHaveLength(1)
   })
 })
 
@@ -312,9 +365,32 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
   it('`setProperty` 是**唯一**的属性写命令（命令联合的封闭性）', () => {
     // 从命令层源码里抽出 `kind:` 字面量集合，断言与契约的命令清单一致 ——
     // 若有人偷偷加一个 `patch`/`setField` 式命令，这条会失败。
-    const text = fs.readFileSync(path.join(SRC_ROOT, 'application', 'commands.ts'), 'utf8')
-    const kinds = [...text.matchAll(/readonly kind: '([a-zA-Z]+)'/g)].map((m) => m[1])
-    const unique = [...new Set(kinds)].sort()
+    //
+    // ## 为什么要读两个文件（#250 GF-5 收敛后的形态）
+    //
+    // 收敛前 `SetPropertyCommand` 在 `commands.ts` 里**再定义**一份，
+    // 故只看该文件就能抽到 `'setProperty'`。收敛后 `commands.ts` 只**再导出**
+    // 该类型，唯一权威在 `application/property-commands.ts`（RNA 的公开命令类型）——
+    // 只看一个文件会漏掉 `setProperty`，于是这条断言会以"清单少一项"的形式失败。
+    //
+    // 修正的做法不是把 `setProperty` 从期望清单里删掉（那等于放松判据、
+    // 让"属性写命令"从此无人检查），而是**两处都读**：契约的命令联合横跨
+    // "命令总表"（`commands.ts`）与"RNA 公开命令"（`property-commands.ts`）。
+    const readKinds = (rel: string): string[] => {
+      const text = fs.readFileSync(path.join(SRC_ROOT, rel), 'utf8')
+      return [...text.matchAll(/readonly kind: '([a-zA-Z]+)'/g)].map((m) => m[1])
+    }
+    /** `property-commands.ts` 的 `SetPropertyCommand` 用 `Readonly<{ kind: … }>`（无 `readonly` 前缀）。 */
+    const setPropertyKinds = (): string[] => {
+      const text = fs.readFileSync(path.join(SRC_ROOT, 'application/property-commands.ts'), 'utf8')
+      const start = text.indexOf('export type SetPropertyCommand')
+      expect(start, '`SetPropertyCommand` 必须定义在 `property-commands.ts`').toBeGreaterThan(-1)
+      const block = text.slice(start, text.indexOf('}>', start))
+      return [...block.matchAll(/kind: '([a-zA-Z]+)'/g)].map((m) => m[1])
+    }
+    const unique = [
+      ...new Set([...readKinds('application/commands.ts'), ...setPropertyKinds()]),
+    ].sort()
     expect(unique).toEqual(
       [
         'addObject',
@@ -336,6 +412,11 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
         'updateInteraction',
       ].sort(),
     )
+    // **唯一性**：属性写命令恰好一个（不是"清单里有 setProperty 就算过"）。
+    // `setChannelValue` 是**编辑上下文**的具名命令（通道取值），不经通用属性写，
+    // 且它写的是 context 而不是属性值 —— 故不在这一组里。
+    const propertyWrites = unique.filter((k) => /set(Property|Field|Value)|patch|assign|merge|apply/i.test(k))
+    expect(propertyWrites, '通用属性写命令必须恰好是 `setProperty`').toEqual(['setProperty'])
     // 明确的负面清单：这些名字一旦出现就意味着"暴露任意字段 patch"
     for (const banned of ['patch', 'setField', 'assign', 'merge', 'applyPatch']) {
       expect(unique, `不得引入 \`${banned}\` 式通用字段写命令（契约 §5.2）`).not.toContain(banned)

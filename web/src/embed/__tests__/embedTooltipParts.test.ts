@@ -15,7 +15,6 @@ import { RuntimeDocument } from '@/context/runtimeDocument'
 import type { EmbedHover } from '@/runtime/hover'
 import type { PartTooltipInfo } from '@/pure/tooltipResolution'
 import type { StructureDefinition } from '@/render/schema/types'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
 
 import ae2Fixture from '../../../e2e/fixtures/parts-ae2-multibox.v2.json'
 
@@ -87,13 +86,13 @@ describe('useEmbedTooltip — 部件命中（fixture: parts-ae2-multibox）', ()
   it('同格无部件命中（part=null）⇒ 宿主 NEI 回退（既有行为不劣化）', () => {
     const { hoverRef, api } = makeTooltip({})
     hoverRef.value = blockHover(CABLE_BUS, 0, null)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    expect(api.tooltipText.value).toBe('ME Glass Cable - Fluix')
   })
 
   it('满方块格（石头）⇒ 宿主 NEI 回退，与基线一致', () => {
     const { hoverRef, api } = makeTooltip({})
     hoverRef.value = blockHover(STONE, 1, null)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('Stone'))
+    expect(api.tooltipText.value).toBe('Stone')
   })
 })
 
@@ -118,7 +117,7 @@ describe('useEmbedTooltip — 逐格人工说明叠加层（两条链不互相�
   it('满方块格无逐格说明（-1）⇒ 宿主 NEI 回退不受部件链影响', () => {
     const { hoverRef, api } = makeTooltip({ def: defWithNote, palette: ['人工说明'] })
     hoverRef.value = blockHover(STONE, 1, null)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('Stone'))
+    expect(api.tooltipText.value).toBe('Stone')
   })
 })
 
@@ -132,7 +131,7 @@ describe('useEmbedTooltip — 既有门禁与旁路不变', () => {
   it('侧栏悬停不携带部件 ⇒ NEI 全行（既有行为）', () => {
     const { hoverRef, api } = makeTooltip({})
     hoverRef.value = { kind: 'block', source: 'sidebar', blockId: CABLE_BUS, clientX: 0, clientY: 0 }
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    expect(api.tooltipText.value).toBe('ME Glass Cable - Fluix')
   })
 
   it('无 hover / 无定义 ⇒ 空串', () => {
@@ -222,7 +221,7 @@ describe('B-4 侧栏物品行：物品身份键 → itemIndex 说明行', () => 
     expect(api.tooltipText.value).toBe(STORAGE_ITEM_KEY)
     // 宿主键（block_registry 键）⇒ NEI 既有语义不变
     hoverRef.value = sidebarHover(CABLE_BUS)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    expect(api.tooltipText.value).toBe('ME Glass Cable - Fluix')
   })
 
   it('键巧合同形时物品索引表优先（单一数据源 = itemIndex）', () => {
@@ -237,7 +236,7 @@ describe('B-4 侧栏物品行：物品身份键 → itemIndex 说明行', () => 
     const { hoverRef, api } = makeTooltip({}) // ae2Def 无 itemIndex
     expect(api.tooltipText.value).toBe('')
     hoverRef.value = sidebarHover(CABLE_BUS)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    expect(api.tooltipText.value).toBe('ME Glass Cable - Fluix')
   })
 
   it('showHoverTooltip 门禁：侧栏物品行不受该开关影响（门禁沿用现状，只在视口路径）', () => {
