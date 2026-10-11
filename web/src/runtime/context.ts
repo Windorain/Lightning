@@ -284,7 +284,8 @@ export class Context {
     const rid = regionId ?? this.resolveInputRegionId() ?? this.viewports.activeId.value
     const slot = rid ? this.viewports.get(rid) : this.viewports.active.value
     if (!slot) throw new Error('getViewportCamera: no viewport slot')
-    return this.main.cameras[slot.cameraMainKey]
+    // `ensureCamera`：键空间按 region 开放（#282）—— 新视口的键可能尚未创建。
+    return this.main.ensureCamera(slot.cameraMainKey)
   }
 
   getOperators(): Main['registries']['operatorsFacade'] {

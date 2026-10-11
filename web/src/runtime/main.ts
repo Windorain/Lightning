@@ -5,6 +5,7 @@ import {
   createMainCameraStore,
   type CameraMainKey,
   type EmbedPublishSettings,
+  type MainCameraStore,
 } from '@/runtime/mainCameras'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
 import type { EmbedWorkbenchEditHandlers } from '@/embed/embedContract'
@@ -84,7 +85,16 @@ export class Main {
   readonly contentRefreshTick = ref(0)
 
   readonly registries: MainRegistries
+  /**
+   * 逻辑相机存储（**按键动态分配**；#282 P10b）。
+   *
+   * 从"固定两键 `{embed, workbench}`"改为按 **region id** 分配 —— 于是 Area 分割出
+   * 的每个 3D 视口各有自己的机位（A05「保持独立观察视角」/§3.4「观察视角…各实例独立」）。
+   * 详见 `mainCameras` 的文件头。
+   */
   readonly cameras: Record<CameraMainKey, Ref<ViewportCameraState | null>>
+  /** 相机存储本体（`cameras` 是它的按键视图；新增键请经 `ensure`）。 */
+  private readonly cameraStore: MainCameraStore
   /** 文档 `meta.embed_initial_view` 的运行时镜像（加载/同步后写入） */
   readonly embedInitialView: Ref<ViewportCameraState | null>
   readonly embedPublish: Ref<EmbedPublishSettings>
@@ -108,9 +118,26 @@ export class Main {
       parsers: parsers ?? createParserRegistry(),
     }
     const store = createMainCameraStore()
+    this.cameraStore = store
     this.cameras = store.cameras
     this.embedInitialView = store.embedInitialView
     this.embedPublish = store.embedPublish
+  }
+
+  /**
+   * 取（必要时创建）某相机键的 `Ref`。
+   *
+   * 为什么需要它：`cameras` 是**开放**键空间（按 region 分配），故消费者不能假设
+   * 键已存在。旧形态下 `cameras[key]` 对两个固定键恒有值，新形态下"新视口的键"
+   * 要经此创建 —— 否则第二个 3D Area 的机位会写到 `undefined`（静默丢弃）。
+   */
+  ensureCamera(key: CameraMainKey): Ref<ViewportCameraState | null> {
+    return this.cameraStore.ensure(key)
+  }
+
+  /** 已分配的相机键（稳定排序；供诊断与 A13 资源对账）。 */
+  cameraKeys(): readonly CameraMainKey[] {
+    return this.cameraStore.keys()
   }
 
   /** 在 Context 创建后绑定 operator 门面（避免重复 wrap） */
