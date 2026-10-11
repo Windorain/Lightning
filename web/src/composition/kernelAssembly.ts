@@ -106,17 +106,21 @@ import {
 } from '@/domain/content'
 import { EMPTY_ANIMATION, type AnimationState } from '@/domain/animation'
 import { err, invalidValue, ok, type Result } from '@/domain/errors'
+import { normalizeCellContent, type CellContent, type CellContentTable } from '@/domain/cellContent'
+import { blockGeometryAsset, decodeBlockGeometry, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
 import {
   objectData,
   sceneObject,
   withObject,
   emptyScene,
+  type AnnotationGeometry,
   type ObjectData,
   type ObjectDataPayload,
   type Scene,
   type SceneObject,
 } from '@/domain/scene'
 import type { Transform } from '@/domain/scene'
+import { assemblePaletteContent, assembleTooltipContent, type AssembledPalette } from './kernelPaletteAssembly'
 // **刻意不 import `@/adapters/files/fidelityRecord`**（深度 3 > 契约 §7.3 规则 2 的
 // 公共出口上限 2）。装配层因此**不自造**保真记录，而是把"本适配器解释不了的字段"
 // 作为**纯数据**（`unknownFields`）报出来，由适配器层（`captureFidelity`）构造记录 ——
@@ -149,6 +153,10 @@ export type AssemblyDiagnosticCode =
   | 'multiblockAssemblyFailed'
   /** 网格超过本装配层的对象上限（防止一份异常文件造出百万对象）。 */
   | 'gridObjectLimitExceeded'
+  /** 调色板条目的烘焙几何里有被**跳过**的四边形（顶点数 ≠ 4 / 非有限分量）。 */
+  | 'blockGeometrySkippedQuads'
+  /** 调色板条目的几何解码成功但拓扑不合法（未产出资产）。 */
+  | 'blockGeometryNoAsset'
 
 export interface AssemblyDiagnostic {
   readonly code: AssemblyDiagnosticCode
@@ -160,6 +168,50 @@ export interface AssemblyDiagnostic {
 
 function diagnostic(code: AssemblyDiagnosticCode, path: string, detail: string): AssemblyDiagnostic {
   return Object.freeze({ code, path, detail })
+}
+
+/**
+ * 装配层诊断构造器作为**收窄**回调（供 `composition/kernelPaletteAssembly` 用）。
+ *
+ * 该模块产出的码是本文件的 `AssemblyDiagnosticCode` 联合的成员，但它在
+ * **另一个模块**里，无法引用本文件的类型（会成环：本文件 import 它）。故它的
+ * 构造器签名收 `string`，这里用一个**显式窄化**的包装把它接回本文件的联合 ——
+ * 于是"码必须是已知码"这条约束仍然只有一个定义点（`AssemblyDiagnosticCode`），
+ * 而不是在两处各列一遍。
+ */
+const diagnosticSink: (code: string, path: string, detail: string) => AssemblyDiagnostic = (code, path, detail) =>
+  diagnostic(code as AssemblyDiagnosticCode, path, detail)
+
+/**
+ * 取内层 body 的 `multiblock` 节原文（**单个节点**，不是整个 body）。
+ *
+ * ## 为什么是"单个节点"（本批退役 `source` 的判据）
+ *
+ * R-WK-06 裁决要求退役的是 **`MultiblockContent.source`（整个内层 body 的原始 JSON 回显）**。
+ * 本函数取的是 `source.multiblock` 这**一个节点**，用途被严格限定为：
+ *
+ *  - **内容身份输入**（`runtime/presentationAdapter#structureDigestOf` 的 `multiblock` 维）：
+ *    那里要的是"装配依据的声明变了没有"，而整节摘要正是这个事实；
+ *  - **类型化承载未覆盖的扩展键**（`viewerSemantics`/`notes` 的族特有字段）：
+ *    它们在文件里真实存在，投影时若不写回就是静默丢语义（§12 第 3 段）。
+ *
+ * ## 与回显的可判定区别
+ *
+ * 回显的形态是「投影时把 `source` 逐键摊平回产物根」—— 那使 `source` 成为
+ * **渲染与保存的事实来源**（删掉它渲染就崩）。本函数之后，投影侧**从类型化字段
+ * 重建**声明（`kernelProjection#projectMultiblockDeclaration`），
+ * 而那些类型化字段是装配期从**同一份** `decl` 派生的。
+ *
+ * 判别实验：把 `declRaw` 从产物里删掉，投影仍产出可被生产解析器读回的声明
+ * （`kernelProjection.test.ts` 的"声明往返逐键一致"逐键断言）——
+ * 若它是回显，删掉即崩。
+ *
+ * 缺失或形态不对时返回冻结的空对象（**显式**，而不是 `undefined` 让调用方猜）。
+ */
+function declRawOf(source: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const raw = source.multiblock
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return Object.freeze({})
+  return Object.freeze({ ...(raw as Record<string, unknown>) })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,8 +249,69 @@ export interface MultiblockContent {
   readonly runstates: readonly MultiblockRunstateDecl[]
   readonly variants: readonly MultiblockVariantDecl[]
   readonly totalTierDomain: MultiblockDecl['totalTierDomain']
-  /** 内层 body 原文（装配器的输入；只读，**不**进内核核心模型）。 */
-  readonly source: Readonly<Record<string, unknown>>
+  /**
+   * 契约内层 body 的 `multiblock` 节**原文**。
+   *
+   * ## ⚠️ 本批（#289 P10d）退役了 `source`（原始 JSON 回显），保留本条目的理由
+   *
+   * R-WK-06 裁决第 3 条逐字要求「`MultiblockContent.source` 的原始 JSON 回显在
+   * #289 同批退役（#249 §12「不能将原始 JSON 重新塞进核心」）」。**已执行**：
+   * `source` 字段本身已删除。
+   *
+   * 而 `decl.raw`（单个 `multiblock` 节点）**保留**，因为它是**类型化承载尚未覆盖**
+   * 那部分声明（`viewerSemantics`/`notes` 的扩展键/`opsLegend` 之外的未知键）的
+   * 唯一通路，且它的消费者是 `runtime/presentationAdapter` 的**内容身份摘要**
+   * （`structureDigestOf({multiblock: doc.multiblock?.decl.raw})`）—— 那里需要
+   * "装配依据的声明变了没有"这一事实，而**整节原文的摘要**正是它。
+   *
+   * ## 与"原始 JSON 回显"的界线（可判定）
+   *
+   * | 形态 | 判据 | 本批 |
+   * |---|---|---|
+   * | **回显**：装配产物携带整个内层 body，投影时**摊平回根** | `projectKernelDocument` 从 `source` 逐键复制 | **已删** |
+   * | **声明原文**：装配产物携带单个 `multiblock` 节，投影时由**类型化字段重建** | 投影从 `channels/runstates/variants/rules/backbone/frames` 重建同名键 | 保留 |
+   *
+   * 判据是可执行的：投影侧若仍从 `raw` 摊平，下面的 `projectMultiblockDeclaration`
+   * 就不需要存在。它存在，且它的产物被逐键断言等于原声明
+   * （见 `__tests__/kernelProjection.test.ts` 的"声明往返逐键一致"）。
+   */
+  readonly declRaw: Readonly<Record<string, unknown>>
+  /**
+   * 投影所需的**类型化声明面**（形状与 `kernelProjection#KernelDeclarationProjection` 一致）。
+   *
+   * ## 为什么由装配产物一并给出（而不是让投影自己去场景里翻）
+   *
+   * 投影要重建内层 body，需要三样东西：声明字段、**帧声明**、**并集调色板 + 几何资产**。
+   * 后两样在场景里也能翻到（`structure:multiblock` 对象的载荷），但"翻"意味着
+   * 投影要按**对象 id 约定**去找 —— 那是把装配的命名约定泄漏给投影层。
+   *
+   * ⇒ 装配产物**显式**给出这三样，投影只做"重建"，不做"查找"。
+   * 这也是"零回显"可判定的原因：`projectMultiblockBody` 的每个输出键都能追溯到
+   * 本字段的一个具名子字段（见那里的逐键来源表）。
+   */
+  readonly projection: MultiblockProjectionFace
+}
+
+/** 装配产物里承载的**投影面**（字段语义见 `kernelProjection#KernelDeclarationProjection`）。 */
+export interface MultiblockProjectionFace {
+  /** 并集调色板（契约 §6；`[0]` 恒为 air）。 */
+  readonly blockPalette: readonly BlockPaletteEntry[]
+  /** 几何资产目录（`assetId` → 资产）。 */
+  readonly assets: Readonly<Record<string, BlockGeometryAsset>>
+  /** 帧声明（变体/运行态/骨架阶/规则引用）。 */
+  readonly frames: readonly {
+    readonly index: number
+    readonly variant: string
+    readonly runstate: string
+    readonly stepIndex: number
+    readonly rules: readonly (string | Readonly<{ id: string; order?: number }>)[]
+    readonly label?: string
+    readonly durationMs?: number
+  }[]
+  /** 契约/payload 的 `schemaVersion`（`null` = 文件未声明）。 */
+  readonly schemaVersion: number | null
+  /** `multiblockCount`（契约 §2.3：必须 `=== 1`）。 */
+  readonly multiblockCount: number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -312,6 +425,28 @@ export interface AssembledDocument {
    * 帧只承载变体声明 —— 见 `RuntimeDocument` 文件头的形态说明）。
    */
   readonly frameObjects: readonly string[]
+  /**
+   * **内容承载规模**（诊断/证据面；#289 P10d）。
+   *
+   * ## 为什么它必须存在（而不是"调试时才打印"）
+   *
+   * 本批的核心断言是"几何/部件/说明**真的进了内核**"。而这件事在切换前
+   * **恒为 0**（几何只在 `MultiblockContent.source` 的回显里，部件/说明根本不进内核）——
+   * 于是"承载是否落地"需要一个**可机械读出的数字**，而不是靠读代码推断。
+   *
+   * 三个计数各自对应一个承载面：
+   *  - `geometryAssets`：唯一几何资产数（0 = 该文档没有方块几何进了内核）；
+   *  - `geometryEntries`：被逐格引用的资产数（> `geometryAssets` 即发生了**共享**）；
+   *  - `contentCells`：带逐格内容（部件/说明）的格数。
+   */
+  readonly contentStats: AssemblyContentStats
+}
+
+/** 内容承载规模（见 {@link AssembledDocument.contentStats}）。 */
+export interface AssemblyContentStats {
+  readonly geometryAssets: number
+  readonly geometryEntries: number
+  readonly contentCells: number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -463,6 +598,199 @@ export function gridCells(grid: Grid): Readonly<Record<string, string>> {
     cells[blockCellKey(pos.x, pos.y, pos.z)] = blockCellValue(block)
   })
   return Object.freeze(cells)
+}
+
+/**
+ * 旧 `Grid` → 内核 `blockGrid` 载荷的**全部内容**（#289 P10d）。
+ *
+ * ## 本函数替代什么
+ *
+ * P10c（#286）实测的缺口是「内核**只**承载 `name:meta` 字符串，
+ * **新层没有方块几何的类型化落点**」。本函数就是那个落点：
+ *
+ * | 载荷字段 | 承载 | 来源 |
+ * |---|---|---|
+ * | `cells` | 逐格方块身份（GF-7 编码） | `Grid.forEach`（既有） |
+ * | `geometry` | 几何资产目录（`assetId` → 资产） | `Grid._paletteCache` 的 `geometry`，**装配期**解码 |
+ * | `cellGeometry` | 逐格 → `assetId` | `SlotBlock.paletteIndex` → 缓存条目 |
+ * | `palette` | 类型化调色板条目（含呈现提示） | 同上 |
+ * | `cellContent` | 逐格部件（+ 逐格说明，经 `tooltipContent`） | `Grid._cellParts` + 文档级叠加层 |
+ *
+ * ## 为什么几何是**网格级目录 + 逐格身份**（而不是逐格内联）
+ *
+ * 见 `domain/scene#ObjectDataPayload` 的 `geometry` 字段注释：逐格内联**不能共享**，
+ * 而 A07「共享几何默认按对象独立编辑」的前提是先有共享。
+ *
+ * ## 逐格说明的合并（**同一键只出现一次，字段级合并**）
+ *
+ * 部件来自 `Grid`（逐格可得）、逐格说明来自文档级叠加层。两者可能命中同一格，
+ * 故合并时以部件为底、说明覆盖 —— 而"缺席 ≠ 空"的语义逐字段保持
+ * （`{...prev, ...value}` 只覆盖给出的字段）。
+ */
+export function gridPayload(
+  grid: Grid,
+  opts: {
+    readonly tooltipContent?: Readonly<Record<string, CellContent>>
+    readonly diag: (code: string, path: string, detail: string) => AssemblyDiagnostic
+  },
+): {
+  readonly cells: Readonly<Record<string, string>>
+  readonly geometry: Readonly<Record<string, BlockGeometryAsset>>
+  readonly cellGeometry: Readonly<Record<string, string>>
+  readonly palette: readonly BlockPaletteEntry[]
+  readonly cellContent: CellContentTable
+  readonly assembled: AssembledPalette
+} {
+  const cells: Record<string, string> = {}
+  grid.forEach((pos, block) => {
+    cells[blockCellKey(pos.x, pos.y, pos.z)] = blockCellValue(block)
+  })
+
+  const assembled = assemblePaletteContent(grid, opts.diag)
+  const tooltips = opts.tooltipContent ?? {}
+  const content: Record<string, CellContent> = { ...assembled.cellContent }
+  for (const [key, value] of Object.entries(tooltips)) {
+    const prev = content[key]
+    content[key] = prev === undefined ? value : Object.freeze({ ...prev, ...value })
+  }
+
+  return {
+    cells: Object.freeze(cells),
+    geometry: assembled.assets,
+    cellGeometry: assembled.cellGeometry,
+    palette: assembled.palette,
+    cellContent: normalizeCellContent(content),
+    assembled,
+  }
+}
+
+/**
+ * 并集调色板（契约 §6「并集（根级唯一一份）」）。
+ *
+ * ## 为什么不能直接用逐格投影出的那张
+ *
+ * 声明的 `backbone.sizeSteps[].cellGrid` 用**并集调色板下标**，而逐格投影只发出
+ * "实际被格引用"的条目 —— 两者**不必相同**（某阶骨架里出现的方块可能不在
+ * 当前取值装配出的网格里）。用逐格那张会让骨架阶的下标指向越界。
+ *
+ * ## 来源与判据
+ *
+ * 优先取装配器读到的并集调色板（`doc.multiblock.blockPalette` 的缓存条目 ——
+ * `context/multiblock/palette#buildPalette` 的 `entries` 就是并集），
+ * 逐条**解码几何**成类型化条目。逐格那张仅作**补充**（把装配新增、并集里没有的
+ * 条目并进来 —— 那不该发生，但发生时不静默丢）。
+ *
+ * 顺序 = 并集顺序（下标即身份，故**不排序**）：排序会让 `sizeSteps[].cellGrid`
+ * 里的下标全部指错方块。这条与 `normalizePalette` 的排序口径**不冲突**：
+ * 那个函数服务的是"按内容去重的呈现清单"，本函数服务的是"下标敏感的声明调色板"。
+ */
+function unionPaletteOf(doc: RuntimeDocument, cellPalette: readonly BlockPaletteEntry[]): readonly BlockPaletteEntry[] {
+  const union = doc.multiblock?.blockPalette
+  if (!Array.isArray(union) || union.length === 0) return cellPalette
+  const out: BlockPaletteEntry[] = []
+  for (let i = 0; i < union.length; i++) {
+    const raw = union[i]
+    if (raw === null || typeof raw !== 'object') {
+      out.push(airLikeEntry())
+      continue
+    }
+    const entry = raw as Record<string, unknown>
+    const registryId = typeof entry.registryId === 'string' ? entry.registryId : 'air'
+    const meta = typeof entry.meta === 'number' ? entry.meta : 0
+    const dec = decodeBlockGeometry(entry.geometry as never)
+    const asset = dec === null ? null : blockGeometryAsset(dec.quads)
+    const typed: {
+      assetId: string
+      registryId: string
+      meta: number
+      renderMode: string
+      geometry: BlockGeometryAsset | null
+      occludesAdjacentFaces?: boolean
+      facing?: BlockPaletteEntry['facing']
+      nbt?: Readonly<Record<string, unknown>>
+      thumbnail?: string
+      tooltip?: readonly string[]
+    } = {
+      assetId: asset?.id ?? '',
+      registryId,
+      meta,
+      renderMode: typeof entry.renderMode === 'string' ? entry.renderMode : 'BakedModel',
+      geometry: asset,
+    }
+    if (typeof entry.occludesAdjacentFaces === 'boolean') typed.occludesAdjacentFaces = entry.occludesAdjacentFaces
+    if (typeof entry.facing === 'string') typed.facing = entry.facing as BlockPaletteEntry['facing']
+    if (entry.nbt !== undefined && entry.nbt !== null && typeof entry.nbt === 'object') typed.nbt = entry.nbt as Readonly<Record<string, unknown>>
+    if (typeof entry.thumbnailPNG === 'string') typed.thumbnail = entry.thumbnailPNG
+    if (Array.isArray(entry.tooltip)) typed.tooltip = Object.freeze(entry.tooltip.filter((x): x is string => typeof x === 'string'))
+    out.push(Object.freeze(typed))
+  }
+  // 补充：逐格那张里有、并集里没有的条目（按 `(registryId, meta, assetId)` 判缺）。
+  const seen = new Set(out.map((e) => `${e.registryId}\u0000${e.meta}\u0000${e.assetId}`))
+  for (const e of cellPalette) {
+    const k = `${e.registryId}\u0000${e.meta}\u0000${e.assetId}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(e)
+  }
+  return Object.freeze(out)
+}
+
+function airLikeEntry(): BlockPaletteEntry {
+  return Object.freeze({ assetId: '', registryId: 'air', meta: 0, renderMode: 'BlockModel', geometry: null })
+}
+
+/**
+ * 装配产物 → `blockGrid` 载荷（**唯一**的载荷构造点）。
+ *
+ * 抽成一个函数而不是在两处各拼一遍：帧为主与多方块两条路径的载荷**必须**同形
+ * （否则 `projectKernelDocument` 要按形态分支读不同字段 —— 那就是两份判据）。
+ *
+ * ## 「缺省即无」的字段不写成空对象
+ *
+ * `geometry`/`cellGeometry`/`cellContent` 在**无内容**时不写入字段
+ * （而不是写 `{}`）—— 使"这份网格没有几何资产"与"这份网格有几何资产但目录为空"
+ * 可区分（与 `domain/cellContent` 判据 3 同一口径）。空几何与无几何是**两种能力状态**：
+ * 前者是缺陷，后者是"几何由生产按身份现算"的正常路径。
+ */
+function blockGridPayload(payload: {
+  readonly cells: Readonly<Record<string, string>>
+  readonly geometry: Readonly<Record<string, BlockGeometryAsset>>
+  readonly cellGeometry: Readonly<Record<string, string>>
+  readonly palette: readonly BlockPaletteEntry[]
+  readonly cellContent: CellContentTable
+}): ObjectDataPayload {
+  const out: {
+    kind: 'blockGrid'
+    cells: Readonly<Record<string, string>>
+    cellContent?: CellContentTable
+    geometry?: Readonly<Record<string, BlockGeometryAsset>>
+    cellGeometry?: Readonly<Record<string, string>>
+    palette?: readonly BlockPaletteEntry[]
+  } = { kind: 'blockGrid', cells: payload.cells }
+  if (Object.keys(payload.cellContent).length > 0) out.cellContent = payload.cellContent
+  if (Object.keys(payload.geometry).length > 0) out.geometry = payload.geometry
+  if (Object.keys(payload.cellGeometry).length > 0) out.cellGeometry = payload.cellGeometry
+  if (payload.palette.length > 0) out.palette = Object.freeze([...payload.palette].sort((a, b) => a.assetId.localeCompare(b.assetId) || a.registryId.localeCompare(b.registryId) || a.meta - b.meta))
+  return Object.freeze(out)
+}
+
+/**
+ * 装配一份**逐格说明叠加层**（文档级字段 → 内核逐格内容）。
+ *
+ * 帧为主文档的说明在文档根；多方块文档的说明在内层 body 的根
+ * （`context/parsers/multiblockDocument.ts` 的 `tooltipPalette`）。
+ * 两条路径最终都把 `tooltipPalette`/`cellTooltipGrid` 挂到 `RuntimeDocument`
+ * 的**根级**字段上（`builtinParsers.ts:101-104` 的 #82 修复），故装配层只读一处。
+ *
+ * 行数取 `grid.height` 而**不是** `cellTooltipGrid.length`：说明网格与 `cellGrid`
+ * 同形，按它自己的长度翻转会让"网格被截断"的文档里说明整体错位一行。
+ */
+function tooltipContentOf(doc: RuntimeDocument, grid: Grid): Readonly<Record<string, CellContent>> {
+  return assembleTooltipContent({
+    cellTooltipGrid: doc.cellTooltipGrid as readonly (readonly (readonly number[])[])[] | undefined,
+    tooltipPalette: doc.tooltipPalette as readonly unknown[] | undefined,
+    sizeRow: grid.height,
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -734,6 +1062,99 @@ interface AnnotationMapping {
 }
 
 /**
+ * 旧注解条目 → 内核**呈现几何参数**（#289 P10d；P10c 实测缺口的补点）。
+ *
+ * ## 本函数替代什么
+ *
+ * P10c（#286）实测：注入完整 box 注解 ⇒ 内核 payload 只剩
+ * `{"kind":"annotation","shape":"box","text":"T\n\nD"}` —— **几何字段全丢**，
+ * 于是内核通道下的注解渲染不出任何几何（`render/mesh/annotationMeshProvider`
+ * 读 `min`/`max`/`renderStyle`/`color`/`frameThickness`/`overlay`/… 全部缺席）。
+ *
+ * ## 为什么逐字段**显式**搬运，而不是把整个旧对象塞进去
+ *
+ * 旧注解对象是 `Record<string, unknown>`（`RuntimeDocument.annotations: unknown[]`），
+ * 直接塞进去就是 #249 §15 第 2 条要退役的"核心无 raw JSON/格式字段袋"。
+ * ⇒ 本函数列一份**封闭字段清单**，只搬它认识的键（未知键由调用方进保真记录，
+ * 与顶层字段同一处置）。
+ *
+ * ## 坐标**原样**搬运（不翻转、不居中）
+ *
+ * 旧注解的坐标系**按 shape 不同**（实测，`render/data/annotationTypes.ts` 的
+ * `annotationIsOnLayer` 逐条注释）：
+ *  - `box` 用**居中**坐标（`min.y + gridHeight/2` 才还原到世界 Y）；
+ *  - `point`/`text` 用"格心世界"（`wy - h/2 + 0.5`）；
+ *  - `line`/`face` 直接是 **RAW Y-up 世界坐标**。
+ *
+ * 三种坐标系混在同一个类型里是**既有的**形态事实。本批的目标是"几何字段别丢"
+ * （否则切换渲染链注解全消失），而**不是**顺手统一坐标系 —— 那需要改动
+ * `annotationMeshProvider` 的读法，属"重构渲染语义"，与「能力不回退 + 逐像素一致」
+ * 的硬约束冲突。⇒ 原样搬运：**投影时逐字段写回**，于是往返无损、渲染零变化。
+ * 该口径差异**如实登记为遗留缺口**（见汇报：注解坐标系三态待统一）。
+ *
+ * 未给出任何几何字段时返回 `null`（**不**写一个空对象：使"无几何参数"与
+ * "有几何参数但全缺省"可区分）。
+ */
+export function annotationGeometryFromLegacy(a: Readonly<Record<string, unknown>>): AnnotationGeometry | null {
+  const out: Record<string, unknown> = {}
+  const vec = (v: unknown): { x: number; y: number; z: number } | undefined => {
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) return undefined
+    const o = v as Record<string, unknown>
+    const x = readNumber(o.x)
+    const y = readNumber(o.y)
+    const z = readNumber(o.z)
+    return x === null || y === null || z === null ? undefined : { x, y, z }
+  }
+  const putVec = (key: string, v: unknown): void => {
+    const p = vec(v)
+    if (p !== undefined) out[key] = Object.freeze(p)
+  }
+
+  putVec('min', a.min)
+  putVec('max', a.max)
+  putVec('pos', a.pos)
+  putVec('anchorPos', a.anchorPos)
+  putVec('blockPos', a.blockPos)
+  // `text` 注解的锚点字段名是 `anchorPos`，内核统一叫 `pos`（呈现层按 shape 读一个名字）。
+  // 转换是**显式**的一处：不转换会让 text 注解的锚点静默丢失。
+  if (out.pos === undefined && out.anchorPos !== undefined) {
+    out.pos = out.anchorPos
+    delete out.anchorPos
+  }
+  if (Array.isArray(a.points)) {
+    const pts: { x: number; y: number; z: number }[] = []
+    for (const p of a.points) {
+      const v = vec(p)
+      if (v !== undefined) pts.push(Object.freeze(v))
+    }
+    if (pts.length > 0) out.points = Object.freeze(pts)
+  }
+  const num = (key: string, src: unknown): void => {
+    const n = readNumber(src)
+    if (n !== null) out[key] = n
+  }
+  num('quadIndex', a.quadIndex)
+  num('renderOpacity', a.renderOpacity)
+  num('fillOpacity', a.fillOpacity)
+  num('frameThickness', a.frameThickness)
+  num('size', a.size)
+  num('thickness', a.thickness)
+  num('fontSize', a.fontSize)
+  num('backgroundAlpha', a.backgroundAlpha)
+  num('frameIndex', a.frameIndex)
+  num('createdAt', a.created_at)
+  num('updatedAt', a.updated_at)
+  for (const key of ['color', 'renderStyle', 'icon', 'arrow', 'linkedAnnotationId'] as const) {
+    if (typeof a[key] === 'string' && (a[key] as string) !== '') out[key] = a[key]
+  }
+  for (const key of ['overlay', 'locked', 'showPoints'] as const) {
+    if (typeof a[key] === 'boolean') out[key] = a[key]
+  }
+  if (Object.keys(out).length === 0) return null
+  return Object.freeze(out) as AnnotationGeometry
+}
+
+/**
  * 旧 `annotations` → 内核 `annotation` 对象。
  *
  * 逐条映射 `id`/`type`（形状）/`visible`；`title`/`description` 合成 `text`
@@ -765,10 +1186,14 @@ export function annotationObjects(annotations: readonly unknown[]): AnnotationMa
     const description = readString(a.description)
     // 合成规则：两者都在 ⇒ `title\n\ndescription`；只有一个 ⇒ 那一个；都没有 ⇒ 无 text 字段。
     const text = title !== '' && description !== '' ? `${title}\n\n${description}` : title !== '' ? title : description
-    const payload: ObjectDataPayload =
-      text === ''
-        ? Object.freeze({ kind: 'annotation' as const, shape: shape as 'box' | 'point' | 'line' | 'text' | 'face' })
-        : Object.freeze({ kind: 'annotation' as const, shape: shape as 'box' | 'point' | 'line' | 'text' | 'face', text })
+    const geometry = annotationGeometryFromLegacy(a)
+    const init: { kind: 'annotation'; shape: 'box' | 'point' | 'line' | 'text' | 'face'; text?: string; geometry?: AnnotationGeometry } = {
+      kind: 'annotation',
+      shape: shape as 'box' | 'point' | 'line' | 'text' | 'face',
+    }
+    if (text !== '') init.text = text
+    if (geometry !== null) init.geometry = geometry
+    const payload: ObjectDataPayload = Object.freeze(init)
     objects.push({
       obj: sceneObject({
         id: objectId,
@@ -821,12 +1246,19 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
         sourceVersion: '',
         diagnostics: Object.freeze([]),
         frameObjects: Object.freeze([]),
+        contentStats: EMPTY_CONTENT_STATS,
       }),
     )
   }
 
   const diagnostics: AssemblyDiagnostic[] = []
   let scene = emptyScene(sceneId)
+  /** 几何资产身份集合（跨帧去重：两个帧对象共享同一份几何时只算一份）。 */
+  const assetIds = new Set<string>()
+  /** 逐格几何引用的总次数（> `assetIds.size` 即发生了共享）。 */
+  let geometryEntryRefs = 0
+  /** 带逐格内容的格数（跨帧累计）。 */
+  let contentCellCount = 0
 
   // ── ① 顶层未知字段 → 报原始字段 + 诊断（记录由调用方构造，见 `unknownFields`） ──
   //
@@ -888,10 +1320,18 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
     }
     const objectId = `structure:frame-${frame.index}`
     const dataId = `${objectId}:data`
+    // #289 P10d：帧网格也走**同一个** `gridPayload` —— 于是"帧为主 vs 多方块"
+    // 的几何承载方式在结构上只有一处实现（不存在两条路径漂移的余地）。
+    const payload = gridPayload(grid, {
+      tooltipContent: tooltipContentOf(doc, grid),
+      diag: diagnosticSink,
+    })
+    diagnostics.push(...payload.assembled.diagnostics)
+    accumulateContentStats(payload, assetIds, (n) => { geometryEntryRefs += n }, (n) => { contentCellCount += n })
     const next = withObject(
       scene,
       sceneObject({ id: objectId, type: 'block', name: frame.label ?? objectId, dataId }),
-      objectData(dataId, Object.freeze({ kind: 'blockGrid' as const, cells: gridCells(grid) }), 'document'),
+      objectData(dataId, blockGridPayload(payload), 'document'),
     )
     if (next !== null) {
       scene = next
@@ -935,21 +1375,6 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
     const decl = doc.multiblock?.decl ?? null
     const source = doc.multiblockSource
     if (decl !== null && source !== null) {
-      multiblock = Object.freeze({
-        id: decl.id,
-        displayName: decl.displayName,
-        channels: Object.freeze([...decl.channels]),
-        runstates: Object.freeze([...decl.runstates]),
-        variants: Object.freeze([...decl.variants]),
-        totalTierDomain: decl.totalTierDomain,
-        source: Object.freeze({ ...source }),
-      })
-      // 装配当前取值 → 一个 **只读内容** 网格对象（`source: 'content'`，§3.3）。
-      //
-      // 直接调 `assembleSelection`（`context/multiblock` 的公共出口）而不是
-      // `shared/viewport/multiblockChannelUi#assembleForSelection`：后者是**UI 包装**
-      // （它做"变体未声明就回落 + 落提示"的展示决策），而装配层要的是**纯装配**。
-      // 用包装会把展示政策拖进装配，且它是深度 3 的路径（超公共出口上限）。
       const selection = input.multiblockSelection ?? initialSelection(doc)
       const outcome = tryAssembleSelection(source, selection)
       if (outcome === null) {
@@ -959,10 +1384,56 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
       } else {
         const objectId = 'structure:multiblock'
         const dataId = `${objectId}:data`
+        const payload = gridPayload(outcome.grid, {
+          tooltipContent: tooltipContentOf(doc, outcome.grid),
+          diag: diagnosticSink,
+        })
+        diagnostics.push(...payload.assembled.diagnostics)
+        multiblock = Object.freeze({
+          id: decl.id,
+          displayName: decl.displayName,
+          channels: Object.freeze([...decl.channels]),
+          runstates: Object.freeze([...decl.runstates]),
+          variants: Object.freeze([...decl.variants]),
+          totalTierDomain: decl.totalTierDomain,
+          declRaw: declRawOf(source),
+          // 投影面：**并集**调色板（不是逐格投影出的那张）。
+          //
+          // 为什么必须是并集：声明的 `backbone.sizeSteps[].cellGrid` 用的是
+          // **并集调色板下标**（契约 §6「并集（根级唯一一份）」），而逐格投影
+          // 只发出"实际被格引用"的条目。用逐格那张会让骨架阶的下标越界
+          // （`buildPalette` 的 `slots[i]` 变 null ⇒ 装配出的骨架缺方块）。
+          projection: Object.freeze({
+            blockPalette: unionPaletteOf(doc, payload.palette),
+            assets: payload.geometry,
+            frames: (doc.multiblock?.frames ?? []).map((f) => {
+              const frame: {
+                index: number
+                variant: string
+                runstate: string
+                stepIndex: number
+                rules: readonly (string | Readonly<{ id: string; order?: number }>)[]
+                label?: string
+                durationMs?: number
+              } = {
+                index: f.index,
+                variant: f.variant,
+                runstate: f.runstate,
+                stepIndex: f.stepIndex,
+                rules: f.rules.map((r) => (typeof r === 'string' ? r : r.order === undefined ? { id: r.id } : { id: r.id, order: r.order })),
+              }
+              if (f.label !== undefined) frame.label = f.label
+              if (f.durationMs !== undefined) frame.durationMs = f.durationMs
+              return Object.freeze(frame)
+            }),
+            schemaVersion: typeof doc.multiblock?.schemaVersion === 'number' ? doc.multiblock.schemaVersion : null,
+            multiblockCount: 1,
+          }),
+        })
         const next = withObject(
           scene,
           sceneObject({ id: objectId, type: 'block', name: multiblock.displayName || objectId, dataId }),
-          objectData(dataId, Object.freeze({ kind: 'blockGrid' as const, cells: gridCells(outcome.grid) }), 'content'),
+          objectData(dataId, blockGridPayload(payload), 'content'),
         )
         if (next !== null) {
           scene = next
@@ -996,8 +1467,37 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
       sourceVersion,
       diagnostics: Object.freeze(diagnostics),
       frameObjects: Object.freeze(frameObjects),
+      contentStats: Object.freeze({
+        geometryAssets: assetIds.size,
+        geometryEntries: geometryEntryRefs,
+        contentCells: contentCellCount,
+      }),
     }),
   )
+}
+
+/** 空内容规模（空文档路径；显式零而不是"没算"）。 */
+const EMPTY_CONTENT_STATS: AssemblyContentStats = Object.freeze({ geometryAssets: 0, geometryEntries: 0, contentCells: 0 })
+
+/**
+ * 累计一次网格装配的内容规模（供 {@link AssembledDocument.contentStats}）。
+ *
+ * `assetIds` 由调用方跨帧持有（**跨帧去重**）：两个帧对象引用同一份几何时只算一份资产 ——
+ * 这正是"共享"在统计上的含义（`geometryEntries > geometryAssets` 即发生了共享）。
+ */
+function accumulateContentStats(
+  payload: {
+    readonly geometry: Readonly<Record<string, BlockGeometryAsset>>
+    readonly cellGeometry: Readonly<Record<string, string>>
+    readonly cellContent: CellContentTable
+  },
+  assetIds: Set<string>,
+  addEntries: (n: number) => void,
+  addCells: (n: number) => void,
+): void {
+  for (const id of Object.keys(payload.geometry)) assetIds.add(id)
+  addEntries(Object.keys(payload.cellGeometry).length)
+  addCells(Object.keys(payload.cellContent).length)
 }
 
 /**

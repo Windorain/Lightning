@@ -35,6 +35,8 @@
 import { digestOf, type EntityRef, type Version } from './identity'
 import { ok, type Result } from './errors'
 import { topologyVersionOf, unitBoxMesh, type Deformation, type MeshPayload } from './geometry'
+import type { BlockGeometryAsset, BlockPaletteEntry } from './blockGeometry'
+import type { CellContentTable } from './cellContent'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 数学值（#249 §19.2：右手、Y-up；保留仿射表达能力）
@@ -100,9 +102,132 @@ export function sameTransform(a: Transform, b: Transform): boolean {
  */
 export type DataSource = 'document' | 'content'
 
+/**
+ * 单元格位置与稳定键的**再导出**。
+ *
+ * 定义在 `domain/cellPosition`（见那里的文件头：为什么单独一个模块 —— 避免
+ * `scene → cellContent → scene` 的环）。此处再导出使既有消费者（`domain/document`、
+ * `composition/**`）不必知道模块划分的变化。
+ */
+export type { CellPosition } from './cellPosition'
+export { cellPositionKey, cellContentKeyOf, parseCellPositionKey } from './cellPosition'
+
+/**
+ * 注解的**呈现几何参数**（#289 P10d：从旧注解模型搬进内核）。
+ *
+ * ## 本类型替代什么
+ *
+ * P10c（#286）实测登记（机械证据）：
+ *
+ * > **注解几何** | 旧面（渲染消费）`min/max/renderStyle/renderOpacity/color/overlay/
+ * > frameThickness/frameIndex/locked…` | 内核承载 `{shape, text?}` 两项 |
+ * > 实测：注入完整 box 注解 ⇒ 内核 payload = `{"kind":"annotation","shape":"box","text":"T\n\nD"}`
+ * > —— **几何字段全丢**
+ *
+ * 后果是内核通道下的注解**渲染不出几何**（`annotationMeshProvider` 读的
+ * `min/max/renderStyle/...` 在载荷里不存在）—— 即渲染链切换会让注解全部消失。
+ *
+ * ## 为什么是"可选的一包参数"而不是把 5 种注解各自的字段都摊进联合
+ *
+ * 旧模型是 5 个 interface（`BoxAnnotation`/`PointAnnotation`/…）+ 一个 `AnnotationBase`
+ * 基类，共 **21 个字段**，且**字段与 shape 强相关**（`min`/`max` 只对 box 有意义，
+ * `arrow` 只对 line 有意义）。把它们全摊进 `ObjectDataPayload` 的分支会让
+ * "一个 box 注解带着 `arrow` 字段"在类型上**可表达**——而那是无意义的组合。
+ *
+ * 同时也不能按 shape 再开 5 个分支：`ObjectDataPayload` 是**开放映射**
+ * （`domain/scene` 文件头：#13「新增一类不需要改核心」），按 shape 分叉会把
+ * "注解形状"变成需要改核心的类型级事实。
+ *
+ * ⇒ 取中间：`shape` 保持**判别式**（既有），几何参数以 {@link AnnotationGeometry}
+ * 这一**具名结构**承载（字段全可选、与 shape 解耦），呈现层按 shape 决定读哪些。
+ * 这不是"字段袋"：每个字段都是具名的、有类型的（#249 §15 第 2 条要退役的是
+ * `Record<string, unknown>` 那种**无界键空间**，而这里是**封闭字段集**）。
+ */
+export interface AnnotationGeometry {
+  /** 盒：局部（居中）坐标的最小角。 */
+  readonly min?: Vec3
+  /** 盒：局部（居中）坐标的最大角。 */
+  readonly max?: Vec3
+  /** 点/文字锚点（RAW Y-up 世界坐标）。 */
+  readonly pos?: Vec3
+  /** 线：折点序列（RAW Y-up）。 */
+  readonly points?: readonly Vec3[]
+  /** 面：宿主格位置（RAW Y-up）与面下标。 */
+  readonly blockPos?: Vec3
+  readonly quadIndex?: number
+  /** 颜色（CSS 颜色串，如 `#4488ff`）。 */
+  readonly color?: string
+  readonly renderStyle?: 'wireframe' | 'boxFrame' | 'translucent' | 'hidden'
+  readonly renderOpacity?: number
+  readonly fillOpacity?: number
+  readonly frameThickness?: number
+  readonly overlay?: boolean
+  readonly locked?: boolean
+  readonly icon?: 'diamond' | 'circle' | 'square' | 'cross'
+  readonly size?: number
+  readonly thickness?: number
+  readonly arrow?: 'none' | 'start' | 'end' | 'both'
+  readonly showPoints?: boolean
+  readonly fontSize?: number
+  readonly backgroundAlpha?: number
+  readonly linkedAnnotationId?: string
+  readonly frameIndex?: number
+  readonly createdAt?: number
+  readonly updatedAt?: number
+}
+
 export type ObjectDataPayload =
-  | { readonly kind: 'blockGrid'; readonly cells: Readonly<Record<string, string>> }
-  | { readonly kind: 'annotation'; readonly shape: 'box' | 'point' | 'line' | 'text' | 'face'; readonly text?: string }
+  | {
+      readonly kind: 'blockGrid'
+      readonly cells: Readonly<Record<string, string>>
+      /**
+       * 逐格内容（部件 / 逐格说明）；键与 `cells` **同一套**（见 {@link cellContentKeyOf}）。
+       *
+       * 缺省 = 无逐格内容（**不**写成空表：使"没有"与"有但是空"可区分，
+       * 与 `domain/cellContent` 文件头判据 3 同一口径）。
+       */
+      readonly cellContent?: CellContentTable
+      /**
+       * 几何**资产目录**（`assetId` → 资产）。**共享的唯一落点**。
+       *
+       * ## 为什么目录挂网格级、逐格只存 `assetId`
+       *
+       * 实测（真实信封夹具）：`appliedenergistics2:tile.BlockCableBus:0` 出现 33 次、
+       * 12 种不同 `quads` 长度 —— 同 `name:meta` 在不同位置是**不同几何**。
+       * 故几何不能由 `name:meta` 推出，必须显式承载；而承载方式决定了两件事：
+       *
+       * | 承载方式 | 共享 | 身份 |
+       * |---|---|---|
+       * | 逐格内联几何 | **不能**（每格一份拷贝） | 无法表达"这两格是同一份几何" |
+       * | 网格级目录 + 逐格 `assetId` | 多格同 id ⇒ 一份资产 | 身份由**内容**派生（`domain/blockGeometry` 判据 2） |
+       *
+       * A07「共享几何默认按对象独立编辑」的前提正是**先有共享**：没有共享，
+       * "独立编辑"就无从谈起。故目录式承载是唯一能证明 A07 的形态。
+       */
+      readonly geometry?: Readonly<Record<string, BlockGeometryAsset>>
+      /**
+       * 逐格 → 几何资产身份（`assetId`）。键与 `cells` 同一套。
+       *
+       * 缺省 = 该网格无几何资产（例如旧编辑期文档：`renderMode: 'BlockModel'`，
+       * 几何由生产代码按方块身份现算）。**缺省不是"空几何"** —— 那是两种不同的能力状态。
+       */
+      readonly cellGeometry?: Readonly<Record<string, string>>
+      /**
+       * 该网格实际使用的**调色板条目**（按内容去重后的稳定序）。
+       *
+       * 与 `geometry` 的分工：目录回答"资产长什么样"，本字段回答"这份网格引用了
+       * 哪些**方块身份 + 呈现提示**的组合"（`occludesAdjacentFaces`/`facing`/`nbt`/`tooltip`
+       * 是**逐条目**事实，不是逐资产事实 —— 同一份几何可以配不同的 `nbt`）。
+       */
+      readonly palette?: readonly BlockPaletteEntry[]
+    }
+  | {
+      readonly kind: 'annotation'
+      readonly shape: 'box' | 'point' | 'line' | 'text' | 'face'
+      readonly text?: string
+      /** 呈现几何参数（#289 补）；缺省 = 该注解无几何参数（仅语义数据）。 */
+      readonly geometry?: AnnotationGeometry
+    }
   | { readonly kind: 'camera'; readonly projection: 'perspective' | 'orthographic'; readonly fov: number; readonly clipStart: number; readonly clipEnd: number }
   /**
    * 逻辑网格（#254 P3 交付）：拓扑 + 固定拓扑形变。

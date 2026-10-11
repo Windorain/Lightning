@@ -260,7 +260,15 @@ describe('P10b · 不静默丢失（§12 保真记录 + 诊断）', () => {
         `${name} 通道声明条数应与文件一致`,
       ).toBe(EXPECTED_CHANNELS[name])
       expect(assembled.multiblock!.variants.length, `${name} 变体数应与文件一致`).toBe(EXPECTED_FRAMES[name])
-      expect(assembled.multiblock!.source, `${name} 内层 body 原文应可用（装配器输入）`).toBeTruthy()
+      // #289 P10d：`source`（整个内层 body 的原始 JSON 回显）**已退役**；
+      // 保留的是 `declRaw`（**单个** `multiblock` 节的扩展键保真）。
+      // 本条断言随之改判 `declRaw` —— 它证明"声明原文可用"这一事实仍然成立，
+      // 同时证明"内层 body 整份回显"已经不在产物里。
+      expect(assembled.multiblock!.declRaw, `${name} 的 multiblock 节原文应可用（扩展键保真）`).toBeTruthy()
+      expect(
+        Object.prototype.hasOwnProperty.call(assembled.multiblock!, 'source'),
+        `${name} 产物不得再有 source（原始 JSON 回显已在 #289 退役）`,
+      ).toBe(false)
     }
   })
 

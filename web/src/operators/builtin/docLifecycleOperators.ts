@@ -80,6 +80,12 @@ export function adoptDocumentIntoKernel(
     multiblock: value.multiblock !== null,
     unknownFields: Object.keys(value.unknownFields).length,
     diagnostics: value.diagnostics.length,
+    // #289 P10d：几何/部件/说明的类型化承载规模（诊断面）。
+    // 这三个数字是"内容面真的进了内核"的可观测证据：切换前它们恒为 0
+    // （几何只在 `multiblockSource` 回显里，部件/说明根本不进内核）。
+    geometryAssets: value.contentStats.geometryAssets,
+    geometryEntries: value.contentStats.geometryEntries,
+    contentCells: value.contentStats.contentCells,
   })
 }
 

@@ -1,0 +1,347 @@
+/**
+ * `domain/multiblockDocument` —— **多方块声明的类型化承载**（#289 P10d；R-WK-06）。
+ *
+ * ## 本模块解决什么（它替代的旧机制）
+ *
+ * P10c（#286）实测（机械证据，Lead 认可）：
+ *
+ * > `MultiblockContent.source` 是"内层 body 原文"，`projectKernelDocument` 把它
+ * > **摊平回产物根**（`kernelProjection.ts:447-454`）。于是"内核通道"能渲染，
+ * > 靠的是**把原始 JSON 原样吐回**——不是内核承载了它。
+ *
+ * 而 #289 执行范围第 1 条与 R-WK-06 裁决第 3 条逐字要求：
+ *
+ * > `MultiblockContent.source` 的原始 JSON 回显在 #289 同批退役
+ * > （#249 §12「不能将原始 JSON 重新塞进核心」）。
+ *
+ * ## 与 `domain/multiblock` 的分工（**不是**重复，是两半）
+ *
+ * | 模块 | 承载什么 | 依据 |
+ * |---|---|---|
+ * | `domain/multiblock`（P4 交付） | **求值半**：通道值域、约束、纯装配求值、写权、轨道采样 | #249 §3.3「通道定义描述值类型、合法域及约束」；§7 通道动画 |
+ * | 本模块（P10d） | **声明半**：通道清单的**呈现事实**（key/name/kind/slider/slot）、运行态、变体、差异规则、骨架阶、总档位域、耦合、说明 | #249 §3.3「多方块声明作为**只读内容定义**，由类型化解析适配接入」 |
+ *
+ * 两半的分界是 **"回答取值合法性" vs "回答文件写了什么"**：
+ * 前者是求值（纯规则），后者是内容（只读声明）。`domain/multiblock` 的文件头
+ * 已逐字说明它**只**覆盖求值半边，且 `AssemblyRule` 刻意是不透明回调
+ * 「不引入任何几何声明」—— 本模块正是那个被刻意留出的落点。
+ *
+ * ## 三条设计判据
+ *
+ * ### 1. 声明是**只读内容**，不是可编辑对象（§3.3 明文）
+ *
+ * 「生成对象可查询和拾取，但其写能力为**只读**，**不因通用对象模型而变得可编辑**。」
+ * ⇒ 本模块的类型全部 `readonly`，且**不**提供任何构造"改一份声明"的入口 ——
+ * 声明只能整体替换（换文档）。这与 `domain/scene#DataSource: 'content'` 的
+ * `writeAuthority` 判定是同一政策在类型层的落点。
+ *
+ * ### 2. 骨架阶的 `cellGrid` 是**声明的组成**，逐格坐标仍用世界坐标
+ *
+ * 旧形态的 `sizeSteps[].cellGrid` 是 `[z][row][col]`、row 0 = 顶部（契约 §4.4）。
+ * 内核的逐格键是 Y-up 世界坐标（`domain/scene#cellContentKeyOf`）。
+ * ⇒ 本模块承载骨架阶时**如实保存文件朝向**（因为它要原样投影回文件），
+ * 而在**装配**时由 `context/multiblock#assembleSelection` 做那一次翻转
+ * （它已是既有的唯一装配翻转点，本批**不**新增第二处 —— §19.2 的"重复坐标翻转"是 A26 负对照）。
+ *
+ * ### 3. 未识别的声明键**不静默丢**，但也不进核心
+ *
+ * §12 第 3 段：「未知字段若必须往返保留，放在带源格式/源版本的适配器保真记录中…
+ * **不能**将原始 JSON 重新塞进核心 `_extra`，也**不能**静默丢失无法解释的语义。」
+ *
+ * 旧 `source` 的形态正是"整个原始 JSON 塞进核心"（它是 `Record<string, unknown>`）。
+ * 本模块把**已知键**类型化，**未知键**由装配层报进 `AssemblyDiagnostic` +
+ * `unknownFields`（保真记录的输入）—— 与 `composition/kernelAssembly` 对顶层字段的
+ * 既有处置**同一手法**（那里逐字写明分工：装配层报原始字段，适配器层构造记录）。
+ *
+ * ## 契约接触点（回 #250 登记，接续 GF 编号）
+ *
+ * 冻结契约全文无 `multiblock`（实测 0 命中）；多方块**文件格式**契约
+ * （`docs/contracts/format-multiblock-doc.md`）是外部格式的权威，本模块**忠实承载**它，
+ * 但内核承载面的形状（本模块的类型）属契约未覆盖处 ⇒ 登记 GF-12（见汇报）。
+ *
+ * ## 纯度
+ *
+ * 无 IO、无 DOM、无时钟、不 import 任何旧层（`domain/` 是纯核心，#249 §4 规则 1）。
+ * `cellGrid: number[][][]` 是**纯数字**（不是旧层的 `Grid` 实例）—— 后者带
+ * `_cellParts`/`_paletteCache` 等运行期状态，是 `context/` 的实现类型。
+ */
+
+import { digestOf } from './identity'
+import { normalizePalette, type BlockPaletteEntry } from './blockGeometry'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 通道 / 运行态 / 变体 / 规则
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 通道用途分类（契约 §4.3）。
+ *
+ * 与 `domain/multiblock#ChannelValueKind` 的区别：那是**值域形态**（能不能插值、怎么量化），
+ * 这是**装配用途**（选骨架阶 / 写内容 / 不参与装配）。两者不是替代关系，
+ * 故各自承载（`domain/multiblock` 文件头对同一分工有逐字说明）。
+ */
+export type MultiblockChannelKind = 'size' | 'replace' | 'hatch'
+
+/** 一条通道的**声明**（契约 §4.2）。 */
+export interface MultiblockChannel {
+  /** GTStructureChannels 枚举名；`null` = 非枚举通道。 */
+  readonly enumName: string | null
+  /** 游戏内通道 id（小写）。 */
+  readonly id: string
+  /** 本文档内唯一键。 */
+  readonly key: string
+  /** **呈现名（UI 标签）**，取 enum 语义 —— 不做 `capitalize(id)` 猜测。 */
+  readonly name: string
+  readonly kind: MultiblockChannelKind
+  readonly slot?: string
+  /** 有效取值下界（`kind === 'size'` 时必填）。 */
+  readonly min: number
+  /** 有效取值上界（缺省 = 取值域上界）。 */
+  readonly max: number
+  readonly axis?: string
+  readonly unit?: string
+  readonly valueSemantics?: string
+  readonly domainSource?: string
+  /** 取值域：`lo` 恒 0（= Not set 档），`hi` = 声明 `max ?? 总档位域上界`。 */
+  readonly domain: Readonly<{ lo: number; hi: number }>
+  /** UI 是否生成滑杆：`kind === 'hatch'` 恒 `false`（契约 §4.3）。 */
+  readonly slider: boolean
+}
+
+/** 运行态声明（契约 §7.1）。 */
+export interface MultiblockRunstate {
+  readonly id: string
+  /** **UI 呈现名**（文件自带，不依赖 GT 语言文件）。 */
+  readonly name: string
+  readonly materialSwap: boolean
+}
+
+/** 一条变体声明（契约 §5.1）。`key` 是主键，值恒为**声明值**（未设置写 0）。 */
+export interface MultiblockVariant {
+  readonly key: string
+  readonly totalTier: number
+  readonly values: Readonly<Record<string, number>>
+  readonly runstate: string
+}
+
+/** guard 子句（契约 §4.5.3）：四种形态之一，之间 AND。 */
+export interface MultiblockGuardClause {
+  readonly channel: string
+  readonly value?: number
+  readonly min?: number
+  readonly max?: number
+  readonly not?: boolean
+}
+
+/** guard（契约 §4.5.3）：`not: true` 对整体取反；无 clauses = 恒真。 */
+export interface MultiblockGuard {
+  readonly not?: boolean
+  readonly clauses: readonly MultiblockGuardClause[]
+}
+
+/** 装配相位（契约 §5.4：尺寸型已由 `stepIndex` 完成，剩下三档）。 */
+export type MultiblockRulePhase = 'backbone' | 'replace' | 'runstate'
+
+/** 规则写入方式（契约 §4.5.1）。 */
+export type MultiblockRuleKind = 'setCell' | 'fill'
+
+/** `fill` 的单轴写法：数组 = 逐层一个坐标；数字 = 每层同一坐标；缺省 = 全长。 */
+export type MultiblockAxisSpec = number | readonly number[]
+
+/** 一条差异规则（契约 §4.5）。**按引用复用**：帧只存 id。 */
+export interface MultiblockRule {
+  readonly id: string
+  readonly phase: MultiblockRulePhase
+  readonly legend?: string
+  readonly kind: MultiblockRuleKind
+  readonly x?: number
+  readonly y?: number
+  readonly z?: number
+  readonly sel?: Readonly<{ x?: MultiblockAxisSpec; y?: MultiblockAxisSpec; z?: MultiblockAxisSpec }>
+  readonly index?: number
+  readonly indexRole?: string
+  readonly channel?: string
+  readonly indexTable?: readonly number[]
+  readonly indexAliases?: Readonly<Record<string, number>>
+  readonly guard?: MultiblockGuard
+}
+
+/** 一阶骨架（契约 §4.4）。`cellGrid` 朝向 `[z][y][x]`、**row 0 = 顶部**（卡片判据 2）。 */
+export interface MultiblockSizeStep {
+  readonly channel: string
+  readonly layers?: number
+  readonly w: number
+  /** 该阶高度（沿用契约字段名 `hh`，避免与 `h` 混淆）。 */
+  readonly hh: number
+  readonly d: number
+  /** 语义角色 → 调色板下标。 */
+  readonly roles: Readonly<Record<string, number>>
+  readonly cellGrid: readonly (readonly (readonly number[])[])[]
+}
+
+/** 骨架（契约 §4.4）。 */
+export interface MultiblockBackbone {
+  readonly kind: string
+  readonly sizeChannel: string
+  readonly sizeSteps: readonly MultiblockSizeStep[]
+}
+
+/** 一条帧的规则引用：纯字符串 = 声明顺序；对象形式可显式给 `order`。 */
+export type MultiblockRuleRef = string | Readonly<{ id: string; order?: number }>
+
+/** 一条帧声明（契约 §5.3）：**唯一**变体存储原语，不携带内联 ops。 */
+export interface MultiblockFrame {
+  readonly index: number
+  readonly variant: string
+  readonly runstate: string
+  readonly stepIndex: number
+  readonly rules: readonly MultiblockRuleRef[]
+  readonly label?: string
+  readonly durationMs?: number
+}
+
+/** 通道耦合（契约 §7.2）。 */
+export interface MultiblockCoupling {
+  readonly id: string
+  readonly a: string
+  readonly b: string
+  readonly requires: string
+}
+
+/** 一条声明级说明（契约 §7.3 软约束）。 */
+export interface MultiblockNote {
+  readonly kind: string
+  readonly text: string
+}
+
+/** 总档位域（契约 §4.1）。 */
+export interface MultiblockTotalTierDomain {
+  readonly min: number
+  readonly max: number
+  readonly default?: number
+}
+
+/**
+ * 一份多方块**声明**（契约 §4.1 的 `multiblock` 节 + §5 的帧清单）。
+ *
+ * ## 为什么帧清单在里面（而不是与通道清单并列）
+ *
+ * 帧是**变体的存储原语**（契约 §5.3）——「一个变体至少一帧」。声明与它的帧是
+ * 同一条事实的两半：只有声明无法装配（不知道用哪一阶骨架），只有帧无法解释
+ * （不知道变体是什么）。旧 `context/multiblock/types.ts#MultiblockInnerDocument`
+ * 把它们放在同一个对象里（`multiblock` + `frames`，都是内层 body 的键），
+ * 本模块**保持这个边界**，只是把 `Record<string, unknown>` 换成类型化字段。
+ */
+export interface MultiblockDeclaration {
+  readonly id: string
+  readonly displayName: string
+  readonly sourceClass?: string
+  readonly hasScopeOverlap: boolean
+  readonly scopeOverlapNote?: string
+  readonly totalTierDomain: MultiblockTotalTierDomain
+  /** 本文档**实际声明**的总档位取值清单。 */
+  readonly tierSample: readonly number[]
+  readonly channels: readonly MultiblockChannel[]
+  readonly runstates: readonly MultiblockRunstate[]
+  readonly variants: readonly MultiblockVariant[]
+  readonly rules: readonly MultiblockRule[]
+  readonly backbone: MultiblockBackbone
+  readonly frames: readonly MultiblockFrame[]
+  readonly couplings: readonly MultiblockCoupling[]
+  readonly couplingMode: string
+  readonly notes: readonly MultiblockNote[]
+  /** 并集调色板（契约 §6；`[0]` 恒为 air）。**与逐格网格共用同一份资产身份**。 */
+  readonly blockPalette: readonly BlockPaletteEntry[]
+  /**
+   * 契约/payload 的 `schemaVersion`（文件自带的格式版本）。
+   *
+   * ## 为什么承载它（实测：它是回显的**唯一**来源之一）
+   *
+   * P10c 侦察（Lead 认可）实测：`schemaVersion` 是内层 body 里**只有回显**能提供、
+   * 投影侧从不重建的两个键之一。多方块解析器读它（`multiblockDocument.ts:935`）——
+   * 不承载它，一次"装配 → 投影"往返就会丢掉它（#249 §12「不能静默丢失」）。
+   */
+  readonly schemaVersion: number | null
+  /** `multiblockCount`（契约 §2.3：**必须** `=== 1`，否则解析器拒绝）。 */
+  readonly multiblockCount: number
+  readonly paletteSource: string
+  readonly geometryEncoding: string
+  readonly opsLegend: Readonly<Record<string, string>>
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 身份与查询
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 声明的**内容身份**。
+ *
+ * 覆盖全部**参与装配或呈现**的字段（通道/运行态/变体/规则/骨架/帧/调色板/耦合）。
+ * 不覆盖诊断性字段（`notes`/`opsLegend`/`sourceClass`）：它们不改变生成物的几何，
+ * 让它们进身份会使"只改一句说明"触发全量重建（A11「只改注解描述 ⇒ 方块几何重建数为 0」
+ * 的同族要求；这正是 §15 第 5 条要退役的"非内容版本冒充内容变化"）。
+ *
+ * 复用 `domain/identity#digestOf`（唯一摘要算法）。
+ */
+export function multiblockDeclDigest(decl: MultiblockDeclaration): number {
+  return digestOf({
+    id: decl.id,
+    totalTierDomain: decl.totalTierDomain,
+    tierSample: decl.tierSample,
+    channels: decl.channels.map((c) => [c.key, c.kind, c.min, c.max, c.domain.lo, c.domain.hi, c.slider]),
+    runstates: decl.runstates.map((r) => [r.id, r.materialSwap]),
+    variants: decl.variants.map((v) => [v.key, v.totalTier, v.values, v.runstate]),
+    rules: decl.rules.map((r) => [r.id, r.phase, r.kind, r.index ?? null, r.indexRole ?? null, r.channel ?? null, r.indexTable ?? null, r.indexAliases ?? null, r.sel ?? null, r.x ?? null, r.y ?? null, r.z ?? null, r.guard ?? null]),
+    backbone: decl.backbone.sizeSteps.map((s) => [s.channel, s.w, s.hh, s.d, s.roles, s.cellGrid]),
+    frames: decl.frames.map((f) => [f.index, f.variant, f.runstate, f.stepIndex, f.rules]),
+    couplings: decl.couplings.map((c) => [c.id, c.a, c.b, c.requires]),
+    palette: decl.blockPalette.map((e) => [e.registryId, e.meta, e.assetId]),
+  })
+}
+
+/** 通道按 key 查（`undefined` = 未声明，由调用方决定是 `UnsupportedOperation` 还是 `InvalidValue`）。 */
+export function findMultiblockChannel(decl: MultiblockDeclaration, key: string): MultiblockChannel | undefined {
+  return decl.channels.find((c) => c.key === key)
+}
+
+/** 变体按 key 查（契约 §5.1：`key` 是主键）。 */
+export function findMultiblockVariant(decl: MultiblockDeclaration, key: string): MultiblockVariant | undefined {
+  return decl.variants.find((v) => v.key === key)
+}
+
+/** 运行态按 id 查。 */
+export function findMultiblockRunstate(decl: MultiblockDeclaration, id: string): MultiblockRunstate | undefined {
+  return decl.runstates.find((r) => r.id === id)
+}
+
+/** 规则按 id 查（帧只存引用，故它是装配的热路径）。 */
+export function findMultiblockRule(decl: MultiblockDeclaration, id: string): MultiblockRule | undefined {
+  return decl.rules.find((r) => r.id === id)
+}
+
+/** 变体键的**声明集合**（供"组合是否已声明"判定，替代旧 `variantByKey` 的 `Map`）。 */
+export function declaredVariantKeys(decl: MultiblockDeclaration): ReadonlySet<string> {
+  return new Set(decl.variants.map((v) => v.key))
+}
+
+/**
+ * 规范化一份声明：调色板去重排序 + 各清单冻结。
+ *
+ * **不**排序通道/运行态/变体/规则/帧：它们的**顺序是语义**
+ * （变体键由通道顺序派生、规则按 `(phase, order)` 稳定排序、运行态首项是回落目标）。
+ * 只规范化调色板（它的顺序**不是**语义 —— 下标是压缩手段，见 `domain/blockGeometry` 判据 3）。
+ */
+export function normalizeMultiblockDeclaration(decl: MultiblockDeclaration): MultiblockDeclaration {
+  return Object.freeze({
+    ...decl,
+    tierSample: Object.freeze([...decl.tierSample]),
+    channels: Object.freeze([...decl.channels]),
+    runstates: Object.freeze([...decl.runstates]),
+    variants: Object.freeze([...decl.variants]),
+    rules: Object.freeze([...decl.rules]),
+    frames: Object.freeze([...decl.frames]),
+    couplings: Object.freeze([...decl.couplings]),
+    notes: Object.freeze([...decl.notes]),
+    blockPalette: normalizePalette(decl.blockPalette),
+  })
+}
