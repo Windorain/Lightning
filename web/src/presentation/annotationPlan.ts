@@ -70,7 +70,22 @@ export type AnnotationPrimitive =
       readonly color: string
       readonly opacity: number
       readonly fillOpacity: number
+      /** `boxFrame` 的框杆厚度（缺省见 `DEFAULT_BOX_FRAME_THICKNESS`）。 */
       readonly frameThickness: number
+      /**
+       * `wireframe` / `translucent` 的**杆厚** —— 与 legacy 硬编码 `0.02` 一致。
+       *
+       * ## 为什么需要这个字段（本批 #289 D3b 抓出的**表达力缺口**）
+       *
+       * legacy 在 `annotationMeshProvider:102`/`:113` 把杆厚**硬编码**成 `0.02`
+       * （它没有参数名，故旧模型的 `BoxAnnotation` 类型里也没有这个字段）。
+       * 若规划器不表达它，"规划器 → 呈现"这条路就**无法**画出与 legacy
+       * 逐像素一致的 wireframe（呈现侧只能猜一个数）。
+       *
+       * ⇒ 补一个显式字段。这不是"新增视觉政策"，而是**把 legacy 已有的行为
+       * 纳入类型**（值取 legacy 的 `0.02`，见 `DEFAULT_BOX_WIREFRAME_THICKNESS`）。
+       */
+      readonly wireframeThickness: number
       /** `true` = 画在覆盖层（不写深度），`false` = 参与世界深度（见旧实现的同一判据）。 */
       readonly overlay: boolean
     }
@@ -144,11 +159,37 @@ export type AnnotationSkipReason =
 export const DEFAULT_ANNOTATION_COLOR = '#ffffff'
 export const DEFAULT_BOX_OPACITY = 1
 export const DEFAULT_BOX_FILL_OPACITY = 0.15
-export const DEFAULT_BOX_FRAME_THICKNESS = 0.03
+/**
+ * box 框杆缺省厚度 —— **与 legacy 逐位一致**（`annotationMeshProvider:125`
+ * 的 `(a.frameThickness ?? 0.04) / 2`，legacy 实测值 `0.04`）。
+ *
+ * 本值第一版误写为 `0.03`（本批 #289 D3b 侦察实测抓出的分歧之一）。
+ * 按 Lead 裁决「以 legacy 为准」改回 —— **逐像素一致是终切的硬判据**，
+ * 视觉政策的"顺手修正"不属于架构迁移的范围（要有意的视觉变更须作为独立决定提出）。
+ * ⇒ **改这个值需要独立裁决**，不得夹在架构迁移里。
+ */
+export const DEFAULT_BOX_FRAME_THICKNESS = 0.04
+/**
+ * wireframe / translucent 的**杆厚** —— 与 legacy 硬编码 `0.02` 一致
+ * （`annotationMeshProvider:102`/`:113` 的 `_buildWireframeBars(..., 0.02, ...)`）。
+ *
+ * legacy 把这两个数**硬编码**在调用点，故该参数在旧模型里没有名字、也没有类型字段；
+ * 本批（#289 D3b）为它补一个**显式字段**：否则"规划器 → 呈现"这条路
+ * **无法表达** legacy 的 wireframe 杆厚（表达力缺口，不是数值分歧）。
+ * 加字段不需要 #250 契约流程 —— `annotationPlan` 是本批（#289）自己的交付物。
+ */
+export const DEFAULT_BOX_WIREFRAME_THICKNESS = 0.02
 export const DEFAULT_POINT_SIZE = 0.3
 export const DEFAULT_LINE_THICKNESS = 0.05
 export const DEFAULT_TEXT_FONT_SIZE = 14
-export const DEFAULT_TEXT_BACKGROUND_ALPHA = 0.6
+/**
+ * 文字背景透明度缺省 —— **与 legacy 逐位一致**（`annotationMeshProvider:231` 的
+ * `(a.backgroundAlpha ?? 0xCC) / 255`，即 `204 / 255 ≈ 0.8`）。
+ *
+ * 本值第一版误写为 `0.6`（D3b 侦察实测抓出的分歧之一），按「以 legacy 为准」改回。
+ * **改这个值需要独立裁决。**
+ */
+export const DEFAULT_TEXT_BACKGROUND_ALPHA = 0xcc / 255
 export const DEFAULT_FACE_OPACITY = 0.55
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,6 +270,9 @@ export function compileAnnotations(inputs: readonly AnnotationInput[]): Annotati
           opacity,
           fillOpacity: typeof g.fillOpacity === 'number' && Number.isFinite(g.fillOpacity) ? g.fillOpacity : DEFAULT_BOX_FILL_OPACITY,
           frameThickness: typeof g.frameThickness === 'number' && Number.isFinite(g.frameThickness) ? g.frameThickness : DEFAULT_BOX_FRAME_THICKNESS,
+          // wireframe 杆厚：legacy 硬编码 0.02，无输入字段可读 ⇒ 恒取该缺省
+          // （加字段是为了**表达**它，不是为了让它可配 —— 可配会成为新的视觉政策）。
+          wireframeThickness: DEFAULT_BOX_WIREFRAME_THICKNESS,
           overlay,
         }),
       )
