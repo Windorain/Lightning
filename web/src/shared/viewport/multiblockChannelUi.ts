@@ -259,9 +259,32 @@ export function formatDims(dims: { w: number; h: number; d: number }): string {
 }
 
 /**
- * 用装配产物构造**渲染视图文档**（只交给 DRW，不外泄给编辑器/其它消费者）。
+ * 用装配产物构造**渲染视图文档**（**切换前的参照实现**；见下方状态说明）。
  *
- * 为什么必须这样做：多方块文档的 `frame.grid` 恒为 `null`（设计如此，网格是装配产物），
+ * ## ⚠️ 本函数在生产路径上**已退役**（#289 P10d D2）
+ *
+ * 生产渲染路径现在走 **内核求值**：`composition/kernelRenderView#kernelRenderViewOf`
+ * （`assembleKernelDocument` → `projectKernelDocument({ renderView })`）。
+ * 实测两条路径**逐三角形一致**（`tier-only` 12 / `ebf-2ch` 12 / `lsc-overlap` 40）。
+ *
+ * ## 为什么**保留**它（而不是按 #171 立即删除）
+ *
+ * 它是**切换前后的对照参照**：`composition/__tests__/renderCutoverParity.test.ts` 的
+ * "before" 侧必须走**切换前真正吃的那条路**，否则比较的不是"切换前后的渲染输入"
+ * 而是"两个不同的东西"（对齐会失去意义）。
+ *
+ * 这与"半成品替换"的区别是**可判定的**：
+ *  - 它的**唯一**消费者是对照测试（生产零调用点）；
+ *  - 它的替代物已交付且**逐位一致**（不是"另一个还没接上的东西"）；
+ *  - 它的存在使"渲染链切换没有改变画面"这条判据**可复算** —— 删了它就只剩断言、没有参照。
+ *
+ * ⇒ 归 **D4**（终切批）处置：届时对照判据改为"与冻结的几何指纹比"，
+ * 本函数随 `AssemblyResult` 一族一起退场（已登记在 `retirementRegistry` 的
+ * `raw-authority-object` 批次内）。
+ *
+ * ## 原始说明（保留：它是"为什么必须这样做"的理由）
+ *
+ * 多方块文档的 `frame.grid` 恒为 `null`（设计如此，网格是装配产物），
  * 而渲染路径（`drwMeshPipeline`）只能吃 `doc.serialize()`，对 `format_version:"2.0"` 文档
  * 解析的是**顶层展开（首帧 structure）**——故：把装配出的 `Grid` 放到首帧
  * （同时放到当前帧下标，兼容"按当前帧解析"的实现），顶层即可解析出装配结构。

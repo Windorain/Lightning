@@ -552,10 +552,34 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
       .filter((abs) => !abs.endsWith(path.join('composition', 'kernelProjection.ts')))
       .filter((abs) => codeOnly(readSource(abs)).includes('projectKernelDocument'))
       .map((abs) => path.relative(SRC_ROOT, abs).replace(/\\/g, '/'))
+    /**
+     * ## P10d D2 的语义更正（本条原先用的判据已不再等价于缺口）
+     *
+     * 原断言是「`projectKernelDocument` 生产零调用方」—— 那是 (c) 的**代理判据**：
+     * 当时它零调用方，故"挂点没接上"显然成立。
+     *
+     * D2（#289）让**渲染路径**经 `composition/kernelRenderView` 调它
+     * （`renderView` 模式：内核求值 → 渲染视图文档）。于是那个代理判据不再等价 ——
+     * 有了调用方，但 (c) 说的**不是**"没人调投影"，而是
+     * 「保真记录**随产物一起传**」那条路没接上。
+     *
+     * ⇒ 改为直接判**缺口本身**：`fidelityFields` 有没有生产调用方在**产物侧**传入。
+     * 这既更准确，也不会因"投影被别的用途用上了"而误判缺口闭合。
+     */
+    const fidelityCallers = srcFiles
+      .filter((abs) => !abs.endsWith(path.join('composition', 'kernelProjection.ts')))
+      .filter((abs) => codeOnly(readSource(abs)).includes('fidelityFields'))
+      .map((abs) => path.relative(SRC_ROOT, abs).replace(/\\/g, '/'))
+    expect(
+      fidelityCallers,
+      `(c) 若产物侧已接线 fidelityFields，本条接缝应核销并同批更新登记：${fidelityCallers.join(', ')}`,
+    ).toEqual([])
+    // 反空洞真：投影**确实**已被生产调用（D2 的渲染路径）—— 故上面那条判据
+    // 测的是"保真挂点未接"，不是"没人用投影"。少了这条，本组会退化成恒真。
     expect(
       projectionImporters,
-      `(c) 若 projectKernelDocument 已有生产调用方，本条接缝应核销并同批更新登记：${projectionImporters.join(', ')}`,
-    ).toEqual([])
+      '前提：投影已被生产调用（D2 渲染路径）⇒ 本组测的是保真挂点，不是"投影没人用"',
+    ).toEqual(['composition/kernelRenderView.ts'])
   })
 
   it('**负对照**：未登记的接缝判据能抓到"旧轨仍在但没有登记"', async () => {
