@@ -51,6 +51,17 @@ import { PARTS_GRID_NONE, partListSignature } from '@/pure/partTypes'
 import type { DocumentContent } from '@/domain/content'
 import { blockPaletteEntryKey, encodeBlockGeometry, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
 import type { CellContentTable } from '@/domain/cellContent'
+// `-1` 哨兵：取**适配层**的定义点（`adapters/files/legacyFields`，与编解码同层）。
+//
+// ## 为什么不直接 import `render/schema/types`（本批被架构闸门判红后的一处分层更正）
+//
+// 第一版从 `@/render/schema/types` 取它，`gate/no-private-cross-layer` 当场判红：
+// `composition/` 是**新实现**层，跨层导入 `render/schema/types`（深度 3）
+// 超出公共出口深度 2。判红是**对的** —— 该常量是**文件格式**的哨兵
+// （"该格无 ToolTip"的编码），不是渲染层的概念；适配层已有一份同值定义
+// （`legacyFields.ts:145` 逐字注明它与 `render/schema/types` 同源）。
+// ⇒ 取适配层那份，既在同一层内，也不增加第三个字面量。
+import { tooltipPoolOf } from '@/adapters/tooltipPool'
 import { findObject, findObjectData, objectsInOrder, type Scene, type SceneObject } from '@/domain/scene'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -596,6 +607,31 @@ export interface KernelProjectionInput {
   readonly fidelityFields?: Readonly<Record<string, unknown>>
   /** 文档 id（缺省用 `scene.id` 去掉 `-scene` 后缀）。 */
   readonly documentId?: string
+  /**
+   * **渲染视图模式**（#289 P10d D1 补充）：把装配出的网格注入"当前帧 + 首帧"，
+   * 并**不**写 `multiblock` 节点 —— 与旧 `buildMultiblockRenderView` 同语义。
+   *
+   * ## 为什么需要它（本批实测抓出的一处**形态混淆**）
+   *
+   * 旧实现有**两个**不同的投影，它们服务于两个不同的消费者：
+   *
+   * | 消费者 | 函数 | 形态 |
+   * |---|---|---|
+   * | 保存（写回文件） | `RuntimeDocument.serialize()` | `multiblock` 节点 + **全部**变体帧（**不带** `structure`） |
+   * | 渲染（DRW 的输入） | `buildMultiblockRenderView(doc, result, frameIndex)` | **没有** `multiblock` 节点 + 首帧/当前帧带装配出的 `structure` |
+   *
+   * 本批修"全声明帧产出"后，`projectKernelDocument` 正确地对齐了**保存**形态；
+   * 而渲染侧要的是另一个形态（网格在帧里）。把两者混为一谈会让渲染拿不到网格
+   * （实测：`resolveRenderBundle` 抛 `StructureData 须为 geometryPhase=baked 的终态`）。
+   *
+   * ## 为什么不写 `multiblock` 节点（旧注释逐字给出的理由）
+   *
+   * `serialize()` 会优先写多方块节点，其中的根级 `blockPalette` 是**并集调色板**
+   * （下标是并集下标），而首帧 `structure` 的 `blockPalette` 是"装配网格里实际
+   * 出现的方块"**重编号**后的调色板。两者混用会让 `cellGrid` 指向错误的条目
+   * —— 静默渲染错方块。故渲染视图**只**保留帧内那一份自洽的 `cellGrid + blockPalette`。
+   */
+  readonly renderView?: Readonly<{ readonly frameIndex: number }>
 }
 
 /** 投影产物：一份旧格式 plain JSON + 诊断。 */
@@ -684,47 +720,159 @@ export function projectMultiblockBody(declaration: KernelDeclarationProjection):
       new Map([[`${e.registryId.slice(e.registryId.indexOf(':') + 1)}\u0000${e.meta}`, e]]),
     ),
   )
-  // **不写 `frames`** —— 见 {@link mergeDeclarationFrames} 的说明：
-  // 帧由"网格承载 + 声明合并"两半合成，而不是由本函数整份写出。
+  // **不写 `frames`** —— 见 {@link projectMultiblockFrames} 的说明：
+  // 多方块的帧是**变体存储原语**，由该函数整份产出（不是本函数）。
   return out
 }
 
 /**
- * 把**声明的帧**合并到**投影出的帧**上（按 index 对齐）。
+ * 多方块文档的 `frames` —— **全部声明帧**，每帧不带 `structure`。
  *
- * ## 为什么必须是"合并"而不是"整份写出"
+ * ## 本批（#289 P10d D1 补充）修掉的一处**真实丢失**
  *
- * 多方块文档的 `frames` 是**变体存储原语**（契约 §5.3，本例 432 帧），
- * 而"当前画出来的网格"只有**一份**（由当前通道取值装配出的那一个）。
- * 投影产物因此天然是**呈现视图**而不是完整往返：帧数 = 网格对象数。
+ * 切换前的实现（`mergeDeclarationFrames`）把声明帧"合并"到**投影出的帧**上
+ * （按 index 对齐），而投影帧数 = 内核里的 `blockGrid` 对象数 = **1**
+ * （多方块的网格是装配产物，只有一个"当前取值"的网格）。
+ * ⇒ 432 个声明帧只有第 0 帧进入产物。旧注释把它登记为"投影的既有有损点"。
  *
- * 切换前的实现就是这个语义 —— 它从内层 body 原文里按下标取 `variant`/`runstate`/
- * `stepIndex`/`rules` 合到投影帧上。本批把它换成**从类型化帧声明**取，
- * 于是"帧声明从哪来"不再依赖原始 JSON。
+ * ## 为什么它不是"固有损失"（本批实测证明）
  *
- * ## 丢掉未合并的声明帧是**既有**行为（本批如实登记，不冒充已修）
+ * 实测文件与旧 `serialize()`：
  *
- * 432 帧声明里只有第 0 帧进入产物。这是投影的**既有**有损点（切换前同样如此），
- * 属"多方块声明 → 呈现视图"的语义边界，**不是**本批引入。
- * 修复它需要"投影出 432 帧但只有一帧带网格"的形态，而那会让
- * `frameCount` 与"可渲染帧数"分离 —— 那是格式演进，不在本批范围（见汇报遗留缺口）。
+ * | 事实 | 值 |
+ * |---|---|
+ * | 文件里 `frames` | **432** |
+ * | 其中**带** `structure` 的 | **0** |
+ * | 旧 `RuntimeDocument.serialize()` 的 `frames` | **432**（全部不带 `structure`） |
+ *
+ * ⇒ 多方块文档的 `frames` 是**变体存储原语**（契约 §5.3：`variant`/`runstate`/
+ * `stepIndex`/`rules`），**不是**渲染网格的载体；网格来自"当前取值装配出的那一份"。
+ * 故正确形态是**产出全部声明帧且不带 `structure`** —— 与旧语义逐字段对齐。
+ * 先前的"1 帧"不是设计边界，是**丢失**。
+ *
+ * ## 为什么一个 `structure` 都不写
+ *
+ * 文件里那 432 帧一个都没有 `structure`（实测）。写进去会让"声明帧"伪装成
+ * "渲染帧"，并让 `frameCount` 与"可渲染帧数"混淆 —— 而渲染帧的载体是
+ * 帧为主形态的 `frames[].structure`（那条路径由 ① 段产出，不受本函数影响）。
+ *
+ * 字段顺序与旧 `serialize()` 一致（`index`/`label`/`durationMs` 打底，再写声明字段），
+ * 使往返产物与旧产物**逐键可比**。
  */
-function mergeDeclarationFrames(
-  plainFrames: readonly Record<string, unknown>[],
-  declarations: readonly KernelFrameDeclaration[],
-): void {
-  for (let i = 0; i < plainFrames.length; i++) {
-    const decl = declarations[i]
-    if (decl === undefined) continue
-    const frame = plainFrames[i]!
-    frame.variant = decl.variant
-    frame.runstate = decl.runstate
-    frame.stepIndex = decl.stepIndex
-    frame.rules = decl.rules.map((r) =>
-      typeof r === 'string' ? r : r.order === undefined ? { id: r.id } : { id: r.id, order: r.order },
-    )
-  }
+function projectMultiblockFrames(
+  declaration: KernelDeclarationProjection,
+  axisFrames: readonly { readonly index: number; readonly label: string | null; readonly durationMs: number | null }[],
+): Record<string, unknown>[] {
+  return declaration.frames.map((f, i) => {
+    // ## 时长轴以**内核的**为准（本批实测抓到的一处回归）
+    //
+    // 变体存储帧（`declaration.frames`）承载 `variant`/`runstate`/`stepIndex`/`rules`；
+    // 而 `durationMs`/`label` 属**帧时长轴**（`content.frameAxis`）——那是可改的内核内容
+    // （改它应让产物跟着变；`kernelProjection.test.ts` 的"改内核帧时长轴"判据把守）。
+    //
+    // 第一版只读 `declaration.frames` 的 `durationMs` ⇒ 改内核时长轴**不影响产物**
+    // （判据当场判红：`expected null to be 777`）。⇒ 时长轴优先，声明帧兜底。
+    const axis = axisFrames[i]
+    const axisDuration = axis?.durationMs
+    const frame: Record<string, unknown> = {
+      index: typeof f.index === 'number' ? f.index : i,
+      label: axis?.label ?? f.label ?? null,
+      durationMs:
+        typeof axisDuration === 'number' && Number.isFinite(axisDuration)
+          ? axisDuration
+          : typeof f.durationMs === 'number' && Number.isFinite(f.durationMs)
+            ? f.durationMs
+            : null,
+    }
+    frame.variant = f.variant
+    frame.runstate = f.runstate
+    frame.stepIndex = f.stepIndex
+    // 规则引用：解析器接受 `string`（= 声明顺序）与 `{id, order}` 两种形态，
+    // 并把 `string` 归一到 `{id, order: 下标}`（`multiblockDocument:630-638`）。
+    // 故**只在 `order` 不等于下标时**才写对象形态 —— 那是唯一承载额外信息的形态。
+    //
+    // ## 为什么这不是"省字节"而是**忠实**（本批实测）
+    //
+    // 第一版无条件写 `{id, order}`。实测旧 `serialize()` 写的是**裸字符串**
+    // （`["coil.slot","glass.rod",…]`），于是产物在这些键上与旧产物**逐字节不同**：
+    // `multiblock-ebf-2ch` 的 `frames` 从 70019 B 涨到 105443 B（+35 KB / 432 帧）。
+    // 而两条形态**语义等价**（解析结果相同），故正确的做法是产出与**源**同形的那个。
+    frame.rules = f.rules.map((r, k) => {
+      if (typeof r === 'string') return r
+      const order = r.order
+      return order === undefined || order === k ? r.id : { id: r.id, order }
+    })
+    return frame
+  })
 }
+
+/**
+ * 逐格说明 → `tooltipPalette` + `cellTooltipGrid`（装配侧 `assembleTooltipContent` 的**逆**）。
+ *
+ * ## 本批（#289 P10d D1 补充）修掉的一处**真实丢失**
+ *
+ * 切换前的投影**完全不写**这两项。真实帧为主信封实测：`tooltipPalette` 16 条、
+ * `cellTooltipGrid` 7×6×19、18 个格带说明 ⇒ 投影产物里**两项全缺**。
+ * 而渲染侧的 tooltip 显示读的正是它们 ⇒ "切换后 tooltip 全丢"。
+ *
+ * ## 它是可逆的（判据是"逐格文本相同"，不是"池逐字节相同"）
+ *
+ * | 方向 | 输入 | 输出 |
+ * |---|---|---|
+ * | 装配（`kernelPaletteAssembly#assembleTooltipContent`） | `cellTooltipGrid` + `tooltipPalette` | 逐格 `cellContent[key].tooltip`（文本直落格；`-1` 吸收成**字段缺席**） |
+ * | 投影（本函数） | 逐格 `cellContent[key].tooltip` | `tooltipPalette`（**内容去重**）+ `cellTooltipGrid`（`-1` = 无说明） |
+ *
+ * 池按**内容去重**（同文案共享一个下标）⇒ 往返后逐格文本相同，而池可能比源更紧凑
+ * （源里重复的文案被合并）。这是无损的：文件格式的池本身就是一个压缩装置
+ * （见 `domain/cellContent` 文件头的判据 3）。
+ *
+ * ## 三条必须成立的契约事实
+ *
+ * 1. **行序要翻回**：内核的格键是 Y-up 世界坐标（GF-7），而文件的
+ *    `cellTooltipGrid` 是 `[z][row][col]` 且 **row 0 = 顶部**。
+ *    装配期用 `row' = sizeRow - 1 - row`（`structureRowToWorldY`）翻过来；
+ *    本函数用同一个**自逆**式子翻回去。`height` 由**带说明的格**的包围盒推 ——
+ *    不用 `cellGrid` 的高度：两者必须一致，而"由说明格自身推"使本函数
+ *    不依赖调用方额外传尺寸（少一个可传错的参数）。
+ * 2. **`-1` 是"无说明"**（`TOOLTIP_GRID_NONE`）。内核侧"字段缺席"映回 `-1`，
+ *    **不是空串** —— 空串是"显式空说明"，与"没有说明"是两回事。
+ * 3. **返回 `null` = 该文档没有任何逐格说明** ⇒ 不写这两项（与装配侧
+ *    "缺省 = 无逐格内容"对称）。写一个全 `-1` 的空网格会让"没有说明"
+ *    与"有说明但是空"混淆。
+ *
+ * ## 为什么入参是**载荷**而不是文档内容三块
+ *
+ * 逐格说明挂在 `blockGrid` 载荷的 `cellContent` 上（网格级内容），
+ * 而 `DocumentContent` 只承载资源/元数据/帧轴 —— 它**不含**逐格内容。
+ * 第一版把入参写成 `DocumentContent`，函数体只能 `void content`（写不出来），
+ * 那正是"参数形状选错"的信号。
+ */
+function tooltipPoolOfPayloads(
+  payloads: readonly {
+    readonly cells: Readonly<Record<string, string>>
+    readonly cellContent?: CellContentTable
+  }[],
+): { palette: readonly string[]; grid: readonly number[][][] } | null {
+  // 实现已移到 `adapters/tooltipPool`（**同 `-1` 哨兵同层**）。
+  //
+  // 第一版把它写在这里，于是取哨兵时连撞两道闸门：
+  //  - `@/render/schema/types` 与 `@/adapters/files/legacyFields` 都是深度 3 ⇒
+  //    `gate/no-private-cross-layer` 判红；
+  //  - 在本层再导出哨兵 ⇒ `gate/no-barrel-smuggling` 判红。
+  //
+  // 两次判红指向同一件事：**这个函数放错了层** —— 它与哨兵同属"文件格式 idiom"
+  // （`adapters/files/legacyFields` 的 F-13 / B-7 正是同一组）。移到 `adapters/`
+  // 后两道闸门同时满足，且哨兵的值仍只有一个来源。
+  //
+  // 本函数仍保留在 `composition/`：它做的是"从**哪一份**载荷取"的选择
+  // （多方块只有一份网格；帧为主取 `frames[0]`），那是装配策略，不是文件格式编码。
+  for (const payload of payloads) {
+    const pool = tooltipPoolOf(payload.cellContent)
+    if (pool !== null) return pool
+  }
+  return null
+}
+
 
 /**
  * `blockGrid` 载荷 → 投影输入（**唯一**的适配点）。
@@ -815,6 +963,11 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
   const blockObjects: SceneObject[] = objectsInOrder(scene).filter((o) => o.type === 'block')
   const frameObjectIds = input.frameObjects ?? blockObjects.map((o) => o.id)
   const structures: { index: number; label: string | null; durationMs: number | null; structure: Record<string, unknown> | null }[] = []
+  /** 逐帧的 `blockGrid` 载荷（逐格说明池的来源；见 `tooltipPoolOfPayloads`）。 */
+  const framePayloads: {
+    readonly cells: Readonly<Record<string, string>>
+    readonly cellContent?: CellContentTable
+  }[] = []
   const axisFrames = content.frameAxis.frames
   for (let i = 0; i < frameObjectIds.length; i++) {
     const objectId = frameObjectIds[i]!
@@ -853,6 +1006,9 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
     if (geoDiag !== null) diagnostics.push(geoDiag)
     const contentDiag = cellContentKeyDiagnostic(data.payload, `$.frames[${i}]`)
     if (contentDiag !== null) diagnostics.push(contentDiag)
+    // 逐格说明池的来源（#289 P10d D1 补充）：逐格内容挂在 `blockGrid` 上，
+    // 故这里收集**载荷**而不是文档级内容 —— 见 `tooltipPoolOfPayloads` 的说明。
+    framePayloads.push(data.payload)
     const axis = axisFrames[i] ?? axisFrames[0]
     structures.push({
       index: axis?.index ?? i,
@@ -936,6 +1092,27 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
   }
   if (content.metadata.createdAtMs !== null) meta.created_at_ms = content.metadata.createdAtMs
 
+  // ── ④b 逐格说明池 → `tooltipPalette` + `cellTooltipGrid`（#289 P10d D1 补充）──
+  //
+  // ## 为什么需要它（本批实测抓出的一处**真实丢失**）
+  //
+  // 切换前的投影**完全不写**这两项。真实帧为主信封实测：`tooltipPalette` 16 条、
+  // `cellTooltipGrid` 7×6×19、18 个格带说明 ⇒ 投影产物里两项**全缺**。
+  // 而渲染侧的 tooltip 显示（`render/interaction` 一族）读的正是它们 ⇒
+  // "切换后 tooltip 全丢"。
+  //
+  // ## 它为什么可逆（装配侧的逆）
+  //
+  // 装配期 `assembleTooltipContent` 把 `cellTooltipGrid`+`tooltipPalette`
+  // **归一成** `cellContent[key].tooltip`（文本直接落格，`-1` 哨兵吸收成"字段缺席"）。
+  // 本函数做它的逆：把逐格文本重新聚成**池 + 下标网格**。
+  //
+  // 池的构造是**内容去重**（同文案共享一个下标）—— 与装配侧的"逐格承载文本"
+  // 是同一份信息，只是重新压缩成文件格式的形态。故往返后**逐格文本相同**，
+  // 而池可能比源更紧凑（源里重复的文案会被合并）。这是**无损**的：
+  // 判据是"逐格文本相同"，不是"池逐字节相同"。
+  const tooltip = tooltipPoolOfPayloads(framePayloads)
+
   // ── ⑤ 形态：由 `multiblockDeclaration` 的存在**机械决定** ──
   const plain: Record<string, unknown> = {
     format_version: '2.0',
@@ -959,6 +1136,12 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
   }
   if (materialPalette.length > 0) plain.materialPalette = materialPalette
 
+  // ── ④c 逐格说明池写回（见 ④b 的说明；必须在 `plain` 声明之后） ──
+  if (tooltip !== null) {
+    plain.tooltipPalette = tooltip.palette
+    plain.cellTooltipGrid = tooltip.grid
+  }
+
   if (input.multiblockDeclaration != null) {
     // 多方块为主：由**类型化承载**重建内层 body 的声明节点（#289 P10d）。
     //
@@ -977,9 +1160,41 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
     for (const [k, v] of Object.entries(rebuilt)) {
       if (!(k in plain)) plain[k] = v
     }
-    // 声明的帧**合并**到投影出的帧上（按 index 对齐）——见 `mergeDeclarationFrames`。
-    mergeDeclarationFrames(plain.frames as Record<string, unknown>[], input.multiblockDeclaration.frames)
-    plain.documentShape = 'multiblock'
+    // 多方块的 `frames` 是**变体存储原语**（契约 §5.3）：本批修正后由
+    // `declaration.frames` **全部**产出（见 `projectMultiblockFrames`），
+    // 故这里不再需要"合并声明帧到投影帧上"——那正是把 432 帧塌成 1 帧的旧做法。
+    const declarationFrames = projectMultiblockFrames(input.multiblockDeclaration, axisFrames)
+    // ── 渲染视图模式：网格注入帧、**不**写多方块节点（见 `renderView` 的说明） ──
+    //
+    // 旧实现是 `buildMultiblockRenderView(doc, result, frameIndex)`：把装配出的
+    // 网格放到"首帧 + 当前帧"上，并清掉 `multiblock` 节点（避免并集调色板与
+    // 帧内重编号调色板混用）。这里**逐字段复刻**同一语义。
+    if (input.renderView !== undefined) {
+      const current = Math.trunc(input.renderView.frameIndex)
+      const gridStructure = structures[0]?.structure ?? null
+      const frames = declarationFrames.map((frame, i) => {
+        // 只给"首帧 + 当前帧"装网格（与旧语义一致：其余帧保持声明帧原样）
+        if (i !== 0 && i !== current) return frame
+        const withGrid: Record<string, unknown> = { ...frame }
+        if (gridStructure !== null) withGrid.structure = gridStructure
+        return withGrid
+      })
+      plain.frames = frames
+      // 清掉 `multiblock` 节点（它的根级 `blockPalette` 是并集调色板 —— 见 `renderView` 的说明）
+      delete plain.multiblock
+      delete plain.multiblockCount
+      // 顶层也要有一份自洽的 `cellGrid + blockPalette`（`serialize()` 会把首帧展开到顶层）
+      const firstStructure = frames[0]?.structure as Record<string, unknown> | undefined
+      if (firstStructure !== undefined) {
+        for (const [k, v] of Object.entries(firstStructure)) {
+          if (k === 'geometryPhase') continue
+          plain[k] = v
+        }
+      }
+    } else {
+      plain.frames = declarationFrames
+      plain.documentShape = 'multiblock'
+    }
   }
 
   // ── ⑥ 保真字段回写（§12 的"往返保留"；`meta.` 前缀写回 meta 子树） ──

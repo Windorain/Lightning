@@ -258,6 +258,8 @@ async function afterDefinition(name: string): Promise<StructureDefinition> {
       schemaVersion: mb.projection.schemaVersion,
       multiblockCount: mb.projection.multiblockCount,
     },
+    // 渲染视图模式：网格注入帧（与旧 `buildMultiblockRenderView` 同语义）。
+    renderView: { frameIndex: 0 },
   })
   // `projectToRuntimeDocument` 走 `fromV2Plain`，其 `serialize()` 做"首帧 structure
   // 展开到顶层" —— 与 before 侧 `buildMultiblockRenderView(...).serialize()` **同一个**形态。

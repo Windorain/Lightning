@@ -261,30 +261,111 @@ export function typedDeclarationOf(decl: MultiblockDecl): {
     //     用类型化的 `min`/`max`（有效取值下/上界）写回区间，语义等价且校验通过。
     channels: Object.freeze(
       decl.channels.map((c) => {
-        const { enumName, domain, ...rest } = c as unknown as {
+        const { enumName, domain, raw, ...rest } = c as unknown as {
           enumName: string | null
           domain: { lo: number; hi: number }
         } & Record<string, unknown>
         void domain
+        // `raw` 与其余元素同样**必须剥离**（见 `variants` 的说明：元素级 `raw`
+        // 会让每轮往返嵌套一层）。它这里曾漏掉，实测 `channels` 每轮 +200 B。
+        void raw
         return Object.freeze({ ...rest, enum: enumName, domain: { min: c.min, max: c.max } }) as Readonly<
           Record<string, unknown>
         >
       }),
     ),
-    runstates: Object.freeze(decl.runstates.map((r) => Object.freeze({ ...r }) as Readonly<Record<string, unknown>>)),
-    variants: Object.freeze(decl.variants.map((v) => Object.freeze({ ...v }) as Readonly<Record<string, unknown>>)),
-    rules: Object.freeze(decl.rules.map((r) => Object.freeze({ ...r }) as Readonly<Record<string, unknown>>)),
+    runstates: Object.freeze(
+      decl.runstates.map((r) => {
+        const { raw, ...rest } = r as unknown as Record<string, unknown>
+        void raw
+        return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+      }),
+    ),
+    // ## 元素级 `raw` **必须剥离**（本批实测抓出的一个**迭代增长**缺陷）
+    //
+    // 类型化元素（变体/规则/运行态/骨架阶）各自带一个 `raw`（解析时的原始节点）。
+    // 第一版把它们 `{...element}` 原样带出 ⇒ `raw` 出现在**产物**里。
+    // 后果不是"多几个字节"，而是**每轮往返都嵌套一层**：
+    //
+    // 实测（`multiblock-ebf-2ch`）：原始 143208 B ⇒ 第 1 轮投影 **512552 B**
+    // （`variant[0].raw.raw…`），第 2 轮**装配直接失败**（`InvalidValue`）。
+    // 那不是"格式冗余"，是"保存两次就坏掉"。
+    //
+    // 剥离是**无损**的：元素的全部**有名字段**都已在类型化面上（`key`/`totalTier`/
+    // `values`/`runstate`… 见 `MultiblockVariantDecl` 等），`raw` 只是解析期
+    // 的中间引用。而**真正**需要扩展键保真的地方是 `declRaw`（`multiblock` 节级）
+    // 与 `fidelityFields`（产物根级）—— 它们**不在**元素内部。
+    variants: Object.freeze(
+      decl.variants.map((v) => {
+        const { raw, ...rest } = v as unknown as Record<string, unknown>
+        void raw
+        return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+      }),
+    ),
+    rules: Object.freeze(
+      decl.rules.map((r) => {
+        const { raw, guard, ...rest } = r as unknown as {
+          raw?: unknown
+          guard?: { readonly clauses?: readonly Record<string, unknown>[] }
+        } & Record<string, unknown>
+        void raw
+        // ## 守卫子句的 `raw` 也要剥离（本批实测抓出的**第二层**嵌套）
+        //
+        // `guard.clauses[]` 同样各带一个 `raw`（`MultiblockGuardClause.raw`）。
+        // 顶层剥离够不到它 —— 实测 `multiblock-lsc-overlap` 的
+        // `guard.clauses[0].raw` **每轮往返嵌套一层**（+47 B/轮），
+        // 即"保存两次就长出多余的 raw 壳"。
+        //
+        // 与顶层同理：子句的全部有名字段（`channel`/`value`/`min`/`max`/`not`）
+        // 都已在类型化面上，`raw` 只是解析期引用 ⇒ 剥离无损。
+        const out: Record<string, unknown> = { ...rest }
+        if (guard !== undefined && guard !== null) {
+          const clauses = guard.clauses
+          if (Array.isArray(clauses)) {
+            out.guard = Object.freeze({
+              ...guard,
+              clauses: Object.freeze(
+                clauses.map((c) => {
+                  const { raw: clauseRaw, ...clauseRest } = c as Record<string, unknown>
+                  void clauseRaw
+                  return Object.freeze({ ...clauseRest })
+                }),
+              ),
+            })
+          } else {
+            out.guard = guard
+          }
+        }
+        return Object.freeze(out) as Readonly<Record<string, unknown>>
+      }),
+    ),
     // 骨架阶**不含** `decl.backbone.raw`（其原始节点由 `declRaw` 保真 —— 两者不重复承载）。
     backbone: Object.freeze({
       kind: decl.backbone.kind,
       sizeChannel: decl.backbone.sizeChannel,
       sizeSteps: Object.freeze(
-        decl.backbone.sizeSteps.map((s) => Object.freeze({ ...s }) as Readonly<Record<string, unknown>>),
+        decl.backbone.sizeSteps.map((s) => {
+          const { raw, ...rest } = s as unknown as Record<string, unknown>
+          void raw
+          return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+        }),
       ),
     }),
-    couplings: Object.freeze(decl.couplings.map((c) => Object.freeze({ ...c }) as Readonly<Record<string, unknown>>)),
+    couplings: Object.freeze(
+      decl.couplings.map((c) => {
+        const { raw, ...rest } = c as unknown as Record<string, unknown>
+        void raw
+        return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+      }),
+    ),
     couplingMode: decl.couplingMode,
-    notes: Object.freeze(decl.notes.map((n) => Object.freeze({ ...n }) as Readonly<Record<string, unknown>>)),
+    notes: Object.freeze(
+      decl.notes.map((n) => {
+        const { raw, ...rest } = n as unknown as Record<string, unknown>
+        void raw
+        return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+      }),
+    ),
     paletteSource: decl.paletteSource,
     geometryEncoding: decl.geometryEncoding,
     opsLegend: Object.freeze({ ...decl.opsLegend }),

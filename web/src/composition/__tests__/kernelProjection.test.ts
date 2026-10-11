@@ -244,11 +244,24 @@ describe('P10b/G-3 · 形态由内容机械决定（不由调用方声明）', (
       })
       const reparsed = await createParserRegistry().detectAndParse(projected.plain)
       expect(reparsed.document, `${name} 投影产物必须能被生产解析器读回`).not.toBeNull()
-      // 读回后的帧数应与内核帧数一致（网格确实写进了每一帧）
-      expect(
-        reparsed.document!.frameCount,
-        `${name} 读回后的帧数应与内核帧对象数一致`,
-      ).toBe(assembled.frameObjects.length)
+      // ## 帧数的正确期望（#289 P10d D1 补充更正）
+      //
+      // 本条原先断言 `frameCount === assembled.frameObjects.length`
+      // （即"帧数 = 内核里的 blockGrid 对象数"）。那编码的是**旧的丢失语义**：
+      // 多方块的网格是**装配产物**（一个"当前取值"的网格 = 1 个对象），
+      // 而它的 `frames` 是**变体存储原语**（432 个声明帧）。
+      // 旧断言于是要求 432 → 1，把丢失**钉成了期望**。
+      //
+      // 实测（文件与旧 `serialize()`）：那 432 帧**一个都不带 `structure`**，
+      // 旧产物也是 432 帧。故正确期望是：
+      //  - **多方块**：帧数 = 声明帧数（变体存储），与旧产物一致；
+      //  - **帧为主**：帧数 = 网格对象数（每帧一份 `structure`）。
+      const expected = assembled.multiblock !== null
+        ? assembled.multiblock.projection.frames.length
+        : assembled.frameObjects.length
+      expect(reparsed.document!.frameCount, `${name} 读回后的帧数应与该形态的语义一致`).toBe(expected)
+      // 反空洞真：真实夹具的帧数必须 > 1（否则"帧数正确"是常数比较）
+      expect(expected, `${name} 应有真实的多帧`).toBeGreaterThan(1)
     }
   })
 
