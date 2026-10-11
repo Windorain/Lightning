@@ -169,49 +169,47 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * 机械证据：`multiblock-channel-traversal.spec.ts` 全 552 组合遍历仍全绿，
    * `lsc-overlap` 的 108/108 组合**逐格 diff = 0**（取值变化真的驱动了重建）。
    */
-  /**
-   * P7（#258）登记：**草稿权威已收敛到输入层，但 P2 的会话镜像仍在**。
-   *
-   * ## 这条接缝是什么（以及它为什么不是"两套政策并存"）
-   *
-   * P7 合流前，属性字段的草稿是 **P2 的 `PanelSession.drafts`**（每字段一份文本，
-   * 解析由 `editors/property-controls.ts` 的 `parseDraft` 做）。
-   * P7 的 `domain/textDraft.ts` 是另一套三态机（含 IME、草稿局部撤销、token 去重）。
-   *
-   * Lead 裁决 B（本批接通）后：**判定与提交时机已单一化** ——
-   * 字段经 `InputPort` 登记、Enter/Escape/IME/Ctrl+Z 由输入层路由、
-   * 解析级结论以 `textProjection` 为准（含属性 `pattern`/`maxLength` 域下传）。
-   *
-   * 仍在服役的旧轨只剩**一处**：`PanelSession.drafts` 作为**呈现镜像**
-   * （父级 `PropertyInspector` 的 `onDraft` 仍写入它，`buildField` 仍读它来
-   * 产生 `draftState`）。它**不再决定**提交时机，也**不再**是非法/中间态提示的来源
-   * （提示以投影为准），故不是第二份政策 —— 但它确实是一份冗余状态。
-   *
-   * ## 为什么本批不删
-   *
-   * `buildField`/`FieldViewModel` 的 `draft`/`draftState` 被 P2 的面板测试与
-   * `fieldFor` 路径使用；把它们改成"只从输入层读"需要字段模型持有 `InputPort`
-   * （呈现层依赖 runtime 端口的装配面），属 #261 的接线范围。
-   * 强行在本批删会得到"字段模型读不到草稿"的行为回退（#171 禁止的半成品）。
-   */
-  Object.freeze({
-    id: 'property-draft-session-mirror',
-    files: Object.freeze([
-      'src/workbench/ux/PropertyInspector.vue',
-      'src/workbench/ux/PropertyField.vue',
-      'src/editors/workbench-rna.ts',
-      'src/editors/property-controls.ts',
-    ]),
-    newTrack:
-      'P7（#258）输入层的草稿三态机：`domain/textDraft.ts`（判定：`complete`/`intermediate`/`invalid` + 原因；IME 组合门；草稿局部历史；Enter/Escape token 去重）+ `runtime/inputSession.ts` 的会话状态 + `InputPort.textProjection` 作为呈现读面。提交经 `draft.commit` → `setProperty` → 唯一写路由。',
-    oldTrack:
-      '`PanelSession.drafts`（`editors/workbench-rna.ts` 的 `buildField` 读它产生 `FieldViewModel.draft`/`draftState`，`editors/property-controls.ts` 的 `parseDraft` 做第二次解析）。**现状**：仅作呈现镜像，不再决定提交时机、不再是提示来源。',
-    blocker:
-      '**R-WK-04（#250）**：让 `FieldViewModel` 以输入层投影为草稿来源，需要"内核驱动文档"这一半 —— 而 #261 交付的是**时间/播放面**（`runtime/kernelSession`），文档内容面未迁移（内核 `Document` 不承载工作台文档内容）。#261 已把**提交时机与判定**单一化（Lead 裁决 B），残留的只是呈现镜像。故本条归 **#282（P10b）**。',
-    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
-    exitCondition:
-      '`src/editors/workbench-rna.ts` 的 `buildField` 不再读 `session.drafts`（草稿改由输入层投影提供），且 `src/editors/property-controls.ts` 的 `parseDraft` 不再被呈现路径调用（判定只在 `src/domain/textDraft.ts`）；届时删除本条登记。**执行批次：#282（R-WK-04）**。',
-  }),
+  // ───────────────────────────────────────────────────────────────────────────
+  // P10c（#286）核销：`property-draft-session-mirror` **已退出**
+  //
+  // ## 这条接缝原来是什么
+  //
+  // P7（#258）把草稿的**判定与提交时机**收敛到了输入层（`domain/textDraft` 三态机 +
+  // `runtime/inputSession` + `InputPort.textProjection`），但 P2 的
+  // `PanelSession.drafts`（每字段一份草稿文本）仍作为**呈现镜像**留在表里：
+  // `PropertyInspector.onDraft` 写它、`buildField` 读它产生
+  // `FieldViewModel.draft`/`draftState`，`editors/property-controls` 的 `parseDraft`
+  // 做第二次解析。
+  //
+  // ## 为什么现在能删（本批实测，不是推理）
+  //
+  // 退出条件原文是"`buildField` 不再读 `session.drafts`，且 `parseDraft` 不再被
+  // 呈现路径调用"。满足它需要证明删掉**不会**损失能力。两条实测给出了答案 ——
+  // 这份镜像在生产里**从未生效**：
+  //
+  //  1. **写键与读键不同**：`PropertyInspector.onDraft` 写
+  //     `localPropertyOf(desc.id)`（`lightning.block.tooltip` → `tooltip`），
+  //     而 `editors/inspector.ts` 的 `makeRow` 与卸载 flush 读
+  //     `localIdOf(desc.id)`（→ `block.tooltip`）。枚举生产 84 个属性，
+  //     **0 处**两键相等 ⇒ 镜像喂给渲染模型的路本就不通。
+  //  2. **环上没有行为**：唯一同键读取点 `buildField` 只被
+  //     `FieldViewModel.draft`/`draftState` 这条链消费，而该链的消费者只有
+  //     组件里那个 `props.field.draftState` 回落分支 —— 它在 (1) 之下永远拿不到值。
+  //
+  // 故本批删除：`PanelSession.drafts`/`sessions`、`FieldViewModel.draft`/`draftState`、
+  // `FieldDraftState`、`property-controls` 的整套 `EditSession`/`EditPolicy`/
+  // `tryCommit`/`canCommitDraft`（`sessions` 从未被写入使用），以及
+  // `PropertyField` 的 `draft`/`commit`/`cancel` 三个 emit
+  // （`commit`/`cancel` **从来没有发出点**，父级处理器本就不可达）。
+  //
+  // "卸载不丢字"这条能力**保留**，只是归属明确在输入层：
+  // `domain/textDraft.blurControl` 的 `blur`/`focus-switch`/`enter` 经
+  // `settleControl` 提交，`PropertyField` 卸载时 `unbindControl` 也会以
+  // `target-invalid` 结算（判据见 `domain/__tests__/textDraft.test.ts` 的焦点切换组）。
+  //
+  // 表长 = 双轨剩余数，只减不增 —— 本条按该语义移出，回归断言在
+  // `__tests__/seams.test.ts`（防旧机制复活）。
+  // ───────────────────────────────────────────────────────────────────────────
 ])
 
 /** 按 id 取登记项（未登记返回 `undefined`，由调用方决定是缺口还是缺陷）。 */

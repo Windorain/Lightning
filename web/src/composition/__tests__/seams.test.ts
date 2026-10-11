@@ -319,6 +319,71 @@ describe('P6 已核销项 · 回归断言（防被改回去）', () => {
     expect(ids).not.toContain('component-mount-lifetime')
     // P6 的开放接缝在 #282（P10b）**已核销** ⇒ 也不得占用本表（同上语义）
     expect(ids).not.toContain('per-viewport-channel-staging')
+    // P7 登记的草稿镜像在 #286（P10c）**已核销** ⇒ 同上
+    expect(ids).not.toContain('property-draft-session-mirror')
+  })
+
+  /**
+   * ## P10c（#286）核销：`property-draft-session-mirror` 的**防复活**断言
+   *
+   * 那条接缝的退出条件是"`buildField` 不再读 `session.drafts`，且 `parseDraft`
+   * 不再被呈现路径调用"。本批删除时给出的实测依据是：镜像的**写键与读键不同**
+   * （写 `localPropertyOf(desc.id)`＝`tooltip`，读 `localIdOf`＝`block.tooltip`），
+   * 生产 84 个属性无一命中 ⇒ 它从未影响渲染。
+   *
+   * 于是"防复活"不能只断言"接缝不在表里"（那只说明登记被删了），还必须断言
+   * **旧机制的代码面确实不存在** —— 否则一份被改回去的镜像会静静地重新长出来，
+   * 而本表已经不再看管它。
+   */
+  it('**旧机制不得复活**：`PanelSession.drafts` 与 P2 的编辑会话机制已零引用', () => {
+    // ① 会话镜像字段与其读/写面
+    const rna = codeOf('editors/workbench-rna.ts')
+    expect(rna.includes('drafts'), '`PanelSession.drafts` 必须已删除').toBe(false)
+    expect(rna.includes('EditSession'), '`sessions: Record<string, EditSession>` 必须已删除').toBe(false)
+
+    // ② 字段模型不再携带草稿/解析态
+    const controls = codeOf('editors/property-controls.ts')
+    expect(controls.includes('draftState'), '`FieldViewModel.draftState` 必须已删除').toBe(false)
+    expect(controls.includes('FieldDraftState'), '`FieldDraftState` 必须已删除').toBe(false)
+    expect(controls.includes('tryCommit'), 'P2 的 `tryCommit` 必须已删除').toBe(false)
+    expect(controls.includes('canCommitDraft'), '`canCommitDraft` 必须已删除').toBe(false)
+    expect(controls.includes('EditPolicy'), '`EditPolicy`/`DEFAULT_EDIT_POLICY` 必须已删除').toBe(false)
+    // `parseDraft` 在**呈现路径**上不得再被调用（判定只在 `domain/textDraft`）
+    expect(controls.includes('parseDraft'), '`property-controls` 不得再调 `parseDraft`').toBe(false)
+
+    // ③ 一个不接收草稿输入的字段模型：构造签名里不得有 `draft`
+    //   （用 `codeText`：对象字面量的键名就是标识符，`codeOf` 会剥掉字符串但键名仍在）
+    const builder = codeText('editors/property-controls.ts')
+    expect(/draft\s*\??:/.test(builder), '`buildFieldViewModel` 的输入不得再含 `draft`').toBe(false)
+
+    // ④ 组件不再有草稿出口（`commit`/`cancel` 从来没有发出点，`draft` 是死镜像）
+    const field = codeText('workbench/ux/PropertyField.vue')
+    expect(field.includes("(e: 'draft'"), '`PropertyField` 不得再声明 `draft` emit').toBe(false)
+    expect(field.includes("(e: 'commit'"), '`PropertyField` 不得再声明 `commit` emit').toBe(false)
+    expect(field.includes('emit('), '`PropertyField` 的 `draft` 转发必须已删除').toBe(true) // 反空洞真：仍有两个合法 emit
+
+    // ⑤ 输入层的替代面**确实在服役**（否则"不引用旧的"可能只是两边都没有）
+    expect(
+      codeOf('workbench/ux/PropertyField.vue').includes('textProjection'),
+      '呈现必须继续读输入层投影（P7 的替代面）',
+    ).toBe(true)
+  })
+
+  /**
+   * **反空洞真**：上述判据不是恒真 —— 把旧形态注入内存即被同一判定式抓到。
+   *
+   * 刻意不写一个真实的旧文件（那会变成"再造一遍旧代码"）：判据的对象是
+   * "文本里有没有这个符号"，负对照只需证明该判定式会命中。
+   */
+  it('**负对照**：上述判据能抓到"镜像被改回去"', () => {
+    const injected = 'export type PanelSession = { drafts: Record<string, string | null> }'
+    expect(injected.includes('drafts'), '注入 `drafts` 必判红').toBe(true)
+    const injectedField = 'const draft = input.draft ?? null\nconst draftState: FieldDraftState = ...'
+    expect(injectedField.includes('draftState'), '注入 `draftState` 必判红').toBe(true)
+    const injectedBuilder = 'input: { descriptor: PropertyDescriptor; draft?: string | null }'
+    expect(/draft\s*\??:/.test(injectedBuilder), '注入 `draft` 入参必判红').toBe(true)
+    const injectedEmit = "const emit = defineEmits<{ (e: 'draft', text: string): void }>()"
+    expect(injectedEmit.includes("(e: 'draft'"), '注入 `draft` emit 必判红').toBe(true)
   })
 
   it('B5 #7：`runtime/hostProfile.ts` 已删除，且全 `src/` 零引用', () => {
