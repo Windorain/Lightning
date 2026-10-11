@@ -79,6 +79,28 @@ export interface DraftParseOptions {
   readonly max?: number
   /** 允许指数记法（`1e3`）。默认允许 —— HTML `<input type=number>` 允许。 */
   readonly allowExponent?: boolean
+  /** 必填（空串 ⇒ `intermediate/empty` 而不是"合法空值"）。 */
+  readonly required?: boolean
+  /**
+   * 文本**模式**约束（正则源串）。不匹配 ⇒ `invalid/malformed`。
+   *
+   * ## 为什么解析层要知道它
+   *
+   * 属性描述自带 `domain: { kind: 'pattern', source: '^\\S+$' }` 这类约束。
+   * 若解析层对它一无所知，就会出现**两个解析器各判一次**：
+   * 输入层的三态机判 `complete`（"看起来合法"），而属性自己的约束判非法。
+   * 结果是界面显示"可以提交"、提交却被唯一写路由拒绝 —— 用户看到的是
+   * "输入没反应"，而不是 #249 §19.1 要求的"非法草稿保留并**提示**"。
+   *
+   * 故把模式**下传**给纯解析：判定仍只有一个来源（本函数），
+   * 只是它的输入变完整了。正则只做**匹配**（不执行用户代码），
+   * 非法正则按"不约束"处理（不因描述错误而卡住输入）。
+   */
+  readonly pattern?: string
+  /** 模式不匹配时的稳定原因码（供提示与诊断）。 */
+  readonly patternReason?: string
+  /** 文本长度上限（`domain.kind === 'text'` 的 `maxLength`）。超限 ⇒ `invalid/malformed`。 */
+  readonly maxLength?: number
 }
 
 const DECIMAL_RE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
@@ -126,8 +148,38 @@ export function parseNumberDraft(text: string, options: DraftParseOptions = {}):
  * 的事，不是本函数的职责）。唯一例外是控件声明 `required` 时的空串：
  * 那是 `intermediate/empty`（还没填完），不是非法。
  */
-export function parseTextDraft(text: string, options: { readonly required?: boolean } = {}): DraftParse {
+/**
+ * 解析文本草稿。
+ *
+ * `required` 与 `pattern` 都来自**属性描述**（下传，不在这里重复判定域）：
+ *  - `required` 且空白 ⇒ `intermediate/empty`（"还没填"，不是错误）；
+ *  - `pattern` 不匹配 ⇒ `invalid/malformed`（"填错了"，可提示且不提交）。
+ *
+ * 顺序有意如此：空串在必填时是**中间态**而不是非法态 —— 用户刚聚焦或清空
+ * 不该立刻报错（与数字解析的 `empty` 同一取舍）。
+ */
+export function parseTextDraft(text: string, options: DraftParseOptions = {}): DraftParse {
   if (options.required === true && text.trim() === '') return { status: 'intermediate', reason: 'empty' }
+  const src = options.pattern
+  if (src !== undefined && src !== '') {
+    let re: RegExp | null = null
+    try {
+      re = new RegExp(src)
+    } catch {
+      // 描述里的正则非法 ⇒ 按"不约束"处理：不因描述错误而卡死输入。
+      re = null
+    }
+    if (re !== null && !re.test(text)) {
+      return {
+        status: 'invalid',
+        reason: 'malformed',
+        ...(options.patternReason === undefined ? {} : { detail: options.patternReason }),
+      }
+    }
+  }
+  if (options.maxLength !== undefined && text.length > options.maxLength) {
+    return { status: 'invalid', reason: 'malformed', detail: 'tooLong' }
+  }
   return { status: 'complete', value: text }
 }
 
@@ -271,6 +323,12 @@ export interface RegisterControlInput {
   readonly max?: number
   readonly required?: boolean
   readonly allowExponent?: boolean
+  /** 文本模式约束（属性描述下传；见 `DraftParseOptions.pattern`）。 */
+  readonly pattern?: string
+  /** 模式不匹配时的稳定原因码。 */
+  readonly patternReason?: string
+  /** 文本长度上限（属性描述下传）。 */
+  readonly maxLength?: number
 }
 
 /**
@@ -299,6 +357,9 @@ export function focusControl(state: TextLayerState, input: RegisterControlInput,
     ...(input.max === undefined ? {} : { max: input.max }),
     ...(input.required === undefined ? {} : { required: input.required }),
     ...(input.allowExponent === undefined ? {} : { allowExponent: input.allowExponent }),
+    ...(input.pattern === undefined ? {} : { pattern: input.pattern }),
+    ...(input.patternReason === undefined ? {} : { patternReason: input.patternReason }),
+    ...(input.maxLength === undefined ? {} : { maxLength: input.maxLength }),
   })
   const control: TextDraftState = Object.freeze({
     controlId: input.controlId,
@@ -315,6 +376,9 @@ export function focusControl(state: TextLayerState, input: RegisterControlInput,
       ...(input.max === undefined ? {} : { max: input.max }),
       ...(input.required === undefined ? {} : { required: input.required }),
       ...(input.allowExponent === undefined ? {} : { allowExponent: input.allowExponent }),
+      ...(input.pattern === undefined ? {} : { pattern: input.pattern }),
+      ...(input.patternReason === undefined ? {} : { patternReason: input.patternReason }),
+      ...(input.maxLength === undefined ? {} : { maxLength: input.maxLength }),
     }),
     active: true,
   })

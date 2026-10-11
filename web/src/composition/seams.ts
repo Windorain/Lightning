@@ -180,6 +180,49 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     exitCondition:
       '删除 `src/shared/viewport/useMultiblockChannels.ts`（其每视口 `state`/`revision`/`bindMultiblockMeshSync` 一并消失），通道取值改经 `EditContext.channelValues`、装配经 `application/evaluation.ts` 的纯求值；届时删除本条登记。',
   }),
+  /**
+   * P7（#258）登记：**草稿权威已收敛到输入层，但 P2 的会话镜像仍在**。
+   *
+   * ## 这条接缝是什么（以及它为什么不是"两套政策并存"）
+   *
+   * P7 合流前，属性字段的草稿是 **P2 的 `PanelSession.drafts`**（每字段一份文本，
+   * 解析由 `editors/property-controls.ts` 的 `parseDraft` 做）。
+   * P7 的 `domain/textDraft.ts` 是另一套三态机（含 IME、草稿局部撤销、token 去重）。
+   *
+   * Lead 裁决 B（本批接通）后：**判定与提交时机已单一化** ——
+   * 字段经 `InputPort` 登记、Enter/Escape/IME/Ctrl+Z 由输入层路由、
+   * 解析级结论以 `textProjection` 为准（含属性 `pattern`/`maxLength` 域下传）。
+   *
+   * 仍在服役的旧轨只剩**一处**：`PanelSession.drafts` 作为**呈现镜像**
+   * （父级 `PropertyInspector` 的 `onDraft` 仍写入它，`buildField` 仍读它来
+   * 产生 `draftState`）。它**不再决定**提交时机，也**不再**是非法/中间态提示的来源
+   * （提示以投影为准），故不是第二份政策 —— 但它确实是一份冗余状态。
+   *
+   * ## 为什么本批不删
+   *
+   * `buildField`/`FieldViewModel` 的 `draft`/`draftState` 被 P2 的面板测试与
+   * `fieldFor` 路径使用；把它们改成"只从输入层读"需要字段模型持有 `InputPort`
+   * （呈现层依赖 runtime 端口的装配面），属 #261 的接线范围。
+   * 强行在本批删会得到"字段模型读不到草稿"的行为回退（#171 禁止的半成品）。
+   */
+  Object.freeze({
+    id: 'property-draft-session-mirror',
+    files: Object.freeze([
+      'src/workbench/ux/PropertyInspector.vue',
+      'src/workbench/ux/PropertyField.vue',
+      'src/editors/workbench-rna.ts',
+      'src/editors/property-controls.ts',
+    ]),
+    newTrack:
+      'P7（#258）输入层的草稿三态机：`domain/textDraft.ts`（判定：`complete`/`intermediate`/`invalid` + 原因；IME 组合门；草稿局部历史；Enter/Escape token 去重）+ `runtime/inputSession.ts` 的会话状态 + `InputPort.textProjection` 作为呈现读面。提交经 `draft.commit` → `setProperty` → 唯一写路由。',
+    oldTrack:
+      '`PanelSession.drafts`（`editors/workbench-rna.ts` 的 `buildField` 读它产生 `FieldViewModel.draft`/`draftState`，`editors/property-controls.ts` 的 `parseDraft` 做第二次解析）。**现状**：仅作呈现镜像，不再决定提交时机、不再是提示来源。',
+    blocker:
+      '让 `FieldViewModel` 直接以输入层投影为草稿来源，需要呈现层的字段模型持有 `InputPort`（或由装配层注入投影函数）。这属 R-WK-03（#250）划定的**内核→生产接线**面：真实文档与 `EditorClient` 尚未接入生产（`new Editor(` 在生产零构造），故字段模型此刻没有"由内核驱动的草稿源"可依赖；先删镜像会得到"字段读不到草稿"的回退。',
+    owner: Object.freeze({ p: 'P10', issue: 261, duty: '集成闭环与交叉验收' }),
+    exitCondition:
+      '`src/editors/workbench-rna.ts` 的 `buildField` 不再读 `session.drafts`（草稿改由输入层投影提供），且 `src/editors/property-controls.ts` 的 `parseDraft` 不再被呈现路径调用（判定只在 `src/domain/textDraft.ts`）；届时删除本条登记。',
+  }),
 ])
 
 /** 按 id 取登记项（未登记返回 `undefined`，由调用方决定是缺口还是缺陷）。 */

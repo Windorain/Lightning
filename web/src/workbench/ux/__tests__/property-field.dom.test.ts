@@ -212,17 +212,49 @@ describe('控件：草稿不提交（#249 §19.1）', () => {
     teardown()
   })
 
-  it('**Enter** 请求提交；**Escape** 请求取消（单次消费，不重复）', () => {
+  /**
+   * Enter/Escape 的**归属**自 P7（#258）合流起不在本组件 —— 改由输入层路由
+   * （`domain/input.ts` 的纯路由 + `domain/textDraft.ts` 的三态机），
+   * 组件只声明 `data-input-control-id` 事实。
+   *
+   * 故本条断言改为：①组件**不再**自行消费这两个键（否则同一次按键会被
+   * 组件与输入层各提交一次）；②它**声明了**输入层路由所需的事实属性。
+   * 路由与提交时机的行为判据在 `domain/__tests__/inputRouting.test.ts`、
+   * `domain/__tests__/textDraft.test.ts` 与 e2e `input-routing.spec.ts` 覆盖。
+   */
+  it('Enter/Escape **不**由组件消费（改由输入层路由），且控件声明路由所需事实', () => {
     const reg = makeRegistry()
     const { root, events } = mount(fieldFor(reg, 'plain', 10, { draft: '20' }))
     const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
 
+    // ① 组件不再自行消费（这是"单一归属"的结构性证据）
     fire(input, 'keydown', { key: 'Enter' })
-    expect(events.filter((e) => e.kind === 'commit')).toHaveLength(1)
-
-    events.length = 0
     fire(input, 'keydown', { key: 'Escape' })
-    expect(events.map((e) => e.kind)).toEqual(['cancel'])
+    expect(events.map((e) => e.kind), 'Enter/Escape 不得由组件自行提交/取消').toEqual([])
+
+    // ② 事实属性齐备：输入层据此判归属（语义层不读 document.activeElement）
+    // 控制 id 带 `field:` 前缀 —— 与命令层 `ControlBinding.controlId`、
+    // `WM.applyPropertyRegistry` 的键**同一个**命名空间（三者必须一致，
+    // 否则会出现"登记了但提交找不到落点"）。
+    expect(input.getAttribute('data-input-control-id')).toBe(`field:${OBJECT_TYPE}.plain`)
+    expect(input.getAttribute('data-input-kind')).toBe('number')
+    expect(input.getAttribute('data-input-display')).toBe('10')
+    teardown()
+  })
+
+  /**
+   * IME 守卫：输入法确认候选词的 Enter **不得**提交草稿。
+   *
+   * 组件级证明只能到"组件不消费"（上一条）；组合态的**政策**在
+   * `domain/textDraft.ts`（`composing` 时 `settleControl` 一律不提交）。
+   * 本组件已不持有该判据，故这里只锁"组件不会绕过它自行提交"。
+   */
+  it('组合期（`isComposing`）的 Enter 不会被组件提交（政策在输入层）', () => {
+    const reg = makeRegistry()
+    const { root, events } = mount(fieldFor(reg, 'plain', 10, { draft: '20' }))
+    const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
+    fire(input, 'keydown', { key: 'Enter', isComposing: true })
+    expect(events.filter((e) => e.kind === 'commit')).toHaveLength(0)
     teardown()
   })
 

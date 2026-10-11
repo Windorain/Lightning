@@ -124,6 +124,40 @@ async function gotoWorkbenchWithScene(page: Page): Promise<void> {
   await waitForViewportMounted(page)
 }
 
+/**
+ * 载入场景并**选中一个方块**，使属性面板渲染出可编辑字段。
+ *
+ * ## 为什么必须选中
+ *
+ * P2 的生成式属性面板以**选中集**为输入（`inspectorInputs` →
+ * `resolveInspectorTargets(selectionOf(ctx))`）：没有选中目标时面板显示
+ * "未选择目标"，一个字段都不渲染。P7 合流前本 spec 只载文档不选中，
+ * 于是 5 条 A25 文本类用例全部因"找不到控件"而 skip —— 那让最关键的
+ * 断言（文本层归属 / IME / 草稿不写文档）**从未真正跑过**。
+ *
+ * 选择走公开观测面 `window.__vm__`（`e2e/helpers/**` 已依赖的既有面），
+ * 不是替身：`getSelection().select()` 就是产品自己的选择 API。
+ */
+async function selectFirstBlock(page: Page): Promise<boolean> {
+  const r = await page.evaluate(() => {
+    const vm = (window as any).__vm__
+    const doc = vm?.getDoc?.().value
+    if (!doc) return 'no-doc'
+    const ser = doc.serialize ? doc.serialize() : doc
+    const st = ser?.frames?.[0]?.structure ?? null
+    const grid = st?.cellGrid ?? null
+    if (!Array.isArray(grid) || grid.length === 0) return 'no-grid'
+    const cell = String(Array.isArray(grid[0]) ? grid[0][0] : grid[0])
+    const entry = (st?.blockPalette ?? [])[Number(cell.split(' ')[0])]
+    vm.getSelection().select({ pos: { x: 0, y: 0, z: 0 }, block_state_id: String(entry?.registryId ?? '') })
+    return 'ok'
+  })
+  if (r !== 'ok') return false
+  // 面板按选中集重算模型（watch 触发），给它一拍
+  await page.waitForTimeout(900)
+  return true
+}
+
 async function counters(page: Page): Promise<P7Counters> {
   return await page.evaluate(() => window.__p7_input__!.counters())
 }
@@ -168,11 +202,17 @@ async function findNumberControlId(page: Page): Promise<string | null> {
   return null
 }
 
-/** 找一个已挂载的文本控件（`g` 不进场景层、Ctrl+Z 走草稿这类断言的载体）。 */
+/**
+ * 找一个已挂载的**文本草稿**控件（`g` 不进场景层、Ctrl+Z 走草稿的载体）。
+ *
+ * 排除 `lightning.block.id`：它是方块身份键（只读语义的展示字段），
+ * 改它没有领域落点；用 `tooltip`/`cellTooltip` 这类真正可写的文本属性。
+ */
 async function findTextControlId(page: Page): Promise<string | null> {
   return await page.evaluate(() => {
-    const el = document.querySelector('[data-input-control-id][data-input-kind="text"]') as HTMLElement | null
-    return el?.dataset.inputControlId ?? null
+    const els = [...document.querySelectorAll('[data-input-control-id][data-input-kind="text"]')] as HTMLElement[]
+    const writable = els.find((e) => !(e.dataset.inputControlId ?? '').endsWith('.id'))
+    return (writable ?? els[0])?.dataset.inputControlId ?? null
   })
 }
 
@@ -354,7 +394,8 @@ test.describe('A22 host-input：同一指针按下只启动一次；捕获丢失
 test.describe('A25 input-focus-drafts：只有目标接收者处理；IME 不触发场景操作；草稿不写文档', () => {
   test('A25-1 焦点在文本控件 ⇒ `g` 不进场景层（只有目标接收者处理）', async ({ page }) => {
     test.setTimeout(120_000)
-    await gotoWorkbenchWithInput(page)
+    await gotoWorkbenchWithScene(page)
+    await selectFirstBlock(page)
 
     const controlId = await findTextControlId(page)
     test.skip(controlId === null, '当前页面无文本控件 —— 需要"场景信息"面板已挂载')
@@ -388,7 +429,8 @@ test.describe('A25 input-focus-drafts：只有目标接收者处理；IME 不触
 
   test('A25-2 IME 组合未结束：拼音字母不触发场景快捷键，且组合态可观测', async ({ page }) => {
     test.setTimeout(120_000)
-    await gotoWorkbenchWithInput(page)
+    await gotoWorkbenchWithScene(page)
+    await selectFirstBlock(page)
 
     const controlId = await findTextControlId(page)
     test.skip(controlId === null, '当前页面无文本控件')
@@ -407,7 +449,9 @@ test.describe('A25 input-focus-drafts：只有目标接收者处理；IME 不触
     // 故这里的判据落在**显式状态** `textFocus.composing` 上 —— 那正是设计要求的来源）
     await page.keyboard.press('g')
 
-    const during = await page.evaluate(() => window.__p7_input__!.textProjection(document.querySelector('[data-input-control-id]')!.getAttribute('data-input-control-id')!))
+    // 读**被聚焦的那个**控件的投影，而不是"页面上第一个控件" ——
+    // 后者可能是另一个字段，于是组合态判据会读到别人的投影而误判。
+    const during = await page.evaluate((x) => window.__p7_input__!.textProjection(x), controlId)
     expect(during?.composing, '组合态必须在投影里可读（呈现与诊断的依据）').toBe(true)
 
     const after = await counters(page)
@@ -428,60 +472,101 @@ test.describe('A25 input-focus-drafts：只有目标接收者处理；IME 不触
     await page.screenshot({ path: 'e2e/screenshots/p7/a25-ime-composition.png' })
   })
 
-  test('A25-3 非法/中间态草稿**不写文档**：`-` 与 `1.2.3` 后文档值不变，且提示可见', async ({ page }) => {
+  /**
+   * A25-3 非法/中间态草稿**不写文档**。
+   *
+   * ## 为什么用 `lightning.block.id`（pattern 域）而不是数字控件
+   *
+   * 载入 fixture + 选中方块后，方块检查器渲染的字段里**没有**数字控件
+   * （`block` 的属性是 string/vec3/enum/color/boolean；数字属性属注解与
+   * publishConfig，前者需要文档里有注解、后者不在 Inspector 的目标解析面内）。
+   * 而 `block.id` 带 `domain: { kind: 'pattern', source: '^\\S+$' }` ——
+   * 它是一条**真实可达**的、能产生 `invalid` 态的路径，正是本条要测的东西。
+   *
+   * 断言的是"非法草稿不写文档 + 提示可见"，与控件类型无关，故换控件不降低强度；
+   * 反而更强：它同时验证了**属性自身的域约束**被下传到纯解析
+   * （否则 `bad value` 会被误判 `complete`，界面显示可提交而提交被拒 ——
+   * 那正是"两个解析器各判一次"的形态）。
+   */
+  test('A25-3 非法草稿**不写文档**：pattern 域拒绝的值保留草稿 + 提示可见', async ({ page }) => {
     test.setTimeout(120_000)
-    await gotoWorkbenchWithInput(page)
+    await gotoWorkbenchWithScene(page)
+    await selectFirstBlock(page)
 
-    const controlId = await findNumberControlId(page)
-    test.skip(controlId === null, '当前页面无数字控件（需要 Wiki 工作区的「嵌入配置」面板）')
+    // pattern 域控件（`block.id`）—— 取第一个声明了 data-input-pattern 的字段
+    const controlId = await page.evaluate(() => {
+      const el = document.querySelector('[data-input-pattern]') as HTMLElement | null
+      return el?.dataset.inputControlId ?? null
+    })
+    test.skip(controlId === null, '当前页面无 pattern 域文本控件（需要方块检查器已渲染）')
 
     const selector = `[data-input-control-id="${controlId}"]`
     const displayBefore = await page.locator(selector).first().evaluate((el) => (el as HTMLElement).dataset.inputDisplay)
 
-    // 输入非法中间态（负号 / 畸形小数）
-    for (const bad of ['-', '1.2.3']) {
-      await page.locator(selector).first().evaluate((el, v) => {
-        const input = el as HTMLInputElement
-        input.focus()
-        input.value = v
-        input.dispatchEvent(new Event('input', { bubbles: true }))
-      }, bad)
+    // 非法值：含空格（pattern `^\S+$` 不允许）
+    const bad = 'bad value'
+    await page.locator(selector).first().evaluate((el, v) => {
+      const input = el as HTMLInputElement
+      input.focus()
+      input.value = v
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }, bad)
 
-      const p = await page.evaluate((id) => window.__p7_input__!.textProjection(id), controlId)
-      expect(p, '草稿投影必须可读').toBeTruthy()
-      expect(p!.status, `"${bad}" 不得被判为 complete（数字控件的中间态/非法态）`).not.toBe('complete')
-      expect(p!.submittable, `"${bad}" 不得有可提交值（A25：非法中间草稿不写文档）`).toBeNull()
-      expect(p!.draft, '草稿必须原样保留（不暗中强制转换）').toBe(bad)
-      // 提示可见（#249 §19.1「非法草稿保留**并提示**」）—— 由 `draftNoticeText` 渲染
-      await expect(page.locator('.ux-rna-draft-notice').first(), '非法草稿必须有可见提示').toBeVisible()
+    const p = await page.evaluate((id) => window.__p7_input__!.textProjection(id), controlId)
+    expect(p, '草稿投影必须可读').toBeTruthy()
+    expect(p!.status, `"${bad}" 必须被判为非法（属性 pattern 域下传到纯解析）`).toBe('invalid')
+    expect(p!.submittable, `"${bad}" 不得有可提交值（A25：非法草稿不写文档）`).toBeNull()
+    expect(p!.draft, '草稿必须原样保留（不暗中强制转换）').toBe(bad)
 
-      // 文档值（呈现层写的 `data-input-display`）**必须不变**
-      const displayNow = await page.locator(selector).first().evaluate((el) => (el as HTMLElement).dataset.inputDisplay)
-      expect(displayNow, `"${bad}" 不得改写文档值`).toBe(displayBefore)
-    }
+    // 提示可见（#249 §19.1「非法草稿保留**并提示**」）
+    await expect(page.locator('.ux-field-problem').first(), '非法草稿必须有可见提示').toBeVisible()
+
+    // 文档值必须不变
+    const displayNow = await page.locator(selector).first().evaluate((el) => (el as HTMLElement).dataset.inputDisplay)
+    expect(displayNow, '非法草稿不得改写文档值').toBe(displayBefore)
+
+    // 中间态：空串（清空）也不得提交
+    await page.locator(selector).first().evaluate((el) => {
+      const input = el as HTMLInputElement
+      input.value = ''
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const pEmpty = await page.evaluate((id) => window.__p7_input__!.textProjection(id), controlId)
+    expect(pEmpty!.status, '空串不得被判为 complete').not.toBe('complete')
+    expect(pEmpty!.submittable, '空串不得有可提交值').toBeNull()
+    const displayAfterEmpty = await page.locator(selector).first().evaluate((el) => (el as HTMLElement).dataset.inputDisplay)
+    expect(displayAfterEmpty, '空串不得改写文档值').toBe(displayBefore)
 
     await page.screenshot({ path: 'e2e/screenshots/p7/a25-invalid-draft.png' })
   })
 
-  test('A25-3b 合法值提交**恰一次**：数字控件输入 432 后文档值更新', async ({ page }) => {
+  test('A25-3b 合法值提交**恰一次**：Enter 后文档值更新为提交值', async ({ page }) => {
     test.setTimeout(120_000)
-    await gotoWorkbenchWithInput(page)
+    await gotoWorkbenchWithScene(page)
+    await selectFirstBlock(page)
 
-    const controlId = await findNumberControlId(page)
-    test.skip(controlId === null, '当前页面无数字控件')
+    // 用不带 pattern 的文本属性（`tooltip`）：合法值不受域约束干扰，
+    // 专测"输入不提交、Enter 提交恰一次"这条事务边界判据（I1）。
+    const controlId = await page.evaluate(() => {
+      const els = [...document.querySelectorAll('[data-input-control-id][data-input-kind="text"]')] as HTMLElement[]
+      const free = els.find((e) => !e.hasAttribute('data-input-pattern') && !(e.dataset.inputControlId ?? '').endsWith('.id'))
+      return free?.dataset.inputControlId ?? null
+    })
+    test.skip(controlId === null, '当前页面无自由文本控件')
 
     const selector = `[data-input-control-id="${controlId}"]`
     const displayBefore = await page.locator(selector).first().evaluate((el) => (el as HTMLElement).dataset.inputDisplay)
+    const commitCountBefore = (await trace(page)).filter((e) => e.commandId === 'draft.commit').length
 
     await page.locator(selector).first().evaluate((el) => {
       const input = el as HTMLInputElement
       input.focus()
-      input.value = '432'
+      input.value = 'e2e-commit-once'
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     const mid = await page.evaluate((id) => window.__p7_input__!.textProjection(id), controlId)
-    expect(mid!.status, '432 是完整合法值').toBe('complete')
-    expect(mid!.submittable).toBe(432)
+    expect(mid!.status, '自由文本是完整合法值').toBe('complete')
+    expect(mid!.submittable).toBe('e2e-commit-once')
     // **输入本身不提交**（I1：只有一次事务边界，发生在 Enter/失焦）
     const displayMid = await page.locator(selector).first().evaluate((el) => (el as HTMLElement).dataset.inputDisplay)
     expect(displayMid, '输入过程不得写文档（提交点只有 Enter/失焦）').toBe(displayBefore)
@@ -492,18 +577,20 @@ test.describe('A25 input-focus-drafts：只有目标接收者处理；IME 不触
         message: 'Enter 后文档值必须更新为提交值',
         timeout: 10_000,
       })
-      .toBe('432')
+      .toBe('e2e-commit-once')
 
-    const t = await trace(page)
-    const commits = t.filter((e) => e.commandId === 'draft.commit')
-    expect(commits.length, '恰一次提交（I1：一次事务边界）').toBeGreaterThan(0)
+    // 恰一次：Enter 之后不得再冒出一条提交（否则同一次按键被消费两次）
+    await page.waitForTimeout(400)
+    const commits = (await trace(page)).filter((e) => e.commandId === 'draft.commit').length
+    expect(commits - commitCountBefore, 'Enter 恰一次提交（I1：一次事务边界）').toBe(1)
 
     await page.screenshot({ path: 'e2e/screenshots/p7/a25-valid-commit.png' })
   })
 
   test('A25-4 文本局部撤销：Ctrl+Z 在活动文本控件里走 `draft.undo`，**不是** `edit.undo`', async ({ page }) => {
     test.setTimeout(120_000)
-    await gotoWorkbenchWithInput(page)
+    await gotoWorkbenchWithScene(page)
+    await selectFirstBlock(page)
 
     const controlId = await findTextControlId(page)
     test.skip(controlId === null, '当前页面无文本控件')

@@ -158,6 +158,68 @@ describe('纯解析三态：完整 / 中间态 / 非法及原因（#249 §19.1 �
     expect(isSubmittable({ status: 'intermediate', reason: 'empty' })).toBe(false)
     expect(isSubmittable({ status: 'invalid', reason: 'malformed' })).toBe(false)
   })
+
+  /**
+   * 属性自身的域约束（`pattern` / `maxLength`）必须下传到**这一个**解析器。
+   *
+   * ## 为什么这条是必需的（P7 合流实测到的缺陷）
+   *
+   * 属性描述自带 `domain: { kind: 'pattern', source: '^\\S+$' }`。合流初版
+   * `parseTextDraft` 不认识它，于是 `block.id` 输入 `bad value` 被判 `complete`
+   * —— 界面显示"可提交"，提交却被唯一写路由拒绝。用户看到的是"输入没反应"，
+   * 而 #249 §19.1 要求的是"非法草稿保留**并提示**"。
+   *
+   * 修法是把域**下传**（判定仍只有这一个来源），而不是在呈现层再加一次判定。
+   */
+  it('`pattern` 域下传：不匹配 ⇒ invalid/malformed（不是"看起来合法"）', () => {
+    const opts = { pattern: '^\\S+$', patternReason: 'namespace:path' }
+    expect(parseTextDraft('bad value', opts)).toEqual<DraftParse>({
+      status: 'invalid',
+      reason: 'malformed',
+      detail: 'namespace:path',
+    })
+    // 匹配 ⇒ 完整
+    expect(parseTextDraft('minecraft:stone', opts)).toEqual<DraftParse>({
+      status: 'complete',
+      value: 'minecraft:stone',
+    })
+  })
+
+  it('`pattern` 是**正则源串**（元字符生效，不是字面量匹配）', () => {
+    // `^[a-z]+$` 必须拒绝大写与数字 —— 若实现按字面量比对，这三条会全过
+    expect(parseTextDraft('ABC', { pattern: '^[a-z]+$' }).status).toBe('invalid')
+    expect(parseTextDraft('a1', { pattern: '^[a-z]+$' }).status).toBe('invalid')
+    expect(parseTextDraft('abc', { pattern: '^[a-z]+$' }).status).toBe('complete')
+  })
+
+  it('非法正则源串 ⇒ 按"不约束"处理（不因描述写错而卡死输入）', () => {
+    // `[` 是未闭合字符组：`new RegExp` 抛错 ⇒ 退化为不约束
+    expect(parseTextDraft('anything', { pattern: '[' }).status).toBe('complete')
+  })
+
+  it('`required` 与 `pattern` 同时存在：空串是**中间态**（先于 pattern 判定）', () => {
+    // 顺序有意义：用户刚聚焦/清空时不该立刻报"格式非法"
+    expect(parseTextDraft('', { required: true, pattern: '^\\S+$' })).toEqual<DraftParse>({
+      status: 'intermediate',
+      reason: 'empty',
+    })
+  })
+
+  it('`maxLength` 超限 ⇒ invalid/malformed', () => {
+    expect(parseTextDraft('abc', { maxLength: 3 }).status).toBe('complete')
+    expect(parseTextDraft('abcd', { maxLength: 3 })).toEqual<DraftParse>({
+      status: 'invalid',
+      reason: 'malformed',
+      detail: 'tooLong',
+    })
+  })
+
+  it('**负对照**：不下传 pattern ⇒ 同样的文本被判 complete（证明判据有差异，不是恒绿）', () => {
+    // 这条把"必须下传"变成可执行判据：若哪天有人把 pattern 从 options 里去掉，
+    // 上一条会立刻变红 —— 而这里记录的是"去掉之后会怎样"。
+    expect(parseTextDraft('bad value').status).toBe('complete')
+    expect(parseTextDraft('bad value', { pattern: '^\\S+$' }).status).toBe('invalid')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

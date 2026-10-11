@@ -456,6 +456,21 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
     reason: '未接通旧 operator 的命令 ID 显式返回 `UnsupportedOperation`（**不**静默丢弃）',
     exitStage: 'P10 集成：命令全部接通新写通路后删除本行；P11 核销',
   }),
+  // ── P7（#258）合流：P2 的属性字段接入输入层（Lead 裁决 B，本批接通）──────
+  Object.freeze({
+    from: 'src/workbench/ux/PropertyField.vue',
+    to: 'application/inputCommands',
+    reason:
+      '属性字段按 `ControlBinding` **类型**声明自己（值，不含 setter），使控件身份进入输入层的命令绑定表 —— 这是"草稿提交经唯一入口"的前提',
+    exitStage: 'P10 集成：字段模型直接产出控件声明后删除本行；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/workbench/ux/PropertyField.vue',
+    to: 'domain/textDraft',
+    reason:
+      '字段只声明**草稿种类**（`DraftKind`）；草稿权威（三态机）在输入层。本边是"呈现读核心类型"的最小面',
+    exitStage: 'P10 集成：字段模型自带草稿种类后删除本行；P11 核销',
+  }),
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {

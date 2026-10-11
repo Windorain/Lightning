@@ -57,8 +57,35 @@ export interface InputPort {
   applyTextInput(controlId: string, text: string, token: number): readonly TextDraftEffect[]
   blurTextControl(controlId: string, reason: DraftRetainReason, token: number): readonly TextDraftEffect[]
   textProjection(controlId: string): ReturnType<typeof draftProjection> | null
+  /** 分配事件 token（组件做命令式调用时用；事件驱动的路径由适配器分配）。 */
+  nextToken(): number
+  /**
+   * 订阅"会话推进了"（**只读**通知）。
+   *
+   * ## 为什么是必需的，而不是可选的便利
+   *
+   * 文本草稿的权威是 `domain/textDraft` —— 它**不在 Vue 的响应式图里**。
+   * 组件要按投影渲染（`textProjection(...).draft`），就必须知道"什么时候该重读"。
+   * 没有这条通道，组件只能自己再存一份草稿并靠自身 DOM 事件更新 ——
+   * 那正是 #249 §19.1 禁止的"第二份草稿权威"（两套政策并存）。
+   *
+   * 通知**不携带政策**：订阅者只得到"去重读投影"的信号；判定与提交时机
+   * 仍全在纯函数里（组件读不到、也改不了）。
+   */
+  subscribe(listener: () => void): () => void
   readonly counters: InputCounters
   readonly trace: readonly InputTraceEntry[]
+}
+
+/** `createInputPort` 的返回类型：多一个**仅供装配层**调用的广播入口。 */
+export interface InputPortHandle extends InputPort {
+  /**
+   * 广播"会话推进了"。**只**由装配层在事件处理完后调用（`composition/assembleInput`）。
+   *
+   * 为什么不放进 `InputPort`：组件若能手握广播权，就可能在没发生事件时乱广播，
+   * 让"投影何时可信"变得不可推理。收窄到装配层是刻意的。
+   */
+  publish(): void
 }
 
 /**
@@ -71,10 +98,22 @@ export interface InputPort {
  * Escape 的**路由**由纯路由判定（`modal.close` 意图），本端口只负责在收到该意图时
  * 执行对应作用域的关闭动作（平台动作）。见 `runtime/inputSession` 的 `drainLocal`。
  */
-export function createInputPort(session: InputSession): InputPort {
+export function createInputPort(session: InputSession): InputPortHandle {
   const escapeHandlers = new Map<string, () => void>()
+  const listeners = new Set<() => void>()
 
   return {
+    publish() {
+      // 快照遍历：订阅者在通知中退订不得影响本次广播。
+      for (const fn of [...listeners]) fn()
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    nextToken() {
+      return session.nextToken()
+    },
     openModalScope(decl) {
       session.openModal({
         scopeId: decl.scopeId,

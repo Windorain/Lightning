@@ -25,7 +25,7 @@
  */
 
 import { createInputSession, type InputEventResult, type InputSession } from '@/runtime/inputSession'
-import { createInputPort, type InputPort } from '@/runtime/inputPort'
+import { createInputPort, type InputPortHandle } from '@/runtime/inputPort'
 import { createInputBinding, type HitTest, type InputBinding } from '@/adapters/inputBinding'
 import type { HotkeyBinding } from '@/domain/input'
 import type { TextDraftEffect } from '@/domain/textDraft'
@@ -99,7 +99,8 @@ export interface AssembleInputOptions {
 
 export interface AssembledInput {
   readonly session: InputSession
-  readonly port: InputPort
+  /** 端口句柄：呈现层用 `InputPort` 面，装配层另有 `publish()`。 */
+  readonly port: InputPortHandle
   readonly binding: InputBinding
   dispose(): void
 }
@@ -140,14 +141,26 @@ export function assembleInput(options: AssembleInputOptions, claim = true): Asse
     return false
   })
 
+  // 每条事件后广播"会话推进了" ⇒ 订阅的组件（属性控件）重读投影。
+  //
+  // 为什么收敛到这一处：投影是**只读**的，但"何时可信"必须唯一。
+  // 若让各组件自己猜（或各自在 DOM 事件里更新本地副本），就会长出第二份草稿权威
+  // （#249 §19.1 禁止）。这里把"事件已处理完 ⇒ 现在可读"变成装配层的单点事实。
+  const notify = (): void => port.publish()
   const binding = createInputBinding({
     session,
     hitTest: options.hitTest,
     ...(options.keyTarget === undefined ? {} : { keyTarget: options.keyTarget }),
     ...(options.pointerTarget === undefined ? {} : { pointerTarget: options.pointerTarget }),
     ...(options.onResume === undefined ? {} : { onResume: options.onResume }),
-    ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
-    ...(options.onTextEffects === undefined ? {} : { onTextEffects: options.onTextEffects }),
+    onEvent: (result) => {
+      options.onEvent?.(result)
+      notify()
+    },
+    onTextEffects: (controlId, effects) => {
+      options.onTextEffects?.(controlId, effects)
+      notify()
+    },
   })
   if (claim) binding.claimExclusive(options.owner)
 

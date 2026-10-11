@@ -133,6 +133,29 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
     return el?.dataset.inputKind === 'number' ? 'number' : 'text'
   }
 
+  /**
+   * 读控件的**域约束声明**（事实，不是政策）。
+   *
+   * 适配器不认识属性描述符（那会把它变成领域层），但它可以读 DOM 上的声明。
+   * 约束的传递路径因此是"描述 → 呈现声明 → 适配器读事实 → **纯解析**判定"：
+   * 判定始终只有一个来源（`domain/textDraft`），适配器只搬运事实。
+   */
+  function domainFactsOf(controlId: string): {
+    pattern?: string
+    patternReason?: string
+    maxLength?: number
+  } {
+    const scope: ParentNode = document
+    const el = scope.querySelector<HTMLElement>(`[data-input-control-id="${controlId}"]`)
+    if (el === null) return {}
+    const ds = el.dataset
+    return {
+      ...(ds.inputPattern === undefined || ds.inputPattern === '' ? {} : { pattern: ds.inputPattern }),
+      ...(ds.inputPatternReason === undefined ? {} : { patternReason: ds.inputPatternReason }),
+      ...(ds.inputMaxlength === undefined ? {} : { maxLength: Number(ds.inputMaxlength) }),
+    }
+  }
+
   // ── 键盘 ─────────────────────────────────────────────────────────────
 
   function onKeyDown(event: Event): void {
@@ -210,6 +233,7 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
         kind: kindOf(controlId),
         displayValue: displayValueOf(controlId),
         commitOn: controlElement(controlId)?.dataset.inputCommitOn === 'explicit' ? 'explicit' : 'enter-or-blur',
+        ...domainFactsOf(controlId),
       },
       token,
     )
