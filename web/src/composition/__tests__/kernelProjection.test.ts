@@ -56,6 +56,7 @@ function declarationOf(assembled: AssembledDocument): KernelDeclarationProjectio
   return {
     id: mb.id,
     displayName: mb.displayName,
+    declaration: mb.projection.declaration,
     declRaw: mb.declRaw,
     blockPalette: mb.projection.blockPalette,
     assets: mb.projection.assets,

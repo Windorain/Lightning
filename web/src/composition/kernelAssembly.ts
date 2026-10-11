@@ -184,6 +184,117 @@ const diagnosticSink: (code: string, path: string, detail: string) => AssemblyDi
   diagnostic(code as AssemblyDiagnosticCode, path, detail)
 
 /**
+ * 生产解析器产出的 `MultiblockDecl`（**类型化**）→ 投影面的类型化声明。
+ *
+ * ## 为什么是"显式逐字段搬运 + 逐元素编码"而不是 `...decl` 展开
+ *
+ * 展开会把 `decl` 的**全部**字段一起带进去，其中两类必须排除：
+ *
+ * | 排除项 | 理由 |
+ * |---|---|
+ * | `ruleById`/`variantByKey`/`channelByKey`/`runstateById`（四个 `Map`） | 不是 JSON 可序列化的（投影产物要能 `JSON.stringify`） |
+ * | `decl.raw`（单个原始 JSON 节点） | 带上它就等于把回显请回来（本批正在退役的东西） |
+ *
+ * ## 逐元素**编码**是必需的（本批实测抓出）
+ *
+ * 通道元素的一个字段名与文件格式**不同**：类型化面叫 `enumName`，而文件键是 `enum`
+ * （契约 §4.2 的双键消歧；解析器硬断言 `'enum' in raw`）。
+ * 直接把类型化元素写出去会让解析器判红 `通道 key 缺 enum 字段` ——
+ * 这与几何的 `encodeBlockGeometry` 是同一类问题：**内部形状 ≠ 文件形状**，
+ * 故必须有一步显式编码。
+ *
+ * 其余元素的字段名与文件一致（规则 `phase`/`kind`/`index`/`indexRole`/`indexTable`/
+ * `channel`/`guard`/`sel`/`x`/`y`/`z`/`legend`；骨架阶 `channel`/`cellGrid`/`layers`/
+ * `w`/`hh`/`d`/`roles`；变体 `key`/`totalTier`/`values`/`runstate`；运行态 `id`/`name`/
+ * `materialSwap`），故只做浅拷贝 —— 但**每个元素都过一遍编码函数**，
+ * 于是"将来哪个字段改名"只会在这里暴露一次，而不是静默产出非法文件。
+ *
+ * 元素自带的 `raw`（每元素一个原始节点）**保留**：那是元素**内部**扩展键的保真，
+ * 去掉它会让"某条规则的族特有字段"静默丢失（§12 第 3 段）。
+ * 类型化的是**结构**（哪些字段已知、有类型），不是"禁止任何原始节点存在"。
+ */
+export function typedDeclarationOf(decl: MultiblockDecl): {
+  sourceClass?: string
+  hasScopeOverlap: boolean
+  scopeOverlapNote?: string
+  totalTierDomain: Readonly<Record<string, unknown>>
+  tierSample: readonly number[]
+  channels: readonly Readonly<Record<string, unknown>>[]
+  runstates: readonly Readonly<Record<string, unknown>>[]
+  variants: readonly Readonly<Record<string, unknown>>[]
+  rules: readonly Readonly<Record<string, unknown>>[]
+  backbone: Readonly<Record<string, unknown>>
+  couplings: readonly Readonly<Record<string, unknown>>[]
+  couplingMode: string
+  notes: readonly Readonly<Record<string, unknown>>[]
+  paletteSource: string
+  geometryEncoding: string
+  opsLegend: Readonly<Record<string, string>>
+} {
+  const out: {
+    sourceClass?: string
+    hasScopeOverlap: boolean
+    scopeOverlapNote?: string
+    totalTierDomain: Readonly<Record<string, unknown>>
+    tierSample: readonly number[]
+    channels: readonly Readonly<Record<string, unknown>>[]
+    runstates: readonly Readonly<Record<string, unknown>>[]
+    variants: readonly Readonly<Record<string, unknown>>[]
+    rules: readonly Readonly<Record<string, unknown>>[]
+    backbone: Readonly<Record<string, unknown>>
+    couplings: readonly Readonly<Record<string, unknown>>[]
+    couplingMode: string
+    notes: readonly Readonly<Record<string, unknown>>[]
+    paletteSource: string
+    geometryEncoding: string
+    opsLegend: Readonly<Record<string, string>>
+  } = {
+    hasScopeOverlap: decl.hasScopeOverlap === true,
+    totalTierDomain: Object.freeze({ ...decl.totalTierDomain }),
+    tierSample: Object.freeze([...decl.tierSample]),
+    // **元素编码**（两个字段名/形状与文件格式不同 —— 本批实测抓出）：
+    //  ① `enumName` → 文件键 `enum`（契约 §4.2 双键消歧；解析器硬断言 `'enum' in raw`）。
+    //  ② `domain` → 文件的**取值域区间** `{min, max}`。类型化面的 `domain` 是**算出来的**
+    //     `{lo, hi}`（`lo` 恒 0），而解析器读的是 `domain.max`（`parseChannel` 第 435 行）——
+    //     把 `{lo, hi}` 原样写回会让 `domain.max` 缺席，于是 `domainHi` 回落成总档位上界，
+    //     进而让 `indexTable` 长度校验判红（实测：`coil` 的 need 从 4 变成 15）。
+    //     用类型化的 `min`/`max`（有效取值下/上界）写回区间，语义等价且校验通过。
+    channels: Object.freeze(
+      decl.channels.map((c) => {
+        const { enumName, domain, ...rest } = c as unknown as {
+          enumName: string | null
+          domain: { lo: number; hi: number }
+        } & Record<string, unknown>
+        void domain
+        return Object.freeze({ ...rest, enum: enumName, domain: { min: c.min, max: c.max } }) as Readonly<
+          Record<string, unknown>
+        >
+      }),
+    ),
+    runstates: Object.freeze(decl.runstates.map((r) => Object.freeze({ ...r }) as Readonly<Record<string, unknown>>)),
+    variants: Object.freeze(decl.variants.map((v) => Object.freeze({ ...v }) as Readonly<Record<string, unknown>>)),
+    rules: Object.freeze(decl.rules.map((r) => Object.freeze({ ...r }) as Readonly<Record<string, unknown>>)),
+    // 骨架阶**不含** `decl.backbone.raw`（其原始节点由 `declRaw` 保真 —— 两者不重复承载）。
+    backbone: Object.freeze({
+      kind: decl.backbone.kind,
+      sizeChannel: decl.backbone.sizeChannel,
+      sizeSteps: Object.freeze(
+        decl.backbone.sizeSteps.map((s) => Object.freeze({ ...s }) as Readonly<Record<string, unknown>>),
+      ),
+    }),
+    couplings: Object.freeze(decl.couplings.map((c) => Object.freeze({ ...c }) as Readonly<Record<string, unknown>>)),
+    couplingMode: decl.couplingMode,
+    notes: Object.freeze(decl.notes.map((n) => Object.freeze({ ...n }) as Readonly<Record<string, unknown>>)),
+    paletteSource: decl.paletteSource,
+    geometryEncoding: decl.geometryEncoding,
+    opsLegend: Object.freeze({ ...decl.opsLegend }),
+  }
+  if (decl.sourceClass !== undefined) out.sourceClass = decl.sourceClass
+  if (decl.scopeOverlapNote !== undefined) out.scopeOverlapNote = decl.scopeOverlapNote
+  return out
+}
+
+/**
  * 取内层 body 的 `multiblock` 节原文（**单个节点**，不是整个 body）。
  *
  * ## 为什么是"单个节点"（本批退役 `source` 的判据）
@@ -295,6 +406,13 @@ export interface MultiblockContent {
 
 /** 装配产物里承载的**投影面**（字段语义见 `kernelProjection#KernelDeclarationProjection`）。 */
 export interface MultiblockProjectionFace {
+  /**
+   * **类型化的声明字段**（形状与 `kernelProjection#KernelTypedDeclaration` 一致）。
+   *
+   * 见那里对"为什么它必须存在"的说明：第一版的投影面**缺**它，导致投影只能从
+   * `declRaw` 回落声明字段（即"声明仍靠原始 JSON"），被零回显判别实验判红。
+   */
+  readonly declaration: ReturnType<typeof typedDeclarationOf>
   /** 并集调色板（契约 §6；`[0]` 恒为 air）。 */
   readonly blockPalette: readonly BlockPaletteEntry[]
   /** 几何资产目录（`assetId` → 资产）。 */
@@ -1415,6 +1533,7 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
           // 只发出"实际被格引用"的条目。用逐格那张会让骨架阶的下标越界
           // （`buildPalette` 的 `slots[i]` 变 null ⇒ 装配出的骨架缺方块）。
           projection: Object.freeze({
+            declaration: typedDeclarationOf(decl),
             blockPalette: unionPaletteOf(doc, payload.palette),
             assets: payload.geometry,
             frames: (doc.multiblock?.frames ?? []).map((f) => {

@@ -46,12 +46,14 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
-import { projectGridCells, projectToRuntimeDocument } from '@/composition/kernelProjection'
+import { projectGridCells, projectKernelDocument, projectToRuntimeDocument } from '@/composition/kernelProjection'
+import type { KernelDeclarationProjection } from '@/composition/kernelProjection'
 import { createParserRegistry, type ParserRegistryImpl } from '@/context/parserRegistry'
 import { V2PlainParser, WorldParser, StructureDataParser, createEnvelopeParser } from '@/context/parsers/builtinParsers'
 import { assembleSelection, type MultiblockInnerDocument } from '@/context/multiblock'
 import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
 import { fixturePath, readJson } from '@/context/__tests__/multiblockFixtureIo.mjs'
+import { RuntimeDocument } from '@/context/runtimeDocument'
 import { unwrap } from '@/domain/errors'
 import { buildMultiblockRenderView } from '@/shared/viewport/multiblockChannelUi'
 import { resolveRenderBundle } from '@/render/data/bundleResolve'
@@ -78,6 +80,15 @@ function productionParserRegistry(): ParserRegistryImpl {
   parsers.register(WorldParser)
   parsers.register(StructureDataParser)
   return parsers
+}
+
+/** 读一份多方块夹具 → `(RuntimeDocument, plain 根)`（都经生产解析器/信封解包）。 */
+async function loadFixture(name: string): Promise<{ doc: RuntimeDocument; plainRoot: Readonly<Record<string, unknown>> }> {
+  const envelope = readJson(fixturePath(name)) as Record<string, unknown>
+  const parsed = await productionParserRegistry().detectAndParse(envelope)
+  expect(parsed.document, `${name} 应能被生产解析器解析`).not.toBeNull()
+  const layers = await readEnvelopeLayers(envelope as never)
+  return { doc: parsed.document!, plainRoot: layers.plain as Readonly<Record<string, unknown>> }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -239,7 +250,8 @@ async function afterDefinition(name: string): Promise<StructureDefinition> {
     multiblockDeclaration: {
       id: mb.id,
       displayName: mb.displayName,
-      declRaw: mb.declRaw,
+      declaration: mb.projection.declaration,
+    declRaw: mb.declRaw,
       blockPalette: mb.projection.blockPalette,
       assets: mb.projection.assets,
       frames: mb.projection.frames,
@@ -321,6 +333,68 @@ describe('P10d · 多方块夹具：切换前后逐格/逐三角形一致', () =
       console.log(`[P10d] ${name}: 投影调色板条目=${stats.entries} 其中带几何=${stats.withGeometry}`)
     })
   }
+})
+
+describe('P10d · 零回显：删掉声明原文后**仍**能从类型化内容重建', () => {
+  it('把 `declRaw` 清空 ⇒ 投影产物**仍**能被生产解析器读回（回显不承重，故它不是回显）', async () => {
+    // ## 本条是"零回显"的**判别实验**（不是"读代码推断"）
+    //
+    // R-WK-06 裁决要求退役的是「把内层 body 的原始 JSON 逐键摊平回产物根」。
+    // 若投影仍依赖它，删掉 `declRaw` 后产物必然读不回 —— 那正是"回显承重"的形态。
+    //
+    // **本判据抓出过一处真实缺陷**：第一版的投影面**没有**类型化声明字段，
+    // `projectMultiblockBody` 于是从 `declRaw` 逐键回落 —— 清空后投影读不回，
+    // 本条当场判红。修复后（投影面携带 `KernelTypedDeclaration`）本条转绿。
+    //
+    // 注意：本条**不**主张 `declRaw` 可以被永久删除（它承载 `viewerSemantics`
+    // 等类型化未覆盖的扩展键 —— §12「未知字段不静默丢」的要求）。
+    // 本条主张的是**可删性**：它不承重，故它不是回显。
+    const { doc, plainRoot } = await loadFixture('multiblock-tier-only')
+    const assembled = unwrap(assembleKernelDocument({ doc, plainRoot }))
+    const mb = assembled.multiblock!
+    const declOf = (declRaw: Readonly<Record<string, unknown>>): KernelDeclarationProjection => ({
+      id: mb.id,
+      displayName: mb.displayName,
+      declaration: mb.projection.declaration,
+      declRaw,
+      blockPalette: mb.projection.blockPalette,
+      assets: mb.projection.assets,
+      frames: mb.projection.frames,
+      schemaVersion: mb.projection.schemaVersion,
+      multiblockCount: mb.projection.multiblockCount,
+    })
+
+    const withRaw = projectKernelDocument({
+      scene: assembled.scene,
+      content: assembled.content,
+      multiblockDeclaration: declOf(mb.declRaw),
+    })
+    const withoutRaw = projectKernelDocument({
+      scene: assembled.scene,
+      content: assembled.content,
+      multiblockDeclaration: declOf(Object.freeze({})),
+    })
+
+    // ① 清空后仍能读回
+    const reparsed = await productionParserRegistry().detectAndParse(withoutRaw.plain)
+    expect(reparsed.document, '删掉 declRaw 后投影产物**仍**必须能被生产解析器读回（否则回显是承重的）').not.toBeNull()
+    const reparsedWith = await productionParserRegistry().detectAndParse(withRaw.plain)
+    expect(reparsed.document!.frameCount, '帧数不得因删掉 declRaw 而变化').toBe(reparsedWith.document!.frameCount)
+    // ② 类型化字段写出的键两边**逐键相同**
+    const mbWith = withRaw.plain.multiblock as Record<string, unknown>
+    const mbWithout = withoutRaw.plain.multiblock as Record<string, unknown>
+    for (const key of ['id', 'displayName', 'channels', 'runstates', 'variants', 'rules', 'backbone', 'totalTierDomain'] as const) {
+      expect(mbWithout[key], `键 ${key} 必须由**类型化字段**写出（不依赖 declRaw）`).toEqual(mbWith[key])
+    }
+    expect(withoutRaw.plain.blockPalette, '调色板必须由类型化条目重建').toEqual(withRaw.plain.blockPalette)
+    expect(withoutRaw.plain.multiblockCount, '`multiblockCount` 必须由类型化字段写出').toBe(1)
+    // ③ 反空洞真：`declRaw` 本身**非空**（否则"清空它"这个实验没有意义）
+    expect(Object.keys(mb.declRaw).length, '前提：真实声明的 declRaw 非空').toBeGreaterThan(0)
+    console.log(
+      `[P10d] 零回显判别：declRaw 键数 ${Object.keys(mb.declRaw).length} → 0，` +
+        `产物仍含 ${Object.keys(mbWithout).length} 个 multiblock 键，帧数 ${reparsed.document!.frameCount}`,
+    )
+  })
 })
 
 describe('P10d · 真实信封（帧为主）：33 个重名条目仍逐位一致', () => {

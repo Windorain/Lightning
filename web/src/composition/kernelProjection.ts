@@ -478,10 +478,48 @@ export type ProjectionDiagnosticCode =
  * 收窄入参使"投影依赖什么"在类型上可见 —— 于是"投影偷偷读了别的字段"不可能
  * （那正是"回显"能藏身的地方）。
  */
+/**
+ * **类型化声明的投影面**（`multiblock` 节里所有**有名字段**的值）。
+ *
+ * ## 为什么它必须存在（本批实测抓出的一处真实缺口）
+ *
+ * 第一版的 `projectMultiblockBody` 从 `declRaw` 回落声明字段 —— 即"声明仍靠原始
+ * JSON"。这一点被**零回显判别实验**当场抓出：把 `declRaw` 清空后投影产物
+ * **读不回**（`expected null not to be null`），证明它当时是**承重**的。
+ *
+ * ⇒ 本类型把声明里所有被生产解析器**校验过**的字段显式列出来。
+ * 它们的值来自 `context/parsers/multiblockDocument` 产出的 `MultiblockDecl`
+ * （通道有 `key`/`name`/`kind`/`min`/`max`/`domain`/`slider`；规则有 `phase`/
+ * `kind`/`guard`/`sel`/`indexTable`/`indexAliases`；骨架阶有带 `cellGrid` 的
+ * `sizeSteps`）—— **不是** `Record<string, unknown>` 的原文。
+ *
+ * 于是 `declRaw` 的角色收窄为**扩展键保真**（`viewerSemantics`/未来的族特有键），
+ * 而不是"整个声明的来源"。
+ */
+export interface KernelTypedDeclaration {
+  readonly sourceClass?: string
+  readonly hasScopeOverlap: boolean
+  readonly scopeOverlapNote?: string
+  readonly totalTierDomain: Readonly<Record<string, unknown>>
+  readonly tierSample: readonly number[]
+  readonly channels: readonly Readonly<Record<string, unknown>>[]
+  readonly runstates: readonly Readonly<Record<string, unknown>>[]
+  readonly variants: readonly Readonly<Record<string, unknown>>[]
+  readonly rules: readonly Readonly<Record<string, unknown>>[]
+  readonly backbone: Readonly<Record<string, unknown>>
+  readonly couplings: readonly Readonly<Record<string, unknown>>[]
+  readonly couplingMode: string
+  readonly notes: readonly Readonly<Record<string, unknown>>[]
+  readonly paletteSource: string
+  readonly geometryEncoding: string
+  readonly opsLegend: Readonly<Record<string, string>>
+}
 export interface KernelDeclarationProjection {
   /** 声明 id（写回内层 body 的 `multiblock.id`）。 */
   readonly id: string
   readonly displayName: string
+  /** **类型化声明字段**（见 {@link KernelTypedDeclaration}）——投影的**主**来源。 */
+  readonly declaration: KernelTypedDeclaration
   /**
    * `multiblock` 节的**扩展键保真**（`declRaw`）。
    *
@@ -600,17 +638,33 @@ export function projectMultiblockBody(declaration: KernelDeclarationProjection):
   if (declaration.schemaVersion !== null) out.schemaVersion = declaration.schemaVersion
   out.multiblockCount = declaration.multiblockCount
 
-  // ① 扩展键保真（打底）。
+  // ① 扩展键保真（打底；**只**为类型化未覆盖的键留位）。
   const mb: Record<string, unknown> = { ...declaration.declRaw }
-  // ② 类型化字段覆盖（它们**赢**）。
+  // ② **类型化字段全部覆盖**（它们赢；`KernelTypedDeclaration` 逐字段列出）。
+  //
+  // 写序是判据的一部分：若把 ② 与 ① 调换，"类型化内容编辑了但导出还是旧的"
+  // 就会成为一个必然的静默缺陷（本文件头判据 1 要防的正是它）。
+  const d = declaration.declaration
   mb.id = declaration.id
   mb.displayName = declaration.displayName
-  mb.channels = declaration.declRaw.channels ?? mb.channels
-  mb.runstates = declaration.declRaw.runstates ?? mb.runstates
-  mb.variants = declaration.declRaw.variants ?? mb.variants
-  mb.rules = declaration.declRaw.rules ?? mb.rules
-  mb.backbone = declaration.declRaw.backbone ?? mb.backbone
-  mb.totalTierDomain = declaration.declRaw.totalTierDomain ?? mb.totalTierDomain
+  mb.couplingMode = d.couplingMode
+  mb.totalTierDomain = d.totalTierDomain
+  mb.tierSample = d.tierSample
+  mb.channels = d.channels
+  mb.runstates = d.runstates
+  mb.variants = d.variants
+  mb.rules = d.rules
+  mb.backbone = d.backbone
+  mb.couplings = d.couplings
+  mb.notes = d.notes
+  mb.paletteSource = d.paletteSource
+  mb.geometryEncoding = d.geometryEncoding
+  mb.opsLegend = d.opsLegend
+  mb.hasScopeOverlap = d.hasScopeOverlap
+  if (d.sourceClass !== undefined) mb.sourceClass = d.sourceClass
+  if (d.scopeOverlapNote !== undefined) mb.scopeOverlapNote = d.scopeOverlapNote
+  // `viewerSemantics` **不**在此列：它是类型化未覆盖的扩展键，由 ① 的 `declRaw` 保留。
+  // 这样的键每一批都可能新增，而"哪些键还没类型化"应当**显式可见**（就是这里没有的键）。
   out.multiblock = mb
 
   // ③ 并集调色板：把**未被任何格引用**的类型化条目补进去。
