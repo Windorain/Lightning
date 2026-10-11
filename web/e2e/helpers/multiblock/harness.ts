@@ -124,6 +124,166 @@ export async function waitForLayerY(page: Page, y: number, timeout = 30_000): Pr
 }
 
 // ---------------------------------------------------------------------------
+// 导航竞态防护（#272）
+// ---------------------------------------------------------------------------
+
+/**
+ * 每页的**导航纪元**（main frame 的 `framenavigated` 计数）。
+ *
+ * ## 为什么需要计数，而不是只靠 try/catch
+ *
+ * `page.evaluate` 的语义是"在**当前**执行上下文里跑"。若该窗口内页面发生了导航
+ * （新文档被提交），上下文被销毁，于是有两种坏结果：
+ *
+ *  1. evaluate **抛错** —— `Execution context was destroyed, most likely because of a
+ *     navigation`（本单报告的现象）；
+ *  2. evaluate **成功返回**，但结果来自**即将被丢弃的文档** —— 更坏：没有任何异常，
+ *     调用方拿着一个"来自上一份文档"的结果继续跑，后续断言在错误的页面上进行。
+ *
+ * 只用 try/catch 只能挡住第 1 种。纪元计数把"这次尝试期间到底有没有导航"
+ * 变成**可判定的事实**：返回值只有在纪元未变时才被接受（见 `evaluateNavigable`）。
+ *
+ * ## 为什么挂监听在这里而不是在 spec 里
+ *
+ * 监听必须**只注册一次**（`page.on` 每次调用都会新增一个监听器，重复注册会泄漏）。
+ * 用 `WeakMap` 以 `page` 为键做惰性注册，页面被回收时状态随之消失。
+ */
+const navEpochs = new WeakMap<Page, { count: number }>()
+
+/** 取当前导航纪元（首次调用时为本页注册一次性监听）。 */
+export function navEpochOf(page: Page): number {
+  let st = navEpochs.get(page)
+  if (st === undefined) {
+    const state = { count: 0 }
+    navEpochs.set(page, state)
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) state.count += 1
+    })
+    return state.count
+  }
+  return st.count
+}
+
+/**
+ * 等到"可以安全 evaluate"的状态：本帧 load 已发生、app 已就绪、DOM 完成。
+ *
+ * 三条判据都**幂等**（已满足时立即返回），故可安全地放在每次尝试之前。
+ *
+ * ## 为什么不用 `networkidle`
+ *
+ * `networkidle`（500ms 无网络）在本应用里**不可靠**：视口渲染、纹理预取与 wiki
+ * 数据页查询都可能持续产生请求，于是它要么白等到超时、要么因"恰好安静了一瞬"
+ * 而给出误导性的通过。判据应当表达**真实前提**（"文档已 load 且 app 已引导完成"），
+ * 而不是"网络看起来安静"。
+ */
+export async function waitForEvaluateReady(page: Page, timeout = 90_000): Promise<void> {
+  await page.waitForLoadState('load', { timeout })
+  await page.waitForFunction(
+    () => (window as any).__vm_ready__ === true && document.readyState === 'complete',
+    undefined,
+    { timeout },
+  )
+}
+
+/**
+ * "evaluate 因导航被打断"的**专用错误类型**。
+ *
+ * ## 为什么需要显式类型（而不是靠消息里恰好含某段文字）
+ *
+ * `evaluateNavigable` 在尝试耗尽后会抛一个**包装**错误（带尝试次数与最后原因）。
+ * 若上层（`injectSceneDocumentOk`）只靠正则匹配消息来判断"这是不是导航竞态"，
+ * 就会依赖"包装消息恰好原样嵌入了 Playwright 的原文"这一**偶然**事实 ——
+ * 一旦消息模板调整（例如以后不再拼接 `lastReason`），判定会静默失效，
+ * 重试不再触发，缺陷以"偶发红"的形式回来。
+ *
+ * 故用显式类型把"是不是导航竞态"变成**类型系统**能回答的问题：
+ *  - 原始 Playwright 错误：靠消息识别（它是外部库，我们无法给它加类型）；
+ *  - 本模块包装后的错误：靠 `instanceof` 识别（可靠，与文案无关）。
+ */
+export class NavigationInterruptedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NavigationInterruptedError'
+  }
+}
+
+/**
+ * 本单竞态的**精确**签名（导航销毁执行上下文）。
+ *
+ * 刻意保持**窄**：只认导航/上下文销毁这一类。任何其它错误（断言失败、超时、
+ * 应用抛错）都**立即上抛**，绝不被重试吞掉 —— 否则重试就从"接住环境竞态"
+ * 退化成"掩盖真实缺陷"，那正是本单要避免的方向。
+ */
+export function isNavigationDestroyedError(e: unknown): boolean {
+  if (e instanceof NavigationInterruptedError) return true
+  const m = e instanceof Error ? e.message : String(e)
+  return /Execution context was destroyed/.test(m) || /most likely because of a navigation/.test(m)
+}
+
+export interface NavigableEvaluateOptions {
+  /** 最大尝试次数（含首次）。**有界**：不是无限重试。 */
+  readonly attempts?: number
+  readonly timeout?: number
+}
+
+/**
+ * 在**导航竞态**下依然可用的 `page.evaluate`。
+ *
+ * ## 契约（三件事同时成立才算成功）
+ *
+ *  1. 每次尝试前先过 {@link waitForEvaluateReady}（load + app 就绪）；
+ *  2. evaluate 正常返回；**且**
+ *  3. **该次尝试期间没有发生导航**（纪元未变）—— 否则返回值按"可能来自已丢弃文档"
+ *     处理，属于失败，需重试。
+ *
+ * ## 为什么这不是"加 sleep 碰运气"
+ *
+ *  - **不 sleep**：重试前不等待固定时长，而是等**可判定的就绪条件**（新文档 load +
+ *    app 引导完成）。等待的是事实，不是时长。
+ *  - **有界**：`attempts` 默认 3。耗尽仍失败 ⇒ 抛错（含最后一次的真实原因），
+ *    不会把失败变成静默通过。
+ *  - **只接环境竞态**：非导航类错误原样上抛，判据强度不受影响。
+ *
+ * ## 与"重试掩盖缺陷"的界线
+ *
+ * 被重试的是**环境**（dev server 的 HMR `full-reload` / `vite:ws:disconnect` 会让
+ * Vite 客户端 `location.reload()`，见 `vite/dist/client/client.mjs` 的
+ * `debounceReload` 与 `vite:ws:disconnect` 分支）—— 与产品行为无关，
+ * 而重试后必然重新履行"注入 → 断言 docLoaded"的完整判据（见 `injectSceneDocumentOk`），
+ * 故没有任何断言被放宽。
+ */
+export async function evaluateNavigable<T, A>(
+  page: Page,
+  fn: (arg: A) => T | Promise<T>,
+  arg: A,
+  opts: NavigableEvaluateOptions = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 3
+  const timeout = opts.timeout ?? 90_000
+  let lastReason = '未知'
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    await waitForEvaluateReady(page, timeout)
+    const epochBefore = navEpochOf(page)
+    try {
+      const value = await page.evaluate(fn as never, arg as never)
+      if (navEpochOf(page) === epochBefore) return value as T
+      lastReason = 'evaluate 期间发生了导航（结果不可信，可能来自已被丢弃的文档）'
+    } catch (e) {
+      if (!isNavigationDestroyedError(e)) throw e
+      lastReason = e instanceof Error ? e.message.split('\n')[0] : String(e)
+    }
+    if (attempt < attempts) {
+      // 等**新文档** load 完成再进入下一次尝试（失败时超时无妨：下一轮的就绪门会再等）。
+      await page.waitForLoadState('load', { timeout }).catch(() => undefined)
+    }
+  }
+  throw new NavigationInterruptedError(
+    `evaluateNavigable：${attempts} 次尝试均被导航打断（每次都等到 load + app 就绪后才重试）。` +
+      `最后一次原因：${lastReason}`,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // IO 接管：场景注入
 // ---------------------------------------------------------------------------
 
@@ -145,6 +305,15 @@ export interface InjectResult {
  *
  * `json` 由调用方给出——可以是仓库 fixture 原件，也可以是测试内动态篡改的副本
  * （篡改副本在内存里，不落盘、不改仓库原件）。
+ *
+ * ## 为什么走 `evaluateNavigable` 而不是裸 `page.evaluate`（#272）
+ *
+ * 注入要跑 `OPERATOR_OPEN_SCENE`（解析 JSON + 建文档 + 装配），耗时数百毫秒 ——
+ * 这是一个**窗口**。若该窗口内页面发生导航（dev server 的 HMR `full-reload`
+ * 或 `vite:ws:disconnect` 都会让 Vite 客户端 `location.reload()`），执行上下文被销毁，
+ * 于是报 `Execution context was destroyed, most likely because of a navigation`
+ * ——即 #272 观测到的间歇失败（全量套件、负载下更易出现；单跑该 spec 不复现）。
+ * `evaluateNavigable` 把"注入前等到就绪 + 窗口内无导航"变成判据，而不是靠运气。
  */
 export async function injectSceneDocument(
   page: Page,
@@ -152,8 +321,9 @@ export async function injectSceneDocument(
   fileName: string,
 ): Promise<InjectResult> {
   const text = JSON.stringify(json)
-  return await page.evaluate(
-    async ({ text, fileName }) => {
+  return await evaluateNavigable(
+    page,
+    async ({ text, fileName }: { text: string; fileName: string }) => {
       const ctx = (window as any).__vm__
       if (!ctx) throw new Error('T2.6: window.__vm__ 未就绪')
       const file = new File([text], fileName, { type: 'application/json' })
@@ -169,19 +339,113 @@ export async function injectSceneDocument(
       }
     },
     { text, fileName },
+    // **单次**尝试：整步重做由 `injectSceneDocumentOk` 负责。
+    // 若此处也用 3 次，重试次数会变成 3×3=9（嵌套相乘），既无必要也让"有界"失准。
+    // 两层职责分工：本函数只保证"这一次 evaluate 没被导航打断"，不重做整个注入步骤。
+    { attempts: 1 },
   )
 }
 
-/** 注入并断言加载成功；返回注入结果。 */
+/** 注入步骤的选项（有界重做；见 `injectSceneDocumentOk`）。 */
+export interface InjectStepOptions {
+  /** 整个"注入 + 断言已加载"步骤的最大尝试次数（含首次）。**有界**。 */
+  readonly attempts?: number
+  readonly timeout?: number
+}
+
+/** 注入步骤的**文档原子性标记**（一次性随机串；导航会把它连同旧文档一起清掉）。 */
+function newInjectToken(): string {
+  return `wk-inj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/**
+ * 注入并断言加载成功；返回注入结果。
+ *
+ * ## 为什么整步要重做，而不只是给 evaluate 加重试（#272 的实测教训）
+ *
+ * 注入**不止是一次 evaluate**，而是一个复合步骤：
+ *
+ * ```
+ * ① page.evaluate(OPERATOR_OPEN_SCENE)   ← 窗口 A（数百 ms）
+ * ② 断言 docLoaded                        ← 判据
+ * ③ 等 doc 非空                            ← 窗口 B
+ * ```
+ *
+ * 只保护窗口 A 是不够的：导航若落在 ②/③ 之间，evaluate 已成功返回，
+ * 但**后续断言是在一份已经没有文档的新文档上做的** ⇒ `waitForDocLoaded` 一直等不到，
+ * 直到 30s 超时。这不是"重试没生效"，而是**重试的作用域画小了**。
+ * （本单的回归用例 A 正是这样先失败的 —— 它逼出了这个洞。）
+ *
+ * ⇒ 用**一次性令牌**把整步钉在同一份文档上：注入前在当前文档写入随机令牌；
+ * 导航一旦发生，令牌随旧文档一起消失。于是"文档被换掉"可以**立即**判定，
+ * 而不是靠把超时调短去猜。
+ *
+ * ## 判据强度不变
+ *
+ * `docLoaded` 断言与改动前**逐字相同**（消息、条件都未放宽）；令牌只用来判定
+ * "这次尝试是否发生在同一份文档上"。非导航类错误（含断言失败）**原样上抛**。
+ */
 export async function injectSceneDocumentOk(
   page: Page,
   json: unknown,
   fileName: string,
+  opts: InjectStepOptions = {},
 ): Promise<InjectResult> {
-  const result = await injectSceneDocument(page, json, fileName)
-  expect(result.docLoaded, `场景注入失败（${fileName}）：${result.parseError}`).toBe(true)
-  await waitForDocLoaded(page)
-  return result
+  const attempts = opts.attempts ?? 3
+  const timeout = opts.timeout ?? 90_000
+  let lastReason = '未知'
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    await waitForEvaluateReady(page, timeout)
+    const token = newInjectToken()
+    try {
+      // ① 在当前文档上打标记（若此刻正好发生导航，标记落在新文档上，仍然自洽）
+      await page.evaluate((t) => {
+        ;(window as any).__wk_inject_token__ = t
+      }, token)
+
+      const result = await injectSceneDocument(page, json, fileName)
+
+      // ② 注入期间文档被换掉 ⇒ 结果与后续断言不属于同一份文档 ⇒ 重做
+      if (!(await tokenStillCurrent(page, token))) {
+        lastReason = '注入期间文档被替换（导航）'
+        continue
+      }
+
+      // ③ 判据：与改动前逐字相同（不放宽）
+      expect(result.docLoaded, `场景注入失败（${fileName}）：${result.parseError}`).toBe(true)
+
+      // ④ 等 doc 非空；若期间文档被换掉则**立即**返回，交给下一轮重做
+      await page.waitForFunction(
+        (t) => {
+          const w = window as any
+          if (w.__wk_inject_token__ !== t) return true
+          return !!w.__vm__ && w.__vm__.getDoc().value !== null
+        },
+        token,
+        { timeout },
+      )
+      if (!(await tokenStillCurrent(page, token))) {
+        lastReason = '等待文档就绪期间文档被替换（导航）'
+        continue
+      }
+      return result
+    } catch (e) {
+      if (!isNavigationDestroyedError(e)) throw e
+      lastReason = e instanceof Error ? e.message.split('\n')[0] : String(e)
+    }
+    if (attempt < attempts) {
+      await page.waitForLoadState('load', { timeout }).catch(() => undefined)
+    }
+  }
+  throw new NavigationInterruptedError(
+    `injectSceneDocumentOk：${attempts} 次尝试均被导航打断（每次都等到 load + app 就绪后才重做）。` +
+      `最后一次原因：${lastReason}`,
+  )
+}
+
+/** 当前文档是否仍是打令牌时那一份（导航会让令牌随旧文档消失）。 */
+async function tokenStillCurrent(page: Page, token: string): Promise<boolean> {
+  return await page.evaluate((t) => (window as any).__wk_inject_token__ === t, token)
 }
 
 // ---------------------------------------------------------------------------
