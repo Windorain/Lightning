@@ -34,6 +34,7 @@ import {
   addAnnotationObject,
   addBlockObject,
   addCameraObject,
+  addMeshObject,
   beginSave,
   completeSave,
   createDocument,
@@ -130,9 +131,11 @@ export interface SetTransformCommand {
 export interface AddObjectCommand {
   readonly kind: 'addObject'
   readonly contextId: string
-  readonly objectType: 'block' | 'annotation' | 'camera'
+  readonly objectType: 'block' | 'annotation' | 'camera' | 'mesh'
   readonly name?: string
   readonly annotationShape?: 'box' | 'point' | 'line' | 'text' | 'face'
+  /** 网格尺寸（仅 `objectType: 'mesh'`；缺省 1 场景单位）。 */
+  readonly meshSize?: number
 }
 
 export interface DeleteObjectCommand {
@@ -535,21 +538,34 @@ function reduceAddObject(state: ApplicationState, cmd: AddObjectCommand): Transi
   const ref = objectRef(a1.id, a2.next.counter)
   const scene = doc.scene
   let nextScene: Scene | null
-  switch (cmd.objectType) {
-    case 'block':
-      nextScene = addBlockObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
-      break
-    case 'annotation':
-      nextScene = addAnnotationObject(scene, {
-        objectId: a1.id,
-        dataId: a2.id,
-        ...(cmd.name === undefined ? {} : { name: cmd.name }),
-        ...(cmd.annotationShape === undefined ? {} : { shape: cmd.annotationShape }),
-      })
-      break
-    case 'camera':
-      nextScene = addCameraObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
-      break
+  if (cmd.objectType === 'mesh') {
+    // 网格（#254 P3）：构造会校验几何参数，故失败原因是**多种**的
+    // （尺寸非法 / id 冲突），不压成同一个 `null`（#249 §5「不能用默认值掩盖缺失」）。
+    const made = addMeshObject(scene, {
+      objectId: a1.id,
+      dataId: a2.id,
+      ...(cmd.name === undefined ? {} : { name: cmd.name }),
+      ...(cmd.meshSize === undefined ? {} : { size: cmd.meshSize }),
+    })
+    if (!made.ok) return rejected(state, made.error)
+    nextScene = made.value
+  } else {
+    switch (cmd.objectType) {
+      case 'block':
+        nextScene = addBlockObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
+        break
+      case 'annotation':
+        nextScene = addAnnotationObject(scene, {
+          objectId: a1.id,
+          dataId: a2.id,
+          ...(cmd.name === undefined ? {} : { name: cmd.name }),
+          ...(cmd.annotationShape === undefined ? {} : { shape: cmd.annotationShape }),
+        })
+        break
+      case 'camera':
+        nextScene = addCameraObject(scene, { objectId: a1.id, dataId: a2.id, ...(cmd.name === undefined ? {} : { name: cmd.name }) })
+        break
+    }
   }
   if (nextScene === null) return rejected(state, invalidValue({ reason: 'idCollision', objectId: a1.id }))
 

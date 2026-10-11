@@ -32,7 +32,8 @@
  * 变换可以离开整数网格；坐标约束由显式纯策略处理，不由身份系统承担。
  */
 
-import { contentDigest, type EntityRef, type Version } from './identity'
+import { digestOf, type EntityRef, type Version } from './identity'
+import { topologyVersionOf, type MeshPayload } from './geometry'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 数学值（#249 §19.2：右手、Y-up；保留仿射表达能力）
@@ -102,6 +103,16 @@ export type ObjectDataPayload =
   | { readonly kind: 'blockGrid'; readonly cells: Readonly<Record<string, string>> }
   | { readonly kind: 'annotation'; readonly shape: 'box' | 'point' | 'line' | 'text' | 'face'; readonly text?: string }
   | { readonly kind: 'camera'; readonly projection: 'perspective' | 'orthographic'; readonly fov: number; readonly clipStart: number; readonly clipEnd: number }
+  /**
+   * 逻辑网格（#254 P3 交付）：拓扑 + 固定拓扑形变。
+   *
+   * 形状声明在此（`ObjectDataPayload` 是唯一的数据种类联合），
+   * **定义**在 `domain/geometry.ts`（`MeshPayload`）。这样做的理由有两条：
+   *  1. 网格**就是**一份对象数据 —— 不另起第二个数据注册表（#249 §3.1）；
+   *  2. `domain/geometry` 只 `import type` 本模块，故运行期依赖是**单向**的
+   *     （本模块 → geometry），没有环。
+   */
+  | MeshPayload
 
 /** 对象数据的载荷种类（供能力/呈现查询，不参与身份）。 */
 export type ObjectDataKind = ObjectDataPayload['kind']
@@ -120,8 +131,35 @@ export interface ObjectData {
   readonly topologyVersion: number
 }
 
+/**
+ * 造一份对象数据。
+ *
+ * ## `topologyVersion` 由载荷**导出**，不由调用方传入（#254 P3）
+ *
+ * P1 曾把 `topologyVersion` 硬编码为 `0`。那在只有 `blockGrid`/`annotation`/`camera`
+ * 三类**无子元素结构**的载荷时恰好正确，但一旦引入网格，硬编码 `0` 就会让
+ * "拓扑版本变化使旧引用显式失效"（#249 §3.2）**永远不触发** —— 引用会静默命中
+ * 另一张网的同一编号元素，正是契约 §1.2 负对照要判红的形态。
+ *
+ * 故现在由 {@link topologyVersionOf} 从载荷导出：
+ *  - 网格载荷 ⇒ 网格的真实拓扑版本；
+ *  - 其余载荷 ⇒ `0`（它们没有子元素，`ElementRef` 对它们无意义）。
+ *
+ * ## `contentVersion` 用 `digestOf`（键序稳定）而不是 `JSON.stringify`
+ *
+ * P1 用 `contentDigest(JSON.stringify(payload))`。`JSON.stringify` 的键序依赖对象
+ * **插入顺序** ⇒ 同一份语义内容用不同构造路径得到的摘要不同 ⇒
+ * 「撤销回实际保存内容必须干净」（#249 §8）会被误判为"仍脏"。
+ * `digestOf` 走 `canonicalize`（键序排序），修掉这一点。
+ */
 export function objectData(id: string, payload: ObjectDataPayload, source: DataSource = 'document'): ObjectData {
-  return Object.freeze({ id, source, payload, contentVersion: contentDigest(JSON.stringify(payload)), topologyVersion: 0 })
+  return Object.freeze({
+    id,
+    source,
+    payload,
+    contentVersion: digestOf(payload),
+    topologyVersion: topologyVersionOf(payload),
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,6 +300,23 @@ const DEFAULT_TYPES: readonly ObjectTypeDescriptor[] = Object.freeze([
   Object.freeze({ type: 'block', dataKind: 'blockGrid', editable: true }),
   Object.freeze({ type: 'annotation', dataKind: 'annotation', editable: true }),
   Object.freeze({ type: 'camera', dataKind: 'camera', editable: true }),
+  /**
+   * 网格对象（#254 P3）。
+   *
+   * ## 为什么必须在**两处**登记
+   *
+   * 收敛（#250 GF-5）之后「类型登记」分成两件事，缺一即表现为**显式失败**：
+   *
+   * | 登记处 | 承载的事实 | 缺失后果 |
+   * |---|---|---|
+   * | 本表（`domain/scene`） | `dataKind` / `editable`（能力与呈现查询） | 类型级能力查询判为未知 |
+   * | RNA 注册表（`application/kernel-properties.ts`） | 逐属性描述与值域 | 属性写被判 `property-not-registered` |
+   *
+   * 两处都登记是**有意**的，不是重复：`domain/` 不得 import `application/`
+   * （依赖单向向下），故能力表无法"查 RNA 得到"；而 RNA 需要单位/值域，
+   * 也不该由 `domain` 的字符串清单承担。分工的判据是**谁需要该事实**。
+   */
+  Object.freeze({ type: 'mesh', dataKind: 'mesh', editable: true }),
 ])
 
 export type ObjectTypeRegistry = Readonly<Record<ObjectTypeId, ObjectTypeDescriptor>>

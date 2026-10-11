@@ -53,6 +53,8 @@ import {
 } from './properties'
 import { ok, domainError, err, type DomainError, type PropertyRef, type Result } from './contracts'
 import { findObject, findObjectData } from '@/domain/scene'
+import { meshFromPayload } from '@/domain/geometry'
+import { commitGeometryEdit } from '@/domain/geometryEditing'
 import { withScene, type Document } from '@/domain/document'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,12 +73,27 @@ import { withScene, type Document } from '@/domain/document'
 export const KERNEL_BLOCK_TYPE = 'block' as const
 export const KERNEL_ANNOTATION_TYPE = 'annotation' as const
 export const KERNEL_CAMERA_TYPE = 'camera' as const
+/**
+ * 网格对象类型（#254 P3）。
+ *
+ * 用**同一条**公开注册路径加入（本文件的对象类型清单 + `registerObjectType`），
+ * 不改核心分派 —— 这是 #249 §13「扩展验证要求通过现有贡献接口新增类型，
+ * 而非改核心 switch」的证明路径：本类型是**第一个**走该路径新增的对象类型。
+ */
+export const KERNEL_MESH_TYPE = 'mesh' as const
 
-/** 内核对象类型全集（供 P3 的 `mesh` 预留扩展：新类型走 `registerObjectType`，不改核心）。 */
+/**
+ * 内核对象类型全集。
+ *
+ * 新增类型只需在此登记 + 在 {@link KERNEL_OBJECT_TYPES} 给出声明
+ * （`createKernelWritePorts` 按本清单为每个类型挂同一个写 handler），
+ * 不需要改任何 `switch (object.type)`。
+ */
 export const KERNEL_OBJECT_TYPE_IDS: readonly string[] = Object.freeze([
   KERNEL_BLOCK_TYPE,
   KERNEL_ANNOTATION_TYPE,
   KERNEL_CAMERA_TYPE,
+  KERNEL_MESH_TYPE,
 ])
 
 /** 位置/缩放等长度量的单位；`m` 为场景默认长度单位（Blender 约定）。 */
@@ -178,6 +195,42 @@ export const KERNEL_OBJECT_TYPES: readonly ObjectTypeDecl[] = Object.freeze([
       }),
     ]),
   }),
+  Object.freeze({
+    id: KERNEL_MESH_TYPE,
+    ownerKind: 'object' as const,
+    display: Object.freeze({ labelKey: 'objectType.mesh', fallback: '网格' }),
+    properties: Object.freeze([
+      ...structuralDecls(),
+      ...transformDecls(),
+      /**
+       * 顶点位置（#254 P3）。
+       *
+       * ## 子元素寻址
+       *
+       * 局部 ID 是 `vertexPosition`，故限定式 ID 为 `mesh.vertexPosition`
+       * （`localOf` 在**第一个点**处切分 ⇒ objectTypeId=`mesh`、localId=`vertexPosition`）。
+       * 具体是**哪个**顶点由 `PropertyRef.element`（`ElementRef{ elementId, topologyVersion }`）
+       * 承载 —— 契约 §1.3 的设计意图正是"子元素寻址是既有寻址的一部分"，
+       * 而不是为几何另开一条命令或旁路。
+       *
+       * ## 为什么 `animatable: false`（有意，不是遗漏）
+       *
+       * 基础网格顶点是**创作内容**。#249 §7 规定固定拓扑形变的动画路径是
+       * 「通过通用动画采样驱动**形变权重/属性**」，而 §3.2 明令「**不能**在每帧
+       * 改写基础网格」。若把本属性标为可动画，就等于给"每帧 setter 写基础值"
+       * 留了一条合法通道 —— 那正是 A09 的负对照要判红的形态。
+       *
+       * 形变权重才是 P4 的轨道目标（其求值入口是 `domain/geometry#evaluateDeformation`）。
+       *
+       * ## `animatable` 不参与可写性判定
+       *
+       * 它只喂 `samplingStrategy`（`properties.ts`），故本属性**照常可写**
+       * （可写性由 `probeWrite`/`evaluateEditability` 按目标事实求值，
+       * 与动画资格是两个正交维度）。
+       */
+      decl('vertexPosition', 'vec3', false, { labelKey: 'property.mesh.vertexPosition', fallback: '顶点位置' }, LENGTH_UNIT),
+    ]),
+  }),
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -255,7 +308,7 @@ export function readRawKernelValue(doc: Document, ref: PropertyRef): Result<unkn
     const field = localId.slice('transform.'.length) as 'position' | 'rotation' | 'scale' | 'pivot'
     return ok(obj.transform[field])
   }
-  if (localId === 'text' || localId.startsWith('projection.')) {
+  if (localId === 'text' || localId.startsWith('projection.') || localId === 'vertexPosition') {
     const data = findObjectData(doc.scene, obj.dataId)
     if (!data) return err(domainError('MissingTarget', { dataId: obj.dataId, property: ref.property }))
     if (localId === 'text') {
@@ -263,6 +316,25 @@ export function readRawKernelValue(doc: Document, ref: PropertyRef): Result<unkn
         return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'annotation', actual: data.payload.kind }))
       }
       return ok(data.payload.text)
+    }
+    if (localId === 'vertexPosition') {
+      // 网格顶点读面（#254 P3）。**必须有**：`applySetProperty` 的"无业务变化 ⇒ unchanged"
+      // 判定依赖 `readRaw` 与前值比较（D5）。缺了它，写相同值会被误报 `applied`
+      // —— 那正是 A06「新建相同内容容器即记账」的同族失真（幽灵历史）。
+      //
+      // 这也是 P2 反复强调的「读写共用同一份 `PropertyAccess`」：读面与写面必须覆盖
+      // **同一组**属性 ID，否则"读到的东西"与"写入要过的判据"不同构。
+      const mesh = meshFromPayload(data.payload)
+      if (!mesh) {
+        return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'mesh', actual: data.payload.kind }))
+      }
+      if (!ref.element) {
+        // 无元素身份 ⇒ 无法确定读哪个顶点（**不**"随便挑一个"）
+        return err(domainError('InvalidValue', { reason: 'element-required', property: ref.property }))
+      }
+      const v = mesh.topology.vertices.find((x) => x.id === ref.element?.elementId)
+      if (!v) return err(domainError('MissingTarget', { reason: 'no-such-vertex', elementId: ref.element.elementId }))
+      return ok(v.position)
     }
     if (data.payload.kind !== 'camera') {
       return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'camera', actual: data.payload.kind }))
@@ -346,6 +418,24 @@ export function kernelAccessOf(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * `vec3` 形状判定（**写入口的窄化辅助**，不是合法性政策）。
+ *
+ * 合法性（值域、单位、硬约束）由值 handler 在 `applySetProperty` 阶段判过；
+ * 本函数只把 `PropertyValue` 联合窄化到 `Vec3`，使下面的结构写入有类型依据。
+ * 判别式与 `isVec3`（P1 内联词汇的遗留，已在 GF-5 收敛中删除）一致，
+ * 但**不含**任何属性语义 —— 故它不是"内联白名单"的回归。
+ */
+function asVec3(value: PropertyValue): Readonly<{ x: number; y: number; z: number }> | null {
+  if (typeof value !== 'object' || value === null) return null
+  if (!('x' in value) || !('y' in value) || !('z' in value)) return null
+  if ('w' in value) return null
+  const v = value as { x: unknown; y: unknown; z: unknown }
+  if (typeof v.x !== 'number' || typeof v.y !== 'number' || typeof v.z !== 'number') return null
+  if (!Number.isFinite(v.x) || !Number.isFinite(v.y) || !Number.isFinite(v.z)) return null
+  return { x: v.x, y: v.y, z: v.z }
+}
+
+/**
  * 应用一个内核属性值 —— 返回**新文档**或结构化错误。
  *
  * 这是「唯一写路由」的**落点**：`reduceSetProperty` 只路由，具体写由本函数按
@@ -381,6 +471,48 @@ export function applyKernelPropertyValue(doc: Document, ref: PropertyRef, value:
 
   const data = findObjectData(scene, obj.dataId)
   if (!data) return err(domainError('MissingTarget', { dataId: obj.dataId, property: ref.property }))
+
+  if (localId === 'vertexPosition') {
+    // ── 网格顶点写（#254 P3）──────────────────────────────────────────────
+    //
+    // 这里**不**做"载荷字段替换"（那会就地改共享数据，正是 A07 负对照要判红的形态），
+    // 而是交给 `commitGeometryEdit` 完成「共享几何按对象独立编辑」：
+    // 数据被多个对象共享受时为目标对象分离出新数据，B 逐位不变。
+    //
+    // 引用有效性（`ref.element.topologyVersion` 与 `ref.owner.contentVersion` 是否过期）
+    // **不在这里判** —— 它已在 `probeWrite` → `staleReason`（`properties.ts`）阶段
+    // 由 `facts.topologyVersion` / `facts.contentVersion` 判过并整批拒绝。
+    // 保持"校验先于应用"这一不变量：本函数只在**已通过预检**的引用上执行写入。
+    const mesh = meshFromPayload(data.payload)
+    if (!mesh) {
+      return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'mesh', actual: data.payload.kind }))
+    }
+    if (!ref.element) {
+      // 无元素身份的顶点写必须显式拒绝（**不**"随便挑一个顶点"）
+      return err(domainError('InvalidValue', { reason: 'element-required', property: ref.property }))
+    }
+    const target = asVec3(value)
+    if (target === null) return err(domainError('InvalidValue', { property: ref.property, expected: 'vec3' }))
+    const current = mesh.topology.vertices.find((v) => v.id === ref.element?.elementId)
+    if (!current) return err(domainError('MissingTarget', { reason: 'no-such-vertex', elementId: ref.element.elementId }))
+
+    // 属性写的语义是**绝对值**，而几何编辑的输入是**自起点的位移** ⇒ 取差值。
+    const committed = commitGeometryEdit(scene, [
+      {
+        objectId: obj.id,
+        vertex: ref.element.elementId,
+        delta: Object.freeze({
+          x: target.x - current.position.x,
+          y: target.y - current.position.y,
+          z: target.z - current.position.z,
+        }),
+      },
+    ])
+    if (!committed.ok) return committed
+    // 净零 ⇒ 场景同一引用 ⇒ `withScene` 判 `changed: false` ⇒ `unchanged`（幽灵历史防线）
+    return ok(withScene(doc, committed.value.scene).doc)
+  }
+
   let payload: typeof data.payload
   if (localId === 'text') {
     if (data.payload.kind !== 'annotation') {

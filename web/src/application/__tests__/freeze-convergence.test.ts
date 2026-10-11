@@ -28,6 +28,7 @@ import {
 import { localPropertyOf, domainError, type EntityRef as ContractEntityRef } from '@/application/contracts'
 import { applySetProperty, createPropertyWritePorts, type PropertyWritePorts } from '@/application/property-commands'
 import { propertyRef } from '@/domain/identity'
+import { defaultObjectTypes } from '@/domain/scene'
 import { kernelPropertyRegistry } from '@/application/kernel-properties'
 import { err, ok, type Result } from '@/domain/errors'
 
@@ -327,6 +328,8 @@ describe('冻结 #3 WouldBlockReason 统一 camelCase', () => {
 describe('冻结 #4 `null` 是合法值，但受理权在描述（nullable）', () => {
   it('`PropertyValue` 含 `null`（三处权威定义必须一致）', () => {
     const props = read('src/application/properties.ts')
+    // 裸 `\n\n` 在此是**安全**的：`read` 已在唯一读入口把行尾归一化为 LF（见其注释）。
+    // 本条曾因 EOL 脆性在 CRLF 检出上判红（PR #268 的事故现场）。
     const m = props.match(/export type PropertyValue\s*=([\s\S]*?)\n\n/)
     expect(m).not.toBeNull()
     expect(m![1]).toMatch(/\|\s*null/)
@@ -648,14 +651,16 @@ describe('GF-5 收敛：内核属性词汇已注册进 RNA 表（原先实测 0/
     'camera.projection.fov',
     'camera.projection.clipStart',
     'camera.projection.clipEnd',
+    // #254 P3：网格顶点（子元素寻址经 `PropertyRef.element`，属性 ID 仍是限定式）
+    'mesh.vertexPosition',
   ]
 
-  it('**机械测量**：内核写面的 10 个属性 ID 在 RNA 注册表里**全部**可解析', () => {
+  it('**机械测量**：内核写面的 11 个属性 ID 在 RNA 注册表里**全部**可解析', () => {
     for (const id of KERNEL_WRITABLE) {
       const d = describeProperty(kernelPropertyRegistry().registry, propertyRef(owner('o1'), id))
       expect(d.ok, `内核属性 ${id} 必须在 RNA 注册表里可解析`).toBe(true)
     }
-    expect(KERNEL_WRITABLE).toHaveLength(10)
+    expect(KERNEL_WRITABLE).toHaveLength(11)
   })
 
   it('负对照：**未注册**的属性仍然被拒（收敛不是"什么都能解析"）', () => {
@@ -666,8 +671,18 @@ describe('GF-5 收敛：内核属性词汇已注册进 RNA 表（原先实测 0/
   })
 
   it('限定式 ID：`<objectTypeId>.<localId>`，且 objectTypeId 是 `domain/scene` 的类型字面量', () => {
-    const decls = kernelPropertyRegistry().registry.objectTypes().map((d) => d.id)
-    expect(decls.sort()).toEqual(['annotation', 'block', 'camera'])
+    const decls = kernelPropertyRegistry().registry.objectTypes().map((d) => d.id).sort()
+    // 期望集**从 `domain/scene` 派生**，而不是硬编码字面量清单。
+    //
+    // 本判据的语义是"RNA 注册表的 objectTypeId 与文档模型的类型一致"（见测试标题）。
+    // 硬编码清单会让"新增一个对象类型"必须手改这里 —— 而手改清单正是这条判据
+    // 想防的漂移（改的人只看到"测试红了、加个字符串就好"，而两处是否**真的**
+    // 一致并未被验证）。派生之后，判据在新增类型时自动跟上，且能抓住
+    // "注册了 RNA 却没登记到文档模型"（或反之）这一类真实不一致。
+    const domainTypes = Object.keys(defaultObjectTypes()).sort()
+    expect(decls).toEqual(domainTypes)
+    // 反空洞真：两边都空时 `toEqual([])` 也会通过，故钉住下界
+    expect(decls.length, '至少覆盖三个内核类型（防"两边都空"的空洞真）').toBeGreaterThanOrEqual(3)
     // 属性 ID 的第一段就是 objectTypeId（冻结 #1 的限定形式）。
     for (const id of KERNEL_WRITABLE) {
       const objectTypeId = id.slice(0, id.indexOf('.'))

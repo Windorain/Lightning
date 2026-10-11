@@ -49,6 +49,12 @@ const PURE_CORE_FILES = [
   'domain/scene.ts',
   'domain/document.ts',
   'domain/editing.ts',
+  // P3（#254）：几何/坐标关系/锚点/选择 —— 与 P1 同属纯核心，受同一 A02 闸门约束
+  'domain/geometry.ts',
+  'domain/geometryEditing.ts',
+  'domain/spatial.ts',
+  'domain/anchor.ts',
+  'domain/selection.ts',
   'application/state.ts',
   'application/commands.ts',
   'application/queries.ts',
