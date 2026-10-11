@@ -34,7 +34,8 @@ export function applyViewportCameraFromDocumentInitial(
   const vp = resolveViewportSlot(ctx, props)
   const key: CameraMainKey = vp.cameraMainKey
   const def = vp.definition.value
-  const camRef = ctx.main.cameras[key]
+  // `ensureCamera`：键空间按 region 开放（#282），新视口的键可能尚未创建。
+  const camRef = ctx.main.ensureCamera(key)
   const snapshot = ctx.main.embedInitialView.value
 
   // 1. Snapshot — embed_initial_view 优先

@@ -109,7 +109,8 @@ export function createEmbedTouchHandler(
   function commitCamera(ctx: Context, state: ViewportCameraState): void {
     const vp = resolveViewportSlot(ctx, { _regionId: regionId })
     if (!vp.camera.value) return
-    ctx.main.cameras[vp.cameraMainKey].value = state
+    // `ensureCamera`：键空间按 region 开放（#282），新视口的键可能尚未创建。
+    ctx.main.ensureCamera(vp.cameraMainKey).value = state
   }
 
   function capturePointer(pe: PointerEvent): void {

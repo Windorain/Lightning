@@ -387,7 +387,17 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     areaOverrideReason: 'R-WK-03：B5 矩阵该 slug 只列 P4（"场景 + 通用轨道"），而播放 Ref 属旧 runtime 实现、且消费者跨 P5/P6 两区；Lead 裁决（2026-10-11）目标批次改为 #261 集成闭环，并修正语义口径为「播放状态归 EditContext」（原写"归宿主"，会致双视口各播各的）。前置条件（宿主驱动接线 + EditContext 补齐 playing 字段与 playback 命令）已在本批完成。',
   }),
 
-  // ── 留给 P6：每视口通道暂存（**同文件两条 slug**） ────────────────────────
+  // ── P10b（#282）已执行：每视口通道暂存（**同文件两条 slug**） ──────────────
+  //
+  // 本组在 #282（P10b）**同批翻转 executed**：文件已删除，取值改经
+  // `EditContext.channelValues`（`runtime/kernelSession` 的 `channelValues()`/
+  // `setChannelValue()` 薄转发，写面走既有的 `setChannelValue` 命令），
+  // 手动刷新链由"渲染侧按**内容身份**自行判定"取代
+  // （`presentation/contentIdentity` + `contentRefreshTick`）。
+  //
+  // 机械证据（本批实测）：`multiblock-channel-traversal.spec.ts` 的**全 552 组合遍历**
+  // 在改后仍全绿，且 `lsc-overlap` 的 108/108 组合**逐格 diff = 0**
+  // —— 即"取值变化真的驱动了重建"，而不是"链断了但没断言"。
   Object.freeze({
     matrixSlug: 'per-viewport-staging',
     section15Entries: Object.freeze([4]),
@@ -400,20 +410,18 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       Object.freeze({ name: 'bindMultiblockMeshSync(revision, …)', pattern: 'bindMultiblockMeshSync\\(\\s*revision\\b' }),
     ]),
     owner: 'P6',
-    status: 'pending',
+    status: 'executed',
+    executedBy: 'P6',
     fileRemoved: true,
-    consumers: Object.freeze([
-      'web/src/shared/viewport/EmbedViewport.vue',
-      'web/src/workbench/components/WorkbenchViewport.vue',
-    ]),
+    // 已 executed ⇒ 消费者清单核销为**空**：两个视口已改吃内核读面
+    // （`useKernelChannels`），不再引用本机制。清单腐烂会被
+    // "消费者清单必须完整"的 `extra` 断言判红，故必须同步核销。
+    consumers: Object.freeze([]),
     group: 'multiblock-channel-staging',
     groupAreaNotes:
-      '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。'
-      + '**R-WK-04（#250，2026-10-11）**：本条的**文档内容面**（视口本地通道取值迁到'
-      + ' `EditContext.channelValues` 并让渲染消费装配结果）归 **#282（P10b 批次）** —— '
-      + '它需要"旧文档 → 内核场景"装配，而该装配未交付（#261 实测：内核 `Document` 不承载'
-      + ' `frames`/`cellGrid`/`textureBlobs`/`multiblock`）。故本条在 #261 保持 `pending`，'
-      + '不伪造"已迁移"。',
+      '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），同批翻转。'
+      + '**R-WK-04（#250，2026-10-11）**：本条的**文档内容面**归 **#282（P10b）**，'
+      + '已在本批执行 —— 取值迁到 `EditContext.channelValues`，视口改吃内核读面。',
     replacement: Object.freeze([
       'web/src/domain/editing.ts#channelValues',
       'web/src/domain/editing.ts#withChannelValue',
@@ -422,7 +430,8 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/domain/multiblock.ts#channelStepTrack',
     ]),
     exitStage:
-      'P6 视口组件重写同批删除（文件本体归 P6；P4 提供替代接口 —— 通道取值属 EditContext、装配是纯函数、写权逐通道判定）；**实际执行归 #282（R-WK-04）**：前置是"旧文档 → 内核场景"装配',
+      'P10b（#282）**已执行**：文件删除，取值归 `EditContext`、写入经 `setChannelValue` 命令、'
+      + '失效由渲染侧按内容身份判定（无调用方手动 refresh）',
   }),
   Object.freeze({
     matrixSlug: 'manual-refresh-chain',
@@ -431,25 +440,26 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     file: 'web/src/shared/viewport/useMultiblockChannels.ts',
     symbols: Object.freeze([callSite('bindMultiblockMeshSync')]),
     owner: 'P6',
-    status: 'pending',
+    status: 'executed',
+    executedBy: 'P6',
     fileRemoved: true,
-    consumers: Object.freeze([
-      'web/src/shared/viewport/EmbedViewport.vue',
-      'web/src/workbench/components/WorkbenchViewport.vue',
-    ]),
+    // 已 executed ⇒ 消费者清单核销为**空**（两个视口已不再引用本机制）。
+    consumers: Object.freeze([]),
     group: 'multiblock-channel-staging',
     groupAreaNotes:
-      '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），必须同批翻转。'
-      + '**R-WK-04（#250）**：文档内容面归 **#282（P10b）** —— 见同组上一条的完整说明。',
+      '组内两条 slug 共用一个文件（`useMultiblockChannels.ts`，P6 区），同批翻转。'
+      + '**R-WK-04（#250）**：文档内容面归 **#282（P10b）**，已在本批执行。',
     replacement: Object.freeze([
       'web/src/application/evaluation.ts#evaluateGraph',
       'web/src/application/evaluation.ts#nodeIdentity',
       'web/src/runtime/evaluation.ts#EvaluationInstance',
     ]),
     exitStage:
-      'P6 视口重写同批删除（失效由依赖图自动传播，无调用方手动 refresh）；**实际执行归 #282（R-WK-04）**',
+      'P10b（#282）**已执行**：手动链删除，失效由内容身份自动判定'
+      + '（`presentation/contentIdentity` 的 `contentIdentityOf`/`planContentRebuild`，'
+      + '由 `contentRefreshTick` 观察者驱动）；全 552 组合遍历 + 108/108 逐格 diff=0 为机械证据',
     areaOverrideReason:
-      'B5 矩阵该 slug 归口 P5（"依赖图自动失效"），但承载"手动链式刷新"的文件 `shared/viewport/useMultiblockChannels.ts` 属 P6 区（R-WK-01 comment 4875 实施细则）。实际分派：依赖图能力 P4 已交付，该文件删除随 P6 视口重写；清单如实登记这一区归属差异供 Lead 排合并顺序',
+      'B5 矩阵该 slug 归口 P5（"依赖图自动失效"），但承载"手动链式刷新"的文件 `shared/viewport/useMultiblockChannels.ts` 属 P6 区（R-WK-01 comment 4875 实施细则）。实际分派：依赖图能力 P4 已交付，该文件删除随 P6 视口重写；本批（#282）执行删除并如实登记区归属差异',
   }),
 
   // ── 留给 P5/P6：旧权威对象的其余消费者（跨区，独立相位） ──────────────────
@@ -496,10 +506,19 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/operators/operatorRegistry.ts',
       'web/src/runtime/hover/access.ts',
       'web/src/shared/viewport/EmbedViewport.vue',
-      'web/src/shared/viewport/useMultiblockChannels.ts',
+      // P10b（#282）：`useMultiblockChannels.ts` 已删除 ⇒ 从清单核销；
+      // 替代它的 `useKernelChannels.ts` 仍是 `getDoc()` 消费者（它的 `renderDoc`
+      // 仍需旧文档构造渲染视图文档 —— 这是 #286（P10c）要接通的部分），
+      // 故**换名登记**而不是移除。
+      'web/src/shared/viewport/useKernelChannels.ts',
       'web/src/shared/viewport/useViewportRuntime.ts',
       'web/src/workbench/WorkbenchRoot.vue',
       'web/src/workbench/components/ExportWorkspace.vue',
+      // P10b（#282）实测补登：本文件 `:281` 的 `watch(() => ctx.getDoc().value, …)`
+      // （"文档后到时重装视口"）是真依赖，此前漏登记。
+      // 扫描器实测抓出（"消费者清单必须完整"断言）—— 漏消费者的后果是
+      // phase flip 永远红，而那个红不会自己报出漏了谁。
+      'web/src/workbench/components/WorkbenchViewport.vue',
       'web/src/workbench/components/StatusBar.vue',
       'web/src/workbench/document/pipeline.ts',
       'web/src/workbench/document/sources/wikiDataPageSource.ts',
@@ -1141,6 +1160,13 @@ describe('P4 退役归口登记（R-WK-01 的机器可读删除点清单）', ()
     // ⇒ 判据改为**按执行者分派**：每个执行者只允许删 R-WK-01/R-WK-03
     // 归给它的区。这不是"放宽"：它仍然拒绝任何执行者删除不属于自己的文件
     // （见下一条负对照）。
+    //
+    // P10b（#282）追加 **P6**：本批执行了 `per-viewport-staging` 组
+    // （`shared/viewport/useMultiblockChannels.ts`）—— 该文件按 R-WK-01
+    // comment 4875 实施细则**属 P6 区**（该组两条 slug 的 `owner` 与
+    // `areaOverrideReason` 逐字登记了这一点）。缺 P6 这一档时，该组**永远
+    // 无法翻相位**（"P6 越区删除"），而那个红只代表"策略表停在 P4/P10 的相位"，
+    // 不代表真的越区 —— 与 P10 当年遇到的是同一类问题。
     const ALLOWED_BY_OWNER: Record<string, readonly string[]> = {
       // P4：材质面板独立 RAF（`workbench/ux/panels/`）
       P4: ['web/src/workbench/ux/panels/'],
@@ -1154,6 +1180,9 @@ describe('P4 退役归口登记（R-WK-01 的机器可读删除点清单）', ()
         'web/src/render/materials/simpleMaterialLibrary.ts',
         'web/src/render/interaction/blockIconCache.ts',
       ],
+      // P6：视口/Area 区（#257「工作区、Area 生命周期与模块装配」）——
+      // `shared/viewport/` 是每视口机制（通道暂存、视口运行时）的所在区。
+      P6: ['web/src/shared/viewport/'],
     }
     for (const e of RETIREMENT_REGISTRY) {
       if (e.status !== 'executed') continue

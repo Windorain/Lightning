@@ -536,6 +536,106 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
     exitStage:
       'P10（#261）本批落地，永久保留（渲染侧消费统一时间纯采样是目标形态，不是过渡）；P11 审计核对旧累加器零引用',
   }),
+  // ── P10b（#282）文档内容面：旧加载路径把文档装配进内核 ──────────────────
+  //
+  // ## 这两条边为什么必须存在，以及它们**不**是"半成品替换"
+  //
+  // R-WK-04（#250）登记的缺口原文是「**全树没有任何生产代码**从旧场景文件构造
+  // 内核 `Scene`」。P10b 交付了装配层（`composition/kernelAssembly`）与内核采纳
+  // （`KernelSession.adoptDocument`）后，**必须**有一个旧层的**真实**调用点，
+  // 否则那个缺口照旧成立（"只在测试里被调用的装配函数"仍然是零生产调用方）。
+  //
+  // `docLifecycleOperators.ts` 就是那个调用点：它是 `OPERATOR_OPEN_SCENE` 的实现，
+  // 即"用户打开一份场景文件"的**唯一**生产路径（拖放/文件选择/菜单都走它）。
+  //
+  // 与"半成品替换"的区别是**可判定的**：
+  //  - 这两条边消费的是**新内核的类型与纯函数**（`domain/document` 的
+  //    `createDocument`/`withContent`、`application/commands` 的 `openDocumentState`），
+  //    不是"旧实现的新名字"；
+  //  - 装配失败的**兜底**是显式的、有日志的（`adoptDocumentIntoKernel` 的分支），
+  //    不是静默双轨 —— 且该兜底的退出条件是"装配层覆盖全部文档形态"（可判定）。
+  //
+  // ## 为什么 `@/composition/kernelAssembly` 本身**不**需要登记
+  //
+  // `composition/**` 是契约 §7 的**装配根**，它引用各层是设计使然（本文件头
+  // 第 561-563 行已说明：`composition/` 落在本判据下天然不算旧层）。
+  // 故这里只登记 `operators/`（旧层）那两条。
+  Object.freeze({
+    from: 'src/operators/builtin/docLifecycleOperators.ts',
+    to: 'domain/document',
+    reason:
+      'P10b（#282）文档内容面接线：`OPERATOR_OPEN_SCENE` 解析出旧文档后，用内核的 `createDocument`/`withContent`/`withDocumentContent` 组装内核 `Document`（装配产物 → 内核文档）。这是 R-WK-04 缺口「没有生产代码把旧场景文件装配成内核 Scene」的**唯一**生产调用点',
+    exitStage:
+      'P10b（#282）本批接线落地；退出条件（可判定）= `operators/` 被 `editors/` + `composition/` 装配接管、旧 operator 注册表退役时，本边随文件退场。P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/operators/builtin/docLifecycleOperators.ts',
+    to: 'application/commands',
+    reason:
+      '同上：`openDocumentState` 是"打开文档"的既有纯入口（本批用它构造内核文档的初始应用状态形状，供诊断/装配测试对账）；它保证"内核文档的打开形状"只有一个定义点，而不是在接线处另拼一份',
+    exitStage:
+      'P10b（#282）本批接线落地；退出条件同上一行（operator 退场时一并消失）。若本行在 P11 时仅剩诊断用途，应改为只导出类型或删除 —— 不得长期保留"仅测试使用"的生产导入',
+  }),
+  // ── P10b（#282）Area 产品接线：旧外壳/旧 operator 消费新 Area 内核 ────────
+  //
+  // ## 这五条边为什么必须存在，以及它们**不**是"半成品替换"
+  //
+  // #249 §13 把「Area 可分割、合并、切换类型，切回恢复局部状态」列为基本骨架的
+  // 完成边界，A05/A17 的**产品级**判据也依赖它。P6 交付了完整的 Area 内核
+  // （`domain/workspace` 纯转移 + `editors/useAreaHost` 接线 + `editors/AreaHost.vue`
+  // 生命周期宿主），但**全树零生产消费者** —— 实测：
+  //
+  //  - `WorkbenchShell.vue` 只有一个 `<slot name="viewport" />`（恒一个 3D 视口）；
+  //  - `AreaHost.vue`/`useAreaHost.ts` 只被两处**注释**提到；
+  //  - `splitArea` 只在 `designUseCasesS16.test.ts` 的**纯域层**断言里被调用。
+  //
+  // 本批把它接进产品，于是**必然**出现"旧层引用新 Area 内核"的边 —— 它们正是
+  // 接线本身。与"半成品替换"的区别是**可判定的**：
+  //
+  //  - 消费的是**纯转移 + 显式生命周期**（`splitArea`/`mergeArea`/`setEditorType`、
+  //    `LifecycleLedger`），不是"旧实现的新名字"；旧形态是"用 `v-show` 保活组件
+  //    来保状态"（§15 第 10 条），那在本批**同批**被替代（布局成为 `Workspace` 的值）；
+  //  - 每条边都是**唯一**的接缝：`areaOperators` 是布局命令的**唯一**写入口
+  //    （`ctx.requireAreaSession()`），组件只**投影**布局、不持有它。
+  //
+  // ⇒ 退出阶段是"P10/P11 把工作台外壳与面板迁到 `shells/`+`editors/` 时随文件退场"。
+  Object.freeze({
+    from: 'src/operators/builtin/areaOperators.ts',
+    to: 'domain/workspace',
+    reason:
+      'P10b（#282）Area 布局命令的**唯一** operator 写入口：`splitArea`/`mergeArea`/`setEditorType`/`setSplitRatio` 的纯转移在此被暴露成命令（菜单可列、快捷键可绑、测试可调），并消费 `SplitDirection` 类型。此前这四条命令只有装配声明（`profiles.ts` 的 `M_LAYOUT_EDIT`）与纯域实现，**零生产调用方**',
+    exitStage:
+      'P10/P11：`operators/` 被 `application/` 命令面接管、旧 operator 注册表退役时，本边随文件退场；P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/runtime/host/workbenchHost.ts',
+    to: 'domain/workspace',
+    reason:
+      'P10b（#282）工作台宿主在**装配期**创建 Area 会话的初始布局（`createWorkspace`/`createInitialLayout`）——与"宿主创建内核会话"（`runtime/kernelSession`）同一口径：#249 要求「Area 与编辑器实例的寿命不依赖组件挂载」，故布局必须由宿主创建并挂在 `Context` 上，不能归渲染它的组件的 `ref`（`WorkbenchRoot` 切工作区时会 `:key` 卸载重建子树）',
+    exitStage:
+      'P10/P11：宿主装配被 `composition/` 的装配根接管时随文件迁移；P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/workbench/components/AreaLayoutHost.vue',
+    to: 'domain/workspace',
+    reason:
+      'P10b（#282）Area 分割树的**渲染投影**：把 `Workspace.layout`（`AreaLayout` 的 `area`/`split` 两种节点）渲染成递归 flex（`direction` + `ratio`），并按类型注入编辑器组件（#10「组件由外壳注入」，`editors/` 不 import 旧 `workbench/`）。它只**读**布局，不持有它',
+    exitStage: 'P10/P11：工作台外壳迁到 `shells/` 层时本组件随之外迁；P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/workbench/components/AreaNodeView.vue',
+    to: 'domain/workspace',
+    reason:
+      'P10b（#282）递归渲染单元（叶子 ⇒ `AreaHost`；内部节点 ⇒ flex 容器）。用**真递归**而不是"扁平化 + 绝对定位"：`ratio` 是嵌套语义（每次分割只切当前节点），扁平化会丢掉"哪次分割切的是哪一块"这一事实。消费 `AreaLayoutNode` 判别式类型',
+    exitStage: 'P10/P11：同 `AreaLayoutHost.vue`（同一组件族），随外壳迁移；P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/workbench/components/areaViewContext.ts',
+    to: 'runtime/lifecycle',
+    reason:
+      'P10b（#282）Area 渲染树的作用域上下文类型引用 `LifecycleLedger`（A13 资源账本）：递归组件每加深一层若靠层层传 props，会让"加深一层"变成"改 N 个签名"（§15 末段禁止的形态），故经 `provide`/`inject` 传递。账本的**写入**仍唯一经 `AreaHost`（`acquire`/`release`/`closeInstance`）',
+    exitStage: 'P10/P11：同 `AreaLayoutHost.vue`（同一组件族），随外壳迁移；P11 审计核销本行',
+  }),
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {

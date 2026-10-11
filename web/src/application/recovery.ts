@@ -41,7 +41,8 @@
  */
 
 import { err, invalidValue, ok, type DomainError, type Result } from '@/domain/errors'
-import { withContent, type Document } from '@/domain/document'
+import { contentDigestOf, withContent, type Document } from '@/domain/document'
+import { EMPTY_CONTENT, type DocumentContent } from '@/domain/content'
 import { digestOf, sameVersion, type Version } from '@/domain/identity'
 import { PREF_PREFIX, type PreferenceNamespace } from '@/domain/instanceSettings'
 import type { AnimationState } from '@/domain/animation'
@@ -356,6 +357,19 @@ export interface RecoverySourceSnapshot {
   readonly id: string
   readonly scene: Scene
   readonly animation: AnimationState
+  /**
+   * 文档内容的其余三块（#282：元数据/帧时长轴/资源引用）。
+   *
+   * 为什么必须进恢复副本：恢复副本的语义是「已提交内容的副本」
+   * （#249 §19.5）。若它只带 `scene`/`animation`，那么恢复回来的文档会
+   * **丢掉元数据与资源引用** —— 而它们**进内容身份**（`contentDigestOf`），
+   * 于是"采纳后内容回到已提交状态"不成立：摘要会与来源快照不同。
+   *
+   * 这与「半次拖动不恢复」是**同一条纪律的两个方向**：
+   *  - 暂存（`interaction`）**不在**快照里 ⇒ 不恢复未提交的东西；
+   *  - 内容三块**在**快照里 ⇒ 不丢失已提交的东西。
+   */
+  readonly content: DocumentContent
   readonly version: Version
 }
 
@@ -364,9 +378,16 @@ export function recoverySourceSnapshot(doc: {
   readonly id: string
   readonly scene: Scene
   readonly animation: AnimationState
+  readonly content?: DocumentContent
   readonly version: Version
 }): RecoverySourceSnapshot {
-  return Object.freeze({ id: doc.id, scene: doc.scene, animation: doc.animation, version: doc.version })
+  return Object.freeze({
+    id: doc.id,
+    scene: doc.scene,
+    animation: doc.animation,
+    content: doc.content ?? EMPTY_CONTENT,
+    version: doc.version,
+  })
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -391,6 +412,8 @@ export interface RecoveryPayload {
   readonly contentVersion: number
   readonly scene: Scene
   readonly animation: AnimationState
+  /** 文档内容的其余三块（#282；与 `scene`/`animation` 一并构成"已提交内容"）。 */
+  readonly content: DocumentContent
   /** 必要资源引用（#249 §19.5「已提交内容**及必要资源引用**」）。 */
   readonly assets: readonly ResourceRef[]
   /** 写入时刻 —— 由**注入时钟**在调用点给出，纯层不读墙钟。 */
@@ -447,7 +470,7 @@ export function captureRecoveryCopy(input: RecoveryCaptureInput): Result<Recover
   if (!Number.isFinite(input.writtenAt)) {
     return err(invalidValue({ reason: 'writtenAtNotInjected', writtenAt: String(input.writtenAt) }))
   }
-  const digest = digestOf({ scene: input.snapshot.scene, animation: input.snapshot.animation })
+  const digest = contentDigestOf(input.snapshot.scene, input.snapshot.animation, input.snapshot.content)
   const declared = input.snapshot.version.contentVersion ?? digest
   if (declared !== digest) {
     return err(
@@ -469,6 +492,7 @@ export function captureRecoveryCopy(input: RecoveryCaptureInput): Result<Recover
     contentVersion: digest,
     scene: input.snapshot.scene,
     animation: input.snapshot.animation,
+    content: input.snapshot.content,
     assets: Object.freeze([...(input.assets ?? [])]),
     writtenAt: input.writtenAt,
   })
@@ -620,6 +644,23 @@ function validatePayloadShape(record: Record<string, unknown>): readonly Recover
     if (!Array.isArray(animation.tracks)) bad('$.animation.tracks', '不是数组')
     if (!isRecord(animation.publishedDefaults)) bad('$.animation.publishedDefaults', '不是键值表')
   }
+  // 内容三块（#282）：形状必须可辨，否则摘要校验会对着一个"看起来空"的值算。
+  // 缺省**允许**（旧副本没有该键 ⇒ 视为空内容），但给了就必须是合法形状 ——
+  // 于是"旧副本读得回"与"坏副本挡得住"同时成立。
+  const content = record.content
+  if (content !== undefined) {
+    if (!isRecord(content)) {
+      bad('$.content', '不是对象')
+    } else {
+      if (!isRecord(content.metadata)) bad('$.content.metadata', '不是对象')
+      if (!isRecord(content.frameAxis)) {
+        bad('$.content.frameAxis', '不是对象')
+      } else if (!Array.isArray(content.frameAxis.frames)) {
+        bad('$.content.frameAxis.frames', '不是数组')
+      }
+      if (!Array.isArray(content.resources)) bad('$.content.resources', '不是数组')
+    }
+  }
   if (typeof record.documentVersion !== 'number' || !Number.isInteger(record.documentVersion) || record.documentVersion < 0) {
     bad('$.documentVersion', '不是非负整数')
   }
@@ -688,7 +729,13 @@ export function validateRecoveryCopy(input: RecoveryValidationInput): RecoveryVa
     )
   }
   if (shape.length === 0) {
-    const computed = digestOf({ scene: parsed.scene, animation: parsed.animation })
+    // 摘要用**唯一权威** `contentDigestOf`（`domain/document`），不再本地拼一份
+    // `digestOf({scene, animation})` —— 那正是「两套判据」的形态，而它在 #282
+    // 引入内容三块后**必然**与文档侧漂移（旧副本会被误判为"摘要不符"）。
+    // 缺 `content` 键的旧副本按空内容算：与 `RecoverySourceSnapshot.content` 的
+    // 缺省同源，故"旧副本读得回"成立。
+    const payloadContent = (isRecord(parsed.content) ? parsed.content : EMPTY_CONTENT) as unknown as DocumentContent
+    const computed = contentDigestOf(parsed.scene as Scene, parsed.animation as AnimationState, payloadContent)
     if (computed !== parsed.contentVersion) {
       reasons.push(
         Object.freeze({
@@ -846,7 +893,7 @@ export function adoptRecoveryCopy(current: Document, adoption: RecoveryAdoption)
   if (adoption.decision === 'reject') {
     return Object.freeze({ status: 'rejected', doc: current, reasons: adoption.reasons, contentPreserved: true })
   }
-  const applied = withContent(current, adoption.payload.scene, adoption.payload.animation)
+  const applied = withContent(current, adoption.payload.scene, adoption.payload.animation, adoption.payload.content)
   const baselinePreserved = applied.doc.saveBaseline === current.saveBaseline && applied.doc.savedSequence === current.savedSequence
   return Object.freeze({
     status: 'adopted',
@@ -872,9 +919,22 @@ export function baselineFingerprint(doc: { readonly saveBaseline: Version; reado
   return digestOf({ saveBaseline: doc.saveBaseline, savedSequence: doc.savedSequence })
 }
 
-/** 内容身份（与 `Document.version.contentVersion` 同一算法；供"内容回到已提交状态"断言）。 */
-export function contentFingerprint(scene: Scene, animation: AnimationState): number {
-  return digestOf({ scene, animation })
+/**
+ * 内容身份（与 `Document.version.contentVersion` **同一算法**；供"内容回到已提交状态"断言）。
+ *
+ * ## 为什么转发 `contentDigestOf` 而不是自己 `digestOf({scene, animation})`（#282 修正）
+ *
+ * 本函数原来本地拼 `digestOf({scene, animation})`，与 `domain/document#contentDigestOf`
+ * 是**两份同义实现**。在 `Document` 只有这两块时它们恰好相等，于是缺陷不可见；
+ * #282 把文档内容扩为「场景 + 动画 + 元数据/帧时长轴/资源引用」后，
+ * 两份实现**必然**漂移 —— 而漂移的表现是"恢复副本的摘要校验把合法副本判成坏的"
+ * （或反过来：把坏副本判成合法的，那更危险）。
+ *
+ * ⇒ 转发唯一权威。`content` 可选，缺省 = 空内容（与 `RecoverySourceSnapshot.content`
+ * 的缺省同源）。
+ */
+export function contentFingerprint(scene: Scene, animation: AnimationState, content: DocumentContent = EMPTY_CONTENT): number {
+  return contentDigestOf(scene, animation, content)
 }
 
 /** 版本是否与恢复副本记录的一致（含提交世代与内容身份）。 */

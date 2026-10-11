@@ -89,7 +89,9 @@ export function ensureMainViewportCamera(
   key: CameraMainKey,
   definition?: StructureDefinition | null,
 ): ViewportCameraState {
-  const ref = main.cameras[key]
+  // 经 `ensureCamera`：`cameras` 是**开放**键空间（按 region 分配，#282）——
+  // 新视口的键可能尚未创建，直接取 `main.cameras[key]` 会得到 `undefined`。
+  const ref = main.ensureCamera(key)
   if (!ref.value) {
     if (main.embedInitialView.value) {
       ref.value = {

@@ -267,6 +267,57 @@ describe('能力裁剪：执行输入来自装配结果（A15 的第二道落点
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 六、通道取值：共享 `EditContext.channelValues`（#282 P10b 退役每视口暂存副本）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('通道取值归编辑上下文：同上下文所有 Area 读同一份（A05）', () => {
+  it('写一个通道取值后**读面**能看到它（不是恒空）', () => {
+    const s = sessionWith([50, 50])
+    expect(s.channelValues(), '初始无取值（不伪造 0）').toEqual({})
+    s.setChannelValue('coil', 3)
+    expect(s.channelValues()['coil'], '写入后必须读得到（反空洞真）').toBe(3)
+  })
+
+  it('**同一份值**：两个"视口"（同一上下文的不同读者）读到完全相同的取值', () => {
+    const s = sessionWith([50, 50])
+    s.setChannelValue('coil', 3)
+    s.setChannelValue('glass', 1)
+    // 两个读者 = 同一会话的两次读（旧形态下每个视口自持副本 ⇒ 会各读各的）
+    const a = s.channelValues()
+    const b = s.channelValues()
+    expect(a).toEqual(b)
+    expect(a).toEqual({ coil: 3, glass: 1 })
+  })
+
+  it('总档位与运行态用**保留键**承载（不与真实通道名冲突）', () => {
+    const s = sessionWith([50, 50])
+    expect(s.totalTier(), '未设置时为 null，不伪造 1').toBeNull()
+    s.setTotalTier(2)
+    expect(s.totalTier()).toBe(2)
+    expect(s.runstateIndex(), '未设置时为 null').toBeNull()
+    s.setRunstateIndex(1)
+    expect(s.runstateIndex()).toBe(1)
+    // 保留键与真实通道**并存**且互不覆盖（键空间不冲突是结构事实）
+    s.setChannelValue('coil', 5)
+    expect(s.channelValues()).toEqual({ $totalTier: 2, $runstate: 1, coil: 5 })
+  })
+
+  it('负对照：旧形态的"每视口自持副本"在本接口下**不可表达**', () => {
+    const s = sessionWith([50, 50])
+    const keys = new Set<string>()
+    for (let o: object | null = s; o && o !== Object.prototype; o = Object.getPrototypeOf(o) as object | null) {
+      for (const k of Object.getOwnPropertyNames(o)) keys.add(k)
+    }
+    // 不得有"视口本地取值表"或"取值变更计数器"这类每视口状态
+    expect(keys.has('channelState'), '不得有每视口取值表（旧 `state` 形态）').toBe(false)
+    expect(keys.has('revision'), '不得有每视口 revision 计数器（旧手动刷新形态）').toBe(false)
+    // 反空洞真：确实扫到了真实成员
+    expect(keys.has('channelValues'), '取值以**读面方法**存在').toBe(true)
+    expect(keys.has('setChannelValue'), '取值以**命令**形式写入').toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 五、负对照：旧形态在本接口下**无法表达**
 // ─────────────────────────────────────────────────────────────────────────────
 

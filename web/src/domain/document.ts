@@ -47,6 +47,7 @@ import {
 } from './identity'
 import { err, invalidValue, missingTarget, ok, type Result } from './errors'
 import { unitBoxMesh, type Deformation } from './geometry'
+import { EMPTY_CONTENT, type DocumentContent } from './content'
 import {
   emptyScene,
   findObject,
@@ -93,6 +94,18 @@ export interface HistoryEntry {
   readonly beforeAnimation?: AnimationState
   /** 操作后的动画状态（仅当该条目改动了动画）。 */
   readonly afterAnimation?: AnimationState
+  /**
+   * 操作前后的**文档内容三块**（元数据/帧时长轴/资源引用）。
+   *
+   * 与 `beforeAnimation` 同一处置（可选 + 缺省 = 「保持当前值」）：
+   * 该条目没改这三块时不伪造一份副本，撤销时也不去"恢复"一个本就没变的字段。
+   *
+   * 为什么必须存：改了元数据是**内容变化**（会进 `contentOf` 摘要、会记账），
+   * 于是撤销必须真的把它改回去 —— 否则「撤销后内容身份回到 before」不成立，
+   * `isDirty` 会在撤销后仍报脏（A17「回保存内容变干净」的反面）。
+   */
+  readonly beforeContent?: DocumentContent
+  readonly afterContent?: DocumentContent
 }
 
 export interface HistoryState {
@@ -127,6 +140,29 @@ export interface Document {
   readonly id: string
   /** 文档内容。 */
   readonly scene: Scene
+  /**
+   * **文档内容的其余三块**（#282 P10b 补齐；见 `domain/content` 的文件头）。
+   *
+   * ## 为什么它与 `scene`/`animation` 并列，而不是塞进 `scene`
+   *
+   * `scene` 是「对象 + 对象数据 + 集合」；本字段承载 #249 §3.1 定义里
+   * **另外三样**：资源引用（§3.1 原文列在 `Document` 定义里）、文档元数据、
+   * 帧时长轴。它们不是「场景的对象结构」——
+   * 把元数据塞进 `scene.objects` 会造出一个假对象；把资源引用塞进去会
+   * 让「这份文档引用哪些资源」变成一次对象遍历（而它是**清单**语义，见 §19.3）。
+   *
+   * ## 它替代了什么（#261 实测的缺口）
+   *
+   * 旧 `RuntimeDocument` 的 `meta` / `textureBlobs` / `materialPalette` /
+   * `frames[].durationMs` 在内核里**没有类型化落点**，于是没有任何生产代码能
+   * 把一份真实场景文件装配成内核 `Document`（R-WK-04 的 blocker 原文）。
+   *
+   * ## 为什么**进内容身份**（与 `history`/`saveBaseline` 的区别）
+   *
+   * 改元数据/换一帧时长/换一份纹理字节都**是**内容变化：应可撤销、应变脏。
+   * 故它们进 `contentOf` 的摘要输入 —— 见 {@link contentOf}。
+   */
+  readonly content: DocumentContent
   /**
    * 动画（轨道 + 发布默认值）。
    *
@@ -166,21 +202,26 @@ export interface Document {
  * 注意 `version` / `saveBaseline` / `history` / `savedSequence` **不在**其中：
  * 它们不是内容（历史深度变化不该让文档变脏）。
  */
-export function contentOf(scene: Scene, animation: AnimationState): unknown {
-  return { scene, animation }
+export function contentOf(scene: Scene, animation: AnimationState, content: DocumentContent = EMPTY_CONTENT): unknown {
+  return { scene, animation, content }
 }
 
 /** 文档内容身份摘要（唯一算法：`digestOf`）。 */
-export function contentDigestOf(scene: Scene, animation: AnimationState): number {
-  return digestOf(contentOf(scene, animation))
+export function contentDigestOf(scene: Scene, animation: AnimationState, content: DocumentContent = EMPTY_CONTENT): number {
+  return digestOf(contentOf(scene, animation, content))
 }
 
-export function createDocument(id: string, opts?: { sceneId?: string; maxHistory?: number; types?: ObjectTypeRegistry }): Document {
+export function createDocument(
+  id: string,
+  opts?: { sceneId?: string; maxHistory?: number; types?: ObjectTypeRegistry; content?: DocumentContent },
+): Document {
   const scene = emptyScene(opts?.sceneId ?? `${id}-scene`)
-  const contentVersion = contentDigestOf(scene, EMPTY_ANIMATION)
+  const content = opts?.content ?? EMPTY_CONTENT
+  const contentVersion = contentDigestOf(scene, EMPTY_ANIMATION, content)
   return Object.freeze({
     id,
     scene,
+    content,
     animation: EMPTY_ANIMATION,
     version: version(0, contentVersion),
     saveBaseline: version(0, contentVersion),
@@ -217,20 +258,35 @@ export function withContent(
   doc: Document,
   scene: Scene,
   animation: AnimationState,
+  content: DocumentContent = doc.content,
 ): { doc: Document; changed: boolean; version: Version } {
-  const nextContent = contentDigestOf(scene, animation)
+  const nextContent = contentDigestOf(scene, animation, content)
   const curContent = doc.version.contentVersion ?? 0
   if (nextContent === curContent) {
     // 内容相同：保持**原版本对象身份**，不推进任何计数。
-    return { doc: Object.freeze({ ...doc, scene, animation }), changed: false, version: doc.version }
+    return { doc: Object.freeze({ ...doc, scene, animation, content }), changed: false, version: doc.version }
   }
   const nextVersion = version(doc.version.documentVersion + 1, nextContent)
-  return { doc: Object.freeze({ ...doc, scene, animation, version: nextVersion }), changed: true, version: nextVersion }
+  return { doc: Object.freeze({ ...doc, scene, animation, content, version: nextVersion }), changed: true, version: nextVersion }
+}
+
+/**
+ * 只替换**文档内容的其余三块**（元数据/帧时长轴/资源引用）。
+ *
+ * 与 `withScene`/`withAnimation` 收敛到同一个 `withContent` ——
+ * 「什么算内容变化」仍然只有一个判据（见 `contentOf` 的说明）。
+ *
+ * 为什么需要这个具名入口而不是让调用方拼一个 `withContent(doc, doc.scene, doc.animation, next)`：
+ * 后者要写三遍「保持不变的那两块」，而任何一处写错（例如误传 `doc.animation` 为
+ * `EMPTY_ANIMATION`）都会**静默清空**一块内容。具名入口让「只改这三块」是结构事实。
+ */
+export function withDocumentContent(doc: Document, content: DocumentContent): { doc: Document; changed: boolean; version: Version } {
+  return withContent(doc, doc.scene, doc.animation, content)
 }
 
 /** 替换动画状态（内容身份判据与 `withScene` 同一处）。 */
 export function withAnimation(doc: Document, animation: AnimationState): { doc: Document; changed: boolean; version: Version } {
-  return withContent(doc, doc.scene, animation)
+  return withContent(doc, doc.scene, animation, doc.content)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -249,6 +305,9 @@ export interface PushHistoryInput {
   /** P4：该条目改动的动画状态（缺省 = 未改动画）。 */
   readonly beforeAnimation?: AnimationState
   readonly afterAnimation?: AnimationState
+  /** #282：该条目改动的文档内容三块（缺省 = 未改内容三块）。 */
+  readonly beforeContent?: DocumentContent
+  readonly afterContent?: DocumentContent
 }
 
 /**
@@ -273,6 +332,8 @@ export function pushHistory(h: HistoryState, input: PushHistoryInput): HistorySt
     selectionAfter: Object.freeze([...(input.selectionAfter ?? [])]),
     ...(input.beforeAnimation === undefined ? {} : { beforeAnimation: input.beforeAnimation }),
     ...(input.afterAnimation === undefined ? {} : { afterAnimation: input.afterAnimation }),
+    ...(input.beforeContent === undefined ? {} : { beforeContent: input.beforeContent }),
+    ...(input.afterContent === undefined ? {} : { afterContent: input.afterContent }),
   })
   const past = [...h.past, entry]
   // 超深时丢弃最旧条目（**不**静默丢弃最新，否则"刚做的操作撤不回"）
@@ -324,6 +385,8 @@ export function undo(doc: Document): HistoryStepResult | null {
     scene: entry.beforeScene,
     // 该条目改过动画则一并回退；没改则保持当前动画（不是"清空"，那会丢别的条目的效果）。
     animation: entry.beforeAnimation ?? doc.animation,
+    // 内容三块同一处置（#282）：没改则保持当前值。
+    content: entry.beforeContent ?? doc.content,
     version: entry.beforeVersion,
     history: Object.freeze({
       past: Object.freeze(doc.history.past.slice(0, -1)),
@@ -343,6 +406,7 @@ export function redo(doc: Document): HistoryStepResult | null {
     ...doc,
     scene: entry.afterScene,
     animation: entry.afterAnimation ?? doc.animation,
+    content: entry.afterContent ?? doc.content,
     version: entry.afterVersion,
     history: Object.freeze({
       past: Object.freeze([...doc.history.past, entry]),
@@ -390,6 +454,15 @@ export interface SaveRequest {
   /** 捕获时的内容身份（S0）。 */
   readonly capturedVersion: Version
   readonly capturedScene: Scene
+  /**
+   * 捕获时的**文档内容三块**（#282）。
+   *
+   * 为什么必须一并捕获：#249 §8 要求保存捕获「已提交快照 S0」。若快照只带 `scene`，
+   * 那么「保存期间改了元数据/纹理」这件事在**写出的产物里**丢失 ——
+   * 产物会是一份「场景是 S0、元数据是最新」的混合体，而它与任何一次真实提交都不对应。
+   * 这正是 A29 负对照「隐式读取最新文档」在保存面上的同族形态。
+   */
+  readonly capturedContent: DocumentContent
 }
 
 /** 保存台账：串行化与竞态判定的**纯**状态。 */
@@ -421,6 +494,7 @@ export function beginSave(ledger: SaveLedger, doc: Document, bindingGeneration: 
     bindingGeneration,
     capturedVersion: doc.version,
     capturedScene: doc.scene,
+    capturedContent: doc.content,
   })
   return {
     ledger: Object.freeze({ ...ledger, nextSequence: ledger.nextSequence + 1, inFlight: request, bindingGeneration }),

@@ -76,6 +76,13 @@ export const menuBarPanel: PanelDeclaration = {
           kind: 'menu',
           label: t('view'),
           items: [
+            // #282 P10b：Area 布局编辑命令**真实可达**（此前只有装配声明与纯域实现，
+            // 全树零入口）。`poll` 读"是否有 Area 会话"（装配结果）⇒ 嵌入外壳
+            // （固定布局）里这些项**灰显**，且原因是装配层的，不是"UI 藏了按钮"。
+            { kind: 'operator', id: 'OPERATOR_AREA_SPLIT', label: lang === 'zh' ? '水平分割区域' : 'Split Area Horizontally', props: { direction: 'horizontal' } },
+            { kind: 'operator', id: 'OPERATOR_AREA_SPLIT', label: lang === 'zh' ? '垂直分割区域' : 'Split Area Vertically', props: { direction: 'vertical' } },
+            { kind: 'operator', id: 'OPERATOR_AREA_MERGE', label: lang === 'zh' ? '合并区域' : 'Merge Area' },
+            { kind: 'separator' },
             { kind: 'operator', id: 'OPERATOR_RESET_LAYOUT', label: t('resetLayout') },
           ],
         },

@@ -41,6 +41,7 @@ import {
   CopyWikiEmbedOperator,
 } from '@/operators/builtin/wikiOperators'
 import { CAPABILITY } from '@/composition/modules'
+import { AREA_OPERATORS } from '@/operators/builtin/areaOperators'
 import { selectTool, moveTool } from '@/workbench/tools/toolDefs'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { boxTool, boxFullTool, BoxGizmo, AnnotationBoxCommitOperator, AnnotationBoxResetOperator } from '@/workbench/tools/boxTool'
@@ -88,6 +89,9 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   WikiSaveConfirmOperator,
   WikiSaveAsOperator,
   CopyWikiEmbedOperator,
+  // #282 P10b：Area 布局编辑命令的 operator 入口（分割/合并/切类型/调比例）。
+  // `poll` 读"是否有 Area 会话"（装配结果）⇒ 嵌入外壳里天然不可用。
+  ...AREA_OPERATORS,
 ]
 
 /**

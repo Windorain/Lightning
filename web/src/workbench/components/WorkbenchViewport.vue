@@ -7,7 +7,7 @@ import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { WorkbenchHost } from '@/runtime/host/workbenchHost'
 import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
-import { bindMultiblockMeshSync, useMultiblockChannels } from '@/shared/viewport/useMultiblockChannels'
+import { useKernelChannels } from '@/shared/viewport/useKernelChannels'
 import { availableDockTabs, defaultDockTab, resolveDockTab, type ViewportDockTab } from '@/shared/viewport/dockTabs'
 import { REGION } from '@/runtime/regionIds'
 import { createToolGizmoHandler } from '@/handlers/toolGizmoHandler'
@@ -22,14 +22,37 @@ const ctx = useContext()
 const host = inject(hostKey)! as WorkbenchHost
 const selection = ctx.getSelection()
 
-const VIEWPORT_REGION_ID = REGION.WORKBENCH_VIEWPORT
+/**
+ * **本视口的 region id**（#282 P10b Area 产品接线）。
+ *
+ * ## 为什么它是 prop 而不是常量
+ *
+ * 旧实现写死 `REGION.WORKBENCH_VIEWPORT` —— 于是"工作台只能有一个 3D 视口"
+ * 成为**组件层**的事实。Area 分割要挂第二个 3D Area，就必须让本组件知道自己
+ * 是**哪一个**视口（region 是"输入域/相机/槽位/机位"的键，见 `mainCameras`）。
+ *
+ * 缺省仍是 `REGION.WORKBENCH_VIEWPORT`：**单视口装配的行为逐字不变**
+ * （既有 e2e 与 `__vm__` 观测面读的就是这个 region）。
+ */
+const props = withDefaults(defineProps<{ regionId?: string }>(), {
+  regionId: REGION.WORKBENCH_VIEWPORT,
+})
+const VIEWPORT_REGION_ID = props.regionId
 const prefs = ctx.requireRegion(VIEWPORT_REGION_ID).state.viewer
-if (!prefs) throw new Error('viewer preferences missing on r-viewport')
+if (!prefs) throw new Error(`viewer preferences missing on ${VIEWPORT_REGION_ID}`)
 
-/** 多方块通道状态（视口本地）：必须先于 DRW 创建，`renderDoc` 即 DRW 的文档来源（T2.5 接线） */
-const mb = useMultiblockChannels(ctx)
+/**
+ * 多方块通道取值（**归内核编辑上下文**；#282 P10b）。
+ *
+ * 必须先于 DRW 创建，`renderDoc` 即 DRW 的文档来源（T2.5 接线）。
+ * 与旧 `useMultiblockChannels` 的差别：本 composable **不持有**取值状态
+ * （旧形态每视口自持 `state` + `revision`），取值权威是
+ * `EditContext.channelValues`，写入经 `setChannelValue` 命令 ⇒
+ * "同一上下文的所有 Area 读到同一份取值"（#249 §3.3、A05）。
+ */
+const mb = useKernelChannels(ctx)
 const {
-  isMultiblock, renderDoc, revision,
+  isMultiblock, renderDoc,
   panel: channelPanel,
   setTier: setChannelTier, setChannelValue, setRunstate: setChannelRunstate,
 } = mb
@@ -53,6 +76,27 @@ const {
 /**
  * 下方栏 tab：可用性与默认项走两端共用的纯逻辑（`dockTabs`），
  * Workbench 侧帧控制/分层预览恒被允许（是否显示帧 tab 仍由多帧与否决定）。
+ *
+ * ## ⚠️ "用户选择" 与 "默认" 必须分开（#282 P10b 实测修正）
+ *
+ * 旧实现是 `const _preferredTab = ref(defaultDockTab(availability))` —— 默认值在
+ * **setup 时求值一次**。那在"本组件只在文档已存在时挂载"（旧 `v-if` 守卫）的前提下
+ * 恰好正确：挂载时 `hasWorldMultiFrame` 已是真值。
+ *
+ * Area 产品接线后本组件由 `AreaHost` 挂载（**文档之前**就存在），于是：
+ *
+ *  1. setup 时 `hasWorldMultiFrame === false` ⇒ 可用列表 `['layer']` ⇒ 默认落 `'layer'`；
+ *  2. 文档到达后可用列表变 `['frame','layer']`，但 `resolveDockTab('layer', …)`
+ *     因 `'layer'` 仍在列表里而**保留它** ⇒ 帧控制 tab 永不成为默认。
+ *
+ * 实测症状：`multiblock-frame-regression.spec.ts` 的
+ * `FRAME_SLIDER = 'input[aria-label^="当前帧"]'` 找不到元素（该 spec 在
+ * 相机键提交上通过、在 Area 接线提交上失败）—— 这正是"跨批回归"的形态。
+ *
+ * 修法：`_userTab` 只记**用户显式选择**（`null` = 没选过）。没选过时 active 直接
+ * 取 `defaultDockTab(可用列表)` —— 那正是 `dockTabs.ts` 对"默认 tab"的定义
+ * （"可用列表中优先级最高者"），于是"文档形态决定默认 tab"与**挂载时机**解耦。
+ * 选过之后仍走 `resolveDockTab`（首选不可用时回落到最高优先级，不残留空 panel）。
  */
 const dockTabAvailability = computed(() => ({
   showFrameTab: true,
@@ -61,14 +105,26 @@ const dockTabAvailability = computed(() => ({
   showChannelsTab: isMultiblock.value,
 }))
 const dockTabs = computed(() => availableDockTabs(dockTabAvailability.value))
-const _preferredTab = ref<ViewportDockTab>(defaultDockTab(dockTabAvailability.value))
+/** 用户**显式**选择过的 tab；`null` = 尚未选择 ⇒ 跟随默认（文档形态驱动）。 */
+const _userTab = ref<ViewportDockTab | null>(null)
 const activeTab = computed<ViewportDockTab>({
-  get: () => resolveDockTab(_preferredTab.value, dockTabs.value),
-  set: (v: ViewportDockTab) => { _preferredTab.value = v },
+  get: () =>
+    _userTab.value === null
+      ? defaultDockTab(dockTabAvailability.value)
+      : resolveDockTab(_userTab.value, dockTabs.value),
+  set: (v: ViewportDockTab) => { _userTab.value = v },
 })
 
-// ---- 多方块接线：取值变化 → 装配产物 → DRW 重新解析 + 重建 mesh ----
-bindMultiblockMeshSync(revision, drw)
+// ---- 多方块接线：取值变化 → 装配产物 → DRW 按**内容身份**自行重建 ----
+//
+// 旧形态：`bindMultiblockMeshSync(revision, drw)` 在每视口的 `revision` 计数器变化时
+// **手动链式**调 `loadStructureAndResources()` + `rebuildContentMesh()`（B5 #5
+// `manual-refresh-chain`）。那是"调用方手动刷新"，漏挂一处就得到"滑杆动了画面不动"。
+//
+// 现在：取值归内核 ⇒ `renderDoc`（下面的 `docOverride`）随之变化，且取值写入时
+// bump `contentRefreshTick` ⇒ DRW 的观察者按 `presentation/contentIdentity`
+// **从数据算出**身份，再按 `RebuildPlan` 分范围执行（见 `drwMeshPipeline` 文件头）。
+// 失效由数据决定，不需要任何调用方声明重建范围。
 /** 渲染定义随装配刷新：让 `vpSlot.definition` 始终等于"当前渲染的网格"（公开观测点） */
 watch(structureDefinition, (d) => { vpSlot.definition.value = d ?? null }, { flush: 'post' })
 
@@ -198,9 +254,37 @@ function onDrop(e: DragEvent) {
   ctx.getOperators().exec('OPERATOR_OPEN_SCENE', { file })
 }
 
+/**
+ * 挂载即尝试装载；**文档后到时重新装载**（#282 P10b 实测修正）。
+ *
+ * ## 为什么必须 watch 文档（而不是只在 `onMounted` 装载一次）
+ *
+ * 旧形态下本组件由父级 `v-if="ctx.getDoc().value"` 守卫（`WorkbenchRoot`），
+ * 于是它**只在文档已存在时**才挂载 ⇒ 挂载时的 `loadStructureAndResources()`
+ * 必然能拿到文档。
+ *
+ * Area 产品接线后，本组件由 `AreaHost` 挂载 —— 它在**文档之前**就存在
+ * （Area 是布局的投影，与文档无关）。此时 `loadStructureAndResources()` 拿到
+ * `doc === null`，按 `drwMeshPipeline` 的逻辑置 `loadStatus = 'error'`，
+ * 而**没有任何东西会再重试** ⇒ 视口永久停在占位态。
+ *
+ * 实测症状：注入场景后 `doc: true` 但 `.vc-viewport` 计数为 0、`wv-placeholder` 为 1。
+ *
+ * ⇒ 文档从"无"变"有"时必须重装。`loadStructureAndResources` 自身是幂等且
+ * 保留视口状态的（`preserveViewport = loadStatus === 'ok'`），故重复调用安全。
+ */
 onMounted(() => {
   void drw.loadStructureAndResources()
 })
+
+watch(
+  () => ctx.getDoc().value,
+  (doc, prev) => {
+    // 只在"从无到有"时重装：文档**替换**（有→有）由 DRW 自己的文档订阅处理，
+    // 在这里再装一次会与它竞争（两条装载路径同时改 `loadStatus`）。
+    if (doc !== null && (prev === null || prev === undefined)) void drw.loadStructureAndResources()
+  },
+)
 /**
  * 卸载：**顺序是语义的一部分**（B5 #10；A13「关闭后实例/监听/作业回基线」）。
  *

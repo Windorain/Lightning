@@ -558,7 +558,7 @@ describe('A31-5 坏副本先校验再采纳：四类拒绝原因齐全，且当�
     }
     // 把暂存位移并进场景却**沿用旧的版本** ⇒ 摘要不符 ⇒ 显式拒绝。
     const captured = captureRecoveryCopy({
-      snapshot: { id: doc.id, scene: merged, animation: doc.animation, version: doc.version },
+      snapshot: { id: doc.id, scene: merged, animation: doc.animation, content: doc.content, version: doc.version },
       identity: INSTANCE_A,
       writtenAt: CLOCK,
     })

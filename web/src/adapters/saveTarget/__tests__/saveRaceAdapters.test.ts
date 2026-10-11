@@ -86,7 +86,7 @@ describe('A16 适配器层：写入目标的条件版本（远端不会被旧请
     void c4.dispatch(doc)
     if (revBefore.ok) {
       const staleWrite = shared.port.write({
-        request: { sequence: 99, documentId: 'doc-1', bindingGeneration: 0, capturedVersion: doc.version, capturedScene: doc.scene },
+        request: { sequence: 99, documentId: 'doc-1', bindingGeneration: 0, capturedVersion: doc.version, capturedScene: doc.scene, capturedContent: doc.content },
         bytes: new Uint8Array([1]),
         expectedRevision: revBefore.value,
       })
@@ -111,7 +111,7 @@ describe('A16 适配器层：写入目标的条件版本（远端不会被旧请
     expect(a.kind).toBe('dispatched')
     // 对照实现里第二次仍然能写（这正是它的缺陷）
     const second = naive.port.write({
-      request: { sequence: 2, documentId: 'doc-1', bindingGeneration: 0, capturedVersion: doc2.version, capturedScene: doc2.scene },
+      request: { sequence: 2, documentId: 'doc-1', bindingGeneration: 0, capturedVersion: doc2.version, capturedScene: doc2.scene, capturedContent: doc2.content },
       bytes: new Uint8Array([2]),
       expectedRevision: 0,
     })

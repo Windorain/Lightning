@@ -123,7 +123,13 @@ export function createViewportManager() {
       for (const slot of slots.values()) fn(slot)
     },
     resetAllViewportCameras(mainCameras: Record<string, import('vue').Ref<import('@/runtime/viewportCamera').ViewportCameraState | null>>): void {
-      for (const slot of slots.values()) mainCameras[slot.cameraMainKey].value = null
+      for (const slot of slots.values()) {
+        // 按键**动态**取：`cameras` 是开放键空间（按 region 分配，#282），
+        // 故新视口的键可能尚未创建 —— 直接 `mainCameras[key].value = null`
+        // 会在键不存在时抛错（`undefined.value`）。
+        const ref = mainCameras[slot.cameraMainKey] ?? (mainCameras[slot.cameraMainKey] = shallowRef(null))
+        ref.value = null
+      }
     },
     activeId,
     active,

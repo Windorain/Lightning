@@ -96,6 +96,77 @@ export class ScreenRoot {
     return this.areas.find(a => a.id === areaId)
   }
 
+  /**
+   * **按需登记一个 3D 视口 region**（#282 P10b Area 产品接线）。
+   *
+   * ## 为什么需要它
+   *
+   * `createWorkbenchScreenRoot` 静态声明 region 列表，其中只有一个
+   * `REGION.WORKBENCH_VIEWPORT`。Area 分割出第二个 3D 视口时，那个视口需要一个
+   * **自己的** region —— 因为 region 是"输入域 + 相机键 + 视口槽位 + viewer 偏好"
+   * 的共同键（见 `mainCameras#cameraMainKeyForRegion` 的说明）。共用一个 region
+   * 会让两个视口共享机位与槽位，那正是 A05 判红的形态。
+   *
+   * ## ⚠️ 两个 id 空间**不同**（P10b 实测修正）
+   *
+   * 初版按 `areaId` 在本类的 `areas` 里查找并 push —— 但本类的 Area id 是
+   * **屏幕树**的（`'viewport-area'`/`'properties-area'`），而调用方给的是
+   * **`domain/workspace`** 的（`'a1'`/`'a2'`）。两者**永不相交**：
+   *
+   *  - 根 Area 只是**碰巧**能用 —— `regionIdFor('a1') === REGION.WORKBENCH_VIEWPORT`
+   *    已在 `_byId` 里，故提前返回；
+   *  - 第一次分割（`'a2'`）时查找失败 ⇒ 抛 `未知 area`（**渲染期崩溃**）。
+   *
+   * 现在改为挂到**承载视口的那个屏幕 Area**（`spaceType === SpaceType.VIEW_3D`，
+   * 全树唯一）—— 于是调用方不再需要知道屏幕树的命名。
+   *
+   * ## 调用时机：**不**在渲染函数里
+   *
+   * 渲染期改屏幕树是 Vue 反模式（`reindex()` 会在依赖收集过程中改被依赖的结构）。
+   * 调用方（`AreaLayoutHost`）在 `watch(..., { immediate: true })` 里登记。
+   */
+  ensureViewportRegion(regionId: string): RegionNode {
+    const existing = this._byId.get(regionId)
+    if (existing) return existing
+    const node = createRegionNode(regionId, RegionType.MAIN, {
+      wmInputId: regionId,
+      keymapId: REGION_KEYMAP.WORKBENCH_VIEWPORT,
+      state: {
+        // 每个视口**自己的** viewer 偏好实例：共享会让"关掉 A 的注解显示"改到 B。
+        viewer: createViewerPreferences(`lightning.prefs.viewport.${regionId}`),
+        hover: createViewportHoverState(),
+      },
+    })
+    const area = this.areas.find((a) => a.spaceType === SpaceType.VIEW_3D)
+    if (area === undefined) {
+      // 没有 3D 屏幕 Area 是**装配缺陷**（本方法只应由工作台外壳调用）——
+      // 响亮失败，不静默把视口 region 挂到属性区（那会让输入路由错位）。
+      throw new Error(`ensureViewportRegion: 本屏幕树没有 VIEW_3D Area（region ${regionId}）`)
+    }
+    area.regions.push(node)
+    this.reindex()
+    return node
+  }
+
+  /**
+   * 注销一个按需登记的视口 region（Area 被合并/关闭时调用）。
+   *
+   * 根 region（`REGION.WORKBENCH_VIEWPORT`）**不**允许注销：它是装配期静态声明的，
+   * 移除它会让单视口装配在合并后彻底没有视口。故显式拒绝（响亮），而不是静默保留
+   * 一个"注销失败"的错觉。
+   */
+  releaseViewportRegion(regionId: string): boolean {
+    if (regionId === REGION.WORKBENCH_VIEWPORT) return false
+    const node = this._byId.get(regionId)
+    if (!node) return false
+    for (const a of this.areas) {
+      const i = a.regions.indexOf(node)
+      if (i >= 0) a.regions.splice(i, 1)
+    }
+    this.reindex()
+    return true
+  }
+
   /** 枚举需向 WM 注册的输入域 id */
   wmInputRegionIds(): string[] {
     return [...this._byInputId.keys()]

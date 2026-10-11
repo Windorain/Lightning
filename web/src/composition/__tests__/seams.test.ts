@@ -180,43 +180,40 @@ function productionFiles(): string[] {
 describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
   const ENTRY_ID = 'per-viewport-channel-staging'
 
-  it('`per-viewport-channel-staging` 已按 `SeamRegistration` 形状登记（owner = P10b/#282，R-WK-04）', () => {
-    const entry = seamById(ENTRY_ID)
-    expect(entry, `P6 的开放接缝必须登记在 SEAMS 里（id=${ENTRY_ID}）`).toBeTruthy()
-    if (!entry) return
-    // 形状（与 `boundary-scan.test.ts` 的逐条断言同口径）
-    expect(entry.id).toMatch(/^[a-z0-9-]+$/)
-    expect(entry.files.length).toBeGreaterThan(0)
-    expect(entry.newTrack).toBeTruthy()
-    expect(entry.oldTrack).toBeTruthy()
-    expect(entry.blocker).toBeTruthy()
-    expect(entry.exitCondition).toBeTruthy()
-    // ## 相位（R-WK-03 → **R-WK-04 修正**）
-    //
-    // R-WK-03 把目标批次从 P6 改为 #261（P10），理由是"删除前置条件是内核接线生产"。
-    // #261 完成了**时间/播放面**的接线，但实测发现本条的退出还多一个前置：
-    // **文档内容面**（视口渲染文档须是内核场景的派生）—— 而内核 `Document`
-    // 不承载 `frames`/`cellGrid`/`multiblock`。故 R-WK-04 把本条改归 **#282（P10b）**。
-    expect(entry.owner.p).toBe('P10b')
-    expect(entry.owner.issue).toBe(282)
-    // 退出条件必须点名 `files` 里的文件（与 `boundary-scan` 同款判据）
-    expect(entry.files.some((f) => entry.exitCondition.includes(f))).toBe(true)
+  /**
+   * ## 本条为何从"登记在表里"翻成"已核销 + 回归把守"（#282 P10b 执行）
+   *
+   * P6 建立本条时登记的是**未退出的双轨**，判据是"旧轨确实仍在"。本批（#282）
+   * 真的把它退掉了：文件删除、取值归 `EditContext`、失效由内容身份判定。
+   *
+   * 于是判据必须**同批翻转**（否则会永远红，而那个红只代表"断言停在旧相位"）：
+   *  - 从 `SEAMS` **移出**（该表的语义是"双轨剩余数、只应减少"）；
+   *  - 改由本组断言把守"旧机制**不得复活**" —— 与 P6 当年核销自己那两条
+   *    （模块级宿主开关、组件挂载决定状态寿命）时同一手法。
+   */
+  it('`per-viewport-channel-staging` 已**核销**（不在 `SEAMS` 里 —— 双轨剩余数只应减少）', () => {
+    expect(seamById(ENTRY_ID), '已退役的接缝不得留在 SEAMS 里（表长 = 双轨剩余数）').toBeUndefined()
   })
 
-  it('旧轨**确实仍在**（登记不得空转）：`useMultiblockChannels.ts` 存在且仍持每视口 state', () => {
+  it('**旧机制不得复活**：`useMultiblockChannels.ts` 已删除，且两个视口不再引用它', () => {
     const rel = 'shared/viewport/useMultiblockChannels.ts'
-    expect(fs.existsSync(path.join(SRC, rel)), '该文件仍应在（P6 区，删除归 #261）').toBe(true)
-    const code = codeOf(rel)
-    expect(code.includes('ref<MultiblockSelectionState>'), '每视口暂存副本仍在（这是本条未退出的证据）').toBe(true)
-    expect(code.includes('bindMultiblockMeshSync'), '手工链式刷新仍在（B5 #4 第二条 slug 的证据）').toBe(true)
-    // 两端仍是**真实**消费者（不是死代码）
-    expect(codeOf('shared/viewport/EmbedViewport.vue').includes('useMultiblockChannels')).toBe(true)
-    expect(codeOf('workbench/components/WorkbenchViewport.vue').includes('useMultiblockChannels')).toBe(true)
+    expect(fs.existsSync(path.join(SRC, rel)), '该文件已随 #282 删除（整文件退役）').toBe(false)
+    // 两个视口已改吃内核读面（`useKernelChannels`）—— 不得再引用旧机制。
+    expect(codeOf('shared/viewport/EmbedViewport.vue').includes('useMultiblockChannels')).toBe(false)
+    expect(codeOf('workbench/components/WorkbenchViewport.vue').includes('useMultiblockChannels')).toBe(false)
+    // 反空洞真：替代面确实在服役（否则"不引用旧的"可能只是因为两边都没有）
+    expect(codeOf('shared/viewport/EmbedViewport.vue').includes('useKernelChannels')).toBe(true)
+    expect(codeOf('workbench/components/WorkbenchViewport.vue').includes('useKernelChannels')).toBe(true)
   })
 
-  it('替代机制**已就位**：`EditContext.channelValues`（P1）+ P4 的纯求值面存在', () => {
+  it('替代机制**已就位且在生产服役**：取值归 `EditContext`，经会话读写', () => {
     expect(codeOf('domain/editing.ts').includes('channelValues'), 'P1 的通道取值归属已存在').toBe(true)
-    expect(fs.existsSync(path.join(SRC, 'application/evaluation.ts')), 'P4 的求值面已存在').toBe(true)
+    // #282：会话把内核取值面暴露给视口（读面 + 唯一写通路）
+    const session = codeOf('runtime/kernelSession.ts')
+    expect(session.includes('channelValues()'), '内核会话暴露取值读面').toBe(true)
+    expect(session.includes('setChannelValue('), '内核会话经命令写入取值（唯一写通路）').toBe(true)
+    // 失效传播不再靠调用方声明重建范围：渲染侧按内容身份判定
+    expect(fs.existsSync(path.join(SRC, 'presentation/contentIdentity.ts')), '内容身份判定面已存在').toBe(true)
   })
 
   it('阻塞方「内核未接线生产」**已不成立** —— 接线已落地（#261），本条按门规更新', () => {
@@ -298,12 +295,16 @@ describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
     // 且**登记表自己的说明文字**（字符串/注释里的符号名）不得被误判为使用点
     // —— 这正是首跑实测到的假红，`codeOf` 剥字符串与注释后消失。
     //
-    // 锚点从 `new Editor(` 换成 `EditContext`：R-WK-04 后 `seams.ts` 的 blocker
-    // 改写为"文档内容面归 #282"，不再逐字提到 `new Editor(`。锚点必须选
-    // **当下确实存在**的一段说明，否则这条反空洞真自己会变成空转
-    // （实测：改写 blocker 后本条判红 —— 它正确地抓到了"锚点已失效"）。
-    expect(codeOf('composition/seams.ts').includes('EditContext'), '文案里的提及不算使用点').toBe(false)
-    expect(codeText('composition/seams.ts').includes('EditContext'), '而原始文本里确实有这段说明（证明上面那条不是空转）').toBe(true)
+    // 锚点几经更换（`new Editor(` → `EditContext` → `documentStateOf`），
+    // 每次接缝表被改写都会让旧锚点失效，而本条会**正确地判红**
+    // （它抓到了"锚点已失效"）。故锚点必须选当下确实存在的说明文字。
+    //
+    // 本锚点选 `documentStateOf`：它**只**出现在 `kernel-property-write-dual-track`
+    // 的 `oldTrack`/`exitCondition` **字符串字面量**里（是函数名，不是 import 名），
+    // 故 `codeOf`（剥注释**与字符串**）看不到它，而 `codeText`（保留字符串、只剥注释）
+    // 看得到 —— 这正是本条要区分的两把尺子。
+    expect(codeOf('composition/seams.ts').includes('documentStateOf'), '文案里的提及不算使用点').toBe(false)
+    expect(codeText('composition/seams.ts').includes('documentStateOf'), '而原始文本里确实有这段说明（证明上面那条不是空转）').toBe(true)
   })
 })
 
@@ -316,8 +317,8 @@ describe('P6 已核销项 · 回归断言（防被改回去）', () => {
     const ids = SEAMS.map((s) => s.id)
     expect(ids).not.toContain('host-profile-global')
     expect(ids).not.toContain('component-mount-lifetime')
-    // 但 P6 的开放接缝必须在
-    expect(ids).toContain('per-viewport-channel-staging')
+    // P6 的开放接缝在 #282（P10b）**已核销** ⇒ 也不得占用本表（同上语义）
+    expect(ids).not.toContain('per-viewport-channel-staging')
   })
 
   it('B5 #7：`runtime/hostProfile.ts` 已删除，且全 `src/` 零引用', () => {
