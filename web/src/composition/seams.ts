@@ -107,12 +107,16 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     newTrack:
       '内核侧固定快照导出（#260）：`domain/captureSpec` 把取景复制成 `CameraSpec` 值、把采样时间算成冻结的 `CaptureTime` 序列；`application/exportPlan` 组装**不可变**请求并在预检处默认失败；`runtime/exportJob` 的离屏端口只有 `acquire/renderFrame/release`（**没有**取实时相机/视口的方法）。静态判据见 `web/tests/architecture/export-purity.test.ts`。',
     oldTrack:
-      '旧导出器仍在生产路径上：`workbench/exportIsometricImage.ts` 与 `workbench/export/bundleMeshAssembly.ts` 从**正在操作的视口**取景（必要时临时改机位再恢复），命令入口在 `operators/builtin/exportOperators.ts`，面板在 `workbench/components/ExportWorkspace.vue`；A29 负对照「导出借用并旋转实时相机」描述的正是这条轨道。',
+      '旧导出器仍在生产路径上：`src/workbench/export/bundleMeshAssembly.ts` 与 `src/workbench/exportIsometricImage.ts` 消费**旧文档内容**（消费方经 `ctx.getDoc().value?.serialize()` 取 plain 文档），命令入口在 `src/operators/builtin/exportOperators.ts`（四个命令全部如此），面板在 `src/workbench/components/ExportWorkspace.vue`。',
     blocker:
-      '**R-WK-04（#250，2026-10-11）**：旧导出器的消费者经 `ctx.getDoc().value?.serialize()` 读**旧文档内容**（`operators/builtin/exportOperators.ts` 四个命令全部如此）⇒ 删除它需要"旧文档 → 内核场景"装配，而该装配未交付（#261 实测：内核 `Document` 只承载 block/annotation/camera/mesh，不承载 `frames`/`cellGrid`/`textureBlobs`/`materialPalette`/`meta`）。#261 已完成的接线是**时间/播放/帧下标面**（`runtime/kernelSession` + `composition/kernelRuntime`），不含文档内容面。故本条归 **#282（P10b）**。',
-    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
+      '**P10c（#286）实测修正（改写 P9 的原文，附机械证据）**：\n' +
+      '① **消费者面**：四个导出命令与 `ExportWorkspace.vue` 全部经 `ctx.getDoc().value?.serialize()` 读旧文档 ⇒ 删除它们需要 `getDoc()` 的退出，而那是 `raw-authority-object` 条目（归 #289/P10d）。\n' +
+      '② **几何面**：OBJ 导出经 `loadStructureOrWorld(doc)` → `collectStructureGeometryPiecesPure(def)`，其几何唯一来源是 `blockPalette[].geometry`（`render/schema/types.ts:257` → `structureGeometryCore.ts:217`）。P10c 实测：内核投影**不带回显**时 palette 条目 `withGeometry=0`、**triangles=0**（ebf-2ch 0/旧 24；帧为主真实信封 0/旧 4882）⇒ 换成内核求值后 OBJ 导出会**静默产出空几何**。这正是 R-WK-06 划给 #289 的内容面。\n' +
+      '③ **替代面未接线**：`runtime/exportJob.ts` 的 `ExportJob` 生产零构造点、`OffscreenRenderPort` 与 `EncoderPort` 均**零生产实现**（`export-purity.test.ts` 只锁了方法集合封闭，不锁"有人实现"）。故"导出改由 `ExportJob` 承担"当前不可执行。\n' +
+      '④ **文字修正**：本条的旧 `oldTrack` 曾称两个文件"从正在操作的视口取景（必要时临时改机位再恢复）"。实测**不成立**：`bundleMeshAssembly.ts` 与 `exportIsometricImage.ts` 都不 import 任何视口/相机/`ctx` 实时面，后者自建 `new THREE.WebGLRenderer` 与自建透视/正交相机（`:105,:153-168`）。"借用并旋转实时相机"发生在**截图**路径（`runtime/renderEngine.ts:215` 的 `canvas.toDataURL`），不是这两个导出器。A29 的负对照面据此收窄（见汇报）。',
+    owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     exitCondition:
-      '`src/workbench/export/bundleMeshAssembly.ts` 与 `src/workbench/exportIsometricImage.ts` 被删除，且 `src/operators/builtin/exportOperators.ts` 的导出命令改由 `src/runtime/exportJob.ts` 的 `ExportJob` 承担（不再从实时视口取景）。届时删除本条登记。**执行批次：#282（R-WK-04）**。',
+      '`src/workbench/export/bundleMeshAssembly.ts` 与 `src/workbench/exportIsometricImage.ts` 被删除，且 `src/operators/builtin/exportOperators.ts` 的导出命令改由 `src/runtime/exportJob.ts` 的 `ExportJob` 承担（`OffscreenRenderPort`/`EncoderPort` 各有生产实现，且 OBJ 几何来自内核内容面而不再依赖旧文档回显）；届时删除本条登记。',
   }),
   /**
    * P9（#260）登记：**导出资源清单的产出方式**尚未接线。
@@ -142,10 +146,10 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     oldTrack:
       '旧导出器（`workbench/export/bundleMeshAssembly.ts`）在烘焙时直接从旧文档与纹理库取资源：没有"必需/可选"的声明，也没有内容版本参与的就绪判定，故"缺资源"表现为烘焙结果里少一块而不是预检失败。',
     blocker:
-      '**R-WK-04（#250）**：`deriveAssetNeeds()` 需要"文档场景 → 呈现图元（`EvaluatedPrimitive[]`）"的装配，而这属**文档内容面** —— 与 `raw-authority-object` 同一前置（内核 `Document` 不承载旧文档内容）。#261 已完成宿主驱动接线与时间/播放面，但图元装配未交付。故本条归 **#282（P10b）**。',
-    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
+      '**R-WK-06（#250，2026-10-12）**：`deriveAssetNeeds()` 需要"文档场景 → 呈现图元（`EvaluatedPrimitive[]`）"的装配，而这属**文档内容面** —— 与 `raw-authority-object` 同一前置（内核 `Document` 不承载旧文档内容）。P9 原登记为 P10b（#282），而 #282 交付的是**多方块通道/呈现接线**，本条未在其中交付；P10c（#286）复核后按 R-WK-06 的划界改归 **#289（P10d）**（内容面补全与呈现消费）。',
+    owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     exitCondition:
-      '`src/application/exportPlan.ts` 的 `deriveAssetNeeds()` 由已装配的图元来源产出非空清单（不再在未装配时返回空），且 `src/runtime/exportJob.ts` 的作业按该清单解析资源。届时删除本条登记。**执行批次：#282（R-WK-04）**。',
+      '`src/application/exportPlan.ts` 的 `deriveAssetNeeds()` 由已装配的图元来源产出非空清单（不再在未装配时返回空），且 `src/runtime/exportJob.ts` 的作业按该清单解析资源。届时删除本条登记。',
   }),
   /**
    * P6（#257）登记：**每视口通道暂存**（B5 #4 的消费者面）。
@@ -210,6 +214,65 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
   // 表长 = 双轨剩余数，只减不增 —— 本条按该语义移出，回归断言在
   // `__tests__/seams.test.ts`（防旧机制复活）。
   // ───────────────────────────────────────────────────────────────────────────
+  /**
+   * P10c（#286）登记：**保真记录的传输未接通**（P9 报告的 G-6 扫尾）。
+   *
+   * ## 为什么必须登记（而不是继续留在报告散文里）
+   *
+   * P9（#260）交付了保真记录的**机制**：`captureFidelity` 采集、
+   * `serializeFidelity`/`parseFidelity` 往返、`fidelityStorageKey` 旁置键、
+   * `judgeFidelityAfterEdit` 三态裁定 —— 全部有测试、全部纯。
+   *
+   * 但 P9 当时的登记口径是"**只给键构造与序列化，不假装已接通**"，而那条缺口
+   * **只写在报告里**（`temp/p09/a20-b1-conformance.md`，属随时会被删除的临时目录）。
+   * 按工作区元规则「规则进指令，证据进平台」「只存在于评论里的规则 ≈ 不存在」，
+   * 一个只活在报告里的缺口在 P11 审计时**无法被机械核对**。本批把它登记进本表。
+   *
+   * ## 缺口的三段（P10c 全树实测，零生产调用方）
+   *
+   *  - **(a) 生产者**：没有任何生产调用方调 `captureFidelity`。天然落点是
+   *    `operators/builtin/docLifecycleOperators.ts` 的 `adoptDocumentIntoKernel`
+   *    —— 它手里已有 `unknownFields`/`sourceFormat`/`sourceVersion`，但**只**在
+   *    日志里数了个数，记录从未被构造。
+   *  - **(b) 持久化**：`fidelityStorageKey` 给出旁置键，但 `RecoveryStorePort`
+   *    的两个实现（`browserStoragePort`/`createMemoryStoragePort`）在生产里
+   *    **从未被实例化**。且该键与 `recoveryStoreKey` 家族**不兼容**
+   *    （缺 scope/instance 段、返回裸 `string` 而非 `Result`、无对应解析器）
+   *    ⇒ "按同一个端口存"不是接线问题，而是**键口径要先统一**。
+   *  - **(c) "随产物一起传"**：`SnapshotPayload`（`domain/captureSpec.ts`）与
+   *    `BuildManifest`（`application/publishFormat.ts`）都是**刻意封闭**的结构
+   *    （后者白名单在文件头明文说明"自由扩展位结构性不可表达"）。唯一已存在的
+   *    产物侧挂点是 `composition/kernelProjection.ts` 的
+   *    `KernelProjectionInput.fidelityFields` → `projectKernelDocument`
+   *    （把字段写回 plain 根与 `meta.` 子树），而它本身**生产零调用方**。
+   *
+   * (c) 才是**真正的**缺口，且它落在"内核 → 旧格式投影"这条面上 —— 与 P10c 的
+   * 渲染链/`RuntimeDocument` 条目不重叠。故本条归 **P10d**（R-WK-06 新设：#289）。
+   *
+   * ## 为什么本批**不**顺手实现 (a)+(b)
+   *
+   * 只做 (a)+(b) 会得到"记录被构造并写进本机存储，却没有任何产物带得走它"——
+   * 正是 #171 禁止的半成品：新机制带着生产副作用上线，而它宣称的能力
+   * （"记录随产物同行"）依然不成立，同时新增一处无读取方的生产存储实例化。
+   */
+  Object.freeze({
+    id: 'fidelity-record-transport-unwired',
+    files: Object.freeze([
+      'src/adapters/files/fidelityRecord.ts',
+      'src/operators/builtin/docLifecycleOperators.ts',
+      'src/composition/kernelProjection.ts',
+      'src/application/recovery.ts',
+    ]),
+    newTrack:
+      '`adapters/files/fidelityRecord.ts` 的保真记录：`captureFidelity` 采集未知顶层字段（带源格式/源版本；`_extra` 显式排除）、`serializeFidelity`/`parseFidelity` 往返（读到 `_extra` 显式拒绝）、`fidelityStorageKey` 旁置键、`judgeFidelityAfterEdit` 的三态裁定（`valid`/`stale`/`dropped`）。产物侧既定挂点是 `composition/kernelProjection.ts` 的 `KernelProjectionInput.fidelityFields` → `projectKernelDocument`（写回 plain 根与 `meta.` 子树）。',
+    oldTrack:
+      '未知顶层字段今天**到不了任何产物**：`composition/kernelAssembly.ts` 把它们收进 `AssembledDocument.unknownFields`，而唯一消费者 `operators/builtin/docLifecycleOperators.ts` 只把键数写进一条日志（`unknownFields: Object.keys(value.unknownFields).length`）—— 记录从未被构造、从未被持久化、也没有任何产物结构接受它；故"保存 → 再打开"会静默丢掉这些字段。',
+    blocker:
+      '产物侧唯一挂点 `src/composition/kernelProjection.ts` 的 `projectKernelDocument` **生产零调用方**：它属"内核 → 旧格式投影"这条面，依赖内核内容面补全（P10d）。同时 `src/application/recovery.ts` 的 `RecoveryStorePort` 在生产里从未被实例化，且 `fidelityStorageKey` 与 `recoveryStoreKey` 家族的键口径不兼容（缺 scope/instance 段、返回裸 `string`、无解析器）—— 持久化半边需先统一键口径，不是接线。故本批只登记，归 P10d。',
+    owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
+    exitCondition:
+      '`src/operators/builtin/docLifecycleOperators.ts` 的 `adoptDocumentIntoKernel` 调 `captureFidelity` 构造记录，且 `src/composition/kernelProjection.ts` 的 `KernelProjectionInput.fidelityFields` 有生产调用方（记录据它写回产物），使"保存 → 再打开"保留未知顶层字段；届时删除本条登记。',
+  }),
 ])
 
 /** 按 id 取登记项（未登记返回 `undefined`，由调用方决定是缺口还是缺陷）。 */
