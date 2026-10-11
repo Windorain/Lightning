@@ -36,7 +36,7 @@ import {
   ok,
   err,
 } from './errors'
-import { entityRef, type EntityRef, type Version } from './identity'
+import { entityRef, digestOf, type EntityRef, type Version } from './identity'
 import {
   findObject,
   sameTransform,
@@ -47,26 +47,36 @@ import {
 import { documentEntityRef, type Document } from './document'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 时间（P1 只需要"显式传入、可序列化"；完整有理帧率与采样策略归 P4）
+// 时间（P1 建立"归 EditContext、由输入注入"；P4 升级为有理帧率）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 时间值（#249 §7「时间以可序列化时间值及有理帧率表达」）。
+ * 时间值 —— **P4 起由 `domain/animation` 权威定义**（#249 §7「时间以可序列化时间值及
+ * 有理帧率表达」）。
  *
- * P1 的作用面是「时间归 EditContext 拥有、由输入注入」——
- * 即「时钟以输入注入，逻辑时钟、动画时间和渲染刷新分离」（#249 §9）。
- * 完整的求值时间语义与采样由 P4（#255）收口；本类型只保证可序列化、无时钟句柄。
+ * P1 曾在本模块定义一个 `{frame: number; fps: number}` 的最小形态，并明确
+ * 「完整的有理帧率与采样策略归 P4」。P4 把那句话落实：真正的定义在
+ * `domain/animation`，本模块**重新导出**它，使既有消费者（`application/commands`、
+ * `application/queries`、`domain/editing` 自身）的导入路径无需改动。
+ *
+ * `fps` 从 `number` 放宽为 `FrameRateSpec`（`number | {num, den}`）——这是**加宽**，
+ * 既有的 `fps: 20` 写法仍然完全合法（见 `frameRateOf`）。故不存在"旧值变成非法"的迁移问题。
  */
-export interface TimeValue {
-  readonly frame: number
-  readonly fps: number
-}
+import {
+  advanceTime,
+  framesPerSecond,
+  sameTime,
+  timeValue,
+  type FrameRate,
+  type FrameRateSpec,
+  type TimeValue,
+} from './animation'
+
+export type { FrameRate, FrameRateSpec, TimeValue }
 
 export const TIME_ZERO: TimeValue = Object.freeze({ frame: 0, fps: 20 })
 
-export function timeValue(frame: number, fps = 20): TimeValue {
-  return Object.freeze({ frame, fps })
-}
+export { timeValue }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EditContext
@@ -424,6 +434,45 @@ export function withChannelValue(ctx: EditContext, key: string, value: number): 
 export function withTime(ctx: EditContext, time: TimeValue): EditContext {
   return Object.freeze({ ...ctx, time })
 }
+
+/**
+ * 推进时间（**逻辑**秒数由宿主显式给出）。
+ *
+ * 本函数取代"某个循环自己 tick"的形态：`deltaSeconds` 是输入，
+ * 因此"同一时间 ⇒ 同一样本"（A09/A27）与"跳帧 = 直接赋值时间"共用一条路径。
+ */
+export function advanceContextTime(ctx: EditContext, deltaSeconds: number): EditContext {
+  return Object.freeze({ ...ctx, time: advanceTime(ctx.time, deltaSeconds) })
+}
+
+/** 定位到某时间（拖动/跳帧/倒退定位）。**不**改文档。 */
+export function seekContextTime(ctx: EditContext, time: TimeValue): EditContext {
+  return Object.freeze({ ...ctx, time })
+}
+
+/**
+ * 暂存事务版本。
+ *
+ * 契约 §4 `EvaluationKey.stagedTransactionVersion`（「活动编辑事务的暂存版本」）的
+ * 数据来源。用**内容摘要**而不是计数器：`#249` §8「dirty 根据内容身份/内容版本…
+ * 不使用仅单调增长的提交计数」是同一原则；计数器会让"暂存回到起点"之后
+ * 求值键仍然不同，于是几何白重算一次（A11 的"重建数为 0"就会假红）。
+ */
+export function stagedTransactionVersion(ctx: EditContext): number {
+  if (ctx.interaction === null) return 0
+  return digestOf({
+    tool: ctx.interaction.tool,
+    targets: ctx.interaction.targets,
+    overrides: ctx.interaction.overrides,
+    totalDisplacement: ctx.interaction.totalDisplacement,
+  })
+}
+
+/** 时间是否相同（转发 `domain/animation`，供下游对账）。 */
+export const sameContextTime = sameTime
+
+/** 帧率数值（呈现/统计用；**判定**一律用 `compareTime`）。 */
+export const contextFramesPerSecond = framesPerSecond
 
 /** 上下文所绑定文档的引用（供换绑判定）。 */
 export function boundDocumentRef(ctx: EditContext, doc: Document): EntityRef {

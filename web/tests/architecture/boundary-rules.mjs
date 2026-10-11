@@ -71,8 +71,8 @@ export const LAYER_DESTINATIONS = [
     layer: 'runtime',
     legacySources: ['runtime'],
     note: '**撞名**：旧 runtime/ 是求值+会话实现，新 runtime/ 是执行批次/调度/效果',
-    // 新实现的**显式**路径（P1 登记；`runtime/host`、`runtime/hover` 与其余根文件仍是旧实现）
-    activeSubpaths: ['runtime/execution.ts', 'runtime/scheduling.ts', 'runtime/effects.ts'],
+    // 新实现的**显式**路径（P1 登记 execution/scheduling/effects，P4 追加 evaluation）
+    activeSubpaths: ['runtime/execution.ts', 'runtime/scheduling.ts', 'runtime/effects.ts', 'runtime/evaluation.ts'],
     /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议是业务规则，不是呈现。 */
     corePurity: true,
   },

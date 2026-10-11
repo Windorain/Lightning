@@ -59,6 +59,7 @@ import {
   type ObjectTypeRegistry,
   type Transform,
 } from './scene'
+import { EMPTY_ANIMATION, type AnimationState } from './animation'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 历史
@@ -71,6 +72,11 @@ import {
  * `domain/scene` 的每次结构变更都返回新场景并共享未变子树，
  * 故"存快照"在本模型下等于"存一个指针"，不构成 #249 §3.2 所禁止的
  * 「每次鼠标移动重复复制整份文档」。
+ *
+ * `beforeAnimation` / `afterAnimation`（P4 增补）承载动画状态的快照。
+ * 它们**可选**是为了让"只改场景"的历史条目不必伪造一份动画状态；
+ * `undo`/`redo` 对缺省值是"保持当前动画不变"—— 语义上正确，因为
+ * 该条目本来就没有改动画。
  */
 export interface HistoryEntry {
   readonly label: string
@@ -83,6 +89,10 @@ export interface HistoryEntry {
   readonly selectionBefore: readonly EntityRef[]
   /** 操作后相关选择（值引用）。 */
   readonly selectionAfter: readonly EntityRef[]
+  /** 操作前的动画状态（仅当该条目改动了动画）。 */
+  readonly beforeAnimation?: AnimationState
+  /** 操作后的动画状态（仅当该条目改动了动画）。 */
+  readonly afterAnimation?: AnimationState
 }
 
 export interface HistoryState {
@@ -117,6 +127,23 @@ export interface Document {
   readonly id: string
   /** 文档内容。 */
   readonly scene: Scene
+  /**
+   * 动画（轨道 + 发布默认值）。
+   *
+   * 归属依据（#249 §3.4 所有权表第一行）：「文档内容、对象与数据、**动画** |
+   * 文档状态域 | 随打开文档存活 | 工程保存、文档历史」。
+   *
+   * ⇒ 轨道进**内容身份**（`contentOf` 的摘要输入），于是：
+   *  - 插入/删除关键帧、启用/禁用轨道 = 可撤销的内容变化（会推进 `documentVersion`）；
+   *  - **播放**（推进时间）只改 `EditContext.time`，**不**碰这里 ⇒
+   *    #249 §7「动画播放不增加文档版本或撤销条目」在结构上成立。
+   *
+   * P1 曾在 `application/commands` 里用一个"读取 `doc.tracks`（若存在）"的
+   * 类型断言占位（`animationDriven`）。那是**故意的临时形态**：它让 A10 的拒绝路径
+   * 在 P1 就有落点而不预造 P4 的数据模型。P4 在此把它换成真实字段，
+   * 断言随之消失（不留旁路）。
+   */
+  readonly animation: AnimationState
   /** 当前版本（单调世代 + 内容身份）。 */
   readonly version: Version
   /** 最后一次成功保存时的**内容身份**。 */
@@ -128,12 +155,33 @@ export interface Document {
   readonly savedSequence: number
 }
 
+/**
+ * 文档的**内容身份输入**。
+ *
+ * 为什么把"内容"抽成一个函数而不是散在 `withScene` 里：内容身份决定了
+ * `documentVersion` 是否推进、历史是否记账、脏状态、以及求值键的
+ * `documentVersion` 那一维。它必须**只有一个**定义点，否则
+ * "什么算内容变化"会出现第二套判据（#249 §15 第 5 条要退役的正是这类分叉）。
+ *
+ * 注意 `version` / `saveBaseline` / `history` / `savedSequence` **不在**其中：
+ * 它们不是内容（历史深度变化不该让文档变脏）。
+ */
+export function contentOf(scene: Scene, animation: AnimationState): unknown {
+  return { scene, animation }
+}
+
+/** 文档内容身份摘要（唯一算法：`digestOf`）。 */
+export function contentDigestOf(scene: Scene, animation: AnimationState): number {
+  return digestOf(contentOf(scene, animation))
+}
+
 export function createDocument(id: string, opts?: { sceneId?: string; maxHistory?: number; types?: ObjectTypeRegistry }): Document {
   const scene = emptyScene(opts?.sceneId ?? `${id}-scene`)
-  const contentVersion = digestOf(scene)
+  const contentVersion = contentDigestOf(scene, EMPTY_ANIMATION)
   return Object.freeze({
     id,
     scene,
+    animation: EMPTY_ANIMATION,
     version: version(0, contentVersion),
     saveBaseline: version(0, contentVersion),
     history: emptyHistory(opts?.maxHistory),
@@ -151,17 +199,38 @@ export function createDocument(id: string, opts?: { sceneId?: string; maxHistory
  *
  * 这是契约 §1.4「仅创建了新容器**不**等于内容变化」与
  * #249 §15 第 5 条「非内容版本不得冒充内容变化」的共同落点：
- * 判定按 `digestOf(scene)`，不按"是否新建了对象"。
+ * 判定按 `contentDigestOf(scene, animation)`，不按"是否新建了对象"。
+ *
+ * 动画状态保持不变（改动画请用 `withAnimation`；两者都经同一内容身份判据）。
  */
 export function withScene(doc: Document, scene: Scene): { doc: Document; changed: boolean; version: Version } {
-  const nextContent = digestOf(scene)
+  return withContent(doc, scene, doc.animation)
+}
+
+/**
+ * 用新场景 **+ 新动画**替换文档内容。
+ *
+ * 之所以让 `withScene` 与 `withAnimation` 都收敛到本函数：内容身份只有一个
+ * 计算点，于是"改场景"与"改动画"不会各自发明一套"是否算变化"的判据。
+ */
+export function withContent(
+  doc: Document,
+  scene: Scene,
+  animation: AnimationState,
+): { doc: Document; changed: boolean; version: Version } {
+  const nextContent = contentDigestOf(scene, animation)
   const curContent = doc.version.contentVersion ?? 0
   if (nextContent === curContent) {
     // 内容相同：保持**原版本对象身份**，不推进任何计数。
-    return { doc: Object.freeze({ ...doc, scene }), changed: false, version: doc.version }
+    return { doc: Object.freeze({ ...doc, scene, animation }), changed: false, version: doc.version }
   }
   const nextVersion = version(doc.version.documentVersion + 1, nextContent)
-  return { doc: Object.freeze({ ...doc, scene, version: nextVersion }), changed: true, version: nextVersion }
+  return { doc: Object.freeze({ ...doc, scene, animation, version: nextVersion }), changed: true, version: nextVersion }
+}
+
+/** 替换动画状态（内容身份判据与 `withScene` 同一处）。 */
+export function withAnimation(doc: Document, animation: AnimationState): { doc: Document; changed: boolean; version: Version } {
+  return withContent(doc, doc.scene, animation)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -177,6 +246,9 @@ export interface PushHistoryInput {
   readonly changes: ChangeSummary
   readonly selectionBefore?: readonly EntityRef[]
   readonly selectionAfter?: readonly EntityRef[]
+  /** P4：该条目改动的动画状态（缺省 = 未改动画）。 */
+  readonly beforeAnimation?: AnimationState
+  readonly afterAnimation?: AnimationState
 }
 
 /**
@@ -199,6 +271,8 @@ export function pushHistory(h: HistoryState, input: PushHistoryInput): HistorySt
     changes: input.changes,
     selectionBefore: Object.freeze([...(input.selectionBefore ?? [])]),
     selectionAfter: Object.freeze([...(input.selectionAfter ?? [])]),
+    ...(input.beforeAnimation === undefined ? {} : { beforeAnimation: input.beforeAnimation }),
+    ...(input.afterAnimation === undefined ? {} : { afterAnimation: input.afterAnimation }),
   })
   const past = [...h.past, entry]
   // 超深时丢弃最旧条目（**不**静默丢弃最新，否则"刚做的操作撤不回"）
@@ -248,6 +322,8 @@ export function undo(doc: Document): HistoryStepResult | null {
   const next: Document = Object.freeze({
     ...doc,
     scene: entry.beforeScene,
+    // 该条目改过动画则一并回退；没改则保持当前动画（不是"清空"，那会丢别的条目的效果）。
+    animation: entry.beforeAnimation ?? doc.animation,
     version: entry.beforeVersion,
     history: Object.freeze({
       past: Object.freeze(doc.history.past.slice(0, -1)),
@@ -266,6 +342,7 @@ export function redo(doc: Document): HistoryStepResult | null {
   const next: Document = Object.freeze({
     ...doc,
     scene: entry.afterScene,
+    animation: entry.afterAnimation ?? doc.animation,
     version: entry.afterVersion,
     history: Object.freeze({
       past: Object.freeze([...doc.history.past, entry]),

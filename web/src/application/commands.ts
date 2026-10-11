@@ -42,6 +42,7 @@ import {
   pushHistory,
   redo as redoDoc,
   undo as undoDoc,
+  withAnimation,
   withScene,
   type Document,
   type SaveLedger,
@@ -68,6 +69,26 @@ import {
   type TimeValue,
 } from '@/domain/editing'
 import {
+  checkValueAgainstDeclaredType,
+  findTrack,
+  insertKeyframe,
+  propertyKey,
+  removeKeyframe,
+  sameTime,
+  sampleTrack,
+  setTrackEnabled,
+  withTrack,
+  withoutTrack,
+  withPublishedDefault,
+  frameRateOf,
+  type AnimationKey,
+  type AnimationState,
+  type AnimationTrack,
+  type InterpolationKind,
+  type TrackValue,
+  type TrackValueType,
+} from '@/domain/animation'
+import {
   err,
   invalidValue,
   missingTarget,
@@ -93,7 +114,11 @@ import {
 import { findObject, findObjectData, sameTransform, type Scene, type Transform, type Vec3 } from '@/domain/scene'
 import type { ApplicationState, EffectRequest } from './state'
 import { applySetProperty, type SetPropertyCommand } from './property-commands'
-import { type PropertyValue } from './properties'
+import {
+  describeProperty as describeRnaProperty,
+  type PropertyDescriptor,
+  type PropertyValue,
+} from './properties'
 import { kernelAccessOf, kernelPropertyRegistry, kernelWritePorts } from './kernel-properties'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,6 +213,51 @@ export interface SetChannelValueCommand {
   readonly value: number
 }
 
+/**
+ * 插入/替换一个关键帧（#249 §7「要求使用关键帧命令或禁用轨道」里的**关键帧命令**）。
+ *
+ * 为什么是具名命令而不是"通用属性写 + 一个 flag"：契约 §5.2 明文
+ * 「插入关键帧等**保持具名命令**」。而且它与 `setProperty` 的**语义不同** ——
+ * `setProperty` 写基础值（被轨道驱动时会被拒），本命令写**轨道**（永远合法，
+ * 前提是目标属性可动画）。合成一个命令会让"我到底改了哪一层"在命令类型上消失。
+ */
+export interface InsertKeyframeCommand {
+  readonly kind: 'insertKeyframe'
+  readonly contextId: string
+  readonly target: PropertyRef
+  readonly time: TimeValue
+  readonly value: TrackValue
+  /** 缺省：已有轨道则沿用其策略，无轨道则按值类型推断（见 `defaultInterpolationFor`）。 */
+  readonly interpolation?: InterpolationKind
+  readonly valueType?: TrackValueType
+  /** 枚举/布尔的合法取值（由 RNA 描述提供）。 */
+  readonly legalValues?: readonly TrackValue[]
+  readonly quantization?: AnimationTrack['quantization']
+}
+
+export interface RemoveKeyframeCommand {
+  readonly kind: 'removeKeyframe'
+  readonly contextId: string
+  readonly target: PropertyRef
+  readonly time: TimeValue
+}
+
+/** 启用/禁用轨道（#249 §3.3「禁用轨道后回到手动/默认值」）。 */
+export interface SetTrackEnabledCommand {
+  readonly kind: 'setTrackEnabled'
+  readonly contextId: string
+  readonly target: PropertyRef
+  readonly enabled: boolean
+}
+
+/** 发布默认值（有效值优先级的**第一层**；#249 §3.3「可发布默认值…属文档」）。 */
+export interface PublishDefaultCommand {
+  readonly kind: 'publishDefault'
+  readonly contextId: string
+  readonly target: PropertyRef
+  readonly value: TrackValue
+}
+
 export interface UndoCommand {
   readonly kind: 'undo'
   readonly contextId: string
@@ -235,6 +305,10 @@ export type Command =
   | SelectCommand
   | SetTimeCommand
   | SetChannelValueCommand
+  | InsertKeyframeCommand
+  | RemoveKeyframeCommand
+  | SetTrackEnabledCommand
+  | PublishDefaultCommand
   | UndoCommand
   | RedoCommand
   | SaveCommand
@@ -263,6 +337,10 @@ export type ImmediateCommand = Extract<
   | { kind: 'redo' }
   | { kind: 'addObject' }
   | { kind: 'deleteObject' }
+  | { kind: 'insertKeyframe' }
+  | { kind: 'removeKeyframe' }
+  | { kind: 'setTrackEnabled' }
+  | { kind: 'publishDefault' }
 >
 
 /** 命令是否需要进入队列（有副作用或需要效果）。 */
@@ -393,6 +471,14 @@ export function reduceCommand(state: ApplicationState, command: Command, env: Ex
       return reduceSetTime(state, command)
     case 'setChannelValue':
       return reduceSetChannelValue(state, command)
+    case 'insertKeyframe':
+      return reduceInsertKeyframe(state, command)
+    case 'removeKeyframe':
+      return reduceRemoveKeyframe(state, command)
+    case 'setTrackEnabled':
+      return reduceSetTrackEnabled(state, command)
+    case 'publishDefault':
+      return reducePublishDefault(state, command)
     case 'addObject':
       return reduceAddObject(state, command)
     case 'deleteObject':
@@ -430,6 +516,10 @@ function capabilityFor(command: Command): readonly string[] {
     case 'setTransform':
     case 'setProperty':
     case 'commitInteraction':
+    case 'insertKeyframe':
+    case 'removeKeyframe':
+    case 'setTrackEnabled':
+    case 'publishDefault':
       return ['content.edit']
     case 'beginInteraction':
     case 'updateInteraction':
@@ -506,8 +596,14 @@ function reduceSetTime(state: ApplicationState, cmd: SetTimeCommand): Transition
   const found = contextAndDoc(state, cmd.contextId)
   if (!found.ok) return rejected(state, found.error)
   const { ctx, doc } = found.value
-  if (!(cmd.time.fps > 0)) return rejected(state, invalidValue({ reason: 'fpsMustBePositive', fps: cmd.time.fps }))
-  if (ctx.time.frame === cmd.time.frame && ctx.time.fps === cmd.time.fps) return unchanged(state, doc.version)
+  // 帧率合法性判据在 `domain/animation`（纯、含有理帧率的规范化），
+  // **不**在本层重写一遍。拒绝的 `reason` 与 P1 保持同一个（`fpsMustBePositive`），
+  // 使既有断言与消费者无需改动。
+  const rate = frameRateOf(cmd.time.fps)
+  if (!rate.ok) return rejected(state, rate.error)
+  // 比较用 `sameTime`（精确、含有理数约分），不用 `frame`/`fps` 逐字段比对 ——
+  // 后者会让 `20` 与 `{num:40,den:2}` 被判为不同时间，从而白推一次求值。
+  if (sameTime(ctx.time, cmd.time)) return unchanged(state, doc.version)
   // 时间属 EditContext：改它**不推进 documentVersion**（#249 §7「动画播放不增加文档版本」）
   return applied(withContext(state, withTime(ctx, cmd.time)), doc.version, changeSummary({ structurallyShared: true }))
 }
@@ -1098,6 +1194,265 @@ function sameSelection(a: SelectionState, b: SelectionState): boolean {
  * 构造处（`kernelAccessOf`）提供，不再由命令层各算一份 —— 两份轨道索引必然漂移，
  * 而漂移会让"动画驱动的属性被拒绝"在两条路径上给出不同答案（A10 负对照）。
  */
+/** 默认插值策略（无显式声明时按值类型推断；#249 §7 的"采样策略由属性值类型和定义选择"）。 */
+function defaultInterpolationFor(valueType: TrackValueType): InterpolationKind {
+  switch (valueType) {
+    case 'quat':
+      return 'slerp'
+    case 'integer':
+      return 'quantized'
+    case 'enum':
+    case 'boolean':
+    case 'string':
+      return 'step'
+    case 'vec3':
+    case 'number':
+      return 'linear'
+  }
+}
+
+/** 由值推断类型（调用方未声明时的兜底；显式声明优先）。 */
+function inferValueType(value: TrackValue): TrackValueType {
+  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number'
+  if (typeof value === 'boolean') return 'boolean'
+  if (typeof value === 'string') return 'enum'
+  if (typeof value === 'object' && value !== null && 'w' in value) return 'quat'
+  return 'vec3'
+}
+
+/**
+ * 插入关键帧。
+ *
+ * 两条语义要点：
+ *  1. **写轨道，不写基础值**：这是"关键帧命令"与"普通基础值写入"的分界。
+ *     被驱动属性的基础值写入仍被 `validatePropertyWrite` 拒绝（A10 的负对照面），
+ *     而本命令永远合法（只要目标可动画）。
+ *  2. **值必须过类型与合法域校验**（`sampleTrack` 的同一套判据）：
+ *     插入一个非法枚举值会让之后每次采样都失败 —— 与其把坏数据存进文档，
+ *     不如在插入点拒绝，并给出同一个 `InvalidValue` 诊断。
+ */
+function reduceInsertKeyframe(state: ApplicationState, cmd: InsertKeyframeCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+  const guard = validateAnimationTarget(doc, cmd.target)
+  if (guard) return rejected(state, guard)
+  const lease = acquireFor(state, doc.id, cmd.contextId)
+  if (!lease.ok) return rejected(state, lease.error)
+
+  const existing = findTrack(doc.animation, cmd.target)
+  // 类型优先取**属性声明**（RNA 描述），其次已有轨道，最后才由值推断。
+  // 顺序不能颠倒：只从值推断会让"往 vec3 属性插一个数字"变成合法操作。
+  //
+  // GF-5 收敛后类型**不再**由本层的第二张表给出（P4 曾有 `declaredValueType(property)`），
+  // 而是向 RNA 注册表解析 —— `validateAnimationTarget` 已保证描述可解析，故此处直接取用。
+  const described = describeRnaProperty(kernelPropertyRegistry().registry, cmd.target)
+  if (!described.ok) return rejected(state, described.error)
+  const declaredType = trackValueTypeOf(described.value.valueType)
+  const valueType = cmd.valueType ?? declaredType ?? existing?.valueType ?? inferValueType(cmd.value)
+  const interpolation = cmd.interpolation ?? existing?.interpolation ?? defaultInterpolationFor(valueType)
+  // 枚举/布尔的合法取值同样取自**声明域**（RNA `ValueDomain`），不另立一份。
+  const legalValues = cmd.legalValues ?? existing?.legalValues ?? legalValuesOf(described.value)
+  const quantization = cmd.quantization ?? existing?.quantization
+
+  // 值与属性声明类型不符 ⇒ 在写入点拒绝（不把坏数据存进文档）
+  if (declaredType !== undefined) {
+    const typeError = checkValueAgainstDeclaredType(declaredType, cmd.value)
+    if (typeError) return rejected(state, typeError)
+  }
+
+  const base: AnimationTrack =
+    existing ??
+    Object.freeze({
+      id: `track:${propertyKey(cmd.target)}`,
+      target: cmd.target,
+      valueType,
+      interpolation,
+      enabled: true,
+      keys: Object.freeze([]) as readonly AnimationKey[],
+      ...(legalValues === undefined ? {} : { legalValues }),
+      ...(quantization === undefined ? {} : { quantization }),
+    })
+
+  const candidate = insertKeyframe(
+    Object.freeze({ ...base, valueType, interpolation, ...(legalValues === undefined ? {} : { legalValues }), ...(quantization === undefined ? {} : { quantization }) }),
+    Object.freeze({ time: cmd.time, value: cmd.value }),
+  )
+
+  // 校验：用**采样器本身**判定"这份轨道在该时间能否产出合法值"。
+  // 这样"插入时接受的"与"采样时产出的"是同一套判据，不会出现
+  // "插入成功但每次采样都失败"的文档。
+  const check = sampleTrack(candidate, cmd.time)
+  if (!check.ok) return rejected(state, check.error)
+
+  return applyAnimationChange(state, doc, ctx, withTrack(doc.animation, candidate), `keyframe ${cmd.target.property}`)
+}
+
+function reduceRemoveKeyframe(state: ApplicationState, cmd: RemoveKeyframeCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+  const track = findTrack(doc.animation, cmd.target)
+  if (!track) return rejected(state, missingTarget({ property: cmd.target.property, objectId: cmd.target.owner.id }))
+  const next = removeKeyframe(track, cmd.time)
+  if (next === track) return unchanged(state, doc.version)
+  const lease = acquireFor(state, doc.id, cmd.contextId)
+  if (!lease.ok) return rejected(state, lease.error)
+  return applyAnimationChange(
+    state,
+    doc,
+    ctx,
+    next.keys.length === 0 ? withoutTrack(doc.animation, cmd.target) : withTrack(doc.animation, next),
+    `remove keyframe ${cmd.target.property}`,
+  )
+}
+
+function reduceSetTrackEnabled(state: ApplicationState, cmd: SetTrackEnabledCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+  const track = findTrack(doc.animation, cmd.target)
+  if (!track) return rejected(state, missingTarget({ property: cmd.target.property, objectId: cmd.target.owner.id }))
+  const next = setTrackEnabled(track, cmd.enabled)
+  if (next === track) return unchanged(state, doc.version)
+  const lease = acquireFor(state, doc.id, cmd.contextId)
+  if (!lease.ok) return rejected(state, lease.error)
+  // 禁用轨道 ⇒ 属性回到手动/默认值（#249 §3.3）。这不是"清空轨道数据"，
+  // 而是让 `animationDrivenKeys` 不再含它 ⇒ 基础值写入重新被允许。
+  return applyAnimationChange(state, doc, ctx, withTrack(doc.animation, next), `${cmd.enabled ? 'enable' : 'disable'} track ${cmd.target.property}`)
+}
+
+function reducePublishDefault(state: ApplicationState, cmd: PublishDefaultCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+  const guard = validateAnimationTarget(doc, cmd.target)
+  if (guard) return rejected(state, guard)
+  const lease = acquireFor(state, doc.id, cmd.contextId)
+  if (!lease.ok) return rejected(state, lease.error)
+  const next = withPublishedDefault(doc.animation, propertyKey(cmd.target), cmd.value)
+  return applyAnimationChange(state, doc, ctx, next, `publish default ${cmd.target.property}`)
+}
+
+/**
+ * RNA 值类型 → 轨道值类型。
+ *
+ * 两侧的**取值空间不同**，映射是有损的、也是必须显式的一处：
+ *  - RNA 的 `PropertyValueType` 是**开放字符串**（`PropertyValueType = string`）
+ *    —— 扩展类型可以注册进来，故不能写成封闭联合；
+ *  - 轨道的 `TrackValueType` 是**可动画子集**（离散/连续插值各自有明确语义）。
+ *
+ * 未映射的类型返回 `undefined` ⇒ 调用方回落到"已有轨道类型"或"由值推断"。
+ * **不**在这里猜一个类型：猜错会让"不可动画的值类型"被插进轨道。
+ */
+function trackValueTypeOf(valueType: string): TrackValueType | undefined {
+  switch (valueType) {
+    case 'number':
+    case 'integer':
+    case 'vec3':
+    case 'quat':
+    case 'string':
+    case 'boolean':
+      return valueType
+    default:
+      return undefined
+  }
+}
+
+/**
+ * 由 RNA **声明域**推出轨道的合法取值集合（枚举/布尔）。
+ *
+ * 为什么取自声明域而不是由调用方传：`legalValues` 是"这条轨道允许哪些值"，
+ * 而"该属性允许哪些值"是**属性声明的同一事实**。两处各写一份 ⇒ 枚举项
+ * 增删后轨道校验静默失效（插入了声明域外的值，直到采样时才暴露）。
+ *
+ * 返回 `undefined` = 该类型不做成员校验（数值类由域的范围约束在值 handler 里管）。
+ */
+function legalValuesOf(desc: PropertyDescriptor): readonly TrackValue[] | undefined {
+  const domain = desc.domain
+  if (!domain) return undefined
+  if (domain.kind === 'enum') return domain.items.map((i) => i.value)
+  return undefined
+}
+
+/** 动画目标的公共校验：目标存在、可写、类型允许动画。 */function validateAnimationTarget(doc: Document, ref: PropertyRef): DomainError | null {
+  if (ref.owner.kind !== 'object') {
+    return unsupportedOperation({ ownerKind: ref.owner.kind, property: ref.property })
+  }
+  const obj = findObject(doc.scene, ref.owner.id)
+  if (!obj) return missingTarget({ objectId: ref.owner.id, property: ref.property })
+  const data = findObjectData(doc.scene, obj.dataId)
+  if (!data) return missingTarget({ dataId: obj.dataId, property: ref.property })
+  // 写权按拥有者判定（#249 §3.3）：多方块生成物的**内容**只读。
+  if (data.source === 'content') return readOnly({ owner: data.source, objectId: ref.owner.id, property: ref.property })
+  // 动画资格（契约 §5.1 `PropertyDescriptor.animatable`）：不可动画的属性不能建轨道，
+  // 否则 UI 会提供一个"关键帧按钮点了没反应"的假成功控件（#249 §13 明文禁止）。
+  //
+  // ## 权威是 **RNA 注册表**（P2 GF-5 收敛后），不是本层的第二张表
+  //
+  // P1-P4 开发期这里读的是 `doc.types[obj.type].animatableProperties`（文档模型自带的
+  // 类型描述）。GF-5 收敛把属性语义的**唯一权威**移到 RNA 注册表（`application/properties`），
+  // 内核类型经 `kernel-properties.ts` 注册 —— `doc.types` 已不再是属性词汇的持有者。
+  // 若此处仍读旧字段，就会出现"注册表说不可动画、命令层说可以"的两套判据
+  // （正是 #250 GF-5 要消除的形态）。故改为向注册表解析描述。
+  //
+  // `describeProperty` 对未注册属性返回 `UnsupportedOperation`，其错误**原样透出** ——
+  // 不折叠成本层的 `propertyNotAnimatable`，否则"未注册"与"已注册但不可动画"
+  // 在诊断上会变成同一件事（而两者的处置不同：前者是缺登记，后者是设计如此）。
+  const described = describeRnaProperty(kernelPropertyRegistry().registry, ref)
+  if (!described.ok) return described.error
+  if (!described.value.animatable) {
+    return unsupportedOperation({ reason: 'propertyNotAnimatable', property: ref.property, objectType: obj.type })
+  }
+  return null
+}
+
+/**
+ * 应用一次动画状态变更：推进内容版本 + 记历史。
+ *
+ * 与 `reduceSetProperty` 的分工：那条命令走属性写校验（会被轨道驱动拒绝），
+ * 本函数走**动画面**（轨道本身的变更）—— 两者都经 `withContent`/`pushHistory`，
+ * 因此"内容身份是否真的变了"只有一个判据点（`domain/document`）。
+ */
+function applyAnimationChange(
+  state: ApplicationState,
+  doc: Document,
+  ctx: EditContext,
+  animation: AnimationState,
+  label: string,
+): Transition {
+  const write = withAnimation(doc, animation)
+  if (!write.changed) {
+    // 内容身份未变（例如插入同时间同值的关键帧）⇒ unchanged，
+    // **不**因"新建了容器"而记账（契约 §1.4）。
+    return unchanged(write.doc === doc ? state : withDoc(state, write.doc), doc.version)
+  }
+  const changes = changeSummary({ changedProperties: [], structurallyShared: true })
+  const withHistory = recordHistory(write.doc, {
+    label,
+    beforeScene: doc.scene,
+    beforeVersion: doc.version,
+    afterScene: doc.scene,
+    afterVersion: write.version,
+    changes,
+    selectionBefore: ctx.selection.selected,
+    selectionAfter: ctx.selection.selected,
+    beforeAnimation: doc.animation,
+    afterAnimation: animation,
+  })
+  const next = withDocState(state, withHistory, doc.id)
+  return applied(next, write.version, changes)
+}
+
+/** 把新文档写回状态（动画面用；不碰上下文与租约）。 */
+function withDocState(state: ApplicationState, doc: Document, documentId: string): ApplicationState {
+  return Object.freeze({ ...state, docs: Object.freeze({ ...state.docs, [documentId]: doc }) })
+}
+
+/** 只替换文档值（不推进版本）。 */
+function withDoc(state: ApplicationState, doc: Document): ApplicationState {
+  return withDocState(state, doc, doc.id)
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 便捷构造（供接线层与测试；不构成第二写通路 —— 它也是走 reduceCommand）

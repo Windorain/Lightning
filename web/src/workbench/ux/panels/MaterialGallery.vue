@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import type { MaterialQueryItem } from '@/runtime/types'
 import { useContext } from '@/runtime/context'
 import OperatorBtn from '@/workbench/ux/OperatorBtn.vue'
 import { parsePngDims } from '@/util/pngDims'
-import { useMaterialAnimation } from './useMaterialAnimation'
+import { parseTextureSequence, sampleTextureSequence, type TextureSequence } from '@/domain/materials'
 import { listMaterials, getMaterialUsageCounts } from '@/context/queries'
 
 const ctx = useContext()
@@ -113,11 +113,153 @@ function selectCard(id: string) {
 
 watch(() => ctx.getDoc().value, () => refresh(), { immediate: true })
 
-const { setCanvasRef } = useMaterialAnimation((id: string) => {
-  const card = cards.value.find(c => c.materialId === id)
-  if (!card) return undefined
-  return { dataUrl: card.dataUrl, kind: card.kind, animation: card.animation }
+// ---- Animated thumbnails：统一时间 + 纯采样（#249 §19.3；退役 #11） ----
+//
+// 本组件此前用 `useMaterialAnimation` —— 它自持 `requestAnimationFrame` 且
+// `elapsed += delta` 累积帧时间（B5 退役矩阵 #11「材质各自 tick 累积纹理时间」）。
+// 现改为：**时间来自场景**（`ctx.getCurrentFrameIndex()` 与帧 `durationMs`），
+// **样本来自纯采样器** `sampleTextureSequence`。两处消费者（网格缩略图与详情
+// 缩略图）在同一次时间推进里用**同一个**时间值，故同时间同结果（A27）。
+//
+// 时钟是**外围**的：本组件不持有任何调度器，重画由两个**事件**驱动
+// （文档变化、帧下标变化）。这与旧实现的差别不是"换了个循环"，而是
+// **没有任何东西累积，也没有任何东西自驱**。
+
+/** 缓存的序列（按 dataUrl + 声明解析一次；解析失败 ⇒ 不播动画）。 */
+const sequences = new Map<string, TextureSequence | null>()
+const animationCanvases = new Map<string, HTMLCanvasElement>()
+const animationImages = new Map<string, HTMLImageElement>()
+
+/** 一帧的默认时长（毫秒）。旧渲染路径用 `DEFAULT_WORLD_FRAME_DWELL_MS = 50`（= 1 tick）。 */
+const DEFAULT_FRAME_MS = 50
+
+/** 场景时间（秒）：帧下标 × 该帧时长。**不含任何累积量**。 */
+function sceneSeconds(): number {
+  const doc = ctx.getDoc().value
+  if (!doc || doc.frameCount === 0) return 0
+  const index = Math.min(Math.max(ctx.getCurrentFrameIndex().value, 0), doc.frameCount - 1)
+  let ms = 0
+  for (let i = 0; i < index; i++) {
+    const d = doc.frame(i)?.durationMs
+    ms += typeof d === 'number' && Number.isFinite(d) && d > 0 ? d : DEFAULT_FRAME_MS
+  }
+  return ms / 1000
+}
+
+/**
+ * 材质声明 → 纹理序列（纯；解析期拒绝即返回 `null`）。
+ *
+ * `defaultFrametimeTicks` 是 Java `.mcmeta` 的 tick 单位 ⇒ ×50ms 换成统一时间单位
+ * （#249 §19.3「原格式时长由**适配器**换成统一时间单位」——本函数就是那个换算点，
+ * 它只做单位换算，不含播放逻辑）。
+ */
+function sequenceFor(card: MaterialCard): TextureSequence | null {
+  if (!card.dataUrl || card.kind !== 'animated') return null
+  const cached = sequences.get(card.dataUrl)
+  if (cached !== undefined) return cached
+
+  if (!card.textureWidth || !card.textureHeight) {
+    sequences.set(card.dataUrl, null)
+    return null
+  }
+  const frameCount = Math.floor(card.textureHeight / card.textureWidth)
+  if (frameCount <= 1) {
+    sequences.set(card.dataUrl, null)
+    return null
+  }
+  const frameMs = Math.max((card.animation?.defaultFrametimeTicks ?? 1) * 50, 1)
+  const parsed = parseTextureSequence({
+    id: card.materialId,
+    resource: { assetId: card.materialId, contentVersion: card.dataUrl.length.toString(36), url: card.dataUrl },
+    frames: Array.from({ length: frameCount }, (_, i) => ({ index: i })),
+    defaultDurationSeconds: frameMs / 1000,
+    loop: 'loop',
+    // 无帧混合声明：#249 §19.3 明文「资源原本不允许混合就阶跃切换」⇒ mix 恒 0。
+    frameBlendAllowed: false,
+  })
+  const value = parsed.ok ? parsed.value : null
+  sequences.set(card.dataUrl, value)
+  return value
+}
+
+/** 把一个样本画到 canvas 上（呈现消费采样结果；采样本身是纯的）。 */
+function paint(canvas: HTMLCanvasElement, img: HTMLImageElement, card: MaterialCard, sample: { frame: number }): void {
+  const frameSize = card.textureWidth ?? img.width
+  if (canvas.width !== frameSize) canvas.width = frameSize
+  if (canvas.height !== frameSize) canvas.height = frameSize
+  const g = canvas.getContext('2d')
+  if (!g) return
+  g.imageSmoothingEnabled = false
+  g.clearRect(0, 0, frameSize, frameSize)
+  g.drawImage(img, 0, sample.frame * frameSize, frameSize, frameSize, 0, 0, frameSize, frameSize)
+}
+
+/**
+ * 所有在册缩略图按同一场景时间重画一次（跳帧/倒退/暂停都由它体现）。
+ *
+ * ## 为什么这里是**事件驱动**而不是 rAF 循环（合流后修正）
+ *
+ * P4 初版让一个 `requestAnimationFrame` 循环每帧调用本函数。那是**多余且有害**的：
+ *
+ *  - `sceneSeconds()`（见下）是**帧下标的纯函数** —— 没有累积量、没有独立时钟。
+ *    帧下标不变时它每次都返回同一个数，于是那个循环每帧重画**完全相同的像素**；
+ *  - 而两个输入都已各自被 `watch` 覆盖（文档变化 → `refresh()`；帧下标变化 →
+ *    本函数）。⇒ 循环没有提供任何新的重画时机。
+ *
+ * 合流到 P5 后被 `presentation-purity.test.ts` 的「遗留 RAF 双向登记」闸门抓到
+ * （它普查 `src/` 全部真实 RAF 调用点，未登记即判红）。**正确的处置不是把它
+ * 登记成 `paint-wakeup`，而是删除它** —— 登记是给"暂时无法消除的接缝"用的，
+ * 而这一处可以直接消除。这也更贴合 #249 §19.3「禁止材质/视口自行累计 tick」
+ * 与 §15 第 6 条「业务推进可枚举」的意图：**能不留自驱调度就不留**。
+ */
+function paintAll(): void {
+  const seconds = sceneSeconds()
+  for (const [key, canvas] of animationCanvases) {
+    const img = animationImages.get(key)
+    const card = cards.value.find(c => c.materialId === key || `${c.materialId}-detail` === key)
+    if (!img || !card) continue
+    const seq = sequenceFor(card)
+    if (!seq) continue
+    const sample = sampleTextureSequence(seq, seconds)
+    if (sample.ok) paint(canvas, img, card, sample.value)
+  }
+}
+
+/** Vue `:ref` 绑定入口（与旧 `useMaterialAnimation().setCanvasRef` 同一调用形态）。 */
+function setCanvasRef(el: unknown, materialId: string): void {
+  const canvas = el as HTMLCanvasElement | null
+  if (!canvas) {
+    animationCanvases.delete(materialId)
+    animationImages.delete(materialId)
+    return
+  }
+  const lookupId = materialId.endsWith('-detail') ? materialId.slice(0, -7) : materialId
+  const card = cards.value.find(c => c.materialId === lookupId)
+  if (!card?.dataUrl || card.kind !== 'animated') return
+  animationCanvases.set(materialId, canvas)
+  const img = new Image()
+  img.onload = () => {
+    animationImages.set(materialId, img)
+    // 图片到达后立即画首帧（此时才拿得到像素）。
+    // 之后的每次重画都由**事件**驱动：文档变化（`refresh`）与帧下标变化（下面的 watch）
+    // —— 没有自驱循环（原因见 `paintAll` 的说明）。
+    const seq = sequenceFor(card)
+    if (seq) {
+      const sample = sampleTextureSequence(seq, sceneSeconds())
+      if (sample.ok) paint(canvas, img, card, sample.value)
+    }
+  }
+  img.src = card.dataUrl
+}
+
+onUnmounted(() => {
+  animationCanvases.clear()
+  animationImages.clear()
 })
+
+// 场景时间变化（跳帧）⇒ 立即重画一次。**这是本组件唯一的播放驱动**：
+// 时间只由帧下标决定，故不需要（也不应有）rAF 循环。
+watch(() => ctx.getCurrentFrameIndex().value, () => paintAll())
 
 // ---- Keyboard navigation ----
 const gridEl = ref<HTMLElement | null>(null)

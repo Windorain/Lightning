@@ -56,6 +56,7 @@ import { findObject, findObjectData } from '@/domain/scene'
 import { meshFromPayload } from '@/domain/geometry'
 import { commitGeometryEdit } from '@/domain/geometryEditing'
 import { withScene, type Document } from '@/domain/document'
+import { animationDrivenKeys, propertyKey } from '@/domain/animation'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. 内核对象类型（`Scene` 模型）
@@ -365,7 +366,7 @@ export function kernelFactsOf(doc: Document, ref: PropertyRef, holdsLease: boole
   return {
     exists: true,
     generated: data?.source === 'content',
-    drivenByTrack: kernelDrivenProperties(doc).has(`${ref.owner.id}\u0000${ref.property}`),
+    drivenByTrack: kernelDrivenProperties(doc).has(propertyKey(ref)),
     locked: false,
     holdsLease,
     ...(data ? { contentVersion: data.contentVersion, topologyVersion: data.topologyVersion } : {}),
@@ -373,20 +374,32 @@ export function kernelFactsOf(doc: Document, ref: PropertyRef, holdsLease: boole
 }
 
 /**
- * 已启用轨道驱动的属性集合（键 = `ownerId\0property`）。
+ * 已启用轨道驱动的属性集合。
  *
- * P1 只提供**判定入口**；轨道数据由 P4（#255）填充到 `Document`。
- * 对空轨道返回空集，故"未实现"不会伪装成"该拒绝"。
+ * ## P4（#255）落地：从 P1 占位换成真实数据模型
  *
- * 键里的 `property` 是**限定式** ID —— 与 `PropertyRef.property` 同一口径，
- * 避免"轨道记 `transform.position`、引用用 `block.transform.position`"这类静默不匹配。
+ * P1 的实现是一个**类型断言占位**（读 `doc.tracks` —— 该字段从未存在，故恒返回空集）：
+ *
+ * ```ts
+ * const tracks = (doc as unknown as { tracks?: readonly { ownerId, property }[] }).tracks
+ * ```
+ *
+ * 它当时的理由是"P1 不含动画数据模型（#252：动画求值由 P4 收口）"，同时让 A10 的
+ * 拒绝路径在 P1 就有落点而**不引入一条真实的旧实现**。P4 现在把轨道数据落到
+ * `doc.animation`（`domain/animation`），故此处改为直接读取 —— 断言消失。
+ *
+ * ## 键算法必须与轨道侧**同一函数**（本文件与命令层的分工交接点）
+ *
+ * P1 占位用 `${ownerId}\0${property}`，而 `domain/animation` 的轨道键用
+ * `propertyKey(ref)`（**含 `owner.kind`、分量与子元素**）。两者不是同一个字符串：
+ * `owner.kind` 与分量的缺失会让"按分量驱动的轨道"与"整向量驱动的轨道"在判定上
+ * 互相漏配（前者漏拒、后者误拒）—— 那正是 A10 负对照要抓的静默失效。
+ *
+ * ⇒ 两侧共用 `propertyKey`。**不要在任一侧另写一份拼接**：格式漂移不会报错，
+ * 只会让"被动画驱动的属性"在某些目标上悄悄不再被拒绝。
  */
 export function kernelDrivenProperties(doc: Document): ReadonlySet<string> {
-  const tracks = (doc as unknown as { tracks?: readonly { ownerId: string; property: string }[] }).tracks
-  const out = new Set<string>()
-  if (!tracks) return out
-  for (const t of tracks) out.add(`${t.ownerId}\u0000${t.property}`)
-  return out
+  return animationDrivenKeys(doc.animation)
 }
 
 /**
