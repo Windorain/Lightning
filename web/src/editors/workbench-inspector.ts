@@ -656,7 +656,7 @@ export function controlKindOf(registry: PropertyRegistry, ctx: InspectorContextI
 // 6. Inspector 装配（面板调用一次的纯函数）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Inspector 的显式输入（读面/可编辑性/草稿由接线层提供）。 */
+/** Inspector 的显式输入（读面/可编辑性由接线层提供）。 */
 export type InspectorContextInputs = Readonly<{
   registry: PropertyRegistry
   layouts: InspectorLayoutRegistry
@@ -664,7 +664,13 @@ export type InspectorContextInputs = Readonly<{
   access: PropertyAccess
   /** 读多选混合值。 */
   readField: (refs: readonly PropertyRef[]) => import('@/application/property-commands').MultiReadResult
-  drafts?: Readonly<Record<string, string | null>>
+  /**
+   * 上一次拒绝原因。
+   *
+   * `drafts`（草稿呈现镜像）已随 P10c（#286）删除：草稿判定与时序唯一在输入层，
+   * 呈现读 `InputPort.textProjection`。详见 `editors/inspector.ts` 的
+   * `InspectorInputs.rejections` 说明与 `composition/seams.ts` 的核销记录。
+   */
   rejections?: Readonly<Record<string, import('@/application/contracts').DomainError>>
   controls?: ControlRegistry
 }>
@@ -692,7 +698,6 @@ export function buildWorkbenchInspector(inputs: InspectorContextInputs): Inspect
       return multiToFieldState(multi)
     },
     editField: (ref) => editStateOf(registry, ref, access),
-    ...(inputs.drafts ? { drafts: inputs.drafts } : {}),
     ...(inputs.rejections ? { rejections: inputs.rejections } : {}),
     ...(inputs.controls ? { controls: inputs.controls } : {}),
   })

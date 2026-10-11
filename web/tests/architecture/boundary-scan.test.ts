@@ -346,7 +346,7 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     expect(seams.SEAMS.length, '本批至少登记一条（属性写双轨）').toBeGreaterThan(0)
   })
 
-  it('每条接缝字段完整，且 `owner` 是**已登记的真实批次**（P1–P11 或 P10b）', async () => {
+  it('每条接缝字段完整，且 `owner` 是**已登记的真实批次**（P1–P11 或 P10b/P10d）', async () => {
     const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
     /**
      * **P10b（#282）**：R-WK-04（#250，2026-10-11）新设的批次。
@@ -366,6 +366,15 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
      */
     const EXTRA_BATCHES: Readonly<Record<string, { readonly issue: number; readonly duty: string }>> = Object.freeze({
       P10b: Object.freeze({ issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
+      /**
+       * **P10d（#289）**：R-WK-06（#250，2026-10-12）新设的续接批次。
+       *
+       * 与 P10b 同一处境：`P<N> → #(251+N)` 那条算术映射容不下它 —— P10c（#286）
+       * 实测"内核内容面不承载几何/注解/部件"后，Lead 把内容面补全与渲染链终切
+       * 拆成独立执行单。写成 `P10` 会让断言通过而登记表说谎（P10c 已明确**不**做
+       * 这件事，见 R-WK-06），故与 P10b 同法显式登记，并接受**同一套**一致性检查。
+       */
+      P10d: Object.freeze({ issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     })
     for (const s of SEAMS) {
       expect(s.id, 'id 必须是非空 kebab-case 稳定标识').toMatch(/^[a-z0-9-]+$/)
@@ -432,6 +441,81 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     // 且新轨**真的**被 `reduceSetProperty` 用上（不是"有个文件摆着"）。
     const commands = readSource(path.join(SRC_ROOT, 'application', 'commands.ts'))
     expect(commands, '新轨必须真实接入命令层').toContain('kernelPropertyRegistry()')
+  })
+
+  /**
+   * ## G-6（#286 P10c 扫尾）：`fidelity-record-transport-unwired` 的**反空洞真**
+   *
+   * 这条接缝是本批**新登记**的（P9 的 G-6 缺口此前只活在临时目录里的报告散文中）。
+   * 一条新登记的接缝若"旧轨"在代码里查不到，那它就是空转 —— 登记表会显得
+   * 管着一件事，而实际没有。故逐条核对它声明的三段缺口**当下确实成立**：
+   * 记录机制存在、生产者缺失、产物侧挂点零调用方。
+   *
+   * 这三条同时是**退出条件的判据面**：任何一个翻转（有人接上生产者/挂点），
+   * 就说明该接缝可以核销，本组断言会判红并要求同批更新登记 —— 这正是
+   * "登记表 = 现状清单"该有的性质。
+   */
+  it('**反空洞真（G-6）**：`fidelity-record-transport-unwired` 的三段缺口当下确实成立', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    const entry = SEAMS.find((s: { id: string }) => s.id === 'fidelity-record-transport-unwired')
+    expect(entry, 'G-6 的传输缺口必须登记（否则它只活在报告散文里，P11 无法机械核对）').toBeTruthy()
+    expect(entry.owner.p, 'G-6 归 P10d（R-WK-06：内容面/投影面）').toBe('P10d')
+
+    // 新轨（记录机制）**确实存在**：不是"登记了一个没实现的机制"。
+    const fidelity = readSource(path.join(SRC_ROOT, 'adapters', 'files', 'fidelityRecord.ts'))
+    for (const needle of ['captureFidelity', 'serializeFidelity', 'fidelityStorageKey', 'judgeFidelityAfterEdit']) {
+      expect(fidelity, `新轨必须真的提供 ${needle}`).toContain(needle)
+    }
+
+    // (a) 生产者缺失：唯一消费者只**数数**，不构造记录。
+    const lifecycle = readSource(path.join(SRC_ROOT, 'operators', 'builtin', 'docLifecycleOperators.ts'))
+    expect(lifecycle, '装配产物的 unknownFields 必须仍只被计数（生产者尚未接线）').toContain(
+      'Object.keys(value.unknownFields).length',
+    )
+    expect(lifecycle, '(a) 若 Producers 已接线，本条接缝应核销 —— 现在不得出现 captureFidelity').not.toContain(
+      'captureFidelity',
+    )
+
+    // (c) 产物侧挂点零生产调用方：只被定义处与**登记表自己的散文**引用。
+    const projection = readSource(path.join(SRC_ROOT, 'composition', 'kernelProjection.ts'))
+    expect(projection, '产物侧既定挂点必须存在（否则"缺口"的说法不成立）').toContain('fidelityFields')
+    // 自己走一遍 `src/`（不用测试内的局部 `productionFiles`，那在另一条用例里）：
+    // 只看**生产**文件（排除 `__tests__`），且排除定义处本身。
+    const srcFiles: string[] = []
+    const walk = (dir: string): void => {
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, ent.name)
+        if (ent.isDirectory()) {
+          if (ent.name === '__tests__' || ent.name === 'node_modules') continue
+          walk(full)
+        } else if (/\.(ts|vue)$/.test(ent.name)) {
+          srcFiles.push(full)
+        }
+      }
+    }
+    walk(SRC_ROOT)
+    /**
+     * 剥注释**与字符串**（本仓 `seams.test.ts` 的 `codeOf` 同一把尺子）。
+     *
+     * 为什么必须这么做：接缝登记表**就是**用字符串描述旧轨的，其中必然出现
+     * `projectKernelDocument` 这个名字。"提到某函数名"不等于"调用它" ——
+     * 若用原文匹配，本条断言会因**自己的登记说明**而恒红（P6 实测过的假红同族）。
+     */
+    const codeOnly = (text: string): string =>
+      text
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\/\/[^\n]*/g, ' ')
+        .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+        .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+        .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+    const projectionImporters = srcFiles
+      .filter((abs) => !abs.endsWith(path.join('composition', 'kernelProjection.ts')))
+      .filter((abs) => codeOnly(readSource(abs)).includes('projectKernelDocument'))
+      .map((abs) => path.relative(SRC_ROOT, abs).replace(/\\/g, '/'))
+    expect(
+      projectionImporters,
+      `(c) 若 projectKernelDocument 已有生产调用方，本条接缝应核销并同批更新登记：${projectionImporters.join(', ')}`,
+    ).toEqual([])
   })
 
   it('**负对照**：未登记的接缝判据能抓到"旧轨仍在但没有登记"', async () => {

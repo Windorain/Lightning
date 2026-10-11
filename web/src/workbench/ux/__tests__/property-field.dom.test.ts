@@ -18,11 +18,14 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createApp, type App } from 'vue'
+import { createApp, nextTick, type App } from 'vue'
 import PropertyField from '@/workbench/ux/PropertyField.vue'
 import { createPropertyRegistry, describeProperty } from '@/application/properties'
 import { buildFieldViewModel, type FieldViewModel } from '@/editors/property-controls'
 import type { PropertyRef } from '@/application/contracts'
+import { contextKey } from '@/runtime/context'
+import { createInputPort } from '@/runtime/inputPort'
+import { createInputSession } from '@/runtime/inputSession'
 
 // ── 夹具（与组件同源：字段模型由 RNA 纯函数造，不手工拼） ──────────────────────
 
@@ -112,7 +115,6 @@ function fieldFor(
   reg: ReturnType<typeof makeRegistry>,
   localId: string,
   value: unknown,
-  opts: { draft?: string | null } = {},
 ): FieldViewModel {
   const propertyId = `${OBJECT_TYPE}.${localId}`
   const d = describeProperty(reg, { owner, property: propertyId })
@@ -122,7 +124,6 @@ function fieldFor(
     descriptor: d.value,
     value: { kind: 'value', value: value as never },
     edit: { kind: 'editable' },
-    draft: opts.draft ?? null,
   })
 }
 
@@ -146,21 +147,54 @@ function readonlyFieldFor(
 let app: App | null = null
 let host: HTMLElement | null = null
 
-function mount(field: FieldViewModel) {
+/**
+ * 挂载控件。
+ *
+ * `onDraft`/`onCommit`/`onCancel` 三个监听在 P10c（#286）随组件 emit 一起删除：
+ * 组件不再转发文本变化（那走输入层的唯一 document 监听），`commit`/`cancel`
+ * 从未有过发出点。留下的两个 emit 都是"无草稿语义"控件用的。
+ */
+function mount(field: FieldViewModel, ctx: unknown = null) {
   const events: { kind: string; payload?: unknown }[] = []
   const container = document.createElement('div')
   document.body.appendChild(container)
   host = container
   app = createApp(PropertyField, {
     field,
-    onDraft: (t: string) => events.push({ kind: 'draft', payload: t }),
-    onCommit: () => events.push({ kind: 'commit' }),
     onCommitValue: (v: unknown) => events.push({ kind: 'commit-value', payload: v }),
     onCommitComponent: (i: number, v: number) => events.push({ kind: 'component', payload: [i, v] }),
-    onCancel: () => events.push({ kind: 'cancel' }),
   })
+  if (ctx !== null) app.provide(contextKey, ctx as never)
   app.mount(container)
   return { root: container, events }
+}
+
+/**
+ * 造一个**真的**输入端口（不 mock 三态机）。
+ *
+ * ## 为什么这里必须用真端口（P10c #286 之后）
+ *
+ * 本文件原有两条用例依赖 P2 的草稿镜像（`FieldViewModel.draftState` 回落分支）
+ * 来断言"非法草稿提示可见"。那份镜像已随单一权威收口删除，若继续用假端口，
+ * 这些用例就会退化成"测一个不存在的回落路径"（假绿）。
+ *
+ * 用真端口后，断言走的是**生产同一条**数据流：
+ * `InputPort.registerTextControl` → `applyTextInput` → `textProjection`。
+ */
+function makeInputPort() {
+  const session = createInputSession({
+    sink: {
+      submit: () => ({ ticketId: 't', commandId: 'c' }),
+      executeNow: () => ({ status: 'unchanged', version: { documentVersion: 0 } }),
+    } as never,
+  })
+  const port = createInputPort(session)
+  return { session, port }
+}
+
+/** 把端口塞进一个最小 `Context` 形状（组件只读 `ctx.wm.inputPort`）。 */
+function ctxWithPort(port: unknown): unknown {
+  return { wm: { inputPort: port } }
 }
 
 beforeEach(() => {
@@ -183,7 +217,14 @@ function fire(el: Element, type: string, init: Record<string, unknown> = {}): vo
 // ── 用例 ─────────────────────────────────────────────────────────────────────
 
 describe('控件：草稿不提交（#249 §19.1）', () => {
-  it('键入**中间态**只发 `draft`，不发 `commit`', () => {
+  /**
+   * P10c（#286）：本条从"发 `draft` 事件"翻成"**不发任何提交意图**"。
+   *
+   * 组件不再有 `draft` emit（草稿走输入层的唯一监听）。判据不变，只是观察面
+   * 从"组件转发的镜像"变成"组件自己的出口"：键入中间态**不得**触发任何出口。
+   * 提交时机本身的行为判据在 `domain/__tests__/textDraft.test.ts`。
+   */
+  it('键入**中间态**不发任何提交意图（提交时机归输入层）', () => {
     const reg = makeRegistry()
     const { root, events } = mount(fieldFor(reg, 'plain', 10))
     const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
@@ -193,20 +234,44 @@ describe('控件：草稿不提交（#249 §19.1）', () => {
       events.length = 0
       input.value = text
       fire(input, 'input')
-      expect(events.map((e) => e.kind), `草稿 ${JSON.stringify(text)} 不得提交`).toEqual(['draft'])
+      expect(events, `草稿 ${JSON.stringify(text)} 不得提交`).toEqual([])
     }
     teardown()
   })
 
-  it('**失焦**在非法草稿上也不提交（保留草稿 + 显示原因）', () => {
+  /**
+   * P10c（#286）：本条改用**真输入端口**，断言生产同一条数据流。
+   *
+   * 原实现用 `field.draftState`（P2 镜像）产生 `InvalidValue` 提示 —— 该镜像已删。
+   * 现在非法草稿的可见提示来自 `InputPort.textProjection`：登记控件 → 输入非法草稿
+   * → 投影给出 `invalid` + 原因，组件把它渲染成 `.ux-field-problem`。
+   *
+   * 这正是 e2e A25-3 走的路径（`input-routing.spec.ts`），此处以 jsdom 复现，
+   * 使"非法草稿不静默吞掉"在单元层也有判据。
+   */
+  it('非法草稿：**保留**在输入层（投影可见）且提示可见，失焦不提交', async () => {
     const reg = makeRegistry()
-    // 草稿 `abc` 对 number 非法 ⇒ `draftState === 'invalid'`
-    const field = fieldFor(reg, 'plain', 10, { draft: 'abc' })
-    expect(field.draftState.state).toBe('invalid')
-    const { root, events } = mount(field)
+    const field = fieldFor(reg, 'plain', 10)
+    const { port } = makeInputPort()
+    const { root, events } = mount(field, ctxWithPort(port))
     const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
+    const controlId = `field:${OBJECT_TYPE}.plain`
+
+    // 输入层的会话以**焦点事实**驱动（`adapters/inputBinding` 的 focusin）。
+    port.registerTextControl(
+      { controlId, kind: 'number', displayValue: '10' },
+      port.nextToken(),
+    )
+    port.applyTextInput(controlId, 'abc', port.nextToken())
+    const p = port.textProjection(controlId)!
+    expect(p.status, '`abc` 对 number 非法 ⇒ invalid').toBe('invalid')
+    expect(p.submittable, '非法草稿没有可提交值').toBeNull()
+    expect(p.draft, '草稿**原样保留**（不暗中强制转换）').toBe('abc')
+    port.publish()
+
+    await nextTick()
     fire(input, 'blur')
-    expect(events.filter((e) => e.kind === 'commit-value')).toHaveLength(0)
+    expect(events.filter((e) => e.kind === 'commit-value'), '失焦不得提交非法草稿').toHaveLength(0)
     // 提示必须可见（不静默吞输入）
     expect(root.querySelector('.ux-field-problem')?.textContent).toContain('InvalidValue')
     teardown()
@@ -224,7 +289,7 @@ describe('控件：草稿不提交（#249 §19.1）', () => {
    */
   it('Enter/Escape **不**由组件消费（改由输入层路由），且控件声明路由所需事实', () => {
     const reg = makeRegistry()
-    const { root, events } = mount(fieldFor(reg, 'plain', 10, { draft: '20' }))
+    const { root, events } = mount(fieldFor(reg, 'plain', 10))
     const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
 
     // ① 组件不再自行消费（这是"单一归属"的结构性证据）
@@ -251,7 +316,7 @@ describe('控件：草稿不提交（#249 §19.1）', () => {
    */
   it('组合期（`isComposing`）的 Enter 不会被组件提交（政策在输入层）', () => {
     const reg = makeRegistry()
-    const { root, events } = mount(fieldFor(reg, 'plain', 10, { draft: '20' }))
+    const { root, events } = mount(fieldFor(reg, 'plain', 10))
     const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
     fire(input, 'keydown', { key: 'Enter', isComposing: true })
     expect(events.filter((e) => e.kind === 'commit')).toHaveLength(0)
@@ -280,7 +345,6 @@ describe('控件：草稿不提交（#249 §19.1）', () => {
       descriptor: d.value,
       value: { kind: 'value', value: 'line1' },
       edit: { kind: 'editable' },
-      draft: 'line1',
     })
     const { root, events } = mount(field)
     const ta = root.querySelector<HTMLTextAreaElement>('textarea')!
@@ -416,10 +480,11 @@ describe('控件：多选混合值（D6 属性区不消失）', () => {
     const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
     // 不预填首项值（旧实现用「首项值」冒充全体并广播覆盖）
     expect(input.value).toBe('—')
-    // 仍可输入统一值（属性区没有因多选而消失）
+    // 仍可输入统一值（属性区没有因多选而消失）：键入不得触发任何提交意图，
+    // 且输入**不**预填首项值 —— 这条在 P10c 后由"组件无提交出口"把守。
     input.value = '42'
     fire(input, 'input')
-    expect(events.some((e) => e.kind === 'draft' && e.payload === '42')).toBe(true)
+    expect(events, '键入只改输入层草稿，组件不发提交意图').toEqual([])
     teardown()
   })
 
