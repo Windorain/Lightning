@@ -58,8 +58,13 @@ describe('尾换行口径：两条写出路径各自显式声明（G-2）', () =
   })
 
   it('**两条口径确实不同**（若有人"顺手统一"，本条判红）', () => {
+    // 两个常量都是字面量类型（`true` / `false`），故 TS 会把 `===` 判为
+    // "类型无重叠" —— 那**正是**本条要断言的事实。用 `as boolean` 让比较
+    // 在运行期进行（类型层面的"永不相等"本身就是结论，但断言仍要跑）。
+    const browserWrites = BROWSER_DOWNLOAD_TRAILING_NEWLINE as boolean
+    const channelWrites = PLAIN_SERIALIZATION.trailingNewline as boolean
     expect(
-      BROWSER_DOWNLOAD_TRAILING_NEWLINE === PLAIN_SERIALIZATION.trailingNewline,
+      browserWrites === channelWrites,
       '两条写出路径的尾换行口径必须**显式不同**：判据只约束命令通道产物，'
         + '而人类下载需要尾换行（否则 POSIX 工具/diff 会把它当异常）。'
         + '把它们统一（无论统一到哪一边）都会静默改变一条路径的字节口径。',
