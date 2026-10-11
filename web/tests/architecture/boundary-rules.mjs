@@ -93,8 +93,27 @@ export const LAYER_DESTINATIONS = [
       '宿主端口实现 → 现散在 util/ + wiki/。**P9（#260）起为部分迁移层**：' +
       '本批新建的保存目标适配（写入串行化 + 远端条件版本）与后续文件/存储适配按 activeSubpaths 登记；' +
       '其余 util/ 旧实现仍是遗留债务。',
-    // P9 登记：保存目标适配。文件/存储适配路径由后续提交追加（同一 PR）。
-    activeSubpaths: ['adapters/saveTarget/coordinator.ts'],
+    // P9 登记：保存目标适配（串行化 + 条件版本）、恢复副本存储、文件/工程/发布格式、
+    // 宿主产物适配（能力矩阵/manifest/宿主传输）。全部为**新增**适配器实现；
+    // `util/` 等旧对应物仍不在执行面内（部分迁移）。
+    activeSubpaths: [
+      'adapters/saveTarget/coordinator.ts',
+      'adapters/storage/memory.ts',
+      'adapters/storage/browser.ts',
+      'adapters/files/fidelityRecord.ts',
+      'adapters/files/legacyShape.ts',
+      'adapters/files/legacyFields.ts',
+      'adapters/files/plainCodec.ts',
+      'adapters/files/envelopeCodec.ts',
+      'adapters/files/versionMigration.ts',
+      'adapters/files/mcAxisProfile.ts',
+      'adapters/files/projectFormat.ts',
+      'adapters/files/documentBinding.ts',
+      'adapters/files/publishFormat.ts',
+      'adapters/host/hostCapabilities.ts',
+      'adapters/host/artifactTransport.ts',
+      'adapters/host/buildManifest.ts',
+    ],
   },
   { layer: 'composition', legacySources: [], note: '装配（无旧对应物，本次新建）' },
   { layer: 'entries', legacySources: ['main*.ts'], note: '薄启动入口 → 现 src/main*.ts 在根' },

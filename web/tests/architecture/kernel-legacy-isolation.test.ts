@@ -78,6 +78,25 @@ const KERNEL_FILES = [
   'runtime/exportJob.ts',
   // P9（#260）保存目标适配：写入串行化 + 远端条件版本（A16 适配器层）
   'adapters/saveTarget/coordinator.ts',
+  // P9（#260）恢复副本存储适配（A31）：内存端口 + 浏览器薄适配
+  'adapters/storage/memory.ts',
+  'adapters/storage/browser.ts',
+  // P9（#260）文件/工程/发布格式适配（A20）：保真记录、形态判别、字段规矩、
+  // Plain/Envelope 编解码、版本迁移、坐标约定、工程格式、文档绑定、发布格式
+  'adapters/files/fidelityRecord.ts',
+  'adapters/files/legacyShape.ts',
+  'adapters/files/legacyFields.ts',
+  'adapters/files/plainCodec.ts',
+  'adapters/files/envelopeCodec.ts',
+  'adapters/files/versionMigration.ts',
+  'adapters/files/mcAxisProfile.ts',
+  'adapters/files/projectFormat.ts',
+  'adapters/files/documentBinding.ts',
+  'adapters/files/publishFormat.ts',
+  // P9（#260）宿主产物适配（A34）：能力矩阵、宿主传输/补丁、构建 manifest
+  'adapters/host/hostCapabilities.ts',
+  'adapters/host/artifactTransport.ts',
+  'adapters/host/buildManifest.ts',
 ]
 
 /**
