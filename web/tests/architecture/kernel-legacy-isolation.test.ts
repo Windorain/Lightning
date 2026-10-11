@@ -68,10 +68,16 @@ const KERNEL_FILES = [
   'application/commands.ts',
   'application/queries.ts',
   'application/evaluation.ts',
+  // P9（#260）持久化与固定快照导出：捕获规格（纯）、导出政策（纯）、导出作业接线
+  'domain/captureSpec.ts',
+  'application/exportPlan.ts',
   'runtime/execution.ts',
   'runtime/scheduling.ts',
   'runtime/effects.ts',
   'runtime/evaluation.ts',
+  'runtime/exportJob.ts',
+  // P9（#260）保存目标适配：写入串行化 + 远端条件版本（A16 适配器层）
+  'adapters/saveTarget/coordinator.ts',
 ]
 
 /**
@@ -574,6 +580,19 @@ describe('内核文件登记表', () => {
     expect(domainDest.activeSubpaths, 'domain 为整层迁移，不应登记 activeSubpaths').toBeUndefined()
     const appDest = rules.LAYER_DESTINATIONS.find((d) => d.layer === 'application')
     expect(appDest.activeSubpaths, 'application 为整层迁移，不应登记 activeSubpaths').toBeUndefined()
+  })
+
+  it('adapters 层为**部分迁移**：本批登记的文件全部存在，且 KERNEL_FILES 的 adapters 项与登记一致', async () => {
+    const rules = await import('./boundary-rules.mjs')
+    const dest = rules.LAYER_DESTINATIONS.find((d) => d.layer === 'adapters')
+    expect(dest, 'adapters 分层必须存在').toBeTruthy()
+    expect(Array.isArray(dest.activeSubpaths), 'P9 起 adapters 必须登记 activeSubpaths（不允许"整层算新"）').toBe(true)
+    for (const rel of dest.activeSubpaths) {
+      expect(fs.existsSync(path.join(SRC_ROOT, rel)), `登记的 adapters 路径 ${rel} 必须存在`).toBe(true)
+    }
+    const adapterKernel = KERNEL_FILES.filter((f) => f.startsWith('adapters/')).sort()
+    expect(adapterKernel.length, 'P9 必须至少登记一个 adapters 新实现（保存目标适配）').toBeGreaterThan(0)
+    expect(dest.activeSubpaths.slice().sort()).toEqual(adapterKernel)
   })
 
   it('扫描器报告的闸门执行面**包含**全部内核文件（防"登记了但没被扫"）', async () => {

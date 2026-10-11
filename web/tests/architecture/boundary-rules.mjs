@@ -52,6 +52,7 @@ import path from 'node:path'
  * | `domain` | 旧对应物是 `pure/` + `context/`（**不同目录**），故无此问题 |
  * | `application` | 旧对应物是 `operators/` + `handlers/` + `events/`（**不同目录**），同上 |
  * | `runtime` | **撞名**：`web/src/runtime/` 既装旧实现（`renderEngine.ts`/`sessionStore.ts`/`chromeBinder.ts` 等 38 个文件），又要装新的执行/调度/效果三件套 |
+ * | `adapters` | 旧对应物是 `util/` + `config/` + `wiki/`（**不同目录**），但 P9（#260）起该层**开始**有实现（保存目标/文件/存储适配），故也登记 `activeSubpaths` |
  *
  * ⇒ 对 `runtime` 这类层，用 `activeSubpaths` **显式列出新实现的路径**；
  * 只有这些路径属于闸门执行面，其余（旧根文件、`host/`、`hover/`…）是遗留债务。
@@ -71,15 +72,30 @@ export const LAYER_DESTINATIONS = [
     layer: 'runtime',
     legacySources: ['runtime'],
     note: '**撞名**：旧 runtime/ 是求值+会话实现，新 runtime/ 是执行批次/调度/效果',
-    // 新实现的**显式**路径（P1 登记 execution/scheduling/effects，P4 追加 evaluation）
-    activeSubpaths: ['runtime/execution.ts', 'runtime/scheduling.ts', 'runtime/effects.ts', 'runtime/evaluation.ts'],
+    // 新实现的**显式**路径（P1 登记 execution/scheduling/effects，P4 追加 evaluation，P9 追加 exportJob）
+    activeSubpaths: [
+      'runtime/execution.ts',
+      'runtime/scheduling.ts',
+      'runtime/effects.ts',
+      'runtime/evaluation.ts',
+      'runtime/exportJob.ts',
+    ],
     /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议是业务规则，不是呈现。 */
     corePurity: true,
   },
   { layer: 'presentation', legacySources: ['render', 'shared'], note: '求值场景→渲染数据 → 现 render/' },
   { layer: 'editors', legacySources: ['workbench', 'viewer', 'embed'], note: '编辑器组件 → 现 workbench/ + viewer/' },
   { layer: 'shells', legacySources: ['workbench', 'embed'], note: '外壳/装配根 → 现混在 workbench/ + embed/' },
-  { layer: 'adapters', legacySources: ['util', 'config', 'wiki', 'dev'], note: '宿主端口实现 → 现散在 util/ + wiki/' },
+  {
+    layer: 'adapters',
+    legacySources: ['util', 'config', 'wiki', 'dev'],
+    note:
+      '宿主端口实现 → 现散在 util/ + wiki/。**P9（#260）起为部分迁移层**：' +
+      '本批新建的保存目标适配（写入串行化 + 远端条件版本）与后续文件/存储适配按 activeSubpaths 登记；' +
+      '其余 util/ 旧实现仍是遗留债务。',
+    // P9 登记：保存目标适配。文件/存储适配路径由后续提交追加（同一 PR）。
+    activeSubpaths: ['adapters/saveTarget/coordinator.ts'],
+  },
   { layer: 'composition', legacySources: [], note: '装配（无旧对应物，本次新建）' },
   { layer: 'entries', legacySources: ['main*.ts'], note: '薄启动入口 → 现 src/main*.ts 在根' },
 ]
