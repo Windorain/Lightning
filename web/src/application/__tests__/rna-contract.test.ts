@@ -258,6 +258,20 @@ function collectValues(v: unknown, out: unknown[] = []): unknown[] {
 }
 
 /**
+ * 读源码并**归一化行尾为 LF**（EOL 脆性的治本处，见 `freeze-convergence.test.ts` 的长注释）。
+ *
+ * 本仓 `core.autocrlf=true` ⇒ 新鲜检出是 CRLF，而执行者工具写出的工作树常是 LF。
+ * 凡断言里出现裸 `\n` 字面量（正则、`indexOf('\n\n')`、`split('\n')` 后按行号切片），
+ * 判据就会随检出口径变化。在唯一读入口归一化后，"用 `\n` 写字面量"重新安全。
+ *
+ * 2026-10-11 合流事故：集成树 `96b2e3b` 上 `freeze-convergence.test.ts:303`
+ * 因 `\n\n` 失配判红 —— 该测试在 LF 树上绿。
+ */
+function readSource(rel: string): string {
+  return readFileSync(path.join(process.cwd(), rel), 'utf8').replace(/\r\n/g, '\n')
+}
+
+/**
  * 剥掉行注释、块注释与字符串字面量 —— 源码级结构断言必须**只看代码**。
  *
  * 保留换行以便行号/正则仍可用；字符串内内容替换为空串（判据不依赖字面量文本）。
@@ -483,7 +497,7 @@ describe('A08-4 唯一写入口', () => {
   })
 
   it('**结构断言**：`application/` 不导出「owner + 值 ⇒ 写下去」的入口', () => {
-    const raw = readFileSync(path.join(process.cwd(), 'src', 'application', 'property-commands.ts'), 'utf8')
+    const raw = readSource('src/application/property-commands.ts')
     // 先把注释与字符串剥掉再判 —— 否则**文档里引用旧实现**（「旧实现的
     // `descriptor.set(owner, value)` 就是…」）会被误判成违规。这也是本断言
     // 第一次跑就抓到的假红：源码级判据必须只看代码，不看注释。
@@ -508,7 +522,7 @@ describe('A08-4 唯一写入口', () => {
       'src/editors/property-controls.ts',
     ]
     for (const f of files) {
-      const src = readFileSync(path.join(process.cwd(), f), 'utf8')
+      const src = readSource(f)
       const importLines = src.split('\n').filter((l) => /^\s*import\b/.test(l) || /from 'vue'|from 'three'/.test(l))
       for (const line of importLines) {
         expect(/from '(vue|three)/.test(line), `${f} 不得 import vue/three：${line.trim()}`).toBe(false)

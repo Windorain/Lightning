@@ -44,6 +44,20 @@ import { WEB_ROOT, buildAstIndex, buildModuleGraph, extractGlobalRefs, extractIm
 
 const SRC_ROOT = path.join(WEB_ROOT, 'src')
 
+/**
+ * 读源码并**归一化行尾为 LF**（EOL 脆性的治本处，见 `freeze-convergence.test.ts` 的长注释）。
+ *
+ * 本仓 `core.autocrlf=true` ⇒ 新鲜检出是 CRLF、执行者工具写出的工作树常是 LF。
+ * 凡断言里用裸 `\n` 字面量（正则、`indexOf('\n\n')`、按行切片），判据就会随检出
+ * 口径变化。在唯一读入口归一化后，"用 `\n` 写字面量"重新安全。
+ *
+ * 2026-10-11 合流事故：集成树 `96b2e3b` 上 `freeze-convergence.test.ts:303` 因
+ * `\n\n` 失配判红（该测试在 LF 树上绿）。
+ */
+function readSource(absPath: string): string {
+  return fs.readFileSync(absPath, 'utf8').replace(/\r\n/g, '\n')
+}
+
 /** 对任意文件路径抽自由标识符引用（负对照用临时文件）。 */
 function extractGlobalRefsFor(absPath) {
   return extractGlobalRefs(absPath)
@@ -372,14 +386,14 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     // 旧轨的**真实证据**：`workbench-rna.ts` 经 `ctx.getDoc()` 读文档，
     // 而 `getDoc()` 的类型是 `RuntimeDocument`（旧模型）。故要两处一起看：
     //  ① 面板侧确实经 `getDoc()` 取文档（旧模型的读入口）；
-    const rna = fs.readFileSync(path.join(SRC_ROOT, 'editors', 'workbench-rna.ts'), 'utf8')
+    const rna = readSource(path.join(SRC_ROOT, 'editors', 'workbench-rna.ts'))
     const codeOnly = rna
       .split('\n')
       .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
       .join('\n')
     expect(codeOnly, '`workbench-rna.ts` 必须仍经 `ctx.getDoc()` 读旧文档').toContain('ctx.getDoc()')
     //  ② 该入口的类型确实是 `RuntimeDocument`（在 `runtime/context.ts` 声明）。
-    const ctxSrc = fs.readFileSync(path.join(SRC_ROOT, 'runtime', 'context.ts'), 'utf8')
+    const ctxSrc = readSource(path.join(SRC_ROOT, 'runtime', 'context.ts'))
     expect(ctxSrc, '`getDoc()` 的类型必须仍是旧 `RuntimeDocument`（旧轨的类型面）').toMatch(
       /getDoc\(\):\s*Ref<RuntimeDocument \| null>/,
     )
@@ -390,7 +404,7 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
       '新轨（内核属性注册）必须已交付，否则"双轨"说法不成立',
     ).toBe(true)
     // 且新轨**真的**被 `reduceSetProperty` 用上（不是"有个文件摆着"）。
-    const commands = fs.readFileSync(path.join(SRC_ROOT, 'application', 'commands.ts'), 'utf8')
+    const commands = readSource(path.join(SRC_ROOT, 'application', 'commands.ts'))
     expect(commands, '新轨必须真实接入命令层').toContain('kernelPropertyRegistry()')
   })
 
