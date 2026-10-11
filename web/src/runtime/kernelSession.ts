@@ -49,11 +49,16 @@
 
 import { Editor, type CommandTicket, type QuerySpec } from './execution'
 import type { Command } from '@/application/commands'
+import type { CommandOutcome } from '@/application/contracts'
 import type { InputSource } from './scheduling'
 import type { ReadView } from '@/application/queries'
 import { defaultExecutionInputs } from '@/application/commands'
+import type { ApplicationState } from '@/application/state'
+import type { Document } from '@/domain/document'
+import type { ExecutionInputs } from '@/application/commands'
 import type { ObjectFactoryTable } from '@/domain/scene'
 import { sampleStripFrameAt, stripTimeline, type StripTimeline } from '@/domain/materials'
+import { frameDurationsMs, frameCount as axisFrameCount, type DocumentContent } from '@/domain/content'
 import { framesPerSecond, type TimeValue } from '@/domain/animation'
 import { TIME_ZERO } from '@/domain/editing'
 
@@ -135,10 +140,14 @@ export interface KernelSessionOptions {
  * （那正是 B5 #7 要退役的形态），由宿主在装配时创建并注入 `Context`。
  */
 export class KernelSession {
-  private readonly editor: Editor
+  private editor: Editor
   readonly documentId: string
   readonly contextId: string
-  private readonly disposeObserver: () => void
+  /** 身份前缀（`adoptDocument` 重建 `Editor` 时必须沿用，否则重放 id 会漂移）。 */
+  private readonly prefix: string
+  /** 执行输入（能力裁剪；重建 `Editor` 时必须重新注入 —— 否则能力回退成全能力）。 */
+  private executionInputs: ExecutionInputs
+  private disposeObserver: () => void
 
   /**
    * 最近一次内核投递的播放快照。
@@ -160,21 +169,82 @@ export class KernelSession {
   constructor(opts: KernelSessionOptions) {
     this.documentId = opts.documentId
     this.contextId = opts.contextId
-    this.editor = new Editor({ prefix: opts.prefix ?? 'wk' })
+    this.prefix = opts.prefix ?? 'wk'
+    this.editor = new Editor({ prefix: this.prefix })
     // 执行输入来自**装配结果**（能力裁剪），不是内核默认的全能力 ——
     // A15「运行时绕 UI 发编辑命令被拒绝」的第二道落点就在这里。
     // `objectFactories` 缺省时由 `defaultExecutionInputs` 给内置三类；
     // 装配层要加载贡献类型时显式覆盖。
-    this.editor.setExecutionInputs(
+    this.executionInputs =
       opts.objectFactories === undefined
         ? defaultExecutionInputs(opts.capabilities)
-        : { capabilities: opts.capabilities, objectFactories: opts.objectFactories },
-    )
+        : { capabilities: opts.capabilities, objectFactories: opts.objectFactories }
+    this.editor.setExecutionInputs(this.executionInputs)
     // 打开文档 + 上下文（一条命令，与 `openDocumentState` 同一入口）。
     this.editor.submit({ kind: 'openDocument', documentId: opts.documentId, contextId: opts.contextId })
     this.editor.drain()
     // 订阅上下文快照：时间/播放/通道的变化由内核**推**过来。
-    const query: QuerySpec = { kind: 'context', contextId: opts.contextId }
+    this.disposeObserver = () => {}
+    this.subscribeContext()
+  }
+
+  /** 绑定帧声明提供者（宿主在文档加载/替换后设置一次；提供者自身读当前值）。 */
+  bindFrameSource(source: FrameSource): void {
+    this.frameSource = source
+  }
+
+  /**
+   * **采纳一份已装配的内核文档**（#282 P10b：装配 → 生产接线的落点）。
+   *
+   * ## 为什么需要它，以及为什么不能用现有命令
+   *
+   * 内核的 `openDocument` 命令**总是**造一个空场景的文档
+   * （`reduceOpenDocument` → `createDocument(id)`，见 `application/commands`），
+   * 且对已打开的 `documentId` 直接拒绝。故"把一份装配好的 `Document` 装进会话"
+   * 在现有命令面上**不可表达**。
+   *
+   * 而新增一条 `adoptDocument` 命令会扩展**冻结契约**的封闭命令联合
+   * （契约 §5.2 的封闭判别联合；`freeze-convergence.test.ts` 逐条断言那 24 项）。
+   * 契约 §8 明文：遇到未覆盖之处"就地记录、不就地实现"，缺口回 #250 裁决 ——
+   * 故本批**不**私自扩命令面，而是走 `Editor` 的**既有公开注入点**
+   * `EditorOptions.initial`（它被设计为"唯一受支持的把预建状态交给 Editor 的通路"）。
+   *
+   * ## 代价（如实登记，不掩盖）
+   *
+   * 它**重建** `Editor` 实例：旧实例的订阅、票据与重放流水随之作废。故本方法
+   * 重新建立上下文订阅，且**不**被设计为高频调用（每次"打开/替换文档"一次）。
+   * 这条代价登记为遗留缺口（见汇报），根治需要那条命令 —— 归 #250 裁决。
+   *
+   * ## 顺序
+   *
+   * 1. 取当前快照（保留 `ids` 分配状态 ⇒ 装配后的编辑仍可重放）；
+   * 2. 把 `docs[documentId]` 换成装配产物；
+   * 3. 用 `initial` 建新 `Editor`，重建订阅。
+   */
+  adoptDocument(document: Document, content?: DocumentContent): void {
+    const base = this.editor.snapshot()
+    const withDoc: ApplicationState = Object.freeze({
+      ...base,
+      docs: Object.freeze({ ...base.docs, [this.documentId]: document }),
+    })
+    this.disposeObserver()
+    this.editor = new Editor({ prefix: this.prefix, initial: withDoc })
+    this.editor.setExecutionInputs(this.executionInputs)
+    // 帧声明：优先用**装配产物的帧时长轴**（内核文档自己声明的事实），
+    // 而不是外部注入的提供者 —— 那正是"文档内容面迁进内核"的可观测含义。
+    // 外部提供者仍可用 `bindFrameSource` 覆盖（例如宿主想在换文档前先绑定）。
+    if (content !== undefined) {
+      this.frameSource = {
+        count: () => axisFrameCount({ frames: content.frameAxis.frames }),
+        durationsMs: () => frameDurationsMs({ frames: content.frameAxis.frames }),
+      }
+    }
+    this.subscribeContext()
+  }
+
+  /** 重建上下文订阅（`adoptDocument` 换了 Editor 实例，故订阅必须重建）。 */
+  private subscribeContext(): void {
+    const query: QuerySpec = { kind: 'context', contextId: this.contextId }
     this.disposeObserver = this.editor.observe(query, (value: unknown) => {
       const v = value as {
         time?: TimeValue
@@ -190,9 +260,14 @@ export class KernelSession {
     })
   }
 
-  /** 绑定帧声明提供者（宿主在文档加载/替换后设置一次；提供者自身读当前值）。 */
-  bindFrameSource(source: FrameSource): void {
-    this.frameSource = source
+  /**
+   * 会话当前持有的**内核文档**（供装配层/诊断读；`undefined` = 文档已关闭）。
+   *
+   * 返回内核值本身（不可变），不是投影 —— 于是"渲染/保存读的是内核"
+   * 可以被直接断言（而不必绕道旧文档再反推）。
+   */
+  document(): Document | undefined {
+    return this.editor.snapshot().docs[this.documentId]
   }
 
   // ── 读面 ─────────────────────────────────────────────────────────────────
@@ -268,6 +343,19 @@ export class KernelSession {
   /** 推进到队列排空（有界）。 */
   drain(): void {
     this.editor.drain()
+  }
+
+  /**
+   * 查一张票据的结算结果（`null` = 尚未结算）。
+   *
+   * 契约 §1.5：「接收**不等于**已生效」⇒ 提交方需要一个显式通路去问"它到底怎么了"。
+   * 缺它时调用方只能靠副作用猜测（例如"对象数变没变"）—— 那是把**拒绝**与
+   * **未结算**混为一谈，而两者对调用方的动作完全不同（前者该报错，后者该等）。
+   *
+   * 转发 `Editor.settlement`（唯一权威）；会话层不自己记票据，故不存在第二份结算状态。
+   */
+  settlementOf(ticket: CommandTicket): CommandOutcome | null {
+    return this.editor.settlement(ticket)
   }
 
   /**

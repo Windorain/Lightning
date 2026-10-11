@@ -39,6 +39,7 @@
 import { onBeforeUnmount, onMounted } from 'vue'
 import type { Context } from '@/runtime/context'
 import { createFrameClock, type FrameClock } from './kernelRuntime'
+import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
 
 /**
  * 把一个外壳的内核会话接上帧时钟。
@@ -52,10 +53,35 @@ export function useKernelFrameLoop(ctx: Context): FrameClock | null {
   const kernel = ctx.kernel
   if (!kernel) return null
 
-  // 帧声明：从旧文档读（**显式接缝**；内核不认识 `RuntimeDocument`）。
+  /**
+   * 帧声明：**优先读内核文档**，旧文档作兜底（#282 P10b）。
+   *
+   * ## 这条优先级就是"文档内容面迁进内核"的可观测含义
+   *
+   * 迁移前：帧数/时长只能从 `ctx.getDoc()`（旧 `RuntimeDocument`）读 —— 内核
+   * 不认识它，故 `KernelSession.bindFrameSource` 的注释逐字把这里标为
+   * 「**显式**的适配接缝」。
+   *
+   * 迁移后：装配产出的内核 `Document` **自己承载**帧时长轴
+   * （`DocumentContent.frameAxis`），故这里先问内核。于是：
+   *  - 内核里改了帧时长 ⇒ 帧下标随之变（不再需要"同步回旧文档"这一步）；
+   *  - 旧文档只在**装配未覆盖该文档形态**时兜底（能力不回退）。
+   *
+   * ## 为什么"先问内核"是函数里的一个分支而不是两套提供者
+   *
+   * 两个提供者会要求"换文档时记得重绑"，漏一次就得到"渲染按旧帧表选帧"的静默错误
+   * （`FrameSource` 的注释里记录了同一取舍：故它是函数而不是数组快照）。
+   * 一个函数内部按当前事实分支，使"总是读当前值"仍是结构性质。
+   */
   kernel.bindFrameSource({
-    count: () => ctx.getDoc().value?.frameCount ?? 0,
+    count: () => {
+      const kdoc = kernel.document()
+      if (kdoc !== undefined) return axisFrameCount(kdoc.content.frameAxis)
+      return ctx.getDoc().value?.frameCount ?? 0
+    },
     durationsMs: () => {
+      const kdoc = kernel.document()
+      if (kdoc !== undefined) return [...frameDurationsMs(kdoc.content.frameAxis)]
       const doc = ctx.getDoc().value
       if (!doc) return []
       const out: number[] = []
