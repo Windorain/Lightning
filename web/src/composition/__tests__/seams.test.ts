@@ -260,7 +260,7 @@ describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
     // 与 ① 同一个判定式（`codeOf`，剥注释**与字符串**），只换事实来源。
     const fakeFile = 'runtime/host/probe.ts'
     const injected = 'export function boot() { const e = new Editor(); return e }'
-    const hits = [fakeFile].filter((rel, i) => [injected][i].includes('new Editor('))
+    const hits = [fakeFile].filter((_rel, i) => [injected][i].includes('new Editor('))
     expect(hits, '注入的内核构造必须能被抓到').toEqual([fakeFile])
     // 而真实生产文件里没有它（上一条已断言为空）——证明①不是恒真
     expect(productionFiles().filter((rel) => codeOf(rel).includes('new Editor('))).toEqual([])
