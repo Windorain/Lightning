@@ -26,7 +26,17 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
+
+import { createParserRegistry } from '@/context/parserRegistry'
+import {
+  V2PlainParser,
+  WorldParser,
+  StructureDataParser,
+  createEnvelopeParser,
+} from '@/context/parsers/builtinParsers'
+import { RuntimeDocument } from '@/context/runtimeDocument'
 
 import {
   decodePlain,
@@ -619,15 +629,114 @@ describe('B-1 基线指纹夹具：本批读取不改变它的语义（b2-item-i
     }
   })
 
-  it('**诚实登记**：本批**未**复算基线 sha256（那需要旧解析链，属 P10 接线）', () => {
-    // 基线夹具的 `entries[*].sha256` 是**旧**「解析 → `document.serialize()`」管线的
-    // 输出指纹（夹具自述 `howToRegenerate` 逐字说明）。本批的新适配器**不**提供那条
-    // 管线（它需要一个"类型化文档 → 旧线格式"的写回路径，而工程格式是新的类型化格式）——
-    // 故本批**不**声称复算过指纹。这条断言把这个边界变成机器可读事实：
-    // 若有人后来把它改成"已复算"，必须同时给出复算实现。
-    const baseline = parseAsIs(BASELINE_FIXTURE) as Record<string, unknown>
-    expect(typeof baseline.howToRegenerate).toBe('string')
-    expect(String(baseline.howToRegenerate), '复算方法必须仍指向旧解析链的 serialize()（本批不复算的依据）').toContain('serialize()')
+  it('**G-4 复算**：用生产解析链重算 sha256，必须与夹具登记逐位一致', async () => {
+    // ## 这条断言替代了什么（#286 P10c · G-4 收口）
+    //
+    // P9（#260）登记 G-4 时的原文是：「`b2-item-index-baseline-no-parts.json` 的
+    // sha256 **未复算**（需旧解析链）」——当时的适配器层没有那条"解析 → `serialize()`"
+    // 的管线，故只能把缺口写成机器可读的**诚实登记**。
+    //
+    // 现在那条管线在生产里**已经存在**：`context/parserRegistry` 的
+    // `RuntimeDocument.fromV2Plain` 仍是生产解析链的产物类型，且
+    // `runtime/host/workbenchHost` 的注册顺序（V2Plain → Envelope → World →
+    // StructureData）就是夹具 `howToRegenerate` 逐字要求的那个顺序。
+    // ⇒ 复算不再需要任何新实现，故本断言把"未复算"翻成"已复算"。
+    //
+    // ## 为什么这条判据重要（不是形式主义）
+    //
+    // 基线夹具的用途是「无部件文档的导出字节**必须不变**」（契约 §2 向后兼容硬约束）。
+    // 指纹一旦漂移，就说明有人改动了"解析 → `serialize()`"这条链的字节输出 ——
+    // 而那正是 B-2 立这条基线的理由。**不真的复算**等于让这条硬约束失去守卫。
+    //
+    // ## 与 `howToRegenerate` 的关系
+    //
+    // 断言里仍然读 `howToRegenerate`/`generatedFrom`，但用途变了：
+    // 前者用来**证明复算方法与本实现同源**（都指向 `serialize()`），
+    // 后者用来**证明基线的历史来源**（B-2 改动前）。两者不再是"不复算的依据"。
+    const baseline = parseAsIs(BASELINE_FIXTURE) as {
+      entries: Record<string, { sha256: string; bytes: number }>
+      howToRegenerate: string
+      generatedFrom: string
+    }
+    expect(typeof baseline.howToRegenerate, '复算方法必须仍指向生产解析链的 serialize()').toBe('string')
+    expect(String(baseline.howToRegenerate), '本断言的复算实现必须与夹具自述同源').toContain('serialize()')
     expect(String(baseline.generatedFrom), '基线来自 B-2 改动前的实现').toContain('B-2')
+
+    // 复算：生产解析链的注册顺序（与 `workbenchHost`/`embedHost` 逐字一致）
+    const parsers = createParserRegistry()
+    parsers.register(V2PlainParser)
+    parsers.register(createEnvelopeParser(parsers))
+    parsers.register(WorldParser)
+    parsers.register(StructureDataParser)
+
+    const cases = [
+      { key: 'minimal-v2', file: 'minimal-v2.json' },
+      { key: 'structuredata-exported-envelope', file: ENVELOPE_FIXTURE },
+    ] as const
+    for (const c of cases) {
+      const entry = baseline.entries[c.key]!
+      const parsed = await parsers.detectAndParse(parseAsIs(c.file))
+      expect(parsed.document, `${c.key}: 生产解析链必须能解析该夹具`).not.toBeNull()
+      const json = JSON.stringify(parsed.document!.serialize())
+      const sha256 = createHash('sha256').update(json, 'utf8').digest('hex')
+      const bytes = Buffer.byteLength(json, 'utf8')
+      expect(bytes, `${c.key}: UTF-8 字节数必须与基线一致（契约 §2 无部件字节不变）`).toBe(entry.bytes)
+      expect(sha256, `${c.key}: sha256 必须与基线一致（解析→serialize() 的字节输出漂移了）`).toBe(entry.sha256)
+    }
+  })
+
+  it('**负对照**：基线指纹确实在守卫字节（改动一个字段即判红）', () => {
+    // 证明上一条不是恒真：把 `serialize()` 的产物动一个字段，指纹必然变。
+    // 用真实夹具走同一条链，再对一个已知字段做最小篡改。
+    const baseline = parseAsIs(BASELINE_FIXTURE) as { entries: Record<string, { sha256: string }> }
+    const entry = baseline.entries['minimal-v2']!
+
+    const plain = parseAsIs('minimal-v2.json')
+    const parsed = RuntimeDocument.fromV2Plain(plain)
+    expect(parsed, '前提：该夹具可被 V2Plain 反序列化').not.toBeNull()
+    const good = JSON.stringify(parsed!.serialize())
+    const goodSha = createHash('sha256').update(good, 'utf8').digest('hex')
+    expect(goodSha, '前提：未篡改时指纹命中基线').toBe(entry.sha256)
+
+    // 篡改：改一个**确实参与 `serialize()`** 的字段。
+    //
+    // ## 为什么不用根级 `label`（本探针实测抓出的事实，值得记下来）
+    //
+    // 首版负对照篡改 `plain.label`，结果指纹**没变** —— 因为 `label` 正是
+    // P10b（#282）实测登记的"有损中间层"：`RuntimeDocument.fromV2Plain` 的 `known`
+    // 集合列了 `label`/`author`/`description`/`gtnhVersion`/… 七个根级键，
+    // 却**从不读它们**，同时又把它们排除在 `_extra` 之外 ⇒ 它们既不在 `meta`、
+    // 也不在 `_extra`、更不在 `serialize()` 里。故"改 label ⇒ 指纹不变"是**正确行为**，
+    // 不是守卫失效。
+    //
+    // 用它当负对照会得出错误结论（"指纹没在守卫字节"），故改用帧时长 ——
+    // 它是 `serialize()` 真实写出的字段（`frames[].durationMs`）。
+    const frames = plain.frames as Record<string, unknown>[]
+    const tamperedPlain = {
+      ...plain,
+      frames: frames.map((f, i) => (i === 0 ? { ...f, durationMs: 12345 } : f)),
+    }
+    const tampered = RuntimeDocument.fromV2Plain(tamperedPlain)
+    expect(tampered, '前提：篡改后仍可解析').not.toBeNull()
+    const tamperedSha = createHash('sha256').update(JSON.stringify(tampered!.serialize()), 'utf8').digest('hex')
+    expect(tamperedSha, '篡改一个参与序列化的字段 ⇒ 指纹必须变（否则这条守卫是恒真的）').not.toBe(entry.sha256)
+  })
+
+  it('**实测登记**：根级 `label` 不参与 `serialize()`（有损中间层；本断言的守卫面据此收窄）', () => {
+    // 这条把上一条负对照的实验事实变成**可执行的登记**：若哪天 `fromV2Plain`
+    // 开始读 `label`（即把有损中间层补全），本断言会判红，逼同批更新上面那条
+    // 负对照的篡改字段选择（`label` 届时**可以**用作负对照）。
+    const plain = parseAsIs('minimal-v2.json')
+    const base = RuntimeDocument.fromV2Plain(plain)
+    expect(base, '前提：该夹具可被 V2Plain 反序列化').not.toBeNull()
+    const tampered = RuntimeDocument.fromV2Plain({ ...plain, label: 'DIFFERENT-LABEL' })
+    expect(tampered, '前提：篡改后仍可解析').not.toBeNull()
+    const sha = (d: RuntimeDocument): string =>
+      createHash('sha256').update(JSON.stringify(d.serialize()), 'utf8').digest('hex')
+    expect(
+      sha(tampered!),
+      '根级 `label` 目前**不**进 `serialize()`（P10b 实测的有损中间层）。' +
+        '若本断言判红，说明中间层已补全 ⇒ 请同步更新上一条负对照的篡改字段说明。',
+    ).toBe(sha(base!))
   })
 })
