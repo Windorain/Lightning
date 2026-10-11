@@ -83,6 +83,36 @@ export const KERNEL_DOCUMENT_ID = 'doc-1'
 /** 内核编辑上下文 id（时间/播放/选择的归属；同一实例内唯一）。 */
 export const KERNEL_CONTEXT_ID = 'ctx-1'
 
+/**
+ * 多方块**总档位**在 `EditContext.channelValues` 里的保留键（#282 P10b）。
+ *
+ * ## 为什么总档位也用"通道"承载
+ *
+ * 旧暂存（`shared/viewport/useMultiblockChannels.ts`）把 `totalTier` 与逐通道
+ * `values` 分成两个字段存，但两者在内核里是**同一种东西**：一个数值域取值。
+ * 用保留键承载后，总档位天然获得"所有 Area 共享"（#249 §3.3）与
+ * "参与撤销/内容身份"（`EditContext` 是值），不需要第二个存储或第二条写通路。
+ *
+ * ## 为什么键名带 `$` 前缀
+ *
+ * 真实通道名来自多方块声明（`decl.channels[].key`），可能撞上任何普通标识符。
+ * `$` 不是合法的声明通道名，故前缀使保留键与真实通道**不可能冲突**（结构性，
+ * 不靠约定）。这是"两个不同事实必须可区分"（#249 §19.3）在键空间上的应用。
+ */
+export const TOTAL_TIER_CHANNEL = '$totalTier'
+
+/**
+ * 多方块**运行态**在 `EditContext.channelValues` 里的保留键（#282 P10b）。
+ *
+ * 值是运行态在声明里的**下标**（`channelValues` 的值类型是 `number`，
+ * 契约 §5 如此规定）—— 故离散选择以序数表达，而非把 id 字符串塞进数值域。
+ * 该口径差异已登记为 GF-10（#282），不在本层私自扩契约类型。
+ */
+export const RUNSTATE_CHANNEL = '$runstate'
+
+/** 空取值表（**冻结**的同一个实例：`channelValues()` 无结果时返回它，不每次新建）。 */
+const EMPTY_CHANNEL_VALUES: Readonly<Record<string, number>> = Object.freeze({})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 对外类型
 // ─────────────────────────────────────────────────────────────────────────────
@@ -165,6 +195,21 @@ export class KernelSession {
 
   /** 帧声明提供者；缺省"无帧"（0 帧 ⇒ 帧下标恒 0）。 */
   private frameSource: FrameSource = { count: () => 0, durationsMs: () => [] }
+
+  /**
+   * 最近一次内核投递的**通道取值快照**（#282 P10b）。
+   *
+   * ## 为什么与 `playbackSnapshot` 同一手法（由内核推、不是每次重建）
+   *
+   * 视口渲染必须**反应式**地跟随取值变化（旧形态靠每视口 `revision` 计数器 +
+   * `watch` 推 mesh 重建）。取值现在归 `EditContext`，而 `context` 观察规格
+   * 的投递值**已经包含** `channelValues`（见 `runtime/execution.ts` 的
+   * `case 'context'`）—— 故复用同一个订阅即可，不需要第二条订阅或第二个轮询。
+   *
+   * 初值是**冻结的空表**：它是 `createEditContext` 的真实初值
+   * （`domain/editing.ts` 里 `channelValues: Object.freeze({})`），不是猜的默认值。
+   */
+  private channelSnapshot: Readonly<Record<string, number>> = EMPTY_CHANNEL_VALUES
 
   constructor(opts: KernelSessionOptions) {
     this.documentId = opts.documentId
@@ -250,6 +295,7 @@ export class KernelSession {
         time?: TimeValue
         playing?: boolean
         rate?: number
+        channelValues?: Readonly<Record<string, number>>
       } | null
       if (v === null) return
       this.playbackSnapshot = Object.freeze({
@@ -257,6 +303,12 @@ export class KernelSession {
         rate: typeof v.rate === 'number' ? v.rate : 1,
         time: v.time ?? TIME_ZERO,
       })
+      // 同一次投递里取通道取值：`context` 规格的值**本就包含**它
+      // （`runtime/execution.ts` 的 `case 'context'`），故不新增订阅。
+      this.channelSnapshot =
+        v.channelValues !== undefined && v.channelValues !== null
+          ? Object.freeze({ ...v.channelValues })
+          : EMPTY_CHANNEL_VALUES
     })
   }
 
@@ -408,6 +460,88 @@ export class KernelSession {
   /** 释放订阅（外壳卸载时调用；**不**释放内核状态 —— 状态是值，由 GC 处理）。 */
   dispose(): void {
     this.disposeObserver()
+  }
+
+  // ── 通道取值（#282 P10b：退役每视口暂存副本） ──────────────────────────────
+
+  /**
+   * **当前通道取值**（共享 `EditContext.channelValues` 的读面投影）。
+   *
+   * ## 为什么它在会话上（而不是每个视口自持）
+   *
+   * #249 §3.3/§3.4：通道取值属**编辑上下文**，故"同一上下文的所有 Area 读到同一份值"
+   * （A05「两视口有效坐标相同」的通道面）。旧形态是
+   * `shared/viewport/useMultiblockChannels.ts` 的**每视口暂存副本** —— 每个视口自持
+   * `{totalTier, values, runstate}` + `revision`，于是"同上下文可见的有效读面"并不存在
+   * （每个视口只能读到自己那份）。这正是 B5 #4 `per-viewport-staging` 要退役的形态。
+   *
+   * ## 为什么不新增状态
+   *
+   * 由内核**投递**（与 `playback()` 同一手法）：`context` 观察规格的投递值本就包含
+   * `channelValues`，故 `subscribeContext` 顺手记一份快照，本方法只读它。
+   * 于是"两个 Area 读到同一份值"是结构事实（同一个会话的同一份快照），
+   * 而不是靠调用方自觉。
+   *
+   * 取值缺失的通道不在结果里（不伪造 0）：调用方按"未设置"处理。
+   */
+  channelValues(): Readonly<Record<string, number>> {
+    return this.channelSnapshot
+  }
+
+  /**
+   * 设置一个通道的取值（经**唯一写通路**；`setChannelValue` 命令）。
+   *
+   * 与 `setPlaying`/`seekTime` 同一形态：提交 + 有界排空（接收 ≠ 已生效，见
+   * {@link settlementOf}）。取值合法性（夹取/回落）由内核的 `reduceSetChannelValue`
+   * 决定，本层**不**自己判 —— 否则就是第二份政策。
+   */
+  setChannelValue(channel: string, value: number): void {
+    this.editor.submit({ kind: 'setChannelValue', contextId: this.contextId, channel, value })
+    this.editor.drain()
+  }
+
+  /**
+   * 设置多方块总档位（`totalTier`）。
+   *
+   * ## 为什么它也是一个"通道取值"
+   *
+   * 旧暂存把 `totalTier` 与逐通道 `values` 分开存（`MultiblockSelectionState`），
+   * 但两者在内核里是**同一种东西**：`EditContext.channelValues` 的一个键值对。
+   * 总档位用保留键 {@link TOTAL_TIER_CHANNEL} 表达 —— 于是它天然满足
+   * "所有 Area 共享"与"参与撤销/内容身份"，不需要第二条写通路或第二个存储。
+   */
+  setTotalTier(tier: number): void {
+    this.setChannelValue(TOTAL_TIER_CHANNEL, tier)
+  }
+
+  /** 当前总档位（未设置时为 `null`，**不**伪造 1）。 */
+  totalTier(): number | null {
+    const v = this.channelValues()[TOTAL_TIER_CHANNEL]
+    return typeof v === 'number' ? v : null
+  }
+
+  /**
+   * 设置运行态（多方块 `runstate`）。
+   *
+   * 与总档位同理：运行态是**离散取值**，用保留键 {@link RUNSTATE_CHANNEL} 承载
+   * （值取 `runstate` 在声明里的**下标** —— `channelValues` 的类型是
+   * `Record<string, number>`，这是它唯一能表达离散选择的形态）。
+   *
+   * ## 为什么用下标而不是 id 字符串
+   *
+   * `channelValues` 的值类型是 `number`（契约如此：通道取值是连续/离散的数值域）。
+   * 把 id 塞进去需要改契约的读面类型 —— 那是**扩契约**，须按 §8 回 #250。
+   * 用下标是当前契约下**唯一**不伪造的表达，且声明顺序稳定（`decl.runstates` 是数组）。
+   * 已登记为 GF-10（见 #282 汇报）。
+   */
+  setRunstateIndex(index: number): void {
+    this.setChannelValue(RUNSTATE_CHANNEL, index)
+  }
+
+  /** 当前运行态下标（未设置时为 `null`）。 */
+  runstateIndex(): number | null {
+    const v = this.channelValues()[RUNSTATE_CHANNEL]
+    return typeof v === 'number' ? v : null
   }
 }
 

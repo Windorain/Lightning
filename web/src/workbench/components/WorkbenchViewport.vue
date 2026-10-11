@@ -7,7 +7,7 @@ import { useContext } from '@/runtime/context'
 import { hostKey } from '@/runtime/host'
 import type { WorkbenchHost } from '@/runtime/host/workbenchHost'
 import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
-import { bindMultiblockMeshSync, useMultiblockChannels } from '@/shared/viewport/useMultiblockChannels'
+import { useKernelChannels } from '@/shared/viewport/useKernelChannels'
 import { availableDockTabs, defaultDockTab, resolveDockTab, type ViewportDockTab } from '@/shared/viewport/dockTabs'
 import { REGION } from '@/runtime/regionIds'
 import { createToolGizmoHandler } from '@/handlers/toolGizmoHandler'
@@ -41,10 +41,18 @@ const VIEWPORT_REGION_ID = props.regionId
 const prefs = ctx.requireRegion(VIEWPORT_REGION_ID).state.viewer
 if (!prefs) throw new Error(`viewer preferences missing on ${VIEWPORT_REGION_ID}`)
 
-/** 多方块通道状态（视口本地）：必须先于 DRW 创建，`renderDoc` 即 DRW 的文档来源（T2.5 接线） */
-const mb = useMultiblockChannels(ctx)
+/**
+ * 多方块通道取值（**归内核编辑上下文**；#282 P10b）。
+ *
+ * 必须先于 DRW 创建，`renderDoc` 即 DRW 的文档来源（T2.5 接线）。
+ * 与旧 `useMultiblockChannels` 的差别：本 composable **不持有**取值状态
+ * （旧形态每视口自持 `state` + `revision`），取值权威是
+ * `EditContext.channelValues`，写入经 `setChannelValue` 命令 ⇒
+ * "同一上下文的所有 Area 读到同一份取值"（#249 §3.3、A05）。
+ */
+const mb = useKernelChannels(ctx)
 const {
-  isMultiblock, renderDoc, revision,
+  isMultiblock, renderDoc,
   panel: channelPanel,
   setTier: setChannelTier, setChannelValue, setRunstate: setChannelRunstate,
 } = mb
@@ -107,8 +115,16 @@ const activeTab = computed<ViewportDockTab>({
   set: (v: ViewportDockTab) => { _userTab.value = v },
 })
 
-// ---- 多方块接线：取值变化 → 装配产物 → DRW 重新解析 + 重建 mesh ----
-bindMultiblockMeshSync(revision, drw)
+// ---- 多方块接线：取值变化 → 装配产物 → DRW 按**内容身份**自行重建 ----
+//
+// 旧形态：`bindMultiblockMeshSync(revision, drw)` 在每视口的 `revision` 计数器变化时
+// **手动链式**调 `loadStructureAndResources()` + `rebuildContentMesh()`（B5 #5
+// `manual-refresh-chain`）。那是"调用方手动刷新"，漏挂一处就得到"滑杆动了画面不动"。
+//
+// 现在：取值归内核 ⇒ `renderDoc`（下面的 `docOverride`）随之变化，且取值写入时
+// bump `contentRefreshTick` ⇒ DRW 的观察者按 `presentation/contentIdentity`
+// **从数据算出**身份，再按 `RebuildPlan` 分范围执行（见 `drwMeshPipeline` 文件头）。
+// 失效由数据决定，不需要任何调用方声明重建范围。
 /** 渲染定义随装配刷新：让 `vpSlot.definition` 始终等于"当前渲染的网格"（公开观测点） */
 watch(structureDefinition, (d) => { vpSlot.definition.value = d ?? null }, { flush: 'post' })
 

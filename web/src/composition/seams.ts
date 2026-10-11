@@ -150,36 +150,25 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
   /**
    * P6（#257）登记：**每视口通道暂存**（B5 #4 的消费者面）。
    *
-   * 归口依据：R-WK-01 实施细则「跨区旧文件的退役删除由**文件所在区批次**执行，
-   * 语义替代方提供替代接口与删除点清单」—— 该文件属 P6 区。
+   * ## ✅ 已核销（#282 P10b 执行）
    *
-   * 相位（R-WK-03 修正，2026-10-11）：删除前置条件是**内核接线生产**，
-   * 目标批次由 P6 改为 **#261（P10 集成闭环）**。
-   * 依据：本表登记时实测「新内核尚未接线生产」——
-   * `web/src` 下 `new Editor(` 零生产构造、`runtime/evaluation.ts` 零导入者、
-   * 没有任何生产调用方推进 `EditContext` 时间（`advanceContextTime` 零生产调用方），
-   * 生产入口（`workbench/WorkbenchRoot.vue`、`dev/DevApp.vue`、
-   * `runtime/host/workbenchHost.ts`）均不 import 内核。
-   * ⇒ 内核未接线的状态下把消费者迁到 `EditContext`，会得到"读面永远静止"的**行为回退**
-   * （通道取值改动不再驱动重建）；那是 #171 禁止的"留半成品"，故整组闭环归 #261。
+   * 本条已**退出**：`shared/viewport/useMultiblockChannels.ts` 删除，每视口
+   * `state`/`revision`/`bindMultiblockMeshSync` 一并消失。取值改经
+   * `EditContext.channelValues`（`runtime/kernelSession` 的 `channelValues()`/
+   * `setChannelValue()` 薄转发，写面走既有的 `setChannelValue` 命令），
+   * 失效由渲染侧按**内容身份**判定（`presentation/contentIdentity` +
+   * `contentRefreshTick`），不再有调用方手动声明的重建范围。
+   *
+   * ## 为什么这条从本表**删除**（而不是留在这里标"已退出"）
+   *
+   * 本表的语义是"双轨**剩余**数、只应减少"（见文件头）。把已退役项留在这里
+   * 会让"表长 = 双轨剩余数"这个不变量失真 —— 与 P6 当年核销自己两条时同一口径。
+   * 故本条移出本表，改由 `__tests__/seams.test.ts` 的**回归断言**把守
+   * （防旧机制被改回去），与 P6 处理"模块级宿主开关"的手法一致。
+   *
+   * 机械证据：`multiblock-channel-traversal.spec.ts` 全 552 组合遍历仍全绿，
+   * `lsc-overlap` 的 108/108 组合**逐格 diff = 0**（取值变化真的驱动了重建）。
    */
-  Object.freeze({
-    id: 'per-viewport-channel-staging',
-    files: Object.freeze([
-      'src/shared/viewport/useMultiblockChannels.ts',
-      'src/shared/viewport/EmbedViewport.vue',
-      'src/workbench/components/WorkbenchViewport.vue',
-    ]),
-    newTrack:
-      '通道取值归 **P1 的 `EditContext.channelValues`**（同一编辑上下文的所有 Area 读到同一份值，#249 §3.3/§3.4）+ **P4（#255）的统一通道求值面**（`application/evaluation.ts` 纯求值、装配是纯函数、失效由依赖图自动传播，无调用方手动 refresh）',
-    oldTrack:
-      '`shared/viewport/useMultiblockChannels.ts` 的**每视口暂存副本**：每个视口自持 `state`（总 Tier / 通道取值 / 运行态）、`revision` 计数与 `bindMultiblockMeshSync()` 的手工链式刷新。这正是 B5 矩阵 #4「每视口独立暂存、重复选择副本」与「手动链式刷新」两条 slug 的共同消费者面 —— 于是"同上下文所有 Area 可见的有效读面"并不存在（每个视口只能读到自己那份）。',
-    blocker:
-      '**R-WK-04（#250）**：`EditContext` 侧的通道取值读面（`channelValues`/`withChannelValue`）与纯装配（`domain/multiblock`）**已在 P4/P10 交付**，本批（#261）也完成了宿主驱动接线；但"删掉每视口暂存副本、渲染改吃装配结果"需要**文档内容面**（视口渲染文档 = 内核场景的派生），而该装配未交付（内核 `Document` 不承载 `frames`/`cellGrid`/`multiblock`）。故本条归 **#282（P10b）**。',
-    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
-    exitCondition:
-      '删除 `src/shared/viewport/useMultiblockChannels.ts`（其每视口 `state`/`revision`/`bindMultiblockMeshSync` 一并消失），通道取值改经 `EditContext.channelValues`、装配经 `application/evaluation.ts` 的纯求值；届时删除本条登记。**执行批次：#282（R-WK-04）**。',
-  }),
   /**
    * P7（#258）登记：**草稿权威已收敛到输入层，但 P2 的会话镜像仍在**。
    *
