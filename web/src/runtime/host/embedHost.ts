@@ -46,7 +46,13 @@ export function createEmbedHost(
 ): { host: EmbedHost; ctx: Context; shell: ShellRuntime } {
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
-  const wm = new WM(logCenter, { surface: 'embed' })
+  // 主题是**实例**设置（P10 #261 F1）：宿主指定的主题经这里进本实例，
+  // 落在实例根元素的 `data-lk-theme` 上 —— 不再写 `document.documentElement`
+  // （那会让同页两实例互相覆盖）。
+  const wm = new WM(logCenter, {
+    surface: 'embed',
+    ...(settings.theme === undefined ? {} : { initialTheme: settings.theme }),
+  })
 
   const screen = createEmbedScreenRoot(createToolSettings(), {
     initialLayerWorldY: settings.initialLayerWorldY,

@@ -95,6 +95,18 @@ export interface AssembleInputOptions {
    * 输入过程中的草稿与"非法草稿"提示就不会刷新（P7 首跑 e2e 实测到的缺陷）。
    */
   readonly onTextEffects?: (controlId: string, effects: readonly TextDraftEffect[]) => void
+  /**
+   * **当前编辑上下文 id**（P10 #261）。
+   *
+   * 为什么由装配层传而不是让绑定自己写 params：见
+   * `runtime/inputSession` 的 `withActiveContext` 说明 —— 上下文是**运行期事实**
+   * （换文档就变），而绑定的 params 是**配置**。写进配置会让"Ctrl+Z 绑到哪个
+   * 上下文"冻结在装配时刻。
+   *
+   * 缺省 `null`：需要 `contextId` 的命令会被**显式拒绝**（`missingParam`），
+   * 不静默 —— 本批实测这曾导致 `edit.undo` 在工作台里从未真正生效。
+   */
+  readonly contextId?: string | null
 }
 
 export interface AssembledInput {
@@ -118,6 +130,7 @@ export function assembleInput(options: AssembleInputOptions, claim = true): Asse
     capabilities: () => options.capabilities,
     ...(options.areaHotkeys === undefined ? {} : { areaHotkeys: options.areaHotkeys }),
     ...(options.appHotkeys === undefined ? {} : { appHotkeys: options.appHotkeys }),
+    ...(options.contextId == null ? {} : { contextId: options.contextId }),
   })
   for (const c of options.controls ?? []) session.bindControl(c)
   for (const i of options.interactions ?? []) session.bindInteraction(i)

@@ -522,43 +522,17 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     blockIconCache.value = null
   }
 
-  // ---- 帧播放（P10 #261：**已删除**专用播放调度器） ----
+  // ---- 帧播放（P10 #261：专用播放调度器已删除） ----
   //
-  // ## 被删除的机制（B5 #8 `frame-sequence-as-animation`；R-WK-03 明列）
+  // 本文件原有一个自续 `setTimeout` 链（`scheduleNextWorldFrameStep` /
+  // `clearWorldPlaybackSchedule` / `worldPlaybackTimeoutId` /
+  // `dwellMsForCurrentWorldFrame`）按索引推进世界帧。它已在本批删除，
+  // 退役判据与替代关系见 `retirementRegistry` 的
+  // `frame-sequence-as-animation` 条目（相位 `executed`）。
   //
-  // 旧实现是本文件里一个**自续的 `setTimeout` 链**：
-  //
-  // ```ts
-  // let worldPlaybackTimeoutId = null
-  // function scheduleNextWorldFrameStep() {
-  //   clearWorldPlaybackSchedule()
-  //   if (!framesPlaybackIsPlaying.value) return
-  //   const delay = dwellMsForCurrentWorldFrame()
-  //   worldPlaybackTimeoutId = setTimeout(() => {
-  //     setFrameIndex(next)                        // 写 Main.currentFrameIndex
-  //     if (framesPlaybackIsPlaying.value) scheduleNextWorldFrameStep()
-  //   }, delay)
-  // }
-  // ```
-  //
-  // 它是**帧专用**的播放调度器（#249 §7 明文要退役的"另建专用播放循环"），
-  // 且它的时间**不来自** `EditContext` —— 于是：
-  //  - 两个 Area 各持一份 `framesPlaybackIsPlaying` 读法，各播各的（A05 的形态）；
-  //  - 面板里看到的帧（按 `durationMs` 累加算）与视口里播放到的帧（按定时器算）
-  //    可以不一致；
-  //  - "跳帧"与"连续播放到同一时刻"落在不同路径上（#249 §7 要消除的分叉）。
-  //
-  // ## 替代（本条现在**没有**任何定时器）
-  //
-  //  - **谁推进**：宿主的帧时钟（`composition/kernelRuntime`）每帧把经过秒数
-  //    作为 `advancePlayback` 命令注入内核；
-  //  - **帧下标从哪来**：`EditContext.time` 经离散阶跃采样派生（`worldFrameIndex()`）；
-  //  - **本管线做什么**：当派生出的帧下标**变化**时，重建 mesh 呈现新帧。
-  //    它不拥有时间、不拥有调度、不拥有"正在播放"这个状态。
-  //
-  // ⇒ 本文件里 `setTimeout`/`setInterval` 零出现；"帧专用播放循环"不存在。
-  //    `dwellMsForCurrentWorldFrame` / `scheduleNextWorldFrameStep` /
-  //    `clearWorldPlaybackSchedule` / `worldPlaybackTimeoutId` 四个符号全部删除。
+  // 现状：本文件**没有任何定时器**；帧下标由 `EditContext.time` 经离散阶跃
+  // 采样**派生**（`worldFrameIndex()`），推进归宿主帧时钟
+  // （`composition/kernelRuntime`）。
 
   /**
    * 换帧（**唯一**入口）：请求内核把时间定位到某帧。
