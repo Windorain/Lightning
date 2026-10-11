@@ -16,27 +16,53 @@
  * 新形态里四件事各有唯一归属：
  *  1. 前缀分派**不存在** —— 属性 ID 是 `lightning.publishConfig.viewWidth`，
  *     写入按键值注册的纯函数执行；
- *  2/4. 提交时机与草稿是 `editors/property-controls.ts` 的纯状态机；
+ *  2/4. 提交时机与草稿是 `domain/textDraft.ts` 的纯状态机（见下"草稿权威"）；
  *  3. 控件选择是 `modelFor(desc)`，与描述同源（本组件只读 `field.control`）。
  *
  * ## 本组件不认识「写到哪里」
  *
- * 它**不接收 setter 闭包**，也不认识 `Context`/文档/命令。它只发三个**意图**：
- * `update:draft`（草稿变了）、`commit`（请提交当前草稿）、`cancel`（还原）。
+ * 它**不接收 setter 闭包**，也不认识文档/命令。它只发三个**意图**：
+ * `draft`（草稿变了）、`commit`（请提交当前草稿）、`cancel`（还原）。
  * 合法性判定与提交由父级用纯函数完成（`canCommitDraft` / `tryCommit`），
  * 因此「拒绝后不得报告 applied」在 UI 层无法被绕过 —— 组件根本没有写的能力。
  *
  * 这是契约 §5.2「唯一写路由」在组件层的**结构性**形态：不是靠约定不写旁路，
  * 而是这里没有可用的旁路。
+ *
+ * ## 草稿权威 = `domain/textDraft`（P7 #258 合流后）
+ *
+ * ## 键盘归属也交给输入层，为什么
+ *
+ * P2 初版在本组件内 `onKeydown` 里直接消费 Enter/Escape。那有两个问题：
+ *  1. **归属判据分散**：`g` 这类场景快捷键的归属由输入层判（`textFocus` 显式状态），
+ *     而 Enter/Escape 由本组件判 —— 同一份"焦点在文本里"的事实被两处各自推断；
+ *  2. **IME 无门**：`e.key === 'Enter'` 在输入法确认候选词时**也会**触发
+ *     （确认键就是 Enter），P2 初版没有 `isComposing` 守卫 ⇒ 中文输入法下
+ *     按回车确认候选会**顺带提交**（#249 §19.1「IME 组合未结束不得提交」）。
+ *
+ * 故本组件现在只声明**事实**（`data-input-control-id` / `data-input-kind` /
+ * `data-input-display`），键盘与 IME 一律经 `InputPort` 路由：
+ *  - `focusin`/`focusout`/`composition*`/`input` 由 `adapters/inputBinding` 的
+ *    **唯一** document 级监听收下（不在这里再挂一套）；
+ *  - Enter/Escape/Ctrl+Z 的判定在 `domain/input.ts`（纯路由）与
+ *    `domain/textDraft.ts`（纯状态机）。
+ *
+ * ## 呈现如何跟随（只有一条数据流）
+ *
+ * `textProjection(controlId)` 是**只读**投影；本组件订阅 `InputPort.subscribe`
+ * 在事件处理完后重读它。组件**不**自己存草稿，故不存在第二份权威
+ * （这正是 #249 §19.1 要的结构）。
  */
 
-import { computed, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { FieldViewModel } from '@/editors/property-controls'
+import { contextKey, type Context } from '@/runtime/context'
+import type { ControlBinding } from '@/application/inputCommands'
+import type { DraftKind } from '@/domain/textDraft'
 
 const props = defineProps<{ field: FieldViewModel }>()
 
 const emit = defineEmits<{
-  /** 草稿文本变化（**不**提交）。 */
   /**
    * 草稿文本变化（**不**提交）。
    *
@@ -54,7 +80,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
-const focused = ref(false)
+const ctx = inject<Context | null>(contextKey, null)
 
 const kind = computed(() => props.field.control.kind)
 const isMixed = computed(() => props.field.value.kind === 'mixed')
@@ -63,6 +89,156 @@ const isReadOnly = computed(() => props.field.edit.kind === 'readOnly')
 const isNumeric = computed(() => kind.value === 'number' || kind.value === 'stepper' || kind.value === 'slider')
 /** 只读原因（结构化，不是布尔）—— 呈现端只做展示，不重新判定。 */
 const readOnlyReason = computed(() => (props.field.edit.kind === 'readOnly' ? props.field.edit.reason : null))
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 输入层接线：控制 id、登记、投影订阅
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 本控件的**输入会话控制 id**（`data-input-control-id` 用它）。
+ *
+ * 用属性 id（`lightning.publishConfig.viewWidth`）而不是 DOM 位置：它在重渲染、
+ * 面板切换、多目标之间**稳定**，故"登记 ↔ DOM 标注"不会像 `RNAWidget` 那样
+ * 因实例复用而错位（那正是 P7 初版踩到的 `unboundControl`）。
+ */
+const controlId = computed(() => `field:${props.field.descriptor.id}`)
+
+/** 该控件是否走草稿型（三态机）。无草稿语义的控件（toggle/dropdown/slider/color）不在其中。 */
+const draftKind = computed<DraftKind | null>(() => {
+  if (props.field.edit.kind !== 'editable') return null
+  const k = kind.value
+  if (k === 'number' || k === 'stepper') return 'number'
+  if (k === 'text' || k === 'multiline-text' || k === 'string-list' || k === 'reference') return 'text'
+  // color 的十六进制文本框也走草稿（色板那一支另发 commit-value）
+  if (k === 'color') return 'text'
+  return null
+})
+
+/**
+ * 订阅信号：每次会话推进 +1，用来让 `projection()` 重新求值。
+ *
+ * 会话是**纯值**对象（不在 Vue 响应式图里），故需要这个显式触发点。
+ */
+const epoch = ref(0)
+let unsubscribe: (() => void) | null = null
+
+function projection(): { draft: string; status: string; reason: string | null; composing: boolean; submittable: number | string | null } | null {
+  // 读 epoch 建立依赖：会话广播 ⇒ 本 computed/函数重新求值
+  void epoch.value
+  const port = ctx?.wm.inputPort ?? null
+  if (port === null) return null
+  return port.textProjection(controlId.value)
+}
+
+/**
+ * 显示文本：**输入层投影优先**（P7 权威），否则回落到 P2 的字段视图模型。
+ *
+ * 为什么两源：`draftKind === null` 的控件（toggle/dropdown/slider）不走草稿，
+ * 它们的显示值只由 P2 的 `field.displayText`/`scalarValue` 提供。
+ * 走草稿的控件则以输入层为准 —— 那是"非法草稿原样保留"的可见证据。
+ */
+const shownText = computed(() => {
+  if (draftKind.value === null) return props.field.draft ?? props.field.displayText
+  const p = projection()
+  if (p !== null && p.draft !== '') return p.draft
+  return props.field.draft ?? props.field.displayText
+})
+
+/** 非法/中间态提示：**输入层**的原因码优先（P7 权威），否则用 P2 的结构化拒绝原因。 */
+const inputProblem = computed(() => {
+  if (draftKind.value === null) return ''
+  const p = projection()
+  if (p === null || p.status === 'complete') return ''
+  return `${p.status === 'invalid' ? 'InvalidValue' : 'draftIncomplete'}: ${p.reason ?? ''}`
+})
+
+/**
+ * 非法草稿/拒绝原因的**可见提示**（不静默吞输入）。
+ *
+ * ## 权威归属：输入层优先，**不可用**时回落 P2
+ *
+ * "投影可用"指输入端口存在**且**该控件已被登记（`textProjection` 非 null）。
+ * 两者都成立时，解析级结论**只**取输入层 —— 否则会出现"两个解析器各判一次"
+ * （域约束宽严/`required` 语义可能给出不同结论），界面就可能显示一条
+ * 并不来自权威路径的错误。
+ *
+ * 投影不可用时回落 P2 的 `draftState`：这覆盖两种真实情形 ——
+ *  (a) 控件尚未获得焦点（会话里还没有它的草稿），此时 P2 的草稿镜像
+ *      是唯一可见信号；
+ *  (b) 组件被单独挂载（如 DOM 单测、或将来不经输入层的宿主），
+ *      此时若强行只认投影，"非法草稿"就**完全不可见** —— 那是把
+ *      "单一权威"做成了"静默吞输入"，恰好违反 #249 §19.1 的提示要求。
+ *
+ * 写入被**拒绝**的原因始终取 P2（唯一写路由的真实结论），与解析级提示不同。
+ */
+const problemText = computed(() => {
+  if (draftKind.value !== null && projection() !== null) {
+    if (inputProblem.value !== '') return inputProblem.value
+    const e = props.field.rejection
+    if (!e) return ''
+    const r = e.params.reason
+    return r === undefined ? e.code : `${e.code}: ${String(r)}`
+  }
+  if (props.field.draftState.state === 'invalid') {
+    const e = props.field.draftState.error
+    const r = e.params.reason
+    return r === undefined ? e.code : `${e.code}: ${String(r)}`
+  }
+  const e = props.field.rejection
+  if (!e) return ''
+  const r = e.params.reason
+  return r === undefined ? e.code : `${e.code}: ${String(r)}`
+})
+
+const problemKind = computed(() => {
+  if (draftKind.value !== null && projection() !== null) {
+    if (inputProblem.value !== '') return 'invalid'
+    return props.field.rejection ? 'rejected' : ''
+  }
+  if (props.field.draftState.state === 'invalid') return 'invalid'
+  return props.field.rejection ? 'rejected' : ''
+})
+
+/** 向量分量输入不发草稿（逐分量 `commit-component`），故不声明为草稿控件。 */
+function registerControl(): void {
+  const port = ctx?.wm.inputPort
+  const k = draftKind.value
+  if (port === null || port === undefined || k === null) return
+  const binding: ControlBinding = {
+    controlId: controlId.value,
+    contextId: 'workbench',
+    // `ref` 是**值**（不含 setter）。`property` 用控制 id：命令层据此回查
+    // `WM.applyPropertyRegistry` 的落点（P7 → P2 `commitFieldValue` 的桥，
+    // 由 `PropertyInspector` 登记；见那里的 `applyPropertyRegistry`）。
+    ref: { owner: { kind: 'document', id: '' }, property: controlId.value },
+    kind: k,
+    commitOn: 'enter-or-blur',
+    ...(props.field.control.min === undefined ? {} : { min: props.field.control.min }),
+    ...(props.field.control.max === undefined ? {} : { max: props.field.control.max }),
+    label: props.field.display.labelFallback,
+  }
+  port.bindControl(binding)
+}
+
+onMounted(() => {
+  const port = ctx?.wm.inputPort ?? null
+  registerControl()
+  if (port !== null) {
+    unsubscribe = port.subscribe(() => {
+      epoch.value += 1
+    })
+  }
+  // **不**在此 `registerTextControl`：控件的会话登记由 `focusin` 事件驱动
+  // （`adapters/inputBinding`）——那才是"焦点事实"的唯一来源。
+  // 未登记时 `textProjection` 返回 `null`，呈现回落到 `field.displayText`，
+  // 正是"还没开始编辑"的正确显示（#249 §19.1 的三个状态各有来源）。
+})
+
+onBeforeUnmount(() => {
+  unsubscribe?.()
+  unsubscribe = null
+  ctx?.wm.inputPort?.unbindControl(controlId.value)
+})
 
 /** 已解析值是否可直接用于受控控件的 `value` 绑定。 */
 const scalarValue = computed<string | number | boolean>(() => {
@@ -73,27 +249,31 @@ const scalarValue = computed<string | number | boolean>(() => {
   return ''
 })
 
-/** 草稿文本（编辑中优先，否则是展示文本）。 */
-const textValue = computed(() => props.field.draft ?? props.field.displayText)
+/**
+ * 草稿文本变化的**镜像**通知（不提交）。
+ *
+ * ## 它为什么还在，以及它为什么不是权威
+ *
+ * 草稿的权威是输入层（`textProjection`）。但父级 `PropertyInspector` 的
+ * `PanelSession.drafts` 仍被 `buildField` 读取（`rejection` 的落点也在那里），
+ * 故此处继续把变化**转发**给父级作为镜像。
+ *
+ * 呈现侧**不读**这份镜像（`shownText` 以投影为准），所以两处不一致时
+ * 以投影为准、不会出现"两个真相"。剩余口径已登记在
+ * `composition/seams.ts`（`property-draft-dual-track`，负责人 P10）。
+ */
+function onText(e: Event): void {
+  emit('draft', (e.target as HTMLInputElement | HTMLTextAreaElement).value)
+}
 
-/** 非法草稿必须有可见提示（不静默吞输入）；拒绝原因同样可见。 */
-const problemText = computed(() => {
-  if (props.field.draftState.state === 'invalid') {
-    const e = props.field.draftState.error
-    const r = e.params.reason
-    return r === undefined ? e.code : `${e.code}: ${String(r)}`
-  }
-  const e = props.field.rejection
-  if (e) {
-    const r = e.params.reason
-    return r === undefined ? e.code : `${e.code}: ${String(r)}`
-  }
-  return ''
-})
-
-const problemKind = computed(() =>
-  props.field.draftState.state === 'invalid' ? 'invalid' : props.field.rejection ? 'rejected' : '',
-)
+/**
+ * 失焦**不再由本组件处理**。
+ *
+ * 失焦的提交时机属输入层（`commitOn: 'enter-or-blur'` 的政策在
+ * `domain/textDraft.settleControl`）。本组件若也发一次 `commit`，
+ * 同一次失焦会被两处各提交一次 —— 那正是 A22/A25 要防的"重复消费"。
+ * 实际的失焦提交由 `adapters/inputBinding` 的 `focusout` → `blurTextControl` 完成。
+ */
 
 /** 分量当前值（向量控件）。 */
 function componentValue(index: number): number {
@@ -105,39 +285,41 @@ function componentValue(index: number): number {
   return typeof n === 'number' ? n : 0
 }
 
-function onText(e: Event): void {
-  emit('draft', (e.target as HTMLInputElement | HTMLTextAreaElement).value)
-}
-
 /**
- * 失焦：请求提交。**非法草稿保留**（不提交、不清除）——
- * 是否真的提交由父级按 `draftState === 'complete'` 判定，这里不重复实现该判据。
+ * 文本控件的**事实标注**（`adapters/inputBinding` 读它们提取 `KeyFact`/`PointerFact`）。
+ *
+ * 这正是 #249 §19.1「语义层不读 `document.activeElement`」的落点：
+ * DOM 只**声明事实**（我是哪个控件、什么类型、当前显示值是什么、域约束是什么），
+ * "谁该收到这个键 / 这份草稿能不能提交"由纯路由与纯解析按显式输入判定。
+ *
+ * ## 为什么域约束也走 DOM 事实
+ *
+ * 属性描述自带域（`pattern` / `min` / `max` / `required`）。适配器**不认识**
+ * 属性描述符（那会把它变成领域层），但它可以读 DOM 上的**声明**。
+ * 于是约束的传递路径是"描述 → 呈现声明 → 适配器读事实 → 纯解析判定"，
+ * 每一跳都只有一种职责，且判定始终只有一个来源（`domain/textDraft`）。
+ *
+ * 不这样做就会出现**两个解析器各判一次**：输入层判 `complete`、
+ * 属性自己的 pattern 判非法 —— 界面显示"可提交"，提交却被唯一写路由拒绝，
+ * 用户看到的是"输入没反应"（P7 合流实测到的 `bad value` 情形）。
  */
-function onBlur(): void {
-  focused.value = false
-  emit('commit')
-}
-
-/** Enter 提交、Escape 还原；两者都在此消费事件，避免冒泡后被重复处理。 */
-function onKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    emit('cancel')
-    return
+const textFacts = computed(() => {
+  const domain = props.field.descriptor.domain
+  const facts: Record<string, string> = {
+    'data-input-control-id': controlId.value,
+    'data-input-kind': draftKind.value ?? 'text',
+    'data-input-display': props.field.displayText,
+    'aria-label': props.field.display.labelFallback,
   }
-  if (e.key === 'Enter' && !e.shiftKey && !props.field.control.multiline) {
-    e.preventDefault()
-    emit('commit')
+  if (domain?.kind === 'pattern') {
+    facts['data-input-pattern'] = domain.source
+    if (domain.hintFallback !== undefined) facts['data-input-pattern-reason'] = domain.hintFallback
   }
-}
-
-// 外部值变化且未在编辑 ⇒ 草稿回落（编辑中不打断输入）。
-watch(
-  () => props.field.displayText,
-  () => {
-    if (!focused.value && props.field.draft !== null) emit('cancel')
-  },
-)
+  if (domain?.kind === 'text' && domain.maxLength !== undefined) {
+    facts['data-input-maxlength'] = String(domain.maxLength)
+  }
+  return facts
+})
 </script>
 
 <template>
@@ -225,40 +407,34 @@ watch(
           @input="(e: Event) => emit('commit-value', (e.target as HTMLInputElement).value)"
         />
         <input
+          v-bind="textFacts"
           type="text"
           class="ux-field-text ux-field-text--mono"
-          :value="textValue"
+          :value="shownText"
           spellcheck="false"
           @input="onText"
-          @focus="focused = true"
-          @blur="onBlur"
-          @keydown="onKeydown"
         />
       </template>
 
       <!-- 多行文本 -->
       <textarea
         v-else-if="kind === 'multiline-text'"
+        v-bind="textFacts"
         class="ux-field-textarea"
-        :value="textValue"
+        :value="shownText"
         spellcheck="false"
         @input="onText"
-        @focus="focused = true"
-        @blur="onBlur"
-        @keydown="onKeydown"
       />
 
       <!-- 字符串列表（分隔符来自描述符）：混合态留空提示而非预填首项值 -->
       <input
         v-else-if="kind === 'string-list'"
+        v-bind="textFacts"
         type="text"
         class="ux-field-text"
-        :value="isMixed ? '' : textValue"
+        :value="isMixed ? '' : shownText"
         :placeholder="isMixed ? '— 混合 —' : ''"
         @input="onText"
-        @focus="focused = true"
-        @blur="onBlur"
-        @keydown="onKeydown"
       />
 
       <!-- 默认（number/stepper/text/reference）：草稿 + 显式提交 -->
@@ -272,6 +448,7 @@ watch(
       -->
       <input
         v-else
+        v-bind="textFacts"
         type="text"
         :inputmode="isNumeric ? 'decimal' : undefined"
         :role="isNumeric ? 'spinbutton' : undefined"
@@ -279,13 +456,10 @@ watch(
         :aria-valuemax="isNumeric ? field.control.max : undefined"
         class="ux-field-text"
         :class="{ 'ux-field-text--mono': kind === 'reference' }"
-        :value="textValue"
+        :value="shownText"
         :placeholder="isMixed ? '— 混合 —' : ''"
         spellcheck="false"
         @input="onText"
-        @focus="focused = true"
-        @blur="onBlur"
-        @keydown="onKeydown"
       />
 
       <span v-if="field.control.unit?.symbolFallback" class="ux-field-unit">{{

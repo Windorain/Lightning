@@ -70,9 +70,30 @@ watch(
   () => {
     model.value = buildInspector(props.ctx, session)
     version.value++
+    // 每次重算后刷新提交落点登记：目标/选中集变化会改变 `resolveRefs` 的结果，
+    // 而落点闭包必须按**当前**描述符与上下文解析（不是快照）。
+    syncCommitSinks()
   },
   { immediate: true, deep: false },
 )
+
+/** 已登记的 controlId（卸载时按它清理，避免在 `applyPropertyRegistry` 里留孤儿）。 */
+const registeredSinkIds = new Set<string>()
+
+function syncCommitSinks(): void {
+  for (const section of model.value.sections) {
+    for (const row of section.rows) {
+      const desc = descriptorOf(row.field.descriptor.id)
+      if (!desc) continue
+      // 只登记**可编辑且有草稿语义**的字段：只读字段没有提交落点
+      // （`resolveRefs` 为空 ⇒ `edit.kind === 'readOnly'`）。
+      const field = buildField(props.ctx, desc, session)
+      if (field.edit.kind !== 'editable') continue
+      registerCommitSink(desc)
+      registeredSinkIds.add(`field:${desc.id}`)
+    }
+  }
+}
 
 function descriptorOf(propertyId: string): PropertyDescriptor | null {
   return workbenchRegistry().registry.descriptor(propertyId) ?? null
@@ -84,11 +105,41 @@ function fieldFor(propertyId: string) {
   return buildField(props.ctx, desc, session)
 }
 
-/** 草稿变化（不提交）。 */
+/** 草稿变化的**镜像**（呈现侧权威是输入层投影；此镜像供 P2 的会话/拒绝原因使用）。 */
 function onDraft(desc: PropertyDescriptor, text: string): void {
   const local = localPropertyOf(desc.id)
   session.drafts[local] = text
   session.rejections[local] = undefined as never
+}
+
+/**
+ * 把每个可编辑属性登记为**输入层的提交落点**。
+ *
+ * ## 为什么这条桥是必需的，以及它为什么在这里
+ *
+ * 输入层（`runtime/inputSession`）判定"草稿完整合法"后产出 `draft.commit`，
+ * 命令层把它映射成 `setProperty`（`application/inputCommands`）。但命令只携带
+ * `PropertyRef`（**值**，不含 setter）—— 真正的落点由装配侧按 `controlId` 解析。
+ *
+ * `application` 层不能认识呈现层的字段/描述符（那是分层倒置），
+ * 故这个映射由**呈现侧自己**登记：本组件知道自己的描述符与写函数，
+ * 于是把"controlId → 用唯一写路由提交这个值"注册进 `WM.applyPropertyRegistry`。
+ *
+ * 落点是 `commitFieldValue` —— 它经 `submitPropertyWrite` 走
+ * `applySetProperty`（P2 的唯一写路由），**不是** `descriptor.set` 直写。
+ *
+ * 退出：真实文档换成内核 `Document` 后（P10），`draft.commit` 可直接映射成
+ * 内核的 `setProperty`，本桥连同 `applyPropertyRegistry` 一起删除。
+ * 已登记于 `composition/seams.ts`。
+ */
+function registerCommitSink(desc: PropertyDescriptor): void {
+  props.ctx.wm.applyPropertyRegistry.set(`field:${desc.id}`, (value: number | string) => {
+    // 输入层已判为完整合法；此处只做"交给唯一写路由"。
+    // 被拒绝的原因落到 `session.rejections`（呈现可见，不静默）。
+    const local = localPropertyOf(desc.id)
+    const outcome = commitFieldValue(props.ctx, desc, value as never)
+    applyOutcome(local, outcome)
+  })
 }
 
 /** 提交当前草稿：仅在**完整合法**时提交（非法草稿保留并提示）。 */
@@ -140,6 +191,10 @@ function applyOutcome(local: string, outcome: { status: string; error?: unknown 
  * （#251 B7 的 C-11/D2.1 #23）。这里改为显式提交。
  */
 onBeforeUnmount(() => {
+  // 清理提交落点登记：本面板卸载后 `field:*` 不应再被解析（否则命令会打到
+  // 一个已经不在界面上的字段，表现为"改了没反应"）。
+  for (const id of registeredSinkIds) props.ctx.wm.applyPropertyRegistry.delete(id)
+  registeredSinkIds.clear()
   for (const section of model.value.sections) {
     for (const row of section.rows) {
       const draft = session.drafts[row.localId]

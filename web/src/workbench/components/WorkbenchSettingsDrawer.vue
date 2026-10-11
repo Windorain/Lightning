@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, onUnmounted, type Ref } from 'vue'
+import { computed, inject, onUnmounted, watch, type Ref } from 'vue'
 
 import ExportsListPanel from '@/workbench/components/ExportsListPanel.vue'
 import LocalBundlePanel from '@/workbench/components/LocalBundlePanel.vue'
@@ -29,15 +29,56 @@ function pickMode(m: WorkbenchWorkspaceMode): void {
   ctx.getConnection().selectedExportName = null
 }
 
-function onKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Escape') close()
-}
+/**
+ * 设置抽屉的弹窗作用域（**显式**）。
+ *
+ * ## B5 退役矩阵 #12（输入面）的删除记录 —— P7（#258）
+ *
+ * **已删除**：
+ *
+ * ```ts
+ * function onKeydown(e: KeyboardEvent) { if (e.key === 'Escape') close() }
+ * onMounted(() => { window.addEventListener('keydown', onKeydown) })   // ← 第四条 keydown
+ * onUnmounted(() => { window.removeEventListener('keydown', onKeydown) })
+ * ```
+ *
+ * 这是 `wikiInputShield.bindWikiModalEscape` 的同构重复：抽屉自己挂一条
+ * `window` keydown 只为处理 Escape。四个问题：
+ *  1. 它是全应用**第四条**键盘监听（另三条在 `chromeBinder`/`viewportBinder`/`wikiInputShield`），
+ *     Escape 会被多处各消费一次，而"谁先谁后"取决于挂载顺序（不可推理）；
+ *  2. `e.key === 'Escape'` 的判定散在组件里 —— 没有层级、没有优先级，
+ *     抽屉开着时它照样抢 Escape（即使焦点在别的弹窗里）；
+ *  3. 它不声明"背景被阻断"，于是抽屉开着时**视口仍能收到** `g` 一类快捷键；
+ *  4. 输入会话完全不知道抽屉存在，`modalScopeId()` 探针读不到它。
+ *
+ * 取代它的是 `ModalScopeState`：抽屉声明一个**具名作用域**（含 `blocksBackground`
+ * 与 Escape 回调），归属与优先级由 `domain/input` 的纯路由判定。
+ * 组件不再持有任何键盘监听。
+ */
+const SCOPE_ID = 'workbench-settings'
 
-onMounted(() => {
-  window.addEventListener('keydown', onKeydown)
-})
+let unbindScope: (() => void) | null = null
+
+watch(
+  open,
+  (isOpen) => {
+    unbindScope?.()
+    unbindScope = null
+    if (!isOpen) return
+    unbindScope = ctx.wm.requireInputPort().openModalScope({
+      scopeId: SCOPE_ID,
+      // 抽屉是遮罩式：开着时背景不应收到场景快捷键
+      blocksBackground: true,
+      confirmOnEnter: false,
+      onEscape: close,
+    })
+  },
+  { immediate: true },
+)
+
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
+  unbindScope?.()
+  unbindScope = null
 })
 </script>
 
