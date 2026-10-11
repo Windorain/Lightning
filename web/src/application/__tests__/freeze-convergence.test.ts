@@ -328,10 +328,9 @@ describe('冻结 #3 WouldBlockReason 统一 camelCase', () => {
 describe('冻结 #4 `null` 是合法值，但受理权在描述（nullable）', () => {
   it('`PropertyValue` 含 `null`（三处权威定义必须一致）', () => {
     const props = read('src/application/properties.ts')
-    // 行尾用 `\r?\n`：本仓 `i/lf w/crlf`（`core.autocrlf=true`，无 `.gitattributes`），
-    // 工作树文件是 CRLF。若正则写死 `\n\n`，本断言会在**任何** Windows 标准检出上
-    // 判红（假红）—— 它测的是"`PropertyValue` 是否含 `null`"，与行尾无关。
-    const m = props.match(/export type PropertyValue\s*=([\s\S]*?)\r?\n\r?\n/)
+    // 裸 `\n\n` 在此是**安全**的：`read` 已在唯一读入口把行尾归一化为 LF（见其注释）。
+    // 本条曾因 EOL 脆性在 CRLF 检出上判红（PR #268 的事故现场）。
+    const m = props.match(/export type PropertyValue\s*=([\s\S]*?)\n\n/)
     expect(m).not.toBeNull()
     expect(m![1]).toMatch(/\|\s*null/)
   })
