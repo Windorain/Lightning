@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, toRef, type Ref } from 'vue'
+import { computed, onScopeDispose, ref, toRef, type Ref } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
@@ -109,6 +109,42 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    * 视口组件卸载（Area 关闭/切类型）后，残留的订阅会在下次换帧时
    * 对着已 dispose 的 DRW 调 `presentWorldFrame` —— 一次真实的"幽灵重绘"。
    */
+  /**
+   * **响应式镜像**（P10 #261：派生值的呈现侧缓存）。
+   *
+   * ## 为什么需要它（一处真实的、由 e2e 抓出的缺陷）
+   *
+   * 首版把 `worldFrameIndex` 写成 `computed(() => kernel.frameIndex())` ——
+   * 看起来对，实际**不响应**：`kernel.frameIndex()` 读的是内核会话的**普通私有字段**
+   * （不是 Vue Ref），`computed` 收集不到任何依赖，于是它算出一次就再也不重算。
+   * 后果由 `multiblock-frame-regression.spec.ts` 抓到：拖滑杆换帧后，
+   * 视口底栏仍显示"帧 1/3"（DOM 用的是这个 computed），而
+   * `ctx.getFrameIndex()`（直接问内核）**已经是 2** —— 两个读面不一致。
+   *
+   * ## 修法：**推**而不是**拉**
+   *
+   * 内核状态是值（不可变快照），没有可订阅的 Ref；故呈现侧的镜像必须由
+   * **帧时钟的每帧广播**推过来（`onFrame`）。这与旧形态的差别不是"换成推了"，
+   * 而是**推的依据**：旧 `Ref` 由任何写入者改（operator、加载路径），
+   * 新镜像由"内核派生出的帧下标"这一**唯一**事实推出。
+   *
+   * 每帧同步（而不是只在换帧时）是刻意的：播放开关、倍率、帧数都可能
+   * 在两次换帧之间变化，而它们同样是呈现要显示的状态。
+   */
+  const frameIndexRef = ref(kernel?.frameIndex() ?? 0)
+  const playingRef = ref(kernel?.playback().playing ?? false)
+  const rateRef = ref(kernel?.playback().rate ?? 1)
+
+  /** 把内核的当前派生事实推入响应式镜像。 */
+  const syncMirror = (): void => {
+    if (!kernel) return
+    const idx = kernel.frameIndex()
+    if (frameIndexRef.value !== idx) frameIndexRef.value = idx
+    const p = kernel.playback()
+    if (playingRef.value !== p.playing) playingRef.value = p.playing
+    if (rateRef.value !== p.rate) rateRef.value = p.rate
+  }
+
   let lastPresentedFrame = -1
   const frameClock = ctx.getFrameClock()
   if (frameClock && kernel) {
@@ -128,6 +164,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
        * 反过来会让"这一帧的纹理时间"与"这一帧的世界帧"来自两个时刻。
        */
       drw.textureCache.value?.setSceneTime(sceneSeconds(info.time))
+      syncMirror()
       if (info.frameIndex === lastPresentedFrame) return
       lastPresentedFrame = info.frameIndex
       void drw.presentWorldFrame(info.frameIndex)
@@ -138,6 +175,10 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     // 首帧：进入视口时立刻呈现当前帧（不等第一次时钟 tick）。
     lastPresentedFrame = kernel.frameIndex()
     drw.textureCache.value?.setSceneTime(sceneSeconds(kernel.playback().time))
+  } else {
+    // 无帧时钟（组件挂载早于外壳装配）：退化为"静态第一帧"，但仍要
+    // 在每次渲染前同步一次镜像，使"装配稍后完成"能被观察到。
+    syncMirror()
   }
 
   return {
@@ -155,18 +196,18 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     structureDefinition: vpSlot.definition,
     mainMeshGroup: vpSlot.contentGroup,
     /**
-     * 世界帧下标（**派生**）。
+     * 世界帧下标（**派生**的响应式镜像）。
      *
      * 返回 `Ref<number>` 形态是**呈现兼容**：模板里写
      * `:world-frame-index="worldFrameIndex"` 需要可自动解包的 `Ref`。
-     * 它是一个 `computed`（只读）—— 与旧的可写 `Ref` 的差别在**写面**：
+     * 它是**只读**的（`Readonly<Ref<number>>`）—— 与旧的可写 `Ref` 的差别在**写面**：
      * 想改帧必须走 `setFrameIndex`（经内核命令），不能 `.value = i`。
      */
-    worldFrameIndex: computed(() => kernel?.frameIndex() ?? 0),
+    worldFrameIndex: frameIndexRef as Readonly<Ref<number>>,
     layerWorldY: ctx.getLayerWorldY(),
-    /** 播放状态（只读 `computed`；写面在 `togglePlayback`/`setFramePlayback`）。 */
-    isPlaying: computed(() => kernel?.playback().playing ?? false),
-    playbackRate: computed(() => kernel?.playback().rate ?? 1),
+    /** 播放状态（只读镜像；写面在 `togglePlayback`/`setFramePlayback`）。 */
+    isPlaying: playingRef as Readonly<Ref<boolean>>,
+    playbackRate: rateRef as Readonly<Ref<number>>,
     frameCount: computed(() => kernel?.frameCount() ?? (ctx.getDoc().value?.frameCount ?? 0)),
     computed: drw.computed,
     materialLibrary: drw.textureCache,
