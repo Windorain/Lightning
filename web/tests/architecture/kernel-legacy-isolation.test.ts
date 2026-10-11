@@ -576,6 +576,66 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
     exitStage:
       'P10b（#282）本批接线落地；退出条件同上一行（operator 退场时一并消失）。若本行在 P11 时仅剩诊断用途，应改为只导出类型或删除 —— 不得长期保留"仅测试使用"的生产导入',
   }),
+  // ── P10b（#282）Area 产品接线：旧外壳/旧 operator 消费新 Area 内核 ────────
+  //
+  // ## 这五条边为什么必须存在，以及它们**不**是"半成品替换"
+  //
+  // #249 §13 把「Area 可分割、合并、切换类型，切回恢复局部状态」列为基本骨架的
+  // 完成边界，A05/A17 的**产品级**判据也依赖它。P6 交付了完整的 Area 内核
+  // （`domain/workspace` 纯转移 + `editors/useAreaHost` 接线 + `editors/AreaHost.vue`
+  // 生命周期宿主），但**全树零生产消费者** —— 实测：
+  //
+  //  - `WorkbenchShell.vue` 只有一个 `<slot name="viewport" />`（恒一个 3D 视口）；
+  //  - `AreaHost.vue`/`useAreaHost.ts` 只被两处**注释**提到；
+  //  - `splitArea` 只在 `designUseCasesS16.test.ts` 的**纯域层**断言里被调用。
+  //
+  // 本批把它接进产品，于是**必然**出现"旧层引用新 Area 内核"的边 —— 它们正是
+  // 接线本身。与"半成品替换"的区别是**可判定的**：
+  //
+  //  - 消费的是**纯转移 + 显式生命周期**（`splitArea`/`mergeArea`/`setEditorType`、
+  //    `LifecycleLedger`），不是"旧实现的新名字"；旧形态是"用 `v-show` 保活组件
+  //    来保状态"（§15 第 10 条），那在本批**同批**被替代（布局成为 `Workspace` 的值）；
+  //  - 每条边都是**唯一**的接缝：`areaOperators` 是布局命令的**唯一**写入口
+  //    （`ctx.requireAreaSession()`），组件只**投影**布局、不持有它。
+  //
+  // ⇒ 退出阶段是"P10/P11 把工作台外壳与面板迁到 `shells/`+`editors/` 时随文件退场"。
+  Object.freeze({
+    from: 'src/operators/builtin/areaOperators.ts',
+    to: 'domain/workspace',
+    reason:
+      'P10b（#282）Area 布局命令的**唯一** operator 写入口：`splitArea`/`mergeArea`/`setEditorType`/`setSplitRatio` 的纯转移在此被暴露成命令（菜单可列、快捷键可绑、测试可调），并消费 `SplitDirection` 类型。此前这四条命令只有装配声明（`profiles.ts` 的 `M_LAYOUT_EDIT`）与纯域实现，**零生产调用方**',
+    exitStage:
+      'P10/P11：`operators/` 被 `application/` 命令面接管、旧 operator 注册表退役时，本边随文件退场；P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/runtime/host/workbenchHost.ts',
+    to: 'domain/workspace',
+    reason:
+      'P10b（#282）工作台宿主在**装配期**创建 Area 会话的初始布局（`createWorkspace`/`createInitialLayout`）——与"宿主创建内核会话"（`runtime/kernelSession`）同一口径：#249 要求「Area 与编辑器实例的寿命不依赖组件挂载」，故布局必须由宿主创建并挂在 `Context` 上，不能归渲染它的组件的 `ref`（`WorkbenchRoot` 切工作区时会 `:key` 卸载重建子树）',
+    exitStage:
+      'P10/P11：宿主装配被 `composition/` 的装配根接管时随文件迁移；P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/workbench/components/AreaLayoutHost.vue',
+    to: 'domain/workspace',
+    reason:
+      'P10b（#282）Area 分割树的**渲染投影**：把 `Workspace.layout`（`AreaLayout` 的 `area`/`split` 两种节点）渲染成递归 flex（`direction` + `ratio`），并按类型注入编辑器组件（#10「组件由外壳注入」，`editors/` 不 import 旧 `workbench/`）。它只**读**布局，不持有它',
+    exitStage: 'P10/P11：工作台外壳迁到 `shells/` 层时本组件随之外迁；P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/workbench/components/AreaNodeView.vue',
+    to: 'domain/workspace',
+    reason:
+      'P10b（#282）递归渲染单元（叶子 ⇒ `AreaHost`；内部节点 ⇒ flex 容器）。用**真递归**而不是"扁平化 + 绝对定位"：`ratio` 是嵌套语义（每次分割只切当前节点），扁平化会丢掉"哪次分割切的是哪一块"这一事实。消费 `AreaLayoutNode` 判别式类型',
+    exitStage: 'P10/P11：同 `AreaLayoutHost.vue`（同一组件族），随外壳迁移；P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/workbench/components/areaViewContext.ts',
+    to: 'runtime/lifecycle',
+    reason:
+      'P10b（#282）Area 渲染树的作用域上下文类型引用 `LifecycleLedger`（A13 资源账本）：递归组件每加深一层若靠层层传 props，会让"加深一层"变成"改 N 个签名"（§15 末段禁止的形态），故经 `provide`/`inject` 传递。账本的**写入**仍唯一经 `AreaHost`（`acquire`/`release`/`closeInstance`）',
+    exitStage: 'P10/P11：同 `AreaLayoutHost.vue`（同一组件族），随外壳迁移；P11 审计核销本行',
+  }),
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {

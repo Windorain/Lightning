@@ -96,6 +96,71 @@ export class ScreenRoot {
     return this.areas.find(a => a.id === areaId)
   }
 
+  /**
+   * **按需登记一个 3D 视口 region**（#282 P10b Area 产品接线）。
+   *
+   * ## 为什么需要它
+   *
+   * `createWorkbenchScreenRoot` 静态声明 region 列表，其中只有一个
+   * `REGION.WORKBENCH_VIEWPORT`。Area 分割出第二个 3D 视口时，那个视口需要一个
+   * **自己的** region —— 因为 region 是"输入域 + 相机键 + 视口槽位 + viewer 偏好"
+   * 的共同键（见 `mainCameras#cameraMainKeyForRegion` 的说明）。共用一个 region
+   * 会让两个视口共享机位与槽位，那正是 A05 判红的形态。
+   *
+   * ## 幂等
+   *
+   * 已有该 region 时**返回它**（不重建）—— 重挂同一个 Area 不应重置 viewer 偏好
+   * 或 hover 状态。这与 `ViewportManager.register(id)` 的幂等语义一致。
+   *
+   * ## 输入域 id 与 region id 相同
+   *
+   * `wmInputId` 取 region id：`hitTest` 经 `data-wm-region` 读出的就是 region id
+   * （`WorkbenchRoot` 的 hitTest 实现），故两者同值才让"指针命中哪个 Area"与
+   * "事件路由到哪个输入域"是同一个事实。**不**复用 `REGION.WORKBENCH_VIEWPORT`。
+   */
+  ensureViewportRegion(regionId: string, areaId: string): RegionNode {
+    const existing = this._byId.get(regionId)
+    if (existing) return existing
+    const node = createRegionNode(regionId, RegionType.MAIN, {
+      wmInputId: regionId,
+      keymapId: REGION_KEYMAP.WORKBENCH_VIEWPORT,
+      state: {
+        // 每个视口**自己的** viewer 偏好实例：共享会让"关掉 A 的注解显示"改到 B。
+        viewer: createViewerPreferences(`lightning.prefs.viewport.${regionId}`),
+        hover: createViewportHoverState(),
+      },
+    })
+    const area = this.areas.find(a => a.id === areaId)
+    if (area) {
+      area.regions.push(node)
+    } else {
+      // 找不到宿主 Area：**不静默吞** —— 加进 popup 区会让它可见但语义错位。
+      // 抛错是响亮的（调用方传了错的 areaId，那是编程错误）。
+      throw new Error(`ensureViewportRegion: 未知 area ${areaId}`)
+    }
+    this.reindex()
+    return node
+  }
+
+  /**
+   * 注销一个按需登记的视口 region（Area 被合并/关闭时调用）。
+   *
+   * 根 region（`REGION.WORKBENCH_VIEWPORT`）**不**允许注销：它是装配期静态声明的，
+   * 移除它会让单视口装配在合并后彻底没有视口。故显式拒绝（响亮），而不是静默保留
+   * 一个"注销失败"的错觉。
+   */
+  releaseViewportRegion(regionId: string): boolean {
+    if (regionId === REGION.WORKBENCH_VIEWPORT) return false
+    const node = this._byId.get(regionId)
+    if (!node) return false
+    for (const a of this.areas) {
+      const i = a.regions.indexOf(node)
+      if (i >= 0) a.regions.splice(i, 1)
+    }
+    this.reindex()
+    return true
+  }
+
   /** 枚举需向 WM 注册的输入域 id */
   wmInputRegionIds(): string[] {
     return [...this._byInputId.keys()]

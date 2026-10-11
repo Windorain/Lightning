@@ -22,9 +22,24 @@ const ctx = useContext()
 const host = inject(hostKey)! as WorkbenchHost
 const selection = ctx.getSelection()
 
-const VIEWPORT_REGION_ID = REGION.WORKBENCH_VIEWPORT
+/**
+ * **本视口的 region id**（#282 P10b Area 产品接线）。
+ *
+ * ## 为什么它是 prop 而不是常量
+ *
+ * 旧实现写死 `REGION.WORKBENCH_VIEWPORT` —— 于是"工作台只能有一个 3D 视口"
+ * 成为**组件层**的事实。Area 分割要挂第二个 3D Area，就必须让本组件知道自己
+ * 是**哪一个**视口（region 是"输入域/相机/槽位/机位"的键，见 `mainCameras`）。
+ *
+ * 缺省仍是 `REGION.WORKBENCH_VIEWPORT`：**单视口装配的行为逐字不变**
+ * （既有 e2e 与 `__vm__` 观测面读的就是这个 region）。
+ */
+const props = withDefaults(defineProps<{ regionId?: string }>(), {
+  regionId: REGION.WORKBENCH_VIEWPORT,
+})
+const VIEWPORT_REGION_ID = props.regionId
 const prefs = ctx.requireRegion(VIEWPORT_REGION_ID).state.viewer
-if (!prefs) throw new Error('viewer preferences missing on r-viewport')
+if (!prefs) throw new Error(`viewer preferences missing on ${VIEWPORT_REGION_ID}`)
 
 /** 多方块通道状态（视口本地）：必须先于 DRW 创建，`renderDoc` 即 DRW 的文档来源（T2.5 接线） */
 const mb = useMultiblockChannels(ctx)

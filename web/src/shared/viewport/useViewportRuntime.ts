@@ -82,7 +82,11 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     showAnnotationsRef: toRef(viewerPrefs, 'showAnnotations'),
     worldAnnotationGroupRef: vpSlot.worldAnnotationGroup,
     toolsOverlayGroupRef: vpSlot.toolsOverlayGroup,
-    viewportCameraRef: ctx.main.cameras[cameraMainKeyForRegion(regionId)],
+    // 经 `ensureCamera`（不是直接下标）：`cameras` 是**开放**键空间（按 region
+    // 分配，#282）—— 新视口的键可能尚未创建，直接下标会得到 `undefined`，
+    // 而 `DRW.bindViewportCameraSync` 拿到 `undefined` 会**静默跳过**机位同步
+    // （表现为"新视口转不动/不跟随时序"，且没有任何报错）。
+    viewportCameraRef: ctx.main.ensureCamera(cameraMainKeyForRegion(regionId)),
     cameraRef: vpSlot.camera,
     orbitTargetRef: vpSlot.orbitTarget,
   })

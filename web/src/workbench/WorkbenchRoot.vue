@@ -46,7 +46,6 @@ import { onMounted, onBeforeUnmount, provide, ref, computed, watch } from 'vue'
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
 import WorkbenchSettingsDrawer from '@/workbench/components/WorkbenchSettingsDrawer.vue'
 import WorkspaceTabs from '@/workbench/components/WorkspaceTabs.vue'
-import WorkbenchViewport from '@/workbench/components/WorkbenchViewport.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
@@ -84,6 +83,7 @@ import { ALL_CAPABILITIES } from '@/application/commands'
 import { assembleInput, type AssembledInput } from '@/composition/assembleInput'
 import { exclusiveKeydownOwners } from '@/adapters/inputBinding'
 import { workbenchCommandSink, workbenchInputHotkeys } from '@/workbench/inputHotkeys'
+import AreaLayoutHost from '@/workbench/components/AreaLayoutHost.vue'
 
 // ── 装配（B5 #7 的替代物：profile 是值，不是模块级全局）────────────────────
 import { CAPABILITY } from '@/composition/modules'
@@ -135,6 +135,34 @@ const propsCollapsed = computed(() => ctx.requireRegion(REGION.WORKBENCH_PROPS).
 
 const embedPublish = computed(() => ctx.main.embedPublish.value)
 const embedSettings = computed<EmbedSettings>(() => buildEmbedSettingsFromMain(ctx.main))
+
+/**
+ * **Area 工作区**（#282 P10b Area 产品接线）。
+ *
+ * ## 布局**不**归本组件
+ *
+ * #249 明文要求「Area 与编辑器实例的寿命不依赖组件挂载」。本组件切工作区时
+ * 会被 `:key` 卸载重建（P6 刻意的 `v-show` → `v-if`），故布局若放在这里的 `ref`
+ * 会随切换丢失 —— 而"切回恢复"正是 §13/A13 的判据。
+ *
+ * 布局因此由**宿主**在装配期创建并挂在 `Context` 上
+ * （`runtime/host/workbenchHost` → `ctx.setAreaSession`）；
+ * `AreaLayoutHost` 只把它渲染出来。本组件只保留一个 ref 用于把布局命令
+ * 暴露给菜单/测试（见 `areaHost()`）。
+ *
+ * 旧形态下"工作台有几个视口"由模板写死（`WorkbenchShell` 一个
+ * `<slot name="viewport">` ⇒ 恒一个 3D 视口），`AreaHost`/`useAreaHost`
+ * **零生产消费者**，于是 `splitArea` 只在纯域层测试里被调用 —— #249 §13
+ * 「Area 可分割、合并、切换类型」在产品里不可达。现在它可达了。
+ */
+const areaHostRef = ref<InstanceType<typeof AreaLayoutHost> | null>(null)
+
+/** 供菜单/快捷键/测试驱动布局命令（与 `AreaLayoutHost` 的 provide 是同一对象）。 */
+function areaHost() {
+  return ctx.hasAreaSession() ? ctx.requireAreaSession() : null
+}
+// e2e 需要能真实触发分割（走真实命令路径，而不是替身）
+;(window as unknown as Record<string, unknown>).__areaHost__ = areaHost
 
 // Context menu
 const contextMenu = createContextMenu()
@@ -401,7 +429,16 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
         </div>
       </template>
       <template #viewport>
-        <WorkbenchViewport v-if="workspace === 'preview' && ctx.getDoc().value" />
+        <!--
+          #282 P10b：单视口 slot → **Area 分割树渲染**。
+          `AreaLayoutHost` 把一个 Area（初始）渲染成 `AreaHost` + `WorkbenchViewport`；
+          分割后自动多出第二个（各有自己的 region ⇒ 自己的机位与视口槽位）。
+          无文档时仍是占位态（`WorkbenchViewport` 自己显示 No scene loaded）。
+        -->
+        <AreaLayoutHost
+          v-if="workspace === 'preview'"
+          ref="areaHostRef"
+        />
         <div v-else-if="workspace === 'wiki' && ctx.getDoc().value" class="wb-wiki-embed">
           <EmbedPreview :settings="embedSettings" :style="{ width: `${embedPublish.viewWidth}px`, height: `${embedPublish.viewHeight}px` }" />
         </div>

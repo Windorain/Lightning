@@ -19,6 +19,9 @@ import { bootWikiWorkbench } from '@/runtime/host/wikiWorkbenchBoot'
 import { CAPABILITY } from '@/composition/modules'
 import type { ShellRuntime } from '@/composition/shell'
 import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
+import { useAreaHost } from '@/editors/useAreaHost'
+import { editorTypeRegistry } from '@/editors/builtinEditors'
+import { createInitialLayout, createWorkspace } from '@/domain/workspace'
 import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 import {
   WORKBENCH_PANELS,
@@ -141,6 +144,33 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
 
   const host = new WorkbenchHost(main, ctx, wm, screen, services)
   computeLayout(ctx, screen)
+
+  // ── Area 会话（#282 P10b）────────────────────────────────────────────────
+  //
+  // 在**宿主**里创建（不是渲染它的组件里）：#249 要求「Area 与编辑器实例的寿命
+  // 不依赖组件挂载」。`WorkbenchRoot` 切工作区时用 `:key` 卸载重建子树，
+  // 若布局归组件的 `ref`，切走再切回会丢掉分割出的 Area 与两个视口的机位 ——
+  // 而"切回恢复"正是 §13/A13 的判据。
+  //
+  // 初始布局是**一个** 3D Area（`viewport3d`）：region 仍是 `r-viewport`，
+  // 故单视口装配的行为与既有 e2e/`__vm__` 观测面**逐字一致**（零回归）。
+  // 分割由 `splitArea` 等命令驱动（见 `operators/builtin/areaOperators`）。
+  //
+  // 只有**可调整布局**的外壳才建它：嵌入外壳在装配层就没有 `layout.edit`
+  // （#257），给它一个 Area 会话会让"固定布局"变成只在 UI 上藏了按钮。
+  if (shell.adjustableLayout) {
+    ctx.setAreaSession(
+      useAreaHost({
+        initial: createWorkspace({
+          id: 'workbench-ws',
+          editContextId: KERNEL_CONTEXT_ID,
+          layout: createInitialLayout({ id: 'a1', editorType: 'viewport3d' }),
+        }),
+        registry: editorTypeRegistry,
+        instancePrefix: 'wb',
+      }),
+    )
+  }
 
   for (const inputId of screen.wmInputRegionIds()) {
     wm.events.registerRegion(inputId)

@@ -42,6 +42,17 @@ import { acquireResource, closeInstance, openInstance, releaseResource, type Lif
 const props = defineProps<{
   /** Area 稳定 id（布局树里的 id）。 */
   areaId: string
+  /**
+   * **本 Area 的 region id**（#282 P10b）。
+   *
+   * 编辑器组件要按 region 定位自己的输入域、相机键与视口槽位
+   * （见 `runtime/mainCameras#cameraMainKeyForRegion`）。两个 3D Area 若共用
+   * 一个 region 就会共享机位 —— 而 A05 要求「保持独立观察视角」。
+   *
+   * 由外壳计算并传入（region 的分配属装配，不属本组件）；缺省 `null` 表示
+   * 本 Area 的类型不需要 region（如纯呈现型编辑器）。
+   */
+  regionId?: string | null
   /** 当前编辑器类型（切换时本组件会重挂内容）。 */
   editorType: string
   /** 活动实例 id（由父层分配；`null` 表示本 Area 不承载实例）。 */
@@ -173,7 +184,13 @@ onBeforeUnmount(close)
       这正是 A13「保留状态不靠隐藏组件存活」在模板层的表达：
       状态在 `Workspace.layout.localState` 里，组件被重建后从那里读回。
     -->
-    <component :is="editor" v-if="editor && instanceId" :key="instanceId" :area-id="areaId" />
+    <component
+      :is="editor"
+      v-if="editor && instanceId"
+      :key="instanceId"
+      :area-id="areaId"
+      :region-id="regionId ?? undefined"
+    />
     <!--
       没有可用编辑器组件时**不留空壳**：显示明确状态。
       #249 §13：「不允许暴露会假成功的按钮或空接口」。

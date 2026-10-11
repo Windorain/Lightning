@@ -33,6 +33,7 @@ import { asReadOnlyDiagnostics } from '@/application/diagnostics'
 import type { ScreenRoot, RegionNode } from '@/runtime/screenRoot'
 import { REGION } from '@/runtime/regionIds'
 import type { KernelSession } from '@/runtime/kernelSession'
+import type { AreaHostApi } from '@/editors/useAreaHost'
 
 function embedUnavailable(name: string): never {
   throw new Error(`embed: ${name} not available`)
@@ -201,6 +202,55 @@ export class Context {
   /** 是否有内核会话（供装配自检与诊断；不抛错）。 */
   hasKernelSession(): boolean {
     return this.kernel !== null
+  }
+
+  /**
+   * **Area 会话**（工作区布局 + 编辑器实例生命周期；#282 P10b）。
+   *
+   * ## 为什么它在 `Context` 上，而不是在渲染它的组件里
+   *
+   * #249 明文要求「**Area 与编辑器实例的寿命不依赖组件挂载**」。若布局归
+   * `AreaLayoutHost.vue` 的 `ref`，那么：
+   *
+   *  - `WorkbenchRoot` 用 `:key="ws-${workspace}"` 切工作区时会**卸载并重建**子树
+   *    （那是 P6 刻意改的：`v-show` → `v-if`，见该文件的注释）⇒ 切到 Wiki 再切回
+   *    预览，分割出来的第二个 Area 与两个视口的机位**全部丢失**；
+   *  - 而"切回恢复"正是 §13/A13 的判据（`localState` 存在的全部理由）。
+   *
+   * 放在 `Context` 上使布局与实例寿命**独立于任何组件**，与内核会话
+   * （`kernel`）同一口径 —— 两者都是"运行实例的状态"，由宿主创建、随实例存亡。
+   *
+   * ## 为什么类型是 `AreaHostApi | null`
+   *
+   * 嵌入外壳（查看器）**没有**布局编辑能力（#257：装配层就不含 `layout.edit`）。
+   * 用 `null` 表达"本实例没有 Area 会话"，与 `kernel` 字段同一手法；
+   * `requireAreaSession()` 对"该有却没有"的情形显式抛错（失败关闭）。
+   *
+   * 由宿主在装配期设置（`runtime/host/workbenchHost`），不由组件设置。
+   */
+  private areaSession: AreaHostApi | null = null
+
+  setAreaSession(session: AreaHostApi | null): void {
+    this.areaSession = session
+  }
+
+  /**
+   * 取 Area 会话；没有则抛错（**失败关闭**）。
+   *
+   * 布局命令（`splitArea`/`mergeArea`/`setEditorType`/`setSplitRatio`）的写面
+   * 必须经它 —— 若某装配没有 Area 会话，调用方应立刻得到明确失败，
+   * 而不是"点了分割没反应"（#249 §13 禁止的假成功控件形态）。
+   */
+  requireAreaSession(): AreaHostApi {
+    if (this.areaSession === null) {
+      throw new Error('Context: 本实例没有 Area 会话（布局编辑能力未装配，见 #282 / #257）')
+    }
+    return this.areaSession
+  }
+
+  /** 是否有 Area 会话（供装配自检与诊断；不抛错）。 */
+  hasAreaSession(): boolean {
+    return this.areaSession !== null
   }
 
   /**
