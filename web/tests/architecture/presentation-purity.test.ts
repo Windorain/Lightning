@@ -139,15 +139,12 @@ const LEGACY_RAF_SITES = [
       '把高频 pointermove 合并为每帧最多一次拾取。消费者是 `handlers/hoverHandler.ts`，'
       + '它写的是 `Region.state.hover`（视图态），**不**写文档/历史 ⇒ 不构成"推进业务"。',
   },
-  {
-    file: 'workbench/ux/panels/useMaterialAnimation.ts',
-    kind: 'business-advance',
-    owner: 'P4',
-    issue: 255,
-    replacement: 'P4 统一动画求值轨道（离散阶跃采样）',
-    exitStage: 'P4 交付同批（B5 已定：材质动画并入统一时间）',
-    note: '**不是** P5 的区（Lead 裁决：materialAnimation 归 P4）。此处仅登记以便 P11 对账。',
-  },
+  // `workbench/ux/panels/useMaterialAnimation.ts` 的登记已**核销**（P4 #255 合流时）：
+  // 该文件已在 P4 交付中删除，其 RAF 与 `elapsed += delta` 累积由统一场景时间 + 纯采样
+  // 替代（B5 #11）。本表的 `stale` 断言（"退役后必须同批更新本表"）正是抓到这一点的机制 ——
+  // 保留一条指向已删文件的登记会让 P11 拿着过期清单去核对不存在的依赖。
+  // 同时 `MaterialGallery.vue` 也不再持 RAF：它改为事件驱动（帧下标 watch），
+  // 故本表**不含**新增项。
   {
     file: 'embed/components/ToolTipBox.vue',
     kind: 'paint-wakeup',

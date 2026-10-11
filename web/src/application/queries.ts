@@ -26,13 +26,10 @@ import { samePropertyRef, type EntityRef, type PropertyRef, type Version } from 
 import { effectiveTransform, type EditContext, type SelectionState, type TimeValue } from '@/domain/editing'
 import { findObject, findObjectData, objectsInOrder, type ObjectData, type Scene, type SceneObject, type Transform } from '@/domain/scene'
 import {
-  authoredValue,
   findTrack,
-  propertyKey,
-  resolveEffectiveValue,
+  highestEffectiveLayer,
   sampleTrack,
   type EffectiveValueLayer,
-  type TrackValue,
 } from '@/domain/animation'
 import type { Document } from '@/domain/document'
 import type { ApplicationState } from './state'
@@ -42,6 +39,7 @@ import {
   evaluateEditability as evaluateRnaEditability,
   readProperty as readRnaProperty,
   type Editability,
+  type EffectiveSources,
   type PropertyValue,
   type PropertyDescriptor,
   type ReadMode,
@@ -265,6 +263,18 @@ export function describeProperty(state: ApplicationState, ref: PropertyRef): Res
 export type PropertyReadMode = ReadMode
 
 /**
+ * 有效值读数：值 + **来源标签** + 是否被轨道驱动。
+ *
+ * `value` 的权威是 RNA 读面；`source` 的权威是 `domain/animation` 的唯一优先级表
+ * （见 `queryEffectiveProperty` 的说明）。两者不是同一件事的两份拷贝。
+ */
+export interface EffectivePropertyValue {
+  readonly value: PropertyValue
+  readonly source: EffectiveValueLayer['kind']
+  readonly driven: boolean
+}
+
+/**
  * 读一个属性值 —— 经**同一份** RNA 值 handler（含分量寻址与有效值优先级）。
  *
  * `mode === 'effective'` 时的覆盖层来自编辑上下文的交互暂存（`interaction.overrides`），
@@ -292,16 +302,29 @@ export function readProperty(
 }
 
 /**
-
-/**
  * **有效值来源的层供给**（P4 的接缝面，`#255`）。
  *
- * ## 为什么在这里而不是在 `properties.ts`
+ * ## 本文件供给 `trackSampled` 与 `staged` 两层
  *
- * `properties.ts` 是 RNA 的**机制**层（优先级与校验），它不该知道"轨道存在哪"；
- * "轨道存在 `doc.animation`、通道手动值存在 `ctx.channelValues`"是本内核的
- * **状态事实**，归本文件（读面接线）。于是机制与状态的边界与 P2 的
- * `kernelAccessOf`（事实供给）同形。
+ * P2 的 `EffectiveSources` 有四层。分工：
+ *
+ *  - ① 文档基础值 —— 由 RNA 的 `readRaw` 提供（`kernelAccessOf`）；
+ *  - ② 手动预览值 —— **适用通道**（`EditContext.channelValues`）。通道不是内核
+ *    注册对象类型（它是**内容拥有者** `objectData`，见 `domain/multiblock`），
+ *    RNA 描述不了它，故这一层不在本文件供给 —— 见下方说明；
+ *  - ③ 已启用轨道的时间采样 —— **P4 在本函数供给**；
+ *  - ④ 活动编辑操作的暂存覆盖 —— 本函数供给（`interaction.overrides`）。
+ *
+ * ## 通道为什么走另一条路（`domain/multiblock#resolveChannelEffective`）
+ *
+ * 通道的拥有者是**内容**（多方块生成物），不是内核对象类型；把它塞进 RNA 就得给
+ * 内容伪造一个对象类型注册，而 #249 §3.3 要求"生成物只读、不编辑生成结果"。
+ * 故通道的有效值由 `domain/multiblock` 的纯解析器给出 —— 它**用的是同一张
+ * 优先级表**（`domain/animation#resolveEffectiveValue` 的 `LAYER_RANK`），
+ * 只是把四层都接上（含 ② 通道手动预览）。P6 在提供 `ChannelSet` 时接上它。
+ *
+ * ⇒ 这里**不**为通道写第二条优先级实现：要么经 RNA（本函数），要么经
+ * `resolveChannelEffective`（通道）。两条路共用优先级表，故不会给出互相矛盾的有效值。
  *
  * ## 只供给**有值**的层
  *
@@ -310,15 +333,10 @@ export function readProperty(
  * 与不传等价，但传 `null` 会被当作"有值且值为 null"（合法属性值），两者语义不同。
  */
 function effectiveSourcesOf(ctx: EditContext, doc: Document, ref: PropertyRef): EffectiveSources {
-  const sources: { preview?: PropertyValue; trackSampled?: PropertyValue; staged?: PropertyValue } = {}
+  const sources: { trackSampled?: PropertyValue; staged?: PropertyValue } = {}
 
-  // ② 编辑上下文手动预览值（通道面；`EditContext.channelValues` 按通道键索引）
-  const channelKey = channelKeyOf(ref.property)
-  if (channelKey !== null && ctx.channelValues[channelKey] !== undefined) {
-    sources.preview = ctx.channelValues[channelKey]
-  }
-
-  // ③ 已启用轨道的时间采样（给定时间直接求值，无累积量）
+  // ③ 已启用轨道的时间采样（给定时间直接求值，**无累积量** —— #249 §7
+  //    "禁止材质/视口自行累计 tick" 的结构性保证：本函数只吃 ctx.time）。
   const track = findTrack(doc.animation, ref)
   if (track && track.enabled) {
     const sampled = sampleTrack(track, ctx.time)
@@ -337,18 +355,53 @@ function effectiveSourcesOf(ctx: EditContext, doc: Document, ref: PropertyRef): 
 }
 
 /**
- * 通道键提取：限定式属性 ID `<objectTypeId>.channel.<key>` 与未限定的 `channel.<key>`
- * 都要认（前者是 RNA 限定式口径，后者是 `domain/multiblock#channelToPropertyRef` 的
- * 内容拥有者口径 —— 多方块通道不是内核注册对象类型）。
+ * 有效值读数（含**来源**与"是否被驱动"）。
+ *
+ * ## `value` 与 `source` 各有唯一权威（刻意分工，不是重复计算）
+ *
+ *  - `value` 来自 `readProperty(…, 'effective')` —— RNA 的读面是值的**唯一**实现
+ *    （含每层的 handler 校验与分量投影）；
+ *  - `source` 是**标签**，由 `domain/animation#highestEffectiveLayer` 的**唯一优先级表**
+ *    选出（`LAYER_RANK`）。**不新增第二张优先级表**。
+ *
+ * 两者由同一组 `EffectiveSources` 驱动，故不可能"值来自轨道、标签说来自暂存"。
+ * 若某一层存在但校验失败，`readProperty` 返回错误且本函数**原样透出** ——
+ * 不给"被拒绝的值"配一个成功的来源标签。
  */
-function channelKeyOf(property: string): string | null {
-  const marker = 'channel.'
-  const at = property.indexOf(marker)
-  if (at === -1) return null
-  // 只接受"开头"或"紧跟一个点"的形态，避免命中 `xchannel.y` 这类子串。
-  if (at !== 0 && property[at - 1] !== '.') return null
-  return property.slice(at + marker.length)
+export function queryEffectiveProperty(
+  state: ApplicationState,
+  contextId: string,
+  ref: PropertyRef,
+): Result<EffectivePropertyValue> {
+  const ctx = ctxOf(state, contextId)
+  if (!ctx) return err(missingTarget({ contextId }))
+  const doc = docOf(state, ctx.documentId)
+  if (!doc) return err(missingTarget({ documentId: ctx.documentId }))
+  const value = readProperty(state, contextId, ref, 'effective')
+  if (!value.ok) return value
+  const sources = effectiveSourcesOf(ctx, doc, ref)
+  const track = findTrack(doc.animation, ref)
+  return ok(
+    Object.freeze({
+      value: value.value,
+      source: effectiveSourceOf(sources),
+      driven: track !== undefined && track.enabled,
+    }),
+  )
 }
+
+/** 用 `domain/animation` 的**唯一优先级表**给有效值贴来源标签（无覆盖层 ⇒ `base`）。 */
+function effectiveSourceOf(sources: EffectiveSources): EffectiveValueLayer['kind'] {
+  const present: EffectiveValueLayer['kind'][] = []
+  if (sources.preview !== undefined) present.push('manualPreview')
+  if (sources.trackSampled !== undefined) present.push('trackSample')
+  if (sources.staged !== undefined) present.push('stagingOverride')
+  // 无覆盖层 ⇒ 有效值就是基础值。`resolveEffectiveValue` 对空集合返回错误是**对的**
+  // （它表达"没有任何覆盖层"），故这里显式回落到 `base` 而不是把错误当成失败。
+  return highestEffectiveLayer(present) ?? 'base'
+}
+
+/**
  * 交互相对于该属性的暂存值（`mode === 'effective'` 的输入）。
  *
  * 暂存按**对象**记录（`interaction.overrides[objectId]` 是一整个 `Transform`），

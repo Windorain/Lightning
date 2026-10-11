@@ -475,8 +475,20 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/workbench/ux/panels/AnnotationEditorPanel.vue',
       'web/src/workbench/ux/panels/MaterialGallery.vue',
       'web/src/workbench/ux/panels/TooltipEditorPanel.vue',
-      'web/src/workbench/ux/panels/blockInspector.ts',
-      'web/src/workbench/ux/panels/sceneInfo.ts',
+      // P2（#253）合流后新增的真实消费者：面板写路径仍落在旧运行时文档上
+      // （`ctx.getDoc()` 读 `RuntimeDocument`）。这是**双轨暂存**的一部分，
+      // 归口 P2→P10 退出（见 `composition/seams.ts` 的同名登记）。
+      'web/src/editors/workbench-rna.ts',
+      'web/src/workbench/ux/PropertyInspector.vue',
+      // **Vue 模板属性里的表达式**也是真依赖：`EmbedRoot.vue:52` 的
+      // `<EmbedViewport v-else-if="ctx.getDoc().value" …>` 在模板里读文档。
+      // 这处由"`.vue` 分段扫描"抓出（曾因 TS 词法把 `"…"` 当字符串而**漏报**；
+      // 漏消费者比假红危险，故 `.vue` 的模板段改用 HTML 口径 —— 见 `codeOfSource`）。
+      'web/src/embed/EmbedRoot.vue',
+      // 注：`workbench/ux/panels/blockInspector.ts` 与 `sceneInfo.ts` 曾在本表内，
+      // 但 P2 合流后二者已不再调用这三个 getter（本扫描器实测 0 命中）⇒ 已核销。
+      // 这正是"清单腐烂"断言（`extra`）的作用：文件改名/改实现后必须同步核销，
+      // 否则 P11 会拿着过期清单去核对不存在的依赖。
     ]),
     replacement: Object.freeze([
       'web/src/application/queries.ts#ReadView',
@@ -493,35 +505,259 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 去掉注释行后的源码。
+ * 去掉**注释与字符串字面量的内容**，只留代码骨架（保留行结构与 `${}` 里的代码）。
  *
- * 用**行级**判据（行首为 `*`、`//`、`/*`）而不是完整词法器：
- * 这是本项目既有的口径（`kernel-legacy-isolation.test.ts` 的"内核代码不得出现旧权威
- * 类型名"用的就是它）。理由：本判据要回答的是"这行**代码**里有没有该形态"，
- * 而退役说明里提到旧符号名（`// 本组件此前用 useMaterialAnimation`）是**有价值**的
- * 记录，不应被判为残留。
+ * ## 为什么不能只用"行级注释判据"（合流后实测的两处假红）
  *
- * 首版实测教训：若用词法器做"字符串也算/不算"的精细处理，`.vue` 文件里
- * JSDoc 中的反引号会干扰扫描（本文件首版探查脚本即因此把 `useMaterialAnimation`
- * 误判为残留）。行级判据没有这个陷阱，且与既有设施同源 —— 宁可口径一致地略保守，
- * 也不引入一个只有本文件使用的第二套词法。
+ * 初版用行级判据（行首为 `*`、`//`、`/*` 才剥）。它在当时的树上够用，但合流到
+ * P2/P3 之后立刻暴露两个真实缺口 —— 都由本文件的断言抓到，且**都是假红**：
+ *
+ *  1. **行尾注释**：`const x = 1 // 见 ctx.getDoc()` 不以 `//` 开头 ⇒ 未被剥掉；
+ *     P2 在 `composition/seams.ts` 里新增了带行尾注释的登记，于是命中被误算。
+ *  2. **字符串字面量里的散文**：`composition/seams.ts` 在一条 `newTrack`/`oldTrack`
+ *     说明字符串里写了 `` `editors/workbench-rna.ts` 经 `ctx.getDoc()` 读文档 `` ——
+ *     那是**关于**该机制的描述，不是对该机制的**依赖**。裸扫描把它算成消费者，
+ *     于是消费者清单被迫多登记一个"其实不需要迁移"的文件，并**误导 P5 去改它**。
+ *
+ * 这两类都不是"判据太松"，而是"判据看不到词法结构"。故升级为字符级扫描。
+ *
+ * ## 为什么保留 `${}` 里的代码（而不是把模板整体当字符串）
+ *
+ * 模板字面量的**字面量部分**是散文，但 `${…}` 里是**真代码**：
+ * `` `${ctx.getDoc().value}` `` 确实依赖 `getDoc`。若把整个模板当字符串一并剥掉，
+ * 就会**漏掉真实消费者**（假绿）—— 而"漏掉消费者"正是本登记表存在的理由，
+ * 比假红危险得多。故进入 `${` 后切回代码模式（用栈支持嵌套），只清字面量片段。
+ *
+ * ## 输出形态与已验证的边界
+ *
+ * 注释/字符串内容逐字符替换为**空格**（不删行）：行号与行结构不变（诊断可直接
+ * 显示命中行），且与 EOL 无关。**未闭合的引号**不吞掉后续行（回落到代码模式）——
+ * 宁可多留文本（漏报方向更安全）。
+ *
+ * 本函数带 13 条合成用例的负对照（见文件末"扫描器词法负对照"），逐条实测：
+ * 行尾注释 / 三类字符串 / 模板散文不误红，模板 `${}` 内代码与真代码必判红。
  */
-export function stripCommentLines(text: string): string {
-  return text
-    .split('\n')
-    .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
-    .join('\n')
+export function stripNonCode(text: string): string {
+  // 见 `stripNonCodeInto` —— 保留长度与行结构，故可逐行对齐使用。
+  return stripNonCodeInto(text, false)
 }
 
-/** 在给定源码里找某条判据的命中（返回命中行的全文，供证据显示）。 */
+/**
+ * 与 {@link stripNonCode} 同，但**不**把引号内容当字符串（HTML 模板口径）。
+ *
+ * ## 为什么 Vue 模板必须用另一套口径（本文件实测抓出的**假绿**）
+ *
+ * 合流后 `EmbedRoot.vue:52` 有一处真依赖：
+ *
+ * ```html
+ * <EmbedViewport v-else-if="ctx.getDoc().value" :settings="settings" />
+ * ```
+ *
+ * 那是模板属性里的**表达式**，是真代码。但 TS 词法把 `"…"` 当字符串字面量，
+ * 于是这处依赖被整段清空 ⇒ 消费者清单**漏掉**它（假绿）。
+ * 漏消费者正是本登记表存在的理由，比假红危险 —— 必须区分两种口径：
+ *  - `<script>` 段：TS 词法（引号 = 字符串，内容非代码）；
+ *  - 模板/样式段：HTML 口径，只去 `<!-- -->` 注释，引号内容是表达式 ⇒ 保留。
+ */
+export function stripNonCodeHtml(text: string): string {
+  return stripNonCodeInto(text, true)
+}
+
+function stripNonCodeInto(text: string, quotedIsCode: boolean): string {
+  const out = text.split('')
+  const blank = (i: number): void => {
+    if (out[i] !== '\n' && out[i] !== '\r') out[i] = ' '
+  }
+  const n = text.length
+  let mode: 'code' | 'line' | 'block' | 'single' | 'double' | 'template' | 'htmlComment' = 'code'
+  /** 模板表达式嵌套栈：每进入一层 `${` 压一帧，记该层内 `{}` 深度。 */
+  const frames: number[] = []
+  let i = 0
+  while (i < n) {
+    const c = text[i]
+    if (mode === 'code') {
+      const c2 = text[i + 1]
+      if (quotedIsCode && c === '<' && text.startsWith('<!--', i)) {
+        mode = 'htmlComment'
+        blank(i)
+        blank(i + 1)
+        blank(i + 2)
+        blank(i + 3)
+        i += 4
+        continue
+      }
+      if (c === '/' && c2 === '/') {
+        mode = 'line'
+        blank(i)
+        blank(i + 1)
+        i += 2
+        continue
+      }
+      if (c === '/' && c2 === '*') {
+        mode = 'block'
+        blank(i)
+        blank(i + 1)
+        i += 2
+        continue
+      }
+      if (!quotedIsCode && (c === "'" || c === '"')) {
+        mode = c === "'" ? 'single' : 'double'
+        blank(i)
+        i++
+        continue
+      }
+      if (c === '`') {
+        mode = 'template'
+        blank(i)
+        i++
+        continue
+      }
+      // 模板表达式收尾：`}` 把当前层闭合时回到模板字面量模式
+      if (c === '}' && frames.length > 0) {
+        if (frames[frames.length - 1] === 0) {
+          frames.pop()
+          mode = 'template'
+          blank(i)
+          i++
+          continue
+        }
+        frames[frames.length - 1] -= 1
+        i++
+        continue
+      }
+      if (c === '{' && frames.length > 0) frames[frames.length - 1] += 1
+      i++
+      continue
+    }
+    if (mode === 'htmlComment') {
+      if (text.startsWith('-->', i)) {
+        mode = 'code'
+        blank(i)
+        blank(i + 1)
+        blank(i + 2)
+        i += 3
+        continue
+      }
+      blank(i)
+      i++
+      continue
+    }
+    if (mode === 'line') {
+      if (c === '\n') {
+        mode = 'code'
+        i++
+        continue
+      }
+      blank(i)
+      i++
+      continue
+    }
+    if (mode === 'block') {
+      if (c === '*' && text[i + 1] === '/') {
+        mode = 'code'
+        blank(i)
+        blank(i + 1)
+        i += 2
+        continue
+      }
+      blank(i)
+      i++
+      continue
+    }
+    if (mode === 'single' || mode === 'double') {
+      const quote = mode === 'single' ? "'" : '"'
+      if (c === '\\') {
+        blank(i)
+        blank(i + 1)
+        i += 2
+        continue
+      }
+      // 未闭合的引号**不**吞掉后续行：宁可多留文本（漏报方向更安全）
+      if (c === '\n') {
+        mode = 'code'
+        i++
+        continue
+      }
+      if (c === quote) {
+        mode = 'code'
+        blank(i)
+        i++
+        continue
+      }
+      blank(i)
+      i++
+      continue
+    }
+    // mode === 'template'：字面量片段置空，`${` 切回代码模式
+    if (c === '\\') {
+      blank(i)
+      blank(i + 1)
+      i += 2
+      continue
+    }
+    if (c === '`') {
+      mode = 'code'
+      blank(i)
+      i++
+      continue
+    }
+    if (c === '$' && text[i + 1] === '{') {
+      frames.push(0)
+      mode = 'code'
+      blank(i)
+      blank(i + 1)
+      i += 2
+      continue
+    }
+    blank(i)
+    i++
+  }
+  return out.join('')
+}
+
+/**
+ * 按**文件种类**取"代码骨架"（供扫描）：`.vue` 分段处理，其余走 TS 词法。
+ *
+ * vue 分段规则：`<script>` 段用 TS 词法；模板/样式段用 HTML 口径。
+ * 两个口径都**保留长度与行结构**，故拼接后逐行对齐仍然成立。
+ */
+export function codeOfSource(absPath: string, raw: string): string {
+  if (!absPath.endsWith('.vue')) return stripNonCode(raw)
+  const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi
+  const pieces: string[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(raw)) !== null) {
+    const open = m.index
+    const closeStart = open + m[0].length - '</script>'.length
+    const bodyStart = open + m[0].indexOf('>') + 1
+    pieces.push(stripNonCodeHtml(raw.slice(last, open)))
+    pieces.push(raw.slice(open, bodyStart))
+    pieces.push(stripNonCode(m[1]))
+    pieces.push(raw.slice(closeStart, closeStart + '</script>'.length))
+    last = closeStart + '</script>'.length
+  }
+  pieces.push(stripNonCodeHtml(raw.slice(last)))
+  return pieces.join('')
+}
+
+/** 便利包装（负对照用）：对**原始文本**跑 TS 词法剥离后找命中。 */
 export function findCriterionHits(
   text: string,
   criterion: SymbolCriterion,
   side: 'own' | 'consumer' = 'consumer',
 ): readonly string[] {
+  return findCriterionHitsIn(stripNonCode(text), criterion, side)
+}
+
+/** 找某条判据在**已去注释/字符串的代码骨架**里的命中（返回命中行，供证据显示）。 */
+export function findCriterionHitsIn(
+  code: string,
+  criterion: SymbolCriterion,
+  side: 'own' | 'consumer' = 'consumer',
+): readonly string[] {
   const scope = criterion.scope ?? 'any'
   if (scope !== 'any' && scope !== side) return Object.freeze([] as string[])
-  const code = stripCommentLines(text)
   const re = new RegExp(criterion.pattern, 'g')
   const hits: string[] = []
   for (const line of code.split('\n')) {
@@ -593,7 +829,8 @@ export function scanEntryResidual(
     }
     for (const c of entry.symbols) {
       const side: 'own' | 'consumer' = rel === own ? 'own' : 'consumer'
-      for (const line of findCriterionHits(text, c, side)) {
+      // `.vue` 按段取代码骨架（模板属性里的表达式是真代码），其余走 TS 词法。
+      for (const line of findCriterionHitsIn(codeOfSource(abs, text), c, side)) {
         out.push(Object.freeze({ file: `web/${rel}`, symbol: c.name, line }))
       }
     }
@@ -1024,6 +1261,54 @@ describe('判据精度负对照：子串撞名不得误红，真依赖残留必�
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 扫描器词法负对照（合流后实测的假红来源，逐条钉住）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('扫描器词法：注释与字符串不算残留，但 `${}` 内的代码算', () => {
+  /**
+   * 这一组是**合流到 P2/P3 后抓出的两处假红**的回归钉。
+   *
+   * 现场：`composition/seams.ts` 用**行尾注释**与**字符串字面量内散文**提到了
+   * `ctx.getDoc()`，行级注释判据看不见两者 ⇒ 它被算成"`runtime/context.ts` 的
+   * 消费者"，于是消费者清单被迫多登记一个**不需要迁移**的文件，
+   * 并会误导 P5 去改它。这不是判据太松，是判据看不到词法结构。
+   */
+  const cases: readonly (readonly [string, string, boolean])[] = [
+    ['行尾注释', 'const x = 1 // 见 ctx.getDoc()', false],
+    ['行首注释', '// ctx.getDoc()', false],
+    ['块注释同行', '/* ctx.getDoc() */', false],
+    ['块注释跨行', '/*\n * ctx.getDoc()\n */', false],
+    ['单引号字符串', "const s = 'ctx.getDoc()'", false],
+    ['双引号字符串', 'const s = "ctx.getDoc()"', false],
+    ['模板字面量散文', 'const s = `经 ctx.getDoc() 读文档`', false],
+    ['字符串内转义引号', "const s = 'a\\' ctx.getDoc()'", false],
+    // 反向：真代码与模板表达式内的代码**必须**判红（否则就是假绿 —— 漏消费者）
+    ['模板内表达式', 'const s = `${ctx.getDoc().value}`', true],
+    ['嵌套模板表达式', 'const s = `${a ?? `${ctx.getDoc()}`}`', true],
+    ['真调用', 'const d = ctx.getDoc().value', true],
+    ['声明位', 'getDoc(): Ref<X> {', true],
+    ['未闭合引号回落代码', "const s = 'oops\nconst d = ctx.getDoc().value", true],
+  ]
+
+  it.each(cases)('%s ⇒ 命中=%s', (_label, input, want) => {
+    expect(stripNonCode(input).includes('getDoc'), `输入: ${JSON.stringify(input)}`).toBe(want)
+  })
+
+  it('**真树对照**：散文提到 `ctx.getDoc()` 的文件不算消费者，真代码算', () => {
+    const readSrc = (rel: string): string => fs.readFileSync(path.join(WEB_ROOT, 'src', rel), 'utf8')
+    const refs = (rel: string): number =>
+      stripNonCode(readSrc(rel))
+        .split('\n')
+        .filter((l) => /\.getDoc\s*\(/.test(l)).length
+    // `composition/seams.ts` 只在说明字符串里提到它 ⇒ 0 处代码引用
+    expect(refs('composition/seams.ts'), 'seams.ts 只有散文提及，不得算消费者').toBe(0)
+    // 而这两个文件**确实**在代码里调用 ⇒ 必须 > 0（反空洞真）
+    expect(refs('editors/workbench-rna.ts'), 'workbench-rna.ts 是真消费者').toBeGreaterThan(0)
+    expect(refs('workbench/ux/PropertyInspector.vue'), 'PropertyInspector.vue 是真消费者').toBeGreaterThan(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 相位翻转仿真：证明"P5/P6 执行删除后翻相位能保持绿"
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1074,13 +1359,16 @@ describe('相位翻转仿真：把登记表投影到一份"已执行删除"的�
     for (const rel of files) {
       const abs = path.join(dest, rel)
       if (!fs.existsSync(abs)) continue
-      const kept = fs
-        .readFileSync(abs, 'utf8')
-        .split('\n')
-        .filter((line) => {
-          const code = stripCommentLines(line)
-          return !allMatchers.some((re) => re.test(code))
-        })
+      // **整文件**去注释/字符串（而不是逐行）：扫描器是有状态的（块注释、模板
+      // 字面量都跨行），逐行喂入会让"看起来是代码"的片段残留（首版实测：
+      // 块注释中间那几行不含行首标记，逐行调用时状态被重置）。
+      // 输出与输入**逐行对齐**（不删行），故可按下标安全裁剪。
+      const raw = fs.readFileSync(abs, 'utf8')
+      const codeLines = codeOfSource(abs, raw).split(/\r?\n/)
+      const kept = raw.split(/\r?\n/).filter((_line, idx) => {
+        const code = codeLines[idx] ?? ''
+        return !allMatchers.some((re) => re.test(code))
+      })
       fs.writeFileSync(abs, kept.join('\n'), 'utf8')
     }
     return dest

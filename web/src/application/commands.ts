@@ -69,9 +69,7 @@ import {
   type TimeValue,
 } from '@/domain/editing'
 import {
-  animationDrivenKeys,
-  checkValueAgainstProperty,
-  declaredValueType,
+  checkValueAgainstDeclaredType,
   findTrack,
   insertKeyframe,
   propertyKey,
@@ -116,7 +114,11 @@ import {
 import { findObject, findObjectData, sameTransform, type Scene, type Transform, type Vec3 } from '@/domain/scene'
 import type { ApplicationState, EffectRequest } from './state'
 import { applySetProperty, type SetPropertyCommand } from './property-commands'
-import { type PropertyValue } from './properties'
+import {
+  describeProperty as describeRnaProperty,
+  type PropertyDescriptor,
+  type PropertyValue,
+} from './properties'
 import { kernelAccessOf, kernelPropertyRegistry, kernelWritePorts } from './kernel-properties'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1239,16 +1241,25 @@ function reduceInsertKeyframe(state: ApplicationState, cmd: InsertKeyframeComman
   if (!lease.ok) return rejected(state, lease.error)
 
   const existing = findTrack(doc.animation, cmd.target)
-  // 类型优先取**属性声明**（`declaredValueType`），其次已有轨道，最后才由值推断。
+  // 类型优先取**属性声明**（RNA 描述），其次已有轨道，最后才由值推断。
   // 顺序不能颠倒：只从值推断会让"往 vec3 属性插一个数字"变成合法操作。
-  const valueType = cmd.valueType ?? declaredValueType(cmd.target.property) ?? existing?.valueType ?? inferValueType(cmd.value)
+  //
+  // GF-5 收敛后类型**不再**由本层的第二张表给出（P4 曾有 `declaredValueType(property)`），
+  // 而是向 RNA 注册表解析 —— `validateAnimationTarget` 已保证描述可解析，故此处直接取用。
+  const described = describeRnaProperty(kernelPropertyRegistry().registry, cmd.target)
+  if (!described.ok) return rejected(state, described.error)
+  const declaredType = trackValueTypeOf(described.value.valueType)
+  const valueType = cmd.valueType ?? declaredType ?? existing?.valueType ?? inferValueType(cmd.value)
   const interpolation = cmd.interpolation ?? existing?.interpolation ?? defaultInterpolationFor(valueType)
-  const legalValues = cmd.legalValues ?? existing?.legalValues
+  // 枚举/布尔的合法取值同样取自**声明域**（RNA `ValueDomain`），不另立一份。
+  const legalValues = cmd.legalValues ?? existing?.legalValues ?? legalValuesOf(described.value)
   const quantization = cmd.quantization ?? existing?.quantization
 
   // 值与属性声明类型不符 ⇒ 在写入点拒绝（不把坏数据存进文档）
-  const typeError = checkValueAgainstProperty(cmd.target.property, cmd.value)
-  if (typeError) return rejected(state, typeError)
+  if (declaredType !== undefined) {
+    const typeError = checkValueAgainstDeclaredType(declaredType, cmd.value)
+    if (typeError) return rejected(state, typeError)
+  }
 
   const base: AnimationTrack =
     existing ??
@@ -1323,8 +1334,48 @@ function reducePublishDefault(state: ApplicationState, cmd: PublishDefaultComman
   return applyAnimationChange(state, doc, ctx, next, `publish default ${cmd.target.property}`)
 }
 
-/** 动画目标的公共校验：目标存在、可写、类型允许动画。 */
-function validateAnimationTarget(doc: Document, ref: PropertyRef): DomainError | null {
+/**
+ * RNA 值类型 → 轨道值类型。
+ *
+ * 两侧的**取值空间不同**，映射是有损的、也是必须显式的一处：
+ *  - RNA 的 `PropertyValueType` 是**开放字符串**（`PropertyValueType = string`）
+ *    —— 扩展类型可以注册进来，故不能写成封闭联合；
+ *  - 轨道的 `TrackValueType` 是**可动画子集**（离散/连续插值各自有明确语义）。
+ *
+ * 未映射的类型返回 `undefined` ⇒ 调用方回落到"已有轨道类型"或"由值推断"。
+ * **不**在这里猜一个类型：猜错会让"不可动画的值类型"被插进轨道。
+ */
+function trackValueTypeOf(valueType: string): TrackValueType | undefined {
+  switch (valueType) {
+    case 'number':
+    case 'integer':
+    case 'vec3':
+    case 'quat':
+    case 'string':
+    case 'boolean':
+      return valueType
+    default:
+      return undefined
+  }
+}
+
+/**
+ * 由 RNA **声明域**推出轨道的合法取值集合（枚举/布尔）。
+ *
+ * 为什么取自声明域而不是由调用方传：`legalValues` 是"这条轨道允许哪些值"，
+ * 而"该属性允许哪些值"是**属性声明的同一事实**。两处各写一份 ⇒ 枚举项
+ * 增删后轨道校验静默失效（插入了声明域外的值，直到采样时才暴露）。
+ *
+ * 返回 `undefined` = 该类型不做成员校验（数值类由域的范围约束在值 handler 里管）。
+ */
+function legalValuesOf(desc: PropertyDescriptor): readonly TrackValue[] | undefined {
+  const domain = desc.domain
+  if (!domain) return undefined
+  if (domain.kind === 'enum') return domain.items.map((i) => i.value)
+  return undefined
+}
+
+/** 动画目标的公共校验：目标存在、可写、类型允许动画。 */function validateAnimationTarget(doc: Document, ref: PropertyRef): DomainError | null {
   if (ref.owner.kind !== 'object') {
     return unsupportedOperation({ ownerKind: ref.owner.kind, property: ref.property })
   }
@@ -1334,11 +1385,23 @@ function validateAnimationTarget(doc: Document, ref: PropertyRef): DomainError |
   if (!data) return missingTarget({ dataId: obj.dataId, property: ref.property })
   // 写权按拥有者判定（#249 §3.3）：多方块生成物的**内容**只读。
   if (data.source === 'content') return readOnly({ owner: data.source, objectId: ref.owner.id, property: ref.property })
-  const desc = Object.prototype.hasOwnProperty.call(doc.types, obj.type) ? doc.types[obj.type] : undefined
-  if (!desc) return unsupportedOperation({ objectType: obj.type, property: ref.property })
   // 动画资格（契约 §5.1 `PropertyDescriptor.animatable`）：不可动画的属性不能建轨道，
   // 否则 UI 会提供一个"关键帧按钮点了没反应"的假成功控件（#249 §13 明文禁止）。
-  if (!desc.animatableProperties.includes(ref.property)) {
+  //
+  // ## 权威是 **RNA 注册表**（P2 GF-5 收敛后），不是本层的第二张表
+  //
+  // P1-P4 开发期这里读的是 `doc.types[obj.type].animatableProperties`（文档模型自带的
+  // 类型描述）。GF-5 收敛把属性语义的**唯一权威**移到 RNA 注册表（`application/properties`），
+  // 内核类型经 `kernel-properties.ts` 注册 —— `doc.types` 已不再是属性词汇的持有者。
+  // 若此处仍读旧字段，就会出现"注册表说不可动画、命令层说可以"的两套判据
+  // （正是 #250 GF-5 要消除的形态）。故改为向注册表解析描述。
+  //
+  // `describeProperty` 对未注册属性返回 `UnsupportedOperation`，其错误**原样透出** ——
+  // 不折叠成本层的 `propertyNotAnimatable`，否则"未注册"与"已注册但不可动画"
+  // 在诊断上会变成同一件事（而两者的处置不同：前者是缺登记，后者是设计如此）。
+  const described = describeRnaProperty(kernelPropertyRegistry().registry, ref)
+  if (!described.ok) return described.error
+  if (!described.value.animatable) {
     return unsupportedOperation({ reason: 'propertyNotAnimatable', property: ref.property, objectType: obj.type })
   }
   return null

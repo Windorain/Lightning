@@ -121,13 +121,12 @@ watch(() => ctx.getDoc().value, () => refresh(), { immediate: true })
 // **样本来自纯采样器** `sampleTextureSequence`。两处消费者（网格缩略图与详情
 // 缩略图）在同一次时间推进里用**同一个**时间值，故同时间同结果（A27）。
 //
-// 时钟是**外围**的：`requestAnimationFrame` 只负责"何时重画一次"，
-// 不参与"当前是哪一帧"——那是场景时间与纯采样器算出来的。这与旧实现的差别
-// 不是"换了个循环"，而是**没有任何东西累积**。
+// 时钟是**外围**的：本组件不持有任何调度器，重画由两个**事件**驱动
+// （文档变化、帧下标变化）。这与旧实现的差别不是"换了个循环"，而是
+// **没有任何东西累积，也没有任何东西自驱**。
 
 /** 缓存的序列（按 dataUrl + 声明解析一次；解析失败 ⇒ 不播动画）。 */
 const sequences = new Map<string, TextureSequence | null>()
-const animationHandles = new Map<string, number>()
 const animationCanvases = new Map<string, HTMLCanvasElement>()
 const animationImages = new Map<string, HTMLImageElement>()
 
@@ -195,7 +194,24 @@ function paint(canvas: HTMLCanvasElement, img: HTMLImageElement, card: MaterialC
   g.drawImage(img, 0, sample.frame * frameSize, frameSize, frameSize, 0, 0, frameSize, frameSize)
 }
 
-/** 所有在册缩略图按同一场景时间重画一次（跳帧/倒退/暂停都由它体现）。 */
+/**
+ * 所有在册缩略图按同一场景时间重画一次（跳帧/倒退/暂停都由它体现）。
+ *
+ * ## 为什么这里是**事件驱动**而不是 rAF 循环（合流后修正）
+ *
+ * P4 初版让一个 `requestAnimationFrame` 循环每帧调用本函数。那是**多余且有害**的：
+ *
+ *  - `sceneSeconds()`（见下）是**帧下标的纯函数** —— 没有累积量、没有独立时钟。
+ *    帧下标不变时它每次都返回同一个数，于是那个循环每帧重画**完全相同的像素**；
+ *  - 而两个输入都已各自被 `watch` 覆盖（文档变化 → `refresh()`；帧下标变化 →
+ *    本函数）。⇒ 循环没有提供任何新的重画时机。
+ *
+ * 合流到 P5 后被 `presentation-purity.test.ts` 的「遗留 RAF 双向登记」闸门抓到
+ * （它普查 `src/` 全部真实 RAF 调用点，未登记即判红）。**正确的处置不是把它
+ * 登记成 `paint-wakeup`，而是删除它** —— 登记是给"暂时无法消除的接缝"用的，
+ * 而这一处可以直接消除。这也更贴合 #249 §19.3「禁止材质/视口自行累计 tick」
+ * 与 §15 第 6 条「业务推进可枚举」的意图：**能不留自驱调度就不留**。
+ */
 function paintAll(): void {
   const seconds = sceneSeconds()
   for (const [key, canvas] of animationCanvases) {
@@ -209,31 +225,12 @@ function paintAll(): void {
   }
 }
 
-/** 只在有动画缩略图时唤醒重画（绘制唤醒不写领域状态，#249 §15 第 6 条）。 */
-function ensureLoop(): void {
-  if (animationHandles.size > 0) return
-  const step = (): void => {
-    paintAll()
-    animationHandles.set('__loop__', requestAnimationFrame(step))
-  }
-  animationHandles.set('__loop__', requestAnimationFrame(step))
-}
-
-function stopLoop(): void {
-  const handle = animationHandles.get('__loop__')
-  if (handle !== undefined) {
-    cancelAnimationFrame(handle)
-    animationHandles.delete('__loop__')
-  }
-}
-
 /** Vue `:ref` 绑定入口（与旧 `useMaterialAnimation().setCanvasRef` 同一调用形态）。 */
 function setCanvasRef(el: unknown, materialId: string): void {
   const canvas = el as HTMLCanvasElement | null
   if (!canvas) {
     animationCanvases.delete(materialId)
     animationImages.delete(materialId)
-    if (animationCanvases.size === 0) stopLoop()
     return
   }
   const lookupId = materialId.endsWith('-detail') ? materialId.slice(0, -7) : materialId
@@ -243,25 +240,25 @@ function setCanvasRef(el: unknown, materialId: string): void {
   const img = new Image()
   img.onload = () => {
     animationImages.set(materialId, img)
-    // 首帧立即画（不等下一次重画）：暂停状态下也能看到正确帧。
+    // 图片到达后立即画首帧（此时才拿得到像素）。
+    // 之后的每次重画都由**事件**驱动：文档变化（`refresh`）与帧下标变化（下面的 watch）
+    // —— 没有自驱循环（原因见 `paintAll` 的说明）。
     const seq = sequenceFor(card)
     if (seq) {
       const sample = sampleTextureSequence(seq, sceneSeconds())
       if (sample.ok) paint(canvas, img, card, sample.value)
     }
-    ensureLoop()
   }
   img.src = card.dataUrl
 }
 
 onUnmounted(() => {
-  stopLoop()
   animationCanvases.clear()
   animationImages.clear()
-  animationHandles.clear()
 })
 
-// 场景时间变化（跳帧）⇒ 立即重画一次，不等下一个重画时机。
+// 场景时间变化（跳帧）⇒ 立即重画一次。**这是本组件唯一的播放驱动**：
+// 时间只由帧下标决定，故不需要（也不应有）rAF 循环。
 watch(() => ctx.getCurrentFrameIndex().value, () => paintAll())
 
 // ---- Keyboard navigation ----

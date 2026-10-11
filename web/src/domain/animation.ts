@@ -871,6 +871,29 @@ export interface ResolvedEffectiveValue {
 }
 
 /**
+ * 一组层里**胜出**的那一层的种类（无层则 `null`）。
+ *
+ * ## 为什么需要它（而不是让调用方自己构造层数组）
+ *
+ * 读面的返回值是 RNA 的 `PropertyValue` —— 它能承载 `TrackValue` 承载不了的形态
+ * （`null`、颜色、引用、`string[]`）。若为了让 `resolveEffectiveValue` 贴一个
+ * 来源标签，就得把这些值塞进 `EffectiveValueLayer`，于是必须做一次
+ * "骗过类型系统的转换"，并且**在调用方复制一份优先级表**。
+ *
+ * 本函数让调用方只交出**种类**：优先级仍只由 `LAYER_RANK` 一处决定，
+ * 于是"值来自哪一层"与"哪一层优先"不会在两处漂移。
+ */
+export function highestEffectiveLayer(
+  kinds: readonly EffectiveValueLayer['kind'][],
+): EffectiveValueLayer['kind'] | null {
+  let winner: EffectiveValueLayer['kind'] | null = null
+  for (const k of kinds) {
+    if (winner === null || LAYER_RANK[k] > LAYER_RANK[winner]) winner = k
+  }
+  return winner
+}
+
+/**
  * 按优先级解析有效值。
  *
  * 两层同 `kind` ⇒ `InvalidValue`：重复层会让"谁赢"取决于数组顺序，
@@ -899,17 +922,46 @@ export function resolveEffectiveValue(layers: readonly EffectiveValueLayer[]): R
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * **限定式属性 ID → 局部 ID**（`<objectTypeId>.<localId>` ⇒ `<localId>`）。
+ *
+ * ## 为什么本域需要知道这个约定（P4 与 P2 的口径交汇点）
+ *
+ * P2（#253）的 RNA 把 `PropertyRef.property` 定为**限定式** ID
+ * （`block.transform.position`、`camera.projection.fov`、`mesh.vertexPosition`）。
+ * P4 的轨道以 `PropertyRef` 为目标，故轨道侧取值同样面对限定式 ID。
+ *
+ * 剥离规则与 `application/contracts#localPropertyOf` **同口径**：用**已知的
+ * objectTypeId** 剥离（对象类型取自对象自身），不按"第一个点"或"最后一个点"切 ——
+ * 因为 objectTypeId 本身可能含点（工作台的 `lightning.annotation.text`），
+ * 按点切会在那时静默出错（冻结 #1 的陷阱）。
+ *
+ * `objectTypeId` 缺省（如内容拥有者的多方块通道、或对象已不在场景里）时，
+ * 退化为"第一个点之后"—— 这是**宽松侧**：它只会让"看起来像限定的 ID"被正确剥离；
+ * 而真正需要精确判定的调用方（写面）已经由 RNA 校验把住了。
+ */
+export function localPropertyId(property: string, objectTypeId?: string): string {
+  if (objectTypeId !== undefined && property.startsWith(`${objectTypeId}.`)) {
+    return property.slice(objectTypeId.length + 1)
+  }
+  const dot = property.indexOf('.')
+  return dot === -1 ? property : property.slice(dot + 1)
+}
+
+/**
  * 读出某个属性引用的**文档基础值**（`authored` 语义的第一层）。
  *
- * 这是"轨道目标可寻址"的最小落地：轨道用它取基准值，`application/queries` 用它
- * 组装有效值分层。未支持的属性返回 `null`（调用方据此决定 `UnsupportedOperation`，
- * **不**在本函数里猜）。
+ * 这是"轨道目标可寻址"的最小落地。未支持的属性返回 `null`（调用方据此决定
+ * `UnsupportedOperation`，**不**在本函数里猜）。
+ *
+ * 接受**限定式与未限定两种**属性 ID：限定式是 P2/RNA 的口径（`block.transform.position`），
+ * 未限定是多方块通道等内容拥有者的口径（`channel.tier`）。两者都剥到局部 ID 再匹配，
+ * 于是本函数不必知道调用方来自哪一面。
  */
 export function authoredValue(scene: Scene, ref: PropertyRef): TrackValue | null {
   if (ref.owner.kind !== 'object') return null
   const obj = findObject(scene, ref.owner.id)
   if (!obj) return null
-  const p = ref.property
+  const p = localPropertyId(ref.property, obj.type)
   if (p === 'name') return obj.name
   if (p === 'visible') return obj.visible
   if (p.startsWith('transform.')) {
@@ -942,45 +994,22 @@ export function isDriven(state: AnimationState, ref: PropertyRef): boolean {
 }
 
 /**
- * 结构属性的**声明值类型**。
- *
- * 为什么需要它：`insertKeyframe` 若只从"传进来的值"推断类型，那么往
- * `transform.position`（vec3）插一个数字会被推断成 `integer` 轨道而**通过**校验 ——
- * 于是文档里出现一条"目标属性是向量、轨道值却是标量"的轨道，每次采样都得到
- * 一个无法应用到属性上的值。这属于"把坏数据存进文档"，必须在写入点拒绝。
- *
- * 类型来源是**属性本身**（RNA 描述在 P2 落地；此处覆盖本批三类对象的已动画属性），
- * 不是值。P2 引入完整 RNA 后，本函数应由描述表替代 —— 那时它仍然是"查描述"，
- * 判据不变、调用方不变。
- */
-export function declaredValueType(property: string): TrackValueType | undefined {
-  switch (property) {
-    case 'transform.position':
-    case 'transform.scale':
-    case 'transform.pivot':
-      return 'vec3'
-    case 'transform.rotation':
-      return 'quat'
-    case 'name':
-      return 'string'
-    case 'visible':
-      return 'boolean'
-    case 'projection.fov':
-    case 'projection.clipStart':
-    case 'projection.clipEnd':
-      return 'number'
-    default:
-      return undefined
-  }
-}
-
-/**
- * 校验"值与属性声明类型"是否相容；`undefined` 表示该属性未登记类型
+ * 校验"值与**已声明的轨道值类型**"是否相容；`undefined` 表示该属性未登记类型
  * （交由调用方决定 `UnsupportedOperation`，本函数不猜）。
+ *
+ * ## 为什么这里**只**接收 `declared`，不接收属性 ID（GF-5 收敛的后果）
+ *
+ * P4 初版有一个 `declaredValueType(property)`：按属性 ID 查一张硬编码表
+ * （`transform.position → vec3`、`projection.fov → number`……）。那与 P2 的
+ * RNA 描述表是**两套描述同一个概念** —— 正是 #250 GF-5 要消除的形态，
+ * 而且漂移是静默的：RNA 里改了某属性的类型，本表不会跟着变，于是
+ * "插入关键帧"按旧类型放行、读面按新类型拒绝。
+ *
+ * 收敛后本域**不认识属性 ID**：调用方（`application/commands`）向 RNA 注册表
+ * 解析描述、取出值类型，再传进来做纯类型检查。于是"属性是什么类型"只有一个权威，
+ * 而本函数只保留纯函数该有的那部分职责（判"这个值配得上这个类型吗"）。
  */
-export function checkValueAgainstProperty(property: string, value: TrackValue): DomainError | null {
-  const declared = declaredValueType(property)
-  if (declared === undefined) return null
+export function checkValueAgainstDeclaredType(declared: TrackValueType, value: TrackValue): DomainError | null {
   return checkValueType(declared, value)
 }
 

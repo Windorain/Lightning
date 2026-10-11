@@ -57,7 +57,7 @@ function firstObjectId(e: Editor): string {
 }
 
 function transformRef(e: Editor) {
-  return propertyRef(objectRef(firstObjectId(e)), 'transform.position')
+  return propertyRef(objectRef(firstObjectId(e)), 'block.transform.position')
 }
 
 /** 提交一条命令并返回结算结果。 */
@@ -152,11 +152,13 @@ describe('F2：动画播放不产生文档版本/撤销条目/内容脏（#249 �
     })
 
     // 轨道启用时：普通基础值写入被拒（A10）
-    const denied = run(e, { kind: 'setProperty', contextId: 'ctx-1', refs: [ref], value: Object.freeze({ x: 9, y: 9, z: 9 }) })
+    const denied = run(e, { kind: 'setProperty', refs: [ref], value: Object.freeze({ x: 9, y: 9, z: 9 }) })
     expect(denied?.status).toBe('rejected')
     if (denied?.status === 'rejected') {
       expect(denied.error.code).toBe('ReadOnly')
-      expect(denied.error.params.reason).toBe('animationDriven')
+      // 原因形状由 **RNA 的可编辑性求值**给出（P2 `properties.ts`），不是命令层的第二套：
+      // `reason: 'animation-driven'`（kebab-case，与 RNA 其它 reason 同风格）。
+      expect(denied.error.params.reason).toBe('animation-driven')
     }
 
     // 禁用轨道
@@ -165,7 +167,7 @@ describe('F2：动画播放不产生文档版本/撤销条目/内容脏（#249 �
     expect(findTrack(docOf(e).animation, ref)?.enabled).toBe(false)
 
     // 现在基础值写入被允许（回到手动取值）
-    const allowed = run(e, { kind: 'setProperty', contextId: 'ctx-1', refs: [ref], value: Object.freeze({ x: 9, y: 9, z: 9 }) })
+    const allowed = run(e, { kind: 'setProperty', refs: [ref], value: Object.freeze({ x: 9, y: 9, z: 9 }) })
     expect(allowed?.status, '禁用轨道后普通基础值写入必须被允许').toBe('applied')
     expect(docOf(e).scene.objects[firstObjectId(e)].transform.position.x).toBe(9)
 
@@ -177,7 +179,7 @@ describe('F2：动画播放不产生文档版本/撤销条目/内容脏（#249 �
     const e = openEditor()
     const ref = transformRef(e)
     // 先写手动基础值
-    run(e, { kind: 'setProperty', contextId: 'ctx-1', refs: [ref], value: Object.freeze({ x: 3, y: 3, z: 3 }) })
+    run(e, { kind: 'setProperty', refs: [ref], value: Object.freeze({ x: 3, y: 3, z: 3 }) })
     const manualBefore = docOf(e).scene.objects[firstObjectId(e)].transform.position
     // 再建轨道并采样（模拟播放）
     run(e, {
@@ -217,14 +219,20 @@ describe('A10 命令面：轨道驱动的属性拒绝普通写（#249 §7 负对
     run(e, { kind: 'insertKeyframe', contextId: 'ctx-1', target: ref, time: timeValue(0, 20), value: Object.freeze({ x: 1, y: 1, z: 1 }) })
 
     const before = versionSnapshot(e)
-    const out = run(e, { kind: 'setProperty', contextId: 'ctx-1', refs: [ref], value: Object.freeze({ x: 5, y: 5, z: 5 }) })
+    const out = run(e, { kind: 'setProperty', refs: [ref], value: Object.freeze({ x: 5, y: 5, z: 5 }) })
     expect(out?.status, '被轨道驱动的属性必须拒绝普通基础值写入').toBe('rejected')
     if (out?.status === 'rejected') {
       expect(out.error.code).toBe('ReadOnly')
-      // 原因是**结构化**的（不是自然语言），且指向动画轨道这一拥有者
-      expect(out.error.params.owner).toBe('animationTrack')
-      expect(out.error.params.reason).toBe('animationDriven')
-      expect(out.error.params.property).toBe('transform.position')
+      // 原因是**结构化**的（不是自然语言）：`reason` 指明拒绝理由、
+      // `property` 指明**限定式**属性 ID（P2 RNA 口径）、`objectId` 指明目标。
+      //
+      // 注：P4 开发期此处断言过 `params.owner === 'animationTrack'` —— 那是本批
+      // 命令层自造的字段。GF-5 收敛后拒绝由 **RNA 求值**统一给出
+      // （`properties.ts` 的 `notEditable` + `facts.drivenByTrack`），
+      // 其参数集就是上面的三个；命令层不再另附一份。
+      expect(out.error.params.reason).toBe('animation-driven')
+      expect(out.error.params.property).toBe('block.transform.position')
+      expect(out.error.params.objectId).toBe(firstObjectId(e))
     }
     // 零残留：文档/历史/脏全不变
     expect(versionSnapshot(e)).toEqual(before)
@@ -246,7 +254,7 @@ describe('A10 命令面：轨道驱动的属性拒绝普通写（#249 §7 负对
   it('不可动画的属性不得建轨道（不提供假成功控件，#249 §13）', () => {
     const e = openEditor()
     // `name` 不在 `animatableProperties` 里
-    const ref = propertyRef(objectRef(firstObjectId(e)), 'name')
+    const ref = propertyRef(objectRef(firstObjectId(e)), 'block.name')
     const out = run(e, { kind: 'insertKeyframe', contextId: 'ctx-1', target: ref, time: timeValue(0, 20), value: 'renamed' })
     expect(out?.status).toBe('rejected')
     if (out?.status === 'rejected') {
@@ -283,7 +291,7 @@ describe('A10 命令面：轨道驱动的属性拒绝普通写（#249 §7 负对
       expect(out.error.params.owner).toBe('content')
     }
     // 而普通手动取值写也被拒（同一条按拥有者的判据）
-    const manual = run(e2, { kind: 'setProperty', contextId: 'ctx-1', refs: [ref], value: Object.freeze({ x: 1, y: 0, z: 0 }) })
+    const manual = run(e2, { kind: 'setProperty', refs: [ref], value: Object.freeze({ x: 1, y: 0, z: 0 }) })
     expect(manual?.status).toBe('rejected')
   })
 
@@ -342,7 +350,7 @@ describe('A10 命令面：轨道驱动的属性拒绝普通写（#249 §7 负对
 
   it('发布默认值不得写不可动画属性（与关键帧同一资格判据）', () => {
     const e = openEditor()
-    const ref = propertyRef(objectRef(firstObjectId(e)), 'name')
+    const ref = propertyRef(objectRef(firstObjectId(e)), 'block.name')
     const out = run(e, { kind: 'publishDefault', contextId: 'ctx-1', target: ref, value: 'x' })
     expect(out?.status).toBe('rejected')
     if (out?.status === 'rejected') expect(out.error.params.reason).toBe('propertyNotAnimatable')

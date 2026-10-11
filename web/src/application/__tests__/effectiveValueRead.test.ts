@@ -22,8 +22,22 @@ import { describe, expect, it } from 'vitest'
 import { Editor } from '@/runtime/execution'
 import { objectRef, propertyRef } from '@/domain/identity'
 import { propertyKey, timeValue } from '@/domain/animation'
+import { channelStepTrack, resolveChannelEffective, type ChannelSet } from '@/domain/multiblock'
 import { withChannelValue } from '@/domain/editing'
 import type { ApplicationState } from '@/application/state'
+
+/** 供通道对照用例的通道集（声明在**内容**侧，故不经内核对象类型注册）。 */
+const CHANNEL_SET: ChannelSet = Object.freeze({
+  id: 'mb-1',
+  channels: Object.freeze([
+    Object.freeze({
+      key: 'tier',
+      name: 'Tier',
+      domain: Object.freeze({ kind: 'integer' as const, min: 0, max: 5 }),
+      source: 'content' as const,
+    }),
+  ]),
+})
 
 function openEditor(): Editor {
   const e = new Editor({ prefix: 'p4q' })
@@ -44,7 +58,7 @@ function withState(e: Editor, next: ApplicationState): Editor {
 }
 
 /** 读有效值（走 `ReadView.interaction.effectiveProperty`）。 */
-function effective(e: Editor, ref = propertyRef(objectRef(firstObjectId(e)), 'transform.position')) {
+function effective(e: Editor, ref = propertyRef(objectRef(firstObjectId(e)), 'block.transform.position')) {
   const view = e.read({ documentId: 'doc-1', contextId: 'ctx-1' })
   return view.interaction.effectiveProperty(ref)
 }
@@ -62,7 +76,7 @@ describe('有效值读面：四层优先级（#249 §7）', () => {
 
   it('有轨道 ⇒ 轨道采样赢（source=trackSample），且 driven=true', () => {
     const e = openEditor()
-    const ref = propertyRef(objectRef(firstObjectId(e)), 'transform.position')
+    const ref = propertyRef(objectRef(firstObjectId(e)), 'block.transform.position')
     e.submit({ kind: 'insertKeyframe', contextId: 'ctx-1', target: ref, time: timeValue(0, 20), value: Object.freeze({ x: 0, y: 0, z: 0 }) })
     e.submit({ kind: 'insertKeyframe', contextId: 'ctx-1', target: ref, time: timeValue(40, 20), value: Object.freeze({ x: 40, y: 0, z: 0 }) })
     e.submit({ kind: 'setTime', contextId: 'ctx-1', time: timeValue(20, 20) })
@@ -78,7 +92,7 @@ describe('有效值读面：四层优先级（#249 §7）', () => {
 
   it('**两个上下文读同一份有效值**（A05 的读面结构保证：接口里没有"视口"参数）', () => {
     const e = openEditor()
-    const ref = propertyRef(objectRef(firstObjectId(e)), 'transform.position')
+    const ref = propertyRef(objectRef(firstObjectId(e)), 'block.transform.position')
     e.submit({ kind: 'insertKeyframe', contextId: 'ctx-1', target: ref, time: timeValue(0, 20), value: Object.freeze({ x: 0, y: 0, z: 0 }) })
     e.submit({ kind: 'insertKeyframe', contextId: 'ctx-1', target: ref, time: timeValue(40, 20), value: Object.freeze({ x: 80, y: 0, z: 0 }) })
     e.submit({ kind: 'beginInteraction', contextId: 'ctx-1', tool: 'move', targets: [firstObjectId(e)] })
@@ -99,7 +113,7 @@ describe('有效值读面：四层优先级（#249 §7）', () => {
 
   it('禁用轨道 ⇒ 退回基础值（source=base），driven=false（#249 §3.3）', () => {
     const e = openEditor()
-    const ref = propertyRef(objectRef(firstObjectId(e)), 'transform.position')
+    const ref = propertyRef(objectRef(firstObjectId(e)), 'block.transform.position')
     e.submit({ kind: 'insertKeyframe', contextId: 'ctx-1', target: ref, time: timeValue(0, 20), value: Object.freeze({ x: 7, y: 0, z: 0 }) })
     e.submit({ kind: 'setTrackEnabled', contextId: 'ctx-1', target: ref, enabled: false })
     e.drain()
@@ -114,7 +128,7 @@ describe('有效值读面：四层优先级（#249 §7）', () => {
 
   it('发布默认值：基础值缺席时作为第一层；基础值在场时**不**覆盖它', () => {
     const e0 = openEditor()
-    const ref = propertyRef(objectRef(firstObjectId(e0)), 'transform.position')
+    const ref = propertyRef(objectRef(firstObjectId(e0)), 'block.transform.position')
     // 场景里 `transform.position` 有基础值（零向量）⇒ 发布默认值不覆盖
     const s = e0.snapshot()
     const doc = s.docs['doc-1']
@@ -142,7 +156,7 @@ describe('有效值读面：四层优先级（#249 §7）', () => {
     if (!r.ok) expect(r.error.code).toBe('MissingTarget')
   })
 
-  it('手动预览值（EditContext.channelValues）参与优先级：高于基础值、低于暂存', () => {
+  it('**通道不冒充内核属性**：`channel.*` 不经 RNA 读面服务（它属内容拥有者，走 `resolveChannelEffective`）', () => {
     const e0 = openEditor()
     const s = e0.snapshot()
     const patched: ApplicationState = Object.freeze({
@@ -150,18 +164,53 @@ describe('有效值读面：四层优先级（#249 §7）', () => {
       contexts: Object.freeze({ ...s.contexts, 'ctx-1': withChannelValue(s.contexts['ctx-1'], 'tier', 3) }),
     })
     const e = withState(e0, patched)
-    // 通道属性键形态：`channel.<key>`（由 domain/multiblock 的 channelToPropertyRef 产出）
+
+    // ## 为什么这里断言的是"拒绝"而不是"返回 3"
+    //
+    // P4 开发期这里曾断言 `source === 'manualPreview'` 且值为 3 —— 那时本读面把
+    // `ctx.channelValues` 接进 RNA 的 `preview` 层。GF-5 收敛后该做法**不成立**：
+    // RNA 的描述按 `objectTypeId` 解析，而**通道的拥有者是内容**（`objectData`，
+    // 多方块生成物），不是内核注册对象类型 —— 给它伪造一条注册就等于
+    // "编辑生成结果"，#249 §3.3 明文禁止。
+    //
+    // ⇒ 通道的有效值由 `domain/multiblock#resolveChannelEffective` 提供：
+    // 它接上四层（含通道手动预览），且**共用同一张优先级表**
+    // （`domain/animation#resolveEffectiveValue` 的 `LAYER_RANK`）。
+    // 本读面**如实拒绝**，不返回一个"看起来对"的值（#249 §13 禁止假成功）。
     const ref = propertyRef(objectRef(firstObjectId(e)), 'channel.tier')
     const r = effective(e, ref)
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.value.source, '手动预览值必须参与优先级').toBe('manualPreview')
-    expect(r.value.value).toBe(3)
+    expect(r.ok, '通道不是内核属性，本读面必须如实拒绝').toBe(false)
+    if (!r.ok) expect(['MissingTarget', 'UnsupportedOperation']).toContain(r.error.code)
+  })
+
+  it('通道有效值由 `resolveChannelEffective` 提供，且与 RNA 读面**共用同一张优先级表**', () => {
+    // 这条是上一条的正向对照（证明"移交"不是"缺失"）：同一份 `ctx.channelValues`
+    // 经通道解析器能取到值，且来源标签来自**同一个** `LAYER_RANK`。
+    const tier = resolveChannelEffective({ manualPreview: 3 })
+    expect(tier.ok).toBe(true)
+    if (tier.ok) {
+      expect(tier.value.value).toBe(3)
+      expect(tier.value.source, '来源标签由 domain/animation 的优先级表给出').toBe('manualPreview')
+    }
+    // 轨道采样胜手动预览（rank 2 > 1）—— 与 RNA 读面的层序完全一致
+    const track = channelStepTrack(CHANNEL_SET, 'tier', [
+      { time: timeValue(0, 20), value: 0 },
+      { time: timeValue(20, 20), value: 9 },
+    ])
+    expect(track.ok).toBe(true)
+    if (track.ok) {
+      const withTrack = resolveChannelEffective({ manualPreview: 3, track: track.value, time: timeValue(20, 20) })
+      expect(withTrack.ok).toBe(true)
+      if (withTrack.ok) {
+        expect(withTrack.value.value, '轨道采样必须赢过手动预览（与 RNA 层序一致）').toBe(9)
+        expect(withTrack.value.source).toBe('trackSample')
+      }
+    }
   })
 
   it('`readProperty(mode:\'effective\')` 与 `effectiveProperty` 一致（同一实现点）', () => {
     const e = openEditor()
-    const ref = propertyRef(objectRef(firstObjectId(e)), 'transform.position')
+    const ref = propertyRef(objectRef(firstObjectId(e)), 'block.transform.position')
     e.submit({ kind: 'insertKeyframe', contextId: 'ctx-1', target: ref, time: timeValue(0, 20), value: Object.freeze({ x: 0, y: 0, z: 0 }) })
     e.submit({ kind: 'insertKeyframe', contextId: 'ctx-1', target: ref, time: timeValue(20, 20), value: Object.freeze({ x: 20, y: 0, z: 0 }) })
     e.submit({ kind: 'setTime', contextId: 'ctx-1', time: timeValue(10, 20) })
