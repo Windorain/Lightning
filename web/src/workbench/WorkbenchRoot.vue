@@ -227,7 +227,6 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
 
 <template>
   <HostProvider :host="host" :ctx="ctx">
-  <HostProvider :host="host" :ctx="ctx">
     <!--
       #10：`v-show` → `v-if` + `:key`。
       只有一个工作区在 DOM 里；切换即**卸载旧组件**（不是隐藏它）。
