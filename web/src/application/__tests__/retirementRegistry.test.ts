@@ -741,6 +741,19 @@ function stripNonCodeInto(text: string, quotedIsCode: boolean): string {
  * 两个口径都**保留长度与行结构**，故拼接后逐行对齐仍然成立。
  */
 export function codeOfSource(absPath: string, raw: string): string {
+  const hit = codeCache.get(absPath)
+  if (hit !== undefined && hit.raw === raw) return hit.code
+  const code = computeCodeOfSource(absPath, raw)
+  codeCache.set(absPath, { raw, code })
+  return code
+}
+
+/** 清除 {@link codeOfSource} 的记忆（仿真前后对照用）。 */
+export function clearCodeCache(): void {
+  codeCache.clear()
+}
+
+function computeCodeOfSource(absPath: string, raw: string): string {
   if (!absPath.endsWith('.vue')) return stripNonCode(raw)
   const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi
   const pieces: string[] = []
@@ -785,6 +798,56 @@ export function findCriterionHitsIn(
   }
   return Object.freeze(hits)
 }
+
+/**
+ * 读源码并**归一化行尾为 LF**（铁律 6 的治本口径，与 #268 同一处治本）。
+ *
+ * ## 为什么必须归一化（本仓 `core.autocrlf=true`）
+ *
+ * 新鲜检出是 **CRLF**（本树 `src/` 404 个文件实测全部 uniform CRLF、0 处裸 LF），
+ * 而执行者工具直接写出的工作树文件常是 LF。凡"读源码 + 正则/切片"的断言都会因此
+ * 随检出口径变化 —— 这正是 #268 的事故形态。
+ *
+ * ## 当前**恰好安全**，但"恰好安全 ≠ 判据安全"（实测，不是推断）
+ *
+ * 本文件的 9 条符号判据全部是**无 `$` 锚**的调用/声明位正则
+ * （`\.getDoc\s*\(`、`materialLibrary\.tick\s*\(` …）。在 CRLF 文本上按 `\n` 切分
+ * 只让每行末尾多一个 `\r`，而**无锚正则照样命中** ⇒ 现状下断言与检出口径无关。
+ *
+ * 实测：在真实 `src/`（404 文件）上对多类判据逐文件比较"CRLF 原文 vs 归一化后"
+ * 的命中数 —— **1352 次比较、0 处差异**。
+ *
+ * 这不构成"不用改"的理由，理由与 #268 的表格一致：
+ *  - #268 的 `boundary-scan` / `kernel-legacy-isolation` 在 CRLF 下**同样通过**，
+ *    仍被统一改为走归一化读入口，注释原文是「恰好安全 ≠ 判据安全」；
+ *  - 真正危险的是**将来**任何 `$` 锚、`indexOf('\n\n')` 或按字符偏移切片：
+ *    `'a\r\nb'.split('\n')` ⇒ `['a\r','b']`，于是 `/getDoc\($/` 永不命中，
+ *    `indexOf('\n\n')` 返回 `-1`（#268 第 253 行那种**假绿**：切片取到文末、
+ *    断言范围错了却仍然通过 —— 比直接判红更危险）。
+ *
+ * 故在**唯一读入口**归一化，使"进入断言的文本恒为 LF"成为**结构性事实**，
+ * 而不是"当前所有正则恰好没锚"这一偶然事实。不写回文件，也不改被断言文件的真实 EOL。
+ */
+export function readSourceText(absPath: string): string {
+  return fs.readFileSync(absPath, 'utf8').replace(/\r\n/g, '\n')
+}
+
+/**
+ * `codeOfSource` 的**按内容**记忆（键 = 绝对路径；仅当原文逐字相同才复用）。
+ *
+ * ## 为什么需要（实测的**真实超时假红**，与 EOL 无关）
+ *
+ * 词法器是**逐字符**扫描，而 `scanEntryResidual` 对**每条登记**都要遍历全部生产
+ * 文件 ⇒ 同一文件被重复词法化 N 次（N = 登记条数）。实测单文件测试耗时 6.5–13s；
+ * 在 CPU 负载下曾达 **34.9s**，超过本仓 `vitest.config.ts` 的 `testTimeout: 30000`
+ * ⇒ 真实超时（无缓存冷启动首次运行时观测到一次）。
+ * 记忆化把"每条目重新词法化"降为"每文件一次"，直接消除该超时面 ——
+ * 治本优于调大超时（后者只是把同一隐患推远）。
+ *
+ * 安全性：键是绝对路径，且**原文不同即重算**。相位翻转仿真用 `mkdtemp` 建独立
+ * 临时树（路径每次不同），且在词法化**之前**完成改写 ⇒ 不存在读到旧内容的情形。
+ */
+const codeCache = new Map<string, { readonly raw: string; readonly code: string }>()
 
 /** 递归列出 `src/` 下的**生产**源文件（绝对路径）。`srcRoot` 可覆盖（供相位翻转仿真）。 */
 function productionFiles(srcRoot: string = path.join(WEB_ROOT, 'src')): readonly string[] {
@@ -842,7 +905,8 @@ export function scanEntryResidual(
     if (exclude.has(rel) || exclude.has(`web/${rel}`)) continue
     let text: string
     try {
-      text = fs.readFileSync(abs, 'utf8')
+      // **归一化读入口**（铁律 6）：进入判据的文本恒为 LF，与检出口径无关。
+      text = readSourceText(abs)
     } catch {
       continue
     }
@@ -869,11 +933,11 @@ export function isGroupExecuted(entry: RetirementEntry): boolean {
   return members.length > 0 && members.every((m) => m.status === 'executed')
 }
 
-/** 读取 `web/` 相对路径的文本；不存在返回 `null`。 */
+/** 读取 `web/` 相对路径的文本（**已归一化为 LF**）；不存在返回 `null`。 */
 function readMaybe(rel: string): string | null {
   const abs = path.join(WEB_ROOT, rel.replace(/^web\//, ''))
   try {
-    return fs.readFileSync(abs, 'utf8')
+    return readSourceText(abs)
   } catch {
     return null
   }
@@ -1314,7 +1378,7 @@ describe('扫描器词法：注释与字符串不算残留，但 `${}` 内的代
   })
 
   it('**真树对照**：散文提到 `ctx.getDoc()` 的文件不算消费者，真代码算', () => {
-    const readSrc = (rel: string): string => fs.readFileSync(path.join(WEB_ROOT, 'src', rel), 'utf8')
+    const readSrc = (rel: string): string => readSourceText(path.join(WEB_ROOT, 'src', rel))
     const refs = (rel: string): number =>
       stripNonCode(readSrc(rel))
         .split('\n')
@@ -1324,6 +1388,74 @@ describe('扫描器词法：注释与字符串不算残留，但 `${}` 内的代
     // 而这两个文件**确实**在代码里调用 ⇒ 必须 > 0（反空洞真）
     expect(refs('editors/workbench-rna.ts'), 'workbench-rna.ts 是真消费者').toBeGreaterThan(0)
     expect(refs('workbench/ux/PropertyInspector.vue'), 'PropertyInspector.vue 是真消费者').toBeGreaterThan(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 铁律 6：读入口归一化（EOL 不敏感），且**证伪侧**也钉住
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('铁律 6：读入口归一化 ⇒ 判据与检出口径无关', () => {
+  it('`readSourceText` 恒返回 LF：对 CRLF 输入剥离 CR，对 LF 输入幂等', () => {
+    // **不依赖本树检出口径** —— 否则这条会变成"CRLF 树上绿、LF 树上红"的新 EOL 脆性。
+    // （我第一版正是这样写的，被"把 src/ 转成 LF 再跑"的反向验证当场判红。）
+    // 改为用**临时文件**构造两种输入，验的是函数语义而非本树口径。
+    const os = require_('node:os') as typeof import('node:os')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-eol-'))
+    try {
+      const crlfFile = path.join(dir, 'crlf.ts')
+      const lfFile = path.join(dir, 'lf.ts')
+      fs.writeFileSync(crlfFile, 'const a = 1\r\nconst b = 2\r\n', 'utf8')
+      fs.writeFileSync(lfFile, 'const a = 1\nconst b = 2\n', 'utf8')
+      // CRLF 输入 ⇒ 进入判据的文本不含 CR
+      expect(readSourceText(crlfFile), 'CRLF 必须被归一化').toBe('const a = 1\nconst b = 2\n')
+      expect(readSourceText(crlfFile).includes('\r')).toBe(false)
+      // LF 输入 ⇒ 幂等（归一化不改变已归一化的文本）
+      expect(readSourceText(lfFile), 'LF 输入必须幂等').toBe('const a = 1\nconst b = 2\n')
+      // 反空洞真：构造的临时文件在磁盘上**确实**是 CRLF（否则第一条什么都不证明）
+      expect(fs.readFileSync(crlfFile, 'utf8').includes('\r\n')).toBe(true)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('**真树**：本树确实读得到源码（反空洞真，与检出口径无关）', () => {
+    // 上一版这里断言"磁盘原文必为 CRLF" ⇒ 在 LF 检出上判红。那是我引入的新脆性：
+    // 本树口径由 `core.autocrlf` 决定，**不是**被测函数的事实 ⇒ 不该断言。
+    // 这里只断言"真的读到了内容 + 进入判据的文本不含 CR"，口径交给上一条（用构造输入验）。
+    const target = path.join(WEB_ROOT, 'src', 'application', 'queries.ts')
+    const normalized = readSourceText(target)
+    expect(normalized.length, '必须真的读到源码').toBeGreaterThan(1000)
+    expect(normalized.includes('\r'), '无论检出是 CRLF 还是 LF，进入判据的文本都不含 CR').toBe(false)
+  })
+
+  it('**证伪侧**：$ 锚定判据在未归一化的 CRLF 行上会失配（"恰好安全 ≠ 判据安全"）', () => {
+    const crlfLine = 'const d = ctx.getDoc().value\r' // 未归一化时 split('\n') 的产物
+    const lfLine = 'const d = ctx.getDoc().value'
+    // 无锚（本文件现状）：两种口径都命中 ⇒ 当前恰好安全
+    expect(/\bgetDoc\s*\(/.test(crlfLine)).toBe(true)
+    expect(/\bgetDoc\s*\(/.test(lfLine)).toBe(true)
+    // 有锚（将来任何人加 `$`）：未归一化时**失配** ⇒ 归一化是必要的
+    expect(/getDoc\(\)\.value$/.test(crlfLine), '尾部 \\r 使 $ 失配').toBe(false)
+    expect(/getDoc\(\)\.value$/.test(lfLine)).toBe(true)
+  })
+
+  it('**真树**：判据命中数与检出口径无关（逐文件实测，反空洞真）', () => {
+    const probes: readonly RegExp[] = [/\bgetDoc\s*\(/, /\btick\s*\(/, /materialLibrary\.tick\s*\(/]
+    let compared = 0
+    const diffs: string[] = []
+    for (const abs of productionFiles()) {
+      const raw = fs.readFileSync(abs, 'utf8')
+      const lf = raw.replace(/\r\n/g, '\n')
+      for (const re of probes) {
+        const onRaw = raw.split('\n').filter((l) => re.test(l)).length
+        const onLf = lf.split('\n').filter((l) => re.test(l)).length
+        compared++
+        if (onRaw !== onLf) diffs.push(`${path.relative(WEB_ROOT, abs)} ${re}`)
+      }
+    }
+    expect(compared, '必须真的比较过（反空洞真）').toBeGreaterThan(1000)
+    expect(diffs, '命中数与检出口径出现差异 ⇒ 该判据未走归一化读入口').toEqual([])
   })
 })
 
@@ -1382,9 +1514,12 @@ describe('相位翻转仿真：把登记表投影到一份"已执行删除"的�
       // 字面量都跨行），逐行喂入会让"看起来是代码"的片段残留（首版实测：
       // 块注释中间那几行不含行首标记，逐行调用时状态被重置）。
       // 输出与输入**逐行对齐**（不删行），故可按下标安全裁剪。
-      const raw = fs.readFileSync(abs, 'utf8')
-      const codeLines = codeOfSource(abs, raw).split(/\r?\n/)
-      const kept = raw.split(/\r?\n/).filter((_line, idx) => {
+      //
+      // 归一化后以 `\n` 重写：仿真树是**一次性临时树**（`mkdtemp`），其 EOL 不构成
+      // 交付面；归一化保证"词法结果"与"裁剪下标"口径一致。
+      const raw = readSourceText(abs)
+      const codeLines = codeOfSource(abs, raw).split('\n')
+      const kept = raw.split('\n').filter((_line, idx) => {
         const code = codeLines[idx] ?? ''
         return !allMatchers.some((re) => re.test(code))
       })
@@ -1421,8 +1556,20 @@ describe('相位翻转仿真：把登记表投影到一份"已执行删除"的�
   })
 
   it('仿真**不修改**原树（跑完 `src/` 与运行前逐字节一致）', () => {
+    // ⚠️ **本条刻意不归一化**（唯一的例外，且必须保持为例外）。
+    //
+    // 铁律 6 要求"读源码 + 正则/切片断言"归一化；但本条的判据**正是字节级不变量**：
+    // "仿真过程没有改动原树一个字节"。若把两个读入口也归一化，判据会**失去检出能力**：
+    //
+    //   原树被误改成 LF 时（内容相同、字节不同）
+    //     逐字节比较   ⇒ 检出（true）
+    //     归一化后比较 ⇒ **不检出**（false）—— 被改动的证据恰好被归一化抹掉
+    //
+    // 这与归一化并不冲突：归一化的目的是让**语义**断言不随 EOL 漂移；
+    // 而本条的语义**就是**"EOL 也不许变"。把它归一化等于把判据改成恒真。
     const before = productionFiles().map((f) => [f, fs.readFileSync(f, 'utf8')] as const)
     const root = projectExecutedTree()
+    clearCodeCache() // 丢弃临时树条目的记忆（那棵树的路径随即删除）
     fs.rmSync(path.dirname(root), { recursive: true, force: true })
     for (const [file, text] of before) {
       expect(fs.readFileSync(file, 'utf8'), `${file} 在仿真后不应被改动`).toBe(text)
