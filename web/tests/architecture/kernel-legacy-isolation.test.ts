@@ -536,6 +536,46 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
     exitStage:
       'P10（#261）本批落地，永久保留（渲染侧消费统一时间纯采样是目标形态，不是过渡）；P11 审计核对旧累加器零引用',
   }),
+  // ── P10b（#282）文档内容面：旧加载路径把文档装配进内核 ──────────────────
+  //
+  // ## 这两条边为什么必须存在，以及它们**不**是"半成品替换"
+  //
+  // R-WK-04（#250）登记的缺口原文是「**全树没有任何生产代码**从旧场景文件构造
+  // 内核 `Scene`」。P10b 交付了装配层（`composition/kernelAssembly`）与内核采纳
+  // （`KernelSession.adoptDocument`）后，**必须**有一个旧层的**真实**调用点，
+  // 否则那个缺口照旧成立（"只在测试里被调用的装配函数"仍然是零生产调用方）。
+  //
+  // `docLifecycleOperators.ts` 就是那个调用点：它是 `OPERATOR_OPEN_SCENE` 的实现，
+  // 即"用户打开一份场景文件"的**唯一**生产路径（拖放/文件选择/菜单都走它）。
+  //
+  // 与"半成品替换"的区别是**可判定的**：
+  //  - 这两条边消费的是**新内核的类型与纯函数**（`domain/document` 的
+  //    `createDocument`/`withContent`、`application/commands` 的 `openDocumentState`），
+  //    不是"旧实现的新名字"；
+  //  - 装配失败的**兜底**是显式的、有日志的（`adoptDocumentIntoKernel` 的分支），
+  //    不是静默双轨 —— 且该兜底的退出条件是"装配层覆盖全部文档形态"（可判定）。
+  //
+  // ## 为什么 `@/composition/kernelAssembly` 本身**不**需要登记
+  //
+  // `composition/**` 是契约 §7 的**装配根**，它引用各层是设计使然（本文件头
+  // 第 561-563 行已说明：`composition/` 落在本判据下天然不算旧层）。
+  // 故这里只登记 `operators/`（旧层）那两条。
+  Object.freeze({
+    from: 'src/operators/builtin/docLifecycleOperators.ts',
+    to: 'domain/document',
+    reason:
+      'P10b（#282）文档内容面接线：`OPERATOR_OPEN_SCENE` 解析出旧文档后，用内核的 `createDocument`/`withContent`/`withDocumentContent` 组装内核 `Document`（装配产物 → 内核文档）。这是 R-WK-04 缺口「没有生产代码把旧场景文件装配成内核 Scene」的**唯一**生产调用点',
+    exitStage:
+      'P10b（#282）本批接线落地；退出条件（可判定）= `operators/` 被 `editors/` + `composition/` 装配接管、旧 operator 注册表退役时，本边随文件退场。P11 审计核销本行',
+  }),
+  Object.freeze({
+    from: 'src/operators/builtin/docLifecycleOperators.ts',
+    to: 'application/commands',
+    reason:
+      '同上：`openDocumentState` 是"打开文档"的既有纯入口（本批用它构造内核文档的初始应用状态形状，供诊断/装配测试对账）；它保证"内核文档的打开形状"只有一个定义点，而不是在接线处另拼一份',
+    exitStage:
+      'P10b（#282）本批接线落地；退出条件同上一行（operator 退场时一并消失）。若本行在 P11 时仅剩诊断用途，应改为只导出类型或删除 —— 不得长期保留"仅测试使用"的生产导入',
+  }),
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {
