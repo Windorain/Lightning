@@ -538,44 +538,27 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
   }),
   // ── P10b（#282）文档内容面：旧加载路径把文档装配进内核 ──────────────────
   //
-  // ## 这两条边为什么必须存在，以及它们**不**是"半成品替换"
+  // ## P10d（#289）D1：这两条边（`docLifecycleOperators → domain/document` 与
+  // `→ application/commands`）**已核销**（登记不得腐烂）
   //
-  // R-WK-04（#250）登记的缺口原文是「**全树没有任何生产代码**从旧场景文件构造
-  // 内核 `Scene`」。P10b 交付了装配层（`composition/kernelAssembly`）与内核采纳
-  // （`KernelSession.adoptDocument`）后，**必须**有一个旧层的**真实**调用点，
-  // 否则那个缺口照旧成立（"只在测试里被调用的装配函数"仍然是零生产调用方）。
+  // D1 把装配实现从该 operator **移进** `composition/documentLoad`
+  // （统一两条加载脊柱 —— 见该模块的文件头）。于是 operator 不再直接引用任何
+  // **内核文件**，只 import `composition/`。架构闸门（"每条已登记边都真实存在"）
+  // 当场判红两行 —— 判红是**对的**：登记表必须与现状一致。
   //
-  // `docLifecycleOperators.ts` 就是那个调用点：它是 `OPERATOR_OPEN_SCENE` 的实现，
-  // 即"用户打开一份场景文件"的**唯一**生产路径（拖放/文件选择/菜单都走它）。
+  // 按本判据的既有口径，**`composition/` 是装配根、引用各层是设计使然**
+  // （见上方"为什么 `composition/kernelAssembly` 不需要登记"），
+  // 故这些边**不该**改登记成 `→ composition/...` —— 那不是"旧→内核"边，
+  // 登记它会把装配根的正当引用伪装成一条需审计的迁移边。正确处置是核销。
   //
-  // 与"半成品替换"的区别是**可判定的**：
-  //  - 这两条边消费的是**新内核的类型与纯函数**（`domain/document` 的
-  //    `createDocument`/`withContent`、`application/commands` 的 `openDocumentState`），
-  //    不是"旧实现的新名字"；
-  //  - 装配失败的**兜底**是显式的、有日志的（`adoptDocumentIntoKernel` 的分支），
-  //    不是静默双轨 —— 且该兜底的退出条件是"装配层覆盖全部文档形态"（可判定）。
+  // ## "装配有真实生产调用点"没有随登记消失，而是换了**更强**的把守者
   //
-  // ## 为什么 `@/composition/kernelAssembly` 本身**不**需要登记
-  //
-  // `composition/**` 是契约 §7 的**装配根**，它引用各层是设计使然（本文件头
-  // 第 561-563 行已说明：`composition/` 落在本判据下天然不算旧层）。
-  // 故这里只登记 `operators/`（旧层）那两条。
-  Object.freeze({
-    from: 'src/operators/builtin/docLifecycleOperators.ts',
-    to: 'domain/document',
-    reason:
-      'P10b（#282）文档内容面接线：`OPERATOR_OPEN_SCENE` 解析出旧文档后，用内核的 `createDocument`/`withContent`/`withDocumentContent` 组装内核 `Document`（装配产物 → 内核文档）。这是 R-WK-04 缺口「没有生产代码把旧场景文件装配成内核 Scene」的**唯一**生产调用点',
-    exitStage:
-      'P10b（#282）本批接线落地；退出条件（可判定）= `operators/` 被 `editors/` + `composition/` 装配接管、旧 operator 注册表退役时，本边随文件退场。P11 审计核销本行',
-  }),
-  Object.freeze({
-    from: 'src/operators/builtin/docLifecycleOperators.ts',
-    to: 'application/commands',
-    reason:
-      '同上：`openDocumentState` 是"打开文档"的既有纯入口（本批用它构造内核文档的初始应用状态形状，供诊断/装配测试对账）；它保证"内核文档的打开形状"只有一个定义点，而不是在接线处另拼一份',
-    exitStage:
-      'P10b（#282）本批接线落地；退出条件同上一行（operator 退场时一并消失）。若本行在 P11 时仅剩诊断用途，应改为只导出类型或删除 —— 不得长期保留"仅测试使用"的生产导入',
-  }),
+  // `composition/__tests__/documentLoadSpines.test.ts` 的「生产源码断言」组
+  // 直接断言**两条**脊柱都调 `adoptLoadedDocument`，且 `DocumentSource` 路径
+  // 必须传 `plainRootOf(loadResult.raw)`。那断言的是**调用（含参数）**，
+  // 比"文件里出现过 import"强。
+
+  // ── P10b（#282）Area 产品接线：旧外壳/旧 operator 消费新 Area 内核 ────────
   // ── P10b（#282）Area 产品接线：旧外壳/旧 operator 消费新 Area 内核 ────────
   //
   // ## 这五条边为什么必须存在，以及它们**不**是"半成品替换"

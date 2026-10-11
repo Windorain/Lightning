@@ -990,8 +990,55 @@ export function metadataFromLegacy(
       origin && typeof origin === 'object'
         ? { x: readNumber(origin.x) ?? 0, y: readNumber(origin.y) ?? 0, z: readNumber(origin.z) ?? 0 }
         : { x: 0, y: 0, z: 0 },
-    createdAtMs: readNumber(meta.created_at_ms),
+    createdAtMs: declaredCreatedAtMs(meta, root),
   })
+}
+
+/**
+ * `createdAtMs` 必须来自**源声明**，不得来自旧解析器的**伪造值**。
+ *
+ * ## 本批（#289 P10d D1）实测抓出的真实缺陷
+ *
+ * `RuntimeDocument.fromV2Plain` 在 `raw.meta` 缺席时**伪造**一份 meta，其中含
+ * `created_at_ms: Date.now()`（`context/runtimeDocument.ts:389`）。而信封类文档的
+ * `meta` 被解包器**摊平到 plain 根**（见 `metadataFromLegacy` 的说明），
+ * 于是"文件没声明创建时间"变成"刚刚创建"。
+ *
+ * 后果不是显示问题，而是**装配不确定**：同一份文件两次装配得到**不同的内核内容**
+ * （`documentMetadata` 进 `contentOf` 的内容身份）⇒ "同一份文件 ⇒ 同一份内容身份"
+ * 这条不变量被破坏，缓存/脏标记/保真往返都建立在一个会变的数字上。
+ *
+ * 实测（`multiblock-tier-only`，文件里确实没有 `created_at_ms`）：
+ * 两次 `assembleKernelDocument` 的 `content.metadata.createdAtMs` 相差数毫秒，
+ * `contentOf(...)` 的内容版本**不相等**。
+ *
+ * ## 判据：**读源，不读伪造值**
+ *
+ *  - 有 `root`（无损源）：按源的**两种形态**取 —— 嵌套 `root.meta.created_at_ms`
+ *    （Plain 文档）或根级 `root.created_at_ms`（信封 meta 摊平后的落点）；
+ *    两处都没有 ⇒ `null`（文件**没有声明**，如实缺席）。
+ *  - 无 `root`（直接调用/无无损源的降级路径）：只能用 `meta.created_at_ms`，
+ *    它**可能**是伪造值 —— 这条降级由函数文档如实标注，不假装可靠。
+ *
+ * 刻意**不**在 `context/runtimeDocument.ts` 处修：那一层是**旧解析器**，
+ * 改它会影响所有旧路径消费者（含 e2e 判据面），而本批的职责边界是装配层
+ * 忠实读取"文件声明了什么"。伪造值仍在旧文档里（它的既有行为），
+ * 但**不再进内核内容身份**。
+ */
+function declaredCreatedAtMs(
+  meta: Readonly<Record<string, unknown>>,
+  root: Readonly<Record<string, unknown>> | undefined,
+): number | null {
+  if (root === undefined) {
+    // 无无损源：如实降级（该值可能是旧解析器的伪造值，见上）。
+    return readNumber(meta.created_at_ms) ?? null
+  }
+  const nested = root.meta
+  const nestedValue =
+    nested !== null && typeof nested === 'object' && !Array.isArray(nested)
+      ? readNumber((nested as Record<string, unknown>).created_at_ms)
+      : undefined
+  return nestedValue ?? readNumber(root.created_at_ms) ?? null
 }
 
 /**

@@ -468,12 +468,52 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     }
 
     // (a) 生产者缺失：唯一消费者只**数数**，不构造记录。
-    const lifecycle = readSource(path.join(SRC_ROOT, 'operators', 'builtin', 'docLifecycleOperators.ts'))
+    //
+    // ## P10d（#289）D1：锚点**搬家**（不是缺口消失）
+    //
+    // D1 把装配实现从 `docLifecycleOperators.ts` 移进 `composition/documentLoad`
+    // （统一两条加载脊柱），于是"只数数"的那一行也随之搬走。
+    // 缺口**仍然成立**（`captureFidelity` 在全树生产文件里零命中），
+    // 故本条改为在**新家**断言，并补一条全树判据 —— 而不是删掉判据。
+    // 把它删掉会是"因为实现搬了家，就把守门人撤了"，正是本判据所反的。
+    const lifecycle = readSource(path.join(SRC_ROOT, 'composition', 'documentLoad.ts'))
     expect(lifecycle, '装配产物的 unknownFields 必须仍只被计数（生产者尚未接线）').toContain(
       'Object.keys(value.unknownFields).length',
     )
-    expect(lifecycle, '(a) 若 Producers 已接线，本条接缝应核销 —— 现在不得出现 captureFidelity').not.toContain(
-      'captureFidelity',
+    // 全树：生产者仍未被接线（比"某个文件里没有"更强的判据 —— 搬家不会让它失效）。
+    const srcFilesForProducer: string[] = []
+    const walkProducer = (dir: string): void => {
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, ent.name)
+        if (ent.isDirectory()) {
+          if (ent.name === '__tests__' || ent.name === 'node_modules') continue
+          walkProducer(full)
+        } else if (/\.(ts|vue)$/.test(ent.name)) {
+          srcFilesForProducer.push(full)
+        }
+      }
+    }
+    walkProducer(SRC_ROOT)
+    /** 剥注释**与字符串**（与下面 (c) 段的 `codeOnly` 同一把尺子；本段自带一份）。 */
+    const stripForProducer = (text: string): string =>
+      text
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\/\/[^\n]*/g, ' ')
+        .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+        .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+        .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+    const producerCallers = srcFilesForProducer
+      .filter((abs) => !abs.endsWith(path.join('adapters', 'files', 'fidelityRecord.ts')))
+      .filter((abs) => stripForProducer(readSource(abs)).includes('captureFidelity'))
+      .map((abs) => path.relative(SRC_ROOT, abs).replace(/\\/g, '/'))
+    expect(
+      producerCallers,
+      `(a) 若生产者已接线，本条接缝应核销并同批更新登记：${producerCallers.join(', ')}`,
+    ).toEqual([])
+    // 且文件选择器路径不再持有它（D1 的另一半：实现已移出该文件）
+    const operatorFile = readSource(path.join(SRC_ROOT, 'operators', 'builtin', 'docLifecycleOperators.ts'))
+    expect(operatorFile, 'D1 后 operator 不再持有装配实现（只转发）').not.toContain(
+      'Object.keys(value.unknownFields).length',
     )
 
     // (c) 产物侧挂点零生产调用方：只被定义处与**登记表自己的散文**引用。
