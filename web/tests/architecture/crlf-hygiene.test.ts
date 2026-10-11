@@ -112,6 +112,22 @@ const PENDING_NORMALIZATION: ReadonlyArray<{ file: string; because: string; owne
 ]
 
 /**
+ * **结构无关的读取者**：读源码文本，但**不把它当文本断言**，而是整体交给一个
+ * 解析器/编译器 ⇒ 行尾天然无关，无需归一化。
+ *
+ * 与 `PENDING_NORMALIZATION`（黄区，"恰好安全"）的区别：
+ * 这里的无关性是**结构性的**（产物与行尾无关），不是"当前断言恰好不碰行尾"。
+ * 但条目仍必须**逐项**接受断言核对（见下方测试），不得只凭名字豁免。
+ */
+const EOL_AGNOSTIC_READERS: ReadonlyArray<{ file: string; because: string }> = [
+  {
+    file: 'tests/architecture/sfc-parse.test.ts',
+    because:
+      '读 `.vue` 文本后**整体**交给 `@vue/compiler-sfc` 的 `parse()`：判据是"能否解析"（AST 结构），不是文本匹配。CRLF 与 LF 都是合法的 SFC 词法输入，解析结果对模板供断言的 AST 结构一致（标签配平与行尾无关）。',
+  },
+]
+
+/**
  * 已知**不读源码**的文件（读的是产物/数据而非源码），故无 EOL 面。
  *
  * 判定依据是断言内容（"文件存在/可解析"），不是文件名。
@@ -207,23 +223,49 @@ describe('CRLF 元检查闸门（铁律 6 的机器化）', () => {
     expect(SOURCE_READING.length, '必须扫描到"读源码"的测试文件').toBeGreaterThanOrEqual(8)
   })
 
-  it('每个读源码的测试文件都必须：读入口**已归一化**，或**在待归一化清单里**', () => {
+  it('每个读源码的测试文件都必须：读入口**已归一化**、**结构无关**，或在**待归一化清单**里', () => {
     const pending = new Set(PENDING_NORMALIZATION.map((p) => p.file))
+    const agnostic = new Set(EOL_AGNOSTIC_READERS.map((p) => p.file))
     const violations: string[] = []
     for (const rel of SOURCE_READING) {
       const code = stripComments(readNorm(path.join(WEB_ROOT, rel)))
-      if (hasEolHandling(code) || pending.has(rel)) continue
+      if (hasEolHandling(code) || pending.has(rel) || agnostic.has(rel)) continue
       violations.push(rel)
     }
     expect(
       violations,
       `以下读源码的测试**读入口未归一化行尾**，且未登记。\n` +
-        `请二选一：\n` +
+        `请三选一：\n` +
         `  ① 在读取处加 \`.replace(/\\r\\n/g, '\\n')\`（推荐，治本，一次覆盖该文件全部断言）；\n` +
-        `  ② 若确认安全，加入 PENDING_NORMALIZATION 并**逐条写明**为何安全（须可核对）。\n` +
+        `  ② 若文本是整体交给解析器的（行尾结构无关），加入 EOL_AGNOSTIC_READERS；\n` +
+        `  ③ 若只是"恰好安全"，加入 PENDING_NORMALIZATION 并**逐条写明**理由（须可核对）。\n` +
         `背景：本仓 core.autocrlf=true ⇒ 新鲜检出是 CRLF，LF 树上写绿的源码断言会在 CI/检出时判红（#253 事故）。\n` +
         violations.join('\n'),
     ).toEqual([])
+  })
+
+  it('结构无关清单的每条也**逐项**成立（不得只凭名字豁免）', () => {
+    for (const p of EOL_AGNOSTIC_READERS) {
+      expect(p.because.length, `${p.file} 必须写明为何结构无关（≥60 字）`).toBeGreaterThan(60)
+      // ① 该文件确实读源码
+      const code = readNorm(path.join(WEB_ROOT, p.file))
+      expect(/readFileSync/.test(code), `${p.file} 必须确实读源码`).toBe(true)
+      // ② 且确实未做 EOL 处理（若做了就该走绿区，不必在此登记）
+      expect(
+        hasEolHandling(stripComments(code)),
+        `${p.file} 已做 EOL 处理 ⇒ 应从 EOL_AGNOSTIC_READERS 移除（走绿区）`,
+      ).toBe(false)
+      // ③ 它确实是我核实的"交给解析器"型：文件里出现 parse/compile 类调用
+      expect(
+        /parse\s*\(|compileTemplate\s*\(|compile\s*\(/.test(code),
+        `${p.file} 的豁免理由是"整体交给解析器"，必须能核到该调用`,
+      ).toBe(true)
+      // ④ 与上面那张清单不得重叠（一个文件只能有一种豁免理由）
+      expect(
+        PENDING_NORMALIZATION.some((q) => q.file === p.file),
+        `${p.file} 不得同时在两张清单里`,
+      ).toBe(false)
+    }
   })
 
   it('待归一化清单每条豁免都**逐项**成立（不绑名字，绑事实）', () => {
