@@ -57,15 +57,67 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   process.exit(2)
 }
 
+// ---------------------------------------------------------------------------
+// #332 · 时间预算（本包装自己的参数；其余原样透传给 playwright）
+// ---------------------------------------------------------------------------
+//   --budget-ms <毫秒>   本次运行的墙钟预算
+//   --budget-soft        超预算只告警、不改变退出码（L3 full 用；避免负载抖动误伤）
+//   --budget-label <名>  预算线名称（日志/登记用，例如 "L2 e2e smoke"）
+// 缺省（不给 --budget-ms）= 与改动前完全一致，只多打印一行实测墙钟。
+const argv = process.argv.slice(2)
+let budgetMs = null
+let budgetSoft = false
+let budgetLabel = 'e2e'
+const forwarded = []
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i]
+  if (a === '--budget-ms') {
+    budgetMs = Number(argv[++i])
+    continue
+  }
+  if (a === '--budget-soft') {
+    budgetSoft = true
+    continue
+  }
+  if (a === '--budget-label') {
+    budgetLabel = String(argv[++i])
+    continue
+  }
+  forwarded.push(a)
+}
+if (budgetMs !== null && (!Number.isFinite(budgetMs) || budgetMs <= 0)) {
+  console.error(`[#332 时间预算] --budget-ms 非法：${JSON.stringify(budgetMs)}（应为正毫秒数）`)
+  process.exit(2)
+}
+
+const fmtMs = (ms) => (ms >= 60_000 ? `${(ms / 60_000).toFixed(2)} min` : `${(ms / 1000).toFixed(1)} s`)
+
 // 走本地 playwright 入口，不经 shell —— 参数（含 spec 路径）原样传递，无引号转义问题。
 const cli = path.join(WEB_DIR, 'node_modules', '@playwright', 'test', 'cli.js')
-const child = spawn(process.execPath, [cli, 'test', ...process.argv.slice(2)], {
+const startedAt = Date.now()
+const child = spawn(process.execPath, [cli, 'test', ...forwarded], {
   cwd: WEB_DIR,
   stdio: 'inherit',
   env: process.env,
 })
 
-child.on('exit', (code) => process.exit(code ?? 1))
+child.on('exit', (code) => {
+  const elapsed = Date.now() - startedAt
+  // 每批合流登记耗时：这一行就是登记源（与退出码同处，不会被漏读）
+  console.log(`[#332 时间预算] ${budgetLabel} 实测墙钟 ${fmtMs(elapsed)}（${elapsed} ms）`)
+  if (budgetMs !== null && elapsed > budgetMs) {
+    const detail =
+      `[#332 时间预算] ${budgetLabel} **超预算**：实测 ${fmtMs(elapsed)} > 预算 ${fmtMs(budgetMs)}` +
+      `（×${(elapsed / budgetMs).toFixed(2)}）`
+    if (budgetSoft) {
+      console.error(`${detail} —— 软预算（L3 口径）：只告警，不改变退出码。`)
+    } else {
+      console.error(`${detail} —— **硬预算：判红**（L2 口径）。`)
+      process.exit(code === 0 || code === undefined ? 3 : code)
+    }
+  }
+  process.exit(code ?? 1)
+})
 child.on('error', (err) => {
   console.error(`[e2e 端口隔离] 无法启动 playwright：${err.message}`)
   process.exit(1)

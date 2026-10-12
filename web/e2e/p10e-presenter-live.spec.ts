@@ -195,7 +195,7 @@ test.describe('P10e 段② · 呈现链真实上线（生产装配 → Presenter
     })
   }
 
-  test('**逐格拾取可用**（真实视口 + 多个屏幕位置 ⇒ 解出多个不同的格）', async ({ page }) => {
+  test('**逐格拾取可用**（真实视口 + 多个屏幕位置 ⇒ 解出多个不同的格）', { tag: '@smoke' }, async ({ page }) => {
     await gotoWorkbench(page)
     const fx = readFixture('multiblock-lsc-overlap.json')
     await injectSceneDocumentOk(page, fx.envelope, 'multiblock-lsc-overlap.json')

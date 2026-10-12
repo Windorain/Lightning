@@ -20,17 +20,31 @@
 
 import {
   TREE_NONCE_ENV,
+  TREE_WEB_ROOT,
   assertTreeIdentity,
   readTreeIdentity,
   resolveBaseURL,
   resolvePort,
   writeIdentityEvidence,
 } from './tree-identity'
+import { excludedSpecs, exclusionBanner, writeExclusionRecord } from './real-artifact-gate'
 
 export default async function globalSetup(): Promise<void> {
   const port = resolvePort()
   const baseURL = resolveBaseURL(port)
   const expectedNonce = process.env[TREE_NONCE_ENV] ?? null
+
+  // #332：真实产物 spec 的排除记录在**这里**落盘（而不是 config 里）。
+  // 时序依据：Playwright 在运行开始时**清空 `test-results/`**，配置加载期写的文件会被删掉 ——
+  // 而 globalSetup 在该清理**之后**运行（实测：落在 config 里的记录跑完就找不到了）。
+  const excluded = excludedSpecs()
+  if (excluded.length > 0) {
+    const file = writeExclusionRecord(TREE_WEB_ROOT, excluded)
+    console.log(exclusionBanner(excluded))
+    console.log(`[#332 e2e 分层] 排除记录已落盘：${file}`)
+  } else {
+    console.log(exclusionBanner([]))
+  }
 
   // 重试等待：正常情况下 webServer 已就绪；留一点余量以防 URL 健康检查与插件握手之间的缝隙。
   let identity = null

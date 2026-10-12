@@ -50,10 +50,25 @@ import {
   resolveBaseURL,
   resolvePort,
 } from './e2e/tree-identity'
+import { testIgnoreGlobs } from './e2e/real-artifact-gate'
 
 // ── 端口（唯一真源）──
 const PORT = resolvePort()
 const BASE_URL = resolveBaseURL(PORT)
+
+/**
+ * #332 · **真实产物 spec 的产物门控排除**（详见 `e2e/real-artifact-gate.ts`）。
+ *
+ * 干净检出上没有游戏内导出的真实产物，其中两份 spec 会在 **import 期**抛错 ⇒
+ * Playwright 把整次 collection 判失败（实测 8.3s 结束、`expected: 0`、一个用例都没跑）。
+ * 这里按**产物是否就绪**排除：缺 ⇒ `testIgnore` 掉（横幅与
+ * `test-results/e2e-exclusions.json` 由 `e2e/global-setup.ts` 落一次）；
+ * 就绪 ⇒ `testIgnore` 为空，这些 spec 自动纳入并必须通过（**没有静默跳过**）。
+ *
+ * 注：**不在这里**打印横幅/落盘 —— 本文件会在每个 worker 进程里重新加载，且 config 加载期
+ * 写的文件会被 Playwright 启动时清空 `test-results/` 删掉（两条都实测踩过）。
+ */
+const TEST_IGNORE = testIgnoreGlobs()
 
 /**
  * 本次运行的服务身份标记（随机 nonce）。
@@ -67,6 +82,8 @@ const TREE_NONCE =
 
 export default defineConfig({
   testDir: './e2e',
+  // #332：真实产物未就绪的 spec 按产物门控排除（产物就绪时为空数组 ⇒ 全部纳入）
+  testIgnore: TEST_IGNORE,
   // 服务身份核验：在任何用例之前断言"端口上的服务是本树的"
   globalSetup: './e2e/global-setup.ts',
   timeout: 90_000,

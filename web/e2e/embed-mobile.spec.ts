@@ -56,7 +56,7 @@ test.describe('embed mobile adaptation', () => {
     expect(sidebarBox?.width ?? 999).toBeLessThanOrEqual(46)
   })
 
-  test('mobile: visual acceptance screenshot', async ({ page }, testInfo) => {
+  test('mobile: visual acceptance screenshot', { tag: '@smoke' }, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chrome', 'mobile-only')
 
     await waitEmbedReady(page)
@@ -170,7 +170,7 @@ test.describe('embed mobile adaptation', () => {
     await expect(page.locator('.wm-titlebar button[title="全屏"]')).toBeVisible()
   })
 
-  test('desktop: no scale, desktop layout', async ({ page }, testInfo) => {
+  test('desktop: no scale, desktop layout', { tag: '@smoke' }, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', 'desktop-only')
 
     await page.goto(PAGE)

@@ -272,7 +272,7 @@ test.describe('P10b · A05/A17 产品级（真实双 3D Area）', () => {
   })
 
   // ── A17 ───────────────────────────────────────────────────────────────────
-  test('A17 · 撤销/重做一致、**无悬空引用**、**回保存内容变干净**', async ({ page }) => {
+  test('A17 · 撤销/重做一致、**无悬空引用**、**回保存内容变干净**', { tag: '@smoke' }, async ({ page }) => {
     await dualViewportWithFixture(page)
     const observed = await page.evaluate(() => {
       const kernel = (window as any).__vm__.requireKernelSession()

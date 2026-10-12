@@ -65,7 +65,7 @@ async function runProbe(page: Page, options: { width?: number; height?: number; 
 }
 
 test.describe('P10f/E · 导出面端口在真实 GL 下产出 PNG', () => {
-  test('真 GL：完整链路跑通，产物是合法 PNG 且**真的有非透明像素**', async ({ page }, testInfo) => {
+  test('真 GL：完整链路跑通，产物是合法 PNG 且**真的有非透明像素**', { tag: '@smoke' }, async ({ page }, testInfo) => {
     fs.mkdirSync(OUT_DIR, { recursive: true })
     await gotoWorkbench(page)
     // 用**真实多方块夹具**（走生产解析器 → 内核装配），使内容面非空。
