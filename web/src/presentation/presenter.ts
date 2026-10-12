@@ -37,6 +37,7 @@ import * as THREE from 'three'
 import type { BatchPayload, CompiledScene, CompileGeneration } from './compileScene'
 import type { GeometryAttributes, MaterialDescriptor } from './evaluationKey'
 import type { ContentIdentity } from './assetIdentity'
+import type { TextureBinding } from './textureBinding'
 import { contentIdentityKey } from './assetIdentity'
 import { OwnershipRegistry, type OwnershipEntry } from './ownership'
 
@@ -62,11 +63,51 @@ export interface PresenterStats {
   batchObjects: number
   /** 当前批次里实例总数。 */
   instanceCount: number
+  /**
+   * **必需纹理未就绪**的材质数（#289 P10d；G4 / A36 的观测面）。
+   *
+   * 非零 ⇒ 画面上有材质走了"无贴图的中性色"路径。它不是崩溃，但**必须可见**：
+   * A36 明文要求「必需资源未就绪**不得假装完整**」——
+   * 这个计数就是"没有假装"的可机械读出形式。
+   */
+  missingRequiredTextures: number
+}
+
+/**
+ * **纹理取用端口**（呈现侧；#289 P10d）。
+ *
+ * ## 为什么是端口而不是"呈现器自己去解码"
+ *
+ * 纹理字节来自文档资源（`domain/content#ContentResource` 的 `payload`/`locator`），
+ * 解码是**适配器**的职责（#249 §4 规则 4：「适配器实现端口」）。
+ * 呈现层只声明"我要按**内容身份**取一张 `THREE.Texture`"，由装配层注入实现 ——
+ * 于是"呈现层不碰 IO"这条纯度纪律成立，且 e2e 可以注入一个真实实现的探针。
+ *
+ * ## 返回 `null` 的语义（**不得**用占位冒充）
+ *
+ * `null` = 该内容身份对应的纹理**当前不可用**（未请求/加载中/缺失/失败）。
+ * 呈现器据此**不设** `map` 并累计 `missingRequiredTextures` ——
+ * 而不是拿一张默认图顶上（那正是"假装完整"）。
+ */
+export interface TexturePort {
+  /** 按内容身份取纹理；`null` = 当前不可用。 */
+  textureFor(identity: ContentIdentity): THREE.Texture | null
 }
 
 export interface PresenterOptions {
   /** 设备作用域（一个渲染器实例一个；由 `nextDeviceScope()` 分配）。 */
   scope: string
+  /**
+   * 纹理取用端口（#289 P10d）。缺省 = 该呈现器不消费纹理
+   * （顶点色/线框专用，或测试路径）—— 那是**显式**配置，不是"忘了接"。
+   */
+  textures?: TexturePort
+  /**
+   * 材质 → 纹理绑定（#289 P10d）。缺省 = 全部材质无贴图。
+   *
+   * 键是 `MaterialDescriptor.id`（绘制批次按材质身份分批，故每个批次一个绑定）。
+   */
+  textureBindings?: ReadonlyMap<string, TextureBinding>
 }
 
 /**
@@ -96,6 +137,7 @@ export class BatchedPresenter {
     disposals: 0,
     batchObjects: 0,
     instanceCount: 0,
+    missingRequiredTextures: 0,
   }
 
   constructor(private readonly options: PresenterOptions) {
@@ -231,7 +273,7 @@ export class BatchedPresenter {
 
   private mount(payload: BatchPayload): MountedBatch {
     const materialIdentity = materialIdentityOf(payload.material)
-    const material = this.materialFor(payload.material)
+    const material = this.materialFor(payload.material, this.options.textureBindings?.get(payload.material.id))
     const geometryKey = geometryKeyOf(payload)
     const geometry = this.geometryFor(geometryKey, payload.attributes)
 
@@ -267,7 +309,7 @@ export class BatchedPresenter {
         const g = attrs !== undefined
           ? this.geometryFor(memberGeometryKey, attrs)
           : geometry
-        const m = this.materialFor(payload.material)
+        const m = this.materialFor(payload.material, this.options.textureBindings?.get(payload.material.id))
         const mesh = new THREE.Mesh(g, m)
         mesh.applyMatrix4(matrixOf(instance.transform))
         mesh.userData.presentationBatch = batchTagOf(payload, instance.instanceSlot)
@@ -371,8 +413,8 @@ export class BatchedPresenter {
 
   // ── 材质缓存 ──
 
-  private materialFor(descriptor: MaterialDescriptor): THREE.Material {
-    const identity = materialIdentityOf(descriptor)
+  private materialFor(descriptor: MaterialDescriptor, binding: TextureBinding | undefined): THREE.Material {
+    const identity = materialIdentityOf(descriptor, binding)
     const key = identityKey(identity)
     const cached = this.materialCache.get(key)
     if (cached !== undefined) {
@@ -380,10 +422,11 @@ export class BatchedPresenter {
       this.stats.materialReuses += 1
       return cached.value
     }
-    const material = createMaterial(descriptor)
+    const material = createMaterial(descriptor, binding, this.options.textures)
     this.materialCache.set(key, { value: material, refs: 1 })
     this.ownership.acquire(this.entryOf(identity), () => {})
     this.stats.materialBuilds += 1
+    if (binding?.missingRequired === true) this.stats.missingRequiredTextures += 1
     return material
   }
 
@@ -437,9 +480,31 @@ interface CachedRef<T> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 材质**实例**身份：id/version + 混合模式 + tint + 顶点色（不同 tint 必须不同材质）。 */
-export function materialIdentityOf(descriptor: MaterialDescriptor): ContentIdentity {
+/**
+ * 材质**内容身份**（#289 P10d：**含纹理内容身份**）。
+ *
+ * ## 为什么纹理必须进材质身份（A36 的"版本替换"判据）
+ *
+ * A36 要求「资源**版本替换**」可判定：同一 `materialId` 换了贴图内容 ⇒
+ * 必须换材质身份，否则缓存命中、画面**永远显示旧图** —— 而那是 A28 负对照
+ * 「按 URL 而不按内容版本缓存」的同族形态。
+ *
+ * 旧形态的身份只有 `(id, blend, tint, useVertexColor)`：它把"换贴图"表达不出来
+ * （纹理根本不在呈现层）。补上 `map` 的**内容身份**后，"内容版本变了 ⇒ 身份变"
+ * 自动成立，且判据与 `presentation/assetIdentity` 同一来源（`contentIdentityKey`）。
+ *
+ * ## 为什么用 `map` 而不是 locator
+ *
+ * §19.3：「资源引用包含稳定资源 ID 和内容版本/哈希，**URL 仅为获取位置**」。
+ * 用 locator 会让"同一份贴图换了个镜像地址"变成两种材质（多余重建），
+ * 而"同一 URL 覆盖上传"变成同一种材质（永不更新）—— 两个方向都错。
+ */
+export function materialIdentityOf(descriptor: MaterialDescriptor, binding?: TextureBinding): ContentIdentity {
+  const mapKey = binding?.map === undefined ? '-' : contentIdentityKey(binding.map)
   return {
-    id: `material:${descriptor.id}:${descriptor.blend}:${descriptor.tint}:${descriptor.useVertexColor ? 'vc' : 'plain'}`,
+    id:
+      `material:${descriptor.id}:${descriptor.blend}:${descriptor.tint}:${descriptor.useVertexColor ? 'vc' : 'plain'}` +
+      `:${mapKey}`,
     version: descriptor.version,
   }
 }
@@ -521,7 +586,51 @@ function buildGeometry(attrs: GeometryAttributes): THREE.BufferGeometry {
   return g
 }
 
-function createMaterial(descriptor: MaterialDescriptor): THREE.MeshBasicMaterial {
+/**
+ * 材质 → three 材质的构造（**含纹理贴图**；#289 P10d 补）。
+ *
+ * ## 本函数替代什么（P10c 实测缺口）
+ *
+ * P10c（#286）实测原文：
+ *
+ * > `presentation/`（P5 交付、本应成为渲染输入的那一层）**完全不处理纹理**：
+ * > `presenter.ts:524` 的 `createMaterial` 只设 `vertexColors`/`color`/`transparent`/
+ * > `alphaTest` —— **没有 `map`**。全层零 `Texture` 使用。
+ *
+ * ⇒ 呈现通道下的方块没有贴图，而旧渲染链（`simpleMaterialLibrary`）有 ——
+ * 切换即"画面变平"（能力回退）。本函数把 `map` 补上。
+ *
+ * ## 三条判据
+ *
+ * ### 1. 纹理按**内容身份**缓存，不按 URL
+ *
+ * `#289` 的硬约束是 `three ^0.174.0`；A28 的负对照是「按 URL 而不按内容版本缓存」。
+ * 故 {@link PresenterOptions.textures} 是一个按 `contentIdentityKey` 索引的端口，
+ * 而"同一 URL 换内容"在该索引下**必然**落进两个不同条目（见 `textureBinding.ts`）。
+ *
+ * ### 2. `map` 缺席 ⇒ **不设** `map`（不是设一张默认图）
+ *
+ * 顶点色/线框材质本就没有贴图。设默认图会让"这个材质没有贴图"与"贴图丢了"
+ * 不可区分 —— 与 `textureBinding.ts` 的字段缺席口径一致。
+ *
+ * ### 3. 必需资源未就绪 ⇒ **显式不标成功**（G4/A36）
+ *
+ * `binding.missingRequired === true` 时**不**静默用占位顶上：本函数仍建材质
+ * （否则整个批次消失，比缺贴图更糟），但走 `params.color` 的中性色并在
+ * 呈现器的 `missingRequired` 计数里可见 —— 于是"渲染出了一个缺贴图的画面"
+ * 是一个**可观测**的事实，而不是宣称完整。
+ *
+ * ## 采样设置
+ *
+ * `binding.sampling` 决定 `magFilter`/`minFilter`/`wrapS`/`wrapT`/`flipY`/mipmap ——
+ * 它们是**呈现参数**（不进资源身份，见 `textureBinding.ts` 的说明）。
+ * MC 体素风格默认 `nearest`（不插值），故 `filter: 'nearest'` 是默认。
+ */
+function createMaterial(
+  descriptor: MaterialDescriptor,
+  binding: TextureBinding | undefined,
+  textures: TexturePort | undefined,
+): THREE.MeshBasicMaterial {
   const params: THREE.MeshBasicMaterialParameters = {
     vertexColors: descriptor.useVertexColor,
     color: descriptor.useVertexColor ? 0xffffff : descriptor.tint,
@@ -530,6 +639,33 @@ function createMaterial(descriptor: MaterialDescriptor): THREE.MeshBasicMaterial
     params.transparent = true
     params.alphaTest = descriptor.blend === 'cutout' ? 0.5 : 0
     params.depthWrite = true
+  }
+
+  // ③ 纹理贴图（#289 P10d 补；缺席即不设 —— 见判据 2）。
+  if (binding?.map !== undefined && textures !== undefined) {
+    const tex = textures.textureFor(binding.map)
+    if (tex !== null) {
+      const s = binding.sampling
+      tex.magFilter = s.filter === 'nearest' ? THREE.NearestFilter : THREE.LinearFilter
+      tex.minFilter = s.mipmaps
+        ? s.filter === 'nearest'
+          ? THREE.NearestMipmapNearestFilter
+          : THREE.LinearMipmapLinearFilter
+        : s.filter === 'nearest'
+          ? THREE.NearestFilter
+          : THREE.LinearFilter
+      tex.wrapS = s.wrap === 'repeat' ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping
+      tex.wrapT = s.wrap === 'repeat' ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping
+      tex.flipY = s.flipY
+      tex.anisotropy = s.anisotropy
+      tex.needsUpdate = true
+      params.map = tex
+      // 贴图与顶点色**相乘**（体素路径的既有语义：几何带 UV + 顶点色，贴图提供纹素）。
+      // `useVertexColor === false` 时 `color` 是整型 tint，同样与贴图相乘 ——
+      // 这正是旧链 `simpleMaterialLibrary` 的口径。
+    }
+    // `tex === null`（还没解码 / 缺失）：按判据 3 走中性色，**不**设 map。
+    // 计数由调用方经 `binding.missingRequired` 读（本函数不持有统计）。
   }
   return new THREE.MeshBasicMaterial(params)
 }

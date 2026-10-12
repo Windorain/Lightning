@@ -4,6 +4,12 @@ import type { DocumentBindingRef, DocumentLoadResult, DocumentSourceId } from '.
 import { applyDocumentBinding } from './binding'
 import { pushRecentStructure } from '@/wiki/wikiRecentStructures'
 import { hydrateMainEmbedInitialViewFromDoc } from '@/context/embedInitialView'
+// #289 P10d（D1）：**装配进内核**是本函数的一部分，不再是文件选择器路径的专属步骤。
+// 见 `composition/documentLoad` 的文件头：本路径（wiki-data / SDE / 本地抽屉）
+// 此前**从不**装配内核 ⇒ 内核文档只在文件选择器路径被填充，
+// 而 wiki-data 恰是最高价值路径。任何"改读内核"的迁移都会在这里静默读到空文档。
+import { adoptLoadedDocument } from '@/composition/documentLoad'
+import { plainRootOf } from '@/adapters/plainRoot'
 
 function workspaceModeForSource(sourceId: DocumentSourceId): WorkbenchWorkspaceMode {
   switch (sourceId) {
@@ -43,6 +49,18 @@ export async function documentLoadPipeline(
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
     hydrateMainEmbedInitialViewFromDoc(ctx.main)
     ctx.requireKernelSession().seekFrame(0)
+    // ── #289 P10d（D1）：装配进内核 ──
+    //
+    // 与文件选择器路径（`operators/builtin/docLifecycleOperators`）**同一份判据**：
+    // 同一个 `plainRootOf`（信封解包 + meta 合并）与同一个 `adoptLoadedDocument`。
+    //
+    // `plainRoot` 用 `loadResult.raw`（解析器看到的源）而不是
+    // `result.document.serialize()` —— 后者是**有损**的（见 `composition/documentLoad`
+    // 对 `plainRootOf` 的说明：根级 `label`/`author` 等七个键从 `RuntimeDocument`
+    // 出发无法恢复）。
+    //
+    // 装配失败**不**阻断加载（如实降级 + 日志），与文件选择器路径同一取舍。
+    adoptLoadedDocument(ctx, result.document, plainRootOf(loadResult.raw), loadResult.locator)
     const totalBlocks = result.document.frames.reduce(
       (sum, f) => sum + (f.grid?.count() ?? 0),
       0,

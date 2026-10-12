@@ -468,12 +468,52 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     }
 
     // (a) 生产者缺失：唯一消费者只**数数**，不构造记录。
-    const lifecycle = readSource(path.join(SRC_ROOT, 'operators', 'builtin', 'docLifecycleOperators.ts'))
+    //
+    // ## P10d（#289）D1：锚点**搬家**（不是缺口消失）
+    //
+    // D1 把装配实现从 `docLifecycleOperators.ts` 移进 `composition/documentLoad`
+    // （统一两条加载脊柱），于是"只数数"的那一行也随之搬走。
+    // 缺口**仍然成立**（`captureFidelity` 在全树生产文件里零命中），
+    // 故本条改为在**新家**断言，并补一条全树判据 —— 而不是删掉判据。
+    // 把它删掉会是"因为实现搬了家，就把守门人撤了"，正是本判据所反的。
+    const lifecycle = readSource(path.join(SRC_ROOT, 'composition', 'documentLoad.ts'))
     expect(lifecycle, '装配产物的 unknownFields 必须仍只被计数（生产者尚未接线）').toContain(
       'Object.keys(value.unknownFields).length',
     )
-    expect(lifecycle, '(a) 若 Producers 已接线，本条接缝应核销 —— 现在不得出现 captureFidelity').not.toContain(
-      'captureFidelity',
+    // 全树：生产者仍未被接线（比"某个文件里没有"更强的判据 —— 搬家不会让它失效）。
+    const srcFilesForProducer: string[] = []
+    const walkProducer = (dir: string): void => {
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, ent.name)
+        if (ent.isDirectory()) {
+          if (ent.name === '__tests__' || ent.name === 'node_modules') continue
+          walkProducer(full)
+        } else if (/\.(ts|vue)$/.test(ent.name)) {
+          srcFilesForProducer.push(full)
+        }
+      }
+    }
+    walkProducer(SRC_ROOT)
+    /** 剥注释**与字符串**（与下面 (c) 段的 `codeOnly` 同一把尺子；本段自带一份）。 */
+    const stripForProducer = (text: string): string =>
+      text
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\/\/[^\n]*/g, ' ')
+        .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+        .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+        .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+    const producerCallers = srcFilesForProducer
+      .filter((abs) => !abs.endsWith(path.join('adapters', 'files', 'fidelityRecord.ts')))
+      .filter((abs) => stripForProducer(readSource(abs)).includes('captureFidelity'))
+      .map((abs) => path.relative(SRC_ROOT, abs).replace(/\\/g, '/'))
+    expect(
+      producerCallers,
+      `(a) 若生产者已接线，本条接缝应核销并同批更新登记：${producerCallers.join(', ')}`,
+    ).toEqual([])
+    // 且文件选择器路径不再持有它（D1 的另一半：实现已移出该文件）
+    const operatorFile = readSource(path.join(SRC_ROOT, 'operators', 'builtin', 'docLifecycleOperators.ts'))
+    expect(operatorFile, 'D1 后 operator 不再持有装配实现（只转发）').not.toContain(
+      'Object.keys(value.unknownFields).length',
     )
 
     // (c) 产物侧挂点零生产调用方：只被定义处与**登记表自己的散文**引用。
@@ -512,10 +552,34 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
       .filter((abs) => !abs.endsWith(path.join('composition', 'kernelProjection.ts')))
       .filter((abs) => codeOnly(readSource(abs)).includes('projectKernelDocument'))
       .map((abs) => path.relative(SRC_ROOT, abs).replace(/\\/g, '/'))
+    /**
+     * ## P10d D2 的语义更正（本条原先用的判据已不再等价于缺口）
+     *
+     * 原断言是「`projectKernelDocument` 生产零调用方」—— 那是 (c) 的**代理判据**：
+     * 当时它零调用方，故"挂点没接上"显然成立。
+     *
+     * D2（#289）让**渲染路径**经 `composition/kernelRenderView` 调它
+     * （`renderView` 模式：内核求值 → 渲染视图文档）。于是那个代理判据不再等价 ——
+     * 有了调用方，但 (c) 说的**不是**"没人调投影"，而是
+     * 「保真记录**随产物一起传**」那条路没接上。
+     *
+     * ⇒ 改为直接判**缺口本身**：`fidelityFields` 有没有生产调用方在**产物侧**传入。
+     * 这既更准确，也不会因"投影被别的用途用上了"而误判缺口闭合。
+     */
+    const fidelityCallers = srcFiles
+      .filter((abs) => !abs.endsWith(path.join('composition', 'kernelProjection.ts')))
+      .filter((abs) => codeOnly(readSource(abs)).includes('fidelityFields'))
+      .map((abs) => path.relative(SRC_ROOT, abs).replace(/\\/g, '/'))
+    expect(
+      fidelityCallers,
+      `(c) 若产物侧已接线 fidelityFields，本条接缝应核销并同批更新登记：${fidelityCallers.join(', ')}`,
+    ).toEqual([])
+    // 反空洞真：投影**确实**已被生产调用（D2 的渲染路径）—— 故上面那条判据
+    // 测的是"保真挂点未接"，不是"没人用投影"。少了这条，本组会退化成恒真。
     expect(
       projectionImporters,
-      `(c) 若 projectKernelDocument 已有生产调用方，本条接缝应核销并同批更新登记：${projectionImporters.join(', ')}`,
-    ).toEqual([])
+      '前提：投影已被生产调用（D2 渲染路径）⇒ 本组测的是保真挂点，不是"投影没人用"',
+    ).toEqual(['composition/kernelRenderView.ts'])
   })
 
   it('**负对照**：未登记的接缝判据能抓到"旧轨仍在但没有登记"', async () => {

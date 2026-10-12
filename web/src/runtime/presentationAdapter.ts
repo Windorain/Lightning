@@ -31,9 +31,12 @@ import {
 } from '@/presentation/contentIdentity'
 import type { EvaluatedPrimitive, GeometryAttributes, GeometryId } from '@/presentation/evaluationKey'
 import { contentDigestOf } from '@/presentation/invalidationPlan'
-import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
-import { bakedQuadTriangleAttributesPure } from '@/render/mesh/structureGeometryUVs'
-import { structureRowToWorldY } from '@/render/data/grid'
+// 几何收集**只有一个**入口（本批 D3a 更正：原先本文件另有一份手写遍历，
+// 它不做遮挡剔除 ⇒ 与渲染路径数值不一致）。见 `structureGeometryAttributes` 的说明。
+import {
+  collectStructureGeometryPiecesPure,
+  mergeBakedQuadPiecesAttributes,
+} from '@/render/mesh/structureGeometryCore'
 
 /**
  * 网格指纹：逐格下标（z→y→x 稳定序）。
@@ -130,61 +133,45 @@ export function structureGeometryId(definition: StructureDefinition, layerPrevie
  * `triangleMap`），而本函数产出**纯数据**（位置/UV/颜色），使呈现编译可以在无 GPU 环境
  * 断言。两者都调用同一个纯几何核心（`decodeBakedGeometry` + `bakedQuadTriangleAttributesPure`），
  * 因此**几何数值一致**（这是 e2e 能对照两侧的前提）。
+ *
+ * ## ⚠️ 本批更正（#289 P10d D3a）：上面那句"因此几何数值一致"**曾是假的**
+ *
+ * 第一版**手写**了一遍遍历（逐格逐四边形全收），而渲染路径经
+ * `collectStructureGeometryPiecesPure` 收集并**默认剔除**被遮挡的四边形。
+ * 两者共用四边形解码器 ≠ 共用**剔除判据** ⇒ 数值并不一致。实测（同一取值口径）：
+ *
+ * | 夹具 | 渲染路径（剔除） | 第一版本函数 |
+ * |---|---|---|
+ * | multiblock-tier-only | 12 | 12 |
+ * | multiblock-ebf-2ch | **12**（tier1）/ **24**（默认） | **36** / **72** |
+ * | multiblock-lsc-overlap | **40** | **104** |
+ *
+ * 即本函数**恰好等于"不剔除"**（`cullOccludedQuads: false`）—— 内部面会被画出来，
+ * 呈现编译若用它，"切换实现不改变画面"直接失效。
+ *
+ * 为何旧判据没抓到：`structureGeometryAttributes` 在本批之前**零调用者**
+ * （生产与测试都没有；`renderCutoverParity` 的指纹一律走
+ * `collectStructureGeometryPiecesPure`），故"注释声称一致、无判据把守"。
+ *
+ * ## 更正方式：不修数字，**删掉重复实现**
+ *
+ * 手写遍历是分歧的**唯一**来源。现在本函数**委托**给渲染路径同一个收集器
+ * （`collectStructureGeometryPiecesPure` + `mergeBakedQuadPiecesAttributes`），
+ * 于是"数值一致"由**构造**保证，而不是由注释声称。
  */
 export function structureGeometryAttributes(
   definition: StructureDefinition,
   options?: { layerPreview?: LayerPreviewMode; visibleObjectId?: string },
 ): GeometryAttributes {
   const layerPreview = options?.layerPreview ?? 'all'
-  const sizeColumn = definition.cellGrid[0]?.[0]?.length ?? 0
-  const sizeRow = definition.cellGrid[0]?.length ?? 0
-  const sizeZSlice = definition.cellGrid.length
-
-  const positions: number[] = []
-  const uvs: number[] = []
-  const colors: number[] = []
-
-  for (let z = 0; z < sizeZSlice; z++) {
-    for (let row = 0; row < sizeRow; row++) {
-      for (let col = 0; col < sizeColumn; col++) {
-        const idx = definition.cellGrid[z]?.[row]?.[col]
-        if (idx === undefined || idx === 0) continue
-        const entry = definition.blockPalette[idx]
-        if (entry === undefined) continue
-
-        // 分层预览：与既有渲染路径同口径（`layerPreview` 的 worldY 语义）
-        if (layerPreview !== 'all') {
-          const voxelY = structureRowToWorldY(row, sizeRow)
-          const isSelected =
-            entry.occludesAdjacentFaces === true
-              ? voxelY <= layerPreview.worldY
-              : Math.round(voxelY) === layerPreview.worldY
-          if (!isSelected) continue
-        }
-
-        let quads
-        try {
-          quads = decodeBakedGeometry(entry.geometry)
-        } catch {
-          continue
-        }
-        for (const quad of quads) {
-          const attrs = bakedQuadTriangleAttributesPure(quad, col, row, z, sizeColumn, sizeRow, sizeZSlice)
-          if (attrs === null) continue
-          positions.push(...attrs.positions)
-          uvs.push(...attrs.uvs)
-          colors.push(...attrs.colors)
-        }
-      }
-    }
-  }
-
-  const positionsF32 = new Float32Array(positions)
+  // 走渲染路径**同一个**收集器：剔除判据因此不可能再漂移。
+  const collected = collectStructureGeometryPiecesPure(definition, { layerPreview })
+  const merged = mergeBakedQuadPiecesAttributes(collected.pieces)
   return {
-    positions: positionsF32,
-    uvs: new Float32Array(uvs),
-    colors: new Float32Array(colors),
-    triangleCount: positionsF32.length / 9,
+    positions: merged.positions,
+    uvs: merged.uvs,
+    colors: merged.colors,
+    triangleCount: merged.positions.length / 9,
   }
 }
 

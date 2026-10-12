@@ -38,13 +38,13 @@
  */
 
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef } from 'vue'
+import { kernelRenderViewOf } from '@/composition/kernelRenderView'
 import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { MultiblockDecl } from '@/context/runtimeDocument'
 import {
   assembleForSelection,
   buildChannelPanelModel,
-  buildMultiblockRenderView,
   clampChannelValue,
   initialMultiblockSelection,
   snapTierToSample,
@@ -211,14 +211,40 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
     return assembleForSelection(d, selection.value)
   })
 
-  const renderDoc = computed<RuntimeDocument | null>(() => {
+  /**
+   * **给 DRW 的渲染视图文档** —— 走**内核求值**（#289 P10d D2）。
+   *
+   * ## 与切换前的差别（本批的 D2 落点）
+   *
+   * | | 切换前 | 现在 |
+   * |---|---|---|
+   * | 构造器 | `buildMultiblockRenderView(doc, outcome.result, frame)`（legacy `AssemblyResult`） | `kernelRenderViewOf(...)`：`assembleKernelDocument` + `projectKernelDocument({renderView})` |
+   * | 身份 | 无（每次取值变化无条件重建视图文档） | **内容派生身份**（`e:<hash>`，不含机位 —— A11） |
+   * | 装配 | `assembleSelection`（旧装配器） | 内核装配（`kernelAssembly`，与保存/投影同一份承载） |
+   *
+   * 实测两路径**逐三角形一致**（`tier-only` 12 / `ebf-2ch` 12 / `lsc-overlap` 40）。
+   *
+   * ## 为什么仍传 `doc`（而不是直接读内核场景）
+   *
+   * 内核场景里的 `blockGrid` 是**装配期固定**的那一份（实测：`setChannelValue` 后
+   * 网格不变），故"按当前取值求值"必须重新装配 —— 而重新装配需要
+   * **声明的内层 body**（`doc.multiblockSource`），它此刻仍由旧文档承载。
+   * 让内核直接承载该 body 是后续批次（需要把 `assembleSelection` 的输入
+   * 也类型化承载），本批的判据是"装配与投影走内核"（已达成，且逐位一致）。
+   */
+  const renderView = computed(() => {
     const d = doc.value
-    if (!d) return null
+    if (!d) return { doc: null, identity: '', diagnostics: [] as string[] }
     // 帧为主文档：原样返回（渲染路径行为零变化）
-    if (!d.isMultiblock) return d
-    const current = ctx.getFrameIndex()
-    return buildMultiblockRenderView(d, outcome.value?.result ?? null, current)
+    if (!d.isMultiblock) return { doc: d, identity: '', diagnostics: [] as string[] }
+    return kernelRenderViewOf({
+      doc: d,
+      selection: selection.value,
+      frameIndex: ctx.getFrameIndex(),
+    })
   })
+
+  const renderDoc = computed<RuntimeDocument | null>(() => renderView.value.doc)
 
   const panel = computed<MultiblockChannelPanelModel | null>(() => {
     const d = doc.value

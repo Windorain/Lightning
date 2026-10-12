@@ -32,7 +32,7 @@ import {
   clearItemSelection,
   type ItemSelectionState,
 } from '@/pure/itemSelection'
-import { OUTLINE_MASK_LIMIT } from '@/pure/outlineLimits'
+import { OUTLINE_MASK_LIMIT } from '@/presentation/outlineBudget'
 import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
 import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import { createHoverHandler } from '@/handlers/hoverHandler'

@@ -15,7 +15,7 @@ import {
   type DrwMeshPipeline,
 } from '@/runtime/drwMeshPipeline'
 import type { BlockRef, SelectedEntity } from '@/context/selection'
-import { OUTLINE_MASK_LIMIT, applyOutlineMaskBudget } from '@/pure/outlineLimits'
+import { OUTLINE_MASK_LIMIT, applyOutlineMaskBudget } from '@/presentation/outlineBudget'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
 import { bindViewportCameraSync } from '@/runtime/viewportCamera'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'

@@ -36,8 +36,57 @@ import { RuntimeDocument } from '@/context/runtimeDocument'
 import { unwrap } from '@/domain/errors'
 import { documentContent, documentMetadata, frameAxis } from '@/domain/content'
 import { withDocumentContent, createDocument } from '@/domain/document'
+import type { AssembledDocument } from '@/composition/kernelAssembly'
+import type { GridProjectionInput, KernelDeclarationProjection } from '@/composition/kernelProjection'
+import type { BlockGeometryAsset, BlockPaletteEntry } from '@/domain/blockGeometry'
+import type { CellContentTable } from '@/domain/cellContent'
 
 const FIXTURES = ['multiblock-ebf-2ch', 'multiblock-lsc-overlap', 'multiblock-tier-only'] as const
+
+/**
+ * 装配产物 → 投影入参（**测试侧的适配**）。
+ *
+ * 生产接线（`docLifecycleOperators`）做同一件事；这里重复一次是刻意的：
+ * 它让测试**显式**声明"投影依赖产物的哪些字段"，于是"投影偷偷读了别的字段"
+ * 会在类型上立刻可见（`KernelDeclarationProjection` 是收窄的投影面）。
+ */
+function declarationOf(assembled: AssembledDocument): KernelDeclarationProjection | null {
+  const mb = assembled.multiblock
+  if (mb === null) return null
+  return {
+    id: mb.id,
+    displayName: mb.displayName,
+    declaration: mb.projection.declaration,
+    declRaw: mb.declRaw,
+    blockPalette: mb.projection.blockPalette,
+    assets: mb.projection.assets,
+    frames: mb.projection.frames,
+    schemaVersion: mb.projection.schemaVersion,
+    multiblockCount: mb.projection.multiblockCount,
+  }
+}
+
+/** `blockGrid` 载荷 → 投影入参（测试侧；与生产同一字段集）。 */
+function gridInputOf(payload: {
+  readonly cells: Readonly<Record<string, string>>
+  readonly geometry?: Readonly<Record<string, BlockGeometryAsset>>
+  readonly cellGeometry?: Readonly<Record<string, string>>
+  readonly palette?: readonly BlockPaletteEntry[]
+  readonly cellContent?: CellContentTable
+}): GridProjectionInput {
+  const out: {
+    cells: Readonly<Record<string, string>>
+    geometry?: Readonly<Record<string, BlockGeometryAsset>>
+    cellGeometry?: Readonly<Record<string, string>>
+    palette?: readonly BlockPaletteEntry[]
+    cellContent?: CellContentTable
+  } = { cells: payload.cells }
+  if (payload.geometry !== undefined) out.geometry = payload.geometry
+  if (payload.cellGeometry !== undefined) out.cellGeometry = payload.cellGeometry
+  if (payload.palette !== undefined) out.palette = payload.palette
+  if (payload.cellContent !== undefined) out.cellContent = payload.cellContent
+  return out
+}
 
 async function loadFixture(name: string) {
   const envelope = readJson(fixturePath(name)) as Record<string, unknown>
@@ -87,7 +136,7 @@ describe('P10b/G-3 · 逐格往返（真实夹具）', () => {
       if (mbData!.payload.kind !== 'blockGrid') return
 
       // 投影回旧 (cellGrid, blockPalette)
-      const projected = projectGridCells(mbData!.payload.cells)
+      const projected = projectGridCells(gridInputOf(mbData!.payload))
       expect(projected.invalidCells, `${name} 投影不应有非法单元`).toBe(0)
       expect(projected.cellGrid.length, `${name} 投影应有网格`).toBeGreaterThan(0)
 
@@ -110,7 +159,7 @@ describe('P10b/G-3 · 投影读内核而非回放输入（防"投影=缓存"）'
     const before = projectKernelDocument({
       scene: assembled.scene,
       content: assembled.content,
-      multiblockSource: assembled.multiblock?.source ?? null,
+      multiblockDeclaration: declarationOf(assembled),
     })
     // 在内核里改元数据（这才是"内核为权威"）
     const next = withDocumentContent(
@@ -124,7 +173,7 @@ describe('P10b/G-3 · 投影读内核而非回放输入（防"投影=缓存"）'
     const after = projectKernelDocument({
       scene: next.doc.scene,
       content: next.doc.content,
-      multiblockSource: assembled.multiblock?.source ?? null,
+      multiblockDeclaration: declarationOf(assembled),
     })
     expect(before.plain.label, '前提：改前产物里的展示名是原值').not.toBe('改过的名字')
     expect(after.plain.label, '改内核元数据后，投影产物必须变（否则投影只是回放缓存）').toBe('改过的名字')
@@ -137,7 +186,7 @@ describe('P10b/G-3 · 投影读内核而非回放输入（防"投影=缓存"）'
     const projected = projectKernelDocument({
       scene: assembled.scene,
       content: assembled.content,
-      multiblockSource: assembled.multiblock?.source ?? null,
+      multiblockDeclaration: declarationOf(assembled),
     })
     // 真实夹具内嵌纹理 ⇒ 产物必须有 textureBlobs 且条数与内核资源数一致
     const blobs = projected.plain.textureBlobs as Record<string, string> | undefined
@@ -156,7 +205,7 @@ describe('P10b/G-3 · 投影读内核而非回放输入（防"投影=缓存"）'
     const projected = projectKernelDocument({
       scene: assembled.scene,
       content: documentContent({ metadata: assembled.content.metadata, frameAxis: changed, resources: assembled.content.resources }),
-      multiblockSource: assembled.multiblock?.source ?? null,
+      multiblockDeclaration: declarationOf(assembled),
     })
     const outFrames = projected.plain.frames as Record<string, unknown>[]
     expect(outFrames[0]!.durationMs, '投影必须读内核的帧时长轴').toBe(777)
@@ -164,14 +213,14 @@ describe('P10b/G-3 · 投影读内核而非回放输入（防"投影=缓存"）'
 })
 
 describe('P10b/G-3 · 形态由内容机械决定（不由调用方声明）', () => {
-  it('有 multiblockSource ⇒ 产物是多方块形态；无 ⇒ 帧为主形态', async () => {
+  it('有 multiblockDeclaration ⇒ 产物是多方块形态；无 ⇒ 帧为主形态', async () => {
     const { doc, plainRoot } = await loadFixture('multiblock-tier-only')
     const assembled = unwrap(assembleKernelDocument({ doc, plainRoot }))
 
     const asMultiblock = projectKernelDocument({
       scene: assembled.scene,
       content: assembled.content,
-      multiblockSource: assembled.multiblock?.source ?? null,
+      multiblockDeclaration: declarationOf(assembled),
     })
     expect(asMultiblock.plain.documentShape, '有内层 body ⇒ 必须是多方块形态').toBe('multiblock')
     expect(asMultiblock.plain.multiblock, '多方块声明必须随产物写出').toBeTruthy()
@@ -179,7 +228,7 @@ describe('P10b/G-3 · 形态由内容机械决定（不由调用方声明）', (
     const asFrames = projectKernelDocument({
       scene: assembled.scene,
       content: assembled.content,
-      multiblockSource: null,
+      multiblockDeclaration: null,
     })
     expect(asFrames.plain.documentShape, '无内层 body ⇒ 不得声明多方块形态').toBeUndefined()
   })
@@ -191,15 +240,28 @@ describe('P10b/G-3 · 形态由内容机械决定（不由调用方声明）', (
       const projected = projectKernelDocument({
         scene: assembled.scene,
         content: assembled.content,
-        multiblockSource: assembled.multiblock?.source ?? null,
+        multiblockDeclaration: declarationOf(assembled),
       })
       const reparsed = await createParserRegistry().detectAndParse(projected.plain)
       expect(reparsed.document, `${name} 投影产物必须能被生产解析器读回`).not.toBeNull()
-      // 读回后的帧数应与内核帧数一致（网格确实写进了每一帧）
-      expect(
-        reparsed.document!.frameCount,
-        `${name} 读回后的帧数应与内核帧对象数一致`,
-      ).toBe(assembled.frameObjects.length)
+      // ## 帧数的正确期望（#289 P10d D1 补充更正）
+      //
+      // 本条原先断言 `frameCount === assembled.frameObjects.length`
+      // （即"帧数 = 内核里的 blockGrid 对象数"）。那编码的是**旧的丢失语义**：
+      // 多方块的网格是**装配产物**（一个"当前取值"的网格 = 1 个对象），
+      // 而它的 `frames` 是**变体存储原语**（432 个声明帧）。
+      // 旧断言于是要求 432 → 1，把丢失**钉成了期望**。
+      //
+      // 实测（文件与旧 `serialize()`）：那 432 帧**一个都不带 `structure`**，
+      // 旧产物也是 432 帧。故正确期望是：
+      //  - **多方块**：帧数 = 声明帧数（变体存储），与旧产物一致；
+      //  - **帧为主**：帧数 = 网格对象数（每帧一份 `structure`）。
+      const expected = assembled.multiblock !== null
+        ? assembled.multiblock.projection.frames.length
+        : assembled.frameObjects.length
+      expect(reparsed.document!.frameCount, `${name} 读回后的帧数应与该形态的语义一致`).toBe(expected)
+      // 反空洞真：真实夹具的帧数必须 > 1（否则"帧数正确"是常数比较）
+      expect(expected, `${name} 应有真实的多帧`).toBeGreaterThan(1)
     }
   })
 
@@ -209,7 +271,7 @@ describe('P10b/G-3 · 形态由内容机械决定（不由调用方声明）', (
     const projected = projectKernelDocument({
       scene: assembled.scene,
       content: assembled.content,
-      multiblockSource: null,
+      multiblockDeclaration: null,
       fidelityFields: { someFutureField: { nested: true }, 'meta.customKey': 'v' },
     })
     expect(projected.plain.someFutureField, '未知顶层字段应回写到根（§12 往返保留）').toEqual({ nested: true })
@@ -228,7 +290,7 @@ describe('P10b/G-3 · 负对照（证明判据不是恒绿）', () => {
     // 真正的判据是**哪个方块在哪一格**：翻转后 `stone` 与 `dirt` 互换位置，
     // 映射必然不同。这也正是"结构上下颠倒"这个缺陷的可观测形态。
     const cells = { '0,0,0': 'minecraft:stone:0', '0,1,0': 'minecraft:dirt:0' }
-    const good = projectGridCells(cells)
+    const good = projectGridCells({ cells })
     const height = good.cellGrid[0]?.length ?? 0
     expect(height, '前提：网格高度必须 ≥ 2，否则翻转写反测不出来').toBeGreaterThan(1)
 
@@ -243,7 +305,7 @@ describe('P10b/G-3 · 负对照（证明判据不是恒绿）', () => {
   })
 
   it('负对照：非法单元确实被计数而不是静默吞掉', () => {
-    const projected = projectGridCells({ '0,0,0': 'minecraft:stone:0', 'bad': 'minecraft:dirt:0', '1,1,1': 'a:b:c' })
+    const projected = projectGridCells({ cells: { '0,0,0': 'minecraft:stone:0', 'bad': 'minecraft:dirt:0', '1,1,1': 'a:b:c' } })
     expect(projected.invalidCells, '两个非法单元必须被计数').toBe(2)
     // 且合法的那个仍然被投影（不因坏数据整份丢弃）
     const solid = projected.cellGrid.flat(2).filter((i) => i !== 0).length
@@ -256,7 +318,7 @@ describe('P10b/G-3 · 负对照（证明判据不是恒绿）', () => {
     const projected = projectKernelDocument({
       scene: assembled.scene,
       content: assembled.content,
-      multiblockSource: null,
+      multiblockDeclaration: null,
     })
     expect(
       Object.prototype.hasOwnProperty.call(projected.plain, '_extra'),

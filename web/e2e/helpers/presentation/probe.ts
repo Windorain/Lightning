@@ -26,6 +26,18 @@ import { compileScene } from '@/presentation/compileScene'
 import { ViewportDeviceRegistry } from '@/presentation/deviceState'
 import { OwnershipRegistry } from '@/presentation/ownership'
 import { PickIndex } from '@/presentation/pickingIndex'
+import { kernelPresentationInputs } from '@/composition/kernelPresentationInputs'
+import { assembleKernelDocument } from '@/composition/kernelAssembly'
+import { projectGridCells } from '@/composition/kernelProjection'
+import { plainRootOf } from '@/adapters/plainRoot'
+import { createParserRegistry } from '@/context/parserRegistry'
+import {
+  V2PlainParser,
+  WorldParser,
+  StructureDataParser,
+  createEnvelopeParser,
+} from '@/context/parsers/builtinParsers'
+import { collectStructureGeometryPiecesPure, mergeBakedQuadPiecesAttributes } from '@/render/mesh/structureGeometryCore'
 import { BatchedPresenter } from '@/presentation/presenter'
 import type { EvaluationKey } from '@/presentation/evaluationKey'
 import {
@@ -137,7 +149,127 @@ function measureDrawCalls(h: Harness): { calls: number; triangles: number; progr
 
 // ─────────────────────────────────────────────────────────────────────────────
 // A18 gpu-batching
-// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * D3c（#289 P10d）· **内核场景**作为呈现层的第二输入源。
+ *
+ * ## 为什么需要这个入口（实测的接线缺口）
+ *
+ * `runA18`/`runA19`/`runA30` 的输入全部来自 `pickFixture(count)` —— **自造图元**，
+ * 直接喂 `compileScene`。它们证明的是"编译 → 呈现"那一段，
+ * **绕过**了"内核场景 → `PresentationInputs`"这一环。
+ *
+ * 即：真 WebGL 判据全绿，也不能说明内核承载的内容能被呈现层吃下。
+ *
+ * ## 输入是**原始信封**，装配在浏览器里用**生产代码**做
+ *
+ * 第一版让 spec 在 Node 侧解包并取出 `cells`/`geometry` —— **实测失败**：
+ * 磁盘上的夹具是**声明**（`multiblock` 节点），逐格网格是**装配产物**；
+ * `.out/expanded-fixtures` 里只有 `variant`/`dims`/`cellGrid` 的**参考签名**，
+ * 不含带几何资产的载荷。
+ *
+ * ⇒ 正确形态：spec 只传**原始信封 JSON**，探针在浏览器里走完整生产链
+ * （`createParserRegistry` → `assembleKernelDocument`）再喂呈现层。
+ * 这比"Node 侧取字段"证明得更多：整条 **内核装配 → 呈现** 链都在真 GL 环境里跑过。
+ *
+ * ## 判据的形状：与**渲染路径**逐位一致 + 真 GL 真的画了
+ *
+ * - `kernelTriangles` 与 `mergeBakedQuadPiecesAttributes(collectStructureGeometryPiecesPure(def))`
+ *   逐位相同（同一收集器 ⇒ 任一侧偏离立刻判红）；
+ * - `measuredCalls > 0` 且 `measuredTriangles > 0`（几何真的被提交，不是空批次）；
+ * - `pickedObjectId` 能解回**内核对象 id**（证明身份链没断）。
+ */
+export async function runKernelInputs(envelope: Record<string, unknown>) {
+  const h = need()
+
+  // ① 完整生产链：信封 → 解析 → 内核装配
+  const parsers = createParserRegistry()
+  parsers.register(V2PlainParser)
+  parsers.register(createEnvelopeParser(parsers))
+  parsers.register(WorldParser)
+  parsers.register(StructureDataParser)
+  const parsed = await parsers.detectAndParse(envelope)
+  if (parsed.document === null) throw new Error('解析失败：生产解析器拒收该信封')
+  const assembled = assembleKernelDocument({ doc: parsed.document, plainRoot: plainRootOf(envelope) })
+  if (!assembled.ok) throw new Error(`内核装配失败：${JSON.stringify(assembled.error)}`)
+  const kernel = assembled.value
+
+  // ② 内核场景 → 呈现输入 → 编译
+  const produced = kernelPresentationInputs({
+    scene: kernel.scene,
+    content: kernel.content,
+    key: keyOf('e2e:kernel'),
+  })
+  const compiled = compileScene(produced.inputs)
+  if (!compiled.ok) throw new Error(`compileScene failed: ${JSON.stringify(compiled.error)}`)
+  const compiledScene = compiled.value
+
+  // ③ 真实 GL：apply + 实测绘制数
+  const presenter = new BatchedPresenter({ scope: 'e2e-kernel' })
+  presenter.apply(compiledScene)
+  h.scene.add(presenter.object3d)
+  const measured = measureDrawCalls(h)
+
+  // ④ 身份链：批次槽位 → 对象身份
+  const pickIndex = new PickIndex(compiledScene)
+  const hit = pickIndex.resolve({ generation: pickIndex.currentGeneration, batchIndex: 0, instanceSlot: 0 })
+
+  // ⑤ 渲染路径的**独立复算**（同一收集器）
+  const payload = Object.values(kernel.scene.data)
+    .map((d) => d.payload)
+    .find((x) => x.kind === 'blockGrid')
+  const reference =
+    payload === undefined || payload.kind !== 'blockGrid'
+      ? { positions: new Float32Array(0), uvs: new Float32Array(0) }
+      : mergeBakedQuadPiecesAttributes(
+          collectStructureGeometryPiecesPure(definitionOfKernelPayload(payload, kernel.content)).pieces,
+        )
+
+  const first = produced.inputs.primitives[0]
+  const actual = first === undefined ? undefined : produced.inputs.geometry.attributesOf(first.geometry.id)
+
+  presenter.dispose()
+  h.scene.remove(presenter.object3d)
+
+  return {
+    primitives: produced.inputs.primitives.length,
+    skipped: produced.skipped,
+    compileSkipped: compiledScene.skipped,
+    payloads: compiledScene.payloads.length,
+    drawCallEstimate: compiledScene.drawCallEstimate,
+    measuredCalls: measured.calls,
+    measuredTriangles: measured.triangles,
+    kernelTriangles: actual?.triangleCount ?? -1,
+    referenceTriangles: reference.positions.length / 9,
+    bitsEqual:
+      actual !== undefined &&
+      actual.positions.length === reference.positions.length &&
+      actual.positions.every((v, i) => v === reference.positions[i]) &&
+      actual.uvs.length === reference.uvs.length &&
+      actual.uvs.every((v, i) => v === reference.uvs[i]),
+    pickedObjectId: hit?.objectId ?? null,
+  }
+}
+
+/** 从内核载荷重建网格定义（与 `kernelPresentationInputs` 内部同一路径；判据侧独立复算）。 */
+function definitionOfKernelPayload(
+  payload: { kind: 'blockGrid' } & Record<string, unknown>,
+  content: { resources: readonly { kind: string }[] },
+) {
+  const projected = projectGridCells({
+    cells: payload.cells as never,
+    geometry: payload.geometry as never,
+    cellGeometry: payload.cellGeometry as never,
+    cellPalette: payload.cellPalette as never,
+    palette: payload.palette as never,
+    cellContent: payload.cellContent as never,
+  })
+  return {
+    geometryPhase: 'baked',
+    cellGrid: projected.cellGrid,
+    blockPalette: projected.blockPalette,
+    materialPalette: content.resources.map((r) => ({ kind: r.kind })),
+  }
+}
 
 export function runA18(count: number) {
   const h = need()
