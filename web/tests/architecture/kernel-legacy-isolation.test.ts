@@ -560,6 +560,32 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       '同上：要按 `scene.order` 遍历 `blockGrid` 载荷取逐格内容（投影侧的"取哪一份载荷"规则必须与 `composition/kernelProjection#tooltipPoolOfPayloads` 同一条，故必须能读场景类型）',
     exitStage: 'P11 终局审计：随本文件与 `RuntimeDocument` 一起退出（同 `domain/document` 那条）',
   }),
+  // ── P10f D3（#301）：**网格读面**（R5，`getDoc()` 终删的 15 处替代面） ─────
+  //
+  // B′ 曾做出网格读面并**如实撤回**（两处不同义，理由留档在
+  // `runtime/context.ts` 的 `setDocument` 上方）。D3 的两条处置：
+  //  ① 写路径（`moveTranslate` 的 `grid.moveBlock`）改走具名**编辑句柄**
+  //     `Context#legacyGridForEdit`（登记为新接缝），**不**经读面；
+  //  ② 撤回理由②（换文档未重装 ⇒ 读到错文档）已由 C′1 的 **GF-16** 解决。
+  //
+  // `runtime/gridRead.ts` 与 `annotationRead`/`tooltipRead` **同一性质与同一层**：
+  // 新写的替代实现，但按本闸门口径落在旧 `runtime/` 层（撞名层），
+  // 且需要内核的 `Document`/`Scene` 类型 ⇒ 两条旧→新边，必须登记（不得静默）。
+  Object.freeze({
+    from: 'src/runtime/gridRead.ts',
+    to: 'domain/document',
+    reason:
+      'P10f D3（#301）的网格读面：把内核 `blockGrid` 载荷（`cells`/`cellContent`/`cellPalette`/`geometry`/新加的声明尺寸）归一成 `KernelGridView`，供 15 处原 `ctx.main.doc.value?.frame(i)?.grid` 消费点使用。两种来源（内核载荷 / 旧 `Grid`）在本模块内归一 ⇒ 消费点零分支',
+    exitStage:
+      'P11 终局审计：待工作台消费面整体迁入新层、且渲染链终切（`presenter-surface-dual-track` 的退出条件成立）后，本读面随旧 `Grid` 一起退出 `runtime/`，此边自然消失',
+  }),
+  Object.freeze({
+    from: 'src/runtime/gridRead.ts',
+    to: 'domain/scene',
+    reason:
+      '同上：`blockGrid` 是 `domain/scene` 的 `ObjectDataPayload` 成员，读面要按 `scene.order` + 对象类型遍历取载荷（与 `runtime/tooltipRead` 取逐格内容是**同一条**遍历规则，刻意不各写一份）',
+    exitStage: 'P11 终局审计：随本文件退出 `runtime/` 而消失（同 `domain/document` 那条）',
+  }),
   // ── P10f C′2（#301）内容写路径：旧层算子发内核命令 ─────────────────────────
   //
   // C′2 把"文档内编辑"从"clone legacy + setDocument"改成"**发内核命令** + 投影回写"

@@ -31,10 +31,24 @@
  * 让"用错事实"在调用点就写不出来。
  */
 
-/** 帧声明（帧数 + 每帧时长；内核与 legacy 两种来源的共同形状）。 */
+/** 帧声明（帧数 + 每帧时长 + 帧标签；内核与 legacy 两种来源的共同形状）。 */
 export interface FrameDeclarationSet {
   readonly count: number
   readonly durationsMs: readonly number[]
+  /**
+   * 每帧的**声明标签**（`FrameDeclaration.label`；`null` = 该帧未声明标签）。
+   *
+   * ## 为什么它属于本读面（#301 P10f D3）
+   *
+   * `context/queries#getCurrentFrame` 与 `#currentFrameKey` 需要
+   * "当前帧的 `{index, label}`" —— 两个字段都在**同一份** `FrameAxis` 上。
+   * 若只暴露 `count`/`durationsMs`，调用方仍得另找一条路读 `label`
+   * ⇒ 那就又是一条绕过本读面的旁路（正是 `raw-authority-object` 要消灭的形态）。
+   *
+   * ⚠️ `index` **不**在此列：帧键与数组下标的区别由调用方按契约决定
+   * （见 `currentFrameKey` 的说明），本读面给的是**轴上的位置序**。
+   */
+  readonly labels: readonly (string | null)[]
 }
 
 export type FrameDeclarationSource = 'kernel' | 'legacy'
@@ -69,10 +83,20 @@ export function resolveFrameDeclarations(
   legacy: FrameDeclarationSet | null,
 ): ResolvedFrameDeclarations {
   if (adopted !== null) {
-    return { count: adopted.count, durationsMs: adopted.durationsMs, source: 'kernel' }
+    return {
+      count: adopted.count,
+      durationsMs: adopted.durationsMs,
+      labels: adopted.labels,
+      source: 'kernel',
+    }
   }
   if (legacy !== null) {
-    return { count: legacy.count, durationsMs: legacy.durationsMs, source: 'legacy' }
+    return {
+      count: legacy.count,
+      durationsMs: legacy.durationsMs,
+      labels: legacy.labels,
+      source: 'legacy',
+    }
   }
-  return { count: 0, durationsMs: [], source: 'legacy' }
+  return { count: 0, durationsMs: [], labels: [], source: 'legacy' }
 }

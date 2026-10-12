@@ -54,10 +54,42 @@ export interface KernelReadHost {
 function makeRealContext(docRef: Ref<RuntimeDocument | null>, session: KernelSession | null): Context {
   const ctx = Object.create(Context.prototype) as Context
   Object.assign(ctx as unknown as Record<string, unknown>, {
-    main: { doc: docRef },
+    main: makeFakeMain(docRef),
     kernel: session,
   })
   return ctx
+}
+
+/**
+ * `main` 的**忠实替身**（只含读面 + 唯一写入口用到的那几个字段）。
+ *
+ * ## 为什么 `replaceDoc` 必须真的写 `doc.value`（不能省）
+ *
+ * #301 P10f D3 的 `Context#restoreDocumentSnapshot`（撤销快照）**经 `setDocument`**
+ * —— 而 `setDocument` 的第一句就是 `this.main.replaceDoc(next)`。
+ * 若替身没有 `replaceDoc`，R8 的判据会以 `is not a function` 判红
+ * （**正确的摩擦**：生产路径多了一个必经点，替身必须同步）。
+ *
+ * 「文档被替换」在生产里是**两个信号一起动**（`contentRefreshTick` +
+ * `documentRevision`，见 `Main#replaceDoc`），故替身也一起动
+ * —— 只动 `doc.value` 会让"换文档后哪些读面该刷新"这类判据假绿。
+ */
+function makeFakeMain(docRef: Ref<RuntimeDocument | null>): Record<string, unknown> {
+  const contentRefreshTick = ref(0)
+  const documentRevision = ref(0)
+  return {
+    doc: docRef,
+    contentRefreshTick,
+    documentRevision,
+    replaceDoc(next: RuntimeDocument | null): void {
+      docRef.value = next
+      contentRefreshTick.value += 1
+      documentRevision.value += 1
+    },
+    requestContentRefresh(): void {
+      contentRefreshTick.value += 1
+    },
+  }
 }
 
 /**

@@ -889,6 +889,8 @@ export function gridPayload(
   readonly geometry: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry: Readonly<Record<string, string>>
   readonly cellPalette: Readonly<Record<string, string>>
+  /** 逐格 → 文件槽位（legacy `paletteIndex`；#301 P10f D3 承载 —— 见 `domain/scene`）。 */
+  readonly cellPaletteIndex: Readonly<Record<string, number>>
   readonly palette: readonly BlockPaletteEntry[]
   readonly cellContent: CellContentTable
   readonly assembled: AssembledPalette
@@ -911,6 +913,7 @@ export function gridPayload(
     geometry: assembled.assets,
     cellGeometry: assembled.cellGeometry,
     cellPalette: assembled.cellPalette,
+    cellPaletteIndex: assembled.cellPaletteIndex,
     palette: assembled.palette,
     cellContent: normalizeCellContent(content),
     assembled,
@@ -1010,6 +1013,7 @@ function blockGridPayload(payload: {
   readonly geometry: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry: Readonly<Record<string, string>>
   readonly cellPalette: Readonly<Record<string, string>>
+  readonly cellPaletteIndex: Readonly<Record<string, number>>
   readonly palette: readonly BlockPaletteEntry[]
   readonly cellContent: CellContentTable
 }): ObjectDataPayload {
@@ -1020,12 +1024,18 @@ function blockGridPayload(payload: {
     geometry?: Readonly<Record<string, BlockGeometryAsset>>
     cellGeometry?: Readonly<Record<string, string>>
     cellPalette?: Readonly<Record<string, string>>
+    cellPaletteIndex?: Readonly<Record<string, number>>
     palette?: readonly BlockPaletteEntry[]
   } = { kind: 'blockGrid', cells: payload.cells }
   if (Object.keys(payload.cellContent).length > 0) out.cellContent = payload.cellContent
   if (Object.keys(payload.geometry).length > 0) out.geometry = payload.geometry
   if (Object.keys(payload.cellGeometry).length > 0) out.cellGeometry = payload.cellGeometry
   if (Object.keys(payload.cellPalette).length > 0) out.cellPalette = payload.cellPalette
+  // 文件槽位（legacy `paletteIndex`）：**独立于** `cellPalette` 的存在性判断 ——
+  // 它是另一件事实（"在文件的 `blockPalette` 里排第几"），只是恰好与它同条件记录。
+  if (Object.keys(payload.cellPaletteIndex).length > 0) {
+    out.cellPaletteIndex = payload.cellPaletteIndex
+  }
   // 调色板**不排序**：它的顺序是**文件的下标分区**（渲染侧同调色板剔除按条目判），
   // 排序会让"哪个格子用哪个条目"的对应关系失效。去重与顺序都由
   // `kernelPaletteAssembly` 按源顺序给出。

@@ -63,6 +63,18 @@ export interface AssembledPalette {
    * 但条目不同的方块分不开）。故逐格显式承载。
    */
   readonly cellPalette: Readonly<Record<string, string>>
+  /**
+   * 逐格 → **文件里的调色板槽位**（= legacy `SlotBlock.paletteIndex`）。
+   *
+   * ## 为什么在装配期原样抄下来（#301 P10f D3）
+   *
+   * `palette` 是**按内容去重的稳定序**（`entryByKey.values()`）—— 它的数组位置
+   * 与文件槽位**无关**。而三个旧消费点按槽位取值，且 R-WK-09 裁决 4 明文
+   * 「投影下标跨网格不可移植为实测事实；改下游键口径 = 行为变更不做」
+   * ⇒ 槽位必须**原样承载**，不能在读取侧复算（复算会得到另一个数，
+   * 因为去重序 ≠ 文件序）。
+   */
+  readonly cellPaletteIndex: Readonly<Record<string, number>>
   /** 资产目录（`assetId` → 资产）。多格同 id ⇒ 一份资产（A07 的共享前提）。 */
   readonly assets: Readonly<Record<string, BlockGeometryAsset>>
   /** 该网格引用的调色板条目（按内容去重后的稳定序）。 */
@@ -114,6 +126,8 @@ export function assemblePaletteContent(
   const assets: Record<string, BlockGeometryAsset> = {}
   const cellGeometry: Record<string, string> = {}
   const cellPalette: Record<string, string> = {}
+  /** 逐格 → 文件槽位（见 `AssembledPalette.cellPaletteIndex` 的说明）。 */
+  const cellPaletteIndex: Record<string, number> = {}
   const content: Record<string, CellContent> = {}
   const diagnostics: AssemblyDiagnostic[] = []
 
@@ -172,6 +186,9 @@ export function assemblePaletteContent(
       if (resolved.assetId !== '') cellGeometry[cellKey] = resolved.assetId
       // 逐格条目键：**无条件**记录（无几何的条目也要能投影回它的呈现提示）
       cellPalette[cellKey] = resolved.entryKey
+      // 文件槽位：与 `cellPalette` 同条件记录（两者描述的是**同一格**的同一个条目，
+      // 一个是身份（内容键）、一个是槽位（文件表达手段）⇒ 缺一即不成对）。
+      cellPaletteIndex[cellKey] = index
     }
 
     // ── 逐格内容（**部件**）──────────────────────────────────────────────
@@ -199,6 +216,7 @@ export function assemblePaletteContent(
   return Object.freeze({
     cellGeometry: Object.freeze(cellGeometry),
     cellPalette: Object.freeze(cellPalette),
+    cellPaletteIndex: Object.freeze(cellPaletteIndex),
     assets: Object.freeze(assets),
     palette: Object.freeze([...entryByKey.values()]),
     cellContent: Object.freeze(content),
