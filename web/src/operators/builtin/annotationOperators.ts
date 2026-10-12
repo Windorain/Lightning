@@ -25,7 +25,9 @@ export const AnnotationCreateOperator: OperatorType = {
 
     const newDoc = doc.clone()
     ;(newDoc.annotations as Annotation[]).push(annotation)
-    ctx.main.replaceDoc(newDoc)
+    // #301 A′：经唯一写入口。**原地修改路径**（本文件三处）只保证**存在性**对齐；
+    // 内核承载的内容与这份 legacy 产物的同步归 C′（判据里显式不断言）。
+    ctx.setDocument(newDoc)
     ctx.getSelection().active.value = annotation.id
   },
 }
@@ -53,7 +55,7 @@ export const AnnotationUpdateOperator: OperatorType = {
     if (idx === -1) return
 
     annotations[idx] = { ...annotations[idx], ...patch, updated_at: Date.now() } as Annotation
-    ctx.main.replaceDoc(newDoc)
+    ctx.setDocument(newDoc)
   },
 }
 
@@ -79,7 +81,7 @@ export const AnnotationDeleteOperator: OperatorType = {
     if (idx === -1) return
 
     annotations.splice(idx, 1)
-    ctx.main.replaceDoc(newDoc)
+    ctx.setDocument(newDoc)
     ctx.getSelection().active.value = null
   },
 }

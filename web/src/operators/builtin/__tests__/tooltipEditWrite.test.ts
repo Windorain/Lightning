@@ -69,6 +69,11 @@ function makeOperatorCtx(initialDoc: unknown) {
   return {
     ctx: {
       getDoc: () => ({ value: current }),
+      // #301 A′：生产侧改用 `Context.setDocument` 这一**唯一写入口**
+      // （它写 legacy 并镜像内核装载状态）。本宿主是算子层的替身，
+      // 故只需复刻"写 legacy"那一半 —— 镜像半边由
+      // `runtime/__tests__/p10fDocumentLifecycle.test.ts` 的逐路径对齐判据把守。
+      setDocument: (d: unknown) => { current = d as never },
       main: { replaceDoc: (d: unknown) => { current = d as never } },
     },
     current: () => current as {
@@ -176,6 +181,9 @@ function makePanelCtx(initialDoc: unknown) {
         return { status: 'FINISHED' }
       },
     }),
+    // #301 A′：生产侧改用 `Context.setDocument`（唯一写入口）。替身只需
+    // 复刻"写 legacy"那一半；镜像半边由 `p10fDocumentLifecycle.test.ts` 把守。
+    setDocument: (d: unknown) => { docRef.value = d as never },
     main: { replaceDoc: (d: unknown) => { docRef.value = d } },
   }
   return { ctx, items }

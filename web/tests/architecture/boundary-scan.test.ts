@@ -40,7 +40,7 @@ import {
   ruleCoreNoDomGlobals,
   topLayer,
 } from './boundary-rules.mjs'
-import { WEB_ROOT, buildAstIndex, buildModuleGraph, extractGlobalRefs, extractImports } from './module-graph.mjs'
+import { WEB_ROOT, buildAstIndex, buildModuleGraph, collectSourceFiles, extractGlobalRefs, extractImports, extractMethodCallSites } from './module-graph.mjs'
 
 const SRC_ROOT = path.join(WEB_ROOT, 'src')
 
@@ -830,5 +830,80 @@ describe('P1 部分迁移层的负对照（#250 裁决 2026-10-11）', () => {
     expect(isGateFile(intoLegacy[0].fromSrcRel, ctx.gateFiles), '前置：旧组件不得在执行面内').toBe(false)
     const hits = GATE_RULES.find((r) => r.id === 'gate/no-private-cross-layer').check(intoLegacy, ctx)
     expect(hits, '旧→旧 深导入是 #249 §15 遗留债务（P6 退役），不是本批新边界的 finding').toEqual([])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #301 P10f A′：文档替换的**唯一写入口**（机械拒绝绕过）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('#301 A′：`Main.replaceDoc` 只允许被 `Context.setDocument` 调用', () => {
+  /**
+   * 白名单：允许出现 `.replaceDoc(` **调用位**的生产文件（`src/` 相对）。
+   *
+   * ## 为什么只有这两个（各自的理由不同）
+   *
+   * | 文件 | 为什么允许 |
+   * |---|---|
+   * | `runtime/context.ts` | `Context.setDocument` 的**实现本体** —— 它就是那个唯一入口 |
+   * | `runtime/main.ts` | `Main.replaceDoc` 的**定义**所在。⚠️ 定义位是**无点号**的类成员声明（`replaceDoc(doc): void {`），AST 按"属性访问调用"判定时**不会**命中它；此处列出是为**可读性**（读者一眼看到"定义与调用各在哪"），不是判据需要 |
+   *
+   * ## 为什么这条闸门值得存在（A′ 存在的全部理由）
+   *
+   * A′ 把 21 处裸调收口成 `ctx.setDocument`，而 `setDocument` 会同时镜像内核的
+   * 装载状态（GF-15）。若将来有人新写一处 `ctx.main.replaceDoc(...)`：
+   *  - legacy 照常工作（**不会**报错）；
+   *  - 内核装载状态悄悄错位 ⇒ 后续批次把 `getDoc().value !== null` 换成
+   *    `hasLoadedDocument()` 时，那处会**静默**改行为。
+   *
+   * 那种失效正是"机械替换换错语义"的形态，且**只会在很晚才暴露**。
+   * ⇒ 在收口的同时把"绕过"变成**判红**，而不是靠评审记得。
+   */
+  const ALLOWED = ['runtime/context.ts', 'runtime/main.ts']
+
+  it('生产里 `.replaceDoc(` 的调用位只出现在白名单文件（注释/字符串不计）', () => {
+    const files = collectSourceFiles(SRC_ROOT)
+    const offenders: string[] = []
+    for (const abs of files) {
+      const rel = path.relative(SRC_ROOT, abs).replace(/[\\/]+/g, '/')
+      if (!isProductionRel(rel)) continue
+      for (const site of extractMethodCallSites(abs, 'replaceDoc')) {
+        if (!ALLOWED.includes(rel)) offenders.push(`${rel}:${site.line}  ${site.text}`)
+      }
+    }
+    expect(
+      offenders,
+      '文档替换必须经 `Context.setDocument`（它同时镜像内核装载状态，GF-15）。\n' +
+        '绕过会让内核装载状态静默错位，而 legacy 照常工作 ⇒ 不会报错。\n' +
+        `违例：\n${offenders.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('**反空洞真**：`setDocument` 本体确实调用它（否则上一条是空转）', () => {
+    // 若哪天 `setDocument` 改成不调 `replaceDoc`（例如自己直接写 `main.doc`），
+    // 上一条会**照样绿**（白名单里没有命中）—— 而那是判据失去对象，不是合规。
+    const sites = extractMethodCallSites(path.join(SRC_ROOT, 'runtime', 'context.ts'), 'replaceDoc')
+    expect(sites.length, '`Context.setDocument` 必须真的调用 `main.replaceDoc`').toBeGreaterThan(0)
+  })
+
+  it('**负对照**：AST 判据不把注释与字符串算成调用位（正则版会）', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-replacedoc-'))
+    try {
+      const file = path.join(dir, 'sample.ts')
+      fs.writeFileSync(
+        file,
+        [
+          '// ctx.main.replaceDoc(x)   ← 注释，不得计入',
+          'const s = "ctx.main.replaceDoc(y)"   // 字符串，不得计入',
+          'export function replaceDoc(doc: unknown): void { void doc }   // 定义位（无点号），不得计入',
+          'export function ok(ctx: any, z: unknown): void { ctx.main.replaceDoc(z) }   // 真调用，必须计入',
+        ].join('\n'),
+        'utf8',
+      )
+      const sites = extractMethodCallSites(file, 'replaceDoc')
+      expect(sites.map((s) => s.line), '只允许最后一行（真调用）命中').toEqual([4])
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

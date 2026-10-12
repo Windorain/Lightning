@@ -171,6 +171,74 @@ export class Context {
   getDoc(): Ref<RuntimeDocument | null> {
     return this.main.doc
   }
+
+  /**
+   * **文档替换的唯一写入口**（#301 P10f A′）。
+   *
+   * ## 它替代的旧机制
+   *
+   * | 旧机制 | 位置 | 本方法的替代 |
+   * |---|---|---|
+   * | 21 处裸调 `ctx.main.replaceDoc(next)` | 15 条路径（`docLifecycleOperators`/`sdeOperators`/`pipeline`/…） | 一处 `ctx.setDocument(next)` |
+   *
+   * ## 为什么必须收口（不是"顺手封装"）
+   *
+   * 内核侧的**装载状态**（`KernelSession.hasLoadedDocument()`，GF-15）必须与
+   * legacy 的 `getDoc().value` **逐点对齐**。若 21 处各写一遍"写 legacy + 镜像内核"：
+   *
+   *  1. 那 21 份是**会漂移的判据**（本工程已三次实测"两份实现必然漂移"）；
+   *  2. **将来**任何新调用点会绕过镜像 —— 而绕过是**静默**的
+   *     （legacy 照常工作、内核状态悄悄错位），正是 A′ 要消除的形态。
+   *
+   * 收口后"文档被替换"在生产里只有一条路径，于是"镜像是否发生"可被**单点**断言，
+   * 且闸门能机械地拒绝绕过（见 `boundary-scan.test.ts` 的 `.replaceDoc(` 白名单）。
+   *
+   * ## 顺序：**先** legacy、**后**内核（顺序是语义的一部分）
+   *
+   * 反过来的话，镜像写入期间若抛错，legacy 会停在旧值而内核已改
+   * —— 两者的不一致会**留在**会话里。先写 legacy 使"最坏情况"退化为
+   * "内核未镜像"（下一次替换会自愈），而不是"内核与 legacy 长期错位"。
+   *
+   * ## 签名：**单参数**（与 A′ 设计表的一处**已声明偏离**）
+   *
+   * A′ 的设计表核定过形态 `setDocument(next, adoption?: AdoptionInput)` ——
+   * 由本方法**一并**完成内容装配。实现采用了**两段式**：
+   *
+   * ```
+   * ctx.setDocument(result.document)                    // 本方法：legacy 写 + 存在性镜像
+   * adoptLoadedDocument(ctx, result.document, plainRootOf(raw), locator)   // 调用点：内容装配
+   * ```
+   *
+   * 理由三条（实现后才在完工报里声明，此处留档）：
+   *
+   *  1. **顺序**：装载路径的既有顺序是 `setDocument` → `seekFrame(0)` → `adopt`，
+   *     且文件选择器路径本来就先 `seekFrame(0)` 再装配。把装配折进本方法会改变该顺序，
+   *     而顺序是 A′ 明确要求保持不变的东西；
+   *  2. **plainRoot 各异**：6 条装载路径的源各不相同（`data` / `raw` / `props.document` /
+   *     `loadResult.raw`），全部收进本方法的参数会让本方法需要认识"这是什么加载路径"
+   *     —— 那正是 A′ 要避免的职责扩散；
+   *  3. **漏装配已被把守**：不装配的后果由 6 条装载路径的 `objects > 0` 判据机械抓住
+   *     （`p10fDocumentLifecycle.test.ts`），故"折进本方法"换来的那点防漏并无额外收益。
+   *
+   * ⇒ 本方法只回答"legacy 文档是谁 + 内核是否已装载"，**内容装配留在调用点**。
+   * 两句合起来才是"一次装载"；只做第一句的后果是"存在性对、内容空"，而那**可断言**。
+   *
+   * ## 原地修改路径的边界（**显式**不保证内容同步）
+   *
+   * 原地修改路径（注解增删改、tooltip 编辑、属性写）**只保证存在性对齐**，
+   * **不**保证内核承载的内容与 legacy 产物同步（它们在旧文档上是 in-place 字段，
+   * 内核侧对应物是对象载荷，映射需要新的命令面）。内容一致性归后续批次（C′），
+   * 本批的判据**显式不断言**它。
+   */
+  setDocument(next: RuntimeDocument | null): void {
+    // ① legacy 先写（与收口前**逐字节相同**的行为：`replaceDoc` 会 bump 内容重读信号）
+    this.main.replaceDoc(next)
+    // ② 内核镜像存在性（无会话 ⇒ 什么都不做：那是配置事实，不是缺陷）
+    const kernel = this.kernel
+    if (kernel === null) return
+    if (next === null) kernel.markUnloaded()
+    else kernel.markLoaded()
+  }
   /**
    * **内核会话**（#261 / R-WK-03）。
    *

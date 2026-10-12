@@ -203,7 +203,8 @@ export const SetWorkspaceModeOperator: OperatorType = {
     if (ctx.getWorkspaceMode().value === mode) return
     // 仅设置抽屉手动切换时清空场景；加载管线在写入文档后切模式，不可清 doc
     if (props.resetDocument === true) {
-      ctx.main.replaceDoc(null)
+      // #301 A′：经唯一写入口（卸载语义 —— 内核侧同步为"未装载"）。
+      ctx.setDocument(null)
       // 帧归零现在是"定位时间"（帧下标是派生值）—— 换文档时由宿主显式发出。
       ctx.requireKernelSession().seekFrame(0)
       ctx.getLocalFileName().value = null
