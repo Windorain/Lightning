@@ -5,6 +5,8 @@ import {
   sdeGetExportFile,
   sdePutWorkspaceDocument,
 } from '@/workbench/sdeApi'
+import { adoptDocumentIntoKernel } from '@/operators/builtin/docLifecycleOperators'
+import { plainRootOf } from '@/adapters/plainRoot'
 
 export const SDEConnectOperator: OperatorType = {
   id: 'OPERATOR_SDE_CONNECT',
@@ -50,12 +52,15 @@ export const SDELoadExportOperator: OperatorType = {
     ctx.getConnection().selectedExportName = name
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      ctx.main.replaceDoc( result.document)
+      ctx.setDocument( result.document)
       ctx.requireKernelSession().seekFrame(0)
+      // #301 A′：**本路径此前从不装配内核**（9 条未装配路径之一）。
+      // `plainRootOf` 是**同步**函数（P10e 统一口径），故不 await。
+      adoptDocumentIntoKernel(ctx, result.document, plainRootOf(data), name)
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      ctx.main.replaceDoc( null)
+      ctx.setDocument( null)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: name, error: result.error })
     }
     ctx.getWorkspaceMode().value = 'sde'
@@ -73,11 +78,13 @@ export const SDELoadWorkspaceOperator: OperatorType = {
     ctx.getEditHistory().clear()
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      ctx.main.replaceDoc( result.document)
+      ctx.setDocument( result.document)
       ctx.requireKernelSession().seekFrame(0)
+      // #301 A′：**本路径此前从不装配内核**（9 条未装配路径之一）。
+      adoptDocumentIntoKernel(ctx, result.document, plainRootOf(data), 'SDE workspace')
       ctx.log.info('场景加载', 'SDE workspace', { frames: result.document.frameCount })
     } else {
-      ctx.main.replaceDoc( null)
+      ctx.setDocument( null)
       ctx.log.error('场景加载', result.error ?? '未知错误')
     }
     await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'sde' })

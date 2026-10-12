@@ -27,7 +27,11 @@ export function pushDocUndo(
     id: generateId('op_'),
     label,
     timestamp: Date.now(),
-    execute: () => { ctx.main.replaceDoc(after) },
-    undo: () => { ctx.main.replaceDoc(before) },
+    // #301 A′：经唯一写入口。**存在性由传入值派生**，不能硬写"已装载" ——
+    // 本函数的 early-return 只在**两者皆 null** 时生效，故 `after` 可为 null
+    // 而 `before` 非 null（撤销会回到"有文档"、重做回到"无文档"）。
+    // `setDocument(null)` 会把内核侧同步为"未装载"，与 legacy 逐点对齐。
+    execute: () => { ctx.setDocument(after) },
+    undo: () => { ctx.setDocument(before) },
   })
 }

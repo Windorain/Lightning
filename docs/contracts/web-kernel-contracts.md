@@ -228,6 +228,64 @@ interface PropertyQueries {
 - **不变量**：`PropertyValue` 不得是可变底层 TypedArray 的引用（#249 §5 明文
   "不能暴露可变底层 TypedArray"）。大批量几何查询提供只读批量投影或明确借用契约。
 
+### 2.3 文档装载状态读面（GF-15，P10f A′ 新增）
+
+```ts
+interface KernelSession {
+  /** 内核当前是否承载**一份已装载的文档**（非"空文档"）。 */
+  hasLoadedDocument(): boolean
+}
+
+interface Context {
+  /** **文档替换的唯一写入口**：写 legacy 文档并镜像内核装载状态。 */
+  setDocument(next: RuntimeDocument | null): void
+}
+```
+
+**为什么需要它（缺口原文）**
+
+内核会话在**构造时**就提交 `openDocument`，而 `reduceOpenDocument` **无条件**
+`createDocument(...)` ⇒ `document()` 从构造起就恒为 `defined`（实测：已定义但
+`scene.objects` 长度为 0）。于是 `document() !== undefined` **无法**表达
+"用户打开了一份文档"这一事实 —— 而 legacy 侧 `getDoc().value` 确实会为 `null`
+（6 处 `replaceDoc(null)`）。
+
+⇒ 「空文档」与「无文档」在内核侧此前**不可区分**。本读面补上缺失的那一半。
+
+**状态迁移（冻结）**
+
+| 时刻 | `document()` | `hasLoadedDocument()` |
+|---|---|---|
+| `new KernelSession(...)` | defined（空） | **`false`** |
+| 装载成功（文件选择器 / 内置示例 / 嵌入 / SDE×2 / wiki-data 与 DocumentSource 管线） | defined | **`true`** |
+| `NewScene`（空**但存在**的场景） | defined | **`true`** |
+| 打开失败 / 关文档 / 工作区重置（`setDocument(null)`） | defined | **`false`** |
+| undo/redo 回放 | 由**传入值**派生（`null` ⇒ `false`） | 同上 |
+
+**必须成立**
+
+1. **与 legacy `getDoc().value !== null` 逐点对齐**：在全部文档替换调用点上
+   `hasLoadedDocument() === (getDoc().value !== null)`。这是后续批次用本读面
+   替换存在性判定的**前提**；不对齐则替换会静默改变行为。
+2. **唯一写入口**：`Main.replaceDoc` 只允许被 `Context.setDocument` 调用
+   （生产源码 `.replaceDoc(` 调用位白名单 = `runtime/context.ts`），
+   由 `tests/architecture/boundary-scan.test.ts` 的 AST 闸门机械把守。
+   绕过不会报错但会让本读面静默错位 ⇒ 必须判红。
+3. **不声称内容时效**：`hasLoadedDocument()` 是**存在性**事实，不是**内容同步**事实。
+   `adoptLoadedDocument` 对内核装配不支持的形态会如实降级（返回 `false`）而
+   legacy 文档仍非 null ⇒ 此时本读面仍为 `true`（对齐口径）。
+   内容一致性由内容身份判据另行回答，**不**由本读面承担。
+4. **不复用 `closeDocument` 表达"未装载"**：`reduceCloseDocument` 会一并删除绑定该
+   文档的 `contexts`/`leases`/`saveLedgers`，而工作区重置路径在后紧跟
+   `seekFrame(0)`（走 `contextAndDoc`）⇒ 复用会让那次帧归零**静默失效**。
+   故"未装载"由会话字段表达，内核文档 datablock 保持存在。
+
+**迁移状态（如实登记）**
+
+本批（P10f A′）**只建立读面并完成对齐**，**不**改动任何消费面 ——
+`raw-authority-object` 的 29 处存在性判定仍在读 `getDoc()`。
+替换它们属后续批次（B′），需与本读面同批进行并附逐点判据。
+
 ---
 
 ## 3. `CommandOutcome` 与错误分类
@@ -613,6 +671,9 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
 | GF-1 | P0 (#251) | §3.2 错误分类 | #249 §5 在正文并列提及 `WouldBlock`/`ReentrantCall`，但"至少包括"清单只有八个码 | 采纳本契取舍：`ReentrantCall` 作为 `WouldBlockError.params.reason='reentrant'`；请 P1 确认或改回第九码 |
 | GF-2 | P0 (#251) | §7 `ModuleDecl` | #249 §10 只说"provides/requires/contributes"，未给 `contributes` 的子类清单 | 本契约按 §10 段落列举出七类；若 P8/P9 需要第八类，回 #250 补 |
 | GF-3 | P0 (#251) | §4 `EvaluationKey` | #249 §7 说"至少区分"六项但未给字段名与类型 | 本契约命名之；`time` 的 `TimeValue` 表示法（有理帧率）待 P4 落地时确认，若需改动条目结构回 #250 |
+| GF-15 | P10f (#301) | §2.3 文档装载状态 | 内核 `document()` 恒 defined（`openDocument` 无条件建文档）⇒ 「空文档」与「无文档」不可区分；而 legacy `getDoc().value` 6 处可为 null | 新增 `KernelSession.hasLoadedDocument()` 读面 + `Context.setDocument` 唯一写入口；本批只建读面并对齐，消费面替换归 B′ |
+
+> **文档维护备注（P10f A′ 实测）**：GF-4…GF-14 已由 #250 裁决并登记于该单评论，但**未回填本表**（本表仍停在 GF-1…GF-3）。本批只按裁决补入 GF-15；GF-4…GF-14 的回填归 #262 收口，避免在本批制造一次与裁决无关的大范围文档改动。
 
 ---
 
@@ -621,6 +682,7 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
 | 版本 | 日期 | 条目 | 依据 |
 |---|---|---|---|
 | v1 | 2026-10-10 | 首次冻结：`PropertyRef`/`EditorClient`/`CommandOutcome`/八项错误分类/`EvaluationKey`/模块声明/所有权表/缺口流程 | #249 §3–§7 §10 §14 §19；#250；#251 B3 |
+| v1.1 | 2026-10-12 | 新增 §2.3 文档装载状态读面（GF-15）：`KernelSession.hasLoadedDocument()` + `Context.setDocument` 唯一写入口 + 状态迁移表 + 与 `closeDocument` 的关系 | #250 comment 5731（R-WK-08 重切）；#301（P10f A′） |
 
 ---
 

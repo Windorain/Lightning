@@ -345,9 +345,57 @@ export function buildAstIndex(files, webRoot = WEB_ROOT) {
   return out
 }
 
+/**
+ * 抽出某文件里对**指定方法名**的调用位（`<recv>.<method>(...)`）—— AST 级。
+ *
+ * ## 为什么加这个（#301 P10f A′）
+ *
+ * A′ 把 21 处裸调 `ctx.main.replaceDoc(...)` 收口成 `Context.setDocument`，
+ * 并要求闸门**机械拒绝绕过**。而"绕过"的判据是"生产里还有谁调 `.replaceDoc(`"，
+ * 那是一个**调用位**事实 —— `extractImports`/`extractGlobalRefs` 都答不了。
+ *
+ * ## 为什么必须 AST 而不是正则（本仓已两次实测的教训）
+ *
+ * 正则版要么把**注释里**的记录算成调用（本批实测：`documentLoad.ts:15`、
+ * `contentIdentity.ts:6`、`invalidationPlan.ts:7` 三处文档注释提到
+ * `Main.replaceDoc()`，还有 `context.ts` 自己解释本设计的注释），
+ * 要么被字符串绕开。本文件已有的 `extractGlobalRefs` 逐字记录了同一取舍：
+ * 「关键词计数只能作补充」。
+ *
+ * ## 判据口径
+ *
+ * 只认 `PropertyAccessExpression` 且 `name.text === methodName` 的**调用**
+ * （即 `.method(` 形态）。因此：
+ *  - 定义位（`replaceDoc(doc): void {}`，无点号）**不**命中 —— 那是类成员声明；
+ *  - 注释与字符串**不**命中；
+ *  - `this.ctx.main.replaceDoc(x)` 与 `ctx.main.replaceDoc(x)` 都命中（接收者不限）。
+ *
+ * @returns `{ line, text }[]`（`line` 为 1 基）；`.vue` 只扫 `<script>` 段。
+ */
+export function extractMethodCallSites(absPath, methodName) {
+  const raw = fs.readFileSync(absPath, 'utf8')
+  const isVue = absPath.endsWith('.vue')
+  const code = isVue ? extractVueScript(raw) : raw
+  const scriptKind = absPath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  const sf = ts.createSourceFile(absPath, code, ts.ScriptTarget.ES2022, true, scriptKind)
+  const out = []
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === methodName
+    ) {
+      const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf))
+      out.push({ line: line + 1, text: code.split('\n')[line].trim() })
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return out
+}
+
 /** 扫描整个 `src/`，返回导入事实与文件清单。 */
-export function buildModuleGraph(root = SRC_ROOT) {
-  const files = collectSourceFiles(root)
+export function buildModuleGraph(root = SRC_ROOT) {  const files = collectSourceFiles(root)
   // `fromRel` 以**扫描根的上一级**（即 `web/`）为基准，于是临时树与真实树
   // 产出同形的相对路径（`src/domain/scene.ts`），规则与测试可共用。
   const webRoot = path.dirname(root)

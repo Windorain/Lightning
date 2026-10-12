@@ -39,6 +39,7 @@ export const TooltipEditOperator: OperatorType = {
     if (!cellTooltipGrid[pos.z][pos.y]) cellTooltipGrid[pos.z][pos.y] = []
     cellTooltipGrid[pos.z][pos.y][pos.x] = text ? idx : -1
 
-    ctx.main.replaceDoc(newDoc)
+    // #301 A′：经唯一写入口。**原地修改路径** ⇒ 只保证存在性对齐（内容同步归 C′）。
+    ctx.setDocument(newDoc)
   },
 }

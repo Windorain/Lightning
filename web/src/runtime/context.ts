@@ -171,6 +171,55 @@ export class Context {
   getDoc(): Ref<RuntimeDocument | null> {
     return this.main.doc
   }
+
+  /**
+   * **文档替换的唯一写入口**（#301 P10f A′）。
+   *
+   * ## 它替代的旧机制
+   *
+   * | 旧机制 | 位置 | 本方法的替代 |
+   * |---|---|---|
+   * | 21 处裸调 `ctx.main.replaceDoc(next)` | 15 条路径（`docLifecycleOperators`/`sdeOperators`/`pipeline`/…） | 一处 `ctx.setDocument(next)` |
+   *
+   * ## 为什么必须收口（不是"顺手封装"）
+   *
+   * 内核侧的**装载状态**（`KernelSession.hasLoadedDocument()`，GF-15）必须与
+   * legacy 的 `getDoc().value` **逐点对齐**。若 21 处各写一遍"写 legacy + 镜像内核"：
+   *
+   *  1. 那 21 份是**会漂移的判据**（本工程已三次实测"两份实现必然漂移"）；
+   *  2. **将来**任何新调用点会绕过镜像 —— 而绕过是**静默**的
+   *     （legacy 照常工作、内核状态悄悄错位），正是 A′ 要消除的形态。
+   *
+   * 收口后"文档被替换"在生产里只有一条路径，于是"镜像是否发生"可被**单点**断言，
+   * 且闸门能机械地拒绝绕过（见 `boundary-scan.test.ts` 的 `.replaceDoc(` 白名单）。
+   *
+   * ## 顺序：**先** legacy、**后**内核（顺序是语义的一部分）
+   *
+   * 反过来的话，镜像写入期间若抛错，legacy 会停在旧值而内核已改
+   * —— 两者的不一致会**留在**会话里。先写 legacy 使"最坏情况"退化为
+   * "内核未镜像"（下一次替换会自愈），而不是"内核与 legacy 长期错位"。
+   *
+   * ## `adoption` 的语义
+   *
+   * 有值 ⇒ 这是**一次装载**（内容来自 `plainRoot` 所指的源）：先按装载语义
+   * 置"已装载"，再由调用方（加载路径）走 `adoptLoadedDocument` 装配内容。
+   * 无值 ⇒ 只是**替换**（原地修改产物 / NewScene 的空场景 / 快照回放）：
+   * 按 `next` 是否为 null 镜像存在性。
+   *
+   * ⚠️ 原地修改路径（注解增删改、tooltip 编辑、属性写）**只保证存在性对齐**，
+   * **不**保证内核承载的内容与 legacy 产物同步（它们在旧文档上是 in-place 字段，
+   * 内核侧对应物是对象载荷，映射需要新的命令面）。内容一致性归后续批次，
+   * 本批的判据**显式不断言**它。
+   */
+  setDocument(next: RuntimeDocument | null): void {
+    // ① legacy 先写（与收口前**逐字节相同**的行为：`replaceDoc` 会 bump 内容重读信号）
+    this.main.replaceDoc(next)
+    // ② 内核镜像存在性（无会话 ⇒ 什么都不做：那是配置事实，不是缺陷）
+    const kernel = this.kernel
+    if (kernel === null) return
+    if (next === null) kernel.markUnloaded()
+    else kernel.markLoaded()
+  }
   /**
    * **内核会话**（#261 / R-WK-03）。
    *

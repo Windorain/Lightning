@@ -284,7 +284,90 @@ export class KernelSession {
         durationsMs: () => frameDurationsMs({ frames: content.frameAxis.frames }),
       }
     }
+    // 采纳即"已装载"（本批 GF-15）：这一行与被替换的旧文档**无关**，
+    // 它只记录"内核现在承载的是被显式装配过的内容"。
+    this.markLoaded()
     this.subscribeContext()
+  }
+
+  // ── 装载状态（#301 P10f A′；GF-15） ──────────────────────────────────────
+
+  /**
+   * 当前**已装载**的文档身份（`null` = 未装载）。
+   *
+   * ## 为什么记"身份"而不是一个裸布尔
+   *
+   * `false` 有**两种成因**，它们在诊断与处置上不同：
+   *  - **从未装载**：会话刚构造，或某条路径从未装过内容；
+   *  - **已卸载**：曾经装过，随后被显式卸载（关文档 / 切换工作区）。
+   *
+   * 记身份使两者可区分（未来要报"上一次装载的是哪份"也有值可查），
+   * 而裸布尔会把它们压成同一个事实 —— 与 `domain/cellContent` 判据 3
+   * 「字段缺席 ≠ 空值」同一口径。
+   */
+  private adoptedDocumentId: string | null = null
+
+  /**
+   * **文档是否已装载**（#301 P10f A′；GF-15 读面）。
+   *
+   * ## 它回答的问题：区分「空文档」与「无文档」
+   *
+   * 内核会话在**构造时**就提交 `openDocument`，而 `reduceOpenDocument`
+   * **无条件** `createDocument(...)` ⇒ `document()` 从构造起就**恒为 defined**
+   * （实测：`document()` 已定义、但 `scene.objects` 长度为 0）。
+   *
+   * ⇒ `document() !== undefined` **不能**表达"用户打开了一份文档"这件事。
+   * 本读面补上那个缺失的事实，于是：
+   *
+   * | 情形 | `document()` | `hasLoadedDocument()` |
+   * |---|---|---|
+   * | 刚构造 | defined（空） | **false** |
+   * | 文件选择器/内置/SDE/wiki-data/嵌入 打开成功 | defined | **true** |
+   * | 打开失败 / 关文档 / 工作区重置 | defined（仍旧或空） | **false** |
+   *
+   * ## 迁移目标（本批只建立读面，**不**改消费面）
+   *
+   * 本读面是 `raw-authority-object` 那 29 处 N1 存在性判定在**后续批次**
+   * （B′）获得"同义替代"的前提 —— A′ 先让它在 21 处调用点上与 legacy
+   * `getDoc().value !== null` **逐点对齐**（判据见 `p10f-documentLifecycle.test.ts`）。
+   *
+   * ## 为什么**不**复用 `closeDocument`
+   *
+   * `reduceCloseDocument` 会一并删除绑定该文档的 `contexts`/`leases`/`saveLedgers`
+   * —— 而 `miscOperators.ts:206` 卸载后**紧跟** `:208` 的 `seekFrame(0)`（走
+   * `contextAndDoc`），复用会让那次帧归零**静默失效**。故"未装载"由本字段表达，
+   * 内核文档 datablock 保持存在（它承载 `EditContext` 的宿主关系）。
+   */
+  hasLoadedDocument(): boolean {
+    return this.adoptedDocumentId === this.documentId
+  }
+
+  /**
+   * 标记"文档已装载"（#301 P10f A′）。
+   *
+   * ## 它**不**声称"内核内容与 legacy 同步"（措辞刻意收窄）
+   *
+   * 本读面是**存在性**事实，不是**内容时效**事实。两者的区别有实测依据：
+   * `adoptLoadedDocument` 对"内核装配不支持的形态"会**如实降级并返回 false**
+   * （旧路径照常渲染）—— 那种情况下 legacy `doc.value` 非 null，故"已装载"
+   * 仍应为 `true`（对齐口径），而内核承载的内容**可能**是空的或上一次的。
+   *
+   * ⇒ 「内容是否同步」是另一件事，归后续批次（C′）用内容身份判据回答；
+   * 本批的判据只比对存在性，并在测试里**显式声明不断言内容一致性**。
+   *
+   * 调用方是 `Context.setDocument` / `KernelSession.adoptDocument`。
+   */
+  markLoaded(): void {
+    this.adoptedDocumentId = this.documentId
+  }
+
+  /**
+   * 标记"未装载"（#301 P10f A′）：文档被置空 / 打开失败 / 工作区重置。
+   *
+   * **不**关闭内核文档 datablock（理由见 {@link hasLoadedDocument}）。
+   */
+  markUnloaded(): void {
+    this.adoptedDocumentId = null
   }
 
   /** 重建上下文订阅（`adoptDocument` 换了 Editor 实例，故订阅必须重建）。 */

@@ -45,7 +45,8 @@ export async function documentLoadPipeline(
 ): Promise<void> {
   const result = await ctx.main.registries.parsers.detectAndParse(loadResult.raw)
   if (result.document) {
-    ctx.main.replaceDoc(result.document)
+    // #301 A′：经唯一写入口（存在性镜像），随后 `adoptLoadedDocument` 装配内容。
+    ctx.setDocument(result.document)
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
     hydrateMainEmbedInitialViewFromDoc(ctx.main)
     ctx.requireKernelSession().seekFrame(0)
@@ -81,7 +82,7 @@ export async function documentLoadPipeline(
       ctx.getLocalFileName().value = loadResult.displayName ?? loadResult.locator
     }
   } else {
-    ctx.main.replaceDoc(null)
+    ctx.setDocument(null)
     ctx.main.embedInitialView.value = null
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
     ctx.log.error('场景加载', result.error ?? '未知错误', {

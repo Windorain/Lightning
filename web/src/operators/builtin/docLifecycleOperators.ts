@@ -89,7 +89,10 @@ export const NewSceneOperator: OperatorType = {
     ctx.getSelection().clear()
     ctx.getEditHistory().clear()
     const doc = RuntimeDocument.empty()
-    ctx.main.replaceDoc(doc)
+    // #301 A′：经**唯一写入口**（它同时镜像内核的装载状态）。
+    // NewScene 的语义是"空**但存在**"——与"无文档"不同，故走 `setDocument(doc)`
+    // 而非 `setDocument(null)`（后者会让内核侧读到"未装载"）。
+    ctx.setDocument(doc)
     ctx.main.embedInitialView.value = null
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
   },
@@ -126,18 +129,19 @@ export const OpenSceneOperator: OperatorType = {
     }
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      ctx.main.replaceDoc(result.document)
+      // #301 A′：经唯一写入口（存在性镜像），随后 `adoptDocumentIntoKernel` 装配内容。
+      ctx.setDocument(result.document)
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       hydrateMainEmbedInitialViewFromDoc(ctx.main)
       ctx.requireKernelSession().seekFrame(0)
       // #282 P10b：装配进内核（权威迁到内核；失败时旧路径兜底并记日志）。
       // `plainRoot` 用**解析器看到的形状**（信封解包后的 plain），不是
       // `result.document.serialize()` —— 后者是有损的（见 kernelAssembly 的实测说明）。
-      adoptDocumentIntoKernel(ctx, result.document, await plainRootOf(data), file.name)
+      adoptDocumentIntoKernel(ctx, result.document, plainRootOf(data), file.name)
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      ctx.main.replaceDoc(null)
+      ctx.setDocument(null)
       ctx.main.embedInitialView.value = null
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
@@ -181,14 +185,19 @@ export const LoadBuiltinSceneOperator: OperatorType = {
     ctx.getEditHistory().clear()
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (result.document) {
-      ctx.main.replaceDoc(result.document)
+      ctx.setDocument(result.document)
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       hydrateMainEmbedInitialViewFromDoc(ctx.main)
       ctx.requireKernelSession().seekFrame(0)
+      // #301 A′：**本路径此前从不装配内核**（P10e 侦察点名的 9 条未装配路径之一）。
+      // 不装配的后果是"改读内核"会在这条路径上读到**空内核文档** —— 静默能力回退。
+      // `plainRoot` 用 `raw`（`getDevSceneDocument(id)` 的产物，即解析器看到的源）；
+      // `plainRootOf` 是**同步**函数（非 Promise），故不 await（P10e 统一口径）。
+      adoptDocumentIntoKernel(ctx, result.document, plainRootOf(raw), `示例 · ${id}.json`)
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `示例 · ${id}.json`, { fileName: `示例 · ${id}.json`, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      ctx.main.replaceDoc(null)
+      ctx.setDocument(null)
       ctx.main.embedInitialView.value = null
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: `示例 · ${id}.json`, error: result.error })
@@ -206,8 +215,14 @@ export const LoadEmbedDocumentOperator: OperatorType = {
     const raw = props.document
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (!result.document) throw new Error('无法加载结构数据')
-    ctx.main.replaceDoc(result.document)
+    ctx.setDocument(result.document)
     ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
     hydrateMainEmbedInitialViewFromDoc(ctx.main)
+    // #301 A′：**本路径此前从不装配内核**（9 条未装配路径之一）。
+    // `props.document` 是 `EmbedData.document`（`embedContract.ts:11-14` 声明为
+    // 「SDE 打包后的 StructureData 或 World（根级含 `textureBlobs`）」）—— 即
+    // **解析器输入本身的 plain 形状**，与 OpenScene 的 `data`、pipeline 的
+    // `loadResult.raw` 同类，故 `plainRootOf` 对它是正确输入。
+    adoptDocumentIntoKernel(ctx, result.document, plainRootOf(raw), 'embed')
   },
 }

@@ -53,7 +53,8 @@ export class ModalOperatorWrapper implements ModalOperation {
 
     if (result === OP_RESULT.CANCELLED) {
       if (this.undoSnapshot !== null) {
-        this.ctx.main.replaceDoc(this.undoSnapshot)
+        // #301 A′：经唯一写入口（取消 ⇒ 回放到进入模态前的快照，非 null ⇒ 已装载）。
+        this.ctx.setDocument(this.undoSnapshot)
         this.undoSnapshot = null
       }
       this.op.cancel?.(this.ctx, this.props)

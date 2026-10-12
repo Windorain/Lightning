@@ -556,10 +556,11 @@ export function submitPropertyWrite(
 
   if (transition.outcome.status !== 'applied') return transition.outcome
 
-  // 文档内容变化 ⇒ 经具名写回路径（`replaceDoc` 会 bump 结构纪元，触发重绘）。
+  // 文档内容变化 ⇒ 经**唯一写入口**（#301 A′：它 bump 内容重读信号并镜像内核装载状态）。
+  // **原地修改路径** ⇒ 只保证存在性对齐（内容同步归 C′）。
   const nextDoc = transition.candidate.document
   if (nextDoc !== state.document) {
-    ctx.main.replaceDoc(nextDoc)
+    ctx.setDocument(nextDoc)
   }
   applyShellState(ctx, state, transition.candidate)
   return transition.outcome
