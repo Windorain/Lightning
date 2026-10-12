@@ -164,12 +164,22 @@ export interface RetirementEntry {
   /**
    * 与 B5 矩阵 `RETIREMENT_OWNERS[slug].owners` 的差异理由。
    *
-   * 存在这个字段的原因是一处**真实的口径分歧**（本批如实登记，未静默抹平）：
-   * B5 矩阵把 `frame-sequence-as-animation` 的退出阶段写成「P4 交付同批」，
+   * 存在这个字段的原因是一处**真实的口径分歧**（当年如实登记，未静默抹平）：
+   * B5 矩阵曾把 `frame-sequence-as-animation` 的退出阶段写成「P4 交付同批」，
    * 而 R-WK-01 规定「跨区旧文件的退役删除由**文件所在区批次**执行」——
    * `render/` 与旧 `runtime/` 属 P5 区。⇒ 同一 slug 下，**业务语义替代**归 P4，
-   * **渲染侧文件删除**归 P5。Lead 已批准该分派（#250），B5 镜像文本暂不改动，
-   * P11 终局审计以本表的机器断言为准统一收口。
+   * **渲染侧文件删除**归 P5。Lead 已批准该分派（#250）。
+   *
+   * ## ⚠️ P11-B3 收口（2026-10-13）：矩阵层**已同步**，本字段转为历史依据
+   *
+   * 上面那句"B5 矩阵写成「P4 交付同批」"描述的是**分歧当时**的状态。该分歧已按
+   * #262 附件 1909 在 `web/tests/architecture/boundary-rules.mjs` 的
+   * `RETIREMENT_OWNERS` 上**同步为终订值**（#8/#11 的 `exitStage` 与 `owners` 补
+   * `P10/#261`；#2/#13 在 P11-B2 已同步）⇒ **矩阵层与现实不再分叉**。
+   * 本字段因此不再充当"矩阵字段过时"的补偿，而是保留**逐条改写依据**
+   * （谁在何时把哪条 slug 的删除归属从哪个批次改判到 `#261`、理由是什么），
+   * 供 P11 终局审计追溯。Gitea 侧历史附件不可变：v3 仍挂在 #250（asset 1008），
+   * 终订镜像见 #262 附件 1909。
    */
   readonly areaOverrideReason?: string
   /** P4 提供的**替代接口**（相对 `web/` 的模块 + 符号）。 */
@@ -326,7 +336,17 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     owner: 'P10',
     status: 'executed',
     executedBy: 'P10',
-    consumers: Object.freeze(['web/src/runtime/renderEngine.ts']),
+    // ## ⚠️ P11-B3 修正：消费者清单**腐烂** ⇒ 修正为空集（实测）
+    //
+    // 旧值 `['web/src/runtime/renderEngine.ts']` 是 P5 收尾批写下的事实，但 #261 删完
+    // 三处机制后它**不再成立**：实测（判据本尊口径 = 本条 `symbols` 的三个判据点）
+    // `runtime/renderEngine.ts` 对 `registerTick` / `applyAnimatedStrip` / `tick` 声明位
+    // **各 0 命中** —— 该文件只剩 `import type { MaterialLibraryApi }`（`:4`）、
+    // 接口字段声明（`:20`）与**注释里的**旧调用示例（`:40`/`:142`，注释被词法器剥除）。
+    // ⇒ 机制无外部消费者，清单按新口径显式登记空集（与同组另两条一致）。
+    // 该腐烂此前不可见：旧完备断言对 `executed` 条目 `continue`（P11-B3 已取消该豁免，
+    // 见 `consumerListDiff` 与其负对照用例）。
+    consumers: Object.freeze([]),
     group: 'material-tick',
     groupAreaNotes: '同 `material-tick` 组（见 renderEngine.ts 条目的完整说明）。**R-WK-03 → P10 执行**：`accMs += dtMs` 累积是纹理动画的生产唯一来源，删除前置条件是内核接线生产（已在 #261 完成）。',
     replacement: Object.freeze([
@@ -918,6 +938,30 @@ export function scanEntryResidual(
   return Object.freeze(out)
 }
 
+/**
+ * **消费者清单的双向对账**（`missing` = 漏登记仍在引用的文件；`extra` = 登记了却不被引用的文件）。
+ *
+ * 抽成纯函数**只为可注入负对照**：本次 P11-B3 实测到一处真实腐烂 ——
+ * `material-viewport-tick` / `simpleMaterialLibrary.ts` 条目的 `consumers` 写着
+ * `web/src/runtime/renderEngine.ts`，而该文件对这三个判据（`registerTick` /
+ * `applyAnimatedStrip` / `tick` 声明位）**零命中**（#261 删除后它只剩注释与类型导入）。
+ * 腐烂之所以能潜伏，是因为原完备断言对 `executed` 条目 `continue`（该字段退出了断言面）；
+ * 本函数 + 其负对照用例把这一形态变成能被判据抓住的输入。
+ *
+ * 归一化两侧的 `web/` 前缀（登记风格两存：接口文档写 `web/` 相对，`scanEntryResidual` 返 `web/` 相对）。
+ */
+export function consumerListDiff(
+  declared: readonly string[],
+  actual: readonly string[],
+): { readonly missing: readonly string[]; readonly extra: readonly string[] } {
+  const d = new Set(declared.map((c) => c.replace(/^web\//, '')))
+  const a = new Set(actual.map((c) => c.replace(/^web\//, '')))
+  return {
+    missing: [...a].filter((f) => !d.has(f)).sort(),
+    extra: [...d].filter((f) => !a.has(f)).sort(),
+  }
+}
+
 /** 某条目所属组的全部条目（无组时只有它自己）。 */
 export function groupMembers(entry: RetirementEntry): readonly RetirementEntry[] {
   if (entry.group === undefined) return Object.freeze([entry])
@@ -1412,12 +1456,20 @@ describe('判据精度负对照：子串撞名不得误红，真依赖残留必�
     // 缺了这条，`main.ts` 那种"权威字段在自己文件、消费者散在 8 个文件"的机制
     // 就会在 P5 删除后被漏掉的消费者拖住 —— 而漏掉的那个**不会**报错，
     // 只会让 phase flip 永远红（首版仿真正是这样抓出来的）。
+    //
+    // ## ⚠️ P11-B3 修正：**取消 `executed` 豁免**（该字段不再是"退出断言面"）
+    //
+    // 原文首行是 `if (e.status === 'executed') continue`。当时的理由是"相位已翻 ⇒
+    // 机制已删 ⇒ 清单无核对对象"。实测该理由**不成立**：`executed` 条目的
+    // `scanEntryResidual(e)` 必为 `[]`（由本文件「`executed` 条目…判据 0 命中」
+    // 与「整组 executed ⇒ 0 命中」两条用例把守）⇒ `actual` 恒为空集，
+    // 于是这条断言对 `executed` 条目等价于「声明必须为空」，**是可核对的**。
+    // 豁免的代价是实测到的一处真实腐烂：
+    // `simpleMaterialLibrary.ts` 条目声明消费者 `web/src/runtime/renderEngine.ts`，
+    // 而该文件对三个判据零命中（#261 删除后只剩注释与类型导入）——
+    // 登记指向了一个**不再引用该机制**的文件，豁免让它静默存活。
     for (const e of RETIREMENT_REGISTRY) {
-      if (e.status === 'executed') continue
-      const declared = new Set((e.consumers ?? []).map((c) => c.replace(/^web\//, '')))
-      const actual = new Set(scanEntryResidual(e).map((r) => r.file.replace(/^web\//, '')))
-      const missing = [...actual].filter((f) => !declared.has(f)).sort()
-      const extra = [...declared].filter((f) => !actual.has(f)).sort()
+      const { missing, extra } = consumerListDiff(e.consumers ?? [], scanEntryResidual(e).map((r) => r.file))
       expect(
         missing,
         `${e.file} 的消费者清单**漏登记**了仍在引用的文件（P5/P6 会漏迁移它们）:\n${missing.join('\n')}`,
@@ -1427,6 +1479,21 @@ describe('判据精度负对照：子串撞名不得误红，真依赖残留必�
         `${e.file} 的消费者清单登记了并不引用该机制的文件（清单腐烂，请核销）:\n${extra.join('\n')}`,
       ).toEqual([])
     }
+  })
+
+  it('**负对照**：消费者清单对账能抓住"清单腐烂"与"漏登记"两个方向（注入式）', () => {
+    // ① 本次实测修正的**真实腐烂形态**：声明了 `renderEngine.ts`，实测零引用 ⇒ `extra` 命中。
+    expect(
+      consumerListDiff(['web/src/runtime/renderEngine.ts'], []).extra,
+      '声明了一个不再引用该机制的文件必须判红（这就是 P11-B3 修掉的那处腐烂）',
+    ).toEqual(['src/runtime/renderEngine.ts'])
+    // ② 反方向：实测多一个未登记的文件 ⇒ `missing` 命中（P5/P6 会漏迁移它）。
+    expect(consumerListDiff([], ['web/src/x.ts']).missing).toEqual(['src/x.ts'])
+    // ③ **反空洞真**：两侧一致时判据必须为空（证明它不是"恒非空"）。
+    expect(
+      consumerListDiff(['web/src/a.ts'], ['src/a.ts']),
+      '声明与实测一致时必须两侧皆空（判据不得恒红）',
+    ).toEqual({ missing: [], extra: [] })
   })
 
   it('**跨区组**：`world-frame-playback` 组必须登记 P5 与 P6 两侧的消费者归属', () => {

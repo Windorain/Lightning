@@ -19,6 +19,14 @@
  *  - 两个端口各有生产实现（`offscreenRenderPort` / `encoderPort`）；
  *  - `ExportJob` 有生产构造点（本文件）；
  *  - 全链在 vitest 里**真跑**（注入受控设备）并产出可判定的 PNG 字节。
+ *
+ * ## ⚠️ P11-B3 措辞精确化（#262 comment 6429 四，2026-10-13）
+ *
+ * 上句「本文件**没有生产调用方**」按 Lead 口径改写为「**零生产消费方**」——
+ * 两件事必须分开（混写曾让"替代面未接线"读起来像"连构造点都没有"）：
+ *  - **有**生产构造点（本文件的 `assembleSnapshotExportJob`）；
+ *  - **零**生产消费方（四个导出命令仍走 `workbench/export*` 旧导出器）。
+ * ⇒ 登记面同批同步（`composition/seams.ts` 的 `export-borrows-live-viewport-dual-track` ③）。
  */
 
 import type { DocumentContent } from '@/domain/content'

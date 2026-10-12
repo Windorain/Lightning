@@ -317,6 +317,13 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * - 三个非渲染产物命令（Plain / Envelope / OBJ）的**产字节**已在 D2 迁到
    *   `Context#plainForSave()`（内核投影优先）—— D-8 的"其余保持"部分已兑现；
    * - 等轴 PNG **保持现路径**（无能力回退），并登记本条等待前置齐备。
+   *
+   * ## ⚠️ 终局裁决（P11-B3，#262 comment 6429 三，2026-10-13）：四命令**不迁**
+   *
+   * 本条曾把"四命令迁 `ExportJob`"当退出条件之一。Lead 终局裁决**采纳「不迁」**：
+   * 切过去丢贴图（`textures` 缺省 ⇒ 中性色）+ 违反 A29（唯一生产 `TexturePort` 属视口作用域）。
+   * ⇒ 本条的 `exitCondition` **收窄**为唯一前置「渲染链终切后」（材质统一 ⇒ 出现不借用
+   * 实时视口的生产 `TexturePort`），不再要求命令迁移。
    */
   Object.freeze({
     id: 'isometric-export-legacy-bake',
@@ -343,12 +350,15 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' 与 `presenter-surface-dual-track` / `legacy-render-source-document` 同一前置。',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
-      '`src/adapters/export/snapshotExportJob.ts` 的装配能拿到**不借用实时视口**的生产 '
-      + '`TexturePort`（或材质统一后不再需要贴图端口），且 '
-      + '`src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
+      '**渲染链终切后**（唯一前置）：`src/composition/presenterSession.ts` 的 `PresenterSession` '
+      + '接管画面、材质统一 ⇒ 生产侧出现**不借用实时视口**的 `TexturePort`（或材质统一后不再需要贴图端口）；'
+      + '届时 `src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
       + '`assembleSnapshotExportJob` + `ExportJob.run()` 产出 PNG'
       + '（同批作废 `src/workbench/exportIsometricImage.ts` 的自建渲染器路径）'
-      + ' ⇒ 届时删除本条登记。',
+      + ' ⇒ 删除本条登记。\n'
+      + '⚠️ **退出条件已收窄（Lead 裁决 #262 comment 6429 三，2026-10-13）**：原条件的另一半是'
+      + '「四命令迁 `ExportJob`」—— 该裁决**采纳「不迁」**（切过去丢贴图 + 违反 A29 借用实时视口）'
+      + '⇒ 本条**不再**以"命令迁移"为退出条件，只留「渲染链终切」这一条可核对前置。',
   }),
   /**
    * P10e（#299）登记：**呈现链与 legacy 渲染链并存**（本批的显式暂存）。
@@ -435,7 +445,23 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       // 四个导出命令仍走旧导出器 ⇒ 四命令迁移归主线 D/E。
       // ⚠️ 真实 GPU 填充那一段**只由 e2e 证明**（本仓 `gl@8.1.6` 是 WebGL 1.0，
       // 而 three r174 硬编码请求 `webgl2` ⇒ vitest 无真 GL 路径）。
-      '③ **替代面未接线**：`runtime/exportJob.ts` 的 `ExportJob` 生产零构造点、`OffscreenRenderPort` 与 `EncoderPort` 均**零生产实现**（`export-purity.test.ts` 只锁了方法集合封闭，不锁"有人实现"）。故"导出改由 `ExportJob` 承担"当前不可执行。**P10f/E（#301）更新**：两端口的生产实现与 `ExportJob` 的生产构造点已落地（`src/adapters/export/`）；仍未接的是**消费面**（四个导出命令仍走旧导出器），四命令迁移归主线 D/E。\n' +
+      //
+      // ## ⚠️ P11-B3 措辞精确化（#262 comment 6429 四，2026-10-13）
+      //
+      // ③ 的**"零生产调用方"口径本就含混**（把"有生产构造点"与"有生产消费方"混成一句），
+      // 实测两件事必须分开写：
+      //  - **有**生产构造点：`src/adapters/export/snapshotExportJob.ts` 的
+      //    `assembleSnapshotExportJob` → `new ExportJob({`（实测 `:82`；此前 11 处
+      //    `new ExportJob(` 全在 `__tests__`）；
+      //  - **零**生产消费方：四个导出命令仍走 `workbench/export*` 旧导出器，
+      //    无一处调 `assembleSnapshotExportJob` / `ExportJob.run()`。
+      // ⇒ 措辞改为「**有生产构造点、零生产消费方**」，并**去掉**"四命令迁移归主线 D/E"
+      //   这一半 —— Lead 裁决：**四命令不迁 `ExportJob`**（切过去丢贴图 + 违反 A29
+      //   借用实时视口），等轴 seam 的退出条件据此收窄为「渲染链终切后」。
+      '③ **替代面的两半必须分开写**（原文"零生产调用方"把两者混为一谈）：\n' +
+      '  · **有生产构造点**：`src/adapters/export/snapshotExportJob.ts` 的 `assembleSnapshotExportJob` 内实例化 `ExportJob`（实测 `:82`，本文件外的唯一构造点；判据 `tests/architecture/export-port-implementation.test.ts`）；`OffscreenRenderPort` 与 `EncoderPort` **各有生产实现**（`src/adapters/export/offscreenRenderPort.ts` / `encoderPort.ts`）。\n' +
+      '  · **零生产消费方**：四个导出命令（`src/operators/builtin/exportOperators.ts`）与 `ExportWorkspace.vue` 全走旧导出器，**无一处**调 `assembleSnapshotExportJob` / `ExportJob.run()` ⇒ "导出改由 `ExportJob` 承担"在**消费面**未接。\n' +
+      '  · **Lead 裁决（#262 comment 6429 三，2026-10-13）：四个导出命令 `迁 ExportJob` = 采纳「不迁」**（切过去丢贴图 + 违反 A29 借用实时视口）⇒ 剩下的只是**旧导出器本体**的删除，其前置收窄为「渲染链终切」（见 seam `isometric-export-legacy-bake`）。\n' +
       '④ **文字修正**：本条的旧 `oldTrack` 曾称两个文件"从正在操作的视口取景（必要时临时改机位再恢复）"。实测**不成立**：`bundleMeshAssembly.ts` 与 `exportIsometricImage.ts` 都不 import 任何视口/相机/`ctx` 实时面，后者自建 `new THREE.WebGLRenderer` 与自建透视/正交相机（`:105,:153-168`）。"借用并旋转实时相机"发生在**截图**路径（`runtime/renderEngine.ts:215` 的 `canvas.toDataURL`），不是这两个导出器。A29 的负对照面据此收窄（见汇报）。',
     owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     exitCondition:
@@ -622,7 +648,22 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * 保留旧名会让"这条接缝在管什么"与代码现状不符（本表的口径是"双轨**剩余**数"）。
    */
   /**
-   * P10f C′2（#301）登记的**剩余半边**：**注解读面/写面的字段面窄于 RNA 描述符**。
+   * P10f C′2（#301）登记的**剩余半边**：**注解写面的字段面窄于 RNA 描述符**。
+   *
+   * ## ⚠️ #262 P11-B3 措辞更正（Lead 裁决 comment 6429 三 L5）：**读面不窄，窄的是写面**
+   *
+   * 本条原写「注解**读面/写面**的字段面窄于 RNA 描述符」，把读面一并列为瓶颈 ——
+   * **与代码现实不符**。实测（判据本尊口径）：
+   * `runtime/annotationRead.ts` 的 `ANNOTATION_FIELD_PAIRS` = **15** 条封闭表，
+   * `id`/`type`/`visible`/`title`/`description` + 几何 `min`/`max`/`pos`/`points`/
+   * `color`/`renderStyle` + **`locked`/`frameIndex`/`createdAt`/`updatedAt`**。
+   * ⇒ 早先被写成"不在读面里"的 **`locked` 与这几类几何事实都在读面内**
+   * （`editors/workbench-rna.ts` 的注解属性读正走这张表，其注释亦逐字写明
+   * 「`locked` 是读面 15 字段之一」）。**读面因此不窄。**
+   *
+   * 真正窄的是**写面**：`operators/builtin/annotationOperators#annotationPatchCommand`
+   * 实测**只迁 `title`**（非单键 `title` 的补丁一律返回 `null`），其余字段整体回落 legacy。
+   * 本条此后只如实登记：**(i) 写面缺口** + **(ii) 读面命名空间未转发的那批几何字段**。
    *
    * ## 为什么必须登记（而不是只在汇报里说"这部分没迁"）
    *
@@ -685,21 +726,25 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '读面是 `runtime/annotationRead#kernelAnnotationsOf` 的**封闭 15 字段**表'
       + '（`ANNOTATION_FIELD_PAIRS` 与回写侧双向断言）。',
     oldTrack:
-      '(b) **仍落 legacy 的字段面**：注解 `locked`/几何（`renderOpacity`/`fillOpacity`/'
-      + '`frameThickness`/`overlay`/`icon`/`size`/`arrow`/`fontSize`/`showPoints`/'
-      + '`linkedAnnotationId`/`quadIndex`…）不在读面的 15 字段里 ⇒'
-      + ' `editors/workbench-rna.ts` 的属性读对它们给 `value-absent`、'
-      + ' `AnnotationEditorPanel.vue` 显示为空；且 `annotationOperators` 的'
-      + ' `annotationPatchCommand` 对未承载字段**整体回落 legacy**（刻意不部分写：'
-      + ' 部分写会让用户看到"改了一半"）。\n'
+      '(b) **仍落 legacy 的是写面**（⚠️ 读面**不窄** —— 见文件头的措辞更正）：'
+      + ' `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand` '
+      + '实测**只迁 `title`**（非单键 `title` 的补丁一律返回 `null`）⇒ `locked`/几何/其余字段的'
+      + '**写**一律回落 legacy（刻意不部分写：部分写会让用户看到"改了一半"）。\n'
+      + '  另有一组**几何**事实不在读面的 15 字段命名空间里（内核 `AnnotationGeometry` '
+      + '**承载**、RNA 描述符**声明**、读面逐字段显式转发时**未列入**）：'
+      + ' `blockPos`/`quadIndex`/`renderOpacity`/`fillOpacity`/`frameThickness`/`overlay`/'
+      + '`icon`/`size`/`thickness`/`arrow`/`showPoints`/`fontSize`/`backgroundAlpha`/'
+      + '`linkedAnnotationId` ⇒ `src/editors/workbench-rna.ts` 的属性读对它们给 `value-absent`、'
+      + ' `AnnotationEditorPanel.vue` 显示为空。\n'
       + '(a) ✅ **已核销（D3）**：逐格说明的回落分支与帧高读取已全部改走'
       + ' `ctx.kernelGrid(0)` / `ctx.frozenDocumentValue()`，对旧读入口 0 命中。',
     blocker:
-      '需要扩 `editors/property-writers#writeAnnotationProperty` 的写入分支与'
-      + ' `application/kernel-properties.ts` 的注解属性描述符，并把'
-      + ' `domain/scene#AnnotationGeometry` 的**全部**字段逐项进读面'
-      + '（它是**封闭形状**，加字段是"决定"而不是自动跟随 —— 见 `geometryFieldsOf` 的注释）。'
-      + '三件都是**承载面/写面新增**，超出 D3「终删 `getDoc()`」的范围（Lead comment 5960 的红线）。',
+      '**(i) 写面**：需要扩 `editors/property-writers#writeAnnotationProperty` 的写入分支与'
+      + ' `application/kernel-properties.ts` 的注解属性描述符；'
+      + ' **(ii) 读面命名空间**：需要在 `runtime/annotationRead#geometryFieldsOf` 里逐项转发'
+      + ' 上面那批尚未列入的几何字段（读面是**封闭 15 字段**表，加字段是"决定"而不是自动跟随'
+      + ' —— 见 `geometryFieldsOf` 的注释）。'
+      + '两件都是**承载面/写面新增**，超出 D3「终删 `getDoc()`」的范围（Lead comment 5960 的红线）。',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
       '`src/runtime/annotationRead.ts` 的 `ANNOTATION_FIELD_PAIRS` 覆盖'
