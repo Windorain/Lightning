@@ -328,6 +328,7 @@ test.describe('P5 · A30 graphics-recovery（真实 WEBGL_lose_context）', () =
     expect(m.sessionGpuRebuiltAfterRestore, 'A30：恢复后呈现器实际世代必须非空').toBe(true)
     expect(m.sessionMountedBatchesAfterRestore, 'A30：重建后必须有挂载的批次（画面非空白的结构代理）').toBeGreaterThan(0)
     expect(m.sessionGenerationConsistent, 'A30：会话返回结果的世代必须与实际世代同源（不得静默不一致）').toBe(true)
+    expect(m.sessionPendingRebuildAfterRestore, 'A30：一次成功重建后"待重建"标志必须复位（否则每帧重编）').toBe(false)
     expect(m.sessionGpuRebuiltAfterContentChange, '对照：内容变一次之后也重建，且**换世代**').toBe(true)
   })
 
