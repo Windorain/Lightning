@@ -24,6 +24,8 @@ function makeSource() {
     documentId: 'doc:1',
     grid: [0, 1, 0, 1] as readonly number[],
     palette: ['minecraft:stone@0'] as readonly string[],
+    // #334：内容级调色板身份（名称级看不见"同 name:meta、异条目内容"）
+    paletteContent: [['#1', { registryId: 'minecraft:stone', meta: 0 }]] as readonly unknown[],
     annotations: [{ id: 'a1', text: '文字 A' }] as readonly unknown[],
     blobs: { stone: 'AAAA' } as unknown,
   }
@@ -33,6 +35,7 @@ function makeSource() {
       structureDigest: structureDigestOf({
         frames: [state.grid],
         palette: state.palette,
+        paletteContent: state.paletteContent,
         frameDecls: [{ index: 0 }],
         multiblock: null,
         layerFilter: 'all',
