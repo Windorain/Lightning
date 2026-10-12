@@ -371,18 +371,33 @@ adoptLoadedDocument  → 可能失败（内核不支持该形态，如实降级�
 
 **必须成立**
 
-1. **`markLoaded` **不得**顺带置 GF-16**：`markLoaded` 只表达存在性。让它兼任会让
-   D8 原样复发（守卫重新变成恒真）。
-2. **`markUnloaded` 必须一并清 GF-16**：卸载后"内核里的就是那份文档"不再成立。
+1. **`markLoaded` 必须一并**清** GF-16**（C′1 实测更正；我第一版写反了）：
+   `markLoaded` 表达"有了一份文档"，而"有"**不蕴含**"内核里的就是它"。
+   `setDocument` 会调 `markLoaded` 而**不** adopt（`NewScene`、注解编辑等 13 条路径）
+   ⇒ 若不清，所有"读内核"的面都返回**上一份**文档的注解/材质/帧轴。
+   实测：装载 A → `setDocument(空文档)` ⇒ 读面仍给 A 的内容。
+   顺序是语义的一部分：`adoptDocument` **先** `markLoaded`、**再** `markContentAdopted`。
+2. **`markUnloaded` 同样清 GF-16**：卸载后"内核里的就是那份文档"不再成立。
 3. **D8 的回落必须可被注入判据证明**：判据走**生产** `adoptLoadedDocument` 喂
    内核真的不支持的形态（`frames` 缺失且非多方块 ⇒ `UnsupportedOperation`），
    断言此时帧数**回落 legacy**（不是 0）。只断言"装配成功时读到 N"是**假绿** ——
    它无法区分"修好了"与"缺陷仍在"。
-4. **帧声明的判定是纯函数**（`runtime/frameDeclarations#resolveFrameDeclarations`）：
-   `Context` 只取事实。理由 —— 判据必须能注入装配失败，而 `Context` 需六件外壳
-   才构造得起来；在测试里复刻判定就是"两份实现"。
+4. **判定提成纯函数**（`runtime/frameDeclarations#resolveFrameDeclarations`、
+   `runtime/sideTableResolution#resolveSideTable`）：`Context` 只取事实。
+   理由 —— 判据必须能注入装配失败，而 `Context` 需六件外壳才构造得起来。
 5. **帧数的两个消费者必须读同一个函数**（`frameDeclarations()`）：D8 的原形态
    正是"帧循环问文档存在、状态栏直读 legacy"⇒ 两读数不一致（#249 §19.9）。
+6. **侧表分流是**对称**的**（`kernelAnnotations()` / `kernelMaterials()`）：
+   装配成功 ⇒ 内核为权威，否则 ⇒ **legacy 为权威**。
+   ⚠️ "未装配 ⇒ 返回空表"是**缺陷**，不是诚实：注解编辑路径会清 GF-16，
+   返回空表会让 `scenePick` 拿不到**原有**注解（用户新建一条后原有注解全部失去拾取），
+   材质面板整片变空。实测：legacy 2 条 / 内核读面 0 条。
+7. **`null` 与 `[]` 在分流输入上不可互换**：`null` = "没有可用来源"（⇒ 回落），
+   `[]` = "这一侧确实空了"（⇒ 内核权威，空是真实答案）。把前者写成后者**就是** D8。
+8. **测试宿主不得复刻被测算法**（C′1 两轮空转的教训）：判据必须执行**生产实现本体**。
+   本批宿主用 `Object.create(Context.prototype)` 造真 `Context`（只注入 `main`/`kernel`）。
+   仅"调用了同名纯函数"不够 —— 宿主自己调它时，`Context` 的调用点仍未被覆盖
+   （实测：注入缺陷仍全绿）。
 
 **三种通知信号不可互换（C′1 实测分派）**
 
@@ -796,6 +811,7 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
 | v1.1 | 2026-10-12 | 新增 §2.3 文档装载状态读面（GF-15）：`KernelSession.hasLoadedDocument()` + `Context.setDocument` 唯一写入口 + 状态迁移表 + 与 `closeDocument` 的关系 | #250 comment 5731（R-WK-08 重切）；#301（P10f A′） |
 | v1.2 | 2026-10-12 | §2.3 补 `Context.hasLoadedDocument()` 消费入口（唯一写者不变量的机械证据）；登记 N1 29 处已替换、N3/N6 未做的机械理由 | #250 comment 5775（B′ 四项裁决）；#301（P10f B′） |
 | v1.3 | 2026-10-12 | 新增 §2.4 装配成功读面（GF-16）：`hasAdoptedContent()` + `frameDeclarations()` 唯一读取面 + 三种通知信号的不可互换表 + D8 修复的注入判据要求 | #250 comment 5861（R-WK-09 四项裁决）；#301（P10f C′1） |
+| v1.4 | 2026-10-12 | §2.4 补侧表读面（`kernelAnnotations`/`kernelMaterials`）的对称分流与 8 条"必须成立"；**更正 v1.3 的第 1 条**（`markLoaded` 必须清 GF-16，第一版写反了） | #250 comment 5880（N4 采 (a)）；#301（P10f C′1 尾段） |
 
 ---
 
