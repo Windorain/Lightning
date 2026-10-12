@@ -29,6 +29,10 @@
  * 本模块**不冒充支持**（#249 §10 末段）。
  */
 
+// 贡献声明的 RNA 半边（`ObjectTypeContribution.rna`）：**只 import 类型** ——
+// 本模块仍是一个纯契约模块（无运行期依赖），与"组件不得询问宿主名"同一条纪律。
+import type { ObjectTypeDecl } from '@/application/properties'
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 标识
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,6 +101,38 @@ export interface ObjectTypeContribution {
   readonly dataKind: string
   readonly editable: boolean
   readonly animatableProperties: readonly string[]
+  /**
+   * 该类型的 **RNA 声明**（`#262` P11-F 段①：A21 的属性写半边）。
+   *
+   * ## 为什么贡献必须自带它（而不是核心按 `type` 现造一个）
+   *
+   * 「这个类型有哪些属性、各是什么值类型/值域/单位」是**贡献方**的知识。
+   * 核心按 `type` 现造声明 = 核心里出现了逐类型的属性词汇表 ——
+   * 那正是 #249 §13「扩展新类型不得改核心 switch」要禁止的形态
+   * （`animatableProperties` 是旧的**字符串清单**，没有值类型，无法充当声明：
+   * 按它猜值类型会得到一个"核心侧的隐式映射表"，同罪）。
+   *
+   * ## 它是可选的，且**只有内核不认识的新类型才需要**（不是遗漏）
+   *
+   * 内核自己的文档模型类型（`block`/`annotation`/`camera`/`mesh`）由
+   * `application/kernel-properties` 的 `KERNEL_OBJECT_TYPES` 声明（那是它们**唯一**的
+   * 权威）。若 profile 的贡献再声明一遍，就会出现**两份**描述 ⇒ 注册时显式报
+   * `duplicate-object-type`（装配缺陷，不静默覆盖）。故：
+   *
+   * | 贡献形态 | 例 | 是否带 `rna` |
+   * |---|---|---|
+   * | 内核文档模型已有的类型 | `block`/`annotation`/`camera` | **不带**（声明归内核） |
+   * | 经贡献接口**新增**的类型 | `text`（A21 的扩展证明） | **带**（声明归贡献方） |
+   *
+   * ## 它怎么到达属性写（唯一写入口不变）
+   *
+   * `composition/contributedObjectTypes#objectTypeDeclarationsOf(assembly)` 把它抽成
+   * 内核声明清单，经 `ExecutionInputs.contributedObjectTypes` 进入
+   * `reduceCommand` 使用的注册表与写端口 —— **不新增写通路**（GF-5 裁决：
+   * 唯一更新入口仍是 `reduceCommand`），也不把注册表变成可变全局
+   * （见 `kernel-properties` 的 `kernelPropertyRegistry(contributed)`）。
+   */
+  readonly rna?: ObjectTypeDecl
 }
 
 /** 2. 求值节点贡献（依赖图节点；不进文档）。 */

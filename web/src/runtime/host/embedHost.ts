@@ -19,6 +19,7 @@ import { createToolSettings } from '@/runtime/toolSettings'
 import { HostBase } from '@/runtime/host'
 import { logCenter } from '@/logging/LogCenter'
 import { capabilitiesOf } from '@/composition/resolver'
+import { objectTypeDeclarationsOf } from '@/composition/contributedObjectTypes'
 import type { ShellRuntime } from '@/composition/shell'
 import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
 
@@ -80,10 +81,15 @@ export function createEmbedHost(
   const runtime = shell ?? { ...EMPTY_SHELL, profileId: 'embed' as const }
   // 内核会话（#261 / R-WK-03）：嵌入外壳同样由宿主创建 Editor，
   // 能力来自**嵌入 profile** 的装配结果（无内容编辑能力 ⇒ 运行时拒绝，A15）。
+  //
+  // P11-F 段①（#262 A21）：贡献类型声明同样来自本外壳的装配结果 —— 查看器也要**认识**
+  // 文档里已有的贡献类型（"知道有哪些对象类型"与"能不能编辑"是两件事，见 profiles.ts 的
+  // `M_TEXT_OBJECT_TYPE` 说明）；能不能**写**仍由能力集合决定（A15 不受影响）。
   const kernel = createKernelSession({
     documentId: KERNEL_DOCUMENT_ID,
     contextId: KERNEL_CONTEXT_ID,
     capabilities: capabilitiesOf(runtime.assembly),
+    contributedObjectTypes: objectTypeDeclarationsOf(runtime.assembly),
   })
   const ctx = new Context(
     main,

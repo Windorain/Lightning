@@ -17,6 +17,7 @@ import { REGION } from '@/runtime/regionIds'
 import { autoConnectSde } from '@/runtime/host/workbenchBoot'
 import { bootWikiWorkbench } from '@/runtime/host/wikiWorkbenchBoot'
 import { CAPABILITY } from '@/composition/modules'
+import { objectTypeDeclarationsOf } from '@/composition/contributedObjectTypes'
 import type { ShellRuntime } from '@/composition/shell'
 import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
 import { useAreaHost } from '@/editors/useAreaHost'
@@ -124,10 +125,16 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
 
   // 能力与宿主端口**显式**从装配结果传入 Context（旧实现经模块级全局反查）
   // 内核会话（#261 / R-WK-03）：宿主创建 Editor，能力来自同一装配结果。
+  //
+  // P11-F 段①（#262 A21 属性写半边）：装配贡献的对象类型（`contributes.objectTypes`
+  // 里带 `rna` 的那些，例：`objects.text` 的 `text`）经**同一条装配结果**派生后交给会话
+  // —— 于是"贡献类型能不能写属性"不再是"够不够得着某个模块级单例"的函数，
+  // 而是装配结果的一部分（派生函数是纯函数，见 `composition/contributedObjectTypes`）。
   const kernel = createKernelSession({
     documentId: KERNEL_DOCUMENT_ID,
     contextId: KERNEL_CONTEXT_ID,
     capabilities: shell.assembly.capabilities,
+    contributedObjectTypes: objectTypeDeclarationsOf(shell.assembly),
   })
   const ctx = new Context(
     main,

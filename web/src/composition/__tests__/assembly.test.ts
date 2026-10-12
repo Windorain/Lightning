@@ -49,6 +49,8 @@ import { ALL_CAPABILITIES } from '@/application/commands'
 // A21（P11-E #262）：贡献方工厂的夹具（与既有 A21 端到端用例同源，只是提到 describe 作用域）
 import { DEFAULT_OBJECT_FACTORIES, objectData, sceneObject } from '@/domain/scene'
 import { ok } from '@/domain/errors'
+// A21（P11-F #262 段①）：贡献声明的 RNA 半边（`ObjectTypeContribution.rna`）
+import type { ObjectTypeDecl } from '@/application/properties'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 夹具
@@ -722,15 +724,43 @@ describe('A21 · 贡献新类型的公共链路（P11-E #262 补；含实测更�
   const TIMER_TYPE = 'timer'
 
   /** 扩展类型的 RNA 声明（与内置类型**同一条** `registerObjectType` 路径）。 */
-  function timerDecl() {
+  function timerDecl(): ObjectTypeDecl {
     return {
       id: TIMER_TYPE,
       ownerKind: 'object' as const,
       display: { labelKey: 'ext.timer', fallback: 'Timer' },
       properties: [
         { id: 'name', valueType: 'string', animatable: false, display: { labelKey: 'ext.timer.name', fallback: '名称' } },
+        // 一个**可动画**的贡献属性：用于动画面（`insertKeyframe`）的残余缺口登记（见 ⑩）
+        { id: 'elapsed', valueType: 'number', animatable: true, display: { labelKey: 'ext.timer.elapsed', fallback: '已过时长' } },
       ],
     }
+  }
+
+  /**
+   * 贡献 `timer` 类型的**模块**（P11-F 段①：带 `rna` 声明 ⇒ 可经装配缝进内核注册表）。
+   *
+   * 与 `timerFactories()` 分开是刻意的：**类型归属**（模块的 `contributes.objectTypes`）
+   * 与**构造能力**（`ExecutionInputs.objectFactories`）是两件事 ——
+   * 前者决定"这个类型有哪些属性、怎么写"，后者决定"谁来造它的对象"。
+   */
+  function timerModule(withRna = true) {
+    return moduleDecl({
+      id: 'objects.timer',
+      provides: ['objectType.timer'],
+      contributes: {
+        objectTypes: [
+          {
+            type: TIMER_TYPE,
+            dataKind: 'annotation',
+            editable: true,
+            animatableProperties: ['name'],
+            ...(withRna ? { rna: timerDecl() } : {}),
+          },
+        ],
+      },
+      note: 'A21 的扩展类型夹具：经贡献接口新增（不改核心任何分支）。',
+    })
   }
 
   /** 贡献方给出的**工厂**（`ExecutionInputs.objectFactories`；核心不认识这个类型名）。 */
@@ -839,7 +869,7 @@ describe('A21 · 贡献新类型的公共链路（P11-E #262 补；含实测更�
     expect(doc.scene.objects[objectId]?.name).toBe('T')
   })
 
-  it('⑤ **正向判据（P11-F 升级）**：贡献类型的属性写经 `reduceCommand` 可用，且历史可撤销', async () => {
+  it('⑤ **正向判据（P11-F 升级）**：贡献声明的类型经**装配缝**进入内核注册表 ⇒ `reduceCommand` 属性写 + undo/redo 全链', async () => {
     // ## 本条的来历（P11-E 登记 ⇒ P11-F 升级，同一机制）
     //
     // P11-E 实测的事实是：`reduceSetProperty` 用模块级单例 `kernelPropertyRegistry()`
@@ -847,15 +877,36 @@ describe('A21 · 贡献新类型的公共链路（P11-E #262 补；含实测更�
     // `composition` 的 `contributes.objectTypes` 没有任何缝到达它们，
     // ⇒ 贡献类型在**命令层**的属性写被结构化拒绝（`MissingTarget: property-not-registered`）。
     //
-    // 当时那条断言守的是"已知缺口"（判红 = 缺口被接通，要求同批升级为正向判据）。
-    // **本提交把登记升级为正向判据**（Lead 裁决 #262 comment 6553 ①）：
-    // 贡献类型必须能经**唯一写入口** `reduceCommand` 写属性并进历史栈。
+    // **本提交把登记升级为正向判据并接通承载面**（Lead 裁决 #262 comment 6553 ①）：
+    // 贡献类型的属性写必须经**唯一写入口** `reduceCommand` 生效并进历史栈。
     //
-    // 此刻判红（读数仍是 `MissingTarget: property-not-registered`）= 缺口仍在；
-    // 承载面（`contributes.objectTypes[].rna` → 装配缝 → `ExecutionInputs`）在下一提交落地。
+    // 承载面（三段，缺一不可）：
+    //  ① 贡献声明带 `rna`（`ObjectTypeContribution.rna`）；
+    //  ② 装配缝 `objectTypeDeclarationsOf(assembly)` 把它抽成内核声明清单；
+    //  ③ 清单经 `ExecutionInputs.contributedObjectTypes` 进注册表/写端口。
     const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
     const { propertyRef, objectRef } = await import('@/domain/identity')
-    const env = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never }
+    const { objectTypeDeclarationsOf, inconsistentObjectTypeDeclarations } = await import('../contributedObjectTypes')
+
+    // ① 装配：贡献模块经**生产解析器**（`resolveComposition`）解析
+    const asm = resolveComposition({ profileId: 'probe-a21', modules: [timerModule()] })
+    expect(asm.ok, '装配必须成功').toBe(true)
+    if (!asm.ok) return
+    // ② 装配缝：贡献的 RNA 声明 → 内核声明清单
+    expect(inconsistentObjectTypeDeclarations(asm.value), '`rna.id` 必须与 `contributes.type` 自洽').toEqual([])
+    const decls = objectTypeDeclarationsOf(asm.value)
+    expect(decls.map((d) => d.id), '装配缝必须抽到贡献的声明').toEqual([TIMER_TYPE])
+    // 反空洞真：**不带** `rna` 的同名贡献 ⇒ 抽不到（缝不是"恒返回一个声明"）
+    const noRna = resolveComposition({ profileId: 'probe-a21-bare', modules: [timerModule(false)] })
+    if (!noRna.ok) throw new Error('bare 装配失败')
+    expect(objectTypeDeclarationsOf(noRna.value), '缺 `rna` 的贡献不得被凭空补出声明').toEqual([])
+
+    // ③ 命令链：声明经执行输入进注册表/写端口
+    const env = {
+      capabilities: ALL_CAPABILITIES,
+      objectFactories: timerFactories() as never,
+      contributedObjectTypes: decls,
+    }
     const added = reduceCommand(openDocumentState('doc1', 'ctx1'), { kind: 'addObject', contextId: 'ctx1', objectType: TIMER_TYPE, name: 'T' }, env)
     expect(added.status).toBe('applied')
     if (added.status !== 'applied') return
@@ -880,6 +931,233 @@ describe('A21 · 贡献新类型的公共链路（P11-E #262 补；含实测更�
     const redone = reduceCommand(undone.state, { kind: 'redo', contextId: 'ctx1' }, env)
     expect(redone.status).toBe('applied')
     expect(redone.state.docs['doc1']!.scene.objects[objectId]?.name, '重做回到写后的值').toBe('Z')
+  })
+
+  it('⑥ **生产装配**判据：`WORKBENCH_PROFILE` 的 `objects.text` 贡献经装配缝可写属性（新承载字段走生产解析+装配）', async () => {
+    // ## 为什么必须有一条走生产装配（AGENTS.md 判据纪律）
+    //
+    // 纯函数判据喂"手工造的贡献"会恒绿，而生产装配可能从不填该字段
+    // （2026-10-13 #301 D3 打回修复的实测教训）。故本条的输入**逐段来自生产**：
+    //  `resolveProfile(WORKBENCH_PROFILE)`（生产 profile + 生产解析器）
+    //  → `objectTypeDeclarationsOf`（装配缝）
+    //  → `createKernelSession({ contributedObjectTypes })`（生产会话入口）
+    //  → `submit(setProperty)` → `drain()` → 读**内核文档**（生产读面）。
+    const { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } = await import('@/runtime/kernelSession')
+    const { createDocument, withScene } = await import('@/domain/document')
+    const { objectData, sceneObject, withObject } = await import('@/domain/scene')
+    const { propertyRef, objectRef } = await import('@/domain/identity')
+    const { objectTypeDeclarationsOf } = await import('../contributedObjectTypes')
+
+    const asm = resolveProfile(WORKBENCH_PROFILE)
+    const decls = objectTypeDeclarationsOf(asm)
+    expect(decls.map((d) => d.id), '生产 profile 的 `objects.text` 必须带上 RNA 声明').toContain('text')
+
+    // 文档：一份含 `text` 类型对象的**内核文档**（`domain/scene`/`domain/document` 的生产构造器）。
+    // 注意：`text` 的**工厂**贡献槽不在本批范围（见完工报的边界登记），
+    // 故这里按装配产物同形的路子直接构造 —— 判据要的是"注册缝的输入来自生产装配"。
+    const base = createDocument(KERNEL_DOCUMENT_ID)
+    const scene = withObject(
+      base.scene,
+      sceneObject({ id: 'o-text', type: 'text', dataId: 'd-text', name: 'T' }),
+      objectData('d-text', { kind: 'annotation', shape: 'text', text: 'hello' }, 'document'),
+    )
+    expect(scene, '夹具场景必须能装 text 对象').not.toBeNull()
+    if (scene === null) return
+
+    const session = createKernelSession({
+      documentId: KERNEL_DOCUMENT_ID,
+      contextId: KERNEL_CONTEXT_ID,
+      capabilities: ALL_CAPABILITIES,
+      contributedObjectTypes: decls,
+    })
+    try {
+      session.adoptDocument(withScene(base, scene).doc)
+      expect(session.document()?.scene.objects['o-text']?.type, '前置：text 对象在内核文档里').toBe('text')
+      const payloadTextOf = (): string | null => {
+        const p = session.document()?.scene.data['d-text']?.payload
+        return p !== undefined && p.kind === 'annotation' ? (p.text ?? null) : null
+      }
+      expect(payloadTextOf(), '反空洞真：写前的载荷文本确实是 hello').toBe('hello')
+
+      session.submit({ kind: 'setProperty', refs: [propertyRef(objectRef('o-text'), 'text.text')], value: 'world' })
+      session.drain()
+      expect(
+        payloadTextOf(),
+        'A21：生产装配下贡献类型（`text`）的属性写必须生效（不再 `property-not-registered`）',
+      ).toBe('world')
+
+      // 负对照（同一装配）：**未注册**的局部属性仍被拒 ⇒ 写面没有被"贡献类型"放宽
+      const versionBefore = session.document()!.version.contentVersion
+      session.submit({ kind: 'setProperty', refs: [propertyRef(objectRef('o-text'), 'text.nope')], value: 'x' })
+      session.drain()
+      expect(payloadTextOf(), '被拒的写不得改动内容').toBe('world')
+      expect(session.document()!.version.contentVersion, '被拒的写不得推进版本').toBe(versionBefore)
+    } finally {
+      session.dispose()
+    }
+  })
+
+  it('⑦ **负对照**：未注册的类型/属性仍被判 `property-not-registered`（缝没有把写面放宽）', async () => {
+    const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
+    const { propertyRef, objectRef } = await import('@/domain/identity')
+    const { objectTypeDeclarationsOf } = await import('../contributedObjectTypes')
+    const asm = resolveComposition({ profileId: 'probe-a21-neg', modules: [timerModule()] })
+    if (!asm.ok) throw new Error('装配失败')
+    const decls = objectTypeDeclarationsOf(asm.value)
+    const env = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never, contributedObjectTypes: decls }
+
+    const added = reduceCommand(openDocumentState('doc1', 'ctx1'), { kind: 'addObject', contextId: 'ctx1', objectType: TIMER_TYPE, name: 'T' }, env)
+    if (added.status !== 'applied') throw new Error('夹具建对象失败')
+    const objectId = Object.keys(added.state.docs['doc1']!.scene.objects)[0]!
+
+    // (a) 已注册**类型**的未注册**属性** ⇒ 仍拒（描述符不存在）
+    const badProp = reduceCommand(
+      added.state,
+      { kind: 'setProperty', refs: [propertyRef(objectRef(objectId), `${TIMER_TYPE}.nope`)], value: 'x' },
+      env,
+    )
+    expect(badProp.status, '未注册属性必须被拒').toBe('rejected')
+    if (badProp.status === 'rejected') {
+      expect(badProp.error.code).toBe('MissingTarget')
+      expect(badProp.error.params.reason).toBe('property-not-registered')
+    }
+
+    // (b) **未注册类型**（同一装配里没有它的声明）⇒ 同一语义、零残留
+    const otherEnv = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never, contributedObjectTypes: [] as never }
+    const badType = reduceCommand(
+      added.state,
+      { kind: 'setProperty', refs: [propertyRef(objectRef(objectId), `${TIMER_TYPE}.name`)], value: 'Z' },
+      otherEnv,
+    )
+    expect(badType.status, '未注册类型的属性写必须被拒（= P11-E 登记的缺口读数，语义保留）').toBe('rejected')
+    if (badType.status === 'rejected') {
+      expect(badType.error.code).toBe('MissingTarget')
+      expect(badType.error.params.reason).toBe('property-not-registered')
+    }
+    // 拒绝**零残留**：对象名与文档版本都没被写（不是"半途写了一半"）
+    expect(badType.state.docs['doc1']!.scene.objects[objectId]?.name).toBe('T')
+    expect(badType.state.docs['doc1']!.version.contentVersion).toBe(added.state.docs['doc1']!.version.contentVersion)
+  })
+
+  it('⑧ **生产接线判据**：两个生产宿主的会话构造点都从**各自装配结果**填上该字段（缝不许悬空）', () => {
+    // 为什么需要这条（AGENTS.md 判据纪律 ⑦ 的同族）：缝存在但生产从不填它，
+    // 判据会恒绿而产品行为零变化（#301 D3 两连实测）。故把"生产宿主填了它"
+    // 也做成判据 —— 且判据本尊可被注入负对照。
+    const srcRoot = path.join(import.meta.dirname, '..', '..')
+    /** 判据本尊：返回"没有把贡献声明从装配结果填进会话"的宿主文件。 */
+    const hostsMissingSeam = (read: (rel: string) => string): string[] => {
+      const hosts = ['runtime/host/workbenchHost.ts', 'runtime/host/embedHost.ts']
+      return hosts.filter((rel) => !/contributedObjectTypes:\s*objectTypeDeclarationsOf\(/.test(read(rel)))
+    }
+    const readReal = (rel: string): string => fs.readFileSync(path.join(srcRoot, rel), 'utf8')
+    expect(hostsMissingSeam(readReal), '两个生产宿主都必须把装配贡献的类型声明交给内核会话').toEqual([])
+
+    // 负对照（注入）：把其中一个宿主的接线摘掉 ⇒ 同一判据必须点名它
+    const mutated = (rel: string): string => (rel.endsWith('embedHost.ts') ? '' : readReal(rel))
+    expect(hostsMissingSeam(mutated), '摘掉接线必须判红（否则本条是空洞真）').toEqual(['runtime/host/embedHost.ts'])
+  })
+
+  it('⑨ **装配缺陷不静默**：贡献声明了内核已有类型 id ⇒ 属性写整批拒绝 `kernel-registry-invalid`', async () => {
+    const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
+    const { propertyRef, objectRef } = await import('@/domain/identity')
+    const { objectTypeDeclarationsOf: declsOf } = await import('../contributedObjectTypes')
+    // 贡献一个**与内核内置类型同名**的声明（`block`）：注册时 `duplicate-object-type`。
+    // 这不该被静默忽略（"我的声明被悄悄丢了"）——按既有口径（注册表构造失败 ⇒
+    // 命令显式拒绝），写成整批拒绝并给出原因。
+    const clash = moduleDecl({
+      id: 'objects.clash',
+      provides: ['objectType.clash'],
+      contributes: {
+        objectTypes: [
+          { type: 'block', dataKind: 'blockGrid', editable: true, animatableProperties: [], rna: { ...timerDecl(), id: 'block' } },
+        ],
+      },
+    })
+    const asm = resolveComposition({ profileId: 'probe-a21-clash', modules: [clash] })
+    if (!asm.ok) throw new Error('装配失败')
+    const clashDecls = declsOf(asm.value)
+    expect(clashDecls.map((d) => d.id), '冲突声明确实进了装配缝').toEqual(['block'])
+
+    // 先在一个**健康**装配下建出对象（否则目标不存在会先被 `resolvePropertyDocument` 拦下，
+    // 测不到注册表构造失败那条路径）。
+    const healthy = { capabilities: ALL_CAPABILITIES }
+    const opened = reduceCommand(
+      openDocumentState('doc1', 'ctx1'),
+      { kind: 'addObject', contextId: 'ctx1', objectType: 'block', name: 'B' },
+      healthy,
+    )
+    if (opened.status !== 'applied') throw new Error('夹具建对象失败')
+    const objectId = Object.keys(opened.state.docs['doc1']!.scene.objects)[0]!
+
+    const env = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never, contributedObjectTypes: clashDecls }
+    const w = reduceCommand(
+      opened.state,
+      { kind: 'setProperty', refs: [propertyRef(objectRef(objectId), 'block.name')], value: 'x' },
+      env,
+    )
+    expect(w.status, '装配缺陷必须显式拒绝（不得静默降级为"属性不存在"）').toBe('rejected')
+    if (w.status === 'rejected') {
+      expect(w.error.code).toBe('UnsupportedOperation')
+      expect(w.error.params.reason).toBe('kernel-registry-invalid')
+    }
+    // 拒绝**零残留**
+    expect(w.state.docs['doc1']!.scene.objects[objectId]?.name).toBe('B')
+  })
+
+  it('⑩ **已知残余登记**：动画面（`insertKeyframe` 的目标校验）仍读内置单例注册表 ⇒ 贡献类型的可动画属性当前插不了关键帧', async () => {
+    // ## 这条守的是"已知的半接状态"，不是"期望行为"（它判红 = 缺口已接通）
+    //
+    // P11-F 段① 把**属性写**（`setProperty`）接上了贡献清单；命令层还有**另一处**
+    // 读注册表的地方：`validateAnimationTarget`（`commands.ts`，`insertKeyframe`/
+    // `removeKeyframe`/`publishDefault` 的公共校验）—— 它调 `kernelPropertyRegistry()`
+    // （无贡献清单）。本批**有意不扩**到动画面（单交付轴：Lead 裁决只要求
+    // "贡献类型 ⇒ `setProperty` 可达"），但把它登记成**可核对的断言**，
+    // 使"半接"这件事不会被静默忘掉。
+    //
+    // ⚠️ 若本断言**判红**（= 贡献类型的可动画属性插关键帧成功了），说明有人把贡献清单
+    // 也接进了动画面 —— 那是能力升级：请把本条升级为正向判据并核销本登记
+    // （与 ⑤ 由 P11-E 登记升级为正向判据同一手法）。
+    const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
+    const { propertyRef, objectRef } = await import('@/domain/identity')
+    const { timeValue } = await import('@/domain/animation')
+    const { objectTypeDeclarationsOf } = await import('../contributedObjectTypes')
+    const asm = resolveComposition({ profileId: 'probe-a21-anim', modules: [timerModule()] })
+    if (!asm.ok) throw new Error('装配失败')
+    const env = {
+      capabilities: ALL_CAPABILITIES,
+      objectFactories: timerFactories() as never,
+      contributedObjectTypes: objectTypeDeclarationsOf(asm.value),
+    }
+
+    // 正对照（区分力）：**内置**类型的可动画属性在同一 env 下能插关键帧
+    // ⇒ 下面的拒绝来自"注册表够不着贡献类型"，不是 `insertKeyframe` 坏了。
+    const cam = reduceCommand(openDocumentState('doc1', 'ctx1'), { kind: 'addObject', contextId: 'ctx1', objectType: 'camera', name: 'C' }, env)
+    if (cam.status !== 'applied') throw new Error('夹具建相机失败')
+    const camId = Object.keys(cam.state.docs['doc1']!.scene.objects)[0]!
+    const camKey = reduceCommand(
+      cam.state,
+      { kind: 'insertKeyframe', contextId: 'ctx1', target: propertyRef(objectRef(camId), 'camera.projection.fov'), time: timeValue(0, 20), value: 50 },
+      env,
+    )
+    expect(camKey.status, '正对照：内置类型的可动画属性必须能插关键帧').toBe('applied')
+
+    // 登记读数：同一 env、贡献类型（`timer`）的可动画属性 ⇒ 被拒
+    const added = reduceCommand(cam.state, { kind: 'addObject', contextId: 'ctx1', objectType: TIMER_TYPE, name: 'T' }, env)
+    if (added.status !== 'applied') throw new Error('夹具建 timer 失败')
+    const timerId = Object.keys(added.state.docs['doc1']!.scene.objects).find((id) => id !== camId)!
+    const timerKey = reduceCommand(
+      added.state,
+      { kind: 'insertKeyframe', contextId: 'ctx1', target: propertyRef(objectRef(timerId), `${TIMER_TYPE}.elapsed`), time: timeValue(0, 20), value: 1 },
+      env,
+    )
+    expect(
+      timerKey.status,
+      '⚠️ 残余登记：动画面未接贡献清单 ⇒ 贡献类型的可动画属性插关键帧被拒（接通后本断言应判红并升级）',
+    ).toBe('rejected')
+    if (timerKey.status === 'rejected') {
+      expect(timerKey.error.code).toBe('MissingTarget')
+      expect(timerKey.error.params.reason).toBe('property-not-registered')
+    }
   })
 })
 

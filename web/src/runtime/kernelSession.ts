@@ -58,6 +58,7 @@ import { defaultExecutionInputs } from '@/application/commands'
 import type { ApplicationState } from '@/application/state'
 import type { Document } from '@/domain/document'
 import type { ExecutionInputs } from '@/application/commands'
+import type { ObjectTypeDecl } from '@/application/properties'
 import type { ObjectFactoryTable } from '@/domain/scene'
 import { sampleStripFrameAt, stripTimeline, type StripTimeline } from '@/domain/materials'
 import { frameDurationsMs, frameCount as axisFrameCount, type DocumentContent } from '@/domain/content'
@@ -175,6 +176,15 @@ export interface KernelSessionOptions {
   readonly prefix?: string
   /** 对象类型构造工厂（装配层可覆盖以加载贡献类型）。 */
   readonly objectFactories?: ObjectFactoryTable
+  /**
+   * **装配贡献的对象类型 RNA 声明**（`#262` P11-F 段①：A21 的属性写半边）。
+   *
+   * 由装配层从 `Assembly.contributions.objectTypes[].rna` 派生
+   * （`composition/contributedObjectTypes#objectTypeDeclarationsOf`），
+   * 经 `ExecutionInputs` 交给 `reduceCommand` —— 缺省 = 只有内核内置类型，
+   * 与会话在 P11-F 之前的行为逐字相同。
+   */
+  readonly contributedObjectTypes?: readonly ObjectTypeDecl[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,6 +252,14 @@ export class KernelSession {
       opts.objectFactories === undefined
         ? defaultExecutionInputs(opts.capabilities)
         : { capabilities: opts.capabilities, objectFactories: opts.objectFactories }
+    // 贡献类型声明**按需附加**（不是无条件加一个空字段）：缺省时执行输入与
+    // P11-F 之前逐字相同 —— `reduceCommand` 走那两个构造期固定的单例。
+    if (opts.contributedObjectTypes !== undefined && opts.contributedObjectTypes.length > 0) {
+      this.executionInputs = Object.freeze({
+        ...this.executionInputs,
+        contributedObjectTypes: opts.contributedObjectTypes,
+      })
+    }
     this.editor.setExecutionInputs(this.executionInputs)
     // 打开文档 + 上下文（一条命令，与 `openDocumentState` 同一入口）。
     this.editor.submit({ kind: 'openDocument', documentId: opts.documentId, contextId: opts.contextId })
