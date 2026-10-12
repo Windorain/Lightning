@@ -215,6 +215,134 @@ describe('A05 multi-area-interaction：拖动期两视口一致、提交一条�
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// A05 负对照（**注入式变异体**）—— #262 P11-E 补
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这一组补的是 A05 的**负对照形态**缺口（#262 comment 6421 A05 行）
+ *
+ * B1 的定性逐字：「三条"负对照"实测均为**接口不可表达**形态
+ * （`read.length===0` / 键集 / 类型里没有该字段），**没有**注入 area 维度并使断言
+ * 判红的变异体 ⇒ 该列要求的"负对照必须判红"**未被证明**」。
+ *
+ * 「接口不可表达」证明的是**结构**（想违约得先改类型，评审可见）；它**不**证明
+ * "断言器本身能抓到那种违约"。本组补上后者：把判据抽成**断言器**，
+ * 然后注入一个**带 area 维度**的读面替身（即"只让发起视口读暂存结果"若被实现
+ * 会是什么形状），断言**同一个断言器在它身上判红**、在合规样本上判绿。
+ *
+ * ## 为什么注入点是"读面替身"而不是改生产代码
+ *
+ * 生产侧的 `ReadScope` 之后没有 area 维度（上一条用例钉住这一点）。
+ * 要制造"area 维度差异"，唯一办法是**注入一个按 area 分片的读面** ——
+ * 那正是变异体该有的形状：它模拟"某天有人给暂存加了 area 维度"之后读面会返回什么。
+ * 断言器若抓不到它，A05 的正面判据就只是"在今天的实现上恰好相等"。
+ */
+describe('A05 负对照（注入式）：area 维度差异必须被**同一个**断言器判红', () => {
+  /** 判据的**机械形式**：两个视口的有效变换必须逐位相同（正/负对照共用）。 */
+  function judgeEffectiveTransformEqual(a: { ok: boolean; value?: unknown }, b: { ok: boolean; value?: unknown }): void {
+    expect(a.ok, '两视口必须都能读到有效变换').toBe(true)
+    expect(b.ok, '两视口必须都能读到有效变换').toBe(true)
+    if (a.ok && b.ok) {
+      expect(a.value, 'A05 判据原文：松手前两视口有效坐标必须相同').toEqual(b.value)
+    }
+  }
+
+  /** 判据的机械形式：两处的选择/上下文摘要必须一致（面板相同）。 */
+  function judgePanelEqual(p: unknown, q: unknown, c: unknown, d: unknown): void {
+    expect(p, '两处选择必须相同').toEqual(q)
+    expect(c, '两处上下文摘要必须相同').toEqual(d)
+  }
+
+  /** 判据的机械形式：暂存期**不得**推进文档版本、**不得**记历史。 */
+  function judgeBaseUntouched(before: { documentVersion: number; canUndo: boolean }, after: { documentVersion: number; canUndo: boolean; undoLabel: string | null }, stagedLabel: string): void {
+    expect(after.documentVersion, '暂存期间文档版本不得推进').toBe(before.documentVersion)
+    expect(after.canUndo, '暂存期间不得记历史').toBe(before.canUndo)
+    expect(after.undoLabel, '暂存不得产生具名历史条目').not.toBe(stagedLabel)
+  }
+
+  /** 断言器判红 = 它抛错。用它把"判红"变成可断言的读数。 */
+  function redOf(run: () => void): boolean {
+    try {
+      run()
+      return false
+    } catch {
+      return true
+    }
+  }
+
+  it('前置（正对照）：**生产读面**上三个断言器都判绿（同一批断言器）', () => {
+    const s = session()
+    const id = addObject(s, 'block', 'A')
+    s.submit({ kind: 'beginInteraction', contextId: 'ctx-1', tool: 'move', targets: [id] })
+    s.drain()
+    s.submit({ kind: 'updateInteraction', contextId: 'ctx-1', displacement: { x: 4, y: 2, z: -1 } })
+    s.drain()
+    const vBefore = s.read().version
+    const docBefore = s.read().workspace.document()
+    expect(docBefore.ok).toBe(true)
+
+    expect(redOf(() => judgeEffectiveTransformEqual(s.read().interaction.effectiveTransform(id), s.read().interaction.effectiveTransform(id)))).toBe(false)
+    const p1 = s.read().interaction.selection()
+    const c1 = s.read().interaction.context()
+    expect(redOf(() => judgePanelEqual(p1, s.read().interaction.selection(), c1, s.read().interaction.context()))).toBe(false)
+    const docAfter = s.read().workspace.document()
+    expect(docBefore.ok && docAfter.ok).toBe(true)
+    if (docBefore.ok && docAfter.ok) {
+      expect(redOf(() => judgeBaseUntouched(
+        { documentVersion: vBefore.documentVersion, canUndo: docBefore.value.canUndo },
+        { documentVersion: s.read().version.documentVersion, canUndo: docAfter.value.canUndo, undoLabel: docAfter.value.undoLabel },
+        'move',
+      ))).toBe(false)
+    }
+  })
+
+  it('变异体 1：注入**按 area 分片**的有效变换（= "只让发起视口读暂存结果"的读面形状）⇒ 判红', () => {
+    // 注入形态：同一次拖拽，发起视口读到暂存结果（x=4），另一个视口读不到（x=0）。
+    const stagedByArea = new Map<string, { position: { x: number; y: number; z: number } }>([
+      ['area-initiator', { position: { x: 4, y: 2, z: -1 } }],
+      ['area-other', { position: { x: 0, y: 0, z: 0 } }],
+    ])
+    const readArea = (areaId: string) => {
+      const v = stagedByArea.get(areaId)
+      return v === undefined ? { ok: false as const } : { ok: true as const, value: v }
+    }
+    expect(redOf(() => judgeEffectiveTransformEqual(readArea('area-initiator'), readArea('area-other'))), 'A05 负对照原文「只让发起视口读暂存结果」必须被判红').toBe(true)
+    // 反向对照（防"恒红"）：两个 area 读到**同一份**暂存 ⇒ 判绿
+    expect(redOf(() => judgeEffectiveTransformEqual(readArea('area-initiator'), readArea('area-initiator')))).toBe(false)
+    // 且"读不到"本身也必须判红（不得把缺失当"相同"）
+    expect(redOf(() => judgeEffectiveTransformEqual(readArea('area-initiator'), { ok: false }))).toBe(true)
+  })
+
+  it('变异体 2：注入 area 维度的**面板差异** ⇒ 面板断言器判红', () => {
+    const panelByArea = new Map<string, unknown>([
+      ['area-initiator', { selected: [{ kind: 'object', id: 'wk-object-1' }] }],
+      ['area-other', { selected: [] }],
+    ])
+    const ctxByArea = new Map<string, unknown>([
+      ['area-initiator', { documentId: 'doc-1', time: { frame: 0, fps: 20 } }],
+      ['area-other', { documentId: 'doc-1', time: { frame: 7, fps: 20 } }],
+    ])
+    expect(
+      redOf(() => judgePanelEqual(panelByArea.get('area-initiator'), panelByArea.get('area-other'), ctxByArea.get('area-initiator'), ctxByArea.get('area-other'))),
+      '每 area 一份面板/上下文 ⇒ 判红（这正是"每视口暂存"形态的面板侧表现）',
+    ).toBe(true)
+    expect(redOf(() => judgePanelEqual(panelByArea.get('area-initiator'), panelByArea.get('area-initiator'), ctxByArea.get('area-initiator'), ctxByArea.get('area-initiator')))).toBe(false)
+  })
+
+  it('变异体 3：注入"暂存期推进文档版本 / 误记历史"⇒ 基础文档与历史断言器判红', () => {
+    const before = { documentVersion: 1, canUndo: true }
+    // 破坏方式 A：暂存期推进版本
+    expect(redOf(() => judgeBaseUntouched(before, { documentVersion: 2, canUndo: true, undoLabel: 'add A' }, 'move')), '暂存期推进文档版本必须判红').toBe(true)
+    // 破坏方式 B：暂存期误记一条名为 move 的历史
+    expect(redOf(() => judgeBaseUntouched(before, { documentVersion: 1, canUndo: true, undoLabel: 'move' }, 'move')), '暂存期误记历史必须判红').toBe(true)
+    // 破坏方式 C：暂存期把 canUndo 从 false 翻成 true（"新建容器即记历史"）
+    expect(redOf(() => judgeBaseUntouched({ documentVersion: 1, canUndo: false }, { documentVersion: 1, canUndo: true, undoLabel: null }, 'move'))).toBe(true)
+    // 反向对照：合规读数判绿
+    expect(redOf(() => judgeBaseUntouched(before, { documentVersion: 1, canUndo: true, undoLabel: 'add A' }, 'move'))).toBe(false)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // A17：history-reference
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -14,6 +14,9 @@ import { assetRequest, contentIdentityKey, contentVersionOfBytes } from '../asse
 import { OwnershipRegistry } from '../ownership'
 import { ContentCache, deviceScopeCount, nextDeviceScope } from '../resourceCache'
 import { DeviceStateMachine, ViewportDeviceRegistry, type DeviceState } from '../deviceState'
+// A36（P11-E #262）：内容编辑侧走**真命令层**（另一条轴必须是生产路径，不是手工拼状态）
+import { ALL_CAPABILITIES, openDocumentState, reduceCommand } from '@/application/commands'
+import { propertyRef } from '@/domain/identity'
 
 const IDENTITY = { id: 'tex:stone', version: 'v1' }
 
@@ -412,5 +415,164 @@ describe('A30 graphics-recovery：设备状态机与失败隔离', () => {
       m.markRestored(i)
     }
     expect(m.transitions.length).toBeLessThanOrEqual(8)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A36（P11-E #262 补）：资源失败 × 内容编辑 —— 两条轴互不回滚
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这条补的是 A36 的子句缺口（#262 comment 6421 A36 行）
+ *
+ * B1 的定性：「`markFailed/markMissing` 全树 4 处调用**全在纯存储层测试**，
+ * 无任何用例把"资源失败"与"内容编辑"放进同一条断言；承载面已具备」。
+ *
+ * ## 判据的语义（为什么"放在同一条断言里"不是形式主义）
+ *
+ * 资源五态（#249 §19.3）与内容编辑（`#249 §6` 的受控提交）是**两条独立的轴**：
+ * 纹理加载失败只应让**该资源**进入 `missing`/`failed` 并在呈现上退化为占位，
+ * **不应**回滚用户刚做出的内容编辑、也不应清空历史。B1 之所以把它列为缺口，
+ * 是因为"两轴互不干扰"此前**没有任何判据**——只有各自的轴被单独测过；
+ * 而"资源失败顺手重置文档"（旧实现里"整库失败 ⇒ 重建整个场景"的形态）
+ * 恰好只在两轴交叉处才可见。
+ *
+ * 本组的机械形式：① 先在**真命令层**做出一次内容编辑；② 在**真资源层**让两个
+ * 资源分别 `markMissing`/`markFailed`；③ 断言内容事实（内容身份/字段/历史长度/
+ * 选择）逐项不变，且失败后**仍能**继续编辑；④ 注入"失败即回滚"的变异体，
+ * 喂给**同一个**断言器 ⇒ 判红（证明断言器有区分力，不是恒绿）。
+ */
+describe('A36 资源失败 × 内容编辑：两条轴互不回滚（P11-E #262 补）', () => {
+  /** 内容侧的可核对事实（跨"失败前/失败后"比对的最小闭集）。 */
+  type ContentFacts = {
+    readonly contentVersion: number
+    readonly objectName: string
+    readonly historyPast: number
+    readonly selection: unknown
+  }
+
+  /** 判据本尊（正/负对照共用一份）。 */
+  function judgeContentSurvivesAssetFailure(before: ContentFacts, after: ContentFacts): void {
+    expect(after.contentVersion, '资源失败不得回滚内容 ⇒ 内容身份必须不变').toBe(before.contentVersion)
+    expect(after.objectName, '资源失败不得把字段值退回编辑前').toBe(before.objectName)
+    expect(after.historyPast, '资源失败不得清空/改动历史栈').toBe(before.historyPast)
+    expect(after.selection, '资源失败不得改选择').toEqual(before.selection)
+  }
+
+  /** 断言器判红 = 它抛错。 */
+  function redOf(run: () => void): boolean {
+    try {
+      run()
+      return false
+    } catch {
+      return true
+    }
+  }
+
+  /** 造"已编辑过一次"的应用状态（真命令层，非手工拼状态）。 */
+  function editedState() {
+    let st = openDocumentState('doc-1', 'ctx-1')
+    const added = reduceCommand(st, { kind: 'addObject', contextId: 'ctx-1', objectType: 'block', name: 'A' }, { capabilities: ALL_CAPABILITIES })
+    expect(added.status).toBe('applied')
+    st = added.state
+    const objectId = Object.keys(st.docs['doc-1']!.scene.objects)[0]!
+    const named = reduceCommand(
+      st,
+      { kind: 'setProperty', refs: [propertyRef({ kind: 'object', id: objectId }, 'block.name')], value: 'A-edited' },
+      { capabilities: ALL_CAPABILITIES },
+    )
+    expect(named.status, '前置：内容编辑必须真的生效').toBe('applied')
+    st = named.state
+    const selected = reduceCommand(st, { kind: 'select', contextId: 'ctx-1', target: { kind: 'object', id: objectId } }, { capabilities: ALL_CAPABILITIES })
+    expect(selected.status).toBe('applied')
+    return { state: selected.state, objectId }
+  }
+
+  function factsOf(state: ReturnType<typeof openDocumentState>, objectId: string): ContentFacts {
+    const doc = state.docs['doc-1']!
+    return {
+      contentVersion: doc.version.contentVersion,
+      objectName: doc.scene.objects[objectId]!.name,
+      historyPast: doc.history.past.length,
+      selection: state.contexts['ctx-1']!.selection.selected,
+    }
+  }
+
+  it('正对照：`markMissing`/`markFailed` 之后，内容/字段/历史/选择逐项不变，且仍可继续编辑', () => {
+    const { state, objectId } = editedState()
+    const before = factsOf(state, objectId)
+
+    // 资源轴：两个资源分别在途 → 一个缺失、一个失败（真 `AssetStateStore`）
+    const s = new AssetStateStore()
+    const missingReq = s.begin(assetRequest({ id: 'tex:missing', version: 'v1' }, { kind: 'external', url: '/m.png' }, true))
+    const failedReq = s.begin(assetRequest({ id: 'tex:failed', version: 'v1' }, { kind: 'external', url: '/f.png' }, true))
+    s.markMissing('tex:missing', missingReq.requestId, '404')
+    s.markFailed('tex:failed', failedReq.requestId, 'decode error', true)
+
+    // 资源侧读数（五态里的两态，且**不**冒充 ready）
+    expect(resolveAssetReadiness(s, 'tex:missing').status).toBe('placeholder')
+    expect(resolveAssetReadiness(s, 'tex:failed').status).toBe('placeholder')
+    expect(s.counts()).toEqual({ idle: 0, loading: 0, available: 0, missing: 1, failed: 1 })
+
+    // 内容侧：**逐项不变**（同一个断言器，与负对照共用）
+    expect(redOf(() => judgeContentSurvivesAssetFailure(before, factsOf(state, objectId)))).toBe(false)
+    // 且状态**引用**都没被资源失败触碰（"没有第二次写"的可核对形式）
+    expect(state.docs['doc-1']!.scene.objects[objectId]!.name).toBe('A-edited')
+
+    // 失败之后**仍能**继续编辑（资源失败不冻结内容面）
+    const after2 = reduceCommand(
+      state,
+      { kind: 'setProperty', refs: [propertyRef({ kind: 'object', id: objectId }, 'block.name')], value: 'A-after-failure' },
+      { capabilities: ALL_CAPABILITIES },
+    )
+    expect(after2.status, '资源失败不得冻结内容编辑').toBe('applied')
+    if (after2.status === 'applied') {
+      expect(after2.state.docs['doc-1']!.scene.objects[objectId]!.name).toBe('A-after-failure')
+      expect(after2.state.docs['doc-1']!.history.past.length, '继续编辑照常记历史').toBe(before.historyPast + 1)
+    }
+    // 撤销也照常（历史里既有编辑仍在）
+    const undone = reduceCommand(state, { kind: 'undo', contextId: 'ctx-1' }, { capabilities: ALL_CAPABILITIES })
+    expect(undone.status).toBe('applied')
+    if (undone.status === 'applied') {
+      expect(undone.state.docs['doc-1']!.scene.objects[objectId]!.name, '撤销回到编辑前的值').toBe('A')
+    }
+  })
+
+  it('**负对照（注入）**：把"资源失败 ⇒ 回滚内容编辑"的变异体喂给同一断言器 ⇒ 判红', () => {
+    const { state, objectId } = editedState()
+    const before = factsOf(state, objectId)
+
+    // 变异体 A′（**真回滚**，不是伪造读数）：用命令层真的撤销那次内容编辑，
+    // 于是"回滚后的内容事实"是**生产实现算出来的**——断言器若抓不到它，
+    // 说明它只会对伪造读数判红（判据无效）。
+    const rolledBack = reduceCommand(state, { kind: 'undo', contextId: 'ctx-1' }, { capabilities: ALL_CAPABILITIES })
+    expect(rolledBack.status, '前置：撤回应生效（这就是"内容被回滚"的真实形态）').toBe('applied')
+    expect(
+      redOf(() => judgeContentSurvivesAssetFailure(before, factsOf(rolledBack.state, objectId))),
+      '内容被**真回滚**（经命令层撤销）⇒ 必须判红',
+    ).toBe(true)
+
+    // 变异体 A：失败把内容身份退回编辑前（"整库失败 ⇒ 重建场景"的形态）
+    expect(
+      redOf(() => judgeContentSurvivesAssetFailure(before, { ...before, contentVersion: before.contentVersion - 1 })),
+      '资源失败回滚内容身份 ⇒ 必须判红',
+    ).toBe(true)
+    // 变异体 B：失败把字段值退回（内容身份可能因实现不同而不变，字段却已被改回）
+    expect(
+      redOf(() => judgeContentSurvivesAssetFailure(before, { ...before, objectName: 'A' })),
+      '资源失败回滚字段值 ⇒ 必须判红',
+    ).toBe(true)
+    // 变异体 C：失败清空历史（"重建"最隐蔽的副作用）
+    expect(
+      redOf(() => judgeContentSurvivesAssetFailure(before, { ...before, historyPast: 0 })),
+      '资源失败清空历史 ⇒ 必须判红',
+    ).toBe(true)
+    // 变异体 D：失败顺手清选择（用户看到"资源坏了，选中也没了"）
+    expect(
+      redOf(() => judgeContentSurvivesAssetFailure(before, { ...before, selection: [] })),
+      '资源失败清选择 ⇒ 必须判红',
+    ).toBe(true)
+    // 正对照（防恒红）：原读数判绿
+    expect(redOf(() => judgeContentSurvivesAssetFailure(before, factsOf(state, objectId)))).toBe(false)
   })
 })
