@@ -445,7 +445,8 @@ describe('A30 graphics-recovery：设备状态机与失败隔离', () => {
 describe('A36 资源失败 × 内容编辑：两条轴互不回滚（P11-E #262 补）', () => {
   /** 内容侧的可核对事实（跨"失败前/失败后"比对的最小闭集）。 */
   type ContentFacts = {
-    readonly contentVersion: number
+    /** 内容身份摘要（`Version.contentVersion` 在类型上可选 ⇒ 原样保留该宽度，不做 `?? 0` 归一）。 */
+    readonly contentVersion: number | undefined
     readonly objectName: string
     readonly historyPast: number
     readonly selection: unknown
@@ -554,7 +555,7 @@ describe('A36 资源失败 × 内容编辑：两条轴互不回滚（P11-E #262 
 
     // 变异体 A：失败把内容身份退回编辑前（"整库失败 ⇒ 重建场景"的形态）
     expect(
-      redOf(() => judgeContentSurvivesAssetFailure(before, { ...before, contentVersion: before.contentVersion - 1 })),
+      redOf(() => judgeContentSurvivesAssetFailure(before, { ...before, contentVersion: (before.contentVersion ?? 0) - 1 })),
       '资源失败回滚内容身份 ⇒ 必须判红',
     ).toBe(true)
     // 变异体 B：失败把字段值退回（内容身份可能因实现不同而不变，字段却已被改回）
