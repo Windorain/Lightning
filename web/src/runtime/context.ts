@@ -208,10 +208,35 @@ export class Context {
    * ⚠️ 刻意读 `this.main.doc` 而**不是** `this.getDoc()`：后者会让本读面的引入
    * **增加** `raw-authority-object` 的 `getDoc` 命中数，而 B′ 的目标是把它降下来
    * （这笔"新增一处、消除 29 处"的账必须干净）。
+   * ## ⚠️ **必须是响应式可追踪的**（B′ 实测抓出的真实回归，务必保留这一读）
+   *
+   * 本方法被 **2 处 `.vue` 模板**直接调用（`EmbedRoot.vue` 的
+   * `v-else-if="ctx.hasLoadedDocument()"`、`WorkbenchRoot.vue` 的
+   * `workspace === 'wiki' && ctx.hasLoadedDocument()`）。而模板的重新渲染
+   * **只跟随它在渲染期读到的响应式依赖**。
+   *
+   * 首版实现只读内核侧的普通字段（`KernelSession` 的 `adoptedDocumentId`）——
+   * 那不是响应式对象，**Vue 追踪不到**。后果是：嵌入外壳的文档装载完成后
+   * 模板**不再重渲染**，`.wm-root` 永不出现 ⇒ `embed-mobile.spec.ts`
+   * **7 条 e2e 全红**（实测：`.wm-root` "element(s) not found"）。
+   *
+   * 内核侧**不能**自己持有响应式状态：`runtime/kernelSession.ts` 在
+   * `KERNEL_FILES` 内，而 `kernel-legacy-isolation.test.ts` 把 `ref(` 列为
+   * 内核代码的**禁用词**（内核是纯核心，不得依赖 Vue）。
+   *
+   * ⇒ 响应式依赖由**本层**提供：下面第一句读 `this.main.doc.value`（它是
+   * `Ref`，且**恰好在每一次文档替换时变化** —— 镜像就在同一次 `setDocument`
+   * 里发生）。于是"文档变了 ⇒ 模板重算 ⇒ 读到内核的最新装载状态"成立。
+   *
+   * ⚠️ 这一读**不是**多余的"为了触发依赖而读"：它同时是**正确性**的一部分 ——
+   * 装配成功路径（`adoptDocument` ⇒ `markLoaded`）在 `replaceDoc` **之后**发生，
+   * 而同一次同步流程内的 `doc.value` 变化已足以让本次渲染读到最终状态。
    */
   hasLoadedDocument(): boolean {
+    // 响应式依赖（见上方长注释：去掉这一读会让 2 处模板永不重渲染）。
+    const legacyPresent = this.main.doc.value !== null
     const kernel = this.kernel
-    if (kernel === null) return this.main.doc.value !== null
+    if (kernel === null) return legacyPresent
     return kernel.hasLoadedDocument()
   }
 

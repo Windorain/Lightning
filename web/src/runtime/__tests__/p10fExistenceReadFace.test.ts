@@ -203,9 +203,113 @@ describe('P10f B′ · ③ 替换确实发生，且 registry 已同步', () => {
     // 生产里 `hasLoadedDocument` 共 29 处调用（1 处定义在 context.ts 内、1 处在 kernelSession.ts）
     expect(n, `实测 ${n} 次 —— 少于 29 说明有站点没换`).toBeGreaterThanOrEqual(29)
   })
+})
 
-  it('registry 的消费者清单与实测一致（0 漏登记 / 0 腐烂）', () => {
-    const entry = RETIREMENT_REGISTRY.find((e) => e.matrixSlug === 'raw-authority-object')!
+// ─────────────────────────────────────────────────────────────────────────────
+// ④ **响应式追踪**：模板能跟着装载状态重渲染（B′ 实测抓出的真实回归）
+// ─────────────────────────────────────────────────────────────────────────────
+describe('P10f B′ · ④ `hasLoadedDocument` 必须可被 Vue 追踪（否则模板永不重渲染）', () => {
+  /**
+   * ## 这条判据是**一次真实回归**换来的（7 条 e2e 全红）
+   *
+   * 首版 `Context.hasLoadedDocument()` 只读内核侧的**普通字段**
+   * （`KernelSession.adoptedDocumentId`）—— 那不是响应式对象，**Vue 追踪不到**。
+   * 而它被 2 处 `.vue` 模板直接调用 ⇒ 文档装载完成后模板**不再重渲染**：
+   * 嵌入外壳的 `.wm-root` 永不出现 ⇒ `e2e/embed-mobile.spec.ts` **7 条全红**
+   * （`Error: expect(locator).toBeVisible() failed — locator('.wm-root')
+   *   element(s) not found`）。
+   *
+   * ## 为什么不能"让内核自己响应式"
+   *
+   * `runtime/kernelSession.ts` 在 `KERNEL_FILES` 内，而
+   * `kernel-legacy-isolation.test.ts` 把 **`ref(`** 列为内核代码的**禁用词**
+   * （内核是纯核心，不得依赖 Vue）。⇒ 响应式必须由 `runtime/context.ts` 提供
+   * （它不在该表内，且本就 import `vue`）。
+   *
+   * ## 判据
+   *
+   * ① 实现里**确实读**了 `this.main.doc.value`（响应式源，且在每一次文档替换时变化）；
+   * ② 且**不是**把它当"无用的读"丢掉 —— 它必须参与返回值或至少被求值；
+   * ③ 反空洞真：把这一读删掉，判据必须判红（本文件用**合成源文本**验证判据本身有效，
+   *    不修改真树 —— 与 `retirementRegistry` 的负对照同一手法）。
+   */
+  const CONTEXT_REL = 'src/runtime/context.ts'
+
+  function methodBodyOf(fromDir: string): string {
+    const text = fs.readFileSync(path.join(fromDir, 'runtime', 'context.ts'), 'utf8').replace(/\r\n/g, '\n')
+    // 去注释后取 `hasLoadedDocument(): boolean { … }` 的方法体
+    const code = text
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .split('\n')
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n')
+    const start = code.indexOf('hasLoadedDocument(): boolean {')
+    expect(start, '`Context.hasLoadedDocument` 必须存在').toBeGreaterThan(-1)
+    return code.slice(start, code.indexOf('\n  }', start))
+  }
+
+  it('实现读 `this.main.doc.value`（响应式依赖源）', () => {
+    const body = methodBodyOf(SRC)
+    expect(
+      /this\.main\.doc\.value/.test(body),
+      '`hasLoadedDocument` 必须读 `this.main.doc.value` —— 它是模板能追踪到的响应式依赖。\n' +
+        '只读内核普通字段会让 `EmbedRoot.vue`/`WorkbenchRoot.vue` 的 2 处模板永不重渲染\n' +
+        '（实测后果：`embed-mobile.spec.ts` 7 条 e2e 全红，`.wm-root` 找不到）。',
+    ).toBe(true)
+    // ① 该读必须被**使用**（赋给变量或参与返回），不是孤立的表达式语句
+    expect(
+      /const\s+\w+\s*=\s*this\.main\.doc\.value/.test(body),
+      '这一读必须参与后续逻辑（赋给变量/参与返回），不能是"为了触发依赖"的空读',
+    ).toBe(true)
+  })
+
+  it('两处 `.vue` 模板确实调用它（判据的作用对象真实存在）', () => {
+    const templates = ['src/embed/EmbedRoot.vue', 'src/workbench/WorkbenchRoot.vue']
+    for (const rel of templates) {
+      const text = fs.readFileSync(path.join(WEB, rel), 'utf8')
+      expect(text, `${rel} 的模板必须调用 \`hasLoadedDocument()\``).toContain('hasLoadedDocument()')
+    }
+  })
+
+  it('**负对照**：删掉那一读 ⇒ 判据判红（证明它非空洞真，用合成源文本，不动真树）', () => {
+    const real = fs.readFileSync(path.join(SRC, 'runtime', 'context.ts'), 'utf8').replace(/\r\n/g, '\n')
+    // 合成一份"首版实现"（只读内核字段）——正是实测判红的那一版
+    const synthetic = real.replace(
+      /hasLoadedDocument\(\): boolean \{[\s\S]*?\n  \}/,
+      'hasLoadedDocument(): boolean {\n' +
+        '    const kernel = this.kernel\n' +
+        '    if (kernel === null) return false\n' +
+        '    return kernel.hasLoadedDocument()\n' +
+        '  }',
+    )
+    expect(synthetic, '前置：替换必须发生').not.toBe(real)
+
+    // ⚠️ 判据必须**只看方法体**（把整份文件当输入会误命中：本文件在别处的注释里
+    // 也提到 `this.main.doc.value`，于是"合成版不含该读"会假绿 —— 本条第一版
+    // 正是这样假绿的，实测判红后改成按方法体裁剪）。
+    const bodyOf = (text: string): string => {
+      const code = text
+        .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+        .split('\n')
+        .map((l) => l.replace(/\/\/.*$/, ''))
+        .join('\n')
+      const start = code.indexOf('hasLoadedDocument(): boolean {')
+      return start < 0 ? '' : code.slice(start, code.indexOf('\n  }', start))
+    }
+
+    expect(
+      /this\.main\.doc\.value/.test(bodyOf(real)),
+      '前置：真实现的方法体里含响应式读',
+    ).toBe(true)
+    expect(
+      /this\.main\.doc\.value/.test(bodyOf(synthetic)),
+      '合成版的方法体不得含响应式读（否则负对照没测到东西）',
+    ).toBe(false)
+  })
+})
+
+describe('P10f B′ · ③b registry 同步（相位不动）', () => {
+  it('registry 的消费者清单与实测一致（0 漏登记 / 0 腐烂）', () => {    const entry = RETIREMENT_REGISTRY.find((e) => e.matrixSlug === 'raw-authority-object')!
     const declared = new Set((entry.consumers ?? []).map((c) => c.replace(/^web\//, '')))
     const actual = new Set<string>()
     for (const abs of productionFiles()) {
