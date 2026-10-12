@@ -28,6 +28,8 @@ function structureParts(overrides: Partial<Parameters<typeof structureDigestOf>[
   return {
     frames: [[0, 1, 0, 1, 0, 0]] as readonly (readonly number[] | null)[],
     palette: ['minecraft:stone@0', 'minecraft:dirt@0'],
+    // #334：内容级调色板身份（与名称级成对；见 `structureDigestOf` 的说明）
+    paletteContent: [['#1', { registryId: 'minecraft:stone', meta: 0 }]],
     frameDecls: [{ index: 0, durationMs: undefined }],
     multiblock: null,
     layerFilter: 'all',
@@ -109,6 +111,43 @@ describe('A11：结构身份的粒度（该变才变）', () => {
     const before = identity()
     const after = identity({ structureDigest: structureDigestOf(structureParts({ palette: ['minecraft:oak_planks@0'] })) })
     expect(diffContentIdentity(before, after).structureChanged).toBe(true)
+  })
+
+  /**
+   * #334：**名称级相同、内容级不同**必须判为结构变化。
+   *
+   * 这是"运行态不可辨"的**最小复现**：多方块运行态只把控制器条目从并集下标 7 换到 8，
+   * 两条条目的 `name:meta` 完全相同（`gt.blockmachines:1000`），差异只在 `tooltip` 与
+   * `nbt.activeFace` —— 名称级口径（`palette: registryId@meta`）**结构上**看不见它。
+   *
+   * 负对照（同一条用例内）：把 `paletteContent` 也换成"名称级等价"的一份 ⇒ 结构身份
+   * 不变 —— 证明本判据的区分力来自内容级字段，而不是来自别的字段顺带变了。
+   */
+  it('#334：调色板条目内容变化（同 `registryId@meta`）⇒ 结构变化；负对照：名称级不动 ⇒ 不变', () => {
+    const nameLevel = ['gregtech:gt.blockmachines@1000']
+    const idleEntry = { registryId: 'gregtech:gt.blockmachines', meta: 1000, tooltip: ['Electric Blast Furnace'] }
+    const activeEntry = {
+      registryId: 'gregtech:gt.blockmachines',
+      meta: 1000,
+      tooltip: ['Electric Blast Furnace (running)'],
+      nbt: { activeFace: true },
+    }
+    const at = (entry: unknown) =>
+      identity({
+        structureDigest: structureDigestOf(
+          structureParts({ palette: nameLevel, paletteContent: [['#7', entry]] }),
+        ),
+      })
+
+    // 名称级逐字相同（这是运行态的真实形态）
+    expect(JSON.stringify(nameLevel)).toBe(JSON.stringify(['gregtech:gt.blockmachines@1000']))
+    expect(diffContentIdentity(at(idleEntry), at(activeEntry)).structureChanged, '内容级变化必须被看见').toBe(true)
+
+    // 负对照：内容级也用同一份 ⇒ 结构身份必须**不变**（否则本判据没有区分力）
+    expect(
+      diffContentIdentity(at(idleEntry), at({ ...idleEntry })).structureChanged,
+      '负对照：内容级不动 ⇒ 不得判为变化',
+    ).toBe(false)
   })
 
   it('只见呈现层的分层过滤变化 ⇒ 结构变化（它改变被采集的几何）', () => {

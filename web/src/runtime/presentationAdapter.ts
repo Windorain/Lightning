@@ -70,12 +70,45 @@ function hashString(s: string): number {
 }
 
 /**
+ * 帧网格的**调色板条目内容**（内容级身份；`#334`）。
+ *
+ * ## 为什么读**网格的 palette cache**（而不是"已解析的定义"）
+ *
+ * `readContentIdentity` 的入参里已有一份 `definition`，它的 `blockPalette` 也带条目内容 ——
+ * 但**不能用**：定义是**渲染产物**（`resolveRenderBundle(doc.serialize())` 的结果），
+ * 判定发生在重解**之前**，故此刻手里那份定义必然是**上一轮**的。用它当内容身份会形成
+ * 「要检测新内容 ⇒ 先得有新内容」的自指闭环 ⇒ 判定永远为一轮之前的状态服务
+ * （`#334` 实测：切运行态时 `readContentIdentity({doc: 新文档, definition: 旧定义})`
+ * 与切换前**逐字节相同**，`planContentRebuild` 全 false）。
+ *
+ * 文档（`docRef.value`）没有这个滞后：它就是"待渲染的内容"本身，取值一变它立刻变
+ * （`composition/kernelRenderView#kernelRenderViewOf` 的投影产物）。
+ * ⇒ 内容级身份必须**从文档机械派生**（与本模块文件头"必须由读集派生"同一纪律）。
+ *
+ * ## 顺序与稳定性
+ *
+ * 逐条输出 `[缓存键, 条目]`，按键**字典序**排序（不依赖 `Map` 插入序）：同一份内容
+ * 必然得到同一个摘要，与装配/解析的遍历顺序无关。
+ */
+export function paletteContentOf(grid: Grid | null): readonly unknown[] {
+  if (grid === null) return []
+  return [...grid.getPaletteCache().entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([key, entry]) => [key, entry])
+}
+
+/**
  * 从文档派生**内容身份**（`structEpoch` 的替代读取面）。
  *
  * `frameIndex` 与 `layerPreview` 参与结构摘要：它们改变被采集的几何
  * （换帧 = 换一整份网格；分层预览 = 只采集某一层）。这不是"非内容版本冒充内容变化" ——
  * 它们**确实**改变呈现内容；而机位/选择/布局**不**在本函数的任何入参里，
  * 因此它们**不可能**影响身份。
+ *
+ * ⚠️ **`definition` 是"已解析的呈现产物"，不是内容源**（`#334` 更正）：它只贡献
+ * **名称级**调色板身份（跨实现口径，重解前后不变）；**内容级**调色板身份取自
+ * **文档自身**（`paletteContentOf`）—— 否则判定会晚一轮，运行态这类"同名称、异条目内容"
+ * 的变化永远不被判为变化。两条各自成立，都是"读了就声明"的直接结果。
  */
 export function readContentIdentity(input: {
   doc: RuntimeDocument | null
@@ -102,6 +135,7 @@ export function readContentIdentity(input: {
     structureDigest: structureDigestOf({
       frames: [gridFingerprint(grid)],
       palette: definition?.blockPalette.map((p) => `${p.registryId}@${p.meta ?? ''}`) ?? [],
+      paletteContent: paletteContentOf(grid),
       frameDecls: doc.frames.map((f) => [f.index, f.durationMs ?? null]),
       multiblock: doc.multiblock?.decl.raw ?? null,
       layerFilter: layerPreview,

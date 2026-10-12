@@ -33,17 +33,38 @@
  * 复制产品侧的域夹取/回落/耦合语义才能算出来 —— 那等于在测试里写第二份实现
  * （本项目"两份实现必然漂移"已三度实测）。声明轴见证已足以让"滑杆未接线"必红。
  *
- * ## 已知盲轴（**如实登记，不假装覆盖**）
+ * ## 已登记盲轴（**如实登记，不假装覆盖**）—— #334 后 EBF 的运行态轴**已出盲**
  *
- * `multiblock-ebf-2ch.json` 的**运行态轴**：216 对"仅运行态不同"的组合，在 `idMeta` 口径下
- * **全部内容相同**（盲率 100%）。成因（源码 + 参考产物双侧核实）：
- * 参考侧运行态把控制器格从并集下标 `7` 写到 `8`，而这两条条目的 `name:meta` **完全相同**
- * （都是 `gt.blockmachines:1000`，差异只在 `tooltip` 与 `nbt.activeFace`），而 `idMeta` 口径
- * 只保留 `name:meta` ⇒ 结构上不可分辨。故本集合**不再为运行态盲轴生成见证**，
- * 并把该事实作为**可红的判据**交给 `assertBlindAxesDocumented()`（轴盲了却不登记 ⇒ 红）。
+ * 本清单的语义是"该轴在**内容口径**下完全不改变内容 ⇒ 该轴无跃迁可验"。
  *
- * 运行态是否**在渲染面上真的生效**属产品侧能力，不属本治理批；由
- * `multiblock-channel-traversal.spec.ts` 的「运行态可辨识性诊断」如实记录，不冒充门禁。
+ * ### 旧状态（#332，已被 #334 推翻）
+ *
+ * 原文登记：`multiblock-ebf-2ch.json` 的运行态轴在 `idMeta`（`name:meta`）口径下 216 对
+ * 「仅运行态不同」的组合**全部内容相同**（盲率 100%）—— 参考侧把控制器格从并集下标 `7`
+ * 写到 `8`，两条条目 `name:meta` 相同（都是 `gt.blockmachines:1000`），差异只在 `tooltip`
+ * 与 `nbt.activeFace`。当时的结论"运行态在渲染面结构性不可分辨"**已不成立**（见下）。
+ *
+ * ### 现在（#334）：见证口径改「内容级」，盲轴清空
+ *
+ * 两个事实同时变了，且都是机械可复核的：
+ *
+ * | 事实 | 旧（#332） | 现在（#334） |
+ * |---|---|---|
+ * | **见证口径** | `idMeta`（门禁口径）—— 结构上看不见 `tooltip`/`nbt` | **`full`（内容口径）**：条目全文（含 `tooltip`/`nbt`） |
+ * | **渲染面可辨性** | 实测不可辨（`cellGrid`+`blockPalette` 两次全文相同） | 已可辨（e2e 门禁：逐字节变化 + active 带 running 形态；根因是失效判定读面只含名称级调色板身份） |
+ *
+ * ⚠️ **两种口径各司其职，不混用**（这是本文件最容易做错的一处）：
+ *
+ * | 用途 | 口径 | 为什么 |
+ * |---|---|---|
+ * | **轴跃迁见证**（"这条轴到底改不改变内容？"） | `full`（内容级） | 内容的变化包括条目内容；用 `idMeta` 会把"改了条目内容"误判成"没变" ⇒ 造出**假盲轴** |
+ * | **内容类代表 / 省略配对 / 逐格门禁** | `idMeta`（名称级） | 它是**跨实现**的稳定身份（参考侧并集调色板 ↔ 渲染侧重编号调色板）；渲染管线被要求保留的正是它，门禁的"逐格 diff=0"才有确定含义 |
+ *
+ * 诚实边界（不夸大防线）：见证进精简集 ⇒ 该轴的两档都会被 **DOM 驱动一次**并在门禁口径下
+ * 断言收敛（"运行态装配错网格"这类缺陷会红）；而"运行态**内容**是否真的被送到渲染面"
+ * 由**产品级判据**承担（`multiblock-channel-traversal.spec.ts` 的「运行态可辨（EBF，门禁）」）
+ * 与单元级身份判据（`src/runtime/__tests__/p11dRunstateContentIdentity.test.ts`）——
+ * `idMeta` 门禁对它**没有**分辨力，这一点不作隐瞒。
  */
 
 import {
@@ -52,7 +73,7 @@ import {
   PANEL_CONTRACTS,
   type ExpectedCombo,
 } from './panelContract'
-import { snapshotOrFallbackReference, type SignatureGrid } from './referenceGrids'
+import { snapshotOrFallbackReference, type SignatureGrid, type SignatureMode } from './referenceGrids'
 
 /** 精简集的构造与自证结果。 */
 export interface ReducedTraversalSet {
@@ -71,6 +92,13 @@ export interface ReducedTraversalSet {
   levelCover: string[]
   /** **已知盲轴**（≥2 档、且每条相邻档对内容都不变）；须与 `KNOWN_BLIND_AXES` 一致。 */
   blindAxes: string[]
+  /**
+   * 见证/盲轴判定所用的**签名口径**。
+   *
+   * 恒为 `'full'`（内容级，含条目全文）—— 见文件头"两种口径各司其职"。保留字段是为了让
+   * 口径**显式可见**（打印进自证摘要），而不是一个隐含在代码里的选择。
+   */
+  witnessMode: SignatureMode
   /** **单档轴**（只有一档 ⇒ 无跃迁可验；与"盲轴"是两回事，分开登记）。 */
   singleLevelAxes: string[]
   /** 逐条配对账本：`省略者 → 与其逐格相同的集合内成员`（删减论证的机械证据）。 */
@@ -86,7 +114,9 @@ export interface ReducedTraversalSet {
  * 而不是静默退化成空转。
  */
 export const KNOWN_BLIND_AXES: Record<string, string[]> = {
-  'multiblock-ebf-2ch.json': ['__runstate'],
+  // #334：EBF 的运行态轴**已出盲**（见证口径改内容级 + 渲染面已可辨，见文件头）。
+  // 空数组是"断言该 fixture 没有任何盲轴"，不是"未登记"。
+  'multiblock-ebf-2ch.json': [],
   'multiblock-tier-only.json': [],
   'multiblock-lsc-overlap.json': [],
 }
@@ -120,12 +150,16 @@ export function buildReducedTraversal(file: string): ReducedTraversalSet {
   const channels = p.channels.map((ch) => ch.key)
 
   const sigs = new Map<string, string>()
+  /** 内容级签名（`full`）—— **只**用于轴跃迁见证与盲轴判定（见文件头"两种口径各司其职"）。 */
+  const contentSigs = new Map<string, string>()
   for (const combo of all) {
     const variant = ref.byVariant.get(combo.variantKey)
     if (!variant) throw new Error(`#332：参考清单缺 ${combo.variantKey}（${file}）`)
     sigs.set(combo.variantKey, sigKey(variant.signature))
+    contentSigs.set(combo.variantKey, sigKey(variant.signatureFull))
   }
   const sigOf = (key: string): string => sigs.get(key)!
+  const contentSigOf = (key: string): string => contentSigs.get(key)!
 
   // ── 1) 内容类代表（每类取字典序最小键：稳定、可复现，不依赖运行顺序） ──
   const byContent = new Map<string, string[]>()
@@ -199,7 +233,9 @@ export function buildReducedTraversal(file: string): ReducedTraversalSet {
         const a = g.get(String(lo))
         const b = g.get(String(hi))
         if (!a || !b) continue
-        if (sigOf(a.variantKey) !== sigOf(b.variantKey)) {
+        // **内容口径**（`full`）：轴"改不改变内容"必须按条目全文问，
+        // 不能用门禁的 `name:meta` 收缩口径（那会把"改了 tooltip/nbt"误判成盲轴）。
+        if (contentSigOf(a.variantKey) !== contentSigOf(b.variantKey)) {
           witness = [a, b]
           break
         }
@@ -274,6 +310,7 @@ export function buildReducedTraversal(file: string): ReducedTraversalSet {
     blindAxes,
     singleLevelAxes,
     pairing,
+    witnessMode: 'full',
   }
 }
 
@@ -302,8 +339,9 @@ export function assertReducedTraversal(): string {
     declared += s.declared
     kept += s.combos.length
     lines.push(
-      `[#332] ${p}：声明 ${s.declared} → 精简 ${s.combos.length}` +
-        `／内容类 ${s.contentClasses}（判据上界）／见证 ${s.witnesses.length}／逐档 ${s.levelCover.length}` +
+      `[#332/#334] ${p}：声明 ${s.declared} → 精简 ${s.combos.length}` +
+        `／内容类 ${s.contentClasses}（判据上界，门禁口径 idMeta）／见证 ${s.witnesses.length}（口径 ${s.witnessMode}）` +
+        `／逐档 ${s.levelCover.length}` +
         `／省略 ${s.pairing.length}（逐条已配对）／盲轴 [${s.blindAxes.join(',') || '无'}]` +
         `／单档轴 [${s.singleLevelAxes.join(',') || '无'}]`,
     )

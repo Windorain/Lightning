@@ -172,8 +172,28 @@ export function resourceDigestOf(textureBlobs: unknown): string {
 export function structureDigestOf(parts: {
   /** 逐帧的网格指纹（顺序稳定；空帧用 `null`）。 */
   frames: readonly (readonly number[] | null)[]
-  /** 调色板身份（`registryId@meta` 序列，顺序稳定）。 */
+  /** 调色板**名称级**身份（`registryId@meta` 序列，顺序稳定）。 */
   palette: readonly string[]
+  /**
+   * 调色板**内容级**身份（逐条完整条目，**位置即下标**，顺序稳定）。
+   *
+   * ## 为什么名称级（`palette`）不够（#334 实测）
+   *
+   * `registryId@meta` 把「条目内容不同、名称相同」的调色板**结构性地投影成同一个字符串**。
+   * 而渲染链真正消费的是条目**内容**（`blockPalette[i]` 的 `geometry`/`renderMode`/
+   * `tooltip`/`nbt` 直接决定画什么、标什么）。于是任何"换掉条目内容但不换方块名"的
+   * 变化（多方块运行态正是这种形态：`gt.blockmachines@1000` 的 `tooltip` 从
+   * `Electric Blast Furnace` 变 `… (running)`、`nbt.activeFace` 从缺席变 `true`）
+   * 在结构摘要里**不可见** ⇒ `planContentRebuild` 全 false ⇒ 渲染链**什么都不做**
+   * ⇒ 视口定义逐字节不变（#334 的三段实测）。
+   *
+   * ## 为什么是**两个**字段而不是把 `palette` 改成内容级
+   *
+   * 两者是不同的事实，各有消费者口径：名称级是**跨实现**的稳定身份（e2e 逐格门禁
+   * `idMeta` 口径、素材登记），内容级是本仓库"到底画什么"的身份。合并会丢掉前者
+   * （例如参考侧与渲染侧调色板编号重排时，名称级是唯一可比的口径）。
+   */
+  paletteContent: readonly unknown[]
   /** 帧级声明（变体/时长等影响呈现的结构性事实）。 */
   frameDecls: readonly unknown[]
   /** 多方块声明（通道/规则/骨架等；帧为主文档为 `null`）。 */
@@ -184,6 +204,7 @@ export function structureDigestOf(parts: {
   return contentDigestOf([
     parts.frames.map((f) => (f === null ? 'x' : f.join(','))),
     parts.palette,
+    parts.paletteContent,
     parts.frameDecls,
     parts.multiblock,
     parts.layerFilter,
