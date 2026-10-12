@@ -27,28 +27,37 @@
  * `MeshCaptureService.entryEqualitySignature` / `lib.mjs#entrySignature` 同口径）：
  * 两边各自把"下标 → 签名"建表，再逐格比签名。**不假设两边下标编号相同**。
  *
- * ⚠️ 已知签名收缩（必须在报告里如实说明，不得掩盖）：
+ * ⚠️ **签名收缩**（必须在报告里如实说明，不得掩盖）：
  *  EBF 调色板下标 7 / 8 的 `registryId@meta` 完全相同
  *  （`gregtech:gt.blockmachines@1000`），仅 tooltip 不同（"Electric Blast Furnace" vs
- *  "(running)"），而渲染管线经 `Grid`（`SlotBlock = {name, meta}`）**按 `name:meta` 归并**，
- *  两者在渲染侧必然合并成一条 —— 故：
+ *  "(running)"）—— 故：
  *   - `signatureCollapsed`：参考里存在"不同签名 / 同 name:meta"的条目对（EBF 为 1）；
  *   - 逐格比对用**同一投影函数**比较（`signatureGrid` 的 `full` 与 `idMeta` 两口径都算，
  *     门禁用 `idMeta`，`full` 作为**非门禁**的更强证据记录）；
- *   - `name:meta` 口径无法区分"运行态把下标 7 写成 8"这类**同 name:meta 的互换**。
- *     ⚠️ **该盲区没有任何 web 面判据覆盖**（#332 实测更正；此前的"由单元测试与 `full` 口径
- *     共同覆盖"是**错的说法**）：
- *       · `full` 口径**不能**覆盖它 —— 实测渲染侧把调色板条目的 `registryId` 统一归一为
- *         `minecraft:` 前缀（`gregtech:gt.blockcasings` → `minecraft:gt.blockcasings`），
- *         故 `full` 对参考侧**恒有差异**（实测 18/18、9/9、6/6，含压根没有运行态轴的
- *         tier-only / lsc）⇒ 它在渲染面没有分辨力，只能当**诊断记录**，不能当门禁；
- *       · 用"仅改运行态、其余轴固定"的组合对实测（#332 运行态诊断用例）：两次渲染定义
- *         `cellGrid` 与 `blockPalette` **全文逐字节相同**，渲染侧控制器条目两次都是
- *         `tooltip=["Electric Blast Furnace"]`、无 `nbt`，而参考侧是 `[7]`（无 nbt）↔ `[8]`
- *         （`tooltip=["Electric Blast Furnace (running)"]`、`nbt={"activeFace":true}`）。
- *     ⇒ 结论：EBF 的 216 对运行态组合在 web 渲染面**结构性不可分辨**，属**产品侧缺口**
- *     （`context/grid.ts` 的调色板缓存按 `blockKey` = `name:meta` 归并 + `_gridToV2` 以该键
- *     去重），须另立单修 `src/`；登记见 `reducedTraversal.ts` 的 `KNOWN_BLIND_AXES`。
+ *   - `name:meta` 口径**天然**无法区分"运行态把下标 7 写成 8"这类同 `name:meta` 的互换。
+ *
+ * ## #334 更正（2026-10-13）：下面这段旧结论**已被实测推翻**，保留以便对账
+ *
+ * > ~~该盲区没有任何 web 面判据覆盖……`full` 口径**不能**覆盖它 —— 实测渲染侧把调色板条目的
+ * > `registryId` 统一归一为 `minecraft:` 前缀，故 `full` 对参考侧**恒有差异**（实测 18/18、
+ * > 9/9、6/6）⇒ 它在渲染面没有分辨力……⇒ 结论：EBF 的 216 对运行态组合在 web 渲染面
+ * > **结构性不可分辨**，属**产品侧缺口**（`context/grid.ts` 的调色板缓存按 `blockKey` =
+ * > `name:meta` 归并 + `_gridToV2` 以该键去重），须另立单修 `src/`。~~
+ *
+ * 事实更正（#334 本批实测，两处都是机械可复核的）：
+ *
+ * 1. **`minecraft:` 归一不成立**：渲染定义的调色板条目保留原 `registryId`
+ *    （实测控制器条目 = `gregtech:gt.blockmachines@1000`，且带 `geometry`/`tooltip`/`nbt`）；
+ *    对"仅改运行态"那一对组合，`full` 口径**参考 vs 渲染逐格 diff = 0/9（两态皆 0）**
+ *    —— 即本文件原先"`full` 恒有差异、没有分辨力"的记录是**陈旧实测**，已不适用。
+ * 2. **缺口位置不是调色板归并**：`_fromV2CellGrid` 以**下标**（`'#'+i`）建缓存、`blockKey`
+ *    对反序列化方块返回 `'#'+paletteIndex`，故 7/8 **不会**被归并；真正的缺口在**失效判定
+ *    读面**（`runtime/presentationAdapter#readContentIdentity` 的结构摘要只含名称级调色板
+ *    身份）⇒ 渲染链从不重解（`planContentRebuild` 全 false）。#334 已修（补内容级调色板项）。
+ *
+ * ⇒ 因此**见证/盲轴口径改用 `full`**（内容级）：EBF 的运行态轴**不再登记为盲轴**，
+ * `KNOWN_BLIND_AXES['multiblock-ebf-2ch.json'] = []`（见 `reducedTraversal.ts` 文件头）。
+ * 逐格**门禁**仍用 `idMeta`（跨实现的稳定身份），`full` 继续作非门禁证据。
  */
 import fs from 'node:fs'
 import path from 'node:path'
