@@ -468,7 +468,7 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
    * 就说明该接缝可以核销，本组断言会判红并要求同批更新登记 —— 这正是
    * "登记表 = 现状清单"该有的性质。
    */
-  it('**反空洞真（G-6）**：`fidelity-record-transport-unwired` 的 (a)(b) 已闭合、(c) 仍成立', async () => {
+  it('**反空洞真（G-6）**：`fidelity-record-transport-unwired` 的 (a)(b)(c-接线) 已闭合、(c-终切) 仍登记', async () => {
     const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
     const entry = SEAMS.find((s: { id: string }) => s.id === 'fidelity-record-transport-unwired')
     expect(entry, 'G-6 的传输缺口必须登记（否则它只活在报告散文里，P11 无法机械核对）').toBeTruthy()
@@ -613,10 +613,23 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
       .filter((abs) => !abs.endsWith(path.join('composition', 'kernelProjection.ts')))
       .filter((abs) => codeOnly(readSource(abs)).includes('fidelityFields'))
       .map((abs) => path.relative(SRC_ROOT, abs).replace(/\\/g, '/'))
+    // ## #301 P10f D2：从"判空"改为"**精确等值**"（不是放松，是换守的对象）
+    //
+    // 原断言 `toEqual([])` 守的是"(c) 产物侧挂点无生产传值方"。D2 把 12 处产字节
+    // 节点改吃 `ctx.plainForSave()` ⇒ 挂点**已接线**，本条**必然**判红 —— 闸门用
+    // "要求同批更新登记"的方式提醒，而不是静默通过（这正是它该有的性质）。
+    //
+    // ⚠️ 新的精确等值把"接线点"钉死：**只能**是 `composition/saveProjection.ts`
+    // （保存读面的唯一装配点）。多出第二个 = 有人绕过唯一装配点自己拼 `fidelityFields`
+    // ⇒ 判红（那正是"漏一样就静默产出错误产物"的复发形态）。
+    //
+    // ⚠️ 并且：**接线 ≠ 缺口闭合**。seam `fidelity-record-transport-unwired` 的
+    // `exitCondition` 保持登记（保存路径的 legacy 回落分支仍在，"`RuntimeDocument`
+    // 退出生产"未达成）—— 核销会让"保存路径尚未终切"失去登记。
     expect(
       fidelityCallers,
-      `(c) 若产物侧已接线 fidelityFields，本条接缝应核销并同批更新登记：${fidelityCallers.join(', ')}`,
-    ).toEqual([])
+      `(c) 产物侧 fidelityFields 的传值方必须**恰好**是"保存读面的唯一装配点"（多一个 = 有人绕过了它）`,
+    ).toEqual(['composition/saveProjection.ts'])
     // 反空洞真：投影**确实**已被生产调用（D2 的渲染路径）—— 故上面那条判据
     // 测的是"保真挂点未接"，不是"没人用投影"。少了这条，本组会退化成恒真。
     expect(

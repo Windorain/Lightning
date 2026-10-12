@@ -383,8 +383,43 @@ function paletteEntryFor(
     typedByKey.get(`minecraft:${tail}\u0000${meta}\u0000${assetId}`) ??
     typedByNameMeta.get(`${tail}\u0000${meta}`) ??
     null
+  /**
+   * ## ⚠️ 命名空间必须回**真实**值（#301 P10f D2 修，登记 D9）
+   *
+   * 本函数的 `registryId` 入参是 GF-7 的单元值编码产物 —— `minecraft:<name>:<meta>`
+   * 里的 `<name>` 已被 `blockCellValue` 截去命名空间（忠实于生产既有编码，
+   * 见上面 ① 的说明）。于是**旧行为**把它原样写进产物的调色板 ⇒
+   * `tectech:gt.godforgecasing` / `gregtech:gt.blockmachines` /
+   * `appliedenergistics2:tile.BlockCableBus` 全部塌成 `minecraft:…`。
+   *
+   * 那是**真实的数据改写**（不是表示差异）：实测真实信封夹具 68 条调色板里
+   * **66 条**命名空间被改写，`cellGrid` 逐格方块身份 **798 格中 172 格**不同
+   * （探针 `temp/p10f/probe/keys4`）。消费者是**身份**语义：
+   * `runtime/presentationAdapter#structureDigestOf` 的 `registryId@meta` 调色板身份、
+   * `pure/itemOutlinePlan` 的 `block_state_id`、`embed/useEmbedTooltip` 的
+   * `blockRegistryKeyForPalette` 注册键 —— 命名空间错 = 身份错。
+   *
+   * 而**类型化条目手里就有真值**（`kernelPaletteAssembly` 从文件条目原样承载）。
+   *
+   * ### 只在"内容键**精确**命中"时采信（不能更宽 —— 本批实测边界）
+   *
+   * | 命中路径 | 是否采信 `typed.registryId` | 理由 |
+   * |---|---|---|
+   * | ⓪ `cellPalette` 内容键精确命中（`typedExact`） | ✅ | 就是那一条，无歧义 |
+   * | ① `assetId` **几何身份**命中 | ❌ **不采信** | **几何身份不唯一**：实测 `multiblock-ebf-2ch` 的 `gregtech:gt.blockcasings@11` 与 `gregtech:gt.blockmachines@1000` **共享同一个** `assetId = geo:e82d564e`（烘焙四边形逐位相同）⇒ `typedByAsset` 只留首条 ⇒ 采信它会把 EBF 控制器写成机壳（**正确的 meta + 错误的命名空间**，比"有损但一致"更坏：它让身份**不一致**且看不出来）。这正是判据"不得瞎猜"的落点。 |
+   * | ② 精确三元组（键里含 `registryId` 本身） | ➖ | 采信与不采信**同值**，无差别 |
+   * | ③ `(name 尾段, meta)` 兜底 | ❌ **不采信** | 同尾段不同命名空间可能有两条（`typedByNameMeta` 只留首条）⇒ 猜会**引入**错误身份 |
+   *
+   * ⇒ 无 `cellPalette` 时**如实保留** GF-7 的有损形态（`minecraft:<name>`）：
+   * 那是"丢命名空间"，但**不会错配**（方块身份仍由 `(tail, meta)` 唯一确定）。
+   * 而生产的两条投影入口（`kernelProjection#gridProjectionInputOf` 与
+   * `projectMultiblockBody`）都**给出了**精确身份 ⇒ 生产产物拿到真命名空间
+   * （负对照见 `p10fSaveProjection.test.ts` 的 D9 组）。
+   */
+  const typedIdentityExact = typedExact !== null
+  const realRegistryId = typedIdentityExact && typed !== null && typed.registryId !== '' ? typed.registryId : registryId
   const out: Record<string, unknown> = {
-    registryId,
+    registryId: realRegistryId,
     meta,
     renderMode: typed?.renderMode ?? (assetId === '' ? 'BlockModel' : 'BakedModel'),
   }

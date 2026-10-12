@@ -37,6 +37,7 @@ import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { KernelSession } from '@/runtime/kernelSession'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
 import { captureFidelityFieldMap } from '@/adapters/fidelityCapture'
+import { plainRootOf } from '@/adapters/plainRoot'
 import { createDocument, withContent, withDocumentContent } from '@/domain/document'
 
 /** 装配诊断/统计要写进去的日志面（与 `Context.log` 同形的最小投影）。 */
@@ -160,7 +161,29 @@ export function adoptLoadedDocument(
     // 无会话（诊断/装配测试路径）：不装配，也不报错 —— 那是配置事实，不是缺陷。
     return false
   }
-  const assembled = assembleKernelDocument({ doc, plainRoot })
+  // ── ⚠️ 边界处的**幂等归一化**（#301 P10f D2 实测抓出的污染入口）────────────
+  //
+  // ## 为什么必须在这里（而不是只靠 12 个调用点自觉）
+  //
+  // `assembly` 把 `plainRoot` 里**不认识的键**收进保真记录，而保真记录**整份写回产物根**。
+  // ⇒ 若调用方误传**信封根**（`{documentFormat, payloadEncoding, payload, meta}`）
+  // 而不是解包后的 plain，那么：
+  //  ① 信封结构键（`payload` = 整份 base64 正文！）会被当成"未知顶层字段"收进保真记录；
+  //  ② 保存时它们被写回**Plain 产物的根** ⇒ 产物同时是 Plain 形态又带一份内嵌 payload
+  //     （体积翻倍 + 形态自相矛盾）；
+  //  ③ 而信封根里**没有**真正的 plain 键（`mode`/`fixtureFile`/`cellGrid`…）
+  //     ⇒ 那些键**不进**保真记录 ⇒ 保存一次就丢。
+  // 实测（真实信封 + 多方块夹具，探针 `temp/p10f/probe/keys2`）：误传 raw 时
+  // `unknownFields` 从 `{mode,scanBounds,source,documentFormat}` 变成
+  // `{documentFormat,payload,payloadEncoding[,payloadNote]}` —— **一边污染、一边丢失**。
+  //
+  // ## 为什么是幂等的
+  //
+  // `plainRootOf` 对**非信封**输入原样返回（零成本、无拷贝），故对"已经正确的调用方"
+  // 完全无行为变化；对误传 raw 的调用方则还原成生产 12 个调用点传入的那个形状。
+  // ⇒ 这是"统一入口"而不是"第二个实现"：解包判据只有 `adapters/plainRoot` 一份。
+  const normalizedRoot = plainRoot === undefined ? undefined : plainRootOf(plainRoot)
+  const assembled = assembleKernelDocument({ doc, plainRoot: normalizedRoot })
   if (!assembled.ok) {
     ctx.log.warn('场景加载', `内核装配未支持该文档形态（旧路径照常渲染）`, {
       locator,
