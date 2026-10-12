@@ -688,6 +688,7 @@ async function runA30SessionFace(
   const generationAfter = session.generation
   const outcomeGenerationAfter = again.generation
   const mountedBatchesAfterRestore = session.object3d.children.length
+  const pendingRebuildAfterRestore = session.pendingRebuild
   const timeKeyAfter = JSON.stringify(session.activeKey?.time ?? null)
   const cameraAfter = camera.matrixWorld.elements.slice()
 
@@ -728,6 +729,9 @@ async function runA30SessionFace(
     sessionForcedRebuildAfterRestore: again.applied === true,
     sessionGpuRebuiltAfterRestore: generationAfter !== null,
     sessionMountedBatchesAfterRestore: mountedBatchesAfterRestore,
+    // 「一次成功重建即复位」在真机上的读数（`pendingRebuild` 的消费者：视口可用它判断
+    // "下一帧是否必然重建"，而这里钉住它的生命周期）
+    sessionPendingRebuildAfterRestore: pendingRebuildAfterRestore,
     sessionGenerationConsistent: outcomeGenerationAfter === generationAfter,
     sessionGpuRebuiltAfterContentChange: liveGenerationAfterContentChange !== null
       && liveGenerationAfterContentChange !== generationBefore,

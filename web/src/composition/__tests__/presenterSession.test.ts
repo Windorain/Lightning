@@ -548,10 +548,14 @@ describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢 + *
       // （若恢复路径不强制重建，下面这份读数会一直保持到内容再变一次。）
       expect(s.generation, '丢失后实际世代必须为 null（旧句柄不复用）').toBeNull()
       expect(s.object3d.children.length, '丢失后挂载必须被清空').toBe(0)
+      // `pendingRebuild` 是**只读**诊断面：丢失即置位（否则调用方无从知道"下一帧会重建"）
+      expect(s.pendingRebuild, '丢失后必须进入"待重建"状态').toBe(true)
 
       // ① 恢复：内容**未变**也必须重建（P11-F 的修复点）
       const again = s.applyKernelDocument(doc, time)
       judgeRecoveryAfterLoss(readingOf(s, again, generationBefore))
+      // 标志的生命周期：**一次**成功重建即复位（不是"永久待重建"⇒ 每帧重编）
+      expect(s.pendingRebuild, '一次成功重建后必须复位').toBe(false)
       // ② 时间：恢复后求值键里的时间必须逐字段不变
       expect(s.activeKey?.time, '② 时间：恢复后求值键里的时间必须逐字段不变').toEqual(timeKeyBefore)
       // ③ 选择：引用相同（恢复路径没有任何写路径碰过应用状态）
@@ -568,6 +572,7 @@ describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢 + *
       expect(sameAgain.applied, '对照：未发生丢失时，同一输入不得重编（同一性保证仍在）').toBe(false)
       expect(s.generation, '对照：未发生丢失时世代不变').toBe(generationBefore)
       expect(sameAgain.generation, '对照：返回值与实际世代同源').toBe(s.generation)
+      expect(s.pendingRebuild, '对照：未发生丢失时不得处于"待重建"（标志只在真丢失后置位）').toBe(false)
 
       // 恢复后**仍然**能感知内容变化并重建（不是"冻住"）
       const bumped = { ...doc, version: { ...doc.version, documentVersion: doc.version.documentVersion + 1 } }
