@@ -151,9 +151,12 @@ export const AnnotationUpdateOperator: OperatorType = {
     if (!id || !patch) return
 
     // #301 P10f C′2：内核写优先（逐字段 `setProperty`）。
-    // ⚠️ 迁移的字段限于内核**读面已暴露**的那 15 个（`ANNOTATION_FIELD_PAIRS`）；
-    // 其余 legacy 专有字段（如 `renderOpacity` 之外的内核未承载项）不在本批范围，
-    // 遇到它们直接回落 legacy —— 宁可走旧路径，也不静默丢字段。
+    // ⚠️ 实测边界（#262 P11-B3 措辞更正，Lead comment 6429 三 L5）：本批**只迁 `title`**
+    // —— 窄的是**写面**（`annotationPatchCommand` 对非单键 `title` 的补丁返回 `null`），
+    // **不是**读面：读面是 15 字段封闭表（`ANNOTATION_FIELD_PAIRS`，**含** `locked`/几何
+    // `min`/`max`/`pos`/`points`/`color`/`renderStyle`）—— 原注释把本批边界说成
+    // "限于读面已暴露的那 15 个"，与 `annotationPatchCommand` 的实现（只认 `title`）不符。
+    // 其余字段（`locked`/`renderOpacity`…）一律回落 legacy —— 宁可走旧路径，也不静默丢字段。
     const command = annotationPatchCommand(id, patch)
     if (command !== null && ctx.submitContentEdit(command)) return
 
