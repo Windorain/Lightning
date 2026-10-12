@@ -560,7 +560,15 @@ export const GATE_RULES = [
  * 属"凭记忆填编号"的错位。加断言后该类错误无法再通过测试（这正是 #249 §14
  * 「负对照必须证明确实破坏了目标保证」在**文档对账**上的同类应用）。
  *
- * 文档侧同源副本见 #251 B5 附件；两者互为镜像，改动必须同批双改（B5 修正由 P1 同步）。
+ * ## 文档侧镜像的**位置更正**（#262 P11-B3，2026-10-13）
+ *
+ * 原写「文档侧同源副本见 **#251** B5 附件」——**事实性错误**。实测：B5 退役矩阵的
+ * 镜像版挂在 **#250**（asset id **1008**，v3 版，36,265 B），`#251` 上的旧附件
+ * （id 984）已被删除（#250 comment 4867 逐字：「#251 的旧 B5 附件（id 984）已删除，
+ * 镜像版迁至本单附件」）。**终订镜像**见 **#262 附件 1909**
+ * （`49792e3-B5-retirement-matrix-final.md`）——本表的终订值以它逐条对账。
+ *
+ * 两者互为镜像，改动必须同批双改。
  */
 export const RETIREMENT_OWNERS = {
   'raw-authority-object': {
@@ -632,9 +640,17 @@ export const RETIREMENT_OWNERS = {
   },
   'frame-sequence-as-animation': {
     entries: [8],
-    owners: [{ p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '场景 + 通用动画轨道' }],
-    exitStage: 'P4 交付同批',
-    role: 'P4 执行者',
+    owners: [
+      { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '场景 + 通用动画轨道' },
+      { p: 'P10', issue: 261, duty: '集成闭环与交叉验收', scope: '旧播放调度（`scheduleNextWorldFrameStep` 族）删除随生产接线' },
+    ],
+    // **R-WK-03 终订值同步**（#262 附件 1909 §1 第 8 行 / §0「删除批次口径未同步」）：
+    // 本表原写「P4 交付同批」，而**删除**实际落在 **P10/#261** —— `runtime/drwMeshPipeline.ts`
+    // 的 `setTimeout` 自续播放调度与 `runtime/main.ts` 的播放 Ref（组 `world-frame-playback`）
+    // 同在 #261 删除，registry 条目的 `areaOverrideReason` 已逐字记录该改写。
+    // ⇒ 矩阵层（活闸门）同步到与代码现实一致的终订值，不再停在 P4 口径。
+    exitStage: 'P4 交付替代（场景 + 通用动画轨道）→ 旧播放调度删除随生产接线归 P10/#261（R-WK-03，已执行）',
+    role: 'P4 执行者（语义替代：场景 + 通用动画轨道）；P10 执行者（生产接线后删除旧播放调度）',
   },
   'grid-coord-as-identity': {
     entries: [9],
@@ -655,9 +671,17 @@ export const RETIREMENT_OWNERS = {
   },
   'material-viewport-tick': {
     entries: [11],
-    owners: [{ p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '统一时间绑定与纹理序列纯采样' }],
-    exitStage: 'P4 交付同批',
-    role: 'P4 执行者',
+    owners: [
+      { p: 'P4', issue: 255, duty: '统一动画求值、依赖图与纹理序列', scope: '统一时间绑定与纹理序列纯采样' },
+      { p: 'P10', issue: 261, duty: '集成闭环与交叉验收', scope: '材质 tick 三处（`renderEngine`/`blockIconCache`/`simpleMaterialLibrary`）随生产接线同批删除' },
+    ],
+    // **R-WK-03 终订值同步**（#262 附件 1909 §1 第 11 行 / §0 同 #8 族）：
+    // 本表原写「P4 交付同批」，而**删除**实际落在 **P10/#261** —— `material-tick` 组
+    // 三处（`runtime/renderEngine.ts:101` 调用位、`render/interaction/blockIconCache.ts:399`
+    // 调用位、`render/materials/simpleMaterialLibrary.ts` 声明位）在 #261 同批删除，
+    // registry 条目的 `areaOverrideReason` 已逐字记录该改写。
+    exitStage: 'P4 交付替代（统一时间绑定与纹理序列纯采样）→ 材质 tick 三处删除随生产接线归 P10/#261（R-WK-03，已执行）',
+    role: 'P4 执行者（语义替代：统一时间绑定与纯采样）；P10 执行者（生产接线后删除材质 tick 三处）',
   },
   'scattered-text-and-global-lang': {
     entries: [12],
