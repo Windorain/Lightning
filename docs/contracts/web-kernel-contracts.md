@@ -1,4 +1,4 @@
-# Web 编辑器内核 · 冻结契约（v1.5）
+# Web 编辑器内核 · 冻结契约（v1.5.1）
 
 > **地位**：本文件是 Web 编辑器内核重建（Gitea
 > [#249](http://127.0.0.1:3300/Lightning/lightning/issues/249)）**跨批次契约的单一来源**。
@@ -12,7 +12,9 @@
 >
 > **本文件的边界**：它是**类型级契约文本**（语义签名、判别式、错误分类、所有权、失败行为），
 > 不是现存可调用 API，也不是实现指南。目录布局见 §7；性能门槛见 #251 B2 附件（标定收口 #262）；
-> 退役归属见 #251 B5 附件。辅助类型在本文件中省略，其完整定义由 P1/P2 在 `web/src/` 落地时补齐 ——
+> 退役归属见 **#250** 附件 **asset id 1008**（B5 退役矩阵 **v3** 版）——**终订镜像**见
+> **#262** 附件 **1909**（`49792e3-B5-retirement-matrix-final.md`）。辅助类型在本文件中省略，
+> 其完整定义由 P1/P2 在 `web/src/` 落地时补齐 ——
 > **补齐时不得改变本文件已冻结的语义**。
 
 ---
@@ -191,6 +193,12 @@ interface EditorClient {
 **必须成立**
 - `read` **不导出**内部 `ApplicationState`、Vue Ref、文档实例字段或渲染对象
   （#249 §5 明文）。⇒ `ReadView` 的字段全部是查询方法，不是数据字段。
+- `read` 对**缺失作用域**（`ReadScope` 指向不存在的文档/上下文）**抛异常**，**不**返回 `Result`
+  —— 那是**调用方缺陷**，与**业务拒绝**的 `DomainError` **值形态**相区分（业务拒绝走
+  `Result` / `CommandOutcome`）。签名保持非 `Result`（`read(scope): ReadView`）正是这个区分。
+  - 依据：GF-4 裁决（#250 comment 4866）；落地见 `web/src/runtime/execution.ts` 的
+    `Editor.read` 抛错路径（缺失作用域 ⇒ `throw`）。
+  - 负对照：让 `read` 对缺失作用域返回 `{ ok: false, error }` ⇒ 与业务拒绝的值形态混淆，必须判红。
 - `executeNow` 在以下情形返回 `WouldBlock` / `ReentrantCall`，**不越序、不阻塞等待**：
   执行器忙、发布订阅中重入、存在不兼容前序排队命令（#249 §5 明文）。
 - `observe` 的回调**不能同栈重入写入**；新命令进入**下一合法更新批次**（#249 §5 明文）。
@@ -796,7 +804,7 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
 | GF-1 | P0 (#251) | §3.2 错误分类 | #249 §5 在正文并列提及 `WouldBlock`/`ReentrantCall`，但"至少包括"清单只有八个码 | 采纳本契取舍：`ReentrantCall` 作为 `WouldBlockError.params.reason='reentrant'`；请 P1 确认或改回第九码 |
 | GF-2 | P0 (#251) | §7 `ModuleDecl` | #249 §10 只说"provides/requires/contributes"，未给 `contributes` 的子类清单 | 本契约按 §10 段落列举出七类；若 P8/P9 需要第八类，回 #250 补 |
 | GF-3 | P0 (#251) | §4 `EvaluationKey` | #249 §7 说"至少区分"六项但未给字段名与类型 | 本契约命名之；`time` 的 `TimeValue` 表示法（有理帧率）待 P4 落地时确认，若需改动条目结构回 #250 |
-| GF-4 | P1 (#252) | §2 `EditorClient.read` | `read(scope): ReadView` 是非 `Result` 签名，`ReadScope` 指向不存在的文档/上下文时没有错误表达形态 | **裁决**：批准 P1 处置——`read()` 对缺失作用域**抛异常**（视为调用方缺陷，与业务拒绝的 `DomainError` 值形态区分），并以测试钉住；`Result` 形态保留给业务拒绝。**最终状态：已落地**（`web/src/runtime/execution.ts:198` 的 `Editor.read` 抛错路径）；⚠️ 契约 §2 正文**未**补记该语义，以本表为准（#250 comment 4866） |
+| GF-4 | P1 (#252) | §2 `EditorClient.read` | `read(scope): ReadView` 是非 `Result` 签名，`ReadScope` 指向不存在的文档/上下文时没有错误表达形态 | **裁决**：批准 P1 处置——`read()` 对缺失作用域**抛异常**（视为调用方缺陷，与业务拒绝的 `DomainError` 值形态区分），并以测试钉住；`Result` 形态保留给业务拒绝。**最终状态：已落地**（`web/src/runtime/execution.ts` 的 `Editor.read` 抛错路径）；**契约 §2.1 正文已同批补记该语义**（v1.5.1，P11-B3）—— 表与正文不再分叉（#250 comment 4866） |
 | GF-5 | P2 (#253)（P1 就地登记时占用 GF-4 号，经裁决改号） | §2/§3/§5 属性写通路 | P1 已合入的 `application/commands.ts` 自建属性写面（`reduceSetProperty` + 内联白名单 + 自有 `PropertyValue`），与 P2 的 RNA 写路由同名并存于 `application/`；全树一度有**三处** `PropertyValue` 定义 | **裁决（方案 A，方案 B「双通路+桥」即 #171/#249 §2.1 禁止的门面，否决）**：P1 的 `reduceCommand`/`ApplicationState` 为唯一更新入口；属性语义（描述/handler/动态可编辑性/值类型/草稿解析）由 P2 的 RNA 注册表承担；删 P1 侧内联白名单与重复类型定义。五项冻结：限定式属性 ID / `owner.kind` 词汇以 §1.1 实体种类为准 / `WouldBlockReason` camelCase / `null` 写仅在描述符声明 `nullable` 时合法 / 多选整体拒绝 + 逐目标原因。**最终状态：已落地**（P2 批内收敛，HEAD `99a7d3a`；PR #267 合流 `96b2e3b`）（#250 comment 4898、4899、4979、4984、4999） |
 | GF-6 | P9 (#260) | §7.3 公共出口最大深度 2 | 「公共出口最大深度 2」是否作用于测试目录未明；职责子目录（`application/export/`、`application/recovery/`）是否为违规 | **裁决**：批准澄清——深度约束只作用于**生产模块**；测试可位于 `<出口>/__tests__/` 不计深度。理由：职责子目录是 #249 §4 目录表的明文结构，深度规则的意图是防「钻进私有实现」，不是压平职责分区。**最终状态：已落地**（`web/tests/architecture/boundary-rules.mjs:226` 遍历时跳过 `__tests__`，`MAX_PUBLIC_EXPORT_DEPTH` 只计生产路径）（#250 comment 5111） |
 | GF-7 | P10b (#282)（就地编号 GF-4 撞号后改号） | blockGrid 单元格编码（适配层§7 外部格式边界） | 旧格式 `blockGrid` 的单元格键/值编码无契约口径 | **裁决**：批准适配层口径——键 `"x,y,z"`、值 `minecraft:<name>:<meta>`（与生产 `BlockRef.block_state_id` 同源）。**后续更正（D2 裁决）**：`kernelProjection.ts:276` 用 `minecraft:${name}` 拼接会**丢命名空间**（而 `typed` 手里有真 registryId）⇒ 判据夹具输入改 `plainRootOf(raw)`（与生产同口径），已修。**最终状态：已落地**（`web/src/domain/cellPosition.ts:56` 的 `cellContentKeyOf` = `cellPositionKey`，键与 `cells` 同一套）（#250 comment 5443、6125） |
@@ -824,6 +832,7 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
 | v1.3 | 2026-10-12 | 新增 §2.4 装配成功读面（GF-16）：`hasAdoptedContent()` + `frameDeclarations()` 唯一读取面 + 三种通知信号的不可互换表 + D8 修复的注入判据要求 | #250 comment 5861（R-WK-09 四项裁决）；#301（P10f C′1） |
 | v1.4 | 2026-10-12 | §2.4 补侧表读面（`kernelAnnotations`/`kernelMaterials`）的对称分流与 8 条"必须成立"；**更正 v1.3 的第 1 条**（`markLoaded` 必须清 GF-16，第一版写反了） | #250 comment 5880（N4 采 (a)）；#301（P10f C′1 尾段） |
 | v1.5 | 2026-10-13 | §8 缺口登记表**回填 GF-4…GF-14**（10 条裁决 + GF-10 编号空缺登记，共 11 行），逐条注明来源评论 id 与最终状态（已落地→文件/读面，或如实登记与代码现实的差异）；移除「GF-4…GF-14 未回填」维护备注（改为回填说明）；文档版本字样同步 v1.5 | #250 评论 4866、4898、4899、4979、4984、4999、5111、5443、5583、5605、5699、5731、6125、6263；#262（P11-B2） |
+| v1.5.1 | 2026-10-13 | **引用更正**：文件头「退役归属见 #251 B5 附件」是**事实性错误**（#251 的旧 B5 附件 id 984 已删除，镜像 v3 挂在 #250 的 asset id 1008）⇒ 改为「#250 附件 asset 1008（v3）+ 终订镜像 #262 附件 1909」；**GF-4 正文补记**：§2.1「必须成立」补 `read()` 缺失作用域 ⇒ 抛异常（调用方缺陷）、与业务拒绝的 `DomainError` 值形态区分 + 负对照，并移除 GF-4 行尾的「⚠️ 契约 §2 正文未补记，以本表为准」注记（表与正文分叉消除） | #262 comment 6408②（Lead 裁决 2026-10-13，P11-B3） |
 
 ---
 
