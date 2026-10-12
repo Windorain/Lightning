@@ -370,14 +370,14 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       'src/editors/property-writers.ts',
     ]),
     newTrack:
-      '内核写面（`addObject`/`deleteObject`/`setProperty` + `applyKernelPropertyValue`）承载注解对象的增删改；C′2 已迁：注解**新建/删除**与 **`title`** 字段写（`annotationOperators` 经 `Context.submitContentEdit`，内核写 + 全保真投影回 legacy）。',
+      '内核写面承载内容编辑：注解**新建/删除**与 **`title`** 字段写（`annotationOperators`，C′2）+ 逐格说明写（`setCellTooltip` 命令，**D0 已交付**）—— 两者都经 `Context.submitContentEdit`（内核写 + 投影回 legacy）。',
     oldTrack:
-      '两类编辑仍落 legacy：(a) 逐格说明经 `metaEditOperators` 写 `tooltipPalette`/`cellTooltipGrid` 侧表（内核无对应命令，且内核 `cellContent` 是"单表 + 键编码"的**不同形状**）；(b) 注解 `locked`/几何等字段经 `annotationOperators` 的回落分支写 legacy（内核写端口只实现 `text`）。',
+      '(a) **已迁（D0）**：逐格说明原先经 `metaEditOperators` / `property-writers` 直接改 `tooltipPalette`/`cellTooltipGrid` 侧表；现改为**内核写优先**，旧写法**降为回落分支**（未装配/无会话时仍走它 ⇒ 见下方 exitCondition 的剩余项）。\n(b) **仍落 legacy**：注解 `locked`/几何等字段经 `annotationOperators` 的回落分支写 legacy（内核写端口只实现 `text`）。',
     blocker:
-      '(a) 需要"侧表 → 单元格内容键表"的表示转换设计 + 可撤销的写命令，属**承载面新增**而非接线；(b) 需要扩 `writeAnnotationProperty` 的写入分支与 `KERNEL_OBJECT_TYPES` 的注解属性描述符（`locked`/几何）。两者都超出《P10f C′2 写路径分派设计》（附件 1670）的核定范围。',
+      '(b) 需要扩 `writeAnnotationProperty` 的写入分支与 `KERNEL_OBJECT_TYPES` 的注解属性描述符（`locked`/几何）。\n(a) 的**剩余项**不是"没做"，而是"**回落分支还在**"：`metaEditOperators` 仍 import `ctx.getDoc()`（取当前帧高度 + 回落写入）。该分支只有在 **D3 终删 `getDoc()`** 时才能删 —— 删早了会在"未装配"时**丢能力**（#171 禁止）。\n⚠️ **更正**：我在 C′2 期写的 blocker 是"(a) 需要表示转换设计，属承载面新增"。**D0 实测推翻了它**：两个方向的转换生产里都早已存在（`kernelPaletteAssembly.ts:249-271` 正向 / `kernelProjection.ts:1114` 反向），所以 D0 只补了一条写命令。',
     owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
     exitCondition:
-      '`src/operators/builtin/metaEditOperators.ts` 不再 import `ctx.getDoc()`（逐格说明改写内核单元格内容），且 `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand` 不再有"未承载字段即回落"的分支（`locked`/几何已在 `writeAnnotationProperty` 有写端口）；届时删除本条登记。**执行批次：#301 子批 D 的 D0 段** —— 理由是"逐格说明写面是 D 的前置"：`metaEditOperators` 留 legacy ⇒ 它仍是 `getDoc` 消费者 ⇒ **D 批的终删闭不了合**。（我第一版把 owner 写成 `P11`，被 `boundary-scan.test.ts` 的"owner 必须是已登记真实批次且职责匹配"闸门**当场判红** —— 闸门是对的：P11 是审计批，不做迁移，把功能迁移挂到审计批名下等于 seam 永无退出。）',
+      '**两个子句都必须成立**：\n① `src/operators/builtin/metaEditOperators.ts` 不再 import `ctx.getDoc()` —— 其**回落分支**与**帧高读取**随 **D3 终删 `getDoc()`** 一并消失（D0 已把主路径迁到内核，但保留了回落 ⇒ 本句**尚未**成立）；\n② `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand` 不再有"未承载字段即回落"的分支（`locked`/几何已在 `writeAnnotationProperty` 有写端口）。\n⇒ 届时删除本条登记。**执行批次：#301 子批 D**（①归 D3 终删段，②归 D 的注解字段写面段）。前者是"逐格说明写面是 D 前置"的理由：`metaEditOperators` 留 `getDoc` ⇒ **D3 的终删闭不了合**。（我第一版把 owner 写成 `P11`，被 `boundary-scan.test.ts` 的"owner 必须是已登记真实批次且职责匹配"闸门**当场判红** —— 闸门是对的：P11 是审计批，不做迁移，把功能迁移挂到审计批名下等于 seam 永无退出。）',
   }),
 ])
 
