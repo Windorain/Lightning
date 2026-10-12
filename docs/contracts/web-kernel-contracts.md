@@ -279,6 +279,12 @@ interface Context {
    文档的 `contexts`/`leases`/`saveLedgers`，而工作区重置路径在后紧跟
    `seekFrame(0)`（走 `contextAndDoc`）⇒ 复用会让那次帧归零**静默失效**。
    故"未装载"由会话字段表达，内核文档 datablock 保持存在。
+5. **写入口是单参数的"两段式"**（A′ 实现相对设计表的一处**已声明偏离**）：
+   `setDocument(next)` 只做「legacy 写 + 存在性镜像」；**内容装配留在调用点**
+   （`adoptLoadedDocument` / `adoptDocumentIntoKernel`），顺序为
+   `setDocument` → `seekFrame(0)` → `adopt`，与加载路径既有顺序一致。
+   ⇒ 消费方若只调 `setDocument` 而漏掉装配，后果是"存在性对、内核内容空" ——
+   该形态由装载路径的 `objects > 0` 判据机械抓住（`p10fDocumentLifecycle.test.ts`）。
 
 **迁移状态（如实登记）**
 

@@ -397,4 +397,69 @@ describe('P10f A′ · 反实现漂移（本文件的镜像宿主 vs 真实实�
     expect(raw.includes('//'), '前置：源码确实含行注释（剥离才有意义）').toBe(true)
     expect(body.includes('先写 legacy'), '注释必须已被剥离（否则会误命中注释文本）').toBe(false)
   })
+
+  /**
+   * ## 为什么这条闸门值得单独存在（Lead 复核抓出的一处真实偏差）
+   *
+   * A′ 的设计表核定过 `setDocument(next, adoption?)` **双参数**形态，实现落成了
+   * **单参数**两段式（理由见 `context.ts` 的注释）。而 `context.ts` 的注释一度**仍在
+   * 描述那个不存在的 `adoption` 参数** —— 即"文档声称的接口 ≠ 真实接口"。
+   *
+   * 那正是本工程反复抓的"声称 ≠ 实现"族（P10d 的 methodology 第 5 条：
+   * 「提到某函数名 ≠ 调用它」）。它**不会**被任何行为测试抓到：行为是对的，
+   * 只有读注释的人会被误导 —— 而下一个消费者正是读注释的人。
+   *
+   * ⇒ 把"注释与签名一致"变成**机器可查**的事实：
+   *  - **签名**参数个数必须等于 1（本批核定并实现的口径）；
+   *  - 描述该方法的**文档注释**里**不得**出现 `adoption` 这个词
+   *    （它只可能是对不存在参数的描述）。
+   *
+   * 若将来确实要加回 `adoption` 参数，本用例会判红并**逼**作者同批更新注释与
+   * 本节口径 —— 那是正确的摩擦。
+   */
+  it('注释与签名一致：`setDocument` 是**单参数**，且文档注释不描述不存在的 `adoption`', () => {
+    const raw = fs.readFileSync(CONTEXT, 'utf8').replace(/\r\n/g, '\n')
+
+    // ① 签名参数个数（用去注释骨架，避免注释里的同名文本干扰）
+    const code = stripComments(raw)
+    const m = /setDocument\s*\(([^)]*)\)\s*:/.exec(code)
+    expect(m, '`Context.setDocument` 必须存在').not.toBeNull()
+    const params = m![1]!.split(',').map((s) => s.trim()).filter((s) => s !== '')
+    expect(params.length, `setDocument 必须是**单参数**（实测 ${params.length} 个：${params.join(' | ')}）`).toBe(1)
+    expect(params[0]).toContain('next')
+
+    // ② 注释**不得**把 `adoption` 描述成**当前存在的参数**。
+    //
+    //    ⚠️ 判据刻意不是"注释里不许出现 `adoption`"（第一版那样写，**当场判红**）：
+    //    本批的注释**需要**用这个词来**记录**那处偏离（"设计表核定过双参数、
+    //    实现落成单参数两段式"）—— 那正是 Lead 要求的留档，删掉它是把
+    //    偏差证据抹掉，比留着更糟。
+    //
+    //    真正要禁的是**静默描述幻影参数**：一段以它为主题的语义说明
+    //    （旧注释的形态是 `## \`adoption\` 的语义` + "有值 ⇒ …、无值 ⇒ …"）。
+    //    ⇒ 判据 = 若提及该词，则**必须**同时留下"这是偏离"的标记。
+    const sigAt = raw.indexOf('setDocument(next: RuntimeDocument | null): void {')
+    expect(sigAt, '前置：必须能定位签名').toBeGreaterThan(-1)
+    const docStart = raw.lastIndexOf('/**', sigAt)
+    expect(docStart, '前置：该方法必须有文档注释').toBeGreaterThan(-1)
+    const doc = raw.slice(docStart, sigAt)
+
+    if (/adoption/i.test(doc)) {
+      expect(
+        /偏离|设计表/.test(doc),
+        '注释提到了 `adoption`（该方法**没有**这个参数），故必须同时标明那是\n' +
+          '"与设计表的偏离 + 实现理由"—— 否则读者会以为装载可以折进本方法。\n' +
+          '（旧缺陷形态：一段 `## `adoption` 的语义` 如实描述一个不存在的参数。）',
+      ).toBe(true)
+      // 且不得保留旧的"语义说明"标题形态（那正是被修掉的那段）
+      expect(
+        /adoption\s*`?\s*的语义/.test(doc),
+        '不得再出现"`adoption` 的语义"这类把它当现有参数的段落标题',
+      ).toBe(false)
+    }
+
+    // ③ 反空洞真：注释里**确实**有内容（否则上面的判据是空转）
+    expect(doc.length, '前置：文档注释非空，判据才有对象').toBeGreaterThan(200)
+    expect(doc.includes('唯一写入口'), '前置：注释确实在描述本方法').toBe(true)
+  })
 })
