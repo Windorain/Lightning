@@ -219,4 +219,25 @@ export type GeometryAttributes = Readonly<{
   colors: Float32Array
   /** 三角形数（= positions.length / 9）。 */
   triangleCount: number
+  /**
+   * **逐三角形 → 单元格**表（#299 P10e 逐格身份层；legacy `triangleMap` 的等价物）。
+   *
+   * ## 为什么它挂在几何属性上（而不是图元上）
+   *
+   * 三角形的**序号**是几何的属性：`positions[9t .. 9t+9)` 就是第 `t` 个三角形。
+   * 而"第 `t` 个三角形属于哪一格"由**同一份**几何的内容决定 —— 两个对象共享同一
+   * 几何身份时，它们的三角形序与格映射**必然相同**（同一份内容）。
+   * 挂在图元上会让"共享几何"的两份映射各存一份并可能漂移。
+   *
+   * 这正是 legacy 的形态：`mesh.userData.triangleMap` 挂在**合并后的几何**上，
+   * 与 `geometry.attributes.position` 同一序（`render/mesh/blockMesh.ts:121-130`）。
+   *
+   * ## 缺失的语义（**显式**，不是"空表"）
+   *
+   * `undefined` = 该几何**不是**逐格来源（A18 自造夹具、纯网格元素、无几何资产）。
+   * 这与"携带了但长度不符"是两种不同的事实：后者是**实现缺陷**，
+   * 由 `compileScene` 的 `cell-map-shape-invalid` 显式跳过并报出。
+   * 把缺失表达成空表会让"这一点不可逐格拾取"与"格表算错了"不可区分。
+   */
+  readonly cellMap?: import('./cellIdentity').TriangleCellMap
 }>
