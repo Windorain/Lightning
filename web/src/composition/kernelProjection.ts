@@ -29,6 +29,18 @@
  * 形态由 {@link KernelProjectionInput} 的 `multiblock` 是否存在**机械决定** ——
  * 让调用方传一个 `shape` 参数就会造出"声明与内容不符"的文件。
  *
+ * ### 2b. 而**网格尺寸**相反：它是**文件声明的事实**，必须由载荷携带（#262 P11-A）
+ *
+ * 两者不矛盾 —— 它们是两条不同的纪律，判据也各不相同：
+ *
+ * | 事实 | 谁能决定 | 为什么 |
+ * |---|---|---|
+ * | 文档**形态** | **内容**（`multiblock` 在不在） | 形态是内容的函数；让调用方声明会造出自相矛盾的文件 |
+ * | 网格**尺寸** | **文件声明**（`sizeColumn/sizeRow/sizeZSlice`） | `cells` 是稀疏键表 ⇒ 尺寸**推不出来**；按内容推会在"尾层/尾列全空"时**丢掉声明**（保存一次就缩水） |
+ *
+ * ⇒ 载荷带声明 ⇒ 按声明输出；不带（内核自创内容）⇒ 维持"尺寸由内容决定"。
+ * 判别子与读面 `runtime/gridRead#declaredGridSize` **同一份判定**（同一事实两处消费）。
+ *
  * ### 3. 未知字段经**保真记录**回写（不静默丢，也不塞回核心）
  *
  * #249 §12：未知字段"若必须往返保留，放在带源格式/源版本的适配器保真记录中"。
@@ -62,6 +74,8 @@ import type { CellContentTable } from '@/domain/cellContent'
 // （`legacyFields.ts:145` 逐字注明它与 `render/schema/types` 同源）。
 // ⇒ 取适配层那份，既在同一层内，也不增加第三个字面量。
 import { tooltipPoolOf } from '@/adapters/tooltipPool'
+// 「什么算一份合法的声明尺寸」的**唯一**定义点（读面/写面共用同一判定 —— #262 P11-A）。
+import { declaredGridSize } from '@/runtime/gridRead'
 import { findObject, findObjectData, objectsInOrder, type Scene, type SceneObject } from '@/domain/scene'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -127,11 +141,43 @@ export interface ProjectedGrid {
   readonly partLists?: unknown[]
   /** 无法解析的单元键/值数（**显式**计数，不静默吞）。 */
   readonly invalidCells: number
+  /**
+   * 落在**声明尺寸之外**的格数（`undefined` = 无此事）。
+   *
+   * 载荷声明了尺寸而内容越界 ⇒ 维度按**内容扩张**（见 {@link projectGridCells} 的裁决），
+   * 本计数让"产物比声明大"这一事实**可观测**（不被静默吞掉）。
+   * 缺席而非 `0`：与 `cellPartsGrid?` 同一"缺省即无"口径。
+   */
+  readonly outsideDeclaredCells?: number
 }
 
 /** 投影用的**网格内容**（类型化承载的投影面）。 */
 export interface GridProjectionInput {
   readonly cells: Readonly<Record<string, string>>
+  /**
+   * **网格的声明尺寸**（`sizeColumn` = x 宽、`sizeRow` = y 高、`sizeZSlice` = z 深）。
+   *
+   * ## 为什么投影**必须**能拿到它（#262 P11-A；D-1 事实的第二处消费方）
+   *
+   * `cells` 是**稀疏**键表（`"x,y,z"` → 方块身份），故"网格多大"**推不出来**。
+   * 修前本函数按 `max(x)+1 / max(y)+1 / max(z)+1` 推（内容包围盒）⇒
+   * **声明尺寸 > 包围盒**的文档（稀疏尾层：尾切片/尾列/顶行全空）保存后 `cellGrid`
+   * **缩小**，文件声明的尺寸事实在保存时**丢失**（实测：声明 6×5×4 的文档
+   * 投影成 2×4×2，见 `__tests__/p11aProjectionSize.test.ts` ① 组）。
+   *
+   * ## 两条路径的判别子就是"载荷带没带这三个字段"（与读面同构）
+   *
+   * | 情形 | 来源 | 输出维度 |
+   * |---|---|---|
+   * | 三字段**在场** | 从文件加载的文档（`kernelAssembly#gridPayload` 抄 `Grid.width/height/depth`，D3 已接通） | **声明尺寸**（缺位补 `AIR_PALETTE_INDEX`） |
+   * | 三字段**缺席** | 内核**自创**内容（无文件声明：手工构造/未来由命令新建的网格） | 内容包围盒（**维持**既有口径） |
+   *
+   * 与 `runtime/gridRead#declaredGridSize` 是**同一份判定**（同一事实两处消费）
+   * —— 那里服务"读面尺寸"，这里服务"投影维度"。
+   */
+  readonly sizeColumn?: number
+  readonly sizeRow?: number
+  readonly sizeZSlice?: number
   /** 几何资产目录（`assetId` → 资产）；缺省 = 该网格无几何资产。 */
   readonly geometry?: Readonly<Record<string, BlockGeometryAsset>>
   /** 逐格 → `assetId`；缺省 = 该网格无几何资产。 */
@@ -187,6 +233,13 @@ export interface GridProjectionInput {
  * 由 `cellContent` 的 `parts` 重建，且**内容签名去重**（契约 §2.1：同内容跨格共享一份下标）
  * 与 `runtimeDocument._gridToV2` 同一口径（`partListSignature`）。
  * 于是"部件池的下标分配"在两条路径上**同源**，不是两套去重算法。
+ *
+ * ## 尺寸的口径（#262 P11-A）
+ *
+ * 输出维度 = `max(载荷声明, 内容包围盒)`（逐轴；声明缺席则退化为包围盒）。
+ * 声明**大于**包围盒 ⇒ 尾层/尾列补 `AIR_PALETTE_INDEX`（声明必须活下来）；
+ * 声明**小于**包围盒（畸形输入）⇒ 按内容扩张并由
+ * {@link ProjectedGrid.outsideDeclaredCells} 显式计数（编码器**不得丢内容**）。
  */
 export function projectGridCells(input: GridProjectionInput): ProjectedGrid {
   const cells = input.cells
@@ -196,7 +249,27 @@ export function projectGridCells(input: GridProjectionInput): ProjectedGrid {
   const cellContent = input.cellContent ?? {}
   const cellPalette = input.cellPalette ?? {}
 
-  // 先解析全部单元，求包围盒（尺寸由内容决定，不由调用方声明 —— 与"形态由内容决定"同一纪律）。
+  // 先解析全部单元。
+  //
+  // ## ⚠️ 尺寸**不是**由内容决定的（#262 P11-A 修的那条；旧注释在此逐字写反过）
+  //
+  // `cells` 是稀疏键表 ⇒ "网格多大"推不出来。故维度取
+  // **`max(载荷声明, 内容包围盒)`**（逐轴），两条事实各有其位：
+  //
+  // | 输入 | 维度 | 为什么 |
+  // |---|---|---|
+  // | 载荷**带**声明（文件加载的文档） | 声明尺寸 | 声明是**文件的事实**：尾层/尾列全空时包围盒更小，按包围盒输出就是**保存时丢掉声明**（本批修的就是它） |
+  // | 载荷**不带**声明（内核自创内容） | 内容包围盒 | 没有任何声明可依 —— **维持**既有口径（与读面 `resolveGridSize` 同构：声明优先、缺省降级） |
+  //
+  // ## 为什么是 `max` 而不是"严格按声明"（畸形输入的裁决）
+  //
+  // 内容是**用户数据**，声明是**元信息**：声明比内容小（手工构造/越界写入的畸形输入）时，
+  // 「截断到声明」会**静默丢掉方块**（#171 硬底线），而「按内容扩张」只让产物比声明大
+  // —— 零丢失，且从第二轮起稳定（新文件声明了更大的尺寸 ⇒ 声明 ⊇ 包围盒）。
+  // 越界事实由 {@link ProjectedGrid.outsideDeclaredCells} **显式计数**（见
+  // `projectKernelDocument` 的 `cellsOutsideDeclaredSize` 诊断），不静默吞。
+  // 生产装配的 `cells` 由 `gridPayload` 从有界 `Grid` 迭代产出 ⇒ 该分支今天不可达；
+  // 它存在是为了让"将来某条写入路径越界"**不会变成丢格或抛异常**。
   const parsed: { x: number; y: number; z: number; name: string; meta: number; key: string }[] = []
   let invalidCells = 0
   for (const [key, value] of Object.entries(cells)) {
@@ -208,7 +281,10 @@ export function projectGridCells(input: GridProjectionInput): ProjectedGrid {
     }
     parsed.push({ ...pos, ...block, key })
   }
-  if (parsed.length === 0) {
+  const declared = declaredGridSize(input)
+  // 无声明 **且** 无内容 ⇒ "没有网格"（`[]`）—— 与"0 宽的网格"是两种状态
+  // （见 `runtime/gridRead#resolveGridSize` 的同口径说明）。
+  if (declared === null && parsed.length === 0) {
     return { cellGrid: [], blockPalette: [airPaletteEntry()], invalidCells }
   }
   let maxX = 0
@@ -219,9 +295,17 @@ export function projectGridCells(input: GridProjectionInput): ProjectedGrid {
     if (c.y > maxY) maxY = c.y
     if (c.z > maxZ) maxZ = c.z
   }
-  const width = maxX + 1
-  const height = maxY + 1
-  const depth = maxZ + 1
+  // 包围盒（**仅**作降级值与下界，不再单独决定尺寸）。
+  const boundsWidth = parsed.length === 0 ? 0 : maxX + 1
+  const boundsHeight = parsed.length === 0 ? 0 : maxY + 1
+  const boundsDepth = parsed.length === 0 ? 0 : maxZ + 1
+  const width = declared === null ? boundsWidth : Math.max(declared.width, boundsWidth)
+  const height = declared === null ? boundsHeight : Math.max(declared.height, boundsHeight)
+  const depth = declared === null ? boundsDepth : Math.max(declared.depth, boundsDepth)
+  const outsideDeclaredCells =
+    declared === null
+      ? 0
+      : parsed.filter((c) => c.x >= declared.width || c.y >= declared.height || c.z >= declared.depth).length
 
   /** 类型化条目按 `(registryId, meta, assetId)` 索引（几何内容进身份，见上）。 */
   const typedByKey = new Map<string, BlockPaletteEntry>()
@@ -294,8 +378,15 @@ export function projectGridCells(input: GridProjectionInput): ProjectedGrid {
 
   const parts = projectParts(cellContent, parsed, { width, height, depth })
   return parts === null
-    ? { cellGrid, blockPalette, invalidCells }
-    : { cellGrid, blockPalette, cellPartsGrid: parts.cellPartsGrid, partLists: parts.partLists, invalidCells }
+    ? { cellGrid, blockPalette, invalidCells, ...(outsideDeclaredCells === 0 ? {} : { outsideDeclaredCells }) }
+    : {
+        cellGrid,
+        blockPalette,
+        cellPartsGrid: parts.cellPartsGrid,
+        partLists: parts.partLists,
+        invalidCells,
+        ...(outsideDeclaredCells === 0 ? {} : { outsideDeclaredCells }),
+      }
 }
 
 /**
@@ -456,6 +547,12 @@ function airPaletteEntry(): Record<string, unknown> {
  * （而不是只够喂渲染、不够保存的半条）。行序翻转在此**再次**用
  * `structureRowToWorldY` 反解 —— 与 `projectGridCells` 同一个函数，
  * 故两处不可能漂移。
+ *
+ * ## 维度**继承**投影产物（#262 P11-A 的关键）
+ *
+ * `width/height/depth` 逐字取自 `projected.cellGrid` 的三维 —— 于是
+ * `projectGridCells` 的尺寸口径（声明优先）在此**自然正确**，本函数**不**再
+ * 自己判一次尺寸（那会造出第二份会漂移的判定：修了投影、忘了这里 = 保存产物仍缩水）。
  */
 export function projectToLegacyGrid(input: GridProjectionInput): { grid: Grid; invalidCells: number } {
   const projected = projectGridCells(input)
@@ -507,6 +604,13 @@ export function projectToLegacyGrid(input: GridProjectionInput): { grid: Grid; i
 export type ProjectionDiagnosticCode =
   /** `blockGrid` 载荷里有无法解析的单元键/值（已跳过，计数在 `count`）。 */
   | 'invalidGridCells'
+  /**
+   * `blockGrid` 载荷里有格**落在声明尺寸之外**（已按内容扩张维度，`count` = 越界格数）。
+   *
+   * 维度取"声明 ⊔ 包围盒"（见 `projectGridCells` 的裁决）⇒ 产物比声明**大**：
+   * 消费者据此知道"这份文档的声明与内容不一致"，而不是让扩张静默发生。
+   */
+  | 'cellsOutsideDeclaredSize'
   /** 内核对象类型不是 `block`（当前渲染/保存格式承载不了它）。 */
   | 'unsupportedObjectType'
   /** `blockGrid` 载荷里有几何资产目录但缺逐格身份（或有身份但缺资产）。 */
@@ -928,11 +1032,22 @@ function tooltipPoolOfPayloads(
 /**
  * `blockGrid` 载荷 → 投影输入（**唯一**的适配点）。
  *
- * 把载荷的四个可选内容字段一次性取出，使调用方不必知道"哪些字段要一起传"
- * （漏传一个的后果是逐格几何/部件静默丢失）。
+ * 把载荷的可选字段一次性取出，使调用方不必知道"哪些字段要一起传"
+ * （漏传一个的后果是逐格几何/部件/声明尺寸静默丢失）。
+ *
+ * ## ⚠️ 声明尺寸三字段必须在这里**传下去**（#262 P11-A 的接线本体）
+ *
+ * 这是 #301 P10f D3 打回的同一个坑：那次是**装配**从不填三字段（读面因此永远走
+ * 包围盒降级），这次是**投影**——载荷已经带着声明，适配点若把它丢掉，
+ * `projectGridCells` 就永远看不到声明 ⇒ 本批的修法**等于没修**。
+ * 故本函数逐字段透传，判据由 `__tests__/p11aProjectionSize.test.ts` 的
+ * ①②（保存路径）与⑦（presenter 路径）把守 —— **输入来自生产装配**，不是手工载荷。
  */
 function gridProjectionInputOf(payload: {
   readonly cells: Readonly<Record<string, string>>
+  readonly sizeColumn?: number
+  readonly sizeRow?: number
+  readonly sizeZSlice?: number
   readonly geometry?: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry?: Readonly<Record<string, string>>
   readonly cellPalette?: Readonly<Record<string, string>>
@@ -941,12 +1056,18 @@ function gridProjectionInputOf(payload: {
 }): GridProjectionInput {
   const out: {
     cells: Readonly<Record<string, string>>
+    sizeColumn?: number
+    sizeRow?: number
+    sizeZSlice?: number
     geometry?: Readonly<Record<string, BlockGeometryAsset>>
     cellGeometry?: Readonly<Record<string, string>>
     cellPalette?: Readonly<Record<string, string>>
     palette?: readonly BlockPaletteEntry[]
     cellContent?: CellContentTable
   } = { cells: payload.cells }
+  if (payload.sizeColumn !== undefined) out.sizeColumn = payload.sizeColumn
+  if (payload.sizeRow !== undefined) out.sizeRow = payload.sizeRow
+  if (payload.sizeZSlice !== undefined) out.sizeZSlice = payload.sizeZSlice
   if (payload.geometry !== undefined) out.geometry = payload.geometry
   if (payload.cellGeometry !== undefined) out.cellGeometry = payload.cellGeometry
   if (payload.cellPalette !== undefined) out.cellPalette = payload.cellPalette
@@ -1048,6 +1169,17 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
           path: `$.frames[${i}].structure.cellGrid`,
           detail: `${objectId} 有无法解析的单元键/值`,
           count: projected.invalidCells,
+        }),
+      )
+    }
+    // 内容越出**声明**尺寸 ⇒ 维度按内容扩张（不丢格），但事实必须**可见**（不静默）。
+    if (projected.outsideDeclaredCells !== undefined) {
+      diagnostics.push(
+        Object.freeze({
+          code: 'cellsOutsideDeclaredSize' as const,
+          path: `$.frames[${i}].structure.cellGrid`,
+          detail: `${objectId} 有 ${projected.outsideDeclaredCells} 格落在载荷声明的尺寸之外 —— 投影按内容扩张维度（不丢格），故产物尺寸大于声明；这是"声明与内容不一致"的输入`,
+          count: projected.outsideDeclaredCells,
         }),
       )
     }

@@ -206,7 +206,14 @@ describe('D3c · 可编译：`compileScene` 真的吃它', () => {
   })
 })
 
-/** 从内核载荷重建网格定义（与 `kernelPresentationInputs` 内部同一路径；判据侧独立复算）。 */
+/**
+ * 从内核载荷重建网格定义（与 `kernelPresentationInputs` 内部同一路径；判据侧独立复算）。
+ *
+ * ⚠️ 声明尺寸三字段必须与生产 `definitionOfPayload` 同字段集（#262 P11-A）：
+ * 漏传 ⇒ 本复算退回包围盒维度，而生产按声明维度 ⇒ 两侧在**稀疏**载荷上分叉，
+ * 本文件的"逐位一致"判据就会拿错参照（本文件现有夹具都是"声明 == 包围盒"，
+ * 故漏传不会当场红 —— 正是那种"以后才炸"的漂移）。
+ */
 async function definitionOf(
   payload: Extract<import('@/domain/scene').ObjectDataPayload, { kind: 'blockGrid' }>,
   content: DocumentContent,
@@ -214,6 +221,9 @@ async function definitionOf(
   const { projectGridCells } = await import('@/composition/kernelProjection')
   const projected = projectGridCells({
     cells: payload.cells,
+    sizeColumn: payload.sizeColumn,
+    sizeRow: payload.sizeRow,
+    sizeZSlice: payload.sizeZSlice,
     geometry: payload.geometry,
     cellGeometry: payload.cellGeometry,
     cellPalette: payload.cellPalette,

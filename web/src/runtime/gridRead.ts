@@ -163,6 +163,41 @@ export interface KernelGridView {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * **载荷声明的网格尺寸**（`null` = 没有一份有效的声明 ⇒ 调用方必须降级）。
+ *
+ * ## 为什么它是一个**独立导出**（而不是 `resolveGridSize` 的私有分支）
+ *
+ * 「什么算一份合法的声明尺寸」是**一个事实**，而它有**两个消费侧**：
+ *
+ * | 侧 | 消费点 | 用它做什么 |
+ * |---|---|---|
+ * | 读 | `resolveGridSize`（本模块） | 网格的尺寸（拾取/居中的基准） |
+ * | 写 | `composition/kernelProjection#projectGridCells`（#262 P11-A） | 投影产物 `cellGrid` 的维度（**文件声明的事实不得在保存时丢**） |
+ *
+ * 两侧若各写一份判定，就会漂移（本工程已三度实测"两份实现必然漂移"）；
+ * 而**判别子**（"载荷带没带声明"）必须两侧同构 —— 这正是 #262 要修的那条欠账。
+ *
+ * ## 判据（`>= 0` 的整数三元组才算声明）
+ *
+ * - 三者**缺一不可**：只写两个 ⇒ 没有完整声明 ⇒ 降级（不猜第三个）；
+ * - `0` 是**合法**声明（"0 宽的网格"是真实状态，与"字段缺席"**必须**可区分 ——
+ *   见 `domain/scene#ObjectDataPayload.sizeColumn` 的说明与 `resolveGridSize` 的口径）；
+ * - 负数/非整数 ⇒ 非法声明 ⇒ 降级（如实降级，不抛：纯层不抛，见 `domain/errors`）。
+ */
+export function declaredGridSize(payload: {
+  readonly sizeColumn?: number
+  readonly sizeRow?: number
+  readonly sizeZSlice?: number
+}): { readonly width: number; readonly height: number; readonly depth: number } | null {
+  const w = payload.sizeColumn
+  const h = payload.sizeRow
+  const d = payload.sizeZSlice
+  if (w === undefined || h === undefined || d === undefined) return null
+  if (![w, h, d].every((n) => Number.isInteger(n) && n >= 0)) return null
+  return { width: w, height: h, depth: d }
+}
+
+/**
  * 网格尺寸解析（**声明优先**）。
  *
  * ## 为什么降级分支要单独可测
@@ -179,19 +214,7 @@ export function resolveGridSize(payload: {
   readonly sizeRow?: number
   readonly sizeZSlice?: number
 }): { readonly width: number; readonly height: number; readonly depth: number } {
-  const fromDeclaration = normalizeSize(payload.sizeColumn, payload.sizeRow, payload.sizeZSlice)
-  if (fromDeclaration !== null) return fromDeclaration
-  return boundsSizeOf(payload.cells)
-}
-
-function normalizeSize(
-  w: number | undefined,
-  h: number | undefined,
-  d: number | undefined,
-): { width: number; height: number; depth: number } | null {
-  if (w === undefined || h === undefined || d === undefined) return null
-  if (![w, h, d].every((n) => Number.isInteger(n) && n >= 0)) return null
-  return { width: w, height: h, depth: d }
+  return declaredGridSize(payload) ?? boundsSizeOf(payload.cells)
 }
 
 /** 包围盒推导（**仅**在载荷未声明尺寸时使用）。 */
