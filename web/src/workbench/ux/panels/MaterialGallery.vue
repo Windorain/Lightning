@@ -135,14 +135,26 @@ const animationImages = new Map<string, HTMLImageElement>()
 /** 一帧的默认时长（毫秒）。旧渲染路径用 `DEFAULT_WORLD_FRAME_DWELL_MS = 50`（= 1 tick）。 */
 const DEFAULT_FRAME_MS = 50
 
-/** 场景时间（秒）：帧下标 × 该帧时长。**不含任何累积量**。 */
+/**
+ * 场景时间（秒）：帧下标 × 该帧时长。**不含任何累积量**。
+ *
+ * #301 P10f C′1（N4 字段完备处 + N6 同族）：改走**帧声明的唯一读取面**
+ * `ctx.frameDeclarations()`（含 GF-16 分流：装配成功 ⇒ 内核帧轴，否则 ⇒ legacy）。
+ *
+ * ## 为什么这是同义替换（而非"看起来等价"）
+ *
+ * 原写法 `doc.frameCount` + `doc.frame(i).durationMs` 与
+ * `frameDeclarations()` 的 legacy 分支**逐字相同**（同一 `frameCount`、
+ * 同一 `?? 0` 缺省口径），且装配成功后内核帧轴才是权威 —— 那正是 D8 的修复方向。
+ * ⇒ 两种状态下都比"直读 legacy"更正确或完全相同。
+ */
 function sceneSeconds(): number {
-  const doc = ctx.getDoc().value
-  if (!doc || doc.frameCount === 0) return 0
-  const index = Math.min(Math.max(ctx.getFrameIndex(), 0), doc.frameCount - 1)
+  const decl = ctx.frameDeclarations()
+  if (decl.count === 0) return 0
+  const index = Math.min(Math.max(ctx.getFrameIndex(), 0), decl.count - 1)
   let ms = 0
   for (let i = 0; i < index; i++) {
-    const d = doc.frame(i)?.durationMs
+    const d = decl.durationsMs[i]
     ms += typeof d === 'number' && Number.isFinite(d) && d > 0 ? d : DEFAULT_FRAME_MS
   }
   return ms / 1000

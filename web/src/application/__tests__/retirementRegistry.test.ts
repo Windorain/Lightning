@@ -527,7 +527,9 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/workbench/document/pipeline.ts',
       'web/src/workbench/document/sources/wikiDataPageSource.ts',
       'web/src/workbench/ux/panels/AnnotationEditorPanel.vue',
-      'web/src/workbench/ux/panels/MaterialGallery.vue',
+      // #301 P10f C′1 核销：`MaterialGallery.vue` 的 `sceneSeconds()` 曾直读
+      // `ctx.getDoc().value` 的 `frameCount`/`frame(i).durationMs`，本批改用
+      // `ctx.frameDeclarations()`（帧声明的唯一读取面 + GF-16 分流）⇒ 不再命中 `getDoc`。
       'web/src/workbench/ux/panels/TooltipEditorPanel.vue',
       // P2（#253）合流后新增的真实消费者：面板写路径仍落在旧运行时文档上
       // （`ctx.getDoc()` 读 `RuntimeDocument`）。这是**双轨暂存**的一部分，

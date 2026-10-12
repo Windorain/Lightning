@@ -8,8 +8,9 @@ import * as THREE from 'three'
 import { buildVoxelVolume } from '../data/grid'
 import { effectiveBlockId, type LayerPreviewMode } from '../data/layerPreview'
 import type { StructureDefinition } from '../schema/types'
-import type { Annotation, AnnotationType } from '../data/annotationTypes'
-import { isBox } from '../data/annotationTypes'
+// #301 P10f C′1（N4）：不再 import 旧 `Annotation` 联合 —— 本模块对注解的依赖已
+// 收窄成结构子集 `ScenePickableBoxAnnotation`（见其说明）。`AnnotationType` 仍在用。
+import type { AnnotationType } from '../data/annotationTypes'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,13 +68,72 @@ export interface ScenePickParams {
   worldAnnotationGroup?: THREE.Group
   def: StructureDefinition
   layerPreview: LayerPreviewMode
-  /** Optional: box annotations for AABB-based picking (merged with mesh hits) */
-  annotations?: Annotation[]
+  /**
+   * 参与 AABB 拾取的**盒**注解（可选）。
+   *
+   * ## 为什么参数收窄成结构子集（#301 P10f C′1，N4）
+   *
+   * 本函数**只**读 `type` / `visible` / `min` / `max` / `id`（见 `:194-197`、
+   * `:204`、`:298-306`）。原先要求完整的 legacy `Annotation` 联合，于是
+   * "提供注解"这件事绑定了**旧文档的字段全集** —— 而那正是 `getDoc()` 的
+   * 消费面（`N4`）。收窄成它真正需要的**结构子集**后：
+   *
+   *  - 内核注解读面（`KernelAnnotationView`）可直接传入（字段同名前缀齐备）；
+   *  - 旧的 `Annotation[]` 也**仍然**满足该子集（结构兼容）⇒ 调用点零改动；
+   *  - 类型系统从此表达"这里到底用了什么"，而不是"它来自哪份旧结构"。
+   *
+   * ⚠️ `type` 收成 `string`（而非 `AnnotationType`）：`isBox` 的窄化只看
+   * `type === 'box'`，而内核来源的形状也是同一套字符串。放宽是**有意的** ——
+   * 它让本参数不再声称"我认识所有旧形状"（那是个更强的、用不到的承诺）。
+   */
+  annotations?: readonly ScenePickableBoxAnnotation[]
+}
+
+/**
+ * `scenePick` 真正依赖的注解**结构子集**（盒拾取所需的最小面）。
+ *
+ * 命名带 `ScenePickable` 以免被误当成"通用注解类型" —— 它不是模型，
+ * 是这个函数的**输入契约**。
+ */
+export interface ScenePickableBoxAnnotation {
+  readonly id: string
+  readonly type: string
+  readonly visible: boolean
+  readonly min?: { readonly x: number; readonly y: number; readonly z: number }
+  readonly max?: { readonly x: number; readonly y: number; readonly z: number }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * 可参与盒拾取的注解（`min`/`max` 已**证明**存在）。
+ *
+ * 用**类型谓词**（而不是返回 `boolean`）：调用方在 `if (!isPickableBox(a)) continue`
+ * 之后需要 `a.min`/`a.max` 是**非可选**的 —— 那正是"判过就不必再判"的类型级表达。
+ * 返回 `boolean` 会让 `rayIntersectsBox` 收到 `x | undefined`（第一版实测报
+ * TS2345 两处），于是要么加非空断言、要么在调用点重复判断 —— 两者都比谓词差。
+ */
+type PickableBoxAnnotation = ScenePickableBoxAnnotation & {
+  readonly min: { readonly x: number; readonly y: number; readonly z: number }
+  readonly max: { readonly x: number; readonly y: number; readonly z: number }
+}
+
+/**
+ * 该注解是否可参与盒拾取（**结构判据**，不是类型窄化）。
+ *
+ * 与旧的 `isBox(a)`（`a.type === 'box'`）语义**相同**，但输入是结构子集
+ * （见 `ScenePickableBoxAnnotation` 的说明）—— 于是内核注解读面也能传入，
+ * 而本函数不需要认识 legacy `Annotation` 联合。
+ *
+ * ⚠️ `min`/`max` 的存在性一并判：旧联合的 `BoxAnnotation` 由**类型**保证两字段在，
+ * 而结构子集下它们可选。少判这一步会让 `rayIntersectsBox` 收到 `undefined`
+ * —— 那是**运行期**崩溃而不是编译期错误。
+ */
+function isPickableBox(a: ScenePickableBoxAnnotation): a is PickableBoxAnnotation {
+  return a.type === 'box' && a.visible !== false && a.min !== undefined && a.max !== undefined
+}
 
 function parseAnnotationName(objName: string): { id: string; type: AnnotationType } | null {
   if (!objName.startsWith('anno-')) return null
@@ -191,7 +251,7 @@ export function pickAtPointer(params: ScenePickParams): ScenePickResult {
   let aabbResult: { annotationId: string; distance: number } | null = null
   if (annotations && annotations.length > 0) {
     for (const anno of annotations) {
-      if (!isBox(anno) || anno.visible === false) continue
+      if (!isPickableBox(anno)) continue
       const d = rayIntersectsBox(raycaster.ray.origin, raycaster.ray.direction, anno.min, anno.max)
       if (d !== null && (aabbResult === null || d < aabbResult.distance)) {
         aabbResult = { annotationId: anno.id, distance: d }
@@ -295,7 +355,7 @@ export function scenePickAllFromPointer(params: ScenePickParams): ScenePickEntit
 
   if (annotations && annotations.length > 0) {
     for (const anno of annotations) {
-      if (!isBox(anno) || anno.visible === false) continue
+      if (!isPickableBox(anno)) continue
       if (seenAnnos.has(anno.id)) continue
       const d = rayIntersectsBox(raycaster.ray.origin, raycaster.ray.direction, anno.min, anno.max)
       if (d === null) continue

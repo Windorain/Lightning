@@ -36,6 +36,12 @@ import type { KernelSession } from '@/runtime/kernelSession'
 // #301 P10f C′1：帧声明的**判定**提成纯函数（D8 的判据必须能注入装配失败，
 // 而 `Context` 的外壳六件套不该进测试）—— 本层只负责"取事实、交结果"。
 import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
+import { kernelAnnotationsOf, kernelMaterialsOf } from '@/runtime/annotationRead'
+import { resolveSideTable } from '@/runtime/sideTableResolution'
+import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotationRead'
+
+/** 空读面常量（eadonly 空数组：避免每次分配，且调用方不得改内联量）。 */
+const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 
@@ -347,6 +353,116 @@ export class Context {
     return { count: doc.frameCount, durationsMs: durations }
   }
 
+  /**
+   * **注解表读面**（#301 P10f C′1；N4 的字段完备部分）。
+   *
+   * 替代 `ctx.getDoc().value?.annotations`（`queries.ts:31` 供 `scenePick` 的盒拾取）。
+   *
+   * ## 本方法只**取事实**；**决定**在纯函数里
+   *
+   * 分流判定在 `runtime/sideTableResolution#resolveSideTable`。为什么提出来：
+   * 我第一版把判定内联在这里，而测试宿主**复刻**了那段 ⇒ 判据**空转**
+   * （实测：把它改成"永远返回空表"，测试仍全绿）。提出去之后测试判的是
+   * **生产代码本身**。这与 `frameDeclarations` 是同一处置。
+   *
+   * ## ⚠️ 为什么这里**必须**回落 legacy（本批实测抓出的自身缺陷）
+   *
+   * 我最初让本读面在"未装配"时返回空表（理由是"诚实"）。那是**错的**：
+   * `setDocument` 会清 GF-16，而**注解编辑路径**（`annotationOperators` 的
+   * clone+push+`setDocument`）正是"换了 legacy 但没装配内核" ⇒ GF-16=false
+   * ⇒ 若返回空表，用户新建一条注解后**连原有的注解也点不中**。
+   * 实测该形态：legacy 2 条 / 内核读面 0 条。
+   *
+   * ## 字段完备性（实测）
+   *
+   * 消费者 `render/interaction/scenePick.ts` 只读 `id`/`type`/`visible`/`min`/`max`，
+   * 全部由内核承载；字段级对比实测 **0 处不一致**（13 个字段逐个比对）。
+   */
+  kernelAnnotations(): readonly KernelAnnotationView[] {
+    // 响应式依赖（与 `frameDeclarations` 同一取舍：`.vue` 消费者需要它）。
+    const legacyDoc = this.main.doc.value
+    return resolveSideTable(this.kernelAdoptedAnnotations(), this.legacyAnnotations(legacyDoc)).rows
+  }
+
+  /**
+   * **材质资源表读面**（#301 P10f C′1）。
+   *
+   * 替代 `ctx.getDoc().value?.materialPalette` + `textureBlobs`
+   * （`queries.ts:204` 的 `listMaterials`）。字段适配的机械依据见
+   * `runtime/annotationRead#kernelMaterialsOf`。
+   *
+   * 分流与 `kernelAnnotations` **同一形态**（决定同样在 `resolveSideTable`）：
+   * **若不回落**，任何一次 `setDocument`（含注解编辑）都会让材质面板**变空**。
+   * 实测该形态：`listMaterials` 返回 0 条而 legacy 有 1 条。
+   */
+  kernelMaterials(): readonly KernelMaterialView[] {
+    const legacyDoc = this.main.doc.value
+    return resolveSideTable(this.kernelAdoptedMaterials(), this.legacyMaterials(legacyDoc)).rows
+  }
+
+  /**
+   * 内核侧注解行；**`null` = 未装配成功**（GF-16）。
+   *
+   * ⚠️ `null` 与 `[]` **不可互换**：前者是"没有可用来源"（⇒ 该回落 legacy），
+   * 后者是"装配产物里确实没有注解"（⇒ 内核权威，空是真实答案）。
+   * 把前者写成后者**就是**本批要修的那个错误。
+   */
+  private kernelAdoptedAnnotations(): readonly KernelAnnotationView[] | null {
+    const kernel = this.kernel
+    if (kernel === null) return null
+    if (!kernel.hasAdoptedContent()) return null
+    return kernelAnnotationsOf(kernel.document())
+  }
+
+  private kernelAdoptedMaterials(): readonly KernelMaterialView[] | null {
+    const kernel = this.kernel
+    if (kernel === null) return null
+    if (!kernel.hasAdoptedContent()) return null
+    return kernelMaterialsOf(kernel.document())
+  }
+
+  /** legacy 侧注解行；`null` = 无文档。字段同名，直接透传。 */
+  private legacyAnnotations(doc: RuntimeDocument | null): readonly KernelAnnotationView[] | null {
+    if (doc === null) return null
+    return (doc.annotations ?? []) as unknown as readonly KernelAnnotationView[]
+  }
+
+  /**
+   * legacy 侧材质行；`null` = 无文档。
+   *
+   * 就地适配 `materialPalette` + `textureBlobs`（下标旁表）⇒ 使读面**形状统一**
+   * （调用方不必知道两种来源）。data URL 的补前缀规则与旧 `listMaterials` **逐字相同**
+   * （已是 `data:` 的原样返回 —— 统一补前缀会产出坏 URL）。
+   */
+  private legacyMaterials(doc: RuntimeDocument | null): readonly KernelMaterialView[] | null {
+    if (doc === null) return null
+    const palette = doc.materialPalette as readonly Record<string, unknown>[] | undefined
+    if (palette === undefined || palette.length === 0) return EMPTY_MATERIAL_VIEWS
+    const blobs = doc.textureBlobs as Record<string, unknown> | undefined
+    const dataUrlOfIndex = (idx: unknown): string | null => {
+      if (typeof idx !== 'number' || !Number.isFinite(idx)) return null
+      const b = blobs?.[String(Math.floor(idx))]
+      if (typeof b !== 'string') return null
+      const trimmed = b.trim()
+      return trimmed.startsWith('data:') ? trimmed : `data:image/png;base64,${trimmed}`
+    }
+    return Object.freeze(
+      palette.map((entry, i) =>
+        Object.freeze({
+          materialId: String(i),
+          kind: (entry.kind ?? 'static16') as string,
+          blend: entry.blend,
+          locator: entry.locator,
+          emissive: entry.emissive,
+          animation: entry.animation,
+          textureDataUrl: dataUrlOfIndex(entry.textureBlobIndex),
+          atlas: entry.atlas,
+          linear: entry.linear,
+          useMipmaps: entry.useMipmaps,
+        }),
+      ),
+    )
+  }
   /**
    * **当前帧的网格** —— ⚠️ **本批撤回，未交付**（#301 P10f B′ 实测发现两处不同义）。
    *

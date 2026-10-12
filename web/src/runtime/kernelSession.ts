@@ -368,6 +368,22 @@ export class KernelSession {
    */
   markLoaded(): void {
     this.adoptedDocumentId = this.documentId
+    // ⚠️ **GF-16 必须一起清掉**（C′1 实测抓出的自身缺陷）：
+    //
+    // "有了一份文档"**不蕴含**"内核里的就是它"。`setDocument` 正是先置存在性、
+    // 再（可能）装配 —— 在装配成功之前，内核承载的是**上一份**文档的内容。
+    //
+    // 反例（实测）：装载 A（装配成功，GF-16=true）→ `NewScene` 调
+    // `setDocument(空文档)`（**不** adopt）⇒ 若 GF-16 仍为 true，
+    // 则所有"读内核"的面都返回 **A 的注解/材质/帧轴**（错文档），
+    // 而 legacy 已是空文档。那正是"读到上一份文档"的静默错误。
+    //
+    // 清掉之后：装配失败/未装配 ⇒ GF-16=false ⇒ 帧声明回落 legacy（D8 修复生效），
+    // 侧表读面返回空表（诚实：内核侧确实没有当前文档的内容）。
+    //
+    // 顺序：`adoptDocument` 先调本方法、再调 `markContentAdopted()` ⇒ 装配成功时
+    // 最终为 true。两行的**先后是语义的一部分**（反过来会被本行清掉）。
+        this.contentAdopted = false
   }
 
   /**

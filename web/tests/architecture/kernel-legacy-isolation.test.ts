@@ -502,6 +502,31 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
     exitStage:
       'P10（#261）本批接线落地，永久保留（会话是内核的生产入口）；P11 审计核对的是旧机制零引用，不是本边消失',
   }),
+  // ── P10f C′1（#301）侧表读面：旧 runtime 层的**投影**消费内核内容类型 ──────
+  //
+  // `runtime/annotationRead.ts` 把内核 `Document` 的注解/资源投影成
+  // 工作台消费的读取形状（旧 `doc.annotations` 的替代面）。它是**新写**的
+  // 替代实现，但按本闸门的口径它落在旧 `runtime/` 层（撞名层），
+  // 且需要内核的 `Document`/`AnnotationGeometry` 类型 ⇒ 构成一条旧→新边，
+  // 必须登记（不得静默）。
+  //
+  // 这两条边是**类型面**依赖（`import type`）：运行期不产生耦合，
+  // 但它们表达的是"旧层的读面正在被换成内核承载"，故仍需在架构清单里可见。
+  Object.freeze({
+    from: 'src/runtime/annotationRead.ts',
+    to: 'domain/document',
+    reason:
+      'P10f C′1 的侧表读面（N4 替代面）：把内核 `Document` 的注解/资源投影成工作台读取形状；旧 runtime 层消费内核内容类型是本次迁移的落点',
+    exitStage:
+      'P11 终局审计：待工作台面板整体迁入 `editors/` 层（P6/P2 重写）后，本读面随之迁出 `runtime/`，此边自然消失',
+  }),
+  Object.freeze({
+    from: 'src/runtime/annotationRead.ts',
+    to: 'domain/scene',
+    reason:
+      '同上：读面按 `AnnotationGeometry` 的**封闭字段集**逐字段转发（不整体展开），故需该类型',
+    exitStage: 'P11 终局审计：随本文件迁出 `runtime/` 而消失（同 `domain/document` 那条）',
+  }),
   Object.freeze({
     from: 'src/runtime/host/workbenchHost.ts',
     to: 'runtime/kernelSession',
