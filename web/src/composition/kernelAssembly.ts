@@ -886,6 +886,22 @@ export function gridPayload(
   },
 ): {
   readonly cells: Readonly<Record<string, string>>
+  /**
+   * **网格的声明尺寸**（#301 P10f D3，D-1）。
+   *
+   * ⚠️ **必须在这里抄下来**（本处曾是 D3 的一处真实缺陷：字段声明了、读面读了、
+   * 纯函数判据绿了，而**装配从不填它** ⇒ 读面永远走"包围盒降级"路径）。
+   * `Grid.width/height/depth` 正是**文件 `cellGrid` 的三个维度**
+   *（`RuntimeDocument._fromV2CellGrid` 用 `cellGrid.length`/`[0].length`/`[0][0].length`
+   * 构造 Grid）⇒ 抄它就是"把文件声明的事实带进内核"。
+   *
+   * 不抄的后果（L3 实测，`multiblock-frame-regression.spec.ts`）：稀疏网格的
+   * 尾层/尾列被挖空时，包围盒推得的 `d/h/w` **小于**声明值 ⇒
+   * `Context#kernelGrid` 给出偏小的 `height` ⇒ `structureRowToWorldY` 的拾取 Y 偏移。
+   */
+  readonly sizeColumn: number
+  readonly sizeRow: number
+  readonly sizeZSlice: number
   readonly geometry: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry: Readonly<Record<string, string>>
   readonly cellPalette: Readonly<Record<string, string>>
@@ -910,6 +926,10 @@ export function gridPayload(
 
   return {
     cells: Object.freeze(cells),
+    // 声明尺寸 = 旧 `Grid` 的维度 = **文件 `cellGrid` 的维度**（见返回类型上的长注释）。
+    sizeColumn: grid.width,
+    sizeRow: grid.height,
+    sizeZSlice: grid.depth,
     geometry: assembled.assets,
     cellGeometry: assembled.cellGeometry,
     cellPalette: assembled.cellPalette,
@@ -1010,6 +1030,9 @@ function airLikeEntry(): BlockPaletteEntry {
  */
 function blockGridPayload(payload: {
   readonly cells: Readonly<Record<string, string>>
+  readonly sizeColumn: number
+  readonly sizeRow: number
+  readonly sizeZSlice: number
   readonly geometry: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry: Readonly<Record<string, string>>
   readonly cellPalette: Readonly<Record<string, string>>
@@ -1020,6 +1043,9 @@ function blockGridPayload(payload: {
   const out: {
     kind: 'blockGrid'
     cells: Readonly<Record<string, string>>
+    sizeColumn?: number
+    sizeRow?: number
+    sizeZSlice?: number
     cellContent?: CellContentTable
     geometry?: Readonly<Record<string, BlockGeometryAsset>>
     cellGeometry?: Readonly<Record<string, string>>
@@ -1027,6 +1053,11 @@ function blockGridPayload(payload: {
     cellPaletteIndex?: Readonly<Record<string, number>>
     palette?: readonly BlockPaletteEntry[]
   } = { kind: 'blockGrid', cells: payload.cells }
+  // 声明尺寸**无条件**写出（`>= 0` 都是合法声明；"0 宽的网格"是真实状态，
+  // 而"字段缺席"会让读面降级去猜 —— 两者必须可区分，见 `runtime/gridRead#resolveGridSize`）。
+  out.sizeColumn = payload.sizeColumn
+  out.sizeRow = payload.sizeRow
+  out.sizeZSlice = payload.sizeZSlice
   if (Object.keys(payload.cellContent).length > 0) out.cellContent = payload.cellContent
   if (Object.keys(payload.geometry).length > 0) out.geometry = payload.geometry
   if (Object.keys(payload.cellGeometry).length > 0) out.cellGeometry = payload.cellGeometry

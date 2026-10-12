@@ -16,6 +16,15 @@
  * （这就是 D-1 要防的那个偏移）。判据若恒真，这一组会同时绿 —— 那正是负对照的作用。
  */
 import { describe, expect, it } from 'vitest'
+import { KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID, KernelSession } from '@/runtime/kernelSession'
+import { adoptLoadedDocument } from '@/composition/documentLoad'
+import { createParserRegistry } from '@/context/parserRegistry'
+import {
+  V2PlainParser,
+  WorldParser,
+  StructureDataParser,
+  createEnvelopeParser,
+} from '@/context/parsers/builtinParsers'
 import {
   gridViewOfLegacy,
   gridViewOfPayload,
@@ -29,6 +38,7 @@ import { blockPaletteEntryKey } from '@/domain/blockGeometry'
 import { createDocument, withScene } from '@/domain/document'
 import { objectData, sceneObject } from '@/domain/scene'
 import { cellPositionKey } from '@/domain/cellPosition'
+import { structureRowToWorldY } from '@/pure/vec'
 import type { Document } from '@/domain/document'
 import type { Scene } from '@/domain/scene'
 
@@ -381,5 +391,186 @@ describe('D3/R5 ④ 内核分支**不**在"该帧无网格"时回落 legacy（�
     // 这份文档是 `annotation` 载荷（不是 blockGrid）⇒ 出现序里没有 block 对象。
     const doc = docWithObjects([{ id: 'anno:0', type: 'annotation', payload: { kind: 'annotation', shape: 'box' } }], 'd3')
     expect(kernelGridOf(doc, 0), '没有 blockGrid 载荷 ⇒ null（不是一份空网格）').toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ⑤ **接线判定**：生产装配**必须真的填** `sizeColumn/sizeRow/sizeZSlice`
+//    （#301 D3 打回修复段 —— L3 擒获的回归正是这一处漏接线）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 本组是"测试没测到生产路径"的**补判据**（真实事故，务必备留）
+ *
+ * D3 首次交付时：① 组（纯函数 `resolveGridSize`）**全绿** —— 因为我喂的载荷
+ * **已经带了**声明字段。而**生产装配从未填过它**：
+ * `kernelAssembly#gridPayload` 声明了这三个字段却从不赋值
+ * ⇒ `resolveGridSize` 在**每一条真实路径**上都走"包围盒降级"
+ * ⇒ D-1 修的东西**没有生效**。
+ *
+ * 后果由 **L3** 独立擒获（`multiblock-frame-regression.spec.ts`：
+ * 3 帧文档的 frame1/frame2 的 `h`/`d`/`w` 与文件声明不符 ⇒ 双 project 确定性红）。
+ * L0/L1/L2 全绿 —— 因为**没有任何判据穿过生产装配看一眼载荷长什么样**。
+ *
+ * ⇒ 本组的两条纪律（与 D2 报告里 `gridInputOf` 漏传 `cellPalette` 那次同族）：
+ *  1. **接线必须有判据**：断言装配产物里**确实有**这三个字段（不是断言读面会用它）；
+ *  2. **判据的输入必须来自生产**：走 `V2PlainParser` → `adoptLoadedDocument`，
+ *     而不是手工拼一个"已经带字段"的载荷。
+ *
+ * 本组用的夹具是**稀疏尾层**形态（尾切片/尾列/顶行全空）——
+ * 正是"声明 vs 包围盒"会分叉的那种网格；并**显式断言两者确实不同**
+ *（否则本组是空转：声明 == 包围盒时它无法区分修好与没修）。
+ */
+describe('D3/R5 ⑤ **接线判定**：装配真的填了声明尺寸（走生产解析 + 装配）', () => {
+  /**
+   * 稀疏尾层网格：**声明** 6 宽 × 5 高 × 4 深，而只有 `(z=1, 世界 y=3, x=1)` 一格有方块。
+   *
+   * 文件 `cellGrid` 的 row 0 = 顶部 ⇒ 世界 `y = h - 1 - row`。
+   * 只放 `row = 1` ⇒ 世界 `y = 3`；包围盒推导会得 `w=2, h=4, d=2`
+   *（`maxX=1, maxY=3, maxZ=1`），**远小于**声明值。
+   */
+  const SPARSE = {
+    d: 4,
+    h: 5,
+    w: 6,
+    cell: { z: 1, row: 1, x: 1 },
+  }
+  /**
+   * 文件行号 → 世界 y（**用生产函数**换算）。
+   *
+   * ⚠️ 我第一版在这里手写 `h - row`，把"行号算成了 y" ⇒ 夹具落在**另一格**
+   *（世界 y=4 而不是 3）⇒ 负对照的期望高度随之错一位，被本组自己的断言抓出。
+   * 这正是"翻转只有一处定义"（`structureRowToWorldY`）的实用价值：手写必错一次。
+   */
+  const WORLD_Y = structureRowToWorldY(SPARSE.cell.row, SPARSE.h)
+
+  function sparsePlain(): Record<string, unknown> {
+    const empty = (): number[][] => Array.from({ length: SPARSE.h }, () => new Array<number>(SPARSE.w).fill(0))
+    const grid: number[][][] = Array.from({ length: SPARSE.d }, empty)
+    grid[SPARSE.cell.z]![SPARSE.cell.row]![SPARSE.cell.x] = 1
+    return {
+      format_version: '2.0',
+      id: 'sparse-tail',
+      meta: { name: 'sparse', author: '', description: '', tags: [], origin: { x: 0, y: 0, z: 0 } },
+      frames: [{ index: 0, label: null, durationMs: 100, structure: { geometryPhase: 'baked', cellGrid: grid, blockPalette: [{ registryId: 'air', meta: 0 }, { registryId: 'minecraft:stone', meta: 0 }] } }],
+      annotations: [],
+      labels: [],
+    }
+  }
+
+  /** 走**生产**解析 + **生产**装配（GF-16 成功），返回会话。 */
+  async function adoptedSession(): Promise<{ session: KernelSession; dispose: () => void }> {
+    const registry = createParserRegistry()
+    registry.register(V2PlainParser)
+    registry.register(createEnvelopeParser(registry))
+    registry.register(WorldParser)
+    registry.register(StructureDataParser)
+    // `detectAndParse` 是**生产**入口（`parse` 只是单解析器的内部协议）。
+    const parsed = await registry.detectAndParse(sparsePlain())
+    expect(parsed.document, '夹具必须可被生产解析器解析').not.toBeNull()
+    const session = new KernelSession({
+      documentId: KERNEL_DOCUMENT_ID,
+      contextId: KERNEL_CONTEXT_ID,
+      capabilities: [],
+    })
+    const ok = adoptLoadedDocument(
+      { kernel: session, log: { info: () => {}, warn: () => {} } },
+      parsed.document!,
+      sparsePlain(),
+      'sparse-tail',
+    )
+    expect(ok, '前置：装配必须成功（GF-16 = true）').toBe(true)
+    return { session, dispose: () => session.dispose() }
+  }
+
+  /** 装配产物里那个 `blockGrid` 载荷的**原始字段**（不经读面 —— 本组要看的正是载荷）。 */
+  function rawPayloadOf(session: KernelSession): Record<string, unknown> {
+    const doc = session.document()!
+    for (const id of doc.scene.order) {
+      const obj = doc.scene.objects[id]
+      if (obj === undefined || obj.type !== 'block') continue
+      const p = doc.scene.data[obj.dataId]?.payload as Record<string, unknown> | undefined
+      if (p?.kind === 'blockGrid') return p
+    }
+    throw new Error('装配产物里没有 blockGrid 载荷')
+  }
+
+  it('① **载荷确实带** `sizeColumn/sizeRow/sizeZSlice`（接线判据本体）', async () => {
+    const { session, dispose } = await adoptedSession()
+    try {
+      const p = rawPayloadOf(session)
+      expect(p.sizeColumn, '装配必须写出宽（声明尺寸）').toBe(SPARSE.w)
+      expect(p.sizeRow, '装配必须写出高（声明尺寸）').toBe(SPARSE.h)
+      expect(p.sizeZSlice, '装配必须写出深（声明尺寸）').toBe(SPARSE.d)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('② 读面据此给出**声明尺寸**（而不是包围盒降级值）', async () => {
+    const { session, dispose } = await adoptedSession()
+    try {
+      const g = kernelGridOf(session.document(), 0)!
+      expect({ w: g.width, h: g.height, d: g.depth }).toEqual({ w: SPARSE.w, h: SPARSE.h, d: SPARSE.d })
+    } finally {
+      dispose()
+    }
+  })
+
+  it('③ **反空洞真**：本夹具的包围盒值**确实小于**声明值（否则本组无法区分修好与没修）', async () => {
+    const { session, dispose } = await adoptedSession()
+    try {
+      const p = rawPayloadOf(session)
+      const cells = p.cells as Record<string, string>
+      const keys = Object.keys(cells)
+      expect(keys, '夹具必须只有一格方块').toHaveLength(1)
+      const [x, y, z] = keys[0]!.split(',').map(Number)
+      const bounds = { w: x! + 1, h: y! + 1, d: z! + 1 }
+      expect(
+        bounds,
+        '包围盒必须**小于**声明（w=2/h=4/d=2 vs 6/5/4）—— 否则"声明优先"这条判据在本夹具上是空转',
+      ).toEqual({ w: SPARSE.cell.x + 1, h: WORLD_Y + 1, d: SPARSE.cell.z + 1 })
+      expect(bounds.w).toBeLessThan(SPARSE.w)
+      expect(bounds.d).toBeLessThan(SPARSE.d)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('④ **负对照**：把载荷的三个字段**去掉**（回放到修复前的形态）⇒ 读面给出包围盒值', () => {
+    const doc = createDocument('neg', { sceneId: 'neg' })
+    const obj = sceneObject({ id: 'b', type: 'block', name: 'b', dataId: 'b:data' })
+    // ⚠️ 刻意**不**写 sizeColumn/sizeRow/sizeZSlice —— 这就是修复前装配产出的形状。
+    const data = objectData('b:data', {
+      kind: 'blockGrid',
+      cells: { [`${SPARSE.cell.x},${WORLD_Y},${SPARSE.cell.z}`]: gf7('stone', 0) },
+    } as never, 'document')
+    const scene: Scene = { ...doc.scene, order: ['b'], objects: { b: obj }, data: { 'b:data': data } }
+    const g = kernelGridOf(withScene(doc, scene).doc, 0)!
+    expect(
+      { w: g.width, h: g.height, d: g.depth },
+      '无声明字段 ⇒ 降级为包围盒（这正是 L3 判红时的读数口径）',
+    ).toEqual({ w: SPARSE.cell.x + 1, h: WORLD_Y + 1, d: SPARSE.cell.z + 1 })
+    expect(g.width, '负对照必须与正路径**不同**，否则本组无区分力').not.toBe(SPARSE.w)
+  })
+
+  it('⑤ 声明尺寸进 `structureRowToWorldY`：与**旧 Grid**（= 文件声明）逐点同值', async () => {
+    const { session, dispose } = await adoptedSession()
+    try {
+      const sdoc = session.document()
+      const kernel = kernelGridOf(sdoc, 0)!
+      // 旧 Grid 的维度就是文件声明（`_fromV2CellGrid` 用 `cellGrid` 三维构造）
+      // ⇒ 本判据比较的是"读面 == 文件声明"这条**唯一**口径。
+      const legacyH = SPARSE.h
+      expect(kernel.height).toBe(legacyH)
+      // 世界中心：网格居中于原点 ⇒ 与 legacy `Grid.centerWorld` 同式；
+      // 用 height 的差异验证"若 height 偏小，中心就偏移"。
+      const center = kernel.centerWorld({ x: 0, y: 0, z: 0 })
+      const boundsH = WORLD_Y + 1
+      expect(center.y, '声明高度下的 y 中心').toBe(0 - SPARSE.h / 2 + 0.5)
+      expect(center.y, '包围盒高度会给出**不同**的中心（可观测偏移）').not.toBe(0 - boundsH / 2 + 0.5)
+    } finally {
+      dispose()
+    }
   })
 })
