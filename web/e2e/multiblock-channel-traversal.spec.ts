@@ -459,22 +459,34 @@ test.describe('T2.6 · 通道滑杆组合遍历（desktop 精简集 / mobile 抽
   })
 
   /**
-   * #332 · **运行态可辨识性诊断（EBF）** —— 把"已知盲轴"变成**如实记录的证据**。
+   * #334 · **运行态可辨（EBF，门禁）** —— 从"非门禁诊断"升格为判据。
    *
-   * 背景（实测，见 `reducedTraversal.ts` 文件头）：EBF 的 216 对"仅运行态不同"的组合，
-   * 在 `idMeta` 口径下**全部内容相同**（盲率 100%）；参考侧把控制器格从并集下标 `7` 写到 `8`，
-   * 而两条条目 `name:meta` 相同（差异只在 `tooltip` 与 `nbt.activeFace`）⇒ `idMeta` 结构上不可分辨。
+   * ## 病历（为什么它此前只能"记录"）
    *
-   * 本用例驱动一对"**其余轴全部固定、仅运行态不同**"的组合，并如实记录：
-   *  ① 两条都收敛到各自参考（`idMeta` 逐格 diff=0）—— 证明**真的渲染了**，不是空跑；
-   *  ② 两次渲染定义（`cellGrid` + `blockPalette` 全文）是否可分辨 —— **记录**产品侧能力现状；
-   *  ③ 渲染侧控制器条目的 `tooltip` / `nbt` —— 与参考侧 7/8 两条逐字对照。
+   * 本条原先只驱动一对"**其余轴全部固定、仅运行态不同**"的组合，断言①两次都收敛到各自
+   * 参考，然后**记录**②渲染定义是否可分辨、③控制器条目内容 —— 因为当时实测渲染面
+   * **结构性不可分辨**（`cellGrid` 与 `blockPalette` 两次全文相同），把"注定红"的断言写成
+   * 门禁等于用假失败冒充判据。缺口登记在 `reducedTraversal.ts` 的 `KNOWN_BLIND_AXES`。
    *
-   * 门禁只有①（"渲染真的发生了"）。②③ **不作门禁**：运行态在渲染面上是否可辨识属产品侧能力，
-   * 若不可辨识则是**实现缺口**（须另立单修 `src/`），不是本治理批能靠改测试解决的 ——
-   * 用一条注定红的断言冒充"加强了判据"正是本项目判据史里的假绿反面。缺口已报 Lead。
+   * ## 现在为什么能当门禁（#334 已修，根因=失效判定读面）
+   *
+   * 根因不在投影、也不在渲染包解析（三段实测：`kernelRenderViewOf` 的产物、`fromV2Plain`
+   * 往返、`resolveRenderBundle` 的解析**都已经可辨**），而在**内容身份的读面**：
+   * `runtime/presentationAdapter#readContentIdentity` 的结构摘要只含**名称级**调色板身份
+   * （`registryId@meta`），对"同 `name:meta`、异条目内容"（运行态：`tooltip`/`nbt.activeFace`）
+   * 结构性不可见 ⇒ `planContentRebuild` 全 false ⇒ 渲染链**什么都不做** ⇒ 视口定义逐字节不变。
+   *
+   * ## 判据（两条都是**生产观测面**：`vpSlot.definition`，不新造探针）
+   *
+   *  1. **逐字节变化**：两次渲染定义（`cellGrid` + `blockPalette` 全文）必须不同；
+   *  2. **含 running 形态**：active 的控制器条目必须带运行态内容（`tooltip` 含
+   *     `(running)` **且** `nbt.activeFace === true`），idle 的必须**不带** ——
+   *     两侧都断言，防止"随手改点别的字段"也算过。
+   *
+   * 门禁仍保留原有的"两次都必须收敛到各自参考（`idMeta` 逐格 diff=0）"作为前置：
+   * 否则下面的"可分辨性"结论毫无意义。
    */
-  test('运行态可辨识性诊断（EBF，非门禁）：固定其余轴、仅改运行态 ⇒ 记录渲染定义是否可分辨', async ({ page }) => {
+  test('运行态可辨（EBF，门禁）：固定其余轴、仅改运行态 ⇒ 视口渲染定义逐字节变化且含 running 形态', async ({ page }) => {
     test.setTimeout(120_000)
     const file = 'multiblock-ebf-2ch.json'
     const ref = snapshotOrFallbackReference(file)
@@ -503,21 +515,35 @@ test.describe('T2.6 · 通道滑杆组合遍历（desktop 精简集 / mobile 抽
     const idle = await drive('idle')
     const active = await drive('active')
 
-    // 门禁①：两次都必须真收敛到各自参考（否则下面的"可分辨性"结论毫无意义）
+    // 前置：两次都必须真收敛到各自参考（否则下面的"可分辨性"结论毫无意义）
     expect(idle.diffCount, `${keyOf('idle')}：必须收敛到参考（idMeta 逐格 diff=0）`).toBe(0)
     expect(active.diffCount, `${keyOf('active')}：必须收敛到参考（idMeta 逐格 diff=0）`).toBe(0)
 
-    // 记录②：两次渲染定义全文是否可分辨
-    const sameGrid = JSON.stringify(idle.rendered.cellGrid) === JSON.stringify(active.rendered.cellGrid)
-    const samePalette = JSON.stringify(idle.rendered.palette) === JSON.stringify(active.rendered.palette)
-    // 记录③：渲染侧控制器条目的 tooltip / nbt（参考侧 7=idle 无 nbt、8=active 带 nbt.activeFace）
-    const controllerOf = (palette: unknown[]): string => {
+    // 门禁①：渲染定义**逐字节**变化（cellGrid + blockPalette 全文）
+    const idleText = JSON.stringify(idle.rendered)
+    const activeText = JSON.stringify(active.rendered)
+    expect(
+      activeText,
+      '#334：仅切运行态后，视口渲染定义（cellGrid + blockPalette 全文）必须逐字节变化',
+    ).not.toBe(idleText)
+
+    // 门禁②：active 必须含 running 形态，idle 必须不含（两侧都断言）
+    const controllerOf = (palette: unknown[]): Record<string, unknown> => {
       const hit = paletteSignatures(palette).findIndex((s) => s.idMeta === 'gt.blockmachines:1000')
-      if (hit < 0) return '<未出现>'
-      const e = palette[hit] as { tooltip?: unknown; nbt?: unknown }
-      return `tooltip=${JSON.stringify(e.tooltip)} nbt=${JSON.stringify(e.nbt)}`
+      expect(hit, 'EBF 的控制器条目（gt.blockmachines:1000）必须出现在渲染调色板里').toBeGreaterThanOrEqual(0)
+      return palette[hit] as Record<string, unknown>
     }
-    const refTooltipOf = (key: string): string => {
+    const runningShape = (e: Record<string, unknown>): boolean =>
+      JSON.stringify(e.tooltip ?? null).includes('(running)') &&
+      (e.nbt as { activeFace?: unknown } | undefined)?.activeFace === true
+
+    const idleCtl = controllerOf(idle.rendered.palette)
+    const activeCtl = controllerOf(active.rendered.palette)
+    expect(runningShape(activeCtl), `#334：active 的控制器条目必须带 running 形态（tooltip + nbt.activeFace），实测 ${JSON.stringify(activeCtl)}`).toBe(true)
+    expect(runningShape(idleCtl), `#334：idle 的控制器条目**不得**带 running 形态，实测 ${JSON.stringify(idleCtl)}`).toBe(false)
+
+    // 参考侧对照（诊断；不是门禁）：并集下标 7/8 的 tooltip/nbt
+    const refController = (key: string): string => {
       const grid = ref.byVariant.get(key)!.cellGrid
       const used = new Set<number>()
       for (const slice of grid) for (const row of slice) for (const i of row) used.add(i)
@@ -531,11 +557,11 @@ test.describe('T2.6 · 通道滑杆组合遍历（desktop 精简集 / mobile 抽
     }
 
     console.log(
-      `[#332 运行态诊断] ${file} :: 其余轴固定 (height=${common.height},coil=${common.coil},glass=${common.glass},tt=${tiers})\n` +
-        `  门禁①（已断言）：两次渲染均收敛到各自参考，idMeta 逐格 diff=0\n` +
-        `  记录②：cellGrid 全文相同=${sameGrid}；blockPalette 全文相同=${samePalette}\n` +
-        `  记录③ 渲染侧控制器条目：idle → ${controllerOf(idle.rendered.palette)}；active → ${controllerOf(active.rendered.palette)}\n` +
-        `  记录③ 参考侧控制器条目：idle → ${refTooltipOf(keyOf('idle'))}；active → ${refTooltipOf(keyOf('active'))}`,
+      `[#334 运行态门禁] ${file} :: 其余轴固定 (height=${common.height},coil=${common.coil},glass=${common.glass},tt=${tiers})\n` +
+        `  前置①：两次渲染均收敛到各自参考，idMeta 逐格 diff=0\n` +
+        `  门禁①：渲染定义逐字节变化 = ${idleText !== activeText}（idle ${idleText.length}B / active ${activeText.length}B）\n` +
+        `  门禁②：active 控制器 = ${JSON.stringify(activeCtl)}；idle 控制器 = ${JSON.stringify(idleCtl)}\n` +
+        `  参考侧对照：idle → ${refController(keyOf('idle'))}；active → ${refController(keyOf('active'))}`,
     )
   })
 
