@@ -47,8 +47,8 @@ import {
 // A21：对象构造入口直接取自 `domain/scene`（不经 `domain/document` 转出口 ——
 // 契约 §7.3 规则 1 禁 barrel；同层具名导入是常态）。
 import { DEFAULT_OBJECT_FACTORIES, createObjectOfType, objectData, withObject, withUpdatedData } from '@/domain/scene'
-import type { ObjectDataPayload } from '@/domain/scene'
-import { cellContent, cellContentKey, normalizeCellContent, type CellContent } from '@/domain/cellContent'
+import type { ObjectData, ObjectDataPayload } from '@/domain/scene'
+import { cellContent, cellContentKey, normalizeCellContent, type CellContent, type CellPosition } from '@/domain/cellContent'
 import {
   acquireLease,
   advancePlayback,
@@ -244,19 +244,30 @@ export interface SetCellTooltipCommand {
   readonly kind: 'setCellTooltip'
   readonly contextId: string
   /**
-   * 目标**方块网格对象**的 id。
+   * ⚠️ **没有 `objectId`**：逐格说明是**文档级**事实（见下方"为什么文档级"）。
    *
-   * ⚠️ 逐格说明挂在 `blockGrid` 载荷上，而**帧为主文档每个帧一个对象**
-   * （`structure:frame-<i>`）、多方块文档只有 `structure:multiblock`。
-   * 装配期把**同一份**文档级说明复制到**每一个**帧对象
-   * （`kernelAssembly.ts:1559-1583` 的循环里调 `tooltipContentOf(doc, grid)`）
-   * ⇒ 写者也必须落到**同一个**目标对象上，否则"写帧 0、读帧 1"会不一致。
-   * 由调用方（经 `Context`）决定是"当前帧对象"还是"多方块对象"。
+   * ## 为什么文档级（实测的语义不对称，本命令的设计依据）
+   *
+   * | 侧 | 承载方式 |
+   * |---|---|
+   * | legacy（文件格式） | `tooltipPalette` + `cellTooltipGrid` 是**文档根**的**单个**网格 |
+   * | 内核 | 逐格说明挂在**每个** `blockGrid` 载荷的 `cellContent` 上 |
+   *
+   * 而装配把**同一份**文档级说明复制到**每一个**帧对象
+   * （`kernelAssembly.ts:1559-1583`：帧循环里逐帧调 `tooltipContentOf(doc, grid)`，
+   * 且用**该帧自己的** `grid.height` 做行序翻转）。
+   *
+   * ## ⚠️ 为什么必须一次写**全部** `blockGrid` 对象（不能只写一个）
+   *
+   * 投影侧 `tooltipPoolOfPayloads`（`kernelProjection.ts:869-873`）取
+   * **第一个**有池的载荷就返回 ⇒ 若各帧的说明**不一致**，只有第一帧的会被写回文件，
+   * 其余帧的**静默丢失**（"看起来写成功了，存出来却没有"）。
+   * ⇒ 本命令对**每个**含该格的 `blockGrid` 对象**原子**写入（一条命令 = 一个事务 = 一条历史）。
+   *
+   * 只写"当前帧对象"是**错的**：那会让多帧文档的说明逐帧分叉，
+   * 而装配期建立的不变量是"所有帧携带同一份文档级说明"。
    */
-  readonly objectId: string
-  readonly x: number
-  readonly y: number
-  readonly z: number
+  readonly cells: readonly CellPosition[]
   /** 说明文案；`null` = 删除该格说明（见上文"缺席 ≠ 空"）。 */
   readonly text: string | null
 }
@@ -1028,68 +1039,111 @@ function reduceSetCellTooltip(state: ApplicationState, cmd: SetCellTooltipComman
   if (!found.ok) return rejected(state, found.error)
   const { ctx, doc } = found.value
 
-  const obj = findObject(doc.scene, cmd.objectId)
-  if (!obj) return rejected(state, missingTarget({ objectId: cmd.objectId }))
-  const data = findObjectData(doc.scene, obj.dataId)
-  if (!data) return rejected(state, missingTarget({ dataId: obj.dataId }))
-  // 只读数据（content 源）不得写 —— 与另两条对象写路径同一守卫。
-  if (data.source === 'content') return rejected(state, readOnly({ owner: data.source, objectId: cmd.objectId }))
-  if (data.payload.kind !== 'blockGrid') {
-    return rejected(
-      state,
-      unsupportedOperation({ objectType: `payload:${data.payload.kind}`, kind: 'setCellTooltip' }),
-    )
-  }
-
-  const key = cellContentKey(cmd.x, cmd.y, cmd.z)
-  // ⚠️ 键必须**已存在**于 `cells`：写一个不存在的格会让说明永远显示不出来
-  // （投影侧的 `cellContentKeyDiagnostic` 正是为此报警）。⇒ 在写入口就拒绝，
-  // 而不是默默存下一个"孤儿键"。
-  if (!Object.prototype.hasOwnProperty.call(data.payload.cells, key)) {
-    return rejected(state, missingTarget({ objectId: `${cmd.objectId}@${key}` }))
-  }
-
-  const before = data.payload.cellContent?.[key] ?? {}
-  // ⚠️ **只有 `null` 表示删除**（我第一版把 `''` 也当成删除，被自己的判据当场判红）。
+  // ⚠️ **只 `null` 表示删除**（我第一版把 `''` 也当删除，被自己的判据当场判红）。
   //
   // 内核 `CellContent.tooltip` 的口径（`domain/cellContent.ts:170`）：
   // 「**缺席** = 无逐格说明。空串 = 显式"说明了空"」—— 两者**必须**可区分。
-  // 把 `''` 当删除会让"用户清空了说明文字"与"用户删除了该格说明"在语义上合并，
-  // 而那正是 `cellContentIsEmpty` 要防的形态。
   const nextTooltip: string | undefined = cmd.text === null ? undefined : cmd.text
-  if ((before.tooltip ?? undefined) === nextTooltip) return unchanged(state, doc.version)
+  if (cmd.cells.length === 0) return rejected(state, missingTarget({ objectId: 'cells[]' }))
+
+  const keys = cmd.cells.map((c) => cellContentKey(c.x, c.y, c.z))
+  if (new Set(keys).size !== keys.length) {
+    // 重复格 ⇒ 拒绝（"多选一失败整批拒"的同一纪律；重复会让变更摘要出现两条同目标项）
+    return rejected(state, invalidValue({ reason: 'duplicateCells', count: keys.length }))
+  }
+
+  // ── 找出**全部**目标：含**任一**该格的 `blockGrid` 对象 ──────────────────
+  //
+  // 见 `SetCellTooltipCommand` 的说明：文档级事实必须在每个帧对象上**同时**成立，
+  // 否则投影只取第一份池 ⇒ 其余帧的说明静默丢失。
+  //
+  // ⚠️ **每格都必须有落点**，否则整批拒绝（部分成功会让"多选一失败整批拒"失效）。
+  const targets: {
+    readonly objectId: string
+    readonly dataId: string
+    readonly source: ObjectData['source']
+    readonly payload: Extract<ObjectDataPayload, { kind: 'blockGrid' }>
+  }[] = []
+  const hitsPerKey = new Map<string, number>(keys.map((k) => [k, 0]))
+  for (const objectId of doc.scene.order) {
+    const obj = findObject(doc.scene, objectId)
+    if (obj === undefined || obj.type !== 'block') continue
+    const data = findObjectData(doc.scene, obj.dataId)
+    if (data === undefined || data.payload.kind !== 'blockGrid') continue
+    let hit = false
+    for (const k of keys) {
+      if (!Object.prototype.hasOwnProperty.call(data.payload.cells, k)) continue
+      hitsPerKey.set(k, (hitsPerKey.get(k) ?? 0) + 1)
+      hit = true
+    }
+    // 该对象与本次写入无关（不含任一格）⇒ 不是目标（各帧网格可以不同尺寸）
+    if (!hit) continue
+    targets.push({ objectId, dataId: obj.dataId, source: data.source, payload: data.payload })
+  }
+  const orphan = keys.find((k) => (hitsPerKey.get(k) ?? 0) === 0)
+  if (targets.length === 0 || orphan !== undefined) {
+    // 有格不在任何网格里 ⇒ 拒绝（否则会存下永不显示的说明；
+    // 投影侧的 `cellContentKeyDiagnostic` 正是为此报警）。
+    return rejected(state, missingTarget({ objectId: `cell@${orphan ?? keys[0]}` }))
+  }
+
+  // 只读数据（`content` 源）不得写 —— 与另两条对象写路径同一守卫。
+  const readOnlyTarget = targets.find((t) => t.source === 'content')
+  if (readOnlyTarget !== undefined) {
+    return rejected(state, readOnly({ owner: readOnlyTarget.source, objectId: readOnlyTarget.objectId }))
+  }
+
+  // ── 幂等：**全部**（目标 × 格）都已是该值 ⇒ `unchanged` ──────────────────
+  const alreadyAll = targets.every((t) =>
+    keys.every((k) => ((t.payload.cellContent?.[k]?.tooltip) ?? undefined) === nextTooltip),
+  )
+  if (alreadyAll) return unchanged(state, doc.version)
 
   const lease = acquireFor(state, doc.id, cmd.contextId)
   if (!lease.ok) return rejected(state, lease.error)
 
-  // 逐格内容表的受控更新：先算新表，再经 `objectData()` 造新数据块
-  // （`objectData` 机械派生 `contentVersion` ⇒ "改了字节版本必变"是结构事实）。
-  const table: Record<string, CellContent> = { ...(data.payload.cellContent ?? {}) }
-  if (nextTooltip === undefined) {
-    const rest: { parts?: CellContent['parts'] } = {}
-    if (before.parts !== undefined) rest.parts = before.parts
-    // 该格因此再无内容 ⇒ **连键一起删**（不留下 `{}` 空壳：
-    // 空表与"有键但空"必须可区分，见 `cellContentIsEmpty` 的口径）。
-    // ⚠️ 但若它还有 `parts`，只去掉 `tooltip` 字段 —— 不能把部件一起删掉。
-    if (rest.parts === undefined) delete table[key]
-    else table[key] = cellContent(rest)
-  } else {
-    table[key] = cellContent({ ...(before.parts === undefined ? {} : { parts: before.parts }), tooltip: nextTooltip })
+  // ── 原子地更新全部目标（一条命令 = 一个事务 = 一条历史） ────────────────
+  let scene: Scene = doc.scene
+  for (const t of targets) {
+    const table: Record<string, CellContent> = { ...(t.payload.cellContent ?? {}) }
+    for (const k of keys) {
+      if (!Object.prototype.hasOwnProperty.call(t.payload.cells, k)) continue
+      const before = t.payload.cellContent?.[k] ?? {}
+      if (nextTooltip === undefined) {
+        const rest: { parts?: CellContent['parts'] } = {}
+        if (before.parts !== undefined) rest.parts = before.parts
+        // 该格因此再无内容 ⇒ **连键一起删**（不留下 `{}` 空壳：
+        // 空表与"有键但空"必须可区分，见 `cellContentIsEmpty` 的口径）。
+        // ⚠️ 但若它还有 `parts`，只去掉 `tooltip` —— 不能把部件一起删掉。
+        if (rest.parts === undefined) delete table[k]
+        else table[k] = cellContent(rest)
+      } else {
+        table[k] = cellContent({
+          ...(before.parts === undefined ? {} : { parts: before.parts }),
+          tooltip: nextTooltip,
+        })
+      }
+    }
+    const nextPayload: ObjectDataPayload = Object.freeze({
+      ...t.payload,
+      cellContent: normalizeCellContent(table),
+    })
+    // `objectData()` 机械派生 `contentVersion` ⇒ "改了字节版本必变"是结构事实。
+    scene = withUpdatedData(scene, objectData(t.dataId, nextPayload, t.source))
   }
-  const payload: ObjectDataPayload = Object.freeze({
-    ...data.payload,
-    cellContent: normalizeCellContent(table),
-  })
-  const nextData = objectData(data.id, payload, data.source)
-  const nextScene: Scene = withUpdatedData(doc.scene, nextData)
+  const nextScene = scene
   const write = withScene(doc, nextScene)
 
   const changes = changeSummary({
-    changedProperties: [{ owner: objectRef(cmd.objectId), property: 'cellTooltip' }],
+    // 变更摘要逐**格**列出（多选/多帧下"改了哪些格"必须可见，不压成一条）
+    changedProperties: cmd.cells.map((c) => ({
+      owner: objectRef(`${c.x},${c.y},${c.z}`),
+      property: 'cellTooltip',
+    })),
     structurallyShared: true,
   })
   const withHistory = recordHistory(write.doc, {
-    label: `cell tooltip ${cmd.objectId}@${key}`,
+    label: `cell tooltip @${keys.join(' ')}`,
     beforeScene: doc.scene,
     beforeVersion: doc.version,
     afterScene: nextScene,

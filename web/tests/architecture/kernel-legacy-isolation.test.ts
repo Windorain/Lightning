@@ -583,6 +583,18 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       '嵌入宿主创建自己的内核会话（能力来自嵌入 profile ⇒ 无内容编辑能力，A15 的运行时拒绝在嵌入侧同样成立）；与工作台会话互不可见 ⇒ 同页两实例状态隔离',
     exitStage: 'P10（#261）本批接线落地，永久保留；P11 核销旧机制',
   }),
+  // ── P10f D0（#301）逐格说明：旧层算子发内核内容命令 ───────────────────────
+  //
+  // D0 把"写逐格说明"从"clone legacy 侧表 + `setDocument`"改成发内核命令
+  // （`setCellTooltip`）。发起者是旧层的 `metaEditOperators` ⇒ 旧→新边，须登记。
+  // 它需要内核的 `contextId` 才能把命令落在正确的编辑上下文上。
+  Object.freeze({
+    from: 'src/operators/builtin/metaEditOperators.ts',
+    to: 'runtime/kernelSession',
+    reason:
+      'P10f D0：逐格说明写路径改走内核命令（`setCellTooltip`），需要 `KERNEL_CONTEXT_ID` 构造命令。与 C′2 的 `annotationOperators` 同类（那条已登记）',
+    exitStage: 'P10/D 批：`operators/` 层随命令面重写迁入新层；P11 核销',
+  }),
   // ── P10（#261）材质时间：渲染侧消费纯采样（`material-tick` 组的替代面）──
   //
   // 这条边是 `material-tick` 组退役的**替代证据**：三处旧机制（`renderEngine` 的
