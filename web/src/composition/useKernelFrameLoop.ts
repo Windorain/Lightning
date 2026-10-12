@@ -15,9 +15,13 @@
  *
  * ### 1. 绑定帧声明（`FrameSource`）
  *
- * 内核不持有文档、不认识 `RuntimeDocument`。帧**声明**（帧数、每帧时长）
- * 由本 composable 从 `ctx.getDoc()` 读出来交给会话 —— 这是一条**显式**的
- * 适配接缝（见 `KernelSession.bindFrameSource` 的说明）。
+ * 内核不持有文档、不认识 `RuntimeDocument`。帧**声明**（帧数 + 每帧时长 + 标签）
+ * 由本 composable 经 `ctx.frameDeclarations()`（**帧声明的唯一读取面**）读出来
+ * 交给会话 —— 这是一条**显式**的适配接缝（见 `KernelSession.bindFrameSource` 的说明）。
+ *
+ * ⚠️ **#301 P10f D3 更新**：本行原写"从 `ctx.getDoc()` 读" —— 那个访问器**已终删**。
+ * 读面换成了 `frameDeclarations()`（与状态栏、帧循环**同一个函数**，
+ * 故三处读数不可能不一致；GF-16 分流就在它内部）。
  *
  * 提供者是**函数**（每次现读）而不是快照：文档可被替换（打开另一份文件），
  * 传快照会要求每次换文档都重新绑定并保证不漏 —— 漏一次就得到

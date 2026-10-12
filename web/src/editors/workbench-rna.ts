@@ -540,10 +540,14 @@ export function documentStateOf(ctx: Context): DocumentState {
  *
  *  - **机制已收敛**：属性语义查同一个 RNA 注册表，写入走同一个 `applySetProperty`
  *    原子路由（多选一失败整批拒、逐目标原因）。这就是 #253 的交付面。
- *  - **数据模型未收敛**：此处读的是 `ctx.getDoc()` 返回的 `RuntimeDocument`
- *    （`documentStateOf` 把它包成 `{version, document, shell}`），
- *    而不是内核的 `domain/document.ts` 的 `Document`/`application/state.ts` 的
- *    `ApplicationState`。
+ *  - **数据模型未收敛**：`documentStateOf` 取的是旧 `RuntimeDocument`
+ *    （包成 `{version, document, shell}`），而不是内核的
+ *    `domain/document.ts` 的 `Document` / `application/state.ts` 的 `ApplicationState`。
+ *    ⚠️ **#301 P10f D3 更新**：取值口已不再是 `ctx.getDoc()`（**该访问器已终删**），
+ *    而是具名口 `Context#legacyDocumentModel()` —— 该口**恰有两处**调用者
+ *    （本文件 + `context/captureEmbedInitialView.ts`），由 `boundary-scan` 的
+ *    白名单闭集判据钉住。剩余半边登记在
+ *    `composition/seams.ts` 的 `property-write-legacy-document-model`（owner P11）。
  *
  * **为什么本批不退**：把实时工作台从 `RuntimeDocument` 迁到内核 `Document`
  * 需要先改工作区/Area 的装配（外壳、视口、选中集的宿主），

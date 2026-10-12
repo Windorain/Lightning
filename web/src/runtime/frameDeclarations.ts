@@ -23,7 +23,7 @@
  * | 事实 | 来源 | 语义 |
  * |---|---|---|
  * | `adopted` | `KernelSession.hasAdoptedContent()`（**GF-16**） | 内核里的**就是**这份文档的装配产物吗 |
- * | `legacy` | `ctx.getDoc().value` | 用户打开的那份文档（总有权威） |
+ * | `legacy` | `main.doc.value`（`Context.legacyFrames` 的内部读取；`getDoc()` 已终删） | 用户打开的那份文档（总有权威） |
  *
  * 「内核有文档」（GF-15/`document() !== undefined`）**不是**这里的判据 ——
  * 它恒真，用它就会退回 D8 的形态。故 `adopted` 参数在类型上被刻意做成

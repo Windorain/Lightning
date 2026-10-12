@@ -294,6 +294,63 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '则该取值口可整体删除。',
   }),
   /**
+   * P10f D3（#301）登记：**等轴 PNG 导出仍走旧烘焙链**（D-8 实测驱动的收窄）。
+   *
+   * ## 为什么本批**不**把它切到 `ExportJob`（实测，不是工作量）
+   *
+   * 任务书第 5 项的字面是"四命令迁 `ExportJob`"，Lead 裁决 D-8 取 (甲)
+   * （ISO PNG 走 `ExportJob`、其余三命令保持 `plainForSave`）。**接线前实测推翻了"低风险"这一前提**：
+   *
+   * | 事实 | 证据 |
+   * |---|---|
+   * | 现路径**带贴图** | `workbench/exportIsometricImage#bakeIsometricStructurePngDataUrl` 先 `buildMaterialLibrary(document)`，再 `buildBlockMesh(definition, materialLibrary, …)` ⇒ 真材质库 |
+   * | `ExportJob` 路径**默认无贴图** | `adapters/export/offscreenRenderPort` 的 `textures?: TexturePort`，注释逐字："缺省 = 材质走 **中性色**" |
+   * | 没有可交出去的生产 `TexturePort` | 全树 `TexturePort` 的**唯一**生产消费者是 `composition/presenterSession`（**视口作用域**，从活视口取资源）。把它交给导出作业正是 A29 要防的"导出借用实时视口" |
+   *
+   * ⇒ 现在切过去，产出的等轴 PNG 会**失去贴图**（画面变平）—— 那是**可感知的能力回退**，
+   * #171 明令禁止。而 `e2e/export-ports.spec.ts` 的现有证据证的是**端口链**
+   *（内容包围盒 + 透视相机 + 合成探针），**不覆盖**等轴方向的语义与画面质量
+   * ⇒ 我原先给 D-8 的"已有 e2e 证据"这句话**不成立**，如实更正。
+   *
+   * ## 本批做了什么
+   *
+   * - 三个非渲染产物命令（Plain / Envelope / OBJ）的**产字节**已在 D2 迁到
+   *   `Context#plainForSave()`（内核投影优先）—— D-8 的"其余保持"部分已兑现；
+   * - 等轴 PNG **保持现路径**（无能力回退），并登记本条等待前置齐备。
+   */
+  Object.freeze({
+    id: 'isometric-export-legacy-bake',
+    files: Object.freeze([
+      'src/workbench/exportIsometricImage.ts',
+      'src/operators/builtin/exportOperators.ts',
+      'src/adapters/export/snapshotExportJob.ts',
+    ]),
+    newTrack:
+      '`adapters/export/snapshotExportJob#assembleSnapshotExportJob` + '
+      + '`SnapshotOffscreenRenderPort`（取景/求值/呈现/读回/释放）+ `createEncoderPort`'
+      + '（真 PNG 字节）—— 冻结快照导出作业的**生产装配**，且已有真 GL e2e 证据'
+      + '（`e2e/export-ports.spec.ts`，2 passed / 负对照诚实失败）。',
+    oldTrack:
+      '`src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
+      + '`src/workbench/exportIsometricImage.ts#bakeIsometricStructurePngDataUrl` **自建** '
+      + '`WebGLRenderer` + `buildMaterialLibrary` + `buildBlockMesh` 烘焙等轴 PNG'
+      + '（D7 修复后 `resolveIsoDirection` 是渲染下标与文件名的**同一来源**）。',
+    blocker:
+      '`adapters/export/offscreenRenderPort` 的 `textures` 缺省 ⇒ **材质走中性色**；'
+      + '而唯一的生产 `TexturePort` 属 `composition/presenterSession`（**视口作用域**）'
+      + ' ⇒ 交给导出作业就是 A29 要防的"导出借用实时视口资源"。'
+      + ' 故切换的前置是**渲染链终切**（呈现层接管画面、材质统一）——'
+      + ' 与 `presenter-surface-dual-track` / `legacy-render-source-document` 同一前置。',
+    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
+    exitCondition:
+      '`src/adapters/export/snapshotExportJob.ts` 的装配能拿到**不借用实时视口**的生产 '
+      + '`TexturePort`（或材质统一后不再需要贴图端口），且 '
+      + '`src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
+      + '`assembleSnapshotExportJob` + `ExportJob.run()` 产出 PNG'
+      + '（同批作废 `src/workbench/exportIsometricImage.ts` 的自建渲染器路径）'
+      + ' ⇒ 届时删除本条登记。',
+  }),
+  /**
    * P10e（#299）登记：**呈现链与 legacy 渲染链并存**（本批的显式暂存）。
    *
    * ## 为什么必须登记（而不是只在汇报里说"本批不切渲染链"）
@@ -306,7 +363,8 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * ## 为什么本批**不**接管画面（切一半比不切更糟）
    *
    * 接管需要"DRW 消费内核求值产物"的整体切换，其前置为：
-   *  - 保存面从 `ctx.getDoc()` 迁到内核投影（`raw-authority-object` 终删）；
+   *  - ✅ **已兑现（#301 P10f D3）**：保存面从旧读取入口迁到内核投影
+   *    （`raw-authority-object` 相位已翻 `executed`；`getDoc()` 判据本尊口径 **0 命中**）；
    *  - 9 条**未装配内核**的加载路径补齐（实测：内核文档只在文件选择器与
    *    `documentLoadPipeline` 两条路径被填充）；
    *  - `Command` 封闭联合扩展（侧表写面）；

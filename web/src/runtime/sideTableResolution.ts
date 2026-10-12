@@ -15,7 +15,7 @@
  * | 事实 | 来源 | 语义 |
  * |---|---|---|
  * | `adopted` | `KernelSession.hasAdoptedContent()`（GF-16） | 内核里的**就是**这份文档的装配产物吗 |
- * | `legacy` | `ctx.getDoc().value`（经读面函数投影） | 用户打开的那份文档（总有权威） |
+ * | `legacy` | `main.doc.value`（`Context` 内部读取后经读面函数投影；`getDoc()` 已终删） | 用户打开的那份文档（总有权威） |
  *
  * ## ⚠️ 为什么这里**必须**回落 legacy（而帧声明也回落，但理由不同）
  *

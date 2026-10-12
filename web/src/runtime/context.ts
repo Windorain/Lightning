@@ -1033,7 +1033,9 @@ export class Context {
    * ## 为什么必须收口（不是"顺手封装"）
    *
    * 内核侧的**装载状态**（`KernelSession.hasLoadedDocument()`，GF-15）必须与
-   * legacy 的 `getDoc().value` **逐点对齐**。若 21 处各写一遍"写 legacy + 镜像内核"：
+   * legacy 侧的"有没有文档"（`main.doc.value !== null`）**逐点对齐**
+   *（`getDoc()` 曾是这个事实的生产读入口，**#301 P10f D3 已终删**）。
+   * 若 21 处各写一遍"写 legacy + 镜像内核"：
    *
    *  1. 那 21 份是**会漂移的判据**（本工程已三次实测"两份实现必然漂移"）；
    *  2. **将来**任何新调用点会绕过镜像 —— 而绕过是**静默**的
@@ -1206,20 +1208,20 @@ export class Context {
   /**
    * **内核会话**（#261 / R-WK-03）。
    *
-   * ## 它与 `getDoc()` 的关系（这是本批最重要的一处说明）
+   * ## 它与**文档内容读面**的关系（#301 P10f D3 更新）
    *
-   * 两者此刻**并存**，且分工明确、各有退出条件：
-   *  - `getDoc()` 是**文档内容**的读面（旧 `RuntimeDocument`）。工作台的
-   *    文档内容迁移（`kernel-property-write-dual-track` 接缝的退出条件）
-   *    需要 `ReadView` 的相机/embed 初始视图读面 + 属性写链迁移，
-   *    本批补齐了读面但**未**完成内容迁移 ⇒ 该接缝仍登记在案；
-   *  - 本方法是**时间 / 播放 / 帧下标**的读面。这一条本批**已完成**迁移：
-   *    旧 `Main.currentFrameIndex` / `Main.framesPlaybackIsPlaying` 两个
-   *    Vue Ref 已被删除，全部消费者改吃本会话（见 `retirementRegistry` 的
-   *    `world-frame-playback` 组，相位已翻 `executed`）。
+   * 旧说明写的是"`getDoc()` 与它此刻**并存**"—— 那个访问器**已终删**
+   *（46 处消费点各有具名读面，见上方 `// --- Main ---` 段的表）。
+   * 现在的事实分两半：
    *
-   * ⇒ 两件事**不是**同一件未竟工作的两半：播放/时间面已收口，
-   * 文档内容面仍开着。把它们混为一谈会让"播放已迁移"被误读成"迁移没做"。
+   * | 面 | 状态 |
+   * |---|---|
+   * | **内容面**（网格/注解/材质/帧声明/说明/元数据/产物 plain） | ✅ 各有具名读面（`kernelGrid`/`kernelAnnotations`/`kernelMaterials`/`frameDeclarations`/`cellTooltips`/`documentMetadata`/`plainForSave`） |
+   * | **写模型 + 渲染链的旧格式** | ⏳ 仍是旧文档载体（`property-write-legacy-document-model` / `legacy-render-source-document`，owner P11） |
+   * | **时间 / 播放 / 帧下标**（本方法所在的这条） | ✅ 本批之前已完成：旧 `Main.currentFrameIndex` / `Main.framesPlaybackIsPlaying` 两个 Vue Ref 已删，全部消费者改吃本会话（见 `retirementRegistry` 的 `world-frame-playback` 组，相位已翻 `executed`） |
+   *
+   * ⇒ 三件事**不是**同一件未竟工作的三半：把它们混为一谈会让"播放已迁移"
+   * 被误读成"迁移没做"，或让"读入口已终删"被误读成"旧数据模型全退了"。
    *
    * 未接线时抛错（**失败关闭**）：调用方若在没有会话的实例上调它，
    * 应立刻得到明确的失败，而不是一个"永远静止"的静默退化。
@@ -1393,11 +1395,13 @@ export class Context {
    * |---|---|---|
    * | 呈现要知道"当前画第几帧" | `requireKernelSession().frameIndex()` | 派生值，与时间同源 |
    * | 呈现/面板要知道"场景时间" | `requireKernelSession().playback().time` | 时间的唯一权威 |
-   * | 选择/拾取要知道"当前帧的网格" | `ctx.getDoc().value?.frame(i)` | **文档内容**仍是旧 `RuntimeDocument`（该迁移未完成，见 `requireKernelSession` 的说明） |
+   * | 选择/拾取要知道"当前帧的网格" | `ctx.kernelGrid(i)` | **网格读面**（#301 D3；内核 `blockGrid` 载荷为权威，未装配回落旧 `Grid` —— 两种来源**归一形状**） |
    *
-   * 第三行是本条与"文档内容迁移"的分界：帧**下标**（时间面）已迁到内核，
-   * 帧**内容**（网格数据）仍读旧文档。混为一谈会让"下标已迁移"被误读成
+   * 第三行是本条与"帧下标"的分界：帧**下标**（时间面）由本会话派生，
+   * 帧**内容**（网格数据）走 `kernelGrid`。混为一谈会让"下标已迁移"被误读成
    * "内容也迁移了"。
+   * ⚠️ **#301 P10f D3 更新**：第三行原写 `ctx.getDoc().value?.frame(i)` —— 该访问器已终删，
+   * 网格读面是 `kernelGrid`（见 `runtime/gridRead`）。
    */
   /**
    * 当前帧下标（**只读**；P10 #261）。

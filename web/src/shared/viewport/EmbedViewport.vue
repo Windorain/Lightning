@@ -64,7 +64,10 @@ const prefs = resolveEmbedViewerPreferences(ctx)
  * 多方块通道取值（**归内核编辑上下文**；#282 P10b）。
  *
  * 必须在 DRW 构造前创建，`renderDoc` 作为 DRW 的文档来源。
- * 帧为主文档时 `renderDoc` 即 `ctx.getDoc()`，渲染路径行为零变化。
+ * 帧为主文档时 `renderDoc` 即 `ctx.legacyRenderSource()`（原文档），渲染路径行为零变化。
+ * ⚠️ **#301 P10f D3 更新**：原写"即 `ctx.getDoc()`" —— 该访问器已终删；
+ * 渲染链的旧格式源走具名读面 `legacyRenderSource()`（已登记接缝
+ * `legacy-render-source-document`，退出 = 渲染链终切）。
  *
  * 与旧 `useMultiblockChannels` 的差别：本 composable **不持有**取值状态
  * （旧形态每视口自持 `state` + `revision`），取值权威是
