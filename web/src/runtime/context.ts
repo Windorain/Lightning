@@ -37,6 +37,7 @@ import type { KernelSession } from '@/runtime/kernelSession'
 // 而 `Context` 的外壳六件套不该进测试）—— 本层只负责"取事实、交结果"。
 import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
 import { kernelAnnotationsOf, kernelMaterialsOf, projectAnnotationsToLegacy } from '@/runtime/annotationRead'
+import { projectKernelSaveView, type SaveProjection } from '@/composition/saveProjection'
 import { resolveSideTable } from '@/runtime/sideTableResolution'
 import type { Command } from '@/application/commands'
 import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotationRead'
@@ -321,6 +322,73 @@ export class Context {
     // 本方法只**取事实**；判定在纯函数里（理由：D8 的判据必须能注入装配失败，
     // 而 `Context` 的外壳六件套不该进测试 —— 见 `runtime/frameDeclarations` 文件头）。
     return resolveFrameDeclarations(this.kernelAdoptedFrames(), this.legacyFrames(legacyDoc))
+  }
+
+  /**
+   * **保存/导出读面**（#301 P10f D2）：内核文档 → 旧格式 plain。
+   *
+   * ## 本方法替代的旧机制
+   *
+   * `ctx.getDoc().value?.serialize()` —— 保存、SDE 导出、wiki 信封、wiki 页保存、
+   * 四个导出命令、`queries.getDocument` 全都从**旧文档**取产物字节。
+   * 那些调用点现在改吃本读面 ⇒ 产物的**权威**从旧文档转到内核。
+   *
+   * ## ⚠️ `null` = "**内核不是权威**" ⇒ 调用方**必须**回落 legacy
+   *
+   * `null` **不是**"没有内容"。三种成因：无会话、未装配成功（GF-16）、
+   * 投影面不可解释（实现缺陷）。三者在处置上都是"回落 legacy 的 `serialize()`"
+   * —— 那是**能力不回退**（#171 硬底线）：内核支持不了的形态，旧路径照常能存。
+   *
+   * ⚠️ 刻意**不**返回一份"看起来能用"的空产物：那会让用户存下一个**空文件**
+   * 而不是旧内容（比报错更糟 —— 与 `kernelProjection` 文件头的判据 2 同一口径）。
+   *
+   * ## 响应式依赖（与 `frameDeclarations` 同一取舍）
+   *
+   * 先读一次 `main.doc`（`Ref`，每次文档替换都变化）。内核侧的装配标记是
+   * **普通字段**（Vue 追踪不到）⇒ 消费方若是 `.vue` 的 `computed`，
+   * 少了这一读就不会在装载后刷新（B′ 的 7 条 embed e2e 是同型回归）。
+   */
+  kernelSaveView(): SaveProjection {
+    // 响应式依赖（见上文）：不得优化掉。
+    void this.main.doc.value
+    return projectKernelSaveView(this.kernel)
+  }
+
+  /**
+   * **保存/导出的产物 plain**（#301 P10f D2）—— 调用点唯一入口。
+   *
+   * ## 为什么把"回落策略"收在这里（而不是让每个调用点自己判）
+   *
+   * 12 个调用点若各自写一遍"内核优先，否则 legacy"，那么
+   * ① 漏写一处 = 该处**静默**退回旧权威（本批要消灭的形态）；
+   * ② 判据就得覆盖 12 份重复逻辑。
+   * ⇒ 分流只有**一处**（与 `frameDeclarations` 的收敛同一理由：
+   * "两个消费者读同一个函数，于是不一致在结构上不可能发生"）。
+   *
+   * ## `source` 字段：让"回落是否发生"**可观测**
+   *
+   * 与 `frameDeclarations` 同口径 —— 诊断与测试要能问"这一刻用的是内核还是 legacy"。
+   * 藏起来会让"内核明明装配好了却在读旧文档"这类缺陷无法被观测。
+   *
+   * ⚠️ 回落**不是**错误：那是 #171「能力不回退」的落点 ——
+   * 内核支持不了的文档形态，旧路径照常能存。
+   *
+   * ## `plain === null` 的唯一成因
+   *
+   * 两条路都拿不到（无会话**且**无旧文档）。调用方按"无内容可存"处理。
+   */
+  plainForSave(): {
+    readonly plain: Readonly<Record<string, unknown>> | null
+    readonly source: 'kernel' | 'legacy'
+  } {
+    const view = this.kernelSaveView()
+    if (view.ok) return { plain: view.plain, source: 'kernel' }
+    // 回落：内核不是权威（无会话 / 未装配 / 投影面不可解释）⇒ 旧文档照常能存。
+    const legacy = this.main.doc.value
+    return {
+      plain: legacy === null ? null : (legacy.serialize() as Record<string, unknown>),
+      source: 'legacy',
+    }
   }
 
   /**

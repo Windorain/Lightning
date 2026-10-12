@@ -605,6 +605,22 @@ export interface KernelProjectionInput {
    * 键是**顶层字段名**（`meta.` 前缀的项写回 `meta` 子树）。
    */
   readonly fidelityFields?: Readonly<Record<string, unknown>>
+  /**
+   * **写回态**的注解行（全保真；#301 P10f D2）。
+   *
+   * ## 为什么它必须与渲染态分开（不是一个可选优化）
+   *
+   * 本函数默认**就地合成**渲染态注解（只有 `id`/`type`/`visible`/`title`/`description`
+   * —— "够画即可"）。而保存/导出需要**全保真**：漏掉 `locked` 会让"锁定即只读"
+   * 失效，漏掉几何 `min`/`max`/`pos`/`points` 会让注解**位置丢失**。
+   * 实测：`locked`/`frameIndex`/`created_at`/`min`/`max` 经渲染态投影后**全部变 `null`**。
+   *
+   * ⇒ 写回路径**必须**传本字段（来源是 `runtime/annotationRead#projectAnnotationsToLegacy`）。
+   * 不传 ⇒ 保持既有渲染行为（零变化）。
+   *
+   * ⚠️ 本函数**不**自己实现全保真那份：再写一遍就是第二份会漂移的实现。
+   */
+  readonly annotationRows?: readonly Readonly<Record<string, unknown>>[]
   /** 文档 id（缺省用 `scene.id` 去掉 `-scene` 后缀）。 */
   readonly documentId?: string
   /**
@@ -1028,21 +1044,47 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
   }
 
   // ── ② 注解对象 → annotations[] ──
-  const annotations: Record<string, unknown>[] = []
-  for (const obj of objectsInOrder(scene)) {
-    if (obj.type !== 'annotation') continue
-    const data = findObjectData(scene, obj.dataId)
-    if (data === undefined || data.payload.kind !== 'annotation') continue
-    const text = data.payload.text ?? ''
-    // 反向合成：`title\n\ndescription` → 两个字段（正向合成的逆）。
-    const [title, ...rest] = text.split('\n\n')
-    annotations.push({
-      id: obj.id.startsWith('annotation:') ? obj.id.slice('annotation:'.length) : obj.id,
-      type: data.payload.shape,
-      visible: obj.visible,
-      title: title ?? '',
-      description: rest.join('\n\n'),
-    })
+  //
+  // ## ⚠️ 两条口径：**渲染态**（够画）与**写回态**（全保真）—— 由 `input.annotationRows` 选择
+  //
+  // | 用途 | 来源 | 字段 |
+  // |---|---|---|
+  // | 渲染（DRW 的输入） | 本函数**就地合成**（下方） | `id`/`type`/`visible`/`title`/`description` —— "够画即可" |
+  // | 写回（保存/导出） | `input.annotationRows`（调用方给） | **全保真**（含 `locked`/`created_at`/`min`/`max`/`pos`/`points`/`color`/…） |
+  //
+  // ## ⚠️ 为什么必须分开（本批实测抓出的能力回退风险）
+  //
+  // 本函数原先**只有**渲染态合成。若把保存路径直接接到它上面，
+  // 那么保存一次就会**静默丢掉** `locked`（锁定即只读的判定依据！）、
+  // `created_at`/`updated_at`、几何 `min`/`max`/`pos`/`points`、`color`/`renderStyle`。
+  // 实测：`locked`/`frameIndex`/`created_at`/`min`/`max` 经渲染态投影后**全部变 `null`**。
+  // ⇒ 那是**能力回退**（#171 的硬底线），不是"字段少几个"。
+  //
+  // ## 为什么全保真那份不在这里实现
+  //
+  // 它是 `runtime/annotationRead#projectAnnotationsToLegacy`（C′2 为本目的写的，
+  // 含"字段顺序固定"与"缺席 ≠ 空"两条纪律，且有独立判据）。
+  // 在此**再写一遍**就是第二份会漂移的实现 ⇒ 本函数只**接受**它，不复制它。
+  const annotations: Record<string, unknown>[] =
+    input.annotationRows !== undefined
+      ? input.annotationRows.map((r) => ({ ...r }))
+      : []
+  if (input.annotationRows === undefined) {
+    for (const obj of objectsInOrder(scene)) {
+      if (obj.type !== 'annotation') continue
+      const data = findObjectData(scene, obj.dataId)
+      if (data === undefined || data.payload.kind !== 'annotation') continue
+      const text = data.payload.text ?? ''
+      // 反向合成：`title\n\ndescription` → 两个字段（正向合成的逆）。
+      const [title, ...rest] = text.split('\n\n')
+      annotations.push({
+        id: obj.id.startsWith('annotation:') ? obj.id.slice('annotation:'.length) : obj.id,
+        type: data.payload.shape,
+        visible: obj.visible,
+        title: title ?? '',
+        description: rest.join('\n\n'),
+      })
+    }
   }
 
   // ── ③ 资源 → textureBlobs + materialPalette ──

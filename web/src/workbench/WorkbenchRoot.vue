@@ -372,7 +372,8 @@ onBeforeUnmount(() => {
 
 
 ctx.log.injectStateRefs({
-  scene: () => ctx.getDoc().value?.serialize() as any,
+  // #301 P10f D2：快照从**内核投影**取（未装配自动回落旧文档）。
+  scene: () => ctx.plainForSave().plain as any,
   selection: () => [...selection.items.value].filter(e => e.kind === 'block').map(e => e.ref),
   toolRegistry: () => ({
     activeToolId: toolRegistry.activeTool.value?.id ?? 'none',

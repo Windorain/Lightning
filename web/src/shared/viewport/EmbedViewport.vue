@@ -330,9 +330,10 @@ function onMetaHintFocusIn(e: FocusEvent): void { const t = e.currentTarget as H
 function onMetaHintFocusOut(): void { hoverState.setMeta(null) }
 
 const previewTitle = computed(() => {
-  const doc = ctx.getDoc().value
-  if (!doc) return ''
-  const fromDoc = sceneDisplayTitleFromRootDocument(doc.serialize())
+  // #301 P10f D2：标题从**内核投影**取（未装配自动回落旧文档）。
+  const plain = ctx.plainForSave().plain
+  if (!plain) return ''
+  const fromDoc = sceneDisplayTitleFromRootDocument(plain as never)
   if (fromDoc) return fromDoc
   const def = vpSlot.definition.value
   const lab = def?.label?.trim()

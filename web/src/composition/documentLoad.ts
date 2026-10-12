@@ -62,6 +62,57 @@ export interface LoadLogPort {
  */
 
 /**
+ * 装配产物的 `multiblock` → 投影侧的**类型化投影面**（#301 P10f D2）。
+ *
+ * ## 为什么这个转换必须在 `composition/` 侧发生
+ *
+ * 装配产物给出的是 `MultiblockProjectionFace`（`kernelAssembly` 的形状），
+ * 而投影要的是 `KernelDeclarationProjection`（`kernelProjection` 的形状）——
+ * 两者字段同义但**是不同类型**。转换点必须在一个**同时能看见两者**的地方，
+ * 那就是装配根 `composition/`（它本来就 import 两边）。
+ *
+ * ⚠️ 不允许把这个转换下沉到 `runtime/kernelSession`：那会让内核侧 import 装配根，
+ * 依赖方向就反了（装配根依赖各层，内核不该依赖装配根）。
+ * 会话只保管**不透明**载荷，解释权留在这一侧。
+ *
+ * ## 形状与 `kernelRenderView#declarationOf` **同源**
+ *
+ * 那个函数对渲染路径做同一件事（装配面 → 投影入参）。本函数是**保存路径**的对应物；
+ * 两者必须给出同一个形状，否则"渲染看到的声明"与"存出来的声明"会分叉。
+ */
+function multiblockProjectionFaceOf(assembled: {
+  readonly multiblock: {
+    readonly id: string
+    readonly displayName: string
+    readonly declRaw: Readonly<Record<string, unknown>>
+    readonly projection: {
+      readonly declaration: unknown
+      readonly blockPalette: unknown
+      readonly assets: unknown
+      readonly frames: unknown
+      readonly schemaVersion: number | null
+      readonly multiblockCount: number
+    }
+  } | null
+}): unknown {
+  const mb = assembled.multiblock
+  if (mb === null) return null
+  // 逐字段**显式**搬运（不用展开运算符）：投影面的字段集若变化，
+  // 这里必须同批更新（展开会让"少搬一个字段"静默通过）。
+  return {
+    id: mb.id,
+    displayName: mb.displayName,
+    declaration: mb.projection.declaration,
+    declRaw: mb.declRaw,
+    blockPalette: mb.projection.blockPalette,
+    assets: mb.projection.assets,
+    frames: mb.projection.frames,
+    schemaVersion: mb.projection.schemaVersion,
+    multiblockCount: mb.projection.multiblockCount,
+  }
+}
+
+/**
  * **把一份已解析的旧文档装进内核会话**（#282 P10b 建立，D1 起为**两条加载路径共用**）。
  *
  * ## 这一步在整条链上的位置
@@ -154,6 +205,20 @@ export function adoptLoadedDocument(
       unknownFields: value.unknownFields,
     }),
   )
+
+  // ── #301 P10f D2：把**装配面**交给会话保管（投影侧要用） ─────────────────
+  //
+  // 两样东西只有装配期知道：帧对象映射（帧下标 → 对象 id）与多方块类型化投影面。
+  // 为什么不留在本函数局部：消费方是**保存/导出**（在别的调用栈上）；
+  // 为什么不让投影自己去场景里翻：那会把装配的命名约定
+  // （`structure:frame-<i>` / `structure:multiblock`）泄漏给投影层
+  // （`kernelAssembly.ts:475-483` 已就此裁定"装配显式给出，投影只做重建"）。
+  //
+  // ⚠️ `multiblock` 以**不透明**形式交给会话（会话在内核侧，不得 import 装配根的类型）。
+  kernel.setAssemblyFace({
+    frameObjects: value.frameObjects,
+    multiblock: value.multiblock === null ? null : multiblockProjectionFaceOf(value),
+  })
 
   for (const d of value.diagnostics) {
     ctx.log.info('内核装配', `${d.code} @ ${d.path}`, { locator, detail: d.detail })

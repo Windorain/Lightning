@@ -495,15 +495,21 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       // `ctx.getDoc().value !== null` 与模板 `v-else-if="ctx.getDoc().value"`），
       // 本批已换成 `ctx.hasLoadedDocument()`（GF-15 读面）⇒ 不再命中 `getDoc`。
       'web/src/operators/builtin/annotationOperators.ts',
-      'web/src/operators/builtin/docLifecycleOperators.ts',
+      // #301 P10f D2 核销（本批的 N2 迁移，逐处实测 0 命中）：
+      //  - `docLifecycleOperators.ts`（保存到文件）、`exportOperators.ts`（四个导出）、
+      //    `sdeOperators.ts`（SDE 导出）、`wikiDataPageSource.ts`（wiki 页保存）、
+      //    `ExportWorkspace.vue`（导出面板）、`WorkbenchRoot.vue`（状态快照）
+      //    六处原先都经 `ctx.getDoc().value?.serialize()` 从**旧文档**取产物字节，
+      //    本批改吃 `ctx.plainForSave()`（内核投影优先，未装配回落）。
+      //  ⇒ 产物字节的**权威**从旧文档转到内核。
+      // ⚠️ 这六处的**旧行**是 `getDoc()` 的"产字节"消费者；它们的退出是
+      //    `raw-authority-object` 条目在 D3 终删 `getDoc()` 的前提。
       'web/src/operators/builtin/documentIoOperators.ts',
-      'web/src/operators/builtin/exportOperators.ts',
       'web/src/operators/builtin/metaEditOperators.ts',
       // #301 P10f C′1 核销：`miscOperators.ts` 最后两处（`:59`/`:73` 的
       // `doc !== null && doc.frameCount > 1`）已换成 `hasLoadedDocument()` +
       // `frameDeclarations()`（帧声明的唯一读取面）⇒ 不再命中 `getDoc`。
       'web/src/operators/builtin/moveTranslate.ts',
-      'web/src/operators/builtin/sdeOperators.ts',
       'web/src/operators/builtin/wikiOperators.ts',
       'web/src/operators/modalOperatorWrapper.ts',
       'web/src/operators/operatorRegistry.ts',
@@ -515,8 +521,6 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       // 故**换名登记**而不是移除。
       'web/src/shared/viewport/useKernelChannels.ts',
       'web/src/shared/viewport/useViewportRuntime.ts',
-      'web/src/workbench/WorkbenchRoot.vue',
-      'web/src/workbench/components/ExportWorkspace.vue',
       // #301 P10f C′1 核销两处：
       //  - `WorkbenchViewport.vue`：`:281` 的 `watch(() => ctx.getDoc().value, …)`
       //    已换成 `hasLoadedDocument()` 的**跃变**读面（`false→true`）——
@@ -525,7 +529,6 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       //    `getContentRefreshTick()`（宽信号：内容重读）。
       'web/src/workbench/components/StatusBar.vue',
       'web/src/workbench/document/pipeline.ts',
-      'web/src/workbench/document/sources/wikiDataPageSource.ts',
       'web/src/workbench/ux/panels/AnnotationEditorPanel.vue',
       // #301 P10f C′1 核销：`MaterialGallery.vue` 的 `sceneSeconds()` 曾直读
       // `ctx.getDoc().value` 的 `frameCount`/`frame(i).durationMs`，本批改用

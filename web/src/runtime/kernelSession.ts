@@ -129,6 +129,22 @@ export interface KernelPlayback {
 }
 
 /**
+ * **装配面**（#301 P10f D2）。
+ *
+ * 投影（`composition/kernelProjection`）重建旧格式产物时，有两样事实**只有装配期知道**：
+ * 帧对象映射与多方块类型化投影面。本接口是它们交给会话保管时的**不透明**形状。
+ *
+ * ⚠️ `multiblock` 是 `unknown`，理由见 `KernelSession#assemblyFace` 的说明
+ * （内核不得 import 装配根的类型 —— 方向会反）。
+ */
+export interface KernelAssemblyFace {
+  /** 帧下标 → 内核对象 id（装配产物原样；长度 = 帧数，多方块文档为 1）。 */
+  readonly frameObjects: readonly string[]
+  /** 多方块类型化投影面（`composition` 侧解释）；`null` = 帧为主文档。 */
+  readonly multiblock: unknown
+}
+
+/**
  * 帧声明提供者（**显式适配接缝**）。
  *
  * 两个方法都必须是**纯值读取**：内核不持有文档、不认识 `RuntimeDocument`、
@@ -366,6 +382,48 @@ export class KernelSession {
   }
 
   /**
+   * **装配面**（#301 P10f D2）：投影侧要用的、装配期才知道的两样东西。
+   *
+   * ## 为什么由会话保管（而不是让投影自己去场景里翻）
+   *
+   * | 需要的东西 | 为什么投影自己翻不到 |
+   * |---|---|
+   * | `frameObjects`（帧下标 → 对象 id） | 帧为主文档是 `structure:frame-<i>`、多方块文档是 `structure:multiblock` —— 让投影按 id 约定去猜，就是把**装配的命名约定泄漏给投影层**（`kernelAssembly.ts:475-483` 已就此裁定"装配显式给出，投影只做重建"） |
+   * | 多方块**类型化投影面** | 同上；且它含并集调色板/几何资产/帧声明，从载荷重建会造出第二份重建逻辑 |
+   *
+   * ⇒ 装配处（`composition/documentLoad`）把两样交进来，会话只**保管**。
+   *
+   * ## ⚠️ `multiblock` 为什么是 `unknown`（刻意的，不是偷懒）
+   *
+   * 它的类型是 `KernelDeclarationProjection`（在 `composition/kernelProjection.ts`）。
+   * 本文件是**内核执行面**（登记在 `runtime/` 的 `activeSubpaths`），
+   * 若 import 装配根的类型，方向就反了 —— **内核不该依赖装配根**（装配根依赖各层）。
+   * ⇒ 会话只保管**不透明载荷**，唯一消费者（`composition/`）在那一侧做类型收窄。
+   * 这是"用 `unknown` 换取依赖方向正确"的**有意**取舍。
+   */
+  private assemblyFace: KernelAssemblyFace | null = null
+
+  /**
+   * 记下装配面（`null` = 未采集，与 `fidelityFieldMap` 同三态口径）。
+   *
+   * 调用方是 `composition/documentLoad#adoptLoadedDocument`（唯一做装配的地方）。
+   */
+  setAssemblyFace(face: KernelAssemblyFace | null): void {
+    this.assemblyFace =
+      face === null
+        ? null
+        : Object.freeze({
+            frameObjects: Object.freeze([...face.frameObjects]),
+            multiblock: face.multiblock,
+          })
+  }
+
+  /** 读装配面（`null` = **未采集**，不是"没有帧"）。 */
+  assemblyFaceOf(): KernelAssemblyFace | null {
+    return this.assemblyFace
+  }
+
+  /**
    * **文档是否已装载**（#301 P10f A′；GF-15 读面）。
    *
    * ## 它回答的问题：区分「空文档」与「无文档」
@@ -506,6 +564,8 @@ export class KernelSession {
     // 卸载后"这份会话里没有别的文档的保真字段"必须成立，否则
     // 下一次保存会把**上一份文档**的未知字段写进**新**产物（串档）。
     this.fidelityFieldMap = null
+    // D2：装配面同理（否则换文档后投影会拿旧帧对象映射去重建新文档 = 串档）。
+    this.assemblyFace = null
   }
 
   /** 重建上下文订阅（`adoptDocument` 换了 Editor 实例，故订阅必须重建）。 */

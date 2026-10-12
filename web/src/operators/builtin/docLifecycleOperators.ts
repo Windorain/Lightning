@@ -161,7 +161,9 @@ export const SaveFileOperator: OperatorType = {
   },
 
   exec(ctx, _props) {
-    const doc = ctx.getDoc().value?.serialize()
+    // #301 P10f D2：产物改由**内核投影**给出（`plainForSave` 是唯一分流点；
+    // 未装配时自动回落旧文档 —— 能力不回退）。
+    const doc = ctx.plainForSave().plain
     if (!doc) return
     const baseName = suggestedJsonBaseName(ctx.getLocalFileName().value, 'structure-export')
     downloadJson(baseName, doc, true)
