@@ -76,11 +76,24 @@ export const RECOVERY_KIND = 'recovery'
 /** 键里的"种类"段：正式保存。 */
 export const SAVE_KIND = 'save'
 
+/**
+ * 键里的"种类"段：**保真记录**（#301 P10f D1(b) 加入本族）。
+ *
+ * 见 {@link fidelityStoreKey} 的说明 —— 它此前是一个**游离**的键方案。
+ */
+export const FIDELITY_KIND = 'fidelity'
+
+/** 保真记录键的 schema 版本（与恢复副本、正式保存**各自独立**升版）。 */
+export const FIDELITY_SCHEMA_VERSION = 1
+
+/** 载荷里的显式标记：保真记录（键与载荷共用同一取值，见 {@link ArtifactKind}）。 */
+export const FIDELITY_ARTIFACT = 'fidelity-record' as const
+
 /** 载荷里的显式标记："这是恢复副本，不是正式保存"。 */
 export const RECOVERY_ARTIFACT = 'recovery-copy' as const
 
 /** 制品种类判别式（键与载荷共用同一对取值）。 */
-export type ArtifactKind = typeof RECOVERY_ARTIFACT | 'formal-save'
+export type ArtifactKind = typeof RECOVERY_ARTIFACT | 'formal-save' | typeof FIDELITY_ARTIFACT
 
 /**
  * 必要实例身份（#249 §19.5「多标签不最后写者无提示互相覆盖」）。
@@ -156,6 +169,67 @@ export interface ParsedSaveStoreKey {
   readonly documentId: string
 }
 
+export interface ParsedFidelityStoreKey {
+  readonly artifact: typeof FIDELITY_ARTIFACT
+  readonly schemaVersion: number
+  readonly scope: RecoveryScope
+  readonly instanceId: string
+  readonly documentId: string
+}
+
+/**
+ * **保真记录**键：`lk.fidelity.v<版本>.<范围>.<实例身份>.<文档 ID>`。
+ *
+ * ## 本函数替代的旧机制（#301 P10f D1(b)；GF-14 的键口径统一）
+ *
+ * 原先它是 `adapters/files/fidelityRecord.ts` 里一个**游离**的键方案：
+ * `lk.fidelity.v1.<文档 ID>.record` —— 与恢复副本/正式保存家族
+ * **八处**不兼容（逐条实测，不是"取个别的名字"）：
+ *
+ * | # | 分歧 | 旧形态 | 本函数 |
+ * |---|---|---|---|
+ * | 1 | 缺 `scope` 段 | 无 | 有（`identity.scope`） |
+ * | 2 | 缺 `instanceId` 段 | 无 | 有（同恢复副本：多标签不得静默互覆） |
+ * | 3 | 不被 `artifactKindOfKey` 识别 | 返回 `null` | 返回 `FIDELITY_ARTIFACT` |
+ * | 4 | 与 `saveStoreKey` 位置长度撞车 | 都是 5 段、形状同，只靠字面量区分 | 6 段（与 `recoveryStoreKey` 同形） |
+ * | 5 | 无解析器 / 不可逆 | 无 | `parseFidelityStoreKey` |
+ * | 6 | 返回裸 `string` | 是 | `Result<string>` |
+ * | 7 | 版本硬编码在模板串里 | `v1` 字面量 | 具名 `FIDELITY_SCHEMA_VERSION` |
+ * | 8 | 空 id 静默降级为 `'unnamed'` | 是 | **显式拒绝**（同族口径）|
+ *
+ * ⇒ 四项"结构性"分歧（1/2/4/5）是**迁移负担为零**的前提下修的：
+ * 旧键在 P9–P10 期间**零生产调用方**（实测：只有 `__tests__` 与 seam 散文提到它）
+ * ⇒ 不存在"已写进用户 localStorage 的旧键"要兼容。
+ *
+ * ## ⚠️ 为什么带 `instanceId`（而不是像正式保存那样不带）
+ *
+ * 与恢复副本同理：保真记录是**这份产物在这一侧的伴生数据**，
+ * 两个标签页处理**同一文档**时若共用一个键会**静默互相覆写**（存储层动作，无 UI 事件）。
+ * 而正式保存键刻意不带实例身份（它是文档级事实，跨标签共享）—— 两者差异是**结构性**的。
+ */
+export function fidelityStoreKey(identity: InstanceIdentity, documentId: string): Result<string> {
+  const bad = requireDocumentId(documentId)
+  if (bad) return err(bad)
+  return ok(
+    `${RECOVERY_PREFIX}.${FIDELITY_KIND}.v${FIDELITY_SCHEMA_VERSION}.${identity.scope}.${identity.instanceId}.${documentId}`,
+  )
+}
+
+/** 解析保真记录键（诊断/迁移/GC 用）；不匹配本方案 ⇒ `null`。 */
+export function parseFidelityStoreKey(key: string): ParsedFidelityStoreKey | null {
+  const m = new RegExp(
+    `^${RECOVERY_PREFIX}\\.${FIDELITY_KIND}\\.v(\\d+)\\.([a-z]+)\\.([^.]+)\\.(.+)$`,
+  ).exec(key)
+  if (!m) return null
+  return Object.freeze({
+    artifact: FIDELITY_ARTIFACT,
+    schemaVersion: Number(m[1]),
+    scope: m[2] as RecoveryScope,
+    instanceId: m[3]!,
+    documentId: m[4]!,
+  })
+}
+
 /** 解析恢复副本键（诊断/迁移/多标签对账用）；不匹配本方案 ⇒ `null`。 */
 export function parseRecoveryStoreKey(key: string): ParsedRecoveryStoreKey | null {
   const m = new RegExp(`^${RECOVERY_PREFIX}\\.${RECOVERY_KIND}\\.v(\\d+)\\.([a-z]+)\\.([^.]+)\\.(.+)$`).exec(key)
@@ -189,6 +263,9 @@ export function parseSaveStoreKey(key: string): ParsedSaveStoreKey | null {
 export function artifactKindOfKey(key: string): ArtifactKind | null {
   if (parseRecoveryStoreKey(key) !== null) return RECOVERY_ARTIFACT
   if (parseSaveStoreKey(key) !== null) return 'formal-save'
+  // #301 P10f D1(b)：保真记录键加入本分类器（原先它对本函数**不可见** ⇒ 返回 null，
+  // 于是"列/GC/迁移"结构上无法识别它）。
+  if (parseFidelityStoreKey(key) !== null) return FIDELITY_ARTIFACT
   return null
 }
 

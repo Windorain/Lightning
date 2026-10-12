@@ -66,11 +66,24 @@ function declarationOf(assembled: AssembledDocument): KernelDeclarationProjectio
   }
 }
 
-/** `blockGrid` 载荷 → 投影入参（测试侧；与生产同一字段集）。 */
+/**
+ * `blockGrid` 载荷 → 投影入参（测试侧；与生产 `kernelProjection#gridProjectionInputOf` **同一字段集**）。
+ *
+ * ## ⚠️ 必须带 `cellPalette`（#301 P10f D2 的 D9 修复后暴露）
+ *
+ * 本助手原先漏了 `cellPalette`（载荷里**有**这个字段，生产入口也**传**它）。
+ * 后果长期不可见：D9 之前无 `cellPalette` 时投影写出的是 GF-7 的有损形态
+ * `minecraft:<name>`，与带 `cellPalette` 的精确结果**恰好同形** ⇒ 漏传没有差异。
+ * D9 让命名空间回真值后两者分叉，且**漏传时不得采信几何身份**（实测
+ * `multiblock-ebf-2ch` 的 `gt.blockcasings@11` 与 `gt.blockmachines@1000`
+ * 共享同一 `assetId`）⇒ 漏传的助手会把 EBF 控制器写成机壳。
+ * ⇒ 助手必须与生产入口同字段集，否则它测的不是生产路径。
+ */
 function gridInputOf(payload: {
   readonly cells: Readonly<Record<string, string>>
   readonly geometry?: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry?: Readonly<Record<string, string>>
+  readonly cellPalette?: Readonly<Record<string, string>>
   readonly palette?: readonly BlockPaletteEntry[]
   readonly cellContent?: CellContentTable
 }): GridProjectionInput {
@@ -78,11 +91,13 @@ function gridInputOf(payload: {
     cells: Readonly<Record<string, string>>
     geometry?: Readonly<Record<string, BlockGeometryAsset>>
     cellGeometry?: Readonly<Record<string, string>>
+    cellPalette?: Readonly<Record<string, string>>
     palette?: readonly BlockPaletteEntry[]
     cellContent?: CellContentTable
   } = { cells: payload.cells }
   if (payload.geometry !== undefined) out.geometry = payload.geometry
   if (payload.cellGeometry !== undefined) out.cellGeometry = payload.cellGeometry
+  if (payload.cellPalette !== undefined) out.cellPalette = payload.cellPalette
   if (payload.palette !== undefined) out.palette = payload.palette
   if (payload.cellContent !== undefined) out.cellContent = payload.cellContent
   return out
@@ -359,7 +374,20 @@ function cellsFromLegacyWith(
         const entry = blockPalette[idx]
         if (entry === undefined) continue
         const rid = entry.registryId as string
-        const name = rid.startsWith('minecraft:') ? rid.slice('minecraft:'.length) : rid
+        // ## ⚠️ 必须与**生产**的"名字来源"同规则（#301 P10f D2 的 D9 修复后暴露）
+        //
+        // 生产侧 `context/runtimeDocument#_fromV2CellGrid` 由 `registryId` 取名字的规则是
+        // **首个冒号之后的部分**（`rid.indexOf(':')` → `slice`），于是
+        // `gregtech:gt.blockcasings` 的名字是 `gt.blockcasings`（与 `blockCellValue`
+        // 的 GF-7 编码 `minecraft:<name>:<meta>` 配套）。
+        //
+        // 本助手原先写的是 `startsWith('minecraft:') ? slice : rid` —— 那在
+        // "registryId 恒被改写成 `minecraft:<name>`"（D9 修复前的有损形态）时
+        // 与生产规则**恰好重合**，故长期没暴露。D9 让命名空间回真值后两条规则分叉：
+        // 后者会把 `gregtech:gt.blockcasings` 整个当成名字（⇒ 双前缀
+        // `minecraft:gregtech:gt.blockcasings:11`）。⇒ 助手必须跟上生产规则。
+        const colon = rid.indexOf(':')
+        const name = colon >= 0 ? rid.slice(colon + 1) : rid
         if (name === 'air') continue
         out[`${x},${y},${z}`] = `minecraft:${name}:${(entry.meta as number) ?? 0}`
       }

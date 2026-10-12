@@ -383,8 +383,43 @@ function paletteEntryFor(
     typedByKey.get(`minecraft:${tail}\u0000${meta}\u0000${assetId}`) ??
     typedByNameMeta.get(`${tail}\u0000${meta}`) ??
     null
+  /**
+   * ## ⚠️ 命名空间必须回**真实**值（#301 P10f D2 修，登记 D9）
+   *
+   * 本函数的 `registryId` 入参是 GF-7 的单元值编码产物 —— `minecraft:<name>:<meta>`
+   * 里的 `<name>` 已被 `blockCellValue` 截去命名空间（忠实于生产既有编码，
+   * 见上面 ① 的说明）。于是**旧行为**把它原样写进产物的调色板 ⇒
+   * `tectech:gt.godforgecasing` / `gregtech:gt.blockmachines` /
+   * `appliedenergistics2:tile.BlockCableBus` 全部塌成 `minecraft:…`。
+   *
+   * 那是**真实的数据改写**（不是表示差异）：实测真实信封夹具 68 条调色板里
+   * **66 条**命名空间被改写，`cellGrid` 逐格方块身份 **798 格中 172 格**不同
+   * （探针 `temp/p10f/probe/keys4`）。消费者是**身份**语义：
+   * `runtime/presentationAdapter#structureDigestOf` 的 `registryId@meta` 调色板身份、
+   * `pure/itemOutlinePlan` 的 `block_state_id`、`embed/useEmbedTooltip` 的
+   * `blockRegistryKeyForPalette` 注册键 —— 命名空间错 = 身份错。
+   *
+   * 而**类型化条目手里就有真值**（`kernelPaletteAssembly` 从文件条目原样承载）。
+   *
+   * ### 只在"内容键**精确**命中"时采信（不能更宽 —— 本批实测边界）
+   *
+   * | 命中路径 | 是否采信 `typed.registryId` | 理由 |
+   * |---|---|---|
+   * | ⓪ `cellPalette` 内容键精确命中（`typedExact`） | ✅ | 就是那一条，无歧义 |
+   * | ① `assetId` **几何身份**命中 | ❌ **不采信** | **几何身份不唯一**：实测 `multiblock-ebf-2ch` 的 `gregtech:gt.blockcasings@11` 与 `gregtech:gt.blockmachines@1000` **共享同一个** `assetId = geo:e82d564e`（烘焙四边形逐位相同）⇒ `typedByAsset` 只留首条 ⇒ 采信它会把 EBF 控制器写成机壳（**正确的 meta + 错误的命名空间**，比"有损但一致"更坏：它让身份**不一致**且看不出来）。这正是判据"不得瞎猜"的落点。 |
+   * | ② 精确三元组（键里含 `registryId` 本身） | ➖ | 采信与不采信**同值**，无差别 |
+   * | ③ `(name 尾段, meta)` 兜底 | ❌ **不采信** | 同尾段不同命名空间可能有两条（`typedByNameMeta` 只留首条）⇒ 猜会**引入**错误身份 |
+   *
+   * ⇒ 无 `cellPalette` 时**如实保留** GF-7 的有损形态（`minecraft:<name>`）：
+   * 那是"丢命名空间"，但**不会错配**（方块身份仍由 `(tail, meta)` 唯一确定）。
+   * 而生产的两条投影入口（`kernelProjection#gridProjectionInputOf` 与
+   * `projectMultiblockBody`）都**给出了**精确身份 ⇒ 生产产物拿到真命名空间
+   * （负对照见 `p10fSaveProjection.test.ts` 的 D9 组）。
+   */
+  const typedIdentityExact = typedExact !== null
+  const realRegistryId = typedIdentityExact && typed !== null && typed.registryId !== '' ? typed.registryId : registryId
   const out: Record<string, unknown> = {
-    registryId,
+    registryId: realRegistryId,
     meta,
     renderMode: typed?.renderMode ?? (assetId === '' ? 'BlockModel' : 'BakedModel'),
   }
@@ -605,6 +640,22 @@ export interface KernelProjectionInput {
    * 键是**顶层字段名**（`meta.` 前缀的项写回 `meta` 子树）。
    */
   readonly fidelityFields?: Readonly<Record<string, unknown>>
+  /**
+   * **写回态**的注解行（全保真；#301 P10f D2）。
+   *
+   * ## 为什么它必须与渲染态分开（不是一个可选优化）
+   *
+   * 本函数默认**就地合成**渲染态注解（只有 `id`/`type`/`visible`/`title`/`description`
+   * —— "够画即可"）。而保存/导出需要**全保真**：漏掉 `locked` 会让"锁定即只读"
+   * 失效，漏掉几何 `min`/`max`/`pos`/`points` 会让注解**位置丢失**。
+   * 实测：`locked`/`frameIndex`/`created_at`/`min`/`max` 经渲染态投影后**全部变 `null`**。
+   *
+   * ⇒ 写回路径**必须**传本字段（来源是 `runtime/annotationRead#projectAnnotationsToLegacy`）。
+   * 不传 ⇒ 保持既有渲染行为（零变化）。
+   *
+   * ⚠️ 本函数**不**自己实现全保真那份：再写一遍就是第二份会漂移的实现。
+   */
+  readonly annotationRows?: readonly Readonly<Record<string, unknown>>[]
   /** 文档 id（缺省用 `scene.id` 去掉 `-scene` 后缀）。 */
   readonly documentId?: string
   /**
@@ -1028,21 +1079,47 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
   }
 
   // ── ② 注解对象 → annotations[] ──
-  const annotations: Record<string, unknown>[] = []
-  for (const obj of objectsInOrder(scene)) {
-    if (obj.type !== 'annotation') continue
-    const data = findObjectData(scene, obj.dataId)
-    if (data === undefined || data.payload.kind !== 'annotation') continue
-    const text = data.payload.text ?? ''
-    // 反向合成：`title\n\ndescription` → 两个字段（正向合成的逆）。
-    const [title, ...rest] = text.split('\n\n')
-    annotations.push({
-      id: obj.id.startsWith('annotation:') ? obj.id.slice('annotation:'.length) : obj.id,
-      type: data.payload.shape,
-      visible: obj.visible,
-      title: title ?? '',
-      description: rest.join('\n\n'),
-    })
+  //
+  // ## ⚠️ 两条口径：**渲染态**（够画）与**写回态**（全保真）—— 由 `input.annotationRows` 选择
+  //
+  // | 用途 | 来源 | 字段 |
+  // |---|---|---|
+  // | 渲染（DRW 的输入） | 本函数**就地合成**（下方） | `id`/`type`/`visible`/`title`/`description` —— "够画即可" |
+  // | 写回（保存/导出） | `input.annotationRows`（调用方给） | **全保真**（含 `locked`/`created_at`/`min`/`max`/`pos`/`points`/`color`/…） |
+  //
+  // ## ⚠️ 为什么必须分开（本批实测抓出的能力回退风险）
+  //
+  // 本函数原先**只有**渲染态合成。若把保存路径直接接到它上面，
+  // 那么保存一次就会**静默丢掉** `locked`（锁定即只读的判定依据！）、
+  // `created_at`/`updated_at`、几何 `min`/`max`/`pos`/`points`、`color`/`renderStyle`。
+  // 实测：`locked`/`frameIndex`/`created_at`/`min`/`max` 经渲染态投影后**全部变 `null`**。
+  // ⇒ 那是**能力回退**（#171 的硬底线），不是"字段少几个"。
+  //
+  // ## 为什么全保真那份不在这里实现
+  //
+  // 它是 `runtime/annotationRead#projectAnnotationsToLegacy`（C′2 为本目的写的，
+  // 含"字段顺序固定"与"缺席 ≠ 空"两条纪律，且有独立判据）。
+  // 在此**再写一遍**就是第二份会漂移的实现 ⇒ 本函数只**接受**它，不复制它。
+  const annotations: Record<string, unknown>[] =
+    input.annotationRows !== undefined
+      ? input.annotationRows.map((r) => ({ ...r }))
+      : []
+  if (input.annotationRows === undefined) {
+    for (const obj of objectsInOrder(scene)) {
+      if (obj.type !== 'annotation') continue
+      const data = findObjectData(scene, obj.dataId)
+      if (data === undefined || data.payload.kind !== 'annotation') continue
+      const text = data.payload.text ?? ''
+      // 反向合成：`title\n\ndescription` → 两个字段（正向合成的逆）。
+      const [title, ...rest] = text.split('\n\n')
+      annotations.push({
+        id: obj.id.startsWith('annotation:') ? obj.id.slice('annotation:'.length) : obj.id,
+        type: data.payload.shape,
+        visible: obj.visible,
+        title: title ?? '',
+        description: rest.join('\n\n'),
+      })
+    }
   }
 
   // ── ③ 资源 → textureBlobs + materialPalette ──

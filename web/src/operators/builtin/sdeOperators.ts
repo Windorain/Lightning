@@ -105,7 +105,7 @@ export const SDEPushOperator: OperatorType = {
     await sdePutWorkspaceDocument(
       ctx.getConnection().apiBase,
       ctx.getConnection().token,
-      ctx.getDoc().value!.serialize() as Record<string, unknown>,
+      ctx.plainForSave().plain as Record<string, unknown>,
     )
   },
 }

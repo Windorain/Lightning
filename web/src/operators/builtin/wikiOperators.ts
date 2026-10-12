@@ -56,7 +56,8 @@ export const WikiSaveConfirmOperator: OperatorType = {
     const doc = ctx.getDoc().value
     if (!doc) return OP_RESULT.CANCELLED
     const base = locDisplay(binding.locator)
-    const envelope = buildEnvelopePackage(doc.serialize())
+    // #301 P10f D2：产物改由**内核投影**给出。
+    const envelope = buildEnvelopePackage((ctx.plainForSave().plain ?? doc.serialize()) as never)
     const plan = previewUploadPlan(base, envelope)
     const ui = ctx.wm.chrome.wikiUi
     if (ui) {

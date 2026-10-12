@@ -303,6 +303,61 @@ export class RuntimeDocument {
     return clone
   }
 
+  /**
+   * **换逐格说明侧表**（#301 P10f D2 收尾 / #333 的回写落点）。
+   *
+   * ## 为什么需要它（与 `withAnnotations` 同一理由，且**同一批**）
+   *
+   * D0 段二让"逐格说明编辑"改走内核命令（`setCellTooltip`），但**没有**扩
+   * `Context#syncLegacyFromKernel` —— 而那个方法的文件头**明文写着**：
+   *
+   * > 「网格/材质/帧轴本批**不写**，故无需回写；将来若要写它们，
+   * > 必须**同时**扩本方法（成对铁律第④项：同一事实的全部消费者同批迁移）。」
+   *
+   * ⇒ 那次迁移**违反了它自己引用的纪律**：内核写了 `cellContent.tooltip`，
+   * legacy 侧表没被投影，而面板读 legacy ⇒ "提交成功但看不到"（**#333**）。
+   * 本方法与 `syncLegacyFromKernel` 的扩展就是那条纪律的补做。
+   *
+   * ## 两个字段**成对**替换（契约 §逐格说明的成对 idioms）
+   *
+   * `tooltipPalette`（文案池）+ `cellTooltipGrid`（下标网格）是**一对**：
+   * 只换一个会留下"悬空下标"（正是 #80 加锁防的形态）。
+   * ⇒ 本方法只暴露**成对**入口，不提供单字段写（结构上让"写一半"不可表达）。
+   *
+   * ## `undefined` 的语义 = **清除**（不是"不改"）
+   *
+   * 内核侧"没有任何逐格说明"是**权威事实** ⇒ legacy 侧表必须被清成"没有"。
+   * 若把 `undefined` 解释成"不改"，则"删掉最后一条说明"会**无声地不生效**
+   * （内核已删、legacy 仍留着旧池与旧网格）—— 那正是本方法要修的那类缺陷。
+   * 调用方若想"不动"，就**不要调**本方法（而不是传 `undefined`）。
+   *
+   * ## 为什么返回 `this` 而不是抛错/空洞
+   *
+   * 与 `withAnnotations` 逐字同口径：**内容相同 ⇒ 返回 `this`**，调用方据此跳过
+   * 回写 ⇒ 不 bump 内容重读信号（"净零往返不重建"）。比较用**逐元素等价**而非
+   * 引用相等（投影每次新建数组）。
+   *
+   * ## 它**不**碰版本/基线/历史
+   *
+   * 同 `withAnnotations`（编辑语义 ⇒ 回写后文档仍是脏的）。
+   */
+  withCellTooltips(
+    palette: readonly string[] | undefined,
+    grid: readonly number[][][] | undefined,
+  ): RuntimeDocument {
+    if (sameTooltipPool(this.tooltipPalette, palette) && sameTooltipGrid(this.cellTooltipGrid, grid)) return this
+    const clone = this.clone()
+    const mutable = clone as unknown as {
+      tooltipPalette: string[] | undefined
+      cellTooltipGrid: number[][][] | undefined
+    }
+    // 深拷贝（`clone()` 已给出新数组，这里再按层复制，避免与投影产物共享可变结构）
+    mutable.tooltipPalette = palette === undefined ? undefined : [...palette]
+    mutable.cellTooltipGrid =
+      grid === undefined ? undefined : grid.map((s) => (s ? s.map((r) => (r ? [...r] : []) ) : []))
+    return clone
+  }
+
   clone(): RuntimeDocument {
     return new RuntimeDocument({
       formatVersion: this.formatVersion,
@@ -615,6 +670,46 @@ export class RuntimeDocument {
  * ⚠️ 代价是：若调用方传入的行**丢掉了** legacy 的额外键，本函数会说"相同"
  * 从而**不丢**它们（因为不写）。这是**有意的**保守方向 —— 宁可少写，不可误删。
  */
+/**
+ * 逐格说明**池**的逐元素等价（`withCellTooltips` 的"内容相同 ⇒ 返回 `this`"判据）。
+ *
+ * `undefined` 与"空数组"**不等价**：前者 = 没有该侧表（文件里不写这个键），
+ * 后者 = 有但为空（文件里写 `[]`）。这正是本工程"缺席 ≠ 空"的口径，
+ * 也是 `projectionFidelity` 的 D1+ 判据所钉的那条。
+ */
+function sameTooltipPool(a: readonly unknown[] | undefined, b: readonly unknown[] | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/** 逐格说明**下标网格**的逐元素等价（同上；`undefined` 与全 `-1` 不等价）。 */
+function sameTooltipGrid(a: readonly number[][][] | undefined, b: readonly number[][][] | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  if (a.length !== b.length) return false
+  for (let z = 0; z < a.length; z++) {
+    const sa = a[z]
+    const sb = b[z]
+    if (sa === undefined || sb === undefined) {
+      if (sa !== sb) return false
+      continue
+    }
+    if (sa.length !== sb.length) return false
+    for (let r = 0; r < sa.length; r++) {
+      const ra = sa[r]
+      const rb = sb[r]
+      if (ra === undefined || rb === undefined) {
+        if (ra !== rb) return false
+        continue
+      }
+      if (ra.length !== rb.length) return false
+      for (let c = 0; c < ra.length; c++) if (ra[c] !== rb[c]) return false
+    }
+  }
+  return true
+}
+
 function sameAnnotationRows(
   a: readonly Record<string, unknown>[],
   b: readonly Record<string, unknown>[],

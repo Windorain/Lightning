@@ -535,6 +535,31 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       '同上：读面按 `AnnotationGeometry` 的**封闭字段集**逐字段转发（不整体展开），故需该类型',
     exitStage: 'P11 终局审计：随本文件迁出 `runtime/` 而消失（同 `domain/document` 那条）',
   }),
+  // ── P10f D2 收尾（#301，回 **#333**）：逐格说明的**回写投影** ──────────────
+  //
+  // D0 段二让"逐格说明编辑"走内核命令，却没扩 `Context#syncLegacyFromKernel`
+  // （该方法文件头自己写着"将来若要写网格/材质，必须**同时**扩本方法"）⇒
+  // 内核写了 `cellContent.tooltip`、legacy 侧表没被投影，而面板/保存读 legacy
+  // ⇒ "提交成功但看不到"（e2e A25-3b 双 project 确定性红 = #333）。
+  //
+  // 补做时新增 `runtime/tooltipRead.ts`：它与 `annotationRead` 同性质 ——
+  // **新写**的替代实现，但按本闸门口径落在旧 `runtime/` 层（撞名层），
+  // 且需要内核的 `Document`/`Scene` 类型 ⇒ 两条旧→新边，必须登记（不得静默）。
+  Object.freeze({
+    from: 'src/runtime/tooltipRead.ts',
+    to: 'domain/document',
+    reason:
+      'P10f D2 收尾（#333）：把内核 `blockGrid.cellContent[].tooltip` 投影回 legacy 的 `tooltipPalette`+`cellTooltipGrid`（面板与保存读 legacy ⇒ 不回写就是"提交成功但看不到"）。与 `runtime/annotationRead.ts` 同一性质与同一层的读/写投影面',
+    exitStage:
+      'P11 终局审计：待工作台面板整体迁入 `editors/` 层、且保存路径无 legacy 回落分支后，本投影面随 `RuntimeDocument` 退出生产而消失',
+  }),
+  Object.freeze({
+    from: 'src/runtime/tooltipRead.ts',
+    to: 'domain/scene',
+    reason:
+      '同上：要按 `scene.order` 遍历 `blockGrid` 载荷取逐格内容（投影侧的"取哪一份载荷"规则必须与 `composition/kernelProjection#tooltipPoolOfPayloads` 同一条，故必须能读场景类型）',
+    exitStage: 'P11 终局审计：随本文件与 `RuntimeDocument` 一起退出（同 `domain/document` 那条）',
+  }),
   // ── P10f C′2（#301）内容写路径：旧层算子发内核命令 ─────────────────────────
   //
   // C′2 把"文档内编辑"从"clone legacy + setDocument"改成"**发内核命令** + 投影回写"
@@ -582,6 +607,18 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
     reason:
       '嵌入宿主创建自己的内核会话（能力来自嵌入 profile ⇒ 无内容编辑能力，A15 的运行时拒绝在嵌入侧同样成立）；与工作台会话互不可见 ⇒ 同页两实例状态隔离',
     exitStage: 'P10（#261）本批接线落地，永久保留；P11 核销旧机制',
+  }),
+  // ── P10f D0（#301）逐格说明：旧层算子发内核内容命令 ───────────────────────
+  //
+  // D0 把"写逐格说明"从"clone legacy 侧表 + `setDocument`"改成发内核命令
+  // （`setCellTooltip`）。发起者是旧层的 `metaEditOperators` ⇒ 旧→新边，须登记。
+  // 它需要内核的 `contextId` 才能把命令落在正确的编辑上下文上。
+  Object.freeze({
+    from: 'src/operators/builtin/metaEditOperators.ts',
+    to: 'runtime/kernelSession',
+    reason:
+      'P10f D0：逐格说明写路径改走内核命令（`setCellTooltip`），需要 `KERNEL_CONTEXT_ID` 构造命令。与 C′2 的 `annotationOperators` 同类（那条已登记）',
+    exitStage: 'P10/D 批：`operators/` 层随命令面重写迁入新层；P11 核销',
   }),
   // ── P10（#261）材质时间：渲染侧消费纯采样（`material-tick` 组的替代面）──
   //
@@ -949,6 +986,16 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
         'save',
         'saveCompleted',
         'select',
+        // #301 P10f D0：逐格说明写命令（GF-13 最小集）。
+        //
+        // ⚠️ 它**不是**"第二个通用属性写"——见下方 `propertyWrites` 的语义判据：
+        // 它按**格坐标**寻址网格对象的**载荷内容**（`blockGrid.cellContent[key].tooltip`），
+        // 不是按 `PropertyRef` 寻址属性值。两者是**不同的寻址面**：
+        //  · `setProperty` 走 RNA 注册表 + `applyKernelPropertyValue`（属性值）；
+        //  · `setCellTooltip` 走 `cellContentKey` 键编码（逐格内容表）。
+        // 内核里**没有** `cellTooltip` 属性描述符（实测 `kernel-properties.ts` 的注解/方块
+        // 属性集都不含它），故无法经 `setProperty` 表达 —— 这正是新增本命令的理由。
+        'setCellTooltip',
         'setChannelValue',
         'setPlaybackRate',
         'setPlaying',

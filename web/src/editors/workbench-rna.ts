@@ -41,6 +41,8 @@ import {
   ok,
 } from '@/application/contracts'
 import { localPropertyOf } from '@/application/contracts'
+import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
+import { NO_CHANGE } from '@/domain/identity'
 import {
   type CapabilityId,
   type PropertyAccess,
@@ -538,6 +540,65 @@ export function submitPropertyWrite(
   const state = documentStateOf(ctx)
   if (state.document == null) {
     return { status: 'rejected', error: domainError('MissingTarget', { reason: 'no-document' }) }
+  }
+
+  // #301 P10f D0：**逐格说明改走内核命令**（本入口原先经 `applySetProperty` 改 legacy 侧表）。
+  //
+  // ## 为什么在这一层拦截（而不是改 `property-writers#writeBlockProperty`）
+  //
+  // `writeBlockProperty` 的签名与职责是"**纯**转移：`DocumentState` → `DocumentState`"，
+  // 它**拿不到 `Context`**，因而无法发内核命令。而本函数是面板的**唯一写路由入口**、
+  // 且已持有 `ctx` ⇒ 只有这里能"先发命令、再决定要不要走 legacy 路径"。
+  // 这也是成对铁律第④项要求的"同一事实的全部写者同批迁移"的落点：
+  // 算子路径（`metaEditOperators`）与本面板路径现在**都**经内核命令。
+  //
+  // ## 拦截条件（窄，只覆盖逐格说明）
+  //
+  // 仅当**全部** ref 都是 `cellTooltip`/`tooltip` 属性时才拦截：
+  //  - 单属性 ⇒ 语义与命令一一对应；
+  //  - 混合属性（同一次提交里既改说明又改别的）⇒ **不拦截**，整批走 legacy
+  //    （命令只表达逐格说明，拆成两半会让"多选一失败整批拒"失效）。
+  const localIds = refs.map((r) => localPropertyOf(r.property, 'lightning.block'))
+  const tooltipOnly =
+    refs.length > 0 &&
+    refs.every((r) => r.owner.kind === 'object' && r.component === undefined) &&
+    localIds.every((id) => id === 'cellTooltip' || id === 'tooltip')
+  if (tooltipOnly && typeof value === 'string') {
+    const cells: { x: number; y: number; z: number }[] = []
+    for (const r of refs) {
+      const parts = r.owner.id.split(',')
+      if (parts.length !== 3) continue
+      const [x, y, z] = parts.map((s) => Number(s))
+      if (x === undefined || y === undefined || z === undefined) continue
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue
+      cells.push({ x, y, z })
+    }
+    if (cells.length === refs.length) {
+      // 旧面板路径对空串写的是 `-1`（无说明）⇒ 空串映射为 `null`（删除），保持行为一致。
+      const appliedToKernel = ctx.submitContentEdit({
+        kind: 'setCellTooltip',
+        contextId: KERNEL_CONTEXT_ID,
+        cells,
+        text: value === '' ? null : value,
+      })
+      if (appliedToKernel) {
+        // 内核已是权威且 `submitContentEdit` 已调 `syncLegacyFromKernel()` 把
+        // 内核内容投影回 legacy ⇒ **不得**再走下面的 legacy 写
+        // （再写一次会以旧侧表覆盖回写产物）。
+        //
+        // ⚠️ **这个前提曾经是假的（#333）**：D0 段二写这一行时，
+        // `syncLegacyFromKernel` **只**投影注解（它自己的文件头就写着"将来若
+        // 要写网格/材质，必须**同时**扩本方法"），而本拦截写的正是内核
+        // `cellContent.tooltip` ⇒ 内核写了、legacy 没投影、这一行又提前返回
+        // ⇒ 面板读 legacy 看不到值（e2e A25-3b 双 project 确定性红，单测全绿）。
+        // 修法**不是**摘掉本拦截（那会退回"逐格说明不改读内核"= 能力回退），
+        // 而是补齐那条被跳过的纪律：`syncLegacyFromKernel` 现在**同时**投影
+        // 逐格说明侧表（`runtime/tooltipRead` + `RuntimeDocument#withCellTooltips`）。
+        // ⇒ 判据把守见 `p10fPanelTooltipWrite.test.ts`（本入口的内核路径）。
+        // NO_CHANGE = 零变更摘要（版本已由内核推进；本函数只回执 outcome）
+        return { status: 'applied', version: versionOf(ctx), changes: NO_CHANGE }
+      }
+    }
   }
 
   const transition = applySetProperty<DocumentState>({

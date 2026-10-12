@@ -74,6 +74,11 @@ function makeOperatorCtx(initialDoc: unknown) {
       // 故只需复刻"写 legacy"那一半 —— 镜像半边由
       // `runtime/__tests__/p10fDocumentLifecycle.test.ts` 的逐路径对齐判据把守。
       setDocument: (d: unknown) => { current = d as never },
+      // #301 P10f D0：算子现在**先**试内核写（`Context.submitContentEdit`）。
+      // 本宿主是**无内核会话**的替身 ⇒ 必须如实返回 `false`
+      // （`Context.submitContentEdit` 在 `kernel === null` 时正是返回 `false`），
+      // 于是本文件的用例**恰好**覆盖 D0 的**回落分支** —— 那正是 #80 回归锁要守的东西。
+      submitContentEdit: () => false,
       main: { replaceDoc: (d: unknown) => { current = d as never } },
     },
     current: () => current as {
@@ -185,6 +190,10 @@ function makePanelCtx(initialDoc: unknown) {
     // #301 A′：生产侧改用 `Context.setDocument`（唯一写入口）。替身只需
     // 复刻"写 legacy"那一半；镜像半边由 `p10fDocumentLifecycle.test.ts` 把守。
     setDocument: (d: unknown) => { docRef.value = d as never },
+    // #301 P10f D0：面板经 `OPERATOR_TOOLTIP_EDIT` 提交，而算子现在**先**试内核写。
+    // 本宿主**无内核会话** ⇒ 如实返回 `false`（与生产 `Context.submitContentEdit`
+    // 在 `kernel === null` 时的行为一致）⇒ 用例覆盖 D0 的**回落分支**（#80 回归锁的本意）。
+    submitContentEdit: () => false,
     // #301 C′1（N9）：`TooltipEditorPanel` 的重读信号从"文档身份"改为
     // **内容重读**（宽信号）—— 原地改 tooltip 侧表也要刷新，故替身须提供它。
     getContentRefreshTick: () => tickRef,

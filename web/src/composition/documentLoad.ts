@@ -36,6 +36,8 @@
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { KernelSession } from '@/runtime/kernelSession'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
+import { captureFidelityFieldMap } from '@/adapters/fidelityCapture'
+import { plainRootOf } from '@/adapters/plainRoot'
 import { createDocument, withContent, withDocumentContent } from '@/domain/document'
 
 /** 装配诊断/统计要写进去的日志面（与 `Context.log` 同形的最小投影）。 */
@@ -59,6 +61,57 @@ export interface LoadLogPort {
  *
  * 现在：实现在 `adapters/plainRoot`（与 codec 同层）；两条加载脊柱各自从它导入。
  */
+
+/**
+ * 装配产物的 `multiblock` → 投影侧的**类型化投影面**（#301 P10f D2）。
+ *
+ * ## 为什么这个转换必须在 `composition/` 侧发生
+ *
+ * 装配产物给出的是 `MultiblockProjectionFace`（`kernelAssembly` 的形状），
+ * 而投影要的是 `KernelDeclarationProjection`（`kernelProjection` 的形状）——
+ * 两者字段同义但**是不同类型**。转换点必须在一个**同时能看见两者**的地方，
+ * 那就是装配根 `composition/`（它本来就 import 两边）。
+ *
+ * ⚠️ 不允许把这个转换下沉到 `runtime/kernelSession`：那会让内核侧 import 装配根，
+ * 依赖方向就反了（装配根依赖各层，内核不该依赖装配根）。
+ * 会话只保管**不透明**载荷，解释权留在这一侧。
+ *
+ * ## 形状与 `kernelRenderView#declarationOf` **同源**
+ *
+ * 那个函数对渲染路径做同一件事（装配面 → 投影入参）。本函数是**保存路径**的对应物；
+ * 两者必须给出同一个形状，否则"渲染看到的声明"与"存出来的声明"会分叉。
+ */
+function multiblockProjectionFaceOf(assembled: {
+  readonly multiblock: {
+    readonly id: string
+    readonly displayName: string
+    readonly declRaw: Readonly<Record<string, unknown>>
+    readonly projection: {
+      readonly declaration: unknown
+      readonly blockPalette: unknown
+      readonly assets: unknown
+      readonly frames: unknown
+      readonly schemaVersion: number | null
+      readonly multiblockCount: number
+    }
+  } | null
+}): unknown {
+  const mb = assembled.multiblock
+  if (mb === null) return null
+  // 逐字段**显式**搬运（不用展开运算符）：投影面的字段集若变化，
+  // 这里必须同批更新（展开会让"少搬一个字段"静默通过）。
+  return {
+    id: mb.id,
+    displayName: mb.displayName,
+    declaration: mb.projection.declaration,
+    declRaw: mb.declRaw,
+    blockPalette: mb.projection.blockPalette,
+    assets: mb.projection.assets,
+    frames: mb.projection.frames,
+    schemaVersion: mb.projection.schemaVersion,
+    multiblockCount: mb.projection.multiblockCount,
+  }
+}
 
 /**
  * **把一份已解析的旧文档装进内核会话**（#282 P10b 建立，D1 起为**两条加载路径共用**）。
@@ -108,7 +161,29 @@ export function adoptLoadedDocument(
     // 无会话（诊断/装配测试路径）：不装配，也不报错 —— 那是配置事实，不是缺陷。
     return false
   }
-  const assembled = assembleKernelDocument({ doc, plainRoot })
+  // ── ⚠️ 边界处的**幂等归一化**（#301 P10f D2 实测抓出的污染入口）────────────
+  //
+  // ## 为什么必须在这里（而不是只靠 12 个调用点自觉）
+  //
+  // `assembly` 把 `plainRoot` 里**不认识的键**收进保真记录，而保真记录**整份写回产物根**。
+  // ⇒ 若调用方误传**信封根**（`{documentFormat, payloadEncoding, payload, meta}`）
+  // 而不是解包后的 plain，那么：
+  //  ① 信封结构键（`payload` = 整份 base64 正文！）会被当成"未知顶层字段"收进保真记录；
+  //  ② 保存时它们被写回**Plain 产物的根** ⇒ 产物同时是 Plain 形态又带一份内嵌 payload
+  //     （体积翻倍 + 形态自相矛盾）；
+  //  ③ 而信封根里**没有**真正的 plain 键（`mode`/`fixtureFile`/`cellGrid`…）
+  //     ⇒ 那些键**不进**保真记录 ⇒ 保存一次就丢。
+  // 实测（真实信封 + 多方块夹具，探针 `temp/p10f/probe/keys2`）：误传 raw 时
+  // `unknownFields` 从 `{mode,scanBounds,source,documentFormat}` 变成
+  // `{documentFormat,payload,payloadEncoding[,payloadNote]}` —— **一边污染、一边丢失**。
+  //
+  // ## 为什么是幂等的
+  //
+  // `plainRootOf` 对**非信封**输入原样返回（零成本、无拷贝），故对"已经正确的调用方"
+  // 完全无行为变化；对误传 raw 的调用方则还原成生产 12 个调用点传入的那个形状。
+  // ⇒ 这是"统一入口"而不是"第二个实现"：解包判据只有 `adapters/plainRoot` 一份。
+  const normalizedRoot = plainRoot === undefined ? undefined : plainRootOf(plainRoot)
+  const assembled = assembleKernelDocument({ doc, plainRoot: normalizedRoot })
   if (!assembled.ok) {
     ctx.log.warn('场景加载', `内核装配未支持该文档形态（旧路径照常渲染）`, {
       locator,
@@ -125,6 +200,48 @@ export function adoptLoadedDocument(
   const withBaseline = Object.freeze({ ...withScene.doc, saveBaseline: withScene.version })
   const adopted = withDocumentContent(withBaseline, value.content).doc
   kernel.adoptDocument(adopted, value.content)
+
+  // ── #301 P10f D1（G-6a）：**采集源文件的未知顶层字段**并交给会话承载 ──────
+  //
+  // ## 本行替代的旧机制
+  //
+  // 原先这里（下方日志）**只把键数写进一条日志**，记录从未被构造
+  // ⇒ "保存 → 再打开"静默丢掉未知顶层字段（seam `fidelity-record-transport-unwired`
+  // 的 `oldTrack` 描述的正是这个形态）。
+  //
+  // ## ⚠️ 为什么经 `adapters/fidelityCapture`（深度 2）而不是直接调 `captureFidelity`
+  //
+  // `captureFidelity` 在 `adapters/files/fidelityRecord.ts` ⇒ 深度 3，而
+  // `composition/` 是**整层的闸门执行面** ⇒ 直引触 `gate/no-private-cross-layer`（实测确认）。
+  // 而"再导出一层"触 `gate/no-barrel-smuggling`（`APPROVED_BARRELS = []`）。
+  // ⇒ 正解是**模块归位**：那一小块自己就是深度 2 的模块（先例：`adapters/tooltipPool.ts`）。
+  //
+  // ## 为什么写进**会话**而不是留在本函数局部
+  //
+  // 消费方是**保存/导出投影**（D2 的三条保存路径 + 四条导出），在别的调用栈上
+  // ⇒ 记录必须有**生命周期 = 文档生命周期**的宿主。会话正是它：
+  // 装载时置位、卸载时清空（`markUnloaded`）⇒ 不串档。
+  kernel.setFidelityFieldMap(
+    captureFidelityFieldMap({
+      sourceFormat: value.sourceFormat,
+      sourceVersion: value.sourceVersion,
+      unknownFields: value.unknownFields,
+    }),
+  )
+
+  // ── #301 P10f D2：把**装配面**交给会话保管（投影侧要用） ─────────────────
+  //
+  // 两样东西只有装配期知道：帧对象映射（帧下标 → 对象 id）与多方块类型化投影面。
+  // 为什么不留在本函数局部：消费方是**保存/导出**（在别的调用栈上）；
+  // 为什么不让投影自己去场景里翻：那会把装配的命名约定
+  // （`structure:frame-<i>` / `structure:multiblock`）泄漏给投影层
+  // （`kernelAssembly.ts:475-483` 已就此裁定"装配显式给出，投影只做重建"）。
+  //
+  // ⚠️ `multiblock` 以**不透明**形式交给会话（会话在内核侧，不得 import 装配根的类型）。
+  kernel.setAssemblyFace({
+    frameObjects: value.frameObjects,
+    multiblock: value.multiblock === null ? null : multiblockProjectionFaceOf(value),
+  })
 
   for (const d of value.diagnostics) {
     ctx.log.info('内核装配', `${d.code} @ ${d.path}`, { locator, detail: d.detail })

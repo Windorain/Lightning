@@ -268,17 +268,20 @@ export function typedDeclarationOf(decl: MultiblockDecl): {
         void domain
         // `raw` 与其余元素同样**必须剥离**（见 `variants` 的说明：元素级 `raw`
         // 会让每轮往返嵌套一层）。它这里曾漏掉，实测 `channels` 每轮 +200 B。
-        void raw
-        return Object.freeze({ ...rest, enum: enumName, domain: { min: c.min, max: c.max } }) as Readonly<
-          Record<string, unknown>
-        >
+        // D10：剥离 `raw` **不等于**丢扩展键 —— 以源节点为底，typed（含上面
+        // 两条改名/改形）覆盖（见 `withExtensionKeys`）。
+        return withExtensionKeys((raw ?? {}) as Readonly<Record<string, unknown>>, {
+          ...rest,
+          enum: enumName,
+          domain: { min: c.min, max: c.max },
+        } as Readonly<Record<string, unknown>>)
       }),
     ),
     runstates: Object.freeze(
       decl.runstates.map((r) => {
         const { raw, ...rest } = r as unknown as Record<string, unknown>
-        void raw
-        return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+        // D10：`runstates[].materialSwap` 等扩展键保留（实测 2/1/1 条）。
+        return withExtensionKeys((raw ?? {}) as Readonly<Record<string, unknown>>, rest as Readonly<Record<string, unknown>>)
       }),
     ),
     // ## 元素级 `raw` **必须剥离**（本批实测抓出的一个**迭代增长**缺陷）
@@ -298,8 +301,9 @@ export function typedDeclarationOf(decl: MultiblockDecl): {
     variants: Object.freeze(
       decl.variants.map((v) => {
         const { raw, ...rest } = v as unknown as Record<string, unknown>
-        void raw
-        return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+        // D10：以**源节点**为底（见 `withExtensionKeys` 的说明）——
+        // `variants[].height` 这类"解析器未提升为有名字段"的键由此保留。
+        return withExtensionKeys((raw ?? {}) as Readonly<Record<string, unknown>>, rest as Readonly<Record<string, unknown>>)
       }),
     ),
     rules: Object.freeze(
@@ -308,7 +312,6 @@ export function typedDeclarationOf(decl: MultiblockDecl): {
           raw?: unknown
           guard?: { readonly clauses?: readonly Record<string, unknown>[] }
         } & Record<string, unknown>
-        void raw
         // ## 守卫子句的 `raw` 也要剥离（本批实测抓出的**第二层**嵌套）
         //
         // `guard.clauses[]` 同样各带一个 `raw`（`MultiblockGuardClause.raw`）。
@@ -336,7 +339,8 @@ export function typedDeclarationOf(decl: MultiblockDecl): {
             out.guard = guard
           }
         }
-        return Object.freeze(out) as Readonly<Record<string, unknown>>
+        // D10：规则的**扩展键**同样以源节点保真（`guard` 由上面的处理覆盖 —— typed 赢）。
+        return withExtensionKeys((raw ?? {}) as Readonly<Record<string, unknown>>, out)
       }),
     ),
     // 骨架阶**不含** `decl.backbone.raw`（其原始节点由 `declRaw` 保真 —— 两者不重复承载）。
@@ -346,24 +350,24 @@ export function typedDeclarationOf(decl: MultiblockDecl): {
       sizeSteps: Object.freeze(
         decl.backbone.sizeSteps.map((s) => {
           const { raw, ...rest } = s as unknown as Record<string, unknown>
-          void raw
-          return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+          // D10：`sizeSteps[].{channel,layers,w,hh,d,roles}` 这类扩展键必须保留
+          // （它们是骨架阶的**尺寸语义**，丢了则骨架重建不出来）。
+          return withExtensionKeys((raw ?? {}) as Readonly<Record<string, unknown>>, rest as Readonly<Record<string, unknown>>)
         }),
       ),
     }),
     couplings: Object.freeze(
       decl.couplings.map((c) => {
         const { raw, ...rest } = c as unknown as Record<string, unknown>
-        void raw
-        return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+        return withExtensionKeys((raw ?? {}) as Readonly<Record<string, unknown>>, rest as Readonly<Record<string, unknown>>)
       }),
     ),
     couplingMode: decl.couplingMode,
     notes: Object.freeze(
       decl.notes.map((n) => {
         const { raw, ...rest } = n as unknown as Record<string, unknown>
-        void raw
-        return Object.freeze({ ...rest }) as Readonly<Record<string, unknown>>
+        // D10：`notes[].source` 等扩展键保留。
+        return withExtensionKeys((raw ?? {}) as Readonly<Record<string, unknown>>, rest as Readonly<Record<string, unknown>>)
       }),
     ),
     paletteSource: decl.paletteSource,
@@ -652,6 +656,51 @@ export interface AssemblyContentStats {
 // ─────────────────────────────────────────────────────────────────────────────
 // 类型化映射表（**唯一**的旧→新字段对应点）
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * **元素级扩展键保真**：以**源节点**为底、类型化字段覆盖（typed 赢）。
+ *
+ * ## 本函数替代的旧机制（#301 P10f D2 修，登记 D10）
+ *
+ * 旧实现是 `const { raw, ...rest } = element; return {...rest}` —— 即
+ * "**丢掉 `raw`，只留类型化字段**"。而下面的注释当时断言：
+ *
+ * > 元素的全部**有名字段**都已在类型化面上（`key`/`totalTier`/`values`/`runstate`…）
+ *
+ * **该断言实测为假**：解析器的 `parseVariant` 只把 `key`/`totalTier`/`values`/
+ * `runstate` 提升为有名字段，而文件里**真实存在**的其它键只留在 `raw` 里。
+ * 实测（三份多方块夹具）：
+ *
+ * | 元素 | 文件里存在、旧实现**丢掉**的键 |
+ * |---|---|
+ * | `variants[].height` | **432 / 108 / 12 条全部**（该夹具的语义就是"总 Tier 决定柱高"） |
+ * | `runstates[].materialSwap` | 2 / 1 / 1 条 |
+ * | `notes[].source` | 3 / 1 / 1 条 |
+ * | `couplings[].{id,rawB,requires,source}` | （lsc）1 条 |
+ * | `backbone.sizeSteps[].{channel,layers,w,hh,d,roles}` | 全部骨架阶 |
+ *
+ * ⇒ 旧实现让**保存一次就丢**这些字段（#171「能力不回退」的硬底线）。
+ *
+ * ## 为什么是"源为底、typed 覆盖"而不是"typed 为底、补扩展键"
+ *
+ * 后者的补法需要枚举"哪些键是扩展键"—— 那正是**第二份会漂移的清单**。
+ * 前者不需要枚举：源节点里**除 `raw` 之外的每一个键**都在产物里，
+ * 而类型化字段（解析器校验过的那些）**覆盖**同名键 ⇒
+ * "编辑了内核内容但导出还是旧的"仍不可能（映射表判据 1）。
+ *
+ * ## 迭代幂等（`projectionFidelity` 的判据面）
+ *
+ * `raw` 自身的键被剥掉 ⇒ 往返**不嵌套**（旧的迭代增长缺陷的成因）；
+ * 而扩展键在第二轮成为源节点的一部分、原样带出 ⇒ 第 2 轮起逐轮相同。
+ */
+function withExtensionKeys(
+  source: Readonly<Record<string, unknown>>,
+  typed: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const { raw: nested, ...rest } = source
+  void nested
+  return Object.freeze({ ...rest, ...typed })
+}
 
 /**
  * 旧 `meta` 里**已知**的键（其余进保真记录 + 诊断）。

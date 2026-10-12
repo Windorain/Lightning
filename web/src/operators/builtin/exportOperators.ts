@@ -62,7 +62,8 @@ export const ExportPlainOperator: OperatorType = {
   },
 
   exec(ctx, _props) {
-    const doc = (ctx.getDoc().value?.serialize() ?? null) as Record<string, unknown> | null
+    // #301 P10f D2：产物改由**内核投影**给出（未装配自动回落旧文档）。
+    const doc = (ctx.plainForSave().plain ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-plain`, doc, true)
@@ -79,7 +80,8 @@ export const ExportEnvelopeOperator: OperatorType = {
   },
 
   exec(ctx, _props) {
-    const doc = (ctx.getDoc().value?.serialize() ?? null) as Record<string, unknown> | null
+    // #301 P10f D2：产物改由**内核投影**给出（未装配自动回落旧文档）。
+    const doc = (ctx.plainForSave().plain ?? null) as Record<string, unknown> | null
     if (!doc) return
     const baseName = sceneStableStringIdFromDocument(doc)
     downloadJson(`${baseName}-envelope`, buildEnvelopePackage(doc), true)
@@ -96,7 +98,8 @@ export const ExportObjOperator: OperatorType = {
   },
 
   async exec(ctx, _props) {
-    const doc = ctx.getDoc().value?.serialize()
+    // #301 P10f D2：产物改由**内核投影**给出（未装配自动回落旧文档）。
+    const doc = ctx.plainForSave().plain
     if (!doc) return
     const explicit = (_props.mode as string | undefined)
     const connected = (_props.connected as boolean) ?? false
@@ -128,7 +131,8 @@ export const ExportIsoPngOperator: OperatorType = {
     // 修复前文件名插值的是原始 `props.direction`，与查表得到的渲染下标是两个来源
     // ⇒ 实测表现为"名为 iso-2.png、内容是方向 0"。见 `resolveIsoDirection` 的说明。
     const directionIndex = resolveIsoDirection(_props.direction)
-    const doc = ctx.getDoc().value?.serialize()
+    // #301 P10f D2：产物改由**内核投影**给出（未装配自动回落旧文档）。
+    const doc = ctx.plainForSave().plain
     if (!doc) return
     try {
       const dataUrl = await bakeIsometricStructurePngDataUrl(doc, directionIndex)

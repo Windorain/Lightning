@@ -9,7 +9,9 @@ import { useContext } from '@/runtime/context'
 const ctx = useContext()
 /** 本实例的翻译（语言来自本实例设置，不是模块级全局读源；#259 A33）。 */
 const t = ctx.t
-const doc = computed(() => ctx.getDoc().value?.serialize() ?? null)
+// #301 P10f D2：产物改由**内核投影**给出（`plainForSave` 是唯一分流点；
+// 未装配时自动回落旧文档 —— 能力不回退）。
+const doc = computed(() => ctx.plainForSave().plain ?? null)
 const baseName = computed(() => doc.value ? sceneStableStringIdFromDocument(doc.value) : 'scene')
 const showSdeSave = computed(() => ctx.getWorkspaceMode().value === 'sde' && ctx.getConnection().apiBase.length > 0)
 const feedback = ref('')

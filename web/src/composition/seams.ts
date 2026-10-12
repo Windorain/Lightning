@@ -319,12 +319,12 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     newTrack:
       '`adapters/files/fidelityRecord.ts` 的保真记录：`captureFidelity` 采集未知顶层字段（带源格式/源版本；`_extra` 显式排除）、`serializeFidelity`/`parseFidelity` 往返（读到 `_extra` 显式拒绝）、`fidelityStorageKey` 旁置键、`judgeFidelityAfterEdit` 的三态裁定（`valid`/`stale`/`dropped`）。产物侧既定挂点是 `composition/kernelProjection.ts` 的 `KernelProjectionInput.fidelityFields` → `projectKernelDocument`（写回 plain 根与 `meta.` 子树）。',
     oldTrack:
-      '未知顶层字段今天**到不了任何产物**：`composition/kernelAssembly.ts` 把它们收进 `AssembledDocument.unknownFields`，而唯一消费者 `operators/builtin/docLifecycleOperators.ts` 只把键数写进一条日志（`unknownFields: Object.keys(value.unknownFields).length`）—— 记录从未被构造、从未被持久化、也没有任何产物结构接受它；故"保存 → 再打开"会静默丢掉这些字段。',
+      '(a) **已接线（D1）**：源文件未知顶层字段原先只被计数、从未构造记录 ⇒ 现由 `composition/documentLoad` 经 `adapters/fidelityCapture`（深度 2）采集并交给内核会话承载。\n(b) **已统一（D1）**：保真键原先是一个**游离**方案（`lk.fidelity.v1.<文档ID>.record`，与 recovery/save 家族八处不兼容：缺 scope/instance 段、无解析器、裸 `string`、版本硬编码、空 id 静默降级、不被分类器识别）⇒ 现并入同族（`fidelityStoreKey`/`parseFidelityStoreKey`/`artifactKindOfKey`）。旧键零生产调用方 ⇒ 无迁移负担。\n(c) **已接线（D2），但本条不核销** —— "接线"与"缺口闭合"是两件事：`composition/saveProjection.ts` 已在产物侧传入 `fidelityFields`（12 处产字节节点全改吃 `ctx.plainForSave()`），且 D2 的产物等价判据（`composition/__tests__/p10fSaveProjection.test.ts` 的 ①③④⑤⑥ 组）已把"键面 + 语义面 + 逐格说明 + 材质表"两侧比对转绿；**但**保存路径的旧权威**回落分支仍在**（`Context.plainForSave` 的 `source: "legacy"`），即"`RuntimeDocument` 退出生产"这条总目标未达成 ⇒ 登记保留，退出条件收窄（见下）。',
     blocker:
-      '产物侧唯一挂点 `src/composition/kernelProjection.ts` 的 `projectKernelDocument` **生产零调用方**：它属"内核 → 旧格式投影"这条面，依赖内核内容面补全（P10d）。同时 `src/application/recovery.ts` 的 `RecoveryStorePort` 在生产里从未被实例化，且 `fidelityStorageKey` 与 `recoveryStoreKey` 家族的键口径不兼容（缺 scope/instance 段、返回裸 `string`、无解析器）—— 持久化半边需先统一键口径，不是接线。故本批只登记，归 P10d。',
-    owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
+      '(c) 剩余两件（**不是**"接线"）：① 保存路径的**回落分支**（`Context.plainForSave` 未装配 ⇒ legacy `serialize()`）随 `RuntimeDocument` 一起退出 —— 归 D4 终退统战的最后一步；② 产物等价判据从"四份夹具"扩到"e2e 真实产物"（本批真实产物 spec 仍显式排除）。\n⚠️ **三处更正**（前序批次写下、后续实测推翻）：① 原写"产物侧唯一挂点 `projectKernelDocument` 生产零调用方"—— **不成立**（`kernelRenderView.ts:135` 已在生产调用它）；真正的缺口更窄：`fidelityFields` 无生产传值方。② 原写 (b) "需先统一键口径，不是接线"—— **D1 已统一**。③ 原写 (c) "D2 接线后删除本条登记"—— **改判**：接线完成 ≠ 缺口闭合（回落分支仍在）⇒ 登记**保留**、只更新文案与退出条件；核销会让"保存路径尚未终切"失去登记。',
+    owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
     exitCondition:
-      '`src/operators/builtin/docLifecycleOperators.ts` 的 `adoptDocumentIntoKernel` 调 `captureFidelity` 构造记录，且 `src/composition/kernelProjection.ts` 的 `KernelProjectionInput.fidelityFields` 有生产调用方（记录据它写回产物），使"保存 → 再打开"保留未知顶层字段；届时删除本条登记。',
+      '**三段全部成立**才算闭合：\n(a) ✅ **D1 已达成** —— `src/composition/documentLoad.ts` 的装配路径经 `adapters/fidelityCapture` 调 `captureFidelity` 构造记录，且由内核会话承载（`KernelSession.setFidelityFieldMap`/`fidelityFieldMapOf`，卸载即清空）；\n(b) ✅ **D1 已达成** —— 保真键并入 recovery/save 家族（`src/application/recovery.ts` 的 `fidelityStoreKey` 带 scope+instance 段、返回 `Result`、有 `parseFidelityStoreKey`、被 `artifactKindOfKey` 识别、版本为具名常量 `FIDELITY_SCHEMA_VERSION`）；\n(c) ⏳ **D2 已接线、等价已把守、终切未完** —— 生产传值方 = `src/composition/saveProjection.ts`（✅ D2），产物等价判据在四份真实夹具上逐键/语义面转绿（✅ D2）；**但**旧权威回落分支仍在 ⇒ 闭合判据改为"保存路径无 legacy 回落分支（`Context.plainForSave` 恒 `source: "kernel"`）**且** e2e 真实产物等价判据纳入套件"。',
   }),
   /**
    * P10f C′2（#301）登记：**侧表写面仍落 legacy**（本批的显式暂存）。
@@ -370,14 +370,14 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       'src/editors/property-writers.ts',
     ]),
     newTrack:
-      '内核写面（`addObject`/`deleteObject`/`setProperty` + `applyKernelPropertyValue`）承载注解对象的增删改；C′2 已迁：注解**新建/删除**与 **`title`** 字段写（`annotationOperators` 经 `Context.submitContentEdit`，内核写 + 全保真投影回 legacy）。',
+      '内核写面承载内容编辑：注解**新建/删除**与 **`title`** 字段写（`annotationOperators`，C′2）+ 逐格说明写（`setCellTooltip` 命令，**D0 已交付**）—— 两者都经 `Context.submitContentEdit`（内核写 + 投影回 legacy）。',
     oldTrack:
-      '两类编辑仍落 legacy：(a) 逐格说明经 `metaEditOperators` 写 `tooltipPalette`/`cellTooltipGrid` 侧表（内核无对应命令，且内核 `cellContent` 是"单表 + 键编码"的**不同形状**）；(b) 注解 `locked`/几何等字段经 `annotationOperators` 的回落分支写 legacy（内核写端口只实现 `text`）。',
+      '(a) **已迁（D0）**：逐格说明原先经 `metaEditOperators` / `property-writers` 直接改 `tooltipPalette`/`cellTooltipGrid` 侧表；现改为**内核写优先**，旧写法**降为回落分支**（未装配/无会话时仍走它 ⇒ 见下方 exitCondition 的剩余项）。\n(b) **仍落 legacy**：注解 `locked`/几何等字段经 `annotationOperators` 的回落分支写 legacy（内核写端口只实现 `text`）。',
     blocker:
-      '(a) 需要"侧表 → 单元格内容键表"的表示转换设计 + 可撤销的写命令，属**承载面新增**而非接线；(b) 需要扩 `writeAnnotationProperty` 的写入分支与 `KERNEL_OBJECT_TYPES` 的注解属性描述符（`locked`/几何）。两者都超出《P10f C′2 写路径分派设计》（附件 1670）的核定范围。',
+      '(b) 需要扩 `writeAnnotationProperty` 的写入分支与 `KERNEL_OBJECT_TYPES` 的注解属性描述符（`locked`/几何）。\n(a) 的**剩余项**不是"没做"，而是"**回落分支还在**"：`metaEditOperators` 仍 import `ctx.getDoc()`（取当前帧高度 + 回落写入）。该分支只有在 **D3 终删 `getDoc()`** 时才能删 —— 删早了会在"未装配"时**丢能力**（#171 禁止）。\n⚠️ **更正**：我在 C′2 期写的 blocker 是"(a) 需要表示转换设计，属承载面新增"。**D0 实测推翻了它**：两个方向的转换生产里都早已存在（`kernelPaletteAssembly.ts:249-271` 正向 / `kernelProjection.ts:1114` 反向），所以 D0 只补了一条写命令。',
     owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
     exitCondition:
-      '`src/operators/builtin/metaEditOperators.ts` 不再 import `ctx.getDoc()`（逐格说明改写内核单元格内容），且 `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand` 不再有"未承载字段即回落"的分支（`locked`/几何已在 `writeAnnotationProperty` 有写端口）；届时删除本条登记。**执行批次：#301 子批 D 的 D0 段** —— 理由是"逐格说明写面是 D 的前置"：`metaEditOperators` 留 legacy ⇒ 它仍是 `getDoc` 消费者 ⇒ **D 批的终删闭不了合**。（我第一版把 owner 写成 `P11`，被 `boundary-scan.test.ts` 的"owner 必须是已登记真实批次且职责匹配"闸门**当场判红** —— 闸门是对的：P11 是审计批，不做迁移，把功能迁移挂到审计批名下等于 seam 永无退出。）',
+      '**两个子句都必须成立**：\n① `src/operators/builtin/metaEditOperators.ts` 不再 import `ctx.getDoc()` —— 其**回落分支**与**帧高读取**随 **D3 终删 `getDoc()`** 一并消失（D0 已把主路径迁到内核，但保留了回落 ⇒ 本句**尚未**成立）；\n② `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand` 不再有"未承载字段即回落"的分支（`locked`/几何已在 `writeAnnotationProperty` 有写端口）。\n⇒ 届时删除本条登记。**执行批次：#301 子批 D**（①归 D3 终删段，②归 D 的注解字段写面段）。前者是"逐格说明写面是 D 前置"的理由：`metaEditOperators` 留 `getDoc` ⇒ **D3 的终删闭不了合**。（我第一版把 owner 写成 `P11`，被 `boundary-scan.test.ts` 的"owner 必须是已登记真实批次且职责匹配"闸门**当场判红** —— 闸门是对的：P11 是审计批，不做迁移，把功能迁移挂到审计批名下等于 seam 永无退出。）',
   }),
 ])
 
