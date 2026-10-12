@@ -30,6 +30,7 @@ import {
   type ContentIdentity,
 } from '@/presentation/contentIdentity'
 import type { EvaluatedPrimitive, GeometryAttributes, GeometryId } from '@/presentation/evaluationKey'
+import { triangleCellMapOf } from '@/presentation/cellIdentity'
 import { contentDigestOf } from '@/presentation/invalidationPlan'
 // 几何收集**只有一个**入口（本批 D3a 更正：原先本文件另有一份手写遍历，
 // 它不做遮挡剔除 ⇒ 与渲染路径数值不一致）。见 `structureGeometryAttributes` 的说明。
@@ -172,6 +173,12 @@ export function structureGeometryAttributes(
     uvs: merged.uvs,
     colors: merged.colors,
     triangleCount: merged.positions.length / 9,
+    // **逐格身份**（#299 P10e）：由**同一批** `collected.pieces` 按**同序**展开。
+    // 关键：不重新遍历网格 —— 若本函数为了产出格表再去遍历一遍，两序会在
+    // "剔除判据变了"时静默错位（D3a 实测的正是这类重复实现漂移：两份遍历差 3 倍三角形）。
+    // `triangleCellMapOf` 只做同序展开（每片固定 2 个三角形，见其说明），
+    // 故"第 t 个三角形属于哪一格"由**构造**保证，而不是由注释声称。
+    cellMap: triangleCellMapOf(collected.pieces),
   }
 }
 

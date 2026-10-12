@@ -82,6 +82,52 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       '`src/runtime/context.ts` 的 `getDoc()` 不再返回 `RuntimeDocument`（类型改为内核 `Document`），且 `src/editors/workbench-rna.ts` 的 `documentStateOf` 直接由内核 `Document` 构造 `DocumentState`（不再有 `RuntimeDocument`）。届时删除本条登记。**执行批次：#282（R-WK-04）**。',
   }),
   /**
+   * P10e（#299）登记：**呈现链与 legacy 渲染链并存**（本批的显式暂存）。
+   *
+   * ## 为什么必须登记（而不是只在汇报里说"本批不切渲染链"）
+   *
+   * 按 #171 退役纪律：「阶段间暂存的未迁移路径必须有负责人和退出阶段」。
+   * 本批把 `BatchedPresenter` 接成**真实生产实现**（此前零生产调用方），
+   * 但它**不接管画面** —— 画面仍由 `DRW`（legacy `blockMesh`）产出。
+   * 这是一条真实的双轨，必须有可核对的退出条件。
+   *
+   * ## 为什么本批**不**接管画面（切一半比不切更糟）
+   *
+   * 接管需要"DRW 消费内核求值产物"的整体切换，其前置为：
+   *  - 保存面从 `ctx.getDoc()` 迁到内核投影（`raw-authority-object` 终删）；
+   *  - 9 条**未装配内核**的加载路径补齐（实测：内核文档只在文件选择器与
+   *    `documentLoadPipeline` 两条路径被填充）；
+   *  - `Command` 封闭联合扩展（侧表写面）；
+   *  - 材质统一（呈现层是 `MeshBasicMaterial`，legacy 是贴图材质库）。
+   *
+   * 缺任一条即"切换后能力回退且无替代" —— 那正是 #171 禁止的半成品形态。
+   *
+   * ## 本批交付的**可核对**能力（不是"接了但没验证"）
+   *
+   * - **逐格拾取**：`PresenterSession.pickAt` 解出 `{column,row,zSlice,quadIndex}`
+   *   （生产视口实测：81 个采样点命中 27 次、解出 6 个不同的格，见
+   *   `e2e/p10e-presenter-live.spec.ts`）；
+   * - **逐像素结构性等价**：同一（由内容导出的）相机下两条链离屏渲染，
+   *   覆盖率与包围盒一致（实测 `ebf-2ch` 覆盖率 0.2286/0.2286、包围盒逐维相同）。
+   */
+  Object.freeze({
+    id: 'presenter-surface-dual-track',
+    files: Object.freeze([
+      'src/composition/presenterSession.ts',
+      'src/shared/viewport/useViewportRuntime.ts',
+      'src/runtime/drwMeshPipeline.ts',
+    ]),
+    newTrack:
+      '`composition/presenterSession` 的 `PresenterSession`：内核场景 → `PresentationInputs` → `compileScene` → `BatchedPresenter` → 真实 GL。每帧经 `applyKernelDocument` 按**内容身份**去重（机位变化不重编，A11）；持 `PickIndex` 提供**逐格**拾取（`cell` = `{column,row,zSlice,quadIndex}`）；纹理经五态链绑定。可观测面：`ViewportSlot.presenterSurface`（批次/账/世代）。',
+    oldTrack:
+      '`runtime/drwMeshPipeline` 的 `blockMeshProvider` → legacy `blockMesh` 仍是**画面**的生产路径（写 `vpSlot.contentGroup`）。呈现会话有自己的根对象，**不**挂进 `contentGroup`（挂进去会让"谁画了这 24 个三角形"没有唯一答案）。',
+    blocker:
+      '**R-WK-07（#250，2026-10-12）**：D4（`raw-authority-object` 终删 + `RuntimeDocument` 退出生产 + G-6 + 导出面）已卷出为 **P10f（#301）** 子批 A–E；渲染链终切属子批 C/D，其前置即上方四条。本批硬约束是**能力不回退**，而"呈现链接管画面但其材质/注解/描边尚未统一"会让画面**变平**（无贴图）—— 那是可感知回退。',
+    owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
+    exitCondition:
+      '`src/runtime/drwMeshPipeline.ts` 的 `blockMeshProvider` 路径被删除，且视口结构层由 `src/composition/presenterSession.ts` 的 `PresenterSession` 产出（画面唯一来源是内核求值产物）；届时删除本条登记。',
+  }),
+  /**
    * P9（#260）登记：**固定快照导出已交付，旧导出器仍在服役**。
    *
    * 这是 B5 退役矩阵第 13 条（`exporter-borrows-live-viewport`）在**代码现状**上的形态：

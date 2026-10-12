@@ -107,7 +107,70 @@ export type OutlinePrimitive =
       readonly kind: 'cellBox'
       readonly objectId: string
       readonly cell: readonly [number, number, number]
+      /**
+       * 兜底盒的**世界空间角点**（#299 P10e）。
+       *
+       * 见 `planOutline` 的 cell 分支说明：由端口 `cellOriginOf` 给出，
+       * 端口缺席时退回"格坐标即世界角"这一纯域约定。
+       */
+      readonly origin: readonly [number, number, number]
     }
+  /**
+   * **逐格四边形轮廓**（#299 P10e；legacy `BlockRef` 整格 quads 通道的等价物）。
+   *
+   * ## 为什么 `cellBox` 不够（这是 O1/O3 缺口原文）
+   *
+   * legacy 的整格高亮**不是**一个盒子 —— 它把该格的**烘焙四边形**（`BakedQuadsGeometry`
+   * 的 quads，格内局部坐标 `0..16`）逐面构造成 mask 几何
+   * （`render/mesh/selectionHighlightProvider` → `buildQuadsMaskMesh`）。
+   * 于是"一个台阶方块"的高亮是台阶形状，"一根线缆"的高亮是线缆形状。
+   *
+   * 用 `cellBox`（1×1×1 盒）代替它会让**所有**高亮都变成一个立方体
+   * —— 那是可感知的视觉回退，而不是实现细节。
+   *
+   * ## 为什么带 `quads` 而不是带 `assetId`
+   *
+   * 带 `assetId` 会要求呈现层自己按身份去查几何资产，于是"查不到时画什么"这个政策
+   * 又被推给下游（每个消费者各答一次 ⇒ 必然漂移）。带**已经解析出来的四边形**使
+   * "无几何"成为一个**上游**事实：端口返回 `undefined` ⇒ `missing-geometry`
+   * （判别式，见 {@link OutlineSkip}），而是否画兜底盒是**一个**政策点。
+   *
+   * ## 坐标空间
+   *
+   * `quads[].vertices` 是**格内局部**坐标（与 `domain/blockGeometry#Quad` 同空间，
+   * 即 legacy 的 `0..16` 单位），`origin` 是该格**世界空间**的角点
+   * （`格中心 - 0.5`，与 legacy `selectionHighlightProvider.ts:61` 逐字同口径）。
+   * 呈现层只需 `局部 + origin`，不需要知道网格尺寸 —— 于是这一形态对"格在世界哪里"
+   * 完全解耦，与 legacy 的两段式（`buildQuadsMaskMesh(quads, corner)`）同形。
+   */
+  | {
+      readonly kind: 'cellQuads'
+      readonly objectId: string
+      /** 该格的世界空间角点（`格中心 - 0.5`；legacy `corner` 同口径）。 */
+      readonly origin: readonly [number, number, number]
+      /** 该格的四边形（**格内局部坐标**；空数组 ⇒ 调用方不得产出本形态）。 */
+      readonly quads: readonly OutlineQuad[]
+    }
+
+/**
+ * 描边几何里的一份四边形（**格内局部坐标**）。
+ *
+ * 就地声明而**不** import `render/schema/types#BakedQuad`：`presentation/` 是新层，
+ * `render/` 是它的**旧对应物**（`LAYER_DESTINATIONS.presentation.legacySources = ['render','shared']`）
+ * —— 新层 import 旧层正是「新门面包旧核心」要禁的方向。
+ * 形状与 `BakedQuad` 一致是**格式契约**（它是文件里真实存在的结构），不是依赖。
+ */
+export interface OutlineQuad {
+  readonly materialIndex: number
+  readonly vertices: readonly {
+    readonly x: number
+    readonly y: number
+    readonly z: number
+    readonly u: number
+    readonly v: number
+    readonly color?: number
+  }[]
+}
 
 /** 描边规划的结果。 */
 export interface OutlinePlan {
@@ -157,7 +220,118 @@ export interface OutlineGeometrySource {
   topologyVersionOf(objectId: string): number | undefined
   /** 取部件的世界空间盒（`kind === 'part'`）。 */
   partBoxesOf(objectId: string, partLocalId: string): readonly { readonly min: readonly [number, number, number]; readonly max: readonly [number, number, number] }[] | undefined
+  /**
+   * 取某格的**四边形轮廓**（`kind === 'cell'`；#299 P10e）。
+   *
+   * `undefined` = 该格无几何（**不是**空数组）：空数组表达的是"这一格确实没有面"
+   * （在合法输入里不该出现 —— 有格的方块必然有面），而 `undefined` 表达"格表里
+   * 查不到这一格 / 几何不可用"。两者对兜底政策的含义不同，见
+   * {@link OutlinePolicy.cellWithoutQuads}。
+   */
+  cellQuadsOf?(objectId: string, cell: readonly [number, number, number]): readonly OutlineQuad[] | undefined
+  /**
+   * 取某格的**世界空间原点**（格角 = 该格世界中心 - 0.5；legacy 同口径）。
+   *
+   * `undefined` = 该格不在当前网格里 ⇒ `missing-geometry`（不静默不画）。
+   * 独立于 {@link cellQuadsOf} 的理由：**原点与几何来自两个不同的面** ——
+   * 原点由网格尺寸/格坐标算出（呈现侧），四边形由几何资产给出（内容侧）。
+   * 合成一个方法会让"几何在但格不在"（网格换了）与"格在但几何没了"（资产丢了）
+   * 不可区分，而前者该整批不画、后者该走兜底政策。
+   */
+  cellOriginOf?(objectId: string, cell: readonly [number, number, number]): readonly [number, number, number] | undefined
 }
+
+/**
+ * **描边政策**（#299 P10e：两个待裁决项在这里成为**显式、唯一、可断言**的输入）。
+ *
+ * ## 为什么把待裁决项做成"政策参数"而不是就地选一个
+ *
+ * P10d 的 D3b 登记了两个待裁决项（O1/O3 的兜底盒政策、O2 的 A12 版本检查）。
+ * 它们的共同点是：**两个分支都是可实现的**，选哪个是**视觉/行为政策**，须由 Lead 裁决
+ * （#289 的裁决纪律：视觉/口径变更须独立裁决，不得由执行者顺手改）。
+ *
+ * ⇒ 执行者的正确动作是**让政策可表达**（两条分支都实现、都有判据、默认值 = **迁移前行为**），
+ * 这样：
+ *  - 裁决前：行为与迁移前**逐字节一致**（默认分支就是 legacy 行为，见各字段说明）；
+ *  - 裁决后：改**一处**默认值即可切换，且切换不会漏掉任何消费者
+ *    （不存在"有三个地方各判一次兜底盒"的形态）。
+ *
+ * 这两个字段是**仅有的**政策点。任何"顺手再放宽一点"的改动都应新增一个具名字段，
+ * 而不是在 `planOutline` 里加分支 —— 政策点数量本身就是可审的。
+ */
+export interface OutlinePolicy {  /**
+   * **待裁决项 ①**：整格目标**无四边形几何**时，画不画 1×1×1 兜底盒。
+   *
+   * | 取值 | 行为 | 来源 |
+   * |---|---|---|
+   * | `'fallback-box'`（**当前默认 = 迁移前行为**） | 产出 `cellBox`（1×1×1 盒） | legacy `selectionHighlightProvider.ts:53-57`/`:69-75` 两处兜底 |
+   * | `'none'` | 产出 `missing-geometry` 判别式，不画 | 规划器原文（`outlinePlan.ts` 的"不用零盒冒充"，A36 纪律） |
+   *
+   * **分歧的实质**：legacy 把"这一格没几何"处理成"画个盒子意思一下"；
+   * 规划器把它处理成"显式报缺"。前者用户在**无几何格**上仍看得到高亮
+   * （例如几何缺失的方块），后者用户什么都看不到但有诊断。
+   *
+   * 默认取 legacy 的理由**不是**"legacy 对"，而是：本批的硬约束是**能力不回退**，
+   * 而"高亮从有变没有"是可感知的回退。切换成 `'none'` 需要 Lead 明确裁决
+   * （它会把"几何缺失"暴露成用户可见的"选中了但没高亮"）。
+   */
+  readonly cellWithoutQuads: 'fallback-box' | 'none'
+  /**
+   * **待裁决项 ②**：拾取键过期时画不画（O2，A12 求值版本检查）。
+   *
+   * | 取值 | 行为 | 来源 |
+   * |---|---|---|
+   * | `'suspend'`（**规划器现状**） | 第一步判 `stale-evaluation`，不画 | `outlinePlan.ts` 原文；A12「不得新描边配旧几何」 |
+   * | `'draw'`（**legacy 现状**） | 不做版本检查，照画 | legacy `SelectionHighlightProvider` **无**版本比对 |
+   *
+   * **分歧的实质**：legacy **不做**版本检查 —— 这正是 A12 负对照要判红的形态
+   * （过期画面上的几何引用被用于描边 ⇒ "新描边配旧几何"）。
+   * 规划器更严，符合 A12 字面。
+   *
+   * 那"更严"为什么不直接算修正？因为它同时是**行为变更**：过期帧上，
+   * legacy 画（可能错位的）边，规划器什么都不画。若过期窗口在正常操作里
+   * 可达（例如拖动中每帧都在编译），"什么都不画"会表现为**高亮闪烁/短暂消失**。
+   * ⇒ 需裁决的是"过期窗口的可达性与时长"，不是"哪个更符合 A12 字面"。
+   *
+   * 默认取 `'suspend'`（规划器现状）的理由：它是**已有的**新层行为，
+   * 本批不引入新变更；且默认值一旦是 `'draw'`，"未经裁决就把 A12 判据关掉"
+   * 会变成一个默认生效的事实。取现状使"裁决后才能放宽"成为结构性事实。
+   */
+  readonly stalePickAtOutline: 'suspend' | 'draw'
+}
+
+/**
+ * 政策值的**具名别名**（供消费者在签名里引用而无需重复写联合）。
+ *
+ * 单独一个别名的理由：`planOutline`/`planOutlines` 的 `policy` 形参用它，
+ * 于是"哪些调用点接受政策"可以靠 `grep EffectiveOutlinePolicy` 一次找全
+ * —— 而写内联联合类型时，找全调用点需要读每一处签名。
+ */
+export type EffectiveOutlinePolicy = OutlinePolicy
+
+/**
+ * **当前基线政策** —— 两个字段各取"本批交付前的既成行为"，理由逐字段见
+ * {@link OutlinePolicy} 的两条说明。
+ *
+ * ## 为什么不叫 "DEFAULT" 也不叫 "LEGACY"
+ *
+ * - 不叫 `LEGACY`：两个字段的基线**不在同一侧** —— `cellWithoutQuads` 取的是
+ *   **legacy** 行为（`'fallback-box'`），`stalePickAtOutline` 取的是**新规划器**行为
+ *   （`'suspend'`）。用 `LEGACY` 命名会让人以为整个对象都是 legacy 口径，
+ *   从而在裁决第一个字段时**误改**第二个。
+ * - 不叫 `DEFAULT`：`DEFAULT_*` 在本仓的既有用法是"性能/预算的合理缺省"
+ *   （`DEFAULT_BATCH_BUDGET`）。这里不是"合理缺省"，而是"**未裁决前不许改变**"
+ *   —— 名字必须让读者先想到"这是待裁决项的现状锚点"。
+ *
+ * 于是命名为 `BASELINE`：它是回归比对的**基准**，改动它等于改行为，
+ * 必须由 Lead 裁决（见 #299 的两裁决项）。
+ */
+export const BASELINE_OUTLINE_POLICY: OutlinePolicy = Object.freeze({
+  /** 基线 = legacy 的两处兜底盒（`selectionHighlightProvider.ts:53-57`/`:69-75`）。 */
+  cellWithoutQuads: 'fallback-box',
+  /** 基线 = 新规划器的第一步版本判定（`planOutline` 原文；A12 字面）。 */
+  stalePickAtOutline: 'suspend',
+})
 
 /**
  * 规划描边（**纯函数**）。
@@ -178,11 +352,12 @@ export function planOutline(
   request: OutlineRequest,
   currentKey: EvaluationKey,
   source: OutlineGeometrySource,
+  policy: OutlinePolicy = BASELINE_OUTLINE_POLICY,
 ): OutlineOutcome {
   const target = request.target
 
-  // ① 求值版本（A12）
-  if (!structurallyEqual(request.keyAtPick, currentKey)) {
+  // ① 求值版本（A12）—— 政策点 ②（O2）：'draw' 时**跳过**本判定（= legacy 行为）。
+  if (policy.stalePickAtOutline === 'suspend' && !structurallyEqual(request.keyAtPick, currentKey)) {
     return {
       ok: false,
       skip: Object.freeze({
@@ -270,11 +445,81 @@ export function planOutline(
     if (target.cell === undefined) {
       return { ok: false, skip: Object.freeze({ kind: 'incomplete-target' as const, detail: 'cell 目标缺 cell 坐标' }) }
     }
+    const cell = Object.freeze(target.cell)
+
+    // 该格的世界空间原点（格角）。缺它 ⇒ 格不在当前网格里 —— 那是 missing-geometry，
+    // 与"格在但几何没了"（下面那条）是两件不同的事（见 `cellOriginOf` 的说明）。
+    const origin = source.cellOriginOf?.(target.objectId, cell)
+    if (source.cellOriginOf !== undefined && origin === undefined) {
+      return {
+        ok: false,
+        skip: Object.freeze({
+          kind: 'missing-geometry' as const,
+          detail: `对象 ${target.objectId} 的当前网格里没有格 (${cell.join(',')})`,
+        }),
+      }
+    }
+
+    const quads = source.cellQuadsOf?.(target.objectId, cell)
+
+    // ── 政策点 ①（O1/O3 的兜底盒）──
+    // `undefined` = 该格无几何；空数组 = "有几何记录但没有面"（合法输入下不该出现，
+    // 但两者的处置在**下面**是同一条 —— 没有面就画不出轮廓，故都走政策）。
+    // 分支只有这一个，所以"画不画兜底盒"在整个代码库里**只有一处**判定。
+    if (quads === undefined || quads.length === 0) {
+      if (policy.cellWithoutQuads === 'none') {
+        return {
+          ok: false,
+          skip: Object.freeze({
+            kind: 'missing-geometry' as const,
+            detail: `对象 ${target.objectId} 的格 (${cell.join(',')}) 无四边形几何（政策 cellWithoutQuads='none'：不画兜底盒）`,
+          }),
+        }
+      }
+      // 基线（legacy 行为）：退化盒。原点可用时用**真实**格角，否则退回以格坐标为中心
+      // —— 后者只在调用方没提供 `cellOriginOf` 时发生（如纯域测试），且与
+      // legacy `gridCenterWorld` 的坐标空间一致（格中心 = 角 + 0.5）。
+      const box = origin ?? [cell[0] - 0.5, cell[1] - 0.5, cell[2] - 0.5]
+      return {
+        ok: true,
+        plan: Object.freeze({
+          primitives: Object.freeze([
+            Object.freeze({
+              kind: 'cellBox' as const,
+              objectId: target.objectId,
+              cell,
+              /**
+               * 兜底盒的**角点**（世界空间）。
+               *
+               * 为什么显式写出来（而不是让呈现侧从 `cell` 自己算）：
+               * `cell` 是**网格下标**（`row 0 = 顶部`），而盒在世界空间 —— 从下标到世界
+               * 需要网格尺寸与翻转（`structureRowToWorldY`），那是适配层的知识。
+               * 让呈现侧自己算会把"坐标翻转"复制到第二个地方（#249 §19.2/A26 禁的形态）。
+               * 端口给了 `origin` 就用它；没给才退回"把格坐标当世界角"这一**纯域**约定。
+               */
+              origin: Object.freeze(box) as readonly [number, number, number],
+            }),
+          ]),
+          geometry: request.geometry,
+        }),
+      }
+    }
+
+    // 有四边形 ⇒ 逐格轮廓（legacy 的整格 quads 通道）。
+    // 无 origin 时退回零角（纯域调用方；呈现侧不得据此静默画错位置 —— 见上）。
     return {
       ok: true,
       plan: Object.freeze({
         primitives: Object.freeze([
-          Object.freeze({ kind: 'cellBox' as const, objectId: target.objectId, cell: Object.freeze(target.cell) }),
+          Object.freeze({
+            kind: 'cellQuads' as const,
+            objectId: target.objectId,
+            origin: Object.freeze(origin ?? [0, 0, 0]) as readonly [number, number, number],
+            quads: Object.freeze(quads.map((q) => Object.freeze({
+              materialIndex: q.materialIndex,
+              vertices: Object.freeze(q.vertices.map((v) => Object.freeze({ ...v }))),
+            }))),
+          }),
         ]),
         geometry: request.geometry,
       }),
@@ -310,11 +555,12 @@ export function planOutlines(
   requests: readonly OutlineRequest[],
   currentKey: EvaluationKey,
   source: OutlineGeometrySource,
+  policy: OutlinePolicy = BASELINE_OUTLINE_POLICY,
 ): Readonly<{ plans: readonly OutlinePlan[]; skipped: readonly OutlineSkip[] }> {
   const plans: OutlinePlan[] = []
   const skipped: OutlineSkip[] = []
   for (const r of requests) {
-    const out = planOutline(r, currentKey, source)
+    const out = planOutline(r, currentKey, source, policy)
     if (out.ok) plans.push(out.plan)
     else skipped.push(out.skip)
   }

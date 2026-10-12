@@ -34,6 +34,7 @@ import type {
   PresentationInputs,
 } from './evaluationKey'
 import type { InvalidationPlan } from './invalidationPlan'
+import { cellMapShapeOk } from './cellIdentity'
 import { err, missingTarget, ok, type DomainError, type Result } from '@/domain/errors'
 
 /**
@@ -120,6 +121,14 @@ export type SkipReason =
   | 'geometry-version-mismatch'
   | 'geometry-unavailable'
   | 'transform-shape-invalid'
+  /**
+   * 几何携带了逐格表，但其长度与三角形数不符（#299 P10e）。
+   *
+   * 单独一个 reason 而不是并进 `geometry-unavailable`：后者是"几何还没到"
+   * （可重试、属资源状态），本项是"格表算错了"（**实现缺陷**，重试不会好）。
+   * 把两者并起来会让一次真实的适配层回归表现为"资源还没加载完"。
+   */
+  | 'cell-map-shape-invalid'
 
 /**
  * 编译求值场景 → 绘制数据。
@@ -158,6 +167,15 @@ export function compileScene(
     }
     if (inputs.geometry.attributesOf(p.geometry.id) === undefined) {
       skipped.push({ objectId: p.objectId, reason: 'geometry-unavailable' })
+      continue
+    }
+    // **逐格身份的形状自检**（#299 P10e）：携带了格表却与三角形数不符 ⇒ 显式跳过。
+    // 为什么在**编译期**判而不是等拾取时才发现：拾取是异步的、可选的用户动作；
+    // 一次算错的格表若只表现为"偶尔点错格"，它永远不会被报出来。放在这里，
+    // 它变成编译结果里的一条**可断言**的 `skipped` 记录。
+    const attrs = inputs.geometry.attributesOf(p.geometry.id)!
+    if (!cellMapShapeOk(attrs.cellMap, attrs.triangleCount)) {
+      skipped.push({ objectId: p.objectId, reason: 'cell-map-shape-invalid' })
       continue
     }
     renderable.push(p)

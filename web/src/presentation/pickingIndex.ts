@@ -22,7 +22,9 @@
  */
 
 import type { CompiledScene, CompileGeneration, GeometryProvenance } from './compileScene'
-import type { EvaluationKey, GeometryId, MaterialDescriptor } from './evaluationKey'
+import type { CellRef, TriangleCellMap } from './cellIdentity'
+import { cellRefOfTriangle } from './cellIdentity'
+import type { EvaluationKey, GeometryAttributes, GeometryId, MaterialDescriptor } from './evaluationKey'
 import { structurallyEqual } from './evaluationKey'
 
 /**
@@ -40,10 +42,32 @@ export type BatchHitRef = Readonly<{
   primitiveIndex?: number
 }>
 
-/** 解析结果：**对象身份 + 元素身份 + 求值版本**。 */
+/** 解析结果：**对象身份 + 元素身份 + 格身份 + 求值版本**。 */
 export interface PickResolution {
   readonly objectId: string
   readonly elementId?: string
+  /**
+   * **格身份**（#299 P10e 逐格身份层）。
+   *
+   * ## 为什么它是**第三个**身份维度，而不是 `elementId` 的一种
+   *
+   * | 维度 | 语义 | 由谁判过期 |
+   * |---|---|---|
+   * | `objectId` | 命中了哪个**对象**（一结构一对象） | 求值键（`structurallyEqual`） |
+   * | `elementId` | 命中了对象的哪个**拓扑元素**（顶点/边/面） | `topologyVersion` |
+   * | `cell` | 命中了对象**内部**的哪一格 + 哪个面 | 求值键（格随内容变） |
+   *
+   * 三者的失效条件不同：拓扑版本变会使元素引用失效，而格坐标在**同一份内容**下
+   * 永远有效（它是内容的坐标，不是索引 —— 见 `cellIdentity` 的三层身份说明）。
+   * 把格并进 `elementId` 会让"命中了哪个元素"这一个问题同时问两件不同的事。
+   *
+   * ## `undefined` 的语义（**显式**，不是"第 0 格"）
+   *
+   * 该几何**不是**逐格来源（A18 自造夹具、纯网格元素），或调用方未提供
+   * `primitiveIndex`。这与"提供了但越界"必须区分：后者返回 `null`
+   * （表与 GPU 状态不一致 ⇒ 真实缺陷，必须暴露而不是回落）。
+   */
+  readonly cell?: CellRef
   readonly geometryId: GeometryId
   readonly geometryVersion: string
   readonly material: MaterialDescriptor
@@ -61,6 +85,23 @@ export class PickIndex {
   private readonly byBatch = new Map<number, GeometryProvenance[]>()
   private readonly byObject = new Map<string, GeometryProvenance>()
   private readonly byBatchMaterial = new Map<number, MaterialDescriptor>()
+  /**
+   * 几何身份 → **逐三角形格表**（#299 P10e）。
+   *
+   * ## 为什么从 `CompiledScene` 自己索引，而不是让调用方注入
+   *
+   * 格表是**几何**的属性（见 `evaluationKey#GeometryAttributes.cellMap`），而
+   * `CompiledScene.payloads` 本就已经携带了每个批次的属性（共享路径在
+   * `payload.attributes`、逐成员路径在 `instance.attributes`）—— 它是**编译产物的一部分**，
+   * 不是外部资源。让调用方再注入一份会造出"两份格表可能不一致"的形态，
+   * 而那种不一致的表现是"点选偶尔点到邻居格"（静默错误，最难查）。
+   *
+   * ## 为什么按**几何身份**索引（而不是按批次/槽位）
+   *
+   * 同一份几何可以落在多个批次（不同材质 → 不同兼容性键 ⇒ 不同批次），而它的
+   * 三角形序与格映射**逐位相同**（同内容）。按几何身份索引使"共享几何"天然只有一份表。
+   */
+  private readonly cellMapByGeometry = new Map<GeometryId, TriangleCellMap>()
   private readonly generation: CompileGeneration
 
   constructor(private readonly scene: CompiledScene) {
@@ -71,7 +112,25 @@ export class PickIndex {
       else list.push(p)
       this.byObject.set(p.objectId, p)
     }
-    for (const payload of scene.payloads) this.byBatchMaterial.set(payload.batchIndex, payload.material)
+    for (const payload of scene.payloads) {
+      this.byBatchMaterial.set(payload.batchIndex, payload.material)
+      this.indexCellMap(payload.geometry.id, payload.attributes)
+      for (const instance of payload.instances) this.indexCellMap(payload.geometry.id, instance.attributes)
+    }
+  }
+
+  /**
+   * 登记一份格表（**先登记者优先**，且只在形状自检通过时登记）。
+   *
+   * 形状自检在这里**再判一次**（`compileScene` 已判过）：`PickIndex` 也能被直接构造
+   * （e2e 探针、诊断脚本），而"格表与三角形数不符"必须在那条路径上同样不可用 ——
+   * 否则拾取会按错位的表解格，而错位是**静默**的（解出来的格坐标看起来完全合法）。
+   */
+  private indexCellMap(geometryId: GeometryId, attrs: GeometryAttributes | undefined): void {
+    if (attrs?.cellMap === undefined) return
+    if (attrs.cellMap.length !== attrs.triangleCount) return
+    if (this.cellMapByGeometry.has(geometryId)) return
+    this.cellMapByGeometry.set(geometryId, attrs.cellMap)
   }
 
   /** 当前世代。 */
@@ -80,11 +139,26 @@ export class PickIndex {
   }
 
   /**
+   * 几何身份 → 格表（**诊断/测试**用；拾取路径请用 `resolve` 的 `cell` 字段）。
+   *
+   * 单独暴露的理由：e2e 与 vitest 需要断言"这张表**确实**按几何身份到达了拾取层"，
+   * 而不只是"某次 resolve 恰好带出了 cell" —— 前者覆盖共享几何的合并语义，
+   * 后者只覆盖一条路径。
+   */
+  cellMapOf(geometryId: GeometryId): TriangleCellMap | undefined {
+    return this.cellMapByGeometry.get(geometryId)
+  }
+
+  /**
    * 解析一次批次命中。
    *
-   * 返回 `null` 的两种情况都**不得**静默糊过去：
+   * 返回 `null` 的四种情况都**不得**静默糊过去：
    *  - `generation` 与本次编译不符 ⇒ 这是**过期画面**上的拾取（A12）；
-   *  - 批次内无该槽位 ⇒ 批次表与 GPU 状态不一致（真实缺陷，必须暴露）。
+   *  - 批次内无该槽位 ⇒ 批次表与 GPU 状态不一致（真实缺陷，必须暴露）；
+   *  - 批次无材质 ⇒ 同上；
+   *  - **几何带格表但 `primitiveIndex` 越界**（#299）⇒ 格表与 GPU 状态不一致 ——
+   *    回落成 `cell: undefined` 会把"点到了界外三角形"伪装成"这个对象不可逐格拾取"，
+   *    而前者是缺陷、后者是设计状态。两者必须可区分，故此处返回 `null`。
    */
   resolve(hit: BatchHitRef): PickResolution | null {
     if (hit.generation !== this.generation) return null
@@ -94,6 +168,29 @@ export class PickIndex {
     if (entry === undefined) return null
     const material = this.byBatchMaterial.get(hit.batchIndex)
     if (material === undefined) return null
+
+    const map = this.cellMapByGeometry.get(entry.geometryId)
+    // 越界 ⇒ 真实缺陷（见上）。注意"没给 primitiveIndex"与"给了越界值"不同：
+    // 前者 `cellRefOfTriangle` 返回 null 而 `hit.primitiveIndex === undefined`，
+    // 故用显式判定把两者分开 —— 不能让 `undefined` 落进同一条 `null` 分支。
+    if (map !== undefined && hit.primitiveIndex !== undefined) {
+      const cell = cellRefOfTriangle(map, hit.primitiveIndex)
+      if (cell === null) return null
+      return {
+        objectId: entry.objectId,
+        elementId: entry.elementId,
+        cell,
+        geometryId: entry.geometryId,
+        geometryVersion: entry.geometryVersion,
+        material,
+        keyAtHit: this.scene.key,
+        generation: this.generation,
+        batchIndex: hit.batchIndex,
+        instanceSlot: hit.instanceSlot,
+        primitiveIndex: hit.primitiveIndex,
+      }
+    }
+
     return {
       objectId: entry.objectId,
       elementId: entry.elementId,
