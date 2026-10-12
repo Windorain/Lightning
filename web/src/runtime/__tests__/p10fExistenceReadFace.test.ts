@@ -233,8 +233,6 @@ describe('P10f B′ · ④ `hasLoadedDocument` 必须可被 Vue 追踪（否则�
    * ③ 反空洞真：把这一读删掉，判据必须判红（本文件用**合成源文本**验证判据本身有效，
    *    不修改真树 —— 与 `retirementRegistry` 的负对照同一手法）。
    */
-  const CONTEXT_REL = 'src/runtime/context.ts'
-
   function methodBodyOf(fromDir: string): string {
     const text = fs.readFileSync(path.join(fromDir, 'runtime', 'context.ts'), 'utf8').replace(/\r\n/g, '\n')
     // 去注释后取 `hasLoadedDocument(): boolean { … }` 的方法体
