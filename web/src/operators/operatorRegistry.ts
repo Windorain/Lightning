@@ -49,8 +49,11 @@ export class OperatorRegistry {
       return
     }
 
-    const doc = ctx.getDoc().value
-    const snap = doc ? ctx.log.snapshot(ctx) : undefined
+    // #301 P10f C′1：存在性判定走 GF-15 读面（B′ 已建立的不变量）。
+    // 原写法 `const doc = …; doc ? snapshot : undefined` 只用"有没有文档"这一位事实
+    // ⇒ 换成读面后残留归零。⚠️ 下方 `:57`/`:59` 的 `.clone()` 是 **N10**
+    // （受控双轨，Lead 裁决 (b)：legacy 快照在撤销路径存续，归一归 P11）—— 本批**不动**。
+    const snap = ctx.hasLoadedDocument() ? ctx.log.snapshot(ctx) : undefined
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
       if (op.flagUndo && ctx.hasLoadedDocument()) {
@@ -80,8 +83,8 @@ export class OperatorRegistry {
       return OP_RESULT.CANCELLED
     }
 
-    const doc = ctx.getDoc().value
-    const snap = doc ? ctx.log.snapshot(ctx) : undefined
+    // #301 P10f C′1：同 `:52`（存在性走 GF-15 读面）。
+    const snap = ctx.hasLoadedDocument() ? ctx.log.snapshot(ctx) : undefined
 
     const resolvedProps: OperatorProperties = props ?? {}
     if (regionId) resolvedProps._regionId = regionId

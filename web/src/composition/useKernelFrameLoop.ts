@@ -39,7 +39,6 @@
 import { onBeforeUnmount, onMounted } from 'vue'
 import type { Context } from '@/runtime/context'
 import { createFrameClock, type FrameClock } from './kernelRuntime'
-import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
 
 /**
  * 把一个外壳的内核会话接上帧时钟。
@@ -75,27 +74,26 @@ export function useKernelFrameLoop(ctx: Context): FrameClock | null {
    */
   kernel.bindFrameSource({
     count: () => {
-      // #301 P10f B′：此处原有一个 `ctx.getDoc().value?.frameCount ?? 0` 的**死分支**，
-      // 已删除（Lead 裁决 (a)）。它测的是 `kernel.document() !== undefined`，而该值
-      // **恒为真**（`openDocument` 无条件建文档条目、`closeDocument` 生产零调用）
-      // ⇒ 那一行**永不执行**。
+      // ── D8 修复（#301 P10f C′1） ──────────────────────────────────────────
       //
-      // ⚠️ 删掉它**不是**在说"这里已经正确"，而是把一处**掩盖缺口的假守卫**移开：
-      // 该分支的注释原本声称"旧文档只在**装配未覆盖该文档形态**时兜底（能力不回退）"，
-      // 但守卫测的是"文档存在"、**不是"装配成功"** ⇒ 装配失败时仍走内核分支，
-      // 返回**空/陈旧**帧轴（0）而不是 legacy 的 N 帧。**那处兜底从未生效。**
+      // 守卫从"**文档存在**"改为"**装配成功**"（GF-16），且分流收敛到
+      // `ctx.frameDeclarations()` —— 与 `StatusBar.vue` **读同一个函数**。
       //
-      // 缺陷本体（装配失败 ⇒ 帧数 0）与"装配成功"读面的缺口已登记为 **D8 / GF-16**，
-      // 修复与 `StatusBar.vue` 的同类替换同批归 C′。本批只做零行为变化的死分支删除。
-      const kdoc = kernel.document()
-      if (kdoc === undefined) return 0
-      return axisFrameCount(kdoc.content.frameAxis)
+      // 原实现（B′ 已把死分支删成 `return 0`）测的是 `kernel.document() !== undefined`，
+      // 而该值**恒为真** ⇒ 装配失败时返回**空帧轴（0）**，而注释声称会回落 legacy。
+      // **那处回落从未生效**（登记 D8）。
+      //
+      // ## 为什么必须收敛到一处（而不是在这里再写一遍 if）
+      //
+      // D8 的原形态就是"两处各自判断、判据不同"：帧循环问"文档存在吗"（恒真 ⇒ 0），
+      // 状态栏直读 legacy（⇒ N）⇒ 同一时刻两个读数**不一致**。
+      // 收敛成一处分流后，"不一致"在结构上不可能发生。
+      //
+      // 回落分支由 `p10fFrameDeclarations.test.ts` 用**装配失败注入**证明其真生效
+      // （否则本修复与原来的死守卫无法区分）。
+      return ctx.frameDeclarations().count
     },
-    durationsMs: () => {
-      const kdoc = kernel.document()
-      if (kdoc === undefined) return []
-      return [...frameDurationsMs(kdoc.content.frameAxis)]
-    },
+    durationsMs: () => [...ctx.frameDeclarations().durationsMs],
   })
 
   const clock = createFrameClock({ session: kernel })

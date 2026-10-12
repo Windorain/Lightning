@@ -284,9 +284,10 @@ export class KernelSession {
         durationsMs: () => frameDurationsMs({ frames: content.frameAxis.frames }),
       }
     }
-    // 采纳即"已装载"（本批 GF-15）：这一行与被替换的旧文档**无关**，
-    // 它只记录"内核现在承载的是被显式装配过的内容"。
+    // 采纳即"已装载"（A′ GF-15）+ "已承载装配产物"（C′1 GF-16）。
+    // 两个标记**分别**置位：前者是存在性，后者是"内核里的就是这份文档"。
     this.markLoaded()
+    this.markContentAdopted()
     this.subscribeContext()
   }
 
@@ -306,6 +307,14 @@ export class KernelSession {
    * 「字段缺席 ≠ 空值」同一口径。
    */
   private adoptedDocumentId: string | null = null
+
+  /**
+   * **内核是否承载"装配成功"的内容**（#301 P10f C′1；GF-16）。
+   *
+   * 与 `adoptedDocumentId` **并列而非合并**（理由见 `hasAdoptedContent`）：
+   * 前者是"有文档"，后者是"内核里的就是那份文档"。D8 的本质是把两者当成了一件事。
+   */
+  private contentAdopted = false
 
   /**
    * **文档是否已装载**（#301 P10f A′；GF-15 读面）。
@@ -362,12 +371,72 @@ export class KernelSession {
   }
 
   /**
+   * **内核是否承载"装配成功"的内容**（#301 P10f C′1；**GF-16** 读面）。
+   *
+   * ## 它与 `hasLoadedDocument()`（GF-15）的区别 —— 两个**不同**的事实
+   *
+   * | 读面 | 回答的问题 | 由谁置位 |
+   * |---|---|---|
+   * | `hasLoadedDocument()`（GF-15） | "用户**有**一份文档吗"（存在性） | `Context.setDocument`（写 legacy 时镜像） |
+   * | `hasAdoptedContent()`（GF-16） | "内核承载的**就是**这份文档的装配产物吗"（装配成功） | `adoptDocument`（**仅**装配成功时） |
+   *
+   * 两者**不等价**，而 D8 正是它们之间的那段缝：
+   *
+   * ```
+   * ctx.setDocument(doc)            → GF-15 = true   （存在性：有文档）
+   * adoptLoadedDocument(...)        → 可能**失败**（形态不被支持）
+   *   成功 ⇒ adoptDocument ⇒ GF-16 = true
+   *   失败 ⇒ 什么都不做   ⇒ GF-16 = **false**，但 GF-15 仍是 true
+   * ```
+   *
+   * ⇒ 装配失败时内核文档是**构造期的空文档**（或上一次的陈旧文档），
+   * 而 `hasLoadedDocument()` 无法区分 —— 这就是 GF-16 存在的理由。
+   *
+   * ## D8：那个缺口为什么表现为"帧数 0"
+   *
+   * `composition/useKernelFrameLoop` 的帧源原本这样守卫：
+   *
+   * ```ts
+   * const kdoc = kernel.document()
+   * if (kdoc !== undefined) return axisFrameCount(kdoc.content.frameAxis)   // ← 恒走这里
+   * return ctx.getDoc()...                                                  // ← 永不执行
+   * ```
+   *
+   * 它测的是**文档存在**（恒真），**不是装配成功** ⇒ 装配失败时返回**空帧轴（0）**，
+   * 而注释声称"装配未覆盖时回落 legacy（能力不回退）"—— **那处回落从未生效**。
+   *
+   * ⇒ 本读面是那处回落的**正确守卫**（见 `useKernelFrameLoop` 的 D8 修复）。
+   *
+   * ## 为什么不用 `hasLoadedDocument()` 兼任
+   *
+   * 兼任会让"装配失败"与"未装载"重新混为一谈，而那正是 D8 的成因。
+   * 与 `domain/cellContent` 判据 3「字段缺席 ≠ 空值」同一口径：
+   * 两个事实就该有两个读面。
+   */
+  hasAdoptedContent(): boolean {
+    return this.contentAdopted
+  }
+
+  /**
+   * 标记"内核已承载装配产物"（**仅**由 {@link adoptDocument} 调用）。
+   *
+   * ⚠️ 刻意**不**被 `markLoaded` 调用：`markLoaded` 表达存在性，
+   * 而本标记表达"装配真的成功"。让前者顺带置后者，D8 会原样复发。
+   */
+  private markContentAdopted(): void {
+    this.contentAdopted = true
+  }
+
+  /**
    * 标记"未装载"（#301 P10f A′）：文档被置空 / 打开失败 / 工作区重置。
    *
    * **不**关闭内核文档 datablock（理由见 {@link hasLoadedDocument}）。
    */
   markUnloaded(): void {
     this.adoptedDocumentId = null
+    // GF-16 必须**一起**清掉：卸载后"内核里的就是那份文档"不再成立
+    // （内核 datablock 仍在，但它承载的是上一次的产物）。
+    this.contentAdopted = false
   }
 
   /** 重建上下文订阅（`adoptDocument` 换了 Editor 实例，故订阅必须重建）。 */

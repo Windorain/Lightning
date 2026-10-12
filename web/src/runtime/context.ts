@@ -33,6 +33,10 @@ import { asReadOnlyDiagnostics } from '@/application/diagnostics'
 import type { ScreenRoot, RegionNode } from '@/runtime/screenRoot'
 import { REGION } from '@/runtime/regionIds'
 import type { KernelSession } from '@/runtime/kernelSession'
+// #301 P10f C′1：帧声明的**判定**提成纯函数（D8 的判据必须能注入装配失败，
+// 而 `Context` 的外壳六件套不该进测试）—— 本层只负责"取事实、交结果"。
+import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
+import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 
 function embedUnavailable(name: string): never {
@@ -238,6 +242,109 @@ export class Context {
     const kernel = this.kernel
     if (kernel === null) return legacyPresent
     return kernel.hasLoadedDocument()
+  }
+
+  /**
+   * **内核是否承载"装配成功"的内容**（#301 P10f C′1；**GF-16** 读面）。
+   *
+   * ## 为什么需要它（D8 的根因）
+   *
+   * `hasLoadedDocument()`（GF-15）回答"**有**一份文档吗"；本读面回答
+   * "内核里的**就是**那份文档吗"。两者不等价，而 D8 正是那段缝：
+   *
+   * ```
+   * setDocument(doc)      → GF-15 = true    （有文档）
+   * adoptLoadedDocument   → 可能**失败**（内核不支持该形态，如实降级）
+   *   成功 ⇒ GF-16 = true
+   *   失败 ⇒ GF-16 = **false**，但 GF-15 仍为 true
+   * ```
+   *
+   * 装配失败时内核文档是**构造期的空文档**，故任何"读内核"的消费者会读到
+   * **空**（而不是 legacy 的真实内容）—— 而 legacy 照常渲染，**不报错**。
+   * 帧源那条路径上，它表现为"帧数变 0"（D8）。
+   *
+   * ## 为什么内核缺席时回落 `false`（与 `hasLoadedDocument` 不同）
+   *
+   * `hasLoadedDocument` 在内核缺席时回落 `main.doc`（存在性在 legacy 侧总能回答）；
+   * 而"装配成功"**在内核缺席时无法回答** —— 没有内核就没有装配。
+   * ⇒ 回落 `false`，使消费者走各自的 legacy 兜底分支（那正是"能力不回退"）。
+   *
+   * ⚠️ 刻意读 `this.main.doc` 之外**不引入**新写入面：本读面只读内核的
+   * 装配标记（`markContentAdopted` 仅由 `adoptDocument` 调用）。
+   */
+  hasAdoptedContent(): boolean {
+    const kernel = this.kernel
+    if (kernel === null) return false
+    return kernel.hasAdoptedContent()
+  }
+
+  /**
+   * **帧声明的唯一读取面**（#301 P10f C′1；D8 修复的落点）。
+   *
+   * ## 为什么必须是"一个"读面（而不是两处各写一遍同样的分流）
+   *
+   * 帧数有**两个**生产消费者：
+   *  - `composition/useKernelFrameLoop` 的 `FrameSource`（驱动帧时钟）；
+   *  - `workbench/components/StatusBar.vue`（显示"第 N 帧 / 共 M 帧"）。
+   *
+   * D8 的原形态正是"两处各自判断、判据不同"：帧循环问"文档存在吗"（恒真 ⇒ 读到 0），
+   * 而状态栏直读 legacy（读到 N）⇒ **同一时刻两个读数不一致**
+   * （#249 §19.9 诊断一致性要防的形态）。
+   *
+   * ⇒ 收敛成一处分流：**只要"装配成功"就以内核为权威，否则回落 legacy**。
+   * 两个消费者读同一个函数，于是"不一致"在结构上不可能发生。
+   *
+   * ## `source` 字段：让"回落是否发生"可观测
+   *
+   * 返回哪个来源是**可判定的**事实，不是内部实现细节 —— 诊断与测试都要能问
+   * "这一刻用的是内核还是 legacy"。把它藏起来会让 D8 那类缺陷无法被观测
+   * （原缺陷之所以活了很久，正是因为"读了 0"看起来只是一个正常数值）。
+   */
+  frameDeclarations(): {
+    readonly count: number
+    readonly durationsMs: readonly number[]
+    readonly source: 'kernel' | 'legacy'
+  } {
+    // ⚠️ **响应式依赖**（与 `hasLoadedDocument` 同一取舍，B′ 实测过代价）：
+    // 消费者里有 `.vue` 的 `computed`（`StatusBar.vue`），而模板重渲染只跟随
+    // 渲染期读到的响应式依赖。内核侧的装配标记是**普通字段**（Vue 追踪不到），
+    // 故这里先读一次 `main.doc`（`Ref`，且在**每一次**文档替换时变化）。
+    // 去掉这一读 ⇒ 装载后状态栏帧数不刷新（B′ 的 7 条 embed e2e 就是同型回归）。
+    const legacyDoc = this.main.doc.value
+    // 本方法只**取事实**；判定在纯函数里（理由：D8 的判据必须能注入装配失败，
+    // 而 `Context` 的外壳六件套不该进测试 —— 见 `runtime/frameDeclarations` 文件头）。
+    return resolveFrameDeclarations(this.kernelAdoptedFrames(), this.legacyFrames(legacyDoc))
+  }
+
+  /**
+   * 装配产物的帧声明；**`null` = 未装配成功**（GF-16）。
+   *
+   * ⚠️ 返回 `null` 而**不是** `{count: 0}`：两者语义不同 ——
+   * 前者是"没有装配产物可用"（⇒ 该回落 legacy），后者是"装配产物声明了 0 帧"
+   * （⇒ 内核权威，且 0 是真实答案）。把前者写成后者**就是 D8 的成因**。
+   */
+  private kernelAdoptedFrames(): { count: number; durationsMs: readonly number[] } | null {
+    const kernel = this.kernel
+    if (kernel === null) return null
+    if (!kernel.hasAdoptedContent()) return null
+    const kdoc = kernel.document()
+    if (kdoc === undefined) return null
+    const frames = kdoc.content.frameAxis.frames
+    return { count: axisFrameCount({ frames }), durationsMs: frameDurationsMs({ frames }) }
+  }
+
+  /** 旧文档的帧声明；`null` = 无旧文档。 */
+  private legacyFrames(
+    doc: RuntimeDocument | null,
+  ): { count: number; durationsMs: readonly number[] } | null {
+    if (doc === null) return null
+    const durations: number[] = []
+    for (let i = 0; i < doc.frameCount; i++) {
+      // `durationMs` 缺省按 0 如实给（与内核 `stripTimeline` 的回落同口径：
+      // 猜一个值会让"没声明时长"与"声明了 50ms"无法区分）。
+      durations.push(doc.frame(i)?.durationMs ?? 0)
+    }
+    return { count: doc.frameCount, durationsMs: durations }
   }
 
   /**
@@ -467,6 +574,31 @@ export class Context {
   getContentRefreshTick(): Ref<number> {
     return this.main.contentRefreshTick
   }
+
+  /**
+   * **文档身份计数**（#301 P10f C′1）：**只在换文档**时变（窄信号）。
+   *
+   * ## 为什么它不是 `getContentRefreshTick` 的别名（实测口径）
+   *
+   * | 信号 | 自增点 | 语义 |
+   * |---|---|---|
+   * | `getContentRefreshTick()` | `replaceDoc` **与** `requestContentRefresh` | "内容**可能**变了"（超集） |
+   * | `getDocumentRevision()` | **仅** `replaceDoc` | "**换了一份文档**"（窄） |
+   *
+   * N9 的 6 处消费者**不是同一种信号**（C′1 逐处实测）：
+   *  - `EmbedViewport.vue` 要的是**窄**的：换文档才重置相机自动初始化；
+   *  - `MaterialGallery` / `PropertyInspector` / `AnnotationEditorPanel` /
+   *    `TooltipEditorPanel` 要的是**宽**的（内容重读），原地编辑也要刷新
+   *    ⇒ 它们改用 `getContentRefreshTick()`；
+   *  - `WorkbenchViewport.vue` 要的是**跃变**（无→有），由 GF-15 的
+   *    `hasLoadedDocument()` 的 `false→true` 表达。
+   *
+   * ⇒ 三种事实、三种读面。把 6 处一律换成 tick 会让"编辑中机位跳回"回归。
+   */
+  getDocumentRevision(): Ref<number> {
+    return this.main.documentRevision
+  }
+
   /**
    * **已删除**（P10 #261，退役 B5 #1 `raw-authority-object` 的
    * `getCurrentFrameIndex` 条目）：旧实现返回 `Ref<number>` —— 一个**可写**的

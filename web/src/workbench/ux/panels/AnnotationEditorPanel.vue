@@ -48,7 +48,8 @@ function load(): void {
 watch(
   () => [
     props.ctx.getSelection().items.value,
-    props.ctx.getDoc().value,
+    // #301 P10f C′1（N9）：宽信号（内容重读）。
+    props.ctx.getContentRefreshTick().value,
     props.ctx.getContentRefreshTick().value,
     props.ctx.getHoveredAnnotationId().value,
   ] as const,

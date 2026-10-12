@@ -212,8 +212,8 @@ export function resolveRefs(ctx: Context, desc: PropertyDescriptor): readonly Pr
   }
 
   if (kind === 'document') {
-    const doc = ctx.getDoc().value
-    if (doc) refs.push({ owner: { kind: 'document', id: 'document' }, property: desc.id })
+    // #301 P10f C′1（N1）：纯存在性 ⇒ GF-15 读面（B′ 已证不变量）。
+    if (ctx.hasLoadedDocument()) refs.push({ owner: { kind: 'document', id: 'document' }, property: desc.id })
     return refs
   }
 

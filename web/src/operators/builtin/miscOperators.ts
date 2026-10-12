@@ -56,8 +56,13 @@ export const ToggleFramePlaybackOperator: OperatorType = {
   id: 'OPERATOR_TOGGLE_FRAME_PLAYBACK',
   label: '切换帧播放',
   poll(ctx) {
-    const doc = ctx.getDoc().value
-    return doc !== null && doc.frameCount > 1
+    // #301 P10f C′1（N1+N6）：存在性走 GF-15，帧数走**帧声明的唯一读取面**
+    // （`ctx.frameDeclarations()` 按 GF-16 分流：装配成功 ⇒ 内核，否则 ⇒ legacy）。
+    //
+    // 原写法 `const doc = ctx.getDoc().value; return doc !== null && doc.frameCount > 1`
+    // 有两处不同义风险：① 直读 legacy 帧数（装配成功后内核才是权威 —— 与 D8 同族）；
+    // ② `doc.frameCount` 与帧循环读到的内核帧轴可能不一致（D8 正是"两个读数"的形态）。
+    return ctx.hasLoadedDocument() && ctx.frameDeclarations().count > 1
   },
   exec(ctx) {
     // 播放状态归 `EditContext`（R-WK-03）⇒ 读当前值再翻转，经命令写回。
@@ -70,8 +75,9 @@ export const SetFramePlaybackOperator: OperatorType = {
   id: 'OPERATOR_SET_FRAME_PLAYBACK',
   label: '设置帧播放',
   poll(ctx) {
-    const doc = ctx.getDoc().value
-    return doc !== null && doc.frameCount > 1
+    // 同上（`ToggleFramePlaybackOperator` 的姊妹算子，判据必须一致 —— 否则两个
+    // 菜单项的可用性会在同一状态下给出不同答案，那本身就是一处不一致）。
+    return ctx.hasLoadedDocument() && ctx.frameDeclarations().count > 1
   },
   exec(ctx, props) {
     ctx.requireKernelSession().setPlaying(Boolean(props.playing))

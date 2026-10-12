@@ -278,11 +278,23 @@ onMounted(() => {
 })
 
 watch(
-  () => ctx.getDoc().value,
-  (doc, prev) => {
+  // #301 P10f C′1（N9）：这里要的是**跃变**信号（无文档 → 有文档），
+  // 由 GF-15 读面 `hasLoadedDocument()` 的 `false→true` 表达。
+  //
+  // ## 为什么单调计数器（tick / revision）**表达不出**它
+  //
+  // R-WK-08 的裁决原文把本处列为"单调计数器表达不出跃变"的实例：
+  // tick/revision 只告诉你"变过"，无从区分"无→有"与"有→有"/"有→无"。
+  // ⇒ 只有**布尔读面**能给出 (prev=false, now=true) 这一对。
+  //
+  // ⚠️ 因此 `prev` 语义必须保留（不能简写成 `if (now)`）—— 那会把"有→有"
+  // （文档**替换**）也当成"无→有"，而下方注释说明那会与 DRW 自己的文档订阅
+  // **竞争**（两条装载路径同时改 `loadStatus`）。
+  () => ctx.hasLoadedDocument(),
+  (now, prev) => {
     // 只在"从无到有"时重装：文档**替换**（有→有）由 DRW 自己的文档订阅处理，
     // 在这里再装一次会与它竞争（两条装载路径同时改 `loadStatus`）。
-    if (doc !== null && (prev === null || prev === undefined)) void drw.loadStructureAndResources()
+    if (now && !prev) void drw.loadStructureAndResources()
   },
 )
 /**

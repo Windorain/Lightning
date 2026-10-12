@@ -111,7 +111,9 @@ function selectCard(id: string) {
   selectedId.value = selectedId.value === id ? null : id
 }
 
-watch(() => ctx.getDoc().value, () => refresh(), { immediate: true })
+// #301 P10f C′1（N9）：材质面板要的是**宽**信号（内容重读）—— 原地编辑也要刷新
+// （`requestContentRefresh` 也自增 tick），故用 `getContentRefreshTick()`。
+watch(() => ctx.getContentRefreshTick().value, () => refresh(), { immediate: true })
 
 // ---- Animated thumbnails：统一时间 + 纯采样（#249 §19.3；退役 #11） ----
 //

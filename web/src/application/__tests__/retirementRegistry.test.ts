@@ -499,7 +499,9 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/operators/builtin/documentIoOperators.ts',
       'web/src/operators/builtin/exportOperators.ts',
       'web/src/operators/builtin/metaEditOperators.ts',
-      'web/src/operators/builtin/miscOperators.ts',
+      // #301 P10f C′1 核销：`miscOperators.ts` 最后两处（`:59`/`:73` 的
+      // `doc !== null && doc.frameCount > 1`）已换成 `hasLoadedDocument()` +
+      // `frameDeclarations()`（帧声明的唯一读取面）⇒ 不再命中 `getDoc`。
       'web/src/operators/builtin/moveTranslate.ts',
       'web/src/operators/builtin/sdeOperators.ts',
       'web/src/operators/builtin/wikiOperators.ts',
@@ -515,11 +517,12 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/shared/viewport/useViewportRuntime.ts',
       'web/src/workbench/WorkbenchRoot.vue',
       'web/src/workbench/components/ExportWorkspace.vue',
-      // P10b（#282）实测补登：本文件 `:281` 的 `watch(() => ctx.getDoc().value, …)`
-      // （"文档后到时重装视口"）是真依赖，此前漏登记。
-      // 扫描器实测抓出（"消费者清单必须完整"断言）—— 漏消费者的后果是
-      // phase flip 永远红，而那个红不会自己报出漏了谁。
-      'web/src/workbench/components/WorkbenchViewport.vue',
+      // #301 P10f C′1 核销两处：
+      //  - `WorkbenchViewport.vue`：`:281` 的 `watch(() => ctx.getDoc().value, …)`
+      //    已换成 `hasLoadedDocument()` 的**跃变**读面（`false→true`）——
+      //    单调计数器（tick/revision）表达不出跃变（R-WK-08 裁决原文点名此例）。
+      //  - `PropertyInspector.vue`：`:61` 的 watch 依赖项已换成
+      //    `getContentRefreshTick()`（宽信号：内容重读）。
       'web/src/workbench/components/StatusBar.vue',
       'web/src/workbench/document/pipeline.ts',
       'web/src/workbench/document/sources/wikiDataPageSource.ts',
@@ -530,7 +533,8 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       // （`ctx.getDoc()` 读 `RuntimeDocument`）。这是**双轨暂存**的一部分，
       // 归口 P2→P10 退出（见 `composition/seams.ts` 的同名登记）。
       'web/src/editors/workbench-rna.ts',
-      'web/src/workbench/ux/PropertyInspector.vue',
+      // #301 P10f C′1 核销：`PropertyInspector.vue:61` 的 watch 依赖项已换成
+      // `getContentRefreshTick()`（宽信号：内容重读）⇒ 不再命中 `getDoc`。
       // **Vue 模板属性里的表达式**也是真依赖：`WorkbenchRoot.vue` 的
       // `<div v-else-if="workspace === 'wiki' && ctx.hasLoadedDocument()" …>`
       // 曾在模板里读 `ctx.getDoc().value`，B′ 已换成 GF-15 读面。
@@ -1503,7 +1507,18 @@ describe('扫描器词法：注释与字符串不算残留，但 `${}` 内的代
     expect(refs('composition/seams.ts'), 'seams.ts 只有散文提及，不得算消费者').toBe(0)
     // 而这两个文件**确实**在代码里调用 ⇒ 必须 > 0（反空洞真）
     expect(refs('editors/workbench-rna.ts'), 'workbench-rna.ts 是真消费者').toBeGreaterThan(0)
-    expect(refs('workbench/ux/PropertyInspector.vue'), 'PropertyInspector.vue 是真消费者').toBeGreaterThan(0)
+    // ⚠️ #301 P10f C′1 更新：`PropertyInspector.vue` 曾是真消费者（`:61` 的 watch
+    // 依赖项 `getDoc().value`），C′1 已把它换成 `getContentRefreshTick()`（宽信号）
+    // ⇒ 不再是消费者。本断言随之**换到**一个仍真调用的文件上，
+    // 否则这条"反空洞真"会因对象消失而失去意义（判据本身不能空转）。
+    expect(refs('editors/workbench-rna.ts'), '换用同一批仍真调用的文件').toBeGreaterThan(0)
+    expect(refs('context/queries.ts'), 'queries.ts 仍是真消费者（N3/N4 归 C′2）').toBeGreaterThan(0)
+    // 且**必须**保留一条"已核销的旧消费者现在为 0"的断言 —— 否则"核销"这件事
+    // 没有任何判据在管（本条正是"同批改判据"的落点）。
+    expect(
+      refs('workbench/ux/PropertyInspector.vue'),
+      'PropertyInspector.vue 已核销（不再是消费者）；若此处 > 0 说明 C′1 的替换被回退',
+    ).toBe(0)
   })
 })
 
