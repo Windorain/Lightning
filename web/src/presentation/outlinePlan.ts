@@ -259,8 +259,7 @@ export interface OutlineGeometrySource {
  * 这两个字段是**仅有的**政策点。任何"顺手再放宽一点"的改动都应新增一个具名字段，
  * 而不是在 `planOutline` 里加分支 —— 政策点数量本身就是可审的。
  */
-export interface OutlinePolicy {
-  /**
+export interface OutlinePolicy {  /**
    * **待裁决项 ①**：整格目标**无四边形几何**时，画不画 1×1×1 兜底盒。
    *
    * | 取值 | 行为 | 来源 |
@@ -300,6 +299,15 @@ export interface OutlinePolicy {
    */
   readonly stalePickAtOutline: 'suspend' | 'draw'
 }
+
+/**
+ * 政策值的**具名别名**（供消费者在签名里引用而无需重复写联合）。
+ *
+ * 单独一个别名的理由：`planOutline`/`planOutlines` 的 `policy` 形参用它，
+ * 于是"哪些调用点接受政策"可以靠 `grep EffectiveOutlinePolicy` 一次找全
+ * —— 而写内联联合类型时，找全调用点需要读每一处签名。
+ */
+export type EffectiveOutlinePolicy = OutlinePolicy
 
 /**
  * **当前基线政策** —— 两个字段各取"本批交付前的既成行为"，理由逐字段见

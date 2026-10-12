@@ -3,7 +3,26 @@ import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
 import { DRW } from '@/runtime/drw'
+import { PresenterSession } from '@/composition/presenterSession'
 import { sceneSeconds } from '@/composition/kernelRuntime'
+
+/**
+ * 时间零值（领域形状 `{frame,fps}`）。
+ *
+ * ## 为什么在这里就地声明（而**不** import `@/domain/animation#TIME_ZERO`）
+ *
+ * 本文件属**旧层**（`shared/`），而 `domain/` 是**新内核**。旧层 import 新内核
+ * 必须有登记（`kernel-legacy-isolation` 的 `APPROVED_LEGACY_TO_KERNEL_EDGES`）——
+ * 本批实测：加一条为取"时间零值"而生的旧→新依赖，被闸门正确判红。
+ *
+ * 而这里需要的东西**只是一个零值字面量**（`{frame: 0, fps: 20}`），
+ * 为它开一条迁移边是本末倒置：那条边会长期存在，而"零值"根本不是内核能力。
+ * ⇒ 就地声明，与 `domain/animation` 的初值同形（`fps: 20` = 1 MC tick/帧，
+ * 见 `DEFAULT_WORLD_FRAME_DWELL_MS` 的同源口径）。
+ *
+ * 这条选择本身是可断言的：`e2e`/单测里"无会话视口退化为静态第一帧"的行为不变。
+ */
+const ZERO_TIME = Object.freeze({ frame: 0, fps: 20 })
 import type { ViewerPreferences } from '@/viewer/preferences'
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
 
@@ -95,6 +114,47 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   vpSlot.outlinePass = drw.outlinePass
 
   /**
+   * **呈现会话**（#299 P10e 段②：`BatchedPresenter` 的生产接线）。
+   *
+   * ## 它替代的旧机制
+   *
+   * `BatchedPresenter` 在本批之前**零生产调用方**（只被 e2e 探针与单测驱动）
+   * —— 于是"内核场景 → `PresentationInputs` → `compileScene` → presenter → 屏幕"
+   * 这条链在**判定面上绿**、在**生产上不存在**（P10c/P10d 反复实测的缺口形态）。
+   * 本会话就是那个缺失的生产消费者。
+   *
+   * ## 与 DRW 的并存关系（**本批不切换渲染链**，显式登记）
+   *
+   * `DRW`（`blockMeshProvider` → legacy `blockMesh`）此刻仍是**画面**的生产路径；
+   * 本会话平行建立一套呈现产物并挂在**同一个** `contentGroup` 之外的结构层下。
+   * 两者并存是**有退出阶段的暂存**（登记于 `composition/seams.ts`：
+   * `presenter-surface-dual-track`），渲染链终切归 **#301（P10f 子批 C/D）**。
+   *
+   * ## 为什么现在不接管画面（本批刻意的边界）
+   *
+   * 接管需要"DRW 消费内核求值产物"的整体切换，而其前置（保存面迁移、
+   * 9 条未装配的加载路径、命令面扩展）尚未交付。按 #171 纪律**不做半成品替换**
+   * —— 切一半会让"交互或画面回退且无替代"。本批交付的是**新层在生产里真实运行**
+   * 且有其自己的可观测面（拾取逐格、纹理绑定、逐像素证据），
+   * 而不是"看起来切了但能力少一半"。
+   *
+   * ## 挂载位置：不挂进 `contentGroup`
+   *
+   * `contentGroup` 是 legacy 渲染路径的产物（`DRW` 往里放 `blockMesh` 的 Group）。
+   * 挂进去会让两条路径的对象混在同一棵子树里 —— 既无法分别观测，
+   * 也会让"谁画了这 24 个三角形"没有唯一答案。故本会话有**自己的**根对象，
+   * 由本 composable 加到视口场景（见下方 `onScopeDispose` 的对称释放）。
+   */
+  const presenterSurface = new PresenterSession({ scope: `viewport:${regionId}` })
+  vpSlot.presenterSurface = presenterSurface
+  onScopeDispose(() => {
+    // 卸载即释放（A19：视口关闭不泄漏 GPU 份额；两个视口共享源数据时
+    // 关其一不破坏另一方 —— 设备作用域按 region 分，故账天然分开）。
+    presenterSurface.dispose()
+    if (vpSlot.presenterSurface === presenterSurface) vpSlot.presenterSurface = null
+  })
+
+  /**
    * 帧变化 ⇒ 重绘该帧（P10 #261）。
    *
    * ## 为什么订阅在**这里**而不是每个视口各起一个帧时钟
@@ -150,6 +210,35 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   }
 
   let lastPresentedFrame = -1
+
+  /**
+   * 把**当前内核文档**喂给呈现会话（每帧调用；内部按内容身份去重）。
+   *
+   * ## 为什么用 try/catch 包住（而不是让它抛）
+   *
+   * 呈现会话是**平行**路径（本批不接管画面，见 `presenterSurface` 的说明）。
+   * 它失败时画面仍由 legacy 渲染链产出 —— 若让它抛出，一个呈现侧的问题会
+   * **连带打死**整条帧循环（画面与交互一起停）。那不是"失败关闭"，
+   * 而是"一个可降级的子系统拖垮不可降级的子系统"。
+   *
+   * ⇒ 这里**显式降级**并把错误记进诊断：`presenterSurfaceError` 是公开观测点，
+   * e2e 可断言"没有静默失败"。而**不**把异常吞成 `null` 让调用方猜。
+   */
+  const presenterErrors: string[] = []
+  const applyPresenterSurface = (): void => {
+    const doc = kernel?.document()
+    if (doc === undefined) return
+    try {
+      const out = presenterSurface.applyKernelDocument(doc, kernel?.playback().time ?? ZERO_TIME)
+      // 编译失败/跳过是**真实事实**，必须可见（不得静默当"画好了"）。
+      if (out.compileError !== null) presenterErrors.push(`compile:${out.compileError}`)
+      for (const s of out.skipped) presenterErrors.push(`kernel-skip:${s.objectId}:${s.reason}`)
+      for (const s of out.compileSkipped) presenterErrors.push(`compile-skip:${s.objectId}:${s.reason}`)
+    } catch (e) {
+      presenterErrors.push(`threw:${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   const frameClock = ctx.getFrameClock()
   if (frameClock && kernel) {
     const off = frameClock.onFrame((info) => {
@@ -169,6 +258,12 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
        */
       drw.textureCache.value?.setSceneTime(sceneSeconds(info.time))
       syncMirror()
+      // **呈现会话的每帧应用**（#299 P10e 段②）。
+      //
+      // 它按**内容身份**决定要不要重编（`applyIfChanged`）：机位变化不重编（A11），
+      // 换帧/换内容才重编。放在这里（而不是只在换帧时）的理由与纹理时间同一：
+      // 内容可能因通道取值、文档替换而变化，而那与"帧下标变了"是两件不同的事。
+      applyPresenterSurface()
       if (info.frameIndex === lastPresentedFrame) return
       lastPresentedFrame = info.frameIndex
       void drw.presentWorldFrame(info.frameIndex)
@@ -179,10 +274,12 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     // 首帧：进入视口时立刻呈现当前帧（不等第一次时钟 tick）。
     lastPresentedFrame = kernel.frameIndex()
     drw.textureCache.value?.setSceneTime(sceneSeconds(kernel.playback().time))
+    applyPresenterSurface()
   } else {
     // 无帧时钟（组件挂载早于外壳装配）：退化为"静态第一帧"，但仍要
     // 在每次渲染前同步一次镜像，使"装配稍后完成"能被观察到。
     syncMirror()
+    applyPresenterSurface()
   }
 
   return {
@@ -215,5 +312,19 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     frameCount: computed(() => kernel?.frameCount() ?? (ctx.getDoc().value?.frameCount ?? 0)),
     computed: drw.computed,
     materialLibrary: drw.textureCache,
+    /**
+     * 呈现会话（#299 P10e 段②）。
+     *
+     * 暴露它是为了**可观测**：e2e 要断言"内核链真的画出了批次、且逐格拾取可用"，
+     * 而那必须能从页面里读到这个会话（与 `outlinePass` 同一手法）。
+     */
+    presenterSurface,
+    /**
+     * 呈现会话的**错误累积**（公开观测点；空数组 = 无错误）。
+     *
+     * 为什么是"累积列表"而不是"最后一个错误"：并发/连续失败时后者会覆盖前者，
+     * 而"哪一类失败"才是诊断要的信息。上限截断避免无界增长（帧循环每帧都可能 push）。
+     */
+    presenterErrors,
   }
 }

@@ -92,6 +92,9 @@ export function createViewportManager() {
         orbitTarget: ref(null),
         cameraMainKey: cameraMainKeyForRegion(id),
         outlinePass: null,
+        // 呈现会话由 `useViewportRuntime` 装配时写入（#299 P10e 段②）；
+        // 与 `outlinePass` 同一口径：注册期没有，装配后有。
+        presenterSurface: null,
       }
       slots.set(id, slot)
       if (!activeId.value) activeId.value = id

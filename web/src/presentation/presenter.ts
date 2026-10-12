@@ -35,6 +35,7 @@
 
 import * as THREE from 'three'
 import type { BatchPayload, CompiledScene, CompileGeneration } from './compileScene'
+import type { BatchHitRef } from './pickingIndex'
 import type { GeometryAttributes, MaterialDescriptor } from './evaluationKey'
 import type { ContentIdentity } from './assetIdentity'
 import type { TextureBinding } from './textureBinding'
@@ -106,6 +107,13 @@ export interface PresenterOptions {
    * 材质 → 纹理绑定（#289 P10d）。缺省 = 全部材质无贴图。
    *
    * 键是 `MaterialDescriptor.id`（绘制批次按材质身份分批，故每个批次一个绑定）。
+   *
+   * ## 为什么它是**可变**字段（本类唯一可变配置）
+   *
+   * 纹理是**异步**到位的（五态链：未请求/加载中/可用/缺失/失败）。呈现器构造时
+   * 资源往往还没解码完，而绑定必须能随后更新 —— 否则"贴图到位了但画面不变"
+   * 会成为常态。更新入口是 {@link BatchedPresenter.setTextureBindings}，
+   * 它**同时**卸载受影响批次（理由见该方法的说明）。
    */
   textureBindings?: ReadonlyMap<string, TextureBinding>
 }
@@ -125,6 +133,14 @@ export class BatchedPresenter {
   private readonly geometryCache = new Map<string, CachedRef<THREE.BufferGeometry>>()
   private generation: CompileGeneration | null = null
   private restoreCount = 0
+  /**
+   * 上一次 `apply` 的场景（**供换纹理绑定时重放**）。
+   *
+   * 存整份引用而不只存"批次键集"：重放需要完整的 payloads 才能按新绑定重建材质。
+   * `CompiledScene` 是**可丢弃**的纯数据（契约 §6），故多持一份引用不构成新的权威
+   * —— 它随时可由 `compileScene` 重建。
+   */
+  private lastScene: CompiledScene | null = null
 
   private readonly stats: PresenterStats = {
     applies: 0,
@@ -198,6 +214,7 @@ export class BatchedPresenter {
   apply(scene: CompiledScene): void {
     this.stats.applies += 1
     this.generation = scene.generation
+    this.lastScene = scene
 
     const nextKeys = new Set<string>()
     for (const payload of scene.payloads) {
@@ -267,6 +284,133 @@ export class BatchedPresenter {
    */
   handleContextRestored(): void {
     this.restoreCount += 1
+  }
+
+  /**
+   * 更新材质 → 纹理绑定（#299 P10e）。
+   *
+   * ## 为什么必须**卸载并重建**受影响的批次，而不是只改 `options`
+   *
+   * 材质缓存键**含纹理内容身份**（见 `materialIdentityOf`：`mapKey` 进 id）。
+   * ⇒ 换一张贴图会改材质身份 ⇒ 旧批次缓存里的材质**不再是**正确的材质。
+   * 若只替换 `options.textureBindings` 而不重建，那些批次会继续用旧材质渲染
+   * —— 画面永远显示旧图，而那是 A28 负对照「按 URL 而不按内容版本缓存」的同族形态
+   * （用户改完贴图看不到变化）。
+   *
+   * ## 为什么重建**不能**留给"下一次 `apply`"
+   *
+   * `apply` 的批次复用键含**成员身份 + 几何身份**而**不含材质身份**
+   * （见 `batchKeyOf`/`canReuse`）—— 于是"换绑定后再 apply 同一个场景"
+   * 会被判为可复用，旧材质照样留着。更糟的是：若调用方此后不再 apply
+   * （内容确实没变，它没理由再 apply），画面会**停在卸载后的空状态**。
+   *
+   * ⇒ 本方法自己做完整的"卸载 → 按新绑定重建"，且只用**上一次 apply 的场景**
+   * （不要求调用方重新给）。于是"换绑定"这件事自洽，不依赖调用方的调用时机。
+   */
+  setTextureBindings(bindings: ReadonlyMap<string, TextureBinding>): void {
+    this.options.textureBindings = bindings
+    if (this.lastScene === null || this.generation === null) return
+    // 卸载全部批次后按新绑定重建（几何/材质缓存仍按内容身份复用，
+    // 故这里的重建只重建**批次对象**与新材质，不重算几何数值）。
+    for (const mounted of [...this.mounted.values()]) this.unmount(mounted)
+    this.remountLastScene()
+  }
+
+  /**
+   * 按当前绑定重建上一次 apply 的场景（`setTextureBindings` 的重建半边）。
+   *
+   * `generation` 在重建后必须**保持不变** —— 它是"这批绘制数据"的身份，
+   * 而换绑定改的是**材质**（呈现参数）而不是绘制数据的结构。
+   * 世代变了会让下游（拾取映射）整体失效，表现为"换张贴图后点不中方块了"。
+   */
+  private remountLastScene(): void {
+    const scene = this.lastScene
+    const generation = this.generation
+    if (scene === null) return
+    // 走 apply 的挂载逻辑，但保住世代（apply 会重算 generationOf；对同一 scene
+    // 它是同一值，故这里只需断言而不是修补）。
+    this.apply(scene)
+    if (this.generation !== generation) {
+      // 同场景重放不该改世代。真出了这种情况说明 `generationOf` 不再纯 ——
+      // 那是实现缺陷，**显式**暴露而不是静默接受（否则拾取会在换绑定后静默全失效）。
+      console.error(
+        `[presenter] setTextureBindings: 世代在重放同一场景时改变（${generation} → ${this.generation}）` +
+          '—— generationOf 不再是纯函数，拾取映射会静默失效',
+      )
+    }
+  }
+
+  /**
+   * 由一次真实 raycast 命中解出**批次内引用**（#299 P10e 交互面重建的桥）。
+   *
+   * ## 为什么这个桥必须在呈现器上（不能在外面自己走 `object.parent`）
+   *
+   * "命中的这个 `Object3D` 是哪个批次的第几个实例"是**呈现器自己**在挂载时建立的
+   * 对应关系（`userData.presentationBatch`，见 {@link batchTagOf}）。外面若自己
+   * 反查（例如按 `object.name` 解析或按父链位置猜），就会造出**第二份**批次映射 ——
+   * 而两份映射漂移的表现是"点选偶尔点到隔壁实例"（静默错误）。
+   *
+   * ## 为什么返回 `BatchHitRef` 而不是 `PickResolution`
+   *
+   * 呈现器**不持有** `PickIndex`（那是编译产物的派生视图，属调用方）。
+   * 它只回答它唯一有资格回答的问题："这次命中对应哪个批次/实例/三角形"。
+   * 解回对象与格身份由调用方经 `PickIndex.resolve` 做 —— 于是
+   * "批次序号不得当对象身份"这条纪律在**类型上**仍然成立（本方法的返回类型里
+   * 根本没有 `objectId`）。
+   *
+   * ## 三种挂载形态都要覆盖（这是本方法唯一的复杂度来源）
+   *
+   * | 形态 | 命中对象 | 槽位来源 |
+   * |---|---|---|
+   * | 实例化（`InstancedMesh`） | 批次对象本身 | `intersection.instanceId` |
+   * | 共享几何 + 独立变形（`Group` + N `Mesh`） | 子 `Mesh` | 子对象的 `userData.instanceSlot` |
+   * | 非同质（`Group` + 逐成员 `Mesh`/几何） | 子 `Mesh` | 同上 |
+   *
+   * 实例化路径**必须**读 `instanceId`：它没有"第几个子对象"这回事
+   * （只有一个网格 + N 个矩阵）。把两者混起来（例如一律读 `userData`）
+   * 会让实例化路径恒解到槽位 0 —— 10,000 个对象里只能点中第一个。
+   *
+   * `generation` 由呈现器当前世代填：调用方拿它去 `PickIndex.resolve`，
+   * 过期世代在那里被判 `null`（A12）。
+   */
+  batchHitOf(intersection: THREE.Intersection): BatchHitRef | null {
+    if (this.generation === null) return null
+    const obj = intersection.object
+    const tag = (obj.userData as { presentationBatch?: ReturnType<typeof batchTagOf> }).presentationBatch
+    if (tag === undefined) return null
+    const batchIndex = tag.batchIndex
+    if (typeof batchIndex !== 'number') return null
+
+    // 实例化：槽位来自 raycaster 的 `instanceId`（**不是** `userData` —— 见上）。
+    if (typeof intersection.instanceId === 'number') {
+      return {
+        generation: this.generation,
+        batchIndex,
+        instanceSlot: intersection.instanceId,
+        primitiveIndex: intersection.faceIndex ?? undefined,
+      }
+    }
+    // 非实例化：槽位写在子对象的标签里（挂载时逐个写入）。
+    const slot = tag.instanceSlot
+    if (typeof slot !== 'number') return null
+    return {
+      generation: this.generation,
+      batchIndex,
+      instanceSlot: slot,
+      primitiveIndex: intersection.faceIndex ?? undefined,
+    }
+  }
+
+  /**
+   * 遍历本呈现器的全部可命中对象（供调用方交给 `Raycaster.intersectObjects`）。
+   *
+   * 为什么不由呈现器自己持有 raycaster：raycaster 需要**相机**，而相机属视口
+   * （#249 §3.4：机位是视口事实）。呈现器只暴露"可命中的物体集合"，
+   * 于是"用哪个相机、从哪个 NDC 发射"完全留在视口侧 —— 同一份呈现产物
+   * 因此可以同时服务两个 Area 的拾取（A05）。
+   */
+  pickTargets(): readonly THREE.Object3D[] {
+    return [...this.mounted.values()].map((m) => m.object)
   }
 
   // ── 挂载 / 更新 / 卸载 ──
