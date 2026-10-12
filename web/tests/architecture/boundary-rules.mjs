@@ -105,6 +105,10 @@ export const LAYER_DESTINATIONS = [
     // 宿主产物适配（能力矩阵/manifest/宿主传输）。全部为**新增**适配器实现；
     // `util/` 等旧对应物仍不在执行面内（部分迁移）。
     // P7 登记：输入事实提取、输入事件绑定、外壳 DOM 事实。
+    // P10f/E（#301）登记：导出面端口的生产实现（离屏渲染端口 + 编码端口 + 设备端口
+    // + 纯 PNG 编码 + 作业装配）。它们属"适配器实现端口"（#249 §4 规则 4），
+    // 且是 `composition/seams.ts` 登记的 `export-borrows-live-viewport-dual-track`
+    // 缺口的**替代面**（原先 `OffscreenRenderPort`/`EncoderPort` 零生产实现）。
     // 不声明 `corePurity` —— 适配器本来就该碰 DOM。
     activeSubpaths: [
       'adapters/saveTarget/coordinator.ts',
@@ -126,6 +130,12 @@ export const LAYER_DESTINATIONS = [
       'adapters/inputFacts.ts',
       'adapters/inputBinding.ts',
       'adapters/shellDom.ts',
+      // P10f/E（#301）：导出面端口实现
+      'adapters/export/pngEncoder.ts',
+      'adapters/export/renderDevice.ts',
+      'adapters/export/offscreenRenderPort.ts',
+      'adapters/export/encoderPort.ts',
+      'adapters/export/snapshotExportJob.ts',
     ],
   },
   {

@@ -158,7 +158,14 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       '**P10c（#286）实测修正（改写 P9 的原文，附机械证据）**：\n' +
       '① **消费者面**：四个导出命令与 `ExportWorkspace.vue` 全部经 `ctx.getDoc().value?.serialize()` 读旧文档 ⇒ 删除它们需要 `getDoc()` 的退出，而那是 `raw-authority-object` 条目（归 #289/P10d）。\n' +
       '② **几何面**：OBJ 导出经 `loadStructureOrWorld(doc)` → `collectStructureGeometryPiecesPure(def)`，其几何唯一来源是 `blockPalette[].geometry`（`render/schema/types.ts:257` → `structureGeometryCore.ts:217`）。P10c 实测：内核投影**不带回显**时 palette 条目 `withGeometry=0`、**triangles=0**（ebf-2ch 0/旧 24；帧为主真实信封 0/旧 4882）⇒ 换成内核求值后 OBJ 导出会**静默产出空几何**。这正是 R-WK-06 划给 #289 的内容面。\n' +
-      '③ **替代面未接线**：`runtime/exportJob.ts` 的 `ExportJob` 生产零构造点、`OffscreenRenderPort` 与 `EncoderPort` 均**零生产实现**（`export-purity.test.ts` 只锁了方法集合封闭，不锁"有人实现"）。故"导出改由 `ExportJob` 承担"当前不可执行。\n' +
+      // P10f/E（#301）窄授权修正（仅本句）：③ 的**前半**已不成立 —— 两个端口已有生产
+      // 实现、`ExportJob` 已有生产构造点（`src/adapters/export/`；判据见
+      // `tests/architecture/export-port-implementation.test.ts` 与
+      // `src/adapters/export/__tests__/exportPorts.test.ts`）。仍未接的是**消费面**：
+      // 四个导出命令仍走旧导出器 ⇒ 四命令迁移归主线 D/E。
+      // ⚠️ 真实 GPU 填充那一段**只由 e2e 证明**（本仓 `gl@8.1.6` 是 WebGL 1.0，
+      // 而 three r174 硬编码请求 `webgl2` ⇒ vitest 无真 GL 路径）。
+      '③ **替代面未接线**：`runtime/exportJob.ts` 的 `ExportJob` 生产零构造点、`OffscreenRenderPort` 与 `EncoderPort` 均**零生产实现**（`export-purity.test.ts` 只锁了方法集合封闭，不锁"有人实现"）。故"导出改由 `ExportJob` 承担"当前不可执行。**P10f/E（#301）更新**：两端口的生产实现与 `ExportJob` 的生产构造点已落地（`src/adapters/export/`）；仍未接的是**消费面**（四个导出命令仍走旧导出器），四命令迁移归主线 D/E。\n' +
       '④ **文字修正**：本条的旧 `oldTrack` 曾称两个文件"从正在操作的视口取景（必要时临时改机位再恢复）"。实测**不成立**：`bundleMeshAssembly.ts` 与 `exportIsometricImage.ts` 都不 import 任何视口/相机/`ctx` 实时面，后者自建 `new THREE.WebGLRenderer` 与自建透视/正交相机（`:105,:153-168`）。"借用并旋转实时相机"发生在**截图**路径（`runtime/renderEngine.ts:215` 的 `canvas.toDataURL`），不是这两个导出器。A29 的负对照面据此收窄（见汇报）。',
     owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     exitCondition:
