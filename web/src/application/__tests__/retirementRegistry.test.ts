@@ -486,78 +486,18 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       Object.freeze({ name: 'getCurrentFrameIndex（引用位）', pattern: '\\.getCurrentFrameIndex\\s*\\(', scope: 'consumer' as const }),
     ]),
     owner: 'P10',
-    status: 'pending',
-    consumers: Object.freeze([
-      'web/src/context/captureEmbedInitialView.ts',
-      'web/src/context/queries.ts',
-      // #301 P10f B′ 核销：`EmbedRoot.vue` / `embedInitialViewOperators.ts` /
-      // `selectOperator.ts` / `boxTool.ts` 四处曾是真消费者（存在性判定
-      // `ctx.getDoc().value !== null` 与模板 `v-else-if="ctx.getDoc().value"`），
-      // 本批已换成 `ctx.hasLoadedDocument()`（GF-15 读面）⇒ 不再命中 `getDoc`。
-      'web/src/operators/builtin/annotationOperators.ts',
-      // #301 P10f D2 核销（本批的 N2 迁移，逐处实测 0 命中）：
-      //  - `docLifecycleOperators.ts`（保存到文件）、`exportOperators.ts`（四个导出）、
-      //    `sdeOperators.ts`（SDE 导出）、`wikiDataPageSource.ts`（wiki 页保存）、
-      //    `ExportWorkspace.vue`（导出面板）、`WorkbenchRoot.vue`（状态快照）
-      //    六处原先都经 `ctx.getDoc().value?.serialize()` 从**旧文档**取产物字节，
-      //    本批改吃 `ctx.plainForSave()`（内核投影优先，未装配回落）。
-      //  ⇒ 产物字节的**权威**从旧文档转到内核。
-      // ⚠️ 这六处的**旧行**是 `getDoc()` 的"产字节"消费者；它们的退出是
-      //    `raw-authority-object` 条目在 D3 终删 `getDoc()` 的前提。
-      'web/src/operators/builtin/documentIoOperators.ts',
-      'web/src/operators/builtin/metaEditOperators.ts',
-      // #301 P10f C′1 核销：`miscOperators.ts` 最后两处（`:59`/`:73` 的
-      // `doc !== null && doc.frameCount > 1`）已换成 `hasLoadedDocument()` +
-      // `frameDeclarations()`（帧声明的唯一读取面）⇒ 不再命中 `getDoc`。
-      'web/src/operators/builtin/moveTranslate.ts',
-      'web/src/operators/builtin/wikiOperators.ts',
-      'web/src/operators/modalOperatorWrapper.ts',
-      'web/src/operators/operatorRegistry.ts',
-      'web/src/runtime/hover/access.ts',
-      'web/src/shared/viewport/EmbedViewport.vue',
-      // P10b（#282）：`useMultiblockChannels.ts` 已删除 ⇒ 从清单核销；
-      // 替代它的 `useKernelChannels.ts` 仍是 `getDoc()` 消费者（它的 `renderDoc`
-      // 仍需旧文档构造渲染视图文档 —— 这是 #286（P10c）要接通的部分），
-      // 故**换名登记**而不是移除。
-      'web/src/shared/viewport/useKernelChannels.ts',
-      'web/src/shared/viewport/useViewportRuntime.ts',
-      // #301 P10f C′1 核销两处：
-      //  - `WorkbenchViewport.vue`：`:281` 的 `watch(() => ctx.getDoc().value, …)`
-      //    已换成 `hasLoadedDocument()` 的**跃变**读面（`false→true`）——
-      //    单调计数器（tick/revision）表达不出跃变（R-WK-08 裁决原文点名此例）。
-      //  - `PropertyInspector.vue`：`:61` 的 watch 依赖项已换成
-      //    `getContentRefreshTick()`（宽信号：内容重读）。
-      'web/src/workbench/components/StatusBar.vue',
-      'web/src/workbench/document/pipeline.ts',
-      'web/src/workbench/ux/panels/AnnotationEditorPanel.vue',
-      // #301 P10f C′1 核销：`MaterialGallery.vue` 的 `sceneSeconds()` 曾直读
-      // `ctx.getDoc().value` 的 `frameCount`/`frame(i).durationMs`，本批改用
-      // `ctx.frameDeclarations()`（帧声明的唯一读取面 + GF-16 分流）⇒ 不再命中 `getDoc`。
-      'web/src/workbench/ux/panels/TooltipEditorPanel.vue',
-      // P2（#253）合流后新增的真实消费者：面板写路径仍落在旧运行时文档上
-      // （`ctx.getDoc()` 读 `RuntimeDocument`）。这是**双轨暂存**的一部分，
-      // 归口 P2→P10 退出（见 `composition/seams.ts` 的同名登记）。
-      'web/src/editors/workbench-rna.ts',
-      // #301 P10f C′1 核销：`PropertyInspector.vue:61` 的 watch 依赖项已换成
-      // `getContentRefreshTick()`（宽信号：内容重读）⇒ 不再命中 `getDoc`。
-      // **Vue 模板属性里的表达式**也是真依赖：`WorkbenchRoot.vue` 的
-      // `<div v-else-if="workspace === 'wiki' && ctx.hasLoadedDocument()" …>`
-      // 曾在模板里读 `ctx.getDoc().value`，B′ 已换成 GF-15 读面。
-      // 这处由"`.vue` 分段扫描"抓出（曾因 TS 词法把 `"…"` 当字符串而**漏报**；
-      // 漏消费者比假红危险，故 `.vue` 的模板段改用 HTML 口径 —— 见 `codeOfSource`）。
-      // P10（#261）新增的真实消费者：外壳级帧循环把**帧声明**从旧文档读出
-      // 交给内核会话（`KernelSession.bindFrameSource`）。这是显式登记过的
-      // 适配接缝 —— 内核不认识 `RuntimeDocument`，帧声明由接线层读。
-      //
-      // ⚠️ #301 P10f B′ 更新：该文件的 `count`/`durationsMs` 里的 legacy 兜底
-      // 两行是**死代码**（守卫 `kernel.document() !== undefined` 恒真），
-      // 本批按 Lead 裁决 (a) 删除 ⇒ `useKernelFrameLoop.ts` 从本清单**核销**。
-      // 缺陷本体（装配失败 ⇒ 帧数 0、兜底从未生效）已登记 D8/GF-16，归 C′。
-      // 注：`workbench/ux/panels/blockInspector.ts` 与 `sceneInfo.ts` 曾在本表内，
-      // 但 P2 合流后二者已不再调用这三个 getter（本扫描器实测 0 命中）⇒ 已核销。
-      // 这正是"清单腐烂"断言（`extra`）的作用：文件改名/改实现后必须同步核销，
-      // 否则 P11 会拿着过期清单去核对不存在的依赖。
-    ]),
+    // ── #301 P10f D3（本批）**翻相位** ──────────────────────────────────────
+    //
+    // 判据本尊口径实测：`getDoc` 全树 **0 命中 / 0 文件**（探针直接调本文件的
+    // `codeOfSource` + 逐条 `symbols`/`scope`，与断言同一把尺子）。
+    // ⇒ 声明位（`runtime/context.ts`）与 46 处消费位（18 文件）同时归零。
+    //
+    // ⚠️ **删除与翻相位必须同一提交**：本表的"`pending` 的机制退役类：判据此刻
+    // **仍有命中**"断言会在只改一边时判红 —— 那是刻意的（防"半删"）。
+    status: 'executed',
+    executedBy: 'P10',
+    // 已 executed ⇒ 消费者清单核销为**空**（"清单腐烂"断言会因非空判红）。
+    consumers: Object.freeze([]),
     replacement: Object.freeze([
       'web/src/application/queries.ts#ReadView',
       'web/src/runtime/execution.ts#EditorClient',
@@ -1061,7 +1001,27 @@ describe('P4 退役归口登记（R-WK-01 的机器可读删除点清单）', ()
 
   it('`pending` 条目：文件仍在，且替代接口**已存在**（防"半成品替换"）', () => {
     const pending = RETIREMENT_REGISTRY.filter((e) => e.status === 'pending')
-    expect(pending.length, '本批必须留下待退役条目（否则"登记"无对象）').toBeGreaterThan(0)
+    // ## ⚠️ 本断言的**相位演化**（#301 P10f D3；口径未放松，只是对象没了）
+    //
+    // P4 建立本条时写的是"本批必须留下待退役条目"—— 那是**P4 相位**的事实
+    // （当时登记表里必然有等待后续批次的对象）。
+    //
+    // D3 把最后一条 pending（`raw-authority-object`）翻成 `executed` ⇒
+    // **登记表首次全 executed**（`pending.length === 0`）。
+    // 继续要求非空会**永远判红**，而那个红只代表"判据停在 P4 的相位"。
+    //
+    // ⇒ 改为**双向**：非空时逐条核对（下同）；为空时**如实登记**"本表已全 executed"
+    // 并断言"全 executed ⇒ 每条都 0 命中"（由下一条 `executed` 用例把守）
+    // —— 于是"清空登记表"不能靠删条目达成，只能靠真的删掉机制。
+    if (pending.length === 0) {
+      expect(
+        RETIREMENT_REGISTRY.every((e) => e.status === 'executed'),
+        '`pending` 为空时必须**全体** executed（防"删条目冒充收敛"）',
+      ).toBe(true)
+      expect(RETIREMENT_REGISTRY.length, '登记表不得被清空（否则本条空转）').toBeGreaterThan(0)
+      // 全 executed ⇒ 下一条用例会逐条扫全树 0 命中。
+      return
+    }
     for (const e of pending) {
       expect(exists(e.file), `${e.file} 登记的旧机制应仍存在（由 ${e.owner} 删除）`).toBe(true)
       for (const ref of e.replacement) {
@@ -1099,7 +1059,15 @@ describe('P4 退役归口登记（R-WK-01 的机器可读删除点清单）', ()
     // 这条是"机制退役"类的反空洞真：`drwMeshPipeline.ts` 等文件会继续存在，
     // 故不能靠"文件存在"证明登记有效 —— 必须证明**那套机制**还在。
     const mechanicalPending = RETIREMENT_REGISTRY.filter((e) => e.status === 'pending' && e.fileRemoved !== true)
-    expect(mechanicalPending.length, '必须有机制退役类 pending 条目').toBeGreaterThan(0)
+    // 相位演化见上一条：D3 之后 `pending` 为空 ⇒ 本条改为"要么有对象可核，
+    // 要么全体 executed（且由 `executed` 那条逐条扫 0 命中）"。
+    if (mechanicalPending.length === 0) {
+      expect(
+        RETIREMENT_REGISTRY.filter((e) => e.status === 'pending').length,
+        '`pending` 的机制退役类为空时，**不得**还有别的 pending（相位必须整体一致）',
+      ).toBe(0)
+      return
+    }
     for (const e of mechanicalPending) {
       const residual = scanEntryResidual(e, { includeOwnFile: true })
       expect(residual.length, `${e.file} 的机制判据此刻 0 命中 —— 该机制可能已被删除，请核销或翻相位`).toBeGreaterThan(0)
@@ -1192,6 +1160,11 @@ describe('P4 退役归口登记（R-WK-01 的机器可读删除点清单）', ()
         'web/src/runtime/renderEngine.ts',
         'web/src/render/materials/simpleMaterialLibrary.ts',
         'web/src/render/interaction/blockIconCache.ts',
+        // P10f D3（#301）：`raw-authority-object` 的**声明位**（`getDoc()` 访问器）
+        // 在 `runtime/context.ts` —— 该文件属 R-WK-03 归 P10 的"内核接线落点"
+        // （`Context` 是 P10 的过渡门面），故本批的机制退役落在这里。
+        // ⚠️ 是**机制退役**不是整文件退役：`fileRemoved` 未置位，文件按设计继续存在。
+        'web/src/runtime/context.ts',
       ],
       // P6：视口/Area 区（#257「工作区、Area 生命周期与模块装配」）——
       // `shared/viewport/` 是每视口机制（通道暂存、视口运行时）的所在区。
@@ -1502,28 +1475,80 @@ describe('扫描器词法：注释与字符串不算残留，但 `${}` 内的代
     expect(stripNonCode(input).includes('getDoc'), `输入: ${JSON.stringify(input)}`).toBe(want)
   })
 
-  it('**真树对照**：散文提到 `ctx.getDoc()` 的文件不算消费者，真代码算', () => {
+  /** 与上面 `refs(rel)` 同一把尺子，但输入是**文本**（合成输入的负对照用）。 */
+  const refs_of = (text: string): number =>
+    stripNonCode(text)
+      .split('\n')
+      .filter((l) => /\.getDoc\s*\(/.test(l)).length
+
+  it('**真树对照**：散文提及不算消费者，真代码算 —— 而 D3 之后**全树真代码为 0**', () => {
+    // ## ⚠️ 本断言的**相位演化**（#301 P10f D3）
+    //
+    // 本条的原始用意是"证明扫描器能区分散文与真代码"——它当年用的对象是
+    // "`seams.ts` 只有散文（0）+ `workbench-rna.ts`/`queries.ts` 是真代码（>0）"。
+    //
+    // D3 之后 `getDoc()` **全树 0 命中** ⇒ ">0 的那一半"没有对象了。
+    // 若直接删掉那一半，本条就只剩"0 == 0"，**无法再证明扫描器抓得到真代码**
+    //（判据空转）。故改为**两段**：
+    //
+    //  ① **真树**：全树真代码 0 命中（终删的机械面；散文**不得**把它变红）；
+    //  ② **合成输入**：把真代码形式的串喂给扫描器 ⇒ 必须命中（反空洞真的**新载体**，
+    //     与上面 `it.each(cases)` 的 `want=true` 那 5 条同一把尺子，这里额外
+    //     钉住"`.getDoc(` 这个具体调用位正则"本身仍有效）。
+    //
+    // ⇒ "扫描器抓得到真代码"这件事**照样有判据**，且不依赖任何仍存活的生产调用点。
     const readSrc = (rel: string): string => readSourceText(path.join(WEB_ROOT, 'src', rel))
     const refs = (rel: string): number =>
       stripNonCode(readSrc(rel))
         .split('\n')
         .filter((l) => /\.getDoc\s*\(/.test(l)).length
-    // `composition/seams.ts` 只在说明字符串里提到它 ⇒ 0 处代码引用
+
+    // ① 真树：散文提及不算消费者（`seams.ts` 的说明字符串就是这一类）
     expect(refs('composition/seams.ts'), 'seams.ts 只有散文提及，不得算消费者').toBe(0)
-    // 而这两个文件**确实**在代码里调用 ⇒ 必须 > 0（反空洞真）
-    expect(refs('editors/workbench-rna.ts'), 'workbench-rna.ts 是真消费者').toBeGreaterThan(0)
-    // ⚠️ #301 P10f C′1 更新：`PropertyInspector.vue` 曾是真消费者（`:61` 的 watch
-    // 依赖项 `getDoc().value`），C′1 已把它换成 `getContentRefreshTick()`（宽信号）
-    // ⇒ 不再是消费者。本断言随之**换到**一个仍真调用的文件上，
-    // 否则这条"反空洞真"会因对象消失而失去意义（判据本身不能空转）。
-    expect(refs('editors/workbench-rna.ts'), '换用同一批仍真调用的文件').toBeGreaterThan(0)
-    expect(refs('context/queries.ts'), 'queries.ts 仍是真消费者（N3/N4 归 C′2）').toBeGreaterThan(0)
-    // 且**必须**保留一条"已核销的旧消费者现在为 0"的断言 —— 否则"核销"这件事
-    // 没有任何判据在管（本条正是"同批改判据"的落点）。
+
+    // ①′ 真树：**D3 之后全树真代码为 0** —— 这是本条的相位更新（不是删除）。
+    // 逐文件扫描 `src/`（与 `scanEntryResidual` 同一遍历口径），而不是抽查几份：
+    // 抽查会在"某处漏删"时假绿。
+    const offenders: string[] = []
+    const walk = (dir: string): void => {
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, ent.name)
+        if (ent.isDirectory()) {
+          if (ent.name === '__tests__' || ent.name === 'node_modules') continue
+          walk(full)
+          continue
+        }
+        if (!/\.(ts|vue)$/.test(ent.name)) continue
+        const rel = path.relative(path.join(WEB_ROOT, 'src'), full).replace(/\\/g, '/')
+        if (refs(rel) > 0) offenders.push(rel)
+      }
+    }
+    walk(path.join(WEB_ROOT, 'src'))
+    expect(offenders, 'D3 已终删 `getDoc()` ⇒ 生产里不得再有真代码调用').toEqual([])
+
+    // ①″ 真树：**已核销**的旧消费者现在为 0（"核销"这件事本身有判据在管）
     expect(
       refs('workbench/ux/PropertyInspector.vue'),
       'PropertyInspector.vue 已核销（不再是消费者）；若此处 > 0 说明 C′1 的替换被回退',
     ).toBe(0)
+    expect(refs('editors/workbench-rna.ts'), 'workbench-rna.ts 已核销（D3 迁移）').toBe(0)
+    expect(refs('context/queries.ts'), 'queries.ts 已核销（D3 迁移）').toBe(0)
+
+    // ② 合成输入：真代码形式 ⇒ 必须命中（本条的反空洞真）
+    // ⚠️ 只喂**引用位**（带点接收者）：声明位（`getDoc(): Ref<…> {`）由
+    // registry 的 `scope: 'own'` 判据单独处理 —— `refs_of` 的口径是"引用位"，
+    // 把声明位喂进来会因正则本身不匹配而假红（不是扫描器弱，是口径不同）。
+    const codeLike = [
+      'const d = ctx.getDoc().value',
+      'const before = ctx.getDoc().value?.clone() ?? null',
+      'if (ctx.getDoc().value !== null) return',
+    ]
+    for (const line of codeLike) {
+      expect(
+        refs_of(line),
+        `扫描器必须抓得到真代码形式：${line}`,
+      ).toBeGreaterThan(0)
+    }
   })
 })
 

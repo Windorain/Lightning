@@ -94,8 +94,8 @@ export const AnnotationCreateOperator: OperatorType = {
   },
 
   exec(ctx, props) {
-    const doc = ctx.getDoc().value
-    if (!doc) return
+    // #301 P10f D3（R1）：存在性判定的同义替代（GF-15 读面）。
+    if (!ctx.hasLoadedDocument()) return
 
     const annotation = props.annotation as Annotation
     if (!annotation) return
@@ -124,7 +124,9 @@ export const AnnotationCreateOperator: OperatorType = {
     }
 
     // 回落：未装配（GF-16 = false）/ 无会话 ⇒ legacy 是权威（能力不回退）。
-    const newDoc = doc.clone()
+    // R8：**替换式**写 ⇒ 要的是**冻结副本**（`frozenDocumentValue()` 就是 clone）。
+    const newDoc = ctx.frozenDocumentValue()
+    if (!newDoc) return
     ;(newDoc.annotations as Annotation[]).push(annotation)
     ctx.setDocument(newDoc)
     ctx.getSelection().active.value = annotation.id
@@ -141,8 +143,8 @@ export const AnnotationUpdateOperator: OperatorType = {
   },
 
   exec(ctx, props) {
-    const doc = ctx.getDoc().value
-    if (!doc) return
+    // #301 P10f D3（R1）。
+    if (!ctx.hasLoadedDocument()) return
 
     const id = props.id as string
     const patch = props.patch as Partial<Annotation>
@@ -156,7 +158,8 @@ export const AnnotationUpdateOperator: OperatorType = {
     if (command !== null && ctx.submitContentEdit(command)) return
 
     // 回落：未装配 / 无会话 / 补丁含内核未承载字段 ⇒ legacy 是权威。
-    const newDoc = doc.clone()
+    const newDoc = ctx.frozenDocumentValue()
+    if (!newDoc) return
     const annotations = newDoc.annotations as Annotation[]
     const idx = annotations.findIndex((a: Annotation) => a.id === id)
     if (idx === -1) return
@@ -176,8 +179,8 @@ export const AnnotationDeleteOperator: OperatorType = {
   },
 
   exec(ctx, props) {
-    const doc = ctx.getDoc().value
-    if (!doc) return
+    // #301 P10f D3（R1）。
+    if (!ctx.hasLoadedDocument()) return
 
     const id = props.id as string
     if (!id) return
@@ -194,7 +197,8 @@ export const AnnotationDeleteOperator: OperatorType = {
     }
 
     // 回落：未装配 / 无会话 ⇒ legacy 是权威。
-    const newDoc = doc.clone()
+    const newDoc = ctx.frozenDocumentValue()
+    if (!newDoc) return
     const annotations = newDoc.annotations as Annotation[]
     const idx = annotations.findIndex((a: Annotation) => a.id === id)
     if (idx === -1) return

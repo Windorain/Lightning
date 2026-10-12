@@ -10,9 +10,8 @@ import type { PartTooltipInfo } from '@/pure/tooltipResolution'
 
 export function blockRefFromViewportHover(ctx: Context, vb: ViewportBlockHover | null): BlockRef | null {
   if (!vb) return null
-  const doc = ctx.getDoc().value
-  const rf = doc?.frame(ctx.getFrameIndex())
-  const h = rf?.grid?.height ?? 0
+  // #301 P10f D3（R5）：网格读面（声明尺寸；旧包围盒推导在尾层全空时会偏小 ⇒ Y 偏移）。
+  const h = ctx.kernelGrid(ctx.getFrameIndex())?.height ?? 0
   const worldY = h > 0 ? structureRowToWorldY(vb.voxel.row, h) : vb.voxel.row
   return {
     pos: { x: vb.voxel.column, y: worldY, z: vb.voxel.zSlice },
@@ -69,9 +68,7 @@ export function setRegionHoverBlock(ctx: Context, regionId: string, block: Block
     hover.clearViewport()
     return
   }
-  const doc = ctx.getDoc().value
-  const grid = doc?.frame(ctx.getFrameIndex())?.grid
-  const h = grid?.height ?? 0
+  const h = ctx.kernelGrid(ctx.getFrameIndex())?.height ?? 0
   const row = h > 0 ? h - 1 - block.pos.y : block.pos.y
   hover.setViewportBlock({
     blockId: block.block_state_id,

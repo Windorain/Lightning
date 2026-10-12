@@ -61,6 +61,14 @@ const FULL_ANNO: Record<string, unknown> = {
 interface Harness {
   ctx: Context
   session: KernelSession
+  /**
+   * **测试侧**对"被跟踪的 legacy 文档"的观测口（#301 P10f D3）。
+   *
+   * `getDoc()` 已退出生产 ⇒ 双轨判据的 legacy 侧只能从宿主观测
+   *（宿主持有被生产代码替换过的那份 `docRef`），故"内核写了、legacy 没投影"
+   * 这类缺陷**照样判红**。理由与手法见 `runtime/__tests__/kernelReadTestHost`。
+   */
+  legacyDocument(): RuntimeDocument | null
   dispose(): void
 }
 
@@ -103,6 +111,8 @@ async function harness(annotations: unknown[], capabilities: readonly string[]):
   return {
     ctx,
     session,
+    // 测试宿主的 legacy 观测口（见 `Harness#legacyDocument` 的说明）。
+    legacyDocument: () => docRef.value,
     dispose: () => session.dispose(),
   }
 }
@@ -133,7 +143,11 @@ describe('P10f C′2 · 注解算子走内核写（装配成功时）', () => {
         '内核写必须产生历史记账（这是"真的走了内核"的机械证据）',
       ).toBeGreaterThan(pastBefore)
       // legacy 侧：投影产物必须也含该条（回写生效）
-      const legacy = (h.ctx.getDoc().value!.annotations ?? []) as Record<string, unknown>[]
+      // #301 P10f D3：`getDoc()` 已退出生产 ⇒ legacy 侧经**测试宿主的观测口**
+      //（它持有那份被替换过的 `docRef`）。⚠️ 这仍然证明"两侧都有"：
+      // `h.legacyDocument()` 拿的是**生产回写投影**替换后的那一份（不是输入副本），
+      // 故"内核写了、legacy 没投影"（#333 同族）在这里**照样判红**。
+      const legacy = (h.legacyDocument()?.annotations ?? []) as Record<string, unknown>[]
       expect(legacy.length, '**双向**：legacy 也必须多出该条（投影回写生效）').toBe(kernelRows.length)
       expect(legacy.some((a) => a.id === 'a2'), 'legacy 里必须有刚建的那条').toBe(true)
     } finally {
@@ -148,7 +162,11 @@ describe('P10f C′2 · 注解算子走内核写（装配成功时）', () => {
       AnnotationDeleteOperator.exec!(h.ctx as never, { id: 'a1' } as never)
       const kernelRows = kernelAnnotationsOf(h.session.document())
       expect(kernelRows.length, '内核必须少一条').toBe(kernelBefore - 1)
-      const legacy = (h.ctx.getDoc().value!.annotations ?? []) as Record<string, unknown>[]
+      // #301 P10f D3：`getDoc()` 已退出生产 ⇒ legacy 侧经**测试宿主的观测口**
+      //（它持有那份被替换过的 `docRef`）。⚠️ 这仍然证明"两侧都有"：
+      // `h.legacyDocument()` 拿的是**生产回写投影**替换后的那一份（不是输入副本），
+      // 故"内核写了、legacy 没投影"（#333 同族）在这里**照样判红**。
+      const legacy = (h.legacyDocument()?.annotations ?? []) as Record<string, unknown>[]
       expect(legacy.length, '双向：legacy 也必须少一条').toBe(kernelRows.length)
     } finally {
       h.dispose()
@@ -161,7 +179,11 @@ describe('P10f C′2 · 注解算子走内核写（装配成功时）', () => {
       AnnotationUpdateOperator.exec!(h.ctx as never, { id: 'a1', patch: { title: 'RENAMED' } } as never)
       const kernelRows = kernelAnnotationsOf(h.session.document())
       expect(kernelRows[0]!.title, '内核侧 title 必须更新').toBe('RENAMED')
-      const legacy = (h.ctx.getDoc().value!.annotations ?? []) as Record<string, unknown>[]
+      // #301 P10f D3：`getDoc()` 已退出生产 ⇒ legacy 侧经**测试宿主的观测口**
+      //（它持有那份被替换过的 `docRef`）。⚠️ 这仍然证明"两侧都有"：
+      // `h.legacyDocument()` 拿的是**生产回写投影**替换后的那一份（不是输入副本），
+      // 故"内核写了、legacy 没投影"（#333 同族）在这里**照样判红**。
+      const legacy = (h.legacyDocument()?.annotations ?? []) as Record<string, unknown>[]
       expect(legacy[0]!.title, '双向：legacy 侧 title 也必须更新').toBe('RENAMED')
       // 全保真：更新 title **不得**顺手丢掉其它字段
       expect(legacy[0]!.locked, '更新时不得丢 `locked`（全保真回写）').toBe(true)
@@ -177,7 +199,11 @@ describe('P10f C′2 · 注解算子走内核写（装配成功时）', () => {
     try {
       // `renderStyle` 不在本批迁移的字段集里（内核写端口未实现它）
       AnnotationUpdateOperator.exec!(h.ctx as never, { id: 'a1', patch: { renderStyle: 'translucent' } } as never)
-      const legacy = (h.ctx.getDoc().value!.annotations ?? []) as Record<string, unknown>[]
+      // #301 P10f D3：`getDoc()` 已退出生产 ⇒ legacy 侧经**测试宿主的观测口**
+      //（它持有那份被替换过的 `docRef`）。⚠️ 这仍然证明"两侧都有"：
+      // `h.legacyDocument()` 拿的是**生产回写投影**替换后的那一份（不是输入副本），
+      // 故"内核写了、legacy 没投影"（#333 同族）在这里**照样判红**。
+      const legacy = (h.legacyDocument()?.annotations ?? []) as Record<string, unknown>[]
       expect(legacy[0]!.renderStyle, '回落路径必须生效（legacy 真的被改了）').toBe('translucent')
     } finally {
       h.dispose()
@@ -195,7 +221,11 @@ describe('P10f C′2 · 回落：无内容编辑能力时走 legacy', () => {
       } as never)
       // 能力不足 ⇒ 内核拒绝 ⇒ 不得谎报成功；legacy 走原路径（能力不回退）
       expect(kernelAnnotationsOf(h.session.document()).length, '能力不足时内核不得变').toBe(kernelBefore)
-      const legacy = (h.ctx.getDoc().value!.annotations ?? []) as Record<string, unknown>[]
+      // #301 P10f D3：`getDoc()` 已退出生产 ⇒ legacy 侧经**测试宿主的观测口**
+      //（它持有那份被替换过的 `docRef`）。⚠️ 这仍然证明"两侧都有"：
+      // `h.legacyDocument()` 拿的是**生产回写投影**替换后的那一份（不是输入副本），
+      // 故"内核写了、legacy 没投影"（#333 同族）在这里**照样判红**。
+      const legacy = (h.legacyDocument()?.annotations ?? []) as Record<string, unknown>[]
       expect(legacy.some((a) => a.id === 'a9'), '回落路径必须让 legacy 拿到该条（能力不回退）').toBe(true)
     } finally {
       h.dispose()

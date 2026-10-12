@@ -171,6 +171,28 @@ export type ObjectDataPayload =
       readonly kind: 'blockGrid'
       readonly cells: Readonly<Record<string, string>>
       /**
+       * **网格的声明尺寸**（`sizeColumn` = x 宽、`sizeRow` = y 高、`sizeZSlice` = z 深）。
+       *
+       * ## 为什么必须显式承载（#301 P10f D3，Lead 裁决 D-1(甲)）
+       *
+       * `cells` 是**稀疏**键表（`"x,y,z"` → 方块身份），故"网格多大"**推不出来** ——
+       * 早期实现按 `max(x)+1 / max(y)+1 / max(z)+1` 推（`kernelProjection.ts:222-224`），
+       * 那在两处**静默出错**：
+       *
+       *  1. **尾层/尾列全空** ⇒ 推得的尺寸比文件声明的小。实测后果是
+       *     `context/queries#gridHeight` 给出偏小的 `h`，而它直接进
+       *     `structureRowToWorldY(row, h)` ⇒ **拾取与悬停的 Y 坐标整体偏移**；
+       *  2. **空网格**（所有格都是空气）⇒ 推得 `0×0×0`，而"0 宽的网格"与
+       *     "没有网格"是**两种不同状态**（与 `cellContent` 的"缺席 ≠ 空"同口径）。
+       *
+       * ⇒ 尺寸是**文件声明的事实**（`cellGrid` 的三个维度），必须显式承载，
+       * 不能由内容反推。缺省（旧形态/未声明）= `undefined` ⇒ 读取侧如实降级为
+       * 包围盒推导（**不**猜一个 `1×1×1`）。
+       */
+      readonly sizeColumn?: number
+      readonly sizeRow?: number
+      readonly sizeZSlice?: number
+      /**
        * 逐格内容（部件 / 逐格说明）；键与 `cells` **同一套**（见 {@link cellContentKeyOf}）。
        *
        * 缺省 = 无逐格内容（**不**写成空表：使"没有"与"有但是空"可区分，
@@ -222,6 +244,29 @@ export type ObjectDataPayload =
        * 缺省 = 载荷没有该信息（旧形态），投影侧走名称/几何匹配的**显式降级**。
        */
       readonly cellPalette?: Readonly<Record<string, string>>
+      /**
+       * 逐格 → **文件里的调色板槽位**（legacy `SlotBlock.paletteIndex`）。
+       *
+       * ## 为什么它必须显式承载（#301 P10f D3；R-WK-09 裁决 4 的落地方式）
+       *
+       * 三个旧消费点按这个槽位取值：
+       * `context/queries#getMaterialUsageCounts`（按槽位分组）、
+       * `#getBlockPaletteEntry` / `#getBlockGeometry`（旧实现经
+       * `PaletteCache.get('#' + paletteIndex)` 取条目）。
+       *
+       * 而 `palette`（本载荷的条目表）是**重新编号**的：投影侧
+       *（`composition/kernelProjection#projectGridCells`）按"非空气格首次出现序"
+       * 从 1 开始重排（0 保留给 air）⇒ **内核侧的数组位置 ≠ 文件槽位**。
+       *
+       * ⇒ 槽位**推不出来**，只能承载。这与 `cellPalette` 的理由同族：
+       * 它们都是"文件格式的表达手段"，而其中**被旧消费方当作键使用**的那一部分
+       * 必须在迁移期原样保留，否则就是行为变更（R-WK-09 裁决 4 明文：
+       * 「投影下标跨网格不可移植为实测事实；改下游键口径 = 行为变更不做」）。
+       *
+       * ⚠️ 它**不是**身份：`cellPalette` 的内容键才是（见上方字段）。
+       * 缺省 = 源里没有该信息（此时读取侧如实给 `undefined`，**不**编一个下标）。
+       */
+      readonly cellPaletteIndex?: Readonly<Record<string, number>>
       /**
        * 该网格实际使用的**调色板条目**（按内容去重后的稳定序）。
        *

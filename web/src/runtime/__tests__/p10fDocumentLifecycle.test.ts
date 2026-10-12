@@ -305,6 +305,18 @@ describe('P10f A′ · `pushDocUndo` 的 undo/redo 两侧（条件性 null）', 
       let captured: { execute: () => void; undo: () => void } | null = null
       const ctxStub = {
         ...host,
+        // #301 P10f D3：`pushDocUndo` 的 `execute`/`undo` 改经不透明令牌的**唯一**
+        // 交回口 `restoreDocumentSnapshot`。本宿主的 `host` 是**替身**（只仿
+        // `getDoc`/`setDocument`），故这里按**生产语义**补一位：
+        // 令牌 → 文档的解析用**生产**的 `documentOfSnapshot`（不是自己拼），
+        // 而"写回 + 镜像"仍走本宿主的 `setDocument`（本判据要钉的正是那一步）。
+        restoreDocumentSnapshot: (token: unknown) => {
+          const next =
+            token === null
+              ? null
+              : (documentOfSnapshot(token as never) ?? null)
+          ;(host as { setDocument: (d: RuntimeDocument | null) => void }).setDocument(next)
+        },
         getEditHistory: () => ({
           push: (entry: { execute: () => void; undo: () => void }) => {
             captured = entry
@@ -314,7 +326,11 @@ describe('P10f A′ · `pushDocUndo` 的 undo/redo 两侧（条件性 null）', 
       // 前置：当前处于"无文档"（after = null 的组合）
       host.setDocument(null)
 
-      pushDocUndo(ctxStub as never, before, null, '测试')
+      // #301 P10f D3：`pushDocUndo` 的入参由旧文档改为**不透明令牌**
+      //（R-WK-09 裁决 3：能力存续、句柄退出）。这里造令牌用**生产**的
+      // `snapshotOf`（不是自己拼一个对象）—— 否则测的是替身而不是生产契约。
+      const { snapshotOf, documentOfSnapshot } = await import('@/runtime/documentSnapshot')
+      pushDocUndo(ctxStub as never, snapshotOf(before), null, '测试')
       expect(captured, 'pushDocUndo 必须压入一条撤销项').not.toBeNull()
 
       // ① execute：回到 after = null ⇒ 两侧都必须为「无」

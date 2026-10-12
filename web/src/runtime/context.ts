@@ -37,7 +37,18 @@ import type { KernelSession } from '@/runtime/kernelSession'
 // 而 `Context` 的外壳六件套不该进测试）—— 本层只负责"取事实、交结果"。
 import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
 import { kernelAnnotationsOf, kernelMaterialsOf, projectAnnotationsToLegacy } from '@/runtime/annotationRead'
-import { projectCellTooltipsToLegacy } from '@/runtime/tooltipRead'
+import { projectCellTooltipsToLegacy, type LegacyCellTooltips } from '@/runtime/tooltipRead'
+import {
+  gridViewOfLegacy,
+  kernelGridOf,
+  type KernelGridView,
+  type LegacyGridLike,
+} from '@/runtime/gridRead'
+import {
+  documentOfSnapshot,
+  snapshotOf,
+  type DocumentSnapshot,
+} from '@/runtime/documentSnapshot'
 import { projectKernelSaveView, type SaveProjection } from '@/composition/saveProjection'
 import { resolveSideTable } from '@/runtime/sideTableResolution'
 import type { Command } from '@/application/commands'
@@ -54,6 +65,29 @@ function embedUnavailable(name: string): never {
 
 function workbenchUnavailable(name: string): never {
   throw new Error(`workbench: ${name} not available`)
+}
+
+// ── #301 P10f D3：`documentMetadata` 的两处常量与两个窄取值器 ──────────────────
+//
+// 与 `EMPTY_MATERIAL_VIEWS` 同一处置：空读面用共享冻结常量（避免每次分配，
+// 且调用方改不动）。取值器是**窄**的（只做类型收窄），刻意不抽成通用 "coerce"
+// 工具 —— 通用强制转换会把"字段是脏的"静默吞掉，而这里的语义是"没有就如实给空"。
+const EMPTY_TAGS: readonly string[] = Object.freeze([])
+const ZERO_ORIGIN = Object.freeze({ x: 0, y: 0, z: 0 })
+
+function strOf(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function vecOf(v: unknown): { readonly x: number; readonly y: number; readonly z: number } | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null
+  const o = v as Record<string, unknown>
+  const x = o.x
+  const y = o.y
+  const z = o.z
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') return null
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null
+  return Object.freeze({ x, y, z })
 }
 
 export class Context {
@@ -181,14 +215,41 @@ export class Context {
   }
 
   // --- Main ---
-  getDoc(): Ref<RuntimeDocument | null> {
-    return this.main.doc
-  }
+  //
+  // ⚠️ **`getDoc()` 已删除**（#301 P10f D3，本批的终删目标）。
+  //
+  // 它曾是"文档内容的**权威读入口**"，46 处消费点经它读一切（保存/导出/属性/拾取/
+  // 撤销/渲染）。现在每一类事实都有**具名读面**：
+  //
+  // | 事实 | 读面 |
+  // |---|---|
+  // | 有文档吗（存在性） | `hasLoadedDocument()`（GF-15） |
+  // | 内核承载的是这份文档吗 | `hasAdoptedContent()`（GF-16） |
+  // | 帧声明（数/时长/标签） | `frameDeclarations()` |
+  // | 网格（尺寸/格/部件/条目/几何/说明） | `kernelGrid(frameIndex)` |
+  // | 注解表 | `kernelAnnotations()` |
+  // | 材质表 | `kernelMaterials()` |
+  // | 逐格说明侧表 | `cellTooltips()` |
+  // | 文档元数据 | `documentMetadata()` |
+  // | 产物 plain | `plainForSave()` |
+  // | 撤销快照 | `documentSnapshot()` / `restoreDocumentSnapshot()` |
+  // | 保存基线（外部格式值） | `frozenDocumentValue()` |
+  // | 渲染链旧格式源 | `legacyRenderSource()` |
+  // | 网格**编辑句柄**（写路径） | `legacyGridForEdit()` |
+  //
+  // ⚠️ **`RuntimeDocument` 类型不删**：它是**外部格式边界**的契约类型
+  //（解析器/投影/保真记录/`plainRoot` 的 47 个引用面），按 D 批映射表 §一
+  //（Lead comment 6034 裁决 1）保留。
+  //
+  // ⚠️ **防绕过**：`main` 仍是 `public readonly`（上面的读面都要读它）⇒
+  // 只判"`getDoc(` 零命中"会被一行 `ctx.main.doc.value` 绕过。故
+  // `boundary-scan.test.ts` 增了一条"`main.doc` 直接读取点白名单闭集"判据
+  // （每一处登记者与理由），见 `tests/architecture/boundary-scan.test.ts`。
 
   /**
    * **文档是否已装载**（#301 P10f B′：GF-15 读面的**消费入口**）。
    *
-   * ## 它与 `getDoc().value !== null` 的关系（本批的全部理由）
+   * ## 它与"旧文档非 null"的关系（B′ 的全部理由）
    *
    * A′ 建立了 `KernelSession.hasLoadedDocument()`，并把"文档替换"收口成
    * `Context.setDocument` 这**唯一写入口**。而生产里写入 `main.doc.value` 的
@@ -202,7 +263,7 @@ export class Context {
    * ```
    *
    * ⇒ 镜像**必然**发生在每一次文档替换上，于是
-   * `hasLoadedDocument() === (getDoc().value !== null)` 是一个
+   * `hasLoadedDocument() === (旧文档 !== null)` 是一个
    * **由唯一写者维护的结构不变量**，在**任意读取点**成立 ——
    * 不只是 `setDocument` 的 21 个调用点。
    *
@@ -218,8 +279,8 @@ export class Context {
    * （菜单项本该可选却变灰、`poll()` 恒假）。
    *
    * ⇒ 回落读 `this.main.doc.value !== null` —— 与替换前的表达式**逐字同义**。
-   * ⚠️ 刻意读 `this.main.doc` 而**不是** `this.getDoc()`：后者会让本读面的引入
-   * **增加** `raw-authority-object` 的 `getDoc` 命中数，而 B′ 的目标是把它降下来
+   * ⚠️ 刻意读 `this.main.doc` 而**不是**（已删除的）旧访问器：后者会让本读面的引入
+   * **增加** `raw-authority-object` 的命中数，而 B′ 的目标是把它降下来
    * （这笔"新增一处、消除 29 处"的账必须干净）。
    * ## ⚠️ **必须是响应式可追踪的**（B′ 实测抓出的真实回归，务必保留这一读）
    *
@@ -312,6 +373,7 @@ export class Context {
   frameDeclarations(): {
     readonly count: number
     readonly durationsMs: readonly number[]
+    readonly labels: readonly (string | null)[]
     readonly source: 'kernel' | 'legacy'
   } {
     // ⚠️ **响应式依赖**（与 `hasLoadedDocument` 同一取舍，B′ 实测过代价）：
@@ -399,28 +461,43 @@ export class Context {
    * 前者是"没有装配产物可用"（⇒ 该回落 legacy），后者是"装配产物声明了 0 帧"
    * （⇒ 内核权威，且 0 是真实答案）。把前者写成后者**就是 D8 的成因**。
    */
-  private kernelAdoptedFrames(): { count: number; durationsMs: readonly number[] } | null {
+  private kernelAdoptedFrames(): {
+    count: number
+    durationsMs: readonly number[]
+    labels: readonly (string | null)[]
+  } | null {
     const kernel = this.kernel
     if (kernel === null) return null
     if (!kernel.hasAdoptedContent()) return null
     const kdoc = kernel.document()
     if (kdoc === undefined) return null
     const frames = kdoc.content.frameAxis.frames
-    return { count: axisFrameCount({ frames }), durationsMs: frameDurationsMs({ frames }) }
+    return {
+      count: axisFrameCount({ frames }),
+      durationsMs: frameDurationsMs({ frames }),
+      // 帧标签是**同一份轴**上的声明事实（`FrameDeclaration.label`）——
+      // 与 count/durations 同源，故同一处取出（不另开读面 ⇒ 不留旁路）。
+      labels: frames.map((f) => f.label),
+    }
   }
 
   /** 旧文档的帧声明；`null` = 无旧文档。 */
   private legacyFrames(
     doc: RuntimeDocument | null,
-  ): { count: number; durationsMs: readonly number[] } | null {
+  ): { count: number; durationsMs: readonly number[]; labels: readonly (string | null)[] } | null {
     if (doc === null) return null
     const durations: number[] = []
+    const labels: (string | null)[] = []
     for (let i = 0; i < doc.frameCount; i++) {
+      const f = doc.frame(i)
       // `durationMs` 缺省按 0 如实给（与内核 `stripTimeline` 的回落同口径：
       // 猜一个值会让"没声明时长"与"声明了 50ms"无法区分）。
-      durations.push(doc.frame(i)?.durationMs ?? 0)
+      durations.push(f?.durationMs ?? 0)
+      // ⚠️ `?? null` **不**换成 `?? ''`：空标签与"没声明标签"不同
+      //（与内核 `FrameDeclaration.label: string | null` 同一口径）。
+      labels.push(f?.label ?? null)
     }
-    return { count: doc.frameCount, durationsMs: durations }
+    return { count: doc.frameCount, durationsMs: durations, labels }
   }
 
   /**
@@ -468,6 +545,372 @@ export class Context {
   kernelMaterials(): readonly KernelMaterialView[] {
     const legacyDoc = this.main.doc.value
     return resolveSideTable(this.kernelAdoptedMaterials(), this.legacyMaterials(legacyDoc)).rows
+  }
+
+  /**
+   * **当前帧的网格读面**（#301 P10f D3；**R5**）。
+   *
+   * ## 它替代的旧机制（15 处消费点）
+   *
+   * `ctx.main.doc.value?.frame(i)?.grid` —— `context/queries.ts`（9 处）、
+   * `runtime/hover/access.ts`（2）、`editors/workbench-rna.ts`（2）、
+   * `operators/builtin/moveTranslate.ts`（1）、
+   * `workbench/ux/panels/TooltipEditorPanel.vue`（1）。
+   *
+   * ## 为什么 B′ 撤回过它，而 D3 能交付（两处撤回理由各自被谁解决）
+   *
+   * B′ 的实现（`temp/p10f/bprime-n3-hold/`）实测出**两处不同义**并如实撤回
+   * （理由留档在 `setDocument` 上方的长注释里）。两条的处置：
+   *
+   * | B′ 的撤回理由 | D3 的处置 |
+   * |---|---|
+   * | ① `moveTranslate.ts` 是**写**路径（把 `grid` 捕获进 `execute`/`undo` 并调 `grid.moveBlock`）—— 读面每次新建对象 ⇒ 写入**静默无效** | **保留 legacy 写句柄**：该处走 {@link legacyGridForEdit}（**编辑句柄**，不是读面），并登记双轨接缝 `legacy-grid-edit-handle`（见 `composition/seams.ts`） |
+   * | ② 换文档但内核未重装时，内核读到**另一个文档**的网格 | 该前置已由 **C′1 的 GF-16**（`hasAdoptedContent`）解决：`setDocument` 在非 `content-sync` 意图下清 GF-16 ⇒ 本读面回落 legacy ⇒ 读到的是**当前**文档 |
+   *
+   * ## 分流（与 `frameDeclarations`/`kernelAnnotations` **同一形态**）
+   *
+   * 装配成功（GF-16）⇒ 内核 `blockGrid` 载荷；否则 ⇒ legacy `Grid` 经
+   * `runtime/gridRead#gridViewOfLegacy` 归一到**同一形状**。
+   * ⇒ 消费点零分支（它们不必知道两种数据模型）。
+   *
+   * ## ⚠️ 与 legacy 的**一处刻意不同**：`tooltipAt`
+   *
+   * legacy 的逐格说明**不在网格上**（在文档根的 `tooltipPalette`/`cellTooltipGrid`
+   * 两个旁表里）⇒ `KernelGridView#tooltipAt` 在 legacy 分支返回 `undefined`。
+   * 逐格说明有**自己**的读面（{@link cellTooltips}）—— 一个读面假装知道
+   * 另一份事实正是 D8 的形态，故刻意不合并。
+   */
+  kernelGrid(frameIndex: number): KernelGridView | null {
+    const kernel = this.kernel
+    // 响应式依赖（与其它读面同一取舍：消费点是 `.vue` 的 computed / 模板）。
+    const legacyDoc = this.main.doc.value
+    if (kernel !== null && kernel.hasAdoptedContent()) {
+      const view = kernelGridOf(kernel.document(), frameIndex)
+      if (view !== null) return view
+      // 内核装配成功但该帧没有 `blockGrid`（例如多方块文档的帧**设计上**
+      // 没有网格，网格是装配产物）⇒ 如实返回 `null`，**不**回落 legacy：
+      // 内核是权威，"这一帧确实没有网格"是它的真实答案（与 `frameDeclarations`
+      // 的 `null`/`0` 之分同一口径）。
+      return null
+    }
+    if (legacyDoc === null) return null
+    const frame = legacyDoc.frame(frameIndex)
+    const grid = frame?.grid
+    if (grid === null || grid === undefined) return null
+    return gridViewOfLegacy(grid as unknown as LegacyGridLike)
+  }
+
+  /**
+   * **旧网格的编辑句柄**（#301 P10f D3；**唯一**的旧数据模型写入口）。
+   *
+   * ## 为什么它与上方的读面**必须分开**（B′ 实测的撤回理由 ①）
+   *
+   * `operators/builtin/moveTranslate.ts` 把 grid 捕获进撤销项的
+   * `execute`/`undo` 闭包，并调 `grid.moveBlock(from, to)` **原地改**。
+   * 而读面（{@link kernelGrid}）**每次新建**一个视图对象
+   * （内核分支更是由不可变载荷算出来的）⇒ 在它上面 `moveBlock` 的改动
+   * **静默丢失**（不报错、不改盘、用户看不到变化）—— B′ 探针实测：
+   *
+   * ```
+   * legacy  frame(0).grid === frame(0).grid   → true   （同一对象，写入留存）
+   * 读面    gridOf(doc,0) === gridOf(doc,0)   → false  （每次新建）
+   * ```
+   *
+   * ## 它是**已登记的暂存**，不是遗漏
+   *
+   * 内核 `Command` 联合里**没有**"移动格"的命令（GF-13 最小集在 C′2 只交付到
+   * `setCellTooltip`）⇒ 该写路径**此刻无法**迁到内核。按 #171
+   * 「阶段间暂存的未迁移路径必须有负责人和退出阶段」，它登记在
+   * `composition/seams.ts` 的 `legacy-grid-edit-handle`（含退出条件）。
+   *
+   * ⚠️ 名字里的 `legacy` 是**刻意的**：调用点一眼能看出"这里是旧数据模型的写"。
+   * 若把它叫成 `gridForEdit` 之类中性名，它就成了一条看不出技术债的旁路
+   * —— 那正是 #171 禁止的"新门面包旧核心保活"的形态。
+   */
+  legacyGridForEdit(frameIndex: number): LegacyGridLike | null {
+    const doc = this.main.doc.value
+    if (doc === null) return null
+    const grid = doc.frame(frameIndex)?.grid
+    if (grid === null || grid === undefined) return null
+    return grid as unknown as LegacyGridLike
+  }
+
+  /**
+   * **逐格说明侧表读面**（#301 P10f D3；**R6**）。
+   *
+   * ## 它替代的旧机制
+   *
+   * `editors/workbench-rna.ts:263`（面板读 `cellTooltip` 属性）与
+   * `workbench/ux/panels/TooltipEditorPanel.vue:33`（面板读当前值）
+   * 直读旧文档根的 `tooltipPalette` + `cellTooltipGrid` 两个旁表。
+   *
+   * ## 内核分支**复用**已交付的投影（不写第二份）
+   *
+   * `runtime/tooltipRead#projectCellTooltipsToLegacy` 是 D2 收尾（#333）交付的
+   * 回写投影，含 `-1` 哨兵与行序翻转，且它的"取哪一份载荷"规则与**保存投影**
+   * （`composition/kernelProjection#tooltipPoolOfPayloads`）**同一条**
+   * —— 由 `p10fPanelTooltipWrite.test.ts` 的"两侧投影必须一致"组把守。
+   * 本读面只做"取事实 + GF-16 分流"。
+   *
+   * ## ⚠️ 这里**必须**回落 legacy（与注解/材质读面同一条实测理由）
+   *
+   * `syncLegacyFromKernel` 只在**装配成功**时把内核投影回 legacy
+   * ⇒ 未装配时（例如 `metaEditOperators` 的回落分支刚写完 legacy）legacy 才是权威。
+   * 若不回落，面板会读到"没有说明"而 legacy 明明有（#333 的同族形态）。
+   *
+   * @returns `null` = 两侧都"没有这一对字段"（**不是**"空池"：
+   *          文件里写 `[]` 是"有但是空"，两者语义不同，见 `domain/cellContent` 判据 3）
+   */
+  cellTooltips(): (LegacyCellTooltips & { readonly source: 'kernel' | 'legacy' }) | null {
+    const kernel = this.kernel
+    // 响应式依赖（同上）。
+    const legacyDoc = this.main.doc.value
+    if (kernel !== null && kernel.hasAdoptedContent()) {
+      const kernelDoc = kernel.document()
+      if (kernelDoc !== undefined) {
+        const projected = projectCellTooltipsToLegacy(kernelDoc)
+        // 内核权威：`null` 就是"没有这一对字段"（**不**回落 —— 回落会让
+        // "删掉最后一条说明"读回旧池，正是 #333 要修的那类静默失效）。
+        return projected === null ? null : { ...projected, source: 'kernel' }
+      }
+    }
+    if (legacyDoc === null) return null
+    const palette = legacyDoc.tooltipPalette as readonly string[] | undefined
+    const grid = legacyDoc.cellTooltipGrid as readonly number[][][] | undefined
+    if (palette === undefined && grid === undefined) return null
+    return { palette: palette ?? [], grid: grid ?? [], source: 'legacy' }
+  }
+
+  /**
+   * **文档元数据读面**（#301 P10f D3；**R7**）。
+   *
+   * ## 它替代的旧机制
+   *
+   * `editors/workbench-rna.ts:285`（`ownerKind === 'document'` 的属性读）
+   * 直读旧文档的 `meta.*` 与 `formatVersion`。
+   *
+   * ## 字段面（逐字段，**不**整体展开）
+   *
+   * | 本读面 | 内核承载 | legacy 承载 |
+   * |---|---|---|
+   * | `name`/`author`/`description`/`tags`/`origin`/`createdAtMs` | `DocumentContent.metadata`（`domain/content.ts`） | `doc.meta.*` |
+   * | `formatVersion` | ❌ **不承载** | `doc.formatVersion` |
+   *
+   * ⚠️ `createdAtMs` 给的是**毫秒数**（`null` = 源里没有），
+   * 而旧路径在 `workbench-rna` 里 `toLocaleString()` 成展示串
+   * ⇒ **格式化留在调用点**（读面只给事实，不给表现）。
+   *
+   * ## ⚠️ `formatVersion` 为什么**始终**取旧文档的声明（本处的一处修正）
+   *
+   * 我第一版让它在内核分支回落到装配面的 `schemaVersion`。**实测推翻了它**：
+   * `schemaVersion` 是**多方可块声明**的格式版本（真实夹具 = `1`），
+   * 而 `doc.formatVersion` 是**文件格式**版本（= `2.0`）—— **两个不同的编号**。
+   * 用前者冒充后者会让属性面板的"格式版本"从 `2.0` 变成 `1`
+   * ⇒ **静默的行为变更**（用户看到错的版本号，而没有任何判据会变红）。
+   *
+   * ⇒ `format_version` 与 `multiblockSource` 同族：**外部格式的事实，内核不承载**
+   * ⇒ 如实转发旧文档的声明。这是"回落"，不是后门：
+   * 它只暴露一个字符串元数据，**不**给内容读入口。
+   * 该处置登记在 `composition/seams.ts` 的 `legacy-render-source-document`
+   * （与渲染链同一条接缝的"外部格式事实"面）。
+   */
+  documentMetadata(): {
+    readonly name: string
+    readonly author: string
+    readonly description: string
+    readonly tags: readonly string[]
+    readonly origin: { readonly x: number; readonly y: number; readonly z: number }
+    readonly createdAtMs: number | null
+    readonly formatVersion: string
+    readonly source: 'kernel' | 'legacy'
+  } {
+    const kernel = this.kernel
+    const legacyDoc = this.main.doc.value
+    // **外部格式事实**（内核不承载；见上文长注释）：始终取旧文档的声明。
+    const formatVersion = legacyDoc?.formatVersion ?? ''
+    if (kernel !== null && kernel.hasAdoptedContent()) {
+      const kernelDoc = kernel.document()
+      if (kernelDoc !== undefined) {
+        const m = kernelDoc.content.metadata
+        return {
+          name: m.name,
+          author: m.author,
+          description: m.description,
+          tags: m.tags,
+          origin: m.origin,
+          createdAtMs: m.createdAtMs,
+          formatVersion,
+          source: 'kernel',
+        }
+      }
+    }
+    if (legacyDoc === null) {
+      return {
+        name: '',
+        author: '',
+        description: '',
+        tags: EMPTY_TAGS,
+        origin: ZERO_ORIGIN,
+        createdAtMs: null,
+        formatVersion: '',
+        source: 'legacy',
+      }
+    }
+    const meta = legacyDoc.meta as unknown as Record<string, unknown>
+    const createdMs = meta.created_at_ms
+    return {
+      name: strOf(meta.name),
+      author: strOf(meta.author),
+      description: strOf(meta.description),
+      tags: Array.isArray(meta.tags) ? (meta.tags as readonly string[]) : EMPTY_TAGS,
+      origin: vecOf(meta.origin) ?? ZERO_ORIGIN,
+      createdAtMs: typeof createdMs === 'number' && Number.isFinite(createdMs) ? createdMs : null,
+      formatVersion,
+      source: 'legacy',
+    }
+  }
+
+  /**
+   * **旧文档本体（不克隆）** —— `getDoc()` 退出后**唯一**保留的旧数据模型取值口。
+   *
+   * ## 只有两个合法消费者，且**都**登记在案（见 `composition/seams.ts`）
+   *
+   * | # | 消费者 | 为什么它需要"本体"而不是"克隆/读面" | 登记 |
+   * |---|---|---|---|
+   * | 1 | `editors/workbench-rna#documentStateOf` | `DocumentState.document` 的**字段类型就是**旧文档（`editors/property-writers`），面板属性写要把它交给 `applySetProperty`；**每格一 clone 会在大文档上产生可感的卡顿**（实测口径：432 帧文档的面板读路径） | `property-write-legacy-document-model` |
+   * | 2 | `context/captureEmbedInitialView` | **原地**写 `doc.meta[embed_initial_view]`（`setDocumentEmbedInitialView` 的语义就是原地改）。改成"克隆 + `setDocument`"会**顺带 bump `documentRevision`** ⇒ `EmbedViewport.vue` 的相机自动初始化被重置（可感知行为变更） | `legacy-document-in-place-edit` |
+   *
+   * ## 为什么它**不**等于"把 `getDoc()` 改个名"（这是判据要能区分的事）
+   *
+   * | | 旧 `getDoc()` | 本方法 |
+   * |---|---|---|
+   * | 调用点 | 46 处 / 18 文件（保存/导出/属性/拾取/渲染/撤销**全在内**） | **2 处**（上面两行，均为已登记的暂存） |
+   * | 语义 | "文档内容的**权威读入口**"（谁都能拿它读一切） | "旧数据模型仍需要的**两句形状**的载体" |
+   * | 判据 | 无（它就是权威） | `boundary-scan.test.ts` 的**白名单闭集**：`legacyDocumentModel(` 的调用者必须**恰为**上面两家（多一处即判红） |
+   *
+   * ⇒ "终删 `getDoc()`"的机械含义是**权威读入口消失、46 处各有具名读面**；
+   * 剩下这两处是**真实的承载面欠账**（写模型仍是旧文档 + 文件格式的原地写），
+   * 故它们必须**可见、可数、有 owner** —— 而不是散在 46 处里看不见。
+   *
+   * ⚠️ **不得**用它读内容事实（网格/注解/材质/帧/说明/元数据/产物 plain）。
+   * 那样做会让白名单闭集变成后门，而闭集正是为防这件事设的。
+   */
+  legacyDocumentModel(): RuntimeDocument | null {
+    return this.main.doc.value
+  }
+
+  /**
+   * **撤销快照令牌**（#301 P10f D3；**R8**）。
+   *
+   * ## 依据：Lead 裁决 R-WK-09 裁决 3（#250 comment 5861）逐字
+   *
+   * > 「**N10 无文档撤销**：裁 **(b) 受控双轨** —— `getDoc().value?.clone()`
+   * > 在撤销路径存续（`before=null` 表达"撤销到无文档"，内核 `pushHistory`
+   * > 只记同文档内 scene 前后态、结构性表达不了）；登记 seams 双轨
+   * > （owner=P11，退出条件=#262 复杂度对账时复审 undo 权威归一）。」
+   *
+   * ⇒ **机制保留**（能力存续），但**访问器退出**：返回值是**不透明令牌**
+   * （`runtime/documentSnapshot`），调用方拿不到 `RuntimeDocument`
+   * —— 若新面直接返回旧文档，"终删"就只是改名（#171 禁）。
+   *
+   * ## 它替代的 9 处
+   *
+   * `operators/operatorRegistry.ts`（6）、`operators/modalOperatorWrapper.ts`（1）、
+   * `operators/builtin/wikiOperators.ts:97`、`workbench/document/pipeline.ts:111`。
+   * ⚠️ 后两处的用途**不同**（保存基线而非撤销），见 {@link frozenDocumentValue}。
+   *
+   * @returns `null` = **当时没有文档**（R-WK-09 的 `before=null` 形态）
+   */
+  documentSnapshot(): DocumentSnapshot | null {
+    // 响应式依赖不需要：撤销项在**调用当刻**捕获（不是 computed/模板）。
+    return snapshotOf(this.main.doc.value)
+  }
+
+  /**
+   * **回到快照**（撤销/重做的唯一入口）。
+   *
+   * 经**同一个**唯一写者 `setDocument` ⇒ 内核装载状态镜像与内容重读信号
+   * 与其它路径**逐点一致**（`.replaceDoc(` 的 AST 白名单闸门因此仍然成立：
+   * 调用点**没有**增加）。
+   *
+   * @param token `null` ⇒ 撤销到"**无文档**"（删掉 `next` 的所有格与帧 ⇒
+   *              必须走 `setDocument(null)`，这正是 R-WK-09 说内核历史
+   *              结构性表达不了的那一态）
+   */
+  restoreDocumentSnapshot(token: DocumentSnapshot | null): void {
+    if (token === null) {
+      this.setDocument(null)
+      return
+    }
+    const doc = documentOfSnapshot(token)
+    // 令牌不认识（伪造/跨 Realm/已被实现换掉）⇒ **不**静默当成"无文档"
+    // （那会静默清空用户文档）。如实抛错：这是编程错误，不是用户输入。
+    if (doc === undefined) {
+      throw new Error('Context.restoreDocumentSnapshot: 未知的快照令牌（不是本实例发出的）')
+    }
+    this.setDocument(doc)
+  }
+
+  /**
+   * **当前文档的冻结副本**（#301 P10f D3；R8 的第二种用途）。
+   *
+   * ## 它与 {@link documentSnapshot} 的分工（**不是**同一件事）
+   *
+   * | 用途 | 面 | 为什么 |
+   * |---|---|---|
+   * | 撤销/重做回到"那一刻" | `documentSnapshot()` 令牌 | 内核历史表达不了"无文档"，且令牌不会被误当内容读 |
+   * | **保存基线**（"与哪一份内容相比是脏的"） | 本方法 | 基线的比较对象是**plain 产物**（`wikiEditSummary` 逐键比），而它的类型是外部格式边界（见下表） |
+   *
+   * ## 为什么返回值是 `RuntimeDocument`（而不是也做成令牌）
+   *
+   * `DocumentBinding.saveBaseline` 的字段类型**就是** `RuntimeDocument | null`
+   * （`workbench/document/types.ts`），由 `adapters/files/documentBinding` 读写。
+   * 把它不透明化就要改绑定层的对外类型 —— 那是**外部格式边界**，
+   * 按 D 批映射表 §一（Lead comment 6034 裁决 1）**保留**。
+   *
+   * ⇒ 本方法是该边界上**唯一**的取值口：`getDoc()` 退出后，生产里没有第二处
+   * "把旧文档交出去"的地方（由 `boundary-scan.test.ts` 的 `main.doc` 读取点
+   * 白名单闭集机械把守）。
+   */
+  frozenDocumentValue(): RuntimeDocument | null {
+    const doc = this.main.doc.value
+    return doc === null ? null : doc.clone()
+  }
+
+  /**
+   * **渲染链的旧格式源文档**（#301 P10f D3；**R9**）。
+   *
+   * ## 它是**已登记的暂存**，不是遗漏（务必连同 seam 一起读）
+   *
+   * 渲染链（DRW）消费的是**旧格式的渲染视图文档**（`RuntimeDocument`）：
+   * 多方块视口的 `renderDoc` 由 `composition/kernelRenderView#kernelRenderViewOf`
+   * 产出，而该函数的**入参与出参都是旧格式**（`assembleKernelDocument` 与
+   * `projectKernelDocument` 的既有签名决定）。
+   *
+   * ⇒ "DRW 不再吃旧格式"这件事**不是**"删一个访问器"能达成的：它要的是
+   * **渲染链终切**（DRW 消费 `PresenterSession`），而那是
+   * `composition/seams.ts` 的 `presenter-surface-dual-track`
+   * 明文登记的接缝，其终切在 D 批映射表 §八被**显式排除**
+   *（"渲染链终切……本批不做"）。
+   *
+   * ## 与旧访问器的**实质区别**（为什么这不是"改个名"）
+   *
+   * | | 旧 `getDoc()` | 本方法 |
+   * |---|---|---|
+   * | 语义 | **文档内容的权威读入口**（谁都能拿它读一切） | **渲染投影的格式输入**（唯一用途：喂 `kernelRenderViewOf`） |
+   * | 消费者 | 24 文件 / 46 处（含保存、导出、属性、拾取、撤销） | 3 处（`shared/viewport/**` 渲染链） |
+   * | 登记 | `raw-authority-object`（终删） | 新接缝 `legacy-render-source-document`（owner P11） |
+   *
+   * ⇒ **内容事实**的读取路径已全部迁到具名读面（`kernelGrid`/`kernelAnnotations`/
+   * `cellTooltips`/`documentMetadata`/`plainForSave`/…）；本方法只剩"把旧格式
+   * 交给渲染投影"这一件，且它**只能**在渲染链终切时消失。
+   *
+   * ⚠️ 调用点**必须**只把它当投影输入（读 `isMultiblock`/`id`/`multiblock.decl.raw`/
+   * `multiblockSource`），**不得**用它读内容事实 —— 那会让本接缝变成后门。
+   */
+  legacyRenderSource(): RuntimeDocument | null {
+    // 响应式依赖（消费者是 `.vue` 的 computed ⇒ 必须可追踪）。
+    return this.main.doc.value
   }
 
   /**
@@ -590,7 +1033,9 @@ export class Context {
    * ## 为什么必须收口（不是"顺手封装"）
    *
    * 内核侧的**装载状态**（`KernelSession.hasLoadedDocument()`，GF-15）必须与
-   * legacy 的 `getDoc().value` **逐点对齐**。若 21 处各写一遍"写 legacy + 镜像内核"：
+   * legacy 侧的"有没有文档"（`main.doc.value !== null`）**逐点对齐**
+   *（`getDoc()` 曾是这个事实的生产读入口，**#301 P10f D3 已终删**）。
+   * 若 21 处各写一遍"写 legacy + 镜像内核"：
    *
    *  1. 那 21 份是**会漂移的判据**（本工程已三次实测"两份实现必然漂移"）；
    *  2. **将来**任何新调用点会绕过镜像 —— 而绕过是**静默**的
@@ -763,20 +1208,20 @@ export class Context {
   /**
    * **内核会话**（#261 / R-WK-03）。
    *
-   * ## 它与 `getDoc()` 的关系（这是本批最重要的一处说明）
+   * ## 它与**文档内容读面**的关系（#301 P10f D3 更新）
    *
-   * 两者此刻**并存**，且分工明确、各有退出条件：
-   *  - `getDoc()` 是**文档内容**的读面（旧 `RuntimeDocument`）。工作台的
-   *    文档内容迁移（`kernel-property-write-dual-track` 接缝的退出条件）
-   *    需要 `ReadView` 的相机/embed 初始视图读面 + 属性写链迁移，
-   *    本批补齐了读面但**未**完成内容迁移 ⇒ 该接缝仍登记在案；
-   *  - 本方法是**时间 / 播放 / 帧下标**的读面。这一条本批**已完成**迁移：
-   *    旧 `Main.currentFrameIndex` / `Main.framesPlaybackIsPlaying` 两个
-   *    Vue Ref 已被删除，全部消费者改吃本会话（见 `retirementRegistry` 的
-   *    `world-frame-playback` 组，相位已翻 `executed`）。
+   * 旧说明写的是"`getDoc()` 与它此刻**并存**"—— 那个访问器**已终删**
+   *（46 处消费点各有具名读面，见上方 `// --- Main ---` 段的表）。
+   * 现在的事实分两半：
    *
-   * ⇒ 两件事**不是**同一件未竟工作的两半：播放/时间面已收口，
-   * 文档内容面仍开着。把它们混为一谈会让"播放已迁移"被误读成"迁移没做"。
+   * | 面 | 状态 |
+   * |---|---|
+   * | **内容面**（网格/注解/材质/帧声明/说明/元数据/产物 plain） | ✅ 各有具名读面（`kernelGrid`/`kernelAnnotations`/`kernelMaterials`/`frameDeclarations`/`cellTooltips`/`documentMetadata`/`plainForSave`） |
+   * | **写模型 + 渲染链的旧格式** | ⏳ 仍是旧文档载体（`property-write-legacy-document-model` / `legacy-render-source-document`，owner P11） |
+   * | **时间 / 播放 / 帧下标**（本方法所在的这条） | ✅ 本批之前已完成：旧 `Main.currentFrameIndex` / `Main.framesPlaybackIsPlaying` 两个 Vue Ref 已删，全部消费者改吃本会话（见 `retirementRegistry` 的 `world-frame-playback` 组，相位已翻 `executed`） |
+   *
+   * ⇒ 三件事**不是**同一件未竟工作的三半：把它们混为一谈会让"播放已迁移"
+   * 被误读成"迁移没做"，或让"读入口已终删"被误读成"旧数据模型全退了"。
    *
    * 未接线时抛错（**失败关闭**）：调用方若在没有会话的实例上调它，
    * 应立刻得到明确的失败，而不是一个"永远静止"的静默退化。
@@ -950,11 +1395,13 @@ export class Context {
    * |---|---|---|
    * | 呈现要知道"当前画第几帧" | `requireKernelSession().frameIndex()` | 派生值，与时间同源 |
    * | 呈现/面板要知道"场景时间" | `requireKernelSession().playback().time` | 时间的唯一权威 |
-   * | 选择/拾取要知道"当前帧的网格" | `ctx.getDoc().value?.frame(i)` | **文档内容**仍是旧 `RuntimeDocument`（该迁移未完成，见 `requireKernelSession` 的说明） |
+   * | 选择/拾取要知道"当前帧的网格" | `ctx.kernelGrid(i)` | **网格读面**（#301 D3；内核 `blockGrid` 载荷为权威，未装配回落旧 `Grid` —— 两种来源**归一形状**） |
    *
-   * 第三行是本条与"文档内容迁移"的分界：帧**下标**（时间面）已迁到内核，
-   * 帧**内容**（网格数据）仍读旧文档。混为一谈会让"下标已迁移"被误读成
+   * 第三行是本条与"帧下标"的分界：帧**下标**（时间面）由本会话派生，
+   * 帧**内容**（网格数据）走 `kernelGrid`。混为一谈会让"下标已迁移"被误读成
    * "内容也迁移了"。
+   * ⚠️ **#301 P10f D3 更新**：第三行原写 `ctx.getDoc().value?.frame(i)` —— 该访问器已终删，
+   * 网格读面是 `kernelGrid`（见 `runtime/gridRead`）。
    */
   /**
    * 当前帧下标（**只读**；P10 #261）。

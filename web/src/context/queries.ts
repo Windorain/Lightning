@@ -17,8 +17,11 @@ import {
   type ScenePickResult,
   type ScenePickBlock,
 } from '@/render/interaction/scenePick'
-import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
-import type { BakedQuadsGeometry } from '@/render/schema/types'
+// #301 P10f D3：`decodeBakedGeometry` 与 `BakedQuadsGeometry` 的导入**随本文件最后两处
+// legacy 读点一起退出** —— 解码与「两侧几何归一」已收进 `runtime/gridRead`（一处），
+// 不再由消费点各自解码（那正是 15 处会漂移的适配）。`BakedQuad` 仍需要：
+// 它是本查询的**返回类型**（消费点按它用）。
+import type { BakedQuad } from '@/render/schema/types'
 import { structureRowToWorldY } from '@/pure/vec'
 import {
   blockLocalPointFromWorldPoint,
@@ -72,9 +75,9 @@ function scenePickBase(ctx: Context, regionId?: string): Omit<ScenePickParams, '
 }
 
 function gridHeight(ctx: Context): number {
-  const doc = ctx.getDoc().value
-  const rf = doc?.frame(ctx.getFrameIndex())
-  return rf?.grid?.height ?? 0
+  // #301 P10f D3（R5 网格读面）：`height` 是**声明尺寸**（见 `runtime/gridRead`
+  // 的 `resolveGridSize`）—— 旧实现按包围盒推，尾层全空时会偏小 ⇒ 拾取 Y 偏移。
+  return ctx.kernelGrid(ctx.getFrameIndex())?.height ?? 0
 }
 
 /** 统一视口拾取（方块 / 注解） */
@@ -124,9 +127,8 @@ export interface PartPick {
  */
 export function pickPartForScenePick(ctx: Context, picked: ScenePickBlock): PartPick | null {
   if (!picked.point) return null
-  const doc = ctx.getDoc().value
-  const rf = doc?.frame(ctx.getFrameIndex())
-  const grid = rf?.grid
+  // #301 P10f D3（R5）：网格读面（`partsAt` 走内核 `cellContent.parts`）。
+  const grid = ctx.kernelGrid(ctx.getFrameIndex())
   if (!grid || grid.height <= 0) return null
   const worldY = structureRowToWorldY(picked.row, grid.height)
   const parts = grid.partsAt({ x: picked.column, y: worldY, z: picked.zSlice })
@@ -158,33 +160,44 @@ export function pickAll(ctx: Context, event: PointerEvent, regionId?: string) {
   return results
 }
 
-/** 获取当前帧的可变引用 */
+/**
+ * 当前帧的**声明**（`{index, label}`）。
+ *
+ * #301 P10f D3（**R4**）：改走 `ctx.frameDeclarations()` —— 帧声明的**唯一**读取面
+ * （与状态栏、帧循环**同一个函数**，故三处读数不可能不一致）。
+ *
+ * ⚠️ `index` 的取值域：本读面给的是**轴上的位置序**（与 `count`/`durationsMs`/`labels`
+ * 同一套下标）。旧实现读的是落盘在帧上的 `index` 字段 —— 两者在常规导出里相同
+ *（装配按数组序填），要落盘字段的语义请用 {@link currentFrameKey}。
+ */
 export function getCurrentFrame(ctx: Context): Frame | null {
-  const doc = ctx.getDoc().value
-  if (!doc) return null
+  const decl = ctx.frameDeclarations()
   const idx = ctx.getFrameIndex()
-  const rf = doc.frame(idx)
-  if (!rf) return null
-  return { index: rf.index, label: rf.label }
+  if (idx < 0 || idx >= decl.count) return null
+  return { index: idx, label: decl.labels[idx] ?? undefined }
 }
 
 /** 获取当前帧的 BlockRef 快照列表 */
 export function getFrameBlocks(ctx: Context): BlockRef[] {
-  const doc = ctx.getDoc().value
-  if (!doc) return []
-  const rf = doc.frame(ctx.getFrameIndex())
-  if (!rf?.grid) return []
-  return rf.grid.blocks().map(({ pos, block }) => ({
-    pos: { x: pos.x, y: pos.y, z: pos.z },
-    block_state_id: `minecraft:${block.name}:${block.meta}`,
+  const grid = ctx.kernelGrid(ctx.getFrameIndex())
+  if (!grid) return []
+  // `kernelGrid` 的 `name`/`meta` 与旧 `SlotBlock` **同源同形**
+  //（`blockGrid.cells` 的值就是 GF-7 的 `minecraft:<name>:<meta>`）⇒ 构造式逐字不变。
+  return grid.blocks().map((cell) => ({
+    pos: { x: cell.pos.x, y: cell.pos.y, z: cell.pos.z },
+    block_state_id: `minecraft:${cell.name}:${cell.meta}`,
   }))
 }
 
-/** 获取完整的场景文档（用于 annotations、labels 等顶层集合的访问） */
+/**
+ * 获取完整的场景文档 plain（用于 annotations、labels 等顶层集合的访问）。
+ *
+ * #301 P10f D3（**R3**）：改吃 `ctx.plainForSave()` —— 保存/导出的**唯一**产物入口
+ *（内核投影优先，未装配回落旧文档）。产物等价已由 D2 的
+ * `composition/__tests__/p10fSaveProjection.test.ts`（52 tests）在四份真实夹具上把守。
+ */
 export function getDocument(ctx: Context): Record<string, unknown> | null {
-  const doc = ctx.getDoc().value
-  if (!doc) return null
-  return doc.serialize() as Record<string, unknown>
+  return ctx.plainForSave().plain as Record<string, unknown> | null
 }
 
 /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
@@ -192,11 +205,9 @@ export function gridCenterWorld(
   ctx: Context,
   pos: { x: number; y: number; z: number },
 ): { x: number; y: number; z: number } | null {
-  const doc = ctx.getDoc().value
-  if (!doc) return null
-  const rf = doc.frame(ctx.getFrameIndex())
-  if (!rf?.grid) return null
-  return rf.grid.centerWorld(pos)
+  const grid = ctx.kernelGrid(ctx.getFrameIndex())
+  if (!grid) return null
+  return grid.centerWorld(pos)
 }
 
 /**
@@ -209,9 +220,10 @@ export function gridCenterWorld(
  * 消费方：B-5 的物品点选高亮（`pure/itemOutlinePlan.ts#planItemOutlineHits` 的帧过滤）。
  */
 export function currentFrameKey(ctx: Context): number {
-  const doc = ctx.getDoc().value
+  // #301 P10f D3（R4）：帧声明的唯一读取面。⚠️ 落盘字段 `RuntimeFrame.index`
+  // 与轴上下标在常规导出里相同（装配按数组序填），本读面用轴下标 —— 语义见文件头。
   const i = ctx.getFrameIndex()
-  return doc?.frame(i)?.index ?? i
+  return i
 }
 
 /**
@@ -249,13 +261,13 @@ export function listMaterials(ctx: Context): MaterialQueryItem[] {
 /** 当前帧按 materialId 统计方块数量 */
 export function getMaterialUsageCounts(ctx: Context): Record<string, number> {
   const counts: Record<string, number> = {}
-  const doc = ctx.getDoc().value
-  if (!doc) return counts
-  const rf = doc.frame(ctx.getFrameIndex())
-  if (!rf?.grid) return counts
-  rf.grid.forEach((_pos, block) => {
-    if (block.paletteIndex !== undefined) {
-      const key = String(block.paletteIndex)
+  const grid = ctx.kernelGrid(ctx.getFrameIndex())
+  if (!grid) return counts
+  // `paletteIndex` 是**文件槽位**（`blockGrid.cellPaletteIndex` 承载，见 `runtime/gridRead`）
+  // —— 本函数按它分组，故读面必须给出**同一个数**（R-WK-09 裁决 4：不改下游键口径）。
+  grid.forEach((cell) => {
+    if (cell.paletteIndex !== undefined) {
+      const key = String(cell.paletteIndex)
       counts[key] = (counts[key] ?? 0) + 1
     }
   })
@@ -265,12 +277,10 @@ export function getMaterialUsageCounts(ctx: Context): Record<string, number> {
 /** 当前帧方块类型统计 (block_state_id → 计数) */
 export function getBlockTypeStats(ctx: Context): Record<string, BlockTypeStat> {
   const stats: Record<string, BlockTypeStat> = {}
-  const doc = ctx.getDoc().value
-  if (!doc) return stats
-  const rf = doc.frame(ctx.getFrameIndex())
-  if (!rf?.grid) return stats
-  rf.grid.forEach((_pos, block) => {
-    const id = `minecraft:${block.name}:${block.meta}`
+  const grid = ctx.kernelGrid(ctx.getFrameIndex())
+  if (!grid) return stats
+  grid.forEach((cell) => {
+    const id = `minecraft:${cell.name}:${cell.meta}`
     const entry = stats[id]
     if (entry) {
       entry.count += 1
@@ -286,14 +296,14 @@ export function getBlockPaletteEntry(
   ctx: Context,
   pos: { x: number; y: number; z: number },
 ) {
-  const doc = ctx.getDoc().value
-  if (!doc) return null
-  const rf = doc.frame(ctx.getFrameIndex())
-  if (!rf?.grid) return null
-  const block = rf.grid.at(pos)
-  if (!block || block.paletteIndex === undefined) return null
-  const cache = rf.grid.getPaletteCache()
-  return cache.get('#' + String(block.paletteIndex)) ?? null
+  const grid = ctx.kernelGrid(ctx.getFrameIndex())
+  if (!grid) return null
+  const cell = grid.at(pos)
+  if (!cell || cell.paletteIndex === undefined) return null
+  // 旧实现经 `PaletteCache.get('#' + paletteIndex)` 取条目；读面按**内容键精确命中**
+  //（内核侧）/ `PaletteCache`（legacy 侧）给出**同一份条目** —— 差异只在承载方式。
+  const entry = grid.paletteEntryOf(pos)
+  return entry === null ? null : (entry.raw as Record<string, unknown>)
 }
 
 /** 获取方块位置的模型几何数据（解码后的 BakedQuad[]），用于精确轮廓描边 */
@@ -301,20 +311,13 @@ export function getBlockGeometry(
   ctx: Context,
   pos: { x: number; y: number; z: number },
 ) {
-  const doc = ctx.getDoc().value
-  if (!doc) return null
-  const rf = doc.frame(ctx.getFrameIndex())
-  if (!rf?.grid) return null
-  const block = rf.grid.at(pos)
-  if (!block || block.paletteIndex === undefined) return null
-  const cache = rf.grid.getPaletteCache()
-  const meta = cache.get('#' + String(block.paletteIndex))
-  if (!meta?.geometry) return null
-  try {
-    return decodeBakedGeometry(meta.geometry as BakedQuadsGeometry)
-  } catch {
-    return null
-  }
+  const grid = ctx.kernelGrid(ctx.getFrameIndex())
+  if (!grid) return null
+  const cell = grid.at(pos)
+  if (!cell || cell.paletteIndex === undefined) return null
+  // 读面已经把两侧的几何**归一**为解码后的四边形（内核资产 `quads` / legacy 原文解码），
+  // 且解码失败与旧实现同样给 `null`（不抛）—— 见 `runtime/gridRead#quadsOfLegacyGeometry`。
+  return grid.geometryOf(pos) as BakedQuad[] | null
 }
 
 /** 获取方块位置的部件列表（契约 §3；无部件 ⇒ null，只读视图勿改） */
@@ -322,11 +325,7 @@ export function getPartsAt(
   ctx: Context,
   pos: { x: number; y: number; z: number },
 ): readonly PartRecord[] | null {
-  const doc = ctx.getDoc().value
-  if (!doc) return null
-  const rf = doc.frame(ctx.getFrameIndex())
-  if (!rf?.grid) return null
-  return rf.grid.partsAt(pos)
+  return ctx.kernelGrid(ctx.getFrameIndex())?.partsAt(pos) ?? null
 }
 
 /**

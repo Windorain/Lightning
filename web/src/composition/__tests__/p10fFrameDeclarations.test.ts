@@ -68,7 +68,11 @@ function adoptedFramesOf(session: KernelSession): FrameDeclarationSet | null {
   const kdoc = session.document()
   if (kdoc === undefined) return null
   const frames = kdoc.content.frameAxis.frames
-  return { count: frames.length, durationsMs: frames.map((f) => f.durationMs ?? 0) }
+  return {
+    count: frames.length,
+    durationsMs: frames.map((f) => f.durationMs ?? 0),
+    labels: frames.map((f) => f.label),
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,24 +81,30 @@ function adoptedFramesOf(session: KernelSession): FrameDeclarationSet | null {
 
 describe('C′1 · D8 ① 纯函数三态（`resolveFrameDeclarations`）', () => {
   it('装配成功 ⇒ 内核为权威（source=kernel）', () => {
-    const r = resolveFrameDeclarations({ count: 432, durationsMs: [50] }, { count: 1, durationsMs: [1] })
+    const r = resolveFrameDeclarations(
+      { count: 432, durationsMs: [50], labels: [null] },
+      { count: 1, durationsMs: [1], labels: [null] },
+    )
     expect(r.source).toBe('kernel')
     expect(r.count).toBe(432)
   })
 
   it('**装配失败（adopted=null）⇒ 回落 legacy**（这正是 D8 修复要恢复的路径）', () => {
-    const r = resolveFrameDeclarations(null, { count: 12, durationsMs: [50] })
+    const r = resolveFrameDeclarations(null, { count: 12, durationsMs: [50], labels: ['\u7b2c 0 \u5e27'] })
     expect(r.source, '未装配成功 ⇒ 必须回落 legacy，而不是返回 0').toBe('legacy')
     expect(r.count, '帧数必须是 legacy 的 12').toBe(12)
   })
 
   it('两者皆无 ⇒ `count: 0`，来源报 legacy（"没有文档"是 legacy 侧的事实）', () => {
     const r = resolveFrameDeclarations(null, null)
-    expect(r).toEqual({ count: 0, durationsMs: [], source: 'legacy' })
+    expect(r).toEqual({ count: 0, durationsMs: [], labels: [], source: 'legacy' })
   })
 
   it('**反空洞真**：装配产物**真的声明 0 帧**时，仍以内核为权威（0 是真实答案，不是回落）', () => {
-    const r = resolveFrameDeclarations({ count: 0, durationsMs: [] }, { count: 12, durationsMs: [50] })
+    const r = resolveFrameDeclarations(
+      { count: 0, durationsMs: [], labels: [] },
+      { count: 12, durationsMs: [50], labels: [null] },
+    )
     expect(r.source, '装配成功且声明 0 帧 ⇒ 内核权威（不得被误当成"没装配"而回落）').toBe('kernel')
     expect(r.count).toBe(0)
   })
@@ -119,7 +129,7 @@ describe('C′1 · D8 ② **装配失败注入**（走生产 `adoptLoadedDocumen
       )
       expect(ok, '前置：本夹具装配必须成功').toBe(true)
       expect(session.hasAdoptedContent(), 'GF-16 = true').toBe(true)
-      const r = resolveFrameDeclarations(adoptedFramesOf(session), { count: 1, durationsMs: [1] })
+      const r = resolveFrameDeclarations(adoptedFramesOf(session), { count: 1, durationsMs: [1], labels: [null] })
       expect(r.source).toBe('kernel')
       expect(r.count, '应为内核声明的帧数').toBe(parsed.document!.frameCount)
     } finally {
@@ -143,7 +153,11 @@ describe('C′1 · D8 ② **装配失败注入**（走生产 `adoptLoadedDocumen
       ).toBe(false)
 
       // **判据本体**：帧数必须是 legacy 的 12，而不是缺陷时的 0
-      const legacy: FrameDeclarationSet = { count: 12, durationsMs: new Array(12).fill(50) }
+      const legacy: FrameDeclarationSet = {
+        count: 12,
+        durationsMs: new Array(12).fill(50),
+        labels: new Array(12).fill(null),
+      }
       const r = resolveFrameDeclarations(adoptedFramesOf(session), legacy)
       expect(r.source, '装配失败 ⇒ 回落 legacy').toBe('legacy')
       expect(
@@ -229,7 +243,14 @@ describe('C′1 · D8 ③ `Context.frameDeclarations` 委托判定（不得内�
 
   it('**反空洞真**：纯函数确实被生产调用（不是测试里才用）', () => {
     // 上一条已断言 `Context` 调用它；此处再确认它不是"只被测试引用"的死代码。
-    const r = resolveFrameDeclarations({ count: 3, durationsMs: [1, 2, 3] }, null)
+    const r = resolveFrameDeclarations(
+      { count: 3, durationsMs: [1, 2, 3], labels: ['a', null, 'c'] },
+      null,
+    )
     expect(r.count).toBe(3)
+    // #301 P10f D3（R4）：`labels` 与 `count`/`durationsMs` **同源**（同一份轴）——
+    // 故它必须经同一处分流，而不是被某条分支悄悄丢掉（丢标签是静默的：
+    // 帧标签只影响展示，不会让任何断言变红）。
+    expect(r.labels, 'labels 必须随 count 一起透传').toEqual(['a', null, 'c'])
   })
 })

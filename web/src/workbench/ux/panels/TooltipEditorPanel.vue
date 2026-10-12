@@ -20,8 +20,8 @@ const blockName = computed(() => blockRef.value?.block_state_id ?? '(未选中)'
 const h = computed(() => {
   const item = blockRef.value
   if (!item) return 0
-  const g = props.ctx.getDoc().value?.frame(0)?.grid
-  return g?.height ?? 0
+  // #301 P10f D3（R5）：网格读面。帧下标**逐字保留 `0`**（旧实现即 `frame(0)`）。
+  return props.ctx.kernelGrid(0)?.height ?? 0
 })
 
 const text = ref('')
@@ -30,12 +30,14 @@ const focused = ref(false)
 function loadValue(): void {
   const item = blockRef.value
   if (!item) { text.value = ''; return }
-  const doc = props.ctx.getDoc().value as Record<string, any> | null
-  const grid = doc?.cellTooltipGrid as number[][][] | undefined
-  if (!grid) { text.value = ''; return }
+  // #301 P10f D3（R6）：逐格说明有**自己**的读面（内容键 → 侧表的投影在
+  // `runtime/tooltipRead`，与保存投影**同一条**取载荷规则 ⇒ 面板看到的 == 存出来的）。
+  const tips = props.ctx.cellTooltips()
+  if (!tips) { text.value = ''; return }
   // #80 修复：缺 tooltipPalette 按**空调色板**处理（写入侧会新建），不再把
   // "调色板缺省"当"无说明层"短路——否则面板上写入的内容读不回，表现为"接受了输入"。
-  const palette = (doc?.tooltipPalette as string[] | undefined) ?? []
+  const grid = tips.grid
+  const palette = tips.palette
   const row = h.value > 0 ? h.value - 1 - item.pos.y : item.pos.y
   const idx = grid[item.pos.z]?.[row]?.[item.pos.x]
   if (idx == null || idx < 0 || idx >= palette.length) { text.value = ''; return }

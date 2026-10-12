@@ -347,6 +347,19 @@ describe('#333 · 负对照（证明上面的判据真的在测"回写"）', () 
     const ctx = makeWorkbenchContext(docRef, fresh)
     try {
       expect(fresh.hasAdoptedContent(), '前提：未装配').toBe(false)
+      // ⚠️ **必须镜像存在性**（#301 P10f D3 暴露的一处替身失真）
+      //
+      // 生产里"装上一份文档"是**一次** `Context.setDocument`：它先 `replaceDoc`
+      //（写 `main.doc`）**再** `kernel.markLoaded()`。本宿主直接注入 `main.doc`，
+      // 跳过了后者 ⇒ `hasLoadedDocument()` 会返回 **false**（内核侧不知道自己已装载），
+      // 于是 `targetFacts` 判 `exists:false` ⇒ 提交被拒 **'rejected'**。
+      //
+      // 那是**替身失真**，不是生产行为：补上镜像这一半即可（与 `kernelReadTestHost`
+      // 的 `swapDocument` 同一处置 —— 那里早已这样做，见其注释"若替身只改 docRef，
+      // 会假绿"）。
+      fresh.markLoaded()
+      expect(ctx.hasLoadedDocument(), '前提：镜像后 GF-15 = true').toBe(true)
+      expect(fresh.hasAdoptedContent(), 'GF-16 仍为假（有文档但未装配）').toBe(false)
       const outcome = panelCommit(ctx, 0, 1, 0, '回落写的')
       expect((outcome as { status: string }).status, '未装配时旧路径照常能写').toBe('applied')
       // ⚠️ 回落分支（`property-writers#writeBlockProperty`）用的是**它自己的**

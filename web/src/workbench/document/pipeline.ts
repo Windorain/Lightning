@@ -108,11 +108,13 @@ export function afterDocumentSave(
   bindingRef: DocumentBindingRef,
   revisionId: number | null | undefined,
 ): void {
-  const doc = ctx.getDoc().value
+  // #301 P10f D3（R8 的第二种用途）：保存基线是**外部格式边界**的值
+  //（`DocumentBinding.saveBaseline: RuntimeDocument | null`）⇒ 走冻结副本取值口。
+  const doc = ctx.frozenDocumentValue()
   const b = bindingRef.value
   bindingRef.value = {
     ...b,
-    saveBaseline: doc?.clone() ?? null,
+    saveBaseline: doc,
     remoteRevisionId: revisionId ?? b.remoteRevisionId,
   }
   ctx.getEditHistory().clear()

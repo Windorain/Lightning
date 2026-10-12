@@ -74,12 +74,281 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     newTrack:
       '内核侧唯一写入口：#253 的 `reduceCommand` → `reduceSetProperty` → RNA 注册表 + `applySetProperty`（`application/kernel-properties.ts` 注册 block/annotation/camera 的属性语义）',
     oldTrack:
-      '实时工作台的面板写路径仍落在**旧运行时文档**上：`editors/workbench-rna.ts` 的 `submitPropertyWrite`/`documentStateOf` 经 `ctx.getDoc()` 读文档，而 `runtime/context.ts` 的 `getDoc()` 类型是旧 `RuntimeDocument`（`getDoc(): Ref<RuntimeDocument | null>`），再包成 `DocumentState` 传给 `applySetProperty`。机制已是同一套（同一个 RNA 表与同一个原子写路由），但**数据模型**仍是旧的 `RuntimeDocument` 而非内核的 `Scene`/`Document`。',
+      '实时工作台的面板写路径仍落在**旧运行时文档**上：`editors/workbench-rna.ts` 的'
+      + ' `documentStateOf` 造 `DocumentState` 时取旧 `RuntimeDocument`（`DocumentState.document` 的'
+      + ' 字段类型就是它），再传给 `applySetProperty`。机制已是同一套（同一个 RNA 表与同一个原子写路由），'
+      + '但**数据模型**仍是旧的 `RuntimeDocument` 而非内核的 `Scene`/`Document`。\n'
+      + '⚠️ **D3 更新**：取值口已不再是 `ctx.getDoc()`（**该访问器已终删**），'
+      + ' 而是具名取值口 `Context#legacyDocumentModel()`（见 `property-write-legacy-document-model`）。',
     blocker:
       '**R-WK-04（#250，2026-10-11）**：把实时工作台从 `RuntimeDocument` 迁到内核 `Document` 需要"旧文档 → 内核场景"装配 —— #261 实测内核 `Document` 只承载 block/annotation/camera/mesh，不承载 `frames`/`cellGrid`/`textureBlobs`/`materialPalette`/`multiblock`/`meta`，而渲染链（21 个 `render/` 文件）按后者工作；全树没有任何生产代码从旧场景文件构造内核 `Scene`。故该装配是**架构新增**而非集成收口，归 **#282（P10b）**。#261 已完成的是宿主驱动接线与 `ReadView` 读面补齐（相机组 + 播放读面），见 `runtime/kernelSession`。',
     owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
     exitCondition:
-      '`src/runtime/context.ts` 的 `getDoc()` 不再返回 `RuntimeDocument`（类型改为内核 `Document`），且 `src/editors/workbench-rna.ts` 的 `documentStateOf` 直接由内核 `Document` 构造 `DocumentState`（不再有 `RuntimeDocument`）。届时删除本条登记。**执行批次：#282（R-WK-04）**。',
+      '**①✅ 已成立（#301 P10f D3）**：`src/runtime/context.ts` 的 `getDoc()` **已删除**'
+      + '（判据本尊口径：`getDoc` 全树 0 命中；该访问器曾是"文档内容的权威读入口"，'
+      + ' 46 处消费点已各有具名读面 —— 见 `Context` 的 `// --- Main ---` 段）。\n'
+      + '**②⏳ 未成立**：`src/editors/workbench-rna.ts` 的 `documentStateOf` 仍由旧文档构造'
+      + ' `DocumentState`（`DocumentState.document` 的类型是 `RuntimeDocument`）。'
+      + '**本批按 Lead 裁决 D-5 收窄改写**：兑现①、②的完整内核化**另立**登记'
+      + ' `property-write-legacy-document-model`（owner P11）—— 兑现②需要**块身份写命令**'
+      + '（实测：`Command` 联合有 `setCellTooltip`、**无** `setCellContent`）'
+      + ' + RNA 描述符 + 写端口，是**承载面新增**，超出 D3「终删」范围。\n'
+      + '⇒ 本条**保留登记**（②未兑现），但它的 `oldTrack` 已不再是"`getDoc()` 读入口"。',
+  }),
+  /**
+   * P10f D3（#301）登记：**属性写的数据模型仍是旧文档**（D-5 裁决的剩余半边）。
+   *
+   * ## 它与 `kernel-property-write-dual-track` 的关系（不是重复登记）
+   *
+   * 那条接缝的原 `exitCondition` 有**两个子句**：
+   *  ① `getDoc()` 不再返回旧文档 —— **D3 已兑现**（访问器终删）；
+   *  ② `documentStateOf` 由内核 `Document` 构造 —— **未兑现**。
+   *
+   * D3 按 Lead 裁决（comment 6228）**收窄**那条（只留②），并把②的完整内核化
+   * **另立本条**（owner P11）。分开的理由是**可核对**：①的判据是"零命中"
+   *（已绿），②的判据是"`Command` 联合有块身份写命令"（**未**存在）——
+   * 混在一条里会让"①已达成"被误读成"整条已达成"。
+   *
+   * ## 为什么本批**不**兑现②（实测，不是工作量）
+   *
+   * ```
+   * application/commands.ts 的 Command 联合（实测 `readonly kind:` 全部命中）：
+   *   setTransform / addObject / deleteObject / setCellTooltip / beginInteraction /
+   *   updateInteraction / commitInteraction / cancelInteraction / select / setTime /
+   *   setPlaying / setPlaybackRate / advancePlayback / setChannelValue /
+   *   insertKeyframe / removeKeyframe / setTrackEnabled / publishDefault /
+   *   undo / redo / save / saveCompleted / openDocument / closeDocument
+   * ⇒ **没有**任何写"块身份 / 网格格内容"的命令（`setCellTooltip` 只写说明）。
+   * ```
+   *
+   * 而 `editors/property-writers#writeBlockProperty` 要写的正是**方块身份**
+   *（`SlotBlock.name`/`meta`）与**格内容**。⇒ 兑现② = 新增命令 + RNA 描述符 +
+   * 写端口，是**承载面新增**（GF-13 最小集在 C′2 只交付到 `setCellTooltip`），
+   * 超出 D3「终删 `getDoc()`」的范围。
+   */
+  Object.freeze({
+    id: 'property-write-legacy-document-model',
+    files: Object.freeze([
+      'src/editors/workbench-rna.ts',
+      'src/editors/property-writers.ts',
+      'src/application/commands.ts',
+    ]),
+    newTrack:
+      '内核 `Document` + `Command` 联合 + `reduceSetProperty`：属性语义查同一个 RNA 注册表、'
+      + '写入走同一个 `applySetProperty` 原子路由（多选一失败整批拒、逐目标原因）—— 机制已收敛。',
+    oldTrack:
+      '`editors/property-writers#DocumentState` 的 `document` 字段类型是'
+      + ' **旧 `RuntimeDocument`**，由 `editors/workbench-rna#documentStateOf` 经'
+      + ' 具名取值口 `Context#legacyDocumentModel()` 取（`getDoc()` 已终删）。'
+      + '⇒ 面板属性写的**数据模型**仍是旧文档。',
+    blocker:
+      '`Command` 联合**无**块身份/格内容写命令（实测 24 个成员，`setCellTooltip` 只写说明）'
+      + ' ⇒ 完整内核化需要：① 新写命令（`setCellContent` 家族，GF-13 扩展）；'
+      + ' ② `application/kernel-properties.ts` 的块身份属性描述符；'
+      + ' ③ `editors/property-writers#writeBlockProperty` 的内核分支。'
+      + ' 三件都是**承载面/写面新增**。',
+    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
+    exitCondition:
+      '`src/editors/property-writers.ts` 的 `DocumentState.document` 的类型不再是'
+      + ' `RuntimeDocument`（改为内核 `Document` 或 `ApplicationState`），'
+      + '且 `src/editors/workbench-rna.ts` 的 `documentStateOf` 不再取旧文档 '
+      + '⇒ 届时删除本条登记，并核销 `kernel-property-write-dual-track` 的子句②。',
+  }),
+  /**
+   * P10f D3（#301）登记：**网格的原地编辑句柄**（B′ 撤回理由①的落点）。
+   *
+   * ## 为什么它**不能**用网格读面（B′ 的实测，必须留下）
+   *
+   * `operators/builtin/moveTranslate` 把 grid 捕获进撤销项的 `execute`/`undo`
+   * 闭包并调 `grid.moveBlock(from, to)` **原地改**。而读面（`Context#kernelGrid`）
+   * **每次新建**一个视图对象（内核分支更是由不可变载荷算出来的）⇒ 在它上面
+   * `moveBlock` 的改动**静默丢失**（不报错、不改盘、用户看不到变化）。B′ 探针实测：
+   *
+   * ```
+   * legacy  frame(0).grid === frame(0).grid   → true   （同一对象，写入留存）
+   * 读面    gridOf(doc,0) === gridOf(doc,0)   → false  （每次新建）
+   * ```
+   *
+   * ⇒ 本批给它一个**具名**编辑句柄（`Context#legacyGridForEdit`），
+   * 而不是让它在读面上写（那会静默无效），也不是把读面做成有状态缓存
+   * （那会让"读到的是快照"这一保证消失）。
+   */
+  Object.freeze({
+    id: 'legacy-grid-edit-handle',
+    files: Object.freeze([
+      'src/runtime/context.ts',
+      'src/runtime/gridRead.ts',
+      'src/operators/builtin/moveTranslate.ts',
+    ]),
+    newTrack:
+      '只读网格读面 `Context#kernelGrid(frameIndex)` → `runtime/gridRead#KernelGridView`'
+      + '（内核 `blockGrid` 载荷为权威，未装配回落旧 `Grid`，**两种来源归一形状**）。'
+      + '它是 15 处内容读取的统一入口（尺寸/格/部件/条目/几何/说明）。',
+    oldTrack:
+      '`src/operators/builtin/moveTranslate.ts` 经**具名编辑句柄**'
+      + ' `Context#legacyGridForEdit(frameIndex)` 取旧 `Grid` 并 `moveBlock`'
+      + '（写路径；句柄带 `moveBlock`，读面**没有**该方法 —— 结构上让"在读面上写"写不出来）。',
+    blocker:
+      '`Command` 联合**无**移动格的命令（GF-13 最小集在 C′2 只到 `setCellTooltip`）'
+      + ' ⇒ 该写路径此刻无法迁到内核；改走读面会让写入静默丢失（#171 禁止的能力回退）。',
+    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
+    exitCondition:
+      '`src/application/commands.ts` 的 `Command` 联合含 `moveCells`'
+      + '（或等价的块移动命令），且 `src/operators/builtin/moveTranslate.ts`'
+      + ' 经 `Context#submitContentEdit` 发起移动、不再持有旧 `Grid`'
+      + '（`src/runtime/gridRead.ts` 的 `LegacyGridLike` 随之下线）'
+      + '⇒ 届时删除 `Context#legacyGridForEdit` 与本条登记。',
+  }),
+  /**
+   * P10f D3（#301）登记：**渲染链的旧格式源文档**（渲染链终切的接缝）。
+   *
+   * ## 为什么它必须留下（D 批映射表 §八明文排除）
+   *
+   * DRW 消费的是**旧格式的渲染视图文档**：多方块视口的 `renderDoc` 由
+   * `composition/kernelRenderView#kernelRenderViewOf` 产出，而该函数的**入参与出参
+   * 都是旧格式**（`assembleKernelDocument` 与 `projectKernelDocument` 的既有签名决定）。
+   * 故"DRW 不再吃旧格式"**不是**"删一个访问器"能达成的 —— 它要的是**渲染链终切**
+   *（DRW 消费 `PresenterSession`），而那是 `presenter-surface-dual-track` 登记的接缝，
+   * 其终切在 D 批映射表 §八被**显式排除**。
+   *
+   * ## 与旧 `getDoc()` 的**实质区别**（这是判据要能区分的事）
+   *
+   * | | 旧 `getDoc()` | 本读面 |
+   * |---|---|---|
+   * | 语义 | 文档内容的**权威读入口** | **渲染投影的格式输入** + 外部格式事实（声明内层 body / 文件格式版本） |
+   * | 消费者 | 46 处 / 18 文件（保存/导出/属性/拾取/撤销**全在内**） | 3 处（`shared/viewport/**`）+ 1 处（`workbench-rna` 的多方块生成态判定）+ e2e 观测 |
+   * | 判据 | 无（它就是权威） | 由 `boundary-scan` 的**白名单**钉住调用者 |
+   */
+  Object.freeze({
+    id: 'legacy-render-source-document',
+    files: Object.freeze([
+      'src/runtime/context.ts',
+      'src/shared/viewport/useViewportRuntime.ts',
+      'src/shared/viewport/useKernelChannels.ts',
+      'src/shared/viewport/EmbedViewport.vue',
+      'src/editors/workbench-rna.ts',
+    ]),
+    newTrack:
+      '内核求值 → 呈现：`composition/kernelRenderView#kernelRenderViewOf` 用'
+      + ' `assembleKernelDocument` + `projectKernelDocument` 产出渲染视图（P10d D2 交付，'
+      + ' 逐三角形一致已验）；`composition/presenterSession#PresenterSession` 已有生产实现。',
+    oldTrack:
+      'DRW 的文档来源仍是旧格式 `RuntimeDocument`，经具名读面 '
+      + '`Context#legacyRenderSource()` 取（`useViewportRuntime` 的 `docRef`、'
+      + ' `useKernelChannels` 的 `decl`/`multiblockSource`、`EmbedViewport` 的 `useEmbedTooltip` 入参、'
+      + ' `workbench-rna` 的多方块生成态判定）。⚠️ 该读面**也**承载两件"外部格式事实"：'
+      + ' 多方块**声明内层 body**（`multiblockSource`，内核不承载）与**文件格式版本**'
+      + '（`formatVersion`，与内核装配面的 `schemaVersion` 是**不同编号**）。',
+    blocker:
+      '画面终切需要"DRW 消费 `PresenterSession`"的整体切换，其前置为材质统一'
+      + '（呈现层是 `MeshBasicMaterial`，legacy 是贴图材质库）与注解/描边统一 ——'
+      + ' 缺任一条即"切换后画面变平"（可感知回退，#171 禁止）。'
+      + ' D 批映射表 §八逐字排除本批做渲染链终切。',
+    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
+    exitCondition:
+      '`src/shared/viewport/useViewportRuntime.ts` 的 `docRef` 不再吃旧格式文档'
+      + '（DRW 消费 `PresenterSession` 产出）、且 `src/editors/workbench-rna.ts` 的'
+      + ' 多方块生成态判定与 `src/shared/viewport/useKernelChannels.ts` 的声明读取'
+      + '都不再经 `Context#legacyRenderSource()`（声明内层 body 与文件格式版本'
+      + ' 由内核或专门适配面承载）⇒ 届时删除该读面与本条登记。',
+  }),
+  /**
+   * P10f D3（#301）登记：**旧文档的原地编辑**（`meta.embed_initial_view` 写）。
+   *
+   * ## 为什么它不能用"克隆 + `setDocument`"（实测的信号面差异）
+   *
+   * `context/captureEmbedInitialView#capturePreviewToDocument` 抓取预览视口相机后
+   * 写 `doc.meta[embed_initial_view]`，而 `context/embedInitialView#setDocumentEmbedInitialView`
+   * 的语义**就是原地改**。
+   *
+   * | 方案 | 后果 |
+   * |---|---|
+   * | 传克隆（`frozenDocumentValue()`） | 写入**静默丢失**（改的是副本，没人用） |
+   * | 克隆 + `setDocument(clone)` | `main.replaceDoc` 会 bump `contentRefreshTick` **与** `documentRevision` ⇒ `EmbedViewport.vue` 的 `watch(getDocumentRevision)` 把 `didInitCamera` 重置 ⇒ **相机自动初始化被重置**（可感知行为变更） |
+   * | **本体**（本条） | 与收口前**逐字节相同**（原地改 meta，不 bump 任何信号） |
+   */
+  Object.freeze({
+    id: 'legacy-document-in-place-edit',
+    files: Object.freeze([
+      'src/runtime/context.ts',
+      'src/context/captureEmbedInitialView.ts',
+      'src/context/embedInitialView.ts',
+    ]),
+    newTrack:
+      '**替换式**编辑一律走"克隆 + `Context#setDocument`"（`frozenDocumentValue()`'
+      + ' 给克隆、`setDocument` 是唯一写入口，语义见其 `intent` 参数）。',
+    oldTrack:
+      '`src/context/captureEmbedInitialView.ts` 经具名取值口 '
+      + '`Context#legacyDocumentModel()` 取**本体**并原地写 `doc.meta`'
+      + '（`setDocumentEmbedInitialView` 的语义就是原地改）。',
+    blocker:
+      '`meta.embed_initial_view` 是**文件格式**的键，内核内容面（`DocumentContent`）'
+      + '不承载它 ⇒ 换成"克隆 + `setDocument`"会改变信号面（见上表），'
+      + '而改成内核命令需要先有"写文档 meta"的命令（`Command` 联合无此类成员）。',
+    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
+    exitCondition:
+      '`meta.embed_initial_view` 由内核内容面或专门适配面承载，'
+      + '且 `src/context/captureEmbedInitialView.ts` 不再取旧文档本体'
+      + '（`src/runtime/context.ts` 的 `legacyDocumentModel()` 在本用途上零调用）'
+      + '⇒ 届时核销本用途；若 `property-write-legacy-document-model` 也已核销，'
+      + '则该取值口可整体删除。',
+  }),
+  /**
+   * P10f D3（#301）登记：**等轴 PNG 导出仍走旧烘焙链**（D-8 实测驱动的收窄）。
+   *
+   * ## 为什么本批**不**把它切到 `ExportJob`（实测，不是工作量）
+   *
+   * 任务书第 5 项的字面是"四命令迁 `ExportJob`"，Lead 裁决 D-8 取 (甲)
+   * （ISO PNG 走 `ExportJob`、其余三命令保持 `plainForSave`）。**接线前实测推翻了"低风险"这一前提**：
+   *
+   * | 事实 | 证据 |
+   * |---|---|
+   * | 现路径**带贴图** | `workbench/exportIsometricImage#bakeIsometricStructurePngDataUrl` 先 `buildMaterialLibrary(document)`，再 `buildBlockMesh(definition, materialLibrary, …)` ⇒ 真材质库 |
+   * | `ExportJob` 路径**默认无贴图** | `adapters/export/offscreenRenderPort` 的 `textures?: TexturePort`，注释逐字："缺省 = 材质走 **中性色**" |
+   * | 没有可交出去的生产 `TexturePort` | 全树 `TexturePort` 的**唯一**生产消费者是 `composition/presenterSession`（**视口作用域**，从活视口取资源）。把它交给导出作业正是 A29 要防的"导出借用实时视口" |
+   *
+   * ⇒ 现在切过去，产出的等轴 PNG 会**失去贴图**（画面变平）—— 那是**可感知的能力回退**，
+   * #171 明令禁止。而 `e2e/export-ports.spec.ts` 的现有证据证的是**端口链**
+   *（内容包围盒 + 透视相机 + 合成探针），**不覆盖**等轴方向的语义与画面质量
+   * ⇒ 我原先给 D-8 的"已有 e2e 证据"这句话**不成立**，如实更正。
+   *
+   * ## 本批做了什么
+   *
+   * - 三个非渲染产物命令（Plain / Envelope / OBJ）的**产字节**已在 D2 迁到
+   *   `Context#plainForSave()`（内核投影优先）—— D-8 的"其余保持"部分已兑现；
+   * - 等轴 PNG **保持现路径**（无能力回退），并登记本条等待前置齐备。
+   */
+  Object.freeze({
+    id: 'isometric-export-legacy-bake',
+    files: Object.freeze([
+      'src/workbench/exportIsometricImage.ts',
+      'src/operators/builtin/exportOperators.ts',
+      'src/adapters/export/snapshotExportJob.ts',
+    ]),
+    newTrack:
+      '`adapters/export/snapshotExportJob#assembleSnapshotExportJob` + '
+      + '`SnapshotOffscreenRenderPort`（取景/求值/呈现/读回/释放）+ `createEncoderPort`'
+      + '（真 PNG 字节）—— 冻结快照导出作业的**生产装配**，且已有真 GL e2e 证据'
+      + '（`e2e/export-ports.spec.ts`，2 passed / 负对照诚实失败）。',
+    oldTrack:
+      '`src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
+      + '`src/workbench/exportIsometricImage.ts#bakeIsometricStructurePngDataUrl` **自建** '
+      + '`WebGLRenderer` + `buildMaterialLibrary` + `buildBlockMesh` 烘焙等轴 PNG'
+      + '（D7 修复后 `resolveIsoDirection` 是渲染下标与文件名的**同一来源**）。',
+    blocker:
+      '`adapters/export/offscreenRenderPort` 的 `textures` 缺省 ⇒ **材质走中性色**；'
+      + '而唯一的生产 `TexturePort` 属 `composition/presenterSession`（**视口作用域**）'
+      + ' ⇒ 交给导出作业就是 A29 要防的"导出借用实时视口资源"。'
+      + ' 故切换的前置是**渲染链终切**（呈现层接管画面、材质统一）——'
+      + ' 与 `presenter-surface-dual-track` / `legacy-render-source-document` 同一前置。',
+    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
+    exitCondition:
+      '`src/adapters/export/snapshotExportJob.ts` 的装配能拿到**不借用实时视口**的生产 '
+      + '`TexturePort`（或材质统一后不再需要贴图端口），且 '
+      + '`src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
+      + '`assembleSnapshotExportJob` + `ExportJob.run()` 产出 PNG'
+      + '（同批作废 `src/workbench/exportIsometricImage.ts` 的自建渲染器路径）'
+      + ' ⇒ 届时删除本条登记。',
   }),
   /**
    * P10e（#299）登记：**呈现链与 legacy 渲染链并存**（本批的显式暂存）。
@@ -94,7 +363,8 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * ## 为什么本批**不**接管画面（切一半比不切更糟）
    *
    * 接管需要"DRW 消费内核求值产物"的整体切换，其前置为：
-   *  - 保存面从 `ctx.getDoc()` 迁到内核投影（`raw-authority-object` 终删）；
+   *  - ✅ **已兑现（#301 P10f D3）**：保存面从旧读取入口迁到内核投影
+   *    （`raw-authority-object` 相位已翻 `executed`；`getDoc()` 判据本尊口径 **0 命中**）；
    *  - 9 条**未装配内核**的加载路径补齐（实测：内核文档只在文件选择器与
    *    `documentLoadPipeline` 两条路径被填充）；
    *  - `Command` 封闭联合扩展（侧表写面）；
@@ -321,13 +591,38 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     oldTrack:
       '(a) **已接线（D1）**：源文件未知顶层字段原先只被计数、从未构造记录 ⇒ 现由 `composition/documentLoad` 经 `adapters/fidelityCapture`（深度 2）采集并交给内核会话承载。\n(b) **已统一（D1）**：保真键原先是一个**游离**方案（`lk.fidelity.v1.<文档ID>.record`，与 recovery/save 家族八处不兼容：缺 scope/instance 段、无解析器、裸 `string`、版本硬编码、空 id 静默降级、不被分类器识别）⇒ 现并入同族（`fidelityStoreKey`/`parseFidelityStoreKey`/`artifactKindOfKey`）。旧键零生产调用方 ⇒ 无迁移负担。\n(c) **已接线（D2），但本条不核销** —— "接线"与"缺口闭合"是两件事：`composition/saveProjection.ts` 已在产物侧传入 `fidelityFields`（12 处产字节节点全改吃 `ctx.plainForSave()`），且 D2 的产物等价判据（`composition/__tests__/p10fSaveProjection.test.ts` 的 ①③④⑤⑥ 组）已把"键面 + 语义面 + 逐格说明 + 材质表"两侧比对转绿；**但**保存路径的旧权威**回落分支仍在**（`Context.plainForSave` 的 `source: "legacy"`），即"`RuntimeDocument` 退出生产"这条总目标未达成 ⇒ 登记保留，退出条件收窄（见下）。',
     blocker:
-      '(c) 剩余两件（**不是**"接线"）：① 保存路径的**回落分支**（`Context.plainForSave` 未装配 ⇒ legacy `serialize()`）随 `RuntimeDocument` 一起退出 —— 归 D4 终退统战的最后一步；② 产物等价判据从"四份夹具"扩到"e2e 真实产物"（本批真实产物 spec 仍显式排除）。\n⚠️ **三处更正**（前序批次写下、后续实测推翻）：① 原写"产物侧唯一挂点 `projectKernelDocument` 生产零调用方"—— **不成立**（`kernelRenderView.ts:135` 已在生产调用它）；真正的缺口更窄：`fidelityFields` 无生产传值方。② 原写 (b) "需先统一键口径，不是接线"—— **D1 已统一**。③ 原写 (c) "D2 接线后删除本条登记"—— **改判**：接线完成 ≠ 缺口闭合（回落分支仍在）⇒ 登记**保留**、只更新文案与退出条件；核销会让"保存路径尚未终切"失去登记。',
+      '(c) 剩余两件（**不是**"接线"）：① 保存路径的**回落分支**（`Context.plainForSave` 未装配 ⇒ legacy `serialize()`）'
+      + ' —— **#301 P10f D3 评估结论：本批不核销该子句**（见下）；'
+      + '② 产物等价判据从"四份夹具"扩到"e2e 真实产物"（真实产物 spec 仍显式排除）。\n'
+      + '⚠️ **D3 对子句①的评估（Lead 任务书第 4 项要求"若未接则保留该子句登记"）**：\n'
+      + '  - **保存等价已验**（D2：`p10fSaveProjection.test.ts` 52 tests，四份真实夹具'
+      + ' 逐键/语义面/逐格说明/材质 sha256 全绿）⇒ 子句①的**前半**（"等价"）已闭；\n'
+      + '  - **但回落分支本身仍在**：`Context#plainForSave` 的 `source: "legacy"` 分支'
+      + ' 在三种情形下必然生效（无会话 / 未装配 GF-16 / 投影面不可解释）——'
+      + ' 这三种情形**不是缺陷**，而是 #171「能力不回退」的落点（内核支持不了的文档形态，'
+      + ' 旧路径照常能存）。`getDoc()` 的终删**不改变**这一点：产字节的**权威**已转到内核投影，'
+      + ' 而"未装配时回落"是**设计**。\n'
+      + '  - **另半边（L4 保真记录的持久化）仍未接**：`RecoveryStorePort`'
+      + '（`adapters/storage/memory`/`browser`）**零生产实例化**（D 映射表 §3.2 实测；'
+      + ' D3 复核仍成立 —— 全树 `createMemoryStoragePort|browserStoragePort` 只出现在 `__tests__`）。'
+      + ' ⇒ **该子句保留登记**（本批不核销，如实回报 Lead）。\n⚠️ **三处更正**（前序批次写下、后续实测推翻）：① 原写"产物侧唯一挂点 `projectKernelDocument` 生产零调用方"—— **不成立**（`kernelRenderView.ts:135` 已在生产调用它）；真正的缺口更窄：`fidelityFields` 无生产传值方。② 原写 (b) "需先统一键口径，不是接线"—— **D1 已统一**。③ 原写 (c) "D2 接线后删除本条登记"—— **改判**：接线完成 ≠ 缺口闭合（回落分支仍在）⇒ 登记**保留**、只更新文案与退出条件；核销会让"保存路径尚未终切"失去登记。',
     owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
     exitCondition:
       '**三段全部成立**才算闭合：\n(a) ✅ **D1 已达成** —— `src/composition/documentLoad.ts` 的装配路径经 `adapters/fidelityCapture` 调 `captureFidelity` 构造记录，且由内核会话承载（`KernelSession.setFidelityFieldMap`/`fidelityFieldMapOf`，卸载即清空）；\n(b) ✅ **D1 已达成** —— 保真键并入 recovery/save 家族（`src/application/recovery.ts` 的 `fidelityStoreKey` 带 scope+instance 段、返回 `Result`、有 `parseFidelityStoreKey`、被 `artifactKindOfKey` 识别、版本为具名常量 `FIDELITY_SCHEMA_VERSION`）；\n(c) ⏳ **D2 已接线、等价已把守、终切未完** —— 生产传值方 = `src/composition/saveProjection.ts`（✅ D2），产物等价判据在四份真实夹具上逐键/语义面转绿（✅ D2）；**但**旧权威回落分支仍在 ⇒ 闭合判据改为"保存路径无 legacy 回落分支（`Context.plainForSave` 恒 `source: "kernel"`）**且** e2e 真实产物等价判据纳入套件"。',
   }),
   /**
-   * P10f C′2（#301）登记：**侧表写面仍落 legacy**（本批的显式暂存）。
+   * ⚠️ **本条第 (a) 半已核销（#301 P10f D3）** —— `side-table-write-legacy-track`
+   * 的子句①（`metaEditOperators.ts` 不再 import 旧读入口）**已成立**：
+   * D3 把它的帧高读取改走 `ctx.kernelGrid(0)`，回落分支的克隆改走
+   * `ctx.frozenDocumentValue()`（R8 的边界取值口）⇒ 该文件对 `getDoc()` 零命中
+   * （判据本尊口径实测 **0 处 / 0 文件**）。
+   *
+   * 子句②（注解 `locked`/几何的写端口）**未**兑现 ⇒ 本条的剩余部分**换名**为
+   * 下面真正的残留登记 `annotation-wide-field-face`（同一事实、只留剩余半边）——
+   * 保留旧名会让"这条接缝在管什么"与代码现状不符（本表的口径是"双轨**剩余**数"）。
+   */
+  /**
+   * P10f C′2（#301）登记的**剩余半边**：**注解读面/写面的字段面窄于 RNA 描述符**。
    *
    * ## 为什么必须登记（而不是只在汇报里说"这部分没迁"）
    *
@@ -360,24 +655,58 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * "读面/写面迁移"扩张成"承载面设计"，而那正是 C′1 期裁定"归 C′2 的写面批
    * 更自然"时**没有**授权的东西（Lead #250 comment 5960 的范围是
    * "9 处编辑走内核命令 + 渲染读改分流"，不含承载面扩张）。
+   *
+   * ---
+   *
+   * ## ⚠️ #301 P10f D3 的**核销**（本条整条移除，只留剩余半边的新登记）
+   *
+   * 原本条的两条子句在 D3 后各归其位：
+   *
+   * | 子句 | D3 后 | 处置 |
+   * |---|---|---|
+   * | ① `metaEditOperators.ts` 不再引用旧读入口 | ✅ **成立**（帧高走 `ctx.kernelGrid(0)`；回落克隆走 `ctx.frozenDocumentValue()`；判据本尊口径 **0 命中**） | 已兑现 ⇒ **不再需要本条** |
+   * | ② 注解 `locked`/几何的写端口 | ⏳ 未兑现 | **换名**为新登记 `annotation-wide-field-face`（同一事实、只留剩余半边） |
+   *
+   * 保留旧名会让"这条接缝在管什么"与代码现状不符 —— 本表的口径是
+   * **双轨剩余数、只应减少**（文件头逐字如此）。
    */
   Object.freeze({
-    id: 'side-table-write-legacy-track',
+    id: 'annotation-wide-field-face',
     files: Object.freeze([
-      'src/operators/builtin/metaEditOperators.ts',
       'src/operators/builtin/annotationOperators.ts',
+      'src/editors/workbench-rna.ts',
+      'src/workbench/ux/panels/AnnotationEditorPanel.vue',
+      'src/runtime/annotationRead.ts',
       'src/application/kernel-properties.ts',
       'src/editors/property-writers.ts',
     ]),
     newTrack:
-      '内核写面承载内容编辑：注解**新建/删除**与 **`title`** 字段写（`annotationOperators`，C′2）+ 逐格说明写（`setCellTooltip` 命令，**D0 已交付**）—— 两者都经 `Context.submitContentEdit`（内核写 + 投影回 legacy）。',
+      '内核写面承载内容编辑：注解**新建/删除**与 **`title`** 字段写（`annotationOperators`，C′2）+ 逐格说明写（`setCellTooltip`，D0）—— 都经 `Context.submitContentEdit`；'
+      + '读面是 `runtime/annotationRead#kernelAnnotationsOf` 的**封闭 15 字段**表'
+      + '（`ANNOTATION_FIELD_PAIRS` 与回写侧双向断言）。',
     oldTrack:
-      '(a) **已迁（D0）**：逐格说明原先经 `metaEditOperators` / `property-writers` 直接改 `tooltipPalette`/`cellTooltipGrid` 侧表；现改为**内核写优先**，旧写法**降为回落分支**（未装配/无会话时仍走它 ⇒ 见下方 exitCondition 的剩余项）。\n(b) **仍落 legacy**：注解 `locked`/几何等字段经 `annotationOperators` 的回落分支写 legacy（内核写端口只实现 `text`）。',
+      '(b) **仍落 legacy 的字段面**：注解 `locked`/几何（`renderOpacity`/`fillOpacity`/'
+      + '`frameThickness`/`overlay`/`icon`/`size`/`arrow`/`fontSize`/`showPoints`/'
+      + '`linkedAnnotationId`/`quadIndex`…）不在读面的 15 字段里 ⇒'
+      + ' `editors/workbench-rna.ts` 的属性读对它们给 `value-absent`、'
+      + ' `AnnotationEditorPanel.vue` 显示为空；且 `annotationOperators` 的'
+      + ' `annotationPatchCommand` 对未承载字段**整体回落 legacy**（刻意不部分写：'
+      + ' 部分写会让用户看到"改了一半"）。\n'
+      + '(a) ✅ **已核销（D3）**：逐格说明的回落分支与帧高读取已全部改走'
+      + ' `ctx.kernelGrid(0)` / `ctx.frozenDocumentValue()`，对旧读入口 0 命中。',
     blocker:
-      '(b) 需要扩 `writeAnnotationProperty` 的写入分支与 `KERNEL_OBJECT_TYPES` 的注解属性描述符（`locked`/几何）。\n(a) 的**剩余项**不是"没做"，而是"**回落分支还在**"：`metaEditOperators` 仍 import `ctx.getDoc()`（取当前帧高度 + 回落写入）。该分支只有在 **D3 终删 `getDoc()`** 时才能删 —— 删早了会在"未装配"时**丢能力**（#171 禁止）。\n⚠️ **更正**：我在 C′2 期写的 blocker 是"(a) 需要表示转换设计，属承载面新增"。**D0 实测推翻了它**：两个方向的转换生产里都早已存在（`kernelPaletteAssembly.ts:249-271` 正向 / `kernelProjection.ts:1114` 反向），所以 D0 只补了一条写命令。',
-    owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
+      '需要扩 `editors/property-writers#writeAnnotationProperty` 的写入分支与'
+      + ' `application/kernel-properties.ts` 的注解属性描述符，并把'
+      + ' `domain/scene#AnnotationGeometry` 的**全部**字段逐项进读面'
+      + '（它是**封闭形状**，加字段是"决定"而不是自动跟随 —— 见 `geometryFieldsOf` 的注释）。'
+      + '三件都是**承载面/写面新增**，超出 D3「终删 `getDoc()`」的范围（Lead comment 5960 的红线）。',
+    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
-      '**两个子句都必须成立**：\n① `src/operators/builtin/metaEditOperators.ts` 不再 import `ctx.getDoc()` —— 其**回落分支**与**帧高读取**随 **D3 终删 `getDoc()`** 一并消失（D0 已把主路径迁到内核，但保留了回落 ⇒ 本句**尚未**成立）；\n② `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand` 不再有"未承载字段即回落"的分支（`locked`/几何已在 `writeAnnotationProperty` 有写端口）。\n⇒ 届时删除本条登记。**执行批次：#301 子批 D**（①归 D3 终删段，②归 D 的注解字段写面段）。前者是"逐格说明写面是 D 前置"的理由：`metaEditOperators` 留 `getDoc` ⇒ **D3 的终删闭不了合**。（我第一版把 owner 写成 `P11`，被 `boundary-scan.test.ts` 的"owner 必须是已登记真实批次且职责匹配"闸门**当场判红** —— 闸门是对的：P11 是审计批，不做迁移，把功能迁移挂到审计批名下等于 seam 永无退出。）',
+      '`src/runtime/annotationRead.ts` 的 `ANNOTATION_FIELD_PAIRS` 覆盖'
+      + ' `src/editors/workbench-inspector.ts` 的注解描述符**全部**字段，'
+      + '且 `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand`'
+      + ' 不再有"未承载字段即整体回落"的分支（`src/editors/property-writers.ts`'
+      + ' 对这些字段都有写分支）⇒ 届时删除本条登记。',
   }),
 ])
 

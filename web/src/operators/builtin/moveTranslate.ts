@@ -302,9 +302,11 @@ export const MoveOperator: OperatorType = {
         })
 
         if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
-          const doc = ctx.getDoc().value
-          const rf = doc?.frame(ctx.getFrameIndex())
-          const grid = rf?.grid
+          // ⚠️ #301 P10f D3：本处是**写路径**（`grid.moveBlock` 被捕获进撤销闭包），
+          // **不是**读点 —— 读面每次新建对象 ⇒ 写入会**静默无效**（B′ 实测的撤回理由①）。
+          // 故走具名**编辑句柄**（`legacyGridForEdit`），并登记接缝
+          // `legacy-grid-edit-handle`（退出 = 内核 `moveCells` 命令交付）。
+          const grid = ctx.legacyGridForEdit(ctx.getFrameIndex())
           if (grid) {
             const moves = s._initialPositions.map(initPos => ({
               from: { x: initPos.x, y: initPos.y, z: initPos.z },

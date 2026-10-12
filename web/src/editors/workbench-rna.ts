@@ -167,9 +167,8 @@ export function selectionOf(ctx: Context): PanelSelection {
     items,
     active: hoveredAnno,
     annotationTypeOf: (id) => {
-      const doc = ctx.getDoc().value
-      const list = (doc?.annotations ?? []) as { id?: string; type?: string }[]
-      return list.find((a) => a.id === id)?.type ?? null
+      // #301 P10f D3（R2）：注解表走内核注解读面（15 字段；含 `type`）。
+      return ctx.kernelAnnotations().find((a) => a.id === id)?.type ?? null
     },
   }
 }
@@ -248,8 +247,9 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
   const ownerKind = objectType ? contractKindOf(objectType.id) : null
 
   if (sceneKind === 'block') {
-    const doc = ctx.getDoc().value
-    const grid = doc?.frame(0)?.grid
+    // #301 P10f D3（R5）：网格读面。⚠️ 帧下标**逐字保留 `0`**（旧实现就是 `frame(0)`）——
+    // 多方块文档"一变体一帧"，改读当前帧会**静默改语义**（不是同义迁移）。
+    const grid = ctx.kernelGrid(0)
     if (!grid) return err(domainError('MissingTarget', { reason: 'no-frame', objectId: ref.owner.id }))
     const [x, y, z] = ref.owner.id.split(',').map(Number)
     const block = grid.at({ x: x ?? 0, y: y ?? 0, z: z ?? 0 })
@@ -261,10 +261,12 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
         return ok({ x: x ?? 0, y: y ?? 0, z: z ?? 0 })
       case 'tooltip':
       case 'cellTooltip': {
-        const grid2 = doc as unknown as { tooltipPalette?: string[]; cellTooltipGrid?: number[][][] }
-        const at = grid2.cellTooltipGrid?.[z ?? 0]?.[y ?? 0]?.[x ?? 0]
+        // #301 P10f D3（R6）：逐格说明走**自己的**读面（侧表不在网格上 ⇒
+        // `kernelGrid.tooltipAt` 在 legacy 分支无从回答，见 `runtime/gridRead` 文件头）。
+        const tips = ctx.cellTooltips()
+        const at = tips?.grid[z ?? 0]?.[y ?? 0]?.[x ?? 0]
         if (at === undefined || at < 0) return ok('')
-        return ok(grid2.tooltipPalette?.[at] ?? '')
+        return ok(tips?.palette[at] ?? '')
       }
       default:
         return err(domainError('MissingTarget', { reason: 'property-not-registered', property: ref.property }))
@@ -272,37 +274,40 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
   }
 
   if (sceneKind === 'annotation') {
-    const doc = ctx.getDoc().value
-    const list = (doc?.annotations ?? []) as Record<string, unknown>[]
-    const a = list.find((x) => x.id === ref.owner.id)
-    if (!a) return err(domainError('MissingTarget', { reason: 'annotation-absent', objectId: ref.owner.id }))
-    const v = a[local]
+    // #301 P10f D3（R2）：注解属性读走内核注解读面。
+    // ⚠️ 读面是**封闭 15 字段**表（`runtime/annotationRead` 的 `ANNOTATION_FIELD_PAIRS`）；
+    // RNA 描述符里的宽字段（`renderOpacity`/`fillOpacity`/`frameThickness`/`overlay`/
+    // `icon`/`size`/…）**不在**读面的命名空间里（读面用 legacy 口径名，见其字段表）。
+    // ⇒ 未命中时**如实失败**（`value-absent`），**不**伪造值也不静默回落旧文档：
+    // 读面本就是"这一刻（内核或 legacy）的事实"，编一个值比失败更坏。
+    // 该收窄已登记：`composition/seams.ts` 的 `annotation-wide-field-face`。
+    const view = ctx.kernelAnnotations().find((x) => x.id === ref.owner.id)
+    if (!view) return err(domainError('MissingTarget', { reason: 'annotation-absent', objectId: ref.owner.id }))
+    const v = (view as unknown as Record<string, unknown>)[local]
     if (v === undefined) return err(domainError('MissingTarget', { reason: 'value-absent', property: ref.property }))
     return ok(v)
   }
 
   if (ownerKind === 'document') {
-    const doc = ctx.getDoc().value
-    if (!doc) return err(domainError('MissingTarget', { reason: 'no-document' }))
+    if (!ctx.hasLoadedDocument()) return err(domainError('MissingTarget', { reason: 'no-document' }))
+    // #301 P10f D3（R7）：文档元数据读面（内核 `DocumentContent.metadata` 优先）。
+    const meta = ctx.documentMetadata()
     switch (local) {
       case 'name':
+        return ok(meta.name)
       case 'author':
+        return ok(meta.author)
       case 'description':
-        return ok((doc.meta as Record<string, unknown>)[local] ?? '')
-      case 'tags': {
-        const tags = (doc.meta as Record<string, unknown>).tags
-        return ok(Array.isArray(tags) ? tags : [])
-      }
-      case 'origin': {
-        const o = (doc.meta as Record<string, unknown>).origin
-        return ok(o && typeof o === 'object' ? o : { x: 0, y: 0, z: 0 })
-      }
-      case 'created_at': {
-        const ms = (doc.meta as Record<string, unknown>).created_at_ms
-        return ok(typeof ms === 'number' ? new Date(ms).toLocaleString() : '')
-      }
+        return ok(meta.description)
+      case 'tags':
+        return ok([...meta.tags])
+      case 'origin':
+        return ok(meta.origin)
+      case 'created_at':
+        // ⚠️ 格式化留在**调用点**（读面只给毫秒事实；`null` ⇒ 空串，与旧 `?? ''` 同形）。
+        return ok(meta.createdAtMs === null ? '' : new Date(meta.createdAtMs).toLocaleString())
       case 'format_version':
-        return ok(doc.formatVersion ?? '')
+        return ok(meta.formatVersion)
       default:
         return err(domainError('MissingTarget', { reason: 'property-not-registered', property: ref.property }))
     }
@@ -371,12 +376,13 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
   const local = localPropertyOf(ref.property, desc?.objectTypeId)
   const kind = objectType ? sceneKindOf(objectType.id) : null
   const ownerKind = objectType ? contractKindOf(objectType.id) : null
-  const doc = ctx.getDoc().value
-  const multiblockReadOnly = isMultiblockGenerated(doc)
+  // #301 P10f D3：多方块生成态由读面给出（**外部格式事实**，内核不承载）；
+  // 网格走 R5 网格读面（帧下标逐字保留 `0` —— 同上方属性读的理由）。
+  const multiblockReadOnly = isMultiblockGenerated(ctx)
+  const grid = kind === 'block' ? ctx.kernelGrid(0) : null
 
   if (kind === 'block') {
-    if (!doc) return factsOf({ exists: false })
-    const grid = doc.frame(0)?.grid
+    if (!ctx.hasLoadedDocument()) return factsOf({ exists: false })
     const [x, y, z] = ref.owner.id.split(',').map(Number)
     const exists = grid?.at({ x: x ?? 0, y: y ?? 0, z: z ?? 0 }) != null
     return factsOf({
@@ -388,8 +394,10 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
   }
 
   if (kind === 'annotation') {
-    const list = (doc?.annotations ?? []) as Record<string, unknown>[]
-    const a = list.find((x) => x.id === ref.owner.id)
+    // #301 P10f D3（R2）：注解事实走内核注解读面（`locked` 是读面 15 字段之一）。
+    const a = ctx.kernelAnnotations().find((x) => x.id === ref.owner.id) as
+      | (Record<string, unknown> & { locked?: boolean })
+      | undefined
     if (!a) return factsOf({ exists: false })
     const locked = local !== 'locked' && a.locked === true
     return factsOf({
@@ -402,7 +410,7 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
   }
 
   if (ownerKind === 'document') {
-    if (!doc) return factsOf({ exists: false })
+    if (!ctx.hasLoadedDocument()) return factsOf({ exists: false })
     return factsOf({ exists: true, generated: multiblockReadOnly, holdsLease: !multiblockReadOnly })
   }
 
@@ -415,10 +423,19 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
   return factsOf({ exists: false })
 }
 
-/** 多方块文档的网格是装配产物 ⇒ 只读（#249 §3.3）。 */
-function isMultiblockGenerated(doc: { multiblock?: unknown; documentShape?: unknown } | null): boolean {
+/**
+ * 多方块文档的网格是装配产物 ⇒ 只读（#249 §3.3）。
+ *
+ * #301 P10f D3：入参由旧文档改为 `Context`，事实取自
+ * `ctx.legacyRenderSource()`（R9 的**外部格式边界**读面）——`multiblock` 声明
+ * 的内层 body（`multiblockSource`）内核不承载，故这条事实仍只能从旧格式读。
+ * ⚠️ 它**只**回答"是不是多方块生成"这一位（不给内容读入口），
+ * 与 R9 的登记用途一致（见 `runtime/context#legacyRenderSource` 的说明）。
+ */
+function isMultiblockGenerated(ctx: Context): boolean {
+  const doc = ctx.legacyRenderSource()
   if (!doc) return false
-  return doc.multiblock != null
+  return (doc as unknown as { multiblock?: unknown }).multiblock != null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -473,7 +490,17 @@ export function workbenchRegistry(): WorkbenchRna {
 
 /** 快照当前文档与壳状态为可写的 `DocumentState`。 */
 export function documentStateOf(ctx: Context): DocumentState {
-  const doc = ctx.getDoc().value
+  // #301 P10f D3：**唯一**仍取旧文档值的地方（`DocumentState.document` 的字段类型
+  // 就是旧文档，见 `editors/property-writers` 的 `DocumentState`）。它经
+  // `frozenDocumentValue()`（R8 的边界取值口）取值 ⇒ `getDoc()` 访问器已退出。
+  // `kernel-property-write-dual-track` 接缝的②子句（"由内核 `Document` 构造"）
+  // 需先有块身份写命令（`Command` 联合现无 `setCellContent`）⇒ 登记为新双轨
+  // `property-write-legacy-document-model`（owner P11），见 `composition/seams.ts`。
+  //
+  // ⚠️ 取的是**本体**（不克隆）：`DocumentState.document` 只是"交给
+  // `applySetProperty` 的形状"，而它是**面板每次读写都要走**的路径 ——
+  // 每格一 clone 会在 432 帧文档上产生可感的卡顿（没有判据会因此变红）。
+  const doc = ctx.legacyDocumentModel()
   const shell: Record<string, unknown> = {}
   const pub = ctx.main.embedPublish.value as unknown as Record<string, unknown>
   shell.shellSettings = { ...pub, features: { ...((pub.features ?? {}) as Record<string, unknown>) } }
@@ -513,10 +540,14 @@ export function documentStateOf(ctx: Context): DocumentState {
  *
  *  - **机制已收敛**：属性语义查同一个 RNA 注册表，写入走同一个 `applySetProperty`
  *    原子路由（多选一失败整批拒、逐目标原因）。这就是 #253 的交付面。
- *  - **数据模型未收敛**：此处读的是 `ctx.getDoc()` 返回的 `RuntimeDocument`
- *    （`documentStateOf` 把它包成 `{version, document, shell}`），
- *    而不是内核的 `domain/document.ts` 的 `Document`/`application/state.ts` 的
- *    `ApplicationState`。
+ *  - **数据模型未收敛**：`documentStateOf` 取的是旧 `RuntimeDocument`
+ *    （包成 `{version, document, shell}`），而不是内核的
+ *    `domain/document.ts` 的 `Document` / `application/state.ts` 的 `ApplicationState`。
+ *    ⚠️ **#301 P10f D3 更新**：取值口已不再是 `ctx.getDoc()`（**该访问器已终删**），
+ *    而是具名口 `Context#legacyDocumentModel()` —— 该口**恰有两处**调用者
+ *    （本文件 + `context/captureEmbedInitialView.ts`），由 `boundary-scan` 的
+ *    白名单闭集判据钉住。剩余半边登记在
+ *    `composition/seams.ts` 的 `property-write-legacy-document-model`（owner P11）。
  *
  * **为什么本批不退**：把实时工作台从 `RuntimeDocument` 迁到内核 `Document`
  * 需要先改工作区/Area 的装配（外壳、视口、选中集的宿主），

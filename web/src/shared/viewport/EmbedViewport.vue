@@ -64,7 +64,10 @@ const prefs = resolveEmbedViewerPreferences(ctx)
  * 多方块通道取值（**归内核编辑上下文**；#282 P10b）。
  *
  * 必须在 DRW 构造前创建，`renderDoc` 作为 DRW 的文档来源。
- * 帧为主文档时 `renderDoc` 即 `ctx.getDoc()`，渲染路径行为零变化。
+ * 帧为主文档时 `renderDoc` 即 `ctx.legacyRenderSource()`（原文档），渲染路径行为零变化。
+ * ⚠️ **#301 P10f D3 更新**：原写"即 `ctx.getDoc()`" —— 该访问器已终删；
+ * 渲染链的旧格式源走具名读面 `legacyRenderSource()`（已登记接缝
+ * `legacy-render-source-document`，退出 = 渲染链终切）。
  *
  * 与旧 `useMultiblockChannels` 的差别：本 composable **不持有**取值状态
  * （旧形态每视口自持 `state` + `revision`），取值权威是
@@ -72,6 +75,9 @@ const prefs = resolveEmbedViewerPreferences(ctx)
  * 于是"同一上下文的所有 Area 读到同一份取值"（#249 §3.3、A05）。
  */
 const mb = useKernelChannels(ctx)
+// #301 P10f D3（R9）：渲染链旧格式源文档的 **Ref 视图**（`Context` 只给值 ⇒
+// 响应式包装留在调用点，避免第二处持有 `Ref<RuntimeDocument>` 的权威）。
+const legacyRenderDoc = computed(() => ctx.legacyRenderSource())
 const {
   isMultiblock, renderDoc,
   panel: channelPanel,
@@ -207,7 +213,10 @@ const { tooltipText, neiTooltipMap, showMetaHint } = useEmbedTooltip({
   definitionRef: vpSlot.definition,
   tooltipPaletteRef: tooltipPalette,
   showHoverTooltipRef: computed(() => prefs.showHoverTooltip),
-  docRef: ctx.getDoc(),
+  // #301 P10f D3（R9）：渲染链的旧格式源文档（**已登记接缝** `legacy-render-source-document`）
+  // —— `useEmbedTooltip` 的入参类型就是渲染侧形状，而渲染链终切在 D 批映射表 §八
+  // 被显式排除 ⇒ 本处是那条接缝的落点，不是内容读入口。
+  docRef: legacyRenderDoc,
 })
 
 /**

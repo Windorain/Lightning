@@ -192,8 +192,15 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
     unframe = null
   })
 
-  const doc = computed(() => ctx.getDoc().value)
-  const decl = computed(() => doc.value?.multiblock?.decl ?? null)
+  // #301 P10f D3（R9）：渲染链的旧格式源文档（已登记接缝 `legacy-render-source-document`）。
+  // ⚠️ 本 composable 需要的是**声明的内层 body**（`doc.multiblockSource`）与
+  // `renderDoc` 的格式输入 —— 两者都是**外部格式**事实（内核不承载，见
+  // `legacyRenderSource` 的说明与本文件 `renderView` 的注释）。
+  const doc = computed(() => ctx.legacyRenderSource())
+  const decl = computed<MultiblockDecl | null>(
+    () =>
+      (doc.value as unknown as { multiblock?: { decl?: MultiblockDecl } } | null)?.multiblock?.decl ?? null,
+  )
   const isMultiblock = computed(() => decl.value !== null)
 
   const selection = computed<MultiblockSelectionState>(() => {

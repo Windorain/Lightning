@@ -36,8 +36,10 @@ export interface UseViewportRuntimeOptions {
    * 可选的**渲染视图文档**覆盖（T2.5 接线）。
    *
    * 多方块文档的 `frame.grid` 恒为 `null`（网格是装配产物），故渲染路径必须吃装配结果；
-   * 由 `useMultiblockChannels().renderDoc` 提供（帧为主文档时它就是 `ctx.getDoc()` 本身，行为零变化）。
-   * 省略该参数时 DRW 直接订阅 `ctx.getDoc()`（既有行为）。
+   * 由 `useMultiblockChannels().renderDoc` 提供（帧为主文档时它就是原文档本身，行为零变化）。
+   * 省略该参数时 DRW 直接订阅 `ctx.legacyRenderSource()`（既有行为）。
+   * ⚠️ **#301 P10f D3 更新**：原写 `ctx.getDoc()` —— 该访问器已终删；渲染链的旧格式源
+   * 走具名读面 `legacyRenderSource()`（已登记接缝 `legacy-render-source-document`）。
    */
   docOverride?: Ref<RuntimeDocument | null>
 }
@@ -70,7 +72,9 @@ export interface UseViewportRuntimeOptions {
 export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   const { ctx, regionId, viewerPrefs, blockIconCacheOptions = {}, initialWorldFrameIndex, docOverride } = opts
   const vpSlot = ctx.viewports.get(regionId) ?? ctx.viewports.register(regionId)
-  const docRef = docOverride ?? computed(() => ctx.getDoc().value)
+  // #301 P10f D3（R9）：DRW 的文档来源（渲染链旧格式）。终切在 D 批映射表 §八
+  // 被显式排除 ⇒ 本处是接缝 `legacy-render-source-document` 的落点。
+  const docRef = docOverride ?? computed(() => ctx.legacyRenderSource())
 
   /**
    * 内核会话（P10 #261）。

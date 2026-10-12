@@ -41,7 +41,9 @@
  * ## 与 A3（文档内容迁移）的分工
  *
  * 本模块接的是**编辑上下文与时间/播放**这条线（R-WK-03 明列的内核缺口）。
- * 工作台的**文档内容**此刻仍是旧 `RuntimeDocument`（`context.getDoc()`），
+ * 工作台的**文档内容**由具名读面读取（`Context#kernelGrid` / `kernelAnnotations` /
+ * `frameDeclarations` / …；旧 `context.getDoc()` **已终删**，见 #301 P10f D3），
+ * 而**写模型与渲染链的旧格式**仍是旧 `RuntimeDocument`（已登记接缝），
  * 故帧声明（帧数、每帧时长）由宿主经 {@link KernelSession.bindFrameSource} 注入 ——
  * 这是一条**显式登记**的适配接缝，不是"内核偷偷读旧文档"：
  * 内核只接受 `count()` / `durationsMs()` 两个纯值提供者，不认识 `RuntimeDocument`。
@@ -445,7 +447,9 @@ export class KernelSession {
    *
    * 本读面是 `raw-authority-object` 那 29 处 N1 存在性判定在**后续批次**
    * （B′）获得"同义替代"的前提 —— A′ 先让它在 21 处调用点上与 legacy
-   * `getDoc().value !== null` **逐点对齐**（判据见 `p10f-documentLifecycle.test.ts`）。
+   * legacy 侧的"有没有文档"（`main.doc.value !== null`）**逐点对齐**
+   *（判据见 `p10f-documentLifecycle.test.ts`）。⚠️ 该事实曾在生产里经
+   * `getDoc()` 读取，而**该访问器已终删**（#301 P10f D3）。
    *
    * ## 为什么**不**复用 `closeDocument`
    *

@@ -11,14 +11,20 @@ import type { Context } from '@/runtime/context'
 import type { OperatorType, OperatorProperties } from './operatorType'
 import { OP_RESULT } from './operatorType'
 import { pushDocUndo } from './pushDocUndo'
-import type { RuntimeDocument } from '@/context/runtimeDocument'
+import type { DocumentSnapshot } from '@/runtime/documentSnapshot'
 
 export class ModalOperatorWrapper implements ModalOperation {
   id: string
   private op: OperatorType
   private ctx: Context
   private props: OperatorProperties
-  private undoSnapshot: RuntimeDocument | null = null
+  /**
+   * 模态进入时的撤销快照（#301 P10f D3：**不透明令牌**，不是旧文档句柄）。
+   *
+   * 见 `runtime/documentSnapshot` 与 R-WK-09 裁决 3："撤销到无文档"的能力存续，
+   * 但不得再把可读的旧文档交出去。
+   */
+  private undoSnapshot: DocumentSnapshot | null = null
   private regionId: string
 
   constructor(op: OperatorType, ctx: Context, props: OperatorProperties, regionId: string) {
@@ -29,7 +35,7 @@ export class ModalOperatorWrapper implements ModalOperation {
     this.regionId = regionId
   }
 
-  setUndoSnapshot(snapshot: RuntimeDocument | null): void {
+  setUndoSnapshot(snapshot: DocumentSnapshot | null): void {
     this.undoSnapshot = snapshot
   }
 
@@ -43,7 +49,8 @@ export class ModalOperatorWrapper implements ModalOperation {
     if (result === OP_RESULT.FINISHED) {
       if (this.op.flagUndo && this.undoSnapshot !== null) {
         const snap = this.undoSnapshot
-        const snapshotAfter = this.ctx.getDoc().value?.clone() ?? null
+        // #301 P10f D3（R8）：撤销快照走**不透明令牌**（R-WK-09 裁决 3 的受控双轨）。
+        const snapshotAfter = this.ctx.documentSnapshot()
         pushDocUndo(this.ctx, snap, snapshotAfter, this.op.label)
         this.undoSnapshot = null
       }
@@ -54,7 +61,8 @@ export class ModalOperatorWrapper implements ModalOperation {
     if (result === OP_RESULT.CANCELLED) {
       if (this.undoSnapshot !== null) {
         // #301 A′：经唯一写入口（取消 ⇒ 回放到进入模态前的快照，非 null ⇒ 已装载）。
-        this.ctx.setDocument(this.undoSnapshot)
+        // #301 D3：快照是**不透明令牌** ⇒ 只能经 `restoreDocumentSnapshot` 交回。
+        this.ctx.restoreDocumentSnapshot(this.undoSnapshot)
         this.undoSnapshot = null
       }
       this.op.cancel?.(this.ctx, this.props)

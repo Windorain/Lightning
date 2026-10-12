@@ -361,18 +361,50 @@ describe('A17 history-reference：撤销/重做一致、无悬空引用、回保
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('A05/A17 覆盖边界：内核层已含负对照，产品层归 #282（R-WK-04）', () => {
-  it('**产品层未达成**守卫：真实 UI 双 Area 需要内核文档内容面', () => {
-    // 与 `designUseCasesS16.test.ts` 的同名守卫同一手法：
-    // 一旦 #282 完成文档内容迁移，本条判红 ⇒ 逼它同批补产品级 A05/A17。
+  it('**产品层守卫**：`getDoc()` 已终删，但产品级 A05/A17 的**完全**达成仍待双 Area 验收（#301 D3 更新）', () => {
+    // ## 本守卫的相位更新（与 `designUseCasesS16.test.ts` 同款）
+    //
+    // 原本条是 **failure-closed** 的："`Context.getDoc()` 仍返回旧文档 ⇒ 产品层未达成"，
+    // 并写明"若 #282 已完成迁移，请补真实 UI 双 Area 的 A05/A17 并更新本守卫"。
+    //
+    // #301 P10f D3 完成了**读入口**的终删 ⇒ 按指引更新（**不删除**守卫）：
+    //  ① `getDoc()` 签名已不存在（源码级）；
+    //  ② 内容事实改由具名读面读（枚举最小集）；
+    //  ③ **仍保留**"不冒充产品级"的那一半：产品级 A05/A17（真实 UI 双 Area）
+    //     的**完全**达成还依赖写模型与渲染链终切（登记
+    //     `property-write-legacy-document-model` / `legacy-render-source-document`），
+    //     本条据实登记为"未达成"。
     const fsMod = require('node:fs') as typeof import('node:fs')
     const pathMod = require('node:path') as typeof import('node:path')
-    const src = fsMod
-      .readFileSync(pathMod.join(process.cwd(), 'src', 'runtime', 'context.ts'), 'utf8')
-      .replace(/\r\n/g, '\n')
+    const readSrc = (rel: string): string =>
+      fsMod.readFileSync(pathMod.join(process.cwd(), 'src', rel), 'utf8').replace(/\r\n/g, '\n')
+    const ctxSrc = readSrc(pathMod.join('runtime', 'context.ts'))
+
+    // ① 终删
     expect(
-      /getDoc\(\):\s*Ref<RuntimeDocument \| null>/.test(src),
-      '本条假定工作台文档仍是旧 `RuntimeDocument`（产品层 A05/A17 未达成）。'
-        + '若 #282 已完成迁移，请补真实 UI 双 Area 的 A05/A17 并更新本守卫。',
+      /getDoc\(\):\s*Ref<RuntimeDocument \| null>/.test(ctxSrc),
+      '`getDoc()` 必须已删除（D3 终删）—— 若它回来了，说明有人把权威读入口恢复成了后门',
+    ).toBe(false)
+
+    // ② 内容事实的具名读面（逐个存在性断言：终删必须给替代面）
+    for (const face of [
+      'hasLoadedDocument(): boolean',
+      'frameDeclarations(): {',
+      'kernelGrid(frameIndex: number): KernelGridView | null',
+      'kernelAnnotations(): readonly KernelAnnotationView[]',
+      'kernelMaterials(): readonly KernelMaterialView[]',
+      'plainForSave():',
+      'legacyRenderSource():',
+    ]) {
+      expect(ctxSrc, `读面 ${face} 必须在案`).toContain(face)
+    }
+
+    // ③ **产品层仍未完全达成**（如实登记）：写模型与渲染链仍是旧格式的载体。
+    expect(
+      readSrc(pathMod.join('editors', 'workbench-rna.ts')).includes('legacyDocumentModel()'),
+      '本守卫的"未达成"半边：属性写的 `DocumentState.document` 仍是旧数据模型'
+        + '（登记 `property-write-legacy-document-model`）⇒ 产品级 A05/A17 的'
+        + '「真实 UI 双 Area」完全达成仍待该写模型与渲染链终切。',
     ).toBe(true)
   })
 })
