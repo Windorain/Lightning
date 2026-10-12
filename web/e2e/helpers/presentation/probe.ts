@@ -682,16 +682,16 @@ async function runA30SessionFace(
     await new Promise((r) => setTimeout(r, 250))
   }
 
-  // 用**当前有效版本**重新应用：同一输入必须仍判"身份未变"
+  // 用**当前有效版本**重新应用：内容身份未变，但 P11-F 段② 起**必须**强制重建 GPU
+  //（否则内容未变的上下文丢失 ⇒ 画面永久空白 —— 这正是 P11-E 实测的缺口）。
   const again = session.applyKernelDocument(doc, time)
   const generationAfter = session.generation
   const outcomeGenerationAfter = again.generation
+  const mountedBatchesAfterRestore = session.object3d.children.length
   const timeKeyAfter = JSON.stringify(session.activeKey?.time ?? null)
   const cameraAfter = camera.matrixWorld.elements.slice()
 
-  // ⚠️ 缺口登记（#262 P11-E 实测发现）：内容未变时恢复**不重建 GPU 资源**
-  //（`applyIfChanged` 在身份未变时提前返回；`presenter.handleContextLost()` 已把
-  // 实际世代置 null）。故这里同时记录"内容变一次之后是否重建"作为正确性对照。
+  // 对照：内容再变一次也必须重建（并换世代）—— 证明"恢复能重建"不是"永远不换世代"
   const bumped = { ...doc, version: { ...doc.version, documentVersion: doc.version.documentVersion + 1 } }
   const afterBump = session.applyKernelDocument(bumped, time)
   const liveGenerationAfterContentChange = session.generation
@@ -702,6 +702,7 @@ async function runA30SessionFace(
     outcomeGenerationAfter,
     liveGenerationAfterRestore: generationAfter,
     liveGenerationAfterContentChange,
+    mountedBatchesAfterRestore,
     afterBumpApplied: afterBump.applied,
     abandoned,
     generationBefore,
@@ -714,13 +715,22 @@ async function runA30SessionFace(
   session.dispose()
 
   return {
-    sessionDocPreserved: again.applied === false && outcomeGenerationAfter === generationBefore,
+    // 「文档不丢」的口径（P11-F 段② 更新）：恢复后**同一份文档 + 时间**必须得到
+    // **同一个世代**（内容身份未变 ⇒ 恢复没有重置文档/时间），且重建确实发生。
+    sessionDocPreserved: generationAfter !== null && generationAfter === generationBefore && again.applied === true,
     sessionSelectionPreserved: detail.selectionBefore === detail.selectionAfter,
     sessionTimePreserved: detail.timeKeyBefore === detail.timeKeyAfter,
     sessionCameraPreserved: cameraBefore.length === cameraAfter.length && cameraBefore.every((v, i) => v === cameraAfter[i]),
-    // 缺口登记读数（见上）：恢复后**实际**世代仍为 null；内容变一次之后才重建
+    // P11-F 段② 的**正向**读数（原 P11-E 缺口登记已升级）：
+    // ① 内容未变 + 上下文丢失 ⇒ 恢复**真的强制重建**（绕过内容身份短路）；
+    // ② 重建后**有挂载**（画面非空白的结构代理）；
+    // ③ 会话**返回结果**的世代与实际世代**同源**（不再静默不一致）。
+    sessionForcedRebuildAfterRestore: again.applied === true,
     sessionGpuRebuiltAfterRestore: generationAfter !== null,
-    sessionGpuRebuiltAfterContentChange: liveGenerationAfterContentChange !== null,
+    sessionMountedBatchesAfterRestore: mountedBatchesAfterRestore,
+    sessionGenerationConsistent: outcomeGenerationAfter === generationAfter,
+    sessionGpuRebuiltAfterContentChange: liveGenerationAfterContentChange !== null
+      && liveGenerationAfterContentChange !== generationBefore,
     sessionDetail: detail,
   }
 }

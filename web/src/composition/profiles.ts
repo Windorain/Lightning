@@ -39,6 +39,7 @@
  */
 
 import { CAPABILITY, moduleDecl, type CapabilityId, type ModuleDecl, type ProfileId } from './modules'
+import { kernelObjectSelfDecls } from '@/application/kernel-properties'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 内核模块（所有 profile 都取）
@@ -176,7 +177,51 @@ export const M_TEXT_OBJECT_TYPE = moduleDecl({
   id: 'objects.text',
   provides: ['objectType.text'],
   contributes: {
-    objectTypes: [{ type: 'text', dataKind: 'annotation', editable: true, animatableProperties: ['annotation.text', 'transform.position'] }],
+    objectTypes: [
+      {
+        type: 'text',
+        dataKind: 'annotation',
+        editable: true,
+        animatableProperties: ['annotation.text', 'transform.position'],
+        /**
+         * ## RNA 声明（`#262` P11-F 段①：A21 的属性写半边）
+         *
+         * 这个字段是 **P11-E 实测缺口**的修复落点：贡献类型此前**没有通向**内核
+         * 属性注册表/写端口的缝 ⇒ `reduceCommand` 对它结构性拒绝
+         * （`MissingTarget: property-not-registered`）。带上声明后，
+         * `composition/contributedObjectTypes` 把它派生进 `ExecutionInputs`，
+         * 属性写经**唯一入口** `reduceCommand` 生效（判据：`assembly.test.ts` A21 组 ⑤）。
+         *
+         * ## 属性词汇为什么是这几个（不是"随手抄 annotation 一份"）
+         *
+         * 本类型复用了核心**已有**的 `annotation` 数据载荷（见本模块顶部说明：
+         * 「新增**对象类型**」开放、「新增**数据载荷种类**」是核心拥有的封闭集合）。
+         * 故可写的局部属性就是内核写面在 annotation 载荷上支持的词汇：
+         *  `name`/`visible`（对象自身）、`transform.*`（对象自身）、`text`（载荷字段）。
+         * 局部 ID 用 `text`（不是 `annotation.text`）—— 否则限定式 ID 会成为
+         * `text.annotation.text`，把载荷种类名混进属性路径（与 `KERNEL_ANNOTATION_TYPE`
+         * 处同一条判据）。
+         *
+         * `animatableProperties` **保持原样**（它自 GF-5 收敛后零生产消费者，
+         * 是历史清单，本批不改它的口径 —— 改它属于语义变更，不在本批范围）。
+         */
+        rna: {
+          id: 'text',
+          ownerKind: 'object',
+          display: { labelKey: 'objectType.text', fallback: '文字' },
+          /**
+           * 对象**自身**属性（`name`/`visible`/`transform.*`）取内核的公共构造器 ——
+           * 它们是 `SceneObject` 的字段（核心拥有的词汇），**每个**对象类型共用同一份
+           * 声明（调用同一个 `applyKernelPropertyValue`）。类型特有的载荷属性
+           * （下面的 `text`）由贡献方自己声明。
+           */
+          properties: [
+            ...kernelObjectSelfDecls(),
+            { id: 'text', valueType: 'string', animatable: false, display: { labelKey: 'annotation.text', fallback: '内容' } },
+          ],
+        },
+      },
+    ],
     controls: [{ property: 'annotation.text', controlId: 'textarea' }],
   },
   note: 'A21 扩展证明：经贡献接口新增文字类型与专用控件（不改 execution/解析器/既有对象分支）。',

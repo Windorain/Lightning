@@ -120,6 +120,23 @@ function structuralDecls(): readonly PropertyDecl[] {
   ]
 }
 
+/**
+ * 对象**自身**属性的声明（结构 + 变换）—— 内核**全部**对象类型共用的一份。
+ *
+ * ## 为什么导出它（P11-F 段①）
+ *
+ * 贡献方新增一个对象类型时（`ModuleContributions.objectTypes[].rna`），它的
+ * `name`/`visible`/`transform.*` 与内置类型**逐字相同** —— 它们不是"某类型的属性"，
+ * 而是 `SceneObject` 的字段（核心词汇），写面也是同一个 handler。让每个贡献方各抄一份
+ * 就是四份会各自漂移的清单（单位、`animatable`、值类型任何一处改动都要改四处）。
+ *
+ * ⇒ 贡献方**引用**本函数的产物（`composition/profiles.ts` 的 `objects.text` 即如此），
+ * 而类型特有的载荷属性（如 `text`）仍由贡献方自己声明。
+ */
+export function kernelObjectSelfDecls(): readonly PropertyDecl[] {
+  return [...structuralDecls(), ...transformDecls()]
+}
+
 function decl(
   id: string,
   valueType: string,
@@ -243,11 +260,22 @@ export const KERNEL_OBJECT_TYPES: readonly ObjectTypeDecl[] = Object.freeze([
  *
  * 生产路径用 `kernelPropertyRegistry()`（惰性缓存）。这里导出工厂是为了
  * 「注册表不是全局可变单例」这一条在测试里可证：两个实例互不影响。
+ *
+ * ## 参数 `contributed`（#262 P11-F 段①：A21 的属性写半边）
+ *
+ * 装配贡献的**新对象类型**声明（`ModuleContributions.objectTypes[].rna`）。
+ * 缺省 = 只有内核内置类型 ⇒ 与 P11-F 之前的构造逐字相同（既有类型行为零改动）。
+ *
+ * 重复 id（贡献方声明了内核已有的类型）**不静默覆盖**：`registerObjectType` 返回
+ * `InvalidValue: duplicate-object-type`，本函数把它收进 `errors` —— 调用方
+ * （`reduceSetProperty`）见到非空 `errors` 即整批拒绝（装配缺陷必须显式暴露）。
  */
-export function createKernelPropertyRegistry(): { registry: PropertyRegistry; errors: readonly DomainError[] } {
+export function createKernelPropertyRegistry(
+  contributed?: readonly ObjectTypeDecl[],
+): { registry: PropertyRegistry; errors: readonly DomainError[] } {
   const registry = createPropertyRegistry()
   const errors: DomainError[] = []
-  for (const decl of KERNEL_OBJECT_TYPES) {
+  for (const decl of [...KERNEL_OBJECT_TYPES, ...(contributed ?? [])]) {
     const r = registry.registerObjectType(decl)
     if (!r.ok) errors.push(r.error)
   }
@@ -257,18 +285,53 @@ export function createKernelPropertyRegistry(): { registry: PropertyRegistry; er
 let cachedRegistry: { registry: PropertyRegistry; errors: readonly DomainError[] } | null = null
 
 /**
- * 内核注册表（惰性单例）。
+ * 按贡献声明缓存的注册表（键是**数组身份**）。
+ *
+ * ## 为什么键可以用身份而不是内容
+ *
+ * 贡献声明清单由**装配**一次性产出（`objectTypesOf` 返回冻结数组），
+ * 同一次装配的每次命令都会拿到**同一个**数组引用。用 `WeakMap` 按身份缓存
+ * 于是既避免每条命令重建注册表，又不会把"内容相同但来源不同"的清单混为一谈
+ * —— 而后者正是"注册表内容取决于谁先来"的老毛病（可变全局权威）的另一种形态。
+ */
+const contributedRegistries = new WeakMap<readonly ObjectTypeDecl[], { registry: PropertyRegistry; errors: readonly DomainError[] }>()
+
+/**
+ * 内核注册表。
  *
  * ## 为什么这里可以有单例，而 RNA 文档又说"不是全局可变单例"
  *
  * `createPropertyRegistry` 的注释反对的是**可变的全局权威**（谁都能往里注册，
- * 于是"当前有哪些属性"取决于导入顺序）。本函数返回的实例在本文件之外**只被读**
+ * 于是"当前有哪些属性"取决于导入顺序）。本函数返回的实例**只被读**
  * （`descriptor` / `objectType` / `valueTypeHandler`），内核的注册发生在构造期一次性完成。
- * 它不进 `ApplicationState`、不进 `reduceCommand` 的输入，故不破坏 A02 纯性。
+ * 它不进 `ApplicationState`、不是任何命令的副作用，故不破坏 A02 纯性。
+ *
+ * ## 贡献类型：**显式输入**，不是往单例里塞（P11-F 段① 的关键设计）
+ *
+ * `contributed` 非空时返回的是**按该清单构造的另一个实例**（按身份缓存），
+ * 而不是"把贡献并进那个全局单例"。两条路都通，选后者的代价是：
+ *
+ *  1. `reduceCommand` 开始依赖一个**可变全局** —— 与 `ExecutionInputs` 的
+ *     「这'什么都不给'本身是 A02 纯性的结构性保证：没有可读的全局来源」直接冲突；
+ *  2. `freeze-convergence.test.ts` 的既有判据「注册表的 objectTypes() 必须等于
+ *     `domain/scene` 的类型集」会在**任何**触发过装配注册的进程里判红
+ *     （注册是全局的 ⇒ 判据的输入被别的测试改变）。
+ *
+ * 走显式输入则与 `ExecutionInputs.objectFactories`（A21 已批准的贡献落点）**同形**：
+ * 装配层装配它、经输入传入、用完即弃。
  */
-export function kernelPropertyRegistry(): { registry: PropertyRegistry; errors: readonly DomainError[] } {
-  if (cachedRegistry === null) cachedRegistry = createKernelPropertyRegistry()
-  return cachedRegistry
+export function kernelPropertyRegistry(
+  contributed?: readonly ObjectTypeDecl[],
+): { registry: PropertyRegistry; errors: readonly DomainError[] } {
+  if (contributed === undefined || contributed.length === 0) {
+    if (cachedRegistry === null) cachedRegistry = createKernelPropertyRegistry()
+    return cachedRegistry
+  }
+  const hit = contributedRegistries.get(contributed)
+  if (hit !== undefined) return hit
+  const built = createKernelPropertyRegistry(contributed)
+  contributedRegistries.set(contributed, built)
+  return built
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -550,25 +613,48 @@ export function applyKernelPropertyValue(doc: Document, ref: PropertyRef, value:
 }
 
 /**
- * 内核写端口表（三类对象**共用同一个**写入函数）。
+ * 内核写端口表（全部对象类型**共用同一个**写入函数）。
  *
  * 共享是刻意的：写入行为由属性 ID 决定（`name` 属对象、`projection.*` 属相机载荷），
  * 不是由对象类型决定。若按类型各写一份，"注解的 text"与"方块的 name"就会各有一套
  * 校验路径 —— 那正是内联白名单的老问题换了个位置。
+ *
+ * `contributed`（#262 P11-F 段①）：装配贡献的新类型 id —— 它们与内置类型**共用同一个**
+ * handler。于是"贡献类型能写属性"不需要第二条写通路：写端口只是多了一条 id → 同一 handler
+ * 的登记，语义仍由 `applyKernelPropertyValue` 的属性词汇（那些是**内核数据载荷**的词汇，
+ * 属核心的封闭集合）唯一决定。
  */
-export function createKernelWritePorts(): PropertyWritePorts<Document> {
+export function createKernelWritePorts(contributed?: readonly ObjectTypeDecl[]): PropertyWritePorts<Document> {
   const ports = createPropertyWritePorts<Document>()
   const handler: PropertyWriteHandler<Document> = (state, ref, value) => applyKernelPropertyValue(state, ref, value)
   for (const id of KERNEL_OBJECT_TYPE_IDS) ports.write(id, handler)
+  for (const decl of contributed ?? []) ports.write(decl.id, handler)
   return ports
 }
 
 let cachedPorts: PropertyWritePorts<Document> | null = null
 
-/** 内核写端口表（惰性单例；内容构造后不变，与注册表同理）。 */
-export function kernelWritePorts(): PropertyWritePorts<Document> {
-  if (cachedPorts === null) cachedPorts = createKernelWritePorts()
-  return cachedPorts
+/** 按贡献声明缓存的写端口表（与 `kernelPropertyRegistry` 同一键：数组身份；理由见该函数）。 */
+const contributedPorts = new WeakMap<readonly ObjectTypeDecl[], PropertyWritePorts<Document>>()
+
+/**
+ * 内核写端口表（惰性缓存；内容构造后不变，与注册表同理）。
+ *
+ * `contributed` 的语义与缓存口径与 {@link kernelPropertyRegistry} **逐条一致**
+ * （同一份清单 ⇒ 同一实例；缺省 ⇒ 那个内置单例）。两者必须同源：注册表说某类型的
+ * 属性可描述、写端口却说没有 handler，会得到 `UnsupportedOperation: no-write-handler`
+ * 这种"半通"状态 —— 而它是静默的（只在**第一次真写**时暴露）。
+ */
+export function kernelWritePorts(contributed?: readonly ObjectTypeDecl[]): PropertyWritePorts<Document> {
+  if (contributed === undefined || contributed.length === 0) {
+    if (cachedPorts === null) cachedPorts = createKernelWritePorts()
+    return cachedPorts
+  }
+  const hit = contributedPorts.get(contributed)
+  if (hit !== undefined) return hit
+  const built = createKernelWritePorts(contributed)
+  contributedPorts.set(contributed, built)
+  return built
 }
 
 /** 某属性的描述（便捷出口；供 `queries.ts` 的读面复用同一注册表）。 */

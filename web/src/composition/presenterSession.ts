@@ -102,6 +102,26 @@ export class PresenterSession {
   private lastIdentity: string | null = null
   /** 上次生效的求值键（A12 的比对基准）。 */
   private currentKey: EvaluationKey | null = null
+  /**
+   * **需要重建 GPU 资源**（`#262` P11-F 段②：A30 残余缺口的修复点）。
+   *
+   * ## 为什么必须有一个显式标志（而不是继续靠"调用方记得再 apply 一次"）
+   *
+   * `BatchedPresenter.handleContextLost()` 会放弃全部 GPU 句柄并把实际世代置 `null`
+   * （旧句柄不复用 —— A30 明文）；恢复的唯一路径是"用当前有效版本重新 `apply()` 一次"。
+   * 而本会话的公开入口 `applyIfChanged`/`applyKernelDocument` 在**内容身份未变**时
+   * **提前返回**（那是 A11 的同一性保证，必须保留）——于是"内容没变的上下文丢失"
+   * **永远等不到那次重建**：画面永久空白，且同一时刻会话**返回结果**里还有世代
+   * （CPU 侧 `compiled.generation`）、`session.generation` 却是 `null`，两者不一致且静默。
+   *
+   * ## 语义边界（为什么它不破坏 A11 的同一性）
+   *
+   * 它**只**由 `handleContextLost()` 置位（= 一个外部设备事件，不是"调用方说脏了"），
+   * 且只在**一次**真实重建后复位。故"机位/布局变化不得重建几何"与
+   * "同一输入两次调用不重编"两条保证逐字不变 —— 判据见
+   * `presenterSession.test.ts` 的反向控制段（未发生丢失时 `applied === false`）。
+   */
+  private needsRebuild = false
 
   constructor(options: PresenterSessionOptions) {
     this.presenter = new BatchedPresenter({
@@ -156,17 +176,22 @@ export class PresenterSession {
     readonly key: EvaluationKey
   }): PresenterApplyOutcome {
     const identity = contentIdentityOf(input.scene, input.content, input.key)
-    if (identity === this.lastIdentity && this.compiled !== null) {
+    if (!this.needsRebuild && identity === this.lastIdentity && this.compiled !== null) {
       // 内容身份未变：**不**重编、**不**重传。但仍要更新当前键 ——
       // 机位变化会改 `viewProjection`（非结构维度），拾取仍应视为"当前"
       // （`structurallyEqual` 不比它）。
+      //
+      // ⚠️ `!this.needsRebuild` 是 P11-F 段② 的修复点：上下文丢失后**必须**绕过本短路
+      // （见 `needsRebuild` 的说明），否则"内容没变的丢失"永远等不到重建 = 画面永久空白。
       this.currentKey = input.key
       return {
         applied: false,
         compileError: null,
         skipped: [],
         compileSkipped: [],
-        generation: this.compiled.generation,
+        // 世代与**实际**同源（不是 CPU 侧 `compiled.generation`）：丢失后实际为 `null`，
+        // 返回值也必须如实说 `null` —— 静默不一致会让调用方无法判断"该重建"。
+        generation: this.presenter.currentGeneration,
         batches: this.compiled.payloads.length,
       }
     }
@@ -180,12 +205,15 @@ export class PresenterSession {
     if (!compiled.ok) {
       // 失败**不清空**上一次的呈现产物：清空会让画面闪空（"编译失败 ⇒ 什么都看不见"），
       // 而调用方拿到的是显式错误 —— 处置权在它手里。
+      //
+      // `needsRebuild` **不复位**：本次没有真重建，下次调用仍须尝试（否则一次失败的
+      // 重建会把"仍需重建"这件事悄悄吞掉 —— 与"不清空产物"是同一条纪律）。
       return {
         applied: false,
         compileError: `${compiled.error.code}`,
         skipped: produced.skipped,
         compileSkipped: [],
-        generation: this.compiled?.generation ?? null,
+        generation: this.presenter.currentGeneration,
         batches: this.compiled?.payloads.length ?? 0,
       }
     }
@@ -195,13 +223,15 @@ export class PresenterSession {
     this.index = new PickIndex(compiled.value)
     this.lastIdentity = identity
     this.currentKey = input.key
+    // 真重建已发生 ⇒ 复位（一次丢失只需一次重建）
+    this.needsRebuild = false
 
     return {
       applied: true,
       compileError: null,
       skipped: produced.skipped,
       compileSkipped: compiled.value.skipped.map((s) => ({ objectId: s.objectId, reason: s.reason })),
-      generation: compiled.value.generation,
+      generation: this.presenter.currentGeneration,
       batches: compiled.value.payloads.length,
     }
   }
@@ -301,6 +331,9 @@ export class PresenterSession {
     this.index = null
     this.lastIdentity = null
     this.currentKey = null
+    // `dispose()` 之后一切都没了：下次 apply 必然走重建路径（`lastIdentity === null`），
+    // 故标志无意义 —— 复位它，避免"已释放却自称待重建"的误导状态。
+    this.needsRebuild = false
   }
 
   /** WebGL 上下文丢失（旧句柄全部放弃；恢复时用当前有效版本重新 apply）。 */
@@ -309,12 +342,25 @@ export class PresenterSession {
     // 编译产物**保留**（它是 CPU 侧纯数据，可重建 GPU 句柄而不必重编）。
     // 但 `PickIndex` 与呈现器世代的对应关系已断 ⇒ 拾取必须等下一次 apply。
     this.index = null
+    // P11-F 段②：旧 GPU 句柄已全部放弃 ⇒ 下一次 apply **必须**真重建
+    // （绕过内容身份短路；否则"内容未变的丢失"永远等不到重建 = 画面永久空白）。
+    this.needsRebuild = true
     return n
   }
 
   /** WebGL 上下文恢复（调用方随后用**当前有效版本**重新 apply 一次）。 */
   handleContextRestored(): void {
     this.presenter.handleContextRestored()
+  }
+
+  /**
+   * 是否有**待重建**的 GPU 份额（诊断/判据面）。
+   *
+   * 只读事实，不是控制入口：置位/复位的唯一路径是 `handleContextLost()`（置位）
+   * 与一次成功重建（复位）。`dispose()` 也会复位（一切都没了，"待重建"不再有意义）。
+   */
+  get pendingRebuild(): boolean {
+    return this.needsRebuild
   }
 }
 

@@ -547,6 +547,28 @@ export interface ExecutionInputs {
    * 装配层可以覆盖它来加载贡献的类型（见 `composition`）。
    */
   readonly objectFactories?: import('@/domain/scene').ObjectFactoryTable
+  /**
+   * **装配贡献的对象类型声明**（A21 的属性写半边；`#262` P11-F 段①）。
+   *
+   * ## 为什么它与 `objectFactories` 并列（而不是塞进某个全局注册表）
+   *
+   * `contributes.objectTypes` 提供的是"新类型是什么"（`dataKind`/`editable`），
+   * `objectFactories` 提供的是"怎么造它"，而本字段提供的是"它的属性怎么描述"
+   * —— 三者都是**能力**（装配层装配、输入传入、用完即弃），不是文档内容。
+   *
+   * ## 缺省即内置（既有行为零改动）
+   *
+   * 缺省时 `reduceSetProperty` 用的就是那个构造期固定的内核注册表/写端口单例，
+   * 与 P11-F 之前逐字相同；只有装配真的贡献了新类型（`ObjectTypeContribution.rna`）
+   * 时才走按清单构造的那一份（见 `kernelPropertyRegistry(contributed)`）。
+   *
+   * ## 为什么不用"装配期写进全局注册表"
+   *
+   * 那会让 `reduceCommand` 依赖一个**可变全局**（与 A02 纯性的"没有可读的全局来源"
+   * 直接冲突），并使 `freeze-convergence` 的既有判据（注册表类型集 = 文档模型类型集）
+   * 在触发过装配注册的进程里判红。见 `kernel-properties` 的对应说明。
+   */
+  readonly contributedObjectTypes?: readonly import('./properties').ObjectTypeDecl[]
   /** 该次执行的关联 id（供诊断，不参与语义）。 */
   readonly correlationId?: string
 }
@@ -1248,16 +1270,23 @@ function reduceSetProperty(state: ApplicationState, cmd: SetPropertyCommand, env
   const lease = acquireFor(state, doc.id, ctx.id)
   if (!lease.ok) return rejected(state, lease.error)
 
-  const { registry, errors } = kernelPropertyRegistry()
+  // 属性词汇的唯一权威：内核 RNA 注册表 + 写端口（P11-F 段① 起支持装配贡献的新类型）。
+  //
+  // 默认路径**逐字不变**：没有贡献类型时仍是那两个构造期固定的惰性单例
+  // （`kernelPropertyRegistry()` / `kernelWritePorts()`），既有类型的行为零改动。
+  const contributed = env.contributedObjectTypes
+  const hasContributed = contributed !== undefined && contributed.length > 0
+  const { registry, errors } = hasContributed ? kernelPropertyRegistry(contributed) : kernelPropertyRegistry()
   if (errors.length > 0) {
     // 内核注册表构造失败是**装配缺陷**，必须显式暴露（不得静默降级为"属性不存在"）。
+    // 贡献声明重复/非法（例如声明了内核已有的类型 id）走的就是这条路。
     return rejected(state, unsupportedOperation({ reason: 'kernel-registry-invalid', detail: String(errors[0]!.params.reason ?? errors[0]!.code) }))
   }
 
   const access = kernelAccessOf(doc, ctx.id, env.capabilities, true)
   const write = applySetProperty<Document>({
     registry,
-    ports: kernelWritePorts(),
+    ports: hasContributed ? kernelWritePorts(contributed) : kernelWritePorts(),
     state: doc,
     command: cmd,
     env: { baseVersion: doc.version, currentVersion: doc.version },

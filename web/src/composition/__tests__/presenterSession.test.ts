@@ -401,21 +401,82 @@ describe('P10e 段② · `applyKernelDocument`（生产调用点）', () => {
  * `handleContextLost()`/`handleContextRestored()` 都不接受任何参数，故"恢复顺手重置
  * 文档/选择/时间/机位"在**接口层面不可表达**（要违约得先改签名，评审可见）。
  *
- * **行为面**：恢复周期**前后**，同一份（文档 + 时间）必须得到**同一个判定**
- * （`applied === false` ⇒ 内容身份链与编译产物都没丢，不是"恢复后重新来过"）；
- * 且恢复后**仍然**能对内容变化重编（不是"冻住"）。调用方持有的四项事实
- * （内核文档 / 选择 / 域时间 / 视口机位）在周期后必须**引用相同**（没有任何
- * 写路径碰过它们）—— 这一点在下面用真实的域类型（`createDocument`、
+ * **行为面**：恢复周期**前后**，四项事实（内核文档 / 选择 / 域时间 / 视口机位）
+ * 必须**引用相同**（没有任何写路径碰过它们）—— 用真实的域类型（`createDocument`、
  * `EditContext.selection`、`timeValue`、`THREE.PerspectiveCamera`）钉住。
  *
- * 负对照（注入）：把"恢复时连编译产物一起丢"的变异体（= 恢复期 `dispose()`，
- * 即"恢复后一切重来"的实现）喂给**同一个**断言器 ⇒ 判红。
+ * ## P11-F（#262 子批）在这里补的是**另一件事**：恢复必须真的重建 GPU
+ *
+ * P11-E 实测发现的缺口（Lead 裁决 comment 6553 ②，必修）：`handleContextLost()` 把
+ * 呈现器实际世代置 `null` 并清空挂载（旧句柄不复用，正确），而恢复要靠调用方
+ * "用当前有效版本重新 `apply()` 一次"；但会话的两个公开入口在**内容身份未变**时
+ * **提前返回** ⇒ **内容没变的上下文丢失后 GPU 永不重建，画面永久空白**；
+ * 且同一时刻会话**返回结果**里 `generation` 有值（CPU 侧 `compiled.generation`）、
+ * `session.generation` 为 `null`，两者不一致且**是静默的**。
+ *
+ * 本批的修法（Lead 采纳的方向）：`PresenterSession` 记 `needsRebuild`
+ * —— `handleContextLost()` 置位，`applyIfChanged` 见置位时**强制重建**（绕过内容身份
+ * 短路）并复位；顺肩把返回值的 `generation` 与**实际**世代同源。
+ * 判据即下面的 `judgeRecoveryAfterLoss`（正/负对照共用同一份）。
  */
-describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢（P11-E #262 补）', () => {
-  /** 判据本尊（正/负对照共用一份）：同一输入在恢复周期后必须仍得"不重编"判定。 */
-  function judgeSameInputAfterRecovery(out: { applied: boolean; generation: string | null }, generationBefore: string | null): void {
-    expect(out.applied, 'A30：恢复后同一份文档+时间必须仍判"内容身份未变"（⇒ 编译产物与身份链都没丢）').toBe(false)
-    expect(out.generation, 'A30：恢复不得改世代（改了 ⇒ 呈现/拾取映射全失效）').toBe(generationBefore)
+describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢 + **恢复必须真的重建 GPU**（P11-F #262）', () => {
+  /**
+   * 恢复周期后的**读数**（判据的显式输入）。
+   *
+   * 为什么把判据写成"读一个记录"而不是"读会话对象"：负对照要能**注入**缺口期的
+   * 真实读数（否则只能靠"改生产代码再跑"来证明判据有区分力，而那不可提交）。
+   */
+  interface RecoveryReading {
+    /** 会话报告本次是否真的重编 + 重建。 */
+    readonly applied: boolean
+    /** 会话**返回结果**里的世代。 */
+    readonly returnedGeneration: string | null
+    /** 会话**实际**世代（`session.generation` ⇒ 呈现器当前世代）。 */
+    readonly liveGeneration: string | null
+    /** 挂载的批次对象数（"画面上有东西"的结构代理）。 */
+    readonly mountedBatches: number
+    /** 丢失**前**的世代（内容身份基准）。 */
+    readonly generationBefore: string | null
+  }
+
+  /**
+   * 判据本尊：内容未变的上下文丢失后，恢复必须真的重建、且世代自洽。
+   *
+   * 五条各挡一种退化：
+   *  ① `applied=true` —— 挡"身份未变 ⇒ 提前返回"（P11-E 实测的缺口形态）；
+   *  ② `mountedBatches>0` —— 挡"重建了但没挂上"（画面仍空白）；
+   *  ③ `liveGeneration!=null` —— 挡"根本没有 GPU 世代"（只 resize 不重建，A30 负对照）；
+   *  ④ `liveGeneration===generationBefore` —— **内容身份未变**：世代必须逐字相同
+   *     （否则"重建"变成了"内容变了"，文档/时间被恢复路径动过）；
+   *  ⑤ `returnedGeneration===liveGeneration` —— 挡 P11-E 实测的**静默不一致**
+   *     （返回结果报 CPU 侧世代、实际为 null）。
+   */
+  function judgeRecoveryAfterLoss(r: RecoveryReading): void {
+    expect(r.applied, 'A30：内容未变的上下文丢失后，恢复必须**真的重建**（不得走内容身份短路）').toBe(true)
+    expect(r.mountedBatches, 'A30：重建后必须有挂载的批次（否则画面永久空白）').toBeGreaterThan(0)
+    expect(r.liveGeneration, 'A30：恢复后呈现器实际世代必须重建（只 resize 不算恢复）').not.toBeNull()
+    expect(r.liveGeneration, 'A30：内容身份未变 ⇒ 世代与丢失前逐字相同（文档/时间没被恢复路径动过）').toBe(
+      r.generationBefore,
+    )
+    expect(
+      r.returnedGeneration,
+      'A30：会话返回结果的 `generation` 必须与**实际**世代同源（不得静默不一致）',
+    ).toBe(r.liveGeneration)
+  }
+
+  /** 从真实会话读一份记录（正/负对照共用同一份读数口径）。 */
+  function readingOf(
+    session: { generation: string | null; object3d: { children: readonly unknown[] } },
+    outcome: { applied: boolean; generation: string | null },
+    generationBefore: string | null,
+  ): RecoveryReading {
+    return {
+      applied: outcome.applied,
+      returnedGeneration: outcome.generation,
+      liveGeneration: session.generation,
+      mountedBatches: session.object3d.children.length,
+      generationBefore,
+    }
   }
 
   /** 断言器判红 = 它抛错。 */
@@ -444,7 +505,7 @@ describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢（P
     }
   })
 
-  it('行为面：真实夹具上跑一次「丢失 → 恢复」，四项事实全部存活', async () => {
+  it('行为面：真实夹具上跑一次「丢失 → 恢复」，四项事实全部存活 + GPU 真的重建', async () => {
     const { scene, content } = await assembledOf('multiblock-ebf-2ch')
     const { createDocument } = await import('@/domain/document')
     const { timeValue } = await import('@/domain/animation')
@@ -476,84 +537,158 @@ describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢（P
       const first = s.applyKernelDocument(doc, time)
       expect(first.applied, '前置：首次应用必须真的编了').toBe(true)
       const generationBefore = s.generation
+      expect(generationBefore, '前置：必须建立世代').not.toBeNull()
       const timeKeyBefore = s.activeKey?.time
 
       // ── 真实恢复周期：丢失（放弃全部 GPU 份额）→ 恢复 ──
       const abandoned = s.handleContextLost()
       expect(abandoned, '丢失必须放弃本会话的 GPU 份额（否则恢复后复用已失效句柄）').toBeGreaterThan(0)
       s.handleContextRestored()
+      // 丢失后、重建前：实际世代为 null 且**无挂载** —— 这就是"画面空白"的现场。
+      // （若恢复路径不强制重建，下面这份读数会一直保持到内容再变一次。）
+      expect(s.generation, '丢失后实际世代必须为 null（旧句柄不复用）').toBeNull()
+      expect(s.object3d.children.length, '丢失后挂载必须被清空').toBe(0)
 
-      // ① 文档 + ② 时间：同一份输入仍判"身份未变"⇒ CPU 侧身份链与编译产物都在
+      // ① 恢复：内容**未变**也必须重建（P11-F 的修复点）
       const again = s.applyKernelDocument(doc, time)
-      judgeSameInputAfterRecovery(again, generationBefore)
+      judgeRecoveryAfterLoss(readingOf(s, again, generationBefore))
+      // ② 时间：恢复后求值键里的时间必须逐字段不变
       expect(s.activeKey?.time, '② 时间：恢复后求值键里的时间必须逐字段不变').toEqual(timeKeyBefore)
-      expect(again.generation, '① 文档：会话报告的世代不变 ⇒ 同一份文档没被恢复路径重置').toBe(generationBefore)
-
-      /**
-       * ## ⚠️ 本批实测发现的**能力缺口**（如实登记，不硬造正向判据）
-       *
-       * `BatchedPresenter.handleContextLost()` 会 `this.generation = null` 并清空挂载
-       * （旧句柄不复用，正确）；`handleContextRestored()` 只计数，恢复要靠调用方
-       * "用当前有效版本重新 `apply()` 一次"（`presenter.ts:281` 明文）。
-       * 但 `PresenterSession` 的公开入口只有 `applyIfChanged`/`applyKernelDocument`
-       * —— 二者在**内容身份未变**时**提前返回**（`applied: false`），于是：
-       *
-       * > **内容没变的上下文丢失 ⇒ GPU 资源不会被重建，画面不会回来**；
-       * > 而会话的**返回结果**里 `generation` 仍有值（那是保留的 CPU 侧
-       * > `compiled.generation`），`session.generation`（呈现器实际世代）却是 `null`
-       * > —— 两者不一致且**是静默的**。
-       *
-       * ⇒ 本组把该事实**登记为可核对的断言**（它判红 = 缺口已闭合，请同批把它升级为
-       * 正向判据："恢复后同一输入也能重建 GPU 资源"）。
-       */
-      expect(
-        s.generation,
-        '⚠️ 缺口登记（A30 残余）：内容未变时恢复不重建 GPU ⇒ 呈现器实际世代仍为 null。'
-          + '若本断言判红（= 恢复后已重建），说明缺口闭合：请把本条改成正向判据并核销登记。',
-      ).toBeNull()
-      expect(again.generation, '同一时刻，会话返回结果里仍报告 CPU 侧世代（不一致是静默的）').toBe(generationBefore)
-      // 恢复后**仍然**能感知内容变化并重建（这是当前唯一的"画面回来"路径）
-      const bumped = { ...doc, version: { ...doc.version, documentVersion: doc.version.documentVersion + 1 } }
-      const rebuilt = s.applyKernelDocument(bumped, time)
-      expect(rebuilt.applied, '恢复后内容变仍必须重编').toBe(true)
-      expect(s.generation, '内容变 ⇒ 呈现器世代重新建立（当前唯一的重建路径）').not.toBeNull()
-
       // ③ 选择：引用相同（恢复路径没有任何写路径碰过应用状态）
       expect(app.contexts['ctx-a30']!.selection.selected, '③ 选择：必须引用相同（未被清空/改写）').toEqual(selectionBefore)
       expect(app.contexts['ctx-a30']!.selection.selected, '③ 选择：元素也得是同一批引用').toBe(selectionBefore)
       // ④ 机位：视口相机逐位不变
       expect(camera.matrixWorld.elements, '④ 机位：视口相机矩阵必须逐位不变').toEqual(cameraBefore.elements)
       expect(camera.position.toArray()).toEqual([3, 4, 5])
+
+      // ── 反向控制：**没有丢失**时，同一份输入仍必须走"身份未变 ⇒ 不重编" ──
+      // 这条挡的是"把修复写成永远重建"（那会让 A11 的同一性保证消失：
+      // 每次调用都重编几何/重传 GPU）。`needsRebuild` 必须**只**在真丢失后置位。
+      const sameAgain = s.applyKernelDocument(doc, time)
+      expect(sameAgain.applied, '对照：未发生丢失时，同一输入不得重编（同一性保证仍在）').toBe(false)
+      expect(s.generation, '对照：未发生丢失时世代不变').toBe(generationBefore)
+      expect(sameAgain.generation, '对照：返回值与实际世代同源').toBe(s.generation)
+
+      // 恢复后**仍然**能感知内容变化并重建（不是"冻住"）
+      const bumped = { ...doc, version: { ...doc.version, documentVersion: doc.version.documentVersion + 1 } }
+      const rebuilt = s.applyKernelDocument(bumped, time)
+      expect(rebuilt.applied, '恢复后内容变仍必须重编').toBe(true)
+      expect(s.generation, '内容变 ⇒ 呈现器世代重新建立').not.toBeNull()
+      expect(s.generation, '内容变 ⇒ 世代确实换了（不是"永远同一个"）').not.toBe(generationBefore)
     } finally {
       s.dispose()
     }
   })
 
-  it('**负对照（注入）**：把"恢复时连编译产物一起丢"的变异体喂给同一断言器 ⇒ 判红', async () => {
-    const { scene, content } = await assembledOf('multiblock-tier-only')
-    const { createDocument } = await import('@/domain/document')
-    const { timeValue } = await import('@/domain/animation')
-    const doc = { ...createDocument('doc-a30-neg'), scene, content }
-    const time = timeValue(7, 20)
+  it('**负对照（注入）**：缺口期的真实读数与"只 resize 不重建"的读数都让同一断言器判红', () => {
+    const before = 'g:11111111'
+    // ① 正对照：修复后的读数（真重建 + 世代自洽）⇒ 判绿
+    expect(
+      redOf(() =>
+        judgeRecoveryAfterLoss({
+          applied: true,
+          returnedGeneration: before,
+          liveGeneration: before,
+          mountedBatches: 3,
+          generationBefore: before,
+        }),
+      ),
+      '修复后的读数必须判绿（否则判据恒红、无区分力）',
+    ).toBe(false)
 
-    const s = new PresenterSession({ scope: 'test-a30-neg' })
-    try {
-      s.applyKernelDocument(doc, time)
-      const generationBefore = s.generation
-      s.handleContextLost()
-      s.handleContextRestored()
-      // 正对照：正确实现判绿
-      expect(redOf(() => judgeSameInputAfterRecovery(s.applyKernelDocument(doc, time), generationBefore))).toBe(false)
-      // 变异体：恢复期把编译产物与身份链一起丢（`dispose()` = "恢复后一切重来"）
-      s.handleContextLost()
-      s.dispose()
-      s.handleContextRestored()
-      expect(
-        redOf(() => judgeSameInputAfterRecovery(s.applyKernelDocument(doc, time), generationBefore)),
-        '"恢复后一切重来"的实现必须判红（重编 + 换世代）',
-      ).toBe(true)
-    } finally {
-      s.dispose()
+    // ② **P11-E 实测的缺口读数**（逐字取自 attachment 1986 的现场）：
+    //    `againApplied=false` / `liveGenerationAfterRestore=null` /
+    //    `outcomeGenerationAfter` 有值（CPU 侧世代）⇒ 必须判红
+    expect(
+      redOf(() =>
+        judgeRecoveryAfterLoss({
+          applied: false,
+          returnedGeneration: before,
+          liveGeneration: null,
+          mountedBatches: 0,
+          generationBefore: before,
+        }),
+      ),
+      '缺口期读数（不重建 + 返回世代不一致）必须判红',
+    ).toBe(true)
+
+    // ③ 只 resize 不重建（A30 的既有负对照形态）⇒ 判红
+    expect(
+      redOf(() =>
+        judgeRecoveryAfterLoss({
+          applied: true,
+          returnedGeneration: null,
+          liveGeneration: null,
+          mountedBatches: 0,
+          generationBefore: before,
+        }),
+      ),
+      '"只 handleContextRestored 不重建"必须判红',
+    ).toBe(true)
+
+    // ④ **静默不一致**单独注入（其余三项都正常，只有返回世代与实际不同源）⇒ 仍须判红
+    expect(
+      redOf(() =>
+        judgeRecoveryAfterLoss({
+          applied: true,
+          returnedGeneration: before,
+          liveGeneration: 'g:22222222',
+          mountedBatches: 3,
+          generationBefore: before,
+        }),
+      ),
+      '世代不一致（哪怕重建成功）必须判红 —— 这正是 P11-E 的"静默"面',
+    ).toBe(true)
+  })
+
+  it('**已知残余登记（接线面）**：生产视口尚未把设备丢失事件接到本会话（`src/` 生产面零调用方）', () => {
+    // ## 这条登记的是什么（以及为什么它不属于本批的修复范围）
+    //
+    // P11-F 段② 修的是**会话行为**：`needsRebuild` ⇒ 内容未变的丢失后恢复也强制重建
+    // （Lead 裁决 comment 6553 ②）。但"谁在生产里把设备丢失事件转成本会话的
+    // `handleContextLost()`"是**另一条线**：全 `src/` 生产面目前只有两个**定义处**
+    // （`PresenterSession` 与它内部调用的 `BatchedPresenter`），
+    // 而 `runtime/renderEngine.ts` 注册的是**旧渲染链**的 canvas DOM 监听
+    // （`ev.preventDefault()` / `onResize()`，不碰本会话）。
+    //
+    // ⇒ 生产接线归**渲染链终切**（`composition/seams.ts` 的 `legacy-render-source-document`，
+    // owner P11；P10e 文件头亦明言"本批不切换渲染链"）。本批**不扩**到那里，
+    // 但把"零调用方"登记成可核对事实：一旦生产侧接上（本断言判红），
+    // 请把它升级为接线判据（"视口收到 webglcontextlost ⇒ 会话进入待重建"）并核销本登记。
+    const filesWith = (root: string, skipTests: boolean): string[] => {
+      const out: string[] = []
+      const walk = (dir: string): void => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (e.name === 'node_modules') continue
+          const full = path.join(dir, e.name)
+          if (e.isDirectory()) {
+            walk(full)
+            continue
+          }
+          if (!/\.(ts|vue)$/.test(e.name)) continue
+          const rel = path.relative(root, full).replace(/\\/g, '/')
+          if (skipTests && rel.includes('__tests__')) continue
+          // 铁律 6：读入口归一化（剥注释行，避免注释里的名字被当成调用方）
+          const code = fs
+            .readFileSync(full, 'utf8')
+            .replace(/\r\n/g, '\n')
+            .split('\n')
+            .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+            .join('\n')
+          if (code.includes('handleContextLost')) out.push(rel)
+        }
+      }
+      walk(root)
+      return out.sort()
     }
+
+    expect(
+      filesWith(path.join(process.cwd(), 'src'), true),
+      '生产面只应有定义处（多出文件 = 有人把设备丢失事件接上了会话 ⇒ 请升级本登记）',
+    ).toEqual(['composition/presenterSession.ts', 'presentation/presenter.ts'])
+    // 反空洞真：同一个扫描器在 `e2e/` 能找到**真实调用方**（探针） ⇒ "零调用方"不是扫描器空转
+    expect(filesWith(path.join(process.cwd(), 'e2e'), false), '扫描器必须能看见 e2e 探针里的调用').toEqual([
+      'helpers/presentation/probe.ts',
+    ])
   })
 })

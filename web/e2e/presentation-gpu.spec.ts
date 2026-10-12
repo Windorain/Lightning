@@ -309,24 +309,26 @@ test.describe('P5 · A30 graphics-recovery（真实 WEBGL_lose_context）', () =
     expect(m.failedRetryable).toBe(true)
     expect(m.retryWorks, 'A30：恢复失败后必须允许重试').toBe(true)
 
-    // ── P11-E #262 补：恢复后「文档 / 选择 / 时间 / 机位」四项不丢（真 Chromium + 真丢失） ──
+    // ── P11-E #262 补 / P11-F 段② 升级：恢复后「文档 / 选择 / 时间 / 机位」四项不丢
+    //    **且** GPU 真的重建（真 Chromium + 真上下文丢失） ──
     // 四项都不是 `null` ⇒ 判据**真的跑过**（缺信封时探针返回 null，本断言会判红）
     expect(m.sessionDetail, 'A30 会话面必须真的跑了（否则四项字段是没测过的空话）').not.toBeNull()
     expect(m.sessionDetail.firstApplied, '前置：会话面首次应用必须真的编了').toBe(true)
-    expect(m.sessionDocPreserved, 'A30：恢复后**文档**不丢（同一输入仍判身份未变、会话报告世代不变）').toBe(true)
+    expect(m.sessionDocPreserved, 'A30：恢复后**文档**不丢（同一输入 ⇒ 同一世代；且重建确实发生）').toBe(true)
     expect(m.sessionSelectionPreserved, 'A30：恢复后**选择**不丢（EditContext 选择引用不变）').toBe(true)
     expect(m.sessionTimePreserved, 'A30：恢复后**时间**不丢（求值键的时间逐字段不变）').toBe(true)
     expect(m.sessionCameraPreserved, 'A30：恢复后**机位**不丢（视口相机矩阵逐位不变）').toBe(true)
-    // ⚠️ 缺口登记（本批实测发现，非 B1 所记）：
-    // 内容未变时"恢复"**不重建 GPU 资源**（`applyIfChanged` 在身份未变时提前返回，
-    // 而 `handleContextLost()` 已把呈现器实际世代置 null）⇒ 画面不会自己回来，
-    // 只有内容再变一次才重建。下面两条把该事实钉成可核对读数：
-    // 若第一条判红（= 恢复后已重建），说明缺口闭合 —— 请把它升级为正向判据并核销登记。
+    // P11-F 段②（原 P11-E 缺口登记已升级为**正向判据**）：
+    // 内容未变 + 上下文丢失 ⇒ 恢复必须**强制重建**（`needsRebuild` 绕过内容身份短路），
+    // 否则画面永久空白；且返回值世代必须与实际世代同源。
     expect(
-      m.sessionGpuRebuiltAfterRestore,
-      '⚠️ A30 缺口登记：内容未变时恢复不重建 GPU（实际世代仍 null）。判红 ⇒ 缺口已闭合，请升级本登记。',
-    ).toBe(false)
-    expect(m.sessionGpuRebuiltAfterContentChange, '对照：内容变一次之后必须重建（当前唯一的重建路径）').toBe(true)
+      m.sessionForcedRebuildAfterRestore,
+      'A30：内容未变的上下文丢失后，恢复必须**真的重建**（不得走内容身份短路）',
+    ).toBe(true)
+    expect(m.sessionGpuRebuiltAfterRestore, 'A30：恢复后呈现器实际世代必须非空').toBe(true)
+    expect(m.sessionMountedBatchesAfterRestore, 'A30：重建后必须有挂载的批次（画面非空白的结构代理）').toBeGreaterThan(0)
+    expect(m.sessionGenerationConsistent, 'A30：会话返回结果的世代必须与实际世代同源（不得静默不一致）').toBe(true)
+    expect(m.sessionGpuRebuiltAfterContentChange, '对照：内容变一次之后也重建，且**换世代**').toBe(true)
   })
 
   test('负对照：只 resize 而不重建归属资源 ⇒ 判红', async ({ page }) => {
