@@ -123,13 +123,19 @@ function renderSamples(h: Harness, n: number): { samplesMs: number[]; calls: num
   h.renderer.info.autoReset = false
   h.renderer.info.reset()
   const samplesMs: number[] = []
-  for (let i = 0; i < n; i++) {
+  // ⚠️ **计时分辨率**：浏览器对 `performance.now()` 做粗化（本环境观测到 0.1 ms 量化）。
+  // 单帧提交远低于该粒度时读数会贴在量化台阶上（实测 median 0.1 ms、两轮比值失真）——
+  // 这是**测量设施的下限**，不是"渲染免费"。故这里**批量提交**：每轮连续渲染 `batch` 帧，
+  // 读到的时长除以 `batch`，把量化误差摊薄到可分辨的量级。
+  const batch = 20
+  const rounds = Math.max(5, Math.ceil(n / batch))
+  for (let i = 0; i < rounds; i++) {
     const t0 = performance.now()
-    h.renderer.render(h.scene, h.camera)
-    samplesMs.push(performance.now() - t0)
+    for (let k = 0; k < batch; k++) h.renderer.render(h.scene, h.camera)
+    samplesMs.push((performance.now() - t0) / batch)
   }
-  const calls = h.renderer.info.render.calls / n
-  const triangles = h.renderer.info.render.triangles / n
+  const calls = h.renderer.info.render.calls / (rounds * batch)
+  const triangles = h.renderer.info.render.triangles / (rounds * batch)
   h.renderer.info.autoReset = true
   return { samplesMs, calls, triangles }
 }
@@ -184,10 +190,15 @@ export function runRecompile(count: number, samples: number) {
   }
   const gen = idx.currentGeneration
   const prov = compiled.provenance
+  // 全量解算：**多轮采样**（≥5），单轮只给一个数会低估离散度。
+  const resolveAllMs: number[] = []
   let hits = 0
-  const t0 = performance.now()
-  for (const p of prov) if (idx.resolve({ generation: gen, batchIndex: p.batchIndex, instanceSlot: p.instanceSlot }) !== null) hits++
-  const resolveAllMs = performance.now() - t0
+  for (let i = 0; i < Math.max(5, samples); i++) {
+    const t0 = performance.now()
+    hits = 0
+    for (const p of prov) if (idx.resolve({ generation: gen, batchIndex: p.batchIndex, instanceSlot: p.instanceSlot }) !== null) hits++
+    resolveAllMs.push(performance.now() - t0)
+  }
 
   const objectProof = {
     objects: count,

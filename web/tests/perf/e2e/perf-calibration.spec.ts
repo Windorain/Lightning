@@ -131,7 +131,7 @@ test.describe('#262 P11-C 浏览器侧标定（真实 Chromium + 真实 WebGL）
         applyMs: number[]
         renderMs: number[]
         pickBuildMs: number[]
-        pickResolveAllMs: number
+        pickResolveAllMs: number[]
         objectProof: Record<string, unknown>
       }>(page, 'runRecompile', [count, SAMPLES])
 
@@ -144,7 +144,7 @@ test.describe('#262 P11-C 浏览器侧标定（真实 Chromium + 真实 WebGL）
           'render.applyToGPU(ms)': stats(r.applyMs),
           'render.renderFrame(ms)': stats(r.renderMs),
           'pick.buildIndex(ms)': stats(r.pickBuildMs),
-          'pick.resolveAll(ms)': stats([r.pickResolveAllMs]),
+          'pick.resolveAll(ms)': stats(r.pickResolveAllMs),
         },
       }
       console.log(`[P11-C ${scale}] ` + JSON.stringify(summary, null, 2))
