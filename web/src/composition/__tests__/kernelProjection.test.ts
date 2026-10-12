@@ -78,9 +78,19 @@ function declarationOf(assembled: AssembledDocument): KernelDeclarationProjectio
  * `multiblock-ebf-2ch` 的 `gt.blockcasings@11` 与 `gt.blockmachines@1000`
  * 共享同一 `assetId`）⇒ 漏传的助手会把 EBF 控制器写成机壳。
  * ⇒ 助手必须与生产入口同字段集，否则它测的不是生产路径。
+ *
+ * ## ⚠️ 同理必须带声明尺寸三字段（#262 P11-A）
+ *
+ * `gridProjectionInputOf` 自 P11-A 起透传 `sizeColumn/sizeRow/sizeZSlice`
+ * （投影维度由**文件声明**决定，见 `kernelProjection#projectGridCells`）。
+ * 本助手若漏传，就会在稀疏载荷上测出与生产**不同**的维度 —— 又是一次
+ * "助手与生产不同字段集"（上一条已经踩过一次）。
  */
 function gridInputOf(payload: {
   readonly cells: Readonly<Record<string, string>>
+  readonly sizeColumn?: number
+  readonly sizeRow?: number
+  readonly sizeZSlice?: number
   readonly geometry?: Readonly<Record<string, BlockGeometryAsset>>
   readonly cellGeometry?: Readonly<Record<string, string>>
   readonly cellPalette?: Readonly<Record<string, string>>
@@ -89,12 +99,18 @@ function gridInputOf(payload: {
 }): GridProjectionInput {
   const out: {
     cells: Readonly<Record<string, string>>
+    sizeColumn?: number
+    sizeRow?: number
+    sizeZSlice?: number
     geometry?: Readonly<Record<string, BlockGeometryAsset>>
     cellGeometry?: Readonly<Record<string, string>>
     cellPalette?: Readonly<Record<string, string>>
     palette?: readonly BlockPaletteEntry[]
     cellContent?: CellContentTable
   } = { cells: payload.cells }
+  if (payload.sizeColumn !== undefined) out.sizeColumn = payload.sizeColumn
+  if (payload.sizeRow !== undefined) out.sizeRow = payload.sizeRow
+  if (payload.sizeZSlice !== undefined) out.sizeZSlice = payload.sizeZSlice
   if (payload.geometry !== undefined) out.geometry = payload.geometry
   if (payload.cellGeometry !== undefined) out.cellGeometry = payload.cellGeometry
   if (payload.cellPalette !== undefined) out.cellPalette = payload.cellPalette
