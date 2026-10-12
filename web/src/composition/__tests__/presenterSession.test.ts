@@ -640,4 +640,55 @@ describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢 + *
       '世代不一致（哪怕重建成功）必须判红 —— 这正是 P11-E 的"静默"面',
     ).toBe(true)
   })
+
+  it('**已知残余登记（接线面）**：生产视口尚未把设备丢失事件接到本会话（`src/` 生产面零调用方）', () => {
+    // ## 这条登记的是什么（以及为什么它不属于本批的修复范围）
+    //
+    // P11-F 段② 修的是**会话行为**：`needsRebuild` ⇒ 内容未变的丢失后恢复也强制重建
+    // （Lead 裁决 comment 6553 ②）。但"谁在生产里把设备丢失事件转成本会话的
+    // `handleContextLost()`"是**另一条线**：全 `src/` 生产面目前只有两个**定义处**
+    // （`PresenterSession` 与它内部调用的 `BatchedPresenter`），
+    // 而 `runtime/renderEngine.ts` 注册的是**旧渲染链**的 canvas DOM 监听
+    // （`ev.preventDefault()` / `onResize()`，不碰本会话）。
+    //
+    // ⇒ 生产接线归**渲染链终切**（`composition/seams.ts` 的 `legacy-render-source-document`，
+    // owner P11；P10e 文件头亦明言"本批不切换渲染链"）。本批**不扩**到那里，
+    // 但把"零调用方"登记成可核对事实：一旦生产侧接上（本断言判红），
+    // 请把它升级为接线判据（"视口收到 webglcontextlost ⇒ 会话进入待重建"）并核销本登记。
+    const filesWith = (root: string, skipTests: boolean): string[] => {
+      const out: string[] = []
+      const walk = (dir: string): void => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (e.name === 'node_modules') continue
+          const full = path.join(dir, e.name)
+          if (e.isDirectory()) {
+            walk(full)
+            continue
+          }
+          if (!/\.(ts|vue)$/.test(e.name)) continue
+          const rel = path.relative(root, full).replace(/\\/g, '/')
+          if (skipTests && rel.includes('__tests__')) continue
+          // 铁律 6：读入口归一化（剥注释行，避免注释里的名字被当成调用方）
+          const code = fs
+            .readFileSync(full, 'utf8')
+            .replace(/\r\n/g, '\n')
+            .split('\n')
+            .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+            .join('\n')
+          if (code.includes('handleContextLost')) out.push(rel)
+        }
+      }
+      walk(root)
+      return out.sort()
+    }
+
+    expect(
+      filesWith(path.join(process.cwd(), 'src'), true),
+      '生产面只应有定义处（多出文件 = 有人把设备丢失事件接上了会话 ⇒ 请升级本登记）',
+    ).toEqual(['composition/presenterSession.ts', 'presentation/presenter.ts'])
+    // 反空洞真：同一个扫描器在 `e2e/` 能找到**真实调用方**（探针） ⇒ "零调用方"不是扫描器空转
+    expect(filesWith(path.join(process.cwd(), 'e2e'), false), '扫描器必须能看见 e2e 探针里的调用').toEqual([
+      'helpers/presentation/probe.ts',
+    ])
+  })
 })
