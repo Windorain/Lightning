@@ -535,6 +535,40 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       '同上：读面按 `AnnotationGeometry` 的**封闭字段集**逐字段转发（不整体展开），故需该类型',
     exitStage: 'P11 终局审计：随本文件迁出 `runtime/` 而消失（同 `domain/document` 那条）',
   }),
+  // ── P10f C′2（#301）内容写路径：旧层算子发内核命令 ─────────────────────────
+  //
+  // C′2 把"文档内编辑"从"clone legacy + setDocument"改成"**发内核命令** + 投影回写"
+  // （裁决 1）。发起者是旧层的算子文件 ⇒ 构成旧→新边，必须登记（不得静默）。
+  Object.freeze({
+    from: 'src/operators/builtin/annotationOperators.ts',
+    to: 'application/commands',
+    reason:
+      'P10f C′2：注解增删改改走内核唯一写通路（`addObject`/`deleteObject`/`setProperty`）。本条是"旧层发起内核写"的落点；命令类型是内核的写面类型',
+    exitStage:
+      'P10/D 批：`operators/` 层随工作台命令面重写迁入新层（届时算子在 `application/` 侧，不再是旧→新边）；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/operators/builtin/annotationOperators.ts',
+    to: 'runtime/kernelSession',
+    reason:
+      '同上：需要内核的 `contextId`（`KERNEL_CONTEXT_ID`）才能构造命令 —— 命令必须落在正确的编辑上下文上',
+    exitStage: 'P10/D 批：随算子层重写而消失；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/operators/builtin/annotationOperators.ts',
+    to: 'domain/identity',
+    reason:
+      "同上：用 `objectRef`/`propertyRef` 构造内核 `PropertyRef`（**限定式 id** `\"<objectTypeId>.<localId>\"`）。⚠️ 我第一版按 `{kind,type,id}` 手写 ref，被 TS2352 当场拦下 —— 这条边正是'该用内核的身份构造子而不是自己拼'的证据",
+    exitStage: 'P10/D 批：随算子层重写而消失；P11 核销',
+  }),
+  Object.freeze({
+    from: 'src/runtime/context.ts',
+    to: 'application/commands',
+    reason:
+      'P10f C′2 的 `submitContentEdit(command: Command)`：**内容编辑的唯一入口**（内核写 + 投影回写一次完成）。`Command` 是内核写面的类型，故 `runtime/` 需 import 它',
+    exitStage:
+      'P11 终局审计：`Context` 本身是 P10 的过渡门面（旧权威 `RuntimeDocument` 终删时随之收口）；届时本边随门面消失',
+  }),
   Object.freeze({
     from: 'src/runtime/host/workbenchHost.ts',
     to: 'runtime/kernelSession',

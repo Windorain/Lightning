@@ -185,6 +185,19 @@ export interface AddObjectCommand {
    * 各类型自己的字段（注释形状 `shape`、网格尺寸 `meshSize`、相机投影…）
    * 一律经这里传入，核心**不**认识任何单类型特有的字段名 ——
    * 那会让"新增一个类型"变成"回来改命令类型"，即 A21 要禁止的形态。
+   *
+   * ## 保留键 `objectId`（#301 P10f C′2，裁决 (a)）
+   *
+   * `params.objectId`（**字符串**）有值时，`reduceAddObject` 用它作为新对象的
+   * 对象 id，而**不**调 `allocateId`；无值 ⇒ `allocateId` 兜底（与改动前逐字节相同）。
+   *
+   * 为什么需要：装配给注解对象的 id 是 `annotation:<legacyId>`（身份由**源**决定），
+   * 而 `allocateId` 产出 `wk-object-N` ⇒ 同一份注解经"装配"与经"addObject"
+   * 会得到**两个身份**。实测后果：`selection.active` 与属性面板的 `EntityRef`
+   * 对不上 ⇒ **面板后续每次写都打到不存在的 id**。
+   *
+   * ⇒ 显式 id 把"注解身份由源决定"这条**已存在于装配**的口径贯彻到写路径，
+   * 而不是引入第二套身份规则。
    */
   readonly params?: Readonly<Record<string, unknown>>
 }
@@ -801,7 +814,32 @@ function reduceAddObject(state: ApplicationState, cmd: AddObjectCommand, env: Ex
   const lease = acquireFor(state, doc.id, cmd.contextId)
   if (!lease.ok) return rejected(state, lease.error)
 
-  const a1 = allocateId(state.ids, 'object')
+  // ⚠️ **显式 id 通道**（#301 P10f C′2，裁决 (a)）：`params.objectId` 有值则用它。
+  //
+  // ## 为什么必须有（实测的阻塞）
+  //
+  // 装配（`composition/kernelAssembly#annotationObjects`）给注解对象的 id 是
+  // **`annotation:<legacyId>`**（身份由**源**决定）。而本函数原先**总是**
+  // `allocateId` ⇒ 同一份注解"走装配"与"走 addObject"得到**两个身份**。
+  //
+  // 后果（实测）：`annotationOperators` 新建后设 `selection.active = a2`，
+  // 而内核对象是 `wk-object-1`；`editors/workbench-inspector.ts:598-602`
+  // 把这个 id **原样**包成 `EntityRef`（`annotationOwner` 零映射）
+  // ⇒ **属性面板后续每次写都打到不存在的 id**（用户可见功能损坏）。
+  //
+  // ## 为什么经 `params` 而不加 `Command` 具名字段
+  //
+  // A21：新增类型/字段不该回来改命令**类型**。`params` 是既有的**唯一开放通道**
+  // （见 `AddObjectCommand.params` 的说明），故走它。
+  //
+  // ## 零破坏
+  //
+  // 无 `params.objectId` ⇒ 行为与改动前**逐字节相同**（`allocateId` 兜底）。
+  const requestedId = cmd.params?.objectId
+  const hasRequestedId = typeof requestedId === 'string' && requestedId !== ''
+  const a1 = hasRequestedId
+    ? { id: requestedId, next: state.ids }
+    : allocateId(state.ids, 'object')
   const a2 = allocateId(a1.next, 'data')
   const ref = objectRef(a1.id, a2.next.counter)
   const scene = doc.scene

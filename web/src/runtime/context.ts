@@ -38,6 +38,7 @@ import type { KernelSession } from '@/runtime/kernelSession'
 import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
 import { kernelAnnotationsOf, kernelMaterialsOf, projectAnnotationsToLegacy } from '@/runtime/annotationRead'
 import { resolveSideTable } from '@/runtime/sideTableResolution'
+import type { Command } from '@/application/commands'
 import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotationRead'
 
 /** 空读面常量（eadonly 空数组：避免每次分配，且调用方不得改内联量）。 */
@@ -694,6 +695,44 @@ export class Context {
   /** 是否有内核会话（供装配自检与诊断；不抛错）。 */
   hasKernelSession(): boolean {
     return this.kernel !== null
+  }
+
+  /**
+   * **内容编辑的唯一入口**（#301 P10f C′2）：内核写 + 投影回写，**一次调用**。
+   *
+   * ## 为什么必须是一个入口（而不是让各 operator 自己组合）
+   *
+   * 编辑的正确形态是"① 内核写 → ② 投影回 legacy"，两步**缺一不可**：
+   *  - 只做 ① ⇒ 保存/渲染读 legacy（D 批前）⇒ **画面不更新、存出旧内容**；
+   *  - 只做 ② ⇒ 内核无权威 ⇒ 撤销链与内容身份与内核脱节。
+   *
+   * 让 9 处调用点各自组合 = 9 份会漂移的实现（本项目三度实测过的形态）。
+   * ⇒ 收口到本方法：**调用方只表达"做了什么编辑"，不表达"怎么同步"**。
+   *
+   * ## 与"未装配"的关系（回落语义）
+   *
+   * 内核缺席或未装配（GF-16 = false）⇒ 本方法**不做**内核写，返回 `false`，
+   * 由调用方走既有的 legacy 路径。这是 C′1 建立的对称分流的延续：
+   * **装配成功 ⇒ 内核权威；否则 ⇒ legacy 权威**。
+   * 刻意不在这里替调用方写 legacy —— 不同编辑的 legacy 写法各异
+   * （注解是数组、tooltip 是侧表），收进来会让本方法需要认识每一种编辑。
+   *
+   * @returns `true` = 内核已写入并回写 legacy（调用方**不应**再写 legacy）；
+   *          `false` = 未装配/无会话（调用方走既有 legacy 路径）
+   */
+  submitContentEdit(command: Command): boolean {
+    const kernel = this.kernel
+    if (kernel === null) return false
+    if (!kernel.hasAdoptedContent()) return false
+    const ticket = kernel.submit(command)
+    kernel.drain()
+    const outcome = kernel.settlementOf(ticket)
+    // ⚠️ 只有真的 `applied` 才回写：`rejected`/`unchanged` 时内核内容没变，
+    // 回写会把 legacy 也改成"内核的旧值"，反而**抹掉**调用方可能要保留的状态。
+    if (outcome === null || outcome.status !== 'applied') return false
+    // 回写（`false` 表示引用未变 ⇒ 无需动作，不是失败）
+    this.syncLegacyFromKernel()
+    return true
   }
 
   /**
