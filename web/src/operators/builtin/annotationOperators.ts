@@ -9,7 +9,7 @@ export const AnnotationCreateOperator: OperatorType = {
   flagUndo: true,
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, props) {
@@ -38,7 +38,7 @@ export const AnnotationUpdateOperator: OperatorType = {
   flagUndo: true,
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, props) {
@@ -65,7 +65,7 @@ export const AnnotationDeleteOperator: OperatorType = {
   flagUndo: true,
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, props) {

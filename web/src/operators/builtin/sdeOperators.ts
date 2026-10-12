@@ -97,11 +97,11 @@ export const SDEPushOperator: OperatorType = {
   description: '将当前场景保存到 SDE 工作区',
 
   poll(ctx) {
-    return ctx.getConnection().connected === true && ctx.getDoc().value !== null
+    return ctx.getConnection().connected === true && ctx.hasLoadedDocument()
   },
 
   async exec(ctx, _props) {
-    if (!ctx.getConnection().apiBase || !ctx.getDoc().value) return
+    if (!ctx.getConnection().apiBase || !ctx.hasLoadedDocument()) return
     await sdePutWorkspaceDocument(
       ctx.getConnection().apiBase,
       ctx.getConnection().token,

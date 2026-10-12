@@ -439,7 +439,7 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
           v-if="workspace === 'preview'"
           ref="areaHostRef"
         />
-        <div v-else-if="workspace === 'wiki' && ctx.getDoc().value" class="wb-wiki-embed">
+        <div v-else-if="workspace === 'wiki' && ctx.hasLoadedDocument()" class="wb-wiki-embed">
           <EmbedPreview :settings="embedSettings" :style="{ width: `${embedPublish.viewWidth}px`, height: `${embedPublish.viewHeight}px` }" />
         </div>
       </template>

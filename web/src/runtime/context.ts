@@ -173,6 +173,119 @@ export class Context {
   }
 
   /**
+   * **文档是否已装载**（#301 P10f B′：GF-15 读面的**消费入口**）。
+   *
+   * ## 它与 `getDoc().value !== null` 的关系（本批的全部理由）
+   *
+   * A′ 建立了 `KernelSession.hasLoadedDocument()`，并把"文档替换"收口成
+   * `Context.setDocument` 这**唯一写入口**。而生产里写入 `main.doc.value` 的
+   * 位置**只有一处**（`runtime/main.ts` 的 `replaceDoc`，其唯一调用者即
+   * `setDocument`）—— 实测：
+   *
+   * ```
+   * 生产里 `main.doc.value =` 的全部命中：
+   *   runtime/main.ts:164        this.doc.value = doc      ← 唯一赋值
+   *   runtime/context.ts         this.main.replaceDoc(next) ← 唯一调用者
+   * ```
+   *
+   * ⇒ 镜像**必然**发生在每一次文档替换上，于是
+   * `hasLoadedDocument() === (getDoc().value !== null)` 是一个
+   * **由唯一写者维护的结构不变量**，在**任意读取点**成立 ——
+   * 不只是 `setDocument` 的 21 个调用点。
+   *
+   * 这正是 B′ 能把 29 处存在性判定（含组件与 `poll()` 等**纯读点**）整批替换的
+   * 依据：不是"逐点核对过恰好相等"，而是"不存在能绕开镜像的写路径"。
+   * 该不变量由 `boundary-scan.test.ts` 的 `.replaceDoc(` 白名单机械把守。
+   *
+   * ## 为什么内核缺席时回落 legacy（而不是返回 `false`）
+   *
+   * `ctx.kernel` 是可空的（构造参数默认 `null`）。两个**生产**宿主都传
+   * （`runtime/host/workbenchHost.ts`、`runtime/host/embedHost.ts`），但测试/诊断
+   * 宿主可能不传。此时若返回 `false`，而 legacy 文档非 null ⇒ **行为变更**
+   * （菜单项本该可选却变灰、`poll()` 恒假）。
+   *
+   * ⇒ 回落读 `this.main.doc.value !== null` —— 与替换前的表达式**逐字同义**。
+   * ⚠️ 刻意读 `this.main.doc` 而**不是** `this.getDoc()`：后者会让本读面的引入
+   * **增加** `raw-authority-object` 的 `getDoc` 命中数，而 B′ 的目标是把它降下来
+   * （这笔"新增一处、消除 29 处"的账必须干净）。
+   * ## ⚠️ **必须是响应式可追踪的**（B′ 实测抓出的真实回归，务必保留这一读）
+   *
+   * 本方法被 **2 处 `.vue` 模板**直接调用（`EmbedRoot.vue` 的
+   * `v-else-if="ctx.hasLoadedDocument()"`、`WorkbenchRoot.vue` 的
+   * `workspace === 'wiki' && ctx.hasLoadedDocument()`）。而模板的重新渲染
+   * **只跟随它在渲染期读到的响应式依赖**。
+   *
+   * 首版实现只读内核侧的普通字段（`KernelSession` 的 `adoptedDocumentId`）——
+   * 那不是响应式对象，**Vue 追踪不到**。后果是：嵌入外壳的文档装载完成后
+   * 模板**不再重渲染**，`.wm-root` 永不出现 ⇒ `embed-mobile.spec.ts`
+   * **7 条 e2e 全红**（实测：`.wm-root` "element(s) not found"）。
+   *
+   * 内核侧**不能**自己持有响应式状态：`runtime/kernelSession.ts` 在
+   * `KERNEL_FILES` 内，而 `kernel-legacy-isolation.test.ts` 把 `ref(` 列为
+   * 内核代码的**禁用词**（内核是纯核心，不得依赖 Vue）。
+   *
+   * ⇒ 响应式依赖由**本层**提供：下面第一句读 `this.main.doc.value`（它是
+   * `Ref`，且**恰好在每一次文档替换时变化** —— 镜像就在同一次 `setDocument`
+   * 里发生）。于是"文档变了 ⇒ 模板重算 ⇒ 读到内核的最新装载状态"成立。
+   *
+   * ⚠️ 这一读**不是**多余的"为了触发依赖而读"：它同时是**正确性**的一部分 ——
+   * 装配成功路径（`adoptDocument` ⇒ `markLoaded`）在 `replaceDoc` **之后**发生，
+   * 而同一次同步流程内的 `doc.value` 变化已足以让本次渲染读到最终状态。
+   */
+  hasLoadedDocument(): boolean {
+    // 响应式依赖（见上方长注释：去掉这一读会让 2 处模板永不重渲染）。
+    const legacyPresent = this.main.doc.value !== null
+    const kernel = this.kernel
+    if (kernel === null) return legacyPresent
+    return kernel.hasLoadedDocument()
+  }
+
+  /**
+   * **当前帧的网格** —— ⚠️ **本批撤回，未交付**（#301 P10f B′ 实测发现两处不同义）。
+   *
+   * ## 为什么它不在这里（撤回理由，留档以免后人重走）
+   *
+   * N3 的 14 处"读网格"看起来同源（都要一个 `Grid`），实现也照着
+   * `projectToLegacyGrid` 复用做了（已实测逐格同义：帧为主/多方块/独立复算
+   * 三类判据全绿）。但接线时实测出**两处不同义**，都不是"判据不够"，而是
+   * **语义面不同**：
+   *
+   * ### ① `moveTranslate.ts:313/330` 是**写**路径，不是读
+   *
+   * 它把 `grid` 捕获进 `execute`/`undo` 并调 `grid.moveBlock(from, to)`。
+   * 实测（探针，本批已跑）：
+   * ```
+   * legacy  frame(0).grid === frame(0).grid         → true   （同一对象，写入留存）
+   * 读面    gridOf(doc,0) === gridOf(doc,0)         → false  （**每次新建**）
+   * 经读面 moveBlock 后重新读该格                    → 改动**丢失**
+   * ```
+   * `projectToLegacyGrid` 每次调用**新建**一个 `Grid`。⇒ 替换后移动操作会
+   * **静默无效**（不报错、不改盘、用户看不到变化）。
+   *
+   * ### ② 换文档但内核未重装时，内核读到**另一个文档**的网格
+   *
+   * A′ 只对齐**存在性**，内容同步明确归 C′。而 `NewScene`/`pushDocUndo`/
+   * 模态取消等 6 条路径只调 `setDocument`、**不**装配内核 ⇒ 内核仍持旧文档，
+   * 而 legacy 已换。实测：
+   * ```
+   * 装配 A（2 格）→ legacy 换成空文档（NewScene 形态）
+   * legacy 方块数 = 0 ；内核读面方块数 = 2  ；divergent = true
+   * ```
+   * ⇒ 替换后 `getBlockTypeStats`/`getPartsAt`/描边 mask/拾取部件这些读
+   * **会返回上一份文档的网格**（不只是"空"，而是**错文档**）。
+   *
+   * ## 结论
+   *
+   * N3 的真正前置不是"网格读面"（那已做出且同义），而是
+   * **(a) 区分网格的读面与写面**、**(b) 内容同步**（`setDocument` 的
+   * 各路径都装配内核）。两者都属 C′（`RuntimeDocument` 退出生产、
+   * `Command` 联合扩展）——本批**不做**，如实回报 Lead 并登记。
+   *
+   * 已做出的读面与三类同义判据保存在 `temp/p10f/bprime-n3-hold/`
+   * （不入树，见铁律 1），C′ 可直接取用。
+   */
+
+  /**
    * **文档替换的唯一写入口**（#301 P10f A′）。
    *
    * ## 它替代的旧机制

@@ -228,7 +228,7 @@ interface PropertyQueries {
 - **不变量**：`PropertyValue` 不得是可变底层 TypedArray 的引用（#249 §5 明文
   "不能暴露可变底层 TypedArray"）。大批量几何查询提供只读批量投影或明确借用契约。
 
-### 2.3 文档装载状态读面（GF-15，P10f A′ 新增）
+### 2.3 文档装载状态读面（GF-15，P10f A′ 新增；B′ 补消费入口）
 
 ```ts
 interface KernelSession {
@@ -239,8 +239,33 @@ interface KernelSession {
 interface Context {
   /** **文档替换的唯一写入口**：写 legacy 文档并镜像内核装载状态。 */
   setDocument(next: RuntimeDocument | null): void
+  /**
+   * **装载状态的消费入口**（B′ 新增）。
+   * 内核在场 ⇒ 取内核；内核缺席（测试/诊断宿主）⇒ 回落 `main.doc.value !== null`。
+   */
+  hasLoadedDocument(): boolean
 }
 ```
+
+**`Context.hasLoadedDocument()` 的语义（B′ 冻结）**
+
+它是 29 处 `ctx.getDoc().value !== null`（含 2 处 `.vue` 模板）的替代读面，**必须**与后者逐点同义。
+同义不是"逐点核对出来的巧合"，而是**由唯一写者维护的结构不变量** —— 实测：
+
+| 事实 | 机械证据 |
+|---|---|
+| 生产里写入 `main.doc.value` 的位置**只有一处** | `runtime/main.ts` 的 `replaceDoc`（全树赋值点扫描） |
+| 而 `replaceDoc` 的调用点**只有一处** | `runtime/context.ts` 的 `setDocument` 本体（AST 白名单闸门） |
+
+⇒ 镜像**必然**发生在每一次文档替换上 ⇒ 该同义在**任意读取点**成立（不只是 `setDocument` 的 21 个调用点）。
+⇒ 这才使 29 处纯读点（组件、`poll()`）可以整批替换，而不必逐点论证。
+两条事实均由 `runtime/__tests__/p10fExistenceReadFace.test.ts` 的 ① 组独立断言
+（并已用"注入第二处写入点"实测该断言非空洞真）。
+
+**内核缺席时回落 `main.doc`**：`ctx.kernel` 可空（构造参数默认 `null`），测试/诊断宿主不传它。
+返回 `false` 会让那些宿主下"本该可选"的菜单项变灰、`poll()` 恒假 —— 那是行为变更。
+回落表达式与替换前**逐字同义**；且刻意读 `this.main.doc` 而非 `this.getDoc()`，
+以免本读面的引入**新增** `getDoc` 命中（B′ 的目标是下降，不是平移）。
 
 **为什么需要它（缺口原文）**
 
@@ -288,9 +313,17 @@ interface Context {
 
 **迁移状态（如实登记）**
 
-本批（P10f A′）**只建立读面并完成对齐**，**不**改动任何消费面 ——
-`raw-authority-object` 的 29 处存在性判定仍在读 `getDoc()`。
-替换它们属后续批次（B′），需与本读面同批进行并附逐点判据。
+P10f **A′** 只建立读面并完成对齐，**不**改动消费面。
+P10f **B′** 完成 **N1 的 29 处**替换（`ctx.hasLoadedDocument()`，含 2 处 `.vue` 模板），
+并同步 registry 消费者清单（核销 5 个已不再命中的文件，相位仍 `pending`）。
+
+**B′ 未做的两类（如实登记，各有机械理由）**
+
+| 类别 | 为何本批不做 |
+|---|---|
+| **N3 网格读（14 处）** | 读面已做出且**逐格同义**（三类判据全绿），但接线实测出**两处语义面不同义**：① `moveTranslate.ts:313/330` 的 `grid.moveBlock(...)` 是**写**路径，而投影 `Grid` **每次新建**（实测 `gridOf(doc,0) !== gridOf(doc,0)`，经它写入后改动**丢失**）；② `NewScene`/`pushDocUndo`/模态取消等 6 条路径只调 `setDocument`、**不装配内核** ⇒ 内核读到**上一份文档**的网格（实测 legacy 0 格 vs 内核 2 格）。两者都需 **(a) 区分网格读/写面**、**(b) 内容同步** ⇒ 归 C′。 |
+| **N6 帧轴（3 处）** | `#30`（`useKernelFrameLoop.ts`）是**死代码**，按裁决 (a) 删除（零行为变化）；`#32`（`useViewportRuntime.ts`）的 legacy 兜底生产不可达，替换为 `?? 0`；`#31`（`StatusBar.vue`）**暂缓** —— 装配失败时替换会让状态栏帧数 N→0（用户可见回归），随 D8/GF-16 修复批归 C′。 |
+
 
 ---
 
@@ -689,6 +722,7 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
 |---|---|---|---|
 | v1 | 2026-10-10 | 首次冻结：`PropertyRef`/`EditorClient`/`CommandOutcome`/八项错误分类/`EvaluationKey`/模块声明/所有权表/缺口流程 | #249 §3–§7 §10 §14 §19；#250；#251 B3 |
 | v1.1 | 2026-10-12 | 新增 §2.3 文档装载状态读面（GF-15）：`KernelSession.hasLoadedDocument()` + `Context.setDocument` 唯一写入口 + 状态迁移表 + 与 `closeDocument` 的关系 | #250 comment 5731（R-WK-08 重切）；#301（P10f A′） |
+| v1.2 | 2026-10-12 | §2.3 补 `Context.hasLoadedDocument()` 消费入口（唯一写者不变量的机械证据）；登记 N1 29 处已替换、N3/N6 未做的机械理由 | #250 comment 5775（B′ 四项裁决）；#301（P10f B′） |
 
 ---
 

@@ -75,23 +75,26 @@ export function useKernelFrameLoop(ctx: Context): FrameClock | null {
    */
   kernel.bindFrameSource({
     count: () => {
+      // #301 P10f B′：此处原有一个 `ctx.getDoc().value?.frameCount ?? 0` 的**死分支**，
+      // 已删除（Lead 裁决 (a)）。它测的是 `kernel.document() !== undefined`，而该值
+      // **恒为真**（`openDocument` 无条件建文档条目、`closeDocument` 生产零调用）
+      // ⇒ 那一行**永不执行**。
+      //
+      // ⚠️ 删掉它**不是**在说"这里已经正确"，而是把一处**掩盖缺口的假守卫**移开：
+      // 该分支的注释原本声称"旧文档只在**装配未覆盖该文档形态**时兜底（能力不回退）"，
+      // 但守卫测的是"文档存在"、**不是"装配成功"** ⇒ 装配失败时仍走内核分支，
+      // 返回**空/陈旧**帧轴（0）而不是 legacy 的 N 帧。**那处兜底从未生效。**
+      //
+      // 缺陷本体（装配失败 ⇒ 帧数 0）与"装配成功"读面的缺口已登记为 **D8 / GF-16**，
+      // 修复与 `StatusBar.vue` 的同类替换同批归 C′。本批只做零行为变化的死分支删除。
       const kdoc = kernel.document()
-      if (kdoc !== undefined) return axisFrameCount(kdoc.content.frameAxis)
-      return ctx.getDoc().value?.frameCount ?? 0
+      if (kdoc === undefined) return 0
+      return axisFrameCount(kdoc.content.frameAxis)
     },
     durationsMs: () => {
       const kdoc = kernel.document()
-      if (kdoc !== undefined) return [...frameDurationsMs(kdoc.content.frameAxis)]
-      const doc = ctx.getDoc().value
-      if (!doc) return []
-      const out: number[] = []
-      for (let i = 0; i < doc.frameCount; i++) {
-        // `durationMs` 缺省由内核按 1ms 处理（`stripTimeline` 的回落），
-        // 故这里如实给 0 而不是"猜一个 50"——猜会让"文档没声明时长"
-        // 与"文档声明了 50ms"在行为上无法区分。
-        out.push(doc.frame(i)?.durationMs ?? 0)
-      }
-      return out
+      if (kdoc === undefined) return []
+      return [...frameDurationsMs(kdoc.content.frameAxis)]
     },
   })
 

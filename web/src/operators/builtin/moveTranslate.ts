@@ -108,7 +108,12 @@ export const MoveOperator: OperatorType = {
   description: '拖拽 Gizmo 或空白区域移动选中方块，X/Y/Z 锁定轴向',
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    // #301 P10f B′：存在性判定走 GF-15 读面。
+    // ⚠️ 本文件另有一处 `grid.moveBlock(...)`（`:313`/`:330`）**本批刻意未换** ——
+    // 那是**写**路径，而读面返回的投影 `Grid` 每次调用都是**新对象**
+    // （实测探针：`gridOf(doc,0) !== gridOf(doc,0)`，经它写入后重新读**改动丢失**）。
+    // 详见 `runtime/context.ts` 中撤回说明与 B′ 完工报。
+    return ctx.hasLoadedDocument()
   },
 
   initModalState(): OperatorProperties {

@@ -41,7 +41,7 @@ export const SetFrameIndexOperator: OperatorType = {
   description: '在多帧场景中切换当前帧',
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, _props) {
@@ -83,7 +83,7 @@ export const SetFramePlaybackRateOperator: OperatorType = {
   label: '设置帧播放倍率',
   description: '设置常量播放倍率（1 = 原速；0 = 暂停推进但保留播放状态）',
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
   exec(ctx, props) {
     const rate = Number(props.rate)
@@ -216,7 +216,7 @@ export const SetWorkspaceModeOperator: OperatorType = {
 export const SetLayerYOperator: OperatorType = {
   id: 'OPERATOR_SET_LAYER_Y',
   label: '设置图层 Y',
-  poll(ctx) { return ctx.getDoc().value !== null },
+  poll(ctx) { return ctx.hasLoadedDocument() },
   exec(ctx, props) {
     const y = Math.floor(props.y as number)
     const v = Number.isFinite(y) ? y : -1
@@ -229,7 +229,7 @@ export const SetHoveredBlockOperator: OperatorType = {
   id: 'OPERATOR_SET_HOVERED_BLOCK',
   label: '设置悬停方块',
   internal: true,
-  poll(ctx) { return !ctx.isEmbed() && ctx.getDoc().value !== null },
+  poll(ctx) { return !ctx.isEmbed() && ctx.hasLoadedDocument() },
   exec(ctx, props) {
     const block = props.block as BlockRef | null | undefined
     setRegionHoverBlock(ctx, REGION.WORKBENCH_VIEWPORT, block ?? null)

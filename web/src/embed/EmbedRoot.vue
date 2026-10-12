@@ -54,7 +54,7 @@ watch(
     <div v-if="loadError" class="embed-boot embed-boot--err">
       {{ loadError }}
     </div>
-    <EmbedViewport v-else-if="ctx.getDoc().value" :settings="settings" />
+    <EmbedViewport v-else-if="ctx.hasLoadedDocument()" :settings="settings" />
     <div v-else class="embed-boot embed-boot--loading">
       <div class="embed-boot-spinner"></div>
       <span>加载中…</span>

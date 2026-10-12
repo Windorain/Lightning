@@ -490,17 +490,18 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     consumers: Object.freeze([
       'web/src/context/captureEmbedInitialView.ts',
       'web/src/context/queries.ts',
-      'web/src/embed/EmbedRoot.vue',
+      // #301 P10f B′ 核销：`EmbedRoot.vue` / `embedInitialViewOperators.ts` /
+      // `selectOperator.ts` / `boxTool.ts` 四处曾是真消费者（存在性判定
+      // `ctx.getDoc().value !== null` 与模板 `v-else-if="ctx.getDoc().value"`），
+      // 本批已换成 `ctx.hasLoadedDocument()`（GF-15 读面）⇒ 不再命中 `getDoc`。
       'web/src/operators/builtin/annotationOperators.ts',
       'web/src/operators/builtin/docLifecycleOperators.ts',
       'web/src/operators/builtin/documentIoOperators.ts',
-      'web/src/operators/builtin/embedInitialViewOperators.ts',
       'web/src/operators/builtin/exportOperators.ts',
       'web/src/operators/builtin/metaEditOperators.ts',
       'web/src/operators/builtin/miscOperators.ts',
       'web/src/operators/builtin/moveTranslate.ts',
       'web/src/operators/builtin/sdeOperators.ts',
-      'web/src/operators/builtin/selectOperator.ts',
       'web/src/operators/builtin/wikiOperators.ts',
       'web/src/operators/modalOperatorWrapper.ts',
       'web/src/operators/operatorRegistry.ts',
@@ -522,7 +523,6 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       'web/src/workbench/components/StatusBar.vue',
       'web/src/workbench/document/pipeline.ts',
       'web/src/workbench/document/sources/wikiDataPageSource.ts',
-      'web/src/workbench/tools/boxTool.ts',
       'web/src/workbench/ux/panels/AnnotationEditorPanel.vue',
       'web/src/workbench/ux/panels/MaterialGallery.vue',
       'web/src/workbench/ux/panels/TooltipEditorPanel.vue',
@@ -531,15 +531,19 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
       // 归口 P2→P10 退出（见 `composition/seams.ts` 的同名登记）。
       'web/src/editors/workbench-rna.ts',
       'web/src/workbench/ux/PropertyInspector.vue',
-      // **Vue 模板属性里的表达式**也是真依赖：`EmbedRoot.vue:52` 的
-      // `<EmbedViewport v-else-if="ctx.getDoc().value" …>` 在模板里读文档。
+      // **Vue 模板属性里的表达式**也是真依赖：`WorkbenchRoot.vue` 的
+      // `<div v-else-if="workspace === 'wiki' && ctx.hasLoadedDocument()" …>`
+      // 曾在模板里读 `ctx.getDoc().value`，B′ 已换成 GF-15 读面。
       // 这处由"`.vue` 分段扫描"抓出（曾因 TS 词法把 `"…"` 当字符串而**漏报**；
       // 漏消费者比假红危险，故 `.vue` 的模板段改用 HTML 口径 —— 见 `codeOfSource`）。
-      'web/src/embed/EmbedRoot.vue',
       // P10（#261）新增的真实消费者：外壳级帧循环把**帧声明**从旧文档读出
       // 交给内核会话（`KernelSession.bindFrameSource`）。这是显式登记过的
       // 适配接缝 —— 内核不认识 `RuntimeDocument`，帧声明由接线层读。
-      'web/src/composition/useKernelFrameLoop.ts',
+      //
+      // ⚠️ #301 P10f B′ 更新：该文件的 `count`/`durationsMs` 里的 legacy 兜底
+      // 两行是**死代码**（守卫 `kernel.document() !== undefined` 恒真），
+      // 本批按 Lead 裁决 (a) 删除 ⇒ `useKernelFrameLoop.ts` 从本清单**核销**。
+      // 缺陷本体（装配失败 ⇒ 帧数 0、兜底从未生效）已登记 D8/GF-16，归 C′。
       // 注：`workbench/ux/panels/blockInspector.ts` 与 `sceneInfo.ts` 曾在本表内，
       // 但 P2 合流后二者已不再调用这三个 getter（本扫描器实测 0 命中）⇒ 已核销。
       // 这正是"清单腐烂"断言（`extra`）的作用：文件改名/改实现后必须同步核销，
