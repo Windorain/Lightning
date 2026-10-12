@@ -468,32 +468,56 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
    * 就说明该接缝可以核销，本组断言会判红并要求同批更新登记 —— 这正是
    * "登记表 = 现状清单"该有的性质。
    */
-  it('**反空洞真（G-6）**：`fidelity-record-transport-unwired` 的三段缺口当下确实成立', async () => {
+  it('**反空洞真（G-6）**：`fidelity-record-transport-unwired` 的 (a)(b) 已闭合、(c) 仍成立', async () => {
     const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
     const entry = SEAMS.find((s: { id: string }) => s.id === 'fidelity-record-transport-unwired')
     expect(entry, 'G-6 的传输缺口必须登记（否则它只活在报告散文里，P11 无法机械核对）').toBeTruthy()
-    expect(entry.owner.p, 'G-6 归 P10d（R-WK-06：内容面/投影面）').toBe('P10d')
+    // ## #301 P10f D1：owner 从 P10d 转到 P10f
+    //
+    // P10d（#289）只做登记、未做三段中的任何一段；D1 做了 (a)+(b)，
+    // 剩下的 (c) 也是本批 D2 的范围 ⇒ 迁移职责整体归 P10f。
+    // ⚠️ 这条断言**不是**为了变绿而改：owner 必须指向"真正会做迁移的批次"，
+    // 否则 seam 会挂在一个不动的批次名下而**永无退出**（P10c 的 P11 误登记同族教训）。
+    expect(entry.owner.p, 'G-6 已转入 P10f（D1 做了 a+b，c 归 D2）').toBe('P10f')
 
     // 新轨（记录机制）**确实存在**：不是"登记了一个没实现的机制"。
     const fidelity = readSource(path.join(SRC_ROOT, 'adapters', 'files', 'fidelityRecord.ts'))
     for (const needle of ['captureFidelity', 'serializeFidelity', 'fidelityStorageKey', 'judgeFidelityAfterEdit']) {
       expect(fidelity, `新轨必须真的提供 ${needle}`).toContain(needle)
     }
+    // (b) ✅ D1 已闭合：键口径并入 recovery/save 家族（有解析器 + 被分类器识别）。
+    const recovery = readSource(path.join(SRC_ROOT, 'application', 'recovery.ts'))
+    expect(recovery, 'D1(b)：保真键的权威构造器必须在 recovery 家族里').toContain('fidelityStoreKey')
+    expect(recovery, 'D1(b)：必须有解析器（旧方案结构上不可逆）').toContain('parseFidelityStoreKey')
+    expect(recovery, 'D1(b)：必须被制品分类器识别').toContain('FIDELITY_ARTIFACT')
 
-    // (a) 生产者缺失：唯一消费者只**数数**，不构造记录。
+    // (a) 生产者：**D1(a) 已接线**（原先是"唯一消费者只数数"）。
     //
     // ## P10d（#289）D1：锚点**搬家**（不是缺口消失）
     //
     // D1 把装配实现从 `docLifecycleOperators.ts` 移进 `composition/documentLoad`
     // （统一两条加载脊柱），于是"只数数"的那一行也随之搬走。
-    // 缺口**仍然成立**（`captureFidelity` 在全树生产文件里零命中），
-    // 故本条改为在**新家**断言，并补一条全树判据 —— 而不是删掉判据。
-    // 把它删掉会是"因为实现搬了家，就把守门人撤了"，正是本判据所反的。
+    // 当时缺口**仍成立**，故本条改为在**新家**断言，并补一条全树判据。
+    //
+    // ## #301 P10f D1(a)：缺口**已闭合**（本条再次改判据，而不是删判据）
+    //
+    // 采集已接线 ⇒ "只数数"的描述不再成立。本条现在守的是：
+    // ① 计数日志**保留**（诊断对账价值不变）；② 采集调用**存在**；
+    // ③ 全树接线点**精确等于**两个文件（多一个 = 有人绕过采集入口）。
     const lifecycle = readSource(path.join(SRC_ROOT, 'composition', 'documentLoad.ts'))
-    expect(lifecycle, '装配产物的 unknownFields 必须仍只被计数（生产者尚未接线）').toContain(
+    // ## #301 P10f D1(a)：本条已从"只被计数"改为"**同时**被计数与采集"
+    //
+    // 原先断言的是「`unknownFields` 必须**仍只**被计数」—— 那描述的是**缺口**
+    // （生产者未接线）。D1(a) 接线后该描述不再成立，故本条改为断言**新事实**：
+    // 计数日志**保留**（它对账价值不变）+ 采集调用**存在**。
+    // ⚠️ 不是"删掉判据"：判据仍在，只是它现在守的是"两者都在"。
+    expect(lifecycle, '计数日志必须保留（诊断对账价值不变）').toContain(
       'Object.keys(value.unknownFields).length',
     )
-    // 全树：生产者仍未被接线（比"某个文件里没有"更强的判据 —— 搬家不会让它失效）。
+    expect(lifecycle, 'D1(a)：未装配产物的未知字段必须被**采集**（不只是计数）').toContain(
+      'captureFidelityFieldMap(',
+    )
+    // 全树：生产者**已**接线 ⇒ 显式列出接线的两个文件（而不是判空）。
     const srcFilesForProducer: string[] = []
     const walkProducer = (dir: string): void => {
       for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -519,10 +543,16 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
       .filter((abs) => !abs.endsWith(path.join('adapters', 'files', 'fidelityRecord.ts')))
       .filter((abs) => stripForProducer(readSource(abs)).includes('captureFidelity'))
       .map((abs) => path.relative(SRC_ROOT, abs).replace(/\\/g, '/'))
+    // ## #301 P10f D1(a)：从"判空"改为"**精确等值**"（不是放松，是换守的对象）
+    //
+    // 原断言 `toEqual([])` 守的是"(a) 尚未接线"。D1(a) 接线后它**必然**判红 ——
+    // 闸门用"要求同批更新登记"的方式提醒，而不是静默通过（这正是它该有的性质）。
+    // 新的精确等值把"接线点"钉死：多出第三个调用方 = 有人绕过了采集入口 ⇒ 判红。
     expect(
-      producerCallers,
-      `(a) 若生产者已接线，本条接缝应核销并同批更新登记：${producerCallers.join(', ')}`,
-    ).toEqual([])
+      producerCallers.sort(),
+      '(a) 生产接线点必须**恰好**是这两个：深度 2 的扁平模块 + 装配路径',
+    ).toEqual(['adapters/fidelityCapture.ts', 'composition/documentLoad.ts'])
+
     // 且文件选择器路径不再持有它（D1 的另一半：实现已移出该文件）
     const operatorFile = readSource(path.join(SRC_ROOT, 'operators', 'builtin', 'docLifecycleOperators.ts'))
     expect(operatorFile, 'D1 后 operator 不再持有装配实现（只转发）').not.toContain(

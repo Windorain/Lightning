@@ -36,6 +36,7 @@
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import type { KernelSession } from '@/runtime/kernelSession'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
+import { captureFidelityFieldMap } from '@/adapters/fidelityCapture'
 import { createDocument, withContent, withDocumentContent } from '@/domain/document'
 
 /** 装配诊断/统计要写进去的日志面（与 `Context.log` 同形的最小投影）。 */
@@ -125,6 +126,34 @@ export function adoptLoadedDocument(
   const withBaseline = Object.freeze({ ...withScene.doc, saveBaseline: withScene.version })
   const adopted = withDocumentContent(withBaseline, value.content).doc
   kernel.adoptDocument(adopted, value.content)
+
+  // ── #301 P10f D1（G-6a）：**采集源文件的未知顶层字段**并交给会话承载 ──────
+  //
+  // ## 本行替代的旧机制
+  //
+  // 原先这里（下方日志）**只把键数写进一条日志**，记录从未被构造
+  // ⇒ "保存 → 再打开"静默丢掉未知顶层字段（seam `fidelity-record-transport-unwired`
+  // 的 `oldTrack` 描述的正是这个形态）。
+  //
+  // ## ⚠️ 为什么经 `adapters/fidelityCapture`（深度 2）而不是直接调 `captureFidelity`
+  //
+  // `captureFidelity` 在 `adapters/files/fidelityRecord.ts` ⇒ 深度 3，而
+  // `composition/` 是**整层的闸门执行面** ⇒ 直引触 `gate/no-private-cross-layer`（实测确认）。
+  // 而"再导出一层"触 `gate/no-barrel-smuggling`（`APPROVED_BARRELS = []`）。
+  // ⇒ 正解是**模块归位**：那一小块自己就是深度 2 的模块（先例：`adapters/tooltipPool.ts`）。
+  //
+  // ## 为什么写进**会话**而不是留在本函数局部
+  //
+  // 消费方是**保存/导出投影**（D2 的三条保存路径 + 四条导出），在别的调用栈上
+  // ⇒ 记录必须有**生命周期 = 文档生命周期**的宿主。会话正是它：
+  // 装载时置位、卸载时清空（`markUnloaded`）⇒ 不串档。
+  kernel.setFidelityFieldMap(
+    captureFidelityFieldMap({
+      sourceFormat: value.sourceFormat,
+      sourceVersion: value.sourceVersion,
+      unknownFields: value.unknownFields,
+    }),
+  )
 
   for (const d of value.diagnostics) {
     ctx.log.info('内核装配', `${d.code} @ ${d.path}`, { locator, detail: d.detail })

@@ -61,6 +61,7 @@ import {
   semanticSubtreeOf,
   SUPPORTED_PAYLOAD_ENCODINGS,
 } from '@/adapters/files/envelopeCodec'
+import { artifactKindOfKey, parseFidelityStoreKey } from '@/application/recovery'
 import {
   captureFidelity,
   CORE_EXTRA_BAG_KEY,
@@ -519,9 +520,26 @@ describe('未知字段 ⇒ 带源格式/源版本的保真记录（#249 §12 第
   })
 
   it('存储键按**文档 ID** 命名（与"经文档 ID 重新绑定"同一思路）', () => {
-    expect(fidelityStorageKey('doc-a')).toBe('lk.fidelity.v1.doc-a.record')
+    // ## #301 P10f D1(b)：键口径已并入 recovery/save 家族
+    //
+    // 原先这三条断言的是**游离**方案的字面量 `lk.fidelity.v1.<id>.record`
+    // （缺 scope/instance 段、无解析器、不被 `artifactKindOfKey` 识别）。
+    // D1(b) 把它并入同族 ⇒ 键形状改变，故本条按**新契约**改写
+    // （不是"为了让测试变绿"：新形状本身是 D1(b) 的交付内容）。
+    // 键口径的权威判据在 `application/__tests__`（含解析器与分类器），
+    // 本条只钉"本转发函数确实走权威构造器且区分文档"。
+    expect(fidelityStorageKey('doc-a')).toBe('lk.fidelity.v1.workbench.default.doc-a')
     expect(fidelityStorageKey('doc-a')).not.toBe(fidelityStorageKey('doc-b'))
-    expect(fidelityStorageKey('   '), '空 id 不产生一个会撞车的空段').toBe('lk.fidelity.v1.unnamed.record')
+    expect(fidelityStorageKey('   '), '空 id 不产生一个会撞车的空段').toBe(
+      'lk.fidelity.v1.workbench.default.unnamed',
+    )
+    // 且新键**可解析**（旧方案结构上不可逆 —— 那是本段要消灭的性质）
+    const parsed = parseFidelityStoreKey(fidelityStorageKey('doc-a'))
+    expect(parsed, 'D1(b)：保真键必须可解析（旧方案无解析器）').not.toBeNull()
+    expect(parsed!.documentId).toBe('doc-a')
+    expect(artifactKindOfKey(fidelityStorageKey('doc-a')), 'D1(b)：必须被制品分类器识别').toBe(
+      'fidelity-record',
+    )
   })
 })
 

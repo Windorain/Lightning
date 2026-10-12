@@ -317,6 +317,55 @@ export class KernelSession {
   private contentAdopted = false
 
   /**
+   * **源文件的未知顶层字段**（#301 P10f D1；G-6a 的产物侧承载）。
+   *
+   * ## 它承载什么
+   *
+   * 装配时（`assembleKernelDocument`）算出的"本适配器解释不了的顶层键"
+   * （含 `meta.` 前缀的元数据未知键）—— 即"保存 → 再打开"要保留、否则**静默丢弃**的那些。
+   *
+   * ## ⚠️ 三态（不是两态）—— 与 `domain/cellContent` 判据 3「缺席 ≠ 空」同一口径
+   *
+   * | 值 | 含义 |
+   * |---|---|
+   * | `null` | **未采集**（这条装载路径没走装配，或尚未装载）—— "不知道" |
+   * | `{}` | **采集了，且确实没有**未知字段 —— "知道，且为空" |
+   *
+   * 把 `null` 压成 `{}` 会让"没采集"冒充"没有"⇒ 保存侧会理直气壮地丢掉字段
+   * （那正是本批要消灭的形态）。故初值与卸载都置 `null`，**不**置 `{}`。
+   *
+   * ## 为什么是 `Readonly<Record<string, unknown>>` 而不是 `FidelityRecord`
+   *
+   * `FidelityRecord` 定义在 `adapters/files/fidelityRecord.ts` ⇒ 引用它是**深度 3**，
+   * 而本文件是闸门执行面（登记在 `runtime/` 的 `activeSubpaths`）⇒ 会触
+   * `gate/no-private-cross-layer`。会话侧只需要**字段表本身**
+   * （`sourceFormat`/`sourceVersion` 已被 `adapters/fidelityCapture` 内部消费）
+   * ⇒ 收成纯数据，本文件**零新增 import**。
+   */
+  private fidelityFieldMap: Readonly<Record<string, unknown>> | null = null
+
+  /**
+   * 记下源文件的未知顶层字段（`null` = 未采集；见 `fidelityFieldMap` 的三态）。
+   *
+   * 调用方是装配路径（`composition/documentLoad` 的 `adoptLoadedDocument`）——
+   * 它是唯一手里同时有 `unknownFields`/`sourceFormat`/`sourceVersion` 的地方。
+   */
+  setFidelityFieldMap(fields: Readonly<Record<string, unknown>> | null): void {
+    // 冻结副本：调用方之后改自己的对象不得影响本会话记录的事实。
+    this.fidelityFieldMap = fields === null ? null : Object.freeze({ ...fields })
+  }
+
+  /**
+   * 读源文件的未知顶层字段（`null` = **未采集**，不是"没有"）。
+   *
+   * ⚠️ 消费方（保存/导出投影，D2）**必须**区分 `null` 与 `{}`：
+   * 前者应回落（不传 `fidelityFields`），后者应显式传空表。
+   */
+  fidelityFieldMapOf(): Readonly<Record<string, unknown>> | null {
+    return this.fidelityFieldMap
+  }
+
+  /**
    * **文档是否已装载**（#301 P10f A′；GF-15 读面）。
    *
    * ## 它回答的问题：区分「空文档」与「无文档」
@@ -453,6 +502,10 @@ export class KernelSession {
     // GF-16 必须**一起**清掉：卸载后"内核里的就是那份文档"不再成立
     // （内核 datablock 仍在，但它承载的是上一次的产物）。
     this.contentAdopted = false
+    // D1：源文件未知字段回到**未采集**（`null`，不是 `{}`）——
+    // 卸载后"这份会话里没有别的文档的保真字段"必须成立，否则
+    // 下一次保存会把**上一份文档**的未知字段写进**新**产物（串档）。
+    this.fidelityFieldMap = null
   }
 
   /** 重建上下文订阅（`adoptDocument` 换了 Editor 实例，故订阅必须重建）。 */

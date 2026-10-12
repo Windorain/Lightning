@@ -319,12 +319,12 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     newTrack:
       '`adapters/files/fidelityRecord.ts` 的保真记录：`captureFidelity` 采集未知顶层字段（带源格式/源版本；`_extra` 显式排除）、`serializeFidelity`/`parseFidelity` 往返（读到 `_extra` 显式拒绝）、`fidelityStorageKey` 旁置键、`judgeFidelityAfterEdit` 的三态裁定（`valid`/`stale`/`dropped`）。产物侧既定挂点是 `composition/kernelProjection.ts` 的 `KernelProjectionInput.fidelityFields` → `projectKernelDocument`（写回 plain 根与 `meta.` 子树）。',
     oldTrack:
-      '未知顶层字段今天**到不了任何产物**：`composition/kernelAssembly.ts` 把它们收进 `AssembledDocument.unknownFields`，而唯一消费者 `operators/builtin/docLifecycleOperators.ts` 只把键数写进一条日志（`unknownFields: Object.keys(value.unknownFields).length`）—— 记录从未被构造、从未被持久化、也没有任何产物结构接受它；故"保存 → 再打开"会静默丢掉这些字段。',
+      '(a) **已接线（D1）**：源文件未知顶层字段原先只被计数、从未构造记录 ⇒ 现由 `composition/documentLoad` 经 `adapters/fidelityCapture`（深度 2）采集并交给内核会话承载。\n(b) **已统一（D1）**：保真键原先是一个**游离**方案（`lk.fidelity.v1.<文档ID>.record`，与 recovery/save 家族八处不兼容：缺 scope/instance 段、无解析器、裸 `string`、版本硬编码、空 id 静默降级、不被分类器识别）⇒ 现并入同族（`fidelityStoreKey`/`parseFidelityStoreKey`/`artifactKindOfKey`）。旧键零生产调用方 ⇒ 无迁移负担。\n(c) **仍开放**：产物侧挂点 `fidelityFields` 的**传值方**仍只有测试 —— 三条保存路径与四条导出尚未改吃内核投影（归 D2/N2）。',
     blocker:
-      '产物侧唯一挂点 `src/composition/kernelProjection.ts` 的 `projectKernelDocument` **生产零调用方**：它属"内核 → 旧格式投影"这条面，依赖内核内容面补全（P10d）。同时 `src/application/recovery.ts` 的 `RecoveryStorePort` 在生产里从未被实例化，且 `fidelityStorageKey` 与 `recoveryStoreKey` 家族的键口径不兼容（缺 scope/instance 段、返回裸 `string`、无解析器）—— 持久化半边需先统一键口径，不是接线。故本批只登记，归 P10d。',
-    owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
+      '(c) 需要三条保存路径（`docLifecycleOperators`/`wikiDataPageSource`(+`wikiOperators`)/`sdeOperators`）与四条导出（`exportOperators`）改吃内核投影 —— 那正是 **D2（N2 迁移）** 的范围，且必须与 G-6a **同批**（否则导出会丢保真字段）。\n⚠️ **两处更正**（我在 C′2/P10c 期写下、D 批实测推翻）：① 原写"产物侧唯一挂点 `projectKernelDocument` 生产零调用方"—— **不成立**（`kernelRenderView.ts:135` 已在生产调用它）；真正的缺口更窄：`fidelityFields` 无生产传值方。② 原写 (b) "需先统一键口径，不是接线"—— **D1 已统一**。',
+    owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
     exitCondition:
-      '`src/operators/builtin/docLifecycleOperators.ts` 的 `adoptDocumentIntoKernel` 调 `captureFidelity` 构造记录，且 `src/composition/kernelProjection.ts` 的 `KernelProjectionInput.fidelityFields` 有生产调用方（记录据它写回产物），使"保存 → 再打开"保留未知顶层字段；届时删除本条登记。',
+      '**三段全部成立**才算闭合：\n(a) ✅ **D1 已达成** —— `src/composition/documentLoad.ts` 的装配路径经 `adapters/fidelityCapture` 调 `captureFidelity` 构造记录，且由内核会话承载（`KernelSession.setFidelityFieldMap`/`fidelityFieldMapOf`，卸载即清空）；\n(b) ✅ **D1 已达成** —— 保真键并入 recovery/save 家族（`src/application/recovery.ts` 的 `fidelityStoreKey` 带 scope+instance 段、返回 `Result`、有 `parseFidelityStoreKey`、被 `artifactKindOfKey` 识别、版本为具名常量 `FIDELITY_SCHEMA_VERSION`）；\n(c) ⏳ **待 D2** —— `src/composition/kernelProjection.ts` 的 `KernelProjectionInput.fidelityFields` 有**生产**传值方（保存/导出路径据它写回产物），使"保存 → 再打开"保留未知顶层字段；届时删除本条登记。',
   }),
   /**
    * P10f C′2（#301）登记：**侧表写面仍落 legacy**（本批的显式暂存）。

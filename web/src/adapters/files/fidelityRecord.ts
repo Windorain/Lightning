@@ -46,6 +46,8 @@
 
 import { invalidValue, type DomainError, type Result, ok, err } from '@/domain/errors'
 import { digestOf } from '@/domain/identity'
+// #301 P10f D1(b)：键口径的唯一权威（与 recovery/save 同族）。
+import { fidelityStoreKey, instanceIdentity } from '@/application/recovery'
 
 /**
  * 核心文档里**禁止**出现的字段袋键名。
@@ -260,13 +262,31 @@ export function hasCoreExtraBag(doc: unknown): boolean {
  *  - 未知字段写进文档根，等于把它们重新变成**文档的一部分**，即 `_extra` 的同构复活
  *    （§15 第 2 条要退役的正是"核心含格式字段袋"）。
  *
- * ⇒ 记录按**文档 ID** 命名存储（与 `#249` §12「布局与个人偏好…经文档 ID 重新绑定」
- * 同一命名思路：按文档身份而非实例身份）。跨宿主传输时记录需与产物**同行**，
- * 这一接线属 P10（登记在汇报的遗留缺口，本模块不假装已接通）。
+ * ## ⚠️ #301 P10f D1(b)：本函数**已不再是键的权威**（它现在只是转发）
+ *
+ * 原先它自己拼 `lk.fidelity.v1.<文档ID>.record` —— 一个与恢复副本/正式保存家族
+ * **八处不兼容**的游离方案（缺 scope/instance 段、无解析器、裸 `string`、
+ * 版本硬编码、空 id 静默降级为 `'unnamed'`、且不被 `artifactKindOfKey` 识别）。
+ *
+ * 现在键口径的**唯一权威**是 `application/recovery.ts` 的 {@link fidelityStoreKey}
+ * （与 `recoveryStoreKey`/`saveStoreKey` 同族、同构造与解析纪律）。
+ * 本函数保留**只为测试**：P9–P10 期间它零生产调用方，故改口径**无迁移负担**。
+ *
+ * ⚠️ **签名刻意不变**（仍收裸 `documentId` 并返回 `string`）：改了会动到既有测试的
+ * 形状，而本批已判定"保留一个测试用的旧形状转发"比"改签名带来的判据扰动"更划算。
+ * **新代码一律用 `fidelityStoreKey(identity, documentId)`**（它返回 `Result`、
+ * 带 scope/instance 段、可解析）。本函数的存在**不**构成第二套键口径 ——
+ * 它没有自己的拼接逻辑，只是把参数补成 `default` 域再转发。
  */
 export function fidelityStorageKey(documentId: string): string {
+  // 空 id：同族权威口径是**显式拒绝**（`Result` 的 `err`），而本转发函数的签名
+  // 不允许返回 `Result` ⇒ 按旧的可观测行为落到 `'unnamed'`（**不产生空段**）。
+  // ⚠️ 归一化**只做这一次**，然后**单次**调权威构造器 —— 不存在第二套拼接。
   const id = documentId.trim() === '' ? 'unnamed' : documentId
-  return `lk.fidelity.v1.${id}.record`
+  const key = fidelityStoreKey(instanceIdentity('workbench', 'default'), id)
+  // `id` 已保证非空 ⇒ 权威构造器不可能失败。若真失败，说明它的口径变了
+  // （本转发的前提被破坏）—— 那是**实现缺陷**，用显式串暴露而不是静默造键。
+  return key.ok ? key.value : 'lk.fidelity.invalid'
 }
 
 /** 记录 → 可持久化 JSON（纯；键序稳定，供存储适配器直接写）。 */
