@@ -236,6 +236,38 @@ describe('E2 · 离屏像素读回**确实**存在于生产实现', () => {
     const methods = [...block.matchAll(/^\s{2}(\w+)\(/gm)].map((m) => m[1])
     expect(methods.sort(), '设备端口只允许"渲染读回 + 释放"').toEqual(['dispose', 'renderAndRead'])
   })
+
+  it('设备**还原原父节点**（否则一次导出会把用户视口的呈现根永久摘走）', () => {
+    // ## 这条判据防的是"导出改坏用户视口"（A29 明文禁止）
+    //
+    // `THREE.Scene.add(root)` **隐含** `root.removeFromParent()`。若渲染后只调
+    // `scene.remove(root)`，那个根对象会**永久离开**它原本所在的场景树 ——
+    // 一次导出把用户正在看的视口改坏（画面变空），且**不报错**。
+    //
+    // 当下生产形态里呈现根没有父节点（`composition/presenterSession` 的根是平行路径，
+    // 不挂进视口内容组），故 `add`/`remove` 恰好平衡 —— 但那是**巧合**，不是可依赖的性质：
+    // 该接缝（`presenter-surface-dual-track`）的退出方向正是"把呈现根接上画面"，
+    // 那天这里就会静默改坏用户画面。⇒ 由结构保证：保存并还原原父节点。
+    const code = codeOnlyLines(readNorm(path.join(SRC_ROOT, 'adapters/export/renderDevice.ts')))
+      .map((l) => l.line)
+      .join('\n')
+    expect(code, '必须保存原父节点').toContain('root.parent')
+    expect(code, '必须存在还原路径（previousParent.add）').toContain('previousParent.add(')
+    expect(code, '还原必须在 finally 里（覆盖抛错与提前返回）').toContain('finally {')
+  })
+
+  it('**负对照**：只 `scene.remove(root)` 的形态会被上一条判据抓到', () => {
+    const legacy = [
+      'scene.add(root)',
+      'renderer.render(scene, camera)',
+      'scene.remove(root)',
+      'return ok(pixels)',
+    ].join('\n')
+    expect(legacy.includes('root.parent'), '旧形态不得含原父节点保存').toBe(false)
+    expect(legacy.includes('previousParent.add('), '旧形态不得含还原').toBe(false)
+    const fixed = 'const previousParent = root.parent\n/* … */ finally { previousParent.add(root) }'
+    expect(fixed.includes('root.parent') && fixed.includes('previousParent.add(')).toBe(true)
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

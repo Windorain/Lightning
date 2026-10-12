@@ -108,6 +108,23 @@ export function createThreeOffscreenDevice(): OffscreenDeviceFactory {
         device: {
           renderAndRead(root: THREE.Object3D, camera: THREE.Camera): Result<Uint8Array> {
             if (disposed) return err(unsupportedOperation({ reason: 'offscreenDeviceDisposed' }))
+            /**
+             * ## 为什么渲染前要**记住并还原**原父节点（A29 的"不改用户视口"）
+             *
+             * `THREE.Scene.add(root)` 会把 `root` 从它**原来的**父节点上**摘下来**
+             * （Three 的 `add` 隐含 `removeFromParent`）。若渲染后只调 `scene.remove(root)`，
+             * 那个 `root` 会**永久离开**它原本所在的场景树 —— 即一次导出把
+             * **用户正在看的视口**改坏了（画面变空），而且**不报错**。
+             *
+             * 当下生产形态里呈现根**没有**父节点（`composition/presenterSession` 的根对象
+             * 是"平行路径"，不挂进视口的内容组 —— 见 `presenter-surface-dual-track` 接缝），
+             * 故 `add`/`remove` 恰好平衡。但那是**当下的巧合**，不是本文件可以依赖的性质：
+             * 一旦将来把呈现根挂进视口（正是该接缝的退出方向），这里就会静默改坏用户画面。
+             *
+             * ⇒ 显式保存原父节点并在 `finally` 里还原。这使"导出不改变用户视口"
+             * 由**结构**保证，而不是靠"它现在恰好没有父节点"。
+             */
+            const previousParent = root.parent
             try {
               scene.add(root)
               // 呈现根不被实时渲染循环驱动 ⇒ 世界矩阵必须**显式**刷新，
@@ -121,11 +138,13 @@ export function createThreeOffscreenDevice(): OffscreenDeviceFactory {
 
               const pixels = new Uint8Array(width * height * 4)
               renderer.readRenderTargetPixels(target, 0, 0, width, height, pixels)
-              scene.remove(root)
               return ok(pixels)
             } catch (e) {
-              scene.remove(root)
               return err(unsupportedOperation({ reason: 'offscreenReadbackFailed', detail: String(e) }))
+            } finally {
+              // 还原到原父节点（如上：`add` 已经把 root 摘下来了）。
+              if (previousParent === null || previousParent === undefined) scene.remove(root)
+              else previousParent.add(root)
             }
           },
           dispose(): void {
