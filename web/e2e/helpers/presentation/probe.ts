@@ -40,6 +40,11 @@ import {
 import { collectStructureGeometryPiecesPure, mergeBakedQuadPiecesAttributes } from '@/render/mesh/structureGeometryCore'
 import { BatchedPresenter } from '@/presentation/presenter'
 import type { EvaluationKey } from '@/presentation/evaluationKey'
+// P11-E #262（A30 补）：会话面（生产视口用的那一层）+ 文档/时间/选择的真实类型
+import { PresenterSession } from '@/composition/presenterSession'
+import { createDocument } from '@/domain/document'
+import { timeValue } from '@/domain/animation'
+import { ALL_CAPABILITIES, openDocumentState, reduceCommand } from '@/application/commands'
 import {
   DEFAULT_MATERIAL,
   fixtureHash,
@@ -489,7 +494,21 @@ export function runA19(rounds: number) {
 // A30 graphics-recovery
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function runA30(count: number) {
+/**
+ * A30 `graphics-recovery`（**真实 `WEBGL_lose_context`**）。
+ *
+ * ## P11-E #262 补：恢复后「文档 / 选择 / 时间 / 机位」四项不丢
+ *
+ * B1 的审计原文：`presenterSession.ts:307/316` 的 `handleContextLost/Restored`
+ * 承载面具备，但**探针返回字段表完整列出也没有这四项** ⇒ 判据缺失。
+ * 故本函数增加一段**会话面**（`PresenterSession`，即生产视口实际用的那一层）：
+ * 用真实信封装配出的内核文档 + 领域时间 + 真实选择 + 视口机位，
+ * 在与上面同一次真实上下文丢失/恢复**之后**逐项核对它们是否还在。
+ *
+ * 为此需要真实信封（`envelope` 可选）：缺省时该段不跑，相应字段为 `null`
+ * —— spec 侧显式传入夹具，使字段**总是**有值（判据不落在"没跑也算过"上）。
+ */
+export async function runA30(count: number, envelope?: Record<string, unknown>) {
   const h = need()
   const fixture = pickFixture(count)
   const compiled = compileScene({ key: keyOf('e2e:a30'), geometry: fixture.geometry, primitives: fixture.primitives })
@@ -562,6 +581,9 @@ export async function runA30(count: number) {
     await new Promise((r) => setTimeout(r, 250))
   }
 
+  // ── P11-E #262 补：会话面（文档 / 选择 / 时间 / 机位）在恢复后不丢 ──
+  const sessionProbe = await runA30SessionFace(envelope, hadLoseExt, loseExt)
+
   return {
     hadLoseExt,
     contextLostFlag,
@@ -587,6 +609,119 @@ export async function runA30(count: number) {
     abandoned: presenter.ledger().acquireTotal,
     fixtureHash: fixture.hash,
     env: h.env,
+    ...sessionProbe,
+  }
+}
+
+/**
+ * A30 的**会话面**（`PresenterSession`）探针：一次真实上下文丢失/恢复周期前后，
+ * 逐项核对「文档 / 选择 / 时间 / 机位」。
+ *
+ * 返回四个布尔字段（缺信封时为 `null`）+ 一份可诊断明细（供证据附件阅读）。
+ */
+async function runA30SessionFace(
+  envelope: Record<string, unknown> | undefined,
+  hadLoseExt: boolean,
+  loseExt: { loseContext(): void; restoreContext(): void } | null,
+): Promise<Record<string, unknown>> {
+  if (envelope === undefined) {
+    return {
+      sessionDocPreserved: null,
+      sessionSelectionPreserved: null,
+      sessionTimePreserved: null,
+      sessionCameraPreserved: null,
+      sessionDetail: null,
+    }
+  }
+  const h = need()
+  // ① 真实信封 → 解析 → 内核装配（与 `runKernelInputs` 同一条生产链）
+  const parsers = createParserRegistry()
+  parsers.register(V2PlainParser)
+  parsers.register(createEnvelopeParser(parsers))
+  parsers.register(WorldParser)
+  parsers.register(StructureDataParser)
+  const parsed = await parsers.detectAndParse(envelope)
+  if (parsed.document === null) throw new Error('A30 会话面：生产解析器拒收该信封')
+  const assembled = assembleKernelDocument({ doc: parsed.document, plainRoot: plainRootOf(envelope) })
+  if (!assembled.ok) throw new Error('A30 会话面：内核装配失败')
+
+  // ② 文档：内核 `Document`（生产调用点同形）
+  const doc = { ...createDocument('e2e-a30-session'), scene: assembled.value.scene, content: assembled.value.content }
+  // ③ 时间：领域时间值（帧 7 / 20fps）
+  const time = timeValue(7, 20)
+
+  // ④ 选择：真实应用状态里的 `EditContext.selection`
+  let app = openDocumentState('e2e-a30-session', 'ctx-a30')
+  const added = reduceCommand(app, { kind: 'addObject', contextId: 'ctx-a30', objectType: 'annotation', name: 'sel' }, { capabilities: ALL_CAPABILITIES })
+  if (added.status !== 'applied') throw new Error('A30 会话面：夹具选择失败')
+  app = added.state
+  const objectId = Object.keys(app.docs['e2e-a30-session']!.scene.objects)[0]!
+  const selected = reduceCommand(app, { kind: 'select', contextId: 'ctx-a30', target: { kind: 'object', id: objectId } }, { capabilities: ALL_CAPABILITIES })
+  if (selected.status !== 'applied') throw new Error('A30 会话面：夹具选择未生效')
+  app = selected.state
+  const selectionBefore = JSON.stringify(app.contexts['ctx-a30']!.selection.selected)
+
+  // ⑤ 机位：视口观察相机（**不在**内核文档里 —— A05/A11 的结构事实）
+  const camera = h.camera
+  const cameraBefore = camera.matrixWorld.elements.slice()
+
+  const session = new PresenterSession({ scope: 'e2e-a30-session' })
+  const first = session.applyKernelDocument(doc, time)
+  const generationBefore = session.generation
+  const timeKeyBefore = JSON.stringify(session.activeKey?.time ?? null)
+
+  // ── 真实上下文丢失 / 恢复（同一扩展，另一个会话） ──
+  if (hadLoseExt && loseExt !== null) {
+    loseExt.loseContext()
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  const abandoned = session.handleContextLost()
+  session.handleContextRestored()
+  if (hadLoseExt && loseExt !== null) {
+    loseExt.restoreContext()
+    await new Promise((r) => setTimeout(r, 250))
+  }
+
+  // 用**当前有效版本**重新应用：同一输入必须仍判"身份未变"
+  const again = session.applyKernelDocument(doc, time)
+  const generationAfter = session.generation
+  const outcomeGenerationAfter = again.generation
+  const timeKeyAfter = JSON.stringify(session.activeKey?.time ?? null)
+  const cameraAfter = camera.matrixWorld.elements.slice()
+
+  // ⚠️ 缺口登记（#262 P11-E 实测发现）：内容未变时恢复**不重建 GPU 资源**
+  //（`applyIfChanged` 在身份未变时提前返回；`presenter.handleContextLost()` 已把
+  // 实际世代置 null）。故这里同时记录"内容变一次之后是否重建"作为正确性对照。
+  const bumped = { ...doc, version: { ...doc.version, documentVersion: doc.version.documentVersion + 1 } }
+  const afterBump = session.applyKernelDocument(bumped, time)
+  const liveGenerationAfterContentChange = session.generation
+
+  const detail = {
+    firstApplied: first.applied,
+    againApplied: again.applied,
+    outcomeGenerationAfter,
+    liveGenerationAfterRestore: generationAfter,
+    liveGenerationAfterContentChange,
+    afterBumpApplied: afterBump.applied,
+    abandoned,
+    generationBefore,
+    timeKeyBefore,
+    timeKeyAfter,
+    selectionBefore,
+    selectionAfter: JSON.stringify(app.contexts['ctx-a30']!.selection.selected),
+    objectId,
+  }
+  session.dispose()
+
+  return {
+    sessionDocPreserved: again.applied === false && outcomeGenerationAfter === generationBefore,
+    sessionSelectionPreserved: detail.selectionBefore === detail.selectionAfter,
+    sessionTimePreserved: detail.timeKeyBefore === detail.timeKeyAfter,
+    sessionCameraPreserved: cameraBefore.length === cameraAfter.length && cameraBefore.every((v, i) => v === cameraAfter[i]),
+    // 缺口登记读数（见上）：恢复后**实际**世代仍为 null；内容变一次之后才重建
+    sessionGpuRebuiltAfterRestore: generationAfter !== null,
+    sessionGpuRebuiltAfterContentChange: liveGenerationAfterContentChange !== null,
+    sessionDetail: detail,
   }
 }
 

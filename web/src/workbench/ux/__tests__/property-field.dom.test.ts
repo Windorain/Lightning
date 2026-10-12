@@ -524,3 +524,135 @@ describe('控件：拒绝原因可见（不得静默失败）', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// A25（P11-E #262 补）：焦点可见性与**控件标签**的 DOM 判据
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这条补的是 A25 的子句缺口（#262 comment 6421 A25 行）
+ *
+ * B1 的定性：「事实面存在：`PropertyField.vue:294` 产出
+ * `aria-label = field.display.labelFallback`、`:483` 有 `:focus` 样式；
+ * 但 `workbench/ux/__tests__/property-field.dom.test.ts` 对 `aria-label` **0 命中**
+ * ⇒ 有实现无断言，补一条 DOM 判据即可（**改掉 aria-label 即判红**）」。
+ *
+ * ## 判据口径（为什么期望值**硬编码**而不是从组件内部状态反读）
+ *
+ * 与本文件头的纪律一致：输入只有 DOM 事件、观察只有 DOM 事实。故 `aria-label`
+ * 的期望值写成**字面量**（`'数值'`/`'正文'`/`'色调'`，取自 `makeRegistry()` 里的
+ * `display.fallback`）——若实现改成"通用名"（旧 `RNAWidget` 的形态：所有控件都叫
+ * `field`），本判据立刻判红。
+ *
+ * ## 覆盖面的诚实边界（本批只新增判据，不改生产行为）
+ *
+ * `aria-label` 由 `textFacts` 注入，而 `textFacts` 只绑在**文本族**控件上
+ * （默认文本框 / 多行文本 / 字符串列表 / 颜色旁的十六进制框）。复选框、下拉、
+ * 滑块目前**没有**程序化可访问名（它们只有同字段内可见的 `<label class="ux-field-label">`
+ * 元素，二者未做 `for`/`id` 关联）—— 那是**能力缺口**（补齐需改生产模板，超出本批
+ * 「只新增/收紧判据」的范围），故本组：① 对文本族做 `aria-label` 判据；
+ * ② 对全部控件做"可见标签存在且文本 = 回退标签"的判据；③ 在完工报里登记该残余。
+ */
+describe('A25 input-focus-drafts：控件标签（可访问名 + 可见标签）', () => {
+  /** 判据本尊（正/负对照共用一份）。 */
+  function judgeAccessibleName(el: Element, expected: string): void {
+    expect(el.getAttribute('aria-label'), 'A25：控件必须带可访问名（`aria-label`）').toBe(expected)
+  }
+
+  /** 可见标签判据：同字段内的 `.ux-field-label` 必须显示回退标签（人读的那一半）。 */
+  function judgeVisibleLabel(root: Element, expected: string): void {
+    const label = root.querySelector('.ux-field-label')
+    expect(label, 'A25：字段必须有可见标签元素').not.toBeNull()
+    expect(label?.textContent?.trim(), 'A25：可见标签必须显示回退标签').toBe(expected)
+  }
+
+  /** 断言器判红 = 它抛错。 */
+  function redOf(run: () => void): boolean {
+    try {
+      run()
+      return false
+    } catch {
+      return true
+    }
+  }
+
+  it('正对照：文本族控件的 `aria-label` = 字段回退标签；可见标签同样在案', () => {
+    const reg = makeRegistry()
+    // ① 默认文本框（number 非硬约束 ⇒ `input.ux-field-text`）
+    const plain = mount(fieldFor(reg, 'plain', 10))
+    const input = plain.root.querySelector<HTMLInputElement>('input.ux-field-text')!
+    expect(input).toBeTruthy()
+    judgeAccessibleName(input, '数值')
+    judgeVisibleLabel(plain.root, '数值')
+    teardown()
+
+    // ② 滑块字段：可见标签必须在（滑块本身无 `aria-label`，见上面的边界说明）
+    const count = mount(fieldFor(reg, 'count', 10))
+    expect(count.root.querySelector('input[type=range]')).toBeTruthy()
+    judgeVisibleLabel(count.root, '数量')
+    teardown()
+
+    // ③ 颜色字段：取色器 + 十六进制文本框；后者带可访问名
+    const tint = mount(fieldFor(reg, 'tint', '#aabbcc'))
+    judgeAccessibleName(tint.root.querySelector<HTMLInputElement>('input.ux-field-text--mono')!, '色调')
+    judgeVisibleLabel(tint.root, '色调')
+    teardown()
+  })
+
+  it('正对照：多行文本的 `aria-label` 走**同一条**事实注入（textarea 也带）', () => {
+    const reg = createPropertyRegistry()
+    reg.registerObjectType({
+      id: 'ui.multi',
+      ownerKind: 'object',
+      display: { labelKey: 'ui.multi', fallback: 'M' },
+      properties: [
+        { id: 'body', valueType: 'string', animatable: false, display: { labelKey: 'ui.body', fallback: '正文' }, domain: { kind: 'text', multiline: true } },
+      ],
+    })
+    const d = describeProperty(reg, { owner, property: 'ui.multi.body' })
+    if (!d.ok) throw new Error('desc')
+    const field = buildFieldViewModel(reg, { owner, property: 'ui.multi.body' }, {
+      descriptor: d.value,
+      value: { kind: 'value', value: 'line1' },
+      edit: { kind: 'editable' },
+    })
+    const { root } = mount(field)
+    const ta = root.querySelector<HTMLTextAreaElement>('textarea')!
+    expect(ta).toBeTruthy()
+    judgeAccessibleName(ta, '正文')
+    teardown()
+  })
+
+  it('**负对照**：把 `aria-label` 去掉 / 改成通用名 ⇒ 同一判据判红（含对**真实渲染 DOM** 的就地变异）', () => {
+    const reg = makeRegistry()
+    const { root } = mount(fieldFor(reg, 'plain', 10))
+    const input = root.querySelector<HTMLInputElement>('input.ux-field-text')!
+    // 前置：正对照判绿
+    expect(redOf(() => judgeAccessibleName(input, '数值'))).toBe(false)
+
+    // 就地变异 1：**真的**把属性摘掉（模拟"实现里不再产出 aria-label"）
+    const original = input.getAttribute('aria-label')
+    input.removeAttribute('aria-label')
+    expect(redOf(() => judgeAccessibleName(input, '数值')), '摘掉 aria-label ⇒ 必须判红').toBe(true)
+
+    // 就地变异 2：改成**通用名**（旧 `RNAWidget` 的形态：所有控件都叫 field）
+    input.setAttribute('aria-label', 'field')
+    expect(redOf(() => judgeAccessibleName(input, '数值')), '改成通用名 ⇒ 必须判红').toBe(true)
+
+    // 就地变异 3：改名（不再是该字段的回退标签）
+    input.setAttribute('aria-label', '数量')
+    expect(redOf(() => judgeAccessibleName(input, '数值')), '写成别的字段的标签 ⇒ 必须判红').toBe(true)
+
+    // 恢复 ⇒ 判绿（证明判据咬的是这个属性本身，不是"恒红"）
+    input.setAttribute('aria-label', original ?? '')
+    expect(redOf(() => judgeAccessibleName(input, '数值')), '恢复原值 ⇒ 判绿').toBe(false)
+
+    // 可见标签同样有区分力：清空它 ⇒ 判红
+    const label = root.querySelector('.ux-field-label')!
+    label.textContent = ''
+    expect(redOf(() => judgeVisibleLabel(root, '数值')), '可见标签被清空 ⇒ 必须判红').toBe(true)
+    label.textContent = '数值'
+    expect(redOf(() => judgeVisibleLabel(root, '数值'))).toBe(false)
+    teardown()
+  })
+})
+
