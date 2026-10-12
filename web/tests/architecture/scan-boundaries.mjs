@@ -78,7 +78,9 @@ function main() {
   for (const rule of GATE_RULES) {
     const evaluatedFiles = rule.needsAst
       ? productionFiles.filter(isGate).length
-      : productionFiles.filter((f) => (rule.id.includes('core-no') ? coreFiles.has(path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/')) : isGate(f))).length
+      // 纯核心规则（`gate/core-*`）的执行面是 `coreFiles`，其余是 `gateFiles`。
+      // 用前缀而不是逐个 id 列举：新增 `gate/core-*` 规则时自动落在正确的面上。
+      : productionFiles.filter((f) => (rule.id.startsWith('gate/core-') ? coreFiles.has(path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/')) : isGate(f))).length
     const hits = rule.check(productionFacts, ctx)
     findings.push(...hits)
     gateReports.push({

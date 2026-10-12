@@ -327,6 +327,8 @@ export const ruleCoreNoVueThree = {
   title: '纯核心层（domain/application，及声明 corePurity 的新执行面）不得依赖 Vue / Three',
   criterion: '#249 §4 导入规则 1/2/6；§14 A01',
   layerDependent: true,
+  /** 本规则消费 `classifyExternal` 的哪些分类（供 `unconsumedExternalClasses` 元保证核对）。 */
+  consumesExternalClasses: ['vue', 'three'],
   check(facts, ctx) {
     const bad = []
     for (const f of facts) {
@@ -408,6 +410,61 @@ export const ruleCoreNoDomGlobals = {
           detail: `${topLayer(srcRel)} 层（新实现）引用了浏览器全局 ${hit.name}`,
         })
       }
+    }
+    return bad
+  },
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 闸门规则 2b：纯核心层不得依赖 Node IO（`node:*` / 裸 `fs`/`path`/…）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这条规则为什么直到 P11-E 才出现（#262 P11-B1 审计的「漏网」项 A01）
+ *
+ * `classifyExternal`（本文件下方）从 **P0** 起就会把 `node:*` 与裸 `fs`/`path`/`os`/
+ * `child_process`/`crypto`/`zlib` 归类成 `'node-io'`，但**当时没有任何 GATE_RULE 消费
+ * 这个分类结果** —— 全树对 `'node-io'` 的命中恰好只有分类器自身那两行。
+ *
+ * 后果（B1 实测的机械表述）：**`import fs from 'node:fs'` 写进 `src/domain/` 之后
+ * `npm run arch:scan` 仍然全绿** —— 「无 IO 实现依赖」这条 #249 §4/A01 的子句
+ * 有一个写好了却没挂上的前置件，于是它长期没有执行面。
+ *
+ * 本规则把它挂上。与此同时，`boundary-scan.test.ts` 增加一条**元保证**：
+ * `classifyExternal` 能产出的每一个分类（`'other-external'` 除外）都必须被某条
+ * GATE_RULE 消费 —— 这样"分类器写好了没人用"这一类漏网**结构上**不可能再次发生。
+ *
+ * ## 判定面
+ *
+ * 与 `ruleCoreNoVueThree` / `ruleCoreNoDomGlobals` **同一张表**（`ctx.coreFiles` =
+ * `domain`/`application` 全文 + 声明 `corePurity` 的执行面）。理由：Node IO 与
+ * Vue/Three/DOM 是同一族的"纯核心不可触达的外部能力"，#249 §4 规则 1/2 把它们
+ * 并列在同一句里。适配器层（`adapters/**`）**不**受此规则约束 ——
+ * 它本来就是"实现端口"（例如 `adapters/files/*` 的编解码可碰平台）。
+ */
+export const ruleCoreNoNodeIo = {
+  id: 'gate/core-no-node-io',
+  title: '纯核心层（domain/application，及声明 corePurity 的新执行面）不得依赖 Node IO（`node:*` 或裸 `fs`/`path`/…）',
+  criterion: '#249 §4 导入规则 1/2；§14 A01「枚举生产 import/export 图；domain/application 无 Vue/Three/DOM/IO/runtime 实现依赖」',
+  layerDependent: true,
+  /** 本规则消费 `classifyExternal` 的 `'node-io'` 分类（A01 漏网项的接线点）。 */
+  consumesExternalClasses: ['node-io'],
+  check(facts, ctx) {
+    const bad = []
+    for (const f of facts) {
+      if (f.kind === 'parse-error') continue
+      // 层由**发起导入的文件**决定（与 ruleCoreNoVueThree 同一理由：目标常常是外部包）。
+      if (!ctx.coreFiles.has(f.fromSrcRel)) continue
+      if (classifyExternal(f.specifier) !== 'node-io') continue
+      bad.push(
+        mkFinding(
+          ruleCoreNoNodeIo,
+          f,
+          `${topLayer(f.fromSrcRel)} 层（新实现）导入了 Node IO 模块 ${f.specifier}`
+            + `${f.isTypeOnly ? '（**类型导入**，同样计入 —— §4 规则 6）' : ''}`
+            + '：纯核心不得有任何 IO 实现依赖（把字节/路径/时钟留在适配器层）。',
+        ),
+      )
     }
     return bad
   },
@@ -502,7 +559,31 @@ export const GATE_RULES = [
   ruleNoBarrelSmuggling,
   ruleNoPrivateCrossLayer,
   ruleCoreNoDomGlobals,
+  // P11-E（#262）挂上 A01 的 IO 子句：分类器自 P0 起就产出 `'node-io'`，
+  // 但在此之前**无规则消费**它 ⇒ `import fs from 'node:fs'` 能进 domain/ 而全绿。
+  ruleCoreNoNodeIo,
 ]
+
+/**
+ * ## 元保证：`classifyExternal` 的每个分类都必须被某条闸门规则消费
+ *
+ * 为什么需要它（P11-E 的 A01 教训）：A01 的 IO 子句缺的不是分类能力，而是**消费者**
+ * —— 分类器写好了、测试也绿着，而"有没有人去用它"这件事**没有任何判据**。
+ * 这条元保证把那个缺口变成机械可测的：任何新增分类若没人消费，本函数返回它，
+ * `boundary-scan.test.ts` 立刻判红（附"要么挂规则、要么删分类器"的处置指引）。
+ *
+ * `'other-external'` 是**兜底桶**（= "不是 vue/three/node-io 的其它外部包"），
+ * 语义上不需要规则消费，故排除。
+ */
+export function unconsumedExternalClasses() {
+  const consumed = new Set()
+  for (const rule of GATE_RULES) {
+    for (const claim of rule.consumesExternalClasses ?? []) consumed.add(claim)
+  }
+  // `classifyExternal` 的值域（与函数体逐条对应；改分类器必须同批改这里）。
+  const produced = ['vue', 'three', 'node-io', 'other-external']
+  return produced.filter((c) => c !== 'other-external' && !consumed.has(c))
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 遗留债务清单（#249 §15）—— 计数与归属，不判 FAIL

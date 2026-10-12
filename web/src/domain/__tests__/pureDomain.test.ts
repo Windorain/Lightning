@@ -39,7 +39,12 @@ import { emptyApplicationState, type ApplicationState } from '@/application/stat
  */
 const require_ = createRequire(path.join(process.cwd(), 'noop.js'))
 const { extractGlobalRefs } = require_(path.join(process.cwd(), 'tests', 'architecture', 'module-graph.mjs')) as {
-  extractGlobalRefs: (absPath: string) => { name: string; line: number }[]
+  /**
+   * `syntax` 是**成员访问原文**（P11-E #262 追加）：抽取器对 `Math.random()` 记下
+   * `name: 'Math'`（`random` 是成员名、被抽取器按设计排除），只有 `syntax`
+   * 保留 `.random` 这一事实 ⇒ 随机源判据需要它。
+   */
+  extractGlobalRefs: (absPath: string) => { name: string; line: number; syntax?: string }[]
 }
 
 /**
@@ -224,20 +229,87 @@ describe('A02 pure-domain：冻结输入 + 重复执行 ⇒ 相同语义结果�
     // 只认真正的 Identifier 引用，注释与字符串不计入。
     // 这是 A02「不读取全局时钟/随机数/DOM/Vue 状态/网络/可变单例」的**导入限制**那一半
     // （#249 §14：静态扫描不宣称能证明全部 JavaScript 纯性，故与行为测试互为补充）。
-    const forbidden = new Set(['Date', 'performance', 'process', 'setTimeout', 'setInterval', 'requestAnimationFrame', 'fetch', 'XMLHttpRequest'])
     const findings: string[] = []
     for (const rel of PURE_CORE_FILES) {
-      const abs = path.resolve(WEB_SRC_ROOT, rel)
-      for (const ref of extractGlobalRefs(abs)) {
-        if (forbidden.has(ref.name)) findings.push(`src/${rel}:${ref.line} ${ref.name}`)
+      for (const f of findForbiddenGlobalRefs(path.resolve(WEB_SRC_ROOT, rel))) {
+        findings.push(`src/${rel}:${f.line} ${f.name}`)
       }
     }
     expect(findings).toEqual([])
     // 反空洞真：抽取器必须**确实**在这些文件上抽到了东西（否则"没找到"可能只是"没解析"）
     const totalRefs = PURE_CORE_FILES.reduce((n, rel) => n + extractGlobalRefs(path.resolve(WEB_SRC_ROOT, rel)).length, 0)
     expect(totalRefs).toBeGreaterThan(50)
+    // 反空洞真 2（P11-E #262 追加）：抽取器**确实**看得见 `Math` 这个标识符 ——
+    // 否则"没有 Math.random"可能只是因为整类标识符都没被抽出来（判据恒绿）。
+    const mathRefs = PURE_CORE_FILES.flatMap((rel) =>
+      extractGlobalRefs(path.resolve(WEB_SRC_ROOT, rel)).filter((r) => r.name === 'Math'),
+    )
+    expect(mathRefs.length, '纯核心确实使用 Math.*（abs/min/max/round 等）⇒ 下面的"无随机"不是空洞真').toBeGreaterThan(0)
   })
 
+  /**
+   * ## 找出一段源码里的**禁用全局引用**（P11-E #262：A02 的随机源子句）
+   *
+   * ### 为什么必须有这个函数（而不是把集合写在测试体内）
+   *
+   * 负对照的纪律（#249 §14）是「**注入缺陷 ⇒ 判红**」——它要求负对照跑的是
+   * **判据本尊**。若把禁用集合写在用例体里、负对照另写一份判断，那么"负对照判红"
+   * 只证明了那份**副本**有效，与产品面的判据无关。
+   *
+   * ### 为什么 `Math` 必须写成**成员式**（`Math.random`）而不是裸标识符
+   *
+   * `Math` 是纯核心**大量使用**的命名空间（实测 21 个纯核心文件里 69 处 `Math.abs`/
+   * `Math.min`/`Math.max`/`Math.round`/`Math.imul`…）。把裸 `Math` 加入禁用集合会
+   * 让判据**恒红**，并逼出"给 `Math` 开白名单"式的手工例外 —— 那正是本工程反复
+   * 禁止的"用旁路消假红"。真正的随机源是 `Math.random()`（不可重放 ⇒ 破坏 A02/A04），
+   * 故禁用面精确到该**成员访问**：`extractGlobalRefs` 把 `Math.random()` 里的 `Math`
+   * 记为一条引用（`random` 是成员名、被抽取器排除），其 `syntax` 保留完整成员式。
+   */
+  const FORBIDDEN_GLOBALS = new Set([
+    'Date',
+    'performance',
+    'process',
+    'setTimeout',
+    'setInterval',
+    'requestAnimationFrame',
+    'fetch',
+    'XMLHttpRequest',
+  ])
+  /**
+   * 禁用**成员式**（`Math.random`）。
+   *
+   * 检测方式：抽取器给出的 `name` 是对象名、`syntax` 是该成员访问的原文 ——
+   * 故用「name 命中 + syntax 里出现 `.random`」两段判定（不是关键词计数：
+   * `syntax` 是 AST 节点原文，注释与字符串不产生引用）。
+   * 容忍书写空白（`Math . random`）。
+   */
+  const FORBIDDEN_MEMBERS: ReadonlyArray<{ readonly object: string; readonly member: string }> = [
+    { object: 'Math', member: 'random' },
+  ]
+
+  function findForbiddenGlobalRefs(absPath: string): { name: string; line: number }[] {
+    const out: { name: string; line: number }[] = []
+    for (const ref of extractGlobalRefs(absPath)) {
+      if (FORBIDDEN_GLOBALS.has(ref.name)) {
+        out.push({ name: ref.name, line: ref.line })
+        continue
+      }
+      for (const f of FORBIDDEN_MEMBERS) {
+        if (ref.name !== f.object) continue
+        const memberAccess = new RegExp(`\\b${f.object}\\s*\\.\\s*${f.member}\\b`)
+        if (memberAccess.test(ref.syntax ?? '')) out.push({ name: `${f.object}.${f.member}`, line: ref.line })
+      }
+    }
+    return out
+  }
+
+  /**
+   * 反空洞真：抽取器对**故意违规**的样本确实判红（同一抽取器、同一判据）。
+   *
+   * P11-E（#262）把样本扩到**随机源**：B1 的 A02 定性是"forbidden 集（:227）逐项可读
+   * …**不含 `Math`** ⇒「无随机」无判据"。本组用例把"含 `Math.random` 的源"喂给
+   * **同一个** `findForbiddenGlobalRefs`，要求它判红。
+   */
   it('反空洞真：抽取器对**故意违规**的样本确实判红（同一抽取器、同一判据）', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-a02-'))
     try {
@@ -250,6 +322,41 @@ describe('A02 pure-domain：冻结输入 + 重复执行 ⇒ 相同语义结果�
       const names = extractGlobalRefs(file).map((r) => r.name)
       expect(names, '同一抽取器必须抓到 Date / performance').toContain('Date')
       expect(names).toContain('performance')
+      expect(findForbiddenGlobalRefs(file).map((f) => f.name).sort(), '判据本尊同样必须判红').toEqual(['Date', 'performance'])
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * ## A02 随机源子句（P11-E #262 补）—— 注入 `Math.random` 必须判红
+   *
+   * 三条对照，缺一不可（#249 §14「负对照必须证明确实破坏了目标保证」）：
+   *  1. **正对照**：同一段代码把 `Math.random()` 换成 `Math.abs()` ⇒ 判绿
+   *     （证明判据咬的是"随机"而不是"用了 Math"）；
+   *  2. **负对照**：含 `Math.random()` ⇒ 判红，且 finding 精确到行号；
+   *  3. **书写变体**：`Math . random` 空白变体同样判红（防"改个空格绕过"）。
+   */
+  it('负对照（随机源）：`Math.random()` 注入纯核心样本 ⇒ 同一判据判红；换成 `Math.abs()` ⇒ 判绿', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-a02-rand-'))
+    try {
+      const clean = path.join(dir, 'clean.ts')
+      fs.writeFileSync(clean, ['export function jitter(v: number): number {', '  return Math.abs(v) + Math.min(v, 1)', '}'].join('\n'), 'utf8')
+      const dirty = path.join(dir, 'dirty.ts')
+      fs.writeFileSync(dirty, ['export function pick(): number {', '  return Math.random()', '}'].join('\n'), 'utf8')
+      const spaced = path.join(dir, 'spaced.ts')
+      fs.writeFileSync(spaced, ['export function pick2(): number {', '  return Math . random()', '}'].join('\n'), 'utf8')
+      // 字符串/注释里的 `Math.random` **不得**计入（否则判据退化成关键词计数）
+      const decoy = path.join(dir, 'decoy.ts')
+      fs.writeFileSync(decoy, ['// Math.random() 的反例说明', "export const s = 'Math.random()'", 'export const n = 1'].join('\n'), 'utf8')
+
+      expect(findForbiddenGlobalRefs(clean), '用 Math.abs/min 不得判红（否则判据恒红）').toEqual([])
+      const red = findForbiddenGlobalRefs(dirty)
+      expect(red, '含 `Math.random()` 的实现必须被判红（A02「不读随机」子句）').toHaveLength(1)
+      expect(red[0]!.name).toBe('Math.random')
+      expect(red[0]!.line, 'finding 必须给出可定位的行号').toBe(2)
+      expect(findForbiddenGlobalRefs(spaced), '空白变体不得绕过').toHaveLength(1)
+      expect(findForbiddenGlobalRefs(decoy), '注释与字符串里的 Math.random 不算引用（AST 口径）').toEqual([])
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

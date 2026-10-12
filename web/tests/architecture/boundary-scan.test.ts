@@ -31,6 +31,7 @@ import {
   P_DUTIES,
   P_TO_ISSUE_OFFSET,
   RETIREMENT_OWNERS,
+  classifyExternal,
   collectLegacyDebt,
   corePurityFileSet,
   isGateFile,
@@ -39,6 +40,7 @@ import {
   resolveInternalTarget,
   ruleCoreNoDomGlobals,
   topLayer,
+  unconsumedExternalClasses,
 } from './boundary-rules.mjs'
 import { WEB_ROOT, buildAstIndex, buildModuleGraph, collectSourceFiles, extractGlobalRefs, extractImports, extractMethodCallSites } from './module-graph.mjs'
 
@@ -207,9 +209,11 @@ describe('A01 设施在当前树上的实况（含空洞真的显式披露）', 
       if (rule.layerDependent !== true) return productionFiles.length
       return productionFiles.filter((f) => {
         const rel = path.relative(SRC_ROOT, f).replace(/[\\/]+/g, '/')
-        // 纯核心规则（禁 Vue/Three/DOM）以 `coreFiles` 为判定面；其余以 `gateFiles`。
-        const coreOnly = rule.id === 'gate/core-no-vue-three' || rule.id === 'gate/core-no-dom-globals'
-        return coreOnly ? ctx.coreFiles.has(rel) : isGateFile(rel, gateFiles)
+        // 纯核心规则（禁 Vue/Three、禁 DOM 全局、禁 Node IO）以 `coreFiles` 为判定面；
+        // 其余以 `gateFiles`。⚠️ 新增 `gate/core-*` 规则必须同批登记到本清单 ——
+        // 否则空洞真判定会按 `gateFiles` 计数，从而掩盖"该规则其实无执行面"。
+        const isCoreRule = rule.id.startsWith('gate/core-')
+        return isCoreRule ? ctx.coreFiles.has(rel) : isGateFile(rel, gateFiles)
       }).length
     }
     for (const rule of GATE_RULES) {
@@ -332,6 +336,54 @@ describe('A01 设施在当前树上的实况（含空洞真的显式披露）', 
 describe('A01 目标分层清单与 #249 §4 一致', () => {
   it('LAYERS 覆盖 #249 §4 的全部九个分层', () => {
     expect(LAYERS).toEqual(['domain', 'application', 'runtime', 'presentation', 'editors', 'shells', 'adapters', 'composition', 'entries'])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A01（P11-E #262）· **分类器与消费者的对账**（防"写好了没人用"的漏网复发）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这组用例的由来（P11-B1 审计 → P11-E 接线）
+ *
+ * B1 的 A01 定性逐字：`boundary-rules.mjs` 的 `classifyExternal` **已产出**
+ * `'node-io'`，"但全树仅这 2 处命中、**无任何 GATE_RULE 消费它** ⇒「无 IO 依赖」
+ * 这一子句的**前置件已写好却未挂上**。⇒ 今天 `import fs from 'node:fs'`
+ * 可以进 `domain/` 而全绿。"
+ *
+ * P11-E 的处置是**接上**（而不是删分类器）：新增 `ruleCoreNoNodeIo` 并登记
+ * `consumesExternalClasses`。本组把这个接线本身变成判据 —— 它要在**没有**
+ * 具体违规样本的情况下也能发现"分类器无人消费"这一类缺口。
+ */
+describe('A01 设施自检：分类器的每个分类都必须有闸门规则消费（P11-E 接线守卫）', () => {
+  it('`gate/core-no-node-io` 必须**在** `GATE_RULES` 里（A01 的 IO 子句不得再次脱线）', () => {
+    // 这条断言的直接反例就是 B1 抓到的那个状态：分类器产出 `'node-io'`，
+    // 但 GATE_RULES 里没有任何规则看它 ⇒ 扫描全绿而边界其实没执行。
+    expect(
+      GATE_RULES.map((r: { id: string }) => r.id),
+      '`gate/core-no-node-io` 必须在闸门规则集内（P11-E 的 A01 接线点）',
+    ).toContain('gate/core-no-node-io')
+  })
+
+  it('`unconsumedExternalClasses()` 必须为空 —— 分类器能产出的分类都有人消费', () => {
+    const unconsumed = unconsumedExternalClasses()
+    expect(
+      unconsumed,
+      `以下外部包分类**没有**任何 GATE_RULE 消费 ⇒ 它们对应的边界子句形同虚设：`
+        + `${unconsumed.join(', ')}。处置二选一：①在对应规则上登记 `
+        + `\`consumesExternalClasses: [...]\` 并真的判定它；②删掉该分类（须给出`
+        + `"已由其他规则覆盖"的证据）。`,
+    ).toEqual([])
+  })
+
+  it('**反空洞真**：分类器对三类包名给出**不同**分类（否则"都有人消费"可以靠一个桶蒙过去）', () => {
+    expect(classifyExternal('vue')).toBe('vue')
+    expect(classifyExternal('three')).toBe('three')
+    expect(classifyExternal('node:fs')).toBe('node-io')
+    expect(classifyExternal('fs')).toBe('node-io')
+    expect(classifyExternal('pako')).toBe('other-external')
+    // 分类器本身的判别力：同一族（IO）的两种写法必须同归一类
+    expect(classifyExternal('node:path')).toBe(classifyExternal('path'))
   })
 })
 
