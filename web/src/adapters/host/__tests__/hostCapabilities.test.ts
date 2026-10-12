@@ -22,6 +22,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { createInputSession } from '@/runtime/inputSession'
 import {
   BARE_HOST_ENVIRONMENT,
   HOST_CAPABILITY_IDS,
@@ -466,5 +467,160 @@ describe('A34 探测：`probeHostCapabilities` 是纯投影', () => {
     // （只有 Blob 而无 createObjectURL 时产物到不了磁盘 —— 见矩阵里的 because）。
     expect(r.blob).toBe(true)
     expect(r['url.createObjectURL']).toBe(false)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 六、A22 host-input（P11-E #262 补）：**挂起/恢复后**宿主能力仍正常
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这条补的是 A22 的子句缺口（#262 comment 6421 A22 行）
+ *
+ * B1 的定性：「能力面已存在（`hostCapabilities.ts:278 probeHostCapabilities` 覆盖
+ * clipboard/fileSystemAccess/indexedDB），缺的只是"挂起恢复后仍正常"这一步断言」。
+ *
+ * ## 为什么"挂起/恢复"用**真** `InputSession.applyVisibility`
+ *
+ * A22 的另一半判据（`inputRouting.test.ts:424`）已经钉住"挂起期间如实报告
+ * `droppedTicks`、恢复给一条基线（不补跑历史 tick）"。本组接着那一步问：
+ * **恢复之后**，宿主的资源/文件能力（剪贴板、文件直写、indexedDB）是否仍然正常。
+ * 用真会话（`createInputSession`）而不是手工拼状态，是因为"挂起/恢复"是会话的
+ * 运行期事实，脱离会话就没有被测量的对象。
+ *
+ * ## 判据的机械形式
+ *
+ * 同一份环境值 ⇒ 恢复前后两次 `probeHostCapabilities` 必须逐字段相同；
+ * 且 `assertHostRequirements` 在恢复后仍判 `launchable`（不是"能探到但被降级"）。
+ * 反向（负对照）：把一个"恢复时丢掉能力报告"的变异体喂给**同一个**断言器 ⇒ 判红。
+ */
+describe('A22 host-input：挂起/恢复后宿主能力仍正常（P11-E #262 补）', () => {
+  /** 断言器判红 = 它抛错。用它把"判红"变成可断言的读数（与 A05 负对照同一手法）。 */
+  function redOf(run: () => void): boolean {
+    try {
+      run()
+      return false
+    } catch {
+      return true
+    }
+  }
+
+  /** 完整能力的宿主环境值（与 `FULL_HOST` 同一份构造输入）。 */
+  const FULL_ENV = {
+    hasDom: true,
+    hasWebGL2: true,
+    hasBlob: true,
+    hasCreateObjectURL: true,
+    hasAtob: true,
+    hasTextEncoder: true,
+    hasIndexedDB: true,
+    hasClipboard: true,
+    hasFileSystemAccess: true,
+  } as const
+
+  /** 判据本尊（正/负对照共用一份 —— #249 §14「负对照必须证明破坏了目标保证」）。 */
+  function judgeCapabilitiesSurviveResume(
+    before: ReturnType<typeof probeHostCapabilities>,
+    after: ReturnType<typeof probeHostCapabilities>,
+    profileId: string,
+    resume: { readonly resumeBaseline: number | null; readonly droppedTicks: number },
+  ): void {
+    // ① 恢复**确实**发生了（不是"根本没挂起"的假绿）
+    expect(resume.resumeBaseline, '恢复必须给一条基线（A22 的既有判据口径）').not.toBeNull()
+    expect(resume.droppedTicks, '挂起期间丢弃的 tick 必须如实报出').toBeGreaterThan(0)
+    // ② 三项"资源/文件能力"逐项仍在，且与挂起前**同一读数**
+    for (const id of ['clipboard', 'fileSystemAccess', 'indexedDB'] as const) {
+      expect(after[id], `恢复后 ${id} 必须与挂起前相同`).toBe(before[id])
+      expect(after[id], `恢复后 ${id} 必须仍可用（不得被挂起清掉）`).toBe(true)
+    }
+    // ③ 启动判定仍为 launchable（能力面不是"探得到但不可用"）
+    const d = assertHostRequirements(spec(profileId), after, { requestedProfile: profileId })
+    expect(d.status, '恢复后必须仍可启动（能力面正常）').toBe('launchable')
+  }
+
+  it('正对照：真 `InputSession` 挂起 → 恢复之后，能力探针与启动判定逐项不变', () => {
+    const session = createInputSession({
+      sink: {
+        submit: () => ({ ticketId: 't', commandId: 'c' }),
+        executeNow: () => ({ status: 'unchanged', version: { documentVersion: 0 } }),
+      } as never,
+      contextId: 'ctx-1',
+      // 一条**模态启动**的 Area 快捷键（`startsModal: true` ⇒ 会话会真的走到 `dispatch`，
+      // 从而读一次 `capabilitySource()`）。非模态快捷键只记轨迹、不在此分发。
+      areaHotkeys: [
+        {
+          key: 'g',
+          commandId: 'tool.beginInteraction',
+          params: { contextId: 'ctx-1', tool: 'move', targets: ['obj-1'] },
+          startsModal: true,
+        },
+      ],
+    })
+    session.setActiveRegion('r-viewport')
+    // 能力来源是**会话**的显式注入（宿主的文件/剪贴板能力经它进入路由判定）
+    let capabilityReads = 0
+    session.setCapabilities(() => {
+      capabilityReads += 1
+      return ['content.edit', 'save.write']
+    })
+
+    const before = probeHostCapabilities(FULL_ENV)
+    expect(session.routing.suspension.suspended, '起点：未挂起').toBe(false)
+
+    // ① 页面隐藏 ⇒ 挂起
+    const hidden = session.applyVisibility({ hidden: true, now: 1_000, lastTickAt: 1_000, tickInterval: 16 })
+    expect(session.routing.suspension.suspended, '隐藏后必须进入挂起').toBe(true)
+    expect(hidden.resumeBaseline, '挂起本身不产生基线').toBeNull()
+
+    // ② 页面重新可见 ⇒ 恢复（5000ms 后）
+    const shown = session.applyVisibility({ hidden: false, now: 6_000, lastTickAt: 1_000, tickInterval: 16 })
+    expect(session.routing.suspension.suspended, '恢复后必须回到未挂起').toBe(false)
+
+    // ③ 恢复后重新探测宿主能力（**生产探针**、同一份环境值）
+    const after = probeHostCapabilities(FULL_ENV)
+    judgeCapabilitiesSurviveResume(before, after, 'workbench', shown)
+
+    // ④ 会话能力面同样存活：恢复后仍能路由事件，且能力来源仍被读取
+    //    （`dispatch` 每次都向 `capabilitySource()` 取值 —— 挂起把它清掉的话这里会停住）
+    const readsBefore = capabilityReads
+    session.handleKey({
+      token: session.nextToken(),
+      kind: 'keydown',
+      key: 'g',
+      ctrl: false,
+      shift: false,
+      alt: false,
+      meta: false,
+      repeat: false,
+      composing: false,
+      targetEditable: false,
+      defaultPrevented: false,
+    } as never)
+    expect(capabilityReads, '恢复后能力来源必须仍被读取（能力面未被挂起清空）').toBeGreaterThan(readsBefore)
+    expect(session.counters.keyEvents, '恢复后会话必须仍能处理事件').toBeGreaterThan(0)
+    expect(session.counters.modalStarts, '恢复后模态快捷键必须仍能启动操作').toBe(1)
+    // 挂起/恢复在轨迹里**如实事后可见**（不是静默状态变化）
+    expect(session.trace.map((t) => t.reason)).toEqual(expect.arrayContaining(['suspended']))
+    expect(session.trace.some((t) => String(t.reason).startsWith('resumed(')), '恢复必须留痕').toBe(true)
+  })
+
+  it('**负对照**：把"恢复时丢掉能力报告"的变异体喂给同一断言器 ⇒ 判红', () => {
+    const before = probeHostCapabilities(FULL_ENV)
+    const resume = { resumeBaseline: 6_000, droppedTicks: 312 }
+    // 变异体 A：恢复后能力报告塌成裸宿主（挂起把能力面清掉了）
+    expect(
+      redOf(() => judgeCapabilitiesSurviveResume(before, probeHostCapabilities(BARE_HOST_ENVIRONMENT), 'workbench', resume)),
+      '恢复后丢掉 clipboard/fileSystemAccess/indexedDB ⇒ 必须判红',
+    ).toBe(true)
+    // 变异体 B：只丢**一项**（最容易漏的形态：整体还在、单项被清）
+    const oneMissing = probeHostCapabilities({ ...FULL_ENV, hasClipboard: false })
+    expect(redOf(() => judgeCapabilitiesSurviveResume(before, oneMissing, 'workbench', resume)), '丢单项同样必须判红').toBe(true)
+    // 变异体 C：根本没挂起（没有基线 ⇒ "恢复后正常"是没被测过的空话）
+    expect(
+      redOf(() => judgeCapabilitiesSurviveResume(before, before, 'workbench', { resumeBaseline: null, droppedTicks: 0 })),
+      '没有发生恢复 ⇒ 必须判红（防"没挂起也算通过"）',
+    ).toBe(true)
+    // 正对照：合规读数判绿（防恒红）
+    expect(redOf(() => judgeCapabilitiesSurviveResume(before, probeHostCapabilities(FULL_ENV), 'workbench', resume))).toBe(false)
   })
 })

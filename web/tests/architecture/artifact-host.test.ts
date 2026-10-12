@@ -45,6 +45,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SRC_ROOT, WEB_ROOT, buildModuleGraph } from './module-graph.mjs'
+// P11-E #262：声明式产物门控（替换掉原来的 5 处 `if (!hasArtifacts) return` 空洞真）
+import { ARTIFACT_GROUPS, artifactGateBanner, evaluateArtifactGate, verdictOf, writeArtifactGateRecord } from './artifact-gate.mjs'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 读入口（铁律 6）
@@ -290,61 +292,143 @@ describe('A34 模块可达性：profile 入口的静态 import 闭包（A15 负�
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 二、真实构建产物的路径与字体证据
+// 二、真实构建产物的路径与字体证据（**声明式产物门控**，P11-E #262 改造）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 产物根目录（**可选**）。
+ * ## 本节的形态（P11-E #262 替换掉 B1 抓到的"空洞真"）
  *
- * A34 的验收要求使用"实际发布产物"。但在**冷树/CI** 上 `dist*` 目录不存在
- * （`.gitignore` 三条规则，B1 B-11），而本批纪律**禁止**跑完整 `npm run build:*`
- * （共享瓶颈文件不可改）与在仓内留产物。
+ * B1 的 A34 定性逐字：「`:319` 起 `:335/:345/:363/:413/:433` **五处
+ * `if (!hasArtifacts/!hasBundle) return` 静默通过**；本树 `web/` 实测无任何 `dist*`
+ * ⇒ 这 5 条是**空洞真**（形似判据、实际零断言）」。
  *
- * ⇒ 本文件对产物的断言是**条件式**的：产物存在 ⇒ 全量断言；
- * 产物不存在 ⇒ 断言**降级为已登记的缺口**（并打印缺失路径），
- * **不**把它写成"通过"（#251「未实现的测试名称不得报告通过」）。
+ * 「空洞真」在报告里**以通过的形式出现**，比"没有判据"更危险。故本节改为
+ * **声明式产物门控**（与 `web/e2e/real-artifact-gate.ts` 的 #332 形态同构）：
  *
- * 证据缺口由 `temp/p09/a34-artifact-host-evidence.md` 里的真实构建补足
- * （该文件记录了 3 次 `npx vite build` 到 temp 的原始输出与字节证据）。
+ *  - 门控结论在**模块加载期**算出一次（`GATE`），并立即打印**启动横幅** +
+ *    落 `web/test-results/a34-artifact-gate.json`；
+ *  - 每条产物判据用 `it.runIf(verdict.ready)` —— 产物就绪 ⇒ **真跑**；
+ *    缺产物 ⇒ 在报告里**显示为 skipped**（不是 passed）+ 横幅列出「缺什么、怎么再生」；
+ *  - 门控自身的自洽性由下面 `A34 门控自检` 一节**永远运行**的元判据把守
+ *    （含"注入一个缺文件的合成组 ⇒ 门控必须判未就绪"的负对照）。
+ *
+ * 真实构建跑一次使这些判据成真**不在本批**（B1/Lead 裁决：归 P11-C 窗口，
+ * 那里本就需要构建产物）。本批完成的是**门控改造**：从此"缺产物"不再冒充"通过"。
  */
-const ARTIFACT_ROOT = process.env.LIGHTNING_P09_ARTIFACT_ROOT ?? path.join(WEB_ROOT, 'dist-wiki-workbench')
+const GATE = evaluateArtifactGate()
+const DIST_GROUP = verdictOf(GATE, 'wiki-workbench-dist')
+const BUNDLE_GROUP = verdictOf(GATE, 'wiki-workbench-bundle')
 
-/** 期望存在的产物文件（相对产物根/`web/`）。 */
-const EXPECTED_ARTIFACTS = [
-  { rel: 'bundled/StructureWorkbench.bundle.js', root: 'wiki' },
-  { rel: 'bundled/StructureWorkbench.css', root: 'wiki' },
-]
+// 启动横幅（模块加载期即打印；vitest 会把它收进该文件的输出里，人读可见）
+console.log(artifactGateBanner(GATE))
+// 机器可读记录（落盘失败**不得**静默：它会让门控退化成"只有打印"）
+const GATE_RECORD_PATH = writeArtifactGateRecord(GATE)
 
-describe('A34 真实产物：资源基址与路径（B1 B-05/B-07）', () => {
-  const hasArtifacts = fs.existsSync(ARTIFACT_ROOT)
-
-  it(`产物目录存在性被**显式披露**（当前：${hasArtifacts ? '存在' : '（缺口，见证据文件）'}）`, () => {
-    // 这条断言的作用是**披露**而不是要求：冷树上没有产物是正常事实（B-11）。
-    // 但它必须可见 —— 不能静默跳过而让人以为"产物断言跑过了"。
-    const dots = EXPECTED_ARTIFACTS.map((a) => path.join(ARTIFACT_ROOT, a.rel))
-    const present = dots.filter((p) => fs.existsSync(p))
-    if (!hasArtifacts) {
-      // 缺口登记：证据在 temp/p09（真实构建）。
-      expect(present, '没有产物目录时不得出现"部分产物"（那说明构建被中断）').toEqual([])
-    } else {
-      expect(present.length, `产物目录存在但缺文件：${dots.filter((p) => !fs.existsSync(p)).join(', ')}`).toBe(dots.length)
+describe('A34 门控自检：声明式产物门控**永远运行**的元判据（含负对照）', () => {
+  it('声明的每组都写全了 `requires`/`regenerate`/`files`（缺产物时必须能告诉人怎么再生）', () => {
+    expect(ARTIFACT_GROUPS.length, '至少声明一组产物').toBeGreaterThan(0)
+    for (const g of ARTIFACT_GROUPS) {
+      expect(g.files.length, `${g.id} 必须声明期望文件`).toBeGreaterThan(0)
+      expect(g.requires.length, `${g.id} 必须写清需要什么产物`).toBeGreaterThan(20)
+      expect(g.regenerate, `${g.id} 必须给出再生命令`).toMatch(/npm run build:|gradlew/)
     }
   })
 
-  it('产物 HTML 的资源引用是**相对路径**（`./bundled/...`，绝对基址会 404）', () => {
-    if (!hasArtifacts) return
-    const htmlPath = path.join(ARTIFACT_ROOT, 'index.html')
-    if (!fs.existsSync(htmlPath)) return
+  it('`ready` 与 `missing` 自洽（不得出现"声明就绪却缺文件"）', () => {
+    for (const v of GATE.groups) {
+      expect(v.ready, `${v.id}：ready ⇔ missing 为空`).toBe(v.missing.length === 0)
+      expect(v.present.length + v.missing.length, `${v.id}：present+missing 必须覆盖全部声明文件`).toBe(
+        ARTIFACT_GROUPS.find((g) => g.id === v.id)!.files.length,
+      )
+    }
+  })
+
+  it('就绪的组：声明的每个文件**真的**存在（不得"部分产物"冒充就绪）', () => {
+    for (const v of GATE.groups) {
+      if (!v.ready) continue
+      for (const rel of v.missing) expect.fail(`就绪组 ${v.id} 却缺 ${rel}`)
+      for (const rel of v.present) {
+        expect(fs.existsSync(path.join(v.root, rel)), `${v.id} 的 ${rel} 必须存在`).toBe(true)
+      }
+    }
+  })
+
+  it('**落盘的机器可读记录与内存结论逐项一致**（门控不能只有打印）', () => {
+    expect(fs.existsSync(GATE_RECORD_PATH), '门控记录必须落盘（证据纪律）').toBe(true)
+    const rec = JSON.parse(readSource(GATE_RECORD_PATH)) as {
+      declared: { id: string; regenerate: string }[]
+      groups: { id: string; ready: boolean; missing: string[] }[]
+      missingIds: string[]
+    }
+    expect(rec.declared.map((d) => d.id).sort()).toEqual(ARTIFACT_GROUPS.map((g) => g.id).sort())
+    expect(rec.groups.map((g) => g.id).sort()).toEqual(GATE.groups.map((g) => g.id).sort())
+    for (const g of rec.groups) {
+      const mem = GATE.groups.find((x) => x.id === g.id)!
+      expect(g.ready, `${g.id}：记录的 ready 必须与内存结论一致`).toBe(mem.ready)
+      expect(g.missing, `${g.id}：记录的 missing 必须与内存结论一致`).toEqual([...mem.missing])
+    }
+    expect(rec.missingIds).toEqual([...GATE.missingIds])
+    for (const d of rec.declared) expect(d.regenerate, `${d.id} 的再生命令必须随记录落盘`).toBeTruthy()
+  })
+
+  it('**横幅点名每一份缺失产物**（"缺什么、怎么再生"必须人读可见，不许静默跳过）', () => {
+    const banner = artifactGateBanner(GATE)
+    for (const v of GATE.groups) {
+      if (v.ready) continue
+      expect(banner, `横幅必须点名缺产物的组 ${v.id}`).toContain(v.id)
+      for (const rel of v.missing) expect(banner, `横幅必须列出缺的文件 ${rel}`).toContain(rel)
+      expect(banner, `横幅必须给出 ${v.id} 的再生命令`).toContain(v.regenerate)
+    }
+    if (GATE.allReady) expect(banner, '全就绪时必须明说"无跳过"').toContain('无跳过')
+  })
+
+  it('**负对照**：注入一个缺文件的合成组 ⇒ 门控判"未就绪"并列出缺什么（不是恒就绪）', () => {
+    const synthetic = [
+      {
+        id: 'synthetic-missing',
+        root: WEB_ROOT,
+        files: ['package.json', '__definitely_absent__/x.js'],
+        requires: '一个故意不存在的产物（负对照用）',
+        regenerate: 'cd web && npm run build:wiki-workbench',
+      },
+    ]
+    const injected = evaluateArtifactGate(synthetic)
+    const v = verdictOf(injected, 'synthetic-missing')
+    expect(v.ready, '有缺文件 ⇒ 必须判未就绪（门控不是恒"就绪"）').toBe(false)
+    expect(v.missing).toEqual(['__definitely_absent__/x.js'])
+    expect(v.present).toEqual(['package.json'])
+    expect(artifactGateBanner(injected)).toContain('__definitely_absent__/x.js')
+    // 另一个方向：同一门控对**齐全**的组判就绪（不是恒"未就绪"）
+    const ok = evaluateArtifactGate([{ ...synthetic[0]!, files: ['package.json'] }])
+    expect(verdictOf(ok, 'synthetic-missing').ready).toBe(true)
+    // 未登记的 id 必须抛错（拼错 id 会让判据静默不跑 —— 那是另一种空洞真）
+    expect(() => verdictOf(injected, 'typo-id')).toThrow(/未登记的组/)
+  })
+})
+
+describe('A34 真实产物：资源基址与路径（B1 B-05/B-07）', () => {
+  it(`产物门控状态被**显式披露**（当前：${DIST_GROUP.ready ? '就绪 ⇒ 下面的判据真跑' : `未就绪 ⇒ 跳过 ${DIST_GROUP.missing.length} 个文件的判据`}）`, () => {
+    // 这条**永远运行**：它把"本节其余判据跑不跑、为什么"变成报告里可读的事实。
+    if (DIST_GROUP.ready) {
+      expect(DIST_GROUP.missing, '就绪 ⇒ 不得有缺失文件').toEqual([])
+      expect(DIST_GROUP.present.length, '就绪 ⇒ 声明文件必须全部在案').toBe(3)
+    } else {
+      expect(DIST_GROUP.missing.length, '未就绪 ⇒ 必须列出缺哪些文件（不得静默）').toBeGreaterThan(0)
+      expect(DIST_GROUP.requires.length, '未就绪 ⇒ 必须写清需要什么').toBeGreaterThan(20)
+      expect(DIST_GROUP.regenerate, '未就绪 ⇒ 必须给出再生命令').toContain('build:wiki-workbench')
+    }
+  })
+
+  it.runIf(DIST_GROUP.ready)('产物 HTML 的资源引用是**相对路径**（`./bundled/...`，绝对基址会 404）', () => {
+    const htmlPath = path.join(DIST_GROUP.root, 'index.html')
     const html = readSource(htmlPath)
     expect(html, 'bundle 必须由相对路径引用').toMatch(/src="\.\/bundled\//)
     expect(html, 'CSS 必须由相对路径引用').toMatch(/href="\.\/bundled\//)
     expect(html, '不得出现站点根绝对引用').not.toMatch(/(?:src|href)="\/bundled\//)
   })
 
-  it('产物 CSS 的字体引用是**相对路径**（`url(./X.woff2)`，B1 B-05 实测形态）', () => {
-    if (!hasArtifacts) return
-    const cssPath = path.join(ARTIFACT_ROOT, 'bundled/StructureWorkbench.css')
-    if (!fs.existsSync(cssPath)) return
+  it.runIf(DIST_GROUP.ready)('产物 CSS 的字体引用是**相对路径**（`url(./X.woff2)`，B1 B-05 实测形态）', () => {
+    const cssPath = path.join(DIST_GROUP.root, 'bundled/StructureWorkbench.css')
     const css = bytesToLatin1(readBytes(cssPath))
     const urls = [...css.matchAll(/url\(([^)]+)\)/g)].map((m) => m[1])
     const fonts = urls.filter((u) => u.includes('.woff2'))
@@ -354,15 +438,14 @@ describe('A34 真实产物：资源基址与路径（B1 B-05/B-07）', () => {
     }
     // 且被引用的文件**真的存在**（"引用存在"与"资源可加载"是两件事）。
     for (const u of fonts) {
-      const target = path.join(ARTIFACT_ROOT, 'bundled', u.replace(/^\.\//, '').split('?')[0].split('#')[0])
+      const target = path.join(DIST_GROUP.root, 'bundled', u.replace(/^\.\//, '').split('?')[0].split('#')[0])
       expect(fs.existsSync(target), `CSS 引用的字体不存在：${target}`).toBe(true)
     }
   })
 
-  it('字体产物与**源字体文件内容逐字节相同**（不是"有引用"而已）', () => {
-    if (!hasArtifacts) return
-    const bundled = filesUnderAbsolute(path.join(ARTIFACT_ROOT, 'bundled')).filter((f) => f.endsWith('.woff2'))
-    if (bundled.length === 0) return
+  it.runIf(DIST_GROUP.ready)('字体产物与**源字体文件内容逐字节相同**（不是"有引用"而已）', () => {
+    const bundled = filesUnderAbsolute(path.join(DIST_GROUP.root, 'bundled')).filter((f) => f.endsWith('.woff2'))
+    expect(bundled.length, '产物里必须有字体（否则本判据无对象 —— 那是另一种空洞真）').toBeGreaterThan(0)
     // 源字体（web/src/assets/fonts/）的字节集合。
     const srcDir = path.join(SRC_ROOT, 'assets/fonts')
     const srcByName = new Map<string, string>()
@@ -406,11 +489,16 @@ const ZIP_SIGNATURE_SEARCHES: ReadonlyArray<{ readonly name: string; readonly he
 ]
 
 describe('A34 真实产物：ZIP 签名字节（B-21 判据 (a)）', () => {
-  const bundlePath = path.join(ARTIFACT_ROOT, 'bundled/StructureWorkbench.bundle.js')
-  const hasBundle = fs.existsSync(bundlePath)
+  it(`产物门控状态被**显式披露**（当前：${BUNDLE_GROUP.ready ? '就绪 ⇒ 下面的字节判据真跑' : `未就绪 ⇒ 跳过（缺 ${BUNDLE_GROUP.missing.join(', ')}）`}）`, () => {
+    if (BUNDLE_GROUP.ready) {
+      expect(fs.existsSync(path.join(BUNDLE_GROUP.root, BUNDLE_GROUP.present[0]!)), '就绪 ⇒ bundle 必须存在').toBe(true)
+    } else {
+      expect(BUNDLE_GROUP.regenerate, '未就绪 ⇒ 必须给出再生命令').toContain('build:wiki-workbench')
+    }
+  })
 
-  it('未补丁的 wiki bundle **确实**含 ZIP 签名字面量（前置：判据有对象）', () => {
-    if (!hasBundle) return
+  it.runIf(BUNDLE_GROUP.ready)('未补丁的 wiki bundle **确实**含 ZIP 签名字面量（前置：判据有对象）', () => {
+    const bundlePath = path.join(BUNDLE_GROUP.root, BUNDLE_GROUP.files[0]!)
     const bytes = readBytes(bundlePath)
     const text = bytesToLatin1(bytes)
     // 逐个真字节形态搜索（latin1 口径）。
@@ -429,13 +517,11 @@ describe('A34 真实产物：ZIP 签名字节（B-21 判据 (a)）', () => {
     }
   })
 
-  it('产物里若含 `atob(\'UEsDBA==\')` ⇒ 不得被引号包住（历史事故形态的产物级断言）', () => {
-    if (!hasBundle) return
-    const text = bytesToLatin1(readBytes(bundlePath))
+  it.runIf(BUNDLE_GROUP.ready)('产物里若含 `atob(\'UEsDBA==\')` ⇒ 不得被引号包住（历史事故形态的产物级断言）', () => {
+    const text = bytesToLatin1(readBytes(path.join(BUNDLE_GROUP.root, BUNDLE_GROUP.files[0]!)))
     // 语法错误形态：`"atob('UEsDBA==')"` —— 它会在浏览器里造成"第二个 " 提前闭合"。
     expect(text, '产物里不得出现被引号包住的 atob 表达式（obj-export-zip-fix.md:34-40）').not.toContain(`"atob('UEsDBA==')"`)
-    expect(text, '不得出现双引号参数的 atob（第一版修复的错误形态）').not.toContain('atob("UEsDBA=='
-    )
+    expect(text, '不得出现双引号参数的 atob（第一版修复的错误形态）').not.toContain('atob("UEsDBA==')
   })
 })
 

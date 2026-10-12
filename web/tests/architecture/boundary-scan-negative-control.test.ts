@@ -28,7 +28,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ruleCoreNoDomGlobals, ruleCoreNoVueThree, ruleNoBarrelSmuggling } from './boundary-rules.mjs'
+import { ruleCoreNoDomGlobals, ruleCoreNoNodeIo, ruleCoreNoVueThree, ruleNoBarrelSmuggling } from './boundary-rules.mjs'
 import { buildAstIndex, buildModuleGraph, extractImports } from './module-graph.mjs'
 
 let tmpRoot = null
@@ -177,6 +177,116 @@ describe('A01 负对照：注入违规**类型导入**必须判红', () => {
     expect(names).toEqual(['document', 'window'])
     expect(hits.every((h) => h.file.includes('leaky'))).toBe(true)
     expect(hits.some((h) => h.file.includes('comment-only')), '注释里的关键词不得计入').toBe(false)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A01（IO 子句）：`node:*` / 裸 `fs`/`path` 进纯核心必须判红
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这组用例补的是 A01 的具体漏网项（#262 P11-B1 审计 → P11-E 接线）
+ *
+ * B1 的机械表述：`classifyExternal`（boundary-rules.mjs）**自 P0 起**就产出
+ * `'node-io'`，而**没有任何 GATE_RULE 消费它** —— 全树对 `'node-io'` 的命中只有
+ * 分类器自身的两行。于是「domain/application 无 IO 依赖」这条 A01 子句
+ * **有一个写好了却没挂上的前置件**：`import fs from 'node:fs'` 写进 `src/domain/`
+ * 之后 `npm run arch:scan` 仍然全绿。
+ *
+ * 本组的形态与上面 vue/three 那组**逐条对应**（同一 `run()` 路径、同一 `mkFinding`），
+ * 使两类外部能力（UI 框架与 IO）在判据上不再有强弱之别。
+ */
+describe('A01 负对照：Node IO（`node:*` 与裸 `fs`/`path`/…）注入纯核心必须判红', () => {
+  it('正对照：合规的 domain / application 样本判绿（同一规则、同一路径）', () => {
+    const { hits } = run(
+      {
+        'domain/scene.ts': "import type { Vec3 } from './vec'\nexport type S = Vec3\n",
+        'domain/vec.ts': 'export type Vec3 = readonly [number, number, number]\n',
+        'application/commands.ts': "import type { Vec3 } from '../domain/vec'\nexport type C = Vec3\n",
+      },
+      ruleCoreNoNodeIo,
+    )
+    expect(hits, '无 IO 导入的纯核心样本不得判红（防"恒红"）').toEqual([])
+  })
+
+  it('负对照 1：`import fs from \'node:fs\'` 注入 domain ⇒ 判红（B1 的漏网原文）', () => {
+    const { hits } = run(
+      { 'domain/io.ts': "import fs from 'node:fs'\nexport const probe = () => fs.existsSync\n" },
+      ruleCoreNoNodeIo,
+    )
+    expect(hits, '`node:fs` 必须有规则消费（A01 漏网项的本体）').toHaveLength(1)
+    expect(hits[0].rule).toBe('gate/core-no-node-io')
+    expect(hits[0].file).toMatch(/domain\/io\.ts$/)
+    expect(hits[0].line).toBe(1)
+    expect(hits[0].specifier).toBe('node:fs')
+    expect(hits[0].detail).toContain('node:fs')
+  })
+
+  it('负对照 2：**裸**说明符（`path` / `crypto` / `child_process`）同样判红（`node:` 不是唯一形态）', () => {
+    const bare = run(
+      { 'application/paths.ts': "import path from 'path'\nexport const j = path.join\n" },
+      ruleCoreNoNodeIo,
+    )
+    expect(bare.hits).toHaveLength(1)
+    expect(bare.hits[0].specifier).toBe('path')
+    const crypto = run(
+      { 'domain/hash.ts': "import { createHash } from 'crypto'\nexport const h = createHash\n" },
+      ruleCoreNoNodeIo,
+    )
+    expect(crypto.hits, '裸 crypto 属同一分类（classifyExternal 的 node-io 列表）').toHaveLength(1)
+    const child = run(
+      { 'application/run.ts': "import { execSync } from 'child_process'\nexport const e = execSync\n" },
+      ruleCoreNoNodeIo,
+    )
+    expect(child.hits).toHaveLength(1)
+  })
+
+  it('负对照 3：`import type` 形态同样判红（§4 规则 6：类型导入同样计入）', () => {
+    const { hits } = run(
+      { 'domain/types.ts': "import type { Stats } from 'node:fs'\nexport type S = Stats\n" },
+      ruleCoreNoNodeIo,
+    )
+    expect(hits).toHaveLength(1)
+    expect(hits[0].isTypeOnly, 'finding 必须如实标出这是类型导入').toBe(true)
+    expect(hits[0].detail).toContain('类型导入')
+  })
+
+  it('负对照 4：`export type { … } from \'node:fs\'`（barrel 转出口）不得漏判', () => {
+    const { hits } = run(
+      { 'domain/barrel.ts': "export type { Stats } from 'node:fs'\n" },
+      ruleCoreNoNodeIo,
+    )
+    expect(hits).toHaveLength(1)
+    expect(hits[0].kind).toBe('export-from')
+  })
+
+  it('**假红对照**：执行面外的文件（适配器/呈现层）里的 IO 导入不得判红', () => {
+    // 本树实况：`adapters/**` 是**实现端口**（#249 §4 规则 4），它们可以碰平台；
+    // 真实执行面由 `corePurityFileSet` 给出（`domain`/`application` 全文 +
+    // 声明 `corePurity` 的新实现），适配器**不在**其中。
+    // 故这里用一份**缩小**的 coreFiles（只含 domain）跑同一条规则：
+    const { srcRoot: root } = makeTree({
+      'domain/ok.ts': 'export const a = 1\n',
+      'adapters/files/codec.ts': "import fs from 'node:fs'\nexport const probe = () => fs.existsSync\n",
+    })
+    const { files: scanned, facts } = buildModuleGraph(root)
+    const gateFiles = new Set(scanned.map((f) => path.relative(root, f).replace(/[\\/]+/g, '/')))
+    const ctx = {
+      srcRoot: root,
+      webRoot: tmpRoot,
+      gateFiles,
+      gateLayers: ['domain', 'application'],
+      // 执行面只含 domain（= 真实 `corePurityFileSet` 里适配器缺席的模拟）
+      coreFiles: new Set(['domain/ok.ts']),
+      layerCollisions: [],
+    }
+    expect(ruleCoreNoNodeIo.check(facts, ctx), '执行面外的 IO 导入不得判红（假红防线）').toEqual([])
+    // 而一旦把那个文件纳入执行面（同一规则、同一事实），它就必须判红 ——
+    // 这证明上一条的"绿"来自执行面口径，不是来自"判据看不见这个文件"。
+    const inFace = { ...ctx, coreFiles: new Set(['domain/ok.ts', 'adapters/files/codec.ts']) }
+    const hits = ruleCoreNoNodeIo.check(facts, inFace)
+    expect(hits).toHaveLength(1)
+    expect(hits[0].file).toMatch(/adapters\/files\/codec\.ts$/)
   })
 })
 

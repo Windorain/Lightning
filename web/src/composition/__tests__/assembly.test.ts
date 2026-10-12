@@ -46,6 +46,9 @@ import {
   resolveComposition,
 } from '../resolver'
 import { ALL_CAPABILITIES } from '@/application/commands'
+// A21（P11-E #262）：贡献方工厂的夹具（与既有 A21 端到端用例同源，只是提到 describe 作用域）
+import { DEFAULT_OBJECT_FACTORIES, objectData, sceneObject } from '@/domain/scene'
+import { ok } from '@/domain/errors'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 夹具
@@ -674,6 +677,190 @@ describe('A21 · extension-proof：经贡献接口新增文字类型与专用控
     expect(WORKBENCH_PROFILE.modules).toContain(M_TEXT_OBJECT_TYPE)
     expect(WIKI_PROFILE.modules).toContain(M_TEXT_OBJECT_TYPE)
     expect(HEADLESS_PROFILE.modules).toContain(M_TEXT_OBJECT_TYPE)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A21（P11-E #262 补链）：贡献新类型 → 公共选择 → 公共属性写 → 公共历史
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这一组补的是 A21 的**子句缺口**（#262 comment 6421 A21 行）
+ *
+ * B1 的定性：「「公共选择」「公共历史」是**类型无关**命令，`registerObjectType`
+ * 是公开 API（`rna-extension.test.ts:163-173` 已证扩展类型走同一注册路径）
+ * ⇒ 缺的只是一条「贡献新类型 → select → setProperty → undo」用例，承载面齐备」。
+ *
+ * ## ⚠️ 实测更正（P11-E 实施中发现，如实登记而非硬造判据）
+ *
+ * 本组**先按 B1 的口径写**，实测（探针，见 #262 P11-E 完工报）得到的事实是：
+ *
+ * | 环节 | 承载面实测 | 结论 |
+ * |---|---|---|
+ * | 贡献新类型 → `addObject` | `ExecutionInputs.objectFactories`（公开贡献落点） | ✅ 生效并记历史 |
+ * | 贡献新类型 → `select` | 选择命令**类型无关** | ✅ 生效 |
+ * | 贡献新类型 → `undo`/`redo` | 历史**随文档**、类型无关 | ✅ 生效 |
+ * | 贡献新类型 → `setProperty` | **`reduceCommand` 用的是模块级单例 `kernelPropertyRegistry()`/`kernelWritePorts()`**，二者由 `KERNEL_OBJECT_TYPES`/`KERNEL_OBJECT_TYPE_IDS` 在构造期固定 ⇒ 贡献类型**没有描述符、没有写端口** | ❌ **结构性拒绝**（`MissingTarget: property-not-registered`） |
+ *
+ * ⇒ B1 的"承载面齐备"对**选择/历史**成立，对**属性写**不成立：`composition` 的
+ * `contributes.objectTypes`（七类贡献之一）**没有**通向 `kernelPropertyRegistry()`
+ * 的缝。本组的处置是（不硬造）：① 把**成立的三段**做成正向判据；
+ * ② 把属性写的**机器**（公开注册缝 `createPropertyRegistry({objectTypes})` +
+ * `createPropertyWritePorts`）证明为可用；③ 把"单例注册表够不着贡献类型"这一
+ * 事实**登记成可核对的断言**（一旦有人接通贡献缝，它判红并要求同批升级本登记）。
+ */
+describe('A21 · 贡献新类型的公共链路（P11-E #262 补；含实测更正登记）', () => {
+  /** 一个**内核不认识**的扩展对象类型（id 不含点 ⇒ 限定式属性 ID `timer.name` 合法）。 */
+  const TIMER_TYPE = 'timer'
+
+  /** 扩展类型的 RNA 声明（与内置类型**同一条** `registerObjectType` 路径）。 */
+  function timerDecl() {
+    return {
+      id: TIMER_TYPE,
+      ownerKind: 'object' as const,
+      display: { labelKey: 'ext.timer', fallback: 'Timer' },
+      properties: [
+        { id: 'name', valueType: 'string', animatable: false, display: { labelKey: 'ext.timer.name', fallback: '名称' } },
+      ],
+    }
+  }
+
+  /** 贡献方给出的**工厂**（`ExecutionInputs.objectFactories`；核心不认识这个类型名）。 */
+  function timerFactories() {
+    return {
+      ...DEFAULT_OBJECT_FACTORIES,
+      [TIMER_TYPE]: (init: { objectId: string; dataId: string; name?: string }) =>
+        ok({
+          object: sceneObject({
+            id: init.objectId,
+            type: TIMER_TYPE,
+            dataId: init.dataId,
+            ...(init.name === undefined ? {} : { name: init.name }),
+          }),
+          data: objectData(init.dataId, { kind: 'annotation' as const, shape: 'text' as const, text: 't' }),
+        }),
+    }
+  }
+
+  it('① 贡献 → `addObject`：新类型可建、历史记它（不改核心任何分支）', async () => {
+    const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
+    const state = openDocumentState('doc1', 'ctx1')
+    const env = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never }
+    const t = reduceCommand(state, { kind: 'addObject', contextId: 'ctx1', objectType: TIMER_TYPE, name: 'T' }, env)
+    expect(t.status, '贡献类型必须能建出来').toBe('applied')
+    if (t.status !== 'applied') return
+    const doc = t.state.docs['doc1']!
+    const obj = Object.values(doc.scene.objects)[0]!
+    expect(obj.type, '对象类型就是贡献方给的那个字符串').toBe(TIMER_TYPE)
+    expect(doc.history.past.map((h) => h.label), 'ADD 记一条历史（后续 undo 的对象）').toContain('T')
+    // 负对照：**撤回工厂** ⇒ 显式 `UnsupportedOperation`（不静默建一个别的类型）
+    const noFactory = reduceCommand(state, { kind: 'addObject', contextId: 'ctx1', objectType: TIMER_TYPE }, { capabilities: ALL_CAPABILITIES })
+    expect(noFactory.status).toBe('rejected')
+    if (noFactory.status === 'rejected') expect(noFactory.error.code).toBe('UnsupportedOperation')
+  })
+
+  it('② 公共选择：`select` 命令对贡献类型**类型无关**地生效', async () => {
+    const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
+    const env = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never }
+    const added = reduceCommand(openDocumentState('doc1', 'ctx1'), { kind: 'addObject', contextId: 'ctx1', objectType: TIMER_TYPE, name: 'T' }, env)
+    expect(added.status).toBe('applied')
+    if (added.status !== 'applied') return
+    const objectId = Object.keys(added.state.docs['doc1']!.scene.objects)[0]!
+    const sel = reduceCommand(added.state, { kind: 'select', contextId: 'ctx1', target: { kind: 'object', id: objectId } }, env)
+    expect(sel.status, '公共选择必须接受贡献类型的对象').toBe('applied')
+    if (sel.status !== 'applied') return
+    expect(sel.state.contexts['ctx1']!.selection.selected).toEqual([{ kind: 'object', id: objectId }])
+    // 点选**不记**文档历史（契约 §6：选择是上下文事实）
+    expect(sel.state.docs['doc1']!.history.past.map((h) => h.label)).toEqual(['T'])
+  })
+
+  it('③ 公共历史：贡献类型对象可被 `undo`/`redo`（历史随文档、类型无关）', async () => {
+    const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
+    const env = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never }
+    let st = openDocumentState('doc1', 'ctx1')
+    const added = reduceCommand(st, { kind: 'addObject', contextId: 'ctx1', objectType: TIMER_TYPE, name: 'T' }, env)
+    expect(added.status).toBe('applied')
+    if (added.status !== 'applied') return
+    st = added.state
+    const objectId = Object.keys(st.docs['doc1']!.scene.objects)[0]!
+
+    const undone = reduceCommand(st, { kind: 'undo', contextId: 'ctx1' }, env)
+    expect(undone.status, '撤销必须生效').toBe('applied')
+    expect(Object.keys(undone.state.docs['doc1']!.scene.objects), '撤销后贡献类型对象消失').toEqual([])
+    expect(undone.state.docs['doc1']!.history.future.length, '进入 redo 栈').toBe(1)
+
+    const redone = reduceCommand(undone.state, { kind: 'redo', contextId: 'ctx1' }, env)
+    expect(redone.status).toBe('applied')
+    expect(redone.state.docs['doc1']!.scene.objects[objectId]?.type, '重做后对象与类型都回来').toBe(TIMER_TYPE)
+  })
+
+  it('④ 属性写**机器**可用：经公开注册缝（`createPropertyRegistry({objectTypes})` + 写端口）写贡献类型', async () => {
+    // 这条证明的是"注册缝本身能承载贡献类型"（`rna-extension.test.ts:163-173` 的同一路径），
+    // 而**不是**"`reduceCommand` 已经支持它"——后者是下一条用例登记的事实。
+    const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
+    const { createPropertyRegistry } = await import('@/application/properties')
+    const { createPropertyWritePorts, applySetProperty } = await import('@/application/property-commands')
+    const { KERNEL_OBJECT_TYPES, kernelAccessOf, applyKernelPropertyValue } = await import('@/application/kernel-properties')
+    const { propertyRef, objectRef } = await import('@/domain/identity')
+    const env = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never }
+    const added = reduceCommand(openDocumentState('doc1', 'ctx1'), { kind: 'addObject', contextId: 'ctx1', objectType: TIMER_TYPE, name: 'T' }, env)
+    expect(added.status).toBe('applied')
+    if (added.status !== 'applied') return
+    const doc = added.state.docs['doc1']!
+    const objectId = Object.keys(doc.scene.objects)[0]!
+
+    // 公开注册缝：内置类型 + 贡献类型**同一条** `registerObjectType`/端口登记路径。
+    const registry = createPropertyRegistry({ objectTypes: [...KERNEL_OBJECT_TYPES, timerDecl()] })
+    expect(registry.descriptor(`${TIMER_TYPE}.name`), '贡献类型的属性描述符必须可解析').toBeDefined()
+    const ports = createPropertyWritePorts<typeof doc>()
+    ports.write(TIMER_TYPE, (state, ref, value) => applyKernelPropertyValue(state, ref, value))
+
+    const w = applySetProperty<typeof doc>({
+      registry,
+      ports,
+      state: doc,
+      command: { kind: 'setProperty', refs: [propertyRef(objectRef(objectId), `${TIMER_TYPE}.name`)], value: 'Z' },
+      env: { baseVersion: doc.version, currentVersion: doc.version },
+      access: kernelAccessOf(doc, 'ctx1', ALL_CAPABILITIES, true),
+    })
+    expect(w.outcome.status, '贡献类型的属性写必须被接受（同一套校验/端口机制）').toBe('applied')
+    if (w.outcome.status !== 'applied') return
+    expect(w.outcome.changes.changedProperties.map((r) => r.property)).toEqual([`${TIMER_TYPE}.name`])
+    expect(w.candidate.scene.objects[objectId]?.name).toBe('Z')
+    // 反空洞真：写**前**的值确实是 T（否则"写成 Z"可能只是本来如此）
+    expect(doc.scene.objects[objectId]?.name).toBe('T')
+  })
+
+  it('⑤ **实测更正登记**：`reduceCommand` 的 `setProperty` 对贡献类型**结构性拒绝**（贡献缝未接）', async () => {
+    // ## 这条断言守的是"已知缺口"，不是"期望行为"（它判红 = 缺口已被接通）
+    //
+    // 事实：`reduceSetProperty` 用模块级单例 `kernelPropertyRegistry()` 与
+    // `kernelWritePorts()`，二者在构造期固定到 `KERNEL_OBJECT_TYPES` ——
+    // `composition` 的 `contributes.objectTypes` 没有任何缝到达它们。
+    // ⇒ 贡献类型在**命令层**的属性写被结构化拒绝（不是静默丢弃、也不是写进别的类型）。
+    //
+    // ⚠️ 若本断言**判红**（即写成功了），说明有人把贡献缝接进了内核注册表 ——
+    // 那是能力升级：请同批把本条改成正向判据（"贡献类型经 reduceCommand 可写"）
+    // 并核销本登记（与 `artifact-host` 的 KNOWN_EMBED_RUNTIME_SEAM 同一手法）。
+    const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
+    const { propertyRef, objectRef } = await import('@/domain/identity')
+    const env = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never }
+    const added = reduceCommand(openDocumentState('doc1', 'ctx1'), { kind: 'addObject', contextId: 'ctx1', objectType: TIMER_TYPE, name: 'T' }, env)
+    expect(added.status).toBe('applied')
+    if (added.status !== 'applied') return
+    const objectId = Object.keys(added.state.docs['doc1']!.scene.objects)[0]!
+    const w = reduceCommand(
+      added.state,
+      { kind: 'setProperty', refs: [propertyRef(objectRef(objectId), `${TIMER_TYPE}.name`)], value: 'Z' },
+      env,
+    )
+    expect(w.status, '当前承载面：命令层的贡献类型属性写被拒（缺口登记；接通后本断言应判红）').toBe('rejected')
+    if (w.status !== 'rejected') return
+    expect(w.error.code).toBe('MissingTarget')
+    expect(w.error.params.reason).toBe('property-not-registered')
+    // 拒绝**零残留**：对象名与文档版本都没被写（不是"半途写了一半"）
+    expect(w.state.docs['doc1']!.scene.objects[objectId]?.name).toBe('T')
+    expect(w.state.docs['doc1']!.version.contentVersion).toBe(added.state.docs['doc1']!.version.contentVersion)
   })
 })
 

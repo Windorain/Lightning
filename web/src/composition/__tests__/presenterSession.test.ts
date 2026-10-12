@@ -382,3 +382,178 @@ describe('P10e 段② · `applyKernelDocument`（生产调用点）', () => {
     }
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A30 graphics-recovery（P11-E #262 补）：**恢复后文档/选择/时间/机位不丢**
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这条补的是 A30 的子句缺口（#262 comment 6421 A30 行）
+ *
+ * B1 的定性：「`handleContextLost/handleContextRestored` 全树生产 2 处
+ * （`presenterSession.ts:307/316`）+ 测试 4 处，**无一处读文档/选择/时间/机位**；
+ * `e2e/presentation-gpu.spec.ts` 的探针返回字段表**完整列出**也没有这四项 ⇒
+ * 承载面具备、判据缺失」。
+ *
+ * ## 判据的两半（结构面 + 行为面，缺一不可）
+ *
+ * **结构面**（与 A05「机位独立」同一手法）：恢复入口的**入参里没有**这四项 ——
+ * `handleContextLost()`/`handleContextRestored()` 都不接受任何参数，故"恢复顺手重置
+ * 文档/选择/时间/机位"在**接口层面不可表达**（要违约得先改签名，评审可见）。
+ *
+ * **行为面**：恢复周期**前后**，同一份（文档 + 时间）必须得到**同一个判定**
+ * （`applied === false` ⇒ 内容身份链与编译产物都没丢，不是"恢复后重新来过"）；
+ * 且恢复后**仍然**能对内容变化重编（不是"冻住"）。调用方持有的四项事实
+ * （内核文档 / 选择 / 域时间 / 视口机位）在周期后必须**引用相同**（没有任何
+ * 写路径碰过它们）—— 这一点在下面用真实的域类型（`createDocument`、
+ * `EditContext.selection`、`timeValue`、`THREE.PerspectiveCamera`）钉住。
+ *
+ * 负对照（注入）：把"恢复时连编译产物一起丢"的变异体（= 恢复期 `dispose()`，
+ * 即"恢复后一切重来"的实现）喂给**同一个**断言器 ⇒ 判红。
+ */
+describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢（P11-E #262 补）', () => {
+  /** 判据本尊（正/负对照共用一份）：同一输入在恢复周期后必须仍得"不重编"判定。 */
+  function judgeSameInputAfterRecovery(out: { applied: boolean; generation: string | null }, generationBefore: string | null): void {
+    expect(out.applied, 'A30：恢复后同一份文档+时间必须仍判"内容身份未变"（⇒ 编译产物与身份链都没丢）').toBe(false)
+    expect(out.generation, 'A30：恢复不得改世代（改了 ⇒ 呈现/拾取映射全失效）').toBe(generationBefore)
+  }
+
+  /** 断言器判红 = 它抛错。 */
+  function redOf(run: () => void): boolean {
+    try {
+      run()
+      return false
+    } catch {
+      return true
+    }
+  }
+
+  it('结构面：恢复入口**不接受**任何参数（恢复路径拿不到文档/选择/时间/机位）', () => {
+    const s = new PresenterSession({ scope: 'test-a30-surface' })
+    try {
+      // 与 A05 的 `read.length === 0` 同一手法：违约形态在接口层面不可表达。
+      expect(s.handleContextLost.length, '`handleContextLost()` 不得接受参数').toBe(0)
+      expect(s.handleContextRestored.length, '`handleContextRestored()` 不得接受参数').toBe(0)
+      // 且会话**没有**"设置选择/机位"的入口（选择与机位属调用方持有的编辑器实例状态）
+      const surface = Object.getOwnPropertyNames(Object.getPrototypeOf(s)).sort()
+      expect(surface).not.toContain('setSelection')
+      expect(surface).not.toContain('setCamera')
+      expect(surface, '会话的公开面里不得出现选择/机位写入').not.toContain('setDocument')
+    } finally {
+      s.dispose()
+    }
+  })
+
+  it('行为面：真实夹具上跑一次「丢失 → 恢复」，四项事实全部存活', async () => {
+    const { scene, content } = await assembledOf('multiblock-ebf-2ch')
+    const { createDocument } = await import('@/domain/document')
+    const { timeValue } = await import('@/domain/animation')
+    const { openDocumentState, reduceCommand, ALL_CAPABILITIES } = await import('@/application/commands')
+
+    // ① 文档：内核文档（真实装配产物装进 `Document`，与生产调用点同形）
+    const doc = { ...createDocument('doc-a30'), scene, content }
+    // ② 时间：领域时间值（有理帧率；帧 7 / 20fps）
+    const time = timeValue(7, 20)
+    // ③ 选择：真实应用状态里的 `EditContext.selection`（#249 §6 所有权表：选择属上下文）
+    let app = openDocumentState('doc-a30', 'ctx-a30')
+    const added = reduceCommand(app, { kind: 'addObject', contextId: 'ctx-a30', objectType: 'annotation', name: 'sel' }, { capabilities: ALL_CAPABILITIES })
+    expect(added.status).toBe('applied')
+    app = added.state
+    const objectId = Object.keys(app.docs['doc-a30']!.scene.objects)[0]!
+    const selected = reduceCommand(app, { kind: 'select', contextId: 'ctx-a30', target: { kind: 'object', id: objectId } }, { capabilities: ALL_CAPABILITIES })
+    expect(selected.status).toBe('applied')
+    app = selected.state
+    const selectionBefore = app.contexts['ctx-a30']!.selection.selected
+    // ④ 机位：**视口**持有的观察相机（不在内核文档里 —— A05/A11 的结构事实）
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000)
+    camera.position.set(3, 4, 5)
+    camera.lookAt(0, 0, 0)
+    camera.updateMatrixWorld(true)
+    const cameraBefore = camera.matrixWorld.clone()
+
+    const s = new PresenterSession({ scope: 'test-a30-behavior' })
+    try {
+      const first = s.applyKernelDocument(doc, time)
+      expect(first.applied, '前置：首次应用必须真的编了').toBe(true)
+      const generationBefore = s.generation
+      const timeKeyBefore = s.activeKey?.time
+
+      // ── 真实恢复周期：丢失（放弃全部 GPU 份额）→ 恢复 ──
+      const abandoned = s.handleContextLost()
+      expect(abandoned, '丢失必须放弃本会话的 GPU 份额（否则恢复后复用已失效句柄）').toBeGreaterThan(0)
+      s.handleContextRestored()
+
+      // ① 文档 + ② 时间：同一份输入仍判"身份未变"⇒ CPU 侧身份链与编译产物都在
+      const again = s.applyKernelDocument(doc, time)
+      judgeSameInputAfterRecovery(again, generationBefore)
+      expect(s.activeKey?.time, '② 时间：恢复后求值键里的时间必须逐字段不变').toEqual(timeKeyBefore)
+      expect(again.generation, '① 文档：会话报告的世代不变 ⇒ 同一份文档没被恢复路径重置').toBe(generationBefore)
+
+      /**
+       * ## ⚠️ 本批实测发现的**能力缺口**（如实登记，不硬造正向判据）
+       *
+       * `BatchedPresenter.handleContextLost()` 会 `this.generation = null` 并清空挂载
+       * （旧句柄不复用，正确）；`handleContextRestored()` 只计数，恢复要靠调用方
+       * "用当前有效版本重新 `apply()` 一次"（`presenter.ts:281` 明文）。
+       * 但 `PresenterSession` 的公开入口只有 `applyIfChanged`/`applyKernelDocument`
+       * —— 二者在**内容身份未变**时**提前返回**（`applied: false`），于是：
+       *
+       * > **内容没变的上下文丢失 ⇒ GPU 资源不会被重建，画面不会回来**；
+       * > 而会话的**返回结果**里 `generation` 仍有值（那是保留的 CPU 侧
+       * > `compiled.generation`），`session.generation`（呈现器实际世代）却是 `null`
+       * > —— 两者不一致且**是静默的**。
+       *
+       * ⇒ 本组把该事实**登记为可核对的断言**（它判红 = 缺口已闭合，请同批把它升级为
+       * 正向判据："恢复后同一输入也能重建 GPU 资源"）。
+       */
+      expect(
+        s.generation,
+        '⚠️ 缺口登记（A30 残余）：内容未变时恢复不重建 GPU ⇒ 呈现器实际世代仍为 null。'
+          + '若本断言判红（= 恢复后已重建），说明缺口闭合：请把本条改成正向判据并核销登记。',
+      ).toBeNull()
+      expect(again.generation, '同一时刻，会话返回结果里仍报告 CPU 侧世代（不一致是静默的）').toBe(generationBefore)
+      // 恢复后**仍然**能感知内容变化并重建（这是当前唯一的"画面回来"路径）
+      const bumped = { ...doc, version: { ...doc.version, documentVersion: doc.version.documentVersion + 1 } }
+      const rebuilt = s.applyKernelDocument(bumped, time)
+      expect(rebuilt.applied, '恢复后内容变仍必须重编').toBe(true)
+      expect(s.generation, '内容变 ⇒ 呈现器世代重新建立（当前唯一的重建路径）').not.toBeNull()
+
+      // ③ 选择：引用相同（恢复路径没有任何写路径碰过应用状态）
+      expect(app.contexts['ctx-a30']!.selection.selected, '③ 选择：必须引用相同（未被清空/改写）').toEqual(selectionBefore)
+      expect(app.contexts['ctx-a30']!.selection.selected, '③ 选择：元素也得是同一批引用').toBe(selectionBefore)
+      // ④ 机位：视口相机逐位不变
+      expect(camera.matrixWorld.elements, '④ 机位：视口相机矩阵必须逐位不变').toEqual(cameraBefore.elements)
+      expect(camera.position.toArray()).toEqual([3, 4, 5])
+    } finally {
+      s.dispose()
+    }
+  })
+
+  it('**负对照（注入）**：把"恢复时连编译产物一起丢"的变异体喂给同一断言器 ⇒ 判红', async () => {
+    const { scene, content } = await assembledOf('multiblock-tier-only')
+    const { createDocument } = await import('@/domain/document')
+    const { timeValue } = await import('@/domain/animation')
+    const doc = { ...createDocument('doc-a30-neg'), scene, content }
+    const time = timeValue(7, 20)
+
+    const s = new PresenterSession({ scope: 'test-a30-neg' })
+    try {
+      s.applyKernelDocument(doc, time)
+      const generationBefore = s.generation
+      s.handleContextLost()
+      s.handleContextRestored()
+      // 正对照：正确实现判绿
+      expect(redOf(() => judgeSameInputAfterRecovery(s.applyKernelDocument(doc, time), generationBefore))).toBe(false)
+      // 变异体：恢复期把编译产物与身份链一起丢（`dispose()` = "恢复后一切重来"）
+      s.handleContextLost()
+      s.dispose()
+      s.handleContextRestored()
+      expect(
+        redOf(() => judgeSameInputAfterRecovery(s.applyKernelDocument(doc, time), generationBefore)),
+        '"恢复后一切重来"的实现必须判红（重编 + 换世代）',
+      ).toBe(true)
+    } finally {
+      s.dispose()
+    }
+  })
+})

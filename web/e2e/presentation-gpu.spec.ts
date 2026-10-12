@@ -47,7 +47,7 @@ type ProbeModule = {
   runA18(count: number): Record<string, unknown>
   runA18Negative(count: number): Record<string, unknown>
   runA19(rounds: number): Record<string, unknown>
-  runA30(count: number): Promise<Record<string, unknown>>
+  runA30(count: number, envelope?: Record<string, unknown>): Promise<Record<string, unknown>>
   runA30Negative(count: number): Record<string, unknown>
   runKernelInputs(envelope: Record<string, unknown>): Promise<Record<string, unknown>>
 }
@@ -282,7 +282,8 @@ test.describe('P5 · A19 resource-release（真实 GL 下的显式计数平衡�
 test.describe('P5 · A30 graphics-recovery（真实 WEBGL_lose_context）', () => {
   test('真实上下文丢失/恢复：旧句柄不复用、重建后才可提交、恢复失败可重试', async ({ page }) => {
     await loadProbe(page)
-    const m = await callProbe<Record<string, any>>(page, 'runA30', [512])
+    // P11-E #262：传真实信封 ⇒ 会话面（文档/选择/时间/机位）四项也能被核对
+    const m = await callProbe<Record<string, any>>(page, 'runA30', [512, loadKernelEnvelope('multiblock-ebf-2ch')])
     console.log('[A30·实测] ' + JSON.stringify(m, null, 2))
     writeEvidence('a30-graphics-recovery.json', m)
 
@@ -307,6 +308,25 @@ test.describe('P5 · A30 graphics-recovery（真实 WEBGL_lose_context）', () =
     expect(m.failedPhase).toBe('failed')
     expect(m.failedRetryable).toBe(true)
     expect(m.retryWorks, 'A30：恢复失败后必须允许重试').toBe(true)
+
+    // ── P11-E #262 补：恢复后「文档 / 选择 / 时间 / 机位」四项不丢（真 Chromium + 真丢失） ──
+    // 四项都不是 `null` ⇒ 判据**真的跑过**（缺信封时探针返回 null，本断言会判红）
+    expect(m.sessionDetail, 'A30 会话面必须真的跑了（否则四项字段是没测过的空话）').not.toBeNull()
+    expect(m.sessionDetail.firstApplied, '前置：会话面首次应用必须真的编了').toBe(true)
+    expect(m.sessionDocPreserved, 'A30：恢复后**文档**不丢（同一输入仍判身份未变、会话报告世代不变）').toBe(true)
+    expect(m.sessionSelectionPreserved, 'A30：恢复后**选择**不丢（EditContext 选择引用不变）').toBe(true)
+    expect(m.sessionTimePreserved, 'A30：恢复后**时间**不丢（求值键的时间逐字段不变）').toBe(true)
+    expect(m.sessionCameraPreserved, 'A30：恢复后**机位**不丢（视口相机矩阵逐位不变）').toBe(true)
+    // ⚠️ 缺口登记（本批实测发现，非 B1 所记）：
+    // 内容未变时"恢复"**不重建 GPU 资源**（`applyIfChanged` 在身份未变时提前返回，
+    // 而 `handleContextLost()` 已把呈现器实际世代置 null）⇒ 画面不会自己回来，
+    // 只有内容再变一次才重建。下面两条把该事实钉成可核对读数：
+    // 若第一条判红（= 恢复后已重建），说明缺口闭合 —— 请把它升级为正向判据并核销登记。
+    expect(
+      m.sessionGpuRebuiltAfterRestore,
+      '⚠️ A30 缺口登记：内容未变时恢复不重建 GPU（实际世代仍 null）。判红 ⇒ 缺口已闭合，请升级本登记。',
+    ).toBe(false)
+    expect(m.sessionGpuRebuiltAfterContentChange, '对照：内容变一次之后必须重建（当前唯一的重建路径）').toBe(true)
   })
 
   test('负对照：只 resize 而不重建归属资源 ⇒ 判红', async ({ page }) => {
