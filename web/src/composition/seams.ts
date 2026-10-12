@@ -326,6 +326,59 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     exitCondition:
       '`src/operators/builtin/docLifecycleOperators.ts` 的 `adoptDocumentIntoKernel` 调 `captureFidelity` 构造记录，且 `src/composition/kernelProjection.ts` 的 `KernelProjectionInput.fidelityFields` 有生产调用方（记录据它写回产物），使"保存 → 再打开"保留未知顶层字段；届时删除本条登记。',
   }),
+  /**
+   * P10f C′2（#301）登记：**侧表写面仍落 legacy**（本批的显式暂存）。
+   *
+   * ## 为什么必须登记（而不是只在汇报里说"这部分没迁"）
+   *
+   * C′2 把"文档内编辑"迁到内核（`annotationOperators` 三处），但**并非全部**：
+   * 有两类编辑内核**尚无对应写面** ⇒ 仍走 legacy。按 #171
+   * 「阶段间暂存的未迁移路径必须有负责人和退出阶段」，它们必须有可核对的出口。
+   *
+   * ## 两类各差什么（实测，不是"还没做"）
+   *
+   * ### (a) 逐格说明（tooltip 侧表）
+   * `operators/builtin/metaEditOperators.ts` 写的是 `doc.tooltipPalette` +
+   * `doc.cellTooltipGrid` —— **两个平行数组 + 下标配对**的侧表结构。
+   * 内核 `DocumentContent` 的 `cellContent` 用的是**单表 + 键编码**
+   * （`domain/cellContent` 的 `cellContentKeyOf`），两者**形状不同**。
+   * 迁移需要一次"侧表 → 键表"的表示转换 + 对应用户可撤销的写命令
+   * —— 那是**新的承载面设计**，不是接线。
+   *
+   * ### (b) 注解的字段写面（`locked` / 几何 / 其余）
+   * 内核注解对象类型的属性集实测为 `name`/`visible`/transform/`text`
+   * （`application/kernel-properties.ts:162-172`），而写端口
+   * `editors/property-writers#writeAnnotationProperty` **只实现 `text` 与分量写**。
+   * ⇒ C′2 的 `annotationPatchCommand` 只迁 `title`；`locked`/几何等
+   * **整体回落 legacy**（刻意不部分写：部分写会让用户看到"改了一半"；
+   * 硬凑成 `setProperty` 会落到 `default: UnsupportedOperation` ⇒ 命令被拒
+   * ⇒ 调用点误判"未装配"而**二次写 legacy**）。
+   *
+   * ## 为什么本批不顺手扩
+   *
+   * (a) 要新设计承载面，(b) 要扩写端口 + 补描述符 —— 两者都会让本批从
+   * "读面/写面迁移"扩张成"承载面设计"，而那正是 C′1 期裁定"归 C′2 的写面批
+   * 更自然"时**没有**授权的东西（Lead #250 comment 5960 的范围是
+   * "9 处编辑走内核命令 + 渲染读改分流"，不含承载面扩张）。
+   */
+  Object.freeze({
+    id: 'side-table-write-legacy-track',
+    files: Object.freeze([
+      'src/operators/builtin/metaEditOperators.ts',
+      'src/operators/builtin/annotationOperators.ts',
+      'src/application/kernel-properties.ts',
+      'src/editors/property-writers.ts',
+    ]),
+    newTrack:
+      '内核写面（`addObject`/`deleteObject`/`setProperty` + `applyKernelPropertyValue`）承载注解对象的增删改；C′2 已迁：注解**新建/删除**与 **`title`** 字段写（`annotationOperators` 经 `Context.submitContentEdit`，内核写 + 全保真投影回 legacy）。',
+    oldTrack:
+      '两类编辑仍落 legacy：(a) 逐格说明经 `metaEditOperators` 写 `tooltipPalette`/`cellTooltipGrid` 侧表（内核无对应命令，且内核 `cellContent` 是"单表 + 键编码"的**不同形状**）；(b) 注解 `locked`/几何等字段经 `annotationOperators` 的回落分支写 legacy（内核写端口只实现 `text`）。',
+    blocker:
+      '(a) 需要"侧表 → 单元格内容键表"的表示转换设计 + 可撤销的写命令，属**承载面新增**而非接线；(b) 需要扩 `writeAnnotationProperty` 的写入分支与 `KERNEL_OBJECT_TYPES` 的注解属性描述符（`locked`/几何）。两者都超出《P10f C′2 写路径分派设计》（附件 1670）的核定范围。',
+    owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
+    exitCondition:
+      '`src/operators/builtin/metaEditOperators.ts` 不再 import `ctx.getDoc()`（逐格说明改写内核单元格内容），且 `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand` 不再有"未承载字段即回落"的分支（`locked`/几何已在 `writeAnnotationProperty` 有写端口）；届时删除本条登记。**执行批次：#301 子批 D 的 D0 段** —— 理由是"逐格说明写面是 D 的前置"：`metaEditOperators` 留 legacy ⇒ 它仍是 `getDoc` 消费者 ⇒ **D 批的终删闭不了合**。（我第一版把 owner 写成 `P11`，被 `boundary-scan.test.ts` 的"owner 必须是已登记真实批次且职责匹配"闸门**当场判红** —— 闸门是对的：P11 是审计批，不做迁移，把功能迁移挂到审计批名下等于 seam 永无退出。）',
+  }),
 ])
 
 /** 按 id 取登记项（未登记返回 `undefined`，由调用方决定是缺口还是缺陷）。 */
