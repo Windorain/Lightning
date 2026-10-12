@@ -7,8 +7,9 @@
 import type { Context } from '@/runtime/context'
 import type { MaterialQueryItem, BlockTypeStat } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
+// #301 P10f C′1（N4）：注解/材质的读面形状来自内核读面（不再依赖旧 Annotation 联合）。
+import type { KernelAnnotationView } from '@/runtime/annotationRead'
 import type { Frame } from '@/render/schema/types'
-import type { Annotation } from '@/render/data/annotationTypes'
 import {
   scenePickAllFromPointer,
   pickAtPointer,
@@ -27,10 +28,24 @@ import {
 import type { PartRecord } from '@/pure/partTypes'
 import { resolvePartMaskGeometry, type PartMaskGeometry } from '@/pure/partMask'
 
-function readAnnotations(ctx: Context): Annotation[] {
-  const doc = ctx.getDoc().value
-  if (!doc) return []
-  return (doc.annotations ?? []) as Annotation[]
+/**
+ * 当前注解集（供 `scenePick` 的盒拾取）。
+ *
+ * #301 P10f C′1（N4 字段完备处）：改走**内核注解读面**。
+ *
+ * ## 为什么这里可以同义替换（字段需求**实测**）
+ *
+ * 唯一消费者 `render/interaction/scenePick.ts` 只读
+ * `id` / `type` / `visible` / `min` / `max`（`:194-197`、`:298-306`，其中
+ * `isPickableBox` 已把该结构子集写成类型）—— 全部由内核承载
+ * （字段表见 `runtime/annotationRead`）。
+ *
+ * ⚠️ 内核未装配（GF-16 = false）时读面返回**空表**：此时内核侧确实没有可读的注解，
+ * 而"回落读 legacy"会让来源再次不可判（D8 同型）。调用方若要区分
+ * "没有注解"与"内核没装"，问 `ctx.hasAdoptedContent()`。
+ */
+function readAnnotations(ctx: Context): KernelAnnotationView[] {
+  return [...ctx.kernelAnnotations()]
 }
 
 function viewportSlot(ctx: Context, regionId?: string) {
@@ -199,42 +214,36 @@ export function currentFrameKey(ctx: Context): number {
   return doc?.frame(i)?.index ?? i
 }
 
-/** 列出所有材质及其纹理 dataURL */
+/**
+ * 列出所有材质及其纹理 dataURL。
+ *
+ * #301 P10f C′1（N4 字段完备处）：改走**内核材质读面**（`ctx.kernelMaterials()`）。
+ *
+ * ## 两处字段适配的机械依据（不是"看着像"）
+ *
+ *  1. **`textureBlobIndex` → 内联 `payload`**：legacy 是"调色板条目里的下标 +
+ *     `textureBlobs` 旁表"两级间接；内核把字节**内联在资源上**（`ContentResource.payload`）
+ *     ⇒ 读面直接给出 data URL，本函数不再需要旁表与下标。
+ *  2. **`locator` → `ref.url`**：语义同为"资源位置"（`ResourceRef` 明文说它
+ *     "**仅**用于取回，不参与身份"）。
+ *
+ * data URL 的补前缀规则与 legacy **逐字相同**（已在读面内实现：
+ * 已是 `data:` 的原样返回，否则补 `data:image/png;base64,`）——
+ * 那条判断不能省，否则二次加前缀会产出坏 URL。
+ */
 export function listMaterials(ctx: Context): MaterialQueryItem[] {
-  const doc = ctx.getDoc().value
-  if (!doc) return []
-  const palette = doc.materialPalette as any[] | undefined
-  if (!palette?.length) return []
-  const blobs = doc.textureBlobs as Record<string, unknown> | undefined
-
-  function getBlob(index: number): string | null {
-    if (!blobs) return null
-    const key = String(index)
-    const b = blobs[key]
-    if (typeof b !== 'string') return null
-    const t = b.trim()
-    if (t.startsWith('data:')) return t
-    return `data:image/png;base64,${t}`
-  }
-
-  return palette.map((entry: any, i: number) => {
-    const idx = entry.textureBlobIndex
-    const dataUrl = (typeof idx === 'number' && Number.isFinite(idx))
-      ? getBlob(Math.floor(idx))
-      : null
-    return {
-      materialId: String(i),
-      kind: entry.kind ?? 'static16',
-      blend: entry.blend,
-      locator: entry.locator,
-      emissive: entry.emissive,
-      animation: entry.animation,
-      textureDataUrl: dataUrl,
-      atlas: entry.atlas,
-      linear: entry.linear,
-      useMipmaps: entry.useMipmaps,
-    }
-  })
+  return ctx.kernelMaterials().map((m) => ({
+    materialId: m.materialId,
+    kind: (m.kind ?? 'static16') as MaterialQueryItem['kind'],
+    blend: m.blend as MaterialQueryItem['blend'],
+    locator: m.locator as MaterialQueryItem['locator'],
+    emissive: m.emissive as MaterialQueryItem['emissive'],
+    animation: m.animation as MaterialQueryItem['animation'],
+    textureDataUrl: m.textureDataUrl,
+    atlas: m.atlas as MaterialQueryItem['atlas'],
+    linear: m.linear as MaterialQueryItem['linear'],
+    useMipmaps: m.useMipmaps as MaterialQueryItem['useMipmaps'],
+  }))
 }
 
 /** 当前帧按 materialId 统计方块数量 */

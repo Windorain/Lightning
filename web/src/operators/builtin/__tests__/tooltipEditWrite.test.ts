@@ -166,6 +166,7 @@ describe('#80 算子层：缺 tooltipPalette 的文档上写入逐格说明', ()
 function makePanelCtx(initialDoc: unknown) {
   const docRef = ref(initialDoc)
   const frameRef = ref(0)
+  const tickRef = ref(0)
   const items = ref<unknown[]>([])
   const ctx = {
     getDoc: () => docRef,
@@ -184,6 +185,9 @@ function makePanelCtx(initialDoc: unknown) {
     // #301 A′：生产侧改用 `Context.setDocument`（唯一写入口）。替身只需
     // 复刻"写 legacy"那一半；镜像半边由 `p10fDocumentLifecycle.test.ts` 把守。
     setDocument: (d: unknown) => { docRef.value = d as never },
+    // #301 C′1（N9）：`TooltipEditorPanel` 的重读信号从"文档身份"改为
+    // **内容重读**（宽信号）—— 原地改 tooltip 侧表也要刷新，故替身须提供它。
+    getContentRefreshTick: () => tickRef,
     main: { replaceDoc: (d: unknown) => { docRef.value = d } },
   }
   return { ctx, items }

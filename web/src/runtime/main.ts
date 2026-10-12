@@ -84,6 +84,25 @@ export class Main {
    */
   readonly contentRefreshTick = ref(0)
 
+  /**
+   * **文档身份计数**（#301 P10f C′1）：**只在** `replaceDoc`（换文档）时自增。
+   *
+   * ## 为什么它与 `contentRefreshTick` 必须并存（实测口径）
+   *
+   * | 信号 | 自增点 | 语义 |
+   * |---|---|---|
+   * | `contentRefreshTick` | `replaceDoc` **与** `requestContentRefresh` | "内容**可能**变了，请重读"（超集） |
+   * | `documentRevision` | **仅** `replaceDoc` | "**换了一份文档**"（窄） |
+   *
+   * 有的消费者要的是窄的那一个：`EmbedViewport.vue` 换文档后要**重置相机自动初始化**
+   * （`didInitCamera = false`），而原地编辑（`requestContentRefresh`，例如移动方块）
+   * **不应**把机位重置 —— 用宽信号会让用户编辑到一半机位跳回。
+   *
+   * ⇒ 两者都留，各自对应一类事实。这条区分是 C′1 实测出来的
+   * （N9 的 6 处消费者并非同一种信号，详见完工报的逐处表）。
+   */
+  readonly documentRevision = ref(0)
+
   readonly registries: MainRegistries
   /**
    * 逻辑相机存储（**按键动态分配**；#282 P10b）。
@@ -164,6 +183,21 @@ export class Main {
     this.doc.value = doc
     // 文档引用变了，呈现层需重读内容（这是"内容可能变了"的请求，不是判定）
     this.contentRefreshTick.value += 1
+    // #301 P10f C′1：**文档身份**计数（只在"换文档"时走这里 —— `replaceDoc` 是
+    // 文档替换的**唯一**写点，由 A′ 的 AST 白名单把守）。
+    //
+    // ## 为什么需要它（而不是复用 `contentRefreshTick`）
+    //
+    // `contentRefreshTick` 有**两个**自增点：本方法与 `requestContentRefresh()`
+    // （原地修改后请求重读）。故它是一个**超集**信号：它变了不代表文档换了。
+    // 而有的消费者要的恰是"文档换了"这一位事实：
+    //
+    // | 消费者 | 想要的信号 | 用 tick 的后果 |
+    // |---|---|---|
+    // | `EmbedViewport.vue` 的相机重初始化 | **仅**换文档 | 原地改内容也会重置相机 ⇒ 编辑中机位跳回 |
+    //
+    // ⇒ 两者都保留：`documentRevision` = "换文档"（窄），`contentRefreshTick` = "内容可能变了"（宽）。
+    this.documentRevision.value += 1
   }
 
   /**

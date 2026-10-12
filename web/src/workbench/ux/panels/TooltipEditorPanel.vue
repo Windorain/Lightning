@@ -43,7 +43,8 @@ function loadValue(): void {
 }
 
 watch(() => blockRef.value, () => { loadValue() }, { immediate: true })
-watch(() => props.ctx.getDoc().value, () => { if (!focused.value) loadValue() })
+// #301 P10f C′1（N9）：宽信号（内容重读）—— tooltip 侧表可能被原地改。
+watch(() => props.ctx.getContentRefreshTick().value, () => { if (!focused.value) loadValue() })
 
 let timer: ReturnType<typeof setTimeout> | undefined
 

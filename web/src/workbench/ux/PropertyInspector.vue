@@ -58,7 +58,8 @@ const version = ref(0)
 /** 重算模型：订阅文档、结构纪元、选中集、悬停与工具设置。 */
 watch(
   () => [
-    props.ctx.getDoc().value,
+    // #301 P10f C′1（N9）：宽信号（内容重读）—— 原地编辑也要重算模型。
+    props.ctx.getContentRefreshTick().value,
     props.ctx.getContentRefreshTick().value,
     props.ctx.getSelection().items.value,
     props.ctx.getHoveredAnnotationId().value,

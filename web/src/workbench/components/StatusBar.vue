@@ -16,7 +16,18 @@ const log = ctx.log
 /** 本实例的翻译（#259 A33：消费本实例语言，无模块级全局读源）。 */
 const t = ctx.t
 
-const frameCount = computed(() => ctx.getDoc().value?.frameCount ?? 0)
+// #301 P10f C′1（D8 修复 + #31）：帧数走**唯一读取面** `ctx.frameDeclarations()`，
+// 与 `composition/useKernelFrameLoop` 的 FrameSource **同一个函数**。
+//
+// ## 为什么原来那行是一个真实缺陷（不是"风格问题"）
+//
+// 原写法 `ctx.getDoc().value?.frameCount ?? 0` 直读 legacy，而帧循环读内核 ——
+// 装配失败时内核是**空文档**⇒ 帧循环报 0，状态栏报 N ⇒ **同一时刻两个读数不一致**。
+// 那是 #249 §19.9 诊断一致性要防的形态（用户看到"帧 0"但状态栏说"共 432 帧"）。
+//
+// 收敛后两侧必然一致：装配成功 ⇒ 都用内核帧轴；否则 ⇒ 都用 legacy。
+// ⚠️ 该读面**不经** `getDoc()`（它内部按 GF-16 分流），故本行的旧符号一并消失。
+const frameCount = computed(() => ctx.frameDeclarations().count)
 const hasWorldMultiFrame = computed(() => frameCount.value > 1)
 
 // B5 #7：旧实现是 `isWikiHostProfile()`（组件在问宿主名 —— #249 §10 明文禁止）。

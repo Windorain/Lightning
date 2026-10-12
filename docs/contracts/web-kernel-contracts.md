@@ -324,6 +324,92 @@ P10f **B′** 完成 **N1 的 29 处**替换（`ctx.hasLoadedDocument()`，含 2
 | **N3 网格读（14 处）** | 读面已做出且**逐格同义**（三类判据全绿），但接线实测出**两处语义面不同义**：① `moveTranslate.ts:313/330` 的 `grid.moveBlock(...)` 是**写**路径，而投影 `Grid` **每次新建**（实测 `gridOf(doc,0) !== gridOf(doc,0)`，经它写入后改动**丢失**）；② `NewScene`/`pushDocUndo`/模态取消等 6 条路径只调 `setDocument`、**不装配内核** ⇒ 内核读到**上一份文档**的网格（实测 legacy 0 格 vs 内核 2 格）。两者都需 **(a) 区分网格读/写面**、**(b) 内容同步** ⇒ 归 C′。 |
 | **N6 帧轴（3 处）** | `#30`（`useKernelFrameLoop.ts`）是**死代码**，按裁决 (a) 删除（零行为变化）；`#32`（`useViewportRuntime.ts`）的 legacy 兜底生产不可达，替换为 `?? 0`；`#31`（`StatusBar.vue`）**暂缓** —— 装配失败时替换会让状态栏帧数 N→0（用户可见回归），随 D8/GF-16 修复批归 C′。 |
 
+### 2.4 装配成功读面与帧声明（GF-16，P10f C′1 新增）
+
+```ts
+interface KernelSession {
+  /** 内核承载的**就是**当前文档的装配产物吗（装配成功）。 */
+  hasAdoptedContent(): boolean
+}
+
+interface Context {
+  /** 装配成功读面的消费入口；内核缺席 ⇒ `false`（没有内核就没有装配）。 */
+  hasAdoptedContent(): boolean
+  /**
+   * **帧声明的唯一读取面**（D8 修复的落点）。
+   * 装配成功 ⇒ 内核帧轴；否则 ⇒ 回落 legacy。`source` 让"走了哪条分支"可观测。
+   */
+  frameDeclarations(): {
+    readonly count: number
+    readonly durationsMs: readonly number[]
+    readonly source: 'kernel' | 'legacy'
+  }
+  /** **文档身份**计数：只在换文档时变（窄信号；`contentRefreshTick` 是宽信号）。 */
+  getDocumentRevision(): Ref<number>
+}
+```
+
+**为什么 GF-16 不能由 GF-15 兼任（D8 的根因）**
+
+| 读面 | 回答的问题 | 由谁置位 |
+|---|---|---|
+| `hasLoadedDocument()`（GF-15） | "用户**有**一份文档吗"（存在性） | `Context.setDocument`（写 legacy 时镜像） |
+| `hasAdoptedContent()`（GF-16） | "内核里的**就是**那份文档吗"（装配成功） | `adoptDocument`（**仅**装配成功时） |
+
+两者**不等价**，而 D8 正是那段缝：
+
+```
+setDocument(doc)     → GF-15 = true    （有文档）
+adoptLoadedDocument  → 可能失败（内核不支持该形态，如实降级）
+  成功 ⇒ GF-16 = true
+  失败 ⇒ GF-16 = false，但 GF-15 仍 true
+```
+
+装配失败时内核文档是**构造期的空文档**；任何"读内核"的消费者读到**空**，
+而 legacy 照常渲染、**不报错**。⇒ 两个事实必须有两个读面
+（与 `domain/cellContent` 判据 3「字段缺席 ≠ 空值」同一口径）。
+
+**必须成立**
+
+1. **`markLoaded` 必须一并**清** GF-16**（C′1 实测更正；我第一版写反了）：
+   `markLoaded` 表达"有了一份文档"，而"有"**不蕴含**"内核里的就是它"。
+   `setDocument` 会调 `markLoaded` 而**不** adopt（`NewScene`、注解编辑等 13 条路径）
+   ⇒ 若不清，所有"读内核"的面都返回**上一份**文档的注解/材质/帧轴。
+   实测：装载 A → `setDocument(空文档)` ⇒ 读面仍给 A 的内容。
+   顺序是语义的一部分：`adoptDocument` **先** `markLoaded`、**再** `markContentAdopted`。
+2. **`markUnloaded` 同样清 GF-16**：卸载后"内核里的就是那份文档"不再成立。
+3. **D8 的回落必须可被注入判据证明**：判据走**生产** `adoptLoadedDocument` 喂
+   内核真的不支持的形态（`frames` 缺失且非多方块 ⇒ `UnsupportedOperation`），
+   断言此时帧数**回落 legacy**（不是 0）。只断言"装配成功时读到 N"是**假绿** ——
+   它无法区分"修好了"与"缺陷仍在"。
+4. **判定提成纯函数**（`runtime/frameDeclarations#resolveFrameDeclarations`、
+   `runtime/sideTableResolution#resolveSideTable`）：`Context` 只取事实。
+   理由 —— 判据必须能注入装配失败，而 `Context` 需六件外壳才构造得起来。
+5. **帧数的两个消费者必须读同一个函数**（`frameDeclarations()`）：D8 的原形态
+   正是"帧循环问文档存在、状态栏直读 legacy"⇒ 两读数不一致（#249 §19.9）。
+6. **侧表分流是**对称**的**（`kernelAnnotations()` / `kernelMaterials()`）：
+   装配成功 ⇒ 内核为权威，否则 ⇒ **legacy 为权威**。
+   ⚠️ "未装配 ⇒ 返回空表"是**缺陷**，不是诚实：注解编辑路径会清 GF-16，
+   返回空表会让 `scenePick` 拿不到**原有**注解（用户新建一条后原有注解全部失去拾取），
+   材质面板整片变空。实测：legacy 2 条 / 内核读面 0 条。
+7. **`null` 与 `[]` 在分流输入上不可互换**：`null` = "没有可用来源"（⇒ 回落），
+   `[]` = "这一侧确实空了"（⇒ 内核权威，空是真实答案）。把前者写成后者**就是** D8。
+8. **测试宿主不得复刻被测算法**（C′1 两轮空转的教训）：判据必须执行**生产实现本体**。
+   本批宿主用 `Object.create(Context.prototype)` 造真 `Context`（只注入 `main`/`kernel`）。
+   仅"调用了同名纯函数"不够 —— 宿主自己调它时，`Context` 的调用点仍未被覆盖
+   （实测：注入缺陷仍全绿）。
+
+**三种通知信号不可互换（C′1 实测分派）**
+
+| 信号 | 自增点 | 语义 | 消费者 |
+|---|---|---|---|
+| `getDocumentRevision()` | **仅** `replaceDoc` | "**换了一份文档**"（窄） | `EmbedViewport.vue`（换文档才重置相机自动初始化） |
+| `getContentRefreshTick()` | `replaceDoc` **与** `requestContentRefresh` | "内容**可能**变了"（宽） | 材质/属性/注解/tooltip 面板（原地编辑也要刷新） |
+| `hasLoadedDocument()` | `setDocument` 镜像 | "无 → 有"（**跃变**） | `WorkbenchViewport.vue`（只在该跃变时重装，避免与 DRW 订阅竞争） |
+
+⚠️ 用宽信号替换窄信号会让"原地编辑时相机跳回"（用户可见回归）；
+单调计数器**表达不出**跃变（R-WK-08 裁决点名此例）。
+
 
 ---
 
@@ -711,6 +797,7 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
 | GF-2 | P0 (#251) | §7 `ModuleDecl` | #249 §10 只说"provides/requires/contributes"，未给 `contributes` 的子类清单 | 本契约按 §10 段落列举出七类；若 P8/P9 需要第八类，回 #250 补 |
 | GF-3 | P0 (#251) | §4 `EvaluationKey` | #249 §7 说"至少区分"六项但未给字段名与类型 | 本契约命名之；`time` 的 `TimeValue` 表示法（有理帧率）待 P4 落地时确认，若需改动条目结构回 #250 |
 | GF-15 | P10f (#301) | §2.3 文档装载状态 | 内核 `document()` 恒 defined（`openDocument` 无条件建文档）⇒ 「空文档」与「无文档」不可区分；而 legacy `getDoc().value` 6 处可为 null | 新增 `KernelSession.hasLoadedDocument()` 读面 + `Context.setDocument` 唯一写入口；本批只建读面并对齐，消费面替换归 B′ |
+| GF-16 | P10f (#301) | §2.4 装配成功读面 | 「有文档」（GF-15）与「内核里的就是那份文档」（装配成功）是**两个**事实，而 D8 把两者当成了一件事：帧源守卫测"文档存在"（恒真）⇒ 装配失败时读到**空帧轴（0）**，而注释声称的 legacy 回落**从未生效** | 新增 `KernelSession.hasAdoptedContent()` + `Context.frameDeclarations()` 唯一读取面（判定在纯函数 `runtime/frameDeclarations`）；D8 同批修复，判据含**装配失败注入** |
 
 > **文档维护备注（P10f A′ 实测）**：GF-4…GF-14 已由 #250 裁决并登记于该单评论，但**未回填本表**（本表仍停在 GF-1…GF-3）。本批只按裁决补入 GF-15；GF-4…GF-14 的回填归 #262 收口，避免在本批制造一次与裁决无关的大范围文档改动。
 
@@ -723,6 +810,8 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
 | v1 | 2026-10-10 | 首次冻结：`PropertyRef`/`EditorClient`/`CommandOutcome`/八项错误分类/`EvaluationKey`/模块声明/所有权表/缺口流程 | #249 §3–§7 §10 §14 §19；#250；#251 B3 |
 | v1.1 | 2026-10-12 | 新增 §2.3 文档装载状态读面（GF-15）：`KernelSession.hasLoadedDocument()` + `Context.setDocument` 唯一写入口 + 状态迁移表 + 与 `closeDocument` 的关系 | #250 comment 5731（R-WK-08 重切）；#301（P10f A′） |
 | v1.2 | 2026-10-12 | §2.3 补 `Context.hasLoadedDocument()` 消费入口（唯一写者不变量的机械证据）；登记 N1 29 处已替换、N3/N6 未做的机械理由 | #250 comment 5775（B′ 四项裁决）；#301（P10f B′） |
+| v1.3 | 2026-10-12 | 新增 §2.4 装配成功读面（GF-16）：`hasAdoptedContent()` + `frameDeclarations()` 唯一读取面 + 三种通知信号的不可互换表 + D8 修复的注入判据要求 | #250 comment 5861（R-WK-09 四项裁决）；#301（P10f C′1） |
+| v1.4 | 2026-10-12 | §2.4 补侧表读面（`kernelAnnotations`/`kernelMaterials`）的对称分流与 8 条"必须成立"；**更正 v1.3 的第 1 条**（`markLoaded` 必须清 GF-16，第一版写反了） | #250 comment 5880（N4 采 (a)）；#301（P10f C′1 尾段） |
 
 ---
 

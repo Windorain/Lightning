@@ -33,6 +33,16 @@ import { asReadOnlyDiagnostics } from '@/application/diagnostics'
 import type { ScreenRoot, RegionNode } from '@/runtime/screenRoot'
 import { REGION } from '@/runtime/regionIds'
 import type { KernelSession } from '@/runtime/kernelSession'
+// #301 P10f C′1：帧声明的**判定**提成纯函数（D8 的判据必须能注入装配失败，
+// 而 `Context` 的外壳六件套不该进测试）—— 本层只负责"取事实、交结果"。
+import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
+import { kernelAnnotationsOf, kernelMaterialsOf } from '@/runtime/annotationRead'
+import { resolveSideTable } from '@/runtime/sideTableResolution'
+import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotationRead'
+
+/** 空读面常量（eadonly 空数组：避免每次分配，且调用方不得改内联量）。 */
+const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
+import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 
 function embedUnavailable(name: string): never {
@@ -240,6 +250,219 @@ export class Context {
     return kernel.hasLoadedDocument()
   }
 
+  /**
+   * **内核是否承载"装配成功"的内容**（#301 P10f C′1；**GF-16** 读面）。
+   *
+   * ## 为什么需要它（D8 的根因）
+   *
+   * `hasLoadedDocument()`（GF-15）回答"**有**一份文档吗"；本读面回答
+   * "内核里的**就是**那份文档吗"。两者不等价，而 D8 正是那段缝：
+   *
+   * ```
+   * setDocument(doc)      → GF-15 = true    （有文档）
+   * adoptLoadedDocument   → 可能**失败**（内核不支持该形态，如实降级）
+   *   成功 ⇒ GF-16 = true
+   *   失败 ⇒ GF-16 = **false**，但 GF-15 仍为 true
+   * ```
+   *
+   * 装配失败时内核文档是**构造期的空文档**，故任何"读内核"的消费者会读到
+   * **空**（而不是 legacy 的真实内容）—— 而 legacy 照常渲染，**不报错**。
+   * 帧源那条路径上，它表现为"帧数变 0"（D8）。
+   *
+   * ## 为什么内核缺席时回落 `false`（与 `hasLoadedDocument` 不同）
+   *
+   * `hasLoadedDocument` 在内核缺席时回落 `main.doc`（存在性在 legacy 侧总能回答）；
+   * 而"装配成功"**在内核缺席时无法回答** —— 没有内核就没有装配。
+   * ⇒ 回落 `false`，使消费者走各自的 legacy 兜底分支（那正是"能力不回退"）。
+   *
+   * ⚠️ 刻意读 `this.main.doc` 之外**不引入**新写入面：本读面只读内核的
+   * 装配标记（`markContentAdopted` 仅由 `adoptDocument` 调用）。
+   */
+  hasAdoptedContent(): boolean {
+    const kernel = this.kernel
+    if (kernel === null) return false
+    return kernel.hasAdoptedContent()
+  }
+
+  /**
+   * **帧声明的唯一读取面**（#301 P10f C′1；D8 修复的落点）。
+   *
+   * ## 为什么必须是"一个"读面（而不是两处各写一遍同样的分流）
+   *
+   * 帧数有**两个**生产消费者：
+   *  - `composition/useKernelFrameLoop` 的 `FrameSource`（驱动帧时钟）；
+   *  - `workbench/components/StatusBar.vue`（显示"第 N 帧 / 共 M 帧"）。
+   *
+   * D8 的原形态正是"两处各自判断、判据不同"：帧循环问"文档存在吗"（恒真 ⇒ 读到 0），
+   * 而状态栏直读 legacy（读到 N）⇒ **同一时刻两个读数不一致**
+   * （#249 §19.9 诊断一致性要防的形态）。
+   *
+   * ⇒ 收敛成一处分流：**只要"装配成功"就以内核为权威，否则回落 legacy**。
+   * 两个消费者读同一个函数，于是"不一致"在结构上不可能发生。
+   *
+   * ## `source` 字段：让"回落是否发生"可观测
+   *
+   * 返回哪个来源是**可判定的**事实，不是内部实现细节 —— 诊断与测试都要能问
+   * "这一刻用的是内核还是 legacy"。把它藏起来会让 D8 那类缺陷无法被观测
+   * （原缺陷之所以活了很久，正是因为"读了 0"看起来只是一个正常数值）。
+   */
+  frameDeclarations(): {
+    readonly count: number
+    readonly durationsMs: readonly number[]
+    readonly source: 'kernel' | 'legacy'
+  } {
+    // ⚠️ **响应式依赖**（与 `hasLoadedDocument` 同一取舍，B′ 实测过代价）：
+    // 消费者里有 `.vue` 的 `computed`（`StatusBar.vue`），而模板重渲染只跟随
+    // 渲染期读到的响应式依赖。内核侧的装配标记是**普通字段**（Vue 追踪不到），
+    // 故这里先读一次 `main.doc`（`Ref`，且在**每一次**文档替换时变化）。
+    // 去掉这一读 ⇒ 装载后状态栏帧数不刷新（B′ 的 7 条 embed e2e 就是同型回归）。
+    const legacyDoc = this.main.doc.value
+    // 本方法只**取事实**；判定在纯函数里（理由：D8 的判据必须能注入装配失败，
+    // 而 `Context` 的外壳六件套不该进测试 —— 见 `runtime/frameDeclarations` 文件头）。
+    return resolveFrameDeclarations(this.kernelAdoptedFrames(), this.legacyFrames(legacyDoc))
+  }
+
+  /**
+   * 装配产物的帧声明；**`null` = 未装配成功**（GF-16）。
+   *
+   * ⚠️ 返回 `null` 而**不是** `{count: 0}`：两者语义不同 ——
+   * 前者是"没有装配产物可用"（⇒ 该回落 legacy），后者是"装配产物声明了 0 帧"
+   * （⇒ 内核权威，且 0 是真实答案）。把前者写成后者**就是 D8 的成因**。
+   */
+  private kernelAdoptedFrames(): { count: number; durationsMs: readonly number[] } | null {
+    const kernel = this.kernel
+    if (kernel === null) return null
+    if (!kernel.hasAdoptedContent()) return null
+    const kdoc = kernel.document()
+    if (kdoc === undefined) return null
+    const frames = kdoc.content.frameAxis.frames
+    return { count: axisFrameCount({ frames }), durationsMs: frameDurationsMs({ frames }) }
+  }
+
+  /** 旧文档的帧声明；`null` = 无旧文档。 */
+  private legacyFrames(
+    doc: RuntimeDocument | null,
+  ): { count: number; durationsMs: readonly number[] } | null {
+    if (doc === null) return null
+    const durations: number[] = []
+    for (let i = 0; i < doc.frameCount; i++) {
+      // `durationMs` 缺省按 0 如实给（与内核 `stripTimeline` 的回落同口径：
+      // 猜一个值会让"没声明时长"与"声明了 50ms"无法区分）。
+      durations.push(doc.frame(i)?.durationMs ?? 0)
+    }
+    return { count: doc.frameCount, durationsMs: durations }
+  }
+
+  /**
+   * **注解表读面**（#301 P10f C′1；N4 的字段完备部分）。
+   *
+   * 替代 `ctx.getDoc().value?.annotations`（`queries.ts:31` 供 `scenePick` 的盒拾取）。
+   *
+   * ## 本方法只**取事实**；**决定**在纯函数里
+   *
+   * 分流判定在 `runtime/sideTableResolution#resolveSideTable`。为什么提出来：
+   * 我第一版把判定内联在这里，而测试宿主**复刻**了那段 ⇒ 判据**空转**
+   * （实测：把它改成"永远返回空表"，测试仍全绿）。提出去之后测试判的是
+   * **生产代码本身**。这与 `frameDeclarations` 是同一处置。
+   *
+   * ## ⚠️ 为什么这里**必须**回落 legacy（本批实测抓出的自身缺陷）
+   *
+   * 我最初让本读面在"未装配"时返回空表（理由是"诚实"）。那是**错的**：
+   * `setDocument` 会清 GF-16，而**注解编辑路径**（`annotationOperators` 的
+   * clone+push+`setDocument`）正是"换了 legacy 但没装配内核" ⇒ GF-16=false
+   * ⇒ 若返回空表，用户新建一条注解后**连原有的注解也点不中**。
+   * 实测该形态：legacy 2 条 / 内核读面 0 条。
+   *
+   * ## 字段完备性（实测）
+   *
+   * 消费者 `render/interaction/scenePick.ts` 只读 `id`/`type`/`visible`/`min`/`max`，
+   * 全部由内核承载；字段级对比实测 **0 处不一致**（13 个字段逐个比对）。
+   */
+  kernelAnnotations(): readonly KernelAnnotationView[] {
+    // 响应式依赖（与 `frameDeclarations` 同一取舍：`.vue` 消费者需要它）。
+    const legacyDoc = this.main.doc.value
+    return resolveSideTable(this.kernelAdoptedAnnotations(), this.legacyAnnotations(legacyDoc)).rows
+  }
+
+  /**
+   * **材质资源表读面**（#301 P10f C′1）。
+   *
+   * 替代 `ctx.getDoc().value?.materialPalette` + `textureBlobs`
+   * （`queries.ts:204` 的 `listMaterials`）。字段适配的机械依据见
+   * `runtime/annotationRead#kernelMaterialsOf`。
+   *
+   * 分流与 `kernelAnnotations` **同一形态**（决定同样在 `resolveSideTable`）：
+   * **若不回落**，任何一次 `setDocument`（含注解编辑）都会让材质面板**变空**。
+   * 实测该形态：`listMaterials` 返回 0 条而 legacy 有 1 条。
+   */
+  kernelMaterials(): readonly KernelMaterialView[] {
+    const legacyDoc = this.main.doc.value
+    return resolveSideTable(this.kernelAdoptedMaterials(), this.legacyMaterials(legacyDoc)).rows
+  }
+
+  /**
+   * 内核侧注解行；**`null` = 未装配成功**（GF-16）。
+   *
+   * ⚠️ `null` 与 `[]` **不可互换**：前者是"没有可用来源"（⇒ 该回落 legacy），
+   * 后者是"装配产物里确实没有注解"（⇒ 内核权威，空是真实答案）。
+   * 把前者写成后者**就是**本批要修的那个错误。
+   */
+  private kernelAdoptedAnnotations(): readonly KernelAnnotationView[] | null {
+    const kernel = this.kernel
+    if (kernel === null) return null
+    if (!kernel.hasAdoptedContent()) return null
+    return kernelAnnotationsOf(kernel.document())
+  }
+
+  private kernelAdoptedMaterials(): readonly KernelMaterialView[] | null {
+    const kernel = this.kernel
+    if (kernel === null) return null
+    if (!kernel.hasAdoptedContent()) return null
+    return kernelMaterialsOf(kernel.document())
+  }
+
+  /** legacy 侧注解行；`null` = 无文档。字段同名，直接透传。 */
+  private legacyAnnotations(doc: RuntimeDocument | null): readonly KernelAnnotationView[] | null {
+    if (doc === null) return null
+    return (doc.annotations ?? []) as unknown as readonly KernelAnnotationView[]
+  }
+
+  /**
+   * legacy 侧材质行；`null` = 无文档。
+   *
+   * 就地适配 `materialPalette` + `textureBlobs`（下标旁表）⇒ 使读面**形状统一**
+   * （调用方不必知道两种来源）。data URL 的补前缀规则与旧 `listMaterials` **逐字相同**
+   * （已是 `data:` 的原样返回 —— 统一补前缀会产出坏 URL）。
+   */
+  private legacyMaterials(doc: RuntimeDocument | null): readonly KernelMaterialView[] | null {
+    if (doc === null) return null
+    const palette = doc.materialPalette as readonly Record<string, unknown>[] | undefined
+    if (palette === undefined || palette.length === 0) return EMPTY_MATERIAL_VIEWS
+    const blobs = doc.textureBlobs as Record<string, unknown> | undefined
+    const dataUrlOfIndex = (idx: unknown): string | null => {
+      if (typeof idx !== 'number' || !Number.isFinite(idx)) return null
+      const b = blobs?.[String(Math.floor(idx))]
+      if (typeof b !== 'string') return null
+      const trimmed = b.trim()
+      return trimmed.startsWith('data:') ? trimmed : `data:image/png;base64,${trimmed}`
+    }
+    return Object.freeze(
+      palette.map((entry, i) =>
+        Object.freeze({
+          materialId: String(i),
+          kind: (entry.kind ?? 'static16') as string,
+          blend: entry.blend,
+          locator: entry.locator,
+          emissive: entry.emissive,
+          animation: entry.animation,
+          textureDataUrl: dataUrlOfIndex(entry.textureBlobIndex),
+          atlas: entry.atlas,
+          linear: entry.linear,
+          useMipmaps: entry.useMipmaps,
+        }),
+      ),
+    )
+  }
   /**
    * **当前帧的网格** —— ⚠️ **本批撤回，未交付**（#301 P10f B′ 实测发现两处不同义）。
    *
@@ -467,6 +690,31 @@ export class Context {
   getContentRefreshTick(): Ref<number> {
     return this.main.contentRefreshTick
   }
+
+  /**
+   * **文档身份计数**（#301 P10f C′1）：**只在换文档**时变（窄信号）。
+   *
+   * ## 为什么它不是 `getContentRefreshTick` 的别名（实测口径）
+   *
+   * | 信号 | 自增点 | 语义 |
+   * |---|---|---|
+   * | `getContentRefreshTick()` | `replaceDoc` **与** `requestContentRefresh` | "内容**可能**变了"（超集） |
+   * | `getDocumentRevision()` | **仅** `replaceDoc` | "**换了一份文档**"（窄） |
+   *
+   * N9 的 6 处消费者**不是同一种信号**（C′1 逐处实测）：
+   *  - `EmbedViewport.vue` 要的是**窄**的：换文档才重置相机自动初始化；
+   *  - `MaterialGallery` / `PropertyInspector` / `AnnotationEditorPanel` /
+   *    `TooltipEditorPanel` 要的是**宽**的（内容重读），原地编辑也要刷新
+   *    ⇒ 它们改用 `getContentRefreshTick()`；
+   *  - `WorkbenchViewport.vue` 要的是**跃变**（无→有），由 GF-15 的
+   *    `hasLoadedDocument()` 的 `false→true` 表达。
+   *
+   * ⇒ 三种事实、三种读面。把 6 处一律换成 tick 会让"编辑中机位跳回"回归。
+   */
+  getDocumentRevision(): Ref<number> {
+    return this.main.documentRevision
+  }
+
   /**
    * **已删除**（P10 #261，退役 B5 #1 `raw-authority-object` 的
    * `getCurrentFrameIndex` 条目）：旧实现返回 `Ref<number>` —— 一个**可写**的

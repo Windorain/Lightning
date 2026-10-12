@@ -137,7 +137,12 @@ watch(loadStatus, (status) => {
   didInitCamera.value = true
   void ctx.getOperators().exec('OPERATOR_INIT_VIEWPORT_CAMERA', initCameraProps)
 })
-watch(() => ctx.getDoc().value, () => {
+// #301 P10f C′1（N9）：这里要的是**窄**信号 —— "**换了一份文档**"。
+// 原来 watch `getDoc().value`（文档 Ref 身份），等价物是 `getDocumentRevision()`
+// （只在 `replaceDoc` 自增）。
+// ⚠️ **不能**换成 `getContentRefreshTick()`：那一个原地编辑（`requestContentRefresh`，
+// 例如移动方块）也会自增 ⇒ 用户编辑到一半机位被重置回初始视角。
+watch(() => ctx.getDocumentRevision().value, () => {
   didInitCamera.value = false
 })
 
