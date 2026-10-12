@@ -617,16 +617,21 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
           })),
         }
       : null
-    const decl = ctx.frameDeclarations()
+    // ⚠️ 名字**不可**再用 `decl`：上面已有 `decl = mb?.decl`（多方块**声明**）——
+    // 两者是不同的事实（帧声明 vs 多方块声明）。我第一版撞名 ⇒ `vue-tsc` **没报**
+    // （`e2e/` 不在其 `tsconfig` 的 include 内）而 **L2 的 babel 解析当场判红**
+    //（`Identifier 'decl' has already been declared`）。记此：**e2e 的语法正确性
+    // 只由 L2 把守**，别指望 L0。
+    const frameDecl = ctx.frameDeclarations()
     return {
       hasDoc: true,
       docId: ((ctx.plainForSave().plain as any)?.id as string | undefined) ?? null,
       documentShape: (doc.multiblockSource?.documentShape as string) ?? null,
       multiblockSourcePresent: doc.multiblockSource !== null,
       isMultiblock: doc.isMultiblock,
-      frameCount: decl.count,
+      frameCount: frameDecl.count,
       // 逐帧网格走 R5（`kernelGrid(i)`；i = 声明序 —— 与旧 `frames[i]` 同一遍历序）。
-      frameGrids: Array.from({ length: decl.count }, (_v, i) => {
+      frameGrids: Array.from({ length: frameDecl.count }, (_v, i) => {
         const grid = ctx.kernelGrid(i)
         if (!grid) return { index: i, present: false, d: 0, h: 0, w: 0, solidCells: 0 }
         return {
