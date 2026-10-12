@@ -148,6 +148,116 @@ function geometryFieldsOf(g: AnnotationGeometry): Partial<KernelAnnotationView> 
 const EMPTY_ANNOTATIONS: readonly KernelAnnotationView[] = Object.freeze([])
 
 /**
+ * **把内核注解投影回 legacy 形状**（#301 P10f C′2；裁决 3 的回写桥）。
+ *
+ * ## 为什么它是**独立**的投影（而不是复用 `projectToRuntimeDocument`）
+ *
+ * C′2 取证实测：`composition/kernelProjection.ts:1039` 的注解投影**只写 5 个字段**
+ * （`id`/`type`/`visible`/`title`/`description`），而内核 `AnnotationGeometry`
+ * 承载 20+ 字段 ⇒ 实测 `locked`/`frameIndex`/`created_at`/`min`/`max` 全部变 `null`。
+ *
+ * 那是 `kernelRenderView` 的**渲染投影**（够画就行），**不是**全保真投影。
+ * 拿它做回写桥 ⇒ **用户每次编辑注解都静默丢数据**。
+ *
+ * ⇒ 精度分离（Lead 裁决 2 采纳）：
+ * | 投影 | 用途 | 精度 |
+ * |---|---|---|
+ * | `kernelProjection#projectKernelDocument` | 渲染产物 | 够画即可 |
+ * | **本函数** | **持久化回写** | **全保真** |
+ *
+ * 合一会让"渲染想少字段"与"保存想全字段"互相牵制 —— 那正是 `fidelityRecord`
+ * 那族缺陷的成因。
+ *
+ * ## 与 {@link kernelAnnotationsOf} 的关系：**同一张字段表，互为逆**
+ *
+ * 本函数**刻意**与读面放在同一模块：两者必须逐字段互逆，
+ * 放在一起才可能被同一张表（`READ_WRITE_FIELDS`）双向断言。
+ * 分散到两个模块会让"加了读字段却忘了写字段"成为静默缺陷。
+ *
+ * ## 反向的名字映射（三处，各自有机械依据）
+ *
+ * | 内核 | legacy | 依据 |
+ * |---|---|---|
+ * | `payload.geometry.createdAt` | `created_at` | 装配的正向映射 `createdAt: a.created_at`（snake→camel） |
+ * | `payload.geometry.updatedAt` | `updated_at` | 同上 |
+ * | `payload.text` | `title` + `description` | 正向合成 `title\n\ndescription` 的逆 |
+ *
+ * ## 属性顺序（可断言的确定性）
+ *
+ * 字段顺序**固定**（不依赖 `Object.keys`）：同一份内核 ⇒ 逐字节相同的 legacy 片段。
+ * 顺序若随实现浮动，"投影是否稳定"就不可断言。
+ */
+export function projectAnnotationsToLegacy(doc: Document | undefined): readonly Record<string, unknown>[] {
+  if (doc === undefined) return EMPTY_LEGACY_ANNOTATIONS
+  const out: Record<string, unknown>[] = []
+  for (const objectId of doc.scene.order) {
+    const payload = annotationPayloadOf(doc, objectId)
+    if (payload === null) continue
+    const obj = doc.scene.objects[objectId]!
+    const { title, description } = splitAnnotationText(payload.text ?? '')
+    const g = payload.geometry
+    // ⚠️ 字段顺序固定（见上文"属性顺序"）。`type`/`id`/`visible` 必写；
+    // 其余**仅在源里有时**才写 —— 这与读面的"字段缺席 ≠ 空值"同口径：
+    // 给 `locked` 补一个默认 `false` 会改变"锁定即只读"的判定。
+    const row: Record<string, unknown> = {
+      id: objectId.startsWith(ANNOTATION_ID_PREFIX) ? objectId.slice(ANNOTATION_ID_PREFIX.length) : objectId,
+      type: payload.shape,
+      visible: obj.visible,
+      title,
+      description,
+    }
+    if (g !== undefined) {
+      for (const key of ['min', 'max', 'pos'] as const) {
+        const v = g[key]
+        if (v !== undefined) row[key] = v
+      }
+      if (g.points !== undefined) row.points = g.points
+      for (const key of ['color', 'renderStyle'] as const) {
+        const v = g[key]
+        if (v !== undefined) row[key] = v
+      }
+      if (g.locked !== undefined) row.locked = g.locked
+      if (g.frameIndex !== undefined) row.frameIndex = g.frameIndex
+      // snake_case 的**逆**映射（正向在 `annotationGeometryFromLegacy`）
+      if (g.createdAt !== undefined) row.created_at = g.createdAt
+      if (g.updatedAt !== undefined) row.updated_at = g.updatedAt
+    }
+    out.push(Object.freeze(row))
+  }
+  return Object.freeze(out)
+}
+
+const EMPTY_LEGACY_ANNOTATIONS: readonly Record<string, unknown>[] = Object.freeze([])
+
+/**
+ * **读写字段表**（单一真相）：`[内核侧键, legacy 键]`。
+ *
+ * 读面（{@link kernelAnnotationsOf}）与回写（{@link projectAnnotationsToLegacy}）
+ * 都由本表驱动断言 ⇒ "加了读字段却忘了写字段"会在测试里当场判红，
+ * 而不是等到用户丢数据。
+ *
+ * ⚠️ 它**只**用于测试与诊断（生产读/写各自的实现仍是显式字段级 ——
+ * 用表驱动生产代码会让"某字段需要特殊变换"变得难写，那会逼着人绕过表）。
+ */
+export const ANNOTATION_FIELD_PAIRS: readonly (readonly [kernel: string, legacy: string])[] = Object.freeze([
+  Object.freeze(['id', 'id'] as const),
+  Object.freeze(['type', 'type'] as const),
+  Object.freeze(['visible', 'visible'] as const),
+  Object.freeze(['title', 'title'] as const),
+  Object.freeze(['description', 'description'] as const),
+  Object.freeze(['min', 'min'] as const),
+  Object.freeze(['max', 'max'] as const),
+  Object.freeze(['pos', 'pos'] as const),
+  Object.freeze(['points', 'points'] as const),
+  Object.freeze(['color', 'color'] as const),
+  Object.freeze(['renderStyle', 'renderStyle'] as const),
+  Object.freeze(['locked', 'locked'] as const),
+  Object.freeze(['frameIndex', 'frameIndex'] as const),
+  Object.freeze(['createdAt', 'created_at'] as const),
+  Object.freeze(['updatedAt', 'updated_at'] as const),
+])
+
+/**
  * **读全部材质资源**（与 legacy `materialPalette` 条目对齐）。
  *
  * ## 两处字段适配（各自有**机械**依据，不是"看着像"）

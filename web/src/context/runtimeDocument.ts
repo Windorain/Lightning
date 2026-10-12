@@ -271,6 +271,38 @@ export class RuntimeDocument {
     return out
   }
 
+  /**
+   * **换一批注解**（#301 P10f C′2 的回写落点）。
+   *
+   * ## 为什么需要它（而不是调用方自己 `clone()` 后改字段）
+   *
+   * C′2 的同步桥要"把内核注解投影回 legacy"，而调用方（`runtime/context`）是
+   * **旧层**代码：让它 `clone()` + 直接改 `annotations` 会绕开本类的封装，
+   * 且**每处调用点都要自己写一遍**（那正是本项目三度实测会漂移的形态）。
+   *
+   * ## 为什么返回 `this` 而不是抛错/空洞
+   *
+   * **内容相同 ⇒ 返回 `this`**（引用相等）。调用方据此判断"无需回写"，
+   * 于是**不 bump 内容重读信号** ⇒ 渲染链不做无谓重建。
+   * 这是"净零往返不重建"的落地：同一份内容回写两次，第二次是零成本。
+   *
+   * ⚠️ 判定用**逐字段等价**而不是引用相等：投影每次都会新建数组与行对象
+   * （纯函数不得返回共享可变结构），故引用比较恒不等 —— 那会让本方法永远"有变化"。
+   *
+   * ## 它**不**碰版本/基线/历史
+   *
+   * 那些字段表示"哪一份文档、是否脏、可否撤销"，与本方法无关。
+   * （`RuntimeDocument` 本身也不持版本 —— 版本在 `Context.versionOf`。）
+   */
+  withAnnotations(next: readonly Record<string, unknown>[]): RuntimeDocument {
+    const current = this.annotations as readonly Record<string, unknown>[]
+    if (sameAnnotationRows(current, next)) return this
+    const clone = this.clone()
+    // `annotations` 是 `readonly` 声明、非冻结数组 ⇒ 就地替换内容（`clone()` 已给出新数组）
+    ;(clone as unknown as { annotations: unknown[] }).annotations = [...next]
+    return clone
+  }
+
   clone(): RuntimeDocument {
     return new RuntimeDocument({
       formatVersion: this.formatVersion,
@@ -563,4 +595,72 @@ export class RuntimeDocument {
 
     return grid
   }
+}
+
+/**
+ * 两批注解行是否**逐字段等价**（#301 P10f C′2 的"净零往返"判定）。
+ *
+ * ## 为什么不能用 `JSON.stringify` 比较
+ *
+ * 键的顺序会影响 `JSON.stringify` 的产物，而本函数的两个输入来自
+ * **不同来源**（legacy 原行 vs 内核投影行）—— 键序不同会让"其实没变"判成"变了"，
+ * 后果是每次回写都 bump 内容重读信号 ⇒ 渲染链无谓重建。
+ *
+ * ## 为什么只比"投影会产出的那些键"
+ *
+ * legacy 行可能带投影**不认识**的额外键（用户数据 / 未来扩展）。那些键
+ * **不参与**等价判定：本函数的用途是"内核投影是否与现状相同"，
+ * 而投影产物里根本没有它们 ⇒ 不该因为它们存在就判"不同"（那会让回写反复发生）。
+ *
+ * ⚠️ 代价是：若调用方传入的行**丢掉了** legacy 的额外键，本函数会说"相同"
+ * 从而**不丢**它们（因为不写）。这是**有意的**保守方向 —— 宁可少写，不可误删。
+ */
+function sameAnnotationRows(
+  a: readonly Record<string, unknown>[],
+  b: readonly Record<string, unknown>[],
+): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!
+    const y = b[i]!
+    // 以 `b`（新投影产物）的键为准：它定义了"这次投影认得的字段集"
+    for (const key of Object.keys(y)) {
+      if (!sameField(x[key], y[key])) return false
+    }
+    // 反向：`a` 里有、`b` 里没有的**投影字段**也算变化 ——
+    // 例如内核删掉了 `locked`，而 legacy 还带着 `true`。
+    // 只检查 `b` 认得的那类键（`ANNOTATION_FIELD_PAIRS` 的 legacy 侧）之外的键不管，
+    // 故这里用"`a` 有而 `b` 明确为 undefined"来判定。
+    for (const key of Object.keys(x)) {
+      if (x[key] === undefined) continue
+      if (y[key] === undefined && PROJECTED_KEYS.has(key)) return false
+    }
+  }
+  return true
+}
+
+/** 投影会产出的 legacy 键（与 `runtime/annotationRead` 的字段表一致）。 */
+const PROJECTED_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'type',
+  'visible',
+  'title',
+  'description',
+  'min',
+  'max',
+  'pos',
+  'points',
+  'color',
+  'renderStyle',
+  'locked',
+  'frameIndex',
+  'created_at',
+  'updated_at',
+])
+
+/** 标量直比；对象/数组走结构比较（投影产出的是冻结的普通对象）。 */
+function sameField(x: unknown, y: unknown): boolean {
+  if (x === y) return true
+  if (x === null || y === null || typeof x !== 'object' || typeof y !== 'object') return false
+  return JSON.stringify(x) === JSON.stringify(y)
 }

@@ -380,8 +380,11 @@ describe('P10f A′ · 反实现漂移（本文件的镜像宿主 vs 真实实�
   it('真实 `Context.setDocument`：先 `main.replaceDoc(next)`、再按 null 镜像内核', () => {
     const raw = fs.readFileSync(CONTEXT, 'utf8').replace(/\r\n/g, '\n')
     const code = stripComments(raw)
-    const start = code.indexOf('setDocument(next: RuntimeDocument | null): void {')
-    expect(start, '`Context.setDocument` 必须存在（它是本批的唯一写入口）').toBeGreaterThan(-1)
+    // #301 C′2：签名加了 `intent` 参数（见下方"注释与签名一致"那条与 `context.ts` 的说明），
+    // 故这里按**签名前缀**定位（不写死整串），否则每次加参数都要改本行 ——
+    // 那会让"这条判据在守什么"变得含混（它守的是**方法体语义**，不是签名文本）。
+    const start = code.indexOf('setDocument(next: RuntimeDocument | null, intent:')
+    expect(start, '`Context.setDocument` 必须存在（它是唯一写入口）').toBeGreaterThan(-1)
     // 取方法体（到下一个顶层 `\n  }` 为止，足够覆盖本方法）
     const body = code.slice(start, code.indexOf('\n  }', start))
 
@@ -393,6 +396,13 @@ describe('P10f A′ · 反实现漂移（本文件的镜像宿主 vs 真实实�
     expect(iLoad, '必须在非 null 时镜像为已装载').toBeGreaterThan(-1)
     expect(iReplace, '**先写 legacy、后镜像**（顺序是语义的一部分，见方法注释）').toBeLessThan(iUnload)
     expect(iReplace).toBeLessThan(iLoad)
+    // #301 C′2：**镜像必须在 `content-sync` 意图下被跳过**。
+    // 否则编辑回写会把内核镜像成"刚装载"（`markLoaded` 清 GF-16）
+    // ⇒ 读面回落 legacy，而内容其实在内核里（C′1 实测抓出的同型缺陷）。
+    const iGuard = body.indexOf("if (intent === 'content-sync') return")
+    expect(iGuard, '必须存在 `content-sync` 早退守卫（编辑回写不得动内核装载状态）').toBeGreaterThan(-1)
+    expect(iGuard, '守卫必须在 `replaceDoc` **之后**（legacy 照写）').toBeGreaterThan(iReplace)
+    expect(iGuard, '守卫必须在镜像**之前**（否则 content-sync 也会镜像）').toBeLessThan(iUnload)
     // 反空洞真：确认剥离确实发生过（否则断言可能落在注释里的同名文本上）
     expect(raw.includes('//'), '前置：源码确实含行注释（剥离才有意义）').toBe(true)
     expect(body.includes('先写 legacy'), '注释必须已被剥离（否则会误命中注释文本）').toBe(false)
@@ -425,8 +435,20 @@ describe('P10f A′ · 反实现漂移（本文件的镜像宿主 vs 真实实�
     const m = /setDocument\s*\(([^)]*)\)\s*:/.exec(code)
     expect(m, '`Context.setDocument` 必须存在').not.toBeNull()
     const params = m![1]!.split(',').map((s) => s.trim()).filter((s) => s !== '')
-    expect(params.length, `setDocument 必须是**单参数**（实测 ${params.length} 个：${params.join(' | ')}）`).toBe(1)
+    // #301 C′2：参数个数由 1 变为 2（`next` + `intent`）。
+    //
+    // ⚠️ 这条判据的**用途**没变（"注释不得描述幻影参数"），变的是**当时的真值**：
+    // A′ 核定的口径是"只做 legacy 写 + 存在性镜像"，故 1 个参数就对；
+    // C′2 需要第二种意图（编辑回写：写 legacy 但**不**动内核装载状态），
+    // 而它必须走**同一个**唯一写者（见 `context.ts` 的 `intent` 说明
+    // ——我第一版让 `syncLegacyFromKernel` 自己调 `replaceDoc`，被闸门当场判红，那是对的）。
+    // ⇒ 参数的**语义**因此被这条闸门钉住：多了就必须在这一节里说明它是什么。
+    expect(params.length, `setDocument 参数个数（实测 ${params.length} 个：${params.join(' | ')}）`).toBe(2)
     expect(params[0]).toContain('next')
+    expect(params[1], "第二个参数必须是 `intent`（装载 / 内容同步两种意图）").toContain('intent')
+    // 意图的取值集合必须是这两个（多一个就要回来更新本节口径）
+    expect(params[1], '`intent` 必须只允许 `load` 与 `content-sync`').toMatch(/'load'/)
+    expect(params[1], '`intent` 必须只允许 `load` 与 `content-sync`').toMatch(/'content-sync'/)
 
     // ② 注释**不得**把 `adoption` 描述成**当前存在的参数**。
     //
@@ -438,7 +460,7 @@ describe('P10f A′ · 反实现漂移（本文件的镜像宿主 vs 真实实�
     //    真正要禁的是**静默描述幻影参数**：一段以它为主题的语义说明
     //    （旧注释的形态是 `## \`adoption\` 的语义` + "有值 ⇒ …、无值 ⇒ …"）。
     //    ⇒ 判据 = 若提及该词，则**必须**同时留下"这是偏离"的标记。
-    const sigAt = raw.indexOf('setDocument(next: RuntimeDocument | null): void {')
+    const sigAt = raw.indexOf('setDocument(next: RuntimeDocument | null, intent:')
     expect(sigAt, '前置：必须能定位签名').toBeGreaterThan(-1)
     const docStart = raw.lastIndexOf('/**', sigAt)
     expect(docStart, '前置：该方法必须有文档注释').toBeGreaterThan(-1)

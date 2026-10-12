@@ -36,7 +36,7 @@ import type { KernelSession } from '@/runtime/kernelSession'
 // #301 P10f C′1：帧声明的**判定**提成纯函数（D8 的判据必须能注入装配失败，
 // 而 `Context` 的外壳六件套不该进测试）—— 本层只负责"取事实、交结果"。
 import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
-import { kernelAnnotationsOf, kernelMaterialsOf } from '@/runtime/annotationRead'
+import { kernelAnnotationsOf, kernelMaterialsOf, projectAnnotationsToLegacy } from '@/runtime/annotationRead'
 import { resolveSideTable } from '@/runtime/sideTableResolution'
 import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotationRead'
 
@@ -565,15 +565,103 @@ export class Context {
    * **不**保证内核承载的内容与 legacy 产物同步（它们在旧文档上是 in-place 字段，
    * 内核侧对应物是对象载荷，映射需要新的命令面）。内容一致性归后续批次（C′），
    * 本批的判据**显式不断言**它。
+   *
+   * ## `intent` 参数（#301 P10f C′2 新增）：两种语义共用一个写者
+   *
+   * 本方法是 legacy 侧**唯一写入口**（由 AST 白名单闸门把守）。C′2 需要第二种写入语义
+   * ——"把内核投影回 legacy"（{@link syncLegacyFromKernel}），它与"装载文档"的区别是
+   * **内核侧的后果不同**：
+   *
+   * | intent | legacy | 内核状态 |
+   * |---|---|---|
+   * | `'load'`（缺省） | 换成 `next` | **镜像装载状态**（`markLoaded`/`markUnloaded`，清 GF-16） |
+   * | `'content-sync'` | 换成 `next` | **不动**（内核仍是同一份已装配文档；GF-16 保持 `true`） |
+   *
+   * ⚠️ 为什么不让 `syncLegacyFromKernel` 自己调 `replaceDoc`（我第一版就是这么写的）：
+   * 那会让 legacy 侧出现**第二个**写入口，而闸门立刻判红
+   * （`p10fExistenceReadFace.test.ts` 的"`replaceDoc(` 调用点只有 `setDocument` 本体"）。
+   * **闸门是对的** —— 多一个写入口就多一处"镜像是否发生"的静默错位面。
+   * ⇒ 正确做法是让**唯一写者**能表达两种意图，而不是绕开它。
+   *
+   * ⚠️ 若 `'content-sync'` 时仍去 `markLoaded`，会把 GF-16 清掉
+   * ⇒ 读面回落 legacy（内容其实在内核里，读面却不用它）；
+   * 若 `'load'` 时不清 GF-16，则换文档后读到**上一份**文档的内容
+   * （C′1 实测抓出的自身缺陷）。故两种意图**必须**分开。
    */
-  setDocument(next: RuntimeDocument | null): void {
+  setDocument(next: RuntimeDocument | null, intent: 'load' | 'content-sync' = 'load'): void {
     // ① legacy 先写（与收口前**逐字节相同**的行为：`replaceDoc` 会 bump 内容重读信号）
     this.main.replaceDoc(next)
-    // ② 内核镜像存在性（无会话 ⇒ 什么都不做：那是配置事实，不是缺陷）
+    // ② 内核镜像**仅**在装载意图下发生（见上文表格）
+    if (intent === 'content-sync') return
     const kernel = this.kernel
     if (kernel === null) return
     if (next === null) kernel.markUnloaded()
     else kernel.markLoaded()
+  }
+
+  /**
+   * **把内核内容投影回 legacy**（#301 P10f C′2；裁决 3 的"单权威"桥）。
+   *
+   * ## 它在 C′2 的位置
+   *
+   * C′2 的写路径是：
+   *
+   * ```
+   * 用户编辑
+   *   └─▶ ① 内核写：kernel.submit(Command) + drain     ← 唯一写权威（自带历史记账）
+   *         └─▶ ② 本方法：内核 → legacy 投影回写
+   *               └─▶ ③ 渲染链 / 保存读 legacy（本批保持现状；终切归 D）
+   * ```
+   *
+   * ## 为什么必须回写（而不是让 legacy 停在旧值）
+   *
+   * 保存路径 `serialize()` 与渲染链都读 legacy，而 **D 批才终删 legacy**
+   * ⇒ 在内核成为唯一权威的今天，legacy 必须被**投影**维护成最新，
+   * 否则"内核改了、保存写出旧的"。
+   *
+   * ## 为什么是单方向（内核 → legacy），不做双向写
+   *
+   * 本项目三度实测"两份实现必然漂移"。双向写会让"谁是权威"再次不可判
+   * —— 那正是 #171 要消除的形态。⇒ 内核是权威，legacy 是**投影产物**。
+   *
+   * ## ⚠️ 它**只**回写注解（本批范围，如实声明）
+   *
+   * C′2 的 5 处内核写只涉及注解（新建/改字段/删除）。
+   * 网格/材质/帧轴本批**不写**，故无需回写；将来若要写它们，
+   * 必须**同时**扩本方法（成对铁律第④项：同一事实的全部消费者同批迁移）。
+   *
+   * ## 不重置 `saveBaseline`（与 `adoptLoadedDocument` 的关键区别）
+   *
+   * `adoptLoadedDocument` 里 `saveBaseline: withScene.version` 的语义是
+   * "**刚打开** = 与保存基线相同"（装载语义）。而本方法是**编辑**语义：
+   * 回写后文档必须是**脏**的（`isDirty === true`），否则关窗不提示保存
+   * ⇒ **用户丢工作**。⇒ 本方法只换 `annotations` 字段，**不碰**版本/基线/历史。
+   *
+   * @returns 是否真的回写了（`false` = 无会话 / 未装配 / 未换引用 ⇒ 调用方无须动作）
+   */
+  syncLegacyFromKernel(): boolean {
+    const kernel = this.kernel
+    if (kernel === null) return false
+    // 未装配 ⇒ 内核里没有可投影的内容（GF-16；此时 legacy 才是权威）
+    if (!kernel.hasAdoptedContent()) return false
+    const current = this.main.doc.value
+    if (current === null) return false
+    const rows = projectAnnotationsToLegacy(kernel.document())
+    const next = current.withAnnotations(rows)
+    // 引用未变 ⇒ 不写（`withAnnotations` 内容相同即返回 `this`）
+    // ⇒ 不 bump 内容重读信号 ⇒ 渲染链不做无谓重建（净零往返零成本）。
+    if (next === current) return false
+    // ⚠️ **走同一个唯一写者** `setDocument`（不自己调 `replaceDoc`）。
+    //
+    // 我第一版直接调 `this.main.replaceDoc(next)` 以避开 `setDocument` 的内核镜像
+    // —— 那立刻被 A′ 的闸门判红（"`replaceDoc(` 的调用点**只有** `setDocument` 本体"）。
+    // **闸门是对的**：`replaceDoc` 是 legacy 侧唯一写入口，多一个调用点就多一处
+    // "镜像是否发生"的静默错位面。
+    //
+    // ⇒ 正确做法是让 `setDocument` 能表达"**编辑**回写"这一意图（见其 `intent` 参数），
+    // 而不是绕过它。
+    this.setDocument(next, 'content-sync')
+    return true
   }
   /**
    * **内核会话**（#261 / R-WK-03）。
