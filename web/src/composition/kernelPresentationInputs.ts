@@ -104,13 +104,31 @@ function materialPaletteOf(content: DocumentContent): readonly Record<string, un
   )
 }
 
-/** 内核 `blockGrid` 载荷 → `StructureDefinition` 形状（复用 `projectGridCells` 的重建）。 */
+/**
+ * 内核 `blockGrid` 载荷 → `StructureDefinition` 形状（复用 `projectGridCells` 的重建）。
+ *
+ * ## ⚠️ 声明尺寸三字段必须一并传下去（#262 P11-A 的第二处接线点）
+ *
+ * `projectGridCells` 的口径是「载荷**带**声明 ⇒ 按声明输出维度」（见其说明）：
+ * 载荷就在手里却不传，等于让 presenter 的网格退回**包围盒**维度 ——
+ * 于是渲染网格的居中所用的 `sizeColumn/sizeRow/sizeZSlice` 与**读面**
+ * （`runtime/gridRead#kernelGrid` 用声明尺寸、`context/queries#pickPartForScenePick`
+ * 与 `pure/vec#structureRowToWorldY` 都吃它）**不一致**：
+ * 稀疏网格上"看着在 A 格、点到却是 B 格"。
+ *
+ * 判据：`__tests__/p11aProjectionSize.test.ts` ⑦ 组 —— presenter 顶点与
+ * "**带声明**重算"逐位相同、与"不带声明重算"**不同**（输入来自生产装配，
+ * 不是手工载荷；这正是 #301 P10f D3 打回的那条纪律）。
+ */
 function definitionOfPayload(
   payload: Extract<ObjectDataPayload, { kind: 'blockGrid' }>,
   materialPalette: readonly Record<string, unknown>[],
 ): GridDefinition {
   const projected = projectGridCells({
     cells: payload.cells,
+    sizeColumn: payload.sizeColumn,
+    sizeRow: payload.sizeRow,
+    sizeZSlice: payload.sizeZSlice,
     geometry: payload.geometry,
     cellGeometry: payload.cellGeometry,
     cellPalette: payload.cellPalette,

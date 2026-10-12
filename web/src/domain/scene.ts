@@ -176,8 +176,7 @@ export type ObjectDataPayload =
        * ## 为什么必须显式承载（#301 P10f D3，Lead 裁决 D-1(甲)）
        *
        * `cells` 是**稀疏**键表（`"x,y,z"` → 方块身份），故"网格多大"**推不出来** ——
-       * 早期实现按 `max(x)+1 / max(y)+1 / max(z)+1` 推（`kernelProjection.ts:222-224`），
-       * 那在两处**静默出错**：
+       * 早期实现按 `max(x)+1 / max(y)+1 / max(z)+1` 推，那在两处**静默出错**：
        *
        *  1. **尾层/尾列全空** ⇒ 推得的尺寸比文件声明的小。实测后果是
        *     `context/queries#gridHeight` 给出偏小的 `h`，而它直接进
@@ -186,8 +185,18 @@ export type ObjectDataPayload =
        *     "没有网格"是**两种不同状态**（与 `cellContent` 的"缺席 ≠ 空"同口径）。
        *
        * ⇒ 尺寸是**文件声明的事实**（`cellGrid` 的三个维度），必须显式承载，
-       * 不能由内容反推。缺省（旧形态/未声明）= `undefined` ⇒ 读取侧如实降级为
+       * 不能由内容反推。缺省（旧形态/未声明）= `undefined` ⇒ 消费侧如实降级为
        * 包围盒推导（**不**猜一个 `1×1×1`）。
+       *
+       * ## 两个消费侧**必须**同口径（#262 P11-A 补的那一侧）
+       *
+       * | 侧 | 消费点 | 用它做什么 |
+       * |---|---|---|
+       * | 读 | `runtime/gridRead#resolveGridSize`（D3 交付） | 网格尺寸（拾取/悬停/居中的基准） |
+       * | 写 | `composition/kernelProjection#projectGridCells`（#262 交付） | 投影产物 `cellGrid` 的维度 —— 缺了这一侧，**保存一次就把声明的尺寸丢了**（实测：声明 6×5×4 的文档投影成 2×4×2） |
+       *
+       * 判定规则只有一处定义（`runtime/gridRead#declaredGridSize`），两侧共用 ——
+       * 否则"哪些字段算一份合法声明"会长出第二份会漂移的实现。
        */
       readonly sizeColumn?: number
       readonly sizeRow?: number
