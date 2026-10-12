@@ -76,7 +76,8 @@ export async function waitForDocLoaded(page: Page, timeout = 30_000): Promise<vo
   await page.waitForFunction(
     () => {
       const ctx = (window as any).__vm__
-      return !!ctx && ctx.getDoc().value !== null
+      // #301 P10f D3：存在性走 GF-15 读面（`getDoc()` 已终删）。
+      return !!ctx && ctx.hasLoadedDocument()
     },
     undefined,
     { timeout },
@@ -341,13 +342,16 @@ export async function injectSceneDocument(
       const file = new File([text], fileName, { type: 'application/json' })
       // 与生产拖放同一入口
       await ctx.getOperators().exec('OPERATOR_OPEN_SCENE', { file })
-      const doc = ctx.getDoc().value
+      // #301 P10f D3：内容事实各有具名读面。
+      const loaded = ctx.hasLoadedDocument()
+      const plain = ctx.plainForSave().plain as Record<string, unknown> | null
+      const rendSrc = ctx.legacyRenderSource() as { isMultiblock?: boolean } | null
       return {
-        docLoaded: doc !== null,
-        docId: doc?.id ?? null,
-        isMultiblock: doc ? doc.isMultiblock : null,
-        frameCount: doc ? doc.frameCount : null,
-        parseError: doc ? null : '解析失败（见 ctx.log 的场景加载 error 记录）',
+        docLoaded: loaded,
+        docId: (plain?.id as string | undefined) ?? null,
+        isMultiblock: rendSrc ? (rendSrc.isMultiblock ?? null) : null,
+        frameCount: loaded ? ctx.frameDeclarations().count : null,
+        parseError: loaded ? null : '解析失败（见 ctx.log 的场景加载 error 记录）',
       }
     },
     { text, fileName },
@@ -431,7 +435,7 @@ export async function injectSceneDocumentOk(
         (t) => {
           const w = window as any
           if (w.__wk_inject_token__ !== t) return true
-          return !!w.__vm__ && w.__vm__.getDoc().value !== null
+          return !!w.__vm__ && w.__vm__.hasLoadedDocument()
         },
         token,
         { timeout },
@@ -558,7 +562,20 @@ export interface DocObservation {
 export async function readDocObservation(page: Page): Promise<DocObservation> {
   return await page.evaluate(() => {
     const ctx = (window as any).__vm__
-    const doc = ctx.getDoc().value
+    // ## #301 P10f D3：观测面按**事实种类**分开取（`getDoc()` 已终删）
+    //
+    // | 事实 | 读面 |
+    // |---|---|
+    // | 有文档吗 / 帧数 | `hasLoadedDocument()` / `frameDeclarations()` |
+    // | 文档 id | `plainForSave().plain.id`（产物 plain 是唯一出口） |
+    // | 逐帧网格 | `kernelGrid(i)`（声明尺寸 + 逐格；i = 声明序） |
+    // | 多方块**声明内层 body**（`multiblockSource`/`decl`/通道/运行态/变体/规则/骨架） | `legacyRenderSource()`（**R9**，外部格式边界；内核不承载该 body，见 `useKernelChannels` 的说明） |
+    //
+    // ⚠️ 最后一行是**已登记接缝** `legacy-render-source-document` 的用途：
+    // 它读的是"渲染链看到的那份旧格式文档"（本 spec 要判的正是渲染链的输入），
+    // **不是**内容读入口的后门。
+    const loaded = ctx.hasLoadedDocument()
+    const doc = loaded ? (ctx.legacyRenderSource() as any) : null
     if (!doc) {
       return {
         hasDoc: false,
@@ -600,18 +617,20 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
           })),
         }
       : null
+    const decl = ctx.frameDeclarations()
     return {
       hasDoc: true,
-      docId: doc.id ?? null,
+      docId: ((ctx.plainForSave().plain as any)?.id as string | undefined) ?? null,
       documentShape: (doc.multiblockSource?.documentShape as string) ?? null,
       multiblockSourcePresent: doc.multiblockSource !== null,
       isMultiblock: doc.isMultiblock,
-      frameCount: doc.frameCount,
-      frameGrids: doc.frames.map((f: any) => {
-        const grid = f.grid
-        if (!grid) return { index: f.index, present: false, d: 0, h: 0, w: 0, solidCells: 0 }
+      frameCount: decl.count,
+      // 逐帧网格走 R5（`kernelGrid(i)`；i = 声明序 —— 与旧 `frames[i]` 同一遍历序）。
+      frameGrids: Array.from({ length: decl.count }, (_v, i) => {
+        const grid = ctx.kernelGrid(i)
+        if (!grid) return { index: i, present: false, d: 0, h: 0, w: 0, solidCells: 0 }
         return {
-          index: f.index,
+          index: i,
           present: true,
           d: grid.depth,
           h: grid.height,
@@ -743,7 +762,7 @@ export async function readViewportState(page: Page): Promise<ViewportObservation
     return {
       frameIndex: ctx.getFrameIndex(),
       layerWorldY: ctx.getLayerWorldY().value,
-      docFrameCount: ctx.getDoc().value?.frameCount ?? 0,
+      docFrameCount: ctx.frameDeclarations().count,
     }
   })
 }

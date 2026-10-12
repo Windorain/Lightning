@@ -39,25 +39,28 @@ export const WikiSaveConfirmOperator: OperatorType = {
   poll(ctx) {
     if (!ctx.hasCapability(CAPABILITY.WIKI_UPLOAD)) return false
     if (ctx.getDocumentBinding().value.sourceId !== 'wiki-data') return false
+    // #301 P10f D3（R3）：差集比较要的是**产物 plain**（`plainForSave` 的唯一分流点）。
     const draft = buildWikiEditSummaryDraft(
       ctx.getDocumentBinding().value.saveBaseline,
-      ctx.getDoc().value,
+      ctx.plainForSave().plain,
     )
     return hasWikiAuditableChanges(draft) || ctx.getEditHistory().canUndo.value
   },
 
   invoke(ctx) {
     const binding = ctx.getDocumentBinding().value
-    const draft = buildWikiEditSummaryDraft(binding.saveBaseline, ctx.getDoc().value)
+    const draft = buildWikiEditSummaryDraft(binding.saveBaseline, ctx.plainForSave().plain)
     if (!hasWikiAuditableChanges(draft) && !ctx.getEditHistory().canUndo.value) {
       ctx.log.warn('Wiki 保存', '没有可保存的变更')
       return OP_RESULT.CANCELLED
     }
-    const doc = ctx.getDoc().value
-    if (!doc) return OP_RESULT.CANCELLED
+    // #301 P10f D3：存在性走 GF-15；产物 plain 只有一条路（`plainForSave`）——
+    // 旧行的 `?? doc.serialize()` 兜底**本来就被该读面内含**（它就是那条回落），
+    // 故删掉重复的第二份回落（不是能力回退）。
+    if (!ctx.hasLoadedDocument()) return OP_RESULT.CANCELLED
     const base = locDisplay(binding.locator)
     // #301 P10f D2：产物改由**内核投影**给出。
-    const envelope = buildEnvelopePackage((ctx.plainForSave().plain ?? doc.serialize()) as never)
+    const envelope = buildEnvelopePackage((ctx.plainForSave().plain ?? {}) as never)
     const plan = previewUploadPlan(base, envelope)
     const ui = ctx.wm.chrome.wikiUi
     if (ui) {
@@ -94,7 +97,9 @@ export const WikiSaveAsOperator: OperatorType = {
       sourceId: 'wiki-data',
       locator: wikiLocatorForBase(name),
       remoteRevisionId: result.revisionId ?? null,
-      saveBaseline: ctx.getDoc().value?.clone() ?? null,
+      // #301 P10f D3（R8 的第二种用途）：保存基线是**外部格式边界**的值
+      //（`DocumentBinding.saveBaseline: RuntimeDocument | null`）⇒ 走冻结副本取值口。
+      saveBaseline: ctx.frozenDocumentValue(),
     })
     ctx.getLocalFileName().value = name
     pushRecentStructure(name)

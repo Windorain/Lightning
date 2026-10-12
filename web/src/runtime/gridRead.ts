@@ -36,6 +36,8 @@ import type { CellContent, CellContentTable } from '@/domain/cellContent'
 import { cellPositionKey } from '@/domain/cellPosition'
 import type { PartRecord } from '@/pure/partTypes'
 import { blockPaletteEntryKey, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
+import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
+import type { BakedQuad, BakedQuadsGeometry } from '@/render/schema/types'
 
 /**
  * `domain/cellContent#PartRecord` → 本读面的 `PartRecord`（**纯类型收窄，零运行期开销**）。
@@ -84,18 +86,49 @@ export interface KernelGridCellView {
   readonly paletteIndex: number | undefined
 }
 
-/** 调色板条目视图（`palette` 表的一项；形状与消费点需求对齐）。 */
+/**
+ * 调色板条目视图（`palette` 表的一项）。
+ *
+ * ## 字段面为什么与**类型化条目**逐项相同（不是"挑几个够用的"）
+ *
+ * 消费点 `context/queries#getBlockPaletteEntry` 的返回形状被 3 个面板读
+ * （`blockInspector` 读 `renderMode`/`facing`/`nbt`；`TooltipEditorPanel` 读 `tooltip`；
+ * `getBlockGeometry` 读 `geometry`）。若本视图只挑几个字段，
+ * 就要么在 `queries` 里写一层字段名映射（第二份会漂移的清单），
+ * 要么改面板（超出"同义迁移"的范围）。
+ *
+ * ⇒ 逐项对齐 `domain/blockGeometry#BlockPaletteEntry`，并额外给 `raw`
+ * （消费点要读本视图未类型化的键时用；**不得**改它）。
+ *
+ * ⚠️ 与 legacy `PaletteEntryMeta` 的**两处**字段名不同（各自是旧形态的历史名）：
+ * `thumbnail`（旧：`thumbnailPNG`）、`meta`（旧条目里有，但 `PaletteEntryMeta` 的类型未列）。
+ * `queries#getBlockPaletteEntry` 的消费点**只读** `renderMode`/`facing`/`nbt`/`tooltip`/`geometry`
+ * ⇒ 无需为这两处差异做映射（实测三方消费者逐字段核对）。
+ */
 export interface KernelPaletteEntryView {
+  /** 资产身份（内容派生；同内容 ⇒ 同 id）。 */
+  readonly assetId: string
   readonly registryId: string
-  readonly meta?: number
-  readonly nbt?: string
+  readonly meta: number
+  readonly renderMode: string
+  /**
+   * **解码后的四边形**（`null` = 该条目无几何）。
+   *
+   * ## 为什么要归一（而不是两侧各给各的形态）
+   *
+   * 内核侧承载的是**类型化资产**（`BlockGeometryAsset`，含 `quads` + `mesh`），
+   * 而 legacy `PaletteEntryMeta.geometry` 是**文件原文**（`BakedQuadsGeometry`）
+   * ⇒ 两者形状不同。唯一消费点（`context/queries#getBlockGeometry`）要的是
+   * **解码后的四边形**，故本视图给那一件 —— 归一发生在**本模块**（一处），
+   * 而不是让消费点去分辨"我拿到的是哪一种形态"（那就是 15 处会漂移的适配）。
+   */
+  readonly geometry: readonly BakedQuad[] | null
   readonly occludesAdjacentFaces?: boolean
   readonly facing?: string
-  /** 条目级逐格说明提示（投影侧 idiom；与 `adapters/files/legacyFields` 同口径）。 */
-  readonly tooltip?: string
-  /** 解码前的烘焙几何（legacy `PaletteEntryMeta.geometry` 同名同形）。 */
-  readonly geometry: unknown
-  /** 条目原文（消费点需要读取本表未类型化的键时用；**不改**）。 */
+  readonly nbt?: Readonly<Record<string, unknown>>
+  readonly thumbnail?: string
+  readonly tooltip?: readonly string[]
+  /** 条目原文（**不改**）。 */
   readonly raw: Readonly<Record<string, unknown>>
 }
 
@@ -119,8 +152,8 @@ export interface KernelGridView {
   tooltipAt(pos: KernelGridPos): string | undefined
   /** 调色板条目（按内容键精确命中；取不到 ⇒ `null`，**不猜**）。 */
   paletteEntryOf(pos: KernelGridPos): KernelPaletteEntryView | null
-  /** 几何资产（`cellGeometry` → `geometry` 目录；取不到 ⇒ `null`）。 */
-  geometryOf(pos: KernelGridPos): unknown | null
+  /** 该格的**解码后四边形**（内核：`cellGeometry` → 资产 `quads`；取不到 ⇒ `null`）。 */
+  geometryOf(pos: KernelGridPos): readonly BakedQuad[] | null
   /** 世界空间体素中心（与 legacy `Grid.centerWorld` 逐字同式）。 */
   centerWorld(pos: KernelGridPos): KernelGridPos
 }
@@ -314,7 +347,7 @@ export function gridViewOfPayload(payload: BlockGridPayload): KernelGridView {
     if (idx < 0) return null
     const entry = palette?.[idx]
     if (entry === null || typeof entry !== 'object') return null
-    return paletteEntryViewOf(entry as Record<string, unknown>)
+    return paletteEntryViewOf(entry as Record<string, unknown>, quadsOfAsset(entry))
   }
 
   const contentAt = (pos: KernelGridPos): CellContent | undefined =>
@@ -356,10 +389,10 @@ export function gridViewOfPayload(payload: BlockGridPayload): KernelGridView {
     paletteEntryOf(pos: KernelGridPos): KernelPaletteEntryView | null {
       return paletteEntryAt(pos)
     },
-    geometryOf(pos: KernelGridPos): unknown | null {
+    geometryOf(pos: KernelGridPos): readonly BakedQuad[] | null {
       const assetId = cellGeometry?.[cellPositionKey(pos)]
       if (assetId === undefined || geometry === undefined) return null
-      return geometry[assetId] ?? null
+      return quadsOfAsset(geometry[assetId])
     },
     centerWorld(pos: KernelGridPos): KernelGridPos {
       // 与 legacy `Grid.centerWorld` **逐字同式**（网格居中于原点，方块中心偏移 +0.5）。
@@ -372,19 +405,56 @@ export function gridViewOfPayload(payload: BlockGridPayload): KernelGridView {
   })
 }
 
-function paletteEntryViewOf(entry: Record<string, unknown>): KernelPaletteEntryView {
+/**
+ * 条目 → 读面视图。
+ *
+ * @param decoded 已归一为"解码后的四边形"的几何（`null` = 无几何）—— **由调用方**
+ *   按各自来源算好（内核：资产 `quads`；legacy：`decodeBakedGeometry`），
+ *   使本函数不必知道两种承载形态。
+ */
+function paletteEntryViewOf(
+  entry: Record<string, unknown>,
+  decoded: readonly BakedQuad[] | null,
+): KernelPaletteEntryView {
+  const tooltip = entry.tooltip
   return Object.freeze({
+    assetId: String(entry.assetId ?? ''),
     registryId: String(entry.registryId ?? ''),
-    ...(typeof entry.meta === 'number' ? { meta: entry.meta } : {}),
-    ...(typeof entry.nbt === 'string' ? { nbt: entry.nbt } : {}),
+    meta: typeof entry.meta === 'number' ? entry.meta : 0,
+    renderMode: typeof entry.renderMode === 'string' ? entry.renderMode : '',
+    geometry: decoded,
     ...(typeof entry.occludesAdjacentFaces === 'boolean'
       ? { occludesAdjacentFaces: entry.occludesAdjacentFaces }
       : {}),
     ...(typeof entry.facing === 'string' ? { facing: entry.facing } : {}),
-    ...(typeof entry.tooltip === 'string' ? { tooltip: entry.tooltip } : {}),
-    geometry: entry.geometry ?? null,
+    ...(entry.nbt === null || entry.nbt === undefined
+      ? {}
+      : { nbt: entry.nbt as Readonly<Record<string, unknown>> }),
+    ...(typeof entry.thumbnail === 'string'
+      ? { thumbnail: entry.thumbnail }
+      : typeof entry.thumbnailPNG === 'string'
+        ? { thumbnail: entry.thumbnailPNG }
+        : {}),
+    ...(Array.isArray(tooltip) ? { tooltip: tooltip as readonly string[] } : {}),
     raw: entry,
   })
+}
+
+/** 内核资产 → 解码后四边形（`null` = 无几何资产）。 */
+function quadsOfAsset(asset: unknown): readonly BakedQuad[] | null {
+  if (asset === null || typeof asset !== 'object') return null
+  const q = (asset as { readonly quads?: unknown }).quads
+  return Array.isArray(q) ? (q as readonly BakedQuad[]) : null
+}
+
+/** legacy 文件原文 → 解码后四边形（解码失败 ⇒ `null`，与旧 `getBlockGeometry` 的 `catch` 同口径）。 */
+function quadsOfLegacyGeometry(raw: unknown): readonly BakedQuad[] | null {
+  if (raw === null || raw === undefined) return null
+  try {
+    return decodeBakedGeometry(raw as BakedQuadsGeometry)
+  } catch {
+    return null
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -419,6 +489,15 @@ export interface LegacyGridLike {
   at(pos: { x: number; y: number; z: number }): LegacySlotBlockLike | null
   forEach(fn: (pos: { x: number; y: number; z: number }, block: LegacySlotBlockLike) => void): void
   partsAt(pos: { x: number; y: number; z: number }): readonly PartRecord[] | null
+  /**
+   * **原地移动一格**（写操作）。
+   *
+   * ⚠️ 它**只**供 {@link LegacyGridLike} 的"编辑句柄"用途（
+   * `operators/builtin/moveTranslate` 把 grid 捕获进撤销闭包）——
+   * **读面**（`KernelGridView`）**没有**这个方法，那正是 B′ 撤回理由①的落点：
+   * 读面每次新建对象 ⇒ 在它上面 `moveBlock` 的改动会**静默丢失**。
+   */
+  moveBlock(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }): boolean
   getPaletteCache(): Map<string, LegacyPaletteEntryLike>
   centerWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number }
 }
@@ -493,12 +572,12 @@ export function gridViewOfLegacy(grid: LegacyGridLike): KernelGridView {
       if (b === null) return null
       const e = entryOf(b.paletteIndex)
       if (e === null) return null
-      return paletteEntryViewOf(e as Record<string, unknown>)
+      return paletteEntryViewOf(e as Record<string, unknown>, quadsOfLegacyGeometry(e.geometry))
     },
-    geometryOf(pos: KernelGridPos): unknown | null {
+    geometryOf(pos: KernelGridPos): readonly BakedQuad[] | null {
       const b = grid.at(pos)
       if (b === null) return null
-      return entryOf(b.paletteIndex)?.geometry ?? null
+      return quadsOfLegacyGeometry(entryOf(b.paletteIndex)?.geometry)
     },
     centerWorld(pos: KernelGridPos) {
       return grid.centerWorld(pos)

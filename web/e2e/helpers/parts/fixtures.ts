@@ -142,8 +142,8 @@ export interface CellPartsObservation {
  */
 export async function readPartsObservation(page: Page): Promise<CellPartsObservation[]> {
   return await page.evaluate(() => {
-    const doc = (window as any).__vm__?.getDoc()?.value
-    const grid = doc?.frame(0)?.grid
+    // #301 P10f D3（R5）：网格读面（网格帧下标**逐字保留 0** —— 原实现即 `frame(0)`）。
+    const grid = (window as any).__vm__?.kernelGrid?.(0)
     if (!grid) return []
     const out: CellPartsObservation[] = []
     for (let z = 0; z < grid.depth; z++) {

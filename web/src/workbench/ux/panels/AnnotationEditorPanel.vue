@@ -34,8 +34,12 @@ const annos = ref<Annotation[]>([])
 
 function load(): void {
   const sel = [...props.ctx.getSelection().items.value].filter(e => e.kind === 'annotation')
-  const doc = props.ctx.getDoc().value
-  const all = (doc?.annotations ?? []) as Annotation[]
+  // #301 P10f D3（R2）：注解表走内核注解读面（`KernelAnnotationView`）。
+  // ⚠️ 面板的 `Annotation` 类型比读面**宽**（含 `renderOpacity`/`fontSize` 等 legacy
+  // 专有字段）⇒ 两跳断言（`as unknown as`）是刻意的：读面给的是**它承载的那一份**，
+  // 未承载字段在面板上表现为 `undefined`（不显示），而**不是**被伪造一个默认值。
+  // 该收窄登记在 `composition/seams.ts` 的 `annotation-wide-field-face`（owner P11）。
+  const all = props.ctx.kernelAnnotations() as unknown as Annotation[]
   if (sel.length === 0) {
     const hoverId = props.ctx.getHoveredAnnotationId().value
     const hovered = hoverId ? all.find(a => a.id === hoverId) : undefined

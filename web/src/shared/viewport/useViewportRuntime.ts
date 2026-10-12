@@ -70,7 +70,9 @@ export interface UseViewportRuntimeOptions {
 export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   const { ctx, regionId, viewerPrefs, blockIconCacheOptions = {}, initialWorldFrameIndex, docOverride } = opts
   const vpSlot = ctx.viewports.get(regionId) ?? ctx.viewports.register(regionId)
-  const docRef = docOverride ?? computed(() => ctx.getDoc().value)
+  // #301 P10f D3（R9）：DRW 的文档来源（渲染链旧格式）。终切在 D 批映射表 §八
+  // 被显式排除 ⇒ 本处是接缝 `legacy-render-source-document` 的落点。
+  const docRef = docOverride ?? computed(() => ctx.legacyRenderSource())
 
   /**
    * 内核会话（P10 #261）。

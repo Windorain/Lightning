@@ -173,9 +173,10 @@ async function gotoWorkbenchWithScene(page: Page): Promise<void> {
 async function selectFirstBlock(page: Page): Promise<boolean> {
   const r = await page.evaluate(() => {
     const vm = (window as any).__vm__
-    const doc = vm?.getDoc?.().value
-    if (!doc) return 'no-doc'
-    const ser = doc.serialize ? doc.serialize() : doc
+    // #301 P10f D3（R3）：本处要的本来就是**产物 plain**（下面直接读 `frames[0].structure`）
+    // ⇒ 改吃唯一产物入口，`serialize()` 只是当年获取 plain 的手段。
+    const ser = vm?.plainForSave?.().plain ?? null
+    if (!ser) return 'no-doc'
     const st = ser?.frames?.[0]?.structure ?? null
     const grid = st?.cellGrid ?? null
     if (!Array.isArray(grid) || grid.length === 0) return 'no-grid'

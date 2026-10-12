@@ -110,14 +110,27 @@ function composeSummary(lines: WikiChangeLine[]): string {
   return text
 }
 
-/** 对比 baseline 与当前文档，生成保存摘要草稿（不访问 mw） */
+/**
+ * 对比 baseline 与当前文档，生成保存摘要草稿（不访问 mw）。
+ *
+ * ## #301 P10f D3 的入参改造（`current` 由旧文档改为**产物 plain**）
+ *
+ * 本函数做的比较**全部**是 plain 键级比较（`meta.*` / `tooltipPalette` /
+ * `cellTooltipGrid` / `annotations` / `labels`）—— 它从来不需要旧文档的**类型**，
+ * 只需要那份 plain。故 `current` 直接吃 `ctx.plainForSave().plain`
+ *（保存/导出的**唯一**产物入口，与真正写出去的那份**同一来源**）。
+ *
+ * ⚠️ `baseline` **仍**是旧文档：`DocumentBinding.saveBaseline` 的字段类型就是
+ * `RuntimeDocument | null`（**外部格式边界**，按 D 批映射表 §一 保留），
+ * 且它是在**写入绑定时**捕获的一份冻结副本（不会随编辑变化）。
+ */
 export function buildWikiEditSummaryDraft(
   baseline: RuntimeDocument | null,
-  current: RuntimeDocument | null,
+  current: Readonly<Record<string, unknown>> | null,
 ): WikiEditSummaryDraft | null {
   if (!baseline || !current) return null
   const b = baseline.serialize() as Record<string, unknown>
-  const c = current.serialize() as Record<string, unknown>
+  const c = current
   const lines: WikiChangeLine[] = []
 
   const metaKeys = ['title', 'description', 'author', 'version'] as const

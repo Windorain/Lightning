@@ -165,8 +165,11 @@ function legacyGridOfSame(): Grid {
   g.setBlock({ x: 1, y: 0, z: 0 }, { name: 'dirt', meta: 3, paletteIndex: 1 })
   g.setBlock({ x: 0, y: 1, z: 0 }, { name: 'air', meta: 0, paletteIndex: 2 })
   const cache = g.getPaletteCache()
-  cache.set('#0', { registryId: 'minecraft:stone', meta: 0, geometry: { quads: [] } } as never)
-  cache.set('#1', { registryId: 'minecraft:dirt', meta: 3, geometry: { quads: [{ i: 1 }] } } as never)
+  // ⚠️ `encoding` **必须**在（`decodeBakedGeometry` 按它分派；缺失 ⇒ 抛"未知编码"
+  // ⇒ 读面的 `catch` 给 `null`）。第一版夹具漏了它 ⇒ 判据把"夹具不合法"
+  // 误读成"读面不同义" —— 记此以免后人重踩。
+  cache.set('#0', { registryId: 'minecraft:stone', meta: 0, geometry: { encoding: 'bakedQuadsJsonV1', quads: [] } } as never)
+  cache.set('#1', { registryId: 'minecraft:dirt', meta: 3, geometry: { encoding: 'bakedQuadsJsonV1', quads: [{ i: 1 }] } } as never)
   cache.set('#2', { registryId: 'minecraft:air', meta: 0 } as never)
   return g
 }
@@ -260,15 +263,20 @@ describe('D3/R5 ③ 两种来源同形状（内核 `blockGrid` vs 旧 `Grid`）'
       //  legacy = 每个调色板条目自带 `geometry`（见 `legacyGridOfSame` 的 cache）
       // ⇒ 两侧各按自己的形态给出同一份几何，判据比较的是**读面归一后的结果**。
       cellGeometry: { '1,0,0': 'geo:dirt' },
-      geometry: { 'geo:dirt': { quads: [{ i: 1 }] } } as never,
+      geometry: { 'geo:dirt': { encoding: 'bakedQuadsJsonV1', quads: [{ i: 1 }] } } as never,
     })
     const l = gridViewOfLegacy(legacyGridOfSame() as unknown as LegacyGridLike)
-    expect(k.paletteEntryOf({ x: 0, y: 0, z: 0 })?.registryId).toBe(
-      l.paletteEntryOf({ x: 0, y: 0, z: 0 })?.registryId,
-    )
-    expect(k.paletteEntryOf({ x: 1, y: 0, z: 0 })?.registryId).toBe(
-      l.paletteEntryOf({ x: 1, y: 0, z: 0 })?.registryId,
-    )
+    for (const pos of [
+      { x: 0, y: 0, z: 0 },
+      { x: 1, y: 0, z: 0 },
+    ]) {
+      // **反空洞真**：两侧都必须**命中**（第一版只比 `?.registryId` ⇒
+      // 两边同为 `undefined` 时也"相等"，判据空转 —— 记此以免后人重踩）。
+      expect(k.paletteEntryOf(pos), `内核侧 ${cellPositionKey(pos)} 必须命中条目`).not.toBeNull()
+      expect(l.paletteEntryOf(pos), `legacy 侧 ${cellPositionKey(pos)} 必须命中条目`).not.toBeNull()
+      expect(k.paletteEntryOf(pos)?.registryId).toBe(l.paletteEntryOf(pos)?.registryId)
+    }
+    expect(k.geometryOf({ x: 1, y: 0, z: 0 }), '内核侧必须解出四边形').not.toBeNull()
     expect(k.geometryOf({ x: 1, y: 0, z: 0 })).toEqual(l.geometryOf({ x: 1, y: 0, z: 0 }))
   })
 

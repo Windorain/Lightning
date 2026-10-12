@@ -431,20 +431,37 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     const entry = SEAMS.find((s: { id: string }) => s.id === 'kernel-property-write-dual-track')
     expect(entry, '必须登记属性写双轨').toBeTruthy()
 
-    // 旧轨的**真实证据**：`workbench-rna.ts` 经 `ctx.getDoc()` 读文档，
-    // 而 `getDoc()` 的类型是 `RuntimeDocument`（旧模型）。故要两处一起看：
-    //  ① 面板侧确实经 `getDoc()` 取文档（旧模型的读入口）；
+    // ## ⚠️ 本断言已**翻转**（#301 P10f D3 的终删落点）
+    //
+    // 原断言是 **failure-closed** 的："`workbench-rna.ts` 必须**仍**经
+    // `ctx.getDoc()` 读旧文档 + `getDoc()` 的类型必须仍是 `Ref<RuntimeDocument | null>`"
+    // —— 它描述的是"双轨仍在"这一事实，故 D3 完成后**必然**要先改它，否则交付时恒红。
+    //
+    // D3 之后的事实分两半（各自都要有判据，不能只留"删干净了"）：
+    //
+    // | 事实 | 判据 |
+    // |---|---|
+    // | ① 旧轨的**读入口**已消失 | `getDoc()` 全树 0 命中（含声明位与引用位） |
+    // | ② 旧轨的**数据模型**仍在（`DocumentState.document` 仍是旧文档，因为它要交付给 `applySetProperty`） | `workbench-rna` 经**具名**取值口 `legacyDocumentModel()` 取，且**不得**再直读 `main.doc` |
+    //
+    // ② 是"双轨仍登记在案"的真实依据（登记表不能空转），而它**不是**"读入口回来了"：
+    // `legacyDocumentModel()` 的调用者由下一条判据（白名单闭集）钉死为**恰好两处**。
     const rna = readSource(path.join(SRC_ROOT, 'editors', 'workbench-rna.ts'))
     const codeOnly = rna
       .split('\n')
       .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
       .join('\n')
-    expect(codeOnly, '`workbench-rna.ts` 必须仍经 `ctx.getDoc()` 读旧文档').toContain('ctx.getDoc()')
-    //  ② 该入口的类型确实是 `RuntimeDocument`（在 `runtime/context.ts` 声明）。
+    expect(codeOnly, '`getDoc()` 访问器已终删 ⇒ 面板侧不得再出现').not.toContain('.getDoc(')
+    expect(codeOnly, '旧轨的**数据模型**仍需要旧文档 ⇒ 经具名取值口').toContain('legacyDocumentModel()')
+    //  ② 该访问器**确实**在 `runtime/context.ts` 声明（否则上面的 toContain 是空转）
     const ctxSrc = readSource(path.join(SRC_ROOT, 'runtime', 'context.ts'))
-    expect(ctxSrc, '`getDoc()` 的类型必须仍是旧 `RuntimeDocument`（旧轨的类型面）').toMatch(
-      /getDoc\(\):\s*Ref<RuntimeDocument \| null>/,
+    expect(ctxSrc, '`legacyDocumentModel()` 必须在 `Context` 上声明').toMatch(
+      /legacyDocumentModel\(\):\s*RuntimeDocument \| null/,
     )
+    expect(
+      /getDoc\(\):\s*Ref<RuntimeDocument \| null>/.test(ctxSrc),
+      '`getDoc()` 的签名必须**已不存在**（D3 终删）',
+    ).toBe(false)
 
     // 登记项声明的阻塞点也必须真实：内核侧写入口已在（新轨已交付）。
     expect(
@@ -636,6 +653,111 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
       projectionImporters,
       '前提：投影已被生产调用（D2 渲染路径）⇒ 本组测的是保真挂点，不是"投影没人用"',
     ).toEqual(['composition/kernelRenderView.ts'])
+  })
+
+  /**
+   * ## D-7：删访问器后的**防绕过**闸门（#301 P10f D3；Lead 裁决 D-7）
+   *
+   * ### 为什么"`getDoc(` 零命中"**不够**
+   *
+   * `Context.main` 是 `public readonly`（读面都要读 `main.doc` —— 它是**响应式依赖**
+   * 的唯一来源，见 `hasLoadedDocument` 的长注释）。⇒ 删掉访问器之后，一行
+   * `ctx.main.doc.value` 就能把"权威读入口"原样拿回来，而"`getDoc(` 零命中"
+   * 这个判据**完全看不见它** —— 那是"机械代理"而不是"判据本意"
+   *（D 批映射表 §一 已澄清：删的是"以 `getDoc()` 为**权威读入口**这条路"）。
+   *
+   * ### 本闸门的形态：**闭集**（多一处即后门，少一处即腐烂）
+   *
+   * 逐个扫 `src/` 生产文件找出所有直接读 `main.doc` 的位置，与白名单逐条对账。
+   * 白名单每条都写清"为什么它必须读本体而不能用某个读面"—— 于是这张表本身就是
+   * "旧数据模型还剩几处欠账、各自归谁"的可核对面。
+   */
+  it('**D-7 防绕过**：`main.doc` 直接读取点恰为白名单闭集；`legacyDocumentModel()` 调用者恰两处', () => {
+    /** 剥注释与**字符串**（与 `retirementRegistry` 的 `stripNonCode` 同一把尺子）。 */
+    const codeOf = (text: string): string =>
+      text
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\/\/[^\n]*/g, ' ')
+        .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+        .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+        .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+
+    /**
+     * 白名单（`src/` 相对路径 → 该文件允许出现直接读 `main.doc` 的理由）。
+     *
+     * ⚠️ 每条都必须能回答："为什么这里不能用 `hasLoadedDocument()` / `kernelGrid()` /
+     * `frameDeclarations()` / `plainForSave()` …？"答不上来的条目就是**后门**。
+     */
+    const ALLOWED: Record<string, string> = {
+      'runtime/context.ts':
+        '读面本体：`hasLoadedDocument`/`frameDeclarations`/`plainForSave`/`kernelAnnotations`/'
+        + '`kernelMaterials`/`kernelGrid`/`cellTooltips`/`documentMetadata`/`legacyDocumentModel`/'
+        + '`legacyGridForEdit`/`legacyRenderSource`/`setDocument` 都在此文件内读 `main.doc`'
+        + '（响应式依赖 + 唯一写入口的落点）。',
+      // ⚠️ `runtime/main.ts` **不**在本表内（实测）：它写的是 `this.doc.value = doc`
+      //（**赋值**，不是读 `main.doc`）⇒ 本闸门的正则（`.main.doc`）看不见它。
+      // 它的"唯一赋值点"性质由另一条既有判据把守
+      //（`p10fExistenceReadFace.test.ts` 的"`main.doc.value =` 只在 `runtime/main.ts`"）。
+      // 我第一版把它登记进来 ⇒ **被本判据的"腐烂"半边当场判红**
+      //（"白名单里有已不存在的登记"）—— 这正是闭集双向对账该有的性质。
+    }
+
+    const walkSrc = (fn: (rel: string, abs: string) => void): void => {
+      const walk = (dir: string): void => {
+        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, ent.name)
+          if (ent.isDirectory()) {
+            if (ent.name === '__tests__' || ent.name === 'node_modules') continue
+            walk(full)
+            continue
+          }
+          if (!/\.(ts|vue)$/.test(ent.name)) continue
+          if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(ent.name) || /\.d\.ts$/.test(ent.name)) continue
+          fn(path.relative(SRC_ROOT, full).replace(/\\/g, '/'), full)
+        }
+      }
+      walk(SRC_ROOT)
+    }
+
+    const hits: string[] = []
+    const modelCallers: string[] = []
+    walkSrc((rel, abs) => {
+      const code = codeOf(readSource(abs))
+      if (/\.main\s*\.\s*doc\b/.test(code)) hits.push(rel)
+      if (rel !== 'runtime/context.ts' && /legacyDocumentModel\s*\(/.test(code)) modelCallers.push(rel)
+    })
+
+    const allowed = Object.keys(ALLOWED)
+    const unexpected = hits.filter((h) => !allowed.includes(h)).sort()
+    const rotten = allowed.filter((f) => !hits.includes(f)).sort()
+    expect(
+      unexpected,
+      '`main.doc` 出现**未登记**的直接读取点 ⇒ 它是绕过具名读面的后门：\n' + unexpected.join('\n'),
+    ).toEqual([])
+    expect(rotten, '白名单里有**已不存在**的登记 ⇒ 清单腐烂，请同步核销：\n' + rotten.join('\n')).toEqual([])
+    expect(
+      modelCallers.sort(),
+      '`Context#legacyDocumentModel()` 的调用者**恰为两处**'
+        + '（`property-write-legacy-document-model` 与 `legacy-document-in-place-edit`）；'
+        + '多一处即为绕过具名读面的后门。',
+    ).toEqual(['context/captureEmbedInitialView.ts', 'editors/workbench-rna.ts'])
+  })
+
+  it('**负对照**：上一条判据能抓到绕过（`ctx.main.doc.value` 必被判红）', () => {
+    const codeOf = (text: string): string =>
+      text
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\/\/[^\n]*/g, ' ')
+        .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+        .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+        .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+    const isHit = (src: string): boolean => /\.main\s*\.\s*doc\b/.test(codeOf(src))
+    expect(isHit('const d = ctx.main.doc.value'), 'ctx.main.doc.value 必须判红').toBe(true)
+    expect(isHit('const d = this.main.doc.value'), 'this.main.doc.value 必须判红').toBe(true)
+    expect(isHit('const d = ctx.main . doc .value'), '空白变体必须判红').toBe(true)
+    // 真判据**不得**被散文或字符串骗过（否则登记表本身就是自己的假红来源）
+    expect(isHit('// 见 ctx.main.doc.value 的说明'), '注释不算绕过').toBe(false)
+    expect(isHit("const s = 'ctx.main.doc.value'"), '字符串不算绕过').toBe(false)
   })
 
   it('**负对照**：未登记的接缝判据能抓到"旧轨仍在但没有登记"', async () => {

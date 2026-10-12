@@ -12,8 +12,8 @@ export const TooltipEditOperator: OperatorType = {
   },
 
   exec(ctx, props) {
-    const doc = ctx.getDoc().value
-    if (!doc) return
+    // #301 P10f D3（R1）：存在性走 GF-15 读面。
+    if (!ctx.hasLoadedDocument()) return
 
     const text = props.text as string
     const pos = props.pos as { x: number; y: number; z: number }
@@ -42,7 +42,7 @@ export const TooltipEditOperator: OperatorType = {
     //
     // ⇒ 必须在本算子内把**行号**翻回世界 Y，且高度用**当前帧**的高度
     // （各帧网格可以不同尺寸；面板侧 `h` 取的也是当前帧）。
-    const frameHeight = doc.frame(0)?.grid?.height ?? 0
+    const frameHeight = ctx.kernelGrid(0)?.height ?? 0
     const worldY = frameHeight > 0 ? frameHeight - 1 - pos.y : pos.y
 
     if (
@@ -57,7 +57,8 @@ export const TooltipEditOperator: OperatorType = {
     }
 
     // 回落：未装配（GF-16 = false）/ 无会话 ⇒ legacy 是权威（能力不回退）。
-    const newDoc = doc.clone()
+    const newDoc = ctx.frozenDocumentValue()
+    if (!newDoc) return
     // #80 修复：`?? []` 曾经造出**孤儿数组**——文字 push 进局部数组后被丢弃，而网格下标
     // 却写进了文档（悬空下标）。修复 = 变更后的两个字段一律写回 newDoc：文档缺调色板时
     // 新建空调色板（契约 §逐格说明的成对 idioms 在写入侧对齐：tooltipPalette / cellTooltipGrid

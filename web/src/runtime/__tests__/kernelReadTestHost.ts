@@ -42,6 +42,25 @@ export interface KernelReadHost {
   readonly ctx: Context
   readonly session: KernelSession | null
   setDocument(doc: RuntimeDocument | null): void
+  /**
+   * **测试侧**对"被跟踪的 legacy 文档"的观测口。
+   *
+   * ## 为什么它在测试宿主里，而不在生产 API 上（#301 P10f D3 的判据设计）
+   *
+   * D3 删掉了 `getDoc()` —— 其机械含义是"**旧文档不再是生产可读的权威**"。
+   * 但"双轨回写是否真的落在 legacy"这类判据**必须**能观测旧文档，
+   * 否则 #333 那一类缺陷（内核写了、legacy 没投影）就重新变得不可判。
+   *
+   * 处置：观测口留在**宿主**（本文件持有 `docRef` 这一注入事实），
+   * **不**回到生产 `Context` 上。于是：
+   *  - 生产代码无法读旧文档（判据本意达成）；
+   *  - 测试**显式声明**它在观测一份"自己注入的、被生产代码替换过的"值
+   *    —— 而不是伪装成"生产有这么一个读面"。
+   *
+   * 这与 `editors/__tests__/p10fPanelTooltipWrite.test.ts` 的 `doc()` 同一手法
+   * （那里一直是这么做的，本批只是把它推广到本宿主）。
+   */
+  legacyDocument(): RuntimeDocument | null
   dispose(): void
 }
 
@@ -120,6 +139,7 @@ export function makeKernelReadHost(doc: RuntimeDocument | null): KernelReadHost 
     ctx: makeRealContext(docRef, null),
     session: null,
     setDocument: (next: RuntimeDocument | null): void => swapDocument(docRef, null, next),
+    legacyDocument: (): RuntimeDocument | null => docRef.value,
     dispose: (): void => {},
   }
 }
@@ -149,6 +169,7 @@ export function makeAdoptedKernelReadHost(
     ctx: makeRealContext(docRef, session),
     session,
     setDocument: (next: RuntimeDocument | null): void => swapDocument(docRef, session, next),
+    legacyDocument: (): RuntimeDocument | null => docRef.value,
     dispose: (): void => session.dispose(),
   }
 }

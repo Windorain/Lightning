@@ -57,9 +57,11 @@ export class OperatorRegistry {
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
       if (op.flagUndo && ctx.hasLoadedDocument()) {
-        const before = ctx.getDoc().value?.clone() ?? null
+        // #301 P10f D3（R8）：撤销快照 = **不透明令牌**（R-WK-09 裁决 3）。
+        // `null` = 当时没有文档 ⇒ 表达"撤销到无文档"（内核历史结构性表达不了的那一态）。
+        const before = ctx.documentSnapshot()
         await op.exec(ctx, resolvedProps)
-        const after = ctx.getDoc().value?.clone() ?? null
+        const after = ctx.documentSnapshot()
         pushDocUndo(ctx, before, after, op.label)
       } else {
         await op.exec(ctx, resolvedProps)
@@ -91,7 +93,7 @@ export class OperatorRegistry {
 
     if (op.invoke) {
       const snapshot = op.flagUndo && ctx.hasLoadedDocument()
-        ? ctx.getDoc().value?.clone() ?? null
+        ? ctx.documentSnapshot()
         : null
 
       const result = op.invoke(ctx, resolvedProps, event)
@@ -106,7 +108,7 @@ export class OperatorRegistry {
         logOperatorResult(ctx, id, op.label, 'RUNNING_MODAL', snap)
       } else if (result === OP_RESULT.FINISHED) {
         if (snapshot !== null) {
-          const snapshotAfter = ctx.getDoc().value?.clone() ?? null
+          const snapshotAfter = ctx.documentSnapshot()
           pushDocUndo(ctx, snapshot, snapshotAfter, op.label)
         }
         logOperatorResult(ctx, id, op.label, 'FINISHED', snap)
@@ -131,9 +133,9 @@ async function invokeExecFallback(
   props: OperatorProperties,
 ): Promise<OpResult> {
   if (op.flagUndo && ctx.hasLoadedDocument()) {
-    const snapshot = ctx.getDoc().value?.clone() ?? null
+    const snapshot = ctx.documentSnapshot()
     await op.exec!(ctx, props)
-    const snapshotAfter = ctx.getDoc().value?.clone() ?? null
+    const snapshotAfter = ctx.documentSnapshot()
     pushDocUndo(ctx, snapshot, snapshotAfter, op.label)
   } else {
     await op.exec!(ctx, props)

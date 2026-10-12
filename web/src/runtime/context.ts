@@ -215,18 +215,36 @@ export class Context {
   }
 
   // --- Main ---
-
-  /**
-   * ⚠️ **本段（S1）暂时保留；S2 删除**（#301 P10f D3）。
-   *
-   * S1 的交付是"新读面**纯新增**"（树保持绿 ⇒ 判据可独立验证）；
-   * S2 把 46 处消费点迁到新读面，**并在同一个 commit 里**删掉本访问器
-   * （否则 `retirementRegistry` 的"pending 条目必须仍有命中"断言会判红
-   * ⇒ 删除与相位翻转必须在同一提交里发生）。
-   */
-  getDoc(): Ref<RuntimeDocument | null> {
-    return this.main.doc
-  }
+  //
+  // ⚠️ **`getDoc()` 已删除**（#301 P10f D3，本批的终删目标）。
+  //
+  // 它曾是"文档内容的**权威读入口**"，46 处消费点经它读一切（保存/导出/属性/拾取/
+  // 撤销/渲染）。现在每一类事实都有**具名读面**：
+  //
+  // | 事实 | 读面 |
+  // |---|---|
+  // | 有文档吗（存在性） | `hasLoadedDocument()`（GF-15） |
+  // | 内核承载的是这份文档吗 | `hasAdoptedContent()`（GF-16） |
+  // | 帧声明（数/时长/标签） | `frameDeclarations()` |
+  // | 网格（尺寸/格/部件/条目/几何/说明） | `kernelGrid(frameIndex)` |
+  // | 注解表 | `kernelAnnotations()` |
+  // | 材质表 | `kernelMaterials()` |
+  // | 逐格说明侧表 | `cellTooltips()` |
+  // | 文档元数据 | `documentMetadata()` |
+  // | 产物 plain | `plainForSave()` |
+  // | 撤销快照 | `documentSnapshot()` / `restoreDocumentSnapshot()` |
+  // | 保存基线（外部格式值） | `frozenDocumentValue()` |
+  // | 渲染链旧格式源 | `legacyRenderSource()` |
+  // | 网格**编辑句柄**（写路径） | `legacyGridForEdit()` |
+  //
+  // ⚠️ **`RuntimeDocument` 类型不删**：它是**外部格式边界**的契约类型
+  //（解析器/投影/保真记录/`plainRoot` 的 47 个引用面），按 D 批映射表 §一
+  //（Lead comment 6034 裁决 1）保留。
+  //
+  // ⚠️ **防绕过**：`main` 仍是 `public readonly`（上面的读面都要读它）⇒
+  // 只判"`getDoc(` 零命中"会被一行 `ctx.main.doc.value` 绕过。故
+  // `boundary-scan.test.ts` 增了一条"`main.doc` 直接读取点白名单闭集"判据
+  // （每一处登记者与理由），见 `tests/architecture/boundary-scan.test.ts`。
 
   /**
    * **文档是否已装载**（#301 P10f B′：GF-15 读面的**消费入口**）。
@@ -750,6 +768,35 @@ export class Context {
       formatVersion,
       source: 'legacy',
     }
+  }
+
+  /**
+   * **旧文档本体（不克隆）** —— `getDoc()` 退出后**唯一**保留的旧数据模型取值口。
+   *
+   * ## 只有两个合法消费者，且**都**登记在案（见 `composition/seams.ts`）
+   *
+   * | # | 消费者 | 为什么它需要"本体"而不是"克隆/读面" | 登记 |
+   * |---|---|---|---|
+   * | 1 | `editors/workbench-rna#documentStateOf` | `DocumentState.document` 的**字段类型就是**旧文档（`editors/property-writers`），面板属性写要把它交给 `applySetProperty`；**每格一 clone 会在大文档上产生可感的卡顿**（实测口径：432 帧文档的面板读路径） | `property-write-legacy-document-model` |
+   * | 2 | `context/captureEmbedInitialView` | **原地**写 `doc.meta[embed_initial_view]`（`setDocumentEmbedInitialView` 的语义就是原地改）。改成"克隆 + `setDocument`"会**顺带 bump `documentRevision`** ⇒ `EmbedViewport.vue` 的相机自动初始化被重置（可感知行为变更） | `legacy-document-in-place-edit` |
+   *
+   * ## 为什么它**不**等于"把 `getDoc()` 改个名"（这是判据要能区分的事）
+   *
+   * | | 旧 `getDoc()` | 本方法 |
+   * |---|---|---|
+   * | 调用点 | 46 处 / 18 文件（保存/导出/属性/拾取/渲染/撤销**全在内**） | **2 处**（上面两行，均为已登记的暂存） |
+   * | 语义 | "文档内容的**权威读入口**"（谁都能拿它读一切） | "旧数据模型仍需要的**两句形状**的载体" |
+   * | 判据 | 无（它就是权威） | `boundary-scan.test.ts` 的**白名单闭集**：`legacyDocumentModel(` 的调用者必须**恰为**上面两家（多一处即判红） |
+   *
+   * ⇒ "终删 `getDoc()`"的机械含义是**权威读入口消失、46 处各有具名读面**；
+   * 剩下这两处是**真实的承载面欠账**（写模型仍是旧文档 + 文件格式的原地写），
+   * 故它们必须**可见、可数、有 owner** —— 而不是散在 46 处里看不见。
+   *
+   * ⚠️ **不得**用它读内容事实（网格/注解/材质/帧/说明/元数据/产物 plain）。
+   * 那样做会让白名单闭集变成后门，而闭集正是为防这件事设的。
+   */
+  legacyDocumentModel(): RuntimeDocument | null {
+    return this.main.doc.value
   }
 
   /**

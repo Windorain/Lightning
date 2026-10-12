@@ -578,18 +578,58 @@ describe('§16 覆盖边界：内核层已达成，产品层归 #282（R-WK-04�
     expect(s.read().objects.get(id).ok).toBe(true)
   })
 
-  it('**产品层未达成**：工作台文档仍是旧 `RuntimeDocument`（归 #282）', () => {
-    // 本断言的目的是**防止把内核层记录冒充产品级达成**。
-    // 判据：`Context.getDoc()` 的返回类型仍是旧文档（源码级检查）。
-    // 一旦 #282 完成迁移，本条会判红 ⇒ 逼它同批更新（与 RAF 双向登记同一手法）。
-    const src = fs
-      .readFileSync(path.join(process.cwd(), 'src', 'runtime', 'context.ts'), 'utf8')
-      .replace(/\r\n/g, '\n')
+  it('**产品层已迁移读入口**：`getDoc()` 终删，工作台经具名读面读内容（#301 D3）', () => {
+    // ## 本条的翻转（它自带指引，这正是那条指引被执行的形态）
+    //
+    // 原断言的目的是**防止把内核层记录冒充产品级达成** —— 判据是
+    // "`Context.getDoc()` 仍返回旧文档（产品层未迁移）"，并逐字写明
+    // 「一旦 #282 完成迁移，本条会判红 ⇒ 逼它同批更新。**不要删除它**
+    // （它是"不冒充产品级"的守卫）」。
+    //
+    // #301 P10f D3 完成了这次迁移 ⇒ **按指引更新**（不删除）：
+    //  ① `getDoc()` 访问器与全部 46 处消费**都不在了**（源码级）；
+    //  ② 内容事实改由**具名读面**读（枚举最小集，逐个存在性断言）；
+    //  ③ **仍保留**"不冒充产品级"的那一半：`RuntimeDocument` **类型仍在使用**
+    //     （外部格式边界 + 两处已登记的旧数据模型载体）⇒ 产品层的**完整**迁移
+    //     （写模型与渲染链终切）**仍未达成**，本条据实登记为"未达成"。
+    const readSrc = (rel: string): string =>
+      fs.readFileSync(path.join(process.cwd(), 'src', rel), 'utf8').replace(/\r\n/g, '\n')
+    const ctxSrc = readSrc(path.join('runtime', 'context.ts'))
+
+    // ① 终删：签名与调用都不在了
     expect(
-      /getDoc\(\):\s*Ref<RuntimeDocument \| null>/.test(src),
-      '本条假定 `getDoc()` 仍返回旧文档（产品层未迁移）。若 #282 已完成迁移，'
-        + '请把本条改为断言内核 `Document` 并更新 §16 的层级标注 —— '
-        + '不要删除它（它是"不冒充产品级"的守卫）。',
+      /getDoc\(\):\s*Ref<RuntimeDocument \| null>/.test(ctxSrc),
+      '`getDoc()` 必须已删除（D3 终删）',
+    ).toBe(false)
+
+    // ② 内容事实的**具名读面**在案（逐个断言，防"删了但没给替代"）
+    for (const face of [
+      'hasLoadedDocument(): boolean',
+      'hasAdoptedContent(): boolean',
+      'frameDeclarations(): {',
+      'kernelGrid(frameIndex: number): KernelGridView | null',
+      'kernelAnnotations(): readonly KernelAnnotationView[]',
+      'kernelMaterials(): readonly KernelMaterialView[]',
+      'cellTooltips():',
+      'documentMetadata():',
+      'plainForSave():',
+      'documentSnapshot():',
+      'legacyRenderSource():',
+    ]) {
+      expect(ctxSrc, `读面 ${face} 必须在案（终删必须给替代面，否则是能力回退）`).toContain(face)
+    }
+
+    // ③ **产品层仍未完全达成**（如实登记，不冒充）
+    //    `RuntimeDocument` 类型仍是**外部格式边界**与两处旧数据模型载体的契约类型。
+    const rna = readSrc(path.join('editors', 'workbench-rna.ts'))
+    expect(
+      rna.includes('legacyDocumentModel()'),
+      '本条的"未达成"半边：面板属性写的 `DocumentState.document` 仍是旧数据模型'
+        + '（登记 `property-write-legacy-document-model`）⇒ 产品层**未**完全迁移。',
+    ).toBe(true)
+    expect(
+      rna.includes('RuntimeDocument'),
+      '`RuntimeDocument` 类型仍在生产使用（外部格式边界）',
     ).toBe(true)
   })
 })

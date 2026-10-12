@@ -46,7 +46,8 @@ export const DocumentSaveOperator: OperatorType = {
   poll(ctx) {
     const b = ctx.getDocumentBinding().value
     if (b.sourceId !== 'wiki-data') return false
-    const draft = buildWikiEditSummaryDraft(b.saveBaseline, ctx.getDoc().value)
+    // #301 P10f D3（R3）：产物 plain 的唯一入口。
+    const draft = buildWikiEditSummaryDraft(b.saveBaseline, ctx.plainForSave().plain)
     return hasWikiAuditableChanges(draft) || ctx.getEditHistory().canUndo.value
   },
 

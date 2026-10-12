@@ -41,7 +41,8 @@ const wikiName = computed(() =>
 )
 const wikiDirty = computed(() => {
   if (binding.value.sourceId !== 'wiki-data') return false
-  const draft = buildWikiEditSummaryDraft(binding.value.saveBaseline, ctx.getDoc().value)
+  // #301 P10f D3（R3）：产物 plain 的唯一入口（与保存/导出同一个分流点）。
+  const draft = buildWikiEditSummaryDraft(binding.value.saveBaseline, ctx.plainForSave().plain)
   return hasWikiAuditableChanges(draft) || ctx.getEditHistory().canUndo.value
 })
 
