@@ -415,6 +415,115 @@ describe('E2·E3·E4 · 真实 PNG 字节 + 像素真的进去了', () => {
     expect(() => encodePngFromRgba(new Uint8Array(16), 0, 1), '宽必须是正整数').toThrow()
     expect(() => encodePngFromRgba(new Uint8Array(16), 2, 2.5), '高必须是整数').toThrow()
   })
+
+  it('E3：`jpeg` 被**显式拒绝**（不按 PNG 编码却声明 image/jpeg）', async () => {
+    // `ImageEncoding` 类型里有 `'jpeg'`。若悄悄按 PNG 编码，字节与声明的媒体类型
+    // 就不一致 —— 那是本批 D7 修复针对的**同族**缺陷（声明与内容不符）。
+    const w = 4
+    const h = 2
+    const encoder = createEncoderPort()
+    const request = requestOf({ spec: specOf({ render: { width: w, height: h, background: 'transparent' } }) })
+    const frame: RenderedFrame = Object.freeze({ index: 0, time: request.frames[0]!, pixels: deterministicPixels(w, h), width: w, height: h })
+    const r = await encoder.encode({
+      request,
+      kind: 'image',
+      encoding: 'jpeg',
+      rendered: [frame],
+      signal: { cancelled: false },
+    })
+    expect(r.ok, 'jpeg 必须显式拒绝而不是按 PNG 编').toBe(false)
+    if (!r.ok) expect(r.error.params.reason).toBe('encoderEncodingUnsupported')
+  })
+
+  it('E3：非 image 种类被显式拒绝（声明面与实现面同一份事实）', async () => {
+    const w = 4
+    const h = 2
+    const encoder = createEncoderPort()
+    const request = requestOf({ spec: specOf({ render: { width: w, height: h, background: 'transparent' } }) })
+    const frame: RenderedFrame = Object.freeze({ index: 0, time: request.frames[0]!, pixels: deterministicPixels(w, h), width: w, height: h })
+    for (const kind of ['animation', 'geometry', 'project'] as const) {
+      const r = await encoder.encode({
+        request,
+        kind,
+        encoding: 'png',
+        rendered: [frame],
+        signal: { cancelled: false },
+      })
+      expect(r.ok, `${kind} 必须显式拒绝（supportedKinds 未声明它）`).toBe(false)
+      if (!r.ok) expect(r.error.params.reason).toBe('encoderKindUnsupported')
+    }
+  })
+
+  it('E3：零帧被显式拒绝（不产出"空但合法"的 PNG）', async () => {
+    const encoder = createEncoderPort()
+    const request = requestOf({ spec: specOf({ render: { width: 4, height: 4, background: 'transparent' } }) })
+    const r = await encoder.encode({
+      request,
+      kind: 'image',
+      encoding: 'png',
+      rendered: [],
+      signal: { cancelled: false },
+    })
+    expect(r.ok, '零帧不得产出空 PNG（伪完整文件的最简形态）').toBe(false)
+    if (!r.ok) expect(r.error.params.reason).toBe('encoderNoFrames')
+  })
+
+  it('E3：取消信号 ⇒ 显式失败且**不产出字节**', async () => {
+    const encoder = createEncoderPort()
+    const w = 4
+    const h = 2
+    const request = requestOf({ spec: specOf({ render: { width: w, height: h, background: 'transparent' } }) })
+    const frame: RenderedFrame = Object.freeze({ index: 0, time: request.frames[0]!, pixels: deterministicPixels(w, h), width: w, height: h })
+    const r = await encoder.encode({
+      request,
+      kind: 'image',
+      encoding: 'png',
+      rendered: [frame],
+      signal: { cancelled: true },
+    })
+    expect(r.ok, '取消必须显式失败').toBe(false)
+    if (!r.ok) expect(r.error.params.reason).toBe('encoderCancelled')
+  })
+
+  it('E4：像素缓冲长度与 `width×height×4` 不符 ⇒ 显式失败（不夹取、不补零）', async () => {
+    const encoder = createEncoderPort()
+    const w = 4
+    const h = 2
+    const request = requestOf({ spec: specOf({ render: { width: w, height: h, background: 'transparent' } }) })
+    // 故意给一个短缓冲（模拟上游算错）
+    const frame: RenderedFrame = Object.freeze({ index: 0, time: request.frames[0]!, pixels: new Uint8Array(8), width: w, height: h })
+    const r = await encoder.encode({
+      request,
+      kind: 'image',
+      encoding: 'png',
+      rendered: [frame],
+      signal: { cancelled: false },
+    })
+    expect(r.ok, '缓冲长度不符必须显式失败').toBe(false)
+    if (!r.ok) expect(r.error.params.reason).toBe('encoderPixelBufferSizeMismatch')
+  })
+
+  it('E4：帧尺寸与 request.render 不符 ⇒ 显式失败（不产出尺寸漂移的图）', async () => {
+    const encoder = createEncoderPort()
+    const request = requestOf({ spec: specOf({ render: { width: 4, height: 4, background: 'transparent' } }) })
+    // 帧声明 4×4 但 request 是 4×4 → 一致；这里造一个不一致的：帧 2×2
+    const frame: RenderedFrame = Object.freeze({
+      index: 0,
+      time: request.frames[0]!,
+      pixels: deterministicPixels(2, 2),
+      width: 2,
+      height: 2,
+    })
+    const r = await encoder.encode({
+      request,
+      kind: 'image',
+      encoding: 'png',
+      rendered: [frame],
+      signal: { cancelled: false },
+    })
+    expect(r.ok, '帧尺寸与请求不符必须显式失败（静默尺寸漂移是缺陷）').toBe(false)
+    if (!r.ok) expect(r.error.params.reason).toBe('encoderFrameSizeMismatch')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

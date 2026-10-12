@@ -49,6 +49,7 @@ interface ExportPortProbeResult {
   framesRendered: number
   releasedFor: number
   errorReason: string | null
+  cameraSource: 'content-bounds' | 'fallback'
 }
 
 /**
@@ -78,6 +79,12 @@ test.describe('P10f/E · 导出面端口在真实 GL 下产出 PNG', () => {
 
     // ① 作业**真的完成**（不是"接线到了但跑不通"）
     expect(result.status, `作业必须完成（note=${result.note} reason=${result.errorReason}）`).toBe('completed')
+    // ①b 取景必须**由内容包围盒导出**（`fallback` 说明呈现根尚未装配 ⇒ 取景可能与内容
+    //     不匹配而读出 0 像素，那是**探针取景问题**、不是实现缺陷 —— 必须能区分开）。
+    expect(
+      result.cameraSource,
+      '取景必须由内容包围盒导出（fallback 下"0 像素"不能归因于实现）',
+    ).toBe('content-bounds')
     // ② 产物是**真 PNG**（魔数 + IHDR 尺寸 == 请求）
     expect(result.pngMagic, '产物必须是 PNG（魔数）').toBe(true)
     expect(result.ihdrWidth, 'IHDR 宽必须等于请求宽').toBe(64)

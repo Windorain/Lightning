@@ -23,6 +23,7 @@
  * （实测 `Failed to resolve module specifier 'three'`）。故探针放在 vite root 内。
  */
 
+import * as THREE from 'three'
 import { assembleSnapshotExportJob } from '@/adapters/export/snapshotExportJob'
 import { createThreeOffscreenDevice } from '@/adapters/export/renderDevice'
 import { planExportRequest } from '@/application/exportPlan'
@@ -47,14 +48,80 @@ function liveKernel(): { scene: Scene; content: DocumentContent } | null {
   return { scene, content }
 }
 
-const VIEW: CameraSpec = {
-  projection: 'perspective',
-  position: { x: 80, y: 80, z: 80 },
-  target: { x: 0, y: 0, z: 0 },
-  up: { x: 0, y: 1, z: 0 },
-  fovDegrees: 45,
-  near: 0.1,
-  far: 5000,
+/**
+ * 取生产工作台里**已装配的呈现根**（`vpSlot.presenterSurface.object3d`）。
+ *
+ * 与 `e2e/helpers/p10e/probe.ts` 的 `slotWithSurface` 同一手法：经
+ * `window.__vm__.viewports` 读，**不**经组件 ref（会话挂在 `ViewportSlot` 上，
+ * 其寿命不依赖组件挂载 —— #249 明文）。
+ */
+function presenterRoot(): THREE.Object3D | null {
+  const ctx = (window as unknown as { __vm__?: Record<string, any> }).__vm__
+  const slots = ctx?.viewports
+  if (slots === undefined) return null
+  const candidates: any[] = []
+  const active = slots.active?.value
+  if (active) candidates.push(active)
+  for (const id of ['r-viewport', 'r-wiki-preview', 'r-workbench-viewport', 'r-embed']) {
+    const s = slots.get?.(id)
+    if (s) candidates.push(s)
+  }
+  const hit = candidates.find((s) => s?.presenterSurface?.object3d != null)
+  return (hit?.presenterSurface?.object3d as THREE.Object3D | undefined) ?? null
+}
+
+/**
+ * 由**内容包围盒**导出一份冻结的取景值（`CameraSpec`）。
+ *
+ * ## 为什么不复用实时视口的相机（P10e 实测的坑，这里必须避开）
+ *
+ * P10e 探针实测原文：实时相机是正交的，且其 `near/far` 被 legacy 链**收紧到刚好
+ * 裹住它自己那一次渲染的内容** —— 换个渲染目标后几何落到裁剪面之外 ⇒ `readPixels`
+ * 全背景（**读出 0 像素**）。
+ *
+ * 更根本的是：A29 要求导出**不借用实时相机**。探针在这里做的是"把观察视角
+ * **复制成值**"（`CameraSpec` 是纯数据）—— 而那正是设计规定的捕获动作
+ * （`domain/captureSpec#copyCameraSpec` 是这件事的唯一入口）。导出端口随后
+ * 只吃这个**值**，没有任何"取当前相机"的方法可调。
+ *
+ * 包围盒取不到（空场景）时回落到一个保守的固定视角 —— 那时端口本来就会
+ * 因"无可绘制内容"诚实失败，探针只是不去掩盖它。
+ */
+function captureCameraSpec(): { spec: CameraSpec; source: 'content-bounds' | 'fallback' } {
+  const root = presenterRoot()
+  const fallback: CameraSpec = {
+    projection: 'perspective',
+    position: { x: 40, y: 40, z: 40 },
+    target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+    fovDegrees: 45,
+    near: 0.1,
+    far: 5000,
+  }
+  if (root === null) return { spec: fallback, source: 'fallback' }
+  root.updateMatrixWorld(true)
+  const box = new THREE.Box3().setFromObject(root)
+  if (box.isEmpty()) return { spec: fallback, source: 'fallback' }
+
+  const center = box.getCenter(new THREE.Vector3())
+  const size = box.getSize(new THREE.Vector3())
+  const radius = Math.max(size.length() / 2, 1e-3)
+  // 距离取 2.6×半径：留足余量使**整份包围盒**落在锥体内（p10e 的同一系数）。
+  const dist = radius * 2.6
+  const near = Math.max(dist / 100, 1e-4)
+  const far = dist + radius * 4
+  return {
+    source: 'content-bounds',
+    spec: {
+      projection: 'perspective',
+      position: { x: center.x + dist * 0.6, y: center.y + dist * 0.6, z: center.z + dist * 0.6 },
+      target: { x: center.x, y: center.y, z: center.z },
+      up: { x: 0, y: 1, z: 0 },
+      fovDegrees: 45,
+      near,
+      far,
+    },
+  }
 }
 
 /** 一次真实导出尝试的读数。 */
@@ -74,6 +141,15 @@ export interface ExportPortProbeResult {
   readonly framesRendered: number
   readonly releasedFor: number
   readonly errorReason: string | null
+  /**
+   * 取景来源（诊断用）：`content-bounds` = 由**内容包围盒**导出；
+   * `fallback` = 包围盒取不到（呈现根尚未装配/为空）而用的保守固定视角。
+   *
+   * 为什么把它报出来：`fallback` 下取景可能与内容不匹配 ⇒ 读出 0 像素。
+   * 那**不是**实现缺陷而是探针取景问题，故必须能与"真 GL 没画"区分开
+   * （否则会拿着一个取景问题的读数去报"链路坏了"）。
+   */
+  readonly cameraSource: 'content-bounds' | 'fallback'
 }
 
 /**
@@ -127,12 +203,16 @@ export async function runExportPortProbe(options: {
   }
 
   const render = { width, height, background: 'transparent' as const }
+  // 取景：把观察视角**复制成值**（见 `captureCameraSpec` 的说明 —— 不借用实时相机）。
+  const captured = captureCameraSpec()
+  const view = captured.spec
+  const cameraSource = captured.source
   const spec: CaptureSpec = {
     frameRate: 20,
     frameCount: 1,
     mapping: { source: 'scene', startFrame: 0, stepFrames: 1 },
     channels: {},
-    camera: { kind: 'view', label: 'p10f-e', view: VIEW },
+    camera: { kind: 'view', label: 'p10f-e', view },
     render,
     animation: EMPTY_ANIMATION,
   }
@@ -171,6 +251,7 @@ export async function runExportPortProbe(options: {
       framesRendered: outcome.status === 'cancelled' ? outcome.framesRendered : 0,
       releasedFor: outcome.releasedFor,
       errorReason: outcome.status === 'failed' ? String(outcome.error.params.reason ?? outcome.error.code) : null,
+      cameraSource,
     }
   }
 
@@ -197,6 +278,7 @@ export async function runExportPortProbe(options: {
     framesRendered: outcome.framesRendered,
     releasedFor: outcome.releasedFor,
     errorReason: null,
+    cameraSource,
   }
 }
 
@@ -213,6 +295,7 @@ function emptyResult(note: string): ExportPortProbeResult {
     framesRendered: 0,
     releasedFor: 0,
     errorReason: null,
+    cameraSource: 'fallback',
   }
 }
 
