@@ -949,6 +949,16 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
         'save',
         'saveCompleted',
         'select',
+        // #301 P10f D0：逐格说明写命令（GF-13 最小集）。
+        //
+        // ⚠️ 它**不是**"第二个通用属性写"——见下方 `propertyWrites` 的语义判据：
+        // 它按**格坐标**寻址网格对象的**载荷内容**（`blockGrid.cellContent[key].tooltip`），
+        // 不是按 `PropertyRef` 寻址属性值。两者是**不同的寻址面**：
+        //  · `setProperty` 走 RNA 注册表 + `applyKernelPropertyValue`（属性值）；
+        //  · `setCellTooltip` 走 `cellContentKey` 键编码（逐格内容表）。
+        // 内核里**没有** `cellTooltip` 属性描述符（实测 `kernel-properties.ts` 的注解/方块
+        // 属性集都不含它），故无法经 `setProperty` 表达 —— 这正是新增本命令的理由。
+        'setCellTooltip',
         'setChannelValue',
         'setPlaybackRate',
         'setPlaying',

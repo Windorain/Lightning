@@ -46,7 +46,9 @@ import {
 } from '@/domain/document'
 // A21：对象构造入口直接取自 `domain/scene`（不经 `domain/document` 转出口 ——
 // 契约 §7.3 规则 1 禁 barrel；同层具名导入是常态）。
-import { DEFAULT_OBJECT_FACTORIES, createObjectOfType, withObject } from '@/domain/scene'
+import { DEFAULT_OBJECT_FACTORIES, createObjectOfType, objectData, withObject, withUpdatedData } from '@/domain/scene'
+import type { ObjectDataPayload } from '@/domain/scene'
+import { cellContent, cellContentKey, normalizeCellContent, type CellContent } from '@/domain/cellContent'
 import {
   acquireLease,
   advancePlayback,
@@ -206,6 +208,57 @@ export interface DeleteObjectCommand {
   readonly kind: 'deleteObject'
   readonly contextId: string
   readonly objectId: string
+}
+
+/**
+ * **写一格说明**（#301 P10f D0；GF-13 最小集的成员）。
+ *
+ * ## 它替代的旧机制
+ *
+ * | 旧机制 | 位置 |
+ * |---|---|
+ * | `clone + 改 `tooltipPalette`/`cellTooltipGrid` + `setDocument`` | `operators/builtin/metaEditOperators.ts:26-43` |
+ * | 同上（属性面板路径） | `editors/property-writers.ts:168-180` |
+ *
+ * 两条写路径都直接改**文件格式的两个顶层侧表字段**
+ * （`tooltipPalette` = 文案池、`cellTooltipGrid` = 下标网格，靠 `-1` 哨兵表示"无"），
+ * 而内核把逐格说明承载在 `blockGrid` 载荷的 `cellContent[key].tooltip` 上
+ * （**键编码**，与 `cells` 同一套键）。
+ *
+ * ## ⚠️ 为什么"一格"要用 `x/y/z` 而不是下标
+ *
+ * 旧侧表用 `cellTooltipGrid[z][row][x]` 的**三元下标**，且 `row` 是**从上往下**的行序
+ * （装配侧要翻成 `y = sizeRow - 1 - row`，见 `kernelPaletteAssembly.ts:260`）。
+ * 内核用 **`x,y,z` 世界坐标键**（`cellContentKey`）。
+ * ⇒ 本命令收**世界坐标**，把"行序翻转"这件事挡在命令面之外 ——
+ * 那正是旧形态最容易错一行的地方（装配层注释已记过一次同类风险）。
+ *
+ * ## `text: null` = 删除该格说明
+ *
+ * 与 `cellContentIsEmpty` 的"缺席 ≠ 空"同口径：
+ * - `null` ⇒ **移除该格的 `tooltip` 字段**（若该格因此无内容，连键一起删）；
+ * - `''` ⇒ 写**显式空说明**（`tooltip: ''`，语义是"说明了空"）。
+ * 把两者压成同一个会让"没说明"与"说明为空"不可区分。
+ */
+export interface SetCellTooltipCommand {
+  readonly kind: 'setCellTooltip'
+  readonly contextId: string
+  /**
+   * 目标**方块网格对象**的 id。
+   *
+   * ⚠️ 逐格说明挂在 `blockGrid` 载荷上，而**帧为主文档每个帧一个对象**
+   * （`structure:frame-<i>`）、多方块文档只有 `structure:multiblock`。
+   * 装配期把**同一份**文档级说明复制到**每一个**帧对象
+   * （`kernelAssembly.ts:1559-1583` 的循环里调 `tooltipContentOf(doc, grid)`）
+   * ⇒ 写者也必须落到**同一个**目标对象上，否则"写帧 0、读帧 1"会不一致。
+   * 由调用方（经 `Context`）决定是"当前帧对象"还是"多方块对象"。
+   */
+  readonly objectId: string
+  readonly x: number
+  readonly y: number
+  readonly z: number
+  /** 说明文案；`null` = 删除该格说明（见上文"缺席 ≠ 空"）。 */
+  readonly text: string | null
 }
 
 export interface BeginInteractionCommand {
@@ -393,6 +446,7 @@ export type Command =
   | SetTransformCommand
   | AddObjectCommand
   | DeleteObjectCommand
+  | SetCellTooltipCommand
   | BeginInteractionCommand
   | UpdateInteractionCommand
   | CommitInteractionCommand
@@ -438,6 +492,7 @@ export type ImmediateCommand = Extract<
   | { kind: 'redo' }
   | { kind: 'addObject' }
   | { kind: 'deleteObject' }
+  | { kind: 'setCellTooltip' }
   | { kind: 'insertKeyframe' }
   | { kind: 'removeKeyframe' }
   | { kind: 'setTrackEnabled' }
@@ -605,6 +660,8 @@ export function reduceCommand(state: ApplicationState, command: Command, env: Ex
       return reduceAddObject(state, command, env)
     case 'deleteObject':
       return reduceDeleteObject(state, command)
+    case 'setCellTooltip':
+      return reduceSetCellTooltip(state, command)
     case 'setTransform':
       return reduceSetTransform(state, command)
     case 'setProperty':
@@ -939,10 +996,119 @@ function reduceDeleteObject(state: ApplicationState, cmd: DeleteObjectCommand): 
   return applied(next, write.version, changes)
 }
 
+/**
+ * **写一格说明**（#301 P10f D0）。
+ *
+ * ## 落点：`blockGrid` 载荷的 `cellContent`
+ *
+ * 逐格说明在内核侧**不是**文档级侧表，而是网格对象载荷的一部分：
+ * `ObjectDataPayload` 的 `blockGrid` 变体带 `cellContent?: CellContentTable`，
+ * 键与 `cells` **同一套**（`cellContentKey`）。
+ * 故本 reducer 改的是**对象数据**，而不是 `DocumentContent`。
+ *
+ * ## 三条与旧路径**逐点等价**的语义（照抄我要替代的那两处行为）
+ *
+ * | 语义 | 旧实现 | 本实现 |
+ * |---|---|---|
+ * | 空文案 = 无说明 | `grid[..] = text ? at : -1`（`-1` 哨兵） | `text === ''` ⇒ 移除 `tooltip` 字段 |
+ * | 同文案共享 | `palette.indexOf(text)` 去重 | 无需池：内核**逐格直接承载文本**（池是对外格式的压缩，不是内核语义） |
+ * | 显式删除 | 无（旧路径只能写 `-1`） | `text === null` ⇒ 移除字段（与 `''` 区分） |
+ *
+ * ⇒ "池 + 下标"这条间接层**不需要**在内核侧复现：它是**文件格式**的压缩方式，
+ * 内核用"文本直接落格"，投影时再重新聚成池
+ * （`kernelProjection.ts:1141-1142` 的 `tooltipPoolOfPayloads` 已实现，D0 **复用**它）。
+ *
+ * ## 幂等：同值 ⇒ `unchanged`
+ *
+ * 与 `reduceSetTransform` 同口径（契约 §1.4：不因新建容器而记 `applied`）。
+ * 少了这条，每次"点一下同样的说明"都会推进版本并进历史。
+ */
+function reduceSetCellTooltip(state: ApplicationState, cmd: SetCellTooltipCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+
+  const obj = findObject(doc.scene, cmd.objectId)
+  if (!obj) return rejected(state, missingTarget({ objectId: cmd.objectId }))
+  const data = findObjectData(doc.scene, obj.dataId)
+  if (!data) return rejected(state, missingTarget({ dataId: obj.dataId }))
+  // 只读数据（content 源）不得写 —— 与另两条对象写路径同一守卫。
+  if (data.source === 'content') return rejected(state, readOnly({ owner: data.source, objectId: cmd.objectId }))
+  if (data.payload.kind !== 'blockGrid') {
+    return rejected(
+      state,
+      unsupportedOperation({ objectType: `payload:${data.payload.kind}`, kind: 'setCellTooltip' }),
+    )
+  }
+
+  const key = cellContentKey(cmd.x, cmd.y, cmd.z)
+  // ⚠️ 键必须**已存在**于 `cells`：写一个不存在的格会让说明永远显示不出来
+  // （投影侧的 `cellContentKeyDiagnostic` 正是为此报警）。⇒ 在写入口就拒绝，
+  // 而不是默默存下一个"孤儿键"。
+  if (!Object.prototype.hasOwnProperty.call(data.payload.cells, key)) {
+    return rejected(state, missingTarget({ objectId: `${cmd.objectId}@${key}` }))
+  }
+
+  const before = data.payload.cellContent?.[key] ?? {}
+  // ⚠️ **只有 `null` 表示删除**（我第一版把 `''` 也当成删除，被自己的判据当场判红）。
+  //
+  // 内核 `CellContent.tooltip` 的口径（`domain/cellContent.ts:170`）：
+  // 「**缺席** = 无逐格说明。空串 = 显式"说明了空"」—— 两者**必须**可区分。
+  // 把 `''` 当删除会让"用户清空了说明文字"与"用户删除了该格说明"在语义上合并，
+  // 而那正是 `cellContentIsEmpty` 要防的形态。
+  const nextTooltip: string | undefined = cmd.text === null ? undefined : cmd.text
+  if ((before.tooltip ?? undefined) === nextTooltip) return unchanged(state, doc.version)
+
+  const lease = acquireFor(state, doc.id, cmd.contextId)
+  if (!lease.ok) return rejected(state, lease.error)
+
+  // 逐格内容表的受控更新：先算新表，再经 `objectData()` 造新数据块
+  // （`objectData` 机械派生 `contentVersion` ⇒ "改了字节版本必变"是结构事实）。
+  const table: Record<string, CellContent> = { ...(data.payload.cellContent ?? {}) }
+  if (nextTooltip === undefined) {
+    const rest: { parts?: CellContent['parts'] } = {}
+    if (before.parts !== undefined) rest.parts = before.parts
+    // 该格因此再无内容 ⇒ **连键一起删**（不留下 `{}` 空壳：
+    // 空表与"有键但空"必须可区分，见 `cellContentIsEmpty` 的口径）。
+    // ⚠️ 但若它还有 `parts`，只去掉 `tooltip` 字段 —— 不能把部件一起删掉。
+    if (rest.parts === undefined) delete table[key]
+    else table[key] = cellContent(rest)
+  } else {
+    table[key] = cellContent({ ...(before.parts === undefined ? {} : { parts: before.parts }), tooltip: nextTooltip })
+  }
+  const payload: ObjectDataPayload = Object.freeze({
+    ...data.payload,
+    cellContent: normalizeCellContent(table),
+  })
+  const nextData = objectData(data.id, payload, data.source)
+  const nextScene: Scene = withUpdatedData(doc.scene, nextData)
+  const write = withScene(doc, nextScene)
+
+  const changes = changeSummary({
+    changedProperties: [{ owner: objectRef(cmd.objectId), property: 'cellTooltip' }],
+    structurallyShared: true,
+  })
+  const withHistory = recordHistory(write.doc, {
+    label: `cell tooltip ${cmd.objectId}@${key}`,
+    beforeScene: doc.scene,
+    beforeVersion: doc.version,
+    afterScene: nextScene,
+    afterVersion: write.version,
+    changes,
+    selectionBefore: ctx.selection.selected,
+    selectionAfter: ctx.selection.selected,
+  })
+  const next: ApplicationState = Object.freeze({
+    ...state,
+    docs: Object.freeze({ ...state.docs, [doc.id]: withHistory }),
+    leases: Object.freeze({ ...state.leases, [doc.id]: lease.value }),
+  })
+  return applied(next, write.version, changes)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 直接变换写
 // ─────────────────────────────────────────────────────────────────────────────
-
 function reduceSetTransform(state: ApplicationState, cmd: SetTransformCommand): Transition {
   const found = contextAndDoc(state, cmd.contextId)
   if (!found.ok) return rejected(state, found.error)
