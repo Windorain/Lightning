@@ -152,6 +152,14 @@ export const KERNEL_FILES = [
   'adapters/inputFacts.ts',
   'adapters/inputBinding.ts',
   'adapters/shellDom.ts',
+  // P10f/E（#301）导出面端口的生产实现（与 `boundary-rules.mjs` 的
+  // `adapters.activeSubpaths` 同源，两处必须同改 —— 断言在下面把守）：
+  // 离屏渲染端口 + 编码端口 + 设备端口 + 纯 PNG 编码 + 作业装配。
+  'adapters/export/pngEncoder.ts',
+  'adapters/export/renderDevice.ts',
+  'adapters/export/offscreenRenderPort.ts',
+  'adapters/export/encoderPort.ts',
+  'adapters/export/snapshotExportJob.ts',
 ]
 
 /**
