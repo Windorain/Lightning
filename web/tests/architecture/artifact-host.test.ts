@@ -498,7 +498,11 @@ describe('A34 真实产物：ZIP 签名字节（B-21 判据 (a)）', () => {
   })
 
   it.runIf(BUNDLE_GROUP.ready)('未补丁的 wiki bundle **确实**含 ZIP 签名字面量（前置：判据有对象）', () => {
-    const bundlePath = path.join(BUNDLE_GROUP.root, BUNDLE_GROUP.files[0]!)
+    // 取**门控结论**里的 `present`（不是原始声明的 `files`）：`files` 只存在于输入侧
+    // `ARTIFACT_GROUP`，`verdictOf(...)` 返回的 `GroupVerdict` 并无该字段 ⇒
+    // P11-E 首版写成 `files[0]` 时，缺产物被 `runIf(false)` 掩盖、产物一就绪立刻
+    // TypeError（P11-C 真跑暴露）。取 `present` 使"就绪却读不到文件名"结构性不可能藏。
+    const bundlePath = path.join(BUNDLE_GROUP.root, BUNDLE_GROUP.present[0]!)
     const bytes = readBytes(bundlePath)
     const text = bytesToLatin1(bytes)
     // 逐个真字节形态搜索（latin1 口径）。
@@ -518,7 +522,7 @@ describe('A34 真实产物：ZIP 签名字节（B-21 判据 (a)）', () => {
   })
 
   it.runIf(BUNDLE_GROUP.ready)('产物里若含 `atob(\'UEsDBA==\')` ⇒ 不得被引号包住（历史事故形态的产物级断言）', () => {
-    const text = bytesToLatin1(readBytes(path.join(BUNDLE_GROUP.root, BUNDLE_GROUP.files[0]!)))
+    const text = bytesToLatin1(readBytes(path.join(BUNDLE_GROUP.root, BUNDLE_GROUP.present[0]!)))
     // 语法错误形态：`"atob('UEsDBA==')"` —— 它会在浏览器里造成"第二个 " 提前闭合"。
     expect(text, '产物里不得出现被引号包住的 atob 表达式（obj-export-zip-fix.md:34-40）').not.toContain(`"atob('UEsDBA==')"`)
     expect(text, '不得出现双引号参数的 atob（第一版修复的错误形态）').not.toContain('atob("UEsDBA==')
