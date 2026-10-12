@@ -704,10 +704,18 @@ describe('A21 · extension-proof：经贡献接口新增文字类型与专用控
  *
  * ⇒ B1 的"承载面齐备"对**选择/历史**成立，对**属性写**不成立：`composition` 的
  * `contributes.objectTypes`（七类贡献之一）**没有**通向 `kernelPropertyRegistry()`
- * 的缝。本组的处置是（不硬造）：① 把**成立的三段**做成正向判据；
+ * 的缝。P11-E 的处置是（不硬造）：① 把**成立的三段**做成正向判据；
  * ② 把属性写的**机器**（公开注册缝 `createPropertyRegistry({objectTypes})` +
  * `createPropertyWritePorts`）证明为可用；③ 把"单例注册表够不着贡献类型"这一
  * 事实**登记成可核对的断言**（一旦有人接通贡献缝，它判红并要求同批升级本登记）。
+ *
+ * ## P11-F（#262 子批）把那条登记**升级为正向判据**并接通承载面
+ *
+ * Lead 裁决（comment 6553 ①）：`contributes.objectTypes` 能注册类型却结构性写不了属性
+ * = 扩展性骨架半残 ⇒ 立接线小批。本批的形态（见 `⑤`）：贡献声明的 RNA 描述经
+ * **装配缝**（`composition/contributedObjectTypes`）转成内核声明，经 `ExecutionInputs`
+ * 进入 `reduceCommand` 使用的注册表/写端口 —— **不新增写通路**（唯一入口仍是
+ * `reduceCommand`），也不把注册表变成可变全局。
  */
 describe('A21 · 贡献新类型的公共链路（P11-E #262 补；含实测更正登记）', () => {
   /** 一个**内核不认识**的扩展对象类型（id 不含点 ⇒ 限定式属性 ID `timer.name` 合法）。 */
@@ -831,17 +839,20 @@ describe('A21 · 贡献新类型的公共链路（P11-E #262 补；含实测更�
     expect(doc.scene.objects[objectId]?.name).toBe('T')
   })
 
-  it('⑤ **实测更正登记**：`reduceCommand` 的 `setProperty` 对贡献类型**结构性拒绝**（贡献缝未接）', async () => {
-    // ## 这条断言守的是"已知缺口"，不是"期望行为"（它判红 = 缺口已被接通）
+  it('⑤ **正向判据（P11-F 升级）**：贡献类型的属性写经 `reduceCommand` 可用，且历史可撤销', async () => {
+    // ## 本条的来历（P11-E 登记 ⇒ P11-F 升级，同一机制）
     //
-    // 事实：`reduceSetProperty` 用模块级单例 `kernelPropertyRegistry()` 与
-    // `kernelWritePorts()`，二者在构造期固定到 `KERNEL_OBJECT_TYPES` ——
-    // `composition` 的 `contributes.objectTypes` 没有任何缝到达它们。
-    // ⇒ 贡献类型在**命令层**的属性写被结构化拒绝（不是静默丢弃、也不是写进别的类型）。
+    // P11-E 实测的事实是：`reduceSetProperty` 用模块级单例 `kernelPropertyRegistry()`
+    // 与 `kernelWritePorts()`，二者在构造期固定到 `KERNEL_OBJECT_TYPES` ——
+    // `composition` 的 `contributes.objectTypes` 没有任何缝到达它们，
+    // ⇒ 贡献类型在**命令层**的属性写被结构化拒绝（`MissingTarget: property-not-registered`）。
     //
-    // ⚠️ 若本断言**判红**（即写成功了），说明有人把贡献缝接进了内核注册表 ——
-    // 那是能力升级：请同批把本条改成正向判据（"贡献类型经 reduceCommand 可写"）
-    // 并核销本登记（与 `artifact-host` 的 KNOWN_EMBED_RUNTIME_SEAM 同一手法）。
+    // 当时那条断言守的是"已知缺口"（判红 = 缺口被接通，要求同批升级为正向判据）。
+    // **本提交把登记升级为正向判据**（Lead 裁决 #262 comment 6553 ①）：
+    // 贡献类型必须能经**唯一写入口** `reduceCommand` 写属性并进历史栈。
+    //
+    // 此刻判红（读数仍是 `MissingTarget: property-not-registered`）= 缺口仍在；
+    // 承载面（`contributes.objectTypes[].rna` → 装配缝 → `ExecutionInputs`）在下一提交落地。
     const { reduceCommand, openDocumentState, ALL_CAPABILITIES } = await import('@/application/commands')
     const { propertyRef, objectRef } = await import('@/domain/identity')
     const env = { capabilities: ALL_CAPABILITIES, objectFactories: timerFactories() as never }
@@ -849,18 +860,26 @@ describe('A21 · 贡献新类型的公共链路（P11-E #262 补；含实测更�
     expect(added.status).toBe('applied')
     if (added.status !== 'applied') return
     const objectId = Object.keys(added.state.docs['doc1']!.scene.objects)[0]!
+    // 反空洞真：写**前**的值确实是 T（否则"写成 Z"可能只是本来如此）
+    expect(added.state.docs['doc1']!.scene.objects[objectId]?.name).toBe('T')
+
     const w = reduceCommand(
       added.state,
       { kind: 'setProperty', refs: [propertyRef(objectRef(objectId), `${TIMER_TYPE}.name`)], value: 'Z' },
       env,
     )
-    expect(w.status, '当前承载面：命令层的贡献类型属性写被拒（缺口登记；接通后本断言应判红）').toBe('rejected')
-    if (w.status !== 'rejected') return
-    expect(w.error.code).toBe('MissingTarget')
-    expect(w.error.params.reason).toBe('property-not-registered')
-    // 拒绝**零残留**：对象名与文档版本都没被写（不是"半途写了一半"）
-    expect(w.state.docs['doc1']!.scene.objects[objectId]?.name).toBe('T')
-    expect(w.state.docs['doc1']!.version.contentVersion).toBe(added.state.docs['doc1']!.version.contentVersion)
+    expect(w.status, 'A21：贡献类型的属性写必须经 `reduceCommand` 被接受（唯一写入口）').toBe('applied')
+    if (w.status !== 'applied') return
+    expect(w.state.docs['doc1']!.scene.objects[objectId]?.name, '写必须真的落到该对象上').toBe('Z')
+    expect(w.changes.changedProperties.map((r) => r.property)).toEqual([`${TIMER_TYPE}.name`])
+
+    // 公共历史：贡献类型的属性写进文档历史栈，可撤销、可重做（类型无关的历史）
+    const undone = reduceCommand(w.state, { kind: 'undo', contextId: 'ctx1' }, env)
+    expect(undone.status, '贡献类型的属性写必须可撤销').toBe('applied')
+    expect(undone.state.docs['doc1']!.scene.objects[objectId]?.name, '撤销回写前的值').toBe('T')
+    const redone = reduceCommand(undone.state, { kind: 'redo', contextId: 'ctx1' }, env)
+    expect(redone.status).toBe('applied')
+    expect(redone.state.docs['doc1']!.scene.objects[objectId]?.name, '重做回到写后的值').toBe('Z')
   })
 })
 
