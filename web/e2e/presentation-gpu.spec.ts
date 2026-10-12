@@ -49,6 +49,74 @@ type ProbeModule = {
   runA19(rounds: number): Record<string, unknown>
   runA30(count: number): Promise<Record<string, unknown>>
   runA30Negative(count: number): Record<string, unknown>
+  runKernelInputs(envelope: Record<string, unknown>): Promise<Record<string, unknown>>
+}
+
+/**
+ * 从夹具读**真实内核载荷**（`blockGrid` 的 `cells`/`cellGeometry`/`geometry`）。
+ *
+ * ## 为什么走信封解包而不是直接读 JSON
+ *
+ * 多方块夹具是**信封**（`documentFormat: 'Envelope'` + base64 内层），
+ * 内层才有 `cells`/`geometry`。`plainRootOf` 是生产解包实现（D1 交付），
+ * 用它保证 spec 读到的东西与内核读到的**同一份**。
+ *
+ * ## 为什么不用内层**完整** body 直接喂
+ *
+ * `kernelPresentationInputs` 要吃的是**内核场景**（`Scene`），而夹具是旧格式 plain。
+ * 故这里只取它需要的四个字段，由探针在浏览器里组装成最小内核场景
+ * —— 这样本判据证明的是"内核**承载的内容**能被吃下"，不掺入场景装配那一环
+ * （那一环由 `kernelAssembly` 的单测把守）。
+ */
+/**
+ * 读一份多方块夹具的**原始信封 JSON**（原样透传给探针）。
+ *
+ * ## 为什么只读字节、不在 Node 侧解包
+ *
+ * 第一版在这里解包并取 `cells`/`geometry` —— **实测失败**：磁盘上的夹具是**声明**
+ * （`multiblock` 节点），逐格网格是**装配产物**（`.out/expanded-fixtures` 只含
+ * `variant`/`dims`/`cellGrid` 的参考签名，不含带几何资产的载荷）。
+ *
+ * ⇒ 交给探针在浏览器里走**完整生产链**
+ * （解析 → 内核装配 → 呈现输入 → 编译 → 真 GL）。
+ * spec 只负责"把外部事实（磁盘上的字节）送进去"，不做任何解读 —— 这样失败的定位
+ * 也清晰：解析/装配/编译哪一步坏了，探针会报出对应的一步。
+ */
+function loadKernelEnvelope(name: string): Record<string, unknown> {
+  return JSON.parse(
+    fs
+      .readFileSync(
+        path.join(import.meta.dirname, '..', 'src', 'context', '__tests__', 'fixtures', `${name}.json`),
+        'utf8',
+      )
+      .replace(/\r\n/g, '\n'),
+  ) as Record<string, unknown>
+}
+
+/**
+ * 信封 → 内层 plain（**最小实现**，与 `adapters/files/envelopeCodec` 同算法）。
+ *
+ * ## 为什么 spec 不 import 生产解包器
+ *
+ * `e2e/` 的文件在 **Node** 里跑（Playwright 侧），而 `plainRootOf` 依赖浏览器/Node 均可的
+ * 纯函数 —— 技术上可以 import。但本 spec 已 import 了 `@/composition/...`（探针经 vite 转译），
+ * 再加一条生产 import 会让"spec 读到的数据"与"页面里探针读到的数据"两条链路耦合。
+ * 这里用最小实现读**磁盘上的字节**，使判据的输入是**外部事实**而非另一份生产代码的输出。
+ */
+function decodeEnvelopeToPlain(envelope: Record<string, unknown>): Record<string, unknown> {
+  if (envelope.documentFormat !== 'Envelope') return envelope
+  const payload = envelope.payload
+  if (typeof payload !== 'string') throw new Error('信封缺 payload')
+  const bytes = Buffer.from(payload, 'base64')
+  let text: string
+  try {
+    text = bytes[0] === 0x1f ? zlib.gunzipSync(bytes).toString('utf8') : bytes.toString('utf8')
+  } catch {
+    text = bytes.toString('utf8')
+  }
+  const inner = JSON.parse(text) as Record<string, unknown>
+  const meta = envelope.meta
+  return typeof meta === 'object' && meta !== null ? { ...inner, ...(meta as Record<string, unknown>) } : inner
 }
 
 /**
@@ -131,6 +199,50 @@ test.describe('P5 · A18 gpu-batching（真实 WebGL 实测绘制数）', () => 
     // 一对象一绘制的**结构性**检出口：不同 tint ⇒ 互不相同的兼容性键（每对象一组）
     expect(m.distinctCompatKeys, '不同 tint 必须产生互不相同的兼容性组').toBe(m.objectCount)
     expect(m.homogeneous).toBe(false)
+  })
+})
+
+/**
+ * ## D3c（#289 P10d）· **内核场景**作为第二输入源
+ *
+ * 上面两条的输入来自 `pickFixture`（**自造图元**）⇒ 它们证明"编译 → 呈现"，
+ * 但**绕过**了"内核场景 → `PresentationInputs`"。本组补上那一环。
+ *
+ * 判据刻意**不**与硬编码三角形数比，而与**渲染路径同一收集器**的独立复算比
+ * —— 那样任一侧偏离立刻判红（D3a 修的那处"不剔除遮挡"缺陷正是这样被抓到的）。
+ */
+test.describe('D3c · 内核承载的内容真的能被呈现层吃下（真实 GL）', () => {
+  test('多方块夹具：内核 → PresentationInputs → compileScene → 真实 GL 绘制 + 与渲染路径逐位一致', async ({ page }) => {
+    await loadProbe(page)
+    // 真实载荷由 spec 从磁盘读（浏览器里没有 fs）
+    const payload = loadKernelEnvelope('multiblock-ebf-2ch')
+    const m = await callProbe<Record<string, any>>(page, 'runKernelInputs', [payload])
+    console.log('[D3c·内核输入] ' + JSON.stringify(m, null, 2))
+    writeEvidence('d3c-kernel-inputs.json', m)
+
+    // ① 接线真的成立（不是空产出）
+    expect(m.primitives, '内核场景必须产出可呈现对象').toBeGreaterThan(0)
+    expect(m.skipped, '本路径不得跳过任何对象').toEqual([])
+    expect(m.compileSkipped, `编译不得跳过（实测：${JSON.stringify(m.compileSkipped)}）`).toEqual([])
+    expect(m.payloads, '必须有批次').toBeGreaterThan(0)
+    // ② 真实 GL 真的画了
+    expect(m.measuredCalls, '真实 GL 绘制数必须 > 0').toBeGreaterThan(0)
+    expect(m.measuredTriangles, '真实 GL 必须提交了三角形').toBeGreaterThan(0)
+    // ③ 与渲染路径**逐位一致**（同一收集器；任一侧偏离立刻判红）
+    expect(m.kernelTriangles, '内核侧三角形数').toBe(m.referenceTriangles)
+    expect(m.bitsEqual, 'positions/uvs 必须与渲染路径逐位相同').toBe(true)
+    // ④ 身份链没断：拾取能解回**内核对象 id**（由装配产出，故断言"非空且不是批次号"）
+    expect(m.pickedObjectId, '拾取必须解回内核对象身份（不得为空）').toBeTruthy()
+    expect(String(m.pickedObjectId), '对象身份不得是批次位置（A18 负对照：批次号不得当对象 ID）').not.toMatch(/^\d+$/)
+  })
+
+  test('**负对照**：另一份夹具 ⇒ 三角形数不同（证明上一条的"一致"不是常数巧合）', async ({ page }) => {
+    await loadProbe(page)
+    const a = await callProbe<Record<string, any>>(page, 'runKernelInputs', [loadKernelEnvelope('multiblock-ebf-2ch')])
+    const b = await callProbe<Record<string, any>>(page, 'runKernelInputs', [loadKernelEnvelope('multiblock-tier-only')])
+    expect(a.referenceTriangles, '两份夹具的三角形数必须不同（否则判据无区分力）').not.toBe(b.referenceTriangles)
+    expect(b.bitsEqual, '第二份同样必须逐位一致').toBe(true)
+    expect(b.measuredCalls, '第二份也必须在真实 GL 下画出东西').toBeGreaterThan(0)
   })
 })
 
