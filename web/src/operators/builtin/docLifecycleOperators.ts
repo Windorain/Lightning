@@ -157,7 +157,7 @@ export const SaveFileOperator: OperatorType = {
   description: '将当前场景保存到本地文件',
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, _props) {

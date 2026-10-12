@@ -7,7 +7,7 @@ export const TooltipEditOperator: OperatorType = {
   flagUndo: true,
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, props) {

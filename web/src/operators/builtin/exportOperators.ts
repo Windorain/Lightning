@@ -19,7 +19,7 @@ export const ExportPlainOperator: OperatorType = {
   description: '下载完整明文 JSON',
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, _props) {
@@ -36,7 +36,7 @@ export const ExportEnvelopeOperator: OperatorType = {
   description: '下载 gzip+Base64 信封格式',
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, _props) {
@@ -53,7 +53,7 @@ export const ExportObjOperator: OperatorType = {
   description: '导出 Wavefront OBJ+MTL 打包为 zip',
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   async exec(ctx, _props) {
@@ -81,7 +81,7 @@ export const ExportIsoPngOperator: OperatorType = {
   description: '将等轴方向渲染输出为 PNG',
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   async exec(ctx, _props) {

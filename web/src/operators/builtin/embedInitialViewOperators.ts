@@ -8,7 +8,7 @@ export const HydrateEmbedInitialViewOperator: OperatorType = {
   label: '水合嵌入初始视角',
   internal: true,
   poll(ctx) {
-    return ctx.getDoc().value != null
+    return ctx.hasLoadedDocument()
   },
   exec(ctx) {
     hydrateMainEmbedInitialViewFromDoc(ctx.main)
@@ -22,7 +22,7 @@ export const SyncEmbedInitialViewOperator: OperatorType = {
   flagUndo: false,
   poll(ctx) {
     const slot = ctx.viewports.get(resolveEmbedViewportRegionId(ctx))
-    return slot?.camera.value != null && ctx.getDoc().value != null
+    return slot?.camera.value != null && ctx.hasLoadedDocument()
   },
   exec(ctx) {
     if (!capturePreviewToDocument(ctx)) {

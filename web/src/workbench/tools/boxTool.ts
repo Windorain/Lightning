@@ -53,7 +53,7 @@ export const AnnotationBoxCommitOperator: OperatorType = {
   id: 'ANNOTATION_BOX_COMMIT',
   label: '确认注解框',
   description: '根据累加的面选择创建 box 注解',
-  poll(ctx) { return ctx.getDoc().value !== null && _pendingSelections.length > 0 },
+  poll(ctx) { return ctx.hasLoadedDocument() && _pendingSelections.length > 0 },
   invoke(ctx, _props, event) {
     const toolProps = ctx.getToolRegistry().activeTool.value?.properties ?? {}
     const ids: string[] = []
@@ -80,7 +80,7 @@ export const AnnotationBoxResetOperator: OperatorType = {
   id: 'ANNOTATION_BOX_RESET',
   label: '重置注解框选择',
   description: '清除所有累加的面选择',
-  poll(ctx) { return ctx.getDoc().value !== null },
+  poll(ctx) { return ctx.hasLoadedDocument() },
   invoke(_ctx, _props, _event) { _boxClearPending(); return OP_RESULT.FINISHED },
 }
 

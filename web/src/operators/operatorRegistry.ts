@@ -53,7 +53,7 @@ export class OperatorRegistry {
     const snap = doc ? ctx.log.snapshot(ctx) : undefined
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
-      if (op.flagUndo && ctx.getDoc().value !== null) {
+      if (op.flagUndo && ctx.hasLoadedDocument()) {
         const before = ctx.getDoc().value?.clone() ?? null
         await op.exec(ctx, resolvedProps)
         const after = ctx.getDoc().value?.clone() ?? null
@@ -87,7 +87,7 @@ export class OperatorRegistry {
     if (regionId) resolvedProps._regionId = regionId
 
     if (op.invoke) {
-      const snapshot = op.flagUndo && ctx.getDoc().value !== null
+      const snapshot = op.flagUndo && ctx.hasLoadedDocument()
         ? ctx.getDoc().value?.clone() ?? null
         : null
 
@@ -127,7 +127,7 @@ async function invokeExecFallback(
   op: OperatorType,
   props: OperatorProperties,
 ): Promise<OpResult> {
-  if (op.flagUndo && ctx.getDoc().value !== null) {
+  if (op.flagUndo && ctx.hasLoadedDocument()) {
     const snapshot = ctx.getDoc().value?.clone() ?? null
     await op.exec!(ctx, props)
     const snapshotAfter = ctx.getDoc().value?.clone() ?? null

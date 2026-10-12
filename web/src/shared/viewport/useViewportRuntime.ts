@@ -309,7 +309,15 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     /** 播放状态（只读镜像；写面在 `togglePlayback`/`setFramePlayback`）。 */
     isPlaying: playingRef as Readonly<Ref<boolean>>,
     playbackRate: rateRef as Readonly<Ref<number>>,
-    frameCount: computed(() => kernel?.frameCount() ?? (ctx.getDoc().value?.frameCount ?? 0)),
+    // #301 P10f B′：内核读面（`kernel` 为 null 时——仅非生产宿主——取 0）。
+    //
+    // 原写法 `kernel?.frameCount() ?? (ctx.getDoc().value?.frameCount ?? 0)` 的
+    // legacy 兜底**生产不可达**：两个生产宿主都传内核
+    // （`runtime/host/workbenchHost.ts`、`runtime/host/embedHost.ts`）。
+    // 且它读的是**内核**帧数（`kernel.frameCount()` 经 `bindFrameSource`），
+    // 不是 legacy 文档帧数 —— 两处在装配失败时都读 0（同一 D8 缺口），
+    // 故保留 legacy 兜底并不能真正"兜"回 legacy 的 N 帧。
+    frameCount: computed(() => kernel?.frameCount() ?? 0),
     computed: drw.computed,
     materialLibrary: drw.textureCache,
     /**

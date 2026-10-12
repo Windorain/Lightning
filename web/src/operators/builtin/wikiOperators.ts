@@ -75,7 +75,7 @@ export const WikiSaveAsOperator: OperatorType = {
   id: 'OPERATOR_WIKI_SAVE_AS',
   label: '另存为 Wiki 结构',
   poll(ctx) {
-    return ctx.hasCapability(CAPABILITY.WIKI_UPLOAD) && ctx.getDoc().value != null && isWikiApiAvailable()
+    return ctx.hasCapability(CAPABILITY.WIKI_UPLOAD) && ctx.hasLoadedDocument() && isWikiApiAvailable()
   },
 
   invoke(ctx) {
