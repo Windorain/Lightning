@@ -582,8 +582,19 @@ export function submitPropertyWrite(
         text: value === '' ? null : value,
       })
       if (appliedToKernel) {
-        // 内核已是权威且已投影回 legacy ⇒ **不得**再走下面的 legacy 写
+        // 内核已是权威且 `submitContentEdit` 已调 `syncLegacyFromKernel()` 把
+        // 内核内容投影回 legacy ⇒ **不得**再走下面的 legacy 写
         // （再写一次会以旧侧表覆盖回写产物）。
+        //
+        // ⚠️ **这个前提曾经是假的（#333）**：D0 段二写这一行时，
+        // `syncLegacyFromKernel` **只**投影注解（它自己的文件头就写着"将来若
+        // 要写网格/材质，必须**同时**扩本方法"），而本拦截写的正是内核
+        // `cellContent.tooltip` ⇒ 内核写了、legacy 没投影、这一行又提前返回
+        // ⇒ 面板读 legacy 看不到值（e2e A25-3b 双 project 确定性红，单测全绿）。
+        // 修法**不是**摘掉本拦截（那会退回"逐格说明不改读内核"= 能力回退），
+        // 而是补齐那条被跳过的纪律：`syncLegacyFromKernel` 现在**同时**投影
+        // 逐格说明侧表（`runtime/tooltipRead` + `RuntimeDocument#withCellTooltips`）。
+        // ⇒ 判据把守见 `p10fPanelTooltipWrite.test.ts`（本入口的内核路径）。
         // NO_CHANGE = 零变更摘要（版本已由内核推进；本函数只回执 outcome）
         return { status: 'applied', version: versionOf(ctx), changes: NO_CHANGE }
       }

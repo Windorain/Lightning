@@ -535,6 +535,31 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       '同上：读面按 `AnnotationGeometry` 的**封闭字段集**逐字段转发（不整体展开），故需该类型',
     exitStage: 'P11 终局审计：随本文件迁出 `runtime/` 而消失（同 `domain/document` 那条）',
   }),
+  // ── P10f D2 收尾（#301，回 **#333**）：逐格说明的**回写投影** ──────────────
+  //
+  // D0 段二让"逐格说明编辑"走内核命令，却没扩 `Context#syncLegacyFromKernel`
+  // （该方法文件头自己写着"将来若要写网格/材质，必须**同时**扩本方法"）⇒
+  // 内核写了 `cellContent.tooltip`、legacy 侧表没被投影，而面板/保存读 legacy
+  // ⇒ "提交成功但看不到"（e2e A25-3b 双 project 确定性红 = #333）。
+  //
+  // 补做时新增 `runtime/tooltipRead.ts`：它与 `annotationRead` 同性质 ——
+  // **新写**的替代实现，但按本闸门口径落在旧 `runtime/` 层（撞名层），
+  // 且需要内核的 `Document`/`Scene` 类型 ⇒ 两条旧→新边，必须登记（不得静默）。
+  Object.freeze({
+    from: 'src/runtime/tooltipRead.ts',
+    to: 'domain/document',
+    reason:
+      'P10f D2 收尾（#333）：把内核 `blockGrid.cellContent[].tooltip` 投影回 legacy 的 `tooltipPalette`+`cellTooltipGrid`（面板与保存读 legacy ⇒ 不回写就是"提交成功但看不到"）。与 `runtime/annotationRead.ts` 同一性质与同一层的读/写投影面',
+    exitStage:
+      'P11 终局审计：待工作台面板整体迁入 `editors/` 层、且保存路径无 legacy 回落分支后，本投影面随 `RuntimeDocument` 退出生产而消失',
+  }),
+  Object.freeze({
+    from: 'src/runtime/tooltipRead.ts',
+    to: 'domain/scene',
+    reason:
+      '同上：要按 `scene.order` 遍历 `blockGrid` 载荷取逐格内容（投影侧的"取哪一份载荷"规则必须与 `composition/kernelProjection#tooltipPoolOfPayloads` 同一条，故必须能读场景类型）',
+    exitStage: 'P11 终局审计：随本文件与 `RuntimeDocument` 一起退出（同 `domain/document` 那条）',
+  }),
   // ── P10f C′2（#301）内容写路径：旧层算子发内核命令 ─────────────────────────
   //
   // C′2 把"文档内编辑"从"clone legacy + setDocument"改成"**发内核命令** + 投影回写"

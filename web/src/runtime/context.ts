@@ -37,6 +37,7 @@ import type { KernelSession } from '@/runtime/kernelSession'
 // 而 `Context` 的外壳六件套不该进测试）—— 本层只负责"取事实、交结果"。
 import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
 import { kernelAnnotationsOf, kernelMaterialsOf, projectAnnotationsToLegacy } from '@/runtime/annotationRead'
+import { projectCellTooltipsToLegacy } from '@/runtime/tooltipRead'
 import { projectKernelSaveView, type SaveProjection } from '@/composition/saveProjection'
 import { resolveSideTable } from '@/runtime/sideTableResolution'
 import type { Command } from '@/application/commands'
@@ -693,18 +694,27 @@ export class Context {
    * 本项目三度实测"两份实现必然漂移"。双向写会让"谁是权威"再次不可判
    * —— 那正是 #171 要消除的形态。⇒ 内核是权威，legacy 是**投影产物**。
    *
-   * ## ⚠️ 它**只**回写注解（本批范围，如实声明）
+   * ## ⚠️ 它回写**两类**事实：注解 + 逐格说明侧表
    *
-   * C′2 的 5 处内核写只涉及注解（新建/改字段/删除）。
-   * 网格/材质/帧轴本批**不写**，故无需回写；将来若要写它们，
-   * 必须**同时**扩本方法（成对铁律第④项：同一事实的全部消费者同批迁移）。
+   * | 事实 | 内核承载 | 回写入口 |
+   * |---|---|---|
+   * | 注解（新建/改字段/删除） | 场景里的 `annotation` 对象 | `projectAnnotationsToLegacy` + `withAnnotations`（C′2） |
+   * | **逐格说明** | `blockGrid.cellContent[key].tooltip` | `projectCellTooltipsToLegacy` + `withCellTooltips`（**D2 收尾补做，回 #333**） |
+   *
+   * 网格/材质/帧轴仍**不写**（内核侧尚无对应写命令 ⇒ 无需回写）。
+   * ⚠️ **教训（#333）**：下面那类"将来若要写它们，必须**同时**扩本方法"的声明，
+   * 必须在**新增内核写命令**的同批兑现 —— D0 段二加了 `setCellTooltip`
+   * 却没扩本方法，于是"内核写了、legacy 没投影"，而面板/保存读 legacy
+   * ⇒ 表现为"提交成功但看不到"（e2e A25-3b 双 project 确定性红，单测全绿）。
+   * ⇒ 判据面必须覆盖**面板入口的内核路径**（`p10fPanelTooltipWrite.test.ts`），
+   * 只测命令层与算子层会漏掉这一整类。
    *
    * ## 不重置 `saveBaseline`（与 `adoptLoadedDocument` 的关键区别）
    *
    * `adoptLoadedDocument` 里 `saveBaseline: withScene.version` 的语义是
    * "**刚打开** = 与保存基线相同"（装载语义）。而本方法是**编辑**语义：
    * 回写后文档必须是**脏**的（`isDirty === true`），否则关窗不提示保存
-   * ⇒ **用户丢工作**。⇒ 本方法只换 `annotations` 字段，**不碰**版本/基线/历史。
+   * ⇒ **用户丢工作**。⇒ 本方法只换侧表字段，**不碰**版本/基线/历史。
    *
    * @returns 是否真的回写了（`false` = 无会话 / 未装配 / 未换引用 ⇒ 调用方无须动作）
    */
@@ -715,9 +725,27 @@ export class Context {
     if (!kernel.hasAdoptedContent()) return false
     const current = this.main.doc.value
     if (current === null) return false
-    const rows = projectAnnotationsToLegacy(kernel.document())
-    const next = current.withAnnotations(rows)
-    // 引用未变 ⇒ 不写（`withAnnotations` 内容相同即返回 `this`）
+    const kernelDoc = kernel.document()
+    // `document()` 的类型是 `Document | undefined`（未装载）。上面已由
+    // `hasAdoptedContent()` 把守，但**如实**再守一次：`undefined` 时无从投影 ⇒
+    // 不下任何结论（返回 `false` = 无须动作），而不是把 `undefined` 当空文档
+    // （那会把 legacy 的注解/侧表**清空** —— 静默丢内容，比不写更糟）。
+    if (kernelDoc === undefined) return false
+    const rows = projectAnnotationsToLegacy(kernelDoc)
+    // ── #333：逐格说明侧表**也必须**回写（D0 段二漏了这一步）──────────────────
+    //
+    // 见本方法文件头那句"将来若要写它们，必须**同时**扩本方法" —— D0 段二
+    // 让逐格说明编辑走内核命令，却没扩本方法 ⇒ 内核写了、legacy 没投影，
+    // 而面板与保存读 legacy ⇒ "提交成功但看不到"（e2e A25-3b 双 project 确定性红）。
+    //
+    // ⚠️ **`null` ⇒ 清除**（不是"不动"）：内核侧"没有任何逐格说明"是权威事实。
+    // 若把 `null` 当"不改"，则"删掉最后一条说明"会无声地不生效（内核已删、
+    // legacy 还留着旧池与旧网格）。语义见 `RuntimeDocument#withCellTooltips`。
+    const tooltips = projectCellTooltipsToLegacy(kernelDoc)
+    const next = current
+      .withAnnotations(rows)
+      .withCellTooltips(tooltips?.palette, tooltips?.grid)
+    // 引用未变 ⇒ 不写（两个 `with*` 都在内容相同时返回 `this`）
     // ⇒ 不 bump 内容重读信号 ⇒ 渲染链不做无谓重建（净零往返零成本）。
     if (next === current) return false
     // ⚠️ **走同一个唯一写者** `setDocument`（不自己调 `replaceDoc`）。
