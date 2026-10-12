@@ -35,8 +35,20 @@
  *   - `signatureCollapsed`：参考里存在"不同签名 / 同 name:meta"的条目对（EBF 为 1）；
  *   - 逐格比对用**同一投影函数**比较（`signatureGrid` 的 `full` 与 `idMeta` 两口径都算，
  *     门禁用 `idMeta`，`full` 作为**非门禁**的更强证据记录）；
- *   - `name:meta` 口径无法区分"运行态把下标 7 写成 8"这类**同 name:meta 的互换**，
- *     该盲区由 `web/src/context/multiblock/` 的单元测试（比对并集下标）与 `full` 口径共同覆盖。
+ *   - `name:meta` 口径无法区分"运行态把下标 7 写成 8"这类**同 name:meta 的互换**。
+ *     ⚠️ **该盲区没有任何 web 面判据覆盖**（#332 实测更正；此前的"由单元测试与 `full` 口径
+ *     共同覆盖"是**错的说法**）：
+ *       · `full` 口径**不能**覆盖它 —— 实测渲染侧把调色板条目的 `registryId` 统一归一为
+ *         `minecraft:` 前缀（`gregtech:gt.blockcasings` → `minecraft:gt.blockcasings`），
+ *         故 `full` 对参考侧**恒有差异**（实测 18/18、9/9、6/6，含压根没有运行态轴的
+ *         tier-only / lsc）⇒ 它在渲染面没有分辨力，只能当**诊断记录**，不能当门禁；
+ *       · 用"仅改运行态、其余轴固定"的组合对实测（#332 运行态诊断用例）：两次渲染定义
+ *         `cellGrid` 与 `blockPalette` **全文逐字节相同**，渲染侧控制器条目两次都是
+ *         `tooltip=["Electric Blast Furnace"]`、无 `nbt`，而参考侧是 `[7]`（无 nbt）↔ `[8]`
+ *         （`tooltip=["Electric Blast Furnace (running)"]`、`nbt={"activeFace":true}`）。
+ *     ⇒ 结论：EBF 的 216 对运行态组合在 web 渲染面**结构性不可分辨**，属**产品侧缺口**
+ *     （`context/grid.ts` 的调色板缓存按 `blockKey` = `name:meta` 归并 + `_gridToV2` 以该键
+ *     去重），须另立单修 `src/`；登记见 `reducedTraversal.ts` 的 `KNOWN_BLIND_AXES`。
  */
 import fs from 'node:fs'
 import path from 'node:path'

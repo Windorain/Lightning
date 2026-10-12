@@ -43,7 +43,10 @@ const REQUIRED_TRIPLE: Record<string, [channels: number, runstates: number, vari
 
 test.describe('T2.6 · 多方块 fixture 加载（公开观测点 vs 文件声明）', () => {
   for (const c of MULTIBLOCK_CONTRACTS) {
-    test(`加载 ${c.file}：形态/通道/运行态/变体/骨架 与文件声明一致`, async ({ page }, testInfo) => {
+    // #332 L2 smoke：只把最轻的一份 fixture 标记为关键路径（"工作台加载 + 文档打开"），
+    // 另两份留在 full —— 三份的差别只是声明规模，加载链路同一条。
+    const tags = c.file === 'multiblock-tier-only.json' ? ['@smoke'] : []
+    test(`加载 ${c.file}：形态/通道/运行态/变体/骨架 与文件声明一致`, { tag: tags }, async ({ page }, testInfo) => {
       fs.mkdirSync(SHOT_DIR, { recursive: true })
       const slug = c.file.replace(/\.json$/, '')
 
