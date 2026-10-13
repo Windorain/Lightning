@@ -19,9 +19,11 @@
  * `resolveIntent`（`application/inputCommands`）把它映射成 P1 的 `Command`；
  * 命令经 `sink.submit` / `sink.executeNow` 进入**唯一写通路** `reduceCommand`。
  *
- * `sink` 由装配方提供：产品侧当前是"具名命令 ID → 既有 operator"的转发表
- * （P10 收口点，见 `workbench/inputHotkeys.ts` 的 `workbenchCommandSink`），
- * 测试侧是 `editorCommandSink(editor)`（真正的 P1 执行器）。
+ * `sink` 由装配方提供。产品侧与测试侧现在走**同一个**内核执行器家族：
+ * 产品侧 `workbench/inputHotkeys` 的 `workbenchCommandSink`（把领域命令交给
+ * `Context#submitContentEditSettlement`/`submitKernelUndoRedo` —— 内核提交**并投影**），
+ * 测试与其它 `EditorClient` 外壳是 `editorCommandSink(editor)`。
+ * R1-β① C4 删除了旧的"具名命令 ID → 既有 operator"转发表。
  */
 
 import { createInputSession, type InputEventResult, type InputSession } from '@/runtime/inputSession'
@@ -37,15 +39,17 @@ export interface AssembleInputOptions {
    *
    * ## 为什么是端口而不是直接要一个 `Editor`
    *
-   * 工作台当前的**真实文档**仍是旧 `RuntimeDocument`（P1 已知缺口：72 个生产文件读它，
-   * 归口 P10 集成把真实文档换成 P1 的类型化文档）。因此今天产品侧交给输入面的
-   * `sink` 是"把具名命令 ID 转发到既有 operator 入口"的实现，
-   * 而**测试**交给它的是真正的 P1 `Editor`（`editorCommandSink`）。
+   * 端口是 `application` 层的契约（本层不认识 `runtime` 的实现类型）。产品侧实现
+   * 是 `workbench/inputHotkeys#workbenchCommandSink` —— 它把领域命令交给
+   * `Context` 的**已结算**入口（内核 submit → drain → 结算 → `syncLegacyFromKernel`
+   * 投影，R1-β① C1–C3 建立）；`EditorClient` 外壳（测试、嵌入）用
+   * `runtime/inputSession#editorCommandSink`。
    *
-   * 这条分界是**显式且逐条列明**的（见 `workbench/inputHotkeys.ts`），
-   * 不是"新门面包旧核心"：命令 ID 空间、幂等账本、可用性查询、路由优先级
-   * 全部是 P7 的新实现，只有"最终落到哪个执行器"这一个点由装配层选择。
-   * P10 把该点换成 `editorCommandSink(editor)` 即完成收口。
+   * 这条分界是**显式且逐条列明**的（见 `workbench/inputHotkeys.ts` 的
+   * `KERNEL_SETTLEMENT_KINDS`），不是"新门面包旧核心"：命令 ID 空间、幂等账本、
+   * 可用性查询、路由优先级全部是 P7 的新实现，只有"最终落到哪个执行器"这一个点
+   * 由装配层选择。R1-β① C4 已把该点从旧 operator 转发换成内核提交路径，
+   * 调用方（本函数）不变。
    */
   readonly sink: CommandSink
   /** 能力集合（profile 裁剪；由装配层决定）。 */

@@ -759,8 +759,8 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       + '实测 legacy `frame(0).grid === frame(0).grid` 为 true，而读面 `gridOf(doc, 0) === gridOf(doc, 0)` 为 false'
       + '（读面每次新建视图对象）。⇒ 旧算子依赖内核会话是本次迁移的**内容**，不是给旧路径续命。',
     exitStage:
-      'R1-β① C4/C5：端口切换后本算子不再作为命令入口（`DOMAIN_COMMAND_TO_OPERATOR` 与 `legacy:` 票号消失），'
-      + '算子随之内迁内核侧装配时核销本行',
+      'R1-β① C4/C5：端口切换后本算子不再作为命令入口（旧的「领域命令 → 旧 operator」转发表'
+      + '与 `<前缀>:<命令名>` 票号形态已消失），算子随之内迁内核侧装配时核销本行',
   }),
   Object.freeze({
     from: 'src/runtime/context.ts',

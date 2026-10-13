@@ -918,6 +918,56 @@ export function commitFieldValue(ctx: Context, desc: PropertyDescriptor, value: 
   return submitPropertyWrite(ctx, refs, value, `set:${desc.id}`)
 }
 
+/** 呈现层控件 id 的前缀（`workbench/ux/PropertyField.vue` 与命令层 `ControlBinding.controlId` 同源）。 */
+const FIELD_CONTROL_PREFIX = 'field:'
+
+/**
+ * **草稿提交（`draft.commit` → `setProperty`）在图中的落点**（R1-β① C4）。
+ *
+ * ## 它替代了什么
+ *
+ * C4 之前，输入端口的 `setProperty` 分支拿 `refs[0].property`（= 控件 id
+ * `field:<描述符 id>`）去查 `WM.applyPropertyRegistry` —— 一张由**已挂载的
+ * 属性面板组件**写入的闭包表。那条链有三处结构性毛病：
+ *  1. 落点依赖**组件是否挂载**：面板没挂载 ⇒ `controlNotRegistered`，而"命令已
+ *     发出、界面上什么都没变"正是 #249 §13 要判红的形态；
+ *  2. 表在**运行期**被组件增删（`PropertyInspector` 的 `syncCommitSinks`/
+ *     `onBeforeUnmount`），命令的落点因此不是装配事实；
+ *  3. 它把"控件 id → 描述符"的解析放在**输入端口**里，而按 R1-β① 裁决②，
+ *     "旧寻址 → 内核 id"的映射**只许**落在边界/投影层 —— 本文件就是那一层。
+ *
+ * 现在解析**只读描述符注册表**（面板的同一张数据表，装配期即确定），再走
+ * {@link commitFieldValue} → {@link submitPropertyWrite}（唯一写路由）。
+ * 于是"值 → 落点"的判定不依赖任何组件生命周期，也不需要一张闭包表。
+ *
+ * ## 为什么内核命令不能直接吃这个 `PropertyRef`
+ *
+ * `ControlBinding.ref` 的 `owner` 是 `{ kind: 'document', id: '' }`、`property`
+ * 是 `field:<描述符 id>` —— 那是**面板寻址**，内核核心不认识（裁决②）。
+ * 故这里必须是"解引用回描述符 ⇒ 由 `resolveRefs` 算出内核/legacy 的双侧目标"，
+ * 而不是把面板 ref 原样发给内核。
+ *
+ * @returns 与面板其它入口（`commitFieldValue`/`commitFieldComponent`）**同一个**
+ *          `CommandOutcome` 形态；描述符不存在 ⇒ 具名拒绝（**不**静默丢弃）。
+ */
+export function commitDraftControlValue(
+  ctx: Context,
+  property: string,
+  value: PropertyValue,
+): CommandOutcome {
+  const descriptorId = property.startsWith(FIELD_CONTROL_PREFIX)
+    ? property.slice(FIELD_CONTROL_PREFIX.length)
+    : property
+  const desc = workbenchRegistry().registry.descriptor(descriptorId) ?? null
+  if (desc === null) {
+    return {
+      status: 'rejected',
+      error: domainError('MissingTarget', { reason: 'unknownPropertyControl', property }),
+    }
+  }
+  return commitFieldValue(ctx, desc, value)
+}
+
 /** 提交某个分量（`component` 寻址；其余分量由写入函数保持）。 */
 export function commitFieldComponent(
   ctx: Context,

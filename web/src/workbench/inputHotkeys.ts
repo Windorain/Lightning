@@ -30,24 +30,24 @@
  * `application/inputCommands.evaluateCommandAvailability` 纯查询决定，
  * 执行由输入会话经 P1 的唯一写通路完成。
  *
- * ## 为什么这里仍有 `operators` 一类转发
+ * ## 本表里剩下的"转发"是什么（R1-β① C4 之后的边界）
  *
- * P7 **不**负责把工作台的旧 operator 全部改造成 P1 命令 —— 那是 P10/P11 的集成面。
- * 本表把两类键分开列明：
+ * 下面 `workbenchInputHotkeys` 里的局部动作（`local.a` / 工具切换 / 面板开合）
+ * **不是**领域命令的一部分 —— 它们不改文档，故**不**存在"转发给谁"的双轨问题：
+ * 它们是本表自己的动作实现。C4 删掉的是**领域命令**那一侧的转发
+ * （命令 ID → 旧 operator + 票号前缀），因为那才是"同一件事有两条权威"。
  *
- * | 类别 | 例子 | 走哪条路 |
- * |---|---|---|
- * | **P1 领域命令** | `edit.undo`、`edit.redo` | `application/inputCommands` → `reduceCommand` |
- * | **旧 operator 转发** | `OPERATOR_SELECT_ALL`、工具切换、面板开合 | 输入会话的**局部动作**处理器 → 既有 operator 入口 |
- *
- * 这个分界是**显式**的（不是"新门面包旧核心"）：转发项在表里逐条列出，
- * 并在注释里写明归属批次。P10 集成后转发项应逐条消失，届时本表只剩领域命令。
+ * 判据：`local.*` 不在 `application/inputCommands#resolveIntent` 的映射里
+ * （见那里的说明），因此它们**进不了**领域写通路，也不可能被误当命令记账。
  */
 
 import type { HotkeyBinding } from '@/domain/input'
 import type { Context } from '@/runtime/context'
-import type { CommandSink } from '@/application/inputCommands'
+import type { Command } from '@/application/commands'
+import type { CommandOutcome } from '@/application/contracts'
+import type { CommandOutcomeLike, CommandSink } from '@/application/inputCommands'
 import { unsupportedOperation } from '@/domain/errors'
+import { commitDraftControlValue, versionOf } from '@/editors/workbench-rna'
 import { REGION } from '@/runtime/regionIds'
 import { toggleRegionCollapsed } from '@/runtime/screenLayout'
 
@@ -87,11 +87,7 @@ export const WORKBENCH_LOCAL_HOTKEYS: readonly LocalHotkey[] = Object.freeze([
   { key: 'n', label: '属性面板显示（ui.toggleProperties）' },
 ])
 
-/** 领域命令 ID → 既有 operator ID 的**转发表**（P10 收口时逐条删除）。 */
-export const DOMAIN_COMMAND_TO_OPERATOR: Readonly<Record<string, string>> = Object.freeze({
-  'edit.undo': 'OPERATOR_UNDO',
-  'edit.redo': 'OPERATOR_REDO',
-})
+/* R1-β① C4：这里的领域命令 → 旧 operator 转发表已删除（含其票号前缀）。 */
 
 /**
  * 把局部键转成 `HotkeyBinding`（统一成同一结构，供路由表使用）。
@@ -164,81 +160,165 @@ export function workbenchInputHotkeys(ctx: Context): {
 }
 
 /**
- * 工作台当前的**命令接收端口**实现（P10 收口点）。
+ * 走**内核提交路径**的领域命令（`Context#submitContentEditSettlement`：submit →
+ * drain → 结算 → `syncLegacyFromKernel` 投影）。
  *
- * ## 为什么它不是 `editorCommandSink(new Editor())`
+ * ## 为什么是逐条列出的字符串集合，而不是 `Command['kind']` 的穷尽 switch
  *
- * 工作台的**真实文档**仍是旧 `RuntimeDocument`：P1 的 `Editor` 持有的是新的
- * 类型化文档（block/annotation/camera），与工作台正在编辑的那份**不是同一份**。
- * 若在这里建一个 `Editor` 并把命令发给它，就会得到一个"命令被 applied、
- * 界面上什么都没变"的假成功 —— 正是 #249 §13「不允许暴露会假成功的按钮」
- * 与 #250「不得以空接口、假成功控件充当完成」要判红的形态。
+ * 这张表就是"输入面把哪些命令交给内核"的**可审计清单**（#249 §19.1 要求
+ * "谁还能触发什么"可审计）。它必须能被判据逐条读出，故用数据而不是分支。
  *
- * 故当前实现把**具名命令 ID** 转发到既有的 operator 入口（逐条列明于
- * `DOMAIN_COMMAND_TO_OPERATOR`），并**显式拒绝**尚未接通的命令 ID
- * （返回 `UnsupportedOperation`，不静默丢弃）。
+ * ## 为什么 `setProperty` / `undo` / `redo` **不**在表里
  *
- * P10 集成把真实文档换成 P1 的类型化文档后，本函数替换为
- * `editorCommandSink(editor)` 即可 —— 调用方（`assembleInput`）不变。
+ * | 命令 | 为什么不直接发内核 |
+ * |---|---|
+ * | `setProperty` | 命令携带的是**面板寻址**（`owner.kind:'document'`、`property:'field:<描述符 id>'`）。按 R1-β① 裁决②，"旧寻址 → 内核 id"的映射只许落在**边界层**；内核核心不认识它 ⇒ 落点是 `editors/workbench-rna#commitDraftControlValue`（再走唯一写路由 `submitPropertyWrite`）。 |
+ * | `undo`/`redo` | 撤销权威是内核历史，但入口必须是 `Context#submitKernelUndoRedo` —— 它额外定义了"栈空（`unchanged`）也算内核已生效、**不**回落旧栈"的语义；直接发 `submitContentEditSettlement` 会让"没什么可撤销"看起来像失败。 |
+ */
+const KERNEL_SETTLEMENT_KINDS: ReadonlySet<string> = new Set([
+  'select',
+  'setTime',
+  'setPlaying',
+  'setPlaybackRate',
+  'advancePlayback',
+  'setChannelValue',
+  'setTransform',
+  'beginInteraction',
+  'updateInteraction',
+  'commitInteraction',
+  'cancelInteraction',
+  'addObject',
+  'deleteObject',
+  'setCellTooltip',
+  'setCellContent',
+  'setCellIdentity',
+  'moveCells',
+  'setDocumentMeta',
+  'insertKeyframe',
+  'removeKeyframe',
+  'setTrackEnabled',
+  'publishDefault',
+])
+
+/**
+ * **有副作用/改变文档集合**的命令（`application/commands#requiresQueue`）：
+ * 它们**不属于**输入面（`executeNow` 的适用范围是"无效果、可有界完成"，契约 §2.1）。
+ * 它们由宿主入口（打开/保存/关闭文档）驱动，故在输入端口上**显式拒绝**。
+ */
+const QUEUED_ONLY_KINDS: ReadonlySet<string> = new Set([
+  'save',
+  'saveCompleted',
+  'openDocument',
+  'closeDocument',
+])
+
+/** 内核结算 → 端口结算（结构同形；`null` = 内核未装配/未采纳内容 ⇒ 具名拒绝）。 */
+function toOutcome(outcome: CommandOutcome | null): CommandOutcomeLike {
+  if (outcome === null) {
+    return {
+      status: 'rejected',
+      error: unsupportedOperation({ reason: 'noKernelContent', command: 'content-edit' }),
+    }
+  }
+  return outcome
+}
+
+/**
+ * 工作台当前的**命令接收端口**实现 —— 领域命令交给**内核提交路径**（R1-β① C4）。
+ *
+ * ## 这个实现替代了什么（本函数的整体转发形态已消失）
+ *
+ * C4 之前，本函数把具名命令经一张「领域命令 → 旧 operator」**转发表**转发给旧算子，
+ * 并返回 `<前缀>:<命令名>` 形态的票号：撤销打到旧栈、`setProperty` 打到
+ * `WM.applyPropertyRegistry` 的闭包表、其余命令被拒绝。那张表与票号前缀**已删除**
+ * （扫描口径见 `src/workbench/__tests__/inputPortKernelRouting.test.ts`：
+ * 本文件内票号前缀 0 命中、全树该转发表标识符 0 命中）。
+ *
+ * 现在分治为三条，逐条可审计：
+ *  1. **领域命令**（{@link KERNEL_SETTLEMENT_KINDS}）⇒ `Context#submitContentEditSettlement`
+ *     （内核 submit → drain → 结算 → 投影回 legacy，读面/视口随之可见）；
+ *  2. **面板草稿提交**（`setProperty`）⇒ `editors/workbench-rna#commitDraftControlValue`
+ *     的**边界映射** ⇒ 唯一写路由；
+ *  3. **撤销/重做** ⇒ `Context#submitKernelUndoRedo`（内核撤销为唯一权威）。
+ *
+ * ## 为什么不是 `editorCommandSink(editor)`
+ *
+ * `editorCommandSink`（`runtime/inputSession.ts:777`）是**结构等价适配**：
+ * 它只把命令交给 `EditorClient`，**不** drain、**不**结算、**不**投影。在测试与
+ * 其它外壳里那是对的（调用方自己持有 Editor 并读结算）；但生产工作台的文档权威是
+ * `KernelSession`（它**不是** `EditorClient`：`read()` 无 scope、没有 `executeNow`/
+ * `observe`），且生产没有帧循环 drain ⇒ 若拿它当生产 sink，命令会停在队列里、
+ * legacy 载体不动 —— 那正是本文件旧注释警示的"命令被 applied、界面上什么都没变"的
+ * **假成功**。故生产端口走 `Context` 的两条**已结算**入口（C1–C3 建立），
+ * `editorCommandSink` 继续服务于 `EditorClient` 外壳。
+ *
+ * 调用方（`composition/assembleInput`）不变：它只要求一个 `CommandSink`。
  */
 export function workbenchCommandSink(ctx: Context): CommandSink {
-  const dispatchOperator = (operatorId: string): void => {
-    void ctx.getOperators().exec(operatorId)
-  }
   return {
     submit(command) {
-      // 输入面当前**不产生需要排队的命令**（都无效果、可有界完成）。
-      // 若将来产生了却走到这里，必须显式失败而不是假装接收。
-      const operatorId = DOMAIN_COMMAND_TO_OPERATOR[command.kind]
-      if (operatorId !== undefined) {
-        dispatchOperator(operatorId)
-        return { ticketId: `legacy:${command.kind}`, commandId: command.kind }
-      }
+      // 生产输入面**不产生**排队命令：`application/inputCommands#resolveIntent`
+      // 的全部 `kind:'command'` 分支都是 `queue:false`（`queue: true` 全文件 0 命中），
+      // 而 `requiresQueue` 只覆盖 save/saveCompleted/openDocument/closeDocument ——
+      // 那四条由宿主入口驱动，不经输入面。内核队列在生产**没有** drain 循环
+      // （drain 调用点只有 `submitContentEditSettlement`/`submitKernelUndoRedo`/
+      // `projectIo`），故在这里返回票号 = "接收了但永不结算"。
+      //
+      // ⚠️ `CommandSink.submit` 的签名**没有**拒绝通道（只返回票号）。故这里只能
+      // 返回具名的 `unsupported:` 票号（非内核票号），并在下方 `executeNow` 的
+      // `QUEUED_ONLY_KINDS` 上给出结构化拒绝；这是本端口暴露出的契约缺口之一。
       return { ticketId: `unsupported:${command.kind}`, commandId: command.kind }
     },
     executeNow(command) {
-      // 草稿提交：**唯一**的领域写点。值已由 `domain/textDraft` 判为完整合法
-      // （中间态/非法态根本不会走到这里 —— 见 `textDraft.settleControl`）。
-      if (command.kind === 'setProperty') {
-        const ref = command.refs[0]
-        const controlId = ref?.property ?? null
-        const apply = controlId === null ? undefined : ctx.wm.applyPropertyRegistry.get(controlId)
-        if (apply === undefined) {
-          // 未登记的控件 ⇒ 显式拒绝（**不**静默丢弃，否则表现为"输入了没反应"）
+      // 端口签名是 `ImmediateCommand`，但生产分发点（`inputCommands#dispatchIntent`）
+      // 把**全部** `queue:false` 的命令都交给本方法，其中 `commitInteraction`
+      // **不在** `ImmediateCommand` 联合里（`commands.ts:717` 的说明）⇒ 这里按
+      // `Command` 的实收形态处理，再逐个 kind 判定；未列出的一律具名拒绝。
+      const cmd = command as Command
+      const kind: string = cmd.kind
+
+      // ① 面板草稿提交：映射在边界层做（裁决②），落点是唯一写路由。
+      if (cmd.kind === 'setProperty') {
+        const refs = cmd.refs
+        const ref = refs.length === 1 ? refs[0] : undefined
+        if (ref === undefined) {
           return {
             status: 'rejected',
-            error: unsupportedOperation({ reason: 'controlNotRegistered', controlId: controlId ?? '' }),
+            error: unsupportedOperation({ reason: 'unsupportedPropertyRefShape', command: kind }),
           }
         }
-        const value = command.value
-        if (value === 'mixed' || value === null || typeof value === 'object' || typeof value === 'boolean') {
-          // 布尔属性（复选/开关）不是草稿型控件 —— 它们没有中间输入态，
-          // 故不应经 `draft.commit` 到这里。显式拒绝而不是静默忽略。
-          return {
-            status: 'rejected',
-            error: unsupportedOperation({ reason: 'unsupportedValueForm', command: command.kind }),
-          }
-        }
-        apply(value)
-        return { status: 'applied', version: { documentVersion: 0, contentVersion: 0 } }
+        return toOutcome(commitDraftControlValue(ctx, ref.property, cmd.value))
       }
-      // 其余命令 ID 的对应在 `EXECUTE_NOW_OPERATORS` 里单点维护；
-      // 未接通的显式 `UnsupportedOperation`（不假装接收）。
-      const spec = EXECUTE_NOW_OPERATORS[command.kind]
-      if (spec === undefined) {
+
+      // ② 撤销/重做：内核撤销是唯一权威（C2 的入口自带"栈空也算已生效"语义）。
+      if (kind === 'undo' || kind === 'redo') {
+        if (ctx.submitKernelUndoRedo(kind)) {
+          return { status: 'applied', version: versionOf(ctx) }
+        }
         return {
           status: 'rejected',
-          error: unsupportedOperation({ reason: 'commandNotWiredToLegacyDocument', command: command.kind }),
+          error: unsupportedOperation({ reason: 'kernelUndoUnavailable', command: kind }),
         }
       }
-      dispatchOperator(spec)
-      return { status: 'applied', version: { documentVersion: 0, contentVersion: 0 } }
+
+      // ③ 其余领域命令：内核提交路径（唯一写通路）。
+      if (KERNEL_SETTLEMENT_KINDS.has(kind)) {
+        return toOutcome(ctx.submitContentEditSettlement(cmd))
+      }
+
+      // ④ 有副作用/改变文档集合的命令：输入面**不是**它们的入口。
+      if (QUEUED_ONLY_KINDS.has(kind)) {
+        return {
+          status: 'rejected',
+          error: unsupportedOperation({ reason: 'effectfulCommandNotAcceptedByInputPort', command: kind }),
+        }
+      }
+
+      // ⑤ 未知/未接通：显式拒绝（附命令名），绝不假装接收。
+      return {
+        status: 'rejected',
+        error: unsupportedOperation({ reason: 'commandNotWiredToInputPort', command: kind }),
+      }
     },
   }
 }
-
-/** `executeNow` 能转发的命令（**逐条**；其余显式 `UnsupportedOperation`）。 */
-const EXECUTE_NOW_OPERATORS: Readonly<Record<string, string>> = Object.freeze({
-  undo: 'OPERATOR_UNDO',
-  redo: 'OPERATOR_REDO',
-})

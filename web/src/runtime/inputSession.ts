@@ -386,7 +386,7 @@ export function createInputSession(options: InputSessionOptions): InputSession {
   ): void {
     // 拒绝时**必须**带结构化参数（`DomainError.params`），否则"为什么被拒"不可诊断：
     // 只有错误码时 `UnsupportedOperation` 无法区分 `unboundControl` /
-    // `commandNotWiredToLegacyDocument` / `controlNotRegistered`，
+    // `commandNotWiredToInputPort` / `unknownPropertyControl`，
     // 而这三者的修法完全不同（P7 首跑 e2e 实测到的证据缺口）。
     const detail =
       error === null
