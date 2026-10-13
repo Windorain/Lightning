@@ -404,10 +404,22 @@ describe('P10f A′ · 反实现漂移（本文件的镜像宿主 vs 真实实�
     // 取方法体（到下一个顶层 `\n  }` 为止，足够覆盖本方法）
     const body = code.slice(start, code.indexOf('\n  }', start))
 
-    const iReplace = body.indexOf('this.main.replaceDoc(next)')
+    // ⚠️ **实参可扩展**（R1-β① C1 加入 `revision: 'document'|'content'` 之后的形态修正）
+    //
+    // 本判据守的是**结构性指纹**："`setDocument` 里 `this.main.replaceDoc(...)` 是
+    // legacy 侧唯一写点、且排在镜像之前"。故只认**调用点前缀**（`this.main.replaceDoc(next`，
+    // 允许其后跟更多实参），不写死整串实参 —— 写死会让"加一个语义参数"这种合法演进
+    // 变成假红（C1 落地时正是这么红的：`p10fDocumentLifecycle.test.ts:396` 的
+    // `indexOf('this.main.replaceDoc(next)')` 在 `replaceDoc(next, revision)` 上取到 -1）。
+    // 它**不是**恒真：调用点消失、或顺序倒置、或早退守卫移位，三条都仍判红。
+    const replaceCall = /this\.main\.replaceDoc\(\s*next\b/.exec(body)
+    expect(
+      replaceCall,
+      '必须调用 `this.main.replaceDoc(next, …)`（legacy 侧写入口；实参允许扩展）',
+    ).not.toBeNull()
+    const iReplace = replaceCall === null ? -1 : replaceCall.index
     const iUnload = body.indexOf('markUnloaded()')
     const iLoad = body.indexOf('markLoaded()')
-    expect(iReplace, '必须调用 `this.main.replaceDoc(next)`（legacy 侧写入口）').toBeGreaterThan(-1)
     expect(iUnload, '必须在 null 时镜像为未装载').toBeGreaterThan(-1)
     expect(iLoad, '必须在非 null 时镜像为已装载').toBeGreaterThan(-1)
     expect(iReplace, '**先写 legacy、后镜像**（顺序是语义的一部分，见方法注释）').toBeLessThan(iUnload)

@@ -92,6 +92,21 @@ function makeRealContext(docRef: Ref<RuntimeDocument | null>, session: KernelSes
  * 「文档被替换」在生产里是**两个信号一起动**（`contentRefreshTick` +
  * `documentRevision`，见 `Main#replaceDoc`），故替身也一起动
  * —— 只动 `doc.value` 会让"换文档后哪些读面该刷新"这类判据假绿。
+ *
+ * ## ⚠️ `revision` 参数必须**逐字复刻**（R1-β① C1 / 裁决③）
+ *
+ * 第一版替身**忽略**第二个实参、无条件 bump 两个信号 ⇒ 它比生产**更宽**，
+ * 于是"`content-sync` 不推进 `documentRevision`"这条判据在本宿主上**恒绿不可能**
+ * （实测：C1 落地后它仍是老的 bump-both 形态）。这正是本工程反复吃过的**替身失真**：
+ * 判据会被一个比生产更宽松的替身喂成假绿/假红。
+ *
+ * ⇒ 本替身与 `Main#replaceDoc` **逐点相同**：
+ *  - `contentRefreshTick` **两种意图都 bump**（宽信号："内容可能变了"）；
+ *  - `documentRevision` **只在**`revision === 'document'` 时 bump（窄信号："换了一份文档"，
+ *    它是 `EmbedViewport.vue` 重置 `didInitCamera` 的依据）。
+ *
+ * 忠实性由判据本尊把守（`r1ContentSyncRevision.test.ts` 的"替身 vs 生产源码"组）：
+ * 生产若改了这段语义而替身没跟，那条会判红。
  */
 function makeFakeMain(docRef: Ref<RuntimeDocument | null>): Record<string, unknown> {
   const contentRefreshTick = ref(0)
@@ -100,9 +115,12 @@ function makeFakeMain(docRef: Ref<RuntimeDocument | null>): Record<string, unkno
     doc: docRef,
     contentRefreshTick,
     documentRevision,
-    replaceDoc(next: RuntimeDocument | null): void {
+    replaceDoc(next: RuntimeDocument | null, revision: 'document' | 'content' = 'document'): void {
       docRef.value = next
+      // 宽信号：两种意图都要（读面靠它重读内容）。
       contentRefreshTick.value += 1
+      // 窄信号：只有**真的换文档**才推进（与 `Main#replaceDoc` 的早退同形）。
+      if (revision === 'content') return
       documentRevision.value += 1
     },
     requestContentRefresh(): void {

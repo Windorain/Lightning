@@ -48,7 +48,8 @@ import { createDocument, withContent, withDocumentContent } from '@/domain/docum
 import { emptyScene, findObject, findObjectData, objectData, sceneObject, withObject } from '@/domain/scene'
 import type { Scene } from '@/domain/scene'
 import { cellContentKey } from '@/domain/cellContent'
-import { submitPropertyWrite } from '@/editors/workbench-rna'
+import { commitFieldValue, submitPropertyWrite, workbenchRegistry } from '@/editors/workbench-rna'
+import { writeErrorKey } from '@/editors/property-writers'
 import { projectCellTooltipsToLegacy } from '@/runtime/tooltipRead'
 import { projectAnnotationsToLegacy } from '@/runtime/annotationRead'
 
@@ -337,8 +338,28 @@ describe('#333 · 负对照（证明上面的判据真的在测"回写"）', () 
     }
   })
 
-  it('**回落分支仍守**：未装配 ⇒ 面板走 legacy 写（能力不回退）', () => {
-    const docRef = ref(legacyDoc()) as unknown as Ref<RuntimeDocument | null>
+  /**
+   * ## 本组守的**新不变量**（R1-β① C3；#385 裁决 = 处置 B）
+   *
+   * 原判据是 `#333` 的负对照：「**未装配 ⇒ 面板走 legacy 写（能力不回退）**」
+   * —— 它要求 GF-15=true / GF-16=false 时 `panelCommit` 仍 `applied` 并写进
+   * `doc.tooltipPalette`。
+   *
+   * 该口径已被**取代**（#385 登记）：在"有文档但内核未 adopted"这一状态下，
+   * 往 legacy 载体写是一条**会说谎的写路径** —— 权威在内核（此刻未 adopted），
+   * 写进 `doc.tooltipPalette` 之后，下一次 `syncLegacyFromKernel` 会把它覆盖掉，
+   * 用户看到的是"改了、又没了"，正是 #333 本身警示的形态。保住的只是能力的**外观**。
+   *
+   * ⇒ 新不变量：**单一内容权威 —— 未装配即显式不可用**。
+   * 判据形态（三半，缺一即失去区分力）：
+   *  1. 状态 `rejected`（**不是** applied，也不是静默无变化）；
+   *  2. 结构化原因 `UnsupportedOperation` + `reason:'kernel-not-adopted'`（响亮可诊断）；
+   *  3. **legacy 载体逐字未被改动**（后半句才是区分力所在：它证明**没有**回落写）。
+   */
+  it('**单一内容权威**：未装配 ⇒ 面板内容写**显式拒绝**（`kernel-not-adopted`），且 legacy 载体逐字未动', () => {
+    // 预置**非空**的 legacy 侧表：这样"未被改动"才是可判的事实（空表上判"没变"没有区分力）。
+    const seeded = legacyDoc().withCellTooltips(['既有的'], [[[0]]])
+    const docRef = ref(seeded) as unknown as Ref<RuntimeDocument | null>
     const fresh = new KernelSession({
       documentId: KERNEL_DOCUMENT_ID,
       contextId: KERNEL_CONTEXT_ID,
@@ -353,24 +374,101 @@ describe('#333 · 负对照（证明上面的判据真的在测"回写"）', () 
       //（写 `main.doc`）**再** `kernel.markLoaded()`。本宿主直接注入 `main.doc`，
       // 跳过了后者 ⇒ `hasLoadedDocument()` 会返回 **false**（内核侧不知道自己已装载），
       // 于是 `targetFacts` 判 `exists:false` ⇒ 提交被拒 **'rejected'**。
-      //
       // 那是**替身失真**，不是生产行为：补上镜像这一半即可（与 `kernelReadTestHost`
-      // 的 `swapDocument` 同一处置 —— 那里早已这样做，见其注释"若替身只改 docRef，
-      // 会假绿"）。
+      // 的 `swapDocument` 同一处置）。
       fresh.markLoaded()
       expect(ctx.hasLoadedDocument(), '前提：镜像后 GF-15 = true').toBe(true)
       expect(fresh.hasAdoptedContent(), 'GF-16 仍为假（有文档但未装配）').toBe(false)
-      const outcome = panelCommit(ctx, 0, 1, 0, '回落写的')
-      expect((outcome as { status: string }).status, '未装配时旧路径照常能写').toBe('applied')
-      // ⚠️ 回落分支（`property-writers#writeBlockProperty`）用的是**它自己的**
-      // 坐标口径：`grid[pos.z][pos.y][pos.x]`（`pos.y` 直接当行下标，**不翻转**）。
-      // 那是 D0 之前就有的既有行为（与内核路径的"世界 y + 投影时翻转"不同径），
-      // 本判据只需证明"回落分支确实写了"，故按**它自己的**口径读。
-      expect(docRef.value?.tooltipPalette, '回落分支必须真的写进池').toEqual(['回落写的'])
+
+      const paletteBefore = docRef.value?.tooltipPalette
+      const gridBefore = docRef.value?.cellTooltipGrid
+      const docBefore = docRef.value
+
+      const outcome = panelCommit(ctx, 0, 1, 0, '回落写的') as {
+        status: string
+        error?: { code?: string; params?: Record<string, unknown> }
+      }
+      expect(outcome.status, '未装配 ⇒ 内容写**不可用**（不再有会说谎的回落）').toBe('rejected')
+      expect(outcome.error?.code, '拒绝必须具名（结构化错误码）').toBe('UnsupportedOperation')
+      expect(outcome.error?.params?.reason, '原因必须可归因：不是"没反应"').toBe('kernel-not-adopted')
+
+      // ★ 区分力所在：形态上"写没写 legacy"必须可判。
+      expect(docRef.value, '不得替换文档引用（没有 setDocument ⇒ 没有回落写）').toBe(docBefore)
+      expect(docRef.value?.tooltipPalette, 'legacy 说明池**逐字**未被改动').toEqual(paletteBefore)
+      expect(docRef.value?.cellTooltipGrid, 'legacy 说明网格**逐字**未被改动').toEqual(gridBefore)
+      expect(docRef.value?.tooltipPalette, '前提：池里确有旧值（否则上面那条是空转）').toEqual(['既有的'])
+    } finally {
+      fresh.dispose()
+    }
+  })
+
+  /**
+   * **注入负对照**（证明上一条的"未改动"半句有区分力，不是恒真）。
+   *
+   * 注入方式：在内存里模拟一次**回落写**（把 `tooltipPalette` 拼上新文案）——
+   * 若生产里有人把 legacy 回落加回 `submitPropertyWrite`，上一条的两条断言
+   *（`tooltipPalette` 未改动、引用未替换）**必然判红**。
+   *
+   * ⚠️ 刻意不读真实文件、也不改 `src/`：本对照只需证明"命中集合变大时该断言会失败"
+   *（与 `seams.test.ts` 的注入负对照同一手法）。
+   */
+  it('**负对照**：注入一次 legacy 回落写 ⇒ 上一条的"逐字未被改动"断言必然判红', () => {
+    const seeded = legacyDoc().withCellTooltips(['既有的'], [[[0]]])
+    // 注入：这条表达式**就是**被取代的那条回落分支的形态（拼池 + 换网格）。
+    const injected = seeded.withCellTooltips(
+      [...(seeded.tooltipPalette ?? []), '回落写的'],
+      [[[0, 1]]],
+    )
+    expect(
+      injected.tooltipPalette,
+      '注入后池必须变 ⇒ "池逐字未改动"这条断言确实有区分力',
+    ).not.toEqual(seeded.tooltipPalette)
+    expect(injected.cellTooltipGrid, '注入后网格也必须变（两半都要有区分力）').not.toEqual(seeded.cellTooltipGrid)
+    // 反面：**不**注入时两半都相等 —— 证明上面那条不是"任何输入都判红"。
+    expect(seeded.tooltipPalette).toEqual(['既有的'])
+    expect(seeded.cellTooltipGrid).toEqual([[[0]]])
+  })
+
+  /**
+   * **拒绝必须响亮可诊断**（A6.2 的判据形态）：拒绝原因经**面板的诊断键**唯一化，
+   * 而不是被压成布尔或默认值。
+   *
+   * 落点：`editors/property-writers#writeErrorKey`（面板/LogCenter 显示拒绝原因时
+   * 用的**稳定诊断键**；`PanelSession.rejections` 按局部属性名存放同一条
+   * `DomainError`，由 `buildFieldViewModel` 的 `rejection` 字段渲染）。
+   */
+  it('**可诊断**：未装配的拒绝经面板入口产出**稳定诊断键**（不是"点了没反应"）', () => {
+    const seeded = legacyDoc().withCellTooltips(['既有的'], [[[0]]])
+    const docRef = ref(seeded) as unknown as Ref<RuntimeDocument | null>
+    const fresh = new KernelSession({
+      documentId: KERNEL_DOCUMENT_ID,
+      contextId: KERNEL_CONTEXT_ID,
+      capabilities: ALL_CAPABILITIES,
+    })
+    const ctx = makeWorkbenchContext(docRef, fresh)
+    try {
+      fresh.markLoaded()
+      // 面板的**真实**提交入口（`commitFieldValue`）：它自己从选中集解析目标。
+      Object.assign(ctx as unknown as Record<string, unknown>, {
+        getSelection: () => ({
+          active: ref(null),
+          items: ref(new Set([{ kind: 'block', ref: { pos: { x: 0, y: 1, z: 0 } } }])),
+        }),
+        getHoveredBlock: () => ref(null),
+        getHoveredAnnotationId: () => ref(null),
+      })
+      const desc = workbenchRegistry().registry.descriptor('lightning.block.tooltip')
+      expect(desc, '前提：面板确实声明了 `tooltip` 属性').toBeTruthy()
+      const outcome = commitFieldValue(ctx, desc!, '测诊断键') as {
+        status: string
+        error?: { code?: string; params?: Record<string, unknown> }
+      }
+      expect(outcome.status, '面板入口必须如实拒绝').toBe('rejected')
+      expect(outcome.error, '拒绝必须带原因（不是布尔）').toBeTruthy()
       expect(
-        docRef.value?.cellTooltipGrid?.[0]?.[1]?.[0],
-        '回落分支按它自己的行下标口径落点（`pos.y` 当 row）',
-      ).toBe(0)
+        writeErrorKey(outcome.error as never),
+        '诊断键必须稳定可读（面板/日志按它显示原因）',
+      ).toBe('UnsupportedOperation:kernel-not-adopted')
     } finally {
       fresh.dispose()
     }
