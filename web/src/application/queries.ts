@@ -24,7 +24,7 @@
 import { err, ok, missingTarget, unsupportedOperation, type Result } from '@/domain/errors'
 import { samePropertyRef, type EntityRef, type PropertyRef, type Version } from '@/domain/identity'
 import { effectiveTransform, type EditContext, type SelectionState, type TimeValue } from '@/domain/editing'
-import { findObject, findObjectData, objectsInOrder, type ObjectData, type Scene, type SceneObject, type Transform } from '@/domain/scene'
+import { findObject, findObjectData, objectsInOrder, type ObjectData, type ObjectDataPayload, type Scene, type SceneObject, type Transform } from '@/domain/scene'
 import {
   findTrack,
   highestEffectiveLayer,
@@ -240,10 +240,30 @@ export function queryPlayback(state: ApplicationState, contextId: string): Resul
 export interface CameraProjection {
   readonly objectId: string
   readonly name: string
-  readonly projection: 'perspective' | 'orthographic'
-  readonly fov: number
-  readonly clipStart: number
-  readonly clipEnd: number
+  /**
+   * 投影参数 —— **可选**（R1-β① C3；**GF-21 乙**）。
+   *
+   * 缺省 = 文档**未声明**该参数，读面**如实缺席**。它曾经不可选：装配把
+   * `meta.embed_initial_view`（观察视角）造成相机对象时硬编码了
+   * `perspective`/`50`/`0.1`/`1000`，而这条读面把常量当真实参数交出 —— 读到的是伪造值。
+   * 现在"未声明"与"声明了某值"在类型上就可区分。
+   */
+  readonly projection?: 'perspective' | 'orthographic'
+  readonly fov?: number
+  readonly clipStart?: number
+  readonly clipEnd?: number
+}
+
+/** 相机载荷 → 读面投影：**只**转发文档真正声明的字段（缺席即省略；GF-21 乙）。 */
+function cameraProjectionOf(obj: { readonly id: string; readonly name: string }, p: Extract<ObjectDataPayload, { kind: 'camera' }>): CameraProjection {
+  return Object.freeze({
+    objectId: obj.id,
+    name: obj.name,
+    ...(p.projection === undefined ? {} : { projection: p.projection }),
+    ...(p.fov === undefined ? {} : { fov: p.fov }),
+    ...(p.clipStart === undefined ? {} : { clipStart: p.clipStart }),
+    ...(p.clipEnd === undefined ? {} : { clipEnd: p.clipEnd }),
+  })
 }
 
 export function queryCamera(state: ApplicationState, documentId: string, objectId: string): Result<CameraProjection> {
@@ -253,17 +273,7 @@ export function queryCamera(state: ApplicationState, documentId: string, objectI
   if (!obj) return err(missingTarget({ objectId }))
   const data = findObjectData(doc.scene, obj.dataId)
   if (!data || data.payload.kind !== 'camera') return err(missingTarget({ dataId: obj.dataId, objectId }))
-  const p = data.payload
-  return ok(
-    Object.freeze({
-      objectId: obj.id,
-      name: obj.name,
-      projection: p.projection,
-      fov: p.fov,
-      clipStart: p.clipStart,
-      clipEnd: p.clipEnd,
-    }),
-  )
+  return ok(cameraProjectionOf(obj, data.payload))
 }
 
 /**
@@ -281,17 +291,7 @@ export function queryCameras(state: ApplicationState, documentId: string): Resul
   for (const obj of objectsInOrder(doc.scene)) {
     const data = findObjectData(doc.scene, obj.dataId)
     if (!data || data.payload.kind !== 'camera') continue
-    const p = data.payload
-    out.push(
-      Object.freeze({
-        objectId: obj.id,
-        name: obj.name,
-        projection: p.projection,
-        fov: p.fov,
-        clipStart: p.clipStart,
-        clipEnd: p.clipEnd,
-      }),
-    )
+    out.push(cameraProjectionOf(obj, data.payload))
   }
   return ok(Object.freeze(out))
 }

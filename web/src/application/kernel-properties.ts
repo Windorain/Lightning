@@ -404,7 +404,13 @@ export function readRawKernelValue(doc: Document, ref: PropertyRef): Result<unkn
       return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'camera', actual: data.payload.kind }))
     }
     const field = localId.slice('projection.'.length) as 'fov' | 'clipStart' | 'clipEnd'
-    return ok(data.payload[field])
+    // GF-21 乙：字段**可选** ⇒ 无声明值时如实"缺"，**不**编一个常量冒充声明值
+    // （那正是装配曾对 `meta.embed_initial_view` 做的事）。
+    const v = data.payload[field]
+    if (v === undefined) {
+      return err(domainError('MissingTarget', { reason: 'projection-not-declared', property: ref.property }))
+    }
+    return ok(v)
   }
   return err(domainError('MissingTarget', { reason: 'property-not-registered', property: ref.property }))
 }
@@ -601,8 +607,14 @@ export function applyKernelPropertyValue(doc: Document, ref: PropertyRef, value:
       return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'camera', actual: data.payload.kind }))
     }
     if (typeof value !== 'number') return err(domainError('InvalidValue', { property: ref.property, expected: 'number' }))
-    const field = localId.slice('projection.'.length) as 'fov' | 'clipStart' | 'clipEnd'
-    payload = Object.freeze({ ...data.payload, [field]: value })
+    // 显式三分支（不用计算键）：投影字段已可选（GF-21 乙），计算键会把可选字段
+    // 摊成索引签名，掩盖"写的是哪一个字段"。
+    const cur = data.payload
+    payload = localId === 'projection.fov'
+      ? Object.freeze({ ...cur, fov: value })
+      : localId === 'projection.clipStart'
+        ? Object.freeze({ ...cur, clipStart: value })
+        : Object.freeze({ ...cur, clipEnd: value })
   } else {
     return err(domainError('UnsupportedOperation', { reason: 'property-not-registered', property: ref.property }))
   }

@@ -1225,18 +1225,22 @@ function declaredCreatedAtMs(
  * 恰好是**观察视角**（`{target, yawDeg, elevationDeg, distance, zoom}`）——
  * 它是"文档声明的默认观察视角"。
  *
- * ⇒ 本批把它装配成一个 `camera` 对象：观察视角放在**非类型化**的 `view`
- * （`Readonly<Record<string, unknown>>`，见本函数返回类型与 `:1271` 的赋值），
- * 而 `payload` 的四个投影字段（`projection:\'perspective\'`/`fov:50`/`clipStart:0.1`/
- * `clipEnd:1000`，见 `:1264-1270`）是**为满足 `camera` 载荷形状而填的常量，
- * 不是文件里声明的值**。
+ * ⇒ 本函数把它装配成一个 `camera` 对象，**只**给出 `kind:'camera'`：
+ * `payload` 的四个投影字段（`projection`/`fov`/`clipStart`/`clipEnd`）**一律省略**
+ * —— 文件里**没有**声明任何投影参数，缺省即"未声明"（`domain/scene` 的相机载荷字段
+ * 已按 **GF-21 乙** 可选化）。观察视角本体（`target`/`yawDeg`/…）仍放在**非类型化**的
+ * `view`（`Readonly<Record<string, unknown>>`，见本函数返回类型与 `:1271` 的赋值）
+ * —— 给它**类型化落点**是 GF-21 甲，**未**在本批兑现。
  *
- * ⚠️ **更正（2026-10-13，调度者实读本函数全函数后改）**：本段原先写的是
- * 「**不**伪造一个 `perspective/fov` 去冒充它」——**那与代码相反，事实是确实伪造了**。
- * 缺口的真实大小因此被掩盖：观察视角至今**没有类型化落点**（这才是 GF-5 的原文），
- * 而有类型的投影字段被常量填满，让"已被内核承载"看起来成立。
- * ⇒ 已登记 **GF-21**（#385，含甲/乙两种处置）；在 GF-21 落地前，任何消费
- * `application/queries` 相机读面中该对象投影字段的代码，读到的都是这四个常量。
+ * ⚠️ **历史（GF-21，#385 评论 7025）**：本函数曾硬编码填 `projection:'perspective'`/
+ * `fov:50`/`clipStart:0.1`/`clipEnd:1000`，而 `application/queries` 的相机读面把这些
+ * 常量当**真实相机参数**交出 ⇒ "已被内核承载"看起来成立，实际是伪造。R1-β① C3
+ * 按**乙**处置：删掉四个常量、改为省略；读面（`CameraProjection`）随之为可选字段，
+ * **无声明值即缺席**，不再冒充。
+ *
+ * ⚠️ **更正（2026-10-13，调度者实读本函数全函数后改）**：本段原写的是
+ * 「**不**伪造一个 `perspective/fov` 去冒充它」——**那与当时的代码相反，事实是确实伪造了**。
+ * 缺口的真实大小因此被掩盖：观察视角至今**没有类型化落点**（这才是 GF-5 的原文）。
  */
 function cameraObjectsFromMeta(meta: Readonly<Record<string, unknown>>): readonly {
   readonly id: string
@@ -1271,10 +1275,7 @@ function cameraObjectsFromMeta(meta: Readonly<Record<string, unknown>>): readonl
       name: 'embed_initial_view',
       payload: Object.freeze({
         kind: 'camera' as const,
-        projection: 'perspective' as const,
-        fov: 50,
-        clipStart: 0.1,
-        clipEnd: 1000,
+        // GF-21 乙：投影字段**省略**（文件里没有声明值）——不填任何常量。
       }),
       view: Object.freeze({ ...v }),
     }),

@@ -292,7 +292,24 @@ export type ObjectDataPayload =
       /** 呈现几何参数（#289 补）；缺省 = 该注解无几何参数（仅语义数据）。 */
       readonly geometry?: AnnotationGeometry
     }
-  | { readonly kind: 'camera'; readonly projection: 'perspective' | 'orthographic'; readonly fov: number; readonly clipStart: number; readonly clipEnd: number }
+  /**
+   * 相机**参数**（投影 / fov / 裁剪面）。
+   *
+   * ## 四个投影字段**全部可选**（R1-β① C3；**GF-21 乙**，#385 评论 7025）
+   *
+   * 缺省表达的是「文档**未声明**该投影参数」——它与"声明了某个值"是**两个**事实。
+   * 之所以必须能表达"未声明"：旧 `meta.embed_initial_view` 是**观察视角**
+   * （`{target,yawDeg,elevationDeg,distance,zoom}`；GF-8 已裁决它归 3D 编辑器实例/
+   * 宿主初始视图，**不是**文档相机参数），而装配曾把它造成一个 `camera` 对象并
+   * **硬编码填充** `projection:'perspective'`/`fov:50`/`clipStart:0.1`/`clipEnd:1000`
+   * （GF-21 实测；`composition/kernelAssembly#observationViewObjectsFromMeta` 已改为
+   * **省略**而不是填常量）。在可选化之前，`application/queries` 的相机读面把这些常量
+   * 当**真实相机参数**交出 ⇒ 渲染/导出一旦切到内核相机就是可见的行为差异。
+   *
+   * ⚠️ `domain/scene.ts` 的 `camera` 工厂（`addObject` 的默认参数）**照常**写满四个字段
+   * —— 那是"新建相机时命令声明了这些默认值"，不是伪造：声明与省略的区别正是本字段表的要点。
+   */
+  | { readonly kind: 'camera'; readonly projection?: 'perspective' | 'orthographic'; readonly fov?: number; readonly clipStart?: number; readonly clipEnd?: number }
   /**
    * 逻辑网格（#254 P3 交付）：拓扑 + 固定拓扑形变。
    *
@@ -594,6 +611,8 @@ export const DEFAULT_OBJECT_FACTORIES: ObjectFactoryTable = Object.freeze({
     })
   },
   camera: (init) => {
+    // 新建相机的**默认参数**：由命令自己声明（不是 GF-21 那种"文件名下没声明、
+    // 装配却填常量"）。四个字段都写满 ⇒ 与 `kind:'camera'` 的可选字段表一致。
     const projection = (init.params?.projection ?? 'perspective') as 'perspective' | 'orthographic'
     const fov = typeof init.params?.fov === 'number' ? init.params.fov : 50
     const clipStart = typeof init.params?.clipStart === 'number' ? init.params.clipStart : 0.1

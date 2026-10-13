@@ -116,18 +116,24 @@ export function resolveCameraSpec(scene: Scene, source: CameraSource): Result<Ca
   // 相机**定义**（投影/视场/裁剪）取自文档；**观察视角**取自 `source.view`。
   // 两者合并成一份冻结值 —— 合并结果与两个来源都不再共享引用。
   const view = source.view
-  if (!Number.isFinite(data.payload.fov) || data.payload.fov <= 0) {
+  const p = data.payload
+  // GF-21 乙：投影字段**可选**（缺省 = 文档未声明）⇒ 这里如实失败，
+  // **不**替文档编一个 `perspective/50/0.1/1000`（这正是本函数开头的纪律）。
+  if (p.projection === undefined || p.fov === undefined || p.clipStart === undefined || p.clipEnd === undefined) {
+    return err(invalidValue({ reason: 'cameraProjectionNotDeclared', objectId: source.objectId }))
+  }
+  if (!Number.isFinite(p.fov) || p.fov <= 0) {
     return err(invalidValue({ reason: 'fovMustBePositive', objectId: source.objectId }))
   }
   return ok(
     Object.freeze({
-      projection: data.payload.projection,
+      projection: p.projection,
       position: Object.freeze({ x: view.position.x, y: view.position.y, z: view.position.z }),
       target: Object.freeze({ x: view.target.x, y: view.target.y, z: view.target.z }),
       up: Object.freeze({ x: view.up.x, y: view.up.y, z: view.up.z }),
-      fovDegrees: data.payload.fov,
-      near: data.payload.clipStart,
-      far: data.payload.clipEnd,
+      fovDegrees: p.fov,
+      near: p.clipStart,
+      far: p.clipEnd,
     }),
   )
 }
