@@ -120,34 +120,19 @@ function fieldFor(propertyId: string) {
  */
 
 /**
- * 把每个可编辑属性登记为**输入层的提交落点**。
+ * 把每个可编辑属性登记为**输入层的提交落点** —— R1-β① C4 **已删除**。
  *
- * ## 为什么这条桥是必需的，以及它为什么在这里
+ * ## 它曾经是什么，为什么不再需要
  *
  * 输入层（`runtime/inputSession`）判定"草稿完整合法"后产出 `draft.commit`，
- * 命令层把它映射成 `setProperty`（`application/inputCommands`）。但命令只携带
- * `PropertyRef`（**值**，不含 setter）—— 真正的落点由装配侧按 `controlId` 解析。
+ * 命令层把它映射成 `setProperty`（`application/inputCommands`），命令携带
+ * `PropertyRef`（**值**，不含 setter）。旧实现在**呈现层**按 `controlId` 登记一张
+ * 闭包表供端口回查 —— 那使"命令落到哪里"取决于组件挂载与目标快照。
  *
- * `application` 层不能认识呈现层的字段/描述符（那是分层倒置），
- * 故这个映射由**呈现侧自己**登记：本组件知道自己的描述符与写函数，
- * 于是把"controlId → 用唯一写路由提交这个值"注册进 `WM.applyPropertyRegistry`。
- *
- * 落点是 `commitFieldValue` —— 它经 `submitPropertyWrite` 走
- * `applySetProperty`（P2 的唯一写路由），**不是** `descriptor.set` 直写。
- *
- * 退出：真实文档换成内核 `Document` 后（P10），`draft.commit` 可直接映射成
- * 内核的 `setProperty`，本桥连同 `applyPropertyRegistry` 一起删除。
- * 已登记于 `composition/seams.ts`。
+ * 现在解析是**数据驱动**的：`editors/workbench-rna#commitDraftControlValue`
+ * 读描述符注册表（面板的同一张数据表）→ `resolveRefs` → `submitPropertyWrite`
+ * （唯一写路由）。本组件不再登记任何提交落点，也不再持有清理责任。
  */
-function registerCommitSink(desc: PropertyDescriptor): void {
-  props.ctx.wm.applyPropertyRegistry.set(`field:${desc.id}`, (value: number | string) => {
-    // 输入层已判为完整合法；此处只做"交给唯一写路由"。
-    // 被拒绝的原因落到 `session.rejections`（呈现可见，不静默）。
-    const local = localPropertyOf(desc.id)
-    const outcome = commitFieldValue(props.ctx, desc, value as never)
-    applyOutcome(local, outcome)
-  })
-}
 
 /** 提交一个已解析值（boolean/枚举/滑块/色板）。 */
 function onCommitValue(desc: PropertyDescriptor, value: unknown): void {
@@ -179,11 +164,18 @@ function applyOutcome(local: string, outcome: { status: string; error?: unknown 
 }
 
 /**
- * 卸载前清理提交落点登记。
+ * ## R1-β① C4：本组件的"提交落点登记"已删除
+ *
+ * 旧实现在这里遍历模型、把每个可编辑描述符注册成一张**闭包表**的一行
+ * （`field:<描述符 id>` → 「用唯一写路由提交这个值」），供输入端口按 `controlId` 回查。
+ * 那条链让命令的落点依赖**组件是否挂载**（没挂载 ⇒ `controlNotRegistered`，
+ * 表现为"输入了没反应"）。C4 把解析移到边界层
+ * （`editors/workbench-rna#commitDraftControlValue`：控件 id → 描述符注册表 →
+ * 唯一写路由），于是落点是**装配事实**而不是组件生命周期事实，本文件不再持有它。
  *
  * ## P10c（#286）：草稿 flush 循环已删除
  *
- * 旧实现在这里遍历模型、把 `session.drafts[row.localId]` 里"完整合法"的草稿提交掉。
+ * 旧实现在卸载前遍历模型、把 `session.drafts[row.localId]` 里"完整合法"的草稿提交掉。
  * 但那段代码读的键是 `row.localId`（`localIdOf` ⇒ `block.tooltip`），
  * 而镜像写入用的键是 `localPropertyOf(desc.id)`（⇒ `tooltip`）——**两键在生产键空间
  * 里无一命中**（84/84 不等），故 flush 体从未执行过一次。
@@ -194,12 +186,6 @@ function applyOutcome(local: string, outcome: { status: string; error?: unknown 
  * `unbindControl` 也会以 `target-invalid` 结算。判据在
  * `domain/__tests__/textDraft.test.ts` 的焦点切换/禁用集与 e2e `input-routing.spec.ts`。
  */
-onBeforeUnmount(() => {
-  // 清理提交落点登记：本面板卸载后 `field:*` 不应再被解析（否则命令会打到
-  // 一个已经不在界面上的字段，表现为"改了没反应"）。
-  for (const id of registeredSinkIds) props.ctx.wm.applyPropertyRegistry.delete(id)
-  registeredSinkIds.clear()
-})
 
 /** 面板标题：多选时显示数量（不隐藏属性区 —— D6）。 */
 const heading = ref('')
