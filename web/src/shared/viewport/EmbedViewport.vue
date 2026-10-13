@@ -99,7 +99,7 @@ const {
   viewerPrefs: prefs,
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
-  docOverride: renderDoc,
+  renderDocRef: renderDoc,
 })
 
 const {

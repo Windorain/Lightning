@@ -65,7 +65,7 @@ const {
   ctx,
   regionId: VIEWPORT_REGION_ID,
   viewerPrefs: prefs,
-  docOverride: renderDoc,
+  renderDocRef: renderDoc,
 })
 
 const {

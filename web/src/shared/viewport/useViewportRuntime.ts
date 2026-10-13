@@ -33,15 +33,25 @@ export interface UseViewportRuntimeOptions {
   blockIconCacheOptions?: BlockIconCacheOptions
   initialWorldFrameIndex?: number
   /**
-   * 可选的**渲染视图文档**覆盖（T2.5 接线）。
+   * **渲染视图文档**（必填；由 `useKernelChannels().renderDoc` 提供）。
    *
-   * 多方块文档的 `frame.grid` 恒为 `null`（网格是装配产物），故渲染路径必须吃装配结果；
-   * 由 `useMultiblockChannels().renderDoc` 提供（帧为主文档时它就是原文档本身，行为零变化）。
-   * 省略该参数时 DRW 直接订阅 `ctx.legacyRenderSource()`（既有行为）。
-   * ⚠️ **#301 P10f D3 更新**：原写 `ctx.getDoc()` —— 该访问器已终删；渲染链的旧格式源
-   * 走具名读面 `legacyRenderSource()`（已登记接缝 `legacy-render-source-document`）。
+   * ## 为什么是必填（R1-β① C5 的改写点）
+   *
+   * 原形态是 `docOverride?: Ref<RuntimeDocument|null>`，缺省时回落
+   * `ctx.legacyRenderSource()` —— 那是接缝 `legacy-render-source-document` 的落点。
+   * C5 按 #385 评论 7140（「永远是消费者适应新的内核」）**删除该回落**：
+   *
+   *  - 生产里**两个**调用方（`EmbedViewport.vue`、`workbench/components/WorkbenchViewport.vue`）
+   *    **都**传了它 ⇒ 回落分支是**死码**，而"死码"在结构上仍是一条可被重新想起的旁路
+   *    （改天有人省略参数就悄悄退回旧文档，且没有任何判据会响）；
+   *  - 改成必填后，"渲染源从哪来"在**类型层**只有一个答案：调用方必须显式给出。
+   *
+   * ⚠️ **这尚未等于"渲染链已切内核呈现契约"**：`renderDoc` 此刻仍是
+   * `composition/kernelRenderView` 产出的**旧格式视图文档**（内核装配 + 投影的产物）。
+   * 真正的画面切换（DRW → `PresenterSession`）是 `presenter-surface-dual-track`
+   * 那条接缝，属本批后续段。本处只消灭"旧文档本体读面"这一条腿。
    */
-  docOverride?: Ref<RuntimeDocument | null>
+  renderDocRef: Ref<RuntimeDocument | null>
 }
 
 /**
@@ -70,11 +80,11 @@ export interface UseViewportRuntimeOptions {
  * ⇒ 本 composable 只**消费**会话，不拥有时钟。
  */
 export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
-  const { ctx, regionId, viewerPrefs, blockIconCacheOptions = {}, initialWorldFrameIndex, docOverride } = opts
+  const { ctx, regionId, viewerPrefs, blockIconCacheOptions = {}, initialWorldFrameIndex, renderDocRef } = opts
   const vpSlot = ctx.viewports.get(regionId) ?? ctx.viewports.register(regionId)
-  // #301 P10f D3（R9）：DRW 的文档来源（渲染链旧格式）。终切在 D 批映射表 §八
-  // 被显式排除 ⇒ 本处是接缝 `legacy-render-source-document` 的落点。
-  const docRef = docOverride ?? computed(() => ctx.legacyRenderSource())
+  // R1-β① C5：渲染源是**必填注入**（原 `docOverride ?? ctx.legacyRenderSource()` 的
+  // 回落已删 —— 见 `renderDocRef` 的说明）。本处不再有"省略参数就退回旧文档"的路径。
+  const docRef = renderDocRef
 
   /**
    * 内核会话（P10 #261）。

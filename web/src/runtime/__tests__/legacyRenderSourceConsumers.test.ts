@@ -19,23 +19,29 @@
  *    `legacyRenderSource(): RuntimeDocument | null {`（无 `.` 前缀），故不计入；
  * 5. CRLF 归一化后匹配（AGENTS.md 铁律 6）。
  *
- * ## 现状与负对照
+ * ## 迁移进度（**分阶段读数**，不是完成句）
  *
- * C5 之前：生产调用点 **4 处**（`useViewportRuntime.ts` 的 `docRef`、
- * `useKernelChannels.ts` 的 `decl` 源、`EmbedViewport.vue` 的 tooltip 入参、
- * `workbench-rna.ts` 的多方块生成态判定）。
- * C5 之后：**3 处** —— `EmbedViewport.vue` 已改写为消费内核读面（元数据 + 注解行）。
+ * | 阶段 | 生产消费点 |
+ * |---|---|
+ * | C5 之前 | **4**：`useViewportRuntime`(docRef 回落) · `useKernelChannels`(decl 源) · `EmbedViewport.vue`(tooltip 入参) · `workbench-rna.ts`(多方块生成态判定) |
+ * | C5 段③（本段） | **2**：`useKernelChannels` · `workbench-rna.ts` —— 前两处已改写（`EmbedViewport.vue` 改吃内核读面；`useViewportRuntime` 的 `docOverride` 改为**必填** `renderDocRef`，回落删除） |
  *
- * ⚠️ 本判据的**区分力**在第二条断言：把 `EmbedViewport.vue` 的
- * `ctx.legacyRenderSource()` 加回去 ⇒ 集合不符 ⇒ 判红（实测过）。
- * 只证明"新路径能用"的判据抓不住"留了旁路"，故这里锁的是**消费者集合**本身。
+ * ⚠️ **剩余 2 处的性质不同**（诚实登记）：它们读的都是**多方块声明**，而
+ * `domain/document#Document` / `domain/content#DocumentContent` **今天不承载**该声明
+ * ⇒ 不是"渲染源回落"，而是**内核承载缺口**（最后一条断言把它钉成可判定事实）。
+ *
+ * ## 区分力（负对照）
+ *
+ * 第 2 条断言抓"已迁的那两处又长回来"（实测：把 `ctx.legacyRenderSource()` 加回
+ * `EmbedViewport.vue` ⇒ 判红）。只证明"新路径能用"的判据抓不住"留了旁路"，
+ * 故这里锁的是**消费者集合**本身。
  *
  * ## 口径的诚实边界
  *
  * 字符串剥离是**正则近似**：模板串里的 `${…}` 嵌套引号、以及正则字面量里的引号
  * 会让剥离结果偏离真实解析。本判据据此**不**声称"覆盖一切写法"，只声称
- * "在真实消费者都用 `ctx.legacyRenderSource()` 的形态下，集合被钉住"。
- * 第三条自检把这条边界**显式化**（证明剥离确实承重、不是装饰）。
+ * "在真实消费者都用 `ctx.legacyRenderSource()` 的成员调用形态下，集合被钉住"。
+ * 第 3 条自检把这条边界**显式化**（证明去字符串确实承重、不是装饰）。
  */
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
@@ -90,15 +96,18 @@ describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数
     ).toEqual([
       'src/editors/workbench-rna.ts',
       'src/shared/viewport/useKernelChannels.ts',
-      'src/shared/viewport/useViewportRuntime.ts',
     ])
   })
 
-  it('**负对照**：`EmbedViewport.vue` 不得再消费该读面（C5 已把它的消费者改写为内核读面）', () => {
+  it('**负对照**：已迁的两处不得再消费该读面（迁完又长回来即判红）', () => {
+    const migrated = [
+      'src/shared/viewport/EmbedViewport.vue',
+      'src/shared/viewport/useViewportRuntime.ts',
+    ]
     expect(
-      productionCallSites().filter((h) => h.file === 'src/shared/viewport/EmbedViewport.vue'),
-      '该组件的 tooltip 入参必须来自内核读面（`documentMetadata()` / `kernelAnnotations()`）；'
-      + '恢复 `ctx.legacyRenderSource()` 即判红',
+      productionCallSites().filter((h) => migrated.includes(h.file)),
+      '`EmbedViewport.vue` 的 tooltip 入参必须来自内核读面（`documentMetadata()`/`kernelAnnotations()`）；'
+      + '`useViewportRuntime` 的渲染源必须是**必填注入** `renderDocRef`（无回落）。恢复任一处即判红',
     ).toEqual([])
   })
 
@@ -115,6 +124,21 @@ describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数
     expect(
       /\.legacyRenderSource\s*\(/.test(stripStrings(stripComments(raw))),
       '去字符串后 `seams.ts` **不得**出现调用形态（它只是登记文字，不是消费者）',
+    ).toBe(false)
+  })
+
+  it('**前置缺口登记**：内核 `DocumentContent` 不承载多方块声明 ⇒ 剩余 2 处的删除条件', () => {
+    const content = fs
+      .readFileSync(path.join(SRC, 'domain', 'content.ts'), 'utf8')
+      .replace(/\r\n/g, '\n')
+    // 反证式断言：只要 `DocumentContent` 还没有具名 `multiblock` 字段，
+    // 剩余两处消费者**不可能**在不新建回落的前提下迁移。它把"缺口"钉成可判定事实。
+    expect(
+      /^\s*readonly multiblock\b/m.test(content),
+      'DONE 信号：一旦 `DocumentContent` 承载多方块声明（具名 `multiblock` 字段），'
+      + '本断言翻红即为"剩余 2 处可以迁了"的信号 —— 届时一并改写 '
+      + '`useKernelChannels.ts` / `workbench-rna.ts`，把第 1 条断言改成 `toEqual([])`，'
+      + '再删除 `Context#legacyRenderSource()` 本体',
     ).toBe(false)
   })
 })
