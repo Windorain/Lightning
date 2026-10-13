@@ -24,14 +24,38 @@ import type { StructureDefinition } from '@/render/schema/types'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import { buildItemHitIndex } from '@/pure/itemIndex'
 import { resolvePreviewTooltipText, resolveViewportTooltipChain } from '@/pure/tooltipResolution'
-import { readSceneMetaField } from '@/render/data/compactSceneDocument'
 
 export function useEmbedTooltip(deps: {
   hoverRef: Ref<EmbedHover | null>
   definitionRef: ShallowRef<StructureDefinition | null>
   tooltipPaletteRef: Ref<readonly string[]>
   showHoverTooltipRef: Ref<boolean>
-  docRef: Ref<{ serialize(): unknown } | null>
+  /**
+   * **文档元数据**（消费者侧投影自内核读面 `Context#documentMetadata()`）。
+   *
+   * ## 它取代了什么（R1-β① C5）
+   *
+   * 旧入参是 `docRef: Ref<{ serialize(): unknown } | null>` —— **旧文档本体**，
+   * 由 `EmbedViewport.vue` 经 `ctx.legacyRenderSource()` 取得（接缝
+   * `legacy-render-source-document` 的四个生产消费点之一）。本层只从它读两件事：
+   * `author` 与 `gtnhVersion`（元信息提示的两行）。
+   *
+   * 按 #385 评论 7140「永远消费者适应新的内核」，本层改吃**内核元数据读面**：
+   * 那两项声明已由 `domain/content#DocumentMetadata` 承载（C5 补），
+   * 故旧文档本体读面在本层**不再需要**。
+   *
+   * ⚠️ 为什么不是"再把 `plain` 传进来"：那等于把旧格式当接口，本层就成了
+   * 第二处解析 `meta.` 展开规则的地方（两处必然漂移 —— 例如信封与裸体的形状差异）。
+   */
+  metaRef: Ref<{ readonly author: string; readonly gtnhVersion: string } | null>
+  /**
+   * **注解行**（消费者侧投影自内核读面 `Context#kernelAnnotations()`）。
+   *
+   * 取代旧 `plain.annotations` 的原地查找。该读面在**未装配**时按 `resolveSideTable`
+   * 回落载体（与 `cellTooltips`/`kernelMaterials` 同一分流），故"未装配 ⇒ 注解悬停
+   * 什么都不显示"这一静默失效不会出现。
+   */
+  annotationsRef: Ref<readonly { readonly id: string; readonly description: string }[]>
 }) {
   /** NEI tooltip map from block palette — keyed by blockId. */
   const neiTooltipMap = computed<Map<string, string[]>>(() => {
@@ -53,18 +77,17 @@ export function useEmbedTooltip(deps: {
    */
   const itemHitIndex = computed(() => buildItemHitIndex(deps.definitionRef.value))
 
-  /** Meta tooltip text (author / version). */
+  /** Meta tooltip text (author / version) —— 取自**内核元数据读面**（C5）。 */
   const metaTooltipText = computed(() => {
-    const d = deps.docRef.value
-    if (!d) return ''
-    const plain = d.serialize()
+    const m = deps.metaRef.value
+    if (!m) return ''
     const rows: string[] = []
-    const pick = (label: string, key: string) => {
-      const v = readSceneMetaField(plain, key).trim()
-      if (v) rows.push(`${label}：${v}`)
+    const pick = (label: string, v: string) => {
+      const t = (v ?? '').trim()
+      if (t) rows.push(`${label}：${t}`)
     }
-    pick('作者', 'author')
-    pick('版本号', 'gtnhVersion')
+    pick('作者', m.author)
+    pick('版本号', m.gtnhVersion)
     return rows.join('\n')
   })
 
@@ -120,11 +143,8 @@ export function useEmbedTooltip(deps: {
       }
 
       case 'annotation': {
-        const doc = deps.docRef.value
-        if (!doc) return ''
-        const plain = doc.serialize() as Record<string, any>
-        const annos = plain.annotations as Array<{ id: string; description?: string }> | undefined
-        const anno = annos?.find((a: { id: string }) => a.id === h.annotationId)
+        // C5：改吃内核注解读面（旧实现从 `doc.serialize().annotations` 里找）。
+        const anno = deps.annotationsRef.value.find((a) => a.id === h.annotationId)
         if (!anno) return ''
         return anno.description || ''
       }

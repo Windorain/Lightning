@@ -657,7 +657,10 @@ function tooltipTextFor(def: StructureDefinition, blockId: string): string {
     definitionRef: shallowRef(def),
     tooltipPaletteRef: ref<readonly string[]>([]),
     showHoverTooltipRef: ref(true),
-    docRef: ref(null),
+    // R1-β① C5：`useEmbedTooltip` 改吃内核读面投影；本条只验侧栏行键解析，
+    // 故两项如实给"没有元数据 / 没有注解"（不是伪装成有值）。
+    metaRef: ref(null),
+    annotationsRef: ref([]),
   })
   return api.tooltipText.value
 }

@@ -38,6 +38,21 @@ const partNorth: PartTooltipInfo = {
   tooltip: ['ME Toggle Bus'],
 }
 
+/**
+ * R1-β① C5：`useEmbedTooltip` 的入参由"旧文档本体（`docRef`）"改为**内核读面投影**
+ * （`metaRef` + `annotationsRef`）。本替身从同一份真实夹具读值 —— 生产里这两项分别来自
+ * `ctx.documentMetadata()` 与 `ctx.kernelAnnotations()`（见 `EmbedViewport.vue`）。
+ */
+const fixturePlain = doc.serialize() as Json
+const fixtureMeta = {
+  author: String((doc.meta as Json).author ?? ''),
+  gtnhVersion: String(fixturePlain.gtnhVersion ?? ''),
+}
+const fixtureAnnotations = (doc.annotations ?? []).map((a) => {
+  const r = a as unknown as { id?: unknown; description?: unknown }
+  return { id: String(r.id ?? ''), description: String(r.description ?? '') }
+})
+
 function makeTooltip(deps: {
   def?: StructureDefinition | null
   palette?: readonly string[]
@@ -49,7 +64,8 @@ function makeTooltip(deps: {
     definitionRef: shallowRef(deps.def === undefined ? ae2Def : deps.def),
     tooltipPaletteRef: ref(deps.palette ?? []),
     showHoverTooltipRef: ref(deps.showHover ?? true),
-    docRef: ref(doc),
+    metaRef: ref(fixtureMeta),
+    annotationsRef: ref(fixtureAnnotations),
   })
   return { hoverRef, api }
 }

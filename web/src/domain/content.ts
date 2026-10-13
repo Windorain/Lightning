@@ -228,6 +228,29 @@ export interface DocumentMetadata {
   /** 场景原点（MC 世界坐标 → 场景坐标的平移量）。 */
   readonly origin: Vec3
   readonly createdAtMs: number | null
+  /**
+   * **文件格式版本**（源文件 `format_version` 声明；无声明 ⇒ `'2.0'` = 旧解析器默认）。
+   *
+   * ## 为什么它是内核元数据（R1-β① C5 的补能力，不是"为消费形状塞字段"）
+   *
+   * 它曾经由 `Context#documentMetadata` **恒取旧文档**的声明（`doc.formatVersion`），
+   * 理由是"外部格式的事实，内核不承载"（见 `composition/seams.ts` 的
+   * `legacy-render-source-document`）。但**产品需要它**：属性面板显示"格式版本"、
+   * 嵌入预览的元信息提示显示版本号 —— 这是**文档自身的元数据**这一业务职责，
+   * 内核的 `DocumentMetadata` 就是它的正确归属。
+   *
+   * ⚠️ 与装配面的 `schemaVersion`（多方块**声明**的编号，真实夹具 = `1`）
+   * **不是同一个编号**：用后者冒充前者会把属性面板的 `2.0` 变成 `1`（静默行为变更）。
+   */
+  readonly formatVersion: string
+  /**
+   * **声明里的 GTNH 版本**（源文件 `gtnhVersion` 声明；无声明 ⇒ `''`）。
+   *
+   * 与 {@link DocumentMetadata.formatVersion} 同族、同一理由：嵌入预览的元信息提示
+   * 需要它（`embed/useEmbedTooltip` 的"版本号"一行），故由内核元数据承载，
+   * 消费者不再回头读旧文档根。
+   */
+  readonly gtnhVersion: string
 }
 
 /** 空元数据（**显式**默认；新建文档与「文件没声明元数据」共用同一值）。 */
@@ -238,6 +261,8 @@ export const EMPTY_METADATA: DocumentMetadata = Object.freeze({
   tags: Object.freeze([]),
   origin: Object.freeze({ x: 0, y: 0, z: 0 }),
   createdAtMs: null,
+  formatVersion: '2.0',
+  gtnhVersion: '',
 })
 
 /** 造元数据（逐字段给出缺省，不静默丢弃已给的字段）。 */
@@ -249,6 +274,8 @@ export function documentMetadata(init: Partial<DocumentMetadata> = {}): Document
     tags: Object.freeze([...(init.tags ?? [])]),
     origin: Object.freeze({ ...(init.origin ?? { x: 0, y: 0, z: 0 }) }),
     createdAtMs: init.createdAtMs ?? null,
+    formatVersion: init.formatVersion ?? '2.0',
+    gtnhVersion: init.gtnhVersion ?? '',
   })
 }
 

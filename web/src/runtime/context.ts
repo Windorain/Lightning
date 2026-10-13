@@ -776,19 +776,23 @@ export class Context {
    * 而旧路径在 `workbench-rna` 里 `toLocaleString()` 成展示串
    * ⇒ **格式化留在调用点**（读面只给事实，不给表现）。
    *
-   * ## ⚠️ `formatVersion` 为什么**始终**取旧文档的声明（本处的一处修正）
+   * ## ⚠️ `formatVersion`：**已在 R1-β① C5 由内核承载**（历史修正保留在案）
    *
-   * 我第一版让它在内核分支回落到装配面的 `schemaVersion`。**实测推翻了它**：
-   * `schemaVersion` 是**多方可块声明**的格式版本（真实夹具 = `1`），
-   * 而 `doc.formatVersion` 是**文件格式**版本（= `2.0`）—— **两个不同的编号**。
+   * D3 的第一版让它在内核分支回落到装配面的 `schemaVersion` —— 那**确实**是错的，
+   * 实测推翻了它：`schemaVersion` 是**多方块声明**的格式版本（真实夹具 = `1`），
+   * 而 `format_version` 是**文件格式**版本（= `2.0`）—— **两个不同的编号**。
    * 用前者冒充后者会让属性面板的"格式版本"从 `2.0` 变成 `1`
    * ⇒ **静默的行为变更**（用户看到错的版本号，而没有任何判据会变红）。
    *
-   * ⇒ `format_version` 与 `multiblockSource` 同族：**外部格式的事实，内核不承载**
-   * ⇒ 如实转发旧文档的声明。这是"回落"，不是后门：
-   * 它只暴露一个字符串元数据，**不**给内容读入口。
-   * 该处置登记在 `composition/seams.ts` 的 `legacy-render-source-document`
-   * （与渲染链同一条接缝的"外部格式事实"面）。
+   * D3 的处置是"如实转发旧文档的声明"（挂在 `legacy-render-source-document` 上）。
+   * **C5 改为把声明本身carried 进内核元数据**（`domain/content#DocumentMetadata.formatVersion`
+   * /`gtnhVersion`，由 `composition/kernelAssembly#metadataFromLegacy` 从源声明的
+   * `format_version`/`gtnhVersion` 读入，缺省与旧解析器逐字相同）——
+   * 于是内核分支**不再回头读旧文档**，而"用 `schemaVersion` 冒充"那条错法在结构上
+   * 仍然不可能（两个字段各自具名、各自有源）。
+   *
+   * 这不是"为消费形状给内核塞字段"：**文档声明的版本**属文档元数据这一业务职责，
+   * 而它的两个真实消费者（属性面板的格式版本、嵌入元信息提示的版本号）都是产品功能。
    */
   documentMetadata(): {
     readonly name: string
@@ -798,12 +802,12 @@ export class Context {
     readonly origin: { readonly x: number; readonly y: number; readonly z: number }
     readonly createdAtMs: number | null
     readonly formatVersion: string
+    /** 声明里的 GTNH 版本（C5 新增，与 `formatVersion` 同族同源）。 */
+    readonly gtnhVersion: string
     readonly source: 'kernel' | 'legacy'
   } {
     const kernel = this.kernel
     const legacyDoc = this.main.doc.value
-    // **外部格式事实**（内核不承载；见上文长注释）：始终取旧文档的声明。
-    const formatVersion = legacyDoc?.formatVersion ?? ''
     if (kernel !== null && kernel.hasAdoptedContent()) {
       const kernelDoc = kernel.document()
       if (kernelDoc !== undefined) {
@@ -815,7 +819,8 @@ export class Context {
           tags: m.tags,
           origin: m.origin,
           createdAtMs: m.createdAtMs,
-          formatVersion,
+          formatVersion: m.formatVersion,
+          gtnhVersion: m.gtnhVersion,
           source: 'kernel',
         }
       }
@@ -829,11 +834,15 @@ export class Context {
         origin: ZERO_ORIGIN,
         createdAtMs: null,
         formatVersion: '',
+        gtnhVersion: '',
         source: 'legacy',
       }
     }
     const meta = legacyDoc.meta as unknown as Record<string, unknown>
     const createdMs = meta.created_at_ms
+    // 未装配侧（GF-16=false）仍取旧声明 —— 与 `cellTooltips`/`kernelAnnotations`
+    // 的回落同一形态（内核不是权威时读载体），**不是**"内核装配好了却回读旧文档"。
+    const plainRoot = legacyDoc.serialize() as Record<string, unknown>
     return {
       name: strOf(meta.name),
       author: strOf(meta.author),
@@ -841,7 +850,8 @@ export class Context {
       tags: Array.isArray(meta.tags) ? (meta.tags as readonly string[]) : EMPTY_TAGS,
       origin: vecOf(meta.origin) ?? ZERO_ORIGIN,
       createdAtMs: typeof createdMs === 'number' && Number.isFinite(createdMs) ? createdMs : null,
-      formatVersion,
+      formatVersion: legacyDoc.formatVersion ?? '',
+      gtnhVersion: strOf(plainRoot.gtnhVersion),
       source: 'legacy',
     }
   }

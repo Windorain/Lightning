@@ -1153,6 +1153,19 @@ export function metadataFromLegacy(
   const name = rootLabel || readString(meta.name) || readString(meta.label)
   const author = readString(meta.author) || (root === undefined ? '' : readString(root.author))
   const description = readString(meta.description) || (root === undefined ? '' : readString(root.description))
+  // ── 声明版本（R1-β① C5）──────────────────────────────────────────────────
+  //
+  // `format_version` 与 `gtnhVersion` 是**源文件声明**的两项版本元数据。
+  // 它们原先由 `Context#documentMetadata` 恒取旧文档（`doc.formatVersion` /
+  // 序列化根），理由记在 `legacy-render-source-document`。C5 按 #385 评论 7140
+  // 把它移进内核元数据：产品需要它们（属性面板的"格式版本"、嵌入元信息提示的
+  // "版本号"），而"文档声明的版本"本就属文档元数据这一业务职责。
+  //
+  // 缺省与旧解析器**逐字相同**：`format_version` 缺席 ⇒ `'2.0'`
+  //（`context/runtimeDocument.ts:534` 的 `?? '2.0'`）；`gtnhVersion` 缺席 ⇒ `''`。
+  const formatVersion = (root === undefined ? '' : readString(root.format_version)) || '2.0'
+  const gtnhVersion =
+    (root === undefined ? '' : readString(root.gtnhVersion)) || readString(meta.gtnhVersion)
   return documentMetadata({
     name,
     author,
@@ -1163,6 +1176,8 @@ export function metadataFromLegacy(
         ? { x: readNumber(origin.x) ?? 0, y: readNumber(origin.y) ?? 0, z: readNumber(origin.z) ?? 0 }
         : { x: 0, y: 0, z: 0 },
     createdAtMs: declaredCreatedAtMs(meta, root),
+    formatVersion,
+    gtnhVersion,
   })
 }
 

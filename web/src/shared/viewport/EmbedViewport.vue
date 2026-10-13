@@ -75,9 +75,14 @@ const prefs = resolveEmbedViewerPreferences(ctx)
  * 于是"同一上下文的所有 Area 读到同一份取值"（#249 §3.3、A05）。
  */
 const mb = useKernelChannels(ctx)
-// #301 P10f D3（R9）：渲染链旧格式源文档的 **Ref 视图**（`Context` 只给值 ⇒
-// 响应式包装留在调用点，避免第二处持有 `Ref<RuntimeDocument>` 的权威）。
-const legacyRenderDoc = computed(() => ctx.legacyRenderSource())
+// #301 P10f D3（R9）：本处曾是 `Context#legacyRenderSource()` 的**生产消费点**之一
+//（渲染链的旧格式源文档）。**R1-β① C5 已改写该消费者**（#385 评论 7140 的授权）：
+// `useEmbedTooltip` 现在吃**内核读面**（元数据 + 注解行），故本组件不再取旧文档本体。
+const metaRef = computed(() => {
+  const m = ctx.documentMetadata()
+  return { author: m.author, gtnhVersion: m.gtnhVersion }
+})
+const annotationsRef = computed(() => ctx.kernelAnnotations())
 const {
   isMultiblock, renderDoc,
   panel: channelPanel,
@@ -213,10 +218,10 @@ const { tooltipText, neiTooltipMap, showMetaHint } = useEmbedTooltip({
   definitionRef: vpSlot.definition,
   tooltipPaletteRef: tooltipPalette,
   showHoverTooltipRef: computed(() => prefs.showHoverTooltip),
-  // #301 P10f D3（R9）：渲染链的旧格式源文档（**已登记接缝** `legacy-render-source-document`）
-  // —— `useEmbedTooltip` 的入参类型就是渲染侧形状，而渲染链终切在 D 批映射表 §八
-  // 被显式排除 ⇒ 本处是那条接缝的落点，不是内容读入口。
-  docRef: legacyRenderDoc,
+  // R1-β① C5：改为**内核读面**（元数据 + 注解行）⇒ 本处不再消费
+  // `Context#legacyRenderSource()`（旧文档本体读面）。
+  metaRef,
+  annotationsRef,
 })
 
 /**
