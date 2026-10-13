@@ -38,6 +38,9 @@
  */
 import type { Document } from '@/domain/document'
 import type { AnnotationGeometry, ObjectDataPayload } from '@/domain/scene'
+// 编码/解码规则**唯一实现**在 `domain/scene`（R1-β① C3 从"装配内联 + 本模块私有"
+// 两处收敛到一处）：本模块只用它的**解码**方向。
+import { splitAnnotationText } from '@/domain/scene'
 
 /** 一条注解的**读面形状**（与 legacy `Annotation` 的消费字段对齐）。 */
 export interface KernelAnnotationView {
@@ -76,10 +79,16 @@ export interface KernelMaterialView {
 /** 注解对象 id 的前缀（与 `kernelAssembly#annotationObjects` 的建法一致）。 */
 const ANNOTATION_ID_PREFIX = 'annotation:'
 
-/** 把 `text` 反向拆回 `title` / `description`（正向合成的逆）。 */
-function splitAnnotationText(text: string): { title: string; description: string } {
-  const [title, ...rest] = text.split('\n\n')
-  return { title: title ?? '', description: rest.join('\n\n') }
+/**
+ * legacy 注解 id → 内核对象 id（**边界映射**，唯一落点）。
+ *
+ * 装配期建立的前缀（`annotation:<legacyId>`，见 `kernelAssembly#annotationObjects`），
+ * 而面板的选中集/`PropertyRef.owner.id` 用的是 **legacy 裸 id**
+ * ⇒ 由本函数在边界处补前缀。核心不认识"裸 id"（裁决②：旧寻址→内核 id 的映射
+ * 只许落在边界/投影层）。
+ */
+export function annotationObjectIdOf(id: string): string {
+  return id.startsWith(ANNOTATION_ID_PREFIX) ? id : `${ANNOTATION_ID_PREFIX}${id}`
 }
 
 function annotationPayloadOf(doc: Document, objectId: string): Extract<ObjectDataPayload, { kind: 'annotation' }> | null {

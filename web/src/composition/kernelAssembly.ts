@@ -110,6 +110,7 @@ import { normalizeCellContent, type CellContent, type CellContentTable } from '@
 import { cellPositionKey } from '@/domain/cellPosition'
 import { blockGeometryAsset, decodeBlockGeometry, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
 import {
+  annotationTextOf,
   objectData,
   sceneObject,
   withObject,
@@ -1540,14 +1541,15 @@ export function annotationObjects(annotations: readonly unknown[]): AnnotationMa
     const dataId = `${objectId}:data`
     const title = readString(a.title)
     const description = readString(a.description)
-    // 合成规则：两者都在 ⇒ `title\n\ndescription`；只有一个 ⇒ 那一个；都没有 ⇒ 无 text 字段。
-    const text = title !== '' && description !== '' ? `${title}\n\n${description}` : title !== '' ? title : description
+    // 合成规则：唯一实现在 `domain/scene#annotationTextOf`（R1-β① C3 把原先的
+    // 内联副本收敛过去 —— 写面要用它的逆向，两处各写一份必然漂移）。
+    const text = annotationTextOf(title, description)
     const geometry = annotationGeometryFromLegacy(a)
     const init: { kind: 'annotation'; shape: 'box' | 'point' | 'line' | 'text' | 'face'; text?: string; geometry?: AnnotationGeometry } = {
       kind: 'annotation',
       shape: shape as 'box' | 'point' | 'line' | 'text' | 'face',
     }
-    if (text !== '') init.text = text
+    if (text !== undefined) init.text = text
     if (geometry !== null) init.geometry = geometry
     const payload: ObjectDataPayload = Object.freeze(init)
     objects.push({

@@ -67,9 +67,18 @@ function annotationPatchCommand(id: string, patch: Partial<Annotation>): SetProp
   // ⇒ 多字段不同值无法用一条命令表达（多字段本批回落 legacy）。
   if (keys.length !== 1) return null
   const only = keys[0]!
-  if (only !== 'title') return null
-  const title = (patch as { title?: unknown }).title
-  if (typeof title !== 'string') return null
+  /**
+   * R1-β① C3：标题/描述是载荷 `text` 的**两个半边**，内核已把它们声明成一等字段
+   * （`application/kernel-properties` 的 `annotation.title`/`annotation.description`）。
+   *
+   * ⚠️ 这里**必须**写 `title` 而不是 `text`：写 `text` 是**整体替换**，改标题会把
+   * 既有描述一起抹掉 —— 迁移前这里正是 `annotation.text`，即"改标题丢描述"的静默
+   * 数据丢失（本批连同内核字段一起修正）。
+   */
+  const local = only === 'title' ? 'title' : only === 'description' ? 'description' : null
+  if (local === null) return null
+  const next = (patch as Record<string, unknown>)[only]
+  if (typeof next !== 'string') return null
   return {
     kind: 'setProperty',
     contextId: KERNEL_CONTEXT_ID,
@@ -78,9 +87,9 @@ function annotationPatchCommand(id: string, patch: Partial<Annotation>): SetProp
       // `application/kernel-properties#localOf`），而 `owner` 只带 `{kind, id}`
       // —— 对象**类型**不在 `EntityRef` 里（我第一版按 `{kind,type,id}` 写，
       // 被 TS2352 当场拦下；类型系统在这里帮了忙）。
-      propertyRef(objectRef(`${ANNOTATION_OBJECT_PREFIX}${id}`), `${KERNEL_ANNOTATION_TYPE}.text`),
+      propertyRef(objectRef(`${ANNOTATION_OBJECT_PREFIX}${id}`), `${KERNEL_ANNOTATION_TYPE}.${local}`),
     ],
-    value: title,
+    value: next,
   } as SetPropertyCommand
 }
 

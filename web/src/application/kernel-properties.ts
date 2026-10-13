@@ -52,7 +52,7 @@ import {
   type TargetFacts,
 } from './properties'
 import { ok, domainError, err, type DomainError, type PropertyRef, type Result } from './contracts'
-import { findObject, findObjectData } from '@/domain/scene'
+import { annotationTextOf, findObject, findObjectData, splitAnnotationText } from '@/domain/scene'
 import { meshFromPayload } from '@/domain/geometry'
 import { commitGeometryEdit } from '@/domain/geometryEditing'
 import { withScene, type Document } from '@/domain/document'
@@ -250,6 +250,19 @@ export const KERNEL_OBJECT_TYPES: readonly ObjectTypeDecl[] = Object.freeze([
         ANNOTATION_RENDER_STYLE_DOMAIN,
       ),
       decl('locked', 'boolean', false, { labelKey: 'annotation.locked', fallback: '锁定' }),
+      // ── 注解的**标题 / 描述**（R1-β① C3）────────────────────────────────────
+      //
+      // 载荷只存合成串 `text`（`domain/scene#annotationTextOf` 的编码规则），而面板的
+      // 两个字段**各自可写** ⇒ 内核必须能表达"只改其中一半"的写（否则改标题会抹掉描述，
+      // 那正是 `annotationOperators#annotationPatchCommand` 迁移前的静默丢数据形态）。
+      decl('title', 'string', false, { labelKey: 'annotation.title', fallback: '标题' }, undefined, {
+        kind: 'text',
+        multiline: true,
+      }),
+      decl('description', 'string', false, { labelKey: 'annotation.description', fallback: '描述' }, undefined, {
+        kind: 'text',
+        multiline: true,
+      }),
     ]),
   }),
   Object.freeze({
@@ -459,6 +472,16 @@ export function readRawKernelValue(doc: Document, ref: PropertyRef): Result<unkn
         return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'annotation', actual: data.payload.kind }))
       }
       return ok(data.payload.text)
+    }
+    if (localId === 'title' || localId === 'description') {
+      // 标题/描述是合成串 `text` 的**两个半边**（编码规则唯一实现见
+      // `domain/scene#annotationTextOf`/`splitAnnotationText`）。缺席 ⇒ 空串，
+      // 与面板读面（`editors/workbench-rna` 的注解分支）同口径。
+      if (data.payload.kind !== 'annotation') {
+        return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'annotation', actual: data.payload.kind }))
+      }
+      const parts = splitAnnotationText(data.payload.text ?? '')
+      return ok(localId === 'title' ? parts.title : parts.description)
     }
     if (localId === 'vertexPosition') {
       // 网格顶点读面（#254 P3）。**必须有**：`applySetProperty` 的"无业务变化 ⇒ unchanged"
@@ -681,6 +704,26 @@ export function applyKernelPropertyValue(doc: Document, ref: PropertyRef, value:
     }
     if (typeof value !== 'string') return err(domainError('InvalidValue', { property: ref.property, expected: 'string' }))
     payload = Object.freeze({ ...data.payload, text: value })
+  } else if (localId === 'title' || localId === 'description') {
+    // ── 注解标题 / 描述：**只改一半**，另一半原样保留（R1-β① C3）─────────────
+    //
+    // ⚠️ 这不是"第二条写通路"：落点仍是载荷的 `text` **一个**字段，编码规则仍是
+    // `domain/scene#annotationTextOf` 那**唯一**一处。此处只是把"面板的两个字段"
+    // 正映射到"载荷的一个字段"（与 `text` 的整体写语义不同、存储同一）——
+    // 改标题必须保留既有描述，否则就是静默丢数据。
+    if (data.payload.kind !== 'annotation') {
+      return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'annotation', actual: data.payload.kind }))
+    }
+    if (typeof value !== 'string') return err(domainError('InvalidValue', { property: ref.property, expected: 'string' }))
+    const parts = splitAnnotationText(data.payload.text ?? '')
+    const text = annotationTextOf(
+      localId === 'title' ? value : parts.title,
+      localId === 'description' ? value : parts.description,
+    )
+    // 两半都空 ⇒ **删掉** `text` 字段（不用 `text: undefined` 留一个显式空位：
+    // "没有"与"有但是空"在本载荷里必须可区分）。
+    const { text: _drop, ...rest } = data.payload
+    payload = Object.freeze(text === undefined ? rest : { ...rest, text })
   } else if (localId.startsWith('projection.')) {
     if (data.payload.kind !== 'camera') {
       return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'camera', actual: data.payload.kind }))

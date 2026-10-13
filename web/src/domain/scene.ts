@@ -166,6 +166,33 @@ export interface AnnotationGeometry {
   readonly updatedAt?: number
 }
 
+/**
+ * 注解的 `title` + `description` → 载荷 `text`（**编码方向的唯一实现**）。
+ *
+ * ## 为什么这条规则必须只有一处（R1-β① C3）
+ *
+ * 它原先**只**活在装配层（`composition/kernelAssembly#annotationObjects` 的内联表达式），
+ * 解码方向活在读面（`runtime/annotationRead#splitAnnotationText`），而本批要把它的
+ * **写**方向加进内核写面 ⇒ 不搬到这里就会变成三份会各自漂移的实现
+ * （"两份实现必然漂移"是本项目三度实测过的形态）。
+ *
+ * 规则（与装配的原内联式**逐字相同**）：两者都非空 ⇒ `title\n\ndescription`；
+ * 只有一个 ⇒ 那一个；都为空 ⇒ `undefined`（**不**写成空串：`''` 是"有但是空"，
+ * 与"没有"是两种可区分的事实 —— 见 `domain/cellContent` 同族判据）。
+ */
+export function annotationTextOf(title: string, description: string): string | undefined {
+  if (title !== '' && description !== '') return `${title}\n\n${description}`
+  if (title !== '') return title
+  if (description !== '') return description
+  return undefined
+}
+
+/** {@link annotationTextOf} 的**逆向**（第一个空行之前是 `title`，其余是 `description`）。 */
+export function splitAnnotationText(text: string): { title: string; description: string } {
+  const [title, ...rest] = text.split('\n\n')
+  return { title: title ?? '', description: rest.join('\n\n') }
+}
+
 export type ObjectDataPayload =
   | {
       readonly kind: 'blockGrid'
