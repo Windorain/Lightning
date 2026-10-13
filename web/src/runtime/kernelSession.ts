@@ -53,7 +53,7 @@ import { Editor, type CommandTicket, type QuerySpec } from './execution'
 import type { Command } from '@/application/commands'
 import type { CommandOutcome } from '@/application/contracts'
 import type { InputSource } from './scheduling'
-import type { ReadView } from '@/application/queries'
+import { queryDocument, type DocumentSummary, type ReadView } from '@/application/queries'
 import { defaultExecutionInputs } from '@/application/commands'
 import type { ApplicationState } from '@/application/state'
 import type { Document } from '@/domain/document'
@@ -623,6 +623,32 @@ export class KernelSession {
    */
   document(): Document | undefined {
     return this.editor.snapshot().docs[this.documentId]
+  }
+
+  /**
+   * **文档摘要**（R1-β① C2；撤销读面的权威来源）。
+   *
+   * ## 为什么不新增一份"撤销状态"
+   *
+   * 撤销可用性与标签**已经是**文档历史的一个投影：权威在
+   * `Document#history.past/future`（`application/queries#queryDocument` 与
+   * `runtime/execution` 的 `case 'document'` 两处**逐字同口径**：
+   * `past.length > 0` / `future.length > 0`，标签取栈顶元素的 `label`）。
+   *
+   * ⇒ 本方法是那条口径在**会话层**的取用点，而不是第三种"撤销状态"。
+   * 若这里再记一份（例如缓存 `canUndo`），就会出现"两份撤销事实"并必然漂移
+   * —— 本项目三度实测过的形态。
+   *
+   * ## 为什么复用 `queryDocument` 而不是自己读 `doc.history`
+   *
+   * 直接读 `doc.history` 会让"什么算可撤销"在会话层有一份**实现**，
+   * 而它在外面的 `queries.ts`/`execution.ts` 已有两份。复用它 ⇒ 三处同源。
+   *
+   * @returns `null` = 文档未打开（调用方据此**不**把旧栈当权威）
+   */
+  documentSummary(): DocumentSummary | null {
+    const result = queryDocument(this.editor.snapshot(), this.documentId)
+    return result.ok ? result.value : null
   }
 
   // ── 读面 ─────────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import {
 import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
 import type { SelectionContext } from '@/context/selection'
-import type { UndoManager } from '@/context/editHistory'
+import type { KernelUndoState, UndoManager } from '@/context/editHistory'
 import type { ToolRegistry } from '@/workbench/tools/registry'
 import type { Rect } from '@/shared/types'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
