@@ -48,8 +48,41 @@ export interface SeamRegistration {
   /**
    * **退出条件**（可静态核对的判据）。退出=删掉 `oldTrack`，
    * 并把本条从本表移除（本表的长度就是"双轨剩余数"，只应减少）。
+   *
+   * ## 退出条件必须是**两个子句**，不是一个（R1-α 补；R0-3 判据补丁）
+   *
+   * 只用"能力/登记条件"当退出条件会产生**假退出**：能力落地的当天，
+   * 旧机制可能一行未动。实测反例（本表内）：`legacy-grid-edit-handle` 的原退出条件
+   * 写的是「`Command` 联合含 `moveCells` 且 `moveTranslate.ts` 经
+   * `Context#submitContentEdit` 发起移动」—— 前半句在 R1-α 落地 `moveCells` 的当天成立，
+   * 而后半句（消费者）一行未动。读者只看前半句会判"已退出"。
+   *
+   * ⇒ 每条 `exitCondition` 必须显式分列：
+   *  - **（甲）登记条件**：能力/承载面是否存在（可机检：类型/成员扫描）；
+   *  - **（乙）消费者迁移数 = 0**：旧路径的**调用点**是否已全部迁走（可机检：全树命中数）。
+   *  **只有（甲）不算退出。** 由 `tests/architecture/boundary-scan.test.ts` 机械把守。
    */
   readonly exitCondition: string
+  /**
+   * 本条声明的文件是否**全部落在生产入口的可达闭包内**（R1-α 补；R0-3 判据补丁）。
+   *
+   * ## 为什么必须有这个字段（闭合判据的**空洞真**）
+   *
+   * 退役判据的一种形态是「入口可达闭包 ∩ 旧层 = ∅」。它对**不在闭包内**的文件
+   * 恒真 —— 什么都不做也判"已退出"。实测（R1-α 探针 `temp/r1a/probe-seam-closure.mjs`）：
+   * 11 条接缝里 **3 条**共 6 处声明文件（4 个不同文件：
+   * `adapters/export/snapshotExportJob.ts`、`domain/captureSpec.ts`、
+   * `application/exportPlan.ts`、`runtime/exportJob.ts`）落在闭包**之外** ——
+   * 而 `runtime/exportJob.ts` 恰是后两条接缝的**迁移目标**
+   * （它不可达正是"尚未接线"这件事本身）。
+   *
+   * ⇒ 对这三条，"闭包判据"不是判据。本字段让这件事**可见**；声明 `outside-closure`
+   * 的接缝必须给出 `closureNote` 说明它的**真判据**是什么，而
+   * `boundary-scan.test.ts` 会**实测**闭包并断言声明值与事实一致。
+   */
+  readonly closureCoverage: 'in-closure' | 'outside-closure'
+  /** `closureCoverage === 'outside-closure'` 时必填：说明闭包判据对本条为何恒真、真判据是什么。 */
+  readonly closureNote?: string
 }
 
 /**
@@ -82,8 +115,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' 而是具名取值口 `Context#legacyDocumentModel()`（见 `property-write-legacy-document-model`）。',
     blocker:
       '**R-WK-04（#250，2026-10-11）**：把实时工作台从 `RuntimeDocument` 迁到内核 `Document` 需要"旧文档 → 内核场景"装配 —— #261 实测内核 `Document` 只承载 block/annotation/camera/mesh，不承载 `frames`/`cellGrid`/`textureBlobs`/`materialPalette`/`multiblock`/`meta`，而渲染链（21 个 `render/` 文件）按后者工作；全树没有任何生产代码从旧场景文件构造内核 `Scene`。故该装配是**架构新增**而非集成收口，归 **#282（P10b）**。#261 已完成的是宿主驱动接线与 `ReadView` 读面补齐（相机组 + 播放读面），见 `runtime/kernelSession`。',
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
     exitCondition:
+      "**（甲）登记条件 —— ✅ 已成立**：`src/runtime/context.ts` 的 `getDoc()` 已终删（全树 0 命中）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`src/editors/workbench-rna.ts` 的 `documentStateOf` 仍由旧文档构造 `DocumentState`（实测 `Context#legacyDocumentModel()` 仍有 2 处生产调用者）。\n闭包内（`closureCoverage: 'in-closure'`）⇒ 闭包判据对本条**有效**。\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '**①✅ 已成立（#301 P10f D3）**：`src/runtime/context.ts` 的 `getDoc()` **已删除**'
       + '（判据本尊口径：`getDoc` 全树 0 命中；该访问器曾是"文档内容的权威读入口"，'
       + ' 46 处消费点已各有具名读面 —— 见 `Context` 的 `// --- Main ---` 段）。\n'
@@ -147,8 +183,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' ② `application/kernel-properties.ts` 的块身份属性描述符；'
       + ' ③ `editors/property-writers#writeBlockProperty` 的内核分支。'
       + ' 三件都是**承载面/写面新增**。',
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
+      "**（甲）登记条件 —— ✅ 已成立（R1-α）**：`src/application/commands.ts` 的 `Command` 联合含块身份/格内容写命令（R1-α 落地 `setCellContent`/`moveCells`/`setDocumentMeta`，联合 24 → 27，R-WK-07 授权）。⚠️ 本条 blocker 原写的\"联合无此类命令\"**已滞后于代码**，同批改正。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`src/editors/property-writers.ts` 的 `DocumentState.document` 仍是 `RuntimeDocument`，`legacyDocumentModel(` 生产调用点 2 处。**只有（甲）不算退出。**\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '`src/editors/property-writers.ts` 的 `DocumentState.document` 的类型不再是'
       + ' `RuntimeDocument`（改为内核 `Document` 或 `ApplicationState`），'
       + '且 `src/editors/workbench-rna.ts` 的 `documentStateOf` 不再取旧文档 '
@@ -191,8 +230,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     blocker:
       '`Command` 联合**无**移动格的命令（GF-13 最小集在 C′2 只到 `setCellTooltip`）'
       + ' ⇒ 该写路径此刻无法迁到内核；改走读面会让写入静默丢失（#171 禁止的能力回退）。',
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
+      "**（甲）登记条件 —— ✅ 已成立（R1-α）**：`src/application/commands.ts` 的 `Command` 联合含 `moveCells`（R1-α 落地；领域语义见该命令注释：整格迁移 / 身份随迁且命名空间不改写 / 替换非交换 / 同时语义）。⚠️ 本条原退出条件只写了这一半，于是它在 `moveCells` 落地的当天**看起来已经退出**，而 `src/operators/builtin/moveTranslate.ts:309` 一行未动 —— 这正是 R0-3 点名的形态。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：实测 `Context#legacyGridForEdit(` 的生产调用点 **1 处**（`src/operators/builtin/moveTranslate.ts:309`），`src/runtime/gridRead.ts` 仍导出 `LegacyGridLike`。**只有（甲）不算退出。**\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '`src/application/commands.ts` 的 `Command` 联合含 `moveCells`'
       + '（或等价的块移动命令），且 `src/operators/builtin/moveTranslate.ts`'
       + ' 经 `Context#submitContentEdit` 发起移动、不再持有旧 `Grid`'
@@ -244,8 +286,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '（呈现层是 `MeshBasicMaterial`，legacy 是贴图材质库）与注解/描边统一 ——'
       + ' 缺任一条即"切换后画面变平"（可感知回退，#171 禁止）。'
       + ' D 批映射表 §八逐字排除本批做渲染链终切。',
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
+      "**（甲）登记条件 —— ⏳ 部分成立**：新轨 `composition/presenterSession.ts` 的 `PresenterSession` 已有生产实现，但终切的另一条前置（材质统一 + 注解/描边统一）未交付。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：实测 `Context#legacyRenderSource()` 的**生产调用点 4 处**（`shared/viewport/useViewportRuntime.ts`、`useKernelChannels.ts`、`EmbedViewport.vue`、`editors/workbench-rna.ts`）。\n闭包内 ⇒ 闭包判据对本条**有效**。\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '`src/shared/viewport/useViewportRuntime.ts` 的 `docRef` 不再吃旧格式文档'
       + '（DRW 消费 `PresenterSession` 产出）、且 `src/editors/workbench-rna.ts` 的'
       + ' 多方块生成态判定与 `src/shared/viewport/useKernelChannels.ts` 的声明读取'
@@ -285,8 +330,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       '`meta.embed_initial_view` 是**文件格式**的键，内核内容面（`DocumentContent`）'
       + '不承载它 ⇒ 换成"克隆 + `setDocument`"会改变信号面（见上表），'
       + '而改成内核命令需要先有"写文档 meta"的命令（`Command` 联合无此类成员）。',
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
+      "**（甲）登记条件 —— ⏳ 未成立**：需要\"承载 `meta.embed_initial_view` 的内核内容面或专门适配面\"。⚠️ **R1-α 实测澄清**：R1-α 落地的 `setDocumentMeta` 写的是 `DocumentContent.metadata` 的具名字段（`name`/`author`/`description`/`tags`/`origin`/`createdAtMs`），**不含** `embed_initial_view` —— GF-8 已裁决它是观察视角（归 3D 编辑器实例/宿主初始视图），不伪造进文档 ⇒ 本条仍缺专门适配面。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：实测 `Context#legacyDocumentModel()` 的生产调用点恰 2 处（`context/captureEmbedInitialView.ts:19`、`editors/workbench-rna.ts:503`）。\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '`meta.embed_initial_view` 由内核内容面或专门适配面承载，'
       + '且 `src/context/captureEmbedInitialView.ts` 不再取旧文档本体'
       + '（`src/runtime/context.ts` 的 `legacyDocumentModel()` 在本用途上零调用）'
@@ -348,8 +396,14 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' ⇒ 交给导出作业就是 A29 要防的"导出借用实时视口资源"。'
       + ' 故切换的前置是**渲染链终切**（呈现层接管画面、材质统一）——'
       + ' 与 `presenter-surface-dual-track` / `legacy-render-source-document` 同一前置。',
+    // ⚠️ **闭包外**（R1-α 实测）：见 `closureNote` —— 「闭包 ∩ 旧层 = ∅」对本条恒真。
+    closureCoverage: 'outside-closure',
+    closureNote:
+      "声明文件 `adapters/export/snapshotExportJob.ts` 不在任何生产入口的可达闭包内 —— 它正是本条尚未接线的那一端（`ExportIsoPngOperator` 仍走自建烘焙链，没有调用它）。⇒「闭包 ∩ 旧层 = ∅」对本条**恒真**，不能当判据。本条的**真判据**是「渲染链终切后 `ExportIsoPngOperator` 经 `assembleSnapshotExportJob` + `ExportJob.run()` 产出 PNG」（接线判据，含负对照：断开该接线则同一产物判据判红）。",
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
+      "**（甲）登记条件 —— ⏳ 未成立**：需\"渲染链终切后出现不借用实时视口的生产 `TexturePort`\"（材质统一的前置）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 仍经 `workbench/exportIsometricImage.ts` 自建烘焙链。\n⚠️ 本条 `closureCoverage: 'outside-closure'` ⇒ **不得**用闭包判据（见 `closureNote`）。\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '**渲染链终切后**（唯一前置）：`src/composition/presenterSession.ts` 的 `PresenterSession` '
       + '接管画面、材质统一 ⇒ 生产侧出现**不借用实时视口**的 `TexturePort`（或材质统一后不再需要贴图端口）；'
       + '届时 `src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
@@ -403,8 +457,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       '`runtime/drwMeshPipeline` 的 `blockMeshProvider` → legacy `blockMesh` 仍是**画面**的生产路径（写 `vpSlot.contentGroup`）。呈现会话有自己的根对象，**不**挂进 `contentGroup`（挂进去会让"谁画了这 24 个三角形"没有唯一答案）。',
     blocker:
       '**R-WK-07（#250，2026-10-12）**：D4（`raw-authority-object` 终删 + `RuntimeDocument` 退出生产 + G-6 + 导出面）已卷出为 **P10f（#301）** 子批 A–E；渲染链终切属子批 C/D，其前置即上方四条。本批硬约束是**能力不回退**，而"呈现链接管画面但其材质/注解/描边尚未统一"会让画面**变平**（无贴图）—— 那是可感知回退。',
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
     exitCondition:
+      "**（甲）登记条件 —— ⏳ 部分成立**：`PresenterSession` 生产实现 ✅（逐格拾取 + 逐像素结构等价已验）。⚠️ **R1-α 更新**：原列前置之一「`Command` 封闭联合扩展（侧表写面）」**已交付**（R1-α 落地 `setCellContent`/`moveCells`/`setDocumentMeta`，联合 24 → 27）；仍未交付的是「9 条未装配内核的加载路径补齐」与「材质统一」。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：画面仍由 `DRW`（legacy `blockMesh`）产出；实测 `shared/viewport/useViewportRuntime.ts:77` 的 `docRef` 仍取 `ctx.legacyRenderSource()`。\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '`src/runtime/drwMeshPipeline.ts` 的 `blockMeshProvider` 路径被删除，且视口结构层由 `src/composition/presenterSession.ts` 的 `PresenterSession` 产出（画面唯一来源是内核求值产物）；届时删除本条登记。',
   }),
   /**
@@ -463,8 +520,14 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       '  · **零生产消费方**：四个导出命令（`src/operators/builtin/exportOperators.ts`）与 `ExportWorkspace.vue` 全走旧导出器，**无一处**调 `assembleSnapshotExportJob` / `ExportJob.run()` ⇒ "导出改由 `ExportJob` 承担"在**消费面**未接。\n' +
       '  · **Lead 裁决（#262 comment 6429 三，2026-10-13）：四个导出命令 `迁 ExportJob` = 采纳「不迁」**（切过去丢贴图 + 违反 A29 借用实时视口）⇒ 剩下的只是**旧导出器本体**的删除，其前置收窄为「渲染链终切」（见 seam `isometric-export-legacy-bake`）。\n' +
       '④ **文字修正**：本条的旧 `oldTrack` 曾称两个文件"从正在操作的视口取景（必要时临时改机位再恢复）"。实测**不成立**：`bundleMeshAssembly.ts` 与 `exportIsometricImage.ts` 都不 import 任何视口/相机/`ctx` 实时面，后者自建 `new THREE.WebGLRenderer` 与自建透视/正交相机（`:105,:153-168`）。"借用并旋转实时相机"发生在**截图**路径（`runtime/renderEngine.ts:215` 的 `canvas.toDataURL`），不是这两个导出器。A29 的负对照面据此收窄（见汇报）。',
+    // ⚠️ **闭包外**（R1-α 实测）：见 `closureNote` —— 「闭包 ∩ 旧层 = ∅」对本条恒真。
+    closureCoverage: 'outside-closure',
+    closureNote:
+      "3 处声明文件不在闭包内：`domain/captureSpec.ts`、`application/exportPlan.ts`、`runtime/exportJob.ts`。其中 `runtime/exportJob.ts` 恰是本条的**迁移目标**（导出作业端口尚未被生产入口装配 ⇒ 不可达**就是**\"尚未接线\"本身）。⇒「闭包 ∩ 旧层 = ∅」对本条**恒真**。本条的**真判据**是「生产导出入口经该端口取资源、且导出路径不再借用实时视口」（A29 + 接线）。",
     owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     exitCondition:
+      "**（甲）登记条件 —— ✅ 已成立**：导出端口实现完备（`adapters/export/snapshotExportJob.ts` + `SnapshotOffscreenRenderPort` + `createEncoderPort`），且已有真 GL e2e 证据（`e2e/export-ports.spec.ts`）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：生产导出入口尚未经该端口装配。\n⚠️ 本条 `closureCoverage: 'outside-closure'` ⇒ **不得**用闭包判据（见 `closureNote`）。\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '`src/workbench/export/bundleMeshAssembly.ts` 与 `src/workbench/exportIsometricImage.ts` 被删除，且 `src/operators/builtin/exportOperators.ts` 的导出命令改由 `src/runtime/exportJob.ts` 的 `ExportJob` 承担（`OffscreenRenderPort`/`EncoderPort` 各有生产实现，且 OBJ 几何来自内核内容面而不再依赖旧文档回显）；届时删除本条登记。',
   }),
   /**
@@ -496,8 +559,14 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       '旧导出器（`workbench/export/bundleMeshAssembly.ts`）在烘焙时直接从旧文档与纹理库取资源：没有"必需/可选"的声明，也没有内容版本参与的就绪判定，故"缺资源"表现为烘焙结果里少一块而不是预检失败。',
     blocker:
       '**R-WK-06（#250，2026-10-12）**：`deriveAssetNeeds()` 需要"文档场景 → 呈现图元（`EvaluatedPrimitive[]`）"的装配，而这属**文档内容面** —— 与 `raw-authority-object` 同一前置（内核 `Document` 不承载旧文档内容）。P9 原登记为 P10b（#282），而 #282 交付的是**多方块通道/呈现接线**，本条未在其中交付；P10c（#286）复核后按 R-WK-06 的划界改归 **#289（P10d）**（内容面补全与呈现消费）。',
+    // ⚠️ **闭包外**（R1-α 实测）：见 `closureNote` —— 「闭包 ∩ 旧层 = ∅」对本条恒真。
+    closureCoverage: 'outside-closure',
+    closureNote:
+      "2 处声明文件不在闭包内：`application/exportPlan.ts`、`runtime/exportJob.ts`（同 `export-borrows-live-viewport-dual-track` 的迁移目标）。⇒「闭包 ∩ 旧层 = ∅」对本条**恒真**。本条的**真判据**是「产物侧已接线 `assetId`/`contentVersion` 清单」（`composition/saveProjection` 已在产物侧传值，见本条说明）。",
     owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     exitCondition:
+      "**（甲）登记条件 —— ✅ 已成立**：产物侧已能表达资源身份（`adapters/files/projectFormat.ts` 的 `normalizeAssets`/`assetManifestDigest`；`composition/saveProjection.ts` 已在产物侧传值）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：导出路径尚未实际写清单。\n⚠️ 本条 `closureCoverage: 'outside-closure'` ⇒ **不得**用闭包判据（见 `closureNote`）。\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '`src/application/exportPlan.ts` 的 `deriveAssetNeeds()` 由已装配的图元来源产出非空清单（不再在未装配时返回空），且 `src/runtime/exportJob.ts` 的作业按该清单解析资源。届时删除本条登记。',
   }),
   /**
@@ -632,8 +701,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '（`adapters/storage/memory`/`browser`）**零生产实例化**（D 映射表 §3.2 实测；'
       + ' D3 复核仍成立 —— 全树 `createMemoryStoragePort|browserStoragePort` 只出现在 `__tests__`）。'
       + ' ⇒ **该子句保留登记**（本批不核销，如实回报 Lead）。\n⚠️ **三处更正**（前序批次写下、后续实测推翻）：① 原写"产物侧唯一挂点 `projectKernelDocument` 生产零调用方"—— **不成立**（`kernelRenderView.ts:135` 已在生产调用它）；真正的缺口更窄：`fidelityFields` 无生产传值方。② 原写 (b) "需先统一键口径，不是接线"—— **D1 已统一**。③ 原写 (c) "D2 接线后删除本条登记"—— **改判**：接线完成 ≠ 缺口闭合（回落分支仍在）⇒ 登记**保留**、只更新文案与退出条件；核销会让"保存路径尚未终切"失去登记。',
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
     exitCondition:
+      "**（甲）登记条件 —— ✅ 已成立（D1 两段）**：装配路径经 `adapters/fidelityCapture` 采集并由内核会话承载（`KernelSession.setFidelityFieldMap`）；保真键已并入 recovery/save 家族（`fidelityStoreKey` 带 scope+instance 段、返回 `Result`、有解析器、被 `artifactKindOfKey` 识别）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：保存路径的旧权威回落分支仍在（`Context.plainForSave` 的 `source: 'legacy'`）。\n闭包内 ⇒ 闭包判据有效（但本条的退出是\"回落分支消失\"，不是\"闭包干净\"）。\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '**三段全部成立**才算闭合：\n(a) ✅ **D1 已达成** —— `src/composition/documentLoad.ts` 的装配路径经 `adapters/fidelityCapture` 调 `captureFidelity` 构造记录，且由内核会话承载（`KernelSession.setFidelityFieldMap`/`fidelityFieldMapOf`，卸载即清空）；\n(b) ✅ **D1 已达成** —— 保真键并入 recovery/save 家族（`src/application/recovery.ts` 的 `fidelityStoreKey` 带 scope+instance 段、返回 `Result`、有 `parseFidelityStoreKey`、被 `artifactKindOfKey` 识别、版本为具名常量 `FIDELITY_SCHEMA_VERSION`）；\n(c) ⏳ **D2 已接线、等价已把守、终切未完** —— 生产传值方 = `src/composition/saveProjection.ts`（✅ D2），产物等价判据在四份真实夹具上逐键/语义面转绿（✅ D2）；**但**旧权威回落分支仍在 ⇒ 闭合判据改为"保存路径无 legacy 回落分支（`Context.plainForSave` 恒 `source: "kernel"`）**且** e2e 真实产物等价判据纳入套件"。',
   }),
   /**
@@ -745,8 +817,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' 上面那批尚未列入的几何字段（读面是**封闭 15 字段**表，加字段是"决定"而不是自动跟随'
       + ' —— 见 `geometryFieldsOf` 的注释）。'
       + '两件都是**承载面/写面新增**，超出 D3「终删 `getDoc()`」的范围（Lead comment 5960 的红线）。',
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
+      "**（甲）登记条件 —— ✅ 部分成立**：读面已是封闭 15 字段表（`ANNOTATION_FIELD_PAIRS`，含 `locked` 与几何）。⚠️ **R1-α 澄清**：注解字段写**不**经逐格内容命令 —— R1-α 落地的 `setCellContent` 写的是**格**内容（`blockGrid.cellContent`），注解字段写走 `SetPropertyCommand` + RNA 描述符。未成立的是描述符字段覆盖。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`annotationOperators.ts` 的 `annotationPatchCommand` 仍有\"未承载字段即整体回落\"的分支（实测只迁 `title`）。\n**以下为原退出条件（逐字保留）**：\n"
+      +
       '`src/runtime/annotationRead.ts` 的 `ANNOTATION_FIELD_PAIRS` 覆盖'
       + ' `src/editors/workbench-inspector.ts` 的注解描述符**全部**字段，'
       + '且 `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand`'

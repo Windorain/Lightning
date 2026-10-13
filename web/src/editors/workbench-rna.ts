@@ -494,8 +494,11 @@ export function documentStateOf(ctx: Context): DocumentState {
   // 就是旧文档，见 `editors/property-writers` 的 `DocumentState`）。它经
   // `frozenDocumentValue()`（R8 的边界取值口）取值 ⇒ `getDoc()` 访问器已退出。
   // `kernel-property-write-dual-track` 接缝的②子句（"由内核 `Document` 构造"）
-  // 需先有块身份写命令（`Command` 联合现无 `setCellContent`）⇒ 登记为新双轨
-  // `property-write-legacy-document-model`（owner P11），见 `composition/seams.ts`。
+  // **能力前置已消除**（R1-α：#387 落地 `setCellContent`/`moveCells`/`setDocumentMeta`，
+  // 联合 24 → 27）—— 剩余的是**写端口迁移**（`DocumentState` 换成内核寻址根 +
+  // `property-writers` 的内核分支），见 `composition/seams.ts` 的
+  // `property-write-legacy-document-model`（owner P11，退出须"登记条件 + 消费者迁移数=0"
+  // 两个子句同时成立）。
   //
   // ⚠️ 取的是**本体**（不克隆）：`DocumentState.document` 只是"交给
   // `applySetProperty` 的形状"，而它是**面板每次读写都要走**的路径 ——

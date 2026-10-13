@@ -47,6 +47,28 @@ export interface LoadLogPort {
 }
 
 /**
+ * **装配所需的宿主面**（`adoptLoadedDocument` 的 `ctx` 参数类型）。
+ *
+ * ## 为什么要具名导出（R1-α：一条只在**类型位置**出现的旧→内核边）
+ *
+ * 原先调用方（`operators/builtin/docLifecycleOperators.ts`）在自己的参数标注里写
+ * `readonly kernel: import('@/runtime/kernelSession').KernelSession | null`
+ * —— 那是一条 `operators/`（旧层）→ `runtime/`（内核层）的依赖，但只出现在
+ * `ImportTypeNode` 里，而 `tests/architecture/module-graph.mjs` 当时**不采集**
+ * 该节点 ⇒ 它既没被边闸门判红，也没进 `APPROVED_LEGACY_TO_KERNEL_EDGES`
+ * （R0-3 实测点名的漏网实例）。
+ *
+ * 修法是**删除这条边**而不是登记它：装配所需的宿主面由**装配方**（本文件，
+ * `composition/` 层）具名声明，调用方 import 这个类型即可。于是
+ * "旧层直接依赖内核模块"在结构上不再需要 —— 这正是 #249 §4 规则 3
+ * 「类型导入同计」想要的形态：类型位置不能成为绕过分层的通道。
+ */
+export interface KernelLoadHost {
+  readonly kernel: KernelSession | null
+  log: LoadLogPort
+}
+
+/**
  * **取"解析器看到的 plain 形状"** ⇒ 见 `adapters/plainRoot#plainRootOf`。
  *
  * ## 为什么它不在本文件（本批被架构闸门判红后的一处分层更正）
@@ -148,10 +170,7 @@ function multiblockProjectionFaceOf(assembled: {
  * 那是**预期内的降级**，不是错误。
  */
 export function adoptLoadedDocument(
-  ctx: {
-    readonly kernel: KernelSession | null
-    log: LoadLogPort
-  },
+  ctx: KernelLoadHost,
   doc: RuntimeDocument,
   plainRoot: Readonly<Record<string, unknown>> | undefined,
   locator: string,

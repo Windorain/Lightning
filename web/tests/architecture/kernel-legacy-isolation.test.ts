@@ -32,6 +32,7 @@
  */
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildModuleGraph, WEB_ROOT, SRC_ROOT, extractImports } from './module-graph.mjs'
@@ -849,6 +850,102 @@ describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已�
       .map((f) => ({ f, target: resolveTarget(f) }))
       .filter(({ f, target }) => target !== null && kernelNoExt.has(target) && !approved.has(`src/${f.fromSrcRel}→${target}`))
     expect(hits, '未登记的旧→新依赖必须判红').toHaveLength(1)
+  })
+
+  /**
+   * **类型位置**（`import('x').T`）的旧→内核边必须进图 —— R1-α 判据形态补丁。
+   *
+   * ## 为什么单列一组（R0-3 实测：这是闸门的**假绿**洞）
+   *
+   * `module-graph.mjs` 原只处理 `isImportDeclaration` / `isExportDeclaration` /
+   * `isImportEqualsDeclaration` / `CallExpression+ImportKeyword`；`ImportTypeNode`
+   * **四条分支全不匹配** ⇒ 只出现在类型标注里的依赖不进图，闸门对它判绿。
+   *
+   * 实测漏网：`src/operators/builtin/docLifecycleOperators.ts:32` 的
+   * `readonly kernel: import('@/runtime/kernelSession').KernelSession | null`
+   * —— 旧层（`operators/`）→ 内核层（`runtime/`）的生产边，既未判红也未登记。
+   *
+   * ## 判据的强度要求（本组三条各自不可省）
+   *
+   * 1. **扫描器**真的产出 `kind: 'import-type'` 事实 —— 走**生产** `extractImports`
+   *    （不是手造 fact 对象：手造会绕过 AST 通路，正是"宿主复刻被测算法"的形态）。
+   * 2. **已知漏网实例不再存在**：那条边已被删除（修法是删边，不是加白名单）
+   *    —— 断言它对**当前**树为 0 命中，且**若**它复活会被同一判据抓到。
+   * 3. **注入即判红**：在临时树上写一条类型位置的旧→内核边，
+   *    同一 `extractImports` + 同一判定逻辑必须命中它。
+   */
+  describe('类型位置的 `import(\'x\').T` 必须进图（R1-α / R0-3 假绿洞的补丁）', () => {
+    /** 走**生产**扫描器解析一段源码，返回导入事实。 */
+    function factsOfSource(source: string): ReturnType<typeof extractImports> {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-importtype-'))
+      const abs = path.join(dir, 'probe.ts')
+      fs.writeFileSync(abs, source, 'utf8')
+      try {
+        return extractImports(abs, dir)
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true })
+      }
+    }
+
+    it('扫描器把 `import(\'x\').T` 记为 `import-type` 事实（生产 `extractImports` 本体）', () => {
+      const facts = factsOfSource(
+        [
+          "import type { A } from '@/domain/errors'",
+          "export interface Probe { readonly kernel: import('@/runtime/kernelSession').KernelSession | null }",
+        ].join('\n'),
+      )
+      const typeFact = facts.find((f) => f.kind === 'import-type')
+      expect(typeFact, '类型位置导入必须被采集（否则闸门对该边假绿）').toBeDefined()
+      expect(typeFact!.specifier).toBe('@/runtime/kernelSession')
+      expect(typeFact!.isTypeOnly, '它是**类型位置**的事实').toBe(true)
+      // 正对照：值位置导入仍按原类别采集（补采集不得改变既有语义）
+      expect(facts.find((f) => f.specifier === '@/domain/errors')?.kind).toBe('import')
+    })
+
+    it('已知漏网实例（`docLifecycleOperators.ts` 的 kernel 字段）**已删除**这条边', () => {
+      const { facts } = loadGraph()
+      const leaked = facts.filter((f) => {
+        const fromRel = path.relative(SRC_ROOT, f.fromFile).replace(/[\\/]+/g, '/')
+        if (fromRel !== 'operators/builtin/docLifecycleOperators.ts') return false
+        return resolveTarget(f) === 'runtime/kernelSession'
+      })
+      expect(
+        leaked.map((f) => `${f.fromRel}:${f.line} (${f.kind})`),
+        '修法是**删边**（装配宿主面由 composition/ 具名声明），不是登记白名单',
+      ).toEqual([])
+    })
+
+    it('**注入即判红**：临时树里的类型位置旧→内核边必须被同一判定逻辑抓到', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-importtype-neg-'))
+      const srcRoot = path.join(dir, 'src')
+      try {
+        const legacy = path.join(srcRoot, 'operators', 'builtin', 'probeLegacy.ts')
+        fs.mkdirSync(path.dirname(legacy), { recursive: true })
+        // 形态与漏网实例**逐字同族**：类型位置、指向内核文件、无值位置导入。
+        fs.writeFileSync(
+          legacy,
+          "export interface Probe { readonly kernel: import('@/runtime/kernelSession').KernelSession | null }\n",
+          'utf8',
+        )
+        const facts = extractImports(legacy, dir)
+        const kernelNoExt = new Set(KERNEL_FILES.map((f) => f.replace(/\.(ts|tsx|mts|vue)$/, '')))
+        const approved = new Set(
+          APPROVED_LEGACY_TO_KERNEL_EDGES.filter((e) => e.internalToKernel !== true).map((e) => `${e.from}→${e.to}`),
+        )
+        const flagged = facts.filter((f) => {
+          const fromRel = path.relative(srcRoot, f.fromFile).replace(/[\\/]+/g, '/')
+          if (!isOldLayerTarget(fromRel.replace(/\.(ts|tsx|mts|vue)$/, ''))) return false
+          const target = resolveTarget(f)
+          return target !== null && kernelNoExt.has(target) && !approved.has(`src/${fromRel}→${target}`)
+        })
+        expect(
+          flagged.map((f) => `${f.fromRel}:${f.line} (${f.kind})`),
+          '类型位置的旧→内核边必须判红（补采集前这里是空数组 = 假绿）',
+        ).toHaveLength(1)
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true })
+      }
+    })
   })
 
   it('反空洞真 + 负对照：内核确实被**新层**依赖，而注入一条旧层导入会被抓到', () => {

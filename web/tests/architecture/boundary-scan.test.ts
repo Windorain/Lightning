@@ -65,6 +65,61 @@ function extractGlobalRefsFor(absPath) {
   return extractGlobalRefs(absPath)
 }
 
+/**
+ * **生产入口的可达闭包**（相对 `src/`、无扩展名的路径集合）—— R1-α 补。
+ *
+ * ## 为什么需要它（闭包判据的"空洞真"）
+ *
+ * 退役判据的一种形态是「入口可达闭包 ∩ 旧层 = ∅」。它对**不在闭包内**的文件
+ * **恒真**：无论怎么改都判"已退出"。故"某条接缝的文件是否在闭包内"本身是
+ * 一条必须被**实测**的事实（`SEAMS[*].closureCoverage` 要对得上）。
+ *
+ * ## 入口集合（与 R0 建议口径一致）
+ *
+ * `main.ts`（embed）、`main-workbench.ts`、`main-wiki-workbench.ts`、`main-dev.ts`。
+ *
+ * ## 与 `artifact-host.test.ts` 的 `importClosure` 的关系（不是第二份实现）
+ *
+ * 那个函数是**单入口**版（T-06 判 jszip 的闭包），本函数是**多入口并集**版。
+ * ⚠️ **已知重复**：两者的 BFS 主体同形。本批**不改** `artifact-host.test.ts`
+ * （它的三个用例绑的是单入口语义），但把这条重复如实登记为 R1-α 的既有债 ——
+ * 它的正确形态是 `module-graph.mjs` 导出一个 `entryClosure(entries)` 供两处共用。
+ * 归因：R4（外壳/入口面）迁移时一并收敛；本批只保证本函数与实测一致。
+ */
+function entryClosure(): Set<string> {
+  const { facts } = buildModuleGraph()
+  const norm = (p: string): string => p.replace(/\.(ts|tsx|mts|vue|js)$/, '')
+  const byFrom = new Map<string, string[]>()
+  for (const f of facts) {
+    const key = norm(path.relative(SRC_ROOT, f.fromFile as string).replace(/[\\/]+/g, '/'))
+    const list = byFrom.get(key)
+    if (list === undefined) byFrom.set(key, [f.specifier as string])
+    else list.push(f.specifier as string)
+  }
+  const reached = new Set<string>()
+  const seen = new Set<string>()
+  const queue = ['main.ts', 'main-workbench.ts', 'main-wiki-workbench.ts', 'main-dev.ts'].map(norm)
+  while (queue.length > 0) {
+    const cur = queue.shift() as string
+    if (seen.has(cur)) continue
+    seen.add(cur)
+    reached.add(cur)
+    for (const spec of byFrom.get(cur) ?? []) {
+      // 不可静态解析的动态导入不进闭包（诚实边界，与 `artifact-host` 同一口径）。
+      if (spec.startsWith('«')) continue
+      if (!spec.startsWith('.') && !spec.startsWith('@/')) continue
+      const abs = spec.startsWith('@/')
+        ? path.join(SRC_ROOT, spec.slice(2))
+        : path.resolve(path.dirname(path.join(SRC_ROOT, cur)), spec)
+      const rel = norm(path.relative(SRC_ROOT, abs).replace(/[\\/]+/g, '/'))
+      if (rel.startsWith('..')) continue
+      queue.push(rel)
+      queue.push(`${rel}/index`)
+    }
+  }
+  return reached
+}
+
 /** 构建与 scan-boundaries.mjs 相同的 ctx（避免测试与入口漂移）。 */
 function buildCtx() {
   const { active, absent, legacyCollisions } = resolveGateLayers(SRC_ROOT)
@@ -476,6 +531,91 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
       const named = s.files.some((f: string) => s.exitCondition.includes(f))
       expect(named, `${s.id} 的退出条件必须点名可核对的产物（文件路径）`).toBe(true)
     }
+  })
+
+  /**
+   * **退出条件的两个子句**（R1-α 补；R0-3 判据补丁"退出条件 ≠ 消费者已迁移"）。
+   *
+   * 只用"能力/登记条件"当退出条件会产生**假退出**：能力落地当天旧机制可能一行未动。
+   * 实测反例（本表内）：`legacy-grid-edit-handle` 的原退出条件写
+   * 「`Command` 联合含 `moveCells` **且** `moveTranslate.ts` 经 `submitContentEdit` 发起移动」
+   * —— 前半句在 R1-α 落地 `moveCells` 当天成立，后半句一行未动。
+   *
+   * ⇒ 每条退出条件必须显式分列「（甲）登记条件」与「（乙）消费者迁移数 = 0」，
+   * 并**禁止**把（甲）单独作为退出依据（本判据用"两子句标记都出现"机械把守）。
+   */
+  it('退出条件必须显式分列「登记条件」与「消费者迁移数 = 0」两个子句（缺一即假退出入口）', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    for (const s of SEAMS) {
+      expect(s.exitCondition, `${s.id} 的退出条件必须含「（甲）登记条件」子句`).toMatch(/登记条件/)
+      expect(s.exitCondition, `${s.id} 的退出条件必须含「（乙）消费者迁移数 = 0」子句`).toMatch(/消费者迁移数\s*=\s*0/)
+    }
+  })
+
+  /**
+   * **闭包覆盖声明必须与实测一致**（R1-α 补；R0-3 判据补丁的"空洞真"半边）。
+   *
+   * ## 这个判据防的是什么
+   *
+   * 退役判据的一种形态是「入口可达闭包 ∩ 旧层 = ∅」。它对**不在闭包内**的文件
+   * **恒真** —— 什么都不做也判"已退出"。实测：11 条接缝里 3 条共 6 处声明文件
+   * 落在闭包外，其中 `runtime/exportJob.ts` 恰是后两条的**迁移目标**
+   * （不可达**就是**"尚未接线"本身）。
+   *
+   * ⇒ 两条断言：
+   *  1. 声明值必须**等于**实测值（声明不得腐烂；也不得把可达的接缝
+   *     伪装成不可达以逃过闭包判据）；
+   *  2. `outside-closure` 必须给出 `closureNote`（让"闭包判据对本条恒真"
+   *     这件事**可见**，而不是静默地什么都不做）。
+   */
+  it('`closureCoverage` 声明必须与实测闭包一致，且 `outside-closure` 必须给出 `closureNote`', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    const closure = entryClosure()
+    /** 实测：该接缝的声明文件是否全在闭包内。 */
+    const measured = (files: readonly string[]): boolean =>
+      files.every((f) => closure.has(f.replace(/^src\//, '').replace(/\.(ts|tsx|mts|vue)$/, '')))
+
+    let outsideCount = 0
+    for (const s of SEAMS) {
+      const inClosure = measured(s.files)
+      const declared = s.closureCoverage
+      expect(
+        declared,
+        `${s.id}：声明 ${declared}，实测 ${inClosure ? 'in-closure' : 'outside-closure'}`
+          + `（声明与事实不一致 —— 见 seams.ts 的 closureCoverage 说明）`,
+      ).toBe(inClosure ? 'in-closure' : 'outside-closure')
+      if (declared === 'outside-closure') {
+        outsideCount += 1
+        expect(
+          (s.closureNote ?? '').length,
+          `${s.id}：\`outside-closure\` 必须给出 \`closureNote\`（否则"闭包判据对本条恒真"这件事是静默的）`,
+        ).toBeGreaterThan(60)
+      } else {
+        expect(s.closureNote, `${s.id}：\`in-closure\` 不得带 \`closureNote\`（它没有恒真问题）`).toBeUndefined()
+      }
+    }
+    // **反空洞真**：本仓确实存在闭包外的接缝（否则上面那条的 outside 分支从未被执行）。
+    expect(
+      outsideCount,
+      '必须至少有一条 `outside-closure` 接缝 —— 否则该分支从未被验证，判据有一半是空转',
+    ).toBeGreaterThan(0)
+  })
+
+  /**
+   * **负对照**：同一条闭包判据在"文件不可达"时必须判 `outside-closure`。
+   *
+   * 正对照（上一条）证明"可达的接缝被声明成 in-closure"；
+   * 本对照证明**不可达确实会被测出来** —— 缺了它，上一条可能只是
+   * "`measured()` 恒返回 true"的空转。
+   */
+  it('**负对照**：`measured()` 对一个闭包外的文件必须返回 false（证明它不是恒真）', async () => {
+    const closure = entryClosure()
+    const measured = (files: readonly string[]): boolean =>
+      files.every((f) => closure.has(f.replace(/^src\//, '').replace(/\.(ts|tsx|mts|vue)$/, '')))
+    // 实测闭包外的一个真实文件（R0-3/prep 点名 + 本批探针复核）。
+    expect(measured(['src/runtime/exportJob.ts']), '`runtime/exportJob.ts` 实测在闭包外').toBe(false)
+    // 正对照：一个确实可达的生产文件。
+    expect(measured(['src/domain/document.ts']), '`domain/document.ts` 实测在闭包内').toBe(true)
   })
 
   it('**反空洞真**：登记的旧轨在代码里**确实存在**（否则登记表是空转）', async () => {

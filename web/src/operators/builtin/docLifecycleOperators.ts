@@ -8,7 +8,7 @@ import { DEFAULT_PREVIEW_SCENE_ID } from '@/viewer/viewerSession'
 // #289 P10d（D1）：装配与信封解包判据**移出本文件**，落在 `composition/documentLoad`
 // —— 于是文件选择器路径与 `workbench/document/pipeline.ts` 的 `DocumentSource` 路径
 // （wiki-data / SDE / 本地抽屉）共用**同一份**判据，而不是各写一份并必然漂移。
-import { adoptLoadedDocument } from '@/composition/documentLoad'
+import { adoptLoadedDocument, type KernelLoadHost } from '@/composition/documentLoad'
 import { plainRootOf } from '@/adapters/plainRoot'
 
 /**
@@ -28,10 +28,7 @@ import { plainRootOf } from '@/adapters/plainRoot'
  * `ctx` 形状一致，调用点读起来仍是"本算子装配了内核"；而**判据**只有一处。
  */
 export function adoptDocumentIntoKernel(
-  ctx: {
-    readonly kernel: import('@/runtime/kernelSession').KernelSession | null
-    log: { info(scope: string, message: string, detail?: unknown): void; warn(scope: string, message: string, detail?: unknown): void }
-  },
+  ctx: KernelLoadHost,
   doc: RuntimeDocument,
   plainRoot: Readonly<Record<string, unknown>> | undefined,
   locator: string,

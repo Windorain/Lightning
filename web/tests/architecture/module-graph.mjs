@@ -27,6 +27,15 @@
  * 动态 `import()` 表达式**会**被扫描（`CallExpression` + `ImportKeyword`），
  * 但只有其参数是**静态字符串字面量**时才能判定去向；模板字面量/变量参数的动态导入
  * 作为 `dynamic-unresolvable` 事实记录，不判红（避免误伤），由能力隔离测试补足。
+ *
+ * ## 类型位置的 `import('x').T`（R1-α 补齐；R0-3 实测的洞）
+ *
+ * 上文"AST 不能证明的"清单**不含**它 —— 它是**能**证明的模块依赖，此前只是没采集。
+ * `ImportTypeNode` 与 `ImportDeclaration`/`CallExpression+ImportKeyword` 都不同节点，
+ * 四条旧分支全不匹配 ⇒ 只在**类型位置**出现的依赖会被静默漏过。
+ * 实测漏网：`src/operators/builtin/docLifecycleOperators.ts:32` 的
+ * `readonly kernel: import('@/runtime/kernelSession').KernelSession | null`。
+ * #249 §4 规则 3「类型导入同计」明文要求它进图，故现已采集（`kind: 'import-type'`）。
  */
 
 import fs from 'node:fs'
@@ -181,6 +190,44 @@ export function extractImports(absPath, root = WEB_ROOT) {
             specifier: expr.text,
             kind: 'import-equals',
             isTypeOnly: node.isTypeOnly === true,
+            line,
+            column,
+            syntax: node.getText(sf).split('\n')[0].trim(),
+          }),
+        )
+      }
+    }
+    // import('x') —— **类型位置**（`import('x').T` 作为类型引用）。
+    //
+    // ## 为什么要单独采集它（R1-α/R0-3 实测：不采集就是闸门的洞）
+    //
+    // `import('x').T` 在 AST 里**不是** `ImportDeclaration`，也**不是**
+    // `CallExpression + ImportKeyword`（那是动态 import 表达式）——它是
+    // `ImportTypeNode`。本扫描器原先四条分支全都不匹配它 ⇒ 只出现在**类型位置**
+    // 的旧权威边会被**静默漏过**，闸门对该边判绿。
+    //
+    // 实测漏网实例：`web/src/operators/builtin/docLifecycleOperators.ts:32` 的
+    // `readonly kernel: import('@/runtime/kernelSession').KernelSession | null`
+    // ——旧层（`operators/`）→ 内核层（`runtime/`）的生产边，既未被边闸门判红，
+    // 也未被登记进 `APPROVED_LEGACY_TO_KERNEL_EDGES`。
+    //
+    // 语义上它**就是**一条模块依赖：类型位置的导入同样让该模块在编译期被解析，
+    // 且在 `isolatedModules` 之外与值位置导入产生同样的耦合。把它排除在采集之外
+    // 等于"用类型标注绕过架构闸门"——正是 #249 §4 规则 3「类型导入同计」明文要求的。
+    //
+    // ⚠️ `isTypeOnly: true`：它是**类型位置**的事实，供规则区分"值依赖"与"类型依赖"；
+    // 是否判红由规则决定（本扫描器只提供事实，不自行放行）。
+    else if (ts.isImportTypeNode(node)) {
+      const arg = node.argument
+      if (arg && ts.isLiteralTypeNode(arg) && ts.isStringLiteral(arg.literal)) {
+        const { line, column } = lineOf(node)
+        facts.push(
+          new ImportFact({
+            fromFile: absPath,
+            root,
+            specifier: arg.literal.text,
+            kind: 'import-type',
+            isTypeOnly: true,
             line,
             column,
             syntax: node.getText(sf).split('\n')[0].trim(),
