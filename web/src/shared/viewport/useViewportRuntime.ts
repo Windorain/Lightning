@@ -280,9 +280,40 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    */
   let textureSyncSeq = 0
   let texturesDisposed = false
+  /**
+   * 上次**成功**同步所用的资源独立身份（`assetId@contentVersion` 串）。
+   *
+   * ## 为什么必须有它（本批 e2e 实测的缺陷）
+   *
+   * `applyPresenterSurface` 在**帧循环里每帧**调用，于是同步也每帧启动一次；
+   * 而取消判据是 `seq !== textureSyncSeq` ⇒ 下一帧把上一帧**在途**的解码结果作废。
+   * 若一次解码（4 张 1×1 PNG 的 `createImageBitmap` + `getImageData`）长于一帧，
+   * 落地那一行**永远不会执行**：资源永远 `ready`、绑定表永远为空、画面永远无贴图，
+   * 而且**没有任何报错**（`missingRequired` 也是 0，因为绑定从未产出）。
+   * 实测：真实夹具 4 张资源在浏览器里全部 `ready` 且有像素，而挂载材质 `map` 全为 null。
+   *
+   * 正解 = 与 `PresenterSession.applyIfChanged` **同一纪律**：按**内容身份**去重
+   * （资源表没变就不重解码、不重绑定 —— A11「不动就不算」同族）。
+   * `seq` 取消判据保留，负责"换文档时旧解码不得落地"。
+   */
+  let lastTextureIdentity: string | null = null
+  /**
+   * **在途**同步的资源身份。
+   *
+   * ⚠️ 只记"已完成"的去重**不够**（本批 e2e 实测第二次仍全无贴图）：帧循环每帧进本函数，
+   * 而 `seq` 判据会把上一帧**在途**的解码作废 ⇒ 每一次都活不到落地那一行。
+   * 记在途身份使"同一份资源的第二次调用直接返回"，在途那一次才可能真正落地。
+   */
+  let inFlightTextureIdentity: string | null = null
+  const textureIdentityOf = (doc: { readonly content: { readonly resources: readonly { readonly ref: { readonly assetId: string; readonly contentVersion: string } }[] } }): string =>
+    doc.content.resources.map((r) => `${r.ref.assetId}@${r.ref.contentVersion}`).join('\u0001')
   const syncPresenterTextures = async (): Promise<void> => {
     const doc = kernel?.document()
     if (doc === undefined || texturesDisposed) return
+    const identity = textureIdentityOf(doc)
+    // 已同步过 / 正在同步同一份资源 ⇒ 不重解码、不重绑定（否则帧循环会把在途解码反复作废）。
+    if (identity === lastTextureIdentity || identity === inFlightTextureIdentity) return
+    inFlightTextureIdentity = identity
     const seq = ++textureSyncSeq
     try {
       const resources = await textureResourcesOf(doc.content.resources, textureDecoder)
@@ -290,6 +321,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       if (seq !== textureSyncSeq || texturesDisposed) return
       const synced = presenterTextures.sync(resources)
       const bound = presenterSurface.bindTextures(resources)
+      lastTextureIdentity = identity
       // 未就绪的必需贴图是**真实事实**，必须可见（不得静默当"画好了"）。
       if (bound.missingRequired > 0) {
         presenterErrors.push(`textures-missing-required:${bound.missingRequired}`)
@@ -300,6 +332,8 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       }
     } catch (e) {
       presenterErrors.push(`textures-threw:${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      if (inFlightTextureIdentity === identity) inFlightTextureIdentity = null
     }
   }
 
