@@ -1611,7 +1611,19 @@ function reduceSetCellIdentity(state: ApplicationState, cmd: SetCellIdentityComm
     return rejected(state, invalidValue({ reason: 'malformed-block-id', meta }))
   }
 
+  // 越界守卫：与 `moveCells` 同口径（`declaredBounds` 在尺寸未声明时返回 `null` ⇒ 不判越界）。
+  // ⚠️ 必须**先于**目标解析的 orphan 判据：越界格的键在任何一个网格里都不存在 ⇒
+  // `blockGridWriteTargets` 会先把它报成 `MissingTarget{orphanKey}`，真原因（越界）被掩盖。
   const targets = blockGridWriteTargets(doc, keys)
+  for (const t of targets.list) {
+    const bounds = declaredBounds(t.payload)
+    if (bounds === null) continue
+    for (const c of cmd.cells) {
+      if (!insideBounds(c, bounds)) {
+        return rejected(state, invalidValue({ reason: 'outsideDeclaredGrid', x: c.x, y: c.y, z: c.z }))
+      }
+    }
+  }
   if (targets.list.length === 0 || targets.orphanKey !== null) {
     return rejected(state, missingTarget({ objectId: `cell@${targets.orphanKey ?? keys[0]}` }))
   }
