@@ -55,7 +55,9 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ref, type Ref } from 'vue'
 import { ALL_CAPABILITIES, type Command } from '@/application/commands'
-import type { CommandOutcomeLike, CommandSink } from '@/application/inputCommands'
+import type { CommandOutcomeLike, CommandSink, ControlBinding } from '@/application/inputCommands'
+import { EMPTY_DISPATCH_LEDGER, createInputCommandBindings, dispatchIntent } from '@/application/inputCommands'
+import type { CommandIntent } from '@/domain/input'
 import { KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID, KernelSession } from '@/runtime/kernelSession'
 import { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
@@ -810,6 +812,129 @@ describe('判据④ 负对照实测判红：同一个断言器必须抓到三种
         redOf(() => judgeRoutedThroughKernel(h, cell, '合规')),
         '合规形态必须判绿 —— 否则上面三条"判红"证明不了区分力',
       ).toBe(false)
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A05 产品级缺口（此刻**可达**的那一半）：真实编辑通道
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## 这一组补的是 A05 的**产品级缺口**，不重复内核层判据
+ *
+ * A05 的内核层判据已在 `src/__tests__/a05a17MultiAreaHistory.test.ts`（该文件头的
+ * 层级表把"产品层"标为 ❌ 归 #282），本文件**不重造**它。
+ *
+ * 它当时标 ❌ 的原因是"产品**输入口**仍是 legacy 转发"（同一句话也写在
+ * `r1aProjectFormatProduction.test.ts` 的定级里）。**C4 把那一半兑现了**：
+ * 现在有了一条真实编辑通道 ——
+ *
+ * ```
+ * CommandIntent（`draft.commit`）→ dispatchIntent → resolveIntent → 输入端口
+ *   → 内核提交 → 恰好一条历史 → syncLegacyFromKernel 投影
+ * ```
+ *
+ * 于是 A05 判据里"真实编辑通道下**提交仅一条历史**"与"两处观察看到**同一**事实"
+ * 在本层**可达**（它们不需要浏览器）：本组钉这两条。
+ *
+ * ⚠️ **仍未覆盖**的是"两个真实 3D Area 在 UI 里拖动"（需要浏览器 + 双 Area 装配）
+ * —— 那是 #282 / L3 e2e 的事，本组**不**声称它。
+ */
+describe('A05 产品级缺口 · 真实编辑通道（`draft.commit` 意图 → 分发 → 端口 → 内核）', () => {
+  const CONTROL_ID = 'field:lightning.block.tooltip'
+
+  function bindingsOf(): ReturnType<typeof createInputCommandBindings> {
+    const control: ControlBinding = {
+      controlId: CONTROL_ID,
+      contextId: KERNEL_CONTEXT_ID,
+      // 生产 `ControlBinding.ref`：面板寻址（`owner` 是壳、`property` 是 `field:<描述符 id>`）。
+      ref: { owner: { kind: 'document', id: '' }, property: CONTROL_ID },
+      kind: 'text',
+      label: '说明',
+    }
+    return createInputCommandBindings({ controls: [control] })
+  }
+
+  it('**提交仅一条历史**：一次 `draft.commit` 意图 ⇒ 恰好一条历史且投影可见', async () => {
+    const probe = await harness()
+    const { cell } = pickCell(probe.session)
+    probe.dispose()
+
+    const h = await harness([cell])
+    try {
+      const intent: CommandIntent = {
+        commandId: 'draft.commit',
+        params: { controlId: CONTROL_ID, value: '经意图提交的说明' },
+      }
+      const dispatched = dispatchIntent(h.port, EMPTY_DISPATCH_LEDGER, 1, intent, bindingsOf())
+      // `settled`（而不是 `submitted`）：`queue:false` 的命令必须走**同步结算**面
+      // —— 生产没有帧循环 drain，"接收了但永不结算"正是旧端口的假成功形态。
+      if (dispatched.status !== 'settled') {
+        throw new Error(`真实编辑通道必须**同步结算**，实收 ${dispatched.status}`)
+      }
+      expect(dispatched.outcome.status, '意图提交必须成功').toBe('applied')
+      expect(dispatched.commandId, '分发必须回报命令 id').toBe('draft.commit')
+
+      // A05「提交仅一条历史」+ 投影可见（与判据①同一批断言）。
+      judgeRoutedThroughKernel(h, cell, '经意图提交的说明')
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('**撤销也走真实通道**：`edit.undo` 意图 ⇒ 内容回原状、历史清空、脏语义回基线', async () => {
+    const probe = await harness()
+    const { cell } = pickCell(probe.session)
+    probe.dispose()
+
+    const h = await harness([cell])
+    try {
+      const commit: CommandIntent = {
+        commandId: 'draft.commit',
+        params: { controlId: CONTROL_ID, value: '经意图提交的说明' },
+      }
+      const written = dispatchIntent(h.port, EMPTY_DISPATCH_LEDGER, 1, commit, bindingsOf())
+      if (written.status !== 'settled') throw new Error(`提交未结算（${written.status}）`)
+      expect(written.outcome.status).toBe('applied')
+      expect(h.ctx.kernelDirty()).toBe(true)
+
+      const undo: CommandIntent = { commandId: 'edit.undo', params: { contextId: KERNEL_CONTEXT_ID } }
+      const undone = dispatchIntent(h.port, EMPTY_DISPATCH_LEDGER, 2, undo, bindingsOf())
+      if (undone.status !== 'settled') throw new Error(`撤销未结算（${undone.status}）`)
+      expect(undone.outcome.status, '经真实通道的撤销必须成功').toBe('applied')
+      expect(h.historyDepth(), '一次撤销清空历史').toBe(0)
+      expect(h.ctx.kernelDirty(), '撤销回保存基线 ⇒ 不脏').toBe(false)
+      expect(legacyTooltipAt(h.doc(), cell), '载体也必须回原状').toBeNull()
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('**两处观察看到同一事实**（A05「面板相同」的读面形态）：读面里没有 area/region 维度', async () => {
+    const probe = await harness()
+    const { cell } = pickCell(probe.session)
+    probe.dispose()
+
+    const h = await harness([cell])
+    try {
+      const intent: CommandIntent = {
+        commandId: 'draft.commit',
+        params: { controlId: CONTROL_ID, value: '两处都该看到' },
+      }
+      const dispatched = dispatchIntent(h.port, EMPTY_DISPATCH_LEDGER, 1, intent, bindingsOf())
+      if (dispatched.status !== 'settled') throw new Error(`提交未结算（${dispatched.status}）`)
+
+      const view1 = h.ctx.cellTooltips()
+      const view2 = h.ctx.cellTooltips()
+      expect(view1, '读面必须给出两侧事实').not.toBeNull()
+      expect(view1, 'A05：两个观察方读到的必须是**同一**事实').toEqual(view2)
+      expect(view1?.source, '以内核为权威').toBe('kernel')
+      // 机位/区域维度**不在**读面里 ⇒ "两个 Area 各持机位"不需要额外机制
+      // （内核层同一条已由 `a05a17MultiAreaHistory.test.ts` 的键集断言钉住）。
+      expect(h.ctx.cellTooltips.length, '读面必须**不接受**任何 area/region 参数').toBe(0)
     } finally {
       h.dispose()
     }
