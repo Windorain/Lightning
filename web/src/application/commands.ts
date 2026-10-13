@@ -1611,19 +1611,20 @@ function reduceSetCellIdentity(state: ApplicationState, cmd: SetCellIdentityComm
     return rejected(state, invalidValue({ reason: 'malformed-block-id', meta }))
   }
 
-  // 越界守卫：与 `moveCells` 同口径（`declaredBounds` 在尺寸未声明时返回 `null` ⇒ 不判越界）。
-  // ⚠️ 必须**先于**目标解析的 orphan 判据：越界格的键在任何一个网格里都不存在 ⇒
-  // `blockGridWriteTargets` 会先把它报成 `MissingTarget{orphanKey}`，真原因（越界）被掩盖。
+  // 目标解析：与 `setCellContent` / `setCellTooltip` **逐字同口径**。
+  //
+  // ⚠️ 本命令**不**另立越界判据。格写命令族既有的、一致的口径是
+  // 「键必须已存在于 `cells`」⇒ 越界键在任何一个网格的 `cells` 里都不存在，
+  // 于是得到 `MissingTarget{orphanKey}`。三条命令同一条判据（`setCellContent`
+  // 在本文件里逐字如此），`setCellIdentity` 不得成为异类。
+  //
+  // 「空网格」与「没有网格」在此**不**区分：两者都不含该键，都报 `MissingTarget`。
+  // 这不损失信息 —— 分辨「越界」与「缺席」需要按声明尺寸
+  // （`sizeColumn`/`sizeRow`/`sizeZSlice`，`domain/scene.ts` 的 `blockGrid` 载荷确实带、
+  // 且 `cells` 是**稀疏**表、尺寸推不出来）反推，而尺寸是**格式边界的建模口径**：
+  // 让写命令替边界做这个判断，就是把边界语义漏进内核（契约 §2.3 的反面）。
+  // 若将来出现**真实生产路径**（非测试合成）让越界键到达本命令，按 §8 登记 GF 后再动共用件。
   const targets = blockGridWriteTargets(doc, keys)
-  for (const t of targets.list) {
-    const bounds = declaredBounds(t.payload)
-    if (bounds === null) continue
-    for (const c of cmd.cells) {
-      if (!insideBounds(c, bounds)) {
-        return rejected(state, invalidValue({ reason: 'outsideDeclaredGrid', x: c.x, y: c.y, z: c.z }))
-      }
-    }
-  }
   if (targets.list.length === 0 || targets.orphanKey !== null) {
     return rejected(state, missingTarget({ objectId: `cell@${targets.orphanKey ?? keys[0]}` }))
   }

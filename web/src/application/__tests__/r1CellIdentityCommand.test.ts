@@ -305,9 +305,24 @@ describe('R1-β① ⑤ 拒绝面', () => {
       code: 'InvalidValue',
     },
     {
-      label: '越界（sizeColumn=4 ⇒ x=9 越界）',
+      label: '键不在任何网格的 `cells` 里（含越界 x=9，sizeColumn=4）',
+      // ⚠️ 期望 `MissingTarget` 而非"越界"专用码 —— **刻意**与 `setCellContent`/`setCellTooltip`
+      // 逐字同口径：三条格写命令的判据都是「键必须已存在于 `cells`」。
+      //
+      // 本项目实测的事实（保留在此以免后人"重发现"）：`blockGrid` 载荷**确实**带
+      // `sizeColumn`/`sizeRow`/`sizeZSlice` 声明尺寸，而 `cells` 是**稀疏**表
+      // ⇒ 尺寸推不出来、只能承载。但"越界 vs 缺席"的分辨是**格式边界**的建模口径：
+      // 让写命令替边界做这个判断，就是把边界语义漏进内核（契约 §2.3 的反面），
+      // 且会让 `setCellIdentity` 成为三条命令里的异类、迫使改共用解析器。
+      // 若将来出现**真实生产路径**（非测试合成）让越界键到达本命令，按 §8 登记 GF 后再动共用件。
       cmd: { cells: [{ x: 9, y: 0, z: 0 }], identity: { name: 'glass', paletteRef: blockPaletteEntryKey(GLASS_ENTRY) } },
-      code: 'InvalidValue',
+      code: 'MissingTarget',
+    },
+    {
+      // 与上一条**同码**：「空网格」与「没有网格」在此不区分（两者都不含该键）。
+      label: '键不存在于任何网格（size* 声明之外，但同码）',
+      cmd: { cells: [{ x: 5, y: 5, z: 5 }], identity: { name: 'glass', paletteRef: blockPaletteEntryKey(GLASS_ENTRY) } },
+      code: 'MissingTarget',
     },
     {
       label: '版本不匹配',
