@@ -64,6 +64,7 @@ import { sampleStripFrameAt, stripTimeline, type StripTimeline } from '@/domain/
 import { frameDurationsMs, frameCount as axisFrameCount, type DocumentContent } from '@/domain/content'
 import { framesPerSecond, type TimeValue } from '@/domain/animation'
 import { TIME_ZERO } from '@/domain/editing'
+import { generatedObjectWriteAuthority } from '@/domain/multiblock'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 稳定身份（单一来源）
@@ -649,6 +650,30 @@ export class KernelSession {
   documentSummary(): DocumentSummary | null {
     const result = queryDocument(this.editor.snapshot(), this.documentId)
     return result.ok ? result.value : null
+  }
+
+  /**
+   * **对象写权读面**（R1-β① C6 收口）。
+   *
+   * ## 为什么它必须经过会话，而不是让外壳直接 import 领域函数
+   *
+   * 判定本身是纯领域事实（`domain/multiblock#generatedObjectWriteAuthority`：
+   * `data.source === 'content'` ⇒ 生成内容 ⇒ 只读），与
+   * `application/kernel-properties.ts` 的 `generated: data?.source === 'content'` 同源。
+   *
+   * 但 `runtime/context.ts` 是**旧层**文件（`kernel-legacy-isolation` 的判定面）——
+   * 它直接 import `@/domain/multiblock` 会新增一条**未登记的旧→新依赖**，
+   * 闸门正确判红（实测：`src/runtime/context.ts:66 → @/domain/multiblock`）。
+   *
+   * ⇒ 会话属新层：**由它向领域取值、外壳只转发**，依赖方向才是单向的。
+   *
+   * @returns `'missing'` = 未装配 / 未采纳内容 / 无该对象（如实降级，**不**猜 `writable`）
+   */
+  writeAuthorityOf(objectId: string): 'writable' | 'readOnly' | 'missing' {
+    if (!this.hasAdoptedContent()) return 'missing'
+    const doc = this.document()
+    if (doc === undefined) return 'missing'
+    return generatedObjectWriteAuthority(doc.scene, objectId)
   }
 
   // ── 读面 ─────────────────────────────────────────────────────────────────

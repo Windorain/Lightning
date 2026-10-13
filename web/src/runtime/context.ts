@@ -62,7 +62,6 @@ import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotat
 const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
 import { findObjectData } from '@/domain/scene'
-import { generatedObjectWriteAuthority } from '@/domain/multiblock'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 
 function embedUnavailable(name: string): never {
@@ -698,10 +697,13 @@ export class Context {
    */
   kernelWriteAuthority(objectId: string): 'writable' | 'readOnly' | 'missing' {
     const kernel = this.kernel
-    if (kernel === null || !kernel.hasAdoptedContent()) return 'missing'
-    const kernelDoc = kernel.document()
-    if (kernelDoc === undefined) return 'missing'
-    return generatedObjectWriteAuthority(kernelDoc.scene, objectId)
+    if (kernel === null) return 'missing'
+    // ⚠️ 由**会话**向领域取值、本层只转发（R1-β① C6 收口，闸门擒获）：
+    // 本文件属**旧层**（`kernel-legacy-isolation` 的判定面），直接
+    // `import { generatedObjectWriteAuthority } from '@/domain/multiblock'`
+    // 会新增一条**未登记的旧→新依赖** —— 那等于用新内核给旧路径续命。
+    // 会话属新层，让它取值、外壳转发，依赖方向才是单向的。
+    return kernel.writeAuthorityOf(objectId)
   }
 
   /**
