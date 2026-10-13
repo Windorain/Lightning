@@ -1660,6 +1660,30 @@ export class Context {
     return true
   }
 
+  /**
+   * **文档脏读面**（R1-beta-C2）。
+   *
+   * `dirty` 是内核的**基线比较**（`application/queries#queryDocument` 的
+   * `!sameContentVersion(doc.version, doc.saveBaseline)`），而旧栈时代工作台一直用
+   * 「撤销栈非空」（`canUndo`）当它的**代理** —— 这也是
+   * `workbench/document/pipeline#afterDocumentSave` 必须在保存后 `getEditHistory().clear()`
+   * 的原因：不 clear，代理就永远为真。
+   *
+   * 内核已在 `saveCompleted` -> `completeSave` 里推进 `saveBaseline`
+   * （`application/__tests__/saveRaceHistory.test.ts` 断言「只有 committed 且绑定代数相符
+   * 才推进基线」「失败不得改基线」）⇒ **代理不再需要**：清空撤销栈既非必要（基线已表达
+   * 「已保存」），也不正确（存盘不应摧毁撤销能力）。
+   *
+   * @returns `null` = 内核未装配 / 无该文档（调用方按各自语义决定，**不回落旧栈**）
+   */
+  kernelDirty(): boolean | null {
+    const kernel = this.kernel
+    if (kernel === null || !kernel.hasAdoptedContent()) return null
+    void this.main.contentRefreshTick.value
+    const summary = kernel.documentSummary()
+    return summary === null ? null : summary.dirty
+  }
+
   getEditHistory(): UndoManager {
     return this.workbench?.editHistory ?? embedUnavailable('editHistory')
   }

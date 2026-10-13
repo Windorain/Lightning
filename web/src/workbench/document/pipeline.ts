@@ -26,7 +26,7 @@ function workspaceModeForSource(sourceId: DocumentSourceId): WorkbenchWorkspaceM
 }
 
 export async function confirmDiscardDirtyIfNeeded(ctx: Context): Promise<boolean> {
-  if (!(ctx.kernelUndoState()?.canUndo ?? false)) return true
+  if (!(ctx.kernelDirty() ?? false)) return true
   const confirmFn = ctx.getToolSettings().confirmDirty ?? window.confirm
   if (!confirmFn('当前场景有未保存的修改，是否继续？')) return false
   return true
@@ -34,7 +34,9 @@ export async function confirmDiscardDirtyIfNeeded(ctx: Context): Promise<boolean
 
 export function clearEditingState(ctx: Context): void {
   ctx.getSelection().clear()
-  ctx.getEditHistory().clear()
+  // R1-beta-C2: 原 ctx.getEditHistory().clear() 删除（不是遗漏）—— 内核撤销历史随
+  // Document 存续（契约 §6），紧随其后的 documentLoadPipeline 会经 setDocument 换成
+  // 另一份文档 ⇒ 新历史天然为空，「清空」是结构上已发生的事。
 }
 
 export async function documentLoadPipeline(
@@ -117,5 +119,10 @@ export function afterDocumentSave(
     saveBaseline: doc,
     remoteRevisionId: revisionId ?? b.remoteRevisionId,
   }
-  ctx.getEditHistory().clear()
+  // R1-beta-C2: 原 ctx.getEditHistory().clear() 删除（不是遗漏）。旧栈时代工作台的
+  // 「脏」是拿「撤销栈非空」当代理，故存盘后必须 clear；内核已有**基线比较**的精确
+  // 脏语义（queries#queryDocument 的 !sameContentVersion(version, saveBaseline)），
+  // 且 saveCompleted -> completeSave 会推进 saveBaseline（saveRaceHistory.test.ts 断言
+  // 「失败不得改基线」）⇒ 代理不再需要。清空撤销栈既非必要，也不正确：存盘不应
+  // 摧毁撤销能力。上面的 saveBaseline 对齐（第 117 行附近）仍是本函数的职责。
 }
