@@ -167,6 +167,9 @@ describe('A20 工程往返：语义身份 / 动画 / 资源引用保留（固定
       documentIdPreserved: true,
       assetManifestPreserved: true,
       editDataPreserved: true,
+      // R1-α：**内容本体**（元数据 / 帧轴 / 资源内容）也是四项之一。
+      // 只比清单摘要看不见内嵌字节与呈现参数 —— 而那是实测丢过的东西。
+      documentContentPreserved: true,
     })
   })
 

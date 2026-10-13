@@ -50,6 +50,7 @@
 import {
   createDocument,
   withContent,
+  withDocumentContent,
   type Document,
 } from '@/domain/document'
 import { createEditContext, type EditContext, type SelectionState } from '@/domain/editing'
@@ -57,6 +58,7 @@ import { invalidValue, unsupportedOperation, type Result, ok, err } from '@/doma
 import { canonicalize, digestOf, entityRef, type EntityRef } from '@/domain/identity'
 import type { Scene } from '@/domain/scene'
 import { EMPTY_ANIMATION, type AnimationState, type TimeValue } from '@/domain/animation'
+import { type DocumentContent } from '@/domain/content'
 
 /**
  * 工程格式主版本。
@@ -127,6 +129,39 @@ export interface ProjectPayload {
   readonly sceneId: string
   readonly scene: Scene
   readonly animation: AnimationState
+  /**
+   * **文档内容的其余三块**（`DocumentContent`：文档元数据 + 帧时长轴 + 资源内容）。
+   *
+   * ## 为什么必须与 `assets` 并存（R1-α 接手生产时实测抓出的保真缺口）
+   *
+   * `assets` 是**清单**（`assetId`/`contentVersion`/`locator` —— 只有**身份**），
+   * 而 `ContentResource` 还带**内容面**：`payload`（内嵌 base64 字节）、`blend`、
+   * `emissive`、`animation`（纹理序列规格）、`atlas`、`linear`、`useMipmaps`。
+   *
+   * R1-α 把本模块接进生产后**当场实测**：`restoreProject` 只用
+   * `createDocument` + `withContent(scene, animation)` ⇒ 重开一份工程得到
+   * `content.resources === []`、`metadata` 全空、`frameAxis` 零帧 ——
+   * **纹理字节、材质呈现参数、逐帧时长与文档元数据全部丢失**。
+   * 那不是"表示差异"，是**内容丢失**（判据 `r1aProjectFormatProduction.test.ts`
+   * 的往返对照当场判红，资源清单 62 条 → 0 条）。
+   *
+   * ⇒ 负载必须**直接编码内核 `Document`**（#249 §12 逐字：
+   * 「工程格式保存**类型化文档**、版本、资源清单与可恢复的编辑数据」）——
+   * `scene` + `animation` + 本条就是"类型化文档"的全部。
+   *
+   * ## 为什么是**可选**字段（同主版本加宽，不是版本跳跃）
+   *
+   * `formatVersion` 的判据是**主版本**，且同主版本内的差异必须是**加宽**
+   * （见文件头判据 1）。R1-α 之前写出的工程文件没有这个键 —— 它们是合法的旧产物，
+   * 必须继续可读（缺省 ⇒ `restoreProject` 退回"只有 scene + animation"的旧行为，
+   * 且**不**静默编造资源）。加宽正好是这个类型演化规则允许的形态。
+   *
+   * ⚠️ 与 `assets` 的**关系不是冗余**：`assets` 是"这份工程引用了哪些资源身份"
+   * 的**清单视图**（`assetManifestDigest` 的对象），本条是**内容本体**。
+   * 用本体反推清单会丢掉"清单里声明了但内容面没有的条目"这一差异；
+   * 反之用清单反推本体则会**丢掉字节** —— 正是上面实测的那次丢失。
+   */
+  readonly content?: DocumentContent
   /** 资源清单（可能为空：无资源的工程是合法的）。 */
   readonly assets: readonly ProjectAssetRef[]
   readonly editData: RecoverableEditData
@@ -170,6 +205,9 @@ export function encodeProject(input: EncodeProjectInput): Result<ProjectFile> {
         sceneId: input.doc.scene.id,
         scene: input.doc.scene,
         animation: input.doc.animation,
+        // R1-α：**直接编码内核 `DocumentContent`**（元数据 + 帧轴 + 资源内容本体）。
+        // 少了它就是实测的那次内容丢失（见 `ProjectPayload#content` 的说明）。
+        content: input.doc.content,
         assets: assets.value,
         editData: editDataOf(input.context),
       }),
@@ -298,6 +336,11 @@ export function decodeProject(raw: unknown): Result<DecodedProject> {
         // 动画缺席 ⇒ 空动画（旧工程文件没有动画节是合法形态）；**不**返回 undefined，
         // 让"没有动画"与"动画没读到"在类型上不可区分才是 A36 类错误。
         animation: (payload.animation ?? EMPTY_ANIMATION) as AnimationState,
+        // R1-α：内容本体缺席 ⇒ **不**编造（旧产物本就没有它）；
+        // 但**有**时必须原样带过 —— 少了它 `restoreProject` 会丢资源/元数据/帧轴。
+        ...(readDocumentContent(payload.content) === undefined
+          ? {}
+          : { content: readDocumentContent(payload.content) as DocumentContent }),
         assets: assets.value,
         editData: Object.freeze({
           contextId: editData.contextId,
@@ -316,8 +359,35 @@ export function decodeProject(raw: unknown): Result<DecodedProject> {
 /** 时间缺省（与 `domain/editing` 的 `TIME_ZERO` 同值；此处不 import 以免多一处耦合）。 */
 const EMPTY_SELECTION_TIME: TimeValue = Object.freeze({ frame: 0, fps: 20 })
 
-function readAssets(v: unknown): readonly ProjectAssetRef[] {
-  if (!Array.isArray(v)) return Object.freeze([])
+/**
+ * 读 `payload.content`（R1-α 加宽的字段）。
+ *
+ * ## 为什么这里做**形状闸门**而不是直接 `as DocumentContent`
+ *
+ * 工程文件是**外部输入**：`payload.content` 可能是任意形状（被人手改过、
+ * 或被更新的主版本写出）。直接断言会让坏形状一路进到 `domain/`,
+ * 在那里以 `Cannot read properties of undefined` 的形式爆在四层之外（难定位）。
+ *
+ * ## 为什么**不**逐字段重建（与 `readAssets` 的处置不同）
+ *
+ * `ContentResource` 的字段全部是**纯数据**（`ref`/`kind`/`payload`/`blend`/
+ * `emissive`/`animation`/`atlas`/`linear`/`useMipmaps`），JSON 往返逐字段保真；
+ * 逐字段重建反而会**漏掉将来新增的字段**（那正是"加宽兼容"要避免的：
+ * 新版本写出的字段被旧版本读取时静默丢弃）。
+ * ⇒ 只校验三个**结构性**前提（是对象、有 `metadata` 与 `frameAxis`、`resources` 是数组），
+ * 其余原样带过。**缺前提 ⇒ 返回 `undefined`**（缺席，不是空值）——
+ * 与"字段缺席 ≠ 空值"同一口径（`domain/cellContent` 判据 3）。
+ */
+function readDocumentContent(v: unknown): DocumentContent | undefined {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return undefined
+  const o = v as Record<string, unknown>
+  if (o.metadata === null || typeof o.metadata !== 'object' || Array.isArray(o.metadata)) return undefined
+  if (o.frameAxis === null || typeof o.frameAxis !== 'object' || Array.isArray(o.frameAxis)) return undefined
+  if (!Array.isArray(o.resources)) return undefined
+  return o as unknown as DocumentContent
+}
+
+function readAssets(v: unknown): readonly ProjectAssetRef[] {  if (!Array.isArray(v)) return Object.freeze([])
   const out: ProjectAssetRef[] = []
   for (const e of v) {
     if (e === null || typeof e !== 'object' || Array.isArray(e)) continue
@@ -385,7 +455,23 @@ function readNumberRecord(v: unknown): Readonly<Record<string, number>> {
  */
 export function restoreProject(decoded: DecodedProject): { doc: Document; context: EditContext } {
   const base = createDocument(decoded.payload.documentId, { sceneId: decoded.payload.sceneId })
-  const restored = withContent(base, decoded.payload.scene, decoded.payload.animation)
+  const withSceneAndAnimation = withContent(base, decoded.payload.scene, decoded.payload.animation)
+  /**
+   * ⚠️ **R1-α 实测抓出的内容丢失**（本函数此前只走 `withContent`）：
+   *
+   * `withContent` 只吃 `scene` + `animation`，于是资源内容（纹理字节/呈现参数/纹理序列）、
+   * 文档元数据、帧时长轴**全部丢失** —— 重开一份工程得到 `resources === []`、
+   * 元数据全空、帧轴零帧。判据 `r1aProjectFormatProduction.test.ts` 的往返对照
+   * 当场判红（资源清单 62 条 → 0 条）。
+   *
+   * 修法是**用负载里的内容本体**（`payload.content`，R1-α 加宽的字段），
+   * 而不是在这里编一份默认值 —— 编默认值会让"丢了"表现为"本来就是空的"。
+   * 旧产物（无该键）保持旧行为：**不**编造资源（它们本就没被写出来）。
+   */
+  const restored =
+    decoded.payload.content === undefined
+      ? withSceneAndAnimation
+      : withDocumentContent(withSceneAndAnimation.doc, decoded.payload.content)
   const doc: Document = Object.freeze({ ...restored.doc, saveBaseline: restored.version })
   const seed = createEditContext(decoded.payload.editData.contextId, decoded.payload.documentId)
   const context: EditContext = Object.freeze({
@@ -420,6 +506,15 @@ export interface ProjectRoundTripReport {
   readonly documentIdPreserved: boolean
   readonly assetManifestPreserved: boolean
   readonly editDataPreserved: boolean
+  /**
+   * **文档内容本体**（元数据 / 帧时长轴 / 资源内容）是否保全（R1-α 补）。
+   *
+   * 与 `assetManifestPreserved` **不是同一件事**：后者只比清单的
+   * `(assetId, contentVersion)` 摘要，看不见内嵌字节、呈现参数、
+   * 纹理序列规格与文档元数据 —— 而 R1-α 接手生产时实测那几样曾经整体丢失
+   * （清单 62 条却 `resources === []` 的形态不可由清单判据区分）。
+   */
+  readonly documentContentPreserved: boolean
 }
 
 export function compareProjectRoundTrip(before: ProjectFile, after: ProjectFile): ProjectRoundTripReport {
@@ -428,6 +523,9 @@ export function compareProjectRoundTrip(before: ProjectFile, after: ProjectFile)
     documentIdPreserved: before.payload.documentId === after.payload.documentId,
     assetManifestPreserved: assetManifestDigest(before.payload.assets) === assetManifestDigest(after.payload.assets),
     editDataPreserved: canonicalize(before.payload.editData) === canonicalize(after.payload.editData),
+    // 内容本体：两侧都缺席（旧产物）算保真；一侧有一侧无**不**算（那是丢失或凭空出现）。
+    documentContentPreserved:
+      canonicalize(before.payload.content ?? null) === canonicalize(after.payload.content ?? null),
   })
 }
 

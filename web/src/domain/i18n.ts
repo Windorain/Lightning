@@ -42,6 +42,9 @@ const DICT: Readonly<Record<string, Readonly<Record<Lang, string>>>> = {
   'openScene': { zh: '打开场景…', en: 'Open Scene…' },
   'newFile': { zh: '新建文件', en: 'New File' },
   'saveToFile': { zh: '保存到文件', en: 'Save to File' },
+  // R1-α（#387）：工程格式的生产开/存入口标签（`adapters/files/projectFormat` 接生产）。
+  'openProject': { zh: '打开工程…', en: 'Open Project…' },
+  'saveProject': { zh: '保存工程', en: 'Save Project' },
   'loadFromWiki': { zh: '从 Wiki 加载…', en: 'Load from Wiki…' },
   'saveToWiki': { zh: '保存到 Wiki', en: 'Save to Wiki' },
   'wikiSavePreview': { zh: '保存预检（分片）', en: 'Save dry-run' },

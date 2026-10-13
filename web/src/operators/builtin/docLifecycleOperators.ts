@@ -206,6 +206,109 @@ export const LoadBuiltinSceneOperator: OperatorType = {
   },
 }
 
+/**
+ * **保存工程**（`OPERATOR_SAVE_PROJECT`；R1-α 接通 `adapters/files/projectFormat`）。
+ *
+ * ## 为什么需要第二个"保存"算子（它不是 `OPERATOR_SAVE_FILE` 的重复）
+ *
+ * 两个算子写**同一份权威**（内核 `Document`）的**两种外部形状**：
+ *
+ * | 算子 | 产物 | 编码器 | 用途 |
+ * |---|---|---|---|
+ * | `OPERATOR_SAVE_FILE` | 旧 plain/信封 | `Context#plainForSave()` → `RuntimeDocument.serialize()` | 与既有场景格式互操作（导出/交给 MC 侧） |
+ * | `OPERATOR_SAVE_PROJECT`（本算子） | 工程文件 | `adapters/files/projectFormat#encodeProject` | **继续编辑**：带资源身份 + 可恢复编辑数据 + 显式 `formatVersion` |
+ *
+ * R0-D④ 实测：`encodeProject` 此前**零生产调用者** ⇒ 工程格式只是一条
+ * 测试里的性质，产品里**没有**"保存工程"这件事。本算子 + `OPERATOR_OPEN_PROJECT`
+ * 是那个缺口的落点（#249 §12 明文要求工程格式保存"类型化文档、版本、资源清单与
+ * 可恢复编辑数据"）。
+ *
+ * ## 失败是**显式**的（不回落旧 plain）
+ *
+ * `projectForSave()` 在内核非权威时返回 `err`（无会话 / 未装配 / 无文档）。
+ * 本算子把它翻成用户可见的错误，**不**改写成"那就存一份旧 plain 吧" ——
+ * 那会让"工程文件里其实是旧格式"这件事静默发生（打开时才发现丢了资源身份）。
+ */
+export const SaveProjectOperator: OperatorType = {
+  id: 'OPERATOR_SAVE_PROJECT',
+  label: '保存工程',
+  description: '将当前文档保存为工程文件（含资源清单与可恢复编辑数据）',
+
+  poll(ctx) {
+    return ctx.hasAdoptedContent()
+  },
+
+  exec(ctx) {
+    const result = ctx.projectForSave()
+    if (!result.ok) {
+      ctx.log.error('保存工程', '内核不是权威，无法编码工程文件', { reason: result.error.params })
+      return
+    }
+    const baseName = suggestedJsonBaseName(ctx.getLocalFileName().value, 'project')
+    // 工程文件是**边界产物**：`encodeProject` 已给出类型化负载，这里只负责写盘。
+    downloadJson(baseName, result.value as unknown as Record<string, unknown>, true)
+  },
+}
+
+/**
+ * **打开工程**（`OPERATOR_OPEN_PROJECT`；`SaveProjectOperator` 的对偶）。
+ *
+ * ## 顺序与"唯一写入口"纪律
+ *
+ * 解码在**边界**（`Context#decodeProjectFile` → `adapters/files/projectFormat#decodeProject`），
+ * 落地在 `Context#adoptProject`（`setDocument` → `seekFrame(0)` → `adoptDocument`，
+ * 与装载脊柱同序，理由见 `adoptProject` 的说明）。
+ *
+ * 本算子**不**自己解析工程形状、也**不**自己构造 `Document` —— 那是边界与
+ * `restoreProject` 的职责。算子只做三件事：取文件、交给它、报结果。
+ */
+export const OpenProjectOperator: OperatorType = {
+  id: 'OPERATOR_OPEN_PROJECT',
+  label: '打开工程',
+  description: '从工程文件恢复文档与可恢复编辑数据',
+
+  poll: () => true,
+
+  async exec(ctx, _props) {
+    let file = _props.file as File | undefined
+    if (!file) {
+      file = await pickFile()
+      if (!file) return
+    }
+    const text = await file.text()
+    let raw: unknown
+    try {
+      raw = JSON.parse(text)
+    } catch (e) {
+      throw new Error(`JSON 解析失败：${e}`)
+    }
+    const decoded = ctx.decodeProjectFile(raw)
+    if (!decoded.ok) {
+      // 显式失败：未知主版本 ⇒ `UnsupportedOperation`（**不**降级读取，
+      // 见 `projectFormat` 文件头判据 1）。
+      ctx.log.error('打开工程', '工程文件不被支持', {
+        fileName: file.name,
+        reason: decoded.error.code,
+        params: decoded.error.params,
+      })
+      return
+    }
+    const adopted = ctx.adoptProject(decoded.value)
+    if (!adopted.ok) {
+      ctx.log.error('打开工程', '宿主未装配内核，工程无法落地', { fileName: file.name, reason: adopted.error.params })
+      return
+    }
+    ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
+    ctx.getLocalFileName().value = file.name
+    ctx.log.info('打开工程', file.name, {
+      fileName: file.name,
+      documentId: decoded.value.payload.documentId,
+      assets: decoded.value.payload.assets.length,
+    })
+    await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-file' })
+  },
+}
+
 export const LoadEmbedDocumentOperator: OperatorType = {
   id: 'OPERATOR_LOAD_EMBED_DOCUMENT',
   label: '加载嵌入文档',

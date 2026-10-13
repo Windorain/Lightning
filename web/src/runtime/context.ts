@@ -50,6 +50,17 @@ import {
   type DocumentSnapshot,
 } from '@/runtime/documentSnapshot'
 import { projectKernelSaveView, type SaveProjection } from '@/composition/saveProjection'
+import { projectToRuntimeDocument } from '@/composition/kernelProjection'
+import { projectAnnotationsToLegacy as projectAnnotationsForProjection } from '@/runtime/annotationRead'
+import {
+  decodeProject,
+  encodeProject,
+  restoreProject,
+  type DecodedProject,
+  type ProjectFile,
+} from '@/adapters/files/projectFormat'
+import { err, ok, unsupportedOperation, type Result } from '@/domain/errors'
+import { createEditContext } from '@/domain/editing'
 import { resolveSideTable } from '@/runtime/sideTableResolution'
 import type { Command } from '@/application/commands'
 import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotationRead'
@@ -452,6 +463,135 @@ export class Context {
       plain: legacy === null ? null : (legacy.serialize() as Record<string, unknown>),
       source: 'legacy',
     }
+  }
+
+  /**
+   * **工程保存**（#249 §12；R1-α 把 `adapters/files/projectFormat` 接进生产）。
+   *
+   * ## 它替代的旧机制（R0-D④ 实测的零生产入口）
+   *
+   * `adapters/files/projectFormat.ts` 的 `encodeProject`/`decodeProject`/`restoreProject`
+   * 在 R1-α 之前**零生产调用者**（非测试全树只命中 `projectRoundTrip.test.ts`）——
+   * 于是"保存/重开一份工程"在 UI 上**没有入口**（74 个算子表里没有 `OPERATOR_PROJECT_*`），
+   * 而 #249 §12 要求的"工程格式保存类型化文档、版本、资源清单与可恢复编辑数据"
+   * 只能是测试里的性质，不是产品能力。本方法 + `adoptProject` + 两个算子把它接上。
+   *
+   * ## 为什么它**不**复用 `plainForSave()`
+   *
+   * `plainForSave()` 的产物是**旧 plain/信封形状**（`cellGrid`/`blockPalette` 在产物根），
+   * 它的编码器是 `RuntimeDocument.serialize()` —— 换句话说它是"把内核投影成**旧格式**"。
+   * 工程格式要的是**另一种**边界产物：`ProjectPayload{scene, animation, assets, editData}`，
+   * 它**直接编码内核 `Document`**（#249 §12）且能承载资源身份与可恢复编辑数据。
+   * 两者是**同一权威的两个不同外部形状**，不是互相替代 —— 故各有一个入口，
+   * 而**权威只有一个**（内核 `Document`）：两个入口都从 `kernel.document()` 取值。
+   *
+   * ## `assets` 的映射是**恒等**的（不是转换）
+   *
+   * `ContentResource{assetId, contentVersion, locator}` 与
+   * `ProjectAssetRef{assetId, contentVersion, locator}` 是**同一条判据的两个落点**
+   * （见 `domain/content` 判据 1：两者都只让 `(assetId, contentVersion)` 进身份）。
+   * 故这里逐字段搬运，**不**做任何推导或补默认值 —— 补一个假的 `contentVersion`
+   * 会让"资源身份随往返"变成一句空话。
+   *
+   * @returns `err` = 内核非权威（无会话 / 未装配 / 无文档 / 读面拒绝）。
+   *          **不回落 legacy** —— 工程格式编码的是内核文档形状，用旧文档填它
+   *          正是"第二个权威"的入口（本单要清算的形态）。
+   */
+  projectForSave(): Result<ProjectFile> {
+    const kernel = this.kernel
+    if (kernel === null) return err(unsupportedOperation({ reason: 'noKernelSession' }))
+    if (!kernel.hasAdoptedContent()) return err(unsupportedOperation({ reason: 'kernelNotAdopted' }))
+    const doc = kernel.document()
+    if (doc === undefined) return err(unsupportedOperation({ reason: 'noKernelDocument' }))
+    const view = kernel.read()
+    const summary = view.interaction.context()
+    if (!summary.ok) return summary
+    const selection = view.interaction.selection()
+    if (!selection.ok) return selection
+    const seed = createEditContext(summary.value.id, summary.value.documentId)
+    return encodeProject({
+      doc,
+      context: Object.freeze({
+        ...seed,
+        selection: selection.value,
+        time: summary.value.time,
+        channelValues: summary.value.channelValues,
+        activeTool: summary.value.activeTool,
+      }),
+      assets: doc.content.resources.map((r) =>
+        Object.freeze({ assetId: r.ref.assetId, contentVersion: r.ref.contentVersion, locator: r.ref.url }),
+      ),
+    })
+  }
+
+  /**
+   * **工程重开**（`projectForSave` 的对偶；同一权威的读入端）。
+   *
+   * ## 顺序是语义的一部分（与装载脊柱同序）
+   *
+   * ```
+   * projectForSave 的产物 → decodeProject → restoreProject
+   *   → setDocument（legacy 载体 + 存在性镜像）
+   *   → seekFrame(0)
+   *   → kernel.adoptDocument（内核权威 = 还原出的 Document）
+   *   → 恢复编辑数据（time / channelValues / 选择）
+   * ```
+   *
+   * 与 `composition/documentLoad#adoptLoadedDocument` 的既有顺序**逐字同序**：
+   * `adoptDocument` **先** `markLoaded`、**再** `markContentAdopted`，而
+   * `setDocument` 会调 `markLoaded` 并清 GF-16 ⇒ 反过来（先 adopt 再 setDocument）
+   * 会让 GF-16 被清掉，"内核里有内容"这件事读不回来。
+   *
+   * ## 画面从哪来（本批的诚实边界）
+   *
+   * 还原出的内核 `Document` 经 `projectToRuntimeDocument` 投成旧格式
+   * `RuntimeDocument` 交给 `setDocument` —— 即**画面仍由旧渲染链产出**
+   * （`shared/viewport/useViewportRuntime.ts:77` 取 `legacyRenderSource()`）。
+   * 渲染链终切（DRW 直接消费 `PresenterSession`）有**独立前置**
+   * （材质统一 + 注解/描边统一，见 `composition/seams.ts` 的
+   * `legacy-render-source-document` / `presenter-surface-dual-track`），
+   * 不属于"把工程格式接进生产"这件事。**但内容权威已经是内核**：还原后的
+   * 语义读面（`kernelGrid`/`kernelAnnotations`/`documentMetadata`）读的是
+   * `restoreProject` 的产物，不是那份投影。
+   *
+   * @returns `err` = 无内核会话（该宿主未装配内核，工程重开无从落地）。
+   *          解码失败由调用方在**边界**处理（`decodeProject` 返回 `Result`）。
+   */
+  adoptProject(decoded: DecodedProject): Result<boolean> {
+    const kernel = this.kernel
+    if (kernel === null) return err(unsupportedOperation({ reason: 'noKernelSession' }))
+    const { doc, context } = restoreProject(decoded)
+    // ① 旧格式载体（画面）+ 存在性镜像。
+    const projected = projectToRuntimeDocument({
+      scene: doc.scene,
+      content: doc.content,
+      annotationRows: projectAnnotationsForProjection(doc),
+    })
+    this.setDocument(projected.doc)
+    kernel.seekFrame(0)
+    // ② 内核权威 = 还原出的 `Document`（**内容身份与保存基线都由 `restoreProject` 定**：
+    //    重开一份工程必须**干净**，见 `projectFormat#restoreProject` 的说明）。
+    kernel.adoptDocument(doc, doc.content)
+    // ③ 恢复可恢复编辑数据（只在有对应内核入口的字段上做；缺入口的**不伪造**）。
+    kernel.seekTime(context.time)
+    for (const [channel, value] of Object.entries(context.channelValues)) {
+      kernel.setChannelValue(channel, value)
+    }
+    const active = context.selection.active
+    if (active !== null) kernel.submit({ kind: 'select', contextId: context.id, target: active })
+    kernel.drain()
+    return ok(true)
+  }
+
+  /**
+   * **工程读入的边界解码**（`decodeProject` 的转发；唯一入口）。
+   *
+   * 把它放在 `Context` 而不是让算子直接 import 适配器：算子层不该知道
+   * "工程格式长什么样"（那是边界职责），只该知道"把用户选的文件交给它、
+   * 拿到成功/失败"。**解码在边界**（契约 §6：外部文件只在边界编解码）。
+   */
+  decodeProjectFile(raw: unknown): Result<DecodedProject> {
+    return decodeProject(raw)
   }
 
   /**

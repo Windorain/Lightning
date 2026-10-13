@@ -14,7 +14,7 @@ import {
   InitViewportCameraOperator,
 } from '@/operators/builtin/viewOperators'
 import { TooltipEditOperator } from '@/operators/builtin/metaEditOperators'
-import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/operators/builtin/docLifecycleOperators'
+import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator, SaveProjectOperator, OpenProjectOperator } from '@/operators/builtin/docLifecycleOperators'
 import { SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator } from '@/operators/builtin/sdeOperators'
 import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/operators/builtin/exportOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/operators/builtin/annotationOperators'
@@ -71,6 +71,9 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   InitViewportCameraOperator,
   TooltipEditOperator,
   NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator,
+  // R1-α（#387）：工程格式的生产开/存入口（R0-D④ 实测 `adapters/files/projectFormat`
+  // 此前零生产调用者 ⇒ "保存/重开一份工程"在产品里没有入口）。
+  SaveProjectOperator, OpenProjectOperator,
   SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetToolSettingOperator, SetRegionSettingOperator, SetHoveredBlockOperator, SetHoveredAnnotationOperator, SetLayerYOperator, ApplySettingsOperator, SetWikiConfigOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator,
   SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator,

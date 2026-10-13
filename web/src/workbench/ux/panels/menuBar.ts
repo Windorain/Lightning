@@ -28,6 +28,12 @@ export const menuBarPanel: PanelDeclaration = {
     const fileItems: (UIOperator | UILabel | UISeparator)[] = [
       { kind: 'operator', id: 'OPERATOR_NEW_SCENE', label: t('newFile') },
       { kind: 'operator', id: 'OPERATOR_OPEN_SCENE', label: t('openScene') },
+      // R1-α（#387）：工程格式的生产开/存入口。
+      // `poll` 让"打开工程"永远可用、"保存工程"只在**内核装配成功**时可用
+      // （工程格式编码的是内核文档 —— 未装配时没有可编码的权威，
+      // 让菜单项可点会在点击后静默失败）。
+      { kind: 'operator', id: 'OPERATOR_OPEN_PROJECT', label: t('openProject') },
+      { kind: 'operator', id: 'OPERATOR_SAVE_PROJECT', label: t('saveProject') },
     ]
     if (wikiFileOps) {
       fileItems.push(
