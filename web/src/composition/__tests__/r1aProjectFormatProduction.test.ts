@@ -30,6 +30,7 @@
  */
 
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ALL_CAPABILITIES } from '@/application/commands'
@@ -117,6 +118,16 @@ function businessSnapshot(session: KernelSession): {
   identities: [string, string][]
   resources: string[]
   metadataName: string
+  /** ⚠️ **内容本体**（不是身份列表）：逐资源的字节摘要 / 呈现参数 / 纹理序列规格。 */
+  resourceBodies: string[]
+  /** 全部资源字节的 sha256（一个标量覆盖所有字节）。 */
+  payloadDigest: string
+  /** 帧时长轴的逐帧声明（`index` + `label`）—— R1-α 实测曾整体丢失。 */
+  frameAxis: (string | null)[][]
+  /** 逐帧 `durationMs` —— 同上。 */
+  frameDurations: (number | null)[]
+  /** 文档元数据（具名字段全量，不只是 `name`）。 */
+  metadata: string
 } {
   const objectId = firstGridObjectId(session)
   const p = payloadOf(session, objectId)
@@ -134,16 +145,63 @@ function businessSnapshot(session: KernelSession): {
       entryKey === undefined ? undefined : p.palette?.find((e) => blockPaletteEntryKey(e) === entryKey)?.registryId
     if (typeof rid === 'string' && rid !== '' && rid !== 'air') identities.push([key, rid])
   }
+  const doc = session.document()!
+  const content = doc.content
+  // ── **内容本体**（R1-α 复核打回 1 的落点）──────────────────────────────────
+  // 只比 `assetId@contentVersion`（身份列表）**看不见**这次丢失的形态：
+  // 实测当时是「资源清单 62 条而 `resources === []`」—— 身份列表为空，
+  // 而清单摘要判据仍说"保住了"。⇒ 逐资源钉住**字节**（长度 + sha256）、
+  // 呈现参数（`blend`/`emissive`）、纹理序列规格、图集归属，并单独钉住帧时长轴。
+  const resourceBodies = content.resources.map((r) =>
+    [
+      r.ref.assetId,
+      r.ref.contentVersion,
+      r.kind,
+      r.payload === null ? 'payload=null' : `payload=${r.payload.replace(/\r\n/g, '\n').length}:${sha256(r.payload)}`,
+      `blend=${r.blend}`,
+      `emissive=${r.emissive}`,
+      `atlas=${r.atlas}`,
+      `linear=${r.linear}`,
+      `useMipmaps=${r.useMipmaps}`,
+      `anim=${r.animation === null ? 'null' : canonicalText(r.animation)}`,
+    ].join('|'),
+  )
+  const payloadDigest = sha256(
+    content.resources.map((r) => (r.payload === null ? '\u0000null' : r.payload.replace(/\r\n/g, '\n'))).join('\u0001'),
+  )
+  const frames = content.frameAxis.frames
   return {
     size: [p.sizeColumn ?? -1, p.sizeRow ?? -1, p.sizeZSlice ?? -1],
     tooltips: tooltips.sort(),
     identities: identities.sort(),
-    resources: session
-      .document()!
-      .content.resources.map((r) => `${r.ref.assetId}@${r.ref.contentVersion}`)
-      .sort(),
-    metadataName: session.document()!.content.metadata.name,
+    resources: content.resources.map((r) => `${r.ref.assetId}@${r.ref.contentVersion}`).sort(),
+    metadataName: content.metadata.name,
+    resourceBodies: resourceBodies.sort(),
+    payloadDigest,
+    frameAxis: frames.map((f) => [String(f.index), f.label] as (string | null)[]),
+    frameDurations: frames.map((f) => f.durationMs),
+    metadata: canonicalText(content.metadata),
   }
+}
+
+/** 键序无关的规范化文本（比较**结构化内容的值**；不用于源码文本的字节断言）。 */
+function canonicalText(v: unknown): string {
+  const sort = (x: unknown): unknown => {
+    if (Array.isArray(x)) return x.map(sort)
+    if (x !== null && typeof x === 'object') {
+      const o = x as Record<string, unknown>
+      const out: Record<string, unknown> = {}
+      for (const k of Object.keys(o).sort()) if (o[k] !== undefined) out[k] = sort(o[k])
+      return out
+    }
+    return x
+  }
+  return JSON.stringify(sort(v))
+}
+
+/** sha256 十六进制。调用方已归一化行尾（铁律 6：字节级断言先归一化再算）。 */
+function sha256(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
 }
 
 describe('R1-α ④ 工程格式接生产：保存 → 重开往返保真（真实信封 + 生产装配）', () => {
@@ -180,6 +238,22 @@ describe('R1-α ④ 工程格式接生产：保存 → 重开往返保真（真�
       expect(after.resources, '资源身份（assetId@contentVersion）往返保真').toEqual(before.resources)
       expect(after.metadataName, '文档元数据往返保真').toBe(before.metadataName)
       expect(after.tooltips.length, '说明格数必须与冻结读数一致').toBe(18)
+      // ── **内容本体**逐项（R1-α 复核打回 1）──────────────────────────────────
+      // 上一条 `resources`（身份列表）**不足以**覆盖契约 §2.7 第 2 条
+      // 「内容本体必须进负载」：实测的丢失形态正是"清单 62 条而 `resources === []`"，
+      // 身份列表为空而清单摘要判据仍绿。⇒ 下面四条钉住**字节与时长**。
+      expect(after.resourceBodies, '逐资源内容本体（字节摘要 + blend/emissive/atlas/linear/mipmaps + 纹理序列规格）往返保真').toEqual(
+        before.resourceBodies,
+      )
+      expect(after.payloadDigest, '全部资源字节的 sha256 往返保真').toBe(before.payloadDigest)
+      expect(after.frameAxis, '帧声明（index + label）往返保真').toEqual(before.frameAxis)
+      expect(after.frameDurations, '逐帧 durationMs 往返保真').toEqual(before.frameDurations)
+      expect(after.metadata, '文档元数据（具名字段全量）往返保真').toBe(before.metadata)
+      // **反空洞真**：本夹具必须**真的**带字节与帧轴 —— 否则上面四条是空转
+      //（真实信封实测 57 条纹理 blob，且 demo 的 blob 是 base64 内嵌字节）。
+      const bodies = fresh.document()!.content.resources.filter((r) => r.payload !== null)
+      expect(bodies.length, '真实信封必须有内嵌字节的资源（否则"字节保真"是空转）').toBeGreaterThan(0)
+      expect(before.frameDurations.length, '帧轴必须有帧（否则"时长保真"是空转）').toBeGreaterThan(0)
       expect(fresh.document()!.version.contentVersion, '还原后内容身份必须等于基线').toBe(
         fresh.document()!.saveBaseline.contentVersion,
       )

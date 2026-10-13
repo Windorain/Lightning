@@ -37,7 +37,7 @@ import {
   PROJECT_FORMAT_MAJOR,
   type ProjectAssetRef,
   type ProjectFile,
-} from '@/adapters/projectFormat'
+} from '@/adapters/files/projectFormat'
 import {
   DOCUMENT_BOUND_PREFERENCES,
   documentBindingsAreIsolated,

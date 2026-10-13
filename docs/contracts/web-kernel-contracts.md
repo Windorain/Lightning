@@ -265,8 +265,9 @@ interface Context {
    *  2. **不得**在本接口上新增**返回旧 `RuntimeDocument`** 的具名读面
    *     （`legacyDocumentModel()` / `legacyRenderSource()` / `legacyGridForEdit()` 一类）。
    *     已存在的三条是**待清算的第二权威读面**（各在 `composition/seams.ts` 登记退出条件），
-   *     R1 及之后**只减不增**。判据：`legacyDocumentModel(`/`legacyRenderSource(`/
-   *     `legacyGridForEdit(` 的全树生产命中数只能下降（口径见 §8 GF-17 的机械判据）。
+   *     R1 及之后**只减不增**。判据口径：`legacyDocumentModel(` / `legacyRenderSource(` /
+   *     `legacyGridForEdit(` 的**生产调用点**命中数只能下降（AST 扫描，测试文件不计；
+   *     ⚠️ **不**用裸标识符 `grep` —— 注释、同名异物与**类型位置**导入会误判）。
    */
   hasLoadedDocument(): boolean
 }
@@ -555,16 +556,42 @@ function kernelGridOf(doc: Document | undefined, frameIndex: number): KernelGrid
 
 ### 2.7 工程格式的生产入口（**R1-α 新增**）
 
+**落点：`composition/projectIo`（装配接线）+ `adapters/projectFile`（边界读写口）。**
+
 ```ts
-interface Context {
-  /** 内核 `Document` → 工程文件（`adapters/files/projectFormat#encodeProject`）。 */
-  projectForSave(): Result<ProjectFile>
-  /** 工程文件 → 内核 `Document`（`restoreProject` + `adoptDocument`）。 */
-  adoptProject(decoded: DecodedProject): Result<boolean>
-  /** 工程读入的**边界解码**（唯一入口；算子不解析工程形状）。 */
-  decodeProjectFile(raw: unknown): Result<DecodedProject>
+// composition/projectIo.ts —— 装配接线（与 composition/documentLoad 同层同性质）
+interface ProjectHost {                 // 结构端口：接线真正需要的两件事
+  readonly kernel: KernelSession | null
+  setDocument(next: RuntimeDocument | null): void
 }
+function projectForSave(host: ProjectHost): Result<ProjectFile>
+function adoptProject(host: ProjectHost, decoded: DecodedProject): Result<boolean>
+function decodeProjectFile(raw: unknown): Result<DecodedProject>
+
+// adapters/projectFile.ts —— 适配器层的**深度 2 公共出口**（实现留在 adapters/files/）
+function projectFileOf(input: { doc; context; assets? }): Result<ProjectFile>
+function readProjectFile(raw: unknown): Result<OpenedProjectFile>
+function restoreProjectFile(decoded: DecodedProject): { doc; context }
 ```
+
+**⚠️ 为什么入口不在 `Context` 上（R1-α 第一版被闸门判红后更正）**
+
+第一版把这三个方法加在 `Context`（`runtime/context.ts`）上 ⇒ 闸门判红
+**三条新的旧层→内核边**（`runtime/context.ts → adapters/files/projectFormat` /
+`→ domain/errors` / `→ domain/editing`）。判红是对的：`runtime/context.ts` 是
+**待清算**的旧层文件（多条接缝指着它），把新能力加进正在退场的宿主，
+正是 #171 禁止的"新门面包旧核心保活"。⇒ 落点改为 `composition/projectIo`
+（与 `composition/documentLoad` 同层同性质：那是装载脊柱的接线，这是工程往返的接线），
+宿主面用结构端口表达，于是装配层**不依赖** `Context` 这个旧类型。
+
+**⚠️ 层级归属与搬迁决定（R1-α 复核打回 3 的答复，可追溯）**
+
+| 问题 | 结论 |
+|---|---|
+| `projectFormat.ts` 按**职责**属哪一层？ | **属 `adapters/files/`** —— 它与 `plainCodec`（plain 形状）/`envelopeCodec`（信封传输编码）/`publishFormat`（发布产物）/`documentBinding`（工作环境绑定）是**同一族文件编解码器**。目录分组是读者的第一层导航。 |
+| 那深度 3 怎么被新层消费？ | **走深度 2 的公共出口** `adapters/projectFile.ts`（契约 §7.3 规则 2）。先例是既有的 `adapters/plainRoot.ts`（对 `files/envelopeCodec` + `files/plainCodec` 做同一件事）。 |
+| 第一版"把实现搬到深度 2"是什么？ | **形状服从规则**（让目录分组迁就一条检查）—— **已回退**。搬迁与否由职责决定，不由闸门决定。 |
+| 出口为什么必须**定义函数**而不能 `export … from`？ | `gate/no-barrel-smuggling` 把跨目录 `export-from`（**含类型位置**）判红。出口必须自己定义该层对外承诺的操作 —— 本工程不承认"经转出口偷渡"。 |
 
 **必须成立**
 
@@ -577,11 +604,17 @@ interface Context {
    ⚠️ **R1-α 实测**：只编码 `scene`+`animation`+`assets`（清单）会让重开丢失
    资源内容（纹理字节 / 呈现参数 / 纹理序列）、文档元数据与帧轴
    —— 实测资源清单 62 条而 `resources === []`，**清单判据区分不出这次丢失**。
-   ⇒ `ProjectRoundTripReport` 必须含 `documentContentPreserved`。
+   ⇒ `ProjectRoundTripReport` 必须含 `documentContentPreserved`，且判据必须**逐项**
+   钉住内容本体（`resources[*].payload` / `blend` / 纹理序列规格与 `frameAxis` 时长），
+   只比"身份列表"（`assetId@contentVersion`）**不算**覆盖本判据。
 3. **重开的顺序是语义的一部分**：`setDocument` → `seekFrame(0)` → `adoptDocument`
    （与装载脊柱同序）。反过来会让 GF-16 被清掉（`setDocument` 会 `markLoaded` 并清装配标记）。
 4. **未知主版本显式拒绝**（`UnsupportedOperation`，**不**降级读取）；
    未知**顶层键**按**文档身份**承载（GF-14 口径）—— 不进核心负载、也不静默丢弃。
+5. **字段映射属边界**：内核 `ContentResource.ref` → 文件 `ProjectAssetRef`
+   （`{assetId, contentVersion, url}` → `{assetId, contentVersion, locator}`）
+   在 `adapters/projectFile` 内完成。装配层**不得**知道文件格式的字段名
+   （否则"外部文件只在边界编解码"就破了）。
 
 
 ---

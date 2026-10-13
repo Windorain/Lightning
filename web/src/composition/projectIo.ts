@@ -22,6 +22,14 @@
  * `composition/`（新装配层），而后者的内部依赖（→ `adapters/`、→ `domain/`）
  * 是**新层内部**的，不产生新的旧→新边。
  *
+ * ## 为什么 import 的是 `@/adapters/projectFile` 而不是 `@/adapters/files/projectFormat`
+ *
+ * 契约 §7.3 规则 2「**公共出口最大深度 2**」：新实现层不得直接 import 深度 3 的实现。
+ * `adapters/projectFile.ts` 是适配器层的**公共出口**（实现留在 `files/` 里），
+ * 与既有的 `adapters/plainRoot.ts`（对 `files/envelopeCodec` + `files/plainCodec`）
+ * **同一形态**。⚠️ R1-α 第一版曾把实现文件**搬到**深度 2 让规则变绿 ——
+ * 那是**形状服从规则**（让目录分组迁就检查），已回退；见 `adapters/projectFile` 的文件头。
+ *
  * ## 纯函数式的边界
  *
  * 三个函数都不改入参、不读全局时钟/DOM/网络。`adoptProject` 会**写**宿主
@@ -34,12 +42,12 @@ import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { err, ok, unsupportedOperation, type Result } from '@/domain/errors'
 import { createEditContext } from '@/domain/editing'
 import {
-  decodeProject,
-  encodeProject,
-  restoreProject,
+  readProjectFile,
+  restoreProjectFile,
+  projectFileOf,
   type DecodedProject,
   type ProjectFile,
-} from '@/adapters/projectFormat'
+} from '@/adapters/projectFile'
 import { projectToRuntimeDocument } from '@/composition/kernelProjection'
 import { projectAnnotationsToLegacy } from '@/runtime/annotationRead'
 
@@ -80,7 +88,10 @@ export function projectForSave(host: ProjectHost): Result<ProjectFile> {
   const selection = view.interaction.selection()
   if (!selection.ok) return selection
   const seed = createEditContext(summary.value.id, summary.value.documentId)
-  return encodeProject({
+  // `assets` **不**在这里派生：内核 `ContentResource.ref` → 文件 `ProjectAssetRef`
+  // 的字段映射属**边界**（它知道文件格式的字段名），故由 `@/adapters/projectFile`
+  // 的 `projectFileOf` 承担（那里缺省即派生）。装配层只交内核事实。
+  return projectFileOf({
     doc,
     context: Object.freeze({
       ...seed,
@@ -89,12 +100,6 @@ export function projectForSave(host: ProjectHost): Result<ProjectFile> {
       channelValues: summary.value.channelValues,
       activeTool: summary.value.activeTool,
     }),
-    // `ContentResource.ref` 与 `ProjectAssetRef` 是**同一条判据的两个落点**
-    // （`domain/content` 判据 1：都只让 `(assetId, contentVersion)` 进身份）
-    // ⇒ 这里逐字段搬运，**不**推导、**不**补默认值。
-    assets: doc.content.resources.map((r) =>
-      Object.freeze({ assetId: r.ref.assetId, contentVersion: r.ref.contentVersion, locator: r.ref.url }),
-    ),
   })
 }
 
@@ -126,7 +131,7 @@ export function projectForSave(host: ProjectHost): Result<ProjectFile> {
 export function adoptProject(host: ProjectHost, decoded: DecodedProject): Result<boolean> {
   const kernel = host.kernel
   if (kernel === null) return err(unsupportedOperation({ reason: 'noKernelSession' }))
-  const { doc, context } = restoreProject(decoded)
+  const { doc, context } = restoreProjectFile(decoded)
   // ① 旧格式载体（画面）+ 存在性镜像。
   const projected = projectToRuntimeDocument({
     scene: doc.scene,
@@ -150,11 +155,13 @@ export function adoptProject(host: ProjectHost, decoded: DecodedProject): Result
 }
 
 /**
- * **工程读入的边界解码**（`decodeProject` 的转发；唯一入口）。
+ * **工程读入的边界解码**（唯一入口；转 `@/adapters/projectFile#readProjectFile`）。
  *
  * 算子层只该知道"把用户选的文件交给它、拿到成功/失败"，不该知道工程格式长什么样
- * （契约 §6：外部文件**只在边界**编解码）。
+ * （契约 §6：外部文件**只在边界**编解码）。本函数是装配层对算子的**唯一**读入口。
  */
 export function decodeProjectFile(raw: unknown): Result<DecodedProject> {
-  return decodeProject(raw)
+  const read = readProjectFile(raw)
+  if (!read.ok) return read
+  return ok(read.value.decoded)
 }

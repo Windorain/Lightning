@@ -136,7 +136,7 @@ export const KERNEL_FILES = [
   'adapters/files/envelopeCodec.ts',
   'adapters/files/versionMigration.ts',
   'adapters/files/mcAxisProfile.ts',
-  'adapters/projectFormat.ts',
+  'adapters/files/projectFormat.ts',
   'adapters/files/documentBinding.ts',
   'adapters/files/publishFormat.ts',
   // P9（#260）宿主产物适配（A34）：能力矩阵、宿主传输/补丁、构建 manifest

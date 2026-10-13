@@ -59,7 +59,9 @@ export interface SeamRegistration {
    *
    * ⇒ 每条 `exitCondition` 必须显式分列：
    *  - **（甲）登记条件**：能力/承载面是否存在（可机检：类型/成员扫描）；
-   *  - **（乙）消费者迁移数 = 0**：旧路径的**调用点**是否已全部迁走（可机检：全树命中数）。
+   *  - **（乙）消费者迁移数 = 0**：旧路径的**调用点**是否已全部迁走
+   *    （可机检：**声明位/引用位**的位级模式命中数，或 `retirementRegistry` 的
+   *    `own`/`consumer` 口径 —— ⚠️ **不**是裸标识符 `grep`：同名异物与注释会误判）。
    *  **只有（甲）不算退出。** 由 `tests/architecture/boundary-scan.test.ts` 机械把守。
    */
   readonly exitCondition: string
@@ -118,10 +120,13 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
     exitCondition:
-      "**（甲）登记条件 —— ✅ 已成立**：`src/runtime/context.ts` 的 `getDoc()` 已终删（全树 0 命中）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`src/editors/workbench-rna.ts` 的 `documentStateOf` 仍由旧文档构造 `DocumentState`（实测 `Context#legacyDocumentModel()` 仍有 2 处生产调用者）。\n闭包内（`closureCoverage: 'in-closure'`）⇒ 闭包判据对本条**有效**。\n**以下为原退出条件（逐字保留）**：\n"
+      "**（甲）登记条件 —— ✅ 已成立**：`src/runtime/context.ts` 的 `getDoc()` 已终删（**registry 判据**：`application/__tests__/retirementRegistry.test.ts:501-502` 的 `own`(`\\bgetDoc\\s*\\(`) 与 `consumer`(`\\.getDoc\\s*\\(`) 两条模式『声明位 / 引用位』**0 命中** —— 该判据自带不误红（排除 `getDocument`/`getDocumentBinding` 等）、真残留判红、以及『同名异物不误判』的对偶。⚠️ **不要**按字面去扫全树：`git grep getDoc` 有 219 命中，其中绝大多数是注释，其余是内核里**同名但无关**的私有辅助函数 `application/commands.ts:2161 function getDoc(state, id)`）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`src/editors/workbench-rna.ts` 的 `documentStateOf` 仍由旧文档构造 `DocumentState`（实测 `Context#legacyDocumentModel()` 仍有 2 处生产调用者）。\n闭包内（`closureCoverage: 'in-closure'`）⇒ 闭包判据对本条**有效**。\n**以下为原退出条件（逐字保留）**：\n"
       +
       '**①✅ 已成立（#301 P10f D3）**：`src/runtime/context.ts` 的 `getDoc()` **已删除**'
-      + '（判据本尊口径：`getDoc` 全树 0 命中；该访问器曾是"文档内容的权威读入口"，'
+      + '（判据本尊口径：`retirementRegistry.test.ts` 的 `own`/`consumer` 两条位级模式 0 命中'
+      + ' —— **不是**「全树 0 命中」：`git grep getDoc` 有 219 命中，'
+      + ' 多为注释与内核同名辅助函数 `commands.ts` 的 `function getDoc(state, id)`；'
+      + ' 该访问器曾是"文档内容的权威读入口"，'
       + ' 46 处消费点已各有具名读面 —— 见 `Context` 的 `// --- Main ---` 段）。\n'
       + '**②⏳ 未成立**：`src/editors/workbench-rna.ts` 的 `documentStateOf` 仍由旧文档构造'
       + ' `DocumentState`（`DocumentState.document` 的类型是 `RuntimeDocument`）。'
