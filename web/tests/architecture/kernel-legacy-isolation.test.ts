@@ -414,8 +414,18 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
   Object.freeze({
     from: 'src/workbench/inputHotkeys.ts',
     to: 'application/inputCommands',
-    reason: '旧 operator 转发实现 `CommandSink` 端口（逐条列明转发项，未接通命令显式拒绝）',
-    exitStage: 'P10 集成：换成 `editorCommandSink(editor)` 后删除本行；P11 核销',
+    reason:
+      '端口签名用 `CommandSink`/`CommandOutcomeLike` **类型**。⚠️ R1-β① C4 已兑现本行原退出条件（旧 operator 转发表 `DOMAIN_COMMAND_TO_OPERATOR` 与 `legacy:` 票号前缀已删除，`submit`/`executeNow` 改由内核端口承担），故此处**只剩类型依赖**，不再是"转发实现"',
+    exitStage:
+      'R1-β① C5 接缝核销：端口实现整体归 `runtime/inputSession#editorCommandSink` 后，工作台侧不再持有 `CommandSink` 类型 ⇒ 核销本行；不得无限续期',
+  }),
+  Object.freeze({
+    from: 'src/workbench/inputHotkeys.ts',
+    to: 'application/commands',
+    reason:
+      '**类型位置**依赖：端口以内核 `Command` 类型表达领域命令（R1-β① C4 端口切换的直接结果 —— 工作台自此是内核的**真实消费者**，即 #385「产品消费者经语义 API 使用它」要求的形态，非违规）。R0-3 判据补丁后类型位置导入同判，故必须显式登记而非静默',
+    exitStage:
+      'R1-β① C5 接缝核销：若命令构造与提交整体移入 `runtime/inputSession` 一侧，工作台层不再命名内核 `Command` ⇒ 本边消失、本行核销；不得无限续期',
   }),
   // ── P7（#258）输入面：旧外壳/旧配置消费新输入内核 ──────────────────────────
   //
