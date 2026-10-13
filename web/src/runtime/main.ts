@@ -178,11 +178,29 @@ export class Main {
    *    而是由 `EditContext.time` 派生的值 ⇒ 换文档时"重置帧"就是
    *    "把时间定位到 0"，那是 `setTime` 命令的职责，不是文档替换的副作用。
    *    调用方若需要重置，显式发 `setTime`（见 `pipeline.ts` 的加载路径）。
+   *
+   * ## ⚠️ `revision` 参数（R1-β① C1，裁决③）
+   *
+   * `documentRevision` 的**唯一**语义是"**换了一份文档**"（窄信号），它是
+   * `EmbedViewport.vue` 重置相机自动初始化（`didInitCamera`）的依据。
+   *
+   * | 写入者 | 意图 | 换文档了吗 | `documentRevision` |
+   * |---|---|---|---|
+   * | 装载路径（`setDocument(next,'load')`） | 用户打开了**另一份**文档 | ✅ | **bump** |
+   * | 内核投影（`setDocument(next,'content-sync')`） | 把内核内容投影到**同一份**文档的载体上 | ❌ | **不 bump** |
+   *
+   * 修前本方法**无条件** bump 两者 ⇒ 每一次投影（注解/逐格说明编辑，以及本轮新增的
+   * 网格写）都重置嵌入视口机位 —— 一处**可感知的行为变更**，
+   * `runtime/context.ts` 的 `legacyDocumentModel` 说明段**早已把它登记在案**。
+   * `contentRefreshTick`（宽信号"内容可能变了"）**两种意图都必须 bump**
+   * —— 读面靠它重读内容；少了它，投影就看不见。
    */
-  replaceDoc(doc: RuntimeDocument | null): void {
+  replaceDoc(doc: RuntimeDocument | null, revision: 'document' | 'content' = 'document'): void {
     this.doc.value = doc
     // 文档引用变了，呈现层需重读内容（这是"内容可能变了"的请求，不是判定）
     this.contentRefreshTick.value += 1
+    // 见上表：只有**真的换文档**才推进窄信号。
+    if (revision === 'content') return
     // #301 P10f C′1：**文档身份**计数（只在"换文档"时走这里 —— `replaceDoc` 是
     // 文档替换的**唯一**写点，由 A′ 的 AST 白名单把守）。
     //

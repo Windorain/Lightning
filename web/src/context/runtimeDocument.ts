@@ -304,6 +304,67 @@ export class RuntimeDocument {
   }
 
   /**
+   * **换某一帧的网格**（R1-β① C1 的回写落点）。
+   *
+   * ## 为什么需要它（与 `withAnnotations`/`withCellTooltips` 同一纪律）
+   *
+   * `Context#syncLegacyFromKernel` 的文件头**明文写着**：
+   *
+   * > 「网格/材质/帧轴仍**不写**（内核侧尚无对应写命令 ⇒ 无需回写）；
+   * > 将来若要写它们，必须**同时**扩本方法。」
+   *
+   * R1-β① 落地的 `moveCells`/`setCellContent` 正是"写网格" ⇒ 本轮必须**同批**补上
+   * 本方法，否则重演 **#333**（内核写了、legacy 没投影 ⇒ 提交成功但看不见）。
+   *
+   * ## 为什么入参是**已解析的 `Grid`** 而不是网格载荷
+   *
+   * 本类（`context/`）**不得**认识内核载荷形状 —— 那属 `composition/` 的投影职责
+   * （见 `composition/kernelProjection#projectToLegacyGrid`，它是装配
+   * `kernelAssembly` 的**逆**，且与投影侧共用同一张逐格映射表，故两处不可能漂移）。
+   * ⇒ 本方法只做"把一个解析好的 `Grid` 装进某一帧"这一件事。
+   *
+   * ## `frameIndex` 的语义 = **帧下标**（不是对象 id）
+   *
+   * 调用方（`syncLegacyFromKernel`）按装配面 `frameObjects` 的顺序逐帧对应；
+   * 越界的 `frameIndex` 是**调用方缺陷** ⇒ 返回 `this`（无变化），不静默新建帧
+   * （新建帧会让帧数与声明轴脱节 —— 投影侧不猜帧）。
+   *
+   * ## `grid === null` 的语义 = **该帧确实没有网格**（不是"不改"）
+   *
+   * 内核侧"这一帧没有 `blockGrid`"是**权威事实**（多方块文档的帧**设计上**没有网格，
+   * 与 `Context#kernelGrid` 返回 `null` 同一口径）⇒ legacy 也必须被清成 `null`。
+   * 调用方若想"不动"，就**不要调**本方法。
+   *
+   * ## 为什么返回 `this` 而不是抛错/空洞
+   *
+   * 与 `withAnnotations` 逐字同口径：**内容相同 ⇒ 返回 `this`**，调用方据此跳过回写
+   * ⇒ 不 bump 内容重读信号（"净零往返不重建"）。
+   * 比较用**引用相等**：`Grid` 是可变类，投影每次都新建实例 ⇒ 引用不等即"有变化"。
+   * ⚠️ 这正是"不得把 `Grid` 做成有状态缓存读面"的同一条理由
+   * （见 `runtime/gridRead` 与 `legacy-grid-edit-handle` 接缝）：`Grid` 是**值载体**，
+   * 它一旦成为共享可变对象，"读到的是快照"这条保证就消失。
+   *
+   * ## 它**不**碰版本/基线/历史
+   *
+   * 同 `withAnnotations`（编辑语义 ⇒ 回写后文档仍是脏的）。
+   */
+  withGrid(frameIndex: number, grid: Grid | null): RuntimeDocument {
+    const at = this.frames.findIndex((f) => f.index === frameIndex)
+    if (at === -1) return this
+    const current = this.frames[at]!
+    if (current.grid === grid) return this
+    const clone = this.clone()
+    clone.frames[at] = new RuntimeFrame(
+      current.index,
+      current.label,
+      grid,
+      current.durationMs,
+      current.multiblock,
+    )
+    return clone
+  }
+
+  /**
    * **换逐格说明侧表**（#301 P10f D2 收尾 / #333 的回写落点）。
    *
    * ## 为什么需要它（与 `withAnnotations` 同一理由，且**同一批**）

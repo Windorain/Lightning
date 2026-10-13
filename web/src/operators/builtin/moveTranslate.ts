@@ -1,6 +1,6 @@
-import { generateId } from '@/pure/string'
 import * as THREE from 'three'
 import type { Context } from '@/runtime/context'
+import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import { pickVoxel } from '@/context/queries'
@@ -302,57 +302,63 @@ export const MoveOperator: OperatorType = {
         })
 
         if (delta.x !== 0 || delta.y !== 0 || delta.z !== 0) {
-          // ⚠️ #301 P10f D3：本处是**写路径**（`grid.moveBlock` 被捕获进撤销闭包），
-          // **不是**读点 —— 读面每次新建对象 ⇒ 写入会**静默无效**（B′ 实测的撤回理由①）。
-          // 故走具名**编辑句柄**（`legacyGridForEdit`），并登记接缝
-          // `legacy-grid-edit-handle`（退出 = 内核 `moveCells` 命令交付）。
-          const grid = ctx.legacyGridForEdit(ctx.getFrameIndex())
-          if (grid) {
-            const moves = s._initialPositions.map(initPos => ({
-              from: { x: initPos.x, y: initPos.y, z: initPos.z },
-              to: { x: initPos.x + delta.x, y: initPos.y + delta.y, z: initPos.z + delta.z },
-            }))
+          // ── R1-β① C1：本处**不再是**旧数据模型的写路径 ──────────────────────
+          //
+          // 修前这里取具名编辑句柄 `ctx.legacyGridForEdit(frameIndex)`（旧 `Grid` 本体），
+          // 把 `grid.moveBlock(from,to)` 捕获进旧撤销项的 `execute`/`undo` 闭包，
+          // 并 `ctx.getEditHistory().push(...)`。那是**两条独立历史**：
+          // 旧栈记一份 snapshot，内核侧另有一条 `moveCells` —— "写了撤不掉"的歧义
+          //（#385 评论 6988 裁决① 点名禁止的中间态）。
+          //
+          // 现在：**内核命令是唯一的写者与唯一的历史**。
+          //   `submitContentEdit({kind:'moveCells'})` → `KernelSession.submit`
+          //   → `Editor.drain` → `reduceMoveCells` → 内核历史
+          //   → `syncLegacyFromKernel` 把内核网格投影回 legacy 载体（渲染/保存读它）。
+          //
+          // ⚠️ 为什么**不能**用地板上的"读面"（`ctx.kernelGrid`）来写：读面每次新建
+          // 不可变视图对象 ⇒ 在它上面 `moveBlock` 的改动**静默丢失**（B′ 实测的撤回
+          // 理由①）。故这里的正确解法不是"换个读面"，而是**不再在载体上写** ——
+          // 把"移动"表达成一条**语义命令**，由内核改它自己的内容。
+          //
+          // ⚠️ 多个格一次提交（`moves`）而不是逐格 submit：`reduceMoveCells` 的语义
+          // 是**同时**的（先读全部源 → 再写全部目标 → 再删纯源），一次 `submit` =
+          // 一个事务 = **一条**历史 ⇒ 一次撤销回到拖动前（而不是 N 次）。
+          const moves = s._initialPositions.map(initPos => ({
+            from: { x: initPos.x, y: initPos.y, z: initPos.z },
+            to: { x: initPos.x + delta.x, y: initPos.y + delta.y, z: initPos.z + delta.z },
+          }))
 
-            const sel = ctx.getSelection()
-            ctx.getEditHistory().push({
-              id: generateId('move_'),
-              label: `移动 (${delta.x}, ${delta.y}, ${delta.z})`,
-              timestamp: Date.now(),
-              execute: () => {
-                for (const m of moves) grid.moveBlock(m.from, m.to)
-                const newItems = [...sel.items.value].map(item => {
-                  if (item.kind !== 'block') return item
-                  const m = moves.find(
-                    mm =>
-                      mm.from.x === item.ref.pos.x &&
-                      mm.from.y === item.ref.pos.y &&
-                      mm.from.z === item.ref.pos.z,
-                  )
-                  return m
-                    ? { ...item, ref: { ...item.ref, pos: { x: m.to.x, y: m.to.y, z: m.to.z } } }
-                    : item
-                })
-                sel.items.value = new Set(newItems)
-                ctx.main.requestContentRefresh()
-              },
-              undo: () => {
-                for (const m of moves) grid.moveBlock(m.to, m.from)
-                const newItems = [...sel.items.value].map(item => {
-                  if (item.kind !== 'block') return item
-                  const m = moves.find(
-                    mm =>
-                      mm.to.x === item.ref.pos.x &&
-                      mm.to.y === item.ref.pos.y &&
-                      mm.to.z === item.ref.pos.z,
-                  )
-                  return m
-                    ? { ...item, ref: { ...item.ref, pos: { x: m.from.x, y: m.from.y, z: m.from.z } } }
-                    : item
-                })
-                sel.items.value = new Set(newItems)
-                ctx.main.requestContentRefresh()
-              },
+          const gridObjectId = ctx.kernelGridObjectId(ctx.getFrameIndex())
+          if (gridObjectId !== null) {
+            const applied = ctx.submitContentEdit({
+              kind: 'moveCells',
+              contextId: KERNEL_CONTEXT_ID,
+              objectId: gridObjectId,
+              moves,
             })
+            // ⚠️ 只有内核真的 `applied` 才动选择集。
+            //
+            // 修前选择集更新写在撤销项的 `execute` 里 ⇒ 它是"执行了就说成功"。
+            // 而 `submitContentEdit` 返回 `false` 有两种**不同**的失败
+            // （未装配 / 命令被拒：越界、重复、只读、版本冲突）——
+            // 两者都必须**如实**表现，而不是照样把方块画到新位置
+            //（那就是 #249 §6 禁止的"假成功控件"形态）。
+            if (applied) {
+              const sel = ctx.getSelection()
+              const newItems = [...sel.items.value].map(item => {
+                if (item.kind !== 'block') return item
+                const m = moves.find(
+                  mm =>
+                    mm.from.x === item.ref.pos.x &&
+                    mm.from.y === item.ref.pos.y &&
+                    mm.from.z === item.ref.pos.z,
+                )
+                return m
+                  ? { ...item, ref: { ...item.ref, pos: { x: m.to.x, y: m.to.y, z: m.to.z } } }
+                  : item
+              })
+              sel.items.value = new Set(newItems)
+            }
           }
         }
 

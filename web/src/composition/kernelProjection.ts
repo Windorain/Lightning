@@ -1113,6 +1113,70 @@ function cellContentKeyDiagnostic(
 }
 
 /**
+ * 内核文档 → **逐帧的旧 `Grid`**（R1-β① C1 的 `Context#syncLegacyFromKernel` 投影面）。
+ *
+ * ## 它替代的旧机制（本函数存在的全部理由）
+ *
+ * 编辑路径在内核化之后，`Context#syncLegacyFromKernel` 必须把内核内容投影回 legacy，
+ * 而**渲染链与保存链此刻仍读 legacy**（终切属后续批次）。逐格移动
+ * （`application/commands#reduceMoveCells`）与逐格内容（`#reduceSetCellContent`）
+ * 写的是 `blockGrid` 载荷 ⇒ 投影必须覆盖网格，否则重演 **#333**
+ * （内核写了、legacy 没投影 ⇒ "提交成功但看不见"）。
+ *
+ * ## 为什么**不**复用 `projectToRuntimeDocument`（关键判据，勿改成"顺手复用"）
+ *
+ * 那条路是 `projectKernelDocument` → `plain` → `RuntimeDocument.fromV2Plain` →
+ * `serialize()`。它的产物是**保存/导出的形状**（含保真字段回写、首帧展开副本、
+ * 多方块内层 body），而本函数的用途是"把**当前内核内容**换成 legacy 载体" ⇒
+ * 若走那条路，投影会把**上一次保存的保真字段**一并写回来，且四处 `serialize()`
+ * 都是**全量重编码**（大文档上是可感的成本）。两者是**不同的投影面**，不是同一件的两种写法：
+ *
+ * | 投影面 | 消费者 | 形状 |
+ * |---|---|---|
+ * | `projectToRuntimeDocument` / `projectKernelDocument` | 保存/导出（外部格式） | 全保真 plain |
+ * | **本函数** | `syncLegacyFromKernel`（渲染载体） | 逐帧 `Grid` |
+ *
+ * ## 与装配的**对偶性**由什么保证
+ *
+ * 逐格重建**唯一调用** `projectToLegacyGrid`（`:557`）—— 它与装配侧
+ * `kernelAssembly#gridPayload` 用**同一张**逐格映射表（`projectGridCells` 内的
+ * `cellPalette` 内容键路径）与同一个行序函数 `structureRowToWorldY`。
+ * ⇒ "装配 ↔ 本投影"不可能漂移，因为两边都没有第二份实现。
+ *
+ * ## `null` 的语义 = **该帧确实没有网格**
+ *
+ * 与 `composition/kernelProjection#projectKernelDocument` 的
+ * `cellGrid.length === 0 ⇒ structure: null` **同一口径**（多方块帧设计上没有网格）。
+ * 调用方据此把 legacy 那一帧清成 `null`（不是"不改"）。
+ *
+ * @param frameObjectIds 帧下标 → 内核对象 id（装配面 `frameObjects`；缺省 = `scene.order`
+ *        里 `block` 对象的顺序，与 `projectKernelDocument` 的缺省逐字同口径）。
+ */
+export function projectKernelGrids(input: {
+  readonly scene: Scene
+  readonly frameObjectIds?: readonly string[]
+}): readonly (Grid | null)[] {
+  const { scene } = input
+  const blockObjects = objectsInOrder(scene).filter((o) => o.type === 'block')
+  const ids = input.frameObjectIds ?? blockObjects.map((o) => o.id)
+  const out: (Grid | null)[] = []
+  for (const objectId of ids) {
+    const obj = findObject(scene, objectId)
+    const data = obj === undefined ? undefined : findObjectData(scene, obj.dataId)
+    if (data === undefined || data.payload.kind !== 'blockGrid') {
+      // 不是 `blockGrid` ⇒ 该帧在文件格式里写不出网格（与 `projectKernelDocument` 的
+      // `unsupportedObjectType` 诊断同一事实）。本投影**不猜**，如实给 `null`。
+      out.push(null)
+      continue
+    }
+    const projected = projectGridCells(gridProjectionInputOf(data.payload))
+    // `cellGrid` 为空 ⇒ 没有网格（不是"空网格"）—— 见 `projectKernelDocument` 同一判据。
+    out.push(projected.cellGrid.length === 0 ? null : projectToLegacyGrid(gridProjectionInputOf(data.payload)).grid)
+  }
+  return Object.freeze(out)
+}
+
+/**
  * 内核文档 → 旧格式 plain JSON（**G-3 反向编码器**）。
  *
  * 逐项映射（与正向装配对偶）：

@@ -50,6 +50,7 @@ import {
   type DocumentSnapshot,
 } from '@/runtime/documentSnapshot'
 import { projectKernelSaveView, type SaveProjection } from '@/composition/saveProjection'
+import { projectKernelGrids } from '@/composition/kernelProjection'
 import { resolveSideTable } from '@/runtime/sideTableResolution'
 import type { Command } from '@/application/commands'
 import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotationRead'
@@ -57,6 +58,7 @@ import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotat
 /** 空读面常量（eadonly 空数组：避免每次分配，且调用方不得改内联量）。 */
 const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
+import { findObjectData } from '@/domain/scene'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 
 function embedUnavailable(name: string): never {
@@ -601,38 +603,57 @@ export class Context {
   }
 
   /**
-   * **旧网格的编辑句柄**（#301 P10f D3；**唯一**的旧数据模型写入口）。
+   * **第 N 帧网格的具名对象 id**（R1-β① C1；`moveCells` 的 `objectId` 来源）。
    *
-   * ## 为什么它与上方的读面**必须分开**（B′ 实测的撤回理由 ①）
+   * ## 为什么调用方不能自己拼 `structure:frame-<i>`
    *
-   * `operators/builtin/moveTranslate.ts` 把 grid 捕获进撤销项的
-   * `execute`/`undo` 闭包，并调 `grid.moveBlock(from, to)` **原地改**。
-   * 而读面（{@link kernelGrid}）**每次新建**一个视图对象
-   * （内核分支更是由不可变载荷算出来的）⇒ 在它上面 `moveBlock` 的改动
-   * **静默丢失**（不报错、不改盘、用户看不到变化）—— B′ 探针实测：
+   * `moveCells` 的 `objectId` 是**内核对象身份**，而它的构造约定
+   * （`composition/kernelAssembly` 的 `` `structure:frame-${frame.index}` ``）
+   * 是**装配实现细节**。`runtime/gridRead` 的 `blockGridPayloadAt` 已明文
+   * 记录同一条口径：**投影层不得依赖该命名**（它按 `scene.order` 的出现序
+   * 取第 N 个 `blockGrid`，不解析 id 前缀）。
    *
-   * ```
-   * legacy  frame(0).grid === frame(0).grid   → true   （同一对象，写入留存）
-   * 读面    gridOf(doc,0) === gridOf(doc,0)   → false  （每次新建）
-   * ```
+   * ⇒ 本访问器按**同一条口径**回答"第 N 帧是谁"：从装配面
+   * （`KernelAssemblyFace#frameObjects`）取，缺装配面时按 `scene.order`
+   * 的出现序推导（与 `projectKernelGrids`/`projectKernelDocument` 的缺省**逐字同口径**）。
    *
-   * ## 它是**已登记的暂存**，不是遗漏
+   * ## 为什么它是 `Context` 的方法而不是一个自由函数
    *
-   * 内核 `Command` 联合里**没有**"移动格"的命令（GF-13 最小集在 C′2 只交付到
-   * `setCellTooltip`）⇒ 该写路径**此刻无法**迁到内核。按 #171
-   * 「阶段间暂存的未迁移路径必须有负责人和退出阶段」，它登记在
-   * `composition/seams.ts` 的 `legacy-grid-edit-handle`（含退出条件）。
+   * 它要读**内核会话**（装配面 + `Document`），而 `Context` 是持有会话的那一层。
+   * 做成纯函数就必须把会话当参数传进来，于是每个调用方各写一次"怎么从会话找第 N 帧"
+   * —— 那正是本项目三度实测的"两份实现必然漂移"。
    *
-   * ⚠️ 名字里的 `legacy` 是**刻意的**：调用点一眼能看出"这里是旧数据模型的写"。
-   * 若把它叫成 `gridForEdit` 之类中性名，它就成了一条看不出技术债的旁路
-   * —— 那正是 #171 禁止的"新门面包旧核心保活"的形态。
+   * ## 与"读面"的关系（它是**寻址**，不是读内容）
+   *
+   * 它不回答"这一帧有哪些方块"（那是 {@link kernelGrid}），只回答
+   * "这一帧的网格对象**叫什么**" —— 写命令需要一个具名目标，而名字不是内容。
+   *
+   * @returns `null` = 内核未装配 / 该帧没有 `blockGrid` 对象（如实降级，**不**伪造 id）
    */
-  legacyGridForEdit(frameIndex: number): LegacyGridLike | null {
-    const doc = this.main.doc.value
-    if (doc === null) return null
-    const grid = doc.frame(frameIndex)?.grid
-    if (grid === null || grid === undefined) return null
-    return grid as unknown as LegacyGridLike
+  kernelGridObjectId(frameIndex: number): string | null {
+    const kernel = this.kernel
+    if (kernel === null || !kernel.hasAdoptedContent()) return null
+    if (!Number.isInteger(frameIndex) || frameIndex < 0) return null
+    const face = kernel.assemblyFaceOf()
+    if (face !== null) {
+      // 装配面是**权威**：它按装配的帧循环顺序记下每帧的 id（见 §2.4 GF-16 的
+      // "两个事实"口径 —— 装配面存在就说明内核里的就是那份文档）。
+      return face.frameObjects[frameIndex] ?? null
+    }
+    const kernelDoc = kernel.document()
+    if (kernelDoc === undefined) return null
+    // 缺装配面（测试夹具/未接线会话）：按 `scene.order` 的出现序推导 —— 与
+    // `runtime/gridRead#blockGridPayloadAt` **同一条**取法，故"第 N 帧"在两处同义。
+    let seen = 0
+    for (const objectId of kernelDoc.scene.order) {
+      const obj = kernelDoc.scene.objects[objectId]
+      if (obj === undefined || obj.type !== 'block') continue
+      const data = findObjectData(kernelDoc.scene, obj.dataId)
+      if (data === undefined || data.payload.kind !== 'blockGrid') continue
+      if (seen === frameIndex) return objectId
+      seen += 1
+    }
+    return null
   }
 
   /**
@@ -1105,7 +1126,13 @@ export class Context {
    */
   setDocument(next: RuntimeDocument | null, intent: 'load' | 'content-sync' = 'load'): void {
     // ① legacy 先写（与收口前**逐字节相同**的行为：`replaceDoc` 会 bump 内容重读信号）
-    this.main.replaceDoc(next)
+    //
+    // ⚠️ R1-β① C1（裁决③）：`revision` 参数把"换文档"与"投影"分开 ——
+    // `'content-sync'` 是**同一份文档的载体换内容**，**不得**推进窄信号
+    // `documentRevision`（它是 `EmbedViewport.vue` 重置相机自动初始化的依据；
+    // 推进它会让"编辑一格 ⇒ 嵌入机位跳回"）。宽信号 `contentRefreshTick`
+    // 两种意图都要（读面靠它重读内容）。
+    this.main.replaceDoc(next, intent === 'content-sync' ? 'content' : 'document')
     // ② 内核镜像**仅**在装载意图下发生（见上文表格）
     if (intent === 'content-sync') return
     const kernel = this.kernel
@@ -1187,7 +1214,33 @@ export class Context {
     // 若把 `null` 当"不改"，则"删掉最后一条说明"会无声地不生效（内核已删、
     // legacy 还留着旧池与旧网格）。语义见 `RuntimeDocument#withCellTooltips`。
     const tooltips = projectCellTooltipsToLegacy(kernelDoc)
-    const next = current
+    // ── R1-β① C1：**网格也必须回写**（三度同一条纪律：成对铁律第④项）──────────
+    //
+    // 为什么是本轮必须做的：`moveCells`/`setCellContent` 写的是 `blockGrid` 载荷，
+    // 而渲染链（`shared/viewport/useViewportRuntime` 的 `docRef`）此刻仍读 legacy
+    // ⇒ 不投影就是 #333 的第二次（"提交成功但看不见"）。
+    //
+    // 帧对应关系来自**装配面**（`frameObjects`：帧下标 → 内核对象 id）；缺省时
+    // `projectKernelGrids` 按 `scene.order` 里 `block` 对象的顺序推导 ——
+    // 与 `projectKernelDocument` 的缺省**逐字同口径**（同一个函数族，不另写一份）。
+    //
+    // ⚠️ **只在真的换了网格时**才动对应帧（`withGrid` 内容相同即返回 `this`），
+    // 于是"没有网格写命令命中"的投影是**净零**的：不 bump 信号、不重建渲染。
+    const face = kernel.assemblyFaceOf()
+    const grids = projectKernelGrids({
+      scene: kernelDoc.scene,
+      ...(face === null ? {} : { frameObjectIds: face.frameObjects }),
+    })
+    let withGrids = current
+    for (let i = 0; i < current.frames.length; i++) {
+      const frame = current.frames[i]!
+      // 帧下标 → 网格：`grids` 的下标是**装配面的帧序**，而 `frames` 的 `index`
+      // 是文件声明里的帧号 ⇒ 按位置对应（与 `projectKernelDocument` 的
+      // `axis = axisFrames[i]` 同一取法）。
+      const next = grids[i] ?? null
+      withGrids = withGrids.withGrid(frame.index, next)
+    }
+    const next = withGrids
       .withAnnotations(rows)
       .withCellTooltips(tooltips?.palette, tooltips?.grid)
     // 引用未变 ⇒ 不写（两个 `with*` 都在内容相同时返回 `this`）
