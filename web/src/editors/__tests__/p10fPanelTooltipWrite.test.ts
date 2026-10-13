@@ -415,8 +415,11 @@ describe('#333 · 负对照（证明上面的判据真的在测"回写"）', () 
   it('**负对照**：注入一次 legacy 回落写 ⇒ 上一条的"逐字未被改动"断言必然判红', () => {
     const seeded = legacyDoc().withCellTooltips(['既有的'], [[[0]]])
     // 注入：这条表达式**就是**被取代的那条回落分支的形态（拼池 + 换网格）。
+    // 池的字段在 legacy 文档上是弱类型的（`unknown`），故此处显式收窄——
+    // 这只是让注入表达式可编译，不改变它的区分力（下两条断言照旧）。
+    const seededPool = (seeded.tooltipPalette as string[] | undefined) ?? []
     const injected = seeded.withCellTooltips(
-      [...(seeded.tooltipPalette ?? []), '回落写的'],
+      [...seededPool, '回落写的'],
       [[[0, 1]]],
     )
     expect(
