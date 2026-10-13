@@ -114,19 +114,28 @@ describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数
     ).toEqual([])
   })
 
-  it('**口径自检**：去字符串是承重的（登记表把调用形态写在字符串里）', () => {
-    const raw = fs
-      .readFileSync(path.join(SRC, 'composition', 'seams.ts'), 'utf8')
-      .replace(/\r\n/g, '\n')
-    // 反证①：原样（只去注释）时 `seams.ts` 会命中 ⇒ 说明"不去字符串"会把登记文字算成消费点。
+  it('**口径自检**：去字符串是承重的（调用形态可以被写在字符串里，那不是消费点）', () => {
+    // 自检用**扫描器自己的输入形态**（不是产品载荷）：把调用形态分别放在
+    // ① 代码位置、② 字符串位置，证明两者在扫描口径下**必须区分**。
+    // 为什么要显式自检：C5 早期版本只去注释 ⇒ `composition/seams.ts` 的**登记文字**
+    // （字符串里写着调用形态）被算成第 5 个消费点，计数从 4 变 5 —— 命中数不是结论。
+    const inCode = 'const d = ctx.legacyRenderSource()'
+    const inString = 'const note = "ctx.legacyRenderSource() 是旧读面"'
+    expect(/\.legacyRenderSource\s*\(/.test(stripComments(inCode)), '代码位置的调用必须被认作消费点').toBe(true)
     expect(
-      /\.legacyRenderSource\s*\(/.test(stripComments(raw)),
-      '前提：`seams.ts` 的**字符串**里确有该调用形态（故去字符串必须做）',
+      /\.legacyRenderSource\s*\(/.test(stripComments(inString)),
+      '前提：不去字符串时该字符串会命中（故去字符串必须做）',
     ).toBe(true)
-    // 反证②：去字符串后不得命中 ⇒ 它不是消费者。
     expect(
-      /\.legacyRenderSource\s*\(/.test(stripStrings(stripComments(raw))),
-      '去字符串后 `seams.ts` **不得**出现调用形态（它只是登记文字，不是消费者）',
+      /\.legacyRenderSource\s*\(/.test(stripStrings(stripComments(inString))),
+      '去字符串后**不得**命中（它是登记文字，不是消费者）',
+    ).toBe(false)
+    // 反空洞真：登记表本身仍在案（否则"剩余 1 处归 R2"这条登记会被静默删掉）。
+    const seams = fs.readFileSync(path.join(SRC, 'composition', 'seams.ts'), 'utf8').replace(/\r\n/g, '\n')
+    expect(seams.includes('legacy-render-source-document'), '登记条目必须仍在案').toBe(true)
+    expect(
+      /\.legacyRenderSource\s*\(/.test(stripStrings(stripComments(seams))),
+      '登记表里**不得**出现调用形态（它只是文字）',
     ).toBe(false)
   })
 
