@@ -62,6 +62,7 @@ import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotat
 const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
 import { findObjectData } from '@/domain/scene'
+import { generatedObjectWriteAuthority } from '@/domain/multiblock'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 
 function embedUnavailable(name: string): never {
@@ -673,6 +674,34 @@ export class Context {
       seen += 1
     }
     return null
+  }
+
+  /**
+   * **某对象的写权**（按拥有者判定；#249 §3.3）。
+   *
+   * ## 它为什么是内核事实（而不是"从旧文档读一位"）
+   *
+   * 写权由**对象数据的来源**决定：`source: 'content'`（装配产出的生成内容）⇒ 只读。
+   * 该标记由**生产装配**写在对象数据上（`composition/kernelAssembly.ts:1810` 的
+   * `objectData(dataId, blockGridPayload(payload), 'content')`，只在多方块生成分支），
+   * 故它本来就是内核文档携带的事实 —— 不需要问旧载体。
+   *
+   * ## 它取代了什么（R1-β① C5）
+   *
+   * `editors/workbench-rna.ts` 原先靠"旧文档有没有 `multiblock` 节"回答"这块内容是不是
+   * 生成的"，那是 `Context#legacyRenderSource()` 的消费点之一（接缝
+   * `legacy-render-source-document`）。本读面把该判定改为**读内核自己的写权事实**，
+   * 与 `application/kernel-properties.ts:539` 的 `generated: data?.source === 'content'`
+   * **同一口径**（按拥有者判定，不是文档级布尔）。
+   *
+   * @returns `'missing'` = 未装配 / 无该对象（如实降级，**不**猜 `writable`）。
+   */
+  kernelWriteAuthority(objectId: string): 'writable' | 'readOnly' | 'missing' {
+    const kernel = this.kernel
+    if (kernel === null || !kernel.hasAdoptedContent()) return 'missing'
+    const kernelDoc = kernel.document()
+    if (kernelDoc === undefined) return 'missing'
+    return generatedObjectWriteAuthority(kernelDoc.scene, objectId)
   }
 
   /**

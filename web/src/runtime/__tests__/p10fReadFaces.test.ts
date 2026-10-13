@@ -216,6 +216,9 @@ describe('D3/R7 `documentMetadata()`', () => {
       origin: { x: 0, y: 0, z: 0 },
       createdAtMs: null,
       formatVersion: '',
+      // R1-β① C5：`gtnhVersion` 与 `formatVersion` 同族同源（都由文档声明承载，
+      // 供嵌入元信息提示用）；无文档时与其余字段一并给空串。
+      gtnhVersion: '',
       source: undefined,
     })
   })

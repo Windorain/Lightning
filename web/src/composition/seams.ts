@@ -148,7 +148,7 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * | | 旧 `getDoc()` | 本读面 |
    * |---|---|---|
    * | 语义 | 文档内容的**权威读入口** | **渲染投影的格式输入** + 外部格式事实（声明内层 body / 文件格式版本） |
-   * | 消费者 | 46 处 / 18 文件（保存/导出/属性/拾取/撤销**全在内**） | 3 处（`shared/viewport/**`）+ 1 处（`workbench-rna` 的多方块生成态判定）+ e2e 观测 |
+   * | 消费者 | 46 处 / 18 文件（保存/导出/属性/拾取/撤销**全在内**） | ⏳ C5 段③ 后剩 1 处（`shared/viewport/useKernelChannels.ts` 的声明内层 body）+ e2e 观测 |
    * | 判据 | 无（它就是权威） | 由 `boundary-scan` 的**白名单**钉住调用者 |
    */
   Object.freeze({
@@ -165,12 +165,12 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' `assembleKernelDocument` + `projectKernelDocument` 产出渲染视图（P10d D2 交付，'
       + ' 逐三角形一致已验）；`composition/presenterSession#PresenterSession` 已有生产实现。',
     oldTrack:
-      'DRW 的文档来源仍是旧格式 `RuntimeDocument`，经具名读面 '
-      + '`Context#legacyRenderSource()` 取（`useViewportRuntime` 的 `docRef`、'
-      + ' `useKernelChannels` 的 `decl`/`multiblockSource`、`EmbedViewport` 的 `useEmbedTooltip` 入参、'
-      + ' `workbench-rna` 的多方块生成态判定）。⚠️ 该读面**也**承载两件"外部格式事实"：'
-      + ' 多方块**声明内层 body**（`multiblockSource`，内核不承载）与**文件格式版本**'
-      + '（`formatVersion`，与内核装配面的 `schemaVersion` 是**不同编号**）。',
+      'DRW 的文档来源仍是旧格式 `RuntimeDocument`（**已改为必填注入** `renderDocRef`，不再回落到读面），'
+      + ' 仅 `useKernelChannels` 仍经具名读面 `Context#legacyRenderSource()` 取多方块'
+      + ' **声明的内层 body**（`multiblockSource`）。⚠️ C5 段③ 已迁 3 处（`EmbedViewport` 的'
+      + ' tooltip 入参 → 内核读面；`useViewportRuntime` 的回落删除；`workbench-rna` 的生成态判定'
+      + ' → `Context#kernelWriteAuthority`）。**文件格式版本**亦已由内核元数据承载'
+      + '（`domain/content#DocumentMetadata.formatVersion`）。',
     blocker:
       '画面终切需要"DRW 消费 `PresenterSession`"的整体切换，其前置为材质统一'
       + '（呈现层是 `MeshBasicMaterial`，legacy 是贴图材质库）与注解/描边统一 ——'
@@ -179,7 +179,7 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
-      "**（甲）登记条件 —— ⏳ 部分成立**：新轨 `composition/presenterSession.ts` 的 `PresenterSession` 已有生产实现，但终切的另一条前置（材质统一 + 注解/描边统一）未交付。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：实测 `Context#legacyRenderSource()` 的**生产调用点 4 处**（`shared/viewport/useViewportRuntime.ts`、`useKernelChannels.ts`、`EmbedViewport.vue`、`editors/workbench-rna.ts`）。\n闭包内 ⇒ 闭包判据对本条**有效**。\n**以下为原退出条件（逐字保留）**：\n"
+      "**（甲）登记条件 —— ⏳ 部分成立**：新轨 `composition/presenterSession.ts` 的 `PresenterSession` 已有生产实现，但终切的另一条前置（材质统一 + 注解/描边统一）未交付。\n**（乙）消费者迁移数 —— ⏳ 4 → 1（R1-β① C5 段③）**：C5 前生产调用点 **4 处**。已迁 **3 处**：\n① `shared/viewport/EmbedViewport.vue` —— `useEmbedTooltip` 入参由旧文档本体改为内核读面投影（`documentMetadata()` + `kernelAnnotations()`）；\n② `shared/viewport/useViewportRuntime.ts` —— `docOverride ?? legacyRenderSource()` 的**回落删除**，渲染源改为**必填注入** `renderDocRef`（类型层只有一个答案）；\n③ `editors/workbench-rna.ts` —— 生成态判定改走 `Context#kernelWriteAuthority(gridObjectId)`（内核写权事实，`source:'content'` 由生产装配写下）。\n**剩余 1 处**：`useKernelChannels.ts` —— 它需要多方块**声明的内层 body**做「按当前通道取值重新装配 + 构造渲染视图文档」，而该 body 今天由旧文档承载（`composition/kernelAssembly#assembleKernelDocument` 的入参就是 `RuntimeDocument`）⇒ 这是**内核承载缺口**，不是渲染源回落。删除 `Context#legacyRenderSource()` 本体须等它迁移完成。\n机械口径与负对照：`src/runtime/__tests__/legacyRenderSourceConsumers.test.ts`（去注释 + 去字符串后按调用计数，集合断言 + 防回流负对照）；写权读面另有生产装配判据 `src/runtime/__tests__/kernelWriteAuthorityFace.test.ts`（正判据 + 两条负对照）。\n闭包内 ⇒ 闭包判据对本条**有效**。\n**以下为原退出条件（逐字保留）**：\n"
       +
       '`src/shared/viewport/useViewportRuntime.ts` 的 `docRef` 不再吃旧格式文档'
       + '（DRW 消费 `PresenterSession` 产出）、且 `src/editors/workbench-rna.ts` 的'

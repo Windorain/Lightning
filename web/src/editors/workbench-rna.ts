@@ -430,16 +430,26 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
 /**
  * 多方块文档的网格是装配产物 ⇒ 只读（#249 §3.3）。
  *
- * #301 P10f D3：入参由旧文档改为 `Context`，事实取自
- * `ctx.legacyRenderSource()`（R9 的**外部格式边界**读面）——`multiblock` 声明
- * 的内层 body（`multiblockSource`）内核不承载，故这条事实仍只能从旧格式读。
- * ⚠️ 它**只**回答"是不是多方块生成"这一位（不给内容读入口），
- * 与 R9 的登记用途一致（见 `runtime/context#legacyRenderSource` 的说明）。
+ * ## R1-β① C5：本判定改读**内核写权事实**（不再是旧文档的 `multiblock` 节）
+ *
+ * | | C5 之前 | C5 之后 |
+ * |---|---|---|
+ * | 事实来源 | `ctx.legacyRenderSource()` 的 `doc.multiblock != null` | `ctx.kernelGridObjectId(0)` + `ctx.kernelWriteAuthority(id)` |
+ * | 判定口径 | 文档级布尔（"有没有 `multiblock` 节"） | **按拥有者**（该帧网格对象的 `source === 'content'` ⇒ `readOnly`） |
+ * | 与既有判定的关系 | 独此一处 | 与 `application/kernel-properties.ts:539` 的 `generated: data?.source === 'content'` 同一口径 |
+ *
+ * 内核侧的写权来源是**生产装配**写下的标记
+ * （`composition/kernelAssembly.ts:1810` 的 `objectData(dataId, blockGridPayload(payload), 'content')`，
+ * 只在多方块生成分支），故这是内核承载的事实，不是"从旧格式读一位"。
+ *
+ * ⚠️ 语义**不变**的边界：未装配（无会话/未 adopt）时同上——`kernelGridObjectId` 与
+ * `kernelWriteAuthority` 各自如实答 `null`/`'missing'` ⇒ `false`（未装配的多方块文档
+ * 本来也不会走到这里要求只读判定）。
  */
 function isMultiblockGenerated(ctx: Context): boolean {
-  const doc = ctx.legacyRenderSource()
-  if (!doc) return false
-  return (doc as unknown as { multiblock?: unknown }).multiblock != null
+  const gridObjectId = ctx.kernelGridObjectId(0)
+  if (gridObjectId === null) return false
+  return ctx.kernelWriteAuthority(gridObjectId) === 'readOnly'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

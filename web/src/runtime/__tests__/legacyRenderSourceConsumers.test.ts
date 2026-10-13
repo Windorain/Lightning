@@ -24,11 +24,13 @@
  * | 阶段 | 生产消费点 |
  * |---|---|
  * | C5 之前 | **4**：`useViewportRuntime`(docRef 回落) · `useKernelChannels`(decl 源) · `EmbedViewport.vue`(tooltip 入参) · `workbench-rna.ts`(多方块生成态判定) |
- * | C5 段③（本段） | **2**：`useKernelChannels` · `workbench-rna.ts` —— 前两处已改写（`EmbedViewport.vue` 改吃内核读面；`useViewportRuntime` 的 `docOverride` 改为**必填** `renderDocRef`，回落删除） |
+ * | C5 段③（本段） | **1**：`useKernelChannels` —— 其余三处已改写：`EmbedViewport.vue` 改吃内核读面（元数据 + 注解行）；`useViewportRuntime` 的 `docOverride` 改为**必填** `renderDocRef`（回落删除）；`workbench-rna.ts` 的生成态判定改走 `Context#kernelWriteAuthority`（内核写权事实，见 `kernelWriteAuthorityFace.test.ts`） |
  *
- * ⚠️ **剩余 2 处的性质不同**（诚实登记）：它们读的都是**多方块声明**，而
- * `domain/document#Document` / `domain/content#DocumentContent` **今天不承载**该声明
+ * ⚠️ **剩余 1 处的性质不同**（诚实登记）：`useKernelChannels` 需要**多方块声明的内层 body**
+ * 来做「按当前通道取值重新装配」与「构造渲染视图文档」，而该 body 今天由旧文档承载
+ * （`composition/kernelAssembly#assembleKernelDocument` 自己就吃 `RuntimeDocument`）
  * ⇒ 不是"渲染源回落"，而是**内核承载缺口**（最后一条断言把它钉成可判定事实）。
+ * 删除 `Context#legacyRenderSource()` 本体**必须等它迁移完成**。
  *
  * ## 区分力（负对照）
  *
@@ -87,27 +89,28 @@ function productionCallSites(): { file: string; line: number }[] {
 }
 
 describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数（接缝 `legacy-render-source-document`）', () => {
-  it('生产消费点 = **3**，且**恰好**是这三处（新增一处即判红）', () => {
+  it('生产消费点 = **1**，且**恰好**是这一处（新增一处即判红）', () => {
     const files = [...new Set(productionCallSites().map((h) => h.file))].sort()
     expect(
       files,
       '渲染链旧格式源的生产消费点集合已变 —— 该集合是接缝（乙）子句的机械口径，'
       + '改动必须同时更新本判据与 `seams.ts` 的登记',
     ).toEqual([
-      'src/editors/workbench-rna.ts',
       'src/shared/viewport/useKernelChannels.ts',
     ])
   })
 
-  it('**负对照**：已迁的两处不得再消费该读面（迁完又长回来即判红）', () => {
+  it('**负对照**：已迁的三处不得再消费该读面（迁完又长回来即判红）', () => {
     const migrated = [
       'src/shared/viewport/EmbedViewport.vue',
       'src/shared/viewport/useViewportRuntime.ts',
+      'src/editors/workbench-rna.ts',
     ]
     expect(
       productionCallSites().filter((h) => migrated.includes(h.file)),
       '`EmbedViewport.vue` 的 tooltip 入参必须来自内核读面（`documentMetadata()`/`kernelAnnotations()`）；'
-      + '`useViewportRuntime` 的渲染源必须是**必填注入** `renderDocRef`（无回落）。恢复任一处即判红',
+      + '`useViewportRuntime` 的渲染源必须是**必填注入** `renderDocRef`（无回落）；'
+      + '`workbench-rna.ts` 的生成态判定必须走内核写权读面 `kernelWriteAuthority`。恢复任一处即判红',
     ).toEqual([])
   })
 
