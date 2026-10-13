@@ -468,7 +468,7 @@ export interface CellIdentity {
  * | 旧机制 | 位置 |
  * |---|---|
  * | `clone + 改 `meta.*` + `setDocument`` | `context/embedInitialView#setDocumentEmbedInitialView`（`meta.embed_initial_view`，原地改） |
- * | 属性面板的 `ownerKind === 'document'` 写 | `editors/property-writers.ts`（经 `DocumentState.document: RuntimeDocument`） |
+ * | 属性面板的 `ownerKind === 'document'` 写 | `editors/property-writers.ts`（经 `DocumentState.document: RuntimeDocument`）→ **R1-β① C3 已改走本命令的 `setDocumentMeta`** |
  * | 注解/文档元数据命令 | `operators/builtin/metaEditOperators.ts` |
  *
  * 落点是 `DocumentContent.metadata`（`domain/content` 的**具名字段**类型，

@@ -55,6 +55,7 @@ import { resolveSideTable } from '@/runtime/sideTableResolution'
 import { cloneViewportCameraState, setDocumentEmbedInitialView } from '@/context/embedInitialView'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
 import type { Command } from '@/application/commands'
+import type { CommandOutcome } from '@/application/contracts'
 import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotationRead'
 
 /** 空读面常量（eadonly 空数组：避免每次分配，且调用方不得改内联量）。 */
@@ -239,7 +240,11 @@ export class Context {
   // | 撤销快照 | `documentSnapshot()` / `restoreDocumentSnapshot()` |
   // | 保存基线（外部格式值） | `frozenDocumentValue()` |
   // | 渲染链旧格式源 | `legacyRenderSource()` |
-  // | 网格**编辑句柄**（写路径） | `legacyGridForEdit()` |
+  // | 宿主初始视图（观察视角） | `setHostEmbedInitialView()`（**写**面；读面是 `main.embedInitialView`） |
+  //
+  // ⚠️ **已终删**：旧数据模型取值口（`legacyDocumentModel()`）与网格编辑句柄
+  //（`legacyGridForEdit()`）在 R1-β① C3 随消费者归零一并删除 —— §2.3 明文
+  //「返回旧 `RuntimeDocument` 的具名读面**只减不增**」，故**不得**以任何名字加回来。
   //
   // ⚠️ **`RuntimeDocument` 类型不删**：它是**外部格式边界**的契约类型
   //（解析器/投影/保真记录/`plainRoot` 的 47 个引用面），按 D 批映射表 §一
@@ -830,39 +835,30 @@ export class Context {
   }
 
   /**
-   * **旧文档本体（不克隆）** —— `getDoc()` 退出后**唯一**保留的旧数据模型取值口。
+   * **已终删（R1-β① C3）**：`legacyDocumentModel()` —— "旧文档本体（不克隆）"取值口。
    *
-   * ## 剩下的合法消费者只有一家，且登记在案（见 `composition/seams.ts`）
+   * ## 它当年是什么、为什么必须存在过
    *
-   * | # | 消费者 | 为什么它需要"本体"而不是"克隆/读面" | 登记 |
+   * `getDoc()`（46 处消费）终删后，仍有**两件事的形状**是旧文档：
+   *  1. `editors/workbench-rna#documentStateOf` 造 `DocumentState` 时把旧文档交给
+   *     `applySetProperty`（写模型仍是旧文档）；
+   *  2. `context/captureEmbedInitialView` **原地**写 `meta.embed_initial_view`
+   *     （观察视角，属宿主初始视图状态）。
+   *
+   * 于是留了这一个**具名**取值口，而不是让旧文档散在几十处 —— 白名单闭集
+   *（`boundary-scan.test.ts` 的 D-7）把调用者钉死，使"还剩几处欠账"可数。
+   *
+   * ## 两个消费者各自怎么走的（这就是删除它的机械理由）
+   *
+   * | # | 消费者 | 去向 | 依据 |
    * |---|---|---|---|
-   * | 1 | `editors/workbench-rna#documentStateOf` | `DocumentState.document` 的**字段类型就是**旧文档（`editors/property-writers`），面板属性写要把它交给 `applySetProperty`；**每格一 clone 会在大文档上产生可感的卡顿**（实测口径：432 帧文档的面板读路径） | `property-write-legacy-document-model` |
+   * | 1 | `context/captureEmbedInitialView` | {@link setHostEmbedInitialView}（**具名宿主装配面**，只收发 `ViewportCameraState`，不交出 `RuntimeDocument`） | #385 裁决④ + GF-8/GF-21 |
+   * | 2 | `editors/workbench-rna#documentStateOf` | 文档内容写**全部**改走内核命令（`setCellIdentity`/`setCellTooltip`/`setProperty`/`setDocumentMeta`）；`DocumentState` 只剩壳设置 | R1-β① C3 本体 |
    *
-   * ⚠️ **第二个消费者已迁走（R1-β① C3；#385 裁决④）**：`context/captureEmbedInitialView`
-   * 曾在此取本体并原地写 `meta.embed_initial_view`，但那是**观察视角**
-   * （3D 编辑器实例/宿主初始视图状态，GF-8），不是"写模型仍是旧文档"这件事
-   * ⇒ 它现在走**具名宿主装配面** {@link setHostEmbedInitialView}，
-   * 原登记 `legacy-document-in-place-edit` 的两个退出子句（专门适配面 + 本用途零调用）
-   * 同批成立并**核销**。
-   *
-   * ## 为什么它**不**等于"把 `getDoc()` 改个名"（这是判据要能区分的事）
-   *
-   * | | 旧 `getDoc()` | 本方法 |
-   * |---|---|---|
-   * | 调用点 | 46 处 / 18 文件（保存/导出/属性/拾取/渲染/撤销**全在内**） | **1 处**（上面那一行，已登记的暂存） |
-   * | 语义 | "文档内容的**权威读入口**"（谁都能拿它读一切） | "旧数据模型仍需要的**那一种形状**的载体" |
-   * | 判据 | 无（它就是权威） | `boundary-scan.test.ts` 的**白名单闭集**：`legacyDocumentModel(` 的调用者必须**恰为**上面那一家（多一处即判红） |
-   *
-   * ⇒ "终删 `getDoc()`"的机械含义是**权威读入口消失、46 处各有具名读面**；
-   * 剩下的这一处是**真实的承载面欠账**（写模型仍是旧文档），
-   * 故它必须**可见、可数、有 owner** —— 而不是散在 46 处里看不见。
-   *
-   * ⚠️ **不得**用它读内容事实（网格/注解/材质/帧/说明/元数据/产物 plain）。
-   * 那样做会让白名单闭集变成后门，而闭集正是为防这件事设的。
+   * ⇒ 调用者 **0**、`DocumentState.document` 字段**不存在**、`property-write-legacy-document-model`
+   * 与 `kernel-property-write-dual-track` 两条登记同批核销。
+   * **不得**以任何名字把它加回来（§2.3：返回旧 `RuntimeDocument` 的具名读面**只减不增**）。
    */
-  legacyDocumentModel(): RuntimeDocument | null {
-    return this.main.doc.value
-  }
 
   /**
    * **宿主初始视图（观察视角）的唯一装配面**（R1-β① C3；#385 裁决④ / GF-8 / GF-21）。
@@ -873,8 +869,9 @@ export class Context {
    * —— #385 裁决④ 逐字：「属 3D 编辑器实例/宿主初始视图状态，**不**伪造进文档 camera
    * 投影参数（GF-8 既有口径）。给它**具名宿主装配面**。」它既不是文档**内容**
    * （内核 `DocumentContent` 不承载它，GF-8 明确禁止把它塞进文档内容来省一条接缝），
-   * 也不是渲染链的主文档投影，因此**不该**经 `legacyDocumentModel()`
-   * ——那个口只为"写模型仍是旧文档"这一件事存续（见其说明段的两行表）。
+   * 也不是渲染链的主文档投影，因此**不该**经旧数据模型取值口
+   * （`legacyDocumentModel()` 已随 R1-β① C3 终删）——那个口只为
+   * "写模型仍是旧文档"这一件事存续过，而那件事已经结束。
    *
    * ## 语义（与迁移前**逐点相同**，不是"顺手换个写法"）
    *
@@ -1396,18 +1393,38 @@ export class Context {
    *          `false` = 未装配/无会话（调用方走既有 legacy 路径）
    */
   submitContentEdit(command: Command): boolean {
+    const outcome = this.submitContentEditSettlement(command)
+    return outcome !== null && outcome.status === 'applied'
+  }
+
+  /**
+   * **内容编辑的唯一入口（细粒度结算形态）**（R1-β① C3）。
+   *
+   * ## 为什么必须有它（`submitContentEdit` 的 `boolean` 不够用）
+   *
+   * `submitContentEdit` 把内核的三种结算压成一个 `boolean`：只有 `applied` 才返回
+   * `true`，于是 `unchanged` 与 `rejected` **不可区分**。而面板属性写必须区分：
+   *  - `unchanged`（值没变）**不得**报告 `applied` —— 那是 A06「单选不得产生历史条目」
+   *    的同族要求（无业务变化不记账）；
+   *  - `rejected` 要把内核给的**结构化原因**如实回报（§3.1：拒绝必须具名）。
+   *
+   * 仍然只有**一条**写入路径：本方法就是 `submitContentEdit` 的本体，后者改为在它之上
+   * 取 `applied`。回写（`syncLegacyFromKernel`）只在 `applied` 时发生 —— 与原实现
+   * **逐点相同**（`rejected`/`unchanged` 时回写会把 legacy 改成"内核的旧值"，
+   * 反而抹掉调用方可能要保留的状态）。
+   *
+   * @returns `null` = 无会话或**未装配**（GF-16 false）⇒ 调用方**如实失败**，
+   *          不得静默回落旧栈（R1 的写权威只有内核这一条）
+   */
+  submitContentEditSettlement(command: Command): CommandOutcome | null {
     const kernel = this.kernel
-    if (kernel === null) return false
-    if (!kernel.hasAdoptedContent()) return false
+    if (kernel === null) return null
+    if (!kernel.hasAdoptedContent()) return null
     const ticket = kernel.submit(command)
     kernel.drain()
     const outcome = kernel.settlementOf(ticket)
-    // ⚠️ 只有真的 `applied` 才回写：`rejected`/`unchanged` 时内核内容没变，
-    // 回写会把 legacy 也改成"内核的旧值"，反而**抹掉**调用方可能要保留的状态。
-    if (outcome === null || outcome.status !== 'applied') return false
-    // 回写（`false` 表示引用未变 ⇒ 无需动作，不是失败）
-    this.syncLegacyFromKernel()
-    return true
+    if (outcome !== null && outcome.status === 'applied') this.syncLegacyFromKernel()
+    return outcome
   }
 
   /**

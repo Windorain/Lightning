@@ -44,17 +44,18 @@ function annotationParamsOf(a: Annotation): Readonly<Record<string, unknown>> {
 /**
  * legacy 单字段补丁 → 内核 `setProperty` 命令；**内核未承载该字段即返回 `null`**。
  *
- * ## ⚠️ 实测边界：本批**只**支持 `text`（其余字段一律回落 legacy）
+ * ## 承载面（R1-β① C3 更新）
  *
- * 内核注解对象类型的属性集实测为
- * `structuralDecls()`（`name`/`visible`）+ `transformDecls()` + `text`
- * （`application/kernel-properties.ts:162-172`），且写端口
- * `editors/property-writers#writeAnnotationProperty` 只实现了 `text` 与分量写。
+ * 内核注解对象类型的属性集现在是
+ * `structuralDecls()`（`name`/`visible`）+ `transformDecls()`
+ * + **`text` / `title` / `description`** + **`color`/`locked`/`min`/`max`/`pos`/`renderStyle`**
+ * （`application/kernel-properties.ts`；后两组是 R1-β① C3 新增 —— 写面从"只认 `text`"
+ * 扩成表驱动）。
  *
- * ⇒ 本批**只**迁移 `text`；`locked`/`priority`/几何等一律回落 legacy。
- * 这是**如实的能力边界**，不是遗漏：把它们硬凑成 `setProperty` 会在
- * `writeAnnotationProperty` 里落到 `default: UnsupportedOperation`
- * ⇒ 命令 `rejected` ⇒ 我的调用点会误判为"未装配"而再次写 legacy（双写）。
+ * ⚠️ **本函数仍然只映射 `title`/`description` 两个键**：其余键在 legacy 侧的值形状
+ * （`min`/`max`/`pos` 的元组 or 向量、`renderOpacity` 一族的读面缺口）尚未在边界处
+ * 定案 ⇒ 整体回落 legacy 的 `frozenDocumentValue()` 写。那条残留如实登记在
+ * `composition/seams.ts` 的 `annotation-wide-field-face`（**未**核销）。
  *
  * ## 为什么不"部分写"
  *

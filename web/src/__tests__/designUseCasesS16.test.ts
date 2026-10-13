@@ -619,14 +619,14 @@ describe('§16 覆盖边界：内核层已达成，产品层归 #282（R-WK-04�
       expect(ctxSrc, `读面 ${face} 必须在案（终删必须给替代面，否则是能力回退）`).toContain(face)
     }
 
-    // ③ **产品层仍未完全达成**（如实登记，不冒充）
-    //    `RuntimeDocument` 类型仍是**外部格式边界**与两处旧数据模型载体的契约类型。
+    // ③ **R1-β① C3：旧数据模型载体这一条已收敛**（断言**翻转**，如实记录终态）
+    //    `RuntimeDocument` 类型仍活在**外部格式边界**（下一条断言把守），但面板属性写的
+    //    数据模型已不再是旧文档：`DocumentState` 只剩壳设置，文档内容写全走内核命令。
     const rna = readSrc(path.join('editors', 'workbench-rna.ts'))
     expect(
-      rna.includes('legacyDocumentModel()'),
-      '本条的"未达成"半边：面板属性写的 `DocumentState.document` 仍是旧数据模型'
-        + '（登记 `property-write-legacy-document-model`）⇒ 产品层**未**完全迁移。',
-    ).toBe(true)
+      rna.split('\n').filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join('\n').includes('legacyDocumentModel'),
+      'R1-β① C3：面板写路径**不得**再取旧数据模型（旧取值口已终删）',
+    ).toBe(false)
     expect(
       rna.includes('RuntimeDocument'),
       '`RuntimeDocument` 类型仍在生产使用（外部格式边界）',

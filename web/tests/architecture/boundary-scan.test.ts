@@ -631,49 +631,58 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     expect(measured(['src/domain/document.ts']), '`domain/document.ts` 实测在闭包内').toBe(true)
   })
 
-  it('**反空洞真**：登记的旧轨在代码里**确实存在**（否则登记表是空转）', async () => {
+  /**
+   * **核销回归（R1-β① C3）**：`kernel-property-write-dual-track` 与
+   * `property-write-legacy-document-model` 两条登记**已退出**，此处把守"不得复活"。
+   *
+   * ## 它替换的是什么（不是删掉一条判据，是把判据翻到终态）
+   *
+   * 原判据是**反空洞真**：断言"登记的旧轨在代码里确实存在" —— 即
+   * `workbench-rna.ts` 仍经 `legacyDocumentModel()` 取旧文档、且该访问器仍在
+   * `Context` 上声明。两条登记退出后，那个断言描述的事实**必然**消失，
+   * 于是把它翻到终态：**旧轨不存在 + 登记不在表里**（两者缺一都判红）。
+   *
+   * | 事实 | 判据 |
+   * |---|---|
+   * | ① 旧轨的**读入口**已消失 | `getDoc()` 声明位 0 命中 |
+   * | ② 旧轨的**数据模型**已消失 | 旧数据模型取值口**在 `Context` 上不再声明**（`modelCallers` 为空见下一条）；`DocumentState` 无 `document` 字段（见 `editors/property-writers.ts`）；面板侧不再出现该调用 |
+   * | ③ **登记不在表里** | `seams.ts` 的 `SEAMS` 不再含这两个 id（表语义 = 双轨剩余数、只应减少） |
+   */
+  it('**核销回归**：属性写双轨的两条登记已退出，且旧数据模型取值口**未复活**', async () => {
     const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
-    const entry = SEAMS.find((s: { id: string }) => s.id === 'kernel-property-write-dual-track')
-    expect(entry, '必须登记属性写双轨').toBeTruthy()
+    const ids = SEAMS.map((s: { id: string }) => s.id)
+    expect(ids, '`kernel-property-write-dual-track` 已核销 ⇒ 不得复活').not.toContain('kernel-property-write-dual-track')
+    expect(ids, '`property-write-legacy-document-model` 已核销 ⇒ 不得复活').not.toContain('property-write-legacy-document-model')
 
-    // ## ⚠️ 本断言已**翻转**（#301 P10f D3 的终删落点）
-    //
-    // 原断言是 **failure-closed** 的："`workbench-rna.ts` 必须**仍**经
-    // `ctx.getDoc()` 读旧文档 + `getDoc()` 的类型必须仍是 `Ref<RuntimeDocument | null>`"
-    // —— 它描述的是"双轨仍在"这一事实，故 D3 完成后**必然**要先改它，否则交付时恒红。
-    //
-    // D3 之后的事实分两半（各自都要有判据，不能只留"删干净了"）：
-    //
-    // | 事实 | 判据 |
-    // |---|---|
-    // | ① 旧轨的**读入口**已消失 | `getDoc()` 全树 0 命中（含声明位与引用位） |
-    // | ② 旧轨的**数据模型**仍在（`DocumentState.document` 仍是旧文档，因为它要交付给 `applySetProperty`） | `workbench-rna` 经**具名**取值口 `legacyDocumentModel()` 取，且**不得**再直读 `main.doc` |
-    //
-    // ② 是"双轨仍登记在案"的真实依据（登记表不能空转），而它**不是**"读入口回来了"：
-    // `legacyDocumentModel()` 的调用者由下一条判据（白名单闭集）钉死为**恰好两处**。
     const rna = readSource(path.join(SRC_ROOT, 'editors', 'workbench-rna.ts'))
     const codeOnly = rna
       .split('\n')
       .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
       .join('\n')
     expect(codeOnly, '`getDoc()` 访问器已终删 ⇒ 面板侧不得再出现').not.toContain('.getDoc(')
-    expect(codeOnly, '旧轨的**数据模型**仍需要旧文档 ⇒ 经具名取值口').toContain('legacyDocumentModel()')
-    //  ② 该访问器**确实**在 `runtime/context.ts` 声明（否则上面的 toContain 是空转）
+    expect(codeOnly, '旧数据模型取值口已终删 ⇒ 面板侧不得再出现').not.toContain('legacyDocumentModel')
+    // 该访问器**确实**已从 `Context` 上消失（否则上面那条可能是"换个名字"）
     const ctxSrc = readSource(path.join(SRC_ROOT, 'runtime', 'context.ts'))
-    expect(ctxSrc, '`legacyDocumentModel()` 必须在 `Context` 上声明').toMatch(
-      /legacyDocumentModel\(\):\s*RuntimeDocument \| null/,
-    )
+    expect(
+      /legacyDocumentModel\s*\(\s*\)\s*:/.test(ctxSrc),
+      '旧数据模型取值口**不得**再在 `Context` 上声明（§2.3：返回旧 `RuntimeDocument` 的具名读面只减不增）',
+    ).toBe(false)
     expect(
       /getDoc\(\):\s*Ref<RuntimeDocument \| null>/.test(ctxSrc),
       '`getDoc()` 的签名必须**已不存在**（D3 终删）',
     ).toBe(false)
 
-    // 登记项声明的阻塞点也必须真实：内核侧写入口已在（新轨已交付）。
+    // `DocumentState` 确实**没有**旧文档字段（否则"数据模型已收敛"是空话）。
+    const state = readSource(path.join(SRC_ROOT, 'editors', 'property-writers.ts'))
+    expect(state, '`DocumentState` 不得再有 `document: RuntimeDocument` 字段').not.toMatch(
+      /readonly document:\s*RuntimeDocument/,
+    )
+
+    // 新轨必须仍然真实接入（核销的正面理由：能力有落点，不是"删掉了事"）。
     expect(
       fs.existsSync(path.join(SRC_ROOT, 'application', 'kernel-properties.ts')),
-      '新轨（内核属性注册）必须已交付，否则"双轨"说法不成立',
+      '新轨（内核属性注册）必须已交付，否则"核销"只是删代码',
     ).toBe(true)
-    // 且新轨**真的**被 `reduceSetProperty` 用上（不是"有个文件摆着"）。
     const commands = readSource(path.join(SRC_ROOT, 'application', 'commands.ts'))
     expect(commands, '新轨必须真实接入命令层').toContain('kernelPropertyRegistry()')
   })
@@ -896,9 +905,11 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     const ALLOWED: Record<string, string> = {
       'runtime/context.ts':
         '读面本体：`hasLoadedDocument`/`frameDeclarations`/`plainForSave`/`kernelAnnotations`/'
-        + '`kernelMaterials`/`kernelGrid`/`cellTooltips`/`documentMetadata`/`legacyDocumentModel`/'
-        + '`legacyGridForEdit`/`legacyRenderSource`/`setDocument` 都在此文件内读 `main.doc`'
-        + '（响应式依赖 + 唯一写入口的落点）。',
+        + '`kernelMaterials`/`kernelGrid`/`cellTooltips`/`documentMetadata`/'
+        + '`legacyRenderSource`/`setDocument`/`setHostEmbedInitialView` 都在此文件内读 `main.doc`'
+        + '（响应式依赖 + 唯一写入口的落点）。'
+        + '⚠️ 曾经的 `legacyDocumentModel`/`legacyGridForEdit` 已于 R1-β① C3 终删，'
+        + '不得加回来（见下方"核销回归"判据）。',
       // ⚠️ `runtime/main.ts` **不**在本表内（实测）：它写的是 `this.doc.value = doc`
       //（**赋值**，不是读 `main.doc`）⇒ 本闸门的正则（`.main.doc`）看不见它。
       // 它的"唯一赋值点"性质由另一条既有判据把守
@@ -942,11 +953,10 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     expect(rotten, '白名单里有**已不存在**的登记 ⇒ 清单腐烂，请同步核销：\n' + rotten.join('\n')).toEqual([])
     expect(
       modelCallers.sort(),
-      '`Context#legacyDocumentModel()` 的调用者**恰为一处**'
-        + '（`property-write-legacy-document-model`）；多一处即为绕过具名读面的后门。'
-        + '⚠️ R1-β① C3（#385 裁决④）之后 `legacy-document-in-place-edit` 那条已核销'
-        + '（`context/captureEmbedInitialView.ts` 改走 `Context#setHostEmbedInitialView`）。',
-    ).toEqual(['editors/workbench-rna.ts'])
+      '`Context` 上**不得**再声明旧数据模型取值口（R1-β① C3 已终删）；'
+        + '任何"返回旧 `RuntimeDocument` 的具名读面"都不许复活'
+        + '（§2.3：只减不增）。若这里非空，说明有人把它加回来了。',
+    ).toEqual([])
   })
 
   it('**负对照**：上一条判据能抓到绕过（`ctx.main.doc.value` 必被判红）', () => {
@@ -973,8 +983,9 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     expect(claim(true, false), '有旧轨且未登记 ⇒ 必须判红').toBe(true)
     expect(claim(true, true), '有旧轨且已登记 ⇒ 不判红').toBe(false)
     expect(claim(false, false), '无旧轨 ⇒ 不判红').toBe(false)
-    // 现实核对：当下确实是"有旧轨 + 已登记"。
-    expect(SEAMS.some((s: { id: string }) => s.id === 'kernel-property-write-dual-track')).toBe(true)
+    // 现实核对：当下确实是"有旧轨 + 已登记"（锚点用**仍然在案**的一条接缝；
+    // 属性写那两条已于 R1-β① C3 核销，故不得再拿它们当锚点）。
+    expect(SEAMS.some((s: { id: string }) => s.id === 'legacy-render-source-document')).toBe(true)
   })
 })
 

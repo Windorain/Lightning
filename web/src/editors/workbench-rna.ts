@@ -41,7 +41,10 @@ import {
   ok,
 } from '@/application/contracts'
 import { localPropertyOf } from '@/application/contracts'
+import { KERNEL_ANNOTATION_TYPE } from '@/application/kernel-properties'
 import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
+import { annotationObjectIdOf } from '@/runtime/annotationRead'
+import type { DocumentMetadata } from '@/domain/content'
 import { NO_CHANGE } from '@/domain/identity'
 import {
   type CapabilityId,
@@ -102,8 +105,8 @@ export function createWorkbenchPropertyRegistry(): { registry: PropertyRegistry;
 }
 
 /**
- * 读运行时版本（旧文档桥的版本映射；见 `composition/seams.ts` 的
- * `kernel-property-write-dual-track` 接缝）。
+ * 读运行时版本（旧文档桥的版本映射；原登记 `kernel-property-write-dual-track`
+ * 已于 R1-β① C3 核销 —— 本函数仍在，因为**版本读面**是面板与写命令的公共输入）。
  *
  * ## P10 #261 修正：`contentVersion` **不再**取帧下标
  *
@@ -489,22 +492,22 @@ export function workbenchRegistry(): WorkbenchRna {
   return cached
 }
 
-/** 快照当前文档与壳状态为可写的 `DocumentState`。 */
+/**
+ * 快照当前**壳状态**为可写的 `DocumentState`（R1-β① C3）。
+ *
+ * ## 它为什么不再构造"文档字段"了
+ *
+ * `DocumentState` 曾携带 `document: RuntimeDocument` —— 面板每次读写都要从
+ * `Context#legacyDocumentModel()` 取旧文档**本体**（每格一 clone 会在大文档上产生
+ * 可感的卡顿，故取本体）。那正是 `composition/seams.ts` 的
+ * `property-write-legacy-document-model` 登记的**最后一条**旧写模型双轨。
+ *
+ * 本批把文档内容写全部改走内核命令（见 `submitPropertyWrite` 的分流表），
+ * 于是本函数只剩**壳设置**：发布配置（`workspace` 拥有者）与工具参数
+ * （`editContext` 拥有者）—— 它们不是文档内容、不进文档历史（契约 §6.4）。
+ * 旧数据模型取值口因此**不再有生产消费者**。
+ */
 export function documentStateOf(ctx: Context): DocumentState {
-  // #301 P10f D3：**唯一**仍取旧文档值的地方（`DocumentState.document` 的字段类型
-  // 就是旧文档，见 `editors/property-writers` 的 `DocumentState`）。它经
-  // `frozenDocumentValue()`（R8 的边界取值口）取值 ⇒ `getDoc()` 访问器已退出。
-  // `kernel-property-write-dual-track` 接缝的②子句（"由内核 `Document` 构造"）
-  // **能力前置已消除**（R1-α：#387 落地 `setCellContent`/`moveCells`/`setDocumentMeta`，
-  // 联合 24 → 27）—— 剩余的是**写端口迁移**（`DocumentState` 换成内核寻址根 +
-  // `property-writers` 的内核分支），见 `composition/seams.ts` 的
-  // `property-write-legacy-document-model`（owner P11，退出须"登记条件 + 消费者迁移数=0"
-  // 两个子句同时成立）。
-  //
-  // ⚠️ 取的是**本体**（不克隆）：`DocumentState.document` 只是"交给
-  // `applySetProperty` 的形状"，而它是**面板每次读写都要走**的路径 ——
-  // 每格一 clone 会在 432 帧文档上产生可感的卡顿（没有判据会因此变红）。
-  const doc = ctx.legacyDocumentModel()
   const shell: Record<string, unknown> = {}
   const pub = ctx.main.embedPublish.value as unknown as Record<string, unknown>
   shell.shellSettings = { ...pub, features: { ...((pub.features ?? {}) as Record<string, unknown>) } }
@@ -516,53 +519,77 @@ export function documentStateOf(ctx: Context): DocumentState {
     snapEnabled: tool.snapEnabled.value,
     dragSensitivity: tool.dragSensitivity,
   }
-  return {
-    version: versionOf(ctx),
-    // 没有文档时给一个占位：写入会被可编辑性/描述解析先行拒绝（`exists:false`）。
-    document: doc as never,
-    shell,
+  return { version: versionOf(ctx), shell }
+}
+
+/**
+ * 面板 RNA 的局部 ID → 内核 `DocumentMetadata` 的具名字段（**边界映射的唯一落点**）。
+ *
+ * 只列**可写**字段：`created_at`/`format_version` 在面板声明里是只读，
+ * 内核 `setDocumentMeta` 也只接受具名字段（GF-14 口径：未知键按**文档身份**走保真记录，
+ * 不因此放宽 `Partial<DocumentMetadata>`）。
+ */
+const DOC_META_PATCH_KEYS: Readonly<Record<string, 'name' | 'author' | 'description' | 'tags' | 'origin'>> = Object.freeze({
+  name: 'name',
+  author: 'author',
+  description: 'description',
+  tags: 'tags',
+  origin: 'origin',
+})
+
+/**
+ * **内核写入的结算 → 面板回执**（R1-β① C3）。
+ *
+ * | 内核结算 | 面板回执 | 为什么 |
+ * |---|---|---|
+ * | `applied` | `applied`（版本取内容重读信号） | 回写已由 `Context#submitContentEditSettlement` 做完 |
+ * | `unchanged` | `unchanged` | **不得**记成 applied：无业务变化不记账（A06 同族） |
+ * | `rejected` | **原样**回报 | §3.1：拒绝必须具名，结构化原因不许被压成布尔 |
+ * | `null`（无会话 / 未装配） | `rejected`（`kernel-not-adopted`） | 写权威只有内核这一条：**如实失败**，不回落旧栈 |
+ *
+ * ⚠️ 最后一行是**刻意的**：#387 的完成判据要求"打断旧运行时源 ⇒ 仍完全可用；
+ * 打断**新**提交/装配 ⇒ 同一生产测试**失败**"。未装配时静默写旧栈既掩盖了新栈的故障，
+ * 也就是本批要消除的双轨形态 ⇒ 这里改成显式红灯。
+ */
+function kernelWriteOutcome(ctx: Context, outcome: CommandOutcome | null, ref: PropertyRef): CommandOutcome {
+  if (outcome === null) {
+    return {
+      status: 'rejected',
+      error: domainError('UnsupportedOperation', {
+        reason: 'kernel-not-adopted',
+        property: ref.property,
+        objectId: ref.owner.id,
+      }),
+    }
   }
+  if (outcome.status !== 'applied') return outcome
+  return { status: 'applied', version: versionOf(ctx), changes: NO_CHANGE }
 }
 
 /**
  * 提交一次属性写 —— **唯一写路由的入口**（面板、脚本、命令搜索共用）。
  *
- * 流程：
- *  1. 从当前 ctx 造 `DocumentState` 与 `PropertyAccess`（同一份事实）；
- *  2. 调 `applySetProperty`（纯，多选原子）；
- *  3. **仅当** `applied` 时把候选状态写回运行时（文档经 `replaceDoc`，壳设置写 ref）。
+ * ## R1-β① C3：分流表（文档内容写**全部**改走内核命令）
  *
- * 第 3 步是「拒绝后不得报告 applied」的落地：`rejected`/`unchanged` 时**什么都不写**，
- * 于是文档、历史与脏状态不变（契约 §5.2）。
+ * | 目标 | 命令 | 边界映射 |
+ * |---|---|---|
+ * | 方块身份 `id` | `setCellIdentity` | 面板 `x,y,z` → `CellPosition`；身份引用走 `Context#kernelCellIdentityRef`（**不**反拼命名空间） |
+ * | 逐格说明 | `setCellTooltip` | 同上；空串 ⇒ `null`（删除） |
+ * | 注解字段 | `setProperty` | legacy 裸注解 id → `annotation:<id>`；面板属性 ID → `annotation.<local>` |
+ * | 场景元数据 | `setDocumentMeta` | 面板局部 ID → 具名字段（`DOC_META_PATCH_KEYS`） |
+ * | 壳设置 | 纯壳转移（`applySetProperty<DocumentState>`） | 无（它不是文档内容） |
  *
- * ---------------------------------------------------------------------------
- * ⚠️ **暂存双轨，负责人 P10/#261，退出于工作台迁移**
- * ---------------------------------------------------------------------------
+ * ## 为什么映射必须在**这一层**做（裁决②）
  *
- * 本函数是当下唯一还落在**旧运行时文档**上的写路径，`composition/seams.ts` 里
- * 以 `kernel-property-write-dual-track` 登记在案：
+ * 「旧寻址 → 内核 id」的映射**只许**落在边界/投影层：核心不认识 `x,y,z` / `anno_x`
+ * 这类面板寻址。本文件是面板与内核之间**唯一**的接线点，故映射收口在此
+ * （`annotationObjectIdOf` 是那一条唯一实现）。
  *
- *  - **机制已收敛**：属性语义查同一个 RNA 注册表，写入走同一个 `applySetProperty`
- *    原子路由（多选一失败整批拒、逐目标原因）。这就是 #253 的交付面。
- *  - **数据模型未收敛**：`documentStateOf` 取的是旧 `RuntimeDocument`
- *    （包成 `{version, document, shell}`），而不是内核的
- *    `domain/document.ts` 的 `Document` / `application/state.ts` 的 `ApplicationState`。
- *    ⚠️ **#301 P10f D3 更新**：取值口已不再是 `ctx.getDoc()`（**该访问器已终删**），
- *    而是具名口 `Context#legacyDocumentModel()` —— 该口**恰有两处**调用者
- *    （本文件 + `context/captureEmbedInitialView.ts`），由 `boundary-scan` 的
- *    白名单闭集判据钉住。剩余半边登记在
- *    `composition/seams.ts` 的 `property-write-legacy-document-model`（owner P11）。
+ * ## 可编辑性仍在**面板注册表**上判（不能被内核命令绕过）
  *
- * **为什么本批不退**：把实时工作台从 `RuntimeDocument` 迁到内核 `Document`
- * 需要先改工作区/Area 的装配（外壳、视口、选中集的宿主），
- * 那是 P6/P10 的面，超出 #253 的退出边界（#253 不做 Area/外壳）。在迁移完成前
- * 强行改这里会让实时工作台失效，属"为让判据变绿而破坏能力"。
- *
- * **退出条件**（可静态核对，见 `seams.ts`）：本文件不再出现 `RuntimeDocument`，
- * 且 `DocumentState.document` 直接由内核 `Document` 构造。届时删除本条登记与本注释。
- *
- * 注意**不存在**的旁路：本文件里没有任何 `descriptor.set(owner, v)` 式内存直写，
- * 也没有按属性名前缀选 operator 的分派（退役 #3 的三条旧写路径均已删除）。
+ * 内核命令不认识面板的 `readOnly`（`created_at` 的 `timestamp`、锁定注解的其余字段、
+ * 查看器无写入能力）⇒ 提交前逐个 `editStateOf` 预检，**任一不可编辑即整批拒绝**
+ * （多选原子性，契约 §3.3）——与 `applySetProperty` 用的是**同一个**纯判据函数。
  */
 export function submitPropertyWrite(
   ctx: Context,
@@ -573,8 +600,16 @@ export function submitPropertyWrite(
   const { registry, ports } = workbenchRegistry()
   const access = accessOfContext(ctx)
   const state = documentStateOf(ctx)
-  if (state.document == null) {
+  // 无文档 ⇒ 原行为的等价形态：**所有**属性写一律拒绝（壳设置也要有文档才谈得上"面板"）。
+  if (refs.length === 0) return { status: 'unchanged', version: versionOf(ctx) }
+  if (!ctx.hasLoadedDocument()) {
     return { status: 'rejected', error: domainError('MissingTarget', { reason: 'no-document' }) }
+  }
+
+  // ── 可编辑性预检（面板注册表的判据；内核命令不会替我们判）──────────────────
+  for (const r of refs) {
+    const edit = editStateOf(registry, r, access)
+    if (edit.kind === 'readOnly') return { status: 'rejected', error: edit.reason }
   }
 
   // #301 P10f D0：**逐格说明改走内核命令**（本入口原先经 `applySetProperty` 改 legacy 侧表）。
@@ -610,29 +645,18 @@ export function submitPropertyWrite(
     }
     if (cells.length === refs.length) {
       // 旧面板路径对空串写的是 `-1`（无说明）⇒ 空串映射为 `null`（删除），保持行为一致。
-      const appliedToKernel = ctx.submitContentEdit({
+      const outcome = ctx.submitContentEditSettlement({
         kind: 'setCellTooltip',
         contextId: KERNEL_CONTEXT_ID,
         cells,
         text: value === '' ? null : value,
       })
-      if (appliedToKernel) {
-        // 内核已是权威且 `submitContentEdit` 已调 `syncLegacyFromKernel()` 把
-        // 内核内容投影回 legacy ⇒ **不得**再走下面的 legacy 写
-        // （再写一次会以旧侧表覆盖回写产物）。
-        //
-        // ⚠️ **这个前提曾经是假的（#333）**：D0 段二写这一行时，
-        // `syncLegacyFromKernel` **只**投影注解（它自己的文件头就写着"将来若
-        // 要写网格/材质，必须**同时**扩本方法"），而本拦截写的正是内核
-        // `cellContent.tooltip` ⇒ 内核写了、legacy 没投影、这一行又提前返回
-        // ⇒ 面板读 legacy 看不到值（e2e A25-3b 双 project 确定性红，单测全绿）。
-        // 修法**不是**摘掉本拦截（那会退回"逐格说明不改读内核"= 能力回退），
-        // 而是补齐那条被跳过的纪律：`syncLegacyFromKernel` 现在**同时**投影
-        // 逐格说明侧表（`runtime/tooltipRead` + `RuntimeDocument#withCellTooltips`）。
-        // ⇒ 判据把守见 `p10fPanelTooltipWrite.test.ts`（本入口的内核路径）。
-        // NO_CHANGE = 零变更摘要（版本已由内核推进；本函数只回执 outcome）
-        return { status: 'applied', version: versionOf(ctx), changes: NO_CHANGE }
-      }
+      // ⚠️ **#333 的教训仍然适用**：内核对 `cellContent.tooltip` 的写必须**同时**有
+      // 投影回写（`syncLegacyFromKernel` 已由 `submitContentEditSettlement` 在
+      // `applied` 时调用，覆盖网格 + 逐格说明 + 注解三块）——否则"提交成功但看不到"
+      // （e2e A25-3b 双 project 确定性红，单测全绿）。
+      // 判据把守见 `p10fPanelTooltipWrite.test.ts`（本入口的内核路径）。
+      return kernelWriteOutcome(ctx, outcome, refs[0]!)
     }
   }
 
@@ -640,11 +664,10 @@ export function submitPropertyWrite(
   //
   // ## 为什么必须绕开 `writeBlockProperty`（GF-7 的写侧成因）
   //
-  // 旧写点（`property-writers.ts:161-163`）把面板给的名字直接写进
-  // `SlotBlock.name`，而该字段按 `pure/gridTypes.ts:18` 是**已截去命名空间**的
-  // 注册名 ⇒ 显示侧 `context/queries.ts:164` 再按 `` `minecraft:${name}` ``
-  // 拼回 ⇒ 任何非 `minecraft` 命名空间在"读出→写回"一个来回后被改写
-  // （GF-7 投影侧实测 68 条调色板里 66 条被改写）。
+  // 旧写点把面板给的名字直接写进 `SlotBlock.name`，而该字段按
+  // `pure/gridTypes.ts:18` 是**已截去命名空间**的注册名 ⇒ 显示侧
+  // `context/queries.ts:164` 再按 `` `minecraft:${name}` `` 拼回 ⇒ 任何非 `minecraft`
+  // 命名空间在"读出→写回"一个来回后被改写（GF-7 投影侧实测 68 条调色板里 66 条被改写）。
   //
   // 内核命令 `setCellIdentity` 的取值是**「`cells` 值（截前缀注册名）+
   // `cellPalette` 值（真 registryId 内容键）」的二元组** ⇒ 两半在同一事务里
@@ -700,19 +723,76 @@ export function submitPropertyWrite(
         }),
       }
     }
-    const appliedToKernel = ctx.submitContentEdit({
+    const outcome = ctx.submitContentEditSettlement({
       kind: 'setCellIdentity',
       contextId: KERNEL_CONTEXT_ID,
       cells,
       identity: { name: parsed.name, paletteRef: ref0, meta: parsed.meta },
     })
-    if (appliedToKernel) {
-      // 与逐格说明同一条纪律：内核写已由 `submitContentEdit` 投影回 legacy ⇒
-      // **不得**再走下面的 legacy 写（再写一次会以旧侧表覆盖回写产物）。
-      return { status: 'applied', version: versionOf(ctx), changes: NO_CHANGE }
-    }
+    return kernelWriteOutcome(ctx, outcome, refs[0]!)
   }
 
+  // ── 注解字段 → 内核 `setProperty`（边界做"面板寻址 → 内核寻址"的映射）────────
+  const firstDesc = registry.descriptor(refs[0]!.property)
+  const firstType = firstDesc ? registry.objectType(firstDesc.objectTypeId) : undefined
+  const sceneKind = firstType ? sceneKindOf(firstType.id) : null
+  const ownerKind = firstType ? contractKindOf(firstType.id) : null
+
+  if (sceneKind === 'annotation') {
+    const translated: PropertyRef[] = []
+    for (const r of refs) {
+      const desc = registry.descriptor(r.property)
+      const local = localPropertyOf(r.property, desc?.objectTypeId)
+      // 内核属性 ID 是 `<objectTypeId>.<localId>`（见 `application/kernel-properties#localOf`）。
+      if (local === '') {
+        return { status: 'rejected', error: domainError('MissingTarget', { reason: 'property-not-registered', property: r.property }) }
+      }
+      translated.push({
+        owner: { kind: 'object', id: annotationObjectIdOf(r.owner.id) },
+        property: `${KERNEL_ANNOTATION_TYPE}.${local}`,
+        ...(r.component === undefined ? {} : { component: r.component }),
+      })
+    }
+    const outcome = ctx.submitContentEditSettlement({
+      kind: 'setProperty',
+      // ⚠️ `SetPropertyCommand` **不带 `contextId`**：上下文由目标文档**反查**
+      // （`application/commands.ts` 的 `reduceSetProperty` —— 契约 §1.1 方向 8
+      // 「不提供跨文档编辑事务」⇒ 一致性由构造保证，不靠校验兜）。
+      refs: translated,
+      value,
+      ...(commandId ? { commandId } : {}),
+    })
+    return kernelWriteOutcome(ctx, outcome, refs[0]!)
+  }
+
+  // ── 场景元数据 → 内核 `setDocumentMeta`（只接受**具名**字段）──────────────
+  if (ownerKind === 'document') {
+    const patch: Record<string, unknown> = {}
+    for (const r of refs) {
+      const desc = registry.descriptor(r.property)
+      const local = localPropertyOf(r.property, desc?.objectTypeId)
+      const key = DOC_META_PATCH_KEYS[local]
+      if (key === undefined) {
+        return {
+          status: 'rejected',
+          error: domainError('UnsupportedOperation', { reason: 'no-write-path', property: r.property, objectId: r.owner.id }),
+        }
+      }
+      patch[key] = value
+    }
+    const outcome = ctx.submitContentEditSettlement({
+      kind: 'setDocumentMeta',
+      contextId: KERNEL_CONTEXT_ID,
+      patch: patch as Partial<DocumentMetadata>,
+      ...(commandId ? { commandId } : {}),
+    })
+    return kernelWriteOutcome(ctx, outcome, refs[0]!)
+  }
+
+  // ── 壳设置（workspace / editContext 拥有者）：纯转移，不进文档历史 ──────────
+  //
+  // 文档内容以外的目标（发布配置、工具参数）**没有**内核命令，也不该有：
+  // 它们不是文档内容（契约 §6.4）。落点、校验与入口仍与其他面共用。
   const transition = applySetProperty<DocumentState>({
     registry,
     ports,
@@ -728,16 +808,10 @@ export function submitPropertyWrite(
   })
 
   if (transition.outcome.status !== 'applied') return transition.outcome
-
-  // 文档内容变化 ⇒ 经**唯一写入口**（#301 A′：它 bump 内容重读信号并镜像内核装载状态）。
-  // **原地修改路径** ⇒ 只保证存在性对齐（内容同步归 C′）。
-  const nextDoc = transition.candidate.document
-  if (nextDoc !== state.document) {
-    ctx.setDocument(nextDoc)
-  }
   applyShellState(ctx, state, transition.candidate)
   return transition.outcome
 }
+
 
 /** 壳设置写回（发布配置 / 工具参数）——不进文档历史（契约 §6.4）。 */
 function applyShellState(ctx: Context, before: DocumentState, after: DocumentState): void {

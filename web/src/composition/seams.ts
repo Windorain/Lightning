@@ -99,153 +99,38 @@ export interface SeamRegistration {
  * `composition/__tests__/seams.test.ts` 的**回归断言**把守（防被改回去）。
  */
 export const SEAMS: readonly SeamRegistration[] = Object.freeze([
-  Object.freeze({
-    id: 'kernel-property-write-dual-track',
-    files: Object.freeze([
-      'src/editors/workbench-rna.ts',
-      'src/application/property-commands.ts',
-      'src/application/kernel-properties.ts',
-    ]),
-    newTrack:
-      '内核侧唯一写入口：#253 的 `reduceCommand` → `reduceSetProperty` → RNA 注册表 + `applySetProperty`（`application/kernel-properties.ts` 注册 block/annotation/camera 的属性语义）',
-    oldTrack:
-      '实时工作台的面板写路径仍落在**旧运行时文档**上：`editors/workbench-rna.ts` 的'
-      + ' `documentStateOf` 造 `DocumentState` 时取旧 `RuntimeDocument`（`DocumentState.document` 的'
-      + ' 字段类型就是它），再传给 `applySetProperty`。机制已是同一套（同一个 RNA 表与同一个原子写路由），'
-      + '但**数据模型**仍是旧的 `RuntimeDocument` 而非内核的 `Scene`/`Document`。\n'
-      + '⚠️ **D3 更新**：取值口已不再是 `ctx.getDoc()`（**该访问器已终删**），'
-      + ' 而是具名取值口 `Context#legacyDocumentModel()`（见 `property-write-legacy-document-model`）。',
-    blocker:
-      '**R-WK-04（#250，2026-10-11）**：把实时工作台从 `RuntimeDocument` 迁到内核 `Document` 需要"旧文档 → 内核场景"装配 —— #261 实测内核 `Document` 只承载 block/annotation/camera/mesh，不承载 `frames`/`cellGrid`/`textureBlobs`/`materialPalette`/`multiblock`/`meta`，而渲染链（21 个 `render/` 文件）按后者工作；全树没有任何生产代码从旧场景文件构造内核 `Scene`。故该装配是**架构新增**而非集成收口，归 **#282（P10b）**。#261 已完成的是宿主驱动接线与 `ReadView` 读面补齐（相机组 + 播放读面），见 `runtime/kernelSession`。',
-    closureCoverage: 'in-closure',
-    owner: Object.freeze({ p: 'P10b', issue: 282, duty: '旧文档→内核场景装配与呈现接线' }),
-    exitCondition:
-      "**（甲）登记条件 —— ✅ 已成立**：`src/runtime/context.ts` 的 `getDoc()` 已终删（**registry 判据**：`application/__tests__/retirementRegistry.test.ts:501-502` 的 `own`(`\\bgetDoc\\s*\\(`) 与 `consumer`(`\\.getDoc\\s*\\(`) 两条模式『声明位 / 引用位』**0 命中** —— 该判据自带不误红（排除 `getDocument`/`getDocumentBinding` 等）、真残留判红、以及『同名异物不误判』的对偶。⚠️ **不要**按字面去扫全树：`git grep getDoc` 有 219 命中，其中绝大多数是注释，其余是内核里**同名但无关**的私有辅助函数 `application/commands.ts:2161 function getDoc(state, id)`）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`src/editors/workbench-rna.ts` 的 `documentStateOf` 仍由旧文档构造 `DocumentState`（实测 `Context#legacyDocumentModel()` 仍有 2 处生产调用者）。\n闭包内（`closureCoverage: 'in-closure'`）⇒ 闭包判据对本条**有效**。\n**以下为原退出条件（逐字保留）**：\n"
-      +
-      '**①✅ 已成立（#301 P10f D3）**：`src/runtime/context.ts` 的 `getDoc()` **已删除**'
-      + '（判据本尊口径：`retirementRegistry.test.ts` 的 `own`/`consumer` 两条位级模式 0 命中'
-      + ' —— **不是**「全树 0 命中」：`git grep getDoc` 有 219 命中，'
-      + ' 多为注释与内核同名辅助函数 `commands.ts` 的 `function getDoc(state, id)`；'
-      + ' 该访问器曾是"文档内容的权威读入口"，'
-      + ' 46 处消费点已各有具名读面 —— 见 `Context` 的 `// --- Main ---` 段）。\n'
-      + '**②⏳ 未成立**：`src/editors/workbench-rna.ts` 的 `documentStateOf` 仍由旧文档构造'
-      + ' `DocumentState`（`DocumentState.document` 的类型是 `RuntimeDocument`）。'
-      + '**本批按 Lead 裁决 D-5 收窄改写**：兑现①、②的完整内核化**另立**登记'
-      + ' `property-write-legacy-document-model`（owner P11）—— 兑现②需要**块身份写命令**'
-      + '（实测：`Command` 联合有 `setCellTooltip`、**无** `setCellContent`）'
-      + ' + RNA 描述符 + 写端口，是**承载面新增**，超出 D3「终删」范围。\n'
-      + '⇒ 本条**保留登记**（②未兑现），但它的 `oldTrack` 已不再是"`getDoc()` 读入口"。',
-  }),
   /**
-   * P10f D3（#301）登记：**属性写的数据模型仍是旧文档**（D-5 裁决的剩余半边）。
+   * ⚠️ **已核销（R1-β① C3）**：原 `kernel-property-write-dual-track` 与
+   * `property-write-legacy-document-model` 两条登记在此。
    *
-   * ## 它与 `kernel-property-write-dual-track` 的关系（不是重复登记）
+   * ## 两条的退出子句**同时**成立（不是"看起来走了"）
    *
-   * 那条接缝的原 `exitCondition` 有**两个子句**：
-   *  ① `getDoc()` 不再返回旧文档 —— **D3 已兑现**（访问器终删）；
-   *  ② `documentStateOf` 由内核 `Document` 构造 —— **未兑现**。
+   * | 子句 | 结论 | 机械证据（判据口径见 `boundary-scan.test.ts`） |
+   * |---|---|---|
+   * | ① `getDoc()` 不再返回旧文档 | ✅ | `retirementRegistry.test.ts` 的 `own`/`consumer` 两条位级模式 **0 命中** |
+   * | ② `documentStateOf` 不再由旧文档构造 `DocumentState` | ✅ | `DocumentState` **已无 `document` 字段**；旧数据模型取值口**已终删**；生产调用点 **0**（`codeOf` 剥注释与字符串后，`editors/workbench-rna.ts` 里不再出现该调用） |
    *
-   * D3 按 Lead 裁决（comment 6228）**收窄**那条（只留②），并把②的完整内核化
-   * **另立本条**（owner P11）。分开的理由是**可核对**：①的判据是"零命中"
-   *（已绿），②的判据是"`Command` 联合有块身份写命令"（**未**存在）——
-   * 混在一条里会让"①已达成"被误读成"整条已达成"。
+   * ## 为什么是"删除登记"而不是"改写登记"
    *
-   * ## 为什么本批**不**兑现②（实测，不是工作量）
+   * `SEAMS` 的语义是"双轨**剩余**数、只应减少"（见本表文件头）。
+   * 两条登记描述的旧轨都已从代码里消失 ⇒ 留在表里就是**空转登记**，
+   * 而"登记表 = 现状清单"是这张表存在的全部理由。
    *
-   * ```
-   * application/commands.ts 的 Command 联合（实测 `readonly kind:` 全部命中）：
-   *   setTransform / addObject / deleteObject / setCellTooltip / beginInteraction /
-   *   updateInteraction / commitInteraction / cancelInteraction / select / setTime /
-   *   setPlaying / setPlaybackRate / advancePlayback / setChannelValue /
-   *   insertKeyframe / removeKeyframe / setTrackEnabled / publishDefault /
-   *   undo / redo / save / saveCompleted / openDocument / closeDocument
-   * ⇒ **没有**任何写"块身份 / 网格格内容"的命令（`setCellTooltip` 只写说明）。
-   * ```
-   *
-   * 而 `editors/property-writers#writeBlockProperty` 要写的正是**方块身份**
-   *（`SlotBlock.name`/`meta`）与**格内容**。⇒ 兑现② = 新增命令 + RNA 描述符 +
-   * 写端口，是**承载面新增**（GF-13 最小集在 C′2 只交付到 `setCellTooltip`），
-   * 超出 D3「终删 `getDoc()`」的范围。
+   * 反向的守护（防被改回去）在 `seams.test.ts` / `boundary-scan.test.ts` /
+   * `p10fD3ExportOwnership.test.ts` 的**核销回归断言**里，不在本表。
    */
-  Object.freeze({
-    id: 'property-write-legacy-document-model',
-    files: Object.freeze([
-      'src/editors/workbench-rna.ts',
-      'src/editors/property-writers.ts',
-      'src/application/commands.ts',
-    ]),
-    newTrack:
-      '内核 `Document` + `Command` 联合 + `reduceSetProperty`：属性语义查同一个 RNA 注册表、'
-      + '写入走同一个 `applySetProperty` 原子路由（多选一失败整批拒、逐目标原因）—— 机制已收敛。',
-    oldTrack:
-      '`editors/property-writers#DocumentState` 的 `document` 字段类型是'
-      + ' **旧 `RuntimeDocument`**，由 `editors/workbench-rna#documentStateOf` 经'
-      + ' 具名取值口 `Context#legacyDocumentModel()` 取（`getDoc()` 已终删）。'
-      + '⇒ 面板属性写的**数据模型**仍是旧文档。',
-    blocker:
-      '`Command` 联合**无**块身份/格内容写命令（实测 24 个成员，`setCellTooltip` 只写说明）'
-      + ' ⇒ 完整内核化需要：① 新写命令（`setCellContent` 家族，GF-13 扩展）；'
-      + ' ② `application/kernel-properties.ts` 的块身份属性描述符；'
-      + ' ③ `editors/property-writers#writeBlockProperty` 的内核分支。'
-      + ' 三件都是**承载面/写面新增**。',
-    closureCoverage: 'in-closure',
-    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
-    exitCondition:
-      "**（甲）登记条件 —— ✅ 已成立（R1-α）**：`src/application/commands.ts` 的 `Command` 联合含块身份/格内容写命令（R1-α 落地 `setCellContent`/`moveCells`/`setDocumentMeta`，联合 24 → 27，R-WK-07 授权）。⚠️ 本条 blocker 原写的\"联合无此类命令\"**已滞后于代码**，同批改正。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`src/editors/property-writers.ts` 的 `DocumentState.document` 仍是 `RuntimeDocument`，`legacyDocumentModel(` 生产调用点 2 处。**只有（甲）不算退出。**\n**以下为原退出条件（逐字保留）**：\n"
-      +
-      '`src/editors/property-writers.ts` 的 `DocumentState.document` 的类型不再是'
-      + ' `RuntimeDocument`（改为内核 `Document` 或 `ApplicationState`），'
-      + '且 `src/editors/workbench-rna.ts` 的 `documentStateOf` 不再取旧文档 '
-      + '⇒ 届时删除本条登记，并核销 `kernel-property-write-dual-track` 的子句②。',
-  }),
   /**
-   * P10f D3（#301）登记：**网格的原地编辑句柄**（B′ 撤回理由①的落点）。
+   * ⚠️ **已核销（R1-β① C3 核销；C1 交付）**：原 `legacy-grid-edit-handle` 登记在此。
    *
-   * ## 为什么它**不能**用网格读面（B′ 的实测，必须留下）
+   * | 子句 | 结论 | 机械证据 |
+   * |---|---|---|
+   * | 甲 `Command` 有块移动命令 | ✅ | `moveCells`（R1-α 落地，领域语义见该命令注释） |
+   * | 乙 消费者迁移数 = 0 | ✅ | `moveTranslate.ts` 已改走 `submitContentEdit` 的 `moveCells` 命令；`Context#legacyGridForEdit` **已删除**（全树 0 命中，只剩注释与登记文） |
    *
-   * `operators/builtin/moveTranslate` 把 grid 捕获进撤销项的 `execute`/`undo`
-   * 闭包并调 `grid.moveBlock(from, to)` **原地改**。而读面（`Context#kernelGrid`）
-   * **每次新建**一个视图对象（内核分支更是由不可变载荷算出来的）⇒ 在它上面
-   * `moveBlock` 的改动**静默丢失**（不报错、不改盘、用户看不到变化）。B′ 探针实测：
-   *
-   * ```
-   * legacy  frame(0).grid === frame(0).grid   → true   （同一对象，写入留存）
-   * 读面    gridOf(doc,0) === gridOf(doc,0)   → false  （每次新建）
-   * ```
-   *
-   * ⇒ 本批给它一个**具名**编辑句柄（`Context#legacyGridForEdit`），
-   * 而不是让它在读面上写（那会静默无效），也不是把读面做成有状态缓存
-   * （那会让"读到的是快照"这一保证消失）。
+   * ⚠️ **本条与网格读面无关**：`runtime/gridRead#gridViewOfLegacy`/`LegacyGridLike`
+   * **仍在**（它们是**读面**的未装配回落，由 `Context#kernelGrid` 的 GF-16 分流使用），
+   * 不在本条登记的范围内 —— 本条登记的是**写**路径的编辑句柄。
    */
-  Object.freeze({
-    id: 'legacy-grid-edit-handle',
-    files: Object.freeze([
-      'src/runtime/context.ts',
-      'src/runtime/gridRead.ts',
-      'src/operators/builtin/moveTranslate.ts',
-    ]),
-    newTrack:
-      '只读网格读面 `Context#kernelGrid(frameIndex)` → `runtime/gridRead#KernelGridView`'
-      + '（内核 `blockGrid` 载荷为权威，未装配回落旧 `Grid`，**两种来源归一形状**）。'
-      + '它是 15 处内容读取的统一入口（尺寸/格/部件/条目/几何/说明）。',
-    oldTrack:
-      '`src/operators/builtin/moveTranslate.ts` 经**具名编辑句柄**'
-      + ' `Context#legacyGridForEdit(frameIndex)` 取旧 `Grid` 并 `moveBlock`'
-      + '（写路径；句柄带 `moveBlock`，读面**没有**该方法 —— 结构上让"在读面上写"写不出来）。',
-    blocker:
-      '`Command` 联合**无**移动格的命令（GF-13 最小集在 C′2 只到 `setCellTooltip`）'
-      + ' ⇒ 该写路径此刻无法迁到内核；改走读面会让写入静默丢失（#171 禁止的能力回退）。',
-    closureCoverage: 'in-closure',
-    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
-    exitCondition:
-      "**（甲）登记条件 —— ✅ 已成立（R1-α）**：`src/application/commands.ts` 的 `Command` 联合含 `moveCells`（R1-α 落地；领域语义见该命令注释：整格迁移 / 身份随迁且命名空间不改写 / 替换非交换 / 同时语义）。⚠️ 本条原退出条件只写了这一半，于是它在 `moveCells` 落地的当天**看起来已经退出**，而 `src/operators/builtin/moveTranslate.ts:309` 一行未动 —— 这正是 R0-3 点名的形态。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：实测 `Context#legacyGridForEdit(` 的生产调用点 **1 处**（`src/operators/builtin/moveTranslate.ts:309`），`src/runtime/gridRead.ts` 仍导出 `LegacyGridLike`。**只有（甲）不算退出。**\n**以下为原退出条件（逐字保留）**：\n"
-      +
-      '`src/application/commands.ts` 的 `Command` 联合含 `moveCells`'
-      + '（或等价的块移动命令），且 `src/operators/builtin/moveTranslate.ts`'
-      + ' 经 `Context#submitContentEdit` 发起移动、不再持有旧 `Grid`'
-      + '（`src/runtime/gridRead.ts` 的 `LegacyGridLike` 随之下线）'
-      + '⇒ 届时删除 `Context#legacyGridForEdit` 与本条登记。',
-  }),
   /**
    * P10f D3（#301）登记：**渲染链的旧格式源文档**（渲染链终切的接缝）。
    *
@@ -776,39 +661,42 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       'src/editors/property-writers.ts',
     ]),
     newTrack:
-      '内核写面承载内容编辑：注解**新建/删除**与 **`title`** 字段写（`annotationOperators`，C′2）+ 逐格说明写（`setCellTooltip`，D0）—— 都经 `Context.submitContentEdit`；'
-      + '读面是 `runtime/annotationRead#kernelAnnotationsOf` 的**封闭 15 字段**表'
-      + '（`ANNOTATION_FIELD_PAIRS` 与回写侧双向断言）。',
+      '内核写面承载注解内容编辑：**新建/删除**（C′2）、**`title`/`description`/`text`**、'
+      + '**`color`/`locked`/`min`/`max`/`pos`/`renderStyle`**（R1-β① C3 新增描述符与写入分支：'
+      + ' `application/kernel-properties.ts` 的注解属性集 + `applyKernelPropertyValue` 的几何/半边写）、'
+      + '逐格说明（`setCellTooltip`，D0）与**面板注解属性写**（`editors/workbench-rna` 路由到 `setProperty`）'
+      + '—— 都经 `Context.submitContentEdit`；读面是 `runtime/annotationRead#kernelAnnotationsOf` 的'
+      + '**封闭 15 字段**表（`ANNOTATION_FIELD_PAIRS` 与回写侧双向断言）。'
+      + '⚠️ 本批同时把 `title`+`description` ↔ 载荷 `text` 的编码规则收敛到 '
+      + '`domain/scene#annotationTextOf`/`splitAnnotationText`（唯一实现），于是内核能表达"只改一半"'
+      + '—— 顺带修掉 `annotationPatchCommand` 原来写 `annotation.text` 造成的**改标题丢描述**。',
     oldTrack:
-      '(b) **仍落 legacy 的是写面**（⚠️ 读面**不窄** —— 见文件头的措辞更正）：'
-      + ' `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand` '
-      + '实测**只迁 `title`**（非单键 `title` 的补丁一律返回 `null`）⇒ `locked`/几何/其余字段的'
-      + '**写**一律回落 legacy（刻意不部分写：部分写会让用户看到"改了一半"）。\n'
-      + '  另有一组**几何**事实不在读面的 15 字段命名空间里（内核 `AnnotationGeometry` '
-      + '**承载**、RNA 描述符**声明**、读面逐字段显式转发时**未列入**）：'
-      + ' `blockPos`/`quadIndex`/`renderOpacity`/`fillOpacity`/`frameThickness`/`overlay`/'
-      + '`icon`/`size`/`thickness`/`arrow`/`showPoints`/`fontSize`/`backgroundAlpha`/'
-      + '`linkedAnnotationId` ⇒ `src/editors/workbench-rna.ts` 的属性读对它们给 `value-absent`、'
-      + ' `AnnotationEditorPanel.vue` 显示为空。\n'
-      + '(a) ✅ **已核销（D3）**：逐格说明的回落分支与帧高读取已全部改走'
-      + ' `ctx.kernelGrid(0)` / `ctx.frozenDocumentValue()`，对旧读入口 0 命中。',
+      '(b) **仍落 legacy 的是这几类**（⚠️ 读面**不窄** —— 见文件头的措辞更正）：'
+      + ' ① `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand` 只映射 '
+      + '`title`/`description` 两个键（其余键返回 `null` ⇒ 整体回落 legacy 的 `frozenDocumentValue()` 写）；'
+      + ' ② 面板**读不到**的那批几何字段（`blockPos`/`quadIndex`/`renderOpacity`/`fillOpacity`/'
+      + '`frameThickness`/`overlay`/`icon`/`size`/`thickness`/`arrow`/`showPoints`/`fontSize`/'
+      + '`backgroundAlpha`/`linkedAnnotationId`/`points`）：内核 `AnnotationGeometry` **承载**它们、'
+      + '但 `runtime/annotationRead#geometryFieldsOf` 逐字段显式转发时**未列入** ⇒ '
+      + '`editors/workbench-rna.ts` 的属性读给 `value-absent`、面板显示为空'
+      + '（**读不到 ⇒ 也写不到**，故它们同时是读面与写面的缺口）。',
     blocker:
-      '**(i) 写面**：需要扩 `editors/property-writers#writeAnnotationProperty` 的写入分支与'
-      + ' `application/kernel-properties.ts` 的注解属性描述符；'
-      + ' **(ii) 读面命名空间**：需要在 `runtime/annotationRead#geometryFieldsOf` 里逐项转发'
-      + ' 上面那批尚未列入的几何字段（读面是**封闭 15 字段**表，加字段是"决定"而不是自动跟随'
-      + ' —— 见 `geometryFieldsOf` 的注释）。'
-      + '两件都是**承载面/写面新增**，超出 D3「终删 `getDoc()`」的范围（Lead comment 5960 的红线）。',
+      '**(i) 读面命名空间**：需要在 `runtime/annotationRead#geometryFieldsOf` 里逐项转发上面那批'
+      + '尚未列入的几何字段（读面是**封闭 15 字段**表，加字段是"决定"而不是自动跟随 —— '
+      + '见 `geometryFieldsOf` 的注释）；'
+      + ' **(ii) 写面跟随**：读面一旦交出这些字段，`application/kernel-properties.ts` 的注解描述符'
+      + '与写入分支必须同批跟上（本批的 `ANNOTATION_GEOMETRY_WRITABLE` 表就是那个落点）。'
+      + '⚠️ R1-β① C3 已把 (i) 的**前置**（写面从"只认 `text`"扩成表驱动）做完，'
+      + '但**没有**扩读面 ⇒ 本条仍开。',
     closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
-      "**（甲）登记条件 —— ✅ 部分成立**：读面已是封闭 15 字段表（`ANNOTATION_FIELD_PAIRS`，含 `locked` 与几何）。⚠️ **R1-α 澄清**：注解字段写**不**经逐格内容命令 —— R1-α 落地的 `setCellContent` 写的是**格**内容（`blockGrid.cellContent`），注解字段写走 `SetPropertyCommand` + RNA 描述符。未成立的是描述符字段覆盖。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`annotationOperators.ts` 的 `annotationPatchCommand` 仍有\"未承载字段即整体回落\"的分支（实测只迁 `title`）。\n**以下为原退出条件（逐字保留）**：\n"
+      "**（甲）登记条件 —— ✅ 大部分成立（R1-β① C3 更新）**：写面侧，内核注解属性集已含 `title`/`description`/`text`/`color`/`locked`/`min`/`max`/`pos`/`renderStyle`（`application/kernel-properties.ts`），且 `domain/scene` 收下了 `title`+`description` ↔ `text` 的唯一编码实现；`annotationPatchCommand` 已能映射 `title`/`description`。**未成立**的是读面命名空间的最后一批几何字段（上表 ②）—— 它们读不到，也就写不到。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`annotationPatchCommand` 对 `color`/`locked`/`min`/`max`/`pos`/`renderStyle` 等键**仍返回 `null`** 并回落 legacy（写面已能表达它们，缺的是调用点的键映射 + 读面字段）。\n**以下为原退出条件（逐字保留）**：\n"
       +
       '`src/runtime/annotationRead.ts` 的 `ANNOTATION_FIELD_PAIRS` 覆盖'
       + ' `src/editors/workbench-inspector.ts` 的注解描述符**全部**字段，'
       + '且 `src/operators/builtin/annotationOperators.ts` 的 `annotationPatchCommand`'
-      + ' 不再有"未承载字段即整体回落"的分支（`src/editors/property-writers.ts`'
-      + ' 对这些字段都有写分支）⇒ 届时删除本条登记。',
+      + ' 不再有"未承载字段即整体回落"的分支 ⇒ 届时删除本条登记。',
   }),
   /**
    * R1-β① **补登**（2026-10-13；用户裁决 R0-7 / #385 评论 7029）。

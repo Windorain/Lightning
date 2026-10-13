@@ -182,24 +182,34 @@ describe('D3/S5 · seam 表整体不变量（新增登记不得破坏既有口�
   })
 
   /**
-   * R1-β① C3（#385 裁决④）核销：`legacy-document-in-place-edit` 的两个退出子句
-   * （"专门适配面" + "本用途零调用"）已同时成立 ⇒ 登记退出。
+   * R1-β① C3 核销：四条登记的两个退出子句都已同时成立 ⇒ 登记退出。
    *
-   * ⚠️ 这条是**回归断言**（与上面那条同性质）：核销项**不得**复活回 `SEAMS`
-   *（该表语义是"双轨剩余数、只应减少"）。它同时替换了原先"本批新增/保留的四条接缝都在"
-   * 清单里的那一项 —— 删除清单项**不是**放宽断言，而是登记退出的机械对账。
+   * | 登记 | 甲（登记条件） | 乙（消费者迁移数 = 0） |
+   * |---|---|---|
+   * | `legacy-document-in-place-edit` | 专门适配面 `Context#setHostEmbedInitialView` | `captureEmbedInitialView` 已改走它 |
+   * | `property-write-legacy-document-model` | `Command` 有块身份/格内容写命令 | `DocumentState` 无 `document` 字段、旧取值口已终删 |
+   * | `kernel-property-write-dual-track` | 同上（getDoc 已终删） | 面板文档内容写全走内核命令 |
+   * | `legacy-grid-edit-handle` | `Command` 有 `moveCells` | `moveTranslate` 已改走它、`legacyGridForEdit` 已删 |
+   *
+   * ⚠️ 这些是**回归断言**：核销项**不得**复活回 `SEAMS`（该表语义是"双轨剩余数、
+   * 只应减少"）。从"本批保留清单"里移除一项**不是**放宽断言，而是登记退出的机械对账。
    */
-  it('**核销的接缝不得复活**：`legacy-document-in-place-edit` 已不在表里（改走 `setHostEmbedInitialView`）', () => {
-    expect(
-      seamById('legacy-document-in-place-edit'),
-      '本用途已由 `Context#setHostEmbedInitialView`（具名宿主装配面）承接 ⇒ 不得复活',
-    ).toBeUndefined()
+  it('**核销的接缝不得复活**：R1-β① C3 核销的四条不在表里', () => {
+    for (const id of [
+      'legacy-document-in-place-edit',
+      'property-write-legacy-document-model',
+      'kernel-property-write-dual-track',
+      'legacy-grid-edit-handle',
+    ]) {
+      expect(seamById(id), `${id} 已核销 ⇒ 不得复活`).toBeUndefined()
+    }
+    // 正面半边：核销的**能力**必须有新落点（"删掉了事"不算退出）。
+    expect(seamById('annotation-wide-field-face'), '注解宽字段面仍在案（本批只兑现了一部分）').toBeDefined()
+    expect(seamById('legacy-render-source-document'), '渲染链终切未做 ⇒ 该条仍在案').toBeDefined()
   })
 
-  it('本批新增/保留的接缝都在（终删暴露的欠账可数）', () => {
+  it('本批保留的接缝都在（终删暴露的欠账可数）', () => {
     for (const id of [
-      'property-write-legacy-document-model',
-      'legacy-grid-edit-handle',
       'legacy-render-source-document',
       'annotation-wide-field-face',
       'isometric-export-legacy-bake',

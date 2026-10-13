@@ -527,12 +527,24 @@ describe('A05/A17 覆盖边界：内核层已含负对照，产品层归 #282（
       expect(ctxSrc, `读面 ${face} 必须在案`).toContain(face)
     }
 
-    // ③ **产品层仍未完全达成**（如实登记）：写模型与渲染链仍是旧格式的载体。
+    // ③ **R1-β① C3：这一"未达成"半边已达成**（断言**翻转**，与上方 ② 同性质）。
+    //
+    // 原断言是 failure-closed 的："`workbench-rna.ts` 必须**仍**含
+    // `legacyDocumentModel()`" —— 它描述的是"属性写的数据模型仍是旧文档"这一**未达成**
+    // 事实，故数据模型收敛（文档内容写全部改走内核命令、`DocumentState` 只剩壳设置）
+    // **必然**要翻它，否则交付时恒红。翻转后的判据仍**双向**：
+    //  - 面板侧不得再出现旧数据模型取值口（数据模型已收敛）；
+    //  - 且文档内容写仍**经内核命令**（否则就是"删掉了事"的能力回退）。
+    const rnaCode = readSrc(pathMod.join('editors', 'workbench-rna.ts'))
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+      .join('\n')
     expect(
-      readSrc(pathMod.join('editors', 'workbench-rna.ts')).includes('legacyDocumentModel()'),
-      '本守卫的"未达成"半边：属性写的 `DocumentState.document` 仍是旧数据模型'
-        + '（登记 `property-write-legacy-document-model`）⇒ 产品级 A05/A17 的'
-        + '「真实 UI 双 Area」完全达成仍待该写模型与渲染链终切。',
-    ).toBe(true)
+      rnaCode.includes('legacyDocumentModel'),
+      'R1-β① C3：面板写路径**不得**再取旧数据模型（`DocumentState` 只剩壳设置）',
+    ).toBe(false)
+    for (const call of ['setCellIdentity', 'setCellTooltip', 'setProperty', 'setDocumentMeta']) {
+      expect(rnaCode, `面板文档内容写必须经内核命令 ${call}（能力不回退）`).toContain(call)
+    }
   })
 })

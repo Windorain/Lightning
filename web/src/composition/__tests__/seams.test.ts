@@ -295,16 +295,17 @@ describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
     // 且**登记表自己的说明文字**（字符串/注释里的符号名）不得被误判为使用点
     // —— 这正是首跑实测到的假红，`codeOf` 剥字符串与注释后消失。
     //
-    // 锚点几经更换（`new Editor(` → `EditContext` → `documentStateOf`），
+    // 锚点几经更换（`new Editor(` → `EditContext` → `documentStateOf` → 本锚点），
     // 每次接缝表被改写都会让旧锚点失效，而本条会**正确地判红**
     // （它抓到了"锚点已失效"）。故锚点必须选当下确实存在的说明文字。
     //
-    // 本锚点选 `documentStateOf`：它**只**出现在 `kernel-property-write-dual-track`
-    // 的 `oldTrack`/`exitCondition` **字符串字面量**里（是函数名，不是 import 名），
-    // 故 `codeOf`（剥注释**与字符串**）看不到它，而 `codeText`（保留字符串、只剥注释）
-    // 看得到 —— 这正是本条要区分的两把尺子。
-    expect(codeOf('composition/seams.ts').includes('documentStateOf'), '文案里的提及不算使用点').toBe(false)
-    expect(codeText('composition/seams.ts').includes('documentStateOf'), '而原始文本里确实有这段说明（证明上面那条不是空转）').toBe(true)
+    // 本锚点选 `useKernelChannels`：它出现在**在案**接缝
+    //（`legacy-render-source-document`）的说明**字符串字面量**里（是符号名，
+    // 不是 import 名），故 `codeOf`（剥注释**与字符串**）看不到它，
+    // 而 `codeText`（保留字符串、只剥注释）看得到 —— 这正是本条要区分的两把尺子。
+    // ⚠️ R1-β① C3：原锚点 `documentStateOf` 随属性写双轨登记**核销**而失效 ⇒ 换锚点。
+    expect(codeOf('composition/seams.ts').includes('useKernelChannels'), '文案里的提及不算使用点').toBe(false)
+    expect(codeText('composition/seams.ts').includes('useKernelChannels'), '而原始文本里确实有这段说明（证明上面那条不是空转）').toBe(true)
   })
 })
 
