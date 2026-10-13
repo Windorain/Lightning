@@ -1582,6 +1582,84 @@ export class Context {
   getSelection(): SelectionContext {
     return this.workbench?.selection ?? embedUnavailable('selection')
   }
+
+  /**
+   * **撤销权威读面**（R1-β① C2）。
+   *
+   * ## 它替代的旧机制
+   *
+   * 旧实现是 `return this.workbench?.editHistory ?? embedUnavailable('editHistory')`
+   * —— 直接把旧 `UndoManager`（`context/editHistory` 的双栈）交出去，于是
+   * 「撤销权威是谁」在类型上**就是旧栈**，而内核 `Document.history` 另有一条并行历史。
+   * 两条历史并存正是 #385 评论 6988 裁决① 点名要消除的形态（"写了撤不掉"的歧义）。
+   *
+   * ## 为什么是"读面 + 转发"而不是"把内核对象包成 UndoManager"
+   *
+   * 内核撤销**不是**一个可从外部 `push` 的栈 —— 它是 `Command` 联合里的
+   * `{kind:'undo'|'redo'}` 两条**语义命令**，历史记账由 `reduceUndoRedo`
+   * 在事务内完成（契约 §5.2）。若这里造一个 `push()` 能塞任意闭包的 `UndoManager`，
+   * 就等于把旧栈的形状**保活**成新门面（#171 明令禁止）。
+   *
+   * ⇒ 本访问器只交出**读**（`canUndo`/`canRedo`/`undoLabel`/`redoLabel`），
+   * 而 `undo()`/`redo()` 走 {@link submitKernelUndoRedo} —— 它们发的是**命令**。
+   *
+   * @returns `null` = 内核未装配（此时调用方必须走旧栈；见 {@link getEditHistory} 的分流）
+   */
+  kernelUndoState(): KernelUndoState | null {
+    const kernel = this.kernel
+    if (kernel === null || !kernel.hasAdoptedContent()) return null
+    // #301 P10f C′1 同一条取舍：响应式依赖挂在**内容重读信号**上
+    // （`contentRefreshTick` 在 `replaceDoc` 与 `requestContentRefresh` 两处自增）
+    // —— 撤销/重做推进文档版本 ⇒ 必须让消费点的 computed 重算。
+    void this.main.contentRefreshTick.value
+    const summary = kernel.documentSummary()
+    if (summary === null) return null
+    return {
+      canUndo: summary.canUndo,
+      canRedo: summary.canRedo,
+      undoLabel: summary.undoLabel,
+      redoLabel: summary.redoLabel,
+    }
+  }
+
+  /**
+   * **经内核提交撤销/重做**（R1-β① C2；内核撤销成为唯一撤销）。
+   *
+   * ## 为什么它必须与 {@link submitContentEdit} 一样带投影
+   *
+   * `submitContentEdit` 的注释写明了编辑的正确形态是"① 内核写 → ② 投影回 legacy"。
+   * 撤销/重做**同样是内容变更**（它换掉 scene 的前后态）⇒ 缺了 ②，legacy 载体
+   * 会停在撤销前的值：保存写出**已撤销**的内容、渲染链看不见变化
+   * —— 正是 #333 那类"提交成功但看不见"。
+   *
+   * ## 为什么收口在这里而不是让调用方各自组合
+   *
+   * 与 `submitContentEdit` 同一条理由（"9 处调用点各自组合 = 9 份会漂移的实现"）：
+   * "内核事务提交后投影"是**一个**事实，故它只有一处实现（本方法）。
+   *
+   * @returns `true` = 内核已执行并投影（调用方**不应**再动旧栈）；
+   *          `false` = 未装配 / 命令被拒（调用方走旧栈）
+   */
+  submitKernelUndoRedo(kind: 'undo' | 'redo'): boolean {
+    const kernel = this.kernel
+    if (kernel === null) return false
+    if (!kernel.hasAdoptedContent()) return false
+    const ticket = kernel.submit({ kind, contextId: KERNEL_CONTEXT_ID })
+    kernel.drain()
+    const outcome = kernel.settlementOf(ticket)
+    // 与 `submitContentEdit` **同一条**判据：只有真的生效才投影。
+    //
+    // ⚠️ `unchanged`（栈空：没什么可撤销）也算**生效**的"无事发生"：它**不**改变
+    // 内容 ⇒ 投影是净零的（`syncLegacyFromKernel` 自己会在引用未变时返回 `false`）。
+    // 故对 `unchanged` 也返回 `true` —— 内核**已经是**权威，调用方不应回落到旧栈：
+    // 把"内核栈空"误读成"未装配"会去动一条**不该再有人动**的旧栈。
+    // 而 `rejected`（版本冲突等）返回 `false`：那是真的没生效，调用方需要知道。
+    if (outcome === null) return false
+    if (outcome.status !== 'applied' && outcome.status !== 'unchanged') return false
+    this.syncLegacyFromKernel()
+    return true
+  }
+
   getEditHistory(): UndoManager {
     return this.workbench?.editHistory ?? embedUnavailable('editHistory')
   }
