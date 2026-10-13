@@ -22,7 +22,7 @@
  * `commitFieldValue` → 唯一写路由。组件不判合法性、不碰文档。
  */
 
-import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { inject } from 'vue'
 import { contextKey, type Context } from '@/runtime/context'
 import PropertyField from './PropertyField.vue'
@@ -70,30 +70,25 @@ watch(
   () => {
     model.value = buildInspector(props.ctx, session)
     version.value++
-    // 每次重算后刷新提交落点登记：目标/选中集变化会改变 `resolveRefs` 的结果，
-    // 而落点闭包必须按**当前**描述符与上下文解析（不是快照）。
-    syncCommitSinks()
   },
   { immediate: true, deep: false },
 )
 
-/** 已登记的 controlId（卸载时按它清理，避免在 `applyPropertyRegistry` 里留孤儿）。 */
-const registeredSinkIds = new Set<string>()
-
-function syncCommitSinks(): void {
-  for (const section of model.value.sections) {
-    for (const row of section.rows) {
-      const desc = descriptorOf(row.field.descriptor.id)
-      if (!desc) continue
-      // 只登记**可编辑且有草稿语义**的字段：只读字段没有提交落点
-      // （`resolveRefs` 为空 ⇒ `edit.kind === 'readOnly'`）。
-      const field = buildField(props.ctx, desc, session)
-      if (field.edit.kind !== 'editable') continue
-      registerCommitSink(desc)
-      registeredSinkIds.add(`field:${desc.id}`)
-    }
-  }
-}
+/**
+ * ## R1-β① C4：`syncCommitSinks` 与 `registeredSinkIds` 已**整体删除**
+ *
+ * 旧实现在这里遍历模型，把每个可编辑描述符登记成 `WM.applyPropertyRegistry` 的一张
+ * 闭包表（`field:<描述符 id>` → 「用唯一写路由提交这个值」）供输入端口按 `controlId`
+ * 回查，并在卸载时清理。那条链使**命令的落点取决于组件是否挂载**：未挂载 ⇒
+ * `controlNotRegistered` ⇒ 表现为"输入了没反应"。
+ *
+ * C4 把解析移到**边界层**：`editors/workbench-rna#commitDraftControlValue`
+ * （控件 id → 描述符注册表 → `submitPropertyWrite` 唯一写路由），由
+ * `workbench/inputHotkeys` 的端口调用 ⇒ 落点是**装配事实**，不是组件生命周期事实。
+ *
+ * ⚠️ `WM.applyPropertyRegistry` 容器本身尚存（`WorkbenchRoot.vue:310` 的诊断读面仍在读
+ * 它的键集），退役归 C5 接缝核销；**本文件已不再向它登记任何东西**。
+ */
 
 function descriptorOf(propertyId: string): PropertyDescriptor | null {
   return workbenchRegistry().registry.descriptor(propertyId) ?? null
