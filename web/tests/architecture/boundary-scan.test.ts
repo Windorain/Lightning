@@ -942,10 +942,11 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     expect(rotten, '白名单里有**已不存在**的登记 ⇒ 清单腐烂，请同步核销：\n' + rotten.join('\n')).toEqual([])
     expect(
       modelCallers.sort(),
-      '`Context#legacyDocumentModel()` 的调用者**恰为两处**'
-        + '（`property-write-legacy-document-model` 与 `legacy-document-in-place-edit`）；'
-        + '多一处即为绕过具名读面的后门。',
-    ).toEqual(['context/captureEmbedInitialView.ts', 'editors/workbench-rna.ts'])
+      '`Context#legacyDocumentModel()` 的调用者**恰为一处**'
+        + '（`property-write-legacy-document-model`）；多一处即为绕过具名读面的后门。'
+        + '⚠️ R1-β① C3（#385 裁决④）之后 `legacy-document-in-place-edit` 那条已核销'
+        + '（`context/captureEmbedInitialView.ts` 改走 `Context#setHostEmbedInitialView`）。',
+    ).toEqual(['editors/workbench-rna.ts'])
   })
 
   it('**负对照**：上一条判据能抓到绕过（`ctx.main.doc.value` 必被判红）', () => {

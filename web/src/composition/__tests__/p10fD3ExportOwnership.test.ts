@@ -181,12 +181,26 @@ describe('D3/S5 · seam 表整体不变量（新增登记不得破坏既有口�
     expect(seamById('annotation-wide-field-face'), '剩余半边必须以新名在案').toBeDefined()
   })
 
-  it('本批新增/保留的四条接缝都在（终删暴露的欠账可数）', () => {
+  /**
+   * R1-β① C3（#385 裁决④）核销：`legacy-document-in-place-edit` 的两个退出子句
+   * （"专门适配面" + "本用途零调用"）已同时成立 ⇒ 登记退出。
+   *
+   * ⚠️ 这条是**回归断言**（与上面那条同性质）：核销项**不得**复活回 `SEAMS`
+   *（该表语义是"双轨剩余数、只应减少"）。它同时替换了原先"本批新增/保留的四条接缝都在"
+   * 清单里的那一项 —— 删除清单项**不是**放宽断言，而是登记退出的机械对账。
+   */
+  it('**核销的接缝不得复活**：`legacy-document-in-place-edit` 已不在表里（改走 `setHostEmbedInitialView`）', () => {
+    expect(
+      seamById('legacy-document-in-place-edit'),
+      '本用途已由 `Context#setHostEmbedInitialView`（具名宿主装配面）承接 ⇒ 不得复活',
+    ).toBeUndefined()
+  })
+
+  it('本批新增/保留的接缝都在（终删暴露的欠账可数）', () => {
     for (const id of [
       'property-write-legacy-document-model',
       'legacy-grid-edit-handle',
       'legacy-render-source-document',
-      'legacy-document-in-place-edit',
       'annotation-wide-field-face',
       'isometric-export-legacy-bake',
     ]) {

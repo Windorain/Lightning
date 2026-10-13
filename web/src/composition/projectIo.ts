@@ -10,7 +10,7 @@
  *
  * 判红是**对的**，且理由不止"闸门要登记"：
  * - `runtime/context.ts` 是**待清算**的旧层文件（`composition/seams.ts` 的
- *   `legacy-render-source-document`/`legacy-document-in-place-edit` 等接缝都指着它）；
+ *   `legacy-render-source-document`/`property-write-legacy-document-model` 等接缝都指着它）；
  *   把新的生产接线**加进**正在退场的宿主里，正是 #171 禁止的
  *   "新门面包旧核心保活"——新能力应该落在新层。
  * - 本模块的职责（"把工程格式接到生产"）是**装配 + 接线**，与 `composition/documentLoad`

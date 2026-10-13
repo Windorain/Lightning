@@ -303,49 +303,26 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' 由内核或专门适配面承载）⇒ 届时删除该读面与本条登记。',
   }),
   /**
-   * P10f D3（#301）登记：**旧文档的原地编辑**（`meta.embed_initial_view` 写）。
+   * ⚠️ **已核销（R1-β① C3；#385 裁决④ + GF-21）**：原 `legacy-document-in-place-edit`
+   * 登记在此。
    *
-   * ## 为什么它不能用"克隆 + `setDocument`"（实测的信号面差异）
+   * ## 它为什么可以退出（两个子句同时成立，不是"看起来走了"）
    *
-   * `context/captureEmbedInitialView#capturePreviewToDocument` 抓取预览视口相机后
-   * 写 `doc.meta[embed_initial_view]`，而 `context/embedInitialView#setDocumentEmbedInitialView`
-   * 的语义**就是原地改**。
+   * | 子句 | 结论 | 机械证据 |
+   * |---|---|---|
+   * | 甲 "承载 `meta.embed_initial_view` 的**专门适配面**" | ✅ 已有 | `runtime/context.ts#setHostEmbedInitialView`（类型化 `ViewportCameraState`，**不**交出旧文档本体；原地写 + 镜像语义逐点不变） |
+   * | 乙 "本用途上 `legacyDocumentModel()` **零调用**" | ✅ 成立 | `context/captureEmbedInitialView.ts` 已改走上面的具名装配面；`boundary-scan.test.ts` 的调用者白名单闭集随之收窄（另见 `property-write-legacy-document-model` 的剩余一处） |
    *
-   * | 方案 | 后果 |
-   * |---|---|
-   * | 传克隆（`frozenDocumentValue()`） | 写入**静默丢失**（改的是副本，没人用） |
-   * | 克隆 + `setDocument(clone)` | `main.replaceDoc` 会 bump `contentRefreshTick` **与** `documentRevision` ⇒ `EmbedViewport.vue` 的 `watch(getDocumentRevision)` 把 `didInitCamera` 重置 ⇒ **相机自动初始化被重置**（可感知行为变更） |
-   * | **本体**（本条） | 与收口前**逐字节相同**（原地改 meta，不 bump 任何信号） |
+   * ## 为什么按"专门适配面"就算退出（而不是"移到另一个口就是改名"）
+   *
+   * 区别在**是否交出旧文档本体**：本面只收发**观察视角的值**（`ViewportCameraState`），
+   * 旧文档形态不出模块；而 `legacyDocumentModel()` 交出的是 `RuntimeDocument` 本体。
+   * #171 禁的是后者那种"换个名字继续当权威读入口"。
+   *
+   * ⚠️ **残留的相邻欠账不在本条**：`meta.embed_initial_view` 至今**没有类型化内核落点**
+   * （装配仍把观察视角放在非类型化的 `view` 里）—— 那是 **GF-21**（甲未兑现），
+   * 不在本接缝的范围内，故本条核销**不等于**GF-21 关闭。
    */
-  Object.freeze({
-    id: 'legacy-document-in-place-edit',
-    files: Object.freeze([
-      'src/runtime/context.ts',
-      'src/context/captureEmbedInitialView.ts',
-      'src/context/embedInitialView.ts',
-    ]),
-    newTrack:
-      '**替换式**编辑一律走"克隆 + `Context#setDocument`"（`frozenDocumentValue()`'
-      + ' 给克隆、`setDocument` 是唯一写入口，语义见其 `intent` 参数）。',
-    oldTrack:
-      '`src/context/captureEmbedInitialView.ts` 经具名取值口 '
-      + '`Context#legacyDocumentModel()` 取**本体**并原地写 `doc.meta`'
-      + '（`setDocumentEmbedInitialView` 的语义就是原地改）。',
-    blocker:
-      '`meta.embed_initial_view` 是**文件格式**的键，内核内容面（`DocumentContent`）'
-      + '不承载它 ⇒ 换成"克隆 + `setDocument`"会改变信号面（见上表），'
-      + '而改成内核命令需要先有"写文档 meta"的命令（`Command` 联合无此类成员）。',
-    closureCoverage: 'in-closure',
-    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
-    exitCondition:
-      "**（甲）登记条件 —— ⏳ 未成立**：需要\"承载 `meta.embed_initial_view` 的内核内容面或专门适配面\"。⚠️ **R1-α 实测澄清**：R1-α 落地的 `setDocumentMeta` 写的是 `DocumentContent.metadata` 的具名字段（`name`/`author`/`description`/`tags`/`origin`/`createdAtMs`），**不含** `embed_initial_view` —— GF-8 已裁决它是观察视角（归 3D 编辑器实例/宿主初始视图），不伪造进文档 ⇒ 本条仍缺专门适配面。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：实测 `Context#legacyDocumentModel()` 的生产调用点恰 2 处（`context/captureEmbedInitialView.ts:19`、`editors/workbench-rna.ts:503`）。\n**以下为原退出条件（逐字保留）**：\n"
-      +
-      '`meta.embed_initial_view` 由内核内容面或专门适配面承载，'
-      + '且 `src/context/captureEmbedInitialView.ts` 不再取旧文档本体'
-      + '（`src/runtime/context.ts` 的 `legacyDocumentModel()` 在本用途上零调用）'
-      + '⇒ 届时核销本用途；若 `property-write-legacy-document-model` 也已核销，'
-      + '则该取值口可整体删除。',
-  }),
   /**
    * P10f D3（#301）登记：**等轴 PNG 导出仍走旧烘焙链**（D-8 实测驱动的收窄）。
    *

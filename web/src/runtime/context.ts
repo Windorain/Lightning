@@ -52,6 +52,8 @@ import {
 import { projectKernelSaveView, type SaveProjection } from '@/composition/saveProjection'
 import { projectKernelGrids } from '@/composition/kernelProjection'
 import { resolveSideTable } from '@/runtime/sideTableResolution'
+import { cloneViewportCameraState, setDocumentEmbedInitialView } from '@/context/embedInitialView'
+import type { ViewportCameraState } from '@/runtime/viewportCamera'
 import type { Command } from '@/application/commands'
 import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotationRead'
 
@@ -830,30 +832,73 @@ export class Context {
   /**
    * **旧文档本体（不克隆）** —— `getDoc()` 退出后**唯一**保留的旧数据模型取值口。
    *
-   * ## 只有两个合法消费者，且**都**登记在案（见 `composition/seams.ts`）
+   * ## 剩下的合法消费者只有一家，且登记在案（见 `composition/seams.ts`）
    *
    * | # | 消费者 | 为什么它需要"本体"而不是"克隆/读面" | 登记 |
    * |---|---|---|---|
    * | 1 | `editors/workbench-rna#documentStateOf` | `DocumentState.document` 的**字段类型就是**旧文档（`editors/property-writers`），面板属性写要把它交给 `applySetProperty`；**每格一 clone 会在大文档上产生可感的卡顿**（实测口径：432 帧文档的面板读路径） | `property-write-legacy-document-model` |
-   * | 2 | `context/captureEmbedInitialView` | **原地**写 `doc.meta[embed_initial_view]`（`setDocumentEmbedInitialView` 的语义就是原地改）。改成"克隆 + `setDocument`"会**顺带 bump `documentRevision`** ⇒ `EmbedViewport.vue` 的相机自动初始化被重置（可感知行为变更） | `legacy-document-in-place-edit` |
+   *
+   * ⚠️ **第二个消费者已迁走（R1-β① C3；#385 裁决④）**：`context/captureEmbedInitialView`
+   * 曾在此取本体并原地写 `meta.embed_initial_view`，但那是**观察视角**
+   * （3D 编辑器实例/宿主初始视图状态，GF-8），不是"写模型仍是旧文档"这件事
+   * ⇒ 它现在走**具名宿主装配面** {@link setHostEmbedInitialView}，
+   * 原登记 `legacy-document-in-place-edit` 的两个退出子句（专门适配面 + 本用途零调用）
+   * 同批成立并**核销**。
    *
    * ## 为什么它**不**等于"把 `getDoc()` 改个名"（这是判据要能区分的事）
    *
    * | | 旧 `getDoc()` | 本方法 |
    * |---|---|---|
-   * | 调用点 | 46 处 / 18 文件（保存/导出/属性/拾取/渲染/撤销**全在内**） | **2 处**（上面两行，均为已登记的暂存） |
-   * | 语义 | "文档内容的**权威读入口**"（谁都能拿它读一切） | "旧数据模型仍需要的**两句形状**的载体" |
-   * | 判据 | 无（它就是权威） | `boundary-scan.test.ts` 的**白名单闭集**：`legacyDocumentModel(` 的调用者必须**恰为**上面两家（多一处即判红） |
+   * | 调用点 | 46 处 / 18 文件（保存/导出/属性/拾取/渲染/撤销**全在内**） | **1 处**（上面那一行，已登记的暂存） |
+   * | 语义 | "文档内容的**权威读入口**"（谁都能拿它读一切） | "旧数据模型仍需要的**那一种形状**的载体" |
+   * | 判据 | 无（它就是权威） | `boundary-scan.test.ts` 的**白名单闭集**：`legacyDocumentModel(` 的调用者必须**恰为**上面那一家（多一处即判红） |
    *
    * ⇒ "终删 `getDoc()`"的机械含义是**权威读入口消失、46 处各有具名读面**；
-   * 剩下这两处是**真实的承载面欠账**（写模型仍是旧文档 + 文件格式的原地写），
-   * 故它们必须**可见、可数、有 owner** —— 而不是散在 46 处里看不见。
+   * 剩下的这一处是**真实的承载面欠账**（写模型仍是旧文档），
+   * 故它必须**可见、可数、有 owner** —— 而不是散在 46 处里看不见。
    *
    * ⚠️ **不得**用它读内容事实（网格/注解/材质/帧/说明/元数据/产物 plain）。
    * 那样做会让白名单闭集变成后门，而闭集正是为防这件事设的。
    */
   legacyDocumentModel(): RuntimeDocument | null {
     return this.main.doc.value
+  }
+
+  /**
+   * **宿主初始视图（观察视角）的唯一装配面**（R1-β① C3；#385 裁决④ / GF-8 / GF-21）。
+   *
+   * ## 为什么它是一个**具名宿主装配面**，而不是"再去取旧数据模型"
+   *
+   * `meta.embed_initial_view` 是**观察视角**（`{target,yawDeg,elevationDeg,distance,zoom}`）
+   * —— #385 裁决④ 逐字：「属 3D 编辑器实例/宿主初始视图状态，**不**伪造进文档 camera
+   * 投影参数（GF-8 既有口径）。给它**具名宿主装配面**。」它既不是文档**内容**
+   * （内核 `DocumentContent` 不承载它，GF-8 明确禁止把它塞进文档内容来省一条接缝），
+   * 也不是渲染链的主文档投影，因此**不该**经 `legacyDocumentModel()`
+   * ——那个口只为"写模型仍是旧文档"这一件事存续（见其说明段的两行表）。
+   *
+   * ## 语义（与迁移前**逐点相同**，不是"顺手换个写法"）
+   *
+   * - **原地**写 `doc.meta[EMBED_INITIAL_VIEW_META_KEY]`（`setDocumentEmbedInitialView`）：
+   *   不换文档引用 ⇒ **不**推进 `documentRevision` ⇒ `EmbedViewport` 的相机自动初始化
+   *   不被重置（若改成"克隆 + `setDocument`"，用户点一次"同步预览视角到文档"就会把
+   *   嵌入机位顶回默认 —— 那是可感知的行为变更）；
+   * - **同时**镜像 `Main.embedInitialView`（运行期读面；预览面板与机位初始化消费它）；
+   * - 无文档 ⇒ 返回 `false`（调用方如实失败，**不**静默造一个）。
+   *
+   * ## 它为什么落在 `Context` 上（而不是另起一个宿主模块）
+   *
+   * 落盘读的是 `main.doc` 本体，而 `tests/architecture/boundary-scan.test.ts` 的
+   * **D-7 防绕过**判据把 `main.doc` 的直接读取点钉成白名单闭集（本文件是"读面本体"那一格）。
+   * 另起模块会让闭集**多一格**（那正是"放宽白名单"）；收口在此则与既有读面同一落点。
+   *
+   * @returns `true` = 已落到宿主初始视图状态；`false` = 此刻没有文档
+   */
+  setHostEmbedInitialView(view: ViewportCameraState | null): boolean {
+    const doc = this.main.doc.value
+    if (doc === null) return false
+    setDocumentEmbedInitialView(doc, view)
+    this.main.embedInitialView.value = view === null ? null : cloneViewportCameraState(view)
+    return true
   }
 
   /**
