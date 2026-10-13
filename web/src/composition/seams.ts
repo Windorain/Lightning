@@ -833,6 +833,65 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' 不再有"未承载字段即整体回落"的分支（`src/editors/property-writers.ts`'
       + ' 对这些字段都有写分支）⇒ 届时删除本条登记。',
   }),
+  /**
+   * R1-β① **补登**（2026-10-13；用户裁决 R0-7 / #385 评论 7029）。
+   *
+   * ## 为什么是"补登"而不是"新增"
+   *
+   * 本表的语义是「双轨**剩余**数、只应减少」。本条登记的是一条**早已存在**、
+   * 却在 P0–P11 全过程中**从未被登记**的双轨：撤销权威。
+   *
+   * 它不在原 11 条里 —— 后果不是"少记一笔"，而是 **R0-3 的机械判据
+   * （"闭包 ∩ 旧层 = ∅" + 本表）结构上发现不了它**：表里没有它，
+   * 扫描器也就不会去找它。补登之后，该判据才重新具备覆盖力。
+   */
+  Object.freeze({
+    id: 'undo-authority-dual-track',
+    files: Object.freeze([
+      'src/operators/pushDocUndo.ts',
+      'src/operators/operatorRegistry.ts',
+      'src/operators/modalOperatorWrapper.ts',
+      'src/runtime/context.ts',
+    ]),
+    newTrack:
+      '内核撤销是 `Document#history` 的事务内记账：`Command` 联合的 '
+      + '`{kind: undo | redo, contextId}` 经 `reduceUndoRedo` 在事务内完成；'
+      + '读面取 `Context#kernelUndoState()`（`KernelSession#documentSummary()` → '
+      + '`application/queries#queryDocument` 的 `doc.history.past/future`），'
+      + '提交面取 `Context#submitKernelUndoRedo()`。',
+    oldTrack:
+      '旧栈 `UndoManager`（`context/editHistory`）仍由 `src/operators/pushDocUndo.ts:34` 的 '
+      + '`ctx.getEditHistory().push({ execute, undo })` **持续写入** —— 它记录的是'
+      + '**算子级整文档快照**（`DocumentSnapshot | null` 不透明令牌，`execute`/`undo` 各做一次'
+      + '整文档替换）。调用点四处：`src/operators/operatorRegistry.ts:65,112,139`'
+      + '（对所有 `flagUndo` 且 `ctx.hasLoadedDocument()` 的算子包一层）与 '
+      + '`src/operators/modalOperatorWrapper.ts:54`；出口是 `Context#getEditHistory()`。'
+      + '⇒ 同一次编辑可能在内核历史与旧栈各留一条记录，而用户按 Ctrl+Z 只走其中一条。',
+    blocker:
+      '**GF-20**（#385 评论 7019、7029）：算子级整文档撤销（含「**撤销到无文档**」，'
+      + '#301 R-WK-09 裁决 3 要求该能力存续）在内核历史模型下**无承载面** —— '
+      + '内核撤销是 `Document#history` 的事务内记账，而 `openDocument`/`closeDocument` '
+      + '会**换掉** `Document`（新文档历史天然为空）⇒ **跨文档撤销在类型上不存在**。'
+      + '用户裁决 R0-7 已定：**多文档不是本轮能力**（仅作架构扩展性保留），'
+      + '故禁止以"先上多文档"解此题；处置 = 现在保留临时路径，后续按 **A′**'
+      + '（把「打开/关闭文档」这一动作本身记成一次可撤销的历史事实，或保留可撤销墓碑使历史可达）。',
+    closureCoverage: 'in-closure',
+    owner: Object.freeze({ p: 'R1-β①', issue: 387, duty: '端口切换与写路径内核化（撤销权威统一）' }),
+    exitCondition:
+      '**（甲）登记条件 —— ⏳ 未成立**：需要 GF-20 的 A′ 落地 —— 内核有承载'
+      + '「文档生命周期转换」的历史形态（或可撤销墓碑），'
+      + '使 `Document#history` 能表达"回到上一份文档 / 回到无文档"。\n'
+      + '**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：`pushDocUndo(` 的旧栈写入点'
+      + '（`src/operators/pushDocUndo.ts:34`）及其四处调用点须消失，'
+      + '且 `Context#getEditHistory()` 的生产调用点为 0'
+      + '（扫描口径：`git grep -n "getEditHistory()" -- web/src`，排除 `__tests__`/`.test.`'
+      + ' 与注释行 —— **不是**按裸标识符扫全树，同名异物与注释会误判）。'
+      + '**只有（甲）不算退出。**\n'
+      + '**以下为补登时记录的旧退出条件（逐字保留）**：'
+      + '`src/operators/pushDocUndo.ts` 不再向旧栈写入，'
+      + '`src/operators/operatorRegistry.ts` 与 `src/operators/modalOperatorWrapper.ts`'
+      + ' 不再包旧栈撤销 ⇒ 届时删除本条登记。',
+  }),
 ])
 
 /** 按 id 取登记项（未登记返回 `undefined`，由调用方决定是缺口还是缺陷）。 */

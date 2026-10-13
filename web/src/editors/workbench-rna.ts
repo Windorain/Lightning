@@ -67,6 +67,7 @@ import {
 import {
   type DocumentState,
   createWorkbenchWritePorts,
+  parseBlockStateId,
 } from './property-writers'
 import {
   type InspectorContextInputs,

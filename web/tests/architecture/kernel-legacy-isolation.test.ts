@@ -750,6 +750,29 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       'P10b（#282）Area 渲染树的作用域上下文类型引用 `LifecycleLedger`（A13 资源账本）：递归组件每加深一层若靠层层传 props，会让"加深一层"变成"改 N 个签名"（§15 末段禁止的形态），故经 `provide`/`inject` 传递。账本的**写入**仍唯一经 `AreaHost`（`acquire`/`release`/`closeInstance`）',
     exitStage: 'P10/P11：同 `AreaLayoutHost.vue`（同一组件族），随外壳迁移；P11 审计核销本行',
   }),
+  Object.freeze({
+    from: 'src/operators/builtin/moveTranslate.ts',
+    to: 'runtime/kernelSession',
+    reason:
+      'R1-β① C1（#387）：网格移动算子改为把移动经**内核语义命令**提交（`{kind: moveCells}` / `Context#submitContentEdit`），'
+      + '不再把 legacy `Grid` 捕获进撤销闭包并原地 `moveBlock`。原形态的写入会**静默丢失** —— '
+      + '实测 legacy `frame(0).grid === frame(0).grid` 为 true，而读面 `gridOf(doc, 0) === gridOf(doc, 0)` 为 false'
+      + '（读面每次新建视图对象）。⇒ 旧算子依赖内核会话是本次迁移的**内容**，不是给旧路径续命。',
+    exitStage:
+      'R1-β① C4/C5：端口切换后本算子不再作为命令入口（`DOMAIN_COMMAND_TO_OPERATOR` 与 `legacy:` 票号消失），'
+      + '算子随之内迁内核侧装配时核销本行',
+  }),
+  Object.freeze({
+    from: 'src/runtime/context.ts',
+    to: 'domain/scene',
+    reason:
+      'R1-β① C3（#387）：`Context#syncLegacyFromKernel` 需读内核 `scene` 的对象数据（`findObjectData`）'
+      + '才能把内核内容（网格 / 逐格内容 / 身份）**投影回 legacy 载体** —— 渲染链与保存链此刻仍读 legacy，'
+      + '缺这次投影就是 #333「提交成功但看不见」。这是迁移期的**单向投影**（内核 → legacy），不是双向同步。',
+    exitStage:
+      'R1 收口后渲染链终切到内核（`legacy-render-source-document` / `presenter-surface-dual-track` 退出）时，'
+      + 'legacy 载体不再被读 ⇒ 本投影与本行一并核销',
+  }),
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {
@@ -823,7 +846,13 @@ describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已�
         `${e.from}→${e.to}`,
       )
       expect(e.reason.length, `${e.from}→${e.to} 必须写明理由`).toBeGreaterThan(20)
-      expect(e.exitStage, `${e.from}→${e.to} 必须写明退出阶段`).toMatch(/P\d+/)
+      // 退出阶段必须写明**负责批次**。批次命名跨过两个时代：
+      //  - P 时代：`P<N>`（#250 立项的 P1–P11，及 P10b/P10d/P10f 续接批）；
+      //  - R 时代：`R<N>`（**#385 立项单**重划的 R1–R6，#386–#392）。
+      // 判据只要求"写明了批次"，**不**锚定某一时代的命名 —— 锚定会把新的
+      // 真实批次逼成谎报一个 P 编号（与 `boundary-scan.test.ts` 里
+      // `EXTRA_BATCHES` 那段注释同一理由：登记表宁可真、不可假）。
+      expect(e.exitStage, `${e.from}→${e.to} 必须写明退出阶段`).toMatch(/(P\d+[a-z]?|R\d+)/)
     }
   })
 
@@ -1127,6 +1156,19 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
         //  · `setDocumentMeta` 写 `DocumentContent.metadata` 的**具名字段**
         //    （`Partial<DocumentMetadata>`，不是 `Record<string, unknown>` 字段袋）——
         //    这正是为什么它**不**算通用字段 patch：类型上就写不了未知键。
+        'setCellIdentity',
+        // R1-β① C3（#387）：**块身份写命令**（GF-19，按 §8 登记在 #385）。
+        //
+        // ⚠️ 它同样**不是**"第二个通用属性写"，理由是**寻址面不同**：面板提交的是
+        // 显示形态的方块身份，而 `cells` 承载的名字**已截去 `minecraft:` 前缀**
+        // （`pure/gridTypes.ts:18`）⇒ 身份在文档里是「`cells` 值 + `cellPalette`
+        // 内容键」的**二元组**，按**格坐标**寻址，没有"从名字反拼命名空间"的环节。
+        // 内核里也没有"块身份"属性描述符（`kernel-properties.ts` 的方块属性集不含它），
+        // 故无法经 `setProperty` 表达 —— 这正是新增本命令的理由。
+        //
+        // （反证：若把它硬塞成 `setProperty` 能表达的形态，就必须由名字反拼
+        // `` `minecraft:${name}` ``，那会把 `ae2:` 改写成 `minecraft:ae2:...` ——
+        // GF-7 实测 68 条调色板里 66 条被改写的那次事故。）
         'setCellContent',
         'setDocumentMeta',
         'moveCells',

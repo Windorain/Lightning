@@ -596,6 +596,31 @@ export interface BlockPaletteEntry {
 }
 
 /**
+ * `registryId` 的**尾段**（首个冒号之后；无冒号则整体）。
+ *
+ * ## 为什么它住在这里
+ *
+ * `BlockPaletteEntry.registryId` 是 `namespace:path` 形态（真实产物含
+ * `gregtech:`/`appliedenergistics2:` 等命名空间），而 `cells` 承载的方块名
+ * **已截去 `minecraft:` 前缀**（`pure/gridTypes.ts:18`）—— 两者是同一约定的
+ * 两端，故"取尾段"的规则与 `BlockPaletteEntry` 同处一个模块。
+ *
+ * ## 它消除的是**第三份**内联实现
+ *
+ * 该规则此前在 `composition/kernelProjection.ts:332` 与 `:461` 各内联一份；
+ * R1-β① C3 的 `runtime/gridRead#identityRefOf` 需要第三处。集中到本函数后，
+ * 调用方引用同一实现（`kernelProjection` 那两处内联可在其后续批次收敛）。
+ *
+ * ⚠️ **它只取尾段，不含"命名空间该不该丢"的判断** —— `ae2:quartz` 与
+ * `minecraft:quartz` 的尾段相同，这正是 `identityRefOf` 遇到多条命中时必须
+ * **拒绝**（返回 `null`）而不是取首条的原因。
+ */
+export function tailOfRegistryId(registryId: string): string {
+  const colon = registryId.indexOf(':')
+  return colon >= 0 ? registryId.slice(colon + 1) : registryId
+}
+
+/**
  * 调色板条目的**内容键**（去重与逐格引用都用它）。
  *
  * ## 为什么必须含**全部**区分字段（本批实测抓出的一处真实回退）

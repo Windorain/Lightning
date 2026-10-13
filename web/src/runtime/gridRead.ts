@@ -35,7 +35,7 @@ import { findObjectData } from '@/domain/scene'
 import type { CellContent, CellContentTable } from '@/domain/cellContent'
 import { cellPositionKey } from '@/domain/cellPosition'
 import type { PartRecord } from '@/pure/partTypes'
-import { blockPaletteEntryKey, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
+import { blockPaletteEntryKey, tailOfRegistryId, type BlockGeometryAsset, type BlockPaletteEntry } from '@/domain/blockGeometry'
 import { decodeBakedGeometry } from '@/render/mesh/bakedGeometryDecode'
 import type { BakedQuad, BakedQuadsGeometry } from '@/render/schema/types'
 
