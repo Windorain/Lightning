@@ -20,10 +20,13 @@
  * ## 定级（**不得**拔高）
  *
  * 本文件是 **kernel 层**验证：命令经 `KernelSession.submit` → 生产 `reduceCommand` 本体。
- * **生产输入口仍是 legacy 转发**（`workbench/inputHotkeys.ts` 的 `workbenchCommandSink`
- * 把具名命令交给旧 operator，未接通的返回 `unsupported:` 票）——
- * 端口切换（`workbenchCommandSink` → `editorCommandSink(editor)`）属 β 批。
- * ⇒ 本文件**不**声称"生产编辑路径已通"。
+ * ⚠️ **本段原写"生产输入口仍是 legacy 转发、端口切换属 β 批"——该描述已被
+ * R1-β① C4 取代**：`workbench/inputHotkeys.ts` 的 `workbenchCommandSink` 现在走
+ * 三条**已结算**入口（`setProperty` → 边界层 `commitDraftControlValue`；
+ * `undo`/`redo` → `Context#submitKernelUndoRedo`；其余领域命令 →
+ * `Context#submitContentEditSettlement`），旧转发表与旧票号前缀已删除。
+ * 端口改道的判据在 `src/workbench/__tests__/inputPortKernelRouting.test.ts`。
+ * ⇒ 本文件仍**只**声称 kernel 层（它直接 `submit`，不经端口）。
  */
 
 import fs from 'node:fs'

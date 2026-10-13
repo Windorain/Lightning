@@ -24,9 +24,11 @@
  * ## 定级（**不拔高**）
  *
  * 本文件是 **kernel + 适配器 + 装配层**验证。生产 UI 入口（File 菜单两项 +
- * 两个算子入注册表）已接线，但生产**输入口**仍是 legacy 转发
- * （`workbench/inputHotkeys.ts` 的 `workbenchCommandSink`）；端口切换属 β 批。
- * ⇒ 本文件**不**声称"UI 上点一下就能跑通"。
+ * 两个算子入注册表）已接线；生产**输入口**已由 **R1-β① C4** 切到内核
+ * （`workbench/inputHotkeys.ts` 的 `workbenchCommandSink` 走三条已结算入口，
+ * 旧转发表与旧票号前缀已删除；判据见
+ * `src/workbench/__tests__/inputPortKernelRouting.test.ts`）。
+ * ⇒ 本文件仍**不**声称"UI 上点一下就能跑通"（端到端 UI 级归 **#282**）。
  */
 
 import fs from 'node:fs'
