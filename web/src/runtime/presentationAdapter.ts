@@ -257,3 +257,127 @@ export function structurePrimitive(input: {
     transparency: null,
   }
 }
+
+/**
+ * **按材质下标分组**的结构几何（#301 P10f D3「材质统一」的关键缺口修复；R1-β① C5）。
+ *
+ * ## 它修的是什么（一个**真实**的贴图断路）
+ *
+ * `mergeBakedQuadPiecesAttributes` 把**全部**四边形并进**一个**几何，而
+ * `structurePrimitive` 只给**一个**材质 `id: 'structure'`。于是：
+ *
+ *  - `presentation/presenter#createMaterial` 只在 `binding.map` 在场时才设 `params.map`；
+ *  - 而 `composition/kernelTextureResources#textureBindingsOf` 的绑定键是
+ *    `material:<下标>`（`MATERIAL_ID_PREFIX` 的约定，与几何的 `materialIndex`、
+ *    资源表下标三者对齐）；
+ *  - `'structure'` **不**符合该约定 ⇒ `materialIndexFromId` 答 `null` ⇒ 该材质永远"无贴图"。
+ *
+ * ⇒ **即使 `TexturePort` 实现齐备、贴图全部解码成功，网格画面上也不会有任何一张贴图。**
+ * 这一条是"材质统一未交付"的**实质**原因（接缝原文只说"呈现层是 `MeshBasicMaterial`"，
+ * 未指出几何分组这一层）。
+ *
+ * ## 分组口径与 legacy **同一**语义
+ *
+ * legacy `render/mesh/blockMesh.ts:87` 用 `materialId: String(w.materialIndex)` 按材质
+ * 分组建 mesh —— 即"一个材质一个绘制批次"。本函数产出同一分组的**纯数据**形态：
+ * 逐 `materialIndex` 过滤四边形、各自 merge、各自算 `cellMap`
+ * （`triangleCellMapOf` 按片序展开，故过滤后仍然"第 t 个三角形属于哪一格"由构造保证）。
+ *
+ * ## 为什么材质 id 是 `material:<下标>`（而不是另起一套命名）
+ *
+ * 那条约定已由 `kernelTextureResources` 定为**唯一**一处（"两个地方各写一遍就会漂移，
+ * 而漂移的后果是静默贴错纹理"）。本函数只是**遵守**它。
+ *
+ * ## 为什么 `blend` 取自调色板条目
+ *
+ * 逐四边形的 `matPalette` 就是文档的材质调色板条目（含 `blend`/`emissive`）。
+ * 分组后每组的 blend 是**组内一致**的（同一 `materialIndex` ⇒ 同一条目），
+ * 故按组取它是精确的，不是近似。缺字段 ⇒ `'opaque'`（与 `MeshBasicMaterial` 的缺省一致）。
+ *
+ * ## ⚠️ 现状：本函数**尚未**接进生产（R1-β① C5 实测的阻断点，已登记 GF）
+ *
+ * 生产 `composition/kernelPresentationInputs` 仍是"一个 `blockGrid` 对象 → **一个**图元、
+ * 材质 id 恒 `'structure'`"。把它切成"逐材质一个图元"会**立刻**撞上
+ * `presentation/compileScene` 的一条既有假设：批次划分与 `byObject` 都**以 `objectId` 为键**
+ * （`compileScene.ts:150`、`:182`、`:188-192`），而按材质分组的多个图元共享**同一个**
+ * 内核对象 id ⇒ 第二个图元覆盖第一个的槽位，实测 `provenance` 会把两个组都记进
+ * **同一个**批次（`[{batch:1,m0},{batch:1,m1}]`）而 `payloads` 却是 `[batch0,batch1]`
+ * —— 拾取随即解不出（`cellIdentity.test.ts` 的"合法命中必须解得出来"当场判红）。
+ *
+ * ⇒ 接通它需要**同时**把 `compileScene` 的批次/来源划分从"按 `objectId`"改为
+ * "按**图元**（对象身份与批次身份分离，#249 §3.3 的原文口径）"。那是呈现编译核心的一处
+ * 结构改动，不与"材质统一"同一风险面（本批不夹带）。
+ *
+ * 本函数仍**保留在此并有判据**（`textureUnificationProduction.test.ts` ④ 组）：它是那一步的
+ * 现成件——一旦批次划分按图元解耦，生产只需改 `kernelPresentationInputs` 一处调用点。
+ */
+export function structureMaterialGroups(input: {
+  definition: StructureDefinition
+  layerPreview: LayerPreviewMode
+  /**
+   * `materialIndex` → 该组的材质 id。
+   *
+   * 缺省 `material:<下标>`（`kernelTextureResources` 的约定）。**注入它是为了
+   * 逐字保留既有"单材质 `'structure'`"形态**（`structurePrimitive` 的消费者与
+   * 判据不必同批改口径），而不是为了给旧形状开后门。
+   */
+  materialIdOf?: (materialIndex: number) => string
+}): readonly {
+  readonly materialIndex: number
+  readonly materialId: string
+  readonly blend: 'opaque' | 'cutout' | 'translucent'
+  readonly geometryId: GeometryId
+  readonly attributes: GeometryAttributes
+}[] {
+  const { definition, layerPreview } = input
+  const materialIdOf = input.materialIdOf ?? ((mi: number) => `material:${mi}`)
+  const collected = collectStructureGeometryPiecesPure(definition, { layerPreview })
+  const baseId = structureGeometryId(definition, layerPreview)
+
+  const order: number[] = []
+  const byMaterial = new Map<number, typeof collected.pieces>()
+  for (const p of collected.pieces) {
+    const list = byMaterial.get(p.materialIndex)
+    if (list === undefined) {
+      byMaterial.set(p.materialIndex, [p])
+      order.push(p.materialIndex)
+    } else {
+      list.push(p)
+    }
+  }
+
+  const out: {
+    materialIndex: number
+    materialId: string
+    blend: 'opaque' | 'cutout' | 'translucent'
+    geometryId: GeometryId
+    attributes: GeometryAttributes
+  }[] = []
+  for (const mi of order) {
+    const pieces = byMaterial.get(mi)!
+    const merged = mergeBakedQuadPiecesAttributes(pieces)
+    const palette = pieces[0]?.matPalette as { blend?: unknown } | undefined
+    out.push({
+      materialIndex: mi,
+      materialId: materialIdOf(mi),
+      blend: asBlend(palette?.blend),
+      // 几何身份**必须**逐组不同：`byId` 是按 `primitive.geometry.id` 存的
+      // （`presentationAdapter` 的 `GeometrySource` 口径），同 id 会让后一组覆盖前一组
+      // ⇒ 表现为"某些材质画的是别的材质的几何"（且没有任何报错）。
+      geometryId: `${baseId}:m${mi}`,
+      attributes: {
+        positions: merged.positions,
+        uvs: merged.uvs,
+        colors: merged.colors,
+        triangleCount: merged.positions.length / 9,
+        cellMap: triangleCellMapOf(pieces),
+      },
+    })
+  }
+  return Object.freeze(out)
+}
+
+/** 调色板条目的 `blend` → 呈现的混合模式（缺省 `'opaque'`，与 legacy 缺省一致）。 */
+function asBlend(v: unknown): 'opaque' | 'cutout' | 'translucent' {
+  return v === 'cutout' || v === 'translucent' ? v : 'opaque'
+}
