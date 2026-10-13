@@ -32,7 +32,7 @@ import type { DiagnosticsReadView } from '@/application/diagnostics'
 import { asReadOnlyDiagnostics } from '@/application/diagnostics'
 import type { ScreenRoot, RegionNode } from '@/runtime/screenRoot'
 import { REGION } from '@/runtime/regionIds'
-import type { KernelSession } from '@/runtime/kernelSession'
+import { KERNEL_CONTEXT_ID, type KernelSession } from '@/runtime/kernelSession'
 // #301 P10f C′1：帧声明的**判定**提成纯函数（D8 的判据必须能注入装配失败，
 // 而 `Context` 的外壳六件套不该进测试）—— 本层只负责"取事实、交结果"。
 import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
