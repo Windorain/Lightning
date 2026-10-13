@@ -4,6 +4,9 @@ import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
 import { DRW } from '@/runtime/drw'
 import { PresenterSession } from '@/composition/presenterSession'
+import { createViewportTexturePort, type ViewportTexturePort } from '@/composition/viewportTexturePort'
+import { textureResourcesOf } from '@/composition/kernelTextureResources'
+import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { sceneSeconds } from '@/composition/kernelRuntime'
 
 /**
@@ -98,6 +101,16 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    */
   const kernel = ctx.kernel
 
+  /**
+   * **纹理端口**（#301 P10f D3「材质统一」；R1-β① C5 落地）。
+   *
+   * 视口作用域：两个 Area 各持一张 GPU 纹理（A19「关其一不破坏另一方」的同一口径）。
+   * 生命期与 `presenterSurface` 对齐（见下方 `onScopeDispose`）。
+   */
+  const presenterTextures = createViewportTexturePort(`viewport:${regionId}`)
+  /** DOM 侧解码器（端口实现；非浏览器环境下 `decode` 如实返回 `null` ⇒ 资源记 `failed`）。 */
+  const textureDecoder = createDomTextureDecoder()
+
   const drw = new DRW({
     docRef,
     contentRefreshTickRef: ctx.getContentRefreshTick(),
@@ -159,12 +172,15 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    * 也会让"谁画了这 24 个三角形"没有唯一答案。故本会话有**自己的**根对象，
    * 由本 composable 加到视口场景（见下方 `onScopeDispose` 的对称释放）。
    */
-  const presenterSurface = new PresenterSession({ scope: `viewport:${regionId}` })
+  const presenterSurface = new PresenterSession({ scope: `viewport:${regionId}`, textures: presenterTextures })
   vpSlot.presenterSurface = presenterSurface
   onScopeDispose(() => {
     // 卸载即释放（A19：视口关闭不泄漏 GPU 份额；两个视口共享源数据时
     // 关其一不破坏另一方 —— 设备作用域按 region 分，故账天然分开）。
     presenterSurface.dispose()
+    // 纹理端口同寿命释放：`THREE.Texture` 的 GPU 句柄**不会**被场景图回收，
+    // 不显式 `dispose()` 就是每视口一份泄漏。
+    presenterTextures.dispose()
     if (vpSlot.presenterSurface === presenterSurface) vpSlot.presenterSurface = null
   })
 
@@ -239,6 +255,54 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    * e2e 可断言"没有静默失败"。而**不**把异常吞成 `null` 让调用方猜。
    */
   const presenterErrors: string[] = []
+
+  /**
+   * **材质统一：内核内容资源 → 纹理端口 → 材质绑定**（#301 P10f D3；R1-β① C5）。
+   *
+   * ## 为什么必须有这条链（它修的是一个**可感知**的回退）
+   *
+   * 呈现会话此前创建时**不传** `textures` ⇒ `presentation/presenter#createMaterial` 的
+   * `textures !== undefined` 短路 ⇒ `params.map` 永不设置 ⇒ 呈现画面只有中性色
+   * （legacy 链有贴图）。这正是"画面终切被阻塞"的实质原因之一（接缝
+   * `presenter-surface-dual-track` 的（甲）前置「材质统一」）。
+   *
+   * ## 顺序（是判据的一部分，反了会静默变平）
+   *
+   * 1. 解码五态：`textureResourcesOf`（坏一张只坏那一张；**不** Promise.all）；
+   * 2. 上传：`presenterTextures.sync`（同身份复用、消失即释放）；
+   * 3. 绑定：`presenterSurface.bindTextures`（唯一绑定生产点 + 触发按新绑定重建）。
+   *
+   * ## 为什么是异步且带序号（取消语义）
+   *
+   * 解码是异步的，而帧循环每帧都会调它 ⇒ 必须有**取消**：只允许**最新**一次
+   * 同步落地（`seq` 比对）。否则旧的一次解码在换文档后回来，会把已换掉那批
+   * 纹理重新绑上（画面停在上一个文档的贴图，且没有任何报错）。
+   */
+  let textureSyncSeq = 0
+  let texturesDisposed = false
+  const syncPresenterTextures = async (): Promise<void> => {
+    const doc = kernel?.document()
+    if (doc === undefined || texturesDisposed) return
+    const seq = ++textureSyncSeq
+    try {
+      const resources = await textureResourcesOf(doc.content.resources, textureDecoder)
+      // 取消：更新的同步已开始（或有更新的文档）⇒ 本次结果作废，**不**落地。
+      if (seq !== textureSyncSeq || texturesDisposed) return
+      const synced = presenterTextures.sync(resources)
+      const bound = presenterSurface.bindTextures(resources)
+      // 未就绪的必需贴图是**真实事实**，必须可见（不得静默当"画好了"）。
+      if (bound.missingRequired > 0) {
+        presenterErrors.push(`textures-missing-required:${bound.missingRequired}`)
+      }
+      if (synced.readyWithoutPixels > 0) {
+        // 契约说 `ready` ⇒ 有像素；这条分支出现即为实现缺陷，显式上报。
+        presenterErrors.push(`textures-ready-without-pixels:${synced.readyWithoutPixels}`)
+      }
+    } catch (e) {
+      presenterErrors.push(`textures-threw:${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   const applyPresenterSurface = (): void => {
     const doc = kernel?.document()
     if (doc === undefined) return
@@ -248,6 +312,8 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       if (out.compileError !== null) presenterErrors.push(`compile:${out.compileError}`)
       for (const s of out.skipped) presenterErrors.push(`kernel-skip:${s.objectId}:${s.reason}`)
       for (const s of out.compileSkipped) presenterErrors.push(`compile-skip:${s.objectId}:${s.reason}`)
+      // 材质统一：编译产物已就位 ⇒ 接着把贴图接上（否则该批次走中性色）。
+      void syncPresenterTextures()
     } catch (e) {
       presenterErrors.push(`threw:${e instanceof Error ? e.message : String(e)}`)
     }
@@ -341,6 +407,13 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
      * 而那必须能从页面里读到这个会话（与 `outlinePass` 同一手法）。
      */
     presenterSurface,
+    /**
+     * 纹理端口（材质统一的**可观测面**：`size` = 当前存活的 GPU 纹理数）。
+     *
+     * 暴露它的理由与 `presenterSurface` 同一：e2e 要断言"贴图真的接上了、
+     * 且换文档后旧纹理被释放"——那必须能从页面里读到，而不是靠"看起来有颜色"。
+     */
+    presenterTextures: presenterTextures as ViewportTexturePort,
     /**
      * 呈现会话的**错误累积**（公开观测点；空数组 = 无错误）。
      *

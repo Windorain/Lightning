@@ -46,10 +46,12 @@ import type { DocumentContent } from '@/domain/content'
 import type { Document } from '@/domain/document'
 import type { TimeValue as DomainTimeValue } from '@/domain/animation'
 import type { EvaluationKey } from '@/presentation/evaluationKey'
+import type { MaterialDescriptor } from '@/presentation/evaluationKey'
 import { compileScene, type CompiledScene } from '@/presentation/compileScene'
 import { PickIndex, evaluateStalePick, type PickResolution } from '@/presentation/pickingIndex'
 import { BatchedPresenter, type TexturePort } from '@/presentation/presenter'
-import type { TextureBinding } from '@/presentation/textureBinding'
+import type { TextureBinding, TextureResource } from '@/presentation/textureBinding'
+import { textureBindingsOf } from '@/composition/kernelTextureResources'
 import { kernelPresentationInputs } from '@/composition/kernelPresentationInputs'
 
 /** 一次 `apply` 的结果（**显式**报告，不静默吞）。 */
@@ -269,6 +271,59 @@ export class PresenterSession {
   /** 装纹理绑定（材质身份 → 纹理内容身份；五态链的消费端）。 */
   setTextureBindings(bindings: ReadonlyMap<string, TextureBinding>): void {
     this.presenter.setTextureBindings(bindings)
+  }
+
+  /**
+   * 上次编译用到的**材质描述符**（按 `id` 去重；未编译过 ⇒ 空）。
+   *
+   * 为什么要有它：绑定键是 `MaterialDescriptor.id`（`presenter.ts:420` 的
+   * `textureBindings.get(payload.material.id)`），而材质描述符**只有编译产物知道**。
+   * 若让调用方自己从内核场景推一份材质清单，那就会出现**第二份**"哪些材质要贴图"的
+   * 判定 —— 而它与真实批次漂移的后果是"某些批次静默无贴图"（比没贴图更难查）。
+   */
+  materialDescriptors(): readonly MaterialDescriptor[] {
+    const c = this.compiled
+    if (c === null) return []
+    const byId = new Map<string, MaterialDescriptor>()
+    for (const p of c.payloads) byId.set(p.material.id, p.material)
+    return Object.freeze([...byId.values()])
+  }
+
+  /**
+   * **按当前资源表重绑纹理**（#301 P10f D3「材质统一」的落点）。
+   *
+   * ## 它做两件事，顺序是判据的一部分
+   *
+   * 1. `textureBindingsOf`（**唯一**绑定生产点）算出「材质 → 纹理内容身份 + 五态」；
+   * 2. `setTextureBindings` 触发按新绑定的重建（呈现器自己做卸载 → 重挂，
+   *    见 `presentation/presenter#setTextureBindings` 的说明）。
+   *
+   * ⚠️ 调用方必须**先**把像素交给 `TexturePort`（`composition/viewportTexturePort#sync`）：
+   * 绑定只描述"该配哪张"，纹理本体由端口按内容身份提供。顺序反了 => 重建时端口里
+   * 还没有那张纹理 => 该批次走中性色（**静默比其他批次平**）。
+   *
+   * @param requiredIndexes 哪些调色板下标的资源是**必需**的；缺省 = 全部必需（与
+   *   `textureBindingsOf` 的口径一致）。预览场景传"全部必需"会让可选贴图缺失被记为
+   *   `missingRequired`，故视口侧应按自身口径传。
+   */
+  bindTextures(
+    resources: readonly TextureResource[],
+    requiredIndexes?: readonly number[],
+  ): { readonly bindings: number; readonly missingRequired: number } {
+    const materials = this.materialDescriptors()
+    const bindings = textureBindingsOf({
+      materials: materials as never,
+      resources,
+      ...(requiredIndexes === undefined ? {} : { requiredIndexes }),
+    })
+    const map = new Map<string, TextureBinding>()
+    let missingRequired = 0
+    for (const b of bindings) {
+      map.set(b.materialId, b)
+      if (b.missingRequired) missingRequired += 1
+    }
+    this.setTextureBindings(map)
+    return Object.freeze({ bindings: map.size, missingRequired })
   }
 
   /**
