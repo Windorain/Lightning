@@ -1225,10 +1225,18 @@ function declaredCreatedAtMs(
  * 恰好是**观察视角**（`{target, yawDeg, elevationDeg, distance, zoom}`）——
  * 它是"文档声明的默认观察视角"。
  *
- * ⇒ 本批把它装配成一个 `camera` 对象并**在诊断里如实标注**该口径差异：
- * 内核的 `camera` 载荷只有投影参数，观察视角没有类型化落点。
- * 这条缺口登记为 **GF-5**（见汇报），**不**伪造一个 `perspective/fov` 去冒充它
- * （伪造会让"文档声明的初始视角"看起来已经被内核承载了，而实际没有）。
+ * ⇒ 本批把它装配成一个 `camera` 对象：观察视角放在**非类型化**的 `view`
+ * （`Readonly<Record<string, unknown>>`，见本函数返回类型与 `:1271` 的赋值），
+ * 而 `payload` 的四个投影字段（`projection:\'perspective\'`/`fov:50`/`clipStart:0.1`/
+ * `clipEnd:1000`，见 `:1264-1270`）是**为满足 `camera` 载荷形状而填的常量，
+ * 不是文件里声明的值**。
+ *
+ * ⚠️ **更正（2026-10-13，调度者实读本函数全函数后改）**：本段原先写的是
+ * 「**不**伪造一个 `perspective/fov` 去冒充它」——**那与代码相反，事实是确实伪造了**。
+ * 缺口的真实大小因此被掩盖：观察视角至今**没有类型化落点**（这才是 GF-5 的原文），
+ * 而有类型的投影字段被常量填满，让"已被内核承载"看起来成立。
+ * ⇒ 已登记 **GF-21**（#385，含甲/乙两种处置）；在 GF-21 落地前，任何消费
+ * `application/queries` 相机读面中该对象投影字段的代码，读到的都是这四个常量。
  */
 function cameraObjectsFromMeta(meta: Readonly<Record<string, unknown>>): readonly {
   readonly id: string
