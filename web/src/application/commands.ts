@@ -39,6 +39,7 @@ import {
   redo as redoDoc,
   undo as undoDoc,
   withAnimation,
+  withDocumentContent,
   withScene,
   type Document,
   type SaveLedger,
@@ -48,7 +49,8 @@ import {
 // 契约 §7.3 规则 1 禁 barrel；同层具名导入是常态）。
 import { DEFAULT_OBJECT_FACTORIES, createObjectOfType, objectData, withObject, withUpdatedData } from '@/domain/scene'
 import type { ObjectData, ObjectDataPayload } from '@/domain/scene'
-import { cellContent, cellContentKey, normalizeCellContent, type CellContent, type CellPosition } from '@/domain/cellContent'
+import { cellContent, cellContentKey, normalizeCellContent, sameCellContent, type CellContent, type CellContentTable, type CellPosition } from '@/domain/cellContent'
+import { documentContent, documentMetadata, type DocumentMetadata } from '@/domain/content'
 import {
   acquireLease,
   advancePlayback,
@@ -105,7 +107,9 @@ import {
 } from '@/domain/errors'
 import {
   allocateId,
+  canonicalize,
   changeSummary,
+  documentRef,
   entityRef,
   objectRef,
   sameContent,
@@ -270,6 +274,162 @@ export interface SetCellTooltipCommand {
   readonly cells: readonly CellPosition[]
   /** 说明文案；`null` = 删除该格说明（见上文"缺席 ≠ 空"）。 */
   readonly text: string | null
+}
+
+/**
+ * **写一格（或多格）的逐格内容**（GF-13 最小集成员 `setCellContent`；R-WK-07 授权）。
+ *
+ * ## 它与 {@link SetCellTooltipCommand} 的分工（不是第二条写通路）
+ *
+ * | 命令 | 写什么 | 粒度 |
+ * |---|---|---|
+ * | `setCellTooltip` | **只**写 `CellContent.tooltip` | 逐字段（保留 `parts`） |
+ * | `setCellContent`（本条） | 该格的 `CellContent` **整体**（`parts` + `tooltip`） | 整值替换 |
+ *
+ * 两条命令的**语义**不同（改一个字段 vs 给出这一格的全部内容），
+ * 但它们归约到**同一条状态转移**：`writeCellContentOf`（本文件内唯一的写入助手），
+ * 故"同一格事实有两个写者"在实现上不成立 —— 那正是 §5.2 要消除的形态。
+ * 拆成两条具名命令的理由是 #249 §6 的同一句：「移动多个对象、删除对象、
+ * 插入关键帧等**保持具名命令**」—— 字段级与整值级的**拒绝条件不同**
+ * （前者只关心 tooltip 的幂等，后者还关心 `parts`），压成一条会让
+ * "只写说明"也必须携带整份部件表（调用方被迫先读后写 ⇒ 引入竞态）。
+ *
+ * ## 为什么 `content: null` 能表达"这一格没有内容"，而 `{}` 不能
+ *
+ * `CellContent` 的两个字段都是**可选**的，且"字段缺席"与"字段在场但为空"
+ * 是两种不同事实（`domain/cellContent` 文件头判据 3）。于是：
+ *
+ * - `content: null` ⇒ **删除该格的 `cellContent` 条目**（"这一格没有逐格内容"）；
+ * - `content: { tooltip: '' }` ⇒ 该格有内容，内容是"**说明了空**"；
+ * - `content: {}` ⇒ 该格有内容条目但两类内容都**缺席**
+ *   （与 `null` 的差别是"有键无内容" vs "无键" —— 前者是显式声明的空壳）。
+ *
+ * 三者都必须可表达，故 `null` 与 `{}` **不得**合并。
+ *
+ * ## 文档级（与 `setCellTooltip` 同一取舍，理由逐字相同）
+ *
+ * 逐格内容在文件格式里是**文档根**的池 + 下标网格（`partLists`/`cellPartsGrid`），
+ * 装配把它复制到**每一个**帧网格对象上。若只写"当前帧对象"，多帧文档的逐格内容
+ * 会逐帧分叉，而投影只取第一份池 ⇒ 其余帧静默丢失。故本命令对**每个**含该格的
+ * `blockGrid` 对象**原子**写入（一条命令 = 一个事务 = 一条历史）。
+ */
+export interface SetCellContentCommand {
+  readonly kind: 'setCellContent'
+  readonly contextId: string
+  /** 目标格（世界坐标；与 `cells` 同一套键，行序翻转**不**进命令面）。 */
+  readonly cells: readonly CellPosition[]
+  /** 该格的新内容；`null` = 删除该格的逐格内容条目（见上文三态）。 */
+  readonly content: CellContent | null
+  /** 期望的文档版本（防"基于过期画面提交"；缺省 = 不检查）。 */
+  readonly expectedVersion?: Version
+}
+
+/**
+ * **移动格**（GF-13 最小集成员 `moveCells`；R-WK-07 授权；R1 的**领域裁决点**）。
+ *
+ * ## 领域语义（R1 必须裁定的那条，这里给出裁定与理由）
+ *
+ * ### ① 被移动的是**整格**，不是"方块身份的坐标"
+ *
+ * 一格在载荷里由**四张同键的逐格表**共同描述（`cells` / `cellContent` /
+ * `cellGeometry` / `cellPalette`，外加文件槽位 `cellPaletteIndex`）。
+ * 只搬 `cells` 会造出一格"身份在 B、内容还在 A"的格子 ——
+ * 那正是 `domain/cellContent` 文件头判据 1 明确要消灭的
+ * 「几张平行网格的下标必须对齐，而**没有任何类型在把守**」这一约定。
+ * ⇒ 本命令把这四张表**同一个键**的项一起搬，于是"下标对齐"从约定变成结构。
+ *
+ * ### ② 方块身份**随格迁移**
+ *
+ * 用户拖动的是**那一块方块**（身份在其上），不是"坐标上的位置"。
+ * 故 `cells`/`cellPalette` 的值随键一起走 —— 且**不得**在移动时重算方块身份：
+ * `cellPalette` 的取值是**条目内容键**（`blockPaletteEntryKey`），
+ * 它含条目的**真实 `registryId`（带命名空间）**，原样迁移即保真；
+ * 若在移动时按 `cells` 的 GF-7 编码重算，就会把
+ * `appliedenergistics2:tile.BlockCableBus` 塌成 `minecraft:tile.BlockCableBus`
+ * （GF-7 更正的**历史事故**：投影侧 D9 实测 68 条调色板里 66 条命名空间被改写）。
+ *
+ * ### ③ 目标是**替换**，不是**交换**
+ *
+ * 目标格原有内容被丢弃，源格**不**接收目标格的原内容。
+ * 依据：`moveBlock(from, to)` 的两参数签名**只能**表达"搬到"，
+ * 而"互换"是另一件事（它需要两个目标与一条不同的不变量：
+ * "互换两次回到原状"）。把 swap 塞进 move 会让"撤销一次"之后
+ * 得到既非起点也非终点的第三种状态。互换若需要，另立具名命令。
+ *
+ * ### ④ 一次命令内的多个移动是**同时**的（与顺序无关）
+ *
+ * 实现顺序：先**读**全部源格 → 再**写**全部目标格 → 最后**删**掉
+ * 那些自己不是任何目标的源键。于是 `a→b, b→c` 的净效果是
+ * "a 与 b 都到 c 的位置（b 覆盖 a）"而不是"a 到 b、再 b 到 c"
+ * —— 后者（链式）必须写成**两条命令**（第二条看得见第一条的结果）。
+ * 选择同时语义的理由是**可判定**：链式语义的结果依赖命令内顺序，
+ * 而"命令内顺序"不是 `Command` 联合能表达的事实（`moves` 是集合）。
+ *
+ * ## 拒绝条件（全部可归因）
+ *
+ * | 条件 | 错误 |
+ * |---|---|
+ * | `moves` 为空 | `MissingTarget` |
+ * | 同一 `from` 出现两次，或同一 `to` 出现两次 | `InvalidValue{reason:'duplicateCells'}` |
+ * | 某 `from` 不在该网格里（`cells` 与四张逐格表都没有该键） | `MissingTarget{objectId:'cell@x,y,z'}` |
+ * | `to` 落在**声明尺寸**之外（载荷声明了 `sizeColumn/sizeRow/sizeZSlice`） | `InvalidValue{reason:'outsideDeclaredGrid'}` |
+ * | 目标对象数据是 `content` 源（只读） | `ReadOnly` |
+ * | `expectedVersion` 与当前不符 | `VersionConflict` |
+ *
+ * 尺寸越界之所以**拒绝**而不是"扩展尺寸"：越界的目标格在文件格式里
+ * **写不出来**（`cellGrid` 的维度是文件声明的），静默丢弃它会让
+ * "命令 applied 但方块不见了" —— 那正是 #333 那类"提交成功却看不见"的形态。
+ *
+ * ## 为什么 `objectId` 必填（与 `setCellTooltip` 的**不对称**，实测语义）
+ *
+ * 方块身份（`cells`）在文件格式里是**逐帧网格**的字段（`frames[].structure.cellGrid`），
+ * 而逐格说明是**文档根**的单张表 ⇒ 装配把它们分别落到"每帧一个对象"与
+ * "广播到每帧对象"。故身份写必须点名**哪一个网格**（拖的是那一帧的那一块），
+ * 而说明写按文档级广播。
+ */
+export interface MoveCellsCommand {
+  readonly kind: 'moveCells'
+  readonly contextId: string
+  /** 在**哪个**网格（`blockGrid` 对象）里移动 —— 见上文"为什么 `objectId` 必填"。 */
+  readonly objectId: string
+  readonly moves: readonly { readonly from: CellPosition; readonly to: CellPosition }[]
+  readonly expectedVersion?: Version
+}
+
+/**
+ * **写文档元数据**（GF-13 最小集成员 `setDocumentMeta`；R-WK-07 授权）。
+ *
+ * ## 它替代的旧机制
+ *
+ * | 旧机制 | 位置 |
+ * |---|---|
+ * | `clone + 改 `meta.*` + `setDocument`` | `context/embedInitialView#setDocumentEmbedInitialView`（`meta.embed_initial_view`，原地改） |
+ * | 属性面板的 `ownerKind === 'document'` 写 | `editors/property-writers.ts`（经 `DocumentState.document: RuntimeDocument`） |
+ * | 注解/文档元数据命令 | `operators/builtin/metaEditOperators.ts` |
+ *
+ * 落点是 `DocumentContent.metadata`（`domain/content` 的**具名字段**类型，
+ * 不是旧 `meta` 的 `Record<string, unknown>` 字段袋）。
+ *
+ * ## 为什么 `patch` 是 `Partial<DocumentMetadata>` 而不是整值
+ *
+ * 整值替换要求每个调用方先读后写 —— 而"读到的元数据"与"写回的元数据"之间
+ * 任何别的写都会**静默丢失**（典型的丢失更新）。`Partial` 的 `undefined` = "不改这个字段"
+ * 是**类型上的缺席**，不是运行期约定；而 `createdAtMs: null` 仍可表达
+ * （`null` 是 `DocumentMetadata` 的合法值：源里没有时间）。
+ *
+ * ## 未知键**不进**这里
+ *
+ * 文件里的未知 `meta` 键走 `adapters/files/fidelityRecord`（保真记录，
+ * 按**文档身份**承载；GF-14 口径）。本命令的 `patch` 只接受**具名**字段 ——
+ * 若它接受 `Record<string, unknown>`，"哪些字段真的没人懂"就永远查不出来
+ * （`domain/content` 文件头判据 3 的同一理由）。
+ */
+export interface SetDocumentMetaCommand {
+  readonly kind: 'setDocumentMeta'
+  readonly contextId: string
+  /** 要改的具名字段；`undefined` = 不改该字段（缺席，非"置空"）。 */
+  readonly patch: Partial<DocumentMetadata>
+  readonly expectedVersion?: Version
 }
 
 export interface BeginInteractionCommand {
@@ -458,6 +618,9 @@ export type Command =
   | AddObjectCommand
   | DeleteObjectCommand
   | SetCellTooltipCommand
+  | SetCellContentCommand
+  | MoveCellsCommand
+  | SetDocumentMetaCommand
   | BeginInteractionCommand
   | UpdateInteractionCommand
   | CommitInteractionCommand
@@ -504,6 +667,9 @@ export type ImmediateCommand = Extract<
   | { kind: 'addObject' }
   | { kind: 'deleteObject' }
   | { kind: 'setCellTooltip' }
+  | { kind: 'setCellContent' }
+  | { kind: 'moveCells' }
+  | { kind: 'setDocumentMeta' }
   | { kind: 'insertKeyframe' }
   | { kind: 'removeKeyframe' }
   | { kind: 'setTrackEnabled' }
@@ -695,6 +861,12 @@ export function reduceCommand(state: ApplicationState, command: Command, env: Ex
       return reduceDeleteObject(state, command)
     case 'setCellTooltip':
       return reduceSetCellTooltip(state, command)
+    case 'setCellContent':
+      return reduceSetCellContent(state, command)
+    case 'moveCells':
+      return reduceMoveCells(state, command)
+    case 'setDocumentMeta':
+      return reduceSetDocumentMeta(state, command)
     case 'setTransform':
       return reduceSetTransform(state, command)
     case 'setProperty':
@@ -732,6 +904,9 @@ function capabilityFor(command: Command): readonly string[] {
     case 'removeKeyframe':
     case 'setTrackEnabled':
     case 'publishDefault':
+    case 'setCellContent':
+    case 'moveCells':
+    case 'setDocumentMeta':
       return ['content.edit']
     case 'beginInteraction':
     case 'updateInteraction':
@@ -1030,6 +1205,57 @@ function reduceDeleteObject(state: ApplicationState, cmd: DeleteObjectCommand): 
 }
 
 /**
+ * **逐格写的目标解析**（唯一实现；`setCellTooltip` 与 `setCellContent` 共用）。
+ *
+ * ## 为什么必须抽成一个函数而不是各写一遍
+ *
+ * 两条命令的语义不同（字段级 vs 整值级），但"哪些 `blockGrid` 对象是这次写的目标"
+ * 是**同一条事实**。各写一遍会让"多帧文档的逐格内容必须同时成立"这条不变量
+ * 在某一条命令上退化成"只写当前帧" —— 而那正是 #333 的形态（写成功但存出来没有）。
+ * 抽取后，"目标解析"只有一处可漂移。
+ *
+ * @returns `list` = 含**任一**目标键的 `blockGrid` 对象；`orphanKey` = 不在任何
+ *          网格里的键（`null` = 全部键都有落点）。
+ */
+function blockGridWriteTargets(
+  doc: Document,
+  keys: readonly string[],
+): {
+  readonly list: readonly {
+    readonly objectId: string
+    readonly dataId: string
+    readonly source: ObjectData['source']
+    readonly payload: Extract<ObjectDataPayload, { kind: 'blockGrid' }>
+  }[]
+  readonly orphanKey: string | null
+} {
+  const list: {
+    readonly objectId: string
+    readonly dataId: string
+    readonly source: ObjectData['source']
+    readonly payload: Extract<ObjectDataPayload, { kind: 'blockGrid' }>
+  }[] = []
+  const hitsPerKey = new Map<string, number>(keys.map((k) => [k, 0]))
+  for (const objectId of doc.scene.order) {
+    const obj = findObject(doc.scene, objectId)
+    if (obj === undefined || obj.type !== 'block') continue
+    const data = findObjectData(doc.scene, obj.dataId)
+    if (data === undefined || data.payload.kind !== 'blockGrid') continue
+    let hit = false
+    for (const k of keys) {
+      if (!Object.prototype.hasOwnProperty.call(data.payload.cells, k)) continue
+      hitsPerKey.set(k, (hitsPerKey.get(k) ?? 0) + 1)
+      hit = true
+    }
+    // 该对象与本次写入无关（不含任一格）⇒ 不是目标（各帧网格可以不同尺寸）
+    if (!hit) continue
+    list.push({ objectId, dataId: obj.dataId, source: data.source, payload: data.payload })
+  }
+  const orphanKey = keys.find((k) => (hitsPerKey.get(k) ?? 0) === 0) ?? null
+  return { list, orphanKey }
+}
+
+/**
  * **写一格说明**（#301 P10f D0）。
  *
  * ## 落点：`blockGrid` 载荷的 `cellContent`
@@ -1080,43 +1306,21 @@ function reduceSetCellTooltip(state: ApplicationState, cmd: SetCellTooltipComman
   // 否则投影只取第一份池 ⇒ 其余帧的说明静默丢失。
   //
   // ⚠️ **每格都必须有落点**，否则整批拒绝（部分成功会让"多选一失败整批拒"失效）。
-  const targets: {
-    readonly objectId: string
-    readonly dataId: string
-    readonly source: ObjectData['source']
-    readonly payload: Extract<ObjectDataPayload, { kind: 'blockGrid' }>
-  }[] = []
-  const hitsPerKey = new Map<string, number>(keys.map((k) => [k, 0]))
-  for (const objectId of doc.scene.order) {
-    const obj = findObject(doc.scene, objectId)
-    if (obj === undefined || obj.type !== 'block') continue
-    const data = findObjectData(doc.scene, obj.dataId)
-    if (data === undefined || data.payload.kind !== 'blockGrid') continue
-    let hit = false
-    for (const k of keys) {
-      if (!Object.prototype.hasOwnProperty.call(data.payload.cells, k)) continue
-      hitsPerKey.set(k, (hitsPerKey.get(k) ?? 0) + 1)
-      hit = true
-    }
-    // 该对象与本次写入无关（不含任一格）⇒ 不是目标（各帧网格可以不同尺寸）
-    if (!hit) continue
-    targets.push({ objectId, dataId: obj.dataId, source: data.source, payload: data.payload })
-  }
-  const orphan = keys.find((k) => (hitsPerKey.get(k) ?? 0) === 0)
-  if (targets.length === 0 || orphan !== undefined) {
+  const targets = blockGridWriteTargets(doc, keys)
+  if (targets.list.length === 0 || targets.orphanKey !== null) {
     // 有格不在任何网格里 ⇒ 拒绝（否则会存下永不显示的说明；
     // 投影侧的 `cellContentKeyDiagnostic` 正是为此报警）。
-    return rejected(state, missingTarget({ objectId: `cell@${orphan ?? keys[0]}` }))
+    return rejected(state, missingTarget({ objectId: `cell@${targets.orphanKey ?? keys[0]}` }))
   }
 
   // 只读数据（`content` 源）不得写 —— 与另两条对象写路径同一守卫。
-  const readOnlyTarget = targets.find((t) => t.source === 'content')
+  const readOnlyTarget = targets.list.find((t) => t.source === 'content')
   if (readOnlyTarget !== undefined) {
     return rejected(state, readOnly({ owner: readOnlyTarget.source, objectId: readOnlyTarget.objectId }))
   }
 
   // ── 幂等：**全部**（目标 × 格）都已是该值 ⇒ `unchanged` ──────────────────
-  const alreadyAll = targets.every((t) =>
+  const alreadyAll = targets.list.every((t) =>
     keys.every((k) => ((t.payload.cellContent?.[k]?.tooltip) ?? undefined) === nextTooltip),
   )
   if (alreadyAll) return unchanged(state, doc.version)
@@ -1126,7 +1330,7 @@ function reduceSetCellTooltip(state: ApplicationState, cmd: SetCellTooltipComman
 
   // ── 原子地更新全部目标（一条命令 = 一个事务 = 一条历史） ────────────────
   let scene: Scene = doc.scene
-  for (const t of targets) {
+  for (const t of targets.list) {
     const table: Record<string, CellContent> = { ...(t.payload.cellContent ?? {}) }
     for (const k of keys) {
       if (!Object.prototype.hasOwnProperty.call(t.payload.cells, k)) continue
@@ -1169,6 +1373,370 @@ function reduceSetCellTooltip(state: ApplicationState, cmd: SetCellTooltipComman
     beforeScene: doc.scene,
     beforeVersion: doc.version,
     afterScene: nextScene,
+    afterVersion: write.version,
+    changes,
+    selectionBefore: ctx.selection.selected,
+    selectionAfter: ctx.selection.selected,
+  })
+  const next: ApplicationState = Object.freeze({
+    ...state,
+    docs: Object.freeze({ ...state.docs, [doc.id]: withHistory }),
+    leases: Object.freeze({ ...state.leases, [doc.id]: lease.value }),
+  })
+  return applied(next, write.version, changes)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 逐格内容写（整值） / 格移动 / 文档元数据写
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 逐格内容写的事务收尾（**唯一**实现；`setCellContent` 与 `setCellTooltip` 共用）。
+ *
+ * ## 为什么"改哪些格"必须在同一处收尾
+ *
+ * 一条逐格写命令 = 一个事务 = 一条历史。把"原子更新全部目标 → 变更摘要 → 记历史"
+ * 散在两处，会让两条命令的可撤销性、租约语义与摘要形状各自演化 ——
+ * 而它们**必须**逐点相同（同一格事实，撤销一次就该回到同一处）。
+ *
+ * `mutate` 收到的是**目标对象的数据载荷**，返回该载荷的新 `cellContent` 表
+ * （`null` = 保持原表不变，用于"这次写与该对象无关"的情形）。
+ */
+function cellContentWrite(
+  state: ApplicationState,
+  ctx: EditContext,
+  doc: Document,
+  label: string,
+  changedCells: readonly CellPosition[],
+  mutate: (
+    payload: Extract<ObjectDataPayload, { kind: 'blockGrid' }>,
+    index: number,
+  ) => CellContentTable | null,
+): Transition {
+  const targets = blockGridWriteTargets(doc, changedCells.map((c) => cellContentKey(c.x, c.y, c.z)))
+  if (targets.list.length === 0 || targets.orphanKey !== null) {
+    return rejected(state, missingTarget({ objectId: `cell@${targets.orphanKey ?? 'none'}` }))
+  }
+  const readOnlyTarget = targets.list.find((t) => t.source === 'content')
+  if (readOnlyTarget !== undefined) {
+    return rejected(state, readOnly({ owner: readOnlyTarget.source, objectId: readOnlyTarget.objectId }))
+  }
+  const lease = acquireFor(state, doc.id, ctx.id)
+  if (!lease.ok) return rejected(state, lease.error)
+
+  let scene: Scene = doc.scene
+  let index = 0
+  for (const t of targets.list) {
+    const nextTable = mutate(t.payload, index)
+    index += 1
+    if (nextTable === null) continue
+    const nextPayload: ObjectDataPayload = Object.freeze({ ...t.payload, cellContent: nextTable })
+    scene = withUpdatedData(scene, objectData(t.dataId, nextPayload, t.source))
+  }
+  const nextScene = scene
+  const write = withScene(doc, nextScene)
+  const changes = changeSummary({
+    changedProperties: changedCells.map((c) => ({ owner: objectRef(`${c.x},${c.y},${c.z}`), property: 'cellContent' })),
+    structurallyShared: true,
+  })
+  const withHistory = recordHistory(write.doc, {
+    label,
+    beforeScene: doc.scene,
+    beforeVersion: doc.version,
+    afterScene: nextScene,
+    afterVersion: write.version,
+    changes,
+    selectionBefore: ctx.selection.selected,
+    selectionAfter: ctx.selection.selected,
+  })
+  const next: ApplicationState = Object.freeze({
+    ...state,
+    docs: Object.freeze({ ...state.docs, [doc.id]: withHistory }),
+    leases: Object.freeze({ ...state.leases, [doc.id]: lease.value }),
+  })
+  return applied(next, write.version, changes)
+}
+
+/**
+ * **写一格（或多格）的逐格内容整体**（GF-13 最小集 `setCellContent`）。
+ *
+ * 语义三条（与命令类型的注释逐点对应）：
+ *  1. `content === null` ⇒ **删键**（"这一格没有逐格内容"）；
+ *  2. 幂等按 `sameCellContent`（内容级等价，不是引用/键序等价）；
+ *  3. 与 `setCellTooltip` 共用 {@link cellContentWrite} —— 事务与历史口径同源。
+ */
+function reduceSetCellContent(state: ApplicationState, cmd: SetCellContentCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+
+  if (cmd.cells.length === 0) return rejected(state, missingTarget({ objectId: 'cells[]' }))
+  const keys = cmd.cells.map((c) => cellContentKey(c.x, c.y, c.z))
+  if (new Set(keys).size !== keys.length) {
+    return rejected(state, invalidValue({ reason: 'duplicateCells', count: keys.length }))
+  }
+  const guard = versionGuard(doc, cmd.expectedVersion)
+  if (guard !== null) return rejected(state, guard)
+
+  // 缺席 ≠ 空：`null` 是"整条删掉"，`{}` 是"有键但两类内容都缺席"。
+  const next: CellContent | null = cmd.content === null ? null : cellContent(cmd.content)
+
+  // 幂等：全部（目标 × 格）都已语义等于新值 ⇒ `unchanged`
+  const targets = blockGridWriteTargets(doc, keys)
+  if (targets.list.length === 0 || targets.orphanKey !== null) {
+    return rejected(state, missingTarget({ objectId: `cell@${targets.orphanKey ?? keys[0]}` }))
+  }
+  const alreadyAll = targets.list.every((t) =>
+    keys.every((k) => sameCellContent(t.payload.cellContent?.[k], next ?? undefined) && (next !== null || t.payload.cellContent?.[k] === undefined)),
+  )
+  if (alreadyAll) return unchanged(state, doc.version)
+
+  return cellContentWrite(state, ctx, doc, `cell content @${keys.join(' ')}`, cmd.cells, (payload) => {
+    const table: Record<string, CellContent> = { ...(payload.cellContent ?? {}) }
+    let dirty = false
+    for (const k of keys) {
+      if (!Object.prototype.hasOwnProperty.call(payload.cells, k)) continue
+      const before = payload.cellContent?.[k]
+      if (next === null) {
+        if (before === undefined) continue
+        delete table[k]
+        dirty = true
+        continue
+      }
+      if (sameCellContent(before, next)) continue
+      table[k] = next
+      dirty = true
+    }
+    return dirty ? normalizeCellContent(table) : null
+  })
+}
+
+/**
+ * **移动格**（GF-13 最小集 `moveCells`；领域语义见命令类型的注释）。
+ *
+ * 实现顺序就是语义的一部分，**不得**重排：
+ *  ① 读全部源格的五项逐格事实 → ② 写全部目标格 → ③ 删"自己不是任何目标"的源键。
+ * 重排成"逐个搬"会让 `a→b, b→c` 变成链式（依赖 `moves` 的顺序），
+ * 而 `moves` 是集合 —— 顺序不是它表达的语义。
+ */
+function reduceMoveCells(state: ApplicationState, cmd: MoveCellsCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+
+  if (cmd.moves.length === 0) return rejected(state, missingTarget({ objectId: 'moves[]' }))
+  const obj = findObject(doc.scene, cmd.objectId)
+  if (obj === undefined) return rejected(state, missingTarget({ objectId: cmd.objectId }))
+  const data = findObjectData(doc.scene, obj.dataId)
+  if (data === undefined || data.payload.kind !== 'blockGrid') {
+    return rejected(state, missingTarget({ objectId: cmd.objectId, dataKind: data?.payload.kind ?? 'none' }))
+  }
+  if (data.source === 'content') return rejected(state, readOnly({ owner: data.source, objectId: cmd.objectId }))
+  const payload = data.payload
+
+  const froms = cmd.moves.map((m) => cellContentKey(m.from.x, m.from.y, m.from.z))
+  const tos = cmd.moves.map((m) => cellContentKey(m.to.x, m.to.y, m.to.z))
+  // 同时语义下重复是不确定的：两个源映射到同一目标 ⇒ 谁赢取决于集合遍历
+  if (new Set(froms).size !== froms.length || new Set(tos).size !== tos.length) {
+    return rejected(state, invalidValue({ reason: 'duplicateCells', count: cmd.moves.length }))
+  }
+  const guard = versionGuard(doc, cmd.expectedVersion)
+  if (guard !== null) return rejected(state, guard)
+
+  // ── ① 源格必须存在（五项逐格表任一有该键即算存在） ─────────────────────
+  const perCellTables = () => [
+    payload.cells,
+    payload.cellContent,
+    payload.cellGeometry,
+    payload.cellPalette,
+    payload.cellPaletteIndex,
+  ]
+  const tables = perCellTables()
+  const hasKey = (k: string): boolean => tables.some((t) => t !== undefined && Object.prototype.hasOwnProperty.call(t, k))
+  const missing = froms.find((k) => !hasKey(k))
+  if (missing !== undefined) return rejected(state, missingTarget({ objectId: `cell@${missing}` }))
+
+  // ── 目标必须在**声明尺寸**内（越界写不出来；见命令类型的注释） ───────────
+  const declared = declaredBounds(payload)
+  if (declared !== null) {
+    const outside = cmd.moves.find((m) => !insideBounds(m.to, declared))
+    if (outside !== undefined) {
+      return rejected(
+        state,
+        invalidValue({ reason: 'outsideDeclaredGrid', x: outside.to.x, y: outside.to.y, z: outside.to.z }),
+      )
+    }
+  }
+
+  // ── 幂等：全部移动都是 from === to ⇒ `unchanged` ────────────────────────
+  if (froms.every((k, i) => k === tos[i])) return unchanged(state, doc.version)
+
+  const moved = froms.filter((k) => !tos.includes(k))
+  const lease = acquireFor(state, doc.id, cmd.contextId)
+  if (!lease.ok) return rejected(state, lease.error)
+
+  // ── ②/③ 同时搬：先取全部源值，再写目标，再删只作源的键 ─────────────────
+  const nextCells: Record<string, string> = { ...payload.cells }
+  const nextContent: Record<string, CellContent> = { ...(payload.cellContent ?? {}) }
+  const nextGeometry: Record<string, string> = { ...(payload.cellGeometry ?? {}) }
+  const nextPaletteRef: Record<string, string> = { ...(payload.cellPalette ?? {}) }
+  const nextPaletteIndex: Record<string, number> = { ...(payload.cellPaletteIndex ?? {}) }
+
+  const pick = <T>(table: Readonly<Record<string, T>> | undefined, k: string): T | undefined => table?.[k]
+  // 先快照（源在写入期间可能被覆盖：`a→b, b→c` 中 b 既是目标又是源）
+  const snapshot = froms.map((k) => ({
+    cells: pick(payload.cells, k),
+    content: pick(payload.cellContent, k),
+    geometry: pick(payload.cellGeometry, k),
+    paletteRef: pick(payload.cellPalette, k),
+    paletteIndex: pick(payload.cellPaletteIndex, k),
+  }))
+
+  const assign = <T>(table: Record<string, T>, k: string, v: T | undefined): void => {
+    if (v === undefined) delete table[k]
+    else table[k] = v
+  }
+  for (let i = 0; i < tos.length; i += 1) {
+    const s = snapshot[i] as (typeof snapshot)[number]
+    assign(nextCells, tos[i] as string, s.cells)
+    assign(nextContent, tos[i] as string, s.content)
+    assign(nextGeometry, tos[i] as string, s.geometry)
+    assign(nextPaletteRef, tos[i] as string, s.paletteRef)
+    assign(nextPaletteIndex, tos[i] as string, s.paletteIndex)
+  }
+  for (const k of moved) {
+    delete nextCells[k]
+    delete nextContent[k]
+    delete nextGeometry[k]
+    delete nextPaletteRef[k]
+    delete nextPaletteIndex[k]
+  }
+
+  const nextPayload: ObjectDataPayload = Object.freeze({
+    ...payload,
+    cells: Object.freeze(nextCells),
+    // 逐格表在空时必须**缺席**而不是空表（"没有"与"有但是空"可区分）
+    ...(Object.keys(nextContent).length === 0 ? {} : { cellContent: normalizeCellContent(nextContent) }),
+    ...(Object.keys(nextGeometry).length === 0 ? {} : { cellGeometry: Object.freeze(nextGeometry) }),
+    ...(Object.keys(nextPaletteRef).length === 0 ? {} : { cellPalette: Object.freeze(nextPaletteRef) }),
+    ...(Object.keys(nextPaletteIndex).length === 0 ? {} : { cellPaletteIndex: Object.freeze(nextPaletteIndex) }),
+  })
+  // ⚠️ `cellContent`/`cellGeometry`/`cellPalette`/`cellPaletteIndex` 若原本缺席而
+  // 本次搬空后仍缺席，`...payload` 会把**原引用**带过来 —— 那是正确的（未变）。
+  // 但若原本在场而搬空，必须**显式删除**键，否则空表会冒充"有内容"。
+  const cleaned = deleteEmptyCellTables(nextPayload)
+
+  const nextScene = withUpdatedData(doc.scene, objectData(data.id, cleaned, data.source))
+  const write = withScene(doc, nextScene)
+  const changes = changeSummary({
+    changedProperties: cmd.moves.map((m) => ({ owner: objectRef(`${m.from.x},${m.from.y},${m.from.z}`), property: 'cell' })),
+    structurallyShared: true,
+  })
+  const withHistory = recordHistory(write.doc, {
+    label: `move cells ${cmd.objectId}`,
+    beforeScene: doc.scene,
+    beforeVersion: doc.version,
+    afterScene: nextScene,
+    afterVersion: write.version,
+    changes,
+    selectionBefore: ctx.selection.selected,
+    selectionAfter: ctx.selection.selected,
+  })
+  const next: ApplicationState = Object.freeze({
+    ...state,
+    docs: Object.freeze({ ...state.docs, [doc.id]: withHistory }),
+    leases: Object.freeze({ ...state.leases, [doc.id]: lease.value }),
+  })
+  return applied(next, write.version, changes)
+}
+
+/** 声明尺寸（`null` = 载荷未声明，此时越界检查**不适用** —— 不猜一个 1×1×1）。 */
+function declaredBounds(payload: {
+  readonly sizeColumn?: number
+  readonly sizeRow?: number
+  readonly sizeZSlice?: number
+}): { readonly w: number; readonly h: number; readonly d: number } | null {
+  const w = payload.sizeColumn
+  const h = payload.sizeRow
+  const d = payload.sizeZSlice
+  if (typeof w !== 'number' || typeof h !== 'number' || typeof d !== 'number') return null
+  if (![w, h, d].every((n) => Number.isInteger(n) && n >= 0)) return null
+  return { w, h, d }
+}
+
+function insideBounds(
+  p: { readonly x: number; readonly y: number; readonly z: number },
+  b: { readonly w: number; readonly h: number; readonly d: number },
+): boolean {
+  return p.x >= 0 && p.y >= 0 && p.z >= 0 && p.x < b.w && p.y < b.h && p.z < b.d
+}
+
+/** 逐格表搬空 ⇒ **删键**（空表与"没有"必须可区分，见 `domain/cellContent` 判据 3）。 */
+function deleteEmptyCellTables(
+  payload: Extract<ObjectDataPayload, { kind: 'blockGrid' }>,
+): Extract<ObjectDataPayload, { kind: 'blockGrid' }> {
+  const out: Record<string, unknown> = { ...payload }
+  for (const key of ['cellContent', 'cellGeometry', 'cellPalette', 'cellPaletteIndex'] as const) {
+    const v = out[key]
+    if (v !== undefined && typeof v === 'object' && v !== null && Object.keys(v).length === 0) delete out[key]
+  }
+  return Object.freeze(out) as unknown as Extract<ObjectDataPayload, { kind: 'blockGrid' }>
+}
+
+/** 期望版本守卫（三处具名写命令共用的**单点**定义）。 */
+function versionGuard(doc: Document, expected: Version | undefined): DomainError | null {
+  if (expected === undefined) return null
+  if (expected.documentVersion !== doc.version.documentVersion) {
+    return versionConflict({ expected: expected.documentVersion, actual: doc.version.documentVersion })
+  }
+  return null
+}
+
+/**
+ * **写文档元数据**（GF-13 最小集 `setDocumentMeta`）。
+ *
+ * ## 幂等按**逐字段语义等价**（不是"给了 patch 就算改了"）
+ *
+ * `undefined` 在 `Partial` 里是"不请求改这一字段"，故判定必须**跳过**它；
+ * 否则 `{ name: 'x' }` 会被读成"author/description/tags/origin/createdAtMs 都变了"
+ * —— 那是把 `Partial` 的缺席语义当成了值。用 `canonicalize` 逐字段比较
+ * （`tags`/`origin` 是数组/对象，`===` 比不出语义相等）。
+ */
+function reduceSetDocumentMeta(state: ApplicationState, cmd: SetDocumentMetaCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+
+  const guard = versionGuard(doc, cmd.expectedVersion)
+  if (guard !== null) return rejected(state, guard)
+
+  const current = doc.content.metadata
+  const requested = Object.keys(cmd.patch).filter((k) => (cmd.patch as Record<string, unknown>)[k] !== undefined)
+  if (requested.length === 0) return rejected(state, invalidValue({ reason: 'emptyMetadataPatch' }))
+
+  const changed = requested.filter((k) => {
+    const before = (current as unknown as Record<string, unknown>)[k]
+    const after = (cmd.patch as Record<string, unknown>)[k]
+    return canonicalize(before) !== canonicalize(after)
+  })
+  if (changed.length === 0) return unchanged(state, doc.version)
+
+  const lease = acquireFor(state, doc.id, cmd.contextId)
+  if (!lease.ok) return rejected(state, lease.error)
+
+  const write = withDocumentContent(
+    doc,
+    documentContent({ ...doc.content, metadata: documentMetadata({ ...current, ...cmd.patch }) }),
+  )
+  const changes = changeSummary({
+    changedProperties: changed.map((k) => ({ owner: documentRef(doc.id), property: `metadata.${k}` })),
+    structurallyShared: true,
+  })
+  const withHistory = recordHistory(write.doc, {
+    label: `document meta ${changed.join(',')}`,
+    beforeScene: doc.scene,
+    beforeVersion: doc.version,
+    afterScene: doc.scene,
     afterVersion: write.version,
     changes,
     selectionBefore: ctx.selection.selected,

@@ -1022,6 +1022,17 @@ describe('唯一写通路（静态面）：内核里没有 Proxy / definePropert
         // 内核里**没有** `cellTooltip` 属性描述符（实测 `kernel-properties.ts` 的注解/方块
         // 属性集都不含它），故无法经 `setProperty` 表达 —— 这正是新增本命令的理由。
         'setCellTooltip',
+        // R1-α（#387）：GF-13 最小集的余下三员（R-WK-07 已批准 `setCellContent`/
+        // `moveCells`/`setDocumentMeta`；本批落地）。三者与 `setCellTooltip` 同属
+        // **逐格/元数据的具名写**，都不是"第二个通用属性写"：
+        //  · `setCellContent` 按**格坐标**寻址 `blockGrid.cellContent[key]`（整值替换）；
+        //  · `moveCells` 按格坐标移动**整格**（五张逐格表同键），不寻址属性值；
+        //  · `setDocumentMeta` 写 `DocumentContent.metadata` 的**具名字段**
+        //    （`Partial<DocumentMetadata>`，不是 `Record<string, unknown>` 字段袋）——
+        //    这正是为什么它**不**算通用字段 patch：类型上就写不了未知键。
+        'setCellContent',
+        'setDocumentMeta',
+        'moveCells',
         'setChannelValue',
         'setPlaybackRate',
         'setPlaying',

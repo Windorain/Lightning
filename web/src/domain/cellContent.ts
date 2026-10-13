@@ -65,6 +65,7 @@
  */
 
 import { cellPositionKey, type CellPosition } from './cellPosition'
+import { canonicalize } from './identity'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 部件（非满方块）
@@ -227,3 +228,27 @@ export function cellContentDigestInput(table: CellContentTable): unknown {
 
 /** 位置类型再导出（供装配/投影两侧共用同一形状，不各自声明）。 */
 export type { CellPosition }
+
+/**
+ * 两份逐格内容是否**语义相同**（幂等判定的唯一口径）。
+ *
+ * ## 为什么不用 `JSON.stringify` 或逐字段手写比较
+ *
+ * | 方案 | 为什么不成立 |
+ * |---|---|
+ * | `JSON.stringify(a) === JSON.stringify(b)` | 键序依赖**构造顺序** ⇒ 同一份语义内容经 `cellContent()` 与经装配得到不同串 ⇒ 幂等判定漏判 ⇒ 每次"写同样的值"都推进版本并进历史（`domain/identity` 文件头记录的同一条理由） |
+ * | 逐字段手写 | `CellContent` 的 `parts` 是 `PartRecord` 的**任意嵌套**结构（`boxes`/`items`/`properties`）⇒ 手写比较会随 `PartRecord` 加字段而**静默漏比**（漏比 = 把"不同"读成"相同" = 丢写） |
+ *
+ * ⇒ 用 `canonicalize`（`domain/identity`）：它对对象键**排序**、对数组保序、
+ * 对 `undefined` 显式编码 ⇒ 同一份语义内容恒得同一串，而它也正是内容身份
+ * （`digestOf`）用的规范化器 —— **不存在第二套规范化口径**。
+ *
+ * ⚠️ 这里返回的是**字符串相等**而不是摘要相等：`digestOf` 是 32 位 FNV-1a，
+ * 它承担"内容身份"（可碰撞、够用）而不承担"是否要写入"的判定
+ * （漏判会让一次真实写入被吞掉）。两者用途不同，故不复用摘要。
+ */
+export function sameCellContent(a: CellContent | undefined, b: CellContent | undefined): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return canonicalize(a) === canonicalize(b)
+}
