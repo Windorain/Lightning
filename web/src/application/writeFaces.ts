@@ -165,6 +165,7 @@ export function writeFaceOf(command: Command): WriteFace {
     case 'setProperty':
     case 'setCellTooltip':
     case 'setCellContent':
+    case 'setCellIdentity':
     case 'moveCells':
     case 'setDocumentMeta':
     case 'insertKeyframe':

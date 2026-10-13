@@ -397,6 +397,70 @@ export interface MoveCellsCommand {
 }
 
 /**
+ * **写一格（或多格）的方块身份**（GF-19；R-WK-07 授权）。
+ *
+ * ## 落点与 GF-7 事故的成因（本命令为什么不能"反拼注册名"）
+ *
+ * 方块身份在文件格式里是两个**平行**事实：`cellGrid` 存注册名（**已截去
+ * `minecraft:` 前缀**，`pure/gridTypes.ts:17-22` 逐字如此），`cellPalette` 存
+ * 条目内容键（含**真实带命名空间的 `registryId`**）。旧面板写路径
+ * （`editors/property-writers.ts:150`）直接改 `SlotBlock.name`/`meta`，
+ * 而显示侧的 `block_state_id` 由 `context/queries.ts` 按
+ * `` `minecraft:${name}:${meta}` `` **反拼** ⇒ 任何非 `minecraft` 命名空间
+ * （`ae2:`、`appliedenergistics2:`…）在"读出→写回"一个来回后被改写成
+ * `minecraft:appliedenergistics2:…`。GF-7 投影侧实测 68 条调色板里 66 条
+ * 命名空间被改写，**成因就是这条反拼**。
+ *
+ * ⇒ 本命令**不参与**注册名的拼装：调用方给的是它已经持有的
+ * 「`cells` 值（截前缀注册名）+ `cellPalette` 值（registryId 内容键）」二元组，
+ * 命令只做**原样落表**。核心不认识 `minecraft:` 之外的任何命名空间规则 ——
+ * 「哪些字节写进 `cells`」是格式边界的口径（`adapters/files`），不是内核的政策。
+ *
+ * ## 为什么 `null` 能表达"这一格没有方块"，而 `{ name:'', … }` 不能
+ *
+ * 与 `setCellContent` 同一取舍：`cells[key]` **缺席** = 该格没有方块（空位）；
+ * `cells[key] === ''` = 有键但注册名为空（非法字节）。两者必须可区分 ⇒
+ * `identity: null` 删 `cells`/`cellPalette` 两表的键，非 `null` 写两表。
+ *
+ * ## 为什么 `name` 与 `paletteRef` 必须**同批**给出，不能只给一个
+ *
+ * `cellPalette` 的条目键（`blockPaletteEntryKey`）含真实 `registryId`，
+ * 而 `cells` 的值只有截前缀注册名 ⇒ **单给任一半都不能唯一决定另一半**
+ * （同一个 `cells` 值可以对应多个不同 `registryId` 的条目）。只给 `cells`
+ * 就会让面板写身份时把调色板引用留在旧方块上 —— "身份在 B、内容还在 A"
+ * 的同族形态（`domain/cellContent` 文件头判据 1）。故两值**必须**成对。
+ *
+ * ## 文档级（与 `setCellTooltip` 同一理由，逐字复用）
+ *
+ * 身份是**逐帧网格**的字段（文件格式 `frames[].structure.cellGrid`），
+ * 装配把它广播到每一个帧网格对象上 ⇒ 本命令对**每个**含该格的
+ * `blockGrid` 对象**原子**写入（一条命令 = 一个事务 = 一条历史）。
+ */
+export interface SetCellIdentityCommand {
+  readonly kind: 'setCellIdentity'
+  readonly contextId: string
+  /** 目标格（世界坐标；与 `cells` 表同一套键）。 */
+  readonly cells: readonly CellPosition[]
+  /** 新身份；`null` = 该格没有方块（删除两表的键，见上文三态）。 */
+  readonly identity: CellIdentity | null
+  /** 期望的文档版本（防"基于过期画面提交"；缺省 = 不检查）。 */
+  readonly expectedVersion?: Version
+}
+
+/**
+ * 一格的方块身份（{@link SetCellIdentityCommand} 的取值形态）。
+ *
+ * `name` = **已截去 `minecraft:` 前缀**的注册名（照 `SlotBlock.name` 的口径原样给，
+ * **不得**由本类型反拼或补前缀）；`paletteRef` = `cellPalette` 的内容键
+ * （含真实 `registryId`，见 `domain/scene` 的 `blockPaletteEntryKey`）。
+ */
+export interface CellIdentity {
+  readonly name: string
+  readonly paletteRef: string
+  readonly meta?: number
+}
+
+/**
  * **写文档元数据**（GF-13 最小集成员 `setDocumentMeta`；R-WK-07 授权）。
  *
  * ## 它替代的旧机制
@@ -619,6 +683,7 @@ export type Command =
   | DeleteObjectCommand
   | SetCellTooltipCommand
   | SetCellContentCommand
+  | SetCellIdentityCommand
   | MoveCellsCommand
   | SetDocumentMetaCommand
   | BeginInteractionCommand
@@ -668,6 +733,7 @@ export type ImmediateCommand = Extract<
   | { kind: 'deleteObject' }
   | { kind: 'setCellTooltip' }
   | { kind: 'setCellContent' }
+  | { kind: 'setCellIdentity' }
   | { kind: 'moveCells' }
   | { kind: 'setDocumentMeta' }
   | { kind: 'insertKeyframe' }
@@ -863,6 +929,8 @@ export function reduceCommand(state: ApplicationState, command: Command, env: Ex
       return reduceSetCellTooltip(state, command)
     case 'setCellContent':
       return reduceSetCellContent(state, command)
+    case 'setCellIdentity':
+      return reduceSetCellIdentity(state, command)
     case 'moveCells':
       return reduceMoveCells(state, command)
     case 'setDocumentMeta':
@@ -905,6 +973,7 @@ function capabilityFor(command: Command): readonly string[] {
     case 'setTrackEnabled':
     case 'publishDefault':
     case 'setCellContent':
+    case 'setCellIdentity':
     case 'moveCells':
     case 'setDocumentMeta':
       return ['content.edit']
@@ -1509,6 +1578,133 @@ function reduceSetCellContent(state: ApplicationState, cmd: SetCellContentComman
     }
     return dirty ? normalizeCellContent(table) : null
   })
+}
+
+/**
+ * **写一格（或多格）的方块身份**（GF-19；语义见 {@link SetCellIdentityCommand}）。
+ *
+ * 与 `setCellContent` 共用 {@link blockGridWriteTargets}（目标解析）与
+ * {@link cellContentWrite}（事务收尾）—— 三条逐格写命令的"改哪些格 / 怎么收尾"
+ * 只有一处实现，故"多帧文档必须同时成立"这条不变量不可能在其中一条上退化。
+ */
+function reduceSetCellIdentity(state: ApplicationState, cmd: SetCellIdentityCommand): Transition {
+  const found = contextAndDoc(state, cmd.contextId)
+  if (!found.ok) return rejected(state, found.error)
+  const { ctx, doc } = found.value
+
+  if (cmd.cells.length === 0) return rejected(state, missingTarget({ objectId: 'cells[]' }))
+  const keys = cmd.cells.map((c) => cellContentKey(c.x, c.y, c.z))
+  if (new Set(keys).size !== keys.length) {
+    return rejected(state, invalidValue({ reason: 'duplicateCells', count: keys.length }))
+  }
+  const guard = versionGuard(doc, cmd.expectedVersion)
+  if (guard !== null) return rejected(state, guard)
+  // 空注册名 = 不存在的方块。缺席由 `identity: null` 表达，不用空串冒充。
+  if (cmd.identity !== null && cmd.identity.name.length === 0) {
+    return rejected(state, invalidValue({ reason: 'emptyBlockName', count: keys.length }))
+  }
+  if (cmd.identity !== null && cmd.identity.paletteRef.length === 0) {
+    return rejected(state, invalidValue({ reason: 'emptyPaletteRef', count: keys.length }))
+  }
+  const meta = cmd.identity?.meta
+  if (meta !== undefined && (!Number.isInteger(meta) || meta < 0)) {
+    return rejected(state, invalidValue({ reason: 'malformed-block-id', meta }))
+  }
+
+  const targets = blockGridWriteTargets(doc, keys)
+  if (targets.list.length === 0 || targets.orphanKey !== null) {
+    return rejected(state, missingTarget({ objectId: `cell@${targets.orphanKey ?? keys[0]}` }))
+  }
+
+  // 幂等：全部（目标 × 格）的两表值都已相同 ⇒ `unchanged`（与另两条同口径）。
+  const alreadyAll = targets.list.every((t) =>
+    keys.every((k) => {
+      const curName = t.payload.cells[k]
+      const curRef = t.payload.cellPalette?.[k]
+      if (cmd.identity === null) return curName === undefined && curRef === undefined
+      return curName === cmd.identity.name && curRef === cmd.identity.paletteRef
+    }),
+  )
+  if (alreadyAll) return unchanged(state, doc.version)
+
+  return cellIdentityWrite(state, ctx, doc, `cell identity @${keys.join(' ')}`, cmd.cells, cmd.identity)
+}
+
+/**
+ * 身份写的事务收尾 —— 与 {@link cellContentWrite} **同形**（目标解析、只读守卫、
+ * 租约、变更摘要、历史各一次），差别只在被改的表：`cells` + `cellPalette` 成对。
+ *
+ * ## 为什么两表必须**同一次**更新且不得各自留旧值
+ *
+ * `cells` 给"这一格是什么方块"，`cellPalette` 给"它的完整注册名/状态"——
+ * 面板显示与投影都读后者。只改 `cells` 会让调色板引用留在**旧**方块上
+ * （"身份在 B、内容还在 A"的同族形态）。故两表在同一个 `nextPayload` 里一起落。
+ */
+function cellIdentityWrite(
+  state: ApplicationState,
+  ctx: EditContext,
+  doc: Document,
+  label: string,
+  changedCells: readonly CellPosition[],
+  identity: CellIdentity | null,
+): Transition {
+  const keys = changedCells.map((c) => cellContentKey(c.x, c.y, c.z))
+  const targets = blockGridWriteTargets(doc, keys)
+  if (targets.list.length === 0 || targets.orphanKey !== null) {
+    return rejected(state, missingTarget({ objectId: `cell@${targets.orphanKey ?? 'none'}` }))
+  }
+  const readOnlyTarget = targets.list.find((t) => t.source === 'content')
+  if (readOnlyTarget !== undefined) {
+    return rejected(state, readOnly({ owner: readOnlyTarget.source, objectId: readOnlyTarget.objectId }))
+  }
+  const lease = acquireFor(state, doc.id, ctx.id)
+  if (!lease.ok) return rejected(state, lease.error)
+
+  let scene: Scene = doc.scene
+  for (const t of targets.list) {
+    const nextCells: Record<string, string> = { ...t.payload.cells }
+    const nextPalette: Record<string, string> = { ...(t.payload.cellPalette ?? {}) }
+    for (const k of keys) {
+      if (!Object.prototype.hasOwnProperty.call(t.payload.cells, k)) continue
+      if (identity === null) {
+        delete nextCells[k]
+        delete nextPalette[k]
+      } else {
+        nextCells[k] = identity.name
+        nextPalette[k] = identity.paletteRef
+      }
+    }
+    const nextPayload: ObjectDataPayload = Object.freeze({
+      ...t.payload,
+      cells: Object.freeze(nextCells),
+      // 空表 ⇒ **删键**（"没有"与"有但是空"必须可区分）。
+      ...(Object.keys(nextPalette).length === 0 ? {} : { cellPalette: Object.freeze(nextPalette) }),
+    })
+    const cleaned = deleteEmptyCellTables(nextPayload)
+    scene = withUpdatedData(scene, objectData(t.dataId, cleaned, t.source))
+  }
+  const nextScene = scene
+  const write = withScene(doc, nextScene)
+  const changes = changeSummary({
+    changedProperties: changedCells.map((c) => ({ owner: objectRef(`${c.x},${c.y},${c.z}`), property: 'blockIdentity' })),
+    structurallyShared: true,
+  })
+  const withHistory = recordHistory(write.doc, {
+    label,
+    beforeScene: doc.scene,
+    beforeVersion: doc.version,
+    afterScene: nextScene,
+    afterVersion: write.version,
+    changes,
+    selectionBefore: ctx.selection.selected,
+    selectionAfter: ctx.selection.selected,
+  })
+  const next: ApplicationState = Object.freeze({
+    ...state,
+    docs: Object.freeze({ ...state.docs, [doc.id]: withHistory }),
+    leases: Object.freeze({ ...state.leases, [doc.id]: lease.value }),
+  })
+  return applied(next, write.version, changes)
 }
 
 /**
