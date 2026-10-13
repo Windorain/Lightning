@@ -635,6 +635,83 @@ export function submitPropertyWrite(
     }
   }
 
+  // R1-β① C3：**方块身份改走内核命令** —— 与上一条逐格说明拦截同形。
+  //
+  // ## 为什么必须绕开 `writeBlockProperty`（GF-7 的写侧成因）
+  //
+  // 旧写点（`property-writers.ts:161-163`）把面板给的名字直接写进
+  // `SlotBlock.name`，而该字段按 `pure/gridTypes.ts:18` 是**已截去命名空间**的
+  // 注册名 ⇒ 显示侧 `context/queries.ts:164` 再按 `` `minecraft:${name}` ``
+  // 拼回 ⇒ 任何非 `minecraft` 命名空间在"读出→写回"一个来回后被改写
+  // （GF-7 投影侧实测 68 条调色板里 66 条被改写）。
+  //
+  // 内核命令 `setCellIdentity` 的取值是**「`cells` 值（截前缀注册名）+
+  // `cellPalette` 值（真 registryId 内容键）」的二元组** ⇒ 两半在同一事务里
+  // 成对落表，**没有**从名字反拼命名空间的环节。
+  //
+  // ## 为什么只接受**调色板里真实存在**的引用
+  //
+  // `cellPalette` 的值必须是本文档调色板里真实存在的内容键。找不到 ⇒ 说明
+  // "这一格的方块不在本文档调色板里"，那是**装配/调色板维护**的事，不是属性写
+  // 能决定的 ⇒ **如实拒绝**，既不按 `minecraft:${name}` 反拼引用兜底
+  // （那正是本段要消除的事故成因），也不回落 legacy 写（那会让内核与 legacy
+  // 就同一格给出两个身份）。
+  const identityOnly =
+    refs.length > 0 &&
+    refs.every((r) => r.owner.kind === 'object' && r.component === undefined) &&
+    localIds.every((id) => id === 'id')
+  if (identityOnly && typeof value === 'string') {
+    const parsed = parseBlockStateId(value)
+    if (parsed === null) {
+      return {
+        status: 'rejected',
+        error: domainError('InvalidValue', { reason: 'malformed-block-id', hintKey: 'validation.locator' }),
+      }
+    }
+    const cells: { x: number; y: number; z: number }[] = []
+    for (const r of refs) {
+      const parts = r.owner.id.split(',')
+      if (parts.length !== 3) continue
+      const [x, y, z] = parts.map((s) => Number(s))
+      if (x === undefined || y === undefined || z === undefined) continue
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue
+      cells.push({ x, y, z })
+    }
+    // 旧寻址（`x,y,z`）解不开 ⇒ 报错，**不静默跳过**（否则"报告成功但没写"）。
+    // 旧寻址→内核 id 的映射只许落在这里（边界层），核心不认识它。
+    if (cells.length !== refs.length) {
+      return {
+        status: 'rejected',
+        error: domainError('InvalidValue', { reason: 'malformed-cell-owner-id' }),
+      }
+    }
+    // `parsed.name` 已按 `parseBlockStateId` 剥离命名空间（与 `SlotBlock.name` 同口径）。
+    // 引用走**读面**（`ctx.kernelCellIdentityRef`），不自己拼 —— 拼就是 GF-7。
+    const first = cells[0]!
+    const ref0 = ctx.kernelCellIdentityRef(0, first, parsed.name, parsed.meta)
+    if (ref0 === null) {
+      return {
+        status: 'rejected',
+        error: domainError('UnsupportedOperation', {
+          reason: 'identity-not-in-palette',
+          property: refs[0]!.property,
+          objectId: refs[0]!.owner.id,
+        }),
+      }
+    }
+    const appliedToKernel = ctx.submitContentEdit({
+      kind: 'setCellIdentity',
+      contextId: KERNEL_CONTEXT_ID,
+      cells,
+      identity: { name: parsed.name, paletteRef: ref0, meta: parsed.meta },
+    })
+    if (appliedToKernel) {
+      // 与逐格说明同一条纪律：内核写已由 `submitContentEdit` 投影回 legacy ⇒
+      // **不得**再走下面的 legacy 写（再写一次会以旧侧表覆盖回写产物）。
+      return { status: 'applied', version: versionOf(ctx), changes: NO_CHANGE }
+    }
+  }
+
   const transition = applySetProperty<DocumentState>({
     registry,
     ports,

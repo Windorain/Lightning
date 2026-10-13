@@ -657,6 +657,42 @@ export class Context {
   }
 
   /**
+   * **某格的方块身份在文档调色板里的内容键**（R1-β① C3；`setCellIdentity` 的
+   * `paletteRef` 来源）。
+   *
+   * ## 它为什么必须存在（GF-7 的写侧）
+   *
+   * `cellPalette` 的值是**含真实命名空间的 `registryId`** 的内容键，而 `cells` 的值
+   * 是**已截去命名空间**的注册名（`pure/gridTypes.ts:18`）。两者**互不推出**：
+   * 同一个截前缀注册名可以对应多个不同 `registryId` 的条目。面板提交的是显示形态
+   * `minecraft:<name>:<meta>`，若要写身份就必须拿到**真实存在的那一条**内容键 ——
+   * 由名字反拼（`` `minecraft:${name}` ``）会把 `ae2:` / `appliedenergistics2:`
+   * 之类的命名空间改写成 `minecraft:`（GF-7 投影侧实测 68 条调色板里 66 条被改写）。
+   *
+   * ## 命中口径：**只在精确命中时采信**（与 `kernelProjection.ts` 的 D9 表同一口径）
+   *
+   * 本访问器只回答"**调色板里已有一条**与 `(name, meta)` 相符的条目吗"，答"是"时
+   * 返回那条的**内容键本身**（故命名空间来自文档，不是来自拼接）。
+   * 不按 `assetId` 几何身份猜、不按名字尾段兜底 —— 那两条路径
+   * （`kernelProjection.ts:500`/`:502`）实测会**引入**错误身份
+   * （`multiblock-ebf-2ch` 的 `gregtech:gt.blockcasings@11` 与
+   * `gregtech:gt.blockmachines@1000` 共享同一个 `assetId`）。
+   *
+   * @returns `null` = 未装配 / 该格无方块 / 调色板里没有相符条目 ⇒ 调用方**如实拒绝**，
+   *   不得反拼引用兜底。
+   */
+  kernelCellIdentityRef(
+    frameIndex: number,
+    pos: { x: number; y: number; z: number },
+    name: string,
+    meta: number,
+  ): string | null {
+    const grid = this.kernelGrid(frameIndex)
+    if (grid === null) return null
+    return grid.identityRefOf(pos, name, meta)
+  }
+
+  /**
    * **逐格说明侧表读面**（#301 P10f D3；**R6**）。
    *
    * ## 它替代的旧机制
