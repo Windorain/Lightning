@@ -26,7 +26,7 @@ function workspaceModeForSource(sourceId: DocumentSourceId): WorkbenchWorkspaceM
 }
 
 export async function confirmDiscardDirtyIfNeeded(ctx: Context): Promise<boolean> {
-  if (!ctx.getEditHistory().canUndo.value) return true
+  if (!(ctx.kernelUndoState()?.canUndo ?? false)) return true
   const confirmFn = ctx.getToolSettings().confirmDirty ?? window.confirm
   if (!confirmFn('当前场景有未保存的修改，是否继续？')) return false
   return true

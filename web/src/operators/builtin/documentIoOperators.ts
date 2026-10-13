@@ -48,7 +48,7 @@ export const DocumentSaveOperator: OperatorType = {
     if (b.sourceId !== 'wiki-data') return false
     // #301 P10f D3（R3）：产物 plain 的唯一入口。
     const draft = buildWikiEditSummaryDraft(b.saveBaseline, ctx.plainForSave().plain)
-    return hasWikiAuditableChanges(draft) || ctx.getEditHistory().canUndo.value
+    return hasWikiAuditableChanges(draft) || (ctx.kernelUndoState()?.canUndo ?? false)
   },
 
   async exec(ctx, props) {

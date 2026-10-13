@@ -44,13 +44,13 @@ export const WikiSaveConfirmOperator: OperatorType = {
       ctx.getDocumentBinding().value.saveBaseline,
       ctx.plainForSave().plain,
     )
-    return hasWikiAuditableChanges(draft) || ctx.getEditHistory().canUndo.value
+    return hasWikiAuditableChanges(draft) || (ctx.kernelUndoState()?.canUndo ?? false)
   },
 
   invoke(ctx) {
     const binding = ctx.getDocumentBinding().value
     const draft = buildWikiEditSummaryDraft(binding.saveBaseline, ctx.plainForSave().plain)
-    if (!hasWikiAuditableChanges(draft) && !ctx.getEditHistory().canUndo.value) {
+    if (!hasWikiAuditableChanges(draft) && !(ctx.kernelUndoState()?.canUndo ?? false)) {
       ctx.log.warn('Wiki 保存', '没有可保存的变更')
       return OP_RESULT.CANCELLED
     }
