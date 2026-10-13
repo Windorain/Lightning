@@ -152,6 +152,28 @@ export interface KernelGridView {
   tooltipAt(pos: KernelGridPos): string | undefined
   /** 调色板条目（按内容键精确命中；取不到 ⇒ `null`，**不猜**）。 */
   paletteEntryOf(pos: KernelGridPos): KernelPaletteEntryView | null
+  /**
+   * **与 `(name, meta)` 相符的调色板条目的内容键**（R1-β① C3；`setCellIdentity` 的
+   * `paletteRef` 来源）。
+   *
+   * ## 为什么要有它（它是 GF-7 在**写侧**的闭合件）
+   *
+   * 面板提交的是显示形态 `minecraft:<name>:<meta>`，而 `cells` 承载的名字**已截去
+   * 命名空间**（`pure/gridTypes.ts:18`）⇒ 由名字反拼引用（`` `minecraft:${name}` ``）
+   * 会把 `ae2:`/`appliedenergistics2:` 之类改写成 `minecraft:`。本方法只**查**
+   * 调色板里已存在的条目并返回**它自己的**内容键 —— 命名空间来自文档，不来自拼接。
+   *
+   * ## 唯一性要求（**不猜**）
+   *
+   * `name` 是 `registryId` 的**尾段**。同一尾段 + 同一 meta 可能对应多条
+   * 不同命名空间的条目 ⇒ 此时返回 `null`（**歧义即拒绝**），
+   * **不**取首条（那正是 `kernelProjection.ts:500`/`:502` 两条"不采信"路径的理由：
+   * 猜会**引入**错误身份）。0 条命中同样返回 `null`。
+   *
+   * @returns 内容键（`blockPaletteEntryKey`，与 `cellPalette` 同一套编码）；
+   *   `null` = 无命中或有歧义 ⇒ 调用方**如实拒绝**，不得反拼兜底。
+   */
+  identityRefOf(pos: KernelGridPos, name: string, meta: number): string | null
   /** 该格的**解码后四边形**（内核：`cellGeometry` → 资产 `quads`；取不到 ⇒ `null`）。 */
   geometryOf(pos: KernelGridPos): readonly BakedQuad[] | null
   /** 世界空间体素中心（与 legacy `Grid.centerWorld` 逐字同式）。 */
@@ -412,6 +434,25 @@ export function gridViewOfPayload(payload: BlockGridPayload): KernelGridView {
     paletteEntryOf(pos: KernelGridPos): KernelPaletteEntryView | null {
       return paletteEntryAt(pos)
     },
+    identityRefOf(_pos: KernelGridPos, name: string, meta: number): string | null {
+      // 扫 `palette` 表（**不是** `cellPalette`：后者只覆盖"当前有方块的那些格"，
+      // 而身份写要回答"这个身份在本文档调色板里存在吗"）。
+      // 命中条件：`registryId` 的**尾段**等于 `name`（`name` 已截前缀），且 `meta` 相等。
+      if (palette === undefined || name === '') return null
+      let hit: string | null = null
+      for (const entry of palette) {
+        if (entry === null || typeof entry !== 'object') continue
+        const typed = entry as BlockPaletteEntry
+        if (tailOfRegistryId(String(typed.registryId ?? '')) !== name) continue
+        if (Number(typed.meta ?? 0) !== meta) continue
+        const key = blockPaletteEntryKey(typed)
+        if (key === '') continue
+        // 歧义 ⇒ 拒绝（**不**取首条）。
+        if (hit !== null && hit !== key) return null
+        hit = key
+      }
+      return hit
+    },
     geometryOf(pos: KernelGridPos): readonly BakedQuad[] | null {
       const assetId = cellGeometry?.[cellPositionKey(pos)]
       if (assetId === undefined || geometry === undefined) return null
@@ -596,6 +637,17 @@ export function gridViewOfLegacy(grid: LegacyGridLike): KernelGridView {
       const e = entryOf(b.paletteIndex)
       if (e === null) return null
       return paletteEntryViewOf(e as Record<string, unknown>, quadsOfLegacyGeometry(e.geometry))
+    },
+    identityRefOf(): string | null {
+      // **legacy 侧如实为 `null`**：`cellPalette`（含真 `registryId` 的内容键）是
+      // **内核 `blockGrid` 载荷**的概念，旧 `Grid` 只有 `paletteIndex` 槽位，
+      // 没有任何内容键形态可返回。
+      //
+      // 这不是"缺实现"，而是**事实**：身份写的权威在内核（`setCellIdentity` 写的是
+      // `cells` + `cellPalette` 两表）。未装配内核时无从表达 ⇒ 返回 `null`，
+      // 由调用方**如实拒绝**（`identity-not-in-palette`），
+      // **不**回落到旧 `setBlock`（那正是 GF-7 丢命名空间的写点，已退役）。
+      return null
     },
     geometryOf(pos: KernelGridPos): readonly BakedQuad[] | null {
       const b = grid.at(pos)

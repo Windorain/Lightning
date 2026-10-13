@@ -147,21 +147,33 @@ export function writeBlockProperty(
   const doc = state.document.clone()
 
   switch (localPropertyOf(ref.property, _context.descriptor.objectTypeId)) {
+    // ───────────────────────────────────────────────────────────────────────
+    // 退役（R1-β① C3）：`id`（方块身份）的旧写点**已删除**
+    // ───────────────────────────────────────────────────────────────────────
+    //
+    // 这里原先是 `doc.frame(0)!.grid!.setBlock(pos, { ...block, name, meta })`
+    // —— 把面板给的名字直接写进 `SlotBlock.name`。该字段按 `pure/gridTypes.ts:18`
+    // 是**已截去 `minecraft:` 前缀**的注册名，而显示侧 `context/queries.ts:164`
+    // 再按 `` `minecraft:${name}` `` 拼回 ⇒ 非 `minecraft` 命名空间在"读出→写回"
+    // 一个来回后被改写（GF-7 投影侧实测 68 条调色板里 **66 条**被改写）。
+    //
+    // 身份写现在走内核命令 `setCellIdentity`（取值是「`cells` 值 + `cellPalette`
+    // 内容键」的**二元组**，没有从名字反拼命名空间的环节），拦截点在
+    // `editors/workbench-rna` 的 `submitPropertyWrite` —— 那里持有 `Context`，
+    // 因而能发命令；本函数是**纯**转移、拿不到 `ctx`，故**不**在此实现身份写。
+    //
+    // ⚠️ 到达这里说明是**混合属性批次**（同一次提交里既改身份又改别的）：
+    // 拦截条件要求"全部 ref 都是 `id`"才拦截，混合批次整批落到这里。
+    // 此时**如实拒绝**，**不**回落旧写（那会让内核与 legacy 就同一格给出两个身份，
+    // 正是本批要消除的双轨）。
     case 'id': {
-      const parsed = parseBlockStateId(String(value))
-      if (!parsed) {
-        return err(
-          domainError('InvalidValue', {
-            reason: 'malformed-block-id',
-            property: ref.property,
-            hintKey: 'validation.locator',
-          }),
-        )
-      }
-      // `SlotBlock.name` 是**已截去 `minecraft:` 前缀**的注册名（`pure/gridTypes.ts:18`）；
-      // 显示用的 `block_state_id` 由读取侧拼回（`context/queries.ts:164`）。
-      doc.frame(frameIndex)!.grid!.setBlock(pos, { ...block, name: parsed.name, meta: parsed.meta })
-      return ok(withDocument(state, doc))
+      return err(
+        domainError('UnsupportedOperation', {
+          reason: 'kernel-routed-block-identity',
+          property: ref.property,
+          objectId: ref.owner.id,
+        }),
+      )
     }
     case 'tooltip':
     case 'cellTooltip': {
