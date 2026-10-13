@@ -24,6 +24,14 @@ export interface OffscreenChainStats {
   readonly nonBackground: number
   readonly coverage: number
   readonly bbox: readonly [number, number, number, number]
+  /**
+   * 该链这次离屏渲染的 PNG data URL（#387 C6 的**画面取证**用）。
+   *
+   * 为什么要它：材质判据（"贴图真的接上了"）若只读 `material.map !== null`，
+   * 证的是**对象图**而不是**画面**。截图使"有贴图 / 无贴图"两次渲染可**逐像素**对照
+   * （`preserveDrawingBuffer: true` 已开，故 `toDataURL` 拿到的是刚渲染的那一帧）。
+   */
+  readonly png: string
 }
 
 export interface OffscreenBothResult {
@@ -97,7 +105,7 @@ function slotWithSurface(): {
  */
 export async function renderBothChainsOffscreen(): Promise<OffscreenBothResult> {
   const { surface, camera, legacyGroup } = slotWithSurface()
-  const empty: OffscreenChainStats = { nonBackground: 0, coverage: 0, bbox: [0, 0, 0, 0] }
+  const empty: OffscreenChainStats = { nonBackground: 0, coverage: 0, bbox: [0, 0, 0, 0], png: '' }
   if (surface === null || camera === null) {
     return { presenter: empty, legacy: empty, negativeEmpty: true, width: 0, height: 0, note: 'no-surface-or-camera' }
   }
@@ -144,6 +152,8 @@ export async function renderBothChainsOffscreen(): Promise<OffscreenBothResult> 
       nonBackground: nonBg,
       coverage: nonBg / (W * H),
       bbox: (maxX < 0 ? [0, 0, 0, 0] : [minX, minY, maxX, maxY]) as [number, number, number, number],
+      // 画面取证：刚渲染的那一帧（`preserveDrawingBuffer: true` 保证它还在）
+      png: canvas.toDataURL('image/png'),
     }
   }
 

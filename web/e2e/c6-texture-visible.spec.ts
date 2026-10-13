@@ -19,7 +19,8 @@
  * | 纯函数（编译产物 / 绑定表 / 材质描述符） | 覆盖（但**不**作为主证据） |
  * | 真实浏览器 + 真实工作台 UI + 生产装配 | **主证据**：`gotoWorkbench` → 注入真实夹具 → 帧循环 apply |
  * | 真实 WebGL 上传与采样 | 覆盖（材质由真实渲染器创建，`map` 指向已上传纹理） |
- * | 画面**像素**能看出某张贴图（纹理内容比对） | ⚠️ **不覆盖**：截图为"画面非空 + 材质带图"的旁证，不做逐像素纹理比对 |
+ * | **画面像素**：贴图真的进了光栅化结果 | 覆盖（**离屏渲染同一呈现链两次**：绑贴图 ⇒ 红，清空绑定 ⇒ 白；几何完全相同） |
+ * | 可见视口的像素（工作台那张画布） | ⚠️ **不覆盖**：可见视口仍由 legacy/DRW 绘制（本批不切渲染链）⇒ 截图只作 UI 在位旁证 |
  *
  * 负对照：把绑定表清空（等价于"没接材质统一"）⇒ 同一观测面必须答 `withMap === 0`
  * ——否则"带贴图"这个观测是恒真的。
@@ -106,6 +107,21 @@ async function clearBindings(page: import('@playwright/test').Page): Promise<boo
   })) as boolean
 }
 
+/** 离屏渲染读数（本批用到的子集；见 `e2e/helpers/p10e/probe.ts`）。 */
+interface OffscreenShot {
+  readonly note: string
+  readonly negativeEmpty: boolean
+  readonly presenter: { readonly nonBackground: number; readonly png: string }
+}
+
+/** 经 vite 转译加载浏览器侧探针（说明见 `p10e-presenter-live.spec.ts`）。 */
+async function callProbe<T>(page: import('@playwright/test').Page, fn: string): Promise<T> {
+  return (await page.evaluate(async ({ fn }) => {
+    const mod = (await import('/e2e/helpers/p10e/probe.ts')) as unknown as Record<string, () => unknown>
+    return await mod[fn]!()
+  }, { fn })) as T
+}
+
 test.describe('R1-β① C6 · 画面贴图可见（真实浏览器 / 真实工作台 / 生产装配）', () => {
   test('真实夹具：挂载材质真的带 `map`，且材质 id 符 `material:<下标>` 约定', async ({ page }, testInfo) => {
     const file = 'multiblock-ebf-2ch.json'
@@ -137,14 +153,29 @@ test.describe('R1-β① C6 · 画面贴图可见（真实浏览器 / 真实工�
       expect(id, `材质 id 必须符 material:<下标> 约定，实得 ${id}`).toMatch(/^material:\d+$/)
     }
 
-    // ⑥ 画面取证：截图 + 非空像素签名（旁证；不做纹理内容比对）
+    // ⑥ 画面取证（层①）：工作台 UI 截图 + 非空像素签名（旁证；不做纹理内容比对）
     const png = await page.screenshot({ fullPage: false })
     const shot = path.join(SHOT_DIR, `c6-texture-${testInfo.project.name}.png`)
     fs.writeFileSync(shot, png)
     const sig = await readPixelSignature(page, png)
     expectNotBlank(sig, 'C6 视口画面')
 
-    // ⑦ 负对照：清空绑定 ⇒ **同一观测面**必须答 0 张
+    /**
+     * ⑦ 画面取证（层②·**主证据**）：把内核呈现链**离屏渲染**两次 —— 绑着贴图 / 清空绑定 ——
+     * 并保存两张 PNG。判据是"两张**不同**"：几何完全相同，唯一的差别就是贴图，
+     * 故"图不同"直接证明**贴图改变了画出来的像素**（而不是只改了对象图里的一个字段）。
+     *
+     * 为什么必须离屏：本批不切渲染链（可见视口仍由 legacy/DRW 画），所以"截实时视口"
+     * 证不到内核链的画面（见 `renderBothChainsOffscreen` 文件头同一理由）。
+     */
+    const withTex = await callProbe<OffscreenShot>(page, 'renderBothChainsOffscreen')
+    expect(withTex.note, '离屏渲染必须取到呈现会话与相机').toBe('ok')
+    expect(withTex.presenter.nonBackground, '内核链必须真的画出像素').toBeGreaterThan(0)
+    expect(withTex.negativeEmpty, '负对照：什么都不渲染必须为空（否则"非空"无意义）').toBe(true)
+    const texPng = path.join(SHOT_DIR, `c6-presenter-with-textures-${testInfo.project.name}.png`)
+    fs.writeFileSync(texPng, Buffer.from(withTex.presenter.png.split(',')[1]!, 'base64'))
+
+    // ⑧ 负对照：清空绑定 ⇒ **同一观测面**必须答 0 张；离屏画面必须**变**
     expect(await clearBindings(page), '必须取到呈现会话才能做负对照').toBe(true)
     await page.waitForTimeout(500)
     const after = await readTextureObservation(page)
@@ -154,5 +185,14 @@ test.describe('R1-β① C6 · 画面贴图可见（真实浏览器 / 真实工�
       '清空绑定 ⇒ 挂载材质必须全部无 `map`（否则上一条是恒真的，无区分力）',
     ).toBe(0)
     expect(after.meshes, '负对照仍应挂着网格（只是无图）').toBeGreaterThan(0)
+
+    const noTex = await callProbe<OffscreenShot>(page, 'renderBothChainsOffscreen')
+    expect(noTex.presenter.nonBackground, '无贴图时几何仍必须画出来（否则第⑦条比的是"有/无几何"）').toBeGreaterThan(0)
+    const noTexPng = path.join(SHOT_DIR, `c6-presenter-no-textures-${testInfo.project.name}.png`)
+    fs.writeFileSync(noTexPng, Buffer.from(noTex.presenter.png.split(',')[1]!, 'base64'))
+    expect(
+      noTex.presenter.png === withTex.presenter.png,
+      '贴图必须改变**画出来的像素**（两次离屏渲染几何相同，唯一变量是贴图 —— 图相同即"贴图没进画面"）',
+    ).toBe(false)
   })
 })
