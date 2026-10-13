@@ -46,7 +46,8 @@ import { adoptLoadedDocument } from '@/composition/documentLoad'
 import { KernelSession } from '@/runtime/kernelSession'
 import { createViewportTexturePort, type ViewportTexturePort } from '@/composition/viewportTexturePort'
 import { PresenterSession } from '@/composition/presenterSession'
-import { textureResourcesOf, type TextureDecoder } from '@/composition/kernelTextureResources'
+import { BatchedPresenter } from '@/presentation/presenter'
+import { textureBindingsOf, textureResourcesOf, type TextureDecoder } from '@/composition/kernelTextureResources'
 import type { TexturePixels } from '@/presentation/textureBinding'
 import type { Document } from '@/domain/document'
 import { KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
@@ -99,8 +100,11 @@ function mapStats(root: THREE.Object3D): { readonly total: number; readonly with
   return { total, withMap }
 }
 
-async function kernelSetup() {
-  const raw = JSON.parse(fs.readFileSync(MB_FIXTURE, 'utf8').replace(/\r\n/g, '\n')) as Record<string, unknown>
+/** 真实信封夹具：**材质组数 39 > `maxBatches`(32)** ⇒ 必然触发合并批次（逐成员身份那条路）。 */
+const ENVELOPE_FIXTURE = path.join(process.cwd(), 'e2e', 'fixtures', 'structuredata-exported-envelope.json')
+
+async function kernelSetup(fixture: string = MB_FIXTURE) {
+  const raw = JSON.parse(fs.readFileSync(fixture, 'utf8').replace(/\r\n/g, '\n')) as Record<string, unknown>
   const registry = createParserRegistry()
   registry.register(V2PlainParser)
   registry.register(createEnvelopeParser(registry))
@@ -113,7 +117,7 @@ async function kernelSetup() {
     contextId: KERNEL_CONTEXT_ID,
     capabilities: [],
   })
-  const ok = adoptLoadedDocument({ kernel: session, log: { info: () => {}, warn: () => {} } }, parsed.document!, raw, MB_FIXTURE)
+  const ok = adoptLoadedDocument({ kernel: session, log: { info: () => {}, warn: () => {} } }, parsed.document!, raw, fixture)
   expect(ok, '生产装配必须成功（GF-16 = true）').toBe(true)
   const doc = session.document()!
   return { session, doc }
@@ -144,8 +148,7 @@ describe('R1-β① C5 · 材质统一：`TexturePort` 生产实现把贴图接�
     }
   })
 
-  it('①b **接线侧**：视口装配确实把端口与解码器给了呈现会话，且绑定按编译材质逐一产出', async () => {
-    const { session, doc } = await kernelSetup()
+  it('①b **接线侧**：视口装配确实把端口与解码器给了呈现会话，且绑定按编译材质逐一产出', async () => {    const { session, doc } = await kernelSetup()
     try {
       const resources = await textureResourcesOf(doc.content.resources, pixelDecoder())
       const port = createViewportTexturePort('test:wiring')
@@ -169,7 +172,7 @@ describe('R1-β① C5 · 材质统一：`TexturePort` 生产实现把贴图接�
     }
   })
 
-  it('①c **阻断点登记**：网格几何的材质 id 不符 `material:<下标>` 约定 ⇒ 那个材质**绑不上**贴图', async () => {
+  it('①c **正判据（C6 翻转）**：网格几何按 `material:<下标>` 分组 ⇒ 挂载的材质**真的**带上了 `map`', async () => {
     const { session, doc } = await kernelSetup()
     try {
       const resources = await textureResourcesOf(doc.content.resources, pixelDecoder())
@@ -182,17 +185,23 @@ describe('R1-β① C5 · 材质统一：`TexturePort` 生产实现把贴图接�
         const stats = mapStats(surface.object3d)
         const ids = surface.materialDescriptors().map((m) => m.id)
         /**
-         * 这条断言是**反证式**的：它记录当前的真实缺口 ——
-         * `composition/kernelPresentationInputs` 产出**一个**网格图元、材质 id 恒为
-         * `'structure'`，而 `textureBindingsOf` 的绑定键约定是 `material:<下标>`
-         * （`kernelTextureResources#MATERIAL_ID_PREFIX`）⇒ 该材质永远"无贴图"。
-         *
-         * ⇒ 一旦生产改成"逐材质一个图元"（`runtime/presentationAdapter#structureMaterialGroups`
-         * 是现成件，阻断点是 `presentation/compileScene` 的批次划分以 `objectId` 为键），
-         * 本断言**翻红**即为 DONE 信号：届时应把 ①c 改成"至少一个材质带 `map`"的正判据。
+         * C5 时本处是**反证式**的阻断点登记（材质 id 恒 `'structure'` ⇒ 永远无贴图）。
+         * C6 接通后按当时的预告翻成正判据：**至少一个**编译材质符约定。
          */
-        expect(ids.every((id) => !id.startsWith('material:')), '当前生产材质 id 均不符约定（这就是阻断点）').toBe(true)
-        expect(stats.withMap, '阻断点存在 ⇒ 网格材质绑不上贴图').toBe(0)
+        expect(ids.length, '编译产物必须有材质').toBeGreaterThan(0)
+        expect(
+          ids.some((id) => id.startsWith('material:')),
+          `C6 起网格材质必须按 material:<下标> 分组，实得 ${JSON.stringify(ids)}`,
+        ).toBe(true)
+        /**
+         * **观测面是挂载后的真实材质**（`surface.object3d` 遍历 `MeshBasicMaterial.map`），
+         * 不是"端口被调用/字段被赋值"。画面级取证见 `web/e2e`（真浏览器截图，本批附件）。
+         */
+        expect(stats.total, '必须有材质挂在树上').toBeGreaterThan(0)
+        expect(
+          stats.withMap,
+          '`material:<下标>` 命中绑定 ⇒ 至少一个挂载材质必须带 `map`（否则贴图仍断路）',
+        ).toBeGreaterThan(0)
       } finally {
         surface.dispose()
         port.dispose()
@@ -202,7 +211,100 @@ describe('R1-β① C5 · 材质统一：`TexturePort` 生产实现把贴图接�
     }
   })
 
-  it('④ **现成件**：`structureMaterialGroups` 按 `materialIndex` **恰好划分**真实夹具的四边形', async () => {
+  /**
+   * **负对照**：只把材质 id 退回 C5 的 `'structure'` 形态（其余全不变）⇒ 挂载材质必须**无** `map`。
+   *
+   * 为什么不加一个"材质 id 注入"参数到生产里：那是为判据开的旁路（白名单的另一种形式）。
+   * 本控制改成在**编译产物的纯数据**上做一次单变量改写，然后走**同一个** `BatchedPresenter`
+   * 与**同一个** `textureBindingsOf` —— 被改的只有"绑定键符不符约定"这一个变量。
+   */
+  it('①d **负对照**：材质 id 退回 `structure` ⇒ 挂载材质**无** `map`（证明 ①c 有区分力）', async () => {
+    const { session, doc } = await kernelSetup()
+    try {
+      const resources = await textureResourcesOf(doc.content.resources, pixelDecoder())
+      const port = createViewportTexturePort('test:revert-id')
+      const presenter = new BatchedPresenter({ scope: 'test:revert-id', textures: port })
+      try {
+        const { kernelPresentationInputs } = await import('@/composition/kernelPresentationInputs')
+        const { compileScene } = await import('@/presentation/compileScene')
+        const produced = kernelPresentationInputs({
+          scene: doc.scene,
+          content: doc.content,
+          key: {
+            documentVersion: doc.version.documentVersion,
+            scene: doc.scene.id,
+            time: { frame: 0, fps: 20 },
+            parameterVersion: 0,
+            contentResourceVersions: [],
+          } as never,
+        })
+        const compiled = compileScene(produced.inputs)
+        expect(compiled.ok, '生产输入必须可编译').toBe(true)
+        if (!compiled.ok) throw new Error('narrow')
+        // **单变量改写**：只把材质 id 换回旧形态。
+        const reverted = {
+          ...compiled.value,
+          payloads: compiled.value.payloads.map((p) => ({
+            ...p,
+            material: { ...p.material, id: 'structure' },
+          })),
+        }
+        presenter.apply(reverted)
+        port.sync(resources)
+        const bindings = textureBindingsOf({
+          materials: reverted.payloads.map((p) => p.material) as never,
+          resources,
+        })
+        presenter.setTextureBindings(new Map(bindings.map((b) => [b.materialId, b])))
+        const stats = mapStats(presenter.object3d)
+        expect(stats.total, '材质仍应挂着（只是没贴图）').toBeGreaterThan(0)
+        expect(
+          stats.withMap,
+          '退回旧材质 id 形态 ⇒ 绑定键 `material:<下标>` 命不中 ⇒ 必须一张贴图都没有',
+        ).toBe(0)
+      } finally {
+        presenter.dispose()
+        port.dispose()
+      }
+    } finally {
+      session.dispose()
+    }
+  })
+
+  /**
+   * **合并批次**（材质组数 > `maxBatches`）：批次级材质只是代表值 ⇒ 呈现必须**逐成员**
+   * 取材质，否则"B 的方块贴 A 的图"（静默贴错纹理）。这条用真实信封夹具（39 个材质组）
+   * 把那条路真的走一遍 —— 否则"逐成员"这段代码在判据里从未被执行。
+   */
+  it('①e **合并批次**：真实信封（39 材质组 > 32 预算）⇒ 挂载材质数 = 编译材质数，且全部带 `map`', async () => {
+    const { session, doc } = await kernelSetup(ENVELOPE_FIXTURE)
+    try {
+      const resources = await textureResourcesOf(doc.content.resources, pixelDecoder())
+      const port = createViewportTexturePort('test:merged')
+      const observed = observeMaterials(doc, port)
+      const surface = observed.session
+      try {
+        port.sync(resources)
+        surface.bindTextures(resources)
+        const ids = surface.materialDescriptors().map((m) => m.id)
+        expect(ids.length, '信封夹具必须有 >32 个材质组（否则本判据覆盖不到合并批次）').toBeGreaterThan(32)
+        const stats = mapStats(surface.object3d)
+        expect(
+          stats.total,
+          '逐成员材质 ⇒ 挂载的材质数必须与编译材质数一致（用代表值会少一批）',
+        ).toBe(ids.length)
+        expect(stats.withMap, '全部编译材质都必须带上 `map`').toBeGreaterThan(0)
+        expect(stats.withMap, '全部编译材质都必须带上 `map`').toBe(stats.total)
+      } finally {
+        surface.dispose()
+        port.dispose()
+      }
+    } finally {
+      session.dispose()
+    }
+  })
+
+  it('④ **接通（C6 翻转）**：`structureMaterialGroups` 按 `materialIndex` **恰好划分**真实夹具的四边形，且生产**逐组**消费它', async () => {
     const { session, doc } = await kernelSetup()
     try {
       // 与生产 `kernelPresentationInputs` 同一份装配产物（不手搓定义）。
@@ -250,8 +352,18 @@ describe('R1-β① C5 · 材质统一：`TexturePort` 生产实现把贴图接�
         content: doc.content,
         key: { documentVersion: doc.version.documentVersion, scene: doc.scene.id, time: { frame: 0, fps: 20 }, parameterVersion: 0, contentResourceVersions: [] } as never,
       })
-      expect(produced.inputs.primitives.length, '生产当前是单图元（阻断点）').toBe(1)
-      expect(groups.length, '而按材质分组本应给出多组（现成件已备）').toBeGreaterThan(1)
+      expect(groups.length, '按材质分组必须给出至少一组').toBeGreaterThan(0)
+      expect(groups.length, '夹具必须真的多材质（否则本判据只覆盖单组路径）').toBeGreaterThan(1)
+      // C5 时这里记的是"生产当前是单图元（阻断点）"；C6 起生产**逐组**消费现成件。
+      expect(produced.inputs.primitives.length, '生产必须逐材质组产出一个图元').toBe(groups.length)
+      expect(
+        produced.inputs.primitives.map((p) => p.material.id),
+        '生产材质 id 必须逐组等于现成件的 id',
+      ).toEqual(groups.map((g) => g.materialId))
+      // **对象身份不被材质分组拆散**（#249 §3.3）：同一对象的所有组共享 objectId。
+      expect(new Set(produced.inputs.primitives.map((p) => p.objectId)).size, '分组不得改变对象身份').toBe(1)
+      // 几何身份逐组不同（同 id 会让属性袋互相覆盖）
+      expect(new Set(produced.inputs.primitives.map((p) => p.geometry.id)).size).toBe(groups.length)
     } finally {
       session.dispose()
     }

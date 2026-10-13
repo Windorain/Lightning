@@ -58,7 +58,7 @@ import type {
   GeometryAttributes,
 } from '@/presentation/evaluationKey'
 import { projectGridCells } from '@/composition/kernelProjection'
-import { structureGeometryAttributes, structurePrimitive } from '@/runtime/presentationAdapter'
+import { structureMaterialPrimitives } from '@/runtime/presentationAdapter'
 
 /**
  * 网格定义的类型：从 `structurePrimitive` 的**入参**派生。
@@ -75,7 +75,7 @@ import { structureGeometryAttributes, structurePrimitive } from '@/runtime/prese
  * ⇒ 从函数签名派生。收益不止绕过闸门：它让本模块与"网格定义长什么样"**解耦**
  * （那个形状属 `render/` 的内部约定），本模块只承诺"能喂给呈现适配层"。
  */
-type GridDefinition = Parameters<typeof structurePrimitive>[0]['definition']
+type GridDefinition = Parameters<typeof structureMaterialPrimitives>[0]['definition']
 
 /**
  * `DocumentContent.resources` → `materialPalette`（**与 `kernelProjection` 的 ③ 同一映射**）。
@@ -206,15 +206,31 @@ export function kernelPresentationInputs(input: {
     }
 
     const definition = definitionOfPayload(payload, materialPalette)
-    const primitive = structurePrimitive({ definition, layerPreview: 'all', materialTint: 0xffffff })
-    // ⚠️ 用 D3a 修正后的 `structureGeometryAttributes`：它委托渲染路径**同一个**收集器
-    // （含遮挡剔除），故本路径的几何与渲染路径**逐位一致**。
+    // ⚠️ 用 D3a 修正后的收集器（`structureMaterialGroups` 内部委托渲染路径**同一个**
+    // 收集器，含遮挡剔除），故本路径的几何与渲染路径**逐位一致**。
     // 修复前它不剔除 ⇒ 实测 `ebf-2ch` 会画 72 个三角形而渲染路径只画 24 个。
-    byId.set(primitive.geometry.id, {
-      version: primitive.geometry.version,
-      attributes: structureGeometryAttributes(definition, { layerPreview: 'all' }),
+    //
+    // 逐 `materialIndex` 一个图元（legacy `render/mesh/blockMesh.ts:87` 是同一分组）：
+    // 材质 id 因此是 `material:<下标>`，与 `kernelTextureResources` 的绑定键约定对齐
+    // ⇒ `createMaterial` 能设 `params.map`（贴图整链唯一缺的一环）。
+    // `objectId` 逐组相同 —— 分组不改变**对象身份**（#249 §3.3）。
+    const groups = structureMaterialPrimitives({
+      definition,
+      layerPreview: 'all',
+      materialTint: 0xffffff,
     })
-    primitives.push(primitive)
+    if (groups.length === 0) {
+      // 全部四边形都被剔除（无可见面）⇒ 如实报告，不产出一个 0 三角形的"空对象"。
+      skipped.push({ objectId, reason: 'empty-geometry' })
+      continue
+    }
+    for (const g of groups) {
+      byId.set(g.primitive.geometry.id, {
+        version: g.primitive.geometry.version,
+        attributes: g.attributes,
+      })
+      primitives.push(g.primitive)
+    }
   }
 
   const geometry: GeometrySource = {

@@ -390,12 +390,16 @@ describe('P10e · 逐格身份层：**真实夹具**上逐三角形与坐标反�
       cellContent: payload.cellContent,
     })
     const { collectStructureGeometryPiecesPure } = await import('@/render/mesh/structureGeometryCore')
-    const pieces = collectStructureGeometryPiecesPure({
+    const allPieces = collectStructureGeometryPiecesPure({
       geometryPhase: 'baked',
       cellGrid: projected.cellGrid,
       blockPalette: projected.blockPalette,
       materialPalette: content.resources.map((r) => ({ kind: r.kind })),
     } as never).pieces
+    // C6 起图元**逐材质分组** ⇒ 该图元的 pieces 是全集里同 `materialIndex` 的那一段，
+    // 且**同序**（过滤保序）。比全集会立刻判红（那正是分组生效的证据）。
+    const mi = Number(p.material.id.slice('material:'.length))
+    const pieces = allPieces.filter((x) => x.materialIndex === mi)
     expect(pieces.length * 2, 'pieces × 2 三角形 = 格表长度').toBe(attrs.cellMap!.length)
     pieces.forEach((piece, i) => {
       const t = i * 2
@@ -549,7 +553,16 @@ describe('P10e · 逐格身份层：进 `PickIndex` 后命中能解出格', () =
       compiled.value.skipped.map((s) => s.reason),
       '格表算错必须走 cell-map-shape-invalid（不是静默画错格）',
     ).toContain('cell-map-shape-invalid')
-    expect(compiled.value.payloads.length, '出错对象不得进批次').toBe(0)
+    // ⚠️ C6 起"一个对象 → 多个材质图元"：坏的是**一个图元**，同对象的其它图元仍应正常进批次
+    // （这与"出错对象不得进批次"是同一件事的两种粒度：出错的是图元，回退到对象会让
+    // 整座结构的其它材质一起消失 —— 那才是过度回退）。
+    expect(
+      compiled.value.payloads.map((x) => x.geometry.id),
+      '坏图元的几何不得进批次',
+    ).not.toContain(p.geometry.id)
+    expect(compiled.value.payloads.length, '同对象的其它材质图元仍应呈现').toBe(
+      inputs.primitives.length - 1,
+    )
   })
 
   it('**反空洞真**：正常输入下 `cell-map-shape-invalid` **一次都不出现**', async () => {
@@ -644,5 +657,112 @@ describe('P10e · 适配层：`structureGeometryAttributes` 直接调用也带�
     expect(attrs.cellMap!.length).toBe(attrs.triangleCount)
     // 反空洞真：格表里必须真的有**多个不同格**（否则格表退化成常数）
     expect(new Set(attrs.cellMap!.map(cellKeyOf)).size).toBeGreaterThan(1)
+  })
+})
+
+/**
+ * R1-β① C6 · **对象身份与批次身份分离**（#249 §3.3 原文）。
+ *
+ * ## 本组抓的缺陷是**具体的**
+ *
+ * 一个内核对象在呈现侧展开成**多个**材质图元（逐 `materialIndex`，legacy
+ * `render/mesh/blockMesh.ts:87` 是同一分组）。若批次/来源划分仍以 `objectId` 为键
+ * （C6 之前：`compileScene.ts:150` 的 `byObject`、`:188-192` 的 `slotOf`），第二个图元
+ * 覆盖第一个的槽位 ⇒ `provenance` 把两组记进同一批次而 `payloads` 是两个批次
+ * ⇒ **有一组根本拾不到**（`resolve` 找不到该批次的来源记录，返回 `null`）。
+ *
+ * ## 为什么两条都在（正 + 负对照）
+ *
+ * 正判据证明"现在能拾"；负对照**把划分退回按 `objectId`**（在编译产物的纯数据上做单变量
+ * 改写 —— 不加生产旁路），证明正判据**不是恒真**：退回后必有材质图元解不出。
+ */
+describe('C6 · 一个内核对象 → 多个材质图元：每个图元都能独立拾取且解回同一对象身份', () => {
+  for (const name of FIXTURES) {
+    it(`${name}：逐材质图元独立可拾取，且对象身份不被分组拆散`, async () => {
+      const { scene, content } = await assembledOf(name)
+      const { inputs } = kernelPresentationInputs({ scene, content, key: keyOf(scene.id) })
+      const compiled = compileScene(inputs)
+      expect(compiled.ok).toBe(true)
+      if (!compiled.ok) throw new Error('narrow')
+      const c = compiled.value
+      const index = new PickIndex(c)
+
+      // 前提：夹具必须真的有"一个对象 → 多个材质图元"（否则本组只覆盖单图元路径）
+      expect(inputs.primitives.length, `${name} 必须逐材质多图元`).toBeGreaterThan(1)
+      expect(new Set(inputs.primitives.map((p) => p.objectId)).size, `${name} 分组不得改变对象身份`).toBe(1)
+      const objectId = inputs.primitives[0]!.objectId
+
+      // 逐图元：按 `provenance`（它带 materialId/batchIndex/instanceSlot）解一次
+      const resolvedMaterials = new Set<string>()
+      let homogeneousSeen = 0
+      let mergedSeen = 0
+      for (const prov of c.provenance) {
+        const hit = index.resolve({
+          generation: index.currentGeneration,
+          batchIndex: prov.batchIndex,
+          instanceSlot: prov.instanceSlot,
+          primitiveIndex: 0,
+        })
+        expect(hit, `${name}：material:${prov.materialId} 所在批次/槽位必须解得出来`).not.toBeNull()
+        expect(hit!.objectId, '解出的必须是**对象身份**（不是图元/批次身份）').toBe(objectId)
+        // 拾取面报的材质必须是**该图元自己的** —— 合并批次（材质组数超预算）里批次级
+        // 材质只是代表值；用代表值会让"点中 B 的方块"报出 A 的材质，与画面不一致。
+        expect(hit!.material.id, '解出的材质必须是该图元自己的').toBe(prov.materialId)
+        if (c.plans[prov.batchIndex]!.homogeneous) homogeneousSeen += 1
+        else mergedSeen += 1
+        expect(hit!.cell, '逐格几何的命中必须带格身份').toBeDefined()
+        const map = index.cellMapOf(prov.geometryId)!
+        expect(cellKeyOf(hit!.cell!), '解出的格必须是该图元几何的第 0 个三角形').toBe(cellKeyOf(map[0]!))
+        resolvedMaterials.add(prov.materialId)
+      }
+      expect(resolvedMaterials.size, '每个材质图元都必须被解析过一遍（否则是空洞真）').toBe(
+        new Set(inputs.primitives.map((p) => p.material.id)).size,
+      )
+      // 强分支必须被真的走到（否则"材质属于该图元"那句没被验证过）
+      expect(homogeneousSeen, `${name}：必须至少有一个同质批次被验证`).toBeGreaterThan(0)
+      // envelope（39 个材质组 > 预算 32）必须真的走到**合并批次**那条路，否则
+      // "逐成员身份"这段代码在判据里从未被执行（正是"判据空洞真"的形态）。
+      if (name === 'envelope') expect(mergedSeen, 'envelope 必须触发合并批次').toBeGreaterThan(0)
+    })
+  }
+
+  it('**负对照**：把划分退回「按 `objectId`」⇒ 必有材质图元解不出（证明上一条有区分力）', async () => {
+    const { scene, content } = await assembledOf('multiblock-tier-only')
+    const { inputs } = kernelPresentationInputs({ scene, content, key: keyOf(scene.id) })
+    const compiled = compileScene(inputs)
+    if (!compiled.ok) throw new Error('narrow')
+    const c = compiled.value
+    expect(c.provenance.length).toBeGreaterThan(1)
+
+    /**
+     * **退回做法**（逐字复现 C6 之前的 `slotOf` 推导）：
+     * `plans.forEach((plan, i) => plan.objectIds.forEach((id, slot) => slotOf.set(id, {i, slot})))`
+     * —— 键是 `objectId`，故同一对象的多个图元**后写覆盖前写**。这里在编译产物的纯数据上
+     * 做同一件事（不加生产旁路、不改生产代码）。
+     */
+    const lastSlotOf = new Map<string, { batchIndex: number; instanceSlot: number }>()
+    for (const p of c.provenance) {
+      lastSlotOf.set(p.objectId, { batchIndex: p.batchIndex, instanceSlot: p.instanceSlot })
+    }
+    const reverted = {
+      ...c,
+      provenance: c.provenance.map((p) => ({ ...p, ...lastSlotOf.get(p.objectId)! })),
+    }
+    const index = new PickIndex(reverted)
+
+    let unresolvable = 0
+    for (const prov of c.provenance) {
+      const hit = index.resolve({
+        generation: index.currentGeneration,
+        batchIndex: prov.batchIndex,
+        instanceSlot: prov.instanceSlot,
+        primitiveIndex: 0,
+      })
+      if (hit === null) unresolvable += 1
+    }
+    expect(
+      unresolvable,
+      '退回按 objectId 划分 ⇒ 被覆盖的那些材质图元必须解不出（若仍全解得出来，则正判据无区分力）',
+    ).toBeGreaterThan(0)
   })
 })

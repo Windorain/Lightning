@@ -102,6 +102,15 @@ export class PickIndex {
    * 三角形序与格映射**逐位相同**（同内容）。按几何身份索引使"共享几何"天然只有一份表。
    */
   private readonly cellMapByGeometry = new Map<GeometryId, TriangleCellMap>()
+  /**
+   * 合并批次（`homogeneous: false`）里**逐成员**的材质与几何身份。
+   *
+   * 为什么必须逐成员：批次级材质/几何只是**代表值**。用代表值解拾取会让
+   * "点中 B 的方块"报出"B 的方块配 A 的材质" —— 而画面（呈现器逐成员取）与拾取
+   * 两份答案不一致，表现为"点中的是高亮，看到的颜色不是"。`compileScene` 因此对
+   * 与批次级不同的成员带上自己的身份（见 `BatchInstance.geometryId/material`）。
+   */
+  private readonly memberIdentity = new Map<string, { geometryId: GeometryId; material?: MaterialDescriptor }>()
   private readonly generation: CompileGeneration
 
   constructor(private readonly scene: CompiledScene) {
@@ -115,8 +124,21 @@ export class PickIndex {
     for (const payload of scene.payloads) {
       this.byBatchMaterial.set(payload.batchIndex, payload.material)
       this.indexCellMap(payload.geometry.id, payload.attributes)
-      for (const instance of payload.instances) this.indexCellMap(payload.geometry.id, instance.attributes)
+      for (const instance of payload.instances) {
+        const geometryId = instance.geometryId ?? payload.geometry.id
+        this.indexCellMap(geometryId, instance.attributes)
+        if (instance.geometryId !== undefined || instance.material !== undefined) {
+          this.memberIdentity.set(this.slotKey(payload.batchIndex, instance.instanceSlot), {
+            geometryId,
+            ...(instance.material === undefined ? {} : { material: instance.material }),
+          })
+        }
+      }
     }
+  }
+
+  private slotKey(batchIndex: number, instanceSlot: number): string {
+    return `${batchIndex}/${instanceSlot}`
   }
 
   /**
@@ -166,10 +188,13 @@ export class PickIndex {
     if (list === undefined) return null
     const entry = list.find((p) => p.instanceSlot === hit.instanceSlot)
     if (entry === undefined) return null
-    const material = this.byBatchMaterial.get(hit.batchIndex)
+    // 合并批次：材质与几何身份按**成员**取（批次级只是代表值）。逐成员项缺席 ⇒ 批次级。
+    const member = this.memberIdentity.get(this.slotKey(hit.batchIndex, hit.instanceSlot))
+    const material = member?.material ?? this.byBatchMaterial.get(hit.batchIndex)
     if (material === undefined) return null
+    const geometryId = member?.geometryId ?? entry.geometryId
 
-    const map = this.cellMapByGeometry.get(entry.geometryId)
+    const map = this.cellMapByGeometry.get(geometryId)
     // 越界 ⇒ 真实缺陷（见上）。注意"没给 primitiveIndex"与"给了越界值"不同：
     // 前者 `cellRefOfTriangle` 返回 null 而 `hit.primitiveIndex === undefined`，
     // 故用显式判定把两者分开 —— 不能让 `undefined` 落进同一条 `null` 分支。

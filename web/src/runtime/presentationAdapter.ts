@@ -217,45 +217,69 @@ export function structureGeometryAttributes(
 }
 
 /**
- * 把结构几何投影成**一个对象**的呈现条目。
+ * 把结构几何投影成**逐材质**的呈现条目（#249 §3.3「对象身份与 GPU 批次身份分离」）。
  *
- * 为什么当前是"一个对象"：legacy 场景里整座结构是**一个**内容 Group（`ViewportSlot.contentGroup`），
- * 没有逐方块对象身份（这正是 #249 §15 第 9 条「格坐标/批次序号兼任对象身份」要在 P3 退役的
- * 遗留事实）。本批的 `presentation/` 已按**逐对象**建模（`EvaluatedPrimitive.objectId`），
- * 但适配层暂时只能喂一个对象 —— 这条差距记于本单汇报的遗留缺口，由 P3（#254）收口。
+ * ## 身份的两个层次（本函数是这条分离的**唯一**产出点）
  *
- * 身份的构造方式仍然是"内容派生"而不是"批次位置派生"：`objectId` 由**结构几何身份**
- * 决定，故同一内容两次编译得到同一 `objectId`（G2 在"单对象"规模上仍可断言）。
+ * | 层次 | 取值 | 为什么 |
+ * |---|---|---|
+ * | **对象身份** `objectId` | 结构几何身份（内容派生，**逐组相同**） | "这一座结构"是一个对象；材质分组不改变对象身份 |
+ * | **批次身份** | 由 `compileScene` 按**图元**划分 | 一个对象可以展开成多个材质图元 ⇒ 批次 ≠ 对象 |
+ *
+ * `objectId` 由**结构几何身份**决定，故同一内容两次编译得到同一 `objectId`（G2）。
+ * 几何身份逐组不同（`<base>:m<下标>`）—— 同 id 会让后一组覆盖前一组的属性袋
+ * （`GeometrySource` 按几何身份存），表现为"某些材质画的是别的材质的几何"且**没有任何报错**。
+ *
+ * ## 为什么材质 id 是 `material:<下标>`
+ *
+ * `composition/kernelTextureResources#MATERIAL_ID_PREFIX` 已把该约定定为**唯一**一处
+ * （绑定键 → 资源表下标）；legacy 亦按 `materialIndex` 分组
+ * （`render/mesh/blockMesh.ts:87` 的 `materialId: String(w.materialIndex)`）。
+ *
+ * ## 单材质定义退化成什么
+ *
+ * 恰好一个组、材质 id `material:0` —— **不**保留 `'structure'` 这个旧 id：
+ * 那个 id 不符合绑定约定 ⇒ 该材质永远无贴图（C5 实测的贴图断路）。
+ * "为了不让某个旧消费者坏而保留旧面"在此不成立：消费者是呈现链自己，同批改写。
  */
-export function structurePrimitive(input: {
+export function structureMaterialPrimitives(input: {
   definition: StructureDefinition
   layerPreview: LayerPreviewMode
   materialTint: number
-}): EvaluatedPrimitive {
+}): readonly {
+  readonly primitive: EvaluatedPrimitive
+  readonly attributes: GeometryAttributes
+}[] {
   const { definition, layerPreview, materialTint } = input
-  const geometryId = structureGeometryId(definition, layerPreview)
+  const objectId = structureGeometryId(definition, layerPreview)
   const sizeRow = definition.cellGrid[0]?.length ?? 1
   const sizeColumn = definition.cellGrid[0]?.[0]?.length ?? 1
   const sizeZ = definition.cellGrid.length
+  const transform: readonly number[] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+  const bounds = {
+    min: [-sizeColumn / 2, -sizeRow / 2, -sizeZ / 2],
+    max: [sizeColumn / 2, sizeRow / 2, sizeZ / 2],
+  } as const
 
-  return {
-    objectId: geometryId,
-    geometry: { id: geometryId, version: 'v1' },
-    material: {
-      id: 'structure',
-      version: 'v1',
-      blend: 'opaque',
-      tint: materialTint,
-      useVertexColor: true,
+  return structureMaterialGroups({ definition, layerPreview }).map((g) => ({
+    primitive: {
+      // ← **对象身份**：同一对象的所有材质组共享它。
+      objectId,
+      geometry: { id: g.geometryId, version: 'v1' },
+      material: {
+        id: g.materialId,
+        version: 'v1',
+        blend: g.blend,
+        tint: materialTint,
+        useVertexColor: true,
+      },
+      transform: [...transform],
+      bounds: { min: [...bounds.min], max: [...bounds.max] },
+      deform: 'shared',
+      transparency: null,
     },
-    transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-    bounds: {
-      min: [-sizeColumn / 2, -sizeRow / 2, -sizeZ / 2],
-      max: [sizeColumn / 2, sizeRow / 2, sizeZ / 2],
-    },
-    deform: 'shared',
-    transparency: null,
-  }
+    attributes: g.attributes,
+  }))
 }
 
 /**
@@ -294,34 +318,20 @@ export function structurePrimitive(input: {
  * 分组后每组的 blend 是**组内一致**的（同一 `materialIndex` ⇒ 同一条目），
  * 故按组取它是精确的，不是近似。缺字段 ⇒ `'opaque'`（与 `MeshBasicMaterial` 的缺省一致）。
  *
- * ## ⚠️ 现状：本函数**尚未**接进生产（R1-β① C5 实测的阻断点，已登记 GF）
+ * ## 现状：生产**已**接通（R1-β① C6）
  *
- * 生产 `composition/kernelPresentationInputs` 仍是"一个 `blockGrid` 对象 → **一个**图元、
- * 材质 id 恒 `'structure'`"。把它切成"逐材质一个图元"会**立刻**撞上
- * `presentation/compileScene` 的一条既有假设：批次划分与 `byObject` 都**以 `objectId` 为键**
- * （`compileScene.ts:150`、`:182`、`:188-192`），而按材质分组的多个图元共享**同一个**
- * 内核对象 id ⇒ 第二个图元覆盖第一个的槽位，实测 `provenance` 会把两个组都记进
- * **同一个**批次（`[{batch:1,m0},{batch:1,m1}]`）而 `payloads` 却是 `[batch0,batch1]`
- * —— 拾取随即解不出（`cellIdentity.test.ts` 的"合法命中必须解得出来"当场判红）。
+ * 生产 `composition/kernelPresentationInputs` 现在走 `structureMaterialPrimitives`（本函数 +
+ * 对象身份/包围盒/变换的装配），于是「一个 `blockGrid` 对象 → 逐 `materialIndex` 多个图元、
+ * 材质 id `material:<下标>`」真的成立，绑定键能命中 ⇒ `createMaterial` 会设 `params.map`。
  *
- * ⇒ 接通它需要**同时**把 `compileScene` 的批次/来源划分从"按 `objectId`"改为
- * "按**图元**（对象身份与批次身份分离，#249 §3.3 的原文口径）"。那是呈现编译核心的一处
- * 结构改动，不与"材质统一"同一风险面（本批不夹带）。
- *
- * 本函数仍**保留在此并有判据**（`textureUnificationProduction.test.ts` ④ 组）：它是那一步的
- * 现成件——一旦批次划分按图元解耦，生产只需改 `kernelPresentationInputs` 一处调用点。
+ * 接通它的**前提**是 `presentation/compileScene` 的批次/来源划分同时从"按 `objectId`"改为
+ * "按**图元**"（#249 §3.3「对象身份与 GPU 批次身份分离」）：分组图元共享同一内核对象 id，
+ * 若批次仍以 `objectId` 为键，第二个图元会覆盖第一个的槽位 ⇒ `provenance` 把两组记进同一
+ * 批次而 `payloads` 是两个批次 ⇒ 拾取解不出。两处是**同一个**改动的两面，不可只做一半。
  */
 export function structureMaterialGroups(input: {
   definition: StructureDefinition
   layerPreview: LayerPreviewMode
-  /**
-   * `materialIndex` → 该组的材质 id。
-   *
-   * 缺省 `material:<下标>`（`kernelTextureResources` 的约定）。**注入它是为了
-   * 逐字保留既有"单材质 `'structure'`"形态**（`structurePrimitive` 的消费者与
-   * 判据不必同批改口径），而不是为了给旧形状开后门。
-   */
-  materialIdOf?: (materialIndex: number) => string
 }): readonly {
   readonly materialIndex: number
   readonly materialId: string
@@ -330,7 +340,6 @@ export function structureMaterialGroups(input: {
   readonly attributes: GeometryAttributes
 }[] {
   const { definition, layerPreview } = input
-  const materialIdOf = input.materialIdOf ?? ((mi: number) => `material:${mi}`)
   const collected = collectStructureGeometryPiecesPure(definition, { layerPreview })
   const baseId = structureGeometryId(definition, layerPreview)
 
@@ -359,7 +368,7 @@ export function structureMaterialGroups(input: {
     const palette = pieces[0]?.matPalette as { blend?: unknown } | undefined
     out.push({
       materialIndex: mi,
-      materialId: materialIdOf(mi),
+      materialId: `material:${mi}`,
       blend: asBlend(palette?.blend),
       // 几何身份**必须**逐组不同：`byId` 是按 `primitive.geometry.id` 存的
       // （`presentationAdapter` 的 `GeometrySource` 口径），同 id 会让后一组覆盖前一组

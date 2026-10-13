@@ -420,6 +420,8 @@ export class BatchedPresenter {
     const material = this.materialFor(payload.material, this.options.textureBindings?.get(payload.material.id))
     const geometryKey = geometryKeyOf(payload)
     const geometry = this.geometryFor(geometryKey, payload.attributes)
+    /** 非同质批次里**与批次级不同**的成员材质键（卸载时逐份释放，见 `unmount`）。 */
+    const memberMaterialKeys: string[] = []
 
     let object: THREE.Object3D
     if (payload.instanceable && payload.sharedGeometry) {
@@ -447,13 +449,19 @@ export class BatchedPresenter {
       holder.name = `batch:${payload.batchIndex}`
       for (const instance of payload.instances) {
         const attrs = instance.attributes
-        const memberGeometryKey = attrs !== undefined
-          ? `${geometryKey}#${instance.objectId}`
-          : geometryKey
+        const memberGeometryKey = instance.geometryId !== undefined
+          ? `geo:${instance.geometryId}`
+          : (attrs !== undefined ? `${geometryKey}#${instance.objectId}` : geometryKey)
         const g = attrs !== undefined
           ? this.geometryFor(memberGeometryKey, attrs)
           : geometry
-        const m = this.materialFor(payload.material, this.options.textureBindings?.get(payload.material.id))
+        // 成员自己的材质（合并批次里批次级只是代表值）。绑定也必须按**成员**材质 id 取。
+        const descriptor = instance.material ?? payload.material
+        const binding = this.options.textureBindings?.get(descriptor.id)
+        const m = this.materialFor(descriptor, binding)
+        if (descriptor.id !== payload.material.id) {
+          memberMaterialKeys.push(identityKey(materialIdentityOf(descriptor, binding)))
+        }
         const mesh = new THREE.Mesh(g, m)
         mesh.applyMatrix4(matrixOf(instance.transform))
         mesh.userData.presentationBatch = batchTagOf(payload, instance.instanceSlot)
@@ -476,6 +484,7 @@ export class BatchedPresenter {
             .map((i) => `${geometryKey}#${i.objectId}`),
       instanceCount: payload.instances.length,
       instanceable: payload.instanceable && payload.sharedGeometry,
+      memberMaterialKeys,
     }
   }
 
@@ -519,6 +528,7 @@ export class BatchedPresenter {
     this.group.remove(mounted.object)
     this.stats.disposals += 1
     this.releaseMaterialRef(mounted.materialKey)
+    for (const key of mounted.memberMaterialKeys) this.releaseMaterialRef(key)
     this.releaseGeometryRef(mounted.geometryKey)
     for (const key of mounted.memberGeometryKeys) this.releaseGeometryRef(key)
     this.mounted.delete(mounted.key)
@@ -610,6 +620,8 @@ interface MountedBatch {
   materialKey: string
   geometryKey: string
   memberGeometryKeys: string[]
+  /** 非同质批次里逐成员的材质键（与 `memberGeometryKeys` 同族：卸载时逐份释放）。 */
+  memberMaterialKeys: string[]
   instanceCount: number
   instanceable: boolean
 }

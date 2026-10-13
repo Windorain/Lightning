@@ -89,6 +89,24 @@ export interface BatchInstance {
   readonly transform: readonly number[]
   /** 非共享几何路径下该实例自己的属性。 */
   readonly attributes?: GeometryAttributes
+  /**
+   * 该成员**自己的**几何身份（`sharedGeometry === false` 时必给）。
+   *
+   * ## 为什么必须逐成员记（而不是沿用 `payload.geometry.id`）
+   *
+   * 合并批次（材质组数超预算 ⇒ `homogeneous: false`）里每个成员各有自己的几何
+   * （分组时逐 `materialIndex` 各一份）。批次级那一个是**代表值**；用它索引
+   * 逐格表会把成员 B 的三角形按成员 A 的格表解 —— 静默解错格（最危险的一类）。
+   * 缺省（未给）＝与批次级相同 —— 这是"共享路径"的语义，不是给旧形状留后门。
+   */
+  readonly geometryId?: GeometryId
+  /**
+   * 该成员**自己的**材质描述符（批次非同质时必给）。
+   *
+   * 合并批次里批次级材质只是代表值；呈现与拾取都必须按成员取，否则会出现
+   * "B 的方块贴 A 的图"（`batchPlan` 的 `homogeneous` 说明明令禁止用代表值糊过去）。
+   */
+  readonly material?: MaterialDescriptor
 }
 
 /** 编译结果。 */
@@ -234,6 +252,11 @@ export function compileScene(
         instanceSlot,
         transform: p.transform,
         attributes: allSameGeometry ? undefined : attrsEntries[instanceSlot],
+        // 逐成员身份：只在**与批次级不同**时给出（共享/同质批次沿用批次级，语义不变）。
+        ...(p.geometry.id === plan.geometry.id ? {} : { geometryId: p.geometry.id }),
+        ...(p.material.id === plan.material.id && p.material.version === plan.material.version
+          ? {}
+          : { material: p.material }),
       }
     })
 

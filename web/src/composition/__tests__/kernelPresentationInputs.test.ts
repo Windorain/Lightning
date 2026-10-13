@@ -135,28 +135,43 @@ describe('D3c · 形状：内核场景 → 纯数据', () => {
   })
 })
 
-describe('D3c · **逐位一致**：与渲染路径同一收集器', () => {
+describe('D3c · **逐位一致**：与渲染路径同一收集器（逐材质组比，C6 起）', () => {
   for (const name of FIXTURES) {
-    it(`${name}：生产者产出的几何与渲染路径**逐位相同**`, async () => {
+    it(`${name}：每个材质图元的几何与渲染路径**逐位相同**，且各组并集不漏不重`, async () => {
       const { scene, content } = await assembledOf(name)
       const { inputs } = kernelPresentationInputs({ scene, content, key: keyOf(scene.id) })
+      const payload = Object.values(scene.data)
+        .map((d) => d.payload)
+        .find((x) => x.kind === 'blockGrid')
+      expect(payload, '前提：夹具带 blockGrid 载荷').toBeDefined()
+      const def = await definitionOf(payload as never, content)
+      const all = collectStructureGeometryPiecesPure(def).pieces
+
       let compared = 0
+      let trianglesInPrimitives = 0
       for (const p of inputs.primitives) {
         const actual = inputs.geometry.attributesOf(p.geometry.id)!
-        // 渲染路径的读数：从同一份内核载荷重建网格，再用同一收集器收几何
-        const payload = Object.values(scene.data)
-          .map((d) => d.payload)
-          .find((x) => x.kind === 'blockGrid')
-        expect(payload, '前提：夹具带 blockGrid 载荷').toBeDefined()
-        const def = await definitionOf(payload as never, content)
-        const merged = mergeBakedQuadPiecesAttributes(collectStructureGeometryPiecesPure(def).pieces)
-        expect(actual.triangleCount, `${name} 三角形数必须与渲染路径相同`).toBe(merged.positions.length / 9)
-        expect(sameFloatBits(actual.positions, merged.positions), 'positions 逐位相同').toBe(true)
-        expect(sameFloatBits(actual.uvs, merged.uvs), 'uvs 逐位相同').toBe(true)
-        expect(sameFloatBits(actual.colors, merged.colors), 'colors 逐位相同').toBe(true)
+        // 材质 id 的约定是 `material:<下标>`（`kernelTextureResources`）—— 判据侧据此
+        // 独立复算该组的参照，而**不是**再调一次生产的分组函数（那会变成同义反复）。
+        expect(p.material.id.startsWith('material:'), `材质 id 必须符绑定约定，实得 ${p.material.id}`).toBe(true)
+        const mi = Number(p.material.id.slice('material:'.length))
+        const merged = mergeBakedQuadPiecesAttributes(all.filter((x) => x.materialIndex === mi))
+        expect(merged.positions.length, `material:${mi} 在渲染路径里必须有四边形`).toBeGreaterThan(0)
+        expect(actual.triangleCount, `${name} material:${mi} 三角形数必须与渲染路径相同`).toBe(
+          merged.positions.length / 9,
+        )
+        expect(sameFloatBits(actual.positions, merged.positions), `material:${mi} positions 逐位相同`).toBe(true)
+        expect(sameFloatBits(actual.uvs, merged.uvs), `material:${mi} uvs 逐位相同`).toBe(true)
+        expect(sameFloatBits(actual.colors, merged.colors), `material:${mi} colors 逐位相同`).toBe(true)
+        trianglesInPrimitives += actual.triangleCount
         compared += 1
       }
       expect(compared, '必须真的比较过（否则是空洞真）').toBeGreaterThan(0)
+      // **并集判据**：分组不得漏掉任何四边形（漏 ⇒ 某些方块根本不画）。
+      expect(trianglesInPrimitives, '各组三角形数之和必须等于渲染路径的全部').toBe(all.length * 2)
+      expect(new Set(all.map((x) => x.materialIndex)).size, '夹具必须真的有多个材质（否则本组只覆盖单组路径）').toBe(
+        new Set(inputs.primitives.map((p) => p.material.id)).size,
+      )
     })
   }
 

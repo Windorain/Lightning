@@ -649,6 +649,11 @@ describe('P11-A ⑦ 接线判定：presenter 侧投影（走生产装配）按�
     payload: Record<string, unknown>,
     content: Parameters<typeof kernelPresentationInputs>[0]['content'],
     withDeclaration: boolean,
+    /**
+     * 只取该 `materialIndex` 的四边形（C6 起生产图元**逐材质分组**；
+     * 不筛就变成"拿一个组的顶点比全集"，必然判红）。
+     */
+    materialIndex?: number,
   ): Float32Array {
     const projected = projectGridCells({
       cells: payload.cells as Readonly<Record<string, string>>,
@@ -672,7 +677,12 @@ describe('P11-A ⑦ 接线判定：presenter 侧投影（走生产装配）按�
       blockPalette: projected.blockPalette,
       materialPalette: content.resources.map((r) => ({ kind: r.kind })),
     } as never
-    const merged = mergeBakedQuadPiecesAttributes(collectStructureGeometryPiecesPure(def).pieces)
+    const pieces = collectStructureGeometryPiecesPure(def).pieces
+    const merged = mergeBakedQuadPiecesAttributes(
+      materialIndex === undefined
+        ? pieces
+        : pieces.filter((x) => x.materialIndex === materialIndex),
+    )
     return merged.positions
   }
 
@@ -702,6 +712,7 @@ describe('P11-A ⑦ 接线判定：presenter 侧投影（走生产装配）按�
       const primitive = produced.inputs.primitives[0]!
       const actual = produced.inputs.geometry.attributesOf(primitive.geometry.id)!.positions
 
+      const mi = Number(primitive.material.id.slice('material:'.length))
       const declared = mergedPositionsOf(payload, doc.content, true)
       const stripped = mergedPositionsOf(payload, doc.content, false)
       expect(stripped.length, '两侧重算都必须真的产出顶点（否则"相同/不同"都是空洞真）').toBe(declared.length)
@@ -710,8 +721,8 @@ describe('P11-A ⑦ 接线判定：presenter 侧投影（走生产装配）按�
         '**判别子必须生效**：带声明与不带声明的重算必须**不同** —— 两者相同意味着声明被忽略（修前正是如此），本组随之失去区分力',
       ).toBe(false)
       expect(
-        sameFloatBits(actual, declared),
-        'presenter 的顶点必须与"带声明"重算逐位相同 ⇒ `definitionOfPayload` 真的把三字段传下去了',
+        sameFloatBits(actual, mergedPositionsOf(payload, doc.content, true, mi)),
+        'presenter 的顶点必须与该材质组的"带声明"重算逐位相同 ⇒ `definitionOfPayload` 真的把三字段传下去了',
       ).toBe(true)
     } finally {
       session.dispose()

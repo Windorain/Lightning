@@ -285,7 +285,17 @@ export class PresenterSession {
     const c = this.compiled
     if (c === null) return []
     const byId = new Map<string, MaterialDescriptor>()
-    for (const p of c.payloads) byId.set(p.material.id, p.material)
+    for (const p of c.payloads) {
+      byId.set(p.material.id, p.material)
+      /**
+       * **合并批次**里批次级材质只是代表值，成员各自还有自己的材质（逐 `materialIndex` 分组，
+       * 见 `compileScene#BatchInstance.material`）。漏掉它们 ⇒ 那些成员拿不到纹理绑定
+       * ⇒ 画面少贴一批图，而**不会有任何报错**（本批实测：真实信封夹具 39 组只绑了 32 个）。
+       */
+      for (const instance of p.instances) {
+        if (instance.material !== undefined) byId.set(instance.material.id, instance.material)
+      }
+    }
     return Object.freeze([...byId.values()])
   }
 
