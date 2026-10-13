@@ -499,8 +499,12 @@ export function workbenchRegistry(): WorkbenchRna {
  *
  * `DocumentState` 曾携带 `document: RuntimeDocument` —— 面板每次读写都要从
  * `Context#legacyDocumentModel()` 取旧文档**本体**（每格一 clone 会在大文档上产生
- * 可感的卡顿，故取本体）。那正是 `composition/seams.ts` 的
- * `property-write-legacy-document-model` 登记的**最后一条**旧写模型双轨。
+ * 可感的卡顿，故取本体）。那曾是 `composition/seams.ts` 的
+ * `property-write-legacy-document-model` 登记的最后一条旧写模型双轨。
+ *
+ * ⚠️ **该登记已在 C3 核销**（2026-10-13，R1-β① C3）：`legacyDocumentModel()` 与
+ * `DocumentState.document` 都已删除，`seams.ts` 不再含该 id，
+ * `tests/architecture/boundary-scan.test.ts` 把守"不得复活"。
  *
  * 本批把文档内容写全部改走内核命令（见 `submitPropertyWrite` 的分流表），
  * 于是本函数只剩**壳设置**：发布配置（`workspace` 拥有者）与工具参数

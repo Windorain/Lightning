@@ -5,8 +5,12 @@
  *
  * 本文件曾同时承载面板的**文档内容**写（方块身份/逐格说明/注解字段/场景元数据）与
  * **壳设置**写。前者在 `DocumentState.document: RuntimeDocument` 上原地 clone + 写，
- * 是 `composition/seams.ts` 的 `property-write-legacy-document-model` 登记的那条双轨，
- * 也是 `Context#legacyDocumentModel()` 的**最后一个**生产消费者。
+ * 曾是 `composition/seams.ts` 的 `property-write-legacy-document-model` 登记的那条双轨，
+ * 也是 `Context#legacyDocumentModel()` 的最后一个生产消费者。
+ *
+ * ⚠️ **那条登记已在 C3 核销**（2026-10-13，R1-β① C3）：写模型取值口
+ * `legacyDocumentModel()` 与 `DocumentState.document` 均已删除，`seams.ts` 不再含该 id，
+ * `tests/architecture/boundary-scan.test.ts` 把守"不得复活"。
  *
  * 本批把文档内容写**全部改走内核命令**（接线在 `editors/workbench-rna#submitPropertyWrite`）：
  *

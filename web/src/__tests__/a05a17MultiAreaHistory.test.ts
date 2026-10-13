@@ -499,9 +499,9 @@ describe('A05/A17 覆盖边界：内核层已含负对照，产品层归 #282（
     //  ① `getDoc()` 签名已不存在（源码级）；
     //  ② 内容事实改由具名读面读（枚举最小集）；
     //  ③ **仍保留**"不冒充产品级"的那一半：产品级 A05/A17（真实 UI 双 Area）
-    //     的**完全**达成还依赖写模型与渲染链终切（登记
-    //     `property-write-legacy-document-model` / `legacy-render-source-document`），
-    //     本条据实登记为"未达成"。
+    //     的**完全**达成还依赖渲染链终切（登记
+    //     `legacy-render-source-document`；同批的 `property-write-legacy-document-model`
+    //     已在 R1-β① C3 核销），本条据实登记为"未达成"。
     const fsMod = require('node:fs') as typeof import('node:fs')
     const pathMod = require('node:path') as typeof import('node:path')
     const readSrc = (rel: string): string =>

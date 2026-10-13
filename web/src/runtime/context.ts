@@ -1348,7 +1348,8 @@ export class Context {
    * | 面 | 状态 |
    * |---|---|
    * | **内容面**（网格/注解/材质/帧声明/说明/元数据/产物 plain） | ✅ 各有具名读面（`kernelGrid`/`kernelAnnotations`/`kernelMaterials`/`frameDeclarations`/`cellTooltips`/`documentMetadata`/`plainForSave`） |
-   * | **写模型 + 渲染链的旧格式** | ⏳ 仍是旧文档载体（`property-write-legacy-document-model` / `legacy-render-source-document`，owner P11） |
+   * | **写模型**（旧数据模型原地 clone + 写） | ✅ **已核销（R1-β① C3，2026-10-13）** —— `property-write-legacy-document-model` 与 `kernel-property-write-dual-track` 两条登记已退出 `seams.ts`，`legacyDocumentModel()` 取值口与 `DocumentState.document` 均已删除；`tests/architecture/boundary-scan.test.ts` 把守"不得复活"。核销理由见 `seams.ts` 的核销段（#385 裁决④ + GF-21） |
+   * | **渲染链的旧格式** | ⏳ 仍是旧文档载体（`legacy-render-source-document`，owner P11） |
    * | **时间 / 播放 / 帧下标**（本方法所在的这条） | ✅ 本批之前已完成：旧 `Main.currentFrameIndex` / `Main.framesPlaybackIsPlaying` 两个 Vue Ref 已删，全部消费者改吃本会话（见 `retirementRegistry` 的 `world-frame-playback` 组，相位已翻 `executed`） |
    *
    * ⇒ 三件事**不是**同一件未竟工作的三半：把它们混为一谈会让"播放已迁移"

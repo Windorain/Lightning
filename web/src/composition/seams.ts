@@ -196,7 +196,7 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * | 子句 | 结论 | 机械证据 |
    * |---|---|---|
    * | 甲 "承载 `meta.embed_initial_view` 的**专门适配面**" | ✅ 已有 | `runtime/context.ts#setHostEmbedInitialView`（类型化 `ViewportCameraState`，**不**交出旧文档本体；原地写 + 镜像语义逐点不变） |
-   * | 乙 "本用途上 `legacyDocumentModel()` **零调用**" | ✅ 成立 | `context/captureEmbedInitialView.ts` 已改走上面的具名装配面；`boundary-scan.test.ts` 的调用者白名单闭集随之收窄（另见 `property-write-legacy-document-model` 的剩余一处） |
+   * | 乙 "本用途上 `legacyDocumentModel()` **零调用**" | ✅ 成立 | `context/captureEmbedInitialView.ts` 已改走上面的具名装配面；`boundary-scan.test.ts` 的调用者白名单闭集随之收窄。**残留的那一处（`property-write-legacy-document-model`）也已在 C3 核销** ⇒ `legacyDocumentModel()` 全树 0 调用 |
    *
    * ## 为什么按"专门适配面"就算退出（而不是"移到另一个口就是改名"）
    *
