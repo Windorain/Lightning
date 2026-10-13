@@ -112,8 +112,43 @@ function transformDecls(): readonly PropertyDecl[] {
   ]
 }
 
-/** 结构属性：由**对象本身**拥有（`SceneObject`），不由数据载荷决定。 */
-function structuralDecls(): readonly PropertyDecl[] {
+/**
+ * 注解渲染样式的值域（值域形状与 `editors/workbench-inspector` 的 `enumDomain(...)` 同构）。
+ *
+ * 取值与面板 `ANNOTATION_BOX_DECL#renderStyle` 的枚举域**逐字相同** ⇒ 内核写面
+ * 不放宽面板已有的校验面（非法串在 `applySetProperty` 就被拒）。
+ */
+const ANNOTATION_RENDER_STYLE_DOMAIN: PropertyDecl['domain'] = Object.freeze({
+  kind: 'enum' as const,
+  items: Object.freeze(
+    ['wireframe', 'boxFrame', 'translucent', 'hidden'].map((v) =>
+      Object.freeze({ value: v, display: Object.freeze({ labelKey: `enum.${v}`, fallback: v }) }),
+    ),
+  ),
+})
+
+/**
+ * 注解**几何 / 逐条事实**的可写局部 ID → `AnnotationGeometry` 字段名（**逐字同名**）。
+ *
+ * ## 为什么是这 6 个（与读面互为逆向的机械口径）
+ *
+ * 读面 `runtime/annotationRead#geometryFieldsOf` 交出去的字段里，**面板可编辑**的这批是：
+ * `min`/`max`/`pos`/`color`/`renderStyle`/`locked`。其余两类**不在**本表：
+ *  - `createdAt`/`updatedAt` → 时间戳，由写入路径生成（面板 `created_at` 也是只读）；
+ *  - `points`/`blockPos`/`quadIndex` → 读面有、但面板 RNA **没有**对应属性
+ *    （见 `editors/workbench-inspector` 的注解声明）⇒ 本批不新增写面；
+ *    该残留如实留在 `composition/seams.ts` 的 `annotation-wide-field-face` 里。
+ */
+const ANNOTATION_GEOMETRY_WRITABLE = Object.freeze([
+  'min',
+  'max',
+  'pos',
+  'color',
+  'renderStyle',
+  'locked',
+] as const)
+
+/** 结构属性：由**对象本身**拥有（`SceneObject`），不由数据载荷决定。 */function structuralDecls(): readonly PropertyDecl[] {
   return [
     decl('name', 'string', false, { labelKey: 'property.name', fallback: 'Name' }, undefined, { kind: 'text', multiline: false }),
     decl('visible', 'boolean', false, { labelKey: 'property.visible', fallback: 'Visible' }),
@@ -186,6 +221,35 @@ export const KERNEL_OBJECT_TYPES: readonly ObjectTypeDecl[] = Object.freeze([
         kind: 'text',
         multiline: true,
       }),
+      // ── 注解的**逐条事实 / 几何**字段（R1-β① C3）────────────────────────────
+      //
+      // ## 为什么必须补这些声明（不是"顺手补齐"）
+      //
+      // 读面 `runtime/annotationRead#geometryFieldsOf` 把 `min`/`max`/`pos`/`color`/
+      // `renderStyle`/`locked`/… 交出去，面板据此**可编辑**（`editors/workbench-inspector`
+      // 的注解对象类型声明里这些属性可写）。而在本批之前，写面**只有** legacy 一条路
+      // （面板经 `DocumentState.document` 改旧文档）⇒ 内核与 legacy 就同一字段给出两个值，
+      // 且那次 legacy 写会把 GF-16（装配成功）清掉。这就是 #385 登记
+      // `annotation-wide-field-face` 的"描述符覆盖"半边。
+      //
+      // ## 值域**逐字**与面板声明相同（校验面不放宽）
+      //
+      // `color` 走 `color` 值类型 ⇒ `HEX6` 校验由值类型 handler 自带；
+      // `renderStyle` 带 enum 域 ⇒ 非法串被拒（与面板的枚举域同一组取值）。
+      // 这不是"两套验证"：面板那张表管**控件**，这张表管**写入**，两者取值相同。
+      decl('min', 'vec3', true, { labelKey: 'annotation.min', fallback: '最小坐标' }),
+      decl('max', 'vec3', true, { labelKey: 'annotation.max', fallback: '最大坐标' }),
+      decl('pos', 'vec3', true, { labelKey: 'annotation.pos', fallback: '位置' }),
+      decl('color', 'color', true, { labelKey: 'annotation.color', fallback: '颜色' }),
+      decl(
+        'renderStyle',
+        'enum',
+        true,
+        { labelKey: 'annotation.renderStyle', fallback: '渲染样式' },
+        undefined,
+        ANNOTATION_RENDER_STYLE_DOMAIN,
+      ),
+      decl('locked', 'boolean', false, { labelKey: 'annotation.locked', fallback: '锁定' }),
     ]),
   }),
   Object.freeze({
@@ -372,9 +436,24 @@ export function readRawKernelValue(doc: Document, ref: PropertyRef): Result<unkn
     const field = localId.slice('transform.'.length) as 'position' | 'rotation' | 'scale' | 'pivot'
     return ok(obj.transform[field])
   }
-  if (localId === 'text' || localId.startsWith('projection.') || localId === 'vertexPosition') {
+  if (
+    localId === 'text' ||
+    localId.startsWith('projection.') ||
+    localId === 'vertexPosition' ||
+    (ANNOTATION_GEOMETRY_WRITABLE as readonly string[]).includes(localId)
+  ) {
     const data = findObjectData(doc.scene, obj.dataId)
     if (!data) return err(domainError('MissingTarget', { dataId: obj.dataId, property: ref.property }))
+    if ((ANNOTATION_GEOMETRY_WRITABLE as readonly string[]).includes(localId)) {
+      // 注解几何/逐条事实（R1-β① C3）：与**写面同一组**局部 ID。
+      // 字段缺席 ⇒ 返回 `undefined`（**不**编造 `false`/`0`/空 vec3）：值 handler 会
+      // 如实判 `invalid`，而 `applySetProperty` 的"现值读不到但目标可写 ⇒ 本次是变化"
+      // 分支（`property-commands.ts:490`）据此照常写入 —— 两种语义都不失真。
+      if (data.payload.kind !== 'annotation') {
+        return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'annotation', actual: data.payload.kind }))
+      }
+      return ok((data.payload.geometry as unknown as Record<string, unknown> | undefined)?.[localId])
+    }
     if (localId === 'text') {
       if (data.payload.kind !== 'annotation') {
         return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'annotation', actual: data.payload.kind }))
@@ -615,6 +694,20 @@ export function applyKernelPropertyValue(doc: Document, ref: PropertyRef, value:
       : localId === 'projection.clipStart'
         ? Object.freeze({ ...cur, clipStart: value })
         : Object.freeze({ ...cur, clipEnd: value })
+  } else if ((ANNOTATION_GEOMETRY_WRITABLE as readonly string[]).includes(localId)) {
+    // ── 注解的**逐条事实 / 几何**字段（R1-β① C3）────────────────────────────
+    //
+    // 写进 `payload.geometry`（`domain/scene#AnnotationGeometry` 的字段名与局部 ID
+    // **逐字同名** ⇒ 无需映射表，也就不会漂移）。值类型/值域已由注册表校验
+    // （`applySetProperty` 的预检），这里只做结构写入。
+    //
+    // ⚠️ 与 `text` 同一载荷：几何**不是**对象自身的字段，改几何必须换载荷引用，
+    // 否则 `withScene` 判不出变化（幽灵历史/静默无操作）。
+    if (data.payload.kind !== 'annotation') {
+      return err(domainError('MissingTarget', { reason: 'payload-kind-mismatch', expected: 'annotation', actual: data.payload.kind }))
+    }
+    const geometry = Object.freeze({ ...(data.payload.geometry ?? {}), [localId]: value })
+    payload = Object.freeze({ ...data.payload, geometry })
   } else {
     return err(domainError('UnsupportedOperation', { reason: 'property-not-registered', property: ref.property }))
   }
