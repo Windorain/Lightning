@@ -1,4 +1,4 @@
-# Web 编辑器内核 · 冻结契约（v1.6）
+# Web 编辑器内核 · 冻结契约（v1.7）
 
 > **地位**：本文件是 Web 编辑器内核重建（Gitea
 > [#249](http://127.0.0.1:3300/Lightning/lightning/issues/249)）**跨批次契约的单一来源**。
@@ -236,7 +236,7 @@ interface PropertyQueries {
 - **不变量**：`PropertyValue` 不得是可变底层 TypedArray 的引用（#249 §5 明文
   "不能暴露可变底层 TypedArray"）。大批量几何查询提供只读批量投影或明确借用契约。
 
-### 2.3 文档装载状态读面（GF-15，P10f A′ 新增；B′ 补消费入口）
+### 2.3 文档装载状态读面（GF-15，P10f A′ 新增；B′ 补消费入口；**R1-α 修正**）
 
 ```ts
 interface KernelSession {
@@ -245,11 +245,28 @@ interface KernelSession {
 }
 
 interface Context {
-  /** **文档替换的唯一写入口**：写 legacy 文档并镜像内核装载状态。 */
+  /**
+   * **文档替换的唯一写入口**。
+   *
+   * ⚠️ **R1-α（v1.7）修正**：本方法的自描述原为「写 legacy 文档**并镜像**内核装载状态」。
+   * 那句话把**一条内容事实的两个存储**写成设计，而 #249 §2.1 的判据是
+   * 「每项事实只有一个权威拥有者」。修正为：**权威是内核 `Document`**；
+   * legacy 文档是**渲染载体的投影**，不是第二份内容权威。
+   * 回落（内核未装配时 legacy 仍是画面来源）由 GF-16 把守并**登记**（见 §8 GF-17）。
+   */
   setDocument(next: RuntimeDocument | null): void
   /**
-   * **装载状态的消费入口**（B′ 新增）。
-   * 内核在场 ⇒ 取内核；内核缺席（测试/诊断宿主）⇒ 回落 `main.doc.value !== null`。
+   * 装载状态的消费入口。
+   *
+   * ⚠️ **R1-α（v1.7）修正两处**：
+   *  1. 内核缺席时的回落分支（原：「回落 `main.doc.value !== null`」）
+   *     **不得**作为长期形态存在 —— 它是宿主装配事实的镜像，必须显式登记
+   *     （§8 GF-17），不得静默保留；
+   *  2. **不得**在本接口上新增**返回旧 `RuntimeDocument`** 的具名读面
+   *     （`legacyDocumentModel()` / `legacyRenderSource()` / `legacyGridForEdit()` 一类）。
+   *     已存在的三条是**待清算的第二权威读面**（各在 `composition/seams.ts` 登记退出条件），
+   *     R1 及之后**只减不增**。判据：`legacyDocumentModel(`/`legacyRenderSource(`/
+   *     `legacyGridForEdit(` 的全树生产命中数只能下降（口径见 §8 GF-17 的机械判据）。
    */
   hasLoadedDocument(): boolean
 }
@@ -332,12 +349,14 @@ P10f **B′** 完成 **N1 的 29 处**替换（`ctx.hasLoadedDocument()`，含 2
 | **N3 网格读（14 处）** | 读面已做出且**逐格同义**（三类判据全绿），但接线实测出**两处语义面不同义**：① `moveTranslate.ts:313/330` 的 `grid.moveBlock(...)` 是**写**路径，而投影 `Grid` **每次新建**（实测 `gridOf(doc,0) !== gridOf(doc,0)`，经它写入后改动**丢失**）；② `NewScene`/`pushDocUndo`/模态取消等 6 条路径只调 `setDocument`、**不装配内核** ⇒ 内核读到**上一份文档**的网格（实测 legacy 0 格 vs 内核 2 格）。两者都需 **(a) 区分网格读/写面**、**(b) 内容同步** ⇒ 归 C′。 |
 | **N6 帧轴（3 处）** | `#30`（`useKernelFrameLoop.ts`）是**死代码**，按裁决 (a) 删除（零行为变化）；`#32`（`useViewportRuntime.ts`）的 legacy 兜底生产不可达，替换为 `?? 0`；`#31`（`StatusBar.vue`）**暂缓** —— 装配失败时替换会让状态栏帧数 N→0（用户可见回归），随 D8/GF-16 修复批归 C′。 |
 
-### 2.4 装配成功读面与帧声明（GF-16，P10f C′1 新增）
+### 2.4 装配成功读面与帧声明（GF-16，P10f C′1 新增；**R1-α 修正**）
 
 ```ts
 interface KernelSession {
   /** 内核承载的**就是**当前文档的装配产物吗（装配成功）。 */
   hasAdoptedContent(): boolean
+  /** ⚠️ R1-α 新增：内核承载的**文档身份**（`contentVersion` 的权威来源）。 */
+  document(): Document | undefined
 }
 
 interface Context {
@@ -346,6 +365,9 @@ interface Context {
   /**
    * **帧声明的唯一读取面**（D8 修复的落点）。
    * 装配成功 ⇒ 内核帧轴；否则 ⇒ 回落 legacy。`source` 让"走了哪条分支"可观测。
+   *
+   * ⚠️ **R1-α（v1.7）修正**：这条回落**必须**登记（§8 GF-17）——
+   * "读者可观测"不等于"有退出阶段"。
    */
   frameDeclarations(): {
     readonly count: number
@@ -417,6 +439,149 @@ adoptLoadedDocument  → 可能失败（内核不支持该形态，如实降级�
 
 ⚠️ 用宽信号替换窄信号会让"原地编辑时相机跳回"（用户可见回归）；
 单调计数器**表达不出**跃变（R-WK-08 裁决点名此例）。
+
+### 2.5 写面分类与共享存储上下文（**R1-α 新增，冻结**；#249 §11 / §3.4）
+
+```ts
+type WriteFace = 'document-content' | 'editor-session' | 'publish-default' | 'export-preview'
+
+interface WriteFaceSpec {
+  readonly face: WriteFace
+  readonly owner: string                 // 契约 §6 所有权表的哪一行
+  readonly sharesDocumentContext: boolean
+  readonly entersDocumentHistory: boolean
+  readonly advancesDocumentVersion: boolean
+  readonly persistsToProject: boolean
+  readonly persistsToRecovery: boolean
+  readonly mayFork: boolean              // 是否允许"同一条事实有两个存储"
+}
+
+function writeFaceOf(command: Command): WriteFace   // 唯一分类点；按 kind 穷举
+function writeIsEffectOnly(command: Command): boolean
+
+interface SharedStorageContextReport {
+  readonly cellContent: boolean
+  readonly objectData: boolean
+  readonly annotations: boolean
+  readonly objectAttachments: boolean
+  readonly allShared: boolean
+}
+function sharedStorageContextReport(): SharedStorageContextReport
+```
+
+**为什么需要本节（v1.6 的缺口）**
+
+v1.6 全无"哪一类写与文档内容共用同一份存储"的口径 ⇒ 旧实现把格内容写在
+`cellTooltipGrid`/`cellPartsGrid` 两个旁表、对象数据写在 `frames[].structure`、
+注解写在 `annotations`、可恢复编辑数据写在 `_sde_workspace.json`、布局与偏好散在
+若干 `localStorage` 键 —— **没有任何类型**在把守"它们该不该分叉"。R0-D② 实测的后果是
+`Context#setDocument` 写 legacy 文档**并镜像**内核装载状态，而 `syncLegacyFromKernel`
+又把内核投影回 legacy ⇒ 同一条内容事实有两个存储。
+
+**四条写面（冻结）**
+
+| 写面 | 权威拥有者 | 共享文档上下文 | 进文档历史 | 推进 `documentVersion` | 进工程 | 进恢复副本 | 允许分叉 |
+|---|---|---|---|---|---|---|---|
+| `document-content` | 文档状态域 | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `editor-session` | `EditContext` | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| `publish-default` | 文档状态域（`animation.publishedDefaults`） | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `export-preview` | 求值缓存 / 适配器 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+**必须成立**
+
+1. **穷举**：`writeFaceOf` 对 `Command` 联合的**每一条**成员返回一个已登记的写面。
+   依据是 `Command` 是封闭判别联合（§5.2）⇒ 可实现为穷举 `switch` 且**无 `default`**
+   （新增命令忘了分类会**编译期**判红）。负对照：注入一条只在联合里、未分类的命令必须判红。
+2. **在历史与在工程是两件不同的事**：`editor-session` **不**进文档历史（A06：
+   「单选不得产生历史条目」）而**必须**进工程文件（#249 §12「可恢复的编辑数据」）。
+   把两条压成一条（都进历史、或都不持久化）都会产生用户可见的错。
+3. **`export-preview` 不得成为任何事实的存储**：它只消费求值产物、**可丢弃**、
+   不保存为权威（§6 所有权表「求值场景、空间索引、统计 | 求值缓存 | 可丢弃 | 不保存为权威」）。
+   ⇒ 它**不参与**共享存储上下文，且是唯一"不要求独占文档写权"的写面。
+4. **`mayFork === false` 对四条写面全部成立**：第二份存储即缺陷。
+   R1 的清算对象（legacy 镜像、`syncLegacyFromKernel`）正落在 `document-content` 上 ——
+   那是一条被容忍的**临时**分叉，由 §8 的接缝登记与退出条件把守，不得成为设计。
+5. **共享存储上下文的判据形态是"能力存在"，不是"扫描无命中"**：
+   格内容 / 对象数据 / 注解三项必须用**可执行的写 → 读**证明（写入后经读面读回），
+   并附负对照（不写就读不到）。`sharedStorageContextReport()` 的
+   `objectAttachments` **今天恒 `false`**（未类型化承载）⇒ `allShared` 恒 `false`；
+   该缺口按 §8 登记 GF（GF-18），由 R2 承接。**不得**用"扫描不到附件字段"报绿。
+
+**β 的接线点（本节的用法）**
+
+β 批接线时按本节确定"一条新写落在哪一面"，从而**机械决定**它是否进历史、进工程、
+进恢复副本 —— 不逐条讨论。具体三处：① `workbenchCommandSink` → `editorCommandSink(editor)`
+的端口切换（见 §2.7）；② 面板写端口从 `DocumentState.document: RuntimeDocument`
+迁到内核寻址根（§2.5 判据 2 决定"选择/时间"不进历史）；③ 工程保存/重开
+（已由 R1-α 接生产，见 §2.7）。
+
+### 2.6 网格读面的落点（**R1-α 明确**；GF-13 的网格读面半边）
+
+**落点：`runtime/gridRead` + 统一存储上下文，**不**是 `ReadView` 加 grid 组。**
+
+```ts
+// runtime/gridRead.ts —— 权威网格读面（GF-13 已交付形态）
+interface KernelGridView {
+  count(): number
+  at(pos): KernelGridCellView | null
+  blocks(): readonly KernelGridCellView[]
+  partsAt(pos): readonly PartRecord[] | null
+  tooltipAt(pos): string | undefined
+  paletteEntryOf(pos): KernelPaletteEntryView | null
+  geometryOf(pos): readonly BakedQuad[] | null
+  centerWorld(pos): KernelGridPos
+}
+function kernelGridOf(doc: Document | undefined, frameIndex: number): KernelGridView | null
+```
+
+**业务理由（为什么不是 `ReadView.objects` 里加一个 grid 组）**
+
+1. **网格是"对象数据载荷的形状"，不是对象集合的查询**。`ReadView.objects` 回答
+   "这份文档有哪些对象/数据"；而逐格读取要回答"第 N 帧的 `blockGrid` 载荷里某格是什么" ——
+   它是**载荷内的迭代**，不是对象级查询。把它塞进 `objects` 会让"一次对象查询"变成
+   一次可能遍历 W×H×D 的扫描（性能与语义都不对）。
+2. **帧轴是它的输入**：`kernelGridOf(doc, frameIndex)` 的第二个参数是"哪一帧"，
+   而 `ReadView` 捕获的是**一致版本**（版本里没有"当前帧"这一维 —— 帧由 `EditContext.time`
+   派生）。把帧维度塞进 `ReadView` 会让同一个 `ReadView` 对"哪一帧"失去定义。
+3. **读面每次新建**（GF-13 实测：`gridOf(doc,0) === gridOf(doc,0)` → `false`）
+   ⇒ **在它上面写会静默丢失**。故写路径**不得**走它：已有 `applySetRange` 三条具名命令
+   （`setCellTooltip`/`setCellContent`/`moveCells`）承接写；`runtime/gridRead` 的
+   `LegacyGridLike`（带 `moveBlock` 的旧编辑句柄）是**待清算**的第二权威写面
+   （退出条件见 `composition/seams.ts` 的 `legacy-grid-edit-handle`）。
+
+⚠️ **`KernelSession.gridOf` 不再是权威读面**（R0-D 裁决）：它没有帧维度、
+且在未装配时回落旧 `Grid`。"权威"的判据是**它读的是内核文档载荷**（`kernelGridOf`），
+而不是它挂在哪一个对象上。
+
+### 2.7 工程格式的生产入口（**R1-α 新增**）
+
+```ts
+interface Context {
+  /** 内核 `Document` → 工程文件（`adapters/files/projectFormat#encodeProject`）。 */
+  projectForSave(): Result<ProjectFile>
+  /** 工程文件 → 内核 `Document`（`restoreProject` + `adoptDocument`）。 */
+  adoptProject(decoded: DecodedProject): Result<boolean>
+  /** 工程读入的**边界解码**（唯一入口；算子不解析工程形状）。 */
+  decodeProjectFile(raw: unknown): Result<DecodedProject>
+}
+```
+
+**必须成立**
+
+1. **两个保存入口，一个权威**：`plainForSave()`（旧 plain/信封形状）与
+   `projectForSave()`（工程形状）是**同一份内核 `Document`** 的两种外部编码，
+   不是两个权威。两者都从 `kernel.document()` 取值；**未装配时 `projectForSave` 显式失败**
+   （返回 `UnsupportedOperation`），**不**用旧文档填工程负载（那正是第二权威的入口）。
+2. **工程负载必须直接编码内核 `Document` 的内容本体**：`scene` + `animation` +
+   `content`（`DocumentContent`：元数据 / 帧时长轴 / 资源内容）。
+   ⚠️ **R1-α 实测**：只编码 `scene`+`animation`+`assets`（清单）会让重开丢失
+   资源内容（纹理字节 / 呈现参数 / 纹理序列）、文档元数据与帧轴
+   —— 实测资源清单 62 条而 `resources === []`，**清单判据区分不出这次丢失**。
+   ⇒ `ProjectRoundTripReport` 必须含 `documentContentPreserved`。
+3. **重开的顺序是语义的一部分**：`setDocument` → `seekFrame(0)` → `adoptDocument`
+   （与装载脊柱同序）。反过来会让 GF-16 被清掉（`setDocument` 会 `markLoaded` 并清装配标记）。
+4. **未知主版本显式拒绝**（`UnsupportedOperation`，**不**降级读取）；
+   未知**顶层键**按**文档身份**承载（GF-14 口径）—— 不进核心负载、也不静默丢弃。
 
 
 ---
@@ -595,6 +760,60 @@ function applySetProperty(
   "null 同时代表加载中/缺失/失败"是 A36 负对照）。
 - **有效值优先级**（#249 §7）必须在本函数内实现，且**编辑被轨道驱动的属性时默认显式拒绝普通基础值写入**
   ，要求使用关键帧命令或禁用轨道（A10 负对照："silently 写入不可见基础值"必须判红）。
+
+**`Command` 联合的逐格/元数据具名写（R1-α 新增三员；GF-13 最小集全落地）**
+
+```ts
+type SetCellContentCommand = Readonly<{
+  kind: 'setCellContent'
+  contextId: string
+  cells: readonly CellPosition[]           // 世界坐标键；行序翻转不进命令面
+  content: CellContent | null              // null = 删键；{} = 有键无内容；两者可区分
+  expectedVersion?: Version
+}>
+
+type MoveCellsCommand = Readonly<{
+  kind: 'moveCells'
+  contextId: string
+  objectId: string                         // 在**哪个**网格里移动（身份写是逐帧字段）
+  moves: readonly { from: CellPosition; to: CellPosition }[]
+  expectedVersion?: Version
+}>
+
+type SetDocumentMetaCommand = Readonly<{
+  kind: 'setDocumentMeta'
+  contextId: string
+  patch: Partial<DocumentMetadata>         // 具名字段；undefined = 不改（缺席 ≠ 置空）
+  expectedVersion?: Version
+}>
+```
+
+**必须成立**
+
+1. **`moveCells` 的领域语义（R1-α 裁定，U-1 的落点）**：
+   ① 移动的是**整格** —— `cells`/`cellContent`/`cellGeometry`/`cellPalette`/
+   `cellPaletteIndex` **五项同键**一起迁移（消灭"平行网格下标必须对齐"这条无类型把守的约定）；
+   ② 方块身份**随格迁移且不被重算** —— 命名空间经 `cellPalette` 的**条目内容键**原样保留，
+   杜绝 GF-7 更正记录的历史事故（投影实测 68 条调色板里 66 条被写成 `minecraft:`）；
+   ③ 目标是**替换**不是**交换**（swap 需另立具名命令：它是一条不同的不变量）；
+   ④ 一次命令内多个移动是**同时**的（先快照全部源 → 写目标 → 删只作源的键），
+   链式必须写两条命令 —— `moves` 是集合，命令内顺序不是它能表达的语义。
+   ⚠️ **不得**由 `Grid.moveBlock(from, to)` 的既有签名决定本命令的形状。
+2. **三态可区分**（与 §2.6 的 `domain/cellContent` 判据 3 同一口径）：
+   `content: null`（删键）/ `{}`（有键、两类内容都缺席）/ `{ tooltip: '' }`（显式空说明）
+   必须各自可表达、可往返。三者并成两者是 A36 类错误。
+3. **`setDocumentMeta` 只接受具名字段**：`patch` 是 `Partial<DocumentMetadata>`，
+   不是 `Record<string, unknown>`。未知 `meta` 键走 `adapters/files/fidelityRecord`
+   （按**文档身份**承载；GF-14 口径）。若本命令接受任意键，
+   "哪些字段真的没人懂"就永远查不出来（`domain/content` 文件头判据 3）。
+4. **幂等**：三条命令同值/同态重写 ⇒ `unchanged`（不推进版本、不进历史）。
+   判据用**内容级等价**（`domain/cellContent#sameCellContent` 的 `canonicalize` 比较，
+   不是 `JSON.stringify` 键序比较，也不是 32 位摘要 —— 摘要碰撞会让一次真实写入被吞掉）。
+5. **拒绝可归因**：重复格 ⇒ `InvalidValue{reason:'duplicateCells'}`；
+   孤儿格 ⇒ `MissingTarget{objectId:'cell@x,y,z'}`；
+   越界（声明尺寸之外）⇒ `InvalidValue{reason:'outsideDeclaredGrid'}`（**不**扩展尺寸：
+   越界的目标格在文件格式里写不出来，静默丢弃会造出"命令 applied 但方块不见了"）；
+   只读源 ⇒ `ReadOnly`；版本不符 ⇒ `VersionConflict`；空 patch ⇒ `InvalidValue{reason:'emptyMetadataPatch'}`。
 
 ### 5.3 纯函数签名（由执行器调用）
 
@@ -787,8 +1006,14 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
    `GF-<n>`（全局序号）· 发现批次 · 契约条目（章节号）· 现象 · 影响面 ·
    建议处置（补契约 / 改契约 / 标记为不实现）。
 2. **在 Gitea 父立项
-   [#250](http://127.0.0.1:3300/Lightning/lightning/issues/250)
+   [#385](http://127.0.0.1:3300/Lightning/lightning/issues/385)
    追加评论**，写明上列字段与最小复现（若有）。这是**唯一**的裁决入口。
+   - ⚠️ **R1-α（v1.7）变更**：本条的入口原为 [#250](http://127.0.0.1:3300/Lightning/lightning/issues/250)。
+     依 **#385 评论 6910**（GF 缺口裁决入口自 #250 迁至 #385），本文件自 v1.7 起
+     裁决入口是 **#385**；#250 保留为历史证据层（旧 GF 的裁决评论仍在其中，只读引用）。
+   - ⚠️ **禁止「先删登记后删旧机制」**（#385 评论 6930 的机械判据）：删除登记必须与
+     删除机制**同一提交**，并在提交信息里给出**全量命中数**。登记滞后于代码
+     （机制还在而登记已说"已兑现"）**同样**是违规 —— R1-α 同批更正了三处此类滞后。
 3. **不阻塞其它工作**：缺口若只影响本批次某条验收，**该条报"未通过"并注明缺口编号**，
    其余条目照常交付。**不得**为让判据变绿而自行放宽或用近似实现顶替
    （#251「验收未满足不得修改判据或省略字段报绿」）。
@@ -813,10 +1038,12 @@ P1–P11 执行者遇到本文件未覆盖或无法满足之处，按下列步�
 | GF-10 | —（**编号空缺**） | — | 无缺口登记 | **处置：登记为编号空缺，不引入空洞条目**。机械证据（2026-10-13 实测）：#250 全 **69** 条评论全文扫描 `GF-10` **零命中**（`GF-9` 之后直接进入 `GF-11`）；#251–#262、#286、#289、#299、#301 的评论亦零命中 ⇒ 该号**从未被分配**，非回填遗漏（#262 P11-B2） |
 | GF-11 | P10d (#289) | `ObjectDataPayload` 类型化内容面 | 内核 `ObjectDataPayload` 的内容面不足以承载旧文档内容（几何/部件/逐格说明/注解），需扩展类型化变体 | **裁决**：批准 P10d 的落地形态——`cellContent`/`geometry`/`cellGeometry`/`cellPalette`/`AnnotationGeometry`。**最终状态：已落地**（`web/src/domain/scene.ts:169` 的 `ObjectDataPayload` 联合 + `AnnotationGeometry`；P10d #289 合流 `fe847d0`）（#250 comment 5583） |
 | GF-12 | P10d (#289) | 多方块声明的类型化承载面 | 多方块声明缺类型化承载；`MultiblockContent.source` 以原始 JSON 回显冒充承载 | **裁决**：批准 `multiblockDocument` + `KernelTypedDeclaration`（逐元素编码规则）；`MultiblockContent.source` 原始 JSON 回显**已退役**。**最终状态：已落地**（`web/src/composition/kernelProjection.ts:649` 的 `KernelTypedDeclaration` + `:672` 的 `declaration` 主来源；P10d 合流 `fe847d0`）（#250 comment 5583） |
-| GF-13 | 登记 P10e (#299) / 执行 P10f (#301) | §2/§3 `Command` 封闭联合 + 网格读面 | 内核 `Command` 联合**无**块身份/格内容写命令（`setCellTooltip` 只写说明）、无网格读面 ⇒ 113 处 `getDoc()` 消费中 75 处（66%）无法机械替换，硬迁只能造门面 | **裁决（R-WK-07）**：授权扩展 `Command` 封闭联合（子批 C 最小集 `setCellTooltip`/`setCellContent`/`moveCells`/`setDocumentMeta` + 注解字段映射）与网格读面扩展（子批 B）；契约须同批更新。**最终状态（2026-10-13 `49792e3` 实测）：部分落地**——① 网格读面**已落地**，兑现形态是 `Context#kernelGrid` → `runtime/gridRead`（`KernelSession.gridOf` 具名读面），**非** `ReadView` 加 grid 组；② `setCellTooltip` **已落地**（`application/commands.ts` 的 `Command` 联合实测 **24** 个成员，含 `setCellTooltip`）；③ `setCellContent`/`moveCells`/`setDocumentMeta` **未落地**（实测联合无此三者）⇒ 四条相关接缝仍在 `composition/seams.ts` 登记（`property-write-legacy-document-model`/`legacy-grid-edit-handle`/`legacy-document-in-place-edit`/`annotation-wide-field-face`），owner 均 P11/#262（#250 comment 5699、5605、5731、5773、5844、5861、5880、5987、6015） |
+| GF-13 | 登记 P10e (#299) / 执行 P10f (#301) | §2/§3 `Command` 封闭联合 + 网格读面 | 内核 `Command` 联合**无**块身份/格内容写命令（`setCellTooltip` 只写说明）、无网格读面 ⇒ 113 处 `getDoc()` 消费中 75 处（66%）无法机械替换，硬迁只能造门面 | **裁决（R-WK-07）**：授权扩展 `Command` 封闭联合（子批 C 最小集 `setCellTooltip`/`setCellContent`/`moveCells`/`setDocumentMeta` + 注解字段映射）与网格读面扩展（子批 B）；契约须同批更新。**最终状态（v1.7 / R1-α `6fa0ea75` 实测）：最小集四条**全部落地**——① 网格读面**已落地**，兑现形态是 `Context#kernelGrid` → `runtime/gridRead`（**非** `ReadView` 加 grid 组；落点与业务理由见 §2.6）；② `setCellTooltip` 已落地（P10f D0）；③ `setCellContent`/`moveCells`/`setDocumentMeta` **R1-α 落地**（`application/commands.ts`，联合 **24 → 27**；领域语义（含 `moveCells` 的 U-1 裁定）见 §5.2）；④ 注解字段映射的**写面**仍未兑现（只迁 `title`）⇒ 三条相关接缝仍在 `composition/seams.ts` 登记（`property-write-legacy-document-model`/`legacy-grid-edit-handle`/`legacy-document-in-place-edit`）——其中前两条的**能力前置已消除**，只剩**消费者迁移**（各 `exitCondition` 已按"登记条件 + 消费者迁移数=0"两子句改写）（#250 comment 5699、5605、5731、5773、5844、5861、5880、5987、6015；#385） |
 | GF-14 | P10f (#301) | G-6 (b) 持久化键口径 | 保真记录的键是**游离方案**（`lk.fidelity.v1.<文档ID>.record`）：缺 scope/instance 段、返回裸 `string`、无解析器、版本硬编码、空 id 静默回落、不被分类器识别 | **裁决**：未知字段按**文档身份**承载；键并入 recovery/save 家族，消除裸 `string` 与空 id 静默回落。**最终状态：已落地，但口径与登记文有差（如实登记）**——实测 `web/src/application/recovery.ts` 的 `fidelityStoreKey(identity, documentId)` = `lightning.recovery.fidelity.v1.<scope>.<instanceId>.<documentId>`（**6 段、含 instance 段**），并有 `parseFidelityStoreKey` + `artifactKindOfKey` 识别、版本取具名 `FIDELITY_SCHEMA_VERSION`；**文档身份在末段**（与裁决一致），但登记文写的「走 `saveStoreKey` 形态、**无 instance 段**」与代码现实**不一致**（代码取与 `recoveryStoreKey` 同形的 6 段）⇒ 以代码为准（#250 comment 5699、6263） |
 | GF-15 | P10f (#301) | §2.3 文档装载状态 | 内核 `document()` 恒 defined（`openDocument` 无条件建文档）⇒ 「空文档」与「无文档」不可区分；而 legacy `getDoc().value` 6 处可为 null | 新增 `KernelSession.hasLoadedDocument()` 读面 + `Context.setDocument` 唯一写入口；本批只建读面并对齐，消费面替换归 B′ |
 | GF-16 | P10f (#301) | §2.4 装配成功读面 | 「有文档」（GF-15）与「内核里的就是那份文档」（装配成功）是**两个**事实，而 D8 把两者当成了一件事：帧源守卫测"文档存在"（恒真）⇒ 装配失败时读到**空帧轴（0）**，而注释声称的 legacy 回落**从未生效** | 新增 `KernelSession.hasAdoptedContent()` + `Context.frameDeclarations()` 唯一读取面（判定在纯函数 `runtime/frameDeclarations`）；D8 同批修复，判据含**装配失败注入** |
+| GF-17 | R1-α (#387) | §2.3 / §2.4 `Context` 的 legacy 回落分支与具名取值口 | R0-D②/D④ 实测：`Context` 上存在三条**返回旧 `RuntimeDocument`** 的具名读面（`legacyDocumentModel()`/`legacyRenderSource()`/`legacyGridForEdit()`）+ 两处**静默回落**（`documentLoad.ts:187-194` 装配失败仅 `warn` + `return false`；`context.ts:450-454` `plainForSave` 的 `source:'legacy'`）。它们**不是错误**（#171「能力不回退」），但"读者可观测"不等于"有退出阶段" | **登记（不就地实现）**：三条读面各在 `composition/seams.ts` 具名登记（`property-write-legacy-document-model`/`legacy-render-source-document`/`legacy-grid-edit-handle`，含**两子句**退出条件：登记条件 + 消费者迁移数=0）；两处静默回落由 §2.3/§2.4 的修正条文禁止**新增**，且已存在的两条按同上口径登记。裁决入口 #385 |
+| GF-18 | R1-α (#387) | §2.5 共享存储上下文 | #249 §11 要求「格内容、对象附件、对象数据、注解**共享同一存储上下文**」，而内核 `ObjectDataPayload` 的变体表里**没有**"对象附件"这一类 —— 今天的等价物是旧文档根级 `itemIndex`/`partIconTextures`/`statsTemplate`，**不在**内核 `DocumentContent` 里 | **登记为缺口（R1-α 不就地实现）**：`application/writeFaces#sharedStorageContextReport()` 的 `objectAttachments` 恒 `false`、`allShared` 恒 `false`（缺口**可见**，不以"扫描无命中"报绿）。承接：**R2**（多方块/部件面）。裁决入口 #385 |
 
 > **回填说明（#262 P11-B2，2026-10-13，基线 `49792e3`）**：GF-4…GF-14 已按 #250 裁决回填本表（10 条裁决 + 1 条编号空缺登记，逐条注明来源评论 id 与最终状态）。其中 **GF-10 为编号空缺**（机械证据见该行）。GF-13/GF-14 的最终落点已按 `web/src/` 实测核对，与登记文不一致处如实登记于对应行。
 
@@ -870,6 +1097,7 @@ B2 §4.1/§4.2/§4.5/§4.6 与注解/多方块/纹理序列规模轴**未标定*
 | v1.5 | 2026-10-13 | §8 缺口登记表**回填 GF-4…GF-14**（10 条裁决 + GF-10 编号空缺登记，共 11 行），逐条注明来源评论 id 与最终状态（已落地→文件/读面，或如实登记与代码现实的差异）；移除「GF-4…GF-14 未回填」维护备注（改为回填说明）；文档版本字样同步 v1.5 | #250 评论 4866、4898、4899、4979、4984、4999、5111、5443、5583、5605、5699、5731、6125、6263；#262（P11-B2） |
 | v1.5.1 | 2026-10-13 | **引用更正**：文件头「退役归属见 #251 B5 附件」是**事实性错误**（#251 的旧 B5 附件 id 984 已删除，镜像 v3 挂在 #250 的 asset id 1008）⇒ 改为「#250 附件 asset 1008（v3）+ 终订镜像 #262 附件 1909」；**GF-4 正文补记**：§2.1「必须成立」补 `read()` 缺失作用域 ⇒ 抛异常（调用方缺陷）、与业务拒绝的 `DomainError` 值形态区分 + 负对照，并移除 GF-4 行尾的「⚠️ 契约 §2 正文未补记，以本表为准」注记（表与正文分叉消除） | #262 comment 6408②（Lead 裁决 2026-10-13，P11-B3） |
 | v1.6 | 2026-10-13 | 新增 **§9 性能预算（标定登记）**：标定口径（D5）+ 建议预算线（软告警）+ 未覆盖轴登记；原 §9 修订记录顺延为 §10（§0 的交叉引用同步） | #262 comment 6669（P11-C 完工报）+ comment 6678（Lead 裁决①） |
+| v1.7 | 2026-10-13 | **R1-α（#387）契约更新，四组**：① **§2.3/§2.4 修正**——`Context.setDocument` 的自描述从「写 legacy 文档**并镜像**内核装载状态」改为"权威是内核 `Document`，legacy 是渲染载体投影"，并**明令禁止**新增返回旧 `RuntimeDocument` 的具名读面（只减不增），两处静默回落改为必须登记；② **新增 §2.5 写面分类与共享存储上下文**（#249 §11 落地：四条写面 + `mayFork` 全 `false` + 共享上下文的"能力存在"判据形态）；③ **新增 §2.6 网格读面落点**（`runtime/gridRead` + 统一存储上下文，附三条业务理由；明确 `KernelSession.gridOf` 不再是权威读面）与 **§2.7 工程格式生产入口**（两入口一权威 / 内容本体必须进负载 / 重开顺序 / 未知版本拒绝）；④ **§5.2 补 `Command` 联合三员**（`setCellContent`/`moveCells`/`setDocumentMeta`）+ `moveCells` 的领域裁定（U-1）+ 三态可区分/幂等/拒绝码；⑤ **§8**：裁决入口自 #250 **迁至 #385**（含"禁止先删登记后删旧机制"），GF-13 **最终状态改为最小集四条全落地**，新增 **GF-17**（legacy 具名读面与静默回落的登记）与 **GF-18**（对象附件未类型化承载） | #385（立项/入口）、#387（R1 执行单）、#385 评论 6910（入口迁移）与 6930（禁止先删登记后删机制）、#386 附件 2300/2301（R0-D③④ 契约草案与裁决）、#250 R-WK-07（GF-13 授权）；实现提交 `6fa0ea75`/`75122922`/`cf9feda2` |
 
 ---
 

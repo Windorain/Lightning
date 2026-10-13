@@ -121,7 +121,7 @@ export const LAYER_DESTINATIONS = [
       'adapters/files/envelopeCodec.ts',
       'adapters/files/versionMigration.ts',
       'adapters/files/mcAxisProfile.ts',
-      'adapters/files/projectFormat.ts',
+      'adapters/projectFormat.ts',
       'adapters/files/documentBinding.ts',
       'adapters/files/publishFormat.ts',
       'adapters/host/hostCapabilities.ts',

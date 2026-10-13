@@ -9,6 +9,12 @@ import { DEFAULT_PREVIEW_SCENE_ID } from '@/viewer/viewerSession'
 // —— 于是文件选择器路径与 `workbench/document/pipeline.ts` 的 `DocumentSource` 路径
 // （wiki-data / SDE / 本地抽屉）共用**同一份**判据，而不是各写一份并必然漂移。
 import { adoptLoadedDocument, type KernelLoadHost } from '@/composition/documentLoad'
+import {
+  adoptProject,
+  decodeProjectFile,
+  projectForSave,
+  type ProjectHost,
+} from '@/composition/projectIo'
 import { plainRootOf } from '@/adapters/plainRoot'
 
 /**
@@ -34,6 +40,37 @@ export function adoptDocumentIntoKernel(
   locator: string,
 ): void {
   adoptLoadedDocument(ctx, doc, plainRoot, locator)
+}
+
+/**
+ * `Context` → 工程接线的**宿主面**（结构端口）。
+ *
+ * `composition/projectIo` 只认识 {@link ProjectHost} 的三件事（内核会话 +
+ * 换 legacy 载体），于是它**不依赖** `Context` 这个旧类型 —— 这是"依赖方向"
+ * 的结构保证：算子层（旧）→ `composition/`（新装配层），
+ * 而后者到 `adapters/`/`domain/` 的边是**新层内部**的（不产生新的旧→新边）。
+ */
+/**
+ * `Context` → 工程接线的**宿主面**（结构端口）。
+ *
+ * ## 为什么这里**不**写 `import('@/runtime/kernelSession').KernelSession`
+ *
+ * 那正是 R1-α 段二**删除**过的那条边（
+ * `docLifecycleOperators.ts:32` 的类型位置导入，R0-3 点名的闸门漏网实例）——
+ * 在这里重新写一遍就是把它请回来。宿主面的类型由 `composition/projectIo`
+ * 的 {@link ProjectHost} 给出，本函数的参数由**调用点**的 `ctx`（算子签名里的
+ * `Context`）推断 ⇒ 不需要在这里点名任何内核类型。
+ *
+ * ⚠️ 参数用 `Pick<...>` 式的结构标注而非 `Context`：本文件已 import
+ * `RuntimeDocument`（旧层内部），而 `Context` 类型由算子签名给出 ——
+ * 手写一个只含两项的结构类型让"本函数需要什么"**显式**，也避免把
+ * `Context` 的完整形状耦合进来。
+ */
+function projectHostOf(ctx: {
+  readonly kernel: ProjectHost['kernel']
+  setDocument(next: RuntimeDocument | null): void
+}): ProjectHost {
+  return { kernel: ctx.kernel, setDocument: (next) => ctx.setDocument(next) }
 }
 
 /**
@@ -239,7 +276,7 @@ export const SaveProjectOperator: OperatorType = {
   },
 
   exec(ctx) {
-    const result = ctx.projectForSave()
+    const result = projectForSave(projectHostOf(ctx))
     if (!result.ok) {
       ctx.log.error('保存工程', '内核不是权威，无法编码工程文件', { reason: result.error.params })
       return
@@ -282,7 +319,7 @@ export const OpenProjectOperator: OperatorType = {
     } catch (e) {
       throw new Error(`JSON 解析失败：${e}`)
     }
-    const decoded = ctx.decodeProjectFile(raw)
+    const decoded = decodeProjectFile(raw)
     if (!decoded.ok) {
       // 显式失败：未知主版本 ⇒ `UnsupportedOperation`（**不**降级读取，
       // 见 `projectFormat` 文件头判据 1）。
@@ -293,7 +330,7 @@ export const OpenProjectOperator: OperatorType = {
       })
       return
     }
-    const adopted = ctx.adoptProject(decoded.value)
+    const adopted = adoptProject(projectHostOf(ctx), decoded.value)
     if (!adopted.ok) {
       ctx.log.error('打开工程', '宿主未装配内核，工程无法落地', { fileName: file.name, reason: adopted.error.params })
       return
