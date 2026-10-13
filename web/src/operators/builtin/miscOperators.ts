@@ -164,18 +164,41 @@ export const SetLanguageOperator: OperatorType = {
 }
 
 // ──────────────────────────── 撤销/重做 ────────────────────────────
-
+//
+// ## R1-β① C2：这两个算子的读面与写面都换了权威
+//
+// 修前：`poll` 读 `ctx.getEditHistory().canUndo.value`，`exec` 调
+// `ctx.getEditHistory().undo()` —— 权威是旧 `UndoManager`（`context/editHistory`
+// 的双栈），而内核 `Document.history` 另有一条并行历史。两条历史并存就是
+// #385 评论 6988 裁决① 要消除的"写了撤不掉"的歧义形态。
+//
+// 修后：读 `ctx.kernelUndoState()`（内核 `Document#history` 的投影，
+// 与 `application/queries#queryDocument` 同口径），写
+// `ctx.submitKernelUndoRedo('undo' | 'redo')`（发 `{kind:'undo'|'redo'}` 命令，
+// 记账由 `reduceUndoRedo` 在事务内完成，契约 §5.2）。
+//
+// ## ⚠️ 未装配时 `poll` 必须返回 `false`，**不得**回落旧栈
+//
+// `kernelUndoState()` 在"无会话/未 adopted"时返回 `null`。此处**刻意**把它读成
+// "不可撤销"，而不是"去问旧栈"：
+//  - 未装配 ⇒ 没有内核文档 ⇒ 内核历史为空，这是**如实**答案，不是退化；
+//  - 若回落旧栈，那条旧栈就永远有人在读 ⇒ "旧栈是唯一的撤销权威"这个已退出的
+//    事实会被这条读路径**保活**（#171 禁止的新门面包旧核心）。
+// 而 `poll` 的语义本来就是"这个算子此刻可用吗" —— `false` 是**正确**的答案
+// （不可用），不是错误（没有"抛错"的余地：`poll` 返回 `boolean`）。
+//
+// 未装配实例因此表现为"撤销/重做菜单项置灰"，与"没有可撤销的东西"逐点同形。
 export const UndoOperator: OperatorType = {
   id: 'OPERATOR_UNDO',
   label: '撤销',
   description: '撤销上一步操作',
 
   poll(ctx) {
-    return ctx.getEditHistory().canUndo.value
+    return ctx.kernelUndoState()?.canUndo ?? false
   },
 
   exec(ctx, _props) {
-    ctx.getEditHistory().undo()
+    ctx.submitKernelUndoRedo('undo')
   },
 }
 
@@ -185,11 +208,11 @@ export const RedoOperator: OperatorType = {
   description: '重做已撤销的操作',
 
   poll(ctx) {
-    return ctx.getEditHistory().canRedo.value
+    return ctx.kernelUndoState()?.canRedo ?? false
   },
 
   exec(ctx, _props) {
-    ctx.getEditHistory().redo()
+    ctx.submitKernelUndoRedo('redo')
   },
 }
 

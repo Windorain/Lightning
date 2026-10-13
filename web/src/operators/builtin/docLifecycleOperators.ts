@@ -115,13 +115,23 @@ export const NewSceneOperator: OperatorType = {
   },
 
   async exec(ctx, _props) {
-    if (ctx.getEditHistory().canUndo.value) {
+    // R1-β① C2：`canUndo` 读内核（旧栈读面已终删）。
+    if (ctx.kernelUndoState()?.canUndo === true) {
       const confirmFn = ctx.getToolSettings().confirmDirty ?? window.confirm
       if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
       await ctx.getOperators().exec('OPERATOR_SAVE_FILE')
     }
     ctx.getSelection().clear()
-    ctx.getEditHistory().clear()
+    // ⚠️ 原 `ctx.getEditHistory().clear()` 在 R1-β① C2 **删除**，不是遗漏。
+    //
+    // 理由：内核撤销历史**随文档存续**（契约 §6 —— 历史是 `Document#history` 的
+    // 一部分，不是外壳级的独立栈）。而下一行的 `ctx.setDocument(doc)` 会把
+    // 内核装载成**另一份**文档 ⇒ 新文档的 `history` 天然为空，
+    // "清空历史"是**结构上**已经发生的事，不需要（也无法）再命令一次。
+    //
+    // 这与旧形态的差别是实质性的：旧栈是外壳单例，换文档**必须**显式 clear
+    // （否则撤销能跨文档回退到上一个场景的内容）；内核形态下那种事故
+    // 在**类型上不可能**发生 —— 这正是本条 clear 变成冗余的原因。
     const doc = RuntimeDocument.empty()
     // #301 A′：经**唯一写入口**（它同时镜像内核的装载状态）。
     // NewScene 的语义是"空**但存在**"——与"无文档"不同，故走 `setDocument(doc)`
@@ -147,13 +157,15 @@ export const OpenSceneOperator: OperatorType = {
       file = await pickFile()
       if (!file) return
     }
-    if (ctx.getEditHistory().canUndo.value) {
+    if (ctx.kernelUndoState()?.canUndo === true) {
       const confirmFn = ctx.getToolSettings().confirmDirty ?? window.confirm
       if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
       await ctx.getOperators().exec('OPERATOR_SAVE_FILE')
     }
     ctx.getSelection().clear()
-    ctx.getEditHistory().clear()
+    // `getEditHistory().clear()` 已删 —— 理由见 `NewSceneOperator` 的同名注释：
+    // 下一行的 `setDocument` 换文档即换 `Document#history`（契约 §6），
+    // "清空历史"是结构上已发生的事。
     const text = await file.text()
     let data: unknown
     try {
@@ -218,7 +230,7 @@ export const LoadBuiltinSceneOperator: OperatorType = {
     const id = sceneId && sceneId.length > 0 ? sceneId : DEFAULT_PREVIEW_SCENE_ID
     const raw = getDevSceneDocument(id)
     ctx.getSelection().clear()
-    ctx.getEditHistory().clear()
+    // `getEditHistory().clear()` 已删（同 `NewSceneOperator` 的理由）。
     const result = await ctx.main.registries.parsers.detectAndParse(raw)
     if (result.document) {
       ctx.setDocument(result.document)

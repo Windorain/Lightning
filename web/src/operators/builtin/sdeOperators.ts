@@ -47,7 +47,9 @@ export const SDELoadExportOperator: OperatorType = {
   async exec(ctx, _props) {
     const name = _props.name as string
     ctx.getSelection().clear()
-    ctx.getEditHistory().clear()
+    // R1-β① C2：`getEditHistory().clear()` 已删 —— 理由同
+    // `docLifecycleOperators#NewSceneOperator`：下方的 `setDocument` 换文档即换
+    // `Document#history`（契约 §6），清空是结构上已发生的事。
     const data = await sdeGetExportFile(ctx.getConnection().apiBase, ctx.getConnection().token, name)
     ctx.getConnection().selectedExportName = name
     const result = await ctx.main.registries.parsers.detectAndParse(data)
@@ -75,7 +77,7 @@ export const SDELoadWorkspaceOperator: OperatorType = {
   async exec(ctx, props) {
     const data = props.data
     ctx.getSelection().clear()
-    ctx.getEditHistory().clear()
+    // `getEditHistory().clear()` 已删（同上）。
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
       ctx.setDocument( result.document)
