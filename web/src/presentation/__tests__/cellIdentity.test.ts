@@ -40,7 +40,6 @@ import {
   type CellRef,
   type TriangleCellMap,
 } from '@/presentation/cellIdentity'
-import { structureGeometryAttributes } from '@/runtime/presentationAdapter'
 import { TIME_ZERO, type EvaluationKey } from '@/presentation/evaluationKey'
 import { createParserRegistry } from '@/context/parserRegistry'
 import { V2PlainParser, WorldParser, StructureDataParser, createEnvelopeParser } from '@/context/parsers/builtinParsers'
@@ -629,10 +628,11 @@ describe('P10e · 逐格身份层：格身份**不**违反对象身份模型', (
 })
 
 /** 直接调适配层（不经装配）也要带格表 —— 防"只有生产者接了"的半成品。 */
-describe('P10e · 适配层：`structureGeometryAttributes` 直接调用也带格表', () => {
-  it('真实夹具经投影出的定义 ⇒ 格表存在且形状正确', async () => {
+describe('P10e · 适配层：逐材质图元直接调用也带格表', () => {
+  it('真实夹具经投影出的定义 ⇒ 每组的格表存在且形状正确', async () => {
     const { scene, content } = await assembledOf('multiblock-tier-only')
     const { projectGridCells } = await import('@/composition/kernelProjection')
+    const { structureMaterialPrimitives } = await import('@/runtime/presentationAdapter')
     const payload = Object.values(scene.data).map((d) => d.payload).find((x) => x.kind === 'blockGrid')
     expect(payload).toBeDefined()
     const p = payload as Extract<typeof payload, { kind: 'blockGrid' }>
@@ -651,12 +651,18 @@ describe('P10e · 适配层：`structureGeometryAttributes` 直接调用也带�
       materialPalette: content.resources.map((r) => ({ kind: r.kind })),
     } as never
 
-    const attrs = structureGeometryAttributes(def, { layerPreview: 'all' })
-    expect(attrs.triangleCount).toBeGreaterThan(0)
-    expect(attrs.cellMap, '适配层必须产出格表').toBeDefined()
-    expect(attrs.cellMap!.length).toBe(attrs.triangleCount)
-    // 反空洞真：格表里必须真的有**多个不同格**（否则格表退化成常数）
-    expect(new Set(attrs.cellMap!.map(cellKeyOf)).size).toBeGreaterThan(1)
+    const groups = structureMaterialPrimitives({ definition: def, layerPreview: 'all', materialTint: 0xffffff })
+    expect(groups.length, '适配层必须逐材质产出').toBeGreaterThan(1)
+    let distinctCells = 0
+    for (const g of groups) {
+      const attrs = g.attributes
+      expect(attrs.triangleCount, `material:${g.primitive.material.id} 必须有真实几何`).toBeGreaterThan(0)
+      expect(attrs.cellMap, '适配层必须产出格表').toBeDefined()
+      expect(attrs.cellMap!.length).toBe(attrs.triangleCount)
+      // 反空洞真：格表里必须真的有**多个不同格**（否则格表退化成常数）
+      distinctCells = Math.max(distinctCells, new Set(attrs.cellMap!.map(cellKeyOf)).size)
+    }
+    expect(distinctCells).toBeGreaterThan(1)
   })
 })
 

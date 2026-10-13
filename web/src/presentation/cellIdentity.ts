@@ -128,7 +128,7 @@ export function cellRefOfTriangle(
  *
  * 单独成函数而不是内联 `===`：它是三条路径的共同判据 ——
  * 编译期（`compileScene` 的 `cell-map-shape-invalid` 跳过）、
- * 适配层（`structureGeometryAttributes` 自检）、
+ * 适配层（`structureMaterialGroups` 按组展开时自检 —— C6 起逐材质组），
  * 以及测试（负对照注入）。散落三处 `===` 就是三处会漂移的判据。
  *
  * `map === undefined` ⇒ `true`（"不携带"是合法状态，见 {@link TriangleCellMap}）。
@@ -155,8 +155,8 @@ export function cellMapShapeOk(
  *
  * 它只把调用方已经拿到的**片段序**（与合并属性同一序）翻成表。若它自己去遍历一遍
  * 网格，那两序会在"剔除判据变了"时静默错位 —— 而 D3a 实测的正是这类
- * 「两份重复实现必然漂移」（`structureGeometryAttributes` 曾经不剔除遮挡，与渲染路径
- * 差 3 倍三角形）。故本函数**只做同序展开**，遍历与剔除仍只有一处。
+ * 「两份重复实现必然漂移」（D3a：适配层曾有一份手写遍历，不剔除遮挡，与渲染路径
+ * 差 3 倍三角形；C6 起那份重复实现已删除）。故本函数**只做同序展开**，遍历与剔除仍只有一处。
  *
  * @param pieces 按**合并属性同一序**给出的片段（只需 `col`/`row`/`zSlice`/`quadIndex`）
  * @param trianglesPerPiece 每片展开出的三角形数（实测恒为 2；显式传参使该事实可断言）

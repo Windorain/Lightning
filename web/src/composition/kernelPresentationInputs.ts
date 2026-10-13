@@ -27,8 +27,8 @@
  * | 步骤 | 复用什么 | 为什么是它 |
  * |---|---|---|
  * | 内核载荷 → 旧格式网格 | `kernelProjection#projectGridCells` | 已实现"逐格 + 调色板 + 部件"的重建，且是 D1 验证过的路径 |
- * | 网格 → 三角形属性 | `runtime/presentationAdapter#structureGeometryAttributes` | 它**委托**渲染路径同一收集器（D3a 修正后），故几何与渲染路径**逐位一致** |
- * | 网格 → 图元 | `runtime/presentationAdapter#structurePrimitive` | 已定义 objectId/几何身份/bounds/材质描述符的口径 |
+ * | 网格 → 三角形属性 | `runtime/presentationAdapter#structureMaterialGroups` | 它**委托**渲染路径同一收集器（D3a 修正后），逐 `materialIndex` 分组，故几何与渲染路径**逐位一致** |
+ * | 网格 → 图元 | `runtime/presentationAdapter#structureMaterialPrimitives` | 已定义 objectId/几何身份/bounds/材质描述符的口径；**逐材质**产图元 |
  *
  * ## 分层（`gate/no-private-cross-layer`：公共出口深度 ≤ 2）
  *
@@ -44,8 +44,8 @@
  *
  * `GeometrySource.versionOf(id)` 与 `EvaluatedPrimitive.geometry.version` **必须**同源 ——
  * 否则 `compileScene` 判 `geometry-version-mismatch` 并**静默跳过全部对象**
- * （表现为"画面空白但无报错"）。故两者都由**同一个** `structurePrimitive` 产出的
- * `geometry.id` 索引。
+ * （表现为"画面空白但无报错"）。故两者都由**同一个** `structureMaterialPrimitives` 产出的
+ * `geometry.id` 索引（逐材质组各一个 id）。
  */
 
 import type { Scene, ObjectDataPayload } from '@/domain/scene'
@@ -61,7 +61,7 @@ import { projectGridCells } from '@/composition/kernelProjection'
 import { structureMaterialPrimitives } from '@/runtime/presentationAdapter'
 
 /**
- * 网格定义的类型：从 `structurePrimitive` 的**入参**派生。
+ * 网格定义的类型：从 `structureMaterialPrimitives` 的**入参**派生。
  *
  * ## 为什么不直接 import `StructureDefinition`（本批被闸门判红后的正解）
  *
@@ -157,14 +157,19 @@ function definitionOfPayload(
  * | 载荷不是 `blockGrid`（注解/相机/网格由各自的呈现路径负责） | `not-blockGrid:<kind>` |
  * | 无类型化几何资产（旧编辑期文档：几何由生产按方块身份现算） | `no-typed-geometry` |
  * | 逐格为空 | `empty-cells` |
+ * | 全部四边形被遮挡剔除（无可见面） | `empty-geometry` |
  *
- * ## 粒度：当前是"一个 `blockGrid` 对象 → 一个图元"
+ * ## 粒度：**一个 `blockGrid` 对象 → 逐 `materialIndex` 多个图元**（C6 起）
  *
- * 与 `structurePrimitive` 同粒度（整座结构一个对象）。**逐格身份**
- * （拾取要的"命中三角形 → 哪一格"、描边要的"该格 quads"）是 #289 之后
- * **P10e** 的显式设计项 —— 本模块**不**假装已经逐格，它如实按"内核里实际有几个
- * 可呈现对象"产出。这也是本批**不**接 presenter 的原因：接了会丢掉逐格交互能力
- * （`context/selection.ts:21-34` 显式要求 `column/row/zSlice`）。
+ * 每个材质组是一个独立图元（各自几何身份 + 材质 id `material:<下标>`），但它们**共享**
+ * 同一个 `objectId` —— 这正是 #249 §3.3「对象身份与 GPU 批次身份分离」：对象身份不由
+ * 材质分组决定，批次身份也不等于对象身份（见 `presentation/compileScene` 的图元键）。
+ *
+ * ## 为什么材质 id 必须是 `material:<下标>`
+ *
+ * `kernelTextureResources#MATERIAL_ID_PREFIX` 已把该约定定为唯一一处；不符则该材质
+ * **永远无贴图**（`materialIndexFromId` 答 `null` ⇒ `createMaterial` 不设 `params.map`）。
+ * 旧形态（整座结构一个图元、材质 id 恒 `'structure'`）已退役。
  */
 export function kernelPresentationInputs(input: {
   readonly scene: Scene
@@ -178,7 +183,7 @@ export function kernelPresentationInputs(input: {
   const skipped: { objectId: string; reason: string }[] = []
   const materialPalette = materialPaletteOf(input.content)
 
-  // 几何端口的数据袋：按几何身份存"版本 + 属性"。**同一个** `structurePrimitive`
+  // 几何端口的数据袋：按几何身份存"版本 + 属性"。**同一个** `structureMaterialPrimitives`
   // 产出两者的来源，故 `versionOf` 与 `primitive.geometry.version` 天然同源。
   const byId = new Map<string, { readonly version: string; readonly attributes: GeometryAttributes }>()
 

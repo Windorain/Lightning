@@ -32,8 +32,9 @@ import {
 import type { EvaluatedPrimitive, GeometryAttributes, GeometryId } from '@/presentation/evaluationKey'
 import { triangleCellMapOf } from '@/presentation/cellIdentity'
 import { contentDigestOf } from '@/presentation/invalidationPlan'
-// 几何收集**只有一个**入口（本批 D3a 更正：原先本文件另有一份手写遍历，
-// 它不做遮挡剔除 ⇒ 与渲染路径数值不一致）。见 `structureGeometryAttributes` 的说明。
+// 几何收集**只有一个**入口（D3a 更正：原先本文件另有一份手写遍历，它不做遮挡剔除
+// ⇒ 与渲染路径数值不一致。C6 起那个重复实现连同它的导出一起删除，收集只发生在
+// `structureMaterialGroups` 内）。
 import {
   collectStructureGeometryPiecesPure,
   mergeBakedQuadPiecesAttributes,
@@ -159,61 +160,6 @@ export function structureGeometryId(definition: StructureDefinition, layerPrevie
     definition.blockPalette.map((p) => `${p.registryId}@${p.meta ?? ''}`),
     layerPreview,
   ])}`
-}
-
-/**
- * 从结构定义产出**纯数据几何属性**（供 `presentation/evaluationKey.GeometrySource` 消费）。
- *
- * 与既有 `blockMesh.buildBlockMesh` 的关系：那条路径产出 `THREE.Group`（含 GPU 对象与
- * `triangleMap`），而本函数产出**纯数据**（位置/UV/颜色），使呈现编译可以在无 GPU 环境
- * 断言。两者都调用同一个纯几何核心（`decodeBakedGeometry` + `bakedQuadTriangleAttributesPure`），
- * 因此**几何数值一致**（这是 e2e 能对照两侧的前提）。
- *
- * ## ⚠️ 本批更正（#289 P10d D3a）：上面那句"因此几何数值一致"**曾是假的**
- *
- * 第一版**手写**了一遍遍历（逐格逐四边形全收），而渲染路径经
- * `collectStructureGeometryPiecesPure` 收集并**默认剔除**被遮挡的四边形。
- * 两者共用四边形解码器 ≠ 共用**剔除判据** ⇒ 数值并不一致。实测（同一取值口径）：
- *
- * | 夹具 | 渲染路径（剔除） | 第一版本函数 |
- * |---|---|---|
- * | multiblock-tier-only | 12 | 12 |
- * | multiblock-ebf-2ch | **12**（tier1）/ **24**（默认） | **36** / **72** |
- * | multiblock-lsc-overlap | **40** | **104** |
- *
- * 即本函数**恰好等于"不剔除"**（`cullOccludedQuads: false`）—— 内部面会被画出来，
- * 呈现编译若用它，"切换实现不改变画面"直接失效。
- *
- * 为何旧判据没抓到：`structureGeometryAttributes` 在本批之前**零调用者**
- * （生产与测试都没有；`renderCutoverParity` 的指纹一律走
- * `collectStructureGeometryPiecesPure`），故"注释声称一致、无判据把守"。
- *
- * ## 更正方式：不修数字，**删掉重复实现**
- *
- * 手写遍历是分歧的**唯一**来源。现在本函数**委托**给渲染路径同一个收集器
- * （`collectStructureGeometryPiecesPure` + `mergeBakedQuadPiecesAttributes`），
- * 于是"数值一致"由**构造**保证，而不是由注释声称。
- */
-export function structureGeometryAttributes(
-  definition: StructureDefinition,
-  options?: { layerPreview?: LayerPreviewMode; visibleObjectId?: string },
-): GeometryAttributes {
-  const layerPreview = options?.layerPreview ?? 'all'
-  // 走渲染路径**同一个**收集器：剔除判据因此不可能再漂移。
-  const collected = collectStructureGeometryPiecesPure(definition, { layerPreview })
-  const merged = mergeBakedQuadPiecesAttributes(collected.pieces)
-  return {
-    positions: merged.positions,
-    uvs: merged.uvs,
-    colors: merged.colors,
-    triangleCount: merged.positions.length / 9,
-    // **逐格身份**（#299 P10e）：由**同一批** `collected.pieces` 按**同序**展开。
-    // 关键：不重新遍历网格 —— 若本函数为了产出格表再去遍历一遍，两序会在
-    // "剔除判据变了"时静默错位（D3a 实测的正是这类重复实现漂移：两份遍历差 3 倍三角形）。
-    // `triangleCellMapOf` 只做同序展开（每片固定 2 个三角形，见其说明），
-    // 故"第 t 个三角形属于哪一格"由**构造**保证，而不是由注释声称。
-    cellMap: triangleCellMapOf(collected.pieces),
-  }
 }
 
 /**

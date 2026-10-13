@@ -31,7 +31,7 @@
 import { describe, expect, it } from 'vitest'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
 import { projectGridCells } from '@/composition/kernelProjection'
-import { structureGeometryAttributes } from '@/runtime/presentationAdapter'
+import { structureMaterialPrimitives } from '@/runtime/presentationAdapter'
 import { collectStructureGeometryPiecesPure, mergeBakedQuadPiecesAttributes } from '@/render/mesh/structureGeometryCore'
 import { fixturePath, readJson } from '@/context/__tests__/multiblockFixtureIo.mjs'
 import { createParserRegistry } from '@/context/parserRegistry'
@@ -91,21 +91,29 @@ function sameFloatBits(a: Float32Array, b: Float32Array): boolean {
   return true
 }
 
-describe('D3a · `structureGeometryAttributes` 必须与渲染路径**逐位**一致', () => {
+describe('D3a · 适配层的几何必须与渲染路径**逐位**一致（C6 起按材质组比）', () => {
   for (const name of FIXTURES) {
     for (const selection of [undefined, { totalTier: 1, values: {}, runstate: '' }]) {
       const label = selection === undefined ? '默认取值' : 'Tier 1'
-      it(`${name}（${label}）：三个属性数组逐元素相同`, async () => {
+      it(`${name}（${label}）：每组三个属性数组逐元素相同，且并集不漏不重`, async () => {
         const definition = await definitionOf(name, selection)
-        const adapter = structureGeometryAttributes(definition, { layerPreview: 'all' })
-        // 渲染路径的读数：同一个收集器 + 同一个合并器
-        const merged = mergeBakedQuadPiecesAttributes(collectStructureGeometryPiecesPure(definition).pieces)
-        expect(adapter.triangleCount, '三角形数必须相同').toBe(merged.positions.length / 9)
-        expect(sameFloatBits(adapter.positions, merged.positions), 'positions 必须逐位相同').toBe(true)
-        expect(sameFloatBits(adapter.uvs, merged.uvs), 'uvs 必须逐位相同').toBe(true)
-        expect(sameFloatBits(adapter.colors, merged.colors), 'colors 必须逐位相同').toBe(true)
-        // 反空洞真：必须有真实几何（否则"逐位相同"是 0 === 0）
-        expect(adapter.triangleCount, `${name} 必须有真实三角形`).toBeGreaterThan(0)
+        // C6 起生产的适配层入口是**逐材质**的：比"整座结构合并值"会恒红，
+        // 故逐组与渲染路径同 `materialIndex` 的那一段比（过滤保序）。
+        const groups = structureMaterialPrimitives({ definition, layerPreview: 'all', materialTint: 0xffffff })
+        const all = collectStructureGeometryPiecesPure(definition).pieces
+        let triangles = 0
+        for (const g of groups) {
+          const mi = Number(g.primitive.material.id.slice('material:'.length))
+          const merged = mergeBakedQuadPiecesAttributes(all.filter((x) => x.materialIndex === mi))
+          expect(g.attributes.triangleCount, `material:${mi} 三角形数必须相同`).toBe(merged.positions.length / 9)
+          expect(sameFloatBits(g.attributes.positions, merged.positions), `material:${mi} positions 必须逐位相同`).toBe(true)
+          expect(sameFloatBits(g.attributes.uvs, merged.uvs), `material:${mi} uvs 必须逐位相同`).toBe(true)
+          expect(sameFloatBits(g.attributes.colors, merged.colors), `material:${mi} colors 必须逐位相同`).toBe(true)
+          triangles += g.attributes.triangleCount
+        }
+        // 反空洞真：必须有真实几何（否则"逐位相同"是 0 === 0），且并集正好覆盖渲染路径全部
+        expect(triangles, `${name} 必须有真实三角形`).toBeGreaterThan(0)
+        expect(triangles, '各组三角形数之和 = 渲染路径全部').toBe(all.length * 2)
       })
     }
   }
