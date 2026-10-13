@@ -429,38 +429,50 @@ export class Context {
   /**
    * **保存/导出的产物 plain**（#301 P10f D2）—— 调用点唯一入口。
    *
-   * ## 为什么把"回落策略"收在这里（而不是让每个调用点自己判）
+   * ## 为什么把产物构造收在这里（而不是让每个调用点自己拼）
    *
-   * 12 个调用点若各自写一遍"内核优先，否则 legacy"，那么
+   * 12 个调用点若各自构造产物，那么
    * ① 漏写一处 = 该处**静默**退回旧权威（本批要消灭的形态）；
    * ② 判据就得覆盖 12 份重复逻辑。
-   * ⇒ 分流只有**一处**（与 `frameDeclarations` 的收敛同一理由：
+   * ⇒ 构造只有**一处**（与 `frameDeclarations` 的收敛同一理由：
    * "两个消费者读同一个函数，于是不一致在结构上不可能发生"）。
    *
-   * ## `source` 字段：让"回落是否发生"**可观测**
+   * ## ⚠️ R1-β① C5：**legacy 回落分支已删除**
    *
-   * 与 `frameDeclarations` 同口径 —— 诊断与测试要能问"这一刻用的是内核还是 legacy"。
-   * 藏起来会让"内核明明装配好了却在读旧文档"这类缺陷无法被观测。
+   * 旧实现是"内核投影优先，投影不可用则回落 `main.doc.serialize()`"。
+   * 那是**保存权威双轨**，而 #387 的同批退役项明文含"`RuntimeDocument` 作为
+   * 编辑、保存、呈现权威"；接缝 `fidelity-record-transport-unwired` 的（乙）
+   * 子句即"该分支消失"（`seams.ts:574`）。
    *
-   * ⚠️ 回落**不是**错误：那是 #171「能力不回退」的落点 ——
-   * 内核支持不了的文档形态，旧路径照常能存。
+   * 删除的**不是**能力：未装配（装配不支持的文档形态）时 `plain === null` +
+   * `reason` 可判定，调用方据此**显式**失败或提示 —— 与 `composition/projectIo`
+   * 的 `projectForSave` 逐字同口径（那里**从来**不回落，理由见其文件头：
+   * "用旧文档填它需要先造一份内核 `Document`，那正是第二个权威的入口"）。
    *
-   * ## `plain === null` 的唯一成因
+   * ## `source` 与 `reason`：让"用了哪条权威 / 为什么没有"**可观测**
    *
-   * 两条路都拿不到（无会话**且**无旧文档）。调用方按"无内容可存"处理。
+   * `source` 恒 `'kernel'` —— 保留该字段是为了让"回落又回来了"这一形态**可被断言**
+   * （它若重新出现 `'legacy'`，类型与判据同时判红）。
+   * `plain === null` 时 `reason` 给出结构化成因（`no-session`/`not-adopted`/`unreadable`），
+   * 调用方按"无内容可存"处理，**不**静默产出一份空产物。
    */
   plainForSave(): {
     readonly plain: Readonly<Record<string, unknown>> | null
-    readonly source: 'kernel' | 'legacy'
+    /** **恒 `'kernel'`**（R1-β① C5）：legacy 回落分支已删除，内核投影是唯一来源。 */
+    readonly source: 'kernel'
+    /** `plain === null` 时的**结构化原因**（非 null 时恒 `null`）—— 来自 `kernelSaveView()`。 */
+    readonly reason: 'no-session' | 'not-adopted' | 'unreadable' | null
   } {
     const view = this.kernelSaveView()
-    if (view.ok) return { plain: view.plain, source: 'kernel' }
-    // 回落：内核不是权威（无会话 / 未装配 / 投影面不可解释）⇒ 旧文档照常能存。
-    const legacy = this.main.doc.value
-    return {
-      plain: legacy === null ? null : (legacy.serialize() as Record<string, unknown>),
-      source: 'legacy',
-    }
+    if (view.ok) return { plain: view.plain, source: 'kernel', reason: null }
+    // ⚠️ **R1-β① C5：legacy 回落已删除**（#385 评论 7140 的消费者重写授权；
+    // `fidelity-record-transport-unwired` 的（乙）子句即"该分支消失"）。
+    // 旧写法在"无会话 / 未装配 / 投影面不可解释"时回落 `main.doc.serialize()` ——
+    // 那让**保存权威**出现两个答案，而 #387 的同批退役项明文含"`RuntimeDocument`
+    // 作为**保存**权威"。删除后语义与 `composition/projectIo#projectForSave`
+    // **逐字同口径**：未装配即"无内容可存"，由调用方显式失败/提示，
+    // **不**静默改写成另一份产物（静默回落 = 存下一份形状不同的文件，比报错更难发现）。
+    return { plain: null, source: 'kernel', reason: view.reason }
   }
 
   /**

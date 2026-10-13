@@ -1250,21 +1250,25 @@ describe('P10f D2 · ⑪ `plainForSave` 的 `source` 分流（唯一分流点 + 
     }
   })
 
-  it('**无会话 ⇒ `source: "legacy"`**（回落可观测，且产物仍可用 = 能力不回退）', async () => {
+  it('**无会话 ⇒ 不再回落**：`plain: null` + `reason: "no-session"`（R1-β① C5 断言翻转）', async () => {
     const { session, legacy } = await loaded('envelope')
     try {
       const host = makeKernelReadHost(legacy as unknown as RuntimeDocument)
       const r = host.ctx.plainForSave()
-      expect(r.source, '无内核会话时回落必须是**可观测**的（不是静默）').toBe('legacy')
-      expect(r.plain, '回落时旧文档照常能存（#171 能力不回退）').not.toBeNull()
-      expect(canon(r.plain)).toBe(canon(legacy.serialize() as Plain))
+      // 负对照（区分力所在）：旧文档这一刻**确实**有内容 —— 故下面的 `null`
+      // 不是"本来就没东西可存"，而是"不再拿另一条权威顶上"。
+      const legacyPlain = legacy.serialize() as Plain
+      expect(Object.keys(legacyPlain).length, '负对照前提：旧文档有内容').toBeGreaterThan(0)
+      expect(r.source, '保存权威唯一（`source: "legacy"` 分支已于 C5 删除）').toBe('kernel')
+      expect(r.plain, '无会话 ⇒ 无内容可存（**不**静默改写成另一份产物）').toBeNull()
+      expect(r.reason, '成因必须**可判定**，不是一句空话').toBe('no-session')
       host.dispose()
     } finally {
       session.dispose()
     }
   })
 
-  it('**有会话但未装配 ⇒ `source: "legacy"`**（GF-16：内核不是权威）', async () => {
+  it('**有会话但未装配 ⇒ `plain: null` + `reason: "not-adopted"`**（GF-16；断言翻转）', async () => {
     // 真 `Context` 实例（只注入读面所需的两件），跑的是**生产** `plainForSave`。
     const { doc } = await legacyDocForTest()
     const fresh = new KernelSession({ documentId: KERNEL_DOCUMENT_ID, contextId: KERNEL_CONTEXT_ID, capabilities: [] })
@@ -1274,8 +1278,11 @@ describe('P10f D2 · ⑪ `plainForSave` 的 `source` 分流（唯一分流点 + 
     try {
       expect(fresh.hasAdoptedContent(), '前提：未装配').toBe(false)
       const r = ctx.plainForSave()
-      expect(r.source, '未装配时内核不是权威 ⇒ 必须回落且**可观测**').toBe('legacy')
-      expect(canon(r.plain)).toBe(canon(doc.serialize() as Plain))
+      expect(r.source).toBe('kernel')
+      expect(r.plain, '未装配 ⇒ 无内容可存（原实现在此回落旧文档产物）').toBeNull()
+      expect(r.reason).toBe('not-adopted')
+      // 负对照（区分力）：旧文档在这一刻**确实**能产出产物 ⇒ 上面那条 `null` 有区分力。
+      expect(Object.keys(doc.serialize() as Plain).length, '负对照前提：旧文档有内容').toBeGreaterThan(0)
     } finally {
       fresh.dispose()
     }
@@ -1284,9 +1291,36 @@ describe('P10f D2 · ⑪ `plainForSave` 的 `source` 分流（唯一分流点 + 
   it('**无会话且无旧文档 ⇒ `plain: null`**（不伪造空产物）', () => {
     const host = makeKernelReadHost(null)
     const r = host.ctx.plainForSave()
-    expect(r.source).toBe('legacy')
-    expect(r.plain, '两条路都拿不到 ⇒ `null`（而不是一份"看起来能用"的空产物）').toBeNull()
+    expect(r.source).toBe('kernel')
+    expect(r.reason).toBe('no-session')
+    expect(r.plain, '无内容可存 ⇒ `null`（而不是一份"看起来能用"的空产物）').toBeNull()
     host.dispose()
+  })
+
+  /**
+   * **负对照：旁路若被恢复，本组判红**（R1-β① C5）。
+   *
+   * 上面三条证明的是"新形态成立"；本条证明的是"**留了旁路能被抓住**"——
+   * 一个只证明"新路径能用"的判据无法区分"删干净了"与"悄悄回落到旧载体"。
+   *
+   * 口径：`Context#plainForSave` 的实现区里**不得**再出现旧权威的两件标志物
+   * （`main.doc.value` 取值 + `'legacy'` 来源字面量）。实测过该判据的区分力：
+   * 把回落分支加回去 ⇒ 两条 `not.toContain` 立刻判红。
+   *
+   * ⚠️ CRLF：本仓 `core.autocrlf=true`，源码文本判据先归一化（AGENTS.md 铁律 6）。
+   */
+  it('**负对照**：`plainForSave` 的实现区不得再含旧权威取值与 `legacy` 来源', () => {
+    const src = fs
+      .readFileSync(path.join(process.cwd(), 'src', 'runtime', 'context.ts'), 'utf8')
+      .replace(/\r\n/g, '\n')
+    const start = src.indexOf('plainForSave():')
+    expect(start, '`plainForSave` 必须在案').toBeGreaterThan(-1)
+    const end = src.indexOf('\n  private kernelAdoptedFrames', start)
+    expect(end, '必须能切出本方法的实现区（否则判据会扫全局而失去区分力）').toBeGreaterThan(start)
+    const body = src.slice(start, end)
+    expect(body, '不得再取旧载体（回落分支的取值点）').not.toContain('this.main.doc.value')
+    expect(body, '不得再以 legacy 为来源').not.toContain("source: 'legacy'")
+    expect(body, '必须给出可判定的成因').toContain('reason: view.reason')
   })
 
   it('**`kernelSaveView` 与 `plainForSave` 同源**（前者是后者的判定入口，不是第二份实现）', async () => {

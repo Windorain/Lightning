@@ -551,29 +551,29 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     newTrack:
       '`adapters/files/fidelityRecord.ts` 的保真记录：`captureFidelity` 采集未知顶层字段（带源格式/源版本；`_extra` 显式排除）、`serializeFidelity`/`parseFidelity` 往返（读到 `_extra` 显式拒绝）、`fidelityStorageKey` 旁置键、`judgeFidelityAfterEdit` 的三态裁定（`valid`/`stale`/`dropped`）。产物侧既定挂点是 `composition/kernelProjection.ts` 的 `KernelProjectionInput.fidelityFields` → `projectKernelDocument`（写回 plain 根与 `meta.` 子树）。',
     oldTrack:
-      '(a) **已接线（D1）**：源文件未知顶层字段原先只被计数、从未构造记录 ⇒ 现由 `composition/documentLoad` 经 `adapters/fidelityCapture`（深度 2）采集并交给内核会话承载。\n(b) **已统一（D1）**：保真键原先是一个**游离**方案（`lk.fidelity.v1.<文档ID>.record`，与 recovery/save 家族八处不兼容：缺 scope/instance 段、无解析器、裸 `string`、版本硬编码、空 id 静默降级、不被分类器识别）⇒ 现并入同族（`fidelityStoreKey`/`parseFidelityStoreKey`/`artifactKindOfKey`）。旧键零生产调用方 ⇒ 无迁移负担。\n(c) **已接线（D2），但本条不核销** —— "接线"与"缺口闭合"是两件事：`composition/saveProjection.ts` 已在产物侧传入 `fidelityFields`（12 处产字节节点全改吃 `ctx.plainForSave()`），且 D2 的产物等价判据（`composition/__tests__/p10fSaveProjection.test.ts` 的 ①③④⑤⑥ 组）已把"键面 + 语义面 + 逐格说明 + 材质表"两侧比对转绿；**但**保存路径的旧权威**回落分支仍在**（`Context.plainForSave` 的 `source: "legacy"`），即"`RuntimeDocument` 退出生产"这条总目标未达成 ⇒ 登记保留，退出条件收窄（见下）。',
+      '(a) **已接线（D1）**：源文件未知顶层字段原先只被计数、从未构造记录 ⇒ 现由 `composition/documentLoad` 经 `adapters/fidelityCapture`（深度 2）采集并交给内核会话承载。\n(b) **已统一（D1）**：保真键原先是一个**游离**方案（`lk.fidelity.v1.<文档ID>.record`，与 recovery/save 家族八处不兼容：缺 scope/instance 段、无解析器、裸 `string`、版本硬编码、空 id 静默降级、不被分类器识别）⇒ 现并入同族（`fidelityStoreKey`/`parseFidelityStoreKey`/`artifactKindOfKey`）。旧键零生产调用方 ⇒ 无迁移负担。\n(c) **已接线（D2）+ 回落分支已删（R1-β① C5，2026-10-13）**：`composition/saveProjection.ts` 已在产物侧传入 `fidelityFields`（12 处产字节节点全改吃 `ctx.plainForSave()`），且 D2 的产物等价判据（`composition/__tests__/p10fSaveProjection.test.ts` 的 ①③④⑤⑥ 组）已把"键面 + 语义面 + 逐格说明 + 材质表"两侧比对转绿。**C5 删除了 `Context.plainForSave` 的 `source: "legacy"` 回落分支**（旧实现：无会话 / 未装配 / 投影面不可解释时回落 `main.doc.serialize()`）⇒ 保存权威**唯一**（与 `composition/projectIo#projectForSave` 逐字同口径；`plain === null` 时给出结构化 `reason`）。本条剩余未闭子句只剩"e2e 真实产物等价判据纳入套件"。',
     blocker:
-      '(c) 剩余两件（**不是**"接线"）：① 保存路径的**回落分支**（`Context.plainForSave` 未装配 ⇒ legacy `serialize()`）'
-      + ' —— **#301 P10f D3 评估结论：本批不核销该子句**（见下）；'
-      + '② 产物等价判据从"四份夹具"扩到"e2e 真实产物"（真实产物 spec 仍显式排除）。\n'
+      '(c) 剩余两件（**不是**"接线"）：① 保存路径的**回落分支** —— **R1-β① C5 已删除**（`Context.plainForSave` 恒 `source: "kernel"`，未装配时 `plain: null` + 结构化 `reason`）；'
+      + '② 产物等价判据从"四份夹具"扩到"e2e 真实产物"（真实产物 spec 仍显式排除）⇒ **本条剩余未闭子句只剩 ②**。\n'
       + '⚠️ **D3 对子句①的评估（Lead 任务书第 4 项要求"若未接则保留该子句登记"）**：\n'
       + '  - **保存等价已验**（D2：`p10fSaveProjection.test.ts` 52 tests，四份真实夹具'
       + ' 逐键/语义面/逐格说明/材质 sha256 全绿）⇒ 子句①的**前半**（"等价"）已闭；\n'
-      + '  - **但回落分支本身仍在**：`Context#plainForSave` 的 `source: "legacy"` 分支'
-      + ' 在三种情形下必然生效（无会话 / 未装配 GF-16 / 投影面不可解释）——'
-      + ' 这三种情形**不是缺陷**，而是 #171「能力不回退」的落点（内核支持不了的文档形态，'
-      + ' 旧路径照常能存）。`getDoc()` 的终删**不改变**这一点：产字节的**权威**已转到内核投影，'
-      + ' 而"未装配时回落"是**设计**。\n'
+      + '  - **当时回落分支仍在**（D3 结论），三种情形下必然生效（无会话 / 未装配 GF-16 / 投影面不可解释）；'
+      + ' D3 当时按 #171「能力不回退」把它当**设计**保留。**C5 按 #385 评论 7140 的消费者重写授权删除它** ——'
+      + ' 口径翻转的依据是 #387 的同批退役项（保存权威不得双轨）与 `composition/projectIo#projectForSave` 的既有先例'
+      + '（那里自陈"用旧文档填它需要先造一份内核 `Document`，那正是第二个权威的入口"）；'
+      + ' 删除**不丢能力**：未装配时 `plain === null` + `reason`（`no-session`/`not-adopted`/`unreadable`）**可判定**，'
+      + ' 调用方据此显式失败/提示（**不是**静默产出一份空产物）。\n'
       + '  - **另半边（L4 保真记录的持久化）仍未接**：`RecoveryStorePort`'
       + '（`adapters/storage/memory`/`browser`）**零生产实例化**（D 映射表 §3.2 实测；'
-      + ' D3 复核仍成立 —— 全树 `createMemoryStoragePort|browserStoragePort` 只出现在 `__tests__`）。'
-      + ' ⇒ **该子句保留登记**（本批不核销，如实回报 Lead）。\n⚠️ **三处更正**（前序批次写下、后续实测推翻）：① 原写"产物侧唯一挂点 `projectKernelDocument` 生产零调用方"—— **不成立**（`kernelRenderView.ts:135` 已在生产调用它）；真正的缺口更窄：`fidelityFields` 无生产传值方。② 原写 (b) "需先统一键口径，不是接线"—— **D1 已统一**。③ 原写 (c) "D2 接线后删除本条登记"—— **改判**：接线完成 ≠ 缺口闭合（回落分支仍在）⇒ 登记**保留**、只更新文案与退出条件；核销会让"保存路径尚未终切"失去登记。',
+      + ' D3 复核仍成立 —— 全树 `createMemoryStoragePort|browserStoragePort` 只出现在 `__tests__`）。\n'
+      + '⚠️ **三处更正**（前序批次写下、后续实测推翻）：① 原写"产物侧唯一挂点 `projectKernelDocument` 生产零调用方"—— **不成立**（`kernelRenderView.ts:135` 已在生产调用它）；真正的缺口更窄：`fidelityFields` 无生产传值方。② 原写 (b) "需先统一键口径，不是接线"—— **D1 已统一**。③ 原写 (c) "D2 接线后删除本条登记"—— **改判**：接线完成 ≠ 缺口闭合（回落分支当时仍在）⇒ 登记保留、只更新文案与退出条件；**C5 已闭掉"回落分支"这一子句**，剩余只有 e2e 真实产物等价 ⇒ 该子句闭后核销本条。',
     closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
     exitCondition:
-      "**（甲）登记条件 —— ✅ 已成立（D1 两段）**：装配路径经 `adapters/fidelityCapture` 采集并由内核会话承载（`KernelSession.setFidelityFieldMap`）；保真键已并入 recovery/save 家族（`fidelityStoreKey` 带 scope+instance 段、返回 `Result`、有解析器、被 `artifactKindOfKey` 识别）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：保存路径的旧权威回落分支仍在（`Context.plainForSave` 的 `source: 'legacy'`）。\n闭包内 ⇒ 闭包判据有效（但本条的退出是\"回落分支消失\"，不是\"闭包干净\"）。\n**以下为原退出条件（逐字保留）**：\n"
+      "**（甲）登记条件 —— ✅ 已成立（D1 两段）**：装配路径经 `adapters/fidelityCapture` 采集并由内核会话承载（`KernelSession.setFidelityFieldMap`）；保真键已并入 recovery/save 家族（`fidelityStoreKey` 带 scope+instance 段、返回 `Result`、有解析器、被 `artifactKindOfKey` 识别）。\n**（乙）消费者迁移数 = 0 —— ✅ 已成立（R1-β① C5，2026-10-13）**：保存路径的旧权威回落分支已删除（`Context.plainForSave` 恒 `source: 'kernel'`，`plain === null` 时 `reason` 可判定；旧实现三种情形回落 `main.doc.serialize()`）。\n闭包内 ⇒ 闭包判据有效（本条的退出仍是\"回落分支消失\"这一子句，现已成立；剩余未闭子句见 `blocker` 的 ②）。\n**以下为原退出条件（逐字保留）**：\n"
       +
-      '**三段全部成立**才算闭合：\n(a) ✅ **D1 已达成** —— `src/composition/documentLoad.ts` 的装配路径经 `adapters/fidelityCapture` 调 `captureFidelity` 构造记录，且由内核会话承载（`KernelSession.setFidelityFieldMap`/`fidelityFieldMapOf`，卸载即清空）；\n(b) ✅ **D1 已达成** —— 保真键并入 recovery/save 家族（`src/application/recovery.ts` 的 `fidelityStoreKey` 带 scope+instance 段、返回 `Result`、有 `parseFidelityStoreKey`、被 `artifactKindOfKey` 识别、版本为具名常量 `FIDELITY_SCHEMA_VERSION`）；\n(c) ⏳ **D2 已接线、等价已把守、终切未完** —— 生产传值方 = `src/composition/saveProjection.ts`（✅ D2），产物等价判据在四份真实夹具上逐键/语义面转绿（✅ D2）；**但**旧权威回落分支仍在 ⇒ 闭合判据改为"保存路径无 legacy 回落分支（`Context.plainForSave` 恒 `source: "kernel"`）**且** e2e 真实产物等价判据纳入套件"。',
+      '**三段全部成立**才算闭合：\n(a) ✅ **D1 已达成** —— `src/composition/documentLoad.ts` 的装配路径经 `adapters/fidelityCapture` 调 `captureFidelity` 构造记录，且由内核会话承载（`KernelSession.setFidelityFieldMap`/`fidelityFieldMapOf`，卸载即清空）；\n(b) ✅ **D1 已达成** —— 保真键并入 recovery/save 家族（`src/application/recovery.ts` 的 `fidelityStoreKey` 带 scope+instance 段、返回 `Result`、有 `parseFidelityStoreKey`、被 `artifactKindOfKey` 识别、版本为具名常量 `FIDELITY_SCHEMA_VERSION`）；\n(c) ✅ **C5 已闭"无 legacy 回落分支"** —— `Context.plainForSave` 恒 `source: "kernel"`（未装配 ⇒ `plain: null` + 结构化 `reason`），生产传值方 = `src/composition/saveProjection.ts`；**剩余未闭**：e2e 真实产物等价判据纳入套件（真实产物 spec 仍按门控显式排除）⇒ 该子句闭后核销本条。',
   }),
   /**
    * ⚠️ **本条第 (a) 半已核销（#301 P10f D3）** —— `side-table-write-legacy-track`

@@ -69,11 +69,16 @@ export interface ProjectHost {
  *
  * ## 为什么**不**回落 legacy
  *
- * `plainForSave()` 有 legacy 回落（未装配时旧文档照常能存）—— 那是它**应该**有的
- * （#171 能力不回退）。工程格式**不同**：它编码的是内核文档形状
- * （`ProjectPayload{scene, animation, content, assets, editData}`），
+ * 工程格式编码的是内核文档形状（`ProjectPayload{scene, animation, content, assets, editData}`），
  * 用旧文档填它需要先造一份内核 `Document`，那正是"第二个权威"的入口。
  * ⇒ 未装配时**显式失败**，由调用方报用户可见的错误。
+ *
+ * ⚠️ **R1-β① C5 更新**：这条口径现已推广到 `Context#plainForSave` —— 它原先的
+ * `source: 'legacy'` 回落分支（未装配 ⇒ 旧文档 `serialize()`）**已删除**，两者
+ * 现在**逐字同口径**（未装配 ⇒ 无内容可存 + 可判定的成因）。原注释里"`plainForSave()`
+ * 有 legacy 回落 —— 那是它**应该**有的（#171 能力不回退）"**已过期**：按 #385 评论 7140
+ * 的消费者重写授权与 #387 的同批退役项（`RuntimeDocument` 不得作**保存**权威），
+ * 默认取向从"保留旧路径"改为"改写消费者并删除该面"。
  *
  * @returns `err(UnsupportedOperation)` = 无会话 / 未装配 / 无文档 / 读面拒绝。
  */
