@@ -45,10 +45,11 @@ describe('A18 gpu-batching：均质夹具的绘制数结构门槛（≤32）', (
     expect(primitives).toHaveLength(A18_FIXTURE_SIZE)
     expect(new Set(plans.map((p) => p.compatibilityKey)).size).toBe(1)
     expect(plans.length).toBeLessThanOrEqual(A18_DRAW_CALL_BUDGET)
-    // 成员无遗漏（合并/分片不得丢对象 —— 丢对象就是假绿）
-    const members = plans.flatMap((p) => p.objectIds)
+    // 成员无遗漏（合并/分片不得丢**图元** —— 丢图元就是假绿）
+    const members = plans.flatMap((p) => p.members)
     expect(members).toHaveLength(A18_FIXTURE_SIZE)
-    expect(new Set(members).size).toBe(A18_FIXTURE_SIZE)
+    expect(new Set(members.map((m) => m.primitiveKey)).size).toBe(A18_FIXTURE_SIZE)
+    expect(new Set(members.map((m) => m.objectId)).size).toBe(A18_FIXTURE_SIZE)
 
     console.log(
       `[A18·结构] 夹具 ${A18_FIXTURE_SIZE} 对象 同几何/同材质/不透明 ⇒ 批次数 ${plans.length}` +

@@ -23,8 +23,8 @@
  */
 
 import type { AssetId } from './assetIdentity'
-import type { BatchPlan, BatchBudget } from './batchPlan'
-import { planBatches, DEFAULT_BATCH_BUDGET } from './batchPlan'
+import type { BatchPlan, BatchBudget, PrimitiveKey } from './batchPlan'
+import { planBatches, DEFAULT_BATCH_BUDGET, primitiveKeyOf } from './batchPlan'
 import type {
   EvaluatedPrimitive,
   EvaluationKey,
@@ -147,7 +147,10 @@ export function compileScene(
 
   const skipped: { objectId: string; reason: SkipReason }[] = []
   const renderable: EvaluatedPrimitive[] = []
-  const byObject = new Map<string, EvaluatedPrimitive>()
+  // 按**图元**（不是对象）索引：#249 §3.3「对象身份与 GPU 批次身份分离」。
+  // 一个内核对象可以展开成多个图元（逐 `materialIndex` 分组），以 `objectId` 为键会让
+  // 第二个图元覆盖第一个的槽位 —— 那正是贴图整链失效 + 拾取解不出的机械原因。
+  const byPrimitive = new Map<PrimitiveKey, EvaluatedPrimitive>()
 
   for (const p of inputs.primitives) {
     if (p.transform.length !== 16) {
@@ -179,23 +182,24 @@ export function compileScene(
       continue
     }
     renderable.push(p)
-    byObject.set(p.objectId, p)
+    byPrimitive.set(primitiveKeyOf(p), p)
   }
 
   const plans = planBatches(renderable, budget)
 
-  // ── 批次划分：objectId → (batchIndex, instanceSlot) ──
-  const slotOf = new Map<string, { batchIndex: number; instanceSlot: number }>()
+  // ── 批次划分：**图元** → (batchIndex, instanceSlot)（不是 objectId）──
+  const slotOf = new Map<PrimitiveKey, { batchIndex: number; instanceSlot: number }>()
   plans.forEach((plan, batchIndex) => {
-    plan.objectIds.forEach((objectId, instanceSlot) => {
-      slotOf.set(objectId, { batchIndex, instanceSlot })
+    plan.members.forEach((member, instanceSlot) => {
+      slotOf.set(member.primitiveKey, { batchIndex, instanceSlot })
     })
   })
 
   // ── provenance：稳定排序（先批次、再槽位）⇒ 编译可复现 ──
+  // 每条记录仍携带**对象身份**（`objectId`）—— 批次身份换了，对象身份没换。
   const provenance: GeometryProvenance[] = []
   for (const p of renderable) {
-    const slot = slotOf.get(p.objectId)!
+    const slot = slotOf.get(primitiveKeyOf(p))!
     provenance.push({
       objectId: p.objectId,
       elementId: p.elementId,
@@ -212,8 +216,9 @@ export function compileScene(
   // ── payloads：纯数据投影 ──
   const payloads: BatchPayload[] = []
   plans.forEach((plan, batchIndex) => {
-    const attrsEntries: (GeometryAttributes | undefined)[] = plan.objectIds.map((id) =>
-      inputs.geometry.attributesOf(byObject.get(id)!.geometry.id),
+    const members = plan.members
+    const attrsEntries: (GeometryAttributes | undefined)[] = members.map((m) =>
+      inputs.geometry.attributesOf(byPrimitive.get(m.primitiveKey)!.geometry.id),
     )
     const first = attrsEntries[0]
     // 同质批次才允许"一份几何 + N 个变换"；且必须是**同一个属性对象**
@@ -221,10 +226,10 @@ export function compileScene(
     const allSameGeometry =
       plan.homogeneous && first !== undefined && attrsEntries.every((a) => a === first)
 
-    const instances: BatchInstance[] = plan.objectIds.map((objectId, instanceSlot) => {
-      const p = byObject.get(objectId)!
+    const instances: BatchInstance[] = members.map((m, instanceSlot) => {
+      const p = byPrimitive.get(m.primitiveKey)!
       return {
-        objectId,
+        objectId: m.objectId,
         elementId: p.elementId,
         instanceSlot,
         transform: p.transform,
@@ -276,7 +281,7 @@ export function generationOf(key: EvaluationKey, plans: readonly BatchPlan[]): C
       .sort()
       .map((id) => `${id}=${key.contentResourceVersions[id]}`)
       .join(','),
-    ...plans.map((p) => `${p.compatibilityKey}:[${p.objectIds.join(',')}]`),
+    ...plans.map((p) => `${p.compatibilityKey}:[${p.members.map((m) => m.primitiveKey).join(',')}]`),
   ]
   let hash = 0x811c9dc5
   const s = parts.join('\u0001')

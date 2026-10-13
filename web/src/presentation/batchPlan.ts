@@ -7,11 +7,12 @@
  * #249 §11 明文：「批次索引仅在其 generation 内有效，拾取必须映射回对象/元素和求值版本。
  * 重新分组、压缩或移出批次不能更改对象 ID，选择和动画轨道不得引用批次位置」。
  *
- * 本模块因此**只**产出"哪些对象落在哪个批次"这一层关系，并把每个批次的成员记录为
- * **对象身份的数组**（`objectIds`）；批次自身的序号是编译产物的一部分，只对**这一次**
- * 编译有效。A18 的负对照「把 batch index 当对象 ID」在实现上表现为：拾取拿到的是
- * `batchIndex` 而不是 `objectId` —— 见 `presentation/pickingIndex.ts`，它**只**接受
- * 携带 generation 的批次引用，并把结果解回 `objectId`。
+ * 本模块因此**只**产出"哪些**图元**落在哪个批次"这一层关系，并把每个批次的成员记录为
+ * **图元身份的数组**（`members`，每个成员带自己的 `primitiveKey` 与所属 `objectId`）；
+ * 批次自身的序号是编译产物的一部分，只对**这一次**编译有效。A18 的负对照「把 batch index
+ * 当对象 ID」在实现上表现为：拾取拿到的是 `batchIndex` 而不是 `objectId` —— 见
+ * `presentation/pickingIndex.ts`，它**只**接受携带 generation 的批次引用，并把结果解回
+ * `objectId`。
  *
  * ## 兼容性键（为什么是这六项）
  *
@@ -33,6 +34,43 @@
 
 import type { EvaluatedPrimitive, GeometryId, MaterialDescriptor } from './evaluationKey'
 
+/**
+ * **图元身份** —— 批次成员的**单位**（#249 §3.3「对象身份与 GPU 批次身份分离」）。
+ *
+ * ## 为什么批次成员的单位不是 `objectId`
+ *
+ * 一个内核对象在呈现侧可以展开成**多个图元**：同一座 `blockGrid` 结构的四边形按
+ * `materialIndex` 分组后，每一组是一份**独立**的几何 + 材质（`render/mesh/blockMesh.ts:87`
+ * 的 `materialId: String(w.materialIndex)` 就是 legacy 的同一分组）。它们**共享**同一个
+ * 内核对象身份（"这一座结构"），却必须是**不同的**批次成员。
+ *
+ * 以 `objectId` 作成员键会让第二个图元覆盖第一个的槽位 —— 表现是 `provenance` 把两组
+ * 记进同一批次而 `payloads` 是两个批次 ⇒ **拾取解不出**，且材质只剩一份（贴图整链失效）。
+ *
+ * ## 为什么是**派生**键而不是新增必填字段
+ *
+ * 它是图元**内容**的函数（对象 × 元素 × 材质 × 几何），不引入新的生产者义务，也不给旧形状
+ * 留后门。派生规则只有本函数一处 —— 两处各写一遍必然漂移，而漂移的表现是"槽位对不上"，静默。
+ */
+export type PrimitiveKey = string
+
+/** 图元的稳定内容键（**唯一一处**派生规则）。 */
+export function primitiveKeyOf(p: EvaluatedPrimitive): PrimitiveKey {
+  return [
+    p.objectId,
+    p.elementId ?? '-',
+    `${p.material.id}@${p.material.version}`,
+    `${p.geometry.id}@${p.geometry.version}`,
+  ].join('\u0000')
+}
+
+/** 批次成员：一个**图元**（对象身份 + 该对象内部的材质/元素分组）。 */
+export interface BatchMember {
+  readonly primitiveKey: PrimitiveKey
+  /** 该图元所属的**对象**身份（拾取解出的就是它；跨重新分批稳定）。 */
+  readonly objectId: string
+}
+
 /** 一个绘制批次（纯数据；不含 three 类型）。 */
 export interface BatchPlan {
   /** 兼容性键（人类可读，用于诊断"为什么这两个对象没合批"）。 */
@@ -42,8 +80,13 @@ export interface BatchPlan {
   readonly deform: 'shared' | 'independent'
   /** 透明顺序分组键（`null` = 不透明组）。 */
   readonly transparency: number | null
-  /** 该批次成员的对象身份 —— **顺序稳定**（按 objectId 升序 ⇒ 编译可复现）。 */
-  readonly objectIds: readonly string[]
+  /**
+   * 该批次的**图元**成员 —— **顺序稳定**（按 `primitiveKey` 升序 ⇒ 编译可复现）。
+   *
+   * 同一 `objectId` 可以出现多次：一个内核对象的多个材质图元各自是一个成员
+   * （这正是"对象身份与批次身份分离"）。
+   */
+  readonly members: readonly BatchMember[]
   /**
    * 是否需要 GPU 实例化路径：
    *  - `true`：同几何 + 同变形方式 + 成员数 > 1 + **同质** ⇒ 可用 `InstancedMesh`/`BatchedMesh`；
@@ -108,7 +151,7 @@ export function compatibilityKeyOf(p: EvaluatedPrimitive): string {
 /**
  * 划分批次。
  *
- * **确定性**（可复现证据的前提）：输出批次按其兼容性键排序，成员按 `objectId` 排序。
+ * **确定性**（可复现证据的前提）：输出批次按其兼容性键排序，成员按 `primitiveKey` 排序。
  * 同一输入两次调用得到**逐字节相同**的计划 —— 这是 A18/G2 的"身份稳定"与证据可对账的
  * 基础（#249 §14「运行后提供期望/实际、源码 SHA、夹具哈希」）。
  */
@@ -134,7 +177,8 @@ export function planBatches(
   for (const key of sortedKeys) {
     const members = groups.get(key)!
     const first = members[0]!
-    members.sort((a, b) => a.objectId.localeCompare(b.objectId))
+    // 成员序按**图元**键（不是 objectId）：同一对象的多个图元必须各有稳定槽位。
+    members.sort((a, b) => primitiveKeyOf(a).localeCompare(primitiveKeyOf(b)))
 
     const instanceable = first.deform === 'shared' && members.length > 1
 
@@ -150,7 +194,7 @@ export function planBatches(
         geometry: first.geometry,
         deform: first.deform,
         transparency: first.transparency,
-        objectIds: part.map((p) => p.objectId),
+        members: part.map((p) => ({ primitiveKey: primitiveKeyOf(p), objectId: p.objectId })),
         instanceable,
         bounds: unionBounds(part),
         homogeneous: true,
@@ -186,7 +230,9 @@ function enforceBatchBudget(plans: readonly BatchPlan[], maxBatches: number): re
       geometry: a.geometry,
       deform: a.deform,
       transparency: a.transparency,
-      objectIds: [...a.objectIds, ...b.objectIds].sort((x, y) => x.localeCompare(y)),
+      members: [...a.members, ...b.members].sort((x, y) =>
+        x.primitiveKey.localeCompare(y.primitiveKey),
+      ),
       instanceable: false,
       bounds: unionBoundsOfBounds(a.bounds, b.bounds),
       homogeneous: false,
