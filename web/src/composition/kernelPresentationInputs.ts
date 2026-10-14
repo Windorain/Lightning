@@ -261,3 +261,76 @@ export function kernelPresentationInputs(input: {
     skipped: Object.freeze(skipped),
   }
 }
+
+/**
+ * **DRW 定义面（直出承载体，G4 · S2 第一半）**：某一帧的网格定义 + 它的来源对象 id。
+ *
+ * ## 本模块替代的旧机制
+ *
+ * | 旧机制 | 位置 | 本承载体的替代 |
+ * |---|---|---|
+ * | 当帧定义只能由**旧格式文档**解析出来 | `runtime/drwMeshPipeline.ts:304-320`：`doc.serialize()` → `isWorldDocument && frames.length>0` → `resolveRenderBundle` | 定义来自**内核载荷**（`blockGrid`）本身，同一份重建口径 |
+ * | 单结构文档在该处**永不解析出定义** | 同上（`frames.length>0` 是硬前提） | 帧下标 → 对象 id 由**装配面**显式给出，单结构/多方块/多帧同一路径 |
+ *
+ * ## 为什么它必须是**内核侧**的读取函数（而不是再包一层旧格式）
+ *
+ * `resolveRenderBundle` 的输入是 `RuntimeDocument.serialize()` —— 那是**有损**中间层
+ * （见 `composition/kernelRenderView` 与 `adapters/plainRoot` 的实测）。渲染链终切的
+ * 要点正是：定义面不得再经旧格式往返，否则"切源"只是换了调用形态。
+ * 这里复用 `definitionOfPayload`（与 `kernelPresentationInputs` 同一重建：`projectGridCells`），
+ * 故它与呈现编译吃的是**同一份**定义。
+ *
+ * ## 不静默：取不到时给出**可判别的** `reason`
+ *
+ * | 情况 | `reason` |
+ * |---|---|
+ * | 帧下标越界（含"没有供源"：`frameObjects` 为空） | `frame-out-of-range` |
+ * | 帧对象 id 在场景里不存在 | `object-missing` |
+ * | 对象数据不存在 | `data-missing` |
+ * | 载荷不是 `blockGrid` | `not-blockGrid:<kind>` |
+ * | 无类型化几何资产 | `no-typed-geometry` |
+ * | 逐格为空 | `empty-cells` |
+ *
+ * ⚠️ **仍未覆盖（S2 第二半的显式欠账，不得静默当已做）**：
+ *  - `tooltipPalette`（旧链路 `resolveRenderBundle.tooltipPalette` 一并返回）本函数**不产出**；
+ *  - 材质混合模式推断（旧落点 `render/data/sceneDocumentMaterialHydrate.ts:88`）；
+ *  - 图标缓存**身份键**（旧落点 `runtime/drwMeshPipeline.ts:263-270` 绑旧 `StructureDefinition`）。
+ */
+export interface KernelDefinitionFace {
+  /** 定义来源的**内核对象 id**（帧下标 → 对象 id 由装配面 `frameObjects` 给出）。 */
+  readonly objectId: string
+  /** 内核载荷重建出的网格定义（**不是**旧格式 `StructureDefinition` 的副本或投影）。 */
+  readonly definition: GridDefinition
+}
+
+/**
+ * 帧下标 → 内核定义面（纯读取：显式输入、不改输入、不依赖 Vue/Three/DOM/IO）。
+ *
+ * @param input.frameObjects 帧下标 → 内核对象 id（装配面 `KernelAssemblyFace#frameObjects`）。
+ *   空数组即"**没有供源**"——那不是"没有定义"，故如实给出 `frame-out-of-range`。
+ */
+export function kernelDefinitionFaceOf(input: {
+  readonly scene: Scene
+  readonly content: DocumentContent
+  readonly frameObjects: readonly string[]
+  readonly frameIndex: number
+}): { readonly face: KernelDefinitionFace | null; readonly reason: string | null } {
+  const objectId = input.frameObjects[input.frameIndex]
+  if (objectId === undefined) return { face: null, reason: 'frame-out-of-range' }
+  const obj = input.scene.objects[objectId]
+  if (obj === undefined) return { face: null, reason: 'object-missing' }
+  const data = input.scene.data[obj.dataId]
+  if (data === undefined) return { face: null, reason: 'data-missing' }
+  if (data.payload.kind !== 'blockGrid') {
+    return { face: null, reason: `not-blockGrid:${data.payload.kind}` }
+  }
+  const payload = data.payload
+  if (payload.geometry === undefined || payload.cellGeometry === undefined) {
+    return { face: null, reason: 'no-typed-geometry' }
+  }
+  if (Object.keys(payload.cells).length === 0) return { face: null, reason: 'empty-cells' }
+  return {
+    face: Object.freeze({ objectId, definition: definitionOfPayload(payload, materialPaletteOf(input.content)) }),
+    reason: null,
+  }
+}
