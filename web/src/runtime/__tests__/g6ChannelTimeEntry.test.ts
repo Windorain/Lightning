@@ -33,6 +33,8 @@ import { createParserRegistry } from '@/context/parserRegistry'
 import { V2PlainParser, WorldParser, StructureDataParser, createEnvelopeParser } from '@/context/parsers/builtinParsers'
 import { fixturePath, readJson } from '@/context/__tests__/multiblockFixtureIo.mjs'
 import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
+import { documentContent, type FrameAxis } from '@/domain/content'
+import { EMPTY_MULTIBLOCK_DECLARATION, type MultiblockDeclaration, type MultiblockSizeStep } from '@/domain/multiblockDocument'
 import { resolveEffectiveValue, type EffectiveValueLayer } from '@/domain/animation'
 import { KernelSession } from '@/runtime/kernelSession'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
@@ -63,8 +65,8 @@ interface Loaded {
   readonly doc: RuntimeDocument
   /** 装配面（生产唯一载体）；本判据用它当**期望来源**。 */
   readonly decl: DeclReadFace
-  /** 账：`DocumentContent.multiblock.channels.length`（生产当前为 0，见"账 b3"）。 */
-  readonly contentMultiblockChannels: number
+  /** 装配产物的帧轴（判据构造"内容声明在场"的第二份载荷时用同一根轴，不另造时钟）。 */
+  readonly frameAxis: FrameAxis
 }
 
 /**
@@ -107,8 +109,52 @@ async function loadProduction(name: string): Promise<Loaded> {
       frames: mb.frames,
       sizeChannel: mb.declaration.backbone.sizeChannel === '' ? null : mb.declaration.backbone.sizeChannel,
     },
-    contentMultiblockChannels: assembled.value.content.multiblock.channels.length,
+    frameAxis: assembled.value.content.frameAxis,
   }
+}
+
+/**
+ * 造一份**只含一个尺寸型通道**的声明（内容侧载体），用来制造"两载体同时在场且可区分"。
+ *
+ * 判据的输入仍是真夹具（帧数取自生产帧轴），这里只替换**声明算术**：`min` 平移、
+ * `stepIndex` 全置 0 —— 于是"用了哪一侧"能被逐点识别（见 b3/b3 负对照的断言）。
+ */
+function craftedDeclaration(input: {
+  readonly id: string
+  readonly key: string
+  readonly name: string
+  readonly min: number
+  readonly max: number
+  readonly frameCount: number
+}): MultiblockDeclaration {
+  const sizeSteps: MultiblockSizeStep[] = Array.from(
+    { length: input.max - input.min + 1 },
+    (_, i): MultiblockSizeStep => ({ channel: input.key, w: 1, hh: i + 1, d: 1, roles: {}, cellGrid: [] }),
+  )
+  return Object.freeze({
+    ...EMPTY_MULTIBLOCK_DECLARATION,
+    id: input.id,
+    displayName: input.id,
+    channels: Object.freeze([
+      Object.freeze({
+        enumName: null,
+        id: input.key,
+        key: input.key,
+        name: input.name,
+        kind: 'size' as const,
+        min: input.min,
+        max: input.max,
+        domain: Object.freeze({ lo: input.min, hi: input.max }),
+        slider: true,
+      }),
+    ]),
+    backbone: Object.freeze({ kind: 'sizeSteps', sizeChannel: input.key, sizeSteps: Object.freeze(sizeSteps) }),
+    frames: Object.freeze(
+      Array.from({ length: input.frameCount }, (_, index) =>
+        Object.freeze({ index, variant: `${input.id}-${index}`, runstate: 'r0', stepIndex: 0, rules: Object.freeze([]) }),
+      ),
+    ),
+  })
 }
 
 /** 期望（从**声明**独立算出）：尺寸型通道的值 = `min + stepIndex`（契约 §5.4 双射）。 */
@@ -428,21 +474,121 @@ describe('G6 ② 负对照 b：余项机械记账', () => {
     }
   })
 
-  it('账 b3：生产装配今天**不填** `DocumentContent.multiblock`（声明走装配面）', async () => {
+  it('账 b3：两载体不变式 —— 内容声明在场则用它，缺则回落装配面投影（不合并）', async () => {
     const loaded = await loadProduction('multiblock-ebf-2ch')
-    // ⚠️ 这是一条**缺口记账**（不是"应当如此"的设计断言）：
-    // `composition/kernelAssembly.ts:1739-1743` 组装 content 时只给 metadata/frameAxis/resources，
-    // 故 `content.multiblock` 恒为空声明，而声明（channels/frames/stepIndex）在装配面上。
-    // G6 ① 的时间入口因此以**装配面**为载体（`KernelSession#rebindChannelTimeSource` 的唯一选择点）。
-    // 一旦 C 区把声明补进 content（R2 正在动 `domain/content.ts`），本行会判红 ⇒
-    // 那是**故意的 fail-loud**：届时必须显式重审载体优先级，而不是让两个载体静默并存。
+    const face = loaded.session.assemblyFaceOf()
+    expect(face, '生产装载必须置位装配面').not.toBeNull()
+    const doc = loaded.session.document()
+    expect(doc, '生产装载后会话必须有文档').toBeDefined()
+    const faceExp = expectationOf(loaded)
+    const n = faceExp.steps.length
+    const sampled = [0, 1, 7, Math.floor(n / 2), n - 1]
+
+    // ── 侧①：**内容声明在场**（同时装配面也在场，两者刻意可区分）⇒ 必须用内容声明 ──
+    //
+    // 内容声明的 `min` = 11（装配面 = 1）、`stepIndex` 全置 0
+    // ⇒ 内容侧恒给 `11`；装配面侧给 `1 + fixtureStep`（随帧变化）。
+    // 于是"用哪一侧"、"会不会把 min 取一侧、stepIndex 取另一侧"都能被逐点识别。
+    loaded.session.adoptDocument(
+      doc!,
+      documentContent({
+        frameAxis: loaded.frameAxis,
+        multiblock: craftedDeclaration({
+          id: 'crafted-height',
+          key: 'height',
+          name: 'Height',
+          min: 11,
+          max: 15,
+          frameCount: loaded.frameAxis.frames.length,
+        }),
+      }),
+    )
+    const contentSide: number[] = []
+    for (const k of sampled) {
+      loaded.session.seekFrame(k)
+      // ⚠️ 本行先按"既有浮点边界"放宽 ±1（末帧早一帧，与本批无关的既有缺陷）；
+      // 同批 `seekFrame` 修法落地后收紧为 `.toBe(k)`，差异即修复证据。
+      const landed = loaded.session.frameIndex()
+      expect(landed, `内容侧：seekFrame(${k}) 必须落在帧 ${k}（或既有边界下的 ${k - 1}）`).toBeGreaterThanOrEqual(k - 1)
+      expect(landed, `内容侧：seekFrame(${k}) 不得越过请求帧`).toBeLessThanOrEqual(k)
+      const got = loaded.session.channelValues()['height']
+      expect(got, `内容声明在场时必须用**内容**的 min+stepIndex（=${11}），实测 ${String(got)}`).toBe(11)
+      expect(got, `不得用装配面侧的值（${expectedValueAt(faceExp, k)}）`).not.toBe(expectedValueAt(faceExp, k))
+      contentSide.push(got!)
+    }
+    // "不得混用"：内容侧 stepIndex 全 0 ⇒ 抽样必须**恒**为 11；若 min 取内容、stepIndex 取装配面
+    // （即两侧各取一半），这里会随帧变化而判红。
+    expect(new Set(contentSide).size, '内容侧抽样必须恒为同一个值（min/stepIndex 不得各取一侧）').toBe(1)
+    // "不得并集"（本用例）：装配面声明三通道，内容声明只有 height ⇒ 读面**只能**有内容的那一份。
     expect(
-      loaded.contentMultiblockChannels,
-      '账：生产 content.multiblock 仍为空（声明只在装配面）——若此处变红，说明载体已补齐，请重审优先级',
-    ).toBe(0)
+      Object.keys(loaded.session.channelValues()).sort(),
+      '读面键集必须等于内容声明的驱动面，不得是两载体的并集',
+    ).toEqual(['height'])
+
+    // ── 侧②：**内容声明缺** ⇒ 回落装配面投影（同一真夹具、同一真装配面）──────────
+    //
+    // 会话：只 `bindFrameSource` + `setAssemblyFace(真面)`，**不**采纳内容声明
+    // （`content.multiblock` 为空声明）⇒ 时间入口的唯一来源就是装配面投影。
+    const faceOnly = new KernelSession({ documentId: 'g6-b3b', contextId: 'g6-b3b-ctx', capabilities: [] })
+    faceOnly.bindFrameSource({
+      count: () => loaded.frameAxis.frames.length,
+      durationsMs: () => loaded.frameAxis.frames.map((f) => f.durationMs ?? 0),
+    })
+    faceOnly.setAssemblyFace(face)
+    for (const k of sampled) {
+      faceOnly.seekFrame(k)
+      const landed = faceOnly.frameIndex()
+      expect(landed, `装配面侧：seekFrame(${k}) 必须落在帧 ${k}（或既有边界下的 ${k - 1}）`).toBeGreaterThanOrEqual(k - 1)
+      expect(landed).toBeLessThanOrEqual(k)
+      expect(
+        faceOnly.channelValues()['height'],
+        `内容声明缺省时必须用**装配面投影**的 min+stepIndex（帧 ${landed} ⇒ ${expectedValueAt(faceExp, landed)}）`,
+      ).toBe(expectedValueAt(faceExp, landed))
+    }
+  })
+
+  it('账 b3 负对照：两侧可区分时若"用装配面"或"两侧并集/各取一半" ⇒ 判据当场红', async () => {
+    const loaded = await loadProduction('multiblock-ebf-2ch')
+    const faceExp = expectationOf(loaded)
+    const doc = loaded.session.document()!
+    const n = faceExp.steps.length
+    const sampled = [0, 1, 7, Math.floor(n / 2), n - 1]
+
+    // 与 b3 同一构造：内容侧 min=21..23、`stepIndex` 全 0，尺寸通道键改成 `coil`；
+    // 装配面侧是 `height` + `1 + fixtureStep`。
+    loaded.session.adoptDocument(
+      doc,
+      documentContent({
+        frameAxis: loaded.frameAxis,
+        multiblock: craftedDeclaration({
+          id: 'crafted-coil',
+          key: 'coil',
+          name: 'Coil',
+          min: 21,
+          max: 23,
+          frameCount: loaded.frameAxis.frames.length,
+        }),
+      }),
+    )
+
+    // 负对照形态（三条都是**可判红的事实**，不是"应当如何"的断言）：
+    const observed: string[] = []
+    for (const k of sampled) {
+      loaded.session.seekFrame(k)
+      observed.push(`${k}:${String(loaded.session.channelValues()['coil'])}`)
+    }
+    // a) 若实现取装配面侧 ⇒ 尺寸通道是 `height`（coil 根本没有轨道）⇒ 本组判红。
+    expect(observed, '内容侧的尺寸通道是 coil 且恒 21；取装配面侧会得到 height/随帧变化').toEqual(
+      sampled.map((k) => `${k}:21`),
+    )
+    // b) 若实现取并集 ⇒ 读面会有装配面的 `height` 键（内容侧只声明 coil）⇒ 判红。
+    expect(Object.keys(loaded.session.channelValues())).toEqual(['coil'])
+    // c) 若实现把 min 取内容、stepIndex 取装配面（两侧各取一半）⇒ 抽样会随帧变化 ⇒ 判红。
     expect(
-      loaded.decl.channels.length,
-      '账的另一半：装配面**确实**带着声明（否则 ① 的时间入口在生产里无从可达）',
-    ).toBeGreaterThan(0)
+      [...new Set(observed.map((o) => o.split(':')[1]))],
+      '抽样恒为同一个值：min 与 stepIndex 必须来自同一侧',
+    ).toEqual(['21'])
+    // 且这一侧确实**不是**装配面算术（否则上面几条会因为"两侧恰好相等"而失去区分力）。
+    expect(faceExp.min, '前提：装配面侧的 min 与内容侧不同（否则本负对照无区分力）').not.toBe(21)
   })
 })
