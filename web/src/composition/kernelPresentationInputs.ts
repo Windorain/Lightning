@@ -59,7 +59,6 @@ import type {
 } from '@/presentation/evaluationKey'
 import { projectGridCells } from '@/composition/kernelProjection'
 import { structureMaterialPrimitives } from '@/runtime/presentationAdapter'
-import type { LayerPreviewMode } from '@/render/data/layerPreview'
 
 /**
  * 网格定义的类型：从 `structureMaterialPrimitives` 的**入参**派生。
@@ -187,7 +186,7 @@ export function kernelPresentationInputs(input: {
    * 过滤语义不在此处重写：`structureMaterialPrimitives` 内部委托**渲染路径同一个**
    * 收集器（`runtime/presentationAdapter`），故"哪一层可见"只有一处定义。
    */
-  readonly layerPreview: LayerPreviewMode
+  readonly layerWorldY: number | null
 }): {
   readonly inputs: PresentationInputs
   readonly skipped: readonly { readonly objectId: string; readonly reason: string }[]
@@ -232,9 +231,10 @@ export function kernelPresentationInputs(input: {
     // 材质 id 因此是 `material:<下标>`，与 `kernelTextureResources` 的绑定键约定对齐
     // ⇒ `createMaterial` 能设 `params.map`（贴图整链唯一缺的一环）。
     // `objectId` 逐组相同 —— 分组不改变**对象身份**（#249 §3.3）。
+    const layerPreview = input.layerWorldY === null ? ('all' as const) : { worldY: input.layerWorldY }
     const groups = structureMaterialPrimitives({
       definition,
-      layerPreview: input.layerPreview,
+      layerPreview,
       materialTint: 0xffffff,
     })
     if (groups.length === 0) {

@@ -707,7 +707,7 @@ describe('P11-A ⑦ 接线判定：presenter 侧投影（走生产装配）按�
       ).toEqual({ 声明: { w: sourceDims.w, h: sourceDims.h, d: sourceDims.d }, 包围盒: bounds })
       expect(bounds.h, '高度：包围盒必须更小，否则本组无区分力').toBeLessThan(sourceDims.h)
 
-      const produced = kernelPresentationInputs({ layerPreview: 'all', scene: doc.scene, content: doc.content, key: keyOf(doc.scene.id) })
+      const produced = kernelPresentationInputs({ layerWorldY: null, scene: doc.scene, content: doc.content, key: keyOf(doc.scene.id) })
       expect(produced.skipped, `presenter 不得跳过本夹具（实测：${JSON.stringify(produced.skipped)}）`).toEqual([])
       const primitive = produced.inputs.primitives[0]!
       const actual = produced.inputs.geometry.attributesOf(primitive.geometry.id)!.positions

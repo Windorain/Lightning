@@ -85,7 +85,10 @@ function pickBase(ctx: Context, regionId?: string): (Omit<ViewportPickInput, 'nd
     camera,
     grid,
     domElement,
-    layerPreview: vp.layerPreview.value ?? 'all',
+    // 分层预览：槽位存的是 legacy 的 `LayerPreviewMode`（`'all' | {worldY}`），
+    // 而内核链的入参是 `worldY: number | null`（`null` = 不分层）——
+    // 形状适配只在此处一次（装配根不得深导入 `render/data/layerPreview`，见 `viewportPick` 的说明）。
+    layerWorldY: layerWorldYOf(vp.layerPreview.value),
     annotations: readAnnotations(ctx),
   }
 }
@@ -108,6 +111,18 @@ function gridHeight(ctx: Context): number {
   // #301 P10f D3（R5 网格读面）：`height` 是**声明尺寸**（见 `runtime/gridRead`
   // 的 `resolveGridSize`）—— 旧实现按包围盒推，尾层全空时会偏小 ⇒ 拾取 Y 偏移。
   return ctx.kernelGrid(ctx.getFrameIndex())?.height ?? 0
+}
+
+/**
+ * 槽位的**分层预览**（`'all' | {worldY}`）→ 内核链入参（`number | null`）。
+ *
+ * 为什么在边界处转：内核链（`composition/viewportPick`）收 `worldY: number | null`，
+ * 于是它不必深导入旧层的 `render/data/layerPreview`（深度 3 会被
+ * `gate/no-private-cross-layer` 判红）。本函数只做**形状适配**，不改语义。
+ */
+function layerWorldYOf(mode: { readonly worldY: number } | 'all' | null): number | null {
+  if (mode === null || mode === 'all') return null
+  return mode.worldY
 }
 
 /** 统一视口拾取（方块 / 注解） */

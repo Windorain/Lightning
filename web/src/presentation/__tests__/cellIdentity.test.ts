@@ -240,7 +240,7 @@ describe('P10e · 逐格身份层：**真实夹具**上逐三角形与坐标反�
   for (const name of FIXTURES) {
     it(`${name}：格表长度 == 三角形数 + 遍历序单调 + 格集合 == 有几何的格集合`, async () => {
       const { scene, content } = await assembledOf(name)
-      const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+      const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
       expect(inputs.primitives.length, '必须有可呈现对象').toBeGreaterThan(0)
 
       const payload = Object.values(scene.data).map((d) => d.payload).find((x) => x.kind === 'blockGrid')!
@@ -326,7 +326,7 @@ describe('P10e · 逐格身份层：**真实夹具**上逐三角形与坐标反�
     //
     // 反之（剔除只减不增），正常路径**必然**满足上界。⇒ 两向都成立。
     const { scene, content } = await assembledOf('multiblock-ebf-2ch')
-    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     const p = inputs.primitives[0]!
     const attrs = inputs.geometry.attributesOf(p.geometry.id)!
 
@@ -373,7 +373,7 @@ describe('P10e · 逐格身份层：**真实夹具**上逐三角形与坐标反�
     // 故它的判据是**与收集器 pieces 的同序对齐**：两者必须逐项一致。
     // 这条同时防"格表来自另一次遍历"（那样长度/顺序会脱钩）。
     const { scene, content } = await assembledOf('multiblock-lsc-overlap')
-    const { inputs, skipped } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs, skipped } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     expect(skipped).toEqual([])
     const p = inputs.primitives[0]!
     const attrs = inputs.geometry.attributesOf(p.geometry.id)!
@@ -415,7 +415,7 @@ describe('P10e · 逐格身份层：**真实夹具**上逐三角形与坐标反�
     const cellsSeen: string[] = []
     for (const name of FIXTURES) {
       const { scene, content } = await assembledOf(name)
-      const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+      const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
       const p = inputs.primitives[0]
       if (p === undefined) continue
       const map = inputs.geometry.attributesOf(p.geometry.id)!.cellMap!
@@ -429,7 +429,7 @@ describe('P10e · 逐格身份层：**真实夹具**上逐三角形与坐标反�
     // 判据形态：把 `cellMap` 的长度与 `positions.length/9` 的关系钉死，
     // 并证明**修改剔除选项**会同时改变两者（若格表来自另一次遍历，两者会脱钩）。
     const { scene, content } = await assembledOf('multiblock-ebf-2ch')
-    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     for (const p of inputs.primitives) {
       const attrs = inputs.geometry.attributesOf(p.geometry.id)!
       // 每个片段 2 个三角形 ⇒ 格表长度必须是偶数且等于三角形数
@@ -449,7 +449,7 @@ describe('P10e · 逐格身份层：**真实夹具**上逐三角形与坐标反�
 describe('P10e · 逐格身份层：进 `PickIndex` 后命中能解出格', () => {
   it('真实夹具：编译 → 批次内**逐槽位**命中 ⇒ 解出真实格（与 `cellMap` 直取一致）', async () => {
     const { scene, content } = await assembledOf('multiblock-ebf-2ch')
-    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     const compiled = compileScene(inputs)
     expect(compiled.ok).toBe(true)
     if (!compiled.ok) throw new Error('narrow')
@@ -485,7 +485,7 @@ describe('P10e · 逐格身份层：进 `PickIndex` 后命中能解出格', () =
 
   it('**越界三角形 ⇒ `null`**（不得回落成"这个对象不可逐格拾取"）', async () => {
     const { scene, content } = await assembledOf('multiblock-tier-only')
-    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     const compiled = compileScene(inputs)
     if (!compiled.ok) throw new Error('narrow')
     const c = compiled.value
@@ -506,7 +506,7 @@ describe('P10e · 逐格身份层：进 `PickIndex` 后命中能解出格', () =
 
   it('**不带 `primitiveIndex` ⇒ `cell: undefined`**（与"越界"是两件事）', async () => {
     const { scene, content } = await assembledOf('multiblock-tier-only')
-    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     const compiled = compileScene(inputs)
     if (!compiled.ok) throw new Error('narrow')
     const index = new PickIndex(compiled.value)
@@ -522,7 +522,7 @@ describe('P10e · 逐格身份层：进 `PickIndex` 后命中能解出格', () =
 
   it('**世代不符 ⇒ `null`**（A12：过期画面上的拾取不得解回当前对象）', async () => {
     const { scene, content } = await assembledOf('multiblock-tier-only')
-    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     const compiled = compileScene(inputs)
     if (!compiled.ok) throw new Error('narrow')
     const index = new PickIndex(compiled.value)
@@ -533,7 +533,7 @@ describe('P10e · 逐格身份层：进 `PickIndex` 后命中能解出格', () =
 
   it('**形状自检**：格表长度与三角形数不符 ⇒ `compileScene` 显式跳过（不静默画）', async () => {
     const { scene, content } = await assembledOf('multiblock-tier-only')
-    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     const p = inputs.primitives[0]!
     const real = inputs.geometry.attributesOf(p.geometry.id)!
     // 注入一个**短一格**的表（模拟适配层算错）
@@ -567,7 +567,7 @@ describe('P10e · 逐格身份层：进 `PickIndex` 后命中能解出格', () =
   it('**反空洞真**：正常输入下 `cell-map-shape-invalid` **一次都不出现**', async () => {
     for (const name of FIXTURES) {
       const { scene, content } = await assembledOf(name)
-      const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+      const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
       const compiled = compileScene(inputs)
       if (!compiled.ok) throw new Error('narrow')
       expect(
@@ -581,7 +581,7 @@ describe('P10e · 逐格身份层：进 `PickIndex` 后命中能解出格', () =
 describe('P10e · 逐格身份层：格身份**不**违反对象身份模型', () => {
   it('格不进 `objectId`：同一对象的多个格共享同一个 `objectId`', async () => {
     const { scene, content } = await assembledOf('multiblock-lsc-overlap')
-    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     const compiled = compileScene(inputs)
     if (!compiled.ok) throw new Error('narrow')
     const index = new PickIndex(compiled.value)
@@ -610,8 +610,8 @@ describe('P10e · 逐格身份层：格身份**不**违反对象身份模型', (
 
   it('格身份**不参与持久化**：`PickIndex` 与格表都可丢弃重建（同输入 ⇒ 同表）', async () => {
     const { scene, content } = await assembledOf('multiblock-ebf-2ch')
-    const a = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
-    const b = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const a = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
+    const b = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     const [ca, cb] = [compileScene(a.inputs), compileScene(b.inputs)]
     if (!ca.ok || !cb.ok) throw new Error('narrow')
     const ka = new PickIndex(ca.value)
@@ -686,7 +686,7 @@ describe('C6 · 一个内核对象 → 多个材质图元：每个图元都能�
   for (const name of FIXTURES) {
     it(`${name}：逐材质图元独立可拾取，且对象身份不被分组拆散`, async () => {
       const { scene, content } = await assembledOf(name)
-      const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+      const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
       const compiled = compileScene(inputs)
       expect(compiled.ok).toBe(true)
       if (!compiled.ok) throw new Error('narrow')
@@ -734,7 +734,7 @@ describe('C6 · 一个内核对象 → 多个材质图元：每个图元都能�
 
   it('**负对照**：把划分退回「按 `objectId`」⇒ 必有材质图元解不出（证明上一条有区分力）', async () => {
     const { scene, content } = await assembledOf('multiblock-tier-only')
-    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerWorldY: null, scene, content, key: keyOf(scene.id) })
     const compiled = compileScene(inputs)
     if (!compiled.ok) throw new Error('narrow')
     const c = compiled.value

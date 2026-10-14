@@ -26,7 +26,7 @@
 
 import * as THREE from 'three'
 import type { KernelGridView } from '@/runtime/gridRead'
-import type { LayerPreviewMode } from '@/render/data/layerPreview'
+
 import type { KernelAnnotationView } from '@/runtime/annotationRead'
 import { annotationObjectIdOf } from '@/runtime/annotationRead'
 import type { PresenterSession } from '@/composition/presenterSession'
@@ -42,6 +42,20 @@ import {
 } from '@/presentation/pickResult'
 import type { AnnotationShape } from '@/presentation/annotationPlan'
 
+/**
+ * 分层预览形状（**从消费端签名派生**，不是 import 深路径类型）。
+ *
+ * `LayerPreviewMode` 定义在 `render/data/layerPreview`（旧层、深度 3）——
+ * 装配根 import 它会被 `gate/no-private-cross-layer` 判红（公共出口最大深度 2）。
+ * 派生写法与 `kernelPresentationInputs#GridDefinition` 同一纪律：形状由**使用点**给出，
+ * 形状变了这里编译不过（不是靠人记得同步）。
+ */
+type LayerPreviewMode = Parameters<typeof kernelPickBlockOf>[0]['layerPreview']
+
+/** `worldY: number | null`（`null` = 不分层）→ legacy 的分层模式。 */
+function layerModeOf(input: ViewportPickInput): LayerPreviewMode {
+  return input.layerWorldY === null ? 'all' : { worldY: input.layerWorldY }
+}
 export interface ViewportPickInput {
   /** 呈现会话（批次 + 注解的唯一产出者）。 */
   readonly surface: PresenterSession
@@ -50,7 +64,7 @@ export interface ViewportPickInput {
   readonly ndc: THREE.Vector2
   /** 内核网格读面（逐格身份 → `blockId`；缺席 ⇒ 无法解出方块）。 */
   readonly grid: KernelGridView
-  readonly layerPreview: LayerPreviewMode
+  readonly layerWorldY: number | null
   /** 内核注解读面（盒拾取的 `min`/`max` 与身份）。 */
   readonly annotations: readonly KernelAnnotationView[]
 }
@@ -72,6 +86,7 @@ export interface ViewportPickInput {
  */
 export function pickInViewport(input: ViewportPickInput): PickResult {
   const raycaster = raycasterOf(input.camera, input.ndc)
+  const layerPreview = layerModeOf(input)
   const annotation = nearestAnnotation(input, raycaster)
   const hit = input.surface.pickAt(raycaster)
 
@@ -82,7 +97,7 @@ export function pickInViewport(input: ViewportPickInput): PickResult {
       point: hit.point,
       distance: hit.distance,
       grid: input.grid,
-      layerPreview: input.layerPreview,
+      layerPreview,
     })
     if (out.ok) block = out.block
   }
@@ -102,10 +117,11 @@ export function pickInViewport(input: ViewportPickInput): PickResult {
  */
 export function pickAllInViewport(input: ViewportPickInput): readonly PickEntity[] {
   const raycaster = raycasterOf(input.camera, input.ndc)
+  const layerPreview = layerModeOf(input)
   const all = input.surface.pickAllAt(raycaster)
   const blocks: readonly PickEntity[] =
     all.kind === 'hits'
-      ? kernelPickEntitiesOf({ hits: all.hits, grid: input.grid, layerPreview: input.layerPreview })
+      ? kernelPickEntitiesOf({ hits: all.hits, grid: input.grid, layerPreview })
       : []
 
   const out: PickEntity[] = [...blocks]

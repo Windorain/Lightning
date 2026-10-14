@@ -368,8 +368,10 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     try {
       // **分层预览**是呈现侧过滤（不进冻结的 `EvaluationKey`）：每帧按当前层写入会话，
       // 它进**内容身份** ⇒ 换一层必然重编（否则"选了 Y=3 画面不动"）。
-      // 这里读 `drw.computed.layerPreviewMode`：该派生规则（`< 0 ⇒ 'all'`）只有一处定义。
-      presenterSurface.setLayerPreview(drw.computed.layerPreviewMode.value)
+      // 这里读 `drw.computed.layerPreviewMode`：该派生规则（`< 0 ⇒ 'all'`）只有一处定义；
+      // 会话侧收的是 `worldY: number | null`（`null` = 不分层）⇒ 本行只做形状适配。
+      const layerMode = drw.computed.layerPreviewMode.value
+      presenterSurface.setLayerPreview(layerMode === 'all' ? null : layerMode.worldY)
       const out = presenterSurface.applyKernelDocument(doc, kernel?.playback().time ?? ZERO_TIME)
       // 编译失败/跳过是**真实事实**，必须可见（不得静默当"画好了"）。
       if (out.compileError !== null) presenterErrors.push(`compile:${out.compileError}`)

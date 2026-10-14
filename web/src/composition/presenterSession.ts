@@ -63,7 +63,7 @@ import type { TextureBinding, TextureResource } from '@/presentation/textureBind
 import { textureBindingsOf } from '@/composition/kernelTextureResources'
 import { kernelPresentationInputs } from '@/composition/kernelPresentationInputs'
 import { kernelAnnotationInputs } from '@/composition/kernelAnnotationInputs'
-import type { LayerPreviewMode } from '@/render/data/layerPreview'
+
 
 /** 一次 `apply` 的结果（**显式**报告，不静默吞）。 */
 export interface PresenterApplyOutcome {
@@ -179,7 +179,7 @@ export class PresenterSession {
    * ⚠️ 它**进**内容身份（`contentIdentityOf` 的 `lp:` 段）：同一文档换一层必须重编，
    * 否则"选了 Y=3 画面不动"。缺省 `'all'` = 不分层（导出/探针等非视口调用方的语义）。
    */
-  private layerPreview: LayerPreviewMode = 'all'
+  private layerWorldY: number | null = null
 
   /** 注解/描边的呈现子树（与批次同根，故一个会话只有一个挂载点）。 */
   private readonly overlay: OverlayPresenter
@@ -245,7 +245,7 @@ export class PresenterSession {
     readonly content: DocumentContent
     readonly key: EvaluationKey
   }): PresenterApplyOutcome {
-    const identity = contentIdentityOf(input.scene, input.content, input.key, this.layerPreview)
+    const identity = contentIdentityOf(input.scene, input.content, input.key, this.layerWorldY)
     if (!this.needsRebuild && identity === this.lastIdentity && this.compiled !== null) {
       // 内容身份未变：**不**重编、**不**重传。但仍要更新当前键 ——
       // 机位变化会改 `viewProjection`（非结构维度），拾取仍应视为"当前"
@@ -270,7 +270,7 @@ export class PresenterSession {
       scene: input.scene,
       content: input.content,
       key: input.key,
-      layerPreview: this.layerPreview,
+      layerWorldY: this.layerWorldY,
     })
     const compiled = compileScene(produced.inputs)
     if (!compiled.ok) {
@@ -348,8 +348,8 @@ export class PresenterSession {
    * 只改"下一次 apply 的可见层"：它进内容身份 ⇒ 下一次 `applyKernelDocument`
    * 必然重编（同一文档换一层也是**不同画面**）。不回读旧值 ⇒ 没有第二份权威。
    */
-  setLayerPreview(mode: LayerPreviewMode): void {
-    this.layerPreview = mode
+  setLayerPreview(worldY: number | null): void {
+    this.layerWorldY = worldY
   }
 
   /**
@@ -700,13 +700,13 @@ export class PresenterSession {
  * 用"键集"而不是"值的深比较"：载荷内容变时 `contentVersion` 由领域层推进
  * （`domain/scene#ObjectData`），故逐值深比较是**重复判据**（会与领域层漂移）。
  */
-function contentIdentityOf(scene: Scene, content: DocumentContent, key: EvaluationKey, layerPreview: LayerPreviewMode): string {
+function contentIdentityOf(scene: Scene, content: DocumentContent, key: EvaluationKey, layerWorldY: number | null): string {
   const parts: string[] = [
     `k:${key.documentVersion}`,
     `s:${key.scene}`,
     `t:${key.time.numerator}/${key.time.denominator}`,
     // 分层预览进身份：同一文档换一层 ⇒ 必须重编（否则"选了 Y=3 画面不动"）。
-    `lp:${layerPreview === 'all' ? 'all' : `y${layerPreview.worldY}`}`,
+    `lp:${layerWorldY === null ? 'all' : `y${layerWorldY}`}`,
   ]
   for (const objectId of scene.order) {
     const obj = scene.objects[objectId]
