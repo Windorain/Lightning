@@ -987,13 +987,35 @@ export class KernelSession {
       ...(typeof published === 'number' ? { publishedDefault: published } : {}),
       ...(typeof manual === 'number' ? { manualPreview: manual } : {}),
       track,
-      time: this.playbackSnapshot.time,
+      time: this.channelSampleTime(),
     })
     // 采样失败**不**吞成"0"：如实回落到手动/默认层（读面不制造值）。
     if (!resolved.ok) return base
     const value = resolved.value.value
     if (value === manual) return base
     return Object.freeze({ ...base, [channelKey]: value })
+  }
+
+  /**
+   * 通道轨道的**采样时间**。
+   *
+   * 帧条是**循环**的：`domain/materials#sampleStripFrameAt` 内部做
+   * `t = ((t % total) + total) % total`（`domain/materials.ts:476-478`）。
+   * 通道轨道（通用 `sampleTrack`）在两端是**钳制**而非循环，故这里先把时间折到
+   * 一个周期内再交给它 —— 否则播过一圈后会出现"帧下标绕回、通道取值卡在末帧"
+   * 的两条轴（A09「同时间同结果」的跨消费者形态）。
+   *
+   * 周期权威与帧轴**同一处**：`totalDurationMs(this.timeline())`
+   * （`sampleStripFrameAt` 内部也用 `totalDurationMs`，见 `domain/materials.ts:473`）。
+   */
+  private channelSampleTime(): TimeValue {
+    const time = this.playbackSnapshot.time
+    const fps = framesPerSecond(time.fps)
+    if (fps <= 0) return time
+    const total = totalDurationMs(this.timeline())
+    if (total <= 0) return time
+    const ms = (time.frame / fps) * 1000
+    return timeFromSeconds((((ms % total) + total) % total) / 1000, time.fps)
   }
 
   /**
