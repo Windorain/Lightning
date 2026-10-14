@@ -57,6 +57,7 @@ export interface KernelScenePickBlock {
 export type KernelPickSkip =
   | { readonly kind: 'no-cell'; readonly detail: string }
   | { readonly kind: 'cell-not-in-grid'; readonly detail: string }
+  | { readonly kind: 'cell-palette-missing'; readonly detail: string }
   | { readonly kind: 'cell-is-air'; readonly detail: string }
 
 export type KernelPickOutcome =
@@ -128,8 +129,30 @@ export function kernelPickBlockOf(input: KernelPickInput): KernelPickOutcome {
 
   // legacy 的 `blockRegistryKeyForPalette` 口径（`meta === 0` ⇒ 裸 `registryId`）：
   // 这是**外部契约**（侧栏高亮、tooltip、导出都按此键对齐），不是可自选的形式。
-  const blockId = blockRegistryKeyForPalette(at.name, at.meta)
-  if (blockId === 'air') {
+  //
+  // ⚠️ **必须取调色板条目的 `registryId`，不能取 `grid.at().name`**（R1-β① C8 实测擒获）：
+  // `at.name` 是 GF-7 编码里的**已截命名空间**名字（`pure/gridTypes.ts:18`：
+  // `cells` 的值就是 `minecraft:<name>:<meta>`）⇒ `at.name === 'stone'` 而 legacy 键是
+  // `minecraft:stone`。这一字之差在外观上是"命中仍然成功、tooltip/侧栏却查不到"的**静默回退**
+  // （`neiTooltipMap` 按 `registryId` 建键 ⇒ 永远不中）。
+  //
+  // 为什么 C7 的判据没抓到它：那条判据的期望值用**同一个** `grid.at()` 现算
+  // （`at.meta === 0 ? at.name : …`）⇒ 与被测实现同源 ⇒ 恒绿。本批把期望改成
+  // **独立来源**（结构定义的调色板 / 真实 registryId），并加"短名必须判红"的负对照。
+  const entry = volume.paletteEntryOf({ x: cell.column, y: worldY, z: cell.zSlice })
+  if (entry === null) {
+    return {
+      ok: false,
+      skip: {
+        kind: 'cell-palette-missing',
+        detail:
+          `命中格 (col=${cell.column}, row=${cell.row}, z=${cell.zSlice}) 在**调色板**里没有条目`
+          + '（`paletteEntryOf` 答 null，可能因歧义拒绝）—— 解不出方块身份（真实缺陷）',
+      },
+    }
+  }
+  const blockId = blockRegistryKeyForPalette(entry.registryId, entry.meta)
+  if (blockId === 'air' || entry.registryId === 'air') {
     return {
       ok: false,
       skip: {

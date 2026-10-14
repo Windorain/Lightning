@@ -912,16 +912,21 @@ export interface ContentMeshObservation {
   /** 视口 slot 里是否已有内容 mesh 组。 */
   present: boolean
   /**
-   * 当前 `contentGroup` 的 uuid。
+   * **内容世代**标识（R1-β① C8 起语义变更，见下）。
    *
-   * 为什么它是"装配真的落定"的判据：`presentContentMesh()` 每次重建都会
-   * **新建一个 Group 并整体替换** `slot.contentGroup.value`（`mainMeshGroup.value = result.group`），
-   * 且 `loadStructureAndResources()` 每次都会 `clearAllMeshStorage()`（world mesh 缓存必空）。
-   * 因此 uuid 变化 ⇔ 新一代 mesh 已经挂进场景 —— 比"definition 已更新"更强
-   * （definition 在 `loadStructureAndResources()` 里先写，mesh 在之后的 `rebuildContentMesh()` 才落地）。
+   * ## 为什么它不再是 `contentGroup.uuid`
    *
-   * 观测口径与 README §7.1 已登记的 `slot.contentGroup`（mesh 数 / 三角形数）一致：
-   * 它是**公开字段**（`ViewportSlot.contentGroup`），不是测试专用后门。
+   * 旧形态下 `presentContentMesh()` 每次重建都**新建一个 Group 并整体替换**
+   * `slot.contentGroup.value` ⇒ "uuid 变化 ⇔ 新一代 mesh 落地"。
+   *
+   * C8 把画面生产者切到 `PresenterSession` 后，`contentGroup` **就是**呈现会话的
+   * 根对象（稳定不变），批次/注解由会话**就地**重建 ⇒ uuid 只会在视口重挂时变，
+   * "世代"这件事改由 `PresenterSession.generation` 表达（它是批次结构世代，
+   * 每次真重建推进）。故本字段 = 呈现会话世代（前缀 `presenter:`），
+   * 无呈现会话时回落 `contentGroup.uuid`。
+   *
+   * ⚠️ 观测口径的实质没变：它仍然只读**公开字段**
+   * （`ViewportSlot.contentGroup` / `ViewportSlot.presenterSurface`），不是测试后门。
    */
   uuid: string | null
   /** 组内 mesh 数。 */
@@ -941,7 +946,11 @@ export async function readContentMesh(
     const ctx = (window as any).__vm__
     const slot = ctx?.viewports?.get(rid)
     const group = slot?.contentGroup?.value ?? null
-    if (!group) return { present: false, uuid: null, meshes: 0, vertices: 0, triangles: 0 }
+    // 世代：优先呈现会话的批次世代（C8 起画面由它产出）；无会话时回落组 uuid。
+    const generation = typeof slot?.presenterSurface?.generation === 'string'
+      ? `presenter:${slot.presenterSurface.generation}`
+      : null
+    if (!group) return { present: false, uuid: generation, meshes: 0, vertices: 0, triangles: 0 }
     let meshes = 0
     let vertices = 0
     let triangles = 0
@@ -956,7 +965,7 @@ export async function readContentMesh(
     })
     return {
       present: true,
-      uuid: typeof group.uuid === 'string' ? group.uuid : null,
+      uuid: generation ?? (typeof group.uuid === 'string' ? group.uuid : null),
       meshes,
       vertices: Math.round(vertices),
       triangles: Math.round(triangles),

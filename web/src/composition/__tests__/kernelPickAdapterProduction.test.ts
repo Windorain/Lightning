@@ -144,15 +144,30 @@ describe('C7 段二 · 内核拾取适配（生产解析 + 装配 + 真实射线
       expect(block.zSlice).toBe(cell.zSlice)
       expect(block.quadIndex).toBe(cell.quadIndex)
 
-      // ② 与内核网格读面逐字一致（证明映射没有自造一份名字/坐标）
-      // 口径与 `composition/kernelPickAdapter` 同：`KernelGridPos.y` 是**世界 Y**
-      //（见 `context/queries#pickPartForScenePick` 的同一写法），不是格表行号。
+      // ② `blockId` = **完整 registry 键**（独立来源：内核网格读面的**调色板条目**）。
+      //
+      // ⚠️ R1-β① C8 判据修复：本行原先把期望值写成 `grid.at()` 现算
+      // （`at.meta === 0 ? at.name : …`），而**实现**也用 `grid.at()` ⇒ 同源 ⇒ **恒绿**。
+      // 生产上暴露的缺口正是这一条：`at.name` 是 GF-7 的**已截命名空间**短名
+      // （`stone`），而 tooltip/侧栏的键是完整 registryId（`minecraft:stone`）⇒
+      // 命中"成功"但 tooltip/侧栏查不到（静默回退，e2e `parts-hover-stats` 实测擒获）。
+      // 现在期望值取**调色板条目**（另一条读面），并加"短名必须判红"的负对照。
       const worldY = structureRowToWorldY(cell.row, grid!.height)
       const at = grid!.at({ x: cell.column, y: worldY, z: cell.zSlice })
       expect(at, '命中格必须在内核网格里').not.toBeNull()
-      const expected = at!.meta === 0 ? at!.name : `${at!.name}@${at!.meta}`
-      expect(block.blockId, '`blockId` 必须来自内核网格读面（同 legacy 键口径）').toBe(expected)
+      const entry = grid!.paletteEntryOf({ x: cell.column, y: worldY, z: cell.zSlice })
+      expect(entry, '命中格必须有调色板条目（身份的唯一来源）').not.toBeNull()
+      const expected = entry!.meta === 0 ? entry!.registryId : `${entry!.registryId}@${entry!.meta}`
+      expect(block.blockId, '`blockId` 必须来自**调色板条目**的 registryId（legacy 键口径）').toBe(expected)
       expect(block.blockId, '不得是空气').not.toBe('air')
+      const shortForm = at!.meta === 0 ? at!.name : `${at!.name}@${at!.meta}`
+      if (shortForm !== entry!.registryId) {
+        expect(
+          block.blockId,
+          '`blockId` 不得退化成 GF-7 短名（丢命名空间 ⇒ tooltip/侧栏永远查不到）',
+        ).not.toBe(shortForm)
+      }
+      expect(block.blockId, '真实 registry 键必须带命名空间').toContain(':')
 
       // ③ 命中点与本次射线同源，且确实落在被击中的三角形上
       expect(block.point.x).toBe(hit.point[0])

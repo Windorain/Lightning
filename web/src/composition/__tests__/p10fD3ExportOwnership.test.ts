@@ -205,7 +205,18 @@ describe('D3/S5 · seam 表整体不变量（新增登记不得破坏既有口�
     }
     // 正面半边：核销的**能力**必须有新落点（"删掉了事"不算退出）。
     expect(seamById('annotation-wide-field-face'), '注解宽字段面仍在案（本批只兑现了一部分）').toBeDefined()
-    expect(seamById('legacy-render-source-document'), '渲染链终切未做 ⇒ 该条仍在案').toBeDefined()
+    expect(seamById('legacy-render-source-document'), '定义/图标面与最后 1 处消费者仍在旧文档上 ⇒ 该条仍在案').toBeDefined()
+  })
+
+  /**
+   * **R1-β① C8 核销的接缝**（同族的回归断言）。
+   *
+   * `presenter-surface-dual-track` 的两个退出子句在 C8 同时成立
+   * （画面由 `PresenterSession` 产出 + `drwMeshPipeline` 的 `blockMeshProvider` 路径删除），
+   * 故它从"双轨剩余数"里退出。核销记录与机械证据留在 `seams.ts` 的同名注释处。
+   */
+  it('**C8 核销的接缝不得复活**：`presenter-surface-dual-track` 不在表里', () => {
+    expect(seamById('presenter-surface-dual-track'), 'C8 已核销 ⇒ 不得复活').toBeUndefined()
   })
 
   it('本批保留的接缝都在（终删暴露的欠账可数）', () => {

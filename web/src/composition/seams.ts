@@ -165,17 +165,18 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' `assembleKernelDocument` + `projectKernelDocument` 产出渲染视图（P10d D2 交付，'
       + ' 逐三角形一致已验）；`composition/presenterSession#PresenterSession` 已有生产实现。',
     oldTrack:
-      'DRW 的文档来源仍是旧格式 `RuntimeDocument`（**已改为必填注入** `renderDocRef`，不再回落到读面），'
-      + ' 仅 `useKernelChannels` 仍经具名读面 `Context#legacyRenderSource()` 取多方块'
-      + ' **声明的内层 body**（`multiblockSource`）。⚠️ C5 段③ 已迁 3 处（`EmbedViewport` 的'
-      + ' tooltip 入参 → 内核读面；`useViewportRuntime` 的回落删除；`workbench-rna` 的生成态判定'
-      + ' → `Context#kernelWriteAuthority`）。**文件格式版本**亦已由内核元数据承载'
-      + '（`domain/content#DocumentMetadata.formatVersion`）。',
+      '`runtime/drwMeshPipeline` 仍读旧格式 `RuntimeDocument`（**已改为必填注入** `renderDocRef`，不再回落到读面），'
+      + ' 但**只读定义面**：结构定义（`resolveRenderBundle`）、材质库（`buildMaterialLibrary`）与'
+      + ' 方块图标缓存。⚠️ **R1-β① C8 起它不再是画面路径**（画面由 `PresenterSession` 产出；'
+      + ' 双轨登记 `presenter-surface-dual-track` 已核销）。剩余：`useKernelChannels` 仍经具名读面'
+      + ' `Context#legacyRenderSource()` 取多方块**声明的内层 body**（`multiblockSource`）。'
+      + '⚠️ C5 段③ 已迁 3 处（`EmbedViewport` 的 tooltip 入参 → 内核读面；`useViewportRuntime` 的回落删除；'
+      + ' `workbench-rna` 的生成态判定 → `Context#kernelWriteAuthority`）。',
     blocker:
-      '画面终切需要"DRW 消费 `PresenterSession`"的整体切换，其前置为材质统一'
-      + '（✅ R1-β① C6 已闭合：逐材质图元 + `material:<下标>` 绑定命中）与注解/描边统一 ——'
-      + ' 缺任一条即"切换后画面变平"（可感知回退，#171 禁止）。'
-      + ' D 批映射表 §八逐字排除本批做渲染链终切。',
+      '**画面终切已完成（R1-β① C8）**，本条现在挡的是**定义/图标面**与**最后 1 处消费者**：'
+      + 'DRW 仍消费旧格式视图文档来解析结构定义与材质库（图标缓存的输入），'
+      + '而 `useKernelChannels.ts` 仍需该文档的**声明内层 body** 做通道/动画语义（归 R2）。'
+      + '⇒ 两处都迁走（或内核承载声明 body）才能删读面本体。',
     closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:
@@ -282,55 +283,25 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '⇒ 本条**不再**以"命令迁移"为退出条件，只留「渲染链终切」这一条可核对前置。',
   }),
   /**
-   * P10e（#299）登记：**呈现链与 legacy 渲染链并存**（本批的显式暂存）。
+   * ⚠️ **已核销（R1-β① C8）**：原 `presenter-surface-dual-track` 登记在此。
    *
-   * ## 为什么必须登记（而不是只在汇报里说"本批不切渲染链"）
+   * 它原是"呈现链与 legacy 渲染链并存"的暂存登记（P10e #299 建立）。C8 把**画面**的生产者
+   * 切到内核呈现根，故两个退出子句同时成立：
    *
-   * 按 #171 退役纪律：「阶段间暂存的未迁移路径必须有负责人和退出阶段」。
-   * 本批把 `BatchedPresenter` 接成**真实生产实现**（此前零生产调用方），
-   * 但它**不接管画面** —— 画面仍由 `DRW`（legacy `blockMesh`）产出。
-   * 这是一条真实的双轨，必须有可核对的退出条件。
+   * | 子句 | 结论 | 机械证据 |
+   * |---|---|---|
+   * | 甲 视口结构层由 `PresenterSession` 产出 | ✅ | `shared/viewport/useViewportRuntime` 把 `vpSlot.contentGroup.value` 指向 `presenterSurface.object3d` —— 该槽位是结构层进场景树的唯一挂载点（`runtime/renderEngine#drawFrame` 的 `layers.structure.add(opts.contentGroup)`） |
+   * | 乙 `drwMeshPipeline` 的 `blockMeshProvider` 路径被删除 | ✅ | `BlockMeshProvider`/`presentContentMesh`/`presentWorldFrame`/`worldMeshCache` 全树 **0 命中**（只剩退役记录文字）；`render/mesh/annotationMeshProvider.ts` 整文件删除 |
+   * | 附属 材质统一 | ✅ C6 | 逐材质图元 + `material:<下标>` 绑定命中（`e2e/c6-texture-visible.spec.ts`） |
+   * | 附属 注解/描边统一 | ✅ C7+C8 | 注解经 `kernelAnnotationInputs` → `annotationPlan` → `OverlayPresenter`（在呈现会话内）；描边经 `PresenterSession.applyOutline` 与 `DRW.outlinePass` 的**自建** mask（`SelectionHighlightProvider`，与内容几何无关） |
    *
-   * ## 为什么本批**不**接管画面（切一半比不切更糟）
+   * ## 画面取证与负对照（C8 第 5 项）
    *
-   * 接管需要"DRW 消费内核求值产物"的整体切换，其前置为：
-   *  - ✅ **已兑现（#301 P10f D3）**：保存面从旧读取入口迁到内核投影
-   *    （`raw-authority-object` 相位已翻 `executed`；`getDoc()` 判据本尊口径 **0 命中**）；
-   *  - 9 条**未装配内核**的加载路径补齐（实测：内核文档只在文件选择器与
-   *    `documentLoadPipeline` 两条路径被填充）；
-   *  - `Command` 封闭联合扩展（侧表写面）；
-   *  - 材质统一（呈现层是 `MeshBasicMaterial`，legacy 是贴图材质库）。
-   *
-   * 缺任一条即"切换后能力回退且无替代" —— 那正是 #171 禁止的半成品形态。
-   *
-   * ## 本批交付的**可核对**能力（不是"接了但没验证"）
-   *
-   * - **逐格拾取**：`PresenterSession.pickAt` 解出 `{column,row,zSlice,quadIndex}`
-   *   （生产视口实测：81 个采样点命中 27 次、解出 6 个不同的格，见
-   *   `e2e/p10e-presenter-live.spec.ts`）；
-   * - **逐像素结构性等价**：同一（由内容导出的）相机下两条链离屏渲染，
-   *   覆盖率与包围盒一致（实测 `ebf-2ch` 覆盖率 0.2286/0.2286、包围盒逐维相同）。
+   * `e2e/c8-picture-takeover.spec.ts`（真实工作台）用**两条互相独立**的事实判"画面生产者是
+   * 呈现根"：①呈现根真的在场景树里（批次对象沿 `parent` 链可达 `mainScene`）；
+   * ②`contentGroup` 下**没有** legacy `userData.triangleMap` 网格。
+   * **负对照**：把结构层指回一个新建的 legacy 网格组（等价于"绘制交回 DRW"）⇒ 判据必须判红。
    */
-  Object.freeze({
-    id: 'presenter-surface-dual-track',
-    files: Object.freeze([
-      'src/composition/presenterSession.ts',
-      'src/shared/viewport/useViewportRuntime.ts',
-      'src/runtime/drwMeshPipeline.ts',
-    ]),
-    newTrack:
-      '`composition/presenterSession` 的 `PresenterSession`：内核场景 → `PresentationInputs` → `compileScene` → `BatchedPresenter` → 真实 GL。每帧经 `applyKernelDocument` 按**内容身份**去重（机位变化不重编，A11）；持 `PickIndex` 提供**逐格**拾取（`cell` = `{column,row,zSlice,quadIndex}`）；纹理经五态链绑定。可观测面：`ViewportSlot.presenterSurface`（批次/账/世代）。',
-    oldTrack:
-      '`runtime/drwMeshPipeline` 的 `blockMeshProvider` → legacy `blockMesh` 仍是**画面**的生产路径（写 `vpSlot.contentGroup`）。呈现会话有自己的根对象，**不**挂进 `contentGroup`（挂进去会让"谁画了这 24 个三角形"没有唯一答案）。',
-    blocker:
-      '**R-WK-07（#250，2026-10-12）**：D4（`raw-authority-object` 终删 + `RuntimeDocument` 退出生产 + G-6 + 导出面）已卷出为 **P10f（#301）** 子批 A–E；渲染链终切属子批 C/D，其前置即上方四条。本批硬约束是**能力不回退**，而"呈现链接管画面但其材质/注解/描边尚未统一"会让画面**变平**（无贴图）—— 那是可感知回退。',
-    closureCoverage: 'in-closure',
-    owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
-    exitCondition:
-      "**（乙）消费者迁移数 = 0 —— ⏳ 未成立（R1 已迁 3/4；剩 1 处 `useKernelChannels.ts` 归 R2，删除负责人 = R2）**：\n已迁（R1 本批）：① `shared/viewport/EmbedViewport.vue` 的 tooltip 入参改内核读面投影；② `shared/viewport/useViewportRuntime.ts` 的 `docOverride ?? legacyRenderSource()` **回落删除**，渲染源改**必填注入** `renderDocRef`；③ `editors/workbench-rna.ts` 的生成态判定改走 `Context#kernelWriteAuthority`。\n**剩余 1 处 = `shared/viewport/useKernelChannels.ts`，归 R2（多方块与动画闭环），删除负责人 = R2**：它四个用途（`projectSelection`/`tierSampleValues`/`clampChannelValue`、`assembleForSelection`、`buildChannelPanelModel`、`kernelRenderViewOf`）**全是通道/动画语义**，不是基础渲染源 ⇒ 按 #385 §15「共享旧文件随**最后**消费者退出删除，负责人是最后消费闭环单」，读面本体 `Context#legacyRenderSource()` 的删除归 R2。\n**可判定 DONE 信号**（机械可查，非自述）：`src/runtime/__tests__/legacyRenderSourceConsumers.test.ts` 的第 4 条断言是**反证式**的 —— 它断言 `domain/content.ts` 里**不存在**具名 `readonly multiblock` 字段；一旦该承载落地，该断言**翻红**（即 DONE 信号：可以迁最后一处并把第 1 条断言改成 `toEqual([])`，随后删除读面本体）。\n**现成资产（勿重发现）**：`web/src/domain/multiblockDocument.ts`（344 行）已有**领域类型化**的 `MultiblockDeclaration`（含 `normalizeMultiblockDeclaration`/`multiblockDeclDigest`/`findMultiblockChannel` 等），但 `src/` 内**零生产消费者**（真正被用的同名实现在 `context/parsers/multiblockDocument.ts`）。R2 的承载落点应复用它，而不是再写一份。\n**（甲）登记条件 —— ⏳ 部分成立**：`PresenterSession` 生产实现 ✅（逐格拾取 + 逐像素结构等价已验）。仍未交付：「材质统一」（呈现层 `TexturePort.textureFor` **零实现**）与「注解/描边统一」（`presentation/annotationPlan`/`outlinePlan` 已交付但**零生产消费者**）。\n**R1 收口不声称本接缝已退出**：读面本体的退出与画面终切均不在 R1 的完成句里。\n**以下为原退出条件（逐字保留）**：\n"
-      +
-      '`src/runtime/drwMeshPipeline.ts` 的 `blockMeshProvider` 路径被删除，且视口结构层由 `src/composition/presenterSession.ts` 的 `PresenterSession` 产出（画面唯一来源是内核求值产物）；届时删除本条登记。',
-  }),
   /**
    * P9（#260）登记：**固定快照导出已交付，旧导出器仍在服役**。
    *

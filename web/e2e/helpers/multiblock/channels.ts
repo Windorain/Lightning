@@ -430,7 +430,11 @@ async function readComboSnapshot(
         panelRunstate: panel?.getAttribute('data-mb-runstate') ?? null,
         panelDisplayName: panel?.getAttribute('data-mb-display-name') ?? null,
         panelChannelValues: channelValues,
-        meshUuid: group && typeof group.uuid === 'string' ? group.uuid : null,
+        // R1-β① C8：世代身份改吃**呈现会话的批次世代**（画面生产者已是它）；
+        // 旧口径 `group.uuid` 在"contentGroup 就是稳定的呈现根"后不再随重建推进。
+        meshUuid: typeof slot?.presenterSurface?.generation === 'string'
+          ? `presenter:${slot.presenterSurface.generation}`
+          : (group && typeof group.uuid === 'string' ? group.uuid : null),
         meshMeshes: meshes,
         meshVertices: Math.round(vertices),
         meshTriangles: Math.round(triangles),
