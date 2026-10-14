@@ -211,13 +211,18 @@ describe('负对照', () => {
 
   it('**负对照（缺省 vs 第 0 帧）**：两者不得因为**采样数值相同**而被判等价', () => {
     const seq = sequenceOf()
-    const absent = bindTexture(materialWith(undefined), null)
-    const zero = bindTexture(materialWith(PHASE_ZERO), null)
+    // 调度者修正（2026-10-14）：`materialIdentityOf(descriptor, binding?)` 的第一参是**材质描述符**，
+    // 不是绑定对象（见 `presentation/presenter.ts:659` 的签名与 :661-665 的"descriptor 是权威"）。
+    // 本条判据的区分力正来自 descriptor 的相位字段，故两个描述符必须留名并作为第一参传入。
+    const absentDescriptor = materialWith(undefined)
+    const zeroDescriptor = materialWith(PHASE_ZERO)
+    const absent = bindTexture(absentDescriptor, null)
+    const zero = bindTexture(zeroDescriptor, null)
     // 采样数值确实相同（乘 1 加 0）—— 这正是"只能靠键区分"的事实基础
     expect(sampleBoundTexture(absent, seq, 0.7)).toEqual(sampleBoundTexture(zero, seq, 0.7))
     // 但键/身份/绑定键三者都必须不同
     expect(texturePhaseKeyOf(undefined)).not.toBe(texturePhaseKeyOf(PHASE_ZERO))
     expect(textureBindingKey(absent)).not.toBe(textureBindingKey(zero))
-    expect(materialIdentityOf(absent).id).not.toBe(materialIdentityOf(zero).id)
+    expect(materialIdentityOf(absentDescriptor, absent).id).not.toBe(materialIdentityOf(zeroDescriptor, zero).id)
   })
 })
