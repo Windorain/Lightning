@@ -164,9 +164,19 @@ export function annotationShapeOfMeshName(name: string): AnnotationShape | null 
   const rest = name.slice(5)
   const firstDash = rest.indexOf('-')
   if (firstDash <= 0) return null
-  const shape = rest.slice(0, firstDash)
-  if (shape === 'box' || shape === 'point' || shape === 'line' || shape === 'text' || shape === 'face') {
-    return shape
-  }
-  return null
+  return asAnnotationShape(rest.slice(0, firstDash))
+}
+
+/**
+ * 字符串 → 注解形状（**窄化检查**，不是类型断言）。
+ *
+ * 为什么需要它：内核注解读面把 `type` 收成 `string`（`runtime/annotationRead` 的
+ * 明示口径 —— 它只做字段改名，不声称认识全部形状），而呈现侧的 `AnnotationShape`
+ * 是**封闭联合**。两者之间的转换必须是一次**真实检查**（否则一个拼错的形状会
+ * 被静默当成合法值一路传到 GPU 规划器）。
+ */
+export function asAnnotationShape(value: string): AnnotationShape | null {
+  return value === 'box' || value === 'point' || value === 'line' || value === 'text' || value === 'face'
+    ? value
+    : null
 }

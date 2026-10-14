@@ -5,16 +5,18 @@
  * 操作符直接 import { pickVoxel, ... } from '@/context/queries' 调用。
  */
 import type { Context } from '@/runtime/context'
+// NDC 换算需要真的构造 `Vector2`（见 `ndcOf`）⇒ 值导入。
+import * as THREE from 'three'
 import type { MaterialQueryItem, BlockTypeStat } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
 // #301 P10f C′1（N4）：注解/材质的读面形状来自内核读面（不再依赖旧 Annotation 联合）。
 import type { KernelAnnotationView } from '@/runtime/annotationRead'
 import type { Frame } from '@/render/schema/types'
 import {
-  scenePickAllFromPointer,
-  pickAtPointer,
-  type ScenePickParams,
-} from '@/render/interaction/scenePick'
+  pickAllInViewport,
+  pickInViewport,
+  type ViewportPickInput,
+} from '@/composition/viewportPick'
 // R1-β① C8：返回/入参形状改吃**独立形状契约**（`presentation/pickResult`）。
 // 旧定义寄居在 `render/interaction/scenePick.ts` 里，而该文件的
 // `pickAtPointer`/`scenePickAllFromPointer` 在本批被删除 ⇒ 消费方不得再依赖它。
@@ -34,16 +36,13 @@ import type { PartRecord } from '@/pure/partTypes'
 import { resolvePartMaskGeometry, type PartMaskGeometry } from '@/pure/partMask'
 
 /**
- * 当前注解集（供 `scenePick` 的盒拾取）。
+ * 当前注解集（盒拾取与注解命中身份的唯一读面）。
  *
  * #301 P10f C′1（N4 字段完备处）：改走**内核注解读面**。
  *
- * ## 为什么这里可以同义替换（字段需求**实测**）
- *
- * 唯一消费者 `render/interaction/scenePick.ts` 只读
- * `id` / `type` / `visible` / `min` / `max`（`:194-197`、`:298-306`，其中
- * `isPickableBox` 已把该结构子集写成类型）—— 全部由内核承载
- * （字段表见 `runtime/annotationRead`）。
+ * R1-β① C8：消费者从旧 `render/interaction/scenePick` 换成
+ * `composition/viewportPick`（内核链）—— 注解命中的**身份映射**（内核对象 id
+ * `annotation:<legacyId>` → 面板用的裸 id）在那边完成，本函数只负责"读到哪些注解"。
  *
  * ⚠️ 内核未装配（GF-16 = false）时读面返回**空表**：此时内核侧确实没有可读的注解，
  * 而"回落读 legacy"会让来源再次不可判（D8 同型）。调用方若要区分
@@ -57,23 +56,52 @@ function viewportSlot(ctx: Context, regionId?: string) {
   return regionId ? (ctx.viewports.get(regionId) ?? ctx.getViewport()) : ctx.getViewport()
 }
 
-function scenePickBase(ctx: Context, regionId?: string): Omit<ScenePickParams, 'clientX' | 'clientY'> | null {
+/**
+ * **内核链拾取的入参**（R1-β① C8）。
+ *
+ * ## 与旧 `scenePickBase` 的差别（不是"换了几个字段"）
+ *
+ * | 旧 | 新 | 为什么 |
+ * |---|---|---|
+ * | `contentGroup`（legacy mesh 树） | `surface`（`PresenterSession`） | 画面生产者已切内核 ⇒ 只有内核批次上的命中能被解出格 |
+ * | `def`（结构定义 → `buildVoxelVolume`） | `grid`（`ctx.kernelGrid`） | 逐格身份与 `blockId` 由内核网格读面给出（与 legacy 同语义，见 `kernelPickAdapter`） |
+ * | `worldAnnotationGroup`/`overlayGroup`（各扫一次） | 注解子树（`PresenterSession` 内） | 注解的呈现已统一到呈现会话（`overlayPresenter` 的 depth/renderOrder 语义在那里） |
+ *
+ * ## 为什么缺任何一项就返回 `null`（而不是"尽力而为"）
+ *
+ * 拾取是**身份判定**：少了网格读面就无法把格映射成 `blockId`，少了呈现会话就没有
+ * 可解算的批次。此处返回 `null` = "本次拾取没有结果"，而**不是**回落到旧链
+ * （那会让"谁解出的这一格"重新出现两个答案，且回落会静默 —— 正是 #387 要消灭的形态）。
+ */
+function pickBase(ctx: Context, regionId?: string): (Omit<ViewportPickInput, 'ndc'> & { domElement: HTMLElement }) | null {
   const vp = viewportSlot(ctx, regionId)
   const camera = vp.camera.value
-  const contentGroup = vp.contentGroup.value
   const domElement = vp.domElement.value
-  const definition = vp.definition.value
-  if (!camera || !contentGroup || !domElement || !definition) return null
+  const surface = vp.presenterSurface
+  const grid = ctx.kernelGrid(ctx.getFrameIndex())
+  if (!camera || !domElement || surface === null || grid === null || grid === undefined) return null
   return {
-    domElement,
+    surface,
     camera,
-    contentGroup,
-    overlayGroup: vp.overlayGroup.value ?? undefined,
-    worldAnnotationGroup: vp.worldAnnotationGroup.value ?? undefined,
-    def: definition,
+    grid,
+    domElement,
     layerPreview: vp.layerPreview.value ?? 'all',
     annotations: readAnnotations(ctx),
   }
+}
+
+/**
+ * 客户端坐标 → NDC（**唯一**换算点）。
+ *
+ * 实现从旧 `scenePick.pickAtPointer` **逐字搬移**（`getBoundingClientRect` + Y 翻转）：
+ * 换算口径改变会让所有拾取位置整体偏移，而那是"看不出错在哪"的一类回归。
+ */
+function ndcOf(domElement: HTMLElement, clientX: number, clientY: number): THREE.Vector2 {
+  const rect = domElement.getBoundingClientRect()
+  return new THREE.Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1,
+  )
 }
 
 function gridHeight(ctx: Context): number {
@@ -93,9 +121,10 @@ export function pickEntityAtClient(
   clientY: number,
   regionId?: string,
 ): PickResult {
-  const base = scenePickBase(ctx, regionId)
+  const base = pickBase(ctx, regionId)
   if (!base) return null
-  return pickAtPointer({ ...base, clientX, clientY })
+  const { domElement, ...rest } = base
+  return pickInViewport({ ...rest, ndc: ndcOf(domElement, clientX, clientY) })
 }
 
 /** 屏幕坐标 → 方块引用 */
@@ -146,13 +175,10 @@ export function pickPartForScenePick(ctx: Context, picked: PickBlock): PartPick 
 
 /** 指针位置穿透的全部实体候选（去重、按深度排序），用于轮换拾取 */
 export function pickAll(ctx: Context, event: PointerEvent, regionId?: string): readonly PickEntity[] {
-  const base = scenePickBase(ctx, regionId)
+  const base = pickBase(ctx, regionId)
   if (!base) return []
-  const results = scenePickAllFromPointer({
-    ...base,
-    clientX: event.clientX,
-    clientY: event.clientY,
-  })
+  const { domElement, ...rest } = base
+  const results = pickAllInViewport({ ...rest, ndc: ndcOf(domElement, event.clientX, event.clientY) })
   const h = gridHeight(ctx)
   // ⚠️ 形状契约的字段是**只读**的（`presentation/pickResult`）⇒ 结构行号 → 世界 Y
   // 的换算必须**造新对象**而不是原地改 `row`（旧写法 `r.row = …` 在只读对象上会抛

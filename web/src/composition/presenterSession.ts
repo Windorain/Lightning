@@ -107,6 +107,13 @@ export interface PresenterHit {
   readonly normal: readonly [number, number, number] | null
 }
 
+/** 一条**注解**命中（`userData.objectId` = 内核对象 id，形如 `annotation:<legacyId>`）。 */
+export interface PresenterAnnotationHit {
+  readonly objectId: string
+  readonly distance: number
+  readonly point: readonly [number, number, number]
+}
+
 /** 一次"穿透全部候选"拾取的结果。 */
 export type PresenterPickAllResult =
   | { readonly kind: 'empty' }
@@ -501,6 +508,46 @@ export class PresenterSession {
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(ndc, camera)
     return this.pickAllAt(raycaster)
+  }
+
+  /**
+   * **注解命中**（R1-β① C8 第 2 项：拾取切内核链）。
+   *
+   * ## 为什么注解走单独一条通道（而不是并进 `pickAt`）
+   *
+   * 批次的命中身份在 `PickIndex`（对象/元素/**格**），而注解的命中身份是
+   * **对象**（`userData.objectId`）—— 两者的解算依据不同，混进一个返回值会让
+   * "这条命中的 `cell` 为什么缺席"变得需要猜。故注解单独返回，由调用方
+   * （`composition/viewportPick`）与批次命中按距离裁决。
+   *
+   * ## 为什么射线打**注解子树**而不是整个根
+   *
+   * `root` 下同时挂着批次对象与注解对象；对整根递归求交会把批次对象也算进来
+   * （它们没有 `objectId`，于是解不出、表现为"注解点不中"）。
+   *
+   * ⚠️ 与 `pickAt` 同一纪律：**显式刷新世界矩阵**。本会话的对象虽在场景树里，
+   * 但其 `matrixWorld` 只在渲染时更新，而拾取可能发生在两次渲染之间
+   * （`pickAnnotationsAt` 是同步读，不能依赖调用方先渲染）。
+   */
+  pickAnnotationsAt(raycaster: THREE.Raycaster): readonly PresenterAnnotationHit[] {
+    const root = this.overlay.object3d
+    root.updateMatrixWorld(true)
+    const hits = raycaster.intersectObject(root, true)
+    const out: PresenterAnnotationHit[] = []
+    for (const hit of hits) {
+      const objectId = (hit.object.userData as { objectId?: unknown }).objectId
+      // 注解网格由 `presentation/overlayPresenter` 建，`userData.objectId` 是它的身份面。
+      // 无该字段 ⇒ 不是注解对象（例如未来加进同一子树的其它物体）⇒ 跳过，不猜。
+      if (typeof objectId !== 'string') continue
+      out.push(
+        Object.freeze({
+          objectId,
+          distance: hit.distance,
+          point: [hit.point.x, hit.point.y, hit.point.z] as const,
+        }),
+      )
+    }
+    return Object.freeze(out)
   }
 
   /** 释放本会话的全部 GPU 份额。 */
