@@ -17,6 +17,8 @@
  * ⇒ 注入缺陷（例如把 `cellTooltips` 的回落分支删掉）会当场判红。
  */
 import { describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import { makeAdoptedKernelReadHost, makeKernelReadHost } from './kernelReadTestHost'
 import { createParserRegistry } from '@/context/parserRegistry'
@@ -315,32 +317,61 @@ describe('D3/R8 `documentSnapshot()` / `restoreDocumentSnapshot()`', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// R9 · 渲染链旧格式源文档
+// R2/S3 · `legacyRenderSource()` 终删 → 两个内核面读面
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('D3/R9 `legacyRenderSource()`（已登记接缝；只作渲染投影输入）', () => {
-  it('给的是**当前**文档（渲染链要读 `isMultiblock`/`id`/`multiblock.decl.raw`）', () => {
-    const doc = editedDoc()
-    const h = makeKernelReadHost(doc)
-    // ⚠️ 按 `id` 比较而**不是**对象身份：宿主用 `ref()` 持有文档，而 Vue 会把
-    // 对象包成响应式代理 ⇒ `main.doc.value !== 原对象`（这是 Vue 的事实，
-    // 不是读面的行为）。生产里 `Main.doc` 同样是 `Ref`，故消费方**本来就**
-    // 只能按内容而非身份使用它。
-    expect(h.ctx.legacyRenderSource()?.id).toBe('edited')
-    expect(h.ctx.legacyRenderSource()?.isMultiblock).toBe(doc.isMultiblock)
+describe('R2/S3 `legacyRenderSource()` 终删（接缝 `legacy-render-source-document` 的（乙）子句）', () => {
+  it('读面**本体已删除**（不得留成死代码，也不得改个名继续存在）', () => {
+    // ⚠️ 必须剥注释：本文件删除处留了一段"退役记录"注释，里面逐字提到该名字
+    // （那是留痕，不是残留实现）。剥注释后若仍命中 ⇒ 实现还在。
+    const src = fs
+      .readFileSync(path.join(process.cwd(), 'src/runtime/context.ts'), 'utf8')
+      .replace(/\r\n/g, '\n')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ')
+    expect(
+      /\.legacyRenderSource\s*\(|legacyRenderSource\s*\(\s*\)\s*:/.test(src),
+      '`Context#legacyRenderSource()` 必须已从 `runtime/context.ts` 删除'
+      + '（全仓调用点为 0 由 `legacyRenderSourceConsumers.test.ts` 机械把守）',
+    ).toBe(false)
   })
 
-  it('**无文档** ⇒ `null`（渲染链据此不建渲染视图，不是空文档）', () => {
-    expect(makeKernelReadHost(null).ctx.legacyRenderSource()).toBeNull()
+  it('`kernelMultiblockDeclaration()`：与 `kernelMultiblockBody().declaration` 是**同一个对象**（装配期不变式）', async () => {
+    const { doc, plainRoot } = await loadFixture('multiblock-tier-only')
+    const h = makeAdoptedKernelReadHost(doc, plainRoot)
+    try {
+      const decl = h.ctx.kernelMultiblockDeclaration()
+      expect(decl, '多方块文档必须给出声明').not.toBeNull()
+      expect(decl!.multiblockCount, '真实声明的 multiblockCount 恒为 1').toBe(1)
+      // 不变式（`composition/kernelAssembly.ts:622`）：body 的声明与 content.multiblock 同一对象。
+      // 两次转换会造出"相等但不同物" ⇒ `toBe` 判红。
+      expect(decl).toBe(h.ctx.kernelMultiblockBody()!.declaration)
+    } finally {
+      h.dispose()
+    }
   })
 
-  it('**换文档后跟着变**（响应式依赖不丢 —— 消费者是 `.vue` 的 computed）', () => {
-    const a = editedDoc()
-    const h = makeKernelReadHost(a)
-    const b = new RuntimeDocument({ id: 'b' } as never)
-    h.setDocument(b)
-    expect(h.ctx.legacyRenderSource()?.id, '换文档后读面必须跟着变（否则渲染链读到上一份）').toBe('b')
-    expect(h.ctx.legacyRenderSource()?.id).not.toBe('edited')
+  it('`kernelMultiblockDeclaration()`：**无会话** ⇒ `null`（不是"空声明对象"）', () => {
+    expect(makeKernelReadHost(null).ctx.kernelMultiblockDeclaration()).toBeNull()
+  })
+
+  it('`kernelRenderViewInputs()`：装配面在场 ⇒ 四样齐（scene / content / frameObjects / 声明投影）', async () => {
+    const { doc, plainRoot } = await loadFixture('multiblock-tier-only')
+    const h = makeAdoptedKernelReadHost(doc, plainRoot)
+    try {
+      const inputs = h.ctx.kernelRenderViewInputs()
+      expect(inputs, '装配面在场时必须给出输入（否则渲染链无处取场景）').not.toBeNull()
+      expect(inputs!.frameObjects.length).toBeGreaterThan(0)
+      expect(inputs!.scene.id).toBe(h.session!.document()!.scene.id)
+      expect(inputs!.content.metadata).toBe(h.session!.document()!.content.metadata)
+      expect(inputs!.multiblockDeclaration, '多方块文档必须带类型化声明投影').not.toBeNull()
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('`kernelRenderViewInputs()`：**无会话** ⇒ `null`（消费方如实降级，不伪造空输入）', () => {
+    expect(makeKernelReadHost(null).ctx.kernelRenderViewInputs()).toBeNull()
   })
 })
 

@@ -9,13 +9,21 @@
  * **忠实展示文件声明**（计划 T2.4 硬约束）：滑杆条数 = 声明条数（`slider === true`，`hatch` 由解析器排除）、
  * 标签取 `name`（呈现名，来自文件）、上限取 `channel.domain.hi`、`0` 显示 `Not set`。
  * 本模块**不猜测通道语义**：`kind` 只用于展示与 `data-*` 观测属性，不改变任何行为分支。
+ *
+ * ## R2/S3：形参收成**声明事实的结构最小面**（两个载体都能喂）
+ *
+ * 声明侧入口（`tierSampleValues`/`channelSliderSpecs`/`clampChannelValue`/
+ * `initialMultiblockSelection`/`buildChannelPanelModelOf`）吃 {@link MultiblockDeclarationFacts}，
+ * 于是**解析形状**（`context/parsers/multiblockDocument`，元素多带 `raw`）与
+ * **内核域声明**（`domain/multiblockDocument#MultiblockDeclaration`，元素无 `raw`）
+ * 都能喂——消费者适应内核，而不是让内核去兼容旧解析形状。
+ * 旧文档版入口（`assembleForSelection`/`buildChannelPanelModel`/`buildMultiblockRenderView`）
+ * 仍吃 `RuntimeDocument`，注释里各写了**退出条件**。
  */
 import {
   RuntimeDocument,
   RuntimeFrame,
   multiblockVariantKey,
-  type MultiblockChannelDecl,
-  type MultiblockDecl,
 } from '@/context/runtimeDocument'
 import {
   assembleSelection,
@@ -73,6 +81,57 @@ export interface MultiblockSelectionState {
   runstate: string
 }
 
+// ---------------------------------------------------------------------------
+// 声明事实的**结构最小面**（R2/S3；两个载体都能喂）
+// ---------------------------------------------------------------------------
+
+/**
+ * 下面这组接口是"**通道面板真正读到的声明事实**"，而**不是**某一种载体的形状。
+ *
+ * ## 为什么收成结构最小面（本批的落点）
+ *
+ * 本模块此前的形参是 `MultiblockDecl`（`context/parsers/multiblockDocument` 的解析形状）：
+ * 它的**每个元素都带必填 `raw: Record<string, unknown>`**（`MultiblockChannelDecl.raw`
+ * 等）。那使另一个载体 —— 内核域声明 `domain/multiblockDocument#MultiblockDeclaration`
+ * （元素**无** `raw`，那是刻意的：#249 §12 禁止把原始 JSON 塞回核心）—— **结构上不可传入**，
+ * 于是"按当前取值重算面板"只能继续吃旧解析形状（= 消费者没适应内核）。
+ *
+ * 收成最小面后：**解析形状**（多带的 `raw`/`enumName` 等是额外字段，可指派）与
+ * **域声明**（字段齐备）**都能喂**，而"读了哪些字段"由下面这些名字**逐条写明** ——
+ * 这也让"某个函数偷偷读了 `raw`"在类型层就不可能（本面没有它）。
+ *
+ * ## 机械核对（Lead 裁决 ③(a) 的前置条件）
+ *
+ * 本批实测（AST 逐函数字段读取，脚本见 Gitea #388 的证据附件）：
+ * `tierSampleValues`/`channelSliderSpecs`/`clampChannelValue`/`initialMultiblockSelection`/
+ * `assembleForSelection`/`buildChannelPanelModel` **函数体内出现 `raw` 属性 = 0 处**
+ * （含经局部别名的读取）⇒ 收窄不丢字段、也没有把 `raw` 塞回内核。
+ */
+export interface MultiblockChannelFacts {
+  readonly key: string
+  readonly name: string
+  readonly kind: string
+  readonly min: number
+  readonly max: number
+  readonly domain: Readonly<{ readonly lo: number; readonly hi: number }>
+  readonly slider: boolean
+}
+
+export interface MultiblockRunstateFacts {
+  readonly id: string
+  readonly name: string
+}
+
+/** 声明里"面板要用的那一部分"（域声明 `MultiblockDeclaration` 与解析形状都能指派）。 */
+export interface MultiblockDeclarationFacts {
+  readonly displayName: string
+  readonly totalTierDomain: Readonly<{ readonly min: number; readonly max: number; readonly default?: number }>
+  readonly tierSample: readonly number[]
+  readonly channels: readonly MultiblockChannelFacts[]
+  readonly runstates: readonly MultiblockRunstateFacts[]
+  readonly notes: readonly Readonly<{ readonly text: string }>[]
+}
+
 /** 装配结论：结果 + 是否命中声明组合 + 提示。 */
 export interface MultiblockAssemblyOutcome {
   result: AssemblyResult | null
@@ -87,7 +146,7 @@ export interface MultiblockAssemblyOutcome {
 // ---------------------------------------------------------------------------
 
 /** 总 Tier 抽取值清单：显式 `tierSample` 优先，缺省 = 整个 `totalTierDomain`。 */
-export function tierSampleValues(decl: MultiblockDecl): number[] {
+export function tierSampleValues(decl: MultiblockDeclarationFacts): number[] {
   const sample = decl.tierSample
   if (Array.isArray(sample) && sample.length > 0) {
     return [...sample].map((n) => Math.trunc(n)).sort((a, b) => a - b)
@@ -116,10 +175,10 @@ export function snapTierToSample(samples: readonly number[], tier: number): numb
 }
 
 /** 每通道一条滑杆的规格（`slider === false` 的 `hatch` 已被解析器排除，此处不重复判断语义）。 */
-export function channelSliderSpecs(decl: MultiblockDecl): ChannelSliderSpec[] {
+export function channelSliderSpecs(decl: MultiblockDeclarationFacts): ChannelSliderSpec[] {
   return decl.channels
     .filter((c) => c.slider)
-    .map((c: MultiblockChannelDecl) => ({
+    .map((c: MultiblockChannelFacts) => ({
       key: c.key,
       name: c.name,
       kind: c.kind,
@@ -134,7 +193,7 @@ export function channelSliderSpecs(decl: MultiblockDecl): ChannelSliderSpec[] {
  * 未声明的通道 key → `null`（调用方忽略该次改动）。
  */
 export function clampChannelValue(
-  decl: MultiblockDecl,
+  decl: MultiblockDeclarationFacts,
   key: string,
   value: number,
 ): number | null {
@@ -146,7 +205,7 @@ export function clampChannelValue(
 }
 
 /** 初始取值：Tier = `domain.default ?? max`（吸附抽样）、所有通道 Not set(0)、运行态 = 声明首项。 */
-export function initialMultiblockSelection(decl: MultiblockDecl): MultiblockSelectionState {
+export function initialMultiblockSelection(decl: MultiblockDeclarationFacts): MultiblockSelectionState {
   const domain = decl.totalTierDomain
   const samples = tierSampleValues(decl)
   const rawDefault = Math.trunc(domain.default ?? domain.max)
@@ -173,6 +232,43 @@ function formatClampText(c: ClampRecord): string {
 }
 
 /**
+ * **装配提示的唯一构造点**（R2/S3）：文件软约束 + 未命中声明组合的回落 + 夹取 + 警告。
+ *
+ * ## 为什么要抽成具名函数（而不是在两个调用点各写一遍）
+ *
+ * 它现在有**两个**调用方，各自吃不同的装配来源：
+ *  - 旧文档路径 `assembleForSelection`（`assembleSelection` 的 `AssemblyResult`）；
+ *  - 内核面路径 `useKernelChannels`（`assembleMultiblockKernelFace` 的 `report`）。
+ *
+ * 两处各写一遍 ⇒ "提示文案/顺序"会有第二份判据（而且面板的提示是**可显示的事实**，
+ * 顺序也是）。故这里只保留**一个**实现，两个来源都喂它。
+ *
+ * ⚠️ `report === null` = **没有装配结论**（未装配/装配失败），此时只有文件软约束提示 ——
+ * 与旧实现"notes 先入表、失败再追加一条"的顺序逐字一致。
+ */
+export function assemblyNoticesOf(input: {
+  readonly notes: readonly Readonly<{ readonly text: string }>[]
+  readonly variantKey: string
+  readonly declared: boolean
+  readonly report: Readonly<{
+    readonly variantKey: string
+    readonly clamped: readonly ClampRecord[]
+    readonly warnings: readonly string[]
+  }> | null
+}): string[] {
+  const notices: string[] = input.notes.map((n) => `提示（文件声明）：${n.text}`)
+  if (input.report === null) return notices
+  if (!input.declared) {
+    notices.push(
+      `组合未声明（${input.variantKey}）：按契约回落最近已声明变体 ${input.report.variantKey}`,
+    )
+  }
+  for (const c of input.report.clamped) notices.push(formatClampText(c))
+  for (const w of input.report.warnings) notices.push(w)
+  return notices
+}
+
+/**
  * 装配当前取值（**唯一装配入口**，UI 不直接调用 T2.2）。
  *
  * 守卫（计划 T2.4/T2.5 明文）：先用 `multiblockVariantKey` + `decl.variantByKey` 判断组合是否已声明；
@@ -190,11 +286,9 @@ export function assembleForSelection(
   const variantKey = multiblockVariantKey(decl, state.values, state.runstate, state.totalTier)
   const declared = decl.variantByKey.has(variantKey)
 
-  // 文件软约束（`notes`）：只提示，不参与装配（契约 §7.3）
-  const notices: string[] = decl.notes.map((n) => `提示（文件声明）：${n.text}`)
-
   const inner = doc.multiblockSource as MultiblockInnerDocument | null
   if (!inner) {
+    const notices = assemblyNoticesOf({ notes: decl.notes, variantKey, declared, report: null })
     notices.push('文档未携带可装配的内层 body（multiblockSource 为空）')
     return { result: null, variantKey, declared, notices }
   }
@@ -205,15 +299,15 @@ export function assembleForSelection(
       values: { ...state.values },
       runstate: state.runstate,
     })
-    if (!declared) {
-      notices.push(
-        `组合未声明（${variantKey}）：按契约回落最近已声明变体 ${result.report.variantKey}`,
-      )
+    // 文件软约束（`notes`）+ 声明回落 + 夹取 + 警告：**唯一**构造点（见 `assemblyNoticesOf`）。
+    return {
+      result,
+      variantKey,
+      declared,
+      notices: assemblyNoticesOf({ notes: decl.notes, variantKey, declared, report: result.report }),
     }
-    for (const c of result.report.clamped) notices.push(formatClampText(c))
-    for (const w of result.report.warnings) notices.push(w)
-    return { result, variantKey, declared, notices }
   } catch (e) {
+    const notices = assemblyNoticesOf({ notes: decl.notes, variantKey, declared, report: null })
     notices.push(`装配失败（已保留上一次可渲染结果）：${formatUnknownError(e)}`)
     return { result: null, variantKey, declared, notices }
   }
@@ -223,7 +317,59 @@ export function assembleForSelection(
 // 装配产物 → 渲染视图文档
 // ---------------------------------------------------------------------------
 
-/** 面板模型：声明 + 当前取值 + 装配结论 → 面板一次性输入。 */
+/**
+ * 装配结论的**最小面**（R2/S3）：面板只用到"变体键 + 尺寸文本 + 提示"三样。
+ *
+ * 为什么不直接用 `MultiblockAssemblyOutcome`（它带 `AssemblyResult`）：那个类型来自
+ * 旧装配器（`context/multiblock`），而内核面路径（`assembleMultiblockKernelFace`）
+ * 产出的是 `report` + `Grid`，**没有** `AssemblyResult`。收成这三样后，两个来源
+ * （旧文档 / 内核面）都能喂，面板本身不再依赖任何一种装配实现。
+ */
+export interface ChannelPanelOutcome {
+  /** 当前取值派生的变体键（观测点）。 */
+  readonly variantKey: string
+  /** 装配尺寸文本（`formatDims` 的产出）；`''` = 本次没有装配结果。 */
+  readonly dims: string
+  readonly notices: readonly string[]
+}
+
+/**
+ * **面板模型（声明事实版）**：声明 + 取值 + 装配结论 → 面板一次性输入。
+ *
+ * 这是两个入口的**唯一实现**；`buildChannelPanelModel`（旧文档版）只是它的适配器。
+ */
+export function buildChannelPanelModelOf(
+  decl: MultiblockDeclarationFacts,
+  state: MultiblockSelectionState,
+  outcome: ChannelPanelOutcome,
+): MultiblockChannelPanelModel {
+  const domain = decl.totalTierDomain
+  return {
+    displayName: decl.displayName,
+    tier: state.totalTier,
+    tierMin: Math.trunc(domain.min),
+    tierMax: Math.trunc(domain.max),
+    tierSamples: tierSampleValues(decl),
+    channels: channelSliderSpecs(decl),
+    values: { ...state.values },
+    runstates: decl.runstates.map((r) => ({ id: r.id, name: r.name })),
+    runstate: state.runstate,
+    variantKey: outcome.variantKey,
+    dims: outcome.dims,
+    notices: [...outcome.notices],
+  }
+}
+
+/**
+ * 面板模型（**旧文档路径**）。
+ *
+ * ⚠️ 它现在只做一件事：从旧文档取出声明事实 + 把旧装配结论折成最小面，
+ * 然后**委托**给 `buildChannelPanelModelOf`（同一实现 —— 这里不复制任何面板逻辑）。
+ *
+ * 退出条件（与 `assembleForSelection` 同批）：旧文档路径的最后一个调用者消失时，
+ * 本函数与其 `RuntimeDocument` 形参一并删除。今天的调用者只有
+ * `useKernelChannels`（**已改吃内核面**，见其 `:266-271`）与两个旧形状的测试。
+ */
 export function buildChannelPanelModel(
   doc: RuntimeDocument,
   state: MultiblockSelectionState,
@@ -231,21 +377,11 @@ export function buildChannelPanelModel(
 ): MultiblockChannelPanelModel | null {
   const mb = doc.multiblock
   if (!mb) return null
-  const domain = mb.decl.totalTierDomain
-  return {
-    displayName: mb.decl.displayName,
-    tier: state.totalTier,
-    tierMin: Math.trunc(domain.min),
-    tierMax: Math.trunc(domain.max),
-    tierSamples: tierSampleValues(mb.decl),
-    channels: channelSliderSpecs(mb.decl),
-    values: { ...state.values },
-    runstates: mb.decl.runstates.map((r) => ({ id: r.id, name: r.name })),
-    runstate: state.runstate,
+  return buildChannelPanelModelOf(mb.decl, state, {
     variantKey: outcome.variantKey,
     dims: outcome.result ? formatDims(outcome.result.dims) : '',
     notices: outcome.notices,
-  }
+  })
 }
 
 /** `0` = 未设置（契约 §5.2：0 与"不设置"在数据层等价）。 */

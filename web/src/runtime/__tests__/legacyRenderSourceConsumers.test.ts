@@ -24,19 +24,18 @@
  * | 阶段 | 生产消费点 |
  * |---|---|
  * | C5 之前 | **4**：`useViewportRuntime`(docRef 回落) · `useKernelChannels`(decl 源) · `EmbedViewport.vue`(tooltip 入参) · `workbench-rna.ts`(多方块生成态判定) |
- * | C5 段③（本段） | **1**：`useKernelChannels` —— 其余三处已改写：`EmbedViewport.vue` 改吃内核读面（元数据 + 注解行）；`useViewportRuntime` 的 `docOverride` 改为**必填** `renderDocRef`（回落删除）；`workbench-rna.ts` 的生成态判定改走 `Context#kernelWriteAuthority`（内核写权事实，见 `kernelWriteAuthorityFace.test.ts`） |
+ * | C5 段③ | **1**：`useKernelChannels` —— 其余三处已改写 |
+ * | **R2/S3（本批）** | **0** —— 最后 1 处（`useKernelChannels`）改吃内核读面（声明 ← `Context#kernelMultiblockDeclaration`；body ← `Context#kernelMultiblockBody`；渲染投影 ← `kernelRenderViewFromFace`），随后**删除 `Context#legacyRenderSource()` 本体** |
  *
- * ⚠️ **剩余 1 处的性质不同**（诚实登记）：`useKernelChannels` 需要**多方块声明的内层 body**
- * 来做「按当前通道取值重新装配」与「构造渲染视图文档」，而该 body 今天由旧文档承载
- * （`composition/kernelAssembly#assembleKernelDocument` 自己就吃 `RuntimeDocument`）
- * ⇒ 不是"渲染源回落"，而是**内核承载缺口**。
+ * ⚠️ **口径扩展（R2/S3；Lead 裁决 ④）**：本文件此前的扫描范围只有 `src/`（排除 `__tests__/`），
+ * 而 `e2e/` **不在 L0 的射程内**（不在 tsconfig include、vitest 不载）⇒ 一处留在 `e2e/` 的调用
+ * 会让 L0/L1 全绿、只有 L2/L3 运行期炸。本批实测正是如此：
+ * `e2e/helpers/multiblock/harness.ts:348,578` 两处当时不被任何判据看见。
+ * ⇒ 现在**两条**判据：生产 = 0（原口径）+ **全仓 = 0**（`src` + `e2e` + `tests` + `scripts`），
+ * 且各自带负对照（含"往 e2e 真实文件文本里注入一处 ⇒ 必红"）。
  *
- * ✅ **该缺口已由 R2-1a（G1）清掉**：`domain/content#DocumentContent` 现有具名
- * `multiblock: MultiblockDeclaration`（复用 `domain/multiblockDocument` 的承载），
- * 由 `adapters/files/multiblockDeclaration` 从**已解析**声明装配，并**进内容身份**
- * （`domain/document#contentDigestOf` 已含 `content`）。最后一条断言即该 DONE 信号
- * （翻绿），另附负对照证明它有区分力。**删除 `Context#legacyRenderSource()` 本体**
- * 仍是 G4（需 A 区空闲）—— 迁移消费点与删本体是两件事。
+ * 可推广的纪律：**"删除/退役"类判据的扫描范围必须覆盖 L0 看不见的目录**，
+ * 否则"删干净了"这个结论本身建立在盲区上。
  *
  * ## 区分力（负对照）
  *
@@ -57,12 +56,12 @@ import path from 'node:path'
 
 const SRC = path.join(process.cwd(), 'src')
 
-/** 递归收集 `src/` 下的 `.ts` / `.vue`。 */
+/** 递归收集 `dir` 下的 `.ts` / `.tsx` / `.mts` / `.vue`。 */
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name)
     if (e.isDirectory()) sourceFiles(p, out)
-    else if (e.isFile() && (e.name.endsWith('.ts') || e.name.endsWith('.vue'))) out.push(p)
+    else if (e.isFile() && /\.(ts|tsx|mts|vue)$/.test(e.name)) out.push(p)
   }
   return out
 }
@@ -90,6 +89,41 @@ function productionCallSites(): { file: string; line: number }[] {
     code.split('\n').forEach((line, i) => {
       if (/\.legacyRenderSource\s*\(/.test(line)) hits.push({ file: `src/${rel}`, line: i + 1 })
     })
+  }
+  return hits
+}
+
+/**
+ * **全仓**扫描根（R2/S3 扩展；Lead 裁决 ④：删除/退役类判据必须覆盖 **L0 看不见**的目录）。
+ *
+ * 为什么必须有这一条：`e2e/` **不在** `tsconfig.json` 的 `include` 里（`vue-tsc` 不查）、
+ * vitest 只载 `src/**` ⇒ 一处 `ctx.legacyRenderSource()` 留在 `e2e/` 里，
+ * L0/L1 全绿，只有 L2/L3 在**运行期**炸 `TypeError: ... is not a function`。
+ * 本批实测就撞上了：`e2e/helpers/multiblock/harness.ts:348,578` 两处（当时不在任何判据的射程内）。
+ */
+const REPO_ROOTS = ['src', 'e2e', 'tests', 'scripts']
+
+/** 单段文本里的调用点行号（与生产口径同一把尺子：先剥注释再剥字符串）。 */
+function linesWithCall(text: string): number[] {
+  const code = stripStrings(stripComments(text.replace(/\r\n/g, '\n')))
+  return code.split('\n').flatMap((line, i) => (/\.legacyRenderSource\s*\(/.test(line) ? [i + 1] : []))
+}
+
+/** 全仓扫描到的文件清单（反空洞真用：必须真的含 `e2e/` 下的文件）。 */
+function scannedRepoFiles(): string[] {
+  return REPO_ROOTS.flatMap((root) => {
+    const abs = path.join(process.cwd(), root)
+    if (!fs.existsSync(abs)) return []
+    return sourceFiles(abs).map((f) => path.relative(process.cwd(), f).replace(/\\/g, '/'))
+  })
+}
+
+/** **全仓**（含 `src/` 测试、`e2e/`、`tests/`、`scripts/`）的调用点。 */
+function allCallSites(): { file: string; line: number }[] {
+  const hits: { file: string; line: number }[] = []
+  for (const rel of scannedRepoFiles()) {
+    const text = fs.readFileSync(path.join(process.cwd(), rel), 'utf8')
+    for (const line of linesWithCall(text)) hits.push({ file: rel, line })
   }
   return hits
 }
@@ -130,15 +164,39 @@ function contentCarriesMultiblock(text: string): boolean {
 }
 
 describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数（接缝 `legacy-render-source-document`）', () => {
-  it('生产消费点 = **1**，且**恰好**是这一处（新增一处即判红）', () => {
+  it('生产消费点 = **0**（接缝（乙）子句达成：消费者迁移数 = 0）', () => {
     const files = [...new Set(productionCallSites().map((h) => h.file))].sort()
     expect(
       files,
-      '渲染链旧格式源的生产消费点集合已变 —— 该集合是接缝（乙）子句的机械口径，'
-      + '改动必须同时更新本判据与 `seams.ts` 的登记',
-    ).toEqual([
-      'src/shared/viewport/useKernelChannels.ts',
-    ])
+      'R2/S3 已把最后一个生产消费点（`src/shared/viewport/useKernelChannels.ts`）改吃内核读面 '
+      + '⇒ 生产集合必须为空。**新增一处即判红**（那是把读面又请回来的形态）',
+    ).toEqual([])
+  })
+
+  it('**全仓**消费点 = 0（含 `src/` 测试、`e2e/`、`tests/`、`scripts/` —— L0 看不见的目录也在内）', () => {
+    // 反空洞真：扫描面必须真的含 `e2e/` 下的文件，否则"0"只是"没扫到"。
+    const scanned = scannedRepoFiles()
+    expect(scanned.some((f) => f.startsWith('e2e/')), '扫描面必须含 `e2e/**`（L0 的盲区）').toBe(true)
+    expect(scanned.some((f) => f.startsWith('src/')), '扫描面必须含 `src/**`').toBe(true)
+    expect(
+      allCallSites().map((h) => `${h.file}:${h.line}`),
+      '全仓不得再有该读面的调用（含 `e2e/` 与 `src/` 测试）—— 它已终删',
+    ).toEqual([])
+  })
+
+  it('**负对照（L0 盲区）**：往 `e2e/` 的真实文件文本里注入一处调用 ⇒ 全仓判据必须判红', () => {
+    // 与扫描口径**同一把尺子**（逐文件 → 剥注释 → 剥字符串 → 逐行匹配）作用在真实 e2e 文本上：
+    // 注入后必须被计数（证明 e2e 真在射程内），而注释/字符串里的同一句话不得计入。
+    const target = scannedRepoFiles().find((f) => f.startsWith('e2e/'))
+    expect(target, '前提：扫描面里必须有一个 `e2e/` 文件可供注入').toBeTruthy()
+    const text = fs.readFileSync(path.join(process.cwd(), target!), 'utf8').replace(/\r\n/g, '\n')
+    expect(linesWithCall(text), '前提：该 e2e 文件此刻**不含**该调用（否则负对照无对象）').toEqual([])
+    expect(
+      linesWithCall(text + '\nconst probe = ctx.legacyRenderSource()\n'),
+      '注入一处调用必须被计数（区分力）',
+    ).toHaveLength(1)
+    expect(linesWithCall('// ctx.legacyRenderSource() 是旧读面\n'), '注释不计').toEqual([])
+    expect(linesWithCall('const note = "ctx.legacyRenderSource() 是旧读面"\n'), '字符串不计').toEqual([])
   })
 
   it('**负对照**：已迁的三处不得再消费该读面（迁完又长回来即判红）', () => {
@@ -180,12 +238,12 @@ describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数
     ).toBe(false)
   })
 
-  it('**DONE 信号**：内核 `DocumentContent` 已具名承载多方块声明（剩余 1 处的删除条件已满足）', () => {
+  it('**DONE 信号**：内核 `DocumentContent` 已具名承载多方块声明（S3 的删除条件已满足并已执行）', () => {
     expect(
       contentCarriesMultiblock(readContentSource()),
-      'DONE 信号翻绿 = `useKernelChannels.ts:199` 的迁移阻塞项（内核无多方块声明的内层 body）已清 —— '
-      + '届时一并改写 `useKernelChannels.ts` / `workbench-rna.ts`，把第 1 条断言改成 `toEqual([])`，'
-      + '再删除 `Context#legacyRenderSource()` 本体（G4，需 A 区空闲）',
+      'DONE 信号 = 内核 `DocumentContent` 具名承载多方块声明（`useKernelChannels` 的迁移阻塞项已清）。'
+      + 'R2/S3 已执行其后续步骤：改吃内核读面 → 全仓消费者集合 = 0（含 `e2e/`）→ 删除读面本体。'
+      + '若本信号翻红（承载字段被删/被换成字段袋），则上面那些"消费者为 0"的判据失去前提',
     ).toBe(true)
   })
 

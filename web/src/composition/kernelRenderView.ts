@@ -29,9 +29,17 @@
 
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { RuntimeDocument as LegacyRuntimeDocument } from '@/context/runtimeDocument'
-import { assembleKernelDocument, type AssembledDocument } from '@/composition/kernelAssembly'
+import {
+  assembleKernelDocument,
+  assembleMultiblockKernelFace,
+  type AssembledDocument,
+} from '@/composition/kernelAssembly'
 import { projectKernelDocument, type KernelDeclarationProjection } from '@/composition/kernelProjection'
-import { evaluateMultiblock, type MultiblockSelectionInput } from '@/presentation/multiblockEvaluation'
+import { evaluationIdentityOf, evaluateMultiblock, type MultiblockSelectionInput } from '@/presentation/multiblockEvaluation'
+import type { CellContent } from '@/domain/cellContent'
+import type { DocumentContent } from '@/domain/content'
+import type { MultiblockBody } from '@/domain/multiblockDocument'
+import { objectData, withUpdatedData, type Scene } from '@/domain/scene'
 
 /** 渲染视图的求值产物（含诊断与身份）。 */
 export interface KernelRenderView {
@@ -171,4 +179,136 @@ export function kernelRenderViewOf(input: {
     identity: evaluated.identity,
     diagnostics: Object.freeze([...evaluated.notices]),
   })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R2/S3：**内核面**求值入口（不吃 `RuntimeDocument`）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 内核面求值的输入：**全部**来自内核读面（会话保管的装配事实 + body 承运）。
+ *
+ * ## 为什么它不在这里自己去取（分工）
+ *
+ * "读哪几个内核面"归 `Context`（那里已有 `kernelMultiblockBody`/`kernelSourceRoot`/
+ * `kernelRenderSourceFace` 一族具名读面，且**响应式依赖**要由读面统一建立）。
+ * 本层只接**已取到的值**并做协调 —— 与 `kernelRenderViewOf` 的 `plainRoot` 由调用方
+ * 传入同一分工。
+ *
+ * ## 与 `kernelRenderViewOf` 的差别（这不是"二选一回落"，是两条各自动工的路径）
+ *
+ * | | `kernelRenderViewOf`（旧） | 本入口（R2/S3） |
+ * |---|---|---|
+ * | 求值 | `assembleKernelDocument({doc, multiblockSelection})`：**整份文档**按新取值重装配 | `assembleMultiblockKernelFace({body, selection})`：**只**重装配多方块网格 |
+ * | 输入 | 旧格式 `RuntimeDocument`（有损） | body 承运 + 会话的 `scene`/`content`/`frameObjects`/声明投影 |
+ * | 元数据 | 靠调用方传 `plainRoot`（不传 ⇒ 有损降级，见 G5） | **不需要**：`content` 本身就是装配期的内核内容（无损） |
+ */
+export interface KernelRenderFaceInput {
+  /** 多方块内层 body 的内核承运；`null` = 帧为主文档（没有可再装配的多方块）。 */
+  readonly body: MultiblockBody | null
+  /** 当前通道取值。 */
+  readonly selection: MultiblockSelectionInput
+  /** 当前帧下标（决定哪一帧带网格）。 */
+  readonly frameIndex: number
+  /** 会话保管的装配事实：场景（当前网格所在的宿主）。 */
+  readonly scene: Scene
+  /** 会话保管的装配事实：内核内容（元数据/帧轴/资源/说明池）。 */
+  readonly content: DocumentContent
+  /** 会话保管的装配事实：帧下标 → 对象 id（装配期才知道）。 */
+  readonly frameObjects: readonly string[]
+  /** 会话保管的装配事实：类型化声明投影（重建内层 body 的键）。 */
+  readonly multiblockDeclaration: KernelDeclarationProjection | null
+  /**
+   * 逐格说明叠加层（文档级 `tooltipPalette` + `cellTooltipGrid`）。
+   *
+   * ⚠️ **今天没有内核承运的来源**：内核按设计不带这两样（它们属解析侧的外部格式事实），
+   * 而 `assembleTooltipContent` 的 `sizeRow` 又必须等于**本次取值装配出的网格高度**
+   * —— 那个网格是本函数**装配之后**才知道的（先有鸡还是先有蛋）。
+   * ⇒ 本参数如实留成可选：调用方拿得到就传，拿不到就**不传**（不伪造）。缺它时
+   * **只**影响本渲染视图文档的逐格说明池，而 DRW 在 `renderSourceRef` 在场时
+   * 优先读内核面（`runtime/drwMeshPipeline#applyWorldFrame` 的早退分支），不吃这一份。
+   */
+  readonly cellContent?: Readonly<Record<string, CellContent>>
+}
+
+/**
+ * **内核面 → 渲染视图文档**（R2/S3 的落点）：让渲染链不再需要 `RuntimeDocument` 作为输入。
+ *
+ * ## 步骤（顺序是判据的一部分）
+ *
+ *  1. **求值身份**：多方块路径由 `evaluationIdentityOf`（声明内容 + 取值 + 帧下标；不含机位）；
+ *  2. **再装配**：`assembleMultiblockKernelFace({ body, selection })` —— 显式失败（**不**回落旧文档）；
+ *  3. **把新网格放进场景**：`withUpdatedData(scene, objectData(dataId, payload, 'content'))`
+ *     —— `projectKernelDocument` 的 `renderView` 模式是从**场景的帧对象载荷**取网格的
+ *     （`kernelProjection.ts:1447` 的 `structures[0]`），故"当前取值"必须以载荷形式进场景；
+ *  4. **投影 + 读回**：`projectKernelDocument({ renderView })` → `fromV2Plain`。
+ *
+ * ## 帧为主文档（`body === null`）
+ *
+ * 走**同一**投影（不带多方块节点、不开 `renderView` 模式），产出的仍是"帧自带的 structure"
+ * 形态 —— 与切换前 `!doc.isMultiblock ⇒ 原样返回 doc` 同一语义。
+ *
+ * ⚠️ **为什么不能返回 `doc: null`**：`runtime/drwMeshPipeline#setCurrentWorldFrame` 的守卫是
+ * `if (!doc || doc.frameCount === 0) return` ⇒ `doc === null` 会让**换帧静默失效**
+ * （画面停在首帧且无报错）。故本入口在两条路径上都产出可读回的文档，读不回时**如实失败**。
+ */
+export function kernelRenderViewFromFace(input: KernelRenderFaceInput): KernelRenderView {
+  const { body, selection, frameIndex } = input
+
+  // 帧为主路径的身份与切换前**逐字相同**（那条路径从不产出身份：`identity: ''`）。
+  const identity = body === null
+    ? ''
+    : evaluationIdentityOf({
+        sceneId: input.scene.id,
+        declarationContent: input.multiblockDeclaration?.declRaw ?? null,
+        selection,
+        frameIndex,
+      })
+
+  let scene = input.scene
+  if (body !== null) {
+    const assembled = assembleMultiblockKernelFace({
+      body,
+      selection,
+      ...(input.cellContent === undefined ? {} : { cellContent: input.cellContent }),
+    })
+    if (!assembled.ok) {
+      const reason =
+        typeof assembled.error.params.reason === 'string'
+          ? assembled.error.params.reason
+          : assembled.error.code
+      return Object.freeze({
+        doc: null,
+        identity,
+        diagnostics: Object.freeze([
+          `多方块再装配未产出（${reason}）—— 保留上一次可渲染结果（不静默产空）`,
+        ]),
+      })
+    }
+    // 网格以**载荷**形式进场景（`renderView` 模式的网格来源；见步骤 ③）。
+    // `source: 'content'` 与装配期创建该对象时的口径**逐字相同**（kernelAssembly.ts:1858）。
+    scene = withUpdatedData(
+      input.scene,
+      objectData(assembled.value.dataId, assembled.value.payload, 'content'),
+    )
+  }
+
+  const projected = projectKernelDocument({
+    scene,
+    content: input.content,
+    frameObjects: input.frameObjects,
+    multiblockDeclaration: body === null ? null : input.multiblockDeclaration,
+    ...(body === null ? {} : { renderView: { frameIndex } }),
+  })
+  const reparsed = LegacyRuntimeDocument.fromV2Plain(projected.plain as Record<string, unknown>)
+  if (reparsed === null) {
+    return Object.freeze({
+      doc: null,
+      identity,
+      diagnostics: Object.freeze([
+        '内核面渲染视图的投影产物无法被 `fromV2Plain` 读回（投影产出了非法形状）—— 这是实现缺陷，不静默',
+      ]),
+    })
+  }
+  return Object.freeze({ doc: reparsed, identity, diagnostics: Object.freeze([]) })
 }

@@ -1330,7 +1330,15 @@ describe('P10f D2 · ⑪ `plainForSave` 的 `source` 分流（唯一分流点 + 
       .replace(/\r\n/g, '\n')
     const start = src.indexOf('plainForSave():')
     expect(start, '`plainForSave` 必须在案').toBeGreaterThan(-1)
-    const end = src.indexOf('\n  private kernelAdoptedFrames', start)
+    // 实现区的结束锚 = **本方法后面的下一个类成员 JSDoc**（`\n  /**`，恰两个空格）。
+    //
+    // ⚠️ R2/S3 修锚：原锚是 `\n  private kernelAdoptedFrames`，于是切片**跨过了
+    // 中间新增的多个读面**（`kernelSourceRoot`/`kernelMultiblockBody`/
+    // `kernelMultiblockDeclaration`…）。它们各自可以有**合法的**响应式读取
+    // （`void this.main.doc.value` 是 `Context` 读面的既有形态），从而让本条
+    // 误判成"plainForSave 又取旧载体"。改成"下一个成员即止"后，本判据扫的
+    // **确实只是 `plainForSave` 自己**（判据变精确，不是变弱）。
+    const end = src.indexOf('\n  /**', start)
     expect(end, '必须能切出本方法的实现区（否则判据会扫全局而失去区分力）').toBeGreaterThan(start)
     const body = src.slice(start, end)
     expect(body, '不得再取旧载体（回落分支的取值点）').not.toContain('this.main.doc.value')

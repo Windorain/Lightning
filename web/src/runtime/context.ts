@@ -50,7 +50,7 @@ import {
   type DocumentSnapshot,
 } from '@/runtime/documentSnapshot'
 import { projectKernelSaveView, type SaveProjection } from '@/composition/saveProjection'
-import { projectKernelGrids } from '@/composition/kernelProjection'
+import { projectKernelGrids, type KernelDeclarationProjection } from '@/composition/kernelProjection'
 import {
   kernelRenderSourceFaceOf,
   type KernelRenderSourceFace,
@@ -64,9 +64,9 @@ import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotat
 
 /** 空读面常量（eadonly 空数组：避免每次分配，且调用方不得改内联量）。 */
 const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
-import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
-import type { MultiblockBody } from '@/domain/multiblockDocument'
-import { findObjectData } from '@/domain/scene'
+import { frameCount as axisFrameCount, frameDurationsMs, type DocumentContent } from '@/domain/content'
+import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
+import { findObjectData, type Scene } from '@/domain/scene'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 
 function embedUnavailable(name: string): never {
@@ -539,6 +539,41 @@ export class Context {
   kernelMultiblockBody(): MultiblockBody | null {
     const session = this.kernel
     return session === null ? null : session.multiblockBodyOf()
+  }
+
+  /**
+   * **多方块声明的内核载体读面**（R2/S3）：`DocumentContent.multiblock` 本身。
+   *
+   * ## 它与 `kernelMultiblockBody()` 的关系（**不是**两份权威）
+   *
+   * 装配期有一个不变式（`composition/kernelAssembly.ts:622`）：
+   * `multiblockBody.declaration` 与 `content.multiblock` 是**同一个对象**。
+   * 两个读面服务两类消费者，各自只回答一个问题：
+   *
+   * | 读面 | 消费者要什么 |
+   * |---|---|
+   * | `kernelMultiblockBody()` | **body 承运**（再装配入口 `assembleMultiblockKernelFace` 的形参） |
+   * | 本方法 | 声明的**事实**（通道/运行态/总档位域/说明 → 面板模型与选择投影） |
+   *
+   * ## `null` 的含义（与 `EMPTY_MULTIBLOCK_DECLARATION` 的分工）
+   *
+   * `null` = **本内核文档没有多方块声明**（帧为主）或未装配。判定依据是
+   * `multiblockCount === 0`：`domain/multiblockDocument` 明文——真实声明恒为 `1`，
+   * 故「空值 ⟺ 无声明」是**结构事实**而不是约定。这里**不**把那份空声明本身返回出去：
+   * 消费方要的是"有没有"的一个答案，返回空对象会让两处各自再判一次。
+   *
+   * ⚠️ 响应式依赖：消费者是 `.vue` 的 `computed`，而内核侧的装配标记是普通字段
+   * （Vue 追踪不到）⇒ 先读一次 `main.doc`（`Ref`，每次换文档都变化），
+   * 与 `kernelSaveView()`/`frameDeclarations()` 同一取舍。
+   */
+  kernelMultiblockDeclaration(): MultiblockDeclaration | null {
+    void this.main.doc.value
+    const session = this.kernel
+    if (session === null || !session.hasAdoptedContent()) return null
+    const kernelDoc = session.document()
+    if (kernelDoc === undefined) return null
+    const decl = kernelDoc.content.multiblock
+    return decl.multiblockCount === 0 ? null : decl
   }
 
   /**
@@ -1095,41 +1130,26 @@ export class Context {
     return doc === null ? null : doc.clone()
   }
 
-  /**
-   * **渲染链的旧格式源文档**（#301 P10f D3；**R9**）。
-   *
-   * ## 它是**已登记的暂存**，不是遗漏（务必连同 seam 一起读）
-   *
-   * 渲染链（DRW）消费的是**旧格式的渲染视图文档**（`RuntimeDocument`）：
-   * 多方块视口的 `renderDoc` 由 `composition/kernelRenderView#kernelRenderViewOf`
-   * 产出，而该函数的**入参与出参都是旧格式**（`assembleKernelDocument` 与
-   * `projectKernelDocument` 的既有签名决定）。
-   *
-   * ⇒ "DRW 不再吃旧格式"这件事**不是**"删一个访问器"能达成的：它要的是
-   * **渲染链终切**（DRW 消费 `PresenterSession`），而那是
-   * `composition/seams.ts` 的 `presenter-surface-dual-track`
-   * 明文登记的接缝，其终切在 D 批映射表 §八被**显式排除**
-   *（"渲染链终切……本批不做"）。
-   *
-   * ## 与旧访问器的**实质区别**（为什么这不是"改个名"）
-   *
-   * | | 旧 `getDoc()` | 本方法 |
-   * |---|---|---|
-   * | 语义 | **文档内容的权威读入口**（谁都能拿它读一切） | **渲染投影的格式输入**（唯一用途：喂 `kernelRenderViewOf`） |
-   * | 消费者 | 24 文件 / 46 处（含保存、导出、属性、拾取、撤销） | 3 处（`shared/viewport/**` 渲染链） |
-   * | 登记 | `raw-authority-object`（终删） | 新接缝 `legacy-render-source-document`（owner P11） |
-   *
-   * ⇒ **内容事实**的读取路径已全部迁到具名读面（`kernelGrid`/`kernelAnnotations`/
-   * `cellTooltips`/`documentMetadata`/`plainForSave`/…）；本方法只剩"把旧格式
-   * 交给渲染投影"这一件，且它**只能**在渲染链终切时消失。
-   *
-   * ⚠️ 调用点**必须**只把它当投影输入（读 `isMultiblock`/`id`/`multiblock.decl.raw`/
-   * `multiblockSource`），**不得**用它读内容事实 —— 那会让本接缝变成后门。
-   */
-  legacyRenderSource(): RuntimeDocument | null {
-    // 响应式依赖（消费者是 `.vue` 的 computed ⇒ 必须可追踪）。
-    return this.main.doc.value
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // R2/S3（本批）：`legacyRenderSource(): RuntimeDocument | null` **已终删**
+  // ─────────────────────────────────────────────────────────────────────────
+  //
+  // 它曾是接缝 `legacy-render-source-document` 的落点（#301 P10f D3；R9）：唯一用途是
+  // 把旧格式文档交给渲染投影（喂 `composition/kernelRenderView#kernelRenderViewOf`）。
+  //
+  // **删除依据（机械可复跑）**：全仓消费者集合 = 0。最后 1 处
+  // （`shared/viewport/useKernelChannels.ts:199`）在本批改吃内核面：
+  //   · 声明事实 ← `kernelMultiblockDeclaration()`（= `DocumentContent.multiblock`）+ 域层索引视图；
+  //   · 内层 body ← `kernelMultiblockBody()`（经 `assembleMultiblockKernelFace` 再装配）；
+  //   · 渲染投影 ← `composition/kernelRenderView#kernelRenderViewFromFace`（形参**无** `RuntimeDocument`）。
+  // `e2e/helpers/multiblock/harness.ts`（**L0 看不见的目录**）的两处调用也在同批改接。
+  // 判据：`src/runtime/__tests__/legacyRenderSourceConsumers.test.ts`（生产 = 0 **且** 全仓 = 0，
+  // 各带负对照，含"往 `e2e/` 注入一处 ⇒ 必红"）。
+  //
+  // ⚠️ `composition/seams.ts` 的 `legacy-render-source-document` 登记**仍须在案**：
+  // 它的另一个子句是"渲染链**画面**终切"（`presenter-surface-dual-track`），
+  // 与本读面的删除是两件事（`tests/architecture/shared-viewport-upward-import-closure.test.ts`
+  // 仍在断言该 id 在册）。
 
   /**
    * **内核渲染源面**（G4 · S2 第二半；接缝 `legacy-render-source-document` 的（乙）子句）。
@@ -1188,6 +1208,43 @@ export class Context {
       content: kernelDoc.content,
       frameObjects: ids,
     })
+  }
+
+  /**
+   * **渲染视图的装配面输入**（R2/S3）：内核面求值入口要的四样（会话保管的装配事实）。
+   *
+   * ## 为什么要有这个读面（而不是让视口直接读 `ctx.kernel`）
+   *
+   * `composition/kernelRenderView#kernelRenderViewFromFace` 的形参是
+   * `{ scene, content, frameObjects, multiblockDeclaration }`：前三样在会话的内核文档上，
+   * 第四样是**不透明载荷**（`KernelAssemblyFace.multiblock: unknown` —— 会话刻意不 import
+   * 装配根的类型，见其字段说明）。若在**视口层**收窄它，视口就得 import 装配根类型
+   * （`tests/architecture/shared-viewport-upward-import-closure.test.ts` 钉住的正是
+   * "视口不得向上 import 装配根"这个方向）；而且**响应式依赖**（消费者是 `computed`）
+   * 只有读面能统一建立。⇒ 收窄与依赖都放这里。
+   *
+   * `null` = 无会话 / 未装配成功 / **装配面未采集**（三态同 `kernelSourceRoot`：
+   * 消费方如实降级，不伪造一份空输入 —— 那会把"未采集"静默变成"文档是空的"）。
+   */
+  kernelRenderViewInputs(): {
+    readonly scene: Scene
+    readonly content: DocumentContent
+    readonly frameObjects: readonly string[]
+    readonly multiblockDeclaration: KernelDeclarationProjection | null
+  } | null {
+    void this.main.doc.value
+    const kernel = this.kernel
+    if (kernel === null || !kernel.hasAdoptedContent()) return null
+    const kernelDoc = kernel.document()
+    if (kernelDoc === undefined) return null
+    const face = kernel.assemblyFaceOf()
+    if (face === null) return null
+    return {
+      scene: kernelDoc.scene,
+      content: kernelDoc.content,
+      frameObjects: face.frameObjects,
+      multiblockDeclaration: (face.multiblock ?? null) as KernelDeclarationProjection | null,
+    }
   }
 
   /**

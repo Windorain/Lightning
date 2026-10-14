@@ -1074,7 +1074,12 @@ export function realDeclarationViolations(doc: DocObservation, p: RealProduct): 
   if (doc.backboneMatchesSource !== true) {
     v.push(`decl.backbone 与 multiblockSource 原文不一致（backboneMatchesSource=${doc.backboneMatchesSource}）`)
   }
-  if (doc.warnings.length > 0) v.push(`解析告警非空：${doc.warnings.join(' | ')}`)
+  if (doc.warnings.length > 0) v.push(`解析告警非空（内核源根重解析）：${doc.warnings.join(' | ')}`)
+  // 伴随断言（R2/S3）：内容同一性 —— 与 `contract#declarationViolations` 同一口径
+  // （"告警为空"必须连同"应用读的就是这份 body"一起成立）。
+  if (doc.declarationMatchesSource !== true) {
+    v.push(`应用侧声明与内核源根重解析不一致（declarationMatchesSource=${doc.declarationMatchesSource}）`)
+  }
   return v
 }
 

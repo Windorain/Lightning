@@ -584,17 +584,26 @@ export function multiblockIndexViewOf<
 }
 
 /**
- * 内核声明 + 其派生索引 = 声明侧的**读视图**（UI/装配直接消费的形状）。
+ * 声明载体 `D` + 其派生索引 = 声明侧的**读视图**（UI/装配直接消费的形状）。
  *
  * 它**不是**另一种承载：索引是纯派生（{@link multiblockIndexViewOf}），
- * 故本类型只表达"声明 + 四张查表"，没有任何会在两处漂移的字段。
+ * 故本类型只表达"**声明本身** + 四张查表"，没有任何会在两处漂移的字段。
  * ⚠️ `raw` **不在**其中（同 {@link MultiblockIndexView} 的说明）。
+ *
+ * ## 为什么把声明载体作为**第一个**类型参数（本批修正）
+ *
+ * 初版把它写成 `MultiblockIndexSource<R,V,C,S> & MultiblockIndexView<R,V,C,S>`，
+ * 于是 `multiblockDeclarationViewOf` 的**返回类型里丢了声明字段**
+ * （`displayName`/`totalTierDomain`/`tierSample`/`notes`… 运行时在、类型上不在）——
+ * 调用方拿到它之后无法把它喂给"声明事实"的形参（本批实测：
+ * `useKernelChannels.ts` 五处 TS2345/TS2339 全由这一处引起）。
+ * 声明的**自身字段**必须留在类型里；索引是**加上去**的那部分。
  */
-export type MultiblockDeclaredView<R, V, C, S> = MultiblockIndexSource<R, V, C, S> &
-  MultiblockIndexView<R, V, C, S>
+export type MultiblockDeclaredView<D, R, V, C, S> = D & MultiblockIndexView<R, V, C, S>
 
 /** 域声明 + 派生索引（见 {@link MultiblockDeclaredView}）。 */
 export type MultiblockDeclarationView = MultiblockDeclaredView<
+  MultiblockDeclaration,
   MultiblockRule,
   MultiblockVariant,
   MultiblockChannel,

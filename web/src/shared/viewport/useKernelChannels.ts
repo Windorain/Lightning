@@ -38,18 +38,21 @@
  */
 
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef } from 'vue'
-import { kernelRenderViewOf } from '@/composition/kernelRenderView'
+import { kernelRenderViewFromFace, type KernelRenderView } from '@/composition/kernelRenderView'
+import { assembleMultiblockKernelFace } from '@/composition/kernelAssembly'
 import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
-import type { MultiblockDecl } from '@/context/runtimeDocument'
+import { multiblockDeclarationViewOf } from '@/domain/multiblockDocument'
 import {
-  assembleForSelection,
-  buildChannelPanelModel,
+  assemblyNoticesOf,
+  buildChannelPanelModelOf,
   clampChannelValue,
+  formatDims,
   initialMultiblockSelection,
   snapTierToSample,
   tierSampleValues,
   type MultiblockChannelPanelModel,
+  type MultiblockDeclarationFacts,
   type MultiblockSelectionState,
 } from './multiblockChannelUi'
 
@@ -105,7 +108,7 @@ const RUNSTATE_KEY = '$runstate'
  * 保持声明初值，而不是被强制成 0）。
  */
 function projectSelection(
-  decl: MultiblockDecl,
+  decl: MultiblockDeclarationFacts,
   values: Readonly<Record<string, number>>,
 ): MultiblockSelectionState {
   const base = initialMultiblockSelection(decl)
@@ -192,86 +195,94 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
     unframe = null
   })
 
-  // #301 P10f D3（R9）：渲染链的旧格式源文档（已登记接缝 `legacy-render-source-document`）。
-  // ⚠️ 本 composable 需要的是**声明的内层 body**（`doc.multiblockSource`）与
-  // `renderDoc` 的格式输入 —— 两者都是**外部格式**事实（内核不承载，见
-  // `legacyRenderSource` 的说明与本文件 `renderView` 的注释）。
-  const doc = computed(() => ctx.legacyRenderSource())
-  const decl = computed<MultiblockDecl | null>(
-    () =>
-      (doc.value as unknown as { multiblock?: { decl?: MultiblockDecl } } | null)?.multiblock?.decl ?? null,
-  )
-  const isMultiblock = computed(() => decl.value !== null)
+  // ── 声明路径（R2/S3）：吃**内核内容载体** `content.multiblock` + 域层索引视图 ──
+  //
+  // 切换前这里取 `ctx.legacyRenderSource()`（旧文档）再读 `doc.multiblock.decl` ——
+  // 那是接缝 `legacy-render-source-document` 的**最后一个**生产消费点。现在：
+  //  · 声明事实 ← `Context#kernelMultiblockDeclaration()`（= `DocumentContent.multiblock`；
+  //    与装配面的声明投影是**同一个对象**，见 `composition/kernelAssembly.ts:622`）；
+  //  · O(1) 查表 ← `domain/multiblockDocument#multiblockDeclarationViewOf`（**唯一**索引
+  //    实现，与解析器共用 ⇒ 键面恒为四张表、不含 `raw`）。
+  const declaredView = computed(() => {
+    const decl = ctx.kernelMultiblockDeclaration()
+    return decl === null ? null : multiblockDeclarationViewOf(decl)
+  })
+  const isMultiblock = computed(() => declaredView.value !== null)
 
   const selection = computed<MultiblockSelectionState>(() => {
-    const d = decl.value
-    if (d === null) return { totalTier: 1, values: {}, runstate: '' }
+    const view = declaredView.value
+    if (view === null) return { totalTier: 1, values: {}, runstate: '' }
     // **总是**投影：`projectSelection` 以声明初值为底再叠加内核取值 ——
     // 故"内核里一个键都没有"时它自然返回声明初值（不需要单独分支）。
     // 单独分支会让"用户设过 0"与"没设过"在两条不同代码路径上处理（易漂移）。
-    return projectSelection(d, mirror.value)
-  })
-
-  const outcome = computed(() => {
-    const d = doc.value
-    if (!d || !d.isMultiblock) return null
-    return assembleForSelection(d, selection.value)
+    return projectSelection(view, mirror.value)
   })
 
   /**
-   * **给 DRW 的渲染视图文档** —— 走**内核求值**（#289 P10d D2）。
+   * **内核面再装配**（R2/S3 的 body 路径）：吃内层 body 承运，**不吃** `RuntimeDocument`。
    *
-   * ## 与切换前的差别（本批的 D2 落点）
-   *
-   * | | 切换前 | 现在 |
-   * |---|---|---|
-   * | 构造器 | `buildMultiblockRenderView(doc, outcome.result, frame)`（legacy `AssemblyResult`） | `kernelRenderViewOf(...)`：`assembleKernelDocument` + `projectKernelDocument({renderView})` |
-   * | 身份 | 无（每次取值变化无条件重建视图文档） | **内容派生身份**（`e:<hash>`，不含机位 —— A11） |
-   * | 装配 | `assembleSelection`（旧装配器） | 内核装配（`kernelAssembly`，与保存/投影同一份承载） |
-   *
-   * 实测两路径**逐三角形一致**（`tier-only` 12 / `ebf-2ch` 12 / `lsc-overlap` 40）。
-   *
-   * ## 为什么仍传 `doc`（而不是直接读内核场景）
-   *
-   * 内核场景里的 `blockGrid` 是**装配期固定**的那一份（实测：`setChannelValue` 后
-   * 网格不变），故"按当前取值求值"必须重新装配 —— 而重新装配需要
-   * **声明的内层 body**（`doc.multiblockSource`），它此刻仍由旧文档承载。
-   * 让内核直接承载该 body 是后续批次（需要把 `assembleSelection` 的输入
-   * 也类型化承载），本批的判据是"装配与投影走内核"（已达成，且逐位一致）。
+   * ⚠️ `cellContent`（逐格说明叠加层）今天**没有内核承运的来源**：内核按设计不带
+   * `tooltipPalette`/`cellTooltipGrid`（它们属解析侧的外部格式事实），而
+   * `assembleTooltipContent` 的 `sizeRow` 必须是**本次取值装配出的网格高度**
+   * （那是装配之后才知道的）⇒ 这里**不传**（不伪造）。影响面与理由见
+   * `composition/kernelRenderView#KernelRenderFaceInput` 的 `cellContent` 说明。
    */
-  const renderView = computed(() => {
-    const d = doc.value
-    if (!d) return { doc: null, identity: '', diagnostics: [] as string[] }
-    // 帧为主文档：原样返回（渲染路径行为零变化）
-    if (!d.isMultiblock) return { doc: d, identity: '', diagnostics: [] as string[] }
-    return kernelRenderViewOf({
-      doc: d,
+  const kernelFace = computed(() => {
+    const body = ctx.kernelMultiblockBody()
+    if (body === null) return null
+    const r = assembleMultiblockKernelFace({ body, selection: selection.value })
+    return r.ok ? r.value : null
+  })
+
+  /**
+   * **给 DRW 的渲染视图文档** —— 走**内核面求值**（R2/S3；`kernelRenderViewFromFace`）。
+   *
+   * ## 与切换前的差别（R2/S3 的落点）
+   *
+   * | | 切换前（`kernelRenderViewOf`） | 现在（`kernelRenderViewFromFace`） |
+   * |---|---|---|
+   * | 输入 | 旧格式 `RuntimeDocument`（`ctx.legacyRenderSource()`） | body 承运 + 会话的 `scene`/`content`/`frameObjects`/声明投影（`ctx.kernelRenderViewInputs()`） |
+   * | 装配 | `assembleKernelDocument({ doc })`：**整份文档**按新取值重装配 | `assembleMultiblockKernelFace({ body })`：**只**重装配多方块网格 |
+   * | 元数据 | 靠 `kernelSourceRoot()` 传无损源（不传即有损降级） | **不需要**：`content` 本身就是装配期的内核内容（无损） |
+   * | 身份 | `e:<hash>`（内容派生，不含机位 —— A11） | 同左（`evaluationIdentityOf`，同一实现） |
+   *
+   * 实测两条内核路径**逐三角形一致**（`tier-only` 12 / `ebf-2ch` 12 / `lsc-overlap` 40）。
+   *
+   * ## `null` 的情形（与切换前同一处置：调用方保留上一次可渲染结果）
+   *
+   * 无会话 / 未装配成功（`kernelRenderViewInputs()` 为 `null`）、再装配失败、
+   * 投影读不回 —— 三者都如实给 `doc: null`，**不**伪造一份"看起来能渲染"的文档。
+   */
+  const renderView = computed<KernelRenderView>(() => {
+    const inputs = ctx.kernelRenderViewInputs()
+    if (inputs === null) return { doc: null, identity: '', diagnostics: [] }
+    return kernelRenderViewFromFace({
+      body: ctx.kernelMultiblockBody(),
       selection: selection.value,
       frameIndex: ctx.getFrameIndex(),
-      // G5：**无损**源根（内核会话保管，装载期由 `composition/documentLoad` 置位）。
-      //
-      // ⚠️ 这一行是判据本身，不是可有可无的优化：缺它 ⇒ `kernelRenderView` 回落
-      // `doc.serialize()`（`RuntimeDocument` 有损，七个根级键读不回）⇒ 渲染视图的
-      // `meta` 与保存链（吃无损源）**算出不同的值**。实测锚点：根级
-      // `meta.created_at_ms`（缺无损源时读不到 ⇒ 渲染视图与保存产物元数据不一致）。
-      //
-      // `null`（未采集：无会话/装配不支持）⇒ 不传，让装配层走它**自己标注为有损**
-      // 的降级路径；**不**传空对象（`{}` 会被读成"源里什么都没有"）。
-      ...(ctx.kernelSourceRoot() === null ? {} : { plainRoot: ctx.kernelSourceRoot() as Readonly<Record<string, unknown>> }),
+      ...inputs,
     })
   })
 
   const renderDoc = computed<RuntimeDocument | null>(() => renderView.value.doc)
 
   const panel = computed<MultiblockChannelPanelModel | null>(() => {
-    const d = doc.value
-    const o = outcome.value
-    if (!d || !d.isMultiblock || !o) return null
-    return buildChannelPanelModel(d, selection.value, o)
+    const view = declaredView.value
+    const face = kernelFace.value
+    // 与切换前同一口径：没有声明、或本次取值装配不出网格 ⇒ 没有面板。
+    if (view === null || face === null) return null
+    const variantKey = face.report.variantKey
+    // 「该组合是否已声明」用**索引视图**判（唯一索引实现；键面不含 `raw`）。
+    const declared = view.variantByKey.has(variantKey)
+    return buildChannelPanelModelOf(view, selection.value, {
+      variantKey,
+      dims: formatDims(face.report.dims),
+      notices: assemblyNoticesOf({ notes: view.notes, variantKey, declared, report: face.report }),
+    })
   })
 
   function setTier(value: number): void {
-    const d = decl.value
+    const d = declaredView.value
     if (!d) return
     const next = snapTierToSample(tierSampleValues(d), value)
     if (next === selection.value.totalTier) return
@@ -280,7 +291,7 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
   }
 
   function setChannelValue(key: string, value: number): void {
-    const d = decl.value
+    const d = declaredView.value
     if (!d) return
     const next = clampChannelValue(d, key, value)
     if (next === null) return
@@ -290,7 +301,7 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
   }
 
   function setRunstate(id: string): void {
-    const d = decl.value
+    const d = declaredView.value
     if (!d) return
     const index = d.runstates.findIndex((r) => r.id === id)
     if (index < 0) return

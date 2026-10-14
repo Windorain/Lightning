@@ -211,11 +211,18 @@ describe('D2 · 失效：声明该节点只读什么（G1/A11 的落点）', () 
 })
 
 describe('D2 · 生产接线：渲染视图走内核求值（不是 legacy 构造器）', () => {
-  it('`useKernelChannels` 的渲染文档来自 `kernelRenderViewOf`，且**不再**调 legacy 构造器', () => {
+  it('`useKernelChannels` 的渲染文档来自**内核面协调入口**，且**不再**调 legacy 构造器', () => {
+    // R2/S3 换了入口名：`kernelRenderViewOf`（形参是旧格式 `RuntimeDocument`）
+    // ⇒ `kernelRenderViewFromFace`（形参是 body 承运 + 会话的装配事实，**无** `RuntimeDocument`）。
+    // 本条守的语义**不变**（"视口确实经协调入口拿渲染视图"），只是入口换名：
+    //  · 旧入口仍在本模块内，服务剩余暂存路径（退出条件 = 旧路径最后一个调用者消失）；
+    //  · 新入口坐标仍在协调层（`composition/kernelRenderView.ts`），未上移到视口。
+    // ⚠️ 登记为**待加强项**（本批不做）：源码文本断言只能证"调用了某个名字"，
+    // 证不了"调用的语义对" —— 语义由本文件上面那些求值节点判据与 R2/S3 的行为判据承担。
     const src = readSource('shared/viewport/useKernelChannels.ts')
       .replace(/\/\*[\s\S]*?\*\//g, ' ')
       .replace(/\/\/[^\n]*/g, ' ')
-    expect(src, '渲染视图必须走内核求值').toContain('kernelRenderViewOf(')
+    expect(src, '渲染视图必须走内核面协调入口').toContain('kernelRenderViewFromFace(')
     expect(src, '不得再调 legacy 构造器（那是切换前的参照实现，生产零调用点）').not.toContain('buildMultiblockRenderView(')
   })
 

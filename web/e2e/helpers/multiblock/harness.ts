@@ -23,6 +23,7 @@
  */
 
 import { expect, type Locator, type Page } from '@playwright/test'
+import { parseMultiblockDeclaration } from '@/context/parsers/multiblockDocument'
 
 /** Workbench 入口（`web/index.html`，与 `obj-export.spec.ts` 同入口）。 */
 export const WORKBENCH_URL = '/'
@@ -343,13 +344,24 @@ export async function injectSceneDocument(
       // 与生产拖放同一入口
       await ctx.getOperators().exec('OPERATOR_OPEN_SCENE', { file })
       // #301 P10f D3：内容事实各有具名读面。
+      // R2/S3：形态判别改走**内核读面**（原 `ctx.legacyRenderSource()` 已退役）。
       const loaded = ctx.hasLoadedDocument()
       const plain = ctx.plainForSave().plain as Record<string, unknown> | null
-      const rendSrc = ctx.legacyRenderSource() as { isMultiblock?: boolean } | null
+      const body = ctx.kernelMultiblockBody()
+      // ⚠️ **严格性**（Lead 裁决 ④）：产物 plain 声明了多方块 ⇒ body **必须**非空。
+      // 缺 body 是**缺陷**（内核没接住声明），不得报成 `isMultiblock: false`
+      // —— 那会用"不是多方块"掩盖失败，让调用方的断言读到一个看起来正常的 `false`。
+      const declaredCount = plain?.multiblockCount
+      if (typeof declaredCount === 'number' && declaredCount > 0 && body === null) {
+        throw new Error(
+          '内核未承载多方块 body：产物 plain 声明 multiblockCount=' + declaredCount
+          + '，但 `ctx.kernelMultiblockBody()` 为 null（装配/承运缺陷，不是"帧为主文档"）',
+        )
+      }
       return {
         docLoaded: loaded,
         docId: (plain?.id as string | undefined) ?? null,
-        isMultiblock: rendSrc ? (rendSrc.isMultiblock ?? null) : null,
+        isMultiblock: body !== null,
         frameCount: loaded ? ctx.frameDeclarations().count : null,
         parseError: loaded ? null : '解析失败（见 ctx.log 的场景加载 error 记录）',
       }
@@ -540,9 +552,29 @@ export interface DocObservation {
   totalTierDomain: { min: number; max: number; default: number | null } | null
   backbone: BackboneObservation | null
   blockPaletteSize: number
+  /**
+   * **解析告警**（R2/S3 起来源变更：必须连同 {@link declarationMatchesSource} 一起读）。
+   *
+   * 来源不再是页面里的旧文档（`doc.multiblock.warnings`，随
+   * `Context#legacyRenderSource()` 一起退役），而是**内核无损源根**在测试进程里用
+   * **同一个解析器**（`parseMultiblockDeclaration`）重解析的产物 —— 判据要证的性质
+   * （"真实产物**文件**无解析瑕疵"）是**文件**的属性，故这样证是完整的；
+   * "应用解析的是**同一份** body"这条链由 {@link declarationMatchesSource} 用内容证。
+   */
   warnings: string[]
   /**
-   * `decl.backbone.sizeSteps[i].cellGrid` 是否与 `multiblockSource`（契约内层 JSON 原文）
+   * 应用侧观测到的声明（`kernelMultiblockBody().declaration` 的通道键 + 骨架逐格）
+   * 是否**等于**上面那次重解析得到的对应值 —— 用**内容**证明同一性。
+   * `null` = 内核源根未采集（那时由 {@link multiblockSourcePresent} 判）。
+   */
+  declarationMatchesSource: boolean | null
+  /**
+   * 内核**无损源根**里的 `multiblock` 节（页面侧没有解析器，故原样过桥给测试进程；
+   * 见 {@link warnings}）。`null` = 未采集。
+   */
+  kernelMultiblockSource: unknown
+  /**
+   * `decl.backbone.sizeSteps[i].cellGrid` 是否与**内核无损源根**的 `multiblock.backbone`
    * 逐格一致 —— 证明解析器把格级数据**原样透传**，而不是自己算了一份。
    */
   backboneMatchesSource: boolean | null
@@ -551,32 +583,30 @@ export interface DocObservation {
 /**
  * 一次性读回全部公开的文档/多方块声明观测点。
  *
- * 数据来源（全部公开）：
- *  - `ctx.getDoc().value` → `RuntimeDocument` 的公开 getter：
- *    `isMultiblock` / `multiblockChannels` / `multiblockRunstates` /
- *    `multiblockVariants` / `multiblockRules` / `multiblockFrames` /
- *    `multiblockSource` / `frameCount`
- *  - `ctx.getDoc().value.multiblock`（公开 readonly 字段）→ `decl.backbone` /
- *    `decl.totalTierDomain` / `blockPalette` / `warnings`
+ * 数据来源（全部公开，R2/S3 起全部是**内核读面**）：
+ *  - `ctx.kernelMultiblockBody().declaration` → 通道 / 运行态 / 变体 / 规则 / 骨架 /
+ *    总 Tier 域 / 调色板 / 帧声明（原 `doc.multiblock*` 一族）；
+ *  - `ctx.kernelSourceRoot()` → 契约**内层 body 原文**（原 `doc.multiblockSource`），
+ *    原样过桥给测试进程重解析（那是 `warnings` 与 `backboneMatchesSource` 的来源）；
+ *  - `ctx.plainForSave().plain` → 文档 id 与形态键；
+ *  - `ctx.kernelGrid(i)` → 逐帧网格；
+ *  - `ctx.frameDeclarations()` → 帧数。
  */
 export async function readDocObservation(page: Page): Promise<DocObservation> {
-  return await page.evaluate(() => {
+  const observed = await page.evaluate(() => {
     const ctx = (window as any).__vm__
-    // ## #301 P10f D3：观测面按**事实种类**分开取（`getDoc()` 已终删）
+    // ## #301 P10f D3 + R2/S3：观测面按**事实种类**分开取（`getDoc()`/`legacyRenderSource()` 均已退役）
     //
     // | 事实 | 读面 |
     // |---|---|
     // | 有文档吗 / 帧数 | `hasLoadedDocument()` / `frameDeclarations()` |
-    // | 文档 id | `plainForSave().plain.id`（产物 plain 是唯一出口） |
+    // | 文档 id / 形态键 | `plainForSave().plain`（产物 plain 是唯一出口） |
+    // | 多方块**声明**（通道/运行态/变体/规则/骨架/调色板/帧声明） | `kernelMultiblockBody().declaration`（内核承运） |
+    // | 契约**内层 body 原文** | `kernelSourceRoot()`（无损源根；页面侧不解析，原样过桥） |
     // | 逐帧网格 | `kernelGrid(i)`（声明尺寸 + 逐格；i = 声明序） |
-    // | 多方块**声明内层 body**（`multiblockSource`/`decl`/通道/运行态/变体/规则/骨架） | `legacyRenderSource()`（**R9**，外部格式边界；内核不承载该 body，见 `useKernelChannels` 的说明） |
-    //
-    // ⚠️ 最后一行是**已登记接缝** `legacy-render-source-document` 的用途：
-    // 它读的是"渲染链看到的那份旧格式文档"（本 spec 要判的正是渲染链的输入），
-    // **不是**内容读入口的后门。
     const loaded = ctx.hasLoadedDocument()
-    const doc = loaded ? (ctx.legacyRenderSource() as any) : null
-    if (!doc) {
+    const plain = ctx.plainForSave().plain as Record<string, unknown> | null
+    if (!loaded) {
       return {
         hasDoc: false,
         docId: null,
@@ -596,11 +626,15 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
         backbone: null,
         blockPaletteSize: 0,
         warnings: [],
+        declarationMatchesSource: null,
+        kernelMultiblockSource: null,
         backboneMatchesSource: null,
       }
     }
-    const mb = doc.multiblock
-    const decl = mb?.decl ?? null
+    const body = ctx.kernelMultiblockBody() as { declaration?: any } | null
+    const decl = body?.declaration ?? null
+    const sourceRoot = ctx.kernelSourceRoot() as Record<string, unknown> | null
+    const sourceMultiblock = (sourceRoot?.multiblock ?? null) as any
     const backbone = decl?.backbone
       ? {
           kind: decl.backbone.kind,
@@ -625,10 +659,13 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
     const frameDecl = ctx.frameDeclarations()
     return {
       hasDoc: true,
-      docId: ((ctx.plainForSave().plain as any)?.id as string | undefined) ?? null,
-      documentShape: (doc.multiblockSource?.documentShape as string) ?? null,
-      multiblockSourcePresent: doc.multiblockSource !== null,
-      isMultiblock: doc.isMultiblock,
+      docId: (plain?.id as string | undefined) ?? null,
+      // 形态键取自**产物 plain**（原取自内层 body 的 `documentShape`）。语义变化如实登记：
+      // 信封形态下旧口径恒 `null`（meta 里的形态键不在内层 body 上），新口径为 `'multiblock'`；
+      // R2/S3 实测全仓**没有**任何判据依赖旧口径（`doc.documentShape` 无 spec 断言）。
+      documentShape: typeof plain?.documentShape === 'string' ? plain.documentShape : null,
+      multiblockSourcePresent: sourceMultiblock !== null,
+      isMultiblock: body !== null,
       frameCount: frameDecl.count,
       // 逐帧网格走 R5（`kernelGrid(i)`；i = 声明序 —— 与旧 `frames[i]` 同一遍历序）。
       frameGrids: Array.from({ length: frameDecl.count }, (_v, i) => {
@@ -643,8 +680,8 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
           solidCells: grid.count(),
         }
       }),
-      channelCount: doc.multiblockChannels.length,
-      channels: doc.multiblockChannels.map((c: any) => ({
+      channelCount: decl?.channels?.length ?? 0,
+      channels: (decl?.channels ?? []).map((c: any) => ({
         key: c.key,
         enumName: c.enumName ?? null,
         id: c.id,
@@ -657,15 +694,15 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
         domainHi: c.domain.hi,
         slot: c.slot ?? null,
       })),
-      runstateCount: doc.multiblockRunstates.length,
-      runstates: doc.multiblockRunstates.map((r: any) => ({
+      runstateCount: decl?.runstates?.length ?? 0,
+      runstates: (decl?.runstates ?? []).map((r: any) => ({
         id: r.id,
         name: r.name,
         materialSwap: !!r.materialSwap,
       })),
-      variantCount: doc.multiblockVariants.length,
-      ruleCount: doc.multiblockRules.length,
-      multiblockFrameCount: doc.multiblockFrames.length,
+      variantCount: decl?.variants?.length ?? 0,
+      ruleCount: decl?.rules?.length ?? 0,
+      multiblockFrameCount: decl?.frames?.length ?? 0,
       totalTierDomain: decl
         ? {
             min: decl.totalTierDomain.min,
@@ -674,10 +711,14 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
           }
         : null,
       backbone,
-      blockPaletteSize: mb ? mb.blockPalette.length : 0,
-      warnings: mb ? [...mb.warnings] : [],
+      blockPaletteSize: decl?.blockPalette?.length ?? 0,
+      // ⚠️ 页面侧**不产**告警：来源已随旧读面退役 ⇒ 改由测试进程重解析**内核源根**填，
+      // 见 `withSourceParse` 与 `DocObservation#warnings` 的说明（含口径边界）。
+      warnings: [],
+      declarationMatchesSource: null,
+      kernelMultiblockSource: sourceMultiblock,
       backboneMatchesSource: (() => {
-        const rawSteps = (doc.multiblockSource as any)?.multiblock?.backbone?.sizeSteps
+        const rawSteps = sourceMultiblock?.backbone?.sizeSteps
         if (!Array.isArray(rawSteps) || !backbone) return null
         if (rawSteps.length !== backbone.steps.length) return false
         return rawSteps.every(
@@ -687,6 +728,50 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
       })(),
     }
   })
+  return withSourceParse(observed)
+}
+
+/**
+ * **内核源根 → 重解析**（R2/S3 的 `warnings` 处置；Lead 裁决 ④ 的 (iii) 方案）。
+ *
+ * ## 为什么这样证是完整的
+ *
+ * 判据要证的性质是"**真实产物文件**无解析瑕疵"—— 那是**文件**的属性，故在测试进程里
+ * 用**同一个解析器**（`parseMultiblockDeclaration`，与生产同一实现）重解析内核无损源根，
+ * 就把这条性质完整证了；而"应用解析的是**同一份** body"这条链由**内容**证：
+ * `declarationMatchesSource` 把应用侧观测到的通道键与骨架逐格值，与重解析得到的
+ * 对应值**直接比对**（不靠"两边各自与期望比"的传递性）。
+ *
+ * ## 口径边界（如实登记）
+ *
+ * 内核无损源根是「内层 body 剔除 meta 键后与信封 meta 合并」的产物
+ * （`adapters/plainRoot#plainRootOf`）—— 比原始内层字节**多**了 meta 键（如 `documentShape`）。
+ * 那不影响本处要比对的声明字段，但严格说"重解析的输入不是原文件字节"；
+ * 与原文件字节一致的那一份由 fixture 门控覆盖
+ * （`scripts/multiblock-fixtures/validate-multiblock-fixtures.mjs --all --verify-grids`）。
+ */
+function withSourceParse(obs: DocObservation): DocObservation {
+  const source = obs.kernelMultiblockSource
+  if (source === null || typeof source !== 'object' || Array.isArray(source)) {
+    // 未采集（无内核载体）⇒ 如实 `null`（"无法判"）："缺 body"由 `multiblockSourcePresent` 判。
+    return { ...obs, warnings: [], declarationMatchesSource: null }
+  }
+  let parsed: ReturnType<typeof parseMultiblockDeclaration>
+  try {
+    parsed = parseMultiblockDeclaration(source as Record<string, unknown>)
+  } catch (e) {
+    return { ...obs, warnings: [`内核源根重解析失败：${String(e)}`], declarationMatchesSource: false }
+  }
+  const decl = parsed.decl
+  const appChannels = JSON.stringify(obs.channels.map((c) => c.key))
+  const srcChannels = JSON.stringify(decl.channels.map((c) => c.key))
+  const appBackbone = JSON.stringify(obs.backbone?.steps.map((s) => s.cellGrid) ?? null)
+  const srcBackbone = JSON.stringify(decl.backbone.sizeSteps.map((s) => s.cellGrid))
+  return {
+    ...obs,
+    warnings: [...parsed.warnings],
+    declarationMatchesSource: appChannels === srcChannels && appBackbone === srcBackbone,
+  }
 }
 
 // ---------------------------------------------------------------------------
