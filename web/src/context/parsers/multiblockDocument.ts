@@ -16,6 +16,8 @@
  *    骨架 dims 声明与实际 cellGrid 形状不一致、变体组合不全）。
  */
 
+import { multiblockIndexViewOf } from '@/domain/multiblockDocument'
+
 /** 文档级形态枚举量（§2.1）：`"multiblock"` = 多方块为主；缺省 = 帧为主。 */
 export const MULTIBLOCK_DOCUMENT_SHAPE = 'multiblock' as const
 
@@ -270,11 +272,11 @@ export interface MultiblockDecl {
   backbone: MultiblockBackbone
   rules: MultiblockRuleDecl[]
   variants: MultiblockVariantDecl[]
-  /** O(1) 查表（T2.2/T2.4 直接用） */
-  ruleById: Map<string, MultiblockRuleDecl>
-  variantByKey: Map<string, MultiblockVariantDecl>
-  channelByKey: Map<string, MultiblockChannelDecl>
-  runstateById: Map<string, MultiblockRunstateDecl>
+  /** O(1) 查表（T2.2/T2.4 直接用）。**由域层唯一实现构造**（`multiblockIndexViewOf`）。 */
+  ruleById: ReadonlyMap<string, MultiblockRuleDecl>
+  variantByKey: ReadonlyMap<string, MultiblockVariantDecl>
+  channelByKey: ReadonlyMap<string, MultiblockChannelDecl>
+  runstateById: ReadonlyMap<string, MultiblockRunstateDecl>
   raw: Record<string, unknown>
 }
 
@@ -343,6 +345,33 @@ export function isMultiblockDocument(inner: unknown): boolean {
 
 function fail(reason: string): never {
   throw new MultiblockParseError(reason)
+}
+
+/**
+ * **第一个**重复出现的键（无重复 = `null`）。
+ *
+ * ## 为什么"查重复"与"建索引"分成两件事
+ *
+ * 「重复主键 = 文件非法」是**解析期**的判定：它要一条能指到具体键的消息
+ * （`规则 id 重复：<id>`），且必须在**读到清单后立刻**判（后面的解析不该在一个
+ * 已知非法的文档上继续跑）。
+ *
+ * 而"按主键查"的索引构造是**纯派生**（`domain/multiblockDocument#multiblockIndexViewOf`，
+ * 重复时按 `Map` 语义后写覆盖）——它是域层**唯一**的索引实现（§15：同一语义不得有
+ * 第二处实现），**不**承担抛错职责（域层不该有"解析器消息"）。
+ *
+ * 注：本函数的扫描口径是"清单**顺序**上的第一个重复键"。这与旧形态
+ * （边建 `Map` 边 `has` 检查）在**首个**重复键上完全一致 —— 该行为在改写前
+ * **全树无覆盖**（实测 `规则 id 重复`/`变体键重复` 两条消息 0 个测试命中），
+ * 本批补上：见 `context/parsers/__tests__/multiblockIndexViewWiring.test.ts`。
+ */
+function firstDuplicateKey(keys: readonly string[]): string | null {
+  const seen = new Set<string>()
+  for (const k of keys) {
+    if (seen.has(k)) return k
+    seen.add(k)
+  }
+  return null
 }
 
 function reqObject(v: unknown, what: string): Record<string, unknown> {
@@ -607,7 +636,7 @@ function parseVariant(raw: Record<string, unknown>, i: number, warnings: string[
 function parseFrame(
   raw: Record<string, unknown>,
   i: number,
-  variantByKey: Map<string, MultiblockVariantDecl>,
+  variantByKey: ReadonlyMap<string, MultiblockVariantDecl>,
   ruleIds: Set<string>,
   stepCount: number,
   warnings: string[],
@@ -752,11 +781,11 @@ export function parseMultiblockDeclaration(inner: Record<string, unknown>): Mult
   const rules = rulesRaw.map((r, i) =>
     parseRule(reqObject(r, `multiblock.rules[${i}]`), channelKeys, warnings),
   )
-  const ruleById = new Map<string, MultiblockRuleDecl>()
-  for (const r of rules) {
-    if (ruleById.has(r.id)) fail(`规则 id 重复：${r.id}（文件内必须唯一）`)
-    ruleById.set(r.id, r)
-  }
+  // 重复主键的**校验**（解析期硬断言）与索引**构造**是两件事：
+  // 前者要可定位的消息（`规则 id 重复：<id>`），后者是域层唯一实现
+  // （`multiblockIndexViewOf`；#388 评论 7708 裁决 1：这里不得再自建 Map 索引）。
+  const dupRuleId = firstDuplicateKey(rules.map((r) => r.id))
+  if (dupRuleId !== null) fail(`规则 id 重复：${dupRuleId}（文件内必须唯一）`)
   const opsLegendRaw = multiblock.opsLegend === undefined || multiblock.opsLegend === null
     ? {}
     : reqObject(multiblock.opsLegend, 'multiblock.opsLegend')
@@ -789,10 +818,13 @@ export function parseMultiblockDeclaration(inner: Record<string, unknown>): Mult
   const variants = variantsRaw.map((v, i) =>
     parseVariant(reqObject(v, `multiblock.variants[${i}]`), i, warnings),
   )
-  const variantByKey = new Map<string, MultiblockVariantDecl>()
+  const dupVariantKey = firstDuplicateKey(variants.map((v) => v.key))
+  if (dupVariantKey !== null) fail(`变体键重复：${dupVariantKey}`)
+  // 索引读视图：**唯一**构造点（域层纯函数）。键集固定为四张表 —— 不含 `raw`。
+  const index = multiblockIndexViewOf({ rules, variants, channels, runstates })
+  const variantByKey = index.variantByKey
+  const ruleById = index.ruleById
   for (const v of variants) {
-    if (variantByKey.has(v.key)) fail(`变体键重复：${v.key}`)
-    variantByKey.set(v.key, v)
     if (!runstateIds.has(v.runstate)) {
       warnings.push(`变体 ${v.key} 的 runstate=${v.runstate} 未在 multiblock.runstates 中声明`)
     }
@@ -924,10 +956,10 @@ export function parseMultiblockDeclaration(inner: Record<string, unknown>): Mult
     backbone,
     rules,
     variants,
-    ruleById,
-    variantByKey,
-    channelByKey: new Map(channels.map(c => [c.key, c])),
-    runstateById: new Map(runstates.map(r => [r.id, r])),
+    ruleById: index.ruleById,
+    variantByKey: index.variantByKey,
+    channelByKey: index.channelByKey,
+    runstateById: index.runstateById,
     raw: multiblock,
   }
 

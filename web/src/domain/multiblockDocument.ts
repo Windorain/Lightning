@@ -503,4 +503,107 @@ export function declaredVariantKeys(decl: MultiblockDeclaration): ReadonlySet<st
   return new Set(decl.variants.map((v) => v.key))
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 派生索引读视图（**唯一**的索引构造点；#388 评论 7708 裁决 1）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 索引源的**结构形状**（元素类型由调用方决定）。
+ *
+ * ## 为什么是结构参数而不是 `MultiblockDeclaration`
+ *
+ * 索引是**纯派生**：它只要求四份清单，元素只需一个主键（规则/运行态 = `id`，
+ * 变体/通道 = `key`）。把形参收成"四份清单"使**两个载体**都能喂它：
+ *
+ * | 载体 | 元素类型 | 出处 |
+ * |---|---|---|
+ * | 内核声明（域） | {@link MultiblockRule} / {@link MultiblockVariant} / … | `adapters/files/multiblockDeclaration` |
+ * | 旧解析结果 | `MultiblockRuleDecl` / … （**多带一个元素级 `raw`**） | `context/parsers/multiblockDocument` |
+ *
+ * ⇒ 同一份语义（"按主键查"）只有**一处**实现，而"域承载"与"边界解析形状"
+ * 各自保留自己的元素类型（§15：同一语义不得有第二处实现）。
+ */
+export interface MultiblockIndexSource<R, V, C, S> {
+  readonly rules: readonly R[]
+  readonly variants: readonly V[]
+  readonly channels: readonly C[]
+  readonly runstates: readonly S[]
+}
+
+/**
+ * **派生索引读视图**：四张 `ReadonlyMap`，按主键查元素。
+ *
+ * ⚠️ **键集合不含 `raw`**（#388 评论 7708 裁决 2）：`raw` 属装配面的
+ * `MultiblockContent#declRaw`（整节原文），需要它的消费者**单独取依赖** ——
+ * 把它混进"索引读视图"会让每一条声明消费者都顺带拿到整节原文
+ * （§15 第 2 条「核心无 raw JSON / 格式字段袋」的形态）。
+ *
+ * ⚠️ 值就是**清单里的那个对象**（不是拷贝）：旧解析侧据此用 `toBe` 断言
+ * "查到的就是声明里那一条"。
+ */
+export interface MultiblockIndexView<R, V, C, S> {
+  readonly ruleById: ReadonlyMap<string, R>
+  readonly variantByKey: ReadonlyMap<string, V>
+  readonly channelByKey: ReadonlyMap<string, C>
+  readonly runstateById: ReadonlyMap<string, S>
+}
+
+/** 内核声明的索引读视图（域元素类型）。 */
+export type MultiblockDeclarationIndexView = MultiblockIndexView<
+  MultiblockRule,
+  MultiblockVariant,
+  MultiblockChannel,
+  MultiblockRunstate
+>
+
+/**
+ * **域声明 → 索引读视图**的**唯一**实现（纯函数）。
+ *
+ * 纯度（判据 ①）：不读 I/O、不读时钟、不碰 DOM/全局，不改动入参 —— 同一份声明
+ * 两次调用得到**逐元素等价**的视图（值的对象身份相同）。
+ *
+ * ## 重复主键的处置（本函数**不**校验）
+ *
+ * 重复主键的**拒绝**是解析期的硬断言（`context/parsers/multiblockDocument.ts`
+ * 的两条 `fail`），属"文件是否合法"；本函数是"按主键查"的纯派生 ⇒ 重复时
+ * **后写覆盖**（`Map` 语义）。把校验塞进来会让域层多出一个"抛错"的职责，
+ * 而解析器仍需自己的可定位消息（`规则 id 重复：<id>`）。
+ */
+export function multiblockIndexViewOf<
+  R extends { readonly id: string },
+  V extends { readonly key: string },
+  C extends { readonly key: string },
+  S extends { readonly id: string },
+>(decl: MultiblockIndexSource<R, V, C, S>): MultiblockIndexView<R, V, C, S> {
+  return Object.freeze({
+    ruleById: new Map(decl.rules.map((r) => [r.id, r] as const)),
+    variantByKey: new Map(decl.variants.map((v) => [v.key, v] as const)),
+    channelByKey: new Map(decl.channels.map((c) => [c.key, c] as const)),
+    runstateById: new Map(decl.runstates.map((r) => [r.id, r] as const)),
+  })
+}
+
+/**
+ * 内核声明 + 其派生索引 = 声明侧的**读视图**（UI/装配直接消费的形状）。
+ *
+ * 它**不是**另一种承载：索引是纯派生（{@link multiblockIndexViewOf}），
+ * 故本类型只表达"声明 + 四张查表"，没有任何会在两处漂移的字段。
+ * ⚠️ `raw` **不在**其中（同 {@link MultiblockIndexView} 的说明）。
+ */
+export type MultiblockDeclaredView<R, V, C, S> = MultiblockIndexSource<R, V, C, S> &
+  MultiblockIndexView<R, V, C, S>
+
+/** 域声明 + 派生索引（见 {@link MultiblockDeclaredView}）。 */
+export type MultiblockDeclarationView = MultiblockDeclaredView<
+  MultiblockRule,
+  MultiblockVariant,
+  MultiblockChannel,
+  MultiblockRunstate
+>
+
+/** 域声明 → **声明读视图**（声明字段原样 + {@link multiblockIndexViewOf} 的索引）。 */
+export function multiblockDeclarationViewOf(decl: MultiblockDeclaration): MultiblockDeclarationView {
+  return Object.freeze({ ...decl, ...multiblockIndexViewOf(decl) })
+}
+
 
