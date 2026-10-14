@@ -150,7 +150,7 @@ const resourceDigestMemo = new WeakMap<object, string>()
  * 为什么必须含内容而不只是键名：A28/A36 要求"同一 URL 换内容"与"版本替换"可判定。
  * 只比键名会让"替换了纹理内容但键没变"静默复用旧资源。
  *
- * ## 身份必须与**形态**无关（**缺陷登记**，实测复查于 2026-10-15，#387 同族批）
+ * ## 身份必须与**形态**无关（**调用点已收敛**；本函数本体仍形态敏感 —— 见下"退出状态"）
  *
  * 本函数对入参直接 `stableStringify` ⇒ 同一逻辑资源的两种契约形态产出**不同**摘要。
  * 实测（本函数本尊，探针逐条打印，非推断）：
@@ -174,37 +174,39 @@ const resourceDigestMemo = new WeakMap<object, string>()
  * `presentation/contentSignal.ts:88-89`（`diffContentIdentity` → `planContentRebuild`），
  * 喂入点是 `runtime/presentationAdapter.ts:150`。
  *
- * ### 为什么未在本批修（**已实测的边界**，不是遗漏）
+ * ### 退出状态（#387 收尾批更新；**保留原登记文字的可追溯性**）
  *
- * 正解是先经唯一的形态归一化点再取摘要，但：
- *
- *  1. 本文件落在**新执行面**（`presentation` 层无 `activeSubpaths` ⇒ 整层受闸门约束），
- *     而 `gate/no-private-cross-layer` 判**发起方**且要求公共出口深度 ≤ 2。
- *     实测（2026-10-15，加了这一行 import 后跑 `npm run arch:scan`）：
- *     `FAIL（1 条 finding）· [gate/no-private-cross-layer] src/presentation/contentIdentity.ts`
- *     `新实现跨层导入了 render 层深于公共出口的实现（render/data/textureBlobPool，深度 3 > 2）`
- *     ⇒ 在本文件里 import `render/data/textureBlobPool` 必然判红。
- *  2. 接线点 `runtime/presentationAdapter.ts:150` 不在 `runtime` 层的 `activeSubpaths`
- *     （见 `tests/architecture/boundary-rules.mjs` 的 runtime 清单）⇒ **不是**闸门文件，
- *     在那里喂入前归一化无闸门冲突。
- *
- * ### 退出条件（owner 见 #387 评论 7719 存疑点 2）
- *
- * `runtime/presentationAdapter.ts:150` 改写为"先判形态、是池则归一化再取摘要"：
+ * **（甲）调用点：已退出。** `runtime/presentationAdapter.ts` 的喂入点已改为"先判形态、是池则
+ * 归一化再取摘要"（模块内 `resourceIdentityInputOf`）：
  *
  * ```ts
- * const raw = doc.textureBlobs ?? doc.materialPalette ?? undefined
- * resourceDigest: resourceDigestOf(isTextureBlobPoolShaped(raw) ? normalizeTextureBlobPool(raw) : raw)
+ * isTextureBlobPoolShaped(raw) ? normalizeTextureBlobPool(raw) : raw
  * ```
  *
- * 必须**带形态判别**：`{stone:'AAAA'}` 不是池，盲归一化会把它压成 `[]` ⇒ 摘要恒等 ⇒
- * A28/A36 的"同键不同内容"判据失效（`presentation/__tests__/contentIdentity.test.ts:178`
- * 与 `contentSignal.test.ts` 会当场判红，实测 `{stone:'AAAA'}`=`c:50b7e1fc`、
- * `{stone:'BBBB'}`=`c:33d05e48`，两者必须继续可分辨）。
- * 判据落 `render/data/__tests__/textureBlobPool.shapeContract.test.ts` 判据 ⑥（登记本读数）。
- * 该退出前，本条属**已知缺陷**，不得当作"已验证正确"。
+ * 判据（走**生产解析** + **生产读取面** `readContentIdentity`，含两条能红负对照）：
+ * `runtime/__tests__/presentationAdapterResourceShape.test.ts`（6 条）。
  *
- * 注：`runtime/presentationAdapter.ts` 在**本批禁写**（另一代理在制），故本批只登记 + 报裁决。
+ * **（乙）纯函数本体：仍未退出（登记的地雷）** —— 本函数的入参契约是 `unknown`，允许池与非池
+ * 混用 ⇒ **任何新调用方都必须先规范化**。owner：内核重建执行线（#249/#387）；
+ * 退出条件：① 入参被收成规范形（类型面由编译器保证没有第二处裸喂），**或** ② `render/` 退役。
+ *
+ * ### ⚠️ 更正（实测否证原登记，逐条保留可追溯性）
+ *
+ * 1. **原写**（`:200-204`）："必须带形态判别：… `presentation/__tests__/contentIdentity.test.ts:178`
+ *    **与 `contentSignal.test.ts` 会当场判红**"。**实测（2026-10-15，把调用点换成盲归一化后跑）**：
+ *    `contentIdentity.test.ts` = **16 passed**（纯函数层，**2 条**与摘要可分辨性相关的断言属它）、
+ *    而 **`contentSignal.test.ts` = 9/9 仍绿** —— 它用 `contentIdentityOf` + `resourceDigestOf`
+ *    **直接构造身份**，压根不经过调用点。⇒ **纯函数层判据看不见调用点**；本缺陷的判据必须落在
+ *    **调用点层**（即上面（甲）那条）。当时按"3 条判红"记的计数亦不准。
+ * 2. **原写**（`:177-189`）："在本文件里 import `render/data/textureBlobPool` 必然判红"。该**实测**
+ *    只对**本文件**成立（它是闸门文件、`gate/no-private-cross-layer` 判发起方）；同批据此推断
+ *    "`runtime/presentationAdapter.ts`（**非**闸门文件）也会 FAIL" ——**那是未实测的推断**，按判定式
+ *    很可能不成立（调度者在 7728 已自行更正）。该断言现已**不再承重**：归一化的唯一实现
+ *    **迁到了最内层** `@/domain/textureBlobPool`（#387 落点迁移），从此与 `render/` 无关。
+ * 3. **原写**（`:207`）："`runtime/presentationAdapter.ts` 在本批禁写（另一代理在制），故本批只登记 + 报裁决"。
+ *    —— 收尾批已获授权并落地（见（甲））；原文字作为历史记录保留在上面的"更正"里。
+ * 4. 另：`contentSignal.test.ts:178` 那类断言喂的是**纯函数输入**（`resourceDigestOf(state.blobs)`），
+ *    ⇒ 它对"调用点有没有规范化"**天然无区分力**；接线判据必须走生产读取面。
  */
 export function resourceDigestOf(textureBlobs: unknown): string {
   if (textureBlobs === null || textureBlobs === undefined) return 'r:none'
