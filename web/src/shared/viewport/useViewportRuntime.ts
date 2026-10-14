@@ -310,6 +310,52 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   const presenterErrors: string[] = []
 
   /**
+   * **R5-0 ①：呈现链错误的结构化发射点**（既有诊断通道，不新造体系）。
+   *
+   * ## 为什么必须有它（修的是一个**活跃假绿**）
+   *
+   * `presenterErrors` 在生产里被写、被返回，但**全 `web/src` 零消费者**：两个宿主
+   * （`EmbedViewport.vue` / `WorkbenchViewport.vue`）的解构都不取它，e2e 又硬编码
+   * `presenterErrors: []` ⇒ "呈现链没有错误"这条断言**恒真**，掩盖了这条链真实产生的
+   * 全部错误。可观测性的唯一判据是"能按码/按关联查询"，而那个读面**已经存在**：
+   * `ctx.wm.diagnostics`（读面 `Context.getDiagnostics()`，e2e 经 `__vm__.getDiagnostics()`
+   * 取 `byCode()`/`byCorrelation()`）。故这里把那 9 处 `push` 的**同一事实**再发一份进既有
+   * 记录器 —— 形态照 `runtime/contentDiagnostics.ts:59` 的
+   * `recorder.record({ channel, code, params, correlation })`。
+   *
+   * ## 码与通道的现状（**不自行扩码表**）
+   *
+   * 既有 22 码里没有"呈现链失败"这一族，最贴近的是 `effect.failed`（效果生命周期失败）
+   * ⇒ 本批先用既有码 + `params.source === 'presenter'` 区分；**新码请求**在交付报告里
+   * 列出交由裁决，不在这里悄悄加码。
+   *
+   * ## ⚠️ 为什么**不** import 任何东西
+   *
+   * 本文件在 `shared/`（旧层）：加 `@/runtime`、`@/domain` 的**值**导入会撞接缝
+   * `kernel-legacy-isolation`（见本文件头 `ZERO_TIME` 那段，同一坑已实测红过）。
+   * 记录器从 `ctx.wm.diagnostics` **现取**，故零新增导入。
+   *
+   * ## 去重：保护**有界**缓冲，不改 push 语义
+   *
+   * `presenterErrors.push` 逐帧执行（数组行为**本批不动**），而记录器是容量 512 的**共享**
+   * 环形缓冲：逐帧记账会把其它通道的记录挤掉。故同一"错误签名"每实例只记一次
+   * （首现上报；与 `contentDiagnostics` 的"按批次聚合"同一动机）。
+   */
+  const reportedPresenterFailures = new Set<string>()
+  const emitPresenterFailure = (reason: string, detail: string, objectId?: string): void => {
+    const signature =
+      objectId === undefined ? `${reason}\u0000${detail}` : `${reason}\u0000${objectId}\u0000${detail}`
+    if (reportedPresenterFailures.has(signature)) return
+    reportedPresenterFailures.add(signature)
+    ctx.wm.diagnostics.record({
+      channel: 'effect',
+      code: 'effect.failed',
+      params: { source: 'presenter', reason, detail },
+      correlation: objectId === undefined ? {} : { objectId },
+    })
+  }
+
+  /**
    * **材质统一：内核内容资源 → 纹理端口 → 材质绑定**（#301 P10f D3；R1-β① C5）。
    *
    * ## 为什么必须有这条链（它修的是一个**可感知**的回退）
@@ -378,13 +424,17 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       // 未就绪的必需贴图是**真实事实**，必须可见（不得静默当"画好了"）。
       if (bound.missingRequired > 0) {
         presenterErrors.push(`textures-missing-required:${bound.missingRequired}`)
+        emitPresenterFailure('textures-missing-required', String(bound.missingRequired))
       }
       if (synced.readyWithoutPixels > 0) {
         // 契约说 `ready` ⇒ 有像素；这条分支出现即为实现缺陷，显式上报。
         presenterErrors.push(`textures-ready-without-pixels:${synced.readyWithoutPixels}`)
+        emitPresenterFailure('textures-ready-without-pixels', String(synced.readyWithoutPixels))
       }
     } catch (e) {
-      presenterErrors.push(`textures-threw:${e instanceof Error ? e.message : String(e)}`)
+      const message = e instanceof Error ? e.message : String(e)
+      presenterErrors.push(`textures-threw:${message}`)
+      emitPresenterFailure('textures-threw', message)
     } finally {
       if (inFlightTextureIdentity === identity) inFlightTextureIdentity = null
     }
@@ -402,14 +452,25 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       presenterSurface.setLayerPreview(layerMode === 'all' ? null : layerMode.worldY)
       const out = presenterSurface.applyKernelDocument(doc, kernel?.playback().time ?? ZERO_TIME)
       // 编译失败/跳过是**真实事实**，必须可见（不得静默当"画好了"）。
-      if (out.compileError !== null) presenterErrors.push(`compile:${out.compileError}`)
-      for (const s of out.skipped) presenterErrors.push(`kernel-skip:${s.objectId}:${s.reason}`)
-      for (const s of out.compileSkipped) presenterErrors.push(`compile-skip:${s.objectId}:${s.reason}`)
+      if (out.compileError !== null) {
+        presenterErrors.push(`compile:${out.compileError}`)
+        emitPresenterFailure('compile', out.compileError)
+      }
+      for (const s of out.skipped) {
+        presenterErrors.push(`kernel-skip:${s.objectId}:${s.reason}`)
+        emitPresenterFailure('kernel-skip', s.reason, s.objectId)
+      }
+      for (const s of out.compileSkipped) {
+        presenterErrors.push(`compile-skip:${s.objectId}:${s.reason}`)
+        emitPresenterFailure('compile-skip', s.reason, s.objectId)
+      }
       // 材质统一：编译产物已就位 ⇒ 接着把贴图接上（否则该批次走中性色）。
       void syncPresenterTextures()
       syncPresenterAnnotations(doc)
     } catch (e) {
-      presenterErrors.push(`threw:${e instanceof Error ? e.message : String(e)}`)
+      const message = e instanceof Error ? e.message : String(e)
+      presenterErrors.push(`threw:${message}`)
+      emitPresenterFailure('threw', message)
     }
   }
 
@@ -432,9 +493,14 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     lastAnnotationIdentity = wanted
     try {
       const outcome = presenterSurface.syncKernelAnnotations(doc.scene, visible)
-      for (const u of outcome.unrendered) presenterErrors.push(`annotation:${u.objectId}:${u.aspect}`)
+      for (const u of outcome.unrendered) {
+        presenterErrors.push(`annotation:${u.objectId}:${u.aspect}`)
+        emitPresenterFailure('annotation', u.aspect, u.objectId)
+      }
     } catch (e) {
-      presenterErrors.push(`annotation-threw:${e instanceof Error ? e.message : String(e)}`)
+      const message = e instanceof Error ? e.message : String(e)
+      presenterErrors.push(`annotation-threw:${message}`)
+      emitPresenterFailure('annotation-threw', message)
     }
   }
 
