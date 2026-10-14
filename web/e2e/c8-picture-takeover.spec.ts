@@ -114,7 +114,10 @@ function augmentedSingleboxFixture(): Record<string, unknown> {
 }
 
 test.describe('R1-β① C8 · 画面接管（真实工作台 / 真实信封 / 生产装配）', () => {
-  test('画面生产者是内核呈现根：在场景树里、且场景内无 legacy 解格网格（含负对照）', async ({ page }, testInfo) => {
+  // `@smoke`（P0 · #387 材质 blend 冻结失效）：本用例断言**视口真的挂出来了**
+  // —— 正是 `buildMaterialLibrary` 抛 `Cannot add property blend, object is not extensible`
+  // 时最先坏掉的那一环（`loadStructureAndResources: failed to build textureCache` ⇒ 60s 挂载超时）。
+  test('画面生产者是内核呈现根：在场景树里、且场景内无 legacy 解格网格（含负对照）', { tag: '@smoke' }, async ({ page }, testInfo) => {
     const file = 'multiblock-ebf-2ch.json'
     fs.mkdirSync(SHOT_DIR, { recursive: true })
     await gotoWorkbench(page)
@@ -181,7 +184,9 @@ test.describe('R1-β① C8 · 画面接管（真实工作台 / 真实信封 / �
     console.log('[C8·画面接管] 画面像素签名（前 3 格，旁证）' + JSON.stringify(sig.slice(0, 3)))
   })
 
-  test('拾取同批切到内核链：真实指针解出方块+部件+tooltip，而场景内无 legacy 解格网格', async ({ page }) => {
+  // `@smoke`（P0 · #387）：本用例走的是 **`parts-singlebox-mix.v2.json` + wiki 内嵌预览** ——
+  // 正是 P0 现场（内核材质条目**冻结且无 blend**）唯一会现形的那条真入口路径。
+  test('拾取同批切到内核链：真实指针解出方块+部件+tooltip，而场景内无 legacy 解格网格', { tag: '@smoke' }, async ({ page }) => {
     // 真实入口：WorkbenchRoot → 注入真实信封（含几何增强）→ 经生产 tab 切 Wiki 工作区
     // （内嵌生产 `EmbedViewport`）。几何增强与 `parts-hover-stats.spec.ts` 同一构造，
     // 探针点（下半 slab 顶面中心）是那条已验收判据用过的**已知可命中**位置。
