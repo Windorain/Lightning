@@ -44,6 +44,10 @@ import {
   collectStructureGeometryPiecesPure,
   mergeBakedQuadPiecesAttributes,
 } from '@/render/mesh/structureGeometryCore'
+// 纹理池形态面走**深度 2 公共出口**（`render/textureBlobPool.ts`）：直接引用
+// `render/data/textureBlobPool`（深度 3）在闸门执行面里是 `gate/no-private-cross-layer` 的
+// 判红形态，且"每处各写一个深度 2 出口"会让同一语义出现第二个落点（§15）。
+import { isTextureBlobPoolShaped, normalizeTextureBlobPool } from '@/render/textureBlobPool'
 
 /**
  * 网格指纹：逐格下标（z→y→x 稳定序）。
@@ -104,6 +108,56 @@ export function paletteContentOf(grid: Grid | null): readonly unknown[] {
 }
 
 /**
+ * 资源身份函数的**唯一喂入口**：先判形态，是纹理池才归一化（#387 收尾批）。
+ *
+ * ## 为什么这里必须有一个规范化步
+ *
+ * `textureBlobs` 在生产里有**两种契约形态**（由生产者决定，不是实现选择）：
+ *
+ * | 形态 | 生产者 |
+ * |---|---|
+ * | 槽位键对象 `{"0":"<b64>", …}` | `composition/kernelProjection.ts:1406-1408`（**帧为主**文档 = `plainForSave().plain`） |
+ * | 数组 `["<b64>", …]` | `composition/kernelPresentationInputs.ts:397-404`（内核材质面）、`composition/kernelProjection.ts:1403-1405`（多方块） |
+ *
+ * 而 `presentation/contentIdentity.ts#resourceDigestOf` **本体是形态敏感的** —— 它按入参的
+ * JSON 文本取内容摘要，不做任何形态解析（形态解析属 `render/data/textureBlobPool.ts`，
+ * §15 同一语义不得有第二处实现）。实测：`['AAAA','BBBB']` ⇒ `c:7f364cd1`，
+ * `{'0':'AAAA','1':'BBBB'}` ⇒ `c:ee985e1c` —— **同一逻辑资源、两个摘要**。
+ *
+ * 后果不是"多算一次"：`readContentIdentity().resources` → `diffContentIdentity().documentChanged`
+ * → `planContentRebuild()` 恒真 ⇒ 每次读身份都触发无谓的全量重建（生产驱动
+ * `presentation/contentSignal.ts:88-89`）。
+ *
+ * ## 为什么是"先判形态"，不是"盲归一化"
+ *
+ * `normalizeTextureBlobPool` 对**非池**值（键不是数值下标的对象，如 `{stone:'AAAA'}`）产出
+ * 空表 —— 对"取字节"是对的（那些键本来不是槽位），对"取**内容摘要**"是**数据丢失**：
+ * 盲归一化会把 `{stone:'AAAA'}` 与 `{stone:'BBBB'}` 一起压成 `[]` ⇒ 摘要**碰撞** ⇒
+ * A28/A36「同键不同内容不得静默复用」判据塌陷（实测：`presentation/__tests__/contentIdentity.test.ts`
+ * 两条 + `contentSignal.test.ts` 一条当场判红）。故配方是**三目**，不是直接调用归一化：
+ *
+ * ```ts
+ * isTextureBlobPoolShaped(v) ? normalizeTextureBlobPool(v) : v
+ * ```
+ *
+ * ## ⚠️ 缺陷登记（未退出）：`resourceDigestOf` 本体仍是形态敏感的地雷
+ *
+ * 本批只修**调用点**（新层 import 旧层是长期债，不给 `presentation/**` 开出口）。身份函数
+ * 的入参契约仍是 `unknown` ⇒ 任何新调用方都**必须先规范化**，否则重现上面那个恒真。
+ *
+ * - **owner**：内核重建执行线（#249 / #387 同族批）；
+ * - **退出条件**：① 身份函数的入参被收成**规范形**（类型面收窄到 `TextureBlobPool` 或规范数组，
+ *   由编译器保证没有第二处裸喂），**或** ② `render/` 退役（`presentation` 层的 legacy 对应物
+ *   删除、两形态分叉随之消失）。
+ *
+ * 判据与负对照见 `runtime/__tests__/presentationAdapterResourceShape.test.ts`（走生产解析 +
+ * 生产读取面，含"盲归一化 ⇒ 判据必红"的负对照）。
+ */
+function resourceIdentityInputOf(raw: unknown): unknown {
+  return isTextureBlobPoolShaped(raw) ? normalizeTextureBlobPool(raw) : raw
+}
+
+/**
  * 从文档派生**内容身份**（`structEpoch` 的替代读取面）。
  *
  * `frameIndex` 与 `layerPreview` 参与结构摘要：它们改变被采集的几何
@@ -147,7 +201,9 @@ export function readContentIdentity(input: {
       layerFilter: layerPreview,
     }),
     annotationDigest: annotationDigestOf(doc.annotations),
-    resourceDigest: resourceDigestOf(doc.textureBlobs ?? doc.materialPalette ?? undefined),
+    // **调用方必须先规范化**：`resourceDigestOf` 本体形态敏感（见 `resourceIdentityInputOf`
+    // 的 docblock，含 owner 与退出条件）。盲归一化会撞坏 A28/A36 的"同键不同内容"。
+    resourceDigest: resourceDigestOf(resourceIdentityInputOf(doc.textureBlobs ?? doc.materialPalette ?? undefined)),
   })
 }
 
