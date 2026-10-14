@@ -17,13 +17,14 @@
  * ## 这是**边界**转换，不是第二份模型
  *
  * 输出类型**复用** `domain/multiblockDocument` 的 `MultiblockDeclaration`（不另立形状）。
- * 输入类型来自旧解析器，两侧同名 ⇒ 本模块用别名导入（`ParsedMultiblockDeclaration`）。
+ * 输入类型**就地声明**（{@link ParsedMultiblockDocument} 一族）—— 只列本适配器真正读取的
+ * 字段，**不 import** 解析器的类型（跨层深度规则 + 边界解耦；理由见那一段的注释）。
  *
  * 同名冲突的处置建议（**本批不擅改**，报调度者）：内核侧与解析侧都叫
  * `MultiblockDeclaration`，且字段集不同（解析侧有 `decl`/`raw`/`warnings`，
  * 内核侧把 `decl` 摊平并去掉全部 `raw`）。建议后续把解析侧改名为
  * `ParsedMultiblockDocument`（或让它退为 `MultiblockDeclaration` 的**构造来源**），
- * 使"同名不同物"不再可能被误读为同一契约。
+ * 使"同名不同物"不再可能被误读为同一契约 —— 本模块的输入契约已先行用了这个名字。
  *
  * ## 未承载的东西**报出来**，不静默丢（§12 第 3 段）
  *
@@ -40,19 +41,222 @@ import {
 } from '@/domain/blockGeometry'
 import {
   EMPTY_MULTIBLOCK_DECLARATION as EMPTY_KERNEL_DECLARATION,
+  type MultiblockAxisSpec,
   type MultiblockBackbone,
   type MultiblockChannel,
+  type MultiblockChannelKind,
   type MultiblockCoupling,
   type MultiblockDeclaration,
   type MultiblockFrame,
   type MultiblockNote,
   type MultiblockRule,
+  type MultiblockRuleKind,
+  type MultiblockRulePhase,
+  type MultiblockRuleRef,
   type MultiblockRunstate,
   type MultiblockSizeStep,
   type MultiblockVariant,
   type MultiblockViewerSemantics,
 } from '@/domain/multiblockDocument'
-import { type MultiblockDeclaration as ParsedMultiblockDeclaration } from '@/context/parsers/multiblockDocument'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 边界输入形状（**就地声明**，不 import 解析器的类型）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/*
+ * ## 为什么这里没有 `import { … } from '@/context/parsers/multiblockDocument'`
+ *
+ * 起初这里直接复用解析器的 `MultiblockDeclaration`。它被判红：
+ * `[gate/no-private-cross-layer] src/adapters/files/multiblockDeclaration.ts:55:1`——
+ * 「新实现跨层导入了 context 层深于公共出口的实现（深度 3 > 2）」。
+ *
+ * 修法是**改导入、不改闸门**（不加豁免、不放宽深度上限），而且这次不是绕过规则
+ * 而是回到规则描述的分工：适配器是**边界**，它的输入契约就是"外部已解析成什么样"，
+ * 这事实属于适配器自己对**它真正读取的字段**的声明，不属于被适配方的类型模块
+ * （`adapters/` 依赖 `context/parsers/**` 的私有实现，正是 §4 规则 6 要断的线）。
+ *
+ * ## 这是**结构**类型，不是第二份模型
+ *
+ * 下面的接口只列**本适配器真正读取**的字段（收窄，不是复制）：解析器多出的字段
+ * （`warnings`/四张 Map/…）不在契约内，将来给解析器加字段也不会牵动这里。
+ * TypeScript 是结构类型 ⇒ 真实解析产物**无需转换**即可传入
+ * `multiblockDeclarationOf`，且赋值本身就在编译期核对"解析器给得出、适配器读得到"。
+ *
+ * ## 为什么字段类型借 `domain` 的字面量联合
+ *
+ * `kind`/`phase`/`kind` 这些字面量联合**必须**与内核同集（否则转换函数的返回值
+ * 装不进内核类型）。写 `string` 会把核对推迟到运行时；借内核的联合则让"外部格式的
+ * 取值域 ⊇ 内核承载的取值域"成为编译期事实。
+ */
+
+/** 边界输入的**通道**（只列读取字段）。 */
+export interface ParsedMultiblockChannel {
+  readonly enumName: string | null
+  readonly id: string
+  readonly key: string
+  readonly name: string
+  readonly kind: MultiblockChannelKind
+  readonly slot?: string
+  readonly min: number
+  readonly max: number
+  readonly axis?: string
+  readonly unit?: string
+  readonly valueSemantics?: string
+  readonly domainSource?: string
+  readonly domain: Readonly<{ lo: number; hi: number }>
+  readonly slider: boolean
+  readonly raw?: Readonly<Record<string, unknown>>
+}
+
+/** 边界输入的**运行态**。 */
+export interface ParsedMultiblockRunstate {
+  readonly id: string
+  readonly name: string
+  readonly materialSwap: boolean
+  readonly raw?: Readonly<Record<string, unknown>>
+}
+
+/** 边界输入的**变体**。 */
+export interface ParsedMultiblockVariant {
+  readonly key: string
+  readonly totalTier: number
+  readonly values: Readonly<Record<string, number>>
+  readonly runstate: string
+  readonly raw?: Readonly<Record<string, unknown>>
+}
+
+/** 边界输入的 **guard 子句**。 */
+export interface ParsedMultiblockGuardClause {
+  readonly channel: string
+  readonly value?: number
+  readonly min?: number
+  readonly max?: number
+  readonly not?: boolean
+}
+
+/** 边界输入的 **guard**。 */
+export interface ParsedMultiblockGuard {
+  readonly not?: boolean
+  readonly clauses: readonly ParsedMultiblockGuardClause[]
+}
+
+/** 边界输入的**规则**。 */
+export interface ParsedMultiblockRule {
+  readonly id: string
+  readonly phase: MultiblockRulePhase
+  readonly legend?: string
+  readonly kind: MultiblockRuleKind
+  readonly x?: number
+  readonly y?: number
+  readonly z?: number
+  readonly sel?: Readonly<{ x?: MultiblockAxisSpec; y?: MultiblockAxisSpec; z?: MultiblockAxisSpec }>
+  readonly index?: number
+  readonly indexRole?: string
+  readonly channel?: string
+  readonly indexTable?: readonly number[]
+  readonly indexAliases?: Readonly<Record<string, number>>
+  readonly guard?: ParsedMultiblockGuard
+  readonly raw?: Readonly<Record<string, unknown>>
+}
+
+/** 边界输入的**骨架阶**。 */
+export interface ParsedMultiblockSizeStep {
+  readonly channel: string
+  readonly layers?: number
+  readonly w: number
+  readonly hh: number
+  readonly d: number
+  readonly roles: Readonly<Record<string, number>>
+  readonly cellGrid: readonly (readonly (readonly number[])[])[]
+  readonly raw?: Readonly<Record<string, unknown>>
+}
+
+/** 边界输入的**骨架**。 */
+export interface ParsedMultiblockBackbone {
+  readonly kind: string
+  readonly sizeChannel: string
+  readonly sizeSteps: readonly ParsedMultiblockSizeStep[]
+  readonly raw?: Readonly<Record<string, unknown>>
+}
+
+/** 边界输入的**帧**。`cellGrid` 在此**可选**：内核帧声明没有它（G3 待裁定）⇒ 有则报诊断。 */
+export interface ParsedMultiblockFrame {
+  readonly index: number
+  readonly variant: string
+  readonly runstate: string
+  readonly stepIndex: number
+  readonly rules: readonly MultiblockRuleRef[]
+  readonly label?: string
+  readonly durationMs?: number
+  readonly cellGrid?: readonly (readonly (readonly number[])[])[]
+  readonly raw?: Readonly<Record<string, unknown>>
+}
+
+/** 边界输入的**耦合**。 */
+export interface ParsedMultiblockCoupling {
+  readonly id: string
+  readonly a: string
+  readonly b: string
+  readonly requires: string
+  readonly raw?: Readonly<Record<string, unknown>>
+}
+
+/** 边界输入的**说明**。 */
+export interface ParsedMultiblockNote {
+  readonly kind: string
+  readonly text: string
+  readonly raw?: Readonly<Record<string, unknown>>
+}
+
+/** 边界输入的**呈现语义**（`raw` 属保真记录，本适配器不读 ⇒ 不列）。 */
+export interface ParsedMultiblockViewerSemantics {
+  readonly frameIsVariant: boolean
+  readonly playback: string
+  readonly layerPreview: string
+  readonly runstateCoverage: Readonly<{ kind: string; geometryDelta: boolean; tesr: string }>
+}
+
+/** 边界输入的**声明节点**。 */
+export interface ParsedMultiblockDecl {
+  readonly id: string
+  readonly displayName: string
+  readonly sourceClass?: string
+  readonly hasScopeOverlap: boolean
+  readonly scopeOverlapNote?: string
+  readonly totalTierDomain: Readonly<{ min: number; max: number; default?: number }>
+  readonly tierSample: readonly number[]
+  readonly channels: readonly ParsedMultiblockChannel[]
+  readonly runstates: readonly ParsedMultiblockRunstate[]
+  readonly variants: readonly ParsedMultiblockVariant[]
+  readonly rules: readonly ParsedMultiblockRule[]
+  readonly backbone: ParsedMultiblockBackbone
+  readonly couplings: readonly ParsedMultiblockCoupling[]
+  readonly couplingMode: string
+  readonly notes: readonly ParsedMultiblockNote[]
+  readonly viewerSemantics: ParsedMultiblockViewerSemantics
+  readonly paletteSource: string
+  readonly geometryEncoding: string
+  readonly opsLegend: Readonly<Record<string, string>>
+  readonly raw: Readonly<Record<string, unknown>>
+}
+
+/**
+ * 边界输入的**整份已解析声明**（= 本适配器的输入契约）。
+ *
+ * 名字刻意叫 `ParsedMultiblockDocument`：与内核承载 `MultiblockDeclaration`
+ * 不再同名，也与建议的解析侧改名一致（见文件头上方"同名冲突"一节）。
+ */
+export interface ParsedMultiblockDocument {
+  readonly schemaVersion?: number
+  readonly multiblockCount: number
+  readonly decl: ParsedMultiblockDecl
+  readonly frames: readonly ParsedMultiblockFrame[]
+  readonly blockPalette: readonly unknown[]
+  readonly materialPalette?: readonly unknown[]
+  readonly textureBlobs?: readonly unknown[]
+  readonly tooltipPalette?: readonly unknown[]
+  readonly raw: Readonly<Record<string, unknown>>
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 诊断
@@ -178,7 +382,7 @@ export function airLikePaletteEntry(): BlockPaletteEntry {
 // 边界转换
 // ─────────────────────────────────────────────────────────────────────────────
 
-function viewerSemanticsOf(vs: ParsedViewerSemanticsLike): MultiblockViewerSemantics {
+function viewerSemanticsOf(vs: ParsedMultiblockViewerSemantics): MultiblockViewerSemantics {
   const cov = vs.runstateCoverage
   return Object.freeze({
     frameIsVariant: vs.frameIsVariant,
@@ -192,15 +396,7 @@ function viewerSemanticsOf(vs: ParsedViewerSemanticsLike): MultiblockViewerSeman
   })
 }
 
-/** 解析器 `viewerSemantics` 的**结构**面（刻意不 import 旧类型名以避开同名混淆）。 */
-interface ParsedViewerSemanticsLike {
-  readonly frameIsVariant: boolean
-  readonly playback: string
-  readonly layerPreview: string
-  readonly runstateCoverage: Readonly<{ kind: string; geometryDelta: boolean; tesr: string }>
-}
-
-function sizeStepOf(s: ParsedMultiblockDeclaration['decl']['backbone']['sizeSteps'][number]): MultiblockSizeStep {
+function sizeStepOf(s: ParsedMultiblockDocument['decl']['backbone']['sizeSteps'][number]): MultiblockSizeStep {
   const step: {
     channel: string
     layers?: number
@@ -221,7 +417,7 @@ function sizeStepOf(s: ParsedMultiblockDeclaration['decl']['backbone']['sizeStep
   return Object.freeze(step)
 }
 
-function backboneOf(b: ParsedMultiblockDeclaration['decl']['backbone']): MultiblockBackbone {
+function backboneOf(b: ParsedMultiblockDocument['decl']['backbone']): MultiblockBackbone {
   return Object.freeze({
     kind: b.kind,
     sizeChannel: b.sizeChannel,
@@ -229,7 +425,7 @@ function backboneOf(b: ParsedMultiblockDeclaration['decl']['backbone']): Multibl
   })
 }
 
-function channelOf(c: ParsedMultiblockDeclaration['decl']['channels'][number]): MultiblockChannel {
+function channelOf(c: ParsedMultiblockDocument['decl']['channels'][number]): MultiblockChannel {
   const out: {
     enumName: string | null
     id: string
@@ -264,11 +460,11 @@ function channelOf(c: ParsedMultiblockDeclaration['decl']['channels'][number]): 
   return Object.freeze(out)
 }
 
-function runstateOf(r: ParsedMultiblockDeclaration['decl']['runstates'][number]): MultiblockRunstate {
+function runstateOf(r: ParsedMultiblockDocument['decl']['runstates'][number]): MultiblockRunstate {
   return Object.freeze({ id: r.id, name: r.name, materialSwap: r.materialSwap })
 }
 
-function variantOf(v: ParsedMultiblockDeclaration['decl']['variants'][number]): MultiblockVariant {
+function variantOf(v: ParsedMultiblockDocument['decl']['variants'][number]): MultiblockVariant {
   return Object.freeze({
     key: v.key,
     totalTier: v.totalTier,
@@ -277,7 +473,7 @@ function variantOf(v: ParsedMultiblockDeclaration['decl']['variants'][number]): 
   })
 }
 
-function ruleOf(r: ParsedMultiblockDeclaration['decl']['rules'][number]): MultiblockRule {
+function ruleOf(r: ParsedMultiblockDocument['decl']['rules'][number]): MultiblockRule {
   const out: {
     id: string
     phase: MultiblockRule['phase']
@@ -329,15 +525,15 @@ function ruleOf(r: ParsedMultiblockDeclaration['decl']['rules'][number]): Multib
   return Object.freeze(out)
 }
 
-function couplingOf(c: ParsedMultiblockDeclaration['decl']['couplings'][number]): MultiblockCoupling {
+function couplingOf(c: ParsedMultiblockDocument['decl']['couplings'][number]): MultiblockCoupling {
   return Object.freeze({ id: c.id, a: c.a, b: c.b, requires: c.requires })
 }
 
-function noteOf(n: ParsedMultiblockDeclaration['decl']['notes'][number]): MultiblockNote {
+function noteOf(n: ParsedMultiblockDocument['decl']['notes'][number]): MultiblockNote {
   return Object.freeze({ kind: n.kind, text: n.text })
 }
 
-function frameOf(f: ParsedMultiblockDeclaration['frames'][number]): MultiblockFrame {
+function frameOf(f: ParsedMultiblockDocument['frames'][number]): MultiblockFrame {
   const out: {
     index: number
     variant: string
@@ -368,7 +564,7 @@ function frameOf(f: ParsedMultiblockDeclaration['frames'][number]): MultiblockFr
  * 「没读到」与「读到空」在**内核侧**由同一常量表示 —— 这正是 `EMPTY_*` 的设计
  * （见 `domain/multiblockDocument#EMPTY_MULTIBLOCK_DECLARATION` 的判据 2）。
  */
-export function multiblockDeclarationOf(parsed: ParsedMultiblockDeclaration | null | undefined): MultiblockAdapterResult {
+export function multiblockDeclarationOf(parsed: ParsedMultiblockDocument | null | undefined): MultiblockAdapterResult {
   const diagnostics: MultiblockAdapterDiagnostic[] = []
   if (parsed === null || parsed === undefined) {
     return Object.freeze({ declaration: EMPTY_KERNEL_DECLARATION, diagnostics: Object.freeze(diagnostics) })
@@ -457,7 +653,7 @@ export function multiblockDeclarationOf(parsed: ParsedMultiblockDeclaration | nu
     couplings: Object.freeze(decl.couplings.map(couplingOf)),
     couplingMode: decl.couplingMode,
     notes: Object.freeze(decl.notes.map(noteOf)),
-    viewerSemantics: viewerSemanticsOf(decl.viewerSemantics as ParsedViewerSemanticsLike),
+    viewerSemantics: viewerSemanticsOf(decl.viewerSemantics),
     // **顺序即语义**：不排序、不去重（见 `paletteEntryOf` 的说明）。
     blockPalette: Object.freeze(parsed.blockPalette.map(paletteEntryOf)),
     schemaVersion: parsed.schemaVersion ?? null,
