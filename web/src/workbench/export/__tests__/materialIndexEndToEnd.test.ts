@@ -43,14 +43,19 @@
  * | **C′ `matOrder` 的观测后果** | `representativePaletteEntryForBlob`（选区代表条目 → tile 尺寸/代表 blend） | 由段C 覆盖：tile 的**源载荷**与尺寸都来自该代表条目 ⇒ 选错代表条目会当场改变 tile 源（段C 的负对照实测如此） |
  * | **D MTL/图集接线** | `bundleMeshAssembly.ts:300-334/351`（`map_Kd` ↔ `textures/*.png`） | 段D：有 atlas 的对象 ⇔ MTL 有 `map_Kd`，且 `map_Kd` 数量 ＝ zip 里 `textures/*.png` 数量 |
  *
- * ## 负对照（必须能红）
+ * ## 负对照（两组，都必须能红）
  *
- * 同一判据喂一份**按旧键重排调色板**的 plain：旧键 ＝ `materialIndexAlignment.test.ts:171-178`
- * 的同一实现（`resourceIdentity` 整串 `localeCompare`），置换从**真资源**上算出
- * （不是手写顺序），只把位置换掉、条目自身字段（`locator`/`textureBlobIndex`）不动
- * ⇒ 段A/段B/段C 必须同时判红（修复前 61/62 与 2051/2165 的形态）。
+ * **① 旧键顺序**（材质索引空间的载荷）：同一判据喂一份**按旧键重排调色板**的 plain ——
+ * 旧键 ＝ `materialIndexAlignment.test.ts:171-178` 的同一实现（`resourceIdentity` 整串
+ * `localeCompare`），置换从**真资源**上算出（不是手写顺序），只把位置换掉、条目自身字段
+ * （`locator`/`textureBlobIndex`）不动 ⇒ 段A/段B/段C 必须同时判红（修复前 61/62 的形态）。
  *
- * ## 实测读数（正/负对照，同一判据本尊）
+ * **② 「修复前形态」**（blob 字节表的载荷）：把 plain 的 `textureBlobs` 整个拿掉
+ * （任何版本的 `extractTextureBlobs` 都返回 `[]` ＝ 修复前对槽位键对象的产出）
+ * ⇒ 段C 必须判红（实测图集 45 / 173 非空体素、单件簇 **1234/1234** 无贴图），
+ * 而共面簇合成不依赖该表 ⇒ `mergedMismatch` 仍 0（证明红来自 blob 侧，不是判据恒红）。
+ *
+ * ## 实测读数（正/两组负对照，同一判据本尊）
  *
  * （读数随本判据一同落在 Gitea #387，见文件末尾注释。）
  */
@@ -728,6 +733,7 @@ function analyze(run: ExportedRun, truth: Truth): Analysis {
 
 let positive: { input: ExportInput; run: ExportedRun; analysis: Analysis }
 let negative: { run: ExportedRun; analysis: Analysis; perm: number[] }
+let preFix: { run: ExportedRun; analysis: Analysis }
 
 beforeAll(async () => {
   installBrowserDouble()
@@ -747,8 +753,16 @@ beforeAll(async () => {
   const negativeRun = await runExport(negPlain)
   const negativeAnalysis = analyze(negativeRun, input.truth)
 
+  // 「修复前形态」负对照（让 45/173 与 1234/1234 这两个读数可复现，而不是报告里的孤证）：
+  // 修复前的 `extractTextureBlobs` 对**槽位键对象**形态返回 `[]`；把 plain 的 blob 表整个拿掉，
+  // 任何版本的该函数都返回 `[]` ⇒ 逐字复刻修复前的 `blobs = []` 条件，其余一切不动。
+  const preFixPlain: Plain = { ...input.plain, textureBlobs: undefined }
+  const preFixRun = await runExport(preFixPlain)
+  const preFixAnalysis = analyze(preFixRun, input.truth)
+
   positive = { input, run: positiveRun, analysis: positiveAnalysis }
   negative = { run: negativeRun, analysis: negativeAnalysis, perm }
+  preFix = { run: preFixRun, analysis: preFixAnalysis }
 
   // 读数落 stdout（证据随附件上传；判据本尊的断言在各 it 里）
   console.log(
@@ -763,6 +777,7 @@ beforeAll(async () => {
         permDisplacedSlots: perm.filter((s, i) => s !== i).length,
         ...negativeAnalysis,
       },
+      preFixShape: preFixAnalysis,
     })}`,
   )
 }, 600_000)
@@ -827,5 +842,29 @@ describe('材质索引空间 · 导出侧端到端（真信封 → 生产链 →
       c.blobMismatch,
       `旧键下产物绑错贴图条数（样例：${c.samples.join('；')}）`,
     ).toBeGreaterThan(0)
+  })
+
+  it('负对照②（修复前形态）：blob 字节表不可读 ⇒ 段C 判红，共面簇侧不受影响', () => {
+    const { a, c } = preFix.analysis
+    // 前提：真夹具的 plain 本就是**槽位键对象**（这正是修复前 `extractTextureBlobs` 的失明点）；
+    // 本负对照把该表整个拿掉 ⇒ 任何版本的 `extractTextureBlobs` 都返回 `[]`（复刻修复前产出）。
+    expect(positive.analysis.a.textureBlobsShape, '真夹具 plain 的 textureBlobs 形态').toBe('object')
+    expect(a.textureBlobsShape, '本负对照的 plain 已无 blob 表').toBe('absent')
+    // 几何不受 blob 表影响：piece 数与 OBJ 顶点数不变
+    expect(preFix.run.pieces.length, '修复前形态下 piece 数不变').toBe(positive.run.pieces.length)
+    expect(c.unplaced, '归位前提仍成立').toBe(0)
+    expect(c.blobQuads, '单件簇 quad 数不变').toBe(positive.analysis.c.blobQuads)
+    // 判红：单件簇**全部**拿不到 blob tile（修复前实测 1234/1234 全 none）
+    expect(
+      c.blobMismatch,
+      `修复前形态下单件簇绑错/无贴图条数（必须＞0；实测 1234/1234）`,
+    ).toBe(c.blobQuads)
+    // 红只来自 blob 侧：共面簇的合成 tile 不依赖 blob 表 ⇒ 仍全对
+    expect(c.mergedMismatch, '共面簇侧不依赖 blob 表 ⇒ 仍 0').toBe(0)
+    // 图集数量塌陷：只剩共面簇合成 tile（实测 45 / 173 个非空体素）
+    expect(c.atlasCount, '修复前形态下图集数必须少于正判据').toBeLessThan(
+      positive.analysis.c.textureCount,
+    )
+    expect(c.atlasCount, '实测 45（正判据 173）').toBe(45)
   })
 })
