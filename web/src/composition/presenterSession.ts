@@ -669,10 +669,14 @@ export class PresenterSession {
    *
    * ## 为什么把"读内核场景"这一步收进本模块（而不是留给视口接线）
    *
-   * 视口接线（`shared/viewport/useViewportRuntime`）属**旧层**，而它已经在**向上依赖**
-   * 装配根（已登记的结构债 `shared-viewport-upward-imports-assembly-root`，
-   * 计数历史 **C7 前 4 → C7 后不得增长**）。若让接线层再 import
-   * `composition/kernelAnnotationInputs`，那条债的计数就会从 4 涨到 5
+   * 视口接线（`shared/viewport/useViewportRuntime`）属**旧层**，而它曾**向上依赖**
+   * 装配根 —— 那笔债就是接缝 `shared-viewport-upward-imports-assembly-root`
+   * （计数历史 **C7 前 4 → C7 后不得增长**）。该接缝**已核销**（R1-β① C10 / 提交
+   * `0219a9eb`：呈现在装配边 `Host#createViewportPresenter(regionId)` 构造后**下行注入**，
+   * 其登记文件的值导入**实测为 0** ⇒ 登记从 `composition/seams.ts` 的 `SEAMS` 删除，
+   * 常驻判据见 `tests/architecture/shared-viewport-upward-import-closure.test.ts`）。
+   * 核销**不改变**本节这条纪律的来历：接线层若再 import `composition/kernelAnnotationInputs`，
+   * 就是把已退的债重新借回来（核销前的计数口径下 = 4 涨到 5）
    * —— "登记是为了可见与可判定，不是为了合法化增长"。
    *
    * 装配根**内部**依赖（`composition/ → composition/`）不是向上依赖：

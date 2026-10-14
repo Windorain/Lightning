@@ -27,9 +27,11 @@ import { resolvePartMaskGeometry } from '@/pure/partMask'
  * ## 为什么值依赖只出现在**本文件**（装配边）而不在 `useViewportRuntime`
  *
  * `shared/viewport/useViewportRuntime.ts` 属旧层，向上 import 装配根（`composition/`）
- * 正是接缝 `shared-viewport-upward-imports-assembly-root` 要退役的方向。
+ * 正是接缝 `shared-viewport-upward-imports-assembly-root` 要退役的方向 —— 该接缝
+ * **已核销**（R1-β① C10 / 提交 `0219a9eb`：值导入实测 **4 → 0**，登记已从 `SEAMS` 删除）。
  * `HostBase` 是装配边：它**拥有**实现选择，视口只收端口。于是"谁提供实现"与
- * "谁消费端口"在类型层分开，且视口的值导入数可机械计数（4 → 0）。
+ * "谁消费端口"在类型层分开，且视口的值导入数可机械计数（4 → 0；常驻判据见
+ * `tests/architecture/shared-viewport-upward-import-closure.test.ts`）。
  */
 export interface ViewportPresenterBundle {
   /** 呈现会话（画面 + 注解/描边的唯一生产者）。 */
@@ -62,7 +64,10 @@ export interface Host {
    * "描边用哪份几何"的实现在 `composition/`（装配根）。视口组件
    * （`shared/viewport/EmbedViewport.vue`、`workbench/components/WorkbenchViewport.vue`）
    * 与 `shared/viewport/useViewportRuntime.ts` 属**旧层** ⇒ 它们不得向上 import 装配根
-   * （接缝 `shared-viewport-upward-imports-assembly-root`）。由宿主构造后**下行注入**，
+   * （接缝 `shared-viewport-upward-imports-assembly-root` —— 该接缝**已核销**：
+   * R1-β① C10 / 提交 `0219a9eb`，本方法即其（甲）子句的具名装配面，登记已从 `SEAMS`
+   * 删除、守护搬到 `tests/architecture/shared-viewport-upward-import-closure.test.ts`）。
+   * 由宿主构造后**下行注入**，
    * 于是"谁提供实现"与"谁消费端口"在类型层分开。
    *
    * ## 为什么按 regionId 构造而不是无参单例

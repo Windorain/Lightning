@@ -24,6 +24,11 @@
  * 字符串字面量**保留** —— 模块说明符本身就是字符串字面量，剥掉它就没有判据可言；
  * 也正因如此，本文件头注释里出现的 `@/composition/` 字样**必须**被剥掉后不计。
  *
+ * **口径边界（如实登记）**：匹配只看**行首**（允许前导空格/制表符）的 `import` 声明，
+ * 故"字符串字面量里**非行首**的 import 形态文本"不计（已配负对照）；而"**多行**字符串
+ * 字面量里**行首**的 import 形态文本"会被计数 —— 那对本判据是**误报方向**（宁可严、
+ * 不会漏报），且 `useViewportRuntime.ts` 里不存在这种文本。
+ *
  * ## 不受本判据管的残余（如实登记，不假装已闭合）
  *
  * `useViewportRuntime.ts:15` 的 `import type { PresenterSession }`（type-only，1 条）**仍在**：
@@ -158,6 +163,11 @@ describe('接缝核销判据 · `shared-viewport-upward-imports-assembly-root`�
     // 口径自检：**注释里**的同一句话不得被算成使用点（本文件头就有这种文字）
     const commented = "// import { seamProbeSymbol } from '@/composition/kernelAssembly'\n"
     expect(compositionValueImports(commented), '注释必须被剥掉').toEqual([])
+    // 口径加固（#387 裁决一）：**字符串字面量里**的假导入（**非行首**）不得被算成使用点
+    // —— 证明"保留字符串字面量"没有把假导入算进来（行首锚点在此把守）。
+    const inString = `const s = "import { seamProbeSymbol } from '@/composition/kernelAssembly'"`
+    expect(compositionValueImports(inString), '字符串字面量里的假导入不得计数').toEqual([])
+
     // 而同一句话在注释外必须被计数（证明上面那条不是"剥得太狠"）
     expect(compositionValueImports("import { seamProbeSymbol } from '@/composition/kernelAssembly'\n"))
       .toEqual(['@/composition/kernelAssembly'])

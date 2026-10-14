@@ -103,6 +103,8 @@ const {
   /**
    * **R1-A C10**：呈现会话包由装配边构造后下行（本组件属旧层，不向上 import 装配根）
    * —— 接缝 `shared-viewport-upward-imports-assembly-root` 的退出判据之一。
+   * 该接缝**已核销**（R1-β① C10 / 提交 `0219a9eb`：(甲)(乙) 两子句同时成立，
+   * 登记已从 `composition/seams.ts` 的 `SEAMS` 删除），本条即（甲）的生产接线证据之一。
    */
   createPresenter: (rid) => host.createViewportPresenter(rid),
 })

@@ -36,7 +36,10 @@ import type { ViewportCameraState } from '@/runtime/viewportCamera'
  * ## 为什么不直接 import `composition/kernelOutlinePlanPort`
  *
  * 本文件属**旧层**（`runtime/`），而 `composition/` 是装配根。旧层持有装配根的
- * **值**依赖正是接缝 `shared-viewport-upward-imports-assembly-root` 要退役的方向。
+ * **值**依赖正是接缝 `shared-viewport-upward-imports-assembly-root` 要退役的方向
+ * —— 该接缝**已核销**（R1-β① C10 / 提交 `0219a9eb`：其登记覆盖的
+ * `shared/viewport/useViewportRuntime.ts` 值导入实测 4 → 0，登记已从 `SEAMS` 删除）；
+ * 本条**不在**那份登记覆盖的文件里，但**同一条方向纪律**照旧适用。
  * 用结构类型让"DRW 需要什么"成为**一条可读的接口**，注入方（宿主装配边）负责
  * 提供实现 —— 与 C9/C10 的注入纪律一致（本处**不**新增门面包旧核心的边）。
  */
