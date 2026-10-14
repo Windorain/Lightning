@@ -44,10 +44,9 @@ import {
   collectStructureGeometryPiecesPure,
   mergeBakedQuadPiecesAttributes,
 } from '@/render/mesh/structureGeometryCore'
-// 纹理池形态面走**深度 2 公共出口**（`render/textureBlobPool.ts`）：直接引用
-// `render/data/textureBlobPool`（深度 3）在闸门执行面里是 `gate/no-private-cross-layer` 的
-// 判红形态，且"每处各写一个深度 2 出口"会让同一语义出现第二个落点（§15）。
-import { isTextureBlobPoolShaped, normalizeTextureBlobPool } from '@/render/textureBlobPool'
+// 纹理池形态面在**最内层** `domain/`（#387 落点迁移）：那里是纯数据形状＋纯函数，
+// 所有层都可 import ⇒ 不产生跨层边，也不需要登记（迁移依据见 `domain/textureBlobPool.ts` 文件头）。
+import { isTextureBlobPoolShaped, normalizeTextureBlobPool } from '@/domain/textureBlobPool'
 
 /**
  * 网格指纹：逐格下标（z→y→x 稳定序）。
@@ -120,7 +119,7 @@ export function paletteContentOf(grid: Grid | null): readonly unknown[] {
  * | 数组 `["<b64>", …]` | `composition/kernelPresentationInputs.ts:397-404`（内核材质面）、`composition/kernelProjection.ts:1403-1405`（多方块） |
  *
  * 而 `presentation/contentIdentity.ts#resourceDigestOf` **本体是形态敏感的** —— 它按入参的
- * JSON 文本取内容摘要，不做任何形态解析（形态解析属 `render/data/textureBlobPool.ts`，
+ * JSON 文本取内容摘要，不做任何形态解析（形态解析属 `domain/textureBlobPool.ts`，
  * §15 同一语义不得有第二处实现）。实测：`['AAAA','BBBB']` ⇒ `c:7f364cd1`，
  * `{'0':'AAAA','1':'BBBB'}` ⇒ `c:ee985e1c` —— **同一逻辑资源、两个摘要**。
  *

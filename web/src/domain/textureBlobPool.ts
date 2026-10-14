@@ -1,5 +1,19 @@
 /**
- * 根级纹理池 `textureBlobs` 的**唯一形态归一化点**（#387 同族批）。
+ * `textureBlobs` 的**唯一形态归一化点**（#387 同族批；原 `render/data/textureBlobPool.ts`，
+ * 本批**迁入 `domain/`**）。
+ *
+ * ## 为什么在 `domain/`（落点迁移的依据，实测驱动）
+ *
+ * 1. 这是**纯数据形状**（两种契约形态）＋**纯函数**（无 Vue/Three/DOM/IO、显式输入、不改输入）
+ *    ⇒ 归属最内层 `domain/`（`LAYER_DESTINATIONS` 里 `domain` 是整层迁移、`corePurity`）；
+ * 2. `tests/architecture/kernel-legacy-isolation.test.ts:269-279` 硬要求内核清单
+ *    `KERNEL_FILES`（57 个文件，含 `adapters/files/*`）的**全部**导入不得指向 16 个旧层目录
+ *    （含 `render`）：`:toEqual([])`、无登记/豁免机制、不看深度。当归一化点在 `render/` 时，
+ *    内核消费者**无法合法引用**（实测：加了 `@/render/textureBlobPool` 后 `test:arch`
+ *    由 225P/0F 变 223P/2F）。
+ * 3. `domain/` 是**最内层**：所有层都可 import 它——内核文件 → `domain/` 不撞隔离闸门；
+ *    旧层文件 → `domain/` 是"向内"，不是"旧→内核迁移边"（那条判据的判定面是 `KERNEL_FILES`）。
+ *    ⇒ 落在这里**不产生任何跨层债**，也不需要登记。
  *
  * ## 这一处为什么必须存在
  *
@@ -20,7 +34,8 @@
  *    的字节（静默错图）。实测 `['a', null, 'c']` 的 `blobs[2]` 由 `'c'` 变 `undefined`。
  *
  * ⇒ 归一化**只在本文件**发生（§15 同一语义不得有第二处实现）；所有消费者走
- * {@link normalizeTextureBlobPool}，类型面用 `../schema/types#TextureBlobPool`。
+ * {@link normalizeTextureBlobPool}，类型面用本文件的 {@link TextureBlobPool}
+ * （`render/schema/types.ts` 只是把它**具名重出口**，见该文件注释）。
  *
  * ## 归一化契约（唯一）
  *
@@ -31,6 +46,21 @@
  * 的 `blobs[i]` 与真值判定）对二者同判"无字节"，用 `''` 可保持 `readonly string[]`
  * 这一既有类型面零改动；同时 `''` 不是合法 base64（内核 `payload !== null` 才写槽），
  * 故不会与真字节混淆。
+ *
+ * ## 同族落点登记表（#387 同族批；**登记即待退出**，不是"已知并存"）
+ *
+ * | 落点 | 状态 | owner | 退出条件 |
+ * |---|---|---|---|
+ * | `render/data/sceneDocumentMaterialHydrate.ts:42`、`render/data/bundleResolve.ts:103-112`、`workbench/export/bundleMaterialBaking.ts`（`extractTextureBlobs`） | **已收敛**（前批，判据 38 条已绿） | 内核重建执行线 | 已退出 |
+ * | `runtime/presentationAdapter.ts:150`（`resourceDigestOf` 喂入口） | **已修**（先判形态再归一化；判据 6 条走生产解析 + 生产读取面） | 内核重建执行线 | 已退出（调用点） |
+ * | `viewer/viewerFromDocument.ts:20` | **已修**（认两种形态 + 能红负对照 3 条） | 内核重建执行线 | 已退出 |
+ * | `adapters/files/legacyFields.ts:111` | **已修**（本批：内核文件改引本模块 ⇒ 不再撞内核隔离闸门） | 内核重建执行线 | 已退出 |
+ * | `adapters/files/publishFormat.ts:175`（`hasNonEmptyArray` 只认数组） | **已修**（同上） | 内核重建执行线 | 已退出 |
+ * | `runtime/context.ts:1231`（同族第 7 处） | **未收敛**：本批**禁写**（该文件在另一代理手上） | 在制该文件的代理（#387 同族批） | 该文件批次收敛时一并修：按形态归一化取池，或改读已归一化的呈现输入；届时删除本行 |
+ * | `presentation/contentIdentity.ts#resourceDigestOf`（**本体**形态敏感） | **登记的地雷**：入参契约是 `unknown`，允许池与非池混用 | 内核重建执行线（#249/#387） | ① 身份函数入参收成规范形（类型面由编译器保证），**或** ② `render/` 退役。**在那之前任何调用方必须先规范化**（配方与负对照见 `runtime/presentationAdapter.ts#resourceIdentityInputOf` 的 docblock） |
+ *
+ * ⚠️ 与"取字节"型消费者不同，**摘要型**消费者**禁止盲归一化**（{@link normalizeTextureBlobPool}
+ * 对非池值产出空表 ⇒ 不同内容会给出同一摘要 ⇒ A28/A36 判据塌陷）。
  */
 
 /** 归一化结果：位置保持（下标 = 槽位），无字节的槽位为 `''`。 */
@@ -38,6 +68,18 @@ export type NormalizedTextureBlobPool = readonly string[]
 
 /** 形态判别的最小面：数组，或"键为数值下标的对象"。 */
 export type TextureBlobPoolLike = readonly unknown[] | Readonly<Record<string, unknown>>
+
+/**
+ * 根级/帧级 `textureBlobs` 的**契约类型**（两种形态，见本文件头的表）。
+ *
+ * 原定义在 `render/schema/types.ts`（#387 落点迁移时随唯一实现一起来到 `domain/`，
+ * 该文件改为**具名重出口**以保持既有 import 面不变）。
+ *
+ * 用途：让"直接按下标取 `blobs[i]` 而不归一化"的类型误用在**编译期**暴露 ——
+ * 文档根（`StructureDataBaked#textureBlobs`）与帧（`Frame#textureBlobs`）都用它。
+ * **任何形态解析只许发生在** {@link normalizeTextureBlobPool}（§15）。
+ */
+export type TextureBlobPool = readonly string[] | Readonly<Record<string, string>>
 
 /**
  * **唯一的** `textureBlobs` 形态归一化：任意形态（数组 / 槽位键对象 / 缺席 / 非法）→ 位置保持数组。
@@ -114,11 +156,11 @@ export function hasTextureBlobAt(blobs: NormalizedTextureBlobPool, slot: number)
 /**
  * 从文档根取 `textureBlobs` 并归一化（消费者最常用的一步）。
  *
- * @param document 任意文档根（`textureBlobs` 可缺席 / 形态非法）
+ * @param doc 任意文档根（`textureBlobs` 可缺席 / 形态非法）
  */
-export function textureBlobPoolOf(document: unknown): NormalizedTextureBlobPool {
-  if (document === null || typeof document !== 'object') return []
-  return normalizeTextureBlobPool((document as { textureBlobs?: unknown }).textureBlobs)
+export function textureBlobPoolOf(doc: unknown): NormalizedTextureBlobPool {
+  if (doc === null || typeof doc !== 'object') return []
+  return normalizeTextureBlobPool((doc as { textureBlobs?: unknown }).textureBlobs)
 }
 
 /**
@@ -127,8 +169,13 @@ export function textureBlobPoolOf(document: unknown): NormalizedTextureBlobPool 
  * 为什么需要它：`normalizeTextureBlobPool` 对**非池**值（键不是数值下标的对象、
  * 元素不是字符串的数组）会产出空表 —— 对"取字节"是对的（那些键本来就不是槽位），
  * 但对"取**内容摘要**"是**数据丢失**：`resourceDigestOf({stone:'AAAA'})` 与
- * `({stone:'BBBB'})` 都会归一成 `[]` ⇒ 摘要相同 ⇒ A28/A36 的"同键不同内容"判据失效
- * （2026-10-15 实测：`contentIdentity.test.ts` 两条 + `contentSignal.test.ts` 一条判红）。
+ * `({stone:'BBBB'})` 都会归一成 `[]` ⇒ 摘要相同 ⇒ A28/A36 的"同键不同内容"判据失效。
+ *
+ * **实测口径（#387 收尾批，勿再引用旧说法）**：盲归一化的受害面只在**调用点层** ——
+ * `presentation/__tests__/contentIdentity.test.ts` 两条（纯函数层）会判红，而
+ * `presentation/__tests__/contentSignal.test.ts` **仍绿**（它用 `contentIdentityOf` +
+ * `resourceDigestOf` 直接构造身份，**不经过** `runtime/presentationAdapter.ts` 的喂入点）。
+ * ⇒ 调用点层的判据在 `runtime/__tests__/presentationAdapterResourceShape.test.ts`。
  *
  * ⇒ 摘要类消费者必须**先判形态**：是池 ⇒ 归一化后取摘要（形态无关）；不是池 ⇒ 按原值取摘要。
  * 判定与归一化同处一地（§15），消费者不许自己写这个判别。

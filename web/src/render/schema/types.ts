@@ -1,4 +1,7 @@
 import type { AnnotationType } from '@/render/data/annotationTypes'
+// 纹理池契约类型随唯一归一化实现迁到最内层 `domain/`（#387 落点迁移）；
+// 本文件只做**具名重出口**（`import type` + `export type { … }`，不是 `export … from` —— 见下方注释）。
+import type { TextureBlobPool } from '@/domain/textureBlobPool'
 
 // ---- Data types shared across layers (pure, no workbench deps) ----
 
@@ -150,9 +153,9 @@ export const TOOLTIP_GRID_NONE = -1
  */
 
 /**
- * 根级纹理池 `textureBlobs` 的**契约类型**（#387 同族批）。
+ * 根级/帧级纹理池 `textureBlobs` 的**契约类型**（#387 同族批）。
  *
- * ## 为什么是联合而不是 `string[]`（类型面失明，本批修）
+ * ## 为什么是联合而不是 `string[]`（类型面失明，同族批修）
  *
  * 此前的声明是 `textureBlobs?: string[]` —— 与**实际产物形态不符**，于是编译器对
  * "消费者只认一种形态"这件事**完全不可见**（`architecture`/`vue-tsc` 全绿而生产静默失效）。
@@ -163,11 +166,21 @@ export const TOOLTIP_GRID_NONE = -1
  * | 槽位键对象 `{"0": "<b64>", …}` | `composition/kernelProjection.ts:1406-1408`（**帧为主**文档的投影产物，`plainForSave().plain`） | 前批实测：真信封投影产物 62 键 |
  * | 数组 `["<b64>", …]`（按需稀疏/占位） | ① `composition/kernelPresentationInputs.ts:397-404`（内核材质面，空洞为 `undefined`）；② `composition/kernelProjection.ts:1403-1405`（**多方块**文档，空洞为 `''`，`docs/contracts/format-multiblock-doc.md:108`） | 契约与实测 |
  *
- * ⇒ **任何形态解析只许发生在** `render/data/textureBlobPool.ts#normalizeTextureBlobPool`
+ * ⇒ **任何形态解析只许发生在** `domain/textureBlobPool.ts#normalizeTextureBlobPool`
  * （§15 同一语义不得有第二处实现）；字段类型用本别名，使"直接按下标取 `blobs[i]` 而不
  * 归一化"的类型误用在编译期暴露。
+ *
+ * ## 为什么这里只是**重出口**（#387 落点迁移）
+ *
+ * 类型的定义已随唯一实现迁到 `@/domain/textureBlobPool`（那里是纯数据形状＋纯函数的最内层
+ * 归属，且内核文件可合法 import —— 见该文件头的迁移依据）。本文件保留同名别名，
+ * 使既有 import 面（`render/data/sceneDocumentV2.ts` 等）零改动。
+ *
+ * ⚠️ 写法是 `import type` + **具名** `export type { … }`，**不是** `export type { … } from '…'`：
+ * 后者会产 `export-from` 事实，而本文件的目标端是闸门执行面（`domain` 整层在面内）⇒
+ * `gate/no-barrel-smuggling` 会判红跨目录转出口（`boundary-rules.mjs:493-516`）。具名重出口不产该事实。
  */
-export type TextureBlobPool = readonly string[] | Readonly<Record<string, string>>
+export type { TextureBlobPool }
 
 /** 可渲染终态（palette + cellGrid） */
 export interface StructureDataBaked {

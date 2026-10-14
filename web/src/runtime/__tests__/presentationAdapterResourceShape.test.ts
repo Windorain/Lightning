@@ -42,7 +42,7 @@ import {
 import { createParserRegistry } from '@/context/parserRegistry'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { diffContentIdentity, planContentRebuild, resourceDigestOf } from '@/presentation/contentIdentity'
-import { normalizeTextureBlobPool } from '@/render/textureBlobPool'
+import { normalizeTextureBlobPool } from '@/domain/textureBlobPool'
 import { readContentIdentity } from '@/runtime/presentationAdapter'
 
 const FIXTURE = path.join(process.cwd(), 'e2e', 'fixtures', 'minimal-v2.json')

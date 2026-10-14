@@ -29,7 +29,7 @@ import {
   isTextureBlobPoolShaped,
   normalizeTextureBlobPool,
   textureBlobPoolOf,
-} from '@/render/data/textureBlobPool'
+} from '@/domain/textureBlobPool'
 import { resourceDigestOf } from '@/presentation/contentIdentity'
 import { extractTextureBlobs } from '@/workbench/export/bundleMaterialBaking'
 
@@ -329,7 +329,7 @@ describe('形态契约 ④：形态解析只许在 textureBlobPool.ts 一处实�
   })
 
   it('正：归一化函数的存在性（唯一落点就在本文件）', () => {
-    const pool = read('render/data/textureBlobPool.ts')
+    const pool = read('domain/textureBlobPool.ts')
     expect(pool).toContain('export function normalizeTextureBlobPool')
     expect(pool).toContain('export function hasTextureBlobAt')
     expect(pool).toContain('export function textureBlobPoolOf')
@@ -338,7 +338,10 @@ describe('形态契约 ④：形态解析只许在 textureBlobPool.ts 一处实�
   it('正：`isTextureBlobPoolShaped` 对"非池"值不误判（摘要类消费者先判形态的依据）', () => {
     expect(isTextureBlobPoolShaped(['A', 'B'])).toBe(true)
     expect(isTextureBlobPoolShaped({ '0': 'A' })).toBe(true)
-    // 非槽位键 ⇒ 不是池（若被归一化会丢内容 ⇒ 摘要恒等的假绿；实测 contentIdentity 3 条判红）
+    // 非槽位键 ⇒ 不是池（若被归一化会丢内容 ⇒ 摘要恒等的假绿）。
+    // 实测口径（#387 收尾批）：`contentIdentity.test.ts` **2 条**（纯函数层）判红；
+    // `contentSignal.test.ts` **绿**（它直接构造身份、不经调用点）⇒ 调用点层判据见
+    // `runtime/__tests__/presentationAdapterResourceShape.test.ts`。
     expect(isTextureBlobPoolShaped({ stone: 'AAAA' })).toBe(false)
     expect(isTextureBlobPoolShaped([{ stone: 'AAAA' }])).toBe(false)
     expect(isTextureBlobPoolShaped('not-a-pool')).toBe(false)

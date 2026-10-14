@@ -4,7 +4,7 @@
 
 import { isBakedStructureData, isWorldDocument } from '@/render/data/bundleResolve'
 import { embeddedStructure } from '@/render/data/worldPlayback'
-import { normalizeTextureBlobPool } from '@/render/textureBlobPool'
+import { normalizeTextureBlobPool } from '@/domain/textureBlobPool'
 import type { StructureData } from '@/render/schema/types'
 
 /**
@@ -26,8 +26,8 @@ export function documentLooksPreviewable(document: unknown): boolean {
   // 归一化是**位置保持**的（下标即槽位），且对非池值产出空表 ⇒ 空池 / 缺席 / 非法
   // 一律 false —— 与原先同口径，只多认了合法的对象形态。
   //
-  // 退出条件：形态解析只在 `render/data/textureBlobPool.ts` 一处（§15）⇒ 本判据随
-  // `render/` 退役（两形态分叉消失）而自然归零。owner：内核重建执行线（#249/#387）。
+  // 退出条件：形态解析只在 `domain/textureBlobPool.ts` 一处（§15）⇒ 本判据随
+  // 两形态分叉消失（生产者统一形态）而自然归零。owner：内核重建执行线（#249/#387）。
   const blobs = (document as { textureBlobs?: unknown }).textureBlobs
   if (normalizeTextureBlobPool(blobs).length === 0) return false
   if (isWorldDocument(document)) {

@@ -8,7 +8,7 @@ import * as THREE from 'three'
 import { inferMaterialBlendModeFromTexture } from '../materials/inferMaterialBlendModeFromTexture'
 import type { MaterialPaletteEntry, StructureData } from '../schema/types'
 import { isBakedStructureData, isWorldDocument } from './bundleResolve'
-import { hasTextureBlobAt, textureBlobPoolOf } from './textureBlobPool'
+import { hasTextureBlobAt, textureBlobPoolOf } from '@/domain/textureBlobPool'
 
 export interface PaletteTextureDataUrlItem {
   materialId: string
@@ -32,7 +32,7 @@ function base64PngToDataUrl(b64: string): string {
  * → `workbench/exportIsometricImage.ts:103 buildMaterialLibrary(plain)`，输入就是
  * `ctx.plainForSave().plain`）实测走这条链。
  *
- * ⇒ 形态解析收敛到 `render/data/textureBlobPool.ts#normalizeTextureBlobPool`
+ * ⇒ 形态解析收敛到 `domain/textureBlobPool.ts#normalizeTextureBlobPool`
  * （§15 同一语义不得有第二处实现），本函数只按下标取字节。
  */
 export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDataUrlItem[] {

@@ -6,7 +6,7 @@
 
 import type { BuildBlockMeshOptions } from '@/render/mesh/blockMesh'
 import type { MaterialBlendMode, MaterialPaletteEntry, StructureDefinition } from '@/render/schema/types'
-import { textureBlobPoolOf } from '@/render/data/textureBlobPool'
+import { textureBlobPoolOf } from '@/domain/textureBlobPool'
 
 export const OBJ_NAME = 'structure.obj'
 export const MTL_NAME = 'structure.mtl'
@@ -71,7 +71,7 @@ export function mtlDissolveAndIllum(blend: MaterialBlendMode | undefined): { d: 
  *
  * 本函数此前**自己**解析形态（数组分支 `.filter` + 对象分支按键落位）——
  * 那是同一语义的**第二处实现**（第一处在渲染侧：`render/data/sceneDocumentMaterialHydrate.ts`
- * 与 `render/data/bundleResolve.ts`）。现统一由 `render/data/textureBlobPool.ts#normalizeTextureBlobPool`
+ * 与 `render/data/bundleResolve.ts`）。现统一由 `domain/textureBlobPool.ts#normalizeTextureBlobPool`
  * 提供，本函数保留名字与返回值形状（3 处调用点不变），只委托。
  */
 export function extractTextureBlobs(normalizedDocument: unknown): string[] {

@@ -12,7 +12,7 @@ import type {
 } from '../schema/types'
 import { indexedRegistryFromMaterialPalette } from '@/pure/materialPaletteBridge'
 import { toStructureDefinition } from './structureDefinition'
-import { hasTextureBlobAt, normalizeTextureBlobPool } from './textureBlobPool'
+import { hasTextureBlobAt, normalizeTextureBlobPool } from '@/domain/textureBlobPool'
 import { embeddedStructure, frameAt, getDefaultFrameIndex } from './worldPlayback'
 
 export function isBakedStructureData(x: StructureData | undefined | null): x is StructureDataBaked {
@@ -92,7 +92,7 @@ export function loadStructureOrWorld(raw: unknown, frameIndex: number | undefine
  * （`composition/kernelPresentationInputs.ts:397-404` 留 `undefined` 空洞）也返 `null`
  * ⇒ 同样跳过。两种情形都**不报错**，只是"校验不存在"。
  *
- * ⇒ 形态解析收敛到 `textureBlobPool.ts#normalizeTextureBlobPool`；本函数只判"池是否存在"。
+ * ⇒ 形态解析收敛到 `domain/textureBlobPool.ts#normalizeTextureBlobPool`；本函数只判"池是否存在"。
  * "槽位有没有字节"由 {@link validateMaterialPaletteEntries} 逐条判定（它现在能区分
  * "下标越界"与"该槽位无字节"两种成因）。
  *
