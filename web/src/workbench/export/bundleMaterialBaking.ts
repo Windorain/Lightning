@@ -32,15 +32,41 @@ export function mtlDissolveAndIllum(blend: MaterialBlendMode | undefined): { d: 
   return { d: 1, illum: 1 }
 }
 
+/**
+ * 从**归一化 plain**（= `Context#plainForSave().plain`，导出算子的输入）取纹理字节表。
+ *
+ * ## 为什么必须同时吃两种形态（端到端实测抓出的缺陷，见 #387）
+ *
+ * `composition/kernelProjection.ts:1321-1330` 把 `textureBlobs` 的**两种形态**登记为**契约**形态：
+ *
+ * | 文档形态 | `textureBlobs` | 依据 |
+ * |---|---|---|
+ * | 帧为主（本函数此前的唯一分支） | 数组 `["<base64>", …]` | `serialize()` 既有形态 |
+ * | 多方块 | 数组（`''` 占位） | `docs/contracts/format-multiblock-doc.md:108` |
+ *
+ * 但内核投影对**帧为主**文档产出的是**槽位键对象**（`{"0": "<base64>", …}`，键 =
+ * `materialPalette` 下标 = `textureBlobIndex`）。此前只认数组 ⇒ 帧为主文档走生产导出
+ * （`ExportObjOperator` → `buildStructureBundleZip`）时 `blobs = []` ⇒ 单件簇的 quad
+ * **全部拿不到 blob tile**，真信封实测 **1234/1234 单件簇 quad 无贴图**（贴图只剩共面簇的
+ * 合成 tile，`atlasCount` 45 / 173 个非空体素）——**静默失效**，既有判据一条都没覆盖。
+ *
+ * 对象形态按键（槽位）还原为**稀疏数组**，使 `blobs[textureBlobIndex]` 的取值口径与数组形态一致。
+ */
 export function extractTextureBlobs(normalizedDocument: unknown): string[] {
-  if (
-    normalizedDocument !== null &&
-    typeof normalizedDocument === 'object' &&
-    Array.isArray((normalizedDocument as { textureBlobs?: unknown }).textureBlobs)
-  ) {
-    return ((normalizedDocument as { textureBlobs: unknown[] }).textureBlobs as unknown[]).filter(
-      (x) => typeof x === 'string',
-    ) as string[]
+  if (normalizedDocument === null || typeof normalizedDocument !== 'object') return []
+  const raw = (normalizedDocument as { textureBlobs?: unknown }).textureBlobs
+  if (Array.isArray(raw)) {
+    return (raw as unknown[]).filter((x) => typeof x === 'string') as string[]
+  }
+  if (raw !== null && typeof raw === 'object') {
+    const out: string[] = []
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v !== 'string') continue
+      const idx = Number(k)
+      if (!Number.isInteger(idx) || idx < 0) continue
+      out[idx] = v
+    }
+    return out
   }
   return []
 }
