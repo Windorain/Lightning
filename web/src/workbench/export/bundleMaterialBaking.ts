@@ -50,13 +50,34 @@ export function mtlDissolveAndIllum(blend: MaterialBlendMode | undefined): { d: 
  * **全部拿不到 blob tile**，真信封实测 **1234/1234 单件簇 quad 无贴图**（贴图只剩共面簇的
  * 合成 tile，`atlasCount` 45 / 173 个非空体素）——**静默失效**，既有判据一条都没覆盖。
  *
- * 对象形态按键（槽位）还原为**稀疏数组**，使 `blobs[textureBlobIndex]` 的取值口径与数组形态一致。
+ * ## 数组分支**必须保持位置**（#387 同族批，本批修）
+ *
+ * 此前的数组分支写的是 `.filter((x) => typeof x === 'string')`。`filter` 是**压紧**语义：
+ * 下标 0 若是空洞（内核材质面 `textureBlobsOfContent` 对无内嵌字节的条留 `undefined`
+ * 空洞，`composition/kernelPresentationInputs.ts:397-404`），其后的 `blobs[1]`、`blobs[2]`
+ * 会整体前移到 `[0]`、`[1]` ⇒ 调用方 `blobs[textureBlobIndex]` 取到**旁边槽位的字节**
+ * （静默错图，不报错）。实测：`['a', null, 'c']` 的 `blobs[2]` 由 `'c'` 变成 `undefined`。
+ *
+ * ⇒ 两分支都按**下标 = 槽位**产出，空洞处写 `''` 占位（保持 `string[]` 而非
+ * `(string|undefined)[]`：6 处调用方（`bundleMeshAssembly.ts:72/127/146-147/160/214/514`）
+ * 的取法全部是 `blobs[i]` 或真值判定，`''` 与 `undefined` 在它们那里同判"无字节"，
+ * 故零改动即语义一致；改类型会牵动该文件 6 处签名，收益为零）。
+ *
+ * **任何形态下 `blobs[i]` 都等于槽位 `i` 的字节或"该槽位无字节"的占位** —— 这是本函数
+ * 对调用方的**唯一**契约（形态解析只在本函数发生）。
  */
 export function extractTextureBlobs(normalizedDocument: unknown): string[] {
   if (normalizedDocument === null || typeof normalizedDocument !== 'object') return []
   const raw = (normalizedDocument as { textureBlobs?: unknown }).textureBlobs
   if (Array.isArray(raw)) {
-    return (raw as unknown[]).filter((x) => typeof x === 'string') as string[]
+    // 位置保持：非字符串槽位（空洞 / `null` / 对象元素）写占位，**不得**压紧。
+    const src = raw as unknown[]
+    const out: string[] = new Array(src.length)
+    for (let i = 0; i < src.length; i++) {
+      const v = src[i]
+      out[i] = typeof v === 'string' ? v : ''
+    }
+    return out
   }
   if (raw !== null && typeof raw === 'object') {
     const out: string[] = []
