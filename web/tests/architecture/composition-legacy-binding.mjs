@@ -230,30 +230,166 @@ export const APPROVED_COMPOSITION_LEGACY_EDGES = [
   E('src/composition/viewportPick.ts', 31, 'runtime/annotationRead', 'import',
     '接线：同上（值位置：拾取时构造读取形状）',
     'R1 收口：同 :30', 'G1'),
-  // ── R1-A C9（f50f6011 / e453ea8f）：描边规划端口经装配根注入 ────────────────
-  //
-  // C9 把"描边几何承载"落成生产实现（`kernelOutlinePlanPort` + 计划→mask 适配 + DRW 接线）。
-  // 该模块是 `composition/` 的装配根（深度 2），只 import `runtime/`、`pure/`、`domain/`、
-  // `presentation/` 的**深度 ≤ 2 公共出口**（见其文件头"分层"一节）。
-  // 它引用旧 `runtime/` 撞名层的**读面**（`gridRead`）与旧运行实例（`context`），
-  // 外加 `pure/partMask` 的部件掩码几何 ⇒ 四条"装配根 → 旧层"边，逐条登记（不得静默）。
-  E('src/composition/kernelOutlinePlanPort.ts', 49, 'runtime/context', 'import',
-    'C9 接线：描边几何源需要旧运行实例的类型（网格/对象的取用入口此刻仍在旧 `Context` 上）——装配根引用各层实现是设计使然（契约 §7）',
-    'R1 收口：旧外壳/旧运行实例退场、描边几何源改吃内核会话后核销', 'R1-A'),
-  E('src/composition/kernelOutlinePlanPort.ts', 50, 'runtime/gridRead', 'import',
-    'C9 接线：格几何的形状由 `gridRead` 的读面返回类型派生（`KernelGridView`/`KernelGridPos`）——刻意**不** import `render/schema/types#BakedQuad`（深度 3 超公共出口上限），故读面是唯一形状来源',
-    'R1 收口：读面迁出旧层（与 `APPROVED_LEGACY_TO_KERNEL_EDGES` 的 `gridRead` 两条同批）后核销', 'R1-A'),
-  E('src/composition/kernelOutlinePlanPort.ts', 51, 'runtime/gridRead', 'import',
-    'C9 接线（值位置）：用 `kernelGridObjectIdOf` 把格归一成对象身份 —— 与 `runtime/gridRead#identityRefOf` 的"歧义即拒绝"同一条纪律，不另写第二份',
-    'R1 收口：同 :50', 'R1-A'),
-  E('src/composition/kernelOutlinePlanPort.ts', 65, 'pure/partMask', 'import',
-    'C9 接线：部件掩码几何复用旧 `pure/partMask` 的实现（`resolvePartMaskGeometry`）——它是既有生产能力的**唯一**实现，本模块只负责把"格的部件"解析成它的输入',
-    'R1 收口：部件掩码几何迁入 `domain`/`adapters` 的新承载后核销（与 `runtime/gridRead` 的退出同批评审）', 'R1-A'),
 ]
+
+/**
+ * **基线（冻结）**：`9630a39d` 的 **11 文件 / 28 行**。
+ *
+ * ## 为什么基线冻结在这个提交，而**不是**评审当刻的最大值
+ *
+ * Lead 裁决（#385，2026-10-14）：基线**不得抬到**评审当刻的 12/32 —— 那会让"边登记边做大"
+ * 成为合法的反模式（登记表成了增长的许可证）。正确形态是：
+ * **基线冻结在上一批真值 11/28**，本批新出现的绑定进**具名豁免清单**（下），
+ * 且豁免清单的**终态必须是空的**。
+ */
+export const BASELINE_FILES = 11
+export const BASELINE_LINES = 28
+/** 基线的来源提交（便于 P11 复核"冻结在哪个真值上"）。 */
+export const BASELINE_COMMIT = '9630a39d'
+
+/**
+ * **具名豁免（暂准，终态必须为空）** —— 装配根 `kernelOutlinePlanPort.ts` 的绑旧层边。
+ *
+ * ## 形态的四条硬约束（Lead 裁决 #385，2026-10-14）
+ *
+ * | # | 约束 | 本文件里的落点 |
+ * |---|---|---|
+ * | ① | 未登记边 ⇒ 判红 | `unregisteredCompositionLegacyEdges` + `approvedWithExemptions` |
+ * | ② | 豁免**只允许**冻结的那 4 条，多一条 ⇒ 红 | `FROZEN_PERMITTED_EXEMPT_GROUPS`（许可组 + 组内条数上限 + 总量 4）+ `exemptionCeilingViolations` |
+ * | ③ | 豁免条数作为**可读读数**导出（趋势机器可见） | `exemptionReading(facts)`（测试打进日志；含许可上限与终态声明） |
+ * | ④ | 终态**必须为空**：R1-A 子件②把这 4 条注入化后豁免归零，基线相对读数回到 11/28 | `terminal: 'empty'` + `terminalBatch`；豁免由**实测导出**（`derivePendingExemptions`）⇒ 绑定一消失，条目自动消失，不存在"留着的空豁免" |
+ *
+ * ## 为什么豁免成员是**实测导出**而不是手写行号清单
+ *
+ * C9 的 `kernelOutlinePlanPort.ts` 在评审期由**其他写者**持续编辑，实测 20 分钟内变了三次：
+ * `:51`（值位置 `gridRead`）与 `:65`（`pure/partMask`）被注入化消掉、行号从 49/50 漂到 56/57。
+ * 手写 `file:line` 清单在这种条件下会产生**假红**（漂移被当成越界）与**假绿**（留着已消失的条目）。
+ * ⇒ 判据钉在**语义**上：许可的 `(file, target)` 组合与条数（冻结），豁免成员由实测导出（读数）。
+ * 判据强度不降：往豁免里塞第五个绑定/新的去向仍然判红（`exemptionCeilingViolations`）。
+ *
+ * ## 收缩史（读数）
+ *
+ * | 时点 | 条数 | 说明 |
+ * |---|---|---|
+ * | C9 落地（`f50f6011`/`e453ea8f`） | **4** | `:49`→`runtime/context`、`:50`/`:51`→`runtime/gridRead`、`:65`→`pure/partMask` |
+ * | R1-A 子件②在途（评审后实测） | **≤4（递减）** | 注入化推进时条目逐个消失，终态 0 |
+ */
+
+/**
+ * ② 的**许可上限**：豁免**只允许** C9 落地时实测的那 4 条绑定。
+ *
+ * ## 为什么用 `(file, target) → 许可条数` 而不是 `file:line` 字面量
+ *
+ * C9 的 `kernelOutlinePlanPort.ts` 在评审期**仍在被编辑**（文件头注释增长 ⇒ 导入行的
+ * 行号从 49/50/51/65 漂到 56/57）。若把许可上限钉成行号字面量，则**行号漂移**
+ * 会被判成"超出许可集" —— 那是**假红**：漂移的是位置，不是绑定的数量与性质。
+ * 闸门要判的是"**绑定的数量与去向**不得新增"，故上限按 `(file, target)` 计数：
+ *  - 新的 `(file, target)` 组合 ⇒ 判红（"多一条"的真正含义）；
+ *  - 同一组合的条数不得超过许可上限；
+ *  - 总条数不得超过 4。
+ */
+export const FROZEN_PERMITTED_EXEMPT_GROUPS = Object.freeze([
+  Object.freeze({ file: 'src/composition/kernelOutlinePlanPort.ts', target: 'runtime/context', permitted: 1 }),
+  Object.freeze({ file: 'src/composition/kernelOutlinePlanPort.ts', target: 'runtime/gridRead', permitted: 2 }),
+  Object.freeze({ file: 'src/composition/kernelOutlinePlanPort.ts', target: 'pure/partMask', permitted: 1 }),
+])
+
+/**
+ * C9 落地（`f50f6011` / `e453ea8f`）时的豁免**历史读数**（4 条 `file:line:target`）。
+ *
+ * ⚠️ 这是**读数快照，不是判据**：C9 的 `kernelOutlinePlanPort.ts` 在评审期由**其他写者**
+ * 持续编辑（文件头注释增长 ⇒ 导入行号漂移；子件②的注入化 ⇒ 条目被消掉）。
+ * 把行号当作**判据**会让"行号漂移"与"注入化收缩"都变成假红 —— 闸门要判的是
+ * **绑定的数量与去向不得新增**（上 `FROZEN_PERMITTED_EXEMPT_GROUPS`），
+ * 而不是一个正在被编辑的文件的行号。故当前的豁免成员由 `derivePendingExemptions()`
+ * **实测导出**（读数），许可上限由冻结的许可组把守（判据）。
+ */
+export const EXEMPTION_LEDGER_AT_C9_LANDING = Object.freeze([
+  'src/composition/kernelOutlinePlanPort.ts:49:runtime/context',
+  'src/composition/kernelOutlinePlanPort.ts:50:runtime/gridRead',
+  'src/composition/kernelOutlinePlanPort.ts:51:runtime/gridRead',
+  'src/composition/kernelOutlinePlanPort.ts:65:pure/partMask',
+].sort())
+
+/** 许可上限的**总条数**（4 = C9 落地时的实测条数）。 */
+export const FROZEN_PERMITTED_EXEMPT_TOTAL = FROZEN_PERMITTED_EXEMPT_GROUPS.reduce((n, g) => n + g.permitted, 0)
+
+/** 冻结基线登记的身份集（28 条；豁免 = 实测 − 本集）。 */
+export const BASELINE_EDGE_IDS = Object.freeze(
+  APPROVED_COMPOSITION_LEGACY_EDGES.map((e) => `${e.from}:${e.line}:${e.to}`).sort(),
+)
+
+/**
+ * **豁免成员（实测导出）**：`composition/` 里绑旧层的边中**不在冻结基线**里的那些。
+ *
+ * 它们在语义上就是"本批新出现、尚未核销、暂准存在"的绑定 —— 由 `PENDING_*` 手写清单
+ * 改成实测导出，是因为 C9 的文件正被其他写者编辑：手写 `file:line` 会在漂移与注入化下
+ * 反复产生**假红**（本批评审期实测：同一份清单在 20 分钟内被动过三次：
+ * `:51`/`:65` 被注入化消掉、行号从 49/50 漂到 56/57）。
+ * 判据强度不降：**许可上限（组 + 条数）仍是冻结的判据**，实测导出只回答"当前还剩几条"。
+ */
+export function derivePendingExemptions(facts, { srcRoot = SRC_ROOT, kernelFiles = readKernelFiles() } = {}) {
+  const baseline = new Set(BASELINE_EDGE_IDS)
+  return countCompositionLegacyEdges(facts, { srcRoot, kernelFiles })
+    .rows.filter((r) => !baseline.has(`${r.file}:${r.line}:${r.target}`))
+    .map((r) => Object.freeze({ from: r.file, line: r.line, to: r.target, kind: 'import', exempt: true, terminalBatch: 'R1-A 子件②' }))
+    .sort((a, b) => (a.from === b.from ? a.line - b.line : a.from < b.from ? -1 : 1))
+}
+
+/** ② 的**机械检测核**：返回"超出许可上限"的说明（空 = 合规）。判据与负对照共用。 */
+export function exemptionCeilingViolations(exemptions) {
+  const out = []
+  const groups = new Map()
+  for (const e of exemptions) {
+    const key = `${e.from}→${e.to}`
+    groups.set(key, (groups.get(key) ?? 0) + 1)
+    const permitted = FROZEN_PERMITTED_EXEMPT_GROUPS.find((g) => g.file === e.from && g.target === e.to)
+    if (!permitted) {
+      out.push(`${e.from}:${e.line} → ${e.to}：该 (file, target) 组合不在冻结许可集内（新增绑定必须走基线修订的显式流程，不是往豁免里塞）`)
+    }
+  }
+  for (const [key, count] of groups) {
+    const [file, target] = key.split('→')
+    const permitted = FROZEN_PERMITTED_EXEMPT_GROUPS.find((g) => g.file === file && g.target === target)
+    if (permitted && count > permitted.permitted) {
+      out.push(`${file} → ${target}：豁免 ${count} 条，超出许可上限 ${permitted.permitted} 条`)
+    }
+  }
+  if (exemptions.length > FROZEN_PERMITTED_EXEMPT_TOTAL) {
+    out.push(`豁免总条数 ${exemptions.length} 超出许可上限 ${FROZEN_PERMITTED_EXEMPT_TOTAL} 条`)
+  }
+  return out
+}
+
+/**
+ * ③ 的读数本体（测试打进日志，供每批合流登记趋势）；`terminal` 是 ④ 的机器可读声明。
+ * `exemptionCount` 是**实测导出**（读数），`permittedCeiling` 是冻结判据。
+ */
+export function exemptionReading(facts) {
+  const exemptions = derivePendingExemptions(facts)
+  return {
+    exemptionCount: exemptions.length,
+    permittedCeiling: FROZEN_PERMITTED_EXEMPT_TOTAL,
+    baseline: { files: BASELINE_FILES, lines: BASELINE_LINES, commit: BASELINE_COMMIT },
+    terminal: 'empty',
+    terminalBatch: 'R1-A 子件②（把这 4 条注入化）',
+    ids: exemptions.map((e) => `${e.from}:${e.line}:${e.to}`),
+  }
+}
+
+/** 生产判据使用的"当前已批准集合" = 冻结基线登记 + 实测导出的具名豁免。 */
+export function approvedWithExemptions(facts) {
+  const exemptions = derivePendingExemptions(facts).map((e) => ({
+    from: e.from,
+    line: e.line,
+    to: e.to,
+    kind: 'import',
+    reason: `R1-A C9 在途绑定（豁免，终态为空）：${e.from} → ${e.to}`,
+    exitStage: 'R1-A 子件②：注入化后从豁免中消失，本批登记随之核销',
+    owner: 'R1-A',
+  }))
+  return [...APPROVED_COMPOSITION_LEGACY_EDGES, ...exemptions]
+}
 
 /** 逐条登记必须写全的字段（防"登记了但没有理由/没有退出归属/没有负责人"）。 */
 export const REGISTRY_REQUIRED_FIELDS = Object.freeze(['from', 'line', 'to', 'kind', 'reason', 'exitStage', 'owner'])
-
-/** 基线：12 文件 / 32 行（修订记录见测试文件头"基线为何是 12/32"）。 */
-export const BASELINE_FILES = 12
-export const BASELINE_LINES = 32
