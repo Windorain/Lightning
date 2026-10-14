@@ -83,7 +83,14 @@ export interface PresenterApplyOutcome {
 /** 一次逐格拾取的结果。 */
 export type PresenterPickResult =
   | { readonly kind: 'miss' }
-  | { readonly kind: 'hit'; readonly resolution: PickResolution }
+  | {
+      readonly kind: 'hit'
+      readonly resolution: PickResolution
+      /** 命中点的**世界坐标**（与 `resolution` 同一次射线，不重射）。 */
+      readonly point: readonly [number, number, number]
+      /** 命中距离（相机到命中点；与 legacy `ScenePickBlock#distance` 同口径）。 */
+      readonly distance: number
+    }
   /**
    * 过期画面上的拾取（A12）：**暂停**该类操作并明确状态。
    *
@@ -401,7 +408,16 @@ export class PresenterSession {
       const verdict = evaluateStalePick(res, this.currentKey)
       if (verdict === null) continue
       if (verdict.kind === 'suspend') return { kind: 'stale', detail: verdict.detail }
-      return { kind: 'hit', resolution: verdict.resolution }
+      return {
+        kind: 'hit',
+        resolution: verdict.resolution,
+        // 命中点/距离随结果一起给：R1-β① C7 的**内核拾取适配**要把它们映射成
+        // `ScenePickBlock#point`（部件级拾取 `pickPartForScenePick` 读它），
+        // 而 `PickResolution` 是**身份**面（对象/元素/格），本就不含世界坐标。
+        // 让调用方自己再射一次线会引入第二条射线（两条可能不一致）。
+        point: [hit.point.x, hit.point.y, hit.point.z],
+        distance: hit.distance,
+      }
     }
     return { kind: 'miss' }
   }
