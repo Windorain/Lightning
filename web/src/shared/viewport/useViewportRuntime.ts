@@ -6,6 +6,7 @@ import { DRW } from '@/runtime/drw'
 import { PresenterSession } from '@/composition/presenterSession'
 import { createViewportTexturePort, type ViewportTexturePort } from '@/composition/viewportTexturePort'
 import { textureResourcesOf } from '@/composition/kernelTextureResources'
+import { kernelAnnotationInputs } from '@/composition/kernelAnnotationInputs'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { sceneSeconds } from '@/composition/kernelRuntime'
 
@@ -174,6 +175,8 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    */
   const presenterSurface = new PresenterSession({ scope: `viewport:${regionId}`, textures: presenterTextures })
   vpSlot.presenterSurface = presenterSurface
+  /** 上次同步给呈现会话的注解身份（文档版本 + 视口可见性）。 */
+  let lastAnnotationIdentity: string | null = null
   onScopeDispose(() => {
     // 卸载即释放（A19：视口关闭不泄漏 GPU 份额；两个视口共享源数据时
     // 关其一不破坏另一方 —— 设备作用域按 region 分，故账天然分开）。
@@ -348,8 +351,34 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       for (const s of out.compileSkipped) presenterErrors.push(`compile-skip:${s.objectId}:${s.reason}`)
       // 材质统一：编译产物已就位 ⇒ 接着把贴图接上（否则该批次走中性色）。
       void syncPresenterTextures()
+      syncPresenterAnnotations(doc)
     } catch (e) {
       presenterErrors.push(`threw:${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  /**
+   * 注解从内核文档进呈现会话（R1-β① C7）。
+   *
+   * 去重口径与 `applyIfChanged` 同一纪律：**文档版本**是内容身份，版本没变就不重建
+   * GPU 对象（注解每帧重编会让 overlay 每帧 dispose/重建一次）。
+   *
+   * `showAnnotations` 是**视口状态**（不是文档内容）⇒ 由本处过滤，而不是让内核承载它
+   * （见 `composition/kernelAnnotationInputs` 的 `visible` 说明）。
+   */
+  const syncPresenterAnnotations = (doc: {
+    readonly version: { readonly documentVersion: number }
+    readonly scene: Parameters<typeof kernelAnnotationInputs>[0]
+  }): void => {
+    const visible = toRef(viewerPrefs, 'showAnnotations').value
+    const wanted = `${visible ? 'show' : 'hide'}:d${doc.version.documentVersion}`
+    if (wanted === lastAnnotationIdentity) return
+    lastAnnotationIdentity = wanted
+    try {
+      const outcome = presenterSurface.setAnnotations(visible ? kernelAnnotationInputs(doc.scene).inputs : [])
+      for (const u of outcome.unrendered) presenterErrors.push(`annotation:${u.objectId}:${u.aspect}`)
+    } catch (e) {
+      presenterErrors.push(`annotation-threw:${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
