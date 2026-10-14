@@ -22,9 +22,13 @@
  * 用版本化输入替代计数器的关键收益是**可计算**："哪个维度变了"可以直接算出来
  * （契约 §4 选择理由），于是"只重建该重建的"从愿望变成判据。
  *
- * ## 六项区分 + 视图投影键
+ * ## 六项区分 + 相位维 + 视图投影键
  *
  * #249 §7 明列六项：文档版本、场景、时间、参数版本、暂存事务版本、内容资源版本。
+ * 本文件在六项之上**增第七维 `texturePhase`**（#388 裁决 R2-① 第 2 条「相位进求值键 = 必修」）：
+ * `docs/contracts` §4 的冻结文本仍是六维，**增维是本轴的契约变更**，由执行单转交裁决者落契约
+ * （本轴不得改 `docs/contracts/**`）。增维是**纯增**：既有六维的语义、序列化前缀与比较顺序
+ * 都不变，新维追加在末尾 ⇒ 旧键是新键的缺省形态（缺省相位序列化为 `-`）。
  * 摄像机/局部显示**若不影响结构**只进 `viewProjection`（契约 §4）。本实现因此把
  * `viewProjection` 与其余六项**分开比较** —— 这是 A11 判据的落点。
  */
@@ -37,7 +41,35 @@ export type TimeValue = Readonly<{ seconds: number; numerator: number; denominat
 
 export const TIME_ZERO: TimeValue = { seconds: 0, numerator: 0, denominator: 1 }
 
-/** 契约 §4 主键的六个维度（顺序即比较顺序，便于诊断按任一维度分组）。 */
+/**
+ * 纹理**相位**绑定 —— 材质**实例**的相位（#249 §19.3；采样器 `domain/materials#sampleTextureInstance`）。
+ *
+ * ## 取值域与缺省语义（三态必须可区分）
+ *
+ * | 值 | 含义 | 序列化 |
+ * |---|---|---|
+ * | `undefined`（字段缺席） | 该材质**无相位动画**：不参与相位，序列按场景时间直接采样 | `-` |
+ * | `{ phaseOffset: 0, phaseScale: 1 }` | 带相位绑定，且恰为"零偏移、原速"（即第 0 相位） | `0/1` |
+ * | 其它数值对 | 带相位绑定，偏移/缩放非平凡 | `<offset>/<scale>` |
+ *
+ * **缺省不得用 `0` 冒充"第 0 帧"**：`undefined` 与 `{0,1}` 在本键里是**两个不等价的值**
+ * （`ph:-` vs `ph:0/1`），故相位缺席的材质与"显式第 0 相位"的材质**不得**共享缓存条目/批次。
+ * 理由不是"像素一定不同"，而是两者是**不同的求值输入** —— 把缺席归一成 `{0,1}` 会让
+ * "该材质是否声明了相位"这一事实在键里消失，之后任何按相位区分的求值与失效都失去可计算性
+ * （与 `useVertexColor` 之下 tint 仍进兼容性键同一口径：不因"当前路径下结果相同"就抹掉输入）。
+ */
+export type TexturePhaseBinding = Readonly<{ phaseOffset: number; phaseScale: number }>
+
+/** 相位维的稳定序列化（**唯一一处**规则：缺省 = `-`，显式 = `<offset>/<scale>`）。 */
+export function texturePhaseKeyOf(phase: TexturePhaseBinding | undefined | null): string {
+  return phase === undefined || phase === null ? '-' : `${phase.phaseOffset}/${phase.phaseScale}`
+}
+
+/**
+ * 主键的维度（顺序即比较顺序，便于诊断按任一维度分组）。
+ *
+ * 前六项逐字来自契约 §4；第七项 `texturePhase` 是 G7（#388 R2-①）新增的**相位维**，追加在末尾。
+ */
 export const EVALUATION_KEY_DIMENSIONS = [
   'documentVersion',
   'scene',
@@ -45,6 +77,7 @@ export const EVALUATION_KEY_DIMENSIONS = [
   'parameterVersion',
   'stagedTransactionVersion',
   'contentResourceVersions',
+  'texturePhase',
 ] as const
 
 export type EvaluationKeyDimension = (typeof EVALUATION_KEY_DIMENSIONS)[number]
@@ -60,6 +93,11 @@ export type EvaluationKey = Readonly<{
   stagedTransactionVersion?: number
   /** 内容资源版本/哈希；键是 `AssetId`，值是内容版本 */
   contentResourceVersions: Readonly<Record<string, string>>
+  /**
+   * **纹理相位**（增维后的第七维）。缺省 = 该材质无相位动画；显式 `{0,1}` = 第 0 相位
+   * —— 语义与"两者不等价"的理由见 {@link TexturePhaseBinding}。
+   */
+  texturePhase?: TexturePhaseBinding
   /** 视图投影键：只影响机位/局部显示，**不影响结构** */
   viewProjection?: Readonly<{ camera: string; localDisplay: string }>
 }>
@@ -70,9 +108,11 @@ export const EMPTY_EVALUATION_KEY: EvaluationKey = {
   time: TIME_ZERO,
   parameterVersion: 0,
   contentResourceVersions: {},
+  // `texturePhase` **刻意缺席** = 无相位动画。不得写成 `{ phaseOffset: 0, phaseScale: 1 }`
+  // （那是"显式第 0 相位"，与缺席不等价；见 `TexturePhaseBinding` 的三态表）。
 }
 
-/** 主键（六项）的稳定序列化 —— 用于缓存查找与"是否结构等价"判定。 */
+/** 主键（七维：契约六项 + 相位）的稳定序列化 —— 用于缓存查找与"是否结构等价"判定。 */
 export function structuralKeyOf(key: EvaluationKey): string {
   return [
     `d${key.documentVersion}`,
@@ -81,6 +121,7 @@ export function structuralKeyOf(key: EvaluationKey): string {
     `p${key.parameterVersion}`,
     `x${key.stagedTransactionVersion ?? '-'}`,
     `r{${resourceVersionsKey(key)}}`,
+    `ph:${texturePhaseKeyOf(key.texturePhase)}`,
   ].join('|')
 }
 
@@ -126,6 +167,7 @@ export function diffEvaluationKey(
   if (prev.parameterVersion !== next.parameterVersion) changed.push('parameterVersion')
   if (prev.stagedTransactionVersion !== next.stagedTransactionVersion) changed.push('stagedTransactionVersion')
   if (resourceVersionsKey(prev) !== resourceVersionsKey(next)) changed.push('contentResourceVersions')
+  if (texturePhaseKeyOf(prev.texturePhase) !== texturePhaseKeyOf(next.texturePhase)) changed.push('texturePhase')
   return changed
 }
 
@@ -191,6 +233,16 @@ export type MaterialDescriptor = Readonly<{
   /** 整型色（`0xRRGGBB`）；顶点色路径为白。 */
   tint: number
   useVertexColor: boolean
+  /**
+   * 纹理**相位**绑定（缺省 = 该材质**无相位动画**；显式 `{0,1}` = 带相位绑定且为原速第 0 相位）。
+   *
+   * 只增字段，既有的 `id`/`version`/`blend`/`tint`/`useVertexColor` 语义不变。它与
+   * {@link TexturePhaseBinding} 的三态口径**同一份**（`undefined` ≠ `{0,1}`），并由
+   * `presentation/batchPlan#compatibilityKeyOf`、`presentation/presenter#materialIdentityOf`
+   * 与 `presentation/textureBinding#textureBindingKey` 三处**同时**进键 —— 相位不同的材质
+   * 因此不共享材质缓存条目，也不合进同一绘制批次（#388 R2-① 的判据面）。
+   */
+  texturePhase?: TexturePhaseBinding
 }>
 
 /**
