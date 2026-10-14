@@ -13,7 +13,6 @@ import { DRW } from '@/runtime/drw'
  * （`runtime/host.ts#HostBase#createViewportPresenter`）构造后下行。
  */
 import type { PresenterSession } from '@/composition/presenterSession'
-import type { KernelRenderSourceFace } from '@/composition/kernelPresentationInputs'
 import type { ViewportPresenterBundle } from '@/runtime/host'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 
@@ -235,10 +234,19 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    *
    * 面在场 ⇒ DRW 不再读 `docRef` 的这三样；`docRef` 只留给多方块的再装配投影
    * （G3 落地前已登记的暂存路径）与内容身份。
+   *
+   * ## ⚠️ 这里**故意不**写类型标注（不许再 import 装配根的类型）
+   *
+   * 接缝 `shared-viewport-upward-imports-assembly-root` 把本目录 → `@/composition/**`
+   * 的 **type-only 残余逐字钉住恰 1 条**（值导入/动态导入皆 0）。加一条 `import type
+   * { KernelRenderSourceFace } from '@/composition/…'` 就让残余变 2 ⇒ 判据判红
+   * （`web/tests/architecture/shared-viewport-upward-import-closure.test.ts`）。
+   * ⇒ 面的类型由 `Context#kernelRenderSourceFace()` 的**返回值推断**得到：
+   * 端口形状归 Context 这一层（本目录可向下 import `@/runtime/**`），
+   * 既不需要向上 import，也不在本目录另立一份"最小结构类型"（那会成为第二份形状、
+   * 与真类型漂移）。
    */
-  const renderSourceRef = computed<KernelRenderSourceFace | null>(() =>
-    ctx.kernelRenderSourceFace(),
-  )
+  const renderSourceRef = computed(() => ctx.kernelRenderSourceFace())
 
   /**
    * 内核会话（P10 #261）。
