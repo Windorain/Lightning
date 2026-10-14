@@ -39,14 +39,31 @@ import path from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import {
+  cloneInner,
   gotoWorkbench,
   injectSceneDocumentOk,
   readFixture,
+  rewrap,
   waitForViewportMounted,
 } from './helpers/multiblock'
 import { expectNotBlank, readPixelSignature } from './helpers/multiblock/pixels'
 
 const SHOT_DIR = path.join(import.meta.dirname, 'screenshots', 'p10e-presenter')
+
+/**
+ * 一条**呈现失败**记录 —— 经既有诊断读面读到的**生产值**。
+ *
+ * 字段口径来自写入侧（`shared/viewport/useViewportRuntime#emitPresenterFailure`）：
+ * `channel: 'effect'` + `code: 'effect.failed'` + `params.source === 'presenter'`
+ * （`reason` / `detail` 恒在；去重超限时多带 `dropped: true`），
+ * `correlation.objectId` 只在有对象身份时才出现（纹理类失败无对象身份）。
+ */
+interface PresenterFailure {
+  readonly reason: string
+  readonly detail: string
+  readonly dropped: boolean
+  readonly objectId: string | null
+}
 
 /** 呈现会话的公开观测面（经 `window.__vm__` 的 `vpSlot.presenterSurface`）。 */
 interface PresenterObservation {
@@ -61,7 +78,17 @@ interface PresenterObservation {
   readonly ledgerRelease: number
   readonly ledgerActive: number
   readonly ledgerBalanced: number
-  readonly presenterErrors: readonly string[]
+  /**
+   * 诊断读面是否**可用**（`ctx.getDiagnostics()` 在场且 `byCode` 可调）。
+   *
+   * ⚠️ 它必须与 `presenterFailures` 一起返回，否则本文件又回到同一种假绿：
+   * 读面缺失时 `presenterFailures` 只能是空数组，而 `toEqual([])` 会把"读不到"
+   * 静默当成"没有错误"（恒真）。分开成两个字段后，断言才能区分
+   * "真的没有错误" 与 "根本读不到"。
+   */
+  readonly diagnosticsReadable: boolean
+  /** 呈现失败记录（**生产值**：读面 = `ctx.getDiagnostics().byCode('effect.failed')`）。 */
+  readonly presenterFailures: readonly PresenterFailure[]
 }
 
 /**
@@ -79,15 +106,36 @@ interface PresenterObservation {
  * 不是泄漏。A19 的判据是"**各自动 dispose 之后**账守恒"（e2e 侧的正确形态见
  * `presentation-gpu.spec.ts` 的 A19 组）。故本文件只读 acquire/active 作为
  * "真的持有了资源"的证据，**不**在活跃态断言守恒（那会是一条恒假的判据）。
+ *
+ * ## 呈现失败为什么读**诊断读面**（修的是本文件此前的假绿）
+ *
+ * 旧版这里返回 `presenterErrors: []`（手写空数组）⇒ `:187` 的
+ * `toEqual([])` 与产品行为**无关**，恒真。生产里那条链的真实事实写在
+ * `ctx.wm.diagnostics`（读面 `ctx.getDiagnostics()`，e2e 经 `__vm__` 取），
+ * 写入形态见 `emitPresenterFailure`：`channel:'effect'` + `code:'effect.failed'`
+ * + `params.source === 'presenter'`。故这里按**码 + source** 过滤读它 ——
+ * 判据从此跟着产品行为走：有失败就非空，没失败才为空。
  */
 async function readPresenterObservation(page: Page): Promise<PresenterObservation> {
   return await page.evaluate(() => {
     const ctx = (window as any).__vm__
     const slots = ctx?.viewports
+    const readView = ctx?.getDiagnostics?.()
+    const diagnosticsReadable = readView !== undefined && typeof readView.byCode === 'function'
+    const presenterFailures = diagnosticsReadable
+      ? (readView.byCode('effect.failed') as any[])
+          .filter((r) => r?.params?.source === 'presenter')
+          .map((r) => ({
+            reason: String(r.params.reason ?? ''),
+            detail: String(r.params.detail ?? ''),
+            dropped: r.params.dropped === true,
+            objectId: typeof r.correlation?.objectId === 'string' ? r.correlation.objectId : null,
+          }))
+      : []
     const blank: any = {
       hasSurface: false, batchObjects: 0, instanceCount: 0, geometryBuilds: 0, materialBuilds: 0,
       missingRequiredTextures: 0, generation: null, ledgerAcquire: 0, ledgerRelease: 0,
-      ledgerActive: 0, ledgerBalanced: 0, presenterErrors: [],
+      ledgerActive: 0, ledgerBalanced: 0, diagnosticsReadable, presenterFailures,
     }
     if (slots === undefined) return blank
     const candidates: any[] = []
@@ -113,9 +161,15 @@ async function readPresenterObservation(page: Page): Promise<PresenterObservatio
       ledgerRelease: led.releaseTotal,
       ledgerActive: led.activeCount,
       ledgerBalanced: led.balanced === true ? 1 : 0,
-      presenterErrors: [],
+      diagnosticsReadable,
+      presenterFailures,
     }
   }) as Promise<PresenterObservation>
+}
+
+/** 只取呈现失败（轮询用；与 `readPresenterObservation` 同一读面、同一过滤口径）。 */
+async function readPresenterFailures(page: Page): Promise<readonly PresenterFailure[]> {
+  return (await readPresenterObservation(page)).presenterFailures
 }
 
 /** 经 vite 转译加载浏览器侧探针（见文件头"探针为什么要走 vite 转译"）。 */
@@ -184,7 +238,15 @@ test.describe('P10e 段② · 呈现链真实上线（生产装配 → Presenter
         `${file}: 活跃资源数必须等于 acquire - release（账面自洽）`,
       ).toBe(obs.ledgerAcquire - obs.ledgerRelease)
       // ⑥ 呈现链不得有编译错误/跳过（内核内容必须被完整吃下）
-      expect(obs.presenterErrors, `${file}: 呈现链不得有错误`).toEqual([])
+      //
+      // ⚠️ 这条断言此前是**恒真**的：读的是本文件手写的 `presenterErrors: []`。
+      // 现在读的是生产诊断记录（`effect.failed` + `params.source==='presenter'`）；
+      // 且先断言读面可用 —— 否则"读不到"会被静默当成"没有错误"。
+      expect(
+        obs.diagnosticsReadable,
+        `${file}: 诊断读面必须可用（否则"没有失败"只说明没读到）`,
+      ).toBe(true)
+      expect(obs.presenterFailures, `${file}: 呈现链不得有错误`).toEqual([])
 
       // ⑦ 逐像素：视口画面非空（走既有判据，门限与其它 spec 同源）
       const png = await page.screenshot({ fullPage: false })
