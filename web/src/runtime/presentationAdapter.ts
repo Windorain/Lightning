@@ -29,7 +29,12 @@ import {
   structureDigestOf,
   type ContentIdentity,
 } from '@/presentation/contentIdentity'
-import type { EvaluatedPrimitive, GeometryAttributes, GeometryId } from '@/presentation/evaluationKey'
+import type {
+  EvaluatedPrimitive,
+  GeometryAttributes,
+  GeometryId,
+  TexturePhaseBinding,
+} from '@/presentation/evaluationKey'
 import { triangleCellMapOf } from '@/presentation/cellIdentity'
 import { contentDigestOf } from '@/presentation/invalidationPlan'
 // 几何收集**只有一个**入口（D3a 更正：原先本文件另有一份手写遍历，它不做遮挡剔除
@@ -212,13 +217,15 @@ export function structureMaterialPrimitives(input: {
       // ← **对象身份**：同一对象的所有材质组共享它。
       objectId,
       geometry: { id: g.geometryId, version: 'v1' },
-      material: {
-        id: g.materialId,
-        version: 'v1',
-        blend: g.blend,
-        tint: materialTint,
-        useVertexColor: true,
-      },
+        material: {
+          id: g.materialId,
+          version: 'v1',
+          blend: g.blend,
+          tint: materialTint,
+          useVertexColor: true,
+          // 相位是**调色板声明**的（缺省 = 无相位动画；不是 `{0,1}` —— #388 R2-①）。
+          ...(g.texturePhase === undefined ? {} : { texturePhase: g.texturePhase }),
+        },
       transform: [...transform],
       bounds: { min: [...bounds.min], max: [...bounds.max] },
       deform: 'shared',
@@ -284,6 +291,12 @@ export function structureMaterialGroups(input: {
   readonly blend: 'opaque' | 'cutout' | 'translucent'
   readonly geometryId: GeometryId
   readonly attributes: GeometryAttributes
+  /**
+   * 该材质组声明的**相位绑定**（`matPalette.animation` 的 `phaseOffset` 与 `phaseScale`
+   * **同时**为有限数时才给出）。缺席 = 该材质**无相位动画** —— 与显式
+   * `{ phaseOffset: 0, phaseScale: 1 }`（第 0 相位）**不等价**（#388 R2-①）。
+   */
+  readonly texturePhase?: TexturePhaseBinding
 }[] {
   const { definition, layerPreview } = input
   const collected = collectStructureGeometryPiecesPure(definition, { layerPreview })
@@ -307,11 +320,13 @@ export function structureMaterialGroups(input: {
     blend: 'opaque' | 'cutout' | 'translucent'
     geometryId: GeometryId
     attributes: GeometryAttributes
+    texturePhase?: TexturePhaseBinding
   }[] = []
   for (const mi of order) {
     const pieces = byMaterial.get(mi)!
     const merged = mergeBakedQuadPiecesAttributes(pieces)
-    const palette = pieces[0]?.matPalette as { blend?: unknown } | undefined
+    const palette = pieces[0]?.matPalette as { blend?: unknown; animation?: unknown } | undefined
+    const texturePhase = asTexturePhase(palette?.animation)
     out.push({
       materialIndex: mi,
       materialId: `material:${mi}`,
@@ -327,9 +342,27 @@ export function structureMaterialGroups(input: {
         triangleCount: merged.positions.length / 9,
         cellMap: triangleCellMapOf(pieces),
       },
+      ...(texturePhase === undefined ? {} : { texturePhase }),
     })
   }
   return Object.freeze(out)
+}
+
+/**
+ * 调色板条目的 `animation.phaseOffset/phaseScale` → 相位绑定（**两者同时**为有限数才算声明）。
+ *
+ * 为什么"同时在场"才成立：只写一半时也可以补个默认值算出一个相位，但那让**半份声明静默生效**
+ * （另一半按 `1` 补）。缺省语义明文是"无相位动画"，故半份声明判为**缺席** —— 让"没声明"与
+ * "声明不完整"在行为上一致地表达"无相位"，而不是发明一个没人声明的相位。
+ */
+function asTexturePhase(animation: unknown): TexturePhaseBinding | undefined {
+  if (animation === null || typeof animation !== 'object') return undefined
+  const a = animation as { phaseOffset?: unknown; phaseScale?: unknown }
+  const offset = a.phaseOffset
+  const scale = a.phaseScale
+  if (typeof offset !== 'number' || typeof scale !== 'number') return undefined
+  if (!Number.isFinite(offset) || !Number.isFinite(scale)) return undefined
+  return Object.freeze({ phaseOffset: offset, phaseScale: scale })
 }
 
 /** 调色板条目的 `blend` → 呈现的混合模式（缺省 `'opaque'`，与 legacy 缺省一致）。 */

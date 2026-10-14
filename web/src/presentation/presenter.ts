@@ -37,6 +37,7 @@ import * as THREE from 'three'
 import type { BatchPayload, CompiledScene, CompileGeneration } from './compileScene'
 import type { BatchHitRef } from './pickingIndex'
 import type { GeometryAttributes, MaterialDescriptor } from './evaluationKey'
+import { texturePhaseKeyOf } from './evaluationKey'
 import type { ContentIdentity } from './assetIdentity'
 import type { TextureBinding } from './textureBinding'
 import { contentIdentityKey } from './assetIdentity'
@@ -657,10 +658,15 @@ interface CachedRef<T> {
  */
 export function materialIdentityOf(descriptor: MaterialDescriptor, binding?: TextureBinding): ContentIdentity {
   const mapKey = binding?.map === undefined ? '-' : contentIdentityKey(binding.map)
+  // 相位进材质身份（#388 R2-①）：`-` = 无相位动画，`0/1` = 显式第 0 相位 ⇒ 两者是**两个**
+  // 身份 ⇒ `materialCache` 不同条目（缺席相位不得复用第 0 相位的 GPU 材质）。
+  // descriptor 是权威；`binding` 是它的派生（`bindTexture` 逐字复制），两处取 `??` 只为
+  // "只给 binding 的调用方"仍能分开缓存 —— 不会把缺席归一成 `{0,1}`。
+  const phaseKey = texturePhaseKeyOf(descriptor.texturePhase ?? binding?.texturePhase)
   return {
     id:
       `material:${descriptor.id}:${descriptor.blend}:${descriptor.tint}:${descriptor.useVertexColor ? 'vc' : 'plain'}` +
-      `:${mapKey}`,
+      `:${mapKey}:ph${phaseKey}`,
     version: descriptor.version,
   }
 }

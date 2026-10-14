@@ -14,7 +14,7 @@
  * `presentation/pickingIndex.ts`，它**只**接受携带 generation 的批次引用，并把结果解回
  * `objectId`。
  *
- * ## 兼容性键（为什么是这六项）
+ * ## 兼容性键（为什么是这七项）
  *
  * | 维度 | 不合并的后果 |
  * |---|---|
@@ -24,6 +24,7 @@
  * | 变形方式 | 独立形变必须走独立路径（§11 明文） |
  * | 顶点色路径 | 顶点色批次与整型 tint 批次的材质设置不同（既有 `batchDescriptor` 口径） |
  * | 透明顺序键 | 同材质不同透明顺序不得互覆 |
+ * | 纹理**相位** | 相位不同的材质采样到不同帧 ⇒ 合进一批只能留一个相位，"另一相位的实例画成同一帧"（#388 R2-①；A28 同族的静默错误） |
  *
  * ## 空间范围是**有界**的，不是无条件细分
  *
@@ -32,7 +33,7 @@
  * 1 个 ⇒ 1 个批次 ⇒ 远低于 A18 的 ≤32 结构性门槛。只有当兼容性组**多于**预算时才横向合并。
  */
 
-import type { EvaluatedPrimitive, GeometryId, MaterialDescriptor } from './evaluationKey'
+import { texturePhaseKeyOf, type EvaluatedPrimitive, type GeometryId, type MaterialDescriptor } from './evaluationKey'
 
 /**
  * **图元身份** —— 批次成员的**单位**（#249 §3.3「对象身份与 GPU 批次身份分离」）。
@@ -60,6 +61,8 @@ export function primitiveKeyOf(p: EvaluatedPrimitive): PrimitiveKey {
     p.objectId,
     p.elementId ?? '-',
     `${p.material.id}@${p.material.version}`,
+    // 相位进成员键：同一对象的两组图元若相位不同，成员键必须不同，否则成员表/拾取槽位对不上。
+    `ph:${texturePhaseKeyOf(p.material.texturePhase)}`,
     `${p.geometry.id}@${p.geometry.version}`,
   ].join('\u0000')
 }
@@ -145,6 +148,8 @@ export function compatibilityKeyOf(p: EvaluatedPrimitive): string {
     `v:${p.material.useVertexColor ? '1' : '0'}`,
     `t:${p.material.useVertexColor ? '-' : p.material.tint}`,
     `x:${p.transparency === null ? '-' : p.transparency}`,
+    // 相位进兼容性键（#388 R2-①）：`-` = 无相位动画，`0/1` = 显式第 0 相位 ⇒ 两者**不合批**。
+    `ph:${texturePhaseKeyOf(p.material.texturePhase)}`,
   ].join('|')
 }
 

@@ -33,7 +33,14 @@
  */
 
 import { contentIdentityKey, type AssetId, type AssetLocator, type ContentIdentity } from './assetIdentity'
-import type { MaterialDescriptor } from './evaluationKey'
+import { texturePhaseKeyOf, type MaterialDescriptor, type TexturePhaseBinding } from './evaluationKey'
+import {
+  sampleTextureInstance,
+  sampleTextureSequence,
+  type TextureSample,
+  type TextureSequence,
+} from '@/domain/materials'
+import type { Result } from '@/domain/errors'
 
 /**
  * 一份纹理资源的**解析结果**（呈现侧的读面）。
@@ -84,6 +91,16 @@ export interface TextureBinding {
   readonly materialVersion: string
   /** 该材质的纹理（缺席 = 该材质无贴图）。 */
   readonly map?: ContentIdentity
+  /**
+   * 该材质的纹理**相位**绑定（G7 / #388 R2-①）。
+   *
+   * 三态语义见 `evaluationKey#TexturePhaseBinding`：**缺席 = 无相位动画**（不参与相位），
+   * 显式 `{ phaseOffset: 0, phaseScale: 1 }` = 第 0 相位。两者**不等价**，且本字段进
+   * {@link textureBindingKey} ⇒ 相位不同的材质不共享绑定缓存条目。
+   *
+   * 它是 `MaterialDescriptor` 相位字段的**派生**（`bindTexture` 逐字复制），不是第二个权威。
+   */
+  readonly texturePhase?: TexturePhaseBinding
   /**
    * 采样设置（呈现契约的一部分；#249 §19.3「纹理采样设置」）。
    *
@@ -160,6 +177,7 @@ export function bindTexture(
       materialVersion: material.version,
       sampling,
       missingRequired: false,
+      ...phaseOf(material),
     })
   }
   return Object.freeze({
@@ -170,13 +188,53 @@ export function bindTexture(
     // 「必需且未就绪」⇒ 显式标缺（G4）。`missing` 与 `failed` 都算未就绪；
     // `unrequested`/`loading` 是**进行中**，不标缺（否则每帧都在报"缺资源"）。
     missingRequired: resource.required && (resource.state === 'missing' || resource.state === 'failed'),
+    ...phaseOf(material),
   })
 }
 
-/** 绑定的稳定键（缓存查找用；含材质身份与纹理内容身份，**不含** locator）。 */
+/**
+ * 相位字段的条件展开（**缺席就是缺席**）。
+ *
+ * 不用 `texturePhase: material.texturePhase`（那会写出值 `undefined` 的**在场**字段）：
+ * 本模块的判据口径是"字段缺席 = 无相位动画"，而"在场但为 `undefined`"是同一份数据的
+ * 另一种形状 —— 保留两种形状会让 `Object.keys`/`toStrictEqual` 类断言与键之外的口径分叉。
+ * 这也是"缺省不得用 `0` 冒充第 0 帧"在**形状层**的对应：无相位 ⇒ 无该字段。
+ */
+function phaseOf(material: MaterialDescriptor): { readonly texturePhase?: TexturePhaseBinding } {
+  return material.texturePhase === undefined ? {} : { texturePhase: material.texturePhase }
+}
+
+/** 绑定的稳定键（缓存查找用；含材质身份、纹理内容身份与**相位**，**不含** locator）。 */
 export function textureBindingKey(binding: TextureBinding): string {
   const map = binding.map === undefined ? '-' : contentIdentityKey(binding.map)
-  return `${binding.materialId}@${binding.materialVersion}|${map}`
+  return `${binding.materialId}@${binding.materialVersion}|${map}|ph:${texturePhaseKeyOf(binding.texturePhase)}`
+}
+
+/**
+ * 在给定**场景时间**上采样该绑定对应的纹理序列 —— `sampleTextureInstance` 的**生产消费者**。
+ *
+ * ## 为什么必须是**分支**而不是"一律走 `sampleTextureInstance`"
+ *
+ * 相位三态里**缺席 ≠ 第 0 相位**（见 `evaluationKey#TexturePhaseBinding`）。若本函数把缺席
+ * 归一成 `DEFAULT_INSTANCE_BINDING`（`{0,1}`），就恰好犯下本轴要防的错误："用 `0` 冒充第 0 帧"
+ * —— `{0,1}` 的 `phaseScale=1` 会打开一条**乘 1** 的相位路径，而缺席意味着**根本没有相位
+ * 绑定**。故缺席 ⇒ 直接 `sampleTextureSequence(sequence, baseSeconds)`（零相位变换），
+ * 显式 ⇒ 交给 `sampleTextureInstance`（相位语义**只在** domain 里有一份实现）。
+ *
+ * ## 返回值
+ *
+ * 与两个采样器一样是 `Result`：非法时间/非法序列由 domain 显式判错，**不得**用默认帧顶替
+ * （A36 同族的"不得假装完整"）。
+ */
+export function sampleBoundTexture(
+  binding: TextureBinding,
+  sequence: TextureSequence,
+  baseSeconds: number,
+): Result<TextureSample> {
+  const phase = binding.texturePhase
+  return phase === undefined
+    ? sampleTextureSequence(sequence, baseSeconds)
+    : sampleTextureInstance(sequence, phase, baseSeconds)
 }
 
 /**

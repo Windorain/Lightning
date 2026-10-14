@@ -15,6 +15,16 @@ interface MaterialAnimationSpec {
   defaultFrametimeTicks?: number
   frameSequence?: Array<{ index: number; timeTicks?: number }>
   interpolate?: boolean
+  /**
+   * 相位偏移（秒）。与 {@link MaterialAnimationSpec.phaseScale} **成对**声明材质实例的相位绑定。
+   *
+   * **两者都缺席 = 该材质无相位动画**（不得用 `0`/`1` 冒充"第 0 相位"）：缺席相位与显式
+   * `{ phaseOffset: 0, phaseScale: 1 }` 是**不同的求值输入**，进求值键/批次键后不共享缓存
+   * （#388 R2-①；口径见 `presentation/evaluationKey#TexturePhaseBinding`）。
+   */
+  phaseOffset?: number
+  /** 相位时间缩放（`1` = 原速）。单独声明无效：必须与 `phaseOffset` 同时在场才构成相位绑定。 */
+  phaseScale?: number
 }
 
 export interface MaterialEntry {
