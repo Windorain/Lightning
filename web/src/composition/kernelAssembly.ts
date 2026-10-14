@@ -2095,10 +2095,29 @@ const evaluatorInputCache = new WeakMap<MultiblockDeclaration, MultiblockInnerDo
  * ## 它不是"把类型化投影面反演成 legacy body"（#388 评论 7686 第 2 条禁止的那件事）
  *
  * 判据是**值的来源**，可机械核对：本函数输出的每一个值都来自 `declaration` 自己的
- * 具名字段（泛型深拷贝，不新增、不推断、不补默认），**没有**一个键来自
+ * 具名字段（泛型深拷贝 + 下面那一处**具名**的通道域桥接），**没有**一个键来自
  * `RuntimeDocument.multiblockSource`，也**没有**`raw` 节点（内核承运里根本没有它）。
  * 被禁的那件事是"从投影面凑出一份**伪造的 legacy 输入**去喂**旧入口**以使旧文档存活"；
  * 这里是新入口把自己的承运交给求值器 —— 求值器本身不在本批写面内（`context/multiblock`）。
+ *
+ * ## 唯一的语义桥：通道域 `{lo, hi}` → `{max: hi}`（实测，非推断）
+ *
+ * 求值器 `context/multiblock/values#channelBounds` 读的是**文件格式**的通道域
+ * （`domain.max ?? 解析后的 totalTier`），而内核声明的通道域是 `{lo: 0, hi}` ——
+ * 解析器（`context/parsers/multiblockDocument.ts:61-88`）在**解析期**就把
+ * 「`domain.max` 缺省 ⇒ 总 Tier 域上界」折叠成了 `hi`。两个类型不同形，桥接是**必需**的，
+ * 否则同一份文档经内核承运求值会得到**不同**的取值域：
+ *
+ * ```text
+ * 实测（multiblock-lsc-overlap，glass）：声明 domain={max:2} ⇒ 端口 hi=2；
+ * 若桥接成 {lo:0,hi:2}（键名不换）则 channelBounds 读不到 max ⇒ 回落到 totalTier=3
+ * ⇒ effective.glass 3（应为 2）⇒ 装配抛「规则 glass.plate 的 indexTable 缺第 3 档」。
+ * ```
+ *
+ * ⇒ 桥接写成 `{ max: hi }`：`hi` **就是**声明的域上界。真实夹具的三个文档里
+ * **每个**通道都声明了 `domain.max`（实测），故桥接在本仓数据上**无损**；
+ * 「文件未声明 `domain.max`」时解析器的 `hi` 与端口的回落口径**不可区分**
+ * （两者都折叠成一个数）——这条边界已在交付评论里登记为发现，不在此静默假设。
  */
 function evaluatorDocumentOf(declaration: MultiblockDeclaration): MultiblockInnerDocument {
   const cached = evaluatorInputCache.get(declaration)
@@ -2107,12 +2126,31 @@ function evaluatorDocumentOf(declaration: MultiblockDeclaration): MultiblockInne
   const input: MultiblockInnerDocument = {
     ...(declaration.schemaVersion === null ? {} : { schemaVersion: declaration.schemaVersion }),
     multiblockCount: declaration.multiblockCount,
-    multiblock: mutableCopy(declaration) as MultiblockDeclFace,
+    multiblock: evaluatorMultiblockOf(declaration),
     blockPalette: mutableCopy(declaration.blockPalette) as EvaluatorPaletteEntry[],
     frames: mutableCopy(declaration.frames) as EvaluatorFrame[],
   }
   evaluatorInputCache.set(declaration, input)
   return input
+}
+
+/**
+ * 声明节点 → 求值端口的 `multiblock` 节（深拷贝 + 通道域桥接，见 {@link evaluatorDocumentOf}）。
+ */
+function evaluatorMultiblockOf(declaration: MultiblockDeclaration): MultiblockDeclFace {
+  const node = mutableCopy(declaration) as Record<string, unknown>
+  const channels = node.channels
+  if (Array.isArray(channels)) {
+    for (const ch of channels) {
+      if (ch === null || typeof ch !== 'object') continue
+      const channel = ch as Record<string, unknown>
+      const domain = channel.domain as { readonly hi?: unknown } | undefined
+      if (domain === undefined) continue
+      // 文件格式的键名与语义：`{max}`（`min` 端口不读）。值 = 内核声明的域上界。
+      channel.domain = { max: domain.hi }
+    }
+  }
+  return node as MultiblockDeclFace
 }
 
 /**
