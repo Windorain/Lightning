@@ -175,6 +175,8 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
       gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
       // B-1：格 + 部件定位 → 该部件 mask（hover 描边；B-5 点选高亮共用同一入口）
       getPartMaskGeometry: (ref) => getPartMaskGeometry(ctx, ref),
+      /** **R1-A C9**：描边几何由装配根注入的规划端口产出（旧层不向上 import 装配根）。 */
+      outlinePlans: host.createViewportOutlinePlanner(VIEWPORT_REGION_ID),
     },
   })
 

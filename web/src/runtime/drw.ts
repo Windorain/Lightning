@@ -244,16 +244,18 @@ export class DRW {
         const pushEntity = (ref: { pos: { x: number; y: number; z: number }; partLocalId?: string }): void => {
           picks.push(ref.partLocalId === undefined ? { pos: ref.pos } : { pos: ref.pos, partLocalId: ref.partLocalId })
         }
-        if (hov) {
-          // 同格不同部件不是同一个悬停目标（B-1：部件身份参与重复判定）
-          const dup = [...items].some(
-            e => e.kind === 'block'
-              && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z
-              && e.ref.partLocalId === hov.partLocalId,
-          )
-          if (!dup) pushEntity(hov)
-        }
-        if (items.size > 0 && items.size <= OUTLINE_MASK_LIMIT) {
+        // 「同格不同部件不是同一个悬停目标」（B-1：部件身份参与重复判定）。
+        const dup = hov !== null && [...items].some(
+          e => e.kind === 'block'
+            && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z
+            && e.ref.partLocalId === hov.partLocalId,
+        )
+        // 预算判据与 legacy **同一口径**：命中总数（选择集 ∪ 悬停）超上限 ⇒ 一个都不画，
+        // 而**不是**只丢掉超出的那些（legacy 的 `entities.size > OUTLINE_MASK_LIMIT ⇒ []`
+        // 就是这个意思；`outlineMaskStats.dropped` 由下面的 `applyOutlineMaskBudget` 报）。
+        const entityCount = items.size + (hov !== null && !dup ? 1 : 0)
+        if (entityCount > 0 && entityCount <= OUTLINE_MASK_LIMIT) {
+          if (hov !== null && !dup) pushEntity(hov)
           for (const e of items) if (e.kind === 'block') pushEntity(e.ref)
         }
         const outcome = options.outlinePlans.planPicks(picks)

@@ -393,6 +393,11 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
       gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
       // B-1：格 + 部件定位 → 该部件 mask（Wiki 预览的悬停描边走这里；独立 Embed 无部件悬停态）
       getPartMaskGeometry: (ref) => getPartMaskGeometry(ctx, ref),
+      /**
+       * **R1-A C9**：描边几何由**装配根注入**的规划端口产出
+       * （`presentation/outlinePlan` 的生产实现；本组件属旧层，不向上 import 装配根）。
+       */
+      outlinePlans: host.createViewportOutlinePlanner(viewportRegionId),
       extraMaskMeshes: sidebarExtraMasks,
     },
     documentKeydown: false,
