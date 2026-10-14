@@ -39,6 +39,7 @@ import type { KernelGridView } from '@/runtime/gridRead'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { PickResolution } from '@/presentation/pickingIndex'
+import type { PresenterHit } from '@/composition/presenterSession'
 
 /** 本适配器的输出：与 legacy `ScenePickBlock` **逐字段同形**（便于判据逐字段对账）。 */
 export interface KernelScenePickBlock {
@@ -151,4 +152,61 @@ export function kernelPickBlockOf(input: KernelPickInput): KernelPickOutcome {
       point: { x: input.point[0], y: input.point[1], z: input.point[2] },
     },
   }
+}
+
+/** 轮换拾取的候选（与 legacy `ScenePickEntity` 的 **block** 分支逐字段同形）。 */
+export interface KernelScenePickEntity {
+  readonly kind: 'block'
+  readonly distance: number
+  readonly blockId: string
+  readonly column: number
+  readonly row: number
+  readonly zSlice: number
+  readonly quadIndex: number | undefined
+  readonly normal: { readonly x: number; readonly y: number; readonly z: number } | undefined
+  readonly point: { readonly x: number; readonly y: number; readonly z: number }
+}
+
+/**
+ * 一条射线上的全部候选（去重口径与 legacy `scenePickAllFromPointer` **同一把键**：
+ * `column,row,zSlice` —— 同格的不同面只算一个候选，否则轮换会在同一格上打转）。
+ *
+ * 输入必须是 `PresenterSession#pickAllAt` 的 `hits`（**按距离升序**，与 legacy 相同）。
+ * 本函数**不**排序：排序是射线的事实，重排会把"离相机更远的候选"提到前面。
+ */
+export function kernelPickEntitiesOf(input: {
+  readonly hits: readonly PresenterHit[]
+  readonly grid: KernelGridView
+  readonly layerPreview: LayerPreviewMode
+}): readonly KernelScenePickEntity[] {
+  const seen = new Set<string>()
+  const out: KernelScenePickEntity[] = []
+  for (const hit of input.hits) {
+    const out0 = kernelPickBlockOf({
+      resolution: hit.resolution,
+      point: hit.point,
+      distance: hit.distance,
+      grid: input.grid,
+      layerPreview: input.layerPreview,
+    })
+    if (!out0.ok) continue
+    const b = out0.block
+    const key = `${b.column},${b.row},${b.zSlice}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(
+      Object.freeze({
+        kind: 'block' as const,
+        distance: b.distance,
+        blockId: b.blockId,
+        column: b.column,
+        row: b.row,
+        zSlice: b.zSlice,
+        quadIndex: b.quadIndex,
+        normal: hit.normal === null ? undefined : { x: hit.normal[0], y: hit.normal[1], z: hit.normal[2] },
+        point: b.point,
+      }),
+    )
+  }
+  return Object.freeze(out)
 }

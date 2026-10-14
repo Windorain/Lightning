@@ -90,13 +90,27 @@ export type PresenterPickResult =
       readonly point: readonly [number, number, number]
       /** 命中距离（相机到命中点；与 legacy `ScenePickBlock#distance` 同口径）。 */
       readonly distance: number
-    }
-  /**
+    }  /**
    * 过期画面上的拾取（A12）：**暂停**该类操作并明确状态。
    *
    * 注意它是**独立分支**而不是 `miss`：调用方对两者的处置不同
    * （`miss` ⇒ 清空选中；`stale` ⇒ 保持现状并提示）。
    */
+  | { readonly kind: 'stale'; readonly detail: string }
+
+/** 一条射线上的**单个**命中（供轮换拾取消费；字段与 `PresenterPickResult#hit` 同源）。 */
+export interface PresenterHit {
+  readonly resolution: PickResolution
+  readonly point: readonly [number, number, number]
+  readonly distance: number
+  /** 命中面的世界空间法线；`null` = 该命中没有面法线（如点/线几何）。 */
+  readonly normal: readonly [number, number, number] | null
+}
+
+/** 一次"穿透全部候选"拾取的结果。 */
+export type PresenterPickAllResult =
+  | { readonly kind: 'empty' }
+  | { readonly kind: 'hits'; readonly hits: readonly PresenterHit[] }
   | { readonly kind: 'stale'; readonly detail: string }
 
 export interface PresenterSessionOptions {
@@ -427,6 +441,66 @@ export class PresenterSession {
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(ndc, camera)
     return this.pickAt(raycaster)
+  }
+
+  /**
+   * **一条射线上的全部命中**（按距离升序），供"轮换拾取"（`pickAll`）用。
+   *
+   * ## 为什么单独一个方法（而不是让调用方循环 `pickAt` 过滤）
+   *
+   * `pickAt` 的语义是"最近的一个" —— 它在第一次可解析命中处 `return`。
+   * 轮换拾取要知道**穿透的全部候选**（`scenePickAllFromPointer` 的语义），
+   * 而那必须遍历同一次射线解出的**全部** `intersection`。让调用方反复调用 `pickAt`
+   * 无法表达这件事（它永远只给最近那个），于是"轮换"会退化成"同一个反复"。
+   *
+   * ## 与 `pickAt` 的一致性（同一条映射，不是第二份实现）
+   *
+   * 两者共用 `batchHitOf` → `PickIndex.resolve` → `evaluateStalePick` 这一条链；
+   * 差别只在**是否提前返回**：`pickAt` 遇到 `suspend` 立即返回 `stale`（A12：
+   * 过期画面上不得选中任何东西），本方法同样如此 —— 过期就是过期，
+   * 不是"跳过这一条继续找下一条"（那会在过期画面上给出一个**新旧混用**的候选集）。
+   */
+  pickAllAt(raycaster: THREE.Raycaster): PresenterPickAllResult {
+    const targets = this.presenter.pickTargets()
+    if (targets.length === 0) return { kind: 'empty' }
+    for (const t of targets) t.updateMatrixWorld(true)
+
+    const hits = raycaster.intersectObjects([...targets], true)
+    const out: PresenterHit[] = []
+    const index = this.index
+    const currentKey = this.currentKey
+    if (index === null || currentKey === null) return { kind: 'hits', hits: Object.freeze(out) }
+    for (const hit of hits) {
+      const ref = this.presenter.batchHitOf(hit)
+      if (ref === null) continue
+      const res = index.resolve(ref)
+      if (res === null) continue
+      const verdict = evaluateStalePick(res, currentKey)
+      if (verdict === null) continue
+      if (verdict.kind === 'suspend') return { kind: 'stale', detail: verdict.detail }
+      out.push({
+        resolution: verdict.resolution,
+        point: [hit.point.x, hit.point.y, hit.point.z],
+        distance: hit.distance,
+        // 法线取**命中面**并转到世界空间（与 legacy 的同一算法：`hit.face.normal`
+        // 经 `matrixWorld` 的方向变换；缺失 ⇒ 如实给 `undefined`，不编一个）。
+        normal:
+          hit.face === undefined || hit.face === null
+            ? null
+            : (() => {
+                const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+                return [n.x, n.y, n.z] as const
+              })(),
+      })
+    }
+    return { kind: 'hits', hits: Object.freeze(out) }
+  }
+
+  /** 由屏幕 NDC 构造射线并取全部命中（便利方法）。 */
+  pickAllAtNdc(camera: THREE.Camera, ndc: THREE.Vector2): PresenterPickAllResult {
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(ndc, camera)
+    return this.pickAllAt(raycaster)
   }
 
   /** 释放本会话的全部 GPU 份额。 */

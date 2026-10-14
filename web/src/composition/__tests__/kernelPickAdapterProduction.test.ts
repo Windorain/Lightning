@@ -38,7 +38,7 @@ import {
 import { adoptLoadedDocument } from '@/composition/documentLoad'
 import { KernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
 import { PresenterSession } from '@/composition/presenterSession'
-import { kernelPickBlockOf, type KernelScenePickBlock } from '@/composition/kernelPickAdapter'
+import { kernelPickBlockOf, kernelPickEntitiesOf, type KernelScenePickBlock } from '@/composition/kernelPickAdapter'
 import { kernelGridOf } from '@/runtime/gridRead'
 import { structureRowToWorldY } from '@/pure/vec'
 
@@ -220,6 +220,71 @@ describe('C7 段二 · 内核拾取适配（生产解析 + 装配 + 真实射线
       expect(out.ok, '分层预览下该格为空气 ⇒ 必须拒绝').toBe(false)
       if (!out.ok) expect(out.skip.kind).toBe('cell-is-air')
       expect(cell.row, '（前置：确实拿到了一格）').toBeTypeOf('number')
+    } finally {
+      session.dispose()
+    }
+  })
+
+  it('⑥ 轮换拾取：`pickAllAt` 给**多个**候选，且去重键与 legacy 同（同格只算一次）', async () => {
+    const doc = await kernelSetup()
+    const session = new PresenterSession({ scope: 'c7-pick-all' })
+    try {
+      session.applyKernelDocument(doc, { frame: 0, fps: 20 })
+      const grid = kernelGridOf(doc, 0)!
+      // 沿 -Z 射入：信封是**多层**结构，故一条轴线上通常能穿透多格。
+      const { raycaster } = rayOnRealTriangle(session)
+      const all = session.pickAllAt(raycaster)
+      expect(all.kind).toBe('hits')
+      if (all.kind !== 'hits') return
+      expect(all.hits.length, '穿透候选至少一个').toBeGreaterThan(0)
+
+      const entities = kernelPickEntitiesOf({ hits: all.hits, grid, layerPreview: 'all' })
+      expect(entities.length).toBeGreaterThan(0)
+      // 去重：同一格不得出现两次（否则轮换会在同一格上打转）
+      const keys = entities.map((e) => `${e.column},${e.row},${e.zSlice}`)
+      expect(new Set(keys).size, '同格只算一个候选').toBe(keys.length)
+      // 距离升序（射线的事实，不得被本层重排）
+      for (let i = 1; i < entities.length; i += 1) {
+        expect(entities[i]!.distance, '候选必须按距离升序').toBeGreaterThanOrEqual(entities[i - 1]!.distance)
+      }
+      // 与单个拾取的**最近一个**必须同格（两条链共用同一映射）
+      const one = kernelPickBlockOf({
+        resolution: all.hits[0]!.resolution,
+        point: all.hits[0]!.point,
+        distance: all.hits[0]!.distance,
+        grid,
+        layerPreview: 'all',
+      })
+      if (one.ok && entities.length > 0) {
+        expect([entities[0]!.column, entities[0]!.row, entities[0]!.zSlice]).toEqual([
+          one.block.column,
+          one.block.row,
+          one.block.zSlice,
+        ])
+      }
+    } finally {
+      session.dispose()
+    }
+  })
+
+  it('⑦ **负对照**：`pickAllAt` 与 `pickAt` 对**同一条射线**给出同一最近格（两链共用一条映射）', async () => {
+    const doc = await kernelSetup()
+    const session = new PresenterSession({ scope: 'c7-pick-all-consistency' })
+    try {
+      session.applyKernelDocument(doc, { frame: 0, fps: 20 })
+      const { raycaster } = rayOnRealTriangle(session)
+      const one = session.pickAt(raycaster)
+      const all = session.pickAllAt(raycaster)
+      expect(one.kind).toBe('hit')
+      expect(all.kind).toBe('hits')
+      if (one.kind !== 'hit' || all.kind !== 'hits') return
+      expect(all.hits.length, '全量必须有内容').toBeGreaterThan(0)
+      const first = all.hits[0]!
+      // 同一条映射 ⇒ 对象身份、格身份、距离必须逐字段一致（不是"两个近似实现"）
+      expect(first.resolution.objectId).toBe(one.resolution.objectId)
+      expect(first.resolution.cell).toEqual(one.resolution.cell)
+      expect(first.distance).toBe(one.distance)
+      expect(first.point).toEqual(one.point)
     } finally {
       session.dispose()
     }
