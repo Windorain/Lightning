@@ -22,6 +22,7 @@ import {
   createDrwMeshPipeline,
   type DrwComputed,
   type DrwMeshPipeline,
+  type FrameChangeUnavailableReport,
 } from '@/runtime/drwMeshPipeline'
 import type { BlockRef, SelectedEntity } from '@/context/selection'
 import { OUTLINE_MASK_LIMIT, applyOutlineMaskBudget } from '@/presentation/outlineBudget'
@@ -80,6 +81,12 @@ export interface DRWDeps {
   initialWorldFrameIndex?: number
   /** 换帧（经 `setTime` 命令定位时间；见 `DrwMeshPipelineDeps.seekFrame`）。 */
   seekFrame?: (index: number) => void | Promise<void>
+  /**
+   * **未装配 ⇒ 换帧不可用**的上报口（R2/S3；`DrwMeshPipelineDeps.onFrameChangeUnavailable`）。
+   *
+   * 本类只透传：判别与去重都在管线的既有守卫处（那里才看得见 `docRef`）。
+   */
+  onFrameChangeUnavailable?: (report: FrameChangeUnavailableReport) => void
   /** 时间是否在前进（呈现侧观测；不驱动任何调度）。 */
   isPlaying?: () => boolean
   /** overlay pass 内**工具预览**根（ViewportSlot；工具的呈现，不是内容网格）。 */
@@ -148,6 +155,7 @@ export class DRW {
       initialWorldFrameIndex: deps.initialWorldFrameIndex,
       contentRefreshTickRef: deps.contentRefreshTickRef,
       seekFrame: deps.seekFrame,
+      onFrameChangeUnavailable: deps.onFrameChangeUnavailable,
       isPlaying: deps.isPlaying,
       toolsOverlayGroupRef: deps.toolsOverlayGroupRef,
     })

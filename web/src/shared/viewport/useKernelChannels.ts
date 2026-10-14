@@ -208,6 +208,22 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
     const decl = ctx.kernelMultiblockDeclaration()
     return decl === null ? null : multiblockDeclarationViewOf(decl)
   })
+  /**
+   * 通道 tab 的**唯一**显隐条件。
+   *
+   * ## R2/S3：未装配 ⇒ `false`，这是**语义正确**而不是静默丢信息
+   *
+   * 判据是"内核是否保管了这份文档的多方块声明"（`Context#kernelMultiblockDeclaration()`
+   * 在 `!hasAdoptedContent()` 时返回 `null`）。未装配成功 ⇒ 内核没有这份文档的**任何**
+   * 声明事实 ⇒ 通道面板两个方向都没有对象：
+   *  - 读（当前取值）：没有权威来源（取值属 `EditContext.channelValues`，而内核没承载它）；
+   *  - 写（`setTier`/`setChannelValue`/`setRunstate`）：没有接收方（三个 setter 都以
+   *    `declaredView` 为门，`null` 时**什么都不做**）。
+   *
+   * ⇒ 此时不出现通道 tab 是**正确**呈现，而不是"把可用的东西藏起来"。而"文档未被承载"
+   * 这一事实本身由换帧路径上的**既有诊断通道**显式说出（`runtime/drwMeshPipeline` 的
+   * `onFrameChangeUnavailable` 接线 ⇒ `ctx.wm.diagnostics`），不靠"tab 不见了"去暗示。
+   */
   const isMultiblock = computed(() => declaredView.value !== null)
 
   const selection = computed<MultiblockSelectionState>(() => {

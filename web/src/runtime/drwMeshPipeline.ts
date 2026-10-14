@@ -69,6 +69,67 @@ function normalizeWorldFrameListIndex(w: { frames: unknown[] }, raw: number): nu
   return ((i % n) + n) % n
 }
 
+/**
+ * **换帧请求不可用的判别式**（R2/S3）。
+ *
+ * 取值**复用既有守卫**（`setCurrentWorldFrame` 的 `!doc || doc.frameCount === 0`），
+ * 不新造判定 —— 于是"什么时候算不可用"只有一个答案（就是那个 `if`）。
+ *
+ * | reason | 判据 | 语义 |
+ * |---|---|---|
+ * | `no-render-view-document` | `docRef.value === null` | 没有渲染视图文档。生产里最常见的原因是**未装配成功**（`hasAdoptedContent() === false` ⇒ 内核面求值产不出文档）；多方块再装配失败 / 投影读不回也落这条（两者同样如实给 `doc: null`，不伪造） |
+ * | `empty-frame-axis` | `doc.frameCount === 0` | 文档在，但帧轴是空的 ⇒ 没有可换的帧 |
+ */
+export type FrameChangeUnavailableReason = 'no-render-view-document' | 'empty-frame-axis'
+
+/** 一次"换帧不可用"的事实（**不**含自然语言；文案归 UI 翻译层）。 */
+export interface FrameChangeUnavailableReport {
+  /** 被请求、但未能生效的帧下标。 */
+  readonly index: number
+  readonly reason: FrameChangeUnavailableReason
+}
+
+/** "换帧不可用"的上报器（决策在这里；落点由 `emit` 承担）。 */
+export interface FrameChangeUnavailableReporter {
+  /** 上报一次（同一不可用时段内每个 reason 只记首条；返回本次是否真的发出）。 */
+  report(index: number, reason: FrameChangeUnavailableReason): boolean
+  /** 内容恢复可用（换帧真的生效）⇒ 结账；下一次不可用重新记一条。 */
+  clear(): void
+}
+
+/**
+ * 建"换帧不可用"上报器。
+ *
+ * ## 为什么必须去重（不是优化）
+ *
+ * 请求方是帧滑块/快捷键 —— 拖一次滑块就是几十次 `setCurrentWorldFrame`，而记录器是
+ * **容量 512 的共享**环形缓冲：逐次记账会把其它通道的记录挤掉。⇒ 同一"不可用时段"内
+ * **每个 reason 只记首条**；换帧真的生效时调 `clear()` 结账。
+ *
+ * ## 为什么不需要"丢弃计数"（与 `createPresenterFailureReporter` 的差别）
+ *
+ * 那个上报器的签名空间**无界**（承载自由文本），超限必须计数并上报；本函数的签名空间
+ * **恰为 2**（`FrameChangeUnavailableReason` 的取值数）⇒ 一个不可用时段最多 2 条记录，
+ * 有界性在**结构上**成立（判据钉住这一点，不靠"请求方不会来回抖动"这种外部假设）。
+ */
+export function createFrameChangeUnavailableReporter(
+  emit: (report: FrameChangeUnavailableReport) => void,
+): FrameChangeUnavailableReporter {
+  // 上界由类型给出：`FrameChangeUnavailableReason` 只有两个成员。
+  const reported = new Set<FrameChangeUnavailableReason>()
+  return {
+    report(index, reason) {
+      if (reported.has(reason)) return false
+      reported.add(reason)
+      emit({ index, reason })
+      return true
+    },
+    clear() {
+      reported.clear()
+    },
+  }
+}
+
 export interface DrwMeshPipelineDeps {
   /** 场景文档（RuntimeDocument）——**暂存路径**：只服务多方块的再装配投影（见 `renderSourceRef`） */
   docRef: Ref<RuntimeDocument | null>
@@ -123,6 +184,18 @@ export interface DrwMeshPipelineDeps {
    */
   seekFrame?: (index: number) => void | Promise<void>
   /**
+   * **未装配 ⇒ 换帧不可用**的上报口（R2/S3）。
+   *
+   * 判别与决策都在本层（判别式**就是** `setCurrentWorldFrame` 的既有守卫；见
+   * `FrameChangeUnavailableReason`），**落点**由接线层给出 —— 生产接线把它映射到
+   * **既有**诊断通道（`ctx.wm.diagnostics.record`，既有码表，不新造体系；
+   * 见 `shared/viewport/useViewportRuntime`）。故本层不 import 任何诊断实现。
+   *
+   * 缺席 = 退回静默（只为"单测/无会话"直接构造本管线的场景保留）；生产**恒**注入，
+   * 这一点由接线判据把守。
+   */
+  onFrameChangeUnavailable?: (report: FrameChangeUnavailableReport) => void
+  /**
    * 时间是否在前进（P10 #261：替代旧的 `framesPlaybackIsPlaying` Ref）。
    *
    * 本管线不做任何调度 —— 只把它当**呈现侧观测**（是否继续跟随）。
@@ -175,7 +248,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     docRef, loadStatus, blockIconCache, tooltipPalette,
     structureDefinition, sceneRef, worldFrameIndex, layerWorldY,
     blockIconCacheOptions, initialWorldFrameIndex, contentRefreshTickRef, seekFrame,
-    toolsOverlayGroupRef, renderSourceRef,
+    toolsOverlayGroupRef, renderSourceRef, onFrameChangeUnavailable,
   } = deps
 
   /** 内核渲染源面（在场 ⇒ 定义/说明/材质三样**不**再经旧格式文档）。 */
@@ -305,14 +378,38 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   // （`worldFrameIndex()`），推进归宿主帧时钟（`composition/kernelRuntime`）。
 
   /**
+   * **未装配 ⇒ 换帧不可用**的上报（R2/S3）：判别式就是下面的既有守卫，落点由接线层给。
+   *
+   * 去重与有界性见 `createFrameChangeUnavailableReporter` 的文件头。
+   */
+  const frameChangeUnavailable = createFrameChangeUnavailableReporter((report) => {
+    onFrameChangeUnavailable?.(report)
+  })
+
+  /**
    * 换帧（**唯一**入口）：请求内核把时间定位到某帧。
    *
    * 它**不**直接改任何本地状态 —— 帧下标是派生值，改时间就是改帧。
    * `seekFrame` 由接线层注入（内部经 `setTime` 命令）。
+   *
+   * ## R2/S3：守卫不再"静默"
+   *
+   * `518bdc15` 删掉 `Context#legacyRenderSource()` 本体后，未装配成功的文档
+   * （`hasAdoptedContent() === false`）**没有**渲染视图文档 ⇒ `docRef.value === null`
+   * ⇒ 原来这里直接 `return`，调用方看到的是"点了没反应"（**静默丢弃请求**）。
+   * 现在同一条守卫**先发一条可查诊断**再返回：判定不变，只是不可用这件事**说出来**。
    */
   async function setCurrentWorldFrame(rawNext: number): Promise<void> {
     const doc = docRef.value
-    if (!doc || doc.frameCount === 0) return
+    if (!doc || doc.frameCount === 0) {
+      frameChangeUnavailable.report(
+        rawNext,
+        doc ? 'empty-frame-axis' : 'no-render-view-document',
+      )
+      return
+    }
+    // 文档在、帧轴非空 ⇒ 本次不可用时段结束（下一次不可用重新记一条）。
+    frameChangeUnavailable.clear()
     if (seekFrame) {
       await Promise.resolve(seekFrame(rawNext))
       return

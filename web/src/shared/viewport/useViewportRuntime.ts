@@ -284,6 +284,39 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     initialWorldFrameIndex,
     // 换帧 = 定位时间（**不**写帧下标）。
     seekFrame: (i) => kernel?.seekFrame(i),
+    /**
+     * **未装配 ⇒ 换帧不可用的上报**（R2/S3）。
+     *
+     * ## 为什么是"既有通道 + 既有判别式"
+     *
+     * 立项单两面都写着："未恢复入口**显式不可用**，不自动回落" ＋ "**不静默丢弃**、
+     * 填空、伪造成功"。判别式由管线给出（**就是**它自己的那条守卫：
+     * `!doc || doc.frameCount === 0`），这里只把事实写进**已经存在**的记录器
+     * —— `ctx.wm.diagnostics`（读面 `Context.getDiagnostics()`，e2e 经 `__vm__` 取证），
+     * 写法照 `runtime/contentDiagnostics.ts:59` 与下方呈现链失败上报（同一通道、同一形状）。
+     *
+     * ## 码与判别式（**不自行扩码表**）
+     *
+     * 既有 22 码里没有"换帧不可用"这一族，最贴近的是 `command.unsupported`
+     * （命令在当前状态下不可执行）⇒ 本处用**既有码**，判别式用两个既有事实：
+     * `params.reason`（管线给的 reason）与 `params.contentAdopted`
+     * （`Context#hasAdoptedContent()` —— GF-16 的**既有**判别式，不另立判定）。
+     * **新码请求**（更精确的码，如 `frame.changeUnavailable`）在交付报告里列出交由裁决，
+     * 不在这里悄悄加码。
+     */
+    onFrameChangeUnavailable: (report) => {
+      ctx.wm.diagnostics.record({
+        channel: 'command',
+        code: 'command.unsupported',
+        params: {
+          source: 'drw.setCurrentWorldFrame',
+          reason: report.reason,
+          frame: report.index,
+          contentAdopted: ctx.hasAdoptedContent(),
+        },
+        correlation: {},
+      })
+    },
     // 播放状态是**读面**：本层不驱动任何调度（帧时钟归外壳）。
     isPlaying: () => kernel?.playback().playing ?? false,
     toolsOverlayGroupRef: vpSlot.toolsOverlayGroup,
