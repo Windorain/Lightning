@@ -6,71 +6,86 @@
  * **负对照与生产判据共用同一实现** —— 测试里另写一份判定逻辑的形态，负对照绿了也证明不了
  * 生产判据会判红）。本文件是它的可执行半边。
  *
- * ## 为什么需要它（已实测的**无判据**缺口）
+ * ---
  *
- * `kernel-legacy-isolation.test.ts` 的判定面只有 `KERNEL_FILES`（domain / application /
- * 新 runtime / adapters 的登记文件）。`composition/`（装配根）与 `presentation/`（呈现侧）
- * **不在判定面内** —— 于是「装配根在生产路径上把真实文件装配成内核文档、再把内核投影回
- * 旧形状」这条**设计必需**的编解码面，在闸门上完全不可见：它既不被"内核不得依赖旧层"覆盖
- * （它不在 `KERNEL_FILES`），也不被"旧层 → 内核"覆盖（它不在 `OLD_LAYERS`）。
+ * # 口径改定：`(file, target)` **对键**（2026-10-14；判据缺陷，不是业务缺陷）
  *
- * ## 判定面（覆盖形式声明）
+ * ## 事故（本判据原先是"行键"口径）
  *
- * | 参与 | 不参与 |
- * |---|---|
- * | `src/composition/**` 下**生产**文件（`__tests__/` 与 `*.test.ts` 除外） | `composition/__tests__/**`、`*.test.ts`（它们是夹具与断言，允许绑旧层） |
- * | **全部**内部导入事实：`import` / `export ... from` / `import('x')` / `import('x').T` / 动态 `import()` / `require` | 外部包（`vue`/`three`/`zod`…）与非相对说明符 |
- * | 目标落在**旧分层**（`OLD_LAYERS`，与内核隔离闸门同表）的边 | 目标落在 `KERNEL_FILES`（新层）或 `composition/` 自身的边 |
+ * 本判据原先把边冻结成 `file:line:target` **三元组**。上游提交 `44030389`
+ * （"R2-1a 第4件(接线)：多方块声明进内容权威"）在
+ * `web/src/composition/kernelAssembly.ts` 插入了一行 import（`:85` 的
+ * `@/adapters/multiblockDeclaration`）连同注释，使**既有的** `@/context/runtimeDocument`
+ * import 从 `:87` 漂到 `:90`。行键口径下：
  *
- * **口径 = AST 全量**（`module-graph.mjs#buildModuleGraph` → TypeScript 编译器 API）。
- * 本判据**不做任何文本扫描**：没有正则、没有 `indexOf`、不读源码正文做匹配
- * —— 因此注释与字符串字面量**天然不可能**误报（`seams.ts` 把符号写在字符串里的坑在此不适用）。
- * 唯一的文本读取是"从 `kernel-legacy-isolation.test.ts` 里取出 `KERNEL_FILES` 字面量"，
- * 那也走 TS 的 AST（见 `composition-legacy-binding.mjs#readKernelFiles`），不是正则。
+ *  - 同一条边被算成"登记之外的新绑定"（升成第三条例外）；
+ *  - 原登记 `:87` 被判"腐烂"；
+ *  - `test:arch` **8 failed / 7 passed**（8 条红全部连锁自这一处行漂移）。
  *
- * ## 三条判据形态（与 #387 评论 7293 的归档纪律一致）
+ * 判"这是判据缺陷"的依据：**被替代的边集合与目标集合都没变** —— 没有新增或消失任何一条
+ * `composition/ → 旧层` 的绑定，变的只是无关编辑造成的行号漂移。**行号不是语义**。
  *
- * 1. **未登记即红**：扫描出的每一条边都必须逐条在 `APPROVED_COMPOSITION_LEGACY_EDGES` 里；
- * 2. **登记不得腐烂**：每条登记都必须**真实存在**（文件 + 行 + 目标全对）；
- * 3. **登记数不得增**：`files` / `lines` 与 `BASELINE_FILES` / `BASELINE_LINES` 逐数对齐
- *    —— 多一条即红（新增绑定必须先改基线并给出理由），少一条**也**红（须同批核销）。
+ * ## 同族先例（本仓已有，不是本判据的临时发明）
+ *
+ * `web/src/pure/__tests__/partMaskEnvelopeExemption.test.ts` 明文要求豁免"以**同一标记**匹配
+ * （**不绑行号**）"：用例名 `脚本侧的豁免登记唯一，并以同一标记匹配（不绑行号）`，
+ * 并有 `expect(block, '豁免登记不得绑行号').not.toMatch(/\bline:\s*\d/)`。
+ * 那次（#39 阶段二 `PartBoxMaskEnvelope`）与本条同因：**行锚在无关编辑下产生假红** ⇒ 去行锚。
+ *
+ * ## 改了什么（只动键，不动强度）
+ *
+ * 1. **键**：`file:line:target` → `(file, target)`；行号降级为**失败消息里的定位注解**
+ *    （人类定位用），**不参与任何断言**；
+ * 2. **重数保留**：同一 `(file,target)` 的多条边仍按**出现次数**计（不折叠成集合）——
+ *    这是**最小的键成分删除**：去掉的是非语义的行号，保留的是"绑了几条"这个语义分量。
+ *    故 `kernelProjection.ts → context/runtimeDocument` 的重数 3 不得掉到 2；
+ * 3. **三条检测一条都没弱化**（下节），且都由 `assessCompositionLegacyBinding` 这一份实现把守。
+ *
+ * ## 一次性等价证明（读数：**28 行 → 21 对**；两个读数都在下面的用例里对账）
+ *
+ * 把旧口径的**行键读数**按 `(file,target)` 归一后，与新对集**完全相等**
+ * （`pairMultisetOfLineKeys` 与 `countCompositionLegacyEdges` 是两条**互相独立**的分组路径）：
+ *
+ * | 读数 | 旧口径（行键） | 新口径（对键 + 重数） |
+ * |---|---|---|
+ * | 冻结基线（`9630a39d`） | **28 行**（28 个不同行键） | **21 对 / 28 次出现**（6 对重数 2~3） |
+ * | 实测（`44030389`） | **30 行** / 30 个不同行键 / 12 文件 | **23 对 / 30 次出现** / 12 文件 |
+ * | `onlyDeclared`（登记腐烂） | **1** 条（`:87`） | **0** 对 |
+ * | `onlyObserved`（登记外绑定） | **3** 条（`:90` 假组件 + 2 条合法豁免） | **2** 对（恰为 2 条合法豁免） |
+ * | 重数差 | — | **0** |
+ *
+ * 旧口径的两条假读数（`:87` / `:90`）**归一到同一个对**（该对在基线里本来就有另一条登记 `:76`），
+ * 归一后**互相湮灭** ⇒ 红绿差只剩 2 条**真**新绑定（`kernelOutlinePlanPort.ts`，本就在具名豁免里）。
+ * **这不是放宽口径**：分量一个没少 —— 重数仍逐条对账（实测 30 次 = 基线 28 次 + 豁免 2 次）。
+ *
+ * ## 三条判据形态（都不许弱化；负对照逐条证伪）
+ *
+ * | # | 检测 | 判红条件 | 负对照 |
+ * |---|---|---|---|
+ * | ① | **未登记即红** | 出现不在冻结集里的**新对**；或既有对**重数溢出**（往同去向上加绑定） | 负对照 A（注入 `@/context/grid` 新对）；负对照 B（把实测存在的对从冻结集移除） |
+ * | ② | **登记不得腐烂** | 冻结集里的对**实测消失**；或实测重数少于登记重数 | 负对照 D（往冻结集塞一个不存在的假对） |
+ * | ③ | **计数不得增** | 对数 > 冻结上限（21 + 许可 2 = 23）；或重数 > 上限（28 + 2 = 30） | 负对照 E（上限压低 1） |
  *
  * ⚠️ **登记是"可见性与可判定性"，不是允许增长**（#387 评论 7293）。
  * 本判据**严禁直接判零**：装配根把真实文件装配成内核文档、把内核投影回旧形状，
- * 是设计必需的编解码面，判零会立刻假红（实测 32 行）。
+ * 是设计必需的编解码面，判零会立刻假红（实测 30 行 / 23 对）。
  *
  * ## 基线冻结 + 具名豁免清单（Lead 裁决 #385，2026-10-14）
  *
- * 评审当刻本树实测 **12 文件 / 32 行**（比冻结基线多 1 文件 / 4 行）—— 多出来的四条来自
- * **在途的 R1-A C9**（`composition/kernelOutlinePlanPort.ts`）。裁决的处置是：
+ * 评审当刻本树实测 **12 文件 / 23 对（30 次）**—— 多出来的两条来自**在途的 R1-A C9**
+ * （`composition/kernelOutlinePlanPort.ts`）。裁决的处置是：
  *
- * - 基线**冻结在 11/28**（上一批真值，`BASELINE_COMMIT = '9630a39d'`），**不抬到 12/32**
- *   —— 否则"边登记边做大"就成了合法的反模式（登记表变成增长的许可证）；
- * - 这 4 条进**具名豁免许可集** `FROZEN_PERMITTED_EXEMPT_GROUPS`（按 `(file, target)` 分组 +
- *   组内条数上限 + 总量 4），其形态有四条硬约束：
- *   ① 未登记边仍 ⇒ 红；② 豁免**只允许**这 4 条（新去向 / 超组上限 / 超总量 ⇒ 红）；
+ * - 基线**冻结在 11 文件 / 21 对 / 28 次**（上一批真值，`BASELINE_COMMIT = '9630a39d'`），
+ *   **不抬到**评审当刻的最大值 —— 否则"边登记边做大"就成了合法的反模式
+ *   （登记表变成增长的许可证）；
+ * - 这 2 条进**具名豁免许可集** `FROZEN_PERMITTED_EXEMPT_GROUPS`（按 `(file, target)` 分组 +
+ *   组内**重数**上限 + 总量 2），其形态有四条硬约束：
+ *   ① 未登记对仍 ⇒ 红；② 豁免**只允许**这 2 条（新去向 / 超组上限 / 超总量 ⇒ 红）；
  *   ③ 豁免条数作为**可读读数**导出（`exemptionReading(facts)`，测试打进日志，
- *   趋势机器可见）；④ 清单**终态必须为空** —— R1-A 子件②把这 4 条注入化后必须删空本表，
- *   届时基线回到 **≤11/28**（本文件的"豁免不得腐烂"断言强制这一收口）。
+ *   趋势机器可见）；④ 清单**终态必须为空** —— R1-A 子件②把这 2 条注入化后必须删空本表。
  *
  * 该形态与本仓 `boundary-scan.test.ts` 的 `EXTRA_BATCHES` / `RETIREMENT_OWNERS`
  * 同族：**暂准 + 具名 + 有终态**，而不是"把新绑定直接写进基线"。
- *
- * ## 与任务书给定数字的差异（实测口径；铁律 #7「以判据本尊的扫描口径实测」）
- *
- * 任务书写"8 个生产文件 / 13 行"；Lead 已在 #387 更正为**窄口径 + 漏 type-only 的粗估，作废**。
- * 本判据的实测三列基线（口径 = 闸门自身的 `OLD_LAYERS`，`runtime/*` 撞名层计入）：
- *
- * | 提交 | 实测（本判据口径） | 说明 |
- * |---|---|---|
- * | `fb0814d4`（真实基线） | **9 文件 / 23 行** | 不含 C8/C9 的新增接线 |
- * | `9630a39d`（**冻结基线**） | **11 文件 / 28 行** | 含 C8 的 `kernelPickAdapter`/`viewportPick` |
- * | 本批（评审时点，含在途 C9） | **12 文件 / 32 行** = 冻结基线 + 豁免 4 条 | 豁免清单的读数 |
- *
- * **口径差异的来源**：目标落在**撞名层 `runtime/`** 的边（`runtime/gridRead`、`runtime/context`、
- * `runtime/annotationRead`、`runtime/presentationAdapter`）同样计入 —— 这些目标既不在
- * `KERNEL_FILES`，也不在新层，按内核隔离闸门的口径**就是**旧层；另有两条
- * `import('x').T` **类型位置**事实（`kernelProjection.ts:562,569`）与 `:78` 一处。
  */
 
 import fs from 'node:fs'
@@ -81,31 +96,55 @@ import { extractImports } from './module-graph.mjs'
 import {
   APPROVED_COMPOSITION_LEGACY_EDGES,
   BASELINE_COMMIT,
+  BASELINE_EDGE_OCCURRENCES,
   BASELINE_FILES,
-  BASELINE_LINES,
+  BASELINE_PAIRS,
+  BASELINE_PAIR_COUNT,
+  BASELINE_PAIR_OCCURRENCES,
   COMPOSITION_SCOPE,
   EXEMPTION_LEDGER_AT_C9_LANDING,
+  EXEMPTION_LEDGER_AT_C9_LANDING_PAIRS,
   FROZEN_PERMITTED_EXEMPT_GROUPS,
   FROZEN_PERMITTED_EXEMPT_TOTAL,
+  LINE_KEY_FALSE_READING_AT_44030389,
+  PAIR_NORMALIZATION,
+  PERMITTED_EXEMPT_OCCURRENCES,
+  PERMITTED_EXEMPT_PAIRS,
   REGISTRY_REQUIRED_FIELDS,
+  REGISTRY_REPORT_ONLY_FIELDS,
+  REGISTRY_SEMANTIC_KEY_FIELDS,
   SRC_ROOT,
   approvedWithExemptions,
+  assessCompositionLegacyBinding,
+  bindingCountViolations,
   countCompositionLegacyEdges,
   derivePendingExemptions,
   exemptionCeilingViolations,
   exemptionExitStatus,
   exemptionReading,
+  exemptionRegistryEntries,
   isOldLayerTarget,
   isProductionRel,
+  multisetEntries,
+  pairKeyOf,
+  pairMultisetOf,
+  pairMultisetOfLineKeys,
   readKernelFiles,
   resolveTargetOf,
+  rottenRegisteredPairs,
   unregisteredCompositionLegacyEdges,
 } from './composition-legacy-binding.mjs'
 
 const makeEdge = (from, line, to) =>
   Object.freeze({ from, line, to, kind: 'import', reason: 'x'.repeat(30), exitStage: 'P11', owner: 'G1' })
 
-describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条登记，未登记即红，登记数不得增', () => {
+const sumOf = (m) => [...m.values()].reduce((a, b) => a + b, 0)
+/** Map → 排序条目（断言里对账用；避免 Map 引用相等造成恒真/恒假）。 */
+const entriesOf = (m) => multisetEntries(m instanceof Map ? m : new Map(Object.entries(m)))
+/** 只取判据键面（对/重数/原因），剥掉含行号的报告文本 —— 用于"行号非键"对账。 */
+const keyFace = (rt) => rt.map((r) => ({ pair: r.pair, declared: r.declared, observed: r.observed, reason: r.reason }))
+
+describe('G1 ①：`composition/` 生产文件绑定旧层的**对** `(file, target)` —— 逐对登记，未登记即红，登记数不得增', () => {
   /** 判据执行面：AST 扫全部生产模块图（与生产扫描器同源）。 */
   // 全树扫描对本配置约 4s：模块内 memo 一次，避免每个用例各扫一遍
   // （判据强度不变 —— 同一次运行内的树是同一份，memo 不影响任何断言）。
@@ -115,9 +154,9 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     return factsPromise
   }
 
-  it('未登记即红：`composition/` 生产文件指向旧层的每一条边都必须登记，或落在具名豁免许可集内', async () => {
+  it('未登记即红 ①：`composition/` 生产文件指向旧层的每一个**对**都必须登记，或落在具名豁免许可集内', async () => {
     const facts = await loadFacts()
-    // 判据：实测边必须 ⊆ (冻结基线登记 ∪ 实测导出的豁免)。
+    // 判据：实测的对多重集必须 ⊆ (冻结基线登记 ∪ 实测导出的豁免)。
     // 因为豁免是实测导出的，本断言等价于"超出许可集的绑定不存在" ——
     // 超许可的实际判红由下面的刚性 ② 用例承担（这里先保证集合自洽）。
     const violations = unregisteredCompositionLegacyEdges(facts, approvedWithExemptions(facts))
@@ -125,52 +164,169 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
       violations,
       `composition/ 生产文件绑定了旧层但既未登记、也不在具名豁免许可集内:\n${violations.join('\n')}`,
     ).toEqual([])
+    // 生产判定核（三检测合一）同样必须判绿 —— 判据只有一份实现。
+    expect(assessCompositionLegacyBinding(facts).violations, '生产判定核必须判绿').toEqual([])
   })
 
-  it('登记不得腐烂：冻结基线的每一条登记都真实存在（文件 + 行 + 目标全对）', async () => {
+  it('登记不得腐烂 ②：冻结基线的每一个**对**都真实存在，且实测重数不得少于登记重数', async () => {
     const facts = await loadFacts()
-    const kernelFiles = readKernelFiles()
-    const present = new Set()
-    for (const f of facts) {
-      const fromRel = path.relative(SRC_ROOT, f.fromFile).replace(/[\\/]+/g, '/')
-      const target = resolveTargetOf(f, SRC_ROOT)
-      if (target === null) continue
-      if (!isOldLayerTarget(target, kernelFiles)) continue
-      present.add(`src/${fromRel}:${f.line}:${target}`)
-    }
-    const rotted = APPROVED_COMPOSITION_LEGACY_EDGES.filter((e) => !present.has(`${e.from}:${e.line}:${e.to}`)).map(
-      (e) => `${e.from}:${e.line} → ${e.to}`,
-    )
+    const rotted = rottenRegisteredPairs(facts)
     expect(
-      rotted,
-      `登记的边已不存在或行号漂移（请同批核销/更正 —— 建筑在腐烂登记上的闸门等于没有闸门）:\n${rotted.join('\n')}`,
+      rotted.map((r) => r.message),
+      `登记的**对**已不存在或重数不足（请同批核销 —— 建筑在腐烂登记上的闸门等于没有闸门）:\n${rotted.map((r) => r.message).join('\n')}`,
     ).toEqual([])
+    // 行号漂移（旧口径的假红来源）不得进入腐烂判定：只看对 + 重数。
+    expect(keyFace(rotted)).toEqual([])
   })
 
-  it('登记数不得增：冻结基线 11/28 **不得抬高**，超出部分必须落在豁免许可集内', async () => {
+  it('登记数不得增 ③：冻结读数 **11 文件 / 21 对 / 28 次** 不得抬高，超出部分必须落在豁免许可集内', async () => {
     const facts = await loadFacts()
     const counted = countCompositionLegacyEdges(facts)
     const exemptions = derivePendingExemptions(facts)
     // ① 基线与登记表**冻结**在 9630a39d 的真值（不得随在途批次抬高）
     expect(BASELINE_COMMIT, '基线必须锚定在真值提交上').toBe('9630a39d')
     expect(
-      { files: BASELINE_FILES, lines: BASELINE_LINES },
-      '冻结基线必须是 9630a39d 的 11/28 —— 不得抬到 12/32（#385 裁决：登记表不是增长的许可证）',
-    ).toEqual({ files: 11, lines: 28 })
-    expect(APPROVED_COMPOSITION_LEGACY_EDGES.length, '冻结登记表长度必须等于基线行数 28').toBe(BASELINE_LINES)
+      { files: BASELINE_FILES, pairs: BASELINE_PAIR_COUNT, occurrences: BASELINE_EDGE_OCCURRENCES },
+      '冻结基线必须是 9630a39d 的 11/21/28（= 旧行键口径的 11/28）—— 不得抬高（#385 裁决：登记表不是增长的许可证）',
+    ).toEqual({ files: 11, pairs: 21, occurrences: 28 })
+    expect(APPROVED_COMPOSITION_LEGACY_EDGES.length, '冻结登记表长度必须等于基线边重数 28').toBe(
+      BASELINE_EDGE_OCCURRENCES,
+    )
+    expect(BASELINE_PAIRS.length, '冻结基线对集必须是 21 对').toBe(BASELINE_PAIR_COUNT)
+    expect(
+      sumOf(new Map(Object.entries(BASELINE_PAIR_OCCURRENCES))),
+      '冻结基线对重数合计必须等于边重数 28',
+    ).toBe(BASELINE_EDGE_OCCURRENCES)
     // ② 实测 = 基线 + 豁免；豁免是**唯一的**合法增量通道，且它自己有条数上限
     expect(
-      { files: counted.files, lines: counted.lines },
-      `实测必须恰好等于 基线{${BASELINE_FILES},${BASELINE_LINES}} + 实测豁免${exemptions.length} 条`
-        + `（新增绑定必须先改基线并写明理由 —— "可见性与可判定性"不等于"允许增长"，#387 评论 7293）`
-        + `。实测:${JSON.stringify({ files: counted.files, lines: counted.lines })}`,
-    ).toEqual({ files: counted.files, lines: BASELINE_LINES + exemptions.length })
-    expect(exemptions.length, '豁免条数必须 ≤ 许可上限 4').toBeLessThanOrEqual(FROZEN_PERMITTED_EXEMPT_TOTAL)
-    // 只要存在豁免，就必然多出恰好 1 个文件（C9 的 kernelOutlinePlanPort.ts）
-    expect(counted.files).toBe(exemptions.length > 0 ? BASELINE_FILES + 1 : BASELINE_FILES)
+      { files: counted.files, pairs: counted.pairs, occurrences: counted.occurrences },
+      `实测必须恰好等于 基线{${BASELINE_FILES}文件,${BASELINE_PAIR_COUNT}对,${BASELINE_EDGE_OCCURRENCES}次}`
+        + ` + 实测豁免${exemptions.length} 对（新增绑定必须先改基线并写明理由 —— `
+        + '"可见性与可判定性"不等于"允许增长"，#387 评论 7293）'
+        + `。实测:${JSON.stringify({ files: counted.files, pairs: counted.pairs, occurrences: counted.occurrences })}`,
+    ).toEqual({
+      files: BASELINE_FILES + new Set(exemptions.map((e) => e.from)).size,
+      pairs: BASELINE_PAIR_COUNT + exemptions.length,
+      occurrences: BASELINE_EDGE_OCCURRENCES + exemptions.reduce((n, e) => n + e.occurrences, 0),
+    })
+    expect(exemptions.length, '豁免**对**数必须 ≤ 许可上限 2').toBeLessThanOrEqual(FROZEN_PERMITTED_EXEMPT_TOTAL)
+    // ③ 计数上限检测（生产上限）必须判绿
+    expect(bindingCountViolations(counted), '生产计数上限下必须判绿').toEqual([])
+    expect(BASELINE_PAIR_COUNT + PERMITTED_EXEMPT_PAIRS, '生产对上限 = 21 + 2').toBe(23)
+    expect(BASELINE_EDGE_OCCURRENCES + PERMITTED_EXEMPT_OCCURRENCES, '生产重数上限 = 28 + 2').toBe(30)
   })
 
-  it('豁免刚性 ②：豁免必须落在**冻结许可集**内、条数不超上限（多一条即红）', async () => {
+  it('**等价证明**：旧「行键读数」按 (file,target) 归一后与新对集**逐对逐重数相等**（28 行 → 21 对）', async () => {
+    const facts = await loadFacts()
+    const counted = countCompositionLegacyEdges(facts)
+
+    // ── 冻结基线：28 行键 → 21 对 / 28 次（两条独立分组路径的读数必须一致） ──
+    const baselineLineKeys = APPROVED_COMPOSITION_LEGACY_EDGES.map((e) => `${e.from}:${e.line}:${e.to}`)
+    expect(baselineLineKeys, '冻结基线的行键读数必须是 28 行').toHaveLength(28)
+    expect(new Set(baselineLineKeys).size, '28 行 = 28 个不同行键（无重复）').toBe(28)
+    const normalizedBaseline = pairMultisetOfLineKeys(baselineLineKeys)
+    expect(
+      entriesOf(normalizedBaseline),
+      '冻结基线：把 28 个行键按 (file,target) 归一，必须与冻结对多重集**逐对逐重数相等**',
+    ).toEqual(entriesOf(BASELINE_PAIR_OCCURRENCES))
+    expect(normalizedBaseline.size, '冻结基线 28 行 → 21 对').toBe(21)
+    expect(sumOf(normalizedBaseline), '归一后重数合计仍为 28（分量守恒 —— 去掉的是键成分，不是分量）').toBe(28)
+    // "对集完全相等"的另一半：**键集**必须与冻结对键集逐条相同（不只是多重集碰巧相等）
+    expect([...normalizedBaseline.keys()].sort(), '归一后的对键集必须等于冻结基线对键集').toEqual([...BASELINE_PAIRS].sort())
+
+    // ── 实测：30 行 → 23 对 / 30 次 ──
+    const observedLineKeys = counted.rows.map((r) => `${r.file}:${r.line}:${r.target}`)
+    const normalizedObserved = pairMultisetOfLineKeys(observedLineKeys)
+    expect(
+      entriesOf(normalizedObserved),
+      '实测：把 30 个行键归一，必须与判定核分组出的对多重集**逐对逐重数相等**',
+    ).toEqual(entriesOf(counted.pairCounts))
+    expect(
+      { lines: observedLineKeys.length, lineKeys: new Set(observedLineKeys).size, pairs: normalizedObserved.size, occurrences: sumOf(normalizedObserved), files: counted.files },
+      '实测读数（对键口径）必须与 PAIR_NORMALIZATION.after 逐项一致',
+    ).toEqual({
+      lines: PAIR_NORMALIZATION.before.measured_lines,
+      lineKeys: PAIR_NORMALIZATION.before.measured_distinct_line_keys,
+      pairs: PAIR_NORMALIZATION.after.measured_pairs,
+      occurrences: PAIR_NORMALIZATION.after.measured_pair_occurrences,
+      files: PAIR_NORMALIZATION.after.measured_files,
+    })
+    // 分量守恒：去掉行锚前后，**边的条数一个没少**
+    expect(PAIR_NORMALIZATION.before.measured_lines, '改口径前 30 行').toBe(30)
+    expect(PAIR_NORMALIZATION.after.measured_pair_occurrences, '改口径后 30 次出现（分量没少）').toBe(30)
+
+    // ── 事故账：旧口径的两条假读数归一到**同一个对**，且该对在基线里本来就有登记 ──
+    const phantomDeclared = pairMultisetOfLineKeys([LINE_KEY_FALSE_READING_AT_44030389.declared_line_key])
+    const phantomObserved = pairMultisetOfLineKeys([LINE_KEY_FALSE_READING_AT_44030389.observed_line_key])
+    expect([...phantomDeclared.keys()], '事故前的"腐烂"读数归一到').toEqual([LINE_KEY_FALSE_READING_AT_44030389.pair])
+    expect([...phantomObserved.keys()], '事故后的"新绑定"读数归一到同一个对').toEqual([LINE_KEY_FALSE_READING_AT_44030389.pair])
+    expect(LINE_KEY_FALSE_READING_AT_44030389.baseline_pair_occurrences, '该对在冻结基线里的重数（事故账）').toBe(2)
+    // 判定核直接分组出来的重数必须与事故账一致 —— 说明该对在基线里本来就有 2 条登记，
+    // 旧口径把其中一条（`:87`）判成"腐烂"纯属行漂移。
+    expect(
+      BASELINE_PAIR_OCCURRENCES[LINE_KEY_FALSE_READING_AT_44030389.pair],
+      '冻结基线里该对的重数必须等于事故账的 2（归一后"腐烂"与"新绑定"是同一条边的两个行号）',
+    ).toBe(LINE_KEY_FALSE_READING_AT_44030389.baseline_pair_occurrences)
+    // ⇒ 归一后两条假读数互相湮灭：实测的登记外**对**只剩 2 条合法豁免，登记腐烂**对**为 0
+    const declaredPairs = pairMultisetOf(BASELINE_PAIRS)
+    const observedPairs = counted.pairCounts
+    const onlyDeclared = [...declaredPairs.keys()].filter((k) => !observedPairs.has(k))
+    const onlyObserved = [...observedPairs.keys()].filter((k) => !declaredPairs.has(k))
+    expect(onlyDeclared, '归一后：登记腐烂的对 = 0（旧口径是 1 条行键）').toEqual([])
+    expect(onlyObserved, '归一后：登记外的对 = 恰好那 2 条已具名豁免的对').toEqual(
+      derivePendingExemptions(facts).map((e) => e.pair),
+    )
+    expect(onlyObserved, `那 2 对必须正是具名豁免（PAIR_NORMALIZATION.after.onlyObserved_pairs=${PAIR_NORMALIZATION.after.onlyObserved_pairs}）`).toHaveLength(
+      PAIR_NORMALIZATION.after.onlyObserved_pairs,
+    )
+
+    // ── 第二处等价证明（历史账）：C9 落地时的豁免 4 行 → 3 对（gridRead 重数 2） ──
+    const ledgerPairs = pairMultisetOfLineKeys(EXEMPTION_LEDGER_AT_C9_LANDING)
+    expect(EXEMPTION_LEDGER_AT_C9_LANDING, 'C9 落地读数快照为 4 行').toHaveLength(4)
+    expect(entriesOf(ledgerPairs), 'C9 读数：4 行归一到 3 对').toEqual(entriesOf(EXEMPTION_LEDGER_AT_C9_LANDING_PAIRS))
+    expect(
+      Object.fromEntries(entriesOf(ledgerPairs)),
+      'C9 读数归一后：runtime/gridRead 重数 2，另两对各 1',
+    ).toEqual({
+      [pairKeyOf('src/composition/kernelOutlinePlanPort.ts', 'runtime/context')]: 1,
+      [pairKeyOf('src/composition/kernelOutlinePlanPort.ts', 'runtime/gridRead')]: 2,
+      [pairKeyOf('src/composition/kernelOutlinePlanPort.ts', 'pure/partMask')]: 1,
+    })
+  })
+
+  it('**行号非键**：把登记表全部行号扰动（+1000 / 全置 1），三条检测的判定读数逐项不变', async () => {
+    const facts = await loadFacts()
+    // 判据键字段 vs 报告注解字段的法定切分（可机械复核）
+    expect(REGISTRY_SEMANTIC_KEY_FIELDS, '判据键只有 (file, target)').toEqual(['from', 'to'])
+    expect(REGISTRY_REPORT_ONLY_FIELDS, '行号是报告注解字段').toEqual(['line'])
+    expect(REGISTRY_REQUIRED_FIELDS).toContain('line')
+
+    // 用一个**会判红**的登记集做对照（否则"两边都是空"的相等是恒真、没有区分力）：
+    // 往冻结集塞一个现实中不存在的假对 ⇒ ② 腐烂必须红。
+    const fakePair = makeEdge('src/composition/kernelProjection.ts', 1, 'runtime/doesNotExist')
+    const withFake = [...APPROVED_COMPOSITION_LEGACY_EDGES, fakePair]
+    const asIs = assessCompositionLegacyBinding(facts, { registry: withFake })
+    const shifted = assessCompositionLegacyBinding(facts, {
+      registry: withFake.map((e) => ({ ...e, line: e.line + 1000 })),
+    })
+    const allOnes = assessCompositionLegacyBinding(facts, { registry: withFake.map((e) => ({ ...e, line: 1 })) })
+    // 对照前提：这个登记集**确实是红的**（证明下面的"不变"不是恒绿）
+    expect(asIs.rotted, '塞假对后必须判红（腐烂）').toHaveLength(1)
+    expect(asIs.violations.length).toBeGreaterThan(0)
+    // 行号扰动 ⇒ 判据键面的读数**逐项不变**（键/重数/原因全同）
+    expect(keyFace(shifted.rotted), '行号 +1000 后腐烂读数逐项不变').toEqual(keyFace(asIs.rotted))
+    expect(keyFace(allOnes.rotted), '行号全置 1 后腐烂读数逐项不变').toEqual(keyFace(asIs.rotted))
+    expect(shifted.unregistered).toEqual(asIs.unregistered)
+    expect(shifted.growth).toEqual(asIs.growth)
+    expect(shifted.ceiling).toEqual(asIs.ceiling)
+    expect(shifted.rotted.map((r) => r.pair), '被点名腐烂的仍是那个假对').toEqual([
+      pairKeyOf('src/composition/kernelProjection.ts', 'runtime/doesNotExist'),
+    ])
+    // 而**行号仍然出现在失败消息里**（人类定位用）—— 只是不参与判定
+    expect(asIs.rotted[0].message, '腐烂消息必须带登记注解行号，供人类定位').toMatch(/kernelProjection\.ts:1\b/)
+  })
+
+  it('豁免刚性 ②：豁免必须落在**冻结许可集**内、重数不超上限（多一条即红）', async () => {
     const facts = await loadFacts()
     const exemptions = derivePendingExemptions(facts)
     // ② 许可上限随 R1-A C10 从 4 收敛到 2（C10 把值导入清零，只剩 type-only）——
@@ -205,18 +361,23 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
   it('豁免条数是**可读读数** ③：导出并被打印（趋势机器可见；终态为空 ⇒ 0）', async () => {
     const facts = await loadFacts()
     const reading = exemptionReading(facts)
-    expect(reading.exemptionCount, '③ 豁免条数必须作为读数导出（实测）').toBe(derivePendingExemptions(facts).length)
+    const exemptions = derivePendingExemptions(facts)
+    expect(reading.exemptionPairs, '③ 豁免**对**数必须作为读数导出（实测）').toBe(exemptions.length)
+    expect(reading.exemptionOccurrences, '③ 读数必须同时给出重数（否则重数增长看不见）').toBe(
+      exemptions.reduce((n, e) => n + e.occurrences, 0),
+    )
     expect(reading.terminal, '④ 终态必须声明为 empty（空的）').toBe('empty')
     expect(reading.permittedCeiling, '③ 读数必须同时给出许可上限（显示收缩进度：C9=4 ⇒ C10=2）').toBe(2)
-    expect(reading.baseline, '读数必须带基线三元组（供每批合流登记趋势）').toEqual({
+    expect(reading.baseline, '读数必须带基线（供每批合流登记趋势；对键口径含 pairs/occurrences 两列）').toEqual({
       files: 11,
-      lines: 28,
+      pairs: 21,
+      occurrences: 28,
       commit: '9630a39d',
     })
-    expect(EXEMPTION_LEDGER_AT_C9_LANDING, 'C9 落地时的读数快照必须留档（4 条）').toHaveLength(4)
+    expect(EXEMPTION_LEDGER_AT_C9_LANDING, 'C9 落地时的读数快照必须留档（4 行）').toHaveLength(4)
     // eslint-disable-next-line no-console
-    console.log(`[G1 读数] 豁免条数=${reading.exemptionCount}/${reading.permittedCeiling}（终态=${reading.terminal}），基线=${reading.baseline.files}/${reading.baseline.lines}@${reading.baseline.commit}，终端批次=${reading.terminalBatch}，当前豁免=${JSON.stringify(reading.ids)}`)
-    expect(typeof reading.exemptionCount).toBe('number')
+    console.log(`[G1 读数] 豁免=${reading.exemptionPairs}对/${reading.exemptionOccurrences}次（许可上限=${reading.permittedCeiling}，终态=${reading.terminal}），基线=${reading.baseline.files}文件/${reading.baseline.pairs}对/${reading.baseline.occurrences}次@${reading.baseline.commit}，终端批次=${reading.terminalBatch}，当前豁免=${JSON.stringify(reading.ids)}，行号注解=${JSON.stringify(reading.lineHints)}`)
+    expect(typeof reading.exemptionPairs).toBe('number')
   })
 
   it('**豁免终态为空** ④：释放条件**可机械判定**（T1 边消失 / T2 目标不再属旧层）', async () => {
@@ -224,10 +385,8 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     const exemptions = derivePendingExemptions(facts)
     // ④ 的机械半边：豁免是**实测导出**，故"绑定消失但条目还在"这种空壳在构造上不可能出现。
     const counted = countCompositionLegacyEdges(facts)
-    const present = new Set(counted.rows.map((r) => `${r.file}:${r.line}:${r.target}`))
-    const stale = exemptions.filter((e) => !present.has(`${e.from}:${e.line}:${e.to}`)).map(
-      (e) => `${e.from}:${e.line} → ${e.to}`,
-    )
+    const present = new Set(counted.pairCounts.keys())
+    const stale = exemptions.filter((e) => !present.has(e.pair)).map((e) => e.pair)
     expect(stale, '豁免必须是实测导出（不存在已消失的空壳条目）').toEqual([])
 
     // ④ 的**可判定**半边：释放条件不是注释里的承诺，而是两条可观测触发，且已接线。
@@ -254,17 +413,20 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
       derivePendingExemptions(facts.filter((f) => !f.fromSrcRel.includes('kernelOutlinePlanPort'))),
       'T1 成立（边消失）时豁免必须自动为空',
     ).toEqual([])
-    // 终态判据：豁免为 0 时，实测必须恰等于冻结基线（回到 11/28）
+    // 终态判据：豁免为 0 时，实测必须恰等于冻结基线（回到 11/21/28）
     if (exemptions.length === 0) {
-      expect(countCompositionLegacyEdges(facts).lines, '终态：豁免为空 ⇒ 实测回到冻结基线 28').toBe(BASELINE_LINES)
+      const end = countCompositionLegacyEdges(facts)
+      expect({ pairs: end.pairs, occurrences: end.occurrences }, '终态：豁免为空 ⇒ 实测回到冻结基线 21 对 / 28 次').toEqual(
+        { pairs: BASELINE_PAIR_COUNT, occurrences: BASELINE_EDGE_OCCURRENCES },
+      )
     }
   })
 
-  it('**剩余 2 条豁免的定性**：全部 type-only、总数 ≤2、指向核销批次（不是"已知并存边界"结账）', async () => {
+  it('**剩余 2 条豁免的定性**：全部 type-only、对数 ≤2、指向核销批次（不是"已知并存边界"结账）', async () => {
     const facts = await loadFacts()
     const exemptions = derivePendingExemptions(facts)
     const status = exemptionExitStatus(facts)
-    expect(status.count, '当前豁免条数').toBeLessThanOrEqual(2)
+    expect(status.count, '当前豁免对数').toBeLessThanOrEqual(2)
     expect(
       exemptions.map(
         (e) => `${e.from.replace('src/composition/', '')}:${e.line}→${e.to}${e.isTypeOnly ? ' [type-only]' : ' [值导入]'}`,
@@ -275,6 +437,7 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
       'kernelOutlinePlanPort.ts:57→runtime/gridRead [type-only]',
     ])
     expect(status.allTypeOnly, '豁免必须全是 type-only（值导入不得借豁免存活）').toBe(true)
+    expect(exemptions.every((e) => e.occurrences === 1), '每条豁免当前各 1 条边（重数溢出会另行判红）').toBe(true)
     // ⚠️ 立场断言：这两条**不是**"已知并存边界"，而是待核销欠账 ——
     // 闸门口径对类型导入同计（`no-private-cross-layer` 对 `import { type X }` 同样产出 finding），
     // 故不许拿 isTypeOnly 当"无所谓"的理由。
@@ -284,25 +447,30 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     ).toBe(true)
   })
 
-  it('**校准自检**：基线读数与判据实测读数逐条一致（对称差为空，且两个数都由判定核数出）', async () => {
+  it('**校准自检**：冻结对集与实测对集逐对逐重数一致（对称差为空，且两个数都由判定核数出）', async () => {
     const facts = await loadFacts()
     const counted = countCompositionLegacyEdges(facts)
     const exemptions = derivePendingExemptions(facts)
-    const observed = new Set(counted.rows.map((r) => `${r.file}:${r.line}:${r.target}`))
-    const declared = new Set([
-      ...APPROVED_COMPOSITION_LEGACY_EDGES.map((e) => `${e.from}:${e.line}:${e.to}`),
-      ...exemptions.map((e) => `${e.from}:${e.line}:${e.to}`),
+    const observed = counted.pairCounts
+    const declared = pairMultisetOf([
+      ...APPROVED_COMPOSITION_LEGACY_EDGES.map((e) => pairKeyOf(e.from, e.to)),
+      ...exemptions.flatMap((e) => Array.from({ length: e.occurrences }, () => e.pair)),
     ])
-    const onlyDeclared = [...declared].filter((k) => !observed.has(k)).sort()
-    const onlyObserved = [...observed].filter((k) => !declared.has(k)).sort()
-    expect({ onlyDeclared, onlyObserved }, '冻结登记 + 实测豁免 与实测边的对称差必须为空').toEqual({
+    const onlyDeclared = [...declared.keys()].filter((k) => !observed.has(k)).sort()
+    const onlyObserved = [...observed.keys()].filter((k) => !declared.has(k)).sort()
+    expect({ onlyDeclared, onlyObserved }, '冻结登记 + 实测豁免 与实测对的对称差必须为空').toEqual({
       onlyDeclared: [],
       onlyObserved: [],
     })
-    // 读数一致性：基线 28 + 实测豁免数 == 判定核数出的行数（不是手写常量对齐手写常量）
-    expect({ lines: BASELINE_LINES + exemptions.length }).toEqual({ lines: counted.lines })
-    // 且冻结基线自身必须是 28 条（读数与常量一致）
-    expect(APPROVED_COMPOSITION_LEGACY_EDGES.length).toBe(BASELINE_LINES)
+    // 重数面也必须一致（集合相等不足以证明"条数没变"）
+    expect(entriesOf(declared), '冻结登记 + 实测豁免 与实测对的多重集必须逐对逐重数相等').toEqual(entriesOf(observed))
+    // 读数一致性：基线 28 次 + 实测豁免重数 == 判定核数出的边数（不是手写常量对齐手写常量）
+    expect({ occurrences: BASELINE_EDGE_OCCURRENCES + exemptions.reduce((n, e) => n + e.occurrences, 0) }).toEqual({
+      occurrences: counted.occurrences,
+    })
+    // 且冻结基线自身必须是 21 对 / 28 次（读数与常量一致）
+    expect(BASELINE_PAIRS.length).toBe(BASELINE_PAIR_COUNT)
+    expect(APPROVED_COMPOSITION_LEGACY_EDGES.length).toBe(BASELINE_EDGE_OCCURRENCES)
   })
 
   it('覆盖形式被测：判定面确实覆盖了 `composition/` 的全部生产文件，且无解析失败', async () => {
@@ -335,7 +503,7 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     ).toEqual([])
   })
 
-  it('登记字段完备性：冻结基线的每条登记都写明 文件/行/目标/类别/理由/退出归属/负责人', () => {
+  it('登记字段完备性：冻结基线的每条登记都写明 文件/行(注解)/目标/类别/理由/退出归属/负责人', () => {
     const incomplete = APPROVED_COMPOSITION_LEGACY_EDGES.filter((e) => {
       if (REGISTRY_REQUIRED_FIELDS.some((k) => e[k] === undefined || e[k] === null || e[k] === '')) return true
       if (String(e.reason).length < 20) return true
@@ -343,20 +511,28 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
       return false
     }).map((e) => `${e.from}:${e.line}`)
     expect(incomplete, `登记项必须写全 ${REGISTRY_REQUIRED_FIELDS.join('/')}（理由 ≥20 字）`).toEqual([])
+    // 登记表的判据键必须唯一可数：对键由 (from, to) 派生，行号不参与
+    expect(
+      APPROVED_COMPOSITION_LEGACY_EDGES.every((e) => e.from.startsWith('src/composition/')),
+      '登记的文件必须在判定面内',
+    ).toBe(true)
   })
 
   it('反空洞真：判定面里**确实**有边被扫到（否则"未登记即红"是空转）', async () => {
     const facts = await loadFacts()
     const counted = countCompositionLegacyEdges(facts)
     const exemptions = derivePendingExemptions(facts)
-    expect(counted.lines, '判定核必须真实命中边 —— 否则上一条的 0 违规只是"没扫到"').toBeGreaterThan(0)
+    expect(counted.occurrences, '判定核必须真实命中边 —— 否则上一条的 0 违规只是"没扫到"').toBeGreaterThan(0)
+    expect(counted.pairs, '对计数必须 > 1（单对会让"对键"口径退化）').toBeGreaterThan(1)
     expect(counted.files).toBeGreaterThan(1)
     // 实测必须 = 冻结基线 + 实测豁免（豁免是实测导出，故这条是"读数自洽"而非"恒真"：
-    // 若实测数**小于**基线，说明基线的 28 条里已有条目消失 ⇒ 登记腐烂，下面的断言会红）
-    expect(counted.lines, '实测必须 = 基线 28 + 实测豁免').toBe(BASELINE_LINES + exemptions.length)
+    // 若实测数**小于**基线，说明基线的 28 次里已有条目消失 ⇒ 登记腐烂，下面的断言会红）
+    expect(counted.occurrences, '实测必须 = 基线 28 次 + 实测豁免重数').toBe(
+      BASELINE_EDGE_OCCURRENCES + exemptions.reduce((n, e) => n + e.occurrences, 0),
+    )
   })
 
-  it('**负对照 A**：往 `composition/` 注入一条未登记的新边 ⇒ 判红', async () => {
+  it('**负对照 A**：往 `composition/` 注入一条未登记的新边（新对）⇒ 判红', async () => {
     // 走**生产**扫描器（`extractImports`）+ **生产**判定核（`unregisteredCompositionLegacyEdges`），
     // 不是手造 fact object（手造会绕过 AST 通路 = "宿主复刻被测算法"）。
     const facts = await loadFacts()
@@ -372,24 +548,41 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
       const kernelFiles = readKernelFiles()
       const violations = unregisteredCompositionLegacyEdges(probeFacts, approved, { srcRoot, kernelFiles })
       expect(violations, '未登记的新边必须判红（注入 `@/context/grid`）').toHaveLength(1)
+      // ① 的失败消息必须带**行号**（人类定位用）—— 行号只在消息里，不在键里
+      expect(violations[0], '判红消息必须带行号供人类定位').toContain('src/composition/probeAssembly.ts:1')
+      expect(violations[0], '判红消息必须点明未登记的**对**').toContain('(file, target) 对未登记')
       // 正对照：同一条边**登记后**判绿（证明判红来自登记表，而不是别的什么）
       const registry = [...approved, makeEdge('src/composition/probeAssembly.ts', 1, 'context/grid')]
       expect(
         unregisteredCompositionLegacyEdges(probeFacts, registry, { srcRoot, kernelFiles }),
         '登记之后必须判绿（否则负对照证明不了登记表在起作用）',
       ).toEqual([])
+      // 重数溢出也必须红：同一对登记 1 条、实测 2 条 ⇒ 判红（对键口径不弱化"往同去向上加绑定"）
+      const dupProbe = path.join(comp, 'probeDup.ts')
+      fs.writeFileSync(dupProbe, "import { slotsOf } from '@/context/grid'\nimport { other } from '@/context/grid'\n", 'utf8')
+      const dupFacts = extractImports(dupProbe, dir)
+      expect(
+        unregisteredCompositionLegacyEdges(
+          dupFacts,
+          [...approved, makeEdge('src/composition/probeDup.ts', 1, 'context/grid')],
+          { srcRoot, kernelFiles },
+        ),
+        '同对重数溢出（登记 1 条、实测 2 条）必须判红',
+      ).toHaveLength(1)
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('**负对照 A′（豁免刚性 ②/③/④）**：塞进许可集外的新豁免 ⇒ 判红；同组超上限 ⇒ 判红；许可上限恒 4', async () => {
+  it('**负对照 A′（豁免刚性 ②/③/④）**：塞进许可集外的新豁免 ⇒ 判红；同组超上限 ⇒ 判红；许可上限恒 2', async () => {
     const facts = await loadFacts()
     const exemptions = derivePendingExemptions(facts)
     const mk = (line, to, from = 'src/composition/kernelAssembly.ts') => ({
       from,
       line,
       to,
+      pair: pairKeyOf(from, to),
+      occurrences: 1,
       kind: 'import',
       reason: 'x'.repeat(30),
       exitStage: 'P11',
@@ -401,9 +594,22 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     const violations = exemptionCeilingViolations(tampered)
     expect(violations, '往豁免清单塞许可集外的新绑定必须被判红').not.toEqual([])
     expect(violations.some((v) => v.includes('kernelAssembly.ts')), '判红必须点名那条越界绑定').toBe(true)
-    // 正面：在同一许可组里**超上限**也要红（gridRead 许可 2 条，塞到 3 条即越界）
-    const overGroup = [900, 901, 902].map((n) => mk(n, 'runtime/gridRead', 'src/composition/kernelOutlinePlanPort.ts'))
+    // 正面：在同一许可组里**超上限**也要红（gridRead 许可 1 条，塞到 2 条即越界）
+    const overGroup = [
+      mk(900, 'runtime/gridRead', 'src/composition/kernelOutlinePlanPort.ts'),
+      mk(901, 'runtime/gridRead', 'src/composition/kernelOutlinePlanPort.ts'),
+    ]
     expect(exemptionCeilingViolations(overGroup), '同组条数超上限即红').not.toEqual([])
+    // 重数溢出同罪：一条豁免条目声称重数 2，而该组只许可 1 ⇒ 也要红
+    expect(
+      exemptionCeilingViolations([{ ...mk(56, 'runtime/context', 'src/composition/kernelOutlinePlanPort.ts'), occurrences: 2 }]),
+      '同组重数超上限即红（重数不能被折叠成集合蒙过）',
+    ).not.toEqual([])
+    // 许可为 0 的组（pure/partMask）出现一条即红
+    expect(
+      exemptionCeilingViolations([mk(65, 'pure/partMask', 'src/composition/kernelOutlinePlanPort.ts')]),
+      '许可上限为 0 的去向出现一条即红',
+    ).not.toEqual([])
     // ③ 许可上限随 C10 收敛为 2（读数不得被人为抬高以容纳新豁免）
     expect(FROZEN_PERMITTED_EXEMPT_TOTAL, '许可上限在 C10 后为 2（只降不升）').toBe(2)
     // ④ 已消失的豁免必然不在实测导出里（空壳在构造上不可能出现）
@@ -415,27 +621,90 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     expect(exemptionCeilingViolations(exemptions), '当前豁免必须通过许可集检测').toEqual([])
   })
 
-  it('**负对照 B**：删掉一条登记 ⇒ 判红', async () => {
+  it('**负对照 B**：从冻结集移除一个**实测存在**的对 ⇒ 判红（未登记 + 豁免越界，两条路都拦）', async () => {
     const facts = await loadFacts()
-    // 删掉 `kernelAssembly.ts:82`（`@/context/multiblock`）这条登记，其余不动。
-    const approved = approvedWithExemptions(facts)
-    const baselineViolations = unregisteredCompositionLegacyEdges(facts, approved)
-    const removed = approved.filter((e) => !(e.from === 'src/composition/kernelAssembly.ts' && e.line === 82))
-    expect(removed.length, '负对照必须真的删掉了一条').toBe(approved.length - 1)
-    const violations = unregisteredCompositionLegacyEdges(facts, removed)
-    // 判据：删一条登记，未登记集合必须在**原集合**上恰好多出**那一条**
-    // （这样写法在工作树另有他人在途改动时依然精确 —— 多余项不被吞掉，也不会把
-    //  别人的未登记边误算成本次删除的效果）。
+    // 移除 `kernelAssembly.ts → context/multiblock`（实测存在、且只登记一条）这一**对**。
+    const removedPair = pairKeyOf('src/composition/kernelAssembly.ts', 'context/multiblock')
+    const removed = APPROVED_COMPOSITION_LEGACY_EDGES.filter((e) => pairKeyOf(e.from, e.to) !== removedPair)
+    expect(removed.length, '负对照必须真的少了一条登记').toBe(APPROVED_COMPOSITION_LEGACY_EDGES.length - 1)
+
+    // 路径一（生产模式的 ①）：豁免集是"实测 − 冻结集"，故被移除的对会冒进豁免 ⇒ 许可集外 ⇒ 红。
+    const prod = assessCompositionLegacyBinding(facts, { registry: removed })
+    expect(prod.ceiling, '被移除的对冒进豁免后必须被许可集拦下（豁免不是登记表的后门）').not.toEqual([])
+    expect(prod.ceiling.join('\n'), '判红必须点名那条被移除登记的对').toContain('context/multiblock')
+    expect(prod.violations.length, '整体判定必须判红（移除登记不得静默通过）').toBeGreaterThan(0)
+    expect(prod.rotted, '移除登记不是"腐烂"（腐烂 = 登记了但实测没有）—— 它该走未登记/越界两条路').toEqual([])
+
+    // 路径二（把豁免通道关掉的严格 ①）：被移除的对必须直接落进"未登记"。
+    const strict = assessCompositionLegacyBinding(facts, { includeExemptions: false })
+    const strictRemoved = assessCompositionLegacyBinding(facts, { registry: removed, includeExemptions: false })
+    const added = strictRemoved.unregistered.filter((v) => !strict.unregistered.includes(v))
     expect(
-      violations.length,
-      `删掉一条登记后未登记集合必须恰好 +1（原 ${baselineViolations.length} ⇒ 期望 ${baselineViolations.length + 1}）`,
-    ).toBe(baselineViolations.length + 1)
-    const added = violations.filter((v) => !baselineViolations.includes(v))
-    expect(added, '新增的那一条必须正是被删登记对应的真实边').toHaveLength(1)
-    expect(added[0]).toContain('kernelAssembly.ts:82')
-    // 同时基线断言也必须红（登记数减少 = 未同批核销）
-    expect(removed.length).not.toBe(BASELINE_LINES)
-    expect(APPROVED_COMPOSITION_LEGACY_EDGES.length - 1).not.toBe(BASELINE_LINES)
+      strictRemoved.unregistered.length,
+      `移除一条登记后未登记集合必须恰好 +1（原 ${strict.unregistered.length} ⇒ 期望 ${strict.unregistered.length + 1}）`,
+    ).toBe(strict.unregistered.length + 1)
+    expect(added, '新增的那一条必须正是被移除登记对应的真实对').toHaveLength(1)
+    expect(added[0], '判红消息必须带实测行号').toContain('kernelAssembly.ts:82')
+    // 同时冻结读数也必须红（登记数减少 = 未同批核销）
+    expect(removed.length).not.toBe(BASELINE_EDGE_OCCURRENCES)
+    expect(APPROVED_COMPOSITION_LEGACY_EDGES.length - 1).not.toBe(BASELINE_EDGE_OCCURRENCES)
+  })
+
+  it('**负对照 D**：往冻结集塞一个现实中不存在的假对 ⇒ 腐烂检测判红', async () => {
+    const facts = await loadFacts()
+    const fake = makeEdge('src/composition/kernelRenderView.ts', 7777, 'runtime/doesNotExist')
+    const verdict = assessCompositionLegacyBinding(facts, { registry: [...APPROVED_COMPOSITION_LEGACY_EDGES, fake] })
+    expect(verdict.rotted, '塞假对 ⇒ 腐烂检测必须点名它').toHaveLength(1)
+    expect(verdict.rotted[0].pair).toBe(pairKeyOf('src/composition/kernelRenderView.ts', 'runtime/doesNotExist'))
+    expect(verdict.rotted[0].observed, '该对实测出现 0 次').toBe(0)
+    expect(verdict.violations.length, '整体判定必须判红').toBeGreaterThan(0)
+    // 反向对照（同一检测的另一面，两种腐烂理由各测一次）：
+    //  ① 整个对消失 ⇒ pair-absent
+    const gonePair = pairKeyOf('src/composition/kernelRenderView.ts', 'context/runtimeDocument')
+    const dropped = facts.filter((f) => !(f.fromSrcRel === 'composition/kernelRenderView.ts' && resolveTargetOf(f, SRC_ROOT) === 'context/runtimeDocument'))
+    expect(
+      rottenRegisteredPairs(dropped).map((r) => `${r.reason}:${r.pair}`),
+      '实测里整个对消失必须报 pair-absent',
+    ).toContain(`pair-absent:${gonePair}`)
+    //  ② 只少一条边（登记 2 条、实测剩 1 条）⇒ occurrence-shortfall（重数面没有退化成集合）
+    let seen = 0
+    const oneShort = facts.filter((f) => {
+      if (f.fromSrcRel !== 'composition/kernelRenderView.ts') return true
+      if (resolveTargetOf(f, SRC_ROOT) !== 'context/runtimeDocument') return true
+      seen += 1
+      return seen !== 1
+    })
+    expect(seen, '该对在实测里确实有 2 条边（否则这条对照无意义）').toBe(
+      BASELINE_PAIR_OCCURRENCES[gonePair],
+    )
+    const shortfall = rottenRegisteredPairs(oneShort).filter((r) => r.pair === gonePair)
+    expect(shortfall.map((r) => `${r.reason}:${r.declared}/${r.observed}`), '少一条边必须报 occurrence-shortfall').toEqual([
+      'occurrence-shortfall:2/1',
+    ])
+    expect(shortfall[0].message, '重数不足的消息必须给出"登记 N 条、实测剩 M 条"').toContain('实测只剩 1 条')
+    // 正对照：不塞假对时检测为空（证明检测不是恒红）
+    expect(rottenRegisteredPairs(facts), '生产登记集下腐烂检测必须为空').toEqual([])
+  })
+
+  it('**负对照 E**：计数上限压低 1 ⇒ 增长检测判红（两个上限各自独立成立）', async () => {
+    const facts = await loadFacts()
+    const counted = countCompositionLegacyEdges(facts)
+    // 正对照：生产上限（21+2 对 / 28+2 次）下判绿
+    expect(bindingCountViolations(counted), '生产上限下必须判绿').toEqual([])
+    // 压低 1（对上限 23→22）：实测 23 对 ⇒ 必须红
+    const pairLowered = bindingCountViolations(counted, { pairCap: 23 - 1 })
+    expect(pairLowered, '对上限压低 1 必须判红').not.toEqual([])
+    expect(pairLowered.join('\n')).toContain('超出冻结上限 22 对')
+    // 压低 1（重数上限 30→29）：实测 30 次 ⇒ 必须红
+    const occLowered = bindingCountViolations(counted, { occurrenceCap: 30 - 1 })
+    expect(occLowered, '重数上限压低 1 必须判红').not.toEqual([])
+    expect(occLowered.join('\n')).toContain('超出冻结上限 29 次')
+    // 两个上限都压低 ⇒ 两条都报（各自独立，不互相掩盖）
+    expect(bindingCountViolations(counted, { pairCap: 22, occurrenceCap: 29 })).toHaveLength(2)
+    // 生产判定核里也接线（不是"只在测试里可用"）
+    const verdict = assessCompositionLegacyBinding(facts, { pairCap: 22, occurrenceCap: 29 })
+    expect(verdict.growth, '生产判定核必须把增长检测接进 violations').toHaveLength(2)
+    expect(verdict.violations.length).toBeGreaterThan(0)
   })
 
   it('**负对照 C**：注入一条**目标在新层**的边不判红（闸门不得把新层也算旧）', () => {
@@ -451,8 +720,27 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
         unregisteredCompositionLegacyEdges(facts, [], { srcRoot, kernelFiles: readKernelFiles() }),
         '指向内核文件（`KERNEL_FILES` 内）的边不是"绑旧层"',
       ).toEqual([])
+      // 且该边确实进了判定面（否则上面的 [] 只是"没扫到"）
+      expect(isOldLayerTarget('application/evaluation', readKernelFiles()), '新层目标不得被算作旧层').toBe(false)
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('登记表 ↔ 豁免集的登记项形态一致（豁免经 exemptionRegistryEntries 进集合运算）', async () => {
+    const facts = await loadFacts()
+    const exemptions = derivePendingExemptions(facts)
+    const entries = exemptionRegistryEntries(exemptions)
+    expect(entries).toHaveLength(exemptions.length)
+    expect(
+      entries.every((e) => typeof e.from === 'string' && typeof e.line === 'number' && typeof e.to === 'string'),
+      '豁免登记项必须带 (from, line(注解), to)',
+    ).toBe(true)
+    // 生产集合 = 冻结基线 + 豁免；两侧对键不得重叠（重叠会让重数被重复计）
+    const frozen = new Set(APPROVED_COMPOSITION_LEGACY_EDGES.map((e) => pairKeyOf(e.from, e.to)))
+    expect(
+      entries.filter((e) => frozen.has(pairKeyOf(e.from, e.to))),
+      '（实测 − 冻结集）的差集按定义不得与冻结集重叠',
+    ).toEqual([])
   })
 })
