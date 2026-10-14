@@ -41,7 +41,6 @@ import { PresenterSession } from '@/composition/presenterSession'
 import { kernelPickBlockOf, type KernelScenePickBlock } from '@/composition/kernelPickAdapter'
 import { kernelGridOf } from '@/runtime/gridRead'
 import { structureRowToWorldY } from '@/pure/vec'
-import { unwrap } from '@/domain/errors'
 
 const ENVELOPE_FIXTURE = path.join(process.cwd(), 'e2e', 'fixtures', 'structuredata-exported-envelope.json')
 
