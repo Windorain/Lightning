@@ -193,7 +193,14 @@ describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数
     const source = readContentSource()
     // 注入 ①：删掉 `DocumentContent` 上的具名字段（正是"缺口复现"的形态）。
     const fieldRemoved = source.replace(/^[ \t]*readonly multiblock: MultiblockDeclaration[ \t]*$/m, '')
-    expect(fieldRemoved, '前提：注入必须真的改动了生产文本').not.toBe(source)
+    // 注入的前提是"生产里有东西可删"。若生产**本来**就没有该承载（缺口态），上一条正断言
+    // 已经判红 —— 此时负对照**无对象**，必须显式说出这一点，不得伪装成"验过了"。
+    if (fieldRemoved === source) {
+      throw new Error(
+        '前置条件不成立：生产文本里已无 `readonly multiblock: MultiblockDeclaration` ⇒ '
+        + '上一条 DONE 信号正断言已判红，本负对照无对象（不得据此认为判据有区分力）',
+      )
+    }
     expect(contentCarriesMultiblock(fieldRemoved), '删掉承载字段后必须判红').toBe(false)
 
     // 注入 ②：字段仍在，但缺省值改回裸 `init.multiblock`（即允许 `undefined` 冒充「无」）
@@ -202,7 +209,7 @@ describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数
       /multiblock: init\.multiblock \?\? EMPTY_MULTIBLOCK_DECLARATION/,
       'multiblock: init.multiblock',
     )
-    expect(undefinedLeak, '前提：第二处注入必须真的改动了生产文本').not.toBe(source)
+    expect(undefinedLeak, '前提：第二处注入必须真的改动了生产文本（缺省值形态变了）').not.toBe(source)
     expect(contentCarriesMultiblock(undefinedLeak), '缺省值允许 `undefined` 后必须判红').toBe(false)
   })
 })
