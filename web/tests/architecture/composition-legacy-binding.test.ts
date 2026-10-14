@@ -93,6 +93,7 @@ import {
   countCompositionLegacyEdges,
   derivePendingExemptions,
   exemptionCeilingViolations,
+  exemptionExitStatus,
   exemptionReading,
   isOldLayerTarget,
   isProductionRel,
@@ -218,22 +219,69 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     expect(typeof reading.exemptionCount).toBe('number')
   })
 
-  it('**豁免终态为空** ④：豁免随注入化自动收缩（绑定消失 ⇒ 条目消失），不得留空壳', async () => {
+  it('**豁免终态为空** ④：释放条件**可机械判定**（T1 边消失 / T2 目标不再属旧层）', async () => {
     const facts = await loadFacts()
     const exemptions = derivePendingExemptions(facts)
     // ④ 的机械半边：豁免是**实测导出**，故"绑定消失但条目还在"这种空壳在构造上不可能出现。
-    // 本用例把这条性质**断言**出来：每一条豁免都必须对应一条当前真实存在的边。
     const counted = countCompositionLegacyEdges(facts)
     const present = new Set(counted.rows.map((r) => `${r.file}:${r.line}:${r.target}`))
     const stale = exemptions.filter((e) => !present.has(`${e.from}:${e.line}:${e.to}`)).map(
       (e) => `${e.from}:${e.line} → ${e.to}`,
     )
     expect(stale, '豁免必须是实测导出（不存在已消失的空壳条目）').toEqual([])
-    // 终态判据：当 R1-A 子件②把这 4 条全部注入化后，豁免长度归 0、相对读数回到基线 11/28。
-    // 这里给出终态的**可判定形式**：豁免为 0 时，实测必须恰等于冻结基线。
+
+    // ④ 的**可判定**半边：释放条件不是注释里的承诺，而是两条可观测触发，且已接线。
+    const status = exemptionExitStatus(facts)
+    expect(
+      status.triggers.map((t) => `${t.id}:${t.kind}`),
+      '释放条件必须显式声明为可观测触发（T1 边消失 / T2 目标不再属旧层）',
+    ).toEqual(['T1:edge-absent', 'T2:target-not-old-layer'])
+    expect(status.violations, '释放条件已成立的条目必须已被移除（否则判红）').toEqual([])
+    // 每条仍在的豁免都必须给出**它凭什么还在**（T1/T2 均未成立的显式证据）
+    for (const r of status.reasons) {
+      expect(r.holdingBecause, `${r.id} 必须给出"凭什么还在"`).toMatch(/T1 未成立/)
+      expect(r.targetStillOldLayer, `${r.id} 的目标今天仍须确实属于旧层（否则 T2 成立 ⇒ 必消失）`).toBe(true)
+    }
+    // **触发条件确实接线**（证伪式校准）：把触发打成成立 ⇒ 条目必须自动消失。
+    //  T2：把两个目标登记进 KERNEL_FILES ⇒ 它们不再是旧层 ⇒ 导出集为空。
+    const fakeKernelFiles = [...readKernelFiles(), 'runtime/context.ts', 'runtime/gridRead.ts']
+    expect(
+      derivePendingExemptions(facts, { kernelFiles: fakeKernelFiles }),
+      'T2 成立（目标登记进 KERNEL_FILES）时豁免必须自动为空 —— 证明"何时必须为空"是接线的，不是承诺',
+    ).toEqual([])
+    //  T1：把该文件的边从事实集里去掉 ⇒ 导出集为空。
+    expect(
+      derivePendingExemptions(facts.filter((f) => !f.fromSrcRel.includes('kernelOutlinePlanPort'))),
+      'T1 成立（边消失）时豁免必须自动为空',
+    ).toEqual([])
+    // 终态判据：豁免为 0 时，实测必须恰等于冻结基线（回到 11/28）
     if (exemptions.length === 0) {
       expect(countCompositionLegacyEdges(facts).lines, '终态：豁免为空 ⇒ 实测回到冻结基线 28').toBe(BASELINE_LINES)
     }
+  })
+
+  it('**剩余 2 条豁免的定性**：全部 type-only、总数 ≤2、指向核销批次（不是"已知并存边界"结账）', async () => {
+    const facts = await loadFacts()
+    const exemptions = derivePendingExemptions(facts)
+    const status = exemptionExitStatus(facts)
+    expect(status.count, '当前豁免条数').toBeLessThanOrEqual(2)
+    expect(
+      exemptions.map(
+        (e) => `${e.from.replace('src/composition/', '')}:${e.line}→${e.to}${e.isTypeOnly ? ' [type-only]' : ' [值导入]'}`,
+      ),
+      '当前两条豁免必须都是 type-only（C10 已把值导入清零）',
+    ).toEqual([
+      'kernelOutlinePlanPort.ts:56→runtime/context [type-only]',
+      'kernelOutlinePlanPort.ts:57→runtime/gridRead [type-only]',
+    ])
+    expect(status.allTypeOnly, '豁免必须全是 type-only（值导入不得借豁免存活）').toBe(true)
+    // ⚠️ 立场断言：这两条**不是**"已知并存边界"，而是待核销欠账 ——
+    // 闸门口径对类型导入同计（`no-private-cross-layer` 对 `import { type X }` 同样产出 finding），
+    // 故不许拿 isTypeOnly 当"无所谓"的理由。
+    expect(
+      exemptions.every((e) => e.terminalBatch && e.terminalBatch.includes('R1-A')),
+      '每条豁免必须指向核销它的批次（欠账有 owner，不是永久边界）',
+    ).toBe(true)
   })
 
   it('**校准自检**：基线读数与判据实测读数逐条一致（对称差为空，且两个数都由判定核数出）', async () => {

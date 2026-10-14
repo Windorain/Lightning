@@ -408,6 +408,67 @@ export function exemptionReading(facts) {
   }
 }
 
+/**
+ * **豁免的"必须为空"是可机械判定的**（不是注释里的承诺）。
+ *
+ * ## 为什么需要它
+ *
+ * "豁免终态应为空"若只写在注释里，就只是一句**无法被判据追踪的承诺** ——
+ * 任何人可以无限期不动它而没有任何东西变红。这里把释放条件定义成**两条可观测触发**，
+ * 且两条都由 `derivePendingExemptions()` 的实现**直接兑现**（豁免是实测导出 ⇒ 条件成立时
+ * 条目**自动**消失，不依赖谁记得去删表）：
+ *
+ * | 触发 | 观测 | 兑现方式 |
+ * |---|---|---|
+ * | **T1 边消失**（注入化落地） | 模块图里不再有 `kernelOutlinePlanPort.ts → <旧层>` 这条边 | 导出集只包含**实测存在**的边 ⇒ 自动为空 |
+ * | **T2 目标不再是旧层**（`runtime/context` / `runtime/gridRead` 被登记进 `KERNEL_FILES`） | `isOldLayerTarget(target, kernelFiles) === false` | `countCompositionLegacyEdges` 已按 `isOldLayerTarget` 过滤 ⇒ 自动为空 |
+ *
+ * ⚠️ 还有一条**不可协商**的边界：`runtime/context` 与 `runtime/gridRead` 今天仍是旧层
+ * （不在 `KERNEL_FILES` 内），所以 T2 **今天不成立**，这两条 type-only 边**现在确实算边**
+ * —— 闸门自身的口径就是"类型导入同计"（`ruleNoPrivateCrossLayer` 对 `import { type X }`
+ * 形态同样产出 finding）。⇒ 它们**不是终态可接受的"已知并存边界"**，而是
+ * **待 R1-A 子件②核销的欠账**。本判据把这个立场变成断言：条目必须全是 type-only、
+ * 必须 ≤2、且不得增长；释放条件一旦成立，条目消失、计数必须回落。
+ */
+export const EXEMPTION_RELEASE_TRIGGERS = Object.freeze([
+  Object.freeze({ id: 'T1', kind: 'edge-absent', detail: '注入化落地 ⇒ 模块图里不再有该边 ⇒ 实测导出自动为空' }),
+  Object.freeze({ id: 'T2', kind: 'target-not-old-layer', detail: '目标被登记进 KERNEL_FILES ⇒ 不再是旧层 ⇒ 实测导出自动为空' }),
+])
+
+/**
+ * ④ 的**机器可读退出状态**：把"何时必须为空"变成可判定的事实，而不是承诺。
+ *
+ * 逐条给出"现在它凭什么还在"（`holdingBecause`）与"哪一条触发一旦成立它就必消失"。
+ * 若 `releaseConditionSatisfied` 为真而条目仍在 ⇒ 调用方（判据）必须判红。
+ */
+export function exemptionExitStatus(facts, { srcRoot = SRC_ROOT, kernelFiles = readKernelFiles() } = {}) {
+  const exemptions = derivePendingExemptions(facts, { srcRoot, kernelFiles })
+  const allTypeOnly = exemptions.every((e) => e.isTypeOnly === true)
+  const reasons = exemptions.map((e) => {
+    const targetStillOldLayer = isOldLayerTarget(e.to, kernelFiles)
+    const edgeAbsent = false // 它出现在导出集里 ⇒ 边存在（T1 不成立）
+    return {
+      id: `${e.from}:${e.line}:${e.to}`,
+      isTypeOnly: e.isTypeOnly === true,
+      edgeAbsent,
+      targetStillOldLayer,
+      releaseConditionSatisfied: edgeAbsent || !targetStillOldLayer,
+      holdingBecause: targetStillOldLayer
+        ? `T1 未成立（边仍在）且 T2 未成立（${e.to} 仍在旧层、未登记进 KERNEL_FILES）`
+        : 'T2 成立（目标已不在旧层）—— 该条必须已消失',
+    }
+  })
+  return {
+    count: exemptions.length,
+    allTypeOnly,
+    mustBeEmpty: exemptions.length === 0,
+    /** 释放条件成立时，条目必须消失：任何"该消失却还在"的条目都在这里列出。 */
+    violations: reasons.filter((r) => r.releaseConditionSatisfied).map((r) => r.id),
+    triggers: EXEMPTION_RELEASE_TRIGGERS,
+    reasons,
+  }
+}
+
 /** 生产判据使用的"当前已批准集合" = 冻结基线登记 + 实测导出的具名豁免。 */
 export function approvedWithExemptions(facts) {
   const exemptions = derivePendingExemptions(facts).map((e) => ({
