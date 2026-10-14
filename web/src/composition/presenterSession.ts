@@ -50,6 +50,15 @@ import type { MaterialDescriptor } from '@/presentation/evaluationKey'
 import { compileScene, type CompiledScene } from '@/presentation/compileScene'
 import { PickIndex, evaluateStalePick, type PickResolution } from '@/presentation/pickingIndex'
 import { BatchedPresenter, type TexturePort } from '@/presentation/presenter'
+import {
+  OverlayPresenter,
+  type FaceQuadPort,
+  type OutlineStyle,
+  type OverlayApplyOutcome,
+  type OverlayStats,
+} from '@/presentation/overlayPresenter'
+import { compileAnnotations, type AnnotationCompiled, type AnnotationInput } from '@/presentation/annotationPlan'
+import type { OutlinePlan } from '@/presentation/outlinePlan'
 import type { TextureBinding, TextureResource } from '@/presentation/textureBinding'
 import { textureBindingsOf } from '@/composition/kernelTextureResources'
 import { kernelPresentationInputs } from '@/composition/kernelPresentationInputs'
@@ -87,6 +96,8 @@ export interface PresenterSessionOptions {
   readonly scope: string
   /** 纹理取用端口（五态链的消费端；缺省 = 不消费纹理）。 */
   readonly textures?: TexturePort
+  /** 面标注的几何端口（`blockPos + quadIndex` → 烘焙四边形）。 */
+  readonly faceQuads?: FaceQuadPort
 }
 
 /**
@@ -125,16 +136,28 @@ export class PresenterSession {
    */
   private needsRebuild = false
 
+  /** 注解/描边的呈现子树（与批次同根，故一个会话只有一个挂载点）。 */
+  private readonly overlay: OverlayPresenter
+  private readonly root = new THREE.Group()
+  private lastAnnotations: AnnotationCompiled | null = null
+  private lastOutline: { plan: OutlinePlan; style?: OutlineStyle } | null = null
+
   constructor(options: PresenterSessionOptions) {
     this.presenter = new BatchedPresenter({
       scope: options.scope,
       ...(options.textures === undefined ? {} : { textures: options.textures }),
     })
+    this.overlay = new OverlayPresenter({
+      scope: options.scope,
+      ...(options.faceQuads === undefined ? {} : { faceQuads: options.faceQuads }),
+    })
+    this.root.name = `presentation-session:${options.scope}`
+    this.root.add(this.presenter.object3d, this.overlay.object3d)
   }
 
   /** 挂载根（调用方把它加进视口的结构层）。 */
   get object3d(): THREE.Group {
-    return this.presenter.object3d
+    return this.root
   }
 
   /** 当前结构世代（`null` = 尚未 apply 过）。 */
@@ -392,10 +415,13 @@ export class PresenterSession {
   /** 释放本会话的全部 GPU 份额。 */
   dispose(): void {
     this.presenter.dispose()
+    this.overlay.dispose()
     this.compiled = null
     this.index = null
     this.lastIdentity = null
     this.currentKey = null
+    this.lastAnnotations = null
+    this.lastOutline = null
     // `dispose()` 之后一切都没了：下次 apply 必然走重建路径（`lastIdentity === null`），
     // 故标志无意义 —— 复位它，避免"已释放却自称待重建"的误导状态。
     this.needsRebuild = false
@@ -416,6 +442,47 @@ export class PresenterSession {
   /** WebGL 上下文恢复（调用方随后用**当前有效版本**重新 apply 一次）。 */
   handleContextRestored(): void {
     this.presenter.handleContextRestored()
+    // 注解/描边不属于批次账（它们各自的几何/材质由 overlay 自己持有）⇒ 恢复时
+    // 用**上次的编译产物**重画一次，保证"恢复后画面与丢失前同内容"。
+    if (this.lastAnnotations !== null) this.overlay.applyAnnotations(this.lastAnnotations)
+    if (this.lastOutline !== null) {
+      this.overlay.applyOutline(this.lastOutline.plan, this.lastOutline.style)
+    }
+  }
+
+  /**
+   * 应用**已编译**的注解图元（内核 `presentation/annotationPlan` 的产物）。
+   *
+   * 这是注解进入 GPU 的唯一入口：编译在 `annotationPlan`（纯），上传在本会话。
+   */
+  applyAnnotations(compiled: AnnotationCompiled): OverlayApplyOutcome {
+    this.lastAnnotations = compiled
+    return this.overlay.applyAnnotations(compiled)
+  }
+
+  /**
+   * 内核注解对象 → 编译 → 呈现（一条调用完成，供装配层用）。
+   *
+   * `inputs` 来自 `composition/kernelAnnotationInputs`（内核场景 → 注解输入），
+   * 故生产路径上"内核里有没有注解"与"画面里有没有注解"由同一份数据决定。
+   */
+  setAnnotations(inputs: readonly AnnotationInput[]): OverlayApplyOutcome {
+    return this.applyAnnotations(compileAnnotations(inputs))
+  }
+
+  /** 应用描边计划（`null` = 清空；描边颜色是**呈现侧政策**，不进计划）。 */
+  applyOutline(plan: OutlinePlan | null, style?: OutlineStyle): OverlayApplyOutcome {
+    this.lastOutline = plan === null ? null : { plan, ...(style === undefined ? {} : { style }) }
+    if (plan === null) {
+      this.overlay.clearOutline()
+      return { drawn: 0, unrendered: [] }
+    }
+    return style === undefined ? this.overlay.applyOutline(plan) : this.overlay.applyOutline(plan, style)
+  }
+
+  /** 注解/描边子树的实时读数（诊断/判据面）。 */
+  overlayStatsSnapshot(): OverlayStats {
+    return this.overlay.statsSnapshot()
   }
 
   /**
