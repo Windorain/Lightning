@@ -3,11 +3,18 @@ import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
 import { DRW } from '@/runtime/drw'
-import { PresenterSession } from '@/composition/presenterSession'
-import { createViewportTexturePort, type ViewportTexturePort } from '@/composition/viewportTexturePort'
-import { textureResourcesOf } from '@/composition/kernelTextureResources'
+/**
+ * **R1-A C10：本文件对 `@/composition/` 的值导入为 0**（接缝
+ * `shared-viewport-upward-imports-assembly-root` 的退出判据）。
+ *
+ * 下面两条都是 **type-only**（不进运行时依赖图，另计）：
+ * `PresenterSession` 只用于 `Parameters<...>` 形态推导，
+ * `ViewportPresenterBundle` 是宿主注入面的形状。实现由装配边
+ * （`runtime/host.ts#HostBase#createViewportPresenter`）构造后下行。
+ */
+import type { PresenterSession } from '@/composition/presenterSession'
+import type { ViewportPresenterBundle } from '@/runtime/host'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
-import { sceneSeconds } from '@/composition/kernelRuntime'
 
 /**
  * 时间零值（领域形状 `{frame,fps}`）。
@@ -55,6 +62,24 @@ export interface UseViewportRuntimeOptions {
    * `legacy-render-source-document`（画面终切已完成；定义/图标面的迁移归 R2/R3）。
    */
   renderDocRef: Ref<RuntimeDocument | null>
+  /**
+   * **呈现会话包的构造（必填注入；R1-A C10）**。
+   *
+   * ## 为什么是必填（与 `renderDocRef` 同形）
+   *
+   * 原形态是本文件 `import { PresenterSession } from '@/composition/presenterSession'`
+   * 并**就地 `new`** —— 那是"视口向上 import 装配根"，正是接缝
+   * `shared-viewport-upward-imports-assembly-root` 要退役的方向（#387 评论 7292：
+   * 优先"注入"而不是"视口向上 import 装配根"）。
+   *
+   * 改成必填后，"呈现会话从哪来"在**类型层**只有一个答案：调用方必须显式给出
+   * （两个生产调用方都经 `host.createViewportPresenter(regionId)` 提供）。
+   * 省略即类型错误 ⇒ 不存在"悄悄退回就地构造"的旁路。
+   *
+   * 生命期仍归**本 composable**（`onScopeDispose` 调 `bundle.dispose()`）：
+   * 构造位置搬走了，"谁负责释放"没有变。
+   */
+  createPresenter: (regionId: string) => ViewportPresenterBundle
 }
 
 /**
@@ -83,7 +108,7 @@ export interface UseViewportRuntimeOptions {
  * ⇒ 本 composable 只**消费**会话，不拥有时钟。
  */
 export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
-  const { ctx, regionId, viewerPrefs, blockIconCacheOptions = {}, initialWorldFrameIndex, renderDocRef } = opts
+  const { ctx, regionId, viewerPrefs, blockIconCacheOptions = {}, initialWorldFrameIndex, renderDocRef, createPresenter } = opts
   const vpSlot = ctx.viewports.get(regionId) ?? ctx.viewports.register(regionId)
   // R1-β① C5：渲染源是**必填注入**（原 `docOverride ?? ctx.legacyRenderSource()` 的
   // 回落已删 —— 见 `renderDocRef` 的说明）。本处不再有"省略参数就退回旧文档"的路径。
@@ -102,12 +127,14 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   const kernel = ctx.kernel
 
   /**
-   * **纹理端口**（#301 P10f D3「材质统一」；R1-β① C5 落地）。
+   * **呈现会话包**（R1-A C10：由装配边构造后下行；见 `createPresenter` 的说明）。
    *
-   * 视口作用域：两个 Area 各持一张 GPU 纹理（A19「关其一不破坏另一方」的同一口径）。
-   * 生命期与 `presenterSurface` 对齐（见下方 `onScopeDispose`）。
+   * 它是本视口的**画面生产者**（C8 起）与纹理端口（C5/D3）的同一处来源：
+   * `presenterSurface` 产出画面，`presenterTextures` 管 GPU 句柄账，
+   * 两者同生共死（`bundle.dispose()`）。
    */
-  const presenterTextures = createViewportTexturePort(`viewport:${regionId}`)
+  const presenterBundle = createPresenter(regionId)
+  const presenterTextures = presenterBundle.textures
   /** DOM 侧解码器（端口实现；非浏览器环境下 `decode` 如实返回 `null` ⇒ 资源记 `failed`）。 */
   const textureDecoder = createDomTextureDecoder()
 
@@ -162,7 +189,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    * 根对象由本 composable 交给视口结构层（`vpSlot.contentGroup.value`），
    * 生命期与 `onScopeDispose` 对齐（dispose + 解引用，见下）。
    */
-  const presenterSurface = new PresenterSession({ scope: `viewport:${regionId}`, textures: presenterTextures })
+  const presenterSurface = presenterBundle.surface
   vpSlot.presenterSurface = presenterSurface
   /**
    * **画面接管**（R1-β① C8 第 1 项；#387 7298）。
@@ -200,10 +227,11 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   onScopeDispose(() => {
     // 卸载即释放（A19：视口关闭不泄漏 GPU 份额；两个视口共享源数据时
     // 关其一不破坏另一方 —— 设备作用域按 region 分，故账天然分开）。
-    presenterSurface.dispose()
-    // 纹理端口同寿命释放：`THREE.Texture` 的 GPU 句柄**不会**被场景图回收，
-    // 不显式 `dispose()` 就是每视口一份泄漏。
-    presenterTextures.dispose()
+    //
+    // R1-A C10：会话与纹理端口的**创建**搬到了装配边（`HostBase#createViewportPresenter`），
+    // 但**释放**仍归本作用域 —— `bundle.dispose()` 是"创建与释放同源"的落点，
+    // 调用方不可能只释放其中一个。
+    presenterBundle.dispose()
     if (vpSlot.presenterSurface === presenterSurface) vpSlot.presenterSurface = null
     // 结构层指向已释放的呈现根会让"卸载后仍有对象在场景里"（幽灵挂载）——
     // 只有确实是**本会话**的根才清（避免抹掉重挂后新会话写下的值）。
@@ -341,7 +369,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     inFlightTextureIdentity = identity
     const seq = ++textureSyncSeq
     try {
-      const resources = await textureResourcesOf(doc.content.resources, textureDecoder)
+      const resources = await presenterBundle.textureResourcesOf(doc.content.resources, textureDecoder)
       // 取消：更新的同步已开始（或有更新的文档）⇒ 本次结果作废，**不**落地。
       if (seq !== textureSyncSeq || texturesDisposed) return
       const synced = presenterTextures.sync(resources)
@@ -427,7 +455,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
        * 顺序：**先**更新时间再判断换帧 —— 换帧判断读的是同一个时间，
        * 反过来会让"这一帧的纹理时间"与"这一帧的世界帧"来自两个时刻。
        */
-      drw.textureCache.value?.setSceneTime(sceneSeconds(info.time))
+      drw.textureCache.value?.setSceneTime(presenterBundle.sceneSeconds(info.time))
       syncMirror()
       // **呈现会话的每帧应用**（#299 P10e 段②）。
       //
@@ -446,7 +474,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     })
     // 首帧：进入视口时立刻呈现当前帧（不等第一次时钟 tick）。
     lastPresentedFrame = kernel.frameIndex()
-    drw.textureCache.value?.setSceneTime(sceneSeconds(kernel.playback().time))
+    drw.textureCache.value?.setSceneTime(presenterBundle.sceneSeconds(kernel.playback().time))
     applyPresenterSurface()
   } else {
     // 无帧时钟（组件挂载早于外壳装配）：退化为"静态第一帧"，但仍要
@@ -506,7 +534,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
      * 暴露它的理由与 `presenterSurface` 同一：e2e 要断言"贴图真的接上了、
      * 且换文档后旧纹理被释放"——那必须能从页面里读到，而不是靠"看起来有颜色"。
      */
-    presenterTextures: presenterTextures as ViewportTexturePort,
+    presenterTextures,
     /**
      * 呈现会话的**错误累积**（公开观测点；空数组 = 无错误）。
      *

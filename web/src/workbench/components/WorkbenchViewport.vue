@@ -66,6 +66,8 @@ const {
   regionId: VIEWPORT_REGION_ID,
   viewerPrefs: prefs,
   renderDocRef: renderDoc,
+  /** **R1-A C10**：呈现会话包由装配边构造后下行（同上）。 */
+  createPresenter: (rid) => host.createViewportPresenter(rid),
 })
 
 const {

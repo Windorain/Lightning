@@ -38,17 +38,23 @@
  * 会让"同一个部件名在别的格也出现"变成一次**静默的错误描边位置**。
  * 单格夹具（B-1 的 AE2 三部件）因此逐项可解析。
  *
- * ## 分层
+ * ## 分层（**对旧层零值导入**）
  *
- * `composition/` 是装配根（深度 2）：本模块只 import `runtime/`、`pure/`、
- * `domain/`、`presentation/` 的**深度 ≤ 2 公共出口**
- * —— `render/schema/types#BakedQuad`（深度 3）**不**在此导入，
- * 格几何的形状由 `runtime/gridRead` 的返回类型派生。
+ * `composition/` 是装配根：它的"新 → 旧"**值**依赖就是"新内核为旧形状让路"的形态，
+ * 是立项单明令要退的东西（#387 裁决："登记不是继续做大的许可"）。
+ * ⇒ 本模块需要旧层读面时**不在 import 处取**，而是收**注入的结构化端口**：
+ *
+ * | 需要的能力 | 旧层实现 | 注入口 | 装配边（`runtime/host.ts`）提供 |
+ * |---|---|---|---|
+ * | 第 N 帧网格的**内核对象 id** | `runtime/gridRead#kernelGridObjectIdOf` | {@link KernelOutlinePlanPortDeps.gridObjectIdOf} | ✅ |
+ * | 部件盒归属规则 | `pure/partMask#resolvePartMaskGeometry` | {@link KernelOutlinePlanPortDeps.resolvePartBoxes} | ✅ |
+ *
+ * 余下的 `runtime/gridRead` 引用只是**类型**（`KernelGridView` 的形状与它的
+ * `ReturnType`），不进运行时依赖图。类型导入数在报告里与值导入**分开计**。
  */
 
 import type { Context } from '@/runtime/context'
 import type { KernelGridView, KernelGridPos } from '@/runtime/gridRead'
-import { kernelGridObjectIdOf } from '@/runtime/gridRead'
 import type { EvaluationKey } from '@/presentation/evaluationKey'
 import {
   planOutlines,
@@ -62,7 +68,6 @@ import {
   type OutlineSkip,
   type OutlineTarget,
 } from '@/presentation/outlinePlan'
-import { resolvePartMaskGeometry } from '@/pure/partMask'
 
 /** 一次拾取引用（**生产形状**：视口的 hover/选择都落在格 + 可选部件上）。 */
 export interface OutlinePickRef {
@@ -92,6 +97,28 @@ export interface KernelOutlinePlanPortDeps {
   readonly currentKey: () => EvaluationKey | null
   /** 描边政策（缺省 = `BASELINE_OUTLINE_POLICY`，即本批不得变更的两政策点）。 */
   readonly policy?: EffectiveOutlinePolicy
+  /**
+   * 第 `frameIndex` 帧网格所属的**内核对象 id**（装配边注入；
+   * 实现 = `runtime/gridRead#kernelGridObjectIdOf`）。
+   *
+   * 收**函数**而不是 import 那个函数：装配根不因"需要一个旧层读面"就长出
+   * 一条新 → 旧的值边（#387 裁决）。
+   */
+  readonly gridObjectIdOf: (frameIndex: number) => string | null
+  /**
+   * 部件盒归属（装配边注入；实现 = `pure/partMask#resolvePartMaskGeometry` 的 `boxes` 面）。
+   *
+   * 规则**只有一处**定义（`pure/partMask`），本模块只消费它的结果：
+   * `null` = 该格/该部件无盒（调用方如实转成 `missing-geometry`，不兜底）。
+   */
+  readonly resolvePartBoxes: (
+    parts: ReturnType<KernelGridView['partsAt']>,
+    wholeCell: ReturnType<KernelGridView['geometryOf']>,
+    partLocalId: string,
+  ) => readonly {
+    readonly min: readonly [number, number, number]
+    readonly max: readonly [number, number, number]
+  }[] | null
 }
 
 /** 读面的世界空间格角（格中心 − 0.5；与 legacy `gridCenterWorld` 同空间）。 */
@@ -116,6 +143,8 @@ export function createKernelOutlineGeometrySource(deps: {
   readonly ctx: Context
   readonly frameIndex: () => number
   readonly inputsOf: KernelOutlinePlanPortDeps['inputsOf']
+  readonly gridObjectIdOf: KernelOutlinePlanPortDeps['gridObjectIdOf']
+  readonly resolvePartBoxes: KernelOutlinePlanPortDeps['resolvePartBoxes']
 }): OutlineGeometrySource {
   const gridNow = (): KernelGridView | null => deps.ctx.kernelGrid(deps.frameIndex())
 
@@ -190,16 +219,12 @@ export function createKernelOutlineGeometrySource(deps: {
       if (grid === null) return undefined
       const cell = uniqueCellOfPart(grid, partLocalId)
       if (cell === null) return undefined
-      // 部件盒归属规则**只有一处**（`pure/partMask`）：本处不改写它，只取它的 boxes 面。
-      const resolved = resolvePartMaskGeometry(
-        grid.partsAt(cell),
-        grid.geometryOf(cell),
-        partLocalId,
-      )
-      const boxes = resolved?.boxes
-      if (boxes === undefined || boxes.length === 0) return undefined
+      // 部件盒归属规则**只有一处**（`pure/partMask`，经装配边注入）：本处不改写它，
+      // 只消费它的 boxes 面（`null`/空 ⇒ 如实 `missing-geometry`）。
+      const boxes = deps.resolvePartBoxes(grid.partsAt(cell), grid.geometryOf(cell), partLocalId)
+      if (boxes === null || boxes.length === 0) return undefined
       // `objectId` 只做身份断言：格所属的对象必须就是请求的对象（防跨对象串味）。
-      const owner = kernelGridObjectIdOf(deps.ctx.kernel?.document(), deps.frameIndex())
+      const owner = deps.gridObjectIdOf(deps.frameIndex())
       if (owner !== null && owner !== objectId) return undefined
       // ⚠️ 端口契约是**世界空间**盒（`outlinePlan.ts#partBoxesOf` 的原文：
       // "取部件的**世界空间**盒"），而 `PartRecord.boxes` 是**格内局部**坐标
@@ -216,7 +241,7 @@ export function createKernelOutlineGeometrySource(deps: {
     cellQuadsOf(objectId, cell) {
       const grid = gridNow()
       if (grid === null) return undefined
-      const owner = kernelGridObjectIdOf(deps.ctx.kernel?.document(), deps.frameIndex())
+      const owner = deps.gridObjectIdOf(deps.frameIndex())
       if (owner !== null && owner !== objectId) return undefined
       const pos = posOf(cell)
       // `at()` 为 null = 该格不在网格里 ⇒ `undefined`（**不是**空数组：
@@ -240,7 +265,7 @@ export function createKernelOutlineGeometrySource(deps: {
     cellOriginOf(objectId, cell) {
       const grid = gridNow()
       if (grid === null) return undefined
-      const owner = kernelGridObjectIdOf(deps.ctx.kernel?.document(), deps.frameIndex())
+      const owner = deps.gridObjectIdOf(deps.frameIndex())
       if (owner !== null && owner !== objectId) return undefined
       const pos = posOf(cell)
       if (grid.at(pos) === null) return undefined
@@ -280,6 +305,8 @@ export function createKernelOutlinePlanPort(deps: KernelOutlinePlanPortDeps): Ou
     ctx: deps.ctx,
     frameIndex: deps.frameIndex,
     inputsOf: deps.inputsOf,
+    gridObjectIdOf: deps.gridObjectIdOf,
+    resolvePartBoxes: deps.resolvePartBoxes,
   })
 
   return {
@@ -296,7 +323,7 @@ export function createKernelOutlinePlanPort(deps: KernelOutlinePlanPortDeps): Ou
           })),
         }
       }
-      const objectId = kernelGridObjectIdOf(deps.ctx.kernel?.document(), deps.frameIndex())
+      const objectId = deps.gridObjectIdOf(deps.frameIndex())
       if (objectId === null) {
         return {
           plans: [],

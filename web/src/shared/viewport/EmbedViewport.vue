@@ -100,6 +100,11 @@ const {
   blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
   initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
   renderDocRef: renderDoc,
+  /**
+   * **R1-A C10**：呈现会话包由装配边构造后下行（本组件属旧层，不向上 import 装配根）
+   * —— 接缝 `shared-viewport-upward-imports-assembly-root` 的退出判据之一。
+   */
+  createPresenter: (rid) => host.createViewportPresenter(rid),
 })
 
 const {
