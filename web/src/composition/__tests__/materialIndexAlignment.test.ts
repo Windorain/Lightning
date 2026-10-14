@@ -48,6 +48,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { plainRootOf } from '@/adapters/plainRoot'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
+import { textureBindingsOf, textureResourcesOf } from '@/composition/kernelTextureResources'
 import { createParserRegistry } from '@/context/parserRegistry'
 import {
   V2PlainParser,
@@ -62,7 +63,10 @@ import {
   resourceIdentity,
   resourceManifestDigest,
   type ContentResource,
+  type DocumentContent,
 } from '@/domain/content'
+import { contentDigestOf } from '@/domain/document'
+import { contentIdentityKey } from '@/presentation/assetIdentity'
 import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 
@@ -268,5 +272,84 @@ describe('G4 · item 1：materialIndex ↔ 内核调色板槽位自洽', () => {
     expect(normalizeResources(reversed).map(resourceIdentity)).toEqual(
       normalizeResources(base).map(resourceIdentity),
     )
+  })
+
+  it('④ 绑定侧（爆炸半径 P2）：`material:<mi>` 的位置解析落到**同一槽位**的那条资源', async () => {
+    const { value } = await assembleRaw(
+      readE2eFixture('structuredata-exported-envelope.json'),
+      'envelope',
+    )
+    const base = value.content.resources
+    const quads = quadMaterialIndexes(value)
+    const distinct = [...new Set(quads)].sort((a, b) => a - b)
+    expect(distinct.length, '夹具必须真的有多个材质分组').toBeGreaterThan(1)
+    // 生产解码器（全 null 即可：身份/位置与解码状态无关），身份由 `textureResourcesOf` 造。
+    const tex = await textureResourcesOf(base, { decode: async () => null })
+    const bindings = textureBindingsOf({
+      materials: distinct.map((mi) => ({
+        id: `material:${mi}`,
+        version: 'v1',
+        blend: 'opaque' as const,
+        tint: 0xffffff,
+        useVertexColor: true,
+      })),
+      resources: tex,
+    })
+    expect(bindings.length).toBe(distinct.length)
+    for (let i = 0; i < distinct.length; i++) {
+      const mi = distinct[i]!
+      expect(base[mi]!.ref.assetId, `位置 ${mi} 必须是槽位 ${mi}`).toBe(`material:${mi}`)
+      expect(
+        contentIdentityKey(bindings[i]!.map!),
+        `material:${mi} 必须绑到位置 ${mi} 的资源`,
+      ).toBe(contentIdentityKey(tex[mi]!.identity))
+    }
+    // 负对照（同一条判据退回旧键顺序 ⇒ 位置解析当场错位）。
+    const viaOld = oldKeyOrder(base)
+    expect(
+      viaOld.some((r, i) => r.ref.assetId !== `material:${i}`),
+      '旧键顺序下位置必然错位（证明本组对顺序敏感）',
+    ).toBe(true)
+  })
+
+  it('⑤ 涟漪账（实测）：清单摘要不变；内容身份只在 ≥10 条材质上变', async () => {
+    const env = await assembleRaw(
+      readE2eFixture('structuredata-exported-envelope.json'),
+      'envelope',
+    )
+    const base = env.value.content.resources
+    const oldOrder = oldKeyOrder(base)
+    const fresh = documentContent({ resources: base })
+    // "修复前的装配产物" = 同样的内容、但资源数组按**旧键**顺序
+    // （不能再喂 `documentContent` —— 它会再规范化一次，把旧顺序抹平，测量就失效）。
+    const legacy: DocumentContent = Object.freeze({ ...fresh, resources: Object.freeze(oldOrder) })
+    // `resourceManifestDigest` 自带 `.sort()` ⇒ 不受清单排列影响（主张复核为实测）。
+    // 实测读数（供涟漪账对照）：清单摘要 2254232072（两种顺序相同）；
+    // 内容身份 new(槽位序) = 1513787328 / old(旧键序) = 3317157096（**必变**）。
+    expect(resourceManifestDigest(fresh.resources)).toBe(resourceManifestDigest(legacy.resources))
+    // 内容身份**会**变：资源数组顺序进入 `contentOf`（`canonicalize` 只排对象键、**不排数组**）
+    // —— 涟漪如实入账，不静默重标基线。
+    expect(
+      contentDigestOf(env.value.scene, env.value.animation, fresh),
+      '62 条材质上内容身份必变（涟漪如实入账）',
+    ).not.toBe(contentDigestOf(env.value.scene, env.value.animation, legacy))
+    // 多方块真夹具（4 条 ⇒ 槽位 <10）：新旧键同序 ⇒ 内容身份**不变**。
+    const mb = await assembleRaw(
+      readJson(fixturePath('multiblock-ebf-2ch')) as Record<string, unknown>,
+      'ebf-2ch',
+    )
+    const mbBase = mb.value.content.resources
+    expect(oldKeyOrder(mbBase).map((r) => r.ref.assetId)).toEqual(
+      normalizeResources(mbBase).map((r) => r.ref.assetId),
+    )
+    const mbFresh = documentContent({ resources: mbBase })
+    const mbLegacy: DocumentContent = Object.freeze({
+      ...mbFresh,
+      resources: Object.freeze(oldKeyOrder(mbBase)),
+    })
+    expect(
+      contentDigestOf(mb.value.scene, mb.value.animation, mbLegacy),
+      '≤9 条材质上内容身份不变（多方块冻结读数不受影响）',
+    ).toBe(contentDigestOf(mb.value.scene, mb.value.animation, mbFresh))
   })
 })
