@@ -24,7 +24,7 @@ import {
   paletteEntryOf,
 } from '@/adapters/files/multiblockDeclaration'
 import { EMPTY_MULTIBLOCK_DECLARATION } from '@/domain/multiblockDocument'
-import { EMPTY_CONTENT, documentContent } from '@/domain/content'
+import { EMPTY_CONTENT, documentContent, type DocumentContent } from '@/domain/content'
 import { createDocument } from '@/domain/document'
 import { parseMultiblockDeclaration } from '@/context/parsers/multiblockDocument'
 
@@ -43,14 +43,24 @@ function innerOf(env: { payload: string }): Json {
 /** 真实 fixture 的**已解析**声明（生产解析器产出，不是手工载荷）。 */
 const parsedFixture = parseMultiblockDeclaration(innerOf(tierOnlyFixture as unknown as { payload: string }))
 
-/** 一条内容路径的文档内容身份。 */
-function contentVersionOf(content: ReturnType<typeof documentContent>): number {
-  return createDocument('g1-probe', { content }).version.contentVersion
+/**
+ * 一条内容路径的文档内容身份。
+ *
+ * `Version.contentVersion` 在类型上是可选的，但 `createDocument` **必须**给出它 —— 否则
+ * "内容身份"这条判据本身无对象。故这里不写 `?? 0`（那会把"版本维丢了"静默变成一个
+ * 合法摘要），而是让前置条件**显式**失败。
+ */
+function contentVersionOf(content: DocumentContent): number {
+  const contentVersion = createDocument('g1-probe', { content }).version.contentVersion
+  if (contentVersion === undefined) {
+    throw new Error('createDocument 必须给出 contentVersion（否则内容身份判据无对象）')
+  }
+  return contentVersion
 }
 
 describe('G1/G2 · 已解析声明 → 内核承载 → 内容身份（生产路径）', () => {
   it('真实 fixture：解析器 → 适配器 → `documentContent` 逐字段承载，且进内容身份', () => {
-    const { declaration, diagnostics } = multiblockDeclarationOf(parsedFixture)
+    const { declaration } = multiblockDeclarationOf(parsedFixture)
 
     // 契约 §2.3：真实多方块文档恒 1 个节点，且 id/displayName 非空（故"空 ⟺ 无"是结构事实）。
     expect(declaration.multiblockCount).toBe(1)
