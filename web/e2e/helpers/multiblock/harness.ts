@@ -569,10 +569,10 @@ export interface DocObservation {
    */
   declarationMatchesSource: boolean | null
   /**
-   * 内核**无损源根**里的 `multiblock` 节（页面侧没有解析器，故原样过桥给测试进程；
-   * 见 {@link warnings}）。`null` = 未采集。
+   * 内核**无损源根**（= 契约内层 body 与信封 meta 合并后的 plain 形状；页面侧没有解析器，
+   * 故原样过桥给测试进程重解析 —— 见 {@link warnings}）。`null` = 未采集。
    */
-  kernelMultiblockSource: unknown
+  kernelSourceRoot: unknown
   /**
    * `decl.backbone.sizeSteps[i].cellGrid` 是否与**内核无损源根**的 `multiblock.backbone`
    * 逐格一致 —— 证明解析器把格级数据**原样透传**，而不是自己算了一份。
@@ -627,7 +627,7 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
         blockPaletteSize: 0,
         warnings: [],
         declarationMatchesSource: null,
-        kernelMultiblockSource: null,
+        kernelSourceRoot: null,
         backboneMatchesSource: null,
       }
     }
@@ -716,7 +716,7 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
       // 见 `withSourceParse` 与 `DocObservation#warnings` 的说明（含口径边界）。
       warnings: [],
       declarationMatchesSource: null,
-      kernelMultiblockSource: sourceMultiblock,
+      kernelSourceRoot: sourceRoot,
       backboneMatchesSource: (() => {
         const rawSteps = sourceMultiblock?.backbone?.sizeSteps
         if (!Array.isArray(rawSteps) || !backbone) return null
@@ -751,7 +751,10 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
  * （`scripts/multiblock-fixtures/validate-multiblock-fixtures.mjs --all --verify-grids`）。
  */
 function withSourceParse(obs: DocObservation): DocObservation {
-  const source = obs.kernelMultiblockSource
+  // ⚠️ 解析器的实参是**内层 body**（`{multiblock, multiblockCount, frames, …}`），
+  // 不是 `multiblock` 节本身 —— L2 实测：传节本身会得到
+  // `documentShape="multiblock" 要求内层存在 multiblock 对象（实际 undefined）`。
+  const source = obs.kernelSourceRoot
   if (source === null || typeof source !== 'object' || Array.isArray(source)) {
     // 未采集（无内核载体）⇒ 如实 `null`（"无法判"）："缺 body"由 `multiblockSourcePresent` 判。
     return { ...obs, warnings: [], declarationMatchesSource: null }

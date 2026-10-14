@@ -138,7 +138,7 @@ test.describe('T2.6 · 多方块 fixture 加载（公开观测点 vs 文件声�
         frameGrids: [], channelCount: 0, channels: [], runstateCount: 0, runstates: [],
         variantCount: 0, ruleCount: 0, multiblockFrameCount: 0, totalTierDomain: null,
         backbone: null, blockPaletteSize: 0, warnings: [], backboneMatchesSource: null,
-        declarationMatchesSource: null, kernelMultiblockSource: null,
+        declarationMatchesSource: null, kernelSourceRoot: null,
         multiblockSourcePresent: false,
       }
       expect(declarationViolations(empty, c).length).toBeGreaterThan(0)
