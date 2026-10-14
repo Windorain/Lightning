@@ -6,7 +6,6 @@ import { DRW } from '@/runtime/drw'
 import { PresenterSession } from '@/composition/presenterSession'
 import { createViewportTexturePort, type ViewportTexturePort } from '@/composition/viewportTexturePort'
 import { textureResourcesOf } from '@/composition/kernelTextureResources'
-import { kernelAnnotationInputs } from '@/composition/kernelAnnotationInputs'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { sceneSeconds } from '@/composition/kernelRuntime'
 
@@ -368,14 +367,14 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    */
   const syncPresenterAnnotations = (doc: {
     readonly version: { readonly documentVersion: number }
-    readonly scene: Parameters<typeof kernelAnnotationInputs>[0]
+    readonly scene: Parameters<PresenterSession['syncKernelAnnotations']>[0]
   }): void => {
     const visible = toRef(viewerPrefs, 'showAnnotations').value
     const wanted = `${visible ? 'show' : 'hide'}:d${doc.version.documentVersion}`
     if (wanted === lastAnnotationIdentity) return
     lastAnnotationIdentity = wanted
     try {
-      const outcome = presenterSurface.setAnnotations(visible ? kernelAnnotationInputs(doc.scene).inputs : [])
+      const outcome = presenterSurface.syncKernelAnnotations(doc.scene, visible)
       for (const u of outcome.unrendered) presenterErrors.push(`annotation:${u.objectId}:${u.aspect}`)
     } catch (e) {
       presenterErrors.push(`annotation-threw:${e instanceof Error ? e.message : String(e)}`)

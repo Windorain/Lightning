@@ -547,7 +547,20 @@ describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢 + *
       // 丢失后、重建前：实际世代为 null 且**无挂载** —— 这就是"画面空白"的现场。
       // （若恢复路径不强制重建，下面这份读数会一直保持到内容再变一次。）
       expect(s.generation, '丢失后实际世代必须为 null（旧句柄不复用）').toBeNull()
-      expect(s.object3d.children.length, '丢失后挂载必须被清空').toBe(0)
+      // R1-β① C7：`object3d` 现在是**会话根**（批次子树 + 注解世界/覆盖层子树 + 描边子树），
+      // 故"挂载被清空"不能再读根的 `children.length`（那是**固定 4 个**子树根，恒非 0）。
+      // 判据改读**真正持有 GPU 对象**的两个面的实时读数 ⇒ 语义不变、且更强
+      //（旧式只看批次根一层，现在批次与注解/描边两面都查）。
+      expect(s.statsSnapshot().batchObjects, '丢失后批次挂载必须被清空').toBe(0)
+      expect(s.overlayStatsSnapshot().annotationObjects, '丢失后注解挂载必须被清空').toBe(0)
+      expect(s.overlayStatsSnapshot().outlineObjects, '丢失后描边挂载必须被清空').toBe(0)
+      // 根上不得残留**叶**对象（子树的 group 壳允许存在，它们自身不持 GPU 资源）。
+      let leaves = 0
+      s.object3d.traverse((o) => {
+        if (o === s.object3d) return
+        if (o.type !== 'Group') leaves += 1
+      })
+      expect(leaves, '丢失后根下不得残留任何叶对象（= 无 GPU 句柄）').toBe(0)
       // `pendingRebuild` 是**只读**诊断面：丢失即置位（否则调用方无从知道"下一帧会重建"）
       expect(s.pendingRebuild, '丢失后必须进入"待重建"状态').toBe(true)
 

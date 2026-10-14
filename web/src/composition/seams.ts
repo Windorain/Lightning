@@ -766,9 +766,19 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * `kernel-legacy-isolation.test.ts` 的判定轴是「**来源**是否为旧层 → **目标**是否为内核」
    * （`isOldLayerTarget`，该文件 206-211 行）；而 `composition/` 既不在 `OLD_LAYERS`
    * 也不在 `KERNEL_FILES`（装配根，`legacySources: []`）⇒ **该轴对这一类依赖恒不判**。
-   * 装配根依赖所有层，"被所有层依赖"是它的反向。`useViewportRuntime` 现在值导入其 5 个模块
-   * （`PresenterSession`、`createViewportTexturePort`、`textureResourcesOf`、
-   * `kernelAnnotationInputs`、`sceneSeconds`——最后一项是 C7 新增），即旧层向上依赖装配根。
+   * 装配根依赖所有层，"被所有层依赖"是它的反向。
+   *
+   * ## 计数历史（趋势必须可见）
+   *
+   * | 时点 | `@/composition/` 值导入数 | 说明 |
+   * |---|---|---|
+   * | `fb0814d4`（C7 起点） | **4** | `presenterSession` / `viewportTexturePort` / `kernelTextureResources` / `kernelRuntime` |
+   * | C7 首版（已纠正） | ~~5~~ | C7 一度新增 `kernelAnnotationInputs` |
+   * | **C7 现状** | **4** | 该增量已**消除**：注解的"读内核场景"一步收进 `PresenterSession#syncKernelAnnotations`（`composition/ → composition/`，不是向上依赖），接线层只用它**本就已导入**的 `PresenterSession` ⇒ 计数**不增长** |
+   *
+   * ⚠️ 本债的语义是「双轨**剩余**数、只应减少」：登记是为了**可见与可判定**，
+   * **不是**为了让增长合法化。后续任何新增 `@/composition/` 值导入都必须先报告，
+   * 不得"顺手再加一个"。
    *
    * ## 为什么暂不整批改注入（诚实说明，不是"工作量大"）
    *
@@ -790,7 +800,7 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     oldTrack:
       "`src/shared/viewport/useViewportRuntime.ts` 直接 import `@/composition/presenterSession`、"
       + '`@/composition/viewportTexturePort`、`@/composition/kernelTextureResources`、'
-      + '`@/composition/kernelAnnotationInputs`、`@/composition/kernelRuntime`（`sceneSeconds`），'
+      + '`@/composition/kernelRuntime`（`sceneSeconds`）—— **4 条**，'
       + '并就地 `new PresenterSession(...)`。',
     blocker:
       '构造点归属未定：候选落点是 `src/runtime/host.ts` 的 `Host` 接口'

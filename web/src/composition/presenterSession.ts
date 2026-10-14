@@ -62,6 +62,7 @@ import type { OutlinePlan } from '@/presentation/outlinePlan'
 import type { TextureBinding, TextureResource } from '@/presentation/textureBinding'
 import { textureBindingsOf } from '@/composition/kernelTextureResources'
 import { kernelPresentationInputs } from '@/composition/kernelPresentationInputs'
+import { kernelAnnotationInputs } from '@/composition/kernelAnnotationInputs'
 
 /** 一次 `apply` 的结果（**显式**报告，不静默吞）。 */
 export interface PresenterApplyOutcome {
@@ -461,13 +462,36 @@ export class PresenterSession {
   }
 
   /**
-   * 内核注解对象 → 编译 → 呈现（一条调用完成，供装配层用）。
+   * 内核注解对象 → 编译 → 呈现（一条调用完成）。
    *
    * `inputs` 来自 `composition/kernelAnnotationInputs`（内核场景 → 注解输入），
    * 故生产路径上"内核里有没有注解"与"画面里有没有注解"由同一份数据决定。
    */
   setAnnotations(inputs: readonly AnnotationInput[]): OverlayApplyOutcome {
     return this.applyAnnotations(compileAnnotations(inputs))
+  }
+
+  /**
+   * 由**内核文档**直接同步注解（含视口可见性过滤）—— 装配层的唯一调用点。
+   *
+   * ## 为什么把"读内核场景"这一步收进本模块（而不是留给视口接线）
+   *
+   * 视口接线（`shared/viewport/useViewportRuntime`）属**旧层**，而它已经在**向上依赖**
+   * 装配根（已登记的结构债 `shared-viewport-upward-imports-assembly-root`，
+   * 计数历史 **C7 前 4 → C7 后不得增长**）。若让接线层再 import
+   * `composition/kernelAnnotationInputs`，那条债的计数就会从 4 涨到 5
+   * —— "登记是为了可见与可判定，不是为了合法化增长"。
+   *
+   * 装配根**内部**依赖（`composition/ → composition/`）不是向上依赖：
+   * 把 `kernelAnnotationInputs` 的调用收在这里，接线层只需用它**本来就已导入**的
+   * `PresenterSession` ⇒ 计数不变。
+   *
+   * `visible === false` ⇒ 清空（注解可见性是**视口状态**，不是文档内容；
+   * 见 `kernelAnnotationInputs` 的 `visible` 恒 `true` 说明）。
+   */
+  syncKernelAnnotations(scene: Scene, visible: boolean): OverlayApplyOutcome {
+    if (!visible) return this.setAnnotations([])
+    return this.setAnnotations(kernelAnnotationInputs(scene).inputs)
   }
 
   /** 应用描边计划（`null` = 清空；描边颜色是**呈现侧政策**，不进计划）。 */
