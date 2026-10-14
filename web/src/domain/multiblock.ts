@@ -442,6 +442,71 @@ export function resolveChannelEffective(input: ChannelEffectiveInput): Result<Ch
   return ok(Object.freeze({ value: v, source: resolved.value.source }))
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 声明（声明半）→ 通道集合（求值半入口）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 声明侧通道的**最小读面**（结构化输入）。
+ *
+ * ## 为什么是结构类型而不是 import 声明半的类型
+ *
+ * 声明半是 `domain/multiblockDocument#MultiblockChannel`（22 字段的声明承载），
+ * 而求值半只用到其中四个：键、呈现名、值域上下界与值域形态。若这里 import 那份类型，
+ * 求值半就被绑在**声明承载的完整形状**上 —— 声明半每加一个字段（G3 已发生过一次）
+ * 都要重新审求值半。结构类型让"求值半读了什么"在签名上可见（与
+ * `domain/multiblockDocument` 文件头"声明半 vs 求值半"的分工一致）。
+ */
+export interface DeclaredChannelLike {
+  /** 声明里的通道键（`decl.channels[].key`）。 */
+  readonly key: string
+  /** 呈现名（UI 标签）。 */
+  readonly name: string
+  /** 声明侧的值域形态（`'size' | 'replace' | 'hatch'`；此处只作诊断标注）。 */
+  readonly kind: string
+  /** 有效取值下界（含）。 */
+  readonly min: number
+  /** 有效取值上界（含）。 */
+  readonly max: number
+}
+
+/**
+ * 把一份**多方块声明**的通道清单翻成求值半的 {@link ChannelSet}。
+ *
+ * ## 为什么值域一律收成 `integer`（不按 `kind` 猜 `boolean`）
+ *
+ * 契约 §4.2 给三类通道（`size`/`replace`/`hatch`）都声明了 `min`/`max`/`domain`，
+ * 即**它们的取值都是一个数值域**；`kind` 描述的是装配用途，不是值的"能不能插值"形态
+ * （见 {@link ChannelValueKind} 的说明）。把 `hatch` 猜成 `boolean` 会凭空造出一个
+ * 声明里没有的形态 —— 那正是"用当前实现替代对象身份"的同族错误。故三类一律
+ * `'integer'`（离散、阶跃、受限整数），并把量化策略交给调用方
+ * （{@link channelStepTrack} 会为 `integer` 附 `{ kind: 'integer' }`）。
+ *
+ * ## 为什么 `source` 恒为 `'content'`
+ *
+ * 这些通道来自**多方块生成物的只读声明**（#249 §3.3），不是用户发布的文档默认值 ——
+ * 写权判定的 {@link channelWriteAuthority} 据此给出"声明不可改、取值可手动预览"。
+ * 需要表示"文档发布"的调用方自行覆盖该字段，本函数不猜。
+ */
+export function channelSetOfDeclaration(
+  declarationId: string,
+  channels: readonly DeclaredChannelLike[],
+): ChannelSet {
+  return Object.freeze({
+    id: declarationId,
+    channels: Object.freeze(
+      channels.map((ch) =>
+        Object.freeze({
+          key: ch.key,
+          name: ch.name,
+          domain: Object.freeze({ kind: 'integer' as const, min: ch.min, max: ch.max }),
+          source: 'content' as const,
+        }),
+      ),
+    ),
+  })
+}
+
 /** 通道属性键（供文档的驱动集合与缓存键使用；与 `propertyKey` 同一算法）。 */
 export function channelPropertyKey(set: ChannelSet, channelKey: string): Result<string> {
   const ref = channelToPropertyRef(set, channelKey)

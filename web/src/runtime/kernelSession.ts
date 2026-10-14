@@ -60,11 +60,18 @@ import type { Document } from '@/domain/document'
 import type { ExecutionInputs } from '@/application/commands'
 import type { ObjectTypeDecl } from '@/application/properties'
 import type { ObjectFactoryTable } from '@/domain/scene'
-import { sampleStripFrameAt, stripTimeline, type StripTimeline } from '@/domain/materials'
+import { sampleStripFrameAt, stripTimeline, totalDurationMs, type StripTimeline } from '@/domain/materials'
 import { frameDurationsMs, frameCount as axisFrameCount, type DocumentContent } from '@/domain/content'
-import { framesPerSecond, type TimeValue } from '@/domain/animation'
+import { framesPerSecond, timeFromSeconds, type AnimationTrack, type TimeValue } from '@/domain/animation'
 import { TIME_ZERO } from '@/domain/editing'
-import { generatedObjectWriteAuthority } from '@/domain/multiblock'
+import {
+  channelSetOfDeclaration,
+  channelStepTrack,
+  findChannel,
+  generatedObjectWriteAuthority,
+  resolveChannelEffective,
+  type ChannelSet,
+} from '@/domain/multiblock'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 稳定身份（单一来源）
@@ -240,6 +247,44 @@ export class KernelSession {
    */
   private channelSnapshot: Readonly<Record<string, number>> = EMPTY_CHANNEL_VALUES
 
+  /**
+   * **离散通道的时间入口来源**（`adoptDocument` 采纳声明时置位；卸载清空）。
+   *
+   * ## 它解决什么（A09 的"离散通道在给定时间求值"）
+   *
+   * 在它之前，通道取值只有**手动层**（`setChannelValue` 写 `EditContext.channelValues`），
+   * 于是播放/跳帧**不改**通道取值，而 `domain/multiblock#channelStepTrack` /
+   * `#resolveChannelEffective` 是**零生产消费者**（#388 INV-1 实测）。
+   *
+   * 声明的**帧清单**（`content.multiblock.frames`）本身就是"时间 → 离散取值"的声明：
+   * 契约 §5.4 明文「尺寸型由 `frame.stepIndex` 完成」，且解析器判据
+   * `sizeSteps.length === 通道 max − min + 1`（`context/parsers/multiblockDocument.ts:739`）
+   * ⇒ `取值 = min + stepIndex` 是**双射**，不需要猜。
+   *
+   * ## 为什么单位/轴上不加第二套换算
+   *
+   * 关键帧的时间轴直接取自 {@link KernelSession.timeline}（= `frameSource` + `stripTimeline`，
+   * 与 {@link KernelSession.frameIndex} **同一份**），并用 `domain/animation#timeFromSeconds`
+   * 做秒→`TimeValue` 换算 —— 与 `frameIndex()` 的 `seconds = time.frame / fps` 同式，
+   * 故"时间 → 帧"与"时间 → 通道取值"不会是两条轴。
+   */
+  private channelSet: ChannelSet | null = null
+
+  /** 声明帧清单里每帧的 `stepIndex`（与 `this.timeline().frameIndices` 同序）。 */
+  private channelFrameSteps: readonly number[] = Object.freeze([])
+
+  /** 骨架的尺寸型通道键（`backbone.sizeChannel`；`null` = 无可查通道）。 */
+  private channelSizeKey: string | null = null
+
+  /**
+   * 通道阶跃轨道缓存（按通道键）。
+   *
+   * 轨道是**纯值**（`(set, key, keys)` 决定），故缓存不引入状态分歧；它只为避免
+   * 每帧重算同一份关键帧（`channelValues()` 会被视口在每次投递时读）。
+   * 声明变化（`adoptDocument`）/卸载时整体清空 ⇒ 不串档。
+   */
+  private channelTrackCache = new Map<string, AnimationTrack>()
+
   constructor(opts: KernelSessionOptions) {
     this.documentId = opts.documentId
     this.contextId = opts.contextId
@@ -320,6 +365,8 @@ export class KernelSession {
         count: () => axisFrameCount({ frames: content.frameAxis.frames }),
         durationsMs: () => frameDurationsMs({ frames: content.frameAxis.frames }),
       }
+      // 离散通道的时间入口：帧清单（stepIndex）就是"时间 → 取值"的声明（见 `channelSet`）。
+      this.bindChannelTimeSource(content)
     }
     // 采纳即"已装载"（A′ GF-15）+ "已承载装配产物"（C′1 GF-16）。
     // 两个标记**分别**置位：前者是存在性，后者是"内核里的就是这份文档"。
@@ -640,6 +687,32 @@ export class KernelSession {
     this.assemblySourceRoot = null
     // D2：装配面同理（否则换文档后投影会拿旧帧对象映射去重建新文档 = 串档）。
     this.assemblyFace = null
+    // 离散通道的时间入口同理：卸载后"这份会话里没有别的文档的帧清单"必须成立，
+    // 否则换文档后播放会用**上一份文档**的 stepIndex 驱动通道取值（串档）。
+    this.clearChannelTimeSource()
+  }
+
+  /**
+   * 记下**离散通道的时间入口来源**（`adoptDocument` 采纳内容时置位）。
+   *
+   * 只有"声明了通道 + 声明了帧"的文档才有时间入口：其余文档（无通道 / 帧为主形态）
+   * 的通道取值**逐字保持**旧行为（手动层），故本接线对它们零影响。
+   */
+  private bindChannelTimeSource(content: DocumentContent): void {
+    const decl = content.multiblock
+    this.clearChannelTimeSource()
+    if (decl.channels.length === 0 || decl.frames.length === 0) return
+    this.channelSet = channelSetOfDeclaration(decl.id, decl.channels)
+    this.channelFrameSteps = Object.freeze(decl.frames.map((f) => f.stepIndex))
+    this.channelSizeKey = decl.backbone.sizeChannel === '' ? null : decl.backbone.sizeChannel
+  }
+
+  /** 清空时间入口来源与轨道缓存（卸载 / 换文档；防串档）。 */
+  private clearChannelTimeSource(): void {
+    this.channelSet = null
+    this.channelFrameSteps = Object.freeze([])
+    this.channelSizeKey = null
+    this.channelTrackCache = new Map<string, AnimationTrack>()
   }
 
   /** 重建上下文订阅（`adoptDocument` 换了 Editor 实例，故订阅必须重建）。 */
@@ -888,9 +961,92 @@ export class KernelSession {
    * 而不是靠调用方自觉。
    *
    * 取值缺失的通道不在结果里（不伪造 0）：调用方按"未设置"处理。
+   *
+   * ## ⚠️ 它返回的是**有效值**（含时间驱动的轨道层），不是裸手动值
+   *
+   * #249 §3.3：「动画输出覆盖当前求值参数，**不反写**手动取值」。故本读面按
+   * `domain/multiblock#resolveChannelEffective` 解析三层后返回**赢家**：
+   * `publishedDefault` → `manualPreview`（`EditContext.channelValues`，仍由
+   * {@link KernelSession.setChannelValue} 写） → `trackSample`（帧清单阶跃轨道，
+   * 由**播放时间**驱动）。手动值本身**原样保留在 `EditContext` 里**（本节只读），
+   * 故"停止播放后手动值仍在、且可继续编辑"是结构性质（不反写）。
+   *
+   * 「优先级」只有**一个定义点**：`domain/animation#resolveEffectiveValue` 的层表
+   * （`LAYER_RANK`）—— 本方法**不**自己比大小、不判"手动还是动画赢"。
    */
   channelValues(): Readonly<Record<string, number>> {
-    return this.channelSnapshot
+    const base = this.channelSnapshot
+    const channelKey = this.channelSizeKey
+    if (channelKey === null) return base
+    const track = this.channelTrackOf(channelKey)
+    if (track === null) return base
+    const defaults = this.document()?.animation.publishedDefaults
+    const published = defaults === undefined ? undefined : defaults[channelKey]
+    const manual = base[channelKey]
+    const resolved = resolveChannelEffective({
+      ...(typeof published === 'number' ? { publishedDefault: published } : {}),
+      ...(typeof manual === 'number' ? { manualPreview: manual } : {}),
+      track,
+      time: this.playbackSnapshot.time,
+    })
+    // 采样失败**不**吞成"0"：如实回落到手动/默认层（读面不制造值）。
+    if (!resolved.ok) return base
+    const value = resolved.value.value
+    if (value === manual) return base
+    return Object.freeze({ ...base, [channelKey]: value })
+  }
+
+  /**
+   * **离散通道在帧轴上的阶跃关键帧**（时间 → 取值；纯值，无副作用）。
+   *
+   * 契约 §5.4：尺寸型通道由 `frame.stepIndex` 完成；取值 = `通道 min + stepIndex`
+   * （解析器已保证 `sizeSteps.length === max − min + 1`，故该反演是双射）。
+   * 时间轴取自 {@link KernelSession.timeline}（与 `frameIndex()` 同一份），
+   * 故"时间 → 帧"与"时间 → 通道取值"在**同一轴**上。
+   */
+  private channelStepKeysOf(
+    channelKey: string,
+  ): readonly { readonly time: TimeValue; readonly value: number }[] {
+    const set = this.channelSet
+    if (set === null || this.channelSizeKey === null || channelKey !== this.channelSizeKey) return Object.freeze([])
+    const ch = findChannel(set, channelKey)
+    if (ch === undefined) return Object.freeze([])
+    const n = Math.min(this.frameSource.count(), this.channelFrameSteps.length)
+    if (n <= 0) return Object.freeze([])
+    const timeline = this.timeline()
+    if (totalDurationMs(timeline) <= 0) return Object.freeze([])
+    const fps = this.playbackSnapshot.time.fps
+    const min = ch.domain.min ?? 0
+    const keys: { time: TimeValue; value: number }[] = []
+    let ms = 0
+    for (let i = 0; i < n; i++) {
+      // 帧 i 的**起始时刻**就是阶跃点（半开区间 `[start, start+dur)`，与
+      // `domain/materials#sampleStripFrameAt` 同语义）。
+      keys.push(
+        Object.freeze({ time: timeFromSeconds(ms / 1000, fps), value: min + this.channelFrameSteps[i]! }),
+      )
+      ms += timeline.durationMs[i] ?? 0
+    }
+    return Object.freeze(keys)
+  }
+
+  /**
+   * 通道的**阶跃轨道**（经唯一构造点 `domain/multiblock#channelStepTrack`）。
+   *
+   * `null` = 本会话没有该通道的时间入口（未采纳声明 / 该通道无逐帧声明 / 轨道构造失败）
+   * —— 读面据此**如实回落**手动层，不制造值。
+   */
+  private channelTrackOf(channelKey: string): AnimationTrack | null {
+    const cached = this.channelTrackCache.get(channelKey)
+    if (cached !== undefined) return cached
+    const set = this.channelSet
+    if (set === null) return null
+    const keys = this.channelStepKeysOf(channelKey)
+    if (keys.length === 0) return null
+    const built = channelStepTrack(set, channelKey, keys)
+    if (!built.ok) return null
+    this.channelTrackCache.set(channelKey, built.value)
+    return built.value
   }
 
   /**
@@ -899,6 +1055,15 @@ export class KernelSession {
    * 与 `setPlaying`/`seekTime` 同一形态：提交 + 有界排空（接收 ≠ 已生效，见
    * {@link settlementOf}）。取值合法性（夹取/回落）由内核的 `reduceSetChannelValue`
    * 决定，本层**不**自己判 —— 否则就是第二份政策。
+   *
+   * ## 与时间驱动值的关系（覆盖/优先级）
+   *
+   * 本方法写的是**手动预览层**（`EditContext.channelValues`）；时间驱动的轨道层由
+   * {@link KernelSession.channelValues} 在与它合成时给出。两层的胜负**只有一处判定**：
+   * `domain/animation#resolveEffectiveValue` 的层表（`trackSample` 高于 `manualPreview`，
+   * 与 `application/queries.ts:431-509` 的 RNA 有效值读数**同一张表**）。
+   * ⇒ 时间在推进（有声明帧清单）时，读面给出轨道采样值；时间不推进/无帧清单时，
+   * 读面逐字给出手动值。本层**不**判断"谁赢"，也不把赢家写回手动层（不反写）。
    */
   setChannelValue(channel: string, value: number): void {
     this.editor.submit({ kind: 'setChannelValue', contextId: this.contextId, channel, value })
