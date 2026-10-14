@@ -80,6 +80,9 @@ import type { Grid, SlotBlock } from '@/context/grid'
 // 而 `assembleSelection` 本来就在 `context/multiblock` 的出口上（那个 index 逐字导出它）。
 // 用更深的那个包装会顺带把 Vue 响应式语义拖进装配层，那也不是装配该做的事。
 import { assembleSelection, type AssemblyResult, type MultiblockInnerDocument } from '@/context/multiblock'
+// 深度 2 的公共出口（契约 §7.3 规则 2）——实现留在 `adapters/files/`（族内），
+// 直接 import 深度 3 会被 `gate/no-private-cross-layer` 判红（首次接线实测 1 条）。
+import { multiblockDeclarationContentOf } from '@/adapters/multiblockDeclaration'
 // 多方块声明类型经 `context/runtimeDocument` 的**公共出口**取得，不钻
 // `@/context/parsers/multiblockDocument`（深度 3 > 契约 §7.3 规则 2 的上限 2）。
 // 那个文件本来就是这些类型的公开再出口（它 `export type { MultiblockChannelDecl, … }`），
@@ -1736,10 +1739,21 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
   diagnostics.push(...res.diagnostics)
 
   // ── ⑦ 内容三块 ──
+  //
+  // ## 多方块声明进**内容权威**（R2-1a 第 4 件）
+  //
+  // 值来自**类型化适配器**（`adapters/files/multiblockDeclaration`）对真实解析结果的输出——
+  // 不是把旧载体（`RuntimeDocument.multiblock`，解析侧形状）换个存放位置：适配器把它转成
+  // **内核承载**（`decl` 摊平、去 `raw`、逐层冻结、调色板保序）。契约 §3.3 要求
+  // 「多方块声明作为**只读内容定义**，由类型化解析适配接入」，这里就是那个接入点。
+  //
+  // 为什么放在 ⑦ 而 ⑧ 才用装配面：⑧ 的 `multiblock`（`MultiblockContent`）是**投影面**
+  // （读解析侧的 Map/`cellGrid`），与内容权威是**两个不同的输出**；本处只补内容权威这一半。
   const content = documentContent({
     metadata: metadataFromLegacy(doc.meta, raw),
     frameAxis: frameAxisFromLegacy(doc.frames),
     resources: normalizeResources(res.resources),
+    multiblock: multiblockDeclarationContentOf(doc.multiblock),
   })
 
   // ── ⑧ 多方块：只读内容定义 + 装配网格 ──
