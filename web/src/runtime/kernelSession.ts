@@ -403,6 +403,54 @@ export class KernelSession {
   }
 
   /**
+   * **无损装配源根**（`null` = 未采集）—— 装配这份文档时解析器看到的 plain 根。
+   *
+   * ## 为什么必须由会话保管（G5 的落点）
+   *
+   * `RuntimeDocument.fromV2Plain` 的 `known` 集合列了
+   * `label`/`author`/`description`/`gtnhVersion`/`modSource`/`globalConfig`/`schemaVersion`
+   * 七个根级键却**从不读**它们、又把它们排除在 `_extra` 之外 ⇒ 它们既不在
+   * `meta` 里、也不在 `_extra` 里、更不在 `serialize()` 里：**从 `RuntimeDocument`
+   * 出发无法恢复**（实测登记在 `adapters/plainRoot.ts` 文件头与
+   * `composition/kernelAssembly#legacyPlainRoot` 的说明里）。
+   *
+   * 于是任何"从 `doc.serialize()` 出发"的投影都**必然有损**。渲染视图这条链
+   * （`composition/kernelRenderView`）原先就是这么走的（`:98-99` 的缺省回落），
+   * 后果是"渲染视图的元数据与装配/保存两条链不一致"——同一个装配函数
+   * （`assembleKernelDocument`）在保存链吃无损源、在渲染链吃有损源，
+   * 两处算出的 `content.metadata` 因此不同。
+   *
+   * ## 为什么写进会话（而不是留在装配函数局部）
+   *
+   * 消费方是**视口层的 composable**（`shared/viewport/useKernelChannels`），
+   * 与装配（`composition/documentLoad`）不在同一个调用栈上 ⇒ 记录必须有
+   * **生命周期 = 文档生命周期**的宿主。会话正是它（先例：`fidelityFieldMap`、
+   * `assemblyFace`）：装载时置位、卸载时清空（`markUnloaded`）⇒ 不串档。
+   *
+   * ## 冻结副本
+   *
+   * 与 `setFidelityFieldMap` 同口径：浅拷贝 + 冻结，调用方之后改自己的对象
+   * 不得影响本会话记录的事实。
+   */
+  private assemblySourceRoot: Readonly<Record<string, unknown>> | null = null
+
+  /** 记下**无损装配源根**（`null` = 未采集；三态口径同 `fidelityFieldMap`）。 */
+  setAssemblySourceRoot(root: Readonly<Record<string, unknown>> | null): void {
+    this.assemblySourceRoot = root === null ? null : Object.freeze({ ...root })
+  }
+
+  /**
+   * 读**无损装配源根**（`null` = **未采集**，不是"没有"）。
+   *
+   * ⚠️ 消费方**必须**把 `null` 当成"没有无损源可用"（如实降级），
+   * 不得伪造一份空对象 —— 空对象会被装配层当成"源里什么都没有"，
+   * 把"未采集"静默变成"元数据为空"（GD 系列的同型缺陷）。
+   */
+  assemblySourceRootOf(): Readonly<Record<string, unknown>> | null {
+    return this.assemblySourceRoot
+  }
+
+  /**
    * **装配面**（#301 P10f D2）：投影侧要用的、装配期才知道的两样东西。
    *
    * ## 为什么由会话保管（而不是让投影自己去场景里翻）
@@ -587,6 +635,9 @@ export class KernelSession {
     // 卸载后"这份会话里没有别的文档的保真字段"必须成立，否则
     // 下一次保存会把**上一份文档**的未知字段写进**新**产物（串档）。
     this.fidelityFieldMap = null
+    // G5：无损装配源根同理 —— 卸载后"这份会话里没有别的文档的源根"必须成立，
+    // 否则换文档后渲染链会拿**上一份文档**的根级元数据（串档）。
+    this.assemblySourceRoot = null
     // D2：装配面同理（否则换文档后投影会拿旧帧对象映射去重建新文档 = 串档）。
     this.assemblyFace = null
   }

@@ -95,7 +95,23 @@ export function kernelRenderViewOf(input: {
   readonly doc: RuntimeDocument
   readonly selection: MultiblockSelectionInput
   readonly frameIndex: number
-  /** 无损源（装配层要它恢复根级元数据）；缺省回落到 `doc.serialize()`（有损，如实降级）。 */
+  /**
+   * **无损源**（装配层要它恢复根级元数据）。
+   *
+   * ## G5（渲染链旧格式源终切 · 第一期）：**生产路径恒传它**
+   *
+   * 唯一生产调用点 `shared/viewport/useKernelChannels` 传
+   * `Context#kernelSourceRoot()`（内核会话保管的装配期源根）。此前不传 ⇒ 本函数
+   * 回落 `doc.serialize()`，而 `RuntimeDocument` **有损**（七个根级键读不回，
+   * 见 `adapters/plainRoot` 文件头的实测登记）⇒ 同一个 `assembleKernelDocument`
+   * 在**保存链**（吃无损源）与**渲染链**（吃 `serialize()`）算出不同的
+   * `content.metadata` —— 同一份文件两条链的元数据不一致。
+   *
+   * ⇒ 本参数仍是**可选**只因为帧为主文档（`:103` 的早退）根本走不到装配；
+   * 多方块路径上"缺它"= **如实降级**（`kernelAssembly#legacyPlainRoot` 自己
+   * 标注有损），而不再是生产形态。判据必须**同时**钉住"传了 ⇒ 无损可观察"
+   * 与"不传 ⇒ 判红"（负对照），否则这一行退化不可见。
+   */
   readonly plainRoot?: Readonly<Record<string, unknown>>
 }): KernelRenderView {
   const { doc, selection, frameIndex } = input

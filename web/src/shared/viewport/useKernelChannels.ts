@@ -248,6 +248,16 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
       doc: d,
       selection: selection.value,
       frameIndex: ctx.getFrameIndex(),
+      // G5：**无损**源根（内核会话保管，装载期由 `composition/documentLoad` 置位）。
+      //
+      // ⚠️ 这一行是判据本身，不是可有可无的优化：缺它 ⇒ `kernelRenderView` 回落
+      // `doc.serialize()`（`RuntimeDocument` 有损，七个根级键读不回）⇒ 渲染视图的
+      // `meta` 与保存链（吃无损源）**算出不同的值**。实测锚点：根级
+      // `meta.created_at_ms`（缺无损源时读不到 ⇒ 渲染视图与保存产物元数据不一致）。
+      //
+      // `null`（未采集：无会话/装配不支持）⇒ 不传，让装配层走它**自己标注为有损**
+      // 的降级路径；**不**传空对象（`{}` 会被读成"源里什么都没有"）。
+      ...(ctx.kernelSourceRoot() === null ? {} : { plainRoot: ctx.kernelSourceRoot() as Readonly<Record<string, unknown>> }),
     })
   })
 

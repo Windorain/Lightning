@@ -248,6 +248,15 @@ export function adoptLoadedDocument(
     }),
   )
 
+  // ── G5：把**无损装配源根**交给会话保管（渲染链要它，理由见该方法文档） ────
+  //
+  // 与 `fidelityFieldMap` **同一个宿主、同一个生命周期**（装载置位 / `markUnloaded` 清空）：
+  // 消费方（`shared/viewport/useKernelChannels` → `composition/kernelRenderView`）
+  // 在另一个调用栈上，而 `RuntimeDocument` 是**有损**中间层（七个根级键读不回）。
+  // ⚠️ 写 `normalizedRoot ?? null`（**未采集**如实表达），不得省略成 `{}`：
+  // 空对象会被装配层读成"源里什么都没有"（静默丢元数据），与 `null` 的语义不同。
+  kernel.setAssemblySourceRoot(normalizedRoot ?? null)
+
   // ── #301 P10f D2：把**装配面**交给会话保管（投影侧要用） ─────────────────
   //
   // 两样东西只有装配期知道：帧对象映射（帧下标 → 对象 id）与多方块类型化投影面。

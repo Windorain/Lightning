@@ -476,6 +476,35 @@ export class Context {
   }
 
   /**
+   * **无损装配源根**（G5）—— 装配这份文档时解析器看到的 plain 根；`null` = 未采集。
+   *
+   * ## 为什么它必须存在（而不是复用 `plainForSave()` 或 `frozenDocumentValue()`）
+   *
+   * | 候选 | 为什么不行 |
+   * |---|---|
+   * | `plainForSave().plain` | 它是**投影产物**（含 `annotations`/`format_version`/`labels`/`meta` 等**投影键**），不是源根；喂回装配层会**污染** `unknownFields`（实测：`documentFormat`/`fixtureFile`/`fixtureSynthetic`/`mode` 被当成"源里的未知顶层字段"） |
+   * | `frozenDocumentValue().serialize()` / `legacyRenderSource()` | `RuntimeDocument` 是**有损**中间层：`label`/`author`/`description`/`gtnhVersion`/`modSource`/`globalConfig`/`schemaVersion` 七个根级键它列出了却从不读、也排除在 `_extra` 之外 ⇒ **无法恢复** |
+   * | 让消费方自己去解包 | 解包判据只许有一份（`adapters/plainRoot#plainRootOf`）；且消费方（视口 composable）手里**没有**装载期的那份原文 |
+   *
+   * ⇒ 唯一正确来源是**装配期**记录的那份源根，由会话保管（`KernelSession#setAssemblySourceRoot`，
+   * 生命周期 = 文档生命周期），本方法只是它的**具名读面**。
+   *
+   * ## 这是"内核侧供给"，不是旧格式面的续命
+   *
+   * 本读面的宿主是**内核会话**（装载时由 `composition/documentLoad` 置位），
+   * 与 `legacyRenderSource()`（读 `main.doc`，旧文档权威）**不同源**：
+   * 后者是接缝 `legacy-render-source-document` 要删除的面，前者在内核侧活着。
+   *
+   * ⚠️ `null` = **未采集**（无会话 / 未装配 / 装配不支持该形态）。消费方必须
+   * 如实降级（不传 `plainRoot`，让装配层走它自己标注为"有损"的路径），
+   * 不得伪造空对象冒充"无损"。
+   */
+  kernelSourceRoot(): Readonly<Record<string, unknown>> | null {
+    const session = this.kernel
+    return session === null ? null : session.assemblySourceRootOf()
+  }
+
+  /**
    * 装配产物的帧声明；**`null` = 未装配成功**（GF-16）。
    *
    * ⚠️ 返回 `null` 而**不是** `{count: 0}`：两者语义不同 ——
