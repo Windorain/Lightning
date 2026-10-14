@@ -6,6 +6,7 @@
 
 import type { BuildBlockMeshOptions } from '@/render/mesh/blockMesh'
 import type { MaterialBlendMode, MaterialPaletteEntry, StructureDefinition } from '@/render/schema/types'
+import { textureBlobPoolOf } from '@/render/data/textureBlobPool'
 
 export const OBJ_NAME = 'structure.obj'
 export const MTL_NAME = 'structure.mtl'
@@ -64,32 +65,17 @@ export function mtlDissolveAndIllum(blend: MaterialBlendMode | undefined): { d: 
  * 故零改动即语义一致；改类型会牵动该文件 6 处签名，收益为零）。
  *
  * **任何形态下 `blobs[i]` 都等于槽位 `i` 的字节或"该槽位无字节"的占位** —— 这是本函数
- * 对调用方的**唯一**契约（形态解析只在本函数发生）。
+ * 对调用方的**唯一**契约。
+ *
+ * ## 形态解析已收敛到渲染侧（#387 同族批；本函数只剩"记账"）
+ *
+ * 本函数此前**自己**解析形态（数组分支 `.filter` + 对象分支按键落位）——
+ * 那是同一语义的**第二处实现**（第一处在渲染侧：`render/data/sceneDocumentMaterialHydrate.ts`
+ * 与 `render/data/bundleResolve.ts`）。现统一由 `render/data/textureBlobPool.ts#normalizeTextureBlobPool`
+ * 提供，本函数保留名字与返回值形状（3 处调用点不变），只委托。
  */
 export function extractTextureBlobs(normalizedDocument: unknown): string[] {
-  if (normalizedDocument === null || typeof normalizedDocument !== 'object') return []
-  const raw = (normalizedDocument as { textureBlobs?: unknown }).textureBlobs
-  if (Array.isArray(raw)) {
-    // 位置保持：非字符串槽位（空洞 / `null` / 对象元素）写占位，**不得**压紧。
-    const src = raw as unknown[]
-    const out: string[] = new Array(src.length)
-    for (let i = 0; i < src.length; i++) {
-      const v = src[i]
-      out[i] = typeof v === 'string' ? v : ''
-    }
-    return out
-  }
-  if (raw !== null && typeof raw === 'object') {
-    const out: string[] = []
-    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-      if (typeof v !== 'string') continue
-      const idx = Number(k)
-      if (!Number.isInteger(idx) || idx < 0) continue
-      out[idx] = v
-    }
-    return out
-  }
-  return []
+  return textureBlobPoolOf(normalizedDocument) as string[]
 }
 
 export function representativePaletteEntryForBlob(

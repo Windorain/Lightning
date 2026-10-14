@@ -12,6 +12,7 @@ import type {
 } from '../schema/types'
 import { indexedRegistryFromMaterialPalette } from '@/pure/materialPaletteBridge'
 import { toStructureDefinition } from './structureDefinition'
+import { hasTextureBlobAt, normalizeTextureBlobPool } from './textureBlobPool'
 import { embeddedStructure, frameAt, getDefaultFrameIndex } from './worldPlayback'
 
 export function isBakedStructureData(x: StructureData | undefined | null): x is StructureDataBaked {
@@ -74,13 +75,40 @@ export function loadStructureOrWorld(raw: unknown, frameIndex: number | undefine
   return loadStructureData(raw)
 }
 
+/**
+ * 根级纹理池（**归一化**后：位置保持数组，`blobs[i]` = 槽位 i 的字节或 `''`）。
+ *
+ * ## 两种形态都接受（#387 同族批修）
+ *
+ * 此前是「只认**数组**、且必须**全密非空**，否则返 `null`」：
+ *
+ * ```ts
+ * if (!Array.isArray(raw) || raw.length === 0) return null
+ * if (!raw.every((x) => typeof x === 'string' && x.length > 0)) return null
+ * ```
+ *
+ * 两处失明：① 帧为主文档的投影产物是**槽位键对象**（`composition/kernelProjection.ts:1406-1408`）
+ * ⇒ 返 `null` ⇒ `validatePackedSceneDocument` **整体跳过**；② 内部核材质面产的**稀疏数组**
+ * （`composition/kernelPresentationInputs.ts:397-404` 留 `undefined` 空洞）也返 `null`
+ * ⇒ 同样跳过。两种情形都**不报错**，只是"校验不存在"。
+ *
+ * ⇒ 形态解析收敛到 `textureBlobPool.ts#normalizeTextureBlobPool`；本函数只判"池是否存在"。
+ * "槽位有没有字节"由 {@link validateMaterialPaletteEntries} 逐条判定（它现在能区分
+ * "下标越界"与"该槽位无字节"两种成因）。
+ *
+ * @returns 池**非空**时为归一化数组；`textureBlobs` 缺席 / 形态非法 / **归一化后为空池**时为
+ *          `null`（＝"编辑态空文档无池"，跳过校验的**既有语义**——旧实现的 `raw.length === 0`
+ *          分支，本批逐字保留：只改"形态失明"，不放宽"空池跳过"这条既有事实）。
+ */
 function rootTextureBlobs(document: unknown): string[] | null {
   if (!document || typeof document !== 'object') return null
   const d = document as Record<string, unknown>
   const raw = d.textureBlobs
-  if (!Array.isArray(raw) || raw.length === 0) return null
-  if (!raw.every((x) => typeof x === 'string' && (x as string).length > 0)) return null
-  return raw as string[]
+  if (raw === undefined || raw === null) return null
+  if (typeof raw !== 'object') return null
+  const pool = normalizeTextureBlobPool(raw) as string[]
+  if (pool.length === 0) return null
+  return pool
 }
 
 function validateMaterialPaletteEntries(blobs: string[], pal: unknown, ctx: string): void {
@@ -99,6 +127,12 @@ function validateMaterialPaletteEntries(blobs: string[], pal: unknown, ctx: stri
     if (bi < 0 || bi >= blobs.length) {
       throw new Error(
         `${ctx}[${i}] textureBlobIndex=${bi} 越界（textureBlobs.length=${blobs.length}）`,
+      )
+    }
+    if (!hasTextureBlobAt(blobs, bi)) {
+      throw new Error(
+        `${ctx}[${i}] textureBlobIndex=${bi} 指向的槽位**无字节**（空洞/占位）——`
+        + '外链资源应带 locator，而不是指向空槽',
       )
     }
   }

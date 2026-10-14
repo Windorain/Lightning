@@ -149,6 +149,62 @@ const resourceDigestMemo = new WeakMap<object, string>()
  *
  * 为什么必须含内容而不只是键名：A28/A36 要求"同一 URL 换内容"与"版本替换"可判定。
  * 只比键名会让"替换了纹理内容但键没变"静默复用旧资源。
+ *
+ * ## 身份必须与**形态**无关（**缺陷登记**，实测复查于 2026-10-15，#387 同族批）
+ *
+ * 本函数对入参直接 `stableStringify` ⇒ 同一逻辑资源的两种契约形态产出**不同**摘要。
+ * 实测（本函数本尊，探针逐条打印，非推断）：
+ *
+ * | 形态 | `stableStringify` 中间串 | 摘要 |
+ * |---|---|---|
+ * | `['AAAA','BBBB']` | `["AAAA","BBBB"]` | `c:7f364cd1` |
+ * | `{'0':'AAAA','1':'BBBB'}` | `{"0":"AAAA","1":"BBBB"}` | `c:ee985e1c` |
+ *
+ * 两种写法**同一份内容**（生产者决定形态：帧为主投影产对象、内核材质面/多方块产数组）
+ * ⇒ 按形态分叉的身份是**假身份**。
+ *
+ * ### 影响面（谁按摘要做缓存/去重/比较）
+ *
+ * ``identity().document = contentDigestOf([documentId, resourceDigest])``（本文件 `:63-66`）
+ * 与 `resources = resourceDigest`（`:69`）⇒ {@link diffContentIdentity} 的
+ * `documentChanged`（`:87`）⇒ {@link planContentRebuild} 走第一条分支（`:115-117`）
+ * ⇒ `reloadResources + resolveStructure + rebuildGeometry + syncAnnotations` **全 true**
+ * ⇒ 同一内容的另一种形态被判成"资源整批换了"，做一次**无谓的全量重建**
+ * （重解结构 + 重建几何 + 重载资源 + 重同步注解）。生产驱动点在
+ * `presentation/contentSignal.ts:88-89`（`diffContentIdentity` → `planContentRebuild`），
+ * 喂入点是 `runtime/presentationAdapter.ts:150`。
+ *
+ * ### 为什么未在本批修（**已实测的边界**，不是遗漏）
+ *
+ * 正解是先经唯一的形态归一化点再取摘要，但：
+ *
+ *  1. 本文件落在**新执行面**（`presentation` 层无 `activeSubpaths` ⇒ 整层受闸门约束），
+ *     而 `gate/no-private-cross-layer` 判**发起方**且要求公共出口深度 ≤ 2。
+ *     实测（2026-10-15，加了这一行 import 后跑 `npm run arch:scan`）：
+ *     `FAIL（1 条 finding）· [gate/no-private-cross-layer] src/presentation/contentIdentity.ts`
+ *     `新实现跨层导入了 render 层深于公共出口的实现（render/data/textureBlobPool，深度 3 > 2）`
+ *     ⇒ 在本文件里 import `render/data/textureBlobPool` 必然判红。
+ *  2. 接线点 `runtime/presentationAdapter.ts:150` 不在 `runtime` 层的 `activeSubpaths`
+ *     （见 `tests/architecture/boundary-rules.mjs` 的 runtime 清单）⇒ **不是**闸门文件，
+ *     在那里喂入前归一化无闸门冲突。
+ *
+ * ### 退出条件（owner 见 #387 评论 7719 存疑点 2）
+ *
+ * `runtime/presentationAdapter.ts:150` 改写为"先判形态、是池则归一化再取摘要"：
+ *
+ * ```ts
+ * const raw = doc.textureBlobs ?? doc.materialPalette ?? undefined
+ * resourceDigest: resourceDigestOf(isTextureBlobPoolShaped(raw) ? normalizeTextureBlobPool(raw) : raw)
+ * ```
+ *
+ * 必须**带形态判别**：`{stone:'AAAA'}` 不是池，盲归一化会把它压成 `[]` ⇒ 摘要恒等 ⇒
+ * A28/A36 的"同键不同内容"判据失效（`presentation/__tests__/contentIdentity.test.ts:178`
+ * 与 `contentSignal.test.ts` 会当场判红，实测 `{stone:'AAAA'}`=`c:50b7e1fc`、
+ * `{stone:'BBBB'}`=`c:33d05e48`，两者必须继续可分辨）。
+ * 判据落 `render/data/__tests__/textureBlobPool.shapeContract.test.ts` 判据 ⑥（登记本读数）。
+ * 该退出前，本条属**已知缺陷**，不得当作"已验证正确"。
+ *
+ * 注：`runtime/presentationAdapter.ts` 在**本批禁写**（另一代理在制），故本批只登记 + 报裁决。
  */
 export function resourceDigestOf(textureBlobs: unknown): string {
   if (textureBlobs === null || textureBlobs === undefined) return 'r:none'

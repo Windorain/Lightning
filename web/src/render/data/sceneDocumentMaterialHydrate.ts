@@ -8,6 +8,7 @@ import * as THREE from 'three'
 import { inferMaterialBlendModeFromTexture } from '../materials/inferMaterialBlendModeFromTexture'
 import type { MaterialPaletteEntry, StructureData } from '../schema/types'
 import { isBakedStructureData, isWorldDocument } from './bundleResolve'
+import { hasTextureBlobAt, textureBlobPoolOf } from './textureBlobPool'
 
 export interface PaletteTextureDataUrlItem {
   materialId: string
@@ -22,14 +23,23 @@ function base64PngToDataUrl(b64: string): string {
 
 /**
  * 枚举纹理为 data URL。优先从根级 `textureBlobs` 读取，其次从 V2 `materials.entries[].texture_png`。
+ *
+ * ## 两种形态都在这里处理（#387 同族批修）
+ *
+ * 此前第一件事是 `if (!Array.isArray(blobs)) return []` —— 于是**帧为主**文档的投影产物
+ * （`composition/kernelProjection.ts:1406-1408` 产**槽位键对象**）在这里被静默丢弃：
+ * 一张都枚举不出来、调用方拿到空材质库、且**不报错**。等轴 PNG 导出（`ExportIsoPngOperator`
+ * → `workbench/exportIsometricImage.ts:103 buildMaterialLibrary(plain)`，输入就是
+ * `ctx.plainForSave().plain`）实测走这条链。
+ *
+ * ⇒ 形态解析收敛到 `render/data/textureBlobPool.ts#normalizeTextureBlobPool`
+ * （§15 同一语义不得有第二处实现），本函数只按下标取字节。
  */
 export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDataUrlItem[] {
   if (!document || typeof document !== 'object') return []
-  const root = document as { textureBlobs?: unknown }
 
-  // Packed textureBlobs
-  const blobs = root.textureBlobs
-  if (!Array.isArray(blobs)) return []
+  // 根级纹理池：**两种契约形态**统一归一为"位置保持数组"（`blobs[i]` = 槽位 i 的字节）。
+  const blobs = textureBlobPoolOf(document)
 
   if (isWorldDocument(document)) {
     const pal = document.materialPalette
@@ -39,9 +49,8 @@ export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDat
       const entry = pal[i]
       const idx = entry.textureBlobIndex
       if (typeof idx !== 'number' || !Number.isFinite(idx)) continue
-      const b = blobs[Math.floor(idx)]
-      if (typeof b !== 'string') continue
-      items.push({ materialId: String(i), dataUrl: base64PngToDataUrl(b) })
+      if (!hasTextureBlobAt(blobs, idx)) continue
+      items.push({ materialId: String(i), dataUrl: base64PngToDataUrl(blobs[Math.floor(idx)]!) })
     }
     return items
   }
@@ -53,9 +62,8 @@ export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDat
     const entry = pal[i]
     const idx = entry.textureBlobIndex
     if (typeof idx !== 'number' || !Number.isFinite(idx)) continue
-    const b = blobs[Math.floor(idx)]
-    if (typeof b !== 'string') continue
-    items.push({ materialId: String(i), dataUrl: base64PngToDataUrl(b) })
+    if (!hasTextureBlobAt(blobs, idx)) continue
+    items.push({ materialId: String(i), dataUrl: base64PngToDataUrl(blobs[Math.floor(idx)]!) })
   }
   return items
 }

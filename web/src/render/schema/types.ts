@@ -149,6 +149,26 @@ export const TOOLTIP_GRID_NONE = -1
  * 值为同结构 `partLists` 池的下标；`PARTS_GRID_NONE` 表示该格无部件（契约 §2）。
  */
 
+/**
+ * 根级纹理池 `textureBlobs` 的**契约类型**（#387 同族批）。
+ *
+ * ## 为什么是联合而不是 `string[]`（类型面失明，本批修）
+ *
+ * 此前的声明是 `textureBlobs?: string[]` —— 与**实际产物形态不符**，于是编译器对
+ * "消费者只认一种形态"这件事**完全不可见**（`architecture`/`vue-tsc` 全绿而生产静默失效）。
+ * 实测的两种形态各由**不同生产者**产出（不是实现选择，是契约）：
+ *
+ * | 形态 | 谁产出 | 依据 |
+ * |---|---|---|
+ * | 槽位键对象 `{"0": "<b64>", …}` | `composition/kernelProjection.ts:1406-1408`（**帧为主**文档的投影产物，`plainForSave().plain`） | 前批实测：真信封投影产物 62 键 |
+ * | 数组 `["<b64>", …]`（按需稀疏/占位） | ① `composition/kernelPresentationInputs.ts:397-404`（内核材质面，空洞为 `undefined`）；② `composition/kernelProjection.ts:1403-1405`（**多方块**文档，空洞为 `''`，`docs/contracts/format-multiblock-doc.md:108`） | 契约与实测 |
+ *
+ * ⇒ **任何形态解析只许发生在** `render/data/textureBlobPool.ts#normalizeTextureBlobPool`
+ * （§15 同一语义不得有第二处实现）；字段类型用本别名，使"直接按下标取 `blobs[i]` 而不
+ * 归一化"的类型误用在编译期暴露。
+ */
+export type TextureBlobPool = readonly string[] | Readonly<Record<string, string>>
+
 /** 可渲染终态（palette + cellGrid） */
 export interface StructureDataBaked {
   geometryPhase: 'baked'
@@ -160,7 +180,8 @@ export interface StructureDataBaked {
   modSource?: string
   schemaVersion?: number
   globalConfig?: Record<string, unknown>
-  textureBlobs?: string[]
+  /** 根级纹理池（Base64 PNG）；**两种契约形态**，见 {@link TextureBlobPool} */
+  textureBlobs?: TextureBlobPool
   source?: { javaClass?: string; structurePiece?: string; note?: string }
   axis?: {
     zSlice?: string
@@ -287,8 +308,8 @@ export interface World {
   description?: string | null
   modSource?: string
   globalConfig?: Record<string, unknown>
-  /** 根级纹理池（Base64 PNG），所有帧共享 */
-  textureBlobs?: string[]
+  /** 根级纹理池（Base64 PNG），所有帧共享；**两种契约形态**，见 {@link TextureBlobPool} */
+  textureBlobs?: TextureBlobPool
   /** 根级 ToolTip 文案池，所有帧共享 */
   tooltipPalette?: string[]
   /** 根级材质调色盘，所有帧共享；BakedQuad.materialIndex 直接指向此数组 */
