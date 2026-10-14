@@ -330,9 +330,12 @@ const EXTRA_PALETTE_KEYS: readonly string[] = Object.freeze(['materialPalette', 
  * 契约 §4.4 的 `sizeSteps[].cellGrid` 是**调色板下标**网格 ⇒ 并集调色板的
  * 顺序是语义。故本函数**不**调用 `domain/blockGeometry#normalizePalette`
  * （它按内容去重**并排序**，服务的是"呈现清单"而非"下标敏感声明"）。
- * ⚠️ 已登记的既有冲突：`domain/multiblockDocument#normalizeMultiblockDeclaration`
- * 对 `blockPalette` 调用了 `normalizePalette` ⇒ 若在装配路径上用它，下标会错位。
- * 本批**不**改它（超范围），只在此如实标注并回报。
+ *
+ * ✅ 已闭合（R2-1a 第 3 件）：`domain/multiblockDocument#normalizeMultiblockDeclaration`
+ * 曾对 `blockPalette` 调用 `normalizePalette`（下标错位的来源）。生产者清单实测**它没有任何
+ * 消费者**，且承载的"保序 + 逐层冻结"已由本模块的出口履行 ⇒ 按 §15 口径（同一语义不得有
+ * 第二处实现）**已删除该函数与其判据文件**。语义判断现留在生产链上：
+ * `web/src/adapters/files/__tests__/multiblockDeclarationFrozen.test.ts`。
  */
 export function paletteEntryOf(raw: unknown): BlockPaletteEntry {
   if (raw === null || typeof raw !== 'object') return airLikePaletteEntry()
