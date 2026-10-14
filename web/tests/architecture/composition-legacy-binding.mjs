@@ -122,7 +122,7 @@ export function countCompositionLegacyEdges(facts, { srcRoot = SRC_ROOT, kernelF
     if (!isProductionRel(fromRel)) continue
     const target = resolveTargetOf(f, srcRoot)
     if (target === null || !isOldLayerTarget(target, kernelFiles)) continue
-    lines.push({ file: `src/${fromRel}`, line: f.line, target })
+    lines.push({ file: `src/${fromRel}`, line: f.line, target, kind: f.kind, isTypeOnly: f.isTypeOnly === true })
   }
   return { files: new Set(lines.map((l) => l.file)).size, lines: lines.length, rows: lines }
 }
@@ -276,33 +276,54 @@ export const BASELINE_COMMIT = '9630a39d'
  */
 
 /**
- * ② 的**许可上限**：豁免**只允许** C9 落地时实测的那 4 条绑定。
+ * ② 的**许可上限**：豁免**只允许**下列 `(file, target)` 组合与条数（新的组合 / 超组上限 / 超总量 ⇒ 判红）。
  *
- * ## 为什么用 `(file, target) → 许可条数` 而不是 `file:line` 字面量
+ * ## 收敛史（逐批向下，不向上 —— #385 裁决 + R1-A C10 收敛）
  *
- * C9 的 `kernelOutlinePlanPort.ts` 在评审期**仍在被编辑**（文件头注释增长 ⇒ 导入行的
- * 行号从 49/50/51/65 漂到 56/57）。若把许可上限钉成行号字面量，则**行号漂移**
- * 会被判成"超出许可集" —— 那是**假红**：漂移的是位置，不是绑定的数量与性质。
- * 闸门要判的是"**绑定的数量与去向**不得新增"，故上限按 `(file, target)` 计数：
- *  - 新的 `(file, target)` 组合 ⇒ 判红（"多一条"的真正含义）；
- *  - 同一组合的条数不得超过许可上限；
- *  - 总条数不得超过 4。
+ * | 时点 | 该文件绑旧层条数 | 其中值导入 | 许可上限总量 | 依据 |
+ * |---|---|---|---|---|
+ * | C9 落地（`f50f6011`/`e453ea8f`） | 4 | 2（`gridRead` 值位置 + `partMask`） | 4 | Lead 裁决的暂准起点 |
+ * | R1-A 子件②在途（评审实测） | 3 | 1（`partMask` 已被注入化消掉） | 4 | 实测导出 |
+ * | **R1-A C10（`d4708d0b`）** | **2** | **0** | **2** | C10 把旧层**值导入清零**（改吃 `runtime/host.ts` 的注入口），只剩 2 条 **type-only** |
+ *
+ * ⚠️ Lead 给定的血统读数记作 `fb0814d4=4 / C7 段二=4 / R1-A C10(d4708d0b)=2（值导入 0）`；
+ * 本判据可**机械复核**的是后两项（C9 落地 = 4、C10 后 = 2 —— `kernelOutlinePlanPort.ts` 本身是
+ * C9 新建的文件，故更早的"4"指向同一"装配根绑旧层"计数线的另一口径，本文件按给定值留档、不冒充实测）。
+ *
+ * ## 为什么上限现在是 2（而不是仍留 4 的余量）
+ *
+ * 余量会让"再塞回一条值导入"不判红 —— 那正是"边登记边做大"的反模式。
+ * 上限必须**紧跟实测**逐批向下收敛，故 C10 落地后即改为：`context` 1、`gridRead` 1、`partMask` **0**。
+ *
+ * ## 剩下这 2 条 type-only 的处置（不得默认永久保留）
+ *
+ * 本判据的口径里 **type-only 同样计入**（`module-graph.mjs` 的 AST 采集含 `import type` 与
+ * `import('x').T`，与 `boundary-rules.mjs`「类型导入同计」一致）⇒ 它们**必须**留在豁免里直到
+ * 被消除，且豁免**终态必须为空**。可消除的路径有两条（择一，须在 R1-A 收口时落地）：
+ *  1. 把 `Context` / `KernelGridView` 的**类型**也改为经 `runtime/host.ts` 的注入口声明
+ *     （与 C10 对值导入做的一样）⇒ 两条 type-only 边消失，豁免归零；
+ *  2. 若 R1-A 收口后 `runtime/` 撞名层本身退出（`gridRead`/`context` 不再是旧层），
+ *     这两条边不再落在 `OLD_LAYERS` 判定内 ⇒ 自然消失。
+ * 在任一路径落地前，本表不得再增，也不得把"2"当作新基线写死。
  */
 export const FROZEN_PERMITTED_EXEMPT_GROUPS = Object.freeze([
   Object.freeze({ file: 'src/composition/kernelOutlinePlanPort.ts', target: 'runtime/context', permitted: 1 }),
-  Object.freeze({ file: 'src/composition/kernelOutlinePlanPort.ts', target: 'runtime/gridRead', permitted: 2 }),
-  Object.freeze({ file: 'src/composition/kernelOutlinePlanPort.ts', target: 'pure/partMask', permitted: 1 }),
+  Object.freeze({ file: 'src/composition/kernelOutlinePlanPort.ts', target: 'runtime/gridRead', permitted: 1 }),
+  Object.freeze({ file: 'src/composition/kernelOutlinePlanPort.ts', target: 'pure/partMask', permitted: 0 }),
 ])
 
 /**
  * C9 落地（`f50f6011` / `e453ea8f`）时的豁免**历史读数**（4 条 `file:line:target`）。
  *
- * ⚠️ 这是**读数快照，不是判据**：C9 的 `kernelOutlinePlanPort.ts` 在评审期由**其他写者**
- * 持续编辑（文件头注释增长 ⇒ 导入行号漂移；子件②的注入化 ⇒ 条目被消掉）。
- * 把行号当作**判据**会让"行号漂移"与"注入化收缩"都变成假红 —— 闸门要判的是
- * **绑定的数量与去向不得新增**（上 `FROZEN_PERMITTED_EXEMPT_GROUPS`），
+ * ⚠️ 这是**读数快照，不是判据**（也不参与任何断言的门槛）：C9 的 `kernelOutlinePlanPort.ts`
+ * 在评审期由**其他写者**持续编辑（文件头注释增长 ⇒ 导入行号漂移；子件②的注入化 ⇒ 条目被消掉；
+ * C10 的值导入清零 ⇒ 只剩 type-only）。把行号当作**判据**会让"行号漂移"与"注入化收缩"
+ * 都变成假红 —— 闸门要判的是**绑定的数量与去向不得新增**（上 `FROZEN_PERMITTED_EXEMPT_GROUPS`），
  * 而不是一个正在被编辑的文件的行号。故当前的豁免成员由 `derivePendingExemptions()`
  * **实测导出**（读数），许可上限由冻结的许可组把守（判据）。
+ *
+ * 收敛史（同一张表，便于 P11 对账）：`fb0814d4=4 / C7 段二=4 / R1-A C10(d4708d0b)=2（值导入 0）`
+ * —— 前两项为 Lead 给定的血统读数（本判据当时不可机械复核），后两项为本判据实测。
  */
 export const EXEMPTION_LEDGER_AT_C9_LANDING = Object.freeze([
   'src/composition/kernelOutlinePlanPort.ts:49:runtime/context',
@@ -311,7 +332,7 @@ export const EXEMPTION_LEDGER_AT_C9_LANDING = Object.freeze([
   'src/composition/kernelOutlinePlanPort.ts:65:pure/partMask',
 ].sort())
 
-/** 许可上限的**总条数**（4 = C9 落地时的实测条数）。 */
+/** 许可上限的**总条数**（2 = R1-A C10 后的实测条数；由 4 收敛而来，只降不升）。 */
 export const FROZEN_PERMITTED_EXEMPT_TOTAL = FROZEN_PERMITTED_EXEMPT_GROUPS.reduce((n, g) => n + g.permitted, 0)
 
 /** 冻结基线登记的身份集（28 条；豁免 = 实测 − 本集）。 */
@@ -332,7 +353,17 @@ export function derivePendingExemptions(facts, { srcRoot = SRC_ROOT, kernelFiles
   const baseline = new Set(BASELINE_EDGE_IDS)
   return countCompositionLegacyEdges(facts, { srcRoot, kernelFiles })
     .rows.filter((r) => !baseline.has(`${r.file}:${r.line}:${r.target}`))
-    .map((r) => Object.freeze({ from: r.file, line: r.line, to: r.target, kind: 'import', exempt: true, terminalBatch: 'R1-A 子件②' }))
+    .map((r) =>
+      Object.freeze({
+        from: r.file,
+        line: r.line,
+        to: r.target,
+        kind: r.kind,
+        isTypeOnly: r.isTypeOnly,
+        exempt: true,
+        terminalBatch: 'R1-A 子件②',
+      }),
+    )
     .sort((a, b) => (a.from === b.from ? a.line - b.line : a.from < b.from ? -1 : 1))
 }
 
@@ -372,7 +403,7 @@ export function exemptionReading(facts) {
     permittedCeiling: FROZEN_PERMITTED_EXEMPT_TOTAL,
     baseline: { files: BASELINE_FILES, lines: BASELINE_LINES, commit: BASELINE_COMMIT },
     terminal: 'empty',
-    terminalBatch: 'R1-A 子件②（把这 4 条注入化）',
+    terminalBatch: 'R1-A 子件②（C10 后剩 2 条 type-only；消除路径见许可组注释）',
     ids: exemptions.map((e) => `${e.from}:${e.line}:${e.to}`),
   }
 }

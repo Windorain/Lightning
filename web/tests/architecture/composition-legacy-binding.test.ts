@@ -172,24 +172,31 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
   it('豁免刚性 ②：豁免必须落在**冻结许可集**内、条数不超上限（多一条即红）', async () => {
     const facts = await loadFacts()
     const exemptions = derivePendingExemptions(facts)
-    // ② 许可上限 = C9 落地时实测的 4 条绑定（按 (file,target) 分组计数，
-    //    行号漂移不改判 —— 闸门判的是"绑定的数量与去向不得新增"，不是"位置不得移动"）。
-    expect(FROZEN_PERMITTED_EXEMPT_TOTAL, '许可上限总量冻结在 C9 落地时的 4 条').toBe(4)
+    // ② 许可上限随 R1-A C10 从 4 收敛到 2（C10 把值导入清零，只剩 type-only）——
+    //    只降不升：留余量会让"再塞回一条值导入"不判红。
+    expect(FROZEN_PERMITTED_EXEMPT_TOTAL, '许可上限必须在 C10 后收敛为 2').toBe(2)
     expect(
-      FROZEN_PERMITTED_EXEMPT_GROUPS.map((g) => `${g.file.replace('src/composition/', '')}→${g.target}`),
-      '许可组必须是 C9 的那三条去向',
+      FROZEN_PERMITTED_EXEMPT_GROUPS.map((g) => `${g.file.replace('src/composition/', '')}→${g.target}:${g.permitted}`),
+      '许可组必须是"C10 收敛后"的三组（其中 pure/partMask 已收敛为 0）',
     ).toEqual([
-      'kernelOutlinePlanPort.ts→runtime/context',
-      'kernelOutlinePlanPort.ts→runtime/gridRead',
-      'kernelOutlinePlanPort.ts→pure/partMask',
+      'kernelOutlinePlanPort.ts→runtime/context:1',
+      'kernelOutlinePlanPort.ts→runtime/gridRead:1',
+      'kernelOutlinePlanPort.ts→pure/partMask:0',
     ])
     // 机械检测核：超许可集 / 超组上限 / 超总量 ⇒ 非空 ⇒ 判红
     const ceilingViolations = exemptionCeilingViolations(exemptions)
     expect(
       ceilingViolations,
-      `豁免超出冻结许可集 ⇒ 判红（"只允许这 4 条"）:\n${ceilingViolations.join('\n')}`,
+      `豁免超出冻结许可集 ⇒ 判红（"只允许这 2 条"）:\n${ceilingViolations.join('\n')}`,
     ).toEqual([])
-    // ④ 终态声明：每条豁免都带 terminalBatch（豁免消失时条目自动消失，不存在空壳）
+    // 值的部分必须已经清零（C10 的成果）—— 本判据按闸门口径把 type-only 也算边，
+    // 故"值导入为 0"要用模块图事实单独断言（不许把值导入混在 type-only 里蒙过）。
+    const valueEdges = exemptions.filter((e) => e.isTypeOnly !== true)
+    expect(
+      valueEdges.map((e) => `${e.from}:${e.line} → ${e.to}`),
+      'C10 之后该文件不得再有**值导入**形态的绑旧层边（值导入必须清零）',
+    ).toEqual([])
+    // ④ 终态声明：每条豁免都带 terminalBatch
     const missingTerminal = exemptions.filter((e) => typeof e.terminalBatch !== 'string' || e.terminalBatch.length === 0)
     expect(missingTerminal.map((e) => `${e.from}:${e.line}`), '每条豁免必须带终态批次声明').toEqual([])
   })
@@ -199,7 +206,7 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     const reading = exemptionReading(facts)
     expect(reading.exemptionCount, '③ 豁免条数必须作为读数导出（实测）').toBe(derivePendingExemptions(facts).length)
     expect(reading.terminal, '④ 终态必须声明为 empty（空的）').toBe('empty')
-    expect(reading.permittedCeiling, '③ 读数必须同时给出许可上限（显示收缩进度）').toBe(4)
+    expect(reading.permittedCeiling, '③ 读数必须同时给出许可上限（显示收缩进度：C9=4 ⇒ C10=2）').toBe(2)
     expect(reading.baseline, '读数必须带基线三元组（供每批合流登记趋势）').toEqual({
       files: 11,
       lines: 28,
@@ -349,8 +356,8 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     // 正面：在同一许可组里**超上限**也要红（gridRead 许可 2 条，塞到 3 条即越界）
     const overGroup = [900, 901, 902].map((n) => mk(n, 'runtime/gridRead', 'src/composition/kernelOutlinePlanPort.ts'))
     expect(exemptionCeilingViolations(overGroup), '同组条数超上限即红').not.toEqual([])
-    // ③ 许可上限恒 4（读数不得被人为抬高以容纳新豁免）
-    expect(FROZEN_PERMITTED_EXEMPT_TOTAL, '许可上限恒为 4').toBe(4)
+    // ③ 许可上限随 C10 收敛为 2（读数不得被人为抬高以容纳新豁免）
+    expect(FROZEN_PERMITTED_EXEMPT_TOTAL, '许可上限在 C10 后为 2（只降不升）').toBe(2)
     // ④ 已消失的豁免必然不在实测导出里（空壳在构造上不可能出现）
     expect(
       exemptions.filter((e) => e.line === 9999),
