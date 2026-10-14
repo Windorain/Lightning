@@ -13,6 +13,7 @@ import { DRW } from '@/runtime/drw'
  * （`runtime/host.ts#HostBase#createViewportPresenter`）构造后下行。
  */
 import type { PresenterSession } from '@/composition/presenterSession'
+import type { KernelRenderSourceFace } from '@/composition/kernelPresentationInputs'
 import type { ViewportPresenterBundle } from '@/runtime/host'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 
@@ -226,6 +227,20 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   const docRef = renderDocRef
 
   /**
+   * **内核渲染源面**（G4 · S2 第二半）：DRW 的定义 / 说明池 / 材质库输入三样由内核直出。
+   *
+   * 为什么在这里构造（而不是让 `.vue` 调用方再传一个 prop）：本 composable 已经持有
+   * `ctx`，面是**读面**（`Context#kernelRenderSourceFace`）—— 多一条注入 prop 只会
+   * 让装配边多一个可省略的口子（"省略即回落"正是 C5 删掉的那种形态）。
+   *
+   * 面在场 ⇒ DRW 不再读 `docRef` 的这三样；`docRef` 只留给多方块的再装配投影
+   * （G3 落地前已登记的暂存路径）与内容身份。
+   */
+  const renderSourceRef = computed<KernelRenderSourceFace | null>(() =>
+    ctx.kernelRenderSourceFace(),
+  )
+
+  /**
    * 内核会话（P10 #261）。
    *
    * 未接线时 `ctx.kernel` 为 `null` ⇒ 本 composable 退化为"帧下标恒 0、
@@ -251,6 +266,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
 
   const drw = new DRW({
     docRef,
+    renderSourceRef,
     contentRefreshTickRef: ctx.getContentRefreshTick(),
     // 帧下标：派生值（无会话 ⇒ 恒 0，即静态第一帧）。
     worldFrameIndex: () => kernel?.frameIndex() ?? 0,

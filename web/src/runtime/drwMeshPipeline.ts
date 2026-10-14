@@ -52,6 +52,7 @@ import {
 } from '@/render/interaction/blockSlotBaker'
 import { createContentSignal } from '@/presentation/contentSignal'
 import type { RebuildPlan } from '@/presentation/contentIdentity'
+import type { KernelRenderSourceFace } from '@/composition/kernelPresentationInputs'
 import { readContentIdentity } from '@/runtime/presentationAdapter'
 
 /**
@@ -69,8 +70,25 @@ function normalizeWorldFrameListIndex(w: { frames: unknown[] }, raw: number): nu
 }
 
 export interface DrwMeshPipelineDeps {
-  /** 场景文档（RuntimeDocument；定义/材质/图标面的读取源，**不再**是画面几何的来源） */
+  /** 场景文档（RuntimeDocument）——**暂存路径**：只服务多方块的再装配投影（见 `renderSourceRef`） */
   docRef: Ref<RuntimeDocument | null>
+  /**
+   * **内核渲染源面**（G4 · S2 第二半）：定义 / 说明池 / 材质库输入三样由**内核内容**直出。
+   *
+   * ## 它替代的旧读取点（逐条对位本文件的 `doc.serialize()` 路径）
+   *
+   * | 旧读取点 | 本面字段 |
+   * |---|---|
+   * | `:225 worldFrameCount` | `frameCount` |
+   * | `:304-320` / `:344-361`（`resolveRenderBundle`） | `definitionAt(i)` |
+   * | `:314` / `:361 tooltipPalette` | `definitionAt(i).tooltipPalette` |
+   * | `:178 buildMaterialLibrary(doc.serialize())` | `materialInput` |
+   *
+   * ⇒ **在场时本文件的 `docRef` 对这三样不再被读**（帧为主的文档上等于旧格式源整条脱离渲染链）。
+   * 它**不**覆盖多方块的再装配（那仍要 `doc.multiblockSource`，是 G3 落地前**已登记**的暂存路径）；
+   * 故两者不是"并存两份真相"，而是"同一份内容的两条**已登记**来源"：面在场优先，面缺席才走旧源。
+   */
+  renderSourceRef?: Ref<KernelRenderSourceFace | null>
   loadStatus: Ref<LoadStatus>
   blockIconCache: ShallowRef<BlockIconCache | null>
   tooltipPalette: ShallowRef<string[]>
@@ -157,8 +175,11 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     docRef, loadStatus, blockIconCache, tooltipPalette,
     structureDefinition, sceneRef, worldFrameIndex, layerWorldY,
     blockIconCacheOptions, initialWorldFrameIndex, contentRefreshTickRef, seekFrame,
-    toolsOverlayGroupRef,
+    toolsOverlayGroupRef, renderSourceRef,
   } = deps
+
+  /** 内核渲染源面（在场 ⇒ 定义/说明/材质三样**不**再经旧格式文档）。 */
+  const renderSource = (): KernelRenderSourceFace | null => renderSourceRef?.value ?? null
 
   /**
    * 当前帧下标 —— **每次现读**（派生值）。
@@ -171,11 +192,16 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   // === 内部纹理缓存，从 doc.textureBlobs 构建 ===
   const textureCache = shallowRef<MaterialLibraryApi | null>(null)
 
-  /** 确保 textureCache 就绪；已完成则直接返回。 */
-  async function ensureTextures(doc: RuntimeDocument, plain?: Record<string, unknown>): Promise<MaterialLibraryApi | null> {
+  /**
+   * 确保 textureCache 就绪；已完成则直接返回。
+   *
+   * 入参是**材质库输入**（`render/data/buildMaterialLibrary` 的 `plainDoc`）：
+   * 内核渲染源面在场时传它的 `materialInput`（内核内容派生），否则传旧格式 plain（暂存路径）。
+   */
+  async function ensureTextures(materialInput: Record<string, unknown>): Promise<MaterialLibraryApi | null> {
     if (textureCache.value && !textureCache.value.isDisposed()) return textureCache.value
     try {
-      textureCache.value = await buildMaterialLibrary(plain ?? doc.serialize())
+      textureCache.value = await buildMaterialLibrary(materialInput)
       return textureCache.value
     } catch (e) {
       console.error('[drw] buildMaterialLibrary failed', e)
@@ -222,7 +248,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   let stopLayerWorldYWatch: (() => void) | null = null
 
   // ---- Computed ----
-  const worldFrameCount = computed(() => docRef.value?.frameCount ?? 0)
+  const worldFrameCount = computed(() => renderSource()?.frameCount ?? docRef.value?.frameCount ?? 0)
   const hasWorldMultiFrame = computed(() => worldFrameCount.value > 1)
   const gridHeight = computed(() => structureDefinition.value?.cellGrid[0]?.length ?? 0)
   const layerPreviewMode = computed<LayerPreviewMode>(() => {
@@ -302,6 +328,20 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
    * 几何由呈现会话按内核内容身份产出，本函数只负责**定义面**。
    */
   async function applyWorldFrame(index: number): Promise<void> {
+    const source = renderSource()
+    if (source !== null) {
+      if (source.frameCount === 0) return
+      return run(async () => {
+        const hit = source.definitionAt(index)
+        // 该帧取不到定义（越界/对象缺失/无类型化几何）⇒ **什么都不做**、保留上一次结果。
+        if (hit === null) return
+        structureDefinition.value = hit.definition
+        tooltipPalette.value = [...hit.tooltipPalette]
+        const lib = textureCache.value
+        if (!lib || lib.isDisposed()) return
+        rebuildIconCache(lib, hit.definition)
+      })
+    }
     const doc = docRef.value
     if (!doc || doc.frameCount === 0) return
     return run(async () => {
@@ -345,10 +385,34 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     const preserveViewport = loadStatus.value === 'ok'
     if (!preserveViewport) loadStatus.value = 'loading'
     try {
+      const source = renderSource()
+      const frameIdx = preserveViewport ? frameIndex() : (initialWorldFrameIndex ?? 0)
+      if (source !== null) {
+        // 内核渲染源面路径：定义/说明/材质输入三样都来自内核内容，**不经**旧格式文档。
+        const hit = source.definitionAt(frameIdx)
+        if (hit === null) {
+          loadStatus.value = 'error'
+          console.error('[drw] loadStructureAndResources: 内核渲染源面在该帧取不到定义')
+          return
+        }
+        structureDefinition.value = hit.definition
+        tooltipPalette.value = [...hit.tooltipPalette]
+        const lib = textureCache.value
+        const effectiveLib = (lib && !lib.isDisposed())
+          ? lib
+          : await ensureTextures(source.materialInput as unknown as Record<string, unknown>)
+        if (!effectiveLib || effectiveLib.isDisposed()) {
+          loadStatus.value = 'error'
+          console.error('[drw] loadStructureAndResources: failed to build textureCache')
+          return
+        }
+        rebuildIconCache(effectiveLib, hit.definition)
+        loadStatus.value = 'ok'
+        return
+      }
       const doc = docRef.value
       if (!doc) { loadStatus.value = 'error'; return }
       const plain = doc.serialize()
-      const frameIdx = preserveViewport ? frameIndex() : initialWorldFrameIndex
       const resolved: RenderBundleResolveResult = resolveRenderBundle(
         { document: plain },
         frameIdx,
@@ -362,7 +426,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       const lib = textureCache.value
       const effectiveLib = (lib && !lib.isDisposed())
         ? lib
-        : await ensureTextures(doc, plain)
+        : await ensureTextures(plain)
       if (!effectiveLib || effectiveLib.isDisposed()) {
         loadStatus.value = 'error'
         console.error('[drw] loadStructureAndResources: failed to build textureCache')

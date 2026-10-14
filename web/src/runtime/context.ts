@@ -51,6 +51,10 @@ import {
 } from '@/runtime/documentSnapshot'
 import { projectKernelSaveView, type SaveProjection } from '@/composition/saveProjection'
 import { projectKernelGrids } from '@/composition/kernelProjection'
+import {
+  kernelRenderSourceFaceOf,
+  type KernelRenderSourceFace,
+} from '@/composition/kernelPresentationInputs'
 import { resolveSideTable } from '@/runtime/sideTableResolution'
 import { cloneViewportCameraState, setDocumentEmbedInitialView } from '@/context/embedInitialView'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
@@ -1092,6 +1096,65 @@ export class Context {
   legacyRenderSource(): RuntimeDocument | null {
     // 响应式依赖（消费者是 `.vue` 的 computed ⇒ 必须可追踪）。
     return this.main.doc.value
+  }
+
+  /**
+   * **内核渲染源面**（G4 · S2 第二半；接缝 `legacy-render-source-document` 的（乙）子句）。
+   *
+   * ## 它替代的旧机制
+   *
+   * 渲染链的**定义面 / 逐格说明池 / 材质库输入**原先只能由旧格式渲染视图文档解析
+   * （`runtime/drwMeshPipeline` 的 `doc.serialize()` → `resolveRenderBundle`）。
+   * 本方法把这三样改为**内核内容直出**：帧下标 → 内核对象 id 由装配面给出，
+   * 定义由 `blockGrid` 载荷重建（`composition/kernelPresentationInputs`），
+   * 说明池由逐格 `cellContent[].tooltip` 重聚，材质输入由 `content.resources` 派生。
+   *
+   * ## 为什么它**不是** `legacyRenderSource()` 的改名
+   *
+   * | | `legacyRenderSource()` | 本方法 |
+   * |---|---|---|
+   * | 返回 | 旧格式 `RuntimeDocument`（调用方自己再解析） | **具名三样**（定义/说明/材质输入） |
+   * | 定义来源 | 旧格式 `frames[].structure`，且要求 `isWorldDocument && frames.length>0`（单结构文档**永不**解析出定义） | 内核 `blockGrid` 载荷（单结构/多方块/多帧同一路径） |
+   * | 消费者 | 渲染链（多方块再装配 + 帧为主的旧投影） | 渲染链的**读面**（DRW 优先取它） |
+   *
+   * ⇒ 帧为主的文档上，渲染链**不再**需要旧格式源（DRW 优先读本面）。
+   * 多方块的**再装配**仍要 `doc.multiblockSource`（`composition/kernelAssembly.ts:1763`）——
+   * 那是 G3（body 的内核落点）落地前**已登记**的暂存路径，与本方法无关。
+   *
+   * ## 响应式
+   *
+   * 与 `plainForSave()`/`kernelSaveView()` 同一条：先 `void this.main.doc.value`
+   * 建立对"换文档/装载内核"的依赖，消费方可以是 `computed`。
+   */
+  kernelRenderSourceFace(): KernelRenderSourceFace | null {
+    void this.main.doc.value
+    const kernel = this.kernel
+    if (kernel === null || !kernel.hasAdoptedContent()) return null
+    const kernelDoc = kernel.document()
+    if (kernelDoc === undefined) return null
+    const face = kernel.assemblyFaceOf()
+    if (face !== null) {
+      return kernelRenderSourceFaceOf({
+        scene: kernelDoc.scene,
+        content: kernelDoc.content,
+        frameObjects: face.frameObjects,
+      })
+    }
+    // 缺装配面（测试夹具 / 未接线会话）：按 `scene.order` 的出现序推导帧对象 ——
+    // 与 `kernelGridObjectId` **同一条**取法，故"第 N 帧"两处同义。
+    const ids: string[] = []
+    for (const objectId of kernelDoc.scene.order) {
+      const obj = kernelDoc.scene.objects[objectId]
+      if (obj === undefined || obj.type !== 'block') continue
+      const data = kernelDoc.scene.data[obj.dataId]
+      if (data === undefined || data.payload.kind !== 'blockGrid') continue
+      ids.push(objectId)
+    }
+    return kernelRenderSourceFaceOf({
+      scene: kernelDoc.scene,
+      content: kernelDoc.content,
+      frameObjects: ids,
+    })
   }
 
   /**

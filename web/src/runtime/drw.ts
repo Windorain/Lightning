@@ -29,6 +29,7 @@ import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProv
 import { plansToMaskMeshes } from '@/render/mesh/outlinePlanMasks'
 import { bindViewportCameraSync } from '@/runtime/viewportCamera'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
+import type { KernelRenderSourceFace } from '@/composition/kernelPresentationInputs'
 
 /**
  * 描边规划端口（**结构类型**，与 `composition/kernelOutlinePlanPort` 的实现同形）。
@@ -60,6 +61,13 @@ export type { DrwComputed } from '@/runtime/drwMeshPipeline'
 
 export interface DRWDeps {
   docRef: Ref<RuntimeDocument | null>
+  /**
+   * 内核渲染源面（G4 · S2 第二半）—— 定义 / 说明池 / 材质库输入的**内核直出**读面。
+   *
+   * 在场时本管线的这三样**不再**读 `docRef`（帧为主文档上等于旧格式源脱离渲染链）；
+   * 缺席时才走 `docRef`+`resolveRenderBundle`（多方块再装配的**已登记暂存路径**）。
+   */
+  renderSourceRef?: Ref<KernelRenderSourceFace | null>
   /** 内容重读请求（原 `structEpochRef`；语义见 `drwMeshPipeline` 文件头） */
   contentRefreshTickRef: Ref<number>
   /**
@@ -128,6 +136,7 @@ export class DRW {
     this.outlinePass = new SelectionOutlinePass(new THREE.Vector2(1024, 768))
     this._mesh = createDrwMeshPipeline({
       docRef: deps.docRef,
+      renderSourceRef: deps.renderSourceRef,
       loadStatus: this.loadStatus,
       blockIconCache: this.blockIconCache,
       tooltipPalette: this.tooltipPalette,
