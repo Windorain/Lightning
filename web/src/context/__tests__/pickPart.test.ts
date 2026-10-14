@@ -19,7 +19,8 @@ import type { Context } from '@/runtime/context'
 // 这是**正确的摩擦**：生产读面变了，替身必须同步（`kernelGrid` 不在替身上时
 // 会以 `is not a function` 判红，而不是静默读到空网格）。
 import { makeKernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
-import type { ScenePickBlock } from '@/render/interaction/scenePick'
+// R1-β① C8：形状契约迁出旧实现文件（`render/interaction/scenePick` 本批删除）。
+import type { PickBlock } from '@/presentation/pickResult'
 import { voxelCenterWorld } from '@/pure/vec'
 
 import ae2Fixture from '../../../e2e/fixtures/parts-ae2-multibox.v2.json'
@@ -40,7 +41,7 @@ function pickAt(
   zSlice: number,
   size: { w: number; h: number; d: number },
   local: { x: number; y: number; z: number },
-): ScenePickBlock {
+): PickBlock {
   const center = voxelCenterWorld(column, row, zSlice, size.w, size.h, size.d)
   return {
     kind: 'block',

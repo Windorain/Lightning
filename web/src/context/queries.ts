@@ -14,9 +14,11 @@ import {
   scenePickAllFromPointer,
   pickAtPointer,
   type ScenePickParams,
-  type ScenePickResult,
-  type ScenePickBlock,
 } from '@/render/interaction/scenePick'
+// R1-β① C8：返回/入参形状改吃**独立形状契约**（`presentation/pickResult`）。
+// 旧定义寄居在 `render/interaction/scenePick.ts` 里，而该文件的
+// `pickAtPointer`/`scenePickAllFromPointer` 在本批被删除 ⇒ 消费方不得再依赖它。
+import type { PickBlock, PickEntity, PickResult } from '@/presentation/pickResult'
 // #301 P10f D3：`decodeBakedGeometry` 与 `BakedQuadsGeometry` 的导入**随本文件最后两处
 // legacy 读点一起退出** —— 解码与「两侧几何归一」已收进 `runtime/gridRead`（一处），
 // 不再由消费点各自解码（那正是 15 处会漂移的适配）。`BakedQuad` 仍需要：
@@ -81,7 +83,7 @@ function gridHeight(ctx: Context): number {
 }
 
 /** 统一视口拾取（方块 / 注解） */
-export function pickEntity(ctx: Context, event: PointerEvent, regionId?: string): ScenePickResult {
+export function pickEntity(ctx: Context, event: PointerEvent, regionId?: string): PickResult {
   return pickEntityAtClient(ctx, event.clientX, event.clientY, regionId)
 }
 
@@ -90,7 +92,7 @@ export function pickEntityAtClient(
   clientX: number,
   clientY: number,
   regionId?: string,
-): ScenePickResult {
+): PickResult {
   const base = scenePickBase(ctx, regionId)
   if (!base) return null
   return pickAtPointer({ ...base, clientX, clientY })
@@ -125,7 +127,7 @@ export interface PartPick {
  * 否则返回 null（调用方保持宿主格既有行为，不劣化）。
  * 盒为导出时快照，可越出 [0,1]³（契约 §6.3）；命中规则见 pure/partHit.ts。
  */
-export function pickPartForScenePick(ctx: Context, picked: ScenePickBlock): PartPick | null {
+export function pickPartForScenePick(ctx: Context, picked: PickBlock): PartPick | null {
   if (!picked.point) return null
   // #301 P10f D3（R5）：网格读面（`partsAt` 走内核 `cellContent.parts`）。
   const grid = ctx.kernelGrid(ctx.getFrameIndex())
@@ -143,7 +145,7 @@ export function pickPartForScenePick(ctx: Context, picked: ScenePickBlock): Part
 }
 
 /** 指针位置穿透的全部实体候选（去重、按深度排序），用于轮换拾取 */
-export function pickAll(ctx: Context, event: PointerEvent, regionId?: string) {
+export function pickAll(ctx: Context, event: PointerEvent, regionId?: string): readonly PickEntity[] {
   const base = scenePickBase(ctx, regionId)
   if (!base) return []
   const results = scenePickAllFromPointer({
@@ -152,12 +154,14 @@ export function pickAll(ctx: Context, event: PointerEvent, regionId?: string) {
     clientY: event.clientY,
   })
   const h = gridHeight(ctx)
-  for (const r of results) {
-    if (r.kind === 'block' && r.row !== undefined) {
-      r.row = h > 0 ? structureRowToWorldY(r.row, h) : r.row
-    }
-  }
-  return results
+  // ⚠️ 形状契约的字段是**只读**的（`presentation/pickResult`）⇒ 结构行号 → 世界 Y
+  // 的换算必须**造新对象**而不是原地改 `row`（旧写法 `r.row = …` 在只读对象上会抛
+  // TypeError，而不是静默失效）。
+  return results.map((r) =>
+    r.kind === 'block' && r.row !== undefined
+      ? { ...r, row: h > 0 ? structureRowToWorldY(r.row, h) : r.row }
+      : r,
+  )
 }
 
 /**

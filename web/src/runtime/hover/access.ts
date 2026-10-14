@@ -5,7 +5,9 @@ import { structureRowToWorldY } from '@/pure/vec'
 import { REGION } from '@/runtime/regionIds'
 import type { ViewportBlockHover, ViewportHoverState } from '@/runtime/hover/state'
 import { requireViewportHover } from '@/runtime/hover/state'
-import type { ScenePickResult } from '@/render/interaction/scenePick'
+// R1-β① C8：拾取结果形状改吃**独立形状契约**（`presentation/pickResult`）——
+// 旧定义寄居在 `render/interaction/scenePick.ts`（要被删除的旧实现文件）里。
+import type { PickResult } from '@/presentation/pickResult'
 import type { PartTooltipInfo } from '@/pure/tooltipResolution'
 
 export function blockRefFromViewportHover(ctx: Context, vb: ViewportBlockHover | null): BlockRef | null {
@@ -34,7 +36,7 @@ export function createWorkbenchHoverAnnotationIdRef(ctx: Context): ComputedRef<s
 /** 将拾取结果写入 Region.state.hover（Embed / Workbench / Wiki 共用） */
 export function applyRegionHoverPick(
   hover: ViewportHoverState,
-  picked: ScenePickResult,
+  picked: PickResult,
   clientX: number,
   clientY: number,
   /** P2.2 部件命中快照（由调用方经 pickPartForScenePick 解析；缺省 = 宿主格命中） */
