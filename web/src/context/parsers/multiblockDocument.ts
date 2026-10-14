@@ -984,7 +984,7 @@ export function parseMultiblockDeclaration(inner: Record<string, unknown>): Mult
  * 导出以便 UI（T2.4/T2.5）与装配器（T2.2）用同一把钥匙定位变体。
  */
 export function multiblockVariantKey(
-  decl: Pick<MultiblockDecl, 'channels'>,
+  decl: { readonly channels: readonly { readonly key: string }[] },
   values: Record<string, number>,
   runstate: string,
   totalTier: number,
