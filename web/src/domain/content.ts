@@ -193,10 +193,38 @@ export function resourceManifestDigest(resources: readonly ContentResource[]): n
 }
 
 /**
- * 资源清单规范化：按身份去重 + 稳定排序。
+ * 资源清单规范化：按身份去重 + **按身份里的槽位数值**排序（稳定、与输入顺序无关）。
  *
  * 同一 `assetId` 以**两个不同内容版本**出现时**不**合并（那会丢掉其中一个版本）——
  * 与 `adapters/files/projectFormat#normalizeAssets` 同一口径。
+ *
+ * ## ⚠️ 为什么排序键**必须**是槽位数值，不是整串字典序（G4+G5 item 1 实测修复）
+ *
+ * 身份键形如 `` `${assetId}\u0000${contentVersion}` ``（`domain/materials#resourceCacheKey`），
+ * 旧实现直接对**整串**做 `localeCompare`。而 `assetId` 的常见形态是 `<kind>:<槽位>`（如
+ * `material:7`）⇒ 字典序把槽位当**字母**比：`material:10` 排在 `material:2` **之前**。
+ *
+ * 后果不是"顺序难看"，而是**静默贴错图**：几何四边形的 `materialIndex` 指向的正是
+ * 调色盘/资源表的**槽位**（`render/schema/types.ts:294`「BakedQuad.materialIndex 直接指向此数组」，
+ * 契约在 `composition/kernelTextureResources.ts:182-190`），故位置 ≠ 槽位时
+ * `materialPalette[q.materialIndex]` 与 `resources[materialIndex]` 一起绑错。
+ * 生产装配实测（真信封 `structuredata-exported-envelope.json`，62 条材质）：
+ * **位置 ≠ 槽位 61/62**，逐 quad **2051/2165** 绑到与文件不同的材质；4 条材质的
+ * 多方块夹具恰好同序（单数字前缀）⇒ 这条 bug 在多方块-only 证据下不可见。
+ *
+ * ## 两条不变量的分工（修复后同时成立）
+ *
+ * 1. **与输入顺序无关**（`documentContent` 的注释依赖它：同一份清单两种排列 ⇒ 同一内容身份）：
+ *    去重后按**身份键的全序**排序 —— 全序 ⇒ 排列无关，这条不因换键而改变；
+ * 2. **下标即槽位**（`kernelTextureResources` 的绑定契约）：`<kind>:<n>` 按 `n` **数值**升序。
+ *
+ * ## 无法解析槽位的身份落在哪（**显式**口径，不是"碰巧"）
+ *
+ * `assetId` 不是 `<kind>:<十进制槽位>` 形态（无冒号 / 尾段非纯数字 / 冒号在首字符）时，
+ * 该条排在同一 `kind` 的可解析条**之后**；两条都不可解析时，回**旧口径**
+ * （整串 `localeCompare`）作稳定 tiebreak —— 保住既有非槽位 id 的相对顺序，
+ * 把行为变化**限制在**槽位 id 上。槽位相等（同 `assetId` 两个内容版本）同样按旧口径
+ * tiebreak，故"哪个版本在前"与修复前一致。
  */
 export function normalizeResources(resources: readonly ContentResource[]): readonly ContentResource[] {
   const seen = new Map<string, ContentResource>()
@@ -204,7 +232,44 @@ export function normalizeResources(resources: readonly ContentResource[]): reado
     const key = resourceIdentity(r)
     if (!seen.has(key)) seen.set(key, r)
   }
-  return Object.freeze([...seen.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v))
+  return Object.freeze(
+    [...seen.entries()].sort(([a], [b]) => compareResourceIdentities(a, b)).map(([, v]) => v),
+  )
+}
+
+/**
+ * 从资源**身份键**里解析槽位（`<kind>:<十进制槽位>` → `{kind, slot}`）；解析不出回 `null`。
+ *
+ * 身份键 = `` `${assetId}\u0000${contentVersion}` ``，故只取 NUL 之前的 `assetId` 段。
+ */
+function parseResourceSlot(identity: string): { readonly kind: string; readonly slot: number } | null {
+  const nul = identity.indexOf('\u0000')
+  const assetId = nul < 0 ? identity : identity.slice(0, nul)
+  const colon = assetId.lastIndexOf(':')
+  if (colon <= 0) return null
+  const tail = assetId.slice(colon + 1)
+  if (!/^\d+$/.test(tail)) return null
+  const slot = Number(tail)
+  return Number.isSafeInteger(slot) ? { kind: assetId.slice(0, colon), slot } : null
+}
+
+/**
+ * 资源身份键的**全序**比较器（见 `normalizeResources` 的口径说明）。
+ *
+ * 可解析槽位的条先按 `kind`、再按**槽位数值**排序；不可解析的排在其后。
+ * 两处 tiebreak（同槽位 / 都不可解析）都用整串 `localeCompare` —— 与修复前同口径。
+ */
+function compareResourceIdentities(a: string, b: string): number {
+  const ka = parseResourceSlot(a)
+  const kb = parseResourceSlot(b)
+  if (ka !== null && kb !== null) {
+    if (ka.kind !== kb.kind) return ka.kind < kb.kind ? -1 : 1
+    if (ka.slot !== kb.slot) return ka.slot - kb.slot
+    return a.localeCompare(b)
+  }
+  if (ka !== null) return -1
+  if (kb !== null) return 1
+  return a.localeCompare(b)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
