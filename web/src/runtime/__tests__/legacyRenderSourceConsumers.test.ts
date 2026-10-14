@@ -29,8 +29,14 @@
  * ⚠️ **剩余 1 处的性质不同**（诚实登记）：`useKernelChannels` 需要**多方块声明的内层 body**
  * 来做「按当前通道取值重新装配」与「构造渲染视图文档」，而该 body 今天由旧文档承载
  * （`composition/kernelAssembly#assembleKernelDocument` 自己就吃 `RuntimeDocument`）
- * ⇒ 不是"渲染源回落"，而是**内核承载缺口**（最后一条断言把它钉成可判定事实）。
- * 删除 `Context#legacyRenderSource()` 本体**必须等它迁移完成**。
+ * ⇒ 不是"渲染源回落"，而是**内核承载缺口**。
+ *
+ * ✅ **该缺口已由 R2-1a（G1）清掉**：`domain/content#DocumentContent` 现有具名
+ * `multiblock: MultiblockDeclaration`（复用 `domain/multiblockDocument` 的承载），
+ * 由 `adapters/files/multiblockDeclaration` 从**已解析**声明装配，并**进内容身份**
+ * （`domain/document#contentDigestOf` 已含 `content`）。最后一条断言即该 DONE 信号
+ * （翻绿），另附负对照证明它有区分力。**删除 `Context#legacyRenderSource()` 本体**
+ * 仍是 G4（需 A 区空闲）—— 迁移消费点与删本体是两件事。
  *
  * ## 区分力（负对照）
  *
@@ -88,6 +94,41 @@ function productionCallSites(): { file: string; line: number }[] {
   return hits
 }
 
+/**
+ * `domain/content.ts` 的源码文本（**CRLF 归一化**后；AGENTS.md 铁律 6：本仓新鲜检出是 CRLF）。
+ */
+function readContentSource(): string {
+  return fs.readFileSync(path.join(SRC, 'domain', 'content.ts'), 'utf8').replace(/\r\n/g, '\n')
+}
+
+/**
+ * **G1 的 DONE 判据本体**：`domain/content.ts` 是否具名承载多方块声明。
+ *
+ * 为什么抽成函数：负对照与正判据必须用**同一个判据**。两处各写一份正则，
+ * 负对照验的就是"另一个判据"，它红了也不能说明本判据有区分力
+ * （本项目已有"判据换了形态后负对照验的是旧形态"的教训）。
+ *
+ * 四条子判据各自对应一种**会被静默违反**的退化形态：
+ *
+ *  1. `readonly multiblock: MultiblockDeclaration` —— 字段在且**类型是复用来的承载**
+ *     （退化形态：字段缺失，或写成 `unknown`/`Record<string, unknown>` 字段袋）；
+ *  2. 从 `./multiblockDocument` 具名导入 —— 形状复用同一契约
+ *     （退化形态：在 `content.ts` 里另立一份形状 ⇒ 出现第二套判据）；
+ *  3. `EMPTY_CONTENT` 里**显式填**空值 （退化形态：字段可选、空值靠 `undefined` 冒充「无」）；
+ *  4. `documentContent()` 的缺省也是**同一个常量**
+ *     （退化形态：缺省写第二份"空对象" ⇒ 同一语义两条构造路径得到两种摘要）。
+ */
+function contentCarriesMultiblock(text: string): boolean {
+  const declared = /^[ \t]*readonly multiblock: MultiblockDeclaration\b/m.test(text)
+  const imported =
+    /import \{[^}]*\bMultiblockDeclaration\b[^}]*\} from '\.\/multiblockDocument'/.test(text)
+  const emptyFilled =
+    /export const EMPTY_CONTENT: DocumentContent = Object\.freeze\(\{[\s\S]*?\bmultiblock: EMPTY_MULTIBLOCK_DECLARATION\b/.test(text)
+  const defaulted =
+    /export function documentContent\([\s\S]*?\bmultiblock: init\.multiblock \?\? EMPTY_MULTIBLOCK_DECLARATION\b/.test(text)
+  return declared && imported && emptyFilled && defaulted
+}
+
 describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数（接缝 `legacy-render-source-document`）', () => {
   it('生产消费点 = **1**，且**恰好**是这一处（新增一处即判红）', () => {
     const files = [...new Set(productionCallSites().map((h) => h.file))].sort()
@@ -139,18 +180,29 @@ describe('R1-β① C5 · `Context#legacyRenderSource()` 的生产消费点计数
     ).toBe(false)
   })
 
-  it('**前置缺口登记**：内核 `DocumentContent` 不承载多方块声明 ⇒ 剩余 2 处的删除条件', () => {
-    const content = fs
-      .readFileSync(path.join(SRC, 'domain', 'content.ts'), 'utf8')
-      .replace(/\r\n/g, '\n')
-    // 反证式断言：只要 `DocumentContent` 还没有具名 `multiblock` 字段，
-    // 剩余两处消费者**不可能**在不新建回落的前提下迁移。它把"缺口"钉成可判定事实。
+  it('**DONE 信号**：内核 `DocumentContent` 已具名承载多方块声明（剩余 1 处的删除条件已满足）', () => {
     expect(
-      /^\s*readonly multiblock\b/m.test(content),
-      'DONE 信号：一旦 `DocumentContent` 承载多方块声明（具名 `multiblock` 字段），'
-      + '本断言翻红即为"剩余 2 处可以迁了"的信号 —— 届时一并改写 '
-      + '`useKernelChannels.ts` / `workbench-rna.ts`，把第 1 条断言改成 `toEqual([])`，'
-      + '再删除 `Context#legacyRenderSource()` 本体',
-    ).toBe(false)
+      contentCarriesMultiblock(readContentSource()),
+      'DONE 信号翻绿 = `useKernelChannels.ts:199` 的迁移阻塞项（内核无多方块声明的内层 body）已清 —— '
+      + '届时一并改写 `useKernelChannels.ts` / `workbench-rna.ts`，把第 1 条断言改成 `toEqual([])`，'
+      + '再删除 `Context#legacyRenderSource()` 本体（G4，需 A 区空闲）',
+    ).toBe(true)
+  })
+
+  it('**负对照**：删掉该承载字段 ⇒ 上一条判据必须判红（证明它有区分力，不是恒真）', () => {
+    const source = readContentSource()
+    // 注入 ①：删掉 `DocumentContent` 上的具名字段（正是"缺口复现"的形态）。
+    const fieldRemoved = source.replace(/^[ \t]*readonly multiblock: MultiblockDeclaration[ \t]*$/m, '')
+    expect(fieldRemoved, '前提：注入必须真的改动了生产文本').not.toBe(source)
+    expect(contentCarriesMultiblock(fieldRemoved), '删掉承载字段后必须判红').toBe(false)
+
+    // 注入 ②：字段仍在，但缺省值改回裸 `init.multiblock`（即允许 `undefined` 冒充「无」）
+    // ⇒ 同一语义会出现两种摘要。只验"字段存在"的判据抓不住这一形态。
+    const undefinedLeak = source.replace(
+      /multiblock: init\.multiblock \?\? EMPTY_MULTIBLOCK_DECLARATION/,
+      'multiblock: init.multiblock',
+    )
+    expect(undefinedLeak, '前提：第二处注入必须真的改动了生产文本').not.toBe(source)
+    expect(contentCarriesMultiblock(undefinedLeak), '缺省值允许 `undefined` 后必须判红').toBe(false)
   })
 })
