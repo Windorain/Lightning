@@ -33,8 +33,9 @@
 import type { DomainError, Result } from '@/domain/errors'
 import { err, unsupportedOperation } from '@/domain/errors'
 import type { ExportRequest } from '@/domain/captureSpec'
-import type { ExportDiagnostic } from '@/application/exportPlan'
-import { preflightError, preflightExport, type EncoderPort, type ExportKind, type ExportPreflight, type ImageEncoding, type RenderedFrame } from '@/application/exportPlan'
+import type { AssetNeedDerivation, ExportAssetManifest, ExportDiagnostic } from '@/application/exportPlan'
+import { exportAssetManifest, preflightError, preflightExport, type EncoderPort, type ExportKind, type ExportPreflight, type ImageEncoding, type RenderedFrame } from '@/application/exportPlan'
+import { packageExportArtifact, type PackagedArtifact } from '@/application/exportAssetCarrier'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 端口
@@ -86,6 +87,12 @@ export interface ExportJobOptions {
   readonly allowLossy?: boolean
   /** 进度回调（可选；纯观察，不驱动业务）。 */
   readonly onProgress?: (p: ExportProgress) => void
+  /**
+   * **资源需求推导记录**（①的显式报告）。缺省 ⇒ 作业在产物里标
+   * `assembled: false` + `reason: 'asset-needs-derivation-absent'`，
+   * **绝不**把"没拿到推导记录"读成"无需资源"（那是本条接缝的假绿形态）。
+   */
+  readonly assetNeeds?: AssetNeedDerivation
 }
 
 /**
@@ -96,12 +103,20 @@ export interface ExportJobOptions {
 export type JobOutcome =
   | {
       readonly status: 'completed'
+      /** **最终产物字节**（已按载体装入清单；见 `carrier`）。 */
       readonly bytes: Uint8Array
       readonly mediaType: string
       /** 是否走了显式有损模式（由 `allowLossy` 显式开启；产物据 `capabilityLoss` 标记）。 */
       readonly lossy: boolean
       readonly releasedFor: number
       readonly framesRendered: number
+      /** ② 资源清单**随产物同行**（`entries` 即请求里那份冻结清单）。 */
+      readonly assetManifest: ExportAssetManifest
+      /** ② 清单在产物里的载体形态与位置（`in-package-entry` / `embedded-field` / `sidecar`）。 */
+      readonly carrier: PackagedArtifact['carrier']
+      readonly manifestLocation: string
+      /** 载体回落原因（非空 ⇒ 请求的载体没做成，已如实报告，**不是**静默降级）。 */
+      readonly carrierFallbackReason: string | null
     }
   | { readonly status: 'cancelled'; readonly releasedFor: number; readonly framesRendered: number }
   | { readonly status: 'failed'; readonly diagnostics: readonly ExportDiagnostic[]; readonly releasedFor: number; readonly error: DomainError }
@@ -249,13 +264,25 @@ export class ExportJob {
 
       // 只在这里产出产物。`lossy` **显式**标记：有损模式只能在 `allowLossy === true` 时走到。
       this.report('done', this.framesRendered)
+      // ② 清单随产物同行：先从**请求里那份冻结清单**组清单（不重算、不再问编辑器），
+      //    再按产物形态装入（单文件字节不变，多文件走包内条目）。
+      const assetManifest = exportAssetManifest(request.assets, this.opts.assetNeeds)
+      const packaged = packageExportArtifact({
+        mediaType: mediaTypeFor(this.opts.kind, this.opts.encoding ?? 'png'),
+        bytes: encoded.value,
+        manifest: assetManifest,
+      })
       return Object.freeze({
         status: 'completed' as const,
-        bytes: encoded.value,
-        mediaType: mediaTypeFor(this.opts.kind, this.opts.encoding ?? 'png'),
+        bytes: packaged.bytes,
+        mediaType: packaged.mediaType,
         lossy: request.capabilityLoss.length > 0 && this.opts.allowLossy === true,
         releasedFor: this.releasedFor,
         framesRendered: this.framesRendered,
+        assetManifest,
+        carrier: packaged.carrier,
+        manifestLocation: packaged.manifestLocation,
+        carrierFallbackReason: packaged.fallbackReason,
       })
     } finally {
       // 四条路径（完成/取消/失败/抛错）都会到这里；`release()` 必须幂等。

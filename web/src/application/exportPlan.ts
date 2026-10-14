@@ -56,6 +56,8 @@ import type { LegacyExportDiagnostic } from '@/domain/geometry'
 // ── P5 呈现侧的**已交付契约**（本层只消费，不重定义）──
 import type { AssetId } from '@/presentation/assetIdentity'
 import { preflightRequiredAssets, type AssetStateStore } from '@/presentation/assetState'
+import { compileScene } from '@/presentation/compileScene'
+import type { PresentationInputs } from '@/presentation/evaluationKey'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 输出形态与编码端口
@@ -148,6 +150,11 @@ export interface CaptureInput {
   readonly spec: CaptureSpec
   /** 资源需求（可选：缺省时由 `deriveAssetNeeds` 从呈现编译反推）。 */
   readonly assets?: readonly ExportAssetNeed[]
+  /**
+   * **已装配**的图元清单（生产装配的产出）。给定时 `assets` 缺省即由它反推，
+   * 且**推不出就是请求不可构造**（`err`）—— 不允许落成"清单为空"的请求。
+   */
+  readonly presentation?: PresentationInputs
   /** 已安装的时间源（缺省仅场景时间）。 */
   readonly timeSources?: CaptureTimeSources
 }
@@ -182,7 +189,25 @@ export function planExportRequest(input: CaptureInput): Result<ExportRequest> {
     animation: input.animation,
   }
 
-  const assets = input.assets ?? deriveAssetNeeds(input.scene, input.animation, frames.value, input.spec)
+  let assets: readonly ExportAssetNeed[]
+  if (input.assets !== undefined) {
+    assets = input.assets
+  } else if (input.presentation !== undefined) {
+    // ① 已装配 ⇒ 反推真实需求。**推不出不等于"无需资源"** ⇒ 请求不可构造。
+    const derived = deriveAssetNeeds({
+      scene: input.scene,
+      animation: input.animation,
+      frames: frames.value,
+      spec: input.spec,
+      presentation: input.presentation,
+    })
+    if (derived.status !== 'derived') {
+      return err(unsupportedOperation({ reason: derived.reason, derivation: derived.status }))
+    }
+    assets = derived.assets
+  } else {
+    assets = Object.freeze([])
+  }
 
   return ok(
     freezeExportRequest({
@@ -201,6 +226,53 @@ export function planExportRequest(input: CaptureInput): Result<ExportRequest> {
 }
 
 /**
+ * 资源需求的**推导结论**（①：不得用空清单冒充"无需资源"）。
+ *
+ * 为什么是判别式联合而不是"返回一个数组"：空数组有两个**语义完全不同**的来源 ——
+ * 「装配过、真的不需要资源」与「根本没装配」。用数组表达时两者不可区分，于是
+ * `preflightRequiredAssets()` 在第二种情况下按定义没有可阻塞项 ⇒ A29 的
+ * 「缺必需资源时预检失败」永远不触发（假绿，见 `composition/seams.ts` 的
+ * `export-asset-manifest-unwired` 登记）。
+ * ⇒ 非 `derived` 分支**必带** `reason` 且 `assets` 恒为空，消费方无路可走地
+ * 必须显式处理"没有清单"这件事。
+ */
+export type AssetNeedDerivation =
+  | {
+      readonly status: 'derived'
+      readonly assembled: true
+      readonly reason: null
+      readonly assets: readonly ExportAssetNeed[]
+    }
+  | {
+      readonly status: 'not-assembled'
+      readonly assembled: false
+      readonly reason: string
+      readonly assets: readonly []
+    }
+  | {
+      readonly status: 'compile-failed'
+      readonly assembled: true
+      readonly reason: string
+      readonly assets: readonly []
+    }
+
+/** 未装配时的原因码（消费方据此报告"为什么没有清单"）。 */
+export const ASSET_NEEDS_NOT_ASSEMBLED = 'presentation-not-assembled'
+
+/** `deriveAssetNeeds` 的输入（请求组装的同源值 + 可选的已装配图元清单）。 */
+export interface DeriveAssetNeedsInput {
+  readonly scene: Scene
+  readonly animation: AnimationState
+  readonly frames: readonly CaptureTime[]
+  readonly spec: CaptureSpec
+  /**
+   * **已装配**的图元清单（生产装配产出，如 `composition/kernelPresentationInputs`）。
+   * 缺省 ⇒ 本函数**不伪造**图元，返回 `not-assembled` 并带上原因。
+   */
+  readonly presentation?: PresentationInputs
+}
+
+/**
  * 从**求值/呈现编译**反推资源需求（#249 §19.4「资源清单」的产出方式）。
  *
  * 为什么必须反推而不是"让调用方列一份"：A29 的负对照包含「缺必需资源时预检失败」，
@@ -210,30 +282,66 @@ export function planExportRequest(input: CaptureInput): Result<ExportRequest> {
  * 本函数消费 P5 已交付的 `compileScene`（同一求值器的呈现半边），
  * 它**不**重新解析旧文件（§19.4「不能绕道重新解析旧文件来获得另一份几何语义」）。
  */
-export function deriveAssetNeeds(
-  scene: Scene,
-  animation: AnimationState,
-  frames: readonly CaptureTime[],
-  spec: CaptureSpec,
-): readonly ExportAssetNeed[] {
-  void scene
-  void animation
-  void frames
-  void spec
-  // ───────────────────────────────────────────────────────────────────────────
-  // 诚实状态（不得含糊）：P5 交付的 `compileScene` 的输入是
-  // `PresentationInputs.primitives`（`EvaluatedPrimitive[]`），而"文档场景 → 图元"这一步
-  // 在 #249 §4 的分层里属于**求值层 + 呈现接线**（`presentation/three` 侧的装配，
-  // 由 #261 P10 集成闭环接线）。本批（P9）**没有**生产调用方持有该装配后的图元清单，
-  // 故此处**不**伪造图元：空清单反推出的资源需求也是空的。
-  //
-  // 为什么不做"看起来能跑"的近似实现：把空需求当成"无需资源"会让 A29 的
-  // 「缺必需资源时预检失败」在真实场景下**永远不触发**，从而制造假绿；
-  // 而 G4 的预检入口 `preflightRequiredAssets()` 是**资源清单驱动**的 ——
-  // 清单为空时它按定义没有可阻塞项。⇒ 正确的形态是：清单由调用方（装配好的导入器）
-  // 提供，本函数在未装配时返回空并**在汇报中登记该接缝**。
-  // ───────────────────────────────────────────────────────────────────────────
-  return Object.freeze([])
+export function deriveAssetNeeds(input: DeriveAssetNeedsInput): AssetNeedDerivation {
+  const { presentation } = input
+  // `scene`/`animation`/`frames`/`spec` 是请求组装的**同源**输入，但本函数**不**从它们
+  // 推导资源：§19.4 明文「不得绕道重新解析旧文件来获得另一份几何语义」。显式 `void`
+  // 表明"刻意未用"，而不是漏用。
+  void input.scene
+  void input.animation
+  void input.frames
+  void input.spec
+
+  if (presentation === undefined) {
+    // ① 未装配 ⇒ **保持空 + 显式报告未装配**（绝不冒充"无需资源"）。
+    return Object.freeze({
+      status: 'not-assembled' as const,
+      assembled: false as const,
+      reason: ASSET_NEEDS_NOT_ASSEMBLED,
+      assets: Object.freeze([]) as readonly [],
+    })
+  }
+
+  const compiled = compileScene(presentation)
+  if (!compiled.ok) {
+    return Object.freeze({
+      status: 'compile-failed' as const,
+      assembled: true as const,
+      reason: `compile-failed:${compiled.error.code}`,
+      assets: Object.freeze([]) as readonly [],
+    })
+  }
+
+  const needs: { readonly assetId: string; readonly contentVersion: string; readonly required: boolean; readonly locator: string }[] = []
+  for (const payload of compiled.value.payloads) {
+    // 批次材料的身份就是它所依赖资源的身份（`MaterialDescriptor.id` 的文档口径：
+    // 「材质身份（内容身份；纹理替换后身份变）」）。装配层没有解析获取位置 ⇒ `locator`
+    // 留空（**不伪造 URL**；`locator` 按契约不参与身份判定）。
+    needs.push({
+      assetId: payload.material.id,
+      contentVersion: payload.material.version,
+      required: true,
+      locator: '',
+    })
+  }
+
+  if (needs.length === 0) {
+    // 编译通过但**零批次** ⇒ 场景内没有可绘制内容。这**不是**"无需资源"，故走
+    // `compile-failed` 分支并带原因，消费方不可能把它读成"清单为空所以不需要资源"。
+    return Object.freeze({
+      status: 'compile-failed' as const,
+      assembled: true as const,
+      reason: 'compiled-no-payloads',
+      assets: Object.freeze([]) as readonly [],
+    })
+  }
+
+  return Object.freeze({
+    status: 'derived' as const,
+    assembled: true as const,
+    reason: null,
+    assets: normalizeAssetNeeds(needs),
+  })
 }
 
 /**
@@ -269,6 +377,67 @@ export function assetManifestDigest(assets: readonly ExportAssetNeed[]): number 
       .sort()
       .join('\u0000'),
   )
+}
+
+/** 清单规范串的每一行（`assetId@contentVersion:req|opt`），**已排序**。 */
+export function assetManifestLines(assets: readonly ExportAssetNeed[]): readonly string[] {
+  return Object.freeze(
+    assets.map((a) => `${a.assetId}@${a.contentVersion}:${a.required ? 'req' : 'opt'}`).sort(),
+  )
+}
+
+/** 清单规范串（①③ 的机械对账口径：排序行以 `\n` 连接，**不含**任何序号）。 */
+export function assetManifestCanonicalText(assets: readonly ExportAssetNeed[]): string {
+  return assetManifestLines(assets).join('\n')
+}
+
+/** 清单格式版本（随产物同行的载体里写死，使消费方能机械识别）。 */
+export const EXPORT_ASSET_MANIFEST_VERSION = 'export-asset-manifest/1'
+
+/**
+ * **导出资源清单**（②：随产物同行的实体）。
+ *
+ * 三件事一体，缺一不可：
+ *  1. `entries` —— 请求里那份**冻结**的清单本身（不是再算一份）；
+ *  2. `digest` / `canonical` —— 机械对账口径（等于 `assetManifestDigest(entries)`）；
+ *  3. `assembled` / `reason` —— 该清单是**装配反推**得来的，还是"根本没有清单"。
+ *     未装配时 `reason` 非空 ⇒ 消费方不可能把空清单读成"无需资源"。
+ */
+export interface ExportAssetManifest {
+  readonly manifestVersion: typeof EXPORT_ASSET_MANIFEST_VERSION
+  readonly assembled: boolean
+  readonly reason: string | null
+  readonly digest: number
+  readonly canonical: string
+  readonly entries: readonly ExportAssetNeed[]
+}
+
+/**
+ * 组一份清单。
+ *
+ * `derivation` 缺省 = 消费方**没有**装配来源（例如清单位于请求里但推导记录未随行）
+ * ⇒ 如实标 `assembled: false` + `reason: 'asset-needs-derivation-absent'`，
+ * 而不是看"清单空不空"来猜（那正是本条接缝的假绿形态）。
+ */
+export function exportAssetManifest(
+  assets: readonly ExportAssetNeed[],
+  derivation?: AssetNeedDerivation,
+): ExportAssetManifest {
+  const assembled = derivation === undefined ? false : derivation.assembled
+  const reason =
+    derivation === undefined
+      ? 'asset-needs-derivation-absent'
+      : derivation.status === 'derived'
+        ? null
+        : derivation.reason
+  return Object.freeze({
+    manifestVersion: EXPORT_ASSET_MANIFEST_VERSION,
+    assembled,
+    reason,
+    digest: assetManifestDigest(assets),
+    canonical: assetManifestCanonicalText(assets),
+    entries: Object.freeze([...assets]),
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
