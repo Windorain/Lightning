@@ -68,7 +68,7 @@ function makePipeline(input: {
 }) {
   const structureDefinition = shallowRef<never | null>(null)
   const tooltipPalette = shallowRef<string[]>([])
-  const loadStatus = ref<LoadStatus>('idle')
+  const loadStatus = ref<LoadStatus>('loading')
   const pipeline = createDrwMeshPipeline({
     // **旧源缺席**：本判据要证"只有内核面也够"。
     docRef: ref(null),
