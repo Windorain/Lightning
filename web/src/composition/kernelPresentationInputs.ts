@@ -59,6 +59,7 @@ import type {
 } from '@/presentation/evaluationKey'
 import { projectGridCells } from '@/composition/kernelProjection'
 import { structureMaterialPrimitives } from '@/runtime/presentationAdapter'
+import type { LayerPreviewMode } from '@/render/data/layerPreview'
 
 /**
  * 网格定义的类型：从 `structureMaterialPrimitives` 的**入参**派生。
@@ -175,6 +176,18 @@ export function kernelPresentationInputs(input: {
   readonly scene: Scene
   readonly content: DocumentContent
   readonly key: EvaluationKey
+  /**
+   * **分层预览**（R1-β① C8 补的形状，不是新政策）。
+   *
+   * 旧画面路径（`drwMeshPipeline` 的 `blockMeshProvider.build(def, lib, {layerPreview})`）
+   * 与旧拾取都吃这个模式；C8 把画面切到本模块后，它是**唯一**的层过滤输入。
+   * C8 之前这里硬编码 `'all'` —— 那时画面不由本链产出，所以无人察觉；一旦画面切过来，
+   * 硬编码会让「分层预览」这个既有能力**静默失效**（选了 Y=3 仍画全部层）。
+   *
+   * 过滤语义不在此处重写：`structureMaterialPrimitives` 内部委托**渲染路径同一个**
+   * 收集器（`runtime/presentationAdapter`），故"哪一层可见"只有一处定义。
+   */
+  readonly layerPreview: LayerPreviewMode
 }): {
   readonly inputs: PresentationInputs
   readonly skipped: readonly { readonly objectId: string; readonly reason: string }[]
@@ -221,7 +234,7 @@ export function kernelPresentationInputs(input: {
     // `objectId` 逐组相同 —— 分组不改变**对象身份**（#249 §3.3）。
     const groups = structureMaterialPrimitives({
       definition,
-      layerPreview: 'all',
+      layerPreview: input.layerPreview,
       materialTint: 0xffffff,
     })
     if (groups.length === 0) {

@@ -63,6 +63,7 @@ import type { TextureBinding, TextureResource } from '@/presentation/textureBind
 import { textureBindingsOf } from '@/composition/kernelTextureResources'
 import { kernelPresentationInputs } from '@/composition/kernelPresentationInputs'
 import { kernelAnnotationInputs } from '@/composition/kernelAnnotationInputs'
+import type { LayerPreviewMode } from '@/render/data/layerPreview'
 
 /** 一次 `apply` 的结果（**显式**报告，不静默吞）。 */
 export interface PresenterApplyOutcome {
@@ -165,6 +166,21 @@ export class PresenterSession {
    */
   private needsRebuild = false
 
+  /**
+   * **分层预览**（R1-β① C8）：呈现侧的**可见层过滤**，由视口接线按当前层设置。
+   *
+   * ## 为什么它是会话状态而不是求值键的一维
+   *
+   * `EvaluationKey`（契约 §4）是**冻结**类型（六个维度逐字来自契约文本），
+   * 而"看哪一层"不是求值输入、是**呈现过滤**（与 legacy `blockMeshProvider.build(def, lib,
+   * {layerPreview})` 同性质）。把它塞进冻结键会同时改契约与核心类型 ——
+   * 那是 #385 明令要走 GF 登记的事，而本批只需要把既有能力接住。
+   *
+   * ⚠️ 它**进**内容身份（`contentIdentityOf` 的 `lp:` 段）：同一文档换一层必须重编，
+   * 否则"选了 Y=3 画面不动"。缺省 `'all'` = 不分层（导出/探针等非视口调用方的语义）。
+   */
+  private layerPreview: LayerPreviewMode = 'all'
+
   /** 注解/描边的呈现子树（与批次同根，故一个会话只有一个挂载点）。 */
   private readonly overlay: OverlayPresenter
   private readonly root = new THREE.Group()
@@ -229,7 +245,7 @@ export class PresenterSession {
     readonly content: DocumentContent
     readonly key: EvaluationKey
   }): PresenterApplyOutcome {
-    const identity = contentIdentityOf(input.scene, input.content, input.key)
+    const identity = contentIdentityOf(input.scene, input.content, input.key, this.layerPreview)
     if (!this.needsRebuild && identity === this.lastIdentity && this.compiled !== null) {
       // 内容身份未变：**不**重编、**不**重传。但仍要更新当前键 ——
       // 机位变化会改 `viewProjection`（非结构维度），拾取仍应视为"当前"
@@ -254,6 +270,7 @@ export class PresenterSession {
       scene: input.scene,
       content: input.content,
       key: input.key,
+      layerPreview: this.layerPreview,
     })
     const compiled = compileScene(produced.inputs)
     if (!compiled.ok) {
@@ -323,6 +340,16 @@ export class PresenterSession {
   /** 装纹理绑定（材质身份 → 纹理内容身份；五态链的消费端）。 */
   setTextureBindings(bindings: ReadonlyMap<string, TextureBinding>): void {
     this.presenter.setTextureBindings(bindings)
+  }
+
+  /**
+   * **设置分层预览**（呈现侧过滤；见 `layerPreview` 字段的说明）。
+   *
+   * 只改"下一次 apply 的可见层"：它进内容身份 ⇒ 下一次 `applyKernelDocument`
+   * 必然重编（同一文档换一层也是**不同画面**）。不回读旧值 ⇒ 没有第二份权威。
+   */
+  setLayerPreview(mode: LayerPreviewMode): void {
+    this.layerPreview = mode
   }
 
   /**
@@ -673,8 +700,14 @@ export class PresenterSession {
  * 用"键集"而不是"值的深比较"：载荷内容变时 `contentVersion` 由领域层推进
  * （`domain/scene#ObjectData`），故逐值深比较是**重复判据**（会与领域层漂移）。
  */
-function contentIdentityOf(scene: Scene, content: DocumentContent, key: EvaluationKey): string {
-  const parts: string[] = [`k:${key.documentVersion}`, `s:${key.scene}`, `t:${key.time.numerator}/${key.time.denominator}`]
+function contentIdentityOf(scene: Scene, content: DocumentContent, key: EvaluationKey, layerPreview: LayerPreviewMode): string {
+  const parts: string[] = [
+    `k:${key.documentVersion}`,
+    `s:${key.scene}`,
+    `t:${key.time.numerator}/${key.time.denominator}`,
+    // 分层预览进身份：同一文档换一层 ⇒ 必须重编（否则"选了 Y=3 画面不动"）。
+    `lp:${layerPreview === 'all' ? 'all' : `y${layerPreview.worldY}`}`,
+  ]
   for (const objectId of scene.order) {
     const obj = scene.objects[objectId]
     if (obj === undefined) continue

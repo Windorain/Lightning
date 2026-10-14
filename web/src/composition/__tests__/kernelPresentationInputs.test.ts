@@ -85,7 +85,7 @@ describe('D3c · 形状：内核场景 → 纯数据', () => {
   for (const name of FIXTURES) {
     it(`${name}：产出 key/geometry/primitives，且**不是**空产出`, async () => {
       const { scene, content } = await assembledOf(name)
-      const { inputs, skipped } = kernelPresentationInputs({ scene, content, key: keyOf(scene.id) })
+      const { inputs, skipped } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
       expect(skipped, `${name} 不应有跳过项`).toEqual([])
       expect(inputs.primitives.length, `${name} 必须有可呈现对象`).toBeGreaterThan(0)
       expect(inputs.key.scene, 'key 必须如实透传').toBe(scene.id)
@@ -98,7 +98,7 @@ describe('D3c · 形状：内核场景 → 纯数据', () => {
 
   it('**几何身份与版本同源**（否则 `compileScene` 判 `geometry-version-mismatch` 并静默跳过全部）', async () => {
     const { scene, content } = await assembledOf('multiblock-ebf-2ch')
-    const { inputs } = kernelPresentationInputs({ scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
     for (const p of inputs.primitives) {
       expect(
         inputs.geometry.versionOf(p.geometry.id),
@@ -120,7 +120,7 @@ describe('D3c · 形状：内核场景 → 纯数据', () => {
         [camId]: { id: camId, source: 'document', payload: { kind: 'camera', projection: 'perspective', fov: 70, clipStart: 0.1, clipEnd: 100 }, contentVersion: 1, topologyVersion: 1 },
       }),
     }
-    const { inputs, skipped } = kernelPresentationInputs({ scene: withCam, content, key: keyOf(scene.id) })
+    const { inputs, skipped } = kernelPresentationInputs({ layerPreview: 'all', scene: withCam, content, key: keyOf(scene.id) })
     expect(inputs.primitives.length, '原 blockGrid 仍在').toBeGreaterThan(0)
     expect(skipped.length).toBe(1)
     expect(skipped[0]!.reason).toBe('not-blockGrid:camera')
@@ -129,7 +129,7 @@ describe('D3c · 形状：内核场景 → 纯数据', () => {
   it('空场景 ⇒ 空产出 + 空跳过（不伪造一个图元）', async () => {
     const { scene } = await assembledOf('multiblock-tier-only')
     const empty: Scene = { ...scene, order: Object.freeze([]), objects: Object.freeze({}), data: Object.freeze({}) }
-    const r = kernelPresentationInputs({ scene: empty, content: { metadata: { name: '', author: '', created_at_ms: null, description: '' }, frameAxis: { frames: [] }, resources: [] } as unknown as DocumentContent, key: keyOf('empty') })
+    const r = kernelPresentationInputs({ layerPreview: 'all', scene: empty, content: { metadata: { name: '', author: '', created_at_ms: null, description: '' }, frameAxis: { frames: [] }, resources: [] } as unknown as DocumentContent, key: keyOf('empty') })
     expect(r.inputs.primitives.length).toBe(0)
     expect(r.skipped.length).toBe(0)
   })
@@ -139,7 +139,7 @@ describe('D3c · **逐位一致**：与渲染路径同一收集器（逐材质�
   for (const name of FIXTURES) {
     it(`${name}：每个材质图元的几何与渲染路径**逐位相同**，且各组并集不漏不重`, async () => {
       const { scene, content } = await assembledOf(name)
-      const { inputs } = kernelPresentationInputs({ scene, content, key: keyOf(scene.id) })
+      const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
       const payload = Object.values(scene.data)
         .map((d) => d.payload)
         .find((x) => x.kind === 'blockGrid')
@@ -179,7 +179,7 @@ describe('D3c · **逐位一致**：与渲染路径同一收集器（逐材质�
     const counts: number[] = []
     for (const name of FIXTURES) {
       const { scene, content } = await assembledOf(name)
-      const { inputs } = kernelPresentationInputs({ scene, content, key: keyOf(scene.id) })
+      const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
       const p = inputs.primitives[0]
       if (p === undefined) continue
       counts.push(inputs.geometry.attributesOf(p.geometry.id)!.triangleCount)
@@ -193,7 +193,7 @@ describe('D3c · 可编译：`compileScene` 真的吃它', () => {
   for (const name of FIXTURES) {
     it(`${name}：编译成功且**零跳过**（数据造出来但编译吃不下会是这一条的失败）`, async () => {
       const { scene, content } = await assembledOf(name)
-      const { inputs } = kernelPresentationInputs({ scene, content, key: keyOf(scene.id) })
+      const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
       const compiled = compileScene(inputs)
       expect(compiled.ok, `${name} 必须能编译`).toBe(true)
       if (!compiled.ok) throw new Error('unreachable')
@@ -208,7 +208,7 @@ describe('D3c · 可编译：`compileScene` 真的吃它', () => {
 
   it('**负对照**：把几何端口抽掉 ⇒ 编译**必须**跳过（证明上一条的"零跳过"不是恒真）', async () => {
     const { scene, content } = await assembledOf('multiblock-ebf-2ch')
-    const { inputs } = kernelPresentationInputs({ scene, content, key: keyOf(scene.id) })
+    const { inputs } = kernelPresentationInputs({ layerPreview: 'all', scene, content, key: keyOf(scene.id) })
     const broken = {
       ...inputs,
       geometry: { versionOf: () => undefined, attributesOf: () => undefined },

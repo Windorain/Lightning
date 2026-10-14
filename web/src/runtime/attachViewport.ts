@@ -25,10 +25,16 @@ export interface AttachViewportInput {
   handlers: ViewportBinderHandlers
   layerPreviewMode: import('@/render/data/layerPreview').LayerPreviewMode
   structureDefinition: ShallowRef<StructureDefinition | null>
+  /**
+   * **视口结构层**（画面挂载点）。
+   *
+   * ⚠️ R1-β① C8 起它由 `useViewportRuntime` 指向**呈现会话的根对象**
+   * （内核呈现根），而不再是 `DRW` 的 legacy 网格组。本函数只把它写进槽位
+   * （`slot.contentGroup`），不产出任何几何。
+   */
   mainMeshGroup: ShallowRef<THREE.Group | null>
   selectionOutline?: SelectionOutlineBind
   documentKeydown?: boolean
-  rebuildMesh?: boolean
 }
 
 /**
@@ -41,7 +47,7 @@ export async function attachViewport(
 ): Promise<() => void> {
   const {
     drw, payload, handlers, layerPreviewMode, structureDefinition, mainMeshGroup,
-    selectionOutline, documentKeydown, rebuildMesh = true,
+    selectionOutline, documentKeydown,
   } = input
   const slot = ctx.viewports.get(regionId) ?? ctx.viewports.register(regionId)
 
@@ -53,14 +59,8 @@ export async function attachViewport(
   drw.outlinePass.setCamera(payload.camera as THREE.Camera)
   payload.renderer.setOutlinePass(drw.outlinePass)
 
-  if (rebuildMesh) {
-    try {
-      await drw.rebuildContentMesh()
-    } catch (e) {
-      console.error(`[attachViewport] rebuildContentMesh ${regionId}`, e)
-    }
-  }
-
+  // R1-β① C8：`drw.rebuildContentMesh()` 的调用已删除 —— 本函数不再产出几何
+  // （画面由呈现会话产出，见 `AttachViewportInput.mainMeshGroup` 的说明）。
   drw.bindOverlayPass(payload.layers.overlay)
 
   slot.orbitTarget.value = payload.orbitTarget

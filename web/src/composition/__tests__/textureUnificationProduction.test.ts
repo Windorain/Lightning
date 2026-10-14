@@ -227,7 +227,7 @@ describe('R1-β① C5 · 材质统一：`TexturePort` 生产实现把贴图接�
       try {
         const { kernelPresentationInputs } = await import('@/composition/kernelPresentationInputs')
         const { compileScene } = await import('@/presentation/compileScene')
-        const produced = kernelPresentationInputs({
+        const produced = kernelPresentationInputs({ layerPreview: 'all',
           scene: doc.scene,
           content: doc.content,
           key: {
@@ -347,7 +347,7 @@ describe('R1-β① C5 · 材质统一：`TexturePort` 生产实现把贴图接�
         expect(g.attributes.cellMap!.length, '每组的格表长度必须等于三角形数').toBe(g.attributes.triangleCount)
       }
       // 与生产当前形态的**差异**是可判定的：生产只给一个图元、材质 id 不是该约定。
-      const produced = kernelPresentationInputs({
+      const produced = kernelPresentationInputs({ layerPreview: 'all',
         scene: doc.scene,
         content: doc.content,
         key: { documentVersion: doc.version.documentVersion, scene: doc.scene.id, time: { frame: 0, fps: 20 }, parameterVersion: 0, contentResourceVersions: [] } as never,

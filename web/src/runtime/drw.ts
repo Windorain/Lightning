@@ -1,5 +1,14 @@
 /**
- * DRW — 视口绘制运行时：mesh/材质/帧呈现 + selection outline（不 import Context）。
+ * DRW — 视口**结构面**运行时：结构定义/材质缓存/图标缓存 + selection outline（不 import Context）。
+ *
+ * ## R1-β① C8：画面生产者已迁出本类
+ *
+ * 旧形态下 `DRW` 是**画面**的唯一生产者（`blockMeshProvider` → legacy `blockMesh` → 写
+ * `mainMeshGroup`）。C8 把画面交给 `composition/presenterSession` 的呈现会话后，本类
+ * 只剩三件事：**结构定义/材质/图标**（定义面，见 `drwMeshPipeline` 文件头）、
+ * **选择描边**（`outlinePass` + `SelectionHighlightProvider` 自建 mask，与内容几何无关）、
+ * **相机同步**（`bindViewportCameraSync`）。故 `mainMeshGroup` 与 `worldAnnotationGroup`
+ * 两个槽位写入点已删除 —— 视口结构层由呈现会话产出。
  */
 import { ref, shallowRef, toRaw, watch, type Ref, type ShallowRef } from 'vue'
 import * as THREE from 'three'
@@ -28,22 +37,17 @@ export interface DRWDeps {
   contentRefreshTickRef: Ref<number>
   /**
    * 世界帧下标（P10 #261：**派生**值的只读 getter，不再是 `Ref`）。
-   *
-   * 见 `DrwMeshPipelineDeps.worldFrameIndex` 的说明：帧下标由
-   * `EditContext.time` 派生，本层只能读。
    */
   worldFrameIndex: () => number
   layerWorldY: Ref<number>
   structureDefinition: ShallowRef<StructureDefinition | null>
-  mainMeshGroup: ShallowRef<THREE.Group | null>
   blockIconCacheOptions?: { sizePx?: number; orthoHalf?: number }
   initialWorldFrameIndex?: number
   /** 换帧（经 `setTime` 命令定位时间；见 `DrwMeshPipelineDeps.seekFrame`）。 */
   seekFrame?: (index: number) => void | Promise<void>
   /** 时间是否在前进（呈现侧观测；不驱动任何调度）。 */
   isPlaying?: () => boolean
-  showAnnotationsRef?: Ref<boolean>
-  worldAnnotationGroupRef?: ShallowRef<THREE.Group | null>
+  /** overlay pass 内**工具预览**根（ViewportSlot；工具的呈现，不是内容网格）。 */
   toolsOverlayGroupRef?: ShallowRef<THREE.Group | null>
   viewportCameraRef?: Ref<ViewportCameraState | null>
   cameraRef?: Ref<THREE.Camera | null>
@@ -53,6 +57,15 @@ export interface DRWDeps {
 export class DRW {
   readonly sceneRef = shallowRef<THREE.Scene | null>(null)
   readonly loadStatus = ref<LoadStatus>('loading')
+  /**
+   * **网格构建忙碌**（UI 的按钮禁用/忙碌态）。
+   *
+   * ⚠️ R1-β① C8 之后它**恒为 `false`**：本类不再建网格（几何由呈现会话产出），
+   * 故没有任何异步网格构建可以"忙"。保留该字段是因为它是**呈现契约**
+   * （`LayerPreviewBar`/`WorldFrameScrubber`/`ViewportFrameLayerDock` 按它禁用控件），
+   * 而"删字段"会连带改 4 个组件 —— 那不在 C8 的交付轴内。语义上它仍然为真：
+   * "此刻没有网格在构建"，所以禁用态**不会**误伤交互。
+   */
   readonly meshBusy = ref(false)
   readonly blockIconCache = shallowRef<BlockIconCache | null>(null)
   readonly tooltipPalette = shallowRef<string[]>([])
@@ -81,11 +94,9 @@ export class DRW {
     this._mesh = createDrwMeshPipeline({
       docRef: deps.docRef,
       loadStatus: this.loadStatus,
-      meshBusy: this.meshBusy,
       blockIconCache: this.blockIconCache,
       tooltipPalette: this.tooltipPalette,
       structureDefinition: deps.structureDefinition,
-      mainMeshGroup: deps.mainMeshGroup,
       sceneRef: this.sceneRef,
       worldFrameIndex: deps.worldFrameIndex,
       layerWorldY: deps.layerWorldY,
@@ -94,8 +105,6 @@ export class DRW {
       contentRefreshTickRef: deps.contentRefreshTickRef,
       seekFrame: deps.seekFrame,
       isPlaying: deps.isPlaying,
-      showAnnotationsRef: deps.showAnnotationsRef,
-      worldAnnotationGroupRef: deps.worldAnnotationGroupRef,
       toolsOverlayGroupRef: deps.toolsOverlayGroupRef,
     })
     if (deps.viewportCameraRef && deps.cameraRef && deps.orbitTargetRef) {
@@ -121,8 +130,15 @@ export class DRW {
     return this._mesh.loadStructureAndResources()
   }
 
-  rebuildContentMesh(): Promise<void> {
-    return this._mesh.rebuildContentMesh()
+  /**
+   * 呈现给定帧的**定义面**（宿主的帧时钟在观测到帧下标变化时调用）。
+   *
+   * 与 `setCurrentWorldFrame` 的分工见 `DrwMeshPipeline` 的接口说明：
+   * 前者是"请求换帧"（写面），本方法是"把某一帧的结构定义读出来"（读面）。
+   * **画面**由呈现会话每帧自行产出，不在这里。
+   */
+  applyWorldFrame(index: number): Promise<void> {
+    return this._mesh.applyWorldFrame(index)
   }
 
   /**
@@ -133,16 +149,6 @@ export class DRW {
    */
   setCurrentWorldFrame(index: number): Promise<void> {
     return this._mesh.setCurrentWorldFrame(index)
-  }
-
-  /**
-   * 呈现给定帧（宿主的帧时钟在观测到帧下标变化时调用）。
-   *
-   * 与 `setCurrentWorldFrame` 的分工见 `DrwMeshPipeline` 的接口说明：
-   * 前者是"请求换帧"（写面），本方法是"把某一帧画出来"（呈现）。
-   */
-  presentWorldFrame(index: number): Promise<void> {
-    return this._mesh.presentWorldFrame(index)
   }
 
   /**

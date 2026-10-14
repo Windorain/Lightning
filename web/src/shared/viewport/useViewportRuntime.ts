@@ -49,10 +49,10 @@ export interface UseViewportRuntimeOptions {
    *    （改天有人省略参数就悄悄退回旧文档，且没有任何判据会响）；
    *  - 改成必填后，"渲染源从哪来"在**类型层**只有一个答案：调用方必须显式给出。
    *
-   * ⚠️ **这尚未等于"渲染链已切内核呈现契约"**：`renderDoc` 此刻仍是
-   * `composition/kernelRenderView` 产出的**旧格式视图文档**（内核装配 + 投影的产物）。
-   * 真正的画面切换（DRW → `PresenterSession`）是 `presenter-surface-dual-track`
-   * 那条接缝，属本批后续段。本处只消灭"旧文档本体读面"这一条腿。
+   * ⚠️ **它不是画面源**（R1-β① C8 起）：它只喂**定义面**（结构定义/材质库/图标缓存）。
+   * 画面由 `PresenterSession` 从**内核文档**产出（见下方 `presenterSurface`）。
+   * 这条"旧格式视图文档仍被 DRW 读"的剩余边登记在 `composition/seams.ts` 的
+   * `legacy-render-source-document`（画面终切已完成；定义/图标面的迁移归 R2/R3）。
    */
   renderDocRef: Ref<RuntimeDocument | null>
 }
@@ -118,15 +118,12 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     worldFrameIndex: () => kernel?.frameIndex() ?? 0,
     layerWorldY: ctx.getLayerWorldY(),
     structureDefinition: vpSlot.definition,
-    mainMeshGroup: vpSlot.contentGroup,
     blockIconCacheOptions,
     initialWorldFrameIndex,
     // 换帧 = 定位时间（**不**写帧下标）。
     seekFrame: (i) => kernel?.seekFrame(i),
     // 播放状态是**读面**：本层不驱动任何调度（帧时钟归外壳）。
     isPlaying: () => kernel?.playback().playing ?? false,
-    showAnnotationsRef: toRef(viewerPrefs, 'showAnnotations'),
-    worldAnnotationGroupRef: vpSlot.worldAnnotationGroup,
     toolsOverlayGroupRef: vpSlot.toolsOverlayGroup,
     // 经 `ensureCamera`（不是直接下标）：`cameras` 是**开放**键空间（按 region
     // 分配，#282）—— 新视口的键可能尚未创建，直接下标会得到 `undefined`，
@@ -141,7 +138,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   vpSlot.outlinePass = drw.outlinePass
 
   /**
-   * **呈现会话**（#299 P10e 段②：`BatchedPresenter` 的生产接线）。
+   * **呈现会话**（#299 P10e 段② 建立；R1-β① C8 起是**画面**的唯一生产者）。
    *
    * ## 它替代的旧机制
    *
@@ -150,30 +147,54 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    * 这条链在**判定面上绿**、在**生产上不存在**（P10c/P10d 反复实测的缺口形态）。
    * 本会话就是那个缺失的生产消费者。
    *
-   * ## 与 DRW 的并存关系（**本批不切换渲染链**，显式登记）
+   * ## C8 之后它接管了画面（不再是平行路径）
    *
-   * `DRW`（`blockMeshProvider` → legacy `blockMesh`）此刻仍是**画面**的生产路径；
-   * 本会话平行建立一套呈现产物并挂在**同一个** `contentGroup` 之外的结构层下。
-   * 两者并存是**有退出阶段的暂存**（登记于 `composition/seams.ts`：
-   * `presenter-surface-dual-track`），渲染链终切归 **#301（P10f 子批 C/D）**。
+   * 旧形态：`DRW`（`blockMeshProvider` → legacy `blockMesh`）是**画面**的生产路径，
+   * 本会话平行存在且**不挂进**场景树（注解/描边对象建了但看不见）。
+   * C8 把两头一起改：`vpSlot.contentGroup` 指向本会话的 `object3d`（见下），
+   * 而 `drwMeshPipeline` 的网格产出被删除。⇒ 画面 = 内核求值产物。
    *
-   * ## 为什么现在不接管画面（本批刻意的边界）
+   * 仍**并存**的是**定义面**（结构定义/材质库/图标缓存经旧格式视图文档解析，
+   * 接缝 `legacy-render-source-document` 的剩余边，归 R2/R3）。
    *
-   * 接管需要"DRW 消费内核求值产物"的整体切换，而其前置（保存面迁移、
-   * 9 条未装配的加载路径、命令面扩展）尚未交付。按 #171 纪律**不做半成品替换**
-   * —— 切一半会让"交互或画面回退且无替代"。本批交付的是**新层在生产里真实运行**
-   * 且有其自己的可观测面（拾取逐格、纹理绑定、逐像素证据），
-   * 而不是"看起来切了但能力少一半"。
+   * ## 挂载点与释放
    *
-   * ## 挂载位置：不挂进 `contentGroup`
-   *
-   * `contentGroup` 是 legacy 渲染路径的产物（`DRW` 往里放 `blockMesh` 的 Group）。
-   * 挂进去会让两条路径的对象混在同一棵子树里 —— 既无法分别观测，
-   * 也会让"谁画了这 24 个三角形"没有唯一答案。故本会话有**自己的**根对象，
-   * 由本 composable 加到视口场景（见下方 `onScopeDispose` 的对称释放）。
+   * 根对象由本 composable 交给视口结构层（`vpSlot.contentGroup.value`），
+   * 生命期与 `onScopeDispose` 对齐（dispose + 解引用，见下）。
    */
   const presenterSurface = new PresenterSession({ scope: `viewport:${regionId}`, textures: presenterTextures })
   vpSlot.presenterSurface = presenterSurface
+  /**
+   * **画面接管**（R1-β① C8 第 1 项；#387 7298）。
+   *
+   * ## 这一行就是"画面由内核呈现根产出"的落点
+   *
+   * `vpSlot.contentGroup` 是**视口结构层在场景树里的挂载点**：
+   *
+   * ```
+   *  RenderEngineHost → RenderEngine.mount(contentGroup = vpSlot.contentGroup)
+   *      ⇒ drawFrame(): layers.structure.add(opts.contentGroup)   // 进场景树
+   * ```
+   *
+   * 旧实现把它指向 `DRW` 的 legacy 网格（`drwMeshPipeline` 的 `mainMeshGroup.value = result.group`）；
+   * C7 之前本会话的 `object3d` **从未** `.add(` 进任何场景树（`presenterSurface` 是个平行路径，
+   * 画面仍由 legacy 网格产出）。C8 把这两件事**同时**改掉：
+   *
+   *  - 本行把呈现根交给视口结构层；
+   *  - `drwMeshPipeline` 里写 `mainMeshGroup` 的那两处**已删除**（无第二生产者）。
+   *
+   * ## 为什么挂在 `contentGroup` 而不是另起一个层级
+   *
+   * `contentGroup` 同时是**相机取景**（`viewportCameraApply` 按它的包围盒夹裁剪面）
+   * 与 e2e 观测（`slot.contentGroup` 是公开字段）的读面。另起一级会让"相机取景围着
+   * 谁"和"谁画了画面"重新分家 —— 而它们必须围着**同一份**几何。
+   *
+   * ## 生命周期
+   *
+   * 挂在会话的 `object3d` 上 ⇒ 下面的 `onScopeDispose` 一次 `dispose()` 同时释放
+   * GPU 份额与（由 RenderEngine 的重挂逻辑）场景挂载。
+   */
+  vpSlot.contentGroup.value = presenterSurface.object3d
   /** 上次同步给呈现会话的注解身份（文档版本 + 视口可见性）。 */
   let lastAnnotationIdentity: string | null = null
   onScopeDispose(() => {
@@ -184,6 +205,9 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     // 不显式 `dispose()` 就是每视口一份泄漏。
     presenterTextures.dispose()
     if (vpSlot.presenterSurface === presenterSurface) vpSlot.presenterSurface = null
+    // 结构层指向已释放的呈现根会让"卸载后仍有对象在场景里"（幽灵挂载）——
+    // 只有确实是**本会话**的根才清（避免抹掉重挂后新会话写下的值）。
+    if (vpSlot.contentGroup.value === presenterSurface.object3d) vpSlot.contentGroup.value = null
   })
 
   /**
@@ -248,12 +272,11 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    *
    * ## 为什么用 try/catch 包住（而不是让它抛）
    *
-   * 呈现会话是**平行**路径（本批不接管画面，见 `presenterSurface` 的说明）。
-   * 它失败时画面仍由 legacy 渲染链产出 —— 若让它抛出，一个呈现侧的问题会
-   * **连带打死**整条帧循环（画面与交互一起停）。那不是"失败关闭"，
-   * 而是"一个可降级的子系统拖垮不可降级的子系统"。
+   * C8 之后呈现会话**就是画面**，它失败时画面不再有 legacy 兜底 ——
+   * 若让它抛出，一个呈现侧的问题会**连带打死**整条帧循环（画面与交互一起停）。
+   * 那不是"失败关闭"，而是"一个可降级的子系统拖垮不可降级的子系统"。
    *
-   * ⇒ 这里**显式降级**并把错误记进诊断：`presenterSurfaceError` 是公开观测点，
+   * ⇒ 这里**显式降级**并把错误记进诊断：`presenterErrors` 是公开观测点，
    * e2e 可断言"没有静默失败"。而**不**把异常吞成 `null` 让调用方猜。
    */
   const presenterErrors: string[] = []
@@ -343,6 +366,10 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     const doc = kernel?.document()
     if (doc === undefined) return
     try {
+      // **分层预览**是呈现侧过滤（不进冻结的 `EvaluationKey`）：每帧按当前层写入会话，
+      // 它进**内容身份** ⇒ 换一层必然重编（否则"选了 Y=3 画面不动"）。
+      // 这里读 `drw.computed.layerPreviewMode`：该派生规则（`< 0 ⇒ 'all'`）只有一处定义。
+      presenterSurface.setLayerPreview(drw.computed.layerPreviewMode.value)
       const out = presenterSurface.applyKernelDocument(doc, kernel?.playback().time ?? ZERO_TIME)
       // 编译失败/跳过是**真实事实**，必须可见（不得静默当"画好了"）。
       if (out.compileError !== null) presenterErrors.push(`compile:${out.compileError}`)
@@ -408,7 +435,9 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       applyPresenterSurface()
       if (info.frameIndex === lastPresentedFrame) return
       lastPresentedFrame = info.frameIndex
-      void drw.presentWorldFrame(info.frameIndex)
+      // **定义面**（结构定义/调色板/图标）随帧刷新；**画面**由上面的
+      // `applyPresenterSurface()` 每帧产出（C8 起不再有 `presentWorldFrame` 建网格这一步）。
+      void drw.applyWorldFrame(info.frameIndex)
     })
     onScopeDispose(() => {
       off()
