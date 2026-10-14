@@ -278,7 +278,16 @@ const E = (from, line, to, kind, reason, exitStage, owner) =>
  * 每条登记的判据身份是 `(from, to)` 这个**对**（见 `BASELINE_PAIRS` / `BASELINE_PAIR_OCCURRENCES`）。
  * `line` 只在**失败消息**里出现，供人类定位；它**不参与任何断言**（可机械复核：
  * 把全表 `line` 扰动 +1000，三条检测的读数逐项不变 —— 见判据文件的"行号非键"用例）。
- * 因此本表的行号**允许**随无关编辑漂移；这里把它维护成实测真值，只是为了让失败消息指得准。
+ * 本表的 `line` 是**冻结快照里的历史注解**（与基线提交同源），**不承诺**与当前文件同步 ——
+ * 上游任一无关编辑都会让它漂移，这正是本条判据去掉行锚的原因。需要精确定位时，失败消息会
+ * **同时**给出登记注解行与**实测行**（`rottenRegisteredPairs` 的 `occurrence-shortfall` 分支）；
+ * 判据本身在任何一种注解下都给出同一结论（见判据文件的"行号非键"与"注解漂移不进判定"两个用例）。
+ *
+ * **活体证据（第二例，同一缺陷类）**：本树 `08cd99fc`（"G4+G5 S2 第二半(1/2)"）在
+ * `web/src/composition/kernelPresentationInputs.ts:61` 插入一行（`@/adapters/tooltipPool`），
+ * 使已登记的 `@/runtime/presentationAdapter` import 从 `:61` 漂到 `:62` ——
+ * 行键口径下这是**又一例**假红（该登记被判"腐烂"），对键口径下**不可见**
+ * （该对登记 1 条、实测 1 条）。本条与 `44030389` 是同一缺陷、不同提交，独立复现。
  */
 export const APPROVED_COMPOSITION_LEGACY_EDGES = [
   // ── 入向：把真实文件装配成内核文档（旧 RuntimeDocument / Grid / multiblock 的公共出口）──
@@ -796,7 +805,13 @@ export function rottenRegisteredPairs(
         message:
           reason === 'pair-absent'
             ? `${from} → ${to}（登记腐烂：实测已无该 (file,target) 对；登记注解行 ${hints.map((l) => `${from}:${l}`).join(', ')}）`
-            : `${from} → ${to}（登记腐烂：登记 ${n} 条，实测只剩 ${observed} 条；登记注解行 ${hints.map((l) => `${from}:${l}`).join(', ')}）`,
+            : `${from} → ${to}（登记腐烂：登记 ${n} 条，实测只剩 ${observed} 条；登记注解行 ${hints
+                .map((l) => `${from}:${l}`)
+                .join(', ')}；实测行 ${(counted.pairRows.get(pair)?.lines ?? [])
+                .slice()
+                .sort((a, b) => a - b)
+                .map((l) => `${from}:${l}`)
+                .join(', ')}）`,
       }),
     )
   }

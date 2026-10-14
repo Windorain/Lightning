@@ -25,6 +25,12 @@
  * 判"这是判据缺陷"的依据：**被替代的边集合与目标集合都没变** —— 没有新增或消失任何一条
  * `composition/ → 旧层` 的绑定，变的只是无关编辑造成的行号漂移。**行号不是语义**。
  *
+ * **第二例（同一缺陷类，独立复现）**：本树 `08cd99fc`（"G4+G5 S2 第二半(1/2)"）在
+ * `web/src/composition/kernelPresentationInputs.ts:61` 插入一行（`@/adapters/tooltipPool`），
+ * 使已登记的 `@/runtime/presentationAdapter` 边从 `:61` 漂到 `:62` ⇒ 行键口径下该登记又被判
+ * "腐烂"（见"注解漂移不进判定"用例里的活体读数），对键口径下**不可见**（该对登记 1 条、实测 1 条）。
+ * 两个不同提交、同一根因（行锚）⇒ 佐证这是**判据缺陷**而非某次编辑的偶然。
+ *
  * ## 同族先例（本仓已有，不是本判据的临时发明）
  *
  * `web/src/pure/__tests__/partMaskEnvelopeExemption.test.ts` 明文要求豁免"以**同一标记**匹配
@@ -324,6 +330,54 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的**对** `(file, tar
     ])
     // 而**行号仍然出现在失败消息里**（人类定位用）—— 只是不参与判定
     expect(asIs.rotted[0].message, '腐烂消息必须带登记注解行号，供人类定位').toMatch(/kernelProjection\.ts:1\b/)
+  })
+
+  it('**注解漂移不进判定**（真实树活体读数）：登记注解行 ≠ 实测行的对，判定仍绿；而按行锚就会判红', async () => {
+    const facts = await loadFacts()
+    const counted = countCompositionLegacyEdges(facts)
+    // 真实树上"登记注解行与实测行不一致"的条目（历史实例：`44030389` 使 kernelAssembly :87→:90；
+    // `08cd99fc` 使 kernelPresentationInputs :61→:62）。读数打进日志供复核/趋势 —— 不打行号以外的东西。
+    const staleEntries = APPROVED_COMPOSITION_LEGACY_EDGES.filter((e) => {
+      const row = counted.pairRows.get(pairKeyOf(e.from, e.to))
+      return row !== undefined && !row.lines.includes(e.line)
+    })
+    const staleReading = staleEntries.map((e) => {
+      const row = counted.pairRows.get(pairKeyOf(e.from, e.to))
+      return `${pairKeyOf(e.from, e.to)}：注解行 :${e.line} / 实测行 ${row.lines.map((l) => `:${l}`).join('、')}`
+    })
+    // eslint-disable-next-line no-console
+    console.log(`[G1 注解漂移] ${staleEntries.length} 条登记的注解行与实测行不一致（判定不受影响 —— 行号不是键）：\n  ${staleReading.join('\n  ')}`)
+
+    // ① 对键口径：真实树上的判定必须判绿（注解漂移不得判红）
+    const asFrozen = assessCompositionLegacyBinding(facts)
+    expect(asFrozen.violations, '冻结注解下必须判绿（注解漂移不是腐烂）').toEqual([])
+    // ② 把注解刷新到实测行后，判定读数逐项不变（注解不进键面）
+    const refreshed = APPROVED_COMPOSITION_LEGACY_EDGES.map((e) => {
+      const row = counted.pairRows.get(pairKeyOf(e.from, e.to))
+      return row === undefined ? e : { ...e, line: row.lines[0] }
+    })
+    const asRefreshed = assessCompositionLegacyBinding(facts, { registry: refreshed })
+    expect(asRefreshed.violations, '注解刷新到实测行后同样判绿（同一个对集）').toEqual([])
+    expect(keyFace(asRefreshed.rotted), '两种注解下的腐烂读数逐项相同').toEqual(keyFace(asFrozen.rotted))
+    expect(asRefreshed.unregistered).toEqual(asFrozen.unregistered)
+    expect(asRefreshed.growth).toEqual(asFrozen.growth)
+    expect(asRefreshed.ceiling).toEqual(asFrozen.ceiling)
+    // ③ **有区分力的半边**：鉴于此树确有漂移条目，同一棵树用**行锚**（旧口径的做法）就会判红 ——
+    //    证明上面的绿不是恒绿，"去掉行锚"确实消掉了这条假红。无漂移条目时本段空转（不制造恒绿断言）。
+    const observedLineKeys = new Set(counted.rows.map((r) => `${r.file}:${r.line}:${r.target}`))
+    const rottedByLineKey = APPROVED_COMPOSITION_LEGACY_EDGES.filter((e) => !observedLineKeys.has(`${e.from}:${e.line}:${e.to}`))
+    expect(rottedByLineKey.length, '行锚口径下被判"腐烂"的登记条数 = 注解漂移的条数').toBe(staleEntries.length)
+    for (const e of staleEntries) {
+      expect(
+        observedLineKeys.has(`${e.from}:${e.line}:${e.to}`),
+        `行锚口径会把 ${e.from}:${e.line} 判成腐烂（实测已不在该行）`,
+      ).toBe(false)
+      expect(
+        counted.pairCounts.has(pairKeyOf(e.from, e.to)),
+        `对键口径下 ${pairKeyOf(e.from, e.to)} 仍实测存在 ⇒ 不得判红`,
+      ).toBe(true)
+    }
+    expect(observedLineKeys.size, '实测行键读数非空（否则上面是空转）').toBeGreaterThan(0)
   })
 
   it('豁免刚性 ②：豁免必须落在**冻结许可集**内、重数不超上限（多一条即红）', async () => {
@@ -682,6 +736,15 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的**对** `(file, tar
       'occurrence-shortfall:2/1',
     ])
     expect(shortfall[0].message, '重数不足的消息必须给出"登记 N 条、实测剩 M 条"').toContain('实测只剩 1 条')
+    // 消息必须**同时**给出登记注解行与**实测行**（注解是冻结快照里的历史值，定位要看实测行）
+    const remainingLines = oneShort
+      .filter((f) => f.fromSrcRel === 'composition/kernelRenderView.ts' && resolveTargetOf(f, SRC_ROOT) === 'context/runtimeDocument')
+      .map((f) => f.line)
+      .sort((a, b) => a - b)
+    expect(remainingLines, '该对实测只剩 1 条').toHaveLength(1)
+    expect(shortfall[0].message, '腐烂消息必须带**实测行**（报告面，人类定位）').toContain(
+      `实测行 src/composition/kernelRenderView.ts:${remainingLines[0]}`,
+    )
     // 正对照：不塞假对时检测为空（证明检测不是恒红）
     expect(rottenRegisteredPairs(facts), '生产登记集下腐烂检测必须为空').toEqual([])
   })
