@@ -375,22 +375,30 @@ export interface KernelRenderSourceFace {
   /**
    * 材质库（`render/data/buildMaterialLibrary`）的输入，由**内核内容**派生。
    *
-   * `textureBlobs` 的键是**槽位**（= `materialPalette` 的数组下标 = 几何 `materialIndex`
-   * 的索引空间；`domain/content#normalizeResources` 的排序键保证位置即槽位）。
+   * ⚠️ `textureBlobs` **必须是数组**（下标 = 槽位，按需稀疏）：`render/data/sceneDocumentMaterialHydrate`
+   * 的 `listPaletteTextureDataUrls` 第一件事是 `if (!Array.isArray(blobs)) return []`
+   * —— 对象形态（`RuntimeDocument.serialize()` 的帧为主形态）会让**一张纹理都枚举不出来**
+   * （P0 实测：真入口上表现为无贴图且不报错）。故本面按 `baked StructureData` 的形态产出
+   * （数组 + `materialPalette[i].textureBlobIndex`）。
    */
   readonly materialInput: {
     readonly geometryPhase: 'baked'
     readonly materialPalette: readonly Record<string, unknown>[]
-    readonly textureBlobs: Readonly<Record<string, string>>
+    readonly textureBlobs: readonly (string | undefined)[]
   }
 }
 
-/** 内核 `content.resources` → `textureBlobs`（**槽位**为键，只收有内嵌字节的条）。 */
-function textureBlobsOfContent(content: DocumentContent): Readonly<Record<string, string>> {
-  const blobs: Record<string, string> = {}
+/**
+ * 内核 `content.resources` → `textureBlobs`（**数组**；下标 = 槽位，只填有内嵌字节的条）。
+ *
+ * 与 `materialPaletteOf` 的 `textureBlobIndex = i` 配对：`listPaletteTextureDataUrls`
+ * 用 `blobs[Math.floor(entry.textureBlobIndex)]` 取字节。
+ */
+function textureBlobsOfContent(content: DocumentContent): readonly (string | undefined)[] {
+  const blobs: (string | undefined)[] = []
   for (let i = 0; i < content.resources.length; i++) {
     const payload = content.resources[i]!.payload
-    if (payload !== null) blobs[String(i)] = payload
+    if (payload !== null) blobs[i] = payload
   }
   return Object.freeze(blobs)
 }

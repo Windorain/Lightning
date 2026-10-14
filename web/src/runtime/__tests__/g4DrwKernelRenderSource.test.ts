@@ -47,15 +47,25 @@ function productionRegistry() {
 
 /** 真信封 → 生产装配 → 内核渲染源面（与产品同一条装配链）。 */
 async function envelopeFace() {
-  const p = path.join(process.cwd(), 'e2e', 'fixtures', 'structuredata-exported-envelope.json')
+  return faceFromFixture('structuredata-exported-envelope.json', true)
+}
+
+/**
+ * 夹具 → 生产装配 → 内核渲染源面。
+ *
+ * @param envelope 信封夹具（payload=base64(gzip)）需要 `readEnvelopeLayers` 解包；
+ *   Plain V2 夹具（`.v2.json`）直接吃原对象。
+ */
+async function faceFromFixture(fileName: string, envelope: boolean) {
+  const p = path.join(process.cwd(), 'e2e', 'fixtures', fileName)
   const raw = JSON.parse(fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')) as Record<string, unknown>
   const parsed = await productionRegistry().detectAndParse(raw)
-  if (parsed.document === null) throw new Error('信封解析失败')
-  const plainRoot = plainRootOf(
-    (await readEnvelopeLayers(raw as never)).plain as Record<string, unknown>,
-  )
+  if (parsed.document === null) throw new Error(`${fileName} 解析失败`)
+  const plainRoot = envelope
+    ? plainRootOf((await readEnvelopeLayers(raw as never)).plain as Record<string, unknown>)
+    : plainRootOf(raw)
   const assembled = assembleKernelDocument({ doc: parsed.document as never, plainRoot })
-  if (!assembled.ok) throw new Error('信封装配失败')
+  if (!assembled.ok) throw new Error(`${fileName} 装配失败`)
   return kernelRenderSourceFaceOf({
     scene: assembled.value.scene,
     content: assembled.value.content,
@@ -88,10 +98,10 @@ function makePipeline(input: {
 
 describe('G4 · S2 第二半接线：DRW 消费内核渲染源面（旧格式源缺席）', () => {
   it('① 旧源缺席 + 内核面在场 ⇒ 定义面/说明池由内核产出', async () => {
+    // 定义面/说明池：用真信封（62 材质、逐格说明）。
     const face = await envelopeFace()
     const h = makePipeline({ face })
-    await h.pipeline.loadStructureAndResources()
-    expect(h.loadStatus.value, '装载必须成功（否则下面的断言是空转）').toBe('ok')
+    await h.pipeline.applyWorldFrame(0)
     const def = h.structureDefinition.value as unknown as {
       materialPalette: readonly unknown[]
       cellGrid: unknown[]
@@ -108,6 +118,16 @@ describe('G4 · S2 第二半接线：DRW 消费内核渲染源面（旧格式源
         ?.materialPalette.length,
       'applyWorldFrame 也走内核面',
     ).toBe(62)
+
+    // 装载路径（含材质库）：用**无内嵌纹理**的夹具 —— Three 的 `TextureLoader` 需要 DOM
+    // （Node 侧 `document is not defined`），带纹理的建库由 L2 真入口（c8/parts 系）把守。
+    const plainFace = await faceFromFixture('parts-singlebox-mix.v2.json', false)
+    const h3 = makePipeline({ face: plainFace })
+    await h3.pipeline.loadStructureAndResources()
+    expect(h3.loadStatus.value, '装载必须成功（否则下面的断言是空转）').toBe('ok')
+    const def3 = h3.structureDefinition.value as unknown as { materialPalette: readonly unknown[] }
+    expect(def3, '装载路径同样由内核面产出定义').not.toBeNull()
+    expect(def3.materialPalette.length, 'c8 夹具（P0 现场）的材质条数').toBeGreaterThan(0)
   })
 
   it('② 负对照：去掉内核面（同一份输入）⇒ 什么都产不出来（证明①有区分力）', async () => {

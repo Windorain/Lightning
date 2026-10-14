@@ -60,42 +60,59 @@ export function listPaletteTextureDataUrls(document: unknown): PaletteTextureDat
   return items
 }
 
-function forEachPaletteSlot(
-  document: unknown,
-  fn: (entry: MaterialPaletteEntry, materialId: string) => void,
-): void {
-  if (!document || typeof document !== 'object') return
-  if (isWorldDocument(document)) {
-    const pal = document.materialPalette
-    if (!pal?.length) return
-    for (let i = 0; i < pal.length; i++) {
-      fn(pal[i], String(i))
-    }
-    return
-  }
+/** 载荷里根级材质调色板的位置（World 与 baked StructureData **同一条**取法）。 */
+function paletteOf(document: unknown): readonly MaterialPaletteEntry[] | null {
+  if (!document || typeof document !== 'object') return null
+  if (isWorldDocument(document)) return document.materialPalette ?? null
   const sd = document as StructureData
-  if (!isBakedStructureData(sd) || !Array.isArray(sd.materialPalette)) return
-  const pal = sd.materialPalette
-  for (let i = 0; i < pal.length; i++) {
-    fn(pal[i], String(i))
-  }
+  if (!isBakedStructureData(sd) || !Array.isArray(sd.materialPalette)) return null
+  return sd.materialPalette
 }
 
 /**
- * 对 `blend === undefined` 的槽位写入推断值；已显式设置的 `blend` 不覆盖。
- * 须在纹理已装入 `preloaded` 之后、{@link buildMaterialRegistryFromSceneDocument} 之前调用一次。
+ * 补全缺 `blend` 的槽位：**返回新的调色板数组**（无需补全 ⇒ `null`，保持输入同一性）。
+ *
+ * ## 为什么不是"原地写"（P0 实测的失效形态）
+ *
+ * 旧实现直接 `entry.blend = …`。而内核侧的材质调色板条目是**冻结**的
+ * （`composition/kernelPresentationInputs.ts` 的 `materialPaletteOf`，D3c `1529fd81` 起刻意加的
+ * 防线：内核产物不得被下游改写）⇒ 真入口上抛
+ * `TypeError: Cannot add property blend, object is not extensible`，材质库建不起来、
+ * 视口挂不出来（`e2e/c8-picture-takeover.spec.ts` 实测：`buildMaterialLibrary failed`
+ * → `loadStructureAndResources: failed to build textureCache` → 60s 挂载超时）。
+ *
+ * ⇒ 冻结**保留**（它是防下游改内核产物），改为由本函数**产出新条目**：
+ * 显式 `blend` 的槽位复用原对象（零拷贝），缺的槽位新建 `{...entry, blend: 推断值}`。
+ * 推断仍只有**一处**实现（`inferMaterialBlendModeFromTexture`），本函数是它唯一的补全调用点。
+ */
+function hydratePalette(
+  document: unknown,
+  preloaded: Map<string, THREE.Texture>,
+): readonly MaterialPaletteEntry[] | null {
+  const pal = paletteOf(document)
+  if (pal === null || pal.length === 0) return null
+  let changed = false
+  const next = pal.map((entry, i) => {
+    if (entry.blend !== undefined) return entry
+    changed = true
+    const tex = preloaded.get(String(i))
+    return { ...entry, blend: tex ? inferMaterialBlendModeFromTexture(tex) : ('opaque' as const) }
+  })
+  return changed ? Object.freeze(next) : null
+}
+
+/**
+ * 补全 `blend === undefined` 的槽位（已显式设置的不覆盖），**返回补全后的文档**。
+ *
+ * 须在纹理已装入 `preloaded` 之后、{@link buildMaterialRegistryFromSceneDocument} 之前调用一次；
+ * **调用方必须使用返回值**（它可能就是输入本身 —— 无槽位需要补全时按原样返回，
+ * 以免制造无意义的浅拷）。输入**永不被改写**（内核产物是冻结的，见 {@link hydratePalette}）。
  */
 export function hydrateMaterialBlendsInSceneDocument(
   document: unknown,
   preloaded: Map<string, THREE.Texture>,
-): void {
-  forEachPaletteSlot(document, (entry, materialId) => {
-    if (entry.blend !== undefined) return
-    const tex = preloaded.get(materialId)
-    if (!tex) {
-      entry.blend = 'opaque'
-      return
-    }
-    entry.blend = inferMaterialBlendModeFromTexture(tex)
-  })
+): unknown {
+  const hydrated = hydratePalette(document, preloaded)
+  if (hydrated === null) return document
+  return { ...(document as Record<string, unknown>), materialPalette: hydrated }
 }
