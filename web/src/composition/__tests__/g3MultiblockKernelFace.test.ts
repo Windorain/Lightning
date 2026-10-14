@@ -41,6 +41,8 @@ import {
 } from '@/domain/multiblockDocument'
 import { findObject, findObjectData } from '@/domain/scene'
 import { unwrap } from '@/domain/errors'
+import fs from 'node:fs'
+import path from 'node:path'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 
 /** 多方块为主的真实夹具（与 `kernelAssembly.test.ts` / 适配器判据同一清单）。 */
@@ -236,5 +238,70 @@ describe('R2-G3 · 过渡不变式：诊断出现 ⇒ 该帧声明 grid 被忽�
     // （1×1×1 的取证样本 vs 骨架阶的 [d][h][w]；求值若读了它，上面的判据必红。）
     expect(injectedGrid).toEqual([[[9]]])
     expect([cleanOut.grid.depth, cleanOut.grid.height, cleanOut.grid.width]).not.toEqual([1, 1, 1])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 语义桥（#388 评论 7717 的条件 (a)(b)）：两种记法**只在这一处相遇**
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 装配根源码。**读后归一化 CRLF**：本仓 `core.autocrlf=true`，新鲜检出是 CRLF，
+ * 而执行者工具写出的工作树常是 LF —— 不归一化的源码判据只在 LF 树上绿（AGENTS 铁律 6）。
+ */
+function assemblyRootSource(): string {
+  return fs
+    .readFileSync(path.join(process.cwd(), 'src', 'composition', 'kernelAssembly.ts'), 'utf8')
+    .replace(/\r\n/g, '\n')
+}
+
+/** 只看**代码行**：桥的说明里逐字写着 `{ max: hi }` —— 那是文档，不是写点。 */
+function codeOnly(src: string): string {
+  return src
+    .split('\n')
+    .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+    .join('\n')
+}
+
+/** 抽取一个顶层函数的源码区间（`function 名(` → 其后第一个列首 `}`）。 */
+function functionSource(code: string, name: string): string {
+  const start = code.indexOf(`function ${name}(`)
+  if (start < 0) throw new Error(`找不到函数 ${name}（判据的前提，实现改名即须同批改判据）`)
+  const end = code.indexOf('\n}', start)
+  if (end < 0) throw new Error(`函数 ${name} 的结尾不可定位（判据的前提）`)
+  return code.slice(start, end + 2)
+}
+
+describe('R2-G3 · 语义桥（#388 评论 7717 条件 a/b）：两种记法只在这一处相遇', () => {
+  it('① 文件格式通道域的写点在全文件里**恰好一处**，且落在具名桥函数内', () => {
+    const raw = assemblyRootSource()
+    const code = codeOnly(raw)
+    // 前提自检：桥确实存在（否则下面的"恰好一处"可能因为一处都没有而误判）。
+    expect(raw.includes('{ max: domain.hi }'), '前提：源码里确有这座桥').toBe(true)
+
+    const writes = [...code.matchAll(/\{\s*max\s*:/g)]
+    expect(writes.length, '文件格式通道域（`{ max: … }`）的写点必须**恰好一处** —— 散落即判红').toBe(1)
+
+    const at = writes[0]!.index ?? -1
+    const bridge = functionSource(code, 'evaluatorChannelDomainOf')
+    const bridgeStart = code.indexOf(bridge)
+    expect(at, '唯一写点必须落在具名桥函数里（内联回调用点即判红）').toBeGreaterThanOrEqual(bridgeStart)
+    expect(at).toBeLessThan(bridgeStart + bridge.length)
+    // 端口适配**只经**这一处：它自己不得再写 `{ max: … }`。
+    expect(
+      functionSource(code, 'evaluatorMultiblockOf').includes('evaluatorChannelDomainOf('),
+      '端口适配必须调用这座桥（不得自己内联换键）',
+    ).toBe(true)
+  })
+
+  it('② 桥**只**换这一个语义字段（不是通用"内核 → 旧形状"转换器）', () => {
+    const bridge = functionSource(codeOnly(assemblyRootSource()), 'evaluatorChannelDomainOf')
+    const body = bridge
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l !== '')
+    // 签名 + **唯一一条** return + 收尾 —— 多一行即说明它开始长成转换器。
+    expect(body, '桥体不得增长（它只许换通道取值域这一个字段）').toHaveLength(3)
+    expect(body[1], '桥体必须只有一处换键，值直取声明的域上界').toBe('return { max: domain.hi }')
   })
 })

@@ -2146,11 +2146,46 @@ function evaluatorMultiblockOf(declaration: MultiblockDeclaration): MultiblockDe
       const channel = ch as Record<string, unknown>
       const domain = channel.domain as { readonly hi?: unknown } | undefined
       if (domain === undefined) continue
-      // 文件格式的键名与语义：`{max}`（`min` 端口不读）。值 = 内核声明的域上界。
-      channel.domain = { max: domain.hi }
+      channel.domain = evaluatorChannelDomainOf(domain)
     }
   }
   return node as MultiblockDeclFace
+}
+
+/**
+ * **两种记法之间的一处语义桥 —— 不是形状反演**（#388 评论 7717 的条件 (a)(b)）。
+ *
+ * | | 内核记法（`domain/multiblockDocument`） | 文件记法（求值端口读的） |
+ * |---|---|---|
+ * | 键 | `{ lo, hi }` | `{ max }`（`min` 端口不读） |
+ * | 语义 | 通道取值域的下界 / 上界 | 同一件事的另一种编码 |
+ *
+ * 解析器（`context/parsers/multiblockDocument.ts`）在解析期就把
+ * 「`domain.max` 缺省 ⇒ 总 Tier 域上界」折叠成了 `hi`，故两者**同义不同形**；
+ * 端口适配必须在这一处换键，否则同一份文档经内核承运求值会得到**不同**的取值域
+ * （实测：`multiblock-lsc-overlap` 的 glass 域 2→3 ⇒ 规则 `glass.plate` 的
+ * indexTable 缺第 3 档 ⇒ 整条装配失败）。
+ *
+ * ## 它是**一处具名纯函数**，不是通用转换器（条件 (a)(b) 的机械形态）
+ *
+ * - 唯一性：全文件里"写文件格式通道域"的**对象字面量只有这一处**
+ *   （判据 `composition/__tests__/g3MultiblockKernelFace.test.ts` 的
+ *   「两种记法只在这一处相遇」按源码扫描钉住；把映射内联回调用点即判红）；
+ * - 覆盖面：本函数**只**换这一个语义字段（通道取值域），**不**做任何
+ *   "内核 → 旧形状"的通用转换 —— 其余键全部走 {@link mutableCopy} 的原样深拷贝。
+ *
+ * ## 保真边界（条件 (c)，**带 owner 与退出条件**）
+ *
+ * 文件**未**声明 `domain.max` 时，解析期的 `hi = 总 Tier 域上界` 与端口的回落口径
+ * `totalTier` **不可区分**（两者都已折叠成一个数）⇒ 本条是**潜在缺陷**：
+ * 若某文件靠"缺省 domain.max + 变更总 Tier 域"表达通道域，端口拿到的上界会偏。
+ * 实测本仓三份真实夹具**每个**通道都声明了 `domain.max` ⇒ 数据上无损。
+ * - owner：R2 线 / G3 批（`composition/kernelAssembly`）；
+ * - 退出条件：求值端口（`context/multiblock/values#channelBounds`）改读内核记法
+ *   `{ lo, hi }` 的那一天 —— 届时本函数与这条边界一并消失（不是"再判一次"）。
+ */
+function evaluatorChannelDomainOf(domain: { readonly hi?: unknown }): Record<string, unknown> {
+  return { max: domain.hi }
 }
 
 /**
