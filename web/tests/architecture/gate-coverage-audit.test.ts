@@ -83,14 +83,56 @@ export const GATE_COVERAGE_AUDIT = Object.freeze([
 const rule = GATE_RULES.find((r) => r.id === 'gate/no-private-cross-layer')
 const gateCtx = (srcRoot) => ({ srcRoot, gateFiles: resolveGateLayers(srcRoot).active })
 
+/** 逐条比对的两侧集合来源（判据只用这两个，不用第三处"手工清单"）。 */
+const surface = () => new Set(resolveGateLayers(SRC_ROOT).active)
+
+/**
+ * **审计的输入全集**：自 `00782b1b` 起新落在四个新层/部分迁移层的**生产**文件。
+ *
+ * 求法（机械化、可复现，铁律 #7 不用 grep 粗估）：
+ * ```
+ * git diff --name-status 00782b1b..HEAD -- web/src/{adapters,runtime,presentation,composition}
+ *   | 取 'A' 行 ⇒ 去 `web/src/` 前缀 ⇒ 去 `__tests__/` 与 `*.test.ts`
+ * ```
+ * 该命令实测产出与下表**逐条相同**（15 条）；表里再加一条幽灵文件、或漏掉一条真实新增，
+ * 下面的"输入全集完整性"用例都会红。
+ */
+export const ADDED_SINCE_00782b1b = Object.freeze([
+  'adapters/export/objExportSerialize.ts',
+  'adapters/export/offscreenTextureDomain.ts',
+  'adapters/export/offscreenTextureUpload.ts',
+  'adapters/files/multiblockDeclaration.ts',
+  'adapters/projectFile.ts',
+  'adapters/textureDecode.ts',
+  'composition/kernelOutlinePlanPort.ts',
+  'composition/kernelPickAdapter.ts',
+  'composition/projectIo.ts',
+  'composition/viewportPick.ts',
+  'composition/viewportTexturePort.ts',
+  'presentation/blockRegistryKey.ts',
+  'presentation/overlayPresenter.ts',
+  'presentation/pickResult.ts',
+  'presentation/textureUploadPort.ts',
+].sort())
+
 describe('G1 ③：闸门覆盖审计 —— 部分迁移层的新文件不得静默脱离执行面', () => {
-  it('登记有效性：审计表里 `after: IN` 的每个文件都**确实**在执行面内', () => {
-    const { active } = resolveGateLayers(SRC_ROOT)
-    const gate = new Set(active)
-    const missing = GATE_COVERAGE_AUDIT.filter((r) => r.after === 'IN' && !gate.has(r.file)).map((r) => r.file)
+  it('输入全集完整性：审计表恰好覆盖 `00782b1b..HEAD` 新增的生产文件（不多不少）', () => {
+    const audited = GATE_COVERAGE_AUDIT.map((r) => r.file).sort()
     expect(
-      missing,
-      '审计表声明"已纳入执行面"但实际不在 ⇒ 登记是空的（或文件被改名/移走，须同批更新审计表）',
+      audited,
+      '审计表必须逐条覆盖自 `00782b1b` 起新增的全部生产文件（漏一条 = 有条目从未被核对；多条 = 混进了不在该区间的文件）',
+    ).toEqual([...ADDED_SINCE_00782b1b])
+  })
+
+  it('登记有效性（双向）：审计表每条的 `after` 都必须等于**实测**执行面成员关系', () => {
+    const gate = surface()
+    const wrong = GATE_COVERAGE_AUDIT.filter((r) => (gate.has(r.file) ? 'IN' : 'OUT') !== r.after).map(
+      (r) => `${r.file}：表记 ${r.after}，实测 ${gate.has(r.file) ? 'IN' : 'OUT'}`,
+    )
+    expect(
+      wrong,
+      '审计表的 after 列必须与 `resolveGateLayers().active` 实测一致（口径：相对 `src/`、无前缀）'
+        + ' —— 不一致要么是口径写错，要么是登记没生效，两者都必须红',
     ).toEqual([])
   })
 
@@ -101,13 +143,38 @@ describe('G1 ③：闸门覆盖审计 —— 部分迁移层的新文件不得�
     expect(bad, '未声明 activeSubpaths 的层整层即执行面，其文件不可能"曾经脱离"').toEqual([])
   })
 
-  it('审计表非空转：**确实**记录了"曾经脱离执行面"的文件（GF-23 同族缺口的实测证据）', () => {
-    const outBefore = GATE_COVERAGE_AUDIT.filter((r) => r.before === 'OUT')
-    expect(outBefore.length, '审计必须留下"曾经脱离"的实测记录（否则这条判据没有对象）').toBeGreaterThan(0)
+  it('**曾经脱离执行面的文件清单**（机械求差）：部分迁移层里未登记即落地的文件', () => {
+    // 口径：`曾经脱离` = 该文件**落地时**不在执行面内。
+    // 两侧集合：
+    //   - "落地时的执行面" = 当前执行面 **减去**本批新登记的那一条
+    //     （`adapters/files/multiblockDeclaration.ts` —— 它是本批唯一的新登记，
+    //      见 `boundary-rules.mjs` 的 `adapters.activeSubpaths` 注释）；
+    //   - "落地文件集" = `ADDED_SINCE_00782b1b`。
+    // 差集 = 落地时不在面内的文件 ⇒ 就是"曾经脱离"清单。
+    const registeredThisBatch = ['adapters/files/multiblockDeclaration.ts']
+    const surfaceBeforeRegistration = new Set(
+      resolveGateLayers(SRC_ROOT).active.filter((f) => !registeredThisBatch.includes(f)),
+    )
+    const detached = ADDED_SINCE_00782b1b.filter((f) => !surfaceBeforeRegistration.has(f))
     expect(
-      outBefore.some((r) => r.file === 'adapters/files/multiblockDeclaration.ts'),
-      '本批实测缺口必须留档',
-    ).toBe(true)
+      detached,
+      '「曾经脱离执行面」清单（机械差集；本批实测结果见下断言）',
+    ).toEqual([
+      'adapters/export/objExportSerialize.ts',
+      'adapters/export/offscreenTextureDomain.ts',
+      'adapters/export/offscreenTextureUpload.ts',
+      'adapters/files/multiblockDeclaration.ts',
+      'adapters/projectFile.ts',
+      'adapters/textureDecode.ts',
+    ])
+    // 审计表里标 `before: 'OUT'` 的必须恰好是这份差集（两处独立表述互证，不得互相抄）
+    expect(
+      GATE_COVERAGE_AUDIT.filter((r) => r.before === 'OUT')
+        .map((r) => r.file)
+        .sort(),
+    ).toEqual(detached)
+    // 非空转：本批确实抓到过缺口
+    expect(detached.length).toBeGreaterThan(0)
   })
 
   it('**负对照**：登记后跨层深路径导入 ⇒ 判红；撤掉登记 ⇒ 同一条导入静默通过', () => {
