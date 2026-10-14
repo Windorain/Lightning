@@ -2,6 +2,10 @@
  * **G1 判据① · `composition/` 生产文件绑定旧层的边**（#385 G1 工作包；形态抄
  * `kernel-legacy-isolation.test.ts#APPROVED_LEGACY_TO_KERNEL_EDGES`）。
  *
+ * 登记表与判定核在 `./composition-legacy-binding.mjs`（数据/逻辑与测试分开，是为了让
+ * **负对照与生产判据共用同一实现** —— 测试里另写一份判定逻辑的形态，负对照绿了也证明不了
+ * 生产判据会判红）。本文件是它的可执行半边。
+ *
  * ## 为什么需要它（已实测的**无判据**缺口）
  *
  * `kernel-legacy-isolation.test.ts` 的判定面只有 `KERNEL_FILES`（domain / application /
@@ -19,306 +23,76 @@
  * | 目标落在**旧分层**（`OLD_LAYERS`，与内核隔离闸门同表）的边 | 目标落在 `KERNEL_FILES`（新层）或 `composition/` 自身的边 |
  *
  * **口径 = AST 全量**（`module-graph.mjs#buildModuleGraph` → TypeScript 编译器 API）。
- * 本文件**不做任何文本扫描**：没有正则、没有 `indexOf`、不读源码文本做匹配
+ * 本判据**不做任何文本扫描**：没有正则、没有 `indexOf`、不读源码正文做匹配
  * —— 因此注释与字符串字面量**天然不可能**误报（`seams.ts` 把符号写在字符串里的坑在此不适用）。
  * 唯一的文本读取是"从 `kernel-legacy-isolation.test.ts` 里取出 `KERNEL_FILES` 字面量"，
- * 那也走 TS 的 AST（见 `readKernelFiles`），不是正则。
+ * 那也走 TS 的 AST（见 `composition-legacy-binding.mjs#readKernelFiles`），不是正则。
  *
  * ## 三条判据形态（与 #387 评论 7293 的归档纪律一致）
  *
  * 1. **未登记即红**：扫描出的每一条边都必须逐条在 `APPROVED_COMPOSITION_LEGACY_EDGES` 里；
- * 2. **登记不得腐烂**：每条登记都必须**真实存在**（文件 + 行 + 说明符 + 目标全对）；
- * 3. **登记数不得增**：`files` / `lines` 与 `COMPOSITION_LEGACY_EDGE_BASELINE` 逐数对齐
+ * 2. **登记不得腐烂**：每条登记都必须**真实存在**（文件 + 行 + 目标全对）；
+ * 3. **登记数不得增**：`files` / `lines` 与 `BASELINE_FILES` / `BASELINE_LINES` 逐数对齐
  *    —— 多一条即红（新增绑定必须先改基线并给出理由），少一条**也**红（须同批核销）。
  *
  * ⚠️ **登记是"可见性与可判定性"，不是允许增长**（#387 评论 7293）。
  * 本判据**严禁直接判零**：装配根把真实文件装配成内核文档、把内核投影回旧形状，
- * 是设计必需的编解码面，判零会立刻假红（实测 28 行）。
- */
-
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import ts from 'typescript'
-import { describe, expect, it } from 'vitest'
-import { SRC_ROOT, extractImports } from './module-graph.mjs'
-
-/** 判定面：`src/` 相对前缀。 */
-export const COMPOSITION_SCOPE = 'composition/'
-
-/**
- * 旧分层表 —— 与 `kernel-legacy-isolation.test.ts#OLD_LAYERS` **同表同义**（撞名层 `runtime` 在列）。
- * 两处都要列同一批目录是**故意**的：判据各自独立可读，改一处必须同批改另一处。
- */
-const OLD_LAYERS = [
-  'pure',
-  'context',
-  'operators',
-  'handlers',
-  'events',
-  'render',
-  'shared',
-  'workbench',
-  'viewer',
-  'embed',
-  'wiki',
-  'util',
-  'config',
-  'dev',
-  'logging',
-  'runtime',
-]
-
-/** 从内核隔离闸门的源码里用 **AST** 取出 `KERNEL_FILES` 字面量（单一事实来源，不复制清单）。 */
-export function readKernelFiles() {
-  const gatePath = path.join(import.meta.dirname, 'kernel-legacy-isolation.test.ts')
-  const text = fs.readFileSync(gatePath, 'utf8').replace(/\r\n/g, '\n')
-  const sf = ts.createSourceFile(gatePath, text, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS)
-  let found = null
-  const visit = (node) => {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === 'KERNEL_FILES' &&
-      node.initializer &&
-      ts.isArrayLiteralExpression(node.initializer)
-    ) {
-      found = node.initializer.elements
-        .filter((e) => ts.isStringLiteral(e))
-        .map((e) => e.text)
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(sf)
-  if (found === null) throw new Error('未能从 kernel-legacy-isolation.test.ts 取出 KERNEL_FILES（判据链断裂）')
-  return found
-}
-
-/** 生产文件判定（与 `module-graph.mjs#isProductionFile` 同口径）。 */
-export function isProductionRel(rel) {
-  if (rel.split('/').slice(0, -1).includes('__tests__')) return false
-  if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(rel)) return false
-  if (/\.d\.ts$/.test(rel)) return false
-  return true
-}
-
-/** 目标模块路径（`src/` 相对、无扩展名）是否属于旧分层（内核文件表内的不算旧）。 */
-export function isOldLayerTarget(rel, kernelFiles) {
-  if (kernelFiles.includes(`${rel}.ts`) || kernelFiles.includes(`${rel}.vue`) || kernelFiles.includes(rel)) return false
-  return OLD_LAYERS.some((layer) => rel === layer || rel.startsWith(`${layer}/`))
-}
-
-/** 解析一条导入事实的目标（`src/` 相对、无扩展名）；不可静态判定 ⇒ `null`。 */
-export function resolveTargetOf(fact, srcRoot) {
-  const spec = fact.specifier
-  if (spec.startsWith('«')) return null
-  if (!spec.startsWith('.') && !spec.startsWith('/') && !spec.startsWith('@/')) return null
-  const abs = spec.startsWith('@/') ? path.join(srcRoot, spec.slice(2)) : path.resolve(path.dirname(fact.fromFile), spec)
-  const rel = path.relative(srcRoot, abs).replace(/[\\/]+/g, '/')
-  if (rel.startsWith('..')) return null
-  return rel.replace(/\.(ts|tsx|mts|vue|js)$/, '')
-}
-
-/**
- * **判定核**：给定导入事实集与登记表，返回未登记的边（判红用）。
- * 生产判据与两条负对照**共用本函数** —— 负对照不得另写一份判定逻辑。
- */
-export function unregisteredCompositionLegacyEdges(facts, registry, { srcRoot = SRC_ROOT, kernelFiles = readKernelFiles() } = {}) {
-  const registered = new Set(registry.map((e) => `${e.from}:${e.line}:${e.to}`))
-  const out = []
-  for (const f of facts) {
-    const fromRel = path.relative(srcRoot, f.fromFile).replace(/[\\/]+/g, '/')
-    if (!fromRel.startsWith(COMPOSITION_SCOPE)) continue
-    if (!isProductionRel(fromRel)) continue
-    const target = resolveTargetOf(f, srcRoot)
-    if (target === null || !isOldLayerTarget(target, kernelFiles)) continue
-    if (registered.has(`src/${fromRel}:${f.line}:${target}`)) continue
-    out.push(`src/${fromRel}:${f.line}  → ${f.specifier}（未登记）`)
-  }
-  return out
-}
-
-/** **校准自检用**：按判定核自己的口径数出（文件数 / 行数）。 */
-export function countCompositionLegacyEdges(facts, { srcRoot = SRC_ROOT, kernelFiles = readKernelFiles() } = {}) {
-  const lines = []
-  for (const f of facts) {
-    const fromRel = path.relative(srcRoot, f.fromFile).replace(/[\\/]+/g, '/')
-    if (!fromRel.startsWith(COMPOSITION_SCOPE)) continue
-    if (!isProductionRel(fromRel)) continue
-    const target = resolveTargetOf(f, srcRoot)
-    if (target === null || !isOldLayerTarget(target, kernelFiles)) continue
-    lines.push({ file: `src/${fromRel}`, line: f.line, target })
-  }
-  return { files: new Set(lines.map((l) => l.file)).size, lines: lines.length, rows: lines }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 登记表（基线：8 文件 / 13 行的**修订实测值**，见下方 BASELINE 注释的差异说明）
-// ─────────────────────────────────────────────────────────────────────────────
-
-const E = (from, line, to, kind, reason, exitStage, owner) =>
-  Object.freeze({ from, line, to, kind, reason, exitStage, owner })
-
-/**
- * `composition/` 生产文件 → 旧层的**已登记**边。
- *
- * ## 每一行为什么"必须存在"
- *
- * 装配根（`composition/`）的职责就是**把各层的实现装到一起**（契约 §7 明文：
- * 装配根引用实现是设计使然）。本批的编解码面更是**不可能不绑旧层**：
- *  - **入向**：把真实文件（旧 `RuntimeDocument` / `Envelope` / `Parser`）装配成内核 `Document`；
- *  - **出向**：把内核的 `Document`/`scene` 投影回旧形状（旧 `Grid`/`SlotBlock`/`vec`）供
- *    渲染链与保存链消费。
- * 判零会立刻假红 ⇒ 形态只能是"逐条登记 + 计数冻结"。
+ * 是设计必需的编解码面，判零会立刻假红（实测 32 行）。
  *
  * ## 与任务书给定数字的差异（实测口径；铁律 #7「以判据本尊的扫描口径实测」）
  *
  * 任务书写"8 个生产文件 / 13 行"，且其逐条列举**自加**为 7 文件 / 17 行（把
  * `kernelAssembly.ts:92` 那处 `import type { … }` **多行语句的结束行**当成导入行，
- * 而 AST 报的是语句起点 `:87`）—— 三组数字互不相符。本判据以**判据本尊的扫描口径**实测，
- * 并把三列基线一并答出：
+ * 而 AST 报的是语句起点 `:87`）—— 三组数字互不相符。本判据的实测三列基线：
  *
  * | 提交 | 实测（本判据口径） | 说明 |
  * |---|---|---|
- * | `fb0814d4`（真实基线，任务书所指的上一批） | **9 文件 / 23 行** | 不含 C8/C9 的新增接线 |
+ * | `fb0814d4`（真实基线） | **9 文件 / 23 行** | 不含 C8/C9 的新增接线 |
  * | `9630a39d`（任务书写明的 HEAD） | **11 文件 / 28 行** | 含 C8 的 `kernelPickAdapter`/`viewportPick` |
- * | `e453ea8f`+（本批评审时点，R1-A C9 已落地） | **12 文件 / 32 行** | 含 C9 的 `kernelOutlinePlanPort` 四条 |
+ * | 本批（`e453ea8f`+ R1-A C9 已落地） | **12 文件 / 32 行** | 含 C9 的 `kernelOutlinePlanPort` 四条 |
  *
  * **口径差异的来源**（相对任务书那张窄清单）：本判据按闸门自身的 `OLD_LAYERS` 判"目标是不是旧层"，
  * 故目标落在**撞名层 `runtime/`** 的边（`runtime/gridRead`、`runtime/context`、
  * `runtime/annotationRead`、`runtime/presentationAdapter`）同样计入 —— 这些目标既不在
  * `KERNEL_FILES`，也不在新层，按内核隔离闸门的口径**就是**旧层；另有两条
  * `import('x').T` **类型位置**事实（`kernelProjection.ts:562,569`）与 `:78` 一处。
- * 只看 `@/context/*` + `@/pure/*` 目标时读数 = **7 文件 / 21 行**（仍在报告里给出，供对照）。
+ * 只看 `@/context/*` + `@/pure/*` 目标时读数 = **7 文件 / 21 行**（报告里给出，供对照）。
  *
  * ## 基线为何是 12/32 而不是 11/28（基线**修订**的显式记录）
  *
  * 本批评审时，R1-A C9（`f50f6011` / `e453ea8f`）已落在本分支上并新增四条装配根 → 旧层绑定。
  * 按本仓 `APPROVED_LEGACY_TO_KERNEL_EDGES` 的既有形态，"新绑定逐条登记"正是闸门要求的处置
- * （登记是可见性与可判定性），故本表**同批登记这四条**并把基线改为 12/32 ——
- * 这是**一次显式的、可复核的基线修订**，不是静默放宽：`git log` 可查本次修订，
- * 每条新登记都写明了理由与退出归属。
+ * （登记是可见性与可判定性），故同批登记这四条并把基线改为 12/32 ——
+ * 这是一次**显式的、可复核的**基线修订（`git log` 可查），每条新登记都写明理由与退出归属。
  */
-export const APPROVED_COMPOSITION_LEGACY_EDGES = [
-  // ── 入向：把真实文件装配成内核文档（旧 RuntimeDocument / Grid / multimblock 的公共出口）──
-  E('src/composition/kernelAssembly.ts', 76, 'context/runtimeDocument', 'import',
-    '入向装配：旧 `RuntimeDocument`/`RuntimeFrame` 的**类型**是装配的输入形状（真实文件先被旧解析器读成它，再被本模块装配成内核 `Document`）。这是"把真实文件装配成内核文档"这条设计必需编解码面的类型端',
-    'R1 收口：旧解析器/旧文档载体退出生产后，本模块的输入形状改为适配器出口 ⇒ 本行随 `@/context/runtimeDocument` 的引用一起核销', 'G1'),
-  E('src/composition/kernelAssembly.ts', 77, 'context/grid', 'import',
-    '入向装配：旧 `Grid`/`SlotBlock` 是**文件分区块**在旧解析器里的类型化承载，装配必须读它才能取出逐格方块身份与调色板槽位',
-    'R1 收口：分区块状态槽由适配器（`adapters/files/**`）直接承载后核销', 'G1'),
-  E('src/composition/kernelAssembly.ts', 82, 'context/multiblock', 'import',
-    '入向装配：多方块**声明**（`assembleSelection` 的公共出口）来自旧 `context/multiblock` —— 它把文件里的多方块声明求值成装配输入',
-    'R1 收口：多方块声明求值迁入 `domain/multiblock` 的适配器侧出口后核销', 'G1'),
-  E('src/composition/kernelAssembly.ts', 87, 'context/runtimeDocument', 'import',
-    '入向装配：多方块声明类型（`MultiblockChannelDecl` 等）经旧 `context/runtimeDocument` 的**公共出口**取得（不钻 `context/parsers/multiblockDocument`，避免超公共出口深度上限 2）',
-    'R1 收口：随 `@/context/runtimeDocument` 退场而核销（同 :76 那条）', 'G1'),
-  E('src/composition/documentLoad.ts', 36, 'context/runtimeDocument', 'import',
-    '入向装配（DocumentSource 脊柱）：加载结果里的 `RuntimeDocument` 类型是两条加载脊柱的公共输入；`plainRootOf(loadResult.raw)` 的形态由它给出',
-    'R1 收口：加载器出口改为适配器形状后核销', 'G1'),
-  E('src/composition/projectIo.ts', 42, 'context/runtimeDocument', 'import',
-    '入向装配（工程 IO 脊柱）：同上，工程文件读回后先落到旧文档类型再装配',
-    'R1 收口：随加载脊柱统一到适配器出口而核销', 'G1'),
 
-  // ── 出向：把内核投影回旧形状（渲染链与保存链此刻仍读旧形状）──
-  E('src/composition/kernelProjection.ts', 56, 'context/grid', 'import',
-    '出向投影：内核载荷 → 旧 `Grid` 的**值导入**（不只是类型）—— 投影产物必须是旧渲染链能直接吃的对象',
-    'R1 收口：渲染链终切内核、旧 `Grid` 退出生产后核销（与 `legacy-render-source-document` 同批）', 'G1'),
-  E('src/composition/kernelProjection.ts', 57, 'context/grid', 'import',
-    '出向投影：旧 `SlotBlock`（格子的文件槽位形态），投影时逐格写回',
-    'R1 收口：同 :56 那条；`SlotBlock` 与 `Grid` 同批退出', 'G1'),
-  E('src/composition/kernelProjection.ts', 58, 'context/runtimeDocument', 'import',
-    '出向投影：投影目标就是旧 `RuntimeDocument`（`RuntimeFrame` 亦是），故需其类型',
-    'R1 收口：旧权威 `RuntimeDocument` 终删时随投影面一起核销', 'G1'),
-  E('src/composition/kernelProjection.ts', 59, 'context/runtimeDocument', 'import',
-    '出向投影：同上（值位置，用于构造旧形状对象）',
-    'R1 收口：同 :58', 'G1'),
-  E('src/composition/kernelProjection.ts', 60, 'pure/vec', 'import',
-    '出向投影：旧形状里坐标是 `vec`（`{x,y,z}` 的旧工具族），投影必须产出同形状',
-    'R1 收口：旧形状退出后被 `domain` 的坐标表示取代 ⇒ 核销', 'G1'),
-  E('src/composition/kernelProjection.ts', 61, 'context/runtimeDocument', 'import',
-    '出向投影：逐格内容/调色板写回旧文档根级字段时需要的类型与常量',
-    'R1 收口：同 :58', 'G1'),
-  E('src/composition/kernelProjection.ts', 62, 'pure/partTypes', 'import',
-    '出向投影：多方块**部件**的旧类型族（部件的文件形状），投影时按它还原',
-    'R1 收口：部件面迁入 `domain/cellContent` 的适配器出口后核销', 'G1'),
-  E('src/composition/kernelProjection.ts', 78, 'runtime/gridRead', 'import',
-    '出向投影：读面（旧 `runtime/` 撞名层的新写实现）与投影面必须共用**同一条**取值规则（"取哪一份载荷"），否则两侧会漂移成两套实现',
-    'R1 收口：`runtime/gridRead` 随工作台消费面迁出旧层时核销（与 `APPROVED_LEGACY_TO_KERNEL_EDGES` 的 `gridRead` 两条同批）', 'G1'),
-  E('src/composition/kernelProjection.ts', 562, 'pure/gridTypes', 'import',
-    '出向投影（类型位置 `import(\'x\').T`）：该行附近的签名用旧 `gridTypes` 的判别式类型表达"投影输入是内核载荷"',
-    'R1 收口：旧 `gridTypes` 退出生产后核销', 'G1'),
-  E('src/composition/kernelProjection.ts', 569, 'pure/gridTypes', 'import',
-    '出向投影（类型位置 `import(\'x\').T`）：同一模块内第二处签名也以内核载荷类型为准，复用旧 `gridTypes` 的判别式类型描述"投影输入来自内核"',
-    'R1 收口：与 :562 同批核销（旧 `gridTypes` 退出生产）', 'G1'),
-  E('src/composition/kernelRenderView.ts', 30, 'context/runtimeDocument', 'import',
-    '出向投影（渲染视图）：内核视图要能被旧渲染链消费，故按旧 `RuntimeFrame` 形状投影',
-    'R1 收口：渲染链终切内核后核销', 'G1'),
-  E('src/composition/kernelRenderView.ts', 31, 'context/runtimeDocument', 'import',
-    '出向投影（渲染视图）：值位置构造（同上）',
-    'R1 收口：同 :30', 'G1'),
-  E('src/composition/kernelPaletteAssembly.ts', 50, 'context/grid', 'import',
-    '出向装配：调色板装配按旧 `Grid` 的槽位语义（`paletteIndex`）对齐条目，使投影产物与旧消费点键口径一致',
-    'R1 收口：旧 `Grid` 槽位语义由内核 `palette` 承载后核销', 'G1'),
-  E('src/composition/projectIo.ts', 53, 'runtime/annotationRead', 'import',
-    '出向投影（工程写出）：注解读面（旧 `runtime/` 撞名层的新写实现）把内核注解投影成旧形状后才能落盘',
-    'R1 收口：保存路径无 legacy 回落分支后，随 `annotationRead` 退出核销', 'G1'),
-  E('src/composition/saveProjection.ts', 47, 'runtime/annotationRead', 'import',
-    '出向投影（保存投影）：同 `projectIo:53`，保存链路读旧形状注解',
-    'R1 收口：同 `projectIo:53`', 'G1'),
-  E('src/composition/useKernelFrameLoop.ts', 44, 'runtime/context', 'import',
-    '接线：帧循环要驱动旧运行实例（`Context`），此刻宿主仍是旧外壳',
-    'R1 收口：旧外壳退场、帧循环改吃新宿主后核销', 'G1'),
-  E('src/composition/kernelPresentationInputs.ts', 61, 'runtime/presentationAdapter', 'import',
-    '接线：呈现输入装配（旧 `runtime/` 撞名层的适配器）—— 装配根引用各层实现是设计使然（契约 §7）',
-    'R1 收口：呈现输入改由 `presentation/` 出口承载后核销', 'G1'),
-  E('src/composition/kernelPickAdapter.ts', 37, 'pure/vec', 'import',
-    '接线：拾取适配器的坐标换算复用旧 `vec` 工具族（射线/包围盒计算）',
-    'R1 收口：坐标与射线工具迁入 `domain`/`presentation` 出口后核销', 'G1'),
-  E('src/composition/kernelPickAdapter.ts', 38, 'runtime/gridRead', 'import',
-    '接线：拾取要经读面取网格（`gridRead` 是 15 处旧消费点的统一替代面），与本模块的命中计算同批接通',
-    'R1 收口：拾取链完全落内核读面后核销（与 `viewportPick` 同批）', 'G1'),
-  E('src/composition/viewportPick.ts', 28, 'runtime/gridRead', 'import',
-    '接线：视口拾取的网格取值经读面（与 `kernelPickAdapter` 共用同一条取值规则）',
-    'R1 收口：同 `kernelPickAdapter:38`', 'G1'),
-  E('src/composition/viewportPick.ts', 30, 'runtime/annotationRead', 'import',
-    '接线：视口拾取要能命中注解，注解形状由读面投影给出',
-    'R1 收口：注解消费面迁出旧层后核销', 'G1'),
-  E('src/composition/viewportPick.ts', 31, 'runtime/annotationRead', 'import',
-    '接线：同上（值位置：拾取时构造读取形状）',
-    'R1 收口：同 :30', 'G1'),
-  // ── R1-A C9（f50f6011 / e453ea8f）：描边规划端口经装配根注入 ────────────────
-  //
-  // C9 把"描边几何承载"落成生产实现（`kernelOutlinePlanPort` + 计划→mask 适配 + DRW 接线）。
-  // 该模块是 `composition/` 的装配根（深度 2），只 import `runtime/`、`pure/`、`domain/`、
-  // `presentation/` 的**深度 ≤ 2 公共出口**（见其文件头"分层"一节）。
-  // 它引用旧 `runtime/` 撞名层的**读面**（`gridRead`）与旧运行实例（`context`），
-  // 外加 `pure/partMask` 的部件掩码几何 ⇒ 四条"装配根 → 旧层"边，逐条登记（不得静默）。
-  E('src/composition/kernelOutlinePlanPort.ts', 49, 'runtime/context', 'import',
-    'C9 接线：描边几何源需要旧运行实例的类型（网格/对象的取用入口此刻仍在旧 `Context` 上）——装配根引用各层实现是设计使然（契约 §7）',
-    'R1 收口：旧外壳/旧运行实例退场、描边几何源改吃内核会话后核销', 'R1-A'),
-  E('src/composition/kernelOutlinePlanPort.ts', 50, 'runtime/gridRead', 'import',
-    'C9 接线：格几何的形状由 `gridRead` 的读面返回类型派生（`KernelGridView`/`KernelGridPos`）——刻意**不** import `render/schema/types#BakedQuad`（深度 3 超公共出口上限），故读面是唯一形状来源',
-    'R1 收口：读面迁出旧层（与 `APPROVED_LEGACY_TO_KERNEL_EDGES` 的 `gridRead` 两条同批）后核销', 'R1-A'),
-  E('src/composition/kernelOutlinePlanPort.ts', 51, 'runtime/gridRead', 'import',
-    'C9 接线（值位置）：用 `kernelGridObjectIdOf` 把格归一成对象身份 —— 与 `runtime/gridRead#identityRefOf` 的"歧义即拒绝"同一条纪律，不另写第二份',
-    'R1 收口：同 :50', 'R1-A'),
-  E('src/composition/kernelOutlinePlanPort.ts', 65, 'pure/partMask', 'import',
-    'C9 接线：部件掩码几何复用旧 `pure/partMask` 的实现（`resolvePartMaskGeometry`）——它是既有生产能力的**唯一**实现，本模块只负责把"格的部件"解析成它的输入',
-    'R1 收口：部件掩码几何迁入 `domain`/`adapters` 的新承载后核销（与 `runtime/gridRead` 的退出同批评审）', 'R1-A'),
-]
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { extractImports } from './module-graph.mjs'
+import {
+  APPROVED_COMPOSITION_LEGACY_EDGES,
+  BASELINE_FILES,
+  BASELINE_LINES,
+  COMPOSITION_SCOPE,
+  REGISTRY_REQUIRED_FIELDS,
+  SRC_ROOT,
+  countCompositionLegacyEdges,
+  isOldLayerTarget,
+  isProductionRel,
+  readKernelFiles,
+  resolveTargetOf,
+  unregisteredCompositionLegacyEdges,
+} from './composition-legacy-binding.mjs'
 
-/** 逐条登记必须写全的字段（防"登记了但没有理由/没有退出归属/没有负责人"）。 */
-const REQUIRED_FIELDS = ['from', 'line', 'to', 'kind', 'reason', 'exitStage', 'owner']
-
-const BASELINE_FILES = 12
-const BASELINE_LINES = 32
+const makeEdge = (from, line, to) =>
+  Object.freeze({ from, line, to, kind: 'import', reason: 'x'.repeat(30), exitStage: 'P11', owner: 'G1' })
 
 describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条登记，未登记即红，登记数不得增', () => {
   /** 判据执行面：AST 扫全部生产模块图（与生产扫描器同源）。 */
-  // 全树扫描对本配置是 ~4s：模块内 memo 一次，避免每个用例各扫一遍
-  // （10 个用例 × 4s = 40s，会把 `test:arch` 的预算吃光；判据强度不变 ——
-  //  同一次运行内的树是同一份，memo 不影响任何断言）。
+  // 全树扫描对本配置约 4s：模块内 memo 一次，避免每个用例各扫一遍
+  // （判据强度不变 —— 同一次运行内的树是同一份，memo 不影响任何断言）。
   let factsPromise = null
   function loadFacts() {
     if (factsPromise === null) factsPromise = import('./module-graph.mjs').then((m) => m.buildModuleGraph().facts)
@@ -345,10 +119,9 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
       if (!isOldLayerTarget(target, kernelFiles)) continue
       present.add(`src/${fromRel}:${f.line}:${target}`)
     }
-    const rotted = []
-    for (const e of APPROVED_COMPOSITION_LEGACY_EDGES) {
-      if (!present.has(`${e.from}:${e.line}:${e.to}`)) rotted.push(`${e.from}:${e.line} → ${e.to}`)
-    }
+    const rotted = APPROVED_COMPOSITION_LEGACY_EDGES.filter((e) => !present.has(`${e.from}:${e.line}:${e.to}`)).map(
+      (e) => `${e.from}:${e.line} → ${e.to}`,
+    )
     expect(
       rotted,
       `登记的边已不存在或行号漂移（请同批核销/更正 —— 建筑在腐烂登记上的闸门等于没有闸门）:\n${rotted.join('\n')}`,
@@ -375,7 +148,7 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
     const onlyRegistered = [...registered].filter((k) => !observed.has(k)).sort()
     const onlyObserved = [...observed].filter((k) => !registered.has(k)).sort()
     expect({ onlyRegistered, onlyObserved }, '登记表与实测边的对称差必须为空').toEqual({ onlyRegistered: [], onlyObserved: [] })
-    // 基线数与判据自身读数一致（作者手写的 11/28 必须等于判定核数出来的 11/28）
+    // 基线数与判据自身读数一致（手写的 12/32 必须等于判定核数出来的 12/32）
     expect({ files: BASELINE_FILES, lines: BASELINE_LINES }).toEqual({ files: counted.files, lines: counted.lines })
   })
 
@@ -411,12 +184,12 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
 
   it('登记字段完备性：每条登记都写明 文件/行/目标/类别/理由/退出归属/负责人', () => {
     const incomplete = APPROVED_COMPOSITION_LEGACY_EDGES.filter((e) => {
-      if (REQUIRED_FIELDS.some((k) => e[k] === undefined || e[k] === null || e[k] === '')) return true
+      if (REGISTRY_REQUIRED_FIELDS.some((k) => e[k] === undefined || e[k] === null || e[k] === '')) return true
       if (String(e.reason).length < 20) return true
       if (String(e.exitStage).length < 5) return true
       return false
     }).map((e) => `${e.from}:${e.line}`)
-    expect(incomplete, `登记项必须写全 ${REQUIRED_FIELDS.join('/')}（理由 ≥20 字）`).toEqual([])
+    expect(incomplete, `登记项必须写全 ${REGISTRY_REQUIRED_FIELDS.join('/')}（理由 ≥20 字）`).toEqual([])
   })
 
   it('反空洞真：判定面里**确实**有边被扫到（否则"未登记即红"是空转）', async () => {
@@ -441,7 +214,7 @@ describe('G1 ①：`composition/` 生产文件绑定旧层的边 —— 逐条�
       const violations = unregisteredCompositionLegacyEdges(facts, APPROVED_COMPOSITION_LEGACY_EDGES, { srcRoot, kernelFiles })
       expect(violations, '未登记的新边必须判红（注入 `@/context/grid`）').toHaveLength(1)
       // 正对照：同一条边**登记后**判绿（证明判红来自登记表，而不是别的什么）
-      const registry = [...APPROVED_COMPOSITION_LEGACY_EDGES, E('src/composition/probeAssembly.ts', 1, 'context/grid', 'import', 'x'.repeat(30), 'P11', 'G1')]
+      const registry = [...APPROVED_COMPOSITION_LEGACY_EDGES, makeEdge('src/composition/probeAssembly.ts', 1, 'context/grid')]
       expect(
         unregisteredCompositionLegacyEdges(facts, registry, { srcRoot, kernelFiles }),
         '登记之后必须判绿（否则负对照证明不了登记表在起作用）',
