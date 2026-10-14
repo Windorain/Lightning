@@ -105,6 +105,23 @@ describe('G1/G2 · 已解析声明 → 内核承载 → 内容身份（生产路
     expect(dropped, '删掉承载即回落：证明该字段真的进内容身份').toBe(empty)
   })
 
+  it('**内容身份确定**：显式空的同一语义在三条构造路径上得到**同一个** digest', () => {
+    // 路径 ①：`EMPTY_CONTENT` 常量字面量
+    // 路径 ②：`documentContent()` 无参缺省
+    // 路径 ③：`documentContent({ multiblock: EMPTY_MULTIBLOCK_DECLARATION })` 显式传空
+    // 三者若不同，就是"同一语义两种摘要" —— 会让文档凭空变脏、并让求值键抖动。
+    const a = contentVersionOf(EMPTY_CONTENT)
+    const b = contentVersionOf(documentContent())
+    const c = contentVersionOf(documentContent({ multiblock: EMPTY_MULTIBLOCK_DECLARATION }))
+    expect(b, '`documentContent()` 缺省必须等于 `EMPTY_CONTENT`').toBe(a)
+    expect(c, '显式传空必须等于缺省（禁 `undefined` 冒充「无」）').toBe(a)
+    // 同一份真实声明**两次独立装配**也必须同摘要（装配不得引入非确定量，如 Map 迭代序）。
+    const d1 = contentVersionOf(documentContent({ multiblock: multiblockDeclarationOf(parsedFixture).declaration }))
+    const d2 = contentVersionOf(documentContent({ multiblock: multiblockDeclarationOf(parsedFixture).declaration }))
+    expect(d2).toBe(d1)
+    expect(d1).not.toBe(a)
+  })
+
   it('未承载的字段**报诊断**，不静默丢（§12）', () => {
     const inner = innerOf(tierOnlyFixture as unknown as { payload: string })
     const frames = (inner.frames as Json[]).map((f, i) =>
