@@ -139,6 +139,10 @@ export const KERNEL_FILES = [
   'adapters/files/projectFormat.ts',
   'adapters/files/documentBinding.ts',
   'adapters/files/publishFormat.ts',
+  // R2（#388）多方块声明适配（A09–A12 边界编解码）：声明形态 ↔ 内核具名承载。
+  // 登记口径与 boundary-rules.mjs 的 `adapters.activeSubpaths` 是同一事实（本文件下方
+  // 「adapters 层为部分迁移」用例逐项比对二者，任一单方增删即红）。
+  'adapters/files/multiblockDeclaration.ts',
   // P9（#260）宿主产物适配（A34）：能力矩阵、宿主传输/补丁、构建 manifest
   'adapters/host/hostCapabilities.ts',
   'adapters/host/artifactTransport.ts',

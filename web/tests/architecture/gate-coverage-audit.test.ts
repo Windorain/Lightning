@@ -47,7 +47,12 @@ import { buildModuleGraph, SRC_ROOT } from './module-graph.mjs'
  * 当前为 `runtime` / `adapters`）或新层里的文件，逐个核对其是否在判定面内。
  *
  * 列：
- *  - `file`：`src/` 相对路径；
+ *  - `file`：**相对 `src/` 的路径**（与 `resolveGateLayers().active` **同口径** —— 该集合
+ *    实测 `length=134`、以 `src/` 开头者 `0`；判据按**被测函数的**口径写。⚠️ 不得反向给
+ *    `active` 加前缀：那会与 `corePurityFileSet`、`path.join(srcRoot, …)`、本文件的负对照
+ *    `gateFiles: ['adapters/files/multiblockDeclaration.ts']` 以及 `boundary-scan.test.ts`
+ *    的既有口径冲突 —— 本文件首次落地时正是把它写成了 `'src/…'`，导致 10 条 `after:'IN'`
+ *    比对全 false（**判据口径 bug**，不是结构发现；已按本口径修正）；
  *  - `layer`：所属层；
  *  - `partial`：该层是否部分迁移（`true` ⇒ 存在"忘登记就静默脱离"的风险面）；
  *  - `before`：本批**登记前**是否在执行面内（实测；`'OUT'` = 曾经脱离执行面）；
@@ -58,21 +63,21 @@ import { buildModuleGraph, SRC_ROOT } from './module-graph.mjs'
  * 取 `A` 行 ⇒ 逐个用 `resolveGateLayers().active` 判定（**不用 grep 粗估**，铁律 #7）。
  */
 export const GATE_COVERAGE_AUDIT = Object.freeze([
-  { file: 'src/adapters/files/multiblockDeclaration.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'IN', why: '本批实测缺口：475 行新实现含跨层导入，落地时未登记 ⇒ 全部闸门静默脱离；本批登记纳入（boundary-rules.mjs 的 adapters.activeSubpaths）' },
-  { file: 'src/adapters/export/objExportSerialize.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同批新落但仍在 `util/` 旧实现的替代序列中；**未登记 ⇒ 仍脱离执行面**，属遗留债务（由导出面批次随 util/ 退役一并处置）' },
-  { file: 'src/adapters/export/offscreenTextureDomain.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同上（在途 R3-2/纹理批次的在制文件）；登记条件 = 该批定稿后由负责批次登记，本判据只把"脱离"这件事变成可见事实' },
-  { file: 'src/adapters/export/offscreenTextureUpload.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同上' },
-  { file: 'src/adapters/projectFile.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同上' },
-  { file: 'src/adapters/textureDecode.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同上' },
-  { file: 'src/presentation/blockRegistryKey.ts', layer: 'presentation', partial: false, before: 'IN', after: 'IN', why: '整层新目录（无撞名）⇒ 全目录即执行面，不存在登记缺口' },
-  { file: 'src/presentation/overlayPresenter.ts', layer: 'presentation', partial: false, before: 'IN', after: 'IN', why: '同上' },
-  { file: 'src/presentation/pickResult.ts', layer: 'presentation', partial: false, before: 'IN', after: 'IN', why: '同上' },
-  { file: 'src/presentation/textureUploadPort.ts', layer: 'presentation', partial: false, before: 'IN', after: 'IN', why: '同上' },
-  { file: 'src/composition/kernelOutlinePlanPort.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上（R1-A C9 新落）' },
-  { file: 'src/composition/kernelPickAdapter.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上' },
-  { file: 'src/composition/projectIo.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上' },
-  { file: 'src/composition/viewportPick.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上' },
-  { file: 'src/composition/viewportTexturePort.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上' },
+  { file: 'adapters/files/multiblockDeclaration.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'IN', why: '本批实测缺口：475 行新实现落地时未登记 ⇒ 全部闸门静默脱离；本批登记纳入（boundary-rules.mjs 的 adapters.activeSubpaths）。⚠️ 登记当场暴露一条既有违规：该文件 `:55` 的跨层深路径导入被判红（**既有违规被登记暴露**，不是登记造成的）—— 已由负责批次在 `3d5f496f` 改导入修复，**未加任何闸门豁免**' },
+  { file: 'adapters/export/objExportSerialize.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同批新落但仍在 `util/` 旧实现的替代序列中；**未登记 ⇒ 仍脱离执行面**，属遗留债务（由导出面批次随 util/ 退役一并处置）' },
+  { file: 'adapters/export/offscreenTextureDomain.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同上（在途 R3-2/纹理批次的在制文件）；登记条件 = 该批定稿后由负责批次登记，本判据只把"脱离"这件事变成可见事实' },
+  { file: 'adapters/export/offscreenTextureUpload.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同上' },
+  { file: 'adapters/projectFile.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同上' },
+  { file: 'adapters/textureDecode.ts', layer: 'adapters', partial: true, before: 'OUT', after: 'OUT', why: '同上' },
+  { file: 'presentation/blockRegistryKey.ts', layer: 'presentation', partial: false, before: 'IN', after: 'IN', why: '整层新目录（无撞名）⇒ 全目录即执行面，不存在登记缺口' },
+  { file: 'presentation/overlayPresenter.ts', layer: 'presentation', partial: false, before: 'IN', after: 'IN', why: '同上' },
+  { file: 'presentation/pickResult.ts', layer: 'presentation', partial: false, before: 'IN', after: 'IN', why: '同上' },
+  { file: 'presentation/textureUploadPort.ts', layer: 'presentation', partial: false, before: 'IN', after: 'IN', why: '同上' },
+  { file: 'composition/kernelOutlinePlanPort.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上（R1-A C9 新落）' },
+  { file: 'composition/kernelPickAdapter.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上' },
+  { file: 'composition/projectIo.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上' },
+  { file: 'composition/viewportPick.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上' },
+  { file: 'composition/viewportTexturePort.ts', layer: 'composition', partial: false, before: 'IN', after: 'IN', why: '同上' },
 ])
 
 const rule = GATE_RULES.find((r) => r.id === 'gate/no-private-cross-layer')
@@ -100,7 +105,7 @@ describe('G1 ③：闸门覆盖审计 —— 部分迁移层的新文件不得�
     const outBefore = GATE_COVERAGE_AUDIT.filter((r) => r.before === 'OUT')
     expect(outBefore.length, '审计必须留下"曾经脱离"的实测记录（否则这条判据没有对象）').toBeGreaterThan(0)
     expect(
-      outBefore.some((r) => r.file === 'src/adapters/files/multiblockDeclaration.ts'),
+      outBefore.some((r) => r.file === 'adapters/files/multiblockDeclaration.ts'),
       '本批实测缺口必须留档',
     ).toBe(true)
   })
@@ -132,15 +137,21 @@ describe('G1 ③：闸门覆盖审计 —— 部分迁移层的新文件不得�
     }
   })
 
-  it('正向：真实树里该文件的**真实**导入确实受 `no-private-cross-layer` 管辖（登记生效）', () => {
+  it('正向 + 负对照：该文件的导入确实受 `no-private-cross-layer` 管辖（登记生效，当前合规）', () => {
+    // 留档（**历史，不是当前状态**）：登记落地后，本文件 `:55` 的跨层深路径导入
+    // （`@/context/parsers/multiblockDocument`，深度 3 > 公共出口上限 2）当场被判红 ——
+    // 那是**登记把一个一直在静默逃逸的既有违规暴露出来**，不是登记造成的红。
+    // 该违规已由负责批次在 `3d5f496f` 就地声明结构输入形状修复（即：**改导入，不是给闸门加豁免**），
+    // 故当前 0 finding。判据因此写成"当前合规 + 通路仍然有效"两段，任一被动手都会红。
     const facts = buildModuleGraph(SRC_ROOT).facts.filter((f) => f.fromSrcRel === 'adapters/files/multiblockDeclaration.ts')
     expect(facts.length, '该文件在模块图里必须有导入事实（否则判定面里没有它）').toBeGreaterThan(0)
-    const findings = rule.check(facts, gateCtx(SRC_ROOT))
-    // 它**当前**不违规（公共出口 ≤2），但"被检查过"这件事必须是可判定的：
-    // 用一条注入的深路径事实在**同一 ctx** 下证明这条通路对它有效。
-    const injected = { ...facts[0], specifier: '@/render/schema/types', fromSrcRel: 'adapters/files/multiblockDeclaration.ts' }
-    const injectedFindings = rule.check([injected], gateCtx(SRC_ROOT))
-    expect(injectedFindings, '登记生效后，注入的深路径跨层导入必须判红').toHaveLength(1)
-    expect(findings, '该文件当前的导入不违反公共出口深度（≤2），故 0 finding 是"真的检查过且合规"').toEqual([])
+    expect(
+      rule.check(facts, gateCtx(SRC_ROOT)).map((f) => `${f.file}:${f.line} → ${f.specifier}（${f.detail}）`),
+      '该文件当前合规：0 finding 是"真的检查过且合规"，不是"没被检查"',
+    ).toEqual([])
+    // 负对照：同一文件注入一条深路径跨层导入 ⇒ 必须判红。证明这条通路**对它**有效；
+    // 若哪天有人把该文件从执行面摘出去，这一条会立刻红。
+    const injected = { ...facts[0], line: 1, specifier: '@/render/schema/types', fromSrcRel: 'adapters/files/multiblockDeclaration.ts' }
+    expect(rule.check([injected], gateCtx(SRC_ROOT)), '同一文件注入的深路径跨层导入必须判红').toHaveLength(1)
   })
 })
