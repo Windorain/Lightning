@@ -51,6 +51,9 @@ import type { Scene } from '@/domain/scene'
 import type { AnimationState, AnimationTrack } from '@/domain/animation'
 import { trackKey } from '@/domain/animation'
 import type { SnapshotPayload } from '@/domain/captureSpec'
+// 纹理池形态归一的**唯一落点**在最内层 `domain/`（#387 落点迁移；此前在 `render/` 时，
+// 本文件作为内核文件 import 它会撞 `kernel-legacy-isolation` —— 见 `hasNonEmptyTexturePool` 的 docblock）。
+import { normalizeTextureBlobPool } from '@/domain/textureBlobPool'
 
 /**
  * 发布物的 `playback` 默认值（B-23 / F-09）。
@@ -135,10 +138,40 @@ export interface PublishableContent {
 /**
  * 数组非空判定（`cellGrid` / `blockPalette` 等**只可能是数组**的字段用）。
  *
- * ⚠️ **不要**用它判定纹理池：见 `texturePresent` 处的未收敛登记（池有两种契约形态）。
+ * ⚠️ **不要**用它判定纹理池：池有两种契约形态，用 {@link hasNonEmptyTexturePool}。
  */
 function hasNonEmptyArray(v: unknown): boolean {
   return Array.isArray(v) && v.length > 0
+}
+
+/**
+ * 纹理池非空判定（**两种契约形态**；#387 收尾批修复）。
+ *
+ * 修复前 `texturePresent` 用的是 `hasNonEmptyArray(d.textureBlobs)` —— **只认数组**，于是
+ * 帧为主文档的投影产物（`plainForSave().plain`，`textureBlobs` 是槽位键对象
+ * `{"0":"<b64>",…}`，见 `composition/kernelProjection.ts:1406-1408`）被清点成"无 texture"
+ * ⇒ 发布准入把**有贴图的真产物**判缺项 `PublishMissingViewerContent`（**假拒绝**）。
+ *
+ * ## 为什么这里**不需要**先判形态（与 `runtime/presentationAdapter.ts` 的摘要配方不同）
+ *
+ * 本函数只问"空不空"，**不比较内容** ⇒ 不存在"盲归一化把两个不同内容压成同一读数"的碰撞风险
+ * （那是 `resourceDigestOf` 才有的性质）。非池值归一化产出空表 ⇒ 与修复前"非数组 ⇒ 无"同口径，
+ * 只多认了合法的对象形态。
+ *
+ * ## 为什么归一化点在 `domain/`（落点判据，不是风格）
+ *
+ * 本文件在 `KERNEL_FILES` 里，`tests/architecture/kernel-legacy-isolation.test.ts:269-279`
+ * 硬要求内核文件的**全部**导入不得指向 16 个旧层目录（含 `render`；`toEqual([])`、无豁免机制）。
+ * 归一化点原先在 `render/`（哪怕加深度 2 公共出口）⇒ 实测 `test:arch` **225P/0F → 223P/2F**。
+ * #387 收尾批据裁决把唯一实现迁到最内层 `domain/`（纯函数 + 纯数据形状）⇒ 该边不再是
+ * "内核 → 旧层"。判据（含能红负对照）：`__tests__/publishFormat.test.ts` 的「#387 形态」组
+ * —— 改回 `hasNonEmptyArray` ⇒ **2 failed | 33 passed**（本批实测）。
+ *
+ * ⚠️ 只给 `texturePresent` 新增本判据：`hasNonEmptyArray` 仍服务 `cellGrid`/`blockPalette`
+ * 等"只可能是数组"的字段，**不得**被本判据替换（那些字段没有两种形态）。
+ */
+function hasNonEmptyTexturePool(v: unknown): boolean {
+  return normalizeTextureBlobPool(v).length > 0
 }
 
 /**
@@ -177,26 +210,9 @@ export function inspectPublishableContent(payload: SnapshotPayload | null, doc?:
   const palettePresent = s !== null ? hasNonEmptyArray(s.blockPalette) || hasNonEmptyArray(d?.blockPalette ?? undefined) : geometryPresent
   put('palette', palettePresent, s !== null ? 'blockPalette' : 'scene.objects')
 
-  // ⚠️ 未收敛登记：`textureBlobs` 有**两种契约形态**，`hasNonEmptyArray` 只认数组
-  // （数组 = 内核材质面 / 多方块；槽位键对象 `{"0":"<b64>",…}` = 帧为主文档的
-  // `plainForSave().plain`，见 `composition/kernelProjection.ts:1406-1408`）
-  // ⇒ 对象形态被清点成"无 texture" ⇒ 发布准入对有贴图的真产物报缺项
-  // `PublishMissingViewerContent`（**假拒绝**）。
-  //
-  // **修复是现成的一行**（本批实测过）：
-  //   `const hasTexturePool = (v: unknown) => normalizeTextureBlobPool(v).length > 0`
-  // 实测：改回 `hasNonEmptyArray` ⇒ `publishFormat.test.ts` **2 failed | 33 passed**。
-  // 但**这一行在本批落不下来**：本文件在 `KERNEL_FILES` 里，而
-  // `tests/architecture/kernel-legacy-isolation.test.ts:269-279` 硬要求"内核文件的全部导入
-  // 都不得指向 16 个旧层目录"（`OLD_LAYERS` 含 `render`，**无登记/豁免机制**、不看深度）
-  // ⇒ `@/render/textureBlobPool`（哪怕深度 2、arch:scan PASS）也会判红。实测：
-  //   `src/adapters/files/publishFormat.ts:56 → @/render/textureBlobPool（旧层 render）`
-  //
-  // **owner**：内核重建执行线（#249/#387）；**退出条件**（任一）：
-  //   ① 形态归一化的唯一实现迁到新层模块（本文件 import 它即合规）；
-  //   ② 本文件与 `legacyFields.ts` 移出 `KERNEL_FILES`；
-  //   ③ 由调用方显式注入"池是否非空"（端口参数），内核侧不接触形态 —— 需平台裁决。
-  const texturePresent = d !== null ? hasNonEmptyArray(d.textureBlobs) || hasNonEmptyArray(s?.textureBlobs) : false
+  // 纹理池：两种形态都算"有"（数组 / 槽位键对象 —— 池专用判据见 `hasNonEmptyTexturePool`）。
+  // 修复前此处是 `hasNonEmptyArray(...)`（只认数组）⇒ 对象形态被清点成"无 texture"（假拒绝）。
+  const texturePresent = d !== null ? hasNonEmptyTexturePool(d.textureBlobs) || hasNonEmptyTexturePool(s?.textureBlobs) : false
   put('texture', texturePresent, 'textureBlobs')
 
   // tooltip：**必须存在**（成对 idioms），但**允许为空数组**（无说明是合法内容）。

@@ -223,6 +223,37 @@ describe('发布格式内容：查看所需内容清点 + 需播放轨道（#249
     expect(content.missing).toContain('texture')
   })
 
+  it('#387 形态：`textureBlobs` 是槽位键对象（帧为主投影 `plainForSave().plain`）⇒ **仍算有 texture**', () => {
+    // 修复前：`texturePresent` 用 `hasNonEmptyArray`（只认数组）⇒ 真产物被判"无 texture"。
+    const rootShape: Record<string, unknown> = { ...publishableDoc(), textureBlobs: { '0': 'AAAA' } }
+    expect(inspectPublishableContent(null, rootShape).missing, '对象形态是合法契约形态 ⇒ 不得判缺 texture').not.toContain('texture')
+    // 帧内结构上的池（`s.textureBlobs` 那一支）同样两种形态都认：
+    const frameShape: Record<string, unknown> = { ...publishableDoc() }
+    delete frameShape.textureBlobs
+    ;(frameShape.frames as Record<string, unknown>[])[0]!.structure = {
+      geometryPhase: 'baked',
+      cellGrid: [[[0]]],
+      blockPalette: [{}],
+      textureBlobs: { '0': 'AAAA' },
+    }
+    expect(inspectPublishableContent(null, frameShape).missing, '帧内结构的对象形态池同样算"有"').not.toContain('texture')
+    // 真空池仍算缺项（"真拒绝"不得被本修复顺手放掉）：
+    expect(inspectPublishableContent(null, { ...publishableDoc(), textureBlobs: {} }).missing).toContain('texture')
+    expect(inspectPublishableContent(null, { ...publishableDoc(), textureBlobs: [] }).missing).toContain('texture')
+  })
+
+  it('**负对照（能红）**：修复前的 `hasNonEmptyArray`（只认数组）⇒ 对象形态被清点成"无 texture"（假拒绝）', () => {
+    /** **只认数组**的池判定（修复前 `texturePresent` 用的那个实现）。 */
+    const oldHasNonEmptyArray = (v: unknown): boolean => Array.isArray(v) && v.length > 0
+    const objectShape: Record<string, unknown> = { ...publishableDoc(), textureBlobs: { '0': 'AAAA' } }
+    expect(oldHasNonEmptyArray(objectShape.textureBlobs), '旧实现：对象形态 ⇒ false（这就是假拒绝的来源）').toBe(false)
+    // 差异**只在对象形态**：数组形态上旧实现是对的（所以"只认数组"才隐蔽）。
+    const arrayShape: Record<string, unknown> = { ...publishableDoc(), textureBlobs: ['AAAA'] }
+    expect(oldHasNonEmptyArray(arrayShape.textureBlobs), '旧实现在数组形态上是对的').toBe(true)
+    // 真实实现：对象形态不得判缺项。
+    expect(inspectPublishableContent(null, objectShape).missing).not.toContain('texture')
+  })
+
   it('"需播放的轨道" = **已启用且有键**的轨道；禁用/空轨道**仍被列出**（不静默丢）', () => {
     const mk = (id: string, enabled: boolean, keyCount: number): AnimationTrack =>
       Object.freeze({

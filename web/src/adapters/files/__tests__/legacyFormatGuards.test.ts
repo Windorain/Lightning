@@ -379,6 +379,59 @@ describe('B-6 `textureBlobIndex`：越界**必须报错**，不当空纹理渲�
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// #387 收尾批：池的**两种契约形态**不得使校验静默跳过（池计数：`Array.isArray` → 归一化）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('#387 池形态：`textureBlobs` 是槽位键对象时也必须校验（修复前静默跳过）', () => {
+  it('正：对象形态（帧为主投影 `plainForSave().plain`）⇒ 池计数正确、越界必报错', () => {
+    expect(
+      checkDocumentMaterialIndexes({ textureBlobs: { '0': 'a', '1': 'b', '2': 'c' }, materialPalette: [{ textureBlobIndex: 2 }] }),
+      '合法下标不得报缺陷',
+    ).toEqual([])
+    const defects = checkDocumentMaterialIndexes({ textureBlobs: { '0': 'a', '1': 'b' }, materialPalette: [{ textureBlobIndex: 2 }] })
+    expect(defects.map((d) => d.code)).toEqual(['TextureBlobIndexOutOfRange'])
+    expect(defects[0]!.blobCount, '池计数必须 = 槽位数（2），不是 0').toBe(2)
+  })
+
+  it('正：对象形态的**空缺槽位**按"下标即槽位"计数（`{"0":…,"2":…}` ⇒ 3 个槽位）', () => {
+    const doc = { textureBlobs: { '0': 'a', '2': 'c' }, materialPalette: [{ textureBlobIndex: 2 }] }
+    expect(checkDocumentMaterialIndexes(doc)).toEqual([])
+    const bad = checkDocumentMaterialIndexes({ ...doc, materialPalette: [{ textureBlobIndex: 3 }] })
+    expect(bad).toHaveLength(1)
+    expect(bad[0]!.blobCount, '槽位数 = 最大数值键 + 1').toBe(3)
+  })
+
+  it('正（回归）：数组口径**不变** —— 长度即槽位数，`""` 占位也算槽位', () => {
+    expect(checkDocumentMaterialIndexes({ textureBlobs: ['a', '', 'c'], materialPalette: [{ textureBlobIndex: 2 }] })).toEqual([])
+    const d = checkDocumentMaterialIndexes({ textureBlobs: ['a', '', 'c'], materialPalette: [{ textureBlobIndex: 3 }] })
+    expect(d).toHaveLength(1)
+    expect(d[0]!.blobCount).toBe(3)
+  })
+
+  it('非池值（键不是数值下标）⇒ 与修复前同口径：池计数 0 ⇒ 跳过（不是槽位表）', () => {
+    expect(
+      checkDocumentMaterialIndexes({ textureBlobs: { stone: 'AAAA' }, materialPalette: [{ textureBlobIndex: 0 }] }),
+      '非池值不是"有池"：这里不引入新的假拒绝',
+    ).toEqual([])
+  })
+
+  it('**负对照（能红）**：修复前的 `Array.isArray(…) ? length : 0` ⇒ 对象形态被数成 0 ⇒ 越界一条都不报', () => {
+    /** 池计数**修复前**的逐字实现。 */
+    const oldPoolCount = (doc: Record<string, unknown>): number =>
+      Array.isArray(doc.textureBlobs) ? (doc.textureBlobs as unknown[]).length : 0
+    const doc: Record<string, unknown> = { textureBlobs: { '0': 'a', '1': 'b' }, materialPalette: [{ textureBlobIndex: 9 }] }
+    // 旧实现：池计数 0 ⇒ `checkMaterialBlobIndexes` 的 `blobCount <= 0` 早退 ⇒ 无缺陷（静默通过）。
+    expect(oldPoolCount(doc)).toBe(0)
+    expect(checkMaterialBlobIndexes(doc.materialPalette, oldPoolCount(doc)), '旧实现：有池但一条都不校验').toEqual([])
+    // 真实实现：同输入必须报错 ⇒ 两者不可互换（这正是本判据的区分力）。
+    const defects = checkDocumentMaterialIndexes(doc)
+    expect(defects, '真实实现必须报错（"有池但不校验"按本函数契约就是放宽）').toHaveLength(1)
+    expect(defects[0]!.code).toBe('TextureBlobIndexOutOfRange')
+    expect(defects).not.toEqual(checkMaterialBlobIndexes(doc.materialPalette, oldPoolCount(doc)))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // F-13 / B-7：tooltip 成对 idioms
 // ─────────────────────────────────────────────────────────────────────────────
 
