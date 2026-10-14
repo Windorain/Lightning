@@ -36,6 +36,117 @@ const ZERO_TIME = Object.freeze({ frame: 0, fps: 20 })
 import type { ViewerPreferences } from '@/viewer/preferences'
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
 
+/**
+ * **呈现链失败的上报器**：有界去重 + **有界**丢弃上报（R5-0 ② 的落点）。
+ *
+ * ## 为什么去重（动机）
+ *
+ * 结构化上报的落点（`ctx.wm.diagnostics`）是**共享**的有界环形缓冲（容量 512），
+ * 而呈现链的错误是在**帧循环**里产生的：逐帧记账会把其它通道的记录挤掉。
+ * 故同一"失败签名"每实例只上报一次（首现上报）。
+ *
+ * ## 为什么要给去重**自己**一个有界（R5-0 ② 修的缺陷）
+ *
+ * 去重的动机是保护**有界**缓冲，而其初版集合**无界**：签名里带 `detail`，
+ * 而 `detail` 承载自由文本（异常 `message`、`out.compileError`）⇒ 错误信息若
+ * 逐帧变化，集合只增不减、没有容量上限、也没有任何判据能看见它。
+ * **观测设施自己不得成为泄漏源**，故：
+ *
+ *  1. 签名数封顶 `PRESENTER_FAILURE_SIGNATURE_MAX`；
+ *  2. 签名里的 `detail` 截断到 `PRESENTER_FAILURE_DETAIL_MAX` —— 否则 256 条签名
+ *     可以各自长到任意长，"有界"只是假的（内存由"条数 × 单条长度"共同决定）；
+ *  3. 超限**不是静默丢弃**：丢弃经 `report`（`kind === 'dropped'`）上报，
+ *     读面可按 `dropped === true` 单独查询 —— 而丢弃上报本身也必须有界（见下）。
+ *
+ * ## 丢弃上报为什么是"≤8 次逐次 + 此后 2 的幂"
+ *
+ * 有界缓冲 + 追加语义下，"每丢一次就记一条"**正是**去重要防的那件事（挤掉别的通道）；
+ * 而"精确到个位的累计丢弃数"在有界记录器里**不可表达**（那是无界状态）。
+ * ⇒ 折中口径：前 8 次逐次精确上报，其后按 2 的幂（`1,2,…,8,16,32,…`）上报，
+ * 故 N 次丢弃至多产生 `8 + ⌈log₂(N/8)⌉` 条记录
+ * （60 fps 跑满 24h ≈ 5.2M 次丢弃 ⇒ 27 条；**记录数随 N 对数增长**，不是逐次）。
+ * 读面因此能回答三件事：丢弃**确实发生了**、**哪个 reason** 在溢出、**量级**多大；
+ * 代价是第 8 次之后读数与真值的偏差 ≤2×（已登记为残留，见交付报告）。
+ *
+ * ## 截断口径必须与记录器一致
+ *
+ * `application/diagnostics#sanitizeParams` 在**写入时**把字符串值截到
+ * `PARAM_VALUE_MAX = 200` 再补 `…`。签名若用**全长**，两条只在第 200 字符后不同的
+ * `detail` 会被判"不同"而各记一次 —— 而读面看到的 `params.detail` **逐字节相同**，
+ * 于是同一条事实在账上出现两次、人却看不出区别。故签名与记录器**同口径**截断。
+ *
+ * ⚠️ 本文件属旧层 `shared/`，**不** import `@/application/diagnostics#PARAM_VALUE_MAX`
+ * （同 `ZERO_TIME` 那段：旧层→新内核的导入要登记，而这里需要的只是一个数）。
+ * 两个数的等值由 `__tests__/presenterFailureBound.test.ts` 断言钉住，防口径漂移。
+ *
+ * `report` 是上报设施与决策的**解耦点**：本函数是纯的（不 import 新层类型、
+ * 不读时钟、不碰 DOM），故可被单测直接驱动（构造逐帧变化的 `message` 即为其负对照）。
+ */
+
+/** 去重签名的条数上限（见上方说明：去重不得自己无界）。 */
+export const PRESENTER_FAILURE_SIGNATURE_MAX = 256
+
+/** 签名里 `detail` 的截断长度（必须等于 `application/diagnostics#PARAM_VALUE_MAX`）。 */
+export const PRESENTER_FAILURE_DETAIL_MAX = 200
+
+/** 一次上报（"真实失败"与"因容量上限被丢弃"共用同一形状，用 `kind` 区分）。 */
+export interface PresenterFailureReport {
+  /** `'failure'` = 一次真实失败；`'dropped'` = 因容量上限被丢弃的失败。 */
+  readonly kind: 'failure' | 'dropped'
+  /** 失败原因（`'dropped'` 时是**被丢那次**的原因，便于定位谁在溢出）。 */
+  readonly reason: string
+  /** 详情（`'failure'` 时已截断）；`'dropped'` 时是当时的累计丢弃数。 */
+  readonly detail: string
+  /** 关联对象身份（无关联时为 `null`）。 */
+  readonly objectId: string | null
+}
+
+export interface PresenterFailureReporter {
+  /** 记一次失败（首现上报；超限则计入丢弃并在上报点上报）。 */
+  readonly emit: (reason: string, detail: string, objectId?: string) => void
+  /** 当前去重签名数（**恒** ≤ `PRESENTER_FAILURE_SIGNATURE_MAX`；判据面）。 */
+  readonly signatureCount: () => number
+  /** 因容量上限被丢弃的不同签名数（累计；判据面）。 */
+  readonly dropCount: () => number
+}
+
+/** 签名分隔符（NUL：不出现在 reason / objectId / 常规 `detail` 文本里，避免拼接歧义）。 */
+const PRESENTER_FAILURE_SEP = String.fromCharCode(0)
+
+export function createPresenterFailureReporter(
+  report: (report: PresenterFailureReport) => void,
+): PresenterFailureReporter {
+  const signatures = new Set<string>()
+  let drops = 0
+  /** 下一次**必然**上报的丢弃数：≤8 逐次（`+1`），其后翻倍 ⇒ 记录数对数增长、不会退化成逐次。 */
+  let nextDropReportAt = 1
+  return {
+    emit(reason, detail, objectId) {
+      const bounded =
+        detail.length > PRESENTER_FAILURE_DETAIL_MAX
+          ? `${detail.slice(0, PRESENTER_FAILURE_DETAIL_MAX)}…`
+          : detail
+      const signature =
+        objectId === undefined
+          ? `${reason}${PRESENTER_FAILURE_SEP}${bounded}`
+          : `${reason}${PRESENTER_FAILURE_SEP}${objectId}${PRESENTER_FAILURE_SEP}${bounded}`
+      if (signatures.has(signature)) return
+      if (signatures.size >= PRESENTER_FAILURE_SIGNATURE_MAX) {
+        drops += 1
+        if (drops >= nextDropReportAt) {
+          report({ kind: 'dropped', reason, detail: String(drops), objectId: objectId ?? null })
+          nextDropReportAt = drops < 8 ? drops + 1 : drops * 2
+        }
+        return
+      }
+      signatures.add(signature)
+      report({ kind: 'failure', reason, detail: bounded, objectId: objectId ?? null })
+    },
+    signatureCount: () => signatures.size,
+    dropCount: () => drops,
+  }
+}
+
 export interface UseViewportRuntimeOptions {
   ctx: Context
   regionId: string
@@ -340,20 +451,28 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    * `presenterErrors.push` 逐帧执行（数组行为**本批不动**），而记录器是容量 512 的**共享**
    * 环形缓冲：逐帧记账会把其它通道的记录挤掉。故同一"错误签名"每实例只记一次
    * （首现上报；与 `contentDiagnostics` 的"按批次聚合"同一动机）。
+   *
+   * ## R5-0 ②：去重**自己**也必须有界（缺陷修复，不是优化）
+   *
+   * 上一条的动机是保护**有界**缓冲，而初版集合**无界**（`detail` 承载自由文本，
+   * 帧循环里逐帧变化 ⇒ 只增不减、零容量上限、零判据可见）。去重/截断/丢弃上报的
+   * 全部口径收在 `createPresenterFailureReporter`（上方模块级函数）里，
+   * 此处只做"决策 → 记录器"的**形状适配**（零新增 import：记录器仍从
+   * `ctx.wm.diagnostics` 现取）。
    */
-  const reportedPresenterFailures = new Set<string>()
-  const emitPresenterFailure = (reason: string, detail: string, objectId?: string): void => {
-    const signature =
-      objectId === undefined ? `${reason}\u0000${detail}` : `${reason}\u0000${objectId}\u0000${detail}`
-    if (reportedPresenterFailures.has(signature)) return
-    reportedPresenterFailures.add(signature)
+  const { emit: emitPresenterFailure } = createPresenterFailureReporter((r) => {
     ctx.wm.diagnostics.record({
       channel: 'effect',
       code: 'effect.failed',
-      params: { source: 'presenter', reason, detail },
-      correlation: objectId === undefined ? {} : { objectId },
+      params:
+        r.kind === 'failure'
+          ? { source: 'presenter', reason: r.reason, detail: r.detail }
+          : // 丢弃**不静默**：多带一个 `dropped` 标量供读面单独查询；
+            // `detail` 是当时的累计丢弃数（见 `createPresenterFailureReporter`）。
+            { source: 'presenter', reason: r.reason, detail: r.detail, dropped: true },
+      correlation: r.objectId === null ? {} : { objectId: r.objectId },
     })
-  }
+  })
 
   /**
    * **材质统一：内核内容资源 → 纹理端口 → 材质绑定**（#301 P10f D3；R1-β① C5）。
