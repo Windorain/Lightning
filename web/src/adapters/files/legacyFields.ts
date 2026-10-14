@@ -105,7 +105,57 @@ export function checkMaterialBlobIndexes(palette: unknown, blobCount: number, at
   return Object.freeze(out)
 }
 
-/** 对**文档**跑材质索引校验（根级 `materialPalette`；World 与 Structure 同一位置）。 */
+/**
+ * 对**文档**跑材质索引校验（根级 `materialPalette`；World 与 Structure 同一位置）。
+ *
+ * ## ⚠️ 未收敛登记：池计数只认数组（对象形态 ⇒ `blobCount = 0` ⇒ 一条都不校验）
+ *
+ * `:111` 的 `Array.isArray(doc.textureBlobs) ? length : 0` 把帧为主文档的投影产物
+ * （`plainForSave().plain`，`textureBlobs` 是槽位键对象 `{"0":"<b64>",…}`，见
+ * `composition/kernelProjection.ts:1406-1408`）数成 `blobCount = 0`
+ * ⇒ `checkMaterialBlobIndexes` 的 `blobCount <= 0` 早退 ⇒ **有池但一条都不校验**。
+ * 本函数自己的契约（见上面 `checkMaterialBlobIndexes` 的 docblock）把"有池但不校验"
+ * 定义为**放宽** ⇒ 这是缺陷，不是"只在 legacy 形状工作"。
+ *
+ * **修复是现成的一行**（本批已实测其判据与负对照）：
+ *
+ * ```ts
+ * const blobs = normalizeTextureBlobPool(doc.textureBlobs).length   // render/textureBlobPool
+ * ```
+ *
+ * 实测：改回旧实现 ⇒ `legacyFormatGuards.test.ts` **3 failed | 55 passed**。
+ * 但**这一行在本批落不下来**，理由见下。
+ *
+ * ## 为什么本批**不可修**（实测，不是推断）
+ *
+ * 本文件登记在内核清单 `KERNEL_FILES` 里（`tests/architecture/kernel-legacy-isolation.test.ts`
+ * 的 `adapters` 项）。该闸门的硬判据是"内核文件的**全部**导入都不得指向 16 个旧层目录"
+ * （`OLD_LAYERS` 含 `render`；判定见该文件 `:269-279` 的 `toEqual([])`）——**没有登记/豁免机制**，
+ * 也不看深度、不看是否 type-only。本批实测：
+ *
+ * ```
+ * FAIL kernel-legacy-isolation > 57 个内核文件（含 P7 输入面）的全部内部导入都落在新层内
+ *   src/adapters/files/legacyFields.ts:35  → @/render/textureBlobPool（旧层 render）
+ *   src/adapters/files/publishFormat.ts:56 → @/render/textureBlobPool（旧层 render）
+ * ```
+ *
+ * ⇒ 深度 2 公共出口满足 `gate/no-private-cross-layer`（`arch:scan` PASS 0 finding），
+ * 但满足不了"内核不得依赖任何旧层"。两条闸门同时成立时后者更强：本文件不能 import
+ * `render/**`，**无论经不经出口**。
+ *
+ * - **owner**：内核重建执行线（#249 / #387 同族批）；
+ * - **退出条件**（任一达成即可落地上面那一行）：
+ *   ① 形态归一化的**唯一实现**迁到新层模块（`domain/` 或新分层的独立出口）⇒ 本文件 import 它即合规
+ *      （代价：`render/**` / `workbench/**` 等旧消费者的旧→新边需登记）；
+ *   ② 本文件与 `publishFormat.ts` 从 `KERNEL_FILES` 移出（以"未迁移"身份留在 `adapters` 层）；
+ *   ③ 由调用方**显式注入**池计数（端口参数），内核侧不接触形态 —— 需平台裁决该 API 变更。
+ *
+ * 另附同批登记的**未接线**事实（与形态无关）：本函数与 `materialIndexError` /
+ * `requireMaterialIndexes` 在 `web/src` 生产代码里**零调用点**（只有
+ * `__tests__/legacyFormatGuards.test.ts` 在用）⇒ 上面的失明目前是**潜伏缺陷**
+ * （判据看得到、生产走不到）。owner 同上；退出条件：B-6 读入侧在生产路径真正接线
+ * （或这些函数连同 legacy 读写面一并退役）。
+ */
 export function checkDocumentMaterialIndexes(doc: unknown): readonly MaterialIndexDefect[] {
   if (!isPlainObject(doc)) return Object.freeze([])
   const blobs = Array.isArray(doc.textureBlobs) ? doc.textureBlobs.length : 0
