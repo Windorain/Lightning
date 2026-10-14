@@ -64,6 +64,7 @@ import { sampleStripFrameAt, stripTimeline, totalDurationMs, type StripTimeline 
 import { frameDurationsMs, frameCount as axisFrameCount, type DocumentContent } from '@/domain/content'
 import { framesPerSecond, timeFromSeconds, type AnimationTrack, type TimeValue } from '@/domain/animation'
 import { TIME_ZERO } from '@/domain/editing'
+import type { MultiblockBody } from '@/domain/multiblockDocument'
 import {
   channelSetOfDeclaration,
   channelStepTrack,
@@ -595,6 +596,43 @@ export class KernelSession {
   }
 
   /**
+   * **多方块内层 body 的内核承运**（G3 / #388 裁决第 3 项）。
+   *
+   * ## 为什么放在会话（与 `assemblySourceRoot` / `assemblyFace` 同一宿主）
+   *
+   * body（多方块声明的内核承载 + 逐帧参考网格的**取证**通道）只有**装配期**能产出：
+   * 它的输入是解析结果（`adapters/files/multiblockDeclaration`），而消费方
+   * （`shared/viewport/useKernelChannels` 的再装配，见
+   * `composition/kernelAssembly#assembleMultiblockKernelFace`）在**另一个调用栈**上。
+   * ⇒ 承运必须有"生命周期 = 文档生命周期"的宿主：装载置位、卸载清空（`markUnloaded`）
+   * ⇒ 换文档不串档（判据：换文档后不得读到上一份的 body）。
+   *
+   * ## 为什么不是"哈希/摘要"或"再解析一次"
+   *
+   * body 是**类型化内核承运**（冻结纯数据），不是旧文档的替身：会话不 import
+   * 装配根的投影形状，也不持有 `RuntimeDocument` —— 它只保管这份不可变值。
+   * 求值端口（`context/multiblock`）在装配层适配（见
+   * `composition/kernelAssembly#evaluatorDocumentOf`），本处只做保管。
+   */
+  private multiblockBody: MultiblockBody | null = null
+
+  /** 记下**多方块内层 body**（`null` = 该文档没有多方块声明 / 未装配）。 */
+  setMultiblockBody(body: MultiblockBody | null): void {
+    this.multiblockBody = body
+  }
+
+  /**
+   * 读**多方块内层 body**（`null` = 未装配 / 帧为主文档）。
+   *
+   * ⚠️ `null` 是**如实答案**（"这份文档没有可再装配的 body"），消费方必须据此
+   * 显式失败或降级（`assembleMultiblockKernelFace` 的 `multiblockBodyNotCarried`），
+   * **不得**回头去旧文档里翻（那正是 G3 要拆掉的那条路）。
+   */
+  multiblockBodyOf(): MultiblockBody | null {
+    return this.multiblockBody
+  }
+
+  /**
    * **装配面**（#301 P10f D2）：投影侧要用的、装配期才知道的两样东西。
    *
    * ## 为什么由会话保管（而不是让投影自己去场景里翻）
@@ -784,6 +822,9 @@ export class KernelSession {
     // G5：无损装配源根同理 —— 卸载后"这份会话里没有别的文档的源根"必须成立，
     // 否则换文档后渲染链会拿**上一份文档**的根级元数据（串档）。
     this.assemblySourceRoot = null
+    // G3：多方块内层 body 同理 —— 卸载后"这份会话里没有别的文档的声明/骨架"必须成立，
+    // 否则换文档后通道再装配会用**上一份文档**的声明与骨架阶求值（串档）。
+    this.multiblockBody = null
     // D2：装配面同理（否则换文档后投影会拿旧帧对象映射去重建新文档 = 串档）。
     this.assemblyFace = null
     // 离散通道的时间入口同理：卸载后"这份会话里没有别的文档的帧清单"必须成立，

@@ -65,6 +65,7 @@ import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotat
 /** 空读面常量（eadonly 空数组：避免每次分配，且调用方不得改内联量）。 */
 const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs } from '@/domain/content'
+import type { MultiblockBody } from '@/domain/multiblockDocument'
 import { findObjectData } from '@/domain/scene'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 
@@ -506,6 +507,38 @@ export class Context {
   kernelSourceRoot(): Readonly<Record<string, unknown>> | null {
     const session = this.kernel
     return session === null ? null : session.assemblySourceRootOf()
+  }
+
+  /**
+   * **多方块内层 body 的内核承运读面**（G3 / #388 裁决第 3 项）。
+   *
+   * ## 它替代的旧机制
+   *
+   * 多方块的**再装配**（按当前通道取值重算网格、构造渲染视图文档）原先只能拿
+   * `legacyRenderSource()` 返回的旧文档，再读它的 `multiblockSource`（解析侧整份
+   * 原始 JSON）。本读面把那个 body 换成**内核承运**：由类型化适配器对真实解析结果
+   * 产出（`adapters/multiblockDeclaration#multiblockBodyContentOf`），装配期就地
+   * 放在 `AssembledDocument#multiblockBody` 上，装载时交给会话保管
+   * （`composition/documentLoad`），本方法只是它的**具名读面**。
+   * 消费方是 `composition/kernelAssembly#assembleMultiblockKernelFace` —— 它的形参里
+   * **没有** `RuntimeDocument`，故多方块再装配不再需要旧文档。
+   *
+   * ## 三态口径（与 `kernelSourceRoot` 同一纪律）
+   *
+   * | 值 | 含义 | 消费方必须做什么 |
+   * |---|---|---|
+   * | 非 `null` | 内核承运在场 | 直接喂再装配入口（**不要**再去旧文档取 body） |
+   * | `null` | 该文档**没有**多方块声明（帧为主）或未装配 | 如实降级：走帧为主路径 |
+   *
+   * ⚠️ 与 `legacyRenderSource()` **不同源**：后者读 `main.doc`（旧文档权威，接缝
+   * `legacy-render-source-document` 要删除的面），前者由内核会话保管、生命周期 =
+   * 文档生命周期（装载置位 / 卸载清空 ⇒ 换文档不串档）。
+   * 也**不是**"旧文档换个地方放"：本读面返回的是内核承运（摊平、去 `raw`、
+   * 逐层冻结的类型化声明 + 逐帧参考网格的取证通道），没有任何 legacy 形状。
+   */
+  kernelMultiblockBody(): MultiblockBody | null {
+    const session = this.kernel
+    return session === null ? null : session.multiblockBodyOf()
   }
 
   /**

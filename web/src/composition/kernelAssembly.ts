@@ -89,7 +89,7 @@ import {
 } from '@/context/multiblock'
 // 深度 2 的公共出口（契约 §7.3 规则 2）——实现留在 `adapters/files/`（族内），
 // 直接 import 深度 3 会被 `gate/no-private-cross-layer` 判红（首次接线实测 1 条）。
-import { multiblockDeclarationContentOf } from '@/adapters/multiblockDeclaration'
+import { multiblockBodyContentOf } from '@/adapters/multiblockDeclaration'
 // 多方块声明类型经 `context/runtimeDocument` 的**公共出口**取得，不钻
 // `@/context/parsers/multiblockDocument`（深度 3 > 契约 §7.3 规则 2 的上限 2）。
 // 那个文件本来就是这些类型的公开再出口（它 `export type { MultiblockChannelDecl, … }`），
@@ -606,6 +606,26 @@ export interface AssembledDocument {
   readonly content: DocumentContent
   /** 多方块声明（只读内容定义）；帧为主文档为 `null`。 */
   readonly multiblock: MultiblockContent | null
+  /**
+   * **多方块内层 body 的内核承运**（G3；帧为主文档为 `null`）。
+   *
+   * ## 为什么承运必须在**装配产物**上（而不是让消费方自己去问适配器）
+   *
+   * 装配是唯一同时握着「真实解析结果」与「内核内容权威」的地方；消费方
+   * （`shared/viewport/useKernelChannels` 的再装配 / 渲染视图）在**另一个调用栈**上，
+   * 手里只有内核会话（`Context`）。让视口回头去调适配器，等于把"文件只在边界被解释"
+   * 这条边界重新打穿（G5 的 `kernelSourceRoot` 同因，见 `composition/documentLoad`）。
+   *
+   * ## 不变式（判据钉住，不靠注释）
+   *
+   *  - `multiblockBody !== null` ⇔ `multiblock !== null`（没有"半个承运"）；
+   *  - `multiblockBody.declaration` 与 `content.multiblock` 是**同一个对象**
+   *    （同一次适配器调用的两个出口 —— 不是两次转换后"相等"）。
+   *
+   * 逐帧 `cellGrid` 等**内层 body** 就在这个承运里（`frameGridEvidence`），
+   * 它不参与身份/求值（`#388` 评论 7501 第 3 项），故**不**进 `content`。
+   */
+  readonly multiblockBody: MultiblockBody | null
   /**
    * **本适配器解释不了的顶层字段**（纯数据；键序保留）。
    *
@@ -1625,6 +1645,7 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
         animation: EMPTY_ANIMATION,
         content: documentContent(),
         multiblock: null,
+        multiblockBody: null,
         unknownFields: Object.freeze({}),
         sourceFormat: 'none',
         sourceVersion: '',
@@ -1757,11 +1778,16 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
   //
   // 为什么放在 ⑦ 而 ⑧ 才用装配面：⑧ 的 `multiblock`（`MultiblockContent`）是**投影面**
   // （读解析侧的 Map/`cellGrid`），与内容权威是**两个不同的输出**；本处只补内容权威这一半。
+  // ⚠️ **一次**适配器调用产出**两个出口**（本行的 `content.multiblock` 与产物上的
+  // `multiblockBody`）：两次转换会造出两份内容相同的声明 —— 既违反"同一语义不得有
+  // 第二处实现"（§15 第 5 条），也会把不变式"承运的声明**就是**内容权威的声明"
+  // 弱化成"两者相等"（判据用 `toBe` 钉住后者）。
+  const carriedBody = multiblockBodyContentOf(doc.multiblock)
   const content = documentContent({
     metadata: metadataFromLegacy(doc.meta, raw),
     frameAxis: frameAxisFromLegacy(doc.frames),
     resources: normalizeResources(res.resources),
-    multiblock: multiblockDeclarationContentOf(doc.multiblock),
+    multiblock: carriedBody.declaration,
   })
 
   // ── ⑧ 多方块：只读内容定义 + 装配网格 ──
@@ -1858,6 +1884,9 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
       animation: EMPTY_ANIMATION,
       content,
       multiblock,
+      // 承运只在**多方块文档**上非空（不变式：与 `multiblock` 同真同假）。
+      // 帧为主文档不造"空承运"：那会让消费方的 `body !== null` 判据恒真。
+      multiblockBody: doc.isMultiblock ? carriedBody : null,
       unknownFields: Object.freeze(unknownFields),
       sourceFormat,
       sourceVersion,

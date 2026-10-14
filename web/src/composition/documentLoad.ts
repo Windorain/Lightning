@@ -257,6 +257,16 @@ export function adoptLoadedDocument(
   // 空对象会被装配层读成"源里什么都没有"（静默丢元数据），与 `null` 的语义不同。
   kernel.setAssemblySourceRoot(normalizedRoot ?? null)
 
+  // ── G3：把**多方块内层 body**交给会话保管（通道/动画语义要它，理由见该方法文档） ──
+  //
+  // 与 `assemblySourceRoot` / `assemblyFace` **同一宿主、同一生命周期**
+  // （装载置位 / `markUnloaded` 清空）。消费方是 `shared/viewport/useKernelChannels`
+  // 的再装配与渲染视图 —— 它在另一个调用栈上，且**不得**再回头去读旧文档的
+  // `multiblockSource`（那正是 G3 要拆掉的那条路）。
+  // ⚠️ 写 `value.multiblockBody`（帧为主文档为 `null`）：**不**在这里兜底造一份空
+  // 承运 —— "body 缺席"必须是可判的诚实信号（`multiblockBodyNotCarried`）。
+  kernel.setMultiblockBody(value.multiblockBody)
+
   // ── #301 P10f D2：把**装配面**交给会话保管（投影侧要用） ─────────────────
   //
   // 两样东西只有装配期知道：帧对象映射（帧下标 → 对象 id）与多方块类型化投影面。
