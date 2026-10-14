@@ -13,7 +13,7 @@ import {
   serializeMtl,
   serializeObjMeshes,
   type MtlSerializedEntry,
-} from '@/render/mesh/objExportSerialize'
+} from '@/adapters/export/objExportSerialize'
 import {
   collectStructureGeometryPiecesPure,
   mergeBakedQuadPiecesAttributes,
