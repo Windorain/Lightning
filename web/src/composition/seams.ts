@@ -729,67 +729,59 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' 不再包旧栈撤销 ⇒ 届时删除本条登记。',
   }),
   /**
-   * **R1-β① C7 登记（结构债）**：旧层 `shared/viewport/useViewportRuntime.ts`
-   * **值导入装配根 `composition/`**（向上依赖）。
+   * ⚠️ **已核销（R1-β① C10 / `d4708d0b`；关单裁决 #387 评论 7489 二）**：原
+   * `shared-viewport-upward-imports-assembly-root` 登记在此。
    *
-   * ## 为什么这是债（而不是"闸门没报所以没事"）
+   * ## 它为什么可以退出（两个子句同时成立，不是"看起来走了"）
    *
-   * `kernel-legacy-isolation.test.ts` 的判定轴是「**来源**是否为旧层 → **目标**是否为内核」
-   * （`isOldLayerTarget`，该文件 206-211 行）；而 `composition/` 既不在 `OLD_LAYERS`
-   * 也不在 `KERNEL_FILES`（装配根，`legacySources: []`）⇒ **该轴对这一类依赖恒不判**。
-   * 装配根依赖所有层，"被所有层依赖"是它的反向。
-   *
-   * ## 计数历史（趋势必须可见）
-   *
-   * | 时点 | `@/composition/` 值导入数 | 说明 |
+   * | 子句 | 结论 | 机械证据（口径与读数均由本批**亲跑**，不转抄任何自述） |
    * |---|---|---|
-   * | `fb0814d4`（C7 起点） | **4** | `presenterSession` / `viewportTexturePort` / `kernelTextureResources` / `kernelRuntime` |
-   * | C7 首版（已纠正） | ~~5~~ | C7 一度新增 `kernelAnnotationInputs` |
-   * | **C7 现状** | **4** | 该增量已**消除**：注解的"读内核场景"一步收进 `PresenterSession#syncKernelAnnotations`（`composition/ → composition/`，不是向上依赖），接线层只用它**本就已导入**的 `PresenterSession` ⇒ 计数**不增长** |
+   * | 甲 具名装配面 + 必填注入 | ✅ | `src/runtime/host.ts:81` 声明 `Host#createViewportPresenter(regionId: string): ViewportPresenterBundle`，包形状见 `:34`（`surface`/`textures`/`textureResourcesOf`/`sceneSeconds`/`dispose`，创建与释放同源），实现 `:123`；描边侧同族 `:74` 声明 / `:108` 实现。两个生产调用方都经它提供：`shared/viewport/EmbedViewport.vue:107`、`workbench/components/WorkbenchViewport.vue:70`（`createPresenter: (rid) => host.createViewportPresenter(rid)`），描边在 `EmbedViewport.vue:405` / `WorkbenchViewport.vue:181`。视口侧 `src/shared/viewport/useViewportRuntime.ts:82` 的 `createPresenter` 是**必填**成员（同 `renderDocRef` 形）⇒ 省略即类型错误，**无退回就地构造的旁路**。 |
+   * | 乙 该文件对 `@/composition/` 的**值导入 = 0** | ✅ | 亲跑读数 **0**（含 `import type` 的全量为 **1**：`useViewportRuntime.ts:15` 的 `import type { PresenterSession }`；动态 `import('@/composition/…')` = 0）。口径见下节。 |
    *
-   * ⚠️ 本债的语义是「双轨**剩余**数、只应减少」：登记是为了**可见与可判定**，
-   * **不是**为了让增长合法化。后续任何新增 `@/composition/` 值导入都必须先报告，
-   * 不得"顺手再加一个"。
+   * ## （乙）的判据口径（#387 评论 7486 一 / 7167）
    *
-   * ## 为什么暂不整批改注入（诚实说明，不是"工作量大"）
+   * 把行注释（`//`）与块注释**置换为空白**后，按
+   * `^\s*import\s+(?!type\b)…from '@/composition/…'` 匹配 **import 声明**：
+   * 字符串字面量**保留**（模块说明符本身就是字符串 —— 剥掉它就没有判据可言），
+   * 故本文件头注释里出现的 `composition/` 字样一律**不计**（裸 `grep` 会误判）。
+   * `import type` 不计入值导入，动态 `import()` 表达式单独计。
    *
-   * 正解形态是**注入**（本文件本就注入式：C5 已把 `docOverride ?? legacyRenderSource()`
-   * 的回落改成必填 `renderDocRef`）—— 呈现会话/纹理端口/注解输入应由装配根构造后**下行**。
-   * 但那要先定"由谁构造"：两个生产宿主（`runtime/host/workbenchHost.ts`、
-   * `runtime/host/embedHost.ts`）已 import `composition/*`，故构造点应落在宿主装配边
-   * （`Host#createViewportPresenter`），而 `Host` 是 `runtime/host.ts` 的接口、
-   * 其两个生产调用方是 Vue 组件 ⇒ 一次**跨三层的接口迁移**，
-   * 与 C7 段二（画面生产者切换）同文件同批动会互相掩盖回归信号。
-   * ⇒ 本批**只登记，不再新增第二条**；C7 之后首个动该文件的批次按注入改造。
+   * ## 计数历史（同一口径在历史 blob 上**逐点复算**，不是转抄）
+   *
+   * | 时点 | 值导入数 | 本批复算 |
+   * |---|---|---|
+   * | `fb0814d4`（C7 起点） | **4** | ✅ 复算 = 4（`presenterSession` / `viewportTexturePort` / `kernelTextureResources` / `kernelRuntime`） |
+   * | C7 首版（已纠正） | ~~5~~ | 该增量由 `51f13008` 消除（注解的"读内核场景"收进 `PresenterSession#syncKernelAnnotations`） |
+   * | `51f13008`（C7 段二收口） | **4** | ✅ 复算 = 4 |
+   * | `d4708d0b`（R1-A C10） | **0** | ✅ 复算 = 0（评论 7486 的读数得到独立复现） |
+   * | `37792ff8`（本批**测量时**的 HEAD） | **0** | ✅ 复算 = 0 |
+   *
+   * **负对照**：在同一份文本里注入 1 条值导入 ⇒ 读数由 0 变 **1**（证明计数有区分力，
+   * 不是恒零）。反复活的**常驻判据**落在
+   * `tests/architecture/shared-viewport-upward-import-closure.test.ts`
+   * —— 本表已不再看管本条，守护随之搬到测试里（同 `seams.test.ts` 对 P6 核销项的处置）。
+   *
+   * ## 为什么是"删除登记"而不是"改写登记"
+   *
+   * 本表语义是"双轨**剩余**数、只应减少"（见文件头）：`oldTrack` 描述的那 4 条值导入
+   * 与就地 `new PresenterSession(...)` 已从代码里消失 ⇒ 留在表里就是**空转登记**，
+   * 而"登记表 = 现状清单"是这张表存在的全部理由（同 `kernel-property-write-dual-track`
+   * 等条的处置）。
+   *
+   * ## 诚实登记的残余（**不在**本条范围，也不由本批消除）
+   *
+   *  - **type-only 仍余 1 条**：`useViewportRuntime.ts:15` 的
+   *    `import type { PresenterSession }`（只用于 `Parameters<…>` 形态推导）。它不进运行时
+   *    依赖图，但**不是**永久保留项 —— 其归属（能否注入形状 / type-only 是否计入值导入）
+   *    由 **G2 在契约 v1.10 中一并裁定**（#387 评论 7489 一）。
+   *  - **他文件里对本 id 的交叉引用未同批改净**（不在本批写区，如实登记）：
+   *    `src/composition/presenterSession.ts:673` 仍写"**已登记**的结构债"——核销后此说不准；
+   *    `src/runtime/drw.ts:39`、`src/runtime/host.ts:30`/`:65`、
+   *    `src/shared/viewport/EmbedViewport.vue:105` 与
+   *    `src/shared/viewport/useViewportRuntime.ts:8`/`:72` 亦点名本 id。
+   *    ⇒ 按"核销后口径"改词交上述文件的归属写者，本批不越界改。
    */
-  Object.freeze({
-    id: 'shared-viewport-upward-imports-assembly-root',
-    files: Object.freeze(['src/shared/viewport/useViewportRuntime.ts']),
-    newTrack:
-      '装配根**注入**：`useViewportRuntime` 的呈现会话/纹理端口/注解输入由调用方（宿主装配边）'
-      + '构造后经 options 下行，该文件对 `composition/` 的**值导入为 0**。',
-    oldTrack:
-      "`src/shared/viewport/useViewportRuntime.ts` 直接 import `@/composition/presenterSession`、"
-      + '`@/composition/viewportTexturePort`、`@/composition/kernelTextureResources`、'
-      + '`@/composition/kernelRuntime`（`sceneSeconds`）—— **4 条**，'
-      + '并就地 `new PresenterSession(...)`。',
-    blocker:
-      '构造点归属未定：候选落点是 `src/runtime/host.ts` 的 `Host` 接口'
-      + '（由 `HostBase` 实现，子类 `workbenchHost`/`embedHost` 已 import `composition/*`），'
-      + '而该接口的生产调用方是 Vue 组件（`shared/viewport/EmbedViewport.vue`、'
-      + '`workbench/components/WorkbenchViewport.vue`）⇒ 改注入是跨三层接口迁移，'
-      + '须与"画面生产者切换"分开批次以保留各自回归信号。',
-    closureCoverage: 'in-closure',
-    owner: Object.freeze({ p: 'R1-β①', issue: 387, duty: '端口切换与写路径内核化（撤销权威统一）' }),
-    exitCondition:
-      '**（甲）登记条件 —— ⏳ 未成立**：`Host`（或等价装配边）有具名的呈现在装配面'
-      + '（例如 `createViewportPresenter(regionId)`），且 `useViewportRuntime` 的 options 里'
-      + '该依赖是**必填**（与 `renderDocRef` 同形：省略即类型错误，不存在回落）。\n'
-      + "**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：对 `src/shared/viewport/useViewportRuntime.ts`\n"
-      + "扫 `from '@/composition/`（口径：**先剥注释与字符串字面量**再匹配 import 声明；"
-      + '本文件头注释里出现过 `composition/` 字样，裸 `grep` 会误判）⇒ 命中数必须为 **0**。\n'
-      + '**只有（甲）不算退出。**',
-  }),
 ])
 
 /** 按 id 取登记项（未登记返回 `undefined`，由调用方决定是缺口还是缺陷）。 */
