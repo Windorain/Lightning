@@ -29,7 +29,11 @@
  * ## 未承载的东西**报出来**，不静默丢（§12 第 3 段）
  *
  * 内核承载**刻意**没有 `raw` 字段袋（§15 第 2 条），也没有 `frames[].cellGrid`
- * （G3 待裁定）与 `materialPalette`/`textureBlobs`/`tooltipPalette`（契约未把它们
+ * ——后者自 G3 起由{@link multiblockBodyOf} 的**取证通道**
+ * （`domain/multiblockDocument#MultiblockFrameGridEvidence`）承载，但**仍不进声明**
+ * （契约 §9.6：它只作校验/取证；声明进内容身份，取证通道不进）。声明侧的诊断
+ * `FrameCellGridNotCarried` 因此**保留**（#388 评论 7501 第 4 项：保留至 G3 关闭）。
+ * `materialPalette`/`textureBlobs`/`tooltipPalette` 也仍未承载（契约未把它们
  * 划进内核声明半）。这些一律进 {@link MultiblockAdapterDiagnostic} ——
  * 「不能静默丢失无法解释的语义」是 §12 的明文，诊断就是它的落点。
  */
@@ -43,11 +47,13 @@ import {
   EMPTY_MULTIBLOCK_DECLARATION as EMPTY_KERNEL_DECLARATION,
   type MultiblockAxisSpec,
   type MultiblockBackbone,
+  type MultiblockBody,
   type MultiblockChannel,
   type MultiblockChannelKind,
   type MultiblockCoupling,
   type MultiblockDeclaration,
   type MultiblockFrame,
+  type MultiblockFrameGridEvidence,
   type MultiblockNote,
   type MultiblockRule,
   type MultiblockRuleKind,
@@ -575,14 +581,21 @@ export function multiblockDeclarationOf(parsed: ParsedMultiblockDocument | null 
 
   const decl = parsed.decl
 
-  // ---- 未承载：逐帧 `cellGrid`（G3 待裁定；e2e 取证脚本依赖，故**必须**报） ----
+  // ---- 未承载：逐帧 `cellGrid`（G3：#388 评论 7501 第 3 项 / 第 4 项） ----
+  //
+  // 语义是"**声明**不承载它"（契约 §9.6：只作校验/取证，生产产物省略）——这一点在
+  // G3 落地后**仍然成立**：取证通道（`multiblockBodyOf`）是另一个承运，声明里不放它。
+  // 故诊断码保留（裁决第 4 项），note 指向真实落点，避免读者以为它被静默丢弃。
   parsed.frames.forEach((f, i) => {
     if (f.cellGrid === undefined) return
     diagnostics.push(
       Object.freeze({
         code: 'FrameCellGridNotCarried' as const,
         at: `$.frames[${i}].cellGrid`,
-        detail: Object.freeze({ frameIndex: f.index, note: '内核帧声明无此字段（G3 待裁定）' }),
+        detail: Object.freeze({
+          frameIndex: f.index,
+          note: '内核**帧声明**无此字段（契约 §9.6 只作校验/取证）；G3 起由 body 的取证通道承载，不参与求值/身份/渲染',
+        }),
       }),
     )
   })
@@ -671,4 +684,70 @@ export function multiblockDeclarationOf(parsed: ParsedMultiblockDocument | null 
 
 function hasKeys(o: Record<string, unknown> | undefined): boolean {
   return o !== undefined && o !== null && Object.keys(o).length > 0
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G3：内层 body 的内核承运（声明 + 取证通道）
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface MultiblockBodyResult {
+  /** 内核承运（可直接喂 `composition/kernelAssembly#assembleMultiblockKernelFace`）。 */
+  readonly body: MultiblockBody
+  /** 未承载的字段/键（与 {@link multiblockDeclarationOf} 同一份，不因换入口而消失）。 */
+  readonly diagnostics: readonly MultiblockAdapterDiagnostic[]
+}
+
+/**
+ * **G3 的承运入口**：已解析结果 → 内层 body 的**内核承载**。
+ *
+ * ## 它替代的旧机制
+ *
+ * 多方块的再装配此前只能吃 `RuntimeDocument.multiblockSource` —— 那是**解析侧的整份原始
+ * JSON**（`context/runtimeDocument.ts:183`：`Record<string, unknown>`，含 `raw` 节点与
+ * 解析期结构）。本函数产出的是**内核承运**：`declaration` 走既有的类型化转换
+ * （{@link multiblockDeclarationOf}：摊平、去 `raw`、逐层冻结、调色板保序），
+ * `frameGridEvidence` 是 G3 新立的取证通道。
+ *
+ * ## 不是"换个存放位置"，也不是"反演 legacy 形状"（#388 评论 7686）
+ *
+ * 两个字段**各自**从**同一个已解析结果**直接读出（`parsed.decl`/`parsed.frames`），
+ * **不经**任何旧形状回推：`declaration` 复用声明侧转换（同一实现，不是第二份），
+ * 取证网格直接从 `parsed.frames[].cellGrid` 抄出并逐层冻结（拷贝 ⇒ 与解析侧**不同物**）。
+ * 诊断也同源：本函数返回的是 {@link multiblockDeclarationOf} 那一份（只读数组），
+ * 不重算、不改写 —— 免得两个入口对同一份文件报出两套诊断。
+ *
+ * ## 为什么诊断**不变**
+ *
+ * G3 的落点是"网格归**对象侧求值产物**"，取证通道只是把帧声明的参考网格
+ * **换个承运**，没有把它变成求值输入。故 `FrameCellGridNotCarried` 的语义
+ * （**声明**不承载它）与关闭条件（#388 评论 7501 第 4 项）都不受影响。
+ */
+export function multiblockBodyOf(parsed: ParsedMultiblockDocument | null | undefined): MultiblockBodyResult {
+  const { declaration, diagnostics } = multiblockDeclarationOf(parsed)
+
+  const evidence: MultiblockFrameGridEvidence[] = []
+  if (parsed !== null && parsed !== undefined) {
+    for (const f of parsed.frames) {
+      if (f.cellGrid === undefined) continue
+      evidence.push(Object.freeze({ frameIndex: f.index, cellGrid: freezeEvidenceGrid(f.cellGrid) }))
+    }
+  }
+
+  return Object.freeze({
+    body: Object.freeze({ declaration, frameGridEvidence: Object.freeze(evidence) }),
+    diagnostics,
+  })
+}
+
+/**
+ * 取证网格的**独立副本**（逐层冻结）。
+ *
+ * 为什么要拷贝而不是原样引用：解析产物是**外部格式**的中间物，与内核承运共享数组
+ * 会让"承运"随解析期的后续改动而变（判据里"不是解析侧原物"就是这条的机械形态）。
+ * 拷贝是**取证通道**的语义所允许的（它不参与求值，故无热路径成本）。
+ */
+function freezeEvidenceGrid(
+  grid: readonly (readonly (readonly number[])[])[],
+): readonly (readonly (readonly number[])[])[] {
+  return Object.freeze(grid.map((slice) => Object.freeze(slice.map((row) => Object.freeze([...row])))))
 }

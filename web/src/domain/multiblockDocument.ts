@@ -331,6 +331,80 @@ export interface MultiblockDeclaration {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 内层 body 的**内核承载**（G3：#388 评论 7501 第 3 项 / 7686）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 逐帧**声明参考网格**的取证承载（G3 的过渡通道）。
+ *
+ * ## 为什么是**独立类型**（不是 {@link MultiblockFrame} 的一个字段）
+ *
+ * 契约 §9.6：帧声明的 `cellGrid`「存在 → 只作**校验/取证**用途；**生产产物必须省略**」；
+ * `domain/content` 的帧声明明文「帧只承载**时间轴上的位置**，网格内容归**对象**」。
+ * 网格是**对象侧的求值产物**（契约 §5：`ASSEMBLE(doc, variantKey) → cellGrid`），
+ * 不是声明字段 —— 把它长在 `MultiblockFrame` 上会让"帧声明"与"求值产物"在类型上
+ * 不可区分，而那正是 §9.6 的反模式（"每帧带参考 `cellGrid`" = 组合展开）。
+ *
+ * ## 不进 {@link multiblockDeclDigest}：**类型层面**强制，不是命名约定
+ *
+ * `multiblockDeclDigest(decl: MultiblockDeclaration)` 的形参类型不含本类型，
+ * `MultiblockDeclaration` 也没有任何字段能装下它 ⇒ 取证网格**在类型上到不了**摘要。
+ * 这条不靠"记得别放进去"，靠"放不进去"（#388 评论 7672 的条件 ①）。
+ *
+ * ## 它**不参与求值/身份/渲染**（过渡不变式，#388 评论 7501 第 3 项）
+ *
+ * 装配读的是声明（本类型的宿主 {@link MultiblockBody.declaration}）与对象侧网格，
+ * **不读**本字段。机械判据：同一份声明，带取证网格与不带它，装配出的网格/报告/
+ * 摘要逐项相等（见 `composition/__tests__` 的 G3 判据）。
+ */
+export interface MultiblockFrameGridEvidence {
+  /** 该帧的**声明下标**（`MultiblockFrame.index`；与数组下标可不同）。 */
+  readonly frameIndex: number
+  /** 参考网格，朝向 `[z][row][col]`、row 0 = 顶部（与 `sizeSteps[].cellGrid` 同约定）。 */
+  readonly cellGrid: readonly (readonly (readonly number[])[])[]
+}
+
+/**
+ * 多方块**内层 body** 的内核承载（G3）。
+ *
+ * ## 它是什么、不是什么
+ *
+ * | | 归属 | 形状 |
+ * |---|---|---|
+ * | `DocumentContent.multiblock`（内容权威） | #249 §3.3 的**声明** | {@link MultiblockDeclaration}：`decl` 摊平、去 `raw` |
+ * | 本类型（body 承运） | #388 评论 7686「内核内容权威**按设计不带 body**」 | **声明 + 取证通道**两半 |
+ *
+ * 它**不是** `RuntimeDocument.multiblockSource` 换个存放位置：那个是**解析侧的整份原始
+ * JSON**（含 `decl`/`raw` 节点、解析期的 `Map`、四张额外调色板）。本类型的两个字段都是
+ * **内核承载**：`declaration` 由类型化适配器对真实解析结果产出（摊平/去 `raw`/逐层冻结），
+ * `frameGridEvidence` 是 G3 新立的取证通道。
+ *
+ * 它也**不是**从类型化投影面**反演**出来的 legacy 形状（#388 评论 7686 第 2 条）：
+ * 两个字段在适配器里**各自**从**已解析结果**直接读出，不经任何形状回推。
+ *
+ * ## 为什么两半放同一个类型
+ *
+ * 它们有**同一个产生者**（类型化适配器，同一个已解析结果）与**同一个生命周期**
+ * （一份文档一次），而消费者不同：`declaration` 进内容权威与装配求值，
+ * `frameGridEvidence` 只进取证面。合在一个承运里，装配的入口形参才能
+ * **不含 `RuntimeDocument`**（G3 的目标状态）。
+ */
+export interface MultiblockBody {
+  /**
+   * 求值依据的**内核声明**（与内容权威同源：同一适配器、同一已解析结果）。
+   *
+   * 装配器读的全部声明事实都在这里（通道/运行态/变体/规则/骨架/帧/并集调色板），
+   * 故"多方块再装配"不再需要旧文档。
+   */
+  readonly declaration: MultiblockDeclaration
+  /**
+   * 逐帧声明参考网格的**取证**通道（独立类型，见 {@link MultiblockFrameGridEvidence}）。
+   * 空数组 = 这份文件没有帧级参考网格（**生产产物**的常态，契约 §9.6）。
+   */
+  readonly frameGridEvidence: readonly MultiblockFrameGridEvidence[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 身份与查询
 // ─────────────────────────────────────────────────────────────────────────────
 

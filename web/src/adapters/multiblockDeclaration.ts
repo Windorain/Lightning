@@ -25,22 +25,26 @@
  * ⇒ 出口必须**自己定义**该层对外承诺的操作；类型用 `export type { … }`（本地再出口，
  * 不是 `export type { … } from '…'`，后者同样是 `ExportDeclaration`）。
  *
- * ## 出口承诺的是**内容面**那一个值
+ * ## 出口承诺的是**内容面 / 承运面**两个值
  *
- * 上层（装配）需要的是「已解析声明 → `DocumentContent.multiblock` 的承载值」这一件事；
- * 承载的**形状与不变量**（`decl` 摊平、去 `raw`、逐层冻结、调色板**保序等长**）由
- * `files/` 的实现族与它的判据负责：
+ * 上层（装配）需要两件事：①「已解析声明 → `DocumentContent.multiblock` 的承载值」
+ * （`multiblockDeclarationContentOf`）；②「已解析结果 → **内核面 body 承运**」
+ * （`multiblockBodyContentOf`，G3 —— 让多方块再装配不再需要 `RuntimeDocument`）。
+ * 承载的**形状与不变量**（`decl` 摊平、去 `raw`、逐层冻结、调色板**保序等长**、
+ * 取证通道不进声明）由 `files/` 的实现族与它的判据负责：
  * `adapters/files/__tests__/multiblockDeclarationFrozen.test.ts`。
  * 未承载字段（帧声明 `cellGrid` 等）的**诊断**留在 `MultiblockAdapterResult` 上，
  * 出口不吞掉它 —— 需要诊断的调用方走 `files/` 的完整结果。
  */
 
-import type { MultiblockDeclaration } from '@/domain/multiblockDocument'
+import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
 import {
+  multiblockBodyOf,
   multiblockDeclarationOf,
   type MultiblockAdapterDiagnostic,
   type MultiblockAdapterDiagnosticCode,
   type MultiblockAdapterResult,
+  type MultiblockBodyResult,
   type ParsedMultiblockDocument,
 } from './files/multiblockDeclaration'
 
@@ -48,6 +52,8 @@ export type {
   MultiblockAdapterDiagnostic,
   MultiblockAdapterDiagnosticCode,
   MultiblockAdapterResult,
+  MultiblockBodyResult,
+  MultiblockBody,
   ParsedMultiblockDocument,
 }
 
@@ -65,4 +71,21 @@ export function multiblockDeclarationContentOf(
   parsed: ParsedMultiblockDocument | null | undefined,
 ): MultiblockDeclaration {
   return multiblockDeclarationOf(parsed).declaration
+}
+
+/**
+ * **G3 承运入口（内核面 body）**：已解析的多方块文档 → 内层 body 的**内核承载**。
+ *
+ * 与 {@link multiblockDeclarationContentOf} 的分工：那个只给**声明**（内容权威那一半），
+ * 本函数给**承运**（声明 + 逐帧参考网格的取证通道），供
+ * `composition/kernelAssembly#assembleMultiblockKernelFace` 使用 ——
+ * 那是"多方块再装配不再需要 `RuntimeDocument`"的入口。
+ *
+ * 诊断（`FrameCellGridNotCarried` 等）的消费者仍走 `files/` 的完整结果
+ * （{@link MultiblockBodyResult}），出口不吞掉它。
+ */
+export function multiblockBodyContentOf(
+  parsed: ParsedMultiblockDocument | null | undefined,
+): MultiblockBody {
+  return multiblockBodyOf(parsed).body
 }
