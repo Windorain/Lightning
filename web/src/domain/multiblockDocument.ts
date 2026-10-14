@@ -116,6 +116,60 @@ export interface MultiblockRunstate {
   readonly materialSwap: boolean
 }
 
+/** 运行态覆盖范围（契约 §7.4；`context/parsers/multiblockDocument.ts` 的解析判据同族）。 */
+export interface MultiblockRunstateCoverage {
+  /** `"texture-material-swap" | "none"`。 */
+  readonly kind: string
+  /** `cellGrid` 是否随运行态变化（本轮恒 `false`，T0.3 裁决）。 */
+  readonly geometryDelta: boolean
+  /** 恒为 `"not-covered"`（契约 §7.4：TESR/附属渲染方块本轮不覆盖）。 */
+  readonly tesr: string
+}
+
+/**
+ * **呈现语义**（契约 §7.4；`docs/contracts/format-multiblock-doc.md`）。
+ *
+ * ## 为什么它是领域承载的一部分（G3）
+ *
+ * 查看器必须能回答「这份声明的帧**是不是**变体语义」「层预览能不能做」，而这不是
+ * 装配求值能推出来的事实 —— 它是**文件声明的呈现策略**。旧承载把它放在
+ * `context/parsers/multiblockDocument.ts#MultiblockViewerSemantics`（含一个
+ * `raw: Record<string, unknown>` 字段袋），而内核声明承载此前**完全没有**它
+ * ⇒ 一旦旧解析器退为边界转换，「声明了什么呈现语义」就没有类型化落点。
+ *
+ * ## 为什么**不带** `raw`
+ *
+ * 旧形态的 `raw` 是 §15 第 2 条要退役的「核心无 raw JSON/格式字段袋」形态：
+ * 未知键属于**适配器的保真记录**（`composition/kernelAssembly#declRawOf` 已有的分工），
+ * 不属于内核内容。故这里只承载已知键，未知键由适配器报出（不静默丢）。
+ */
+export interface MultiblockViewerSemantics {
+  /** 帧语义 = 变体语义（硬约束 2）。 */
+  readonly frameIsVariant: boolean
+  /** 帧播放语义，本轮恒 `"variant-frames"`。 */
+  readonly playback: string
+  readonly layerPreview: string
+  readonly runstateCoverage: MultiblockRunstateCoverage
+}
+
+/**
+ * 呈现语义的**缺省**。
+ *
+ * 取值逐条等于旧解析器对缺失键的落地口径（`context/parsers/multiblockDocument.ts:872-882`）：
+ * `frameIsVariant`（只有显式 `false` 才否）、`playback ?? 'variant-frames'`、
+ * `layerPreview ?? 'supported'`、coverage `kind ?? 'none'` / `geometryDelta === true` /
+ * `tesr ?? 'not-covered'`。
+ *
+ * 为什么把缺省**具名**而不是在每个构造点写 `?? ...`：缺省是判据（「文件没声明」与
+ * 「声明了缺省值」必须给出同一行为），散写就有 N 份，且会随解析器改动静默漂移。
+ */
+export const DEFAULT_VIEWER_SEMANTICS: MultiblockViewerSemantics = Object.freeze({
+  frameIsVariant: true,
+  playback: 'variant-frames',
+  layerPreview: 'supported',
+  runstateCoverage: Object.freeze({ kind: 'none', geometryDelta: false, tesr: 'not-covered' }),
+})
+
 /** 一条变体声明（契约 §5.1）。`key` 是主键，值恒为**声明值**（未设置写 0）。 */
 export interface MultiblockVariant {
   readonly key: string
@@ -250,6 +304,13 @@ export interface MultiblockDeclaration {
   readonly couplings: readonly MultiblockCoupling[]
   readonly couplingMode: string
   readonly notes: readonly MultiblockNote[]
+  /**
+   * 呈现语义（G3；见 {@link MultiblockViewerSemantics}）。
+   *
+   * **不进** {@link multiblockDeclDigest}：它不改变生成物的几何（与 `notes`/`opsLegend`/
+   * `sourceClass` 同一判据 —— 让「只改一句播放说明」触发全量重建正是 A11 要拦的形态）。
+   */
+  readonly viewerSemantics: MultiblockViewerSemantics
   /** 并集调色板（契约 §6；`[0]` 恒为 air）。**与逐格网格共用同一份资产身份**。 */
   readonly blockPalette: readonly BlockPaletteEntry[]
   /**
@@ -272,6 +333,50 @@ export interface MultiblockDeclaration {
 // ─────────────────────────────────────────────────────────────────────────────
 // 身份与查询
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * **「这份文档没有多方块声明」的唯一表示**（G1）。
+ *
+ * ## 为什么是「一份显式空声明」而不是 `null` / `undefined`
+ *
+ * 三条理由，都是判据上的：
+ *
+ *  1. **禁止 `undefined` 冒充「无」**。可空字段会让「没读到」「解析器忘了填」
+ *     与「文件确实声明了空」在类型上不可区分 —— 那正是 §15 第 2 条要退役的形态。
+ *  2. **同一语义只能有一个值**。本模块的 `EMPTY_*` 族（`EMPTY_METADATA` /
+ *     `EMPTY_FRAME_AXIS`）口径一致：空值是**载体类型的冻结实例**，于是
+ *     「无声明」在 `canonicalize` 下只有一个字符串（`digestOf` 的键序已稳定），
+ *     ⇒ 同一语义不会出现两种内容摘要（见 `domain/document#contentOf`）。
+ *  3. **真实声明不可能与之相等**。契约 §2.3 要求 `multiblockCount === 1` 且
+ *     `multiblock.id` / `displayName` 为非空字符串 ⇒ 「空值 ⟺ 无声明」是结构事实，
+ *     不是约定。
+ *
+ * 注意 `multiblockCount: 0` 是**刻意的**：它不是一份「合法的多方块文档」
+ * （那种文档恒为 1），而是「本内核文档没有多方块节点」这个事实的显式编码。
+ */
+export const EMPTY_MULTIBLOCK_DECLARATION: MultiblockDeclaration = Object.freeze({
+  id: '',
+  displayName: '',
+  hasScopeOverlap: false,
+  totalTierDomain: Object.freeze({ min: 0, max: 0 }),
+  tierSample: Object.freeze([]) as readonly number[],
+  channels: Object.freeze([]) as readonly MultiblockChannel[],
+  runstates: Object.freeze([]) as readonly MultiblockRunstate[],
+  variants: Object.freeze([]) as readonly MultiblockVariant[],
+  rules: Object.freeze([]) as readonly MultiblockRule[],
+  backbone: Object.freeze({ kind: '', sizeChannel: '', sizeSteps: Object.freeze([]) }) as MultiblockBackbone,
+  frames: Object.freeze([]) as readonly MultiblockFrame[],
+  couplings: Object.freeze([]) as readonly MultiblockCoupling[],
+  couplingMode: '',
+  notes: Object.freeze([]) as readonly MultiblockNote[],
+  viewerSemantics: DEFAULT_VIEWER_SEMANTICS,
+  blockPalette: Object.freeze([]) as readonly BlockPaletteEntry[],
+  schemaVersion: null,
+  multiblockCount: 0,
+  paletteSource: '',
+  geometryEncoding: '',
+  opsLegend: Object.freeze({}) as Readonly<Record<string, string>>,
+})
 
 /**
  * 声明的**内容身份**。

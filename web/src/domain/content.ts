@@ -21,6 +21,7 @@
  * | {@link ContentResource} | `RuntimeDocument.textureBlobs` + `materialPalette`（两个 `unknown[]`） | §3.1「资源引用」；§19.3「资源引用包含稳定资源 ID 和内容版本/哈希，URL 仅为获取位置」 |
  * | {@link DocumentMetadata} | `RuntimeDocument.meta`（`Record<string, unknown>` 字段袋） | §15 第 2 条「核心无 raw JSON/格式字段袋」 |
  * | {@link FrameAxis} | `RuntimeDocument.frames[].durationMs`（散在帧对象上） | §3.1「保存字段使用类型化结构，不以 `unknown[]` 或无界字段袋替代模型设计」 |
+ * | {@link DocumentContent.multiblock} | `RuntimeDocument.multiblock`（`context/parsers/multiblockDocument.ts` 的解析类型） | §3.3「多方块声明作为**只读内容定义**，由类型化解析适配接入」；形状复用 `domain/multiblockDocument#MultiblockDeclaration`（G1） |
  *
  * ## 三条设计判据（各自对应一个会被静默违反的约束）
  *
@@ -62,6 +63,7 @@
  */
 
 import { digestOf } from './identity'
+import { EMPTY_MULTIBLOCK_DECLARATION, type MultiblockDeclaration } from './multiblockDocument'
 import { resourceCacheKey, type ResourceRef } from './materials'
 import type { Vec3 } from './scene'
 
@@ -357,12 +359,38 @@ export interface DocumentContent {
   readonly metadata: DocumentMetadata
   readonly frameAxis: FrameAxis
   readonly resources: readonly ContentResource[]
+  /**
+   * **多方块声明**（G1）。
+   *
+   * ## 为什么它必须在这里（迁移阻塞点）
+   *
+   * `shared/viewport/useKernelChannels.ts:199` 是 `Context#legacyRenderSource()` 的
+   * **唯一**生产消费者，它要的是「多方块声明的内层 body」——用来按当前通道取值
+   * **重新装配**并构造渲染视图文档。此前内核内容里没有任何落点承载它，于是那次读
+   * 只能走旧读面。本字段即那个落点。
+   *
+   * ## 为什么**非空**且有显式空值
+   *
+   * 类型是 `MultiblockDeclaration`（复用 `domain/multiblockDocument`，不另立形状），
+   * 而"本内核文档没有多方块节点"由 {@link EMPTY_MULTIBLOCK_DECLARATION} 表示 ——
+   * 一个**确定**的冻结值，故同一语义不会因构造路径不同而得到两种摘要
+   * （`canonicalize` 键序稳定；见 `domain/identity`）。
+   *
+   * ## 为什么进内容身份
+   *
+   * 声明**是**内容：`contentOf` 把它一并摘要 ⇒ 换一份声明（或从"无"变成"有"）
+   * 必然改变 `contentDigest` ⇒ 推进 `documentVersion`、变脏、可撤销。这与
+   * §15 第 5 条一致 —— 反过来，"声明没变"时摘要也不得变（`documentContent` 的
+   * 缺省值与真实空声明是同一个值）。
+   */
+  readonly multiblock: MultiblockDeclaration
 }
 
 export const EMPTY_CONTENT: DocumentContent = Object.freeze({
   metadata: EMPTY_METADATA,
   frameAxis: EMPTY_FRAME_AXIS,
   resources: Object.freeze([]),
+  multiblock: EMPTY_MULTIBLOCK_DECLARATION,
 })
 
 /** 造一份内容（`resources` 走规范化，故「同一份清单两种顺序」内容身份相同）。 */
@@ -371,5 +399,6 @@ export function documentContent(init: Partial<DocumentContent> = {}): DocumentCo
     metadata: init.metadata ?? EMPTY_METADATA,
     frameAxis: init.frameAxis ?? EMPTY_FRAME_AXIS,
     resources: normalizeResources(init.resources ?? []),
+    multiblock: init.multiblock ?? EMPTY_MULTIBLOCK_DECLARATION,
   })
 }
