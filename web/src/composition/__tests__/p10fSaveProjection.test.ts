@@ -307,7 +307,12 @@ const LEAF_RULES: readonly LeafRule[] = Object.freeze([
     id: 'material-palette-permutation',
     path: 'materialPalette',
     dir: 'any',
-    why: '内核按**首次引用顺序**重排材质表、并把 blob 表压紧（`textureBlobs.kind` 决定逐条索引）。⚠️ 仅"按 `locator` 的语义字段 + blob 内容逐条相同"时合法（见 ⑤ 组）。',
+    why:
+      '内核按**首次引用顺序**重排材质表；blob 表的**表示**由文档形态决定'
+      + '（`composition/kernelProjection.ts:1405-1408`：多方块 ⇒ 数组，帧为主 ⇒ 槽位键对象），'
+      + '且两条路径的**下标空间不同**（投影 = 按调色板槽位展开，实测 62 键；legacy `serialize()` = 按内容去重，实测 57 条）。'
+      + '⚠️ 仅"同 `locator` 的语义字段逐条相同 + 每条经各自 `textureBlobIndex` 取到的字节相同"时合法（见 ⑤ 组；'
+      + '下标空间的实测登记见 `render/data/__tests__/isoExportTextureChain.test.ts` A 组）。',
     check: 'palette-permutation',
   },
   {
@@ -321,7 +326,17 @@ const LEAF_RULES: readonly LeafRule[] = Object.freeze([
     id: 'texture-blobs-shape',
     path: 'textureBlobs',
     dir: 'any',
-    why: '帧为主文档的 `textureBlobs` 有**两种契约形态**：对象（`{"0": b64}`，`serialize()` 的既有形态）与数组（`[b64]`，契约 §108 对多方块逐字要求）。内核按**形态**机械决定，故帧为主信封从源里的数组变成对象。⚠️ 仅当"按键/下标取到的 blob 内容逐条相同"时合法（见 ⑤ 组）。',
+    why:
+      '帧为主文档的 `textureBlobs` 有**两种契约形态**（由**生产者**决定，不是实现选择）：'
+      + '① **投影产物**（`plainForSave().plain`，内核侧）= 槽位键对象 `{"0": b64, …}`，键 = 调色板槽位'
+      + '（实测 **62 键**，按槽位**展开**，共享贴图复制多份）；'
+      + '② **legacy `serialize()`** = 数组 `[b64, …]`（实测 **57 条**，按内容**去重**；多方块文档亦逐字要求数组，'
+      + '`docs/contracts/format-multiblock-doc.md:108`）。'
+      + '⚠️ 2026-10-15 更正（#387 评论 7717 裁决②）：本条目此前把**对象形态**写成「`serialize()` 的既有形态」——'
+      + '**与实测相反**（`serialize().textureBlobs` 是数组 57 条，对象 62 键才是投影产物）。'
+      + '⚠️ 保留条件：两种表示的下标空间**不同**（展开池 0..61 vs 去重池 0..56），'
+      + '故只能逐条经各自的 `textureBlobIndex` 对账，或对**字节集合**对账；位置对账必然假红。'
+      + '实测与判据见 `render/data/__tests__/isoExportTextureChain.test.ts` A 组。',
     check: 'blob-shape',
   },
   {
