@@ -34,7 +34,6 @@ import {
   planExportRequest,
   preflightExport,
   type EncoderPort,
-  type ExportAssetNeed,
 } from '@/application/exportPlan'
 import {
   EXPORT_ASSET_MANIFEST_ENTRY,
@@ -101,7 +100,7 @@ const ENCODER: EncoderPort = {
   encode: async () => ok(new Uint8Array([1])),
 }
 
-const NEEDS: readonly ExportAssetNeed[] = Object.freeze([
+const NEEDS: readonly Need[] = Object.freeze([
   Object.freeze({ assetId: 'tex/a', contentVersion: 'v1', required: true, locator: '' }),
   Object.freeze({ assetId: 'tex/b', contentVersion: 'v1', required: false, locator: '' }),
 ])
