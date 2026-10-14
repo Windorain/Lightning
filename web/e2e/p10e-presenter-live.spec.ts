@@ -59,6 +59,8 @@ const SHOT_DIR = path.join(import.meta.dirname, 'screenshots', 'p10e-presenter')
  * `correlation.objectId` 只在有对象身份时才出现（纹理类失败无对象身份）。
  */
 interface PresenterFailure {
+  readonly code: string
+  readonly channel: string
   readonly reason: string
   readonly detail: string
   readonly dropped: boolean
@@ -126,6 +128,8 @@ async function readPresenterObservation(page: Page): Promise<PresenterObservatio
       ? (readView.byCode('effect.failed') as any[])
           .filter((r) => r?.params?.source === 'presenter')
           .map((r) => ({
+            code: String(r.code ?? ''),
+            channel: String(r.channel ?? ''),
             reason: String(r.params.reason ?? ''),
             detail: String(r.params.detail ?? ''),
             dropped: r.params.dropped === true,
@@ -256,6 +260,112 @@ test.describe('P10e 段② · 呈现链真实上线（生产装配 → Presenter
       expectNotBlank(sig, `${file} 视口画面`)
     })
   }
+
+  /**
+   * **呈现失败的判据本身必须可红**（修 #391 的假绿）。
+   *
+   * 上一条 ⑥ 断言"干净文档 ⇒ 呈现失败记录为空"。一条**恒真**的空断言与它长得一模一样
+   * （旧版就是手写 `presenterErrors: []`），故必须再给一次**正面对照**：
+   * 真的注入一次呈现失败 ⇒ 同一读面必须报出那条记录。
+   *
+   * ## 注入什么、为什么（**走生产链**，不是直接调函数）
+   *
+   * 篡改副本的**内嵌纹理字节**（`textureBlobs[0]` 换成非图像），其余一字不改，
+   * 经 `rewrap` 重建信封后仍走生产入口 `OPERATOR_OPEN_SCENE`。于是：
+   *
+   * ```
+   * 内嵌字节坏 → composition/kernelTextureResources#textureResourcesOf 逐条解码 ⇒ state='failed'
+   *   → presentation/textureBinding#bindTexture: required && failed ⇒ missingRequired=true
+   *     → presenterSession#bindTextures 统计 missingRequired > 0
+   *       → useViewportRuntime#syncPresenterTextures:
+   *          emitPresenterFailure('textures-missing-required', String(n))
+   * ```
+   *
+   * 选这条而不是"直接调 `applyKernelDocument`"的理由：**发射点在帧循环里**
+   * （会话自己不写诊断），只有走真实文档加载 + 真实帧循环才证明"接线还在"。
+   *
+   * ## 负对照（同一页面、同一 `Context`，先读后注入）
+   *
+   * 注入前先读一次：读面可用且**零**记录。诊断是**只追加**的环形缓冲，
+   * 故"注入前 0 条 → 注入后 ≥1 条且 reason 正确"不可能由测试自造 —— 报出这条记录的
+   * 只能是产品代码。
+   */
+  test('**正对照**：注入一次呈现失败 ⇒ 诊断读面必须报出该记录（reason/source 正确）', async ({ page }) => {
+    await gotoWorkbench(page)
+
+    // ── ① 负对照（同页面、同 Context，注入之前）：读面可用 + 零记录 ──
+    const before = await readPresenterObservation(page)
+    expect(before.diagnosticsReadable, '诊断读面必须可用（否则"读不到"会被当成"没有失败"）').toBe(true)
+    expect(
+      before.presenterFailures,
+      `未注入任何文档时不得有呈现失败记录（实测 ${JSON.stringify(before.presenterFailures)}）`,
+    ).toEqual([])
+
+    // ── ② 注入：只把第 0 条内嵌纹理的字节换成非图像（其余逐字不动）──
+    const { envelope, inner } = readFixture('multiblock-tier-only.json')
+    const tampered = cloneInner(inner)
+    const blobs = tampered.textureBlobs as string[]
+    expect(blobs.length, '该夹具必须带内嵌纹理字节（否则这条注入没有着力点）').toBeGreaterThan(0)
+    const cleanBlob = blobs[0]!
+    blobs[0] = Buffer.from('not-an-image', 'utf8').toString('base64')
+    expect(blobs[0], '篡改必须真的换了字节').not.toBe(cleanBlob)
+
+    const injected = await injectSceneDocumentOk(
+      page,
+      rewrap(envelope, tampered),
+      'tampered-texture.json',
+    )
+    expect(injected.docLoaded, '坏一张贴图仍应能正常解析（否则红色来自解析失败，不是判据）').toBe(true)
+    expect(injected.isMultiblock).toBe(true)
+    await waitForViewportMounted(page)
+
+    // ── ③ 判据：记录必须出现在诊断读面上（有界轮询，不靠固定 sleep 猜）──
+    await expect
+      .poll(async () => (await readPresenterFailures(page)).length, {
+        timeout: 30_000,
+        message: '贴图坏掉后呈现链必须报出一条失败记录（读面 = getDiagnostics().byCode）',
+      })
+      .toBeGreaterThan(0)
+
+    const failures = await readPresenterFailures(page)
+    console.log(`[P10e·呈现失败] 注入坏贴图 ⇒ 记录 ${JSON.stringify(failures)}`)
+
+    const record = failures.find((f) => f.reason === 'textures-missing-required')
+    // `params.source === 'presenter'` 由读面过滤给出（`readPresenterObservation` 内的
+    // `.filter(r => r.params.source === 'presenter')`）：能出现在这里的记录 source 必然正确。
+    expect(
+      record,
+      `必须报出"必需贴图缺失"这条：实测 ${JSON.stringify(failures)}`,
+    ).toBeDefined()
+    // 码/通道/source 是"这条记录属于呈现链"的身份三件套（读面按码过滤，source 由过滤给出）
+    expect(record!.code, '必须走既有码 effect.failed').toBe('effect.failed')
+    expect(record!.channel, '必须落在 effect 通道').toBe('effect')
+    expect(record!.dropped, '首现的失败不是丢弃上报').toBe(false)
+    expect(
+      Number(record!.detail),
+      `detail 必须是缺失计数（实测 ${JSON.stringify(record!.detail)}）`,
+    ).toBeGreaterThan(0)
+
+    // ── ④ 负对照第二半：**干净的**同一份夹具不得报出这条 reason ──
+    // 先证明"呈现链真的在这份文档上跑过"（有批次），再断言它零记录 ——
+    // 否则"没记录"可能只是"还没跑"。最后用③**同一个过滤 + 同一个 reason** 再判一次 0，
+    // 使"③ 的红"有对照：同一判据在干净文档上恒为 0。
+    await gotoWorkbench(page)
+    const clean = readFixture('multiblock-tier-only.json')
+    await injectSceneDocumentOk(page, clean.envelope, clean.file)
+    await waitForViewportMounted(page)
+    await page.waitForTimeout(1500)
+    const cleanObs = await readPresenterObservation(page)
+    expect(cleanObs.batchObjects, '干净夹具上呈现链必须真的产出批次（否则"零记录"没有意义）').toBeGreaterThan(0)
+    expect(
+      cleanObs.presenterFailures,
+      `干净夹具不得报出呈现失败（实测 ${JSON.stringify(cleanObs.presenterFailures)}）`,
+    ).toEqual([])
+    expect(
+      cleanObs.presenterFailures.filter((f) => f.reason === 'textures-missing-required').length,
+      '③ 用的同一条判据（同一过滤 + 同一 reason）在干净夹具上必须为 0',
+    ).toBe(0)
+  })
 
   test('**逐格拾取可用**（真实视口 + 多个屏幕位置 ⇒ 解出多个不同的格）', { tag: '@smoke' }, async ({ page }) => {
     await gotoWorkbench(page)
