@@ -58,6 +58,7 @@ import type {
   GeometryAttributes,
 } from '@/presentation/evaluationKey'
 import { projectGridCells } from '@/composition/kernelProjection'
+import { tooltipPoolOf } from '@/adapters/tooltipPool'
 import { structureMaterialPrimitives } from '@/runtime/presentationAdapter'
 
 /**
@@ -292,7 +293,9 @@ export function kernelPresentationInputs(input: {
  * | 逐格为空 | `empty-cells` |
  *
  * ⚠️ **仍未覆盖（S2 第二半的显式欠账，不得静默当已做）**：
- *  - `tooltipPalette`（旧链路 `resolveRenderBundle.tooltipPalette` 一并返回）本函数**不产出**；
+ *  - `tooltipPalette`（旧链路 `resolveRenderBundle.tooltipPalette` 一并返回）本函数**不产出**
+ *    —— 它由 {@link kernelRenderSourceFaceOf} 在同一份载荷上补出（逐格 `cellContent[].tooltip`
+ *    经 `adapters/tooltipPool` 重聚成池，与投影侧同一条编码）；
  *  - 材质混合模式推断（旧落点 `render/data/sceneDocumentMaterialHydrate.ts:88`）；
  *  - 图标缓存**身份键**（旧落点 `runtime/drwMeshPipeline.ts:263-270` 绑旧 `StructureDefinition`）。
  */
@@ -333,4 +336,94 @@ export function kernelDefinitionFaceOf(input: {
     face: Object.freeze({ objectId, definition: definitionOfPayload(payload, materialPaletteOf(input.content)) }),
     reason: null,
   }
+}
+
+/**
+ * **DRW 渲染源面（G4 · S2 第二半 · 帧为主半）**：旧链路里由**旧格式文档**一次给全的三样
+ * （当帧定义 / 逐格说明池 / 材质库输入）在内核侧的**具名承载体**。
+ *
+ * ## 本模块替代的旧机制（逐条对位 `runtime/drwMeshPipeline.ts` 的旧读取点）
+ *
+ * | 旧读取点 | 旧输入 | 本承载体的字段 |
+ * |---|---|---|
+ * | `:225 docRef.value?.frameCount` | 旧文档帧数 | {@link KernelRenderSourceFace.frameCount} |
+ * | `:304-320`/`:344-361` `doc.serialize()` → `isWorldDocument && frames.length>0` → `resolveRenderBundle` | 旧文档帧结构 | {@link KernelRenderSourceFace.definitionAt}（复用 `kernelDefinitionFaceOf`，**同一份**重建口径） |
+ * | `:314`/`:361 tooltipPalette.value = resolved.tooltipPalette` | 旧文档根 `tooltipPalette` | 同上的 `tooltipPalette`（逐格 `cellContent[].tooltip` 经 `adapters/tooltipPool` 重聚，与投影侧**同一条**编码） |
+ * | `:178 buildMaterialLibrary(plain ?? doc.serialize())` | 旧文档 `materialPalette`+`textureBlobs` | {@link KernelRenderSourceFace.materialInput}（由 `content.resources` 机械派生） |
+ *
+ * ## 为什么"帧为主"这一半可以真切（而多方块半暂存）
+ *
+ * 帧为主文档的定义/说明/材质三样，在内核内容里**已经全在**（`blockGrid` 载荷 +
+ * `content.resources`），故不需要任何旧格式往返。多方块的**再装配**（`doc.multiblockSource`）
+ * 仍绑旧文档 —— 那是 G3（body 的内核落点）落地前**已登记**的暂存路径，与本面无关。
+ *
+ * ## 不静默
+ *
+ * `definitionAt` 取不到时回 `null`（**不**造一份"看起来能渲染"的空定义）；调用方据此
+ * 保留上一次结果或显式报错。`tooltipPalette` 在"内核里没有任何逐格说明"时回**空数组**
+ * （`adapters/tooltipPool` 的 `null` = 没有这一对字段；此时池为空是**如实**的，
+ * 见 `runtime/tooltipRead` 对"缺席 ≠ 空"的说明）。
+ */
+export interface KernelRenderSourceFace {
+  /** 帧数（装配面 `frameObjects` 的长度）。 */
+  readonly frameCount: number
+  /** 帧下标 → （定义 + 说明池）；取不到回 `null`（**不**回落到旧文档）。 */
+  readonly definitionAt: (frameIndex: number) => {
+    readonly definition: GridDefinition
+    readonly tooltipPalette: readonly string[]
+  } | null
+  /**
+   * 材质库（`render/data/buildMaterialLibrary`）的输入，由**内核内容**派生。
+   *
+   * `textureBlobs` 的键是**槽位**（= `materialPalette` 的数组下标 = 几何 `materialIndex`
+   * 的索引空间；`domain/content#normalizeResources` 的排序键保证位置即槽位）。
+   */
+  readonly materialInput: {
+    readonly geometryPhase: 'baked'
+    readonly materialPalette: readonly Record<string, unknown>[]
+    readonly textureBlobs: Readonly<Record<string, string>>
+  }
+}
+
+/** 内核 `content.resources` → `textureBlobs`（**槽位**为键，只收有内嵌字节的条）。 */
+function textureBlobsOfContent(content: DocumentContent): Readonly<Record<string, string>> {
+  const blobs: Record<string, string> = {}
+  for (let i = 0; i < content.resources.length; i++) {
+    const payload = content.resources[i]!.payload
+    if (payload !== null) blobs[String(i)] = payload
+  }
+  return Object.freeze(blobs)
+}
+
+/**
+ * 内核场景 + 内容 + 装配面 → **DRW 渲染源面**（纯读取：显式输入、不改输入、不依赖 Vue/Three/DOM/IO）。
+ *
+ * @param input.frameObjects 帧下标 → 内核对象 id（装配面 `KernelAssemblyFace#frameObjects`）。
+ */
+export function kernelRenderSourceFaceOf(input: {
+  readonly scene: Scene
+  readonly content: DocumentContent
+  readonly frameObjects: readonly string[]
+}): KernelRenderSourceFace {
+  const materialPalette = materialPaletteOf(input.content)
+  return Object.freeze({
+    frameCount: input.frameObjects.length,
+    definitionAt: (frameIndex: number) => {
+      const r = kernelDefinitionFaceOf({ ...input, frameIndex })
+      if (r.face === null) return null
+      const obj = input.scene.objects[r.face.objectId]
+      const data = obj === undefined ? undefined : input.scene.data[obj.dataId]
+      if (data === undefined || data.payload.kind !== 'blockGrid') return null
+      const pool = tooltipPoolOf(data.payload.cellContent)
+      return Object.freeze({
+        definition: r.face.definition,
+        tooltipPalette: pool === null ? Object.freeze([]) : pool.palette,
+      })
+    },
+    materialInput: Object.freeze({
+      geometryPhase: 'baked' as const,
+      materialPalette,
+      textureBlobs: textureBlobsOfContent(input.content),
+    }),
+  })
 }
