@@ -79,7 +79,14 @@ import type { Grid, SlotBlock } from '@/context/grid'
 // `@/shared/viewport/multiblockChannelUi` 是它的 UI 包装（深度 3，超公共出口上限）——
 // 而 `assembleSelection` 本来就在 `context/multiblock` 的出口上（那个 index 逐字导出它）。
 // 用更深的那个包装会顺带把 Vue 响应式语义拖进装配层，那也不是装配该做的事。
-import { assembleSelection, type AssemblyResult, type MultiblockInnerDocument } from '@/context/multiblock'
+import {
+  assembleSelection,
+  type AssemblyResult,
+  type MultiblockDecl as MultiblockDeclFace,
+  type MultiblockFrame as EvaluatorFrame,
+  type MultiblockInnerDocument,
+  type MultiblockPaletteEntry as EvaluatorPaletteEntry,
+} from '@/context/multiblock'
 // 深度 2 的公共出口（契约 §7.3 规则 2）——实现留在 `adapters/files/`（族内），
 // 直接 import 深度 3 会被 `gate/no-private-cross-layer` 判红（首次接线实测 1 条）。
 import { multiblockDeclarationContentOf } from '@/adapters/multiblockDeclaration'
@@ -108,6 +115,7 @@ import {
   type TextureAnimationSpec,
 } from '@/domain/content'
 import { EMPTY_ANIMATION, type AnimationState } from '@/domain/animation'
+import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
 import { err, invalidValue, ok, type Result } from '@/domain/errors'
 import { normalizeCellContent, type CellContent, type CellContentTable } from '@/domain/cellContent'
 import { cellPositionKey } from '@/domain/cellPosition'
@@ -1926,8 +1934,22 @@ function tryAssembleSelection(
   source: Readonly<Record<string, unknown>>,
   selection: MultiblockSelectionState,
 ): AssemblyResult | null {
+  return assembleFromEvaluatorInput(source as MultiblockInnerDocument, selection)
+}
+
+/**
+ * 装配一个求值端口输入（**不抛**：异常返回 `null`，由调用方落诊断/失败）。
+ *
+ * 唯一的调用点形态 —— 旧路径（`RuntimeDocument.multiblockSource`）与 G3 的内核面路径
+ * （{@link evaluatorDocumentOf}）**共用**这一处 try/catch 与选择映射，免得
+ * 「未声明组合/文件缺陷」在两处各有一套处置（§15 第 5 条）。
+ */
+function assembleFromEvaluatorInput(
+  input: MultiblockInnerDocument,
+  selection: MultiblockSelectionState,
+): AssemblyResult | null {
   try {
-    return assembleSelection(source as MultiblockInnerDocument, {
+    return assembleSelection(input, {
       totalTier: selection.totalTier,
       values: { ...selection.values },
       runstate: selection.runstate,
@@ -1937,9 +1959,201 @@ function tryAssembleSelection(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// G3：多方块的**内核面**再装配入口（**不吃 `RuntimeDocument`**）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 内核面多方块再装配的输入。**形参里没有 `RuntimeDocument`**（G3 的目标状态）。
+ *
+ * 背景（#388 评论 7686/7698）：`shared/viewport/useKernelChannels.ts:215-219/242-262`
+ * 今天的再装配绑在 `ctx.legacyRenderSource()` 返回的旧文档上（`:199`），而旧文档的
+ * `multiblockSource` 是**解析侧整份原始 JSON**。内核内容权威**按设计不带 body**
+ * ⇒ body 另立承运（`domain/multiblockDocument#MultiblockBody`），由类型化适配器
+ * 对真实解析结果产出（`adapters/multiblockDeclaration#multiblockBodyContentOf`）。
+ */
+export interface MultiblockKernelFaceInput {
+  /**
+   * 内层 body 的内核承运。
+   *
+   * `null` = **没有承运** ⇒ 本入口**显式失败**（`invalidValue`）：既不回落旧文档
+   * （它不在形参里，回落无从谈起），也不静默产空 —— 那是 #388 评论 7698 的负对照口径。
+   */
+  readonly body: MultiblockBody | null
+  /** 取值选择；缺省 = 声明自己的初始选择（与旧路径 `initialSelection` 同一实现）。 */
+  readonly selection?: MultiblockSelectionState
+  /**
+   * 逐格说明叠加层（文档级 `tooltipPalette`/`cellTooltipGrid` 的内核面替身）。
+   *
+   * 为什么是**输入**而不是本入口自己去取：那两样仍属解析侧、**尚未**进内核承运
+   * （适配器的 `ExtraPaletteNotCarried` 是诚实暂态）。装配**不伪造**它们。
+   */
+  readonly cellContent?: Readonly<Record<string, CellContent>>
+}
+
+/** 内核面再装配的产物（对象载荷 + 承运回执；场景装配由调用方做）。 */
+export interface MultiblockKernelFaceAssembly {
+  /** 多方块网格对象的 id / dataId（与文档路径 **逐字相同**：`structure:multiblock`）。 */
+  readonly objectId: string
+  readonly dataId: string
+  readonly grid: Grid
+  readonly report: AssemblyResult['report']
+  /** `blockGrid` 对象载荷（调色板/几何/逐格内容，与文档路径同一构造点）。 */
+  readonly payload: ObjectDataPayload
+  /** 承运回执：与输入**同一份**（判据据此断言"等于适配器输出"）。 */
+  readonly body: MultiblockBody
+  readonly diagnostics: readonly AssemblyDiagnostic[]
+}
+
+/**
+ * **G3 的装配入口**：吃内核面 body，产出多方块网格的对象载荷 —— **不再需要 `RuntimeDocument`**。
+ *
+ * ## 与 `assembleKernelDocument` 的分工
+ *
+ * 那个吃整份文档（元数据/帧轴/资源/注解…），本函数**只**做多方块网格的再装配
+ * （选择变了就重算网格）。故它是"骨架"而不是"第二份装配器"：网格的求值、
+ * 调色板/几何/逐格内容的构造都复用**同一批**生产函数
+ * （`assembleSelection` / `gridPayload` / `blockGridPayload`）。
+ *
+ * ## 为什么 ⑧ 段今天还读旧文档
+ *
+ * 文档路径的 ⑧ 段此刻**仍**走 `doc.multiblockSource`（暂存路径，owner = R2 线 /
+ * G3 批，退出条件 = 调用方改走本入口）。本函数先让**再装配**这一半脱离旧文档；
+ * 调用方迁移与旧路径退出的次序见 Gitea #388 的交付评论（`kernelRenderView` 的
+ * 求值端口是它的第一个消费者）。
+ */
+export function assembleMultiblockKernelFace(
+  input: MultiblockKernelFaceInput,
+): Result<MultiblockKernelFaceAssembly> {
+  const body = input.body
+  if (body === null) {
+    return err(
+      invalidValue({
+        reason: 'multiblockBodyNotCarried',
+        note: '内核面再装配必须给 body 承运（multiblockBodyContentOf 对真实解析结果的产出）：没有它无从求值，也不回落 RuntimeDocument',
+      }),
+    )
+  }
+
+  const declaration = body.declaration
+  const selection = input.selection ?? initialSelectionOfDeclaration(declaration)
+  const outcome = assembleFromEvaluatorInput(evaluatorDocumentOf(declaration), selection)
+  if (outcome === null) {
+    // 文件缺陷（变体无 frame / stepIndex 越界…）：**显式失败**，与文档路径落
+    // `multiblockAssemblyFailed` 诊断同因 —— 但不静默产空对象。
+    return err(
+      invalidValue({
+        reason: 'multiblockAssemblyFailed',
+        multiblockId: declaration.id,
+        frameCount: declaration.frames.length,
+      }),
+    )
+  }
+
+  const diagnostics: AssemblyDiagnostic[] = []
+  const payload = gridPayload(outcome.grid, {
+    ...(input.cellContent === undefined ? {} : { tooltipContent: input.cellContent }),
+    diag: diagnosticSink,
+  })
+  diagnostics.push(...payload.assembled.diagnostics)
+
+  return ok(
+    Object.freeze({
+      objectId: 'structure:multiblock',
+      dataId: 'structure:multiblock:data',
+      grid: outcome.grid,
+      report: outcome.report,
+      payload: blockGridPayload(payload),
+      body,
+      diagnostics: Object.freeze(diagnostics),
+    }),
+  )
+}
+
+/**
+ * 求值端口输入的**逐声明备忘**。
+ *
+ * 键 = 声明对象本身（内核承运是不可变的冻结值 ⇒ 身份即内容）。备忘的理由是**成本**：
+ * 端口适配要深拷贝骨架阶网格（见 {@link mutableCopy}），而选择变化会重入本入口
+ * （滑杆拖动），若不备忘就会每次选择都重拷全部骨架阶。
+ */
+const evaluatorInputCache = new WeakMap<MultiblockDeclaration, MultiblockInnerDocument>()
+
+/**
+ * 内核声明 → 求值端口（`context/multiblock#MultiblockInnerDocument`）的**端口适配**。
+ *
+ * ## 为什么需要它（而不是把声明直接传给 `assembleSelection`）
+ *
+ * 端口的类型是**旧层的宽松形状**（`MultiblockDecl` 等带 `[k: string]: unknown` 索引签名、
+ * 数组是**可变**的 `number[][][]`），而内核声明是**收窄的只读类型**（`readonly` 数组、
+ * 无索引签名）⇒ 二者在类型上不可直接赋值。本函数做的是**端口适配**：
+ *
+ *  1. 深拷贝成可变纯数据（`mutableCopy`）—— 旧路径传的是解析期 JSON，本来就是可变、
+ *     未冻结的；拷贝让求值端拿到**同形的**输入，且**不会**（即使误写）污染冻结的内核承运；
+ *  2. 逐字段放回端口的三个键（`multiblock` / `blockPalette` / `frames`）。
+ *
+ * ## 它不是"把类型化投影面反演成 legacy body"（#388 评论 7686 第 2 条禁止的那件事）
+ *
+ * 判据是**值的来源**，可机械核对：本函数输出的每一个值都来自 `declaration` 自己的
+ * 具名字段（泛型深拷贝，不新增、不推断、不补默认），**没有**一个键来自
+ * `RuntimeDocument.multiblockSource`，也**没有**`raw` 节点（内核承运里根本没有它）。
+ * 被禁的那件事是"从投影面凑出一份**伪造的 legacy 输入**去喂**旧入口**以使旧文档存活"；
+ * 这里是新入口把自己的承运交给求值器 —— 求值器本身不在本批写面内（`context/multiblock`）。
+ */
+function evaluatorDocumentOf(declaration: MultiblockDeclaration): MultiblockInnerDocument {
+  const cached = evaluatorInputCache.get(declaration)
+  if (cached !== undefined) return cached
+
+  const input: MultiblockInnerDocument = {
+    ...(declaration.schemaVersion === null ? {} : { schemaVersion: declaration.schemaVersion }),
+    multiblockCount: declaration.multiblockCount,
+    multiblock: mutableCopy(declaration) as MultiblockDeclFace,
+    blockPalette: mutableCopy(declaration.blockPalette) as EvaluatorPaletteEntry[],
+    frames: mutableCopy(declaration.frames) as EvaluatorFrame[],
+  }
+  evaluatorInputCache.set(declaration, input)
+  return input
+}
+
+/**
+ * 冻结纯数据的**可变深拷贝**（数组/对象逐层重建，标量原样）。
+ *
+ * 为什么不用 `structuredClone`：装配层要能在**没有全局结构化克隆**的宿主里跑，
+ * 且这里的数据形状是受限的（JSON 值：标量/数组/纯对象）—— 一个显式递归就够，
+ * 也把"哪些值被拷贝"变成可读的代码而不是宿主能力。
+ */
+function mutableCopy(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(mutableCopy)
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [key, v] of Object.entries(value as Record<string, unknown>)) out[key] = mutableCopy(v)
+    return out
+  }
+  return value
+}
+
 /** 文档声明的初始多方块选择（与 `useMultiblockChannels` 的初始口径同源）。 */
 function initialSelection(doc: RuntimeDocument): MultiblockSelectionState {
-  const decl = doc.multiblock?.decl
+  return initialSelectionOfDeclaration(doc.multiblock?.decl)
+}
+
+/**
+ * 声明 → 初始选择（旧载体与内核承运**同一实现**）。
+ *
+ * 形参只要三个字段：旧载体给的是 `doc.multiblock.decl`，内核承运给的是
+ * `MultiblockDeclaration` —— 后者是前者的类型化摊平，两者的 `totalTierDomain`/
+ * `channels`/`runstates` 语义相同。写成收窄形参而不是两次实现，是为了让
+ * 「初始选择」只有一个定义点（§15 第 5 条）。
+ */
+function initialSelectionOfDeclaration(
+  decl:
+    | {
+        readonly totalTierDomain: { readonly min: number; readonly max: number; readonly default?: number }
+        readonly channels: readonly { readonly key: string }[]
+        readonly runstates: readonly { readonly id: string }[]
+      }
+    | undefined,
+): MultiblockSelectionState {
   if (!decl) return { totalTier: 1, values: {}, runstate: '' }
   const domain = decl.totalTierDomain
   const values: Record<string, number> = {}
