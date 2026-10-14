@@ -133,7 +133,7 @@ describe('C7 段二 · 内核拾取适配（生产解析 + 装配 + 真实射线
         point: hit.point,
         distance: hit.distance,
         grid: grid!,
-        layerPreview: 'all',
+        layerWorldY: null,
       })
       expect(out.ok, `适配必须解出方格（若否：${out.ok ? '' : out.skip.detail}）`).toBe(true)
       if (!out.ok) return
@@ -203,7 +203,7 @@ describe('C7 段二 · 内核拾取适配（生产解析 + 装配 + 真实射线
         point: hit.point,
         distance: hit.distance,
         grid,
-        layerPreview: 'all',
+        layerWorldY: null,
       })
       expect(out.ok, '无格身份 ⇒ 必须拒绝，而不是猜一格').toBe(false)
       if (!out.ok) expect(out.skip.kind).toBe('no-cell')
@@ -230,7 +230,7 @@ describe('C7 段二 · 内核拾取适配（生产解析 + 装配 + 真实射线
         point: hit.point,
         distance: hit.distance,
         grid,
-        layerPreview: { worldY: -12345 },
+        layerWorldY: -12345,
       })
       expect(out.ok, '分层预览下该格为空气 ⇒ 必须拒绝').toBe(false)
       if (!out.ok) expect(out.skip.kind).toBe('cell-is-air')
@@ -253,7 +253,7 @@ describe('C7 段二 · 内核拾取适配（生产解析 + 装配 + 真实射线
       if (all.kind !== 'hits') return
       expect(all.hits.length, '穿透候选至少一个').toBeGreaterThan(0)
 
-      const entities = kernelPickEntitiesOf({ hits: all.hits, grid, layerPreview: 'all' })
+      const entities = kernelPickEntitiesOf({ hits: all.hits, grid, layerWorldY: null })
       expect(entities.length).toBeGreaterThan(0)
       // 去重：同一格不得出现两次（否则轮换会在同一格上打转）
       const keys = entities.map((e) => `${e.column},${e.row},${e.zSlice}`)
@@ -268,7 +268,7 @@ describe('C7 段二 · 内核拾取适配（生产解析 + 装配 + 真实射线
         point: all.hits[0]!.point,
         distance: all.hits[0]!.distance,
         grid,
-        layerPreview: 'all',
+        layerWorldY: null,
       })
       if (one.ok && entities.length > 0) {
         expect([entities[0]!.column, entities[0]!.row, entities[0]!.zSlice]).toEqual([

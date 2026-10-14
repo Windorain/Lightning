@@ -24,7 +24,7 @@
  * | 输出字段 | 来源 | 与 legacy 的关系 |
  * |---|---|---|
  * | `column` / `row` / `zSlice` / `quadIndex` | `resolution.cell` | **逐字同名**（`presentation/cellIdentity#CellRef` 明文沿用 legacy 口径） |
- * | `blockId` | `grid.at({x: column, y: worldY, z: zSlice})` → `name` | 内核网格读面（`runtime/gridRead`），与 legacy 的 `effectiveBlockId` 同语义 |
+ * | `blockId` | `paletteEntryOf(...)` → `registryId` + `meta` → `presentation/blockRegistryKey` | 内核网格读面（`runtime/gridRead`）+ 呈现层键口径。**不是** `at().name`（GF-7 截前缀短名 ⇒ 静默失配，C8 修） |
  * | `distance` / `point` | `PresenterPickResult` | 与 `resolution` **同一次射线**（不重射） |
  *
  * ## 纯性
@@ -36,8 +36,7 @@
 
 import { structureRowToWorldY } from '@/pure/vec'
 import type { KernelGridView } from '@/runtime/gridRead'
-import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
-import type { LayerPreviewMode } from '@/render/data/layerPreview'
+import { blockRegistryKey } from '@/presentation/blockRegistryKey'
 import type { PickResolution } from '@/presentation/pickingIndex'
 import type { PresenterHit } from '@/composition/presenterSession'
 
@@ -69,8 +68,15 @@ export interface KernelPickInput {
   readonly point: readonly [number, number, number]
   readonly distance: number
   readonly grid: KernelGridView
-  /** 分层预览模式（与 legacy 拾取同一取值域；`'all'` = 不分层）。 */
-  readonly layerPreview: LayerPreviewMode
+  /**
+   * 分层预览的**世界 Y**（`null` = 不分层）。
+   *
+   * 取新层形状（`number | null`，与 `PresenterSession#setLayerPreview` /
+   * `kernelPresentationInputs` 同一取值域），**不**取 legacy 的 `'all' | {worldY}`
+   * 联合：后者定义在 `render/data/layerPreview`（深度 3），装配根 import 它会被
+   * `gate/no-private-cross-layer` 判红（公共出口最大深度 2）。
+   */
+  readonly layerWorldY: number | null
 }
 
 /**
@@ -115,13 +121,13 @@ export function kernelPickBlockOf(input: KernelPickInput): KernelPickOutcome {
   // `structureRowToWorldY(row, sizeRow) === mode.worldY` 时返回真实体素。
   // 这里用**同一函数**判（而不是重写一遍比较），故"分层预览下的命中语义"
   // 不因切链而变 —— 两份实现必然漂移，本工程已三度实测。
-  if (input.layerPreview !== 'all' && structureRowToWorldY(cell.row, volume.height) !== input.layerPreview.worldY) {
+  if (input.layerWorldY !== null && structureRowToWorldY(cell.row, volume.height) !== input.layerWorldY) {
     return {
       ok: false,
       skip: {
         kind: 'cell-is-air',
         detail:
-          `命中格 (col=${cell.column}, row=${cell.row}, z=${cell.zSlice}) 不在分层预览的 Y=${input.layerPreview.worldY} 层`
+          `命中格 (col=${cell.column}, row=${cell.row}, z=${cell.zSlice}) 不在分层预览的 Y=${input.layerWorldY} 层`
           + '上 ⇒ 该层视图下它是空气（无可选对象）',
       },
     }
@@ -151,7 +157,7 @@ export function kernelPickBlockOf(input: KernelPickInput): KernelPickOutcome {
       },
     }
   }
-  const blockId = blockRegistryKeyForPalette(entry.registryId, entry.meta)
+  const blockId = blockRegistryKey(entry.registryId, entry.meta)
   if (blockId === 'air' || entry.registryId === 'air') {
     return {
       ok: false,
@@ -200,7 +206,7 @@ export interface KernelScenePickEntity {
 export function kernelPickEntitiesOf(input: {
   readonly hits: readonly PresenterHit[]
   readonly grid: KernelGridView
-  readonly layerPreview: LayerPreviewMode
+  readonly layerWorldY: number | null
 }): readonly KernelScenePickEntity[] {
   const seen = new Set<string>()
   const out: KernelScenePickEntity[] = []
@@ -210,7 +216,7 @@ export function kernelPickEntitiesOf(input: {
       point: hit.point,
       distance: hit.distance,
       grid: input.grid,
-      layerPreview: input.layerPreview,
+      layerWorldY: input.layerWorldY,
     })
     if (!out0.ok) continue
     const b = out0.block
