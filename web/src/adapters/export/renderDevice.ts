@@ -36,6 +36,11 @@
 import * as THREE from 'three'
 import { err, ok, unsupportedOperation, type Result } from '@/domain/errors'
 import type { RenderSettings } from '@/domain/captureSpec'
+import type { TexturePort } from '@/presentation/presenter'
+import { nextDeviceScope, type DeviceScope } from '@/presentation/resourceCache'
+import type { TextureResource } from '@/presentation/textureBinding'
+import { texturePortOf } from '@/presentation/textureUploadPort'
+import { createRendererTextureUpload } from './offscreenTextureUpload'
 
 /**
  * 一个已分配的离屏设备。
@@ -55,10 +60,35 @@ export interface OffscreenDevice {
   dispose(): void
 }
 
+/** 一次 `acquire` 的产出（`textures` 见下）。 */
+export interface OffscreenDeviceAcquisition {
+  readonly device: OffscreenDevice
+  readonly allocated: number
+  /**
+   * **本设备域自建的**纹理取用端口（#389 R3-②）。
+   *
+   * 它由 `acquire` 内造出（因此绑定的是**本次**设备的渲染器），厂商方把它交给
+   * `SnapshotOffscreenRenderPortOptions.textures` 注入点 —— 于是离屏呈现**永远**
+   * 用离屏上下文里的纹理，不向实时视口索取任何 GL 资源或纹理句柄。
+   *
+   * 缺省 = 该实现不提供纹理域（受控设备/测试替身），与"未注入 `textures`"同义
+   * （材质走中性色）。它是**可选**字段：既有注入实现无需改动即仍满足本接口。
+   */
+  readonly textures?: TexturePort
+}
+
 /** 离屏设备工厂（装配层注入；e2e 用 {@link createThreeOffscreenDevice}，测试用受控实现）。 */
 export interface OffscreenDeviceFactory {
   /** 按渲染设置分配一个设备；分配失败是结构化失败。 */
-  acquire(render: RenderSettings): Result<{ readonly device: OffscreenDevice; readonly allocated: number }>
+  acquire(render: RenderSettings): Result<OffscreenDeviceAcquisition>
+}
+
+/** {@link createThreeOffscreenDevice} 的装配参数。 */
+export interface ThreeOffscreenDeviceOptions {
+  /** 设备作用域（缺省由 `nextDeviceScope` 分配：一个渲染器一个）。 */
+  readonly scope?: DeviceScope
+  /** 本次装配的纹理资源表（五态链读面）；缺省 = 不消费纹理。 */
+  readonly resources?: readonly TextureResource[]
 }
 
 /**
@@ -67,9 +97,11 @@ export interface OffscreenDeviceFactory {
  * `allocated: 2` = 渲染器 + 渲染目标 两个句柄 —— 它进 `ExportJob` 的
  * `releasedFor`，使"分配了几个、释放了几个"成为可断言的事实。
  */
-export function createThreeOffscreenDevice(): OffscreenDeviceFactory {
+export function createThreeOffscreenDevice(
+  options: ThreeOffscreenDeviceOptions = {},
+): OffscreenDeviceFactory {
   return {
-    acquire(render: RenderSettings): Result<{ readonly device: OffscreenDevice; readonly allocated: number }> {
+    acquire(render: RenderSettings): Result<OffscreenDeviceAcquisition> {
       const width = render.width
       const height = render.height
       if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
@@ -97,6 +129,14 @@ export function createThreeOffscreenDevice(): OffscreenDeviceFactory {
       if (transparent) renderer.setClearColor(0x000000, 0)
       else renderer.setClearColor(render.background, 1)
 
+      // ── 设备域自建（#389 R3-② 的裁决②落地处）────────────────────────────────
+      // 上传端口在这里造出：它捕获的是**本次 acquire 的渲染器** ⇒ "谁拥有 GL 上下文，
+      // 谁就是实例化者"。装配方拿到的只是冻结呈现接口（`TexturePort`），
+      // 而**没有**任何跨模块入口能拿到本渲染器或 `THREE.Texture` 句柄。
+      const deviceScope = options.scope ?? nextDeviceScope('offscreen-export')
+      const upload = createRendererTextureUpload(deviceScope, renderer)
+      const textures = texturePortOf(upload, options.resources ?? [])
+
       const scene = new THREE.Scene()
       scene.background = transparent ? null : new THREE.Color(render.background)
       // 呈现层用 `MeshBasicMaterial`（见 `presentation/presenter#createMaterial`），
@@ -105,6 +145,7 @@ export function createThreeOffscreenDevice(): OffscreenDeviceFactory {
       let disposed = false
       return ok({
         allocated: 2,
+        textures,
         device: {
           renderAndRead(root: THREE.Object3D, camera: THREE.Camera): Result<Uint8Array> {
             if (disposed) return err(unsupportedOperation({ reason: 'offscreenDeviceDisposed' }))
@@ -150,6 +191,8 @@ export function createThreeOffscreenDevice(): OffscreenDeviceFactory {
           dispose(): void {
             if (disposed) return // 幂等（离屏端口在四条路径上都会调它）
             disposed = true
+            // 先释放本域纹理（此时渲染器仍在），再释放渲染器与渲染目标。
+            upload.dispose()
             target.dispose()
             renderer.dispose()
           },
