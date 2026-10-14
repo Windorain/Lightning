@@ -967,9 +967,34 @@ export class KernelSession {
     if (n <= 0) return 0
     const timeline = this.timeline()
     if (timeline.frameIndices.length === 0) return 0
-    const fps = framesPerSecond(this.playbackSnapshot.time.fps)
-    const seconds = fps > 0 ? this.playbackSnapshot.time.frame / fps : 0
-    return sampleStripFrameAt(timeline, seconds * 1000)
+    return sampleStripFrameAt(timeline, this.axisMsOf(this.playbackSnapshot.time))
+  }
+
+  /**
+   * 时间值 → **帧轴毫秒**（帧轴唯一的"时间 → 毫秒"换算点）。
+   *
+   * ## 为什么需要显式 epsilon 归整（实测缺陷，不是洁癖）
+   *
+   * 定位链是"毫秒 → 秒 → `time.frame` →（`frameIndex`）→ 秒 → 毫秒"的**往返**换算，
+   * 浮点末位误差让本该**恰好落在帧起点**的时刻变成 `431 − 1e-13` 一类值；而
+   * `domain/materials#sampleStripFrameAt` 内部用 `Math.floor` ⇒ 差 1e-13 就丢一整帧。
+   *
+   * 实测（`multiblock-ebf-2ch`，432 帧、每帧 1ms）：`seekFrame(431)` 的帧读面是 **430**
+   * —— 末帧永远定位不到；`seekFrame(1)/seekFrame(216)` 等中间帧恰好没有误差，故问题
+   * 只在特定帧上显形（这正是"重放/跳帧不一致"这类缺陷难被抓的原因）。
+   *
+   * ## 处置：对**换算**做显式归整，而不是对**结果**做钳制
+   *
+   * 归整到 1e-6 ms：远大于该往返的浮点误差（~1e-13），又远小于任何有意义的帧时长
+   * ⇒ 真正的亚毫秒时刻（如 430.4ms）仍落在它该在的帧里，**不改变**帧轴语义。
+   * 刻意**不**用"钳到 `n-1`"：那会把"定位到末帧"换成"定位到另一个错帧"，把缺陷藏起来。
+   */
+  private axisMsOf(time: TimeValue): number {
+    const fps = framesPerSecond(time.fps)
+    if (fps <= 0) return 0
+    const frame = Number.isFinite(time.frame) ? time.frame : 0
+    const ms = (frame / fps) * 1000
+    return Math.round(ms * 1e6) / 1e6
   }
 
   /** 帧总数（转发帧声明；供呈现判断"是否多帧"）。 */
@@ -1138,11 +1163,12 @@ export class KernelSession {
    */
   private channelSampleTime(): TimeValue {
     const time = this.playbackSnapshot.time
-    const fps = framesPerSecond(time.fps)
-    if (fps <= 0) return time
+    if (framesPerSecond(time.fps) <= 0) return time
     const total = totalDurationMs(this.timeline())
     if (total <= 0) return time
-    const ms = (time.frame / fps) * 1000
+    // 毫秒换算与 `frameIndex()` **共用** `axisMsOf`（同一归整口径）——否则通道取值的
+    // 相位与帧读面会在浮点边界上各偏一帧（"同一条轴"就成了两处换算各自解释）。
+    const ms = this.axisMsOf(time)
     return timeFromSeconds((((ms % total) + total) % total) / 1000, time.fps)
   }
 

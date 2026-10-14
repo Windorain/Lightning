@@ -35,7 +35,13 @@ import { fixturePath, readJson } from '@/context/__tests__/multiblockFixtureIo.m
 import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
 import { documentContent, type FrameAxis } from '@/domain/content'
 import { EMPTY_MULTIBLOCK_DECLARATION, type MultiblockDeclaration, type MultiblockSizeStep } from '@/domain/multiblockDocument'
-import { resolveEffectiveValue, type EffectiveValueLayer } from '@/domain/animation'
+import {
+  resolveEffectiveValue,
+  timeFromSeconds,
+  type EffectiveValueLayer,
+  type FrameRateSpec,
+  type TimeValue,
+} from '@/domain/animation'
 import { KernelSession } from '@/runtime/kernelSession'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 
@@ -243,10 +249,10 @@ describe('G6 ②：离散通道的时间入口（生产装配路径）', () => {
     expect(timeEntryViolations(loaded.session, exp), '正向判据必须全绿').toEqual([])
   })
 
-  it('正向（跳帧）：seekFrame(k) ⇒ 取值就是该帧读面所在帧声明的 min + stepIndex_k', async () => {
+  it('正向（跳帧）：seekFrame(k) ⇒ 取值就是第 k 帧声明的 min + stepIndex_k', async () => {
     const loaded = await loadProduction('multiblock-ebf-2ch')
     const exp = expectationOf(loaded)
-    const sampled = [0, 1, 2, 3, Math.floor(exp.steps.length / 2)]
+    const sampled = [0, 1, 2, 3, Math.floor(exp.steps.length / 2), exp.steps.length - 1]
     const values: number[] = []
     for (const k of sampled) {
       loaded.session.seekFrame(k)
@@ -255,18 +261,6 @@ describe('G6 ②：离散通道的时间入口（生产装配路径）', () => {
       expect(got, `seekFrame(${k})：期望 ${expectedValueAt(exp, k)}`).toBe(expectedValueAt(exp, k))
       values.push(got!)
     }
-    // 末帧是**既有浮点边界**的现场（与本批无关，见本用例末尾说明）：
-    // `seekFrame(n-1)` 走 `ms→秒→time.frame→再除回秒` 的两次换算，`floor` 在此丢 1 帧。
-    // 判据只断言**同轴不变式**（通道取值 = 该帧读面所在帧的声明值），不掩盖它也不依赖它。
-    const last = exp.steps.length - 1
-    loaded.session.seekFrame(last)
-    const lastFrame = loaded.session.frameIndex()
-    expect(lastFrame, '既有边界：末帧定位的帧读面允许早一帧（浮点 floor）').toBeGreaterThanOrEqual(last - 1)
-    expect(lastFrame).toBeLessThanOrEqual(last)
-    expect(
-      loaded.session.channelValues()[exp.sizeKey],
-      '同轴不变式：取值必须等于帧读面所在帧的声明值（不因边界 artifact 而错帧）',
-    ).toBe(expectedValueAt(exp, lastFrame))
     // 同一 stepIndex 的两帧必须给同一取值（阶跃，不是逐帧漂移）。
     // 抽样口径：每个 stepIndex 取**前两个**帧下标（全配对是 432² 次定位，判据不必那么贵）。
     const framesByStep = new Map<number, number[]>()
@@ -506,11 +500,7 @@ describe('G6 ② 负对照 b：余项机械记账', () => {
     const contentSide: number[] = []
     for (const k of sampled) {
       loaded.session.seekFrame(k)
-      // ⚠️ 本行先按"既有浮点边界"放宽 ±1（末帧早一帧，与本批无关的既有缺陷）；
-      // 同批 `seekFrame` 修法落地后收紧为 `.toBe(k)`，差异即修复证据。
-      const landed = loaded.session.frameIndex()
-      expect(landed, `内容侧：seekFrame(${k}) 必须落在帧 ${k}（或既有边界下的 ${k - 1}）`).toBeGreaterThanOrEqual(k - 1)
-      expect(landed, `内容侧：seekFrame(${k}) 不得越过请求帧`).toBeLessThanOrEqual(k)
+      expect(loaded.session.frameIndex(), `内容侧：seekFrame(${k}) 必须恰好落在帧 ${k}`).toBe(k)
       const got = loaded.session.channelValues()['height']
       expect(got, `内容声明在场时必须用**内容**的 min+stepIndex（=${11}），实测 ${String(got)}`).toBe(11)
       expect(got, `不得用装配面侧的值（${expectedValueAt(faceExp, k)}）`).not.toBe(expectedValueAt(faceExp, k))
@@ -537,13 +527,11 @@ describe('G6 ② 负对照 b：余项机械记账', () => {
     faceOnly.setAssemblyFace(face)
     for (const k of sampled) {
       faceOnly.seekFrame(k)
-      const landed = faceOnly.frameIndex()
-      expect(landed, `装配面侧：seekFrame(${k}) 必须落在帧 ${k}（或既有边界下的 ${k - 1}）`).toBeGreaterThanOrEqual(k - 1)
-      expect(landed).toBeLessThanOrEqual(k)
+      expect(faceOnly.frameIndex(), `装配面侧：seekFrame(${k}) 必须恰好落在帧 ${k}`).toBe(k)
       expect(
         faceOnly.channelValues()['height'],
-        `内容声明缺省时必须用**装配面投影**的 min+stepIndex（帧 ${landed} ⇒ ${expectedValueAt(faceExp, landed)}）`,
-      ).toBe(expectedValueAt(faceExp, landed))
+        `内容声明缺省时必须用**装配面投影**的 min+stepIndex（帧 ${k} ⇒ ${expectedValueAt(faceExp, k)}）`,
+      ).toBe(expectedValueAt(faceExp, k))
     }
   })
 
@@ -590,5 +578,64 @@ describe('G6 ② 负对照 b：余项机械记账', () => {
     ).toEqual(['21'])
     // 且这一侧确实**不是**装配面算术（否则上面几条会因为"两侧恰好相等"而失去区分力）。
     expect(faceExp.min, '前提：装配面侧的 min 与内容侧不同（否则本负对照无区分力）').not.toBe(21)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 附：帧定位的换算必须**单点归整**（既有缺陷的判据；见 `KernelSession#axisMsOf`）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('G6 附：帧定位（`seekFrame` → 帧读面）的换算单点归整', () => {
+  /** 毫秒 → 时间值（走生产换算 `domain/animation#timeFromSeconds`，不在判据里自造换算）。 */
+  const atMs = (ms: number, fps: FrameRateSpec): TimeValue => timeFromSeconds(ms / 1000, fps)
+
+  it('三处对照：首帧 / 中间帧 / 末帧 —— 帧读面所在帧必须**恰好**是请求帧', async () => {
+    const loaded = await loadProduction('multiblock-ebf-2ch')
+    const exp = expectationOf(loaded)
+    const n = exp.steps.length
+    for (const k of [0, 1, 2, Math.floor(n / 2), n - 2, n - 1]) {
+      loaded.session.seekFrame(k)
+      expect(loaded.session.frameIndex(), `seekFrame(${k}) 后帧读面必须恰好是 ${k}`).toBe(k)
+      expect(
+        loaded.session.channelValues()[exp.sizeKey],
+        `定位到帧 ${k} 时通道取值必须是 ${expectedValueAt(exp, k)}`,
+      ).toBe(expectedValueAt(exp, k))
+    }
+  })
+
+  it('全量往返：逐帧"定位 → 取回时间 → 再吐回生产时间源"必须仍是同一帧', async () => {
+    const loaded = await loadProduction('multiblock-ebf-2ch')
+    const exp = expectationOf(loaded)
+    const n = exp.steps.length
+    const broken: string[] = []
+    for (let k = 0; k < n; k += 1) {
+      loaded.session.seekFrame(k)
+      const landed = loaded.session.frameIndex()
+      if (landed !== k) broken.push(`${k}→${landed}`)
+      // 把该时刻原样喂回生产时间源（拖动/跳帧/重放都会走这条往返）。
+      const t = loaded.session.playback().time
+      loaded.session.seekTime(t)
+      const again = loaded.session.frameIndex()
+      if (again !== k) broken.push(`往返 ${k}→${again}`)
+    }
+    // 既有双换算在 432 帧夹具上会给出 `431→430`（末帧永远定位不到）；单点归整后必须 0 偏差。
+    expect(broken, `全量 ${n} 帧逐帧定位必须 0 偏差（实测偏差帧：${broken.slice(0, 8).join(', ')}）`).toEqual([])
+  })
+
+  it('不变更帧轴语义：帧中/边界仍按半开区间，亚毫秒时刻不被归整吞掉', async () => {
+    const loaded = await loadProduction('multiblock-ebf-2ch')
+    const fps = loaded.session.playback().time.fps
+    /** 该夹具每帧的毫秒数（从生产帧轴读，不在判据里复刻归一化）。 */
+    const dwell = loaded.frameAxis.frames[0]?.durationMs ?? 1
+    // 末帧的帧中 / 帧尾附近：只要没到下一帧起点，就必须仍在**末帧**（归整不得把它推到下一帧）。
+    const lastStart = (loaded.frameAxis.frames.length - 1) * dwell
+    loaded.session.seekTime(atMs(lastStart + dwell / 2, fps))
+    expect(loaded.session.frameIndex(), '末帧的帧中必须仍在末帧').toBe(loaded.frameAxis.frames.length - 1)
+    const justBefore = lastStart + dwell - 1e-4
+    loaded.session.seekTime(atMs(justBefore, fps))
+    expect(loaded.session.frameIndex(), '帧尾亚毫秒处不得被归整推到下一帧').toBe(loaded.frameAxis.frames.length - 1)
+    // 帧 0 的帧中（归整不能把它推回上一帧或推到下一帧）。
+    loaded.session.seekTime(atMs(dwell / 2, fps))
+    expect(loaded.session.frameIndex(), '首帧的帧中必须仍在首帧').toBe(0)
   })
 })
