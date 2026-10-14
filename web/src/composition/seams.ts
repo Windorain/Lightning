@@ -757,6 +757,58 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '`src/operators/operatorRegistry.ts` 与 `src/operators/modalOperatorWrapper.ts`'
       + ' 不再包旧栈撤销 ⇒ 届时删除本条登记。',
   }),
+  /**
+   * **R1-β① C7 登记（结构债）**：旧层 `shared/viewport/useViewportRuntime.ts`
+   * **值导入装配根 `composition/`**（向上依赖）。
+   *
+   * ## 为什么这是债（而不是"闸门没报所以没事"）
+   *
+   * `kernel-legacy-isolation.test.ts` 的判定轴是「**来源**是否为旧层 → **目标**是否为内核」
+   * （`isOldLayerTarget`，该文件 206-211 行）；而 `composition/` 既不在 `OLD_LAYERS`
+   * 也不在 `KERNEL_FILES`（装配根，`legacySources: []`）⇒ **该轴对这一类依赖恒不判**。
+   * 装配根依赖所有层，"被所有层依赖"是它的反向。`useViewportRuntime` 现在值导入其 5 个模块
+   * （`PresenterSession`、`createViewportTexturePort`、`textureResourcesOf`、
+   * `kernelAnnotationInputs`、`sceneSeconds`——最后一项是 C7 新增），即旧层向上依赖装配根。
+   *
+   * ## 为什么暂不整批改注入（诚实说明，不是"工作量大"）
+   *
+   * 正解形态是**注入**（本文件本就注入式：C5 已把 `docOverride ?? legacyRenderSource()`
+   * 的回落改成必填 `renderDocRef`）—— 呈现会话/纹理端口/注解输入应由装配根构造后**下行**。
+   * 但那要先定"由谁构造"：两个生产宿主（`runtime/host/workbenchHost.ts`、
+   * `runtime/host/embedHost.ts`）已 import `composition/*`，故构造点应落在宿主装配边
+   * （`Host#createViewportPresenter`），而 `Host` 是 `runtime/host.ts` 的接口、
+   * 其两个生产调用方是 Vue 组件 ⇒ 一次**跨三层的接口迁移**，
+   * 与 C7 段二（画面生产者切换）同文件同批动会互相掩盖回归信号。
+   * ⇒ 本批**只登记，不再新增第二条**；C7 之后首个动该文件的批次按注入改造。
+   */
+  Object.freeze({
+    id: 'shared-viewport-upward-imports-assembly-root',
+    files: Object.freeze(['src/shared/viewport/useViewportRuntime.ts']),
+    newTrack:
+      '装配根**注入**：`useViewportRuntime` 的呈现会话/纹理端口/注解输入由调用方（宿主装配边）'
+      + '构造后经 options 下行，该文件对 `composition/` 的**值导入为 0**。',
+    oldTrack:
+      "`src/shared/viewport/useViewportRuntime.ts` 直接 import `@/composition/presenterSession`、"
+      + '`@/composition/viewportTexturePort`、`@/composition/kernelTextureResources`、'
+      + '`@/composition/kernelAnnotationInputs`、`@/composition/kernelRuntime`（`sceneSeconds`），'
+      + '并就地 `new PresenterSession(...)`。',
+    blocker:
+      '构造点归属未定：候选落点是 `src/runtime/host.ts` 的 `Host` 接口'
+      + '（由 `HostBase` 实现，子类 `workbenchHost`/`embedHost` 已 import `composition/*`），'
+      + '而该接口的生产调用方是 Vue 组件（`shared/viewport/EmbedViewport.vue`、'
+      + '`workbench/components/WorkbenchViewport.vue`）⇒ 改注入是跨三层接口迁移，'
+      + '须与"画面生产者切换"分开批次以保留各自回归信号。',
+    closureCoverage: 'in-closure',
+    owner: Object.freeze({ p: 'R1-β①', issue: 387, duty: '端口切换与写路径内核化（撤销权威统一）' }),
+    exitCondition:
+      '**（甲）登记条件 —— ⏳ 未成立**：`Host`（或等价装配边）有具名的呈现在装配面'
+      + '（例如 `createViewportPresenter(regionId)`），且 `useViewportRuntime` 的 options 里'
+      + '该依赖是**必填**（与 `renderDocRef` 同形：省略即类型错误，不存在回落）。\n'
+      + "**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：对 `src/shared/viewport/useViewportRuntime.ts`\n"
+      + "扫 `from '@/composition/`（口径：**先剥注释与字符串字面量**再匹配 import 声明；"
+      + '本文件头注释里出现过 `composition/` 字样，裸 `grep` 会误判）⇒ 命中数必须为 **0**。\n'
+      + '**只有（甲）不算退出。**',
+  }),
 ])
 
 /** 按 id 取登记项（未登记返回 `undefined`，由调用方决定是缺口还是缺陷）。 */
