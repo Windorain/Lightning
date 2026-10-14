@@ -136,6 +136,11 @@ export const LAYER_DESTINATIONS = [
       'adapters/export/offscreenRenderPort.ts',
       'adapters/export/encoderPort.ts',
       'adapters/export/snapshotExportJob.ts',
+      // G1（#385）覆盖审计：**曾经脱离执行面**的文件（GF-23 同族 —— 部分迁移层里新落的内核
+      // 文件若不登记，就静默脱离 `no-private-cross-layer` / `core-no-vue-three` 等闸门，
+      // 而"闸门没报错"被误读成"结构对"）。本文件 475 行、含跨层 import，落地时未登记 ⇒
+      // 判定面里查无此文件（审计证据见 `gate-coverage-audit.test.ts`）。
+      'adapters/files/multiblockDeclaration.ts',
     ],
   },
   {
