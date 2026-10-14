@@ -37,9 +37,11 @@ import {
   propertyKey,
   resolveEffectiveValue,
   sampleTrack,
+  timeFromSeconds,
   validateParameterSet,
   type AnimationTrack,
   type EffectiveValueLayer,
+  type FrameRateSpec,
   type ParameterCandidate,
   type ParameterConstraint,
   type TimeValue,
@@ -507,12 +509,79 @@ export function channelSetOfDeclaration(
   })
 }
 
+/**
+ * 帧轴上的**尺寸型通道阶跃关键帧**（纯函数；离散值 ⇒ 阶跃，不插值）。
+ *
+ * ## 它凭什么能从帧清单反演出通道取值（不是猜）
+ *
+ * 契约 §5.4 明文：「骨架尺寸型**已由 `frame.stepIndex` 完成**」；解析器另有一条
+ * 可执行判据 `sizeSteps.length === 通道 max − min + 1`
+ * （`context/parsers/multiblockDocument.ts:739`）⇒ 阶下标与通道取值是一一对应的，
+ * 故 `取值 = min + stepIndex` 是**双射**而不是约定俗成的猜测。
+ *
+ * ## 时间轴：帧起点（半开区间），与帧采样器同语义
+ *
+ * 第 i 个关键帧的时间 = 前 i 帧停留时长之和（`timeFromSeconds` 换算，与
+ * `KernelSession#frameIndex` 的 `seconds = time.frame / fps` 同式）；阶跃点落在
+ * 帧**起点**上，于是与 `domain/materials#sampleStripFrameAt` 的半开区间
+ * 「`[start, start+dur)` 归本项、边界取下一项」逐点一致 —— 两条读面同一根轴。
+ *
+ * ## 越界 ⇒ 显式失败（不外推、不钳制、不伪造）
+ *
+ * `min + stepIndex > max` 是**声明自相矛盾**（骨架阶数与通道域长度不符）。
+ * 此时返回错误而不是钳到 `max`：钳制会让"声明有缺陷"变成"看起来正常的取值"。
+ */
+export function sizeChannelStepKeys(
+  set: ChannelSet,
+  channelKey: string,
+  sizeChannel: string,
+  frameSteps: readonly number[],
+  frameDurationsMs: readonly number[],
+  fps: FrameRateSpec,
+): Result<readonly { readonly time: TimeValue; readonly value: number }[]> {
+  const ch = findChannel(set, channelKey)
+  if (!ch) return err(invalidValue({ reason: 'channelNotDeclared', channel: channelKey, channelSet: set.id }))
+  if (channelKey !== sizeChannel) {
+    return err(
+      invalidValue({
+        reason: 'channelIsNotSizeChannel',
+        channel: channelKey,
+        sizeChannel,
+        channelSet: set.id,
+      }),
+    )
+  }
+  const n = Math.min(frameSteps.length, frameDurationsMs.length)
+  if (n <= 0) return err(invalidValue({ reason: 'channelTimeAxisEmpty', channel: channelKey, channelSet: set.id }))
+  const min = ch.domain.min ?? 0
+  const max = ch.domain.max ?? Number.POSITIVE_INFINITY
+  const keys: { time: TimeValue; value: number }[] = []
+  let ms = 0
+  for (let i = 0; i < n; i++) {
+    const value = min + frameSteps[i]!
+    if (value > max) {
+      return err(
+        invalidValue({
+          reason: 'channelStepOutOfDomain',
+          channel: channelKey,
+          index: i,
+          value,
+          max,
+          channelSet: set.id,
+        }),
+      )
+    }
+    keys.push(Object.freeze({ time: timeFromSeconds(ms / 1000, fps), value }))
+    ms += frameDurationsMs[i]!
+  }
+  return ok(Object.freeze(keys))
+}
+
 /** 通道属性键（供文档的驱动集合与缓存键使用；与 `propertyKey` 同一算法）。 */
 export function channelPropertyKey(set: ChannelSet, channelKey: string): Result<string> {
   const ref = channelToPropertyRef(set, channelKey)
   if (!ref.ok) return err(ref.error)
   return ok(propertyKey(ref.value))
 }
-
 /** 未使用占位：保持 `DomainError` 类型可达（下游 `import type`）。 */
 export type { DomainError }
