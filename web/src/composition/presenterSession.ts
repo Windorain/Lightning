@@ -47,6 +47,7 @@ import type { Document } from '@/domain/document'
 import type { TimeValue as DomainTimeValue } from '@/domain/animation'
 import type { EvaluationKey } from '@/presentation/evaluationKey'
 import type { MaterialDescriptor } from '@/presentation/evaluationKey'
+import type { PresentationInputs } from '@/presentation/evaluationKey'
 import { compileScene, type CompiledScene } from '@/presentation/compileScene'
 import { PickIndex, evaluateStalePick, type PickResolution } from '@/presentation/pickingIndex'
 import { BatchedPresenter, type TexturePort } from '@/presentation/presenter'
@@ -186,6 +187,21 @@ export class PresenterSession {
   private readonly root = new THREE.Group()
   private lastAnnotations: AnnotationCompiled | null = null
   private lastOutline: { plan: OutlinePlan; style?: OutlineStyle } | null = null
+  /**
+   * 上次编译**实际用过**的呈现输入（`kernelPresentationInputs` 的产物）。
+   *
+   * ## 为什么必须有它（C9 描边几何承载的供源）
+   *
+   * `presentation/outlinePlan#OutlineGeometrySource.boundsOf` / `topologyVersionOf`
+   * 的权威来源就是 `EvaluatedPrimitive` 的 `bounds` / `geometry.version`
+   * —— 而那份图元表只在这里产出（`applyIfChanged` 内）。
+   * 若让描边侧**自己再算一遍** `kernelPresentationInputs`，就会出现第二份
+   * "本帧图元长什么样"的判定，而它与真正画出来的批次漂移的后果是
+   * 「描边框住的对象比画出来的多/少」且没有任何判据会响。
+   *
+   * ⇒ 记住本次输入，供描边端口取 `bounds`/版本（**同一份**数据，不是复刻）。
+   */
+  private lastInputs: PresentationInputs | null = null
 
   constructor(options: PresenterSessionOptions) {
     this.presenter = new BatchedPresenter({
@@ -213,6 +229,16 @@ export class PresenterSession {
   /** 当前生效的求值键（A12 比对基准；`null` = 尚未 apply 过）。 */
   get activeKey(): EvaluationKey | null {
     return this.currentKey
+  }
+
+  /**
+   * 上次编译**实际用过**的呈现输入（见 `lastInputs` 的说明；未编译过 ⇒ `null`）。
+   *
+   * 消费方是描边几何端口（`composition/kernelOutlinePlanPort`）：
+   * `object` 目标的 `boundsOf` 与元素目标的 `topologyVersionOf` 都取自这里的图元。
+   */
+  inputsSnapshot(): PresentationInputs | null {
+    return this.lastInputs
   }
 
   /** 呈现器统计（诊断 / A18/A19 观测面）。 */
@@ -273,6 +299,9 @@ export class PresenterSession {
       layerWorldY: this.layerWorldY,
     })
     const compiled = compileScene(produced.inputs)
+    // 记住本次**实际**图元表（`bounds`/几何版本的供源，见 `lastInputs`）——
+    // 与下面的编译分支无关：编译失败时图元仍是"本帧的真实产物"，如实保留。
+    this.lastInputs = produced.inputs
     if (!compiled.ok) {
       // 失败**不清空**上一次的呈现产物：清空会让画面闪空（"编译失败 ⇒ 什么都看不见"），
       // 而调用方拿到的是显式错误 —— 处置权在它手里。

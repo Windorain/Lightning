@@ -299,8 +299,28 @@ export function kernelGridOf(doc: Document | undefined, frameIndex: number): Ker
   return gridViewOfPayload(payload)
 }
 
-/** 按 `scene.order` 的出现序取第 `frameIndex` 个 `blockGrid` 载荷。 */
-function blockGridPayloadAt(doc: Document, frameIndex: number): BlockGridPayload | null {
+/**
+ * 第 `frameIndex` 帧的 `blockGrid` **对象 id**（`null` = 没有）。
+ *
+ * ## 为什么它必须与 `kernelGridOf` **同源**（而不是调用方按命名猜）
+ *
+ * "第 N 帧的网格属于哪个内核对象"是**一个事实**：`kernelGridOf` 用它取载荷，
+ * 而描边规划的 `objectId`（`presentation/outlinePlan#OutlineTarget.objectId`）
+ * 必须指**同一个**对象 —— 否则"描边画在另一个对象上"而没有任何判据会响。
+ *
+ * ⇒ 与 `blockGridPayloadAt` 共用**同一次遍历**（`blockGridObjectAt`），
+ * `frame-<i>` 命名约定在这里同样**不**被依赖。
+ */
+export function kernelGridObjectIdOf(doc: Document | undefined, frameIndex: number): string | null {
+  return blockGridObjectAt(doc, frameIndex)?.objectId ?? null
+}
+
+/** 第 `frameIndex` 帧的 `blockGrid`：**唯一次**遍历（id 与载荷一起给，两处不可能漂移）。 */
+function blockGridObjectAt(
+  doc: Document | undefined,
+  frameIndex: number,
+): { readonly objectId: string; readonly payload: BlockGridPayload } | null {
+  if (doc === undefined) return null
   if (!Number.isInteger(frameIndex) || frameIndex < 0) return null
   let seen = 0
   for (const objectId of doc.scene.order) {
@@ -308,10 +328,15 @@ function blockGridPayloadAt(doc: Document, frameIndex: number): BlockGridPayload
     if (obj === undefined || obj.type !== 'block') continue
     const data = findObjectData(doc.scene, obj.dataId)
     if (data === undefined || data.payload.kind !== 'blockGrid') continue
-    if (seen === frameIndex) return data.payload as unknown as BlockGridPayload
+    if (seen === frameIndex) return { objectId, payload: data.payload as unknown as BlockGridPayload }
     seen += 1
   }
   return null
+}
+
+/** 按 `scene.order` 的出现序取第 `frameIndex` 个 `blockGrid` 载荷。 */
+function blockGridPayloadAt(doc: Document, frameIndex: number): BlockGridPayload | null {
+  return blockGridObjectAt(doc, frameIndex)?.payload ?? null
 }
 
 /**

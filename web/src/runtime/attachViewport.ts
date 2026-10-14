@@ -16,6 +16,14 @@ export interface SelectionOutlineBind {
   gridCenterWorld: (pos: { x: number; y: number; z: number }) => { x: number; y: number; z: number } | null
   /** B-1 部件级 mask 通道（缺省 ⇒ 整格几何，既有行为） */
   getPartMaskGeometry?: import('@/render/mesh/selectionHighlightProvider').MaskGeometrySource
+  /**
+   * **R1-A C9：描边规划端口**（由调用方/装配边注入）。
+   *
+   * 给定时，hover/点选描边的 mask 由 `presentation/outlinePlan` 的生产实现产出
+   * （见 `runtime/drw#bindSelectionOutline`）。此处**不** import `composition/`：
+   * 本文件属旧层，值依赖只能由装配边下行（注入纪律）。
+   */
+  outlinePlans?: import('@/runtime/drw').OutlinePlanPort
   extraMaskMeshes?: Ref<THREE.Mesh[]> | import('vue').ShallowRef<THREE.Mesh[]>
 }
 

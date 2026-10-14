@@ -26,8 +26,32 @@ import {
 import type { BlockRef, SelectedEntity } from '@/context/selection'
 import { OUTLINE_MASK_LIMIT, applyOutlineMaskBudget } from '@/presentation/outlineBudget'
 import { SelectionHighlightProvider } from '@/render/mesh/selectionHighlightProvider'
+import { plansToMaskMeshes } from '@/render/mesh/outlinePlanMasks'
 import { bindViewportCameraSync } from '@/runtime/viewportCamera'
 import type { ViewportCameraState } from '@/runtime/viewportCamera'
+
+/**
+ * 描边规划端口（**结构类型**，与 `composition/kernelOutlinePlanPort` 的实现同形）。
+ *
+ * ## 为什么不直接 import `composition/kernelOutlinePlanPort`
+ *
+ * 本文件属**旧层**（`runtime/`），而 `composition/` 是装配根。旧层持有装配根的
+ * **值**依赖正是接缝 `shared-viewport-upward-imports-assembly-root` 要退役的方向。
+ * 用结构类型让"DRW 需要什么"成为**一条可读的接口**，注入方（宿主装配边）负责
+ * 提供实现 —— 与 C9/C10 的注入纪律一致（本处**不**新增门面包旧核心的边）。
+ */
+export interface OutlinePlanPort {
+  planPicks(picks: readonly OutlinePickRef[]): {
+    readonly plans: readonly import('@/presentation/outlinePlan').OutlinePlan[]
+    readonly skipped: readonly import('@/presentation/outlinePlan').OutlineSkip[]
+  }
+}
+
+/** 一次拾取引用（格 + 可选部件；与 `BlockRef` 同一语义面）。 */
+export interface OutlinePickRef {
+  readonly pos: { readonly x: number; readonly y: number; readonly z: number }
+  readonly partLocalId?: string
+}
 
 export type { DrwComputed } from '@/runtime/drwMeshPipeline'
 
@@ -81,6 +105,14 @@ export class DRW {
     shown: 0,
     dropped: 0,
   })
+  /**
+   * **描边规划的跳过原因**（C9；空数组 = 无跳过）。
+   *
+   * 与 `outlineMaskStats` 的分工：后者是"画出来多少"（预算截断），本字段是
+   * "为什么没画"（过期求值 / 缺几何 / 目标不完整）。分开是因为处置不同：
+   * 截断要提示"只显示前 N 处"，跳过要提示"选中了但没高亮、因为……"。
+   */
+  readonly outlineSkipped = ref<readonly string[]>([])
   readonly computed: DrwComputed
   readonly textureCache: Readonly<ShallowRef<MaterialLibraryApi | null>>
 
@@ -189,6 +221,15 @@ export class DRW {
      * 否则整格几何（既有行为）。hover 描边与点选高亮共用此入口。
      */
     getPartMaskGeometry?: import('@/render/mesh/selectionHighlightProvider').MaskGeometrySource
+    /**
+     * **R1-A C9：描边规划端口**（生产实现 = `composition/kernelOutlinePlanPort`）。
+     *
+     * 给定时，mask 由 `presentation/outlinePlan#planOutlines` 产出（图元 = 格四边形 /
+     * 部件盒 / 1×1×1 兜底盒），而**不**再走 `SelectionHighlightProvider` 的 legacy
+     * 决策分支 ⇒ "该不该画、画什么形状"只有一处判定（政策 = `BASELINE_OUTLINE_POLICY`，
+     * 即迁移前行为）。未给定 ⇒ 维持 legacy 通道（调用方决定的过渡态）。
+     */
+    outlinePlans?: OutlinePlanPort
     /** Embed 侧栏按 blockId 高亮等附加遮罩 */
     extraMaskMeshes?: Ref<THREE.Mesh[]> | ShallowRef<THREE.Mesh[]>
   }): void {
@@ -197,7 +238,32 @@ export class DRW {
       const items = options.selectionItems.value
       const hov = options.highlightOnHover.value ? options.hoveredBlock.value : null
       let masks: THREE.Mesh[] = []
-      if (!hov) {
+      if (options.outlinePlans !== undefined) {
+        // ── C9 生产路径：拾取引用 → 规划器 → mask ──
+        const picks: OutlinePickRef[] = []
+        const pushEntity = (ref: { pos: { x: number; y: number; z: number }; partLocalId?: string }): void => {
+          picks.push(ref.partLocalId === undefined ? { pos: ref.pos } : { pos: ref.pos, partLocalId: ref.partLocalId })
+        }
+        if (hov) {
+          // 同格不同部件不是同一个悬停目标（B-1：部件身份参与重复判定）
+          const dup = [...items].some(
+            e => e.kind === 'block'
+              && e.ref.pos.x === hov.pos.x && e.ref.pos.y === hov.pos.y && e.ref.pos.z === hov.pos.z
+              && e.ref.partLocalId === hov.partLocalId,
+          )
+          if (!dup) pushEntity(hov)
+        }
+        if (items.size > 0 && items.size <= OUTLINE_MASK_LIMIT) {
+          for (const e of items) if (e.kind === 'block') pushEntity(e.ref)
+        }
+        const outcome = options.outlinePlans.planPicks(picks)
+        masks = plansToMaskMeshes(outcome.plans)
+        // 跳过是**真实事实**（过期求值/缺几何/目标不完整），必须可见 —— 与
+        // `presenterErrors` 同一纪律（不静默当"画好了"）。
+        this.outlineSkipped.value = outcome.skipped.length === 0
+          ? []
+          : outcome.skipped.map((s) => `${s.kind}:${s.detail}`)
+      } else if (!hov) {
         if (items.size > 0 && items.size <= OUTLINE_MASK_LIMIT) {
           masks = this.highlightProvider.build(
             items,
