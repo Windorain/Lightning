@@ -44,6 +44,7 @@ import { localPropertyOf } from '@/application/contracts'
 import { KERNEL_ANNOTATION_TYPE } from '@/application/kernel-properties'
 import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
 import { annotationObjectIdOf } from '@/runtime/annotationRead'
+import { cellTooltipTextAt } from '@/runtime/tooltipRead'
 import type { DocumentMetadata } from '@/domain/content'
 import { NO_CHANGE } from '@/domain/identity'
 import {
@@ -267,10 +268,15 @@ export function readRawValue(ctx: Context, ref: PropertyRef): Result<unknown> {
       case 'cellTooltip': {
         // #301 P10f D3（R6）：逐格说明走**自己的**读面（侧表不在网格上 ⇒
         // `kernelGrid.tooltipAt` 在 legacy 分支无从回答，见 `runtime/gridRead` 文件头）。
+        //
+        // ⚠️ 必须经 `cellTooltipTextAt`：池是 `[z][row][col]`（row 0 = 顶部），
+        // 而本处拿到的是**世界坐标**。M1 P2 实测：直接 `grid[z][y][x]` 漏掉行翻转
+        // ⇒ 面板读到**镜像行那一格**的说明（选中 9,2,5 时显示空格子 ""，
+        // 而该格实际有"下面放置过滤传送带并黑名单标记"）。写侧一直是对的，
+        // 故症状是"写进去了但面板读不回"。
         const tips = ctx.cellTooltips()
-        const at = tips?.grid[z ?? 0]?.[y ?? 0]?.[x ?? 0]
-        if (at === undefined || at < 0) return ok('')
-        return ok(tips?.palette[at] ?? '')
+        if (tips === null) return ok('')
+        return ok(cellTooltipTextAt(tips, { x: x ?? 0, y: y ?? 0, z: z ?? 0 }))
       }
       default:
         return err(domainError('MissingTarget', { reason: 'property-not-registered', property: ref.property }))

@@ -64,6 +64,44 @@ export interface LegacyCellTooltips {
  * （`domain/cellContent` 判据 3），故必须能区分。`tooltipPoolOf` 已经是这个口径
  * （`entries.length === 0 ⇒ null`），本函数**透传**它、不重新判定。
  */
+/**
+ * 按**内核格坐标**（Y-up 世界坐标）从池里读一格说明文本。
+ *
+ * ## 为什么这个函数必须存在（M1 P2 运行期实测的"面板读到镜像行"）
+ *
+ * 池的编码是 `grid[z][row][col]` 且 **`row 0 = 顶部`**（`adapters/tooltipPool`
+ * 的 `row = height - 1 - y`），与文件格式同形。**写**侧（`setCellTooltip` 的 `cells`）
+ * 与**核**侧（`cellContent` 的格键）用的都是世界坐标，故任何"按世界坐标读池"的
+ * 消费点都必须做**同一个自逆翻转** —— 漏掉它就会读到**镜像那一行**的另一格。
+ *
+ * P2 实测（真实信封、非构造）：
+ * ```
+ * 面板坐标 = 9,2,5（= 内核格 x=9,y=2,z=5）
+ * 写入后：池 grid[5][3][9] = "MARKER-A"（写入落点正确，与文档网格逐格 diff 一致）
+ * 而 RNA 读面用 grid[z][y][x] = grid[5][2][9] ⇒ 读到 "" （另一格的空值）
+ * ```
+ * 表现为"选中一格、面板 Tooltip 恒为空，输入后仍然显示空"——**假象是"没写进去"**。
+ *
+ * 高度取**池自身**的行数：读的是池，就必须按池的编码反解；用外部尺寸
+ * （`kernelGrid().height`）会在"说明格未铺满整列"时与池的编码漂移
+ * （那一条已单独登记：`tooltipPoolOf` 按说明格包围盒推 `height`，
+ * 而装配侧 `assembleTooltipContent` 按 `sizeRow`，两者只在"最高一列有说明"时相等）。
+ */
+export function cellTooltipTextAt(
+  tips: LegacyCellTooltips,
+  cell: { readonly x: number; readonly y: number; readonly z: number },
+): string {
+  const slice = tips.grid[cell.z]
+  if (slice === undefined) return ''
+  const height = slice.length
+  if (height === 0) return ''
+  const row = height - 1 - cell.y
+  if (row < 0) return ''
+  const idx = slice[row]?.[cell.x]
+  if (idx === undefined || idx < 0) return ''
+  return tips.palette[idx] ?? ''
+}
+
 export function projectCellTooltipsToLegacy(doc: Document): LegacyCellTooltips | null {
   // 遍历序 = `scene.order`（与投影侧 `objectsInOrder(scene)` 同序：两者都是
   // `Scene.order` 的机械展开）。**不**按对象 id 排序 —— id 里有 `frame-<i>`

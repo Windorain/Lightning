@@ -125,7 +125,7 @@ const draftKind = computed<DraftKind | null>(() => {
 const epoch = ref(0)
 let unsubscribe: (() => void) | null = null
 
-function projection(): { draft: string; status: string; reason: string | null; composing: boolean; submittable: number | string | null } | null {
+function projection(): { draft: string; status: string; reason: string | null; composing: boolean; active: boolean; submittable: number | string | null } | null {
   // 读 epoch 建立依赖：会话广播 ⇒ 本 computed/函数重新求值
   void epoch.value
   const port = ctx?.wm.inputPort ?? null
@@ -134,18 +134,35 @@ function projection(): { draft: string; status: string; reason: string | null; c
 }
 
 /**
- * 显示文本：**输入层投影优先**（P7 权威），投影不可用时用 P2 的 `displayText`。
+ * 显示文本：**正在编辑时**取输入层投影（P7 权威），否则取 P2 的 `displayText`。
  *
- * ## 为什么还留回落（P10c #286 之后）
- *
- * `draftKind !== null` 但控件**尚未登记**时 `textProjection` 返回 `null`
- * （会话以 `focusin` 事实驱动），此时显示的是已提交值的格式化文本 —— 正是
- * "还没开始编辑"的正确显示。回落**不再**读草稿镜像（那份镜像已删除），
+ * 回落（P10c #286 之后）：`draftKind !== null` 但控件**尚未登记**时
+ * `textProjection` 返回 `null`（会话以 `focusin` 事实驱动），此时显示的是已提交值的
+ * 格式化文本 —— 正是"还没开始编辑"的正确显示。回落**不再**读草稿镜像（那份镜像已删除），
  * 故这里不可能出现"两个真相"。
+ *
+ * ## 为什么必须区分「正在编辑」与「结算后留存」（M1 P2 运行期实测）
+ *
+ * 结算（Enter/失焦）**不会**清掉会话里的文本：`blurControl` 把
+ * `displayValue` 与 `text` 一起置为已提交值（`domain/textDraft.ts` 的结算分支），
+ * 于是提交之后 `projection().draft !== ''` 仍成立。
+ *
+ * 若呈现端无条件以 `draft` 优先，则**外部内容变化**（Ctrl+Z / Ctrl+Shift+Z、
+ * 换选中格、换文档）时这份留存文本会盖住权威读面。实测（`temp/m1-p2/`）：
+ *
+ * ```
+ * 编辑 9,2,5 的 Tooltip ⇒ 输入框 "P2-X"，data-input-display "P2-X"
+ * Ctrl+Z（内核已回滚）⇒ data-input-display 回退为 "下面放置过滤传送带并黑名单标记"
+ *                       而输入框仍显示 "P2-X"     ← 画面不跟随
+ * ```
+ *
+ * 故判据是 `active`（= 获得焦点且未关闭）：只有它才表示"这份文本是用户的在途编辑"。
+ * 不这样做就只能靠"再点一下别处"去撞一次重读 —— 那正是 M1 操作卡第 4 步
+ * 「逐步撤销…画面不更新」列为失败形态的原因。
  */
 const shownText = computed(() => {
   const p = projection()
-  if (p !== null && p.draft !== '') return p.draft
+  if (p !== null && p.active && p.draft !== '') return p.draft
   return props.field.displayText
 })
 

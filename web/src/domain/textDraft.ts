@@ -644,6 +644,16 @@ export function draftProjection(control: TextDraftState): {
   readonly status: DraftParse['status']
   readonly reason: string | null
   readonly composing: boolean
+  /**
+   * 是否处于**活动编辑**（获得焦点且未关闭）。
+   *
+   * ⚠️ 呈现端必须用它区分「正在编辑的草稿」与「结算后仍留在会话里的文本」：
+   * `draft`（= `text`）在提交**之后**仍等于已提交值，若呈现端无条件以它优先，
+   * 那么外部内容变化（撤销/重做、换格、换文档）时那份留存文本会盖住权威读面
+   * —— M1 P2 实测：Ctrl+Z 已把文档改回旧值（`data-input-display` 同步回退），
+   * 输入框里却仍显示新值，即"画面不更新"。
+   */
+  readonly active: boolean
 } {
   return Object.freeze({
     controlId: control.controlId,
@@ -653,5 +663,6 @@ export function draftProjection(control: TextDraftState): {
     status: control.parse.status,
     reason: control.parse.status === 'complete' ? null : control.parse.reason,
     composing: control.composing,
+    active: control.active,
   })
 }
