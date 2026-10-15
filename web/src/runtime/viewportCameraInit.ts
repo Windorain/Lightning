@@ -1,0 +1,115 @@
+/**
+ * 视口相机**初始机位施加纪律** —— "每个视口、每份文档，一次"。
+ *
+ * ## 为什么需要它（M1 用户实测缺陷的根因落点）
+ *
+ * 缺陷：**在工作台里第一次编辑一格说明（或第一次移动方块），视口机位被复位回
+ * "装载后自动框选"的机位**，用户花时间调好的视角被丢弃。
+ *
+ * 运行期实测（探针 `zz-camera-rootcause.spec.ts`，读数见交付报告）：
+ *
+ * | 时刻 | 事实 |
+ * |---|---|
+ * | 装载后 | `cameras['r-viewport'].value` = fit 机位；`@ready` 第 1 次 |
+ * | 第一次编辑 | `contentRefreshTick` 自增 ⇒ DRW `applyContentRefresh` ⇒ `materialLibrary`（`drw.textureCache`）**瞬时变 null** |
+ * | 紧接着 | 视口模板的 `v-if="… && materialLibrary"` 变假 ⇒ `RenderEngineHost` **卸载 → 重挂** |
+ * | 重挂后 | `@ready` 第 2 次 ⇒ `attachViewport` ⇒ `OPERATOR_INIT_VIEWPORT_CAMERA` ⇒ **重新 fit** |
+ * | 第二次编辑 | 同一路径**不再变空** ⇒ 不再复位 |
+ *
+ * 即：**"重新施加初始机位"被绑在了"宿主被重新挂载"这一事件上**，而宿主重挂的
+ * 触发面是**内容投影**（编辑/移动都算）。内容变化只应更新画面，**不得**重新框选
+ * 用户已调整的机位。
+ *
+ * ## 纪律（本模块的唯一出口）
+ *
+ * 施加初始机位（自动框选）**只允许**在两种情况下发生：
+ *
+ *  1. 该视口**还没有**逻辑相机状态（`cameras[key].value === null`）；
+ *  2. 或者**换了一份文档** —— 由**窄信号** `documentRevision` 表达。
+ *
+ * ### ⚠️ 为什么用 `documentRevision` 而不是 `contentRefreshTick`
+ *
+ * 两者都不是"事件"，但**语义不同**（`runtime/main.ts` 的写入者表已钉住）：
+ *
+ * | 信号 | 自增点 | 语义 |
+ * |---|---|---|
+ * | `documentRevision`（**窄**） | **仅** `replaceDoc(next, 'document')` | "**换了一份文档**" |
+ * | `contentRefreshTick`（宽） | `replaceDoc` **与** `requestContentRefresh` | "内容**可能**变了" |
+ *
+ * 逐格说明编辑、移动方块走的是**内核投影**（`setDocument(next,'content-sync')`）
+ * ⇒ 只推宽信号。若用宽信号做本判据，**每一次投影都会重新框选** ——
+ * 那正是 `runtime/main.ts:182-196` 明文记载的"修前形态"，已被修过一次；
+ * 本模块**不得**把它走回去。
+ *
+ * 同一个纪律在嵌入视口侧是 `EmbedViewport.vue` 的 `didInitCamera` +
+ * `watch(getDocumentRevision)`（`shared/viewport/EmbedViewport.vue:151-165`）。
+ * 本模块是它在**装配边**（宿主挂载路径）的对应物：判据只此一处，
+ * 两个宿主（工作台 / 嵌入）共用同一条纪律，不各自在组件回调里记状态。
+ *
+ * ## 纯函数 + 台账
+ *
+ * 判定本身是纯函数（显式输入、不改输入、无 IO）；"某个 region 上次施加时是哪份文档"
+ * 是**状态**，由 {@link createViewportCameraInitLedger} 持有，挂在该 Context 的
+ * 视口管理器上（`runtime/viewportManager.ts`）—— 于是它在
+ * `unregister`/`reset`（视口真的被拆解）时随槽位一起清除：**关掉再打开一个 Area
+ * 仍会重新框选**（与改动前的行为一致），而"同一份文档内的内容投影"不会。
+ */
+
+/** 一次"是否施加初始机位"判定的全部输入。 */
+export interface InitialCameraClaimInput {
+  /** 当前文档身份（窄信号 `ctx.getDocumentRevision()`，**只**在换文档时变）。 */
+  readonly documentRevision: number
+  /** 本视口上次施加初始机位时的文档身份；`null` = 从未施加过。 */
+  readonly lastAppliedDocumentRevision: number | null
+  /** 该视口的逻辑相机**是否已有值**（`cameras[key].value !== null`）。 */
+  readonly hasCameraState: boolean
+}
+
+/**
+ * 该视口此刻**是否应当**施加初始机位（自动框选）。
+ *
+ * 两条充分条件（见模块头）：没有相机状态、或换了文档。其余一律**不动相机**。
+ */
+export function shouldApplyInitialViewportCamera(input: InitialCameraClaimInput): boolean {
+  if (!input.hasCameraState) return true
+  return input.lastAppliedDocumentRevision !== input.documentRevision
+}
+
+/**
+ * 初始机位施加台账（**按 region 记**："这个视口上次是哪份文档时框选的"）。
+ *
+ * 为什么按键是 region 而不是 `cameraMainKey`：region 是视口的生命周期身份
+ * （`ViewportManager` 的槽位键），而 `WIKI_PREVIEW → embed` 这类映射会让两个
+ * 不同 region 共用一份相机状态 —— 但"谁还没框选过"必须按**视口**记。
+ */
+export interface ViewportCameraInitLedger {
+  /**
+   * 取一次"施加初始机位"的许可：返回 `true` 表示调用方**应当**施加，
+   * 并就地记下本次文档身份；返回 `false` 表示本视口在当前文档下已施加过。
+   */
+  claim(regionId: string, documentRevision: number, hasCameraState: boolean): boolean
+  /** 忘记某 region 的记号（视口被拆解/槽位归零时调用）。 */
+  forget(regionId: string): void
+  /** 当前记下的文档身份（诊断/判据面；未记录为 `null`）。 */
+  appliedRevisionOf(regionId: string): number | null
+}
+
+export function createViewportCameraInitLedger(): ViewportCameraInitLedger {
+  const applied = new Map<string, number>()
+  return {
+    claim(regionId, documentRevision, hasCameraState) {
+      const last = applied.get(regionId) ?? null
+      if (!shouldApplyInitialViewportCamera({ documentRevision, lastAppliedDocumentRevision: last, hasCameraState })) {
+        return false
+      }
+      applied.set(regionId, documentRevision)
+      return true
+    },
+    forget(regionId) {
+      applied.delete(regionId)
+    },
+    appliedRevisionOf(regionId) {
+      return applied.get(regionId) ?? null
+    },
+  }
+}

@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef } from 'vue'
 import type { ViewportSlot } from '@/runtime/types'
 import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
+import { createViewportCameraInitLedger } from '@/runtime/viewportCameraInit'
 
 /**
  * 把一个视口槽位**归零**（B5 #10 的资源基线在 slot 层的落点）。
@@ -73,6 +74,15 @@ export function createViewportManager() {
     const id = activeId.value
     return id ? (slots.get(id) ?? null) : null
   })
+  /**
+   * **初始机位施加台账**（M1 缺陷修复；纪律与实测证据见
+   * `runtime/viewportCameraInit.ts` 的文件头）。
+   *
+   * 它按 region 记"上次是哪份文档时框选的"，故必须与槽位**同生共死**：
+   * 槽位被拆解（`unregister` / `reset`）即忘记 ⇒ "关掉再打开一个 Area 仍会重新框选"
+   * 与改动前一致，而同一份文档内的内容投影（编辑/移动）不再重置机位。
+   */
+  const cameraInit = createViewportCameraInitLedger()
 
   return {
     register(id: string): ViewportSlot {
@@ -110,6 +120,8 @@ export function createViewportManager() {
       const slot = slots.get(id)
       if (slot) resetSlot(slot)
       slots.delete(id)
+      // 视口真的被拆解 ⇒ 初始机位记号一并作废（见 `cameraInit` 的说明）
+      cameraInit.forget(id)
       if (activeId.value === id) {
         activeId.value = slots.keys().next().value ?? null
       }
@@ -118,6 +130,20 @@ export function createViewportManager() {
     reset(id: string): void {
       const slot = slots.get(id)
       if (slot) resetSlot(slot)
+      cameraInit.forget(id)
+    },
+    /**
+     * 该 region 此刻是否**应当**施加初始机位（`runtime/viewportCameraInit.ts`）。
+     *
+     * 取到 `true` 就同时在台账上记下本次文档身份 —— 调用方**不得**只读不取
+     * （否则下一次调用会重复返回 `true`，"只施加一次"成为空话）。
+     */
+    claimInitialViewportCamera(id: string, documentRevision: number, hasCameraState: boolean): boolean {
+      return cameraInit.claim(id, documentRevision, hasCameraState)
+    },
+    /** 台账中该 region 已施加初始机位的文档身份（`null` = 尚未施加；判据/诊断面）。 */
+    initialViewportCameraRevisionOf(id: string): number | null {
+      return cameraInit.appliedRevisionOf(id)
     },
     get(id: string): ViewportSlot | undefined {
       return slots.get(id)

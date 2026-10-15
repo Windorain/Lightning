@@ -88,7 +88,33 @@ export async function attachViewport(
     drw.bindSelectionOutline(selectionOutline)
   }
 
-  await ctx.getOperators().exec('OPERATOR_INIT_VIEWPORT_CAMERA', { _regionId: regionId })
+  /**
+   * **初始机位（自动框选）只施加一次** —— M1 缺陷修复（用户实测："第一次编辑
+   * 导致视口复位"；根因与运行期证据见 `runtime/viewportCameraInit.ts` 文件头）。
+   *
+   * ## 改动前后的差别（这就是本行）
+   *
+   * | | 触发面 | 后果 |
+   * |---|---|---|
+   * | 改动前 | **每一次**本函数被调用（= `@ready`，宿主重挂即触发） | 内容投影让 `materialLibrary` 瞬时为空 ⇒ 宿主重挂 ⇒ **重新 fit，用户机位被丢弃** |
+   * | 改动后 | ①该视口还没有相机状态，或 ②**换了一份文档**（窄信号 `documentRevision`） | 内容投影只更新画面，**不动**用户机位 |
+   *
+   * 判据是纯函数 + 按 region 的台账（`ctx.viewports.claimInitialViewportCamera`），
+   * 台账随槽位拆解清除 ⇒ "关掉再打开 Area"仍会重新框选。
+   *
+   * ⚠️ **不是**"把政策塞进组件回调"：本函数是装配边（`HostBase.attachViewport`
+   * 的唯一实现体），纪律只此一处；两个宿主（工作台/嵌入）都不需要自己记状态。
+   * `EmbedViewport.vue` 侧原有的 `didInitCamera` 纪律与其同源（同一窄信号）。
+   */
+  const cameraRef = ctx.main.ensureCamera(slot.cameraMainKey)
+  const shouldInitCamera = ctx.viewports.claimInitialViewportCamera(
+    regionId,
+    ctx.getDocumentRevision().value,
+    cameraRef.value !== null,
+  )
+  if (shouldInitCamera) {
+    await ctx.getOperators().exec('OPERATOR_INIT_VIEWPORT_CAMERA', { _regionId: regionId })
+  }
 
   return () => {
     unbindDom()
