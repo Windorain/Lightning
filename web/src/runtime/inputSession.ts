@@ -381,9 +381,22 @@ export function createInputSession(options: InputSessionOptions): InputSession {
       filled.commandId,
       outcome.status,
       eventToken,
-      outcome.status === 'rejected' ? outcome.error : null,
+      // `settled` 也可能是**业务拒绝**：`executeNow` 的返回值里带 `status:'rejected'`。
+      // 只按分发状态判会把这条拒绝的原因整个丢掉 —— 轨迹只剩 `dispatched:settled`，
+      // 于是"命令被拒了"与"命令生效了"在证据上完全同形。
+      // M1 P2 实测的后果：面板写「方块标识」对本文档所有取值都被
+      // `identity-not-in-palette` 拒绝（调色板里同 (注册名尾段, meta) 有多条内容键
+      // ⇒ `identityRefOf` 按歧义如实拒绝），而没有任何观测面记下它。
+      dispatchRejectionOf(outcome),
     )
     return outcome
+  }
+
+  /** 一次分发的**业务拒绝**错误（两种形态：分发被拒 / 已结算但业务被拒）。 */
+  function dispatchRejectionOf(outcome: DispatchOutcome): DomainError | null {
+    if (outcome.status === 'rejected') return outcome.error
+    if (outcome.status === 'settled' && outcome.outcome.status === 'rejected') return outcome.outcome.error
+    return null
   }
 
   /**
