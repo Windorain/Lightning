@@ -1006,6 +1006,10 @@ function tooltipPoolOfPayloads(
   payloads: readonly {
     readonly cells: Readonly<Record<string, string>>
     readonly cellContent?: CellContentTable
+    /** 载荷声明的网格尺寸（说明池形状的权威；见 `adapters/tooltipPool` 判据 2）。 */
+    readonly sizeColumn?: number
+    readonly sizeRow?: number
+    readonly sizeZSlice?: number
   }[],
 ): { palette: readonly string[]; grid: readonly number[][][] } | null {
   // 实现已移到 `adapters/tooltipPool`（**同 `-1` 哨兵同层**）。
@@ -1021,8 +1025,18 @@ function tooltipPoolOfPayloads(
   //
   // 本函数仍保留在 `composition/`：它做的是"从**哪一份**载荷取"的选择
   // （多方块只有一份网格；帧为主取 `frames[0]`），那是装配策略，不是文件格式编码。
+  //
+  // ⚠️ **M1 P3**：声明尺寸必须**传下去**。漏传 = 说明池退回"按说明格包围盒"推导
+  // ⇒ 产物 `cellTooltipGrid` 与产物 `cellGrid` 的声明**不同形**，而消费侧
+  // （`kernelAssembly#tooltipContentOf`）逐字按 `sizeRow` 反解行号 ⇒ 重开时注解**搬行**。
+  // 这不是形状洁癖：实测（真实信封 + 删掉最高行注解）走 `保存到文件 → 打开场景`
+  // 后 17 个注解全部上移一行。
   for (const payload of payloads) {
-    const pool = tooltipPoolOf(payload.cellContent)
+    const pool = tooltipPoolOf(payload.cellContent, {
+      width: payload.sizeColumn,
+      height: payload.sizeRow,
+      depth: payload.sizeZSlice,
+    })
     if (pool !== null) return pool
   }
   return null
@@ -1203,6 +1217,10 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
   const framePayloads: {
     readonly cells: Readonly<Record<string, string>>
     readonly cellContent?: CellContentTable
+    /** 声明尺寸：说明池形状的权威（漏在这里声明就会在类型上丢掉它 —— M1 P3）。 */
+    readonly sizeColumn?: number
+    readonly sizeRow?: number
+    readonly sizeZSlice?: number
   }[] = []
   const axisFrames = content.frameAxis.frames
   for (let i = 0; i < frameObjectIds.length; i++) {

@@ -82,10 +82,11 @@ export interface LegacyCellTooltips {
  * ```
  * 表现为"选中一格、面板 Tooltip 恒为空，输入后仍然显示空"——**假象是"没写进去"**。
  *
- * 高度取**池自身**的行数：读的是池，就必须按池的编码反解；用外部尺寸
- * （`kernelGrid().height`）会在"说明格未铺满整列"时与池的编码漂移
- * （那一条已单独登记：`tooltipPoolOf` 按说明格包围盒推 `height`，
- * 而装配侧 `assembleTooltipContent` 按 `sizeRow`，两者只在"最高一列有说明"时相等）。
+ * 高度取**池自身**的行数：读的是池，就必须按池的编码反解。M1 P3 起池的形状
+ * 由**载荷声明**决定（`tooltipPoolOf` 的 `declared` 参数：`max(声明, 包围盒)`），
+ * 故这里的"池自身行数"就是装配侧 `sizeRow` 的同一个值 —— 两处不再可能漂移。
+ * （P3 之前池按说明格包围盒推高度，只在"最高一行有说明"时与装配侧相等；
+ * 那正是"保存到文件 → 打开场景"里注解整体搬行的成因，已修。）
  */
 export function cellTooltipTextAt(
   tips: LegacyCellTooltips,
@@ -111,7 +112,14 @@ export function projectCellTooltipsToLegacy(doc: Document): LegacyCellTooltips |
     if (obj === undefined || obj.type !== 'block') continue
     const data = findObjectData(doc.scene, obj.dataId)
     if (data === undefined || data.payload.kind !== 'blockGrid') continue
-    const pool: TooltipPool | null = tooltipPoolOf(data.payload.cellContent)
+    // 声明尺寸**同传**：侧表的形状必须与保存投影（`kernelProjection#tooltipPoolOfPayloads`）
+    // 和装配侧（`kernelAssembly#tooltipContentOf` 的 `sizeRow` 反解）**同形**。
+    // 漏传会让"最高一行没有说明"的文档得到一个更矮的网格 ⇒ 行号整体错位（M1 P3 实测）。
+    const pool: TooltipPool | null = tooltipPoolOf(data.payload.cellContent, {
+      width: data.payload.sizeColumn,
+      height: data.payload.sizeRow,
+      depth: data.payload.sizeZSlice,
+    })
     if (pool !== null) return { palette: pool.palette, grid: pool.grid }
   }
   return null

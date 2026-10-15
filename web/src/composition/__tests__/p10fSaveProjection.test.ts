@@ -749,7 +749,7 @@ describe('P10f D2 · ③ 等价：语义面（两侧产物各自喂回**生产�
   }
 })
 
-describe('P10f D2 · ④ 等价：逐格说明文本（池重压缩 / 网格宽度差异下的**语义**相等）', () => {
+describe('P10f D2 · ④ 等价：逐格说明文本（池重压缩 / **同形**网格下的**语义**相等）', () => {
   for (const name of FIXTURES) {
     it(`**逐格说明**（${name}）：两侧逐格文案相同；legacy 有说明的格内核不得缺`, async () => {
       const { session, legacy } = await loaded(name)
@@ -763,10 +763,15 @@ describe('P10f D2 · ④ 等价：逐格说明文本（池重压缩 / 网格宽�
         expect(r.mismatch, `逐格说明文案必须相同：\n${r.mismatch.slice(0, 10).join('\n')}`).toEqual([])
         expect(r.kernelCells, '内核产物里带说明的格数必须与 legacy 相同（丢格 = 丢文案）').toBe(r.legacyCells)
         if (r.legacyCells > 0) {
-          // 反空洞真：确有说明格时，网格宽度差异**必须**真实存在（证明本组不是恒真）
-          expect(r.gridWidths[0], '有说明时两侧网格宽度差是本批实测事实').not.toBe(r.gridWidths[1])
+          // 反空洞真（**M1 P3 改判**）：说明网格的形状由**载荷声明**决定，不是说明格包围盒
+          // （`adapters/tooltipPool` 判据 2）⇒ 两侧宽度必须**相等**。
+          // ⚠️ P3 之前这里是 `not.toBe`（"宽度差必须真实存在"）——那条断言记录的是当时的
+          // 缺陷（envelope 实测包围盒宽 16 < 声明 19）。修好后若保留它，就等于**保住缺陷**；
+          // 改为相等后判别力仍在：读面/投影若退回"按包围盒推形状"，这里立刻判红。
+          expect(r.gridWidths[0], '说明网格必须与方块网格同形（宽度 = 声明；M1 P3 修）').toBe(r.gridWidths[1])
+          expect(r.compared, '必须真的比过格（否则"相等"是空转）').toBeGreaterThan(0)
         }
-        console.log(`[D2/④] ${name}: 说明格 ${r.legacyCells}，网格宽度 ${r.gridWidths[1]} → ${r.gridWidths[0]}`)
+        console.log(`[D2/④] ${name}: 说明格 ${r.legacyCells}，网格宽度 kernel=${r.gridWidths[0]} legacy=${r.gridWidths[1]}`)
       } finally {
         session.dispose()
       }

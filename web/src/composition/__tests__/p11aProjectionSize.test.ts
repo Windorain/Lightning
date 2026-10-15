@@ -191,6 +191,39 @@ function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
 
+/**
+ * **逐格说明**的（声明, 说明格包围盒）前提读数（M1 P3 补）。
+ *
+ * 与 `cellGrid` 同一条口径：说明网格的形状自 P3 起同样"声明优先"
+ * （`adapters/tooltipPool` 判据 2），故"剥掉声明 ⇒ 产物逐字节不变"这条等价
+ * **只在声明 == 包围盒时**成立。返回该夹具第一个带说明的载荷两侧的形状。
+ * `null` = 本夹具没有任何逐格说明（那时说明网格两项本就不写，等价不受影响）。
+ */
+function tooltipPreconditionOf(
+  payloads: readonly Record<string, unknown>[],
+): { declared: { w: number; h: number; d: number }; bounds: { w: number; h: number; d: number } } | null {
+  for (const p of payloads) {
+    const cc = p.cellContent as Record<string, { tooltip?: unknown }> | undefined
+    if (cc === undefined) continue
+    const keys: Record<string, string> = {}
+    for (const [k, v] of Object.entries(cc)) if (typeof v?.tooltip === 'string') keys[k] = 'x'
+    if (Object.keys(keys).length === 0) continue
+    return {
+      declared: { w: p.sizeColumn as number, h: p.sizeRow as number, d: p.sizeZSlice as number },
+      bounds: boundsOfCells(keys),
+    }
+  }
+  return null
+}
+
+/** 两份产物的**根级键差异**（键序无关；`undefined` 视为缺席）。 */
+function rootDiffKeys(a: Plain, b: Plain): string[] {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  const out: string[] = []
+  for (const k of keys) if (canonOf(a[k]) !== canonOf(b[k])) out.push(k)
+  return out.sort()
+}
+
 /** 生产保存视图的产物（断言失败时给出可读原因，而不是 `undefined` 崩溃）。 */
 function saveArtifactOf(session: KernelSession): Plain {
   const projected = projectKernelSaveView(session)
@@ -434,6 +467,16 @@ const FIXTURES = ['envelope', 'multiblock-tier-only', 'multiblock-ebf-2ch', 'mul
  * 展开根级 `cellGrid`，而多方块帧的网格由渲染视图注入）。若只比保存产物，
  * 三份多方块夹具的相等是**空洞**的。故额外比 `projectKernelDocument` 的帧形态
  * 产物 —— 那条路径上三份夹具的网格**确实**被投影。
+ *
+ * ## ⚠️ M1 P3：本组的前提必须**同时**覆盖逐格说明网格
+ *
+ * 该"逐字节等价"成立的前提是「载荷声明 == 内容包围盒」（声明无从生效）。
+ * P3 起**说明网格（`tooltipPalette` + `cellTooltipGrid`）也纳入"声明优先"**
+ * （`adapters/tooltipPool` 判据 2，修的是"重开时注解整体搬行"）⇒
+ * 只检查 `cellGrid` 的声明==包围盒**不足以**推出整份产物等价：
+ * 实测 `envelope` 的说明格包围盒宽 16 < 声明 19（三份多方块夹具无逐格说明，不受影响）。
+ * ⇒ 本组对该夹具改判为"两侧**必须**不同，且差异**只**允许落在说明网格两项"
+ * （不是放宽：两个分支各自都有判别力，且都断言了差异/相等的确切形状）。
  */
 describe('P11-A ④ 既有等价：四份真实夹具「带声明」与「剥掉声明」的产物**逐字节相同**', () => {
   for (const name of FIXTURES) {
@@ -442,7 +485,7 @@ describe('P11-A ④ 既有等价：四份真实夹具「带声明」与「剥掉
       try {
         const payloads = gridPayloads(session.document()!)
         expect(payloads.length, '前提：夹具必须有 blockGrid 载荷').toBeGreaterThan(0)
-        // 反空洞真：本夹具的**声明 == 包围盒**（这正是"两条路径应当相同"的前提）
+        // 反空洞真①：本夹具的**网格内容**声明 == 包围盒
         for (const p of payloads) {
           const bounds = boundsOfCells(p.cells as Record<string, string>)
           expect(
@@ -450,7 +493,12 @@ describe('P11-A ④ 既有等价：四份真实夹具「带声明」与「剥掉
             `${name}：本判据只在"声明 == 包围盒"的夹具上成立；若某份夹具出现稀疏尾层，本组必须改判（不是放宽）`,
           ).toEqual({ 声明: { w: bounds.w, h: bounds.h, d: bounds.d }, 包围盒: bounds })
         }
-        const a = artifactBytes(saveArtifactOf(session))
+        // 反空洞真②（M1 P3 补）：**逐格说明**的声明 == 包围盒 是本组的前提之一。
+        const tip = tooltipPreconditionOf(payloads)
+        const tipDeclared = tip === null || (tip.declared.w === tip.bounds.w && tip.declared.h === tip.bounds.h && tip.declared.d === tip.bounds.d)
+
+        const artifactA = saveArtifactOf(session)
+        const a = artifactBytes(artifactA)
 
         // 帧形态投影（生产函数）—— 这一路**不管**保存形态是否带网格
         const projectFrames = (s: KernelSession): string => {
@@ -467,12 +515,35 @@ describe('P11-A ④ 既有等价：四份真实夹具「带声明」与「剥掉
         const framesA = projectFrames(session)
 
         session.adoptDocument(withoutDeclaredSizes(session.document()!), session.document()!.content)
-        const b = artifactBytes(saveArtifactOf(session))
+        const artifactB = saveArtifactOf(session)
+        const b = artifactBytes(artifactB)
         const framesB = projectFrames(session)
 
-        console.log(`[P11-A/④] ${name}: 保存产物 ${Buffer.byteLength(a, 'utf8')} B sha256=${sha256(a)}`)
-        expect(sha256(b), '保存产物必须**逐字节**不变（修前的行为 ≡ 剥掉声明的行为）').toBe(sha256(a))
-        expect(sha256(framesB), '帧形态投影产物必须**逐字节**不变').toBe(sha256(framesA))
+        console.log(`[P11-A/④] ${name}: 保存产物 ${Buffer.byteLength(a, 'utf8')} B sha256=${sha256(a)}；说明网格声明==包围盒=${tipDeclared}`)
+        if (tipDeclared) {
+          expect(sha256(b), '保存产物必须**逐字节**不变（修前的行为 ≡ 剥掉声明的行为）').toBe(sha256(a))
+          expect(sha256(framesB), '帧形态投影产物必须**逐字节**不变').toBe(sha256(framesA))
+        } else {
+          // 声明 > 说明格包围盒：两侧**必须**不同（否则"声明优先"在说明网格上没生效）
+          expect(sha256(b), '说明格包围盒 < 声明 ⇒ 剥掉声明后说明网格必须**变小**（声明优先的可观测形态）').not.toBe(sha256(a))
+          expect(sha256(framesB), '帧形态投影同理必须不同').not.toBe(sha256(framesA))
+          // 差异**只**允许落在说明网格两项上（其它键逐字不变 ⇒ 不是误伤）
+          const otherKeys = rootDiffKeys(artifactA, artifactB).filter(
+            (k) => k !== 'cellTooltipGrid' && k !== 'tooltipPalette',
+          )
+          expect(otherKeys, '剥掉声明只允许影响说明网格两项；其它键必须逐字不变').toEqual([])
+          // 形状两侧各自的确切形态（判据侧独立复算，不用投影的中间量）
+          expect(dimsOf(artifactA.cellTooltipGrid), '带声明 ⇒ 说明网格 = 声明形状').toEqual({
+            d: payloads[0]!.sizeZSlice,
+            h: payloads[0]!.sizeRow,
+            w: payloads[0]!.sizeColumn,
+          })
+          expect(dimsOf(artifactB.cellTooltipGrid), '剥掉声明 ⇒ 说明网格 = 说明格包围盒').toEqual({
+            d: tip!.bounds.d,
+            h: tip!.bounds.h,
+            w: tip!.bounds.w,
+          })
+        }
       } finally {
         session.dispose()
       }

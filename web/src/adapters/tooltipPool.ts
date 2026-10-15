@@ -56,25 +56,59 @@ export interface TooltipPool {
 }
 
 /**
+ * 网格的**声明尺寸**（`cellGrid` 的三个维度；轴与 {@link TooltipPool} 的 `[z][row][col]` 同义）。
+ *
+ * 由调用方从**同一份载荷**的 `sizeColumn/sizeRow/sizeZSlice` 传入 —— 这三个字段是
+ * 装配期从文件 `cellGrid` 的维度写下的（`kernelAssembly#gridPayload`），
+ * 故它就是"说明网格该有多大"的**唯一权威**。
+ */
+export interface TooltipPoolDeclaredSize {
+  /** x 宽（`cellGrid` 的第三维长度）。 */
+  readonly width?: number
+  /** y 高（`cellGrid` 的第二维长度 = `sizeRow`）。 */
+  readonly height?: number
+  /** z 深（`cellGrid` 的第一维长度）。 */
+  readonly depth?: number
+}
+
+/** 合法声明分量（正整数）⇒ 原值；其余（缺省/0/负数/非整数）⇒ 0（等于"无声明"）。 */
+function declaredAxis(v: number | undefined): number {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : 0
+}
+
+/**
  * 逐格说明 → `tooltipPalette` + `cellTooltipGrid`。
  *
- * ## 三条契约事实
+ * ## 四条契约事实
  *
  * 1. **行序要翻回**：内核的格键是 Y-up 世界坐标（GF-7），而文件的
  *    `cellTooltipGrid` 是 `[z][row][col]` 且 **row 0 = 顶部**。
  *    装配期用 `row' = sizeRow - 1 - row` 翻过来；本函数用同一个**自逆**式子翻回去。
- *    `height` 由**带说明的格**的包围盒推 —— 不用 `cellGrid` 的高度：两者必然一致，
- *    而"由说明格自身推"少一个可传错的参数。
- * 2. **`-1` 是"无说明"**（`TOOLTIP_GRID_NONE`）。内核侧"字段缺席"映回 `-1`，
+ * 2. **形状的权威是载荷声明，**不是**说明格的包围盒**（M1 P3 实测修的）：
+ *    消费侧（`kernelAssembly#tooltipContentOf`）**逐字**用 `grid.height` 反解行号，
+ *    其注释即写明「说明网格与 `cellGrid` **同形**」。于是若这里按包围盒输出，
+ *    "最高一行没有说明"的文档会得到一个**比声明矮**的 `cellTooltipGrid`
+ *    ——重开时同一个注解会被 `sizeRow - 1 - row` 映到**另一格**（静默搬行）。
+ *    实测（真实信封，删掉最高行注解后走 `保存到文件 → 打开场景`）：
+ *    `cellGrid` 声明 `7x6x19` 而产物 `cellTooltipGrid` 为 `7x5x16`，
+ *    重开后 17 个注解**全部上移一行**。
+ *    ⇒ 尺寸取 **`max(声明, 说明格包围盒)`**（逐轴）：
+ *     - 声明更大：尾行/尾列补 `-1`（声明是文件的事实，与 `projectGridCells` 同口径）；
+ *     - 声明更小或缺失（畸形/自造内容）：按包围盒**扩张**，绝不截断注解
+ *       （截断即丢用户数据，见 #171 硬底线）。
+ *    包围盒仍**是**下界，故"无声明"时行为与修复前**逐字相同**。
+ * 3. **`-1` 是"无说明"**（`TOOLTIP_GRID_NONE`）。内核侧"字段缺席"映回 `-1`，
  *    **不是空串** —— 空串是"显式空说明"，与"没有说明"是两回事。
- * 3. **返回 `null` = 该文档没有任何逐格说明** ⇒ 调用方不写这两项（与装配侧
+ * 4. **返回 `null` = 该文档没有任何逐格说明** ⇒ 调用方不写这两项（与装配侧
  *    "缺省 = 无逐格内容"对称）。写一个全 `-1` 的空网格会让"没有说明"
  *    与"有说明但是空"混淆。
  *
  * @param cells 逐格内容（键 = `` `${x},${y},${z}` ``，值只需 `tooltip` 字段）
+ * @param declared 同一份载荷的声明尺寸（缺省 ⇒ 只用包围盒；见判据 2）
  */
 export function tooltipPoolOf(
   cells: Readonly<Record<string, { readonly tooltip?: string }>> | undefined,
+  declared?: TooltipPoolDeclaredSize,
 ): TooltipPool | null {
   if (cells === undefined) return null
   const entries: { pos: CellPos; tooltip: string }[] = []
@@ -86,7 +120,8 @@ export function tooltipPoolOf(
     entries.push({ pos, tooltip })
   }
   if (entries.length === 0) return null
-  // 包围盒（网格必须覆盖全部带说明的格，否则它们会被静默丢弃）
+  // 包围盒 = 尺寸的**下界**（网格必须覆盖全部带说明的格，否则它们会被静默丢弃）；
+  // 上界由载荷声明给出（见文件头判据 2）。
   let maxX = 0
   let maxY = 0
   let maxZ = 0
@@ -95,9 +130,13 @@ export function tooltipPoolOf(
     if (e.pos.y > maxY) maxY = e.pos.y
     if (e.pos.z > maxZ) maxZ = e.pos.z
   }
-  const width = maxX + 1
-  const height = maxY + 1
-  const depth = maxZ + 1
+  // 尺寸 = max(载荷声明, 说明格包围盒)（逐轴；见文件头判据 2）。
+  const boundsWidth = maxX + 1
+  const boundsHeight = maxY + 1
+  const boundsDepth = maxZ + 1
+  const width = Math.max(boundsWidth, declaredAxis(declared?.width))
+  const height = Math.max(boundsHeight, declaredAxis(declared?.height))
+  const depth = Math.max(boundsDepth, declaredAxis(declared?.depth))
   // 池：按**内容去重**（同文案共享一个下标）；首见顺序 ⇒ 稳定可复现。
   const palette: string[] = []
   const indexOfText = new Map<string, number>()
