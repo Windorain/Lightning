@@ -7,6 +7,7 @@ import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import type { ViewportBinderHandlers } from '@/runtime/viewportBinder'
 import { bindViewportDom } from '@/runtime/viewportBinder'
 import type { BlockRef, SelectedEntity } from '@/context/selection'
+import { applyViewportCameraState } from '@/runtime/viewportCamera'
 
 export interface SelectionOutlineBind {
   selectionItems: Ref<Set<SelectedEntity>>
@@ -114,6 +115,33 @@ export async function attachViewport(
   )
   if (shouldInitCamera) {
     await ctx.getOperators().exec('OPERATOR_INIT_VIEWPORT_CAMERA', { _regionId: regionId })
+  }
+
+  /**
+   * **画面相机必须与逻辑机位一致** —— 本行补的是"不重新框选"的必要一半。
+   *
+   * ## 为什么必须有它（本批 e2e 判据当场抓出的第二环）
+   *
+   * 宿主重挂（上面那段说明的同一事件）会走 `RenderEngine.mount` ⇒ **新建一个
+   * THREE 相机**（`View3DRenderer` 的默认姿态）。而"逻辑机位 → 画面相机"的同步
+   * 只有 `bindViewportCameraSync` 的 `watch(stateRef)` 一处 —— 它由**状态变化**
+   * 驱动，不是由"装上了新相机"驱动。
+   *
+   * 于是只做"不重新 fit"会得到更坏的形态：逻辑机位（`main.cameras[key]`）保住了，
+   * 但画面停在新建相机的默认姿态 ⇒ 用户看到的视角照样跳走，且与状态不一致。
+   * 实测（`kernel-viewport-camera.spec.ts` 修复中途的运行读数）：
+   * 编辑后 `logical` 逐字段等于挪动值，而 `engine` 的 `matrixWorld` 变成单位矩阵、
+   * `zoom` 2.4 → 1（新相机默认）。
+   *
+   * ⇒ 装配点补一次"把**现有**逻辑机位施加到当前相机"（与 watch 调的是**同一个**
+   * `applyViewportCameraState`，不是新算法）。语义上它是**同步**、不是**框选**：
+   * 首次装载那条路仍由上面的 `OPERATOR_INIT_VIEWPORT_CAMERA`（自动框选）承担。
+   */
+  const cameraState = cameraRef.value
+  const engineCamera = slot.camera.value
+  const engineOrbit = slot.orbitTarget.value
+  if (cameraState && engineCamera && engineOrbit) {
+    applyViewportCameraState(engineCamera, engineOrbit, cameraState)
   }
 
   return () => {
