@@ -347,12 +347,25 @@ export function focusControl(state: TextLayerState, input: RegisterControlInput,
   const previous = cur.focusedControlId === null ? undefined : controlOf(cur, cur.focusedControlId)
   if (previous && previous.controlId !== input.controlId) {
     const r = settleControl(previous, 'focus-switch')
-    cur = withControl(cur, r.control)
+    cur = withControl(cur, afterSettle(previous, r))
     effects.push(...r.effects)
   }
 
   const existing = controlOf(cur, input.controlId)
-  const parse = parseDraft(input.kind, existing?.text ?? input.displayValue, {
+  /**
+   * 重新登记一个**没有挂起草稿**的控件时，草稿种子必须换成**刚读到的文档值**。
+   *
+   * `displayValue` 每次登记都按 DOM 事实刷新（下面那行），而 `text` 原先一律沿用
+   * `existing.text`。若该控件上次留下的 `text` 已不再是挂起的草稿（`text === 它自己的`
+   * `displayValue`），两者就会错配：`text` 是旧的文档值、`displayValue` 是新的
+   * ⇒ 失焦时以旧值提交，把别处（同一底层值的另一个字段）刚写的新值改回去。
+   *
+   * 保留 draft 的情形必须原样保住：非法/中间态草稿 `text !== displayValue`
+   * —— 那正是「非法草稿保留并提示、切换焦点不丢字」的落点。
+   */
+  const cleanExisting = existing !== undefined && existing.text === existing.displayValue
+  const seed = existing === undefined || cleanExisting ? input.displayValue : existing.text
+  const parse = parseDraft(input.kind, seed, {
     ...(input.min === undefined ? {} : { min: input.min }),
     ...(input.max === undefined ? {} : { max: input.max }),
     ...(input.required === undefined ? {} : { required: input.required }),
@@ -365,9 +378,9 @@ export function focusControl(state: TextLayerState, input: RegisterControlInput,
     controlId: input.controlId,
     kind: input.kind,
     displayValue: input.displayValue,
-    text: existing?.text ?? input.displayValue,
-    textHistory: existing?.textHistory ?? Object.freeze([]),
-    textFuture: existing?.textFuture ?? Object.freeze([]),
+    text: seed,
+    textHistory: cleanExisting ? Object.freeze([]) : (existing?.textHistory ?? Object.freeze([])),
+    textFuture: cleanExisting ? Object.freeze([]) : (existing?.textFuture ?? Object.freeze([])),
     parse,
     composing: false,
     commitOn: input.commitOn ?? 'enter-or-blur',
@@ -453,16 +466,11 @@ export function blurControl(state: TextLayerState, controlId: string, reason: Dr
     effects.push({ kind: 'retain', controlId, reason })
   } else {
     const r = settleControl(control, reason)
-    const next = isSubmittable(control.parse) && control.text !== control.displayValue
-      ? Object.freeze({
-          ...r.control,
-          active: false,
-          displayValue: String(control.parse.value),
-          text: String(control.parse.value),
-          textHistory: Object.freeze([]),
-          textFuture: Object.freeze([]),
-        })
-      : Object.freeze({ ...r.control, active: false })
+    // 提交成功 ⇒ 草稿与显示值一起对齐（见 `afterSettle`）；保留/非法 ⇒ 只清活动态。
+    const next =
+      r.effects.some((e) => e.kind === 'commit')
+        ? Object.freeze({ ...afterSettle(control, r), active: false })
+        : Object.freeze({ ...r.control, active: false })
     cur = withControl(cur, next)
     effects.push(...r.effects)
   }
@@ -593,6 +601,57 @@ export type DraftKey = 'Enter' | 'Escape' | 'Tab' | 'Ctrl+Z' | 'Ctrl+Shift+Z'
  * | `Tab` | 等同焦点切换的结算（提交或保留），由接线层随后移动焦点 |
  * | `Ctrl+Z` | 草稿局部撤销（**不**触发文档历史） |
  */
+/**
+ * 结算结果 → 控件状态：**提交成功后，草稿与显示值必须一起对齐到已提交值**。
+ *
+ * ## 为什么必须有一个统一的"提交后对齐"（M1 P2 运行期实测的静默回退）
+ *
+ * `settleControl` 只产出 `commit` **效果**，它**不动状态**（`text` 仍是用户刚敲的
+ * 那一串、`displayValue` 仍是提交前的文档值）。于是调用方若不同步这两者，控件在
+ * 状态里就永远"挂着一份未提交草稿"。
+ *
+ * 这个不一致单独看无害（下一次结算会再提交一次同样的值 ⇒ 内核按 `unchanged` 吸收），
+ * 但**换焦点**时会兑现成一次真实写入：
+ *
+ * ```
+ * ① 编辑字段 A 并提交（Tab）      → A 的状态：text = 新值, displayValue = 旧值  ← 未对齐
+ * ② 焦点落到字段 B（与 A 写同一格）
+ * ③ 再回到 A 编辑并提交            → A 对齐
+ * ④ B 失焦：B 的状态是上次登记时留下的 text（旧值），
+ *    而 focusControl 每次登记都会把 displayValue 刷成**刚读到的**文档值
+ *    ⇒ text ≠ displayValue ⇒ settleControl 认为"有一份待提交草稿"
+ *    ⇒ **提交旧值，把 A 刚写的新值悄悄改回去**
+ * ```
+ *
+ * 实测（真实信封，`temp/m1-p2/probe-two-writes4.cjs`）：连续两次编辑同一格的
+ * Tooltip 后，第三次历史条目来自 `field:lightning.block.cellTooltip`、
+ * 值为**第一次**编辑的文本 —— 文档被回退，`canUndo` 也跟着失真。
+ * （该缺陷此前被"读面漏行翻转"掩盖：镜像读让 B 的值恒定不变，text 与
+ * displayValue 恰好总是相等。修好读面后它才现形。）
+ *
+ * 判据用**效果**而不是再算一次 `isSubmittable`：`settleControl` 只在
+ * "可提交**且**与显示值不同"时产出 `commit` ⇒ "有 commit 效果"就是
+ * "这一份草稿已经进文档"的准确标记。非法/中间态（`retain`）**不动**
+ * —— 那正是「非法草稿保留并提示」要保留的东西。
+ */
+function afterSettle(
+  control: TextDraftState,
+  settled: { readonly control: TextDraftState; readonly effects: readonly TextDraftEffect[] },
+): TextDraftState {
+  if (!settled.effects.some((e) => e.kind === 'commit')) return settled.control
+  // `commit` 蕴含可提交 ⇒ 正常路径必取 `.value`；`isSubmittable` 只用于收窄类型
+  // （并作防御：不可提交却出现 commit 效果时**不动**状态，而不是造一个假值）。
+  if (!isSubmittable(control.parse)) return settled.control
+  const committed = String(control.parse.value)
+  return Object.freeze({
+    ...settled.control,
+    displayValue: committed,
+    text: committed,
+    textHistory: Object.freeze([]),
+    textFuture: Object.freeze([]),
+  })
+}
+
 export function applyDraftKey(state: TextLayerState, controlId: string, key: DraftKey, token = 0): TextLayerResult {
   if (tokenConsumed(state, token)) return { status: 'duplicate', state, effects: [] }
   let cur = consumeToken(state, token)
@@ -622,15 +681,14 @@ export function applyDraftKey(state: TextLayerState, controlId: string, key: Dra
       }
       if (control.commitOn === 'explicit') return applied(cur, [])
       const r = settleControl(control, 'enter')
-      const next = isSubmittable(control.parse) && control.text !== control.displayValue
-        ? Object.freeze({ ...r.control, displayValue: String(control.parse.value), text: String(control.parse.value), textHistory: Object.freeze([]) })
-        : r.control
-      return applied(withControl(cur, next), r.effects)
+      return applied(withControl(cur, afterSettle(control, r)), r.effects)
     }
     case 'Tab': {
       if (control.commitOn === 'explicit') return applied(cur, [{ kind: 'retain', controlId, reason: 'focus-switch' }])
       const r = settleControl(control, 'focus-switch')
-      return applied(withControl(cur, r.control), r.effects)
+      // ⚠️ 这里曾经**不同步**（与 Enter/失焦两条路径不一致）⇒ 换焦点后控件在状态里
+      // 仍挂着已提交的文本，再失焦就会以旧文本再提交一次。见 `afterSettle` 的实测说明。
+      return applied(withControl(cur, afterSettle(control, r)), r.effects)
     }
   }
 }
