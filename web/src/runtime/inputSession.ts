@@ -109,6 +109,25 @@ export interface InputTraceEntry {
   readonly commandId: string | null
   readonly reason: string
   readonly startedModal: boolean
+  /**
+   * 该事件的意图**是否真的交给了分发**（`dispatch`）。仅键事件写入。
+   *
+   * ## 为什么必须有这一位（M1 P2 实测的假绿）
+   *
+   * `commandId` 记的是**路由产出**的意图，而不是"意图被发出去"。在 P2 修复前，
+   * `handleKey` 只在 `startsModal` 时才 `dispatch`，于是 `edit.undo`（应用快捷键，
+   * `startsModal: false`）的轨迹长这样：
+   *
+   * ```
+   * { level: 'app', commandId: 'edit.undo', reason: 'app-hotkey' }   ← 意图产出了
+   * （没有 source: 'command' 的记录）                                  ← 但它从未被分发
+   * ```
+   *
+   * 只看 `commandId` 的判断会得出"撤销已触发"的结论 —— 这正是本缺陷长期潜伏的原因
+   * （P7 的 A25-1 断言 `tool.beginInteraction` 不出现，而它**从不**可能出现）。
+   * 故把"产出意图"与"交出意图"显式分开记录。
+   */
+  readonly dispatched?: boolean
 }
 
 /** A22 的可观测计数（测试据它断言"只启动一次"）。 */
@@ -452,6 +471,13 @@ export function createInputSession(options: InputSessionOptions): InputSession {
 
       const outcomes: DispatchOutcome[] = []
 
+      /**
+       * 文本层是否已经**就地**消费了这次意图（草稿三态：`draft.undo`/`draft.redo`/
+       * `draft.key`）。就地消费的意图**不得**再经 `dispatch` 走一遍 ——
+       * 否则同一次按键会被当成两条命令（草稿提交已经在 `runTextEffects` 里发出）。
+       */
+      let consumedByTextLayer = false
+
       // 文本层语义（草稿三态）在纯函数里执行；本层只搬运状态与效果。
       const activeControlId = before.textFocus.controlId
       if (activeControlId !== null && d.level === 'text' && d.intent !== null && d.intent.commandId.startsWith('draft.')) {
@@ -459,6 +485,7 @@ export function createInputSession(options: InputSessionOptions): InputSession {
         const draftKey: DraftKey | null =
           key ?? (d.intent.commandId === 'draft.undo' ? 'Ctrl+Z' : d.intent.commandId === 'draft.redo' ? 'Ctrl+Shift+Z' : null)
         if (draftKey !== null) {
+          consumedByTextLayer = true
           const tr = applyDraftKey(text, activeControlId, draftKey, fact.token)
           if (tr.status === 'duplicate') {
             counters.suppressedDuplicates += 1
@@ -479,6 +506,36 @@ export function createInputSession(options: InputSessionOptions): InputSession {
       }
 
       if (d.startsModal && d.intent !== null) counters.modalStarts += 1
+      /**
+       * 意图 → 分发的**唯一收口**（本批修复）。
+       *
+       * ## 这里曾经漏掉什么（M1 P2 运行期实测）
+       *
+       * 旧写法是 `if (d.startsModal) dispatch(d.intent, …)`。于是**只有**启动模态操作的
+       * 键（交互 Enter/Escape、弹窗确认）会走到分发；而 `level: 'app'` 与
+       * `level: 'area'` 的意图 `startsModal` 为 `false` ⇒ **全部键盘快捷键都不分发**：
+       *
+       * | 键 | 意图 | 旧行为 |
+       * |---|---|---|
+       * | Ctrl+Z / Ctrl+Shift+Z | `edit.undo` / `edit.redo`（app） | 意图产出后**被丢弃** ⇒ 静默 no-op |
+       * | `g`/`a`/`b`/`l`/`p`/`Tab`/`t`/`n` | `local.*`（area） | 同上 ⇒ 移动工具等全部不可达 |
+       * | 弹窗内 Escape | `modal.close`（modal） | 同上 ⇒ Escape 不关弹窗 |
+       *
+       * 实测证据（P2 `temp/m1-p2/diag-undo-result.json`）：Ctrl+Z 后轨迹出现
+       * `{level:'app', commandId:'edit.undo', reason:'app-hotkey', startedModal:false}`，
+       * 但**没有**任何 `source:'command'` 记录；同一时刻经菜单入口
+       * （`InputPort#invokeCommand('edit.undo')` → 同一个 `dispatch`）撤销**成功**
+       * （`canUndo true→false`、`dirty true→false`）⇒ 下游完好，缺的只是这一跳。
+       *
+       * ## 为什么是"除了文本层已消费的，其余一律交出"
+       *
+       * 判据不是"哪个层级该分发"（那会把政策复制一份到本层），而是
+       * **"路由产出了意图、且还没有人消费它"**：路由层已经用
+       * `consumedTokens` / `modalStartTokens` 保证一个事件至多一个意图，
+       * `dispatchIntent` 又用 `(token, commandId)` 账本保证同一意图至多执行一次
+       * （A22 的两处冗余落点不变）。故此处不需要再判层级。
+       */
+      const handedToDispatch = d.intent !== null && !consumedByTextLayer
       record({
         token: fact.token,
         source: 'key',
@@ -488,8 +545,9 @@ export function createInputSession(options: InputSessionOptions): InputSession {
         commandId: d.intent?.commandId ?? null,
         reason: d.reason,
         startedModal: d.startsModal,
+        dispatched: handedToDispatch,
       })
-      if (d.startsModal) {
+      if (handedToDispatch) {
         const o = dispatch(d.intent, fact.token)
         if (o) outcomes.push(o)
       }
