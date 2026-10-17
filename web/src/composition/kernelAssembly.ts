@@ -515,8 +515,8 @@ export interface MultiblockProjectionFace {
   readonly blockPalette: readonly BlockPaletteEntry[]
   /** 几何资产目录（`assetId` → 资产）。 */
   readonly assets: Readonly<Record<string, BlockGeometryAsset>>
-  /** 帧声明（变体/运行态/骨架阶/规则引用）。 */
-  readonly frames: readonly {
+  /** **场景清单**（变体/运行态/骨架阶/规则引用；领域叫 Scene，格式键 frames）。 */
+  readonly scenes: readonly {
     readonly index: number
     readonly variant: string
     readonly runstate: string
@@ -623,7 +623,7 @@ export interface AssembledDocument {
    *  - `multiblockBody.declaration` 与 `content.multiblock` 是**同一个对象**
    *    （同一次适配器调用的两个出口 —— 不是两次转换后"相等"）。
    *
-   * 逐帧 `cellGrid` 等**内层 body** 就在这个承运里（`frameGridEvidence`），
+   * 逐场景 `cellGrid` 等**内层 body** 就在这个承运里（`sceneGridEvidence`），
    * 它不参与身份/求值（`#388` 评论 7501 第 3 项），故**不**进 `content`。
    */
   readonly multiblockBody: MultiblockBody | null
@@ -1839,7 +1839,8 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
             declaration: typedDeclarationOf(decl),
             blockPalette: unionPaletteOf(doc, payload.palette),
             assets: payload.geometry,
-            frames: (doc.multiblock?.frames ?? []).map((f) => {
+            // 领域场景清单（格式键 `frames` 的投影面；M5-1 起领域叫 Scene）。
+            scenes: (doc.multiblock?.frames ?? []).map((f) => {
               const frame: {
                 index: number
                 variant: string
@@ -2085,7 +2086,7 @@ export function assembleMultiblockKernelFace(
       invalidValue({
         reason: 'multiblockAssemblyFailed',
         multiblockId: declaration.id,
-        frameCount: declaration.frames.length,
+        sceneCount: declaration.scenes.length,
       }),
     )
   }
@@ -2168,7 +2169,8 @@ function evaluatorDocumentOf(declaration: MultiblockDeclaration): MultiblockInne
     multiblockCount: declaration.multiblockCount,
     multiblock: evaluatorMultiblockOf(declaration),
     blockPalette: mutableCopy(declaration.blockPalette) as EvaluatorPaletteEntry[],
-    frames: mutableCopy(declaration.frames) as EvaluatorFrame[],
+    // 领域**场景**清单 → 求值端口的 `frames` 键（端口类型来自旧层，键名不改）。
+    frames: mutableCopy(declaration.scenes) as EvaluatorFrame[],
   }
   evaluatorInputCache.set(declaration, input)
   return input

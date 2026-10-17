@@ -245,7 +245,7 @@ describe('P10b · 不静默丢失（§12 保真记录 + 诊断）', () => {
       '多方块文档的帧轴必须为空（帧清单 = 变体配置集合，不是时间轴）',
     ).toBe(0)
     expect(
-      assembled.multiblock!.projection.frames.length,
+      assembled.multiblock!.projection.scenes.length,
       '场景声明必须仍全部承载（空帧轴 ≠ 丢内容）',
     ).toBe(EXPECTED_FRAMES['multiblock-ebf-2ch'])
     // 资源引用：真实夹具内嵌纹理 ⇒ 必须有资源且**每条都有内容版本**

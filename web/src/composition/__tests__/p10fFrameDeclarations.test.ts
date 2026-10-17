@@ -38,7 +38,6 @@ import { adoptLoadedDocument } from '@/composition/documentLoad'
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import { createParserRegistry } from '@/context/parserRegistry'
 import { V2PlainParser, WorldParser, StructureDataParser, createEnvelopeParser } from '@/context/parsers/builtinParsers'
-import { fixturePath, readJson } from '@/context/__tests__/multiblockFixtureIo.mjs'
 
 function parsers() {
   const p = createParserRegistry()

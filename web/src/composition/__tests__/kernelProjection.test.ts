@@ -60,7 +60,7 @@ function declarationOf(assembled: AssembledDocument): KernelDeclarationProjectio
     declRaw: mb.declRaw,
     blockPalette: mb.projection.blockPalette,
     assets: mb.projection.assets,
-    frames: mb.projection.frames,
+    scenes: mb.projection.scenes,
     schemaVersion: mb.projection.schemaVersion,
     multiblockCount: mb.projection.multiblockCount,
   }
@@ -243,7 +243,7 @@ describe('P10b/G-3 · 投影读内核而非回放输入（防"投影=缓存"）'
     })
     const outFrames = projected.plain.frames as Record<string, unknown>[]
     expect(outFrames.length, '全部声明场景仍必须产出（不因空帧轴而丢）').toBe(
-      assembled.multiblock!.projection.frames.length,
+      assembled.multiblock!.projection.scenes.length,
     )
     expect(outFrames[0]!.durationMs, '场景时长来自声明，不来自时间轴').not.toBe(777)
     expect(outFrames[0]!.label, '场景标签来自声明，不来自时间轴').not.toBe('bogus-frame')
@@ -295,7 +295,7 @@ describe('P10b/G-3 · 形态由内容机械决定（不由调用方声明）', (
       //  - **多方块**：帧数 = 声明帧数（变体存储），与旧产物一致；
       //  - **帧为主**：帧数 = 网格对象数（每帧一份 `structure`）。
       const expected = assembled.multiblock !== null
-        ? assembled.multiblock.projection.frames.length
+        ? assembled.multiblock.projection.scenes.length
         : assembled.frameObjects.length
       expect(reparsed.document!.frameCount, `${name} 读回后的帧数应与该形态的语义一致`).toBe(expected)
       // 反空洞真：真实夹具的帧数必须 > 1（否则"帧数正确"是常数比较）

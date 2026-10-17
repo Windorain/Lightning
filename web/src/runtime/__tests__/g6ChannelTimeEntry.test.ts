@@ -86,7 +86,7 @@ async function loadProduction(name: string): Promise<Loaded> {
           readonly channels: readonly { key: string; kind: string; min: number; max: number }[]
           readonly backbone: { readonly sizeChannel: string }
         }
-        readonly frames: readonly { readonly stepIndex: number }[]
+        readonly scenes: readonly { readonly stepIndex: number }[]
       }
     | null
     | undefined
@@ -98,7 +98,7 @@ async function loadProduction(name: string): Promise<Loaded> {
     decl: {
       id: mb.id,
       channels: mb.declaration.channels,
-      sceneSteps: mb.frames.map((f) => f.stepIndex),
+      sceneSteps: mb.scenes.map((f) => f.stepIndex),
       sizeChannel: mb.declaration.backbone.sizeChannel === '' ? null : mb.declaration.backbone.sizeChannel,
     },
     frameAxis: assembled.value.content.frameAxis,

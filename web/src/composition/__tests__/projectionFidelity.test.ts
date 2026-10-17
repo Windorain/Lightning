@@ -53,7 +53,7 @@ function declarationOf(assembled: ReturnType<typeof unwrapAssembled>): KernelDec
     declRaw: mb.declRaw,
     blockPalette: mb.projection.blockPalette,
     assets: mb.projection.assets,
-    frames: mb.projection.frames,
+    scenes: mb.projection.scenes,
     schemaVersion: mb.projection.schemaVersion,
     multiblockCount: mb.projection.multiblockCount,
   }
@@ -129,7 +129,7 @@ describe('D1 补充 · 多方块产出**全部**声明帧（修掉 432 → 1 的
       const parsed = await productionParsers().detectAndParse(raw)
       const doc = parsed.document!
       const assembled = unwrapAssembled(assembleKernelDocument({ doc, plainRoot: plainRootOf(raw) }))
-      const declFrames = assembled.multiblock!.projection.frames.length
+      const declFrames = assembled.multiblock!.projection.scenes.length
       const projected = projectKernelDocument({
         scene: assembled.scene,
         content: assembled.content,

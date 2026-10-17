@@ -254,7 +254,7 @@ async function afterDefinition(name: string): Promise<StructureDefinition> {
     declRaw: mb.declRaw,
       blockPalette: mb.projection.blockPalette,
       assets: mb.projection.assets,
-      frames: mb.projection.frames,
+      scenes: mb.projection.scenes,
       schemaVersion: mb.projection.schemaVersion,
       multiblockCount: mb.projection.multiblockCount,
     },
@@ -361,7 +361,7 @@ describe('P10d · 零回显：删掉声明原文后**仍**能从类型化内容�
       declRaw,
       blockPalette: mb.projection.blockPalette,
       assets: mb.projection.assets,
-      frames: mb.projection.frames,
+      scenes: mb.projection.scenes,
       schemaVersion: mb.projection.schemaVersion,
       multiblockCount: mb.projection.multiblockCount,
     })

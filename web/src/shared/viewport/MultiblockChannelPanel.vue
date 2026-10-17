@@ -113,6 +113,11 @@ function valueOf(key: string): number {
     </div>
 
     <div class="vp-mb__col vp-mb__col--side">
+      <div class="vp-mb__row vp-mb__row--scene" data-mb-scene-row>
+        <span class="vp-mb__label">场景</span>
+        <span class="vp-mb__value" data-mb-scene-count>{{ model.sceneCount }}</span>
+        <span class="vp-mb__hint">变体配置 · 不参与播放</span>
+      </div>
       <div class="vp-mb__row vp-mb__row--runstate">
         <label class="vp-mb__label" for="mb-runstate">运行态</label>
         <select
@@ -152,6 +157,8 @@ function valueOf(key: string): number {
   align-items: center; gap: 8px; min-width: 0;
 }
 .vp-mb__row--runstate { grid-template-columns: minmax(56px, max-content) minmax(90px, 1fr); }
+.vp-mb__row--scene { grid-template-columns: minmax(56px, max-content) auto 1fr; }
+.vp-mb__hint { font-size: 10px; opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vp-mb__label { font-size: 11px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vp-mb__range { width: 100%; min-width: 0; height: 14px; cursor: pointer; }
 .vp-mb__value { font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }

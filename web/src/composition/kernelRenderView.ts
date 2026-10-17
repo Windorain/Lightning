@@ -61,7 +61,7 @@ function declarationOf(assembled: {
       readonly declaration: unknown
       readonly blockPalette: unknown
       readonly assets: unknown
-      readonly frames: unknown
+      readonly scenes: unknown
       readonly schemaVersion: number | null
       readonly multiblockCount: number
     }
@@ -76,7 +76,7 @@ function declarationOf(assembled: {
     declRaw: mb.declRaw,
     blockPalette: mb.projection.blockPalette as KernelDeclarationProjection['blockPalette'],
     assets: mb.projection.assets as KernelDeclarationProjection['assets'],
-    frames: mb.projection.frames as KernelDeclarationProjection['frames'],
+    scenes: mb.projection.scenes as KernelDeclarationProjection['scenes'],
     schemaVersion: mb.projection.schemaVersion,
     multiblockCount: mb.projection.multiblockCount,
   }

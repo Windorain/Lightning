@@ -303,6 +303,8 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
     // 「该组合是否已声明」用**索引视图**判（唯一索引实现；键面不含 `raw`）。
     const declared = view.variantByKey.has(variantKey)
     return buildChannelPanelModelOf(view, selection.value, {
+      // M5-1：场景数（变体配置集合；不是时间轴帧数）—— 与内核声明 scenes 同源。
+      sceneCount: ctx.kernelMultiblockDeclaration()?.scenes.length ?? 0,
       variantKey,
       dims: face === null ? '' : formatDims(face.report.dims),
       notices: assemblyNoticesOf({

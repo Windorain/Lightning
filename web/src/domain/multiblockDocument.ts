@@ -243,14 +243,31 @@ export interface MultiblockBackbone {
 /** 一条帧的规则引用：纯字符串 = 声明顺序；对象形式可显式给 `order`。 */
 export type MultiblockRuleRef = string | Readonly<{ id: string; order?: number }>
 
-/** 一条帧声明（契约 §5.3）：**唯一**变体存储原语，不携带内联 ops。 */
-export interface MultiblockFrame {
+/**
+ * 一条**场景（Scene）声明**（契约 §5.3 的 `frames` 键）：**唯一**变体存储原语，
+ * 不携带内联 ops。
+ *
+ * ## M5-1（2026-10-18 用户裁决）：「帧」在这里是**场景**
+ *
+ * 多方块文档的帧清单是**变体配置集合**（Blender 的 Scene 语义），**不是**时间轴上的帧：
+ * 它与时间、播放无关，永不参与播放。故领域类型叫 `Scene`、集合叫 `scenes`。
+ *
+ * ⚠️ **文件格式的键仍是 `frames`**（`.multiblock.json`，外部格式兼容，不改）：
+ * 适配器在边界上把「格式 `frames` 键」翻译成「领域场景清单」，映射点见
+ * `adapters/files/multiblockDeclaration#sceneOf`。
+ */
+export interface MultiblockScene {
   readonly index: number
   readonly variant: string
   readonly runstate: string
   readonly stepIndex: number
   readonly rules: readonly MultiblockRuleRef[]
   readonly label?: string
+  /**
+   * 文件格式的既有字段（多方块文档**不用**，保留以保真回写）。
+   *
+   * 它**不是**时间轴事实：场景没有时长、也不参与播放（M5-1）。
+   */
   readonly durationMs?: number
 }
 
@@ -276,15 +293,17 @@ export interface MultiblockTotalTierDomain {
 }
 
 /**
- * 一份多方块**声明**（契约 §4.1 的 `multiblock` 节 + §5 的帧清单）。
+ * 一份多方块**声明**（契约 §4.1 的 `multiblock` 节 + §5 的场景清单）。
  *
- * ## 为什么帧清单在里面（而不是与通道清单并列）
+ * ## 为什么场景清单在里面（而不是与通道清单并列）
  *
- * 帧是**变体的存储原语**（契约 §5.3）——「一个变体至少一帧」。声明与它的帧是
- * 同一条事实的两半：只有声明无法装配（不知道用哪一阶骨架），只有帧无法解释
- * （不知道变体是什么）。旧 `context/multiblock/types.ts#MultiblockInnerDocument`
+ * **场景**是**变体的存储原语**（契约 §5.3 的 `frames` 键）——「一个变体至少一个场景」。
+ * 声明与它的场景是同一条事实的两半：只有声明无法装配（不知道用哪一阶骨架），
+ * 只有场景无法解释（不知道变体是什么）。旧 `context/multiblock/types.ts#MultiblockInnerDocument`
  * 把它们放在同一个对象里（`multiblock` + `frames`，都是内层 body 的键），
  * 本模块**保持这个边界**，只是把 `Record<string, unknown>` 换成类型化字段。
+ *
+ * M5-1：这里的「场景」与**时间轴**无关 —— 帧为主文档的帧才是时间轴上的帧。
  */
 export interface MultiblockDeclaration {
   readonly id: string
@@ -300,12 +319,16 @@ export interface MultiblockDeclaration {
   readonly variants: readonly MultiblockVariant[]
   readonly rules: readonly MultiblockRule[]
   readonly backbone: MultiblockBackbone
-  readonly frames: readonly MultiblockFrame[]
+  /** **场景清单**（文件格式键 `frames`；变体配置集合，不是时间轴）。 */
+  readonly scenes: readonly MultiblockScene[]
   readonly couplings: readonly MultiblockCoupling[]
   readonly couplingMode: string
   readonly notes: readonly MultiblockNote[]
   /**
    * 呈现语义（G3；见 {@link MultiblockViewerSemantics}）。
+   *
+   * 注：`viewerSemantics.frameIsVariant` / `playback` 的**键名来自文件格式**（外部兼容，不改）；
+   * 语义上它们描述的是「场景 = 变体、不参与播放」。
    *
    * **不进** {@link multiblockDeclDigest}：它不改变生成物的几何（与 `notes`/`opsLegend`/
    * `sourceClass` 同一判据 —— 让「只改一句播放说明」触发全量重建正是 A11 要拦的形态）。
@@ -337,12 +360,12 @@ export interface MultiblockDeclaration {
 /**
  * 逐帧**声明参考网格**的取证承载（G3 的过渡通道）。
  *
- * ## 为什么是**独立类型**（不是 {@link MultiblockFrame} 的一个字段）
+ * ## 为什么是**独立类型**（不是 {@link MultiblockScene} 的一个字段）
  *
  * 契约 §9.6：帧声明的 `cellGrid`「存在 → 只作**校验/取证**用途；**生产产物必须省略**」；
  * `domain/content` 的帧声明明文「帧只承载**时间轴上的位置**，网格内容归**对象**」。
  * 网格是**对象侧的求值产物**（契约 §5：`ASSEMBLE(doc, variantKey) → cellGrid`），
- * 不是声明字段 —— 把它长在 `MultiblockFrame` 上会让"帧声明"与"求值产物"在类型上
+ * 不是声明字段 —— 把它长在 `MultiblockScene` 上会让"场景声明"与"求值产物"在类型上
  * 不可区分，而那正是 §9.6 的反模式（"每帧带参考 `cellGrid`" = 组合展开）。
  *
  * ## 不进 {@link multiblockDeclDigest}：**类型层面**强制，不是命名约定
@@ -357,9 +380,9 @@ export interface MultiblockDeclaration {
  * **不读**本字段。机械判据：同一份声明，带取证网格与不带它，装配出的网格/报告/
  * 摘要逐项相等（见 `composition/__tests__` 的 G3 判据）。
  */
-export interface MultiblockFrameGridEvidence {
-  /** 该帧的**声明下标**（`MultiblockFrame.index`；与数组下标可不同）。 */
-  readonly frameIndex: number
+export interface MultiblockSceneGridEvidence {
+  /** 该场景的**声明下标**（`MultiblockScene.index`；与数组下标可不同）。 */
+  readonly sceneIndex: number
   /** 参考网格，朝向 `[z][row][col]`、row 0 = 顶部（与 `sizeSteps[].cellGrid` 同约定）。 */
   readonly cellGrid: readonly (readonly (readonly number[])[])[]
 }
@@ -377,7 +400,7 @@ export interface MultiblockFrameGridEvidence {
  * 它**不是** `RuntimeDocument.multiblockSource` 换个存放位置：那个是**解析侧的整份原始
  * JSON**（含 `decl`/`raw` 节点、解析期的 `Map`、四张额外调色板）。本类型的两个字段都是
  * **内核承载**：`declaration` 由类型化适配器对真实解析结果产出（摊平/去 `raw`/逐层冻结），
- * `frameGridEvidence` 是 G3 新立的取证通道。
+ * `sceneGridEvidence` 是 G3 新立的取证通道。
  *
  * 它也**不是**从类型化投影面**反演**出来的 legacy 形状（#388 评论 7686 第 2 条）：
  * 两个字段在适配器里**各自**从**已解析结果**直接读出，不经任何形状回推。
@@ -386,22 +409,22 @@ export interface MultiblockFrameGridEvidence {
  *
  * 它们有**同一个产生者**（类型化适配器，同一个已解析结果）与**同一个生命周期**
  * （一份文档一次），而消费者不同：`declaration` 进内容权威与装配求值，
- * `frameGridEvidence` 只进取证面。合在一个承运里，装配的入口形参才能
+ * `sceneGridEvidence` 只进取证面。合在一个承运里，装配的入口形参才能
  * **不含 `RuntimeDocument`**（G3 的目标状态）。
  */
 export interface MultiblockBody {
   /**
    * 求值依据的**内核声明**（与内容权威同源：同一适配器、同一已解析结果）。
    *
-   * 装配器读的全部声明事实都在这里（通道/运行态/变体/规则/骨架/帧/并集调色板），
+   * 装配器读的全部声明事实都在这里（通道/运行态/变体/规则/骨架/场景/并集调色板），
    * 故"多方块再装配"不再需要旧文档。
    */
   readonly declaration: MultiblockDeclaration
   /**
-   * 逐帧声明参考网格的**取证**通道（独立类型，见 {@link MultiblockFrameGridEvidence}）。
-   * 空数组 = 这份文件没有帧级参考网格（**生产产物**的常态，契约 §9.6）。
+   * 逐场景声明参考网格的**取证**通道（独立类型，见 {@link MultiblockSceneGridEvidence}）。
+   * 空数组 = 这份文件没有场景级参考网格（**生产产物**的常态，契约 §9.6）。
    */
-  readonly frameGridEvidence: readonly MultiblockFrameGridEvidence[]
+  readonly sceneGridEvidence: readonly MultiblockSceneGridEvidence[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -439,7 +462,7 @@ export const EMPTY_MULTIBLOCK_DECLARATION: MultiblockDeclaration = Object.freeze
   variants: Object.freeze([]) as readonly MultiblockVariant[],
   rules: Object.freeze([]) as readonly MultiblockRule[],
   backbone: Object.freeze({ kind: '', sizeChannel: '', sizeSteps: Object.freeze([]) }) as MultiblockBackbone,
-  frames: Object.freeze([]) as readonly MultiblockFrame[],
+  scenes: Object.freeze([]) as readonly MultiblockScene[],
   couplings: Object.freeze([]) as readonly MultiblockCoupling[],
   couplingMode: '',
   notes: Object.freeze([]) as readonly MultiblockNote[],
@@ -455,7 +478,7 @@ export const EMPTY_MULTIBLOCK_DECLARATION: MultiblockDeclaration = Object.freeze
 /**
  * 声明的**内容身份**。
  *
- * 覆盖全部**参与装配或呈现**的字段（通道/运行态/变体/规则/骨架/帧/调色板/耦合）。
+ * 覆盖全部**参与装配或呈现**的字段（通道/运行态/变体/规则/骨架/场景/调色板/耦合）。
  * 不覆盖诊断性字段（`notes`/`opsLegend`/`sourceClass`）：它们不改变生成物的几何，
  * 让它们进身份会使"只改一句说明"触发全量重建（A11「只改注解描述 ⇒ 方块几何重建数为 0」
  * 的同族要求；这正是 §15 第 5 条要退役的"非内容版本冒充内容变化"）。
@@ -472,7 +495,7 @@ export function multiblockDeclDigest(decl: MultiblockDeclaration): number {
     variants: decl.variants.map((v) => [v.key, v.totalTier, v.values, v.runstate]),
     rules: decl.rules.map((r) => [r.id, r.phase, r.kind, r.index ?? null, r.indexRole ?? null, r.channel ?? null, r.indexTable ?? null, r.indexAliases ?? null, r.sel ?? null, r.x ?? null, r.y ?? null, r.z ?? null, r.guard ?? null]),
     backbone: decl.backbone.sizeSteps.map((s) => [s.channel, s.w, s.hh, s.d, s.roles, s.cellGrid]),
-    frames: decl.frames.map((f) => [f.index, f.variant, f.runstate, f.stepIndex, f.rules]),
+    scenes: decl.scenes.map((f) => [f.index, f.variant, f.runstate, f.stepIndex, f.rules]),
     couplings: decl.couplings.map((c) => [c.id, c.a, c.b, c.requires]),
     palette: decl.blockPalette.map((e) => [e.registryId, e.meta, e.assetId]),
   })

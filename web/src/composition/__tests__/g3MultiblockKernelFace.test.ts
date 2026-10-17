@@ -55,11 +55,11 @@ const FIXTURES = ['multiblock-tier-only', 'multiblock-ebf-2ch', 'multiblock-lsc-
 /**
  * 条件 ①（#388 评论 7672）的**类型层面**形态：`cellGrid` **不是**声明字段
  * ⇒ 取证网格在类型上到不了 `multiblockDeclDigest`（它的形参就是 `MultiblockDeclaration`）。
- * 谁把 `cellGrid` 加回 `MultiblockFrame`（或声明本身），这一行就编译失败。
+ * 谁把 `cellGrid` 加回 `MultiblockScene`（或声明本身），这一行就编译失败。
  */
 type CellGridNotInDeclaration = Extract<
   'cellGrid',
-  keyof MultiblockDeclaration | keyof MultiblockDeclaration['frames'][number]
+  keyof MultiblockDeclaration | keyof MultiblockDeclaration['scenes'][number]
 > extends never
   ? true
   : never
@@ -114,7 +114,7 @@ describe('R2-G3 · 内层 body 的内核承运（生产链）', () => {
       // ① 非空：声明两半都在（通道/帧/并集调色板），且不是"空声明"。
       expect(body.declaration.multiblockCount).toBe(1)
       expect(body.declaration.channels.length).toBeGreaterThan(0)
-      expect(body.declaration.frames.length).toBeGreaterThan(0)
+      expect(body.declaration.scenes.length).toBeGreaterThan(0)
       expect(body.declaration.blockPalette.length).toBeGreaterThan(0)
 
       // ② 等于**适配器输出**：装配回执与输入是**同一份**承运（不是又造一份）。
@@ -126,7 +126,7 @@ describe('R2-G3 · 内层 body 的内核承运（生产链）', () => {
       expect(body as unknown as Record<string, unknown>).not.toBe(doc.multiblock)
       expect(body.declaration as unknown as Record<string, unknown>).not.toHaveProperty('decl')
       expect(body.declaration as unknown as Record<string, unknown>).not.toHaveProperty('raw')
-      for (const frame of body.declaration.frames) {
+      for (const frame of body.declaration.scenes) {
         expect(frame as unknown as Record<string, unknown>).not.toHaveProperty('raw')
       }
 
@@ -211,16 +211,16 @@ describe('R2-G3 · 过渡不变式：诊断出现 ⇒ 该帧声明 grid 被忽�
 
     const injected = multiblockBodyContentOf(parsedInjected)
     // 承运：取证通道拿到了它（不是静默丢），帧号 = 该帧的**声明下标**。
-    expect(injected.frameGridEvidence).toHaveLength(1)
-    expect(injected.frameGridEvidence[0]!.frameIndex).toBe(clean.declaration.frames[0]!.index)
-    expect(injected.frameGridEvidence[0]!.cellGrid).toEqual([[[9]]])
+    expect(injected.sceneGridEvidence).toHaveLength(1)
+    expect(injected.sceneGridEvidence[0]!.sceneIndex).toBe(clean.declaration.scenes[0]!.index)
+    expect(injected.sceneGridEvidence[0]!.cellGrid).toEqual([[[9]]])
     // 与解析侧原物**不同物**（拷贝 + 逐层冻结）。
-    expect(injected.frameGridEvidence[0]!.cellGrid).not.toBe(injectedGrid)
-    expect(Object.isFrozen(injected.frameGridEvidence[0]!.cellGrid)).toBe(true)
+    expect(injected.sceneGridEvidence[0]!.cellGrid).not.toBe(injectedGrid)
+    expect(Object.isFrozen(injected.sceneGridEvidence[0]!.cellGrid)).toBe(true)
 
     // ---- 不变式 1：取证网格**不进身份**（带与不带 ⇒ 同摘要） -------------------
     expect(multiblockDeclDigest(injected.declaration)).toBe(multiblockDeclDigest(clean.declaration))
-    for (const frame of injected.declaration.frames) {
+    for (const frame of injected.declaration.scenes) {
       expect(frame as unknown as Record<string, unknown>).not.toHaveProperty('cellGrid')
     }
 

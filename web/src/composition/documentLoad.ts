@@ -112,7 +112,7 @@ function multiblockProjectionFaceOf(assembled: {
       readonly declaration: unknown
       readonly blockPalette: unknown
       readonly assets: unknown
-      readonly frames: unknown
+      readonly scenes: unknown
       readonly schemaVersion: number | null
       readonly multiblockCount: number
     }
@@ -129,7 +129,7 @@ function multiblockProjectionFaceOf(assembled: {
     declRaw: mb.declRaw,
     blockPalette: mb.projection.blockPalette,
     assets: mb.projection.assets,
-    frames: mb.projection.frames,
+    scenes: mb.projection.scenes,
     schemaVersion: mb.projection.schemaVersion,
     multiblockCount: mb.projection.multiblockCount,
   }

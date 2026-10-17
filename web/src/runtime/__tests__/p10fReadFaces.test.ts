@@ -110,7 +110,7 @@ describe('D3/R4 `frameDeclarations().labels`（与 count/durations 同源同分�
       expect(decl.count, '场景清单不进时间轴 ⇒ 帧数 0').toBe(0)
       expect(decl.labels).toEqual([])
       // 反空洞真：该夹具确实声明了多场景（否则本判据可能只是夹具没内容）。
-      expect(h.session!.document()!.content.multiblock.frames.length).toBeGreaterThan(1)
+      expect(h.session!.document()!.content.multiblock.scenes.length).toBeGreaterThan(1)
     } finally {
       h.dispose()
     }

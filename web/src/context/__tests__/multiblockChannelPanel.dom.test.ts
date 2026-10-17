@@ -80,9 +80,10 @@ function panelModelFor(
 const dockBaseProps = {
   activeTab: 'channels',
   'onUpdate:activeTab': () => {},
-  hasWorldMultiFrame: true,
+  // M5-1：多方块文档没有时间轴帧（帧控制 tab 只属于帧为主文档）
+  hasWorldMultiFrame: false,
   worldFrameIndex: 0,
-  worldFrameCount: 432,
+  worldFrameCount: 0,
   framesPlaybackIsPlaying: false,
   meshBusy: false,
   gridHeight: 5,
@@ -174,7 +175,7 @@ describe('T2.4 「通道」面板 DOM（真实组件）', () => {
 })
 
 describe('T2.5 下方栏 tab（真实组件）', () => {
-  it('多方块文档：出现「通道」tab 并渲染面板；切到帧控制后通道面板让位', async () => {
+  it('多方块文档：出现「通道」tab 并渲染面板；**不出现帧控制 tab**（场景不参与播放）', async () => {
     const doc = await parse(ebfFixture)
     const onUpdate = vi.fn()
     const el = mount(ViewportFrameLayerDock, {
@@ -183,20 +184,17 @@ describe('T2.5 下方栏 tab（真实组件）', () => {
       'onUpdate:activeTab': onUpdate,
     })
 
+    // M5-1：多方块文档没有时间轴帧（场景清单 ≠ 时间轴）⇒ 帧控制 tab 不属于它。
     const tabs = [...el.querySelectorAll<HTMLElement>('.vp-dock__tab')]
-    expect(tabs.map((t) => t.getAttribute('data-dock-tab'))).toEqual(['channels', 'frame', 'layer'])
+    expect(tabs.map((t) => t.getAttribute('data-dock-tab'))).toEqual(['channels', 'layer'])
     expect(el.querySelector('[data-dock-panel="channels"]')).toBeTruthy()
     expect(el.querySelector('[data-mb-status]')).toBeTruthy()
     expect(el.querySelector('.vp-dock__tab--active')!.getAttribute('data-dock-tab')).toBe('channels')
-    // 既有状态行顺序不变：`.vp-dock__stat` 的 .first() 仍应是「帧」（T2.6 harness 依赖）
+    // 状态行：帧那一项缺席（没有帧轴），层与通道项按既有顺序
     const stats = [...el.querySelectorAll<HTMLElement>('.vp-dock__stat')]
-    expect(stats[0]!.textContent).toContain('帧')
-    expect(stats[1]!.textContent).toContain('层')
-    expect(stats[2]!.getAttribute('data-mb-status')).not.toBeNull()
-
-    // 点帧控制 → 只有 tab 状态变化（面板由父层 v-model 决定），通道面板不干扰帧控制控件
-    tabs[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(onUpdate).toHaveBeenCalledWith('frame')
+    expect(stats[0]!.textContent, '无帧轴 ⇒ 状态行首项是「层」').toContain('层')
+    expect(stats[1]!.getAttribute('data-mb-status')).not.toBeNull()
+    expect(el.textContent, '多方块文档不得出现「帧」状态读数').not.toContain('帧 ')
   })
 
   it('帧为主文档：通道 tab 不出现，帧控制/分层预览照旧', async () => {
@@ -204,6 +202,9 @@ describe('T2.5 下方栏 tab（真实组件）', () => {
     expect(doc.isMultiblock).toBe(false)
     const el = mount(ViewportFrameLayerDock, {
       ...dockBaseProps,
+      // 帧为主文档才是时间轴的拥有者 ⇒ 多帧时有帧控制 tab。
+      hasWorldMultiFrame: true,
+      worldFrameCount: 2,
       activeTab: 'frame',
       channelPanel: null,
     })

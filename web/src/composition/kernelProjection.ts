@@ -687,15 +687,19 @@ export interface KernelDeclarationProjection {
   readonly blockPalette: readonly BlockPaletteEntry[]
   /** 几何资产目录（`assetId` → 资产）；`blockPalette` 条目的几何从这里取。 */
   readonly assets: Readonly<Record<string, BlockGeometryAsset>>
-  /** 帧声明（写回内层 body 的 `frames`：变体/运行态/骨架阶/规则引用）。 */
-  readonly frames: readonly KernelFrameDeclaration[]
+  /**
+   * **场景声明**（写回内层 body 的 `frames` 键：变体/运行态/骨架阶/规则引用）。
+   *
+   * 领域叫「场景」（M5-1）；键名 `frames` 属**文件格式**，只在边界出现。
+   */
+  readonly scenes: readonly KernelSceneDeclaration[]
   /** 契约/payload 的 `schemaVersion`。 */
   readonly schemaVersion: number | null
   readonly multiblockCount: number
 }
 
-/** 一帧的**声明面**（投影用；网格由 `blockGrid` 载荷另行重建）。 */
-export interface KernelFrameDeclaration {
+/** 一个**场景的声明面**（投影用；网格由 `blockGrid` 载荷另行重建）。 */
+export interface KernelSceneDeclaration {
   readonly index: number
   readonly variant: string
   readonly runstate: string
@@ -875,8 +879,8 @@ export function projectMultiblockBody(declaration: KernelDeclarationProjection):
       new Map([[`${e.registryId.slice(e.registryId.indexOf(':') + 1)}\u0000${e.meta}`, e]]),
     ),
   )
-  // **不写 `frames`** —— 见 {@link projectMultiblockFrames} 的说明：
-  // 多方块的帧是**变体存储原语**，由该函数整份产出（不是本函数）。
+  // **不写 `frames`** —— 见 {@link projectMultiblockScenes} 的说明：
+  // 多方块的「帧」是**场景**（变体存储原语），由该函数整份产出（不是本函数）。
   return out
 }
 
@@ -917,7 +921,7 @@ export function projectMultiblockBody(declaration: KernelDeclarationProjection):
 function projectMultiblockScenes(
   declaration: KernelDeclarationProjection,
 ): Record<string, unknown>[] {
-  return declaration.frames.map((f, i) => {
+  return declaration.scenes.map((f, i) => {
     // ## M5-1：场景的 `label`/`durationMs` 是**声明**事实，不是时间轴事实
     //
     // 旧实现优先读 `content.frameAxis`（"时长轴优先，声明兜底"），那建立在
@@ -1443,10 +1447,10 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
     for (const [k, v] of Object.entries(rebuilt)) {
       if (!(k in plain)) plain[k] = v
     }
-    // 多方块的 `frames` 是**变体存储原语**（契约 §5.3）：本批修正后由
-    // `declaration.frames` **全部**产出（见 `projectMultiblockFrames`），
+    // 多方块的 `frames` 键承载的是**场景**（变体存储原语，契约 §5.3）：本批修正后由
+    // `declaration.scenes` **全部**产出（见 `projectMultiblockScenes`），
     // 故这里不再需要"合并声明帧到投影帧上"——那正是把 432 帧塌成 1 帧的旧做法。
-    const declarationFrames = projectMultiblockScenes(input.multiblockDeclaration)
+    const declarationScenes = projectMultiblockScenes(input.multiblockDeclaration)
     // ── 渲染视图模式：网格注入帧、**不**写多方块节点（见 `renderView` 的说明） ──
     //
     // 旧实现是 `buildMultiblockRenderView(doc, result, frameIndex)`：把装配出的
@@ -1455,7 +1459,7 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
     if (input.renderView !== undefined) {
       const current = Math.trunc(input.renderView.frameIndex)
       const gridStructure = structures[0]?.structure ?? null
-      const frames = declarationFrames.map((frame, i) => {
+      const frames = declarationScenes.map((frame, i) => {
         // 只给"首帧 + 当前帧"装网格（与旧语义一致：其余帧保持声明帧原样）
         if (i !== 0 && i !== current) return frame
         const withGrid: Record<string, unknown> = { ...frame }
@@ -1475,7 +1479,7 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
         }
       }
     } else {
-      plain.frames = declarationFrames
+      plain.frames = declarationScenes
       plain.documentShape = 'multiblock'
     }
   }

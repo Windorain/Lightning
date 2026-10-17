@@ -52,14 +52,14 @@ import {
   type MultiblockChannelKind,
   type MultiblockCoupling,
   type MultiblockDeclaration,
-  type MultiblockFrame,
-  type MultiblockFrameGridEvidence,
   type MultiblockNote,
   type MultiblockRule,
   type MultiblockRuleKind,
   type MultiblockRulePhase,
   type MultiblockRuleRef,
   type MultiblockRunstate,
+  type MultiblockScene,
+  type MultiblockSceneGridEvidence,
   type MultiblockSizeStep,
   type MultiblockVariant,
   type MultiblockViewerSemantics,
@@ -542,13 +542,20 @@ function noteOf(n: ParsedMultiblockDocument['decl']['notes'][number]): Multibloc
   return Object.freeze({ kind: n.kind, text: n.text })
 }
 
-function frameOf(f: ParsedMultiblockDocument['frames'][number]): MultiblockFrame {
+/**
+ * **格式 → 领域**：一条 `frames` 条目 → 一条**场景**声明。
+ *
+ * ⚠️ 键名差异是**边界适配**，不是笔误：文件格式的 `frames` 键（`.multiblock.json`）
+ * 承载的是**变体配置集合（场景，Scene）**，不是时间轴上的帧。格式不改（外部兼容），
+ * 领域**不沿用**那个词（M5-1 用户裁决：帧→场景概念更名）。
+ */
+function sceneOf(f: ParsedMultiblockDocument['frames'][number]): MultiblockScene {
   const out: {
     index: number
     variant: string
     runstate: string
     stepIndex: number
-    rules: readonly MultiblockFrame['rules'][number][]
+    rules: readonly MultiblockScene['rules'][number][]
     label?: string
     durationMs?: number
   } = {
@@ -665,7 +672,8 @@ export function multiblockDeclarationOf(parsed: ParsedMultiblockDocument | null 
     variants: Object.freeze(decl.variants.map(variantOf)),
     rules: Object.freeze(decl.rules.map(ruleOf)),
     backbone: backboneOf(decl.backbone),
-    frames: Object.freeze(parsed.frames.map(frameOf)),
+    // 格式键 `frames` → 领域场景清单（见 `sceneOf` 的说明）。
+    scenes: Object.freeze(parsed.frames.map(sceneOf)),
     couplings: Object.freeze(decl.couplings.map(couplingOf)),
     couplingMode: decl.couplingMode,
     notes: Object.freeze(decl.notes.map(noteOf)),
@@ -706,35 +714,36 @@ export interface MultiblockBodyResult {
  * JSON**（`context/runtimeDocument.ts:183`：`Record<string, unknown>`，含 `raw` 节点与
  * 解析期结构）。本函数产出的是**内核承运**：`declaration` 走既有的类型化转换
  * （{@link multiblockDeclarationOf}：摊平、去 `raw`、逐层冻结、调色板保序），
- * `frameGridEvidence` 是 G3 新立的取证通道。
+ * `sceneGridEvidence` 是 G3 新立的取证通道。
  *
  * ## 不是"换个存放位置"，也不是"反演 legacy 形状"（#388 评论 7686）
  *
  * 两个字段**各自**从**同一个已解析结果**直接读出（`parsed.decl`/`parsed.frames`），
  * **不经**任何旧形状回推：`declaration` 复用声明侧转换（同一实现，不是第二份），
- * 取证网格直接从 `parsed.frames[].cellGrid` 抄出并逐层冻结（拷贝 ⇒ 与解析侧**不同物**）。
+ * 取证网格直接从 `parsed.frames[].cellGrid` 抄出并逐层冻结（拷贝 ⇒ 与解析侧**不同物**）
+ * —— 格式键 `frames` 在这里就是**场景**清单（见 `sceneOf`）。
  * 诊断也同源：本函数返回的是 {@link multiblockDeclarationOf} 那一份（只读数组），
  * 不重算、不改写 —— 免得两个入口对同一份文件报出两套诊断。
  *
  * ## 为什么诊断**不变**
  *
- * G3 的落点是"网格归**对象侧求值产物**"，取证通道只是把帧声明的参考网格
+ * G3 的落点是"网格归**对象侧求值产物**"，取证通道只是把场景声明的参考网格
  * **换个承运**，没有把它变成求值输入。故 `FrameCellGridNotCarried` 的语义
  * （**声明**不承载它）与关闭条件（#388 评论 7501 第 4 项）都不受影响。
  */
 export function multiblockBodyOf(parsed: ParsedMultiblockDocument | null | undefined): MultiblockBodyResult {
   const { declaration, diagnostics } = multiblockDeclarationOf(parsed)
 
-  const evidence: MultiblockFrameGridEvidence[] = []
+  const evidence: MultiblockSceneGridEvidence[] = []
   if (parsed !== null && parsed !== undefined) {
     for (const f of parsed.frames) {
       if (f.cellGrid === undefined) continue
-      evidence.push(Object.freeze({ frameIndex: f.index, cellGrid: freezeEvidenceGrid(f.cellGrid) }))
+      evidence.push(Object.freeze({ sceneIndex: f.index, cellGrid: freezeEvidenceGrid(f.cellGrid) }))
     }
   }
 
   return Object.freeze({
-    body: Object.freeze({ declaration, frameGridEvidence: Object.freeze(evidence) }),
+    body: Object.freeze({ declaration, sceneGridEvidence: Object.freeze(evidence) }),
     diagnostics,
   })
 }

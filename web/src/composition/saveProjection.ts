@@ -88,7 +88,7 @@ function declarationOf(face: unknown): KernelDeclarationProjection | null | unde
     declRaw: (f.declRaw ?? {}) as Readonly<Record<string, unknown>>,
     blockPalette: (f.blockPalette ?? []) as KernelDeclarationProjection['blockPalette'],
     assets: (f.assets ?? {}) as KernelDeclarationProjection['assets'],
-    frames: (f.frames ?? []) as KernelDeclarationProjection['frames'],
+    scenes: (f.scenes ?? []) as KernelDeclarationProjection['scenes'],
     schemaVersion: (f.schemaVersion ?? null) as number | null,
     multiblockCount: (f.multiblockCount ?? 1) as number,
   }

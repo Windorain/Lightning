@@ -113,8 +113,8 @@ describe('P10b · 生产接线：装配产物进入内核会话', () => {
     session.seekFrame(1)
     expect(session.frameIndex(), '跳帧不生效：场景切换 ≠ 动画').toBe(0)
     // 但内容没有丢：全部场景声明仍在内核内容里（空帧轴 ≠ 丢内容）。
-    expect(assembled.content.multiblock.frames.length, '前提：夹具确实声明了多场景').toBeGreaterThan(1)
-    expect(kdoc.content.multiblock.frames.length).toBe(assembled.content.multiblock.frames.length)
+    expect(assembled.content.multiblock.scenes.length, '前提：夹具确实声明了多场景').toBeGreaterThan(1)
+    expect(kdoc.content.multiblock.scenes.length).toBe(assembled.content.multiblock.scenes.length)
     session.dispose()
   })
 

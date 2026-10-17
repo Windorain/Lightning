@@ -110,7 +110,7 @@ describe('R2-G3 · 装载携带 body（装配产物 → 会话 → Context 读�
       // 键面：承运只有这两键 —— `raw`/`decl` 这类旧形状**不在**（G3 的"不许反演"）。
       expect(Object.keys(carried as unknown as Record<string, unknown>).sort(), `${name}：承运键面`).toEqual([
         'declaration',
-        'frameGridEvidence',
+        'sceneGridEvidence',
       ])
       // 与解析侧原物**不同物**：承运不是"把旧载体换个地方放"。
       expect(carried, `${name}：承运不得是解析侧原物`).not.toBe(doc.multiblock as unknown as object)
@@ -120,7 +120,7 @@ describe('R2-G3 · 装载携带 body（装配产物 → 会话 → Context 读�
       ).not.toHaveProperty('raw')
       // 声明本身是内核承载（有骨架阶/调色板/帧声明），不是空的占位。
       expect(carried.declaration.id, `${name}：载体必须是真实声明`).not.toBe('')
-      expect(carried.declaration.frames.length, `${name}：帧声明必须随承运在场`).toBeGreaterThan(0)
+      expect(carried.declaration.scenes.length, `${name}：帧声明必须随承运在场`).toBeGreaterThan(0)
     }
   })
 

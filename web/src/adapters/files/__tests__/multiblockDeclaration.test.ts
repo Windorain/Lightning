@@ -78,7 +78,7 @@ describe('G1/G2 · 已解析声明 → 内核承载 → 内容身份（生产路
         parsedFixture.decl.backbone.sizeSteps[i]!.cellGrid,
       )
     }
-    expect(declaration.frames.length).toBe(parsedFixture.frames.length)
+    expect(declaration.scenes.length).toBe(parsedFixture.frames.length)
     expect(declaration.couplings.map((c) => c.id)).toEqual(parsedFixture.decl.couplings.map((c) => c.id))
     expect(declaration.notes).toHaveLength(parsedFixture.decl.notes.length)
     expect(declaration.opsLegend).toEqual(parsedFixture.decl.opsLegend)
@@ -100,7 +100,7 @@ describe('G1/G2 · 已解析声明 → 内核承载 → 内容身份（生产路
 
     // 迁移阻塞点的那一段：帧 + 声明现在都在内核内容里。
     const content = documentContent({ multiblock: declaration })
-    expect(content.multiblock.frames.length).toBe(parsedFixture.frames.length)
+    expect(content.multiblock.scenes.length).toBe(parsedFixture.frames.length)
 
     // 进内容身份：真实声明 ≠ 无声明。
     expect(contentVersionOf(content)).not.toBe(contentVersionOf(documentContent()))

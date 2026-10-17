@@ -66,6 +66,13 @@ export interface MultiblockChannelPanelModel {
   values: Record<string, number>
   runstates: Array<{ id: string; name: string }>
   runstate: string
+  /**
+   * **场景数**（变体配置集合的条数；观测点）。
+   *
+   * M5-1：这份清单是**场景（Scene）**，不是时间轴上的帧 —— 它与播放无关。
+   * 面板显示它只是为了让"文件声明了多少个变体配置"可见。
+   */
+  sceneCount: number
   /** 当前取值派生的变体键（观测点：装配产物确实随之变化） */
   variantKey: string
   /** 装配结果尺寸 `w×h×d`（观测点；装配失败为空串） */
@@ -326,6 +333,8 @@ export function assembleForSelection(
  * （旧文档 / 内核面）都能喂，面板本身不再依赖任何一种装配实现。
  */
 export interface ChannelPanelOutcome {
+  /** **场景数**（变体配置集合的条数；M5-1：场景不是时间轴帧）。 */
+  readonly sceneCount: number
   /** 当前取值派生的变体键（观测点）。 */
   readonly variantKey: string
   /** 装配尺寸文本（`formatDims` 的产出）；`''` = 本次没有装配结果。 */
@@ -354,6 +363,7 @@ export function buildChannelPanelModelOf(
     values: { ...state.values },
     runstates: decl.runstates.map((r) => ({ id: r.id, name: r.name })),
     runstate: state.runstate,
+    sceneCount: outcome.sceneCount,
     variantKey: outcome.variantKey,
     dims: outcome.dims,
     notices: [...outcome.notices],
@@ -378,6 +388,8 @@ export function buildChannelPanelModel(
   const mb = doc.multiblock
   if (!mb) return null
   return buildChannelPanelModelOf(mb.decl, state, {
+    // 文件格式键 `frames` 就是场景清单（见 `adapters/files/multiblockDeclaration#sceneOf`）。
+    sceneCount: doc.frames.length,
     variantKey: outcome.variantKey,
     dims: outcome.result ? formatDims(outcome.result.dims) : '',
     notices: outcome.notices,
