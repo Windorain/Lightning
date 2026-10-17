@@ -117,6 +117,7 @@ import {
 } from '@/domain/content'
 import { EMPTY_ANIMATION, type AnimationState } from '@/domain/animation'
 import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
+import { initialMultiblockSelection } from '@/domain/multiblockSelection'
 import { err, invalidValue, ok, type Result } from '@/domain/errors'
 import { normalizeCellContent, type CellContent, type CellContentTable } from '@/domain/cellContent'
 import { cellPositionKey } from '@/domain/cellPosition'
@@ -2077,7 +2078,7 @@ export function assembleMultiblockKernelFace(
   }
 
   const declaration = body.declaration
-  const selection = input.selection ?? initialSelectionOfDeclaration(declaration)
+  const selection = input.selection ?? initialMultiblockSelection(declaration)
   const outcome = assembleFromEvaluatorInput(evaluatorDocumentOf(declaration), selection)
   if (outcome === null) {
     // 文件缺陷（变体无 frame / stepIndex 越界…）：**显式失败**，与文档路径落
@@ -2247,37 +2248,16 @@ function mutableCopy(value: unknown): unknown {
   return value
 }
 
-/** 文档声明的初始多方块选择（与 `useMultiblockChannels` 的初始口径同源）。 */
-function initialSelection(doc: RuntimeDocument): MultiblockSelectionState {
-  return initialSelectionOfDeclaration(doc.multiblock?.decl)
-}
-
 /**
- * 声明 → 初始选择（旧载体与内核承运**同一实现**）。
+ * 文档声明的初始多方块选择。
  *
- * 形参只要三个字段：旧载体给的是 `doc.multiblock.decl`，内核承运给的是
- * `MultiblockDeclaration` —— 后者是前者的类型化摊平，两者的 `totalTierDomain`/
- * `channels`/`runstates` 语义相同。写成收窄形参而不是两次实现，是为了让
- * 「初始选择」只有一个定义点（§15 第 5 条）。
+ * M5-2：初值投影下沉到 `domain/multiblockSelection#initialMultiblockSelection`
+ * （面板初值 / 装载装配 / 画面求值**同一实现**）。此前这里另有一份"只按域夹取、不吸附
+ * `tierSample`"的实现 —— 两份口径会让"初始画面"与"面板初始显示"合法地不相等。
  */
-function initialSelectionOfDeclaration(
-  decl:
-    | {
-        readonly totalTierDomain: { readonly min: number; readonly max: number; readonly default?: number }
-        readonly channels: readonly { readonly key: string }[]
-        readonly runstates: readonly { readonly id: string }[]
-      }
-    | undefined,
-): MultiblockSelectionState {
-  if (!decl) return { totalTier: 1, values: {}, runstate: '' }
-  const domain = decl.totalTierDomain
-  const values: Record<string, number> = {}
-  for (const c of decl.channels) values[c.key] = 0
-  return {
-    totalTier: Math.min(Math.max(Math.trunc(domain.default ?? domain.max), Math.trunc(domain.min)), Math.trunc(domain.max)),
-    values,
-    runstate: decl.runstates[0]?.id ?? '',
-  }
+function initialSelection(doc: RuntimeDocument): MultiblockSelectionState {
+  const decl = doc.multiblock?.decl
+  return decl ? initialMultiblockSelection(decl) : { totalTier: 1, values: {}, runstate: '' }
 }
 
 /** 未使用占位：保持 `Transform` 类型可达（下游类型推导用）。 */

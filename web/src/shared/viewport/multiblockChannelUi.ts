@@ -32,6 +32,33 @@ import {
   type MultiblockInnerDocument,
 } from '@/context/multiblock'
 import { formatUnknownError } from '@/util/formatUnknownError'
+// M5-2：选择投影下沉到 domain（面板 / 装载装配 / 画面求值**同吃一处**）。
+// 本模块不再自己实现，只把同一批具名符号转出给既有调用方（签名/语义不变）。
+import {
+  clampChannelValue,
+  initialMultiblockSelection,
+  snapTierToSample,
+  tierSampleValues,
+} from '@/domain/multiblockSelection'
+import type {
+  MultiblockChannelFacts,
+  MultiblockDeclarationFacts,
+  MultiblockRunstateFacts,
+  MultiblockSelectionState,
+} from '@/domain/multiblockSelection'
+
+export {
+  clampChannelValue,
+  initialMultiblockSelection,
+  snapTierToSample,
+  tierSampleValues,
+}
+export type {
+  MultiblockChannelFacts,
+  MultiblockDeclarationFacts,
+  MultiblockRunstateFacts,
+  MultiblockSelectionState,
+}
 
 // ---------------------------------------------------------------------------
 // 面板模型（props 形状，Embed / Workbench 共用）
@@ -81,63 +108,10 @@ export interface MultiblockChannelPanelModel {
   notices: string[]
 }
 
-/** 当前取值选择（视图本地状态，与 `assembleSelection` 的输入同形）。 */
-export interface MultiblockSelectionState {
-  totalTier: number
-  values: Record<string, number>
-  runstate: string
-}
-
-// ---------------------------------------------------------------------------
-// 声明事实的**结构最小面**（R2/S3；两个载体都能喂）
-// ---------------------------------------------------------------------------
-
-/**
- * 下面这组接口是"**通道面板真正读到的声明事实**"，而**不是**某一种载体的形状。
- *
- * ## 为什么收成结构最小面（本批的落点）
- *
- * 本模块此前的形参是 `MultiblockDecl`（`context/parsers/multiblockDocument` 的解析形状）：
- * 它的**每个元素都带必填 `raw: Record<string, unknown>`**（`MultiblockChannelDecl.raw`
- * 等）。那使另一个载体 —— 内核域声明 `domain/multiblockDocument#MultiblockDeclaration`
- * （元素**无** `raw`，那是刻意的：#249 §12 禁止把原始 JSON 塞回核心）—— **结构上不可传入**，
- * 于是"按当前取值重算面板"只能继续吃旧解析形状（= 消费者没适应内核）。
- *
- * 收成最小面后：**解析形状**（多带的 `raw`/`enumName` 等是额外字段，可指派）与
- * **域声明**（字段齐备）**都能喂**，而"读了哪些字段"由下面这些名字**逐条写明** ——
- * 这也让"某个函数偷偷读了 `raw`"在类型层就不可能（本面没有它）。
- *
- * ## 机械核对（Lead 裁决 ③(a) 的前置条件）
- *
- * 本批实测（AST 逐函数字段读取，脚本见 Gitea #388 的证据附件）：
- * `tierSampleValues`/`channelSliderSpecs`/`clampChannelValue`/`initialMultiblockSelection`/
- * `assembleForSelection`/`buildChannelPanelModel` **函数体内出现 `raw` 属性 = 0 处**
- * （含经局部别名的读取）⇒ 收窄不丢字段、也没有把 `raw` 塞回内核。
- */
-export interface MultiblockChannelFacts {
-  readonly key: string
-  readonly name: string
-  readonly kind: string
-  readonly min: number
-  readonly max: number
-  readonly domain: Readonly<{ readonly lo: number; readonly hi: number }>
-  readonly slider: boolean
-}
-
-export interface MultiblockRunstateFacts {
-  readonly id: string
-  readonly name: string
-}
-
-/** 声明里"面板要用的那一部分"（域声明 `MultiblockDeclaration` 与解析形状都能指派）。 */
-export interface MultiblockDeclarationFacts {
-  readonly displayName: string
-  readonly totalTierDomain: Readonly<{ readonly min: number; readonly max: number; readonly default?: number }>
-  readonly tierSample: readonly number[]
-  readonly channels: readonly MultiblockChannelFacts[]
-  readonly runstates: readonly MultiblockRunstateFacts[]
-  readonly notes: readonly Readonly<{ readonly text: string }>[]
-}
+// M5-2：`MultiblockSelectionState` 与"声明事实的结构最小面"、以及
+// `tierSampleValues`/`snapTierToSample`/`clampChannelValue`/`initialMultiblockSelection`
+// 已下沉到 `domain/multiblockSelection`（面板 / 装载装配 / 画面求值同一实现），
+// 本文件在文件头以 `export type` / `export` 转出，签名与语义不变。
 
 /** 装配结论：结果 + 是否命中声明组合 + 提示。 */
 export interface MultiblockAssemblyOutcome {
@@ -149,37 +123,8 @@ export interface MultiblockAssemblyOutcome {
 }
 
 // ---------------------------------------------------------------------------
-// 声明 → 滑杆 / 初始取值
+// 声明 → 滑杆
 // ---------------------------------------------------------------------------
-
-/** 总 Tier 抽取值清单：显式 `tierSample` 优先，缺省 = 整个 `totalTierDomain`。 */
-export function tierSampleValues(decl: MultiblockDeclarationFacts): number[] {
-  const sample = decl.tierSample
-  if (Array.isArray(sample) && sample.length > 0) {
-    return [...sample].map((n) => Math.trunc(n)).sort((a, b) => a - b)
-  }
-  const out: number[] = []
-  for (let i = Math.trunc(decl.totalTierDomain.min); i <= Math.trunc(decl.totalTierDomain.max); i++) out.push(i)
-  return out
-}
-
-/**
- * Tier 吸附：把任意 Tier 值吸附到最近的**已声明**抽样值（并列取较小者）。
- *
- * 依据 T2.2 移交注意②：未落在 `tierSample` 的 Tier 会被装配器回落最近抽样并落 warning。
- * 滑杆吸附后 UI 只会停在已声明组合上，warning 不再因滑杆产生（文档瑕疵仍照实提示）。
- */
-export function snapTierToSample(samples: readonly number[], tier: number): number {
-  if (samples.length === 0) return Math.trunc(tier)
-  const target = Math.trunc(tier)
-  let best = samples[0]!
-  for (const v of samples) {
-    const d = Math.abs(v - target)
-    const bd = Math.abs(best - target)
-    if (d < bd || (d === bd && v < best)) best = v
-  }
-  return best
-}
 
 /** 每通道一条滑杆的规格（`slider === false` 的 `hatch` 已被解析器排除，此处不重复判断语义）。 */
 export function channelSliderSpecs(decl: MultiblockDeclarationFacts): ChannelSliderSpec[] {
@@ -193,38 +138,6 @@ export function channelSliderSpecs(decl: MultiblockDeclarationFacts): ChannelSli
       max: c.max,
       hi: c.domain.hi,
     }))
-}
-
-/**
- * 通道取值夹到声明取值域 `0..domain.hi`（滑杆理论上到不了域外，这里仍是**不信任输入**的一道闸）。
- * 未声明的通道 key → `null`（调用方忽略该次改动）。
- */
-export function clampChannelValue(
-  decl: MultiblockDeclarationFacts,
-  key: string,
-  value: number,
-): number | null {
-  const ch = decl.channels.find((c) => c.key === key)
-  if (!ch) return null
-  const v = Math.trunc(value)
-  if (!Number.isFinite(v)) return 0
-  return Math.min(Math.max(v, 0), ch.domain.hi)
-}
-
-/** 初始取值：Tier = `domain.default ?? max`（吸附抽样）、所有通道 Not set(0)、运行态 = 声明首项。 */
-export function initialMultiblockSelection(decl: MultiblockDeclarationFacts): MultiblockSelectionState {
-  const domain = decl.totalTierDomain
-  const samples = tierSampleValues(decl)
-  const rawDefault = Math.trunc(domain.default ?? domain.max)
-  const inDomain = Math.min(Math.max(rawDefault, Math.trunc(domain.min)), Math.trunc(domain.max))
-  const values: Record<string, number> = {}
-  // 契约 §5.1：变体声明值**每个通道都有**（未设置写 0）——故全部通道入表，滑杆只覆盖其中一部分
-  for (const c of decl.channels) values[c.key] = 0
-  return {
-    totalTier: snapTierToSample(samples, inDomain),
-    values,
-    runstate: decl.runstates[0]?.id ?? '',
-  }
 }
 
 // ---------------------------------------------------------------------------

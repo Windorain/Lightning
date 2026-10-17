@@ -66,6 +66,9 @@ import { framesPerSecond, type TimeValue } from '@/domain/animation'
 import { TIME_ZERO } from '@/domain/editing'
 import type { MultiblockBody } from '@/domain/multiblockDocument'
 import { generatedObjectWriteAuthority } from '@/domain/multiblock'
+// M5-2：保留键下沉到 domain（面板/装配/画面求值共用同一份取值空间契约）。
+import { RUNSTATE_CHANNEL, TOTAL_TIER_CHANNEL } from '@/domain/multiblockSelection'
+export { RUNSTATE_CHANNEL, TOTAL_TIER_CHANNEL }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 稳定身份（单一来源）
@@ -88,32 +91,10 @@ export const KERNEL_DOCUMENT_ID = 'doc-1'
 /** 内核编辑上下文 id（时间/播放/选择的归属；同一实例内唯一）。 */
 export const KERNEL_CONTEXT_ID = 'ctx-1'
 
-/**
- * 多方块**总档位**在 `EditContext.channelValues` 里的保留键（#282 P10b）。
- *
- * ## 为什么总档位也用"通道"承载
- *
- * 旧暂存（`shared/viewport/useMultiblockChannels.ts`）把 `totalTier` 与逐通道
- * `values` 分成两个字段存，但两者在内核里是**同一种东西**：一个数值域取值。
- * 用保留键承载后，总档位天然获得"所有 Area 共享"（#249 §3.3）与
- * "参与撤销/内容身份"（`EditContext` 是值），不需要第二个存储或第二条写通路。
- *
- * ## 为什么键名带 `$` 前缀
- *
- * 真实通道名来自多方块声明（`decl.channels[].key`），可能撞上任何普通标识符。
- * `$` 不是合法的声明通道名，故前缀使保留键与真实通道**不可能冲突**（结构性，
- * 不靠约定）。这是"两个不同事实必须可区分"（#249 §19.3）在键空间上的应用。
- */
-export const TOTAL_TIER_CHANNEL = '$totalTier'
-
-/**
- * 多方块**运行态**在 `EditContext.channelValues` 里的保留键（#282 P10b）。
- *
- * 值是运行态在声明里的**下标**（`channelValues` 的值类型是 `number`，
- * 契约 §5 如此规定）—— 故离散选择以序数表达，而非把 id 字符串塞进数值域。
- * 该口径差异已登记为 GF-10（#282），不在本层私自扩契约类型。
- */
-export const RUNSTATE_CHANNEL = '$runstate'
+// `TOTAL_TIER_CHANNEL` / `RUNSTATE_CHANNEL` 的定义已下沉到
+// `domain/multiblockSelection`（本文件只 re-export，见文件头 import）：
+// 保留键是**取值空间契约**，面板投影（domain）与画面求值（composition）都要读它，
+// 留在 runtime 会让下两层无法使用同一份常量。
 
 /** 空取值表（**冻结**的同一个实例：`channelValues()` 无结果时返回它，不每次新建）。 */
 const EMPTY_CHANNEL_VALUES: Readonly<Record<string, number>> = Object.freeze({})
