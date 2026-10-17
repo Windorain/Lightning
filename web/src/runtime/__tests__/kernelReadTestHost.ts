@@ -36,6 +36,12 @@ import { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID, KernelSession } from '@/runtime/kernelSession'
 import { adoptLoadedDocument } from '@/composition/documentLoad'
+import { multiblockDeclarationViewOf } from '@/domain/multiblockDocument'
+import { projectMultiblockSelection } from '@/domain/multiblockSelection'
+import {
+  channelPanelModelOf,
+  type MultiblockChannelPanelModel,
+} from '@/shared/viewport/multiblockChannelUi'
 
 export interface KernelReadHost {
   /** **生产** `Context` 实例（只有 `main`/`kernel` 两件被注入）。 */
@@ -146,6 +152,28 @@ function swapDocument(
   if (session === null) return
   if (next === null) session.markUnloaded()
   else session.markLoaded()
+}
+
+/**
+ * **生产面板模型**（与 `useKernelChannels#panel` **同一派生**）：内核读面 + 唯一求值点。
+ *
+ * M6-1：旧文档版 `buildChannelPanelModel`（形参 `RuntimeDocument`）已退役。判据要的
+ * 面板模型必须来自生产派生（声明 = `DocumentContent.multiblock`、场景数 = 声明里的
+ * `scenes`、尺寸/提示 = `evaluateMultiblockPresentation` 的装配报告），故把
+ * "生产派生"收在这一个测试口里 —— 两个判据文件不再各写一遍。
+ *
+ * `null` = 无声明（帧为主文档）或装配面缺席（如实降级，不伪造空面板）。
+ */
+export function productionPanelModelOf(host: KernelReadHost): MultiblockChannelPanelModel | null {
+  const decl = host.ctx.kernelMultiblockDeclaration()
+  if (decl === null) return null
+  const view = multiblockDeclarationViewOf(decl)
+  return channelPanelModelOf(
+    view,
+    projectMultiblockSelection(view, host.session?.channelValues() ?? {}),
+    decl.scenes.length,
+    host.ctx.kernelMultiblockEvaluation()?.assembly ?? null,
+  )
 }
 
 /** **legacy 分支**宿主：不装配（读面走 legacy 侧）。 */

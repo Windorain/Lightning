@@ -32,13 +32,12 @@ import {
 } from '@/context/parsers/builtinParsers'
 import { plainRootOf } from '@/adapters/plainRoot'
 import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
-import { projectMultiblockSelection } from '@/domain/multiblockSelection'
-import { multiblockDeclarationViewOf } from '@/domain/multiblockDocument'
-import { makeAdoptedKernelReadHost, type KernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
 import {
-  channelPanelModelOf,
-  type MultiblockChannelPanelModel,
-} from '@/shared/viewport/multiblockChannelUi'
+  makeAdoptedKernelReadHost,
+  productionPanelModelOf,
+  type KernelReadHost,
+} from '@/runtime/__tests__/kernelReadTestHost'
+import type { MultiblockChannelPanelModel } from '@/shared/viewport/multiblockChannelUi'
 
 import ebfFixture from './fixtures/multiblock-ebf-2ch.json'
 import tierOnlyFixture from './fixtures/multiblock-tier-only.json'
@@ -141,19 +140,6 @@ async function makeHost(raw: unknown): Promise<KernelReadHost> {
   return makeAdoptedKernelReadHost(parsed.document as never, plainRoot)
 }
 
-/** 生产面板派生（与 `useKernelChannels#panel` 同一实现：内核读面 + 唯一求值点）。 */
-function productionPanelModel(host: KernelReadHost): MultiblockChannelPanelModel | null {
-  const decl = host.ctx.kernelMultiblockDeclaration()
-  if (decl === null) return null
-  const view = multiblockDeclarationViewOf(decl)
-  return channelPanelModelOf(
-    view,
-    projectMultiblockSelection(view, host.session!.channelValues()),
-    decl.scenes.length,
-    host.ctx.kernelMultiblockEvaluation()?.assembly ?? null,
-  )
-}
-
 const mounted: App[] = []
 const hosts: HTMLElement[] = []
 
@@ -190,7 +176,7 @@ describe('M6-1 冻结面板夹具 = 生产派生（内核读面 + 唯一求值�
   it('EBF 默认取值：冻结夹具与生产派生**逐字段相等**', async () => {
     const host = await makeHost(ebfFixture)
     try {
-      expect(productionPanelModel(host)).toEqual(FROZEN_PANEL_MODELS['ebf-default'])
+      expect(productionPanelModelOf(host)).toEqual(FROZEN_PANEL_MODELS['ebf-default'])
     } finally {
       host.dispose()
     }
@@ -205,7 +191,7 @@ describe('M6-1 冻结面板夹具 = 生产派生（内核读面 + 唯一求值�
       session.setChannelValue('coil', 3)
       session.setChannelValue('glass', 0)
       session.setRunstateIndex(1)
-      expect(productionPanelModel(host)).toEqual(FROZEN_PANEL_MODELS['ebf-high'])
+      expect(productionPanelModelOf(host)).toEqual(FROZEN_PANEL_MODELS['ebf-high'])
     } finally {
       host.dispose()
     }
@@ -214,7 +200,7 @@ describe('M6-1 冻结面板夹具 = 生产派生（内核读面 + 唯一求值�
   it('tier-only 默认取值：冻结夹具与生产派生**逐字段相等**', async () => {
     const host = await makeHost(tierOnlyFixture)
     try {
-      expect(productionPanelModel(host)).toEqual(FROZEN_PANEL_MODELS['tier-only-default'])
+      expect(productionPanelModelOf(host)).toEqual(FROZEN_PANEL_MODELS['tier-only-default'])
     } finally {
       host.dispose()
     }
