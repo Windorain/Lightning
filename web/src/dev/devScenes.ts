@@ -41,6 +41,7 @@ for (const [path, mod] of Object.entries(rawGlob)) {
  */
 const SCENE_DISPLAY_NAMES: Readonly<Record<string, string>> = Object.freeze({
   'builtin-multiblock-ebf': '示例·电力高炉（多方块）',
+  'builtin-animated-texture': '示例·动态贴图',
 })
 
 /** 内置示例在面板里的呈现名（未登记 ⇒ id 本身）。 */

@@ -29,8 +29,10 @@ import {
   initialMultiblockSelection,
   tierSampleValues,
 } from '@/shared/viewport/multiblockChannelUi'
+import { textureAnimationOf } from '@/domain/textureAnimation'
 
 import sample from '../../../data/scenes/builtin-multiblock-ebf.json'
+import animatedSample from '../../../data/scenes/builtin-animated-texture.json'
 
 /** 与宿主同一份注册顺序（生产解析入口）。 */
 function productionRegistry() {
@@ -84,5 +86,67 @@ describe('内置样例：产品资产形态（不是夹具）', () => {
 
     const initial = initialMultiblockSelection(decl)
     expect(initial).toEqual({ totalTier: 2, values: { height: 0, coil: 0, glass: 0 }, runstate: 'idle' })
+  })
+})
+describe('内置样例：动态贴图（示例·动态贴图）', () => {
+  const envelope = animatedSample as unknown as Record<string, unknown>
+  const meta = envelope.meta as Record<string, unknown>
+
+  it('信封是生产形态，且不含夹具字段', () => {
+    expect(envelope.documentFormat).toBe('Envelope')
+    expect(envelope.payloadEncoding).toBe('gzip+base64')
+    for (const key of ['payloadNote', 'fixtureSynthetic', 'fixtureFile', 'modSource']) {
+      expect(key in envelope, `信封根不得含夹具字段 ${key}`).toBe(false)
+      expect(key in meta, `meta 不得含夹具字段 ${key}`).toBe(false)
+    }
+    expect(meta.name).toBe('示例·动态贴图')
+    expect(displayNameOfScene('builtin-animated-texture')).toBe('示例·动态贴图')
+  })
+
+  it('多帧 + 动画材质：播放按钮可见（world 帧 3）、材质声明 4 帧竖条', async () => {
+    const parsed = await productionRegistry().detectAndParse(envelope)
+    expect(parsed.error).toBeUndefined()
+    const doc = parsed.document!
+    expect(doc.isMultiblock, '动态贴图样例是帧为主文档').toBe(false)
+
+    // 世界帧轴：3 帧 × 200ms —— 单帧文档没有帧控制 tab（用户无法"播放着看"）。
+    expect(doc.frameCount).toBe(3)
+    for (const f of doc.frames) expect(f.durationMs, '帧时长是文档声明（不是缺省 1ms）').toBe(200)
+
+    // 材质：animated + 4 帧声明；竖条 16×64 = 4 格。
+    const material = (doc.materialPalette as Array<Record<string, unknown>>)[0]!
+    expect(material.kind).toBe('animated')
+    expect(material.animation).toEqual({
+      defaultFrametimeTicks: 2,
+      frameSequence: [
+        { index: 0 },
+        { index: 1, timeTicks: 3 },
+        { index: 2, timeTicks: 1 },
+        { index: 3, timeTicks: 2 },
+      ],
+    })
+
+    const base64 = (doc.textureBlobs as Record<string, string>)['0']!
+    const png = Buffer.from(base64, 'base64')
+    const width = png.readUInt32BE(16)
+    const height = png.readUInt32BE(20)
+    expect([width, height], '竖条：宽 = 格边长、高 = 4 格').toEqual([16, 64])
+    expect(height % width).toBe(0)
+
+    // 生产派生：声明 → 可采样序列（同一函数，M5-3 的唯一派生点）。
+    const binding = textureAnimationOf({
+      id: 'material:0',
+      resource: { assetId: 'material:0', contentVersion: 'sha:test', url: 'inline:0' },
+      kind: 'animated',
+      animation: material.animation as never,
+      width,
+      height,
+    })
+    expect(binding, '必须派生出发可采样序列（否则样例不会动）').not.toBeNull()
+    expect(binding!.stripFrameCount).toBe(4)
+    expect(binding!.sequence.frames.map((f) => f.index)).toEqual([0, 1, 2, 3])
+    // 2/3/1/2 tick = 0.10/0.15/0.05/0.10 s ⇒ 一个循环 0.40 s（GIF 计划与视口采样同源）。
+    const seconds = binding!.sequence.frames.map((f) => f.duration.num / f.duration.den)
+    expect(seconds.map((s) => Number(s.toFixed(3)))).toEqual([0.1, 0.15, 0.05, 0.1])
   })
 })
