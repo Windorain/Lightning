@@ -208,6 +208,26 @@ function put(buf, x, y, [r, g, b, a = 255]) {
 function fill(buf, rgba) {
   for (let y = 0; y < PX; y++) for (let x = 0; x < PX; x++) put(buf, x, y, rgba)
 }
+/**
+ * **细纹底纹**：2×2 方块交错的明暗差（±8）。
+ *
+ * 为什么每个面都要有它（M5 手测返工的判据需要）：
+ *  - 画面层判据用"局部高频细节占比"证明**贴图真的贴上了**（纯色面只在棱边有对比）；
+ *  - 大片平坦色块会让该读数接近 0（16×16 的板子只有边框/铆钉有对比，实测 0.089）；
+ *  - 真实的 GT 机壳贴图同样是"细粒度像素纹理"，故这里给一个确定性的交错底纹
+ *    （2 像素块、±8 灰阶），既让机器看起来有材质，也让判据有稳定的量级。
+ */
+function dither(buf, amount = 8) {
+  for (let y = 0; y < PX; y++) {
+    for (let x = 0; x < PX; x++) {
+      const i = (y * PX + x) * 4
+      const sign = ((x >> 1) + (y >> 1)) % 2 === 0 ? 1 : -1
+      for (let c = 0; c < 3; c++) {
+        buf[i + c] = Math.max(0, Math.min(255, buf[i + c] + sign * amount))
+      }
+    }
+  }
+}
 /** 机壳：灰色钢板 + 深色边框 + 四角铆钉。 */
 function texCasing() {
   const t = blank()
@@ -220,6 +240,7 @@ function texCasing() {
     for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) put(t, x + dx, y + dy, [200, 204, 210])
   }
   for (let y = 6; y <= 9; y++) for (let x = 5; x <= 10; x++) put(t, x, y, [122, 127, 134])
+  dither(t)
   return t
 }
 /** 线圈：铜色横条（深/亮交替）。 */
@@ -234,6 +255,7 @@ function texCoil() {
     put(t, x, 0, [96, 54, 24])
     put(t, x, PX - 1, [96, 54, 24])
   }
+  dither(t)
   return t
 }
 /** 玻璃：浅蓝半透明 + 深色框 + 一条高光斜线。 */
@@ -245,6 +267,7 @@ function texGlass() {
     put(t, 0, i, [96, 150, 180, 235]); put(t, PX - 1, i, [96, 150, 180, 235])
   }
   for (let i = 2; i < 9; i++) for (let d = 0; d < 2; d++) put(t, i + d, PX - 2 - i, [220, 240, 252, 225])
+  dither(t)
   return t
 }
 /** 控制器：深色机壳 + 绿色屏幕（带扫描线）+ 红色指示灯。 */
@@ -259,6 +282,7 @@ function texController() {
   }
   for (const x of [3, 12]) for (let y = 4; y <= 11; y++) put(t, x, y, [24, 70, 44])
   put(t, 14, 2, [220, 64, 64])
+  dither(t, 6)
   return t
 }
 
