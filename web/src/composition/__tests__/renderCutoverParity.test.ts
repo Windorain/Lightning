@@ -24,6 +24,14 @@
  *             逐格 pieces / 逐三角形属性必须**逐位相同**
  * ```
  *
+ * ## M6-1：多方块形态的 before 换成了**冻结几何指纹**
+ *
+ * 多方块夹具的 before 原先走视口层旧装配簇（`assembleSelection` +
+ * `buildMultiblockRenderView`）。该簇已随 `M5_CLOSEOUT` 退役 ⇒ 现在比的是
+ * "生产链（内核装配 → 投影）的几何指纹"与"切换前那条路最后一次全绿时的**实测指纹**"
+ * （{@link FROZEN_GEOMETRY}）。帧为主信封那一组仍保留"原始 JSON vs 生产链"的活对照
+ * （它的 before 不经过任何已退役入口）。
+ *
  * 关键是两条路径都喂给**同一份生产几何核心**（`render/mesh/structureGeometryCore`），
  * 而不是各写一套三角形算法 —— 后者会让"两条路径都算错成一样"成为假绿。
  *
@@ -50,12 +58,11 @@ import { projectGridCells, projectKernelDocument, projectToRuntimeDocument } fro
 import type { KernelDeclarationProjection } from '@/composition/kernelProjection'
 import { createParserRegistry, type ParserRegistryImpl } from '@/context/parserRegistry'
 import { V2PlainParser, WorldParser, StructureDataParser, createEnvelopeParser } from '@/context/parsers/builtinParsers'
-import { assembleSelection, type MultiblockInnerDocument } from '@/context/multiblock'
 import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
 import { fixturePath, readJson } from '@/context/__tests__/multiblockFixtureIo.mjs'
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import { unwrap } from '@/domain/errors'
-import { buildMultiblockRenderView } from '@/shared/viewport/multiblockChannelUi'
+import { digestOf } from '@/domain/identity'
 import { resolveRenderBundle } from '@/render/data/bundleResolve'
 import type { StructureDefinition } from '@/render/schema/types'
 import {
@@ -191,36 +198,106 @@ function beforeDefinition(inner: Record<string, unknown>): StructureDefinition {
 }
 
 /**
- * **before（多方块形态）**：**切换前**的渲染链真实输入（`StructureDefinition`）。
+ * **冻结几何指纹（多方块形态）** —— 切换前渲染输入在 M6-1 收口时的**实测读数**。
  *
- * ## 为什么多方块的 before 不能直接取内层 body
+ * ## 为什么是"冻结"而不是"每次现算 before"
  *
- * 多方块文档的 `frame.grid` 恒为 `null`（网格是**装配产物**，契约设计如此）。
- * 故切换前的渲染几何**不是**文件里现成的，而是：
+ * 旧 before 侧走 `assembleSelection` + `buildMultiblockRenderView`（视口层的旧文档装配簇）。
+ * 那条路径在 M6-1 已随 `M5_CLOSEOUT` 退役（生产零调用，唯一消费者是本文件）。
+ * 它的**判据价值**是"切换没有改变几何"，故本批把它当时的输出**冻结成指纹**：
  *
  * ```
- * 内层 body ──assembleSelection──▶ Grid ──serialize()（首帧 structure 展开）──▶ resolveRenderBundle ──▶ StructureDefinition
+ * 切换前渲染输入（旧装配簇，已退役）──实测──▶ 本文件的 FROZEN_GEOMETRY
+ *                                              ▲ 必须逐位相等
+ * 生产链（内核装配 → 投影 → resolveRenderBundle）┘
  * ```
  *
- * 这正是 `context/__tests__/multiblockChannelRender.test.ts:174-178` 建立的既有路径，
- * 也是 `drwMeshPipeline` 切换前真正吃的东西。⇒ before 必须走同一条路，
- * 否则比较的不是"切换前后的渲染输入"而是"两个不同的东西"（那会让对齐失去意义）。
+ * 指纹口径与运行期 `fingerprint()` 同源：`pieceKeys` 逐条保留（顺序即绘制顺序），
+ * 顶点/UV/顶点色三张定长数组取**内容摘要**（`domain/identity#digestOf`，与
+ * `application/exportPlan` 同一摘要算法 —— 不新写哈希）。
+ *
+ * ⚠️ 这份常量不是"手写期望值"：它是切换前路径在 **M6-1 收口前最后一次全绿运行**
+ * 的产物（逐项打印后冻结），任何生产漂移都会让 `frozenFirstDifference` 说出第一处差异。
  */
-async function beforeMultiblockDefinition(name: string): Promise<StructureDefinition> {
-  const envelope = readJson(fixturePath(name)) as Record<string, unknown>
-  const parsed = await productionParserRegistry().detectAndParse(envelope)
-  const doc = parsed.document!
-  const inner = doc.multiblockSource as MultiblockInnerDocument
-  const outcome = assembleSelection(inner, {})
-  const view = buildMultiblockRenderView(doc, outcome, 0)
-  const { definition } = resolveRenderBundle({ document: view.serialize() }, 0)
-  // `materialPalette` 在多方块形态下挂在**根级**（契约 §6），而 `resolveRenderBundle`
-  // 只在 World 分支注入它 —— 单文件 V2 形态靠"首帧 structure 展开"。
-  // 故这里按生产的实际形状补齐：几何收集读 `materialPalette[mi]`（`structureGeometryCore:331`）。
-  if (!Array.isArray((definition as { materialPalette?: unknown }).materialPalette)) {
-    ;(definition as { materialPalette?: unknown }).materialPalette = doc.materialPalette ?? []
+interface FrozenGeometryFingerprint {
+  readonly triangleCount: number
+  readonly pieceCount: number
+  /** 逐 piece 的 (col,row,zSlice,materialIndex,quadIndex) —— 逐格/逐面的定位证据。 */
+  readonly pieceKeys: readonly string[]
+  /** 顶点坐标内容摘要（`d:<8 hex>`）。 */
+  readonly positionsDigest: string
+  /** UV 内容摘要。 */
+  readonly uvsDigest: string
+  /** 顶点色内容摘要。 */
+  readonly colorsDigest: string
+}
+
+const FROZEN_GEOMETRY: Readonly<Record<string, FrozenGeometryFingerprint>> = Object.freeze({
+  'multiblock-ebf-2ch': {
+    triangleCount: 24,
+    pieceCount: 12,
+    pieceKeys: ['0/0/0:0:0', '0/0/1:0:0', '0/0/2:0:0', '0/1/0:0:0', '0/1/1:0:0', '0/1/2:0:0', '2/0/0:1:1', '2/0/1:1:1', '2/0/2:1:1', '2/1/0:1:1', '2/1/1:1:1', '2/1/2:1:1'],
+    positionsDigest: 'd:a3078c83',
+    uvsDigest: 'd:bdd1f65d',
+    colorsDigest: 'd:7a08427d',
+  },
+  'multiblock-tier-only': {
+    triangleCount: 12,
+    pieceCount: 6,
+    pieceKeys: ['0/0/0:0:0', '0/0/0:1:1', '0/1/0:0:0', '0/1/0:1:1', '0/2/0:0:0', '0/2/0:1:1'],
+    positionsDigest: 'd:63b2790f',
+    uvsDigest: 'd:80bd84ed',
+    colorsDigest: 'd:0c84f5dd',
+  },
+  'multiblock-lsc-overlap': {
+    triangleCount: 40,
+    pieceCount: 20,
+    pieceKeys: ['0/0/0:0:0', '0/0/1:0:0', '0/0/2:0:0', '0/1/0:0:0', '0/1/1:0:0', '0/1/1:1:1', '0/1/2:0:0', '0/2/0:0:0', '0/2/1:0:0', '0/2/2:0:0', '2/0/0:1:1', '2/0/1:1:1', '2/0/2:1:1', '2/1/0:1:1', '2/1/1:0:0', '2/1/1:1:1', '2/1/2:1:1', '2/2/0:1:1', '2/2/1:1:1', '2/2/2:1:1'],
+    positionsDigest: 'd:0e04508b',
+    uvsDigest: 'd:7f19c71d',
+    colorsDigest: 'd:c04982fd',
+  },
+})
+
+/** 摘要口径（复用 `domain/identity#digestOf`；不新写哈希）。 */
+function digestHex(value: unknown): string {
+  return 'd:' + digestOf(value).toString(16).padStart(8, '0')
+}
+
+/** 一次几何收集的**冻结形态指纹**（计数 + 定位键 + 三张数组的内容摘要）。 */
+function frozenOf(def: StructureDefinition): FrozenGeometryFingerprint {
+  const f = fingerprint(def)
+  return {
+    triangleCount: f.triangleCount,
+    pieceCount: f.pieceCount,
+    pieceKeys: f.pieceKeys,
+    positionsDigest: digestHex(f.positions),
+    uvsDigest: digestHex(f.uvs),
+    colorsDigest: digestHex(f.colors),
   }
-  return definition
+}
+
+/** 逐位比较"生产指纹 vs 冻结指纹"，返回**第一处差异**的描述（`null` = 完全一致）。 */
+function frozenFirstDifference(
+  frozen: FrozenGeometryFingerprint,
+  actual: FrozenGeometryFingerprint,
+): string | null {
+  if (frozen.triangleCount !== actual.triangleCount) return `三角形数 ${frozen.triangleCount} → ${actual.triangleCount}`
+  if (frozen.pieceCount !== actual.pieceCount) return `piece 数 ${frozen.pieceCount} → ${actual.pieceCount}`
+  const n = Math.max(frozen.pieceKeys.length, actual.pieceKeys.length)
+  for (let i = 0; i < n; i++) {
+    if (frozen.pieceKeys[i] !== actual.pieceKeys[i]) {
+      return `piece[${i}] 定位键 ${String(frozen.pieceKeys[i])} → ${String(actual.pieceKeys[i])}`
+    }
+  }
+  if (frozen.positionsDigest !== actual.positionsDigest) {
+    return `顶点摘要 ${frozen.positionsDigest} → ${actual.positionsDigest}`
+  }
+  if (frozen.uvsDigest !== actual.uvsDigest) return `UV 摘要 ${frozen.uvsDigest} → ${actual.uvsDigest}`
+  if (frozen.colorsDigest !== actual.colorsDigest) {
+    return `顶点色摘要 ${frozen.colorsDigest} → ${actual.colorsDigest}`
+  }
+  return null
 }
 
 /**
@@ -258,11 +335,12 @@ async function afterDefinition(name: string): Promise<StructureDefinition> {
       schemaVersion: mb.projection.schemaVersion,
       multiblockCount: mb.projection.multiblockCount,
     },
-    // 渲染视图模式：网格注入帧（与旧 `buildMultiblockRenderView` 同语义）。
+    // 渲染视图模式：网格注入帧（切换前 `buildMultiblockRenderView` 的语义；该入口 M6-1 已退役）。
     renderView: { frameIndex: 0 },
   })
   // `projectToRuntimeDocument` 走 `fromV2Plain`，其 `serialize()` 做"首帧 structure
-  // 展开到顶层" —— 与 before 侧 `buildMultiblockRenderView(...).serialize()` **同一个**形态。
+  // 展开到顶层" —— 与切换前 `buildMultiblockRenderView(...).serialize()` **同一个**形态
+  // （该入口 M6-1 已退役；冻结指纹记录的正是那个形态的几何读数）。
   const { definition } = resolveRenderBundle({ document: doc.serialize() }, 0)
   if (!Array.isArray((definition as { materialPalette?: unknown }).materialPalette)) {
     ;(definition as { materialPalette?: unknown }).materialPalette = doc.materialPalette ?? []
@@ -315,19 +393,39 @@ async function assertGeometryFromTypedAssets(name: string): Promise<{ entries: n
 
 const MULTIBLOCK_FIXTURES = ['multiblock-ebf-2ch', 'multiblock-tier-only', 'multiblock-lsc-overlap'] as const
 
-describe('P10d · 多方块夹具：切换前后逐格/逐三角形一致', () => {
+describe('P10d · 多方块夹具：生产链与**冻结几何指纹**逐位一致', () => {
   for (const name of MULTIBLOCK_FIXTURES) {
-    it(`${name}：装配 → 投影后的几何与切换前渲染输入**逐位相同**`, async () => {
-      const before = await beforeMultiblockDefinition(name)
+    it(`${name}：装配 → 投影后的几何与冻结指纹**逐位相同**`, async () => {
       const after = await afterDefinition(name)
 
-      const fa = fingerprint(before)
-      const fb = fingerprint(after)
-      const diff = firstDifference(fa, fb)
-      expect(diff, `${name} 切换前后几何必须逐位相同（首个差异：${diff ?? '无'}）`).toBeNull()
+      const frozen = FROZEN_GEOMETRY[name]!
+      const got = frozenOf(after)
+      const diff = frozenFirstDifference(frozen, got)
+      expect(diff, `${name} 生产链几何必须与冻结指纹逐位相同（首个差异：${diff ?? '无'}）`).toBeNull()
       // 反空洞真：这条断言只有在"真的有三角形"时才有意义。
-      expect(fa.triangleCount, `${name} 应有真实三角形（否则"一致"是 0 = 0 的空洞真）`).toBeGreaterThan(0)
-      console.log(`[P10d] ${name}: pieces=${fa.pieceCount} triangles=${fa.triangleCount} diff=${diff ?? 'none'}`)
+      expect(got.triangleCount, `${name} 应有真实三角形（否则"一致"是 0 = 0 的空洞真）`).toBeGreaterThan(0)
+      console.log(`[P10d] ${name}: pieces=${got.pieceCount} triangles=${got.triangleCount} diff=${diff ?? 'none'}`)
+    })
+
+    it(`${name}：**负对照** —— 冻结指纹比较有区分力（改动任一面必被说出）`, async () => {
+      // 判据自证：把生产指纹逐面篡改一次，`frozenFirstDifference` 必须报出**同一面**的差异。
+      // 否则"逐位相同"可能只是比较函数恒返回 null（无区分力的空洞真）。
+      const got = frozenOf(await afterDefinition(name))
+      const frozen = FROZEN_GEOMETRY[name]!
+      expect(frozenFirstDifference(frozen, got), '前提：生产指纹此刻与冻结指纹一致').toBeNull()
+
+      const mutatedKeys = { ...got, pieceKeys: [...got.pieceKeys.slice(0, -1), '9/9/9:9:9'] }
+      expect(frozenFirstDifference(frozen, mutatedKeys), 'piece 定位键变化必须被说出').toContain('定位键')
+      expect(
+        frozenFirstDifference(frozen, { ...got, positionsDigest: 'd:00000000' }),
+        '顶点摘要变化必须被说出',
+      ).toContain('顶点摘要')
+      expect(frozenFirstDifference(frozen, { ...got, uvsDigest: 'd:00000000' })).toContain('UV 摘要')
+      expect(frozenFirstDifference(frozen, { ...got, colorsDigest: 'd:00000000' })).toContain('顶点色摘要')
+      expect(
+        frozenFirstDifference(frozen, { ...got, triangleCount: got.triangleCount + 1 }),
+        '三角形数变化必须被说出',
+      ).toContain('三角形数')
     })
 
     it(`${name}：投影产物的几何**全部**来自内核类型化资产（零回显）`, async () => {
