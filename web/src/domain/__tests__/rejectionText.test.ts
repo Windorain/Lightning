@@ -86,6 +86,16 @@ describe('M4-3 R1 · 拒绝原因成句映射', () => {
     expect(rejectionReason(e, 'en')).toContain('brand-new-reason')
   })
 
+  it('无 `reason` 的码级拒绝 ⇒ 兜底句点名**判别参数**（不只一句"不支持"）', () => {
+    // 带 `capability` 的码级拒绝归到 `capability-missing` 条目（同一个用户事实），
+    // 句子必须点名**缺哪个能力** —— 只说"不支持的操作"等于没说。
+    const zh = rejectionReason(domainError('UnsupportedOperation', { capability: 'content.add', command: 'addObject' }), 'zh')
+    expect(zh, '缺什么能力必须点名').toContain('content.add')
+    expect(zh, '必须说清是能力缺失这一类').toContain('写能力')
+    const en = rejectionReason(domainError('UnsupportedOperation', { objectType: 'mesh', kind: 'addObject' }), 'en')
+    expect(en).toContain('objectType=mesh')
+  })
+
   it('未知码 ⇒ 兜底句保留原码文本（运行期防御，不许吞）', () => {
     const e = { code: 'TotallyNewCode', params: { reason: 'x' } } as unknown as DomainError
     const zh = rejectionReason(e, 'zh')

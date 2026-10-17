@@ -289,15 +289,46 @@ const CODE_FALLBACK: Readonly<Record<DomainErrorCode, Entry>> = Object.freeze({
   },
 })
 
-/** 兜底句式：**原因**在句尾保留原文（不许吞）。 */
+/**
+ * 兜底句式里允许点名的**判别参数**（存在即追加）。
+ *
+ * 为什么需要它：内核有一族拒绝**不带 `reason`**，只带"是什么被拒"
+ *（`unsupportedOperation({ capability, command })`、`{ objectType, kind }`、
+ * `{ ownerKind, property }`）。若兜底句只写「不支持的操作」，
+ * 用户与诊断都无从定位 —— 那与"吞掉"只差一步。
+ */
+const DISCRIMINATORS: readonly string[] = Object.freeze([
+  'capability',
+  'command',
+  'objectType',
+  'kind',
+  'ownerKind',
+  'property',
+  'objectId',
+  'documentId',
+])
+
+/** 把判别参数拼成一句括注（无则空串）。**不是**自然语言，是事实摘要。 */
+function discriminatorOf(params: Params): string {
+  const parts: string[] = []
+  for (const key of DISCRIMINATORS) {
+    const v = p(params, key)
+    if (v !== '') parts.push(`${key}=${v}`)
+  }
+  return parts.join(', ')
+}
+
+/** 兜底句式：**原因**（无则判别参数）在句尾保留原文（不许吞）。 */
 function failZh(label: string, params: Params): string {
   const reason = p(params, 'reason')
-  return reason === '' ? label : `${label}（${reason}）`
+  const detail = reason !== '' ? reason : discriminatorOf(params)
+  return detail === '' ? label : `${label}（${detail}）`
 }
 
 function failEn(label: string, params: Params): string {
   const reason = p(params, 'reason')
-  return reason === '' ? label : `${label} (${reason})`
+  const detail = reason !== '' ? reason : discriminatorOf(params)
+  return detail === '' ? label : `${label} (${detail})`
 }
 
 /** 句首（操作名）。`subject` 给了就用它（如「方块标识」），否则用操作名。 */
