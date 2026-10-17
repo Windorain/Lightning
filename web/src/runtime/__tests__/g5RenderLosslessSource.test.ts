@@ -3,12 +3,12 @@
  *
  * ## 本文件证的是什么
  *
- * `composition/kernelRenderView#kernelRenderViewOf` 的 `plainRoot` 入参此前在生产
- * 路径上**从不传** ⇒ 回落 `doc.serialize()`。而 `RuntimeDocument` 是**有损**中间层
- * （`label`/`author`/`description`/`gtnhVersion`/`modSource`/`globalConfig`/`schemaVersion`
+ * 渲染链的输入曾经是旧格式 `RuntimeDocument`（有损中间层：`label`/`author`/
+ * `description`/`gtnhVersion`/`modSource`/`globalConfig`/`schemaVersion`
  * 七个根级键被 `fromV2Plain` 列进 `known` 却从不读、也不收进 `_extra`）。
+ * 旧入口 `kernelRenderViewOf#plainRoot` 是"补上无损源"的那条路 —— 它在 M6-1 已删。
  *
- * 现在的链路（本批 S1 落点）：
+ * 现在的链路（生产形态，**不再有"传/不传 plainRoot"这个参数**）：
  *
  * ```
  *  composition/documentLoad#adoptLoadedDocument      （生产装配，唯一置位点）
@@ -17,10 +17,10 @@
  *  KernelSession#assemblySourceRootOf()              （宿主：生命周期 = 文档生命周期）
  *        │
  *        ▼
- *  Context#kernelSourceRoot()                        （具名读面）
+ *  Context#kernelRenderViewInputs()                  （已求值场景 + **内核内容**）
  *        │
  *        ▼
- *  shared/viewport/useKernelChannels → kernelRenderViewOf({ plainRoot })
+ *  kernelRenderViewFromFace                          （投影 + 读回）
  * ```
  *
  * ## 判据的形状（三条，缺一不可）
@@ -28,10 +28,12 @@
  * 1. **无损是可观察事实**：注入的源根键（含**未知顶层键**与**根级元数据键**）
  *    经会话往返后**逐键相等**（不是"看调用形态"）；
  * 2. **有损路径机械可见**：同一份文档的 `doc.serialize()` **不含**那些键
- *    （证明"回落 `serialize()`"不可能等价 —— 这是负对照的**前提**）；
- * 3. **负对照判红**：同一份装配产物，`kernelRenderViewOf` **传**与**不传**
- *    `plainRoot` 产出的渲染视图在**可观察面**上必须不同（本判据用
- *    `meta.created_at_ms`：无损源里有、`serialize()` 里没有）。
+ *    （证明"拿 serialize() 当装配源"不可能等价 —— 这是负对照的**前提**）；
+ * 3. **负对照判红**：同一份文档、同一条生产入口，装配源**有损/无损**两种情形
+ *    产出的渲染视图在**可观察面**上必须不同（本判据用 `meta.created_at_ms`：
+ *    无损源里有、`serialize()` 里没有）。M6-1 之前这一条比的是
+ *    `kernelRenderViewOf({ plainRoot })` 与 `kernelRenderViewOf({})`；
+ *    旧入口删除后，**差异点回到它真正所在的地方**：装配源。
  *
  * ⚠️ 输入全部走**生产装配**（`adoptLoadedDocument` + `plainRootOf`），
  * 不是手搓载荷 —— 否则"字段从没被生产填过"会假绿（AGENTS.md 的接线判据纪律）。
@@ -40,7 +42,7 @@
 import { describe, expect, it } from 'vitest'
 import { plainRootOf } from '@/adapters/plainRoot'
 import { adoptLoadedDocument } from '@/composition/documentLoad'
-import { kernelRenderViewOf } from '@/composition/kernelRenderView'
+import { kernelRenderViewFromFace } from '@/composition/kernelRenderView'
 import { createParserRegistry } from '@/context/parserRegistry'
 import {
   V2PlainParser,
@@ -52,7 +54,8 @@ import { fixturePath, readJson } from '@/context/__tests__/multiblockFixtureIo.m
 import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
 import { KernelSession } from '@/runtime/kernelSession'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
-import type { MultiblockSelectionState } from '@/shared/viewport/multiblockChannelUi'
+import { KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
+import { makeAdoptedKernelReadHost, type KernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
 
 const NOOP_LOG = { info: () => {}, warn: () => {} }
 
@@ -102,9 +105,42 @@ async function loadWithLosslessSource(name: string): Promise<{
   return { doc: parsed.document as never as RuntimeDocument, session, sourcePlain }
 }
 
+/**
+ * 同一份夹具的两条**生产装配**：有无无损源。
+ *
+ * - `withSource`：`adoptLoadedDocument(..., plainRootOf(注入后的根))`（生产形态）；
+ * - `withoutSource`：`adoptLoadedDocument(..., undefined)` ⇒ 装配回落 `legacyPlainRoot(doc)`
+ *   （即 `doc.serialize()` 的口径，有损）。两者都是**生产入口**，差别只在装配源 ——
+ *   这正是 M6-1 前 `kernelRenderViewOf` 的 `plainRoot` 参数所代表的那件事。
+ */
+async function twoAssemblies(name: string): Promise<{ withSource: KernelReadHost; withoutSource: KernelReadHost }> {
+  const raw = readJson(fixturePath(name)) as Record<string, unknown>
+  const parsed = await productionRegistry().detectAndParse(raw)
+  if (parsed.document === null) throw new Error(`夹具 ${name} 解析失败`)
+  const layers = await readEnvelopeLayers(raw as never)
+  const plain = layers.plain as Record<string, unknown>
+  const sourcePlain: Record<string, unknown> = {
+    ...plain,
+    ...INJECTED_UNKNOWN,
+    meta: { ...((plain.meta as Record<string, unknown> | undefined) ?? {}), created_at_ms: INJECTED_CREATED_AT_MS },
+  }
+  const withSource = makeAdoptedKernelReadHost(parsed.document as never, plainRootOf(sourcePlain))
+  const withoutSource = makeAdoptedKernelReadHost(parsed.document as never)
+  return { withSource, withoutSource }
+}
+
+/** 生产渲染视图的 `serialize()`（`useKernelChannels#renderDoc` 同一入口 + 同一读面）。 */
+function renderedPlainOf(host: KernelReadHost): Record<string, unknown> {
+  const inputs = host.ctx.kernelRenderViewInputs()
+  if (inputs === null) throw new Error('前提：内核渲染视图输入必须在场')
+  const rv = kernelRenderViewFromFace({ ...inputs, frameIndex: 0 })
+  if (rv.doc === null) throw new Error(`渲染视图必须产出：${rv.diagnostics.join(' | ')}`)
+  return rv.doc.serialize() as Record<string, unknown>
+}
+
 const FIXTURES = ['multiblock-ebf-2ch', 'multiblock-tier-only'] as const
 
-describe('G5 · 渲染链无损源（kernelSourceRoot → kernelRenderViewOf#plainRoot）', () => {
+describe('G5 · 渲染链无损源（session.assemblySourceRoot → 内核内容 → 渲染视图）', () => {
   it('① 无损可观察：注入的源根键经会话往返后**逐键相等**（含未知顶层键与根级元数据键）', async () => {
     for (const name of FIXTURES) {
       const { session, sourcePlain } = await loadWithLosslessSource(name)
@@ -128,7 +164,7 @@ describe('G5 · 渲染链无损源（kernelSourceRoot → kernelRenderViewOf#pla
     }
   })
 
-  it('② 有损路径机械可见：`doc.serialize()` **不含**这些键（回落 serialize() 不可能等价）', async () => {
+  it('② 有损路径机械可见：`doc.serialize()` **不含**这些键（拿它当装配源不可能等价）', async () => {
     for (const name of FIXTURES) {
       const { doc } = await loadWithLosslessSource(name)
       const serialized = doc.serialize() as Record<string, unknown>
@@ -146,33 +182,31 @@ describe('G5 · 渲染链无损源（kernelSourceRoot → kernelRenderViewOf#pla
     }
   })
 
-  it('③ 负对照判红：同一装配产物，传/不传 `plainRoot` 的渲染视图在可观察面上**必须不同**', async () => {
+  it('③ 负对照判红：同一生产入口，装配源**无损/有损**的渲染视图在可观察面上**必须不同**', async () => {
     for (const name of FIXTURES) {
-      const { doc, session, sourcePlain } = await loadWithLosslessSource(name)
-      const selection: MultiblockSelectionState = { totalTier: 1, values: {}, runstate: '' }
-      const withRoot = kernelRenderViewOf({
-        doc,
-        selection,
-        frameIndex: 0,
-        plainRoot: session.assemblySourceRootOf() ?? undefined,
-      })
-      const withoutRoot = kernelRenderViewOf({ doc, selection, frameIndex: 0 })
-      // 前提：两条路都产出了渲染视图（否则"不同"可能只是"一个 null"）。
-      expect(withRoot.doc, `${name}：传无损源必须产出渲染视图`).not.toBeNull()
-      expect(withoutRoot.doc, `${name}：不传也必须产出渲染视图（如实降级，不崩）`).not.toBeNull()
-      // 可观察面：投影把 `content.metadata.createdAtMs` 写到 `meta.created_at_ms`。
-      const metaOf = (d: unknown): Record<string, unknown> =>
-        ((d as { meta: Record<string, unknown> }).meta ?? {}) as Record<string, unknown>
-      expect(
-        metaOf(withRoot.doc).created_at_ms,
-        `${name}：传无损源 ⇒ 渲染视图的元数据必须来自**源**（逐字）`,
-      ).toBe(INJECTED_CREATED_AT_MS)
-      expect(
-        metaOf(withoutRoot.doc).created_at_ms,
-        `${name}：**负对照**——不传无损源 ⇒ 该值必须不同（否则本判据无区分力）`,
-      ).not.toBe(INJECTED_CREATED_AT_MS)
-      // 而且"无损"这件事在渲染视图上还要与**源**一致（不是只与另一个内部值一致）。
-      expect(sourcePlain.meta, `${name}：前提——源根确有 meta`).toBeDefined()
+      const { withSource, withoutSource } = await twoAssemblies(name)
+      try {
+        const lossless = renderedPlainOf(withSource)
+        const lossy = renderedPlainOf(withoutSource)
+        // 前提：两条路都产出了渲染视图（否则"不同"可能只是"一个 null"）。
+        expect(Object.keys(lossless).length, `${name}：无损源必须产出渲染视图`).toBeGreaterThan(0)
+        expect(Object.keys(lossy).length, `${name}：有损装配源也必须产出渲染视图（如实降级，不崩）`).toBeGreaterThan(0)
+
+        // 可观察面：投影把 `content.metadata.createdAtMs` 写到 `meta.created_at_ms`。
+        const metaOf = (d: Record<string, unknown>): Record<string, unknown> =>
+          ((d.meta ?? {}) as Record<string, unknown>)
+        expect(
+          metaOf(lossless).created_at_ms,
+          `${name}：无损源 ⇒ 渲染视图的元数据必须来自**源**（逐字）`,
+        ).toBe(INJECTED_CREATED_AT_MS)
+        expect(
+          metaOf(lossy).created_at_ms,
+          `${name}：**负对照**——有损装配源 ⇒ 该值必须不同（否则本判据无区分力）`,
+        ).not.toBe(INJECTED_CREATED_AT_MS)
+      } finally {
+        withSource.dispose()
+        withoutSource.dispose()
+      }
     }
   })
 
@@ -184,5 +218,11 @@ describe('G5 · 渲染链无损源（kernelSourceRoot → kernelRenderViewOf#pla
       session.assemblySourceRootOf(),
       '卸载后必须回到 null —— 否则换文档后渲染链会拿上一份文档的根级元数据',
     ).toBeNull()
+  })
+
+  it('⑤ 会话身份常量仍被本判据使用（防"宿主换了 id 而判据没跟"）', () => {
+    // 这两条常量是 `makeAdoptedKernelReadHost` 的注入事实；本文件不新造第二套。
+    expect(KERNEL_DOCUMENT_ID.length).toBeGreaterThan(0)
+    expect(KERNEL_CONTEXT_ID.length).toBeGreaterThan(0)
   })
 })
