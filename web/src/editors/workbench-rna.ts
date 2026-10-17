@@ -44,9 +44,7 @@ import { localPropertyOf } from '@/application/contracts'
 import { KERNEL_ANNOTATION_TYPE } from '@/application/kernel-properties'
 import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
 import { annotationObjectIdOf } from '@/runtime/annotationRead'
-import { rejectionSentence } from '@/domain/rejectionText'
-import type { Lang } from '@/domain/i18n'
-import { LOG_LEVEL } from '@/logging/LogCenter'
+import { announceRejection } from '@/runtime/rejectionNotice'
 import { cellTooltipTextAt } from '@/runtime/tooltipRead'
 import type { DocumentMetadata } from '@/domain/content'
 import { NO_CHANGE } from '@/domain/identity'
@@ -641,11 +639,6 @@ export function submitPropertyWrite(
 }
 
 
-/** 本实例语言（成句文案用；`domain/i18n` 的纯翻译只认显式输入）。 */
-function langOf(ctx: Context): Lang {
-  return ctx.getShellSettings().lang.value
-}
-
 /** 字段的描述符显示名（「方块标识」这类**具体**对象名；缺省则用操作名）。 */
 function fieldLabelOf(propertyId: string): string | undefined {
   return workbenchRegistry().registry.descriptor(propertyId)?.display.fallback
@@ -671,12 +664,8 @@ function settleFieldWrite(ctx: Context, refs: readonly PropertyRef[], outcome: C
     for (const r of refs) store.reject(r.property, outcome.error)
     const first = refs[0]?.['property']
     const label = first === undefined ? undefined : fieldLabelOf(first)
-    ctx.log.setLiveStatus(
-      rejectionSentence(outcome.error, langOf(ctx), 'propertyWrite', label),
-      LOG_LEVEL.WARN,
-      null,
-      'rejection',
-    )
+    // 单一写入点：与算子路径共用同一句成句原因（`runtime/rejectionNotice`）。
+    announceRejection(ctx, outcome.error, 'propertyWrite', label)
     return
   }
   // 写成功（applied/unchanged）：清掉这些字段的回执，并让底栏回到下一条事实。

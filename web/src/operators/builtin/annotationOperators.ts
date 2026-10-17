@@ -6,6 +6,8 @@ import type { SetPropertyCommand } from '@/application/commands'
 import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
 import { KERNEL_ANNOTATION_TYPE } from '@/application/kernel-properties'
 import { objectRef, propertyRef } from '@/domain/identity'
+import { settlementOf } from '@/domain/editSettlement'
+import { fallbackToLegacyOn } from '@/runtime/rejectionNotice'
 
 /**
  * 内核注解对象的 id 前缀（与 `composition/kernelAssembly#annotationObjects` 一致）。
@@ -119,7 +121,9 @@ export const AnnotationCreateOperator: OperatorType = {
     // `submitContentEdit` 一步完成"① 内核命令 + ② 投影回 legacy"；
     // 成功 ⇒ legacy 已被回写成最新，**不得**再走下面的 legacy 路径
     // （再写一次会以旧数组覆盖回写产物 ⇒ 内容丢失）。
-    if (ctx.submitContentEdit({
+    // M4-3 R3：取**结算**（三分派）而不是布尔 —— 布尔把"被拒"与"未装配"压成同一个 false，
+    // 于是内核拒绝会被当成未装配而**回落 legacy 写**，把拒绝抹成成功（S0 域 2 ③ 的最恶劣形态）。
+    const created = settlementOf(ctx.submitContentEditSettlement({
       kind: 'addObject',
       contextId: KERNEL_CONTEXT_ID,
       objectType: 'annotation',
@@ -128,7 +132,9 @@ export const AnnotationCreateOperator: OperatorType = {
       // （`annotation:<legacyId>`），否则 `selection.active` 与属性面板的
       // `EntityRef` 对不上 ⇒ 面板后续每次写都打到不存在的 id（实测的阻塞）。
       params: { ...annotationParamsOf(annotation), objectId: `${ANNOTATION_OBJECT_PREFIX}${annotation.id}` },
-    })) {
+    }))
+    // 被拒 ⇒ 底栏成句原因**且不回落**；未装配 ⇒ 既有 legacy 回落（双轨接缝的合法分支）。
+    if (!fallbackToLegacyOn(ctx, created, 'annotationEdit')) {
       ctx.getSelection().active.value = annotation.id
       return
     }
@@ -168,7 +174,13 @@ export const AnnotationUpdateOperator: OperatorType = {
     // "限于读面已暴露的那 15 个"，与 `annotationPatchCommand` 的实现（只认 `title`）不符。
     // 其余字段（`locked`/`renderOpacity`…）一律回落 legacy —— 宁可走旧路径，也不静默丢字段。
     const command = annotationPatchCommand(id, patch)
-    if (command !== null && ctx.submitContentEdit(command)) return
+    if (command !== null) {
+      const settled = settlementOf(ctx.submitContentEditSettlement(command))
+      // 补丁是**单字段**且内核承载 ⇒ 内核的结论就是结论：
+      // applied/unchanged ⇒ 完成；rejected ⇒ 底栏成句原因、**不回落**；
+      // not-assembled ⇒ 才走下面的 legacy 回落。
+      if (!fallbackToLegacyOn(ctx, settled, 'annotationEdit')) return
+    }
 
     // 回落：未装配 / 无会话 / 补丁含内核未承载字段 ⇒ legacy 是权威。
     const newDoc = ctx.frozenDocumentValue()
@@ -200,11 +212,13 @@ export const AnnotationDeleteOperator: OperatorType = {
 
     // #301 P10f C′2：内核写优先（`deleteObject`）。
     // 内核对象 id 有 `annotation:` 前缀（装配期建立，见 `kernelAssembly#annotationObjects`）。
-    if (ctx.submitContentEdit({
+    const deleted = settlementOf(ctx.submitContentEditSettlement({
       kind: 'deleteObject',
       contextId: KERNEL_CONTEXT_ID,
       objectId: `${ANNOTATION_OBJECT_PREFIX}${id}`,
-    })) {
+    }))
+    // 同上：被拒**不回落**（否则"删不掉"会表现为"删掉了但内容还在"）。
+    if (!fallbackToLegacyOn(ctx, deleted, 'annotationEdit')) {
       ctx.getSelection().active.value = null
       return
     }

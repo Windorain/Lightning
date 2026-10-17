@@ -92,11 +92,23 @@ async function harness(annotations: unknown[], capabilities: readonly string[]):
 
   // 真 Context：只注入本算子用到的字段（`main.doc` / `kernel` / 选择集）
   const selected = ref<{ id: string } | null>(null)
+  /** 底栏实时状态（M4-3：拒绝必须**可见**，故断言它而不是只看内容没变）。 */
+  const live = ref<{ message: string; level: number; state: string | null; origin: string | null } | null>(null)
   const ctx = Object.create(Context.prototype) as Context
   Object.assign(ctx as unknown as Record<string, unknown>, {
     main: { doc: docRef },
     kernel: session,
     getSelection: () => ({ active: selected, items: ref(new Set()) }),
+    // M4-3 R3：算子结算会写**底栏成句原因**（拒绝可见）—— 记下来供断言读。
+    getShellSettings: () => ({ lang: ref('zh') }),
+    log: {
+      setLiveStatus: (message: string, level = 0, state: string | null = null, origin: string | null = null) => {
+        live.value = { message, level, state, origin }
+      },
+      clearRejectionStatus: () => {
+        if (live.value?.origin === 'rejection') live.value = null
+      },
+    },
     setDocument: (next: RuntimeDocument | null, intent: 'load' | 'content-sync' = 'load') =>
       // 复刻**唯一写者**的两段（镜像半边由 p10fDocumentLifecycle 把守）
       (Context.prototype as unknown as { setDocument: (n: RuntimeDocument | null, i: string) => void })
@@ -111,6 +123,7 @@ async function harness(annotations: unknown[], capabilities: readonly string[]):
   return {
     ctx,
     session,
+    live,
     // 测试宿主的 legacy 观测口（见 `Harness#legacyDocument` 的说明）。
     legacyDocument: () => docRef.value,
     dispose: () => session.dispose(),
@@ -211,22 +224,39 @@ describe('P10f C′2 · 注解算子走内核写（装配成功时）', () => {
   })
 })
 
-describe('P10f C′2 · 回落：无内容编辑能力时走 legacy', () => {
-  it('`VIEWER_CAPABILITIES`（无 content.add）⇒ 内核拒绝 ⇒ legacy 路径生效', async () => {
+/**
+ * ## M4-3 R3：这条判据的口径**已按设计简报翻转**
+ *
+ * 旧行为：能力不足 ⇒ 内核 `rejected` ⇒ 布尔 `false` ⇒ **回落 legacy 写** ⇒
+ * 内核的拒绝被当成"未装配"抹掉（用户看不到任何原因，内容却变了）。
+ *
+ * 新行为（设计简报 R3 的收口原则）：`rejected` ⇒ **底栏成句原因 + 不回落**；
+ * 只有 `not-assembled`（无会话 / GF-16 假）才回落 legacy。
+ *
+ * 影响面：这 4 个算子（注解新建/更新/删除、工具提示）只由**工作台**的工具与面板调用
+ * （boxTool/faceTool/lineTool/pointTool/textTool、AnnotationEditorPanel、TooltipEditorPanel），
+ * 查看器外壳没有这些入口 ⇒ 不存在"看不了也改不了"的能力回退。
+ */
+describe('P10f C′2 · 拒绝与回落的分界（M4-3 R3 翻转）', () => {
+  it('能力不足 ⇒ 内核 `rejected` ⇒ **底栏可见 + 不回落**（拒绝不再被当成未装配）', async () => {
     const h = await harness([FULL_ANNO], ['interaction.begin'])
     try {
       const kernelBefore = kernelAnnotationsOf(h.session.document()).length
+      const legacyBefore = ((h.legacyDocument()?.annotations ?? []) as Record<string, unknown>[]).length
       AnnotationCreateOperator.exec!(h.ctx as never, {
         annotation: { id: 'a9', type: 'box', visible: true, title: 'X', min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } },
       } as never)
-      // 能力不足 ⇒ 内核拒绝 ⇒ 不得谎报成功；legacy 走原路径（能力不回退）
       expect(kernelAnnotationsOf(h.session.document()).length, '能力不足时内核不得变').toBe(kernelBefore)
-      // #301 P10f D3：`getDoc()` 已退出生产 ⇒ legacy 侧经**测试宿主的观测口**
-      //（它持有那份被替换过的 `docRef`）。⚠️ 这仍然证明"两侧都有"：
-      // `h.legacyDocument()` 拿的是**生产回写投影**替换后的那一份（不是输入副本），
-      // 故"内核写了、legacy 没投影"（#333 同族）在这里**照样判红**。
+      // ① 拒绝**可见**：底栏拿到成句原因（渠道标为 rejection）
+      const live = h.live.value
+      expect(live, '被拒必须写底栏（否则用户只看到\'点了没反应\'）').not.toBeNull()
+      expect(live!.origin, '渠道必须是 rejection（成功提交只清自己那条，不动纹理结论）').toBe('rejection')
+      expect(live!.message, '成句原因必须点名"注解编辑被拒"与能力缺失').toMatch(/^注解编辑被拒：/)
+      expect(live!.message, '必须点名**缺哪个能力**（只说"不支持"等于没说）').toContain('content.add')
+      // ② **不回落**：legacy 不得多出该条（那会把内核拒绝洗成成功）
       const legacy = (h.legacyDocument()?.annotations ?? []) as Record<string, unknown>[]
-      expect(legacy.some((a) => a.id === 'a9'), '回落路径必须让 legacy 拿到该条（能力不回退）').toBe(true)
+      expect(legacy.length, '被拒时不得回落 legacy 写').toBe(legacyBefore)
+      expect(legacy.some((a) => a.id === 'a9'), '被拒的注解不得出现在 legacy 里').toBe(false)
     } finally {
       h.dispose()
     }

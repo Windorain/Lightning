@@ -1,5 +1,7 @@
 import type { OperatorType } from '@/operators/operatorType'
 import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
+import { settlementOf } from '@/domain/editSettlement'
+import { fallbackToLegacyOn } from '@/runtime/rejectionNotice'
 
 export const TooltipEditOperator: OperatorType = {
   id: 'OPERATOR_TOOLTIP_EDIT',
@@ -45,16 +47,18 @@ export const TooltipEditOperator: OperatorType = {
     const frameHeight = ctx.kernelGrid(0)?.height ?? 0
     const worldY = frameHeight > 0 ? frameHeight - 1 - pos.y : pos.y
 
-    if (
-      ctx.submitContentEdit({
+    // M4-3 R3：取**结算**（三分派）而不是布尔 —— 布尔把"被拒"与"未装配"压成同一个 false，
+    // 于是"这一格被内核拒绝"会静默回落 legacy 写，把拒绝抹成成功。
+    const settled = settlementOf(
+      ctx.submitContentEditSettlement({
         kind: 'setCellTooltip',
         contextId: KERNEL_CONTEXT_ID,
         cells: [{ x: pos.x, y: worldY, z: pos.z }],
         text: text === '' ? null : text,
-      })
-    ) {
-      return
-    }
+      }),
+    )
+    // 被拒 ⇒ 底栏成句原因**且不回落**；未装配 ⇒ 既有 legacy 回落。
+    if (!fallbackToLegacyOn(ctx, settled, 'metaEdit')) return
 
     // 回落：未装配（GF-16 = false）/ 无会话 ⇒ legacy 是权威（能力不回退）。
     const newDoc = ctx.frozenDocumentValue()

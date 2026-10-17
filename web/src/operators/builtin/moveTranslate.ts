@@ -6,6 +6,8 @@ import type { ViewportSlot } from '@/runtime/types'
 import { OP_RESULT } from '@/operators/operatorType'
 import { pickVoxel } from '@/context/queries'
 import { roundVector } from '@/pure/vec'
+import { kernelAccepted, settlementOf } from '@/domain/editSettlement'
+import { announceRejection } from '@/runtime/rejectionNotice'
 
 const WORLD_AXES: Record<string, THREE.Vector3> = {
   x: new THREE.Vector3(1, 0, 0),
@@ -371,20 +373,30 @@ export const MoveOperator: OperatorType = {
 
           const gridObjectId = ctx.kernelGridObjectId(ctx.getFrameIndex())
           if (gridObjectId !== null) {
-            const applied = ctx.submitContentEdit({
+            // M4-3 R3：取**结算**而不是布尔（布尔把 rejected 与 not-assembled 压成一个 false，
+            // 于是"越界/只读/重复格被拒"与"内核没装上"在界面上同形 —— 都是拖了没反应）。
+            const settlement = settlementOf(ctx.submitContentEditSettlement({
               kind: 'moveCells',
               contextId: KERNEL_CONTEXT_ID,
               objectId: gridObjectId,
               moves,
-            })
-            // ⚠️ 只有内核真的 `applied` 才动选择集。
+            }))
+            // ⚠️ 只有内核真的受理（`applied`/`unchanged`）才动选择集。
             //
             // 修前选择集更新写在撤销项的 `execute` 里 ⇒ 它是"执行了就说成功"。
-            // 而 `submitContentEdit` 返回 `false` 有两种**不同**的失败
-            // （未装配 / 命令被拒：越界、重复、只读、版本冲突）——
-            // 两者都必须**如实**表现，而不是照样把方块画到新位置
-            //（那就是 #249 §6 禁止的"假成功控件"形态）。
-            if (applied) {
+            // 而布尔形态把两种**不同**的失败压成同一个 `false`
+            // （未装配 / 命令被拒：越界、重复、只读、版本冲突）—— 两者都必须**如实**表现，
+            // 而不是照样把方块画到新位置（那正是 #249 §6 禁止的"假成功控件"形态）。
+            if (settlement.kind === 'not-assembled') {
+              announceRejection(
+                ctx,
+                { code: 'UnsupportedOperation', params: { reason: 'kernel-not-adopted' } },
+                'move',
+              )
+            } else if (settlement.kind === 'rejected') {
+              announceRejection(ctx, settlement.error, 'move')
+            }
+            if (kernelAccepted(settlement)) {
               const sel = ctx.getSelection()
               const newItems = [...sel.items.value].map(item => {
                 if (item.kind !== 'block') return item

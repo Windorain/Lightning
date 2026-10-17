@@ -327,9 +327,24 @@ function defaultHead(op: RejectionOperation): string {
   }
 }
 
+/**
+ * 取「有效原因键」。
+ *
+ * 多数拒绝带 `params.reason`；但内核里有一族拒绝是**按能力**给出的
+ * （`commands.ts` 的 `unsupportedOperation({ capability, command })` 不带 `reason`），
+ * 它们与 `capability-missing` 是同一个用户事实 ⇒ 归到同一条文案，
+ * 否则界面只会说一句「不支持的操作」，说不出**缺什么**。
+ */
+function reasonKeyOf(error: DomainError): string {
+  const reason = p(error.params, 'reason')
+  if (reason !== '') return reason
+  if (error.code === 'UnsupportedOperation' && p(error.params, 'capability') !== '') return 'capability-missing'
+  return ''
+}
+
 /** 原因从句（纯；未知码/未知原因都保留原文本）。 */
 export function rejectionReason(error: DomainError, lang: Lang): string {
-  const reason = p(error.params, 'reason')
+  const reason = reasonKeyOf(error)
   const entry = reason === '' ? undefined : REASONS[`${error.code}:${reason}`]
   if (entry) return (entry[lang] ?? entry.zh)(error.params)
   // 已知码但没有专门条目（含 `reason` 缺省的码级拒绝，如 `DocumentBusy`/版本冲突）。
