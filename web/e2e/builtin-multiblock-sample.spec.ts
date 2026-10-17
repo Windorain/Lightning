@@ -401,7 +401,17 @@ test.describe('M5-5 · 内置多方块样例（真实入口 → 通道面板 →
    */
   test("画面层：机器真的画在屏幕上，且拖 Height 后像素面可见变化", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chrome", "真实指针/像素判据固定在 desktop-chrome")
-    test.setTimeout(180_000)
+    /**
+     * **超时余量（300s；L3 满并发实测，2026-10-18）**。
+     *
+     * 本用例的真实工作量 = 加载样例（生产装配 432 场景）+ **两张整视口截图**
+     * + 两次逐像素解码（每次约 56 万像素，含 3x3 局部对比与色桶统计）。
+     * 孤跑实测 46~49 s；**L3 满并发（多 spec 争 CPU）下首跑 180 s 超时、重试 56.1 s 通过**
+     * —— 属并发耗时抖动，不是判据不稳（重试一次即绿，读数与孤跑一致）。
+     * 取 300 s 约等于孤跑耗时的 6 倍、抖动后耗时的 5 倍：既留足余量，又不掩盖"真的卡死"
+     * （卡死的表现是永远等不到收敛，而不是慢 2 倍）。
+     */
+    test.setTimeout(300_000)
     await page.setViewportSize({ width: 1440, height: 900 })
     await gotoWorkbench(page)
     await openBuiltinSample(page)
