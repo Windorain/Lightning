@@ -55,6 +55,17 @@ export interface InputBindingOptions {
   readonly pointerTarget?: Document | HTMLElement
   /** 捕获宿主解析（缺省：事件 target 最近的 `.vc-viewport`）。 */
   readonly resolveCaptureElement?: (event: PointerEvent, regionId: string | null) => Element | null
+  /**
+   * 当前模态的**根元素**（`null` = 未登记）。
+   *
+   * 适配器用它把"事件目标是否在模态内部"翻成 {@link PointerFact.hitModalScopeId} /
+   * {@link KeyFact.hitModalScopeId} 这一维**事实**；路由据此区分"模态内部（普通 DOM）"
+   * 与"背景（被吞）"。根元素由弹窗组件在 `openModalScope` 时提交（见 `runtime/inputPort`）。
+   *
+   * 缺省 `undefined` ⇒ 事实恒为 `null` ⇒ 行为与旧实现逐字相同（全部按背景吞）——
+   * 对**未**登记根的老调用方是安全回落，不是"猜不出来就放行"。
+   */
+  readonly modalRootOf?: (scopeId: string) => Element | null
   /** 页面挂起/恢复时的回调（runtime 时钟据此重置基线）。 */
   readonly onResume?: (input: { resumeBaseline: number; droppedTicks: number }) => void
   /** 每条事件处理后的观测回调（诊断/探针）。 */
@@ -115,6 +126,21 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
     return null
   }
 
+  /**
+   * 事件目标落在**当前模态根**内 ⇒ 返回该作用域 id；否则 `null`。
+   *
+   * 只有当前打开的模态算数（`session.routing.modal.scopeId`）：残留的旧弹窗 DOM
+   * 不是"内部"。根元素未登记 ⇒ 一律 `null`（安全回落：按背景吞）。
+   */
+  function hitModalScopeOf(target: EventTarget | null): string | null {
+    const modal = session.routing.modal
+    if (!modal.open || modal.scopeId === null) return null
+    if (target === null) return null
+    const root = options.modalRootOf?.(modal.scopeId) ?? null
+    if (root === null) return null
+    return target instanceof Node && root.contains(target) ? modal.scopeId : null
+  }
+
   function ownerOf(target: EventTarget | null): string | null {
     if (!(target instanceof HTMLElement)) return null
     const el = target.closest('[data-input-control-id]') as HTMLElement | null
@@ -161,7 +187,9 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
   function onKeyDown(event: Event): void {
     if (!mounted) return
     const ke = event as KeyboardEvent
-    const result = session.handleKey(readKeyFact(ke, session.nextToken()))
+    const result = session.handleKey(
+      readKeyFact(ke, session.nextToken(), { hitModalScopeId: hitModalScopeOf(ke.target) }),
+    )
     runPlatform(result, ke)
     options.onEvent?.(result)
   }
@@ -169,7 +197,9 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
   function onKeyUp(event: Event): void {
     if (!mounted) return
     const ke = event as KeyboardEvent
-    const result = session.handleKey(readKeyFact(ke, session.nextToken()))
+    const result = session.handleKey(
+      readKeyFact(ke, session.nextToken(), { hitModalScopeId: hitModalScopeOf(ke.target) }),
+    )
     runPlatform(result, ke)
     options.onEvent?.(result)
   }
@@ -196,7 +226,11 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
     const captureTarget = pointerId >= 0 ? captureElement(pe as PointerEvent, regionId) : null
     const captured = captureTarget !== null && hasCapture(captureTarget, pointerId)
 
-    const fact = readPointerFact(pe, session.nextToken(), { hitRegionId: regionId, captured })
+    const fact = readPointerFact(pe, session.nextToken(), {
+      hitRegionId: regionId,
+      captured,
+      hitModalScopeId: hitModalScopeOf(pe.target),
+    })
     if (fact === null) return
     const result = session.handlePointer(fact)
 

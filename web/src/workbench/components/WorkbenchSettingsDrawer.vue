@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onUnmounted, watch, type Ref } from 'vue'
+import { computed, inject, onUnmounted, ref, watch, type Ref } from 'vue'
 
 import ExportsListPanel from '@/workbench/components/ExportsListPanel.vue'
 import LocalBundlePanel from '@/workbench/components/LocalBundlePanel.vue'
@@ -57,6 +57,17 @@ function pickMode(m: WorkbenchWorkspaceMode): void {
  */
 const SCOPE_ID = 'workbench-settings'
 
+/**
+ * 抽屉根元素（`ModalScopeDeclaration.root` 的落点）。
+ *
+ * 为什么必须登记：模态把"阻断背景"实现为对所有未捕获指针事件 `preventDefault`，
+ * 而原生 `<select>` 下拉、文本框焦点、checkbox 勾选都吃 `pointerdown` 的默认行为
+ * —— 不区分"点在背景"与"点在模态自己 DOM 里"，抽屉里的这些控件就全部打不开
+ * （M5-5 手测：内置示例的场景 ID 下拉点不开）。根元素只在**组件自己**知道（且抽屉
+ * teleport 到 body），故随作用域一起提交，由输入层翻成"目标在模态内"的事实。
+ */
+const drawerRoot = ref<HTMLElement | null>(null)
+
 let unbindScope: (() => void) | null = null
 
 watch(
@@ -69,6 +80,8 @@ watch(
       scopeId: SCOPE_ID,
       // 抽屉是遮罩式：开着时背景不应收到场景快捷键
       blocksBackground: true,
+      // 抽屉**内部**仍是普通 DOM（原生下拉/输入框要能获得焦点与默认行为）
+      root: () => drawerRoot.value,
       confirmOnEnter: false,
       onEscape: close,
     })
@@ -85,7 +98,7 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <Transition name="drawer">
-      <div v-if="open" class="drawer-root">
+      <div v-if="open" ref="drawerRoot" class="drawer-root">
         <div class="drawer-backdrop" aria-hidden="true" @click="close" />
         <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
           <header class="drawer-head">

@@ -38,6 +38,20 @@ export interface ModalScopeDeclaration {
   readonly confirmOnEnter?: boolean
   readonly textControlIds?: readonly string[]
   readonly focusId?: string | null
+  /**
+   * 弹窗的**根元素**（或其 getter）。
+   *
+   * ## 为什么这是登记的一部分（M5-5 打回）
+   *
+   * 模态"阻断背景"必须能区分"背景"与"模态自己 DOM 里"——否则原生 `<select>` /
+   * 文本框 / checkbox 全被 `preventDefault` 吞掉（焦点与下拉永远打不开，且无报错）。
+   * 只有**登记作用域的组件自己**知道根元素是谁（抽屉还 teleport 到 body），
+   * 故根元素随作用域一起提交；输入层把它翻成 `hitModalScopeId` 事实。
+   *
+   * 用 getter 而不是元素：登记发生在 `watch(open)` 的 `pre` 阶段（DOM 还没 patch），
+   * 事件发生时元素才一定存在。返回 `null` ⇒ 该作用域退化为"全部按背景吞"（安全方向）。
+   */
+  readonly root?: Element | (() => Element | null)
   /** Escape 时的动作（关闭弹窗一类）。**不是**领域命令。 */
   readonly onEscape?: () => void
 }
@@ -47,6 +61,12 @@ export interface InputPort {
   /** 关闭指定作用域（若它就是当前作用域）。Escape 路由的落点。 */
   closeModalScope(scopeId: string): boolean
   readonly modalScopeId: string | null
+  /**
+   * 某个已登记作用域的**根元素**（未登记/已注销 ⇒ `null`）。
+   *
+   * 只读事实面：适配器据此判定事件目标在模态内部还是背景。它**不**改任何状态。
+   */
+  modalRootElementOf(scopeId: string | null): Element | null
   setInteraction(interaction: { contextId: string; regionId: string; tool: string } | null): void
   setActiveRegion(regionId: string | null): void
   setHotkeys(area: readonly HotkeyBinding[], app: readonly HotkeyBinding[]): void
@@ -123,6 +143,8 @@ export interface InputPortHandle extends InputPort {
  */
 export function createInputPort(session: InputSession): InputPortHandle {
   const escapeHandlers = new Map<string, () => void>()
+  /** 作用域 → 根元素（元素或 getter；见 `ModalScopeDeclaration.root`）。 */
+  const modalRoots = new Map<string, Element | (() => Element | null)>()
   const listeners = new Set<() => void>()
 
   return {
@@ -149,8 +171,10 @@ export function createInputPort(session: InputSession): InputPortHandle {
         ...(decl.focusId === undefined ? {} : { focusId: decl.focusId }),
       })
       if (decl.onEscape) escapeHandlers.set(decl.scopeId, decl.onEscape)
+      if (decl.root !== undefined) modalRoots.set(decl.scopeId, decl.root)
       return () => {
         escapeHandlers.delete(decl.scopeId)
+        modalRoots.delete(decl.scopeId)
         session.closeModal(decl.scopeId)
       }
     },
@@ -162,6 +186,12 @@ export function createInputPort(session: InputSession): InputPortHandle {
     },
     get modalScopeId() {
       return session.routing.modal.scopeId
+    },
+    modalRootElementOf(scopeId) {
+      if (scopeId === null) return null
+      const root = modalRoots.get(scopeId)
+      if (root === undefined) return null
+      return typeof root === 'function' ? root() : root
     },
     setInteraction(interaction) {
       session.setInteraction(interaction)

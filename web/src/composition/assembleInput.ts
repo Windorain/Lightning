@@ -167,6 +167,8 @@ export function assembleInput(options: AssembleInputOptions, claim = true): Asse
   const binding = createInputBinding({
     session,
     hitTest: options.hitTest,
+    // 模态"内部 vs 背景"的判定依据（M5-5）：根元素由弹窗在 openModalScope 时登记。
+    modalRootOf: (scopeId) => port.modalRootElementOf(scopeId),
     ...(options.keyTarget === undefined ? {} : { keyTarget: options.keyTarget }),
     ...(options.pointerTarget === undefined ? {} : { pointerTarget: options.pointerTarget }),
     ...(options.onResume === undefined ? {} : { onResume: options.onResume }),

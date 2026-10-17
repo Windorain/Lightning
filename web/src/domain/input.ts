@@ -112,6 +112,13 @@ export interface KeyFact {
   readonly composing: boolean
   /** 目标是否为可编辑元素 —— **适配器提取的事实**（语义层不查 `activeElement`）。 */
   readonly targetEditable: boolean
+  /**
+   * 该事件目标落在哪个已登记模态根内（`null` = 背景）。
+   *
+   * 与 {@link PointerFact.hitModalScopeId} 同一事实、同一理由：模态**内部**的原生控件
+   * （textarea/input）要拿到按键的默认行为（插入字符），而背景仍要被 Modal 语义吞掉。
+   */
+  readonly hitModalScopeId: string | null
   readonly defaultPrevented: boolean
 }
 
@@ -155,6 +162,24 @@ export interface PointerFact {
   readonly height?: number
   /** 该事件命中的 Area（由适配器按坐标事实判定；`null` = 不在任何 Area 内）。 */
   readonly hitRegionId: string | null
+  /**
+   * 该事件目标落在哪个**已登记模态根**内（`null` = 不在任何模态内）。
+   *
+   * ## 为什么必须有这一维（M5-5 打回：设置抽屉的原生下拉打不开）
+   *
+   * 模态的"阻断背景"是**正当语义**，但它此前无法区分"点在模态**背景**"与
+   * "点在模态**自己**的 DOM 里"：适配器只报坐标事实，路由拿不到"目标在谁内部"，
+   * 于是对**所有**未捕获指针事件一律 `preventDefault`。按钮靠 `click` 侥幸可用，
+   * 而原生 `<select>` / 文本框 / checkbox 吃 `pointerdown` 的默认行为（焦点、下拉）
+   * ⇒ 模态里的这些控件全部失效，且**没有任何报错**。
+   *
+   * ## 为什么是"作用域 id"而不是布尔
+   *
+   * 只报"在模态内"会让**另一个**未打开模态的 DOM（比如前一个弹窗残留节点）也算内部。
+   * 带上 scopeId，路由才能核对"是不是**当前**这个模态"（见 `routePointer`）。
+   * 适配器负责把 DOM 事件目标翻成这个事实（它知道已登记模态的根元素）。
+   */
+  readonly hitModalScopeId: string | null
   /** 该 `pointerId` 当前是否已被本应用捕获（平台事实）。 */
   readonly captured: boolean
   /** 轨迹点（**不合并、不丢弃**；空数组表示本次事件无轨迹）。 */
@@ -475,6 +500,19 @@ function routeModalKey(state: InputRoutingState, fact: KeyFact): RoutingDecision
       reason: 'modal-enter-confirm',
     })
   }
+  // 命中**当前模态自身** DOM ⇒ 交给浏览器做原生编辑（同 `PointerFact` 的那一维）。
+  // 关键只有 `preventDefault: false`：在 document 的 keydown 上 `preventDefault`
+  // 会取消字符插入（模态里的 textarea 因此一个字也打不进去）。
+  // 仍然 `level: 'modal'`：这个键**不**得下落成 Area/应用快捷键。
+  if (fact.hitModalScopeId !== null && fact.hitModalScopeId === modal.scopeId) {
+    return decision({
+      level: 'modal',
+      receiver,
+      preventDefault: false,
+      stopPropagation: false,
+      reason: fact.targetEditable ? 'modal-interior-native-editing' : 'modal-interior-passthrough',
+    })
+  }
   if (modal.blocksBackground) {
     return decision({
       level: 'modal',
@@ -750,9 +788,18 @@ export function routePointer(
 
   // ── 未捕获 ──
   if (state.modal.open && state.modal.blocksBackground) {
+    const scope = state.modal.scopeId ?? 'anonymous'
+    // 命中**当前模态自身** DOM ⇒ 它是普通 DOM：不吞默认行为、不产生区域意图。
+    // 否则原生 select 下拉 / 文本框焦点 / checkbox 勾选全部失效（按钮只因走 click 幸免）。
+    if (fact.hitModalScopeId !== null && fact.hitModalScopeId === state.modal.scopeId) {
+      return {
+        state,
+        decision: pdec({ receiverKind: 'modal', receiver: `modal:${scope}`, preventDefault: false, reason: 'modal-interior-passthrough' }),
+      }
+    }
     return {
       state,
-      decision: pdec({ receiverKind: 'modal', receiver: `modal:${state.modal.scopeId ?? 'anonymous'}`, preventDefault: true, reason: 'modal-blocks-pointer' }),
+      decision: pdec({ receiverKind: 'modal', receiver: `modal:${scope}`, preventDefault: true, reason: 'modal-blocks-pointer' }),
     }
   }
 

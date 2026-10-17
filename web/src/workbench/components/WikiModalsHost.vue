@@ -63,6 +63,22 @@ function currentScopeId(): string | null {
   return `${SCOPE_ID}:${m}`
 }
 
+/**
+ * 当前可见弹窗的**根元素**（`ModalScopeDeclaration.root` 的落点）。
+ *
+ * 三个 `v-if` 兄弟共用同一个 ref 名（同一时刻只挂载一个）；picker 是组件，取其 `$el`。
+ * 不登记它 ⇒ 弹窗内的 textarea / 搜索框拿不到 `pointerdown` 的默认行为（焦点），
+ * 且 keydown 会被模态分支 `preventDefault` ⇒ 一个字也打不进去（M5-5 同族缺陷）。
+ */
+const modalRootEl = ref<HTMLElement | null>(null)
+const pickerRef = ref<{ $el?: Element } | null>(null)
+
+/** 根元素（按当前弹窗取值；事件发生时求值，此时 DOM 已 patch）。 */
+function modalRootOf(): Element | null {
+  if (modal.value === 'picker') return pickerRef.value?.$el ?? null
+  return modalRootEl.value
+}
+
 let unbindScope: (() => void) | null = null
 
 watch(
@@ -75,6 +91,8 @@ watch(
       scopeId: `${SCOPE_ID}:${m}`,
       blocksBackground: true,
       confirmOnEnter: false,
+      // 弹窗**内部**是普通 DOM（见 modalRootOf 的说明）
+      root: modalRootOf,
       // 弹窗**自己**的文本控件：它们在弹窗内仍接收输入（#249 §19.1 的层级示例）
       textControlIds: ['wiki-edit-summary', 'wiki-save-as-name'],
       onEscape: closeModal,
@@ -137,6 +155,7 @@ const saveAsName = ref('')
 
 <template>
   <WikiStructurePickerModal
+    ref="pickerRef"
     :ctx="ctx"
     :open="modal === 'picker'"
     @close="closeModal"
@@ -145,6 +164,7 @@ const saveAsName = ref('')
 
   <div
     v-if="modal === 'save-confirm' && saveConfirm"
+    ref="modalRootEl"
     class="wiki-modal-backdrop"
     @mousedown.self="closeModal"
     @keydown.stop
@@ -170,6 +190,7 @@ const saveAsName = ref('')
 
   <div
     v-if="modal === 'save-preview'"
+    ref="modalRootEl"
     class="wiki-modal-backdrop"
     @mousedown.self="closeModal"
     @keydown.stop
@@ -186,6 +207,7 @@ const saveAsName = ref('')
 
   <div
     v-if="modal === 'save-as'"
+    ref="modalRootEl"
     class="wiki-modal-backdrop"
     @mousedown.self="closeModal"
     @keydown.stop

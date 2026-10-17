@@ -60,7 +60,11 @@ export function isEditableElement(el: unknown): boolean {
  * `token` 由接线层分配（单调），它是去重、A22 判定与重放记录的键。
  * 注意本函数**不**判断"该不该处理"，也不 `preventDefault` —— 全是事实。
  */
-export function readKeyFact(event: KeyboardEvent, token: number): KeyFact {
+export function readKeyFact(
+  event: KeyboardEvent,
+  token: number,
+  opts: { readonly hitModalScopeId?: string | null } = {},
+): KeyFact {
   return Object.freeze({
     token,
     kind: event.type === 'keyup' ? 'keyup' : 'keydown',
@@ -75,6 +79,7 @@ export function readKeyFact(event: KeyboardEvent, token: number): KeyFact {
     // `isComposing` 是标准字段；旧引擎缺省时退化为 `keyCode === 229`（IME 处理中）。
     composing: event.isComposing === true || (event as unknown as { keyCode?: number }).keyCode === 229,
     targetEditable: isEditableElement(event.target),
+    hitModalScopeId: opts.hitModalScopeId ?? null,
     defaultPrevented: event.defaultPrevented,
   })
 }
@@ -142,7 +147,17 @@ export function readTrail(event: PointerEvent): readonly TrailPoint[] {
 export function readPointerFact(
   event: PointerEvent | WheelEvent,
   token: number,
-  opts: { readonly hitRegionId: string | null; readonly captured: boolean },
+  opts: {
+    readonly hitRegionId: string | null
+    readonly captured: boolean
+    /**
+     * 事件目标落在哪个**已登记模态根**内（`null` = 背景/无模态）。
+     *
+     * 由接线层注入：只有它知道"当前模态的根元素是谁"（组件在 `openModalScope` 时
+     * 提交根元素；见 `runtime/inputPort`）。适配器不猜"哪个 DOM 算模态"。
+     */
+    readonly hitModalScopeId?: string | null
+  },
 ): PointerFact | null {
   const kind = pointerKindOf(event)
   if (kind === null) return null
@@ -163,6 +178,7 @@ export function readPointerFact(
     alt: event.altKey,
     meta: event.metaKey,
     hitRegionId: opts.hitRegionId,
+    hitModalScopeId: opts.hitModalScopeId ?? null,
     captured: opts.captured,
     trail: isWheel ? Object.freeze([]) : readTrail(pe),
     ...(isWheel || pe.pressure === undefined ? {} : { pressure: pe.pressure }),

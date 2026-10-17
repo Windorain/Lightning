@@ -98,6 +98,7 @@ function key(parts: Partial<KeyFact> & { key: string }): KeyFact {
     repeat: false,
     composing: false,
     targetEditable: false,
+    hitModalScopeId: null,
     defaultPrevented: false,
     ...parts,
   })
@@ -118,6 +119,7 @@ function pointer(parts: Partial<PointerFact> & { kind: PointerFact['kind'] }): P
     alt: false,
     meta: false,
     hitRegionId: 'r-viewport',
+    hitModalScopeId: null,
     captured: false,
     trail: Object.freeze([]),
     ...parts,
@@ -407,6 +409,43 @@ describe('A22 / 指针路由：按 pointerId 单独路由，捕获丢失按政�
     const r = routePointer(s, pointer({ kind: 'down' }))
     expect(r.decision.receiverKind).toBe('modal')
     expect(r.decision.preventDefault).toBe(true)
+  })
+
+  it('模态**内部** DOM 的指针事件不吞默认行为（原生 select 下拉/文本框焦点靠它）', () => {
+    const s = withModal(baseState(), modalOpened({ scopeId: 'workbench-settings', blocksBackground: true }))
+    const r = routePointer(s, pointer({ kind: 'down', hitModalScopeId: 'workbench-settings' }))
+    expect(r.decision.receiverKind, '仍归模态接收（不得路由给 Area）').toBe('modal')
+    expect(r.decision.receiver).toBe('modal:workbench-settings')
+    expect(r.decision.preventDefault, '模态内部的 DOM 是普通 DOM：不得取消 pointerdown 默认行为').toBe(false)
+    expect(r.decision.intent, '模态内部点击不得产生 pointer.down 一类区域意图').toBeNull()
+    expect(r.decision.reason).toBe('modal-interior-passthrough')
+  })
+
+  it('**负向**：命中**别的**作用域（残留旧弹窗 DOM）仍按背景吞（不是"在任意模态内就放行"）', () => {
+    const s = withModal(baseState(), modalOpened({ scopeId: 'workbench-settings', blocksBackground: true }))
+    const r = routePointer(s, pointer({ kind: 'down', hitModalScopeId: 'stale-other-modal' }))
+    expect(r.decision.preventDefault).toBe(true)
+    expect(r.decision.reason).toBe('modal-blocks-pointer')
+  })
+
+  it('模态内部的可编辑目标：键交给浏览器做原生编辑（不再一个字也打不进去）', () => {
+    const s = withModal(baseState(), modalOpened({ scopeId: 'wiki-save:x', blocksBackground: true }))
+    const r = routeKeyboardKey(s, key({ key: 'a', targetEditable: true, hitModalScopeId: 'wiki-save:x' }))
+    expect(r.decision.level, '仍是模态层：这个键不得下落成 Area 快捷键').toBe('modal')
+    expect(r.decision.preventDefault, '否则 document keydown 会取消字符插入').toBe(false)
+    expect(r.decision.intent).toBeNull()
+    expect(r.decision.reason).toBe('modal-interior-native-editing')
+  })
+
+  it('**负向**：背景上的同一个键仍被吞（模态语义不回潮：Area 快捷键不触发）', () => {
+    const s = withModal(baseState(), modalOpened({ scopeId: 'wiki-save:x', blocksBackground: true }))
+    const r = routeKeyboardKey(s, key({ key: 'g', hitModalScopeId: null }))
+    expect(r.decision.level).toBe('modal')
+    expect(r.decision.preventDefault).toBe(true)
+    expect(r.decision.intent).toBeNull()
+    // 再证一条：模态关闭后 g 仍到 Area（说明上面不是恒绿）
+    const open = routeKeyboardKey(withModal(baseState(), NO_MODAL), key({ key: 'g' }))
+    expect(open.decision.intent?.commandId).toBe('tool.beginInteraction')
   })
 
   it('滚轮路由到命中 Area 并阻止默认行为（否则页面会跟着滚）', () => {
