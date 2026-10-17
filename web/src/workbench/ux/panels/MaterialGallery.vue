@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import type { MaterialQueryItem } from '@/runtime/types'
 import { useContext } from '@/runtime/context'
 import OperatorBtn from '@/workbench/ux/OperatorBtn.vue'
@@ -26,6 +26,13 @@ interface MaterialCard {
 const cards = ref<MaterialCard[]>([])
 const selectedId = ref<string | null>(null)
 const focusedIndex = ref(0)
+/**
+ * 每个 canvas 上次画出的样本帧（同帧重绘是纯浪费；也是"没有自驱 tick"的可见证据）。
+ *
+ * 文档内容重读（`refresh`）时必须清空：换了一份贴图而帧下标恰好相同，不得因为
+ * "帧没变"跳过重绘（否则画面上是上一份文档的帧）。
+ */
+const lastPaintedFrame = new Map<string, number>()
 
 const KIND_LABEL: Record<string, string> = { static16: '静态 (16×)', animated: '动画' }
 const BLEND_LABEL: Record<string, string> = { opaque: '不透明', cutout: '裁剪', translucent: '半透明' }
@@ -99,6 +106,8 @@ function refresh() {
     }
   })
 
+  // 内容重读 ⇒ 贴图/声明可能变了，上一轮"画过第几帧"不再是事实（见 lastPaintedFrame）。
+  lastPaintedFrame.clear()
   if (selectedId.value && !cards.value.find(c => c.materialId === selectedId.value)) {
     selectedId.value = null
   }
@@ -132,33 +141,13 @@ const sequences = new Map<string, TextureSequence | null>()
 const animationCanvases = new Map<string, HTMLCanvasElement>()
 const animationImages = new Map<string, HTMLImageElement>()
 
-/** 一帧的默认时长（毫秒）。旧渲染路径用 `DEFAULT_WORLD_FRAME_DWELL_MS = 50`（= 1 tick）。 */
-const DEFAULT_FRAME_MS = 50
-
-/**
- * 场景时间（秒）：帧下标 × 该帧时长。**不含任何累积量**。
- *
- * #301 P10f C′1（N4 字段完备处 + N6 同族）：改走**帧声明的唯一读取面**
- * `ctx.frameDeclarations()`（含 GF-16 分流：装配成功 ⇒ 内核帧轴，否则 ⇒ legacy）。
- *
- * ## 为什么这是同义替换（而非"看起来等价"）
- *
- * 原写法 `doc.frameCount` + `doc.frame(i).durationMs` 与
- * `frameDeclarations()` 的 legacy 分支**逐字相同**（同一 `frameCount`、
- * 同一 `?? 0` 缺省口径），且装配成功后内核帧轴才是权威 —— 那正是 D8 的修复方向。
- * ⇒ 两种状态下都比"直读 legacy"更正确或完全相同。
- */
-function sceneSeconds(): number {
-  const decl = ctx.frameDeclarations()
-  if (decl.count === 0) return 0
-  const index = Math.min(Math.max(ctx.getFrameIndex(), 0), decl.count - 1)
-  let ms = 0
-  for (let i = 0; i < index; i++) {
-    const d = decl.durationsMs[i]
-    ms += typeof d === 'number' && Number.isFinite(d) && d > 0 ? d : DEFAULT_FRAME_MS
-  }
-  return ms / 1000
-}
+// 场景秒数**不再**在本组件里计算：唯一权威是 `domain/animation#sceneClockOf`，
+// 本组件经 `ctx.getSceneSeconds()` 读它的只读投影。
+//
+// 被删除的旧本地实现是"Σ 当前帧之前各帧 durationMs"，与视口的连续口径
+// （时间 × 帧率）不同源 —— 在不等帧时长的文档上两者给出不同的采样时刻。
+// 它还带一个 `DEFAULT_FRAME_MS=50` 的缺省：场景秒**不吃**任何帧时长缺省，
+// 那个常量随公式一起消失（纹理序列的 tick 缺省另有唯一出处）。
 
 /**
  * 材质声明 → 纹理序列（纯；解析期拒绝即返回 `null`）。
@@ -227,7 +216,8 @@ function paint(canvas: HTMLCanvasElement, img: HTMLImageElement, card: MaterialC
  * 与 §15 第 6 条「业务推进可枚举」的意图：**能不留自驱调度就不留**。
  */
 function paintAll(): void {
-  const seconds = sceneSeconds()
+  // 时间来自**唯一权威**（与视口/导出同一函数），不是本组件的独立累加器。
+  const seconds = ctx.getSceneSeconds()
   for (const [key, canvas] of animationCanvases) {
     const img = animationImages.get(key)
     const card = cards.value.find(c => c.materialId === key || `${c.materialId}-detail` === key)
@@ -235,7 +225,11 @@ function paintAll(): void {
     const seq = sequenceFor(card)
     if (!seq) continue
     const sample = sampleTextureSequence(seq, seconds)
-    if (sample.ok) paint(canvas, img, card, sample.value)
+    if (!sample.ok) continue
+    const frame = sample.value.frame
+    if (lastPaintedFrame.get(key) === frame) continue
+    paint(canvas, img, card, sample.value)
+    lastPaintedFrame.set(key, frame)
   }
 }
 
@@ -259,8 +253,11 @@ function setCanvasRef(el: unknown, materialId: string): void {
     // —— 没有自驱循环（原因见 `paintAll` 的说明）。
     const seq = sequenceFor(card)
     if (seq) {
-      const sample = sampleTextureSequence(seq, sceneSeconds())
-      if (sample.ok) paint(canvas, img, card, sample.value)
+      const sample = sampleTextureSequence(seq, ctx.getSceneSeconds())
+      if (sample.ok) {
+        paint(canvas, img, card, sample.value)
+        lastPaintedFrame.set(materialId, sample.value.frame)
+      }
     }
   }
   img.src = card.dataUrl
@@ -269,10 +266,42 @@ function setCanvasRef(el: unknown, materialId: string): void {
 onUnmounted(() => {
   animationCanvases.clear()
   animationImages.clear()
+  lastPaintedFrame.clear()
 })
 
-// 场景时间变化（跳帧）⇒ 立即重画一次。**这是本组件唯一的播放驱动**：
-// 时间只由帧下标决定，故不需要（也不应有）rAF 循环。
+/**
+ * **帧时钟订阅**（播放驱动）+ **帧下标 watch**（暂停态拖动定位）。
+ *
+ * ## 为什么必须订阅时钟（而不只 watch 帧下标）
+ *
+ * 旧驱动只有 `watch(() => ctx.getFrameIndex())`。M5-1 拆掉多方块帧轴后，
+ * 多方块文档 `frameCount()===0`、帧下标恒 0 ⇒ 播放不会触发 watch，面板冻结。
+ * 而纹理时间**本来就不该**依赖世界帧轴（`domain/animation#sceneClockOf` 只吃 frame/fps）。
+ *
+ * ## 为什么只在本组件订阅、不自己起调度器
+ *
+ * 时钟归外壳（`Context#getFrameClock`，一个 `EditContext` 一个），本组件只**订阅**：
+ * 不累加任何 delta、不持有 rAF。暂停时 `advanced===false`（内核时间没变）⇒ 不重绘。
+ * 帧时钟不可用（组件挂载早于外壳装配）时由 `watch(clock)` 在它出现后补订阅。
+ */
+let unframe: (() => void) | null = null
+function subscribeClock(): void {
+  unframe?.()
+  unframe = null
+  const clock = ctx.getFrameClock()
+  if (clock === null) return
+  unframe = clock.onFrame((info) => {
+    if (info.advanced) paintAll()
+  })
+}
+watch(() => ctx.getFrameClock(), () => subscribeClock())
+onMounted(() => subscribeClock())
+onBeforeUnmount(() => {
+  unframe?.()
+  unframe = null
+})
+
+// 暂停态拖动定位（时间变了但时钟 `advanced` 未必触发）⇒ 也重画一次。
 watch(() => ctx.getFrameIndex(), () => paintAll())
 
 // ---- Keyboard navigation ----

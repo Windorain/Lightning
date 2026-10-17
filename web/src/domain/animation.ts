@@ -199,6 +199,50 @@ export function secondsOf(t: TimeValue): Rational {
   return rational(Math.round(frame * 1e6) * den, num * 1e6)
 }
 
+/**
+ * 场景时钟（**呈现侧唯一时间输入**）。
+ *
+ * - `seconds`：权威连续秒数（帧内连续；纹理序列/通道/未来关键帧共用）；
+ * - `numerator/denominator`：求值键文本用的"第几帧 @ 多少 fps"（仅诊断/键序列化，
+ *   `seconds` 才是判定值；有理帧率下二者不必能互相精确还原）。
+ *
+ * 它是**纯函数**：无时钟、无状态、无缺省帧时长。文件有没有声明 `durationMs` 不影响场景秒
+ * —— 那是「世界帧轴」的输入（见 `domain/materials#stripTimeline`），不是场景时间。
+ */
+export interface SceneClock {
+  readonly seconds: number
+  readonly numerator: number
+  readonly denominator: number
+}
+
+/**
+ * 由时间值算场景时钟（**唯一**实现；`composition/kernelRuntime#sceneSeconds`、
+ * `composition/presenterSession#applyKernelDocument`、`runtime/context#getSceneSeconds`
+ * 与材质面板全部委托到这里，不得各算一份）。
+ *
+ * 非法帧率（非有限、`<= 0`）⇒ 全零（`seconds=0, numerator=0, denominator=1`）：
+ * **不得**回落到 `secondsOf` 的 `DEFAULT_FRAME_RATE`（20）—— 那会让一个非法帧率的文档
+ * 读出一个"看起来正常"的场景秒，与既有判据 `fps<=0 ⇒ 0` 冲突。
+ */
+export function sceneClockOf(time: TimeValue): SceneClock {
+  const fps = framesPerSecond(time.fps)
+  if (!(fps > 0)) {
+    return Object.freeze({ seconds: 0, numerator: 0, denominator: 1 })
+  }
+  const exact = secondsOf(time)
+  const frame = Number.isFinite(time.frame) ? time.frame : 0
+  return Object.freeze({
+    seconds: exact.num / exact.den,
+    numerator: frame,
+    denominator: Number.isInteger(fps) ? fps : 1,
+  })
+}
+
+/** 场景秒数（`sceneClockOf(time).seconds` 的便捷投影；**不得**另写一套换算）。 */
+export function sceneSecondsOf(time: TimeValue): number {
+  return sceneClockOf(time).seconds
+}
+
 /** 秒 → 时间（有理帧率下构造）。 */
 export function timeFromSeconds(seconds: number, fps: FrameRateSpec = 20): TimeValue {
   const rate = frameRateOf(fps)

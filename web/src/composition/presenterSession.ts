@@ -44,7 +44,7 @@ import * as THREE from 'three'
 import type { Scene, ObjectDataPayload } from '@/domain/scene'
 import type { DocumentContent } from '@/domain/content'
 import type { Document } from '@/domain/document'
-import type { TimeValue as DomainTimeValue } from '@/domain/animation'
+import { sceneClockOf, type TimeValue as DomainTimeValue } from '@/domain/animation'
 import type { EvaluationKey } from '@/presentation/evaluationKey'
 import type { MaterialDescriptor } from '@/presentation/evaluationKey'
 import type { PresentationInputs } from '@/presentation/evaluationKey'
@@ -359,7 +359,8 @@ export class PresenterSession {
       key: {
         documentVersion: doc.version.documentVersion,
         scene: doc.scene.id,
-        time: presentationTimeOf(time),
+        // 时间维的**唯一**换算在 domain（`sceneClockOf`）；本处只做形状转换。
+        time: sceneClockOf(time),
         parameterVersion: 0,
         contentResourceVersions: resourceVersionsOf(doc.content),
       },
@@ -732,12 +733,23 @@ export class PresenterSession {
  * 场景对象序 + 每个对象的载荷**内容版本** + 几何/逐格目录的键集 + 帧下标。
  * 用"键集"而不是"值的深比较"：载荷内容变时 `contentVersion` 由领域层推进
  * （`domain/scene#ObjectData`），故逐值深比较是**重复判据**（会与领域层漂移）。
+ *
+ * ## ⚠️ **时间不是结构身份**（M5-3 的判据反转）
+ *
+ * 本函数曾把时间片段（`t:<frame>/<fps>`）拼进身份。后果是播放时每帧该段都变
+ * ⇒ 每帧全量 `compileScene` + `presenter.apply`，而编译产物里**没有任何时间相关
+ * 像素**（纹理由"同一张竖条贴图 + 每帧 UV 偏移"呈现，见
+ * `presentation/presenter#applySceneTime`）。那是纯粹的每帧全量重建。
+ *
+ * ⇒ 时间相关呈现**必须**走 `presenter.setSceneTime`，不得靠重编。求值键
+ * （`EvaluationKey.time`）**仍然完整保留**该维度（契约维度、诊断、离屏冻结序列都用它），
+ * 只是不再参与"要不要重编"。
  */
 function contentIdentityOf(scene: Scene, content: DocumentContent, key: EvaluationKey, layerWorldY: number | null): string {
   const parts: string[] = [
     `k:${key.documentVersion}`,
     `s:${key.scene}`,
-    `t:${key.time.numerator}/${key.time.denominator}`,
+    // ⚠️ 时间**不在**这里（见上）。谁把 `t:` 加回来，播放就会退回"每帧全量重编"。
     // 分层预览进身份：同一文档换一层 ⇒ 必须重编（否则"选了 Y=3 画面不动"）。
     `lp:${layerWorldY === null ? 'all' : `y${layerWorldY}`}`,
   ]
@@ -790,40 +802,7 @@ function resourceVersionsOf(content: DocumentContent): Readonly<Record<string, s
   return out
 }
 
-/**
- * **领域时间 → 呈现求值键的时间表示**（两个同名不同类型的**唯一**换算点）。
- *
- * ## 为什么这里有一个真实的坑（本批实测撞到）
- *
- * 全仓有**两个**叫 `TimeValue` 的类型，形状**不同**：
- *
- * | 归属 | 形状 | 用途 |
- * |---|---|---|
- * | `domain/animation#TimeValue` | `{ frame: number; fps: FrameRateSpec }` | **领域**的时间事实（GF-3 的有理帧率） |
- * | `presentation/evaluationKey#TimeValue` | `{ seconds; numerator; denominator }` | 呈现**求值键**的时间维度 |
- *
- * 同名不同形 ⇒ 直接把领域时间塞进求值键**编译不过**（本批实测：`TS2739`）。
- * 这不是障碍而是**保护**：它逼着写出这个换算，于是"呈现键里的时间怎么来的"
- * 有唯一答案。
- *
- * ## 换算口径
- *
- * `numerator/denominator` 取**帧号与帧率的有理表示**（`framesPerSecond` 已把
- * `number | {num,den}` 归一），`seconds = frame / fps` —— 与
- * `composition/kernelRuntime#sceneSeconds` **同一算法**（那是场景秒数的既有唯一定义点）。
- *
- * ⚠️ 这里**不 import** `sceneSeconds`：本函数还要产出分子/分母（那个函数只给秒数），
- * 而重复写一次 `frame/fps` 是有意的 —— 判据（`presenterSession.test.ts`）把两者
- * 的**一致性**钉住，这比"只写一处但少一半信息"更安全。
- */
-function presentationTimeOf(time: DomainTimeValue): import('@/presentation/evaluationKey').TimeValue {
-  const spec = time.fps
-  const num = typeof spec === 'number' ? spec : spec.num / spec.den
-  const den = 1
-  const fps = num / den
-  return Object.freeze({
-    seconds: fps > 0 ? time.frame / fps : 0,
-    numerator: time.frame,
-    denominator: Number.isInteger(fps) && fps > 0 ? fps : 1,
-  })
-}
+// 时间维的换算**没有**本文件里的复制件：权威是 `domain/animation#sceneClockOf`
+// （`applyKernelDocument` 直接调它）。两个同名 `TimeValue` 的形状差异仍是真实的
+// （`domain` 侧 `{frame,fps}`、求值键侧 `{seconds,numerator,denominator}`），但
+// 换算规则只有一处 —— 多写一份就会在"哪一处是权威"上出现第二个答案。

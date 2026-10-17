@@ -43,7 +43,7 @@
 
 import type { KernelSession } from '@/runtime/kernelSession'
 import type { TimeValue } from '@/domain/animation'
-import { framesPerSecond } from '@/domain/animation'
+import { sceneSecondsOf } from '@/domain/animation'
 
 /**
  * 帧时钟的对外面。
@@ -198,21 +198,22 @@ export function createFrameClock(opts: FrameClockOptions): FrameClock {
 /**
  * 由内核播放快照算出**场景秒数**（纹理/通道动画的统一时间输入）。
  *
- * ## 为什么这个换算需要一个具名函数
+ * ## 权威在 `domain/animation#sceneClockOf`
  *
  * #249 §19.3 要求纹理序列"默认绑定**场景时间**"，且「所有影响输出的时间来源
  * 与参数进入相应求值键」。于是"场景秒数"必须**只有一个**定义点 ——
  * 否则材质面板、渲染侧、导出各算一份，同一时刻会得到不同的采样结果
  * （那正是 A27「双 Area/跳帧/离屏导出一致」要判红的形态）。
  *
+ * 本导出**只是宿主端口**（`runtime/host.ts` 注入 `ViewportPresenterBundle.sceneSeconds`）
+ * 的稳定入口：函数体委托 `domain` 的唯一实现，不在装配层重写算法。
+ *
  * 与旧做法的关键差别：旧 `MaterialGallery.sceneSeconds()` 是"累加当前帧**之前**
  * 各帧的 `durationMs`"（一个**离散帧**口径），而旧 `simpleMaterialLibrary.accMs`
  * 是"每材质自持的毫秒累加器"（一个**连续**口径）。两个口径不同源 ⇒
- * 面板里看到的帧与视口里看到的帧可以不一致。本函数是**连续**口径
+ * 面板里看到的帧与视口里看到的帧可以不一致。权威函数是**连续**口径
  * （时间 × 帧率），且它是**唯一**的。
  */
 export function sceneSeconds(time: TimeValue): number {
-  const fps = framesPerSecond(time.fps)
-  if (!(fps > 0)) return 0
-  return time.frame / fps
+  return sceneSecondsOf(time)
 }

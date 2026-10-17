@@ -65,6 +65,7 @@ import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotat
 /** 空读面常量（eadonly 空数组：避免每次分配，且调用方不得改内联量）。 */
 const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs, type DocumentContent } from '@/domain/content'
+import { sceneSecondsOf } from '@/domain/animation'
 import type { Document } from '@/domain/document'
 import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
 import {
@@ -1976,6 +1977,22 @@ export class Context {
    */
   getFrameIndex(): number {
     return this.kernel?.frameIndex() ?? 0
+  }
+
+  /**
+   * **场景秒数**（唯一权威 `domain/animation#sceneClockOf` 的只读投影；无会话 ⇒ 0）。
+   *
+   * 为什么是"场景秒数"而不是"帧下标 × 帧时长"：后者是**离散帧轴**口径
+   * （缺省 50 ms、且只在有帧轴的文档上成立），与视口/导出的连续口径不同源。
+   * 面板缩略图与视口纹理必须读**同一个**时间值 —— 否则同一时刻会得到不同样本
+   * （A27 的判据形态）。
+   *
+   * 无会话时给 0（与 `getFrameIndex()` 同一条读路径纪律：静态呈现，而不是让面板崩）。
+   */
+  getSceneSeconds(): number {
+    const kernel = this.kernel
+    // `null` 与 `undefined` 都表示"尚无会话"（与 `getFrameIndex()` 的 `?.` 同一口径）。
+    return kernel == null ? 0 : sceneSecondsOf(kernel.playback().time)
   }
 
   /** 按 region 取 Main 逻辑相机 */

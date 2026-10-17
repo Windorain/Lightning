@@ -361,7 +361,19 @@ describe('P10e 段② · 导出面自检', () => {
 })
 
 describe('P10e 段② · `applyKernelDocument`（生产调用点）', () => {
-  it('内核文档 → 呈现：同文档同时间 ⇒ 不重编；时间变 ⇒ 重编', async () => {
+  /**
+   * **M5-3a 反转**：时间**不是**结构身份。
+   *
+   * 旧断言写"时间变 ⇒ 必须重编（纹理/帧采样依赖它）" —— 那条断言的实现把时间片段
+   * 拼进 `contentIdentityOf`，于是播放时每帧全量重编，而编译产物里**没有任何时间相关
+   * 像素**（纹理时间必须走 `presenter.setSceneTime`，不是重编；见 `presenterSession`
+   * 的 `contentIdentityOf` 说明）。
+   *
+   * 现在钉的是相反的事实：同文档、时间变 ⇒ `applied === false`（不重编），
+   * 但求值键里的时间维**如实更新**（诊断/离屏冻结序列仍用它）。
+   * 反向负对照（改 `documentVersion` ⇒ 必须重编）保留。
+   */
+  it('内核文档 → 呈现：同文档同时间 ⇒ 不重编；时间变 ⇒ 仍不重编但键时间更新', async () => {
     const { scene, content } = await assembledOf('multiblock-tier-only')
     const { createDocument } = await import('@/domain/document')
     const { TIME_ZERO: DOMAIN_T0, timeValue } = await import('@/domain/animation')
@@ -376,7 +388,10 @@ describe('P10e 段② · `applyKernelDocument`（生产调用点）', () => {
       const b = s.applyKernelDocument(withScene, DOMAIN_T0)
       expect(b.applied, '同文档同时间 ⇒ 不得重编').toBe(false)
       const c = s.applyKernelDocument(withScene, timeValue(1, 20))
-      expect(c.applied, '时间变 ⇒ 求值键变 ⇒ 必须重编（纹理/帧采样依赖它）').toBe(true)
+      expect(c.applied, '时间不是结构身份 ⇒ 不得因时间变重编').toBe(false)
+      expect(s.activeKey?.time.seconds, '求值键的时间维必须如实更新').toBe(0.05)
+      const d = s.applyKernelDocument({ ...withScene, version: { ...withScene.version, documentVersion: 2 } }, timeValue(1, 20))
+      expect(d.applied, '负对照：文档版本变 ⇒ 必须重编（不是"永远不重编"）').toBe(true)
     } finally {
       s.dispose()
     }
