@@ -151,7 +151,7 @@ export const KERNEL_LEGACY_SHAPE_FIELDS = Object.freeze([
       + '⚠️ 与装配面的 `schemaVersion`（多方块声明编号）**不是同一个编号**，不得互相冒充。',
     legacyConsumers: Object.freeze([
       '属性面板（`formatVersion` 显示）',
-      'embed/useEmbedTooltip（元信息提示的版本号一行）',
+      'shared/viewport/useEmbedTooltip（元信息提示的版本号一行）',
       'adapters/files/envelopeCodec（源文件声明 → 内核元数据）',
     ]),
     exitStage:

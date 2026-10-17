@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { ref, shallowRef } from 'vue'
-import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
+import { useEmbedTooltip } from '@/shared/viewport/useEmbedTooltip'
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import type { EmbedHover } from '@/runtime/hover'
 import type { PartTooltipInfo } from '@/pure/tooltipResolution'

@@ -1,5 +1,9 @@
 /**
- * useEmbedTooltip — 嵌入视口的工具提示解析 composable。
+ * useEmbedTooltip — 视口的工具提示解析 composable。
+ *
+ * 工作台视口（`WorkbenchViewport`）与嵌入预览器（`EmbedViewport`）共用本模块：
+ * 两者都只是把各自 region 的 hover 联合视图 + 渲染定义 + 逐格说明池接进来，
+ * 解析链只有这一处（`pure/tooltipResolution` 为纯函数内核）。
  *
  * 消费 region.state.hover 导出的 hover 联合类型，结合场景数据计算出最终的
  * tooltipText / neiTooltipMap / metaTooltipText / showMetaHint。

@@ -192,7 +192,7 @@ const LEGACY_RAF_SITES = [
   // 同时 `MaterialGallery.vue` 也不再持 RAF：它改为事件驱动（帧下标 watch），
   // 故本表**不含**新增项。
   {
-    file: 'embed/components/ToolTipBox.vue',
+    file: 'shared/viewport/ToolTipBox.vue',
     kind: 'paint-wakeup',
     owner: 'P8',
     issue: 259,

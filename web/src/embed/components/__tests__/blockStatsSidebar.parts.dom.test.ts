@@ -33,7 +33,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick, ref, shallowRef, type App } from 'vue'
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
-import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
+import { useEmbedTooltip } from '@/shared/viewport/useEmbedTooltip'
 import { BlockIconCache } from '@/render/interaction/blockIconCache'
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
