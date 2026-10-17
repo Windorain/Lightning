@@ -2,7 +2,7 @@
 /**
  * 底栏状态条：模型信息 + 帧信息 + 渲染状态 + Wiki 绑定
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { LOG_LEVEL } from '@/logging/LogCenter'
 import { useContext } from '@/runtime/context'
 import { useShell } from '@/composition/shell'
@@ -46,6 +46,37 @@ const wikiDirty = computed(() => {
   return hasWikiAuditableChanges(draft) || (ctx.kernelDirty() ?? false)
 })
 
+/**
+ * **实时状态槽**（#399 缺陷 B）：资源生命周期（纹理五态）的唯一用户可见写面。
+ *
+ * ## 为什么必须**排在** `lastDisplayable` 之前且能占住主位
+ *
+ * `lastDisplayable` 一旦被任一非 DEBUG 日志写过就再无代码清（`LogCenter.clear()` 全树零调用）
+ * ⇒ 载入期它恒为「初始化视口相机 → FINISHED」，把"正在加载 3/57"这类真实进展**永久遮蔽**
+ * （#399 的零反馈就是这么来的）。故实时状态有两条特权：
+ *  1. 渲染在最前（同一行左侧）；
+ *  2. 处于 `loading` 时**顶替**最后一条日志的位置（陈旧日志不得压过"此刻在干什么"）。
+ * 非 `loading` 时两者并存：终态是可查询事实，不该赶走操作反馈。
+ */
+const live = computed(() => log.liveStatus.value)
+/** 加载中：实时状态占主位（见上）。 */
+const showLastLog = computed(() => log.lastDisplayable.value !== null && live.value?.state !== 'loading')
+
+/**
+ * 粘性「loading 曾被观察到」标记（e2e 反假绿用）。
+ *
+ * 只暴露**当前**状态是不够的：终态一旦落地，`data-texture-state` 就变成 `ready`/`missing`，
+ * 判据无法区分"真的经历了加载"与"压根没写过加载态"（后者正是 #399 的原缺陷）。
+ * 故首次进入 `loading` 后本标记保持，供 `data-texture-loading-seen` 读面断言。
+ */
+const loadingSeen = ref(false)
+watch(
+  () => live.value?.state,
+  (state) => {
+    if (state === 'loading') loadingSeen.value = true
+  },
+)
+
 function logClass(level: number): string {
   if (level & LOG_LEVEL.ERROR) return 'sb-item sb-item--error'
   if (level & LOG_LEVEL.WARN) return 'sb-item sb-item--warn'
@@ -59,8 +90,15 @@ function openWikiDataPage() {
 </script>
 
 <template>
-  <div class="sb-root">
-    <span v-if="log.lastDisplayable.value" :class="logClass(log.lastDisplayable.value.level)">
+  <div
+    class="sb-root"
+    :data-texture-state="live ? live.state : undefined"
+    :data-texture-loading-seen="loadingSeen ? '1' : undefined"
+  >
+    <span v-if="live" :class="logClass(live.level)" :data-live-status="live.state">
+      {{ live.message }}
+    </span>
+    <span v-if="showLastLog && log.lastDisplayable.value" :class="logClass(log.lastDisplayable.value.level)">
       {{ log.lastDisplayable.value.message }}
     </span>
     <span v-if="log.statusMessage && !log.lastDisplayable.value" class="sb-item">{{ log.statusMessage }}</span>

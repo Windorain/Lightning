@@ -82,6 +82,34 @@ export interface CheckResult {
   actual: unknown
 }
 
+/**
+ * **实时状态槽**（#399 缺陷 B）：状态栏「此刻正在发生什么」的独立读面。
+ *
+ * ## 为什么必须与 `lastDisplayable` / `entries` 三者分开
+ *
+ * | 槽 | 语义 | 本条选择 |
+ * |---|---|---|
+ * | `entries` | 全部日志（有界 2000 条） | **不**进：逐图进度若 push 会洪泛，并把诊断通道挤掉 |
+ * | `lastDisplayable` | 最后一条非 DEBUG 日志 | **不**写：它一旦被写过就再无代码清（`clear()` 全树零调用）⇒ 状态栏恒显示「初始化视口相机 → FINISHED」，把真实进展**永久遮蔽** |
+ * | `liveStatus`（本槽） | 当前生命周期的实时事实 | 单值、有界、可被写入方按需更新/清空 |
+ *
+ * 这正是 #399 的暗坑：既有 `setStatus()` 的 8 处调用点因上述遮蔽**永远不可见**，
+ * 所以"实时状态"不能复用那条路 —— 它必须有自己的槽与自己的渲染优先级。
+ *
+ * ## 为什么带 `state`（机器可读标签）
+ *
+ * 文本是给人看的（可本地化、可变形）；判据与诊断要问"现在是不是加载中"，
+ * 不能靠对文本做正则猜测，也不能靠固定延时或像素颜色（SPEC §7.4 末句）。
+ * 状态标签由**写入方的事实**给出，读面（状态栏 `data-texture-state`、`__log__.liveStatus()`）
+ * 直接消费它。
+ */
+export interface LiveStatus {
+  message: string
+  level: LogLevelValue
+  /** 机器可读状态标签（当前唯一生产者：纹理资源五态）。`null` = 只有文本、无结构状态。 */
+  state: string | null
+}
+
 export function createLogCenter() {
   const MAX_ENTRIES = 2000
 
@@ -103,6 +131,11 @@ export function createLogCenter() {
 
   const entries = shallowRef<Report[]>([])
   const lastDisplayable = ref<Report | null>(null)
+  /**
+   * 实时状态（单值、有界；见 `LiveStatus` 的说明：#399 缺陷 B 的写点与读面）。
+   * 独立于 `entries`/`lastDisplayable`，故不会被"最后一条日志"的永久遮蔽吞掉。
+   */
+  const liveStatus = ref<LiveStatus | null>(null)
   const sessions = new Map<string, Session>()
 
   let _traceId: string | null = null
@@ -156,6 +189,7 @@ export function createLogCenter() {
   return {
     entries,
     lastDisplayable,
+    liveStatus,
 
     debug(source: string, message: string, detail?: unknown): Report {
       return push(LOG_LEVEL.DEBUG, source, message, detail)
@@ -192,6 +226,7 @@ export function createLogCenter() {
     clear(): void {
       entries.value = []
       lastDisplayable.value = null
+      liveStatus.value = null
       _displayMessage.value = ''
     },
 
@@ -352,6 +387,31 @@ export function createLogCenter() {
       },
     } as const,
 
+    /* —— Live status（实时状态槽，#399 缺陷 B） —— */
+
+    /**
+     * 写实时状态（**不**进 `entries`、**不**写 `lastDisplayable`）。
+     *
+     * ## 为什么在入口去重
+     *
+     * 写点位于**每帧**调用的链上（`useViewportRuntime#syncPresenterTextures`）与
+     * 逐图结算回调里：同值重复写会让状态栏每帧触发一次渲染。去重放在**唯一入口**
+     * 比让每个调用方各自记"上一条是什么"更可靠（后者漏一处就是每帧重渲染）。
+     *
+     * @param state 机器可读状态标签（如 `'loading'`/`'ready'`/`'missing'`/`'failed'`）；
+     *              读面据此判定，不解析文本（SPEC §7.4）。
+     */
+    setLiveStatus(message: string, level: LogLevelValue = LOG_LEVEL.INFO, state: string | null = null): void {
+      const cur = liveStatus.value
+      if (cur !== null && cur.message === message && cur.level === level && cur.state === state) return
+      liveStatus.value = { message, level, state }
+    },
+
+    /** 清空实时状态（文档关闭 / 视口卸载 / 无资源可报时）。 */
+    clearLiveStatus(): void {
+      if (liveStatus.value !== null) liveStatus.value = null
+    },
+
     /* —— Status message —— */
 
     setStatus(message: string, level: LogLevelValue = LOG_LEVEL.INFO): void {
@@ -420,6 +480,8 @@ export function installUnifiedLogApi(ctx: Context): void {
     },
     contains: (mask: number) => logCenter.contains(mask),
     lastDisplayable: () => logCenter.lastDisplayable.value,
+    /** 实时状态读面（#399）：诊断/e2e 不解析状态栏文本即可判定加载/就绪/缺失/失败。 */
+    liveStatus: () => logCenter.liveStatus.value,
     clear: () => logCenter.clear(),
     statusMessage: () => logCenter.statusMessage,
 
