@@ -794,4 +794,34 @@ test.describe('M4-2 · 双区编辑同步（一次编辑，另一区看得见）
     console.log('[DE-3] 格=' + fileIdx.join('/') + ' 历史项="' + String(afterEdit.undoLabel) + '" 一次撤销即回基线')
   })
 
+  test('DE-4 机位不串：A 区真实拖动改机位 ⇒ B 区机位逐字段不变', async ({ page }) => {
+    test.setTimeout(300_000)
+    const { a, b } = await openDualArea(page)
+
+    // 前提：两区机位先各自挪离默认值，且互不相同
+    // （否则"B 没变"与"两区都还是默认"不可区分 —— 判据会恒绿）
+    await setCamera(page, a.region, { target: [9, 1, 5], yawDeg: 35, elevationDeg: 20, distance: 6, zoom: 2.4 })
+    await setCamera(page, b.region, { target: [1, 7, 2], yawDeg: 120, elevationDeg: 55, distance: 18, zoom: 0.8 })
+    const aBefore = await logicalCamera(page, a.region)
+    const bBefore = await logicalCamera(page, b.region)
+    expect(aBefore, '前提：A 区机位必须落地').not.toBeNull()
+    expect(bBefore, '前提：B 区机位必须落地').not.toBeNull()
+    expect(aBefore, '前提：两区机位必须互不相同').not.toEqual(bBefore)
+    const bEngineBefore = await engineCamera(page, b.region)
+
+    // ── A 区真实拖动（Shift+中键 = 旋转视图 ⇒ 生产 OPERATOR_VIEW_ROTATE）──
+    const probesA = await uncoveredPoints(page, a.region)
+    expect(probesA.length, '前提：A 区画布必须有未被覆盖层遮挡的点').toBeGreaterThan(0)
+    await dragMiddle(page, probesA[0]!, 70, 24, true)
+
+    // ① 拖动必须真的动了 A 区机位（否则"B 没变"是空转）
+    const aAfter = await logicalCamera(page, a.region)
+    expect(aAfter, 'A 区拖动后机位必须变化（本判据的区分力所在）').not.toEqual(aBefore)
+    // ② B 区逐字段不变：逻辑机位 + 引擎取景（矩阵/zoom/正交框）
+    expect(await logicalCamera(page, b.region), 'A 区拖动不得改动 B 区逻辑机位').toEqual(bBefore)
+    expect(await engineCamera(page, b.region), 'A 区拖动不得改动 B 区引擎相机取景').toEqual(bEngineBefore)
+
+    console.log('[DE-4] A: ' + JSON.stringify(aBefore) + ' → ' + JSON.stringify(aAfter) + '；B 不变=' + JSON.stringify(bBefore))
+  })
+
 })
