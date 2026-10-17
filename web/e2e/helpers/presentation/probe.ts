@@ -199,10 +199,18 @@ export async function runKernelInputs(envelope: Record<string, unknown>) {
   const kernel = assembled.value
 
   // ② 内核场景 → 呈现输入 → 编译
+  //
+  // ⚠️ `layerWorldY` 必填（C8 起它是**唯一**的层过滤输入，见
+  // `composition/kernelPresentationInputs` 的字段说明）。此前本探针**漏传** ⇒
+  // 生产代码读到 `undefined`，而它的分支是 `layerWorldY === null ? 'all' : {worldY}`
+  // ⇒ 变成 `{worldY: undefined}` ⇒ `effectiveVoxelState` 把所有体素判成不可见
+  // ⇒ `empty-geometry` ⇒ `primitives: 0`。这正是 D3c 自 P10d 起长期判红的原因
+  // （**探针缺陷，不是生产缺陷** —— 视口侧一直传值）。
   const produced = kernelPresentationInputs({
     scene: kernel.scene,
     content: kernel.content,
     key: keyOf('e2e:kernel'),
+    layerWorldY: null,
   })
   const compiled = compileScene(produced.inputs)
   if (!compiled.ok) throw new Error(`compileScene failed: ${JSON.stringify(compiled.error)}`)
@@ -222,15 +230,46 @@ export async function runKernelInputs(envelope: Record<string, unknown>) {
   const payload = Object.values(kernel.scene.data)
     .map((d) => d.payload)
     .find((x) => x.kind === 'blockGrid')
-  const reference =
+  //
+  // ## 逐**材质组**复算（C6 起一个 `blockGrid` 对象 → 逐 `materialIndex` 多个图元）
+  //
+  // 本探针原先把 `primitives[0]`（**一个**材质组）与"全部片段的合并"比 ⇒ C6 之后
+  // 必然不相等（12 vs 24 三角形）—— 那同样是**探针缺陷**（与 `layerWorldY` 漏传同批）。
+  // 正确口径：渲染侧按 `materialIndex` 分组、各自合并，与内核侧逐 `material:<下标>` 图元对位。
+  const pieces =
     payload === undefined || payload.kind !== 'blockGrid'
-      ? { positions: new Float32Array(0), uvs: new Float32Array(0) }
-      : mergeBakedQuadPiecesAttributes(
-          collectStructureGeometryPiecesPure(definitionOfKernelPayload(payload, kernel.content)).pieces,
-        )
+      ? []
+      : collectStructureGeometryPiecesPure(definitionOfKernelPayload(payload, kernel.content)).pieces
+  const byMaterial = new Map<number, typeof pieces>()
+  for (const piece of pieces) {
+    const list = byMaterial.get(piece.materialIndex)
+    if (list === undefined) byMaterial.set(piece.materialIndex, [piece])
+    else list.push(piece)
+  }
+  const referenceGroups = new Map<number, { positions: Float32Array; uvs: Float32Array }>()
+  for (const [mi, list] of byMaterial) referenceGroups.set(mi, mergeBakedQuadPiecesAttributes(list))
+  const reference = mergeBakedQuadPiecesAttributes(pieces)
 
-  const first = produced.inputs.primitives[0]
-  const actual = first === undefined ? undefined : produced.inputs.geometry.attributesOf(first.geometry.id)
+  /** 逐图元与参考组对位（`material:<下标>` 是绑定键约定，见 `kernelTextureResources`）。 */
+  const groupOf = (primitive: (typeof produced.inputs.primitives)[number]) => {
+    const mi = Number.parseInt(String(primitive.material.id).replace('material:', ''), 10)
+    return Number.isInteger(mi) ? referenceGroups.get(mi) : undefined
+  }
+  const groupsMatch = produced.inputs.primitives.every((prim) => {
+    const attrs = produced.inputs.geometry.attributesOf(prim.geometry.id)
+    const ref = groupOf(prim)
+    if (attrs === undefined || ref === undefined) return false
+    return (
+      attrs.positions.length === ref.positions.length &&
+      attrs.positions.every((v, i) => v === ref.positions[i]) &&
+      attrs.uvs.length === ref.uvs.length &&
+      attrs.uvs.every((v, i) => v === ref.uvs[i])
+    )
+  })
+  const kernelTriangles = produced.inputs.primitives.reduce((n, prim) => {
+    const attrs = produced.inputs.geometry.attributesOf(prim.geometry.id)
+    return n + (attrs?.triangleCount ?? 0)
+  }, 0)
 
   presenter.dispose()
   h.scene.remove(presenter.object3d)
@@ -243,14 +282,9 @@ export async function runKernelInputs(envelope: Record<string, unknown>) {
     drawCallEstimate: compiledScene.drawCallEstimate,
     measuredCalls: measured.calls,
     measuredTriangles: measured.triangles,
-    kernelTriangles: actual?.triangleCount ?? -1,
+    kernelTriangles,
     referenceTriangles: reference.positions.length / 9,
-    bitsEqual:
-      actual !== undefined &&
-      actual.positions.length === reference.positions.length &&
-      actual.positions.every((v, i) => v === reference.positions[i]) &&
-      actual.uvs.length === reference.uvs.length &&
-      actual.uvs.every((v, i) => v === reference.uvs[i]),
+    bitsEqual: groupsMatch,
     pickedObjectId: hit?.objectId ?? null,
   }
 }
