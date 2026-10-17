@@ -46,7 +46,8 @@ export function announceRejection(
  * 结算分派 → 是否**回落 legacy**。
  *
  * 三个分支的语义见 `domain/editSettlement`：
- *  - `applied`/`unchanged` ⇒ `false`（内核已受理；回落会用旧数据覆盖内核结果）；
+ *  - `applied`/`unchanged` ⇒ `false`（内核已受理；回落会用旧数据覆盖内核结果），
+ *    并清掉上一条拒绝文案（"下次成功提交时由后续写入自然覆盖"，不做定时器）；
  *  - `rejected` ⇒ 先写成句原因，再 `false`（**不得**回落：拒绝不是"没装配"）；
  *  - `not-assembled` ⇒ `true`（双轨接缝的既有回退语义）。
  *
@@ -57,7 +58,20 @@ export function fallbackToLegacyOn(
   settlement: EditSettlement,
   op: RejectionOperation,
   subject?: string,
+  options?: { readonly noLegacyPath?: boolean },
 ): boolean {
-  if (settlement.kind === 'rejected') announceRejection(ctx, settlement.error, op, subject)
-  return settlement.kind === 'not-assembled'
+  if (settlement.kind === 'rejected') {
+    announceRejection(ctx, settlement.error, op, subject)
+    return false
+  }
+  if (settlement.kind === 'not-assembled') {
+    // 有 legacy 兜底 ⇒ 交回调用方（双轨接缝的既有语义）；
+    // 没有兜底（如移动：C1 起内核就是唯一写者）⇒ **如实告知**，静默跳过就是"拖了没反应"。
+    if (options?.noLegacyPath !== true) return true
+    announceRejection(ctx, { code: 'UnsupportedOperation', params: { reason: 'kernel-not-adopted' } }, op, subject)
+    return false
+  }
+  // 内核已受理 ⇒ 上一条拒绝不再是当前事实（"下次成功提交自然覆盖"，不做定时器）。
+  ctx.log.clearRejectionStatus()
+  return false
 }

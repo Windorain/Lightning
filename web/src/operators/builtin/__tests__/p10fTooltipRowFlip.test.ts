@@ -87,6 +87,18 @@ function harness(): Harness {
     main: { doc: docRef },
     kernel: session,
     getSelection: () => ({ active: ref(null), items: ref(new Set()) }),
+    // M4-3 R3：算子结算会写底栏（拒绝成句原因 / 成功清自己那条）。
+    // 这是生产 LogCenter 两个方法按契约的内存替身 —— 本文件钉的是行序翻转，不是底栏渲染。
+    getShellSettings: () => ({ lang: ref('zh') }),
+    log: {
+      setLiveStatus: (message: string, level = 0, state: string | null = null, origin: string | null = null) => {
+        void message
+        void level
+        void state
+        void origin
+      },
+      clearRejectionStatus: () => {},
+    },
   })
   Object.assign((ctx as unknown as { main: Record<string, unknown> }).main, {
     replaceDoc: (d: RuntimeDocument | null) => {

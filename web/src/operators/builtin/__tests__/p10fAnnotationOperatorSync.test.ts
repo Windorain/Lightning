@@ -69,6 +69,8 @@ interface Harness {
    * 这类缺陷**照样判红**。理由与手法见 `runtime/__tests__/kernelReadTestHost`。
    */
   legacyDocument(): RuntimeDocument | null
+  /** 底栏实时状态（M4-3：拒绝必须**可见** ⇒ 断言它，而不只是断言"内容没变"）。 */
+  live: Ref<{ message: string; level: number; state: string | null; origin: string | null } | null>
   dispose(): void
 }
 

@@ -7,7 +7,7 @@ import { OP_RESULT } from '@/operators/operatorType'
 import { pickVoxel } from '@/context/queries'
 import { roundVector } from '@/pure/vec'
 import { kernelAccepted, settlementOf } from '@/domain/editSettlement'
-import { announceRejection } from '@/runtime/rejectionNotice'
+import { fallbackToLegacyOn } from '@/runtime/rejectionNotice'
 
 const WORLD_AXES: Record<string, THREE.Vector3> = {
   x: new THREE.Vector3(1, 0, 0),
@@ -387,15 +387,10 @@ export const MoveOperator: OperatorType = {
             // 而布尔形态把两种**不同**的失败压成同一个 `false`
             // （未装配 / 命令被拒：越界、重复、只读、版本冲突）—— 两者都必须**如实**表现，
             // 而不是照样把方块画到新位置（那正是 #249 §6 禁止的"假成功控件"形态）。
-            if (settlement.kind === 'not-assembled') {
-              announceRejection(
-                ctx,
-                { code: 'UnsupportedOperation', params: { reason: 'kernel-not-adopted' } },
-                'move',
-              )
-            } else if (settlement.kind === 'rejected') {
-              announceRejection(ctx, settlement.error, 'move')
-            }
+            // 被拒 ⇒ **底栏成句原因**（移动被拒：越界/只读/重复格…），选择集不动（内容没变）。
+            // 未装配 ⇒ 也如实告知（本处没有 legacy 兜底可走：C1 起唯一写者就是内核），
+            // 静默跳过就是"拖了没反应"；内核受理 ⇒ 顺手清掉上一条拒绝文案。
+            fallbackToLegacyOn(ctx, settlement, 'move', undefined, { noLegacyPath: true })
             if (kernelAccepted(settlement)) {
               const sel = ctx.getSelection()
               const newItems = [...sel.items.value].map(item => {
