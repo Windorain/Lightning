@@ -77,6 +77,16 @@ watch(
   },
 )
 
+/**
+ * **悬停格读数**（M3-shell B1）：编辑器视口的悬停信息落在**固定位**（底栏）。
+ *
+ * 数据源是唯一读面 `ctx.getHoveredBlock()`（`runtime/hover/access`：本 region 的
+ * `viewportBlock` 经 `blockRefFromViewportHover` 换成内核世界坐标的 `BlockRef`）——
+ * 与右栏「方块检查器」无选中时的回落读的是**同一个**读面，两处不会分叉。
+ * 悬浮 ToolTipBox 已从编辑器视口撤除（见 `WorkbenchViewport` 的注释）。
+ */
+const hoveredBlock = computed(() => ctx.getHoveredBlock().value)
+
 function logClass(level: number): string {
   if (level & LOG_LEVEL.ERROR) return 'sb-item sb-item--error'
   if (level & LOG_LEVEL.WARN) return 'sb-item sb-item--warn'
@@ -102,6 +112,9 @@ function openWikiDataPage() {
       {{ log.lastDisplayable.value.message }}
     </span>
     <span v-if="log.statusMessage && !log.lastDisplayable.value" class="sb-item">{{ log.statusMessage }}</span>
+    <span v-if="hoveredBlock" class="sb-item" data-hovered-cell>
+      {{ t('hover') }} {{ hoveredBlock.pos.x }}, {{ hoveredBlock.pos.y }}, {{ hoveredBlock.pos.z }}
+    </span>
     <span v-if="wikiHost && wikiName" class="sb-item sb-item--link" @click="openWikiDataPage">
       {{ t('wikiStructure') }}: {{ wikiName }}
       <span v-if="wikiDirty" class="sb-unsaved"> · {{ t('unsaved') }}</span>

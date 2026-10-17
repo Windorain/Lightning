@@ -17,9 +17,6 @@ import type { ToolContext } from '@/workbench/tools/tool'
 import { pickVoxel, pickAll, getCurrentFrame, gridCenterWorld, getBlockGeometry, getPartMaskGeometry } from '@/context/queries'
 import ToolHintsBar from '@/workbench/ux/ToolHintsBar.vue'
 import type { ToolHint } from '@/workbench/tools/tool'
-import { embedHoverFromState, requireViewportHover } from '@/runtime/hover'
-import { useEmbedTooltip } from '@/shared/viewport/useEmbedTooltip'
-import ToolTipBox from '@/shared/viewport/ToolTipBox.vue'
 
 const ctx = useContext()
 const host = inject(hostKey)! as WorkbenchHost
@@ -62,7 +59,6 @@ const {
 
 const {
   drw, vpSlot, loadStatus, meshBusy, structureDefinition, mainMeshGroup,
-  tooltipPalette,
   worldFrameIndex, layerWorldY, isPlaying,
   computed: drwComputed,
 } = useViewportRuntime({
@@ -79,30 +75,17 @@ const {
   hasWorldMultiFrame, worldFrameCount,
 } = drwComputed
 
-// ---- Hover / tooltip（region.state.hover + 统一 HOVER handler）----
+// ---- Hover（region.state.hover + 统一 HOVER handler）----
 //
-// #398：工作台视口与嵌入预览器是同一套呈现职责（SPEC §3.5「提示框是说明内容的
-// 一次呈现，不是新的内容副本」），故复用 `shared/viewport` 的**同一套**解析链与
-// 呈现件，不在本组件里另写一份文本解析。
+// ## M3-shell B1：编辑器视口**不再渲染悬浮 ToolTipBox**（用户裁决：编辑器视口无悬浮框）
 //
-// 输入是**本 region 的 viewportBlock**（生产 `handlers/hoverHandler` 写入）；
-// `hover.annotation` 是互斥的「3D 注解对象命中」通道（`setViewportBlock` 会清空它），
-// 不能拿它承载逐格说明 —— 那会把两种领域对象混成一种（同 SPEC §3.5）。
-const hoverState = requireViewportHover(ctx.requireRegion(VIEWPORT_REGION_ID).state)
-const hover = embedHoverFromState(hoverState)
-const metaRef = computed(() => {
-  const m = ctx.documentMetadata()
-  return { author: m.author, gtnhVersion: m.gtnhVersion }
-})
-const annotationsRef = computed(() => ctx.kernelAnnotations())
-const { tooltipText } = useEmbedTooltip({
-  hoverRef: hover,
-  definitionRef: vpSlot.definition,
-  tooltipPaletteRef: tooltipPalette,
-  showHoverTooltipRef: computed(() => prefs.showHoverTooltip),
-  metaRef,
-  annotationsRef,
-})
+// 旧接线（#398）把 `shared/viewport` 的解析链与 `ToolTipBox` 挂在本视口上。
+// B1 撤掉它，悬停信息的呈现改到**固定位**：
+//   - 右栏「方块检查器」在无选中时回落悬停方块（`workbench-rna#resolveRefs`，零改动）；
+//   - `StatusBar` 的悬停格读数（见该组件）。
+// 嵌入预览器（`EmbedViewport` + region `r-wiki-preview`）仍走原链路 ——
+// `useEmbedTooltip`/`ToolTipBox` 原样保留，那是渲染器视口专属的呈现。
+// 拾取本身（`handlers/hoverHandler` 写 `viewportBlock`）不受影响。
 
 /**
  * 下方栏 tab：可用性与默认项走两端共用的纯逻辑（`dockTabs`），
@@ -442,16 +425,6 @@ onBeforeUnmount(() => {
       @set-channel-value="onChannelValue"
       @set-runstate="setChannelRunstate"
       @update:layer-y="setLayerY"
-    />
-
-    <!-- Tooltip Teleport 到 body ⇒ 脱离实例根的继承链，须显式传本实例主题（#259 A33） -->
-    <ToolTipBox
-      v-if="hover && tooltipText"
-      :text="tooltipText"
-      :client-x="hover.clientX"
-      :client-y="hover.clientY"
-      :offset="prefs.tooltipOffset"
-      :theme="ctx.getShellSettings().theme.value"
     />
 
   </div>

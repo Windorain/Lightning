@@ -1,71 +1,67 @@
 /**
- * M2-2 · **#398 回归判据：工作台主视口悬停方块必须显示 ToolTipBox**（真实入口）。
+ * M3-shell B1 · 编辑器视口的悬停信息落在**固定位**（原 #398 判据的改写）。
  *
- * ## 缺陷形态（#398）
+ * ## 本次改写为什么发生
  *
- * 工作台 3D Area 渲染的是 `WorkbenchViewport`，它的内核悬停 `viewportBlock` 一直有值
- * （拾取正常），但页面上 **`.wm-tooltip-box` 计数恒为 0 —— 显示消费方缺失**。
- * `9390643c`（2026-05-20「remove old ToolTip」）把整条 tooltip 链从工作台视口删除后
- * 从未恢复；`EmbedViewport` 里的 tooltip 层只服务 Wiki 工作区，不在这条路径上。
+ * 旧判据（M2-2 #398）要求工作台主视口悬停方块时出现 .wm-tooltip-box。M3-shell B1
+ * 按用户裁决把悬浮 ToolTipBox **从编辑器视口撤除**：跟随指针的提示框在编辑时挡住
+ * 正在编辑的格子，而悬停信息本来就有两条更好的固定位：
  *
- * ## 修法落点（本判据要证明的事实）
+ *  - 右栏「方块检查器」在**无选中**时回落悬停方块（workbench-rna#resolveRefs）；
+ *  - 底栏 StatusBar 的悬停格读数（data-hovered-cell）。
  *
- * - 模块：`shared/viewport/ToolTipBox.vue` + `shared/viewport/useEmbedTooltip.ts`
- *   （工作台与嵌入预览器共用；#398 前置提交把它从 `embed/` 归位）；
- * - 接线：`WorkbenchViewport.vue` 从**本 region** 的 `state.hover` 经
- *   `embedHoverFromState` 取 `viewportBlock`，喂给同一条解析链；
- * - 不改内核 hover 态：`hover.annotation` 是互斥的「3D 注解对象命中」通道，
- *   不能承载逐格说明（SPEC §3.5「注解与逐格说明是不同对象」）。
+ * 嵌入预览器（EmbedViewport，region r-wiki-preview）仍是渲染器视口，ToolTipBox
+ * 原样保留 —— 本文件用**同一套真实悬停注入**分别打两个 region，证明这是
+ * 「呈现位置的选择」而不是「能力的丢失」。
  *
- * ## 判据（B 级：真实入口 + 最小负对照）
+ * ## 判据（真实入口 + 双向对照）
  *
- * 1. 生产入口：`gotoWorkbench` → 生产 `OPERATOR_OPEN_SCENE` + `File`
- *    （`injectSceneDocumentOk`，夹具 `structuredata-exported-envelope.json`）→
- *    `r-viewport` 视口/相机就绪；
- * 2. 真实 `pointermove`（`injectHoverAtCellLocal(..., 'r-viewport')`，与生产
- *    `viewportBinder` 监听同一路径）命中**带逐格说明的格**：候选从夹具
- *    `cellTooltipGrid`/`tooltipPalette` 解出（独立来源），再以 **hover 实际返回的
- *    voxel** 为准核对 —— 不硬编码单据里那个在原始 `cellGrid` 是 air 的示例坐标；
- * 3. 前提：`region('r-viewport').state.hover.viewportBlock` 非空（拾取真的发生）；
- * 4. 主断言：`.wm-tooltip-box[role="tooltip"]` 可见，且文本同时含
- *    该格逐格说明（夹具 `tooltipPalette`）与方块 NEI 名（夹具 `blockPalette` 首行）；
- * 5. 负对照：`showHoverTooltip:false` ⇒ 计数 0（既有偏好门禁不变）；
- * 6. 生命周期：`pointerleave` ⇒ tooltip 消失。
+ * H1（编辑器侧）：
+ *  1. 生产入口打开夹具（OPERATOR_OPEN_SCENE + File），真实 pointermove 命中带逐格
+ *     说明的格（候选自夹具原件解出，不硬编码坐标）；
+ *  2. **负对照**：编辑器视口命中后 .wm-tooltip-box 计数为 0；
+ *  3. **正对照**：底栏 data-hovered-cell 显示悬停格的内核世界坐标；右栏「方块检查器」
+ *     的 lightning.block.pos 显示**同一坐标** —— 两处都走生产装配的 getHoveredBlock()
+ *     读面（不是手工塞进面板的载荷）；
+ *  4. pointerleave ⇒ 悬停读数消失、viewportBlock 清空。
  *
- * 选择器用 `.wm-tooltip-box`（`ToolTipBox` 的 `role="tooltip"`），**不是**
- * `.tip-preview`（后者是面板内嵌的死组件，无定位/Teleport）。
- *
- * 文本比对做 CRLF/空白归一 + MC 颜色码剥离：`ToolTipBox` 经受控呈现边界
- * （`ContentText` → `domain/textContent`）渲染，`§x` 变为颜色节点后不再出现在 DOM 文本里。
+ * H2（嵌入侧，region 区分）：
+ *  5. 切到 Wiki 工作区、在 r-wiki-preview 上真实悬停 ⇒ .wm-tooltip-box 出现且文本
+ *     含该格逐格说明与方块 NEI 名（旧链路未回退）；
+ *  6. 偏好 showHoverTooltip:false（lightning.prefs.wiki-preview）⇒ 拾取仍在、
+ *     tooltip 计数 0（偏好门禁在**仍然存在**的那条呈现上照旧生效）。
  */
 import { expect, test, type Page } from '@playwright/test'
-import {
-  gotoWorkbench,
-  injectSceneDocumentOk,
-  waitForViewportMounted,
-} from './helpers/multiblock/harness'
+import { gotoWorkbench, injectSceneDocumentOk } from './helpers/multiblock/harness'
 import {
   clearWikiHover,
   injectHoverAtCellLocal,
   readTooltipText,
   readWikiHover,
   TOOLTIP_BOX,
+  WIKI_REGION,
+  WIKI_TAB_TEXT,
+  waitWikiViewportReady,
   type WikiHoverObservation,
 } from './helpers/parts/hover'
 import { fixturePath, innerDocOf, readJson, type InnerDoc } from './helpers/saveReopen'
 
 const REGION = 'r-viewport'
 const FIXTURE = 'structuredata-exported-envelope.json'
-const PREF_KEY = 'lightning.prefs.viewport'
+/**
+ * Wiki 预览 region 的 viewer 偏好键（runtime/screenRoot.ts 里
+ * createViewerPreferences('lightning.prefs.wiki-preview')）。
+ */
+const WIKI_PREF_KEY = 'lightning.prefs.wiki-preview'
 
 /** 夹具里的一个「带逐格说明的格」候选（文件索引 = hover voxel 下标）。 */
 interface Candidate {
   z: number
   row: number
   col: number
-  /** 逐格说明文本（夹具 `tooltipPalette`，独立来源）。 */
+  /** 逐格说明文本（夹具 tooltipPalette，独立来源）。 */
   cellText: string
-  /** 该格方块的 NEI 首行（夹具 `blockPalette[slot].tooltip[0]`）。 */
+  /** 该格方块的 NEI 首行（夹具 blockPalette[slot].tooltip[0]）。 */
   blockName: string
 }
 
@@ -83,7 +79,7 @@ function annotatedCandidates(doc: InnerDoc): Candidate[] {
         const cellText = doc.tooltipPalette[idx]
         if (typeof cellText !== 'string' || cellText.length === 0) continue
         const slot = doc.cellGrid[z]?.[row]?.[col]
-        if (slot === undefined || slot === 0) continue // 0 = air（单据示例坐标即此坑）
+        if (slot === undefined || slot === 0) continue // 0 = air
         const blockName = blocks[slot]?.tooltip?.[0]
         if (typeof blockName !== 'string' || blockName.length === 0) continue
         out.push({ z, row, col, cellText, blockName })
@@ -96,25 +92,24 @@ function annotatedCandidates(doc: InnerDoc): Candidate[] {
 
 /** 归一：剥 MC 颜色码 + 去掉全部空白（DOM innerText 与夹具原文的格式差异）。 */
 function norm(s: string): string {
-  return s.replace(/§./g, '').replace(/s+/g, '')
+  return s.replace(/§./g, '').replace(/\s+/g, '')
 }
 
-/** 等 `r-viewport` 槽位活着（camera + definition + domElement），并等相机稳定。 */
-async function waitViewportLive(page: Page): Promise<void> {
-  await waitForViewportMounted(page)
+/** 等某个 region 的槽位活着（camera + definition + domElement），并等相机稳定。 */
+async function waitViewportLive(page: Page, rid: string): Promise<void> {
   await page.waitForFunction(
-    (rid) => {
-      const slot = (window as any).__vm__?.viewports?.get(rid)
+    (id) => {
+      const slot = (window as any).__vm__?.viewports?.get(id)
       return !!slot?.camera?.value && !!slot?.definition?.value && !!slot?.domElement?.value
     },
-    REGION,
+    rid,
     { timeout: 60_000 },
   )
   const readCam = () =>
-    page.evaluate((rid) => {
-      const cam = (window as any).__vm__?.viewports?.get(rid)?.camera?.value
+    page.evaluate((id) => {
+      const cam = (window as any).__vm__?.viewports?.get(id)?.camera?.value
       return cam ? JSON.stringify([cam.position.toArray(), cam.zoom]) : null
-    }, REGION)
+    }, rid)
   const deadline = Date.now() + 20_000
   let prev = await readCam()
   for (;;) {
@@ -122,22 +117,31 @@ async function waitViewportLive(page: Page): Promise<void> {
     const cur = await readCam()
     if (cur && cur === prev) return
     prev = cur
-    if (Date.now() > deadline) throw new Error('#398：r-viewport 相机在 20s 内未稳定')
+    if (Date.now() > deadline) throw new Error('B1：视口相机在 20s 内未稳定（' + rid + '）')
   }
 }
 
-/** 生产入口：打开工作台并装载真实信封（`OPERATOR_OPEN_SCENE` + File）。 */
-async function openFixture(page: Page): Promise<void> {
+/** 生产入口：打开工作台并装载真实信封（OPERATOR_OPEN_SCENE + File）。 */
+async function openWorkbench(page: Page): Promise<void> {
   await gotoWorkbench(page)
   await injectSceneDocumentOk(page, readJson(fixturePath()), FIXTURE)
-  await waitViewportLive(page)
+  await waitViewportLive(page, REGION)
 }
 
-/** 读 hover，最多等 `timeout`（拾取是 rAF 合并的；未命中 ⇒ null，不抛错）。 */
-async function readHoverWithin(page: Page, timeout = 1500): Promise<WikiHoverObservation | null> {
+/** 生产入口：装载同一夹具，再经 WorkspaceTabs 的 DOM click 进入 Wiki 工作区。 */
+async function openWiki(page: Page): Promise<void> {
+  await gotoWorkbench(page)
+  await injectSceneDocumentOk(page, readJson(fixturePath()), FIXTURE)
+  await page.locator('.wt-tab', { hasText: WIKI_TAB_TEXT }).click()
+  await waitWikiViewportReady(page)
+  await waitViewportLive(page, WIKI_REGION)
+}
+
+/** 读 hover，最多等 timeout（拾取是 rAF 合并的；未命中 ⇒ null，不抛错）。 */
+async function readHoverWithin(page: Page, rid: string, timeout = 1200): Promise<WikiHoverObservation | null> {
   const deadline = Date.now() + timeout
   for (;;) {
-    const h = await readWikiHover(page, REGION)
+    const h = await readWikiHover(page, rid)
     if (h) return h
     if (Date.now() > deadline) return null
     await page.waitForTimeout(30)
@@ -165,83 +169,134 @@ interface Hit {
  * 真实 pointermove 扫描候选，返回第一个「hover 返回的 voxel = 该候选格」的命中。
  * 射线可能先打到同一视线上更靠前的方块 ⇒ voxel 与候选不符时继续试下一格/下一采样点。
  */
-async function findVisibleAnnotatedCell(page: Page, candidates: readonly Candidate[]): Promise<Hit> {
+async function findVisibleAnnotatedCell(
+  page: Page,
+  candidates: readonly Candidate[],
+  rid: string,
+): Promise<Hit> {
   const tried: string[] = []
   for (const candidate of candidates) {
     for (const local of LOCAL_POINTS) {
-      await clearWikiHover(page, REGION)
-      await injectHoverAtCellLocal(page, { ...candidate, ...local }, REGION)
-      const hover = await readHoverWithin(page, 1200)
+      await clearWikiHover(page, rid)
+      await injectHoverAtCellLocal(page, { ...candidate, ...local }, rid)
+      const hover = await readHoverWithin(page, rid, 900)
       const v = hover?.voxel
       if (!v) {
-        tried.push(`${candidate.z}/${candidate.row}/${candidate.col}@${local.lx},${local.ly},${local.lz} → 未命中`)
+        tried.push(candidate.z + '/' + candidate.row + '/' + candidate.col + ' → 未命中')
         continue
       }
       if (v.column === candidate.col && v.row === candidate.row && v.zSlice === candidate.z) {
         return { candidate, hover, local }
       }
       tried.push(
-        `${candidate.z}/${candidate.row}/${candidate.col}@${local.lx},${local.ly},${local.lz} → 命中 voxel ${v.zSlice}/${v.row}/${v.column}`,
+        candidate.z + '/' + candidate.row + '/' + candidate.col + ' → 命中 voxel ' +
+          v.zSlice + '/' + v.row + '/' + v.column,
       )
     }
   }
   throw new Error(
-    `#398：真实 pointermove 未命中任何带逐格说明的格（共 ${candidates.length} 个候选）。` +
-      `已试：\n${tried.join('\n')}`,
+    'B1：真实 pointermove 未命中任何带逐格说明的格（候选 ' + candidates.length + ' 个，region ' + rid + '）。' +
+      '已试：\n' + tried.join('\n'),
   )
 }
 
-test.describe('#398 工作台视口悬停 tooltip（真实入口）', () => {
-  test('H1 真实悬停有逐格说明的格 ⇒ ToolTipBox 显示说明与方块标识；偏好关闭/pointerleave ⇒ 不显示', async ({ page }) => {
+test.describe('M3-shell B1 · 编辑器视口悬停（固定位呈现）', () => {
+  test('B1-H1 编辑器视口：无悬浮 ToolTipBox；底栏/右栏显示悬停格；离开清空', async ({ page }) => {
     test.setTimeout(300_000)
     const doc = innerDocOf(fixturePath())
     const candidates = annotatedCandidates(doc)
     expect(candidates.length, '前提：夹具必须真有带逐格说明的格（否则本用例空转）').toBeGreaterThan(0)
+    const sizeRow = doc.cellGrid[0]!.length
 
-    // ── ① 生产入口 ──
-    await openFixture(page)
-
-    // ── ② 真实 pointermove 命中带逐格说明的格 ──
-    const hit = await findVisibleAnnotatedCell(page, candidates)
-    console.log(
-      `[#398] 命中格 z/row/col=${hit.candidate.z}/${hit.candidate.row}/${hit.candidate.col}` +
-        ` local=${JSON.stringify(hit.local)} voxel=${JSON.stringify(hit.hover.voxel)}` +
-        ` cellText=${JSON.stringify(hit.candidate.cellText)} blockName=${JSON.stringify(hit.candidate.blockName)}`,
-    )
-
-    // ── ③ 前提：内核拾取已发生（#398 的"有拾取"部分）──
+    // ── ① 生产入口 + 真实 pointermove 命中带逐格说明的格 ──
+    await openWorkbench(page)
+    const hit = await findVisibleAnnotatedCell(page, candidates, REGION)
     expect(hit.hover.voxel, '前提：真实 pointermove 必须被内核拾取（viewportBlock 非空）').toEqual({
       column: hit.candidate.col,
       row: hit.candidate.row,
       zSlice: hit.candidate.z,
     })
 
-    // ── ④ 主断言：显示层出现，文本 = 该格逐格说明 + 方块 NEI 名 ──
-    const box = page.locator(`${TOOLTIP_BOX}[role="tooltip"]`)
-    await expect(box, '#398：悬停带逐格说明的方块必须出现 ToolTipBox').toHaveCount(1)
+    // 内核世界坐标：row（文件，顶部为 0）→ y = sizeRow - 1 - row。
+    const worldX = hit.candidate.col
+    const worldY = sizeRow - 1 - hit.candidate.row
+    const worldZ = hit.candidate.z
+
+    // ── ② 负对照：编辑器视口不再出现悬浮 ToolTipBox ──
+    // 留一拍：若呈现件被重新接回，ToolTipBox 会在这段时间内挂载（判据不靠"恰好没渲染"）。
+    await page.waitForTimeout(700)
+    await expect(
+      page.locator(TOOLTIP_BOX),
+      'B1：编辑器视口悬停不得再出现悬浮 ToolTipBox（悬停信息落固定位）',
+    ).toHaveCount(0)
+
+    // ── ③ 正对照（底栏固定位）：同一读面的悬停格读数 ──
+    const readout = page.locator('[data-hovered-cell]')
+    await expect(readout, 'B1：底栏必须有悬停格读数').toHaveCount(1)
+    const readoutText = (await readout.first().innerText()).replace(/\s+/g, ' ').trim()
+    expect(readoutText, '底栏悬停读数必须是悬停格的内核世界坐标').toBe(
+      '悬停 ' + worldX + ', ' + worldY + ', ' + worldZ,
+    )
+
+    // ── ④ 正对照（右栏固定位）：方块检查器在**无选中**时回落悬停方块 ──
+    await page.locator('.pt-tab', { hasText: '方块检查器' }).first().click()
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate(
+            () =>
+              document
+                .querySelector('[data-property="lightning.block.pos"] .ux-field-readonly')
+                ?.textContent?.trim() ?? null,
+          ),
+        {
+          timeout: 20_000,
+          message: 'B1：方块检查器必须呈现悬停格坐标（无选中回落悬停，生产装配）',
+        },
+      )
+      .toBe(worldX + ', ' + worldY + ', ' + worldZ)
+
+    // ── ⑤ 生命周期：pointerleave ⇒ 读数消失、悬停清空 ──
+    await clearWikiHover(page, REGION)
+    await expect(page.locator('[data-hovered-cell]'), 'pointerleave 后悬停读数必须消失').toHaveCount(0)
+    expect(await readWikiHover(page, REGION), 'pointerleave 后 viewportBlock 必须清空').toBeNull()
+  })
+
+  test('B1-H2 嵌入预览视口（r-wiki-preview）仍显示 ToolTipBox；偏好关闭仍生效', async ({ page }) => {
+    test.setTimeout(300_000)
+    const doc = innerDocOf(fixturePath())
+    const candidates = annotatedCandidates(doc)
+    expect(candidates.length, '前提：夹具必须真有带逐格说明的格').toBeGreaterThan(0)
+
+    // ── ① 渲染器视口：同一套真实悬停注入，ToolTipBox 必须照旧出现 ──
+    await openWiki(page)
+    const hit = await findVisibleAnnotatedCell(page, candidates, WIKI_REGION)
+    const box = page.locator(TOOLTIP_BOX + '[role="tooltip"]')
+    await expect(box, 'B1：渲染器视口（r-wiki-preview）仍必须显示 ToolTipBox').toHaveCount(1)
     await expect(box).toBeVisible()
     const text = await readTooltipText(page)
-    console.log(`[#398] tooltip 文本=${JSON.stringify(text)}`)
-    expect(text, 'tooltip 必须有文本').not.toBeNull()
-    expect(norm(text!), `tooltip 必须含该格逐格说明「${hit.candidate.cellText}」`).toContain(norm(hit.candidate.cellText))
-    expect(norm(text!), `tooltip 必须含方块标识「${hit.candidate.blockName}」`).toContain(norm(hit.candidate.blockName))
+    expect(text, '嵌入侧 tooltip 必须有文本').not.toBeNull()
+    expect(norm(text!), '必须含该格逐格说明「' + hit.candidate.cellText + '」').toContain(
+      norm(hit.candidate.cellText),
+    )
+    expect(norm(text!), '必须含方块标识「' + hit.candidate.blockName + '」').toContain(
+      norm(hit.candidate.blockName),
+    )
 
-    // ── ⑤ 生命周期：生产 pointerleave ⇒ hover 清空、tooltip 消失 ──
-    await clearWikiHover(page, REGION)
-    await expect(box, 'pointerleave 后 tooltip 必须消失').toHaveCount(0)
-    expect(await readWikiHover(page, REGION), 'pointerleave 后 viewportBlock 必须清空').toBeNull()
-
-    // ── ⑥ 负对照：偏好 showHoverTooltip:false ⇒ 拾取仍在、tooltip 计数 0 ──
-    await page.evaluate((key) => localStorage.setItem(key, JSON.stringify({ showHoverTooltip: false })), PREF_KEY)
-    await openFixture(page)
-    await injectHoverAtCellLocal(page, { ...hit.candidate, ...hit.local }, REGION)
-    const hoverOff = await readHoverWithin(page, 5000)
+    // ── ② 偏好门禁（既有语义）：关闭 showHoverTooltip ⇒ 拾取仍在、tooltip 不显示 ──
+    await page.evaluate(
+      (key) => localStorage.setItem(key, JSON.stringify({ showHoverTooltip: false })),
+      WIKI_PREF_KEY,
+    )
+    await openWiki(page)
+    await injectHoverAtCellLocal(page, { ...hit.candidate, ...hit.local }, WIKI_REGION)
+    const hoverOff = await readHoverWithin(page, WIKI_REGION, 5000)
     expect(hoverOff, '负对照前提：偏好关闭后拾取仍必须发生').not.toBeNull()
     await page.waitForTimeout(500)
     await expect(
-      page.locator(`${TOOLTIP_BOX}[role="tooltip"]`),
+      page.locator(TOOLTIP_BOX + '[role="tooltip"]'),
       '负对照：showHoverTooltip:false 时不得显示 tooltip',
     ).toHaveCount(0)
-    await page.evaluate((key) => localStorage.removeItem(key), PREF_KEY)
+    await page.evaluate((key) => localStorage.removeItem(key), WIKI_PREF_KEY)
   })
 })

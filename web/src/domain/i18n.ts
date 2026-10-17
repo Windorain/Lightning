@@ -64,6 +64,7 @@ const DICT: Readonly<Record<string, Readonly<Record<Lang, string>>>> = {
   'undo': { zh: '撤销 (Ctrl+Z)', en: 'Undo (Ctrl+Z)' },
   'redo': { zh: '重做 (Ctrl+Shift+Z)', en: 'Redo (Ctrl+Shift+Z)' },
   'toggleTheme': { zh: '切换主题', en: 'Toggle Theme' },
+  'hover': { zh: '悬停', en: 'Hover' },
   'fullscreen': { zh: '全屏', en: 'Fullscreen' },
   'exitFullscreen': { zh: '退出全屏', en: 'Exit fullscreen' },
   'preview': { zh: '编辑', en: 'Edit' },
