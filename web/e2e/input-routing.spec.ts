@@ -728,3 +728,29 @@ test.describe('P7 负对照：判据必须有差异（不是恒绿）', () => {
     expect(captured[0]!.receiver, '接收者必须是捕获归属者（pointer:<id>@<region>）').toContain('pointer:')
   })
 })
+
+test.describe('B1 r-toolshelf：工具架是**视口 Area 内的悬浮 Region**（用户裁决 2026-10-17）', () => {
+  /**
+   * `REGION.WORKBENCH_TOOLSHELF = 'r-toolshelf'`（`runtime/regionIds.ts:4`）早已声明，
+   * 但 DOM 里长期没有宿主 ⇒ `hitTest` 沿 `closest('[data-wm-region]')` 永远读到
+   * `r-viewport`（整条视口条带）。B1 把标注落到**浮层元素自身**，本用例钉住这三件事，
+   * 防止方向回退（曾经的错法是把它做成独立左栏 `aside.wb-leftbar`）。
+   */
+  test('B1-1 `.wb-toolshelf` 带 r-toolshelf 标注、绝对定位、且在 main.wb-viewport 之内', async ({ page }) => {
+    test.setTimeout(120_000)
+    await gotoWorkbench(page)
+    const facts = await page.evaluate(() => {
+      const el = document.querySelector('.wb-toolshelf') as HTMLElement | null
+      if (!el) return null
+      return {
+        region: el.dataset.wmRegion ?? null,
+        position: getComputedStyle(el).position,
+        insideViewport: !!el.closest('main.wb-viewport'),
+      }
+    })
+    expect(facts, '工具架必须存在（编辑工作区默认展开）').not.toBeNull()
+    expect(facts!.region, '① region 标注必须落在浮层上（此前无 DOM 宿主）').toBe('r-toolshelf')
+    expect(facts!.position, '② 必须是悬浮层（absolute），不是独立左栏的静态列').toBe('absolute')
+    expect(facts!.insideViewport, '③ 必须在 main.wb-viewport 内 —— 视口 Area 的 Region，不是独立 Area').toBe(true)
+  })
+})
