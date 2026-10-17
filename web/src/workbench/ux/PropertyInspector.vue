@@ -22,7 +22,7 @@
  * `commitFieldValue` → 唯一写路由。组件不判合法性、不碰文档。
  */
 
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { inject } from 'vue'
 import { contextKey, type Context } from '@/runtime/context'
 import PropertyField from './PropertyField.vue'
@@ -38,8 +38,9 @@ import {
   workbenchRegistry,
 } from '@/editors/workbench-rna'
 import { localPropertyOf } from '@/editors/property-writers'
-import type { InspectorModel } from '@/editors/inspector'
+import type { InspectorModel, InspectorRow } from '@/editors/inspector'
 import { buildInspector } from '@/editors/workbench-rna'
+import { OBJECT_TYPE } from '@/editors/workbench-inspector'
 
 const props = defineProps<{
   ctx: Context
@@ -199,6 +200,69 @@ function objectLabel(objectTypeId: string): string {
   return decl?.display.fallback ?? decl?.display.labelKey ?? objectTypeId
 }
 
+/**
+ * ## M3-shell B1：**呈现层**的 section 分组（方块检查器）
+ *
+ * 设计简报 C4 要求：身份 / 坐标 / 说明（逐格说明与方块 Tooltip **分开**，
+ * SPEC §3.5 两种对象不混）。这**不是**改模型：`BLOCK_LAYOUT` 仍是
+ * 「标识（id/tooltip/cellTooltip）+ 位置（pos）」两节，`buildInspectorModel`
+ * 与 `BLOCK_DECL` 一字未动；本组件只是把同一批行**重新分节呈现**，
+ * 于是读取路径、写路径、重算信号全部保持原状。
+ *
+ * 非方块对象类型（注解、场景元信息、发布配置……）仍按模型自带的分节渲染 ——
+ * 那一侧的分节语义属于各自的布局规格，B1 不重新解释。
+ */
+interface PresentationSection {
+  id: string
+  label: string
+  rows: readonly InspectorRow[]
+}
+
+/** 方块字段的呈现分组；属性 ID 与 `BLOCK_DECL` 的 local id 一一对应。 */
+const BLOCK_PRESENTATION: readonly { id: string; label: string; properties: readonly string[] }[] = [
+  { id: 'b1.identity', label: '身份', properties: ['id'] },
+  { id: 'b1.position', label: '坐标', properties: ['pos'] },
+  { id: 'b1.tooltip', label: '说明', properties: ['tooltip'] },
+  { id: 'b1.cell-tooltip', label: '单元格 Tooltip', properties: ['cellTooltip'] },
+]
+
+const presentationSections = computed<readonly PresentationSection[]>(() => {
+  const sections = model.value.sections
+  if (model.value.objectTypeId !== OBJECT_TYPE.block) {
+    return sections.map((s) => ({
+      id: s.id,
+      label: s.display.fallback ?? s.display.labelKey,
+      rows: s.rows,
+    }))
+  }
+
+  const byLocalId = new Map<string, InspectorRow>()
+  for (const s of sections) for (const row of s.rows) byLocalId.set(row.localId, row)
+
+  const out: PresentationSection[] = []
+  const placed = new Set<string>()
+  for (const group of BLOCK_PRESENTATION) {
+    const rows: InspectorRow[] = []
+    for (const propertyId of group.properties) {
+      const row = byLocalId.get(propertyId)
+      if (!row) continue
+      placed.add(propertyId)
+      rows.push(row)
+    }
+    if (rows.length > 0) out.push({ id: group.id, label: group.label, rows })
+  }
+  // 未来新增的方块属性：落到「其他」，不静默丢弃（生成式补齐的可见性同样适用）。
+  const rest = [...byLocalId.values()].filter((row) => !placed.has(row.localId))
+  if (rest.length > 0) out.push({ id: 'b1.rest', label: '其他', rows: rest })
+  return out
+})
+
+/** section 收合状态：组件内即可（设计 C4 明说不持久化，B2 再议）。 */
+const collapsed = ref<Record<string, boolean>>({})
+function toggleSection(id: string): void {
+  collapsed.value[id] = !collapsed.value[id]
+}
+
 void inject(contextKey, null)
 </script>
 
@@ -214,17 +278,31 @@ void inject(contextKey, null)
         <span v-if="model.generated" class="inspector-badge" title="无布局规格，按声明生成">自动</span>
       </div>
 
-      <section v-for="section in model.sections" :key="section.id" class="inspector-section">
-        <label class="inspector-section-label">{{ section.display.fallback ?? section.display.labelKey }}</label>
+      <!--
+        B1：分节头可点击收合。用 v-show（**不卸载**字段）：PropertyField 的输入
+        控件绑定/文本草稿由输入层结算，卸载会把它当 target-invalid 收尾。
+      -->
+      <section v-for="section in presentationSections" :key="section.id" class="inspector-section">
+        <button
+          type="button"
+          class="inspector-section-label"
+          :aria-expanded="!collapsed[section.id]"
+          @click="toggleSection(section.id)"
+        >
+          <span class="inspector-section-caret" aria-hidden="true">{{ collapsed[section.id] ? '▸' : '▾' }}</span>
+          {{ section.label }}
+        </button>
 
-        <template v-for="row in section.rows" :key="row.localId">
-          <PropertyField
-            v-if="fieldFor(row.field.descriptor.id)"
-            :field="fieldFor(row.field.descriptor.id)!"
-            @commit-value="(v: unknown) => onCommitValue(row.field.descriptor, v)"
-            @commit-component="(i: number, v: number) => onCommitComponent(row.field.descriptor, i, v)"
-          />
-        </template>
+        <div v-show="!collapsed[section.id]" class="inspector-section-body">
+          <template v-for="row in section.rows" :key="row.localId">
+            <PropertyField
+              v-if="fieldFor(row.field.descriptor.id)"
+              :field="fieldFor(row.field.descriptor.id)!"
+              @commit-value="(v: unknown) => onCommitValue(row.field.descriptor, v)"
+              @commit-component="(i: number, v: number) => onCommitComponent(row.field.descriptor, i, v)"
+            />
+          </template>
+        </div>
       </section>
 
       <!-- 面板的只读诊断/具名命令片段（该渲染器**没有**属性分支） -->
@@ -267,12 +345,22 @@ void inject(contextKey, null)
   background: var(--wb-bg-surface);
 }
 .inspector-section-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
   font-size: 10px;
   font-weight: 600;
   color: var(--wb-text-dim);
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  margin-bottom: 6px;
+  text-align: left;
+  cursor: pointer;
 }
+.inspector-section-label:hover { color: var(--wb-text); }
+.inspector-section-caret { width: 10px; flex-shrink: 0; font-size: 9px; }
+.inspector-section-body { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 </style>
