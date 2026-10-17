@@ -78,6 +78,33 @@ export interface TextureDecoder {
 }
 
 /**
+ * 解码的**有界并发窗口**（#399 缺陷 A / B1）。
+ *
+ * ## 为什么原来那么慢（不是"慢在解码器"，而是慢在**排队**）
+ *
+ * 旧实现是 for 循环里逐张 await decoder.decode(...) —— 62 张严格串行。
+ * 单张的成本不止 CPU：createImageBitmap 是一次**异步往返**，串行即 N 次往返排队；
+ * 同一批字节在另一条链（render/data/buildMaterialLibrary 的 Promise.all）实测 <0.7 s，
+ * 而本链实测 6.77 s（#399 分诊 §1.2 + 本批 e2e 白模期墙钟）。
+ *
+ * ## 为什么是"有界"而不是 Promise.all
+ *
+ * 无界并发会把**大图**同时展开：每张的 RGBA 是整幅内存（W×H×4），真实工程里几十张大图
+ * 同时解码会顶到内存峰值。窗口 6–8 在本批夹具（16×16 级、少数 ~19 KB PNG）上已足以
+ * 把异步往返重叠掉，同时把峰值钉在"窗口 × 单张 RGBA"。
+ *
+ * ## 不变量（改动此处必须保住的判据）
+ *
+ * 1. **输出下标对齐**：textureBindingsOf 按 resources[paletteIndex] 消费资源
+ *    （见 :228 一带），故乱序完成必须写回**自己的槽**，不得按完成顺序 push；
+ * 2. **逐项独立失败**：一张抛错只坏它自己（decodeOne 的 try/catch）；
+ * 3. **进度单调**：done 只在某一项**结算后** +1，故 n 单调不减、终态计数与 out 逐项一致。
+ *
+ * 三条都有单测（kernelTextureResources.test.ts 的「有界并发」用例：乱序完成 + 第 3 张抛错）。
+ */
+export const TEXTURE_DECODE_CONCURRENCY = 8
+
+/**
  * 一次进度事实（逐项结算后回调；`state === 'loading'` 期间）。
  *
  * `done` 含 `unrequested` 项：外链资源"不必再等"，也应计入已结算，
@@ -161,11 +188,12 @@ async function decodeOne(r: ContentResource, decoder: TextureDecoder): Promise<T
  * `contentResource()` **机械派生**（"改了字节却写旧版本"在构造上不可能）。
  * 故本函数**直接用**它，不重算 —— 重算会让"版本从哪来"出现两个答案。
  *
- * ## 进度（#399）
+ * ## 并发与进度（#399）
  *
- * 可经可选的第三参 `onProgress` 报出"已结算 n/total"与终态计数（**旁路**：上报抛错
- * 不影响解码结果）。输出**下标对齐**与"坏一张只坏一张"是既有判据，进度只是把
- * 已经发生的事实读出来，不改变调度方式。
+ * 逐条解码改为**有界并发**（窗口 = `TEXTURE_DECODE_CONCURRENCY`），并可经可选的第三参
+ * `onProgress` 报出"已结算 n/total"与终态计数（**旁路**：上报抛错不影响解码结果）。
+ * 输出**下标对齐**与"坏一张只坏一张"两条既有判据不变；它们是并发化最容易被改坏的地方，
+ * 故逐条列在常量注释里并由单测钉住。
  */
 export async function textureResourcesOf(
   resources: readonly ContentResource[],
@@ -202,11 +230,22 @@ export async function textureResourcesOf(
   // 起点事实（调用方不必自己拼"0/total"；也保证 0 条时终态仍被报出）。
   report('loading')
 
-  // 调度方式**本提交不变**（逐条串行）：这里只把"已结算 n/total"变成可观测事实。
-  // 并发化是下一个提交（#399 B1），届时不变量仍是下面这两条。
-  for (let index = 0; index < total; index += 1) {
-    settle(index, await decodeOne(resources[index]!, decoder))
+  let next = 0
+  /**
+   * 一个工作槽：反复取下一个下标，直到取完。
+   *
+   * 窗口由**并发 worker 数**限定（不是"分批 Promise.all"）：某张慢时别的槽继续推进，
+   * 不像分批那样被最慢的一张卡整批。下标分配与写回都在同步段内完成 ⇒ 不会两槽抢同一下标。
+   */
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next
+      next += 1
+      if (index >= total) return
+      settle(index, await decodeOne(resources[index]!, decoder))
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(TEXTURE_DECODE_CONCURRENCY, total) }, () => worker()))
 
   // 每个槽都已在 return 前写入（worker 覆盖全部下标才退出）⇒ 此处收窄是结构事实，不是断言猜测。
   const filled = out as readonly TextureResource[]
