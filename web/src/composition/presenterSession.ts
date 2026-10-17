@@ -246,6 +246,22 @@ export class PresenterSession {
     return this.presenter.statsSnapshot()
   }
 
+  /**
+   * 当前**纹理样本**（按 assetId 去重；e2e/单测的观测面）。
+   *
+   * 转发而不是复制：采样与读数都在呈现器里（"这一帧取哪一格"只有一处判定）。
+   * 公开面形状与 `BatchedPresenter` 逐字一致 —— 调用方（e2e 经 `presenterSurface`、
+   * 单测直接持有会话）不需要知道是哪个对象在回答。
+   */
+  textureSamples(): ReturnType<BatchedPresenter['textureSamples']> {
+    return this.presenter.textureSamples()
+  }
+
+  /** 采样诊断计数（错误 / 声明混合未混合 / 相位跳过）。 */
+  textureSampleStats(): ReturnType<BatchedPresenter['textureSampleStats']> {
+    return this.presenter.textureSampleStats()
+  }
+
   /** 归属账（A19 主判据）。 */
   ledger(): ReturnType<BatchedPresenter['ledger']> {
     return this.presenter.ledger()
@@ -271,6 +287,12 @@ export class PresenterSession {
     readonly content: DocumentContent
     readonly key: EvaluationKey
   }): PresenterApplyOutcome {
+    // ① **先**落时间，再判结构身份（顺序是判据的一部分）：
+    //    · 时间已不在结构身份里（见 contentIdentityOf），故"要不要重编"与它无关；
+    //    · 但纹理样本必须**每帧**跟着时间走 —— 停止播放、暂停定位、快进后 identity 未变
+    //      时若漏了这一步，画面会停在上一个时间点（无报错）。
+    //    · 无已登记动画材质时它是 no-op（同值短路 + 空登记表）。
+    this.presenter.setSceneTime(input.key.time.seconds)
     const identity = contentIdentityOf(input.scene, input.content, input.key, this.layerWorldY)
     if (!this.needsRebuild && identity === this.lastIdentity && this.compiled !== null) {
       // 内容身份未变：**不**重编、**不**重传。但仍要更新当前键 ——

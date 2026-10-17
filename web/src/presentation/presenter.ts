@@ -39,7 +39,7 @@ import type { BatchHitRef } from './pickingIndex'
 import type { GeometryAttributes, MaterialDescriptor } from './evaluationKey'
 import { texturePhaseKeyOf } from './evaluationKey'
 import type { ContentIdentity } from './assetIdentity'
-import type { TextureBinding } from './textureBinding'
+import { sampleBoundTexture, type TextureBinding } from './textureBinding'
 import { contentIdentityKey } from './assetIdentity'
 import { OwnershipRegistry, type OwnershipEntry } from './ownership'
 
@@ -96,6 +96,27 @@ export interface TexturePort {
   textureFor(identity: ContentIdentity): THREE.Texture | null
 }
 
+/**
+ * 一次**纹理样本**的读数（呈现侧诊断面；e2e 与单测的观测点）。
+ *
+ * 它回答"这一帧画面里的竖条贴图取了哪一段"，与像素断言互补：像素证明"offset 真的
+ * 进了画面"，本读数证明"进的是哪一个样本"（同一输入时间 ⇒ 同一读数）。
+ */
+export interface TextureSampleReport {
+  readonly assetId: string
+  readonly contentVersion: string
+  /** 采样用的场景秒（**唯一权威** `domain/animation#sceneClockOf` 的投影）。 */
+  readonly seconds: number
+  /** 序列声明索引（已归一到 `0..stripFrameCount-1`）。 */
+  readonly frame: number
+  readonly nextFrame: number
+  /** 无混合声明时恒 0；非 0 表示**声明了** interp 而 M5 只做阶跃（见 `textureSampleStats`）。 */
+  readonly mix: number
+  readonly stripFrameCount: number
+  readonly offsetY: number
+  readonly repeatY: number
+}
+
 export interface PresenterOptions {
   /** 设备作用域（一个渲染器实例一个；由 `nextDeviceScope()` 分配）。 */
   scope: string
@@ -142,6 +163,35 @@ export class BatchedPresenter {
    * —— 它随时可由 `compileScene` 重建。
    */
   private lastScene: CompiledScene | null = null
+
+  /**
+   * 已挂载的**动画材质**：材质键 → (纹理, 绑定)。纹理按内容身份共享，采样时按纹理去重。
+   *
+   * ## 为什么按"材质键"登记而不是"按材质对象"
+   *
+   * 材质缓存键（materialIdentityOf 的 identityKey）就是卸载时的检索键
+   * （releaseMaterialRef）；用同一把钥匙登记，登记与释放不会各说各话。
+   * 而**采样**是纹理级操作（offset/repeat 是 THREE.Texture 的属性）⇒
+   * 一次 applySceneTime 里对同一张纹理只写一次（见该方法）。
+   */
+  private readonly animatedMaterials = new Map<string, { texture: THREE.Texture; binding: TextureBinding }>()
+  /**
+   * 当前场景秒数（**唯一**时间输入；由 PresenterSession 每帧经 setSceneTime 落进来）。
+   *
+   * 呈现器**不读时钟、不累加 delta**：它只保存"这一帧的时间是什么"，
+   * 于是同一时间必然得到同一样本（跳帧/倒退/离屏冻结序列都走这一个值）。
+   */
+  private sceneSeconds = 0
+  /** 上次写入的样本（按 assetId 去重；诊断读面）。 */
+  private readonly lastSamples = new Map<string, TextureSampleReport>()
+  /** 采样失败次数（**不**回落 0 帧冒充成功）。 */
+  private sampleErrors = 0
+  /** 声明了帧混合而被**阶跃**呈现的样本数（M5 的显式能力缺口，不静默假装）。 */
+  private blendedSamples = 0
+  /** 因相位绑定而**未登记**动画的材质数（同一纹理被多相位共享时 offset 会互相覆盖）。 */
+  private phaseAnimationSkipped = 0
+  /** 已诊断过的混合素材（每个 assetId 只告警一次，避免每帧刷屏）。 */
+  private readonly blendReported = new Set<string>()
 
   private readonly stats: PresenterStats = {
     applies: 0,
@@ -204,6 +254,127 @@ export class BatchedPresenter {
   }
 
   /**
+   * **场景时间**（秒）。只写呈现参数（纹理的 repeat.y/offset.y），
+   * **不改结构、不触发重编、不设 needsUpdate**。
+   *
+   * ## 为什么同值短路
+   *
+   * 播放时每帧都会调用它；时间没变（暂停、倍率 0、亚帧取整）时没有任何新样本要写。
+   * 短路省掉每帧一遍映射遍历与一次采样对象分配 —— 而"暂停 500 ms 样本不漂"
+   * 也因此是结构事实，不是靠"反正写进去也一样"。
+   *
+   * apply/rebind 走**私有** applySceneTime 强制落一次（新材质必须拿到初值，
+   * 不能被"同值"吞掉）。
+   */
+  setSceneTime(seconds: number): void {
+    const s = Number.isFinite(seconds) ? seconds : 0
+    if (s === this.sceneSeconds) return
+    this.sceneSeconds = s
+    this.applySceneTime()
+  }
+
+  /**
+   * 当前**纹理样本**（按 assetId 去重；冻结数组）。e2e/单测的观测面。
+   *
+   * 空数组 = 没有已登记的动画材质（**不是**"采样失败"：失败计入
+   * textureSampleStats().errors）。
+   */
+  textureSamples(): readonly TextureSampleReport[] {
+    return Object.freeze([...this.lastSamples.values()])
+  }
+
+  /** 采样诊断计数（错误 / 声明混合未混合 / 相位跳过）。 */
+  textureSampleStats(): { errors: number; blended: number; phaseSkipped: number } {
+    return Object.freeze({
+      errors: this.sampleErrors,
+      blended: this.blendedSamples,
+      phaseSkipped: this.phaseAnimationSkipped,
+    })
+  }
+
+  /**
+   * 把当前 sceneSeconds 落到全部已登记动画材质上（**唯一**采样写点）。
+   *
+   * ## 竖条裁切为什么是 repeat.y/offset.y（而不是改 UV）
+   *
+   * 几何 UV 是**满 tile**（0..1），整张竖条平铺会把所有帧压进一个面。正确的呈现手段是
+   * 纹理级变换：repeat.y = 1/N 把 V 压到一格，offset.y 选择哪一格。它**不碰
+   * 顶点数据、不改几何身份、不改批次身份** ⇒ 播放期零重建（G1/A11 的前提）。
+   *
+   * ## 三条纪律
+   *
+   * 1. **不设 texture.needsUpdate**：那会让 GPU 每帧重传整张像素（legacy
+   *    applyFrameOffset 的先例正是只写 uniform）；
+   * 2. **按纹理去重**：offset 是纹理级属性，同一纹理的多个材质写同一个值；
+   * 3. **失败显式计数**（sampleErrors），**不**回落 0 帧/1 帧冒充成功。
+   *
+   * ## flipY 分支（不是洁癖）
+   *
+   * 帧 0 = 竖条**最上一格**（与 legacy textureStripAnimation 的约定一致）。flipY=false
+   * 时 V 向下增长 ⇒ offset.y = frame/N；flipY=true（纹理上下翻转）时帧序整体倒过来
+   * ⇒ offset.y = (N-1-frame)/N。不分支会让"将来出现 flipY=true 的采样"上下颠倒。
+   */
+  private applySceneTime(): void {
+    const seconds = this.sceneSeconds
+    /** 本遍已写过的纹理（纹理级去重；见上）。 */
+    const written = new Set<THREE.Texture>()
+    const reports = new Map<string, TextureSampleReport>()
+    for (const { texture, binding } of this.animatedMaterials.values()) {
+      const animation = binding.animation
+      if (animation === undefined || binding.map === undefined) continue
+      const sampled = sampleBoundTexture(binding, animation.sequence, seconds)
+      if (!sampled.ok) {
+        // 显式失败：保持上一次偏移（不写 0 冒充第 0 帧），并计数。
+        this.sampleErrors += 1
+        continue
+      }
+      const stripFrameCount = animation.stripFrameCount
+      const frame = Math.max(0, Math.min(stripFrameCount - 1, sampled.value.frame))
+      const offsetY = binding.sampling.flipY
+        ? (stripFrameCount - 1 - frame) / stripFrameCount
+        : frame / stripFrameCount
+      if (!written.has(texture)) {
+        written.add(texture)
+        texture.repeat.y = 1 / stripFrameCount
+        texture.offset.y = offsetY
+        // 只写 uniform：不设 texture.needsUpdate（见上）。
+      }
+      if (sampled.value.mix !== 0) {
+        // 声明了 interpolate ⇒ 本应两帧混合；M5 只做阶跃。**显式**暴露缺口，
+        // 不静默假装"已混合"（每个 assetId 只告警一次，避免每帧刷屏）。
+        this.blendedSamples += 1
+        const assetId = binding.map.id
+        if (!this.blendReported.has(assetId)) {
+          this.blendReported.add(assetId)
+          console.warn(
+            `[presenter] texture-blend-not-applied:${assetId} —— 该纹理声明了 interpolate，`
+              + 'M5 只做离散阶跃（mix 不参与呈现）；要真混合需另立工作包',
+          )
+        }
+      }
+      const key = binding.map.id
+      if (!reports.has(key)) {
+        reports.set(
+          key,
+          Object.freeze({
+            assetId: binding.map.id,
+            contentVersion: binding.map.version,
+            seconds,
+            frame,
+            nextFrame: sampled.value.nextFrame,
+            mix: sampled.value.mix,
+            stripFrameCount,
+            offsetY: texture.offset.y,
+            repeatY: texture.repeat.y,
+          }),
+        )
+      }
+    }
+    // 只保留**当前登记**的样本：卸载掉的材质不得残留读数（否则读面会说谎）。
+    this.lastSamples.clear()
+    for (const [key, report] of reports) this.lastSamples.set(key, report)
+  }
+  /**
    * 应用一次编译结果（**GPU 上传阶段**）。
    *
    * 增量策略（G1 的关键）：
@@ -239,6 +410,9 @@ export class BatchedPresenter {
     for (const mounted of [...this.mounted.values()]) {
       if (!nextKeys.has(mounted.key)) this.unmount(mounted)
     }
+    // 新建/重挂的材质**立刻**拿到当前帧的偏移，不依赖下一次 tick（否则重编那一帧
+    // 会显示上一个时间点的样本，而画面上没有任何报错）。
+    this.applySceneTime()
   }
 
   /** 释放本呈现器持有的全部份额（+ 卸载全部批次对象）。 */
@@ -256,6 +430,9 @@ export class BatchedPresenter {
       this.materialCache.delete(key)
       this.ownership.release(this.entryOf(materialIdentityOfKey(key)))
     }
+    this.animatedMaterials.clear()
+    this.lastSamples.clear()
+    this.blendReported.clear()
     this.group.clear()
     this.generation = null
   }
@@ -273,6 +450,9 @@ export class BatchedPresenter {
     this.mounted.clear()
     this.geometryCache.clear()
     this.materialCache.clear()
+    // 旧 GPU 纹理句柄已失效：动画登记与样本读数一并清空（恢复后按当前时间重新落一次）。
+    this.animatedMaterials.clear()
+    this.lastSamples.clear()
     const abandoned = this.ownership.abandonAll('webgl-context-lost')
     this.generation = null
     return abandoned
@@ -309,12 +489,31 @@ export class BatchedPresenter {
    * （不要求调用方重新给）。于是"换绑定"这件事自洽，不依赖调用方的调用时机。
    */
   setTextureBindings(bindings: ReadonlyMap<string, TextureBinding>): void {
+    // ① 归零"曾经动画、现在不再动画"的纹理：offset/repeat 是纹理级属性，
+    //    残留的旧偏移会把静态贴图裁成一格（画面上是"贴图突然只剩一条"）。
+    const animatedMaps = new Set<string>()
+    for (const b of bindings.values()) {
+      if (b.animation !== undefined && b.map !== undefined) animatedMaps.add(identityKey(b.map))
+    }
+    const staleTextures = new Set<THREE.Texture>()
+    for (const { texture, binding } of this.animatedMaterials.values()) {
+      if (binding.map !== undefined && !animatedMaps.has(identityKey(binding.map))) staleTextures.add(texture)
+    }
+    for (const tex of staleTextures) {
+      tex.repeat.set(1, 1)
+      tex.offset.set(0, 0)
+    }
+    // ② 登记与读数随新绑定重建（旧键不再有意义）。
+    this.animatedMaterials.clear()
+    this.lastSamples.clear()
     this.options.textureBindings = bindings
     if (this.lastScene === null || this.generation === null) return
     // 卸载全部批次后按新绑定重建（几何/材质缓存仍按内容身份复用，
     // 故这里的重建只重建**批次对象**与新材质，不重算几何数值）。
     for (const mounted of [...this.mounted.values()]) this.unmount(mounted)
     this.remountLastScene()
+    // 重挂后**立刻**重采样（新材质不得等下一次 tick 才拿到当前帧偏移）。
+    this.applySceneTime()
   }
 
   /**
@@ -582,6 +781,7 @@ export class BatchedPresenter {
     this.ownership.acquire(this.entryOf(identity), () => {})
     this.stats.materialBuilds += 1
     if (binding?.missingRequired === true) this.stats.missingRequiredTextures += 1
+    this.registerAnimatedMaterial(key, binding)
     return material
   }
 
@@ -593,7 +793,30 @@ export class BatchedPresenter {
     cached.value.dispose()
     this.stats.disposals += 1
     this.materialCache.delete(key)
+    this.animatedMaterials.delete(key)
     this.ownership.release(this.entryOf(materialIdentityOfKey(key)))
+  }
+
+
+  /**
+   * 登记一个**动画材质**（材质新建后调用；卸载时按同一把钥匙注销）。
+   *
+   * 三条跳过判据（都**不**静默）：
+   *  1. 无绑定/无 animation/无 map ⇒ 静态贴图，不登记（缺席就是缺席）；
+   *  2. 相位绑定 ⇒ **不登记**并计数：同一张纹理可能被多个相位共享，而 offset 是
+   *     纹理级属性 ⇒ 两个相位会互相覆盖（"用第一个材质的相位糊过去"是更糟的静默错误）。
+   *     生产相位数据当前恒缺席，故这只是显式的缺口登记；
+   *  3. 纹理端口取不到纹理（未解码/缺失）⇒ 不登记（没有 GPU 贴图可写）。
+   */
+  private registerAnimatedMaterial(key: string, binding: TextureBinding | undefined): void {
+    if (binding === undefined || binding.animation === undefined || binding.map === undefined) return
+    if (binding.texturePhase !== undefined) {
+      this.phaseAnimationSkipped += 1
+      return
+    }
+    const texture = this.options.textures?.textureFor(binding.map)
+    if (texture === null || texture === undefined) return
+    this.animatedMaterials.set(key, { texture, binding })
   }
 
   /**
