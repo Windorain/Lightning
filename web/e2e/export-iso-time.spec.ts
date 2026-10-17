@@ -244,4 +244,47 @@ test.describe('M5-4 · 等轴 PNG 显式时间', () => {
       .toBeVisible({ timeout: 20_000 })
     await expect(page.locator('[data-iso-dl-err]')).not.toHaveText('')
   })
-})
+  /**
+   * **C6（M5-4 / P4 手测实测）**：非法时间必须**真人在键盘上到得了**红字。
+   *
+   * ## 为什么这条要专门存在
+   *
+   * 输入框原是 `type="number"`：浏览器**吞掉**非法键盘输入（键入 `abc` 后 `value` 恒空），
+   * 于是 `isoTimeInvalid` 红字在真人操作下几乎不可达（只有清空输入框才碰得到）——
+   * 一条只有程序化可达的错误位等于没有。改为文本输入 + `@input` 即时校验后，本判据
+   * 把"键入非法文本 ⇒ 红字出现"钉住（同时钉住"改回合法 ⇒ 红字消失"与"非法时不下载"）。
+   */
+  test('C6 · 键入非法时间 ⇒ 红字可见；改回合法 ⇒ 红字消失；非法时点下载 ⇒ 可见错误且无下载', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-chrome', '导出卡判据固定在 desktop-chrome')
+    await openExportTab(page)
+
+    const input = page.locator('[data-iso-seconds]')
+    const invalid = page.locator('[data-iso-time-invalid]')
+    // 基线：合法值 ⇒ 无红字（否则下面的"出现"可能恒真）。
+    await setIsoSeconds(page, '0.05')
+    await expect(invalid, '合法时间不得显示红字').toHaveCount(0)
+
+    // 键入非法文本（**不**失焦）：`@input` 即时校验就该出现红字。
+    await input.fill('abc')
+    await expect(invalid, '键入非法时间必须立刻出现红字（不必等失焦/提交）').toBeVisible({ timeout: 5_000 })
+    await expect(invalid).not.toHaveText('')
+
+    // 改回合法 ⇒ 红字消失（红字是"当前输入非法"，不是一次性横幅）。
+    await input.fill('0.1')
+    await expect(invalid, '改回合法值后红字必须消失').toHaveCount(0, { timeout: 5_000 })
+
+    // 再键入非法值并提交（失焦）：红字仍在，且**点下载必须可见失败、不得产出下载**。
+    await input.fill('abc')
+    await expect(invalid).toBeVisible({ timeout: 5_000 })
+    const downloadPromise = page
+      .waitForEvent('download', { timeout: 3_000 })
+      .then(() => 'downloaded' as const)
+      .catch(() => 'no-download' as const)
+    await page.locator('[data-download-iso]').click()
+    expect(await downloadPromise, '非法时间不得产出下载（不得静默当 t=0）').toBe('no-download')
+    await expect(page.locator('[data-iso-dl-err]'), '非法时间的下载失败必须可见').toBeVisible({ timeout: 20_000 })
+    await expect(page.locator('[data-iso-dl-err]')).not.toHaveText('')
+
+    console.log('[C6] 非法时间：键入即红字、改回即消失、点下载可见失败且无下载')
+  })
+});
