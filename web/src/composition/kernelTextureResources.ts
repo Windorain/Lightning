@@ -78,6 +78,61 @@ export interface TextureDecoder {
 }
 
 /**
+ * 一次进度事实（逐项结算后回调；`state === 'loading'` 期间）。
+ *
+ * `done` 含 `unrequested` 项：外链资源"不必再等"，也应计入已结算，
+ * 否则进度永远停在 `(total - 外链数)/total`，读起来像卡住。
+ *
+ * ## 为什么这里**没有** `missing`
+ *
+ * 本模块从不产出 `missing`（只有 `ready`/`failed`/`unrequested`：内嵌字节要么解出来、
+ * 要么失败）。"缺失"是**必需性**事实 —— 由 `textureBindingsOf`/`bindTexture` 的
+ * `missingRequired` 回答（`presentation/textureBinding.ts:190`）。
+ * 在这里补一个恒为 0 的 `missing` 字段就是"看起来完备的假分支"，
+ * 故终态只报 `ready`/`failed`，缺失由绑定层汇总（SPEC §7.4：由实际请求与绑定事实推导）。
+ */
+export interface TextureResourcesProgress {
+  /** `'loading'` = 还在解；终态为 `'ready'`（全解出来）或 `'failed'`（至少一张失败）。 */
+  readonly state: 'loading' | 'ready' | 'failed'
+  /** 已结算条数（含 `unrequested`）。 */
+  readonly done: number
+  readonly total: number
+  readonly ready: number
+  readonly unrequested: number
+  readonly failed: number
+}
+
+/** 进度报告的接收面（**旁路**：它抛错不得影响解码结果，见 `textureResourcesOf`）。 */
+export type TextureProgressSink = (progress: TextureResourcesProgress) => void
+
+/**
+ * 单条资源的**解码 + 五态判定**（`textureResourcesOf` 的最小工作单元）。
+ *
+ * 逐条独立 try/catch 是"坏一张只坏一张"的落点 —— 它**不**依赖调用方的调度方式，
+ * 故并发化不会改变失败语义。
+ */
+async function decodeOne(r: ContentResource, decoder: TextureDecoder): Promise<TextureResource> {
+  const identity: ContentIdentity = Object.freeze({
+    id: r.ref.assetId,
+    // 用文档声明的版本（构造期由字节派生）；空串 ⇒ 按字节现算兜底。
+    version: r.ref.contentVersion !== '' ? r.ref.contentVersion : contentVersionOfBytes(r.payload ?? ''),
+  })
+  const locator = locatorOf(r)
+
+  // ① 外链 ⇒ `unrequested`（取回是宿主端口的职责，不在这里假装）。
+  if (r.payload === null) return freezeResource(identity, locator, 'unrequested', null)
+  // ② 内嵌 ⇒ 解码（**按条**兜错：一处失败只坏这一条）
+  try {
+    const pixels = await decoder.decode(r.payload)
+    return pixels === null
+      ? freezeResource(identity, locator, 'failed', null, '解码返回 null（字节不是可解码图像）')
+      : freezeResource(identity, locator, 'ready', pixels)
+  } catch (e) {
+    return freezeResource(identity, locator, 'failed', null, formatReason(e))
+  }
+}
+
+/**
  * `DocumentContent.resources` → `TextureResource[]`（**逐资源五态**）。
  *
  * ## 状态判定（每一条都有对应断言）
@@ -105,38 +160,58 @@ export interface TextureDecoder {
  * 注：`ContentResource.ref.contentVersion` 已由 `domain/content` 的
  * `contentResource()` **机械派生**（"改了字节却写旧版本"在构造上不可能）。
  * 故本函数**直接用**它，不重算 —— 重算会让"版本从哪来"出现两个答案。
+ *
+ * ## 进度（#399）
+ *
+ * 可经可选的第三参 `onProgress` 报出"已结算 n/total"与终态计数（**旁路**：上报抛错
+ * 不影响解码结果）。输出**下标对齐**与"坏一张只坏一张"是既有判据，进度只是把
+ * 已经发生的事实读出来，不改变调度方式。
  */
 export async function textureResourcesOf(
   resources: readonly ContentResource[],
   decoder: TextureDecoder,
+  onProgress?: TextureProgressSink,
 ): Promise<readonly TextureResource[]> {
-  const out: TextureResource[] = []
-  for (const r of resources) {
-    const identity: ContentIdentity = Object.freeze({
-      id: r.ref.assetId,
-      // 用文档声明的版本（构造期由字节派生）；空串 ⇒ 按字节现算兜底。
-      version: r.ref.contentVersion !== '' ? r.ref.contentVersion : contentVersionOfBytes(r.payload ?? ''),
-    })
-    const locator = locatorOf(r)
+  const total = resources.length
+  // 定长槽位：乱序完成写回自己的下标（见 `TEXTURE_DECODE_CONCURRENCY` 的不变量 1）。
+  const out: (TextureResource | undefined)[] = new Array(total)
+  let done = 0
+  let ready = 0
+  let unrequested = 0
+  let failed = 0
 
-    // ① 外链 ⇒ `unrequested`（取回是宿主端口的职责，不在这里假装）。
-    if (r.payload === null) {
-      out.push(freezeResource(identity, locator, 'unrequested', null))
-      continue
-    }
-    // ② 内嵌 ⇒ 逐条解码（**不** Promise.all：那会让一处失败拖垮全部）
+  const report = (state: TextureResourcesProgress['state']): void => {
+    if (onProgress === undefined) return
     try {
-      const pixels = await decoder.decode(r.payload)
-      if (pixels === null) {
-        out.push(freezeResource(identity, locator, 'failed', null, '解码返回 null（字节不是可解码图像）'))
-      } else {
-        out.push(freezeResource(identity, locator, 'ready', pixels))
-      }
-    } catch (e) {
-      out.push(freezeResource(identity, locator, 'failed', null, formatReason(e)))
+      onProgress(Object.freeze({ state, done, total, ready, unrequested, failed }))
+    } catch {
+      // 进度上报是**旁路**：它抛错不得把一批已解码的纹理伪装成"全部失败"。
+      // （那会让"报表坏了"看起来像"资源坏了" —— 两种事实必须可区分。）
     }
   }
-  return Object.freeze(out)
+
+  const settle = (index: number, resource: TextureResource): void => {
+    out[index] = resource
+    done += 1
+    if (resource.state === 'ready') ready += 1
+    else if (resource.state === 'unrequested') unrequested += 1
+    else failed += 1
+    report('loading')
+  }
+
+  // 起点事实（调用方不必自己拼"0/total"；也保证 0 条时终态仍被报出）。
+  report('loading')
+
+  // 调度方式**本提交不变**（逐条串行）：这里只把"已结算 n/total"变成可观测事实。
+  // 并发化是下一个提交（#399 B1），届时不变量仍是下面这两条。
+  for (let index = 0; index < total; index += 1) {
+    settle(index, await decodeOne(resources[index]!, decoder))
+  }
+
+  // 每个槽都已在 return 前写入（worker 覆盖全部下标才退出）⇒ 此处收窄是结构事实，不是断言猜测。
+  const filled = out as readonly TextureResource[]
+  report(failed > 0 ? 'failed' : 'ready')
+  return Object.freeze(filled)
 }
 
 /** 取回位置（**不参与身份**）：有内嵌字节 ⇒ 内嵌，否则外部。 */

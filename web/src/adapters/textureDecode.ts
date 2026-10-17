@@ -49,6 +49,9 @@ export function createDomTextureDecoder(): TextureDecoder {
     async decode(payload: string): Promise<TexturePixels | null> {
       const reason = textureDecodeUnsupportedReason()
       if (reason !== null) return null
+      // 耗时登记（#399 步骤 6）：单张解码的墙钟，供 `performance.getEntriesByName('texture-decode:image')`
+      // 读取（白模期四段拆分的"解码"一段）。**不改行为**：测量本身失败不影响返回值。
+      const t0 = perfNow()
       try {
         const blob = await payloadToBlob(payload)
         if (blob === null) return null
@@ -63,19 +66,60 @@ export function createDomTextureDecoder(): TextureDecoder {
       } catch {
         // 坏字节/非法 data URL —— 端口契约要求"映射成五态之一"，`null` 即失败态。
         return null
+      } finally {
+        perfSince('texture-decode:image', t0)
       }
     },
   }
 }
 
+/** 性能测量是否可用（非浏览器/受限环境 ⇒ 全部跳过，不做兼容分支之外的猜测）。 */
+const PERF_ON = typeof performance !== 'undefined' && typeof performance.measure === 'function'
+
+function perfNow(): number {
+  return PERF_ON ? performance.now() : 0
+}
+
+/** 记一条耗时（同名多条由浏览器分别保留；缓冲上限只影响可回读的条数，不影响行为）。 */
+function perfSince(name: string, start: number): void {
+  if (!PERF_ON) return
+  try {
+    performance.measure(name, { start, end: performance.now() })
+  } catch {
+    // 测量是旁路：失败不得让"能解码"变成"解不出来"。
+  }
+}
+
+/**
+ * 模块级复用的 2D 画布（#399 缺陷 A / B2）。
+ *
+ * ## 旧实现的两笔白费
+ *
+ * 每张纹理都 `new OffscreenCanvas(w, h)` + `getContext('2d')`（一次 GPU/软件位图分配），
+ * 然后 `getImageData(...).data.buffer.slice(0)` —— `getImageData` **本身已是新分配的拷贝**，
+ * `.buffer.slice(0)` 是**第二份**整幅 RGBA 拷贝。57 张串行时这两笔都被放大 57 倍。
+ *
+ * ## 复用为什么安全
+ *
+ * - 画布只是"位图 → RGBA"的中转：`drawImage` 后立刻 `getImageData`，两次调用之间**没有
+ *   await** ⇒ 单线程下不可能穿插另一张的绘制（并发解码也只在 `await` 处交错）。
+ * - 返回的 `Uint8Array` 由 `new Uint8Array(ImageData.data)` **新分配**，不与该画布共享
+ *   内存 ⇒ 复用不会让已交付的像素在下一张解码时被改写（这条是 B2 的正确性判据）。
+ * - resize 会清空画布内容，但我们每次都重绘，故无残留。
+ */
+let sharedCanvas2d: OffscreenCanvas | null = null
+
 /** 取 2D 画布的 `ImageData`（`OffscreenCanvas` 优先；无则用 `<canvas>`）。 */
 function readRgba(source: CanvasImageSource, width: number, height: number): Uint8Array | null {
   if (typeof OffscreenCanvas === 'function') {
-    const canvas = new OffscreenCanvas(width, height)
+    const canvas = sharedCanvas2d ?? (sharedCanvas2d = new OffscreenCanvas(width, height))
+    if (canvas.width !== width) canvas.width = width
+    if (canvas.height !== height) canvas.height = height
     const ctx = canvas.getContext('2d')
     if (ctx === null) return null
     ctx.drawImage(source, 0, 0)
-    return new Uint8Array(ctx.getImageData(0, 0, width, height).data.buffer.slice(0))
+    // `new Uint8Array(ImageData.data)` 即一份独立拷贝（去掉旧写法的第二份 `.buffer.slice(0)`）。
+    return new Uint8Array(ctx.getImageData(0, 0, width, height).data)
   }
   if (typeof document === 'undefined') return null
   const canvas = document.createElement('canvas')
@@ -84,7 +128,7 @@ function readRgba(source: CanvasImageSource, width: number, height: number): Uin
   const ctx = canvas.getContext('2d')
   if (ctx === null) return null
   ctx.drawImage(source, 0, 0)
-  return new Uint8Array(ctx.getImageData(0, 0, width, height).data.buffer.slice(0))
+  return new Uint8Array(ctx.getImageData(0, 0, width, height).data)
 }
 
 /** data URL / 裸 base64 → `Blob`（**不**取远端：外链资源由宿主端口负责）。 */

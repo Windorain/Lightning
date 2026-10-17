@@ -15,6 +15,9 @@ import { DRW } from '@/runtime/drw'
 import type { PresenterSession } from '@/composition/presenterSession'
 import type { ViewportPresenterBundle } from '@/runtime/host'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
+// 中立设施（`kernel-legacy-isolation.test.ts` 的中立清单含 `logging`）：实时状态槽是
+// 状态栏的读面来源，不是"旧权威对象"。
+import { LOG_LEVEL, type LogLevelValue } from '@/logging/LogCenter'
 
 /**
  * 时间零值（领域形状 `{frame,fps}`）。
@@ -399,6 +402,10 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     // R1-A C10：会话与纹理端口的**创建**搬到了装配边（`HostBase#createViewportPresenter`），
     // 但**释放**仍归本作用域 —— `bundle.dispose()` 是"创建与释放同源"的落点，
     // 调用方不可能只释放其中一个。
+    // #399：本标志此前**只读不写**（恒为 false ⇒ "卸载后不写"的守卫是空的）。
+    // 卸载后不得再写实时状态/纹理同步结果：没有消费者，且会改写共享状态栏。
+    texturesDisposed = true
+    ctx.log.clearLiveStatus()
     presenterBundle.dispose()
     if (vpSlot.presenterSurface === presenterSurface) vpSlot.presenterSurface = null
     // 结构层指向已释放的呈现根会让"卸载后仍有对象在场景里"（幽灵挂载）——
@@ -555,6 +562,59 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    */
   let textureSyncSeq = 0
   let texturesDisposed = false
+
+  /**
+   * 纹理生命周期的**实时状态写点**（#399 缺陷 B 的修复落点之一）。
+   *
+   * ## 为什么写 `liveStatus` 而不是既有的 `ctx.log.setStatus`
+   *
+   * `setStatus` 在当前状态栏被 `lastDisplayable` **永久遮蔽**：任一非 DEBUG 日志写过之后，
+   * 状态栏就恒显示「初始化视口相机 → FINISHED」，而唯一能清它的 `LogCenter.clear()` 全树零调用。
+   * ⇒ 只调 `setStatus` 的修法会「改完了但屏幕没变」（#399 分诊 §2.1 的暗坑）。
+   * `liveStatus` 是独立槽，状态栏为它保留了最高渲染优先级与 `data-texture-state` 读面。
+   *
+   * ## 为什么不必在这里去重
+   *
+   * 本链由 `applyPresenterSurface` **每帧**调用；去重放在 `LogCenter.setLiveStatus` 的
+   * 唯一入口（同值不写 ref），比每个调用方各记一份「上一条」更不易漏。
+   *
+   * ## 为什么卸载后不写
+   *
+   * 卸载后的写入没有消费者，却会让已关闭的视口继续改写共享状态栏。
+   */
+  const writeTextureLive = (
+    message: string,
+    state: 'loading' | 'ready' | 'missing' | 'failed',
+    level: LogLevelValue = LOG_LEVEL.INFO,
+  ): void => {
+    if (texturesDisposed) return
+    ctx.log.setLiveStatus(message, level, state)
+  }
+
+  /**
+   * 纹理装配的耗时标记（#399 步骤 6）：只登记、不参与判定。
+   *
+   * 读数面 =
+   * `performance.getEntriesByName('texture-sync:decode' | 'texture-sync:bind' | 'texture-sync:total')`
+   * —— 白模期墙钟由 `total` 给出，解码/上传绑定各占多少由前两者拆开（同机同夹具对照）。
+   * 标记缺失/`performance` 不可用时全部静默跳过：测量是旁路，不得改变装配行为。
+   */
+  const perfMark = (name: string): void => {
+    if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return
+    try {
+      performance.mark(name)
+    } catch {
+      // 测量是旁路（标记缓冲写满等），不影响装配。
+    }
+  }
+  const perfMeasure = (name: string, startMark: string, endMark: string): void => {
+    if (typeof performance === 'undefined' || typeof performance.measure !== 'function') return
+    try {
+      performance.measure(name, startMark, endMark)
+    } catch {
+      // 标记不存在（例如在解码前就取消）⇒ 不测量，也不抛。
+    }
+  }
   /**
    * 上次**成功**同步所用的资源独立身份（`assetId@contentVersion` 串）。
    *
@@ -583,20 +643,61 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   const textureIdentityOf = (doc: { readonly content: { readonly resources: readonly { readonly ref: { readonly assetId: string; readonly contentVersion: string } }[] } }): string =>
     doc.content.resources.map((r) => `${r.ref.assetId}@${r.ref.contentVersion}`).join('\u0001')
   const syncPresenterTextures = async (): Promise<void> => {
+    if (texturesDisposed) return
     const doc = kernel?.document()
-    if (doc === undefined || texturesDisposed) return
+    if (doc === undefined) {
+      // 文档已关闭：实时状态不得残留上一份文档的成品结论（SPEC §7.4：状态由**当前**事实推导）。
+      ctx.log.clearLiveStatus()
+      return
+    }
     const identity = textureIdentityOf(doc)
     // 已同步过 / 正在同步同一份资源 ⇒ 不重解码、不重绑定（否则帧循环会把在途解码反复作废）。
     if (identity === lastTextureIdentity || identity === inFlightTextureIdentity) return
+    const total = doc.content.resources.length
+    if (total === 0) {
+      // 没有资源可报 ⇒ 不写「0/0」这种假进度，也不让上一份文档的结论留着。
+      ctx.log.clearLiveStatus()
+      return
+    }
     inFlightTextureIdentity = identity
     const seq = ++textureSyncSeq
+    // 起点：加载中 0/total。相位与计数都取自**本次请求的事实**（不是计时器猜测）。
+    writeTextureLive(`纹理加载中 0/${total}`, 'loading')
+    perfMark(`texture-sync:${seq}:start`)
     try {
-      const resources = await presenterBundle.textureResourcesOf(doc.content.resources, textureDecoder)
+      const resources = await presenterBundle.textureResourcesOf(
+        doc.content.resources,
+        textureDecoder,
+        (p) => {
+          // 取消/卸载后不写：过期批次不得覆盖新批次的进度（与下面的 seq 判据同一条纪律）。
+          if (seq !== textureSyncSeq || texturesDisposed) return
+          writeTextureLive(`纹理加载中 ${p.done}/${p.total}`, 'loading')
+        },
+      )
+      perfMark(`texture-sync:${seq}:decoded`)
       // 取消：更新的同步已开始（或有更新的文档）⇒ 本次结果作废，**不**落地。
       if (seq !== textureSyncSeq || texturesDisposed) return
       const synced = presenterTextures.sync(resources)
       const bound = presenterSurface.bindTextures(resources)
+      perfMark(`texture-sync:${seq}:bound`)
       lastTextureIdentity = identity
+      // 终态（#399）：以**绑定事实** `missingRequired` 优先 —— 「解码成功」不等于「显示就绪」
+      // （SPEC §7.4：原始字节/解码结果/设备绑定并不等价；占位不得冒充完整结果）。
+      // 三条文案是 e2e 的锚点：加载中 n/total、就绪 n/n、缺失|失败 k/total。
+      //
+      // ⚠️ 计数单位必须与分母一致：`total` 是**资源**条数，故 k 也是资源条数。
+      // `bound.missingRequired` 数的是**绑定**（材质）条数（`presenterSession.bindTextures`），
+      // 同一张纹理可被多个材质引用 ⇒ 拿它当分子会得到「缺失 3/57」这种跨单位读数。
+      // 它只用来判定「缺的是必需贴图」与否（语义），数量取未就绪资源条数。
+      const notReady = resources.filter((r) => r.state !== 'ready' && r.state !== 'unrequested').length
+      if (bound.missingRequired > 0) {
+        writeTextureLive(`纹理缺失 ${notReady}/${total}`, 'missing', LOG_LEVEL.WARN)
+      } else if (notReady > 0) {
+        // 非必需贴图坏了：画面可显示，但「有失败」是事实，不得报成就绪。
+        writeTextureLive(`纹理失败 ${notReady}/${total}`, 'failed', LOG_LEVEL.ERROR)
+      } else {
+        writeTextureLive(`纹理就绪 ${total}/${total}`, 'ready')
+      }
       // 未就绪的必需贴图是**真实事实**，必须可见（不得静默当"画好了"）。
       if (bound.missingRequired > 0) {
         presenterErrors.push(`textures-missing-required:${bound.missingRequired}`)
@@ -611,7 +712,17 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       const message = e instanceof Error ? e.message : String(e)
       presenterErrors.push(`textures-threw:${message}`)
       emitPresenterFailure('textures-threw', message)
+      // 整批失败同样是**终态**：不得停在「加载中」（SPEC §7.4 末句：失败不能一直显示为加载中）。
+      // 过期批次（已有更新文档）不得改写状态栏。
+      if (seq === textureSyncSeq && !texturesDisposed) {
+        writeTextureLive(`纹理失败 ${total}/${total}`, 'failed', LOG_LEVEL.ERROR)
+      }
     } finally {
+      // 耗时登记（#399 步骤 6）：total 是白模期墙钟，decode/bind 是它的两段拆分。
+      perfMark(`texture-sync:${seq}:end`)
+      perfMeasure('texture-sync:total', `texture-sync:${seq}:start`, `texture-sync:${seq}:end`)
+      perfMeasure('texture-sync:decode', `texture-sync:${seq}:start`, `texture-sync:${seq}:decoded`)
+      perfMeasure('texture-sync:bind', `texture-sync:${seq}:decoded`, `texture-sync:${seq}:bound`)
       if (inFlightTextureIdentity === identity) inFlightTextureIdentity = null
     }
   }
