@@ -39,6 +39,8 @@ import { assembleKernelDocument } from '@/composition/kernelAssembly'
 import { captureFidelityFieldMap } from '@/adapters/fidelityCapture'
 import { plainRootOf } from '@/adapters/plainRoot'
 import { createDocument, withContent, withDocumentContent } from '@/domain/document'
+import type { Document } from '@/domain/document'
+import type { KernelAssemblyFace } from '@/runtime/kernelSession'
 
 /** 装配诊断/统计要写进去的日志面（与 `Context.log` 同形的最小投影）。 */
 export interface LoadLogPort {
@@ -300,4 +302,35 @@ export function adoptLoadedDocument(
     contentCells: value.contentStats.contentCells,
   })
   return true
+}
+
+/**
+ * **从已在内核里的文档重建装配面**（打开工程路径；文件加载路径由 {@link adoptLoadedDocument} 直接给）。
+ *
+ * ## 为什么需要它（M5-2 回归修复）
+ *
+ * 装配面（`frameObjects`：帧下标 → 内核对象 id）是**装配期才知道**的事实。文件加载路径
+ * 在同一批里由装配产物给出（见上方 `setAssemblyFace`）；而**工程文件**存的是
+ * 已经装配好的内核文档（`scene` 含 `blockGrid` 载荷 + `content`），不含装配面。
+ * `adoptProject` 只 `adoptDocument` ⇒ 装配面缺席 ⇒ `Context#kernelRenderSourceFace`
+ * 返回 `null`（画面不挂载、UI 显示 No scene loaded）。
+ *
+ * ## 口径 = 投影层的既有缺省（不是新约定）
+ *
+ * `composition/kernelProjection#projectKernelDocument` / `projectKernelGrids` 在
+ * `frameObjectIds` 缺省时的取法**逐字相同**：`scene.order` 里 `type === 'block'`
+ * 的对象顺序。故这里不是"再造一条回落"，而是把**投影本来就用的那条推导**在
+ * 装配面缺席时补上（打开工程的文档已经装配完成，推导与产物同义）。
+ *
+ * @returns 装配面；`multiblock` 恒 `null` —— 工程格式只携带声明（`content.multiblock`），
+ *   不携带内层 body 承运（`MultiblockBody`），故不伪造类型化投影面。
+ */
+export function assemblyFaceOfDocument(doc: Document): KernelAssemblyFace {
+  const frameObjects: string[] = []
+  for (const objectId of doc.scene.order) {
+    const obj = doc.scene.objects[objectId]
+    if (obj === undefined || obj.type !== 'block') continue
+    frameObjects.push(objectId)
+  }
+  return Object.freeze({ frameObjects: Object.freeze(frameObjects), multiblock: null })
 }

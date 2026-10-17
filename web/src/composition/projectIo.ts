@@ -49,6 +49,7 @@ import {
   type DecodedProject,
   type ProjectFile,
 } from '@/adapters/projectFile'
+import { assemblyFaceOfDocument } from '@/composition/documentLoad'
 import { projectToRuntimeDocument } from '@/composition/kernelProjection'
 import { projectAnnotationsToLegacy } from '@/runtime/annotationRead'
 
@@ -148,6 +149,24 @@ export function adoptProject(host: ProjectHost, decoded: DecodedProject): Result
   kernel.seekFrame(0)
   // ② 内核权威：`restoreProject` 同时定了内容身份与保存基线（重开必须**干净**）。
   kernel.adoptDocument(doc, doc.content)
+  // ②b 装配面：工程存的是**已装配**的内核文档（scene 含 blockGrid），缺的只是
+  // 「帧下标 → 对象 id」映射。用投影层**同一缺省口径**（`scene.order` 的 block 对象序）
+  // 重建它 —— 否则 `Context#kernelRenderSourceFace` 返回 null ⇒ 视口不挂载
+  // （M5-2 删除该读面的旧回落后暴露：`kernel-save-reopen` 等三 spec 全红）。
+  //
+  // 同时**显式清掉**上一份文档的 body 承运：工程格式不携带 `MultiblockBody`，
+  // 留着旧的就是串档（`markUnloaded` 才清，而本路径是先 setDocument 再 adoptDocument）。
+  kernel.setMultiblockBody(null)
+  kernel.setAssemblyFace(assemblyFaceOfDocument(doc))
+  // ②b 装配面：工程存的是**已装配**的内核文档（scene 含 blockGrid），缺的只是
+  // 「帧下标 → 对象 id」映射。用投影层**同一缺省口径**（`scene.order` 的 block 对象序）
+  // 重建它 —— 否则 `Context#kernelRenderSourceFace` 返回 null ⇒ 视口不挂载
+  // （M5-2 删除该读面的旧回落分支后暴露：`kernel-save-reopen` 等三 spec 全红）。
+  //
+  // 同时**显式清掉**上一份文档的 body 承运：工程格式不携带 `MultiblockBody`，
+  // 留着旧的就是串档（`markUnloaded` 才清，而本路径是先 setDocument 再 adoptDocument）。
+  kernel.setMultiblockBody(null)
+  kernel.setAssemblyFace(assemblyFaceOfDocument(doc))
   // ③ 可恢复编辑数据（只在有内核入口的字段上做；缺入口的**不伪造**）。
   kernel.seekTime(context.time)
   for (const [channel, value] of Object.entries(context.channelValues)) {
