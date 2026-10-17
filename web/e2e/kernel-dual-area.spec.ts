@@ -204,6 +204,26 @@ test.describe('M4-1 · 双区归属（悬停 / 活动区 / gizmo 各归各区）
 
   test('DA-2 activeAreaId 随指针：点 B 后菜单同款合并命令作用在 B', async ({ page }) => {
     test.setTimeout(300_000)
+    // 判据固定在 desktop-chrome（与 kernel-move-persist MP-1 / kernel-viewport-camera V2 /
+    // kernel-undo-redo P2-4 同族的 desktop-only 口径）。
+    //
+    // ## 为什么在窄视口下**不可能**成立（实测，不是假设）
+    //
+    // mobile-chrome 是 393×727：分割后**每个叶子只有 46/45 px 宽**
+    // （实测 leaf A x=0 w=46、leaf B x=47 w=45），而悬浮工具架 `.wb-toolshelf`
+    // 是 x=4 w=46 h=274 —— **完整覆盖 A 叶子的整条宽度**。于是"点 A 区画面中心"
+    // 那一点（实测 23,354）经 `elementFromPoint` 命中的是 `.wb-toolshelf`
+    // （region `r-toolshelf`），**不是 A 叶子**：叶子根上的
+    // `@pointerdown.capture`（activeAreaId 的唯一写点）根本没被触发 ⇒ activeAreaId
+    // 必然仍是分割时设的 B。
+    //
+    // 这不是产品回归：工具架按用户裁决就是"视口 Area 内的悬浮 Region"（B1），
+    // 在 46px 宽的叶子上它必然盖满；判据需要的"点在本区内"这个前提在窄视口下不成立。
+    // 在 mobile 上放宽成"随便点一下也算"会让判据变成空转 —— 故 skip 而不是降级。
+    test.skip(
+      test.info().project.name !== 'desktop-chrome',
+      'activeAreaId 判据固定在 desktop-chrome（393px 下每区仅 46px 宽，A 区被 46px 宽的工具架完整覆盖，点"画面中心"命中的是 r-toolshelf 而非叶子）',
+    )
     const { a, b } = await openDualArea(page)
 
     // 前提：分割算子把**新** Area（B）设为活动区 —— 于是"点 A"是一次真正的切换。

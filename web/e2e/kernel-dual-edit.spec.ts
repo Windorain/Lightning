@@ -826,6 +826,24 @@ test.describe('M4-2 · 双区编辑同步（一次编辑，另一区看得见）
 
   test('DE-5 暂存不串：A 区拖动未松手期间内核不推进、B 区仍是正式内容；松手后 B 区见新位置', async ({ page }) => {
     test.setTimeout(420_000)
+    // 判据固定在 desktop-chrome（与 P2-4 / V2 / MP-1 同一口径）。
+    //
+    // ## 为什么窄视口下不成立（L3 实测读数，不是假设）
+    //
+    // ① 每区只有 46/45 px 宽（393×727，实测 leaf A w=46、leaf B w=45），
+    //    候选格里有一部分**真实指针打不到**（实测 8 个候选里有 2 个全程未命中），
+    //    可命中的那些其"空白起点 + 位移尺度"也被压缩到几个像素；
+    // ② 更硬的一条：mobile 模拟下**同样的真实拖动不产生内核移动**（M1 P2 已登记为
+    //    "未定位"项，P2-4/V2/MP-1 都因此固定在 desktop-chrome）。实测 8 个候选格 ×
+    //    8 个方向全部 "未改内容"，即内核一次都没有受理 —— 而本判据的全部断言都以
+    //    "拖动真的改了内容"为前提。
+    //
+    // 在 mobile 上放宽"拖动必须真的改内容"会让整条判据变成空转（暂存期读数无对象、
+    // 松手后无差异可断言），故 skip 而不是降级。
+    test.skip(
+      test.info().project.name !== 'desktop-chrome',
+      '暂存/拖动判据固定在 desktop-chrome（窄视口每区仅 46px 宽；mobile 模拟下真实拖动未产生内核移动，M1 P2 已登记，同 P2-4/V2/MP-1）',
+    )
     const doc = innerDocOf(fixturePath())
     const sizeRow = doc.cellGrid[0]!.length
     const { a, b } = await openDualArea(page)
