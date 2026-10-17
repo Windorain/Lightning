@@ -1,5 +1,5 @@
 /**
- * **D2（#289 P10d）· 多方块网格求值节点**的判据。
+ * **D2（#289 P10d）· 多方块求值节点的身份** 与 **M6-1 的生产求值点**判据。
  *
  * ## 本文件证什么
  *
@@ -8,106 +8,109 @@
  * **不是**"通道一变就改写内核文档里的网格"（那会把求值结果写进文档内容，
  * 制造脏文档与幽灵历史 —— 与 #249 禁止的「动画输出反写手动取值」同族）。
  *
- * 故本文件的判据分三组：
+ * ## M6-1：旧的 evaluateMultiblock 已删，判据搬到**生产求值点**上
+ *
+ * 旧 presentation/multiblockEvaluation#evaluateMultiblock（注入式装配端口）与
+ * evaluationNodeDependency 已随 M5_CLOSEOUT 删除 —— 它们在**生产零调用**，
+ * 唯一消费者是本文件与对照测试。生产求值点只有一个：
+ * composition/kernelMultiblockEvaluation#evaluateMultiblockPresentation。
+ * 故本文件的分组变成：
  *
  * | 组 | 判据 | 违反的后果 |
  * |---|---|---|
- * | 纯性 | 同输入 ⇒ 同输出（含身份） | 求值不可缓存、证据不可复现 |
- * | 身份 | 机位**不**进身份；取值/声明/帧**进**身份 | 转视角重算几何（A11 判红）/ 滑杆动了不重算（画面不跟手） |
- * | 失效 | 只有视图投影变化 ⇒ `geometry` 重算数 **0** | G1「改注解不重建几何」判红 |
+ * | 身份 | 机位**不**进身份；取值/声明/帧**进**身份；键序不影响身份 | 转视角重算几何（A11 判红）/ 滑杆动了不重算（画面不跟手） |
+ * | 失败不穿透 | 声明缺陷 ⇒ failed: true + 诊断，**不抛错**、不回落装载期场景 | 画面静默画回旧取值（旧通路复活） |
+ * | 生产接线 | 视口走 kernelRenderViewFromFace；旧入口与旧构造器**不存在** | 第二份求值/构造实现复活 |
  *
- * ## 为什么"机位不进身份"必须单独断言
- *
- * 这是 A11 的实现落点，也是最容易做错的一处：把机位（或任何非读集维度）
- * 计进身份，会让"转一下视角"重算全部方块几何。而身份是**唯一**的缓存键，
- * 故这条断言直接等价于 A11。
+ * A11 的"节点只读声明"（target: geometry / inputs: []）由
+ * application/__tests__/evaluationInvalidation.test.ts 在**生产**节点形状上把守
+ * —— 本文件不再为已删的 evaluationNodeDependency 保留一份"只能测死代码"的判据。
  */
 
 import { describe, expect, it } from 'vitest'
 import {
-  evaluateMultiblock,
   evaluationIdentityOf,
-  evaluationNodeDependency,
-  type GridAssembler,
   type MultiblockSelectionInput,
 } from '@/presentation/multiblockEvaluation'
-import { computeInvalidation, NO_DIGESTS, recomputeCount, type NodeDependency } from '@/presentation/invalidationPlan'
-import { TIME_ZERO, type EvaluationKey } from '@/presentation/evaluationKey'
+import * as kernelRenderViewModule from '@/composition/kernelRenderView'
+import * as evaluationModule from '@/presentation/multiblockEvaluation'
+import { evaluateMultiblockPresentation } from '@/composition/kernelMultiblockEvaluation'
+import { createParserRegistry } from '@/context/parserRegistry'
+import {
+  V2PlainParser,
+  WorldParser,
+  StructureDataParser,
+  createEnvelopeParser,
+} from '@/context/parsers/builtinParsers'
+import { plainRootOf } from '@/adapters/plainRoot'
+import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
+import { makeAdoptedKernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
 
 import fs from 'node:fs'
 import path from 'node:path'
 
+import ebfFixture from '@/context/__tests__/fixtures/multiblock-ebf-2ch.json'
+
 const SRC = path.join(process.cwd(), 'src')
 
-/** 读源码并归一化行尾（铁律 6）。 */
+/** 读源码并归一化行尾（铁律 6：CRLF 树上断言必须与工作树行尾无关）。 */
 function readSource(rel: string): string {
   return fs.readFileSync(path.join(SRC, rel), 'utf8').replace(/\r\n/g, '\n')
 }
 
-/** 列出全部生产文件（排除 `__tests__`）。 */
-function listProductionFiles(): string[] {
-  const out: string[] = []
-  const walk = (dir: string): void => {
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, ent.name)
-      if (ent.isDirectory()) {
-        if (ent.name === '__tests__' || ent.name === 'node_modules') continue
-        walk(full)
-      } else if (/\.(ts|vue)$/.test(ent.name)) {
-        out.push(path.relative(SRC, full).replace(/\\/g, '/'))
-      }
-    }
-  }
-  walk(SRC)
-  return out
+/**
+ * 剥注释（**行级**词法）：丢掉整行注释（双斜杠行或块注释的星号行）。
+ *
+ * 本文件只需要"注释里的名字不算调用"这一条区分力，行级剥离足够且**没有正则复杂度**；
+ * 更完整的词法剥离由 application/__tests__/retirementRegistry.test.ts 的
+ * stripNonCode 承担（那里是判据本尊）。
+ */
+function stripCommentLines(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => {
+      const t = line.trimStart()
+      return !(t.startsWith('//') || t.startsWith('*') || t.startsWith('/*'))
+    })
+    .join('\n')
 }
-
-
-/** 一个确定的装配端口：把取值编码进"网格"（使"取值变了网格变了"可断言）。 */
-const deterministicAssembler: GridAssembler = (sel) => ({
-  grid: { cells: `${sel.totalTier}:${sel.runstate}:${JSON.stringify(sel.values)}` },
-})
 
 const SEL_A: MultiblockSelectionInput = { totalTier: 1, values: { height: 0 }, runstate: 'idle' }
 const SEL_B: MultiblockSelectionInput = { totalTier: 2, values: { height: 1 }, runstate: 'idle' }
 
-function inputOf(over: Partial<Parameters<typeof evaluateMultiblock>[0]> = {}) {
+function identityInput(over: Record<string, unknown> = {}) {
   return {
     sceneId: 'scene-1',
     declarationContent: { id: 'mb-1', channels: ['height'] },
     selection: SEL_A,
     frameIndex: 0,
-    assemble: deterministicAssembler,
     ...over,
   }
 }
 
-describe('D2 · 求值节点：纯性与身份', () => {
-  it('同输入 ⇒ 同输出（含身份）—— 可缓存、可复现', () => {
-    const a = evaluateMultiblock(inputOf())
-    const b = evaluateMultiblock(inputOf())
-    expect(a.identity).toBe(b.identity)
-    expect(a.grid).toEqual(b.grid)
-    expect(a.declared).toBe(true)
+describe('D2 · 求值身份：纯性与读集', () => {
+  it('同输入 ⇒ 同身份 —— 可缓存、可复现', () => {
+    expect(evaluationIdentityOf(identityInput())).toBe(evaluationIdentityOf(identityInput()))
   })
 
   it('**取值变化 ⇒ 身份必变**（否则滑杆动了不重算 —— 画面不跟手）', () => {
-    const a = evaluateMultiblock(inputOf({ selection: SEL_A }))
-    const b = evaluateMultiblock(inputOf({ selection: SEL_B }))
-    expect(a.identity).not.toBe(b.identity)
-    expect(a.grid).not.toEqual(b.grid)
+    expect(evaluationIdentityOf(identityInput({ selection: SEL_A }))).not.toBe(
+      evaluationIdentityOf(identityInput({ selection: SEL_B })),
+    )
   })
 
   it('**声明内容变化 ⇒ 身份必变**', () => {
-    const a = evaluateMultiblock(inputOf())
-    const b = evaluateMultiblock(inputOf({ declarationContent: { id: 'mb-1', channels: ['height', 'glass'] } }))
-    expect(a.identity).not.toBe(b.identity)
+    expect(evaluationIdentityOf(identityInput())).not.toBe(
+      evaluationIdentityOf(
+        identityInput({ declarationContent: { id: 'mb-1', channels: ['height', 'glass'] } }),
+      ),
+    )
   })
 
   it('**帧下标变化 ⇒ 身份必变**（它决定注入哪一帧）', () => {
-    const a = evaluateMultiblock(inputOf({ frameIndex: 0 }))
-    const b = evaluateMultiblock(inputOf({ frameIndex: 3 }))
-    expect(a.identity).not.toBe(b.identity)
+    expect(evaluationIdentityOf(identityInput({ frameIndex: 0 }))).not.toBe(
+      evaluationIdentityOf(identityInput({ frameIndex: 3 })),
+    )
   })
 
   it('**A11 负对照：机位不参与身份** —— 身份函数根本不接受机位参数', () => {
@@ -115,146 +118,150 @@ describe('D2 · 求值节点：纯性与身份', () => {
     //  ① 身份函数的入参里没有机位/选择/布局（结构上不可能受影响）；
     //  ② 同一个 (声明, 取值, 帧) 反复求值恒得同一身份。
     // 这条断言直接等价于 A11「机位变化 ⇒ 方块几何重建数 0」。
-    const id = evaluationIdentityOf({
-      sceneId: 'scene-1',
-      declarationContent: { id: 'mb-1' },
-      selection: SEL_A,
-      frameIndex: 0,
-    })
+    const id = evaluationIdentityOf(identityInput())
     for (let i = 0; i < 5; i++) {
-      expect(
-        evaluationIdentityOf({ sceneId: 'scene-1', declarationContent: { id: 'mb-1' }, selection: SEL_A, frameIndex: 0 }),
-      ).toBe(id)
+      expect(evaluationIdentityOf(identityInput())).toBe(id)
     }
     // 且身份函数的形参名里不含机位族词汇（防"偷偷加一个参数"）
     const src = evaluationIdentityOf.toString()
     for (const forbidden of ['camera', 'viewProjection', 'localDisplay', 'yaw', 'elevation']) {
-      expect(src.includes(forbidden), `身份函数不得读 ${forbidden}（那会让转视角重算几何）`).toBe(false)
+      expect(src.includes(forbidden), '身份函数不得读机位族参数（那会让转视角重算几何）').toBe(false)
     }
   })
 
   it('取值键序不影响身份（同一取值两种枚举顺序 ⇒ 同身份）', () => {
-    const a = evaluateMultiblock(inputOf({ selection: { totalTier: 1, values: { height: 0, glass: 0 }, runstate: 'idle' } }))
-    const b = evaluateMultiblock(inputOf({ selection: { totalTier: 1, values: { glass: 0, height: 0 }, runstate: 'idle' } }))
-    expect(a.identity, '集合枚举顺序不构成内容差异').toBe(b.identity)
-  })
-})
-
-describe('D2 · 求值节点：装配失败不穿透（保留上次可渲染结果）', () => {
-  it('装配端口返回 `null` ⇒ `grid: null` + 提示，**不抛错**', () => {
-    const r = evaluateMultiblock(inputOf({ assemble: () => null }))
-    expect(r.grid).toBeNull()
-    expect(r.declared).toBe(false)
-    expect(r.notices.length, '必须显式报告"装配不出"').toBeGreaterThan(0)
-  })
-
-  it('装配端口**抛错** ⇒ 同样捕获（旧实现同取舍：异常不穿透到 UI）', () => {
-    const r = evaluateMultiblock(
-      inputOf({
-        assemble: () => {
-          throw new Error('声明缺陷')
-        },
-      }),
+    const a = evaluationIdentityOf(
+      identityInput({ selection: { totalTier: 1, values: { height: 0, glass: 0 }, runstate: 'idle' } }),
     )
-    expect(r.grid).toBeNull()
-    expect(r.notices.join('')).toContain('装配失败')
-  })
-
-  it('身份在装配失败时**仍**由输入派生（调用方据此判断"要不要重试"）', () => {
-    const ok = evaluateMultiblock(inputOf())
-    const bad = evaluateMultiblock(inputOf({ assemble: () => null }))
-    expect(bad.identity, '身份只由输入决定，不由装配成功与否决定').toBe(ok.identity)
+    const b = evaluationIdentityOf(
+      identityInput({ selection: { totalTier: 1, values: { glass: 0, height: 0 }, runstate: 'idle' } }),
+    )
+    expect(a, '集合枚举顺序不构成内容差异').toBe(b)
   })
 })
 
-describe('D2 · 失效：声明该节点只读什么（G1/A11 的落点）', () => {
-  const node: NodeDependency = evaluationNodeDependency({
-    nodeId: 'mb-grid',
-    declarationMembers: ['ch:height', 'ch:glass'],
-    identity: 'e:abc',
+// ─────────────────────────────────────────────────────────────────────────────
+// 生产求值点（唯一）：evaluateMultiblockPresentation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 生产链宿主（真 Context + 真 KernelSession；输入全部来自生产解析 + 生产装载）。 */
+async function makeHost() {
+  const registry = createParserRegistry()
+  registry.register(V2PlainParser)
+  registry.register(createEnvelopeParser(registry))
+  registry.register(WorldParser)
+  registry.register(StructureDataParser)
+  const raw = ebfFixture as unknown as Record<string, unknown>
+  const parsed = await registry.detectAndParse(raw)
+  if (!parsed.document) throw new Error('夹具解析失败')
+  const plainRoot = plainRootOf((await readEnvelopeLayers(raw as never)).plain as Record<string, unknown>)
+  return makeAdoptedKernelReadHost(parsed.document as never, plainRoot)
+}
+
+describe('M6-1 · 生产求值点：装配失败不穿透（保留上次可渲染结果）', () => {
+  it('声明缺陷（scenes 清空）⇒ failed: true + 诊断 + assembly: null，**不抛错**', async () => {
+    const host = await makeHost()
+    try {
+      const doc = host.session!.document()!
+      const body = host.session!.multiblockBodyOf()!
+      const face = host.session!.assemblyFaceOf()!
+      const corruptBody = { declaration: { ...body.declaration, scenes: [] }, sceneGridEvidence: [] }
+      const out = evaluateMultiblockPresentation({
+        scene: doc.scene,
+        content: doc.content,
+        frameObjects: face.frameObjects,
+        multiblockDeclaration: (face.multiblock ?? null) as never,
+        body: corruptBody as never,
+        selection: { totalTier: 1, values: {}, runstate: 'idle' },
+        frameIndex: 0,
+      })
+      expect(out.failed, '装配不出 ⇒ 必须显式失败（不得静默回落装载期场景）').toBe(true)
+      expect(out.assembly, '失败时 assembly 必须为 null（消费方据此保留上一次结果）').toBeNull()
+      expect(out.diagnostics.length, '失败必须带可显示诊断').toBeGreaterThan(0)
+      expect(out.diagnostics.join(''), '诊断必须说出"保留上一次可渲染结果"').toContain('保留上一次可渲染结果')
+      expect(out.identity, '身份仍由输入派生（调用方据此判断要不要重试）').toMatch(/^e:/)
+    } finally {
+      host.dispose()
+    }
   })
 
-  it('节点声明 `target: geometry` 且 **`inputs` 为空**（尤其不含 `documentVersion`）', () => {
-    expect(node.target, '它产出几何 ⇒ A11 读 recomputeCounts.geometry').toBe('geometry')
-    expect(node.inputs, '不得声明任何求值键维度').toEqual([])
-    // 这条是 G1 的关键：若声明 `documentVersion`，改一个注解文字就会让网格重算。
-    expect(node.inputs.includes('documentVersion' as never), 'G1：改注解不得重建方块几何').toBe(false)
+  it('身份在装配失败时**仍**与成功时相同（身份只由输入决定，不由装配成功与否决定）', async () => {
+    const host = await makeHost()
+    try {
+      const doc = host.session!.document()!
+      const body = host.session!.multiblockBodyOf()!
+      const face = host.session!.assemblyFaceOf()!
+      const base = {
+        scene: doc.scene,
+        content: doc.content,
+        frameObjects: face.frameObjects,
+        multiblockDeclaration: (face.multiblock ?? null) as never,
+        selection: { totalTier: 1, values: {}, runstate: 'idle' },
+        frameIndex: 0,
+      }
+      const ok = evaluateMultiblockPresentation({ ...base, body })
+      const bad = evaluateMultiblockPresentation({
+        ...base,
+        body: { declaration: { ...body.declaration, scenes: [] }, sceneGridEvidence: [] } as never,
+      })
+      expect(ok.failed).toBe(false)
+      expect(bad.identity, '身份 = 读集摘要，与装配成败无关').toBe(ok.identity)
+    } finally {
+      host.dispose()
+    }
   })
 
-  it('**只有视图投影变化 ⇒ geometry 重算数 0**（A11 主判据）', () => {
-    const keyA: EvaluationKey = { documentVersion: 1, scene: 's1', time: TIME_ZERO, parameterVersion: 0, contentResourceVersions: {} }
-    const keyB: EvaluationKey = { ...keyA, viewProjection: { camera: 'c2', localDisplay: 'all' } }
-    const plan = computeInvalidation(keyA, keyB, [node], NO_DIGESTS)
-    expect(recomputeCount(plan, 'geometry'), 'A11：机位变化 ⇒ 方块几何重建数为 0').toBe(0)
-    expect(plan.viewProjectionChanged, '前提：确实只有投影变了').toBe(true)
-  })
-
-  it('**声明内容摘要变化 ⇒ geometry 重算 1**（反空洞真：上一条不是恒真）', () => {
-    const keyA: EvaluationKey = { documentVersion: 1, scene: 's1', time: TIME_ZERO, parameterVersion: 0, contentResourceVersions: {} }
-    const changed = evaluationNodeDependency({ nodeId: 'mb-grid', declarationMembers: ['ch:height', 'ch:glass'], identity: 'e:CHANGED' })
-    const plan = computeInvalidation(keyA, keyA, [changed], {
-      collections: { 'mb-grid:declaration': 'm:0:2' },
-      nodes: { 'mb-grid': 'e:abc' },
-    })
-    expect(recomputeCount(plan, 'geometry'), '内容摘要变了 ⇒ 必须重算').toBe(1)
-  })
-
-  it('内容与成员都没变 ⇒ 复用（`no-input-changed`）', () => {
-    const keyA: EvaluationKey = { documentVersion: 1, scene: 's1', time: TIME_ZERO, parameterVersion: 0, contentResourceVersions: {} }
-    const plan = computeInvalidation(keyA, keyA, [node], {
-      collections: { 'mb-grid:declaration': node.collections![0]!.membersDigest },
-      nodes: { 'mb-grid': 'e:abc' },
-    })
-    expect(recomputeCount(plan, 'geometry'), '什么都没变 ⇒ 复用').toBe(0)
-    expect(plan.verdicts[0]!.action).toBe('reuse')
+  it('帧为主文档（body === null）⇒ 原样返回内核场景、身份为空串、不算失败', async () => {
+    const host = await makeHost()
+    try {
+      const doc = host.session!.document()!
+      const face = host.session!.assemblyFaceOf()!
+      const out = evaluateMultiblockPresentation({
+        scene: doc.scene,
+        content: doc.content,
+        frameObjects: face.frameObjects,
+        multiblockDeclaration: null,
+        body: null,
+        selection: { totalTier: 1, values: {}, runstate: 'idle' },
+        frameIndex: 0,
+      })
+      expect(out.failed).toBe(false)
+      expect(out.assembly).toBeNull()
+      expect(out.scene, '帧为主 ⇒ 求值场景就是内核场景（行为零变化）').toBe(doc.scene)
+      expect(out.identity, '帧为主身份为空串（与切换前逐字相同）').toBe('')
+    } finally {
+      host.dispose()
+    }
   })
 })
 
-describe('D2 · 生产接线：渲染视图走内核求值（不是 legacy 构造器）', () => {
-  it('`useKernelChannels` 的渲染文档来自**内核面协调入口**，且**不再**调 legacy 构造器', () => {
-    // R2/S3 换了入口名：`kernelRenderViewOf`（形参是旧格式 `RuntimeDocument`）
-    // ⇒ `kernelRenderViewFromFace`（形参是 body 承运 + 会话的装配事实，**无** `RuntimeDocument`）。
-    // 本条守的语义**不变**（"视口确实经协调入口拿渲染视图"），只是入口换名：
-    //  · 旧入口仍在本模块内，服务剩余暂存路径（退出条件 = 旧路径最后一个调用者消失）；
-    //  · 新入口坐标仍在协调层（`composition/kernelRenderView.ts`），未上移到视口。
-    // ⚠️ 登记为**待加强项**（本批不做）：源码文本断言只能证"调用了某个名字"，
-    // 证不了"调用的语义对" —— 语义由本文件上面那些求值节点判据与 R2/S3 的行为判据承担。
-    const src = readSource('shared/viewport/useKernelChannels.ts')
-      .replace(/\/\*[\s\S]*?\*\//g, ' ')
-      .replace(/\/\/[^\n]*/g, ' ')
+describe('M6-1 · 生产接线：视口走内核面渲染视图（旧入口已删）', () => {
+  it('useKernelChannels 的渲染文档来自**内核面协调入口**，且**不再**调 legacy 构造器', () => {
+    const src = stripCommentLines(readSource('shared/viewport/useKernelChannels.ts'))
     expect(src, '渲染视图必须走内核面协调入口').toContain('kernelRenderViewFromFace(')
-    expect(src, '不得再调 legacy 构造器（那是切换前的参照实现，生产零调用点）').not.toContain('buildMultiblockRenderView(')
+    expect(src, '不得再调 legacy 构造器（已随 M6-1 删除）').not.toContain('buildMultiblockRenderView(')
+    expect(src, '不得再调旧文档求值入口（已随 M6-1 删除）').not.toContain('kernelRenderViewOf(')
   })
 
-  it('`kernelRenderViewOf` 确实走内核装配 + 投影（`renderView` 模式）', () => {
-    const src = readSource('composition/kernelRenderView.ts')
-      .replace(/\/\*[\s\S]*?\*\//g, ' ')
-      .replace(/\/\/[^\n]*/g, ' ')
-    expect(src, '必须走内核装配').toContain('assembleKernelDocument(')
-    expect(src, '必须以 renderView 模式投影（网格注入帧）').toContain('renderView:')
-    expect(src, '不得把求值结果写回文档内容').not.toMatch(/replaceDoc|adoptDocument/)
+  it('旧入口在生产导出里**不存在**（防回流：删掉的不是调用、是符号本身）', () => {
+    expect('kernelRenderViewOf' in kernelRenderViewModule, 'kernelRenderViewOf 必须已删除').toBe(false)
+    expect('evaluateMultiblock' in evaluationModule, 'evaluateMultiblock 必须已删除').toBe(false)
+    expect('evaluationNodeDependency' in evaluationModule, 'evaluationNodeDependency 必须已删除').toBe(false)
+    // 反空洞真：两个模块仍导出它们该有的东西（不是"整个模块被删了"）。
+    expect('kernelRenderViewFromFace' in kernelRenderViewModule).toBe(true)
+    expect('evaluationIdentityOf' in evaluationModule).toBe(true)
   })
 
-  it('**负对照**：legacy 构造器仍存在且仅被对照测试消费（保留参照，不是"半成品"）', () => {
-    // 生产零调用点，而对照测试必须能用它 —— 两件事都要成立。
-    //
-    // ⚠️ 必须**剥注释与字符串**：本仓散文大量引用旧函数名（说明"替代了什么"），
-    // 那是文档价值而非调用。与 `boundary-scan.test.ts` 的 `codeOnly` 同一把尺子
-    // （"提到某函数名" ≠ "调用它"；不剥会让判据因自己的说明而恒红）。
-    const codeOnly = (rel: string): string =>
-      readSource(rel)
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/\/\/[^\n]*/g, ' ')
-        .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
-        .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
-        .replace(/`(?:[^`\\]|\\.)*`/g, '``')
-    const prod = listProductionFiles().filter((rel) => rel !== 'shared/viewport/multiblockChannelUi.ts')
-    const callers = prod.filter((rel) => codeOnly(rel).includes('buildMultiblockRenderView('))
-    expect(callers, `生产不得再调 legacy 构造器，实测：${callers.join(', ')}`).toEqual([])
-    // 定义处本身仍在（否则"参照"这个说法不成立）
-    expect(codeOnly('shared/viewport/multiblockChannelUi.ts'), '参照实现必须仍存在').toContain('buildMultiblockRenderView(')
-    // 对照测试必须仍用它（否则对齐失去意义）
-    const parity = readSource('composition/__tests__/renderCutoverParity.test.ts')
-    expect(parity, '对照测试必须仍用 legacy 构造器作参照').toContain('buildMultiblockRenderView(')
+  it('**负对照**：源码文本断言不是恒真（注释里的名字不算，真调用必被抓住）', () => {
+    const prod = readSource('shared/viewport/useKernelChannels.ts')
+    expect(stripCommentLines(prod)).not.toContain('kernelRenderViewOf(')
+    expect(
+      stripCommentLines(prod + '\nconst probe = kernelRenderViewOf({})'),
+      '注入一行真调用必须被抓住',
+    ).toContain('kernelRenderViewOf(')
+    expect(
+      stripCommentLines(prod + '\n// kernelRenderViewOf({})'),
+      '注释里的名字不算调用（否则判据会被自己的说明判红）',
+    ).not.toContain('kernelRenderViewOf(')
   })
 })

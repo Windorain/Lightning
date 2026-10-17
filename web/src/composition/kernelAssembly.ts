@@ -164,7 +164,7 @@ export type AssemblyDiagnosticCode =
   | 'unsupportedAnnotationShape'
   /** 纹理条目没有可用的内嵌字节，且没有 locator ⇒ 无法取回（显式，不是"空纹理"）。 */
   | 'resourceWithoutPayloadOrLocator'
-  /** 多方块装配失败（保留上一次可渲染结果；见 `assembleForSelection`）。 */
+  /** 多方块装配失败（保留上一次可渲染结果；见 `kernelMultiblockEvaluation#evaluateMultiblockPresentation`）。 */
   | 'multiblockAssemblyFailed'
   /** 网格超过本装配层的对象上限（防止一份异常文件造出百万对象）。 */
   | 'gridObjectLimitExceeded'
@@ -1962,9 +1962,9 @@ function legacyPlainRoot(doc: RuntimeDocument): Readonly<Record<string, unknown>
 /**
  * 装配一个多方块选择（**不抛**：装配异常返回 `null`，由调用方落诊断）。
  *
- * 与 `shared/viewport/multiblockChannelUi#assembleForSelection` 的分工：
- * 那个是**UI 包装**（做"未声明组合回落 + 落提示"的展示决策，返回面板模型），
- * 本函数只要**装配结果**（网格），且**不**吞掉"未声明组合"这件事的语义 ——
+ * 与面板侧（`shared/viewport/multiblockChannelUi#channelPanelModelOf` 的装配报告）的分工：
+ * 那个负责"未声明组合 + 落提示"的**展示**决策，本函数只要**装配结果**（网格），
+ * 且**不**吞掉"未声明组合"这件事的语义 ——
  * 它按 §5.2 推论 3「只夹取不拒绝」交给 `assembleSelection` 处理，
  * 那里会把未声明组合回落到最近的已声明变体并落 `report.warnings`。
  *

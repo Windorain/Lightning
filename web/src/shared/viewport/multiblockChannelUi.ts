@@ -2,15 +2,17 @@
  * 「通道」面板的**纯逻辑**（T2.4/T2.5）—— 无 Vue、无 DOM、无 ctx。
  *
  * 分工：
- *  - 本模块：文件声明 → 滑杆规格 / 面板模型；旧文档路径的装配包装（见文件末）。
- *  - `useKernelChannels.ts`：把本模块包成响应式状态（Vue），装配走内核面
+ *  - 本模块：文件声明 → 滑杆规格 / 面板模型（纯派生）。
+ *  - `useKernelChannels.ts`：把本模块包成响应式状态（Vue），求值走内核面
  *    （`evaluateMultiblockPresentation` 的唯一求值点）。
  *  - `MultiblockChannelPanel.vue`：纯展示 + 事件（props/emits）。
  *
- * ⚠️ M5-5：旧 `useMultiblockChannels.ts`（每视口暂存）已在 P6 删除；本文件里
- * 吃 `RuntimeDocument` 的三个入口（`assembleForSelection`/`buildChannelPanelModel`/
- * `buildMultiblockRenderView`）**生产零调用**，仅作切换前后对照判据的参照，
- * 登记在 `application/__tests__/retirementRegistry.test.ts` 的 `M5_CLOSEOUT`（owner = M6）。
+ * ⚠️ **M6-1**：本文件原有的三个吃 `RuntimeDocument` 的旧文档入口
+ * （`assembleForSelection`/`buildChannelPanelModel`/`buildMultiblockRenderView`）
+ * **已删除** —— 它们生产零调用、只被切换前后的对照/面板判据消费；本批把那些判据
+ * 改为「生产派生（内核读面 + 唯一求值点）+ 冻结夹具/指纹」后同批退场
+ * （登记见 `application/__tests__/retirementRegistry.test.ts` 的 `M5_CLOSEOUT`）。
+ * 面板模型的唯一派生入口是 {@link channelPanelModelOf}。
  *
  * **忠实展示文件声明**（计划 T2.4 硬约束）：滑杆条数 = 声明条数（`slider === true`，`hatch` 由解析器排除）、
  * 标签取 `name`（呈现名，来自文件）、上限取 `channel.domain.hi`、`0` 显示 `Not set`。
@@ -23,21 +25,10 @@
  * 于是**解析形状**（`context/parsers/multiblockDocument`，元素多带 `raw`）与
  * **内核域声明**（`domain/multiblockDocument#MultiblockDeclaration`，元素无 `raw`）
  * 都能喂——消费者适应内核，而不是让内核去兼容旧解析形状。
- * 旧文档版入口（`assembleForSelection`/`buildChannelPanelModel`/`buildMultiblockRenderView`）
- * 仍吃 `RuntimeDocument`，注释里各写了**退出条件**。
+ * ⇒ 本模块**不再** import 任何旧格式文档类型（`RuntimeDocument`/`AssemblyResult` 等已随旧入口删除）。
  */
-import {
-  RuntimeDocument,
-  RuntimeFrame,
-  multiblockVariantKey,
-} from '@/context/runtimeDocument'
-import {
-  assembleSelection,
-  type AssemblyResult,
-  type ClampRecord,
-  type MultiblockInnerDocument,
-} from '@/context/multiblock'
-import { formatUnknownError } from '@/util/formatUnknownError'
+import { multiblockVariantKey } from '@/context/runtimeDocument'
+import type { ClampRecord } from '@/context/multiblock'
 // M5-2：选择投影下沉到 domain（面板 / 装载装配 / 画面求值**同吃一处**）。
 // 本模块不再自己实现，只把同一批具名符号转出给既有调用方（签名/语义不变）。
 import {
@@ -87,7 +78,7 @@ export interface ChannelSliderSpec {
   hi: number
 }
 
-/** 面板一次性输入（由 `buildChannelPanelModel` 组装）。 */
+/** 面板一次性输入（由 `channelPanelModelOf` 组装）。 */
 export interface MultiblockChannelPanelModel {
   displayName: string
   tier: number
@@ -120,35 +111,8 @@ export interface MultiblockChannelPanelModel {
 // 已下沉到 `domain/multiblockSelection`（面板 / 装载装配 / 画面求值同一实现），
 // 本文件在文件头以 `export type` / `export` 转出，签名与语义不变。
 
-/** 装配结论：结果 + 是否命中声明组合 + 提示。 */
-export interface MultiblockAssemblyOutcome {
-  result: AssemblyResult | null
-  variantKey: string
-  /** 变体键是否命中 `decl.variantByKey`（未命中时由 T2.2 回落并落提示） */
-  declared: boolean
-  notices: string[]
-}
-
 // ---------------------------------------------------------------------------
-// 声明 → 滑杆
-// ---------------------------------------------------------------------------
-
-/** 每通道一条滑杆的规格（`slider === false` 的 `hatch` 已被解析器排除，此处不重复判断语义）。 */
-export function channelSliderSpecs(decl: MultiblockDeclarationFacts): ChannelSliderSpec[] {
-  return decl.channels
-    .filter((c) => c.slider)
-    .map((c: MultiblockChannelFacts) => ({
-      key: c.key,
-      name: c.name,
-      kind: c.kind,
-      min: c.min,
-      max: c.max,
-      hi: c.domain.hi,
-    }))
-}
-
-// ---------------------------------------------------------------------------
-// 当前取值 → 装配
+// 装配提示（唯一构造点）
 // ---------------------------------------------------------------------------
 
 function formatClampText(c: ClampRecord): string {
@@ -161,14 +125,11 @@ function formatClampText(c: ClampRecord): string {
 /**
  * **装配提示的唯一构造点**（R2/S3）：文件软约束 + 未命中声明组合的回落 + 夹取 + 警告。
  *
- * ## 为什么要抽成具名函数（而不是在两个调用点各写一遍）
+ * ## 为什么是具名函数（而不是在调用点各写一遍）
  *
- * 它现在有**两个**调用方，各自吃不同的装配来源：
- *  - 旧文档路径 `assembleForSelection`（`assembleSelection` 的 `AssemblyResult`）；
- *  - 内核面路径 `useKernelChannels`（`assembleMultiblockKernelFace` 的 `report`）。
- *
- * 两处各写一遍 ⇒ "提示文案/顺序"会有第二份判据（而且面板的提示是**可显示的事实**，
- * 顺序也是）。故这里只保留**一个**实现，两个来源都喂它。
+ * 面板的提示是**可显示的事实**，顺序也是 ⇒ 提示文案只能有一份实现。
+ * 生产装配来源是内核面（`assembleMultiblockKernelFace` 的 `report`），
+ * 由 {@link channelPanelModelOf} 喂入。
  *
  * ⚠️ `report === null` = **没有装配结论**（未装配/装配失败），此时只有文件软约束提示 ——
  * 与旧实现"notes 先入表、失败再追加一条"的顺序逐字一致。
@@ -195,49 +156,22 @@ export function assemblyNoticesOf(input: {
   return notices
 }
 
-/**
- * 装配当前取值（**唯一装配入口**，UI 不直接调用 T2.2）。
- *
- * 守卫（计划 T2.4/T2.5 明文）：先用 `multiblockVariantKey` + `decl.variantByKey` 判断组合是否已声明；
- * 未声明时**不拒绝**（契约 §5.2 推论 3：只夹取/回落），落一条提示后交给 `assembleSelection`。
- * 装配异常一律在此捕获（`result: null` + 提示），不得穿透到 UI。
- */
-export function assembleForSelection(
-  doc: RuntimeDocument,
-  state: MultiblockSelectionState,
-): MultiblockAssemblyOutcome {
-  const mb = doc.multiblock
-  if (!mb) return { result: null, variantKey: '', declared: false, notices: [] }
+// ---------------------------------------------------------------------------
+// 声明 → 滑杆
+// ---------------------------------------------------------------------------
 
-  const decl = mb.decl
-  const variantKey = multiblockVariantKey(decl, state.values, state.runstate, state.totalTier)
-  const declared = decl.variantByKey.has(variantKey)
-
-  const inner = doc.multiblockSource as MultiblockInnerDocument | null
-  if (!inner) {
-    const notices = assemblyNoticesOf({ notes: decl.notes, variantKey, declared, report: null })
-    notices.push('文档未携带可装配的内层 body（multiblockSource 为空）')
-    return { result: null, variantKey, declared, notices }
-  }
-
-  try {
-    const result = assembleSelection(inner, {
-      totalTier: state.totalTier,
-      values: { ...state.values },
-      runstate: state.runstate,
-    })
-    // 文件软约束（`notes`）+ 声明回落 + 夹取 + 警告：**唯一**构造点（见 `assemblyNoticesOf`）。
-    return {
-      result,
-      variantKey,
-      declared,
-      notices: assemblyNoticesOf({ notes: decl.notes, variantKey, declared, report: result.report }),
-    }
-  } catch (e) {
-    const notices = assemblyNoticesOf({ notes: decl.notes, variantKey, declared, report: null })
-    notices.push(`装配失败（已保留上一次可渲染结果）：${formatUnknownError(e)}`)
-    return { result: null, variantKey, declared, notices }
-  }
+/** 每通道一条滑杆的规格（`slider === false` 的 `hatch` 已被解析器排除，此处不重复判断语义）。 */
+export function channelSliderSpecs(decl: MultiblockDeclarationFacts): ChannelSliderSpec[] {
+  return decl.channels
+    .filter((c) => c.slider)
+    .map((c: MultiblockChannelFacts) => ({
+      key: c.key,
+      name: c.name,
+      kind: c.kind,
+      min: c.min,
+      max: c.max,
+      hi: c.domain.hi,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +199,7 @@ export interface ChannelPanelOutcome {
 /**
  * **面板模型（声明事实版）**：声明 + 取值 + 装配结论 → 面板一次性输入。
  *
- * 这是两个入口的**唯一实现**；`buildChannelPanelModel`（旧文档版）只是它的适配器。
+ * 这是面板模型的**唯一组装实现**（旧文档版适配器已随 M6-1 删除）。
  */
 export function buildChannelPanelModelOf(
   decl: MultiblockDeclarationFacts,
@@ -336,32 +270,6 @@ export function channelPanelModelOf(
   })
 }
 
-/**
- * 面板模型（**旧文档路径**）。
- *
- * ⚠️ 它现在只做一件事：从旧文档取出声明事实 + 把旧装配结论折成最小面，
- * 然后**委托**给 `buildChannelPanelModelOf`（同一实现 —— 这里不复制任何面板逻辑）。
- *
- * 退出条件（与 `assembleForSelection` 同批）：旧文档路径的最后一个调用者消失时，
- * 本函数与其 `RuntimeDocument` 形参一并删除。今天的调用者只有
- * `useKernelChannels`（**已改吃内核面**，见其 `:266-271`）与两个旧形状的测试。
- */
-export function buildChannelPanelModel(
-  doc: RuntimeDocument,
-  state: MultiblockSelectionState,
-  outcome: MultiblockAssemblyOutcome,
-): MultiblockChannelPanelModel | null {
-  const mb = doc.multiblock
-  if (!mb) return null
-  return buildChannelPanelModelOf(mb.decl, state, {
-    // 文件格式键 `frames` 就是场景清单（见 `adapters/files/multiblockDeclaration#sceneOf`）。
-    sceneCount: doc.frames.length,
-    variantKey: outcome.variantKey,
-    dims: outcome.result ? formatDims(outcome.result.dims) : '',
-    notices: outcome.notices,
-  })
-}
-
 /** `0` = 未设置（契约 §5.2：0 与"不设置"在数据层等价）。 */
 export function formatChannelValue(value: number): string {
   return value === 0 ? 'Not set' : String(value)
@@ -370,69 +278,4 @@ export function formatChannelValue(value: number): string {
 /** `w×h×d`（观测用）。 */
 export function formatDims(dims: { w: number; h: number; d: number }): string {
   return `${dims.w}×${dims.h}×${dims.d}`
-}
-
-/**
- * 用装配产物构造**渲染视图文档**（**切换前的参照实现**；见下方状态说明）。
- *
- * ## ⚠️ 本函数在生产路径上**已退役**（#289 P10d D2）
- *
- * 生产渲染路径现在走 **内核求值**：`composition/kernelRenderView#kernelRenderViewOf`
- * （`assembleKernelDocument` → `projectKernelDocument({ renderView })`）。
- * 实测两条路径**逐三角形一致**（`tier-only` 12 / `ebf-2ch` 12 / `lsc-overlap` 40）。
- *
- * ## 为什么**保留**它（而不是按 #171 立即删除）
- *
- * 它是**切换前后的对照参照**：`composition/__tests__/renderCutoverParity.test.ts` 的
- * "before" 侧必须走**切换前真正吃的那条路**，否则比较的不是"切换前后的渲染输入"
- * 而是"两个不同的东西"（对齐会失去意义）。
- *
- * 这与"半成品替换"的区别是**可判定的**：
- *  - 它的**唯一**消费者是对照测试（生产零调用点）；
- *  - 它的替代物已交付且**逐位一致**（不是"另一个还没接上的东西"）；
- *  - 它的存在使"渲染链切换没有改变画面"这条判据**可复算** —— 删了它就只剩断言、没有参照。
- *
- * ⇒ 归 **D4**（终切批）处置：届时对照判据改为"与冻结的几何指纹比"，
- * 本函数随 `AssemblyResult` 一族一起退场（已登记在 `retirementRegistry` 的
- * `raw-authority-object` 批次内）。
- *
- * ## 原始说明（保留：它是"为什么必须这样做"的理由）
- *
- * 多方块文档的 `frame.grid` 恒为 `null`（设计如此，网格是装配产物），
- * 而渲染路径（`drwMeshPipeline`）只能吃 `doc.serialize()`，对 `format_version:"2.0"` 文档
- * 解析的是**顶层展开（首帧 structure）**——故：把装配出的 `Grid` 放到首帧
- * （同时放到当前帧下标，兼容"按当前帧解析"的实现），顶层即可解析出装配结构。
- *
- * ⚠️ **刻意不传 `multiblock`（也不传 `_extra`）**：`serialize()` 会优先写入 `extra`/多方块节点，
- * 其中的根级 `blockPalette` 是**并集调色板**（下标是并集下标），而首帧 `structure` 的
- * `blockPalette` 是 `_gridToV2` 依据"装配网格里实际出现的方块"**重编号**后的调色板。
- * 两者混用会让 `cellGrid` 指向错误的调色板条目 —— 静默渲染错方块。
- * 不传多方块节点 ⇒ 顶层只有首帧 structure 一份自洽的 `cellGrid + blockPalette`。
- */
-export function buildMultiblockRenderView(
-  doc: RuntimeDocument,
-  result: AssemblyResult | null,
-  frameIndex: number,
-): RuntimeDocument {
-  if (!doc.isMultiblock || !result) return doc
-  const grid = result.grid
-  const current = Math.trunc(frameIndex)
-  const frames = doc.frames.map((f, i) => {
-    if (i !== 0 && i !== current) return f
-    return new RuntimeFrame(f.index, f.label, grid, f.durationMs, f.multiblock)
-  })
-  return new RuntimeDocument({
-    formatVersion: doc.formatVersion,
-    id: doc.id,
-    frames,
-    meta: doc.meta,
-    annotations: doc.annotations,
-    labels: doc.labels,
-    textureBlobs: doc.textureBlobs ?? null,
-    tooltipPalette: doc.tooltipPalette ?? null,
-    cellTooltipGrid: doc.cellTooltipGrid ?? null,
-    materialPalette: doc.materialPalette ?? null,
-    playback: doc.playback ?? null,
-    multiblock: null,
-  })
 }

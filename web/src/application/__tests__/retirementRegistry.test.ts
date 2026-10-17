@@ -77,6 +77,9 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import * as multiblockDomain from '@/domain/multiblock'
+import * as kernelRenderViewModule from '@/composition/kernelRenderView'
+import * as multiblockEvaluationModule from '@/presentation/multiblockEvaluation'
+import * as multiblockChannelUiModule from '@/shared/viewport/multiblockChannelUi'
 
 /**
  * `web/` 根。
@@ -620,71 +623,85 @@ export const M5_CLOSEOUT: readonly M5CloseoutEntry[] = Object.freeze([
     reason: 'PropertyRef → 通道键的反向解析；零消费者',
     exitStage: 'M5-5 已删',
   },
-  // ── 登记保留：通道阶跃轨道的寻址面 ────────────────────────────────────
+  // ── M6-1 删除：通道阶跃轨道的寻址包装 ──────────────────────────────────
+  //
+  // 轨道目标改走**通用属性面**（`domain/identity#propertyRef`）后，这个中间包装只剩
+  // `channelStepTrack` 一个调用方，而它自己也能直接构造同一份引用
+  // ⇒ 同批内联删除（不留"薄包装"这一层）。`channelStepTrack` 保留（它是 #249 §7 要求的
+  // 阶跃轨道证明路径，判据在 `domain/__tests__/multiblockChannelTimeEntry.test.ts`）。
   {
     symbol: 'channelToPropertyRef',
     file: 'web/src/domain/multiblock.ts',
-    status: 'retained',
+    status: 'deleted',
     owner: 'M6',
     reason:
-      'channelStepTrack（#249 §7 要求的"至少一条阶跃通道轨道"证明路径）仍用它做轨道目标；'
-      + '生产调用为零，但删它会把通道阶跃轨道的判据一并废掉',
-    exitStage: 'M6 呈现链收口批：轨道寻址改走通用属性面后随 channelStepTrack 同批处置',
+      '把通道键折成 PropertyRef 的薄包装：唯一调用方 channelStepTrack 已直接走通用属性面'
+      + '（domain/identity#propertyRef），保留它等于保留第二处寻址口径',
+    exitStage: 'M6-1 已删（轨道寻址 = domain/identity#propertyRef，通道阶跃轨道判据不变）',
   },
-  // ── 登记保留：切换前的对照参照（M5-2 遗留，本批核实仍零生产调用）───────
+  // ── M6-1 删除：切换前的对照参照（判据改为「生产派生 + 冻结夹具/指纹」）──────
   //
-  // 这三条是 M5-2 声明的"切换前参照"：生产零调用，只被对照/恒等判据消费。
-  // M5-5 核实它们仍零生产调用；**不删**的理由是删除会把"切换没有改变画面/内容身份"
-  // 这条证据换成一份冻结指纹 —— 那是 M6 呈现链收口批的工作，M5 末尾不新造冻结资产。
+  // M5-2 声明的五条"切换前参照"在生产零调用、只被对照/恒等判据消费。M5-5 把它们
+  // 登记为 retained（owner = M6），退出条件是"对照改为冻结指纹"。M6-1 兑现了那个条件：
+  //
+  // | 判据文件 | 替换形态 |
+  // |---|---|
+  // | composition/__tests__/renderCutoverParity.test.ts | 冻结**几何指纹**（计数/定位键/顶点·UV·色摘要） |
+  // | context/__tests__/multiblockChannelRender.test.ts | 生产链（唯一求值点 + 内核面渲染视图）+ 冻结期望 |
+  // | context/__tests__/multiblockChannelPanel.dom.test.ts | 冻结**面板模型**夹具（生产派生等价性另有一条 anchor） |
+  // | runtime/__tests__/g5RenderLosslessSource.test.ts | 生产装配源的有损/无损对照（不再有 plainRoot 入参） |
+  // | runtime/__tests__/p11dRunstateContentIdentity.test.ts | 同一生产链（求值点 + kernelRenderViewFromFace） |
   {
     symbol: 'kernelRenderViewOf',
     file: 'web/src/composition/kernelRenderView.ts',
-    status: 'retained',
+    status: 'deleted',
     owner: 'M6',
     reason:
-      '旧入口（整份文档重装配 + 投影）是 g5RenderLosslessSource / p11dRunstateContentIdentity '
-      + '的对照参照；生产由 kernelRenderViewFromFace（只投影已求值场景）承担',
-    exitStage: 'M6 呈现链收口批：把对照改为冻结几何/内容身份指纹后同批删除',
+      '旧入口（整份旧文档重装配 + 投影）是 g5RenderLosslessSource / p11dRunstateContentIdentity '
+      + '的对照参照；M6-1 把两条判据改走生产替代（kernelRenderViewFromFace + 唯一求值点）后同批删除',
+    exitStage:
+      'M6-1 已删（渲染视图唯一入口 = kernelRenderViewFromFace；求值唯一入口 = '
+      + 'composition/kernelMultiblockEvaluation#evaluateMultiblockPresentation）',
   },
   {
     symbol: 'evaluateMultiblock',
     file: 'web/src/presentation/multiblockEvaluation.ts',
-    status: 'retained',
+    status: 'deleted',
     owner: 'M6',
     reason:
       '其唯一消费者是 kernelRenderViewOf；生产求值点是 evaluateMultiblockPresentation'
       + '（并带有与生产不同的失效模型，不能当活路径用）',
-    exitStage: 'M6：随 kernelRenderViewOf 同批删除（含 evaluationNodeDependency）',
+    exitStage: 'M6-1 已删（连同它的专属类型与 evaluationNodeDependency：节点依赖不再有第二份）',
   },
   {
     symbol: 'buildMultiblockRenderView',
     file: 'web/src/shared/viewport/multiblockChannelUi.ts',
-    status: 'retained',
+    status: 'deleted',
     owner: 'M6',
     reason:
       'renderCutoverParity 的 "before" 侧必须走切换前真正吃的那条路（否则比较的不是'
       + '切换前后的渲染输入）；生产零调用',
-    exitStage: 'M6：对照改为冻结几何指纹后随旧文档装配簇同批删除',
+    exitStage: 'M6-1 已删（对照 = 冻结几何指纹；指纹即该入口收口前最后一次全绿运行的实测读数）',
   },
   {
     symbol: 'assembleForSelection',
     file: 'web/src/shared/viewport/multiblockChannelUi.ts',
-    status: 'retained',
+    status: 'deleted',
     owner: 'M6',
     reason:
       '旧文档装配包装（未声明组合回落 + 提示）；生产已改吃 assembleMultiblockKernelFace，'
       + '它只剩面板 DOM 判据与切换对照两个测试消费者',
-    exitStage: 'M6：旧文档装配簇退出时同批删除（与 buildMultiblockRenderView 一致）',
+    exitStage: 'M6-1 已删（旧文档装配簇整体退出：判据改走生产链，面板底座改冻结夹具）',
   },
   {
     symbol: 'buildChannelPanelModel',
     file: 'web/src/shared/viewport/multiblockChannelUi.ts',
-    status: 'retained',
+    status: 'deleted',
     owner: 'M6',
     reason:
       '旧文档面板模型适配器（委托 buildChannelPanelModelOf）；生产面板走内核面，'
       + '它只剩 DOM 判据消费',
-    exitStage: 'M6：与 assembleForSelection 同批退出',
+    exitStage: 'M6-1 已删（生产唯一派生 = multiblockChannelUi#channelPanelModelOf；DOM 判据用冻结夹具）',
   },
 ])
 
@@ -694,7 +711,12 @@ export function countCallSitesInCode(code: string, symbol: string): number {
   return (code.match(re) ?? []).length
 }
 
-/** 全树生产代码里某符号的调用位命中（`web/` 相对文件 + 行）。 */
+/**
+ * 全树生产代码里某符号的调用位命中（`web/` 相对文件 + 行）。
+ *
+ * ⚠️ 每调用一次走一遍全树（`web/src` 400+ 文件）；词法剥离本身由
+ * {@link codeOfSource} 按路径记忆（那里已有缓存），故这里不再叠第二层。
+ */
 function productionCallSites(symbol: string): readonly string[] {
   const out: string[] = []
   const walk = (dir: string): void => {
@@ -707,8 +729,7 @@ function productionCallSites(symbol: string): readonly string[] {
       }
       if (!/\.(ts|tsx|vue|mts)$/.test(e.name)) continue
       if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(e.name) || /\.d\.ts$/.test(e.name)) continue
-      const raw = readSourceText(full)
-      const code = codeOfSource(full, raw)
+      const code = codeOfSource(full, readSourceText(full))
       if (countCallSitesInCode(code, symbol) === 0) continue
       for (const line of code.split('\n')) {
         if (countCallSitesInCode(line, symbol) > 0) {
@@ -722,17 +743,41 @@ function productionCallSites(symbol: string): readonly string[] {
   return Object.freeze(out)
 }
 
-describe('M5-5 退役收口：删除零消费者残留 + 保留对照入口（各自有 owner）', () => {
-  it('已删符号在模块导出里**不存在**（防回流）', () => {
+/**
+ * 承载文件的导出面（**按 `file` 逐条取**）—— 已删符号的"不存在"必须在该符号
+ * **自己的模块**上断言。
+ *
+ * ## 为什么不能只看一个模块（M6-1 实测的假绿）
+ *
+ * 原实现固定 `e.symbol in multiblockDomain`。M5-5 的已删符号恰好都长在
+ * `domain/multiblock`，所以它有效；M6-1 新删的五条分别长在 `composition`/
+ * `presentation`/`shared` ⇒ 同一个断言对它们**恒真**（一个别的模块当然没有这个名字），
+ * 于是"防回流"退化成空转。⇒ 按条目自己的 `file` 取模块；未登记的模块**显式判红**
+ * （"没被任何判据覆盖"不许静默通过）。
+ */
+const EXPORT_FACE_OF_FILE: Readonly<Record<string, object>> = Object.freeze({
+  'web/src/domain/multiblock.ts': multiblockDomain,
+  'web/src/composition/kernelRenderView.ts': kernelRenderViewModule,
+  'web/src/presentation/multiblockEvaluation.ts': multiblockEvaluationModule,
+  'web/src/shared/viewport/multiblockChannelUi.ts': multiblockChannelUiModule,
+})
+
+describe('M5 退役收口：删除零消费者残留 + 保留对照入口（各自有 owner）', () => {
+  it('已删符号在**它自己的模块**导出里不存在（防回流）', () => {
     for (const e of M5_CLOSEOUT.filter((x) => x.status === 'deleted')) {
+      const face = EXPORT_FACE_OF_FILE[e.file]
+      expect(face, `${e.symbol}：${e.file} 未被本判据覆盖（必须登记导出面，否则这条断言空转）`).toBeDefined()
       expect(
-        e.symbol in multiblockDomain,
-        `M5-5：${e.symbol} 已删除 —— 回流 = 第二份求值/写权复活`,
+        e.symbol in face!,
+        `${e.symbol} 已删除 —— 回流 = 第二份求值/写权/构造实现复活`,
       ).toBe(false)
     }
-    // 反空洞真：模块本身仍导出它该有的东西（不是"整个模块被删了"）。
+    // 反空洞真：各模块本身仍导出它们该有的东西（不是"整个模块被删了"）。
     expect('channelStepTrack' in multiblockDomain).toBe(true)
     expect('resolveChannelEffective' in multiblockDomain).toBe(true)
+    expect('kernelRenderViewFromFace' in kernelRenderViewModule).toBe(true)
+    expect('evaluationIdentityOf' in multiblockEvaluationModule).toBe(true)
+    expect('channelPanelModelOf' in multiblockChannelUiModule).toBe(true)
   })
 
   it('已删符号全树**零调用位**（注释里提到名字不算）', () => {
@@ -1991,6 +2036,9 @@ describe('相位翻转仿真：把登记表投影到一份"已执行删除"的�
     return dest
   }
 
+  // ⚠️ 显式超时（**判据不变**，只放宽时长）：本条会复制整棵树并对**每条**登记项重扫，
+  // 本机单跑约 8 s；全量并行（183 个测试文件同时跑）下实测越过 vitest 默认 30 s
+  // —— 那是 CPU 争用，不是失败（同 `m5/2` 对画面层用例的处置，仓库既有先例）。
   it('**执行删除后，每条判据都能归零**（无"无法满足的断言"）', () => {
     const root = projectExecutedTree()
     try {
@@ -2005,7 +2053,7 @@ describe('相位翻转仿真：把登记表投影到一份"已执行删除"的�
     } finally {
       fs.rmSync(path.dirname(root), { recursive: true, force: true })
     }
-  })
+  }, 300_000)
 
   it('**原树仍有残留**（反空洞真）：仿真归零不是因为判据恒空', () => {
     for (const e of RETIREMENT_REGISTRY) {

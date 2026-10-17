@@ -137,8 +137,9 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * ## 为什么它必须留下（D 批映射表 §八明文排除）
    *
    * DRW 消费的是**旧格式的渲染视图文档**：多方块视口的 `renderDoc` 由
-   * `composition/kernelRenderView#kernelRenderViewOf` 产出，而该函数的**入参与出参
-   * 都是旧格式**（`assembleKernelDocument` 与 `projectKernelDocument` 的既有签名决定）。
+   * `composition/kernelRenderView#kernelRenderViewFromFace` 产出（D3 当时是
+   * `kernelRenderViewOf`，**M6-1 已删**），而该函数的**出参**仍是旧格式
+   *（`projectKernelDocument` 的既有签名决定）。
    * 故"DRW 不再吃旧格式"**不是**"删一个访问器"能达成的 —— 它要的是**渲染链终切**
    *（DRW 消费 `PresenterSession`），而那是 `presenter-surface-dual-track` 登记的接缝，
    * 其终切在 D 批映射表 §八被**显式排除**。
@@ -182,7 +183,7 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' ① **已核销（R2/S3 + M5-2）**：`useKernelChannels` 不再取 `doc.multiblockSource`，'
       + ' 再装配走 `assembleMultiblockKernelFace` + `evaluateMultiblockPresentation`（画面源唯一）；'
       + ' 旧文档装配簇（`assembleForSelection`/`buildChannelPanelModel`/`kernelRenderViewOf`）'
-      + ' `生产零调用`，仅作对照判据参照 —— 登记见 `application/__tests__/retirementRegistry.test.ts` 的 `M5_CLOSEOUT`（owner = M6）；'
+      + ' **M6-1 已删**（判据改为生产派生 + 冻结指纹/夹具）—— `M5_CLOSEOUT` 相应条目已全部转 `deleted`；'
       + ' ② 方块图标缓存的**身份键**（`runtime/drwMeshPipeline.ts:292-293` 键里绑旧 `StructureDefinition` 的'
       + ' `definition.id` + `summarizeBlocksForCache(definition)`）—— **未迁**；'
       + ' ③ `contentRefreshTick` 消费点（`runtime/drw.ts:149`、`runtime/drwMeshPipeline.ts:369`）—— **本轴退出项**。'
@@ -199,10 +200,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '⇒ 三类都迁走（或内核承载声明 body / 定义身份键）才能删读面本体。'
       + '另有内核面缺席时的旧文档回落分支（`runtime/drwMeshPipeline.ts:345-361` 与 `:413-434`），'
       + '生产注入点（`shared/viewport/useViewportRuntime.ts:249`）恒在场 ⇒ 该分支不构成生产读取。'
-      + '**M5-5 更新**：旧文档装配簇（`assembleForSelection`/`buildChannelPanelModel`/`kernelRenderViewOf`）'
-      + '与 `buildMultiblockRenderView` 均已核实**生产零调用**（全树生产代码 0 调用位），'
-      + '仅被对照/恒等判据消费；它们**不是**本接缝的第二权威（画面源唯一 = `evaluateMultiblockPresentation`），'
-      + '故登记在 `M5_CLOSEOUT`（owner = M6，退出条件 = 对照改为冻结指纹）而不在本表另开一条。',
+      + '**M6-1 更新（原 M5-5 登记已核销）**：旧文档装配簇（`assembleForSelection`/`buildChannelPanelModel`/'
+      + '`kernelRenderViewOf`）与 `buildMultiblockRenderView` 在 M6-1 前核实为**生产零调用**（全树 0 调用位），'
+      + '仅被对照/恒等判据消费；M6-1 把那些判据改为**生产派生 + 冻结几何指纹/冻结面板夹具**后**同批删除**这四个入口'
+      + '（`M5_CLOSEOUT` 的五条 retained 全部转 `deleted`）。它们**从未**是本接缝的第二权威'
+      + '（画面源唯一 = `evaluateMultiblockPresentation`）。',
     closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:

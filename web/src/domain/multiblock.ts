@@ -35,8 +35,8 @@
  * 专用轨道执行器或"若 multiblock 则另一套播放"**。」
  *
  * ⇒ 本模块**不含**任何播放循环、定时器或轨道执行器。它只提供**通用**构件：
- *  - `channelToPropertyRef`：把通道映射到一个 `PropertyRef`（通用轨道寻址）；
- *  - `channelStepTrack`：用 `domain/animation` 的 `step` 采样策略构造轨道；
+ *  - `channelStepTrack`：用 `domain/animation` 的 `step` 采样策略构造轨道
+ *    （轨道目标用**通用属性面**直接构造 `PropertyRef`，不再有中间寻址包装）；
  *  - 约束列表构造（`range`/`enum`/`coupling`）——**与轨道校验同一套** `ParameterConstraint` 纯值，
  *    校验由 `domain/animation#validateParameterSet` 执行（本模块不新造校验器）。
  *
@@ -60,7 +60,7 @@ import {
   type TimeValue,
   type TrackValue,
 } from './animation'
-import { entityRef, propertyRef, type PropertyRef } from './identity'
+import { entityRef, propertyRef } from './identity'
 import { findObject, findObjectData, type Scene } from './scene'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ export function findChannel(set: ChannelSet, key: string): ChannelDefinition | u
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 通道 → PropertyRef（让通用轨道能寻址通道）
+// 通道 → 轨道目标（让通用轨道能寻址通道）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -132,15 +132,6 @@ export function findChannel(set: ChannelSet, key: string): ChannelDefinition | u
  * 无法从引用本身分辨。
  */
 export const MULTIBLOCK_OWNER_KIND = 'objectData' as const
-
-/** 把通道键映射成可寻址属性引用（通用轨道目标）。 */
-export function channelToPropertyRef(set: ChannelSet, channelKey: string): Result<PropertyRef> {
-  const ch = findChannel(set, channelKey)
-  if (!ch) return err(invalidValue({ reason: 'channelNotDeclared', channel: channelKey, channelSet: set.id }))
-  return ok(
-    propertyRef(entityRef(MULTIBLOCK_OWNER_KIND, set.id, undefined), `channel.${ch.key}`),
-  )
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 约束构造（复用通用纯校验，不新造校验器）
@@ -228,12 +219,13 @@ export function channelStepTrack(
 ): Result<AnimationTrack> {
   const ch = findChannel(set, channelKey)
   if (!ch) return err(invalidValue({ reason: 'channelNotDeclared', channel: channelKey, channelSet: set.id }))
-  const target = channelToPropertyRef(set, channelKey)
-  if (!target.ok) return target
+  // 轨道目标走**通用属性面**（M6-1）：通道键 → `channel.<key>` 属性引用，唯一拥有者
+  // 是 `objectData`（通道取值是内容定义的一部分，见 {@link MULTIBLOCK_OWNER_KIND}）。
+  const target = propertyRef(entityRef(MULTIBLOCK_OWNER_KIND, set.id, undefined), `channel.${ch.key}`)
   return ok(
     Object.freeze({
       id: `track:${set.id}:${channelKey}`,
-      target: target.value,
+      target,
       valueType: ch.domain.kind === 'integer' ? 'integer' : ch.domain.kind === 'boolean' ? 'boolean' : ch.domain.kind === 'enum' ? 'enum' : 'number',
       // 台阶离散通道：阶跃（#249 §7「枚举、布尔、离散通道：阶跃」）。
       interpolation: 'step' as const,
