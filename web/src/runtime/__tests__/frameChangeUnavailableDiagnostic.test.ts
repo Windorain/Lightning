@@ -45,6 +45,7 @@ import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
 import { plainRootOf } from '@/adapters/plainRoot'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
 import { kernelRenderViewFromFace } from '@/composition/kernelRenderView'
+import { evaluateMultiblockPresentation } from '@/composition/kernelMultiblockEvaluation'
 
 /** 读源码并**归一化行尾**（铁律 6：新鲜检出是 CRLF，同一断言必须在两种口径下同结论）。 */
 function readSource(...segments: string[]): string {
@@ -100,14 +101,23 @@ async function productionRenderViewDoc(): Promise<RuntimeDocument> {
   const plainRoot = plainRootOf((await readEnvelopeLayers(raw as never)).plain as Record<string, unknown>)
   const assembled = assembleKernelDocument({ doc: parsed.document as never, plainRoot })
   if (!assembled.ok) throw new Error('fixture 装配失败（判据②的输入必须是生产装配产物）')
-  const view = kernelRenderViewFromFace({
-    body: null,
-    selection: { totalTier: 1, values: {}, runstate: '' },
-    frameIndex: 0,
+  // M5-2：求值点唯一（`evaluateMultiblockPresentation`），本入口只投影已求值场景。
+  const evaluated = evaluateMultiblockPresentation({
     scene: assembled.value.scene,
     content: assembled.value.content,
     frameObjects: assembled.value.frameObjects,
     multiblockDeclaration: null,
+    body: assembled.value.multiblockBody ?? null,
+    selection: { totalTier: 1, values: {}, runstate: '' },
+    frameIndex: 0,
+  })
+  const view = kernelRenderViewFromFace({
+    scene: evaluated.scene,
+    content: evaluated.content,
+    frameObjects: evaluated.frameObjects,
+    multiblockDeclaration: evaluated.multiblockDeclaration,
+    identity: evaluated.identity,
+    frameIndex: 0,
   })
   if (view.doc === null) throw new Error('生产链未产出渲染视图文档（判据②的输入必须真实在场）')
   return view.doc

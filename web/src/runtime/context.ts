@@ -65,7 +65,18 @@ import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotat
 /** 空读面常量（eadonly 空数组：避免每次分配，且调用方不得改内联量）。 */
 const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs, type DocumentContent } from '@/domain/content'
+import type { Document } from '@/domain/document'
 import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
+import {
+  EMPTY_MULTIBLOCK_SELECTION,
+  projectMultiblockSelection,
+} from '@/domain/multiblockSelection'
+import {
+  declarationFactsOf,
+  derivedPresentationDocument,
+  evaluateMultiblockPresentation,
+  type MultiblockEvaluation,
+} from '@/composition/kernelMultiblockEvaluation'
 import { findObjectData, type Scene } from '@/domain/scene'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 import { createFieldRejectionStore, type FieldRejectionStore } from '@/runtime/fieldRejections'
@@ -1185,26 +1196,36 @@ export class Context {
    * | 消费者 | 渲染链（多方块再装配 + 帧为主的旧投影） | 渲染链的**读面**（DRW 优先取它） |
    *
    * ⇒ 帧为主的文档上，渲染链**不再**需要旧格式源（DRW 优先读本面）。
-   * 多方块的**再装配**仍要 `doc.multiblockSource`（`composition/kernelAssembly.ts:1763`）——
-   * 那是 G3（body 的内核落点）落地前**已登记**的暂存路径，与本方法无关。
+   *
+   * ## M5-2：场景取自**按当前取值求值的派生场景**（断点②的落点）
+   *
+   * 此前这里读的是内核文档场景 —— 那是**装载期**装配产物（`initialSelection`），
+   * 通道取值从不写回它 ⇒ 滑杆动了画面不动（连 coil/glass 都不生效）。
+   * 现在场景来自 {@link kernelMultiblockEvaluation}（`evaluateMultiblockPresentation`
+   * 的唯一产物）；求值失败（`failed`）时本面返回 `null`（DRW 显式报错并保留上一帧），
+   * **不**回落装载期场景 —— 回落就是"旧通路复活"，判据会红。
    *
    * ## 响应式
    *
    * 与 `plainForSave()`/`kernelSaveView()` 同一条：先 `void this.main.doc.value`
-   * 建立对"换文档/装载内核"的依赖，消费方可以是 `computed`。
+   * 建立对"换文档/装载内核"的依赖；通道取值变化经 `contentRefreshTick`（写通道时由
+   * `useKernelChannels` 请求一次内容重读）传导，故消费方可以是 `computed`。
    */
   kernelRenderSourceFace(): KernelRenderSourceFace | null {
     void this.main.doc.value
+    void this.main.contentRefreshTick.value
     const kernel = this.kernel
     if (kernel === null || !kernel.hasAdoptedContent()) return null
     const kernelDoc = kernel.document()
     if (kernelDoc === undefined) return null
-    const face = kernel.assemblyFaceOf()
-    if (face !== null) {
+    const evaluation = this.kernelMultiblockEvaluation()
+    if (evaluation !== null) {
+      // 求值失败 ⇒ **不**回落装载期场景（那会让"画面画的是旧取值"永远无法被判红）。
+      if (evaluation.failed) return null
       return kernelRenderSourceFaceOf({
-        scene: kernelDoc.scene,
-        content: kernelDoc.content,
-        frameObjects: face.frameObjects,
+        scene: evaluation.scene,
+        content: evaluation.content,
+        frameObjects: evaluation.frameObjects,
       })
     }
     // 缺装配面（测试夹具 / 未接线会话）：按 `scene.order` 的出现序推导帧对象 ——
@@ -1245,20 +1266,91 @@ export class Context {
     readonly content: DocumentContent
     readonly frameObjects: readonly string[]
     readonly multiblockDeclaration: KernelDeclarationProjection | null
+    readonly identity: string
   } | null {
+    const evaluation = this.kernelMultiblockEvaluation()
+    if (evaluation === null || evaluation.failed) return null
+    return {
+      scene: evaluation.scene,
+      content: evaluation.content,
+      frameObjects: evaluation.frameObjects,
+      multiblockDeclaration: evaluation.multiblockDeclaration,
+      identity: evaluation.identity,
+    }
+  }
+
+  /**
+   * **按当前通道取值求值多方块**（M5-2 · 断点②唯一求值点）。
+   *
+   * ## 它替代什么
+   *
+   * 此前"画面"读的是 `kernelDoc.scene` —— 装载期装配（`initialSelection`：全通道 0、
+   * tt=default）。通道取值变化既不重跑装配、也不写回该场景 ⇒ 画面恒定在初始取值
+   * （s0-a §2.5-6）。本方法把「声明 + body + **当前取值**」交给
+   * `composition/kernelMultiblockEvaluation#evaluateMultiblockPresentation`，
+   * 产出**派生场景**供 DRW 定义面与呈现会话共用。
+   *
+   * ## 为什么是派生而不是写回（Lead 裁决）
+   *
+   * 写回会让内核文档的 `scene` 由取值改变 ⇒ 文档版本/历史/保存投影与"这次求值"
+   * 纠缠，且同一份内容在不同取值下有多份"内容事实"。派生场景每次现算、不落存储、
+   * 不进历史、不进保存（保存投影只带声明，见 `composition/kernelProjection` 的
+   * `renderView` 边界）。
+   *
+   * ## 三态
+   *
+   * | 值 | 含义 |
+   * |---|---|
+   * | `null` | 无会话 / 未装配成功 / **装配面未采集**（消费方如实降级） |
+   * | `failed: true` | 再装配失败（文档缺陷）：消费方**保留上一次可渲染结果**，不回落装载期场景 |
+   * | `failed: false` | 正常；帧为主文档 `assembly === null` 且 `scene` 即内核场景 |
+   *
+   * ## 响应式
+   *
+   * `main.doc`（换文档）+ `contentRefreshTick`（内容/取值可能变了）两处依赖；
+   * 取值本身由 `KernelSession#channelValues()` 投影，读它即依赖内核投递的快照。
+   */
+  kernelMultiblockEvaluation(): MultiblockEvaluation | null {
     void this.main.doc.value
+    void this.main.contentRefreshTick.value
     const kernel = this.kernel
     if (kernel === null || !kernel.hasAdoptedContent()) return null
     const kernelDoc = kernel.document()
     if (kernelDoc === undefined) return null
     const face = kernel.assemblyFaceOf()
     if (face === null) return null
-    return {
+    const decl = declarationFactsOf(kernelDoc.content)
+    const selection = decl === null
+      ? EMPTY_MULTIBLOCK_SELECTION
+      : projectMultiblockSelection(decl, kernel.channelValues())
+    return evaluateMultiblockPresentation({
       scene: kernelDoc.scene,
       content: kernelDoc.content,
       frameObjects: face.frameObjects,
       multiblockDeclaration: (face.multiblock ?? null) as KernelDeclarationProjection | null,
-    }
+      body: kernel.multiblockBodyOf(),
+      selection,
+      frameIndex: this.getFrameIndex(),
+    })
+  }
+
+  /**
+   * **呈现会话要读的文档**（画面源；M5-2）。
+   *
+   * 帧为主文档 / 无多方块 ⇒ 原样返回内核文档（行为零变化）；多方块 ⇒ 同 id/版本/历史，
+   * **只**把场景换成按当前取值求值的派生场景（见 {@link kernelMultiblockEvaluation}）。
+   * 求值失败 ⇒ 原样返回内核文档（呈现会话按内容身份短路，画面保留上一次结果）。
+   *
+   * 它**不是**第二份文档权威：不落存储、不进历史、不进保存。
+   */
+  kernelPresentationDocument(): Document | null {
+    const kernel = this.kernel
+    if (kernel === null || !kernel.hasAdoptedContent()) return null
+    const kernelDoc = kernel.document()
+    if (kernelDoc === undefined) return null
+    const evaluation = this.kernelMultiblockEvaluation()
+    if (evaluation === null) return kernelDoc
+    return derivedPresentationDocument(kernelDoc, evaluation)
   }
 
   /**

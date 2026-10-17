@@ -39,22 +39,22 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef } from 'vue'
 import { kernelRenderViewFromFace, type KernelRenderView } from '@/composition/kernelRenderView'
-import { assembleMultiblockKernelFace } from '@/composition/kernelAssembly'
 import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { multiblockVariantKey } from '@/context/runtimeDocument'
 import { multiblockDeclarationViewOf } from '@/domain/multiblockDocument'
 import {
-  assemblyNoticesOf,
-  buildChannelPanelModelOf,
   clampChannelValue,
-  formatDims,
-  initialMultiblockSelection,
+  projectMultiblockSelection,
   snapTierToSample,
   tierSampleValues,
-  type MultiblockChannelPanelModel,
-  type MultiblockDeclarationFacts,
   type MultiblockSelectionState,
+} from '@/domain/multiblockSelection'
+import {
+  assemblyNoticesOf,
+  buildChannelPanelModelOf,
+  formatDims,
+  type MultiblockChannelPanelModel,
 } from './multiblockChannelUi'
 
 export interface KernelChannelControls {
@@ -77,12 +77,13 @@ export interface KernelChannelControls {
   setRunstate(id: string): void
 }
 
-/** 内核保留键（与 `runtime/kernelSession` 同源；这里只读不重定义）。 */
-const TOTAL_TIER_KEY = '$totalTier'
-const RUNSTATE_KEY = '$runstate'
+// M5-2：选择投影（含保留键 `$totalTier`/`$runstate` 与"以声明初值为底"的规则）
+// 已下沉到 `domain/multiblockSelection#projectMultiblockSelection` —— 面板、装载装配、
+// 画面求值**同一实现**。下面保留的是它为什么必须"以声明初值为底"的历史说明；
+// 判据由 `context/__tests__/multiblockChannelRender.test.ts` 与 e2e 遍历把守。
 
 /**
- * 把内核的 `channelValues` 投影成多方块选择状态。
+ * 取值投影的历史说明（实现见 `domain/multiblockSelection#projectMultiblockSelection`）。
  *
  * ## 为什么需要这层投影（而不是让内核直接存 `MultiblockSelectionState`）
  *
@@ -108,29 +109,6 @@ const RUNSTATE_KEY = '$runstate'
  * 再用内核取值**覆盖** —— 于是"没设过"与"设过 0"仍可区分（内核里没有的键
  * 保持声明初值，而不是被强制成 0）。
  */
-function projectSelection(
-  decl: MultiblockDeclarationFacts,
-  values: Readonly<Record<string, number>>,
-): MultiblockSelectionState {
-  const base = initialMultiblockSelection(decl)
-  const runstateIndex = values[RUNSTATE_KEY]
-  const runstate =
-    typeof runstateIndex === 'number' && decl.runstates[runstateIndex] !== undefined
-      ? decl.runstates[runstateIndex].id
-      : base.runstate
-  const totalTier = values[TOTAL_TIER_KEY]
-  const perChannel: Record<string, number> = { ...base.values }
-  for (const [k, v] of Object.entries(values)) {
-    if (k === TOTAL_TIER_KEY || k === RUNSTATE_KEY) continue
-    perChannel[k] = v
-  }
-  return {
-    totalTier: typeof totalTier === 'number' ? totalTier : base.totalTier,
-    values: perChannel,
-    runstate,
-  }
-}
-
 export function useKernelChannels(ctx: Context): KernelChannelControls {
   const kernel = ctx.kernel
 
@@ -232,23 +210,24 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
     // **总是**投影：`projectSelection` 以声明初值为底再叠加内核取值 ——
     // 故"内核里一个键都没有"时它自然返回声明初值（不需要单独分支）。
     // 单独分支会让"用户设过 0"与"没设过"在两条不同代码路径上处理（易漂移）。
-    return projectSelection(view, mirror.value)
+    return projectMultiblockSelection(view, mirror.value)
   })
 
   /**
-   * **内核面再装配**（R2/S3 的 body 路径）：吃内层 body 承运，**不吃** `RuntimeDocument`。
+   * **按当前取值的再装配**（M5-2：面板与画面**同一份**装配产物）。
+   *
+   * 切换前本模块自己调 `assembleMultiblockKernelFace` 只为面板取尺寸 —— 而画面读的是
+   * 装载期场景 ⇒ 两处对"当前取值"各有一个答案（断点②）。现在唯一求值点是
+   * `Context#kernelMultiblockEvaluation()`（内部同样调 `assembleMultiblockKernelFace`），
+   * 面板的尺寸/变体键与画面的网格来自**同一次**求值。
    *
    * ⚠️ `cellContent`（逐格说明叠加层）今天**没有内核承运的来源**：内核按设计不带
-   * `tooltipPalette`/`cellTooltipGrid`（它们属解析侧的外部格式事实），而
-   * `assembleTooltipContent` 的 `sizeRow` 必须是**本次取值装配出的网格高度**
-   * （那是装配之后才知道的）⇒ 这里**不传**（不伪造）。影响面与理由见
-   * `composition/kernelRenderView#KernelRenderFaceInput` 的 `cellContent` 说明。
+   * `tooltipPalette`/`cellTooltipGrid`（它们属解析侧的外部格式事实）⇒ 求值点不传（不伪造）。
    */
+  const evaluation = computed(() => ctx.kernelMultiblockEvaluation())
   const kernelFace = computed(() => {
-    const body = ctx.kernelMultiblockBody()
-    if (body === null) return null
-    const r = assembleMultiblockKernelFace({ body, selection: selection.value })
-    return r.ok ? r.value : null
+    const e = evaluation.value
+    return e === null || e.assembly === null ? null : e.assembly
   })
 
   /**
@@ -274,10 +253,12 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
     const inputs = ctx.kernelRenderViewInputs()
     if (inputs === null) return { doc: null, identity: '', diagnostics: [] }
     return kernelRenderViewFromFace({
-      body: ctx.kernelMultiblockBody(),
-      selection: selection.value,
+      scene: inputs.scene,
+      content: inputs.content,
+      frameObjects: inputs.frameObjects,
+      multiblockDeclaration: inputs.multiblockDeclaration,
+      identity: inputs.identity,
       frameIndex: ctx.getFrameIndex(),
-      ...inputs,
     })
   })
 

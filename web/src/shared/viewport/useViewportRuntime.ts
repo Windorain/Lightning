@@ -756,8 +756,19 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   }
 
   const applyPresenterSurface = (): void => {
-    const doc = kernel?.document()
-    if (doc === undefined) return
+    /**
+     * **画面源 = 内核呈现文档**（M5-2）。
+     *
+     * 此前读 `kernel?.document()` 的 **装载期场景**：通道取值变化不重跑装配、
+     * 也不写回该场景 ⇒ "滑杆动了画面不动"（断点②）。现在读
+     * `Context#kernelPresentationDocument()`：多方块文档的 `scene` 是**按当前取值
+     * 求值的派生场景**（唯一求值点 `composition/kernelMultiblockEvaluation`），
+     * 帧为主文档原样返回内核文档（行为零变化）。
+     *
+     * 派生文档不落存储、不进历史：它只是"这一帧该画什么"的求值产物。
+     */
+    const doc = ctx.kernelPresentationDocument()
+    if (doc === null) return
     try {
       // **分层预览**是呈现侧过滤（不进冻结的 `EvaluationKey`）：每帧按当前层写入会话，
       // 它进**内容身份** ⇒ 换一层必然重编（否则"选了 Y=3 画面不动"）。
