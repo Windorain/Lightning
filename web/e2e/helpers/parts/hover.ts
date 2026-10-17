@@ -230,6 +230,57 @@ export async function injectHoverAtCellLocal(
 }
 
 /**
+ * 把格内局部点经视口当前正交相机投影到 **client 坐标**（不派发任何事件）。
+ *
+ * 与 {@link injectHoverAtCellLocal} 同一套投影数学（世界偏移与网格生成互逆：
+ * `ox = col - w/2`、`oy = worldY - h/2`、`oz = z - d/2`；worldY = h-1-row），
+ * 但**只算不派发** —— 供需要真实输入设备的判据（`page.mouse.click`，
+ * 见 `kernel-click-pick.spec.ts`）在 Node 侧拿到坐标。
+ *
+ * ⚠️ 两者**不合并**：注入版把投影与派发放在同一次 evaluate 内，是为了保证
+ * "相机在两者之间不可能移动"；若先取坐标再回 Node 派发，中间可能发生相机 fit。
+ * 真实输入判据本身要求"鼠标真的移动/点击"，因此这里接受这一点，并在
+ * 采样前后复核 hover 返回的 voxel（以拾取实际结果为准，不硬编码坐标）。
+ */
+export async function projectCellLocal(
+  page: Page,
+  pt: CellLocalPoint,
+  rid: string,
+): Promise<InjectedPointer> {
+  return await page.evaluate(
+    ({ rid, pt }) => {
+      const ctx = (window as any).__vm__
+      const slot = ctx.viewports.get(rid)
+      const cam = slot.camera.value
+      const el = slot.domElement.value as HTMLElement
+      const g = slot.definition.value.cellGrid as number[][][]
+      const d = g.length
+      const h = g[0]!.length
+      const w = g[0]![0]!.length
+      const worldY = h - 1 - pt.row
+      const p = { x: pt.col - w / 2 + pt.lx, y: worldY - h / 2 + pt.ly, z: pt.z - d / 2 + pt.lz }
+      const mul = (m: number[], v: [number, number, number, number]): [number, number, number, number] => [
+        m[0]! * v[0] + m[4]! * v[1] + m[8]! * v[2] + m[12]! * v[3],
+        m[1]! * v[0] + m[5]! * v[1] + m[9]! * v[2] + m[13]! * v[3],
+        m[2]! * v[0] + m[6]! * v[1] + m[10]! * v[2] + m[14]! * v[3],
+        m[3]! * v[0] + m[7]! * v[1] + m[11]! * v[2] + m[15]! * v[3],
+      ]
+      cam.updateMatrixWorld()
+      const view = mul(cam.matrixWorldInverse.elements, [p.x, p.y, p.z, 1])
+      const clip = mul(cam.projectionMatrix.elements, view)
+      const ndc = { x: clip[0] / clip[3], y: clip[1] / clip[3] }
+      const rect = el.getBoundingClientRect()
+      return {
+        clientX: rect.left + ((ndc.x + 1) / 2) * rect.width,
+        clientY: rect.top + ((1 - ndc.y) / 2) * rect.height,
+        world: p,
+      }
+    },
+    { rid, pt },
+  )
+}
+
+/**
  * 移出视口（生产 `pointerleave` 路径 → hover.clearViewport()），清理两次探测之间的悬停态。
  * `rid` 缺省为 Wiki 预览；工作台视口判据传 `r-viewport`。
  */
