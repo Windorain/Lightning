@@ -711,4 +711,87 @@ test.describe('M4-2 · 双区编辑同步（一次编辑，另一区看得见）
     )
   })
 
+  test('DE-3 同一条历史：A 区编辑一次只 +1；焦点在 B 按 Ctrl+Z 照样回退', async ({ page }) => {
+    test.setTimeout(300_000)
+    const doc = innerDocOf(fixturePath())
+    const candidates = annotatedCandidates(doc)
+    const sizeRow = doc.cellGrid[0]!.length
+    const { a, b } = await openDualArea(page)
+
+    // 前提：装载基线必须干净（否则"一次撤销回基线"无从判定）
+    expect(await undoState(page), '前提：刚装载的文档不得已有可撤销/重做的编辑').toEqual({
+      canUndo: false,
+      canRedo: false,
+      undoLabel: null,
+      redoLabel: null,
+    })
+
+    const hit = await findHitPoint(page, a.region, candidates)
+    await page.mouse.click(hit.client.x, hit.client.y)
+    const fileIdx = fileIdxOf(hit.candidate)
+    await expect.poll(async () => await selectedPos(page)).toEqual(kernelPosOf(hit.candidate, sizeRow))
+
+    const NEW = 'M4-2 DE-3（e2e）'
+    await writeField(page, TOOLTIP_FIELD, NEW)
+    await expect.poll(async () => await kernelTooltipAt(page, fileIdx)).toBe(NEW)
+
+    // ── ① 一次编辑 = 恰好一条历史：撤销项指向该格 ──
+    const afterEdit = await undoState(page)
+    expect(afterEdit.canUndo, '编辑必须进内核撤销栈').toBe(true)
+    expect(String(afterEdit.undoLabel), '撤销项文案必须指向被改的那一格').toContain('cell tooltip @')
+
+    // ── ② 把焦点挪到 B 区（真实点选 B 区一格）──
+    // 活动区必须是 B —— 否则"在 B 按 Ctrl+Z"与"在 A 按"没有区别，判据没有区分力。
+    const hitB = await findHitPoint(page, b.region, candidates)
+    await page.mouse.click(hitB.client.x, hitB.client.y)
+    await expect
+      .poll(async () => await page.evaluate(() => (window as any).__areaHost__()?.activeAreaId?.value ?? null), {
+        message: '点 B 区之后活动区必须是 B（焦点确实在 B）',
+      })
+      .toBe(b.areaId)
+
+    // ── ③ 焦点在 B 区按 Ctrl+Z ⇒ 内容回退（撤销不按区分叉）──
+    await page.keyboard.press('Control+z')
+    await page.waitForTimeout(1200)
+    expect(
+      await kernelTooltipAt(page, fileIdx),
+      '焦点在 B 区时 Ctrl+Z 必须回退文档内容（撤销不按区分叉）',
+    ).toBe(hit.candidate.text)
+    const afterUndo = await undoState(page)
+    expect(
+      afterUndo.canUndo,
+      '一次撤销必须回到装载基线（栈空）—— 若一次编辑记了多条历史，这里仍会有可撤销项',
+    ).toBe(false)
+    expect(afterUndo.canRedo, '撤销后必须可重做').toBe(true)
+    await expect
+      .poll(async () => (await definitionTooltipAt(page, b.region, fileIdx)).text, {
+        message: '撤销回退后 B 区呈现读面必须回到原文（回退对两区同样可见）',
+        timeout: 20_000,
+      })
+      .toBe(hit.candidate.text)
+    expect((await definitionTooltipAt(page, a.region, fileIdx)).text, 'A 区呈现读面同样回到原文').toBe(
+      hit.candidate.text,
+    )
+
+    // ── ④ 栈空后再按：不得改内容（不回落旧栈）──
+    const emptyState = await undoState(page)
+    await page.keyboard.press('Control+z')
+    await page.waitForTimeout(900)
+    expect(await undoState(page), '栈空后 Ctrl+Z 不得改变栈状态（不回落旧栈）').toEqual(emptyState)
+    expect(await kernelTooltipAt(page, fileIdx), '栈空后 Ctrl+Z 不得改内容').toBe(hit.candidate.text)
+
+    // ── ⑤ 焦点仍在 B 重做 ⇒ 新值回来，两区都看得见 ──
+    await page.keyboard.press('Control+Shift+z')
+    await page.waitForTimeout(1200)
+    expect(await kernelTooltipAt(page, fileIdx), '重做必须重现新值').toBe(NEW)
+    await expect
+      .poll(async () => (await definitionTooltipAt(page, b.region, fileIdx)).text, {
+        message: '重做后 B 区呈现读面必须重现新值',
+        timeout: 20_000,
+      })
+      .toBe(NEW)
+
+    console.log('[DE-3] 格=' + fileIdx.join('/') + ' 历史项="' + String(afterEdit.undoLabel) + '" 一次撤销即回基线')
+  })
+
 })
