@@ -953,4 +953,58 @@ test.describe('M4-2 · 双区编辑同步（一次编辑，另一区看得见）
     expect(committed, '真实拖动必须至少成功提交一次（否则整条判据空转）。已试：\n' + tried.join('\n')).toBe(true)
   })
 
+  test('DE-6 负对照：纯读操作（两区悬停 + 两区拖相机）不产生历史项与脏标记', async ({ page }) => {
+    test.setTimeout(300_000)
+    const doc = innerDocOf(fixturePath())
+    const candidates = annotatedCandidates(doc)
+    const { a, b } = await openDualArea(page)
+
+    const beforeUndo = await undoState(page)
+    const beforeDirty = await isDirty(page)
+    const beforeCells = await kernelCells(page)
+    const defABefore = await definitionCells(page, a.region)
+    const defBBefore = await definitionCells(page, b.region)
+    expect(beforeDirty, '前提：刚装载必须干净').toBe(false)
+    expect(beforeUndo, '前提：刚装载不得已有历史').toEqual({
+      canUndo: false,
+      canRedo: false,
+      undoLabel: null,
+      redoLabel: null,
+    })
+
+    // ── ① 两区各真实悬停至少一格 ──
+    let hovers = 0
+    for (const c of candidates.slice(0, 2)) {
+      if (await findHitForCell(page, a.region, c)) hovers++
+      if (await findHitForCell(page, b.region, c)) hovers++
+    }
+    expect(hovers, '前提：两区必须真的能悬停到格（否则负对照空转）').toBeGreaterThanOrEqual(2)
+
+    // ── ② 两区各真实拖动一次相机（中键 = 平移，纯读操作）──
+    const ca = await logicalCamera(page, a.region)
+    const cb = await logicalCamera(page, b.region)
+    const probesA = await uncoveredPoints(page, a.region)
+    const probesB = await uncoveredPoints(page, b.region)
+    expect(probesA.length, '前提：A 区画布必须有未被遮挡的点').toBeGreaterThan(0)
+    expect(probesB.length, '前提：B 区画布必须有未被遮挡的点').toBeGreaterThan(0)
+    await dragMiddle(page, probesA[0]!, 50, 12)
+    await dragMiddle(page, probesB[0]!, -50, 12)
+
+    // 读操作必须**真的发生**（否则下面的"没产生历史"没有区分力）
+    expect(await logicalCamera(page, a.region), 'A 区拖动必须真的改了机位').not.toEqual(ca)
+    expect(await logicalCamera(page, b.region), 'B 区拖动必须真的改了机位').not.toEqual(cb)
+
+    // ── ③ 负对照判据 ──
+    expect(await undoState(page), '纯读操作不得产生历史项').toEqual(beforeUndo)
+    expect(await isDirty(page), '纯读操作不得产生脏标记').toBe(beforeDirty)
+    expect(JSON.stringify(await kernelCells(page)), '纯读操作不得改内容').toBe(JSON.stringify(beforeCells))
+    expect(JSON.stringify(await definitionCells(page, a.region)), 'A 区呈现读面不得因读操作而变').toBe(
+      JSON.stringify(defABefore),
+    )
+    expect(JSON.stringify(await definitionCells(page, b.region)), 'B 区呈现读面不得因读操作而变').toBe(
+      JSON.stringify(defBBefore),
+    )
+
+    console.log('[DE-6] 悬停命中 ' + hovers + ' 次、两区各拖动一次相机 ⇒ 历史/脏/内容均未变')
+  })
 })
