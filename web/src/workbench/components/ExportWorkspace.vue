@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 import { copyTextToClipboard } from '@/util/browser'
 import { bakeIsometricStructurePngDataUrl } from '@/workbench/exportIsometricImage'
+import { bakeIsometricGifBlob } from '@/workbench/exportAnimatedGif'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { useContext } from '@/runtime/context'
 
@@ -64,6 +65,41 @@ async function bakeIso(): Promise<void> {
 }
 // `.lazy` 只在 change（失焦/回车）提交 ⇒ 一次编辑一次重烘焙，不需要计时器。
 watch(() => [doc.value, isoDir.value, isoSeconds.value] as const, () => { void bakeIso() }, { immediate: true })
+
+// ── 场景 GIF（M5-4）────────────────────────────────────────────────────────
+// 与等轴 PNG 同一个方向/相机；时间来自"纹理序列一个循环"的冻结计划（不是墙钟）。
+const gifUrl = ref<string | null>(null)
+const gifBusy = ref(false)
+const gifErr = ref<string | null>(null)
+/** 例："12 帧 / 1.500 s" —— e2e 的 `[data-gif-plan]` 读它，与下载字节解码结果对账。 */
+const gifInfo = ref<string | null>(null)
+async function makeGif(): Promise<void> {
+  const d = doc.value
+  if (!d) return
+  gifBusy.value = true
+  gifErr.value = null
+  try {
+    const r = await bakeIsometricGifBlob(d, isoDir.value)
+    if (gifUrl.value) URL.revokeObjectURL(gifUrl.value)
+    gifUrl.value = URL.createObjectURL(r.blob)
+    gifInfo.value = `${r.frameCount} 帧 / ${(r.totalMs / 1000).toFixed(3)} s`
+  } catch (e) {
+    gifUrl.value = null
+    gifInfo.value = null
+    gifErr.value = formatUnknownError(e)
+  } finally {
+    gifBusy.value = false
+  }
+}
+async function downloadGif(): Promise<void> {
+  gifErr.value = null
+  try {
+    await ctx.getOperators().exec('OPERATOR_EXPORT_SCENE_GIF', { direction: isoDir.value })
+    msg(`已下载动画 GIF ${isoDir.value + 1}/4`)
+  } catch (e) {
+    gifErr.value = formatUnknownError(e)
+  }
+}
 async function downloadIso(): Promise<void> {
   dlErr.value = null
   try {
@@ -118,6 +154,20 @@ function pushToServer(): void {
         <img v-else-if="isoUrl" :src="isoUrl" class="ew-iso" alt="Iso preview" />
         <div v-if="isoErr" class="ew-fb ew-fb--err">{{ isoErr }}</div>
         <div v-if="dlErr" class="ew-fb ew-fb--err" data-iso-dl-err>{{ dlErr }}</div>
+      </section>
+
+      <section class="ew-card">
+        <h3>{{ t("animGif") }}</h3>
+        <p class="ew-desc">{{ t("animGifDesc") }}</p>
+        <div class="ew-row">
+          <button class="ew-btn ew-btn--sm" @click="cycleIso" :disabled="gifBusy">{{ t("isoDir") }} {{ isoDir + 1 }}/4</button>
+          <button class="ew-btn" @click="void makeGif()" :disabled="gifBusy" data-make-gif>{{ t("generateGif") }}</button>
+          <button v-if="gifUrl" class="ew-btn ew-btn--primary" @click="void downloadGif()" data-download-gif>{{ t("downloadGif") }}</button>
+        </div>
+        <div v-if="gifBusy" class="ew-fb">{{ t("rendering") }}</div>
+        <div v-else-if="gifInfo" class="ew-fb" data-gif-plan>{{ gifInfo }}</div>
+        <img v-if="gifUrl" :src="gifUrl" class="ew-iso" alt="GIF preview" />
+        <div v-if="gifErr" class="ew-fb ew-fb--err" data-gif-err>{{ gifErr }}</div>
       </section>
 
       <section v-if="showSdeSave" class="ew-card">

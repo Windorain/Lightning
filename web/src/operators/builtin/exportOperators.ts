@@ -4,6 +4,7 @@ import { loadStructureOrWorld } from '@/render/data/bundleResolve'
 import { downloadBlob, downloadJson } from '@/util/browser'
 import { buildStructureBundleZip } from '@/workbench/export/bundleMeshAssembly'
 import { bakeIsometricStructurePngDataUrl, dataUrlToPngBlob, normalizeIsoSeconds } from '@/workbench/exportIsometricImage'
+import { bakeIsometricGifBlob } from '@/workbench/exportAnimatedGif'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 
 const ISO_DIRECTION_MAP: Record<string, number> = {
@@ -144,6 +145,43 @@ export const ExportIsoPngOperator: OperatorType = {
     } catch (e) {
       ctx.log.warn('导出', `等轴 PNG 导出失败: ${e}`)
       // **再抛**：log.warn 只留诊断，可见性由调用方（UI）承担。吞掉它正是本轮要修的形态。
+      throw e
+    }
+  },
+}
+
+/**
+ * 场景 GIF（M5-4）：把**模型画面**在"纹理序列一个循环"内逐帧渲染成 GIF89a。
+ *
+ * 与材质卡 `OPERATOR_EXPORT_GIF`（导出**贴图条本身**）分工不同：本命令导出的是
+ * 场景画面，且与等轴 PNG 共用方向/尺寸/相机（`workbench/exportAnimatedGif`）。
+ *
+ * 时间来自 `domain/materials#planSequenceLoop` 的冻结计划（声明时长 → 逐帧厘秒），
+ * 不读墙钟、不自算 tick、不截断超限循环（超限是**显式失败**）。
+ */
+export const ExportSceneGifOperator: OperatorType = {
+  id: 'OPERATOR_EXPORT_SCENE_GIF',
+  label: '导出动画 GIF',
+  description: '把纹理序列的一个循环逐帧渲染成 GIF（与等轴 PNG 同一台相机）',
+
+  poll(ctx) {
+    return ctx.hasLoadedDocument()
+  },
+
+  async exec(ctx, _props) {
+    const directionIndex = resolveIsoDirection(_props.direction)
+    const doc = ctx.plainForSave().plain
+    if (!doc) return
+    const rawSize = _props.pixelSize
+    const pixelSize = typeof rawSize === 'number' && Number.isFinite(rawSize)
+      ? Math.max(64, Math.min(512, Math.floor(rawSize)))
+      : 320
+    try {
+      const result = await bakeIsometricGifBlob(doc, directionIndex, { pixelSize })
+      downloadBlob(`anim-${directionIndex}.gif`, result.blob)
+    } catch (e) {
+      ctx.log.warn('导出', `场景 GIF 导出失败: ${e}`)
+      // 同轴等轴 PNG：日志只留诊断，可见性由调用方承担。
       throw e
     }
   },
