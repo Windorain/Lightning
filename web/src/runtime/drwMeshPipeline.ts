@@ -575,6 +575,20 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
 
     return run(async () => {
       if (plan.reloadResources) {
+        // ⚠️ 这里只动**资源**（材质库 + 图标缓存），**不**动视口宿主/画布。
+        //
+        // 宿主的寿命由"有已解析场景"决定（`loadStatus === 'ok' && structureDefinition`），
+        // 不由本行的 `textureCache` 决定 —— SPEC §7.3「资源加载状态改变不得销毁正常视口
+        // 宿主」、§7.4「部分资源未就绪时可以保留已有画面」。#397（M2-1）之前两个宿主模板
+        // 把 `materialLibrary`（= 本 ref）写进 `v-if`，于是本行执行时 `RenderEngineHost`
+        // 被卸载重挂、canvas DOM 节点被换掉（实测 2 帧宿主与画布同时缺席、空窗 512 ms）。
+        // 判据：`web/e2e/kernel-viewport-host-lifetime.spec.ts`。
+        //
+        // 登记（**未修**，不属 #397 轴）：内容身份在装载路径上**没有**基线
+        // （`contentSignal` 首次 `republish` 时 `prev === null` ⇒ `documentChanged`），
+        // 故"第一次内容编辑"会被判成"换了文档"⇒ 多做一次资源重解码（§8「编辑不得隐式
+        // 改变未变资源」）。今天它只浪费一次解码、不改变画面（画面走呈现会话的纹理端口），
+        // 故与本单分开处理。
         disposeIconCache()
         textureCache.value?.dispose()
         textureCache.value = null

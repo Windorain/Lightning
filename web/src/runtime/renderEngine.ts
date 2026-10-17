@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 import { View3DRenderer } from '@/render/viewport/renderViewport'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
-import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 
@@ -15,9 +14,23 @@ export interface RenderEngineReadyPayload {
   renderer: View3DRenderer
 }
 
+/**
+ * 引擎的**装配期**选项。
+ *
+ * ## 为什么这里**没有**材质库（#397，M2-1）
+ *
+ * 旧字段 `materialLibrary` 是 P10 #261 之前"绘制循环里每材质累加时间"
+ * （`materialLibrary.tick(delta)`）的遗留输入。那条 tick 删除后，本引擎**不再读**它：
+ * 画面由呈现会话（`PresenterSession`）产出，贴图绑定走纹理端口，材质库只服务
+ * 方块图标缓存（`runtime/drwMeshPipeline` 的 `textureCache`）。
+ *
+ * 留着这个字段的代价不是"多一个未用参数"：它让"画布寿命"看起来依赖材质库就绪，
+ * 于是两个视口宿主都把 `materialLibrary` 写进 `v-if` ⇒ 资源重建期（编辑触发）宿主
+ * 卸载重挂、canvas 被换掉（#397）。⇒ 同批删除字段与两处挂载条件
+ * （SPEC §7.3「资源加载状态改变不得销毁正常视口宿主」、§7.4「保留已有画面」）。
+ */
 export interface RenderEngineOptions {
   definition: StructureDefinition
-  materialLibrary: MaterialLibraryApi
   contentGroup: THREE.Group | null
   layerPreviewMode: LayerPreviewMode
   sceneBackground?: number

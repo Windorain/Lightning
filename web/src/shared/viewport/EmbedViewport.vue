@@ -92,7 +92,7 @@ const {
 const {
   drw, vpSlot, loadStatus, meshBusy, blockIconCache, tooltipPalette,
   structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY, isPlaying,
-  computed: drwComputed, materialLibrary,
+  computed: drwComputed,
 } = useViewportRuntime({
   ctx,
   regionId: viewportRegionId,
@@ -496,11 +496,19 @@ onBeforeUnmount(() => {
         @clear-selection="onSidebarClearSelection"
       />
       <div class="wm-viewport-column">
+        <!--
+          宿主挂载条件**只**表达"有一份已解析的场景"，不含资源瞬时态 —— 与
+          `workbench/components/WorkbenchViewport.vue` 同一纪律（#397 / SPEC §7.3、§7.4、§8；
+          根因链与实测读数写在该文件的那段说明里）。
+
+          `materialLibrary`（`drw.textureCache`）在资源重建期会瞬时为 null，而它**不是**
+          本宿主的输入（贴图绑定归呈现会话；材质库只服务方块图标缓存）⇒ 不得用它决定
+          宿主/画布寿命。两个宿主共用同一条规则（SPEC §10.10「同一规则适用于所有宿主」）。
+        -->
         <RenderEngineHost
           ref="engineHostRef"
-          v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
+          v-if="loadStatus === 'ok' && structureDefinition"
           :definition="structureDefinition"
-          :material-library="materialLibrary"
           :content-group="mainMeshGroup"
           :layer-preview-mode="layerPreviewMode"
           :scene-background="s?.sceneBackground ?? 0x5a5a5a"

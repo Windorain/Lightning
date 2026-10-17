@@ -762,7 +762,6 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     // 故保留 legacy 兜底并不能真正"兜"回 legacy 的 N 帧。
     frameCount: computed(() => kernel?.frameCount() ?? 0),
     computed: drw.computed,
-    materialLibrary: drw.textureCache,
     /**
      * 呈现会话（#299 P10e 段②）。
      *

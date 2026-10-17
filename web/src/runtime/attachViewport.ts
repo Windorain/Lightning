@@ -100,6 +100,11 @@ export async function attachViewport(
    * | 改动前 | **每一次**本函数被调用（= `@ready`，宿主重挂即触发） | 内容投影让 `materialLibrary` 瞬时为空 ⇒ 宿主重挂 ⇒ **重新 fit，用户机位被丢弃** |
    * | 改动后 | ①该视口还没有相机状态，或 ②**换了一份文档**（窄信号 `documentRevision`） | 内容投影只更新画面，**不动**用户机位 |
    *
+   * 📌 **M2-1（#397）补充**：上表"宿主重挂"这一触发面**已按 SPEC §7.3/§7.4 删除** ——
+   * 两个宿主模板的 `v-if` 不再包含 `materialLibrary`（资源瞬时态不再决定画布寿命），
+   * 故内容投影连"重挂"都不会发生。本台账仍保留：它管的是"谁可以框选"（换文档 / 首次），
+   * 与挂载次数解耦；回退保护见 `e2e/kernel-viewport-host-lifetime.spec.ts`。
+   *
    * 判据是纯函数 + 按 region 的台账（`ctx.viewports.claimInitialViewportCamera`），
    * 台账随槽位拆解清除 ⇒ "关掉再打开 Area"仍会重新框选。
    *

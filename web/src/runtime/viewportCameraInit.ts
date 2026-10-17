@@ -44,7 +44,7 @@
  * `viewportRemovals=1`、`bothAbsentFrames=2`、`currentIsSame=false`（画布原标记丢失）——
  * 与 #397 单据的"2 帧、512 ms 空窗"同形。
  *
- * **修复方向**（本批后续提交落地）：宿主的挂载条件只表达"有已解析场景"，不参与任何
+ * **修复**（本批落地）：宿主的挂载条件只表达"有已解析场景"，不参与任何
  * 资源瞬时态；`materialLibrary` 作为宿主输入一并退出（贴图绑定归呈现会话，材质库只服务
  * 方块图标缓存）。判据 = `web/e2e/kernel-viewport-host-lifetime.spec.ts`（canvas 元素同一、
  * 无缺席帧、占位未出现、机位不变）。

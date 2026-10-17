@@ -60,7 +60,7 @@ const {
 const {
   drw, vpSlot, loadStatus, meshBusy, structureDefinition, mainMeshGroup,
   worldFrameIndex, layerWorldY, isPlaying,
-  computed: drwComputed, materialLibrary,
+  computed: drwComputed,
 } = useViewportRuntime({
   ctx,
   regionId: VIEWPORT_REGION_ID,
@@ -345,11 +345,38 @@ onBeforeUnmount(() => {
       @drop="onDrop"
     >
       <ToolHintsBar :hints="toolHints" />
+    <!--
+      宿主挂载条件 = **"有一份已解析的场景"**，**不**含任何资源瞬时态。
+
+      ## #397（M2-1）：为什么这里曾经有 `&& materialLibrary`
+
+      旧条件写的是 `loadStatus === 'ok' && structureDefinition && materialLibrary`，
+      其中 `materialLibrary` 是 `drw.textureCache`（材质库）。它在**资源重建**时被
+      置空再重建（`runtime/drwMeshPipeline#applyContentRefresh` 的
+      `plan.reloadResources` 分支：`textureCache.value = null`），于是：
+
+        第一次内容投影 ⇒ contentRefreshTick ⇒ 内容身份首次 `republish`（无基线 ⇒
+        `documentChanged`）⇒ `reloadResources` ⇒ textureCache 瞬时为 null ⇒
+        本 `v-if` 变假 ⇒ `RenderEngineHost` **卸载重挂** ⇒ canvas DOM 节点被换掉
+        （#397 实测：2 帧「.vc-viewport 与 canvas 同时缺席」、空窗 512 ms）。
+
+      ## 为什么删掉它是对的（不是"放宽条件"）
+
+      `RenderEngineHost`/`RenderEngine` **不消费**材质库：贴图绑定由呈现会话
+      （`PresenterSession.bindTextures` + 纹理端口）负责，材质库只服务**方块图标缓存**
+      （侧栏缩略图）。也就是说旧条件是在用"一个与画布无关的资源"决定画布的寿命 ——
+      SPEC §7.3「普通内容编辑、撤销/重做、资源加载状态改变**不得销毁**正常视口宿主」、
+      §7.4「部分资源未就绪时，可以按显示策略**保留已有画面**或显示占位」、§8
+      「资源到达/失败不得隐式改变正常视口寿命」。
+
+      ⇒ 判据只剩"有场景可画"：`loadStatus === 'ok'`（一次成功装载；后续内容刷新
+      `preserveViewport` 保持 'ok'）+ 已解析的 `structureDefinition`。
+      资源在编辑期间即便瞬时重建，宿主与画布也**继续存在**、继续呈现既有画面。
+    -->
     <RenderEngineHost
       ref="engineHostRef"
-      v-if="loadStatus === 'ok' && structureDefinition && materialLibrary"
+      v-if="loadStatus === 'ok' && structureDefinition"
       :definition="structureDefinition"
-      :material-library="materialLibrary"
       :content-group="mainMeshGroup"
       :layer-preview-mode="layerPreviewMode"
       :scene-background="0x5a5a5a"
