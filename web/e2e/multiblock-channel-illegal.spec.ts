@@ -13,8 +13,9 @@
  *     同时验面板给出的**取值域契约**（`min`/`max`/`data-mb-channel-hi`）确实覆盖了所有合法值。
  *
  *  ② **Tier 未声明抽样**（如 EBF `tt=3`，`tierSample=[1,2,14]`）：
- *     Tier 滑杆**不吸附**（`data-mb-tier` 显示 3），装配器按 §5.2 回落到最近抽样（2）并落 warning；
- *     面板必须**如实呈现**该回落提示，且 `data-mb-variant` 反映的是**用户请求**的键。
+ *     Tier 滑杆**吸附**到已声明抽样（`snapTierToSample`；M5-1/M5-2 起的生产口径），
+ *     故产品面永远不会请求未声明 Tier；装配器仍保留 §5.2 的"未声明 → 回落最近变体 + warning"
+ *     作为程序化请求的兜底，面板必须**如实呈现**（吸附后不应出现该提示）。
  *
  *  ③ **耦合违规**（LSC `capacitor >= glass`，`couplingMode: "clamp"`）：
  *     违规组合被夹取（`glass` 降到 `capacitor`），面板必须如实呈现 `耦合夹取：…` 提示，

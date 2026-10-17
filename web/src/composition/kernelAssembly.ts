@@ -78,7 +78,7 @@ import type { Grid, SlotBlock } from '@/context/grid'
 // 通道装配经 `context/multiblock` 的**公共出口**取得（深度 2）。
 // `@/shared/viewport/multiblockChannelUi` 是它的 UI 包装（深度 3，超公共出口上限）——
 // 而 `assembleSelection` 本来就在 `context/multiblock` 的出口上（那个 index 逐字导出它）。
-// 用更深的那个包装会顺带把 Vue 响应式语义拖进装配层，那也不是装配该做的事。
+// 用更深的那个包装会顺带把呈现侧（响应式/旧文档）语义拖进装配层，那也不是装配该做的事。
 import {
   assembleSelection,
   type AssemblyResult,
@@ -541,10 +541,10 @@ export interface MultiblockProjectionFace {
  *
  * ## 为什么在这里声明而不是 import `shared/viewport/multiblockChannelUi`
  *
- * 那个模块是**呈现侧的 UI 状态**类型（它把"每视口暂存"的形状写进类型），
- * 而装配层要的是**装配输入**。两者字段恰好同形（`totalTier`/`values`/`runstate`），
- * 但语义不同：前者的"每视口一份"正是 B5 #4 要退役的形态（§15 第 4 条），
- * 装配层**不该**把那个语义引进类型。
+ * 那个模块是**呈现侧**的类型（面板模型 / 旧文档装配包装），而装配层要的是**装配输入**。
+ * 两者字段恰好同形（`totalTier`/`values`/`runstate`），但语义不同：呈现侧那份服务的
+ * 是面板展示，装配层**不该**把呈现语义引进类型。字段同形的权威类型是
+ * `domain/multiblockSelection#MultiblockSelectionState`（每视口暂存已在 P6 删除，§15 第 4 条）。
  *
  * 且它是深度 3 的路径（超公共出口上限 2）。⇒ 就地声明装配输入的形状，
  * 与 `context/multiblock#MultiblockSelection`（`totalTier`/`values`/`runstate`）

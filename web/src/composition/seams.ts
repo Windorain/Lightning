@@ -178,10 +178,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '（生产装配面 ⇒ `loadStatus` = `ok`、`materialPalette.length === 62`、`tooltipPalette.length > 0`；'
       + ' 负对照 `renderSourceRef = null` ⇒ 定义 `null`、说明池 `[]`、装载如实 `error`）。'
       + ' ⚠️ **R1-β① C8 起 DRW 不再是画面路径**（画面由 `PresenterSession` 产出；'
-      + ' 双轨登记 `presenter-surface-dual-track` 已核销）。**仍读旧格式文档的只剩三类**：'
-      + ' ① `shared/viewport/useKernelChannels.ts:199` 取多方块**声明的内层 body**（`doc.multiblockSource`，'
-      + ' 供 `:215-219` `assembleForSelection` 与 `:242-262` 多方块 `kernelRenderViewOf` 再装配）——'
-      + ' **被 G3 门住**（缺“内核面的 body 装配入口”），owner = R2 线 / G3 批；'
+      + ' 双轨登记 `presenter-surface-dual-track` 已核销）。**仍读旧格式文档的只剩两类**：'
+      + ' ① **已核销（R2/S3 + M5-2）**：`useKernelChannels` 不再取 `doc.multiblockSource`，'
+      + ' 再装配走 `assembleMultiblockKernelFace` + `evaluateMultiblockPresentation`（画面源唯一）；'
+      + ' 旧文档装配簇（`assembleForSelection`/`buildChannelPanelModel`/`kernelRenderViewOf`）'
+      + ' `生产零调用`，仅作对照判据参照 —— 登记见 `application/__tests__/retirementRegistry.test.ts` 的 `M5_CLOSEOUT`（owner = M6）；'
       + ' ② 方块图标缓存的**身份键**（`runtime/drwMeshPipeline.ts:292-293` 键里绑旧 `StructureDefinition` 的'
       + ' `definition.id` + `summarizeBlocksForCache(definition)`）—— **未迁**；'
       + ' ③ `contentRefreshTick` 消费点（`runtime/drw.ts:149`、`runtime/drwMeshPipeline.ts:369`）—— **本轴退出项**。'
@@ -197,7 +198,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '③ `contentRefreshTick` 消费点（`runtime/drw.ts:149`、`runtime/drwMeshPipeline.ts:369`，**本轴退出项**）。'
       + '⇒ 三类都迁走（或内核承载声明 body / 定义身份键）才能删读面本体。'
       + '另有内核面缺席时的旧文档回落分支（`runtime/drwMeshPipeline.ts:345-361` 与 `:413-434`），'
-      + '生产注入点（`shared/viewport/useViewportRuntime.ts:249`）恒在场 ⇒ 该分支不构成生产读取。',
+      + '生产注入点（`shared/viewport/useViewportRuntime.ts:249`）恒在场 ⇒ 该分支不构成生产读取。'
+      + '**M5-5 更新**：旧文档装配簇（`assembleForSelection`/`buildChannelPanelModel`/`kernelRenderViewOf`）'
+      + '与 `buildMultiblockRenderView` 均已核实**生产零调用**（全树生产代码 0 调用位），'
+      + '仅被对照/恒等判据消费；它们**不是**本接缝的第二权威（画面源唯一 = `evaluateMultiblockPresentation`），'
+      + '故登记在 `M5_CLOSEOUT`（owner = M6，退出条件 = 对照改为冻结指纹）而不在本表另开一条。',
     closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
     exitCondition:

@@ -1177,7 +1177,8 @@ export class Context {
   // ─────────────────────────────────────────────────────────────────────────
   //
   // 它曾是接缝 `legacy-render-source-document` 的落点（#301 P10f D3；R9）：唯一用途是
-  // 把旧格式文档交给渲染投影（喂 `composition/kernelRenderView#kernelRenderViewOf`）。
+  // 把旧格式文档交给渲染投影（当时喂 `composition/kernelRenderView#kernelRenderViewOf` ——
+  // M5-2 起该入口**生产零调用**，投影改由 `kernelRenderViewFromFace` 吃已求值场景）。
   //
   // **删除依据（机械可复跑）**：全仓消费者集合 = 0。最后 1 处
   // （`shared/viewport/useKernelChannels.ts:199`）在本批改吃内核面：

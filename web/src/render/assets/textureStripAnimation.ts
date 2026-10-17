@@ -4,8 +4,9 @@
  * 行为参考 Java版：竖直帧条、frametime 以 tick 计（1 tick = 1/20 s）。
  */
 
-/** Java 版：1 tick = 50 ms */
-export const MINECRAFT_TICK_MS = 50
+// M5-5 归位：tick 毫秒值的**唯一定义**在 `domain/textureAnimation#TEXTURE_TICK_MS`；
+// 本适配器只引用，不再自带常量（防两处静默分叉）。
+import { TEXTURE_TICK_MS } from '@/domain/textureAnimation'
 
 export interface McmetaFrameSpec {
   index: number
@@ -94,7 +95,7 @@ export function resolveAnimationTimeline(
   if (!anim || frameCount < 1) {
     return {
       frames: [{ index: 0 }],
-      durationMsPerFrame: [MINECRAFT_TICK_MS],
+      durationMsPerFrame: [TEXTURE_TICK_MS],
     }
   }
 
@@ -110,7 +111,7 @@ export function resolveAnimationTimeline(
 
   const durationMsPerFrame = frames.map((f) => {
     const ticks = f.timeTicks ?? anim.defaultFrametimeTicks
-    return ticks * MINECRAFT_TICK_MS
+    return ticks * TEXTURE_TICK_MS
   })
 
   return { frames, durationMsPerFrame }

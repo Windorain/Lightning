@@ -446,8 +446,9 @@ export function targetFacts(ctx: Context, ref: PropertyRef): TargetFacts {
  * | 与既有判定的关系 | 独此一处 | 与 `application/kernel-properties.ts:539` 的 `generated: data?.source === 'content'` 同一口径 |
  *
  * 内核侧的写权来源是**生产装配**写下的标记
- * （`composition/kernelAssembly.ts:1810` 的 `objectData(dataId, blockGridPayload(payload), 'content')`，
- * 只在多方块生成分支），故这是内核承载的事实，不是"从旧格式读一位"。
+ * （`composition/kernelAssembly.ts` 多方块生成分支的
+ * `objectData(dataId, blockGridPayload(payload), 'content')` —— 不写死行号：该文件同批仍在改），
+ * 故这是内核承载的事实，不是"从旧格式读一位"。
  *
  * ⚠️ 语义**不变**的边界：未装配（无会话/未 adopt）时同上——`kernelGridObjectId` 与
  * `kernelWriteAuthority` 各自如实答 `null`/`'missing'` ⇒ `false`（未装配的多方块文档

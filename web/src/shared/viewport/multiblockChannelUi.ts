@@ -2,9 +2,15 @@
  * 「通道」面板的**纯逻辑**（T2.4/T2.5）—— 无 Vue、无 DOM、无 ctx。
  *
  * 分工：
- *  - 本模块：文件声明 → 滑杆规格 / 初始取值 / 面板模型；当前取值 → 装配（T2.2 装配器）→ 渲染视图文档。
- *  - `useMultiblockChannels.ts`：把本模块包成响应式状态（Vue）。
+ *  - 本模块：文件声明 → 滑杆规格 / 面板模型；旧文档路径的装配包装（见文件末）。
+ *  - `useKernelChannels.ts`：把本模块包成响应式状态（Vue），装配走内核面
+ *    （`evaluateMultiblockPresentation` 的唯一求值点）。
  *  - `MultiblockChannelPanel.vue`：纯展示 + 事件（props/emits）。
+ *
+ * ⚠️ M5-5：旧 `useMultiblockChannels.ts`（每视口暂存）已在 P6 删除；本文件里
+ * 吃 `RuntimeDocument` 的三个入口（`assembleForSelection`/`buildChannelPanelModel`/
+ * `buildMultiblockRenderView`）**生产零调用**，仅作切换前后对照判据的参照，
+ * 登记在 `application/__tests__/retirementRegistry.test.ts` 的 `M5_CLOSEOUT`（owner = M6）。
  *
  * **忠实展示文件声明**（计划 T2.4 硬约束）：滑杆条数 = 声明条数（`slider === true`，`hatch` 由解析器排除）、
  * 标签取 `name`（呈现名，来自文件）、上限取 `channel.domain.hi`、`0` 显示 `Not set`。

@@ -25,7 +25,7 @@ import {
   textureAnimationOf,
   type TextureAnimationInput,
 } from '@/domain/textureAnimation'
-import { MINECRAFT_TICK_MS } from '@/render/assets/textureStripAnimation'
+import * as textureStripModule from '@/render/assets/textureStripAnimation'
 
 const RESOURCE = Object.freeze({ assetId: 'material:0', contentVersion: 'v1', url: 'inline:0' })
 
@@ -155,11 +155,17 @@ describe('M5-3b · 两条时间轴缺省**故意不同**（防"统一回去"）'
     expect(WORLD_FRAME_AXIS_FALLBACK_MS, '1 ms 与 50 ms 必须不同').not.toBe(TEXTURE_TICK_MS)
   })
 
-  it('旧适配器的 tick 常量与 domain 一致（漂移判据；常量**未**归位，临时口径）', () => {
-    // M5-3 的待决项 1：`render/assets/textureStripAnimation#MINECRAFT_TICK_MS` 是否归位
-    // 到 `domain/textureAnimation` 需裁决，本批不碰 legacy 文件 ⇒ 用本条钉住两者相等。
-    // 若哪天有人改了其中一处，这条会红，而不是让两处静默分叉。
-    expect(MINECRAFT_TICK_MS).toBe(TEXTURE_TICK_MS)
+  it('tick 毫秒值**单点定义**：旧适配器不再自带常量（M5-5 归位）', () => {
+    // M5-3 的待决项 1 已裁决：tick 的唯一写点是 `domain/textureAnimation#TEXTURE_TICK_MS`；
+    // `render/assets/textureStripAnimation` 改为 import 它，不再导出自己的 50。
+    // 本条是**防回流**判据：若有人把第二份常量加回去（两处静默分叉的起点），这里判红。
+    expect(TEXTURE_TICK_MS).toBe(50)
+    expect(
+      'MINECRAFT_TICK_MS' in textureStripModule,
+      'tick 常量必须只有 domain 一处定义（旧适配器不得再导出第二份）',
+    ).toBe(false)
+    // 行为不变：缺省帧时长仍按 domain 的常量换算。
+    expect(textureStripModule.resolveAnimationTimeline({}, 1).durationMsPerFrame[0]).toBe(TEXTURE_TICK_MS)
   })
 })
 

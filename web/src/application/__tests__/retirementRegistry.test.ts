@@ -76,6 +76,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
+import * as multiblockDomain from '@/domain/multiblock'
 
 /**
  * `web/` 根。
@@ -445,9 +446,11 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     replacement: Object.freeze([
       'web/src/domain/editing.ts#channelValues',
       'web/src/domain/editing.ts#withChannelValue',
-      'web/src/domain/multiblock.ts#evaluateChannelAssembly',
-      'web/src/domain/multiblock.ts#channelWriteAuthority',
-      'web/src/domain/multiblock.ts#channelStepTrack',
+      // M5-5：原替代接口列的 `evaluateChannelAssembly`/`channelWriteAuthority` 已**删除**
+      // （零生产消费者、且与生产"只夹取不拒绝"的口径相反）。现值层的唯一权威是：
+      'web/src/domain/multiblockSelection.ts#projectMultiblockSelection',
+      'web/src/domain/multiblock.ts#sampleChannelAt',
+      'web/src/runtime/kernelSession.ts#channelValues',
     ]),
     exitStage:
       'P10b（#282）**已执行**：文件删除，取值归 `EditContext`、写入经 `setChannelValue` 命令、'
@@ -535,6 +538,238 @@ export const RETIREMENT_REGISTRY: readonly RetirementEntry[] = Object.freeze([
     areaOverrideReason: 'R-WK-03：本条的渲染侧读面（`getDoc`/`getCurrentFrameIndex` 消费者）归 P5，但删除前置条件是"内核接线进生产"（#261）；接缝 B 另需先由 P9/#261 补齐相机与 embed 初始视图读面，否则迁移消费者只能伪造不存在的查询（=#1 负对照要判红的形态）',
   }),
 ])
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M5-5 收口：本批**删除**的符号 + **保留**的对照入口（不属 B5 矩阵）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * M5 收口的第二条登记面（与 {@link RETIREMENT_REGISTRY} 并列，**不**混进 B5 矩阵）。
+ *
+ * 为什么另立一张表而不是往 `RETIREMENT_REGISTRY` 里塞：
+ *  - 那张表的 `matrixSlug`/`owner` 与 #250 的 B5 退役矩阵逐条对账（`owner` 只认
+ *    P4/P5/P6/P9/P10/P11，`section15Entries` 指向 §15 行号）——M5 的删除对象**不在**
+ *    那张矩阵里，硬塞会让"归属批次与矩阵对应"断言失去意义；
+ *  - 本表的语义也不同：它登记的是**M5 这一批的收口事实**（删了什么、为什么还留着什么），
+ *    其中 `retained` 条目**不是**"以后再说"，而是**当前仍被对照判据消费**的入口。
+ *
+ * 状态机（与 B5 表同一纪律，双向）：
+ *  - `deleted` ⇒ 模块导出里**不存在**该符号，且全树**零调用位**；
+ *  - `retained` ⇒ 符号仍在、**生产零调用**（只被测试/对照判据消费），且必须写明
+ *    owner 与非空退出条件 —— "零调用但继续存在"必须有一个外部的、可核对的理由。
+ */
+export interface M5CloseoutEntry {
+  /** 符号名（导出名 / 调用位名）。 */
+  readonly symbol: string
+  /** 承载文件（`web/` 相对）。 */
+  readonly file: string
+  readonly status: 'deleted' | 'retained'
+  /** `M5` = 本批删除；`M6` = 呈现链收口批（对照参照的退出负责人）。 */
+  readonly owner: 'M5' | 'M6'
+  /** 为什么删 / 为什么留（留的必须指向**当前真实存在**的消费者）。 */
+  readonly reason: string
+  /** 退出阶段（`retained` 必填且必须点名 M6）。 */
+  readonly exitStage: string
+}
+
+export const M5_CLOSEOUT: readonly M5CloseoutEntry[] = Object.freeze([
+  // ── 本批删除：`domain/multiblock` 的「第二条求值/写权」───────────────
+  //
+  // 六条同一族：`evaluateChannelAssembly` → `validateChannelValues`；
+  // `channelWriteAuthority` 与 `channelToPropertyRef` 族（`channelPropertyKey`/
+  // `channelKeyOfProperty`）互相闭合。M5-1 之后生产求值已全部走
+  // `context/multiblock#assembleSelection` + `composition/kernelMultiblockEvaluation`，
+  // 这些符号在**生产与测试里都零引用**（只有退役登记文提到名字）⇒ 删除不丢判据。
+  {
+    symbol: 'evaluateChannelAssembly',
+    file: 'web/src/domain/multiblock.ts',
+    status: 'deleted',
+    owner: 'M5',
+    reason: '生产求值的第二实现；与生产"只夹取不拒绝"的口径相反（G5），零消费者',
+    exitStage: 'M5-5 已删（求值唯一权威 = context/multiblock#assembleSelection）',
+  },
+  {
+    symbol: 'validateChannelValues',
+    file: 'web/src/domain/multiblock.ts',
+    status: 'deleted',
+    owner: 'M5',
+    reason: '只为 evaluateChannelAssembly 服务的"不夹取"校验；零外部消费者',
+    exitStage: 'M5-5 已删（校验由 domain/animation#validateParameterSet 在调用方执行）',
+  },
+  {
+    symbol: 'channelWriteAuthority',
+    file: 'web/src/domain/multiblock.ts',
+    status: 'deleted',
+    owner: 'M5',
+    reason: '逐通道写权是域层超出 SPEC 的承诺（G4）；生产写权按 ObjectData.source 判定',
+    exitStage: 'M5-5 已删（写权 = domain/scene#ObjectData.source）',
+  },
+  {
+    symbol: 'channelPropertyKey',
+    file: 'web/src/domain/multiblock.ts',
+    status: 'deleted',
+    owner: 'M5',
+    reason: 'channelToPropertyRef 的反向寻址包装；零消费者',
+    exitStage: 'M5-5 已删',
+  },
+  {
+    symbol: 'channelKeyOfProperty',
+    file: 'web/src/domain/multiblock.ts',
+    status: 'deleted',
+    owner: 'M5',
+    reason: 'PropertyRef → 通道键的反向解析；零消费者',
+    exitStage: 'M5-5 已删',
+  },
+  // ── 登记保留：通道阶跃轨道的寻址面 ────────────────────────────────────
+  {
+    symbol: 'channelToPropertyRef',
+    file: 'web/src/domain/multiblock.ts',
+    status: 'retained',
+    owner: 'M6',
+    reason:
+      'channelStepTrack（#249 §7 要求的"至少一条阶跃通道轨道"证明路径）仍用它做轨道目标；'
+      + '生产调用为零，但删它会把通道阶跃轨道的判据一并废掉',
+    exitStage: 'M6 呈现链收口批：轨道寻址改走通用属性面后随 channelStepTrack 同批处置',
+  },
+  // ── 登记保留：切换前的对照参照（M5-2 遗留，本批核实仍零生产调用）───────
+  //
+  // 这三条是 M5-2 声明的"切换前参照"：生产零调用，只被对照/恒等判据消费。
+  // M5-5 核实它们仍零生产调用；**不删**的理由是删除会把"切换没有改变画面/内容身份"
+  // 这条证据换成一份冻结指纹 —— 那是 M6 呈现链收口批的工作，M5 末尾不新造冻结资产。
+  {
+    symbol: 'kernelRenderViewOf',
+    file: 'web/src/composition/kernelRenderView.ts',
+    status: 'retained',
+    owner: 'M6',
+    reason:
+      '旧入口（整份文档重装配 + 投影）是 g5RenderLosslessSource / p11dRunstateContentIdentity '
+      + '的对照参照；生产由 kernelRenderViewFromFace（只投影已求值场景）承担',
+    exitStage: 'M6 呈现链收口批：把对照改为冻结几何/内容身份指纹后同批删除',
+  },
+  {
+    symbol: 'evaluateMultiblock',
+    file: 'web/src/presentation/multiblockEvaluation.ts',
+    status: 'retained',
+    owner: 'M6',
+    reason:
+      '其唯一消费者是 kernelRenderViewOf；生产求值点是 evaluateMultiblockPresentation'
+      + '（并带有与生产不同的失效模型，不能当活路径用）',
+    exitStage: 'M6：随 kernelRenderViewOf 同批删除（含 evaluationNodeDependency）',
+  },
+  {
+    symbol: 'buildMultiblockRenderView',
+    file: 'web/src/shared/viewport/multiblockChannelUi.ts',
+    status: 'retained',
+    owner: 'M6',
+    reason:
+      'renderCutoverParity 的 "before" 侧必须走切换前真正吃的那条路（否则比较的不是'
+      + '切换前后的渲染输入）；生产零调用',
+    exitStage: 'M6：对照改为冻结几何指纹后随旧文档装配簇同批删除',
+  },
+  {
+    symbol: 'assembleForSelection',
+    file: 'web/src/shared/viewport/multiblockChannelUi.ts',
+    status: 'retained',
+    owner: 'M6',
+    reason:
+      '旧文档装配包装（未声明组合回落 + 提示）；生产已改吃 assembleMultiblockKernelFace，'
+      + '它只剩面板 DOM 判据与切换对照两个测试消费者',
+    exitStage: 'M6：旧文档装配簇退出时同批删除（与 buildMultiblockRenderView 一致）',
+  },
+  {
+    symbol: 'buildChannelPanelModel',
+    file: 'web/src/shared/viewport/multiblockChannelUi.ts',
+    status: 'retained',
+    owner: 'M6',
+    reason:
+      '旧文档面板模型适配器（委托 buildChannelPanelModelOf）；生产面板走内核面，'
+      + '它只剩 DOM 判据消费',
+    exitStage: 'M6：与 assembleForSelection 同批退出',
+  },
+])
+
+/** 调用位计数（**纯**：输入已去注释的代码骨架）。 */
+export function countCallSitesInCode(code: string, symbol: string): number {
+  const re = new RegExp(`\\b${symbol}\\s*\\(`, 'g')
+  return (code.match(re) ?? []).length
+}
+
+/** 全树生产代码里某符号的调用位命中（`web/` 相对文件 + 行）。 */
+function productionCallSites(symbol: string): readonly string[] {
+  const out: string[] = []
+  const walk = (dir: string): void => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) {
+        if (e.name === '__tests__' || e.name === 'node_modules') continue
+        walk(full)
+        continue
+      }
+      if (!/\.(ts|tsx|vue|mts)$/.test(e.name)) continue
+      if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(e.name) || /\.d\.ts$/.test(e.name)) continue
+      const raw = readSourceText(full)
+      const code = codeOfSource(full, raw)
+      if (countCallSitesInCode(code, symbol) === 0) continue
+      for (const line of code.split('\n')) {
+        if (countCallSitesInCode(line, symbol) > 0) {
+          out.push(`${path.relative(WEB_ROOT, full).replace(/[\\/]+/g, '/')} :: ${line.trim()}`)
+        }
+      }
+    }
+  }
+  const srcRoot = path.join(WEB_ROOT, 'src')
+  if (fs.existsSync(srcRoot)) walk(srcRoot)
+  return Object.freeze(out)
+}
+
+describe('M5-5 退役收口：删除零消费者残留 + 保留对照入口（各自有 owner）', () => {
+  it('已删符号在模块导出里**不存在**（防回流）', () => {
+    for (const e of M5_CLOSEOUT.filter((x) => x.status === 'deleted')) {
+      expect(
+        e.symbol in multiblockDomain,
+        `M5-5：${e.symbol} 已删除 —— 回流 = 第二份求值/写权复活`,
+      ).toBe(false)
+    }
+    // 反空洞真：模块本身仍导出它该有的东西（不是"整个模块被删了"）。
+    expect('channelStepTrack' in multiblockDomain).toBe(true)
+    expect('resolveChannelEffective' in multiblockDomain).toBe(true)
+  })
+
+  it('已删符号全树**零调用位**（注释里提到名字不算）', () => {
+    for (const e of M5_CLOSEOUT.filter((x) => x.status === 'deleted')) {
+      expect(productionCallSites(e.symbol), `M5-5：${e.symbol} 仍有调用位`).toEqual([])
+    }
+  })
+
+  it('保留条目：符号仍在、**生产零调用**、owner 与退出阶段已登记', () => {
+    for (const e of M5_CLOSEOUT.filter((x) => x.status === 'retained')) {
+      expect(e.owner, `${e.symbol}：保留必须有外部 owner`).toBe('M6')
+      expect(e.reason.length, `${e.symbol}：保留必须写明理由`).toBeGreaterThan(40)
+      expect(e.exitStage, `${e.symbol}：退出阶段必须点名 M6`).toContain('M6')
+      const text = readMaybe(e.file)
+      expect(text, `${e.file} 必须存在（保留类）`).not.toBeNull()
+      expect(text!.includes(e.symbol), `${e.file} 必须仍定义 ${e.symbol}`).toBe(true)
+      // **生产零调用** = 除定义文件外，调用位只能来自**同一保留簇**的其它文件。
+      // 例：`evaluateMultiblock` 的唯一调用者是 `kernelRenderViewOf` —— 后者本身也零生产调用，
+      // 故这条链是"零调用 → 零调用"，不是生产入口。簇外的调用位才判红（见下一条）。
+      const own = e.file.replace(/^web\//, '')
+      const retainedFiles = new Set(
+        M5_CLOSEOUT.filter((x) => x.status === 'retained').map((x) => x.file.replace(/^web\//, '')),
+      )
+      const sites = productionCallSites(e.symbol)
+        .filter((s) => !s.startsWith(own))
+        .filter((s) => !retainedFiles.has(s.split(' :: ')[0] ?? ''))
+      expect(sites, `${e.symbol} 仍被**保留簇之外**的生产代码调用（则它不该是"零调用对照"）`).toEqual([])
+    }
+  })
+
+  it('**负对照**：调用位计数不是恒空（注入一行真调用必被抓住；注释里的不算）', () => {
+    expect(countCallSitesInCode(stripNonCode('const x = evaluateMultiblock({ a: 1 })'), 'evaluateMultiblock')).toBe(1)
+    expect(countCallSitesInCode(stripNonCode('// evaluateMultiblock({ a: 1 })'), 'evaluateMultiblock')).toBe(0)
+    expect(countCallSitesInCode(stripNonCode('const s = "evaluateMultiblock("'), 'evaluateMultiblock')).toBe(0)
+  })
+})
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 扫描设施（**纯**：输入文本 → 命中；便于负对照直接喂合成文本）

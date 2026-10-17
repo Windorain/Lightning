@@ -770,9 +770,9 @@ export type ParameterConstraint =
  *
  * 允许 `string` 的理由：枚举型参数（如"运行态 id"）的合法域是字符串。
  * 只允许 `number` 会逼调用方为字符串枚举另造一套校验器 —— 那正是
- * #249 §7 禁止的"另建专用"形态。数值通道的**取值**仍由
- * `domain/multiblock` 的 `validateChannelValues` 收窄为 `number`
- * （职责分层：通用参数校验 vs 通道取值校验）。
+ * #249 §7 禁止的"另建专用"形态。数值通道的取值在投影/装配边界收窄为 `number`
+ * （`domain/multiblockSelection` 与 `context/multiblock` 的装配输入），
+ * 本模块保持通用（职责分层：通用参数校验 vs 通道取值校验）。
  */
 export type ParameterValue = number | string
 export type ParameterCandidate = Readonly<Record<string, ParameterValue>>

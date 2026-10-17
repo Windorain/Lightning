@@ -91,7 +91,8 @@ function hashString(s: string): number {
  * 与切换前**逐字节相同**，`planContentRebuild` 全 false）。
  *
  * 文档（`docRef.value`）没有这个滞后：它就是"待渲染的内容"本身，取值一变它立刻变
- * （`composition/kernelRenderView#kernelRenderViewOf` 的投影产物）。
+ * （`composition/kernelRenderView#kernelRenderViewFromFace` 的投影产物；M5-2 起
+ * 定义面 / 呈现会话读同一份派生场景）。
  * ⇒ 内容级身份必须**从文档机械派生**（与本模块文件头"必须由读集派生"同一纪律）。
  *
  * ## 顺序与稳定性
