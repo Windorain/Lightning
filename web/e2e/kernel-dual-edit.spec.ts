@@ -616,4 +616,99 @@ test.describe('M4-2 · 双区编辑同步（一次编辑，另一区看得见）
     )
   })
 
+  test('DE-2 B 区真实点选 + 右栏编辑 ⇒ A 区同格呈现读面为新值（反向对称）', async ({ page }) => {
+    test.setTimeout(300_000)
+    const doc = innerDocOf(fixturePath())
+    const candidates = annotatedCandidates(doc)
+    expect(candidates.length, '前提：夹具必须真有带逐格说明的格').toBeGreaterThan(0)
+    const sizeRow = doc.cellGrid[0]!.length
+
+    const { a, b } = await openDualArea(page)
+
+    // ── ① B 区真实左键点选一格 ──
+    const hit = await findHitPoint(page, b.region, candidates)
+    await page.mouse.click(hit.client.x, hit.client.y)
+    const kernelPos = kernelPosOf(hit.candidate, sizeRow)
+    const fileIdx = fileIdxOf(hit.candidate)
+    await expect
+      .poll(async () => await selectedPos(page), {
+        message: 'B 区真实左键必须让右栏显示被点中的那一格（点选按区，不是按根区相机）',
+        timeout: 10_000,
+      })
+      .toEqual(kernelPos)
+    expect((await fieldOf(page, TOOLTIP_FIELD))?.value, '前提：右栏字段值必须来自夹具原件').toBe(hit.candidate.text)
+
+    // ── ② 前提：A 区呈现读面此刻携带夹具原文 + 记下它的令牌与宿主身份 ──
+    const aBefore = await definitionTooltipAt(page, a.region, fileIdx)
+    expect(aBefore.text, '前提：A 区自己的呈现读面此刻必须携带夹具原文').toBe(hit.candidate.text)
+    expect(aBefore.token, '前提：A 区读面必须存在（令牌非空）').not.toBeNull()
+    const hostA0 = await page.evaluate((rid: string) => {
+      const vm = (window as any).__vm__
+      ;(window as any).__deHostA__ = vm.viewports.get(rid).domElement.value
+      return document.querySelectorAll('canvas').length
+    }, a.region)
+
+    // ── ③ 经右栏改该格（同一个生产提交链，只是点选发生在 B 区）──
+    const NEW = 'M4-2 DE-2（e2e）B→A'
+    await writeField(page, TOOLTIP_FIELD, NEW)
+    await expect
+      .poll(async () => await kernelTooltipAt(page, fileIdx), { message: '编辑必须落进内核内容', timeout: 15_000 })
+      .toBe(NEW)
+
+    // ── ④ 主断言：A 区自己的读面必须（a）重新解析过、且（b）同格解出新值 ──
+    // （与 DE-1 同一条口径：只断言文本会在"陈旧网格 + 当前说明池"下假绿）
+    await expect
+      .poll(
+        async () => {
+          const s = await definitionTooltipAt(page, a.region, fileIdx)
+          return { refreshed: s.token !== aBefore.token, text: s.text }
+        },
+        { message: 'B 区编辑后 A 区必须重解自己的定义（令牌变）且同格读出新值', timeout: 20_000 },
+      )
+      .toEqual({ refreshed: true, text: NEW })
+
+    expect(
+      await page.evaluate((rid: string) => {
+        const vm = (window as any).__vm__
+        return {
+          domSame: vm.viewports.get(rid).domElement.value === (window as any).__deHostA__,
+          canvasCount: document.querySelectorAll('canvas').length,
+        }
+      }, a.region),
+      'A 区读面的刷新不得靠"重建视口宿主"实现（DOM 元素与 canvas 数必须不变）',
+    ).toEqual({ domSame: true, canvasCount: hostA0 })
+    expect(
+      (await definitionTooltipAt(page, b.region, fileIdx)).text,
+      'B 区自己的呈现读面同样应为新值',
+    ).toBe(NEW)
+    expect(
+      await definitionsAreDistinct(page, a.region, b.region),
+      '两区的 definition 必须是两个不同对象（反恒真锚点）',
+    ).toBe(true)
+    const other = candidates.find(
+      (c) => !(c.z === hit.candidate.z && c.row === hit.candidate.row && c.col === hit.candidate.col),
+    )
+    expect(other, '前提：夹具必须还有第二个带说明的格').toBeTruthy()
+    expect(
+      (await definitionTooltipAt(page, a.region, fileIdxOf(other!))).text,
+      'A 区读面不得"把所有格都读成新值"（未被编辑的另一格必须仍是它自己的原文）',
+    ).toBe(other!.text)
+
+    // ── ⑤ A 区视口还活着：真实悬停该格仍命中 ──
+    const ptA = await projectCellLocal(page, { ...hit.candidate, ...hit.local }, a.region)
+    await page.mouse.move(ptA.clientX, ptA.clientY)
+    const hoverA = await readHoverWithin(page, a.region, 5000)
+    expect(hoverA?.voxel, 'A 区真实悬停必须命中该格').toEqual({
+      column: hit.candidate.col,
+      row: hit.candidate.row,
+      zSlice: hit.candidate.z,
+    })
+
+    console.log(
+      '[DE-2] regions=' + b.region + '→' + a.region +
+        ' 格=' + hit.candidate.z + '/' + hit.candidate.row + '/' + hit.candidate.col +
+        ' 原文="' + hit.candidate.text + '" → "' + NEW + '"',
+    )
+  })
+
 })
