@@ -20,6 +20,40 @@
  * 触发面是**内容投影**（编辑/移动都算）。内容变化只应更新画面，**不得**重新框选
  * 用户已调整的机位。
  *
+ * ## 根因核验（M2-1 / #397，2026-10-17 复核）
+ *
+ * 上表第 2–3 行的"宿主重挂"是**独立于机位修复**的另一处缺陷（SPEC §7.3/§7.4）：
+ * 普通内容编辑不得销毁健康视口宿主。本次沿"内容提交 → 投影 → 宿主渲染条件"逐环读码 +
+ * 真实入口实测，确认的链是：
+ *
+ * ```
+ * ① Tooltip 提交          → 内核内容事务提交（`workbench-rna` / operator 写面）
+ * ② `contentRefreshTick`++ → `runtime/main.ts:229-231`（`requestContentRefresh`）
+ * ③ DRW 观察者             → `runtime/drwMeshPipeline.ts:466-471`（`applyContentRefresh`）
+ * ④ 首次内容身份 `republish` → `presentation/contentSignal.ts:85-107`；`prev === null`
+ *                             （装载路径**从未**建立基线）⇒ `diffContentIdentity` 判
+ *                             `documentChanged`（`presentation/contentIdentity.ts:83-90`）
+ * ⑤ 重建计划               → `planContentRebuild` 首分支 ⇒ `reloadResources: true`
+ *                             （`presentation/contentIdentity.ts:114-117`）
+ * ⑥ 资源处置               → `drwMeshPipeline.ts:577-581`：`textureCache.value = null`
+ * ⑦ 宿主挂载条件           → 两个宿主的 `v-if` 含 `materialLibrary`（= 该 ref）
+ *                             ⇒ 条件瞬假 ⇒ `RenderEngineHost` 卸载 → 重挂 ⇒ 新 canvas
+ * ```
+ *
+ * 实测（真实工作台 + 生产 `OPERATOR_OPEN_SCENE`，修复前）：编辑后 `canvasRemovals=1`、
+ * `viewportRemovals=1`、`bothAbsentFrames=2`、`currentIsSame=false`（画布原标记丢失）——
+ * 与 #397 单据的"2 帧、512 ms 空窗"同形。
+ *
+ * **修复方向**（本批后续提交落地）：宿主的挂载条件只表达"有已解析场景"，不参与任何
+ * 资源瞬时态；`materialLibrary` 作为宿主输入一并退出（贴图绑定归呈现会话，材质库只服务
+ * 方块图标缓存）。判据 = `web/e2e/kernel-viewport-host-lifetime.spec.ts`（canvas 元素同一、
+ * 无缺席帧、占位未出现、机位不变）。
+ *
+ * ⚠️ 本模块的纪律仍**必须**保留，理由与宿主重挂无关：它约束的是"**谁**可以施加初始机位"
+ * （没有相机状态 / 换了文档），而不是"宿主有没有重挂"。文档替换（`replaceDoc`）即便
+ * 不再触发重挂，也**仍然必须重新框选**新文档 —— 判据靠窄信号 `documentRevision`，
+ * 与挂载次数无关。
+ *
  * ## 纪律（本模块的唯一出口）
  *
  * 施加初始机位（自动框选）**只允许**在两种情况下发生：
