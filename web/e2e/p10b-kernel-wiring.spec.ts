@@ -52,6 +52,7 @@ import {
   waitForViewportMounted,
   VIEWPORT_CANVAS,
 } from './helpers/multiblock'
+import { buildFrameDominantMultiframeDocument, FRAME_COUNT } from './helpers/multiblock/frameDoc'
 
 /** 内核会话的公开观测面（经 `window.__vm__` 的 `ctx.kernel`）。 */
 interface KernelObservation {
@@ -62,6 +63,8 @@ interface KernelObservation {
   readonly multiblockAuthority: string | null
   readonly frameAxisCount: number
   readonly frameAxisDurations: readonly number[]
+  /** 声明里的**场景**条数（M5-1：场景不是时间轴帧，留在声明里）。 */
+  readonly sceneCount: number
   readonly contentVersion: number | null
 }
 
@@ -72,14 +75,16 @@ async function readKernelObservation(page: import('@playwright/test').Page): Pro
     if (kernel === null) {
       return {
         hasKernel: false, hasDocument: false, objectCount: 0, objectIds: [],
-        multiblockAuthority: null, frameAxisCount: 0, frameAxisDurations: [], contentVersion: null,
+        multiblockAuthority: null, frameAxisCount: 0, frameAxisDurations: [], sceneCount: 0,
+        contentVersion: null,
       }
     }
     const doc = kernel.document()
     if (doc === undefined || doc === null) {
       return {
         hasKernel: true, hasDocument: false, objectCount: 0, objectIds: [],
-        multiblockAuthority: null, frameAxisCount: 0, frameAxisDurations: [], contentVersion: null,
+        multiblockAuthority: null, frameAxisCount: 0, frameAxisDurations: [], sceneCount: 0,
+        contentVersion: null,
       }
     }
     const objectIds = Object.keys(doc.scene.objects)
@@ -99,13 +104,19 @@ async function readKernelObservation(page: import('@playwright/test').Page): Pro
       multiblockAuthority: authority,
       frameAxisCount: frames.length,
       frameAxisDurations: frames.map((f: { durationMs: number | null }) => f.durationMs ?? 0),
+      // M5-1：场景在**声明**里（content.multiblock.scenes），不进 frameAxis。
+      sceneCount: doc.content.multiblock?.scenes?.length ?? 0,
       contentVersion: typeof doc.version.contentVersion === 'number' ? doc.version.contentVersion : null,
     }
   })
 }
 
-/** 各夹具的帧数（与 `multiblockAssembler.test.ts` 同一清单）。 */
-const FRAME_COUNTS: Record<string, number> = {
+/**
+ * 各夹具的**已声明场景数**（M5-1：场景 = 变体配置集合，不是时间轴帧）。
+ *
+ * 数字不变（432/108/12 是文件声明的事实），但断言对象从"帧轴长度"改为"声明里的场景条数"。
+ */
+const SCENE_COUNTS: Record<string, number> = {
   'multiblock-ebf-2ch.json': 432,
   'multiblock-lsc-overlap.json': 108,
   'multiblock-tier-only.json': 12,
@@ -115,7 +126,7 @@ const SHOT_DIR = path.join(import.meta.dirname, 'screenshots', 'p10b-kernel')
 
 test.describe('P10b · 内核接线（真实夹具经生产入口装进内核会话）', () => {
   for (const file of ['multiblock-tier-only.json', 'multiblock-ebf-2ch.json'] as const) {
-    test(`${file}：装配进内核 + 内核读面报只读 + 帧时长轴在内核`, async ({ page }, testInfo) => {
+    test(`${file}：装配进内核 + 内核读面报只读 + 场景在声明里、不进时间轴`, async ({ page }, testInfo) => {
       fs.mkdirSync(SHOT_DIR, { recursive: true })
       await gotoWorkbench(page)
 
@@ -143,12 +154,24 @@ test.describe('P10b · 内核接线（真实夹具经生产入口装进内核会
         `${file} 多方块生成物的写权必须是 readOnly（§3.3「不因通用对象模型而变得可编辑」）`,
       ).toBe('readOnly')
 
-      // ── ③ 内核文档承载帧时长轴（帧数与文件声明一致）──
+      // ── ③ 场景 ≠ 时间轴（M5-1 裁决）：场景条数在**声明**里，`frameAxis` **恒空** ──
+      //
+      // 旧断言（M5-1 之前）是「帧时长轴长度 = 432/12/108」。那是把变体配置集合误读成
+      // 时间轴帧的形态：432 个场景经 `stripTimeline` 的 0→1ms 归一化被伪装成 432ms 动画。
+      // 现在两条都是**可判红**的：场景数必须等于文件声明；帧轴必须为空（若哪天又把
+      // 场景合回时间轴，第二条立刻红）。
+      expect(
+        obs.sceneCount,
+        `${file} 已声明场景数必须等于文件声明（场景在 content.multiblock.scenes）`,
+      ).toBe(SCENE_COUNTS[file])
       expect(
         obs.frameAxisCount,
-        `${file} 内核文档的帧时长轴长度必须等于文件声明的帧数`,
-      ).toBe(FRAME_COUNTS[file])
-      expect(obs.frameAxisDurations.length, `${file} 每帧时长必须逐项在内核里`).toBe(FRAME_COUNTS[file])
+        `${file} 多方块文档的帧轴必须为空（场景不参与播放；M5-1 用户裁决）`,
+      ).toBe(0)
+      expect(
+        obs.frameAxisDurations.length,
+        `${file} 帧轴为空 ⇒ 没有逐帧时长（不得再合成 432×1ms）`,
+      ).toBe(0)
 
       // ── ④ 内容身份已由内核算出（不是占位）──
       expect(obs.contentVersion, `${file} 内核文档必须有内容身份摘要`).not.toBeNull()
@@ -166,22 +189,45 @@ test.describe('P10b · 内核接线（真实夹具经生产入口装进内核会
     })
   }
 
-  test('帧声明**来自内核**：换帧走内核命令，帧下标随之变', async ({ page }) => {
+  test('场景**不参与播放**：多方块文档没有帧轴，seekFrame 不动帧下标', async ({ page }) => {
     await gotoWorkbench(page)
     const fx = readFixture('multiblock-tier-only.json')
     await injectSceneDocumentOk(page, fx.envelope, 'multiblock-tier-only.json')
     await waitForViewportMounted(page)
 
-    // 帧数已进内核 ⇒ 内核能真的按帧时长轴定位
+    // M5-1：多方块文档的帧清单是**场景**（变体配置），不是时间轴帧 ⇒ frameAxis 为空：
+    //  · `frameCount()` = 0、帧下标恒 0；
+    //  · `seekFrame` 在空帧轴上**什么都不做**（不静默改成别的帧）。
+    // 旧断言是「seekFrame(3) ⇒ 帧下标 3」—— 那条把 12 个场景当成 12 帧动画。
     const before = await page.evaluate(() => (window as any).__vm__.kernel.frameIndex())
     expect(before, '初始帧下标应为 0').toBe(0)
+    const frameCount = await page.evaluate(() => (window as any).__vm__.kernel.frameCount())
+    expect(frameCount, '多方块文档的帧轴必须为空（场景不参与播放）').toBe(0)
 
     await page.evaluate(() => (window as any).__vm__.kernel.seekFrame(3))
     const after = await page.evaluate(() => (window as any).__vm__.kernel.frameIndex())
     expect(
       after,
-      'seekFrame 应经内核命令定位到第 3 帧（证明 frameAxis 真的在内核里被用）',
-    ).toBe(3)
+      '空帧轴上 seekFrame 不得改变帧下标（场景切换由通道取值驱动，不是 seek）',
+    ).toBe(0)
+
+    // 反空洞真（负对照见下一个 test）：同一会话在**帧为主**文档上 seekFrame 是真能动的。
+  })
+
+  test('**负对照**：帧为主文档的帧轴非空且 seekFrame 真的动（证明上一条不是"内核恒不支持"）', async ({ page }) => {
+    await gotoWorkbench(page)
+    await injectSceneDocumentOk(page, buildFrameDominantMultiframeDocument(), 'multiframe-frame-dominant.json')
+    await waitForViewportMounted(page)
+
+    const frameCount = await page.evaluate(() => (window as any).__vm__.kernel.frameCount())
+    expect(frameCount, '帧为主文档的帧轴必须非空（3 帧样例）').toBe(FRAME_COUNT)
+    expect(await page.evaluate(() => (window as any).__vm__.kernel.frameIndex()), '初始帧下标 0').toBe(0)
+
+    await page.evaluate(() => (window as any).__vm__.kernel.seekFrame(2))
+    expect(
+      await page.evaluate(() => (window as any).__vm__.kernel.frameIndex()),
+      '帧为主文档上 seekFrame(2) 必须定位到第 2 帧（时间轴真的在内核里被用）',
+    ).toBe(2)
   })
 
   test('**负对照**：帧为主文档（minimal-v2）不被装配成多方块', async ({ page }) => {
