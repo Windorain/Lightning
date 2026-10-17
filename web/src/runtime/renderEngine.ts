@@ -3,6 +3,7 @@ import { View3DRenderer } from '@/render/viewport/renderViewport'
 import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
+import { syncClipPlanesToGroup } from '@/render/interaction/initialCamera'
 
 export interface RenderEngineReadyPayload {
   mainScene: THREE.Scene
@@ -168,6 +169,17 @@ export class RenderEngine {
         this.lastContentGroup = opts.contentGroup
         if (opts.contentGroup) layers.structure.add(opts.contentGroup)
       }
+      /**
+       * **裁剪面跟随内容包围盒**（M5-2 返工）。
+       *
+       * 机位（框选）**不**在这里动 —— 内容变化不得重新框选（`viewportCameraInit` 的纪律）。
+       * 但内容**变大**时（多方块拖 Height）旧 `near` 会把盒体切开，屏幕上出现
+       * 一道斜切楔形。`syncClipPlanesToGroup` 只改 near/far，不动任何可见构图。
+       *
+       * 每帧算一次是 O(批次数)：`Box3.setFromObject` 走几何已缓存的 `boundingBox`，
+       * 不遍历顶点；且 helper 在值未变时**不**写相机（不触发无用重算）。
+       */
+      if (opts.contentGroup) syncClipPlanesToGroup(vp.camera, opts.contentGroup)
       vp.renderMain()
       vp.renderOverlay(overlayScene)
       vp.renderGizmo()
