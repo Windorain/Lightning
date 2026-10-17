@@ -10,7 +10,7 @@
  *
  * | 组 | 钉什么 |
  * |---|---|
- * | ① | **三命令的产字节归属**：Plain / Envelope / OBJ 都经 `ctx.plainForSave()` 取 plain（内核投影优先），**不是**旧文档 `serialize()` |
+ * | ① | **产字节归属**：Plain / Envelope / OBJ / 等轴 PNG / 场景 GIF（M5-4）都经 `ctx.plainForSave()` 取内容（内核投影优先），**不是**旧文档 `serialize()` |
  * | ② | **等轴 PNG 的归属**：仍走 `workbench/exportIsometricImage` 的自建渲染器路径（**未**切 `ExportJob`），且该事实**登记在案**（seam 存在 + exitCondition 点名文件） |
  * | ③ | **D-8 前提的机械证据**：`SnapshotOffscreenRenderPort` 的 `textures` **缺省** ⇒ 材质走中性色（即：切过去会丢贴图）。这是"不能切"的**实在依据**，不是判断 |
  * | ④ | **`artifact-host` 四断言的成立条件**：ESM 入口闭包判据打的是"embed 闭包含不含 jszip 消费者"，而 Plain/Envelope/OBJ 仍在 `workbench/export/*`（含 jszip）⇒ **四断言不需改**（任务书预计要改，实测不变 —— 如实登记） |
@@ -50,14 +50,17 @@ describe('D3/S5 ① 三命令的产字节归属：`plainForSave` 是唯一入口
     const hits = code.split('\n').filter((l) => l.includes('plainForSave()')).length
     expect(
       hits,
-      '四条导出命令都必须经 `plainForSave()`（ISO PNG 也要取 plain 做烘焙输入）',
-    ).toBe(4)
+      // M5-4：新增 `ExportSceneGifOperator`（场景 GIF）⇒ 从四条变**五条**；
+      // 它同样只经 `plainForSave()` 取内容（不碰旧文档读面）。
+      '五条导出命令都必须经 `plainForSave()`（ISO PNG / 场景 GIF 也要取 plain 做烘焙输入）',
+    ).toBe(5)
   })
 
-  it('**反空洞真**：该文件确实还有四处 `exec`（判据不是对着空文件跑）', () => {
+  it('**反空洞真**：该文件确实还有五处 `exec`（判据不是对着空文件跑）', () => {
     const code = codeOnly(readSrc(threeCommands))
     const execs = code.split('\n').filter((l) => /exec\(ctx/.test(l)).length
-    expect(execs).toBe(4)
+    // M5-4：Plain / Envelope / OBJ / 等轴 PNG / 场景 GIF = 5 处。
+    expect(execs).toBe(5)
   })
 
   it('**旧路径不得复活**：该文件对旧读取入口零命中（真代码口径）', () => {
