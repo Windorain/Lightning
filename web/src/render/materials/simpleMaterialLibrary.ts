@@ -73,6 +73,16 @@ export interface MaterialLibraryApi {
    * （不是"只能向前"的累积量）。
    */
   setSceneTime(seconds: number): void
+  /**
+   * 本库**实际**会随场景时间采样的帧条（含每帧停留毫秒）。空数组 = 没有动画材质。
+   *
+   * ## 为什么从这里取，而不是再从 plain doc 解析一遍（M5-4）
+   *
+   * `configureTextureForEntry` 是**唯一**决定"这是不是动画条 / 几帧 / 每帧多久"的地方
+   * （内部走 `resolveAnimationTimeline`）。第二份解析必然漂移，而漂移的表现正是
+   * "GIF 的帧时长与画面看到的帧不同步"——故 GIF 计划只读这一个出口。
+   */
+  animatedSequences(): readonly AnimatedTextureSequence[]
   getMaterialForBatch(descriptor: BatchDescriptor): Promise<THREE.MeshBasicMaterial>
   dispose(): void
   /** 一旦为 true，进行中的 buildBlockMesh 应放弃结果，不再挂场景 */
@@ -148,6 +158,15 @@ interface AnimatedStrip {
   readonly tex: THREE.Texture
   readonly timeline: StripTimeline
   readonly frameCount: number
+  /** 材质身份（materialId）；GIF 计划的稳定排序与诊断用。 */
+  readonly materialId: string
+}
+
+/** 材质库对外报告的**实际**动画序列（M5-4：GIF 时间计划的输入）。 */
+export interface AnimatedTextureSequence {
+  readonly materialId: string
+  readonly frameCount: number
+  readonly durationsMs: readonly number[]
 }
 
 /**
@@ -178,6 +197,7 @@ function configureAnimatedStrip(
   tex: THREE.Texture,
   parsed: ParsedMcmeta,
   frameCount: number,
+  materialId: string,
 ): AnimatedStrip | null {
   const { frames, durationMsPerFrame } = resolveAnimationTimeline(parsed, frameCount)
   if (frames.length === 0) return null
@@ -192,7 +212,7 @@ function configureAnimatedStrip(
   // 初值：场景时间 0 对应的帧（与旧实现"先 applyFrameAtIndex(0)"同一呈现起点，
   // 但取值路径是采样而不是"下标 0"—— 时间 0 落在哪一项由时长轴决定）。
   applyFrameOffset(tex, timeline, frameCount, 0)
-  return Object.freeze({ tex, timeline, frameCount })
+  return Object.freeze({ tex, timeline, frameCount, materialId })
 }
 
 /** 把采样出的帧写成纹理 V 偏移（呈现手段；帧的选择由纯采样决定）。 */
@@ -205,6 +225,7 @@ function applyFrameOffset(tex: THREE.Texture, timeline: StripTimeline, frameCoun
 function configureTextureForEntry(
   tex: THREE.Texture,
   entry: MaterialEntry,
+  materialId: string,
 ): AnimatedStrip | null {
   tex.colorSpace = THREE.SRGBColorSpace
   tex.flipY = false
@@ -226,7 +247,7 @@ function configureTextureForEntry(
 
   const parsed = materialEntryToParsedMcmeta(entry, nFrames)
   if (shouldAnimateStrip(parsed, nFrames)) {
-    return configureAnimatedStrip(tex, parsed, nFrames)
+    return configureAnimatedStrip(tex, parsed, nFrames, materialId)
   }
   tex.repeat.set(1, 1)
   tex.offset.set(0, 0)
@@ -259,7 +280,7 @@ export class SimpleMaterialLibrary implements MaterialLibraryApi {
     for (const [materialId, tex] of preloaded) {
       const entry = registry.materials[materialId]
       if (!entry) continue
-      const strip = configureTextureForEntry(tex, entry)
+      const strip = configureTextureForEntry(tex, entry, materialId)
       if (strip) this.animatedStrips.push(strip)
       this.textureByMaterialId.set(materialId, tex)
     }
@@ -283,6 +304,20 @@ export class SimpleMaterialLibrary implements MaterialLibraryApi {
     for (const strip of this.animatedStrips) {
       applyFrameOffset(strip.tex, strip.timeline, strip.frameCount, s)
     }
+  }
+
+  /**
+   * 本库**实际**会随场景时间采样的帧条（M5-4）。
+   *
+   * 返回的是登记项的快照：`durationsMs` 与 `frameCount` 来自 `resolveAnimationTimeline`
+   * 的同一份解释（`timeline.durationMs`），因此与 `setSceneTime` 的采样**同源**。
+   */
+  animatedSequences(): readonly AnimatedTextureSequence[] {
+    return this.animatedStrips.map((s) => ({
+      materialId: s.materialId,
+      frameCount: s.frameCount,
+      durationsMs: s.timeline.durationMs,
+    }))
   }
 
   /** 最近一次收到的场景时间（秒）；诊断与测试用。 */
