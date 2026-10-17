@@ -139,10 +139,18 @@ export function provideToolRegistry(): ToolRegistry {
 
   function clearToolContext(regionId: string): void {
     contexts.delete(regionId)
-    // 该区的实例随视口一起退场（其呈现根挂在该区的 toolsOverlayGroup 里）
+    // 该区的实例随视口一起退场（其呈现根挂在该区的 overlay group 里）。
+    //
+    // 释放顺序：deactivate（各工具自己的清理）→ 从父节点摘下 → dispose（MoveGizmo 的
+    // 几何/材质）。区域被反复分割/合并时实例会被反复创建，不 dispose 就是每次分割
+    // 漏一组 GPU 缓冲（A19 的泄漏判据在实例级成立，故这里不给它留口子）。
     for (const [k, gizmo] of [...instances]) {
       if (!k.endsWith('@' + regionId)) continue
       gizmo.deactivate()
+      const root = (gizmo as { root?: { parent?: { remove(o: unknown): void } | null } }).root
+      if (root?.parent) root.parent.remove(root)
+      const disposable = gizmo as { dispose?: () => void }
+      if (typeof disposable.dispose === 'function') disposable.dispose()
       instances.delete(k)
     }
   }
