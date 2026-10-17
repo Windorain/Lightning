@@ -148,7 +148,13 @@ function pushToServer(): void {
             <span class="ew-unit">s</span>
           </label>
           <button class="ew-btn ew-btn--sm" @click="takeCurrentTime" :disabled="isoBusy">{{ t("takeCurrentTime") }}</button>
-          <button v-if="isoUrl" class="ew-btn ew-btn--primary" @click="downloadIso()">{{ t("downloadPng") }}</button>
+          <!--
+            M5-4：下载按钮不再以"预览成功"为前提（原 `v-if="isoUrl"`）。
+            理由：下载失败的错误位（`dlErr`）必须有**可达**的触发路径 —— 若按钮只在预览成功时
+            出现，而预览与下载又走同一条烘焙链，那个错误位在 UI 上几乎不可达（形同死代码）。
+            现在：预览失败也能点下载，失败即显示红色错误位（不产生任何下载）。
+          -->
+          <button v-if="doc" class="ew-btn ew-btn--primary" @click="downloadIso()" data-download-iso>{{ t("downloadPng") }}</button>
         </div>
         <div v-if="isoBusy" class="ew-fb">{{ t('rendering') }}</div>
         <img v-else-if="isoUrl" :src="isoUrl" class="ew-iso" alt="Iso preview" />
