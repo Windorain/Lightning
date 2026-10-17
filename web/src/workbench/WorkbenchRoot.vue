@@ -45,6 +45,7 @@ import { onMounted, onBeforeUnmount, provide, ref, computed, watch } from 'vue'
 
 import WorkbenchShell from '@/workbench/layout/WorkbenchShell.vue'
 import WorkbenchSettingsDrawer from '@/workbench/components/WorkbenchSettingsDrawer.vue'
+import MenubarSettingsButton from '@/workbench/components/MenubarSettingsButton.vue'
 import WorkspaceTabs from '@/workbench/components/WorkspaceTabs.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
@@ -410,6 +411,7 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
             @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
           />
           <MenubarWikiStatus />
+          <MenubarSettingsButton />
           <MenubarFullscreenButton />
         </div>
       </template>
@@ -462,6 +464,7 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
             @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
           />
           <MenubarWikiStatus />
+          <MenubarSettingsButton />
           <MenubarFullscreenButton />
         </div>
       </template>
@@ -486,6 +489,7 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
             @operator="(id: string, p?: Record<string, unknown>) => ctx.getOperators().exec(id, p)"
           />
           <MenubarWikiStatus />
+          <MenubarSettingsButton />
           <MenubarFullscreenButton />
         </div>
       </template>
