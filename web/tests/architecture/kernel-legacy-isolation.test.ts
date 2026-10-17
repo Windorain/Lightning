@@ -820,6 +820,32 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
     exitStage:
       'M6/M7 面板与呈现接线整体迁入内核侧编辑器、或 `getSceneSeconds` 的消费者改为直接持有会话时，本边核销',
   }),
+  // ── M5-4：GIF 的逐帧时间计划只有一份权威 ──────────────────────────────────
+  //
+  // 场景 GIF 与材质卡 GIF 都必须从 `domain/materials#planSequenceLoop` 取"逐帧停留"。
+  // 在旧层各自算一遍（旧形态就是 `defaultFrametimeTicks * 5`）会立刻分叉：
+  // 同一份声明在两条路径上给出不同时长，而**画面**看起来都"成功"。
+  // ⇒ 这两条边是"旧层消费唯一权威"，不是给旧路径续命。
+  Object.freeze({
+    from: 'src/workbench/exportAnimatedGif.ts',
+    to: 'domain/materials',
+    reason:
+      'M5-4：场景 GIF 的逐帧采样点与厘秒时延由 `planSequenceLoop` 唯一给出（LCM 共同循环 + '
+      + '最大余数法分配）。旧层若自算 tick，则"GIF 的时长"与"材质库实际采样的时长"成为两份可分叉的事实。',
+    exitStage:
+      'M6 把 GIF 接进导出作业面（`captureSpec` 表达逐帧 hold + `EncoderInput` 携带时延）时，'
+      + '本文件一并退出，本边随之核销',
+  }),
+  Object.freeze({
+    from: 'src/operators/builtin/materialOperators.ts',
+    to: 'domain/materials',
+    reason:
+      'M5-4：材质卡 GIF 的逐帧时延改由 `planSequenceLoop` 给出（修复前用 '
+      + '`defaultFrametimeTicks * 5` 自算，忽略 `frameSequence[].timeTicks` ⇒ 不等帧时长被压平）。'
+      + '时延与场景 GIF 同源，两条路径不再各解释一遍声明。',
+    exitStage:
+      'M6 场景导出作业面接管后（同 `exportAnimatedGif` 那条边）：若材质卡 GIF 并入场景导出或该命令下线，核销本行',
+  }),
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {
