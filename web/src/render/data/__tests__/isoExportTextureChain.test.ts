@@ -18,6 +18,10 @@
  * `ExportIsoPngOperator.exec` 的 `catch (e)` 里只落 `ctx.log.warn('导出', '等轴 PNG 导出失败: …')`
  * ⇒ **无产物、无 UI 报错**（用户只看到"点了没反应"）。
  *
+ * ⚠️ **M5-4 起该形态已修**：同一条失败仍记 `log.warn`，但算子会把错误**再抛**给调用方，
+ * 由导出卡片的红色错误位显示（`e2e/export-iso-time.spec.ts` 的 C5 把守）。
+ * 本文件的历史描述保留，用于说明这条链当初为什么会静默。
+ *
  * ## 为什么这条判据必须走**生产装配**（而不是手写载荷）
  *
  * 手工载荷 `{'0': 'A'}` 会恒绿：它证明不了"真入口真的会喂对象形态"。
@@ -276,7 +280,7 @@ describe('等轴 PNG 导出链 · 形态判据（生产装配输入）', () => {
     await expect(
       lib.getMaterialForBatch(descriptorFor('0')),
       '这就是 bakeIsometricStructurePngDataUrl → buildBlockMesh 在真入口上的报错'
-        + '（被 ExportIsoPngOperator 的 catch 降级成 log.warn，用户看不到）',
+        + '（修复前被 ExportIsoPngOperator 的 catch 降级成 log.warn、用户看不到；M5-4 起算子再抛 ⇒ 卡片可见）',
     ).rejects.toThrow('纹理未预取')
     lib.dispose()
   })
