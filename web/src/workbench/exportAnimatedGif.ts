@@ -1,21 +1,22 @@
 /**
  * 场景 GIF：等轴烘焙链上的**真实场景动画导出**（M5-4）。
  *
- * ## 为什么走 legacy 烘焙链而不是内核快照作业（选型理由，**不是**懒）
+ * ## 为什么走等轴烘焙链而不是内核快照作业（选型理由，**不是**懒）
  *
- * 内核离屏快照链（`adapters/export/snapshotExportJob` + `SnapshotOffscreenRenderPort`）今天
- * 表达不了"纹理序列的一个循环"：
+ * ⚠️ 设计稿 §4.3 原来的理由之一是"呈现链不采纹理时间，经它出的 GIF 画面不动"——
+ * **那条理由已被 M5-3 作废**：`presentation/presenter` 现在确实按场景时间写
+ * `repeat.y`/`offset.y`（`presenter.ts` 的竖条裁切段）。维持本选型的**当前**理由是：
  *
- *  1. `domain/captureSpec` 的 `TimeMapping` 只有**均匀** `stepFrames`（`planCaptureFrames` 也
- *     只按 `baseFrame + step*i` 生成）⇒ "逐帧不等 hold"在作业面上**不可表达**；
- *  2. `EncoderInput` 没有逐帧 hold 字段 ⇒ GIF 编码端口拿不到时延；
- *  3. 更关键的是**画面**：`presentation/presenter` 尚不按时间裁切帧条（M5-2 的另一半），
- *     经那条链出的 GIF 会把整条竖帧贴图压到一个面上 —— 产物"看起来没动"却报成功。
+ *  1. **同链判据**：PNG 与 GIF 同渲染器/同相机/同尺寸/同材质库 ⇒ "GIF 首帧 ≈ 同参数 PNG"
+ *     才能作为一条可观测判据（e2e C9）。两条链各画一张，这条判据就退化成"两张图差不多"。
+ *  2. **作业面表达不了逐帧 hold**：`domain/captureSpec` 的 `TimeMapping` 只有**均匀**
+ *     `stepFrames`（`planCaptureFrames` 只按 `baseFrame + step*i` 生成）；
+ *     `EncoderInput`（`application/exportPlan`）没有逐帧 hold 字段；`encoderPort` 的
+ *     `SUPPORTED_ENCODE_KINDS` 还没有 `'animation'` ⇒ GIF 的时延**无处安放**。
+ *     这三条是 M6 前置（已登记进 seams），不是被忽略。
  *
- * 因此本包复用与等轴 PNG **同一条**烘焙链（`workbench/exportIsometricImage#openIsometricStage`）：
- * 同渲染器、同相机、同尺寸、同材质库 ⇒ "GIF 第 k 帧"与"同 `seconds` 的 PNG"
- * 从结构上就是同一张图（e2e C9 就把这条当作可观测判据）。
- * 作业面缺口已登记进 seams（M6 前置），不是被忽略。
+ * 于是本包复用与等轴 PNG **同一条**烘焙链（`workbench/exportIsometricImage#openIsometricStage`），
+ * 时间序列本身则完全冻结（`planSequenceLoop` 一次算完）。M6 整链替换时本文件一并退出。
  *
  * ## 时间从哪来
  *
