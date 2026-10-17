@@ -1,9 +1,11 @@
 import type { OperatorType } from '@/operators/operatorType'
 import type { MaterialQueryItem } from '@/runtime/types'
-import { encodeAnimatedGif } from '@/workbench/animatedGifEncoder'
+import { encodeAnimatedGif, probeAnimatedStrip } from '@/workbench/animatedGifEncoder'
 import { filenameStem } from '@/pure/string'
-import { downloadPng, copyTextToClipboard } from '@/util/browser'
+import { downloadPng, downloadBlob, copyTextToClipboard } from '@/util/browser'
 import { listMaterials } from '@/context/queries'
+import { planSequenceLoop } from '@/domain/materials'
+import { resolveAnimationTimeline } from '@/render/assets/textureStripAnimation'
 
 function resolveMaterial(ctx: any, materialId: string): MaterialQueryItem | undefined {
   const materials = listMaterials(ctx)
@@ -71,18 +73,32 @@ export const ExportGifOperator: OperatorType = {
       return
     }
     try {
-      const delay = (m.animation?.defaultFrametimeTicks ?? 1) * 5 // ticks to centiseconds
-      const { blob } = await encodeAnimatedGif(m.textureDataUrl, delay)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${filenameStem(m, materialId)}.gif`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      const probe = await probeAnimatedStrip(m.textureDataUrl)
+      // 声明的**逐帧**时长（唯一解释器：`render/assets/textureStripAnimation#resolveAnimationTimeline`）。
+      // 形状必须与 `simpleMaterialLibrary#materialEntryToParsedMcmeta` **同构**，
+      // 否则两条路径对同一份声明给出不同帧数 —— 那正是本包要消灭的漂移。
+      const parsed = {
+        animation: {
+          defaultFrametimeTicks: m.animation?.defaultFrametimeTicks ?? 1,
+          frameSequence: m.animation?.frameSequence ?? [],
+          interpolate: m.animation?.interpolate === true,
+        },
+      }
+      const { durationMsPerFrame } = resolveAnimationTimeline(parsed, probe.frameCount)
+      // 时间计划**唯一权威**：逐帧停留由声明算出（旧实现用 `defaultFrametimeTicks * 5` 自算，
+      // 忽略 `frameSequence[].timeTicks` ⇒ 不等的帧时长被压成同一个值）。
+      const plan = planSequenceLoop([
+        { id: materialId, frameCount: probe.frameCount, durationsMs: durationMsPerFrame },
+      ])
+      if (!plan.ok) {
+        throw new Error(`GIF 时间计划失败: ${plan.error.code} ${JSON.stringify(plan.error.params)}`)
+      }
+      const { blob } = await encodeAnimatedGif(m.textureDataUrl, plan.value.delayCs)
+      downloadBlob(`${filenameStem(m, materialId)}.gif`, blob)
     } catch (e) {
       ctx.log?.warn('导出', `GIF 导出失败: ${e}`)
+      // 同 `ExportIsoPngOperator`：日志只留诊断，可见性由调用方承担。
+      throw e
     }
   },
 }
