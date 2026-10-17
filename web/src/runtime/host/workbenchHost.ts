@@ -185,7 +185,7 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   wm.events.registerRegion(REGION.CHROME)
 
   registerWorkbenchOperators(registry)
-  registerWorkbenchTools(toolRegistry, viewports, tool)
+  registerWorkbenchTools(toolRegistry, tool)
 
   installUnifiedLogApi(ctx)
   selection.bindLog(ctx.log)

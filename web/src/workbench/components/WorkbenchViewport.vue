@@ -11,6 +11,7 @@ import { useKernelChannels } from '@/shared/viewport/useKernelChannels'
 import { availableDockTabs, defaultDockTab, resolveDockTab, type ViewportDockTab } from '@/shared/viewport/dockTabs'
 import { REGION } from '@/runtime/regionIds'
 import { createToolGizmoHandler } from '@/handlers/toolGizmoHandler'
+import type { MoveGizmo } from '@/workbench/tools/gizmos'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
 import { createHoverHandler } from '@/handlers/hoverHandler'
 import type { ToolContext } from '@/workbench/tools/tool'
@@ -181,7 +182,9 @@ const engineHostRef = ref<InstanceType<typeof RenderEngineHost> | null>(null)
 
 async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void> {
   toolCtx = createToolContext()
-  ctx.getToolRegistry().setToolContext(toolCtx)
+  // M4-1：工具上下文**按 region** 登记（旧实现是注册表上的一个单例，
+  // "最后 ready 的视口赢" ⇒ 第二区的 gizmo 用的是第一区的相机/选中集）。
+  ctx.getToolRegistry().setToolContext(VIEWPORT_REGION_ID, toolCtx)
 
   await host.attachViewport(VIEWPORT_REGION_ID, {
     drw,
@@ -191,7 +194,7 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     mainMeshGroup,
     handlers: {
       hover: createHoverHandler(VIEWPORT_REGION_ID, () => ctx),
-      gizmo: createToolGizmoHandler(VIEWPORT_REGION_ID, () => ctx, () => toolCtx),
+      gizmo: createToolGizmoHandler(VIEWPORT_REGION_ID, () => ctx),
       keymap: createKeymapHandler(VIEWPORT_REGION_ID, () => ctx),
     },
     selectionOutline: {
@@ -207,9 +210,19 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     },
   })
 
+  /**
+   * **本区的 move gizmo**（M4-1 双区归属）。
+   *
+   * 实例由工具注册表**按 region** 提供（注册的是工厂，见 `registerWorkbenchTools`），
+   * 并缓存在本区槽位的 `gizmo` 字段（`ViewportSlot#gizmo` 的既有含义不变：
+   * "本视口挂着的 move gizmo"）。挂载点是本区的 `toolsOverlayGroup`，
+   * 故两个 3D Area 各有自己的 gizmo 节点与自己的相机投影。
+   */
   const toolsRoot = vpSlot.toolsOverlayGroup.value
-  if (vpSlot.gizmo.value && toolsRoot) {
-    toolsRoot.add(vpSlot.gizmo.value.root)
+  const regionGizmo = ctx.getToolRegistry().gizmoOf('move', VIEWPORT_REGION_ID)
+  vpSlot.gizmo.value = regionGizmo as MoveGizmo | null
+  if (regionGizmo && toolsRoot) {
+    toolsRoot.add((regionGizmo as MoveGizmo).root)
   }
 
   const onFrame = (): void => {
@@ -223,7 +236,8 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
 const toolHints = computed<ToolHint[]>(() => ctx.getToolRegistry().activeTool.value?.hints ?? [])
 
 function updateOverlay(): void {
-  const gizmo = ctx.getToolRegistry().activeGizmo.value
+  // 本区的那一只（不是"全局最后 ready 的视口"那一只）
+  const gizmo = ctx.getToolRegistry().gizmoFor(VIEWPORT_REGION_ID)
   if (gizmo && toolCtx) gizmo.render(toolCtx)
 
   const moveGizmo = vpSlot.gizmo.value
@@ -349,6 +363,8 @@ watch(
  */
 onBeforeUnmount(() => {
   host.detachViewport(VIEWPORT_REGION_ID)
+  // 该区的工具上下文/gizmo 实例随视口退场（否则注册表继续指向已拆的视口）
+  ctx.getToolRegistry().clearToolContext(VIEWPORT_REGION_ID)
   _alive = false
   unframeHook?.()
   unframeHook = null

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { Context } from '@/runtime/context'
 import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
+import type { ViewportSlot } from '@/runtime/types'
 import { OP_RESULT } from '@/operators/operatorType'
 import { pickVoxel } from '@/context/queries'
 import { roundVector } from '@/pure/vec'
@@ -18,14 +19,44 @@ interface ScreenProjection {
   k: number
 }
 
+/**
+ * **事件来源 region**（M4-1 双区归属）。
+ *
+ * 解析顺序：调用方显式给的 `props.regionId` → 本算子被 invoke 时登记的目标区
+ * （`OperatorRegistry#invoke` 写 `_regionId`）→ 当前输入区的兜底读面。
+ * `null` = 没有任何区域线索（脚本直调），此时退回"活动视口"（旧行为）。
+ */
+function regionIdOf(ctx: Context, props: OperatorProperties): string | null {
+  const explicit = props.regionId ?? props._regionId
+  if (typeof explicit === 'string' && explicit.length > 0) return explicit
+  return ctx.resolveInputRegionId(props)
+}
+
+/**
+ * 取**事件来源 region** 的视口槽位（机位/画布）。
+ *
+ * 旧实现一律用 `ctx.getViewport()`（= `viewports.active`），而 activeId 是"最后装配的
+ * 那个视口" ⇒ 在 B 区拖 gizmo 时投影用的是 A 区的相机（拖动方向错乱）。
+ * 有 region 线索就用该区槽位；没有才回落到 active。
+ */
+function viewportOf(ctx: Context, props: OperatorProperties): ViewportSlot {
+  const rid = regionIdOf(ctx, props)
+  if (rid !== null) {
+    const slot = ctx.viewports.get(rid)
+    if (slot) return slot
+  }
+  return ctx.getViewport()
+}
 /** Project a world-space direction vector to screen-space at the given origin point. */
 function projectAxis(
   ctx: Context,
+  props: OperatorProperties,
   origin: { x: number; y: number; z: number },
   dir: THREE.Vector3,
 ): ScreenProjection {
-  const camera = ctx.getViewport().camera.value
-  const domEl = ctx.getViewport().domElement.value
+  const viewport = viewportOf(ctx, props)
+  const camera = viewport.camera.value
+  const domEl = viewport.domElement.value
   if (!camera || !domEl) return { screenDirX: 0, screenDirY: 0, k: 0 }
   const rect = domEl.getBoundingClientRect()
   const p1 = new THREE.Vector3(origin.x, origin.y, origin.z).project(camera)
@@ -40,6 +71,7 @@ function projectAxis(
 /** Build the list of (worldDir, screenProjection) pairs for the current drag mode. */
 function buildProjectionAxes(
   ctx: Context,
+  props: OperatorProperties,
   s: MoveModalState,
 ): Array<{ dir: THREE.Vector3; proj: ScreenProjection }> {
   const origin = { x: s._originX, y: s._originY, z: s._originZ }
@@ -47,7 +79,7 @@ function buildProjectionAxes(
   // Axis lock overrides everything
   if (s._axisLock) {
     const dir = WORLD_AXES[s._axisLock]
-    return [{ dir, proj: projectAxis(ctx, origin, dir) }]
+    return [{ dir, proj: projectAxis(ctx, props, origin, dir) }]
   }
 
   // Gizmo single axis
@@ -64,21 +96,30 @@ function buildProjectionAxes(
     ]
   }
 
-  // Free move: camera right and up
-  const camera = ctx.getViewport().camera.value
+  // Free move: camera right and up（机位取**事件来源 region**，见 `viewportOf`）
+  const camera = viewportOf(ctx, props).camera.value
   if (!camera) return []
   const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
   return [
-    { dir: right, proj: projectAxis(ctx, origin, right) },
-    { dir: up, proj: projectAxis(ctx, origin, up) },
+    { dir: right, proj: projectAxis(ctx, props, origin, right) },
+    { dir: up, proj: projectAxis(ctx, props, origin, up) },
   ]
 }
 
-/** Animation-safe way to get gizmo. Prefers props ref, falls back to registry. */
+/**
+ * 取本次拖动用的 gizmo。
+ *
+ * 优先用调用方随属性传来的实例（gizmo 自己的 `onPointerDown` 传的是**本区那一只**）；
+ * 否则问工具注册表要**事件来源 region** 的 move gizmo —— 不要用"全局最后 ready 的
+ * 那个"，那正是 A/B 两区共用一个 gizmo 的形态（S0 域 1 缺口 ④）。
+ */
 function getGizmo(ctx: Context, props: OperatorProperties): { root: THREE.Group } | null {
-  return ((props as any).gizmo as { root: THREE.Group } | null)
-    ?? (ctx.getToolRegistry().activeGizmo.value as { root: THREE.Group } | null)
+  const direct = (props as any).gizmo as { root: THREE.Group } | null
+  if (direct) return direct
+  const rid = regionIdOf(ctx, props)
+  if (rid === null) return null
+  return ctx.getToolRegistry().gizmoOf('move', rid) as { root: THREE.Group } | null
 }
 
 interface MoveModalState {
@@ -272,7 +313,7 @@ export const MoveOperator: OperatorType = {
       if (!gizmo) return OP_RESULT.CANCELLED
 
       if (event.type === 'pointermove') {
-        const axes = buildProjectionAxes(ctx, s)
+        const axes = buildProjectionAxes(ctx, props, s)
         const dx = event.clientX - s._startX
         const dy = event.clientY - s._startY
 
@@ -403,7 +444,7 @@ export const MoveOperator: OperatorType = {
         gizmo.root.position.set(s._originX, s._originY, s._originZ)
       }
       if (s._pointerId >= 0) {
-        const el = ctx.getViewport().domElement.value
+        const el = viewportOf(ctx, props).domElement.value
         try {
           el?.releasePointerCapture(s._pointerId)
         } catch {

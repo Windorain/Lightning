@@ -50,7 +50,6 @@ import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
 import { textTool, TextGizmo } from '@/workbench/tools/textTool'
 import { faceTool, FaceGizmo } from '@/workbench/tools/faceTool'
 import type { ToolRegistry } from '@/workbench/tools/registry'
-import type { ViewportManager } from '@/runtime/viewportManager'
 import { unhandledWritableTypes } from '@/editors/workbench-rna'
 import type { PanelDeclaration } from '@/workbench/ux/types/panel'
 import type { ToolSettings } from '@/runtime/contextAccess'
@@ -146,21 +145,29 @@ export function validateWorkbenchRna(): readonly string[] {
   return unhandledWritableTypes()
 }
 
+/**
+ * 注册工作台工具与其 gizmo **工厂**（M4-1：gizmo 按 region 归属）。
+ *
+ * ## 为什么这里不再造实例、也不再往 `'r-viewport'` 槽位写
+ *
+ * 旧实现造**一个** `MoveGizmo` 并塞进根视口槽位 ⇒ 第二区没有 gizmo（S0 域 1 缺口 ②），
+ * 而两区共用同一个 `Object3D` 在结构上也不可能（一个节点只有一个父）。
+ *
+ * 现在注册的是**工厂**：每个视口在 `ready` 时向注册表要**本区**的实例
+ * （`ToolRegistry#gizmoOf(toolId, regionId)`），并挂到本区的
+ * `toolsOverlayGroup`。注册期因此不需要知道"未来会分割出哪些 region"。
+ */
 export function registerWorkbenchTools(
   toolRegistry: ToolRegistry,
-  viewports: ViewportManager,
   _tool: ToolSettings,
-): MoveGizmo {
-  const moveGizmo = new MoveGizmo()
-  viewports.register('r-viewport').gizmo.value = moveGizmo
+): void {
   toolRegistry.register(selectTool)
-  toolRegistry.register(moveTool, moveGizmo)
-  toolRegistry.register(boxTool, new BoxGizmo())
-  toolRegistry.register(boxFullTool, new BoxGizmo())
-  toolRegistry.register(pointTool, new PointGizmo())
-  toolRegistry.register(lineTool, new LineGizmo())
-  toolRegistry.register(textTool, new TextGizmo())
-  toolRegistry.register(faceTool, new FaceGizmo())
+  toolRegistry.register(moveTool, () => new MoveGizmo())
+  toolRegistry.register(boxTool, () => new BoxGizmo())
+  toolRegistry.register(boxFullTool, () => new BoxGizmo())
+  toolRegistry.register(pointTool, () => new PointGizmo())
+  toolRegistry.register(lineTool, () => new LineGizmo())
+  toolRegistry.register(textTool, () => new TextGizmo())
+  toolRegistry.register(faceTool, () => new FaceGizmo())
   toolRegistry.activate('select')
-  return moveGizmo
 }

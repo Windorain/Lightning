@@ -126,7 +126,7 @@ export function createKeymapHandler(
             const result = ctx.getOperators().invoke(binding.opId, mergedProps, event, regionId)
             if (ctx.isEmbed()) return { break: true }
             if (result === OP_RESULT.FINISHED) {
-              const hasGizmo = !ctx.isEmbed() && ctx.getToolRegistry().activeGizmo.value !== null
+              const hasGizmo = !ctx.isEmbed() && ctx.getToolRegistry().hasGizmo()
               if (!hasGizmo) {
                 const pe = event as PointerEvent
                 drag.active = true
