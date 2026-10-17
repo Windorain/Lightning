@@ -7,8 +7,9 @@
  * 按用户裁决把悬浮 ToolTipBox **从编辑器视口撤除**：跟随指针的提示框在编辑时挡住
  * 正在编辑的格子，而悬停信息本来就有两条更好的固定位：
  *
- *  - 右栏「方块检查器」在**无选中**时回落悬停方块（workbench-rna#resolveRefs）；
- *  - 底栏 StatusBar 的悬停格读数（data-hovered-cell）。
+ *  - 底栏 StatusBar 的悬停格读数（data-hovered-cell）；
+ *  - （设计 C5① 还想要右栏回落，但实测面板目标解析只认选中集/悬停注解 ——
+ *    见 H1 ④ 的如实记录，补齐需改 editors 层，B1 护栏外，列 B2 候选。）
  *
  * 嵌入预览器（EmbedViewport，region r-wiki-preview）仍是渲染器视口，ToolTipBox
  * 原样保留 —— 本文件用**同一套真实悬停注入**分别打两个 region，证明这是
@@ -20,9 +21,8 @@
  *  1. 生产入口打开夹具（OPERATOR_OPEN_SCENE + File），真实 pointermove 命中带逐格
  *     说明的格（候选自夹具原件解出，不硬编码坐标）；
  *  2. **负对照**：编辑器视口命中后 .wm-tooltip-box 计数为 0；
- *  3. **正对照**：底栏 data-hovered-cell 显示悬停格的内核世界坐标；右栏「方块检查器」
- *     的 lightning.block.pos 显示**同一坐标** —— 两处都走生产装配的 getHoveredBlock()
- *     读面（不是手工塞进面板的载荷）；
+ *  3. **正对照**：底栏 data-hovered-cell 显示悬停格的内核世界坐标 —— 走生产装配的
+ *     getHoveredBlock() 读面（不是手工塞进 DOM 的载荷）；
  *  4. pointerleave ⇒ 悬停读数消失、viewportBlock 清空。
  *
  * H2（嵌入侧，region 区分）：
@@ -238,23 +238,19 @@ test.describe('M3-shell B1 · 编辑器视口悬停（固定位呈现）', () =>
       '悬停 ' + worldX + ', ' + worldY + ', ' + worldZ,
     )
 
-    // ── ④ 正对照（右栏固定位）：方块检查器在**无选中**时回落悬停方块 ──
-    await page.locator('.pt-tab', { hasText: '方块检查器' }).first().click()
-    await expect
-      .poll(
-        async () =>
-          await page.evaluate(
-            () =>
-              document
-                .querySelector('[data-property="lightning.block.pos"] .ux-field-readonly')
-                ?.textContent?.trim() ?? null,
-          ),
-        {
-          timeout: 20_000,
-          message: 'B1：方块检查器必须呈现悬停格坐标（无选中回落悬停，生产装配）',
-        },
-      )
-      .toBe(worldX + ', ' + worldY + ', ' + worldZ)
+    // ── ④ 为什么这里**没有**右栏断言（B1 实测记录，见回报的偏差项）──
+    // 设计 C5① 假定「右栏 inspector 无选中时回落悬停方块」已是既有能力
+    // （workbench-rna#resolveRefs :200-204）。实测不成立：resolveRefs 只决定
+    // "属性的目标引用"，而**面板目标解析**在 editors/workbench-inspector
+    // （resolveInspectorTargets）里只看选中集与悬停**注解**——悬停方块不产生 target，
+    // 于是无选中时面板恒为「未选择目标」，".ux-field-readonly" 不存在。
+    // 补齐它需要改 editors 层的目标解析，超出 B1「只动外壳呈现层」的护栏，
+    // 故 B1 的悬停固定位由 ③（底栏）承担；右栏回落列为 B2 候选。
+    // 这里只断言「悬停时面板不会被假的字段值污染」：字段缺席而不是显示错格。
+    await expect(
+      page.locator('[data-property="lightning.block.pos"]'),
+      'B1：无选中时面板不得凭空渲染方块字段（回落能力未建成，如实为空）',
+    ).toHaveCount(0)
 
     // ── ⑤ 生命周期：pointerleave ⇒ 读数消失、悬停清空 ──
     await clearWikiHover(page, REGION)
