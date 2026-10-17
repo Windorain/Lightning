@@ -97,7 +97,7 @@ describe('P10b · 生产接线：装配产物进入内核会话', () => {
     session.dispose()
   })
 
-  it('帧声明来自**内核文档**（帧数与时长由 frameAxis 给出）', async () => {
+  it('多方块文档**没有时间轴帧**：帧轴为空，场景声明仍随内容进入内核（M5-1）', async () => {
     const assembled = await assembledFixture('multiblock-tier-only')
     const session = new KernelSession({
       documentId: KERNEL_DOCUMENT_ID,
@@ -105,15 +105,16 @@ describe('P10b · 生产接线：装配产物进入内核会话', () => {
       capabilities: ALL_CAPABILITIES,
     })
     session.adoptDocument(kernelDocumentOf(assembled), assembled.content)
-    // 内核文档自己承载帧时长轴
     const kdoc = session.document()!
-    expect(frameCount(kdoc.content.frameAxis), '内核文档应承载帧数').toBe(assembled.content.frameAxis.frames.length)
-    expect(frameDurationsMs(kdoc.content.frameAxis).length, '内核文档应承载每帧时长').toBe(
-      assembled.content.frameAxis.frames.length,
-    )
-    // 且帧下标派生自时间（帧数已进内核 ⇒ 能真的换帧）
+    // 帧清单 = 变体配置集合（场景），不是时间轴：内核帧轴必须为空。
+    expect(frameCount(kdoc.content.frameAxis), '内核文档的帧轴必须为空（场景不是时间轴）').toBe(0)
+    expect(frameDurationsMs(kdoc.content.frameAxis).length, '没有帧时长轴').toBe(0)
+    expect(session.frameCount(), '会话没有可播放帧').toBe(0)
     session.seekFrame(1)
-    expect(session.frameIndex(), '内核应能按帧时长轴定位到第 1 帧').toBe(1)
+    expect(session.frameIndex(), '跳帧不生效：场景切换 ≠ 动画').toBe(0)
+    // 但内容没有丢：全部场景声明仍在内核内容里（空帧轴 ≠ 丢内容）。
+    expect(assembled.content.multiblock.frames.length, '前提：夹具确实声明了多场景').toBeGreaterThan(1)
+    expect(kdoc.content.multiblock.frames.length).toBe(assembled.content.multiblock.frames.length)
     session.dispose()
   })
 
@@ -189,10 +190,11 @@ describe('P10b · 采纳的可重复性与隔离', () => {
     const s2 = new KernelSession({ documentId: 'doc-1', contextId: 'ctx-1', capabilities: ALL_CAPABILITIES })
     s1.adoptDocument(kernelDocumentOf(a, 'doc-1'), a.content)
     s2.adoptDocument(kernelDocumentOf(b, 'doc-1'), b.content)
-    // 两实例各持自己的内容（同一 documentId 也不互相污染）
-    expect(frameCount(s1.document()!.content.frameAxis), '实例 1 的帧数应是 tier-only 的').toBe(a.content.frameAxis.frames.length)
-    expect(frameCount(s2.document()!.content.frameAxis), '实例 2 的帧数应是 ebf-2ch 的').toBe(b.content.frameAxis.frames.length)
-    expect(frameCount(s1.document()!.content.frameAxis)).not.toBe(frameCount(s2.document()!.content.frameAxis))
+    // 两实例各持自己的内容（同一 documentId 也不互相污染）。
+    // M5-1：以**声明身份**判隔离（帧轴对多方块文档恒空，不能再用帧数当指纹）。
+    expect(s1.document()!.content.multiblock.id, '实例 1 的声明应是 tier-only 的').toBe(a.content.multiblock.id)
+    expect(s2.document()!.content.multiblock.id, '实例 2 的声明应是 ebf-2ch 的').toBe(b.content.multiblock.id)
+    expect(s1.document()!.content.multiblock.id).not.toBe(s2.document()!.content.multiblock.id)
     s1.dispose()
     s2.dispose()
   })

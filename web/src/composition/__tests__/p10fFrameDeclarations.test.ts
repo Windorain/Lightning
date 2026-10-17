@@ -49,6 +49,23 @@ function parsers() {
   return p
 }
 
+/**
+ * **帧为主文档**（时间轴的拥有者；两帧、各带网格）。
+ *
+ * M5-1 之后多方块文档的帧轴恒为空，故"内核帧轴为权威"这条判据只能由帧为主文档承担。
+ */
+const FRAME_DOMINANT_PLAIN: Record<string, unknown> = Object.freeze({
+  format_version: '2.0',
+  id: 'frame-dominant',
+  meta: { name: '两帧', author: 'a', created_at_ms: 1, description: '', tags: [], origin: { x: 0, y: 0, z: 0 } },
+  annotations: [],
+  labels: [],
+  frames: [
+    { index: 0, label: 'f0', durationMs: 50, structure: { geometryPhase: 'baked', cellGrid: [[[1]]], blockPalette: [{ registryId: 'air', meta: 0 }, { registryId: 'minecraft:stone', meta: 0 }] } },
+    { index: 1, label: 'f1', durationMs: 100, structure: { geometryPhase: 'baked', cellGrid: [[[1]]], blockPalette: [{ registryId: 'air', meta: 0 }, { registryId: 'minecraft:stone', meta: 0 }] } },
+  ],
+})
+
 /** 内核不支持的形态（`frames` 缺失且非多方块）⇒ 装配**必失败**。 */
 function unassemblableDoc(): RuntimeDocument {
   return new RuntimeDocument({ id: 'unassemblable' })
@@ -115,23 +132,26 @@ describe('C′1 · D8 ① 纯函数三态（`resolveFrameDeclarations`）', () =
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('C′1 · D8 ② **装配失败注入**（走生产 `adoptLoadedDocument`）', () => {
-  it('正常路径：真实夹具装配成功 ⇒ GF-16 为 true、内核帧轴为权威', async () => {
-    const raw = readJson(fixturePath('multiblock-ebf-2ch')) as Record<string, unknown>
-    const parsed = await parsers().detectAndParse(raw)
-    expect(parsed.document, '夹具应可解析').not.toBeNull()
+  it('正常路径：帧为主文档装配成功 ⇒ GF-16 为 true、内核帧轴为权威', async () => {
+    // ⚠️ M5-1：多方块文档的帧清单是**场景清单**（不是时间轴），其帧轴恒为空 ——
+    // 故本判据必须用**帧为主**文档（时间轴的拥有者）来测"内核帧轴为权威"。
+    // 输入仍走生产解析器 + 生产装配（不是手工拼 RuntimeDocument）。
+    const parsed = await parsers().detectAndParse(FRAME_DOMINANT_PLAIN)
+    expect(parsed.document, '帧为主夹具应可解析').not.toBeNull()
     const session = newSession()
     try {
       const ok = adoptLoadedDocument(
         { kernel: session, log: { info: () => {}, warn: () => {} } },
         parsed.document!,
-        undefined,
-        'ebf-2ch',
+        FRAME_DOMINANT_PLAIN,
+        'frame-dominant',
       )
       expect(ok, '前置：本夹具装配必须成功').toBe(true)
       expect(session.hasAdoptedContent(), 'GF-16 = true').toBe(true)
       const r = resolveFrameDeclarations(adoptedFramesOf(session), { count: 1, durationsMs: [1], labels: [null] })
       expect(r.source).toBe('kernel')
-      expect(r.count, '应为内核声明的帧数').toBe(parsed.document!.frameCount)
+      expect(r.count, '应为内核声明的帧数（= 2）').toBe(2)
+      expect(r.labels, '标签来自内核帧轴').toEqual(['f0', 'f1'])
     } finally {
       session.dispose()
     }

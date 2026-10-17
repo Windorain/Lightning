@@ -48,6 +48,23 @@ async function loadFixture(name: string): Promise<{ doc: RuntimeDocument; plainR
   return { doc: parsed.document!, plainRoot: layers.plain as Record<string, unknown> }
 }
 
+/**
+ * **帧为主文档**（时间轴的拥有者；两帧、各带网格）。
+ *
+ * M5-1 之后多方块文档的帧轴恒为空，故"帧标签来自内核帧轴"这条判据只能由帧为主文档承担。
+ */
+const FRAME_DOMINANT_PLAIN: Record<string, unknown> = Object.freeze({
+  format_version: '2.0',
+  id: 'frame-dominant',
+  meta: { name: '两帧', author: 'a', created_at_ms: 1, description: '', tags: [], origin: { x: 0, y: 0, z: 0 } },
+  annotations: [],
+  labels: [],
+  frames: [
+    { index: 0, label: 'f0', durationMs: 50, structure: { geometryPhase: 'baked', cellGrid: [[[1]]], blockPalette: [{ registryId: 'air', meta: 0 }, { registryId: 'minecraft:stone', meta: 0 }] } },
+    { index: 1, label: 'f1', durationMs: 100, structure: { geometryPhase: 'baked', cellGrid: [[[1]]], blockPalette: [{ registryId: 'air', meta: 0 }, { registryId: 'minecraft:stone', meta: 0 }] } },
+  ],
+})
+
 /** 造一份"编辑期文档"（无帧网格、带注解与元数据）。 */
 function editedDoc(): RuntimeDocument {
   return new RuntimeDocument({
@@ -64,9 +81,12 @@ function editedDoc(): RuntimeDocument {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('D3/R4 `frameDeclarations().labels`（与 count/durations 同源同分流）', () => {
-  it('装配成功 ⇒ 标签来自**内核**帧轴（与真实夹具的声明逐项相同）', async () => {
-    const { doc, plainRoot } = await loadFixture('multiblock-tier-only')
-    const h = makeAdoptedKernelReadHost(doc, plainRoot)
+  it('装配成功 ⇒ 标签来自**内核**帧轴（帧为主文档：两帧、带标签）', async () => {
+    // ⚠️ M5-1：多方块文档的帧清单是**场景清单**，其帧轴恒为空 ⇒ 本判据改用帧为主文档
+    // （帧轴 = 时间轴，标签随文档声明）；输入仍走生产解析器 + 生产装配。
+    const parsed = await parsers().detectAndParse(FRAME_DOMINANT_PLAIN)
+    expect(parsed.document, '帧为主夹具应可解析').not.toBeNull()
+    const h = makeAdoptedKernelReadHost(parsed.document!, FRAME_DOMINANT_PLAIN)
     try {
       const decl = h.ctx.frameDeclarations()
       expect(decl.source, '前置：必须装配成功').toBe('kernel')
@@ -75,6 +95,22 @@ describe('D3/R4 `frameDeclarations().labels`（与 count/durations 同源同分�
       expect(decl.labels.length, '标签数必须与帧数一致（同一条轴）').toBe(decl.count)
       // 反空洞真：这份夹具的帧轴**真的有**帧（否则 labels 的比较是空转）。
       expect(decl.count).toBeGreaterThan(0)
+      expect(decl.labels, '标签逐项来自声明').toEqual(['f0', 'f1'])
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('M5-1 反向：多方块文档**没有时间轴帧** ⇒ 内核权威地给出 0 帧（不是回落）', async () => {
+    const { doc, plainRoot } = await loadFixture('multiblock-tier-only')
+    const h = makeAdoptedKernelReadHost(doc, plainRoot)
+    try {
+      const decl = h.ctx.frameDeclarations()
+      expect(decl.source, '装配成功 ⇒ 内核权威（0 是真实答案，不是回落）').toBe('kernel')
+      expect(decl.count, '场景清单不进时间轴 ⇒ 帧数 0').toBe(0)
+      expect(decl.labels).toEqual([])
+      // 反空洞真：该夹具确实声明了多场景（否则本判据可能只是夹具没内容）。
+      expect(h.session!.document()!.content.multiblock.frames.length).toBeGreaterThan(1)
     } finally {
       h.dispose()
     }

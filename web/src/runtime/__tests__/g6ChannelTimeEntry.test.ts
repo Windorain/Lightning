@@ -1,28 +1,22 @@
 /**
- * **G6 ②/③：离散通道的「时间入口」判据**（A09「四类可动画属性在给定时间求值」的通道面）。
+ * **M5-1 ①：多方块通道取值的读面判据**（生产装配路径）。
  *
- * ## 这个文件证明什么（以及它防的三类假绿）
+ * ## 这个文件证明什么（断点①的修复面）
  *
- * G6 ① 把播放时间经**既有纯采样器**接进通道取值（`channelStepTrack` →
- * `resolveChannelEffective`，零新增 tick）。本文件给那条接线加判据，三条防线：
+ * 用户裁决（2026-10-18）：多方块文档的「Frame」概念作废，由 Blender「Scene」语义取代 ——
+ * **帧清单 = 变体配置集合（场景）**，与时间轴无关、**永不参与播放**；播放/动画是
+ * 通用关键帧+插值系统，场景切换 ≠ 动画。
  *
- * | 防线 | 判据 | 防什么 |
+ * 对应地，本文件钉住三件事：
+ *
+ * | # | 判据 | 防什么 |
  * |---|---|---|
- * | 生产装配 | 输入来自**真夹具 → 生产解析器 → `adoptLoadedDocument` 真装配** | 防"手工拼一份带声明的载荷"（AGENTS #301 D3 ⑦：纯函数判据喂已带字段的载荷会恒绿，而生产装配可能从不填该字段） |
- * | 独立期望 | 期望值来自**声明本身**（`min + frame.stepIndex`，契约 §5.4），不是被测量的实现 | 防"把自我实现当期望来源" |
- * | 区分力 | 同一判据函数在**三条负对照**上必须判红 | 防恒绿判据（"跑一遍没抛错"不算判据） |
+ * | ① | 生产装配出的 `content.frameAxis` 对多方块文档**恒为空**，`frameCount()===0` | 防"432 个场景被 `stripTimeline` 的 0→1ms 归一化伪装成 432ms 动画"（断点①的帮凶） |
+ * | ② | `channelValues()` 只投影手动层：初始为空表；手动写值逐字可见 | 防"轨道层压住手动值"（SPEC §3.7:109 静默成功却不可见） |
+ * | ③ | **负对照**：若仍合成轨道，帧 k 的读面必为 `min + stepIndex_k` —— 实测不成立 | 防判据恒绿（必须能区分"修好"与"没修"） |
  *
- * ## 期望为什么是 `min + stepIndex`（不是从会话里读出来的数）
- *
- * 契约 §5.4 明文「尺寸型由 `frame.stepIndex` 完成」；解析器另有一条可执行判据
- * `sizeSteps.length === 通道 max − min + 1`（`context/parsers/multiblockDocument.ts:739`）
- * ⇒ 阶与取值一一对应，`min + stepIndex` 是**双射**。本文件把这条声明算术**在测试里
- * 独立算一遍**，再去和会话读面比 —— 而不是把会话的输出当期望。
- *
- * ## 时间源
- *
- * 只用生产入口：`setPlaying` / `frame(经过秒数)`（内核按帧注入，宿主不自己改状态）与
- * `seekFrame` / `seekTime`。测试**不持有**任何 tick，也不读墙钟。
+ * 输入全部走**生产装配**（真夹具 → 生产解析器 → `adoptLoadedDocument`），
+ * 不是手工拼一份带声明的载荷（AGENTS #301 D3 ⑦）。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -33,17 +27,9 @@ import { createParserRegistry } from '@/context/parserRegistry'
 import { V2PlainParser, WorldParser, StructureDataParser, createEnvelopeParser } from '@/context/parsers/builtinParsers'
 import { fixturePath, readJson } from '@/context/__tests__/multiblockFixtureIo.mjs'
 import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
-import { documentContent, type FrameAxis } from '@/domain/content'
-import { EMPTY_MULTIBLOCK_DECLARATION, type MultiblockDeclaration, type MultiblockSizeStep } from '@/domain/multiblockDocument'
-import {
-  resolveEffectiveValue,
-  timeFromSeconds,
-  type EffectiveValueLayer,
-  type FrameRateSpec,
-  type TimeValue,
-} from '@/domain/animation'
-import { KernelSession } from '@/runtime/kernelSession'
+import type { FrameAxis } from '@/domain/content'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
+import { KernelSession } from '@/runtime/kernelSession'
 
 const NOOP_LOG = { info: () => {}, warn: () => {} }
 
@@ -57,11 +43,12 @@ function productionRegistry() {
   return parsers
 }
 
-/** 装配面里与本判据有关的那部分（**输入**；期望从这里独立算出）。 */
+/** 判据需要的声明事实（**输入**；期望从这里独立算出）。 */
 interface DeclReadFace {
   readonly id: string
   readonly channels: readonly { readonly key: string; readonly kind: string; readonly min: number; readonly max: number }[]
-  readonly frames: readonly { readonly stepIndex: number }[]
+  /** 声明的**场景清单**（每项一个 `stepIndex`；来自生产装配面的格式投影）。 */
+  readonly sceneSteps: readonly number[]
   readonly sizeChannel: string | null
 }
 
@@ -69,9 +56,8 @@ interface Loaded {
   readonly name: string
   readonly session: KernelSession
   readonly doc: RuntimeDocument
-  /** 装配面（生产唯一载体）；本判据用它当**期望来源**。 */
   readonly decl: DeclReadFace
-  /** 装配产物的帧轴（判据构造"内容声明在场"的第二份载荷时用同一根轴，不另造时钟）。 */
+  /** 生产装配出的内核帧轴（多方块文档必须为空）。 */
   readonly frameAxis: FrameAxis
 }
 
@@ -87,7 +73,7 @@ async function loadProduction(name: string): Promise<Loaded> {
   if (parsed.document === null) throw new Error(`夹具 ${name} 生产解析失败：${parsed.error}`)
   const layers = await readEnvelopeLayers(raw as never)
   const plainRoot = plainRootOf(layers.plain as Record<string, unknown>)
-  const session = new KernelSession({ documentId: `g6-${name}`, contextId: 'g6-ctx', capabilities: [] })
+  const session = new KernelSession({ documentId: `m5-${name}`, contextId: 'm5-ctx', capabilities: [] })
   const adopted = adoptLoadedDocument({ kernel: session, log: NOOP_LOG }, parsed.document as never, plainRoot, name)
   if (!adopted) throw new Error(`夹具 ${name} 生产装配失败`)
   const assembled = assembleKernelDocument({ doc: parsed.document as never, plainRoot })
@@ -112,530 +98,119 @@ async function loadProduction(name: string): Promise<Loaded> {
     decl: {
       id: mb.id,
       channels: mb.declaration.channels,
-      frames: mb.frames,
+      sceneSteps: mb.frames.map((f) => f.stepIndex),
       sizeChannel: mb.declaration.backbone.sizeChannel === '' ? null : mb.declaration.backbone.sizeChannel,
     },
     frameAxis: assembled.value.content.frameAxis,
   }
 }
 
-/**
- * 造一份**只含一个尺寸型通道**的声明（内容侧载体），用来制造"两载体同时在场且可区分"。
- *
- * 判据的输入仍是真夹具（帧数取自生产帧轴），这里只替换**声明算术**：`min` 平移、
- * `stepIndex` 全置 0 —— 于是"用了哪一侧"能被逐点识别（见 b3/b3 负对照的断言）。
- */
-function craftedDeclaration(input: {
-  readonly id: string
-  readonly key: string
-  readonly name: string
-  readonly min: number
-  readonly max: number
-  readonly frameCount: number
-}): MultiblockDeclaration {
-  const sizeSteps: MultiblockSizeStep[] = Array.from(
-    { length: input.max - input.min + 1 },
-    (_, i): MultiblockSizeStep => ({ channel: input.key, w: 1, hh: i + 1, d: 1, roles: {}, cellGrid: [] }),
-  )
-  return Object.freeze({
-    ...EMPTY_MULTIBLOCK_DECLARATION,
-    id: input.id,
-    displayName: input.id,
-    channels: Object.freeze([
-      Object.freeze({
-        enumName: null,
-        id: input.key,
-        key: input.key,
-        name: input.name,
-        kind: 'size' as const,
-        min: input.min,
-        max: input.max,
-        domain: Object.freeze({ lo: input.min, hi: input.max }),
-        slider: true,
-      }),
-    ]),
-    backbone: Object.freeze({ kind: 'sizeSteps', sizeChannel: input.key, sizeSteps: Object.freeze(sizeSteps) }),
-    frames: Object.freeze(
-      Array.from({ length: input.frameCount }, (_, index) =>
-        Object.freeze({ index, variant: `${input.id}-${index}`, runstate: 'r0', stepIndex: 0, rules: Object.freeze([]) }),
-      ),
-    ),
-  })
-}
-
-/** 期望（从**声明**独立算出）：尺寸型通道的值 = `min + stepIndex`（契约 §5.4 双射）。 */
-interface Expectation {
+/** 尺寸型通道的声明算术：`min + stepIndex`（旧轨道合成的取值 —— 只作为**负对照期望**）。 */
+interface Counterfactual {
   readonly sizeKey: string
   readonly min: number
   readonly max: number
   readonly steps: readonly number[]
 }
 
-function expectationOf(loaded: Loaded): Expectation {
+function counterfactualOf(loaded: Loaded): Counterfactual {
   const sizeKey = loaded.decl.sizeChannel
   expect(sizeKey, `${loaded.name}：骨架必须有尺寸型通道键（否则本判据空转）`).not.toBeNull()
   const ch = loaded.decl.channels.find((c) => c.key === sizeKey)
-  expect(ch, `${loaded.name}：骨架尺寸型通道必须在 channels 里声明（否则"时间入口"不存在）`).toBeDefined()
-  expect(loaded.decl.frames.length, `${loaded.name}：夹具必须多帧（否则阶跃无区分力）`).toBeGreaterThan(1)
-  const steps = loaded.decl.frames.map((f) => f.stepIndex)
+  expect(ch, `${loaded.name}：骨架尺寸型通道必须在 channels 里声明`).toBeDefined()
+  expect(loaded.decl.sceneSteps.length, `${loaded.name}：夹具必须多场景（否则阶跃无区分力）`).toBeGreaterThan(1)
+  const steps = loaded.decl.sceneSteps
   expect(
     new Set(steps).size,
-    `${loaded.name}：夹具的 stepIndex 必须至少两种取值（否则"阶跃"与"常数"不可辨）`,
+    `${loaded.name}：场景清单的 stepIndex 必须至少两种取值（否则"阶跃"与"常数"不可辨）`,
   ).toBeGreaterThan(1)
   return { sizeKey: sizeKey!, min: ch!.min, max: ch!.max, steps }
 }
 
-/** 判据核心：`channelValues()[sizeKey]` 在给定会话/时刻下应当是什么（声明算术）。 */
-function expectedValueAt(exp: Expectation, frameIndex: number): number {
-  const step = exp.steps[frameIndex]
-  if (step === undefined) throw new Error(`帧下标 ${frameIndex} 超出声明的帧清单（${exp.steps.length} 帧）`)
-  return exp.min + step
+/** 若轨道仍被合成，场景 k 的读面值（旧公式；负对照的期望）。 */
+function synthesizedValueAt(c: Counterfactual, sceneIndex: number): number {
+  const step = c.steps[sceneIndex]
+  if (step === undefined) throw new Error(`场景下标 ${sceneIndex} 超出声明清单（${c.steps.length} 项）`)
+  return c.min + step
 }
 
-/**
- * **正向不变式**（同一函数服务正向判据与负对照 ⇒ 负对照能证明它有区分力）。
- *
- * 沿生产时间源推进 60 次（0.025 s/次 ⇒ 1.5 s，对这些夹具的周期是多圈），每次检查：
- *
- * 1. `channelValues()[sizeKey] === min + steps[frameIndex()]`（**同轴**：帧读面与通道读面
- *    必须指同一帧；这也是"取模两处同式"的钉合点，见"账 b2"）；
- * 2. 同一个帧下标在**多圈里每次被读到都必须给同一个值**（相位等价）；
- * 3. 观测到的取值序列**不是常数**（否则"时间入口没驱动取值"，判据必须有区分力）。
- *
- * 返回违例清单；空数组 = 绿。**不抛异常**，以便负对照断言"它确实非空"。
- */
-function timeEntryViolations(session: KernelSession, exp: Expectation): string[] {
-  const violations: string[] = []
-  const valueByFrame = new Map<number, number>()
-  const observed = new Set<number>()
-  let wrapped = 0
-  let previous = session.frameIndex()
-  session.setPlaying(true)
-  for (let i = 0; i < 60; i++) {
-    session.frame(0.025)
-    const frameIndex = session.frameIndex()
-    if (frameIndex < previous) wrapped += 1
-    previous = frameIndex
-    const expected = expectedValueAt(exp, frameIndex)
-    const got = session.channelValues()[exp.sizeKey]
-    if (got === undefined) {
-      violations.push(`步 ${i}：帧下标 ${frameIndex} 时读面没有 ${exp.sizeKey}（期望 ${expected}）`)
-      continue
+describe('M5-1 ①：多方块场景清单不进时间轴（生产装配）', () => {
+  it('生产装配出的 `content.frameAxis` 恒为空：场景不是帧、frameCount()===0', async () => {
+    for (const name of ['multiblock-ebf-2ch', 'multiblock-tier-only']) {
+      const loaded = await loadProduction(name)
+      expect(
+        loaded.frameAxis.frames.length,
+        `${name}：多方块文档的帧轴必须为空（场景清单 ≠ 时间轴）`,
+      ).toBe(0)
+      expect(loaded.session.frameCount(), `${name}：内核帧数必须为 0（无可播放帧）`).toBe(0)
+      expect(loaded.session.frameIndex(), `${name}：帧下标恒 0`).toBe(0)
+      // 反空洞真：夹具确实声明了多场景（否则"空帧轴"可能只是夹具没帧）。
+      expect(loaded.decl.sceneSteps.length, `${name}：夹具必须声明多场景`).toBeGreaterThan(1)
     }
-    observed.add(got)
-    if (got !== expected) violations.push(`步 ${i}：帧下标 ${frameIndex} 期望 ${expected}，读面 ${got}`)
-    const seen = valueByFrame.get(frameIndex)
-    if (seen !== undefined && seen !== got) {
-      violations.push(`帧下标 ${frameIndex} 两圈取值不同（${seen} vs ${got}）：相位不等价`)
-    }
-    valueByFrame.set(frameIndex, got)
-  }
-  if (observed.size < 2) violations.push(`60 次时间推进里通道取值只有 ${observed.size} 种：时间入口未驱动取值`)
-  if (wrapped < 2) violations.push(`60 次推进只回卷 ${wrapped} 次：未覆盖多圈相位（判据覆盖不足）`)
-  return violations
-}
+  })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ② 正向判据（生产装配 + 生产时间源 + 独立期望）
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('G6 ②：离散通道的时间入口（生产装配路径）', () => {
-  it('正向：播放推进 ⇒ 通道取值按 min + stepIndex 阶跃，且与帧读面同轴（多圈相位等价）', async () => {
+  it('播放/跳帧不改变通道读面：场景切换 ≠ 动画', async () => {
     const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    // 前提（不是断言对象，但缺了它结论无意义）：装配面确实带了多帧声明与实通道。
-    expect(loaded.decl.channels.length, 'ebf 夹具必须声明通道').toBeGreaterThan(0)
-    expect(loaded.decl.frames.length, 'ebf 夹具必须多帧').toBeGreaterThan(1)
-    expect(timeEntryViolations(loaded.session, exp), '正向判据必须全绿').toEqual([])
-  })
-
-  it('正向（跳帧）：seekFrame(k) ⇒ 取值就是第 k 帧声明的 min + stepIndex_k', async () => {
-    const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    const sampled = [0, 1, 2, 3, Math.floor(exp.steps.length / 2), exp.steps.length - 1]
-    const values: number[] = []
-    for (const k of sampled) {
-      loaded.session.seekFrame(k)
-      expect(loaded.session.frameIndex(), `seekFrame(${k}) 后帧读面必须就是 ${k}`).toBe(k)
-      const got = loaded.session.channelValues()[exp.sizeKey]
-      expect(got, `seekFrame(${k})：期望 ${expectedValueAt(exp, k)}`).toBe(expectedValueAt(exp, k))
-      values.push(got!)
-    }
-    // 同一 stepIndex 的两帧必须给同一取值（阶跃，不是逐帧漂移）。
-    // 抽样口径：每个 stepIndex 取**前两个**帧下标（全配对是 432² 次定位，判据不必那么贵）。
-    const framesByStep = new Map<number, number[]>()
-    exp.steps.forEach((step, frame) => {
-      const list = framesByStep.get(step) ?? []
-      if (list.length < 2) list.push(frame)
-      framesByStep.set(step, list)
-    })
-    const pairable = [...framesByStep.values()].filter((list) => list.length === 2)
-    expect(pairable.length, '夹具必须有至少一个 stepIndex 出现 ≥2 次（否则"同阶同值"不可判）').toBeGreaterThan(0)
-    for (const [a, b] of pairable) {
-      loaded.session.seekFrame(a!)
-      const va = loaded.session.channelValues()[exp.sizeKey]
-      loaded.session.seekFrame(b!)
-      const vb = loaded.session.channelValues()[exp.sizeKey]
-      expect(va, `stepIndex 相同的帧 ${String(a)}/${String(b)} 必须同值（阶跃）`).toBe(vb)
-    }
-    expect(new Set(values).size, '抽样的帧必须给出不止一种取值（否则判据无区分力）').toBeGreaterThan(1)
-  })
-
-  it('正向（阶跃语义）：帧内任意时刻同值，边界取下一帧（半开区间）', async () => {
-    const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    // 找到一个"相邻两帧 stepIndex 不同"的位置，才有边界可判。
-    let boundary = -1
-    for (let i = 1; i < exp.steps.length; i += 1) {
-      if (exp.steps[i] !== exp.steps[i - 1]) {
-        boundary = i
-        break
-      }
-    }
-    expect(boundary, '夹具里必须存在 stepIndex 变化的相邻帧（否则边界无区分力）').toBeGreaterThan(0)
-    loaded.session.seekFrame(boundary)
-    const atStart = loaded.session.channelValues()[exp.sizeKey]
-    expect(atStart, '帧起点（边界）必须取**下一帧**的值').toBe(expectedValueAt(exp, boundary))
-    expect(atStart, '边界两侧必须真的不同（否则该点不是阶跃边界）').not.toBe(expectedValueAt(exp, boundary - 1))
-  })
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ② 负对照（三条；同一判据函数必须判红）
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('G6 ② 负对照：去掉时间入口 / 换静态来源 ⇒ 同一判据必须判红', () => {
-  it('负对照 a1：手工绑定帧轴但**不采纳声明**（只有手动层）⇒ 时间推进不改通道取值', () => {
-    const session = new KernelSession({ documentId: 'g6-neg-a1', contextId: 'g6-neg-a1-ctx', capabilities: [] })
-    const durations = Array.from({ length: 40 }, () => 25)
-    session.bindFrameSource({ count: () => durations.length, durationsMs: () => durations })
-    session.setChannelValue('height', 3)
-    const exp: Expectation = { sizeKey: 'height', min: 1, max: 5, steps: durations.map((_, i) => i % 5) }
-    expect(session.channelValues()['height'], '前提：手动层必须读得到').toBe(3)
-    expect(
-      timeEntryViolations(session, exp).length,
-      '去掉声明（时间入口的唯一载体）后，正向判据必须判红 —— 否则它测的不是时间入口',
-    ).toBeGreaterThan(0)
-  })
-
-  it('负对照 a2：生产装载后 `markUnloaded()` 清掉载体 ⇒ 时间推进不再改通道取值', async () => {
-    const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    expect(timeEntryViolations(loaded.session, exp), '前提：装载后正向判据必须先是绿的').toEqual([])
-    loaded.session.markUnloaded()
-    expect(
-      timeEntryViolations(loaded.session, exp).length,
-      '卸载清掉声明后必须判红：证明取值由**时间入口**驱动，而不是"帧轴自己动的"',
-    ).toBeGreaterThan(0)
-  })
-
-  it('负对照 a3：真实夹具 multiblock-tier-only（`sizeChannel=totalTier` 非声明通道）⇒ 无时间入口 ⇒ 判红', async () => {
-    const loaded = await loadProduction('multiblock-tier-only')
-    // 该夹具的骨架通道是保留键 totalTier，**不在** channels 里 ⇒ 求值半查不到通道
-    // ⇒ 如实没有时间入口（不伪造一个"总档位轨道"）。
-    expect(loaded.decl.sizeChannel, 'tier-only 的骨架通道必须是保留键 totalTier').toBe('totalTier')
-    expect(
-      loaded.decl.channels.some((c) => c.key === 'totalTier'),
-      '前提：totalTier 不是声明通道（否则本负对照与 a1 重复）',
-    ).toBe(false)
-    const exp: Expectation = {
-      sizeKey: 'structTier',
-      min: 1,
-      max: 3,
-      steps: loaded.decl.frames.map((f) => f.stepIndex),
-    }
-    expect(
-      timeEntryViolations(loaded.session, exp).length,
-      '未声明的骨架通道必须没有时间入口（判红 = 如实回落，而不是猜一条轨道）',
-    ).toBeGreaterThan(0)
-    expect(loaded.session.channelValues(), '无时间入口时读面不得凭空多出通道取值').toEqual({})
-  })
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ③ 优先级 / 覆盖（只有一个定义点）
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('G6 ③：时间驱动值与手动层的优先级只有一处定义点', () => {
-  it('③a：轨道层高于手动层，且会话的裁决与 `resolveEffectiveValue` 的层表逐点一致', async () => {
-    const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    loaded.session.seekFrame(0)
-    const trackValue = loaded.session.channelValues()[exp.sizeKey]
-    expect(trackValue, '前提：第 0 帧有轨道采样值').toBe(expectedValueAt(exp, 0))
-    // 手动写一个**不同于**轨道值的合法值（域内取另一个成员）。
-    const span = exp.max - exp.min + 1
-    const manual = exp.min + ((exp.steps[0]! + 1) % span)
-    expect(manual, '前提：手动值必须与轨道值不同（否则本判据无区分力）').not.toBe(trackValue)
-    loaded.session.setChannelValue(exp.sizeKey, manual)
-    const afterManual = loaded.session.channelValues()[exp.sizeKey]
-    expect(afterManual, '有轨道时手动写入不得夺走读面（trackSample > manualPreview）').toBe(trackValue)
-    // 同一裁决必须**等于**纯层表的结果（会话不得自带第二套优先级）。
-    const pureLayers: EffectiveValueLayer[] = [
-      { kind: 'manualPreview', value: manual },
-      { kind: 'trackSample', value: trackValue! },
-    ]
-    const pure = resolveEffectiveValue(pureLayers)
-    expect(pure.ok, '层表必须能裁决这两层').toBe(true)
-    if (pure.ok) expect(afterManual, '会话的裁决必须与层表逐点一致').toBe(pure.value.value)
-  })
-
-  it('③b：不反写 —— 清掉时间入口后手动值原样仍在（手动层未被赢家覆盖）', async () => {
-    const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    loaded.session.seekFrame(0)
-    const manual = exp.min + 1
-    expect(manual, '前提：手动值必须与第 0 帧的轨道值不同').not.toBe(expectedValueAt(exp, 0))
-    loaded.session.setChannelValue(exp.sizeKey, manual)
-    expect(loaded.session.channelValues()[exp.sizeKey], '前提：轨道层仍然赢').toBe(expectedValueAt(exp, 0))
-    loaded.session.markUnloaded()
-    expect(
-      loaded.session.channelValues()[exp.sizeKey],
-      '清掉时间入口后读面必须**逐字**给出当初手动写的值 ⇒ 赢家没有反写手动层',
-    ).toBe(manual)
-  })
-
-  it('③c：无时间入口时手动层即读面（同一判据在另一半上也成立）', async () => {
-    const loaded = await loadProduction('multiblock-tier-only')
-    loaded.session.setChannelValue('structTier', 2)
-    expect(loaded.session.channelValues()['structTier']).toBe(2)
-  })
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ② 负对照 b：把 ① 的余项变成**判据看到的可见事实**（机械记账，不靠注释）
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('G6 ② 负对照 b：余项机械记账', () => {
-  it('账 b1：保留键 `$totalTier`/`$runstate` 仍**没有**时间入口（只有手动层）', async () => {
-    const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    // 时间轴推进**不**碰保留键：读面里除尺寸型通道外不得多出任何键。
+    const c = counterfactualOf(loaded)
+    loaded.session.setChannelValue(c.sizeKey, 4)
+    const before = loaded.session.channelValues()[c.sizeKey]
+    expect(before).toBe(4)
     loaded.session.setPlaying(true)
     loaded.session.frame(0.2)
-    const keys = Object.keys(loaded.session.channelValues()).sort()
-    expect(keys, '时间入口只驱动声明的尺寸型通道；保留键必须仍不可见（无入口）').toEqual([exp.sizeKey])
-    // 手动写保留键后，**时间推进不得改写它**（没有轨道 = 没有覆盖）。
-    loaded.session.setTotalTier(1)
-    loaded.session.setRunstateIndex(0)
-    const before = { tier: loaded.session.totalTier(), run: loaded.session.runstateIndex() }
-    for (let i = 0; i < 12; i += 1) loaded.session.frame(0.05)
-    expect(
-      { tier: loaded.session.totalTier(), run: loaded.session.runstateIndex() },
-      '保留键仍只有手动层：时间推进不得改写它们（若将来接上时间入口，本行必须**显式**改判）',
-    ).toEqual(before)
-    // 尺寸型通道同时仍在随时间走 ⇒ 证明"没被改写"不是因为时间轴整个停了。
-    const frameIndex = loaded.session.frameIndex()
-    expect(loaded.session.channelValues()[exp.sizeKey]).toBe(expectedValueAt(exp, frameIndex))
-  })
-
-  it('账 b2：取模在两处同式 ⇒ 用"帧读面 ≡ 通道读面"把两处钉在一起（多圈）', async () => {
-    const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    // `domain/materials#sampleStripFrameAt` 内部取模（帧读面）与
-    // `KernelSession#channelSampleTime` 的折返（通道读面）是**两处**同式表达。
-    // 本判据不给"两处都在"，而是给**更强的不变式**：同一相位在多圈上必须得到
-    // 同一个 `(帧下标, 通道取值)` 对。任一处改了取模口径（或新增第三处解释），本行判红。
-    //
-    // 一圈的长度**从生产时间源观测**（`seekFrame(0)` 与 `seekFrame(1)` 的时间差 = 一帧的
-    // 时间值），不在这里复刻 `stripTimeline` 的毫秒归一化 —— 否则判据自带第二套轴换算。
-    loaded.session.seekFrame(0)
-    const t0 = loaded.session.playback().time
-    loaded.session.seekFrame(1)
-    const t1 = loaded.session.playback().time
-    const framesPerFrame = t1.frame - t0.frame
-    expect(framesPerFrame, '观测到的一帧时间值必须为正（否则无法构造多圈时刻）').toBeGreaterThan(0)
-    const periodFrames = exp.steps.length * framesPerFrame
-    for (const k of [0, 1, 7, Math.floor(exp.steps.length / 3), exp.steps.length - 1]) {
-      const observations: string[] = []
-      for (const loop of [0, 1, 2]) {
-        // 取该帧的**帧中**（不是帧起点）：帧中远离边界，浮点 floor 不会在两圈之间跳帧，
-        // 于是"同一相位"这件事可以被逐字比较。
-        const at = (k + 0.5) * framesPerFrame + loop * periodFrames
-        loaded.session.seekTime({ frame: at, fps: t0.fps })
-        const frameIndex = loaded.session.frameIndex()
-        const got = loaded.session.channelValues()[exp.sizeKey]
-        observations.push(`${frameIndex}:${String(got)}`)
-      }
-      expect(
-        new Set(observations).size,
-        `帧 ${k} 在三圈上必须给出同一个 (帧下标, 取值)；实测 ${observations.join(' / ')}`,
-      ).toBe(1)
-      expect(
-        observations[0],
-        `且它必须精确等于声明算术：帧 ${k} ⇒ ${k}:${expectedValueAt(exp, k)}（实测 ${observations[0]}）`,
-      ).toBe(`${k}:${expectedValueAt(exp, k)}`)
-    }
-  })
-
-  it('账 b3：两载体不变式 —— 内容声明在场则用它，缺则回落装配面投影（不合并）', async () => {
-    const loaded = await loadProduction('multiblock-ebf-2ch')
-    const face = loaded.session.assemblyFaceOf()
-    expect(face, '生产装载必须置位装配面').not.toBeNull()
-    const doc = loaded.session.document()
-    expect(doc, '生产装载后会话必须有文档').toBeDefined()
-    const faceExp = expectationOf(loaded)
-    const n = faceExp.steps.length
-    const sampled = [0, 1, 7, Math.floor(n / 2), n - 1]
-
-    // ── 侧①：**内容声明在场**（同时装配面也在场，两者刻意可区分）⇒ 必须用内容声明 ──
-    //
-    // 内容声明的 `min` = 11（装配面 = 1）、`stepIndex` 全置 0
-    // ⇒ 内容侧恒给 `11`；装配面侧给 `1 + fixtureStep`（随帧变化）。
-    // 于是"用哪一侧"、"会不会把 min 取一侧、stepIndex 取另一侧"都能被逐点识别。
-    loaded.session.adoptDocument(
-      doc!,
-      documentContent({
-        frameAxis: loaded.frameAxis,
-        multiblock: craftedDeclaration({
-          id: 'crafted-height',
-          key: 'height',
-          name: 'Height',
-          min: 11,
-          max: 15,
-          frameCount: loaded.frameAxis.frames.length,
-        }),
-      }),
-    )
-    const contentSide: number[] = []
-    for (const k of sampled) {
-      loaded.session.seekFrame(k)
-      expect(loaded.session.frameIndex(), `内容侧：seekFrame(${k}) 必须恰好落在帧 ${k}`).toBe(k)
-      const got = loaded.session.channelValues()['height']
-      expect(got, `内容声明在场时必须用**内容**的 min+stepIndex（=${11}），实测 ${String(got)}`).toBe(11)
-      expect(got, `不得用装配面侧的值（${expectedValueAt(faceExp, k)}）`).not.toBe(expectedValueAt(faceExp, k))
-      contentSide.push(got!)
-    }
-    // "不得混用"：内容侧 stepIndex 全 0 ⇒ 抽样必须**恒**为 11；若 min 取内容、stepIndex 取装配面
-    // （即两侧各取一半），这里会随帧变化而判红。
-    expect(new Set(contentSide).size, '内容侧抽样必须恒为同一个值（min/stepIndex 不得各取一侧）').toBe(1)
-    // "不得并集"（本用例）：装配面声明三通道，内容声明只有 height ⇒ 读面**只能**有内容的那一份。
-    expect(
-      Object.keys(loaded.session.channelValues()).sort(),
-      '读面键集必须等于内容声明的驱动面，不得是两载体的并集',
-    ).toEqual(['height'])
-
-    // ── 侧②：**内容声明缺** ⇒ 回落装配面投影（同一真夹具、同一真装配面）──────────
-    //
-    // 会话：只 `bindFrameSource` + `setAssemblyFace(真面)`，**不**采纳内容声明
-    // （`content.multiblock` 为空声明）⇒ 时间入口的唯一来源就是装配面投影。
-    const faceOnly = new KernelSession({ documentId: 'g6-b3b', contextId: 'g6-b3b-ctx', capabilities: [] })
-    faceOnly.bindFrameSource({
-      count: () => loaded.frameAxis.frames.length,
-      durationsMs: () => loaded.frameAxis.frames.map((f) => f.durationMs ?? 0),
-    })
-    faceOnly.setAssemblyFace(face)
-    for (const k of sampled) {
-      faceOnly.seekFrame(k)
-      expect(faceOnly.frameIndex(), `装配面侧：seekFrame(${k}) 必须恰好落在帧 ${k}`).toBe(k)
-      expect(
-        faceOnly.channelValues()['height'],
-        `内容声明缺省时必须用**装配面投影**的 min+stepIndex（帧 ${k} ⇒ ${expectedValueAt(faceExp, k)}）`,
-      ).toBe(expectedValueAt(faceExp, k))
-    }
-  })
-
-  it('账 b3 负对照：两侧可区分时若"用装配面"或"两侧并集/各取一半" ⇒ 判据当场红', async () => {
-    const loaded = await loadProduction('multiblock-ebf-2ch')
-    const faceExp = expectationOf(loaded)
-    const doc = loaded.session.document()!
-    const n = faceExp.steps.length
-    const sampled = [0, 1, 7, Math.floor(n / 2), n - 1]
-
-    // 与 b3 同一构造：内容侧 min=21..23、`stepIndex` 全 0，尺寸通道键改成 `coil`；
-    // 装配面侧是 `height` + `1 + fixtureStep`。
-    loaded.session.adoptDocument(
-      doc,
-      documentContent({
-        frameAxis: loaded.frameAxis,
-        multiblock: craftedDeclaration({
-          id: 'crafted-coil',
-          key: 'coil',
-          name: 'Coil',
-          min: 21,
-          max: 23,
-          frameCount: loaded.frameAxis.frames.length,
-        }),
-      }),
-    )
-
-    // 负对照形态（三条都是**可判红的事实**，不是"应当如何"的断言）：
-    const observed: string[] = []
-    for (const k of sampled) {
-      loaded.session.seekFrame(k)
-      observed.push(`${k}:${String(loaded.session.channelValues()['coil'])}`)
-    }
-    // a) 若实现取装配面侧 ⇒ 尺寸通道是 `height`（coil 根本没有轨道）⇒ 本组判红。
-    expect(observed, '内容侧的尺寸通道是 coil 且恒 21；取装配面侧会得到 height/随帧变化').toEqual(
-      sampled.map((k) => `${k}:21`),
-    )
-    // b) 若实现取并集 ⇒ 读面会有装配面的 `height` 键（内容侧只声明 coil）⇒ 判红。
-    expect(Object.keys(loaded.session.channelValues())).toEqual(['coil'])
-    // c) 若实现把 min 取内容、stepIndex 取装配面（两侧各取一半）⇒ 抽样会随帧变化 ⇒ 判红。
-    expect(
-      [...new Set(observed.map((o) => o.split(':')[1]))],
-      '抽样恒为同一个值：min 与 stepIndex 必须来自同一侧',
-    ).toEqual(['21'])
-    // 且这一侧确实**不是**装配面算术（否则上面几条会因为"两侧恰好相等"而失去区分力）。
-    expect(faceExp.min, '前提：装配面侧的 min 与内容侧不同（否则本负对照无区分力）').not.toBe(21)
+    loaded.session.seekFrame(Math.min(5, c.steps.length - 1))
+    loaded.session.setPlaying(false)
+    expect(loaded.session.frameIndex(), '跳帧不得把场景清单当时间轴（帧下标仍 0）').toBe(0)
+    expect(loaded.session.channelValues()[c.sizeKey], '时间推进不得改写手动值').toBe(before)
   })
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 附：帧定位的换算必须**单点归整**（既有缺陷的判据；见 `KernelSession#axisMsOf`）
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('G6 附：帧定位（`seekFrame` → 帧读面）的换算单点归整', () => {
-  /** 毫秒 → 时间值（走生产换算 `domain/animation#timeFromSeconds`，不在判据里自造换算）。 */
-  const atMs = (ms: number, fps: FrameRateSpec): TimeValue => timeFromSeconds(ms / 1000, fps)
-
-  it('三处对照：首帧 / 中间帧 / 末帧 —— 帧读面所在帧必须**恰好**是请求帧', async () => {
+describe('M5-1 ②：通道读面只投影手动层', () => {
+  it('初始读面为空表（未设置 ≠ 伪造 0）；声明的 0 由面板按声明初值给出', async () => {
     const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    const n = exp.steps.length
-    for (const k of [0, 1, 2, Math.floor(n / 2), n - 2, n - 1]) {
-      loaded.session.seekFrame(k)
-      expect(loaded.session.frameIndex(), `seekFrame(${k}) 后帧读面必须恰好是 ${k}`).toBe(k)
-      expect(
-        loaded.session.channelValues()[exp.sizeKey],
-        `定位到帧 ${k} 时通道取值必须是 ${expectedValueAt(exp, k)}`,
-      ).toBe(expectedValueAt(exp, k))
-    }
+    const c = counterfactualOf(loaded)
+    expect(loaded.session.channelValues(), '未手动设置时读面不得凭空多出通道取值').toEqual({})
+    expect(
+      loaded.session.channelValues()[c.sizeKey],
+      '尺寸型通道在初始时刻必须没有"轨道采样值"（断点①的本体）',
+    ).toBeUndefined()
   })
 
-  it('全量往返：逐帧"定位 → 取回时间 → 再吐回生产时间源"必须仍是同一帧', async () => {
+  it('手动写通道值 ⇒ 读面逐字返回（手动值即有效值）', async () => {
     const loaded = await loadProduction('multiblock-ebf-2ch')
-    const exp = expectationOf(loaded)
-    const n = exp.steps.length
-    const broken: string[] = []
-    for (let k = 0; k < n; k += 1) {
-      loaded.session.seekFrame(k)
-      const landed = loaded.session.frameIndex()
-      if (landed !== k) broken.push(`${k}→${landed}`)
-      // 把该时刻原样喂回生产时间源（拖动/跳帧/重放都会走这条往返）。
-      const t = loaded.session.playback().time
-      loaded.session.seekTime(t)
-      const again = loaded.session.frameIndex()
-      if (again !== k) broken.push(`往返 ${k}→${again}`)
-    }
-    // 既有双换算在 432 帧夹具上会给出 `431→430`（末帧永远定位不到）；单点归整后必须 0 偏差。
-    expect(broken, `全量 ${n} 帧逐帧定位必须 0 偏差（实测偏差帧：${broken.slice(0, 8).join(', ')}）`).toEqual([])
+    const c = counterfactualOf(loaded)
+    const manual = c.min + 1
+    loaded.session.setChannelValue(c.sizeKey, manual)
+    expect(loaded.session.channelValues()[c.sizeKey], '手动写入必须夺回读面（轨道层已不存在）').toBe(manual)
+    // 非尺寸型通道同理（防止"只修了尺寸轴"）。
+    const other = loaded.decl.channels.find((x) => x.key !== c.sizeKey)
+    expect(other, '夹具必须有第二条通道（否则本判据空转）').toBeDefined()
+    loaded.session.setChannelValue(other!.key, 2)
+    expect(loaded.session.channelValues()[other!.key]).toBe(2)
+    // 保留键同理。
+    loaded.session.setTotalTier(2)
+    loaded.session.setRunstateIndex(1)
+    expect(loaded.session.totalTier()).toBe(2)
+    expect(loaded.session.runstateIndex()).toBe(1)
   })
 
-  it('不变更帧轴语义：帧中/边界仍按半开区间，亚毫秒时刻不被归整吞掉', async () => {
+  it('**负对照**：若仍合成轨道，帧 k 必为 min + stepIndex_k —— 实测不成立', async () => {
     const loaded = await loadProduction('multiblock-ebf-2ch')
-    const fps = loaded.session.playback().time.fps
-    /** 该夹具每帧的毫秒数（从生产帧轴读，不在判据里复刻归一化）。 */
-    const dwell = loaded.frameAxis.frames[0]?.durationMs ?? 1
-    // 末帧的帧中 / 帧尾附近：只要没到下一帧起点，就必须仍在**末帧**（归整不得把它推到下一帧）。
-    const lastStart = (loaded.frameAxis.frames.length - 1) * dwell
-    loaded.session.seekTime(atMs(lastStart + dwell / 2, fps))
-    expect(loaded.session.frameIndex(), '末帧的帧中必须仍在末帧').toBe(loaded.frameAxis.frames.length - 1)
-    const justBefore = lastStart + dwell - 1e-4
-    loaded.session.seekTime(atMs(justBefore, fps))
-    expect(loaded.session.frameIndex(), '帧尾亚毫秒处不得被归整推到下一帧').toBe(loaded.frameAxis.frames.length - 1)
-    // 帧 0 的帧中（归整不能把它推回上一帧或推到下一帧）。
-    loaded.session.seekTime(atMs(dwell / 2, fps))
-    expect(loaded.session.frameIndex(), '首帧的帧中必须仍在首帧').toBe(0)
+    const c = counterfactualOf(loaded)
+    const sampled = [0, 1, Math.floor(c.steps.length / 2), c.steps.length - 1]
+    const counterfactualValues = new Set(sampled.map((k) => synthesizedValueAt(c, k)))
+    // 前提：旧公式在抽样上给出不止一种取值（否则"不相等"可能只是因为值恰好相同）。
+    expect(counterfactualValues.size, '负对照前提：旧公式在抽样上必须给出可区分的变化').toBeGreaterThan(1)
+    const observed: (number | undefined)[] = []
+    for (const k of sampled) {
+      loaded.session.seekFrame(k)
+      const got = loaded.session.channelValues()[c.sizeKey]
+      observed.push(got)
+      expect(got, `场景 k=${k}：读面不得是旧轨道公式的 ${synthesizedValueAt(c, k)}`).not.toBe(
+        synthesizedValueAt(c, k),
+      )
+    }
+    expect(new Set(observed), '抽样上读面必须恒为"未设置"（同一个 undefined），而不是随场景变化').toEqual(
+      new Set([undefined]),
+    )
   })
 })

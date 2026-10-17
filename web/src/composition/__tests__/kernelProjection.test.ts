@@ -228,18 +228,25 @@ describe('P10b/G-3 · 投影读内核而非回放输入（防"投影=缓存"）'
     expect(palette.length, '材质调色板条数应与内核资源数一致').toBe(assembled.content.resources.length)
   })
 
-  it('改内核帧时长轴 ⇒ 投影产物的 frames[].durationMs 必须跟着变', async () => {
+  it('多方块场景清单**不读**内核帧时长轴（场景不是时间轴）', async () => {
     const { doc, plainRoot } = await loadFixture('multiblock-tier-only')
     const assembled = unwrap(assembleKernelDocument({ doc, plainRoot }))
-    const frames = assembled.content.frameAxis.frames
-    const changed = frameAxis(frames.map((f, i) => (i === 0 ? { ...f, durationMs: 777 } : f)))
+    // M5-1：生产装配对多方块文档给出**空帧轴**（帧清单 = 变体配置集合，不是时间轴）。
+    expect(assembled.content.frameAxis.frames.length, '前提：多方块文档的帧轴为空').toBe(0)
+    // 即便有人把一条 777ms 的"帧"塞进内核帧轴，场景清单也不得跟着变 ——
+    // 场景的 label/durationMs 是**声明**事实，不是时间轴事实。
+    const bogus = frameAxis([{ index: 0, label: 'bogus-frame', durationMs: 777 }])
     const projected = projectKernelDocument({
       scene: assembled.scene,
-      content: documentContent({ metadata: assembled.content.metadata, frameAxis: changed, resources: assembled.content.resources }),
+      content: documentContent({ metadata: assembled.content.metadata, frameAxis: bogus, resources: assembled.content.resources }),
       multiblockDeclaration: declarationOf(assembled),
     })
     const outFrames = projected.plain.frames as Record<string, unknown>[]
-    expect(outFrames[0]!.durationMs, '投影必须读内核的帧时长轴').toBe(777)
+    expect(outFrames.length, '全部声明场景仍必须产出（不因空帧轴而丢）').toBe(
+      assembled.multiblock!.projection.frames.length,
+    )
+    expect(outFrames[0]!.durationMs, '场景时长来自声明，不来自时间轴').not.toBe(777)
+    expect(outFrames[0]!.label, '场景标签来自声明，不来自时间轴').not.toBe('bogus-frame')
   })
 })
 

@@ -104,6 +104,7 @@ import {
   contentResource,
   documentContent,
   documentMetadata,
+  EMPTY_FRAME_AXIS,
   frameAxis,
   normalizeResources,
   type ContentResource,
@@ -1783,9 +1784,19 @@ export function assembleKernelDocument(input: AssemblyInput): Result<AssembledDo
   // 第二处实现"（§15 第 5 条），也会把不变式"承运的声明**就是**内容权威的声明"
   // 弱化成"两者相等"（判据用 `toBe` 钉住后者）。
   const carriedBody = multiblockBodyContentOf(doc.multiblock)
+  // ── 帧轴：多方块的「场景清单」**不进时间轴**（M5-1） ──
+  //
+  // 多方块文档的帧清单是**变体配置集合（场景，Scene）**，不是时间轴上的帧：
+  // 它不与 `EditContext.time` 相干，也永不参与播放（2026-10-18 用户裁决）。
+  // 故这类文档的 `content.frameAxis` **恒为空** —— 于是：
+  //  · 会话的 `frameCount()` = 0、`frameIndex()` 恒 0（没有可播放的帧）；
+  //  · 帧控制 tab 不再属于多方块文档（它的归属是时间轴文档）；
+  //  · 帧时长轴不再把"432 个场景"经 `stripTimeline` 的 0→1ms 归一化
+  //    伪装成 432ms 的动画（那是断点①的帮凶）。
+  // 帧为主文档的帧轴逐字不变（通用动画链，M5-1 不碰它）。
   const content = documentContent({
     metadata: metadataFromLegacy(doc.meta, raw),
-    frameAxis: frameAxisFromLegacy(doc.frames),
+    frameAxis: doc.isMultiblock ? EMPTY_FRAME_AXIS : frameAxisFromLegacy(doc.frames),
     resources: normalizeResources(res.resources),
     multiblock: carriedBody.declaration,
   })

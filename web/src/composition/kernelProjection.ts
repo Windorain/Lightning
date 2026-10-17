@@ -914,30 +914,22 @@ export function projectMultiblockBody(declaration: KernelDeclarationProjection):
  * 字段顺序与旧 `serialize()` 一致（`index`/`label`/`durationMs` 打底，再写声明字段），
  * 使往返产物与旧产物**逐键可比**。
  */
-function projectMultiblockFrames(
+function projectMultiblockScenes(
   declaration: KernelDeclarationProjection,
-  axisFrames: readonly { readonly index: number; readonly label: string | null; readonly durationMs: number | null }[],
 ): Record<string, unknown>[] {
   return declaration.frames.map((f, i) => {
-    // ## 时长轴以**内核的**为准（本批实测抓到的一处回归）
+    // ## M5-1：场景的 `label`/`durationMs` 是**声明**事实，不是时间轴事实
     //
-    // 变体存储帧（`declaration.frames`）承载 `variant`/`runstate`/`stepIndex`/`rules`；
-    // 而 `durationMs`/`label` 属**帧时长轴**（`content.frameAxis`）——那是可改的内核内容
-    // （改它应让产物跟着变；`kernelProjection.test.ts` 的"改内核帧时长轴"判据把守）。
-    //
-    // 第一版只读 `declaration.frames` 的 `durationMs` ⇒ 改内核时长轴**不影响产物**
-    // （判据当场判红：`expected null to be 777`）。⇒ 时长轴优先，声明帧兜底。
-    const axis = axisFrames[i]
-    const axisDuration = axis?.durationMs
+    // 旧实现优先读 `content.frameAxis`（"时长轴优先，声明兜底"），那建立在
+    // 「多方块帧 = 时间轴帧」的误读上。用户裁决（2026-10-18）：帧清单 = 变体配置
+    // 集合（场景），与时间轴无关、永不参与播放 ⇒ 场景的标签/时长只能来自声明本身。
+    // 于是即使有人把一条帧轴塞进内核内容，场景清单也不会跟着变（判据见
+    // `kernelProjection.test.ts` 的"场景清单不读内核帧时长轴"）。
     const frame: Record<string, unknown> = {
       index: typeof f.index === 'number' ? f.index : i,
-      label: axis?.label ?? f.label ?? null,
+      label: f.label ?? null,
       durationMs:
-        typeof axisDuration === 'number' && Number.isFinite(axisDuration)
-          ? axisDuration
-          : typeof f.durationMs === 'number' && Number.isFinite(f.durationMs)
-            ? f.durationMs
-            : null,
+        typeof f.durationMs === 'number' && Number.isFinite(f.durationMs) ? f.durationMs : null,
     }
     frame.variant = f.variant
     frame.runstate = f.runstate
@@ -1454,7 +1446,7 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
     // 多方块的 `frames` 是**变体存储原语**（契约 §5.3）：本批修正后由
     // `declaration.frames` **全部**产出（见 `projectMultiblockFrames`），
     // 故这里不再需要"合并声明帧到投影帧上"——那正是把 432 帧塌成 1 帧的旧做法。
-    const declarationFrames = projectMultiblockFrames(input.multiblockDeclaration, axisFrames)
+    const declarationFrames = projectMultiblockScenes(input.multiblockDeclaration)
     // ── 渲染视图模式：网格注入帧、**不**写多方块节点（见 `renderView` 的说明） ──
     //
     // 旧实现是 `buildMultiblockRenderView(doc, result, frameIndex)`：把装配出的

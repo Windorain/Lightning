@@ -1,26 +1,30 @@
 /**
- * **G6 ③ 纯函数面判据**：离散通道时间入口的**构造与采样**（`domain/multiblock`）。
+ * **M5-1 纯函数面判据**：离散通道的**通用轨道构造与采样**（`domain/multiblock`）。
  *
  * 与 `runtime/__tests__/g6ChannelTimeEntry.test.ts`（生产装配路径）的分工：
- * 本文件判**算术与值域政策**，那份判**接线与生产可达**。两者都必需 ——
- * 只有前者会得到"纯函数很对但生产从不喂它"，只有后者会得到"接上了但算术靠猜"。
+ * 本文件判**算术与值域政策**，那份判**接线与生产可达**。
  *
  * | 判据 | 防什么 |
  * |---|---|
  * | `channelSetOfDeclaration` 逐字段搬运 | 防"适配器悄悄改值域"（声明 → 求值半的唯一翻译点） |
- * | `sizeChannelStepKeys` 的取值 = `min + stepIndex` 且时刻 = 帧起点 | 防"另一套时间轴/另一套反演" |
- * | 越界 `stepIndex` ⇒ **显式失败**（不钳制） | 防"把声明自相矛盾钳成一个看起来正常的取值" |
+ * | `channelStepTrack` 接受**调用方显式给的关键帧** | 防"轨道构造器偷偷从场景清单反演" |
  * | 经 `channelStepTrack` + `sampleChannelAt` 的采样恒为**域内整数** | 防线性插值冒充离散阶跃（插值会产出域外/非整数） |
+ * | 本模块**不再导出** `sizeChannelStepKeys` | 防"帧清单 → 时轴关键帧"的桥回流（M5-1：场景不是时间轴） |
+ *
+ * ## 为什么期望值在测试里独立算
+ *
+ * 关键帧的时刻与取值都是**本文件显式写下的输入**（不是从帧/场景清单反演），
+ * 故采样期望是"输入 → 半开区间规则"的直接结果，不借助被测实现。
  */
 
 import { describe, expect, it } from 'vitest'
-import { framesPerSecond, timeValue, type TimeValue } from '@/domain/animation'
+import { timeValue, type TimeValue } from '@/domain/animation'
+import * as multiblockDomain from '@/domain/multiblock'
 import {
   channelSetOfDeclaration,
   channelStepTrack,
   findChannel,
   sampleChannelAt,
-  sizeChannelStepKeys,
   type ChannelSet,
   type DeclaredChannelLike,
 } from '@/domain/multiblock'
@@ -34,10 +38,6 @@ const CHANNELS: readonly DeclaredChannelLike[] = Object.freeze([
   Object.freeze({ key: 'hatch', name: 'Hatch', kind: 'hatch', min: 0, max: 2 }),
 ])
 
-/** 每帧 100ms；`stepIndex` 刻意让第 0/2 帧同阶（验证"阶跃按声明、不按帧号漂移"）。 */
-const STEPS = Object.freeze([0, 1, 0, 2])
-const DURATIONS = Object.freeze([100, 100, 100, 100])
-
 function setOf(): ChannelSet {
   return channelSetOfDeclaration('mb-test', CHANNELS)
 }
@@ -47,7 +47,20 @@ function atMs(ms: number): TimeValue {
   return timeValue((ms / 1000) * FPS, FPS)
 }
 
-describe('G6 ③ 声明 → 通道集合（唯一翻译点）', () => {
+/**
+ * **调用方显式给的关键帧**（每 100ms 一个，取值 = 通道 min + 一个显式台阶）。
+ *
+ * 它**不是**从任何帧/场景清单反演出来的：M5-1 之后不存在那条桥。
+ * 这里保留"台阶序列"，只为判"通用轨道构造器 + 通用采样器"的阶跃语义。
+ */
+const KEYS = Object.freeze([
+  Object.freeze({ time: atMs(0), value: 1 }),
+  Object.freeze({ time: atMs(100), value: 2 }),
+  Object.freeze({ time: atMs(200), value: 1 }),
+  Object.freeze({ time: atMs(300), value: 3 }),
+])
+
+describe('M5-1 声明 → 通道集合（唯一翻译点）', () => {
   it('逐字段搬运键/名/值域，且三类 kind 一律收成数值域 `integer`（不按 kind 猜 boolean）', () => {
     const set = setOf()
     expect(set.id).toBe('mb-test')
@@ -66,53 +79,10 @@ describe('G6 ③ 声明 → 通道集合（唯一翻译点）', () => {
   })
 })
 
-describe('G6 ③ 帧 → 阶跃关键帧（契约 §5.4 的双射）', () => {
-  it('第 i 键：时刻 = 前 i 帧停留时长之和，取值 = 通道 min + stepIndex_i', () => {
+describe('M5-1 通用阶跃轨道（显式关键帧；不从场景清单反演）', () => {
+  it('经通用采样器：帧中同值、边界取下一帧、恒为域内整数', () => {
     const set = setOf()
-    const built = sizeChannelStepKeys(set, 'height', 'height', STEPS, DURATIONS, FPS)
-    expect(built.ok, '构造必须成功').toBe(true)
-    if (!built.ok) return
-    expect(built.value).toHaveLength(STEPS.length)
-    let ms = 0
-    for (let i = 0; i < STEPS.length; i += 1) {
-      // 期望在测试里**独立算**：秒 = 累计毫秒 / 1000，帧 = 秒 × fps（与生产同一换算）。
-      expect(built.value[i]!.time, `键 ${i} 的时刻必须是第 ${i} 帧的起点`).toEqual(atMs(ms))
-      expect(built.value[i]!.value, `键 ${i} 的取值必须是 min + stepIndex_${i}`).toBe(1 + STEPS[i]!)
-      ms += DURATIONS[i]!
-    }
-    // 相邻键的间距 = 该帧的停留时长（阶跃点落在帧起点上，不落在帧中/帧末）。
-    for (let i = 1; i < built.value.length; i += 1) {
-      const gapMs = (built.value[i]!.time.frame - built.value[i - 1]!.time.frame) / framesPerSecond(FPS) * 1000
-      expect(gapMs, `键 ${i - 1}→${i} 的间距必须是第 ${i - 1} 帧的停留时长`).toBe(DURATIONS[i - 1]!)
-    }
-  })
-
-  it('越界 `stepIndex`（min + step > max）⇒ 显式失败：不钳制、不外推、不伪造', () => {
-    const set = setOf()
-    const bad = sizeChannelStepKeys(set, 'height', 'height', Object.freeze([0, 9]), Object.freeze([100, 100]), FPS)
-    expect(bad.ok, '声明自相矛盾时必须判错').toBe(false)
-    if (!bad.ok) expect(bad.error.params.reason).toBe('channelStepOutOfDomain')
-  })
-
-  it('非尺寸型通道 / 未声明通道 ⇒ 各自显式失败（不猜一条轨道出来）', () => {
-    const set = setOf()
-    const wrongChannel = sizeChannelStepKeys(set, 'coil', 'height', STEPS, DURATIONS, FPS)
-    expect(wrongChannel.ok).toBe(false)
-    if (!wrongChannel.ok) expect(wrongChannel.error.params.reason).toBe('channelIsNotSizeChannel')
-    const unknown = sizeChannelStepKeys(set, 'nope', 'nope', STEPS, DURATIONS, FPS)
-    expect(unknown.ok).toBe(false)
-    if (!unknown.ok) expect(unknown.error.params.reason).toBe('channelNotDeclared')
-    const empty = sizeChannelStepKeys(set, 'height', 'height', Object.freeze([]), Object.freeze([]), FPS)
-    expect(empty.ok).toBe(false)
-    if (!empty.ok) expect(empty.error.params.reason).toBe('channelTimeAxisEmpty')
-  })
-
-  it('经通用采样器（`channelStepTrack` + `sampleChannelAt`）：帧中同值、边界取下一帧、恒为域内整数', () => {
-    const set = setOf()
-    const keys = sizeChannelStepKeys(set, 'height', 'height', STEPS, DURATIONS, FPS)
-    expect(keys.ok).toBe(true)
-    if (!keys.ok) return
-    const track = channelStepTrack(set, 'height', keys.value)
+    const track = channelStepTrack(set, 'height', KEYS)
     expect(track.ok, '轨道构造必须走通用构造点').toBe(true)
     if (!track.ok) return
     const sampleAt = (ms: number): number => {
@@ -121,14 +91,14 @@ describe('G6 ③ 帧 → 阶跃关键帧（契约 §5.4 的双射）', () => {
       if (!s.ok) throw new Error('unreachable')
       return s.value as number
     }
-    // 帧中 = 本帧的值（阶跃，不是插值）
-    expect(sampleAt(50), '帧 0 中点 ⇒ stepIndex 0 的值').toBe(1)
-    expect(sampleAt(150), '帧 1 中点 ⇒ stepIndex 1 的值').toBe(2)
-    expect(sampleAt(250), '帧 2 中点 ⇒ stepIndex 0 的值（与帧 0 同阶 ⇒ 同值）').toBe(1)
-    expect(sampleAt(350), '帧 3 中点 ⇒ stepIndex 2 的值').toBe(3)
-    // 边界 = 下一帧（半开区间 `[start, start+dur)`）
-    expect(sampleAt(100), '100ms 是帧 1 的起点 ⇒ 取帧 1 的值').toBe(2)
-    expect(sampleAt(200), '200ms 是帧 2 的起点 ⇒ 取帧 2 的值').toBe(1)
+    // 帧中 = 本键的值（阶跃，不是插值）
+    expect(sampleAt(50), '0..100ms ⇒ 键 0 的值').toBe(1)
+    expect(sampleAt(150), '100..200ms ⇒ 键 1 的值').toBe(2)
+    expect(sampleAt(250), '200..300ms ⇒ 键 2 的值（与键 0 同值 ⇒ 阶跃而非帧号漂移）').toBe(1)
+    expect(sampleAt(350), '300ms 之后 ⇒ 末键的值').toBe(3)
+    // 边界 = 下一键（半开区间 `[start, start+dur)`）
+    expect(sampleAt(100), '100ms 是键 1 的起点 ⇒ 取键 1 的值').toBe(2)
+    expect(sampleAt(200), '200ms 是键 2 的起点 ⇒ 取键 2 的值').toBe(1)
     // 关键性质：**恒为域内整数** —— 线性插值会在 0..100ms 之间产出 1.5 这类域外值。
     for (let ms = 0; ms <= 400; ms += 1) {
       const v = sampleAt(ms)
@@ -136,5 +106,19 @@ describe('G6 ③ 帧 → 阶跃关键帧（契约 §5.4 的双射）', () => {
       expect(v, `${ms}ms 采样出域外值 ${v}`).toBeGreaterThanOrEqual(1)
       expect(v).toBeLessThanOrEqual(5)
     }
+  })
+
+  it('轨道构造只认**通道身份**：未声明通道显式失败（不凭空造轨道）', () => {
+    const set = setOf()
+    const unknown = channelStepTrack(set, 'nope', KEYS)
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.params.reason).toBe('channelNotDeclared')
+  })
+
+  it('**退役判据**：`domain/multiblock` 不再导出「帧清单 → 时轴关键帧」的桥', () => {
+    expect(
+      'sizeChannelStepKeys' in multiblockDomain,
+      'M5-1：场景清单不是时间轴来源 —— 该桥不得回流（回流 = 断点①复活）',
+    ).toBe(false)
   })
 })

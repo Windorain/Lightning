@@ -239,8 +239,15 @@ describe('P10b · 不静默丢失（§12 保真记录 + 诊断）', () => {
     ).toBe(plainRoot.label)
     expect(assembled.content.metadata.author, '作者应被装配（同样来自 plain 根）').toBe(plainRoot.author)
     expect(assembled.content.metadata.description.length, '描述应被装配').toBeGreaterThan(0)
-    // 帧时长轴：与文件帧数一致
-    expect(assembled.content.frameAxis.frames.length).toBe(EXPECTED_FRAMES['multiblock-ebf-2ch'])
+    // M5-1：多方块的**场景清单不进时间轴** —— 帧轴必须为空，但场景声明必须仍全部承载
+    expect(
+      assembled.content.frameAxis.frames.length,
+      '多方块文档的帧轴必须为空（帧清单 = 变体配置集合，不是时间轴）',
+    ).toBe(0)
+    expect(
+      assembled.multiblock!.projection.frames.length,
+      '场景声明必须仍全部承载（空帧轴 ≠ 丢内容）',
+    ).toBe(EXPECTED_FRAMES['multiblock-ebf-2ch'])
     // 资源引用：真实夹具内嵌纹理 ⇒ 必须有资源且**每条都有内容版本**
     expect(assembled.content.resources.length, 'ebf-2ch 应装配出资源引用').toBeGreaterThan(0)
     for (const r of assembled.content.resources) {
