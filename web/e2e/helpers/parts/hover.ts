@@ -10,11 +10,12 @@
  *     因此经生产 `WorkspaceTabs` 的 DOM click 切入 Wiki 工作区 —— 这就是生产用户
  *     查看嵌入预览的同一路径，不是测试壳。
  *  2. **DOM 事件注入**：`injectHoverAtCellLocal()` 把「格内局部坐标」经**视口实际
- *     相机**（公开观测 `ctx.viewports.get('r-wiki-preview').camera`，正交）投影到
+ *     相机**（公开观测 `ctx.viewports.get(rid).camera`，正交；`rid` 缺省为 Wiki 预览，
+ *     可传 `r-viewport` 复用同一注入路径）投影到
  *     client 坐标，再在视口 DOM 元素上派发 `pointermove` —— 与 `viewportBinder`
  *     的生产监听（capture 阶段 `pointermove` → `ed.dispatch`）同一路径。
  *     投影与派发在**同一次 evaluate** 内完成，相机在两者之间不可能移动。
- *  3. **公开观测**：`window.__vm__` → `ctx.viewports.get('r-wiki-preview')` 的
+ *  3. **公开观测**：`window.__vm__` → `ctx.viewports.get(rid)` 的
  *     `camera/domElement/definition/contentGroup`（公开字段，与 `context/queries.ts`
  *     拾取链读的是同一份），加上 `ctx.region('r-wiki-preview').state.hover`
  *     （hoverHandler 写入的公开悬停状态，`viewportBlock.part` 即部件命中信息）
@@ -178,7 +179,11 @@ export interface InjectedPointer {
  * 世界偏移与网格生成互逆（`structureGeometryUVs.ts`：ox = col - w/2，
  * oy = worldY - h/2，oz = z - d/2；worldY = h-1-row）。
  */
-export async function injectHoverAtCellLocal(page: Page, pt: CellLocalPoint): Promise<InjectedPointer> {
+export async function injectHoverAtCellLocal(
+  page: Page,
+  pt: CellLocalPoint,
+  rid: string = WIKI_REGION,
+): Promise<InjectedPointer> {
   return await page.evaluate(
     ({ rid, pt }) => {
       const ctx = (window as any).__vm__
@@ -220,12 +225,15 @@ export async function injectHoverAtCellLocal(page: Page, pt: CellLocalPoint): Pr
       )
       return { clientX, clientY, world: p }
     },
-    { rid: WIKI_REGION, pt },
+    { rid, pt },
   )
 }
 
-/** 移出视口（生产 `pointerleave` 路径 → hover.clearViewport()），清理两次探测之间的悬停态。 */
-export async function clearWikiHover(page: Page): Promise<void> {
+/**
+ * 移出视口（生产 `pointerleave` 路径 → hover.clearViewport()），清理两次探测之间的悬停态。
+ * `rid` 缺省为 Wiki 预览；工作台视口判据传 `r-viewport`。
+ */
+export async function clearWikiHover(page: Page, rid: string = WIKI_REGION): Promise<void> {
   await page.evaluate((rid) => {
     const el = (window as any).__vm__?.viewports?.get(rid)?.domElement?.value as HTMLElement | undefined
     el?.dispatchEvent(
@@ -237,7 +245,7 @@ export async function clearWikiHover(page: Page): Promise<void> {
         isPrimary: true,
       }),
     )
-  }, WIKI_REGION)
+  }, rid)
 }
 
 // ---------------------------------------------------------------------------
@@ -251,8 +259,11 @@ export interface WikiHoverObservation {
   part: { localId: string; displayName: string; tooltip: string[] } | null
 }
 
-/** 读 Wiki 预览 region 的公开悬停状态（`hoverHandler` 写入；未悬停方块 ⇒ null）。 */
-export async function readWikiHover(page: Page): Promise<WikiHoverObservation | null> {
+/**
+ * 读 region 的公开悬停状态（`hoverHandler` 写入；未悬停方块 ⇒ null）。
+ * `rid` 缺省为 Wiki 预览；工作台视口判据传 `r-viewport`。
+ */
+export async function readWikiHover(page: Page, rid: string = WIKI_REGION): Promise<WikiHoverObservation | null> {
   return await page.evaluate((rid) => {
     const hover = (window as any).__vm__?.region(rid)?.state.hover
     const vb = hover?.viewportBlock?.value ?? null
@@ -262,7 +273,7 @@ export async function readWikiHover(page: Page): Promise<WikiHoverObservation | 
       voxel: vb.voxel ?? null,
       part: vb.part ? { localId: vb.part.localId, displayName: vb.part.displayName, tooltip: [...vb.part.tooltip] } : null,
     }
-  }, WIKI_REGION)
+  }, rid)
 }
 
 /** 读 tooltip DOM 文本（`.wm-tooltip-box`；未显示 ⇒ null）。 */
