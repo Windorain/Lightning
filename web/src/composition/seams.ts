@@ -161,9 +161,13 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       'src/editors/workbench-rna.ts',
     ]),
     newTrack:
-      '内核求值 → 呈现：`composition/kernelRenderView#kernelRenderViewOf` 用'
-      + ' `assembleKernelDocument` + `projectKernelDocument` 产出渲染视图（P10d D2 交付，'
-      + ' 逐三角形一致已验）；`composition/presenterSession#PresenterSession` 已有生产实现。',
+      '内核求值 → 呈现：`composition/kernelMultiblockEvaluation#evaluateMultiblockPresentation`'
+      + '（**M5-2 唯一求值点**）按"声明 + body + 当前通道取值"再装配出**派生场景**，'
+      + ' `Context#kernelRenderSourceFace`（DRW 定义面）与 `Context#kernelPresentationDocument`'
+      + '（呈现会话）读同一份派生场景 ⇒ "滑杆动了画面动"（断点②）；'
+      + ' `composition/kernelRenderView#kernelRenderViewFromFace` 只做投影（不再自己装配）；'
+      + ' `composition/presenterSession#PresenterSession` 是画面生产者。'
+      + ' 派生场景不写回内核文档（不进历史、不进保存）—— 求值 ≠ 内容。',
     oldTrack:
       '`runtime/drwMeshPipeline` 的**定义面 / 说明池 / 材质库输入**已改吃内核面 `KernelRenderSourceFace`'
       + '（`composition/kernelPresentationInputs#kernelRenderSourceFaceOf`；R1-β① **G4+G5**，提交 `c66975a4` + `92fff13d`）：'

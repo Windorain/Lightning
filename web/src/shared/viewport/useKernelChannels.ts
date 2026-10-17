@@ -34,7 +34,14 @@
  * 多方块文档的 `frame.grid` 恒为 `null`（网格是装配产物），而 DRW 只吃
  * `RuntimeDocument.serialize()`。故 `renderDoc` 仍构造一份**视图文档** ——
  * 但它的输入已从"每视口本地取值"改为"**内核**取值 + 内核装配产物"。
- * 让 DRW 直接消费内核场景是 #286（P10c）的范围（渲染链接管内核求值）。
+ *
+ * ## M5-2（断点②）：面板与画面吃**同一次**求值
+ *
+ * 本模块不再自己调 `assembleMultiblockKernelFace`（那会让"面板尺寸"与"画面网格"
+ * 各算一次）：面板的 `dims`/`variantKey` 与画面的定义面/几何都来自
+ * `Context#kernelMultiblockEvaluation()` 的**同一份**派生场景。取值写入仍只经
+ * `setChannelValue` 命令；本模块只负责"写后请求一次内容重读"（`contentRefreshTick`），
+ * 失效判定仍由渲染侧按内容身份自行算。
  */
 
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef } from 'vue'
