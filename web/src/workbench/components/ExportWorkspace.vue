@@ -56,6 +56,14 @@ let isoSeq = 0
 function cycleIso(): void { isoDir.value = (isoDir.value + 1) % 4 }
 /** 「取当前预览时间」：把场景时间权威的当前值搬进输入框（不提交任何命令）。 */
 function takeCurrentTime(): void { isoSeconds.value = ctx.getSceneSeconds() }
+/**
+ * 输入框里的值不是有限数（`v-model.lazy.number` 解析失败时会退回**字符串**）。
+ * 这是**提示**，不是判据：真正的拒绝发生在 `normalizeIsoSeconds`（唯一归一入口）。
+ */
+const isoTimeInvalid = computed(() => {
+  const v: unknown = isoSeconds.value
+  return typeof v !== 'number' || !Number.isFinite(v)
+})
 async function bakeIso(): Promise<void> {
   const d = doc.value; if (!d) { isoUrl.value = null; isoErr.value = null; isoBusy.value = false; return }
   const seq = ++isoSeq; isoBusy.value = true; isoErr.value = null
@@ -156,6 +164,7 @@ function pushToServer(): void {
           -->
           <button v-if="doc" class="ew-btn ew-btn--primary" @click="downloadIso()" data-download-iso>{{ t("downloadPng") }}</button>
         </div>
+        <div v-if="isoTimeInvalid" class="ew-fb ew-fb--err">{{ t("isoTimeInvalid") }}</div>
         <div v-if="isoBusy" class="ew-fb">{{ t('rendering') }}</div>
         <img v-else-if="isoUrl" :src="isoUrl" class="ew-iso" alt="Iso preview" />
         <div v-if="isoErr" class="ew-fb ew-fb--err">{{ isoErr }}</div>
