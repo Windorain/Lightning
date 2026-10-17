@@ -180,16 +180,16 @@ test.describe('M2-4 呈现画面：纹理就绪前后像素对照（真实入口
     ).toEqual([])
 
     // ── ⑧ 主断言 ②：就绪后画面非单一中性灰（白模反义）──
-    // 阈值按实测标定（两次独立运行读数见日志）：
-    //   就绪前白模：uniqueColors≈78、chromatic≈0.007、neutral≈0.99
-    //   就绪后贴图：uniqueColors≈399、chromatic≈0.039、neutral≈0.95
-    // 取"绝对下限 + 相对跃升"两条互相独立的证人：
-    //   · 绝对：白模是灰阶明暗，彩度高的像素几乎为零 ⇒ 就绪后必须 ≥0.02（实测 2 倍余量）；
-    //     独特色数必须 ≥200（白模实测 78，纯灰度画面只有几十）；
-    //   · 相对：就绪后的彩色比例必须 ≥ 白模的 2 倍，且中性灰占比必须**下降**
-    //     （这两条把"贴图真的替换了灰模"与"画面整体变亮"区分开）。
-    // 不用 dominantColorShare 当证人：视口背景占画面大多数（实测两态都≈0.80），
-    // 它没有区分力（本文件如实登记，不拿一个恒定的数当证据）。
+    // 阈值按**实测**标定（两个 project 各跑过，读数见日志与提交说明）：
+    //   桌面：白模 uniqueColors=78 chromatic=0.0072 neutral=0.9924
+    //         就绪 uniqueColors=402 chromatic=0.0385 neutral=0.9436
+    //   窄视口：白模 uniqueColors=73 chromatic=0.0014 neutral=0.9985
+    //           就绪 uniqueColors=285 chromatic=0.0064 neutral=0.9907
+    // ⇒ **绝对**彩色占比不可跨视口（宽/窄白模 0.0072 vs 0.0014，窄视口就绪 0.0064
+    //   低于桌面白模 0.0072），故只用它做**同视口内的相对**比较；
+    //   绝对的"非单一中性灰"由**独特色数**承担（白模 73–78，就绪 285–402）。
+    // 不用 dominantColorShare 当证人：视口背景占画面多数（两态都≈0.80/0.97），
+    // 没有区分力（如实登记，不拿一个恒定的数当证据）。
     expect(
       after.stats.uniqueColors,
       '② 就绪后画面必须有丰富的颜色（5bit 量化独特色数；白模/纯色画面只有几十）',
@@ -200,12 +200,12 @@ test.describe('M2-4 呈现画面：纹理就绪前后像素对照（真实入口
     ).toBeGreaterThan(before!.stats.uniqueColors * 2)
     expect(
       after.chroma.chromaticRatio,
-      '② 就绪后必须有可观比例的**彩色**像素（彩度>16 且亮度>20）；白模是灰阶明暗 ⇒ 该值≈0',
-    ).toBeGreaterThanOrEqual(0.02)
+      '② 就绪后必须**有**彩色像素（彩度>16 且亮度>20）；白模是灰阶明暗 ⇒ 该值≈0',
+    ).toBeGreaterThanOrEqual(0.004)
     expect(
       after.chroma.chromaticRatio,
       '② 就绪后的彩色比例必须 ≥ 白模的 2 倍（否则"非白模"无从谈起）',
-    ).toBeGreaterThanOrEqual(Math.max(before!.chroma.chromaticRatio * 2, 0.02))
+    ).toBeGreaterThanOrEqual(Math.max(before!.chroma.chromaticRatio * 2, 0.004))
     expect(
       after.chroma.neutralGrayRatio,
       '② 中性灰像素占比必须**下降**（贴图替换了灰模；仅整体提亮不会让它降）',

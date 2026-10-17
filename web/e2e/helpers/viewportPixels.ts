@@ -169,6 +169,17 @@ export interface ChromaStats {
   neutralGrayRatio: number
 }
 
+/**
+ * ⚠️ 口径边界：`chromaticRatio` **不能**当跨视口的绝对值判据。
+ *
+ * 实测（M2-4）：就绪后桌面 0.0385、窄视口 0.0064（结构占画面比例不同）；
+ * 而窄视口的**白模**是 0.0014、桌面白模 0.0072 —— 绝对值区间互相重叠。
+ * 故 `chromaticRatio` 只在**同一视口内做相对比较**（就绪 vs 白模），
+ * 绝对值下限只留一个"确实有彩色像素"的低门限。
+ * 试过的替代方案：用"与众数背景色不同"的像素算内容包围盒 —— 实测包围盒
+ * 覆盖整幅画面（背景是渐变/带抗锯齿，不是单一量化色），没有隔离能力，已弃用。
+ */
+
 /** 一次"门控采样"的完整读数（证据链：状态 + 像素 sha + 统计 + 签名 + 颜色分布 + 机位）。 */
 export interface ViewportSample {
   /** 采样时刻的 `data-texture-state`（门已核对，前后各一次）。 */
@@ -272,6 +283,8 @@ export async function sampleViewport(
       }
       let top = 0
       for (let i = 0; i < counts.length; i++) if (counts[i]! > top) top = counts[i]!
+
+
       const mean = sum / n
       const variance = Math.max(0, sumSq / n - mean * mean)
       const signature: number[] = []
