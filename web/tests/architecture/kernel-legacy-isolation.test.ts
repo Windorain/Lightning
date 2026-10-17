@@ -776,6 +776,22 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       'R1-β① C4/C5：端口切换后本算子不再作为命令入口（旧的「领域命令 → 旧 operator」转发表'
       + '与 `<前缀>:<命令名>` 票号形态已消失），算子随之内迁内核侧装配时核销本行',
   }),
+  // ── M5-2（断点②）：画面源 = **按当前取值求值的派生文档** ────────────────────
+  //
+  // `Context#kernelPresentationDocument()` 把内核文档（`Document`）与求值场景合成
+  // **派生文档**交给呈现会话 —— 派生文档的形状就是内核 `Document`（同 id/版本/历史，
+  // 只换 `scene`），故旧层 `runtime/context.ts` 需要该类型。与上一条（`domain/scene`）
+  // 同性质：**单向读面**（内核 → 呈现），不是双向同步。
+  Object.freeze({
+    from: 'src/runtime/context.ts',
+    to: 'domain/document',
+    reason:
+      'M5-2（断点②）：`Context#kernelPresentationDocument()` 返回"内核文档 + 按当前通道取值求值的派生场景"'
+      + '（同 id/版本/历史，只换 scene），呈现会话据此产出画面；派生文档不落存储、不进历史、不进保存。'
+      + '这是画面源从"装载期装配"切到"当前取值求值"的落点。',
+    exitStage:
+      'M6/M7 呈现链改为直接吃求值场景（`PresenterSession` 收 scene 而非 Document）时，本方法与该边一并核销',
+  }),
   Object.freeze({
     from: 'src/runtime/context.ts',
     to: 'domain/scene',
@@ -862,11 +878,13 @@ describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已�
       expect(e.reason.length, `${e.from}→${e.to} 必须写明理由`).toBeGreaterThan(20)
       // 退出阶段必须写明**负责批次**。批次命名跨过两个时代：
       //  - P 时代：`P<N>`（#250 立项的 P1–P11，及 P10b/P10d/P10f 续接批）；
-      //  - R 时代：`R<N>`（**#385 立项单**重划的 R1–R6，#386–#392）。
+      //  - R 时代：`R<N>`（**#385 立项单**重划的 R1–R6，#386–#392）；
+      //  - M 时代：`M<N>`（**2026-10-17 里程碑重划**：M2–M8，执行计划
+      //    `.workspace/plans/web-kernel-execution-plan.md`）。
       // 判据只要求"写明了批次"，**不**锚定某一时代的命名 —— 锚定会把新的
       // 真实批次逼成谎报一个 P 编号（与 `boundary-scan.test.ts` 里
       // `EXTRA_BATCHES` 那段注释同一理由：登记表宁可真、不可假）。
-      expect(e.exitStage, `${e.from}→${e.to} 必须写明退出阶段`).toMatch(/(P\d+[a-z]?|R\d+)/)
+      expect(e.exitStage, `${e.from}→${e.to} 必须写明退出阶段`).toMatch(/(P\d+[a-z]?|R\d+|M\d+)/)
     }
   })
 

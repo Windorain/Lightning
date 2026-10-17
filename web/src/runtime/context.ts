@@ -131,6 +131,22 @@ export class Context {
    */
   private fieldRejections: FieldRejectionStore | null = null
 
+  /**
+   * 多方块求值的**失效驱动缓存**（M5-2 性能护栏；见 `kernelMultiblockEvaluation`）。
+   *
+   * 字段值是不可变快照：命中 ⇒ 返回**同一个**求值产物对象（消费方的 `computed`
+   * 依赖因此稳定）；键变（写通道 / 换文档 / 换帧）⇒ 恰好一次重算。
+   */
+  private multiblockEvaluationCache: {
+    readonly key: string
+    readonly scene: Scene
+    readonly content: DocumentContent
+    readonly body: MultiblockBody | null
+    readonly declaration: unknown
+    readonly frameObjects: readonly string[]
+    readonly value: MultiblockEvaluation
+  } | null = null
+
   constructor(
     readonly main: Main,
     readonly wm: WM,
@@ -1323,15 +1339,63 @@ export class Context {
     const selection = decl === null
       ? EMPTY_MULTIBLOCK_SELECTION
       : projectMultiblockSelection(decl, kernel.channelValues())
-    return evaluateMultiblockPresentation({
+    const frameIndex = this.getFrameIndex()
+    const body = kernel.multiblockBodyOf()
+
+    // ── 失效驱动的记忆化（M5-2 的性能护栏）───────────────────────────────
+    //
+    // 通道拖动是高频交互，而本方法是**每帧**被呈现循环调的（`applyPresenterSurface`）。
+    // 没有记忆化 ⇒ 每帧全量再装配（432 个已声明组合的 fixture 上尤其贵）。
+    // 缓存键 = **求值身份的全部输入**（文档版本 + 声明/场景/body 的对象身份 +
+    // 取值 + 帧下标）：键不变 ⇒ 复用同一份求值产物（同对象，消费方的 computed 也稳定）。
+    // 键变（写通道 / 换文档 / 换帧）⇒ 恰好一次重算 —— 这就是"只在取值变化时发生"。
+    //
+    // 为什么键里放对象**引用**而不是再算一份摘要：这些对象都是内核文档不可变值的一部分
+    // （每次文档修改换新引用），引用比较既便宜又是**结构性**的（同引用 ⇒ 同内容）。
+    const key = [
+      kernelDoc.version.documentVersion,
+      frameIndex,
+      selection.totalTier,
+      selection.runstate,
+      Object.entries(selection.values)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => `${k}=${v}`)
+        .join(','),
+    ].join('|')
+    // `?? null`：`Context` 也被诊断脚本/测试宿主以 `Object.create(Context.prototype)`
+    // 构造（类字段初始化器不执行）—— 与 `fieldRejections` 同一处置。
+    const cached = this.multiblockEvaluationCache ?? null
+    if (
+      cached !== null &&
+      cached.key === key &&
+      cached.scene === kernelDoc.scene &&
+      cached.content === kernelDoc.content &&
+      cached.body === body &&
+      cached.declaration === (face.multiblock ?? null) &&
+      cached.frameObjects === face.frameObjects
+    ) {
+      return cached.value
+    }
+
+    const value = evaluateMultiblockPresentation({
       scene: kernelDoc.scene,
       content: kernelDoc.content,
       frameObjects: face.frameObjects,
       multiblockDeclaration: (face.multiblock ?? null) as KernelDeclarationProjection | null,
-      body: kernel.multiblockBodyOf(),
+      body,
       selection,
-      frameIndex: this.getFrameIndex(),
+      frameIndex,
     })
+    this.multiblockEvaluationCache = Object.freeze({
+      key,
+      scene: kernelDoc.scene,
+      content: kernelDoc.content,
+      body,
+      declaration: face.multiblock ?? null,
+      frameObjects: face.frameObjects,
+      value,
+    })
+    return value
   }
 
   /**

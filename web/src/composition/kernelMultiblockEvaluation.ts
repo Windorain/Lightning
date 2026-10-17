@@ -38,12 +38,10 @@
 
 import type { Document } from '@/domain/document'
 import type { DocumentContent } from '@/domain/content'
-import type { Grid } from '@/context/grid'
-import type { AssemblyResult } from '@/context/multiblock'
 import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
 import type { MultiblockSelectionState } from '@/domain/multiblockSelection'
 import { objectData, withUpdatedData, type Scene } from '@/domain/scene'
-import { assembleMultiblockKernelFace } from '@/composition/kernelAssembly'
+import { assembleMultiblockKernelFace, type MultiblockKernelFaceAssembly } from '@/composition/kernelAssembly'
 import type { KernelDeclarationProjection } from '@/composition/kernelProjection'
 import { evaluationIdentityOf } from '@/presentation/multiblockEvaluation'
 
@@ -53,10 +51,14 @@ export interface MultiblockAssemblyFacts {
   readonly objectId: string
   /** 网格对象数据 id（逐字相同）。 */
   readonly dataId: string
-  /** 装配出的网格（`Grid`；呈现/投影/定义面同一份）。 */
-  readonly grid: Grid
-  /** 装配报告（尺寸/变体键/夹取/警告）。 */
-  readonly report: AssemblyResult['report']
+  /**
+   * 装配报告（尺寸/变体键/夹取/警告）。
+   *
+   * 类型取自装配根的产物（`MultiblockKernelFaceAssembly`）：本文件**不** import
+   * `@/context/**`（那会新增 composition → 旧层的绑定对，见
+   * `tests/architecture/composition-legacy-binding.test.ts` 的冻结读数）。
+   */
+  readonly report: MultiblockKernelFaceAssembly['report']
 }
 
 /**
@@ -162,7 +164,6 @@ export function evaluateMultiblockPresentation(input: MultiblockEvaluationInput)
     assembly: Object.freeze({
       objectId: assembled.value.objectId,
       dataId: assembled.value.dataId,
-      grid: assembled.value.grid,
       report: assembled.value.report,
     }),
     failed: false,
