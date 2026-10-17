@@ -18,7 +18,14 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { textureResourcesOf, textureBindingsOf, TEXTURE_STATES, type TextureDecoder } from '@/composition/kernelTextureResources'
+import {
+  textureResourcesOf,
+  textureBindingsOf,
+  TEXTURE_STATES,
+  TEXTURE_DECODE_CONCURRENCY,
+  type TextureDecoder,
+  type TextureResourcesProgress,
+} from '@/composition/kernelTextureResources'
 import { bindTexture, missingRequiredAssets, textureRequirementsOf, type TextureResource } from '@/presentation/textureBinding'
 import { contentIdentityKey } from '@/presentation/assetIdentity'
 import type { ContentResource } from '@/domain/content'
@@ -281,3 +288,112 @@ describe('D3a · 纯性与确定性（可缓存的前提）', () => {
     expect(out.length).toBe(0)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #399 B1 · 有界并发：乱序完成 + 单张抛错（并发化最容易破坏的两条不变量）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('#399 B1 · 有界并发（缺陷 A）：下标对齐 / 逐项失败 / 进度计数', () => {
+  const N = 24
+  /** 注入"坏一张"的下标：不是 0（0 会被"没开始"掩盖），也不是最后一个（会被"末尾"掩盖）。 */
+  const BAD = 3
+
+  /**
+   * 乱序完成 + 统计在途峰值的解码器。
+   *
+   * 延迟按**逆序**给（下标越大越先完成）⇒ 完成顺序与输入顺序严格相反：
+   * 任何"按完成顺序 push"的实现都会让 out 与入参错位，而本文件的判据逐位钉身份。
+   */
+  function outOfOrderDecoder(badIndex: number): {
+    decode: (payload: string) => Promise<{ width: number; height: number; rgba: Uint8Array }>
+    peak: () => number
+  } {
+    let inFlight = 0
+    let peak = 0
+    const decode = async (payload: string) => {
+      const i = Number(payload.slice(1))
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      try {
+        await new Promise((resolve) => setTimeout(resolve, (N - i) * 2))
+        if (i === badIndex) throw new Error(`注入的解码失败（第 ${i} 张）`)
+        return { width: 4, height: 4, rgba: new Uint8Array(4 * 4 * 4) }
+      } finally {
+        inFlight -= 1
+      }
+    }
+    return { decode, peak: () => peak }
+  }
+
+  const resourcesOf = (n: number) =>
+    Array.from({ length: n }, (_, i) => resource({ assetId: `r${i}`, payload: `p${i}` }))
+
+  it('乱序完成 + 第 3 张抛错 ⇒ out[3] 为 failed，其余**按位**为 ready（位置即语义）', async () => {
+    const d = outOfOrderDecoder(BAD)
+    const out = await textureResourcesOf(resourcesOf(N), { decode: d.decode })
+    expect(out.length, '并发不得丢项/多项').toBe(N)
+    expect(
+      out.map((r, i) => (r.state === 'failed' ? i : -1)).filter((i) => i >= 0),
+      '**恰好**第 3 张失败（坏一张只坏一张，且是它自己）',
+    ).toEqual([BAD])
+    for (let i = 0; i < N; i += 1) {
+      expect(
+        contentIdentityKey(out[i]!.identity),
+        `下标 ${i} 必须仍是第 ${i} 张资源（乱序完成不得改变输出位置）`,
+      ).toBe(`r${i}@v:r${i}`)
+      if (i !== BAD) expect(out[i]!.state, `第 ${i} 张必须可用`).toBe('ready')
+    }
+    expect(d.peak(), '必须真的并发（否则本判据退化成串行的同义反复）').toBeGreaterThan(1)
+    expect(d.peak(), '同时在途不得超过窗口（无界并发会顶内存峰值）').toBeLessThanOrEqual(TEXTURE_DECODE_CONCURRENCY)
+  })
+
+  it('onProgress：n 单调不减、起点为 0/total、终态汇总与真实产出逐项一致', async () => {
+    const d = outOfOrderDecoder(BAD)
+    const events: TextureResourcesProgress[] = []
+    const out = await textureResourcesOf(resourcesOf(N), { decode: d.decode }, (p) => events.push(p))
+
+    expect(events.length, '必须至少收到起点与终态').toBeGreaterThan(2)
+    expect(events[0], '起点必须是 0/total 的加载中（调用方不必自己拼）').toMatchObject({
+      state: 'loading',
+      done: 0,
+      total: N,
+    })
+    const dones = events.map((e) => e.done)
+    expect(
+      dones.every((n, i) => i === 0 || n >= dones[i - 1]!),
+      `n 必须单调不减（实测 ${dones.join(',')}）`,
+    ).toBe(true)
+    expect(Math.max(...dones), '必须走到 n === total（否则进度永远差一截）').toBe(N)
+
+    const last = events[events.length - 1]!
+    expect(last.state, '有一张失败 ⇒ 终态是 failed，不是 ready').toBe('failed')
+    expect(last.done).toBe(N)
+    expect(last.failed, '终态失败数').toBe(1)
+    expect(last.ready, '终态可用数').toBe(N - 1)
+    expect(last.ready + last.failed + last.unrequested, '终态三类计数必须补齐总数').toBe(N)
+    expect(last.ready, '汇总必须与真实产出一致').toBe(out.filter((r) => r.state === 'ready').length)
+    expect(last.failed, '汇总必须与真实产出一致').toBe(out.filter((r) => r.state === 'failed').length)
+  })
+
+  it('全部成功 ⇒ 终态 ready、ready 数等于总数（不得把"没失败"漏报成别的相位）', async () => {
+    const events: TextureResourcesProgress[] = []
+    const out = await textureResourcesOf(resourcesOf(6), okDecoder, (p) => events.push(p))
+    expect(out.every((r) => r.state === 'ready')).toBe(true)
+    const last = events[events.length - 1]!
+    expect(last.state).toBe('ready')
+    expect(last.ready).toBe(6)
+    expect(last.failed).toBe(0)
+  })
+
+  it('进度上报抛错是**旁路**：不得把已解码的纹理伪装成失败（报表坏了 ≠ 资源坏了）', async () => {
+    const out = await textureResourcesOf(resourcesOf(5), okDecoder, () => {
+      throw new Error('注入：进度上报抛错')
+    })
+    expect(out.length).toBe(5)
+    expect(
+      out.every((r) => r.state === 'ready'),
+      '上报抛错若冒泡，会把整批结果变成 failed —— 两种事实必须可区分',
+    ).toBe(true)
+  })
+})
+
