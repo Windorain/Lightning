@@ -535,3 +535,225 @@ export function stripTimeline(
   return Object.freeze({ frameIndices: Object.freeze([...frameIndices]), durationMs: Object.freeze(durations) })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 序列循环计划（GIF 导出的**唯一**时间权威；M5-4）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 一条动画帧条的**声明**（已由适配器归一：毫秒整数、恒 `> 0`）。
+ *
+ * 单位链只有一条，任何一环都不得各自换算：
+ * `mcmeta tick × 50ms`（`render/assets/textureStripAnimation#resolveAnimationTimeline`）
+ * → **毫秒整数**（`StripTimeline.durationMs`）→ 本文件的 `durationsMs`
+ * → {@link SequenceLoopPlan.delayCs}（GIF 的厘秒）。
+ */
+export interface LoopStrip {
+  /** 稳定标识（materialId），用于确定性排序与诊断。 */
+  readonly id: string
+  readonly frameCount: number
+  readonly durationsMs: readonly number[]
+}
+
+/**
+ * 一个**共同循环**的逐帧采样计划。
+ *
+ * `atMs[i]` 是第 i 帧的**起始时刻**；`delayCs[i]` 是它在 GIF 里的停留
+ * （厘秒，恒 `>= 1`）。两者一一对应，且 `Σ delayCs === Math.round(totalMs/10)`
+ * —— "GIF 总时长 == 声明总时长"因此是可断言的**整数事实**，不是浮点近似。
+ */
+export interface SequenceLoopPlan {
+  readonly frameCount: number
+  /** 一个循环的总时长（毫秒，整数）。 */
+  readonly totalMs: number
+  /** 采样点（毫秒，严格升序，全部 `< totalMs`）。 */
+  readonly atMs: readonly number[]
+  /** 与 atMs 一一对应的 GIF 停留（厘秒；恒 `>= 1`；Σ = round(totalMs/10)）。 */
+  readonly delayCs: readonly number[]
+}
+
+/** 场景 GIF 的硬上限（超限**显式失败**，不截断、不抽帧 —— 截断会让"循环"不闭合）。 */
+export const LOOP_LIMITS = Object.freeze({ maxFrames: 240, maxTotalMs: 30_000 })
+
+function gcdInt(a: number, b: number): number {
+  let x = a
+  let y = b
+  while (y !== 0) {
+    const t = x % y
+    x = y
+    y = t
+  }
+  return x
+}
+
+function lcmInt(a: number, b: number): number {
+  return (a / gcdInt(a, b)) * b
+}
+
+/**
+ * 把多条动画帧条排成**一个共同循环**的逐帧时间计划。
+ *
+ * ## 为什么是 LCM 而不是"取最长的一条"
+ *
+ * 多条动画长度不成倍数时，"最长那条的一个循环"结束时其它序列**不在相位 0**
+ * ⇒ 产物自称"循环"但接缝可见。LCM 是"所有序列同时回到相位 0"的最小长度；
+ * 单序列时二者等价。代价是上限写死并**显式失败**（`textureLoopTooLong`）。
+ *
+ * ## 边界必须包含**每个序列的每一次重启**
+ *
+ * 只取"一个周期内的帧边界"在单序列时正确，多序列时会漏掉短序列在共同循环内的
+ * 重启点（例：序列 A 周期 100ms、B 周期 150ms、L=300ms ⇒ A 在 100/200 也重启）。
+ * 漏掉它们会让 GIF 在 A 的一个循环里显示同一帧 —— 画面不动而计划"成功"。
+ * 故本函数按 `base = 0, T, 2T, … < L` 展开每条序列的周期边界。
+ *
+ * ## 时长分配（最大余数法 + 最小 1 厘秒）
+ *
+ * 先取 `max(1, floor(holdMs/10))`，再把差额按小数余数从大到小分配（余数相同按
+ * 下标升序），最后逐项校准到 `Σ == Math.round(totalMs/10)`。
+ *
+ * ## 显式失败面
+ *
+ * - 空表 ⇒ `InvalidValue`（不产出 1 帧假 GIF）；
+ * - 帧数/时长声明不合法 ⇒ `InvalidValue`；
+ * - 超过 {@link LOOP_LIMITS} ⇒ `UnsupportedOperation#textureLoopTooLong`；
+ * - 总长短于"每帧至少 1 厘秒"的物理下限（`totalMs/10 < frameCount`）⇒
+ *   `UnsupportedOperation#textureLoopTooShort`（不把 GIF 的 1 厘秒地板伪装成
+ *   "总时长与声明一致"）。
+ */
+export function planSequenceLoop(
+  strips: readonly LoopStrip[],
+  limits: { readonly maxFrames: number; readonly maxTotalMs: number } = LOOP_LIMITS,
+): Result<SequenceLoopPlan> {
+  if (!Array.isArray(strips) || strips.length === 0) {
+    return err(invalidValue({ reason: 'noAnimatedSequences' }))
+  }
+
+  const totals: number[] = []
+  const cycleBoundaries: number[][] = []
+  let upperBoundFrames = 0
+  for (const strip of strips) {
+    const durations = strip.durationsMs
+    if (!Array.isArray(durations) || !Number.isInteger(strip.frameCount) || strip.frameCount < 1
+      || durations.length !== strip.frameCount) {
+      return err(invalidValue({
+        reason: 'invalidStripDurations',
+        id: strip.id,
+        frameCount: Number.isFinite(strip.frameCount) ? strip.frameCount : 0,
+        durations: Array.isArray(durations) ? durations.length : 0,
+      }))
+    }
+    const bounds: number[] = []
+    let total = 0
+    for (let i = 0; i < durations.length; i++) {
+      const d = durations[i]
+      if (typeof d !== 'number' || !Number.isInteger(d) || d <= 0) {
+        return err(invalidValue({
+          property: 'durationsMs',
+          reason: 'nonPositiveDuration',
+          id: strip.id,
+          index: i,
+          value: typeof d === 'number' && Number.isFinite(d) ? d : String(d),
+        }))
+      }
+      bounds.push(total)
+      total += d
+    }
+    if (total <= 0) {
+      return err(invalidValue({ reason: 'emptyStrip', id: strip.id }))
+    }
+    totals.push(total)
+    cycleBoundaries.push(bounds)
+    upperBoundFrames += bounds.length
+  }
+
+  let totalMs = 1
+  for (const t of totals) totalMs = lcmInt(totalMs, t)
+  if (!Number.isFinite(totalMs) || totalMs <= 0) {
+    return err(invalidValue({ reason: 'loopLengthOverflow' }))
+  }
+  if (totalMs > limits.maxTotalMs) {
+    return err(unsupportedOperation({
+      reason: 'textureLoopTooLong',
+      frames: upperBoundFrames,
+      totalMs,
+      maxFrames: limits.maxFrames,
+      maxTotalMs: limits.maxTotalMs,
+    }))
+  }
+
+  const boundarySet = new Set<number>()
+  for (let s = 0; s < strips.length; s++) {
+    const period = totals[s]!
+    const bounds = cycleBoundaries[s]!
+    for (let base = 0; base < totalMs; base += period) {
+      for (const b of bounds) boundarySet.add((base + b) % totalMs)
+    }
+  }
+  const boundaries = [...boundarySet].sort((a, b) => a - b)
+  if (boundaries.length === 0) {
+    return err(invalidValue({ reason: 'emptyLoop' }))
+  }
+  if (boundaries.length > limits.maxFrames) {
+    return err(unsupportedOperation({
+      reason: 'textureLoopTooLong',
+      frames: boundaries.length,
+      totalMs,
+      maxFrames: limits.maxFrames,
+      maxTotalMs: limits.maxTotalMs,
+    }))
+  }
+
+  const targetSum = Math.round(totalMs / 10)
+  if (targetSum < boundaries.length) {
+    return err(unsupportedOperation({
+      reason: 'textureLoopTooShort',
+      frames: boundaries.length,
+      totalMs,
+      maxTotalMs: limits.maxTotalMs,
+    }))
+  }
+
+  const holdMs = boundaries.map((b, i) => (i + 1 < boundaries.length ? boundaries[i + 1]! : totalMs) - b)
+  const quotas = holdMs.map((h) => h / 10)
+  const delayCs = quotas.map((q) => Math.max(1, Math.floor(q)))
+  let sum = delayCs.reduce((a, b) => a + b, 0)
+
+  if (sum < targetSum) {
+    const order = quotas
+      .map((q, i) => ({ i, frac: q - Math.floor(q) }))
+      .sort((a, b) => (b.frac - a.frac) || (a.i - b.i))
+    let k = 0
+    while (sum < targetSum && k < order.length) {
+      const at = order[k]!.i
+      delayCs[at] = delayCs[at]! + 1
+      sum += 1
+      k += 1
+    }
+  } else if (sum > targetSum) {
+    const order = quotas
+      .map((q, i) => ({ i, frac: q - Math.floor(q), reducible: delayCs[i]! > 1 }))
+      .filter((x) => x.reducible)
+      .sort((a, b) => (a.frac - b.frac) || (a.i - b.i))
+    let k = 0
+    while (sum > targetSum && order.length > 0 && k < order.length * 2) {
+      const at = order[k % order.length]!.i
+      if (delayCs[at]! > 1) {
+        delayCs[at] = delayCs[at]! - 1
+        sum -= 1
+      }
+      k += 1
+    }
+  }
+
+  if (sum !== targetSum) {
+    return err(invalidValue({ reason: 'delaySumMismatch', expected: targetSum, actual: sum }))
+  }
+
+  return ok(Object.freeze({
+    frameCount: boundaries.length,
+    totalMs,
+    atMs: Object.freeze(boundaries),
+    delayCs: Object.freeze(delayCs),
+  }))
+}
+
+
