@@ -12,17 +12,20 @@
  *  - `AnnotationEditorPanel.vue` 手写 `textarea` 绕过 RNA，再自建 `Proxy` 拦截 `set`；
  *  - 三者最终都落到 `RNAWidget` 的三条写路径（两条前缀分派 + 一条 `descriptor.set`）。
  *
- * 新形态：面板**只有一条**渲染路径 —— `buildInspector(ctx, session)` 产出的
+ * 新形态：面板**只有一条**渲染路径 —— `buildInspector(ctx)` 产出的
  * `InspectorModel`（纯函数、可断言、无布局规格也能生成）。属性覆盖度由
  * `rnaCoverage()` 可查，「登记了但界面没有入口」不再是隐形的（#251 B7 的 E-6）。
  *
- * ## 提交时机
+ * ## 提交时机与拒绝原因（M4-3 R2）
  *
- * 草稿与拒绝原因放在 `PanelSession`（跨重渲染保留），提交走
- * `commitFieldValue` → 唯一写路由。组件不判合法性、不碰文档。
+ * 提交走 `commitFieldValue` → 唯一写路由。**拒绝原因不再住在本组件里**：
+ * 它是运行时共享读面（`Context#getFieldRejections()`），因为文本控件的提交经
+ * 输入端口、结构性拿不到组件局部态（S0 域 2 ①）。本组件因此既不需要
+ * `PanelSession`，也不需要 `applyOutcome` —— 结算发生在写路由那一层。
+ * 组件仍然不判合法性、不碰文档。
  */
 
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { inject } from 'vue'
 import { contextKey, type Context } from '@/runtime/context'
 import PropertyField from './PropertyField.vue'
@@ -30,14 +33,11 @@ import ReadonlyLayout from './ReadonlyLayout.vue'
 import type { PropertyDescriptor } from '@/application/properties'
 import type { UILayout } from './types/layout'
 import {
-  type PanelSession,
   buildField,
   commitFieldComponent,
   commitFieldValue,
-  createPanelSession,
   workbenchRegistry,
 } from '@/editors/workbench-rna'
-import { localPropertyOf } from '@/editors/property-writers'
 import type { InspectorModel, InspectorRow } from '@/editors/inspector'
 import { buildInspector } from '@/editors/workbench-rna'
 import { OBJECT_TYPE } from '@/editors/workbench-inspector'
@@ -50,9 +50,7 @@ const props = defineProps<{
   fragment?: UILayout
 }>()
 
-const session: PanelSession = reactive(createPanelSession()) as PanelSession
-
-const model = ref<InspectorModel>(buildInspector(props.ctx, session))
+const model = ref<InspectorModel>(buildInspector(props.ctx))
 
 const version = ref(0)
 
@@ -69,10 +67,28 @@ watch(
     props.ctx.main.embedPublish.value,
   ],
   () => {
-    model.value = buildInspector(props.ctx, session)
+    model.value = buildInspector(props.ctx)
     version.value++
   },
   { immediate: true, deep: false },
+)
+
+/**
+ * **拒绝回执的订阅**（M4-3 R2）。
+ *
+ * 共享读面是一张 `shallowRef` 表：写入会换对象 ⇒ 这里读到变化后重算模型，
+ * 字段随即渲染 `.ux-field-problem[data-problem=rejected]`。
+ *
+ * 为什么必须单独订阅（而不是并进上面那条 watch）：上一条的依赖全是**文档/选中**信号，
+ * 而"刚才那次写入被拒"不改变任何一项（拒绝的语义就是**内容不变**，SPEC §8）
+ * —— 不订阅它，拒绝就永远等不到一次重渲染。
+ */
+watch(
+  () => props.ctx.getFieldRejections().table.value,
+  () => {
+    model.value = buildInspector(props.ctx)
+    version.value++
+  },
 )
 
 /**
@@ -95,10 +111,16 @@ function descriptorOf(propertyId: string): PropertyDescriptor | null {
   return workbenchRegistry().registry.descriptor(propertyId) ?? null
 }
 
+/**
+ * 某属性行的字段模型（每次渲染重算）。
+ *
+ * M4-3 R2 起拒绝原因来自运行时共享读面（`buildField` 内部读
+ * `Context#getFieldRejections()`），故这里不再需要任何会话参数。
+ */
 function fieldFor(propertyId: string) {
   const desc = descriptorOf(propertyId)
   if (!desc) return null
-  return buildField(props.ctx, desc, session)
+  return buildField(props.ctx, desc)
 }
 
 /** 草稿变化的**镜像**：P10c（#286）起已删除，本回调随之退役。
@@ -130,33 +152,19 @@ function fieldFor(propertyId: string) {
  * （唯一写路由）。本组件不再登记任何提交落点，也不再持有清理责任。
  */
 
-/** 提交一个已解析值（boolean/枚举/滑块/色板）。 */
+/**
+ * 提交一个已解析值（boolean/枚举/滑块/色板）。
+ *
+ * 结算（记拒绝 / 清拒绝 / 写底栏）已在唯一写路由里做完（M4-3 R2）——
+ * 本组件**不再**维护第二份拒绝态，因此这里不处理 `outcome`。
+ */
 function onCommitValue(desc: PropertyDescriptor, value: unknown): void {
-  const local = localPropertyOf(desc.id)
-  const outcome = commitFieldValue(props.ctx, desc, value as never)
-  applyOutcome(local, outcome)
+  commitFieldValue(props.ctx, desc, value as never)
 }
 
 /** 提交某分量。 */
 function onCommitComponent(desc: PropertyDescriptor, index: number, value: number): void {
-  const local = localPropertyOf(desc.id)
-  const outcome = commitFieldComponent(props.ctx, desc, index, value)
-  applyOutcome(local, outcome)
-}
-
-/**
- * 结算：`applied`/`unchanged` ⇒ 清拒绝原因；`rejected` ⇒ **记录原因**（拒绝后不得
- * 报告成功，D5）。
- *
- * P10c（#286）：`session.drafts` 已删，故这里不再清草稿 —— 草稿由输入层持有，
- * 非法/中间态的**可见提示**来自 `InputPort.textProjection`（呈现侧读面）。
- */
-function applyOutcome(local: string, outcome: { status: string; error?: unknown }): void {
-  if (outcome.status === 'rejected') {
-    session.rejections[local] = outcome.error as never
-    return
-  }
-  session.rejections[local] = undefined as never
+  commitFieldComponent(props.ctx, desc, index, value)
 }
 
 /**

@@ -505,7 +505,7 @@ describe('控件：多选混合值（D6 属性区不消失）', () => {
 })
 
 describe('控件：拒绝原因可见（不得静默失败）', () => {
-  it('字段带 `rejection` 时渲染结构化原因', () => {
+  it('字段带 `rejection` 时渲染**成句原因**（M4-3：不再是裸错误码）', () => {
     const reg = makeRegistry()
     const d = describeProperty(reg, { owner, property: `${OBJECT_TYPE}.count` })
     if (!d.ok) throw new Error('desc')
@@ -517,9 +517,26 @@ describe('控件：拒绝原因可见（不得静默失败）', () => {
     })
     const { root } = mount(field)
     const problem = root.querySelector('.ux-field-problem')!
-    expect(problem.textContent).toContain('ReadOnly')
-    expect(problem.textContent).toContain('generated-owner')
-    expect(problem.getAttribute('data-problem')).toBe('rejected')
+    // 用户裁决（2026-10-17）：字段级给**人能读的原因**。裸码 `ReadOnly: generated-owner`
+    // 只对开发者有意义；工具提示与 e2e 断言改为读句子。
+    expect(problem.textContent).toContain('生成物')
+    expect(problem.textContent, '不得再直接输出错误码').not.toContain('generated-owner')
+    expect(problem.getAttribute('data-problem'), '拒绝态仍由机器可读属性承载').toBe('rejected')
+    teardown()
+  })
+
+  it('未知拒绝码**不吞**：句子带原码文本（运行期防御）', () => {
+    const reg = makeRegistry()
+    const d = describeProperty(reg, { owner, property: `${OBJECT_TYPE}.count` })
+    if (!d.ok) throw new Error('desc')
+    const field = buildFieldViewModel(reg, { owner, property: `${OBJECT_TYPE}.count` }, {
+      descriptor: d.value,
+      value: { kind: 'value', value: 10 },
+      edit: { kind: 'editable' },
+      rejection: { code: 'TotallyUnknown', params: { reason: 'x' } } as never,
+    })
+    const { root } = mount(field)
+    expect(root.querySelector('.ux-field-problem')!.textContent).toContain('TotallyUnknown')
     teardown()
   })
 })

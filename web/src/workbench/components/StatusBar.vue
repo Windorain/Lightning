@@ -105,7 +105,12 @@ function openWikiDataPage() {
     :data-texture-state="live ? live.state : undefined"
     :data-texture-loading-seen="loadingSeen ? '1' : undefined"
   >
-    <span v-if="live" :class="logClass(live.level)" :data-live-status="live.state">
+    <span
+      v-if="live"
+      :class="logClass(live.level)"
+      :data-live-status="live.state"
+      :data-live-origin="live.origin ?? undefined"
+    >
       {{ live.message }}
     </span>
     <span v-if="showLastLog && log.lastDisplayable.value" :class="logClass(log.lastDisplayable.value.level)">

@@ -52,6 +52,7 @@ import { commitFieldValue, submitPropertyWrite, workbenchRegistry } from '@/edit
 import { writeErrorKey } from '@/editors/property-writers'
 import { projectCellTooltipsToLegacy } from '@/runtime/tooltipRead'
 import { projectAnnotationsToLegacy } from '@/runtime/annotationRead'
+import { createFieldRejectionStore } from '@/runtime/fieldRejections'
 
 const OBJ = 'structure:frame-0'
 /** 高度 2 的网格（`cellGrid` 行序：row 0 = 顶部 ⇒ 世界 y = h-1-row）。 */
@@ -111,6 +112,11 @@ function harness(): Harness {
  * | `workbench`（**非 null**）| `isEmbed()` = `workbench === null` ⇒ 非 null 才给写能力（`defaultCapabilities`） |
  * | `getShellSettings` | `accessOfContext` 读 `lang.value`（A33 的实例级语言） |
  * | `main.embedPublish` + `getToolSettings` | `documentStateOf` 造 `shell` 时读它们（空文档占位） |
+ * | `fieldRejections` + `log` | M4-3 R2：写路由的结算处同时写**字段拒绝回执**与**底栏成句原因** |
+ *
+ * ⚠️ `fieldRejections` 必须显式注入：`Object.create(Context.prototype)` **不执行**
+ * 类字段初始化器，于是生产里那个 `private readonly` 存储在这里不存在。
+ * 注入的是**生产工厂**（`createFieldRejectionStore`），不是替身。
  *
  * ⚠️ 注入的**不是**"判定"：`submitPropertyWrite` 与 `syncLegacyFromKernel` 跑的都是
  * **生产实现本体**（本文件要钉的正是它们）。
@@ -133,6 +139,8 @@ function makeWorkbenchContext(
     getSelection: () => ({ active: ref(null), items: ref(new Set()) }),
     getContentRefreshTick: () => ref(0),
     getShellSettings: () => ({ lang: ref('zh') }),
+    fieldRejections: createFieldRejectionStore(),
+    log: fakeLog(),
     getToolSettings: () => ({
       replaceBrush: ref(''),
       fillBrush: ref(''),
@@ -147,6 +155,30 @@ function makeWorkbenchContext(
     },
   })
   return ctx
+}
+
+/**
+ * 最小可用 `ctx.log`（M4-3 R2 的结算处只用到两个方法）。
+ *
+ * 记录写下的实时状态，供"拒绝必须到达底栏"这类断言直接读——它**不是**替身逻辑，
+ * 只是把生产 `LogCenter` 的两个方法按其契约换成可观测的内存槽
+ * （本文件钉的是写路由的结算，不是 LogCenter 的去重策略，后者有自己的单测）。
+ */
+function fakeLog(): {
+  setLiveStatus(message: string, level?: number, state?: string | null, origin?: string | null): void
+  clearRejectionStatus(): void
+  live: { message: string; level: number; state: string | null; origin: string | null } | null
+} {
+  const slot = {
+    live: null as { message: string; level: number; state: string | null; origin: string | null } | null,
+    setLiveStatus(message: string, level = 0, state: string | null = null, origin: string | null = null): void {
+      slot.live = { message, level, state, origin }
+    },
+    clearRejectionStatus(): void {
+      if (slot.live?.origin === 'rejection') slot.live = null
+    },
+  }
+  return slot
 }
 
 /** 内核侧读一条逐格说明。 */

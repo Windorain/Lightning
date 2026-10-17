@@ -44,6 +44,9 @@ import { localPropertyOf } from '@/application/contracts'
 import { KERNEL_ANNOTATION_TYPE } from '@/application/kernel-properties'
 import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
 import { annotationObjectIdOf } from '@/runtime/annotationRead'
+import { rejectionSentence } from '@/domain/rejectionText'
+import type { Lang } from '@/domain/i18n'
+import { LOG_LEVEL } from '@/logging/LogCenter'
 import { cellTooltipTextAt } from '@/runtime/tooltipRead'
 import type { DocumentMetadata } from '@/domain/content'
 import { NO_CHANGE } from '@/domain/identity'
@@ -611,7 +614,76 @@ function kernelWriteOutcome(ctx: Context, outcome: CommandOutcome | null, ref: P
  * 查看器无写入能力）⇒ 提交前逐个 `editStateOf` 预检，**任一不可编辑即整批拒绝**
  * （多选原子性，契约 §3.3）——与 `applySetProperty` 用的是**同一个**纯判据函数。
  */
+/**
+ * 提交一次属性写（**唯一写路由的入口**，同时是「拒绝可见」的**结算处**）。
+ *
+ * ## 为什么这一层是拒绝回执的收口点（M4-3 R2）
+ *
+ * 面板控件（`commitFieldValue`）、输入端口（`commitDraftControlValue`）与脚本
+ * 三条路**都经过这里** ⇒ 在这里结算一次，"文本控件的拒绝"才可能到达面板
+ * —— 输入端口那条链结构上拿不到组件局部态（S0 域 2 ①）。
+ *
+ * 结算产物有两处消费：
+ *  1. 运行时共享读面 `ctx.getFieldRejections()`（字段级 `.ux-field-problem` 的来源）；
+ *  2. 底栏实时状态 `ctx.log.setLiveStatus(…, 'rejection')`（成句原因）。
+ *
+ * **拒绝判定本身一字未改**：本函数只是把既有的 `CommandOutcome` 如实送达用户。
+ */
 export function submitPropertyWrite(
+  ctx: Context,
+  refs: readonly PropertyRef[],
+  value: PropertyValue,
+  commandId?: string,
+): CommandOutcome {
+  const outcome = submitPropertyWriteCore(ctx, refs, value, commandId)
+  settleFieldWrite(ctx, refs, outcome)
+  return outcome
+}
+
+
+/** 本实例语言（成句文案用；`domain/i18n` 的纯翻译只认显式输入）。 */
+function langOf(ctx: Context): Lang {
+  return ctx.getShellSettings().lang.value
+}
+
+/** 字段的描述符显示名（「方块标识」这类**具体**对象名；缺省则用操作名）。 */
+function fieldLabelOf(propertyId: string): string | undefined {
+  return workbenchRegistry().registry.descriptor(propertyId)?.display.fallback
+}
+
+/**
+ * **一次属性写的可见结算**（M4-3 R2）：字段级回执 + 底栏成句原因。
+ *
+ * ## 为什么两处都要写
+ *
+ * 用户裁决口径（2026-10-17）是「字段级 + 底栏成句原因」：字段级指出**哪一个**字段坏了，
+ * 底栏给完整的一句话（字段空间窄，放不下整句）。两者读的是同一个错误值，
+ * 文案由同一个纯模块（`domain/rejectionText`）产出 ⇒ 不存在两份措辞。
+ *
+ * ## 成功时为什么只清「拒绝」那一条
+ *
+ * 见 `LogCenter#clearRejectionStatus`：底栏实时状态槽同时被纹理链使用，
+ * 整槽清空会把「纹理就绪 n/n」永久抹掉（纹理链按内容身份去重，不会重写）。
+ */
+function settleFieldWrite(ctx: Context, refs: readonly PropertyRef[], outcome: CommandOutcome): void {
+  const store = ctx.getFieldRejections()
+  if (outcome.status === 'rejected') {
+    for (const r of refs) store.reject(r.property, outcome.error)
+    const first = refs[0]?.['property']
+    const label = first === undefined ? undefined : fieldLabelOf(first)
+    ctx.log.setLiveStatus(
+      rejectionSentence(outcome.error, langOf(ctx), 'propertyWrite', label),
+      LOG_LEVEL.WARN,
+      null,
+      'rejection',
+    )
+    return
+  }
+  // 写成功（applied/unchanged）：清掉这些字段的回执，并让底栏回到下一条事实。
+  for (const r of refs) store.clear(r.property)
+  ctx.log.clearRejectionStatus()
+}
+function submitPropertyWriteCore(
   ctx: Context,
   refs: readonly PropertyRef[],
   value: PropertyValue,
@@ -884,13 +956,15 @@ function applyShellState(ctx: Context, before: DocumentState, after: DocumentSta
  * 留下的是**唯一**那条真实需要跨重渲染保留的状态：拒绝原因（写路由的真实结论，
  * 见 D5「拒绝后不得报告成功」）。
  */
-export type PanelSession = {
-  rejections: Record<string, DomainError>
-}
-
-export function createPanelSession(): PanelSession {
-  return { rejections: {} }
-}
+/* M4-3 R2：`PanelSession`（含上一版仅剩的 `rejections` 字段）**已整体删除**。
+ *
+ * 拒绝原因不再是"某个面板实例的局部态"，而是运行时共享读面
+ * （`runtime/fieldRejections`，经 `Context#getFieldRejections()` 存取）：
+ * 写点在唯一写路由的结算处（`submitPropertyWrite` → `settleFieldWrite`），
+ * 读点在 `buildField`。于是：
+ *  - 输入端口提交的拒绝（文本控件）与面板 emit 提交的拒绝**走同一个写点**；
+ *  - 面板重挂载不会丢掉"刚才那次被拒"（跨重渲染保留的语义不变，只是归属变了）；
+ *  - 键从"局部 id"改为**属性描述符 id**（见 `fieldRejections` 的说明）。 */
 
 /** 多选读面 → 字段读状态（显式混合值）。 */
 export function readFieldState(ctx: Context, desc: PropertyDescriptor): FieldValueState {
@@ -909,11 +983,15 @@ export function readFieldState(ctx: Context, desc: PropertyDescriptor): FieldVal
   }
 }
 
-/** 一个属性在某面板会话下的完整字段模型。 */
+/**
+ * 一个属性的完整字段模型（**拒绝原因取运行时共享读面**，M4-3 R2）。
+ *
+ * 读源是 `Context#getFieldRejections()`（键 = 属性描述符 id）——与写点用同一个键，
+ * 不存在"写一个键、读另一个键"的镜像形态（P10c 核销的那条旧镜像正是死在这里）。
+ */
 export function buildField(
   ctx: Context,
   desc: PropertyDescriptor,
-  session: PanelSession,
 ): ReturnType<typeof buildFieldViewModel> {
   const refs = resolveRefs(ctx, desc)
   const ref: PropertyRef = refs[0] ?? { owner: { kind: 'document', id: '' }, property: desc.id }
@@ -921,20 +999,24 @@ export function buildField(
   const edit: FieldEditState = refs.length === 0
     ? { kind: 'readOnly', reason: domainError('MissingTarget', { reason: 'no-selection', property: desc.id }) }
     : editStateOf(workbenchRegistry().registry, ref, accessOfContext(ctx))
-  const local = localPropertyOf(desc.id, desc.objectTypeId)
   const field = buildFieldViewModel(workbenchRegistry().registry, ref, {
     descriptor: desc,
     value,
     edit,
-    rejection: session.rejections[local] ?? null,
+    rejection: ctx.getFieldRejections().get(desc.id)?.error ?? null,
   })
   return field
 }
 
-/** 面板会话的提交动作（草稿 → 唯一写路由；**不是** setter 闭包）。 */
+/** 面板的提交动作（草稿 → 唯一写路由；**不是** setter 闭包）。 */
 export function commitFieldValue(ctx: Context, desc: PropertyDescriptor, value: PropertyValue): CommandOutcome {
   const refs = resolveRefs(ctx, desc)
-  if (refs.length === 0) return { status: 'rejected', error: domainError('MissingTarget', { reason: 'no-targets' }) }
+  if (refs.length === 0) {
+    // 没有目标也是一次**真实的拒绝**（不是没事发生）：同样要落到字段与底栏。
+    const outcome: CommandOutcome = { status: 'rejected', error: domainError('MissingTarget', { reason: 'no-targets' }) }
+    settleFieldWrite(ctx, [{ owner: { kind: 'document', id: '' }, property: desc.id }], outcome)
+    return outcome
+  }
   return submitPropertyWrite(ctx, refs, value, `set:${desc.id}`)
 }
 
@@ -980,10 +1062,12 @@ export function commitDraftControlValue(
     : property
   const desc = workbenchRegistry().registry.descriptor(descriptorId) ?? null
   if (desc === null) {
-    return {
+    const outcome: CommandOutcome = {
       status: 'rejected',
       error: domainError('MissingTarget', { reason: 'unknownPropertyControl', property }),
     }
+    settleFieldWrite(ctx, [{ owner: { kind: 'document', id: '' }, property: descriptorId }], outcome)
+    return outcome
   }
   return commitFieldValue(ctx, desc, value)
 }
@@ -996,12 +1080,16 @@ export function commitFieldComponent(
   value: number,
 ): CommandOutcome {
   const refs = resolveRefs(ctx, desc).map((r): PropertyRef => ({ ...r, component: index }))
-  if (refs.length === 0) return { status: 'rejected', error: domainError('MissingTarget', { reason: 'no-targets' }) }
+  if (refs.length === 0) {
+    const outcome: CommandOutcome = { status: 'rejected', error: domainError('MissingTarget', { reason: 'no-targets' }) }
+    settleFieldWrite(ctx, [{ owner: { kind: 'document', id: '' }, property: desc.id }], outcome)
+    return outcome
+  }
   return submitPropertyWrite(ctx, refs, value, `set:${desc.id}[${index}]`)
 }
 
 /** 面板生成式模型的输入（把 ctx 事实一次性收齐，之后交给纯函数）。 */
-export function inspectorInputs(ctx: Context, session: PanelSession): InspectorContextInputs {
+export function inspectorInputs(ctx: Context): InspectorContextInputs {
   const targets = resolveInspectorTargets(selectionOf(ctx))
   return {
     registry: workbenchRegistry().registry,
@@ -1009,13 +1097,22 @@ export function inspectorInputs(ctx: Context, session: PanelSession): InspectorC
     targets,
     access: accessOfContext(ctx),
     readField: (refs) => readMultiValue(workbenchRegistry().registry, refs, 'authored', accessOfContext(ctx)),
-    rejections: session.rejections,
+    // M4-3 R2：拒绝原因取运行时共享读面（键 = 属性描述符 id，与写点同键）。
+    rejections: rejectionErrorsOf(ctx),
   }
 }
 
+/** 共享读面 → 纯模型输入（属性描述符 id → DomainError；只读派生，不复制权威）。 */
+function rejectionErrorsOf(ctx: Context): Readonly<Record<string, DomainError>> {
+  const table = ctx.getFieldRejections().table.value
+  const out: Record<string, DomainError> = {}
+  for (const [id, r] of Object.entries(table)) out[id] = r.error
+  return out
+}
+
 /** 生成 Inspector 模型（面板渲染用）。 */
-export function buildInspector(ctx: Context, session: PanelSession): InspectorModel {
-  return buildWorkbenchInspector(inspectorInputs(ctx, session))
+export function buildInspector(ctx: Context): InspectorModel {
+  return buildWorkbenchInspector(inspectorInputs(ctx))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1082,7 +1179,7 @@ export function describeForDiagnostics(ctx: Context, propertyId: string) {
   }
 }
 
-/** 面板会话的字段模型缓存（组合式；组件用一次、纯函数算一次）。 */
-export function useInspectorModel(ctx: Context, session: PanelSession): ComputedRef<InspectorModel> {
-  return computed(() => buildInspector(ctx, session))
+/** 字段模型的组合式缓存（组件用一次、纯函数算一次）。 */
+export function useInspectorModel(ctx: Context): ComputedRef<InspectorModel> {
+  return computed(() => buildInspector(ctx))
 }

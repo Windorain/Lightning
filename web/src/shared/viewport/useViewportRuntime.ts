@@ -566,6 +566,18 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
   /**
    * 纹理生命周期的**实时状态写点**（#399 缺陷 B 的修复落点之一）。
    *
+   * ## 与「编辑拒绝可见」（M4-3 R2）共用同一个槽：写序与覆盖关系
+   *
+   * 本链写 `origin: 'texture'`，拒绝链写 `origin: 'rejection'`。两者**互不清理**：
+   *  - 纹理链按**内容身份**去重（`identity === lastTextureIdentity` ⇒ 直接返回），
+   *    所以加载完成后不会每帧重写；此后若发生一次编辑拒绝，底栏就停在拒绝文案上
+   *    —— 那是正确的：拒绝是**更晚**的事实。
+   *  - 反之，纹理资源身份变化（换文档/换资源）时纹理链会**覆盖**拒绝文案：
+   *    那也是正确的：资源生命周期重新开始时，「正在加载」比一条旧拒绝更该显示。
+   *  - 成功提交只清 `origin === 'rejection'` 的那一条（`clearRejectionStatus`），
+   *    **不**动纹理结论 —— 否则一次写成功会把「纹理就绪 4/4」永久抹掉
+   *    （纹理链不会自动重写它）。
+   *
    * ## 为什么写 `liveStatus` 而不是既有的 `ctx.log.setStatus`
    *
    * `setStatus` 在当前状态栏被 `lastDisplayable` **永久遮蔽**：任一非 DEBUG 日志写过之后，
@@ -588,7 +600,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     level: LogLevelValue = LOG_LEVEL.INFO,
   ): void => {
     if (texturesDisposed) return
-    ctx.log.setLiveStatus(message, level, state)
+    ctx.log.setLiveStatus(message, level, state, 'texture')
   }
 
   /**

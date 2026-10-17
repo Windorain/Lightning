@@ -106,9 +106,26 @@ export interface CheckResult {
 export interface LiveStatus {
   message: string
   level: LogLevelValue
-  /** 机器可读状态标签（当前唯一生产者：纹理资源五态）。`null` = 只有文本、无结构状态。 */
+  /** 机器可读状态标签（纹理资源五态；编辑拒绝不带状态）。`null` = 只有文本、无结构状态。 */
   state: string | null
+  /**
+   * 写入方渠道（M4-3）。
+   *
+   * ## 为什么需要它（而不是靠 state 区分）
+   *
+   * 纹理链是**唯一**生产者时，"这条状态是不是纹理的"可以从 `state` 读出来。
+   * 编辑被拒（M4-3 R2）也写这个槽，但它**没有**机器可读状态（`state: null`），
+   * 于是两条链在 `state` 上无法区分。而"写成功时清掉**我自己的**拒绝文案、
+   * 不动纹理结论"这件事必须有判据 —— 否则一次成功提交会把「纹理就绪 4/4」
+   * 从底栏抹掉（纹理链按**内容身份**去重，不会自动重写回来）。
+   *
+   * `null` = 无渠道信息的其它写入方（既有调用点保持原语义）。
+   */
+  origin: LiveStatusOrigin
 }
+
+/** 实时状态槽的写入方渠道。 */
+export type LiveStatusOrigin = 'texture' | 'rejection' | null
 
 export function createLogCenter() {
   const MAX_ENTRIES = 2000
@@ -400,16 +417,37 @@ export function createLogCenter() {
      *
      * @param state 机器可读状态标签（如 `'loading'`/`'ready'`/`'missing'`/`'failed'`）；
      *              读面据此判定，不解析文本（SPEC §7.4）。
+     * @param origin 写入方渠道（M4-3：纹理五态 / 编辑拒绝）。缺省 `null` = 未声明渠道。
      */
-    setLiveStatus(message: string, level: LogLevelValue = LOG_LEVEL.INFO, state: string | null = null): void {
+    setLiveStatus(
+      message: string,
+      level: LogLevelValue = LOG_LEVEL.INFO,
+      state: string | null = null,
+      origin: LiveStatusOrigin = null,
+    ): void {
       const cur = liveStatus.value
-      if (cur !== null && cur.message === message && cur.level === level && cur.state === state) return
-      liveStatus.value = { message, level, state }
+      if (cur !== null && cur.message === message && cur.level === level && cur.state === state && cur.origin === origin) return
+      liveStatus.value = { message, level, state, origin }
     },
 
     /** 清空实时状态（文档关闭 / 视口卸载 / 无资源可报时）。 */
     clearLiveStatus(): void {
       if (liveStatus.value !== null) liveStatus.value = null
+    },
+
+    /**
+     * 只清**编辑拒绝**写下的实时状态（M4-3 R2）。
+     *
+     * ## 为什么不是 `clearLiveStatus`
+     *
+     * 纹理链按**内容身份**去重（`useViewportRuntime#syncPresenterTextures`）——
+     * 资源表没变就不会重写状态。若一次成功提交把槽整个清空，「纹理就绪 4/4」
+     * 就永久消失，直到下一次资源身份变化（那是**回退**，不是清理）。
+     * 故清空必须**按渠道**：只处理自己写下的那一条。
+     */
+    clearRejectionStatus(): void {
+      const cur = liveStatus.value
+      if (cur !== null && cur.origin === 'rejection') liveStatus.value = null
     },
 
     /* —— Status message —— */

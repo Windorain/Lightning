@@ -68,6 +68,7 @@ import { frameCount as axisFrameCount, frameDurationsMs, type DocumentContent } 
 import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
 import { findObjectData, type Scene } from '@/domain/scene'
 import type { AreaHostApi } from '@/editors/useAreaHost'
+import { createFieldRejectionStore, type FieldRejectionStore } from '@/runtime/fieldRejections'
 
 function embedUnavailable(name: string): never {
   throw new Error(`embed: ${name} not available`)
@@ -105,6 +106,19 @@ export class Context {
   private workbenchHoverAnnotation: ComputedRef<string | null> | null = null
   /** 只读诊断读面（构造时收窄一次；见 `getDiagnostics`）。 */
   private readonly readOnlyDiagnostics: DiagnosticsReadView
+  /**
+   * **字段级写拒绝的共享读面**（M4-3 R2）。
+   *
+   * 写点 = 唯一写路由的结算处（`editors/workbench-rna#submitPropertyWrite`），
+   * 读点 = 字段模型构造（`buildField`）与底栏实时状态。放在 `Context` 上是为了
+   * 让"输入端口提交的拒绝"也能被面板读到 —— 组件局部态结构性做不到（S0 域 2 ①）。
+   *
+   * **惰性创建**（`null` 到首次取用时才建）：它是纯内存的一次性分配，
+   * 而 `Context` 也被诊断脚本以 `Object.create(Context.prototype)` 形态构造
+   * （类字段初始化器不执行）——惰性化让那条路径不必知道本字段存在，
+   * 也不会在构造期给每个实例多分配一张表。
+   */
+  private fieldRejections: FieldRejectionStore | null = null
 
   constructor(
     readonly main: Main,
@@ -1830,6 +1844,19 @@ export class Context {
 
   getShellSettings(): ShellSettings {
     return this.wm.settings
+  }
+
+  /**
+   * 字段级写拒绝的共享读面（M4-3 R2）。
+   *
+   * 返回的是**存储本身**（含 `reject`/`clear` 写方法）：写点只有唯一写路由的结算处，
+   * 读面（`table`/`get`）供字段模型与诊断使用。与 `getDiagnostics()` 的"只读视图"
+   * 处置不同 —— 那里收窄是为了防止顺手改状态，而这里**必须**让结算处能写，
+   * 且写入口只有一个（本文件不提供第二个写路径）。
+   */
+  getFieldRejections(): FieldRejectionStore {
+    this.fieldRejections ??= createFieldRejectionStore()
+    return this.fieldRejections
   }
 
   /**

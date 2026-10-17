@@ -164,6 +164,18 @@ function makeWorkbenchContext(
     getHoveredAnnotationId: () => ref(null),
     getContentRefreshTick: () => ref(0),
     getShellSettings: () => ({ lang: ref('zh') }),
+    // M4-3 R2：写路由的结算处会写**底栏实时状态**（拒绝成句原因 / 成功时清自己那条）。
+    // 这是生产 LogCenter 两个方法按契约的内存替身 —— 本文件钉的是路由，
+    // 不是 LogCenter 的去重或渲染（那两条各有自己的判据）。
+    log: {
+      setLiveStatus: (message: string, level = 0, state: string | null = null, origin: string | null = null) => {
+        void message
+        void level
+        void state
+        void origin
+      },
+      clearRejectionStatus: () => {},
+    },
     getToolSettings: () => ({
       replaceBrush: ref(''),
       fillBrush: ref(''),

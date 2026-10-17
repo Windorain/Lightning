@@ -68,11 +68,13 @@
  * （这正是 #249 §19.1 要的结构）。
  */
 
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { FieldViewModel } from '@/editors/property-controls'
 import { contextKey, type Context } from '@/runtime/context'
 import type { ControlBinding } from '@/application/inputCommands'
-import type { DraftKind } from '@/domain/textDraft'
+import type { DraftKind, RegisterControlInput } from '@/domain/textDraft'
+import { rejectionReason } from '@/domain/rejectionText'
+import type { Lang } from '@/domain/i18n'
 
 const props = defineProps<{ field: FieldViewModel }>()
 
@@ -187,18 +189,18 @@ const inputProblem = computed(() => {
  * 写入被**拒绝**的原因始终取 P2（唯一写路由的真实结论），与解析级提示不同。
  */
 const problemText = computed(() => {
-  if (draftKind.value !== null) {
-    if (inputProblem.value !== '') return inputProblem.value
-    const e = props.field.rejection
-    if (!e) return ''
-    const r = e.params.reason
-    return r === undefined ? e.code : `${e.code}: ${String(r)}`
-  }
+  if (draftKind.value !== null && inputProblem.value !== '') return inputProblem.value
   const e = props.field.rejection
   if (!e) return ''
-  const r = e.params.reason
-  return r === undefined ? e.code : `${e.code}: ${String(r)}`
+  // 写入被拒 ⇒ **成句原因**（M4-3 R2）。字段标签已经指明是哪个属性，
+  // 故这里只取原因从句；底栏给的是同一句话的完整形态（见 `workbench-rna#settleFieldWrite`）。
+  return rejectionReason(e, langOf(ctx))
 })
+
+/** 本实例语言（`domain/i18n` 的纯翻译只认显式输入；无 ctx 的诊断挂载退中文）。 */
+function langOf(c: Context | null): Lang {
+  return c === null ? 'zh' : c.getShellSettings().lang.value
+}
 
 const problemKind = computed(() => {
   if (draftKind.value !== null && inputProblem.value !== '') return 'invalid'
@@ -225,6 +227,66 @@ function registerControl(): void {
   }
   port.bindControl(binding)
 }
+
+/**
+ * 文本草稿的**会话登记输入**（`focusin` 与「拒绝后重锚」共用同一份事实）。
+ *
+ * 域约束同样来自属性描述（`domain`），经 `data-input-*` 声明与这里两处**同源**：
+ * 判定仍在 `domain/textDraft`，本组件只搬运事实。
+ */
+function draftRegisterInput(): RegisterControlInput {
+  const domain = props.field.descriptor.domain
+  return {
+    controlId: controlId.value,
+    kind: draftKind.value ?? 'text',
+    displayValue: props.field.displayText,
+    commitOn: 'enter-or-blur',
+    ...(props.field.control.min === undefined ? {} : { min: props.field.control.min }),
+    ...(props.field.control.max === undefined ? {} : { max: props.field.control.max }),
+    ...(domain?.kind === 'pattern' ? { pattern: domain.source } : {}),
+    ...(domain?.kind === 'pattern' && domain.hintFallback !== undefined
+      ? { patternReason: domain.hintFallback }
+      : {}),
+    ...(domain?.kind === 'text' && domain.maxLength !== undefined ? { maxLength: domain.maxLength } : {}),
+  }
+}
+
+/**
+ * **写入被拒 ⇒ 草稿回落到未变的文档值**（M4-3 R2 的"值弹回"）。
+ *
+ * ## 为什么要重锚，而不是留着一份"已被拒的草稿"
+ *
+ * 提交被拒的语义是**内容没变**（SPEC §8）。而结算时 `textDraft.afterSettle` 会把
+ * `text` 与 `displayValue` 一起对齐到**那次提交的值**（它只看"有 commit 效果"，
+ * 不知道结果）。若不重锚，输入框会继续显示一个**文档里并不存在**的值 ——
+ * 那正是"静默成功"的另一种形态（用户以为写进去了）。
+ *
+ * ## 为什么用「重新登记」而不是新机制
+ *
+ * `focusControl` 对**同一控件**重登记会按"没有挂起草稿"的分支重新取种子
+ * （`text === displayValue` ⇒ seed := 刚读到的 `displayValue`），
+ * 于是草稿回到文档值、**不产生 commit 效果**、不清焦点、不动历史。
+ * 这是一条既有的纯路径，不引入第二份草稿权威。
+ *
+ * ## 触发条件（窄）
+ *
+ * 只看 `field.rejection` 的**对象身份**变化（新的拒绝 ⇒ 新对象），且只在
+ * 该控件确实处于活动编辑态（`projection().active`）时重锚 —— 否则会把焦点
+ * 从用户正在编辑的**别的**控件上抢走。
+ */
+watch(
+  () => props.field.rejection,
+  (rejection) => {
+    if (rejection === null) return
+    if (draftKind.value === null) return
+    const port = ctx?.wm.inputPort
+    if (port === null || port === undefined) return
+    const p = projection()
+    if (p === null || !p.active) return
+    port.registerTextControl(draftRegisterInput(), port.nextToken())
+    epoch.value += 1
+  },
+)
 
 onMounted(() => {
   const port = ctx?.wm.inputPort ?? null
