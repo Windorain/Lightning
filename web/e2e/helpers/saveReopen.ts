@@ -165,6 +165,34 @@ export function withoutTopRowAnnotations(doc: InnerDoc): { doc: InnerDoc; cleare
   return { doc: { ...doc, cellTooltipGrid: tips }, cleared }
 }
 
+/**
+ * 半损坏信封：把**第一项** `textureBlobs` 换成非法 base64，其余键原样封回
+ * （改的是内存副本，夹具原件不动）。
+ *
+ * 为什么坏第一项：它被 `materialPalette[0]` 引用 ⇒ 绑定层会把它算成
+ * "必需且未就绪"，于是判据能同时证「坏一张只坏一张」与「缺失范围可辨认」。
+ * 该函数从 `kernel-texture-progress.spec.ts` 上移到 helper —— 像素判据与
+ * 状态栏判据必须吃**同一份**损坏输入，否则两条判据可能在描述不同场景。
+ */
+export function brokenFirstBlobEnvelope(sourceFile: string = fixturePath()): Record<string, unknown> {
+  const raw = readJson(sourceFile)
+  const inner = innerDocOf(sourceFile) as unknown as { textureBlobs: string[] } & Record<string, unknown>
+  const blobs = inner.textureBlobs
+  expect(Array.isArray(blobs) && blobs.length > 0, '前提：夹具必须有 textureBlobs').toBe(true)
+  const payload = zlib
+    .gzipSync(Buffer.from(JSON.stringify({ ...inner, textureBlobs: ['!!!not-base64!!!', ...blobs.slice(1)] }), 'utf8'))
+    .toString('base64')
+  return { ...raw, payload }
+}
+
+/** 夹具里 `materialPalette[0]` 的 locator（损坏的正是它引用的那张贴图）。 */
+export function firstMaterialLocator(sourceFile: string = fixturePath()): string {
+  const inner = innerDocOf(sourceFile) as unknown as { materialPalette: { locator?: string }[] }
+  const locator = inner.materialPalette[0]?.locator
+  expect(typeof locator === 'string' && locator.length > 0, '前提：materialPalette[0] 必须有 locator').toBe(true)
+  return locator as string
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 真实菜单 + 文件选择器 / 下载
 // ─────────────────────────────────────────────────────────────────────────────

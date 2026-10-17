@@ -31,9 +31,8 @@
  *   白模期墙钟与其解码分段（#399 步骤 6 的耗时登记，只登记不改行为）。
  */
 import { expect, test, type Page } from '@playwright/test'
-import zlib from 'node:zlib'
 import { gotoWorkbench, injectSceneDocumentOk } from './helpers/multiblock/harness'
-import { fixturePath, innerDocOf, readJson } from './helpers/saveReopen'
+import { brokenFirstBlobEnvelope, firstMaterialLocator, fixturePath, readJson } from './helpers/saveReopen'
 
 const FIXTURE = 'structuredata-exported-envelope.json'
 /** 状态栏根节点（StatusBar.vue）。 */
@@ -190,27 +189,6 @@ test.describe('#399 纹理异步期状态栏反馈（真实入口）', () => {
 })
 
 /**
- * 把第一项 textureBlobs 换成**非法 base64**，再封回同形态信封（原件不动，改的是内存副本）。
- *
- * 为什么坏第一项：它是 materialPalette[0] 引用的贴图 ⇒ 绑定层会把它算成「必需且未就绪」，
- * 于是判据能同时证「坏一张只坏一张」与「缺失范围可辨认」。
+ * 损坏输入与像素判据共用同一份构造：`helpers/saveReopen#brokenFirstBlobEnvelope`
+ * （M2-4 上移；本 spec 不再自带第二套实现）。
  */
-/** 夹具里 materialPalette[0] 的 locator（负对照损坏的正是它引用的那张贴图）。 */
-function firstMaterialLocator(): string {
-  const inner = innerDocOf(fixturePath()) as unknown as { materialPalette: { locator?: string }[] }
-  const locator = inner.materialPalette[0]?.locator
-  expect(typeof locator === 'string' && locator.length > 0, '前提：materialPalette[0] 必须有 locator').toBe(true)
-  return locator as string
-}
-
-function brokenFirstBlobEnvelope(): Record<string, unknown> {
-  const file = fixturePath()
-  const raw = readJson(file)
-  const inner = innerDocOf(file) as unknown as { textureBlobs: string[] } & Record<string, unknown>
-  const blobs = inner.textureBlobs
-  expect(Array.isArray(blobs) && blobs.length > 0, '前提：夹具必须有 textureBlobs').toBe(true)
-  const payload = zlib
-    .gzipSync(Buffer.from(JSON.stringify({ ...inner, textureBlobs: ['!!!not-base64!!!', ...blobs.slice(1)] }), 'utf8'))
-    .toString('base64')
-  return { ...raw, payload }
-}
