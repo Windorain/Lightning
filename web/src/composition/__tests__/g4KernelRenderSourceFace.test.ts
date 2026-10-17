@@ -158,6 +158,29 @@ describe('G4 · S2 第二半：DRW 渲染源面（内核直出）', () => {
       expect(filePool.includes(t), `内核池不得凭空多出文件没有的文本：${t}`).toBe(true)
     }
 
+    // #398 / M2-2：定义面必须携带逐格说明下标网格 —— 消费侧
+    // `resolvePreviewTooltipText(def, palette, hover)` **只从定义**读 `cellTooltipGrid`。
+    // 修前内核重建路径漏挂它 ⇒ 生产上逐格说明恒回退成宿主 NEI 名（工作台 + Wiki 预览同病）。
+    const defGrid = (at0!.definition as unknown as { cellTooltipGrid?: number[][][] }).cellTooltipGrid
+    expect(defGrid, '定义面必须携带 cellTooltipGrid（逐格说明的呈现输入）').toBeDefined()
+    let matchedCells = 0
+    for (let z = 0; z < fileGrid!.length; z++) {
+      for (let row = 0; row < fileGrid![z]!.length; row++) {
+        for (let col = 0; col < fileGrid![z]![row]!.length; col++) {
+          const fileIdx = fileGrid![z]![row]![col]!
+          if (fileIdx < 0) continue
+          const defIdx = defGrid![z]?.[row]?.[col]
+          expect(defIdx, `定义面网格必须在 (${z},${row},${col}) 有说明`).toBeGreaterThanOrEqual(0)
+          expect(
+            at0!.tooltipPalette[defIdx!],
+            `定义面 (${z},${row},${col}) 的说明文本必须与文件原件一致`,
+          ).toBe(filePool[fileIdx])
+          matchedCells += 1
+        }
+      }
+    }
+    expect(matchedCells, '前提：文件里确有逐格说明（不是空网格）').toBeGreaterThan(0)
+
     // 材质输入：位置 = 槽位 + 纹理字节按槽位键。
     const mi = face.materialInput
     expect(mi.geometryPhase).toBe('baked')

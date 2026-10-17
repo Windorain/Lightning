@@ -136,6 +136,25 @@ function definitionOfPayload(
     palette: payload.palette,
     cellContent: payload.cellContent,
   })
+  /**
+   * ## 逐格说明下标网格也必须挂回定义（#398 / M2-2）
+   *
+   * 消费侧是 `pure/tooltipResolution#resolvePreviewTooltipText`：它从**渲染定义**
+   * 读 `cellTooltipGrid`，再用同一个 `tooltipPalette` 解出该格文本。旧格式路径
+   * 里定义由 `toStructureDefinition` 浅拷贝源结构，天然带着该网格；内核重建路径
+   * （本函数）此前只重建了 `cellGrid`/`blockPalette`/`cellPartsGrid`，**漏了它** ⇒
+   * 生产上 `def.cellTooltipGrid` 恒 `undefined`，逐格说明永远回退成宿主 NEI 名
+   * （工作台与 Wiki 预览都受影响）。
+   *
+   * 编码仍只有一处：`adapters/tooltipPool#tooltipPoolOf`（与
+   * `kernelRenderSourceFaceOf` 产说明池的是同一个函数、同一份 `cellContent` 与声明尺寸），
+   * 故这里挂上的 `grid` 与面孔径下发的 `palette` 下标必然对齐（不是第二套编码）。
+   */
+  const tooltipPool = tooltipPoolOf(payload.cellContent, {
+    width: payload.sizeColumn,
+    height: payload.sizeRow,
+    depth: payload.sizeZSlice,
+  })
   return {
     geometryPhase: 'baked',
     cellGrid: projected.cellGrid,
@@ -144,6 +163,7 @@ function definitionOfPayload(
     ...(projected.cellPartsGrid === undefined
       ? {}
       : { cellPartsGrid: projected.cellPartsGrid, partLists: projected.partLists }),
+    ...(tooltipPool === null ? {} : { cellTooltipGrid: [...tooltipPool.grid] }),
   } as unknown as GridDefinition
 }
 
