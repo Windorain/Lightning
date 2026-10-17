@@ -1,5 +1,12 @@
 /**
  * 离屏 WebGL：与预览相同的 mesh 管线，固定等轴四向（绕 Y 旋转 90°）导出 PNG Data URL。
+ *
+ * ## M5-4：共享 stage（PNG 与 GIF 同一条烘焙链）
+ *
+ * 时间输入是**显式**的：`bakeIsometricStructurePngDataUrl` 的 `seconds` 缺省 0（与改造前
+ * "帧偏移停在构造初值 0"逐位一致），非法值**抛**（不把 `NaN` 伪装成 `t=0`）。
+ * 场景 GIF（`workbench/exportAnimatedGif.ts`）复用 {@link openIsometricStage}：同渲染器、
+ * 同相机、同材质库 —— 这是"GIF 首帧 ≈ 同参数 PNG"判据的结构前提。
  */
 
 import * as THREE from 'three'
@@ -11,6 +18,7 @@ import {
   STANDARD_ISOMETRIC_ELEVATION_FROM_HORIZONTAL_DEG,
 } from '@/render/interaction/initialCamera'
 import { buildBlockMesh } from '@/render/mesh/blockMesh'
+import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 
 /** 四向等轴方位角（度），相邻相差 90° */
 export const ISOMETRIC_EXPORT_YAW_DEG: readonly number[] = [45, 135, 225, 315]
@@ -89,18 +97,68 @@ export function dataUrlToPngBlob(dataUrl: string): Blob {
 }
 
 /**
- * @param directionIndex 0..3，对应 {@link ISOMETRIC_EXPORT_YAW_DEG}
+ * 导出时间的**唯一**归一入口（导出时间可固定可重现；SPEC.md:113）。
+ *
+ * - 缺省（`undefined`）= **0 秒**，与改造前"帧偏移 0"逐位一致（负对照 C3 钉这条）；
+ * - 非有限数 / 非 number ⇒ **抛**，不静默当 0（把"写了 NaN"伪装成"t=0"正是要防的）；
+ * - 负数**允许**：采样器对负时间取模（`domain/materials.ts#sampleStripFrameAt`），
+ *   钳制它会制造第二种语义。
  */
-export async function bakeIsometricStructurePngDataUrl(
+export function normalizeIsoSeconds(raw: unknown): number {
+  if (raw === undefined) return 0
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    throw new Error(`等轴导出的时间不是有限数：${String(raw)}`)
+  }
+  return raw
+}
+
+/**
+ * 等轴烘焙的共享 stage：一个渲染器 + 一台正交相机 + 一个已建好的场景 + 材质库。
+ *
+ * ## 谁负责释放
+ *
+ * {@link IsometricStage.dispose} **幂等**，顺序固定：
+ * 先 `built.dispose()`（几何/材质），再 `materialLibrary.dispose()`，再 `renderer.dispose()`。
+ * 这与改造前 `bakeIsometricStructurePngDataUrl` 的 `built.dispose()` + `finally` 两段合并一致。
+ *
+ * ## 为什么把 stage 抽出来（M5-4）
+ *
+ * 场景 GIF 必须与 PNG **同一条**烘焙链（同相机/同尺寸/同材质库）：
+ * 走内核呈现链（`assembleSnapshotExportJob`）在今天会把整条竖帧贴图压到一个面上
+ * （呈现链尚未按时间裁切帧条，M5-2 的另一半），那会产出"看起来没动"的假 GIF。
+ * 共享 stage 让"GIF 第 k 帧"与"同 seconds 的 PNG"从结构上就是同一张图。
+ */
+export interface IsometricStage {
+  readonly renderer: THREE.WebGLRenderer
+  readonly scene: THREE.Scene
+  readonly ortho: THREE.OrthographicCamera
+  readonly group: THREE.Group
+  readonly materialLibrary: MaterialLibraryApi
+  dispose(): void
+}
+
+/**
+ * 建一个可复用的等轴烘焙 stage。
+ *
+ * @param directionIndex 0..3，对应 {@link ISOMETRIC_EXPORT_YAW_DEG}
+ * @param options.seconds 场景秒数（缺省 0；非法值抛）——在**建库之后、任何 render 之前**
+ *   写一次；GIF 逐帧再调 `materialLibrary.setSceneTime`。
+ */
+export async function openIsometricStage(
   document: unknown,
   directionIndex: number,
-  options?: { pixelSize?: number },
-): Promise<string> {
+  options?: { pixelSize?: number; seconds?: number },
+): Promise<IsometricStage> {
   const size = Math.max(64, Math.min(1024, options?.pixelSize ?? 480))
   const dirIdx = ((Math.floor(directionIndex) % 4) + 4) % 4
   const yawDeg = ISOMETRIC_EXPORT_YAW_DEG[dirIdx] ?? 45
+  const seconds = normalizeIsoSeconds(options?.seconds)
 
   const materialLibrary = await buildMaterialLibrary(document)
+  // 时间只在**一处**赋值（M5-4）：`setSceneTime` 是无状态纯映射
+  // （`simpleMaterialLibrary`：sampleStripFrameAt → 写 tex.offset.y），
+  // 调用时机只要求在 `renderer.render` 之前；放在建库之后使"这一库的时间"只有一处赋值。
+  materialLibrary.setSceneTime(seconds)
   const { definition } = resolveRenderBundle({ document })
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -108,8 +166,22 @@ export async function bakeIsometricStructurePngDataUrl(
     preserveDrawingBuffer: true,
   })
 
+  const scene = new THREE.Scene()
+  scene.background = null
+  const pivot = new THREE.Group()
+  let built: Awaited<ReturnType<typeof buildBlockMesh>> | null = null
+  let disposed = false
+  const dispose = (): void => {
+    if (disposed) return
+    disposed = true
+    pivot.removeFromParent()
+    built?.dispose()
+    materialLibrary.dispose()
+    renderer.dispose()
+  }
+
   try {
-    const built = await buildBlockMesh(definition, materialLibrary, {
+    built = await buildBlockMesh(definition, materialLibrary, {
       layerPreview: 'all',
     })
 
@@ -118,16 +190,12 @@ export async function bakeIsometricStructurePngDataUrl(
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.setClearColor(0x000000, 0)
 
-    const scene = new THREE.Scene()
-    scene.background = null
-
     const ambient = new THREE.AmbientLight(0xffffff, 0.55)
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.9)
     dirLight.position.set(6, 10, 8)
     scene.add(ambient, dirLight)
 
     /** 根 pivot：将内容 AABB 中心平移到世界原点，轨道目标恒为原点（即原 AABB 中心） */
-    const pivot = new THREE.Group()
     scene.add(pivot)
     const group = built.group
     pivot.add(group)
@@ -167,16 +235,29 @@ export async function bakeIsometricStructurePngDataUrl(
     ortho.updateMatrixWorld(true)
     fitOrthographicCameraToBox(ortho, boxForFrustum)
 
-    renderer.render(scene, ortho)
+    return { renderer, scene, ortho, group, materialLibrary, dispose }
+  } catch (e) {
+    dispose()
+    throw e
+  }
+}
 
-    const dataUrl = renderer.domElement.toDataURL('image/png')
-
-    pivot.removeFromParent()
-    built.dispose()
-
-    return dataUrl
+/**
+ * 等轴 PNG 的**唯一**生产入口（M5-4：`seconds` 显式时间）。
+ *
+ * @param directionIndex 0..3，对应 {@link ISOMETRIC_EXPORT_YAW_DEG}
+ * @param options.seconds 场景秒数（缺省 0；`normalizeIsoSeconds` 是唯一归一入口）
+ */
+export async function bakeIsometricStructurePngDataUrl(
+  document: unknown,
+  directionIndex: number,
+  options?: { pixelSize?: number; seconds?: number },
+): Promise<string> {
+  const stage = await openIsometricStage(document, directionIndex, options)
+  try {
+    stage.renderer.render(stage.scene, stage.ortho)
+    return stage.renderer.domElement.toDataURL('image/png')
   } finally {
-    renderer.dispose()
-    materialLibrary.dispose()
+    stage.dispose()
   }
 }

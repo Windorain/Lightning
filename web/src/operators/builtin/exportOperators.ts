@@ -3,7 +3,7 @@ import { buildEnvelopePackage } from '@/render/data/sceneExport'
 import { loadStructureOrWorld } from '@/render/data/bundleResolve'
 import { downloadBlob, downloadJson } from '@/util/browser'
 import { buildStructureBundleZip } from '@/workbench/export/bundleMeshAssembly'
-import { bakeIsometricStructurePngDataUrl, dataUrlToPngBlob } from '@/workbench/exportIsometricImage'
+import { bakeIsometricStructurePngDataUrl, dataUrlToPngBlob, normalizeIsoSeconds } from '@/workbench/exportIsometricImage'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 
 const ISO_DIRECTION_MAP: Record<string, number> = {
@@ -134,12 +134,17 @@ export const ExportIsoPngOperator: OperatorType = {
     // #301 P10f D2：产物改由**内核投影**给出（未装配自动回落旧文档）。
     const doc = ctx.plainForSave().plain
     if (!doc) return
+    // 显式时间（缺省 0）；非法值在这里就拒（与烘焙同一个归一入口），
+    // 不落进下面的 try 被压成一条 warn。
+    const seconds = normalizeIsoSeconds(_props.seconds)
     try {
-      const dataUrl = await bakeIsometricStructurePngDataUrl(doc, directionIndex)
+      const dataUrl = await bakeIsometricStructurePngDataUrl(doc, directionIndex, { seconds })
       const blob = dataUrlToPngBlob(dataUrl)
       downloadBlob(`iso-${directionIndex}.png`, blob)
     } catch (e) {
       ctx.log.warn('导出', `等轴 PNG 导出失败: ${e}`)
+      // **再抛**：log.warn 只留诊断，可见性由调用方（UI）承担。吞掉它正是本轮要修的形态。
+      throw e
     }
   },
 }

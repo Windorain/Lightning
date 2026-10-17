@@ -187,8 +187,10 @@ describe('D7 · 算子层：渲染下标与文件名同源（防再次分叉）'
 
   it('反空洞真：剥注释后的代码视图**确实**还含有真实使用点（否则下面几条恒绿）', () => {
     // 若 `codeOnly` 把代码也剥光了，下面"不含旧写法"的断言会恒真 —— 那是假绿。
+    // M5-4：签名多了 `options`（显式时间）⇒ 这里钉**前缀**（同源下标），不再钉完整调用串。
+    // 前缀断言保留原判据的意图（bake 吃归一化下标），同时允许后续再追加参数。
     expect(SOURCE_VIEW, '代码视图必须保留真实调用（否则判据空转）').toContain(
-      'bakeIsometricStructurePngDataUrl(doc, directionIndex)',
+      'bakeIsometricStructurePngDataUrl(doc, directionIndex,',
     )
     expect(SOURCE_VIEW, '代码视图必须保留下载调用').toContain('downloadBlob(')
     // 且注释里那段"旧写法"的引用确实**在原文里**（证明剥注释这一步有实际作用）
@@ -205,7 +207,9 @@ describe('D7 · 算子层：渲染下标与文件名同源（防再次分叉）'
 
   it('文件名与 bake 的**同一个**变量（同源）', () => {
     expect(SOURCE, '文件名必须用归一化后的下标').toContain('iso-${directionIndex}.png')
-    expect(SOURCE, 'bake 必须吃同一个归一化下标').toContain('bakeIsometricStructurePngDataUrl(doc, directionIndex)')
+    expect(SOURCE, 'bake 必须吃同一个归一化下标').toContain('bakeIsometricStructurePngDataUrl(doc, directionIndex,')
+    // M5-4：时间必须真的进 bake 的 options（而不是只改了 UI）。
+    expect(SOURCE, '显式时间必须经归一入口进 bake 的 options').toContain('{ seconds }')
     // 反空洞真：变量确实由唯一入口产出（否则上面两条可能引用了别处的同名变量）
     expect(SOURCE).toContain('const directionIndex = resolveIsoDirection(_props.direction)')
   })
