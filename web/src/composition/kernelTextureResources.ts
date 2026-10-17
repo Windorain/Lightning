@@ -45,6 +45,7 @@ import {
 } from '@/presentation/assetIdentity'
 import { bindTexture } from '@/presentation/textureBinding'
 import type { TextureBinding, TexturePixels, TextureResource, TextureSampling, TextureState } from '@/presentation/textureBinding'
+import { textureAnimationOf, type TextureAnimationBinding } from '@/domain/textureAnimation'
 
 /** 五态的**声明式**取值（不是本模块发明 —— 逐字来自 #249 §19.3）。 */
 export const TEXTURE_STATES: readonly TextureState[] = Object.freeze([
@@ -151,11 +152,24 @@ async function decodeOne(r: ContentResource, decoder: TextureDecoder): Promise<T
   // ② 内嵌 ⇒ 解码（**按条**兜错：一处失败只坏这一条）
   try {
     const pixels = await decoder.decode(r.payload)
-    return pixels === null
-      ? freezeResource(identity, locator, 'failed', null, '解码返回 null（字节不是可解码图像）')
-      : freezeResource(identity, locator, 'ready', pixels)
+    if (pixels === null) {
+      return freezeResource(identity, locator, 'failed', null, undefined, '解码返回 null（字节不是可解码图像）')
+    }
+    // ③ 就绪 ⇒ 由「声明 + 像素尺寸」派生纹理序列（#M5-3）。
+    // 未解码/失败 ⇒ 缺席（没有像素就没有格数可推，**不猜**帧数）。
+    // 派生是纯的；归一化后的非法序列会显式抛出（实现缺陷），由本处的逐条兜错落成
+    // 这一条的 `failed` —— 不让它把整批解码拖垮（"坏一张只坏一张"不变）。
+    const animation = textureAnimationOf({
+      id: identity.id,
+      resource: r.ref,
+      kind: r.kind,
+      animation: r.animation,
+      width: pixels.width,
+      height: pixels.height,
+    })
+    return freezeResource(identity, locator, 'ready', pixels, animation ?? undefined)
   } catch (e) {
-    return freezeResource(identity, locator, 'failed', null, formatReason(e))
+    return freezeResource(identity, locator, 'failed', null, undefined, formatReason(e))
   }
 }
 
@@ -259,11 +273,19 @@ function locatorOf(r: ContentResource): AssetLocator {
   return Object.freeze({ kind: 'external' as const, url: r.ref.url })
 }
 
+/**
+ * 冻结一条五态资源。
+ *
+ * `animation` **只在有值时展开**（与 `phaseOf` 的"缺席就是缺席"同一纪律）：
+ * 静态贴图不得写出 `animation: undefined` 的在场字段 —— 保留两种形状会让
+ * `Object.keys`/`toStrictEqual` 类断言与"缺席 = 静态"的口径分叉。
+ */
 function freezeResource(
   identity: ContentIdentity,
   locator: AssetLocator,
   state: TextureState,
   pixels: TexturePixels | null,
+  animation?: TextureAnimationBinding,
   failure?: string,
 ): TextureResource {
   return Object.freeze({
@@ -271,6 +293,7 @@ function freezeResource(
     locator,
     state,
     pixels,
+    ...(animation === undefined ? {} : { animation }),
     ...(failure === undefined ? {} : { failure }),
   }) as TextureResource
 }
@@ -351,6 +374,8 @@ export function textureBindingsOf(input: {
         identity: resource.identity,
         required: needed === null ? true : needed.has(index as number),
         state: resource.state,
+        // 序列只在就绪时派生（见 `decodeOne`）；缺席 ⇒ 绑定不带 animation。
+        ...(resource.animation === undefined ? {} : { animation: resource.animation }),
       },
       input.sampling,
     )

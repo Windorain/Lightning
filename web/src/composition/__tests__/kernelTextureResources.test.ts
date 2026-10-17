@@ -26,9 +26,15 @@ import {
   type TextureDecoder,
   type TextureResourcesProgress,
 } from '@/composition/kernelTextureResources'
-import { bindTexture, missingRequiredAssets, textureRequirementsOf, type TextureResource } from '@/presentation/textureBinding'
+import {
+  bindTexture,
+  missingRequiredAssets,
+  textureBindingKey,
+  textureRequirementsOf,
+  type TextureResource,
+} from '@/presentation/textureBinding'
 import { contentIdentityKey } from '@/presentation/assetIdentity'
-import type { ContentResource } from '@/domain/content'
+import type { ContentResource, TextureAnimationSpec } from '@/domain/content'
 import { plainRootOf } from '@/adapters/plainRoot'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -394,6 +400,111 @@ describe('#399 B1 · 有界并发（缺陷 A）：下标对齐 / 逐项失败 / 
       out.every((r) => r.state === 'ready'),
       '上报抛错若冒泡，会把整批结果变成 failed —— 两种事实必须可区分',
     ).toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M5-3b：纹理序列（就绪 ⇒ 派生；缺席 = 静态）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 16×64 竖条像素（4 格）——格数由像素尺寸推，不由声明推。 */
+const stripDecoder: TextureDecoder = {
+  decode: async () => ({ width: 16, height: 64, rgba: new Uint8Array(16 * 64 * 4) }),
+}
+
+const STRIP_ANIMATION: TextureAnimationSpec = Object.freeze({
+  defaultFrametimeTicks: 2,
+  frameSequence: Object.freeze([
+    Object.freeze({ index: 0 }),
+    Object.freeze({ index: 1, timeTicks: 3 }),
+    Object.freeze({ index: 2, timeTicks: 1 }),
+    Object.freeze({ index: 3, timeTicks: 2 }),
+  ]),
+})
+
+describe('M5-3b · 纹理资源派生序列（`textureAnimationOf` 的生产接线）', () => {
+  it('生产形状的 ContentResource（animated + 声明 + 16×64 像素）⇒ 资源带 animation', async () => {
+    const out = await textureResourcesOf(
+      [resource({ assetId: 'material:0', payload: 'p0', kind: 'animated', animation: STRIP_ANIMATION })],
+      stripDecoder,
+    )
+    expect(out[0]!.state).toBe('ready')
+    const animation = out[0]!.animation
+    expect(animation, '就绪 + 竖条 ⇒ 必须派生序列').toBeDefined()
+    expect(animation!.stripFrameCount).toBe(4)
+    expect(animation!.sequence.frames.map((f) => f.duration.num / f.duration.den)).toEqual([0.1, 0.15, 0.05, 0.1])
+  })
+
+  it('绑定生产点把 `resource.animation` 带进 `TextureBinding`（唯一绑定构造点）', async () => {
+    const out = await textureResourcesOf(
+      [resource({ assetId: 'material:0', payload: 'p0', kind: 'animated', animation: STRIP_ANIMATION })],
+      stripDecoder,
+    )
+    const bindings = textureBindingsOf({ materials: [material('material:0')], resources: out })
+    expect(bindings).toHaveLength(1)
+    expect(bindings[0]!.animation, '绑定必须带序列（presenter 的每帧采样输入）').toBeDefined()
+    expect(bindings[0]!.animation!.stripFrameCount).toBe(4)
+  })
+
+  it('负对照：kind=static16 ⇒ 即使像素是 16×64 竖条，animation **缺席**', async () => {
+    const out = await textureResourcesOf(
+      [resource({ assetId: 'material:0', payload: 'p0', kind: 'static16', animation: STRIP_ANIMATION })],
+      stripDecoder,
+    )
+    expect(out[0]!.state).toBe('ready')
+    expect(out[0]!.animation, 'kind 不是 animated ⇒ 不采样').toBeUndefined()
+    expect('animation' in out[0]!, '缺席就是缺席（不得写出 animation: undefined）').toBe(false)
+    const bindings = textureBindingsOf({ materials: [material('material:0')], resources: out })
+    expect(bindings[0]!.animation).toBeUndefined()
+  })
+
+  it('越界/负索引与非法时长**归一化**后仍出序列，且资源不得被标 failed（贴图本身可用）', async () => {
+    const out = await textureResourcesOf(
+      [
+        resource({
+          assetId: 'material:0',
+          payload: 'p0',
+          kind: 'animated',
+          animation: { defaultFrametimeTicks: 0, frameSequence: [{ index: -5 }, { index: 9, timeTicks: 0 }] },
+        }),
+      ],
+      stripDecoder,
+    )
+    expect(out[0]!.state, '坏声明不是坏贴图').toBe('ready')
+    const animation = out[0]!.animation!
+    expect(animation.sequence.frames.map((f) => f.index), '取模 + 默认 tick').toEqual([3, 1])
+    expect(animation.sequence.frames.map((f) => f.duration.num / f.duration.den)).toEqual([0.05, 0.05])
+  })
+
+  it('未解码/失败 ⇒ 无 animation（不猜帧数）', async () => {
+    const out = await textureResourcesOf([resource({ assetId: 'ext', payload: null })], stripDecoder)
+    expect(out[0]!.state).toBe('unrequested')
+    expect(out[0]!.animation).toBeUndefined()
+  })
+
+  it('绑定键含序列：只有动画声明不同的两个绑定 ⇒ 键不同', async () => {
+    const base = bindTexture(material('material:0'), {
+      identity: { id: 'material:0', version: 'v1' },
+      required: true,
+      state: 'ready',
+    })
+    const animated = bindTexture(material('material:0'), {
+      identity: { id: 'material:0', version: 'v1' },
+      required: true,
+      state: 'ready',
+      animation: {
+        sequence: {
+          id: 'material:0',
+          resource: { assetId: 'material:0', contentVersion: 'v1', url: '' },
+          frames: [{ index: 0, duration: { num: 1, den: 20 } }],
+          loop: 'loop',
+        },
+        stripFrameCount: 4,
+      },
+    })
+    expect(textureBindingKey(base)).not.toBe(textureBindingKey(animated))
+    expect(textureBindingKey(base)).toContain('|an:-')
+    expect(textureBindingKey(animated)).toContain('|an:')
   })
 })
 

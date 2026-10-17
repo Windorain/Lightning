@@ -495,7 +495,18 @@ export function totalDurationMs(timeline: StripTimeline): number {
 }
 
 /**
- * 由 mcmeta 形态的**原始**帧时长构造时间轴（毫秒整数，`<= 0` 回落到 `1`）。
+ * **世界帧轴**的缺省帧时长（毫秒）：非法/缺省时长回落值。
+ *
+ * ⚠️ 它**只服务"帧为主"文档的世界帧轴**（M5-1 之后多方块不再提供帧轴）。
+ * **纹理序列不得复用它**：纹理的 tick 缺省恒为 1 tick = 50 ms
+ * （`domain/textureAnimation#TEXTURE_TICK_MS`）。两个数字**故意不同** ——
+ * 1 ms 与 50 ms 是两条不同的时间轴，判据里同时钉住（防止下一个人把它们"统一"回去）。
+ */
+export const WORLD_FRAME_AXIS_FALLBACK_MS = 1
+
+/**
+ * 由 mcmeta 形态的**原始**帧时长构造时间轴（毫秒整数，`<= 0` 回落到
+ * {@link WORLD_FRAME_AXIS_FALLBACK_MS}）。
  *
  * ## 为什么非法时长在这里**回落**而不是拒绝（与 `parseTextureSequence` 的分工）
  *
@@ -505,7 +516,7 @@ export function totalDurationMs(timeline: StripTimeline): number {
  * 本函数面对的是**外部格式（mcmeta）的解释**：mcmeta 允许省略时长
  * （用 `defaultFrametimeTicks`）、也允许写出 `0`（Minecraft 自身把它当 1 tick）。
  * 那是**适配器可以做的归一化** —— 与 `domain/materials` 文件头里
- * "适配器可以做的归一化"同一口径。故这里回落成 `1` 毫秒，
+ * "适配器可以做的归一化"同一口径。故这里回落成 `WORLD_FRAME_AXIS_FALLBACK_MS`（1 毫秒），
  * **不**把外部格式的宽松解释升级成核心的拒绝。
  */
 export function stripTimeline(
@@ -515,7 +526,11 @@ export function stripTimeline(
   const durations: number[] = []
   for (let i = 0; i < frameIndices.length; i++) {
     const raw = durationMs[i]
-    durations.push(typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1)
+    durations.push(
+      typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+        ? Math.floor(raw)
+        : WORLD_FRAME_AXIS_FALLBACK_MS,
+    )
   }
   return Object.freeze({ frameIndices: Object.freeze([...frameIndices]), durationMs: Object.freeze(durations) })
 }

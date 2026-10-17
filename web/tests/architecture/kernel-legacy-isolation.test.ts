@@ -803,6 +803,23 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       'R1 收口后渲染链终切到内核（`legacy-render-source-document` / `presenter-surface-dual-track` 退出）时，'
       + 'legacy 载体不再被读 ⇒ 本投影与本行一并核销',
   }),
+  // ── M5-3a：场景秒数唯一化 ────────────────────────────────────────────────
+  //
+  // 材质面板（`MaterialGallery.vue`）与 `Context` 的时间读面此前各自算一份场景秒
+  // （面板是"Σ 之前各帧 durationMs + 50ms 缺省"的**离散**口径，视口是帧/帧率连续口径），
+  // 不等帧时长下两者给出不同采样时刻。M5-3 把权威下沉到 `domain/animation#sceneClockOf`，
+  // 旧层 `runtime/context.ts` 的 `getSceneSeconds()` 只做**只读投影**：
+  // 少一次 `import` 就逼着有人在 `runtime/` 里再写一遍 `frame/fps`（第二份权威）。
+  Object.freeze({
+    from: 'src/runtime/context.ts',
+    to: 'domain/animation',
+    reason:
+      'M5-3a：`Context#getSceneSeconds()` 是场景秒数唯一权威（`sceneClockOf`）的只读投影 —— '
+      + '面板缩略图与视口纹理必须读**同一个**时间值（A27「同一时间同样本」的前提）。'
+      + '这是内核能力被旧层消费，不是旧路径续命。',
+    exitStage:
+      'M6/M7 面板与呈现接线整体迁入内核侧编辑器、或 `getSceneSeconds` 的消费者改为直接持有会话时，本边核销',
+  }),
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {

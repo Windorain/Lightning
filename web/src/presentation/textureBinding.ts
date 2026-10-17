@@ -40,6 +40,7 @@ import {
   type TextureSample,
   type TextureSequence,
 } from '@/domain/materials'
+import { sequenceKey, type TextureAnimationBinding } from '@/domain/textureAnimation'
 import type { Result } from '@/domain/errors'
 
 /**
@@ -65,6 +66,14 @@ export interface TextureResource {
   readonly pixels: TexturePixels | null
   /** 失败原因（`state === 'failed'` 时非空）。 */
   readonly failure?: string
+  /**
+   * 纹理序列（声明 + 竖条格数）。**缺席 = 静态贴图**。
+   *
+   * 它是 `ContentResource.animation` 与解码像素尺寸的**派生**
+   * （`domain/textureAnimation#textureAnimationOf`），不是第二个权威。
+   * 只在 `state === 'ready'` 时可能出现 —— 没有像素就没有格数可推。
+   */
+  readonly animation?: TextureAnimationBinding
 }
 
 export type TextureState = 'unrequested' | 'loading' | 'ready' | 'missing' | 'failed'
@@ -91,6 +100,17 @@ export interface TextureBinding {
   readonly materialVersion: string
   /** 该材质的纹理（缺席 = 该材质无贴图）。 */
   readonly map?: ContentIdentity
+  /**
+   * 纹理序列（声明 + 竖条格数）。缺席 = 单帧贴图：**不采样、不写 offset/repeat**。
+   *
+   * ## 它为什么不进 `ContentIdentity` / `materialIdentityOf`
+   *
+   * 动画声明不是字节：进内容身份会让"改播放速度"变成"换资源"（A28 的反向错误）；
+   * 进材质身份会让每帧采样参数变化触发**重编**（而形状/几何/批次完全没变）。
+   * ⇒ 它只进 {@link textureBindingKey}（"绑定值"的稳定键）与资源同步去重键，
+   * 呈现器换绑定后由 `setTextureBindings` 卸载重挂并立即重采样。
+   */
+  readonly animation?: TextureAnimationBinding
   /**
    * 该材质的纹理**相位**绑定（G7 / #388 R2-①）。
    *
@@ -167,11 +187,18 @@ export interface TextureRequirement {
  */
 export function bindTexture(
   material: MaterialDescriptor,
-  resource: { readonly identity: ContentIdentity; readonly required: boolean; readonly state: TextureState } | null,
+  resource: {
+    readonly identity: ContentIdentity
+    readonly required: boolean
+    readonly state: TextureState
+    /** 资源派生出的纹理序列（缺席 = 静态贴图；见 `textureAnimationOf`）。 */
+    readonly animation?: TextureAnimationBinding
+  } | null,
   sampling: TextureSampling = VOXEL_SAMPLING,
 ): TextureBinding {
   if (resource === null) {
     // 无贴图材质（顶点色纯色/线框）：**显式**不绑，而不是绑一张默认图。
+    // 无资源 ⇒ 无像素 ⇒ 无格数 ⇒ **不产** animation（不猜帧数）。
     return Object.freeze({
       materialId: material.id,
       materialVersion: material.version,
@@ -188,6 +215,8 @@ export function bindTexture(
     // 「必需且未就绪」⇒ 显式标缺（G4）。`missing` 与 `failed` 都算未就绪；
     // `unrequested`/`loading` 是**进行中**，不标缺（否则每帧都在报"缺资源"）。
     missingRequired: resource.required && (resource.state === 'missing' || resource.state === 'failed'),
+    // 缺席就是缺席（与 phaseOf 同一形状纪律）：静态贴图不得写出 `animation: undefined`。
+    ...(resource.animation === undefined ? {} : { animation: resource.animation }),
     ...phaseOf(material),
   })
 }
@@ -204,10 +233,17 @@ function phaseOf(material: MaterialDescriptor): { readonly texturePhase?: Textur
   return material.texturePhase === undefined ? {} : { texturePhase: material.texturePhase }
 }
 
-/** 绑定的稳定键（缓存查找用；含材质身份、纹理内容身份与**相位**，**不含** locator）。 */
+/**
+ * 绑定的稳定键（缓存查找用；含材质身份、纹理内容身份、**纹理序列**与**相位**，**不含** locator）。
+ *
+ * 序列必须进键：两个只有动画声明不同的绑定是**不同的呈现输入**（同一张图、不同的
+ * 帧时长/帧序 ⇒ 同一时刻不同样本）。它**不**进 `ContentIdentity`/`materialIdentityOf`
+ * —— 见 `TextureBinding#animation` 的说明。
+ */
 export function textureBindingKey(binding: TextureBinding): string {
   const map = binding.map === undefined ? '-' : contentIdentityKey(binding.map)
-  return `${binding.materialId}@${binding.materialVersion}|${map}|ph:${texturePhaseKeyOf(binding.texturePhase)}`
+  const animation = binding.animation === undefined ? '-' : sequenceKey(binding.animation.sequence)
+  return `${binding.materialId}@${binding.materialVersion}|${map}|an:${animation}|ph:${texturePhaseKeyOf(binding.texturePhase)}`
 }
 
 /**
@@ -225,6 +261,10 @@ export function textureBindingKey(binding: TextureBinding): string {
  *
  * 与两个采样器一样是 `Result`：非法时间/非法序列由 domain 显式判错，**不得**用默认帧顶替
  * （A36 同族的"不得假装完整"）。
+ *
+ * ⚠️ 本函数是 **presenter 每帧消费的唯一采样入口**（`BatchedPresenter#applySceneTime`）。
+ * 签名固定为 `(binding, sequence, baseSeconds)`：**不得**加 `deltaSeconds` 之类的累积参数
+ * —— 累积量没有"倒退"通路，跳帧/倒放会与连续播放给出不同样本（A27 的判据形态）。
  */
 export function sampleBoundTexture(
   binding: TextureBinding,

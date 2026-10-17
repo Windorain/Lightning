@@ -15,6 +15,8 @@ import { DRW } from '@/runtime/drw'
 import type { PresenterSession } from '@/composition/presenterSession'
 import type { ViewportPresenterBundle } from '@/runtime/host'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
+import { animationSpecKey } from '@/domain/textureAnimation'
+import type { ContentResource } from '@/domain/content'
 // 中立设施（`kernel-legacy-isolation.test.ts` 的中立清单含 `logging`）：实时状态槽是
 // 状态栏的读面来源，不是"旧权威对象"。
 import { LOG_LEVEL, type LogLevelValue } from '@/logging/LogCenter'
@@ -652,8 +654,17 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    * 记在途身份使"同一份资源的第二次调用直接返回"，在途那一次才可能真正落地。
    */
   let inFlightTextureIdentity: string | null = null
-  const textureIdentityOf = (doc: { readonly content: { readonly resources: readonly { readonly ref: { readonly assetId: string; readonly contentVersion: string } }[] } }): string =>
-    doc.content.resources.map((r) => `${r.ref.assetId}@${r.ref.contentVersion}`).join('\u0001')
+  /**
+   * 纹理同步的**去重键**：资源内容身份 + **动画声明**。
+   *
+   * 只拼 `assetId@contentVersion` 会漏掉"字节没变、播放速度/帧序变了"：
+   * mcmeta 声明改而像素不变时不会重同步 ⇒ 绑定表里还是旧序列 ⇒
+   * "改了播放速度不生效"（且没有任何报错）。声明键是纯函数
+   * （`domain/textureAnimation#animationSpecKey`），不是派生后的序列 ——
+   * 多一次重建是安全的，少一次不是。
+   */
+  const textureIdentityOf = (doc: { readonly content: { readonly resources: readonly ContentResource[] } }): string =>
+    doc.content.resources.map((r) => `${r.ref.assetId}@${r.ref.contentVersion}#${animationSpecKey(r.animation)}`).join('\u0001')
   const syncPresenterTextures = async (): Promise<void> => {
     if (texturesDisposed) return
     const doc = kernel?.document()

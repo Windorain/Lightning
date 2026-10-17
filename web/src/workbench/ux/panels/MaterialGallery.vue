@@ -4,7 +4,8 @@ import type { MaterialQueryItem } from '@/runtime/types'
 import { useContext } from '@/runtime/context'
 import OperatorBtn from '@/workbench/ux/OperatorBtn.vue'
 import { parsePngDims } from '@/util/pngDims'
-import { parseTextureSequence, sampleTextureSequence, type TextureSequence } from '@/domain/materials'
+import { sampleTextureSequence, type TextureSequence } from '@/domain/materials'
+import { animationSpecKey, textureAnimationOf } from '@/domain/textureAnimation'
 import { listMaterials, getMaterialUsageCounts } from '@/context/queries'
 
 const ctx = useContext()
@@ -150,38 +151,38 @@ const animationImages = new Map<string, HTMLImageElement>()
 // 那个常量随公式一起消失（纹理序列的 tick 缺省另有唯一出处）。
 
 /**
- * 材质声明 → 纹理序列（纯；解析期拒绝即返回 `null`）。
+ * 材质声明 → 纹理序列（纯）。
  *
- * `defaultFrametimeTicks` 是 Java `.mcmeta` 的 tick 单位 ⇒ ×50ms 换成统一时间单位
- * （#249 §19.3「原格式时长由**适配器**换成统一时间单位」——本函数就是那个换算点，
- * 它只做单位换算，不含播放逻辑）。
+ * ## 为什么调 `domain/textureAnimation#textureAnimationOf`（而不是本地再推一遍）
+ *
+ * 本组件此前自己算"格数 = floor(h/w)、缺省 tick × 50ms、顺序播放"。同一张竖条贴图
+ * 在**视口呈现**（UV 偏移裁切）与**本面板缩略图**由两份派生解释 ⇒ 只要其中一份漂移
+ * （例如格数取整、tick 缺省、帧索引是否取模），同一时刻面板与视口就会显示不同帧
+ * （A27 的同族形态）。⇒ 派生只有一处：`textureAnimationOf`（返回 `null` = 静态）。
+ *
+ * 缓存键必须含**动画声明**：同一个 dataUrl 的字节配不同 `frametime/frames` 是不同
+ * 序列（只按 dataUrl 缓存会让"改了播放速度"在面板上不生效）。
  */
 function sequenceFor(card: MaterialCard): TextureSequence | null {
   if (!card.dataUrl || card.kind !== 'animated') return null
-  const cached = sequences.get(card.dataUrl)
+  const cacheKey = `${card.dataUrl.length.toString(36)}:${card.dataUrl.slice(-32)}|${animationSpecKey(card.animation)}`
+  const cached = sequences.get(cacheKey)
   if (cached !== undefined) return cached
 
   if (!card.textureWidth || !card.textureHeight) {
-    sequences.set(card.dataUrl, null)
+    sequences.set(cacheKey, null)
     return null
   }
-  const frameCount = Math.floor(card.textureHeight / card.textureWidth)
-  if (frameCount <= 1) {
-    sequences.set(card.dataUrl, null)
-    return null
-  }
-  const frameMs = Math.max((card.animation?.defaultFrametimeTicks ?? 1) * 50, 1)
-  const parsed = parseTextureSequence({
+  const binding = textureAnimationOf({
     id: card.materialId,
-    resource: { assetId: card.materialId, contentVersion: card.dataUrl.length.toString(36), url: card.dataUrl },
-    frames: Array.from({ length: frameCount }, (_, i) => ({ index: i })),
-    defaultDurationSeconds: frameMs / 1000,
-    loop: 'loop',
-    // 无帧混合声明：#249 §19.3 明文「资源原本不允许混合就阶跃切换」⇒ mix 恒 0。
-    frameBlendAllowed: false,
+    resource: { assetId: card.materialId, contentVersion: cacheKey, url: card.dataUrl },
+    kind: card.kind,
+    animation: card.animation ?? null,
+    width: card.textureWidth,
+    height: card.textureHeight,
   })
-  const value = parsed.ok ? parsed.value : null
-  sequences.set(card.dataUrl, value)
+  const value = binding === null ? null : binding.sequence
+  sequences.set(cacheKey, value)
   return value
 }
 
