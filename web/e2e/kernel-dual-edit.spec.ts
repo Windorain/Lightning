@@ -824,4 +824,133 @@ test.describe('M4-2 · 双区编辑同步（一次编辑，另一区看得见）
     console.log('[DE-4] A: ' + JSON.stringify(aBefore) + ' → ' + JSON.stringify(aAfter) + '；B 不变=' + JSON.stringify(bBefore))
   })
 
+  test('DE-5 暂存不串：A 区拖动未松手期间内核不推进、B 区仍是正式内容；松手后 B 区见新位置', async ({ page }) => {
+    test.setTimeout(420_000)
+    const doc = innerDocOf(fixturePath())
+    const sizeRow = doc.cellGrid[0]!.length
+    const { a, b } = await openDualArea(page)
+
+    const before = await kernelCells(page)
+    expect(Object.keys(before).length, '前提：样本必须有非空格').toBeGreaterThan(10)
+    const beforeUndo = await undoState(page)
+    const beforeDirty = await isDirty(page)
+    expect(beforeDirty, '前提：刚装载必须干净（否则"暂存不推进版本"无从判定）').toBe(false)
+    const defABefore = await definitionCells(page, a.region)
+    const defBBefore = await definitionCells(page, b.region)
+    expect(JSON.stringify(defBBefore), '前提：两区呈现读面必须一致（同一份内容的两个视口读面）').toBe(
+      JSON.stringify(defABefore),
+    )
+
+    // ── 选一个"有空邻居"的实心格（真实左键点选；空邻居 ≥2 ⇒ 拖动有多个合法方向）──
+    const order = await movableCells(page)
+    expect(order.length, '前提：样本必须存在有空邻居的实心格（否则无法自由移动）').toBeGreaterThan(0)
+
+    const empty = await findEmptyPoint(page, a.region)
+    expect(empty, '前提：A 区画布必须有未被遮挡的空白点（自由移动的起点）').not.toBeNull()
+
+    // ── 真实指针拖动：**松手前**读一次，松手后再读一次 ──
+    // 位移量按"格"的屏幕尺度不确定 ⇒ 逐格 × 逐方向试；越界/落空会被内核拒绝 ⇒ 内容不变，
+    // 那时换一个格/方向再试（不把"上一条撤销项还在"当作本次成功）。
+    const deltas: Array<[number, number]> = [
+      [60, 0],
+      [-60, 0],
+      [0, 60],
+      [0, -60],
+      [120, 0],
+      [-120, 0],
+      [0, 120],
+      [0, -120],
+    ]
+    const tried: string[] = []
+    let committed = false
+    let hit: Hit | null = null
+    for (const cell of order.slice(0, 8)) {
+      if (committed) break
+      const found = await findHitForCell(page, a.region, cell)
+      if (!found) {
+        tried.push('格 ' + cell.z + '/' + cell.row + '/' + cell.col + ' 真实指针打不到')
+        continue
+      }
+      hit = found
+      await page.mouse.click(found.client.x, found.client.y)
+      await expect
+        .poll(async () => await selectedPos(page), { message: '真实左键必须选中该格' })
+        .toEqual(kernelPosOf(found.candidate, sizeRow))
+
+      for (const d of deltas) {
+        if (committed) break
+        await page.keyboard.press('g')
+        await page.waitForTimeout(350)
+        const toolNow = await page.evaluate(
+          () => (window as any).__vm__.getToolRegistry().activeTool.value?.id ?? null,
+        )
+        expect(toolNow, '前提：真实按键 g 必须激活移动工具').toBe('move')
+        await page.mouse.move(empty!.x, empty!.y)
+        await page.mouse.down()
+        await page.mouse.move(empty!.x + d[0], empty!.y + d[1], { steps: 8 })
+        await page.waitForTimeout(320)
+
+        // ── 暂存期读数（此时**未松手**，模态仍 RUNNING_MODAL）──
+        const duringUndo = await undoState(page)
+        const duringDirty = await isDirty(page)
+        const duringCells = await kernelCells(page)
+        const duringA = await definitionCells(page, a.region)
+        const duringB = await definitionCells(page, b.region)
+
+        await page.mouse.up()
+        await page.waitForTimeout(1600)
+        const after = await kernelCells(page)
+        const changed = Object.keys({ ...before, ...after }).filter((k) => before[k] !== after[k])
+        if (changed.length === 0) {
+          tried.push('格 ' + cell.z + '/' + cell.row + '/' + cell.col + ' Δ=' + d[0] + ',' + d[1] + ' 未改内容（被拒或没到一格）')
+          continue
+        }
+
+        // ── ① 暂存期：内核不推进、历史不记、两区读到的仍是正式内容 ──
+        expect(duringUndo, '暂存期间不得记历史（撤销栈在拖动中不得变化）').toEqual(beforeUndo)
+        expect(duringDirty, '暂存期间文档不得被判脏（暂存不是正式内容）').toBe(beforeDirty)
+        expect(JSON.stringify(duringCells), '暂存期间内核内容必须仍是正式内容（未提交）').toBe(
+          JSON.stringify(before),
+        )
+        expect(JSON.stringify(duringA), '暂存期间 A 区呈现读面必须仍是正式内容').toBe(JSON.stringify(defABefore))
+        expect(JSON.stringify(duringB), '暂存期间 B 区呈现读面必须仍是正式内容').toBe(JSON.stringify(defBBefore))
+
+        // ── ② 松手（FINISHED）之后：恰好一条移动历史，且两区都看到新位置 ──
+        const emptied = changed.filter((k) => before[k] !== undefined && after[k] === undefined)
+        expect(emptied.length, '自由移动必须让恰好一格源格变空').toBe(1)
+        const from = emptied[0]!
+        const filled = changed.filter((k) => after[k] === before[from])
+        expect(filled.length, '目标格必须拿到源格原来的方块').toBe(1)
+        const to = filled[0]!
+        const st = await undoState(page)
+        expect(String(st.undoLabel), '松手（FINISHED）才产生一条内核移动历史').toContain('move cells')
+        // 移动算子在内核受理后把选择集平移到落点 ⇒ 落点必须与内容差异一致（交叉核对）
+        expect(await selectedPos(page), '松手后选择集必须平移到移动后的位置').toEqual(
+          to.split(',').map((n) => Number(n)),
+        )
+        await expect
+          .poll(
+            async () => {
+              const dNow = await definitionCells(page, b.region)
+              return dNow[to] ?? null
+            },
+            { message: '松手后 B 区呈现读面必须看到新位置', timeout: 20_000 },
+          )
+          .toBe(before[from])
+        const defBAfter = await definitionCells(page, b.region)
+        expect(defBAfter[from], 'B 区不得仍把源格当作有方块').toBeUndefined()
+        const defAAfter = await definitionCells(page, a.region)
+        expect(defAAfter[to], 'A 区呈现读面同样看到新位置').toBe(before[from])
+        expect(defAAfter[from], 'A 区源格必须变空').toBeUndefined()
+
+        console.log(
+          '[DE-5] ' + from + ' → ' + to + '（撤销项 "' + String(st.undoLabel) + '"）；暂存期未推进版本/未记历史',
+        )
+        committed = true
+      }
+    }
+    expect(hit, '前提：真实指针必须能命中一个可移动的格').not.toBeNull()
+    expect(committed, '真实拖动必须至少成功提交一次（否则整条判据空转）。已试：\n' + tried.join('\n')).toBe(true)
+  })
+
 })
