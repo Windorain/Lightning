@@ -689,14 +689,30 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       // `bound.missingRequired` 数的是**绑定**（材质）条数（`presenterSession.bindTextures`），
       // 同一张纹理可被多个材质引用 ⇒ 拿它当分子会得到「缺失 3/57」这种跨单位读数。
       // 它只用来判定「缺的是必需贴图」与否（语义），数量取未就绪资源条数。
-      const notReady = resources.filter((r) => r.state !== 'ready' && r.state !== 'unrequested').length
-      if (bound.missingRequired > 0) {
-        writeTextureLive(`纹理缺失 ${notReady}/${total}`, 'missing', LOG_LEVEL.WARN)
-      } else if (notReady > 0) {
-        // 非必需贴图坏了：画面可显示，但「有失败」是事实，不得报成就绪。
-        writeTextureLive(`纹理失败 ${notReady}/${total}`, 'failed', LOG_LEVEL.ERROR)
-      } else {
+      //
+      // 「缺失范围可辨认」（SPEC §7.4）：计数之外再点名**哪几张**（有界：最多 2 条，单条截断到
+      // 28 字符）。locator 是给用户的取回位置（如 `gregtech:iconsets/GODFORGE_TRIM`），为空时
+      // 退回 assetId —— 绝不只报一个孤零零的数字让人去翻日志。
+      // 注意：这里**不早退** —— 下面的 `missingRequired` / `readyWithoutPixels` 诊断必须照旧上报。
+      const notReadyResources = resources.filter((r) => r.state !== 'ready' && r.state !== 'unrequested')
+      const notReady = notReadyResources.length
+      if (notReady === 0) {
         writeTextureLive(`纹理就绪 ${total}/${total}`, 'ready')
+      } else {
+        const named = notReadyResources
+          .slice(0, 2)
+          .map((r) => {
+            const s = r.locator.url !== '' ? r.locator.url : r.identity.id
+            return s.length > 28 ? `${s.slice(0, 27)}…` : s
+          })
+          .join(', ')
+        const suffix = `（${named}${notReady > 2 ? ' 等' : ''}）`
+        if (bound.missingRequired > 0) {
+          writeTextureLive(`纹理缺失 ${notReady}/${total}${suffix}`, 'missing', LOG_LEVEL.WARN)
+        } else {
+          // 非必需贴图坏了：画面可显示，但「有失败」是事实，不得报成就绪。
+          writeTextureLive(`纹理失败 ${notReady}/${total}${suffix}`, 'failed', LOG_LEVEL.ERROR)
+        }
       }
       // 未就绪的必需贴图是**真实事实**，必须可见（不得静默当"画好了"）。
       if (bound.missingRequired > 0) {

@@ -181,6 +181,11 @@ test.describe('#399 纹理异步期状态栏反馈（真实入口）', () => {
     expect(finalText, '终态不得停在加载中').not.toMatch(LOADING)
     expect(await textureState(page), '负对照的状态标签').toMatch(/^(missing|failed)$/)
     expect(await page.locator(STATUS_BAR).getAttribute('data-texture-loading-seen')).toBe('1')
+    // 「缺失范围必须可辨认」不止一个计数：坏掉那条的 locator 必须被点名。
+    const brokenLocator = firstMaterialLocator()
+    expect(norm(finalText), `终态必须点名缺失的那条资源（${brokenLocator}），而不只给一个数字`).toContain(
+      brokenLocator.slice(0, 20),
+    )
   })
 })
 
@@ -190,6 +195,14 @@ test.describe('#399 纹理异步期状态栏反馈（真实入口）', () => {
  * 为什么坏第一项：它是 materialPalette[0] 引用的贴图 ⇒ 绑定层会把它算成「必需且未就绪」，
  * 于是判据能同时证「坏一张只坏一张」与「缺失范围可辨认」。
  */
+/** 夹具里 materialPalette[0] 的 locator（负对照损坏的正是它引用的那张贴图）。 */
+function firstMaterialLocator(): string {
+  const inner = innerDocOf(fixturePath()) as unknown as { materialPalette: { locator?: string }[] }
+  const locator = inner.materialPalette[0]?.locator
+  expect(typeof locator === 'string' && locator.length > 0, '前提：materialPalette[0] 必须有 locator').toBe(true)
+  return locator as string
+}
+
 function brokenFirstBlobEnvelope(): Record<string, unknown> {
   const file = fixturePath()
   const raw = readJson(file)
