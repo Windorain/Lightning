@@ -218,12 +218,18 @@ interface PresentationSection {
   rows: readonly InspectorRow[]
 }
 
-/** 方块字段的呈现分组；属性 ID 与 `BLOCK_DECL` 的 local id 一一对应。 */
+/**
+ * 方块字段的呈现分组。
+ *
+ * ⚠️ 键是 `InspectorRow.localId` —— `editors/inspector#localIdOf` 取**第一个点之后**的整段
+ * （`'lightning.block.pos'` ⇒ `'block.pos'`），不是末段。B1 实测踩过：按末段分组会让
+ * 四个字段全部落到「其他」。
+ */
 const BLOCK_PRESENTATION: readonly { id: string; label: string; properties: readonly string[] }[] = [
-  { id: 'b1.identity', label: '身份', properties: ['id'] },
-  { id: 'b1.position', label: '坐标', properties: ['pos'] },
-  { id: 'b1.tooltip', label: '说明', properties: ['tooltip'] },
-  { id: 'b1.cell-tooltip', label: '单元格 Tooltip', properties: ['cellTooltip'] },
+  { id: 'b1.identity', label: '身份', properties: ['block.id'] },
+  { id: 'b1.position', label: '坐标', properties: ['block.pos'] },
+  { id: 'b1.tooltip', label: '说明', properties: ['block.tooltip'] },
+  { id: 'b1.cell-tooltip', label: '单元格 Tooltip', properties: ['block.cellTooltip'] },
 ]
 
 const presentationSections = computed<readonly PresentationSection[]>(() => {
@@ -355,8 +361,8 @@ void inject(contextKey, null)
   font-size: 10px;
   font-weight: 600;
   color: var(--wb-text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
+  /* 不经 text-transform：分组标题是中文文案（「单元格 Tooltip」），大写化会改写呈现文字。 */
+  letter-spacing: 0.4px;
   text-align: left;
   cursor: pointer;
 }
