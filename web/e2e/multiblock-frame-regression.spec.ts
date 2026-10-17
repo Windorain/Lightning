@@ -66,7 +66,7 @@ test.describe('T2.6 · 帧为主文档回归（帧播放 / 分层预览语义）
     expect(doc.channelCount).toBe(0)
     expect(doc.runstateCount).toBe(0)
     expect(doc.variantCount).toBe(0)
-    expect(doc.multiblockFrameCount).toBe(0)
+    expect(doc.multiblockSceneCount, '帧为主文档没有多方块场景声明').toBe(0)
     expect(doc.frameCount).toBe(FRAME_COUNT)
     expect(
       doc.frameGrids.map((f) => [f.d, f.h, f.w, f.solidCells]),

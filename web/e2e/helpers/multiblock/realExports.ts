@@ -1057,7 +1057,7 @@ export function realDeclarationViolations(doc: DocObservation, p: RealProduct): 
   cmp('变体数', doc.variantCount, p.variantKeys.length)
   cmp('差异规则条数', doc.ruleCount, p.ruleCount)
   cmp('帧数 = 变体数（一变体一帧）', doc.frameCount, p.variantKeys.length)
-  cmp('帧声明数', doc.multiblockFrameCount, p.variantKeys.length)
+  cmp('场景声明数', doc.multiblockSceneCount, p.variantKeys.length)
   cmp('并集调色板条目数', doc.blockPaletteSize, p.paletteSize)
   cmp('骨架 sizeChannel', doc.backbone?.sizeChannel ?? null, p.sizeChannel)
   cmp('骨架阶数', doc.backbone?.stepCount ?? null, p.steps.length)

@@ -236,6 +236,22 @@ interface PropertyQueries {
 - **不变量**：`PropertyValue` 不得是可变底层 TypedArray 的引用（#249 §5 明文
   "不能暴露可变底层 TypedArray"）。大批量几何查询提供只读批量投影或明确借用契约。
 
+### 2.2a 多方块「场景」不是时间轴（M5-1，2026-10-18 用户裁决）
+
+**必须成立**
+
+- 多方块文档的帧清单是**变体配置集合（场景，Scene）**：与时间轴无关、**永不参与播放**。
+  对应地，这类文档装配出的 `DocumentContent.frameAxis` **恒为空**（`frameCount() === 0`），
+  帧控制/播放控件不属于这种文档。
+- 播放/动画是**通用关键帧 + 插值**系统（`domain/animation`）；**场景切换 ≠ 动画**。
+- `KernelSession#channelValues()` 只投影**手动预览层**（`EditContext.channelValues`）：
+  不允许把场景清单合成为阶跃轨道叠在手动值上（那会让"普通基础值写入静默成功却不可见"，
+  违反 #249 §7 / 上表 `'effective'` 的语义边界）。将来若要驱动通道，必须走**显式关键帧**。
+- `durationMs` 在多方块文档里**不参与任何时间映射**（场景没有时长）；
+  旧实现"缺省 0 经 `stripTimeline` 归一为 1ms"的那条链已退役（它是断点①的帮凶）。
+- **文件格式的 `frames` 键不改**：适配器在边界上把它翻译成领域场景清单
+  （`adapters/files/multiblockDeclaration#sceneOf`），格式兼容与领域语义分离。
+
 ### 2.3 文档装载状态读面（GF-15，P10f A′ 新增；B′ 补消费入口；**R1-α 修正**）
 
 ```ts

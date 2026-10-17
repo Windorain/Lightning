@@ -220,11 +220,12 @@ export function declarationViolations(
   if (doc.ruleCount !== c.ruleCount) {
     v.push(`差异规则条数=${doc.ruleCount}，期望 ${c.ruleCount}`)
   }
-  if (doc.frameCount !== c.frameCount) {
-    v.push(`帧数=${doc.frameCount}，期望 ${c.frameCount}（一变体一帧）`)
+  // M5-1：多方块文档的帧清单是**场景**（变体配置集合），不是时间轴 ⇒ 内核帧轴恒 0。
+  if (doc.frameCount !== 0) {
+    v.push(`时间轴帧数=${doc.frameCount}，期望 0（场景不是时间轴）`)
   }
-  if (doc.multiblockFrameCount !== c.frameCount) {
-    v.push(`帧声明数=${doc.multiblockFrameCount}，期望 ${c.frameCount}`)
+  if (doc.multiblockSceneCount !== c.frameCount) {
+    v.push(`场景声明数=${doc.multiblockSceneCount}，期望 ${c.frameCount}（一变体一场景）`)
   }
   if (
     !doc.totalTierDomain ||

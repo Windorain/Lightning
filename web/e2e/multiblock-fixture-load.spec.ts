@@ -61,10 +61,14 @@ test.describe('T2.6 · 多方块 fixture 加载（公开观测点 vs 文件声�
 
       const injected = await injectSceneDocumentOk(page, fx.envelope, c.file)
       expect(injected.isMultiblock, `${c.file} 应被判别为多方块为主文档`).toBe(true)
-      expect(injected.frameCount, `${c.file} 帧数（一变体一帧）`).toBe(c.frameCount)
+      // M5-1（2026-10-18 用户裁决）：帧清单是**场景（变体配置集合）**，不是时间轴 ——
+      // 故内核帧轴为 0（没有可播放帧），而声明里的场景数仍是"一变体一场景"。
+      expect(injected.frameCount, `${c.file} 内核帧轴必须为 0（场景不参与播放）`).toBe(0)
 
       // ── 公开观测（原则 4）：RuntimeDocument 公开 getter ──
       const doc = await readDocObservation(page)
+      // 声明没有丢：全部场景仍在声明里（空帧轴 ≠ 丢内容）。
+      expect(doc.multiblockSceneCount, `${c.file} 声明的场景数（一变体一场景）`).toBe(c.frameCount)
 
       // 计划自检口径的三元组
       expect(
@@ -119,7 +123,7 @@ test.describe('T2.6 · 多方块 fixture 加载（公开观测点 vs 文件声�
     expect(doc.channelCount).toBe(0)
     expect(doc.runstateCount).toBe(0)
     expect(doc.variantCount).toBe(0)
-    expect(doc.multiblockFrameCount).toBe(0)
+    expect(doc.multiblockSceneCount).toBe(0)
     expect(doc.frameCount).toBe(1)
     // 帧为主文档的帧自带 grid（与多方块帧「grid 由装配产生」形成对照）
     expect(doc.frameGrids[0]?.present).toBe(true)
@@ -136,7 +140,7 @@ test.describe('T2.6 · 多方块 fixture 加载（公开观测点 vs 文件声�
       const empty = {
         hasDoc: false, docId: null, documentShape: null, isMultiblock: false, frameCount: 0,
         frameGrids: [], channelCount: 0, channels: [], runstateCount: 0, runstates: [],
-        variantCount: 0, ruleCount: 0, multiblockFrameCount: 0, totalTierDomain: null,
+        variantCount: 0, ruleCount: 0, multiblockSceneCount: 0, totalTierDomain: null,
         backbone: null, blockPaletteSize: 0, warnings: [], backboneMatchesSource: null,
         declarationMatchesSource: null, kernelSourceRoot: null,
         multiblockSourcePresent: false,

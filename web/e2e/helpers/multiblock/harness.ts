@@ -548,7 +548,8 @@ export interface DocObservation {
   runstates: RunstateObservation[]
   variantCount: number
   ruleCount: number
-  multiblockFrameCount: number
+  /** **场景数**（声明里的变体配置集合；M5-1 起领域叫 Scene，格式键仍是 `frames`）。 */
+  multiblockSceneCount: number
   totalTierDomain: { min: number; max: number; default: number | null } | null
   backbone: BackboneObservation | null
   blockPaletteSize: number
@@ -621,7 +622,7 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
         runstates: [],
         variantCount: 0,
         ruleCount: 0,
-        multiblockFrameCount: 0,
+        multiblockSceneCount: 0,
         totalTierDomain: null,
         backbone: null,
         blockPaletteSize: 0,
@@ -702,7 +703,8 @@ export async function readDocObservation(page: Page): Promise<DocObservation> {
       })),
       variantCount: decl?.variants?.length ?? 0,
       ruleCount: decl?.rules?.length ?? 0,
-      multiblockFrameCount: decl?.frames?.length ?? 0,
+      // 声明里的**场景**清单（内核声明字段 `scenes`；不是时间轴帧数）。
+      multiblockSceneCount: decl?.scenes?.length ?? 0,
       totalTierDomain: decl
         ? {
             min: decl.totalTierDomain.min,
