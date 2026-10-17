@@ -1244,21 +1244,14 @@ export class Context {
         frameObjects: evaluation.frameObjects,
       })
     }
-    // 缺装配面（测试夹具 / 未接线会话）：按 `scene.order` 的出现序推导帧对象 ——
-    // 与 `kernelGridObjectId` **同一条**取法，故"第 N 帧"两处同义。
-    const ids: string[] = []
-    for (const objectId of kernelDoc.scene.order) {
-      const obj = kernelDoc.scene.objects[objectId]
-      if (obj === undefined || obj.type !== 'block') continue
-      const data = kernelDoc.scene.data[obj.dataId]
-      if (data === undefined || data.payload.kind !== 'blockGrid') continue
-      ids.push(objectId)
-    }
-    return kernelRenderSourceFaceOf({
-      scene: kernelDoc.scene,
-      content: kernelDoc.content,
-      frameObjects: ids,
-    })
+    // **装配面缺席 ⇒ 本面缺席**（M5-2 退役）。
+    //
+    // 旧实现在此按 `scene.order` 的出现序**推导**帧对象，再拿**装载期场景**产定义面 ——
+    // 那正是断点②的"旧通路"：通道取值变化后仍会画装载期装配的网格，且这条回落
+    // 让"画面到底读哪份场景"永远有两个答案。生产里 `hasAdoptedContent()` 为真时
+    // 装配面必在场（`composition/documentLoad` 同一次装载里 `setAssemblyFace`），
+    // 故该分支是**兼容旁路**，按退役纪律同批删除（不留第二条画面源）。
+    return null
   }
 
   /**
