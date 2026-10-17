@@ -1,8 +1,8 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { BlockRef } from '@/context/selection'
 import {
-  createWorkbenchHoverAnnotationIdRef,
-  createWorkbenchHoverBlockRef,
+  createScreenHoverAnnotationIdRef,
+  createScreenHoverBlockRef,
 } from '@/runtime/hover/access'
 import type { InjectionKey } from 'vue'
 import { inject, provide } from 'vue'
@@ -1902,14 +1902,31 @@ export class Context {
   getLayerWorldY(): Ref<number> {
     return this.getSession().layerWorldY
   }
+  /**
+   * **全域悬停方块读面**（底栏读数 / 右栏检查器回落 / 属性目标解析）。
+   *
+   * ## M4-1（双区归属）改了什么
+   *
+   * 旧实现固定读**根区**（`createWorkbenchHoverBlockRef` 里写死
+   * `REGION.WORKBENCH_VIEWPORT`）⇒ 第二区悬停时底栏与检查器毫无读数
+   * （S0 域 1 缺口 ①）。"全域单例"读面不该属于某一个区，故现在读
+   * **最近写入过悬停的那个区**（见 `runtime/hover/access#createScreenHoverRegionRef`）。
+   *
+   * 单视口装配里屏幕只有一个会写悬停的区 ⇒ 行为与改动前**逐字一致**
+   * （M3-shell B1 的底栏 `data-hovered-cell` 判据不回潮）。
+   *
+   * 要读"某一个区自己的悬停"（例如该视口的悬停描边），用
+   * `createWorkbenchHoverBlockRef(this, regionId)` —— 不要用本读面。
+   */
   getHoveredBlock(): Ref<BlockRef | null> {
     if (this.isEmbed()) workbenchUnavailable('hoveredBlock')
-    this.workbenchHoverBlock ??= createWorkbenchHoverBlockRef(this)
+    this.workbenchHoverBlock ??= createScreenHoverBlockRef(this)
     return this.workbenchHoverBlock
   }
+  /** 全域悬停注解读面（与 {@link getHoveredBlock} 同一条"最近悬停区"规则）。 */
   getHoveredAnnotationId(): Ref<string | null> {
     if (this.isEmbed()) workbenchUnavailable('hoveredAnnotationId')
-    this.workbenchHoverAnnotation ??= createWorkbenchHoverAnnotationIdRef(this)
+    this.workbenchHoverAnnotation ??= createScreenHoverAnnotationIdRef(this)
     return this.workbenchHoverAnnotation
   }
 

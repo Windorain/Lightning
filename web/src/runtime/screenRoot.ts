@@ -12,7 +12,7 @@ import type {
 import { createViewerPreferences } from '@/viewer/preferences'
 import { readPersistedPanelWidths } from '@/workbench/layout/panelLayoutStorage'
 import { REGION, REGION_KEYMAP } from '@/runtime/regionIds'
-import { createViewportHoverState } from '@/runtime/hover'
+import { createHoverClock, createViewportHoverState, type HoverClock } from '@/runtime/hover'
 import type { ConnectionState, UIWorkspace, WorkbenchWorkspaceMode } from '@/runtime/types'
 import { createDocumentBindingRef } from '@/workbench/document/binding'
 
@@ -48,6 +48,12 @@ export class ScreenRoot {
   readonly popupRegions: RegionNode[]
   readonly layout: ScreenLayout
   session: WorkbenchSession | EmbedSession
+  /**
+   * **屏幕级悬停时钟**（M4-1）：同屏各 region 的悬停写入序号都从这里发放，
+   * 于是"最近悬停的是哪个区"可比较。`reindex()`（region 增删）也推进它 ——
+   * 全域悬停读面因此能看见"运行期新登记的第二区"。
+   */
+  readonly hoverClock: HoverClock
 
   private readonly _byId = new Map<string, RegionNode>()
   private readonly _byInputId = new Map<string, RegionNode>()
@@ -59,10 +65,12 @@ export class ScreenRoot {
     popupRegions: RegionNode[],
     session: WorkbenchSession | EmbedSession,
     layout?: Partial<{ leftWidth: number; rightWidth: number }>,
+    hoverClock?: HoverClock,
   ) {
     this.areas = areas
     this.popupRegions = popupRegions
     this.session = session
+    this.hoverClock = hoverClock ?? createHoverClock()
     this.layout = {
       leftWidth: ref(layout?.leftWidth ?? 220),
       rightWidth: ref(layout?.rightWidth ?? 300),
@@ -82,6 +90,9 @@ export class ScreenRoot {
       for (const r of a.regions) add(r)
     }
     for (const r of this.popupRegions) add(r)
+    // region 增删也是"可读面变了"：推进时钟让全域悬停读面重算
+    // （否则新登记的第二区第一次悬停不会唤醒已算过的 computed）。
+    this.hoverClock?.next()
   }
 
   region(regionId: string): RegionNode | undefined {
@@ -134,7 +145,7 @@ export class ScreenRoot {
       state: {
         // 每个视口**自己的** viewer 偏好实例：共享会让"关掉 A 的注解显示"改到 B。
         viewer: createViewerPreferences(`lightning.prefs.viewport.${regionId}`),
-        hover: createViewportHoverState(),
+        hover: createViewportHoverState(this.hoverClock),
       },
     })
     const area = this.areas.find((a) => a.spaceType === SpaceType.VIEW_3D)
@@ -234,6 +245,8 @@ export function createWorkbenchScreenRoot(
   },
 ): ScreenRoot {
   const session = createWorkbenchSession()
+  /** 本屏的悬停时钟（同屏各 region 共用；见 `ScreenRoot#hoverClock`）。 */
+  const hoverClock = createHoverClock()
 
   const areas: AreaNode[] = [
     {
@@ -252,7 +265,7 @@ export function createWorkbenchScreenRoot(
           keymapId: REGION_KEYMAP.WORKBENCH_VIEWPORT,
           state: {
             viewer: createViewerPreferences('lightning.prefs.viewport'),
-            hover: createViewportHoverState(),
+            hover: createViewportHoverState(hoverClock),
           },
         }),
       ],
@@ -273,7 +286,7 @@ export function createWorkbenchScreenRoot(
   const wikiPreview = createRegionNode(REGION.WIKI_PREVIEW, RegionType.MAIN, {
     wmInputId: REGION.WIKI_PREVIEW,
     keymapId: REGION_KEYMAP.EMBED_VIEWPORT,
-    state: { viewer: createViewerPreferences('lightning.prefs.wiki-preview'), hover: createViewportHoverState() },
+    state: { viewer: createViewerPreferences('lightning.prefs.wiki-preview'), hover: createViewportHoverState(hoverClock) },
   })
   wikiPreview.visible = false
 
@@ -281,7 +294,7 @@ export function createWorkbenchScreenRoot(
   return new ScreenRoot('workbench', { width: 1400, height: 800 }, areas, [wikiPreview], session, {
     leftWidth,
     rightWidth,
-  })
+  }, hoverClock)
 }
 
 /** Embed：单 Region 退化树 */
@@ -292,6 +305,7 @@ export function createEmbedScreenRoot(
   },
 ): ScreenRoot {
   const session = createEmbedSession(extras)
+  const hoverClock = createHoverClock()
   const areas: AreaNode[] = [
     {
       id: 'embed-area',
@@ -302,10 +316,10 @@ export function createEmbedScreenRoot(
         createRegionNode(REGION.EMBED, RegionType.MAIN, {
           wmInputId: REGION.EMBED,
           keymapId: REGION_KEYMAP.EMBED_VIEWPORT,
-          state: { tool, viewer: createViewerPreferences('lightning.prefs.embed'), hover: createViewportHoverState() },
+          state: { tool, viewer: createViewerPreferences('lightning.prefs.embed'), hover: createViewportHoverState(hoverClock) },
         }),
       ],
     },
   ]
-  return new ScreenRoot('embed', { width: 800, height: 600 }, areas, [], session)
+  return new ScreenRoot('embed', { width: 800, height: 600 }, areas, [], session, undefined, hoverClock)
 }

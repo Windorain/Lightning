@@ -17,6 +17,7 @@ import type { ToolContext } from '@/workbench/tools/tool'
 import { pickVoxel, pickAll, getCurrentFrame, gridCenterWorld, getBlockGeometry, getPartMaskGeometry } from '@/context/queries'
 import ToolHintsBar from '@/workbench/ux/ToolHintsBar.vue'
 import type { ToolHint } from '@/workbench/tools/tool'
+import { createWorkbenchHoverBlockRef } from '@/runtime/hover/access'
 
 const ctx = useContext()
 const host = inject(hostKey)! as WorkbenchHost
@@ -74,6 +75,18 @@ const {
   layerPreviewMode, layerPreviewLabel, gridHeight,
   hasWorldMultiFrame, worldFrameCount,
 } = drwComputed
+
+/**
+ * **本视口自己的悬停描边目标**（M4-1 双区归属）。
+ *
+ * 旧写法是 `ctx.getHoveredBlock()`，而该读面当时写死根区 ⇒ 每个视口的描边都画
+ * 根区的悬停格（B 区悬停时 A 的格子亮、A 区悬停时两区同时亮）。region 是悬停状态
+ * 的键（`handlers/hoverHandler` 按 region 写），读面必须同键。
+ *
+ * 悬停的**非呈现**读面（底栏/检查器）走的是 `ctx.getHoveredBlock()` 的
+ * "最近悬停区"规则 —— 两者分工是"本区描边"与"全域读数"，不是同一件事。
+ */
+const regionHoveredBlock = createWorkbenchHoverBlockRef(ctx, VIEWPORT_REGION_ID)
 
 // ---- Hover（region.state.hover + 统一 HOVER handler）----
 //
@@ -183,7 +196,7 @@ async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void>
     },
     selectionOutline: {
       selectionItems: selection.items,
-      hoveredBlock: ctx.getHoveredBlock(),
+      hoveredBlock: regionHoveredBlock,
       highlightOnHover: computed(() => prefs!.highlightOnHover),
       getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
       gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
