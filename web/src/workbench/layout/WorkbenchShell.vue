@@ -41,9 +41,14 @@ import { usePanelResize } from './panelResize'
 
 const ctx = useContext()
 const shell = useShell()
-const { rightWidth, startRightDrag, dragging } = usePanelResize(ctx)
+const { leftWidth, rightWidth, startLeftDrag, startRightDrag, dragging } = usePanelResize(ctx)
 const slots = useSlots()
 const hasProperties = () => !!slots.properties
+/**
+ * 左栏（工具架）是否存在 —— 与右栏同一口径：看父级**是否传了 slot**。
+ * Wiki 工作区与折叠态由父级的 `v-if` 决定，外壳不重复判定。
+ */
+const hasToolShelf = () => !!slots['tool-shelf']
 /**
  * 固定布局（不可调整 Area 布局）的外壳填满宿主容器；可调整布局的用 `100vh`。
  * 判据来自**装配结果**（`shellLayouts.adjustableLayout`），不是宿主名。
@@ -71,8 +76,30 @@ const fillsHost = !shell.adjustableLayout
     </nav>
 
     <div class="wb-main">
-      <main class="wb-viewport" :data-wm-region="REGION.WORKBENCH_VIEWPORT">
+      <!--
+        左栏（工具架）：B1 起是**真左栏**，不再是视口内的绝对定位浮层。
+        `data-wm-region` 让指针命中读到 `r-toolshelf`（该 region 早已在
+        `runtime/regionIds` 声明，此前无 DOM 宿主 ⇒ hitTest 永不返回它）。
+      -->
+      <aside
+        v-if="hasToolShelf()"
+        class="wb-leftbar"
+        :data-wm-region="REGION.WORKBENCH_TOOLSHELF"
+        :style="{ width: `${leftWidth}px` }"
+      >
         <slot name="tool-shelf" />
+      </aside>
+
+      <div
+        v-if="hasToolShelf()"
+        class="wb-divider wb-divider--left"
+        @pointerdown="startLeftDrag"
+        role="separator"
+        aria-orientation="vertical"
+        tabindex="-1"
+      />
+
+      <main class="wb-viewport" :data-wm-region="REGION.WORKBENCH_VIEWPORT">
         <slot name="viewport" />
       </main>
 
@@ -143,6 +170,15 @@ const fillsHost = !shell.adjustableLayout
   min-height: 0;
   display: flex;
   overflow: hidden;
+}
+
+/* 左栏（工具架）。不设 overflow：工具架的分组浮层（`.tg-flyout`）要越过本栏
+   边界展开；设 overflow-y:auto 会把 x 轴一并裁剪（CSS 规定 visible+auto ⇒ auto）。 */
+.wb-leftbar {
+  flex-shrink: 0;
+  overflow: visible;
+  background: var(--wb-bg-elevated);
+  border-right: 1px solid var(--wb-border);
 }
 
 .wb-divider {

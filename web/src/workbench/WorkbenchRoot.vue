@@ -537,57 +537,18 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
 </template>
 
 <style scoped>
+/* 工具架：B1 起是左栏内的**静态流式**布局，不再是视口内的绝对定位浮层
+   （旧样式 position:absolute/top:4/left:4/z-index:100 已删）。左栏的背景与
+   右侧边界由 WorkbenchShell 的 .wb-leftbar 提供。 */
 .wb-toolshelf {
-  position: absolute; top: 4px; left: 4px; z-index: 100;
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 4px;
-  background: var(--wb-bg-elevated);
-  border: 1px solid var(--wb-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-}
-.wb-toolshelf :deep(.ux-operator-btn) {
-  width: 34px; height: 34px; padding: 0;
-  font-size: 16px; line-height: 1;
-  display: flex; align-items: center; justify-content: center;
-  border-color: transparent;
-  background: transparent;
-  color: var(--wb-text-muted);
-  border-radius: var(--wb-radius-md);
-}
-.wb-toolshelf :deep(.ux-operator-btn:hover) {
-  background: var(--wb-bg-hover);
-  border-color: var(--wb-border);
-}
-.wb-toolshelf :deep(.ux-operator-btn--active) {
-  background: var(--wb-bg-hover);
-  border-color: var(--wb-accent);
-  box-shadow: 0 0 10px rgba(77, 171, 247, 0.2);
-}
-.wb-toolshelf :deep(.ux-operator-btn--active:hover) {
-  background: var(--wb-bg-hover);
-  border-color: var(--wb-accent);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 4px;
 }
 .wb-menubar-inner {
   display: flex;
   align-items: center;
   height: 100%;
   padding: 0 10px;
-}
-.wb-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--wb-text);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  margin-right: 24px;
-  user-select: none;
-  flex-shrink: 0;
-}
-.wb-brand-icon {
-  color: var(--wb-accent);
 }
 .wb-menubar-inner :deep(.ux-menu-btn) {
   border: none;
@@ -633,10 +594,6 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
     linear-gradient(var(--wb-grid-color) 1px, transparent 1px),
     linear-gradient(90deg, var(--wb-grid-color) 1px, transparent 1px);
   background-size: 32px 32px;
-}
-.wb-wiki-placeholder {
-  color: var(--wb-text-dim);
-  font-size: 15px;
 }
 </style>
 
