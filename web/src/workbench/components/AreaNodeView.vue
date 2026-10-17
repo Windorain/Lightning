@@ -61,12 +61,22 @@ function componentFor(editorType: string): Component | null {
 </script>
 
 <template>
-  <!-- ── 叶子：一个 Area ⇒ 一个显式生命周期宿主 ── -->
+  <!--
+    ── 叶子：一个 Area ⇒ 一个显式生命周期宿主 ──
+
+    `@pointerdown.capture`（M4-1）：**捕获阶段**在叶子根上设"最后操作的区"。
+    捕获阶段 = 事件在到达 canvas / 面板 / 工具架之前先经过这里，于是无论用户
+    点的是视口画面还是该区的下方面板，活动区都跟着指针走；用冒泡则会被
+    canvas 上"恰好 stopPropagation"的处理链截断（那正是"点了 B 却切了 A"的形态）。
+
+    它只写 `useAreaHost#setActive`（唯一写点），不做任何布局决定。
+  -->
   <div
     v-if="area"
     class="area-node area-node--leaf"
     :data-area-id="area.id"
     :data-wm-region="ctx.regionIdFor(area.id)"
+    @pointerdown.capture="ctx.onActivateArea(area.id)"
   >
     <AreaHost
       :area-id="area.id"

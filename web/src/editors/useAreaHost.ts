@@ -250,8 +250,17 @@ export function useAreaHost(options: UseAreaHostOptions): AreaHostApi {
     return Object.freeze({ ok: true })
   }
 
+  /**
+   * 设活动 Area（**唯一写点**；M4-1 起随指针写入，见 `AreaNodeView` 的捕获监听）。
+   *
+   * 已是活动区时**不重写** `workspace`：本方法现在会被每一次 pointerdown 调用
+   * （"最后操作的区"就是这么来的），无谓地替换工作区值会让布局树的所有
+   * `computed`（`areaIds`/`areas`）在每次点击时失效重算 —— 那是纯开销，
+   * 且容易与"布局真的变了"混为一谈。
+   */
   function setActive(areaId: AreaId): void {
     if (!findArea(workspace.value.layout, areaId)) return
+    if (workspace.value.activeAreaId === areaId) return
     workspace.value = Object.freeze({ ...workspace.value, activeAreaId: areaId })
   }
 

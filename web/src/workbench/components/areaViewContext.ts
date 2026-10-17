@@ -42,6 +42,17 @@ export interface AreaViewContext {
   onInstanceClose(payload: { areaId: string }): void
   /** 资源账本异常（漏还/过度释放）。 */
   onLifecycleError(payload: { areaId: string; reason: string; detail: unknown }): void
+  /**
+   * **把该 Area 设为"最后操作的区"**（M4-1）。
+   *
+   * 布局命令（分割/合并/切类型）的目标解析读活动 Area
+   * （`operators/builtin/areaOperators#resolveAreaId`）。旧实现只有分割/合并
+   * 算子自己写它 ⇒ 菜单命令永远作用在"上一次被算子选中的那个区"，
+   * 与用户刚点的视口无关（S0 域 1 缺口 ③）。
+   *
+   * 由叶子的 `pointerdown`（捕获阶段，事件首站）调用 —— 见 `AreaNodeView`。
+   */
+  onActivateArea(areaId: string): void
 }
 
 export const AREA_VIEW_CONTEXT: InjectionKey<AreaViewContext> = Symbol('areaViewContext')

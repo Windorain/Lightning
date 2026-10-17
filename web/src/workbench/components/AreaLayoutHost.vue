@@ -174,6 +174,14 @@ const viewContext: AreaViewContext = {
   onInstanceOpen: (p) => host.bindInstance(p.areaId, p.instanceId),
   onInstanceClose: (p) => host.bindInstance(p.areaId, null),
   onLifecycleError: (p) => ctx.log.warn('Area 生命周期', `${p.reason} @ ${p.areaId}`, p.detail),
+  /**
+   * **活动 Area 随指针**（M4-1）：任何区被按下 ⇒ 它成为"最后操作的区"，
+   * 于是菜单里的分割/合并/切类型作用于用户刚点的那个区（而不是 `useAreaHost`
+   * 里那个只有算子才写的旧值）。
+   *
+   * 写入点仍是 `useAreaHost#setActive`（唯一）；这里只做接线，不做决定。
+   */
+  onActivateArea: (areaId) => host.setActive(areaId),
 }
 provide(AREA_VIEW_CONTEXT, viewContext)
 
