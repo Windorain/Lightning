@@ -2,10 +2,10 @@
   "format_version": "2.0",
   "id": "e2e-texture-strip",
   "meta": {
-    "name": "E2E Texture Strip",
+    "name": "E2E Texture Strip (animated)",
     "author": "",
     "created_at_ms": 0,
-    "description": "",
+    "description": "M5-3 纹理时间夹具：3×3×3 实心网格 + 16×64 四色竖条（帧 0 顶）+ mcmeta 声明",
     "tags": [],
     "origin": {
       "x": 0,
@@ -84,7 +84,7 @@
             "tooltip": []
           },
           {
-            "registryId": "minecraft:gold_ore",
+            "registryId": "tectech:gt.godforgecasing",
             "meta": 0,
             "renderMode": "BakedQuads",
             "geometry": {
@@ -98,45 +98,18 @@
                       "y": 0,
                       "z": 1,
                       "u": 0,
-                      "v": 0,
-                      "color": 16777215
-                    },
-                    {
-                      "x": 1,
-                      "y": 0,
-                      "z": 1,
-                      "u": 1,
-                      "v": 0,
-                      "color": 16777215
-                    },
-                    {
-                      "x": 1,
-                      "y": 1,
-                      "z": 1,
-                      "u": 1,
                       "v": 1,
-                      "color": 16777215
+                      "brightness": 14680064,
+                      "color": -8421505
                     },
-                    {
-                      "x": 0,
-                      "y": 1,
-                      "z": 1,
-                      "u": 0,
-                      "v": 1,
-                      "color": 16777215
-                    }
-                  ]
-                },
-                {
-                  "materialIndex": 0,
-                  "vertices": [
                     {
                       "x": 0,
                       "y": 0,
                       "z": 0,
                       "u": 0,
                       "v": 0,
-                      "color": 16777215
+                      "brightness": 14680064,
+                      "color": -8421505
                     },
                     {
                       "x": 1,
@@ -144,7 +117,8 @@
                       "z": 0,
                       "u": 1,
                       "v": 0,
-                      "color": 16777215
+                      "brightness": 14680064,
+                      "color": -8421505
                     },
                     {
                       "x": 1,
@@ -152,15 +126,8 @@
                       "z": 1,
                       "u": 1,
                       "v": 1,
-                      "color": 16777215
-                    },
-                    {
-                      "x": 0,
-                      "y": 0,
-                      "z": 1,
-                      "u": 0,
-                      "v": 1,
-                      "color": 16777215
+                      "brightness": 14680064,
+                      "color": -8421505
                     }
                   ]
                 },
@@ -169,11 +136,12 @@
                   "vertices": [
                     {
                       "x": 1,
-                      "y": 0,
-                      "z": 0,
-                      "u": 0,
-                      "v": 0,
-                      "color": 16777215
+                      "y": 1,
+                      "z": 1,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -1
                     },
                     {
                       "x": 1,
@@ -181,60 +149,26 @@
                       "z": 0,
                       "u": 1,
                       "v": 0,
-                      "color": 16777215
-                    },
-                    {
-                      "x": 1,
-                      "y": 1,
-                      "z": 1,
-                      "u": 1,
-                      "v": 1,
-                      "color": 16777215
-                    },
-                    {
-                      "x": 1,
-                      "y": 0,
-                      "z": 1,
-                      "u": 0,
-                      "v": 1,
-                      "color": 16777215
-                    }
-                  ]
-                },
-                {
-                  "materialIndex": 0,
-                  "vertices": [
-                    {
-                      "x": 0,
-                      "y": 0,
-                      "z": 0,
-                      "u": 0,
-                      "v": 0,
-                      "color": 16777215
+                      "brightness": 15728640,
+                      "color": -1
                     },
                     {
                       "x": 0,
                       "y": 1,
                       "z": 0,
-                      "u": 1,
+                      "u": 0,
                       "v": 0,
-                      "color": 16777215
+                      "brightness": 15728640,
+                      "color": -1
                     },
                     {
                       "x": 0,
                       "y": 1,
                       "z": 1,
-                      "u": 1,
-                      "v": 1,
-                      "color": 16777215
-                    },
-                    {
-                      "x": 0,
-                      "y": 0,
-                      "z": 1,
                       "u": 0,
                       "v": 1,
-                      "color": 16777215
+                      "brightness": 15728640,
+                      "color": -1
                     }
                   ]
                 },
@@ -245,9 +179,142 @@
                       "x": 0,
                       "y": 1,
                       "z": 0,
+                      "u": 1,
+                      "v": 0,
+                      "brightness": 15728640,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 1,
+                      "y": 1,
+                      "z": 0,
                       "u": 0,
                       "v": 0,
-                      "color": 16777215
+                      "brightness": 15728640,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 0,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 0,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -3355444
+                    }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    {
+                      "x": 0,
+                      "y": 1,
+                      "z": 1,
+                      "u": 0,
+                      "v": 0,
+                      "brightness": 0,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 1,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 0,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 1,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 0,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 1,
+                      "y": 1,
+                      "z": 1,
+                      "u": 1,
+                      "v": 0,
+                      "brightness": 0,
+                      "color": -3355444
+                    }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    {
+                      "x": 0,
+                      "y": 1,
+                      "z": 1,
+                      "u": 1,
+                      "v": 0,
+                      "brightness": 15728640,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 0,
+                      "y": 1,
+                      "z": 0,
+                      "u": 0,
+                      "v": 0,
+                      "brightness": 15728640,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 0,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 1,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -6710887
+                    }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 1,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 0,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 0,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 0,
+                      "color": -6710887
                     },
                     {
                       "x": 1,
@@ -255,23 +322,17 @@
                       "z": 0,
                       "u": 1,
                       "v": 0,
-                      "color": 16777215
+                      "brightness": 0,
+                      "color": -6710887
                     },
                     {
                       "x": 1,
                       "y": 1,
                       "z": 1,
-                      "u": 1,
-                      "v": 1,
-                      "color": 16777215
-                    },
-                    {
-                      "x": 0,
-                      "y": 1,
-                      "z": 1,
                       "u": 0,
-                      "v": 1,
-                      "color": 16777215
+                      "v": 0,
+                      "brightness": 0,
+                      "color": -6710887
                     }
                   ]
                 }
@@ -292,6 +353,7 @@
     {
       "textureBlobIndex": 0,
       "kind": "animated",
+      "blend": "opaque",
       "animation": {
         "defaultFrametimeTicks": 2,
         "frameSequence": [
