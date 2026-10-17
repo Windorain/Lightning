@@ -418,7 +418,7 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
         <WorkspaceTabs :model-value="workspace" @update:model-value="workspace = $event" />
       </template>
       <template v-if="workspace !== 'wiki' && !toolshelfCollapsed" #tool-shelf>
-        <div class="wb-toolshelf">
+        <div class="wb-toolshelf" :data-wm-region="REGION.WORKBENCH_TOOLSHELF">
           <template v-for="panel in activeToolshelfPanels" :key="panel.id">
             <component v-if="panel.component" :is="panel.component" :ctx="ctx" />
             <ReadonlyLayout
@@ -537,12 +537,19 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
 </template>
 
 <style scoped>
-/* 工具架：B1 起是左栏内的**静态流式**布局，不再是视口内的绝对定位浮层
-   （旧样式 position:absolute/top:4/left:4/z-index:100 已删）。左栏的背景与
-   右侧边界由 WorkbenchShell 的 .wb-leftbar 提供。 */
+/* 工具架 = 编辑视口 Area 内的**悬浮 Region**（用户裁决 2026-10-17）：
+   position:absolute 浮在视口左上，不占布局流、不挤压 canvas。
+   `data-wm-region="r-toolshelf"` 落在本元素上（见模板），于是指针命中的是
+   「工具架」而不是整条视口条带 —— 这正是 `runtime/regionIds.ts:4` 声明了
+   却一直无 DOM 宿主的缺口。 */
 .wb-toolshelf {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 6px 4px;
+  position: absolute; top: 4px; left: 4px; z-index: 100;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 4px;
+  background: var(--wb-bg-elevated);
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
 .wb-menubar-inner {
   display: flex;
