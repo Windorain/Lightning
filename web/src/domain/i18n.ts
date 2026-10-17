@@ -59,6 +59,11 @@ const DICT: Readonly<Record<string, Readonly<Record<Lang, string>>>> = {
   'chinese': { zh: '中文', en: '中文' },
   'english': { zh: 'English', en: 'English' },
   'resetLayout': { zh: '重置布局', en: 'Reset Layout' },
+  // M3-shell B1：菜单正式化的新标签。键位提示写**实际绑定**（inputHotkeys：Ctrl+Z / Ctrl+Shift+Z），
+  // 不是设计简报里笔误的 Ctrl+Y —— 见 B1 回报的偏差项。
+  'undo': { zh: '撤销 (Ctrl+Z)', en: 'Undo (Ctrl+Z)' },
+  'redo': { zh: '重做 (Ctrl+Shift+Z)', en: 'Redo (Ctrl+Shift+Z)' },
+  'toggleTheme': { zh: '切换主题', en: 'Toggle Theme' },
   'fullscreen': { zh: '全屏', en: 'Fullscreen' },
   'exitFullscreen': { zh: '退出全屏', en: 'Exit fullscreen' },
   'preview': { zh: '编辑', en: 'Edit' },

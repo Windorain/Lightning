@@ -25,14 +25,20 @@ export const menuBarPanel: PanelDeclaration = {
     const wikiUi = ctx.wm.chrome.wikiUi
     const wikiFileOps = wikiHost && (wikiUi?.mwReady.value ?? isWikiApiAvailable())
 
+    // M3-shell B1：文件菜单按 Blender 式分组定序 ——
+    //   [新建] ─ [打开场景… / 打开工程…] ─ [保存工程 / 保存到文件]
+    // 只加分隔符与顺序；**项文案与 operator id 一字未改**（8 份 saveReopen 判据按文案定位）。
+    // wiki 宿主的追加逻辑（含其前置分隔符）保持原样：那是另一条文档来源的分组。
     const fileItems: (UIOperator | UILabel | UISeparator)[] = [
       { kind: 'operator', id: 'OPERATOR_NEW_SCENE', label: t('newFile') },
+      { kind: 'separator' },
       { kind: 'operator', id: 'OPERATOR_OPEN_SCENE', label: t('openScene') },
       // R1-α（#387）：工程格式的生产开/存入口。
       // `poll` 让"打开工程"永远可用、"保存工程"只在**内核装配成功**时可用
       // （工程格式编码的是内核文档 —— 未装配时没有可编码的权威，
       // 让菜单项可点会在点击后静默失败）。
       { kind: 'operator', id: 'OPERATOR_OPEN_PROJECT', label: t('openProject') },
+      { kind: 'separator' },
       { kind: 'operator', id: 'OPERATOR_SAVE_PROJECT', label: t('saveProject') },
     ]
     if (wikiFileOps) {
@@ -44,7 +50,6 @@ export const menuBarPanel: PanelDeclaration = {
       )
     } else if (!wikiHost) {
       fileItems.push(
-        { kind: 'separator' },
         { kind: 'operator', id: 'OPERATOR_SAVE_FILE', label: t('saveToFile') },
       )
     }
@@ -64,6 +69,13 @@ export const menuBarPanel: PanelDeclaration = {
           kind: 'menu',
           label: t('edit'),
           items: [
+            // M3-shell B1：撤销/重做接到**既有** operator（注册表里两者都有，
+            // `poll` 读内核撤销读面 `ctx.kernelUndoState()` —— 没有可撤销项时
+            // invoke 会被 poll 拒绝为 CANCELLED，不静默改文档）。
+            // 键位提示写**实际绑定**：`workbench/inputHotkeys` 是 Ctrl+Z / Ctrl+Shift+Z。
+            { kind: 'operator', id: 'OPERATOR_UNDO', label: t('undo') },
+            { kind: 'operator', id: 'OPERATOR_REDO', label: t('redo') },
+            { kind: 'separator' },
             { kind: 'label', text: t('language') },
             {
               kind: 'operator', id: 'OPERATOR_SET_LANGUAGE',
@@ -90,20 +102,18 @@ export const menuBarPanel: PanelDeclaration = {
             { kind: 'operator', id: 'OPERATOR_AREA_MERGE', label: lang === 'zh' ? '合并区域' : 'Merge Area' },
             { kind: 'separator' },
             { kind: 'operator', id: 'OPERATOR_RESET_LAYOUT', label: t('resetLayout') },
+            // M3-shell B1：主题切换从顶栏右侧的独立 ☀ 项挪进视图菜单尾（菜单正式化）。
+            // 只换**呈现位置**：operator id / 行为 / 持久化一律不变。
+            { kind: 'separator' },
+            { kind: 'operator', id: 'OPERATOR_TOGGLE_THEME', label: t('toggleTheme'), icon: '☀' },
           ],
         },
         // Help — disabled label, no dropdown
         { kind: 'label', text: t('help') },
         // Spacer — pushes right-side items to the end via UI flex styles
         { kind: 'label', text: '' },
-        // Theme toggle
-        {
-          kind: 'operator',
-          id: 'OPERATOR_TOGGLE_THEME',
-          label: '☀',
-          title: lang === 'zh' ? '切换主题' : 'Toggle Theme',
-        },
         // 连接状态（Wiki 状态见 MenubarWikiStatus 组件）
+        // M3-shell B1：顶栏右侧不再渲染主题项（已挪进视图菜单尾）。
         ...(wikiHost
           ? []
           : [
