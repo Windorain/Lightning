@@ -29,7 +29,7 @@
  * desktop-only：顶栏设置入口与抽屉是桌面工作台布局（窄视口下不在同一屏）。
  */
 
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import {
   CHANNEL_TAB,
   channelSlider,
@@ -58,6 +58,82 @@ const CONTRACT_FILE = 'multiblock-ebf-2ch.json'
 /** 初始组合：tt=声明默认 2、通道全 Not set（面板/渲染的初始态）。 */
 const INITIAL_KEY = 'height:0|coil:0|glass:0|tt:2|runstate:idle'
 
+/**
+ * 真实入口一步加载内置样例（顶栏设置 → 抽屉 → 内置示例 → 加载到工作台 → 关闭抽屉）。
+ *
+ * 两条判据共用：①功能面（滑杆改画面）；②手测面（1440×900 下全部通道可达）。
+ * 抽出来是为了让"入口步骤"只有一处实现 —— 两条判据若各写一遍，入口一改就会漂移。
+ */
+async function openBuiltinSample(page: Page): Promise<void> {
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const drawer = page.locator('.drawer-panel')
+  await expect(drawer, '设置抽屉必须能从顶栏打开（M5-5 恢复的入口）').toBeVisible()
+  await drawer.getByRole('button', { name: '内置示例', exact: true }).click()
+
+  const sceneSelect = drawer.locator('select')
+  const sampleOption = sceneSelect.locator(`option[value="${SAMPLE_SCENE_ID}"]`)
+  await expect(sampleOption, '内置示例列表必须包含多方块样例（按产品名呈现）').toHaveText(SAMPLE_DISPLAY_NAME)
+  await sceneSelect.selectOption(SAMPLE_SCENE_ID)
+  await drawer.getByRole('button', { name: '加载到工作台' }).click()
+
+  await waitForDocLoaded(page)
+  await waitForViewportMounted(page)
+  await waitForRenderedGrid(page)
+  // 抽屉是遮罩式：后续要在工作区里操作，先关掉。
+  await drawer.getByRole('button', { name: '关闭' }).click()
+  await expect(drawer).toBeHidden()
+}
+
+/** 面板几何观测（P4 手测阻断的判据面）：面板盒 + 每条滑杆的**屏幕盒**。 */
+interface PanelSliderGeometry {
+  readonly key: string
+  readonly top: number
+  readonly bottom: number
+  readonly left: number
+  readonly right: number
+  readonly height: number
+}
+
+interface PanelGeometry {
+  readonly innerWidth: number
+  readonly innerHeight: number
+  readonly panel: {
+    readonly top: number
+    readonly bottom: number
+    readonly height: number
+    readonly clientHeight: number
+    readonly scrollHeight: number
+  } | null
+  readonly sliders: readonly PanelSliderGeometry[]
+}
+
+async function readPanelGeometry(page: Page): Promise<PanelGeometry> {
+  return await page.evaluate(() => {
+    const panel = document.querySelector('[data-dock-panel="channels"]') as HTMLElement | null
+    const pr = panel?.getBoundingClientRect()
+    const sliders = [...document.querySelectorAll('input[data-mb-channel]')].map((el) => {
+      const r = (el as HTMLElement).getBoundingClientRect()
+      return {
+        key: el.getAttribute('data-mb-channel') ?? '',
+        top: r.top, bottom: r.bottom, left: r.left, right: r.right,
+        height: r.height,
+      }
+    })
+    return {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      panel:
+        pr === undefined
+          ? null
+          : {
+              top: pr.top, bottom: pr.bottom, height: pr.height,
+              clientHeight: panel!.clientHeight, scrollHeight: panel!.scrollHeight,
+            },
+      sliders,
+    }
+  })
+}
+
 test.describe('M5-5 · 内置多方块样例（真实入口 → 通道面板 → 滑杆改画面）', () => {
   test('设置 → 内置示例 → 加载：通道 tab / 面板条数 / 滑杆改变渲染定义（逐格 = 参考）', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', '真实入口手测面固定在 desktop-chrome')
@@ -68,23 +144,7 @@ test.describe('M5-5 · 内置多方块样例（真实入口 → 通道面板 →
     await gotoWorkbench(page)
 
     // ── 1. 真实入口：顶栏「设置」→ 抽屉 → 内置示例 ───────────────────────────
-    await page.getByRole('button', { name: '设置', exact: true }).click()
-    const drawer = page.locator('.drawer-panel')
-    await expect(drawer, '设置抽屉必须能从顶栏打开（M5-5 恢复的入口）').toBeVisible()
-    await drawer.getByRole('button', { name: '内置示例', exact: true }).click()
-
-    const sceneSelect = drawer.locator('select')
-    const sampleOption = sceneSelect.locator(`option[value="${SAMPLE_SCENE_ID}"]`)
-    await expect(sampleOption, '内置示例列表必须包含多方块样例（按产品名呈现）').toHaveText(SAMPLE_DISPLAY_NAME)
-    await sceneSelect.selectOption(SAMPLE_SCENE_ID)
-    await drawer.getByRole('button', { name: '加载到工作台' }).click()
-
-    await waitForDocLoaded(page)
-    await waitForViewportMounted(page)
-    await waitForRenderedGrid(page)
-    // 抽屉是遮罩式：后续要在工作区里操作，先关掉。
-    await drawer.getByRole('button', { name: '关闭' }).click()
-    await expect(drawer).toBeHidden()
+    await openBuiltinSample(page)
 
     // ── 2. 通道 tab + 面板条数 = 文件声明 ────────────────────────────────────
     await expect(page.locator(CHANNEL_TAB), '多方块文档必须出现「通道」tab').toBeVisible()
@@ -149,4 +209,97 @@ test.describe('M5-5 · 内置多方块样例（真实入口 → 通道面板 →
         `逐格 = 参考（初始 ${INITIAL_KEY}、目标 ${targetKey}）`,
     )
   })
-})
+  /**
+   * **P4 手测阻断（M5-2 打回）**：1440×900 下通道面板被裁 —— 只露 Tier/Height，
+   * Coil/Glass 落在面板外且页面底边也裁（实测：面板 computed height = 40px，
+   * 命中主题规则 `.vp-dock--workbench .vp-dock__panel { height: 40px }`，
+   * 而通道覆盖规则是单类选择器、压不过它；scrollHeight 90 > clientHeight 40）。
+   *
+   * 判据刻意**不**用 `scrollIntoViewIfNeeded`（那会把裁剪掩盖成"可达"）：
+   *  1. 每条声明通道滑杆的**几何盒**完整落在面板盒与窗口内（不需要滚动）；
+   *  2. 面板内容不依赖滚动（scrollHeight ≤ clientHeight）；
+   *  3. 滑杆中点用**裸鼠标坐标**点击：命中测试必须是滑杆本身，且模型真的变。
+   */
+  test('1440×900 / 1600×1200：声明的全部通道滑杆在面板/视口内可达且可交互（手测阻断回归）', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-chrome', '手测面固定在 desktop-chrome（桌面窗口尺寸）')
+    test.setTimeout(180_000)
+    const p = panelContractFor(CONTRACT_FILE)
+
+    // 先定视口再进页面：布局按首个手测窗口初始化。
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await gotoWorkbench(page)
+    await openBuiltinSample(page)
+    await expect(page.locator(CHANNEL_TAB), '多方块文档必须出现「通道」tab').toBeVisible()
+    await openChannelTabReady(page)
+
+    // P4 手测的两个窗口都要成立（只验一个会让"换窗口又裁"漏网）。
+    const sizes = [
+      { width: 1440, height: 900 },
+      { width: 1600, height: 1200 },
+    ] as const
+    const logs: string[] = []
+    for (const size of sizes) {
+      await page.setViewportSize(size)
+      // 等一帧让布局落定（视口尺寸变化触发 reflow，不是异步数据）。
+      await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => r())))
+      const geom = await readPanelGeometry(page)
+      const label = `${size.width}×${size.height}`
+
+      // 反空洞真：面板与声明通道都在场（否则下面的"都在框内"是没扫到）。
+      expect(geom.panel, `${label}：通道面板必须存在`).not.toBeNull()
+      expect(geom.sliders.map((s) => s.key), `${label}：滑杆集合 = 声明通道`).toEqual(p.channels.map((c) => c.key))
+      expect(geom.innerWidth, `${label}：窗口宽`).toBe(size.width)
+      expect(geom.innerHeight, `${label}：窗口高`).toBe(size.height)
+
+      // ① 面板不得被窗口底边裁（P4 症状之一：面板底部越过窗口底）。
+      expect(geom.panel!.bottom, `${label}：面板底边必须在窗口内`).toBeLessThanOrEqual(geom.innerHeight + 0.5)
+      expect(geom.panel!.top, `${label}：面板顶边必须在窗口内`).toBeGreaterThanOrEqual(0)
+
+      // ② 每条通道滑杆完整落在面板盒与窗口内（Coil/Glass 不得落在面板外）。
+      for (const s of geom.sliders) {
+        expect(s.height, `${label} ${s.key}：滑杆必须有非零高度`).toBeGreaterThan(0)
+        expect(s.top, `${label} ${s.key}：顶部必须在面板内`).toBeGreaterThanOrEqual(geom.panel!.top - 0.5)
+        expect(s.bottom, `${label} ${s.key}：底部必须在面板内（不得被裁）`).toBeLessThanOrEqual(geom.panel!.bottom + 0.5)
+        expect(s.bottom, `${label} ${s.key}：底部必须在窗口内`).toBeLessThanOrEqual(geom.innerHeight + 0.5)
+      }
+
+      // ③ 内容不依赖滚动（EBF 3 通道 + Tier 在两个手测窗口下都必须一屏可见）。
+      expect(
+        geom.panel!.scrollHeight,
+        `${label}：面板内容高度不得超出可视高度（EBF 样例必须一屏可见，不靠滚动）`,
+      ).toBeLessThanOrEqual(geom.panel!.clientHeight + 1)
+
+      logs.push(
+        `${label} panel=${Math.round(geom.panel!.height)}px client=${geom.panel!.clientHeight} scroll=${geom.panel!.scrollHeight} ` +
+          `sliders=${geom.sliders.map((s) => `${s.key}@${Math.round(s.top)}-${Math.round(s.bottom)}`).join(',')}`,
+      )
+
+      // ④ 可交互（在首个手测窗口验一次就够：同一 DOM/事件链，尺寸不改变命中语义）。
+      if (size.width !== 1440) continue
+      const coil = geom.sliders.find((s) => s.key === 'coil')!
+      const cx = (coil.left + coil.right) / 2
+      const cy = (coil.top + coil.bottom) / 2
+      const hit = await page.evaluate(
+        ({ x, y }) => {
+          const el = document.elementFromPoint(x, y) as HTMLElement | null
+          return el?.getAttribute?.('data-mb-channel') ?? el?.tagName ?? null
+        },
+        { x: cx, y: cy },
+      )
+      expect(hit, `${label}：滑杆中点必须命中滑杆本身（不被裁/不被其它元素遮挡）`).toBe('coil')
+      await page.mouse.click(cx, cy)
+      await expect
+        .poll(
+          async () => {
+            const panel = await readChannelPanel(page)
+            return panel.channels.find((c) => c.key === 'coil')!.value
+          },
+          { timeout: 10_000 },
+        )
+        .toBeGreaterThan(0)
+      logs.push(`click(coil)→${(await readChannelPanel(page)).channels.find((c) => c.key === 'coil')!.value}`)
+    }
+
+    console.log(`[M5-5] 通道可达（P4 手测窗口）：${logs.join(' | ')}`)
+  })
+});

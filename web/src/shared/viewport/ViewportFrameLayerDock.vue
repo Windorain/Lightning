@@ -228,12 +228,21 @@ const emit = defineEmits<{
 }
 .vp-dock--embed .vp-dock__panel { height: 48px; background: var(--nei-inset-bg); }
 .vp-dock--workbench .vp-dock__panel { height: 40px; background: var(--wb-bg-elevated); }
-/* 通道面板：内容高度随声明条数增长（视口下方栏按需变高，超过上限内部滚动） */
-.vp-dock__panel--channels {
-  height: auto; min-height: 40px; max-height: 152px;
-  align-items: stretch; overflow-y: auto;
+/* 通道面板：内容高度随声明条数增长（视口下方栏按需变高，超过上限内部滚动）
+ *
+ * ⚠️ 选择器必须是**两类**（`.vp-dock__panel.vp-dock__panel--channels`）：
+ * 主题规则 `.vp-dock--workbench .vp-dock__panel { height: 40px }` 也是两类的特异性，
+ * 单类选择器压不过它 —— 实测（1440×900，内置 EBF 样例）面板被钉在 40px，
+ * 只露 Tier/Height，Coil/Glass 落在面板外且页面底边也被裁（P4 手测发现）。
+ *
+ * `max-height: min(152px, 25vh)`：4 条滑杆的自然高度约 90px；通道更多的文档在
+ * **可用高度内滚动**（不把画布挤没，也不会被窗口底边裁掉）。 */
+.vp-dock__panel.vp-dock__panel--channels {
+  height: auto; min-height: 40px;
+  max-height: min(152px, 25vh);
+  align-items: stretch; overflow-y: auto; overscroll-behavior: contain;
 }
-.vp-dock--embed .vp-dock__panel--channels { min-height: 48px; }
+.vp-dock--embed .vp-dock__panel.vp-dock__panel--channels { min-height: 48px; }
 .vp-dock__panel :deep(.wm-wfs),
 .vp-dock__panel :deep(.wm-wfp-controls),
 .vp-dock__panel :deep(.wm-layer-bar) {
