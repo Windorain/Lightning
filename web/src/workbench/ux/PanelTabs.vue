@@ -55,20 +55,48 @@ const activePanel = computed(() => {
 function selectTab(id: string): void {
   activeId.value = id
 }
+
+/**
+ * 竖排标签栏的**文字缩写/符号**（M3-shell B1）。
+ *
+ * 本仓没有图标体系，B1 不引入图标库（设计明文）：用面板 id → 一个等宽可读的
+ * 符号，未知面板回落到 label 首字 —— 于是新增面板也总有可点的标记。
+ * 完整的 tab 文案仍由 `.pt-tab-label` 逐字渲染（e2e 按文案定位）。
+ */
+const TAB_GLYPHS: Readonly<Record<string, string>> = {
+  'block-inspector': '▦',
+  'transform-panel': '✥',
+  'scene-info-panel': 'ⓘ',
+  'block-stats-panel': '∑',
+  'annotation-panel': '✎',
+  'wiki-config-panel': '⚙',
+  'tooltip-editor': '☰',
+}
+
+function glyphFor(p: PanelTabItem): string {
+  return p.icon ?? TAB_GLYPHS[p.id] ?? p.label.slice(0, 1)
+}
 </script>
 
 <template>
   <div class="pt-root" v-if="panels.length > 0">
-    <div class="pt-tabs">
+    <!--
+      M3-shell B1：标签栏从顶部横排改为**左缘竖排**（Blender properties 式）。
+      类名 `.pt-tabs`/`.pt-tab`/`.pt-content` 与全部 tab 文案逐字保留 ——
+      e2e 按文案定位（`kernel-undo-redo` 的「变换」、`input-routing` 的逐 tab 遍历）。
+    -->
+    <div class="pt-tabs" role="tablist" aria-orientation="vertical">
       <button
         v-for="p in panels"
         :key="p.id"
         class="pt-tab"
         :class="{ 'pt-tab--active': activeId === p.id }"
-        @click="selectTab(p.id)"
         :title="p.label"
+        role="tab"
+        :aria-selected="activeId === p.id"
+        @click="selectTab(p.id)"
       >
-        <span v-if="p.icon" class="pt-tab-icon">{{ p.icon }}</span>
+        <span class="pt-tab-icon" aria-hidden="true">{{ glyphFor(p) }}</span>
         <span class="pt-tab-label">{{ p.label }}</span>
       </button>
     </div>
@@ -92,38 +120,36 @@ function selectTab(id: string): void {
 <style scoped>
 .pt-root {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
+  min-height: 0;
 }
+/* 左缘竖排标签栏：窄栏 + 可纵向滚动（面板多时仍可点到最后一个）。 */
 .pt-tabs {
   flex-shrink: 0;
   display: flex;
+  flex-direction: column;
+  width: 58px;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--wb-bg-surface);
-  overflow-x: auto;
-  height: 34px;
-  position: relative;
-}
-.pt-tabs::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent 0%, var(--wb-border) 20%, var(--wb-border) 80%, transparent 100%);
+  border-right: 1px solid var(--wb-border);
+  padding: 4px 0;
 }
 .pt-tab {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 0 16px;
+  gap: 3px;
+  padding: 8px 2px 6px;
   border: none;
+  border-left: 2px solid transparent;
   background: transparent;
   color: var(--wb-text-muted);
-  font-size: 13px;
+  font-size: 10px;
   cursor: pointer;
   white-space: nowrap;
-  border-bottom: 2px solid transparent;
+  flex-shrink: 0;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .pt-tab:hover {
@@ -132,7 +158,8 @@ function selectTab(id: string): void {
 }
 .pt-tab--active {
   color: var(--wb-text);
-  border-bottom-color: var(--wb-accent);
+  border-left-color: var(--wb-accent);
+  background: var(--wb-bg-hover);
   font-weight: 500;
 }
 .pt-tab:focus-visible {
@@ -141,14 +168,21 @@ function selectTab(id: string): void {
   border-radius: 2px;
 }
 .pt-tab-icon {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
 }
 .pt-tab-label {
+  display: block;
   font-weight: inherit;
+  max-width: 54px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  line-height: 1.2;
 }
 .pt-content {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
   padding: 10px 12px;
 }
