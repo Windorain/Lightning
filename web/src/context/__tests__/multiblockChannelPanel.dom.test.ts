@@ -10,6 +10,14 @@
  *  - 面板里**没有** Layer 滑杆（分层预览 tab 已有，不重复造）。
  *
  * 无框架依赖：`createApp(...).mount(el)` + 原生 DOM 断言（仓库未装 @vue/test-utils）。
+ *
+ * ## M6-1：面板模型的**冻结夹具**（替代旧文档版 `buildChannelPanelModel`）
+ *
+ * 旧实现（`assembleForSelection` + `buildChannelPanelModel`，形参是 `RuntimeDocument`）
+ * 已随 M6-1 退役。本文件的模型现在是**测试内冻结夹具**（{@link FROZEN_PANEL_MODELS}），
+ * 与生产等价性由 `冻结面板夹具 = 生产派生（内核读面 + 唯一求值点）` 一条钉住：
+ * 夹具不是"手写的期望值"，而是**生产派生结果被冻结**；若生产派生漂移，那条判据当场判红，
+ * 而下面的 DOM 判据继续用固定输入证明"组件渲染行为"。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp, type App } from 'vue'
@@ -22,17 +30,129 @@ import {
   StructureDataParser,
   createEnvelopeParser,
 } from '@/context/parsers/builtinParsers'
-import type { RuntimeDocument } from '@/context/runtimeDocument'
+import { plainRootOf } from '@/adapters/plainRoot'
+import { readEnvelopeLayers } from '@/render/data/compactSceneDocument'
+import { projectMultiblockSelection } from '@/domain/multiblockSelection'
+import { multiblockDeclarationViewOf } from '@/domain/multiblockDocument'
+import { makeAdoptedKernelReadHost, type KernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
 import {
-  assembleForSelection,
-  buildChannelPanelModel,
-  initialMultiblockSelection,
+  channelPanelModelOf,
   type MultiblockChannelPanelModel,
 } from '@/shared/viewport/multiblockChannelUi'
 
 import ebfFixture from './fixtures/multiblock-ebf-2ch.json'
 import tierOnlyFixture from './fixtures/multiblock-tier-only.json'
 import minimalV2 from '../../../e2e/fixtures/minimal-v2.json'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 冻结面板模型（M6-1：生产派生结果的快照；与生产的等价性由下面的 anchor 判据把守）
+// ─────────────────────────────────────────────────────────────────────────────
+
+const EBF_NOTICES = [
+  '提示（文件声明）：本机无通道间约束：coil 与 glass 作用于不相交的位置集合，故 couplings:[] + 不拒绝任何组合（装配按各通道独立生效）。',
+  '提示（文件声明）：「玻璃 ≥ 能量仓等级」这类约束的另一方是可变结构内容而非通道，格式内无法求值 → 软约束 note，不参与装配夹取。',
+  '提示（文件声明）：TESR（shader/VAO + 延迟后处理）活动表现、运行中才生成的附属渲染方块 → 本轮显式"不覆盖"。',
+] as const
+
+const EBF_CHANNELS = [
+  { key: 'height', name: 'Height', kind: 'size', min: 1, max: 5, hi: 5 },
+  { key: 'coil', name: 'Coil', kind: 'replace', min: 1, max: 3, hi: 3 },
+  { key: 'glass', name: 'Glass', kind: 'replace', min: 1, max: 2, hi: 2 },
+] as const
+
+/** **冻结面板模型**：键 = 场景名（默认取值 / 高取值 / tier-only 默认）。 */
+const FROZEN_PANEL_MODELS: Readonly<Record<string, MultiblockChannelPanelModel>> = Object.freeze({
+  'ebf-default': {
+    displayName: 'Electric Blast Furnace',
+    tier: 2,
+    tierMin: 1,
+    tierMax: 14,
+    tierSamples: [1, 2, 14],
+    channels: EBF_CHANNELS.map((c) => ({ ...c })),
+    values: { height: 0, coil: 0, glass: 0 },
+    runstates: [
+      { id: 'idle', name: 'Idle' },
+      { id: 'active', name: 'Running' },
+    ],
+    runstate: 'idle',
+    sceneCount: 432,
+    variantKey: 'height:0|coil:0|glass:0|tt:2|runstate:idle',
+    dims: '3×2×3',
+    notices: [...EBF_NOTICES],
+  },
+  'ebf-high': {
+    displayName: 'Electric Blast Furnace',
+    tier: 14,
+    tierMin: 1,
+    tierMax: 14,
+    tierSamples: [1, 2, 14],
+    channels: EBF_CHANNELS.map((c) => ({ ...c })),
+    values: { height: 5, coil: 3, glass: 0 },
+    runstates: [
+      { id: 'idle', name: 'Idle' },
+      { id: 'active', name: 'Running' },
+    ],
+    runstate: 'active',
+    sceneCount: 432,
+    variantKey: 'height:5|coil:3|glass:0|tt:14|runstate:active',
+    dims: '3×5×3',
+    notices: [...EBF_NOTICES, '取值夹取：glass 14 → 2（超出声明取值域）'],
+  },
+  'tier-only-default': {
+    displayName: 'Tier Column',
+    tier: 1,
+    tierMin: 1,
+    tierMax: 3,
+    tierSamples: [1, 2, 3],
+    channels: [{ key: 'structTier', name: 'Structure Tier', kind: 'replace', min: 1, max: 3, hi: 3 }],
+    values: { structTier: 0 },
+    runstates: [{ id: 'idle', name: 'Idle' }],
+    runstate: 'idle',
+    sceneCount: 12,
+    variantKey: 'structTier:0|tt:1|runstate:idle',
+    dims: '1×3×1',
+    notices: ['提示（文件声明）：本机未探测到任何通道间约束 → 缺省行为 couplings:[] + 不拒绝任何组合（装配按各通道独立生效）。'],
+  },
+})
+
+/** 取一份**可挂载的副本**（组件拿到的是普通对象；副本避免跨用例共享同一引用）。 */
+function frozenModel(name: keyof typeof FROZEN_PANEL_MODELS): MultiblockChannelPanelModel {
+  return JSON.parse(JSON.stringify(FROZEN_PANEL_MODELS[name])) as MultiblockChannelPanelModel
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 生产链（只用于"夹具 = 生产派生"这条 anchor 判据）
+// ─────────────────────────────────────────────────────────────────────────────
+
+function productionRegistry() {
+  const registry = createParserRegistry()
+  registry.register(V2PlainParser)
+  registry.register(createEnvelopeParser(registry))
+  registry.register(WorldParser)
+  registry.register(StructureDataParser)
+  return registry
+}
+
+/** 生产链：fixture 原文 → 生产解析 → 生产装配/装载（真 Context + 真 KernelSession）。 */
+async function makeHost(raw: unknown): Promise<KernelReadHost> {
+  const parsed = await productionRegistry().detectAndParse(raw)
+  if (!parsed.document) throw new Error('fixture 解析失败')
+  const plainRoot = plainRootOf((await readEnvelopeLayers(raw as never)).plain as Record<string, unknown>)
+  return makeAdoptedKernelReadHost(parsed.document as never, plainRoot)
+}
+
+/** 生产面板派生（与 `useKernelChannels#panel` 同一实现：内核读面 + 唯一求值点）。 */
+function productionPanelModel(host: KernelReadHost): MultiblockChannelPanelModel | null {
+  const decl = host.ctx.kernelMultiblockDeclaration()
+  if (decl === null) return null
+  const view = multiblockDeclarationViewOf(decl)
+  return channelPanelModelOf(
+    view,
+    projectMultiblockSelection(view, host.session!.channelValues()),
+    decl.scenes.length,
+    host.ctx.kernelMultiblockEvaluation()?.assembly ?? null,
+  )
+}
 
 const mounted: App[] = []
 const hosts: HTMLElement[] = []
@@ -52,31 +172,6 @@ afterEach(() => {
   for (const el of hosts.splice(0)) el.remove()
 })
 
-function productionRegistry() {
-  const registry = createParserRegistry()
-  registry.register(V2PlainParser)
-  registry.register(createEnvelopeParser(registry))
-  registry.register(WorldParser)
-  registry.register(StructureDataParser)
-  return registry
-}
-
-async function parse(raw: unknown): Promise<RuntimeDocument> {
-  const res = await productionRegistry().detectAndParse(raw)
-  if (!res.document) throw new Error(`fixture 解析失败：${res.error}`)
-  return res.document
-}
-
-/** 文档 + 取值 → 面板模型（与两端视口 `useMultiblockChannels` 走的是同一条纯逻辑）。 */
-function panelModelFor(
-  doc: RuntimeDocument,
-  patch: Partial<{ totalTier: number; values: Record<string, number>; runstate: string }> = {},
-): MultiblockChannelPanelModel {
-  const base = initialMultiblockSelection(doc.multiblock!.decl)
-  const state = { ...base, ...patch, values: patch.values ?? base.values }
-  return buildChannelPanelModel(doc, state, assembleForSelection(doc, state))!
-}
-
 const dockBaseProps = {
   activeTab: 'channels',
   'onUpdate:activeTab': () => {},
@@ -91,10 +186,51 @@ const dockBaseProps = {
   layerPreviewLabel: 'ALL',
 }
 
+describe('M6-1 冻结面板夹具 = 生产派生（内核读面 + 唯一求值点）', () => {
+  it('EBF 默认取值：冻结夹具与生产派生**逐字段相等**', async () => {
+    const host = await makeHost(ebfFixture)
+    try {
+      expect(productionPanelModel(host)).toEqual(FROZEN_PANEL_MODELS['ebf-default'])
+    } finally {
+      host.dispose()
+    }
+  })
+
+  it('EBF 高取值（tt14 / height5 / coil3 / active）：冻结夹具与生产派生**逐字段相等**', async () => {
+    const host = await makeHost(ebfFixture)
+    try {
+      const session = host.session!
+      session.setTotalTier(14)
+      session.setChannelValue('height', 5)
+      session.setChannelValue('coil', 3)
+      session.setChannelValue('glass', 0)
+      session.setRunstateIndex(1)
+      expect(productionPanelModel(host)).toEqual(FROZEN_PANEL_MODELS['ebf-high'])
+    } finally {
+      host.dispose()
+    }
+  })
+
+  it('tier-only 默认取值：冻结夹具与生产派生**逐字段相等**', async () => {
+    const host = await makeHost(tierOnlyFixture)
+    try {
+      expect(productionPanelModel(host)).toEqual(FROZEN_PANEL_MODELS['tier-only-default'])
+    } finally {
+      host.dispose()
+    }
+  })
+
+  it('反空洞真：三份冻结夹具彼此可辨（否则"相等"没有区分力）', () => {
+    const keys = Object.keys(FROZEN_PANEL_MODELS)
+    const variants = new Set(keys.map((k) => FROZEN_PANEL_MODELS[k]!.variantKey))
+    expect(variants.size, '夹具的变体键必须互不相同').toBe(keys.length)
+    expect(FROZEN_PANEL_MODELS['ebf-default']!.dims).not.toBe(FROZEN_PANEL_MODELS['ebf-high']!.dims)
+  })
+})
+
 describe('T2.4 「通道」面板 DOM（真实组件）', () => {
-  it('EBF：Tier 滑杆 + 每通道一条滑杆 + 运行态切换 + Not set 文本', async () => {
-    const doc = await parse(ebfFixture)
-    const el = mount(MultiblockChannelPanel, { model: panelModelFor(doc) })
+  it('EBF：Tier 滑杆 + 每通道一条滑杆 + 运行态切换 + Not set 文本', () => {
+    const el = mount(MultiblockChannelPanel, { model: frozenModel('ebf-default') })
 
     const panel = el.querySelector<HTMLElement>('[data-mb-panel="channels"]')!
     expect(panel).toBeTruthy()
@@ -135,9 +271,8 @@ describe('T2.4 「通道」面板 DOM（真实组件）', () => {
     expect(el.querySelector('.wm-layer-bar')).toBeNull()
   })
 
-  it('tier-only：只有 Tier 滑杆 + 1 条通道滑杆（无具名通道的形态）', async () => {
-    const doc = await parse(tierOnlyFixture)
-    const el = mount(MultiblockChannelPanel, { model: panelModelFor(doc) })
+  it('tier-only：只有 Tier 滑杆 + 1 条通道滑杆（无具名通道的形态）', () => {
+    const el = mount(MultiblockChannelPanel, { model: frozenModel('tier-only-default') })
     const channels = [...el.querySelectorAll<HTMLInputElement>('input[data-mb-channel]')]
     expect(channels.map((c) => c.getAttribute('data-mb-channel'))).toEqual(['structTier'])
     expect(channels[0]!.max).toBe('3')
@@ -145,13 +280,12 @@ describe('T2.4 「通道」面板 DOM（真实组件）', () => {
     expect(el.querySelectorAll('option[data-mb-runstate-id]').length).toBe(1)
   })
 
-  it('拖动滑杆 → 事件载荷正确（Tier / 通道 / 运行态）', async () => {
-    const doc = await parse(ebfFixture)
+  it('拖动滑杆 → 事件载荷正确（Tier / 通道 / 运行态）', () => {
     const onTier = vi.fn()
     const onValue = vi.fn()
     const onRunstate = vi.fn()
     const el = mount(MultiblockChannelPanel, {
-      model: panelModelFor(doc),
+      model: frozenModel('ebf-default'),
       'onUpdate:tier': onTier,
       'onUpdate:value': onValue,
       'onUpdate:runstate': onRunstate,
@@ -175,12 +309,11 @@ describe('T2.4 「通道」面板 DOM（真实组件）', () => {
 })
 
 describe('T2.5 下方栏 tab（真实组件）', () => {
-  it('多方块文档：出现「通道」tab 并渲染面板；**不出现帧控制 tab**（场景不参与播放）', async () => {
-    const doc = await parse(ebfFixture)
+  it('多方块文档：出现「通道」tab 并渲染面板；**不出现帧控制 tab**（场景不参与播放）', () => {
     const onUpdate = vi.fn()
     const el = mount(ViewportFrameLayerDock, {
       ...dockBaseProps,
-      channelPanel: panelModelFor(doc),
+      channelPanel: frozenModel('ebf-default'),
       'onUpdate:activeTab': onUpdate,
     })
 
@@ -198,8 +331,9 @@ describe('T2.5 下方栏 tab（真实组件）', () => {
   })
 
   it('帧为主文档：通道 tab 不出现，帧控制/分层预览照旧', async () => {
-    const doc = await parse(minimalV2)
-    expect(doc.isMultiblock).toBe(false)
+    const parsed = await productionRegistry().detectAndParse(minimalV2 as unknown as Record<string, unknown>)
+    expect(parsed.document).not.toBeNull()
+    expect(parsed.document!.isMultiblock).toBe(false)
     const el = mount(ViewportFrameLayerDock, {
       ...dockBaseProps,
       // 帧为主文档才是时间轴的拥有者 ⇒ 多帧时有帧控制 tab。
@@ -214,11 +348,8 @@ describe('T2.5 下方栏 tab（真实组件）', () => {
     expect(el.querySelector('.vp-dock__tab--active')!.getAttribute('data-dock-tab')).toBe('frame')
   })
 
-  it('面板值文本随模型刷新（0 → Not set；非 0 → 数字）', async () => {
-    const doc = await parse(ebfFixture)
-    const el = mount(MultiblockChannelPanel, {
-      model: panelModelFor(doc, { totalTier: 14, values: { height: 5, coil: 3, glass: 0 }, runstate: 'active' }),
-    })
+  it('面板值文本随模型刷新（0 → Not set；非 0 → 数字）', () => {
+    const el = mount(MultiblockChannelPanel, { model: frozenModel('ebf-high') })
     expect(el.querySelector('[data-mb-channel-value="height"]')!.textContent!.trim()).toBe('5')
     expect(el.querySelector('[data-mb-channel-value="coil"]')!.textContent!.trim()).toBe('3')
     expect(el.querySelector('[data-mb-channel-value="glass"]')!.textContent!.trim()).toBe('Not set')

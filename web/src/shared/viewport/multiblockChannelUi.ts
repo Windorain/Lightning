@@ -52,6 +52,7 @@ import type {
   MultiblockRunstateFacts,
   MultiblockSelectionState,
 } from '@/domain/multiblockSelection'
+import type { MultiblockDeclarationView } from '@/domain/multiblockDocument'
 
 export {
   clampChannelValue,
@@ -287,6 +288,52 @@ export function buildChannelPanelModelOf(
     dims: outcome.dims,
     notices: [...outcome.notices],
   }
+}
+
+/**
+ * 装配结论的**最小面**（面板只读"变体键 + 尺寸 + 夹取/警告"）。
+ *
+ * 结构类型：装配根产物（`MultiblockKernelFaceAssembly['report']`）与旧
+ * `AssemblyResult['report']` 都能喂 —— 面板本身不依赖任何一种装配实现。
+ */
+export interface ChannelPanelAssemblyFacts {
+  readonly report: {
+    readonly variantKey: string
+    readonly dims: Readonly<{ w: number; h: number; d: number }>
+    readonly clamped: readonly ClampRecord[]
+    readonly warnings: readonly string[]
+  }
+}
+
+/**
+ * **面板模型（生产唯一派生）**：声明读视图 + 当前取值 + 装配结论 → 面板一次性输入。
+ *
+ * 它替代旧文档版 `buildChannelPanelModel`（M6-1）：旧版要一份 `RuntimeDocument`
+ * 才能取声明与场景数，而生产面板的输入早已是内核读面（声明 = `DocumentContent.multiblock`、
+ * 场景数 = 声明里的 `scenes`、尺寸/提示 = 唯一求值点的装配报告）。
+ * ⇒ 调用方不再需要旧文档，面板模型只有一个派生入口（`useKernelChannels#panel` 与判据同吃）。
+ */
+export function channelPanelModelOf(
+  decl: MultiblockDeclarationView,
+  state: MultiblockSelectionState,
+  sceneCount: number,
+  face: ChannelPanelAssemblyFacts | null,
+): MultiblockChannelPanelModel {
+  // 变体键走**契约的唯一派生规则**（`multiblockVariantKey`）—— 不是 report 里的
+  // "回落后的实际变体"：面板要报的是**当前取值派生**的键（两者在未声明组合上不同）。
+  const variantKey = multiblockVariantKey(decl, { ...state.values }, state.runstate, state.totalTier)
+  return buildChannelPanelModelOf(decl, state, {
+    sceneCount,
+    variantKey,
+    dims: face === null ? '' : formatDims(face.report.dims),
+    notices: assemblyNoticesOf({
+      notes: decl.notes,
+      variantKey,
+      // 「该组合是否已声明」用**索引视图**判（唯一索引实现；键面不含 raw）。
+      declared: decl.variantByKey.has(variantKey),
+      report: face === null ? null : face.report,
+    }),
+  })
 }
 
 /**

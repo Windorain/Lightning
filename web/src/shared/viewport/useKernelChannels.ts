@@ -48,7 +48,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef } fr
 import { kernelRenderViewFromFace, type KernelRenderView } from '@/composition/kernelRenderView'
 import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
-import { multiblockVariantKey } from '@/context/runtimeDocument'
 import { multiblockDeclarationViewOf } from '@/domain/multiblockDocument'
 import {
   clampChannelValue,
@@ -58,9 +57,7 @@ import {
   type MultiblockSelectionState,
 } from '@/domain/multiblockSelection'
 import {
-  assemblyNoticesOf,
-  buildChannelPanelModelOf,
-  formatDims,
+  channelPanelModelOf,
   type MultiblockChannelPanelModel,
 } from './multiblockChannelUi'
 
@@ -273,35 +270,18 @@ export function useKernelChannels(ctx: Context): KernelChannelControls {
 
   const panel = computed<MultiblockChannelPanelModel | null>(() => {
     const view = declaredView.value
-    // ⚠️ 与切换前**同一口径**：装配失败**不**让面板消失 —— 旧路径的
-    // `assembleForSelection` 失败时也返回非 null 结论（`result: null` + 提示），
-    // 面板照样渲染（`dims: ''`）。若这里因 `kernelFace === null` 就 `return null`，
-    // 面板会在"非法组合"下整块消失（L3 实测：`data-mb-variant` 找不到 ⇒ 遍历判据判红）。
+    // ⚠️ 与切换前**同一口径**：装配失败**不**让面板消失 —— 求值失败时
+    // `kernelFace` 为 `null`，面板照样渲染（`dims: ''` + 提示）。若这里因
+    // `kernelFace === null` 就 `return null`，面板会在"非法组合"下整块消失
+    // （L3 实测：`data-mb-variant` 找不到 ⇒ 遍历判据判红）。
     if (view === null) return null
-    const face = kernelFace.value
-    // 变体键走**契约的唯一派生规则**（`multiblockVariantKey`）—— 不是 `report.variantKey`：
-    // 后者是"回落后的**实际**变体"，而面板要报的是**当前取值派生**的键（两者在未声明组合上不同，
-    // 旧实现把它们分别放在 `variantKey` 与那条"组合未声明"提示里）。
-    const variantKey = multiblockVariantKey(
+    return channelPanelModelOf(
       view,
-      selection.value.values,
-      selection.value.runstate,
-      selection.value.totalTier,
-    )
-    // 「该组合是否已声明」用**索引视图**判（唯一索引实现；键面不含 `raw`）。
-    const declared = view.variantByKey.has(variantKey)
-    return buildChannelPanelModelOf(view, selection.value, {
+      selection.value,
       // M5-1：场景数（变体配置集合；不是时间轴帧数）—— 与内核声明 scenes 同源。
-      sceneCount: ctx.kernelMultiblockDeclaration()?.scenes.length ?? 0,
-      variantKey,
-      dims: face === null ? '' : formatDims(face.report.dims),
-      notices: assemblyNoticesOf({
-        notes: view.notes,
-        variantKey,
-        declared,
-        report: face === null ? null : face.report,
-      }),
-    })
+      ctx.kernelMultiblockDeclaration()?.scenes.length ?? 0,
+      kernelFace.value,
+    )
   })
 
   function setTier(value: number): void {
