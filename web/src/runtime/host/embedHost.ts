@@ -41,9 +41,16 @@ export class EmbedHost extends HostBase {
 
 export function createEmbedHost(
   settings: EmbedSettings,
-  bootstrap?: Pick<EmbedBootstrapOptions, 'structureBase' | 'workbenchEdit' | 'handlers'>,
-  /** 外壳运行实例（嵌入 profile 的装配结果）。缺省时构造一个**能力为空**的实例（失败关闭）。 */
-  shell?: ShellRuntime,
+  bootstrap: Pick<EmbedBootstrapOptions, 'structureBase' | 'workbenchEdit' | 'handlers'> | undefined,
+  /**
+   * 外壳运行实例（**嵌入 profile 的装配结果**；M7-4 段 A / D1）。
+   *
+   * 必填：旧实现允许省略并落到 `EMPTY_SHELL`（能力空集），于是
+   * `EMBED_PROFILE` 的裁剪声明在生产里**零消费者** —— 那正是 A14/A15
+   * "只活在测试里"的根因。省略它在**类型层**就不可表达（没有第二条失败关闭旁路：
+   * 装配失败由 `createEmbedShellRuntime` 显式抛出）。
+   */
+  shell: ShellRuntime,
 ): { host: EmbedHost; ctx: Context; shell: ShellRuntime } {
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
@@ -78,7 +85,7 @@ export function createEmbedHost(
   parsers.register(WorldParser)
   parsers.register(StructureDataParser)
 
-  const runtime = shell ?? { ...EMPTY_SHELL, profileId: 'embed' as const }
+  const runtime = shell
   // 内核会话（#261 / R-WK-03）：嵌入外壳同样由宿主创建 Editor，
   // 能力来自**嵌入 profile** 的装配结果（无内容编辑能力 ⇒ 运行时拒绝，A15）。
   //
@@ -124,27 +131,3 @@ export function createEmbedHost(
   return { host: new EmbedHost(main, ctx, wm), ctx, shell: runtime }
 }
 
-/** 缺省外壳（能力为空）：调用方未提供装配结果时的**失败关闭**兜底。 */
-const EMPTY_SHELL: ShellRuntime = Object.freeze({
-  profileId: 'embed',
-  assembly: Object.freeze({
-    profileId: 'embed',
-    modules: Object.freeze([]),
-    capabilities: Object.freeze([]),
-    contributions: Object.freeze({
-      objectTypes: Object.freeze([]),
-      evaluationNodes: Object.freeze([]),
-      commands: Object.freeze([]),
-      editors: Object.freeze([]),
-      controls: Object.freeze([]),
-      hostPorts: Object.freeze([]),
-      shellLayouts: Object.freeze([]),
-    }),
-    pruned: Object.freeze([]),
-    prunedLandings: Object.freeze([]),
-  }),
-  has: () => false,
-  adjustableLayout: false,
-  regions: Object.freeze([]),
-  pageKeyboard: null,
-})

@@ -2,7 +2,7 @@
 /**
  * EmbedRoot — 嵌入场景的 ctx Owner。
  */
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import type { EmbedBootstrapOptions } from '@/embed/embedContract'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { createEmbedHost } from '@/runtime/host/embedHost'
@@ -10,6 +10,9 @@ import { useKernelFrameLoop } from '@/composition/useKernelFrameLoop'
 import HostProvider from '@/runtime/HostProvider.vue'
 import EmbedViewport from '@/shared/viewport/EmbedViewport.vue'
 import { buildEmbedSettingsFromBootstrap } from '@/viewer/viewerConfig'
+import { createEmbedShellRuntime, shellKey } from '@/composition/shell'
+import { createEmbedAssemblyProbe, registerEmbedAssemblyProbe } from '@/embed/embedAssemblyProbe'
+import { REGION } from '@/runtime/regionIds'
 
 const props = defineProps<{
   bootstrap: EmbedBootstrapOptions
@@ -19,10 +22,52 @@ const settings = buildEmbedSettingsFromBootstrap({
   ui: props.bootstrap.ui,
   features: props.bootstrap.features,
 })
+
+/**
+ * **本实例的外壳运行实例**（M7-4 段 A / D1）：由 `EMBED_PROFILE` 解析而来。
+ *
+ * ## 这里修的是什么
+ *
+ * 旧实现调 `createEmbedHost(settings, …, undefined)`（第三个参数缺省）⇒ 宿主落在
+ * `EMPTY_SHELL`（能力空集）—— 于是 `EMBED_PROFILE` 的装配结果（以及它的
+ * `pruned` / `prunedLandings`）在生产里**零消费者**：A14/A15 只活在
+ * `assembly.test.ts` 里。现在装配结果是真的输入：
+ *   - `provide(shellKey, shell)` ⇒ 组件问能力（`useShell()`）能拿到本实例的装配；
+ *   - `createEmbedHost(…, shell)` ⇒ 内核会话的能力集合 = 装配结果（A15 的运行时落点）。
+ *
+ * ## 为什么是"写死 EMBED_PROFILE"而不是读构建期变量
+ *
+ * 见 `composition/shell#createEmbedShellRuntime`：嵌入库只有一个装配形态，
+ * 它的 profile 是产品代码的事实，不是构建配置的事实。
+ */
+const shell = createEmbedShellRuntime()
+provide(shellKey, shell)
+
 const { host, ctx } = createEmbedHost(settings, {
   structureBase: props.bootstrap.structureBase,
   workbenchEdit: props.bootstrap.workbenchEdit,
   handlers: props.bootstrap.handlers,
+}, shell)
+
+/**
+ * **装配只读面**（M7-4 段 A）：把**本实例真实的** `shell.assembly` 登记进按实例的
+ * 探针表（`window.__lk_embed__.probes()`）。
+ *
+ * 登记发生在 `onMounted`、注销发生在 `onBeforeUnmount`：探针的寿命与实例一致
+ * （同页两个 `mount()` ⇒ 两条记录，不互相覆盖）。它只读装配结果，不产生第二套能力真源。
+ */
+let unregisterAssemblyProbe: (() => void) | null = null
+onMounted(() => {
+  unregisterAssemblyProbe = registerEmbedAssemblyProbe(createEmbedAssemblyProbe({
+    profileId: shell.profileId,
+    regionId: REGION.EMBED,
+    assembly: shell.assembly,
+    ctx,
+  }))
+})
+onBeforeUnmount(() => {
+  unregisterAssemblyProbe?.()
+  unregisterAssemblyProbe = null
 })
 
 // **内核帧循环**（P10 #261 / R-WK-03）：嵌入外壳同样由宿主按帧注入时间。

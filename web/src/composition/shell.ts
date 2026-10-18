@@ -41,7 +41,7 @@
 
 import { inject, type InjectionKey } from 'vue'
 import { CAPABILITY, type CapabilityId, type ModuleDecl, type ProfileId } from './modules'
-import { ALL_PROFILES, profileById, type ProfileDecl } from './profiles'
+import { ALL_PROFILES, EMBED_PROFILE, profileById, type ProfileDecl } from './profiles'
 import { capabilitiesOf, resolveComposition, type Assembly } from './resolver'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,6 +114,28 @@ export function createShellRuntime(assembly: Assembly, options?: { floatingUiSco
     regions: Object.freeze([...(shellLayout?.regions ?? [])]),
     pageKeyboard,
   })
+}
+
+/**
+ * **生产嵌入外壳**（EmbedRoot 唯一的装配入口）。
+ *
+ * ## 为什么要有这个工厂，而不是让 EmbedRoot 直接写 `createShellRuntimeForProfile(resolveShellProfile())`
+ *
+ * 工作台是"整个页面就是一个宿主"，它的 profile 来自**构建期**变量
+ * （`resolveShellProfile()`）。嵌入不是：`StructureRender.js` 被打进任意 Wiki 页面，
+ * 它**只有一个**装配形态。若照抄工作台的解析路径，就需要给嵌入库构建注入
+ * `VITE_SHELL_PROFILE=embed` 之类的构建期常量 —— 那会让"嵌入用哪个 profile"
+ * 变成构建配置的事实，而不是产品代码的事实（忘配一个就静默退回工作台装配）。
+ *
+ * ⇒ 嵌入的 profile **在这一行写死**，并由 `EmbedRoot` 消费、`provide(shellKey)`。
+ * 生产事实因此可被测试直接调用（`assembly.test.ts` 的"生产装配输入"组）与
+ * 运行实例读取（嵌入实例的 debug 只读面，见 `embed/embedAssemblyProbe`）。
+ *
+ * 无 `floatingUiScope`：嵌入不是页面所有者，浮层 UI 没有"宿主容器"可接管
+ * （`pageKeyboard` 也因 EMBED_PROFILE 无 `wiki.upload` 而自然为 `null`）。
+ */
+export function createEmbedShellRuntime(): ShellRuntime {
+  return createShellRuntimeForProfile(EMBED_PROFILE)
 }
 
 /** 解析一个 profile 并构造外壳运行实例（失败时抛 —— 启动期失败必须显式）。 */
