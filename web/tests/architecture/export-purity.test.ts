@@ -180,6 +180,217 @@ describe('P9 导出纯净性：快照时间只能来自固定采样序列（#249
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 一之二、导出**入口**的实时视口/相机面 + 明示例外表（M6-6 / Q5；设计 §10.8）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 导出**入口**判定面（M6-6 扩面）：命令、导出卡片、生产执行入口、**即兴抓屏**。
+ *
+ * 与上面 `P9_EXPORT_FILES` 的分工：那一组判的是"导出**实现**不得自驱时间/不得
+ * import 实时面"（导入形状）；这一组判的是"导出**入口**的代码里有没有真的去读写
+ * 活画布/活相机"（调用形状）。后者是 A29 负对照的最后一道面 —— 导入可以绕道，
+ * 但 `canvas.toDataURL()` / `renderMain()` 只能发生在那条路径上。
+ */
+const EXPORT_ENTRY_FILES = [
+  'operators/builtin/exportOperators.ts',
+  'workbench/components/ExportWorkspace.vue',
+  'workbench/export/isoExportJob.ts',
+  // 截屏（Q5 的明示例外，见下 `EXPORT_LIVE_VIEWPORT_EXCEPTIONS`）：它在判定面内，
+  // 但**不放行整条判据** —— 例外必须承重（删掉 ⇒ 判红；假条目 ⇒ 报无对应命中）。
+  'runtime/renderEngine.ts',
+]
+
+/**
+ * 「读实时视口/相机」的**代码级**命中特征。
+ *
+ * 为什么不是 `import` 面：`ExportWorkspace.vue` 合法地 import `runtime/context`
+ * （拿 `ctx` 调命令），把它算成"借用实时相机"会让判据逼出一个假绿豁免。
+ * 真正的借用发生在**调用**上：读活画布的 `domElement`、活渲染器 `webglRenderer`、
+ * 用当前机位重绘的 `renderMain`、把画布像素直接读出来的 `toDataURL`。
+ */
+const LIVE_VIEWPORT_NEEDLES = [
+  { needle: 'toDataURL', why: '读活画布像素（"此刻画面"）' },
+  { needle: 'domElement', why: '取实时画布的 DOM 元素' },
+  { needle: 'webglRenderer', why: '取实时 WebGL 渲染器' },
+  { needle: 'renderMain', why: '用当前相机重绘' },
+]
+
+interface LiveViewportException {
+  readonly file: string
+  readonly symbol: string
+  /** 登记它的 seam（`模块#id`）—— 例外必须有一条**在案**的明示登记，不能是裸豁免。 */
+  readonly registeredIn: string
+}
+
+/**
+ * **明示例外表**（Q5 裁决）：截屏按产品定义就是"即兴抓屏"，不是正式导出。
+ *
+ * ⚠️ 这张表**不是**免死金牌：`auditLiveViewport` 的两条反空洞判据要求
+ * ① 条目必须有对应命中；② 删掉真条目 ⇒ 判据判红。表里只允许放**按产品定义**
+ * 就该读实时面的路径。
+ */
+const EXPORT_LIVE_VIEWPORT_EXCEPTIONS: readonly LiveViewportException[] = [
+  {
+    file: 'runtime/renderEngine.ts',
+    symbol: 'screenshot',
+    registeredIn: 'seams#screenshot-live-capture-by-design',
+  },
+]
+
+/** 一段源码里命中实时视口/相机的特征（按行，注释行不算）。 */
+function liveViewportNeedlesIn(text: string): string[] {
+  const out: string[] = []
+  for (const { line, no } of codeOnlyLines(text)) {
+    for (const { needle } of LIVE_VIEWPORT_NEEDLES) {
+      if (line.includes(needle)) out.push(`${no}:${needle}`)
+    }
+  }
+  return out
+}
+
+/** 文件里命中实时视口/相机的代码行（`rel:行:特征`）。 */
+function liveViewportHits(rel: string): string[] {
+  return liveViewportNeedlesIn(readSource(path.join(SRC_ROOT, rel))).map((hit) => `${rel}:${hit}`)
+}
+
+/**
+ * 抽一个具名方法的函数体（大括号配对）。
+ *
+ * 边界：不解析字符串/模板字面量里的大括号 —— 本判据只需要回答"这个 symbol 的
+ * 函数体里有没有实时面调用"，目标方法（`screenshot`/`dispose`）没有会打破配对的
+ * 字面量。若日后出现，本函数会抽偏并**判红**（宁可误红，不可静默放行）。
+ */
+function symbolBody(rel: string, symbol: string): string | null {
+  const text = readSource(path.join(SRC_ROOT, rel))
+  const re = new RegExp(`(?:^|\\n)[ \\t]*(?:export\\s+)?(?:async\\s+)?(?:function\\s+)?${symbol}\\s*\\(`)
+  const m = re.exec(text)
+  if (m === null) return null
+  const open = text.indexOf('{', m.index + m[0].length)
+  if (open === -1) return null
+  let depth = 0
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1
+    else if (text[i] === '}') {
+      depth -= 1
+      if (depth === 0) return text.slice(open, i + 1)
+    }
+  }
+  return null
+}
+
+/**
+ * 审计"导出入口读实时面"的例外表。
+ *
+ * 返回两本账，**两本都必须为空**：
+ *  - `violations`：命中实时面却不在例外表（或例外表条目不够）⇒ A29 判红；
+ *  - `unused`：例外表条目没有对应命中（文件不读实时面 / symbol 不读 / symbol 不存在）
+ *    ⇒ "例外条目无对应命中"，防例外表变成万能免死金牌。
+ */
+function auditLiveViewport(
+  files: readonly string[],
+  exceptions: readonly LiveViewportException[],
+): { violations: string[]; unused: string[] } {
+  const violations: string[] = []
+  const unused: string[] = []
+  const byFile = new Map<string, LiveViewportException[]>()
+  for (const e of exceptions) {
+    const list = byFile.get(e.file)
+    if (list === undefined) byFile.set(e.file, [e])
+    else list.push(e)
+  }
+  for (const e of exceptions) {
+    if (!files.includes(e.file)) unused.push(`${e.file}#${e.symbol}：例外条目无对应命中（该文件不在导出入口判定面）`)
+  }
+  for (const file of files) {
+    const hits = liveViewportHits(file)
+    const matched = byFile.get(file) ?? []
+    if (hits.length === 0) {
+      for (const e of matched) {
+        unused.push(`${e.file}#${e.symbol}：例外条目无对应命中（该文件不读实时视口/相机）`)
+      }
+      continue
+    }
+    if (matched.length === 0) {
+      violations.push(`${hits.join(', ')} —— 命中实时视口/相机且未登记例外（A29）`)
+      continue
+    }
+    for (const e of matched) {
+      const body = symbolBody(e.file, e.symbol)
+      if (body === null) {
+        unused.push(`${e.file}#${e.symbol}：例外条目无对应命中（找不到该 symbol）`)
+        continue
+      }
+      if (liveViewportNeedlesIn(body).length === 0) {
+        unused.push(`${e.file}#${e.symbol}：例外条目无对应命中（该 symbol 不读实时视口/相机）`)
+      }
+    }
+  }
+  return { violations, unused }
+}
+
+describe('M6-6 · 导出入口的实时视口/相机面：命中即判红，例外必须承重（Q5）', () => {
+  it('判定面是真的、例外是在案登记、两本账都为空', async () => {
+    for (const rel of EXPORT_ENTRY_FILES) {
+      const p = path.join(SRC_ROOT, rel)
+      expect(fs.existsSync(p), `${rel} 必须存在（导出入口判定面）`).toBe(true)
+      expect(readSource(p).length, `${rel} 不得为空`).toBeGreaterThan(200)
+    }
+    // 反空洞真：判定面必须真的命中实时面（否则下面的"两本账为空"是恒真）。
+    const hitFiles = EXPORT_ENTRY_FILES.filter((rel) => liveViewportHits(rel).length > 0)
+    expect(hitFiles, '判定面里必须至少有一个文件真的读写实时面（本树 = 截屏）').toEqual(['runtime/renderEngine.ts'])
+
+    const { SEAMS, seamById } = await import(
+      path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/')
+    )
+    for (const e of EXPORT_LIVE_VIEWPORT_EXCEPTIONS) {
+      const [module, id] = e.registeredIn.split('#')
+      expect(module, '例外必须登记到 composition/seams').toBe('seams')
+      expect(
+        SEAMS.some((s: { id: string }) => s.id === id),
+        `例外表指向的 seam「${id}」必须在案（否则例外是裸豁免）`,
+      ).toBe(true)
+      // 明示例外：退出条件写"不适用"，不是"待迁移"。
+      expect(seamById(id).exitCondition, '明示例外的退出条件必须写「不适用」').toContain('不适用')
+    }
+
+    const audit = auditLiveViewport(EXPORT_ENTRY_FILES, EXPORT_LIVE_VIEWPORT_EXCEPTIONS)
+    expect(audit.violations, `导出入口读实时视口/相机（A29）:\n${audit.violations.join('\n')}`).toEqual([])
+    expect(audit.unused, `例外表存在无对应命中的条目（例外表不得变成免死金牌）:\n${audit.unused.join('\n')}`).toEqual([])
+  })
+
+  it('**反空洞判据 ①**：例外表里的假条目必须报「例外条目无对应命中」', () => {
+    const fakeSymbol: LiveViewportException = {
+      file: 'runtime/renderEngine.ts',
+      symbol: 'dispose',
+      registeredIn: 'seams#screenshot-live-capture-by-design',
+    }
+    const fakeFile: LiveViewportException = {
+      file: 'workbench/components/ExportWorkspace.vue',
+      symbol: 'downloadGif',
+      registeredIn: 'seams#screenshot-live-capture-by-design',
+    }
+    const audit = auditLiveViewport(EXPORT_ENTRY_FILES, [
+      ...EXPORT_LIVE_VIEWPORT_EXCEPTIONS,
+      fakeSymbol,
+      fakeFile,
+    ])
+    expect(audit.violations, '假条目不得制造 violation（它不命中）').toEqual([])
+    expect(audit.unused.join('\n'), '两个假条目都必须被判"无对应命中"').toContain('例外条目无对应命中')
+    expect(audit.unused, '每个假条目各报一条').toHaveLength(2)
+    expect(audit.unused.join('\n')).toContain('runtime/renderEngine.ts#dispose')
+    expect(audit.unused.join('\n')).toContain('workbench/components/ExportWorkspace.vue#downloadGif')
+  })
+
+  it('**反空洞判据 ②**：删掉真条目 ⇒ 判据必须判红（例外是承重的，不是装饰）', () => {
+    const withoutReal = EXPORT_LIVE_VIEWPORT_EXCEPTIONS.filter((e) => e.file !== 'runtime/renderEngine.ts')
+    const audit = auditLiveViewport(EXPORT_ENTRY_FILES, withoutReal)
+    expect(audit.unused, '删掉真条目后不应有 unused（它本来有命中）').toEqual([])
+    expect(audit.violations.join('\n'), '删掉真条目后截屏路径必须被判红').toContain('runtime/renderEngine.ts')
+    expect(audit.violations.join('\n')).toContain('未登记例外')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 二、导出层与新内核的依赖方向
 // ─────────────────────────────────────────────────────────────────────────────
 
