@@ -10,6 +10,10 @@ import type { OutlinePlanPort } from '@/runtime/drw'
 import { PresenterSession } from '@/composition/presenterSession'
 import { createViewportTexturePort, type ViewportTexturePort } from '@/composition/viewportTexturePort'
 import { textureResourcesOf } from '@/composition/kernelTextureResources'
+import {
+  createResourceDiagnostics,
+  type ResourceDiagnosticsPort,
+} from '@/composition/resourceDiagnostics'
 import { sceneSeconds } from '@/composition/kernelRuntime'
 import { kernelGridObjectIdOf } from '@/runtime/gridRead'
 import { resolvePartMaskGeometry } from '@/pure/partMask'
@@ -40,6 +44,13 @@ export interface ViewportPresenterBundle {
   readonly textures: ViewportTexturePort
   /** 内容资源表 → 五态纹理资源（`composition/kernelTextureResources#textureResourcesOf`）。 */
   readonly textureResourcesOf: typeof textureResourcesOf
+  /**
+   * 资源失败/降级/重试/恢复的**结构化发射口**（M8-5；`composition/resourceDiagnostics`）。
+   *
+   * 视口只交事实（五态表 + 绑定计数 + 重试次数），码表与记录形状归装配根 ——
+   * 与 `surface`/`textures` 同一注入纪律（旧层不向上 import 装配根）。
+   */
+  readonly resources: ResourceDiagnosticsPort
   /** 场景时间 → 秒（`composition/kernelRuntime#sceneSeconds`）。 */
   readonly sceneSeconds: typeof sceneSeconds
   /** 释放会话与纹理端口（**同一处**：创建与释放同源）。 */
@@ -151,6 +162,20 @@ export abstract class HostBase implements Host {
     })
   }
 
+  /**
+   * **资源诊断端口**（M8-5）：每个宿主实例一份（不是每视口一份）。
+   *
+   * 它是**记录面**，跨视口共享同一个有界记录器（容量 512）。按视口分帐靠
+   * `correlation.viewportId`，故状态（"上次失败的资源")按视口分桶在本模块内部 ——
+   * 多 Area 下互不覆盖。
+   */
+  private _resourceDiagnostics: ResourceDiagnosticsPort | null = null
+
+  private resourceDiagnostics(): ResourceDiagnosticsPort {
+    this._resourceDiagnostics ??= createResourceDiagnostics(this.ctx.wm.diagnostics)
+    return this._resourceDiagnostics
+  }
+
   createViewportPresenter(regionId: string): ViewportPresenterBundle {
     const textures = createViewportTexturePort(`viewport:${regionId}`)
     // M8-3：设备相位机按视口从**生产索引**取（`ctx.viewports.devices` 是
@@ -161,6 +186,7 @@ export abstract class HostBase implements Host {
       surface,
       textures,
       textureResourcesOf,
+      resources: this.resourceDiagnostics(),
       sceneSeconds,
       dispose: () => {
         // 顺序与 C8/C5 的既有释放同序：先会话（挂载根）后纹理端口。

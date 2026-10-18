@@ -20,6 +20,7 @@ import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrar
 import { SelectionOutlinePass } from '@/render/postprocessing/SelectionOutlinePass'
 import {
   createDrwMeshPipeline,
+  type DecodedPaletteTexture,
   type DrwComputed,
   type DrwMeshPipeline,
   type FrameChangeUnavailableReport,
@@ -180,6 +181,14 @@ export class DRW {
 
   loadStructureAndResources(): Promise<void> {
     return this._mesh.loadStructureAndResources()
+  }
+
+  /**
+   * **接收已解码的调色板纹理**（M8-5）：视口的纹理同步环在五态结算后把 `ready`
+   * 的像素交进来，图标材质库据此装配（本类不解码 —— 第二解码链已退役）。
+   */
+  applyDecodedTextures(textures: readonly DecodedPaletteTexture[]): void {
+    this._mesh.applyDecodedTextures(textures)
   }
 
   /**

@@ -648,6 +648,35 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    */
   let lastTextureIdentity: string | null = null
   /**
+   * **资源失败重试**（M8-5 / D6；SPEC §7.4:252「重试建立新的请求，旧请求不得覆盖它」）。
+   *
+   * ## 为什么入口在 `Context`、执行在这里
+   *
+   * 发起者可能是底栏按钮/命令（它们只认得 `Context`），而**执行**只可能在这里 ——
+   * 只有本环持有解码器、纹理端口与取消序号。`Context#requestResourceRetry()` 是
+   * 两者之间唯一的请求槽（自增计数 + 监听器，见那里的说明）。
+   *
+   * ## 一次重试 = 一次**新请求**
+   *
+   * 落地的两件事：①把去重键作废（否则"同一份资源"会直接早退，等于没重试）；
+   * ②把 `attempt` 加一并发 `resource.retryRequested`（新请求的序号进诊断）。
+   * 旧的在途解码由既有的 `seq !== textureSyncSeq` 判据作废 —— 不新增取消机制。
+   */
+  let retryAttempt = 0
+  let pendingRetry = false
+  /** 上次结算里**失败**的资源身份（重试请求的点名与"恢复"对账用；有界 = 资源条数）。 */
+  let lastFailedAssetIds: string[] = []
+  const stopResourceRetryWatch = ctx.onResourceRetry(() => {
+    pendingRetry = true
+    // 去重键作废：失败后同身份不会自动重试（这正是 D6 的成因），重试必须显式破键。
+    lastTextureIdentity = null
+    inFlightTextureIdentity = null
+  })
+  onScopeDispose(() => {
+    stopResourceRetryWatch()
+  })
+
+  /**
    * **在途**同步的资源身份。
    *
    * ⚠️ 只记"已完成"的去重**不够**（本批 e2e 实测第二次仍全无贴图）：帧循环每帧进本函数，
@@ -672,6 +701,8 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     if (doc === undefined) {
       // 文档已关闭：实时状态不得残留上一份文档的成品结论（SPEC §7.4：状态由**当前**事实推导）。
       ctx.log.clearLiveStatus()
+      // 失败清单同理：下一份文档的"恢复"不得拿上一份的身份对账。
+      lastFailedAssetIds = []
       return
     }
     const identity = textureIdentityOf(doc)
@@ -685,6 +716,17 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     }
     inFlightTextureIdentity = identity
     const seq = ++textureSyncSeq
+    // 显式重试 ⇒ 本次是**新请求**：先记请求事实（哪怕随后解码抛错，请求也真实发生过），
+    // 再按同一套流程走。旧请求的结果由下面的 `seq` 判据作废（不静默覆盖）。
+    if (pendingRetry) {
+      pendingRetry = false
+      retryAttempt += 1
+      presenterBundle.resources.reportRetryRequested({
+        viewportId: regionId,
+        failed: lastFailedAssetIds,
+        attempt: retryAttempt,
+      })
+    }
     // 起点：加载中 0/total。相位与计数都取自**本次请求的事实**（不是计时器猜测）。
     writeTextureLive(`纹理加载中 0/${total}`, 'loading')
     perfMark(`texture-sync:${seq}:start`)
@@ -703,6 +745,27 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       if (seq !== textureSyncSeq || texturesDisposed) return
       const synced = presenterTextures.sync(resources)
       const bound = presenterSurface.bindTextures(resources)
+      // **图标材质库的像素来源**（M8-5）：把**已解码**的槽位交给 DRW。
+      //
+      // 解码只发生在上面的 `textureResourcesOf`（唯一链）；DRW 拿到的是像素，
+      // 于是"一张坏图"不可能让图标库整库失败（旧 `buildMaterialLibrary` 的
+      // `Promise.all` 形态已删除）。`materialId` 用**下标字符串** —— 与
+      // `listPaletteTextureDataUrls` 的槽位口径一致（见 `materialLibraryFromTextures`）。
+      //
+      // 只在 `ready` 且带像素时交出：未就绪的槽缺失 ⇒ 该材质图标落占位（Q1 同族降级）。
+      drw.applyDecodedTextures(
+        resources.flatMap((r, index) =>
+          r.state === 'ready' && r.pixels !== null
+            ? [{
+                materialId: String(index),
+                width: r.pixels.width,
+                height: r.pixels.height,
+                rgba: r.pixels.rgba,
+                name: `${r.identity.id}@${r.identity.version}`,
+              }]
+            : [],
+        ),
+      )
       perfMark(`texture-sync:${seq}:bound`)
       lastTextureIdentity = identity
       // 终态（#399）：以**绑定事实** `missingRequired` 优先 —— 「解码成功」不等于「显示就绪」
@@ -731,17 +794,37 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
           })
           .join(', ')
         const suffix = `（${named}${notReady > 2 ? ' 等' : ''}）`
+        // Q1（M8-5）：资源失败**不夺视口** —— 受影响图元以占位（无贴图）呈现，
+        // 其余内容照常。文案必须同时说清三件事：数量、**点名**、以及"画面还在"，
+        // 否则读者会按旧行为理解成"整个视口没了"（那正是 S0-B D2 的旧形态）。
         if (bound.missingRequired > 0) {
-          writeTextureLive(`纹理缺失 ${notReady}/${total}${suffix}`, 'missing', LOG_LEVEL.WARN)
+          writeTextureLive(
+            `纹理缺失 ${notReady}/${total}${suffix}：视口保留，受影响图元以占位显示`,
+            'missing',
+            LOG_LEVEL.WARN,
+          )
         } else {
           // 非必需贴图坏了：画面可显示，但「有失败」是事实，不得报成就绪。
-          writeTextureLive(`纹理失败 ${notReady}/${total}${suffix}`, 'failed', LOG_LEVEL.ERROR)
+          writeTextureLive(
+            `纹理失败 ${notReady}/${total}${suffix}：视口保留，其余正常显示`,
+            'failed',
+            LOG_LEVEL.ERROR,
+          )
         }
       }
-      // 未就绪的必需贴图是**真实事实**，必须可见（不得静默当"画好了"）。
+      // 资源事实的**结构化**记录（M8-5）：逐条点名 + 降级范围 + 重试后的恢复对账。
+      // 这里**不**再借 `effect.failed`（D2/D7：那条记录没有 assetId，且与呈现链的
+      // 编译/注解失败混在同一条通道里）。计数单位见上面的注释。
+      presenterBundle.resources.reportOutcome({
+        viewportId: regionId,
+        resources,
+        degradedMaterials: bound.degraded,
+        missingRequired: bound.missingRequired,
+        attempt: retryAttempt,
+      })
+      lastFailedAssetIds = notReadyResources.map((r) => r.identity.id)
       if (bound.missingRequired > 0) {
         presenterErrors.push(`textures-missing-required:${bound.missingRequired}`)
-        emitPresenterFailure('textures-missing-required', String(bound.missingRequired))
       }
       if (synced.readyWithoutPixels > 0) {
         // 契约说 `ready` ⇒ 有像素；这条分支出现即为实现缺陷，显式上报。

@@ -3,7 +3,6 @@
  */
 
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
-import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { RenderBundle } from '@/render/schema/types'
 import type { Main } from '@/runtime/main'
 
@@ -45,7 +44,6 @@ export const ALL_FEATURES_OFF: View3DFeatures = {
 export interface View3DConfig {
   sceneId: string
   renderBundle: RenderBundle
-  materialLibrary: MaterialLibraryApi
   features: View3DFeatures
   blockIconCacheOptions: BlockIconCacheOptions
   initialLayerWorldY: number
@@ -62,7 +60,11 @@ export interface View3DConfig {
 
 /**
  * EmbedSettings — 嵌入视口的渲染配置。
- * 从 View3DConfig 拆解出渲染端所需字段，不含 renderBundle / materialLibrary。
+ * 从 View3DConfig 拆解出渲染端所需字段，不含 renderBundle / sceneId。
+ *
+ * 材质库**不在**配置里（M8-5）：图标材质库由 DRW 内部按**已解码像素**装配
+ * （唯一解码链 = `composition/kernelTextureResources`），旧的 `buildMaterialLibrary`
+ * 第二解码链已退役。
  */
 export interface EmbedSettings {
   features: View3DFeatures
@@ -162,7 +164,7 @@ export function buildEmbedSettingsFromMain(main: Main): EmbedSettings {
   }
 }
 
-export const defaultEmbedUi: Omit<View3DConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
+export const defaultEmbedUi: Omit<View3DConfig, 'renderBundle' | 'sceneId'> = {
   features: {
     blockStatsSidebar: false,
     layerBar: false,

@@ -5,7 +5,7 @@
  *
  * | 旧机制 | 位置 | 本模块的替代 |
  * |---|---|---|
- * | 材质库**自己**解码并持有 `THREE.Texture`，视口拿不到"哪张缺了" | `render/data/buildMaterialLibrary.ts`（`Promise.all` 整库 reject） | 呈现层按**内容身份**取纹理（`TexturePort.textureFor`），资源五态由 `composition/kernelTextureResources` 判定；本模块只做「已解码像素 → GPU 纹理」的持有与生命周期 |
+ * | 材质库**自己**解码并持有 `THREE.Texture`，视口拿不到"哪张缺了" | `render/data/buildMaterialLibrary.ts`（`Promise.all` 整库 reject；**M8-5 已删除**，现为 `render/data/materialLibraryFromTextures`） | 呈现层按**内容身份**取纹理（`TexturePort.textureFor`），资源五态由 `composition/kernelTextureResources` 判定；本模块只做「已解码像素 → GPU 纹理」的持有与生命周期 |
  *
  * ## 为什么需要它（接缝 `presenter-surface-dual-track` 的「材质统一」前置）
  *

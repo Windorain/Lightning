@@ -5,7 +5,7 @@
  *
  * | 旧机制 | 位置 | 本模块的替代 |
  * |---|---|---|
- * | `buildMaterialLibrary(plainDoc)` 用 `Promise.all` + 逐项 `throw` 解码全部纹理 | `render/data/buildMaterialLibrary.ts:23-43` | 逐资源**五态**（`unrequested`/`loading`/`ready`/`missing`/`failed`），坏一张只坏那一张 |
+ * | `buildMaterialLibrary(plainDoc)` 用 `Promise.all` + 逐项 `throw` 解码全部纹理 | `render/data/buildMaterialLibrary.ts`（**M8-5 已删除**） | 逐资源**五态**（`unrequested`/`loading`/`ready`/`missing`/`failed`），坏一张只坏那一张；**本模块是该字节解码的唯一生产链** |
  *
  * ## 为什么必须做（本批实测抓出的真缺陷）
  *
@@ -85,7 +85,7 @@ export interface TextureDecoder {
  *
  * 旧实现是 for 循环里逐张 await decoder.decode(...) —— 62 张严格串行。
  * 单张的成本不止 CPU：createImageBitmap 是一次**异步往返**，串行即 N 次往返排队；
- * 同一批字节在另一条链（render/data/buildMaterialLibrary 的 Promise.all）实测 <0.7 s，
+ * 同一批字节在旧链（`render/data/buildMaterialLibrary` 的 `Promise.all`，M8-5 已删除）实测 <0.7 s，
  * 而本链实测 6.77 s（#399 分诊 §1.2 + 本批 e2e 白模期墙钟）。
  *
  * ## 为什么是"有界"而不是 Promise.all

@@ -163,7 +163,23 @@ describe('R5-0 ② · 接线判据：生产文件确实走这个有界上报器'
     expect(src.length, '反空洞真：读到的必须是非空源文件').toBeGreaterThan(1000)
     expect(src, '生产接线必须用有界上报器').toContain('createPresenterFailureReporter')
     expect(src, '旧的无界去重集合不得复活').not.toContain('reportedPresenterFailures')
-    // 9 个发点仍然在（接线只是换了实现，不是删掉了上报）
-    expect(src.match(/emitPresenterFailure\(/g)?.length ?? 0).toBeGreaterThanOrEqual(9)
+    // 发点仍然在（接线只是换了实现，不是删掉了上报）。
+    //
+    // ⚠️ M8-5 起是 **8** 而不是 9：原来的第 9 个是 `textures-missing-required` ——
+    // 它把**资源**事实借 `effect.failed` 发出去（S0-B D2/D7：那条记录没有 assetId，
+    // 且与呈现链的编译/注解失败混在同一条通道里）。该事实现已落 `resource.*` 族
+    // （`composition/resourceDiagnostics`，由本文件的 `presenterBundle.resources.reportOutcome` 发射）。
+    //
+    // 只把 9 改成 8 是**放宽**；等价的替换是下面这一对断言：
+    // 「借用的那一条已消失」+「资源事实有了自己的结构化发点」。
+    expect(src.match(/emitPresenterFailure\(/g)?.length ?? 0).toBe(8)
+    expect(
+      src,
+      '资源事实不得再借 effect.failed（M8-5：应落 resource.* 族）',
+    ).not.toContain("emitPresenterFailure('textures-missing-required'")
+    expect(
+      src,
+      '资源事实必须有自己的结构化发点（资源诊断端口）',
+    ).toContain('presenterBundle.resources.reportOutcome(')
   })
 })

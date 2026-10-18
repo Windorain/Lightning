@@ -1338,7 +1338,7 @@ export function projectKernelDocument(input: KernelProjectionInput): ProjectedDo
   //
   // | 文档形态 | `textureBlobs` | 依据 |
   // |---|---|---|
-  // | 帧为主（V2Plain/World） | **对象**（`{"0": "<base64>", …}`） | `RuntimeDocument.serialize()` 的既有形态；`render/data/buildMaterialLibrary` 按键读 |
+  // | 帧为主（V2Plain/World） | **对象**（`{"0": "<base64>", …}`） | `RuntimeDocument.serialize()` 的既有形态；`domain/textureBlobPool#normalizeTextureBlobPool` 归一后按键读 |
   // | 多方块（`documentShape: multiblock`） | **数组**（`["<base64>", …]`） | `docs/contracts/format-multiblock-doc.md:108` 逐字要求「`"textureBlobs": [ … ]`」，且 `multiblockDocument` 的解析器**显式拒绝**对象形态（实测报 `textureBlobs 必须是数组（实际 object）`） |
   //
   // ⇒ 由 `multiblockDeclaration` 的存在机械决定用哪种（与形态判别同一纪律）。

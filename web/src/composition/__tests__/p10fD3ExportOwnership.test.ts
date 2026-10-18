@@ -142,7 +142,7 @@ describe('D3/S5 ③ 纹理域：端口**真的**绑纹理（M6-3 反转）', () 
     ]
     for (const rel of exportFiles) {
       const code = codeOnly(readSrc(rel))
-      for (const banned of ['buildMaterialLibrary', 'buildBlockMesh', 'simpleMaterialLibrary', 'resolveRenderBundle']) {
+      for (const banned of ['buildMaterialLibrary', 'materialLibraryFromTextures', 'buildBlockMesh', 'simpleMaterialLibrary', 'resolveRenderBundle']) {
         expect(code, rel + ' 不得 import 旧材质/网格入口 ' + banned).not.toContain(banned)
       }
     }

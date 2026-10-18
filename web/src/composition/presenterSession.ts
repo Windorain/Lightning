@@ -526,6 +526,15 @@ export class PresenterSession {
    * 绑定只描述"该配哪张"，纹理本体由端口按内容身份提供。顺序反了 => 重建时端口里
    * 还没有那张纹理 => 该批次走中性色（**静默比其他批次平**）。
    *
+   * ## 第三个返回值 `degraded`：**呈现降级**的范围（M8-5 / Q1）
+   *
+   * 绑定表里 `map` 指向一张**未就绪**资源的材质条数 —— 呈现器按该绑定取纹理时
+   * 拿到 `null` ⇒ 该批次不设 `params.map`（以中性色/顶点色呈现，即**占位降级**）。
+   * 这与 `missingRequired` 是两个不同的量：
+   *  - `missingRequired` 只数**必需**资源（语义 = "不得假装完整"，导出预检用）；
+   *  - `degraded` 数**所有**未就绪（含非必需、外链未取回）—— 它回答"画面里有多少
+   *    图元是以占位呈现的"，是"降级可观测"的读数（资源诊断与 e2e 都读它）。
+   *
    * @param requiredIndexes 哪些调色板下标的资源是**必需**的；缺省 = 全部必需（与
    *   `textureBindingsOf` 的口径一致）。预览场景传"全部必需"会让可选贴图缺失被记为
    *   `missingRequired`，故视口侧应按自身口径传。
@@ -533,21 +542,29 @@ export class PresenterSession {
   bindTextures(
     resources: readonly TextureResource[],
     requiredIndexes?: readonly number[],
-  ): { readonly bindings: number; readonly missingRequired: number } {
+  ): { readonly bindings: number; readonly missingRequired: number; readonly degraded: number } {
     const materials = this.materialDescriptors()
     const bindings = textureBindingsOf({
       materials: materials as never,
       resources,
       ...(requiredIndexes === undefined ? {} : { requiredIndexes }),
     })
+    // 资源身份 → 五态（绑定只带内容身份，降级判定要回查资源表本身）
+    const stateByKey = new Map<string, string>()
+    for (const r of resources) stateByKey.set(`${r.identity.id}@${r.identity.version}`, r.state)
     const map = new Map<string, TextureBinding>()
     let missingRequired = 0
+    let degraded = 0
     for (const b of bindings) {
       map.set(b.materialId, b)
       if (b.missingRequired) missingRequired += 1
+      if (b.map !== undefined) {
+        const state = stateByKey.get(`${b.map.id}@${b.map.version}`)
+        if (state !== 'ready') degraded += 1
+      }
     }
     this.setTextureBindings(map)
-    return Object.freeze({ bindings: map.size, missingRequired })
+    return Object.freeze({ bindings: map.size, missingRequired, degraded })
   }
 
   /**

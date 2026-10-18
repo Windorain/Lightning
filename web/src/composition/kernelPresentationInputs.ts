@@ -369,7 +369,7 @@ export function kernelDefinitionFaceOf(input: {
  * | `:225 docRef.value?.frameCount` | 旧文档帧数 | {@link KernelRenderSourceFace.frameCount} |
  * | `:304-320`/`:344-361` `doc.serialize()` → `isWorldDocument && frames.length>0` → `resolveRenderBundle` | 旧文档帧结构 | {@link KernelRenderSourceFace.definitionAt}（复用 `kernelDefinitionFaceOf`，**同一份**重建口径） |
  * | `:314`/`:361 tooltipPalette.value = resolved.tooltipPalette` | 旧文档根 `tooltipPalette` | 同上的 `tooltipPalette`（逐格 `cellContent[].tooltip` 经 `adapters/tooltipPool` 重聚，与投影侧**同一条**编码） |
- * | `:178 buildMaterialLibrary(plain ?? doc.serialize())` | 旧文档 `materialPalette`+`textureBlobs` | {@link KernelRenderSourceFace.materialInput}（由 `content.resources` 机械派生） |
+ * | `:178 buildMaterialLibrary(plain ?? doc.serialize())`（M8-5 已退役为 `render/data/materialLibraryFromTextures`） | 旧文档 `materialPalette`+`textureBlobs` | {@link KernelRenderSourceFace.materialInput}（由 `content.resources` 机械派生） |
  *
  * ## 为什么"帧为主"这一半可以真切（而多方块半暂存）
  *
@@ -393,7 +393,11 @@ export interface KernelRenderSourceFace {
     readonly tooltipPalette: readonly string[]
   } | null
   /**
-   * 材质库（`render/data/buildMaterialLibrary`）的输入，由**内核内容**派生。
+   * 图标材质库（`render/data/materialLibraryFromTextures`）的输入，由**内核内容**派生。
+   *
+   * ⚠️ 它**不是**解码输入：解码只在 `composition/kernelTextureResources` 一侧发生
+   * （M8-5 退役了旧的 `buildMaterialLibrary` 第二解码链）。本面给的是"槽位 → 字节"，
+   * 供 `textureResourcesOf` 已经是同一份 `content.resources` ⇒ 两处不会漂移。
    *
    * ⚠️ `textureBlobs` **必须是数组**（下标 = 槽位，按需稀疏）：`render/data/sceneDocumentMaterialHydrate`
    * 的 `listPaletteTextureDataUrls` 第一件事是 `if (!Array.isArray(blobs)) return []`

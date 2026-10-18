@@ -105,6 +105,24 @@ function recoveryTime(ms: number): string {
   }
 }
 
+/**
+ * **资源失败重试入口**（M8-5 / D6）。
+ *
+ * 只在"当前实时状态是资源终态失败"时出现 —— 它是那条点名文案旁边的**动作**，
+ * 而不是一个常驻按钮（常驻会让人以为"总能重试出别的东西"，而内嵌字节重解不会变好；
+ * 见 `operators/builtin/resourceOperators` 的二选一论证）。
+ *
+ * 判据取 `live.origin === 'texture'` + 终态：不猜文本、不看计数（同一状态机）。
+ */
+const canRetryResources = computed(() => {
+  const l = live.value
+  return l !== null && l.origin === 'texture' && (l.state === 'missing' || l.state === 'failed')
+})
+
+function retryResources(): void {
+  void ctx.getOperators().exec('OPERATOR_RETRY_RESOURCES')
+}
+
 function adoptRecovery(): void {
   void ctx.getOperators().exec('OPERATOR_RECOVERY_ADOPT')
 }
@@ -138,6 +156,14 @@ function openWikiDataPage() {
       :data-live-origin="live.origin ?? undefined"
     >
       {{ live.message }}
+      <button
+        v-if="canRetryResources"
+        class="sb-recovery-btn"
+        data-lk-resource-retry
+        type="button"
+        title="对未就绪的纹理资源发起一次新请求（画面保留，成功后占位恢复）"
+        @click="retryResources"
+      >重试</button>
     </span>
     <span v-if="showLastLog && log.lastDisplayable.value" :class="logClass(log.lastDisplayable.value.level)">
       {{ log.lastDisplayable.value.message }}

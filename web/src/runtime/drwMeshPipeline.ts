@@ -12,8 +12,21 @@
  *
  * ## 本文件**保留**的职责（C8 的交付轴不含它们）
  *
- *  - **材质库**（`textureCache`）：`buildMaterialLibrary(doc.serialize())` —— 它的另一个消费者是
- *    **方块图标缓存**（`blockIconCache`，侧栏/统计面板的缩略图），而图标链不在本批轴内；
+ *  - **材质库**（`textureCache`）：**只服务方块图标缓存**（`blockIconCache`，侧栏/统计面板的
+ *    缩略图）。画面贴图走呈现会话（`presenterSession` + 纹理端口），不经本文件。
+ *
+ *    ## M8-5：本文件的材质库**不再解码**（第二个解码链已退役）
+ *
+ *    旧形态是本文件调 `buildMaterialLibrary(doc)` —— 那个函数用 `THREE.TextureLoader`
+ *    **自己解码**全部纹理且 `Promise.all` 整库 reject。后果是 S0-B D2 的装载面形态：
+ *    **一张必需贴图坏了 ⇒ 材质库建不起来 ⇒ `loadStatus='error'` ⇒ 整个视口不挂载**。
+ *    现在解码只发生在**唯一**那条链（`composition/kernelTextureResources` + 适配层解码器），
+ *    本文件只接收**已解码像素**（`applyDecodedTextures`）并装配材质库：
+ *    缺失的槽不建纹理，只有**那个材质**的图标烘焙落 error（占位），其余照常。
+ *
+ *    ⇒ **资源级失败不再改 `loadStatus`**（Q1：资源失败不夺视口；SPEC §8:284）。
+ *    `loadStatus='error'` 只留给**文档级**失败（取不到定义 / 没有文档）—— 见
+ *    `loadStructureAndResources` 的两条 `return`。
  *  - **结构定义解析**（`resolveRenderBundle`）：`structureDefinition` 是分层预览、
  *    统计面板与 `ViewportSlot.definition` 的读面来源；
  *  - **工具预览根**（`toolsOverlayGroup`）：工具（box/line/point/text/face）把自己的预览 mesh
@@ -39,7 +52,7 @@ import type { LayerPreviewMode } from '@/render/data/layerPreview'
 import type { StructureDefinition } from '@/render/schema/types'
 import type { BlockStatRow } from '@/render/interaction/blockStats'
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
-import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
+import { buildMaterialLibraryFromTextures } from '@/render/data/materialLibraryFromTextures'
 import { isWorldDocument, resolveRenderBundle, type RenderBundleResolveResult } from '@/render/data/bundleResolve'
 import {
   BlockIconCache,
@@ -128,6 +141,32 @@ export function createFrameChangeUnavailableReporter(
       reported.clear()
     },
   }
+}
+
+/**
+ * **已解码的调色板纹理**（M8-5：本文件的唯一纹理输入）。
+ *
+ * ## 为什么是"结构类型"而不是 import `presentation/textureBinding#TexturePixels`
+ *
+ * 本文件属**旧层**（`kernel-legacy-isolation` 的判定面）：加一条旧→新 `value`/`type`
+ * 边都要登记进 `APPROVED_LEGACY_TO_KERNEL_EDGES`，而这里需要的只是三个字段的形状。
+ * 生产侧（`shared/viewport/useViewportRuntime`）把五态资源表**映射**成这个形状 ——
+ * 映射是一行 `map`，比开一条长期依赖边更接近"谁该知道内核类型"的答案
+ * （那条边会随图标链整体迁入新层而消失；见交付报告的退役清单）。
+ *
+ * ## 字段语义
+ *
+ * `materialId` 是**调色板槽位**（`'0'`、`'1'`…，与 `listPaletteTextureDataUrls` 的
+ * `materialId` 同一口径）；`name` 只用于纹理对象命名（排障），不参与身份。
+ */
+export interface DecodedPaletteTexture {
+  readonly materialId: string
+  readonly width: number
+  readonly height: number
+  /** RGBA8（长度 = `width * height * 4`）。 */
+  readonly rgba: Uint8Array
+  /** 诊断/排障用的稳定名字（`assetId@contentVersion`）。 */
+  readonly name: string
 }
 
 export interface DrwMeshPipelineDeps {
@@ -229,6 +268,13 @@ export interface DrwMeshPipeline {
   applyWorldFrame(index: number): Promise<void>
   disposeCachesAndLibrary(): void
   /**
+   * **接收已解码的调色板纹理**（M8-5）：唯一调用方是视口的纹理同步环，
+   * 它在 `textureResourcesOf`（唯一解码链）结算后把 `ready` 的像素交过来。
+   *
+   * 本方法只做"像素 → 图标材质库/图标缓存"的装配，**不解码**（第二解码链已退役）。
+   */
+  applyDecodedTextures(textures: readonly DecodedPaletteTexture[]): void
+  /**
    * 按**内容身份**应用一次内容重读（原 `rebuildAll()` 的位置）。
    *
    * 返回本次实际执行的 `RebuildPlan`；内容未变时返回 `null`（**什么都不做**）。
@@ -262,24 +308,90 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
    */
   const frameIndex = (): number => worldFrameIndex()
 
-  // === 内部纹理缓存，从 doc.textureBlobs 构建 ===
+  // === 图标材质库（由**已解码像素**装配；本文件不再解码 —— M8-5 退役第二解码链）===
   const textureCache = shallowRef<MaterialLibraryApi | null>(null)
 
   /**
-   * 确保 textureCache 就绪；已完成则直接返回。
+   * **最近一次**喂进来的已解码调色板纹理（槽位 id = 调色板下标字符串）。
    *
-   * 入参是**材质库输入**（`render/data/buildMaterialLibrary` 的 `plainDoc`）：
-   * 内核渲染源面在场时传它的 `materialInput`（内核内容派生），否则传旧格式 plain（暂存路径）。
+   * 它只服务图标烘焙：`SimpleMaterialLibrary` 的 `preloaded` 需要 `THREE.Texture`，
+   * 而纹理在这里由**像素**现建（每次重建材质库各建一次，随库一起 `dispose`）。
+   * 与视口的 GPU 纹理端口**不是同一批句柄**：图标烘焙用独立 `WebGLRenderer`，
+   * 共用纹理会让烘焙期的采样参数/帧偏移写入污染视口画面（两个设备域各自持有）。
    */
-  async function ensureTextures(materialInput: Record<string, unknown>): Promise<MaterialLibraryApi | null> {
-    if (textureCache.value && !textureCache.value.isDisposed()) return textureCache.value
+  let decodedPalette: ReadonlyMap<string, DecodedPaletteTexture> = new Map()
+  /** 上次装配时的调色板像素身份键（同键不重建库/图标缓存）。 */
+  let decodedPaletteKey = ''
+  /** 最近一次装载路径给出的材质输入（图标库重建时要用它；`null` = 还没装载过）。 */
+  let lastMaterialInput: Record<string, unknown> | null = null
+
+  /** 像素 → 本设备域的一张 `THREE.DataTexture`（图标烘焙专用；由材质库持有并释放）。 */
+  function textureOfDecoded(pixels: DecodedPaletteTexture): THREE.Texture {
+    const tex = new THREE.DataTexture(pixels.rgba, pixels.width, pixels.height, THREE.RGBAFormat)
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.name = pixels.name
+    tex.needsUpdate = true
+    return tex
+  }
+
+  /**
+   * 装配图标材质库（**同步、不抛**）。
+   *
+   * 入参是**材质库输入**（`render/data/materialLibraryFromTextures` 的 `plainDoc`）：
+   * 内核渲染源面在场时传它的 `materialInput`（内核内容派生），否则传旧格式 plain（暂存路径）。
+   *
+   * ## 失败语义（Q1）
+   *
+   * 缺失/未就绪的纹理只是"该槽没有 `map`"，**不**让库建不起来；
+   * 只有装配本身有实现缺陷（hydrate/registry 抛错）才返回 `null` ——
+   * 那时**视口仍照常挂载**（资源级失败不改 `loadStatus`），图标缓存降级为无。
+   */
+  function iconLibraryFor(materialInput: Record<string, unknown>): MaterialLibraryApi | null {
+    const existing = textureCache.value
+    if (existing && !existing.isDisposed()) return existing
     try {
-      textureCache.value = await buildMaterialLibrary(materialInput)
+      textureCache.value = buildMaterialLibraryFromTextures(materialInput, (materialId) => {
+        const pixels = decodedPalette.get(materialId)
+        return pixels === undefined ? null : textureOfDecoded(pixels)
+      })
       return textureCache.value
     } catch (e) {
-      console.error('[drw] buildMaterialLibrary failed', e)
+      console.error('[drw] 图标材质库装配失败（视口与画面不受影响，图标降级为无）', e)
+      textureCache.value = null
       return null
     }
+  }
+
+  /**
+   * **接收已解码的调色板纹理**（唯一调用方 = 视口纹理同步环，M8-5）。
+   *
+   * 同键（槽位 + 内容身份）直接返回：帧循环每帧都可能调它，而重建材质库会连带
+   * 重建图标缓存（重烘全部图标）—— 那是可见的成本，不能每帧发生。
+   *
+   * 新键 ⇒ 释放旧材质库（连带其纹理）并按新像素重建；已有结构定义时重建图标缓存，
+   * 使"纹理晚到/重试成功"能真的把图标从占位恢复成有图（`BlockIconCache.ensure`
+   * 会对 `error` 条目重新排队，见 `drwMeshPipeline.init` 的 watch）。
+   */
+  function applyDecodedTextures(textures: readonly DecodedPaletteTexture[]): void {
+    const key = textures.map((t) => `${t.materialId}@${t.name}`).join('\u0001')
+    if (key === decodedPaletteKey) return
+    decodedPaletteKey = key
+    const next = new Map<string, DecodedPaletteTexture>()
+    for (const t of textures) next.set(t.materialId, t)
+    decodedPalette = next
+    // 还没装载过（没有材质输入）⇒ 只更新像素：装载路径会用它们建库。
+    if (lastMaterialInput === null) return
+    // 释放旧库（它 own 着旧纹理）并按新像素重建；定义还没解析出来时也不建图标缓存。
+    textureCache.value?.dispose()
+    textureCache.value = null
+    const definition = structureDefinition.value
+    if (definition === null) return
+    const lib = iconLibraryFor(lastMaterialInput)
+    if (lib === null) {
+      disposeIconCache()
+      return
+    }
+    rebuildIconCache(lib, definition)
   }
 
   // ---- Overlay pass（工具预览；与 main structure 并列，由 DRW 统一同步）----
@@ -494,16 +606,14 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
         }
         structureDefinition.value = hit.definition
         tooltipPalette.value = [...hit.tooltipPalette]
-        const lib = textureCache.value
-        const effectiveLib = (lib && !lib.isDisposed())
-          ? lib
-          : await ensureTextures(source.materialInput as unknown as Record<string, unknown>)
-        if (!effectiveLib || effectiveLib.isDisposed()) {
-          loadStatus.value = 'error'
-          console.error('[drw] loadStructureAndResources: failed to build textureCache')
-          return
-        }
-        rebuildIconCache(effectiveLib, hit.definition)
+        const materialInput = source.materialInput as unknown as Record<string, unknown>
+        lastMaterialInput = materialInput
+        // **资源级失败不夺视口**（M8-5 / Q1；SPEC §7.4:256 + §8:284）：
+        // 图标材质库允许缺纹理（缺的槽没有 map ⇒ 该材质的图标落占位），
+        // 因此这里**不再**因为库建不起来而把 loadStatus 置 error ——
+        // 那正是"一张坏图 ⇒ 整个视口不挂载"的旧形态（S0-B D2）。
+        const lib = iconLibraryFor(materialInput)
+        if (lib !== null) rebuildIconCache(lib, hit.definition)
         loadStatus.value = 'ok'
         return
       }
@@ -520,16 +630,10 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       }
       structureDefinition.value = resolved.definition
       tooltipPalette.value = resolved.tooltipPalette
-      const lib = textureCache.value
-      const effectiveLib = (lib && !lib.isDisposed())
-        ? lib
-        : await ensureTextures(plain)
-      if (!effectiveLib || effectiveLib.isDisposed()) {
-        loadStatus.value = 'error'
-        console.error('[drw] loadStructureAndResources: failed to build textureCache')
-        return
-      }
-      rebuildIconCache(effectiveLib, resolved.definition)
+      lastMaterialInput = plain
+      // 同一条 Q1 取舍（见内核源面分支的说明）：资源缺失只降级图标，不改装载状态。
+      const lib = iconLibraryFor(plain)
+      if (lib !== null) rebuildIconCache(lib, resolved.definition)
       loadStatus.value = 'ok'
     } catch (e) {
       loadStatus.value = 'error'
@@ -622,6 +726,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
   return {
     registerScene,
     loadStructureAndResources,
+    applyDecodedTextures,
     bindOverlayPass,
     unbindOverlayPass,
     setCurrentWorldFrame,

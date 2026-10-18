@@ -134,6 +134,35 @@ export type DiagnosticReasonCode =
   | 'recovery.discarded'
   /** 存储里的恢复副本**校验失败**（参数带键/文档身份/结构化原因；不自动删除）。 */
   | 'recovery.corrupt'
+  // —— 资源失败/降级/重试/恢复（M8-5；SPEC §7.4:252/256 + §8:284 + D7）——
+  //
+  // 屏上资源链（`composition/kernelTextureResources#textureResourcesOf` 的五态表）
+  // 的四个结算事实。**不借 `effect.failed`**（D2：那种借用在"资源"这一族里
+  // 信息更少、且与呈现链的编译/注解失败混在同一条通道里）。
+  //
+  // 每条都带 `params.assetId`（+ 有 locator 时带 `params.locator`）—— D7：
+  // 只报"有 k 张失败"不是可定位的诊断（用户无法回答"哪一张"）。
+  /**
+   * 一项资源**请求失败**（解码失败/字节不是图像）。
+   *
+   * 参数：`assetId` / `locator` / `state` / `reason`（失败原因，供排障）。
+   * 关联：`correlation.viewportId`（多 Area 时可定位是哪一侧的呈现受影响）。
+   */
+  | 'resource.failed'
+  /**
+   * 资源未就绪导致**呈现降级**（受影响图元以占位呈现；其余照常）。
+   *
+   * 参数：`degradedMaterials`（绑定指向未就绪资源的材质条数）、`missingRequired`、
+   * `failed` / `total`（资源条数）、`attempt`（0 = 首次请求，>0 = 显式重试的第 n 次）。
+   *
+   * 它存在的前提是 Q1 的产品口径：**资源失败不夺视口**，受影响图元降级 ——
+   * 于是"降级"本身必须是一个可查询事实（否则用户只看到画面变平却没有任何记录）。
+   */
+  | 'resource.degraded'
+  /** 用户/系统发起了一次**显式重试**（新请求；旧请求不得覆盖它，SPEC §7.4:252）。 */
+  | 'resource.retryRequested'
+  /** 之前失败的一项资源在重试后**就绪**（占位恢复为正常呈现）。 */
+  | 'resource.recovered'
 
 /** 原因的可选结构化参数（**值**只允许标量；不塞对象图）。 */
 export type DiagnosticParams = Readonly<Record<string, string | number | boolean>>

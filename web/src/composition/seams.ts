@@ -179,7 +179,7 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '（`composition/kernelPresentationInputs#kernelRenderSourceFaceOf`；R1-β① **G4+G5**，提交 `c66975a4` + `92fff13d`）：'
       + ' `definitionAt(frameIndex)` → 逐帧 `{ definition, tooltipPalette }`、`materialInput`；注入点'
       + ' `shared/viewport/useViewportRuntime.ts:249`（`ctx.kernelRenderSourceFace()`），DRW 侧 `runtime/drwMeshPipeline.ts:182` 的 `renderSource()` 消费；'
-      + ' `buildMaterialLibrary(doc.serialize())` 已从 DRW 消失（现 `buildMaterialLibrary(materialInput)`，`runtime/drwMeshPipeline.ts:204`）。'
+      + ' `buildMaterialLibrary(doc.serialize())` 已从 DRW 消失（现 `materialInput`；**M8-5 起**该链已退役为 `render/data/materialLibraryFromTextures` —— 按**已解码像素**装配，见下）。'
       + ' 接线判据以**旧源缺席**（`docRef = null`）证明内核面**自足**：`runtime/__tests__/g4DrwKernelRenderSource.test.ts`'
       + '（生产装配面 ⇒ `loadStatus` = `ok`、`materialPalette.length === 62`、`tooltipPalette.length > 0`；'
       + ' 负对照 `renderSourceRef = null` ⇒ 定义 `null`、说明池 `[]`、装载如实 `error`）。'

@@ -30,8 +30,9 @@ function base64PngToDataUrl(b64: string): string {
  * （`composition/kernelProjection.ts:1406-1408` 产**槽位键对象**）在这里被静默丢弃：
  * 一张都枚举不出来、调用方拿到空材质库、且**不报错**。当时的等轴 PNG 导出
  * （`ExportIsoPngOperator` → `workbench/exportIsometricImage.ts:103 buildMaterialLibrary(plain)`）
- * 实测走这条链 —— **该导出链已于 M6-3 退役**，但本函数仍是 DRW 定义面/图标面的
- * textureBlob 池解析入口（`runtime/drwMeshPipeline` 的 `textureCache` 供源）。
+ * 实测走这条链 —— **该导出链已于 M6-3 退役**，但本函数仍是**图标材质库**的槽位枚举入口
+ * （`render/data/materialLibraryFromTextures`；M8-5 起它只做槽位枚举，**不看**字节内容 ——
+ * 解码已归 `composition/kernelTextureResources` 的唯一链）。
  *
  * ⇒ 形态解析收敛到 `domain/textureBlobPool.ts#normalizeTextureBlobPool`
  * （§15 同一语义不得有第二处实现），本函数只按下标取字节。

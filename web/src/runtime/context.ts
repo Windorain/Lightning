@@ -2414,6 +2414,55 @@ export class Context {
     return this.recoverySession
   }
 
+  /**
+   * **资源失败重试**（M8-5 / D6；SPEC §7.4:252「重试建立新的请求，旧请求不得覆盖它」）。
+   *
+   * ## 为什么请求槽在 `Context` 上
+   *
+   * 发起者（底栏按钮、命令、自动化）只能拿到 `Context`；而**执行**只可能在视口的
+   * 纹理同步环里（它持有解码器、纹理端口与取消序号 `textureSyncSeq`）。
+   * 两者之间需要一个**唯一**的请求槽，否则"谁在重试"会有多份状态。
+   *
+   * ## 为什么是自增计数 + 监听器（而不是一个布尔/Ref）
+   *
+   * - 布尔会把两次连续重试折叠成一次（第一次还没被消费就被第二次覆盖）；
+   * - 计数让"第 n 次请求"可判定（diagnostic 的 `attempt` 就是它）；
+   * - 监听器只**通知**、不携带状态 ⇒ 视口被通知时现读计数，不存在"通知即权威"。
+   *
+   * 幂等边界：**每个**视口都会收到通知并按自己的能力重试；没有视口时计数仍增长
+   * （不静默吞掉请求），但不产生任何记录（没有执行 = 没有请求事实）。
+   */
+  private _resourceRetryAttempt = 0
+
+  private readonly _resourceRetryListeners = new Set<() => void>()
+
+  /** 发起一次重试请求，返回本次请求序号（从 1 起）。 */
+  requestResourceRetry(): number {
+    this._resourceRetryAttempt += 1
+    // 复制一份再通知：监听器可能在回调里退订（视口卸载路径）。
+    for (const listener of [...this._resourceRetryListeners]) {
+      try {
+        listener()
+      } catch {
+        // 重试是**用户请求**，单个视口的接线异常不得让其它视口失去重试机会。
+      }
+    }
+    return this._resourceRetryAttempt
+  }
+
+  /** 已发起的重试请求数（视口在收到通知后现读）。 */
+  resourceRetryAttempt(): number {
+    return this._resourceRetryAttempt
+  }
+
+  /** 订阅重试请求；返回退订句柄（视口在 `onScopeDispose` 里调用）。 */
+  onResourceRetry(listener: () => void): () => void {
+    this._resourceRetryListeners.add(listener)
+    return () => {
+      this._resourceRetryListeners.delete(listener)
+    }
+  }
+
   getEditHistory(): UndoManager {
     return this.workbench?.editHistory ?? embedUnavailable('editHistory')
   }

@@ -112,7 +112,9 @@ describe('C2 · 作业入口真的装配并运行（不是"捕获完就丢"）',
 })
 
 describe('C3 · 导出层不得 import 旧材质库/网格构建（不借道旧几何语义）', () => {
-  const BANNED = ['render/materials/simpleMaterialLibrary', 'render/data/buildMaterialLibrary', 'render/mesh/blockMesh']
+  // M8-5：旧 `render/data/buildMaterialLibrary`（第二解码链）已删除；判定改为**当前**的
+  // 图标材质库装配模块（导出层同样不得借道它 —— 贴图必须走五态链 + `bindTextures`）。
+  const BANNED = ['render/materials/simpleMaterialLibrary', 'render/data/materialLibraryFromTextures', 'render/mesh/blockMesh']
 
   it('导出层文件对这些模块零命中（真代码口径）', () => {
     const hits: string[] = []
@@ -125,7 +127,7 @@ describe('C3 · 导出层不得 import 旧材质库/网格构建（不借道旧�
 
   it('**反空洞真**：这些文件确实存在且非空；**负对照**注入一条 import 必须命中', () => {
     for (const rel of EXPORT_LAYER_FILES) expect(readSource(rel).length).toBeGreaterThan(200)
-    const injected = "import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'"
+    const injected = "import { buildMaterialLibraryFromTextures } from '@/render/data/materialLibraryFromTextures'"
     expect(BANNED.some((b) => injected.includes(b)), '负对照：注入的旧 import 必须命中判定').toBe(true)
   })
 })
