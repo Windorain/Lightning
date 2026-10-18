@@ -46,6 +46,7 @@ import {
   resolveComposition,
 } from '../resolver'
 import { ALL_CAPABILITIES } from '@/application/commands'
+import { createEmbedShellRuntime } from '../shell'
 // A21（P11-E #262）：贡献方工厂的夹具（与既有 A21 端到端用例同源，只是提到 describe 作用域）
 import { DEFAULT_OBJECT_FACTORIES, objectData, sceneObject } from '@/domain/scene'
 import { ok } from '@/domain/errors'
@@ -1247,3 +1248,71 @@ describe('模块不反向依赖 profile 或宿主名；组件不询问宿主名'
     expect(found).toContain('isWikiHostProfile')
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A14/A15 · 生产装配输入（M7-4 段 A / D1）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * §4 横切规则 5 / 铁律⑦：**接线判据的输入必须来自生产装配**。
+ *
+ * 上面的 A14/A15 组用的是 `resolveComposition({profileId, modules})` —— 那是解析器，
+ * 而 M7-4 之前**没有任何生产代码**把 `EMBED_PROFILE` 的解析结果交给嵌入宿主：
+ * `EmbedRoot` 省略 `shell`，`createEmbedHost` 落到能力空集。于是上面那组绿
+ * 不能证明"运行中的嵌入没有编辑能力"。
+ *
+ * 下面的输入是 `EmbedRoot` **实际消费的同一个工厂**（`createEmbedShellRuntime`）：
+ * 它返回的 `ShellRuntime` 又被 e2e 从**运行实例**里读出来（`window.__lk_embed__`）。
+ * 两层判据因此对的是同一份装配结果，不是两份等价物。
+ */
+describe('A14/A15 · 生产嵌入装配（EmbedRoot 实际消费的外壳实例）', () => {
+  it('生产嵌入外壳 = EMBED_PROFILE 的解析结果，A14/A15 事实在它上面成立', () => {
+    const shell = createEmbedShellRuntime()
+    expect(shell.profileId, '生产嵌入外壳必须是 embed profile').toBe('embed')
+    const caps = capabilitiesOf(shell.assembly)
+    // 正向（Q2 能力集：看 + 悬停说明 + 播放动画；截屏不属装配能力，见报告对照表）
+    for (const cap of [
+      CAPABILITY.EVALUATE,
+      CAPABILITY.PICKING,
+      CAPABILITY.INTERACTION_BEGIN,
+      'timeline.playback',
+      'timeline.edit',
+      'channels.panel',
+      'editor.viewport3d',
+      'shell.embed',
+    ]) {
+      expect(caps, `生产嵌入必须仍能 ${cap}（Q2 能力集）`).toContain(cap)
+    }
+    // 负向（Q2 的"无编辑/保存/正式导出"）
+    for (const cap of [
+      CAPABILITY.CONTENT_EDIT,
+      CAPABILITY.CONTENT_ADD,
+      CAPABILITY.CONTENT_DELETE,
+      CAPABILITY.SAVE_WRITE,
+      CAPABILITY.EXPORT_RUN,
+      'tools.manipulators',
+      'layout.edit',
+    ]) {
+      expect(caps, `生产嵌入不得有 ${cap}`).not.toContain(cap)
+      expect(shell.has(cap), `shell.has(${cap}) 必须为 false（组件问能力的唯一入口）`).toBe(false)
+    }
+    expect(hasContentEditing(shell.assembly), '生产嵌入构建不得具备内容编辑面').toBe(false)
+    // A14：可选落点裁剪可查询（生产装配结果上也留下记录）
+    expect(shell.assembly.prunedLandings.filter((p) => p.id === 'inspector')).toEqual([
+      { kind: 'editor', id: 'inspector', moduleId: 'editors.inspector', missingCapability: 'inspector.panels' },
+    ])
+  })
+
+  it('**负对照**：同一判据在工作台装配上判红（证明上面的"不得有"不是恒真）', () => {
+    const wb = createShellRuntimeForProbe(WORKBENCH_PROFILE)
+    expect(capabilitiesOf(wb), '工作台必须能编辑（否则上面的负向断言无区分力）').toContain(CAPABILITY.CONTENT_EDIT)
+    expect(hasContentEditing(wb), '工作台构建必须含内容编辑面').toBe(true)
+  })
+})
+
+/** 负对照用：用**同一个**装配工厂解析另一个 profile（不是手搓 Assembly）。 */
+function createShellRuntimeForProbe(p: typeof WORKBENCH_PROFILE) {
+  const r = resolveComposition({ profileId: p.id, modules: p.modules })
+  if (!r.ok) throw new Error('probe profile 解析失败')
+  return r.value
+}
