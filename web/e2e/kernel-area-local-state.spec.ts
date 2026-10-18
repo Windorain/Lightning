@@ -39,7 +39,7 @@ import {
   readFixture,
   waitForViewportMounted,
 } from './helpers/multiblock'
-import { leaveAndReturnWorkspace, readAreaState } from './helpers/areaLifetime'
+import { collectHint, leaveAndReturnWorkspace, readAreaState } from './helpers/areaLifetime'
 
 /** 多方块夹具（默认 tab = 通道；与"分层预览"可区分）。 */
 const FIXTURE = 'multiblock-ebf-2ch.json'
@@ -163,8 +163,18 @@ test.describe('M7-2 · G3 实例私有局部状态（localState）真写回/读�
     await expect(page.locator('.vc-viewport canvas')).toHaveCount(1, { timeout: 60_000 })
 
     const restored = await readActiveDockTab(page)
-    console.log('[G3/切类型] saved=' + JSON.stringify(whileAway) + ' restoredTab=' + restored)
+    const hint = await collectHint(page)
+    console.log('[G3/切类型] saved=' + JSON.stringify(whileAway) + ' restoredTab=' + restored
+      + ' lifecycleErrors=' + JSON.stringify(hint.lifecycleErrors))
     expect(restored, '⚠️ 切回后必须恢复用户选择的下方栏 tab（首次呈现前恢复，不是先默认再改回）').toBe('layer')
+    // 切类型关闭实例的两条纪律（M7-2 / D4）：
+    //  ① 要么真关（旧账销掉、无 releaseFailed/closeFailed 噪音）；
+    //  ② 要么报结构化原因 —— 不得留下"看起来 close 了但什么都没发生"的第三种形态。
+    expect(
+      hint.lifecycleErrors,
+      '⚠️ 切类型关闭旧实例不得产生生命周期错误（releaseFailed/closeFailed 说明关错了 id）；实际 '
+        + JSON.stringify(hint.lifecycleErrors),
+    ).toEqual([])
   })
 
   test('G3 负对照：默认 tab 与判据值必须可区分（否则"恢复"是空转）', async ({ page }) => {

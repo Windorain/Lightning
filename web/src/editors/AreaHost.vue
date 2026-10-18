@@ -66,8 +66,27 @@ const props = defineProps<{
   editorType: string
   /** 活动实例 id（由父层分配；`null` 表示本 Area 不承载实例）。 */
   instanceId: string | null
-  /** 该编辑器类型声明的资源种类（挂载时逐一 acquire）。 */
-  resources: readonly string[]
+  /**
+   * 某编辑器类型声明的资源种类（挂载时逐一 `acquire`；关闭时按**打开时那个类型**逐一 `release`）。
+   *
+   * ## 为什么是函数而不是数组（M7-2 实测：S0-B D4 之外的第二环）
+   *
+   * 旧的 `resources: readonly string[]` 由父层按**当前** `editorType` 算好传入。切类型时
+   * `props.editorType` 在关闭**之前**就变成了新类型（Vue props 先于子组件 watcher 更新），
+   * 于是 `close()` 拿**新类型**的资源清单去释放**旧实例**：
+   *
+   * | | 旧实例实际持有 | 关闭时按什么释放 | 后果 |
+   * |---|---|---|---|
+   * | 切类型 viewport3d → timeline | 6 类 | timeline 的清单（空） | 6 类一个都没还 ⇒ `resourceLeakOnClose` |
+   * | 反向切换 | 0 类 | viewport3d 的 6 类 | 每类一条 `releaseFailed` |
+   *
+   * 实测读数（`e2e/kernel-area-local-state.spec.ts` 的切类型用例，修复前）：
+   * `["releaseFailed @ a1" ×8, "resourceLeakOnClose @ a1" ×2]`。
+   *
+   * ⇒ 释放必须按 `opened.editorType` **现取**清单；本函数就是"按类型取清单"的端口
+   * （实现是 `editors/areaRegistry#resourcesOf`，本层不解释资源语义）。
+   */
+  resourcesOf: (editorType: string) => readonly string[]
   /**
    * 真实编辑器组件。
    *
@@ -197,7 +216,7 @@ function open(): void {
     return
   }
   let l = next
-  for (const kind of props.resources) {
+  for (const kind of props.resourcesOf(props.editorType)) {
     const acquired = acquireResource(l, id, kind)
     if (acquired === null) {
       emit('lifecycle-error', { areaId: props.areaId, reason: 'acquireFailed', detail: { instanceId: id, kind } })
@@ -230,7 +249,8 @@ function close(): void {
 
   // 现取账本（不是渲染期快照）：见 `getLedger` 的说明
   let l = props.getLedger()
-  for (const kind of props.resources) {
+  // ⚠️ 按**打开时那个类型**的清单释放（见 `resourcesOf`：此刻 props.editorType 已是新类型）
+  for (const kind of props.resourcesOf(record.editorType)) {
     const released = releaseResource(l, id, kind)
     if (released === null) {
       emit('lifecycle-error', { areaId: props.areaId, reason: 'releaseFailed', detail: { instanceId: id, kind } })

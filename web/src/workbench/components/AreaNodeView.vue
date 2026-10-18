@@ -83,7 +83,7 @@ function componentFor(editorType: string): Component | null {
       :region-id="ctx.regionIdFor(area.id)"
       :editor-type="area.editorType"
       :instance-id="ctx.instanceIdOf(area.id)"
-      :resources="ctx.resourcesOf(area.editorType)"
+      :resources-of="ctx.resourcesOf"
       :editor="componentFor(area.editorType)"
       :get-ledger="ctx.ledger"
       :local-state="ctx.localStateOf(area.id, area.editorType)"
