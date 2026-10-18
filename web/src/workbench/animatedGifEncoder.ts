@@ -31,7 +31,7 @@
  * `'frame'` 调色板下每帧还要写 ≤768B 的局部色表，故按 `w*h + 1024` 预留；
  * 沿用旧式的 `w*h + 256` 会让 omggif 在局部色表上**越界写**（静默截断）。
  */
-import { GifWriter } from 'omggif'
+import { encodeGifBytes } from '@/adapters/export/gifEncoder'
 
 export interface EncodeAnimatedGifResult {
   blob: Blob
@@ -54,8 +54,6 @@ export interface EncodeGifOptions {
   /** 循环次数（`0` = 无限循环，与旧实现一致）。 */
   readonly loop?: number
 }
-
-const ALPHA_THRESHOLD = 128
 
 function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -105,102 +103,6 @@ async function extractFrames(dataUrl: string): Promise<{ frames: ImageData[]; fr
   return { frames, frameSize }
 }
 
-function packColor(r: number, g: number, b: number): number {
-  return (r << 16) | (g << 8) | b
-}
-
-interface PaletteResult {
-  /** Packed 24-bit colours, length = power of 2 (min 2, max 256). */
-  colors: number[]
-  /** Index of the transparent colour, or null if no transparency. */
-  transparentIdx: number | null
-}
-
-/**
- * Build a palette from opaque pixels only.
- * If transparent pixels exist, index 0 is reserved for them.
- * Unique opaque colours capped at 255 (indexes 1..255), leaving index 0 free.
- */
-function buildPalette(frames: readonly RgbaFrame[]): PaletteResult {
-  const freq = new Map<number, number>()
-  let hasTransparent = false
-
-  for (const frame of frames) {
-    const d = frame.data
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3]! < ALPHA_THRESHOLD) {
-        hasTransparent = true
-        continue
-      }
-      const packed = packColor(d[i]!, d[i + 1]!, d[i + 2]!)
-      freq.set(packed, (freq.get(packed) ?? 0) + 1)
-    }
-  }
-
-  const maxOpaque = hasTransparent ? 255 : 256
-  const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1])
-  const top = sorted.slice(0, maxOpaque)
-  const palette: number[] = []
-
-  if (hasTransparent) palette.push(0) // index 0 = transparent
-
-  for (const [color] of top) palette.push(color)
-
-  // Pad to power of 2
-  let size = 2
-  while (size < palette.length) size *= 2
-  while (palette.length < size) palette.push(0)
-
-  return { colors: palette, transparentIdx: hasTransparent ? 0 : null }
-}
-
-function frameToIndices(
-  frame: RgbaFrame,
-  palette: number[],
-  transparentIdx: number | null,
-): Uint8Array {
-  const colorToIndex = new Map<number, number>()
-  for (let i = 0; i < palette.length; i++) {
-    colorToIndex.set(palette[i]!, i)
-  }
-
-  const pixels = new Uint8Array(frame.width * frame.height)
-  const d = frame.data
-  for (let i = 0; i < pixels.length; i++) {
-    const off = i * 4
-    if (d[off + 3]! < ALPHA_THRESHOLD && transparentIdx !== null) {
-      pixels[i] = transparentIdx
-    } else {
-      const packed = packColor(d[off]!, d[off + 1]!, d[off + 2]!)
-      pixels[i] = colorToIndex.get(packed) ?? (transparentIdx ?? 0)
-    }
-  }
-  return pixels
-}
-
-/** 垂直翻转（把 WebGL 的左下原点行序变成 GIF 的上左原点）。**只翻一次**。 */
-function flipRows(frame: RgbaFrame): RgbaFrame {
-  const { width, height } = frame
-  const stride = width * 4
-  const out = new Uint8Array(stride * height)
-  for (let y = 0; y < height; y++) {
-    const src = (height - 1 - y) * stride
-    out.set(frame.data.subarray(src, src + stride), y * stride)
-  }
-  return { data: out, width, height }
-}
-
-function validateDelays(frames: readonly RgbaFrame[], delaysCs: readonly number[]): void {
-  if (delaysCs.length !== frames.length) {
-    throw new Error(`GIF 帧数与逐帧时延数不一致：${frames.length} 帧 vs ${delaysCs.length} 个时延`)
-  }
-  for (const d of delaysCs) {
-    if (!Number.isInteger(d) || d < 1) {
-      throw new Error(`GIF 逐帧时延必须是 >= 1 的整数厘秒，实得 ${String(d)}`)
-    }
-  }
-}
-
 /**
  * 把已解码的 RGBA 帧编码成 GIF89a。
  *
@@ -212,43 +114,25 @@ export async function encodeGifFrames(
   delaysCs: readonly number[],
   options?: EncodeGifOptions,
 ): Promise<Blob> {
-  if (frames.length === 0) throw new Error('encodeGifFrames: 至少需要 1 帧')
-  validateDelays(frames, delaysCs)
-
-  const width = frames[0]!.width
-  const height = frames[0]!.height
-  for (const f of frames) {
-    if (f.width !== width || f.height !== height) {
-      throw new Error(`encodeGifFrames: 帧尺寸不一致 ${f.width}x${f.height} vs ${width}x${height}`)
-    }
+  // 编码核心**只有一份**：`adapters/export/gifEncoder#encodeGifBytes`（M6-2）。
+  // 本函数是旧入口的**薄委派**（返回 `Blob` 是旧调用方要的形态），随旧链一起删除（M6-3）。
+  const bytes = encodeGifBytes(
+    frames.map((f) => ({
+      pixels: f.data instanceof Uint8Array
+        ? f.data
+        : new Uint8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength),
+      width: f.width,
+      height: f.height,
+    })),
+    delaysCs,
+    { palette: options?.palette ?? 'global', flipY: options?.flipY === true, loopCount: options?.loop ?? 0 },
+  )
+  if (!bytes.ok) {
+    // 旧签名**抛**（旧调用方按异常处理）；把结构化失败翻译回异常，语义保持不变。
+    const params = bytes.error.params
+    throw new Error(String(params.reason) + (params.detail === undefined ? '' : ': ' + String(params.detail)))
   }
-
-  const prepared = options?.flipY === true ? frames.map(flipRows) : frames
-  const mode = options?.palette ?? 'global'
-  const loop = options?.loop ?? 0
-
-  // 全局色表只在 'global' 模式写；'frame' 模式没有全局表（每帧自带局部表）。
-  const global = mode === 'global' ? buildPalette(prepared) : null
-  const bufSize = 1024 + prepared.length * (width * height + 1024)
-  const buf = new Uint8Array(bufSize)
-  const writer = new GifWriter(buf, width, height, global
-    ? { loop, palette: global.colors }
-    : { loop })
-
-  for (let i = 0; i < prepared.length; i++) {
-    const frame = prepared[i]!
-    const local = global ?? buildPalette([frame])
-    const frameOpts: { delay: number; palette?: number[]; transparent?: number } = { delay: delaysCs[i]! }
-    if (global === null) frameOpts.palette = local.colors
-    if (local.transparentIdx !== null) frameOpts.transparent = local.transparentIdx
-    writer.addFrame(0, 0, width, height, frameToIndices(frame, local.colors, local.transparentIdx), frameOpts)
-  }
-
-  const end = writer.end()
-  if (end <= 0 || end > bufSize) {
-    throw new Error(`encodeGifFrames: 编码缓冲不足（end=${end} > ${bufSize}）`)
-  }
-  return new Blob([buf.subarray(0, end)], { type: 'image/gif' })
+  return new Blob([bytes.value as unknown as BlobPart], { type: 'image/gif' })
 }
 
 /**
