@@ -34,7 +34,7 @@ import type { DomainError, Result } from '@/domain/errors'
 import { err, unsupportedOperation } from '@/domain/errors'
 import type { ExportRequest } from '@/domain/captureSpec'
 import type { AssetNeedDerivation, ExportAssetManifest, ExportDiagnostic } from '@/application/exportPlan'
-import { exportAssetManifest, preflightError, preflightExport, type EncoderPort, type ExportKind, type ExportPreflight, type ImageEncoding, type RenderedFrame } from '@/application/exportPlan'
+import { exportAssetManifest, preflightError, preflightExport, type ArtifactEncoding, type EncoderPort, type ExportKind, type ExportPreflight, type RenderedFrame } from '@/application/exportPlan'
 import { packageExportArtifact, type PackagedArtifact } from '@/application/exportAssetCarrier'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ export interface ExportProgress {
 export interface ExportJobOptions {
   readonly request: ExportRequest
   readonly kind: ExportKind
-  readonly encoding?: ImageEncoding
+  readonly encoding?: ArtifactEncoding
   readonly port: OffscreenRenderPort
   readonly encoder?: EncoderPort
   /** 资源状态仓库（P5 交付；缺省 ⇒ 有必需资源即阻塞）。 */
@@ -87,6 +87,8 @@ export interface ExportJobOptions {
   readonly allowLossy?: boolean
   /** 进度回调（可选；纯观察，不驱动业务）。 */
   readonly onProgress?: (p: ExportProgress) => void
+  /** 仅 `kind === 'animation'`：GIF 循环次数（缺省 `0` = 无限；不暴露 UI，见设计 Q9）。 */
+  readonly loopCount?: number
   /**
    * **资源需求推导记录**（①的显式报告）。缺省 ⇒ 作业在产物里标
    * `assembled: false` + `reason: 'asset-needs-derivation-absent'`，
@@ -117,6 +119,11 @@ export type JobOutcome =
       readonly manifestLocation: string
       /** 载体回落原因（非空 ⇒ 请求的载体没做成，已如实报告，**不是**静默降级）。 */
       readonly carrierFallbackReason: string | null
+      /**
+       * 预检的**非阻塞**诊断（例如 `ExportTimeQuantized`："已完成但有偏差"）。
+       * 阻塞项不可能走到这里（它们让作业 `failed`），故本字段只承载 notes。
+       */
+      readonly diagnostics: readonly ExportDiagnostic[]
     }
   | { readonly status: 'cancelled'; readonly releasedFor: number; readonly framesRendered: number }
   | { readonly status: 'failed'; readonly diagnostics: readonly ExportDiagnostic[]; readonly releasedFor: number; readonly error: DomainError }
@@ -247,6 +254,7 @@ export class ExportJob {
         // 取消信号是**活视图**：编码器在长循环里可以读到最新的取消意图。
         // 它不读墙钟、不设超时（契约 §1.5「调用超时不冒充取消」）。
         signal: { get cancelled() { return job.cancelled } },
+        ...(this.opts.loopCount === undefined ? {} : { loopCount: this.opts.loopCount }),
       })
       if (this.cancelled) {
         return Object.freeze({ status: 'cancelled' as const, releasedFor: this.releasedFor, framesRendered: this.framesRendered })
@@ -283,6 +291,7 @@ export class ExportJob {
         carrier: packaged.carrier,
         manifestLocation: packaged.manifestLocation,
         carrierFallbackReason: packaged.fallbackReason,
+        diagnostics: pre.diagnostics,
       })
     } finally {
       // 四条路径（完成/取消/失败/抛错）都会到这里；`release()` 必须幂等。
@@ -297,7 +306,7 @@ export class ExportJob {
   }
 }
 
-function mediaTypeFor(kind: ExportKind, encoding: ImageEncoding): string {
+function mediaTypeFor(kind: ExportKind, encoding: ArtifactEncoding): string {
   switch (kind) {
     case 'image':
       return encoding === 'jpeg' ? 'image/jpeg' : 'image/png'

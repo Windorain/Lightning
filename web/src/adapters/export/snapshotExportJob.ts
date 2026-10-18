@@ -31,7 +31,7 @@
 
 import type { DocumentContent } from '@/domain/content'
 import type { ExportAssetNeed, ExportRequest } from '@/domain/captureSpec'
-import type { ExportKind, ImageEncoding } from '@/application/exportPlan'
+import type { ArtifactEncoding, ExportKind } from '@/application/exportPlan'
 import type { AssetStateStore } from '@/presentation/assetState'
 import { ExportJob, type ExportProgress } from '@/runtime/exportJob'
 import { createSnapshotOffscreenRenderPort, type SnapshotOffscreenRenderPort } from './offscreenRenderPort'
@@ -43,7 +43,7 @@ export interface SnapshotExportJobOptions {
   /** 不可变导出请求（由 `application/exportPlan.planExportRequest` 产出）。 */
   readonly request: ExportRequest
   readonly kind: ExportKind
-  readonly encoding?: ImageEncoding
+  readonly encoding?: ArtifactEncoding
   /** 离屏设备工厂：e2e 注 `createThreeOffscreenDevice()`；vitest 注受控实现。 */
   readonly devices: OffscreenDeviceFactory
   /** 捕获时的内核内容面（S0 值；见 `offscreenRenderPort` 文件头）。 */
@@ -58,6 +58,8 @@ export interface SnapshotExportJobOptions {
   readonly textures?: TexturePort
   /** 进度回调（纯观察；不驱动业务）。 */
   readonly onProgress?: (p: ExportProgress) => void
+  /** 仅 `kind === 'animation'`：GIF 循环次数（缺省 `0` = 无限）。 */
+  readonly loopCount?: number
 }
 
 /** 一次组装的结果：作业本体 + 它用的端口（供测试断言端口状态）。 */
@@ -96,6 +98,7 @@ export function assembleSnapshotExportJob(options: SnapshotExportJobOptions): Sn
     ...(options.assets === undefined ? {} : { assets: options.assets }),
     ...(options.allowLossy === undefined ? {} : { allowLossy: options.allowLossy }),
     ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+    ...(options.loopCount === undefined ? {} : { loopCount: options.loopCount }),
   })
 
   return { job, port }

@@ -53,6 +53,7 @@ import {
 } from '@/domain/captureSpec'
 import type { Scene } from '@/domain/scene'
 import type { LegacyExportDiagnostic } from '@/domain/geometry'
+import { delayCsOf } from '@/domain/materials'
 // ── P5 呈现侧的**已交付契约**（本层只消费，不重定义）──
 import type { AssetId } from '@/presentation/assetIdentity'
 import { preflightRequiredAssets, type AssetStateStore } from '@/presentation/assetState'
@@ -66,11 +67,43 @@ import type { PresentationInputs } from '@/presentation/evaluationKey'
 /** 导出产物种类（#249 §19.4 提到的三类消费者：图片、GIF/动画、几何发布）。 */
 export type ExportKind = 'image' | 'animation' | 'geometry' | 'project'
 
-/** 图片编码格式（与 `ExportKind` 正交：一张图也可以是 PNG 或 JPEG）。 */
+/**
+ * **产物编码格式**（M6-2：从"图片格式"扩成"产物格式"）。
+ *
+ * `gif` 只对 `animation` 合法、`png/jpeg` 只对 `image` 合法 —— 这条约束
+ * 由 {@link encodingAllowedFor} **一处**声明，预检与编码端口都读它（不各写一份 switch）。
+ */
+export type ArtifactEncoding = 'png' | 'jpeg' | 'gif'
+
+/** 兼容别名（既有调用点不动）：图片可用的两种编码。 */
 export type ImageEncoding = 'png' | 'jpeg'
 
-/** 媒体类型（产物字节的**声明**，不是产物本身）。 */
-export function mediaTypeOf(kind: ExportKind, encoding: ImageEncoding = 'png'): string {
+/**
+ * **kind × encoding 兼容表**（全树唯一一份）。
+ *
+ * 为什么必须有它：`mediaTypeOf('animation')` 恒为 `image/gif`，于是"格式与种类"
+ * 在类型上互相独立；没有这张表的话 `kind:'image'` + `encoding:'gif'` 会被
+ * 预检放行、再由某个端口按 PNG 编出来却声明 `image/gif` —— 声明与字节不符。
+ */
+export function supportedEncodingsFor(kind: ExportKind): readonly ArtifactEncoding[] {
+  switch (kind) {
+    case 'image':
+      return Object.freeze(['png', 'jpeg'] as const)
+    case 'animation':
+      return Object.freeze(['gif'] as const)
+    case 'geometry':
+    case 'project':
+      return Object.freeze([] as const)
+  }
+}
+
+/** 该 `kind` 是否允许该 `encoding`（预检与端口共用，不各写一份）。 */
+export function encodingAllowedFor(kind: ExportKind, encoding: ArtifactEncoding): boolean {
+  return supportedEncodingsFor(kind).includes(encoding)
+}
+
+/** 媒体类型（产物字节的**声明**，不是产物本身；不合法组合有 EncodingNotConfigured 挡在前面）。 */
+export function mediaTypeOf(kind: ExportKind, encoding: ArtifactEncoding = 'png'): string {
   switch (kind) {
     case 'image':
       return encoding === 'jpeg' ? 'image/jpeg' : 'image/png'
@@ -86,7 +119,7 @@ export function mediaTypeOf(kind: ExportKind, encoding: ImageEncoding = 'png'): 
 /**
  * 产物文件名扩展名（与 `mediaTypeOf` 同一张表派生，不另立第二处判断）。
  */
-export function fileExtensionOf(kind: ExportKind, encoding: ImageEncoding = 'png'): string {
+export function fileExtensionOf(kind: ExportKind, encoding: ArtifactEncoding = 'png'): string {
   const media = mediaTypeOf(kind, encoding)
   const slash = media.indexOf('/')
   const sub = media.slice(slash + 1)
@@ -107,6 +140,15 @@ export interface EncoderPort {
   /** 本端口支持哪些产物种类。 */
   readonly supportedKinds: readonly ExportKind[]
   /**
+   * 本端口支持哪些编码格式（M6-2 新增，**可选**）。
+   *
+   * 缺失 = 端口没有细到 encoding 维度（既有测试替身）；给定时预检会据它判
+   * `ExportEncodingNotConfigured`。组合端口（`createEncoderPort`）取各 part 的并集。
+   */
+  readonly supportedEncodings?: readonly ArtifactEncoding[]
+  /** 端口名（诊断用；组合端口在失败侧带它，使"GIF 编不出来"与"PNG 编不出来"可区分）。 */
+  readonly name?: string
+  /**
    * 执行编码。成功返回字节；失败返回**结构化**原因（不是抛异常）。
    *
    * `signal` 只用于"尽快停下"，**不**用超时冒充取消（契约 §1.5）。
@@ -117,10 +159,15 @@ export interface EncoderPort {
 export interface EncoderInput {
   readonly request: ExportRequest
   readonly kind: ExportKind
-  readonly encoding: ImageEncoding
+  readonly encoding: ArtifactEncoding
   /** 逐帧渲染结果（由作业按采样序列产出；纯数据）。 */
   readonly rendered: readonly RenderedFrame[]
   readonly signal: { readonly cancelled: boolean }
+  /**
+   * 仅 `kind === 'animation'`：GIF 循环次数（`0` = 无限；缺省 `0`）。
+   * 必须是整数 `>= 0`（非法值由 GIF 端口判 `encoderLoopCountInvalid`）。
+   */
+  readonly loopCount?: number
 }
 
 /** 一帧的渲染结果，**纯数据**（不含 GPU 句柄；#249 §11「纯数据投影与 GPU 上传分开」）。 */
@@ -131,6 +178,13 @@ export interface RenderedFrame {
   readonly pixels: Uint8Array
   readonly width: number
   readonly height: number
+  /**
+   * 本帧驻留（毫秒整数、`>= 1`）。**与 `CaptureTime.holdMs` 同一值**（作业搬运，不重算）。
+   *
+   * 为什么挂在帧上而不是 `EncoderInput.holdsMs` 平行数组：平行数组允许长度不一致
+   * （需要一条运行时校验），且会诱使第二个来源（编码器自己按帧率再算一遍 = 第二套时间权威）。
+   */
+  readonly holdMs?: number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -603,6 +657,13 @@ export interface ExportDiagnostic {
     | 'ExportRequiresLossyMode'
     | 'ExportEncodingNotConfigured'
     | 'ExportEmptyScene'
+    /**
+     * 声明时长与产物时长不一致（**已完成但有偏差**，不阻塞）。
+     *
+     * 来源：GIF 的时延单位是厘秒（1cs = 10ms），故 `holdMs` 非 10 的整数倍时
+     * 产物必然比声明短/长。这是外部格式不可表达 ⇒ 结构化报告，不静默。
+     */
+    | 'ExportTimeQuantized'
     /** 离屏资源分配失败（作业侧；#249 §19.4「作业有独立生命周期与资源预算」）。 */
     | 'ExportAcquireFailed'
     /** 单帧渲染失败（作业侧）。 */
@@ -621,7 +682,7 @@ export type ExportPreflight =
 export interface PreflightInput {
   readonly request: ExportRequest
   readonly kind: ExportKind
-  readonly encoding?: ImageEncoding
+  readonly encoding?: ArtifactEncoding
   /**
    * 资源状态仓库（P5 交付）。缺省 `undefined` = 调用方**没有**资源状态面 ⇒
    * 只要请求里存在 `required` 资源就判 blocked（不假装"没有资源需求"）。
@@ -631,6 +692,42 @@ export interface PreflightInput {
   readonly allowLossy?: boolean
   /** 编码能力端口（缺省 = 无编码器 ⇒ 明确 blocked，而不是产出空文件）。 */
   readonly encoder?: EncoderPort
+}
+
+/**
+ * **声明时长 vs 编码时长**的量化诊断（null = 无偏差或无从判定）。
+ *
+ * 只在 `animation` + `gif` 且每帧都声明了 `holdMs` 时可判定：GIF 的时延单位是
+ * 厘秒，故产物时长 = `Σ delayCs × 10`，与声明时长 `Σ holdMs` 可能不同。**不阻塞**：
+ * 50ms/100ms 这类合法声明本来就落在整数厘秒上；非整数倍（如 45ms）只是不可完全表达。
+ */
+export function timeQuantizationOf(
+  request: ExportRequest,
+  kind: ExportKind,
+  encoding: ArtifactEncoding,
+): ExportDiagnostic | null {
+  if (kind !== 'animation' || encoding !== 'gif') return null
+  const holds: number[] = []
+  for (const f of request.frames) {
+    if (f.holdMs === undefined) return null // 端口会判 `encoderHoldMissing`，这里不猜
+    holds.push(f.holdMs)
+  }
+  if (holds.length === 0) return null
+  const delays = delayCsOf(holds)
+  if (!delays.ok) return null // 由端口/预检判红，不在这里伪造读数
+  const declaredMs = holds.reduce((a, b) => a + b, 0)
+  const encodedMs = delays.value.reduce((a, b) => a + b, 0) * 10
+  if (declaredMs === encodedMs) return null
+  return Object.freeze({
+    code: 'ExportTimeQuantized' as const,
+    detail: Object.freeze({
+      declaredMs,
+      encodedMs,
+      roundUnit: 'cs',
+      frames: holds.length,
+      deltaMs: encodedMs - declaredMs,
+    }),
+  })
 }
 
 /**
@@ -649,7 +746,10 @@ export interface PreflightInput {
  * 这里对 `mapping.source === 'runtime'` 且 `frames` 为空的组合补一条诊断。
  */
 export function preflightExport(input: PreflightInput): ExportPreflight {
+  /** 阻塞项（决定 `blocked`）。 */
   const diagnostics: ExportDiagnostic[] = []
+  /** 非阻塞项（"已完成但有偏差"）：状态仍可为 `ready`，但必须随结局报出。 */
+  const notes: ExportDiagnostic[] = []
   const { request } = input
 
   if (request.frames.length === 0) {
@@ -714,6 +814,36 @@ export function preflightExport(input: PreflightInput): ExportPreflight {
     )
   }
 
+  // **kind × encoding 兼容表**（D5）。今天没有任何判据打到 `encoding` 维度 ——
+  // 于是 `image+gif` 会被放行、再由"按 PNG 编却声明 image/gif"的路径产出伪产物。
+  if (input.encoding !== undefined) {
+    if (!encodingAllowedFor(input.kind, input.encoding)) {
+      diagnostics.push(
+        Object.freeze({
+          code: 'ExportKindUnsupported',
+          detail: Object.freeze({
+            kind: input.kind,
+            encoding: input.encoding,
+            allowed: supportedEncodingsFor(input.kind).join(','),
+            reason: 'encodingNotAllowedForKind',
+          }),
+        }),
+      )
+    } else if (
+      input.encoder !== undefined &&
+      input.encoder.supportedEncodings !== undefined &&
+      !input.encoder.supportedEncodings.includes(input.encoding)
+    ) {
+      // 种类对、但端口没有这个编码器（例如 PNG 端口被要求出 gif）⇒ 明确缺能力。
+      diagnostics.push(
+        Object.freeze({ code: 'ExportEncodingNotConfigured', detail: Object.freeze({ kind: input.kind, encoding: input.encoding }) }),
+      )
+    } else {
+      const quantized = timeQuantizationOf(request, input.kind, input.encoding)
+      if (quantized !== null) notes.push(quantized)
+    }
+  }
+
   if (Object.keys(request.payload.scene.objects).length === 0) {
     diagnostics.push(
       Object.freeze({ code: 'ExportEmptyScene', detail: Object.freeze({ sceneId: request.payload.sceneId, objects: 0 }) }),
@@ -721,8 +851,8 @@ export function preflightExport(input: PreflightInput): ExportPreflight {
   }
 
   return diagnostics.length === 0
-    ? Object.freeze({ status: 'ready' as const, diagnostics: Object.freeze([]) })
-    : Object.freeze({ status: 'blocked' as const, diagnostics: Object.freeze(diagnostics) })
+    ? Object.freeze({ status: 'ready' as const, diagnostics: Object.freeze([...notes]) })
+    : Object.freeze({ status: 'blocked' as const, diagnostics: Object.freeze([...diagnostics, ...notes]) })
 }
 
 function flatten(detail: Readonly<Record<string, string | number>>): Record<string, string | number> {

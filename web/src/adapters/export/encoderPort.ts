@@ -8,14 +8,23 @@
  * | `EncoderPort` **零生产实现**（导出政策层只声明"能不能编码"，无人实现） | 本批前的实况 | 本文件是那个实现：`supportedKinds` + `encode()` |
  * | 经画布编码（`canvas.toBlob` / `toDataURL`） | `workbench/textureAtlasRaster.ts`、`workbench/exportIsometricImage.ts` | 纯字节编码（`adapters/export/pngEncoder`），无 DOM |
  *
- * ## 支持面**诚实声明**（不假装能编 GIF/OBJ/JSON）
+ * ## 组合，而不是"全知端口"（M6-2 / D4）
  *
- * `supportedKinds` 只列**本实现真能编码**的种类：`'image'`（PNG/JPEG）。
- * 其余三类**明确不列** —— 于是 `application/exportPlan.preflightExport` 会据
- * `encoder.supportedKinds.includes(kind)` 判 `ExportKindUnsupported` 而**阻塞**。
+ * 本文件给两个 part：{@link createPngEncoderPort}（`image` + `png`）与
+ * `createGifEncoderPort`（`animation` + `gif`，见 `adapters/export/gifEncoderPort`）。
+ * {@link createEncoderPort} 是**组合端口**：能力字段取并集，encode 按 kind/encoding 分派，
+ * part 的失败原样冒泡并补 `part` 名。⇒ 想编 GIF 必须真的有 GIF part，
+ * "声明了两类却只实现一类"的伪产物形态在这里没有位置。
+ *
+ * ## 支持面**诚实声明**（不假装能编 OBJ/JSON/JPEG）
+ *
+ * 每个 part 的 `supportedKinds` 只列它真能编码的种类：PNG part 是 `'image'`，
+ * GIF part 是 `'animation'`。其余种类**在该 part 上明确不列** —— 于是
+ * `application/exportPlan.preflightExport` 会据 `supportedKinds` 判
+ * `ExportKindUnsupported` 而**阻塞**。
  *
  * 这是 #249 §12「不支持的导出**明确报告**，不假成功」的直接落地：
- * 若把四类全列上而只实现 image，预检会放行、`encode` 要么抛要么产出错的字节
+ * 若把四类全列上而只实现一类，预检会放行、`encode` 要么抛要么产出错的字节
  * —— 那就是"伪完整文件"。**声明即能力**，声明面与实现面必须同一份事实。
  *
  * ## 为什么不是 `async` 包一层就算完
@@ -30,13 +39,17 @@
  * **不产出部分字节**。这里没有超时、不读墙钟 —— 想取消就显式 `cancel()`。
  */
 
-import { ok, err, unsupportedOperation, type Result } from '@/domain/errors'
+import { ok, err, unsupportedOperation, type DomainError, type Result } from '@/domain/errors'
 import { PNG_COLOR_TYPE_RGBA } from './pngEncoder'
-import type { EncoderInput, EncoderPort, ExportKind, RenderedFrame } from '@/application/exportPlan'
+import type { ArtifactEncoding, EncoderInput, EncoderPort, ExportKind, RenderedFrame } from '@/application/exportPlan'
 import { encodePngFromRgba } from './pngEncoder'
+import { createGifEncoderPort } from './gifEncoderPort'
 
-/** 本实现**真能编码**的种类（见文件头「支持面诚实声明」）。 */
+/** **PNG 端口**真能编码的种类（见文件头「支持面诚实声明」；组合端口才声明 animation）。 */
 export const SUPPORTED_ENCODE_KINDS: readonly ExportKind[] = Object.freeze(['image'] as const)
+
+/** **PNG 端口**真能编码的格式（JPEG 显式拒绝：见 `createPngEncoderPort` 的注释）。 */
+export const SUPPORTED_ENCODE_ENCODINGS: readonly ArtifactEncoding[] = Object.freeze(['png'] as const)
 
 /**
  * 图片编码器（PNG 完整实现；JPEG **明确不支持**）。
@@ -50,7 +63,9 @@ export const SUPPORTED_ENCODE_KINDS: readonly ExportKind[] = Object.freeze(['ima
  */
 export function createPngEncoderPort(): EncoderPort {
   return {
+    name: 'png',
     supportedKinds: SUPPORTED_ENCODE_KINDS,
+    supportedEncodings: SUPPORTED_ENCODE_ENCODINGS,
     async encode(input: EncoderInput): Promise<Result<Uint8Array>> {
       if (!SUPPORTED_ENCODE_KINDS.includes(input.kind)) {
         return err(
@@ -79,7 +94,7 @@ export function createPngEncoderPort(): EncoderPort {
           unsupportedOperation({
             reason: 'encoderImageTakesSingleFrame',
             frames: frames.length,
-            hint: '多帧请用 kind=animation（本实现尚未支持）',
+            hint: '多帧请用 kind=animation + encoding=gif（PNG 端口只出单帧）',
           }),
         )
       }
@@ -136,9 +151,91 @@ function encodeFrame(frame: RenderedFrame): Result<Uint8Array> {
   }
 }
 
-/** 便于装配层的工厂风格入口。 */
-export function createEncoderPort(): EncoderPort {
-  return createPngEncoderPort()
+/**
+ * **组合端口**：按 `kind` 选 part，同 kind 多 part 时再按 `encoding` 筛（M6-2 / D4）。
+ *
+ * 为什么不造一个"全知端口"：`encoderPort.ts:11-19` 的原则是**声明即能力** ——
+ * 一个端口声明两类却只实现一类，预检就会放行伪产物。组合则让每个 part 各自诚实，
+ * 而 `supportedKinds/supportedEncodings` 取并集，预检据此判"整体能不能编"。
+ *
+ * 三条可测语义：
+ * 1. 能力字段是**并集**（part 的顺序决定并集顺序 ⇒ 稳定）；
+ * 2. 无匹配 part ⇒ `encoderKindUnsupported`（沿用既有码）或 `encoderEncodingUnsupported`；
+ * 3. part 的失败**原样**冒泡，但补 `part` 名（否则"GIF 编不出来"与"PNG 编不出来"不可区分）。
+ *
+ * 公共前置（与 part 无关、对全部 kind 都成立）：零帧、帧尺寸与 `request.render` 不符。
+ * 它们放在分派**之前**，使"尺寸漂移"不会被某个 part 漏检。
+ */
+export function createEncoderPort(
+  parts: readonly EncoderPort[] = [createPngEncoderPort(), createGifEncoderPort()],
+): EncoderPort {
+  const kinds: ExportKind[] = []
+  const encodings: ArtifactEncoding[] = []
+  for (const part of parts) {
+    for (const k of part.supportedKinds) if (!kinds.includes(k)) kinds.push(k)
+    for (const e of part.supportedEncodings ?? []) if (!encodings.includes(e)) encodings.push(e)
+  }
+
+  return {
+    name: parts.map((p) => p.name ?? p.supportedKinds.join('+')).join('+'),
+    supportedKinds: Object.freeze(kinds),
+    supportedEncodings: Object.freeze(encodings),
+    async encode(input: EncoderInput): Promise<Result<Uint8Array>> {
+      // 零帧：不产出"空但合法"的产物（这是"伪完整文件"的最简形态）。
+      if (input.rendered.length === 0) {
+        return err(unsupportedOperation({ reason: 'encoderNoFrames', requestId: input.request.requestId }))
+      }
+      for (let i = 0; i < input.rendered.length; i++) {
+        const frame = input.rendered[i]!
+        if (frame.width !== input.request.render.width || frame.height !== input.request.render.height) {
+          return err(
+            unsupportedOperation({
+              reason: 'encoderFrameSizeMismatch',
+              frameIndex: i,
+              frameWidth: frame.width,
+              frameHeight: frame.height,
+              requestWidth: input.request.render.width,
+              requestHeight: input.request.render.height,
+            }),
+          )
+        }
+      }
+
+      const byKind = parts.filter((p) => p.supportedKinds.includes(input.kind))
+      if (byKind.length === 0) {
+        return err(
+          unsupportedOperation({
+            reason: 'encoderKindUnsupported',
+            kind: input.kind,
+            supported: kinds.join(','),
+          }),
+        )
+      }
+      const chosen = byKind.length === 1
+        ? byKind[0]!
+        : byKind.find((p) => (p.supportedEncodings ?? []).includes(input.encoding))
+      if (chosen === undefined) {
+        return err(
+          unsupportedOperation({
+            reason: 'encoderEncodingUnsupported',
+            kind: input.kind,
+            encoding: input.encoding,
+            supported: encodings.join(','),
+          }),
+        )
+      }
+
+      const result = await chosen.encode(input)
+      if (result.ok) return result
+      const part = chosen.name ?? chosen.supportedKinds.join('+')
+      return err(withPart(result.error, part))
+    },
+  }
+}
+
+/** 给失败侧补 `part`（保留原 code 与全部 params —— 判据仍按原 reason 断言）。 */
+function withPart(error: DomainError, part: string): DomainError {
+  return Object.freeze({ ...error, params: Object.freeze({ ...error.params, part }) })
 }
 
 /** 未使用占位：保持 `PNG_COLOR_TYPE_RGBA` 可达（判据经它核对 IHDR 色彩类型）。 */

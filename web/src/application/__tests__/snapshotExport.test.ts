@@ -36,6 +36,7 @@ import {
 import { LOOP_LIMITS } from '@/domain/materials'
 import {
   describeExportRequest,
+  encodingAllowedFor,
   evaluationKeyOf,
   fileExtensionOf,
   mediaTypeOf,
@@ -45,6 +46,8 @@ import {
   preflightExport,
   planSourceFrames,
   requestMatchesVersion,
+  supportedEncodingsFor,
+  timeQuantizationOf,
   type EncoderPort,
   type ExportKind,
   type RenderedFrame,
@@ -138,6 +141,20 @@ function fakePort(opts: { failAcquire?: boolean; failFrame?: number } = {}) {
     },
   }
   return { port, state }
+}
+
+/**
+ * 一个"只有 PNG"的端口（诚实声明 supportedEncodings）——
+ * 用于 N10/N11 的"种类对但端口没有该编码"分支（M6-2）。
+ */
+function pngOnlyEncoder(): EncoderPort {
+  return {
+    supportedKinds: ['image', 'animation'],
+    supportedEncodings: ['png'],
+    async encode() {
+      return { ok: true, value: new Uint8Array([0]) }
+    },
+  }
 }
 
 /** 一个"总是成功"的编码器（其字节可辨识，便于断言产物来自哪次请求）。 */
@@ -555,6 +572,94 @@ describe('A29：预检 —— 缺必需资源 / 无编码器 / 有损未显式 �
     expect(e).not.toBeNull()
     expect(['UnsupportedOperation', 'InvalidValue', 'MissingTarget']).toContain(e!.code)
     expect(typeof e!.params.reason).toBe('string')
+  })
+})
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 三·补（M6-2）：kind × encoding 兼容表（N10/N11）与时长量化诊断（不阻塞）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('M6-2 N10/N11：kind × encoding 兼容表（格式与种类不许"各自为政"）', () => {
+  it('N10 image + gif ⇒ blocked（不得静默产出 GIF 字节却叫 png）', () => {
+    const pre = preflightExport({ request: requestOf(), kind: 'image', encoding: 'gif', encoder: okEncoder() })
+    expect(pre.status).toBe('blocked')
+    const d = pre.diagnostics.find((x) => x.code === 'ExportKindUnsupported')
+    expect(d, '必须判 ExportKindUnsupported（不是"按 png 编完就完事"）').toBeDefined()
+    expect(d!.detail.reason).toBe('encodingNotAllowedForKind')
+    expect(d!.detail.encoding).toBe('gif')
+    expect(d!.detail.allowed).toBe('png,jpeg')
+  })
+
+  it('N11 animation + png ⇒ blocked（反向同样）', () => {
+    const pre = preflightExport({ request: requestOf(), kind: 'animation', encoding: 'png', encoder: okEncoder() })
+    expect(pre.status).toBe('blocked')
+    const d = pre.diagnostics.find((x) => x.code === 'ExportKindUnsupported')
+    expect(d).toBeDefined()
+    expect(d!.detail.allowed).toBe('gif')
+  })
+
+  it('兼容表本身：image ⇒ png/jpeg、animation ⇒ gif、geometry/project ⇒ 空（由 encoder 缺省拒绝）', () => {
+    expect([...supportedEncodingsFor('image')]).toEqual(['png', 'jpeg'])
+    expect([...supportedEncodingsFor('animation')]).toEqual(['gif'])
+    expect([...supportedEncodingsFor('geometry')]).toEqual([])
+    expect([...supportedEncodingsFor('project')]).toEqual([])
+    expect(encodingAllowedFor('image', 'png')).toBe(true)
+    expect(encodingAllowedFor('image', 'gif')).toBe(false)
+    expect(encodingAllowedFor('animation', 'gif')).toBe(true)
+    expect(encodingAllowedFor('animation', 'jpeg')).toBe(false)
+  })
+
+  it('种类对、但端口没有该编码 ⇒ ExportEncodingNotConfigured（PNG 端口被要求出 gif）', () => {
+    const pre = preflightExport({ request: requestOf(), kind: 'animation', encoding: 'gif', encoder: pngOnlyEncoder() })
+    expect(pre.status).toBe('blocked')
+    expect(pre.diagnostics.map((d) => d.code)).toContain('ExportEncodingNotConfigured')
+  })
+
+  it('正面对照：animation + gif + 能出 GIF 的端口 ⇒ ready（不是"一律拦动画"）', () => {
+    const pre = preflightExport({ request: requestOf(), kind: 'animation', encoding: 'gif', encoder: okEncoder() })
+    expect(pre.status).toBe('ready')
+  })
+})
+
+describe('M6-2：ExportTimeQuantized —— 声明时长与产物时长不一致时**报告但不阻塞**', () => {
+  it('holds 为 10 的整数倍 ⇒ 无诊断、无偏差', () => {
+    const req = requestOf({ spec: holdsSpec({ holdsMs: [50, 100, 50] }) })
+    expect(timeQuantizationOf(req, 'animation', 'gif')).toBeNull()
+    expect(preflightExport({ request: req, kind: 'animation', encoding: 'gif', encoder: okEncoder() }).status).toBe('ready')
+  })
+
+  it('holds 非 10 的倍数（45ms）⇒ ExportTimeQuantized，且**仍 ready**（已完成但有偏差）', () => {
+    const req = requestOf({ spec: holdsSpec({ holdsMs: [45, 45, 45] }) })
+    const note = timeQuantizationOf(req, 'animation', 'gif')
+    expect(note, '非整数厘秒必须产出结构化诊断（不静默）').not.toBeNull()
+    expect(note!.code).toBe('ExportTimeQuantized')
+    expect(note!.detail.declaredMs).toBe(135)
+    // Σ delayCs = 5+5+4? 由 delayCsOf 的最大余数法决定；此处只断言"偏差等于所报的量"。
+    const encoded = Number(note!.detail.encodedMs)
+    expect(note!.detail.roundUnit).toBe('cs')
+    expect(note!.detail.frames).toBe(3)
+    expect(encoded % 10).toBe(0)
+    expect(Number(note!.detail.deltaMs)).toBe(encoded - 135)
+    // 不阻塞：状态仍 ready，诊断随行。
+    const pre = preflightExport({ request: req, kind: 'animation', encoding: 'gif', encoder: okEncoder() })
+    expect(pre.status, '量化不是错误（阻塞会把 50/100ms 这类合法声明也判红）').toBe('ready')
+    expect(pre.diagnostics.map((d) => d.code)).toContain('ExportTimeQuantized')
+  })
+
+  it('作业完成时把非阻塞诊断带进产物结局（不是"预检说了、结局不说"）', async () => {
+    const req = requestOf({ spec: holdsSpec({ holdsMs: [45, 45, 45] }) })
+    const job = new ExportJob({ request: req, kind: 'animation', encoding: 'gif', port: fakePort().port, encoder: okEncoder() })
+    const outcome = await job.run()
+    expect(outcome.status).toBe('completed')
+    if (outcome.status !== 'completed') return
+    expect(outcome.diagnostics.map((d) => d.code)).toContain('ExportTimeQuantized')
+  })
+
+  it('非动画/非 gif 一律不判量化（图片没有"逐帧驻留"这回事）', () => {
+    const req = requestOf({ spec: holdsSpec({ holdsMs: [45, 45, 45] }) })
+    expect(timeQuantizationOf(req, 'image', 'png')).toBeNull()
+    expect(timeQuantizationOf(req, 'animation', 'png')).toBeNull()
   })
 })
 

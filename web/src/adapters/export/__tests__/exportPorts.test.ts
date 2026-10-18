@@ -28,7 +28,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import pako from 'pako'
 import { PNG_MAGIC, crc32, encodePngFromRgba } from '@/adapters/export/pngEncoder'
-import { createEncoderPort, SUPPORTED_ENCODE_KINDS } from '@/adapters/export/encoderPort'
+import { createEncoderPort, createPngEncoderPort, SUPPORTED_ENCODE_KINDS } from '@/adapters/export/encoderPort'
+import {
+  SUPPORTED_ANIMATION_ENCODE_KINDS,
+  SUPPORTED_ANIMATION_ENCODINGS,
+  createGifEncoderPort,
+} from '@/adapters/export/gifEncoderPort'
+import { encodeGifBytes } from '@/adapters/export/gifEncoder'
+import { delayCsOf } from '@/domain/materials'
 import { createSnapshotOffscreenRenderPort } from '@/adapters/export/offscreenRenderPort'
 import { assembleSnapshotExportJob } from '@/adapters/export/snapshotExportJob'
 import type { OffscreenDevice, OffscreenDeviceFactory } from '@/adapters/export/renderDevice'
@@ -258,14 +265,20 @@ describe('E1 · 两个端口各有**生产实现**，且 ExportJob 有生产构�
     expect(typeof encoder.encode).toBe('function')
   })
 
-  it('编码器 `supportedKinds` **诚实声明**：只列真能编码的种类', () => {
-    // 把四类全列上而只实现 image 会让预检放行、编码阶段产出错误字节（伪完整文件）。
+  it('编码端口 **诚实声明**：每个 part 只列自己真能编码的种类，组合端口取并集', () => {
+    // PNG part 只声明 image；GIF part 只声明 animation —— 谁都不"顺手全列"。
     expect([...SUPPORTED_ENCODE_KINDS]).toEqual(['image'])
+    expect([...SUPPORTED_ANIMATION_ENCODE_KINDS]).toEqual(['animation'])
+    expect([...SUPPORTED_ANIMATION_ENCODINGS]).toEqual(['gif'])
+    expect([...createPngEncoderPort().supportedEncodings!]).toEqual(['png'])
+    expect([...createGifEncoderPort().supportedEncodings!]).toEqual(['gif'])
+
+    // 组合端口的能力 = 各 part 的**并集**（geometry/project 谁都不声明）。
     const encoder = createEncoderPort()
-    expect([...encoder.supportedKinds]).toEqual(['image'])
-    // 于是非 image 种类会被预检判 ExportKindUnsupported（而不是静默产出）
-    for (const kind of ['animation', 'geometry', 'project'] as const) {
-      expect(encoder.supportedKinds.includes(kind), `${kind} 不得被声明为支持`).toBe(false)
+    expect([...encoder.supportedKinds]).toEqual(['image', 'animation'])
+    expect([...encoder.supportedEncodings!].sort()).toEqual(['gif', 'png'])
+    for (const kind of ['geometry', 'project'] as const) {
+      expect(encoder.supportedKinds.includes(kind), kind + ' 不得被声明为支持').toBe(false)
     }
   })
 
@@ -435,23 +448,29 @@ describe('E2·E3·E4 · 真实 PNG 字节 + 像素真的进去了', () => {
     if (!r.ok) expect(r.error.params.reason).toBe('encoderEncodingUnsupported')
   })
 
-  it('E3：非 image 种类被显式拒绝（声明面与实现面同一份事实）', async () => {
+  it('E3：种类/格式不匹配被显式拒绝（声明面与实现面同一份事实）', async () => {
     const w = 4
     const h = 2
     const encoder = createEncoderPort()
     const request = requestOf({ spec: specOf({ render: { width: w, height: h, background: 'transparent' } }) })
     const frame: RenderedFrame = Object.freeze({ index: 0, time: request.frames[0]!, pixels: deterministicPixels(w, h), width: w, height: h })
-    for (const kind of ['animation', 'geometry', 'project'] as const) {
-      const r = await encoder.encode({
-        request,
-        kind,
-        encoding: 'png',
-        rendered: [frame],
-        signal: { cancelled: false },
-      })
-      expect(r.ok, `${kind} 必须显式拒绝（supportedKinds 未声明它）`).toBe(false)
+
+    // 谁都没声明 geometry/project ⇒ 种类级拒绝。
+    for (const kind of ['geometry', 'project'] as const) {
+      const r = await encoder.encode({ request, kind, encoding: 'png', rendered: [frame], signal: { cancelled: false } })
+      expect(r.ok, kind + ' 必须显式拒绝（supportedKinds 未声明它）').toBe(false)
       if (!r.ok) expect(r.error.params.reason).toBe('encoderKindUnsupported')
     }
+
+    // animation 种类**有** GIF part，但 png 不是它的格式 ⇒ 格式级拒绝（不是"种类不支持"）。
+    const wrongFormat = await encoder.encode({ request, kind: 'animation', encoding: 'png', rendered: [frame], signal: { cancelled: false } })
+    expect(wrongFormat.ok).toBe(false)
+    if (!wrongFormat.ok) expect(wrongFormat.error.params.reason).toBe('encoderEncodingUnsupported')
+
+    // image + gif **不会**被静默按 PNG 编出来：PNG part 只声明 png。
+    const imageGif = await encoder.encode({ request, kind: 'image', encoding: 'gif', rendered: [frame], signal: { cancelled: false } })
+    expect(imageGif.ok, 'image+gif 不得静默产出 PNG 字节却叫 gif').toBe(false)
+    if (!imageGif.ok) expect(imageGif.error.params.reason).toBe('encoderEncodingUnsupported')
   })
 
   it('E3：零帧被显式拒绝（不产出"空但合法"的 PNG）', async () => {
@@ -759,7 +778,9 @@ describe('E6 · 链路闭环：`ExportJob.run()` + 两个真端口 ⇒ 完整 PN
     const { request, content } = await realRequestOf()
     const { job } = assembleSnapshotExportJob({
       request,
-      kind: 'animation', // 编码器不支持 ⇒ 预检必须阻塞
+      // M6-2：组合编码端口现在**支持** animation（GIF part），故本负对照改用
+      // 谁都不声明的 geometry（否则这条判据会因为"种类突然被支持"而失去对象）。
+      kind: 'geometry',
       devices: dev.factory,
       content,
       scope: 'e6-neg2',
@@ -819,6 +840,321 @@ describe('E6 · 链路闭环：`ExportJob.run()` + 两个真端口 ⇒ 完整 PN
     expect(outcome.status).toBe('completed')
     expect(outcome.releasedFor, '`releasedFor` 必须等于端口报告的分配数').toBe(port.allocatedCount)
     expect(port.allocatedCount, '分配数必须非零（否则该判据恒真）').toBeGreaterThan(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// N12–N20（M6-2）：动画（GIF）编码端口的**负对照面**
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 造一帧"有驻留"的渲染结果（`holdMs` 由调用方给，缺席则不给该字段）。 */
+function gifFrame(request: ReturnType<typeof requestOf>, index: number, over: { holdMs?: number; w?: number; h?: number } = {}): RenderedFrame {
+  const w = over.w ?? request.render.width
+  const h = over.h ?? request.render.height
+  const base = Object.freeze({
+    index,
+    time: request.frames[index]!,
+    pixels: deterministicPixels(w, h),
+    width: w,
+    height: h,
+  })
+  return over.holdMs === undefined ? base : Object.freeze({ ...base, holdMs: over.holdMs })
+}
+
+/** 一份"三帧、逐帧驻留"的动画请求（GIF 的合法输入）。 */
+function gifRequestOf(holdsMs: readonly number[] = [50, 100, 50]) {
+  return requestOf({
+    spec: specOf({
+      frameCount: holdsMs.length,
+      mapping: { source: 'scene-holds', startSeconds: 0, holdsMs },
+      render: { width: 4, height: 4, background: 'transparent' },
+    }),
+  })
+}
+
+/** 把请求的冻结序列逐帧搬成渲染结果（holdMs 与 CaptureTime.holdMs 同值）。 */
+function withHolds(request: ReturnType<typeof requestOf>): RenderedFrame[] {
+  return request.frames.map((f, i) => gifFrame(request, i, { holdMs: f.holdMs }))
+}
+
+describe('N12–N20（M6-2）· GIF 端口的每一条拒绝都能判红', () => {
+  it('正面对照：合法动画输入 ⇒ 真 GIF89a 字节（魔数 + trailer）', async () => {
+    const request = gifRequestOf()
+    const enc = createGifEncoderPort()
+    const r = await enc.encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered: withHolds(request),
+      signal: { cancelled: false },
+    })
+    expect(r.ok, '合法输入必须成功').toBe(true)
+    if (!r.ok) return
+    expect(String.fromCharCode(...r.value.subarray(0, 6)), 'GIF 魔数').toBe('GIF89a')
+    expect(r.value[r.value.length - 1], 'GIF trailer 必须是 0x3B').toBe(0x3b)
+    expect(r.value.length, '必须是真实字节').toBeGreaterThan(50)
+  })
+
+  it('N12 零帧 ⇒ encoderNoFrames（不产出"空但合法"的 GIF）', async () => {
+    const request = gifRequestOf()
+    const r = await createGifEncoderPort().encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered: [],
+      signal: { cancelled: false },
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error.params.reason).toBe('encoderNoFrames')
+  })
+
+  it('N13 image + 多帧 ⇒ encoderImageTakesSingleFrame（保留；hint 指向 animation）', async () => {
+    const request = requestOf({ spec: specOf({ frameCount: 2, render: { width: 4, height: 4, background: 'transparent' } }) })
+    const r = await createEncoderPort().encode({
+      request,
+      kind: 'image',
+      encoding: 'png',
+      rendered: request.frames.map((_, i) => gifFrame(request, i)),
+      signal: { cancelled: false },
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error.params.reason).toBe('encoderImageTakesSingleFrame')
+      expect(String(r.error.params.hint)).toContain('animation')
+    }
+  })
+
+  it('N14 动画里某帧 holdMs 缺席 ⇒ encoderHoldMissing{index}（不按帧率补一个）', async () => {
+    const request = gifRequestOf()
+    const frames = withHolds(request)
+    const withoutHold = Object.freeze({
+      index: frames[1]!.index,
+      time: frames[1]!.time,
+      pixels: frames[1]!.pixels,
+      width: frames[1]!.width,
+      height: frames[1]!.height,
+    })
+    const r = await createGifEncoderPort().encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered: [frames[0]!, withoutHold, frames[2]!],
+      signal: { cancelled: false },
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error.params.reason).toBe('encoderHoldMissing')
+      expect(r.error.params.index).toBe(1)
+    }
+  })
+
+  it('N15 渲染帧数 ≠ 请求采样数 ⇒ encoderFrameCountMismatch（少渲一帧不得编成短 GIF）', async () => {
+    const request = gifRequestOf([50, 100, 50])
+    const frames = withHolds(request).slice(0, 2)
+    const r = await createGifEncoderPort().encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered: frames,
+      signal: { cancelled: false },
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error.params.reason).toBe('encoderFrameCountMismatch')
+      expect(r.error.params.rendered).toBe(2)
+      expect(r.error.params.frames).toBe(3)
+    }
+  })
+
+  it('N16 ΣdelayCs 撞 1 厘秒地板 ⇒ textureLoopTooShort（domain 码，带 part）', async () => {
+    const request = gifRequestOf([1, 1, 1, 1])
+    const r = await createGifEncoderPort().encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered: withHolds(request),
+      signal: { cancelled: false },
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error.code).toBe('UnsupportedOperation')
+      expect(r.error.params.reason).toBe('textureLoopTooShort')
+      expect(r.error.params.part, '失败侧必须能归因到 part').toBe('gif')
+    }
+  })
+
+  it('N17 loopCount 非法（-1 / 1.5）⇒ encoderLoopCountInvalid；0/2 合法', async () => {
+    const request = gifRequestOf()
+    for (const bad of [-1, 1.5]) {
+      const r = await createGifEncoderPort().encode({
+        request,
+        kind: 'animation',
+        encoding: 'gif',
+        rendered: withHolds(request),
+        signal: { cancelled: false },
+        loopCount: bad,
+      })
+      expect(r.ok, 'loopCount=' + bad + ' 必须被拒绝').toBe(false)
+      if (!r.ok) expect(r.error.params.reason).toBe('encoderLoopCountInvalid')
+    }
+    for (const good of [0, 2]) {
+      const r = await createGifEncoderPort().encode({
+        request,
+        kind: 'animation',
+        encoding: 'gif',
+        rendered: withHolds(request),
+        signal: { cancelled: false },
+        loopCount: good,
+      })
+      expect(r.ok, 'loopCount=' + good + ' 必须成功').toBe(true)
+    }
+  })
+
+  it('N18 帧尺寸 ≠ request.render ⇒ encoderFrameSizeMismatch（动画同样要查，在**公共前置**）', async () => {
+    const request = gifRequestOf()
+    const frames = withHolds(request)
+    const wrong = gifFrame(request, 1, { holdMs: frames[1]!.holdMs, w: 2, h: 2 })
+    const rendered = [frames[0]!, wrong, frames[2]!]
+    const composite = await createEncoderPort().encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered,
+      signal: { cancelled: false },
+    })
+    expect(composite.ok).toBe(false)
+    if (!composite.ok) {
+      expect(composite.error.params.reason).toBe('encoderFrameSizeMismatch')
+      expect(composite.error.params.frameIndex).toBe(1)
+    }
+    // GIF part 自身也查（纵深防御：直接调 part 也不能产出尺寸漂移的 GIF）。
+    const part = await createGifEncoderPort().encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered,
+      signal: { cancelled: false },
+    })
+    expect(part.ok).toBe(false)
+    if (!part.ok) expect(part.error.params.reason).toBe('encoderFrameSizeMismatch')
+  })
+
+  it('N19 signal.cancelled ⇒ encoderCancelled + 零字节（不产出半个 GIF）', async () => {
+    const request = gifRequestOf()
+    const early = await createGifEncoderPort().encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered: withHolds(request),
+      signal: { cancelled: true },
+    })
+    expect(early.ok).toBe(false)
+    if (!early.ok) expect(early.error.params.reason).toBe('encoderCancelled')
+    expect('bytes' in early).toBe(false)
+
+    // 帧循环**中途**取消（活视图）：第二次读取起返回 true ⇒ 同样零字节。
+    let reads = 0
+    const signal = {
+      get cancelled() {
+        reads += 1
+        return reads > 1
+      },
+    }
+    const midway = await createGifEncoderPort().encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered: withHolds(request),
+      signal,
+    })
+    expect(midway.ok, '中途取消必须失败').toBe(false)
+    if (!midway.ok) expect(midway.error.params.reason).toBe('encoderCancelled')
+    expect('bytes' in midway).toBe(false)
+  })
+
+  it('N20 直接调 createPngEncoderPort() 编 animation ⇒ encoderKindUnsupported', async () => {
+    const request = gifRequestOf()
+    const pngOnly = createPngEncoderPort()
+    const r = await pngOnly.encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered: withHolds(request),
+      signal: { cancelled: false },
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error.params.reason).toBe('encoderKindUnsupported')
+      expect(String(r.error.params.supported)).toBe('image')
+    }
+    // 反空洞真：同一个 PNG 端口编 image/png 是**能成功**的（不是"什么都不会"）
+    const okImage = await pngOnly.encode({
+      request,
+      kind: 'image',
+      encoding: 'png',
+      rendered: [gifFrame(request, 0)],
+      signal: { cancelled: false },
+    })
+    expect(okImage.ok).toBe(true)
+  })
+
+  it('GIF 时延**来自声明**：产物里的 GCE delay 逐帧等于 delayCsOf(holdMs)', async () => {
+    const holds = [50, 100, 50]
+    const request = gifRequestOf(holds)
+    const r = await createGifEncoderPort().encode({
+      request,
+      kind: 'animation',
+      encoding: 'gif',
+      rendered: withHolds(request),
+      signal: { cancelled: false },
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const planned = delayCsOf(holds)
+    expect(planned.ok).toBe(true)
+    if (!planned.ok) return
+    // 唯一换算点给 [5,10,5]；旧"ticks*5 自算"会给 [5,5,5] —— 两者可区分。
+    expect([...planned.value]).toEqual([5, 10, 5])
+    expect([...planned.value]).not.toEqual([5, 5, 5])
+
+    // 从产物里**解出**每帧 Graphic Control Extension 的 delay（小端 uint16）。
+    const delays: number[] = []
+    const bytes = r.value
+    for (let i = 0; i + 8 < bytes.length; i++) {
+      if (bytes[i] === 0x21 && bytes[i + 1] === 0xf9 && bytes[i + 2] === 0x04) {
+        delays.push(bytes[i + 4]! | (bytes[i + 5]! << 8))
+      }
+    }
+    expect(delays, '产物里的逐帧时延必须等于计划（[5,10,5]，不是 [5,5,5]）').toEqual([5, 10, 5])
+  })
+
+  it('GIF 字节**逐字节可复现**（同一输入两次编码完全相同 —— GIF 无时间戳）', async () => {
+    const request = gifRequestOf()
+    const enc = createGifEncoderPort()
+    const a = await enc.encode({ request, kind: 'animation', encoding: 'gif', rendered: withHolds(request), signal: { cancelled: false } })
+    const b = await enc.encode({ request, kind: 'animation', encoding: 'gif', rendered: withHolds(request), signal: { cancelled: false } })
+    expect(a.ok && b.ok).toBe(true)
+    if (!a.ok || !b.ok) return
+    expect([...a.value]).toEqual([...b.value])
+  })
+
+  it('encodeGifBytes 的失败面是**值**（帧数/时延数、非法时延、loopCount、缓冲），不抛', () => {
+    const w = 2
+    const h = 2
+    const frames = [{ pixels: deterministicPixels(w, h), width: w, height: h }]
+    expect(encodeGifBytes([], [], { palette: 'frame', flipY: true, loopCount: 0 }).ok).toBe(false)
+    const mismatch = encodeGifBytes(frames, [5, 5], { palette: 'frame', flipY: true, loopCount: 0 })
+    expect(mismatch.ok).toBe(false)
+    if (!mismatch.ok) expect(mismatch.error.params.reason).toBe('gifDelayCountMismatch')
+    const badDelay = encodeGifBytes(frames, [0], { palette: 'frame', flipY: true, loopCount: 0 })
+    expect(badDelay.ok).toBe(false)
+    if (!badDelay.ok) expect(badDelay.error.params.reason).toBe('gifDelayInvalid')
+    const badLoop = encodeGifBytes(frames, [5], { palette: 'frame', flipY: true, loopCount: -1 })
+    expect(badLoop.ok).toBe(false)
+    if (!badLoop.ok) expect(badLoop.error.params.reason).toBe('gifLoopCountInvalid')
+    const badBuffer = encodeGifBytes([{ pixels: new Uint8Array(3), width: w, height: h }], [5], { palette: 'frame', flipY: true, loopCount: 0 })
+    expect(badBuffer.ok).toBe(false)
+    if (!badBuffer.ok) expect(badBuffer.error.params.reason).toBe('gifPixelBufferSizeMismatch')
   })
 })
 

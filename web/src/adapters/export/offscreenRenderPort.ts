@@ -225,6 +225,8 @@ export class SnapshotOffscreenRenderPort implements OffscreenRenderPort {
         pixels: read.value,
         width: request.render.width,
         height: request.render.height,
+        // 驻留**搬运**自冻结序列（不是这里按帧率重算 —— 那会成为第二套时间权威）。
+        ...(time.holdMs === undefined ? {} : { holdMs: time.holdMs }),
       }),
     )
   }
