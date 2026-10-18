@@ -52,6 +52,11 @@ import { compileScene, materialDescriptorsOf, type CompiledScene } from '@/prese
 import { PickIndex, evaluateStalePick, type PickResolution } from '@/presentation/pickingIndex'
 import { BatchedPresenter, type TexturePort } from '@/presentation/presenter'
 import {
+  DeviceStateMachine,
+  type DeviceGeneration,
+  type DeviceState,
+} from '@/presentation/deviceState'
+import {
   OverlayPresenter,
   type FaceQuadPort,
   type OutlineStyle,
@@ -129,6 +134,20 @@ export interface PresenterSessionOptions {
   readonly textures?: TexturePort
   /** 面标注的几何端口（`blockPos + quadIndex` → 烘焙四边形）。 */
   readonly faceQuads?: FaceQuadPort
+  /**
+   * **设备相位机**（M8-3：由装配边按视口从 `ViewportDeviceRegistry` 取，会话持有）。
+   *
+   * 缺省 = 本会话自建一台（离屏导出/单测）：设备代次与相位语义不变，只是不进入
+   * 生产视口的"其他 Area 继续可用"索引。两个视口**不得**共用一个实例。
+   */
+  readonly device?: DeviceStateMachine
+  /**
+   * 状态转移的时间戳来源（诊断审计用；纯层不读全局时钟）。
+   *
+   * 缺省 `() => 0`：单测得到确定性读数；生产装配边不传也**不**冒充真实时间
+   * —— 设备转移的排序语义不依赖墙钟（`transitions` 是追加序）。
+   */
+  readonly now?: () => number
 }
 
 /**
@@ -168,6 +187,16 @@ export class PresenterSession {
   private needsRebuild = false
 
   /**
+   * **设备相位机**（M8-3）：本轮丢失/恢复周期的唯一权威。
+   *
+   * `applyIfChanged` 的"允许提交"判据直接读它（`canSubmit()`）：
+   * 丢失期**不得**重建 GPU 份额（旧批处理句柄已失效），恢复后由浏览器事件把相位
+   * 推回 `ready` 并推进**设备代次**，下一次 apply 才用新代次重建。
+   */
+  private readonly device: DeviceStateMachine
+  private readonly now: () => number
+
+  /**
    * **分层预览**（R1-β① C8）：呈现侧的**可见层过滤**，由视口接线按当前层设置。
    *
    * ## 为什么它是会话状态而不是求值键的一维
@@ -204,6 +233,8 @@ export class PresenterSession {
   private lastInputs: PresentationInputs | null = null
 
   constructor(options: PresenterSessionOptions) {
+    this.device = options.device ?? new DeviceStateMachine()
+    this.now = options.now ?? (() => 0)
     this.presenter = new BatchedPresenter({
       scope: options.scope,
       ...(options.textures === undefined ? {} : { textures: options.textures }),
@@ -229,6 +260,52 @@ export class PresenterSession {
   /** 当前生效的求值键（A12 比对基准；`null` = 尚未 apply 过）。 */
   get activeKey(): EvaluationKey | null {
     return this.currentKey
+  }
+
+  /**
+   * 当前**设备代次**（SPEC §6:206；`number`，恢复后严格递增）。
+   *
+   * 与 {@link generation}（结构/内容世代，`g:xxxxxxxx`）**不同空间**、不互相赋值
+   * （§6:208「这些维度不能互相代替」）。读面消费者：e2e S3-b、设备诊断（关联字段）。
+   */
+  get deviceGeneration(): DeviceGeneration {
+    return this.device.deviceGeneration
+  }
+
+  /** 当前设备相位（`ready` / `lost` / `recovering` / `failed`）。 */
+  get devicePhase(): DeviceState['phase'] {
+    return this.device.current.phase
+  }
+
+  /** 设备相位快照（诊断/判据面；只读）。 */
+  get deviceState(): DeviceState {
+    return this.device.current
+  }
+
+  /** 设备相位转移审计（只读；有界，容量由 `DeviceStateMachine` 决定）。 */
+  deviceTransitions(): readonly import('@/presentation/deviceState').DeviceTransition[] {
+    return this.device.transitions
+  }
+
+  /**
+   * 当前是否允许向设备提交**新的** GPU 工作（`false` = 丢失期，呈现暂停）。
+   *
+   * 与 `pendingRebuild` 的分工：`pendingRebuild` 说"下一帧必须重建"，
+   * 本读面说"现在能不能重建"—— 两条一起把"丢失期不重建、恢复后必重建"钉住。
+   */
+  get deviceReady(): boolean {
+    return this.device.canSubmit()
+  }
+
+  /**
+   * 上次**实际应用**（真编译并上传）的内容身份（诊断/判据面）。
+   *
+   * 它是 `applyIfChanged` 去重用的同一份字符串（`k:<documentVersion>|s:<sceneId>|…`），
+   * 因此"恢复后重建用的是不是**当前**内容"可被机检：若恢复路径回放了丢失瞬间的
+   * 快照，这里会停在旧文档版本（§7.5:264「从当前有效状态重建」）。
+   */
+  get appliedContentIdentity(): string | null {
+    return this.lastIdentity
   }
 
   /**
@@ -287,6 +364,21 @@ export class PresenterSession {
     readonly content: DocumentContent
     readonly key: EvaluationKey
   }): PresenterApplyOutcome {
+    // ⓪ **设备丢失期暂停呈现**（M8-3）：旧句柄已失效，此时 apply 会把新份额
+    //    建在死设备上（违反 §7.5:262「不能继续使用旧代次句柄」）。相位由设备状态机
+    //    权威回答；恢复事件把它推回 ready 并推进设备代次，下一次调用才重建。
+    //    `needsRebuild` **保持 true**（否则恢复后会走内容身份短路 ⇒ 画面永久空白）。
+    if (!this.device.canSubmit()) {
+      this.currentKey = input.key
+      return {
+        applied: false,
+        compileError: null,
+        skipped: [],
+        compileSkipped: [],
+        generation: null,
+        batches: 0,
+      }
+    }
     // ① **先**落时间，再判结构身份（顺序是判据的一部分）：
     //    · 时间已不在结构身份里（见 contentIdentityOf），故"要不要重编"与它无关；
     //    · 但纹理样本必须**每帧**跟着时间走 —— 停止播放、暂停定位、快进后 identity 未变
@@ -345,8 +437,9 @@ export class PresenterSession {
     this.index = new PickIndex(compiled.value)
     this.lastIdentity = identity
     this.currentKey = input.key
-    // 真重建已发生 ⇒ 复位（一次丢失只需一次重建）
+    // 真重建已发生 ⇒ 复位（一次丢失只需一次重建）；并记录"本设备代次已呈现"。
     this.needsRebuild = false
+    this.device.markPresented(this.now())
 
     return {
       applied: true,
@@ -637,17 +730,28 @@ export class PresenterSession {
   /** WebGL 上下文丢失（旧句柄全部放弃；恢复时用当前有效版本重新 apply）。 */
   handleContextLost(): number {
     const n = this.presenter.handleContextLost()
+    // 注解/描边不属于批次账，但它们的 THREE 对象同样持有旧设备句柄 ⇒ 一并放弃
+    // （只用上次编译产物重画，不重编 —— 编译在 CPU 侧，与设备无关）。
+    this.overlay.handleContextLost()
     // 编译产物**保留**（它是 CPU 侧纯数据，可重建 GPU 句柄而不必重编）。
     // 但 `PickIndex` 与呈现器世代的对应关系已断 ⇒ 拾取必须等下一次 apply。
     this.index = null
     // P11-F 段②：旧 GPU 句柄已全部放弃 ⇒ 下一次 apply **必须**真重建
     // （绕过内容身份短路；否则"内容未变的丢失"永远等不到重建 = 画面永久空白）。
     this.needsRebuild = true
+    // M8-3：相位权威随之进入 lost（`applyIfChanged` 据此暂停提交，直到 restore）。
+    this.device.markLost('webgl-context-lost', this.now())
     return n
   }
 
   /** WebGL 上下文恢复（调用方随后用**当前有效版本**重新 apply 一次）。 */
   handleContextRestored(): void {
+    // M8-3：浏览器确认新上下文已建立 ⇒ 推进设备代次（旧代次从此不服役）。
+    const at = this.now()
+    this.device.markRecovering(at)
+    this.device.markRestored(at)
+    // 呈现器的份额代次随权威推进（旧代次份额此前已被 abandonAll 清空）。
+    this.presenter.beginDeviceGeneration(this.device.deviceGeneration)
     this.presenter.handleContextRestored()
     // 注解/描边不属于批次账（它们各自的几何/材质由 overlay 自己持有）⇒ 恢复时
     // 用**上次的编译产物**重画一次，保证"恢复后画面与丢失前同内容"。
@@ -656,7 +760,6 @@ export class PresenterSession {
       this.overlay.applyOutline(this.lastOutline.plan, this.lastOutline.style)
     }
   }
-
   /**
    * 应用**已编译**的注解图元（内核 `presentation/annotationPlan` 的产物）。
    *

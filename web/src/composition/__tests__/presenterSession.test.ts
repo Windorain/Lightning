@@ -25,6 +25,8 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import { PresenterSession } from '@/composition/presenterSession'
+import { attachViewportDeviceEvents } from '@/runtime/deviceEvents'
+import { createDiagnosticRecorder } from '@/application/diagnostics'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
 import { createParserRegistry } from '@/context/parserRegistry'
 import { V2PlainParser, WorldParser, StructureDataParser, createEnvelopeParser } from '@/context/parsers/builtinParsers'
@@ -37,6 +39,27 @@ import type { DocumentContent } from '@/domain/content'
 import fs from 'node:fs'
 import path from 'node:path'
 
+/**
+ * 最小的画布替身：只需要 `add/removeEventListener` + 派发。
+ *
+ * 用真浏览器 `EventTarget` 会要求 DOM 环境；而本判据要证的是"事件到达会话"，
+ * 监听注册/注销的语义与 DOM 一致即可（`removeEventListener` 后不得再派发到监听）。
+ */
+class FakeCanvas {
+  private readonly listeners = new Map<string, Set<(ev: Event) => void>>()
+  addEventListener(type: string, listener: (ev: Event) => void): void {
+    const set = this.listeners.get(type) ?? new Set<(ev: Event) => void>()
+    set.add(listener)
+    this.listeners.set(type, set)
+  }
+  removeEventListener(type: string, listener: (ev: Event) => void): void {
+    this.listeners.get(type)?.delete(listener)
+  }
+  dispatch(type: string): void {
+    const ev = new Event(type, { cancelable: true })
+    for (const listener of [...(this.listeners.get(type) ?? [])]) listener(ev)
+  }
+}
 function productionParsers() {
   const parsers = createParserRegistry()
   parsers.register(V2PlainParser)
@@ -674,22 +697,119 @@ describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢 + *
     ).toBe(true)
   })
 
-  it('**已知残余登记（接线面）**：生产视口尚未把设备丢失事件接到本会话（`src/` 生产面零调用方）', () => {
-    // ## 这条登记的是什么（以及为什么它不属于本批的修复范围）
+  it('**接线判据**：视口画布收到 webglcontextlost ⇒ 会话进入待重建（旧登记已升级核销）', async () => {
+    // ## 这条判据替代了什么（M8-3）
     //
-    // P11-F 段② 修的是**会话行为**：`needsRebuild` ⇒ 内容未变的丢失后恢复也强制重建
-    // （Lead 裁决 comment 6553 ②）。但"谁在生产里把设备丢失事件转成本会话的
-    // `handleContextLost()`"是**另一条线**：全 `src/` 生产面目前只有两个**定义处**
-    // （`PresenterSession` 与它内部调用的 `BatchedPresenter`），
-    // 而 `runtime/renderEngine.ts` 注册的是**旧渲染链**的 canvas DOM 监听
-    // （`ev.preventDefault()` / `onResize()`，不碰本会话）。
+    // 本文件原先在这里登记「生产面零调用方」（`src/` 只有两个定义处，多一个文件就判红），
+    // 并写明「一旦生产侧接上，请把它升级为**接线判据**（视口收到 webglcontextlost ⇒
+    // 会话进入待重建）并核销本登记」。M8-3 接线后，本用例就是那个升级形态：
     //
-    // ⇒ 生产接线归**渲染链终切**（`composition/seams.ts` 的 `legacy-render-source-document`，
-    // owner P11；P10e 文件头亦明言"本批不切换渲染链"）。本批**不扩**到那里，
-    // 但把"零调用方"登记成可核对事实：一旦生产侧接上（本断言判红），
-    // 请把它升级为接线判据（"视口收到 webglcontextlost ⇒ 会话进入待重建"）并核销本登记。
+    // | 旧登记（零调用方） | 本判据（接线） |
+    // |---|---|
+    // | 断言「没有第三个文件提到 handleContextLost」 | 断言唯一转译点是 `runtime/deviceEvents`，**且画布事件真的会到达会话** |
+    // | 静态扫描即可满足 | 行为面：真事件 → 真会话 → `pendingRebuild` 翻转 + 设备代次推进 |
+    // | 不知道接线是否可用 | 注销后**不再**转译（D11：监听可注销） |
+    const session = new PresenterSession({ scope: 'test-m8-wiring' })
+    const recorder = createDiagnosticRecorder({ capacity: 64, now: () => 0 })
+    const live: { message: string; state: string | null }[] = []
+    const canvas = new FakeCanvas()
+    const detach = attachViewportDeviceEvents({
+      canvas,
+      viewportId: 'r-viewport',
+      session,
+      diagnostics: recorder,
+      liveStatus: {
+        setLiveStatus: (message: string, _level?: number, state?: string | null) => {
+          live.push({ message, state: state ?? null })
+        },
+      },
+    })
+    try {
+      // ① 装载（真实夹具）后进入稳定态
+      const { scene, content } = await assembledOf('multiblock-ebf-2ch')
+      const applied = session.applyIfChanged({ scene, content, key: keyOf(scene.id) })
+      expect(applied.applied, '前提：首次应用必须真的编了').toBe(true)
+      expect(session.pendingRebuild, '前提：稳定态不处于待重建').toBe(false)
+      expect(session.deviceGeneration, '前提：设备代次从 1 起').toBe(1)
+      const generationBefore = session.deviceGeneration
+      const compileGenerationBefore = session.generation
+
+      // ② 视口画布收到 webglcontextlost ⇒ **会话**进入待重建
+      canvas.dispatch('webglcontextlost')
+      expect(session.pendingRebuild, '视口收到 webglcontextlost ⇒ 会话必须进入待重建').toBe(true)
+      expect(session.devicePhase, '丢失期相位必须是 lost（不是「没东西可画」）').toBe('lost')
+      expect(session.deviceReady, '丢失期不得提交 GPU 工作').toBe(false)
+      expect(session.ledger().activeCount, '旧代次份额必须被全部放弃').toBe(0)
+      expect(session.ledger().abandonedTotal, '裁决②：放弃必须单列记账').toBeGreaterThan(0)
+      expect(session.ledger().lastAbandonReason, '放弃原因必须可读').toBeTruthy()
+
+      // ③ 丢失期 apply 不得重建（旧句柄已失效）
+      const duringLoss = session.applyIfChanged({ scene, content, key: keyOf(scene.id) })
+      expect(duringLoss.applied, '丢失期不得重建 GPU 份额（旧代次句柄已失效）').toBe(false)
+      expect(session.pendingRebuild, '丢失期必须**保持**待重建（否则恢复后被内容身份短路吞掉）').toBe(true)
+
+      // ④ 恢复 ⇒ 设备代次推进 + 待重建复位（一次成功重建）
+      canvas.dispatch('webglcontextrestored')
+      expect(session.deviceGeneration, '恢复后设备代次必须严格递增').toBeGreaterThan(generationBefore)
+      expect(session.generation, '恢复事件本身不重建（世代仍空）').toBeNull()
+      const afterRestore = session.applyIfChanged({ scene, content, key: keyOf(scene.id) })
+      expect(afterRestore.applied, '恢复后第一次 apply 必须真重建（绕过内容身份短路）').toBe(true)
+      expect(session.pendingRebuild, '一次成功重建后必须复位').toBe(false)
+      expect(session.generation, '内容未变 ⇒ 结构世代回到同一值（A30 的正确行为）').toBe(compileGenerationBefore)
+      expect(
+        String(session.deviceGeneration),
+        '设备代次不得用结构世代冒充（§6:208 维度不能互相代替）',
+      ).not.toBe(String(session.generation))
+      expect(
+        session.ledger().balanced,
+        '丢失一个周期后账必须守恒（acquired === released + abandoned + live）',
+      ).toBe(true)
+      expect(session.ledger().liveRefs, '恢复后新代次的份额必须重新建立').toBeGreaterThan(0)
+
+      // ⑤ 诊断：丢失/恢复各一条 device.* 记录，且能定位到视口与代次
+      const deviceRecords = recorder.byChannel('device')
+      expect(deviceRecords.map((r) => r.code), '丢失与恢复必须是可区分的两个码').toEqual([
+        'device.lost',
+        'device.restored',
+      ])
+      for (const rec of deviceRecords) {
+        expect(rec.correlation.viewportId, '关联字段必须能定位到视口（多 Area 场景必需）').toBe('r-viewport')
+        expect(typeof rec.correlation.deviceGeneration, '关联字段必须带设备代次').toBe('number')
+        expect(Object.keys(rec.params).length, '记录必须带结构化参数').toBeGreaterThan(0)
+      }
+      expect(live.map((l) => l.state), '用户可见提示必须成句出现（丢失/恢复各一次）').toEqual([
+        'device-lost',
+        'device-restored',
+      ])
+
+      // ⑥ D11：注销后不得再转译（「监听不注销」是 S0-A 的登记项）
+      detach()
+      const abandonedBefore = session.ledger().abandonedTotal
+      canvas.dispatch('webglcontextlost')
+      expect(
+        session.ledger().abandonedTotal,
+        '注销后的画布事件不得再到达会话（否则视口拆解后仍会改写已释放会话的状态）',
+      ).toBe(abandonedBefore)
+      expect(recorder.byChannel('device'), '注销后不得再发 device.* 记录').toHaveLength(2)
+    } finally {
+      detach()
+      session.dispose()
+    }
+  })
+
+  it('**接线面（静态）**：设备事件只有一个转译点，且它经装配边接在视口画布上', () => {
     const filesWith = (root: string, skipTests: boolean): string[] => {
       const out: string[] = []
+      const strip = (raw: string): string =>
+        raw
+          .split(String.fromCharCode(13))
+          .join('')
+          .split(String.fromCharCode(10))
+          .filter((l) => {
+            const t = l.trimStart()
+            return !(t.startsWith('*') || t.startsWith('//') || t.startsWith('/*'))
+          })
+          .join(String.fromCharCode(10))
       const walk = (dir: string): void => {
         for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
           if (e.name === 'node_modules') continue
@@ -698,30 +818,39 @@ describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢 + *
             walk(full)
             continue
           }
-          if (!/\.(ts|vue)$/.test(e.name)) continue
-          const rel = path.relative(root, full).replace(/\\/g, '/')
+          if (!(e.name.endsWith('.ts') || e.name.endsWith('.vue'))) continue
+          const rel = path.relative(root, full).split(String.fromCharCode(92)).join('/')
           if (skipTests && rel.includes('__tests__')) continue
           // 铁律 6：读入口归一化（剥注释行，避免注释里的名字被当成调用方）
-          const code = fs
-            .readFileSync(full, 'utf8')
-            .replace(/\r\n/g, '\n')
-            .split('\n')
-            .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
-            .join('\n')
-          if (code.includes('handleContextLost')) out.push(rel)
+          if (strip(fs.readFileSync(full, 'utf8')).includes('handleContextLost')) out.push(rel)
         }
       }
       walk(root)
       return out.sort()
     }
 
+    // 定义处 3 个（批次 / 会话 / 注解描边）+ **唯一转译点** 1 个。
+    // 多出任何其它文件 = 出现了第二套设备处置（那正是旧"零接线"登记要防的反面）。
     expect(
       filesWith(path.join(process.cwd(), 'src'), true),
-      '生产面只应有定义处（多出文件 = 有人把设备丢失事件接上了会话 ⇒ 请升级本登记）',
-    ).toEqual(['composition/presenterSession.ts', 'presentation/presenter.ts'])
-    // 反空洞真：同一个扫描器在 `e2e/` 能找到**真实调用方**（探针） ⇒ "零调用方"不是扫描器空转
+      '生产面只允许：三个定义处（presenter/session/overlay）+ 一个设备事件转译点',
+    ).toEqual([
+      'composition/presenterSession.ts',
+      'presentation/overlayPresenter.ts',
+      'presentation/presenter.ts',
+      'runtime/deviceEvents.ts',
+    ])
+    // 反空洞真：同一个扫描器在 `e2e/` 能找到**真实调用方**（探针） ⇒ 不是扫描器空转
     expect(filesWith(path.join(process.cwd(), 'e2e'), false), '扫描器必须能看见 e2e 探针里的调用').toEqual([
       'helpers/presentation/probe.ts',
     ])
+    // 装配边：视口运行时必须**真的**调用转译点（否则「转译点存在」只是死代码）
+    const runtime = fs
+      .readFileSync(path.join(process.cwd(), 'src', 'shared', 'viewport', 'useViewportRuntime.ts'), 'utf8')
+      .split(String.fromCharCode(13))
+      .join('')
+    expect(runtime, '视口运行时必须把画布事件接上（装配边）').toContain('attachViewportDeviceEvents(')
+    expect(runtime, '接线必须传真实会话（不是别的对象）').toContain('session: presenterSurface')
   })
+
 })

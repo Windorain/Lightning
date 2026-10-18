@@ -101,6 +101,15 @@ export type DiagnosticReasonCode =
   | 'export.layerStackUnexpressed'
   /** OBJ：混合模式只能用 MTL 的 `d`/`illum` 近似（cutout/translucent 不精确）。 */
   | 'export.blendApproximated'
+  // —— 设备生命周期（M8-3；SPEC §7.5 / §6:206 的"设备代次"维度）——
+  /**
+   * WebGL 上下文丢失：呈现暂停、旧代次份额被**放弃**（不是回收）。
+   *
+   * 参数带放弃数与视口/代次关联字段 —— 多 Area 场景据此定位是谁丢了设备。
+   */
+  | 'device.lost'
+  /** WebGL 上下文恢复：设备代次已推进，会话将按**当前有效状态**重建呈现资源。 */
+  | 'device.restored'
 
 /** 原因的可选结构化参数（**值**只允许标量；不塞对象图）。 */
 export type DiagnosticParams = Readonly<Record<string, string | number | boolean>>
@@ -119,6 +128,18 @@ export interface DiagnosticCorrelation {
   /** 呈现版本：实际已发布 / 目标（#249 §19.9「实际/目标呈现版本」）。 */
   readonly actualPresentationVersion?: number
   readonly targetPresentationVersion?: number
+  /**
+   * 视口 region id（M8-3）：设备事件的**定位**字段（双 Area 判得出是谁丢了设备）。
+   *
+   * 它只用于关联，不是内容身份 —— 与 `objectId` 同一性质。
+   */
+  readonly viewportId?: string
+  /**
+   * 设备代次（M8-3；SPEC §6:206）：该事件发生在/推进到第几次**有效设备生命周期**。
+   *
+   * ⚠️ 与 `actualPresentationVersion`（呈现版本，内容侧）**不同空间**，不得互相赋值。
+   */
+  readonly deviceGeneration?: number
 }
 
 /** 一条诊断记录。`at` 由**注入的**时钟给出（纯核心不读墙钟）。 */
@@ -146,6 +167,8 @@ export type DiagnosticChannel =
   | 'content'
   /** 导出通道（M6-4）：能力损失/不可表达语义/作业结算。 */
   | 'export'
+  /** 设备生命周期通道（M8-3）：丢失/恢复/重建（不放 effect 通道里冒充）。 */
+  | 'device'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 脱敏（#259：生产不记录凭据或完整文档）

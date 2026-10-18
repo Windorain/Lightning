@@ -153,7 +153,10 @@ export abstract class HostBase implements Host {
 
   createViewportPresenter(regionId: string): ViewportPresenterBundle {
     const textures = createViewportTexturePort(`viewport:${regionId}`)
-    const surface = new PresenterSession({ scope: `viewport:${regionId}`, textures })
+    // M8-3：设备相位机按视口从**生产索引**取（`ctx.viewports.devices` 是
+    // "其他 Area 继续可用"的读面）；会话持有同一实例 ⇒ 状态权威只有一份。
+    const device = this.ctx.viewports.devices.machineFor(regionId)
+    const surface = new PresenterSession({ scope: `viewport:${regionId}`, textures, device })
     return {
       surface,
       textures,
@@ -163,6 +166,9 @@ export abstract class HostBase implements Host {
         // 顺序与 C8/C5 的既有释放同序：先会话（挂载根）后纹理端口。
         surface.dispose()
         textures.dispose()
+        // 视口拆解 ⇒ 退出设备相位索引（已拆解的视口不得继续出现在
+        // "可提交视口"读面里）。
+        this.ctx.viewports.devices.remove(regionId)
       },
     }
   }

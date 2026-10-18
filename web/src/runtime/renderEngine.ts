@@ -90,6 +90,16 @@ export class RenderEngine {
   private resizeObserver: ResizeObserver | null = null
   private onResize: (() => void) | null = null
   private onVisibilityToGl: (() => void) | null = null
+  /**
+   * 承载设备事件的画布（D11：拆解时**必须**能注销，所以必须是具名引用）。
+   *
+   * 丢失监听的动作只有 `preventDefault()`（浏览器规范要求：不调用就永远不会恢复），
+   * 真正的设备语义（放弃旧代次/诊断/重建）由 `runtime/deviceEvents` 接在**同一张画布**上
+   * 转给呈现会话 —— 两处监听各司其职，不是第二套处置。
+   */
+  private contextCanvas: HTMLCanvasElement | null = null
+  private readonly onContextLost = (ev: Event): void => { ev.preventDefault() }
+  private readonly onContextRestored = (): void => { this.onResize?.() }
   private lastContentGroup: THREE.Group | null = null
   private opts: RenderEngineOptions | null = null
   private readonly frameHooks = new Set<() => void>()
@@ -143,8 +153,9 @@ export class RenderEngine {
     }
     document.addEventListener('visibilitychange', this.onVisibilityToGl)
     const domCanvas = vp.domElement
-    domCanvas.addEventListener('webglcontextlost', (ev) => { ev.preventDefault() }, false)
-    domCanvas.addEventListener('webglcontextrestored', () => { this.onResize?.() })
+    this.contextCanvas = domCanvas
+    domCanvas.addEventListener('webglcontextlost', this.onContextLost, false)
+    domCanvas.addEventListener('webglcontextrestored', this.onContextRestored, false)
 
     applySizeFromEl()
     vp.initComposer(mainScene)
@@ -267,6 +278,14 @@ export class RenderEngine {
     if (this.onVisibilityToGl) {
       document.removeEventListener('visibilitychange', this.onVisibilityToGl)
       this.onVisibilityToGl = null
+    }
+    // D11：设备事件监听不得随画布"一起失去引用"就算注销 —— 显式摘除，
+    // 否则将来复用同一 canvas 重挂引擎会出现重复监听（两次 preventDefault 无害、
+    // 两次 onResize 浪费，而"谁还挂着"无从审计）。
+    if (this.contextCanvas !== null) {
+      this.contextCanvas.removeEventListener('webglcontextlost', this.onContextLost, false)
+      this.contextCanvas.removeEventListener('webglcontextrestored', this.onContextRestored, false)
+      this.contextCanvas = null
     }
     this.renderer?.dispose()
     this.renderer = null

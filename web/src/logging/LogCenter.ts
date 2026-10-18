@@ -138,8 +138,15 @@ export interface LiveStatus {
   origin: LiveStatusOrigin
 }
 
-/** 实时状态槽的写入方渠道。 */
-export type LiveStatusOrigin = 'texture' | 'rejection' | null
+/**
+ * 实时状态槽的写入方渠道。
+ *
+ * `'device'`（M8-3）：设备丢失/恢复的用户可见提示（SPEC §10.7:309「失败必须说明
+ * 实际后果」）。它**不**被 `clearRejectionStatus` 清、也不被纹理链的 `clearLiveStatus`
+ * 之外的写点悄悄覆盖语义 —— 恢复事件之后的纹理加载会正常顶替它（资源生命周期
+ * 重新开始 ⇒「正在加载」比「设备已恢复」更该显示）。
+ */
+export type LiveStatusOrigin = 'texture' | 'rejection' | 'device' | null
 
 export function createLogCenter() {
   const MAX_ENTRIES = 2000

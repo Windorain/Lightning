@@ -2,6 +2,7 @@ import { computed, ref, shallowRef } from 'vue'
 import type { ViewportSlot } from '@/runtime/types'
 import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
 import { createViewportCameraInitLedger } from '@/runtime/viewportCameraInit'
+import { ViewportDeviceRegistry } from '@/presentation/deviceState'
 
 /**
  * 把一个视口槽位**归零**（B5 #10 的资源基线在 slot 层的落点）。
@@ -84,8 +85,17 @@ export function createViewportManager() {
    * 覆盖用户机位（与 SPEC §7.3-b③ 相反；裁决与判据见模块头）。
    */
   const cameraInit = createViewportCameraInitLedger()
+  /**
+   * **设备相位索引**（M8-3）：一个视口一台 `DeviceStateMachine`。
+   *
+   * 权威在机器本身（`PresenterSession` 持有同一实例）；本索引只回答两件
+   * "多 Area"问题：哪些视口此刻可提交（`submittableViewports`）与哪些处于
+   * 非就绪相位（`pending`）。视口卸载时 `remove`，不让已拆解的视口留在读面里。
+   */
+  const devices = new ViewportDeviceRegistry()
 
   return {
+    devices,
     register(id: string): ViewportSlot {
       if (slots.has(id)) return slots.get(id)!
       const slot: ViewportSlot = {

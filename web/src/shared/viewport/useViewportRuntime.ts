@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, ref, toRef, type Ref } from 'vue'
+import { computed, onScopeDispose, ref, toRef, watch, type Ref } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
@@ -14,6 +14,7 @@ import { DRW } from '@/runtime/drw'
  */
 import type { PresenterSession } from '@/composition/presenterSession'
 import type { ViewportPresenterBundle } from '@/runtime/host'
+import { attachViewportDeviceEvents } from '@/runtime/deviceEvents'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { animationSpecKey } from '@/domain/textureAnimation'
 import type { ContentResource } from '@/domain/content'
@@ -766,6 +767,52 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     }
   }
 
+  /**
+   * **设备丢失/恢复的生产接线**（M8-3；S0-A D1/D11）。
+   *
+   * 画布由 `attachViewport` 写进 `vpSlot.domElement`（视口就绪后才非空）⇒ 用 watch
+   * 跟随它：**重挂会换画布**，旧监听必须先注销再挂新画布（同一函数返回注销句柄）。
+   *
+   * ## 各层分工（本接线只做"搬家"）
+   *
+   * - 会话（`PresenterSession`）：放弃旧代次份额、置 `pendingRebuild`、恢复后强制重建；
+   * - 图幅/纹理：丢失期放弃旧 GPU 纹理（`abandon` —— 不逐张 dispose 死句柄），
+   *   恢复后把纹理同步去重键作废，使下一帧按**当前内容**重新上传；
+   * - 诊断/底栏：`runtime/deviceEvents` 发 `device.*` 并写用户可见状态。
+   *
+   * ## 为什么恢复期要作废纹理去重键
+   *
+   * `syncPresenterTextures` 按 `assetId@version` 去重（那是它的正确性来源）。
+   * 设备丢失后纹理被**放弃**，若去重键不变，恢复后不会重传 —— 画面回来但没有贴图，
+   * 而且没有任何报错。设备代次变了 ⇒ 纹理代次也必须重来（§7.5:262）。
+   */
+  let detachDeviceEvents: (() => void) | null = null
+  watch(
+    vpSlot.domElement,
+    (canvas) => {
+      detachDeviceEvents?.()
+      detachDeviceEvents = null
+      if (canvas === null) return
+      detachDeviceEvents = attachViewportDeviceEvents({
+        canvas,
+        viewportId: regionId,
+        session: presenterSurface,
+        diagnostics: ctx.wm.diagnostics,
+        liveStatus: ctx.log,
+        onLost: () => presenterTextures.abandon(),
+        onRestored: () => {
+          lastTextureIdentity = null
+          inFlightTextureIdentity = null
+        },
+      })
+    },
+    { flush: 'post', immediate: true },
+  )
+  onScopeDispose(() => {
+    detachDeviceEvents?.()
+    detachDeviceEvents = null
+  })
+
   const applyPresenterSurface = (): void => {
     /**
      * **画面源 = 内核呈现文档**（M5-2）。
@@ -780,6 +827,11 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
      */
     const doc = ctx.kernelPresentationDocument()
     if (doc === null) return
+    // **设备丢失期暂停呈现**（M8-3 / §7.5:264）：画面资源已随设备失效，此时再
+    // 求值/上传只会把新份额建在死上下文上。会话的相位机是唯一判据；恢复事件
+    // 把它推回 ready 后，本函数下一帧自然按**当前**文档/时间重建。
+    // 注意：只暂停"呈现"，不碰文档/选择/时间/机位 —— 那些读面照旧可用。
+    if (!presenterSurface.deviceReady) return
     try {
       // **分层预览**是呈现侧过滤（不进冻结的 `EvaluationKey`）：每帧按当前层写入会话，
       // 它进**内容身份** ⇒ 换一层必然重编（否则"选了 Y=3 画面不动"）。
