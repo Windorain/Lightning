@@ -19,7 +19,7 @@
  *
  * 全部经 `EditorViewportPolicy`（`shared/viewport/editorViewportHost.ts`）：
  * 渲染配置、dock 允许项、输入处理器、描边绑定、装载后钩子、局部状态、拖放能力。
- * 本组件**没有** `isEmbed` / profile / 宿主名字段 —— SPEC §4.1：外壳与宿主不是领域
+ * 本组件**没有** `宿主身份判断` / profile / 宿主名字段 —— SPEC §4.1：外壳与宿主不是领域
  * 规则的另一个实现；"嵌入故意没有"的能力必须在**装配**（`ShellRuntime`）或**策略值**里，
  * 不能变成合壳组件内部的分支（那是把分叉搬进组件）。
  *

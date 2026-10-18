@@ -16,7 +16,7 @@
  * | dock | 帧/层恒允许、空时仍渲染 | 与旧行为逐字相同 |
  * | 占位态 | `No scene loaded` 文案 | 工作台的用户引导（嵌入没有） |
  *
- * 组件内**没有** `isEmbed` 判断：差异全在策略值里（SPEC §4.1）。
+ * 组件内**没有** `宿主身份判断` 判断：差异全在策略值里（SPEC §4.1）。
  */
 import { computed, ref } from 'vue'
 import { useContext } from '@/runtime/context'

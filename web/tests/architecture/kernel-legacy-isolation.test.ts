@@ -781,6 +781,27 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       'R1-β① C4/C5：端口切换后本算子不再作为命令入口（旧的「领域命令 → 旧 operator」转发表'
       + '与 `<前缀>:<命令名>` 票号形态已消失），算子随之内迁内核侧装配时核销本行',
   }),
+  // ── M7-5：算子**能力门**（`OperatorType.requires`）的拒绝落点 ────────────────
+  //
+  // M7-5 把 25 处宿主身份判断改成"能力缺席 ⇒ 结构化拒绝"。拒绝必须走**同一条**既有链：
+  // 八码封闭集里的 `UnsupportedOperation`（`domain/errors` 的构造子）+ 底栏唯一写入点
+  // （`runtime/rejectionNotice#announceRejection`，M4-3 R3 建立的单点）。
+  // 若为了躲开旧→新边而在算子里另写一句 "`ctx.log.warn(...)` + 手拼文案"，
+  // 就会造出**第二套拒绝语义**（错误码不稳定、文案不再随语言切换）—— 那正是
+  // #171 禁止的"新门面包旧核心"的反面：两套并行。故登记两条边。
+  Object.freeze({
+    from: 'src/operators/capabilityRefusal.ts',
+    to: 'domain/errors',
+    reason:
+      'M7-5 算子能力门：缺能力必须产出**八码封闭集**里的 `UnsupportedOperation`（构造子带 `reason`/`capability`），'
+      + '不得在旧层手拼错误值 —— 否则错误码会按调用点漂移，e2e/底栏/诊断各读一份',
+    exitStage:
+      'P10/P11：`operators/` 被 `application/` 命令面接管、算子注册表退役时，本文件随算子在 `application/` 侧重建；P11 核销本行',
+  }),
+  // ⚠️ 同一文件还有一条 → `@/runtime/rejectionNotice`（拒绝的唯一用户可见写入点）。
+  // 那个目标是**旧层未登记文件**（不在 KERNEL_FILES 内）⇒ 本判据不把它算作"旧→新内核"边，
+  // 故**不登记**：登记一条本表判定不到的边会让"每条登记都真实存在"判红（登记不得腐烂）。
+  // 那条导入是**旧→旧**，由 `boundary-rules.mjs` 的分层闸门按常规管辖。
   // ── M5-2（断点②）：画面源 = **按当前取值求值的派生文档** ────────────────────
   //
   // `Context#kernelPresentationDocument()` 把内核文档（`Document`）与求值场景合成

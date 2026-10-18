@@ -16,7 +16,7 @@
  * | 输入 | hover + **触摸** + keymap（工作台注入 gizmo/keymap） |
  * | dock | 由 `features` 开关决定、空时不渲染 |
  *
- * ## 它**没有** `if (isEmbed)`
+ * ## 它**没有** `if (宿主身份判断)`
  *
  * 差异全在策略值（`EditorViewportPolicy`）与装配（`ShellRuntime`）里；本组件内部不问
  * "我是不是嵌入"，也不问宿主名（SPEC §4.1 / §10.10）。

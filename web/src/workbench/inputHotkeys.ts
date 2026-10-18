@@ -12,7 +12,7 @@
  *     case 'undo': ctx.getOperators().exec('OPERATOR_UNDO'); break
  *     case 'redo': ctx.getOperators().exec('OPERATOR_REDO'); break
  *     case 'select-all': ctx.getOperators().exec('OPERATOR_SELECT_ALL'); break
- *     case 'toggle-toolshelf': if (!ctx.isEmbed()) toggleRegionCollapsed(...); break
+ *     case 'toggle-toolshelf': if (<宿主身份判断>) toggleRegionCollapsed(...); break
  *     …
  *   }
  * }
@@ -22,7 +22,7 @@
  *  1. **同一命令三个名字**：快捷键用 `'undo'`（action 字符串），菜单用
  *     `'OPERATOR_UNDO'`（operator id），而 P7 的命令空间是 `'edit.undo'` ——
  *     无法做命令搜索，也无法审计"谁还能触发撤销"；
- *  2. **可用性判在按键分支里**：`if (!ctx.isEmbed())` 让"工具栏开关"这个命令
+ *  2. **可用性判在按键分支里**：一句宿主身份判断让"工具栏开关"这个命令
  *     在嵌入下不可用，而菜单里仍然显示 —— 菜单与快捷键得出不同结论；
  *  3. **动作实现写在分支里**，不经过任何统一入口，于是"同一事件启动两次"无从拦截。
  *
@@ -116,7 +116,7 @@ export function localHotkeyBindings(): readonly HotkeyBinding[] {
  *
  * 返回结构直接喂给 `assembleInput`。局部动作处理器**只在**这一处登记，
  * 且每条动作是**显式**的 `ctx.getOperators().exec` / UI 调用 —— 不再藏在
- * `switch` 分支里，且不再有 `if (!ctx.isEmbed())` 这类"可用性判在分支里"的写法
+ * `switch` 分支里，且不再有"可用性判在分支里"的宿主身份判断
  * （嵌入与工作台的差异由**传入的键表**表达，而不是由分支表达）。
  */
 export function workbenchInputHotkeys(ctx: Context): {
