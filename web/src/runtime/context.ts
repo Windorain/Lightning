@@ -66,6 +66,7 @@ import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotat
 const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs, type DocumentContent } from '@/domain/content'
 import { sceneSecondsOf } from '@/domain/animation'
+import type { AnimationState } from '@/domain/animation'
 import type { Version } from '@/domain/identity'
 import type { Document } from '@/domain/document'
 import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
@@ -1440,6 +1441,7 @@ export class Context {
   kernelPresentationSnapshot(): {
     readonly scene: Scene
     readonly content: DocumentContent
+    readonly animation: AnimationState
     readonly version: Version
     readonly channels: Readonly<Record<string, number>>
   } | null {
@@ -1450,6 +1452,8 @@ export class Context {
     return Object.freeze({
       scene: doc.scene,
       content: doc.content,
+      // 动画状态也取自**同一个**文档（`SnapshotPayload` 要求它在场；从别处补就是第二个来源）。
+      animation: doc.animation,
       version: doc.version,
       channels: Object.freeze({ ...kernel.channelValues() }),
     })
