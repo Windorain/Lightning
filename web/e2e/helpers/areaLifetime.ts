@@ -313,6 +313,12 @@ export interface HintReading {
   lastDisplayable: string | null
   /** 近若干条 WARN/ERROR 日志（生产诊断面）。 */
   warnings: string[]
+  /**
+   * `Area 生命周期` 来源的生命周期错误（`AreaHost` 的 `lifecycle-error` → `ctx.log.warn`，
+   * 见 `workbench/components/AreaLayoutHost.vue:176`）。包含 reason：releaseFailed /
+   * closeFailed / instanceAlreadyOpen / resourceLeakOnClose / disposeThrew / acquireFailed。
+   */
+  lifecycleErrors: string[]
 }
 
 /** 收集"用户能看到/能查到的提示"（CRLF 归一化）。 */
@@ -322,7 +328,10 @@ export async function collectHint(page: Page): Promise<HintReading> {
     const log = (window as any).__log__ ?? null
     const live = log?.liveStatus?.() ?? null
     const last = log?.lastDisplayable?.() ?? null
-    const warns = (log?.recent?.(8 | 16, 40) ?? []) as { source?: string; message?: string }[]
+    const warns = (log?.recent?.(8 | 16, 200) ?? []) as { source?: string; message?: string }[]
+    const lifecycleErrors = warns
+      .filter((w) => (w.source ?? '').includes('Area 生命周期'))
+      .map((w) => norm(w.message ?? ''))
     const liveEl = document.querySelector('.sb-root [data-live-status]')
     return {
       statusBar: norm(document.querySelector('.sb-root')?.textContent ?? ''),
@@ -333,6 +342,7 @@ export async function collectHint(page: Page): Promise<HintReading> {
           : null,
       lastDisplayable: last ? norm(last.message) : null,
       warnings: warns.map((w) => norm((w.source ? w.source + ' ' : '') + (w.message ?? ''))),
+      lifecycleErrors,
     }
   })) as HintReading
 }
