@@ -145,8 +145,13 @@ export interface LiveStatus {
  * 实际后果」）。它**不**被 `clearRejectionStatus` 清、也不被纹理链的 `clearLiveStatus`
  * 之外的写点悄悄覆盖语义 —— 恢复事件之后的纹理加载会正常顶替它（资源生命周期
  * 重新开始 ⇒「正在加载」比「设备已恢复」更该显示）。
+ *
+ * `'recovery'`（M8-4）：恢复副本的检测/采纳/放弃/写入失败提示（SPEC §9:299）。
+ * 它同样不被 `clearRejectionStatus` 清；提示的**持久化入口**在状态栏（副本候选
+ * 与损坏数各有一条常驻行），liveStatus 只负责"刚刚发生了什么"的那一句 ——
+ * 否则纹理链的 `loading/ready` 一写就会把"有一份可采纳副本"顶掉。
  */
-export type LiveStatusOrigin = 'texture' | 'rejection' | 'device' | null
+export type LiveStatusOrigin = 'texture' | 'rejection' | 'device' | 'recovery' | null
 
 export function createLogCenter() {
   const MAX_ENTRIES = 2000

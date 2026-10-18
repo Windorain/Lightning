@@ -110,6 +110,30 @@ export type DiagnosticReasonCode =
   | 'device.lost'
   /** WebGL 上下文恢复：设备代次已推进，会话将按**当前有效状态**重建呈现资源。 */
   | 'device.restored'
+  // —— 恢复副本（M8-4；SPEC §9:299）——
+  /**
+   * 写恢复副本失败（**三类不合并**，见 `params.cause`）。
+   *
+   * | `cause` | 含义 | 用户能做什么 |
+   * |---|---|---|
+   * | `quotaExceeded` | 存储配额不足 | 清理存储/降低份数后重试 |
+   * | `unavailable` | 宿主拒绝/没有存储（隐私模式等） | 本环境不提供恢复副本；手动保存照常 |
+   * | `failed` | 存储访问抛错（`params.code` 保留稳定码） | 保留诊断；不影响手动保存 |
+   * | `serialization` | 来源快照自相矛盾/无法序列化（纯层拒绝） | 这是实现缺陷，内容与保存不受影响 |
+   *
+   * 写入失败**不**改变正式保存基线，也不阻断编辑（S0-B 承接 A31-3 的产品化）。
+   */
+  | 'recovery.writeFailed'
+  /** 启动/刷新后检测到**可采纳**的未采纳恢复副本（参数带键/文档身份/写入时刻）。 */
+  | 'recovery.detected'
+  /** 已采纳一份恢复副本（参数带内容版本与"基线是否逐位未变"事实）。 */
+  | 'recovery.adopted'
+  /** 采纳**未完成**（副本有效但投影/落地失败）—— 当前有效内容必须原样保留。 */
+  | 'recovery.adoptFailed'
+  /** 已放弃（删除）一份/一族恢复副本（用户显式动作或正式保存后的作废）。 */
+  | 'recovery.discarded'
+  /** 存储里的恢复副本**校验失败**（参数带键/文档身份/结构化原因；不自动删除）。 */
+  | 'recovery.corrupt'
 
 /** 原因的可选结构化参数（**值**只允许标量；不塞对象图）。 */
 export type DiagnosticParams = Readonly<Record<string, string | number | boolean>>
@@ -169,6 +193,8 @@ export type DiagnosticChannel =
   | 'export'
   /** 设备生命周期通道（M8-3）：丢失/恢复/重建（不放 effect 通道里冒充）。 */
   | 'device'
+  /** 恢复副本通道（M8-4）：写入失败/检测/采纳/放弃/损坏（不借 resource/effect 冒充）。 */
+  | 'recovery'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 脱敏（#259：生产不记录凭据或完整文档）
