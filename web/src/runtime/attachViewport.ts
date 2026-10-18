@@ -8,6 +8,7 @@ import type { ViewportBinderHandlers } from '@/runtime/viewportBinder'
 import { bindViewportDom } from '@/runtime/viewportBinder'
 import type { BlockRef, SelectedEntity } from '@/context/selection'
 import { applyViewportCameraState } from '@/runtime/viewportCamera'
+import { CAPABILITY } from '@/composition/modules'
 
 export interface SelectionOutlineBind {
   selectionItems: Ref<Set<SelectedEntity>>
@@ -82,7 +83,11 @@ export async function attachViewport(
 
   const unbindDom = bindViewportDom(ctx, regionId, payload.domElement, handlers, {
     documentKeydown,
-    touchScreenGestures: ctx.isEmbed(),
+    // M7-5：本行原来把 `touchScreenGestures` 直接写成宿主身份判断（嵌入 ⇒ true）。
+    // 它的事实是"本实例的指针面是
+    // **屏上手势面**（手指/触控笔算屏幕指针，见 `embed/touchPointer`）"——现在由装配声明
+    // （`EMBED_PROFILE` 的 `interaction.screenGestures`）回答，宿主名不再进入共享装配边。
+    touchScreenGestures: ctx.hasCapability(CAPABILITY.SCREEN_GESTURES),
   })
 
   if (selectionOutline) {
