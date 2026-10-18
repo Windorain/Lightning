@@ -67,9 +67,23 @@ const props = defineProps<{
    * 而"类型 → 组件"的绑定本属装配，不属核心。`null` = 本装配没有它的实现。
    */
   editor: Component | null
-  /** 账本（由父层持有；本组件只写它的新值）。 */
-  ledger: LifecycleLedger
-  /** 账本变更回调（Vue 里 `ledger` 是 prop，不能就地改）。 */
+  /**
+   * 读**当前**账本（由父层持有；本组件只写它的新值）。
+   *
+   * ## 为什么是 getter 而不是值（M7-2 / D4 实测）
+   *
+   * 旧形状是 `ledger: LifecycleLedger`（渲染期快照）。关闭发生在**卸载/换代**
+   * 期间时，父层不一定重渲过这个子组件，于是 `props.ledger` 可能是若干次
+   * 转移之前的旧值；`close()` 在这个旧值上 `release`/`closeInstance`，再
+   * `onLedgerChange` **写回**，就把已被兄弟实例关掉的记录**复活**了。
+   *
+   * 实测（M7-1 G4 先红读数，③ 合并回单区）：活跃实例 `[3,4]`、`totalActive=12`，
+   * 其中 3 是在 ③ 之前已关闭、被 stale 账本写回复活的；④ 离开工作区后 3 仍留存。
+   *
+   * ⇒ 账本是**当前值**，不是渲染输入。每次 open/close 都现取。
+   */
+  getLedger: () => LifecycleLedger
+  /** 账本变更回调（Vue 里账本是 prop，不能就地改）。 */
   onLedgerChange: (next: LifecycleLedger) => void
   /** 子组件提供的资源释放口（真正的 dispose）。 */
   dispose?: () => void
@@ -84,13 +98,29 @@ const emit = defineEmits<{
   (e: 'lifecycle-error', payload: { areaId: string; reason: string; detail: unknown }): void
 }>()
 
-/** 本组件是否真的开了实例（防卸载时对没开的实例做 release）。 */
-const opened = ref(false)
+/**
+ * 本组件**真正打开的那个实例**（`null` = 没开）。
+ *
+ * ## 为什么不能读 `props.instanceId` 来关（M7-2 / D4 根因）
+ *
+ * 关闭发生在两种时刻，而这两种时刻 `props.instanceId` 都**可能已不是**本组件
+ * 打开的那个 id：
+ *
+ * | 时刻 | `props.instanceId` 的实际值 | 后果 |
+ * |---|---|---|
+ * | 合并/关闭 Area（组件卸载） | 父层按**新布局**算 `instanceIdOf(areaId)` ⇒ `null` | 旧 `close()` 的 `id === null` 守卫**静默早退**：不 release、不 close、不发任何账号 —— 旧实例记录永久留存 |
+ * | 切编辑器类型（watch 触发） | 已是**新**实例 id | 关闭打在新 id 上：`releaseFailed`/`closeFailed`，旧账不销 |
+ *
+ * ⇒ 打开时把 id 与类型记下来，关闭只认这份记录。它**不是第二份权威**：
+ * 账本仍是唯一账本、`setLedger` 仍是唯一写路径；这里只记"本组件开的是哪一个"，
+ * 与 SPEC §7.3-a 的"实例从显式创建/恢复到显式关闭"一一对应。
+ */
+const opened = ref<{ readonly instanceId: string; readonly editorType: string } | null>(null)
 
 function open(): void {
   const id = props.instanceId
-  if (id === null || opened.value) return
-  const next = openInstance(props.ledger, id, props.editorType)
+  if (id === null || opened.value !== null) return
+  const next = openInstance(props.getLedger(), id, props.editorType)
   if (next === null) {
     emit('lifecycle-error', { areaId: props.areaId, reason: 'instanceAlreadyOpen', detail: { instanceId: id } })
     return
@@ -106,7 +136,7 @@ function open(): void {
     l = acquired
   }
   props.onLedgerChange(l)
-  opened.value = true
+  opened.value = { instanceId: id, editorType: props.editorType }
   emit('instance-open', { areaId: props.areaId, instanceId: id })
 }
 
@@ -118,8 +148,10 @@ function open(): void {
  * 那会让"漏还"这条判据静默失效（本批实测过一次这类假绿）。
  */
 function close(): void {
-  const id = props.instanceId
-  if (id === null || !opened.value) return
+  // 关闭只认**本组件打开的那个实例**（见 `opened` 的表：props 的 id 可能已是 null/新值）
+  const record = opened.value
+  if (record === null) return
+  const id = record.instanceId
   emit('instance-close', { areaId: props.areaId, instanceId: id })
 
   // 真正的 dispose 先做（此时 DOM/WebGL 仍有效）
@@ -129,7 +161,8 @@ function close(): void {
     emit('lifecycle-error', { areaId: props.areaId, reason: 'disposeThrew', detail: String(e) })
   }
 
-  let l = props.ledger
+  // 现取账本（不是渲染期快照）：见 `getLedger` 的说明
+  let l = props.getLedger()
   for (const kind of props.resources) {
     const released = releaseResource(l, id, kind)
     if (released === null) {
@@ -148,7 +181,7 @@ function close(): void {
     }
     props.onLedgerChange(closed.ledger)
   }
-  opened.value = false
+  opened.value = null
 }
 
 onMounted(open)

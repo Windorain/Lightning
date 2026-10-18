@@ -85,7 +85,7 @@ function componentFor(editorType: string): Component | null {
       :instance-id="ctx.instanceIdOf(area.id)"
       :resources="ctx.resourcesOf(area.editorType)"
       :editor="componentFor(area.editorType)"
-      :ledger="ctx.ledger()"
+      :get-ledger="ctx.ledger"
       :on-ledger-change="ctx.setLedger"
       @instance-open="ctx.onInstanceOpen"
       @instance-close="ctx.onInstanceClose"
