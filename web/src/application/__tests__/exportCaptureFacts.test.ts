@@ -7,12 +7,8 @@
  *  3. 明细不出现在清单的 canonical/digest 里 —— 塞进 `ExportAssetNeed` 会改契约。
  */
 import { describe, expect, it } from 'vitest'
-import {
-  assetManifestCanonicalText,
-  assetManifestDigest,
-  captureFactsOfBindings,
-  type ExportAssetNeed,
-} from '@/application/exportPlan'
+import { assetManifestCanonicalText, assetManifestDigest, captureFactsOfBindings } from '@/application/exportPlan'
+import type { ExportAssetNeed } from '@/domain/captureSpec'
 import type { TextureBinding } from '@/presentation/textureBinding'
 
 function binding(overrides: Partial<TextureBinding> = {}): TextureBinding {
@@ -34,7 +30,7 @@ describe('Q8 B 块：ExportCaptureFacts 只读明细', () => {
           stripFrameCount: 2,
           sequence: {
             id: 'material:0',
-            resource: { assetId: 'material:0', contentVersion: 'tex-v1' },
+            resource: { assetId: 'material:0', contentVersion: 'tex-v1', url: '' },
             frames: [
               { index: 0, duration: { num: 1, den: 20 } },
               { index: 1, duration: { num: 2, den: 20 } },
@@ -82,7 +78,7 @@ describe('Q8 B 块：ExportCaptureFacts 只读明细', () => {
           stripFrameCount: 4,
           sequence: {
             id: 'material:0',
-            resource: { assetId: 'material:0', contentVersion: 'tex-v1' },
+            resource: { assetId: 'material:0', contentVersion: 'tex-v1', url: '' },
             frames: [{ index: 0, duration: { num: 1, den: 20 } }],
             loop: 'loop',
           },

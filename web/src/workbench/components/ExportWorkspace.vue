@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
-import { copyTextToClipboard } from '@/util/browser'
+import { copyTextToClipboard, downloadBlob } from '@/util/browser'
 import { blobOf, dataUrlOf, exportErrorText, runIsoExport } from '@/workbench/export/isoExportJob'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { useContext } from '@/runtime/context'
+import type { ExportAssetManifest, ExportCaptureFacts } from '@/application/exportPlan'
+import ExportManifestPanel from './ExportManifestPanel.vue'
+
+/** 一次成功导出的面板数据（A 块来自冻结清单，B 块来自捕获明细）。 */
+interface ExportPanelData {
+  readonly manifest: ExportAssetManifest
+  readonly facts: ExportCaptureFacts | null
+}
 
 const ctx = useContext()
 /** 本实例的翻译（语言来自本实例设置，不是模块级全局读源；#259 A33）。 */
@@ -63,6 +71,8 @@ const isoDraft = ref(isoText.value)
 const isoUrl = ref<string | null>(null)
 const isoBusy = ref(false)
 const isoErr = ref<string | null>(null)
+/** 本次成功导出的清单面板（Q8：只有成功结局才有面板；失败必须清空）。 */
+const isoPanel = ref<ExportPanelData | null>(null)
 /** 下载失败（可见）；与 `isoErr`（预览失败）分开 —— 两者的触发条件不同。 */
 const dlErr = ref<string | null>(null)
 let isoSeq = 0
@@ -94,10 +104,10 @@ function onIsoInput(e: Event): void {
 }
 async function bakeIso(): Promise<void> {
   const d = doc.value
-  if (!d) { isoUrl.value = null; isoErr.value = null; isoBusy.value = false; return }
+  if (!d) { isoUrl.value = null; isoErr.value = null; isoBusy.value = false; isoPanel.value = null; return }
   const seconds = isoSeconds.value
   // 非法输入**不烘焙**：把 'abc' 当 t=0 画出来就是"静默当 0"（本卡的红字说的正是它非法）。
-  if (seconds === null) { isoUrl.value = null; isoErr.value = null; isoBusy.value = false; return }
+  if (seconds === null) { isoUrl.value = null; isoErr.value = null; isoBusy.value = false; isoPanel.value = null; return }
   const seq = ++isoSeq; isoBusy.value = true; isoErr.value = null
   try {
     /**
@@ -118,7 +128,15 @@ async function bakeIso(): Promise<void> {
     if (!r.ok) throw new Error(exportErrorText(r.error))
     if (seq !== isoSeq) return
     isoUrl.value = dataUrlOf(r.value)
-  } catch (e) { if (seq !== isoSeq) return; isoUrl.value = null; isoErr.value = formatUnknownError(e) }
+    // Q8：A/B 两块都来自**这一次**作业的结局（不是再算一份清单）。
+    isoPanel.value = { manifest: r.value.outcome.assetManifest, facts: r.value.outcome.captureFacts ?? null }
+  } catch (e) {
+    if (seq !== isoSeq) return
+    isoUrl.value = null
+    isoErr.value = formatUnknownError(e)
+    // 失败必须**没有**面板：一张残留的清单会让"这次没导成"看起来像"导成了"。
+    isoPanel.value = null
+  }
   finally { if (seq === isoSeq) isoBusy.value = false }
 }
 // `.lazy` 只在 change（失焦/回车）提交 ⇒ 一次编辑一次重烘焙，不需要计时器。
@@ -129,6 +147,7 @@ watch(() => [doc.value, isoDir.value, isoSeconds.value] as const, () => { void b
 const gifUrl = ref<string | null>(null)
 const gifBusy = ref(false)
 const gifErr = ref<string | null>(null)
+const gifPanel = ref<ExportPanelData | null>(null)
 /** 例："12 帧 / 1.500 s" —— e2e 的 `[data-gif-plan]` 读它，与下载字节解码结果对账。 */
 const gifInfo = ref<string | null>(null)
 async function makeGif(): Promise<void> {
@@ -136,6 +155,7 @@ async function makeGif(): Promise<void> {
   if (!d) return
   gifBusy.value = true
   gifErr.value = null
+  gifPanel.value = null
   try {
     /**
      * 预览边长 480 = 旧烘焙缺省（下载侧命令仍是 320）—— 这条分叉**原样保留**：
@@ -154,9 +174,11 @@ async function makeGif(): Promise<void> {
     // 帧数与总时长来自**捕获期的时间计划**（不是回读产物、不是再算一遍声明）。
     const loop = r.value.capture.loop
     gifInfo.value = loop === null ? null : `${loop.frameCount} 帧 / ${(loop.totalMs / 1000).toFixed(3)} s`
+    gifPanel.value = { manifest: r.value.outcome.assetManifest, facts: r.value.outcome.captureFacts ?? null }
   } catch (e) {
     gifUrl.value = null
     gifInfo.value = null
+    gifPanel.value = null
     gifErr.value = formatUnknownError(e)
   } finally {
     gifBusy.value = false
@@ -164,24 +186,61 @@ async function makeGif(): Promise<void> {
 }
 async function downloadGif(): Promise<void> {
   gifErr.value = null
+  gifPanel.value = null
   try {
-    await ctx.getOperators().exec('OPERATOR_EXPORT_SCENE_GIF', { direction: isoDir.value })
+    /**
+     * Q8：卡片下载走**同一条** `runIsoExport`（不是第二套烘焙），于是：
+     *  - 面板 A/B 两块拿到的是**这一次下载**的 `outcome`；
+     *  - 下载只落产物本身（清单交付 = 面板，不产生第二个文件）。
+     *
+     * 边长 320 = 命令侧缺省（预览 480）；Q1 的统一归 M6-5，这里只搬运形参。
+     */
+    const r = await runIsoExport(ctx, {
+      kind: 'animation',
+      directionIndex: isoDir.value,
+      pixelSize: 320,
+      decoder: createDomTextureDecoder(),
+      now: Date.now(),
+    })
+    if (!r.ok) throw new Error(exportErrorText(r.error))
+    downloadBlob(r.value.fileName, blobOf(r.value))
+    gifPanel.value = { manifest: r.value.outcome.assetManifest, facts: r.value.outcome.captureFacts ?? null }
     msg(`已下载动画 GIF ${isoDir.value + 1}/4`)
   } catch (e) {
+    gifPanel.value = null
     gifErr.value = formatUnknownError(e)
   }
 }
 async function downloadIso(): Promise<void> {
   dlErr.value = null
+  isoPanel.value = null
+  // 非法输入**不下载**（不在卡片里换成 0；错误位必须可见）。
+  const seconds = isoSeconds.value
+  if (seconds === null) {
+    dlErr.value = t('isoTimeInvalid')
+    msg(dlErr.value)
+    return
+  }
   try {
-    // 非法输入**原样下发**（不在这里换成 0）：让唯一归一入口 `normalizeIsoSeconds` 拒绝它，
-    // 于是"非法 ⇒ 有可见错误"这条路径在点下载时同样成立（不是只在预览里）。
-    const seconds: unknown = isoSeconds.value ?? isoText.value
-    await ctx.getOperators().exec('OPERATOR_EXPORT_ISO_PNG', { direction: isoDir.value, seconds })
+    /**
+     * Q8：与预览**同一条链、同一组参数**（480/方向/秒数），只是多落一次盘。
+     * `outcome` 直接喂面板 ⇒ "卡片上的清单就是这次下载的清单"由结构保证。
+     */
+    const r = await runIsoExport(ctx, {
+      kind: 'image',
+      directionIndex: isoDir.value,
+      pixelSize: 480,
+      seconds,
+      decoder: createDomTextureDecoder(),
+      now: Date.now(),
+    })
+    if (!r.ok) throw new Error(exportErrorText(r.error))
+    downloadBlob(r.value.fileName, blobOf(r.value))
+    isoPanel.value = { manifest: r.value.outcome.assetManifest, facts: r.value.outcome.captureFacts ?? null }
     msg(`已下载等轴视角 PNG ${isoDir.value + 1}/4`)
   } catch (e) {
-    // 算子现在会把失败**再抛**给调用方（M5-4）；卡片必须有可见错误位，
-    // 否则用户只看到"点了没反应"。
+    // 失败必须有可见错误位；且不得留下上次成功的面板（"没导成"不能看起来像导成了）。
+    isoPanel.value = null
     dlErr.value = formatUnknownError(e)
     msg(formatUnknownError(e))
   }
@@ -250,6 +309,8 @@ function pushToServer(): void {
         <img v-else-if="isoUrl" :src="isoUrl" class="ew-iso" alt="Iso preview" />
         <div v-if="isoErr" class="ew-fb ew-fb--err">{{ isoErr }}</div>
         <div v-if="dlErr" class="ew-fb ew-fb--err" data-iso-dl-err>{{ dlErr }}</div>
+        <!-- Q8：一次下载只有产物本身；A/B 清单在卡片内的面板里（不产生第二个文件）。 -->
+        <ExportManifestPanel format="iso-png" :manifest="isoPanel?.manifest ?? null" :facts="isoPanel?.facts ?? null" />
       </section>
 
       <section class="ew-card">
@@ -264,6 +325,7 @@ function pushToServer(): void {
         <div v-else-if="gifInfo" class="ew-fb" data-gif-plan>{{ gifInfo }}</div>
         <img v-if="gifUrl" :src="gifUrl" class="ew-iso" alt="GIF preview" />
         <div v-if="gifErr" class="ew-fb ew-fb--err" data-gif-err>{{ gifErr }}</div>
+        <ExportManifestPanel format="scene-gif" :manifest="gifPanel?.manifest ?? null" :facts="gifPanel?.facts ?? null" />
       </section>
 
       <section v-if="showSdeSave" class="ew-card">
