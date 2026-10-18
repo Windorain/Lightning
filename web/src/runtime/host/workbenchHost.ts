@@ -1,5 +1,5 @@
 import { createOperatorRegistry } from '@/operators/operatorRegistry'
-import { logCenter, installUnifiedLogApi } from '@/logging/LogCenter'
+import { createLogCenter, installUnifiedLogApi, type UnifiedLogDisposer } from '@/logging/LogCenter'
 import { computeLayout, boundsOfByOperator, boundsOfByRNAPath } from '@/workbench/ux/layout'
 import { V2PlainParser, createEnvelopeParser, WorldParser, StructureDataParser } from '@/context/parsers/builtinParsers'
 import { Main } from '@/runtime/main'
@@ -54,18 +54,26 @@ export interface WorkbenchHostResult {
   screen: ScreenRoot
   services: WorkbenchServices
   shell: ShellRuntime
+  /**
+   * 注销本实例的 **`window.__log__` 登记**（M7-6；切分线②）。
+   *
+   * 宿主根组件卸载时调用：在册集合因此反映"此刻真的在跑哪些实例"
+   * —— 否则读面会继续指向一个已销毁的 ctx。
+   */
+  disposeLogApi: UnifiedLogDisposer
 }
 
 export class WorkbenchHost extends HostBase {
   readonly main: Main
   readonly ctx: Context
   readonly wm: WM
-  readonly log = logCenter
 
   constructor(
     main: Main,
     ctx: Context,
     wm: WM,
+    /** 本实例的日志中心（M7-6：由宿主创建，不再是模块级单例）。 */
+    readonly log: ReturnType<typeof createLogCenter>,
     readonly screen: ScreenRoot,
     readonly services: WorkbenchServices,
   ) {
@@ -97,10 +105,14 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   const { selection, editHistory, toolRegistry, tool, shell } = deps
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
+  // 日志中心是**实例**的（M7-6 切分线①）：两个宿主各建一份，
+  // 于是 `entries`/`liveStatus` 不再跨实例混流（S0-A D8/D9）。
+  const log = createLogCenter()
+
   // 工作台实例身份是**固定**的（Q3：结构上禁止同页两个工作台）。
   // 它仍必须显式传给 WM / ScreenRoot：持久化键与观测面都按实例命名，
   // 而不是按"当前宿主是什么"反查。
-  const wm = new WM(logCenter, { surface: 'workbench', instanceId: WORKBENCH_INSTANCE_ID })
+  const wm = new WM(log, { surface: 'workbench', instanceId: WORKBENCH_INSTANCE_ID })
 
   const screen = createWorkbenchScreenRoot(tool, WORKBENCH_PANELS, WORKBENCH_INSTANCE_ID)
 
@@ -143,7 +155,7 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   const ctx = new Context(
     main,
     wm,
-    logCenter,
+    log,
     viewports,
     screen,
     services,
@@ -153,7 +165,7 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   )
   main.bindOperatorFacade(() => ctx)
 
-  const host = new WorkbenchHost(main, ctx, wm, screen, services)
+  const host = new WorkbenchHost(main, ctx, wm, log, screen, services)
   computeLayout(ctx, screen)
 
   // ── Area 会话（#282 P10b）────────────────────────────────────────────────
@@ -191,9 +203,9 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   registerWorkbenchOperators(registry)
   registerWorkbenchTools(toolRegistry, tool)
 
-  installUnifiedLogApi(ctx)
+  const disposeLogApi = installUnifiedLogApi(ctx)
   selection.bindLog(ctx.log)
   editHistory.bindLog(ctx.log)
 
-  return { host, ctx, screen, services, shell }
+  return { host, ctx, screen, services, shell, disposeLogApi }
 }

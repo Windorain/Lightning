@@ -2,7 +2,20 @@
  * LogCenter — 统一日志系统。
  *
  * 对标 Blender 的 ReportList + BKE_report。
- * 位掩码级别，全局单例。所有日志、状态消息、会话合并、快照/diff、状态查询均通过此入口。
+ * 位掩码级别。所有日志、状态消息、会话合并、快照/diff、状态查询均通过此入口。
+ *
+ * ## 实例归属（M7-6；S0-A D8/D9）
+ *
+ * 本模块**不再是模块级单例**：`createLogCenter()` 由**宿主**各建一份
+ * （`createWorkbenchHost` / `createEmbedHost`），挂在 `Context.log` 上。
+ * 消费点签名因此一个都不用改（`Context` 一直持有 `log` 构造参数）。
+ *
+ * 这解决了 S0-A D8 的形状：同页两个嵌入过去共用一份 `entries`/`liveStatus`，
+ * 于是 A 的"纹理加载中 3/57"会出现在 B 的状态栏读面上，而 B 的一次
+ * `clearLiveStatus()` 会抹掉 A 的结论 —— 典型"最后写者胜"。
+ *
+ * ⚠️ `window.__log__` 是**按实例登记**的（见文件末尾）：全局只有**一个**读取器，
+ * 但它的缺省读面指向**第一个在册实例**，要读别的实例必须 `forInstance(id)` 指明。
  *
  * 级别: DEBUG(1) | INFO(2) | OPERATOR(4) | WARN(8) | ERROR(16)
  */
@@ -330,8 +343,8 @@ export function createLogCenter() {
       // `shell.workbench`）。没有该外壳的实例（嵌入）只报**内容块**这一项事实，
       // 而不是"假装选择为空"——后者会与"确实没选中"同形（SPEC §10.7）。
       //
-      // ⚠️ 实例隔离不在这里（GE-3 / M7-6）：本文件仍是模块级单例，
-      // `window.__log__` 仍只装一次。本处只做"去宿主判断"，不动实例化。
+      // M7-6：本函数是**实例方法**（`ctx.log` 由宿主各建一份），故"谁的快照"
+      // 由调用方持有的 `ctx` 决定，不需要在这里再判实例。
       if (!ctx.hasCapability(CAPABILITY.SHELL_WORKBENCH)) {
         return {
           logId: id,
@@ -508,52 +521,77 @@ export function createLogCenter() {
   }
 }
 
-/** Default singleton instance — shared across production code. Tests can call `createLogCenter()` for a fresh instance. */
-export const logCenter = createLogCenter()
+/* —— Window API：按实例登记（M7-6 / D9） —— */
 
-/* —— Window API —— */
+/**
+ * 一个实例的统一日志读面（`window.__log__` 与 `forInstance(id)` 的元素）。
+ *
+ * 每个方法都**闭包到本实例的 `ctx.log`**：同页两个实例各自读自己的
+ * `entries`/`liveStatus`，不存在共享槽。
+ */
+export type UnifiedLogApi = ReturnType<typeof createUnifiedLogApi>
 
-export function installUnifiedLogApi(ctx: Context): void {
-  if (typeof window === 'undefined') return
-  ;(window as any).__log__ = {
+/** 带实例身份的统一日志读面（`__log__.instances()` 的元素）。 */
+export type UnifiedLogInstance = UnifiedLogApi & { readonly instanceId: string }
+
+interface RegisteredLog {
+  readonly instanceId: string
+  readonly ctx: Context
+  readonly api: UnifiedLogApi
+}
+
+/**
+ * **按实例登记**（照抄 `embed/embedAssemblyProbe` 的 `register`/`probes` 形态）。
+ *
+ * 为什么不是"每次 install 覆盖 `window.__log__`"：那正是 D9 的"最后写者胜"——
+ * 同页第二个实例挂载后，e2e/诊断读到的全是**后来者**的状态。
+ * 现在注册表是唯一真源，全局读取器只是它的**只读投影**：
+ * 缺省读面取**第一个在册实例**（保住既有单实例页面的读数），
+ * 要读某个实例必须**指明** id（`forInstance`），不存在隐式"最后一个"。
+ */
+const registeredLogs: RegisteredLog[] = []
+
+function createUnifiedLogApi(ctx: Context) {
+  const log = ctx.log
+  return {
     // Logs
-    recent: (levelMask?: number, count?: number) => logCenter.recent(levelMask, count),
+    recent: (levelMask?: number, count?: number) => log.recent(levelMask, count),
     since: (lastId: number) => {
-      const all = logCenter.recent()
+      const all = log.recent()
       const idx = all.findIndex(e => e.id === lastId)
       const entries = idx >= 0 ? all.slice(idx + 1) : all
       return { entries, count: entries.length }
     },
-    contains: (mask: number) => logCenter.contains(mask),
-    lastDisplayable: () => logCenter.lastDisplayable.value,
+    contains: (mask: number) => log.contains(mask),
+    lastDisplayable: () => log.lastDisplayable.value,
     /** 实时状态读面（#399）：诊断/e2e 不解析状态栏文本即可判定加载/就绪/缺失/失败。 */
-    liveStatus: () => logCenter.liveStatus.value,
-    clear: () => logCenter.clear(),
-    statusMessage: () => logCenter.statusMessage,
+    liveStatus: () => log.liveStatus.value,
+    clear: () => log.clear(),
+    statusMessage: () => log.statusMessage,
 
     // Sessions
-    sessionSummaries: () => logCenter.sessionSummaries(),
+    sessionSummaries: () => log.sessionSummaries(),
     isModalActive: () => ctx.wm.events.modalDepth('r-viewport') > 0,
 
     // Snapshot / Diff
-    snapshot: () => logCenter.snapshot(ctx),
-    diff: (snap: StateDigest) => logCenter.diff(snap, ctx),
+    snapshot: () => log.snapshot(ctx),
+    diff: (snap: StateDigest) => log.diff(snap, ctx),
 
     // Checks
     check: {
-      selectionSize: (n: number) => logCenter.check.selectionSize(ctx, n),
-      blockCount: (n: number) => logCenter.check.blockCount(ctx, n),
-      blockAt: (pos: { x: number; y: number; z: number }, id?: string) => logCenter.check.blockAt(ctx, pos, id),
-      operatorActive: (id: string) => logCenter.check.operatorActive(ctx, id),
+      selectionSize: (n: number) => log.check.selectionSize(ctx, n),
+      blockCount: (n: number) => log.check.blockCount(ctx, n),
+      blockAt: (pos: { x: number; y: number; z: number }, id?: string) => log.check.blockAt(ctx, pos, id),
+      operatorActive: (id: string) => log.check.operatorActive(ctx, id),
     },
 
     // State queries
-    getScene: () => logCenter.getScene(),
-    getSelection: () => logCenter.getSelection(),
-    getActiveTool: () => logCenter.getActiveTool(),
-    getEditHistory: () => logCenter.getEditHistory(),
-    getGizmoPosition: () => logCenter.getGizmoPosition(),
-    getCameraState: () => logCenter.getCameraState(),
+    getScene: () => log.getScene(),
+    getSelection: () => log.getSelection(),
+    getActiveTool: () => log.getActiveTool(),
+    getEditHistory: () => log.getEditHistory(),
+    getGizmoPosition: () => log.getGizmoPosition(),
+    getCameraState: () => log.getCameraState(),
 
     // RNA（#253 P2）
     //
@@ -598,4 +636,62 @@ export function installUnifiedLogApi(ctx: Context): void {
       })
     },
   }
+}
+
+/**
+ * 把全局读取器重建成"注册表的只读投影"。
+ *
+ * 缺省方法投影到**第一个在册实例**（不是最后安装者）。注册表变化（挂载/卸载）
+ * 时重建，于是"第一个"也随实际在册集合变化 —— 仍不会退化成最后写者胜。
+ */
+function publishUnifiedLogApi(): void {
+  if (typeof window === 'undefined') return
+  const primary = registeredLogs[0]
+  if (primary === undefined) {
+    delete (window as any).__log__
+    return
+  }
+  ;(window as any).__log__ = {
+    ...primary.api,
+    /** 在册实例 id（顺序 = 登记顺序）。 */
+    instanceIds: () => registeredLogs.map((r) => r.instanceId),
+    /** 全部在册实例的读面（每个都带 `instanceId`）。 */
+    instances: (): UnifiedLogInstance[] => registeredLogs.map((r) => ({ instanceId: r.instanceId, ...r.api })),
+    /**
+     * 指明实例的读面；不在册 ⇒ `null`（**不**回落到缺省实例 ——
+     * 那会让"读错实例"与"实例已卸载"同形）。
+     */
+    forInstance: (instanceId: string): UnifiedLogInstance | null => {
+      const found = registeredLogs.find((r) => r.instanceId === instanceId)
+      return found === undefined ? null : { instanceId: found.instanceId, ...found.api }
+    },
+  }
+}
+
+/**
+ * 登记**本实例**的统一日志读面（返回注销函数；调用方在卸载时调用）。
+ *
+ * 消费点（`ctx.log`）签名不变：日志实例由宿主创建、挂在 `Context.log` 上；
+ * 本函数只把它投影成一个按实例登记的全局读面。
+ */
+export type UnifiedLogDisposer = () => void
+
+export function installUnifiedLogApi(ctx: Context): UnifiedLogDisposer {
+  if (typeof window === 'undefined') return () => {}
+  const existing = registeredLogs.find((r) => r.ctx === ctx)
+  if (existing !== undefined) return () => { /* 已登记：注销由首次调用方负责 */ }
+  const entry: RegisteredLog = { instanceId: ctx.instanceId, ctx, api: createUnifiedLogApi(ctx) }
+  registeredLogs.push(entry)
+  publishUnifiedLogApi()
+  return () => {
+    const i = registeredLogs.indexOf(entry)
+    if (i < 0) return
+    registeredLogs.splice(i, 1)
+    publishUnifiedLogApi()
+  }
+}
+
+/** 测试/诊断：当前在册的实例 id（只读快照）。 */
+export function registeredLogInstanceIds(): readonly string[] {
+  return Object.freeze(registeredLogs.map((r) => r.instanceId))
 }

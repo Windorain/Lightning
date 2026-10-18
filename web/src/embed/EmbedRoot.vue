@@ -51,7 +51,7 @@ const settings = buildEmbedSettingsFromBootstrap({
 const shell = createEmbedShellRuntime()
 provide(shellKey, shell)
 
-const { host, ctx } = createEmbedHost(settings, {
+const { host, ctx, disposeLogApi } = createEmbedHost(settings, {
   structureBase: props.bootstrap.structureBase,
   workbenchEdit: props.bootstrap.workbenchEdit,
   handlers: props.bootstrap.handlers,
@@ -76,6 +76,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   unregisterAssemblyProbe?.()
   unregisterAssemblyProbe = null
+  // 本实例的 `window.__log__` 登记必须随实例退出（M7-6 切分线②）：
+  // 多实例页上"读面还指着一个已销毁的 ctx"与"实例仍在跑"必须可区分。
+  disposeLogApi()
 })
 
 // **内核帧循环**（P10 #261 / R-WK-03）：嵌入外壳同样由宿主按帧注入时间。

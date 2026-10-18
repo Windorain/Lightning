@@ -17,19 +17,25 @@ import { createViewportManager } from '@/runtime/viewportManager'
 import { createEmbedScreenRoot } from '@/runtime/screenRoot'
 import { createToolSettings } from '@/runtime/toolSettings'
 import { HostBase } from '@/runtime/host'
-import { logCenter } from '@/logging/LogCenter'
+import { createLogCenter, installUnifiedLogApi, type UnifiedLogDisposer } from '@/logging/LogCenter'
 import { capabilitiesOf } from '@/composition/resolver'
 import { objectTypeDeclarationsOf } from '@/composition/contributedObjectTypes'
 import type { ShellRuntime } from '@/composition/shell'
 import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
 
 export class EmbedHost extends HostBase {
-  readonly log = logCenter
-
   constructor(
     readonly main: Main,
     readonly ctx: Context,
     readonly wm: WM,
+    /**
+     * **本实例的日志中心**（M7-6；切分线①：日志实例由宿主创建并挂 `Context.log`）。
+     *
+     * 旧实现是模块级单例（`export const logCenter`）：同页两个嵌入共用一份
+     * `entries`/`liveStatus`，于是 A 的"纹理加载中 3/57"出现在 B 的状态栏读面上
+     * —— 那是 S0-A D9 的"最后写者胜"。现在每个宿主各建一份。
+     */
+    readonly log: ReturnType<typeof createLogCenter>,
   ) {
     super()
   }
@@ -58,13 +64,14 @@ export function createEmbedHost(
    * 面板/键位全部按它命名。缺省成固定串就等于把 D6/D7/D9 留在原地。
    */
   instanceId: string,
-): { host: EmbedHost; ctx: Context; shell: ShellRuntime } {
+): { host: EmbedHost; ctx: Context; shell: ShellRuntime; disposeLogApi: UnifiedLogDisposer } {
   const registry = createOperatorRegistry()
+  const log = createLogCenter()
   const viewports = createViewportManager()
   // 主题是**实例**设置（P10 #261 F1）：宿主指定的主题经这里进本实例，
   // 落在实例根元素的 `data-lk-theme` 上 —— 不再写 `document.documentElement`
   // （那会让同页两实例互相覆盖）。
-  const wm = new WM(logCenter, {
+  const wm = new WM(log, {
     surface: 'embed',
     instanceId,
     ...(settings.theme === undefined ? {} : { initialTheme: settings.theme }),
@@ -110,7 +117,7 @@ export function createEmbedHost(
   const ctx = new Context(
     main,
     wm,
-    logCenter,
+    log,
     viewports,
     screen,
     null,
@@ -137,6 +144,10 @@ export function createEmbedHost(
     if (!registry.find(op.id)) registry.register(op)
   }
 
-  return { host: new EmbedHost(main, ctx, wm), ctx, shell: runtime }
+  // `window.__log__` 的**按实例登记**（切分线②）：同页两实例各有自己的登记项，
+  // 读面必须指明实例；缺省读面取第一个在册实例（不再是"最后安装者"）。
+  const disposeLogApi = installUnifiedLogApi(ctx)
+
+  return { host: new EmbedHost(main, ctx, wm, log), ctx, shell: runtime, disposeLogApi }
 }
 
