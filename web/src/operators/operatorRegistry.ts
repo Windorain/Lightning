@@ -10,6 +10,22 @@ import { pushDocUndo } from './pushDocUndo'
 
 import { ModalOperatorWrapper } from './modalOperatorWrapper'
 import type { StateDigest } from '@/logging/LogCenter'
+import { refuseOperator } from './capabilityRefusal'
+
+/**
+ * 该算子**缺哪一个能力**（`null` = 全部具备）。
+ *
+ * M7-5：能力门是**声明式**的（`OperatorType.requires`），结算点在注册表的两条入口
+ * （`exec`/`invoke`）—— 于是"缺能力"只有一种行为：**结构化拒绝** + 成句原因，
+ * 不会出现"某个算子在 poll 里悄悄返回 false、另一个在 exec 里直接 return"的分叉
+ * （SPEC §10.7/§10.10）。
+ */
+function missingCapabilityOf(op: OperatorType, ctx: Context): string | null {
+  for (const capability of op.requires ?? []) {
+    if (!ctx.hasCapability(capability)) return capability
+  }
+  return null
+}
 
 function logOperatorResult(
   ctx: Context, opId: string, label: string, result: string,
@@ -44,6 +60,9 @@ export class OperatorRegistry {
   async exec(ctx: Context, id: string, props?: OperatorProperties): Promise<void> {
     const op = this.operators.get(id)
     if (!op) { ctx.log.warn('Operator', `exec: op not found ${id}`, { opId: id }); return }
+    // 能力门优先于 poll：缺能力是**装配事实**（不会因文档状态变化），必须先结算成拒绝。
+    const missingCapability = missingCapabilityOf(op, ctx)
+    if (missingCapability !== null) { refuseOperator(ctx, op, missingCapability); return }
     if (op.poll && !op.poll(ctx)) {
       ctx.log.info('Operator', `exec: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
       return
@@ -80,6 +99,8 @@ export class OperatorRegistry {
   ): OpResult {
     const op = this.operators.get(id)
     if (!op) { ctx.log.warn('Operator', `invoke: op not found ${id}`, { opId: id }); return OP_RESULT.CANCELLED }
+    const missingCapability = missingCapabilityOf(op, ctx)
+    if (missingCapability !== null) { refuseOperator(ctx, op, missingCapability); return OP_RESULT.CANCELLED }
     if (op.poll && !op.poll(ctx)) {
       ctx.log.info('Operator', `invoke: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
       return OP_RESULT.CANCELLED

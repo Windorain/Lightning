@@ -219,6 +219,13 @@ const REASONS: Readonly<Record<string, Entry>> = Object.freeze({
     zh: (q) => `本外壳缺少写能力（${p(q, 'capability')}）`,
     en: (q) => `missing capability (${p(q, 'capability')})`,
   },
+  // M7-5：算子/命令的**能力门**拒绝。与 `capability-missing` 不是同一句：
+  // 那条的宾语是"写能力"（属性写路径），而这里缺的可能是屏上手势、外观覆盖、
+  // 工作台外壳等**非写**能力 —— 句子必须能说清"缺的是哪一项、不是写权限"。
+  'UnsupportedOperation:capability-unavailable': {
+    zh: (q) => `本外壳不具备该能力（${p(q, 'capability')}）`,
+    en: (q) => `this shell does not provide the capability (${p(q, 'capability')})`,
+  },
   'UnsupportedOperation:kernel-registry-invalid': {
     zh: (q) => `内核属性注册表不合法（${p(q, 'detail')}）`,
     en: (q) => `invalid kernel property registry (${p(q, 'detail')})`,

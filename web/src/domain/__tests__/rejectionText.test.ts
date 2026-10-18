@@ -49,6 +49,8 @@ const CASES: Readonly<Record<string, DomainError>> = {
   'UnsupportedOperation:kernel-not-adopted': domainError('UnsupportedOperation', { reason: 'kernel-not-adopted', property: 'lightning.block.id' }),
   'UnsupportedOperation:capability-missing': domainError('UnsupportedOperation', { reason: 'capability-missing', capability: 'property.write' }),
   'UnsupportedOperation:kernel-registry-invalid': domainError('UnsupportedOperation', { reason: 'kernel-registry-invalid', detail: 'dup' }),
+  // M7-5：能力门拒绝（非写能力）—— 与 `capability-missing` 分开成句
+  'UnsupportedOperation:capability-unavailable': domainError('UnsupportedOperation', { reason: 'capability-unavailable', capability: 'tools.manipulators' }),
   'UnsupportedOperation:propertyNotAnimatable': domainError('UnsupportedOperation', { reason: 'propertyNotAnimatable', property: 'lightning.block.id' }),
   'DocumentBusy:unknown': domainError('DocumentBusy', { documentId: 'd1', holder: 'ctx-a', requester: 'ctx-b' }),
   'VersionConflict:unknown': domainError('VersionConflict', { expected: 3, actual: 4 }),

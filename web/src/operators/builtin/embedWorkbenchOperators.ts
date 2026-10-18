@@ -14,8 +14,17 @@ export const OpenWikiWorkbenchOperator: OperatorType = {
   label: '在结构工作台中打开',
   internal: true,
 
+  /**
+   * 可用性 = **宿主页面声明的跳转桥**（bootstrap 的 `workbenchEdit` 经
+   * `OPERATOR_...`/`Main#embedWorkbenchEdit` 落到这里）。
+   *
+   * M7-5 之前这里还有一句"非嵌入才返回 false"的宿主身份判断 —— 那是宿主分叉。
+   * 删掉它不改变任何生产行为：`Main#embedWorkbenchEdit` 缺省 `{enabled:false}`
+   * 且只有嵌入宿主（`EmbedRoot` 的 bootstrap）会把它置真；工作台实例永远是 false。
+   * ⇒ 唯一的权威是**宿主页面给的声明**（SPEC §10.1：一项事实一个权威），
+   * 而不是"这个实例是不是嵌入"。
+   */
   poll(ctx) {
-    if (!ctx.isEmbed()) return false
     const state = ctx.main.embedWorkbenchEdit.value
     const base = ctx.main.embedStructureBase.value
     return state.enabled && !!base

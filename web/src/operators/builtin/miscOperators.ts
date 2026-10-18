@@ -1,4 +1,5 @@
 import type { OperatorType } from '@/operators/operatorType'
+import { CAPABILITY } from '@/composition/modules'
 import type { WorkbenchWorkspaceMode } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
 import { REGION } from '@/runtime/regionIds'
@@ -101,7 +102,9 @@ export const SetFramePlaybackRateOperator: OperatorType = {
 export const SetToolSettingOperator: OperatorType = {
   id: 'OPERATOR_SET_TOOL_SETTING',
   label: '设置工具参数',
-  poll(ctx) { return !ctx.isEmbed() },
+  // M7-5：工具参数属于**操纵器面**（工具注册表/参数/gizmo）—— 能力缺席即拒绝，
+  // 不再用"是不是嵌入"表达（M7-4 报告 §5 的 25 点清单之一）。
+  requires: [CAPABILITY.TOOLS_MANIPULATORS],
   exec(ctx, props) {
     const key = props.key as string
     const tool = ctx.getToolSettings()
@@ -137,10 +140,10 @@ export const ThemeToggleOperator: OperatorType = {
   label: '切换主题',
   description: '在暗色/亮色主题间切换',
 
-  poll(_ctx) { return true },
+  // M7-5：外观的**本地覆盖**是一项环境能力（嵌入的外观归宿主页）⇒ 缺它即拒绝。
+  requires: [CAPABILITY.APPEARANCE_LOCAL],
 
   exec(ctx) {
-    if (ctx.isEmbed()) return
     // 只改**本实例**设置（#259 A33）：旧实现在这里写 `wm.settings.theme`，
     // 而当时的 shellSettings 会把值落到 `document.documentElement` 与全局存储键上，
     // 于是同页另一个实例被迫同主题。现在写入的是实例作用域设置。
@@ -154,12 +157,13 @@ export const SetLanguageOperator: OperatorType = {
   label: '设置语言',
   description: '设置界面语言（zh/en）',
 
-  poll(_ctx) { return true },
+  // 与主题同一条环境能力（外观的本地覆盖）。
+  requires: [CAPABILITY.APPEARANCE_LOCAL],
 
   exec(ctx, props) {
     const lang = props.lang as 'zh' | 'en'
     if (lang !== 'zh' && lang !== 'en') return
-    if (!ctx.isEmbed()) ctx.getShellSettings().setLang(lang)
+    ctx.getShellSettings().setLang(lang)
   },
 }
 
@@ -258,7 +262,9 @@ export const SetHoveredBlockOperator: OperatorType = {
   id: 'OPERATOR_SET_HOVERED_BLOCK',
   label: '设置悬停方块',
   internal: true,
-  poll(ctx) { return !ctx.isEmbed() && ctx.hasLoadedDocument() },
+  // 全域悬停读面是**工作台 chrome** 的呈现需求（底栏读数/检查器回落）⇒ 工作台外壳能力。
+  requires: [CAPABILITY.SHELL_WORKBENCH],
+  poll(ctx) { return ctx.hasLoadedDocument() },
   exec(ctx, props) {
     const block = props.block as BlockRef | null | undefined
     setRegionHoverBlock(ctx, REGION.WORKBENCH_VIEWPORT, block ?? null)
@@ -269,7 +275,7 @@ export const SetHoveredAnnotationOperator: OperatorType = {
   id: 'OPERATOR_SET_HOVERED_ANNOTATION',
   label: '设置悬停注解',
   internal: true,
-  poll(ctx) { return !ctx.isEmbed() },
+  requires: [CAPABILITY.SHELL_WORKBENCH],
   exec(ctx, props) {
     const id = props.annotationId as string | null | undefined
     setRegionHoverAnnotation(ctx, REGION.WORKBENCH_VIEWPORT, id ?? null)
@@ -279,7 +285,9 @@ export const SetHoveredAnnotationOperator: OperatorType = {
 export const SetWikiConfigOperator: OperatorType = {
   id: 'OPERATOR_SET_WIKI_CONFIG',
   label: '设置 Wiki 配置',
-  poll(ctx) { return !ctx.isEmbed() },
+  // 嵌入发布配置是**工作台侧**的工作区设置（`uiWorkspace==='wiki'` 的"嵌入配置"面板）；
+  // 嵌入面自己不配置自己的发布模板 ⇒ 工作台外壳能力。
+  requires: [CAPABILITY.SHELL_WORKBENCH],
   exec(ctx, props) {
     const path = props.path as string
     if (!path) return
@@ -311,12 +319,14 @@ export const SetRegionSettingOperator: OperatorType = {
 export const ApplySettingsOperator: OperatorType = {
   id: 'OPERATOR_APPLY_SETTINGS',
   label: '应用启动设置',
-  poll() { return true },
+  // 它写的是**工作台会话**（workspaceMode/uiWorkspace/connection）——那三样只有工作台外壳有；
+  // 能力缺席时应当**拒绝**，而不是"先写一半再在 getWorkspaceMode 上抛错"。
+  requires: [CAPABILITY.SHELL_WORKBENCH],
   exec(ctx, props) {
     if (props.workspaceMode) ctx.getWorkspaceMode().value = props.workspaceMode as WorkbenchWorkspaceMode
     if (props.uiWorkspace) ctx.getUiWorkspace().value = props.uiWorkspace as import('@/runtime/types').UIWorkspace
     const conn = props.connection as Partial<import('@/runtime/types').ConnectionState> | undefined
-    if (conn && !ctx.isEmbed()) {
+    if (conn) {
       Object.assign(ctx.getConnection(), conn)
     }
   },
