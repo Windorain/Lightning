@@ -1,8 +1,9 @@
 import type { OperatorType } from '@/operators/operatorType'
 import { getDocumentSourceRegistry } from '@/workbench/document/registry'
 import {
-  afterDocumentSave,
+  beginDocumentSave,
   clearEditingState,
+  completeDocumentSave,
   confirmDiscardDirtyIfNeeded,
   documentLoadPipeline,
 } from '@/workbench/document/pipeline'
@@ -72,11 +73,23 @@ export const DocumentSaveOperator: OperatorType = {
       return
     }
     const summary = String(props.summary ?? binding.pendingSaveSummary ?? '')
+    // ── M8-2：保存**发起时**捕获 S0（B1 在途 + B2 产物投影），完成时只交结局 ──
+    const ticket = beginDocumentSave(ctx)
+    if (ticket === null) {
+      // 串行化：已有在途保存（或内核不可保存）⇒ 如实拒绝，不并发、不排队
+      ctx.log.warn('Wiki 保存', '已有保存在途或当前无保存权威，本次未提交')
+      return
+    }
     try {
       const result = await source.save(ctx, { summary })
-      afterDocumentSave(ctx, ctx.getDocumentBinding(), result.revisionId)
+      completeDocumentSave(ctx, ticket, { kind: 'committed', revisionId: result.revisionId })
       ctx.log.info('Wiki 保存', binding.locator, { revisionId: result.revisionId })
     } catch (err) {
+      // 失败**不推进**基线（SPEC §9:293；domain/document#completeSave 只认 committed）
+      completeDocumentSave(ctx, ticket, {
+        kind: 'failed',
+        code: (err as { code?: string }).code ?? 'wiki-save-failed',
+      })
       if (isEditConflictError(err)) {
         const ui = ctx.wm.chrome.wikiUi
         const msg = err instanceof Error ? err.message : String(err)

@@ -31,6 +31,14 @@ const MIN_V2 = {
   labels: [],
 }
 
+/**
+ * ## M8-2：两侧入参都是**产物 plain 空间**
+ *
+ * 旧实现把 `RuntimeDocument` 作为基线、由函数内部 `.serialize()` 转换；现在
+ * `DocumentBinding.saveBaseline` 存的就是产物 plain 的冻结快照（见其字段说明）。
+ * 判据逻辑未变：这里把 fixture 的 `RuntimeDocument` 显式 `.serialize()` 后传入，
+ * 与生产"基线=产物 plain、当前=plainForSave().plain"的形态一致。
+ */
 describe('wikiEditSummary', () => {
   it('detects embed_initial_view as auditable change', () => {
     const baseline = RuntimeDocument.fromV2Plain(MIN_V2 as Record<string, unknown>)!
@@ -44,7 +52,10 @@ describe('wikiEditSummary', () => {
     })
 
     // #301 P10f D3：`current` 是**产物 plain**（保存路径的同一来源）。
-    const draft = buildWikiEditSummaryDraft(baseline, current.serialize() as Record<string, unknown>)
+    const draft = buildWikiEditSummaryDraft(
+      baseline.serialize() as Record<string, unknown>,
+      current.serialize() as Record<string, unknown>,
+    )
     expect(hasWikiAuditableChanges(draft)).toBe(true)
     expect(draft?.lines.some((l) => l.key === 'embed_initial_view')).toBe(true)
   })
@@ -65,7 +76,10 @@ describe('wikiEditSummary', () => {
     const current = baseline.clone()
 
     // #301 P10f D3：`current` 是**产物 plain**（保存路径的同一来源）。
-    const draft = buildWikiEditSummaryDraft(baseline, current.serialize() as Record<string, unknown>)
+    const draft = buildWikiEditSummaryDraft(
+      baseline.serialize() as Record<string, unknown>,
+      current.serialize() as Record<string, unknown>,
+    )
     expect(hasWikiAuditableChanges(draft)).toBe(false)
   })
 })
@@ -89,7 +103,10 @@ describe('#83 逐格说明进入可审计判定与编辑摘要', () => {
     const current = docWithTooltips(['存储总线', '流体存储总线'], [[[1]]])
 
     // #301 P10f D3：`current` 是**产物 plain**（保存路径的同一来源）。
-    const draft = buildWikiEditSummaryDraft(baseline, current.serialize() as Record<string, unknown>)
+    const draft = buildWikiEditSummaryDraft(
+      baseline.serialize() as Record<string, unknown>,
+      current.serialize() as Record<string, unknown>,
+    )
     expect(hasWikiAuditableChanges(draft)).toBe(true)
     const line = draft!.lines.find((l) => l.key === 'cellTooltip')
     expect(line, 'cellTooltipGrid 变更必须成行').toBeTruthy()
@@ -104,7 +121,10 @@ describe('#83 逐格说明进入可审计判定与编辑摘要', () => {
     const current = docWithTooltips(['新文案'], [[[0]]])
 
     // #301 P10f D3：`current` 是**产物 plain**（保存路径的同一来源）。
-    const draft = buildWikiEditSummaryDraft(baseline, current.serialize() as Record<string, unknown>)
+    const draft = buildWikiEditSummaryDraft(
+      baseline.serialize() as Record<string, unknown>,
+      current.serialize() as Record<string, unknown>,
+    )
     expect(hasWikiAuditableChanges(draft)).toBe(true)
     const line = draft!.lines.find((l) => l.key === 'tooltip')
     expect(line!.details).toEqual(['tooltipPalette[0]: "旧文案" -> "新文案"'])
@@ -117,7 +137,10 @@ describe('#83 逐格说明进入可审计判定与编辑摘要', () => {
     const current = docWithTooltips(['存储总线', '流体存储总线'], [[[1]]])
 
     // #301 P10f D3：`current` 是**产物 plain**（保存路径的同一来源）。
-    const draft = buildWikiEditSummaryDraft(baseline, current.serialize() as Record<string, unknown>)
+    const draft = buildWikiEditSummaryDraft(
+      baseline.serialize() as Record<string, unknown>,
+      current.serialize() as Record<string, unknown>,
+    )
     expect(draft!.defaultSummary).toContain('tooltipPalette[1]: <missing> -> "流体存储总线"')
     expect(draft!.defaultSummary).toContain('cellTooltipGrid[0][0][0]: "" -> "流体存储总线"')
   })
@@ -127,7 +150,10 @@ describe('#83 逐格说明进入可审计判定与编辑摘要', () => {
     const current = docWithTooltips(['存储总线'], [[[-1]]])
 
     // #301 P10f D3：`current` 是**产物 plain**（保存路径的同一来源）。
-    const draft = buildWikiEditSummaryDraft(baseline, current.serialize() as Record<string, unknown>)
+    const draft = buildWikiEditSummaryDraft(
+      baseline.serialize() as Record<string, unknown>,
+      current.serialize() as Record<string, unknown>,
+    )
     const line = draft!.lines.find((l) => l.key === 'cellTooltip')
     expect(line!.details).toEqual(['cellTooltipGrid[0][0][0]: "存储总线" -> ""'])
   })
@@ -137,7 +163,10 @@ describe('#83 逐格说明进入可审计判定与编辑摘要', () => {
     const current = docWithTooltips(['存储总线'], [[[7]]])
 
     // #301 P10f D3：`current` 是**产物 plain**（保存路径的同一来源）。
-    const draft = buildWikiEditSummaryDraft(baseline, current.serialize() as Record<string, unknown>)
+    const draft = buildWikiEditSummaryDraft(
+      baseline.serialize() as Record<string, unknown>,
+      current.serialize() as Record<string, unknown>,
+    )
     const line = draft!.lines.find((l) => l.key === 'cellTooltip')
     expect(line!.details).toEqual(['cellTooltipGrid[0][0][0]: "存储总线" -> #7'])
   })
@@ -146,7 +175,10 @@ describe('#83 逐格说明进入可审计判定与编辑摘要', () => {
     const baseline = docWithTooltips(['存储总线'], [[[0]]])
     const current = docWithTooltips(['存储总线'], [[[0]]])
     // #301 P10f D3：`current` 是**产物 plain**（保存路径的同一来源）。
-    const draft = buildWikiEditSummaryDraft(baseline, current.serialize() as Record<string, unknown>)
+    const draft = buildWikiEditSummaryDraft(
+      baseline.serialize() as Record<string, unknown>,
+      current.serialize() as Record<string, unknown>,
+    )
     expect(draft).toBeNull()
   })
 
@@ -154,7 +186,10 @@ describe('#83 逐格说明进入可审计判定与编辑摘要', () => {
     const baseline = RuntimeDocument.fromV2Plain(MIN_V2 as Record<string, unknown>)!
     const current = baseline.clone()
     // #301 P10f D3：`current` 是**产物 plain**（保存路径的同一来源）。
-    const draft = buildWikiEditSummaryDraft(baseline, current.serialize() as Record<string, unknown>)
+    const draft = buildWikiEditSummaryDraft(
+      baseline.serialize() as Record<string, unknown>,
+      current.serialize() as Record<string, unknown>,
+    )
     expect(draft).toBeNull()
   })
 })

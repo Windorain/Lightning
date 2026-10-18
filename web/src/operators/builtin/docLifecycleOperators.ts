@@ -16,6 +16,7 @@ import {
   type ProjectHost,
 } from '@/composition/projectIo'
 import { plainRootOf } from '@/adapters/plainRoot'
+import { beginDocumentSave, completeDocumentSave } from '@/workbench/document/pipeline'
 
 /**
  * **把一份已解析的旧文档装进内核会话**（#282 P10b 建立；#289 P10d（D1）改为**转发**）。
@@ -207,12 +208,28 @@ export const SaveFileOperator: OperatorType = {
   },
 
   exec(ctx, _props) {
+    // ── M8-2：保存**发起时**捕获 S0；写盘成功后交 `committed`（基线取捕获的 S0）──
+    const ticket = beginDocumentSave(ctx)
+    if (ticket === null) {
+      ctx.log.warn('保存到文件', '已有保存在途或当前无保存权威，本次未提交')
+      return
+    }
     // #301 P10f D2：产物改由**内核投影**给出（`plainForSave` 是唯一分流点；
     // 未装配时自动回落旧文档 —— 能力不回退）。
     const doc = ctx.plainForSave().plain
-    if (!doc) return
+    if (!doc) {
+      completeDocumentSave(ctx, ticket, { kind: 'failed', code: 'no-save-projection' })
+      return
+    }
     const baseName = suggestedJsonBaseName(ctx.getLocalFileName().value, 'structure-export')
-    downloadJson(baseName, doc, true)
+    try {
+      downloadJson(baseName, doc, true)
+    } catch (err) {
+      // 写盘失败**不推进**基线（在途槽位必须释放，否则后续保存会被串行化规则永久拒绝）
+      completeDocumentSave(ctx, ticket, { kind: 'failed', code: 'download-failed' })
+      throw err
+    }
+    completeDocumentSave(ctx, ticket, { kind: 'committed' })
   },
 }
 
@@ -288,14 +305,27 @@ export const SaveProjectOperator: OperatorType = {
   },
 
   exec(ctx) {
+    // ── M8-2：保存**发起时**捕获 S0；写盘成功后交 `committed`（基线取捕获的 S0）──
+    const ticket = beginDocumentSave(ctx)
+    if (ticket === null) {
+      ctx.log.warn('保存工程', '已有保存在途或当前无保存权威，本次未提交')
+      return
+    }
     const result = projectForSave(projectHostOf(ctx))
     if (!result.ok) {
+      completeDocumentSave(ctx, ticket, { kind: 'failed', code: 'project-encode-failed' })
       ctx.log.error('保存工程', '内核不是权威，无法编码工程文件', { reason: result.error.params })
       return
     }
     const baseName = suggestedJsonBaseName(ctx.getLocalFileName().value, 'project')
     // 工程文件是**边界产物**：`encodeProject` 已给出类型化负载，这里只负责写盘。
-    downloadJson(baseName, result.value as unknown as Record<string, unknown>, true)
+    try {
+      downloadJson(baseName, result.value as unknown as Record<string, unknown>, true)
+    } catch (err) {
+      completeDocumentSave(ctx, ticket, { kind: 'failed', code: 'download-failed' })
+      throw err
+    }
+    completeDocumentSave(ctx, ticket, { kind: 'committed' })
   },
 }
 

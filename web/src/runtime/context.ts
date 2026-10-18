@@ -32,7 +32,12 @@ import type { DiagnosticsReadView } from '@/application/diagnostics'
 import { asReadOnlyDiagnostics } from '@/application/diagnostics'
 import type { ScreenRoot, RegionNode } from '@/runtime/screenRoot'
 import { REGION } from '@/runtime/regionIds'
-import { KERNEL_CONTEXT_ID, type KernelSession } from '@/runtime/kernelSession'
+import {
+  KERNEL_CONTEXT_ID,
+  type KernelSaveOutcome,
+  type KernelSaveRequest,
+  type KernelSession,
+} from '@/runtime/kernelSession'
 // #301 P10f C′1：帧声明的**判定**提成纯函数（D8 的判据必须能注入装配失败，
 // 而 `Context` 的外壳六件套不该进测试）—— 本层只负责"取事实、交结果"。
 import { resolveFrameDeclarations } from '@/runtime/frameDeclarations'
@@ -114,6 +119,27 @@ function vecOf(v: unknown): { readonly x: number; readonly y: number; readonly z
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null
   return Object.freeze({ x, y, z })
 }
+
+/**
+ * 一次**生产保存**的凭据（M8-2 / D1）：内核在途请求 + 捕获时刻的产物投影。
+ *
+ * 定义在 `Context` 旁边而不是各自持有：这两个类型是 `beginKernelSave` 与
+ * workbench 侧 `beginDocumentSave/completeDocumentSave` 的**共同词汇**。
+ * 让它们住在这里，旧层文件（`workbench/document/pipeline.ts`）只经既有的
+ * `@/runtime/context` 边拿到类型，不必新增一条"旧层 → 内核会话"的依赖
+ * （`tests/architecture/kernel-legacy-isolation.test.ts` 会正确判红那种边）。
+ */
+export interface DocumentSaveTicket {
+  /** 内核在途请求（序号 / 绑定代数 / 捕获的内容身份 S0）。 */
+  readonly request: KernelSaveRequest
+  /** 捕获时刻的产物投影（`plainForSave().plain`，与写出去的那份**同一来源**）。 */
+  readonly baseline: Readonly<Record<string, unknown>> | null
+}
+
+/** 保存的结局：`committed` 才推进基线；`revisionId` 只有 Wiki 路有。 */
+export type DocumentSaveOutcome =
+  | { readonly kind: 'committed'; readonly revisionId?: number | null }
+  | { readonly kind: 'failed'; readonly code: string }
 
 export class Context {
   private workbenchHoverBlock: ComputedRef<BlockRef | null> | null = null
@@ -1178,14 +1204,19 @@ export class Context {
    * | 用途 | 面 | 为什么 |
    * |---|---|---|
    * | 撤销/重做回到"那一刻" | `documentSnapshot()` 令牌 | 内核历史表达不了"无文档"，且令牌不会被误当内容读 |
-   * | **保存基线**（"与哪一份内容相比是脏的"） | 本方法 | 基线的比较对象是**plain 产物**（`wikiEditSummary` 逐键比），而它的类型是外部格式边界（见下表） |
+   * | **替换式写的旧文档载体**（注解/元数据算子） | 本方法 | 那些写路径按 `RuntimeDocument` 的形状整份替换（R8） |
    *
-   * ## 为什么返回值是 `RuntimeDocument`（而不是也做成令牌）
+   * ## 它**不再**是保存基线的取值口（M8-2）
    *
-   * `DocumentBinding.saveBaseline` 的字段类型**就是** `RuntimeDocument | null`
-   * （`workbench/document/types.ts`），由 `adapters/files/documentBinding` 读写。
-   * 把它不透明化就要改绑定层的对外类型 —— 那是**外部格式边界**，
-   * 按 D 批映射表 §一（Lead comment 6034 裁决 1）**保留**。
+   * 旧实现让 `DocumentBinding.saveBaseline` 持有本方法的 `RuntimeDocument`，
+   * 再由 `wikiEditSummary` 调 `.serialize()` 与产物 plain 比较。两份**不同空间**的
+   * 投影（loader 的解析产物 vs 内核投影：tooltip 池按首次使用重排）永远不相等
+   * ⇒ 刚装载就报「有未保存变更」；而且那条基线由 `afterDocumentSave` 无条件推进，
+   * 与内核 B1 各自为政（S0-B D1 的双基线）。收口后：
+   *  - `DocumentBinding.saveBaseline` 是**产物 plain 的冻结快照**；
+   *  - 只有 `workbench/document/pipeline#completeDocumentSave`（内核结算 `applied` 后）写它。
+   *
+   * ⇒ 本方法只剩"把旧文档交出去给替换式写路径"这一种用途。
    *
    * ⇒ 本方法是该边界上**唯一**的取值口：`getDoc()` 退出后，生产里没有第二处
    * "把旧文档交出去"的地方（由 `boundary-scan.test.ts` 的 `main.doc` 读取点
@@ -2321,6 +2352,40 @@ export class Context {
     void this.main.contentRefreshTick.value
     const summary = kernel.documentSummary()
     return summary === null ? null : summary.dirty
+  }
+
+  /**
+   * **生产保存请求的内核侧半边**（M8-2 / D1）：捕获 S0 + 登记在途。
+   *
+   * ## 它修复的是什么
+   *
+   * `completeSave` 是正式保存基线（B1）的**唯一**推进器，而它在生产里**零派发**
+   * （S0-B D1）：三条生产保存只写盘/写远端，保存后 `kernelDirty()` 仍为 true。
+   * 本方法与 {@link completeKernelSave} 把既有的 `save` / `saveCompleted` 命令面
+   * 暴露给保存算子 —— 语义（串行化、绑定代数、committed 才推进、基线取捕获的 S0）
+   * 全部由 `application/commands` + `domain/document` 决定，这里不重复任何一条。
+   *
+   * @returns `null` = 无会话 / 未装配 / 已有在途保存（调用方如实失败，不并发）
+   */
+  beginKernelSave(): KernelSaveRequest | null {
+    const kernel = this.kernel
+    if (kernel === null) return null
+    return kernel.beginSaveRequest()
+  }
+
+  /**
+   * 结算一次生产保存请求（B1 的唯一推进路径）。
+   *
+   * @returns 是否真的推进了基线（`true` 才允许把外部绑定基线投影成同一份 S0）
+   */
+  completeKernelSave(request: KernelSaveRequest, outcome: KernelSaveOutcome): boolean {
+    const kernel = this.kernel
+    if (kernel === null) return false
+    // ⚠️ **不** bump `contentRefreshTick`：那个信号是"内容**可能**变了，请重读"，
+    // 它的消费者会重建 DRW 网格/材质（保存不该让画面重来一次）。基线变化由消费方
+    // 自己重新求值：状态栏的 `wikiDirty` 依赖 `binding.value`（下面由 workbench 侧
+    // 投影并写入新对象），而 `kernelDirty()` 是**每次调用现算**的读面。
+    return kernel.completeSaveRequest(request, outcome)
   }
 
   getEditHistory(): UndoManager {

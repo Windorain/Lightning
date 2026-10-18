@@ -1,4 +1,3 @@
-import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { EMBED_INITIAL_VIEW_META_KEY } from '@/context/embedInitialView'
 
 /** 保存到灰机 Data:Structures 时的默认编辑摘要 */
@@ -120,16 +119,17 @@ function composeSummary(lines: WikiChangeLine[]): string {
  * 只需要那份 plain。故 `current` 直接吃 `ctx.plainForSave().plain`
  *（保存/导出的**唯一**产物入口，与真正写出去的那份**同一来源**）。
  *
- * ⚠️ `baseline` **仍**是旧文档：`DocumentBinding.saveBaseline` 的字段类型就是
- * `RuntimeDocument | null`（**外部格式边界**，按 D 批映射表 §一 保留），
- * 且它是在**写入绑定时**捕获的一份冻结副本（不会随编辑变化）。
+ * ⚠️ `baseline` 是**产物 plain 的冻结快照**（M8-2 收口；旧类型是解析器的
+ * `RuntimeDocument`，比较前要 `.serialize()`，而那份投影与内核产物**不同空间**：
+ * tooltip 池会按首次使用重排 ⇒ 刚装载就报"有变更"）。现在两边同空间，
+ * "无差异"才真的等于"与保存基线相同"。
  */
 export function buildWikiEditSummaryDraft(
-  baseline: RuntimeDocument | null,
+  baseline: Readonly<Record<string, unknown>> | null,
   current: Readonly<Record<string, unknown>> | null,
 ): WikiEditSummaryDraft | null {
   if (!baseline || !current) return null
-  const b = baseline.serialize() as Record<string, unknown>
+  const b = baseline
   const c = current
   const lines: WikiChangeLine[] = []
 

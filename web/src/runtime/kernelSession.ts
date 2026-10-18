@@ -54,9 +54,10 @@ import type { Command } from '@/application/commands'
 import type { CommandOutcome } from '@/application/contracts'
 import type { InputSource } from './scheduling'
 import { queryDocument, type DocumentSummary, type ReadView } from '@/application/queries'
-import { defaultExecutionInputs } from '@/application/commands'
+import { defaultExecutionInputs, type SaveCompletedCommand } from '@/application/commands'
 import type { ApplicationState } from '@/application/state'
 import type { Document } from '@/domain/document'
+import type { Version } from '@/domain/identity'
 import type { ExecutionInputs } from '@/application/commands'
 import type { ObjectTypeDecl } from '@/application/properties'
 import type { ObjectFactoryTable } from '@/domain/scene'
@@ -169,6 +170,30 @@ export interface KernelSessionOptions {
    */
   readonly contributedObjectTypes?: readonly ObjectTypeDecl[]
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 生产保存的结算凭据（M8-2 / D1）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 一次生产保存请求的**不可变凭据**（`beginSaveRequest` 的返回值）。
+ *
+ * 三样都是**捕获时刻**的事实：请求序号（在途判据）、绑定代数（旧完成事件判据）、
+ * 捕获的内容身份 S0（成功时基线的落点）。宿主只把它原样递回
+ * `completeSaveRequest` —— 不允许在完成时重新读"当前版本"来推基线。
+ */
+export interface KernelSaveRequest {
+  readonly sequence: number
+  readonly bindingGeneration: number
+  readonly capturedVersion: Version
+}
+
+/** 一次生产保存的结局（只有 `committed` 推进基线；失败/过期一律不动）。 */
+export type KernelSaveOutcome =
+  | { readonly kind: 'committed' }
+  | { readonly kind: 'failed'; readonly code: string }
+
+const COMMITTED: { readonly kind: 'committed' } = Object.freeze({ kind: 'committed' })
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 会话
@@ -725,6 +750,73 @@ export class KernelSession {
   documentSummary(): DocumentSummary | null {
     const result = queryDocument(this.editor.snapshot(), this.documentId)
     return result.ok ? result.value : null
+  }
+
+  // ── 生产保存的**内核侧**结算（M8-2：D1 收口；B1 的唯一推进者）──────────────
+
+  /**
+   * 发起一次**生产保存请求**：捕获 S0（在途序号 + 绑定代数 + 内容身份）。
+   *
+   * ## 为什么是"走既有命令"而不是在这里另写一套判断
+   *
+   * 保存的三条语义判据（在途序号、绑定代数、只有 `committed` 才推进基线）
+   * 已经**只有一份实现**：`application/commands#reduceSave` / `#reduceSaveCompleted`
+   * → `domain/document#beginSave` / `#completeSave`。
+   * 本方法只是把那条命令面暴露给宿主（生产保存算子），因此：
+   *  - 串行化（在途 ⇒ 返回 `null`）与 `reduceSave` 的拒绝判据同源；
+   *  - 基线推进取**该请求捕获的 `capturedVersion`**（不是"当前版本"）——
+   *    保存期间的新编辑仍脏（SPEC §9:293 / `commands.ts:2336`）。
+   *
+   * ## 为什么不直接用 `SaveCoordinator`（`adapters/saveTarget`）
+   *
+   * 那个协调器自带**一份独立 `SaveLedger`**（构造参数 `ledger`）并要求
+   * `SaveTargetPort`（条件版本写入 + 序列化端口）。三条生产保存路径的目标分别是
+   * 浏览器下载（无远端修订）与 MediaWiki 编辑（冲突由 `mw.Api` 的
+   * `editconflict` 回答，见 `wikiDataWikiApiAdapter`），没有一条需要"本实例的
+   * 第二本账"。用它 = 在 `ApplicationState.saveLedgers` 之外再造一份"什么算保存成功"，
+   * 正是本包要消灭的双写。⇒ **不接**；reduce 路径自足（见 `completeSaveRequest`）。
+   *
+   * @returns `null` = 无会话 / 未装配 / **已有在途保存**（串行化；调用方如实失败）
+   */
+  beginSaveRequest(): KernelSaveRequest | null {
+    if (!this.hasAdoptedContent()) return null
+    const before = this.editor.snapshot()
+    // 没有台账 = 该文档从未发起过保存（`ledgerOf` 同样按缺省台账处理）⇒ 直接发命令
+    const ledger = before.saveLedgers[this.documentId]
+    if (ledger !== undefined && ledger.inFlight !== null) return null
+    this.editor.submit({ kind: 'save', contextId: this.contextId })
+    this.editor.drain()
+    const started = this.editor.snapshot().saveLedgers[this.documentId]
+    if (started === undefined || started.inFlight === null) return null
+    const request = started.inFlight
+    return Object.freeze({
+      sequence: request.sequence,
+      bindingGeneration: request.bindingGeneration,
+      capturedVersion: request.capturedVersion,
+    })
+  }
+
+  /**
+   * 结算一次生产保存请求（成功/失败/过期都由 `completeSave` 判定）。
+   *
+   * @returns 是否**真的推进了基线**（`savedSequence` 变成该请求序号）
+   */
+  completeSaveRequest(request: KernelSaveRequest, outcome: KernelSaveOutcome): boolean {
+    const ledger = this.editor.snapshot().saveLedgers[this.documentId]
+    if (ledger === undefined || ledger.inFlight === null || ledger.inFlight.sequence !== request.sequence) {
+      // 不是**在途**的那一次（迟到/重复/已被 rebind 丢弃）⇒ 不提交命令，也不改基线
+      return false
+    }
+    const command: SaveCompletedCommand = {
+      kind: 'saveCompleted',
+      documentId: this.documentId,
+      sequence: request.sequence,
+      bindingGeneration: request.bindingGeneration,
+      outcome: outcome.kind === 'committed' ? COMMITTED : Object.freeze({ kind: 'failed' as const, code: outcome.code }),
+    }
+    this.editor.submit(command)
+    this.editor.drain()
+    return this.document()?.savedSequence === request.sequence
   }
 
   /**
