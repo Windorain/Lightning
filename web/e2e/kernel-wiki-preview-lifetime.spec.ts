@@ -83,6 +83,16 @@ test.describe('M7-4B · D6 Wiki 预览槽位释放（双宿主同一卸载路径
     const root = await readRegionLifecycle(page, ['r-viewport'])
     expect(root.byRegion['r-viewport'].slotLive, '切回编辑后工作台视口必须仍活着').toBe(true)
 
+    // ── ⑤ 释放不得毒化 region：再切回 Wiki，预览必须重新挂上且槽位再次活着 ──
+    await page.locator('.wt-tab', { hasText: WIKI_TAB_TEXT }).click()
+    await waitWikiViewportReady(page, 90_000)
+    const again = await readRegionLifecycle(page, [WIKI_REGION])
+    console.log('[D6 reenter] ' + JSON.stringify(again.byRegion[WIKI_REGION]))
+    expect(
+      again.byRegion[WIKI_REGION].slotLive,
+      '释放必须是可重入的：再进 Wiki 工作区时预览视口必须重新挂上（不是"关掉就坏"）',
+    ).toBe(true)
+
     // 夹具文件存在性（防"因为夹具缺失而走了空路径"）
     expect(fs.existsSync(path.join(import.meta.dirname, 'fixtures', FIXTURE))).toBe(true)
   })
