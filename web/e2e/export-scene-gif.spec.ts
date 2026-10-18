@@ -4,6 +4,7 @@
  * | 判据 | 断言 |
  * |---|---|---|
  * | C7 | 真下载的字节：可被浏览器解码 + 帧数 == UI 声明 + **逐帧 delay == 声明** |
+ * | C7b | **预览与下载同尺寸**（M6-5 / Q1）：卡片上 GIF 的 naturalWidth/Height == 下载字节的逻辑屏宽高 |
  * | C8 | 相邻帧像素**不同**（渲染一次复制 N 帧的实现会在这里判红） |
  * | C9 | GIF 第 0 帧 ≈ 同方向同尺寸 `seconds=0` 的 PNG（差异 < 2%） |
  * | 负对照 | 去掉 `animation`（静态材质）⇒ 卡片错误位 + **无** download（不产出单帧假 GIF） |
@@ -91,6 +92,23 @@ test.describe('M5-4 · 场景 GIF 导出', () => {
     expect(plan, 'UI 声明的帧数必须是 2').toContain(`${ANIMATED_FIXTURE_EXPECTATION.frameCount} 帧`)
     expect(plan, 'UI 声明的总时长必须是 0.150 s').toContain('0.150 s')
 
+    // ── C7b：预览尺寸（M6-5 统一后 = 下载尺寸）──
+    // 期望值 480 由测试**独立**写出（不 import 生产常量）：Q1 的裁决是"预览与下载
+    // 统一到等轴 PNG 的 480"，若测试跟着实现读常量，两边一起漂移时判据恒绿。
+    const previewImg = page.locator('[data-gif-preview]')
+    await expect(previewImg, '生成成功后卡片必须显示预览').toBeVisible({ timeout: 60_000 })
+    await expect
+      .poll(async () => await previewImg.evaluate((el) => (el as HTMLImageElement).naturalWidth), {
+        message: '预览 GIF 的边长必须是 480（与等轴 PNG 同一值）',
+        timeout: 30_000,
+      })
+      .toBe(480)
+    const preview = await previewImg.evaluate((el) => {
+      const img = el as HTMLImageElement
+      return { width: img.naturalWidth, height: img.naturalHeight }
+    })
+    expect(preview.height, '预览必须是正方形（同一边长）').toBe(480)
+
     // 真实下载。
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: 90_000 }),
@@ -103,8 +121,11 @@ test.describe('M5-4 · 场景 GIF 导出', () => {
     // ① 字节结构（测试侧解析，不 import 生产编码器）。
     const gif = parseGif(new Uint8Array(bytes))
     expect(gif.header, '必须是 GIF89a（不是 GIF87a/伪格式）').toBe('GIF89a')
-    expect(gif.width, '逻辑屏宽度必须是导出边长').toBe(320)
-    expect(gif.height, '逻辑屏高度必须是导出边长').toBe(320)
+    // 判据是"下载 == 预览"，不是"下载 == 某个写死的数"：尺寸分叉正是 M6-5 要消灭的东西。
+    expect(gif.width, '下载字节的逻辑屏宽度必须 == 卡片预览宽度').toBe(preview.width)
+    expect(gif.height, '下载字节的逻辑屏高度必须 == 卡片预览高度').toBe(preview.height)
+    expect(gif.width, '统一后的边长必须是 480（等轴 PNG 同一值）').toBe(480)
+    expect(gif.height, '统一后的边长必须是 480（等轴 PNG 同一值）').toBe(480)
     expect(gif.imageCount, '帧数必须 == 声明（2 帧）').toBe(ANIMATED_FIXTURE_EXPECTATION.frameCount)
     // **本判据能红的点**：旧的自算 tick 写法对同一份声明给出 [5,5]。
     expect(gif.delaysCs, '逐帧 delay 必须 == 声明 [5,10]（旧自算 tick 会给 [5,5]）')
@@ -112,10 +133,10 @@ test.describe('M5-4 · 场景 GIF 导出', () => {
     const totalMs = gif.delaysCs.reduce((a, b) => a + b, 0) * 10
     expect(totalMs, 'GIF 总时长必须 == 声明 150ms').toBe(ANIMATED_FIXTURE_EXPECTATION.totalMs)
 
-    // ② 可解码（浏览器解码器），尺寸 == 请求。
+    // ② 可解码（浏览器解码器），尺寸 == 预览/请求。
     const decoded = await decodeGifFrames(page, bytes)
-    expect(decoded.width).toBe(320)
-    expect(decoded.height).toBe(320)
+    expect(decoded.width).toBe(preview.width)
+    expect(decoded.height).toBe(preview.height)
 
     // ③ C9：GIF 首帧 ≈ 同方向/同尺寸、seconds=0 的 PNG。
     const [pngDownload] = await Promise.all([
@@ -166,6 +187,8 @@ test.describe('M5-4 · 场景 GIF 导出', () => {
       path.join(OUT_DIR, `c7-readings-${testInfo.workerIndex}.json`),
       JSON.stringify({
         plan,
+        previewSize: preview,
+        gifSize: { width: gif.width, height: gif.height },
         gifFrames: gif.imageCount,
         gifDelaysCs: gif.delaysCs,
         gifBytes: bytes.length,

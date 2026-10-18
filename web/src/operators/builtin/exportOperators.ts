@@ -4,7 +4,12 @@ import { loadStructureOrWorld } from '@/render/data/bundleResolve'
 import { downloadBlob, downloadJson } from '@/util/browser'
 import { buildStructureBundleZip } from '@/workbench/export/bundleMeshAssembly'
 import { normalizeIsoSeconds } from '@/application/captureInput'
-import { exportErrorText, runIsoExport } from '@/workbench/export/isoExportJob'
+import {
+  SCENE_GIF_PIXEL_SIZE,
+  SCENE_GIF_PIXEL_SIZE_RANGE,
+  exportErrorText,
+  runIsoExport,
+} from '@/workbench/export/isoExportJob'
 import { createExportDiagnosticSink } from '@/workbench/export/exportCommandDiagnostics'
 import { objExportSemantics } from '@/application/exportSemantics'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
@@ -214,10 +219,17 @@ export const ExportSceneGifOperator: OperatorType = {
   async exec(ctx, _props) {
     const directionIndex = resolveIsoDirection(_props.direction)
     const rawSize = _props.pixelSize
-    // 夹取只有**一处**（命令侧）；捕获器只搬运形参（Q1 的区间统一归 M6-5）。
+    /**
+     * 边长**缺省与夹取都有唯一来源**（M6-5 / Q1）：
+     *  - 缺省 `SCENE_GIF_PIXEL_SIZE`（480）= 卡片预览与等轴 PNG 的同一值；
+     *  - 区间 `SCENE_GIF_PIXEL_SIZE_RANGE`（64..512）= 本命令的既有政策值。
+     * 卡片侧（`ExportWorkspace.vue` 的预览/下载）引用**同一个常量**，故
+     * "预览 480 / 下载 320"这条分叉在结构上不再可表达。
+     * 夹取只在本处发生：捕获器与作业只搬运形参，不做第二次解释。
+     */
     const pixelSize = typeof rawSize === 'number' && Number.isFinite(rawSize)
-      ? Math.max(64, Math.min(512, Math.floor(rawSize)))
-      : 320
+      ? Math.max(SCENE_GIF_PIXEL_SIZE_RANGE.min, Math.min(SCENE_GIF_PIXEL_SIZE_RANGE.max, Math.floor(rawSize)))
+      : SCENE_GIF_PIXEL_SIZE
     if (!ctx.hasLoadedDocument()) return
     // M6-4：与等轴 PNG 同一套诊断接线（同一通道、同一形状）。
     const diagnostics = createExportDiagnosticSink(ctx.wm.diagnostics, {
