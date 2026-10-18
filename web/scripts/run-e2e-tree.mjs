@@ -58,6 +58,26 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 // ---------------------------------------------------------------------------
+// M8-2 · wiki-profile 入口的端口（**同一次运行、同一条身份核验链**）
+// ---------------------------------------------------------------------------
+// 主槽给 workbench profile；wiki-profile 服务用相邻槽（缺省 +1，可用
+// PLAYWRIGHT_WIKI_PORT 覆盖）。两者都被 e2e/global-setup.ts 用
+// root + nonce + profile 三项核验 ⇒ 这里只负责把"本次运行占了哪两个端口"打出来，
+// 让日志本身能证明"没有悄悄只跑了一个 profile"。
+const wikiRaw = process.env.PLAYWRIGHT_WIKI_PORT
+const wikiPort =
+  wikiRaw === undefined || wikiRaw.trim() === '' ? port + 1 : Number(wikiRaw)
+if (!Number.isInteger(wikiPort) || wikiPort < 1 || wikiPort > 65535 || wikiPort === port) {
+  console.error(
+    `[e2e 端口隔离] wiki-profile 端口非法：${JSON.stringify(wikiPort)}（应为 1..65535 且与主槽不同）`,
+  )
+  process.exit(2)
+}
+console.log(
+  `[e2e 端口隔离] 本次运行两个服务：workbench=${port}（主槽） / wiki=${wikiPort}（wiki-profile 入口）`,
+)
+
+// ---------------------------------------------------------------------------
 // #332 · 时间预算（本包装自己的参数；其余原样透传给 playwright）
 // ---------------------------------------------------------------------------
 //   --budget-ms <毫秒>   本次运行的墙钟预算

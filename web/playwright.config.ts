@@ -45,16 +45,26 @@
 import crypto from 'node:crypto'
 import { defineConfig, devices } from '@playwright/test'
 import {
+  SHELL_PROFILE_ENV,
   TREE_NONCE_ENV,
   TREE_NONCE_INJECTED_ENV,
   resolveBaseURL,
   resolvePort,
+  resolveWikiBaseURL,
+  resolveWikiPort,
+  wikiNonceOf,
 } from './e2e/tree-identity'
 import { testIgnoreGlobs } from './e2e/real-artifact-gate'
 
 // ── 端口（唯一真源）──
 const PORT = resolvePort()
 const BASE_URL = resolveBaseURL(PORT)
+// ── M8-2：第二个服务 = **wiki-profile** 入口（同树、同一次运行、同一条身份核验链）──
+// 为什么要两个服务而不是一个可切换的：S1 的三条生产保存路径分属两个 profile
+// （「保存到文件」只在 workbench 菜单、「保存到 Wiki」只在 wiki 菜单），一条 spec
+// 要同时判两族就必须两个服务并存；否则只能"跳过"，而静默跳过是明令禁止的假绿。
+const WIKI_PORT = resolveWikiPort(PORT)
+const WIKI_BASE_URL = resolveWikiBaseURL(WIKI_PORT)
 
 /**
  * #332 · **真实产物 spec 的产物门控排除**（详见 `e2e/real-artifact-gate.ts`）。
@@ -94,14 +104,34 @@ export default defineConfig({
     baseURL: BASE_URL,
     trace: 'on-first-retry',
   },
-  webServer: {
-    command: `npx vite --port ${PORT} --strictPort`,
-    url: BASE_URL,
-    reuseExistingServer: true,
-    timeout: 120_000,
-    // 本树身份标记交给 vite 进程；`vite.config.ts` 的 /__tree__ 端点把它回给 globalSetup
-    env: { [TREE_NONCE_INJECTED_ENV]: TREE_NONCE },
-  },
+  webServer: [
+    {
+      command: `npx vite --port ${PORT} --strictPort`,
+      url: BASE_URL,
+      reuseExistingServer: true,
+      timeout: 120_000,
+      // 本树身份标记交给 vite 进程；`vite.config.ts` 的 /__tree__ 端点把它回给 globalSetup。
+      // `VITE_SHELL_PROFILE` 同时是**客户端**的装配输入（`composition/shell#resolveShellProfile`
+      // 的唯一构建期输入）⇒ 显式写死，别让"这台服务到底装的是哪个外壳"靠缺省值猜。
+      env: {
+        [TREE_NONCE_INJECTED_ENV]: TREE_NONCE,
+        [SHELL_PROFILE_ENV]: 'workbench',
+      },
+    },
+    {
+      // wiki-profile 入口：**同一条** vite 配置（同一份树身份插件、同一份插件链），
+      // 只把外壳 profile 换成 wiki。于是它天然继承端口隔离 + /__tree__ 身份核验，
+      // 不是另起一套入口。
+      command: `npx vite --port ${WIKI_PORT} --strictPort`,
+      url: WIKI_BASE_URL,
+      reuseExistingServer: true,
+      timeout: 120_000,
+      env: {
+        [TREE_NONCE_INJECTED_ENV]: wikiNonceOf(TREE_NONCE)!,
+        [SHELL_PROFILE_ENV]: 'wiki',
+      },
+    },
+  ],
   projects: [
     {
       name: 'mobile-chrome',

@@ -231,9 +231,20 @@ export function resolveShellProfile(env: Record<string, string | boolean | undef
  * 它让"装配根在非 Vite 环境里也能解析"成为事实，而不是靠 try/catch 兜。
  */
 function readBuildEnv(): Record<string, string | boolean | undefined> {
+  // ## ⚠️ 必须是**静态**的 `import.meta.env` 访问（M8-2 修复）
+  //
+  // Vite 的 `vite:import-analysis` 只在模块源码里出现 `import.meta.env`
+  // 这个**静态属性访问**时（其 `hasEnv` 判定）才给该模块注入
+  // `import.meta.env = { … }`。旧写法是 `const meta = import.meta as …; meta.env`
+  // —— 那是**动态**读，注入从不发生，于是浏览器里 `VITE_SHELL_PROFILE` /
+  // `VITE_HOST_PROFILE` **恒为 undefined**，所有装配入口静默落到 `workbench`：
+  // 这正是「wiki-profile 的 e2e 入口不存在」的根因（M8-1 §2 的实测现象），
+  // 也意味着 `vite.wiki-workbench.config.ts` 注入的旧变量**从来没被读到**。
+  //
+  // 纯 Node（单测/扫描器/vitest 之外的脚本）里 `import.meta.env` 不存在
+  // ⇒ 退化成空对象 ⇒ 缺省 `workbench`（与修复前同一行为，不影响任何既有判据）。
   try {
-    const meta = import.meta as unknown as { env?: Record<string, string | boolean | undefined> }
-    return meta.env ?? {}
+    return (import.meta.env ?? {}) as Record<string, string | boolean | undefined>
   } catch {
     return {}
   }

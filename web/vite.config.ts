@@ -30,6 +30,11 @@ function treeIdentityPlugin(): Plugin {
             root: server.config.root,
             // 可选第二因子：由 PLAYWRIGHT_TREE_NONCE → webServer.env → VITE_TREE_NONCE 注入
             nonce: process.env.VITE_TREE_NONCE ?? null,
+            // **外壳 profile 实测值**（M8-2）：与客户端 `import.meta.env.VITE_SHELL_PROFILE`
+            // 是**同一个**进程环境变量 ⇒ 这一项报告的就是"这个服务真的按哪个 profile 装配"。
+            // 有了它，"wiki-profile 的 e2e 入口"才不会被一个仍在跑 workbench 的旧服务冒充
+            // （身份核验在 e2e/global-setup.ts 逐服务断言，见 e2e/tree-identity.ts）。
+            profile: process.env.VITE_SHELL_PROFILE ?? null,
             pid: process.pid,
           }),
         )

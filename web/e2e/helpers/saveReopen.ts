@@ -87,7 +87,22 @@ export function readJson(filePath: string): Record<string, unknown> {
 
 /** 解开信封（`gzip+base64`）拿内层文档；非信封则原样当文档。 */
 export function innerDocOf(fixtureFile: string): InnerDoc {
-  const raw = readJson(fixtureFile)
+  return innerDocOfJson(readJson(fixtureFile))
+}
+
+/**
+ * 同上，但输入是**信封的 JSON 文本**（M8-2：Wiki 保存写出去的页面正文就是它）。
+ *
+ * 为什么必须有它：判据要证明"远端收到的是**含本次编辑**的内容"，而信封的载荷是
+ * `gzip+base64` ⇒ 直接 `toContain(编辑文本)` 永远为假。这里解到内层再比对，
+ * 与装载路径（`innerDocOf`）同一份解包判据，不另写一套。
+ */
+export function innerDocOfText(text: string): InnerDoc {
+  return innerDocOfJson(JSON.parse(text) as Record<string, unknown>)
+}
+
+function innerDocOfJson(parsed: Record<string, unknown>): InnerDoc {
+  const raw = parsed
   let doc: Record<string, unknown> = raw
   if (typeof raw.payload === 'string') {
     doc = JSON.parse(zlib.gunzipSync(Buffer.from(raw.payload, 'base64')).toString('utf8')) as Record<string, unknown>
@@ -96,7 +111,7 @@ export function innerDocOf(fixtureFile: string): InnerDoc {
   const tips = doc.cellTooltipGrid as number[][][] | undefined
   const palette = doc.tooltipPalette as string[] | undefined
   if (!Array.isArray(grid) || !Array.isArray(tips) || !Array.isArray(palette)) {
-    throw new Error(`夹具缺少逐格说明三项（cellGrid/cellTooltipGrid/tooltipPalette）：${fixtureFile}`)
+    throw new Error('文档缺少逐格说明三项（cellGrid/cellTooltipGrid/tooltipPalette）')
   }
   return doc as unknown as InnerDoc
 }
@@ -248,6 +263,23 @@ export async function saveViaFileMenu(
   await page.waitForTimeout(300)
   expect(fs.existsSync(destPath), `下载必须落盘到 ${destPath}`).toBe(true)
   return { path: destPath, suggested: download.suggestedFilename(), bytes: fs.statSync(destPath).size }
+}
+
+/**
+ * **File 菜单 → 保存到 Wiki → 确认保存**（M8-2；只对 **wiki-profile** 服务有效）。
+ *
+ * 与 `saveViaFileMenu` 的差别：这条路没有浏览器下载，写入是 `mw.Api` 的编辑请求
+ * （e2e 里由 `helpers/m8/wikiSandbox` 扮演远端并记录正文）。
+ *
+ * ⚠️ 返回时保存**可能仍在途**（确认按钮先关模态、再 await 算子）——
+ * 这正是 S1-e 需要的时序：调用方可以在这之后立刻插入一次真实编辑。
+ */
+export async function saveViaWikiMenu(page: Page): Promise<void> {
+  await fileMenuButton(page).click()
+  await menuItem(page, '保存到 Wiki').click()
+  const confirm = page.locator('.wiki-modal__primary', { hasText: '确认保存' })
+  await expect(confirm, '「保存到 Wiki」必须打开确认模态（否则没走生产入口）').toBeVisible({ timeout: 20_000 })
+  await confirm.click()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
