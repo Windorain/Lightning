@@ -455,7 +455,10 @@ export function runA19(rounds: number) {
     const aLedger = a.ledger()
     b.dispose()
     const bLedger = b.ledger()
+    // M8 裁决② 起两条读面分工：`balanced` = 记账守恒（含设备丢失的单列放弃），
+    // `atBaseline` = 活跃计数回基线。"每轮全部关闭后"两者都必须成立。
     if (!aLedger.balanced || !bLedger.balanced) balancedEveryRound = false
+    if (!aLedger.atBaseline || !bLedger.atBaseline) balancedEveryRound = false
 
     const active = a.ledger().activeCount + b.ledger().activeCount
     if (active !== 0) allRoundsBackToBaseline = false
@@ -511,7 +514,13 @@ export function runA19(rounds: number) {
     sharedDispose: sharedLedger.disposeTotal,
     sharedDisposeCalls: disposeCalls,
     sharedBalanced: sharedLedger.balanced,
+    sharedAtBaseline: sharedLedger.atBaseline,
+    // 负对照 1 的**判红读数**（M8 裁决②口径）：漏一次 release ⇒ 仍有一份份额在服役，
+    // 且活跃计数**没有**回基线。记账本身不说谎（`balanced` 仍为 true —— 份额确实在账上），
+    // 因此判红不能只靠 `balanced`；这两个读数才是"少一次 dispose"的可判定形态。
     negativeLeakBalanced: leakLedger.balanced,
+    negativeLeakAtBaseline: leakLedger.atBaseline,
+    negativeLeakLiveRefs: leakLedger.liveRefs,
     negativeLeakActive: leakLedger.activeCount,
     negativeLeakAcquire: leakLedger.acquireTotal,
     negativeLeakRelease: leakLedger.releaseTotal,

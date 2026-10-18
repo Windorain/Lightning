@@ -266,9 +266,17 @@ test.describe('P5 · A19 resource-release（真实 GL 下的显式计数平衡�
     expect(m.sharedDispose).toBe(1)
     expect(m.sharedDisposeCalls).toBe(1)
     expect(m.sharedBalanced).toBe(true)
+    expect(m.sharedAtBaseline, '共享条目全释放后必须回基线').toBe(true)
 
-    // 负对照 1：少一次 dispose ⇒ 判红
-    expect(m.negativeLeakBalanced, '负对照：少一次 dispose 必须判红').toBe(false)
+    // 负对照 1：少一次 dispose ⇒ 判红。
+    //
+    // M8 裁决② 把「记账守恒」（balanced，含设备丢失的**单列**放弃）与「活跃计数回基线」
+    // （atBaseline）拆成两条读面：漏一次 release 的份额**仍在账上**，所以 balanced 仍为真；
+    // 判红读数是"那一份仍在服役"（liveRefs === 1）且"未回基线"（atBaseline === false）。
+    // 分辨力不降：漏一次 ⇒ liveRefs 恰为 1；若改成漏两次 ⇒ liveRefs 恰为 2。
+    expect(m.negativeLeakAtBaseline, '负对照：少一次 dispose 必须判红（活跃计数不得回基线）').toBe(false)
+    expect(m.negativeLeakLiveRefs, '负对照：漏掉的那一份份额必须仍可见（liveRefs 恰为 1）').toBe(1)
+    expect(m.negativeLeakBalanced, '记账本身不得说谎：份额在账上，不是丢了账').toBe(true)
     expect(m.negativeLeakActive).toBeGreaterThan(0)
     // 负对照 2：提前释放 ⇒ 显式报错
     expect(m.negativeEarlySecondReleaseOk, '负对照：重复释放必须被拒').toBe(false)
