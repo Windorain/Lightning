@@ -113,37 +113,40 @@ function regionIdFor(areaId: string): string {
 const areas = computed<readonly AreaNode[]>(() => collectAreas(host.workspace.value.layout))
 
 /**
- * **分配并绑定编辑器实例 id**（#282 P10b 实测修正 —— 这是"零视口"回归的根因）。
+ * 本层**登记过**的视口 region（= 释放台账）。
  *
- * ## 为什么必须有这一步
+ * ## 为什么需要它（M7-3 / D5）
  *
- * `AreaHost` 只在 `instanceId !== null` 时挂载编辑器组件，否则显示
- * "该落点在本装配中不可用"空态。而 `AreaNode.instanceId` 由 `createArea`
- * 硬编码为 `null`（`domain/workspace.ts`），`splitArea` 建新 Area 也走
- * `createArea` ⇒ **永远是 `null`**。
+ * `ensureViewportRegion` 会在**屏幕树**里挂一个 region 节点（含该视口的
+ * viewer 偏好实例、悬停状态、输入域 id）。M7-3 之前本组件只在**整块卸载**时
+ * 释放它们，于是"合并掉一个 Area"这条**局部**关闭路径把节点留在了屏幕树上：
+ * 被合并的区已经不在布局里、画布也已销毁，但 `screen.region('r-viewport-a2')`
+ * 仍返回节点、`wmInputRegionIds()` 仍报它的输入域 —— 陈旧成功读面（S0-B D5）。
  *
- * `useAreaHost.allocateInstanceId` 是"分配 id"的公开入口，但**全树零调用方**：
- * 唯一会绑定的路径是 `AreaHost` 的 `instance-open` 事件，而该事件只在 `open()`
- * 里发出，`open()` 又在 `id === null` 时提前返回 —— **死锁**。
+ * 释放权威与登记权威必须是**同一处**（就是本组件）：它知道"哪些 region 是它
+ * 为当前布局登记的"，因此合并/关闭掉的那个能当场释放，而装配期静态声明的根
+ * region（`r-viewport`）不会被误删（`releaseViewportRegion` 对它显式返回 false）。
+ */
+const ensuredRegions = new Set<string>()
+
+/**
+ * 布局 → 屏幕树 region 的**对账**（登记 + 释放），以及实例 id 的分配。
  *
- * ⇒ 由本组件（渲染树的拥有者）显式分配并绑定：它是"谁渲染这个 Area"的答案，
- * 故也是"谁给它一个实例"的答案。这与 `useAreaHost` 文件头所述"实例 id 的分配
- * 是**显式输入**"（#249 §2.1）一致 —— 分配者就是接线层。
+ * ## 实例 id 为什么由本组件分配（P10b 实测修正 —— 这是"零视口"回归的根因）
  *
- * ## 幂等
+ * `AreaHost` 只在 `instanceId !== null` 时挂载编辑器组件；而 `AreaNode.instanceId`
+ * 由 `createArea` 硬编码为 `null`，唯一会绑定它的路径是 `AreaHost` 的
+ * `instance-open` 事件，该事件又只在 `open()` 里发出、`open()` 在 id 为 `null` 时
+ * 提前返回 —— **死锁**。⇒ 由渲染树的拥有者（本组件）显式分配并绑定：它回答
+ * "谁渲染这个 Area"，也就回答"谁给它一个实例"（#249 §2.1：身份是显式输入）。
+ * 已有 id 的 Area **不重分配**（重分配会让 `AreaHost` 的 `:key` 变化 ⇒ 视口与
+ * WebGL 上下文被无谓重建）；切类型时 `setEditorType` 把 id 置回 `null` ⇒ 这里
+ * 再分配一个新 id ⇒ `AreaHost` 关旧开新（A13「切类型释放旧实例」）。
+ * `immediate: true` 让首次渲染前就绑好 id（否则首帧渲染空态）。
  *
- * 已有 id 的 Area **不重分配**（重分配会让 `AreaHost` 的 `:key` 变化 ⇒ 组件被
- * 重建 ⇒ 视口与 WebGL 上下文被无谓销毁重建）。`bindInstance` 对"值未变"也自行 no-op。
- *
- * ## 时机（两个"不能在渲染期做"的事都在这里）
- *
- * `immediate: true` 让**首次渲染前**就绑好 id（否则首帧渲染的是空态）；之后每次
- * 布局变化（分割/合并/切类型）重新对账。切类型时
- * `domain/workspace#setEditorType` 把 `instanceId` 置回 `null`（表示"要新实例"），
- * 于是这里再分配一个新 id ⇒ `AreaHost` 关旧开新（A13「切类型释放旧实例」）。
- *
- * region 登记与实例绑定**同一时机**（都依赖"当前有哪些 Area"），且都在 watch 里
- * 而不是渲染函数里 —— 渲染期改屏幕树是 Vue 反模式。
+ * 时机：`watch` 的 **pre-flush**（默认）⇒ 早于子组件卸载。于是被合并 Area 的
+ * region 在它的 `WorkbenchViewport` 拆解之前就已从屏幕树移除；子组件卸载只负责
+ * 自己的运行资源（detach / DRW / 视口槽位）。两者不重叠、也不互为前提。
  */
 watch(
   areas,
@@ -152,10 +155,18 @@ watch(
       if (a.instanceId === null) host.bindInstance(a.id, host.allocateInstanceId(a.editorType))
     }
     const screen = ctx.getScreenRoot()
-    const ensure = (screen as unknown as { ensureViewportRegion?: (r: string) => unknown } | null)?.ensureViewportRegion
-    if (typeof ensure === 'function') {
-      for (const a of list) ensure.call(screen, regionIdFor(a.id))
+    const desired = new Set(list.map((a) => regionIdFor(a.id)))
+    if (screen !== null) for (const id of desired) screen.ensureViewportRegion(id)
+    // 被关闭/合并的 Area：其 region 节点当场释放（不是等整块卸载）。
+    if (screen !== null) {
+      for (const id of [...ensuredRegions]) {
+        if (desired.has(id)) continue
+        // 释放成功才从台账移除：根 region 会被显式拒绝（它属装配期静态声明），
+        // 拒绝≠已释放，留在台账里下次仍会尝试 —— 不制造"已经释放了"的错觉。
+        if (screen.releaseViewportRegion(id)) ensuredRegions.delete(id)
+      }
     }
+    for (const id of desired) ensuredRegions.add(id)
   },
   { immediate: true },
 )
@@ -201,11 +212,17 @@ const viewContext: AreaViewContext = {
 }
 provide(AREA_VIEW_CONTEXT, viewContext)
 
+/**
+ * 整块卸载（切工作区/离开）：释放**本层登记过**的全部 region。
+ *
+ * 与上面的增量释放同一权威、同一个出口（`releaseViewportRegion`）：
+ * 卸载只是"一次把台账清空"，不是第二条释放路径。
+ */
 onBeforeUnmount(() => {
   const screen = ctx.getScreenRoot()
-  const release = (screen as unknown as { releaseViewportRegion?: (id: string) => boolean } | null)?.releaseViewportRegion
-  if (typeof release !== 'function') return
-  for (const a of areas.value) release.call(screen, regionIdFor(a.id))
+  if (screen === null) return
+  for (const id of ensuredRegions) screen.releaseViewportRegion(id)
+  ensuredRegions.clear()
 })
 
 /** 供外壳读布局（模板 ref / 诊断 / e2e 观测面）。 */
