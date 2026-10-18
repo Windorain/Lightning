@@ -21,7 +21,19 @@
 
 import type { InjectionKey, Component } from 'vue'
 import type { LifecycleLedger } from '@/runtime/lifecycle'
-import type { EditorLocalState } from '@/domain/workspace'
+
+/**
+ * Area 局部状态的可序列化载荷（结构等价于 `domain/workspace#EditorLocalState`）。
+ *
+ * ## 为什么在这里重述而不是 import 内核类型（架构边纪律）
+ *
+ * `workbench/**` 是**旧层**：它 import `@/domain/workspace` 会被
+ * `tests/architecture/kernel-legacy-isolation.test.ts` 判为"未登记的旧→新依赖"。
+ * 本文件只需要"一个 `Record<string, unknown>` 的形状"来表达端口，不消费任何
+ * 内核语义 ⇒ 用结构类型，不新增一条需要登记与核销的迁移边（新边应留给真实消费者）。
+ * 真正消费 `EditorLocalState` 的是 `editors/AreaHost.vue`（新层，可直接引用）。
+ */
+export type AreaLocalState = Readonly<Record<string, unknown>>
 
 /** Area 渲染树的作用域能力（由 `AreaLayoutHost` 提供）。 */
 export interface AreaViewContext {
@@ -49,14 +61,14 @@ export interface AreaViewContext {
    * 读面给 `AreaHost`，由它作为 `:local-state` 传给编辑器组件 —— 组件在**首次呈现前**
    * 就拿到恢复后的形态（SPEC §7.3-b③），而不是"先默认再改回"。
    */
-  localStateOf(areaId: string, editorType: string): EditorLocalState | undefined
+  localStateOf(areaId: string, editorType: string): AreaLocalState | undefined
   /**
    * 编辑器关闭前交回的局部状态 ⇒ 写回布局树（`useAreaHost#captureLocalState`）。
    *
    * 这是 M7-2 之前**零调用**的那条死机制（`useAreaHost.ts` 的 `captureLocalState`
    * 定义齐备但生产无调用者）：现在由 `AreaHost` 在关闭前问子组件、经此写回。
    */
-  onLocalStateCapture(areaId: string, editorType: string, state: EditorLocalState): void
+  onLocalStateCapture(areaId: string, editorType: string, state: AreaLocalState): void
   /**
    * **把该 Area 设为"最后操作的区"**（M4-1）。
    *
