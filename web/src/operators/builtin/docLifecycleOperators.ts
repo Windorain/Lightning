@@ -163,10 +163,6 @@ export const OpenSceneOperator: OperatorType = {
       if (!confirmFn('当前场景有未保存的修改，是否保存？')) return
       await ctx.getOperators().exec('OPERATOR_SAVE_FILE')
     }
-    ctx.getSelection().clear()
-    // `getEditHistory().clear()` 已删 —— 理由见 `NewSceneOperator` 的同名注释：
-    // 下一行的 `setDocument` 换文档即换 `Document#history`（契约 §6），
-    // "清空历史"是结构上已发生的事。
     const text = await file.text()
     let data: unknown
     try {
@@ -176,6 +172,12 @@ export const OpenSceneOperator: OperatorType = {
     }
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
+      // 选择只在**确认要换文档**之后清（M8-5 / D3）：装载失败必须保留当前选择 ——
+      // 旧形态在解析**之前**就清，失败时用户的选中格已经没了（不可回退）。
+      ctx.getSelection().clear()
+      // `getEditHistory().clear()` 已删 —— 理由见 `NewSceneOperator` 的同名注释：
+      // 下一行的 `setDocument` 换文档即换 `Document#history`（契约 §6），
+      // "清空历史"是结构上已发生的事。
       // #301 A′：经唯一写入口（存在性镜像），随后 `adoptDocumentIntoKernel` 装配内容。
       ctx.setDocument(result.document)
       ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
@@ -188,10 +190,18 @@ export const OpenSceneOperator: OperatorType = {
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', file.name, { fileName: file.name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      ctx.setDocument(null)
-      ctx.main.embedInitialView.value = null
-      ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
-      ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: file.name, error: result.error })
+      // ── M8-5 / D3：装载失败**不换掉**当前有效文档（与 `workbench/document/pipeline` 同一取舍）──
+      //
+      // 旧形态：`setDocument(null)` + 清 `embedInitialView` + 重置全部机位 ⇒ 一次失败的
+      // 打开把正在编辑的内容、画面、选择一起清掉（S0-B D3；SPEC §9:299 / §10.7:309）。
+      const reason = result.error ?? '未知错误'
+      ctx.log.error(
+        '场景加载',
+        `打开失败：${reason}（当前场景保持不变）`,
+        { fileName: file.name, error: result.error, keptCurrentDocument: ctx.hasLoadedDocument() },
+      )
+      // 文件名与工作区模式都不换：它们描述"当前这份内容来自哪"。
+      return
     }
     ctx.getLocalFileName().value = file.name
     await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'local-file' })

@@ -88,19 +88,29 @@ export async function documentLoadPipeline(
       ctx.getLocalFileName().value = loadResult.displayName ?? loadResult.locator
     }
   } else {
-    ctx.setDocument(null)
-    ctx.main.embedInitialView.value = null
-    ctx.viewports.resetAllViewportCameras(ctx.main.cameras)
-    ctx.log.error('场景加载', result.error ?? '未知错误', {
-      locator: loadResult.locator,
-      error: result.error,
-    })
-    applyDocumentBinding(bindingRef, {
-      sourceId: 'empty',
-      locator: '',
-      remoteRevisionId: null,
-      saveBaseline: null,
-    })
+    // ── M8-5 / D3：装载失败**不换掉**当前有效文档 ──────────────────────────────
+    //
+    // 旧形态是三件事一起做：`setDocument(null)`、清 `embedInitialView`、把绑定置成
+    // `empty/null`。后果是具体的：用户正在编辑的内容（含未保存修改）与选择被一次
+    // **失败的打开**清空，且没有任何回退路径（S0-B D3）。这正是 SPEC §9:299
+    // 「损坏副本和存储失败不得破坏当前有效内容」的同族语义（输入侧失败不得破坏
+    // 当前有效内容），也是 §10.7:309「失败必须保留原有效状态或明确说明实际后果」。
+    //
+    // ⇒ 失败只在**输入侧**结算：当前文档、画面、选择、绑定原样保留；
+    // 用户看到一句**点名原因**的提示（"当前场景保持不变"是实际后果的说明）。
+    const reason = result.error ?? '未知错误'
+    ctx.log.error(
+      '场景加载',
+      `打开失败：${reason}（当前场景保持不变）`,
+      {
+        locator: loadResult.locator,
+        error: result.error,
+        keptCurrentDocument: ctx.hasLoadedDocument(),
+      },
+    )
+    // 工作区模式也**不**跟着换：它描述的是"当前这份内容来自哪"
+    // （换模式会让一个还在编辑的本地场景显示成 wiki 模式）。
+    return
   }
   const mode = workspaceModeForSource(sourceId)
   if (ctx.getWorkspaceMode().value !== mode) {
