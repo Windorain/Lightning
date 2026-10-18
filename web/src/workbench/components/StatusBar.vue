@@ -87,6 +87,32 @@ watch(
  */
 const hoveredBlock = computed(() => ctx.getHoveredBlock().value)
 
+/**
+ * **恢复副本**（M8-4；SPEC §9:299）的常驻提示与显式入口。
+ *
+ * 为什么不只靠 `liveStatus`：纹理链在编辑后会写 `loading/ready`，按"更晚的事实胜"
+ * 的既有口径会把"有一份可采纳副本"顶掉。候选/损坏数是**状态**（不是一次性事件），
+ * 故由状态栏常驻一行渲染；`liveStatus` 只负责"刚刚检测/采纳/放弃/写入失败"那一句。
+ */
+const recoveryCandidate = computed(() => ctx.getRecoverySession()?.candidate.value ?? null)
+const recoveryCorrupt = computed(() => ctx.getRecoverySession()?.corruptCount.value ?? 0)
+
+function recoveryTime(ms: number): string {
+  try {
+    return new Date(ms).toLocaleString()
+  } catch {
+    return String(ms)
+  }
+}
+
+function adoptRecovery(): void {
+  void ctx.getOperators().exec('OPERATOR_RECOVERY_ADOPT')
+}
+
+function discardRecovery(): void {
+  void ctx.getOperators().exec('OPERATOR_RECOVERY_DISCARD')
+}
+
 function logClass(level: number): string {
   if (level & LOG_LEVEL.ERROR) return 'sb-item sb-item--error'
   if (level & LOG_LEVEL.WARN) return 'sb-item sb-item--warn'
@@ -120,6 +146,24 @@ function openWikiDataPage() {
     <span v-if="hoveredBlock" class="sb-item" data-hovered-cell>
       {{ t('hover') }} {{ hoveredBlock.pos.x }}, {{ hoveredBlock.pos.y }}, {{ hoveredBlock.pos.z }}
     </span>
+    <span
+      v-if="recoveryCandidate"
+      class="sb-item sb-item--recovery"
+      data-lk-recovery="available"
+      :title="'恢复副本（未采纳）：' + (recoveryCandidate.label || recoveryCandidate.documentId)"
+    >
+      恢复副本可选（{{ recoveryTime(recoveryCandidate.writtenAt) }}）
+      <button class="sb-recovery-btn" data-lk-recovery-adopt type="button" @click="adoptRecovery">采纳</button>
+      <button class="sb-recovery-btn" data-lk-recovery-discard type="button" @click="discardRecovery">放弃</button>
+    </span>
+    <span
+      v-else-if="recoveryCorrupt > 0"
+      class="sb-item sb-item--warn"
+      data-lk-recovery="corrupt"
+    >
+      损坏的恢复副本 {{ recoveryCorrupt }} 份（当前内容未受影响）
+      <button class="sb-recovery-btn" data-lk-recovery-discard type="button" @click="discardRecovery">放弃</button>
+    </span>
     <span v-if="wikiHost && wikiName" class="sb-item sb-item--link" @click="openWikiDataPage">
       {{ t('wikiStructure') }}: {{ wikiName }}
       <span v-if="wikiDirty" class="sb-unsaved"> · {{ t('unsaved') }}</span>
@@ -143,6 +187,19 @@ function openWikiDataPage() {
 .sb-item--link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .sb-item--link:hover { color: var(--wb-text); }
 .sb-unsaved { color: var(--wb-warn); }
+.sb-item--recovery { color: var(--wb-accent, #7fb3ff); }
+.sb-recovery-btn {
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--wb-text);
+  background: transparent;
+  border: 1px solid var(--wb-border, #555);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.sb-recovery-btn:hover { background: var(--wb-hover, rgba(255, 255, 255, 0.12)); }
 .sb-item--error { color: var(--wb-danger); }
 .sb-item--warn { color: var(--wb-warn); }
 .sb-spacer { flex: 1; }

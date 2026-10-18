@@ -20,6 +20,8 @@ import { CAPABILITY } from '@/composition/modules'
 import { objectTypeDeclarationsOf } from '@/composition/contributedObjectTypes'
 import type { ShellRuntime } from '@/composition/shell'
 import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
+import { createRecoverySession } from '@/composition/recoverySession'
+import { createRecoveryHost } from '@/runtime/host/recoveryHost'
 import { useAreaHost } from '@/editors/useAreaHost'
 import { editorTypeRegistry } from '@/editors/builtinEditors'
 import { createInitialLayout, createWorkspace } from '@/domain/workspace'
@@ -93,6 +95,8 @@ export class WorkbenchHost extends HostBase {
    */
   override destroy(): void {
     super.destroy()
+    // M8-4：清恢复副本会话的计时器/pagehide 监听（**不**删除任何存储内容）。
+    this.ctx.getRecoverySession()?.dispose()
     this.disposeLogApi()
   }
 
@@ -177,6 +181,15 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
     kernel,
   )
   main.bindOperatorFacade(() => ctx)
+
+  // ── 恢复副本（M8-4；SPEC §9:299）────────────────────────────────────────
+  //
+  // 装配期创建（启动扫描在构造里同步完成 ⇒ 状态栏/算子在本帧就能读到候选），
+  // 生命周期 = 本外壳实例（destroy 时 dispose）。存储端口在生产是浏览器
+  // localStorage 适配器；写/采纳**不**经过保存结算（基线只由 completeKernelSave 推）。
+  // 政策在 composition（`recoverySession`），装载动作在本层的 `recoveryHost` ——
+  // 后者是旧层文件，可以动 Context/KernelSession；前者按闸门不得 import 旧层。
+  ctx.setRecoverySession(createRecoverySession({ host: createRecoveryHost(ctx) }))
 
   const disposeLogApi = installUnifiedLogApi(ctx)
   const host = new WorkbenchHost(main, ctx, wm, log, screen, services, disposeLogApi)

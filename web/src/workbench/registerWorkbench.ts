@@ -41,6 +41,7 @@ import {
   CopyWikiEmbedOperator,
 } from '@/operators/builtin/wikiOperators'
 import { CAPABILITY } from '@/composition/modules'
+import { RecoveryAdoptOperator, RecoveryDiscardOperator } from '@/operators/builtin/recoveryOperators'
 import { AREA_OPERATORS } from '@/operators/builtin/areaOperators'
 import { selectTool, moveTool } from '@/workbench/tools/toolDefs'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
@@ -91,6 +92,10 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   WikiSaveConfirmOperator,
   WikiSaveAsOperator,
   CopyWikiEmbedOperator,
+  // M8-4：恢复副本的显式采纳/放弃（底栏按钮与命令共用同一条入口；
+  // **没有**"读到就自动采纳"的路径 —— SPEC §9:299）。
+  RecoveryAdoptOperator,
+  RecoveryDiscardOperator,
   // #282 P10b：Area 布局编辑命令的 operator 入口（分割/合并/切类型/调比例）。
   // `poll` 读"是否有 Area 会话"（装配结果）⇒ 嵌入外壳里天然不可用。
   ...AREA_OPERATORS,

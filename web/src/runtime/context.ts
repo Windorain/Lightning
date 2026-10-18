@@ -87,6 +87,7 @@ import {
 import { findObjectData, type Scene } from '@/domain/scene'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 import { createFieldRejectionStore, type FieldRejectionStore } from '@/runtime/fieldRejections'
+import type { RecoverySessionPort } from '@/composition/recoverySession'
 import { CAPABILITY } from '@/composition/modules'
 
 function embedUnavailable(name: string): never {
@@ -1837,6 +1838,9 @@ export class Context {
     // ⇒ 正确做法是让 `setDocument` 能表达"**编辑**回写"这一意图（见其 `intent` 参数），
     // 而不是绕过它。
     this.setDocument(next, 'content-sync')
+    // M8-4：一次内容提交（内核写 + legacy 投影）**已结算** —— 恢复副本的写触发点。
+    // 只在真的改了内容时走到这里（`next === current` 已在上面早退）。
+    this.recoverySession?.contentSettled()
     return true
   }
   /**
@@ -2385,7 +2389,29 @@ export class Context {
     // 它的消费者会重建 DRW 网格/材质（保存不该让画面重来一次）。基线变化由消费方
     // 自己重新求值：状态栏的 `wikiDirty` 依赖 `binding.value`（下面由 workbench 侧
     // 投影并写入新对象），而 `kernelDirty()` 是**每次调用现算**的读面。
-    return kernel.completeSaveRequest(request, outcome)
+    const applied = kernel.completeSaveRequest(request, outcome)
+    // M8-4：正式保存**真的**推进了基线 ⇒ 对应恢复副本作废（Q2 策略；副本是旁路事实，
+    // 这里只在基线推进后清理，失败/过期保存**不**动副本）。
+    if (applied) this.recoverySession?.formalSaveCommitted()
+    return applied
+  }
+
+  /**
+   * **恢复副本会话**（M8-4；装配层创建，读面在状态栏/算子）。
+   *
+   * 与 `areaSession` 同一取舍：它是**实例**的运行期会话，由宿主装配期设置、
+   * 随实例销毁；`Context` 只持有端口并转交两个结算信号
+   * （{@link syncLegacyFromKernel} 的内容提交、{@link completeKernelSave} 的基线推进）。
+   */
+  private recoverySession: RecoverySessionPort | null = null
+
+  setRecoverySession(session: RecoverySessionPort | null): void {
+    this.recoverySession = session
+  }
+
+  /** 本实例的恢复副本会话（`null` = 装配未接线/无存储能力）。 */
+  getRecoverySession(): RecoverySessionPort | null {
+    return this.recoverySession
   }
 
   getEditHistory(): UndoManager {
