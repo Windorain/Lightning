@@ -307,8 +307,13 @@ export async function readLedger(page: Page): Promise<LedgerReading> {
 export interface HintReading {
   /** 底栏文本（状态栏 = 用户可见面）。 */
   statusBar: string
-  /** 实时状态槽（#399 读面：`data-live-status` + 文案）。 */
-  liveStatus: { message: string; state: string } | null
+  /**
+   * 实时状态槽（#399 读面：`data-live-status` + 文案）。
+   *
+   * `origin` 是写入方渠道（M4-3）：`'rejection'` = 编辑/布局拒绝，`'texture'` = 纹理五态。
+   * 判据据此区分"走了既有拒绝通道"与"某个别的槽恰好有字"（不是靠文本猜）。
+   */
+  liveStatus: { message: string; state: string; origin: string | null } | null
   /** 最后一条可显示日志（底栏第二条位的来源）。 */
   lastDisplayable: string | null
   /** 近若干条 WARN/ERROR 日志（生产诊断面）。 */
@@ -336,13 +341,77 @@ export async function collectHint(page: Page): Promise<HintReading> {
     return {
       statusBar: norm(document.querySelector('.sb-root')?.textContent ?? ''),
       liveStatus: live
-        ? { message: norm(live.message), state: String(live.state) }
+        ? { message: norm(live.message), state: String(live.state), origin: live.origin === null || live.origin === undefined ? null : String(live.origin) }
         : liveEl
-          ? { message: norm(liveEl.textContent), state: liveEl.getAttribute('data-live-status') ?? '' }
+          ? {
+              message: norm(liveEl.textContent),
+              state: liveEl.getAttribute('data-live-status') ?? '',
+              origin: liveEl.getAttribute('data-live-origin'),
+            }
           : null,
       lastDisplayable: last ? norm(last.message) : null,
       warnings: warns.map((w) => norm((w.source ? w.source + ' ' : '') + (w.message ?? ''))),
       lifecycleErrors,
     }
   })) as HintReading
+}
+export interface RegionLifecycleProbe {
+  /** 屏幕树里是否还有这个 region 节点（`ScreenRoot#region`）。 */
+  node: boolean
+  /** 是否仍登记为 WM 输入域（`ScreenRoot#wmInputRegionIds`）。 */
+  inputDomain: boolean
+  /** 视口槽位是否仍登记（`ctx.viewports.get`）。 */
+  slotPresent: boolean
+  /** 槽位是否仍持有承载资源（camera + domElement 非空 ⇒ 真的还有一个视口在跑）。 */
+  slotLive: boolean
+}
+
+export interface RegionLifecycleReading {
+  /** 屏幕树各 Area 的 region id（被合并区的节点不得留在这里）。 */
+  areas: { areaId: string; regions: string[] }[]
+  /** WM 输入域 id 全集。 */
+  inputIds: string[]
+  /** 逐 region 读数（键 = 传入的 region id）。 */
+  byRegion: Record<string, RegionLifecycleProbe>
+}
+
+/**
+ * 读 **region 生命周期**（M7-3 / D5）：屏幕树节点 + WM 输入域 + 视口槽位。
+ *
+ * ## 三个面为什么都要读
+ *
+ * 一个视口 region 是**三个登记**的共同键（`runtime/screenRoot#ensureViewportRegion`）：
+ *  - **屏幕树节点** —— 持有该视口的 viewer 偏好实例与悬停状态；
+ *  - **WM 输入域** —— 输入路由按它分发；
+ *  - **视口槽位** —— 承载 camera/DRW 等运行资源（`ctx.viewports`）。
+ *
+ * 合并掉一个 Area 后三者**都**必须消失；只消失其一是"半个关闭"（D5 的首红形态是
+ * 槽位已释放、屏幕树节点与输入域仍在：读面继续报一个不存在的视口）。
+ *
+ * 只读：不调用任何产品函数制造状态（`ensure/release` 都不碰）。
+ */
+export async function readRegionLifecycle(
+  page: Page,
+  regionIds: readonly string[],
+): Promise<RegionLifecycleReading> {
+  return (await page.evaluate((ids: string[]) => {
+    const vm = (window as any).__vm__
+    const screen = vm.getScreenRoot()
+    const areas = (screen?.areas ?? []).map((a: any) => ({
+      areaId: String(a.id),
+      regions: (a.regions ?? []).map((r: any) => String(r.id)),
+    }))
+    const inputIds: string[] = screen?.wmInputRegionIds ? (screen.wmInputRegionIds() as string[]).map(String) : []
+    const byRegion: Record<string, RegionLifecycleProbe> = {}
+    for (const id of ids) {
+      const slot = vm.viewports.get(id)
+      byRegion[id] = {
+        node: screen?.region ? screen.region(id) !== undefined : false,
+        inputDomain: inputIds.includes(id),
+        slotPresent: slot !== undefined,
+        slotLive: slot ? slot.camera.value !== null && slot.domElement.value !== null : false,
+      }
+    }
+    return { areas, inputIds, byRegion }
+  }, [...regionIds])) as RegionLifecycleReading
 }
