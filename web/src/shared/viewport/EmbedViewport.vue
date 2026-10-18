@@ -454,7 +454,13 @@ onBeforeUnmount(() => {
         <button type="button" class="nei-icon-btn wsr-mobile-hide" title="复位视角" @click="void ctx.getOperators().exec('OPERATOR_VIEW_RESET', initCameraProps)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 3.1L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-3.1L3 16"/><path d="M3 21v-5h5"/></svg>
         </button>
-        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="截屏" @click="engineHostRef?.screenshot()">
+        <!--
+          Q5（M6-6）：**文案必须明示例外性质** —— 这个按钮读的是当前活画布/活相机
+          （`renderEngine#screenshot`），按产品定义是「即兴抓屏」，**不是**正式导出
+          （正式导出走固定快照：ExportRequest + 资源清单 + ExportJob）。
+          文件名前缀 `lightning-screenshot-` 与导出产物天然区分，但用户不该靠文件名猜语义。
+        -->
+        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="截屏（当前画面，非正式导出）" @click="engineHostRef?.screenshot()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
         </button>
         <button type="button" class="nei-icon-btn" title="全屏" @click="toggleFullscreen">
