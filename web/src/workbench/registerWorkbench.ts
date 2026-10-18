@@ -23,7 +23,7 @@ import {
   ThemeToggleOperator, SetLanguageOperator, SetToolSettingOperator, SetRegionSettingOperator, UndoOperator, RedoOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator, SetWikiConfigOperator, ApplySettingsOperator, SetLayerYOperator,
 } from '@/operators/builtin/miscOperators'
-import { ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/operators/builtin/materialOperators'
+import { ExportTextureOperator, CopyMaterialLocatorOperator } from '@/operators/builtin/materialOperators'
 import {
   HydrateEmbedInitialViewOperator,
   SyncEmbedInitialViewOperator,
@@ -80,7 +80,7 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   ThemeToggleOperator, SetLanguageOperator,
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
   AnnotationBoxCommitOperator, AnnotationBoxResetOperator,
-  ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator,
+  ExportTextureOperator, CopyMaterialLocatorOperator,
   HydrateEmbedInitialViewOperator,
   SyncEmbedInitialViewOperator,
   DocumentLoadOperator,

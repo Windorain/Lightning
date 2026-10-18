@@ -467,12 +467,8 @@ watch(focusedIndex, () => {
           </div>
 
           <div class="mg-detail-ops">
-            <OperatorBtn
-              v-if="selected.kind === 'animated'"
-              op-id="OPERATOR_EXPORT_GIF"
-              label="导出 GIF"
-              :operator-props="{ materialId: selected.materialId }"
-            />
+            <!-- Q2（M6-3）：材质卡的「导出 GIF」入口已退出（与场景 GIF 合并成一个入口）。
+                 静态纹理仍可导出 PNG；"单独导出某张材质的动画 GIF"不再有入口。 -->
             <OperatorBtn
               op-id="OPERATOR_EXPORT_TEXTURE"
               label="导出 PNG"

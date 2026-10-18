@@ -245,105 +245,34 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
    * （装配仍把观察视角放在非类型化的 `view` 里）—— 那是 **GF-21**（甲未兑现），
    * 不在本接缝的范围内，故本条核销**不等于**GF-21 关闭。
    */
-  /**
-   * P10f D3（#301）登记：**等轴 PNG 导出仍走旧烘焙链**（D-8 实测驱动的收窄）。
-   *
-   * ## 为什么本批**不**把它切到 `ExportJob`（实测，不是工作量）
-   *
-   * 任务书第 5 项的字面是"四命令迁 `ExportJob`"，Lead 裁决 D-8 取 (甲)
-   * （ISO PNG 走 `ExportJob`、其余三命令保持 `plainForSave`）。**接线前实测推翻了"低风险"这一前提**：
-   *
-   * | 事实 | 证据 |
-   * |---|---|
-   * | 现路径**带贴图** | `workbench/exportIsometricImage#bakeIsometricStructurePngDataUrl` 先 `buildMaterialLibrary(document)`，再 `buildBlockMesh(definition, materialLibrary, …)` ⇒ 真材质库 |
-   * | `ExportJob` 路径**默认无贴图** | `adapters/export/offscreenRenderPort` 的 `textures?: TexturePort`，注释逐字："缺省 = 材质走 **中性色**" |
-   * | 没有可交出去的生产 `TexturePort` | 全树 `TexturePort` 的**唯一**生产消费者是 `composition/presenterSession`（**视口作用域**，从活视口取资源）。把它交给导出作业正是 A29 要防的"导出借用实时视口" |
-   *
-   * ⇒ 现在切过去，产出的等轴 PNG 会**失去贴图**（画面变平）—— 那是**可感知的能力回退**，
-   * #171 明令禁止。而 `e2e/export-ports.spec.ts` 的现有证据证的是**端口链**
-   *（内容包围盒 + 透视相机 + 合成探针），**不覆盖**等轴方向的语义与画面质量
-   * ⇒ 我原先给 D-8 的"已有 e2e 证据"这句话**不成立**，如实更正。
-   *
-   * ## 本批做了什么
-   *
-   * - 三个非渲染产物命令（Plain / Envelope / OBJ）的**产字节**已在 D2 迁到
-   *   `Context#plainForSave()`（内核投影优先）—— D-8 的"其余保持"部分已兑现；
-   * - 等轴 PNG **保持现路径**（无能力回退），并登记本条等待前置齐备。
-   *
-   * ## ⚠️ 终局裁决（P11-B3，#262 comment 6429 三，2026-10-13）：四命令**不迁**
-   *
-   * 本条曾把"四命令迁 `ExportJob`"当退出条件之一。Lead 终局裁决**采纳「不迁」**：
-   * 切过去丢贴图（`textures` 缺省 ⇒ 中性色）+ 违反 A29（唯一生产 `TexturePort` 属视口作用域）。
-   * ⇒ 本条的 `exitCondition` **收窄**为唯一前置「渲染链终切后」（材质统一 ⇒ 出现不借用
-   * 实时视口的生产 `TexturePort`），不再要求命令迁移。
-   */
-  Object.freeze({
-    id: 'isometric-export-legacy-bake',
-    files: Object.freeze([
-      'src/workbench/exportIsometricImage.ts',
-      'src/operators/builtin/exportOperators.ts',
-      'src/adapters/export/snapshotExportJob.ts',
-      // M6-2：GIF 字节核心与动画编码端口已落在 adapters/export（新轨那一端），
-      // 故一并登记 —— 否则"旧链退役"的判据面看不见这两块已经在位的替代物。
-      'src/adapters/export/gifEncoder.ts',
-      'src/adapters/export/gifEncoderPort.ts',
-      // M5-4：GIF 导出在同一自建链上（同 stage/同相机），故同属本接缝。
-      'src/workbench/exportAnimatedGif.ts',
-      'src/workbench/animatedGifEncoder.ts',
-    ]),
-    newTrack:
-      '`adapters/export/snapshotExportJob#assembleSnapshotExportJob` + '
-      + '`SnapshotOffscreenRenderPort`（取景/求值/呈现/读回/释放）+ `createEncoderPort`'
-      + '（**组合端口**：PNG part 出真 PNG 字节、GIF part 出真 GIF 字节，见 `adapters/export/gifEncoderPort`）'
-      + '—— 冻结快照导出作业的**生产装配**，且已有真 GL e2e 证据'
-      + '（`e2e/export-ports.spec.ts`，2 passed / 负对照诚实失败）。',
-    oldTrack:
-      '`src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
-      + '`src/workbench/exportIsometricImage.ts#bakeIsometricStructurePngDataUrl` **自建** '
-      + '`WebGLRenderer` + `buildMaterialLibrary` + `buildBlockMesh` 烘焙等轴 PNG'
-      + '（D7 修复后 `resolveIsoDirection` 是渲染下标与文件名的**同一来源**）。'
-      + ' M5-4 起同一自建链还承载 **GIF 导出**：'
-      + '`workbench/exportAnimatedGif.ts#bakeIsometricGifBlob` 复用同一个 `openIsometricStage`'
-      + '（同相机/同尺寸/同材质库），逐帧 `setSceneTime` → `render` → `readPixels` → `omggif` 编码。'
-      + '时间输入是**显式**的（序列一个循环的边界，见 `domain/materials#planSequenceLoop`），'
-      + '但呈现链仍是 legacy 链 —— 维持该链的**当前**理由是**同链判据**（PNG/GIF 同相机/同尺寸/'
-      + '同材质库，"GIF 首帧 ≈ 同参数 PNG"才是可观测判据），**不再**是"呈现链不采纹理时间"'
-      + '（M5-3 已落地该采样），**也不再**是"作业面表达不了逐帧 hold"'
-      + '（M6-2 已落地 `scene-holds` + `CaptureTime.holdMs` + GIF 编码端口）。',
-    blocker:
-      // ⚠️ M5-4 更正（原文第②句已过时，依据 #389 R3-②）：**纹理域这半已落地** ——
-      //     离屏设备在 `acquire` 内自建 `TexturePort`（`adapters/export/renderDevice.ts:132-138`），
-      //     只需调用方把捕获的 `TextureResource[]` 传进 `createThreeOffscreenDevice({ resources })`。
-      '**纹理域这半已落地**：离屏设备在 `acquire` 内自建 `TexturePort`（`adapters/export/renderDevice.ts:132-138`，#389 R3-②）'
-      + ' ⇒ 导出作业不再必然"材质走中性色"，只需调用方把捕获的 `TextureResource[]` 传进 `createThreeOffscreenDevice({ resources })`。'
-      + '仍缺两件：① 呈现链**按时间采样帧条**已由 M5-3 落地（`presentation/presenter.ts` 写 `repeat.y`/`offset.y`）；'
-      + '② 渲染链终切（材质统一）。 ⇒ 切换前置仍是「渲染链终切」，但**不再是"没有纹理端口"**。'
-      + ' 与 `presenter-surface-dual-track` / `legacy-render-source-document` 同一前置。'
-      + ' ✅ **作业面已能表达（M6-2）**：`domain/captureSpec` 的 `TimeMapping` 增 `scene-holds`'
-      + '（`startSeconds` + `holdsMs[]`，驻留时长是唯一权威），`CaptureTime.holdMs` 逐帧驻留，'
-      + '`RenderedFrame.holdMs` 随帧搬运（不做平行数组），`encoderPort` 由**组合端口**支持 `animation`'
-      + '（`adapters/export/gifEncoderPort` + `adapters/export/gifEncoder`），ms→厘秒只有 `domain/materials#delayCsOf` 一处换算。'
-      + ' ⇒ 旧链**不能**再以"作业面表达不了"为由保留；仍缺的是下一段的**呈现链纹理域接线**'
-      + '（离屏端口 bindTextures / 设备纹理透传 / assetNeeds 转发，归 M6-3），'
-      + '接线未完成时切过去会出**没有贴图**的产物（`presentation/presenter.ts` 走中性色）。',
-    // ⚠️ **闭包外**（R1-α 实测）：见 `closureNote` —— 「闭包 ∩ 旧层 = ∅」对本条恒真。
-    closureCoverage: 'outside-closure',
-    closureNote:
-      "声明文件 `adapters/export/snapshotExportJob.ts` 不在任何生产入口的可达闭包内 —— 它正是本条尚未接线的那一端（`ExportIsoPngOperator` 仍走自建烘焙链，没有调用它）。⇒「闭包 ∩ 旧层 = ∅」对本条**恒真**，不能当判据。本条的**真判据**是「渲染链终切后 `ExportIsoPngOperator` 经 `assembleSnapshotExportJob` + `ExportJob.run()` 产出 PNG」（接线判据，含负对照：断开该接线则同一产物判据判红）。",
-    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
-    exitCondition:
-      "**（甲）登记条件 —— ⏳ 未成立**：需\"渲染链终切后出现不借用实时视口的生产 `TexturePort`\"（材质统一的前置）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立（M5-4 后为 2 条命令）**：`ExportIsoPngOperator` 与 `ExportSceneGifOperator` 仍经 `workbench/exportIsometricImage.ts` / `workbench/exportAnimatedGif.ts` 的自建烘焙链。\n⚠️ 本条 `closureCoverage: 'outside-closure'` ⇒ **不得**用闭包判据（见 `closureNote`）。\n**以下为原退出条件（逐字保留）**：\n"
-      +
-      '**渲染链终切后**（唯一前置）：`src/composition/presenterSession.ts` 的 `PresenterSession` '
-      + '接管画面、材质统一 ⇒ 生产侧出现**不借用实时视口**的 `TexturePort`（或材质统一后不再需要贴图端口）；'
-      + '届时 `src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
-      + '`assembleSnapshotExportJob` + `ExportJob.run()` 产出 PNG'
-      + '（同批作废 `src/workbench/exportIsometricImage.ts` 的自建渲染器路径）'
-      + ' ⇒ 删除本条登记。\n'
-      + '⚠️ **退出条件已收窄（Lead 裁决 #262 comment 6429 三，2026-10-13）**：原条件的另一半是'
-      + '「四命令迁 `ExportJob`」—— 该裁决**采纳「不迁」**（切过去丢贴图 + 违反 A29 借用实时视口）'
-      + '⇒ 本条**不再**以"命令迁移"为退出条件，只留「渲染链终切」这一条可核对前置。',
-  }),
+  // ───────────────────────────────────────────────────────────────────────────
+  // M6-3 核销：`isometric-export-legacy-bake` **已退出**（导出切同一条呈现链）
+  //
+  // ## 这条接缝原来是什么
+  //
+  // "等轴 PNG / 场景 GIF 仍走自建烘焙链"的暂存登记：命令取 `plainForSave()` 的**声明态**
+  // 文档，自己 `new THREE.WebGLRenderer` + `buildMaterialLibrary` + `buildBlockMesh` 烘焙，
+  // 逐帧再 `setSceneTime`。它的退出条件原文只有一条：「渲染链终切后，命令经
+  // `assembleSnapshotExportJob` + `ExportJob.run()` 产出 PNG」。
+  //
+  // ## 为什么现在能删（六条可机检条件**同时**成立，逐条留证）
+  //
+  // | # | 条件 | 机械证据 |
+  // |---|---|---|
+  // | 1 | 三个整文件已删除 | `workbench/exportIsometricImage.ts` / `exportAnimatedGif.ts` / `animatedGifEncoder.ts` 不在树上 |
+  // | 2 | 两个入口不再 import 旧烘焙 | 全树对三个路径的**代码**引用为 0（只剩退役文字） |
+  // | 3 | 两个命令**确实**经作业 | `exportOperators` 调 `runIsoExport`，后者调 `assembleSnapshotExportJob` + `ExportJob.run()`；静态判据在 `tests/architecture/export-chain.test.ts` |
+  // | 4 | 判据面全绿 | `export-iso-time` / `export-scene-gif` / `export-ports` / `exportPorts.test.ts` / `snapshotExport.test.ts` + 反转后的 `p10fD3ExportOwnership` |
+  // | 5 | 登记面同步 | 本条删除；`export-borrows-live-viewport-dual-track` 的 ③ 同步改成"2/5 已迁" |
+  // | 6 | 新判据接棒 | `export-chain.test.ts` 的「命令必须经作业」静态判据（含负对照） |
+  //
+  // ## 为什么替换是**结构性**的（不是"换了实现但仍是两条链"）
+  //
+  // 命令现在只做三件事：捕获（`composition/exportCapture`，读与屏上**同一个**求值点的派生场景）、
+  // 装配冻结作业、运行。相机是**四个 `CameraSpec` 值**（`presentation/isoExportCamera`），
+  // 时间来自冻结的 `CaptureTime[]`，纹理只有**一份** `TextureResource[]`（同一数组值喂设备与绑定）。
+  // ⇒ "第二次求值/第二条采样器/第二台相机"在导出侧不再可表达。
+  //
   /**
    * ⚠️ **已核销（R1-β① C8）**：原 `presenter-surface-dual-track` 登记在此。
    *
@@ -383,19 +312,16 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       'src/application/exportPlan.ts',
       'src/runtime/exportJob.ts',
       'src/workbench/export/bundleMeshAssembly.ts',
-      'src/workbench/exportIsometricImage.ts',
       'src/operators/builtin/exportOperators.ts',
       'src/workbench/components/ExportWorkspace.vue',
-      // M5-4：场景 GIF 同样走旧导出器（不借用实时视口，但仍不是在作业面上）。
-      'src/workbench/exportAnimatedGif.ts',
     ]),
     newTrack:
       '内核侧固定快照导出（#260）：`domain/captureSpec` 把取景复制成 `CameraSpec` 值、把采样时间算成冻结的 `CaptureTime` 序列；`application/exportPlan` 组装**不可变**请求并在预检处默认失败；`runtime/exportJob` 的离屏端口只有 `acquire/renderFrame/release`（**没有**取实时相机/视口的方法）。静态判据见 `web/tests/architecture/export-purity.test.ts`。',
     oldTrack:
-      '旧导出器仍在生产路径上：`src/workbench/export/bundleMeshAssembly.ts` 与 `src/workbench/exportIsometricImage.ts` 消费**旧文档内容**（消费方经 `ctx.getDoc().value?.serialize()` 取 plain 文档），命令入口在 `src/operators/builtin/exportOperators.ts`（**五个**导出命令全部如此：Plain / Envelope / OBJ / 等轴 PNG / 动画 GIF），面板在 `src/workbench/components/ExportWorkspace.vue`。',
+      '旧导出器仍在**部分**生产路径上：`src/workbench/export/bundleMeshAssembly.ts` 消费**旧文档内容**（消费方经 `ctx.plainForSave()` 取 plain 文档），命令入口在 `src/operators/builtin/exportOperators.ts`。⚠️ **M6-3 起只剩三个**（Plain / Envelope / OBJ）；等轴 PNG 与场景 GIF 已迁至 `assembleSnapshotExportJob` + `ExportJob.run()`，旧烘焙链（`workbench/exportIsometricImage.ts` / `exportAnimatedGif.ts` / `animatedGifEncoder.ts`）整文件删除。',
     blocker:
       '**P10c（#286）实测修正（改写 P9 的原文，附机械证据）**：\n' +
-      '① **消费者面**：四个导出命令与 `ExportWorkspace.vue` 全部经 `ctx.getDoc().value?.serialize()` 读旧文档 ⇒ 删除它们需要 `getDoc()` 的退出，而那是 `raw-authority-object` 条目（归 #289/P10d）。\n' +
+      '① **消费者面（M6-3 更新）**：Plain / Envelope / OBJ **三个**命令与 `ExportWorkspace.vue` 的导出卡片仍经 `ctx.plainForSave()` 读旧文档投影（`getDoc()` 已终删）⇒ 删掉它们需要那三条产物迁到内核侧；等轴 PNG 与场景 GIF **已退出**该面（M6-3：经 `workbench/export/isoExportJob` → `ExportJob`）。\n' +
       '② **几何面**：OBJ 导出经 `loadStructureOrWorld(doc)` → `collectStructureGeometryPiecesPure(def)`，其几何唯一来源是 `blockPalette[].geometry`（`render/schema/types.ts:257` → `structureGeometryCore.ts:217`）。P10c 实测：内核投影**不带回显**时 palette 条目 `withGeometry=0`、**triangles=0**（ebf-2ch 0/旧 24；帧为主真实信封 0/旧 4882）⇒ 换成内核求值后 OBJ 导出会**静默产出空几何**。这正是 R-WK-06 划给 #289 的内容面。\n' +
       // P10f/E（#301）窄授权修正（仅本句）：③ 的**前半**已不成立 —— 两个端口已有生产
       // 实现、`ExportJob` 已有生产构造点（`src/adapters/export/`；判据见
@@ -417,20 +343,36 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       // ⇒ 措辞改为「**有生产构造点、零生产消费方**」，并**去掉**"四命令迁移归主线 D/E"
       //   这一半 —— Lead 裁决：**四命令不迁 `ExportJob`**（切过去丢贴图 + 违反 A29
       //   借用实时视口），等轴 seam 的退出条件据此收窄为「渲染链终切后」。
+      // ## ✅ Q6 对照实验结论（M6-3 交付项；设计 §11.4）
+      //
+      // 方法：临时在 `useViewportRuntime` 的帧回调加探针并两态跑（保留 / 关断
+      // `drw.textureCache.setSceneTime`），在边界秒 ±1µs 读 `textureSamples()` 与视口像素。
+      //
+      // | 读数 | 结果 |
+      // |---|---|
+      // | 反空洞真（cache 是否在场） | **在场**：66 次帧回调里 38 次非空，且自报 `material:0 → 4 帧` |
+      // | 关断前后 samples | **逐字段相同**（6 个边界秒全部） |
+      // | 关断前后视口像素 | **逐字节相同** |
+      //
+      // ⇒ **可见面上已无双采样器**：唯一驱动画面的是 `sampleBoundTexture`；DRW 的
+      // `applyFrameOffset` 仍在内存里跑（它自己的材质库），但不再影响任何被绘制的批次。
+      // ⚠️ 措辞边界：只能说"屏上**可见面**无双采样器"，不能说"树内已无第二采样器"——
+      // 后者不成立（`simpleMaterialLibrary` 仍在服役，见保留清单）。
       '③ **替代面的两半必须分开写**（原文"零生产调用方"把两者混为一谈）：\n' +
       '  · **有生产构造点**：`src/adapters/export/snapshotExportJob.ts` 的 `assembleSnapshotExportJob` 内实例化 `ExportJob`（实测 `:82`，本文件外的唯一构造点；判据 `tests/architecture/export-port-implementation.test.ts`）；`OffscreenRenderPort` 与 `EncoderPort` **各有生产实现**（`src/adapters/export/offscreenRenderPort.ts` / `encoderPort.ts`）。\n' +
-      '  · **零生产消费方**：五个导出命令（`src/operators/builtin/exportOperators.ts`，M5-4 起含 `OPERATOR_EXPORT_SCENE_GIF`）与 `ExportWorkspace.vue` 全走旧导出器，**无一处**调 `assembleSnapshotExportJob` / `ExportJob.run()` ⇒ "导出改由 `ExportJob` 承担"在**消费面**未接。\n' +
+      '  · **部分生产消费方（2/5）**：等轴 PNG（`OPERATOR_EXPORT_ISO_PNG`）与场景 GIF（`OPERATOR_EXPORT_SCENE_GIF`）已经 `workbench/export/isoExportJob` 调 `assembleSnapshotExportJob` + `ExportJob.run()`（M6-3）；Plain / Envelope / OBJ 三条仍走 `plainForSave()` 的旧投影路径（它们产的是 JSON/ZIP，不属呈现链）。\n' +
       '  · **Lead 裁决（#262 comment 6429 三，2026-10-13）：四个导出命令 `迁 ExportJob` = 采纳「不迁」**（切过去丢贴图 + 违反 A29 借用实时视口）⇒ 剩下的只是**旧导出器本体**的删除，其前置收窄为「渲染链终切」（见 seam `isometric-export-legacy-bake`）。\n' +
-      '④ **文字修正**：本条的旧 `oldTrack` 曾称两个文件"从正在操作的视口取景（必要时临时改机位再恢复）"。实测**不成立**：`bundleMeshAssembly.ts` 与 `exportIsometricImage.ts` 都不 import 任何视口/相机/`ctx` 实时面，后者自建 `new THREE.WebGLRenderer` 与自建透视/正交相机（`:105,:153-168`）。"借用并旋转实时相机"发生在**截图**路径（`runtime/renderEngine.ts:215` 的 `canvas.toDataURL`），不是这两个导出器。A29 的负对照面据此收窄（见汇报）。',
-    // ⚠️ **闭包外**（R1-α 实测）：见 `closureNote` —— 「闭包 ∩ 旧层 = ∅」对本条恒真。
-    closureCoverage: 'outside-closure',
-    closureNote:
-      "3 处声明文件不在闭包内：`domain/captureSpec.ts`、`application/exportPlan.ts`、`runtime/exportJob.ts`。其中 `runtime/exportJob.ts` 恰是本条的**迁移目标**（导出作业端口尚未被生产入口装配 ⇒ 不可达**就是**\"尚未接线\"本身）。⇒「闭包 ∩ 旧层 = ∅」对本条**恒真**。本条的**真判据**是「生产导出入口经该端口取资源、且导出路径不再借用实时视口」（A29 + 接线）。",
+            '④ **文字修正**：本条的旧 `oldTrack` 曾称两个文件"从正在操作的视口取景（必要时临时改机位再恢复）"。实测**不成立**：`bundleMeshAssembly.ts` 与 `exportIsometricImage.ts` 都不 import 任何视口/相机/`ctx` 实时面，后者自建 `new THREE.WebGLRenderer` 与自建透视/正交相机（`:105,:153-168`）。"借用并旋转实时相机"发生在**截图**路径（`runtime/renderEngine.ts:215` 的 `canvas.toDataURL`），不是这两个导出器。A29 的负对照面据此收窄（见汇报）。',
+    // ⚠️ **M6-3：闭包覆盖从 `outside-closure` 翻成 `in-closure`** —— 这条翻转本身就是切链的证据：
+    // 切链前 `runtime/exportJob.ts` 在生产入口的可达闭包**外**（"尚未接线"），现在经
+    // `workbench/export/isoExportJob` → `assembleSnapshotExportJob` 可达。
+    // ⇒ 原 `closureNote`（"闭包判据对本条恒真"）随之作废并删除。
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     exitCondition:
-      "**（甲）登记条件 —— ✅ 已成立**：导出端口实现完备（`adapters/export/snapshotExportJob.ts` + `SnapshotOffscreenRenderPort` + `createEncoderPort`），且已有真 GL e2e 证据（`e2e/export-ports.spec.ts`）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立（含 M5-4 新增的 `OPERATOR_EXPORT_SCENE_GIF`）**：生产导出入口尚未经该端口装配。\n⚠️ 本条 `closureCoverage: 'outside-closure'` ⇒ **不得**用闭包判据（见 `closureNote`）。\n**以下为原退出条件（逐字保留）**：\n"
+      "**（甲）登记条件 —— ✅ 已成立**：导出端口实现完备（`adapters/export/snapshotExportJob.ts` + `SnapshotOffscreenRenderPort` + `createEncoderPort`），且已有真 GL e2e 证据（`e2e/export-ports.spec.ts`）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立（3 条）**：Plain / Envelope / OBJ 仍走 `plainForSave()` 的旧投影路径；等轴 PNG 与场景 GIF **已迁**（M6-3，经 `workbench/export/isoExportJob` → `ExportJob.run()`，旧烘焙链整文件删除）。\n⚠️ 本条 `closureCoverage: 'outside-closure'` ⇒ **不得**用闭包判据（见 `closureNote`）。\n**以下为原退出条件（逐字保留）**：\n"
       +
-      '`src/workbench/export/bundleMeshAssembly.ts` 与 `src/workbench/exportIsometricImage.ts` 被删除，且 `src/operators/builtin/exportOperators.ts` 的导出命令改由 `src/runtime/exportJob.ts` 的 `ExportJob` 承担（`OffscreenRenderPort`/`EncoderPort` 各有生产实现，且 OBJ 几何来自内核内容面而不再依赖旧文档回显）；届时删除本条登记。',
+      '`src/workbench/export/bundleMeshAssembly.ts` 被删除，且 `src/operators/builtin/exportOperators.ts` 的全部导出命令改由 `src/runtime/exportJob.ts` 的 `ExportJob` 承担（含 OBJ 几何来自内核内容面而不再依赖旧文档回显）；届时删除本条登记。\n⚠️ **M6-3 已兑现一半**：等轴 PNG / 场景 GIF 两条已迁且旧烘焙链整文件删除；剩 Plain / Envelope / OBJ 三条与 `bundleMeshAssembly.ts`。',
   }),
   /**
    * P9（#260）登记：**导出资源清单的产出方式**尚未接线。
@@ -461,13 +403,13 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       '旧导出器（`workbench/export/bundleMeshAssembly.ts`）在烘焙时直接从旧文档与纹理库取资源：没有"必需/可选"的声明，也没有内容版本参与的就绪判定，故"缺资源"表现为烘焙结果里少一块而不是预检失败。',
     blocker:
       '**R-WK-06（#250，2026-10-12）**：`deriveAssetNeeds()` 需要"文档场景 → 呈现图元（`EvaluatedPrimitive[]`）"的装配，而这属**文档内容面** —— 与 `raw-authority-object` 同一前置（内核 `Document` 不承载旧文档内容）。P9 原登记为 P10b（#282），而 #282 交付的是**多方块通道/呈现接线**，本条未在其中交付；P10c（#286）复核后按 R-WK-06 的划界改归 **#289（P10d）**（内容面补全与呈现消费）。',
-    // ⚠️ **闭包外**（R1-α 实测）：见 `closureNote` —— 「闭包 ∩ 旧层 = ∅」对本条恒真。
-    closureCoverage: 'outside-closure',
-    closureNote:
-      "2 处声明文件不在闭包内：`application/exportPlan.ts`、`runtime/exportJob.ts`（同 `export-borrows-live-viewport-dual-track` 的迁移目标）。⇒「闭包 ∩ 旧层 = ∅」对本条**恒真**。本条的**真判据**是「产物侧已接线 `assetId`/`contentVersion` 清单」（`composition/saveProjection` 已在产物侧传值，见本条说明）。",
+    // ⚠️ **M6-3：闭包覆盖从 `outside-closure` 翻成 `in-closure`**（与 `export-borrows-…` 同批）：
+    // 声明文件里的 `application/exportPlan.ts` / `runtime/exportJob.ts` 现在**可达**
+    // （导出命令 → 捕获装配 → 作业）⇒ 原 `closureNote` 作废并删除。
+    closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     exitCondition:
-      "**（甲）登记条件 —— ✅ 已成立**：产物侧已能表达资源身份（`adapters/files/projectFormat.ts` 的 `normalizeAssets`/`assetManifestDigest`；`composition/saveProjection.ts` 已在产物侧传值）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立**：导出路径尚未实际写清单。\n⚠️ 本条 `closureCoverage: 'outside-closure'` ⇒ **不得**用闭包判据（见 `closureNote`）。\n**以下为原退出条件（逐字保留）**：\n"
+      "**（甲）登记条件 —— ✅ 已成立**：产物侧已能表达资源身份（`adapters/files/projectFormat.ts` 的 `normalizeAssets`/`assetManifestDigest`；`composition/saveProjection.ts` 已在产物侧传值）。\n**（乙）消费者迁移数 = 0 —— ⏳ 部分兑现（M6-3）**：等轴 PNG / 场景 GIF 已按捕获期反推的清单写产物（`deriveAssetNeeds` → 请求 `assets` → 作业 `assetNeeds` 转发）；**OBJ 仍不写清单**（`bundleMeshAssembly` 直接从旧文档与纹理库取资源）。\n**以下为原退出条件（逐字保留）**：\n"
       +
       '`src/application/exportPlan.ts` 的 `deriveAssetNeeds()` 由已装配的图元来源产出非空清单（不再在未装配时返回空），且 `src/runtime/exportJob.ts` 的作业按该清单解析资源。届时删除本条登记。',
   }),

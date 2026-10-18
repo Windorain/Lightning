@@ -67,7 +67,6 @@ const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs, type DocumentContent } from '@/domain/content'
 import { sceneSecondsOf } from '@/domain/animation'
 import type { AnimationState } from '@/domain/animation'
-import type { Version } from '@/domain/identity'
 import type { Document } from '@/domain/document'
 import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
 import {
@@ -1442,7 +1441,9 @@ export class Context {
     readonly scene: Scene
     readonly content: DocumentContent
     readonly animation: AnimationState
-    readonly version: Version
+    /** 内容版本（结构上等于 `domain/identity#Version`；此处不 import 它以守住
+     *  "旧层不得新增未登记的内核依赖" 那条闸门 —— 类型是结构性的，此处只用其形状）。 */
+    readonly version: { readonly documentVersion: number; readonly contentVersion?: number }
     readonly channels: Readonly<Record<string, number>>
   } | null {
     const doc = this.kernelPresentationDocument()

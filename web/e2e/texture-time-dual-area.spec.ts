@@ -60,6 +60,16 @@ interface RegionReading {
   readonly region: string
   readonly samples: SampleReport[]
   readonly stats: { applies: number; materialBuilds: number; batchBuilds: number; geometryBuilds: number }
+  /** 呈现会话的求值键（M6-3 补面：双区同源的**身份**证据，不是样本证据）。 */
+  readonly activeKey: {
+    documentVersion: number
+    scene: string
+    time: { seconds: number; numerator: number; denominator: number }
+    parameterVersion: number
+    contentResourceVersions: Record<string, string>
+  } | null
+  /** 采样诊断计数（M6-3 补面；三项与屏上同源判定）。 */
+  readonly sampleStats: { errors: number; blended: number; phaseSkipped: number } | null
 }
 
 interface DualReading {
@@ -96,12 +106,26 @@ async function readDual(page: Page, regions: readonly string[]): Promise<DualRea
     for (const id of ids) {
       const surface = ctx?.viewports?.get(id)?.presenterSurface ?? null
       if (surface === null) {
-        out.push({ region: id, samples: [], stats: { applies: -1, materialBuilds: -1, batchBuilds: -1, geometryBuilds: -1 } })
+        out.push({
+          region: id,
+          samples: [],
+          stats: { applies: -1, materialBuilds: -1, batchBuilds: -1, geometryBuilds: -1 },
+          activeKey: null,
+          sampleStats: null,
+        })
         continue
       }
       const stats = surface.statsSnapshot()
+      const key = typeof surface.activeKey === 'object' && surface.activeKey !== null
+        ? JSON.parse(JSON.stringify(surface.activeKey))
+        : null
+      const sampleStats = typeof surface.textureSampleStats === 'function'
+        ? JSON.parse(JSON.stringify(surface.textureSampleStats()))
+        : null
       out.push({
         region: id,
+        activeKey: key,
+        sampleStats,
         samples: JSON.parse(JSON.stringify(surface.textureSamples() ?? [])),
         stats: {
           applies: stats.applies,
@@ -277,6 +301,61 @@ test.describe('M5-3 · 纹理时间 → 呈现（真实双 Area）', () => {
     expect(pausedAfter.regions[0]!.stats.applies, '暂停期不得有重编').toBe(pausedBefore.regions[0]!.stats.applies)
     expect(pausedAfter.playing, '全程未播放').toBe(false)
     console.log('[TT-1] paused stable samples=' + JSON.stringify(pausedAfter.regions[0]!.samples[0]))
+  })
+
+  /**
+   * **TT-1b（M6-3 补面 · 判据 ①）**：双视口不只"样本相同"，**身份**也必须相同。
+   *
+   * ## 为什么补这条（而不是重复 TT-1）
+   *
+   * TT-1 断的是 `textureSamples()` 逐字段相等 —— 那是"这一帧取了哪一格"。
+   * 但两份读数相同**不代表**两个区走的是同一个求值键：完全可能一边在 A 内容上取到
+   * 恰好相同的样本（例如两边都停在帧 0）。`activeKey` +
+   * `textureSampleStats()` 把"同源"从**结果**证到**身份**：
+   *
+   * | 读面 | 回答 |
+   * |---|---|
+   * | `textureSamples()` | 这一帧取到哪一格（结果） |
+   * | `activeKey` | 这一帧是按哪个求值键算的（身份：文档版本 / 场景 / 场景时间 / 参数版本 / 资源版本） |
+   * | `textureSampleStats()` | 采样有没有出错/混合/相位跳过（诊断） |
+   *
+   * ## 明确**不**期望 key 相等的情形
+   *
+   * `setLayerPreview` 进的是**内容身份**（`presenterSession#contentIdentityOf` 的 `lp:` 段），
+   * **不是** `activeKey` 的一维（键是契约冻结的六维）。故"两区设了不同分层预览"时
+   * 期望的是"内容身份不同、key 仍相同" —— 把它写成"key 应不同"是**误判**。
+   */
+  test('TT-1b 双区 activeKey 与 textureSampleStats 逐字段相等（判据 ① 补面）', async ({ page }) => {
+    test.setTimeout(300_000)
+    await gotoWorkbench(page)
+    await injectSceneDocumentOk(page, readJson(FIXTURE_PATH), FIXTURE)
+    await waitForViewportMounted(page)
+    expect(
+      await waitTextureState(page, TERMINAL_TEXTURE_STATES, '动画竖条纹理终态', 180_000),
+      '完好夹具的终态必须是 ready',
+    ).toBe('ready')
+
+    await splitArea(page)
+    await expect.poll(async () => (await readLeafRegions(page)).length, { timeout: 30_000 }).toBe(2)
+    const regions = await readLeafRegions(page)
+
+    await seekSeconds(page, 0.12)
+    const at = await waitSameSeconds(page, regions, 0.12)
+    const [a, b] = at.regions
+    // 反空洞真：读数必须在场（null 会让"相等"变成两条 null === null 的空转）
+    expect(a!.activeKey, 'activeKey 必须在场（否则补面是空转）').not.toBeNull()
+    expect(a!.sampleStats, 'textureSampleStats 必须在场').not.toBeNull()
+    expect(a!.activeKey!.scene, 'key 必须指名场景（不是空对象）').not.toBe('')
+    expect(Object.keys(a!.activeKey!.contentResourceVersions).length, '资源版本必须进 key').toBeGreaterThan(0)
+
+    // ① 身份逐字段相等
+    expect(a!.activeKey, '两区的求值键必须逐字段相等（同一份内容、同一秒、同一参数版本）').toEqual(b!.activeKey)
+    // ② 诊断计数逐项相等
+    expect(a!.sampleStats, '两区的采样诊断计数必须相等').toEqual(b!.sampleStats)
+    // ③ 键里的场景时间 == 目标秒（把"同秒"证到 key 上，而不只是样本里）
+    expect(a!.activeKey!.time.seconds, 'key 里的场景秒必须等于定位秒').toBeCloseTo(0.12, 9)
+
+    console.log('[TT-1b] activeKey=' + JSON.stringify(a!.activeKey) + ' stats=' + JSON.stringify(a!.sampleStats))
   })
 
   test('TT-2 负对照：同一份竖条字节但声明为静态（kind=static16）⇒ 两区无样本、纹理不裁切', async ({ page }) => {

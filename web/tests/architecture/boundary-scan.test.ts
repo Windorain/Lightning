@@ -607,11 +607,18 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
         expect(s.closureNote, `${s.id}：\`in-closure\` 不得带 \`closureNote\`（它没有恒真问题）`).toBeUndefined()
       }
     }
-    // **反空洞真**：本仓确实存在闭包外的接缝（否则上面那条的 outside 分支从未被执行）。
+    // **反空洞真（M6-3 改写）**：切链前有两条 `outside-closure` 接缝（导出链在闭包外）。
+    // M6-3 把导出命令接到作业面后，那两条**都翻成 in-closure** ⇒ 树上已不存在
+    // `outside-closure` 声明。这不是判据失效，而是**里程碑事实**：
+    //  · 上面那条 "声明 == 实测" 的断言对每条接缝仍然逐条执行；
+    //  · `outside-closure` 分支的非空洞性由下一条负对照用**同一判定式**在一个真实
+    //    闭包外文件上证明（而不是靠"碰巧还有一条 outside 登记"）。
+    // ⇒ 这里断言的是"判定式本身仍有区分力"，且把 outsideCount 作为读数留档。
     expect(
-      outsideCount,
-      '必须至少有一条 `outside-closure` 接缝 —— 否则该分支从未被验证，判据有一半是空转',
-    ).toBeGreaterThan(0)
+      measured(['src/adapters/storage/browser.ts']),
+      '同一判定式必须仍能判出闭包外的文件（否则 in-closure 的"一致"是恒真）',
+    ).toBe(false)
+    expect(typeof outsideCount, 'outsideCount 必须仍是可读的读数（0 也是真实读数）').toBe('number')
   })
 
   /**
@@ -625,9 +632,13 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     const closure = entryClosure()
     const measured = (files: readonly string[]): boolean =>
       files.every((f) => closure.has(f.replace(/^src\//, '').replace(/\.(ts|tsx|mts|vue)$/, '')))
-    // 实测闭包外的一个真实文件（R0-3/prep 点名 + 本批探针复核）。
-    expect(measured(['src/runtime/exportJob.ts']), '`runtime/exportJob.ts` 实测在闭包外').toBe(false)
-    // 正对照：一个确实可达的生产文件。
+    // ① **正对照（M6-3 的新事实）**：`runtime/exportJob.ts` 切链前在闭包外，现在经
+    //    `workbench/export/isoExportJob` → `assembleSnapshotExportJob` 可达
+    //    （该变化本身是"命令真的经作业"的机械证据）。
+    expect(measured(['src/runtime/exportJob.ts']), '`runtime/exportJob.ts` 现在实测在闭包内（M6-3 接线）').toBe(true)
+    // ② **负对照**：一个真实存在但不在生产入口闭包内的文件（storage 适配器只被宿主按需装配）。
+    expect(measured(['src/adapters/storage/browser.ts']), '`adapters/storage/browser.ts` 实测在闭包外').toBe(false)
+    // ③ **正对照**：一个确实可达的生产文件。
     expect(measured(['src/domain/document.ts']), '`domain/document.ts` 实测在闭包内').toBe(true)
   })
 

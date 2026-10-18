@@ -3,8 +3,9 @@ import { buildEnvelopePackage } from '@/render/data/sceneExport'
 import { loadStructureOrWorld } from '@/render/data/bundleResolve'
 import { downloadBlob, downloadJson } from '@/util/browser'
 import { buildStructureBundleZip } from '@/workbench/export/bundleMeshAssembly'
-import { bakeIsometricStructurePngDataUrl, dataUrlToPngBlob, normalizeIsoSeconds } from '@/workbench/exportIsometricImage'
-import { bakeIsometricGifBlob } from '@/workbench/exportAnimatedGif'
+import { normalizeIsoSeconds } from '@/application/captureInput'
+import { exportErrorText, runIsoExport } from '@/workbench/export/isoExportJob'
+import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 
 const ISO_DIRECTION_MAP: Record<string, number> = {
@@ -129,19 +130,23 @@ export const ExportIsoPngOperator: OperatorType = {
 
   async exec(ctx, _props) {
     // #301 P10f/E 修复 D7：渲染下标与文件名**同源**（都取自 `directionIndex`）。
-    // 修复前文件名插值的是原始 `props.direction`，与查表得到的渲染下标是两个来源
-    // ⇒ 实测表现为"名为 iso-2.png、内容是方向 0"。见 `resolveIsoDirection` 的说明。
     const directionIndex = resolveIsoDirection(_props.direction)
-    // #301 P10f D2：产物改由**内核投影**给出（未装配自动回落旧文档）。
-    const doc = ctx.plainForSave().plain
-    if (!doc) return
-    // 显式时间（缺省 0）；非法值在这里就拒（与烘焙同一个归一入口），
-    // 不落进下面的 try 被压成一条 warn。
+    // 显式时间（缺省 0）；非法值在这里就拒（唯一归一入口），不落进 try 被压成一条 warn。
     const seconds = normalizeIsoSeconds(_props.seconds)
+    if (!ctx.hasLoadedDocument()) return
     try {
-      const dataUrl = await bakeIsometricStructurePngDataUrl(doc, directionIndex, { seconds })
-      const blob = dataUrlToPngBlob(dataUrl)
-      downloadBlob(`iso-${directionIndex}.png`, blob)
+      // M6-3：产物 = **与屏上同一条呈现链**（捕获派生场景 → 冻结作业 → 导出作业）。
+      const result = await runIsoExport(ctx, {
+        kind: 'image',
+        directionIndex,
+        // 与旧烘焙同一个边长（480）：Q1 的 480/320 统一归 M6-5，本包只搬运形参。
+        pixelSize: 480,
+        seconds,
+        decoder: createDomTextureDecoder(),
+        now: Date.now(),
+      })
+      if (!result.ok) throw new Error(exportErrorText(result.error))
+      downloadBlob(result.value.fileName, new Blob([result.value.bytes as unknown as BlobPart], { type: result.value.mediaType }))
     } catch (e) {
       ctx.log.warn('导出', `等轴 PNG 导出失败: ${e}`)
       // **再抛**：log.warn 只留诊断，可见性由调用方（UI）承担。吞掉它正是本轮要修的形态。
@@ -153,8 +158,11 @@ export const ExportIsoPngOperator: OperatorType = {
 /**
  * 场景 GIF（M5-4）：把**模型画面**在"纹理序列一个循环"内逐帧渲染成 GIF89a。
  *
- * 与材质卡 `OPERATOR_EXPORT_GIF`（导出**贴图条本身**）分工不同：本命令导出的是
- * 场景画面，且与等轴 PNG 共用方向/尺寸/相机（`workbench/exportAnimatedGif`）。
+ * 本命令导出的是**模型画面**（3D）；材质卡那条"导出贴图条本身"的入口已随 Q2 裁决退出
+ * （`materialOperators` 的 `ExportGifOperator` 与 `workbench/animatedGifEncoder` 同批删除），
+ * 故"把某张材质的动画单独导出成 GIF"**不再有入口**（静态纹理 PNG 仍可导出）。
+ *
+ * 与等轴 PNG **同一条**呈现链、同一台相机（M6-3）：两者的差别只有"取一帧"与"取一个循环"。
  *
  * 时间来自 `domain/materials#planSequenceLoop` 的冻结计划（声明时长 → 逐帧厘秒），
  * 不读墙钟、不自算 tick、不截断超限循环（超限是**显式失败**）。
@@ -170,15 +178,23 @@ export const ExportSceneGifOperator: OperatorType = {
 
   async exec(ctx, _props) {
     const directionIndex = resolveIsoDirection(_props.direction)
-    const doc = ctx.plainForSave().plain
-    if (!doc) return
     const rawSize = _props.pixelSize
+    // 夹取只有**一处**（命令侧）；捕获器只搬运形参（Q1 的区间统一归 M6-5）。
     const pixelSize = typeof rawSize === 'number' && Number.isFinite(rawSize)
       ? Math.max(64, Math.min(512, Math.floor(rawSize)))
       : 320
+    if (!ctx.hasLoadedDocument()) return
     try {
-      const result = await bakeIsometricGifBlob(doc, directionIndex, { pixelSize })
-      downloadBlob(`anim-${directionIndex}.gif`, result.blob)
+      // M6-3：与等轴 PNG **同一条**呈现链（同相机/同内容/同资源表）。
+      const result = await runIsoExport(ctx, {
+        kind: 'animation',
+        directionIndex,
+        pixelSize,
+        decoder: createDomTextureDecoder(),
+        now: Date.now(),
+      })
+      if (!result.ok) throw new Error(exportErrorText(result.error))
+      downloadBlob(result.value.fileName, new Blob([result.value.bytes as unknown as BlobPart], { type: result.value.mediaType }))
     } catch (e) {
       ctx.log.warn('导出', `场景 GIF 导出失败: ${e}`)
       // 同轴等轴 PNG：日志只留诊断，可见性由调用方承担。

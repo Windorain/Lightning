@@ -34,7 +34,7 @@ import type { CameraSpec, CaptureSpec, ExportAssetNeed, ExportRequest, RenderSet
 import { freezeExportRequest } from '@/domain/captureSpec'
 import type { DocumentContent } from '@/domain/content'
 import type { Version } from '@/domain/identity'
-import { planSequenceLoop, type SequenceLoopPlan } from '@/domain/materials'
+import { LOOP_LIMITS, planSequenceLoop, type SequenceLoopPlan } from '@/domain/materials'
 import type { Scene } from '@/domain/scene'
 import type { AssetNeedDerivation, CaptureInput } from '@/application/exportPlan'
 import { deriveAssetNeeds, planExportRequest } from '@/application/exportPlan'
@@ -78,6 +78,17 @@ export interface ExportCaptureOptions {
   readonly now: number
   /** 请求 ID（诊断用；缺省按 kind 生成）。 */
   readonly requestId?: string
+  /**
+   * 逐帧驻留的上限表（缺省 = `domain/materials#LOOP_LIMITS`，与 GIF 的"太长"同一张表）。
+   *
+   * ## 为什么它是**参数**而不是常量
+   *
+   * 上限本身是产品政策（30 s / 240 帧），但"超限要显式失败"这条**行为**必须可判。
+   * 夹具不可能真的声明 30 s+ 的循环（那会让判据本身变慢且脆弱），故判据把上限压低到
+   * 夹具可触发的量级 —— 判的是**同一条路径**（`planSequenceLoop` 的 `textureLoopTooLong`
+   * → 捕获失败 → 零产物），不是另写一条"模拟超限"的分支。
+   */
+  readonly loopLimits?: { readonly maxFrames: number; readonly maxTotalMs: number }
 }
 
 /** 一次捕获的**全部**产物（值；之后不再回读编辑器）。 */
@@ -122,7 +133,10 @@ function durationMsOf(d: { readonly num: number; readonly den: number }): number
  * `domain/textureAnimation`）；共同循环的排布来自 `domain/materials#planSequenceLoop`
  * —— 与旧链**同一个**函数、同一份口径（不再问材质库）。
  */
-function loopOf(resources: readonly TextureResource[]): Result<SequenceLoopPlan> {
+function loopOf(
+  resources: readonly TextureResource[],
+  limits: { readonly maxFrames: number; readonly maxTotalMs: number },
+): Result<SequenceLoopPlan> {
   const strips: { readonly id: string; readonly frameCount: number; readonly durationsMs: readonly number[] }[] = []
   for (const r of resources) {
     const animation = r.animation
@@ -147,7 +161,7 @@ function loopOf(resources: readonly TextureResource[]): Result<SequenceLoopPlan>
     // 没有动画序列 ⇒ **显式失败**（不产出单帧假 GIF，与旧链同一处置）。
     return err(unsupportedOperation({ reason: 'noAnimatedSequences' }))
   }
-  return planSequenceLoop(strips)
+  return planSequenceLoop(strips, limits)
 }
 
 /** `SequenceLoopPlan` → 逐段驻留（与帧一一对应；最后一段回绕到 `totalMs`）。 */
@@ -226,7 +240,9 @@ export async function captureExportSnapshot(
   const render: RenderSettings = { width: options.pixelSize, height: options.pixelSize, background: 'transparent' }
 
   // ⑥ 时间序列（GIF：逐帧驻留来自声明；PNG：单帧在 `seconds`）。
-  const loop = options.kind === 'animation' ? loopOf(textureResources) : null
+  const loop = options.kind === 'animation'
+    ? loopOf(textureResources, options.loopLimits ?? LOOP_LIMITS)
+    : null
   if (loop !== null && !loop.ok) return err(loop.error)
   const plannedLoop = loop !== null && loop.ok ? loop.value : null
   const mapping: TimeMapping = plannedLoop !== null

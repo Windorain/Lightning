@@ -2,8 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 import { copyTextToClipboard } from '@/util/browser'
-import { bakeIsometricStructurePngDataUrl } from '@/workbench/exportIsometricImage'
-import { bakeIsometricGifBlob } from '@/workbench/exportAnimatedGif'
+import { blobOf, dataUrlOf, exportErrorText, runIsoExport } from '@/workbench/export/isoExportJob'
+import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { useContext } from '@/runtime/context'
 
@@ -99,8 +99,26 @@ async function bakeIso(): Promise<void> {
   // 非法输入**不烘焙**：把 'abc' 当 t=0 画出来就是"静默当 0"（本卡的红字说的正是它非法）。
   if (seconds === null) { isoUrl.value = null; isoErr.value = null; isoBusy.value = false; return }
   const seq = ++isoSeq; isoBusy.value = true; isoErr.value = null
-  try { const url = await bakeIsometricStructurePngDataUrl(d, isoDir.value, { seconds }); if (seq !== isoSeq) return; isoUrl.value = url }
-  catch (e) { if (seq !== isoSeq) return; isoUrl.value = null; isoErr.value = formatUnknownError(e) }
+  try {
+    /**
+     * 预览与下载**同一条链、同一组参数**（M6-3）：预览不再走第二套烘焙，
+     * 于是"卡片上看到的图就是下载得到的图"由结构保证（既有判据 C2 逐字节断言）。
+     *
+     * 边长 480 = 旧烘焙的缺省（`openIsometricStage` 的 `pixelSize ?? 480`）；
+     * Q1 的 480/320 统一归 M6-5，本轮只做**形参搬运**。
+     */
+    const r = await runIsoExport(ctx, {
+      kind: 'image',
+      directionIndex: isoDir.value,
+      pixelSize: 480,
+      seconds,
+      decoder: createDomTextureDecoder(),
+      now: Date.now(),
+    })
+    if (!r.ok) throw new Error(exportErrorText(r.error))
+    if (seq !== isoSeq) return
+    isoUrl.value = dataUrlOf(r.value)
+  } catch (e) { if (seq !== isoSeq) return; isoUrl.value = null; isoErr.value = formatUnknownError(e) }
   finally { if (seq === isoSeq) isoBusy.value = false }
 }
 // `.lazy` 只在 change（失焦/回车）提交 ⇒ 一次编辑一次重烘焙，不需要计时器。
@@ -119,10 +137,23 @@ async function makeGif(): Promise<void> {
   gifBusy.value = true
   gifErr.value = null
   try {
-    const r = await bakeIsometricGifBlob(d, isoDir.value)
+    /**
+     * 预览边长 480 = 旧烘焙缺省（下载侧命令仍是 320）—— 这条分叉**原样保留**：
+     * 统一归 M6-5（Q1），本包不新增也不消除分叉。
+     */
+    const r = await runIsoExport(ctx, {
+      kind: 'animation',
+      directionIndex: isoDir.value,
+      pixelSize: 480,
+      decoder: createDomTextureDecoder(),
+      now: Date.now(),
+    })
+    if (!r.ok) throw new Error(exportErrorText(r.error))
     if (gifUrl.value) URL.revokeObjectURL(gifUrl.value)
-    gifUrl.value = URL.createObjectURL(r.blob)
-    gifInfo.value = `${r.frameCount} 帧 / ${(r.totalMs / 1000).toFixed(3)} s`
+    gifUrl.value = URL.createObjectURL(blobOf(r.value))
+    // 帧数与总时长来自**捕获期的时间计划**（不是回读产物、不是再算一遍声明）。
+    const loop = r.value.capture.loop
+    gifInfo.value = loop === null ? null : `${loop.frameCount} 帧 / ${(loop.totalMs / 1000).toFixed(3)} s`
   } catch (e) {
     gifUrl.value = null
     gifInfo.value = null

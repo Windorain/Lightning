@@ -820,32 +820,39 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
     exitStage:
       'M6/M7 面板与呈现接线整体迁入内核侧编辑器、或 `getSceneSeconds` 的消费者改为直接持有会话时，本边核销',
   }),
-  // ── M5-4：GIF 的逐帧时间计划只有一份权威 ──────────────────────────────────
+  // ── M6-3：导出层开始消费**内核导出作业**（唯一允许读实时面的层）────────────
   //
-  // 场景 GIF 与材质卡 GIF 都必须从 `domain/materials#planSequenceLoop` 取"逐帧停留"。
-  // 在旧层各自算一遍（旧形态就是 `defaultFrametimeTicks * 5`）会立刻分叉：
-  // 同一份声明在两条路径上给出不同时长，而**画面**看起来都"成功"。
-  // ⇒ 这两条边是"旧层消费唯一权威"，不是给旧路径续命。
-  Object.freeze({
-    from: 'src/workbench/exportAnimatedGif.ts',
-    to: 'domain/materials',
-    reason:
-      'M5-4：场景 GIF 的逐帧采样点与厘秒时延由 `planSequenceLoop` 唯一给出（LCM 共同循环 + '
-      + '最大余数法分配）。旧层若自算 tick，则"GIF 的时长"与"材质库实际采样的时长"成为两份可分叉的事实。',
-    exitStage:
-      'M6 把 GIF 接进导出作业面（`captureSpec` 表达逐帧 hold + `EncoderInput` 携带时延）时，'
-      + '本文件一并退出，本边随之核销',
-  }),
-  Object.freeze({
-    from: 'src/operators/builtin/materialOperators.ts',
-    to: 'domain/materials',
-    reason:
-      'M5-4：材质卡 GIF 的逐帧时延改由 `planSequenceLoop` 给出（修复前用 '
-      + '`defaultFrametimeTicks * 5` 自算，忽略 `frameSequence[].timeTicks` ⇒ 不等帧时长被压平）。'
-      + '时延与场景 GIF 同源，两条路径不再各解释一遍声明。',
-    exitStage:
-      'M6 场景导出作业面接管后（同 `exportAnimatedGif` 那条边）：若材质卡 GIF 并入场景导出或该命令下线，核销本行',
-  }),
+  // 切链后，等轴 PNG / 场景 GIF 的命令不再自建渲染器与烘焙链，而是经
+  // `workbench/export/isoExportJob` 调 `composition/exportCapture`（派生场景）与
+  // `assembleSnapshotExportJob`（冻结作业）。⇒ `workbench/` 这一层**首次**消费内核的
+  // 导出能力（在此之前 exportJob 整条链在闭包外）。
+  //
+  // 这些边是"旧层消费内核能力"，不是"用新层给旧路径续命"：旧烘焙链已整文件删除。
+  // 退出：M6-5/M6-6 之后工作台导出面板整体迁入内核侧编辑器（`workbench/` 不再有导出入口）时核销。
+  ...([
+    ['src/workbench/export/isoExportJob.ts', 'domain/errors', '错误是值（Result 的失败侧）—— 导出失败必须结构化上报，不得抛字符串'],
+    ['src/workbench/export/isoExportJob.ts', 'application/exportPlan', '媒体类型/扩展名与编码种类来自同一条政策（不另立第二张表）'],
+    ['src/workbench/export/isoExportJob.ts', 'adapters/export/renderDevice', '真 GL 设备端口（离屏渲染目标的唯一实现）'],
+    ['src/workbench/export/isoExportJob.ts', 'adapters/export/snapshotExportJob', '冻结快照作业的生产装配（两端口 + ExportJob 的唯一构造点）'],
+    ['src/workbench/export/isoExportJob.ts', 'runtime/exportJob', '作业结局（JobOutcome）的类型来源 —— 失败/取消/完成三态由它定义'],
+  ] as const).map(([from, to, reason]) =>
+    Object.freeze({
+      from,
+      to,
+      reason: 'M6-3：' + reason + '。切链后导出命令经作业面消费内核能力（旧烘焙链已删除）。',
+      exitStage:
+        'M6-5/M6-6 之后工作台导出面板整体迁入内核侧编辑器（workbench/ 不再有导出入口）时，本边核销',
+    }),
+  ),
+  // ── M5-4 的两条边（GIF 时延的唯一权威）**已随 M6-3 核销** ────────────────
+  //
+  // 原登记：`workbench/exportAnimatedGif.ts` 与 `operators/builtin/materialOperators.ts`
+  // → `domain/materials`（逐帧时延由 `planSequenceLoop` 唯一给出）。
+  //
+  // M6-3 把两处消费者都退役：前者整文件删除；后者的 `ExportGifOperator` 随 Q2 裁决退出。
+  // 判定**没有随之消失**，只是换了形态 —— 现在落在 `tests/architecture/export-chain.test.ts`
+  // 的 C4（导出层不得以 `* 5` 自算 ticks→厘秒，必须经 `delayCsOf`/`planSequenceLoop`）。
+  // ⇒ 按"登记不得腐烂"的纪律，边随消费者一起核销；判定由接棒判据把守。
 ]
 
 describe('依赖方向：旧层 → 新内核的**未登记**依赖判红；已登记的迁移边必须真实存在', () => {

@@ -46,6 +46,15 @@ const P9_EXPORT_FILES = [
   'adapters/export/gifEncoderPort.ts',
   'adapters/export/encoderPort.ts',
   'adapters/export/offscreenRenderPort.ts',
+  // M6-3：**整个 `adapters/export/**` 都是导出实现**（§10.6 的补面）。漏掉新文件
+  // 等于给它们一张"不得自驱时间/不得借用实时视口"的免查券 —— 而这类判据正是
+  // 切链后最容易悄悄失守的地方。
+  'adapters/export/snapshotExportJob.ts',
+  'adapters/export/renderDevice.ts',
+  'adapters/export/pngEncoder.ts',
+  'adapters/export/abortBridge.ts',
+  'adapters/export/offscreenTextureUpload.ts',
+  'adapters/export/offscreenTextureDomain.ts',
 ]
 
 /** 本批新建的适配器路径（跨层导入纪律由 `boundary-rules.mjs` 判；此处只做时间/借用面）。 */

@@ -28,9 +28,10 @@ function base64PngToDataUrl(b64: string): string {
  *
  * 此前第一件事是 `if (!Array.isArray(blobs)) return []` —— 于是**帧为主**文档的投影产物
  * （`composition/kernelProjection.ts:1406-1408` 产**槽位键对象**）在这里被静默丢弃：
- * 一张都枚举不出来、调用方拿到空材质库、且**不报错**。等轴 PNG 导出（`ExportIsoPngOperator`
- * → `workbench/exportIsometricImage.ts:103 buildMaterialLibrary(plain)`，输入就是
- * `ctx.plainForSave().plain`）实测走这条链。
+ * 一张都枚举不出来、调用方拿到空材质库、且**不报错**。当时的等轴 PNG 导出
+ * （`ExportIsoPngOperator` → `workbench/exportIsometricImage.ts:103 buildMaterialLibrary(plain)`）
+ * 实测走这条链 —— **该导出链已于 M6-3 退役**，但本函数仍是 DRW 定义面/图标面的
+ * textureBlob 池解析入口（`runtime/drwMeshPipeline` 的 `textureCache` 供源）。
  *
  * ⇒ 形态解析收敛到 `domain/textureBlobPool.ts#normalizeTextureBlobPool`
  * （§15 同一语义不得有第二处实现），本函数只按下标取字节。

@@ -5,7 +5,7 @@
  *
  * ```
  * operators/builtin/exportOperators.ts:135   ctx.plainForSave().plain
- *   → workbench/exportIsometricImage.ts#bakeIsometricStructurePngDataUrl
+ *   → workbench/exportIsometricImage.ts#bakeIsometricStructurePngDataUrl   ← **M6-3 已删**
  *     → render/data/buildMaterialLibrary.ts:29  const fetchList = listPaletteTextureDataUrls(plainDoc)
  *       → render/data/sceneDocumentMaterialHydrate.ts#listPaletteTextureDataUrls
  * ```
@@ -17,6 +17,10 @@
  * `throw new Error('纹理未预取: ' + materialId)` ⇒ 该异常在
  * `ExportIsoPngOperator.exec` 的 `catch (e)` 里只落 `ctx.log.warn('导出', '等轴 PNG 导出失败: …')`
  * ⇒ **无产物、无 UI 报错**（用户只看到"点了没反应"）。
+ *
+ * ⚠️ **M6-3：上链的第一跳已退役**（导出改走内核呈现快照 + 冻结作业，`exportIsometricImage` 整文件删除）。
+ * 本判据守的**仍然在位**：`listPaletteTextureDataUrls` 是 DRW 定义面/图标面的 textureBlob 池解析入口，
+ * 而 `buildMaterialLibrary` 仍是 DRW 的 `textureCache` 供源（`runtime/drwMeshPipeline`）。
  *
  * ⚠️ **M5-4 起该形态已修**：同一条失败仍记 `log.warn`，但算子会把错误**再抛**给调用方，
  * 由导出卡片的红色错误位显示（`e2e/export-iso-time.spec.ts` 的 C5 把守）。
