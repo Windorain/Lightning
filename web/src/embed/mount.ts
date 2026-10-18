@@ -105,6 +105,17 @@ function renderFailurePlaceholder(el: HTMLElement, failure: EmbedMountFailure): 
   box.setAttribute('role', 'alert')
   box.setAttribute('data-lk-embed-error', failure.code)
   box.textContent = `结构渲染器挂载失败：${failure.message}`
+  // 内联样式而不是外挂 CSS：占位必须在**任何**宿主页面都可见，
+  // 而嵌入库的样式表由宿主页按需引入 —— 依赖它会让"失败不可见"重新出现。
+  box.style.cssText = [
+    'padding:12px 14px',
+    'font:13px/1.5 system-ui, sans-serif',
+    'color:#fecaca',
+    'background:#3f1d1d',
+    'border:1px solid #7f1d1d',
+    'border-radius:4px',
+    'white-space:pre-wrap',
+  ].join(';')
   el.appendChild(box)
 }
 
