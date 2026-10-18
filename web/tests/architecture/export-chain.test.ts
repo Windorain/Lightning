@@ -154,6 +154,42 @@ function productionSources(): string[] {
   return out
 }
 
+describe('C5 · 离屏读回必须做**线性 → sRGB**（M6-3 色彩回归的静态把守）', () => {
+  /**
+   * 这条守卫的是 M6-3 修复环的根因：three 渲染到 render target 时输出恒为线性
+   * （`outputColorSpace` 只在渲染到 canvas 时生效）⇒ 少了编码这一跳，导出整体偏暗约 2×。
+   *
+   * 行为面由 `e2e/export-color-parity.spec.ts` 判（导出亮度 vs 视口）；本处只钉
+   * "**那一段代码还在、且位于读回与返回之间**"——防它被顺手删掉而没有任何东西会响。
+   */
+  it('`renderDevice` 在 readRenderTargetPixels 之后、返回之前调用 encodeLinearRgbaToSrgb', () => {
+    const code = codeOnly(readSource('adapters/export/renderDevice.ts'))
+    const readAt = code.indexOf('readRenderTargetPixels(')
+    const encAt = code.indexOf('encodeLinearRgbaToSrgb(')
+    const retAt = code.indexOf('return ok(pixels)')
+    expect(readAt, '读回点必须在').toBeGreaterThan(-1)
+    expect(encAt, '编码点必须在（否则导出按线性值写出 ⇒ 整体偏暗）').toBeGreaterThan(readAt)
+    expect(retAt, '返回点必须在').toBeGreaterThan(encAt)
+  })
+
+  it('编码实现是纯函数（无 GL/DOM/three import）—— 故它能在 vitest 里逐值断言', () => {
+    const code = readSource('adapters/export/srgbEncode.ts')
+    expect(code, '不得 import three（编码是标量数学，不是渲染）').not.toContain("from 'three'")
+    expect(code, '不得碰 DOM').not.toContain('document.')
+    expect(code, '必须导出查表入口（判据用同一张表，避免自算一份）').toContain('srgbEncodeTable')
+    expect(code.length, '文件不得为空').toBeGreaterThan(800)
+  })
+
+  it('**负对照**：把编码调用删掉（= 修复前的形态）会被上面第一条抓到', () => {
+    const broken = readSource('adapters/export/renderDevice.ts').replace(/encodeLinearRgbaToSrgb\(pixels\)/g, 'void encodeLinearRgbaToSrgb')
+    const code = codeOnly(broken)
+    const readAt = code.indexOf('readRenderTargetPixels(')
+    const encAt = code.indexOf('encodeLinearRgbaToSrgb(')
+    // 判定式与上面逐字相同：缺了"调用"（只剩 import 的标识符）必然判红。
+    const ok = encAt > readAt && /encodeLinearRgbaToSrgb\(pixels\)/.test(broken)
+    expect(ok, '负对照：删掉调用必须判红').toBe(false)
+  })
+})
 describe('C4 · 逐帧时延**不得**自算（M6-2 判定的迁移形态）', () => {
   /**
    * 旧形态：`(m.animation?.defaultFrametimeTicks ?? 1) * 5` —— 它把"1 tick = 5 厘秒"

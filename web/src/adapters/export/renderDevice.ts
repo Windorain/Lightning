@@ -41,6 +41,7 @@ import { nextDeviceScope, type DeviceScope } from '@/presentation/resourceCache'
 import type { TextureResource } from '@/presentation/textureBinding'
 import { texturePortOf } from '@/presentation/textureUploadPort'
 import { createRendererTextureUpload } from './offscreenTextureUpload'
+import { encodeLinearRgbaToSrgb } from './srgbEncode'
 
 /**
  * 一个已分配的离屏设备。
@@ -179,6 +180,19 @@ export function createThreeOffscreenDevice(
 
               const pixels = new Uint8Array(width * height * 4)
               renderer.readRenderTargetPixels(target, 0, 0, width, height, pixels)
+              /**
+               * ⚠️ **线性 → sRGB 编码**（M6-3 修复环；这里是那条回归的落点）。
+               *
+               * three r174 的输出阶段：**渲染到 render target 时输出恒为线性**
+               * （`outputColorSpace` 只在 `currentRenderTarget === null` 时生效）——
+               * 于是上面 `renderer.outputColorSpace = SRGBColorSpace` 对读回**不起作用**，
+               * 读到的是线性光值。直接当 sRGB 编码进 PNG 会让画面系统性偏暗
+               * （实测中调夹具：38.79 vs 96.77，-60%）。
+               *
+               * 旧烘焙链没有这个问题：它渲染到 **canvas**，输出阶段本就是 sRGB。
+               * ⇒ 这一跳把"渲染目标的线性读回"补齐成"画布会给出的 sRGB 值"。
+               */
+              encodeLinearRgbaToSrgb(pixels)
               return ok(pixels)
             } catch (e) {
               return err(unsupportedOperation({ reason: 'offscreenReadbackFailed', detail: String(e) }))
