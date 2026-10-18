@@ -189,36 +189,60 @@ test.describe('P10b · Area 产品接线（真实双 3D Area）', () => {
     expect(after.areaIds.length, '合并后应只剩 1 个 Area').toBe(1)
   })
 
+  /**
+   * ## ⚠️ M7-2 把本用例从"判据自喂"改为**生产驱动**（判据语义不变、强度提高）
+   *
+   * 旧版本先自己调 `host.captureLocalState(areaId, 'viewport3d', { yawDeg: 45, … })`
+   * 造一份输入，再断言切类型后它还在。S0-B §3.3 已点名这是自喂：它只证明
+   * "纯转移不删键"（`domain/workspace.ts:465-476`），**不**证明"组件卸载前真的写进去了"
+   * —— 而后者正是 §13「切回恢复局部状态」的实体。
+   *
+   * M7-2 接上生产写回后（`AreaHost#close` → `useAreaHost#captureLocalState`），
+   * 自喂的那份值会在关闭时被**真实实例状态**覆盖（这是正确行为：实例是权威）。
+   * 故本用例改为：真实点击下方栏 tab 制造状态 → 切类型 → 断言布局树里是它 →
+   * 切回 → 断言 UI 回到它。断言的**语义**（切走不丢、切回逐字段相等）一字未改。
+   */
   test('切类型保留局部状态：切走再切回逐字段相等（§13/A13）', async ({ page }) => {
     await gotoWorkbench(page)
     const fx = readFixture('multiblock-tier-only.json')
     await injectSceneDocumentOk(page, fx.envelope, 'multiblock-tier-only.json')
     await waitForViewportMounted(page)
+    // 多方块文档下方栏的默认是「通道」；先显式选「分层预览」以便区分"恢复"与"默认"
+    await expect(page.locator('[data-dock-tab="channels"]')).toHaveCount(1, { timeout: 30_000 })
+    await page.locator('[data-dock-tab="layer"]').click()
+    await expect
+      .poll(async () => page.evaluate(() => document.querySelector('.vp-dock__tab--active')?.getAttribute('data-dock-tab') ?? null), {
+        timeout: 20_000,
+      })
+      .toBe('layer')
 
     const result = await page.evaluate(async () => {
       const ctx = (window as any).__vm__
       const host = (window as any).__areaHost__()
       const areaId = host.areaIds.value[0] as string
-      // 写入一份"该类型的局部状态"（模拟视口记下自己的观察视角）
-      host.captureLocalState(areaId, 'viewport3d', { yawDeg: 45, elevationDeg: 30, distance: 20 })
-      const saved = host.restoreLocalState(areaId, 'viewport3d')
-      // 切到另一个类型
+      // 切到另一个类型（关闭实例 ⇒ 生产写回局部状态）
       await ctx.getOperators().exec('OPERATOR_AREA_SET_EDITOR_TYPE', { areaId, editorType: 'inspector' })
       const afterSwitch = host.restoreLocalState(areaId, 'viewport3d')
-      // 切回来
+      // 切回来（挂载 ⇒ 生产读回）
       await ctx.getOperators().exec('OPERATOR_AREA_SET_EDITOR_TYPE', { areaId, editorType: 'viewport3d' })
       const afterSwitchBack = host.restoreLocalState(areaId, 'viewport3d')
-      return { saved, afterSwitch, afterSwitchBack }
+      return { afterSwitch, afterSwitchBack }
     })
 
-    expect(result.saved, '写入后应能读回局部状态').toMatchObject({ yawDeg: 45, distance: 20 })
     expect(
       result.afterSwitch,
       '切走后**不得**删除旧类型的局部状态（删除就是 A13 负对照"丢掉编辑器状态"）',
-    ).toMatchObject({ yawDeg: 45 })
+    ).toEqual({ dockTab: 'layer' })
     expect(
       result.afterSwitchBack,
       '切回后必须逐字段恢复（§13「切回恢复局部状态」）',
-    ).toEqual(result.saved)
+    ).toEqual(result.afterSwitch)
+    await expect(page.locator('.vc-viewport canvas')).toHaveCount(1, { timeout: 30_000 })
+    await expect
+      .poll(async () => page.evaluate(() => document.querySelector('.vp-dock__tab--active')?.getAttribute('data-dock-tab') ?? null), {
+        message: '切回后下方栏必须回到用户显式选择的那一项',
+        timeout: 20_000,
+      })
+      .toBe('layer')
   })
 })

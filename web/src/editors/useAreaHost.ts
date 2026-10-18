@@ -29,6 +29,23 @@
  *  3. 维护 `instanceId` 的分配与 `AreaNode.instanceId` 的同步；
  *  4. 维护资源账本（`runtime/lifecycle`）。
  *
+ * ## M7-2：①② 从"定义了但零调用"变成**生产链路**（S0-B D2 的收口）
+ *
+ * 实测缺口（S0-B §3.3）：这两个函数当时只有 e2e 自己调（`p10b-area-wiring.spec.ts`），
+ * 生产既没人写也没人读 ⇒ "切回恢复局部状态"靠的是"组件没被卸载过"这个假象。
+ *
+ * 现在的调用链（三个口各司其职，无第二份权威）：
+ *
+ * ```
+ * AreaHost#close   → 问子组件 captureLocalState()      ← 编辑器组件唯一自述口
+ *                  → AreaLayoutHost.onLocalStateCapture → 本模块 captureLocalState
+ *                  → domain/workspace#setLocalState    → Workspace.layout.localState
+ * AreaHost 渲染     ← AreaLayoutHost.localStateOf       ← 本模块 restoreLocalState
+ *                  → :local-state                       ← 组件首帧即恢复形态
+ * ```
+ *
+ * 判据：`e2e/kernel-area-local-state.spec.ts`（真实点击 dock tab → 工作区往返 / 切类型往返）。
+ *
  * ## 实例 id 的分配是**显式输入**
  *
  * #249 §2.1 要求纯函数"需要身份分配时作为输入传入"。

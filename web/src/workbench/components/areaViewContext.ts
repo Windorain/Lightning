@@ -21,6 +21,7 @@
 
 import type { InjectionKey, Component } from 'vue'
 import type { LifecycleLedger } from '@/runtime/lifecycle'
+import type { EditorLocalState } from '@/domain/workspace'
 
 /** Area 渲染树的作用域能力（由 `AreaLayoutHost` 提供）。 */
 export interface AreaViewContext {
@@ -42,6 +43,20 @@ export interface AreaViewContext {
   onInstanceClose(payload: { areaId: string }): void
   /** 资源账本异常（漏还/过度释放）。 */
   onLifecycleError(payload: { areaId: string; reason: string; detail: unknown }): void
+  /**
+   * 该 Area 在**当前编辑器类型**下已保存的局部状态（`Workspace.layout.localState`）。
+   *
+   * 读面给 `AreaHost`，由它作为 `:local-state` 传给编辑器组件 —— 组件在**首次呈现前**
+   * 就拿到恢复后的形态（SPEC §7.3-b③），而不是"先默认再改回"。
+   */
+  localStateOf(areaId: string, editorType: string): EditorLocalState | undefined
+  /**
+   * 编辑器关闭前交回的局部状态 ⇒ 写回布局树（`useAreaHost#captureLocalState`）。
+   *
+   * 这是 M7-2 之前**零调用**的那条死机制（`useAreaHost.ts` 的 `captureLocalState`
+   * 定义齐备但生产无调用者）：现在由 `AreaHost` 在关闭前问子组件、经此写回。
+   */
+  onLocalStateCapture(areaId: string, editorType: string, state: EditorLocalState): void
   /**
    * **把该 Area 设为"最后操作的区"**（M4-1）。
    *

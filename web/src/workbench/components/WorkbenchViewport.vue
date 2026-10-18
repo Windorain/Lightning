@@ -36,7 +36,17 @@ const selection = ctx.getSelection()
  * 缺省仍是 `REGION.WORKBENCH_VIEWPORT`：**单视口装配的行为逐字不变**
  * （既有 e2e 与 `__vm__` 观测面读的就是这个 region）。
  */
-const props = withDefaults(defineProps<{ regionId?: string }>(), {
+const props = withDefaults(defineProps<{
+  regionId?: string
+  /**
+   * 本 Area 在 `viewport3d` 类型下**已保存的局部状态**（`Workspace.layout.localState`）。
+   *
+   * 由 `AreaHost` 从布局树读出后下行（M7-2「localState 真接线」）。本组件只在
+   * **setup 时读一次**：首帧即恢复形态（SPEC §7.3-b③「逻辑状态应在首次呈现前
+   * 正确恢复」），不做"先默认再改回"的双跳。
+   */
+  localState?: Record<string, unknown>
+}>(), {
   regionId: REGION.WORKBENCH_VIEWPORT,
 })
 const VIEWPORT_REGION_ID = props.regionId
@@ -133,8 +143,38 @@ const dockTabAvailability = computed(() => ({
   showChannelsTab: isMultiblock.value,
 }))
 const dockTabs = computed(() => availableDockTabs(dockTabAvailability.value))
-/** 用户**显式**选择过的 tab；`null` = 尚未选择 ⇒ 跟随默认（文档形态驱动）。 */
-const _userTab = ref<ViewportDockTab | null>(null)
+/**
+ * 读回本实例的局部状态（M7-2 接线）。
+ *
+ * ## 为什么 `viewport3d` 的局部状态**只有这一项**
+ *
+ * | 状态 | 归属 | 为什么不在 `localState` 里 |
+ * |---|---|---|
+ * | 观察机位 | 实例私有（§7.3-b） | 已由 `Main.cameras[region]` 承载，且**跨组件**存活（`runtime/mainCameras.ts`）；再存一份就是第二份权威（§7.3-b 的反例） |
+ * | 活动工具 / 选择 / 历史 | 文档与内核会话 | 归 `EditContext`/`Document`，换 Area 不结束它们 |
+ * | 层高 / 帧 / 通道取值 | 文档呈现输入 | 归内核（`setLayerY`/`setFrameIndex` 等算子写内核） |
+ * | **下方栏 tab（本行）** | **本视口实例的局部显示** | 没有任何其它机制承载 ⇒ 换承载就丢（工作区往返、切类型回切都回到默认） |
+ *
+ * 所以这里只保存"用户显式选过的 dock tab"。`null` = 没选过 ⇒ 跟随文档形态默认
+ * （`dockTabs#defaultDockTab`）—— 这个区分本身是语义，别把它压成"存当前生效值"。
+ */
+const _userTab = ref<ViewportDockTab | null>(readSavedDockTab(props.localState))
+
+function readSavedDockTab(state: Record<string, unknown> | undefined): ViewportDockTab | null {
+  const saved = state?.dockTab
+  return saved === 'frame' || saved === 'layer' || saved === 'channels' ? saved : null
+}
+
+/**
+ * 交回本实例的局部状态（由 `AreaHost` 在关闭前调用；见 `editors/AreaHost.vue`）。
+ *
+ * 返回的是**用户显式选择**（`null` 也照实返回：那是"没选过"这一事实，
+ * 与"选了第一个"不同）。
+ */
+function captureLocalState(): Record<string, unknown> {
+  return { dockTab: _userTab.value }
+}
+defineExpose({ captureLocalState })
 const activeTab = computed<ViewportDockTab>({
   get: () =>
     _userTab.value === null

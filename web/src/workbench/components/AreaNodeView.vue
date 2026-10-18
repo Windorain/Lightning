@@ -86,6 +86,8 @@ function componentFor(editorType: string): Component | null {
       :resources="ctx.resourcesOf(area.editorType)"
       :editor="componentFor(area.editorType)"
       :get-ledger="ctx.ledger"
+      :local-state="ctx.localStateOf(area.id, area.editorType)"
+      :on-local-state-capture="ctx.onLocalStateCapture"
       :on-ledger-change="ctx.setLedger"
       @instance-open="ctx.onInstanceOpen"
       @instance-close="ctx.onInstanceClose"

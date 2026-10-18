@@ -175,6 +175,22 @@ const viewContext: AreaViewContext = {
   onInstanceClose: (p) => host.bindInstance(p.areaId, null),
   onLifecycleError: (p) => ctx.log.warn('Area 生命周期', `${p.reason} @ ${p.areaId}`, p.detail),
   /**
+   * **局部状态的两个口**（M7-2「localState 真接线」；计划 §5 M7-2 原话：
+   * 「同会话布局树写回/读回；Q1 裁决：刷新持久化本轮不做」）。
+   *
+   * 之前这两条在 `useAreaHost` 里定义齐备但**生产零调用**（写与读都只有 e2e 自己调），
+   * 于是一个 Area 的实例私有 UI 状态只能靠"组件没被卸载过"存活 —— 正是 §7.3-a 要退役的形态。
+   * 现在：`AreaHost#close` 先问子组件要状态 ⇒ 这里写回布局树；挂载时读出来当
+   * `:local-state` 传给子组件（首次呈现前就恢复）。
+   *
+   * 写入权威仍唯一（`useAreaHost#captureLocalState` → `domain/workspace#setLocalState`）；
+   * 本层只做接线，不解释状态内容（各编辑器类型自己的语义）。
+   */
+  localStateOf: (areaId, editorType) => host.restoreLocalState(areaId, editorType),
+  onLocalStateCapture: (areaId, editorType, state) => {
+    host.captureLocalState(areaId, editorType, state)
+  },
+  /**
    * **活动 Area 随指针**（M4-1）：任何区被按下 ⇒ 它成为"最后操作的区"，
    * 于是菜单里的分割/合并/切类型作用于用户刚点的那个区（而不是 `useAreaHost`
    * 里那个只有算子才写的旧值）。

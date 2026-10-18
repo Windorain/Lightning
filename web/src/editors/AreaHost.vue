@@ -19,10 +19,18 @@
  *
  * - **挂载即开实例**：`onMounted` → `openInstance(ledger, instanceId, editorType)`
  *   并 `acquire` 该编辑器类型声明的资源；
- * - **卸载即关实例**：`onBeforeUnmount` → 先逐一 `release`，再 `closeInstance`，
- *   最后调 `dispose()`（真正的 GPU/DOM/监听释放由子组件通过 `expose` 提供）；
- * - **状态不在组件里**：观察视角等局部状态由父层（`useAreaHost`）在
- *   切走/卸载前写入 `Workspace.layout` 的 `localState`，组件只是它的"投影"。
+ * - **卸载即关实例**：`onBeforeUnmount` → 先把实例私有局部状态写回布局树
+ *   （`captureLocalState`，M7-2 接线），再逐一 `release`，最后 `closeInstance`；
+ * - **状态不在组件里**：实例私有的可序列化局部状态由父层（`useAreaHost`）在
+ *   切走/卸载前写入 `Workspace.layout` 的 `localState`，组件挂载后**读回**
+ *   （`:local-state`）。组件只是它的"投影"。
+ *
+ * ## 两处口的现状（M7-2 收口，见各处的注释）
+ *
+ * | 口 | 现状 |
+ * |---|---|
+ * | 局部状态 | **真接线**：`captureLocalState`（子组件 expose）→ `onLocalStateCapture`（父层写布局树）→ `restoreLocalState`（父层读）→ `:local-state`（子组件读回） |
+ * | `:dispose` | **已删除**（原先是从未被任何调用方传入的可选 prop，见下方注释） |
  *
  * ## 它**不**询问宿主名
  *
@@ -38,6 +46,7 @@
  */
 import { onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import { acquireResource, closeInstance, openInstance, releaseResource, type LifecycleLedger } from '@/runtime/lifecycle'
+import type { EditorLocalState } from '@/domain/workspace'
 
 const props = defineProps<{
   /** Area 稳定 id（布局树里的 id）。 */
@@ -85,9 +94,35 @@ const props = defineProps<{
   getLedger: () => LifecycleLedger
   /** 账本变更回调（Vue 里账本是 prop，不能就地改）。 */
   onLedgerChange: (next: LifecycleLedger) => void
-  /** 子组件提供的资源释放口（真正的 dispose）。 */
-  dispose?: () => void
+  /**
+   * 本 Area 在**当前编辑器类型**下已保存的局部状态（`Workspace.layout.localState` 的值）。
+   *
+   * 组件挂载时读它一次（首帧就是恢复后的形态，不是"先默认再改回" ——
+   * SPEC §7.3-b③「逻辑状态应在**首次呈现前**正确恢复」）。
+   */
+  localState?: EditorLocalState
+  /** 子组件在关闭前交回的局部状态 ⇒ 父层写回布局树（`useAreaHost#captureLocalState`）。 */
+  onLocalStateCapture: (areaId: string, editorType: string, state: EditorLocalState) => void
 }>()
+
+/**
+ * ## `:dispose` 口已删除（M7-2 顺带义务，留证据）
+ *
+ * 旧声明是一个可选 prop `dispose?: () => void`，注释说"真正的 GPU/DOM/监听释放由
+ * 子组件通过 `expose` 提供"。**全 `src/` 无任何传入口**（`AreaNodeView` 的模板从未
+ * 写 `:dispose`，也没有 `dispose=` 赋值），故它恒为 `undefined`：
+ *
+ * - 该口在运行时**永远不执行**（`close()` 里的 `try { props.dispose?.() } catch` 是死代码）；
+ * - 文件头却据此声称"关闭即真释放"，与事实不符（真实释放在
+ *   `WorkbenchViewport#onBeforeUnmount`：detach → 摘帧钩子 → 注销 region → `drw.dispose()`
+ *   → `viewports.unregister`，以及 `RenderEngineHost#onBeforeUnmount` 的 `engine.dispose()`）。
+ *
+ * 选择**删除**而不是接线，理由是可证伪的：父子卸载顺序是
+ * 父 `beforeUnmount` → 子卸载，而 `drw.dispose()` 不幂等（`outlinePass.dispose` +
+ * `disposeCachesAndLibrary` + `mesh.dispose`）。若在本组件里再调一次"真释放"，
+ * 同一份 GPU 资源会被释放两遍（第二遍作用于已释放的句柄）。⇒ 释放路径保持现状
+ * （子组件自己的卸载钩子），这里只留事实记录。
+ */
 
 const emit = defineEmits<{
   /** 实例挂载完成（父层据此登记实例 ↔ Area 绑定）。 */
@@ -116,6 +151,42 @@ const emit = defineEmits<{
  * 与 SPEC §7.3-a 的"实例从显式创建/恢复到显式关闭"一一对应。
  */
 const opened = ref<{ readonly instanceId: string; readonly editorType: string } | null>(null)
+
+/**
+ * 编辑器组件实例的**局部状态口**（子组件 `defineExpose({ captureLocalState })`）。
+ *
+ * 为什么必须走"问子组件"而不是在本层拼：局部状态是**实例私有**的
+ * （各编辑器类型不同、语义不同），核心不为类型开 switch（A21 同一纪律）。
+ * 本层只负责"何时问、写到哪里"。
+ */
+interface EditorLocalStateHandle {
+  captureLocalState?: () => EditorLocalState
+}
+const editorRef = ref<EditorLocalStateHandle | null>(null)
+
+/**
+ * 把编辑器当前的局部状态写回布局树（**在释放资源之前**，此时子组件仍挂着）。
+ *
+ * 位置很关键：`close()` 由「卸载」与「切类型/换实例」两条路共用，二者都发生在
+ * 子组件还活着的时候（父 `beforeUnmount` 先于子卸载；`watch` 是 pre-flush，
+ * 先于 `:key` 触发的重建）⇒ 这一刻问得到真状态。
+ */
+function captureEditorLocalState(): void {
+  const record = opened.value
+  const handle = editorRef.value
+  if (record === null || handle === null) return
+  const capture = handle.captureLocalState
+  if (typeof capture !== 'function') return
+  let state: EditorLocalState | undefined
+  try {
+    state = capture.call(handle)
+  } catch (e) {
+    emit('lifecycle-error', { areaId: props.areaId, reason: 'captureLocalStateThrew', detail: String(e) })
+    return
+  }
+  if (state === undefined) return
+  props.onLocalStateCapture(props.areaId, record.editorType, state)
+}
 
 function open(): void {
   const id = props.instanceId
@@ -152,14 +223,10 @@ function close(): void {
   const record = opened.value
   if (record === null) return
   const id = record.instanceId
-  emit('instance-close', { areaId: props.areaId, instanceId: id })
 
-  // 真正的 dispose 先做（此时 DOM/WebGL 仍有效）
-  try {
-    props.dispose?.()
-  } catch (e) {
-    emit('lifecycle-error', { areaId: props.areaId, reason: 'disposeThrew', detail: String(e) })
-  }
+  // ① 先交回局部状态（此时子组件仍挂着，问得到真值；见 `captureEditorLocalState`）
+  captureEditorLocalState()
+  emit('instance-close', { areaId: props.areaId, instanceId: id })
 
   // 现取账本（不是渲染期快照）：见 `getLedger` 的说明
   let l = props.getLedger()
@@ -219,10 +286,12 @@ onBeforeUnmount(close)
     -->
     <component
       :is="editor"
+      ref="editorRef"
       v-if="editor && instanceId"
       :key="instanceId"
       :area-id="areaId"
       :region-id="regionId ?? undefined"
+      :local-state="localState"
     />
     <!--
       没有可用编辑器组件时**不留空壳**：显示明确状态。

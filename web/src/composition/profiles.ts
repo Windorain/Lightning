@@ -607,7 +607,19 @@ export const M_LAYOUT_STORAGE = moduleDecl({
   provides: ['workspace.storage'],
   requires: ['workspace.layout', 'port.browser'],
   contributes: { hostPorts: [{ portId: 'workspaceStore', implementation: 'adapters.storage.workspace' }] },
-  note: '工作环境存储：布局/局部状态/活动 Area 的保留政策见 `domain/workspace` 的 `WORKSPACE_RETENTION`。',
+  /**
+   * ## M7-2（2026-10-19）：本端口**原样保留**，本轮不接线（M7-0 Q1 裁决）
+   *
+   * Q1 原文："同会话布局树写回/读回，**刷新持久化不做**"。M7-2 接的是**同会话**那条：
+   * `AreaHost#close` → `useAreaHost#captureLocalState` → `Workspace.layout.localState`，
+   * 挂载时经 `:local-state` 读回（判据 `e2e/kernel-area-local-state.spec.ts`）。
+   *
+   * 跨刷新/跨会话的持久化仍**未接线**（`workspaceStore` 端口零生产消费者），
+   * 承接项 **A13**（工作环境存储：布局/局部状态/活动 Area 的保留与恢复），
+   * 排期在本里程碑之后；保留政策见 `domain/workspace` 的 `WORKSPACE_RETENTION`。
+   * ⇒ 本声明与端口实现**不动**，避免在"还没接线"时先造第二套持久化读面。
+   */
+  note: '工作环境存储：布局/局部状态/活动 Area 的保留政策见 `domain/workspace` 的 `WORKSPACE_RETENTION`（M7-2：同会话读写已接线；跨刷新持久化未接，承接项 A13）。',
 })
 
 /** 导出（独立渲染作业；P9 #260 交付）。 */
