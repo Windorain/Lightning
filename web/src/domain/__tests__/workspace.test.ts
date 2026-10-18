@@ -183,25 +183,37 @@ describe('A13 · 关闭 Area 释放运行资源（负对照「保持废弃组件
 
   it('**负对照**：若把"关闭"实现成"隐藏"（不释放任何实例）⇒ disposedInstances 为空 ⇒ 判红', () => {
     // 模拟"只隐藏不销毁"的实现：布局结构没变、实例集合没变、没有任何释放
-    const layout = baseWorkspace().layout
+    const s = splitArea(baseWorkspace().layout, { areaId: 'a1', newAreaId: 'a2', splitId: 's1', direction: 'vertical' })
+    if (!s.ok) throw new Error('split')
+    const withA2 = withInstance(s.value, 'a2', 'i2')
+    if (!withA2.ok) throw new Error('withInstance')
     const hiddenInsteadOfClosed = [] as readonly EditorInstanceId[]
     expect(
       hiddenInsteadOfClosed,
       '「保持废弃组件」的实现必然报告 0 个被释放实例 —— 本断言就是要它判红',
-    ).not.toEqual(['i1'])
+    ).not.toEqual(['i2'])
     // 真实现的对照：关闭确实报出了实例
-    const real = closeArea(layout, 'a1')
-    expect(real.ok && real.value.disposedInstances).toEqual(['i1'])
+    const real = closeArea(withA2.value, 'a2')
+    expect(real.ok && real.value.disposedInstances).toEqual(['i2'])
   })
 
-  it('closeArea 作用于**根 Area** ⇒ 布局变空（显式的 null，不留空壳）', () => {
+  it('关闭/合并**最后一个 Area** ⇒ 被拒绝（工作台没有"零个 Area"这个合法状态）', () => {
     const ws = baseWorkspace()
+    // M7-3 / Q4：根 Area 没有兄弟可上提 ⇒ 合并会留下空工作台 ⇒ 显式拒绝（纯值，输入不变）
     const r = closeArea(ws.layout, 'a1')
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.value.layout).toBeNull()
-    expect(r.value.closedAreaIds).toEqual(['a1'])
-    expect(r.value.disposedInstances).toEqual(['i1'])
+    expect(r.ok, '最后一个 Area 的关闭必须被拒绝，而不是把布局置空').toBe(false)
+    if (r.ok) return
+    expect(r.error.code).toBe('InvalidValue')
+    expect(r.error.params.reason).toBe('lastArea')
+    expect(mergeArea(ws.layout, 'a1').ok, '合并最后一个 Area 与关闭同因同果').toBe(false)
+    // 负对照：两区时合并**必须**成功 —— 防"为过判据把合并一律拒掉"
+    const s = splitArea(ws.layout, { areaId: 'a1', newAreaId: 'a2', splitId: 's1', direction: 'vertical' })
+    if (!s.ok) throw new Error('split')
+    const merged = mergeArea(s.value, 'a2')
+    expect(merged.ok, '两区时必须允许合并（否则是"一律拒绝"的假修复）').toBe(true)
+    if (!merged.ok) return
+    expect(areaIds(merged.value.layout)).toEqual(['a1'])
+    expect(merged.value.disposedInstances).toEqual([])
   })
 
   it('mergeArea 把空间让给兄弟（比 closeArea 多一个结构后果，语义分开）', () => {

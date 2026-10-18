@@ -368,7 +368,14 @@ export function splitArea(layout: AreaLayout, input: SplitAreaInput): Result<Are
 
 /** 合并结果：新布局 + **被关闭的 Area**（供接线层释放运行资源）。 */
 export interface MergeResult {
-  readonly layout: AreaLayout
+  /**
+   * 合并后的布局。
+   *
+   * 类型是**非空**节点（不是 `AreaLayout`）：`mergeArea` 拒绝把最后一个 Area 合掉
+   * （见下），故成功结果永远至少剩一个 Area。让类型表达这条不变式，
+   * 消费者就不必再写"null 怎么办"的分支（那正是空白工作台的入口）。
+   */
+  readonly layout: AreaLayoutNode
   readonly closedAreaIds: readonly AreaId[]
   /** 被关闭 Area 上曾活动的编辑器实例 id（**资源释放的依据**）。 */
   readonly disposedInstances: readonly EditorInstanceId[]
@@ -377,15 +384,31 @@ export interface MergeResult {
 /**
  * 合并：关闭 `areaId`，其**兄弟子树**上提一层。
  *
- * 若根就是该 Area（无父分割），合并的结果是空布局 —— 这是显式的 `null`，
- * 不是"悄悄留一个空壳"。
+ * ## 最后一个 Area **不可合并**（M7-3 / M7-0 Q4 裁决）
+ *
+ * 工作台没有「零个 Area」这个合法状态：一个区都没有时用户既不能编辑也不能恢复
+ * （产品内唯一"重置布局"只做 `location.reload()`，见
+ * `operators/builtin/miscOperators.ts`）。所以对**根 Area**（无父分割、无兄弟可上提）
+ * 的合并是一次**被拒绝的转移**：
+ *
+ * ```
+ * err(invalidValue({ reason: 'lastArea' }))      ← 纯值，输入不变
+ * ```
+ *
+ * 由接线层（`operators/builtin/areaOperators`）翻译成用户可见的原因
+ * 「至少保留一个区域」。**不**把布局置 `null` —— 那会留下一个空白工作台，
+ * 把破坏性动作报成成功（S0-B D3 的首红形态）。
+ *
+ * 拒绝不产生 `closedAreaIds`/`disposedInstances`：没有任何实例被关闭，账本不动。
+ * `closeArea` 复用本转移，故"关闭最后一个区"同样被拒（它也会留下零个 Area）。
  */
 export function mergeArea(layout: AreaLayout, areaId: AreaId): Result<MergeResult> {
   if (!layout) return err(missingTarget({ areaId }))
   const target = findArea(layout, areaId)
   if (!target) return err(missingTarget({ areaId }))
   if (layout.kind === 'area') {
-    return ok(Object.freeze({ layout: null, closedAreaIds: Object.freeze([areaId]), disposedInstances: instanceOf(target) }))
+    // 根 Area：没有兄弟可上提 ⇒ 合并会留下"零个 Area"（非法状态）。显式拒绝。
+    return err(invalidValue({ reason: 'lastArea', areaId }))
   }
 
   /** 递归：在 `node` 里找到含 `areaId` 的**最近**分割，用它执行上提。 */
