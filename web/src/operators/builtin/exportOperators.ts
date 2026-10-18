@@ -5,7 +5,7 @@ import { downloadBlob, downloadJson } from '@/util/browser'
 import { buildStructureBundleZip } from '@/workbench/export/bundleMeshAssembly'
 import { normalizeIsoSeconds } from '@/application/captureInput'
 import {
-  SCENE_GIF_PIXEL_SIZE,
+  EXPORT_PIXEL_SIZE,
   SCENE_GIF_PIXEL_SIZE_RANGE,
   exportErrorText,
   runIsoExport,
@@ -167,8 +167,8 @@ export const ExportIsoPngOperator: OperatorType = {
       const result = await runIsoExport(ctx, {
         kind: 'image',
         directionIndex,
-        // 与旧烘焙同一个边长（480）：Q1 的 480/320 统一归 M6-5，本包只搬运形参。
-        pixelSize: 480,
+        // 与旧烘焙同一个边长（480）；场景 GIF 同批统一到**同一个常量**（M6-5 / Q1）。
+        pixelSize: EXPORT_PIXEL_SIZE,
         seconds,
         decoder: createDomTextureDecoder(),
         now: Date.now(),
@@ -221,7 +221,7 @@ export const ExportSceneGifOperator: OperatorType = {
     const rawSize = _props.pixelSize
     /**
      * 边长**缺省与夹取都有唯一来源**（M6-5 / Q1）：
-     *  - 缺省 `SCENE_GIF_PIXEL_SIZE`（480）= 卡片预览与等轴 PNG 的同一值；
+     *  - 缺省 `EXPORT_PIXEL_SIZE`（480）= 卡片预览/下载与等轴 PNG 的同一值；
      *  - 区间 `SCENE_GIF_PIXEL_SIZE_RANGE`（64..512）= 本命令的既有政策值。
      * 卡片侧（`ExportWorkspace.vue` 的预览/下载）引用**同一个常量**，故
      * "预览 480 / 下载 320"这条分叉在结构上不再可表达。
@@ -229,7 +229,7 @@ export const ExportSceneGifOperator: OperatorType = {
      */
     const pixelSize = typeof rawSize === 'number' && Number.isFinite(rawSize)
       ? Math.max(SCENE_GIF_PIXEL_SIZE_RANGE.min, Math.min(SCENE_GIF_PIXEL_SIZE_RANGE.max, Math.floor(rawSize)))
-      : SCENE_GIF_PIXEL_SIZE
+      : EXPORT_PIXEL_SIZE
     if (!ctx.hasLoadedDocument()) return
     // M6-4：与等轴 PNG 同一套诊断接线（同一通道、同一形状）。
     const diagnostics = createExportDiagnosticSink(ctx.wm.diagnostics, {

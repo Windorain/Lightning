@@ -30,19 +30,19 @@ import type { TextureDecoder } from '@/composition/kernelTextureResources'
 import { captureExportSnapshot, type ExportCapture, type ExportCaptureKind, type ExportCaptureSource } from '@/composition/exportCapture'
 
 /**
- * 场景 GIF 的渲染边长（**唯一来源**；Q1 裁决，M6-5 收口）。
+ * 等轴导出的渲染边长（**唯一来源**；Q1 裁决，M6-5 收口）。
  *
- * ## 为什么是一个常量而不是两个缺省
+ * ## 为什么是一个常量而不是几个缺省
  *
- * M6-3 之前预览走 `ExportWorkspace.vue` 的 480（旧烘焙缺省），下载走
+ * M6-3 之前场景 GIF 的预览走 `ExportWorkspace.vue` 的 480（旧烘焙缺省），下载走
  * `ExportSceneGifOperator` 的 320（命令缺省）⇒ 同一张卡片"看到的"和"下到的"
  * 是两个尺寸（s0-a §6.2 D1 实测 480 vs 320）。**两个缺省必然漂移**，故收成一个值：
- * 卡片预览、卡片下载、命令缺省三处都引用本常量。
+ * GIF 卡片预览、GIF 卡片下载、GIF 命令缺省、等轴 PNG 命令与卡片 —— 全部引用本常量。
  *
  * 480 的选择：等轴 PNG 的既有边长就是 480（预览与下载同源），GIF 与它同一台相机/
  * 同一取景，统一到 480 后"GIF 首帧 ≈ 同参数 PNG"的判据不再跨尺寸比较。
  */
-export const SCENE_GIF_PIXEL_SIZE = 480
+export const EXPORT_PIXEL_SIZE = 480
 
 /**
  * 场景 GIF 边长的夹取区间（**唯一一处夹取**在 `ExportSceneGifOperator`）。
@@ -60,7 +60,7 @@ export interface IsoExportOptions {
   /** 0..3（调用方已归一）。 */
   readonly directionIndex: number
   /**
-   * 渲染边长（像素）。**搬运**自调用方（本模块不做夹取，见 `SCENE_GIF_PIXEL_SIZE`
+   * 渲染边长（像素）。**搬运**自调用方（本模块不做夹取，见 `EXPORT_PIXEL_SIZE`
    * 的说明：夹取只有命令侧一处；卡片与命令引用同一个常量）。
    */
   readonly pixelSize: number

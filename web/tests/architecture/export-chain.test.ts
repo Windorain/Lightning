@@ -15,6 +15,7 @@
  * | C2 | 作业入口真的装配并运行（`assembleSnapshotExportJob` + `.job.run()`） | 一个"只捕获不运行"的空壳 |
  * | C3 | 导出层**不得** import 旧材质库/网格构建（`simpleMaterialLibrary` / `buildMaterialLibrary` / `buildBlockMesh`） | 注入一条 import |
  * | C4 | 逐帧时延**不得**自算（`*` 5 形式的 ticks→厘秒），必须经 `delayCsOf`/`planSequenceLoop` | 旧表达式 `(defaultFrametimeTicks ?? 1) * 5` |
+ * | C5 | 导出边长只有**一个来源**（`EXPORT_PIXEL_SIZE`），调用点不写字面量；夹取只在命令侧一处 | 旧形态 `pixelSize: 480` / `pixelSize: 320`（Q1 的 480/320 分叉） |
  *
  * ## C4 为什么必须存在（判定迁移，不是新判据）
  *
@@ -203,5 +204,63 @@ describe('C4 · 逐帧时延**不得**自算（M6-2 判定的迁移形态）', (
     expect(selfComputedDelays(legacy), '负对照：旧自算式必须被命中').toHaveLength(2)
     // 而合法形态（`delayCsOf` 的调用、`totalMs` 之类）不得被误判
     expect(selfComputedDelays('const delays = delayCsOf(holds)'), '合法形态不得误判').toEqual([])
+  })
+})
+
+/**
+ * **C5 · 导出边长只有一个来源**（M6-5 / Q1 的静态面）。
+ *
+ * e2e 证明"预览 == 下载"（`export-scene-gif.spec.ts` 的 C7b），但那条判据只能看见
+ * **一条**命令的端到端。静态面要回答的是另一个问题：**有没有第二个数字**。
+ * Q1 的原缺陷正是两个缺省各自漂移（480 / 320）—— 只要允许调用点写字面量，
+ * 下一次"顺手改一个"就会重新长出一条分叉，而 e2e 要到尺寸对不上才会响。
+ */
+describe('C5 · 导出边长只有一个来源（Q1 的静态面）', () => {
+  /** 命令与卡片（**调用点**：这两处曾经各写一个数）。 */
+  const CALL_SITES = ['operators/builtin/exportOperators.ts', 'workbench/components/ExportWorkspace.vue']
+
+  /** 调用点把边长写成数字字面量的行（`pixelSize: 480`）。 */
+  function literalPixelSize(code: string): string[] {
+    return code
+      .split('\n')
+      .filter((line) => /pixelSize\s*:\s*\d/.test(line))
+      .map((line) => line.trim())
+  }
+
+  it('命令与卡片只引用常量，不写字面量', () => {
+    const hits: string[] = []
+    for (const rel of CALL_SITES) {
+      for (const line of literalPixelSize(codeOnly(readSource(rel)))) hits.push(rel + ': ' + line)
+    }
+    expect(hits, '导出边长必须引用 EXPORT_PIXEL_SIZE（Q1：两个缺省必然漂移）:\n' + hits.join('\n')).toEqual([])
+  })
+
+  it('常量确实定义在唯一位点上，且夹取只在命令侧一处', () => {
+    const runner = codeOnly(readSource(RUNNER))
+    expect(runner, '边长的唯一来源必须在生产执行入口定义').toContain('export const EXPORT_PIXEL_SIZE')
+    expect(runner, '夹取区间也必须定义在唯一位点上').toContain('export const SCENE_GIF_PIXEL_SIZE_RANGE')
+    /**
+     * 夹取**策略**只有一个解释点：区间常量的消费方（定义处之外）必须恰好是命令。
+     * 这比"找 `Math.min`"精确 —— 后者可以被任意重写绕过，而常量消费方是**名称**
+     * 层面的事实：谁解释这个区间，谁就得 import 它。
+     */
+    const consumers = [...EXPORT_LAYER_FILES, RUNNER, ...productionSources()]
+      .filter((rel, i, all) => all.indexOf(rel) === i)
+      .filter((rel) => rel !== RUNNER)
+      .filter((rel) => codeOnly(readSource(rel)).includes('SCENE_GIF_PIXEL_SIZE_RANGE'))
+    expect(consumers, '夹取区间只允许命令侧解释（捕获/作业只搬运形参）').toEqual([COMMANDS])
+    // 反空洞真：命令侧**真的**用 Math.max/Math.min 夹取（不是只 import 了个名字）
+    const commandCode = codeOnly(readSource(COMMANDS))
+    expect(/Math\.max\(SCENE_GIF_PIXEL_SIZE_RANGE\.min/.test(commandCode), '命令侧必须真的夹下界').toBe(true)
+    expect(/Math\.min\(SCENE_GIF_PIXEL_SIZE_RANGE\.max/.test(commandCode), '命令侧必须真的夹上界').toBe(true)
+  })
+
+  it('**负对照**：旧的 480/320 双缺省形态喂给同一判定必须命中', () => {
+    const legacy = [
+      'const r = await runIsoExport(ctx, { kind: "animation", pixelSize: 480 })',
+      'const r = await runIsoExport(ctx, { kind: "animation", pixelSize: 320 })',
+    ].join('\n')
+    expect(literalPixelSize(legacy), '负对照：Q1 的两个缺省都必须被命中').toHaveLength(2)
+    expect(literalPixelSize('const r = await runIsoExport(ctx, { pixelSize: EXPORT_PIXEL_SIZE })'), '合法形态不得误判').toEqual([])
   })
 })

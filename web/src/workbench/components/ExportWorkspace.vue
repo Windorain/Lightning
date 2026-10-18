@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 import { copyTextToClipboard, downloadBlob } from '@/util/browser'
-import { SCENE_GIF_PIXEL_SIZE, blobOf, dataUrlOf, exportErrorText, runIsoExport } from '@/workbench/export/isoExportJob'
+import { EXPORT_PIXEL_SIZE, blobOf, dataUrlOf, exportErrorText, runIsoExport } from '@/workbench/export/isoExportJob'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { formatUnknownError } from '@/util/formatUnknownError'
 import { useContext } from '@/runtime/context'
@@ -115,13 +115,13 @@ async function bakeIso(): Promise<void> {
      * 于是"卡片上看到的图就是下载得到的图"由结构保证（既有判据 C2 逐字节断言）。
      *
      * 边长 480 = 旧烘焙的缺省（`openIsometricStage` 的 `pixelSize ?? 480`）；
-     * 场景 GIF 已由 M6-5 统一到同一值（`SCENE_GIF_PIXEL_SIZE`），两张卡片的
-     * 预览/下载不再各自写死一个数。
+     * M6-5 起它是**唯一来源** `EXPORT_PIXEL_SIZE`（场景 GIF 同批统一），两张卡片的
+     * 预览/下载都不再各自写死一个数。
      */
     const r = await runIsoExport(ctx, {
       kind: 'image',
       directionIndex: isoDir.value,
-      pixelSize: 480,
+      pixelSize: EXPORT_PIXEL_SIZE,
       seconds,
       decoder: createDomTextureDecoder(),
       now: Date.now(),
@@ -159,13 +159,13 @@ async function makeGif(): Promise<void> {
   gifPanel.value = null
   try {
     /**
-     * 预览与下载**同尺寸来源**（M6-5 / Q1）：两处都引用 `SCENE_GIF_PIXEL_SIZE`，
+     * 预览与下载**同尺寸来源**（M6-5 / Q1）：两处都引用 `EXPORT_PIXEL_SIZE`，
      * 不再出现"预览 480 / 下载 320"。夹取仍在命令侧一处（`ExportSceneGifOperator`）。
      */
     const r = await runIsoExport(ctx, {
       kind: 'animation',
       directionIndex: isoDir.value,
-      pixelSize: SCENE_GIF_PIXEL_SIZE,
+      pixelSize: EXPORT_PIXEL_SIZE,
       decoder: createDomTextureDecoder(),
       now: Date.now(),
     })
@@ -194,13 +194,13 @@ async function downloadGif(): Promise<void> {
      *  - 面板 A/B 两块拿到的是**这一次下载**的 `outcome`；
      *  - 下载只落产物本身（清单交付 = 面板，不产生第二个文件）。
      *
-     * 与预览**同一个常量**（`SCENE_GIF_PIXEL_SIZE`）：这次下载的字节与卡片上
+     * 与预览**同一个常量**（`EXPORT_PIXEL_SIZE`）：这次下载的字节与卡片上
      * 显示的预览是同一尺寸，e2e 对两者直接对账。
      */
     const r = await runIsoExport(ctx, {
       kind: 'animation',
       directionIndex: isoDir.value,
-      pixelSize: SCENE_GIF_PIXEL_SIZE,
+      pixelSize: EXPORT_PIXEL_SIZE,
       decoder: createDomTextureDecoder(),
       now: Date.now(),
     })
@@ -225,13 +225,13 @@ async function downloadIso(): Promise<void> {
   }
   try {
     /**
-     * Q8：与预览**同一条链、同一组参数**（480/方向/秒数），只是多落一次盘。
+     * Q8：与预览**同一条链、同一组参数**（边长/方向/秒数），只是多落一次盘。
      * `outcome` 直接喂面板 ⇒ "卡片上的清单就是这次下载的清单"由结构保证。
      */
     const r = await runIsoExport(ctx, {
       kind: 'image',
       directionIndex: isoDir.value,
-      pixelSize: 480,
+      pixelSize: EXPORT_PIXEL_SIZE,
       seconds,
       decoder: createDomTextureDecoder(),
       now: Date.now(),
