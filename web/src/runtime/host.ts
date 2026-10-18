@@ -88,6 +88,32 @@ export interface Host {
 
 export abstract class HostBase implements Host {
   private _detachByRegion = new Map<string, () => void>()
+  private _disposed = false
+
+  /**
+   * **显式销毁本宿主持有的接线资源**（M7-6；S0-B D8 的另一半）。
+   *
+   * ## 为什么宿主需要一个 `destroy()`
+   *
+   * 契约矩阵（`adapters/host/hostCapabilities`）为工作台登记了
+   * `destroyEntry: 'WorkbenchHost.destroy'`，而**该类上根本没有这个方法** ——
+   * 那是一条"登记了但不存在"的销毁入口（比"没登记"更坏：它让读者以为
+   * 寿命问题已经解决）。M7 的退出判据（G7：卸载后资源回基线）要求入口真实存在。
+   *
+   * ## 它销毁什么、不销毁什么
+   *
+   * 只销毁**本宿主自己持有的**接线：它登记过的视口 attach（DOM 监听、overlay 绑定）。
+   * 组件内资源（renderer/纹理/presenter）由组件 `onBeforeUnmount` 释放 ——
+   * 那是就近的作用域，宿主跨过去释放会造出第二份"谁在什么时候 dispose"。
+   * 两者顺序不变：Vue 先卸载子树（组件释放呈现资源），随后根组件调用本方法。
+   *
+   * 幂等：重复调用不重复释放（`_disposed` 守卫）。
+   */
+  destroy(): void {
+    if (this._disposed) return
+    this._disposed = true
+    for (const region of [...this._detachByRegion.keys()]) this.detachViewport(region)
+  }
 
   abstract readonly main: Main
   abstract readonly ctx: Context

@@ -59,6 +59,23 @@ export interface EmbedAssemblyProbe {
   /** 内核编辑上下文 id（构造负对照命令时需要；来自本实例会话，不是硬编码）。 */
   contextId(): string
   /**
+   * **寿命读面**（M7-6 / G7）：本实例此刻还持有多少运行资源。
+   *
+   * 为什么要在这里读：嵌入页没有 `__vm__`（那是工作台的观测面），
+   * 而"卸载后资源回基线"这条判据需要**本实例自己的**账：
+   *  - `viewportLive`：本实例的视口槽位是否仍持有 camera/domElement
+   *    （`runtime/viewportManager#isSlotLive` 的同一判据）；
+   *  - `frameClockRunning`：外壳帧循环是否还在推进（`composition/useKernelFrameLoop`）。
+   *
+   * 两者都为 `false` ⇒ 本实例的呈现与时钟都已退出；配合 DOM 的 canvas 计数
+   * 与 `__log__.instanceIds()` 的在册数，就是 G7 的"回基线"三面。
+   */
+  lifecycle(): {
+    readonly viewportSlotPresent: boolean
+    readonly viewportLive: boolean
+    readonly frameClockRunning: boolean
+  }
+  /**
    * **生产写入口**（`Context#submitContentEditSettlement`）：与 operator 同一条路径。
    *
    * 返回 `null` = 本实例没有会话/未装配；`rejected` = 内核结构化拒绝
@@ -119,6 +136,14 @@ export function createEmbedAssemblyProbe(input: {
     pruned: () => input.assembly.pruned,
     prunedLandings: () => input.assembly.prunedLandings,
     contextId: () => input.ctx.requireKernelSession().contextId,
+    lifecycle: () => {
+      const slot = input.ctx.viewports.get(input.regionId)
+      return {
+        viewportSlotPresent: slot !== undefined,
+        viewportLive: slot !== undefined && slot.camera.value !== null && slot.domElement.value !== null,
+        frameClockRunning: input.ctx.getFrameClock()?.running === true,
+      }
+    },
     attemptCommand: (command: ContentEditCommand) => input.ctx.submitContentEditSettlement(command),
   })
 }

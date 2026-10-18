@@ -21,6 +21,8 @@
  * 3. 「可选缺失静默」⇒ 断言降级项必须带非空 `effect`，且缺 `degradation` 的声明被 `validate` 判违规。
  */
 
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createInputSession } from '@/runtime/inputSession'
 import {
@@ -38,6 +40,14 @@ import {
   type HostCapabilityId,
   type HostProfileSpec,
 } from '../hostCapabilities'
+
+/**
+ * 本树 `web/` 的绝对路径（只用于**源码指纹**判据：登记的名字必须对得上真实符号）。
+ *
+ * 从 `import.meta.url` 往上两级：`src/adapters/host/__tests__` → `src` → `web`。
+ * 不用 `process.cwd()`：vitest 的 cwd 随调用方式而变，指纹会时绿时红。
+ */
+const WEB_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '../../../..')
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 测试夹具：两种宿主环境（都用**构造值**，不读全局）
@@ -112,6 +122,41 @@ describe('A34 能力矩阵：四个 profile 的声明完整性（#249 §19.8）'
         expect(s.lifecycleGap, `${s.id} 的缺口说明必须点名归属批次`).toMatch(/P\d+/)
       }
     }
+  })
+
+  /**
+   * M7-6 · **嵌入的寿命缺口已核销**（S0-B D8 的登记项）。
+   *
+   * 判据两面：
+   *  1. `embed` 的 `destroyEntry` 非 null 且**没有** `lifecycleGap` ——
+   *     "有入口"与"还登记着缺口"不能同时成立（validate 的 `lifecycle-gap` 规则同向）；
+   *  2. 登记的名字指向**真实存在**的 API：`mount(...).unmount()` 在
+   *     `src/embed/mount.ts` 的返回类型上有 `unmount`（源码指纹，CRLF 归一化）。
+   *
+   * 负对照：把 embed 改回 `destroyEntry: null` + 缺口说明 ⇒ 第 1 面判红；
+   * 这正是"核销"与"改写说明"的区别。
+   */
+  it('M7-6：embed 的寿命缺口已核销（真实 destroyEntry、无 lifecycleGap）', () => {
+    const embed = HOST_PROFILE_SPECS.find((s) => s.id === 'embed')!
+    expect(embed.destroyEntry, 'embed 必须登记真实的销毁入口').not.toBeNull()
+    expect(embed.destroyEntry).toContain('unmount')
+    expect(embed.lifecycleGap, '有销毁入口时不得再留缺口说明（否则缺口没被核销）').toBeUndefined()
+
+    // 入口名必须能在产品源码里对上：`mount()` 返回的会话类型声明了 unmount()。
+    const src = fs
+      .readFileSync(path.join(WEB_ROOT, 'src/embed/mount.ts'), 'utf8')
+      .replace(/\r\n/g, '\n')
+    expect(src, 'mount() 的返回类型必须声明 unmount()').toMatch(/interface EmbedSession[\s\S]*?unmount\(\): void/)
+    expect(src, 'mount() 必须返回 EmbedSession（不再是 void）').toMatch(/export function mount\([\s\S]*?\): EmbedSession \{/)
+  })
+
+  it('M7-6：workbench 登记的销毁入口在类上**真实存在**（旧登记指向不存在的符号）', () => {
+    const wb = HOST_PROFILE_SPECS.find((s) => s.id === 'workbench')!
+    expect(wb.destroyEntry).toBe('WorkbenchHost.destroy')
+    const hostSrc = fs
+      .readFileSync(path.join(WEB_ROOT, 'src/runtime/host/workbenchHost.ts'), 'utf8')
+      .replace(/\r\n/g, '\n')
+    expect(hostSrc, 'WorkbenchHost 必须有 destroy() 实现（M7-6 前它只是个名字）').toMatch(/override destroy\(\): void \{/)
   })
 
   it('资源基址规则：有产物的 profile 必须相对基址（B1 B-07，非站点根加载）', () => {

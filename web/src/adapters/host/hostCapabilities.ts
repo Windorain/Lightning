@@ -619,6 +619,14 @@ export const HOST_PROFILE_SPECS: readonly HostProfileSpec[] = Object.freeze([
     artifacts: ['dist-workbench/index.html', 'dist-workbench/bundled/'],
     startEntry: 'createWorkbenchHost',
     startModule: 'web/src/runtime/host/workbenchHost.ts',
+    /**
+     * `WorkbenchHost.destroy`（M7-6 更正：本类此前**没有**这个方法）。
+     *
+     * 旧登记写着一个不存在的符号 —— 那比"没登记"更坏（读者会以为寿命问题已解决）。
+     * 现在 `HostBase#destroy`（`runtime/host.ts`）真实存在：摘掉本宿主登记过的
+     * 视口 attach；`WorkbenchHost#destroy` 追加注销 `window.__log__` 的本实例登记；
+     * `WorkbenchRoot#onBeforeUnmount` 调用它（Vue 先卸载子树释放呈现资源，随后宿主销毁接线）。
+     */
     destroyEntry: 'WorkbenchHost.destroy',
     resourceBase: RELATIVE_BASE_WITH_ASSETS,
     capabilities: Object.freeze([
@@ -640,12 +648,17 @@ export const HOST_PROFILE_SPECS: readonly HostProfileSpec[] = Object.freeze([
     artifacts: ['dist/StructureRender.js', 'dist/StructureRender.css'],
     startEntry: 'LightningEmbed.mount',
     startModule: 'web/src/main.ts',
-    // 库形态：调用方自己持有 Vue app；本产物**不**公开 unmount。
-    destroyEntry: null,
-    lifecycleGap:
-      'embed 是 IIFE 库，mount() 内部 createApp(...).mount(el) 的 app 句柄未返回给调用方 ⇒ ' +
-      '调用方无法销毁（重复 mount 会叠挂 Vue 实例，P6/P10 的「同页多实例及销毁」需要它）。' +
-      '归属：P6（#257）Area 生命周期 + P10（#261）生产接线；本批只登记为缺口，不伪造一个销毁接口。',
+    /**
+     * 库形态的销毁入口（M7-6 核销 `lifecycleGap`）。
+     *
+     * 旧登记是 `null` + 一段"mount() 不返回 app 句柄 ⇒ 调用方无法销毁"的缺口说明。
+     * M7-6 让 `mount()` 返回 `EmbedSession`（`{ instanceId, mounted, failure, update, unmount }`），
+     * 于是销毁入口**真实存在**：`mount(...).unmount()`。
+     *
+     * 缺口核销的判据不是"文档改了"，而是 G7：两次 `mount()` + 一次 `unmount()` 后
+     * canvas / 视口槽位 / 帧循环 / 日志登记全部回基线（`e2e/kernel-embed-lifetime.spec.ts`）。
+     */
+    destroyEntry: 'LightningEmbed.mount().unmount',
     resourceBase: RELATIVE_BASE_WITH_ASSETS,
     capabilities: Object.freeze([
       Object.freeze({ id: 'dom', requirement: 'required', ...CAP.dom }),
@@ -672,6 +685,7 @@ export const HOST_PROFILE_SPECS: readonly HostProfileSpec[] = Object.freeze([
     ],
     startEntry: 'bootWikiWorkbench',
     startModule: 'web/src/runtime/host/wikiWorkbenchBoot.ts',
+    // 与 workbench 同一实现（wiki-workbench 只是另一个 profile ⇒ 同一个宿主类）。
     destroyEntry: 'WorkbenchHost.destroy',
     resourceBase: RELATIVE_BASE_WITH_ASSETS,
     capabilities: Object.freeze([

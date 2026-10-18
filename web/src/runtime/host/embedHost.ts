@@ -36,8 +36,19 @@ export class EmbedHost extends HostBase {
      * —— 那是 S0-A D9 的"最后写者胜"。现在每个宿主各建一份。
      */
     readonly log: ReturnType<typeof createLogCenter>,
+    /** 注销本实例的 `window.__log__` 登记（由 `createEmbedHost` 安装）。 */
+    private readonly disposeLogApi: UnifiedLogDisposer,
   ) {
     super()
+  }
+
+  /**
+   * 显式销毁（与 `WorkbenchHost.destroy` 同一形状；`mount().unmount()` 经
+   * `EmbedRoot#onBeforeUnmount` 走到这里）。
+   */
+  override destroy(): void {
+    super.destroy()
+    this.disposeLogApi()
   }
 
   async start(): Promise<void> {
@@ -64,7 +75,7 @@ export function createEmbedHost(
    * 面板/键位全部按它命名。缺省成固定串就等于把 D6/D7/D9 留在原地。
    */
   instanceId: string,
-): { host: EmbedHost; ctx: Context; shell: ShellRuntime; disposeLogApi: UnifiedLogDisposer } {
+): { host: EmbedHost; ctx: Context; shell: ShellRuntime } {
   const registry = createOperatorRegistry()
   const log = createLogCenter()
   const viewports = createViewportManager()
@@ -148,6 +159,6 @@ export function createEmbedHost(
   // 读面必须指明实例；缺省读面取第一个在册实例（不再是"最后安装者"）。
   const disposeLogApi = installUnifiedLogApi(ctx)
 
-  return { host: new EmbedHost(main, ctx, wm, log), ctx, shell: runtime, disposeLogApi }
+  return { host: new EmbedHost(main, ctx, wm, log, disposeLogApi), ctx, shell: runtime }
 }
 

@@ -76,11 +76,24 @@ export class WorkbenchHost extends HostBase {
     readonly log: ReturnType<typeof createLogCenter>,
     readonly screen: ScreenRoot,
     readonly services: WorkbenchServices,
+    /** 注销本实例的 `window.__log__` 登记（由 `createWorkbenchHost` 安装）。 */
+    private readonly disposeLogApi: UnifiedLogDisposer,
   ) {
     super()
     this.main = main
     this.ctx = ctx
     this.wm = wm
+  }
+
+  /**
+   * 显式销毁（契约矩阵的 `destroyEntry`；M7-6 让它**真的存在**）。
+   *
+   * 顺序：先让基类摘掉视口 attach（DOM 监听/overlay），再注销日志观测面登记 ——
+   * 反过来会让"已销毁实例的日志还能被读到"多存在一会儿。
+   */
+  override destroy(): void {
+    super.destroy()
+    this.disposeLogApi()
   }
 
   async start(): Promise<void> {
@@ -165,7 +178,8 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   )
   main.bindOperatorFacade(() => ctx)
 
-  const host = new WorkbenchHost(main, ctx, wm, log, screen, services)
+  const disposeLogApi = installUnifiedLogApi(ctx)
+  const host = new WorkbenchHost(main, ctx, wm, log, screen, services, disposeLogApi)
   computeLayout(ctx, screen)
 
   // ── Area 会话（#282 P10b）────────────────────────────────────────────────
@@ -203,7 +217,6 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   registerWorkbenchOperators(registry)
   registerWorkbenchTools(toolRegistry, tool)
 
-  const disposeLogApi = installUnifiedLogApi(ctx)
   selection.bindLog(ctx.log)
   editHistory.bindLog(ctx.log)
 

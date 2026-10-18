@@ -113,7 +113,7 @@ const toolRegistry = provideToolRegistry()
 
 // 共享 VM 组装
 const tool = createToolSettings()
-const { host, ctx, screen: defaultScreen, disposeLogApi } = createWorkbenchHost({
+const { host, ctx, screen: defaultScreen } = createWorkbenchHost({
   selection, editHistory, toolRegistry, tool, shell,
 })
 
@@ -360,9 +360,9 @@ onBeforeUnmount(() => {
   unbindChrome = null
   unbindWikiKeyBubble?.()
   unbindWikiKeyBubble = null
-  // `window.__log__` 里的**本实例登记**必须随实例退出（M7-6 切分线②）：
-  // 否则读面继续指向一个已销毁的 ctx，与"实例还在跑"同形。
-  disposeLogApi()
+  // 宿主显式销毁（M7-6）：摘掉视口 attach + 注销 `window.__log__` 的**本实例登记**。
+  // 不销毁会让读面继续指向一个已销毁的 ctx —— 与"实例还在跑"同形。
+  host.destroy()
   inputAssembly?.dispose()
   inputAssembly = null
   if (ctx.wm.inputPort !== null) ctx.wm.inputPort = null
