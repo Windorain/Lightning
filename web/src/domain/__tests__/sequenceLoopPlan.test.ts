@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   LOOP_LIMITS,
+  delayCsOf,
   planSequenceLoop,
   type LoopStrip,
   type SequenceLoopPlan,
@@ -85,6 +86,71 @@ describe('planSequenceLoop · 多序列（LCM 共同循环）', () => {
     expect(plan.atMs).toEqual([0, 50])
     expect(plan.delayCs).toEqual([5, 5])
     expectInvariants(plan)
+  })
+})
+
+
+describe('delayCsOf · ms→厘秒的**唯一**换算点（M6-2 / D3）', () => {
+  function okCs(holds: readonly number[]): readonly number[] {
+    const r = delayCsOf(holds)
+    if (!r.ok) throw new Error("delayCsOf 意外失败：" + r.error.code + " " + JSON.stringify(r.error.params))
+    return r.value
+  }
+
+  it('与 planSequenceLoop 的 delayCs **逐项相等**（同一份声明只有一个时延）', () => {
+    const plan = okPlan([{ id: 'm0', frameCount: 3, durationsMs: [50, 100, 50] }])
+    expect(plan.atMs).toEqual([0, 50, 150])
+    const holds = [50, 100, 50]
+    expect([...okCs(holds)]).toEqual([...plan.delayCs])
+    // 反空洞真：不是"恒等"（[5,10,5] 与旧自算 ticks*5 的 [5,5,5] 不同）
+    expect([...okCs(holds)]).not.toEqual([5, 5, 5])
+  })
+
+  it('1 厘秒地板：5ms ⇒ 1cs（量化，不另立"四舍五入"）', () => {
+    expect([...okCs([5])]).toEqual([1])
+  })
+
+  it('最大余数法：15ms + 15ms ⇒ Σ 恰为 round(30/10)=3 ⇒ [2,1]（余数相同按下标）', () => {
+    const cs = okCs([15, 15])
+    expect([...cs]).toEqual([2, 1])
+    expect(cs.reduce((a, b) => a + b, 0)).toBe(Math.round(30 / 10))
+  })
+
+  it('不减到 0：总量偏大时只在 > 1 的项上回收（保住 1 厘秒地板）', () => {
+    const cs = okCs([25, 5])
+    expect(cs.every((c: number) => Number.isInteger(c) && c >= 1)).toBe(true)
+    expect(cs.reduce((a, b) => a + b, 0)).toBe(Math.round(30 / 10))
+  })
+
+  it('总时长短于 1 厘秒地板 × 帧数 ⇒ textureLoopTooShort（不是"截断成合法"）', () => {
+    const r = delayCsOf([1, 1, 1, 1])
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error.code).toBe('UnsupportedOperation')
+    expect(r.error.params.reason).toBe('textureLoopTooShort')
+    expect(r.error.params.frames).toBe(4)
+    expect(r.error.params.totalMs).toBe(4)
+  })
+
+  it('非法驻留（0 / 负 / 小数 / 空表）⇒ InvalidValue（不夹取）', () => {
+    for (const bad of [0, -5, 1.5]) {
+      const r = delayCsOf([50, bad])
+      expect(r.ok, '驻留 ' + bad + ' 必须被拒绝').toBe(false)
+      if (!r.ok) expect(r.error.params.reason).toBe('nonPositiveDuration')
+    }
+    const empty = delayCsOf([])
+    expect(empty.ok).toBe(false)
+    if (!empty.ok) expect(empty.error.params.reason).toBe('emptyHolds')
+  })
+
+  it('上限与 planSequenceLoop 同一张表（超限 ⇒ textureLoopTooLong）', () => {
+    const r = delayCsOf([LOOP_LIMITS.maxTotalMs + 1])
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error.code).toBe('UnsupportedOperation')
+      expect(r.error.params.reason).toBe('textureLoopTooLong')
+      expect(r.error.params.maxTotalMs).toBe(LOOP_LIMITS.maxTotalMs)
+    }
   })
 })
 

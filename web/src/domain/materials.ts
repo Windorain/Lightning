@@ -590,6 +590,106 @@ function lcmInt(a: number, b: number): number {
 }
 
 /**
+ * 逐帧驻留（毫秒）→ GIF 的逐帧时延（厘秒）—— **全树唯一的 ms→cs 换算点**。
+ *
+ * ## 为什么是导出函数（M6-2 / 设计 D3）
+ *
+ * 同一份"驻留"有两个消费者：捕获期的 `planSequenceLoop`（把共同循环的每段 hold
+ * 换成 GIF 时延）与编码期的 GIF 端口（把 `CaptureTime.holdMs` 换成 GIF 时延）。
+ * 两处各写一遍换算，就会出现"同一份声明、两个时延"—— 正是本仓反复退役的形态。
+ * 故换算只在这里做一次，两边都调它。
+ *
+ * ## 规则（逐字等于 `planSequenceLoop` 原先内联的那一段）
+ *
+ * 1. 先取 `max(1, floor(hold/10))`（GIF 的 1 厘秒地板是**量化**，不是重算）；
+ * 2. 差额按小数余数从大到小分配（余数相同按下标升序）；
+ * 3. 逐项校准到 `Σ delayCs === Math.round(totalMs/10)`；
+ * 4. `totalMs/10 < 帧数` ⇒ `textureLoopTooShort`
+ *    （不把"每帧至少 1 厘秒"伪装成"总时长与声明一致"）。
+ *
+ * ⚠️ **量化会发生**：`holdMs` 不是 10 的整数倍时，产物时长必然与声明不同
+ * （如 5ms ⇒ 1cs = 10ms）。这不是错误，而是外部格式不可表达 ⇒ 调用方据此产出
+ * `ExportTimeQuantized` 诊断（"已完成但有偏差"，不阻塞）。
+ */
+export function delayCsOf(
+  holdsMs: readonly number[],
+  limits: { readonly maxFrames: number; readonly maxTotalMs: number } = LOOP_LIMITS,
+): Result<readonly number[]> {
+  if (!Array.isArray(holdsMs) || holdsMs.length === 0) {
+    return err(invalidValue({ reason: 'emptyHolds' }))
+  }
+  let totalMs = 0
+  for (let i = 0; i < holdsMs.length; i++) {
+    const h = holdsMs[i]
+    if (typeof h !== 'number' || !Number.isInteger(h) || h <= 0) {
+      return err(
+        invalidValue({
+          reason: 'nonPositiveDuration',
+          index: i,
+          value: typeof h === 'number' && Number.isFinite(h) ? h : String(h),
+        }),
+      )
+    }
+    totalMs += h
+  }
+  if (holdsMs.length > limits.maxFrames || totalMs > limits.maxTotalMs) {
+    return err(unsupportedOperation({
+      reason: 'textureLoopTooLong',
+      frames: holdsMs.length,
+      totalMs,
+      maxFrames: limits.maxFrames,
+      maxTotalMs: limits.maxTotalMs,
+    }))
+  }
+
+  const targetSum = Math.round(totalMs / 10)
+  if (targetSum < holdsMs.length) {
+    return err(unsupportedOperation({
+      reason: 'textureLoopTooShort',
+      frames: holdsMs.length,
+      totalMs,
+      maxTotalMs: limits.maxTotalMs,
+    }))
+  }
+
+  const quotas = holdsMs.map((h) => h / 10)
+  const delayCs = quotas.map((q) => Math.max(1, Math.floor(q)))
+  let sum = delayCs.reduce((a, b) => a + b, 0)
+
+  if (sum < targetSum) {
+    const order = quotas
+      .map((q, i) => ({ i, frac: q - Math.floor(q) }))
+      .sort((a, b) => (b.frac - a.frac) || (a.i - b.i))
+    let k = 0
+    while (sum < targetSum && k < order.length) {
+      const at = order[k]!.i
+      delayCs[at] = delayCs[at]! + 1
+      sum += 1
+      k += 1
+    }
+  } else if (sum > targetSum) {
+    const order = quotas
+      .map((q, i) => ({ i, frac: q - Math.floor(q), reducible: delayCs[i]! > 1 }))
+      .filter((x) => x.reducible)
+      .sort((a, b) => (a.frac - b.frac) || (a.i - b.i))
+    let k = 0
+    while (sum > targetSum && order.length > 0 && k < order.length * 2) {
+      const at = order[k % order.length]!.i
+      if (delayCs[at]! > 1) {
+        delayCs[at] = delayCs[at]! - 1
+        sum -= 1
+      }
+      k += 1
+    }
+  }
+
+  if (sum !== targetSum) {
+    return err(invalidValue({ reason: 'delaySumMismatch', expected: targetSum, actual: sum }))
+  }
+  return ok(Object.freeze(delayCs))
+}
+
+/**
  * 把多条动画帧条排成**一个共同循环**的逐帧时间计划。
  *
  * ## 为什么是 LCM 而不是"取最长的一条"
@@ -609,6 +709,9 @@ function lcmInt(a: number, b: number): number {
  *
  * 先取 `max(1, floor(holdMs/10))`，再把差额按小数余数从大到小分配（余数相同按
  * 下标升序），最后逐项校准到 `Σ == Math.round(totalMs/10)`。
+ *
+ * ⚠️ 这段换算**已抽成** `delayCsOf`（M6-2）：本函数与 GIF 编码端口共用同一个
+ * 换算点（"一个单位链只有一处换算"），此处不再内联一份。
  *
  * ## 显式失败面
  *
@@ -702,57 +805,17 @@ export function planSequenceLoop(
     }))
   }
 
-  const targetSum = Math.round(totalMs / 10)
-  if (targetSum < boundaries.length) {
-    return err(unsupportedOperation({
-      reason: 'textureLoopTooShort',
-      frames: boundaries.length,
-      totalMs,
-      maxTotalMs: limits.maxTotalMs,
-    }))
-  }
-
+  // 每段 hold = 相邻边界之差（正是"这一帧在 GIF 里停多久"）。
   const holdMs = boundaries.map((b, i) => (i + 1 < boundaries.length ? boundaries[i + 1]! : totalMs) - b)
-  const quotas = holdMs.map((h) => h / 10)
-  const delayCs = quotas.map((q) => Math.max(1, Math.floor(q)))
-  let sum = delayCs.reduce((a, b) => a + b, 0)
-
-  if (sum < targetSum) {
-    const order = quotas
-      .map((q, i) => ({ i, frac: q - Math.floor(q) }))
-      .sort((a, b) => (b.frac - a.frac) || (a.i - b.i))
-    let k = 0
-    while (sum < targetSum && k < order.length) {
-      const at = order[k]!.i
-      delayCs[at] = delayCs[at]! + 1
-      sum += 1
-      k += 1
-    }
-  } else if (sum > targetSum) {
-    const order = quotas
-      .map((q, i) => ({ i, frac: q - Math.floor(q), reducible: delayCs[i]! > 1 }))
-      .filter((x) => x.reducible)
-      .sort((a, b) => (a.frac - b.frac) || (a.i - b.i))
-    let k = 0
-    while (sum > targetSum && order.length > 0 && k < order.length * 2) {
-      const at = order[k % order.length]!.i
-      if (delayCs[at]! > 1) {
-        delayCs[at] = delayCs[at]! - 1
-        sum -= 1
-      }
-      k += 1
-    }
-  }
-
-  if (sum !== targetSum) {
-    return err(invalidValue({ reason: 'delaySumMismatch', expected: targetSum, actual: sum }))
-  }
+  // 厘秒换算**只在** `delayCsOf` 一处（M6-2 设计 D3：不在两个地方各转一次）。
+  const delays = delayCsOf(holdMs, limits)
+  if (!delays.ok) return err(delays.error)
 
   return ok(Object.freeze({
     frameCount: boundaries.length,
     totalMs,
     atMs: Object.freeze(boundaries),
-    delayCs: Object.freeze(delayCs),
+    delayCs: delays.value,
   }))
 }
 
