@@ -20,10 +20,12 @@
  *
  * ## 为什么这里 `new ExportJob(...)` 而不是 `assembleSnapshotExportJob(...)`
  *
- * 生产装配入口 `adapters/export/snapshotExportJob.ts#assembleSnapshotExportJob` **尚未**
- * 转发 `assetNeeds`（该文件属 R3-1a 写面，本批**不改**，已在回报里列为一行移交项）。
- * 故这里复用它的**它自己的生产端口** + 生产编码器，只多传一个 `assetNeeds` 选项 ——
- * 除了这一个选项，链路上没有任何一处是替身。
+ * ⚠️ **历史注记（M6-4 核实）**：本段原写"生产装配入口尚未转发 `assetNeeds`" ——
+ * 那句已过时：M6-3 的 G3 之后 `assembleSnapshotExportJob` **确实**转发
+ * `assetNeeds`（以及 `captureFacts`）。本探针保留自建 `ExportJob` 的形态是**刻意**的：
+ * 它要额外注入一份"缺一条必需资源"的 `AssetStateStore` 做负对照，而装配入口不给这个缝。
+ * 生产路径的转发由 `e2e/export-manifest-panel.spec.ts`（走 `runIsoExport` → 装配入口）
+ * 与 `snapshotExportJob` 的转发断言把守。
  *
  * ## 判据里为什么必须有负对照
  *

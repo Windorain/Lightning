@@ -55,6 +55,10 @@ const P9_EXPORT_FILES = [
   'adapters/export/abortBridge.ts',
   'adapters/export/offscreenTextureUpload.ts',
   'adapters/export/offscreenTextureDomain.ts',
+  // M6-4：导出**语义矩阵**（不可表达语义的唯一声明点）与它的诊断桥 —— 同样不得
+  // 自驱时间、不得借用实时视口。漏掉它们等于给新文件一张免查券。
+  'application/exportSemantics.ts',
+  'runtime/exportDiagnostics.ts',
 ]
 
 /** 本批新建的适配器路径（跨层导入纪律由 `boundary-rules.mjs` 判；此处只做时间/借用面）。 */
