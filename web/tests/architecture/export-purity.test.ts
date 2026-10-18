@@ -40,6 +40,12 @@ const P9_EXPORT_FILES = [
   'domain/captureSpec.ts',
   'application/exportPlan.ts',
   'runtime/exportJob.ts',
+  // M6-2：编码适配器（GIF 字节核心 / 动画编码端口 / 离屏端口）同样属于"导出实现"，
+  // 不得自驱时间、不得借用实时视口。**漏掉它们**等于给新文件一张免查券。
+  'adapters/export/gifEncoder.ts',
+  'adapters/export/gifEncoderPort.ts',
+  'adapters/export/encoderPort.ts',
+  'adapters/export/offscreenRenderPort.ts',
 ]
 
 /** 本批新建的适配器路径（跨层导入纪律由 `boundary-rules.mjs` 判；此处只做时间/借用面）。 */
