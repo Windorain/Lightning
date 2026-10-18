@@ -339,6 +339,8 @@ export interface ExportGifProbeResult {
   /** 逐帧 Graphic Control Extension 的 delay（厘秒）—— 必须等于计划，不是自算 tick。 */
   readonly delaysCs: readonly number[]
   readonly bytesLength: number
+  /** 产物字节的 FNV-1a 摘要（N23：同参数两次导出必须逐字节相同）。 */
+  readonly bytesDigest: string
   readonly framesRendered: number
   readonly releasedFor: number
   /** 浏览器解码器能否解开（独立于编码器）；能解开时的尺寸。 */
@@ -453,12 +455,23 @@ export async function runExportGifProbe(options: {
     imageCount: parsed.imageCount,
     delaysCs: parsed.delaysCs,
     bytesLength: bytes.length,
+    bytesDigest: digestOf(bytes),
     framesRendered: outcome.framesRendered,
     releasedFor: outcome.releasedFor,
     decodedWidth,
     decodedHeight,
     decoderOk,
   }
+}
+
+/** FNV-1a 32 位摘要（十六进制）—— 只用于「两次字节是否完全相同」的判定。 */
+function digestOf(bytes: Uint8Array): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i]!
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, '0')
 }
 
 function gifEmpty(note: string): ExportGifProbeResult {
@@ -472,6 +485,7 @@ function gifEmpty(note: string): ExportGifProbeResult {
     imageCount: 0,
     delaysCs: [],
     bytesLength: 0,
+    bytesDigest: '',
     framesRendered: 0,
     releasedFor: 0,
     decodedWidth: -1,

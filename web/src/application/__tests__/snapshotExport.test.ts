@@ -580,6 +580,33 @@ describe('A29：预检 —— 缺必需资源 / 无编码器 / 有损未显式 �
 // 三·补（M6-2）：kind × encoding 兼容表（N10/N11）与时长量化诊断（不阻塞）
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe('M6-2 N9：动画种类仍需端口**真的声明** animation（实现里有 GIF 也不放松预检）', () => {
+  it('kind:animation + 端口 supportedKinds 不含 animation ⇒ ExportKindUnsupported', () => {
+    const onlyImages: EncoderPort = {
+      supportedKinds: ['image'],
+      async encode() {
+        return { ok: true, value: new Uint8Array([0]) }
+      },
+    }
+    const pre = preflightExport({ request: requestOf(), kind: 'animation', encoder: onlyImages })
+    expect(pre.status).toBe('blocked')
+    const d = pre.diagnostics.find((x) => x.code === 'ExportKindUnsupported')
+    expect(d, '不得因为"实现里其实有 GIF"就放行').toBeDefined()
+    expect(d!.detail.kind).toBe('animation')
+    expect(String(d!.detail.supported)).toBe('image')
+  })
+
+  it('反空洞真：同一个请求换成真的声明了 animation 的端口 ⇒ ready', () => {
+    const withAnimation: EncoderPort = {
+      supportedKinds: ['image', 'animation'],
+      async encode() {
+        return { ok: true, value: new Uint8Array([0]) }
+      },
+    }
+    expect(preflightExport({ request: requestOf(), kind: 'animation', encoder: withAnimation }).status).toBe('ready')
+  })
+})
+
 describe('M6-2 N10/N11：kind × encoding 兼容表（格式与种类不许"各自为政"）', () => {
   it('N10 image + gif ⇒ blocked（不得静默产出 GIF 字节却叫 png）', () => {
     const pre = preflightExport({ request: requestOf(), kind: 'image', encoding: 'gif', encoder: okEncoder() })

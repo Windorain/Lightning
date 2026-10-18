@@ -74,6 +74,7 @@ interface ExportGifProbeResult {
   imageCount: number
   delaysCs: number[]
   bytesLength: number
+  bytesDigest: string
   framesRendered: number
   releasedFor: number
   decodedWidth: number
@@ -191,6 +192,26 @@ test.describe('M6-2 · 真 GL 下的**动画**导出（逐帧 hold → GIF 字�
       JSON.stringify(result, null, 2),
       'utf8',
     )
+  })
+
+  test('N23（e2e 等价面）：同参数两次动画导出 ⇒ GIF **逐字节相同**（无时间戳）', async ({ page }) => {
+    await gotoWorkbench(page)
+    const fx = readFixture('multiblock-tier-only.json')
+    await injectSceneDocumentOk(page, fx.envelope, 'multiblock-tier-only.json')
+    await waitForViewportMounted(page)
+    await page.waitForTimeout(1500)
+
+    const first = await runGifProbe(page, { width: 24, height: 24, holdsMs: [50, 100, 50] })
+    const second = await runGifProbe(page, { width: 24, height: 24, holdsMs: [50, 100, 50] })
+    expect(first.status, '第一次必须完成').toBe('completed')
+    expect(second.status, '第二次必须完成').toBe('completed')
+    // 结构读数逐项相等（含逐帧时延）——"同参数"不是靠调用方相信，而是产物自证。
+    expect(second.imageCount).toBe(first.imageCount)
+    expect(second.delaysCs).toEqual(first.delaysCs)
+    expect(second.bytesLength, '同参数两次产物的字节长度必须相同').toBe(first.bytesLength)
+    // **逐字节**（不是「长度差不多」）：GIF 格式不含时间戳，故摘要必须相等。
+    expect(first.bytesDigest.length, '摘要必须非空（否则下面的相等是空转）').toBe(8)
+    expect(second.bytesDigest, '同参数两次导出必须逐字节相同').toBe(first.bytesDigest)
   })
 
   test('**负对照**：同一份内容走 PNG 端口编 animation ⇒ 显式失败（组合端口不是"一个端口声称全能"）', async ({ page }) => {
