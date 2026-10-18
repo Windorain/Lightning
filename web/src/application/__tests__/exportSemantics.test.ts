@@ -79,7 +79,7 @@ describe('矩阵完整性：格式 × 不可表达语义（唯一声明点）', 
   const expected: Record<'png' | 'gif' | 'obj', readonly ExportSemanticKind[]> = {
     png: ['transform', 'deformation', 'annotation-text', 'animation-tracks'],
     gif: ['transform', 'deformation', 'annotation-text', 'animation-tracks'],
-    obj: ['texture-sequence', 'geometry-skipped', 'blend-approximation'],
+    obj: ['texture-sequence', 'geometry-skipped', 'layered-stacking', 'blend-approximation'],
   }
 
   it('三张表逐格 == 期望（缺一格即判红）', () => {
@@ -159,7 +159,7 @@ describe('PNG/GIF：能力表 → 结构化诊断（`export.capabilityUnsupporte
 
 describe('OBJ：装配期事实 → 结构化诊断（首帧/跳过/近似）', () => {
   it('空报告 ⇒ 零诊断（"没有不可表达语义"不是事件）', () => {
-    expect(objExportSemantics({ firstFrameOnly: [], skippedUnmappedVoxels: 0, skippedVoxels: [], blendApproximations: [] })).toEqual([])
+    expect(objExportSemantics({ firstFrameOnly: [], skippedUnmappedVoxels: 0, skippedVoxels: [], layered: null, blendApproximations: [] })).toEqual([])
   })
 
   it('竖条动画只用首帧 ⇒ `export.firstFrameOnly`，带 blobIndex/frameCount/材质归属', () => {
@@ -167,6 +167,7 @@ describe('OBJ：装配期事实 → 结构化诊断（首帧/跳过/近似）', 
       firstFrameOnly: [{ blobIndex: 0, frameCount: 4, materialIndices: [0, 2] }],
       skippedUnmappedVoxels: 0,
       skippedVoxels: [],
+      layered: null,
       blendApproximations: [],
     })
     expect(out).toHaveLength(1)
@@ -182,6 +183,7 @@ describe('OBJ：装配期事实 → 结构化诊断（首帧/跳过/近似）', 
         { registryKey: 'z:1', reason: 'special_no_geometry', voxelCount: 2 },
         { registryKey: 'a:1', reason: 'decode_error', voxelCount: 3 },
       ],
+      layered: null,
       blendApproximations: [],
     })
     expect(out.map((f) => f.code)).toEqual(['export.geometrySkipped', 'export.geometrySkipped'])
@@ -189,9 +191,22 @@ describe('OBJ：装配期事实 → 结构化诊断（首帧/跳过/近似）', 
   })
 
   it('**只有计数没有明细**时仍必须报（"有体素被丢"不得因明细缺失而消失）', () => {
-    const out = objExportSemantics({ firstFrameOnly: [], skippedUnmappedVoxels: 7, skippedVoxels: [], blendApproximations: [] })
+    const out = objExportSemantics({ firstFrameOnly: [], skippedUnmappedVoxels: 7, skippedVoxels: [], layered: null, blendApproximations: [] })
     expect(out).toHaveLength(1)
     expect(out[0]!.params.voxelCount).toBe(7)
+  })
+
+  it('layered 模式 ⇒ `export.layerStackUnexpressed`（叠化规则只在文件名/注释里）', () => {
+    const out = objExportSemantics({
+      firstFrameOnly: [],
+      skippedUnmappedVoxels: 0,
+      skippedVoxels: [],
+      layered: { layerCount: 3 },
+      blendApproximations: [],
+    })
+    expect(out).toHaveLength(1)
+    expect(out[0]!.code).toBe('export.layerStackUnexpressed')
+    expect(out[0]!.params).toMatchObject({ layerCount: 3, compose: 'caller' })
   })
 
   it('混合模式 ⇒ `export.blendApproximated`（MTL 的 d/illum 是近似，必须声明）', () => {
@@ -199,6 +214,7 @@ describe('OBJ：装配期事实 → 结构化诊断（首帧/跳过/近似）', 
       firstFrameOnly: [],
       skippedUnmappedVoxels: 0,
       skippedVoxels: [],
+      layered: null,
       blendApproximations: [{ materialName: 'm_layer_0', blend: 'cutout' }],
     })
     expect(out[0]!.code).toBe('export.blendApproximated')

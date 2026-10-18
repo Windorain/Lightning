@@ -50,6 +50,7 @@ export const EXPORT_SEMANTIC_CODES = Object.freeze({
   capabilityUnsupported: 'export.capabilityUnsupported',
   firstFrameOnly: 'export.firstFrameOnly',
   geometrySkipped: 'export.geometrySkipped',
+  layerStackUnexpressed: 'export.layerStackUnexpressed',
   blendApproximated: 'export.blendApproximated',
 } as const satisfies Readonly<Record<string, DiagnosticReasonCode>>)
 
@@ -87,6 +88,7 @@ export type ExportSemanticKind =
   | 'animation-tracks'
   | 'texture-sequence'
   | 'geometry-skipped'
+  | 'layered-stacking'
   | 'blend-approximation'
 
 export interface ExportSemanticCell {
@@ -122,6 +124,7 @@ export const EXPORT_SEMANTIC_MATRIX: Readonly<Record<ExportSemanticFormat, reado
   obj: Object.freeze([
     cell('texture-sequence', EXPORT_SEMANTIC_CODES.firstFrameOnly, 'OBJ 的 UV 映射到单张贴图；竖条多帧只能取首帧'),
     cell('geometry-skipped', EXPORT_SEMANTIC_CODES.geometrySkipped, '无几何/解码失败的体素没有面可写（此前只写注释行）'),
+    cell('layered-stacking', EXPORT_SEMANTIC_CODES.layerStackUnexpressed, 'layered 模式的叠化顺序只在文件名与注释里；OBJ/MTL 没有合成规则'),
     cell('blend-approximation', EXPORT_SEMANTIC_CODES.blendApproximated, 'MTL 只有 d/illum，cutout 与 translucent 都只能近似'),
   ]),
 })
@@ -210,6 +213,11 @@ export interface BundleBlendApproximationFact {
   readonly blend: string
 }
 
+/** layered 模式的叠化层数（OBJ/MTL 没有合成规则，只能交回调用方）。 */
+export interface BundleLayeredFact {
+  readonly layerCount: number
+}
+
 /**
  * OBJ 装配期的**不可表达事实**（结构化、纯数据）。
  *
@@ -220,6 +228,8 @@ export interface BundleSemanticReport {
   readonly firstFrameOnly: readonly BundleTextureFirstFrameFact[]
   readonly skippedUnmappedVoxels: number
   readonly skippedVoxels: readonly BundleSkippedVoxelFact[]
+  /** 非空 = 本次是 layered 模式（多层 PNG 共享 UV，叠化规则不在产物里）。 */
+  readonly layered: BundleLayeredFact | null
   readonly blendApproximations: readonly BundleBlendApproximationFact[]
 }
 
@@ -228,6 +238,7 @@ export const EMPTY_BUNDLE_SEMANTIC_REPORT: BundleSemanticReport = Object.freeze(
   firstFrameOnly: Object.freeze([]),
   skippedUnmappedVoxels: 0,
   skippedVoxels: Object.freeze([]),
+  layered: null,
   blendApproximations: Object.freeze([]),
 })
 
@@ -238,6 +249,7 @@ export const EMPTY_BUNDLE_SEMANTIC_REPORT: BundleSemanticReport = Object.freeze(
  * 文档两次导出的诊断序列可对账（与 `capabilityReport` 的稳定排序同一动机）。
  */
 export function objExportSemantics(report: BundleSemanticReport): readonly ExportSemanticFinding[] {
+  // 顺序：首帧 → 跳过体素 → 分层 → 混合近似（稳定；同一次导出两次跑给同一序列）。
   const out: ExportSemanticFinding[] = []
   for (const t of report.firstFrameOnly) {
     out.push(
@@ -265,6 +277,14 @@ export function objExportSemantics(report: BundleSemanticReport): readonly Expor
       Object.freeze({
         code: EXPORT_SEMANTIC_CODES.geometrySkipped,
         params: Object.freeze({ registryKey: s.registryKey, reason: s.reason, voxelCount: s.voxelCount }),
+      }),
+    )
+  }
+  if (report.layered !== null) {
+    out.push(
+      Object.freeze({
+        code: EXPORT_SEMANTIC_CODES.layerStackUnexpressed,
+        params: Object.freeze({ layerCount: report.layered.layerCount, compose: 'caller' }),
       }),
     )
   }

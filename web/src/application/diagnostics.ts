@@ -97,6 +97,8 @@ export type DiagnosticReasonCode =
   | 'export.firstFrameOnly'
   /** OBJ：无几何/解码失败的体素被跳过（此前只写注释行）。 */
   | 'export.geometrySkipped'
+  /** OBJ：layered 模式的叠化规则不在产物里（多层 PNG 共享 UV，需调用方合成）。 */
+  | 'export.layerStackUnexpressed'
   /** OBJ：混合模式只能用 MTL 的 `d`/`illum` 近似（cutout/translucent 不精确）。 */
   | 'export.blendApproximated'
 

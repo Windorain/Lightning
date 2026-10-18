@@ -18,6 +18,14 @@ export type StructureBundleExportMode = 'block' | 'connected' | 'layered'
 export interface StructureBundleExportOptions extends BuildBlockMeshOptions {
   /** World 文档时覆盖默认帧 */
   worldFrameIndex?: number
+  /**
+   * **装配期的不可表达事实**（M6-4；SPEC §9）。
+   *
+   * OBJ 的产物里只能写注释行（`# skipped_unmapped_voxels=…`），机器与用户都读不到。
+   * 装配时把事实**结构化**交回调用方（导出命令），由它写进诊断通道。
+   * 纯观察：回调抛错不影响导出（调用方负责兜）。
+   */
+  onSemanticReport?: (report: import('@/application/exportSemantics').BundleSemanticReport) => void
   /** `block`：每体素单 mesh + 单 atlas；`connected`：每连通域单 mesh + 单 atlas（先 component 邻面剔除再叠化打包）；`layered`：全结构一份 mesh，不叠化，按 quadOrder 输出多层透明 PNG */
   mode?: StructureBundleExportMode
   /** 纹理图集最大边长（像素）；`block` 与 `connected` 共用 */

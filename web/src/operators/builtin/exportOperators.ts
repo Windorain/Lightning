@@ -6,6 +6,7 @@ import { buildStructureBundleZip } from '@/workbench/export/bundleMeshAssembly'
 import { normalizeIsoSeconds } from '@/application/captureInput'
 import { exportErrorText, runIsoExport } from '@/workbench/export/isoExportJob'
 import { createExportDiagnosticSink } from '@/workbench/export/exportCommandDiagnostics'
+import { objExportSemantics } from '@/application/exportSemantics'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 
@@ -109,11 +110,23 @@ export const ExportObjOperator: OperatorType = {
     const mode = explicit ?? (connected ? 'connected' : 'block')
     const baseName = sceneStableStringIdFromDocument(doc)
     const def = loadStructureOrWorld(doc, undefined)
-    const blob = await buildStructureBundleZip(def, doc, { mode: mode as any })
+    // M6-4：OBJ 的不可表达语义（首帧纹理 / 跳过体素 / 分层叠化 / 混合近似）。
+    // 此前这些事实只写在产物的注释行里，机器与用户都读不到（SPEC 9）。
+    const diagnostics = createExportDiagnosticSink(ctx.wm.diagnostics, {
+      commandId: 'OPERATOR_EXPORT_OBJ',
+      format: 'obj',
+    })
+    diagnostics.requested({ mode })
+    const blob = await buildStructureBundleZip(def, doc, {
+      mode: mode as any,
+      onSemanticReport: (report) => { diagnostics.findings(objExportSemantics(report)) },
+    })
     // 插桩：验证 ZIP 文件头
     const sigBytes = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
     const sigHex = Array.from(sigBytes).map(b => b.toString(16).padStart(2, '0')).join('')
     if (sigHex !== '504b0304') {
+      // 文件头异常是**产物损坏**（不是语义损失）：结构化记一条，日志照旧。
+      diagnostics.failed({ code: 'UnsupportedOperation', params: { reason: 'zipSignatureInvalid', expected: '504b0304', actual: sigHex, size: blob.size } })
       ctx.log.warn('导出', `ZIP 文件头异常: 期望 504b0304, 实际 ${sigHex}, 大小 ${blob.size}`)
     }
     downloadBlob(`${baseName}-${mode}.zip`, blob)
@@ -141,6 +154,9 @@ export const ExportIsoPngOperator: OperatorType = {
       format: 'png',
     })
     diagnostics.requested({ direction: directionIndex, seconds })
+    // **已记过**的失败不再记第二遍：`export.failed` 必须一条事实一条记录
+    // （否则同一次失败在环形缓冲里出现两次不同的 code —— `MissingTarget` 与 `Thrown`）。
+    let recorded = false
     try {
       // M6-3：产物 = **与屏上同一条呈现链**（捕获派生场景 → 冻结作业 → 导出作业）。
       const result = await runIsoExport(ctx, {
@@ -156,6 +172,7 @@ export const ExportIsoPngOperator: OperatorType = {
       })
       if (!result.ok) {
         // 结构化失败：先按 **DomainError** 记诊断（保留 code + params），再转成人读错误抛出。
+        recorded = true
         diagnostics.failed(result.error)
         throw new Error(exportErrorText(result.error))
       }
@@ -164,8 +181,8 @@ export const ExportIsoPngOperator: OperatorType = {
       diagnostics.completed(result.value)
       downloadBlob(result.value.fileName, new Blob([result.value.bytes as unknown as BlobPart], { type: result.value.mediaType }))
     } catch (e) {
-      // DomainError 已在上面记过；这里只补"其它抛出"（记录器本身不重复写同一条）。
-      if (!(e instanceof Error && /\.code=/.test(e.message))) diagnostics.failed(e)
+      // DomainError 已在上面记过；这里只补"其它抛出"（一次失败只留一条事实）。
+      if (!recorded) diagnostics.failed(e)
       ctx.log.warn('导出', `等轴 PNG 导出失败: ${e}`)
       // **再抛**：log.warn 只留诊断，可见性由调用方（UI）承担。吞掉它正是本轮要修的形态。
       throw e
