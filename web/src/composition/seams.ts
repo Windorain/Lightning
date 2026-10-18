@@ -593,9 +593,11 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '（那里自陈"用旧文档填它需要先造一份内核 `Document`，那正是第二个权威的入口"）；'
       + ' 删除**不丢能力**：未装配时 `plain === null` + `reason`（`no-session`/`not-adopted`/`unreadable`）**可判定**，'
       + ' 调用方据此显式失败/提示（**不是**静默产出一份空产物）。\n'
-      + '  - **另半边（L4 保真记录的持久化）仍未接**：`RecoveryStorePort`'
-      + '（`adapters/storage/memory`/`browser`）**零生产实例化**（D 映射表 §3.2 实测；'
-      + ' D3 复核仍成立 —— 全树 `createMemoryStoragePort|browserStoragePort` 只出现在 `__tests__`）。\n'
+      + '  - **另半边（L4 保真记录的持久化）仍未接**：`RecoveryStorePort` 现由 **M8-4** 的恢复副本接线'
+      + '**生产实例化**（`composition/recoverySession` 用 `browserStoragePort` 写/读/校验/采纳恢复副本，'
+      + ' 键族 `lk.recovery.v1.*`）—— 2026-10-19 更正：本条此前写"零生产实例化"（D3 当时成立），'
+      + ' M8-4 接线后该句不再成立；**仍未接的是保真记录自身的持久化**（`fidelityStoreKey` 至今无生产读写点，'
+      + ' 只有 `adapters/files/fidelityRecord` 的形状与测试）。\n'
       + '⚠️ **三处更正**（前序批次写下、后续实测推翻）：① 原写"产物侧唯一挂点 `projectKernelDocument` 生产零调用方"—— **不成立**（`kernelRenderView.ts:135` 已在生产调用它）；真正的缺口更窄：`fidelityFields` 无生产传值方。② 原写 (b) "需先统一键口径，不是接线"—— **D1 已统一**。③ 原写 (c) "D2 接线后删除本条登记"—— **改判**：接线完成 ≠ 缺口闭合（回落分支当时仍在）⇒ 登记保留、只更新文案与退出条件；**C5 已闭掉"回落分支"这一子句**，剩余只有 e2e 真实产物等价 ⇒ 该子句闭后核销本条。',
     closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),

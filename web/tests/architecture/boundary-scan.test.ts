@@ -615,7 +615,7 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     //    闭包外文件上证明（而不是靠"碰巧还有一条 outside 登记"）。
     // ⇒ 这里断言的是"判定式本身仍有区分力"，且把 outsideCount 作为读数留档。
     expect(
-      measured(['src/adapters/storage/browser.ts']),
+      measured(['src/adapters/storage/memory.ts']),
       '同一判定式必须仍能判出闭包外的文件（否则 in-closure 的"一致"是恒真）',
     ).toBe(false)
     expect(typeof outsideCount, 'outsideCount 必须仍是可读的读数（0 也是真实读数）').toBe('number')
@@ -636,8 +636,14 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
     //    `workbench/export/isoExportJob` → `assembleSnapshotExportJob` 可达
     //    （该变化本身是"命令真的经作业"的机械证据）。
     expect(measured(['src/runtime/exportJob.ts']), '`runtime/exportJob.ts` 现在实测在闭包内（M6-3 接线）').toBe(true)
-    // ② **负对照**：一个真实存在但不在生产入口闭包内的文件（storage 适配器只被宿主按需装配）。
-    expect(measured(['src/adapters/storage/browser.ts']), '`adapters/storage/browser.ts` 实测在闭包外').toBe(false)
+    // ② **负对照**：一个真实存在但不在生产入口闭包内的文件。
+    //
+    // ⚠️ M8-4 换过锚点（不是放宽判据）：此前这里指向 `adapters/storage/browser.ts`，
+    // 理由是「storage 适配器只被宿主按需装配」——恢复副本接线（composition/recoverySession
+    // → adapters/recoveryStore → storage/browser）之后**那句话不再成立**，该文件真的进了
+    // 生产闭包（这本身是 M8-4「端口生产实例化」的机械证据）。故锚点改到**内存实现**：
+    // 它只服务单测（`createMemoryStoragePort` 仍零生产实例化），是当前真实的闭包外文件。
+    expect(measured(['src/adapters/storage/memory.ts']), '`adapters/storage/memory.ts` 实测在闭包外').toBe(false)
     // ③ **正对照**：一个确实可达的生产文件。
     expect(measured(['src/domain/document.ts']), '`domain/document.ts` 实测在闭包内').toBe(true)
   })
