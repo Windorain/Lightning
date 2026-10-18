@@ -98,6 +98,28 @@ const POINTER_EVENT_NAMES = [
   'wheel',
 ] as const
 
+/**
+ * **独占冲突**（M7-6）：第二个挂载者被结构性拒绝时抛的就是这个类型。
+ *
+ * 为什么要有具名类型而不是裸 `Error`：调用方（`WorkbenchRoot`）需要把这一种失败
+ * 翻译成**一句人话**（Q3），而其它装配异常仍必须照原样向上抛 —— 靠
+ * `err.message.includes(...)` 判别会把"文案"变成一根隐式接口（改文案就静默失效）。
+ */
+export class ExclusiveKeydownConflict extends Error {
+  constructor(
+    /** 当前持有者名（诊断用；用户看到的是上层给的人话文案）。 */
+    readonly incumbent: string,
+    /** 试图再挂一条的所有者名。 */
+    readonly challenger: string,
+  ) {
+    super(
+      `[inputBinding] document keydown 已被 ${incumbent} 持有；${challenger} 不得再挂第二条` +
+        '（A22「两个 handler 各启动操作」的结构性防御）',
+    )
+    this.name = 'ExclusiveKeydownConflict'
+  }
+}
+
 /** 进程级挂载计数（**跨实例**）。A22 的"只挂一条"由它执行，而不是靠自觉。 */
 let mountedKeydownOwners: string[] = []
 
@@ -377,10 +399,9 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
   return {
     claimExclusive(owner) {
       if (mountedKeydownOwners.length > 0) {
-        throw new Error(
-          `[inputBinding] document keydown 已被 ${mountedKeydownOwners[0]} 持有；${owner} 不得再挂第二条` +
-            '（A22「两个 handler 各启动操作」的结构性防御）',
-        )
+        // **结构禁止不变**：仍然拒绝，且拒绝发生在任何监听被挂上之前。
+        // 变的是错误类型：调用方据此给用户一句人话（M7-0 Q3），而不是把诊断原文抛给页面。
+        throw new ExclusiveKeydownConflict(mountedKeydownOwners[0]!, owner)
       }
       mountedKeydownOwners = [owner]
     },

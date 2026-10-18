@@ -82,7 +82,8 @@ import {
 import { isWikiApiAvailable } from '@/wiki/mwApiAdapter'
 import { ALL_CAPABILITIES } from '@/application/commands'
 import { assembleInput, type AssembledInput } from '@/composition/assembleInput'
-import { exclusiveKeydownOwners } from '@/adapters/inputBinding'
+import { ExclusiveKeydownConflict, exclusiveKeydownOwners } from '@/adapters/inputBinding'
+import { SINGLE_WORKBENCH_NOTICE } from '@/workbench/singleWorkbenchNotice'
 import { workbenchCommandSink, workbenchInputHotkeys } from '@/workbench/inputHotkeys'
 import AreaLayoutHost from '@/workbench/components/AreaLayoutHost.vue'
 
@@ -251,8 +252,19 @@ function refreshDraftMirrors(): void {
   if (hooks) for (const fn of hooks.values()) fn('')
 }
 
+/**
+ * 第二个工作台实例的提示（M7-6 / Q3）。
+ *
+ * 结构禁止不变（`claimExclusive` 仍拒绝第二条 document keydown）；变的是**表现**：
+ * 旧实现在 `onMounted` 的异步回调里抛错 ⇒ 用户只看到第二个工作台半死、没有任何解释。
+ * 现在把这一种冲突收成一句人话 + 视口区内的可见提示条，其余异常照旧上抛
+ * （吞掉它们会让真正的装配缺陷静默）。
+ */
+const singleInstanceNotice = ref<string | null>(null)
+
 function assembleWorkbenchInput(): void {
   const hotkeys = workbenchInputHotkeys(ctx)
+  try {
   inputAssembly = assembleInput({
     // P10 收口点：把老 operator 转发换成 `editorCommandSink(editor)` 即完成
     // "输入 → P1 唯一写通路"的最后一跳。当前实现逐条列明转发项，
@@ -297,6 +309,22 @@ function assembleWorkbenchInput(): void {
       ctx.log.info('输入', `页面恢复：基线=${Math.round(resumeBaseline)}ms 丢弃 ${droppedTicks} tick`)
     },
   })
+  } catch (e) {
+    /**
+     * **同页第二个工作台**（M7-0 Q3）：结构禁止保留，表现改成一句人话。
+     *
+     * 判据是"提示可见 + 原实例不受影响"，不是"第二个工作台能用" —— 后者会
+     * 悄悄废掉 A22 的结构防御（两条 document keydown 各启动操作）。
+     */
+    if (e instanceof ExclusiveKeydownConflict) {
+      singleInstanceNotice.value = SINGLE_WORKBENCH_NOTICE
+      ctx.log.warn('工作台', SINGLE_WORKBENCH_NOTICE, { incumbent: e.incumbent, challenger: e.challenger })
+      console.warn('[StructureRenderer] ' + SINGLE_WORKBENCH_NOTICE)
+      return
+    }
+    // 别的装配异常照旧上抛：吞掉它们会把真正的缺陷变成"没有键盘"。
+    throw e
+  }
   ctx.wm.inputPort = inputAssembly.port
   // e2e/诊断探针（只读；不含任何领域状态）
   ;(window as any).__p7_input__ = {
@@ -394,6 +422,19 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
 
 <template>
   <HostProvider :host="host" :ctx="ctx">
+    <!--
+      **同页第二个工作台**（M7-6 / Q3）：结构禁止不变，给一句人话 + 可见提示。
+      提示落在实例根内（不是 document.body）：同页两个实例时，用户能看出是**哪一个**
+      实例没接管键盘；它也随本实例卸载一起消失，不留全局残留。
+    -->
+    <div
+      v-if="singleInstanceNotice"
+      class="wm-single-instance-notice"
+      role="alert"
+      data-lk-workbench-conflict="1"
+    >
+      {{ singleInstanceNotice }}
+    </div>
     <!--
       #10：`v-show` → `v-if` + `:key`。
       只有一个工作区在 DOM 里；切换即**卸载旧组件**（不是隐藏它）。
@@ -544,6 +585,19 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
 </template>
 
 <style scoped>
+/* 第二个工作台实例的提示条（M7-6 / Q3）。
+   刻意**在文档流内**而不是 fixed：fixed 会横跨整页、盖住**第一个**实例的 UI
+   （实测：同页双实例页面上它的点击会拦截另一个实例的视口，把"原实例不受影响"
+   这条判据自己弄坏）。在流内 ⇒ 只占本实例自己的一块高度。 */
+.wm-single-instance-notice {
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--wb-text);
+  background: var(--wb-warn, #7a5a00);
+  border-bottom: 1px solid var(--wb-border);
+}
+
 /* 工具架 = 编辑视口 Area 内的**悬浮 Region**（用户裁决 2026-10-17）：
    position:absolute 浮在视口左上，不占布局流、不挤压 canvas。
    `data-wm-region="r-toolshelf"` 落在本元素上（见模板），于是指针命中的是

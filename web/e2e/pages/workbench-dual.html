@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Workbench Dual-Instance E2E</title>
+    <style>
+      body { margin: 0; background: #0f172a; font-family: system-ui, sans-serif; }
+      .row { display: flex; gap: 8px; padding: 4px; align-items: flex-start; }
+      .pane { width: 49vw; height: 96vh; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <!--
+      M7-6 · **同页两个工作台**（Q3：结构禁止 + 人话提示）。
+
+      两个独立挂载点各挂一个 DevApp（= 两个真实的 WorkbenchRoot 装配）。
+      第二个实例在 inputBinding 的独占 claim 处被拒；本页只负责"宿主会这么干"，
+      判定全部由 spec 从产品读面读。
+    -->
+    <div class="row">
+      <div id="wb-a" class="pane"></div>
+      <div id="wb-b" class="pane"></div>
+    </div>
+    <script type="module" src="/e2e/pages/workbench-dual.ts"></script>
+  </body>
+</html>

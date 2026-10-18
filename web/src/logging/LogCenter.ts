@@ -680,6 +680,23 @@ export function installUnifiedLogApi(ctx: Context): UnifiedLogDisposer {
   if (typeof window === 'undefined') return () => {}
   const existing = registeredLogs.find((r) => r.ctx === ctx)
   if (existing !== undefined) return () => { /* 已登记：注销由首次调用方负责 */ }
+  /**
+   * **实例身份唯一**：同一个 `instanceId` 不允许登记两次。
+   *
+   * 两个不同 ctx 拿到同一个 id 只会在一种情形下发生：同页两个**工作台**
+   * （工作台身份固定为 `workbench`，见 Q3 的"结构禁止"）。那时的正确处置不是
+   * "后写覆盖"（D9 的老毛病），也不是"编一个 workbench#2"（伪造身份），
+   * 而是**拒绝登记**：第二个实例的观测面不存在，用户拿到的是一句人话提示
+   * （`workbench/singleWorkbenchNotice`）。它的 `ctx.log` 本身照常работает ——
+   * 缺的只是"经 `window.__log__` 指名读它"这个跨实例观测面。
+   */
+  if (registeredLogs.some((r) => r.instanceId === ctx.instanceId)) {
+    console.warn(
+      `[LogCenter] 实例身份 ${ctx.instanceId} 已被登记：本次实例不进入 __log__ 观测面` +
+        '（同页两个工作台属结构禁止，见 Q3）',
+    )
+    return () => {}
+  }
   const entry: RegisteredLog = { instanceId: ctx.instanceId, ctx, api: createUnifiedLogApi(ctx) }
   registeredLogs.push(entry)
   publishUnifiedLogApi()
