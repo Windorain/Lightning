@@ -26,10 +26,22 @@
  * 多实例的偏好/日志隔离归 M7-6；本面只解决"装配结果可查询 + 负对照可执行"。
  */
 
-import type { Command } from '@/application/commands'
-import type { CommandOutcome } from '@/application/contracts'
 import type { Assembly } from '@/composition/resolver'
 import type { Context } from '@/runtime/context'
+
+/**
+ * 命令与结算的类型**从生产写入口推出来**（不在本文件 import 内核层类型）。
+ *
+ * ## 为什么不写 `import type { Command } from '@/application/commands'`
+ *
+ * `embed/` 属旧层；那会新增一条"旧层 → 内核层"的反向依赖边，而
+ * `tests/architecture/kernel-legacy-isolation.test.ts` 对未登记的边一律判红。
+ * 登记一条**迁移**边（理由 + 退出阶段）在本处是错的口径：这里不需要任何新能力，
+ * 只是要一个已经被 `Context` 公开的方法的入参/返回类型 —— 从它推出来即可，
+ * 于是既没有新依赖边、也不会与内核契约漂移（签名变了这里跟着变）。
+ */
+type ContentEditCommand = Parameters<Context['submitContentEditSettlement']>[0]
+type ContentEditOutcome = ReturnType<Context['submitContentEditSettlement']>
 
 export interface EmbedAssemblyProbe {
   /** 本实例的 profile（生产嵌入恒为 `'embed'`）。 */
@@ -53,7 +65,7 @@ export interface EmbedAssemblyProbe {
    * （被裁能力 ⇒ `UnsupportedOperation`）。夹具不得直接调 `reduceCommand` ——
    * 那会绕过"这个实例到底有没有能力"这一被测事实。
    */
-  attemptCommand(command: Command): CommandOutcome | null
+  attemptCommand(command: ContentEditCommand): ContentEditOutcome
 }
 
 const probes: EmbedAssemblyProbe[] = []
@@ -107,6 +119,6 @@ export function createEmbedAssemblyProbe(input: {
     pruned: () => input.assembly.pruned,
     prunedLandings: () => input.assembly.prunedLandings,
     contextId: () => input.ctx.requireKernelSession().contextId,
-    attemptCommand: (command: Command) => input.ctx.submitContentEditSettlement(command),
+    attemptCommand: (command: ContentEditCommand) => input.ctx.submitContentEditSettlement(command),
   })
 }

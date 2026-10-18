@@ -50,7 +50,7 @@ import WorkspaceTabs from '@/workbench/components/WorkspaceTabs.vue'
 import StatusBar from '@/workbench/components/StatusBar.vue'
 import ExportWorkspace from '@/workbench/components/ExportWorkspace.vue'
 import MaterialGallery from '@/workbench/ux/panels/MaterialGallery.vue'
-import { EmbedPreview } from '@/shared/viewport/embedPreview'
+import EmbedViewport from '@/shared/viewport/EmbedViewport.vue'
 import { buildEmbedSettingsFromMain } from '@/viewer/viewerConfig'
 import type { EmbedSettings } from '@/viewer/viewerConfig'
 import { createSelectionContext } from '@/context/selection'
@@ -443,7 +443,7 @@ type WorkbenchWorkspace = 'preview' | 'wiki' | 'export' | 'materials'
           ref="areaHostRef"
         />
         <div v-else-if="workspace === 'wiki' && ctx.hasLoadedDocument()" class="wb-wiki-embed">
-          <EmbedPreview :settings="embedSettings" :style="{ width: `${embedPublish.viewWidth}px`, height: `${embedPublish.viewHeight}px` }" />
+          <EmbedViewport :settings="embedSettings" :style="{ width: `${embedPublish.viewWidth}px`, height: `${embedPublish.viewHeight}px` }" />
         </div>
       </template>
       <template v-if="!propsCollapsed" #properties>

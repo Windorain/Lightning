@@ -195,15 +195,32 @@ describe('P6 开放接缝 · 登记在 `SEAMS` 且阻塞方**为真**', () => {
     expect(seamById(ENTRY_ID), '已退役的接缝不得留在 SEAMS 里（表长 = 双轨剩余数）').toBeUndefined()
   })
 
-  it('**旧机制不得复活**：`useMultiblockChannels.ts` 已删除，且两个视口不再引用它', () => {
+  /**
+   * ## M7-4 段 B 更新（钉错了文件，不是放宽）
+   *
+   * 判据原本钉的是"**两个视口文件**里含 `useKernelChannels`"。合壳后视口粘合只有一份
+   * （`shared/viewport/EditorViewportHost.vue`），两个壳已不再直接引用它 —— 旧写法会把
+   * **正确的收敛**判成"替代面不在服役"。
+   *
+   * 意图不变且更严：①旧机制不得复活；②替代面必须在**两个壳实际走的那条路径**上服役
+   * （不是"两边都没有"的空洞绿）；③两个壳必须经该唯一实现。
+   *
+   * 读数（M7-4 段 B）：合壳前 Embed/Workbench 命中 `useKernelChannels` 均 true；
+   * 合壳后两壳均 false（0 处直接调用），唯一宿主 true，两壳 import 宿主 = true。
+   */
+  it('**旧机制不得复活**：`useMultiblockChannels.ts` 已删除，且视口路径不再引用它', () => {
     const rel = 'shared/viewport/useMultiblockChannels.ts'
     expect(fs.existsSync(path.join(SRC, rel)), '该文件已随 #282 删除（整文件退役）').toBe(false)
-    // 两个视口已改吃内核读面（`useKernelChannels`）—— 不得再引用旧机制。
+    // 两个壳与唯一宿主都不得引用旧机制。
     expect(codeOf('shared/viewport/EmbedViewport.vue').includes('useMultiblockChannels')).toBe(false)
     expect(codeOf('workbench/components/WorkbenchViewport.vue').includes('useMultiblockChannels')).toBe(false)
-    // 反空洞真：替代面确实在服役（否则"不引用旧的"可能只是因为两边都没有）
-    expect(codeOf('shared/viewport/EmbedViewport.vue').includes('useKernelChannels')).toBe(true)
-    expect(codeOf('workbench/components/WorkbenchViewport.vue').includes('useKernelChannels')).toBe(true)
+    expect(codeOf('shared/viewport/EditorViewportHost.vue').includes('useMultiblockChannels')).toBe(false)
+    // 反空洞真：替代面确实在**两个壳走的那条路径**上服役（M7-4 合壳后的唯一落点）。
+    expect(codeOf('shared/viewport/EditorViewportHost.vue').includes('useKernelChannels'), '唯一视口宿主必须吃内核通道读面').toBe(true)
+    for (const shell of ['shared/viewport/EmbedViewport.vue', 'workbench/components/WorkbenchViewport.vue']) {
+      // 用**标识符**判定（`codeOf` 会剥掉字符串字面量，模块路径在那里不算代码）。
+      expect(codeOf(shell).includes('EditorViewportHost'), shell + ' 必须经唯一视口宿主（替代面在它上面）').toBe(true)
+    }
   })
 
   it('替代机制**已就位且在生产服役**：取值归 `EditContext`，经会话读写', () => {
@@ -418,10 +435,24 @@ describe('P6 已核销项 · 回归断言（防被改回去）', () => {
       codeOf('runtime/viewportBinder.ts').includes('unregisterRegion'),
       'viewportBinder 的 unbind 不得注销 region 系统（会破坏重挂）',
     ).toBe(false)
+    /*
+     * ## M7-4 段 B 更新（钉错了文件，不是放宽）
+     *
+     * 合壳前"真正的拆解点"是 `WorkbenchViewport.vue`；合壳后两个宿主共用同一条卸载路径
+     * （`shared/viewport/EditorViewportHost.vue`，D6 就在那里修好：嵌入侧此前**漏了**这一句）。
+     * 意图不变：①unbind 不归零；②binder 不注销 region；③真正的拆解点归零槽位；
+     * ④**两个壳都不得自己再写一份**（否则又是两份实现）。
+     */
     expect(
-      codeOf('workbench/components/WorkbenchViewport.vue').includes('ctx.viewports.unregister('),
+      codeOf('shared/viewport/EditorViewportHost.vue').includes('ctx.viewports.unregister('),
       '真正的拆解点必须归零槽位',
     ).toBe(true)
+    for (const shell of ['shared/viewport/EmbedViewport.vue', 'workbench/components/WorkbenchViewport.vue']) {
+      expect(
+        codeOf(shell).includes('ctx.viewports.unregister('),
+        shell + ' 不得自己再写一份槽位归零（归零只在唯一宿主里）',
+      ).toBe(false)
+    }
   })
 
   it('B5 #7：`composition/shell.ts` 是**唯一**读取旧宿主环境变量的地方（迁移窗口恰一处）', () => {

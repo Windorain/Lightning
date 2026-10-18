@@ -540,8 +540,24 @@ export const M_SHELL_WORKBENCH = moduleDecl({
  *
  * 注意它 `requires` 的是 `workspace.layout`（布局**模型**）而**不是** `layout.edit`
  * —— 于是"嵌入也有 Area 布局模型，但没有布局编辑能力"是装配层面的事实。
- * 「相同挂载机制」（#257 明文）由两端共用 `workspace.layout` + 同一个
- * `AreaHost` 承载（见 `editors/AreaHost.vue`）。
+ *
+ * ## 「相同挂载机制」（#257 明文）实际指什么（M7-4 更正）
+ *
+ * 本行此前写的是"两端共用 `workspace.layout` + 同一个 `AreaHost`"。**那与生产事实不符**
+ * （S0-A §1.3 / S0-B D7）：嵌入不创建 `AreaSession`（`runtime/host/workbenchHost` 只在
+ * `shell.adjustableLayout` 为真时建会话），因此也从不会挂 `editors/AreaHost.vue`。
+ *
+ * M7-4 收敛后的准确形态是两层共用、一层不共用：
+ *
+ * | 层 | 两宿主是否共用 | 落点 |
+ * |---|---|---|
+ * | 布局**模型** | 共用（装配声明） | `workspace.layout` 能力（本模块 `requires`） |
+ * | **视口宿主**（挂载/载入/相机/卸载/槽位归零） | **共用同一组件** | `shared/viewport/EditorViewportHost.vue`（唯一实现） |
+ * | Area 会话与实例账本 | **不共用**（嵌入装配无 `layout.edit`） | `workbenchHost` 的 `if (shell.adjustableLayout)` |
+ *
+ * ⇒ "相同挂载机制"= 同一个视口宿主组件的同一套卸载契约（detach → 注销输入域 →
+ * dispose → **槽位归零**），不是"同一个 AreaHost"。本条按实际收敛形态改写，
+ * 不再保留一个可被读成"嵌入有 Area 实例"的假声明。
  */
 export const M_SHELL_EMBED = moduleDecl({
   id: 'shells.embed',
@@ -550,7 +566,7 @@ export const M_SHELL_EMBED = moduleDecl({
   contributes: {
     shellLayouts: [{ shellId: 'embed', adjustableLayout: false, regions: ['viewport', 'channels', 'timeline'] }],
   },
-  note: '嵌入外壳（查看器）：固定布局，省略布局编辑命令；与工作台共用相同挂载机制。',
+  note: '嵌入外壳（查看器）：固定布局，省略布局编辑命令；与工作台共用同一个视口宿主组件（EditorViewportHost）与同一套卸载契约，但不建 Area 会话（装配无 layout.edit）。',
 })
 
 /** Wiki 工作台外壳（工作台的 Wiki 宿主形态）。 */
