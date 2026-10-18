@@ -66,6 +66,7 @@ import type { KernelAnnotationView, KernelMaterialView } from '@/runtime/annotat
 const EMPTY_MATERIAL_VIEWS: readonly KernelMaterialView[] = Object.freeze([])
 import { frameCount as axisFrameCount, frameDurationsMs, type DocumentContent } from '@/domain/content'
 import { sceneSecondsOf } from '@/domain/animation'
+import type { Version } from '@/domain/identity'
 import type { Document } from '@/domain/document'
 import type { MultiblockBody, MultiblockDeclaration } from '@/domain/multiblockDocument'
 import {
@@ -1411,6 +1412,49 @@ export class Context {
     if (evaluation === null) return kernelDoc
     return derivedPresentationDocument(kernelDoc, evaluation)
   }
+
+  /**
+   * **导出捕获读面：与屏上同一个求值点**（M6-3；Q10 已批准的方案 A）。
+   *
+   * ## 为什么要有它（而不是让导出装配自己拼求值）
+   *
+   * 屏上的画面源是 `kernelPresentationDocument()`（`useViewportRuntime` 的
+   * `applyPresenterSurface` 每帧调它）。导出要"与屏上同一个求值点"，最弱也最容易漂移的
+   * 做法是让装配层直接调 `evaluateMultiblockPresentation` 再自己读 `kernel.channelValues()`
+   * —— 那会把"取值 → 派生"的组合在第二个地方重新拼一遍；一旦本类的 memo 键
+   * （见 {@link kernelMultiblockEvaluation}）扩展（加 layer/runstate 之类），导出侧不会跟着变，
+   * 于是又出现"屏上对、导出不对"。
+   *
+   * ⇒ 本方法只做三件事：**调同一个** {@link kernelPresentationDocument}、
+   * 取出它的 `scene`/`content`/`version`、再附上本次求值用的取值表。
+   * 它不新增任何求值分支，也不缓存第二份结果。
+   *
+   * ## 返回值是**值**（不是句柄）
+   *
+   * `scene`/`content` 是内核不可变文档的一部分（结构共享），`version` 是捕获时刻的内容版本，
+   * `channels` 是取值快照。导出把它们冻进 `ExportRequest` 后就不再回读本类 ——
+   * 这就是 A29「导出期间继续编辑不改变本次快照」的结构性依据。
+   *
+   * `null` = 无会话/未采纳内容（消费方**如实失败**，不回落旧文档 —— 那会变成第二条内容权威）。
+   */
+  kernelPresentationSnapshot(): {
+    readonly scene: Scene
+    readonly content: DocumentContent
+    readonly version: Version
+    readonly channels: Readonly<Record<string, number>>
+  } | null {
+    const doc = this.kernelPresentationDocument()
+    if (doc === null) return null
+    const kernel = this.kernel
+    if (kernel === null) return null
+    return Object.freeze({
+      scene: doc.scene,
+      content: doc.content,
+      version: doc.version,
+      channels: Object.freeze({ ...kernel.channelValues() }),
+    })
+  }
+
 
   /**
    * 内核侧注解行；**`null` = 未装配成功**（GF-16）。

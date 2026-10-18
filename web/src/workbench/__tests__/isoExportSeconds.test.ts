@@ -7,7 +7,7 @@
  * - 负数**允许**（采样器对负时间取模；钳制它会制造第二种语义）。
  */
 import { describe, expect, it } from 'vitest'
-import { normalizeIsoSeconds } from '@/workbench/exportIsometricImage'
+import { normalizeIsoSeconds } from '@/application/captureInput'
 
 describe('normalizeIsoSeconds · 缺省与合法输入', () => {
   it('undefined ⇒ 0（缺省 = 0 秒）', () => {
