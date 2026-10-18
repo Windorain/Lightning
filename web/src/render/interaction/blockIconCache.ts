@@ -67,6 +67,31 @@ export interface BlockIconCacheOptions {
 /** 变更 ortho/size 等布局时递增，供 `setRevisionKey` 拼接以重烘 */
 export const BLOCK_ICON_LAYOUT_REVISION = '1'
 
+/**
+ * 图标烘焙上下文丢失时的**显式失败**（M8-3 / S0-A D10）。
+ *
+ * 图标缓存用**独立** WebGLRenderer（不占视口画布）。它的上下文丢失时，
+ * `renderer.render()` 会按 three 的实现**静默返回**，随后 `drawImage(src)` 会把一张
+ * 空画布拷进缓存并标成 `ready` ⇒ 图标永久空白且无报错（SPEC §10.7:309 禁止的
+ * "静默错误"）。⇒ 烘焙前后都检查上下文：丢失就抛这个稳定原因，由 `bakeOne` 落
+ * `status: 'error'`（可见、可重试），**绝不**缓存空白。
+ */
+export const ICON_BAKE_CONTEXT_LOST = 'icon-bake:webgl-context-lost'
+
+/**
+ * 烘焙上下文是否已不可用（取不到上下文也算不可用 —— 不拿空白冒充图标）。
+ *
+ * 纯函数（只读守卫）；`isContextLost()` 在个别实现上可能抛，按不可用处理。
+ */
+export function iconBakeContextLost(gl: { isContextLost(): boolean } | null | undefined): boolean {
+  if (gl === null || gl === undefined) return true
+  try {
+    return gl.isContextLost()
+  } catch {
+    return true
+  }
+}
+
 type ResolvedIconOpts = Required<BlockIconCacheOptions>
 
 const defaultOpts: ResolvedIconOpts = {
@@ -103,6 +128,12 @@ export class BlockIconCache {
   private revision = ''
 
   private disposed = false
+
+  /** 图标烘焙上下文是否已丢失（丢失期**不得**入缓存；见 ICON_BAKE_CONTEXT_LOST）。 */
+  private contextLost = false
+
+  /** 烘焙画布上的设备事件监听（拆解时显式注销 —— 与视口侧同一条 D11 纪律）。 */
+  private contextListeners: { canvas: HTMLCanvasElement; onLost: (ev: Event) => void; onRestored: () => void } | null = null
 
   /** 部件物品图标纹理源（通道 1；P1.7/P1.8 产物接入点） */
   private partIconSource: PartIconTextureSource | null = null
@@ -278,6 +309,19 @@ export class BlockIconCache {
     const s = this.opts.sizePx
     r.setSize(s, s, false)
     r.setClearColor(this.opts.clearColor, this.opts.clearAlpha)
+    // 独立上下文的丢失/恢复：丢失期置位（阻断空白入库），恢复后重试因丢失失败的图标。
+    const canvasEl = r.domElement
+    const onLost = (ev: Event): void => {
+      ev.preventDefault()
+      this.contextLost = true
+    }
+    const onRestored = (): void => {
+      this.contextLost = false
+      this.retryContextLossFailures()
+    }
+    canvasEl.addEventListener('webglcontextlost', onLost, false)
+    canvasEl.addEventListener('webglcontextrestored', onRestored, false)
+    this.contextListeners = { canvas: canvasEl, onLost, onRestored }
     this.renderer = r
     return r
   }
@@ -408,7 +452,15 @@ export class BlockIconCache {
       // 这与 `bakeRevisionKey`（`setRevisionKey` 设的缓存键）是同一政策的两半：
       // 键说"这份图标由哪些输入决定"，而本行说"那些输入里时间取哪个值"。
       this.library.setSceneTime(0)
+      // D10：丢失期**不得**渲染后拷一张空画布进缓存。
+      if (this.contextLost || iconBakeContextLost(renderer.getContext())) {
+        throw new Error(ICON_BAKE_CONTEXT_LOST)
+      }
       renderer.render(scene, cam)
+      // 渲染中途丢失同样不可信（render 会静默返回）—— 落缓存前再验一次。
+      if (this.contextLost || iconBakeContextLost(renderer.getContext())) {
+        throw new Error(ICON_BAKE_CONTEXT_LOST)
+      }
 
       const src = renderer.domElement
       const canvas = document.createElement('canvas')
@@ -422,6 +474,22 @@ export class BlockIconCache {
     } finally {
       disposeMesh?.()
     }
+  }
+
+  /**
+   * 恢复后重试**因上下文丢失而失败**的图标（只动这一类错误，不碰真实资源错误）。
+   */
+  private retryContextLossFailures(): void {
+    const hostKeys: string[] = []
+    const partKeys: string[] = []
+    for (const [key, entry] of [...this.map.entries()]) {
+      if (entry.status !== 'error' || entry.error?.message !== ICON_BAKE_CONTEXT_LOST) continue
+      this.map.delete(key)
+      if (this.partIconKeys.has(key)) partKeys.push(key)
+      else hostKeys.push(key)
+    }
+    if (hostKeys.length > 0) this.ensure(hostKeys)
+    if (partKeys.length > 0) this.ensurePartIcons(partKeys)
   }
 
   private clearEntries(): void {
@@ -441,6 +509,11 @@ export class BlockIconCache {
     if (this.disposed) return
     this.disposed = true
     this.clearEntries()
+    if (this.contextListeners !== null) {
+      this.contextListeners.canvas.removeEventListener('webglcontextlost', this.contextListeners.onLost, false)
+      this.contextListeners.canvas.removeEventListener('webglcontextrestored', this.contextListeners.onRestored, false)
+      this.contextListeners = null
+    }
     this.renderer?.dispose()
     this.renderer?.forceContextLoss?.()
     this.renderer = null
