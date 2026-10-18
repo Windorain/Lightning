@@ -41,6 +41,7 @@
 
 import { ok, err, unsupportedOperation, type DomainError, type Result } from '@/domain/errors'
 import { PNG_COLOR_TYPE_RGBA } from './pngEncoder'
+import { encodingAllowedFor, supportedEncodingsFor } from '@/application/exportPlan'
 import type { ArtifactEncoding, EncoderInput, EncoderPort, ExportKind, RenderedFrame } from '@/application/exportPlan'
 import { encodePngFromRgba } from './pngEncoder'
 import { createGifEncoderPort } from './gifEncoderPort'
@@ -201,6 +202,7 @@ export function createEncoderPort(
         }
       }
 
+      // 先判「谁都没声明这个种类」—— 那是最粗的一层，诊断也最直接。
       const byKind = parts.filter((p) => p.supportedKinds.includes(input.kind))
       if (byKind.length === 0) {
         return err(
@@ -211,6 +213,21 @@ export function createEncoderPort(
           }),
         )
       }
+
+      // **kind × encoding 兼容表**：预检与组合端口读的是**同一张表**（不各写一份 switch）。
+      // 再判「这个组合本身合法吗」—— 它与「缺个能做它的端口」是两件事，
+      // 混成一码会让「image+gif 这个组合不成立」看起来像「缺个 GIF 端口」。
+      if (!encodingAllowedFor(input.kind, input.encoding)) {
+        return err(
+          unsupportedOperation({
+            reason: 'encodingNotAllowedForKind',
+            kind: input.kind,
+            encoding: input.encoding,
+            allowed: supportedEncodingsFor(input.kind).join(','),
+          }),
+        )
+      }
+
       const chosen = byKind.length === 1
         ? byKind[0]!
         : byKind.find((p) => (p.supportedEncodings ?? []).includes(input.encoding))

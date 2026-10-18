@@ -462,15 +462,26 @@ describe('E2·E3·E4 · 真实 PNG 字节 + 像素真的进去了', () => {
       if (!r.ok) expect(r.error.params.reason).toBe('encoderKindUnsupported')
     }
 
-    // animation 种类**有** GIF part，但 png 不是它的格式 ⇒ 格式级拒绝（不是"种类不支持"）。
+    // animation+png / image+gif 是**组合本身不合法**（kind×encoding 兼容表）⇒ 组合端口据此判红。
     const wrongFormat = await encoder.encode({ request, kind: 'animation', encoding: 'png', rendered: [frame], signal: { cancelled: false } })
     expect(wrongFormat.ok).toBe(false)
-    if (!wrongFormat.ok) expect(wrongFormat.error.params.reason).toBe('encoderEncodingUnsupported')
+    if (!wrongFormat.ok) {
+      expect(wrongFormat.error.params.reason).toBe('encodingNotAllowedForKind')
+      expect(wrongFormat.error.params.allowed).toBe('gif')
+    }
 
-    // image + gif **不会**被静默按 PNG 编出来：PNG part 只声明 png。
+    // image + gif **不会**被静默按 PNG 编出来。
     const imageGif = await encoder.encode({ request, kind: 'image', encoding: 'gif', rendered: [frame], signal: { cancelled: false } })
     expect(imageGif.ok, 'image+gif 不得静默产出 PNG 字节却叫 gif').toBe(false)
-    if (!imageGif.ok) expect(imageGif.error.params.reason).toBe('encoderEncodingUnsupported')
+    if (!imageGif.ok) {
+      expect(imageGif.error.params.reason).toBe('encodingNotAllowedForKind')
+      expect(imageGif.error.params.allowed).toBe('png,jpeg')
+    }
+
+    // 「组合合法但没有端口能做」的另一半：image+jpeg（PNG part 只声明 png）。
+    const noJpeg = await encoder.encode({ request, kind: 'image', encoding: 'jpeg', rendered: [frame], signal: { cancelled: false } })
+    expect(noJpeg.ok).toBe(false)
+    if (!noJpeg.ok) expect(noJpeg.error.params.reason).toBe('encoderEncodingUnsupported')
   })
 
   it('E3：零帧被显式拒绝（不产出"空但合法"的 PNG）', async () => {
