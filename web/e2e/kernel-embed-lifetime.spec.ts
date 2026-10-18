@@ -25,31 +25,36 @@
  */
 
 import { expect, test, type Page } from '@playwright/test'
+import { readEmbedInstanceLifecycles, type EmbedInstanceLifecycle } from './helpers/areaLifetime'
 
 const PAGE = '/e2e/pages/embed-dual.html'
 
-/** 一个实例此刻的寿命读数（全部来自产品读面）。 */
+/**
+ * 一个实例此刻的寿命读数：**三条读面合并**（全部来自产品）。
+ *
+ * - 视口槽位 + 帧循环：`helpers/areaLifetime#readEmbedInstanceLifecycles`
+ *   （按实例登记的装配探针；判据与工作台的 `readRegionLifecycle` 同一条 `slotLive`）；
+ * - 观测面登记：`__log__.instanceIds()` / `probes().length`；
+ * - 画布：DOM 计数（"组件树真的卸载了"，不是 `v-show` 藏起来）。
+ */
 interface LifecycleReading {
   probeCount: number
-  /** 每个在册实例的 `lifecycle()`（顺序 = 挂载顺序）。 */
-  live: { viewportSlotPresent: boolean; viewportLive: boolean; frameClockRunning: boolean }[]
-  /** `__log__.instanceIds()`（`__log__` 不存在时为空）。 */
+  instances: EmbedInstanceLifecycle[]
   logInstanceIds: string[]
-  /** 画布计数（DOM）。 */
   canvases: number
 }
 
 async function readLifecycle(page: Page): Promise<LifecycleReading> {
-  return (await page.evaluate(() => {
-    const probes = ((window as any).__lk_embed__?.probes?.() ?? []) as any[]
+  const instances = await readEmbedInstanceLifecycles(page)
+  const rest = (await page.evaluate(() => {
     const log = (window as any).__log__
     return {
-      probeCount: probes.length,
-      live: probes.map((p) => p.lifecycle()),
-      logInstanceIds: log?.instanceIds?.() ?? [],
+      probeCount: ((window as any).__lk_embed__?.probes?.() ?? []).length,
+      logInstanceIds: (log?.instanceIds?.() ?? []) as string[],
       canvases: document.querySelectorAll('.vc-viewport canvas').length,
     }
-  })) as LifecycleReading
+  })) as { probeCount: number; logInstanceIds: string[]; canvases: number }
+  return { ...rest, instances }
 }
 
 async function waitDualReady(page: Page): Promise<void> {
@@ -76,8 +81,8 @@ test.describe('M7-6 · G7 嵌入实例显式销毁 / 失败面', () => {
     expect(baseline.canvases, '基线必须有两个在用实例的画布').toBe(2)
     expect(baseline.probeCount, '基线必须有两个在册装配探针').toBe(2)
     expect(baseline.logInstanceIds.length, '基线必须有两个在册日志实例').toBe(2)
-    for (const [i, l] of baseline.live.entries()) {
-      expect(l.viewportLive, `基线实例 ${i} 的视口必须活着（前提）`).toBe(true)
+    for (const [i, l] of baseline.instances.entries()) {
+      expect(l.slotLive, `基线实例 ${i} 的视口必须活着（前提）`).toBe(true)
       expect(l.frameClockRunning, `基线实例 ${i} 的帧循环必须在跑（前提）`).toBe(true)
     }
 
@@ -108,7 +113,7 @@ test.describe('M7-6 · G7 嵌入实例显式销毁 / 失败面', () => {
     expect(withFour.probeCount, '四个实例 ⇒ 四条装配探针登记').toBe(4)
     expect(withFour.logInstanceIds.length, '四个实例 ⇒ 四条日志登记').toBe(4)
     // 【前提】两个新实例的帧循环真的在跑（"回基线"要求它们确实曾经在跑）
-    expect(withFour.live.slice(2).every((l) => l.frameClockRunning), '新实例的帧循环必须在跑（前提）').toBe(true)
+    expect(withFour.instances.slice(2).every((l) => l.frameClockRunning), '新实例的帧循环必须在跑（前提）').toBe(true)
 
     // ── ② 显式销毁一个（真实调用 mount() 返回的 unmount()）──
     const unmountedX = await page.evaluate(() => (window as any).__embedDual__.unmount('#embed-x'))
@@ -141,8 +146,8 @@ test.describe('M7-6 · G7 嵌入实例显式销毁 / 失败面', () => {
     expect(restored.probeCount, '⚠️ G7：销毁后装配探针登记必须回到基线').toBe(baseline.probeCount)
     expect(restored.logInstanceIds.length, '⚠️ G7：销毁后日志登记必须回到基线').toBe(baseline.logInstanceIds.length)
     // 剩下两个实例**不受牵连**（销毁 A 不得把 B 的呈现/时钟一起弄停）
-    for (const [i, l] of restored.live.entries()) {
-      expect(l.viewportLive, `销毁别的实例不得影响实例 ${i} 的视口`).toBe(true)
+    for (const [i, l] of restored.instances.entries()) {
+      expect(l.slotLive, `销毁别的实例不得影响实例 ${i} 的视口`).toBe(true)
       expect(l.frameClockRunning, `销毁别的实例不得停掉实例 ${i} 的帧循环`).toBe(true)
     }
 

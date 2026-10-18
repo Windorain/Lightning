@@ -67,6 +67,7 @@ const { host, ctx } = createEmbedHost(settings, {
 let unregisterAssemblyProbe: (() => void) | null = null
 onMounted(() => {
   unregisterAssemblyProbe = registerEmbedAssemblyProbe(createEmbedAssemblyProbe({
+    instanceId: props.instanceId ?? 'embed',
     profileId: shell.profileId,
     regionId: REGION.EMBED,
     assembly: shell.assembly,

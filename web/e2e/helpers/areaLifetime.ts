@@ -415,3 +415,46 @@ export async function readRegionLifecycle(
     return { areas, inputIds, byRegion }
   }, [...regionIds])) as RegionLifecycleReading
 }
+
+/**
+ * M7-6 · **嵌入实例的生命周期读数**（G7；同一个 `slotLive` 判据的另一条入口）。
+ *
+ * ## 为什么不直接用 `readRegionLifecycle`
+ *
+ * 那个读面读 `window.__vm__` —— 它是**工作台**的观测面（`WorkbenchRoot` 安装、
+ * 指向唯一 ctx）。嵌入页没有它，而且**不该有**：`__vm__` 是单值全局，
+ * 同页两个嵌入谁后挂谁覆盖 —— 正是 M7-6 要消灭的那类"最后写者胜"。
+ *
+ * 故嵌入侧走**按实例登记**的装配探针（`embed/embedAssemblyProbe`）：
+ * 每个实例一条，读的是**本实例**的视口槽位。判据与 `RegionLifecycleProbe#slotLive`
+ * **同一条**（`camera` 与 `domElement` 都非空才算活着，见
+ * `runtime/viewportManager#isSlotLive`），于是两条读面对"槽位活着"的定义不会漂移。
+ *
+ * 返回的每一项额外带 `frameClockRunning`（外壳帧循环是否还在推进）——
+ * 只看 DOM 会被"画布没了但 RAF 还在跑"假绿。
+ */
+export interface EmbedInstanceLifecycle {
+  /** 实例身份（与持久键/日志登记的键同一个）。 */
+  instanceId: string
+  /** 视口槽位是否仍登记。 */
+  slotPresent: boolean
+  /** 槽位是否仍持有承载资源（= `isSlotLive` 的同一判据）。 */
+  slotLive: boolean
+  /** 外壳帧循环是否仍在跑。 */
+  frameClockRunning: boolean
+}
+
+export async function readEmbedInstanceLifecycles(page: Page): Promise<EmbedInstanceLifecycle[]> {
+  return (await page.evaluate(() => {
+    const probes = ((window as any).__lk_embed__?.probes?.() ?? []) as any[]
+    return probes.map((p) => {
+      const l = p.lifecycle()
+      return {
+        instanceId: String(p.instanceId ?? ''),
+        slotPresent: Boolean(l.viewportSlotPresent),
+        slotLive: Boolean(l.viewportLive),
+        frameClockRunning: Boolean(l.frameClockRunning),
+      }
+    })
+  })) as EmbedInstanceLifecycle[]
+}

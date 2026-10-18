@@ -44,6 +44,13 @@ type ContentEditCommand = Parameters<Context['submitContentEditSettlement']>[0]
 type ContentEditOutcome = ReturnType<Context['submitContentEditSettlement']>
 
 export interface EmbedAssemblyProbe {
+  /**
+   * **本实例身份**（M7-6；与持久化键、`__log__` 登记同一个键）。
+   *
+   * 为什么观测面必须有它：多实例页上"这条读数属于谁"必须能指名 ——
+   * 否则失败/寿命判据只能靠"第几个 probe"猜测（顺序会随卸载变化）。
+   */
+  readonly instanceId: string
   /** 本实例的 profile（生产嵌入恒为 `'embed'`）。 */
   readonly profileId: string
   /** 本实例的视口 region（独立嵌入 = `r-embed`；Wiki 预览走工作台 ctx，不经本面）。 */
@@ -123,12 +130,14 @@ if (typeof window !== 'undefined') {
 
 /** 供 `EmbedRoot` 组装的便捷构造（把 `ShellRuntime` + `Context` 收成一个只读面）。 */
 export function createEmbedAssemblyProbe(input: {
+  readonly instanceId: string
   readonly profileId: string
   readonly regionId: string
   readonly assembly: Assembly
   readonly ctx: Context
 }): EmbedAssemblyProbe {
   return Object.freeze({
+    instanceId: input.instanceId,
     profileId: input.profileId,
     regionId: input.regionId,
     assembly: () => input.assembly,
