@@ -1,22 +1,37 @@
 <script setup lang="ts">
 /**
- * EmbedViewport — 嵌入场景的视口消费者。
+ * `EmbedViewport` —— 嵌入（查看器）视口的**薄包装**（M7-4 段 B）。
  *
- * 对齐 WorkbenchViewport：
- * - useContext() 取 ctx
- * - 本地 DRW 管理 mesh/材质/帧状态
- * - 叶子组件全部 props/emits
+ * ## 本文件现在只负责"嵌入这一侧的呈现与策略"
+ *
+ * 视口粘合（通道取值、视口运行时、载入时机、相机纪律、dock tab、卸载顺序）已收敛到
+ * `shared/viewport/EditorViewportHost.vue`（唯一实现）。这里提供的是**嵌入特有**的
+ * 呈现与策略：
+ *
+ * | 面 | 说明 |
+ * |---|---|
+ * | 标题栏 / 全屏 / 设置面板 / 调试状态栏 | 嵌入的页面壳（工作台没有这些 DOM） |
+ * | 统计侧栏 + 物品行选中 → 描边 mask | 查看器的左栏（工作台用属性面板） |
+ * | 悬浮 `ToolTipBox` | M3-shell B1 用户裁决：编辑器视口无悬浮框，渲染器视口有 |
+ * | 输入 | hover + **触摸** + keymap（工作台注入 gizmo/keymap） |
+ * | dock | 由 `features` 开关决定、空时不渲染 |
+ *
+ * ## 它**没有** `if (isEmbed)`
+ *
+ * 差异全在策略值（`EditorViewportPolicy`）与装配（`ShellRuntime`）里；本组件内部不问
+ * "我是不是嵌入"，也不问宿主名（SPEC §4.1 / §10.10）。
+ *
+ * ## 相机纪律：那一份 `didInitCamera` 已删除
+ *
+ * 旧实现自己在 `loadStatus==='ok'` 时执行一次 `OPERATOR_INIT_VIEWPORT_CAMERA`，与
+ * `runtime/attachViewport#claimInitialViewportCamera` 的按 region 台账**重复**：
+ * 一次挂载可能框选两次，且与"换文档才重新框选"的语义相反（M7-2/D1 的台账是唯一纪律）。
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import * as THREE from 'three'
 import { useContext } from '@/runtime/context'
-import { hostKey } from '@/runtime/host'
-import type { Host } from '@/runtime/host'
 import { resolveEmbedViewportRegionId, resolveEmbedViewerPreferences } from '@/runtime/embedViewportRegion'
-import { useViewportRuntime } from '@/shared/viewport/useViewportRuntime'
-import { useKernelChannels } from '@/shared/viewport/useKernelChannels'
-import { availableDockTabs, defaultDockTab, resolveDockTab, type ViewportDockTab } from '@/shared/viewport/dockTabs'
-import { blockRefFromViewportHover } from '@/runtime/hover'
+import { blockRefFromViewportHover, embedHoverFromState } from '@/runtime/hover'
 import { createEmbedSidebarOutlineMasks } from '@/runtime/embedSidebarOutline'
 import { createEmbedItemOutlineMasks } from '@/runtime/embedItemOutline'
 import {
@@ -33,111 +48,36 @@ import {
   type ItemSelectionState,
 } from '@/pure/itemSelection'
 import { OUTLINE_MASK_LIMIT } from '@/presentation/outlineBudget'
-import RenderEngineHost from '@/shared/viewport/RenderEngineHost.vue'
-import type { RenderEngineReadyPayload } from '@/runtime/renderEngine'
 import { createHoverHandler } from '@/handlers/hoverHandler'
-import ViewportFrameLayerDock from '@/shared/viewport/ViewportFrameLayerDock.vue'
-import ToolTipBox from '@/shared/viewport/ToolTipBox.vue'
-import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
-import type { EmbedSettings } from '@/viewer/viewerConfig'
 import { createKeymapHandler } from '@/handlers/keymapHandler'
 import { createEmbedTouchHandler } from '@/embed/embedTouchHandler'
 import { sceneDisplayTitleFromRootDocument } from '@/viewer/sceneDisplayTitle'
-import { embedHoverFromState } from '@/runtime/hover'
 import { useEmbedTooltip } from '@/shared/viewport/useEmbedTooltip'
 import { useEmbedLayoutProfile } from '@/embed/useEmbedLayoutProfile'
 import EmbedSettingsPanel from '@/embed/components/EmbedSettingsPanel.vue'
+import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
+import ToolTipBox from '@/shared/viewport/ToolTipBox.vue'
+import EditorViewportHost from '@/shared/viewport/EditorViewportHost.vue'
+import EditorViewportDock from '@/shared/viewport/EditorViewportDock.vue'
+import type { EditorViewportHostApi, EditorViewportPolicy } from '@/shared/viewport/editorViewportHost'
+import type { EmbedSettings } from '@/viewer/viewerConfig'
+import type { StructureDefinition } from '@/render/schema/types'
 
 const props = defineProps<{
   settings?: EmbedSettings
 }>()
 
 const ctx = useContext()
-const host = inject(hostKey)! as Host
 
+/** 本实例的视口 region（独立嵌入 `r-embed` / Wiki 预览 `r-wiki-preview`）。 */
 const viewportRegionId = resolveEmbedViewportRegionId(ctx)
 const viewportRegion = ctx.requireRegion(viewportRegionId)
 const hoverState = viewportRegion.state.hover!
 const prefs = resolveEmbedViewerPreferences(ctx)
 
-/**
- * 多方块通道取值（**归内核编辑上下文**；#282 P10b）。
- *
- * 必须在 DRW 构造前创建，`renderDoc` 作为 DRW 的文档来源。
- * 帧为主文档时 `renderDoc` 即 `ctx.legacyRenderSource()`（原文档），渲染路径行为零变化。
- * ⚠️ **#301 P10f D3 更新**：原写"即 `ctx.getDoc()`" —— 该访问器已终删；
- * 渲染链的旧格式源走具名读面 `legacyRenderSource()`（已登记接缝
- * `legacy-render-source-document`，退出 = 渲染链终切）。
- *
- * 与旧 `useMultiblockChannels` 的差别：本 composable **不持有**取值状态
- * （旧形态每视口自持 `state` + `revision`），取值权威是
- * `EditContext.channelValues`，写入经 `setChannelValue` 命令。
- * 于是"同一上下文的所有 Area 读到同一份取值"（#249 §3.3、A05）。
- */
-const mb = useKernelChannels(ctx)
-// #301 P10f D3（R9）：本处曾是 `Context#legacyRenderSource()` 的**生产消费点**之一
-//（渲染链的旧格式源文档）。**R1-β① C5 已改写该消费者**（#385 评论 7140 的授权）：
-// `useEmbedTooltip` 现在吃**内核读面**（元数据 + 注解行），故本组件不再取旧文档本体。
-const metaRef = computed(() => {
-  const m = ctx.documentMetadata()
-  return { author: m.author, gtnhVersion: m.gtnhVersion }
-})
-const annotationsRef = computed(() => ctx.kernelAnnotations())
-const {
-  isMultiblock, renderDoc,
-  panel: channelPanel,
-  setTier: setChannelTier, setChannelValue, setRunstate: setChannelRunstate,
-} = mb
-
-const {
-  drw, vpSlot, loadStatus, meshBusy, blockIconCache, tooltipPalette,
-  structureDefinition, mainMeshGroup, worldFrameIndex, layerWorldY, isPlaying,
-  computed: drwComputed,
-} = useViewportRuntime({
-  ctx,
-  regionId: viewportRegionId,
-  viewerPrefs: prefs,
-  blockIconCacheOptions: props.settings?.blockIconCacheOptions ?? {},
-  initialWorldFrameIndex: props.settings?.initialWorldFrameIndex,
-  renderDocRef: renderDoc,
-  /**
-   * **R1-A C10**：呈现会话包由装配边构造后下行（本组件属旧层，不向上 import 装配根）
-   * —— 接缝 `shared-viewport-upward-imports-assembly-root` 的退出判据之一。
-   * 该接缝**已核销**（R1-β① C10 / 提交 `0219a9eb`：(甲)(乙) 两子句同时成立，
-   * 登记已从 `composition/seams.ts` 的 `SEAMS` 删除），本条即（甲）的生产接线证据之一。
-   */
-  createPresenter: (rid) => host.createViewportPresenter(rid),
-})
-
-const {
-  layerPreviewMode, layerPreviewLabel, gridHeight,
-  hasWorldMultiFrame, worldFrameCount, blockStatsEntries,
-} = drwComputed
-
-/**
- * F2 接线（拍板：**prop 传递**，与 P2.4 的消费点一致 —— `BlockStatsSidebar` 已内建
- * `partIconTextures` prop 并在其 watch 内注入 `BlockIconCache#setPartIconTextureSource`，
- * 故本组件只负责把**文档根字段**送到该 prop，不在视口侧重复注入缓存）。
- *
- * 数据来源 = 渲染定义根（`structureDefinition`，即 DRW 解析后的 `StructureDefinition`）：
- * `partIconTextures` 是**文档根级**字段（非 structure 级），
- * 经解析链（StructureDataParser 根透传 / V2Plain `_extra` 兜底）→ `RuntimeDocument.serialize()`
- * 根展开 → `toStructureDefinition` 浅拷贝挂到该对象上；与侧栏回退读取的
- * `cache.getStructure()` 是**同一份对象**（DRW 用同一 definition 重建图标缓存）。
- * 键 = 物品身份键（`registry:damage[#nbt]`，契约 §5）；缺省/空 ⇒ null（纯回退链，行为同旧文件）。
- * （本轮同级的 `statsTemplate`/`statsOverride` 语义已随决策 C 作废，本组件不再读取。）
- */
-type PartIconTexturesCarrier = { partIconTextures?: Record<string, string> }
-const partIconTextures = computed<Record<string, string> | null>(() => {
-  const raw = (structureDefinition.value as unknown as PartIconTexturesCarrier | null)?.partIconTextures
-  return raw && typeof raw === 'object' ? raw : null
-})
-
 const showSettingsPanel = ref(false)
-
 // ---- Hover / tooltip（region.state.hover + 统一 HOVER handler）----
 const hover = embedHoverFromState(hoverState)
-const engineHostRef = ref<InstanceType<typeof RenderEngineHost> | null>(null)
 const wmRoot = ref<HTMLDivElement | null>(null)
 const sidebarCollapsed = ref(false)
 const { layoutClass, profile } = useEmbedLayoutProfile(wmRoot)
@@ -147,22 +87,6 @@ watch(profile, (p) => {
 }, { immediate: true })
 
 const initCameraProps = { _regionId: viewportRegionId }
-
-const didInitCamera = ref(false)
-watch(loadStatus, (status) => {
-  if (didInitCamera.value || status !== 'ok') return
-  if (!mainMeshGroup.value) return
-  didInitCamera.value = true
-  void ctx.getOperators().exec('OPERATOR_INIT_VIEWPORT_CAMERA', initCameraProps)
-})
-// #301 P10f C′1（N9）：这里要的是**窄**信号 —— "**换了一份文档**"。
-// 原来 watch `getDoc().value`（文档 Ref 身份），等价物是 `getDocumentRevision()`
-// （只在 `replaceDoc` 自增）。
-// ⚠️ **不能**换成 `getContentRefreshTick()`：那一个原地编辑（`requestContentRefresh`，
-// 例如移动方块）也会自增 ⇒ 用户编辑到一半机位被重置回初始视角。
-watch(() => ctx.getDocumentRevision().value, () => {
-  didInitCamera.value = false
-})
 
 /**
  * 旧文件（宿主清单）选中：单值，单击切换。
@@ -175,26 +99,40 @@ const itemSelection = shallowRef<ItemSelectionState>(EMPTY_ITEM_SELECTION)
 const selectedItemKeys = computed<ReadonlySet<string>>(() => itemSelection.value.selected)
 const selectionAnchor = computed<string | null>(() => itemSelection.value.anchor)
 
-/** B-2 落盘 `itemIndex` 的反查索引（消费点；旧文件缺省 ⇒ 空表 ⇒ 全部行"没有对应方块"） */
-const itemHitIndex = computed<ItemHitIndex>(() => buildItemHitIndex(structureDefinition.value))
-
 /** 勿用 ref：深度响应式会代理 Mesh，破坏 Three.js 矩阵访问 */
 const sidebarExtraMasks = shallowRef<THREE.Mesh[]>([])
 const emptySelection = ref(new Set<import('@/context/selection').SelectedEntity>())
+
+const hostRef = ref<InstanceType<typeof EditorViewportHost> | null>(null)
+/**
+ * 宿主的读面 + **它持有的 ref**（tooltip / 描边需要 `Ref` 形态的输入）。
+ *
+ * `vpApi` 用 computed 转发：api 的 getter 在模板/计算副作用里被读 ⇒ 依赖照常收集。
+ * `definitionRef` / `tooltipPaletteRef` 同法转发到宿主内部的 ref（**不复制状态**：
+ * 只有宿主一份定义与调色板，这里只是读路径）。
+ */
+const vpApi = computed<EditorViewportHostApi | null>(() => hostRef.value?.api ?? null)
+const definitionRef = computed<StructureDefinition | null>(() => vpApi.value?.structureDefinition ?? null)
+const tooltipPaletteRef = computed<readonly string[]>(() => vpApi.value?.tooltipPalette ?? [])
+
 const hoveredBlockForOutline = computed(() =>
   blockRefFromViewportHover(ctx, hoverState.viewportBlock.value),
 )
+
 const { rebuildSelectionMasks } = createEmbedSidebarOutlineMasks({
-  definitionRef: vpSlot.definition,
+  definitionRef,
   masksRef: sidebarExtraMasks,
 })
+
+/** B-2 落盘 `itemIndex` 的反查索引（消费点；旧文件缺省 ⇒ 空表 ⇒ 全部行"没有对应方块"） */
+const itemHitIndex = computed<ItemHitIndex>(() => buildItemHitIndex(definitionRef.value))
 
 /**
  * B-5：选中物品键集合 → mask。与 `rebuildSelectionMasks` 写入**同一个** `sidebarExtraMasks`
  * 通道（`drw.bindSelectionOutline` 的 `extraMaskMeshes`），因此呈现与 hover 完全一致。
  */
 const { rebuildItemSelectionMasks, plan: itemOutlinePlan } = createEmbedItemOutlineMasks({
-  definitionRef: vpSlot.definition,
+  definitionRef,
   masksRef: sidebarExtraMasks,
   indexRef: () => itemHitIndex.value,
   frameRef: () => currentFrameKey(ctx),
@@ -219,14 +157,19 @@ function rebuildOutline(): void {
   rebuildSelectionMasks(selectedBlockId.value)
 }
 
+const metaRef = computed(() => {
+  const m = ctx.documentMetadata()
+  return { author: m.author, gtnhVersion: m.gtnhVersion }
+})
+const annotationsRef = computed(() => ctx.kernelAnnotations())
+
 // ---- Tooltip text (extracted composable) ----
 const { tooltipText, neiTooltipMap, showMetaHint } = useEmbedTooltip({
   hoverRef: hover,
-  definitionRef: vpSlot.definition,
-  tooltipPaletteRef: tooltipPalette,
+  definitionRef,
+  tooltipPaletteRef,
   showHoverTooltipRef: computed(() => prefs.showHoverTooltip),
-  // R1-β① C5：改为**内核读面**（元数据 + 注解行）⇒ 本处不再消费
-  // `Context#legacyRenderSource()`（旧文档本体读面）。
+  // R1-β① C5：改为**内核读面**（元数据 + 注解行）⇒ 不再消费 `Context#legacyRenderSource()`。
   metaRef,
   annotationsRef,
 })
@@ -258,7 +201,7 @@ function onSidebarClearSelection(): void {
   itemSelection.value = clearItemSelection()
 }
 
-watch([selectedBlockId, itemSelection, vpSlot.definition], rebuildOutline)
+watch([selectedBlockId, itemSelection, definitionRef], rebuildOutline)
 
 /**
  * 选择状态提示（#38「不得静默失效」的呈现面）：
@@ -274,8 +217,8 @@ const selectionNotice = computed<string | null>(() => {
     if (p.offFrameCount > 0) parts.push(`${p.offFrameCount} 项的对应方块不在当前帧`)
     if (p.truncated) parts.push(`命中 ${p.totalHits} 处，仅高亮前 ${p.shownHits} 处`)
   }
-  const st = drw.outlineMaskStats.value
-  if (st.dropped > 0) {
+  const st = hostRef.value?.api.drw.outlineMaskStats.value
+  if (st && st.dropped > 0) {
     parts.push(`高亮命中 ${st.total} 处超出上限 ${OUTLINE_MASK_LIMIT}，仅显示前 ${st.shown} 处`)
   }
   return parts.length > 0 ? parts.join('；') : null
@@ -308,40 +251,40 @@ const editWorkbenchTitle = computed(() =>
   workbenchEdit.value.enabled ? '在结构工作台中打开' : workbenchEdit.value.reason,
 )
 
-/**
- * 下方栏 tab：可用性由「形态 + 既有特性开关」共同决定（两端共用 `dockTabs` 纯逻辑，行为一致）。
- * 通道 tab 由**文档形态**驱动（多方块为主文档），不受 `features` 开关影响。
- */
-const dockTabAvailability = computed(() => ({
-  showFrameTab: showFrameCtl.value,
-  hasWorldMultiFrame: hasWorldMultiFrame.value,
-  showLayerTab: showLayerBar.value,
-  showChannelsTab: isMultiblock.value,
-}))
-const dockTabs = computed(() => availableDockTabs(dockTabAvailability.value))
-const hasBottomDock = computed(() => dockTabs.value.length > 0)
-
-const _preferredTab = ref<ViewportDockTab>(defaultDockTab(dockTabAvailability.value))
-const activeTab = computed<ViewportDockTab>({
-  get: () => resolveDockTab(_preferredTab.value, dockTabs.value),
-  set: (v: ViewportDockTab) => { _preferredTab.value = v },
-})
-
-// ---- 多方块接线：取值变化 → 装配产物 → DRW 按**内容身份**自行重建 ----
-//
-// 旧形态：`bindMultiblockMeshSync(revision, drw)` 在每视口的 `revision` 计数器变化时
-// **手动链式**调 `loadStructureAndResources()` + `rebuildContentMesh()`（B5 #5
-// `manual-refresh-chain`）。那是"调用方手动刷新"，漏挂一处就得到"滑杆动了画面不动"。
-//
-// 现在：取值归内核 ⇒ `renderDoc`（下面的 `docOverride`）随之变化 ⇒ DRW 的
-// `contentRefreshTick` 观察者按 `presentation/contentIdentity` **从数据算出**身份，
-// 再按 `RebuildPlan` 分范围执行（见 `drwMeshPipeline` 文件头）。失效由数据决定，
-// 不需要任何调用方声明 —— 故 `revision` 与 `bindMultiblockMeshSync` 一并消失。
-/** 渲染定义随装配刷新：让 `vpSlot.definition` 始终等于"当前渲染的网格"（公开观测点） */
-watch(structureDefinition, (d) => { vpSlot.definition.value = d ?? null }, { flush: 'post' })
-
-function onChannelValue(payload: { key: string; value: number }): void {
-  setChannelValue(payload.key, payload.value)
+/** 本实例的宿主策略（差异全部是这些值；组件内部没有宿主名判断）。 */
+const policy: EditorViewportPolicy = {
+  ...(props.settings?.blockIconCacheOptions === undefined ? {} : { blockIconCacheOptions: props.settings.blockIconCacheOptions }),
+  ...(props.settings?.initialWorldFrameIndex === undefined ? {} : { initialWorldFrameIndex: props.settings.initialWorldFrameIndex }),
+  ...(props.settings?.sceneBackground === undefined ? {} : { sceneBackground: props.settings.sceneBackground }),
+  showAxesGizmo: showAxesGizmo.value,
+  /**
+   * dock：**由 `features` 开关 + 文档形态共同决定**，空时不渲染
+   * （通道 tab 由文档形态驱动，不受 features 影响 —— 与旧口径逐字相同）。
+   */
+  dock: {
+    showFrameTab: showFrameCtl.value,
+    showLayerTab: showLayerBar.value,
+    hideWhenEmpty: true,
+    theme: 'embed',
+  },
+  input: ({ regionId }) => ({
+    hover: createHoverHandler(regionId, () => ctx),
+    gizmo: createEmbedTouchHandler(regionId, () => ctx),
+    keymap: createKeymapHandler(regionId, () => ctx),
+  }),
+  /** 嵌入没有页面级键盘输入面（无 InputPort）⇒ 不绑 document keydown。 */
+  documentKeydown: false,
+  selection: ({ prefs: p, outlinePlans }) => ({
+    selectionItems: emptySelection,
+    hoveredBlock: hoveredBlockForOutline,
+    highlightOnHover: computed(() => p.highlightOnHover),
+    getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
+    gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
+    // B-1：格 + 部件定位 → 该部件 mask（Wiki 预览的悬停描边走这里；独立 Embed 无部件悬停态）
+    getPartMaskGeometry: (ref) => getPartMaskGeometry(ctx, ref),
+    outlinePlans,
+    extraMaskMeshes: sidebarExtraMasks,
+  }),
 }
 
 function onMetaHintPointerEnter(e: PointerEvent): void { hoverState.setMeta({ clientX: e.clientX, clientY: e.clientY }) }
@@ -356,7 +299,7 @@ const previewTitle = computed(() => {
   if (!plain) return ''
   const fromDoc = sceneDisplayTitleFromRootDocument(plain as never)
   if (fromDoc) return fromDoc
-  const def = vpSlot.definition.value
+  const def = definitionRef.value
   const lab = def?.label?.trim()
   if (lab) return lab
   const id = def?.id?.trim()
@@ -364,6 +307,7 @@ const previewTitle = computed(() => {
   return '结构预览'
 })
 
+const loadStatus = computed(() => vpApi.value?.loadStatus ?? 'loading')
 const statusBarClass = computed(() => {
   if (loadStatus.value === 'error') return 'wm-status-bar wm-status-bar--err'
   if (loadStatus.value === 'loading') return 'wm-status-bar wm-status-bar--loading'
@@ -374,63 +318,25 @@ const statusSummary = computed(() => {
   if (loadStatus.value === 'loading') return '加载中…'
   if (loadStatus.value === 'error') return ''
   const parts: string[] = ['场景已加载']
-  if (hasWorldMultiFrame.value) {
-    parts.push(`${worldFrameCount.value} Frames`)
-  }
+  if (vpApi.value?.hasWorldMultiFrame) parts.push(`${vpApi.value.worldFrameCount} Frames`)
   return parts.join(' · ')
 })
 
-async function onViewportReady(payload: RenderEngineReadyPayload): Promise<void> {
-  await host.attachViewport(viewportRegionId, {
-    drw,
-    payload,
-    layerPreviewMode: layerPreviewMode.value,
-    structureDefinition,
-    mainMeshGroup,
-    handlers: {
-      hover: createHoverHandler(viewportRegionId, () => ctx),
-      gizmo: createEmbedTouchHandler(viewportRegionId, () => ctx),
-      keymap: createKeymapHandler(viewportRegionId, () => ctx),
-    },
-    selectionOutline: {
-      selectionItems: emptySelection,
-      hoveredBlock: hoveredBlockForOutline,
-      highlightOnHover: computed(() => prefs.highlightOnHover),
-      getBlockGeometry: (pos) => getBlockGeometry(ctx, pos),
-      gridCenterWorld: (pos) => gridCenterWorld(ctx, pos),
-      // B-1：格 + 部件定位 → 该部件 mask（Wiki 预览的悬停描边走这里；独立 Embed 无部件悬停态）
-      getPartMaskGeometry: (ref) => getPartMaskGeometry(ctx, ref),
-      /**
-       * **R1-A C9**：描边几何由**装配根注入**的规划端口产出
-       * （`presentation/outlinePlan` 的生产实现；本组件属旧层，不向上 import 装配根）。
-       */
-      outlinePlans: host.createViewportOutlinePlanner(viewportRegionId),
-      extraMaskMeshes: sidebarExtraMasks,
-    },
-    documentKeydown: false,
-  })
-}
-
-function setFrameIndex(i: number): void {
-  void ctx.getOperators().exec('OPERATOR_SET_FRAME_INDEX', { index: i })
-}
-
-function togglePlayback(): void {
-  void ctx.getOperators().exec('OPERATOR_TOGGLE_FRAME_PLAYBACK')
-}
+/**
+ * F2 接线（`partIconTextures` = 文档根级字段）：数据来源 = 渲染定义根，
+ * 经解析链根透传后与侧栏回退读取的是**同一份对象**。
+ */
+type PartIconTexturesCarrier = { partIconTextures?: Record<string, string> }
+const partIconTextures = computed<Record<string, string> | null>(() => {
+  const raw = (definitionRef.value as unknown as PartIconTexturesCarrier | null)?.partIconTextures
+  return raw && typeof raw === 'object' ? raw : null
+})
 
 function onSidebarTooltipHover(
   payload: { blockId: string; clientX: number; clientY: number; source: 'sidebar' } | null,
 ): void {
   hoverState.setSidebarBlock(payload)
 }
-
-onMounted(async () => { await drw.loadStructureAndResources() })
-onBeforeUnmount(() => {
-  host.detachViewport(viewportRegionId)
-  ctx.wm.events.unregisterRegion(viewportRegionId)
-  drw.dispose()
-})
 </script>
 
 <template>
@@ -458,9 +364,8 @@ onBeforeUnmount(() => {
           Q5（M6-6）：**文案必须明示例外性质** —— 这个按钮读的是当前活画布/活相机
           （`renderEngine#screenshot`），按产品定义是「即兴抓屏」，**不是**正式导出
           （正式导出走固定快照：ExportRequest + 资源清单 + ExportJob）。
-          文件名前缀 `lightning-screenshot-` 与导出产物天然区分，但用户不该靠文件名猜语义。
         -->
-        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="截屏（当前画面，非正式导出）" @click="engineHostRef?.screenshot()">
+        <button type="button" class="nei-icon-btn wsr-mobile-hide" title="截屏（当前画面，非正式导出）" @click="vpApi?.screenshot()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
         </button>
         <button type="button" class="nei-icon-btn" title="全屏" @click="toggleFullscreen">
@@ -485,8 +390,8 @@ onBeforeUnmount(() => {
 
     <div class="wm-main-stage">
       <BlockStatsSidebar
-        v-if="showStats && loadStatus === 'ok' && blockIconCache"
-        :entries="blockStatsEntries" :cache="blockIconCache"
+        v-if="showStats && vpApi && loadStatus === 'ok' && vpApi.blockIconCache"
+        :entries="vpApi.blockStatsEntries" :cache="vpApi.blockIconCache"
         :collapsed="sidebarCollapsed"
         :selected-block-id="selectedBlockId"
         :selected-item-keys="selectedItemKeys"
@@ -501,51 +406,15 @@ onBeforeUnmount(() => {
         @select-item="onSidebarSelectItem"
         @clear-selection="onSidebarClearSelection"
       />
-      <div class="wm-viewport-column">
-        <!--
-          宿主挂载条件**只**表达"有一份已解析的场景"，不含资源瞬时态 —— 与
-          `workbench/components/WorkbenchViewport.vue` 同一纪律（#397 / SPEC §7.3、§7.4、§8；
-          根因链与实测读数写在该文件的那段说明里）。
-
-          `materialLibrary`（`drw.textureCache`）在资源重建期会瞬时为 null，而它**不是**
-          本宿主的输入（贴图绑定归呈现会话；材质库只服务方块图标缓存）⇒ 不得用它决定
-          宿主/画布寿命。两个宿主共用同一条规则（SPEC §10.10「同一规则适用于所有宿主」）。
-        -->
-        <RenderEngineHost
-          ref="engineHostRef"
-          v-if="loadStatus === 'ok' && structureDefinition"
-          :definition="structureDefinition"
-          :content-group="mainMeshGroup"
-          :layer-preview-mode="layerPreviewMode"
-          :scene-background="s?.sceneBackground ?? 0x5a5a5a"
-          :show-axes-gizmo="showAxesGizmo"
-          @ready="onViewportReady"
-        />
-      </div>
+      <EditorViewportHost
+        ref="hostRef"
+        class="wm-viewport-column"
+        :region-id="viewportRegionId"
+        :policy="policy"
+      />
     </div>
 
-    <ViewportFrameLayerDock
-      v-if="hasBottomDock && loadStatus === 'ok'"
-      v-model:active-tab="activeTab"
-      theme="embed"
-      :show-frame-tab="showFrameCtl"
-      :show-layer-tab="showLayerBar"
-      :has-world-multi-frame="hasWorldMultiFrame"
-      :world-frame-index="worldFrameIndex"
-      :world-frame-count="worldFrameCount"
-      :is-playing="isPlaying"
-      :mesh-busy="meshBusy"
-      :grid-height="gridHeight"
-      :layer-world-y="layerWorldY"
-      :layer-preview-label="layerPreviewLabel"
-      :channel-panel="channelPanel"
-      @set-frame="setFrameIndex"
-      @toggle-playback="togglePlayback"
-      @set-tier="setChannelTier"
-      @set-channel-value="onChannelValue"
-      @set-runstate="setChannelRunstate"
-      @update:layer-y="(v: number) => { void ctx.getOperators().exec('OPERATOR_SET_LAYER_Y', { y: v }) }"
-    />
+    <EditorViewportDock v-if="vpApi" :api="vpApi" />
 
     <!-- 调试状态栏 -->
     <div v-if="showDebugStatus" :class="statusBarClass" role="status" aria-live="polite">

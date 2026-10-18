@@ -16,7 +16,7 @@
  */
 
 import * as THREE from 'three'
-import { shallowRef, type ShallowRef } from 'vue'
+import { shallowRef, type Ref, type ShallowRef } from 'vue'
 import type { StructureDefinition, SelectedEntity } from '@/render/schema/types'
 import type { ItemHitIndex } from '@/pure/itemIndex'
 import {
@@ -34,7 +34,7 @@ import { disposeOutlineMaskMeshes } from '@/render/mesh/blockRegistryOutlineMask
 
 export interface EmbedItemOutlineDeps {
   /** 当前渲染定义（= `vpSlot.definition`，与 DRW 渲染的网格同源） */
-  definitionRef: ShallowRef<StructureDefinition | null>
+  definitionRef: Ref<StructureDefinition | null>
   /** 侧栏附加 mask 槽（与旧路径共用同一个 shallowRef，两条路径互斥） */
   masksRef: ShallowRef<THREE.Mesh[]>
   /** 反查索引（`buildItemHitIndex` 产物） */

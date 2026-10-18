@@ -46,9 +46,17 @@ const SRC_ROOT = path.join(WEB_ROOT, 'src')
 const SEAM_ID = 'shared-viewport-upward-imports-assembly-root'
 /** 本条接缝唯一声明的文件（原 `SEAMS` 条目的 `files`）。 */
 const TARGET_REL = 'src/shared/viewport/useViewportRuntime.ts'
+/**
+ * **生产调用方（M7-4 段 B 更新）**：合壳前是两份视口实现各接一次线
+ * (`EmbedViewport.vue` + `WorkbenchViewport.vue`)；合壳后视口粘合只有一份
+ * (`EditorViewportHost.vue`)，两个壳已不再直接消费 `useViewportRuntime`。
+ *
+ * 判据本身没有放宽：仍然是"**全部**生产调用方都必须经 `Host#createViewportPresenter`"。
+ * 区别只是调用方集合从 2 变成 1 —— 若有人再加一处就地 `new PresenterSession`，
+ * 它仍然要进这个清单才可能通过，而清单里只有这一处。
+ */
 const CONSUMERS = [
-  'src/shared/viewport/EmbedViewport.vue',
-  'src/workbench/components/WorkbenchViewport.vue',
+  'src/shared/viewport/EditorViewportHost.vue',
 ]
 
 /** 读源码并**归一化行尾**（铁律 6：本仓 `core.autocrlf=true`，新鲜检出是 CRLF）。 */

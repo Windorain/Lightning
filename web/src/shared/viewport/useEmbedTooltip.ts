@@ -22,7 +22,7 @@
  * "取最后一个冒号之后"会给出 `"0"` 这类无意义片段，已废弃）。空说明兜底由 `itemIndex` 保证
  * （`tooltip` 空 ⇒ 至少 `display` 一行），本层不把它掏空。
  */
-import { computed, type Ref, type ShallowRef } from 'vue'
+import { computed, type Ref } from 'vue'
 import type { EmbedHover } from '@/runtime/hover'
 import type { StructureDefinition } from '@/render/schema/types'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
@@ -31,7 +31,7 @@ import { resolvePreviewTooltipText, resolveViewportTooltipChain } from '@/pure/t
 
 export function useEmbedTooltip(deps: {
   hoverRef: Ref<EmbedHover | null>
-  definitionRef: ShallowRef<StructureDefinition | null>
+  definitionRef: Ref<StructureDefinition | null>
   tooltipPaletteRef: Ref<readonly string[]>
   showHoverTooltipRef: Ref<boolean>
   /**
