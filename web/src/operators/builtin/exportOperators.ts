@@ -5,6 +5,7 @@ import { downloadBlob, downloadJson } from '@/util/browser'
 import { buildStructureBundleZip } from '@/workbench/export/bundleMeshAssembly'
 import { normalizeIsoSeconds } from '@/application/captureInput'
 import { exportErrorText, runIsoExport } from '@/workbench/export/isoExportJob'
+import { createExportDiagnosticSink } from '@/workbench/export/exportCommandDiagnostics'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
 
@@ -134,6 +135,12 @@ export const ExportIsoPngOperator: OperatorType = {
     // 显式时间（缺省 0）；非法值在这里就拒（唯一归一入口），不落进 try 被压成一条 warn。
     const seconds = normalizeIsoSeconds(_props.seconds)
     if (!ctx.hasLoadedDocument()) return
+    // M6-4：命令接**结构化诊断**（此前只有 UI 文案与 log.warn；SPEC §9）。
+    const diagnostics = createExportDiagnosticSink(ctx.wm.diagnostics, {
+      commandId: 'OPERATOR_EXPORT_ISO_PNG',
+      format: 'png',
+    })
+    diagnostics.requested({ direction: directionIndex, seconds })
     try {
       // M6-3：产物 = **与屏上同一条呈现链**（捕获派生场景 → 冻结作业 → 导出作业）。
       const result = await runIsoExport(ctx, {
@@ -144,10 +151,21 @@ export const ExportIsoPngOperator: OperatorType = {
         seconds,
         decoder: createDomTextureDecoder(),
         now: Date.now(),
+        // 捕获后、作业前的不可表达语义（能力损失/文字/轨道）逐项进诊断通道。
+        onSemantics: (findings) => { diagnostics.findings(findings) },
       })
-      if (!result.ok) throw new Error(exportErrorText(result.error))
+      if (!result.ok) {
+        // 结构化失败：先按 **DomainError** 记诊断（保留 code + params），再转成人读错误抛出。
+        diagnostics.failed(result.error)
+        throw new Error(exportErrorText(result.error))
+      }
+      // 作业完成的非阻塞项（如 GIF 厘秒量化）与完成事实一并报出。
+      diagnostics.diagnostics(result.value.outcome.diagnostics)
+      diagnostics.completed(result.value)
       downloadBlob(result.value.fileName, new Blob([result.value.bytes as unknown as BlobPart], { type: result.value.mediaType }))
     } catch (e) {
+      // DomainError 已在上面记过；这里只补"其它抛出"（记录器本身不重复写同一条）。
+      if (!(e instanceof Error && /\.code=/.test(e.message))) diagnostics.failed(e)
       ctx.log.warn('导出', `等轴 PNG 导出失败: ${e}`)
       // **再抛**：log.warn 只留诊断，可见性由调用方（UI）承担。吞掉它正是本轮要修的形态。
       throw e
@@ -184,6 +202,12 @@ export const ExportSceneGifOperator: OperatorType = {
       ? Math.max(64, Math.min(512, Math.floor(rawSize)))
       : 320
     if (!ctx.hasLoadedDocument()) return
+    // M6-4：与等轴 PNG 同一套诊断接线（同一通道、同一形状）。
+    const diagnostics = createExportDiagnosticSink(ctx.wm.diagnostics, {
+      commandId: 'OPERATOR_EXPORT_SCENE_GIF',
+      format: 'gif',
+    })
+    diagnostics.requested({ direction: directionIndex, pixelSize })
     try {
       // M6-3：与等轴 PNG **同一条**呈现链（同相机/同内容/同资源表）。
       const result = await runIsoExport(ctx, {
@@ -192,10 +216,17 @@ export const ExportSceneGifOperator: OperatorType = {
         pixelSize,
         decoder: createDomTextureDecoder(),
         now: Date.now(),
+        onSemantics: (findings) => { diagnostics.findings(findings) },
       })
-      if (!result.ok) throw new Error(exportErrorText(result.error))
+      if (!result.ok) {
+        diagnostics.failed(result.error)
+        throw new Error(exportErrorText(result.error))
+      }
+      diagnostics.diagnostics(result.value.outcome.diagnostics)
+      diagnostics.completed(result.value)
       downloadBlob(result.value.fileName, new Blob([result.value.bytes as unknown as BlobPart], { type: result.value.mediaType }))
     } catch (e) {
+      if (!(e instanceof Error && /\.code=/.test(e.message))) diagnostics.failed(e)
       ctx.log.warn('导出', `场景 GIF 导出失败: ${e}`)
       // 同轴等轴 PNG：日志只留诊断，可见性由调用方承担。
       throw e

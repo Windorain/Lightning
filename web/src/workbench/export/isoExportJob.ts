@@ -22,6 +22,7 @@
 import { err, ok, unsupportedOperation, type DomainError, type Result } from '@/domain/errors'
 import type { ArtifactEncoding, ExportKind } from '@/application/exportPlan'
 import { fileExtensionOf, mediaTypeOf } from '@/application/exportPlan'
+import { stillExportSemantics, type ExportSemanticFinding } from '@/application/exportSemantics'
 import { createThreeOffscreenDevice } from '@/adapters/export/renderDevice'
 import { assembleSnapshotExportJob } from '@/adapters/export/snapshotExportJob'
 import type { JobOutcome } from '@/runtime/exportJob'
@@ -46,6 +47,16 @@ export interface IsoExportOptions {
   readonly now: number
   /** 取消入口（生产命令当前不传 —— Q3 裁决：不加 UI 按钮，只保留内部语义）。 */
   readonly signal?: AbortSignal
+  /**
+   * **不可表达语义的回调**（M6-4；SPEC §9）。
+   *
+   * 在**捕获之后、作业之前**调用一次（此时 `request` 已冻结、能力损失已可判），
+   * 且与作业成败无关 —— 于是"这次导出把纹理首帧当成了唯一帧"这类事实
+   * **不会**因为作业后面失败而消失，也不会因为成功而被吞掉。
+   *
+   * 纯观察：抛错不影响导出（调用方负责兜）。
+   */
+  readonly onSemantics?: (findings: readonly ExportSemanticFinding[]) => void
   /** 进度回调（纯观察）。 */
   readonly onProgress?: (completed: number, total: number) => void
   /**
@@ -65,6 +76,8 @@ export interface IsoExportResult {
   readonly capture: ExportCapture
   /** 作业结局（`completed`；失败/取消不会走到这里）。 */
   readonly outcome: Extract<JobOutcome, { status: 'completed' }>
+  /** 本次导出的**不可表达语义**（与 `onSemantics` 同一份事实；空 = 完全表达）。 */
+  readonly semantics: readonly ExportSemanticFinding[]
 }
 
 /** 一次导出作业的作用域（一个作业一个；进呈现层归属键）。 */
@@ -95,6 +108,19 @@ export async function runIsoExport(
   const capture = captured.value
   const kind: ExportKind = options.kind === 'image' ? 'image' : 'animation'
   const encoding: ArtifactEncoding = options.kind === 'image' ? 'png' : 'gif'
+
+  /**
+   * **不可表达语义**（M6-4 / SPEC §9）：捕获值已冻结 ⇒ 能力损失此刻可判。
+   *
+   * 在作业之前算并回调：作业失败/取消时这些事实**同样**必须可见（"没导成"不等于
+   * "没有不可表达语义"）。纯观察 —— 回调抛错不影响导出。
+   */
+  const semantics = stillExportSemantics(capture.request, options.kind === 'image' ? 'png' : 'gif')
+  try {
+    options.onSemantics?.(semantics)
+  } catch {
+    // 诊断是旁路：上报失败不改变导出结论。
+  }
 
   const handlers = assembleSnapshotExportJob({
     request: capture.request,
@@ -135,6 +161,7 @@ export async function runIsoExport(
         fileName,
         capture,
         outcome,
+        semantics,
       }),
     )
   } finally {

@@ -55,9 +55,17 @@ export const EXPORT_SEMANTIC_CODES = Object.freeze({
 
 export type ExportSemanticCode = (typeof EXPORT_SEMANTIC_CODES)[keyof typeof EXPORT_SEMANTIC_CODES]
 
+/**
+ * 导出通道的**全部**码（`DiagnosticReasonCode` 的 `export.*` 子集）。
+ *
+ * 事实的码不限于矩阵那四个：预检/作业的阻塞项（资源未就绪、缺编码器…）也走同一通道，
+ * 于是"一次导出的全部结构化结论"读一个 `channel === 'export'` 就够了。
+ */
+export type ExportDiagnosticCode = Extract<DiagnosticReasonCode, `export.${string}`>
+
 /** 一条"这个格式表达不了这件事"的结构化事实（诊断通道的输入）。 */
 export interface ExportSemanticFinding {
-  readonly code: ExportSemanticCode
+  readonly code: ExportDiagnosticCode
   /** 稳定参数（只允许标量；与 `DiagnosticParams` 同形状）。 */
   readonly params: Readonly<Record<string, string | number | boolean>>
   /** 归属对象（无对象语义留空；进 `DiagnosticCorrelation#objectId`）。 */
@@ -94,23 +102,27 @@ export interface ExportSemanticCell {
  * 判据（`exportSemantics.test.ts`）把本表与"从 s0-b §5.1 抄下来的期望表"逐格比对：
  * 删掉一格 ⇒ 判红；加一格却没生产者 ⇒ 判红（生产者断言在同一文件里）。
  */
+function cell(kind: ExportSemanticKind, code: ExportSemanticCode, why: string): ExportSemanticCell {
+  return Object.freeze({ kind, code, why })
+}
+
 export const EXPORT_SEMANTIC_MATRIX: Readonly<Record<ExportSemanticFormat, readonly ExportSemanticCell[]>> = Object.freeze({
   png: Object.freeze([
-    { kind: 'transform', code: 'export.capabilityUnsupported', why: '位图不含对象身份/变换字段；非整数格平移只能以像素近似' },
-    { kind: 'deformation', code: 'export.capabilityUnsupported', why: '固定拓扑形变没有可写回的表示' },
-    { kind: 'annotation-text', code: 'export.capabilityUnsupported', why: '注解文字不参与等轴渲染，位图里没有文本语义' },
-    { kind: 'animation-tracks', code: 'export.capabilityUnsupported', why: '静止图只有单帧；轨道在捕获时刻被冻结' },
+    cell('transform', EXPORT_SEMANTIC_CODES.capabilityUnsupported, '位图不含对象身份/变换字段；非整数格平移只能以像素近似'),
+    cell('deformation', EXPORT_SEMANTIC_CODES.capabilityUnsupported, '固定拓扑形变没有可写回的表示'),
+    cell('annotation-text', EXPORT_SEMANTIC_CODES.capabilityUnsupported, '注解文字不参与等轴渲染，位图里没有文本语义'),
+    cell('animation-tracks', EXPORT_SEMANTIC_CODES.capabilityUnsupported, '静止图只有单帧；轨道在捕获时刻被冻结'),
   ]),
   gif: Object.freeze([
-    { kind: 'transform', code: 'export.capabilityUnsupported', why: '同 PNG：GIF 帧只有像素' },
-    { kind: 'deformation', code: 'export.capabilityUnsupported', why: '同 PNG' },
-    { kind: 'annotation-text', code: 'export.capabilityUnsupported', why: '同 PNG' },
-    { kind: 'animation-tracks', code: 'export.capabilityUnsupported', why: 'GIF 只逐帧记录纹理序列的一个共同循环；轨道值不随时间写回' },
+    cell('transform', EXPORT_SEMANTIC_CODES.capabilityUnsupported, 'GIF 的每一帧都只有像素，没有对象身份/变换字段可写回'),
+    cell('deformation', EXPORT_SEMANTIC_CODES.capabilityUnsupported, '固定拓扑形变在任何单帧像素里都没有可复原的表示'),
+    cell('annotation-text', EXPORT_SEMANTIC_CODES.capabilityUnsupported, '注解文字不参与等轴渲染，逐帧像素里没有文本语义'),
+    cell('animation-tracks', EXPORT_SEMANTIC_CODES.capabilityUnsupported, 'GIF 只逐帧记录纹理序列的一个共同循环；轨道值不随时间写回'),
   ]),
   obj: Object.freeze([
-    { kind: 'texture-sequence', code: 'export.firstFrameOnly', why: 'OBJ 的 UV 映射到单张贴图；竖条多帧只能取首帧' },
-    { kind: 'geometry-skipped', code: 'export.geometrySkipped', why: '无几何/解码失败的体素没有面可写（此前只写注释行）' },
-    { kind: 'blend-approximation', code: 'export.blendApproximated', why: 'MTL 只有 d/illum，cutout 与 translucent 都只能近似' },
+    cell('texture-sequence', EXPORT_SEMANTIC_CODES.firstFrameOnly, 'OBJ 的 UV 映射到单张贴图；竖条多帧只能取首帧'),
+    cell('geometry-skipped', EXPORT_SEMANTIC_CODES.geometrySkipped, '无几何/解码失败的体素没有面可写（此前只写注释行）'),
+    cell('blend-approximation', EXPORT_SEMANTIC_CODES.blendApproximated, 'MTL 只有 d/illum，cutout 与 translucent 都只能近似'),
   ]),
 })
 
