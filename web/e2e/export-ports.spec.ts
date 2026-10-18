@@ -64,6 +64,33 @@ async function runProbe(page: Page, options: { width?: number; height?: number; 
   }, options)) as ExportPortProbeResult
 }
 
+interface ExportGifProbeResult {
+  note: string
+  status: string
+  errorReason: string | null
+  gifMagic: boolean
+  screenWidth: number
+  screenHeight: number
+  imageCount: number
+  delaysCs: number[]
+  bytesLength: number
+  framesRendered: number
+  releasedFor: number
+  decodedWidth: number
+  decodedHeight: number
+  decoderOk: boolean
+}
+
+/** 在页面里跑**动画（GIF）**探针（M6-2：真 GL 逐帧 + 组合编码端口的 GIF part）。 */
+async function runGifProbe(page: Page, options: { width?: number; height?: number; holdsMs?: number[] }): Promise<ExportGifProbeResult> {
+  return (await page.evaluate(async (opts) => {
+    const mod = (await import('/e2e/helpers/p10f/exportPortsProbe.ts')) as {
+      runExportGifProbe: (o: typeof opts) => Promise<unknown>
+    }
+    return await mod.runExportGifProbe(opts)
+  }, options)) as ExportGifProbeResult
+}
+
 test.describe('P10f/E · 导出面端口在真实 GL 下产出 PNG', () => {
   test('真 GL：完整链路跑通，产物是合法 PNG 且**真的有非透明像素**', { tag: '@smoke' }, async ({ page }, testInfo) => {
     fs.mkdirSync(OUT_DIR, { recursive: true })
@@ -124,5 +151,116 @@ test.describe('P10f/E · 导出面端口在真实 GL 下产出 PNG', () => {
     expect(result.errorReason, '失败原因必须是"没有可绘制内容"').toBe('offscreenNoDrawableContent')
     expect(result.bytesLength, '失败路径不得产出任何字节').toBe(0)
     expect(result.nonTransparent, '失败路径不得有像素').toBe(0)
+  })
+})
+test.describe('M6-2 · 真 GL 下的**动画**导出（逐帧 hold → GIF 字节）', () => {
+  test('真 GL：三帧不等驻留 ⇒ 真 GIF89a，帧数/逐帧 delay/尺寸逐项等于声明', { tag: '@smoke' }, async ({ page }, testInfo) => {
+    fs.mkdirSync(OUT_DIR, { recursive: true })
+    await gotoWorkbench(page)
+    const fx = readFixture('multiblock-tier-only.json')
+    await injectSceneDocumentOk(page, fx.envelope, 'multiblock-tier-only.json')
+    await waitForViewportMounted(page)
+    await page.waitForTimeout(1500)
+
+    const holds = [50, 100, 50]
+    const result = await runGifProbe(page, { width: 32, height: 32, holdsMs: holds })
+    console.log('[M6-2·gif] live =', JSON.stringify(result))
+
+    // ① 作业真的完成（不是"GIF part 接线到了但跑不通"）
+    expect(result.status, '作业必须完成（note=' + result.note + ' reason=' + String(result.errorReason) + '）').toBe('completed')
+    // ② 产物是**真 GIF89a**，且尺寸等于请求
+    expect(result.gifMagic, '产物必须是 GIF89a（魔数）').toBe(true)
+    expect(result.screenWidth, 'GIF 逻辑屏幕宽必须等于请求宽').toBe(32)
+    expect(result.screenHeight, 'GIF 逻辑屏幕高必须等于请求高').toBe(32)
+    expect(result.bytesLength, '产物必须是真实字节（非空）').toBeGreaterThan(100)
+    // ③ 帧数 == 请求采样数（少渲一帧必须被抓到，而不是静默产出短 GIF）
+    expect(result.framesRendered, '三帧请求必须真渲染三次').toBe(3)
+    expect(result.imageCount, 'GIF 里的图像个数必须等于帧数').toBe(3)
+    // ④ **逐帧时延来自声明**：[50,100,50] ⇒ [5,10,5]（旧"ticks*5 自算"会给 [5,5,5]）
+    expect(result.delaysCs, '逐帧 delay 必须等于 holdMs/10（不等时长 ⇒ [5,10,5]）').toEqual([5, 10, 5])
+    expect(result.delaysCs, '不得退化成"每帧同值"的自算结果').not.toEqual([5, 5, 5])
+    // ⑤ 浏览器**解码器**能解开（独立于编码器的判据）
+    expect(result.decoderOk, '产物必须能被浏览器解码器解开').toBe(true)
+    expect(result.decodedWidth, '解码宽度必须等于请求宽').toBe(32)
+    expect(result.decodedHeight, '解码高度必须等于请求高').toBe(32)
+    // ⑥ 生命周期
+    expect(result.releasedFor, '分配句柄数必须非零且被释放').toBeGreaterThan(0)
+
+    fs.writeFileSync(
+      path.join(OUT_DIR, 'm6-2-gif-probe-' + testInfo.workerIndex + '.json'),
+      JSON.stringify(result, null, 2),
+      'utf8',
+    )
+  })
+
+  test('**负对照**：同一份内容走 PNG 端口编 animation ⇒ 显式失败（组合端口不是"一个端口声称全能"）', async ({ page }) => {
+    await gotoWorkbench(page)
+    const fx = readFixture('multiblock-tier-only.json')
+    await injectSceneDocumentOk(page, fx.envelope, 'multiblock-tier-only.json')
+    await waitForViewportMounted(page)
+    await page.waitForTimeout(1000)
+
+    // 在页面里直接调 PNG part 编动画：必须 encoderKindUnsupported（而不是"按 PNG 编出来"）。
+    const reason = await page.evaluate(async () => {
+      const [{ createPngEncoderPort }, { planExportRequest }] = await Promise.all([
+        import('/src/adapters/export/encoderPort.ts'),
+        import('/src/application/exportPlan.ts'),
+      ])
+      const ctx = (window as unknown as { __vm__?: Record<string, any> }).__vm__
+      const doc = ctx?.kernel?.document?.()
+      if (doc === undefined || doc === null) return 'no-live-kernel-document'
+      const animation = { tracks: {}, defaults: {} }
+      const spec = {
+        frameRate: 20,
+        frameCount: 1,
+        mapping: { source: 'scene', startFrame: 0, stepFrames: 1 },
+        channels: {},
+        camera: {
+          kind: 'view',
+          label: 'm6-2-neg',
+          view: {
+            projection: 'perspective',
+            position: { x: 40, y: 40, z: 40 },
+            target: { x: 0, y: 0, z: 0 },
+            up: { x: 0, y: 1, z: 0 },
+            fovDegrees: 45,
+            near: 0.1,
+            far: 5000,
+          },
+        },
+        render: { width: 8, height: 8, background: 'transparent' },
+        animation,
+      }
+      const planned = planExportRequest({
+        requestId: 'm6-2-neg',
+        now: 0,
+        documentId: 'live',
+        version: { documentVersion: 1, contentVersion: 1 },
+        scene: doc.scene,
+        animation,
+        camera: spec.camera,
+        spec,
+        assets: [],
+      })
+      if (!planned.ok) return 'plan-failed:' + planned.error.code
+      const frame = {
+        index: 0,
+        time: planned.value.frames[0],
+        pixels: new Uint8Array(8 * 8 * 4),
+        width: 8,
+        height: 8,
+        holdMs: 50,
+      }
+      const r = await createPngEncoderPort().encode({
+        request: planned.value,
+        kind: 'animation',
+        encoding: 'gif',
+        rendered: [frame],
+        signal: { cancelled: false },
+      })
+      return r.ok ? 'unexpected-success' : String(r.error.params.reason)
+    })
+    console.log('[M6-2·gif] png-part-on-animation =', reason)
+    expect(reason, 'PNG 端口编 animation 必须显式拒绝').toBe('encoderKindUnsupported')
   })
 })

@@ -319,3 +319,163 @@ async function decodeNonTransparent(bytes: Uint8Array): Promise<{ nonTransparent
   for (let i = 3; i < data.length; i += 4) if (data[i]! > 0) nonTransparent += 1
   return { nonTransparent, totalPixels: canvas.width * canvas.height }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M6-2：真 GL 下的**动画（GIF）**导出探针
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 一次真实 GIF 导出尝试的读数（每一条都对应一条判据）。 */
+export interface ExportGifProbeResult {
+  readonly note: string
+  readonly status: string
+  readonly errorReason: string | null
+  /** 产物是否以 `GIF89a` 开头。 */
+  readonly gifMagic: boolean
+  /** GIF 逻辑屏幕宽高（逻辑屏幕描述符，小端 u16）。 */
+  readonly screenWidth: number
+  readonly screenHeight: number
+  /** 产物里**图像描述符**（0x2C）的个数 —— 应当等于请求的帧数。 */
+  readonly imageCount: number
+  /** 逐帧 Graphic Control Extension 的 delay（厘秒）—— 必须等于计划，不是自算 tick。 */
+  readonly delaysCs: readonly number[]
+  readonly bytesLength: number
+  readonly framesRendered: number
+  readonly releasedFor: number
+  /** 浏览器解码器能否解开（独立于编码器）；能解开时的尺寸。 */
+  readonly decodedWidth: number
+  readonly decodedHeight: number
+  readonly decoderOk: boolean
+}
+
+/** 解析 GIF 的块结构（只取判据要用的三个量：逻辑屏幕、图像个数、逐帧 delay）。 */
+function parseGif(bytes: Uint8Array): { screenWidth: number; screenHeight: number; imageCount: number; delaysCs: number[] } {
+  const screenWidth = bytes.length >= 8 ? (bytes[6]! | (bytes[7]! << 8)) : -1
+  const screenHeight = bytes.length >= 10 ? (bytes[8]! | (bytes[9]! << 8)) : -1
+  let imageCount = 0
+  const delaysCs: number[] = []
+  for (let i = 0; i + 8 < bytes.length; i++) {
+    if (bytes[i] === 0x21 && bytes[i + 1] === 0xf9 && bytes[i + 2] === 0x04) {
+      delaysCs.push(bytes[i + 4]! | (bytes[i + 5]! << 8))
+    }
+    if (bytes[i] === 0x2c) imageCount += 1
+  }
+  return { screenWidth, screenHeight, imageCount, delaysCs }
+}
+
+/**
+ * **在真浏览器里跑动画导出链**：内核内容 → 离屏端口（真 GL，逐帧）→ 组合编码端口 → GIF 字节。
+ *
+ * 与 {@link runExportPortProbe} 的差别只在"时间与编码"两处：
+ *  - 时间用 `scene-holds`（逐帧驻留 = 声明，**不是**按帧率自算）；
+ *  - 编码走 {@link createEncoderPort}（组合端口）的 GIF part —— 于是"真 GL 逐帧渲染 +
+ *    hold 随帧搬运 + ms→厘秒唯一换算 + GIF 字节"这四环在**一条链上**被证明。
+ *
+ * 解码用浏览器（{@link createImageBitmap}）而不是自己解自己写的字节：只要它能解开，
+ * "产物是合法图像"就不是编码器的自说自话。
+ */
+export async function runExportGifProbe(options: {
+  width?: number
+  height?: number
+  /** 逐帧驻留（毫秒）；缺省 [50, 100, 50]（**不等时长**，可区分"自算 tick"）。 */
+  holdsMs?: readonly number[]
+} = {}): Promise<ExportGifProbeResult> {
+  const width = options.width ?? 32
+  const height = options.height ?? 32
+  const holdsMs = options.holdsMs ?? [50, 100, 50]
+  const live = liveKernel()
+  if (live === null) return gifEmpty('no-live-kernel-document')
+
+  const render = { width, height, background: 'transparent' as const }
+  const captured = captureCameraSpec()
+  const spec: CaptureSpec = {
+    frameRate: 20,
+    frameCount: holdsMs.length,
+    mapping: { source: 'scene-holds', startSeconds: 0, holdsMs: [...holdsMs] },
+    channels: {},
+    camera: { kind: 'view', label: 'm6-2-gif', view: captured.spec },
+    render,
+    animation: EMPTY_ANIMATION,
+  }
+  const planned = planExportRequest({
+    requestId: 'm6-2-gif',
+    now: 1_700_000_000_000,
+    documentId: 'live',
+    version: { documentVersion: 1, contentVersion: 1 },
+    scene: live.scene,
+    animation: EMPTY_ANIMATION,
+    camera: spec.camera,
+    spec,
+    assets: [],
+  })
+  if (!planned.ok) return gifEmpty(`plan-failed:${planned.error.code}`)
+
+  const { job } = assembleSnapshotExportJob({
+    request: planned.value,
+    kind: 'animation',
+    encoding: 'gif',
+    devices: createThreeOffscreenDevice(),
+    content: live.content,
+    scope: 'm6-2-gif-e2e',
+  })
+  const outcome = await job.run()
+  if (outcome.status !== 'completed') {
+    return {
+      ...gifEmpty(`job-${outcome.status}`),
+      framesRendered: outcome.status === 'cancelled' ? outcome.framesRendered : 0,
+      releasedFor: outcome.releasedFor,
+      errorReason: outcome.status === 'failed' ? String(outcome.error.params.reason ?? outcome.error.code) : null,
+    }
+  }
+
+  const bytes = outcome.bytes
+  const parsed = parseGif(bytes)
+  const gifMagic = bytes.length >= 6 && String.fromCharCode(bytes[0]!, bytes[1]!, bytes[2]!, bytes[3]!, bytes[4]!, bytes[5]!) === 'GIF89a'
+  let decodedWidth = -1
+  let decodedHeight = -1
+  let decoderOk = false
+  try {
+    const blob = new Blob([bytes as unknown as BlobPart], { type: 'image/gif' })
+    const bitmap = await createImageBitmap(blob)
+    decodedWidth = bitmap.width
+    decodedHeight = bitmap.height
+    decoderOk = bitmap.width > 0 && bitmap.height > 0
+  } catch {
+    decoderOk = false
+  }
+
+  return {
+    note: 'ok',
+    status: outcome.status,
+    errorReason: null,
+    gifMagic,
+    screenWidth: parsed.screenWidth,
+    screenHeight: parsed.screenHeight,
+    imageCount: parsed.imageCount,
+    delaysCs: parsed.delaysCs,
+    bytesLength: bytes.length,
+    framesRendered: outcome.framesRendered,
+    releasedFor: outcome.releasedFor,
+    decodedWidth,
+    decodedHeight,
+    decoderOk,
+  }
+}
+
+function gifEmpty(note: string): ExportGifProbeResult {
+  return {
+    note,
+    status: 'failed',
+    errorReason: null,
+    gifMagic: false,
+    screenWidth: -1,
+    screenHeight: -1,
+    imageCount: 0,
+    delaysCs: [],
+    bytesLength: 0,
+    framesRendered: 0,
+    releasedFor: 0,
+    decodedWidth: -1,
+    decodedHeight: -1,
+    decoderOk: false,
+  }
+}
