@@ -41,6 +41,7 @@ import {
   ok,
 } from '@/application/contracts'
 import { localPropertyOf } from '@/application/contracts'
+import { CAPABILITY } from '@/composition/modules'
 import { KERNEL_ANNOTATION_TYPE } from '@/application/kernel-properties'
 import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
 import { annotationObjectIdOf } from '@/runtime/annotationRead'
@@ -479,8 +480,10 @@ export function accessOfContext(ctx: Context, capabilities?: ReadonlySet<Capabil
  */
 export function defaultCapabilities(ctx: Context): ReadonlySet<CapabilityId> {
   const caps = new Set<CapabilityId>()
-  // 嵌入预览（`data-wsr-*`）是**只读**呈现：不给写能力。
-  if (!ctx.isEmbed()) caps.add(CAP_PROPERTY_WRITE)
+  // M7-5：属性写能力的判据是**装配能力** `content.edit`（与 `application/kernel-properties`
+  // 的 `capabilities.includes('content.edit')` 逐字同一条）。查看器/无界面装配没有它
+  // ⇒ 不给写能力 ⇒ 运行期拒绝（A15），而不是"按宿主名决定给不给"。
+  if (ctx.hasCapability(CAPABILITY.CONTENT_EDIT)) caps.add(CAP_PROPERTY_WRITE)
   return caps
 }
 

@@ -11,6 +11,7 @@ import { ref, shallowRef } from 'vue'
 import type { Context } from '@/runtime/context'
 import { getFrameBlocks } from '@/context/queries'
 import { describeForDiagnostics, rnaCoverage } from '@/editors/workbench-rna'
+import { CAPABILITY } from '@/composition/modules'
 
 export const LOG_LEVEL = {
   DEBUG:    1,
@@ -324,7 +325,14 @@ export function createLogCenter() {
       const id = nextId
       const blocks = getFrameBlocks(ctx)
       const blockDigest = blocks.map(b => ({ pos: { ...b.pos }, id: b.block_state_id }))
-      if (ctx.isEmbed()) {
+      // M7-5：摘要里的「选择集 / 活动算子」两项是**工作台会话的诊断读面**
+      // （选择服务与工具注册表由 `createWorkbenchHost` 的宿主依赖提供，装配声明为
+      // `shell.workbench`）。没有该外壳的实例（嵌入）只报**内容块**这一项事实，
+      // 而不是"假装选择为空"——后者会与"确实没选中"同形（SPEC §10.7）。
+      //
+      // ⚠️ 实例隔离不在这里（GE-3 / M7-6）：本文件仍是模块级单例，
+      // `window.__log__` 仍只装一次。本处只做"去宿主判断"，不动实例化。
+      if (!ctx.hasCapability(CAPABILITY.SHELL_WORKBENCH)) {
         return {
           logId: id,
           blockCount: blocks.length,
@@ -365,7 +373,7 @@ export function createLogCenter() {
         if (!newMap.has(key)) diff.blocksRemoved.push(b)
       }
 
-      if (!ctx.isEmbed()) {
+      if (ctx.hasCapability(CAPABILITY.SHELL_WORKBENCH)) {
         const nowSel = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
         diff.selectionChanged =
           snap.selectionSize !== nowSel.length ||

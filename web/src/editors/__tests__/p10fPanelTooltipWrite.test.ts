@@ -109,7 +109,7 @@ function harness(): Harness {
  * | `kernel` | 内核会话（写权威）；`null` = 无会话 ⇒ 回落分支 |
  * | `getContentRefreshTick` | `versionOf`/`accessOfContext` 读它（内容重读宽信号） |
  * | `getSelection` | `targetFacts` 读选中集 |
- * | `workbench`（**非 null**）| `isEmbed()` = `workbench === null` ⇒ 非 null 才给写能力（`defaultCapabilities`） |
+ * | `capabilities` | M7-5：写能力来自装配能力 `content.edit`（`defaultCapabilities`） |
  * | `getShellSettings` | `accessOfContext` 读 `lang.value`（A33 的实例级语言） |
  * | `main.embedPublish` + `getToolSettings` | `documentStateOf` 造 `shell` 时读它们（空文档占位） |
  * | `fieldRejections` + `log` | M4-3 R2：写路由的结算处同时写**字段拒绝回执**与**底栏成句原因** |
@@ -133,8 +133,9 @@ function makeWorkbenchContext(
       embedPublish: ref({}),
     },
     kernel: session,
-    // 非 null ⇒ `isEmbed()` 为假 ⇒ 具备属性写能力（否则提交会被**能力**拒绝，
-    // 那测的就是"能力门"而不是本文件要钉的"回写"）
+    // M7-5：写能力来自**装配能力** `content.edit`（生产工作台装配的同一项）。
+    // 缺它 ⇒ 提交会被能力拒绝，那测的就是"能力门"而不是本文件要钉的"回写"。
+    capabilities: ['content.edit', 'shell.workbench'],
     workbench: {},
     getSelection: () => ({ active: ref(null), items: ref(new Set()) }),
     getContentRefreshTick: () => ref(0),

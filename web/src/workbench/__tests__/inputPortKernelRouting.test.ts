@@ -135,7 +135,7 @@ interface Harness {
  * | `main.doc` / `main.replaceDoc` | `documentStateOf` 读载体；`setDocument`（唯一写入口）写它 |
  * | `main.contentRefreshTick` | `kernelDirty()` 直读它（**不**注入 ⇒ `kernelDirty()` 抛错） |
  * | `kernel` | 内核会话（写权威 + 历史权威） |
- * | `workbench`（非 null） | `isEmbed()` = `workbench === null` ⇒ 非 null 才给写能力 |
+ * | `capabilities` | M7-5：写能力的判据是装配能力 `content.edit`（`defaultCapabilities`），不再是"宿主身份" |
  * | `getSelection` | `resolveRefs` 从**选中集**算目标（用户点了哪一格） |
  * | `getShellSettings` / `getToolSettings` | `accessOfContext` / `documentStateOf` 读它们 |
  */
@@ -153,7 +153,10 @@ function makeWorkbenchContext(
       documentRevision: ref(0),
     },
     kernel: session,
-    // 非 null ⇒ 具备属性写能力（否则提交会被**能力**拒绝 ⇒ 测的是能力门，不是路由）
+    // M7-5：写能力来自**装配能力** `content.edit`（生产工作台装配的同一项）。
+    // 缺它 ⇒ 提交会被能力拒绝 ⇒ 测的就是能力门而不是路由（本文件要钉路由）。
+    capabilities: ['content.edit', 'shell.workbench'],
+    // 「没有工作台服务」这一情形由别的判据覆盖；本文件需要选择/工具读面在场。
     workbench: {},
     getSelection: () => ({
       active: ref(null),

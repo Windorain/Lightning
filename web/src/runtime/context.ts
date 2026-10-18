@@ -82,6 +82,7 @@ import {
 import { findObjectData, type Scene } from '@/domain/scene'
 import type { AreaHostApi } from '@/editors/useAreaHost'
 import { createFieldRejectionStore, type FieldRejectionStore } from '@/runtime/fieldRejections'
+import { CAPABILITY } from '@/composition/modules'
 
 function embedUnavailable(name: string): never {
   throw new Error(`embed: ${name} not available`)
@@ -229,8 +230,30 @@ export class Context {
     return this.capabilities.includes(capability)
   }
 
-  isEmbed(): boolean {
-    return this.workbench === null
+  /**
+   * **工作台外壳的会话读面**是否可用（M7-5：取代宿主身份判断）。
+   *
+   * ## 为什么这个判断仍然存在，但它不是"宿主分叉"
+   *
+   * 旧的宿主身份判断回答的是"**我是谁**"（`workbench === null` ⇒ 我大概是个嵌入），
+   * 于是 25 个调用点各自按身份分叉，同一事实在两个宿主里出现两个实现（SPEC §4.1/§10.10）。
+   *
+   * 现在这个私有助手只服务一类读面：**工作区模式 / 本地文件名 / 文档绑定 / 连接 /
+   * 全域悬停**。这几样是 `WorkbenchSession`（工作台会话）的字段，装配声明是
+   * `shell.workbench` 能力（`composition/profiles` 的 `M_SHELL_WORKBENCH`）。
+   *
+   * 两个条件**同时**要求，是"失败响亮"的取舍：
+   *  - 能力缺席 ⇒ 装配层面就说"本外壳没有工作台会话"（这是被声明的**事实**，可直接断言）；
+   *  - 服务缺席 ⇒ 能力声明与装配自相矛盾（`createWorkbenchHost` 永远两者都给），
+   *    抛出比返回 `undefined` 字段更早暴露错误。
+   *
+   * 于是调用方读到的仍是**同一个** `workbenchUnavailable(...)` 错误（用户可见文案不变），
+   * 但判据可以从**装配声明**判断，而不是从"当前宿主叫什么"。
+   */
+  private requireWorkbenchShell(name: string): void {
+    if (!this.hasCapability(CAPABILITY.SHELL_WORKBENCH) || this.workbench === null) {
+      workbenchUnavailable(name)
+    }
   }
 
   // --- WM 输入域（活跃区域通道）---
@@ -2114,32 +2137,44 @@ export class Context {
     return this.screen.session
   }
 
+  /**
+   * 本实例的工具参数（工具架/嵌入面板共用同一个 `ToolSettings` 形状）。
+   *
+   * ## M7-5：按 **region 的 tool 事实**解析，不按宿主身份选 region
+   *
+   * 旧实现是 旧实现按宿主身份选 region。
+   * "哪个 region 承载工具参数"本来就是 **Screen 树的事实**（`createWorkbenchScreenRoot` 把
+   * `tool` 挂在 `r-toolshelf`；`createEmbedScreenRoot` 挂在 `r-embed`）—— 直接读它即可，
+   * 不需要先知道"我是谁"。两个宿主的读数是同一份对象（`screenRoot` 工厂注入的那个），
+   * 因此行为与本改动前逐字一致。
+   */
   getToolSettings(): ToolSettings {
-    const rid = this.isEmbed() ? REGION.EMBED : REGION.WORKBENCH_TOOLSHELF
-    const tool = this.requireRegion(rid).state.tool
-    if (!tool) throw new Error(`tool settings missing on region ${rid}`)
-    return tool as ToolSettings
+    for (const rid of [REGION.WORKBENCH_TOOLSHELF, REGION.EMBED]) {
+      const tool = this.region(rid)?.state.tool
+      if (tool) return tool as ToolSettings
+    }
+    throw new Error('tool settings missing on both tool regions (r-toolshelf / r-embed)')
   }
 
   getWorkspaceMode(): Ref<WorkbenchWorkspaceMode> {
-    if (this.isEmbed()) workbenchUnavailable('workspaceMode')
+    this.requireWorkbenchShell('workspaceMode')
     return (this.getSession() as WorkbenchSession).workspaceMode
   }
   getUiWorkspace(): Ref<UIWorkspace> {
-    if (this.isEmbed()) workbenchUnavailable('uiWorkspace')
+    this.requireWorkbenchShell('uiWorkspace')
     return (this.getSession() as WorkbenchSession).uiWorkspace
   }
   getLocalFileName(): Ref<string | null> {
-    if (this.isEmbed()) workbenchUnavailable('localFileName')
+    this.requireWorkbenchShell('localFileName')
     return (this.getSession() as WorkbenchSession).localFileName
   }
 
   getDocumentBinding() {
-    if (this.isEmbed()) workbenchUnavailable('documentBinding')
+    this.requireWorkbenchShell('documentBinding')
     return (this.getSession() as WorkbenchSession).documentBinding
   }
   getConnection(): ConnectionState {
-    if (this.isEmbed()) workbenchUnavailable('connection')
+    this.requireWorkbenchShell('connection')
     return (this.getSession() as WorkbenchSession).connection
   }
   getLayerWorldY(): Ref<number> {
@@ -2162,13 +2197,13 @@ export class Context {
    * `createWorkbenchHoverBlockRef(this, regionId)` —— 不要用本读面。
    */
   getHoveredBlock(): Ref<BlockRef | null> {
-    if (this.isEmbed()) workbenchUnavailable('hoveredBlock')
+    this.requireWorkbenchShell('hoveredBlock')
     this.workbenchHoverBlock ??= createScreenHoverBlockRef(this)
     return this.workbenchHoverBlock
   }
   /** 全域悬停注解读面（与 {@link getHoveredBlock} 同一条"最近悬停区"规则）。 */
   getHoveredAnnotationId(): Ref<string | null> {
-    if (this.isEmbed()) workbenchUnavailable('hoveredAnnotationId')
+    this.requireWorkbenchShell('hoveredAnnotationId')
     this.workbenchHoverAnnotation ??= createScreenHoverAnnotationIdRef(this)
     return this.workbenchHoverAnnotation
   }

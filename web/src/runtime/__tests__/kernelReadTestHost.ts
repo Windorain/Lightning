@@ -81,6 +81,15 @@ function makeRealContext(docRef: Ref<RuntimeDocument | null>, session: KernelSes
   Object.assign(ctx as unknown as Record<string, unknown>, {
     main: makeFakeMain(docRef),
     kernel: session,
+    /**
+     * **装配能力 = 空集**（M7-5）。
+     *
+     * 本宿主是"只注入读面所需字段"的手工 `Context`（`Object.create` 不执行类字段
+     * 初始化器 ⇒ 生产构造函数里的空集缺省在这里**不存在**）。`Context` 的能力查询
+     * 是若干读面的门（工作台会话/悬停/外观…），给空集让它们**失败关闭**：
+     * 没有装配就没有工作台外壳能力，读面按生产语义抛 `workbench:` 而不是 TypeError。
+     */
+    capabilities: Object.freeze([]) as readonly string[],
   })
   return ctx
 }
