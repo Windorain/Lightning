@@ -134,6 +134,34 @@ export interface CompiledScene {
   readonly drawCallEstimate: number
 }
 
+/**
+ * 编译产物里**参与呈现的材质描述符**（按 `id` 去重）。
+ *
+ * ## 为什么必须由编译产物给出（而不是调用方自己从场景推）
+ *
+ * 绑定键是 `MaterialDescriptor.id`，而材质描述符**只有编译产物知道**。若让调用方
+ * 自己从内核场景推一份材质清单，那就会出现**第二份**"哪些材质要贴图"的判定 ——
+ * 而它与真实批次漂移的后果是"某些批次静默无贴图"（比没贴图更难查）。
+ *
+ * ## 合并批次必须逐成员收
+ *
+ * 批次级材质只是代表值；成员各自还有自己的材质（逐 `materialIndex` 分组，见
+ * `BatchInstance#material`）。漏掉它们 ⇒ 那些成员拿不到纹理绑定。
+ *
+ * 导出捕获（`composition/exportCapture`）与屏上呈现（`composition/presenterSession`）
+ * 共用本函数，于是"绑定用哪份材质表"只有一处答案。
+ */
+export function materialDescriptorsOf(compiled: CompiledScene): readonly MaterialDescriptor[] {
+  const byId = new Map<string, MaterialDescriptor>()
+  for (const p of compiled.payloads) {
+    byId.set(p.material.id, p.material)
+    for (const instance of p.instances) {
+      if (instance.material !== undefined) byId.set(instance.material.id, instance.material)
+    }
+  }
+  return Object.freeze([...byId.values()])
+}
+
 export type SkipReason =
   | 'geometry-identity-unknown'
   | 'geometry-version-mismatch'

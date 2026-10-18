@@ -107,6 +107,8 @@ export async function runIsoExport(
     textureResources: capture.textureResources,
     assets: capture.assets,
     assetNeeds: capture.assetNeeds,
+    // Q8 面板 B 块：捕获期那一份明细（与绑定同源；不进 digest）。
+    captureFacts: capture.captureFacts,
     // 循环次数缺省 = 0（无限；Q9 裁决：不暴露 UI）。
     ...(options.kind === 'animation' ? { loopCount: 0 } : {}),
     ...(options.signal === undefined ? {} : { signal: options.signal }),

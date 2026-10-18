@@ -59,6 +59,7 @@ import type { AssetId } from '@/presentation/assetIdentity'
 import { preflightRequiredAssets, type AssetStateStore } from '@/presentation/assetState'
 import { compileScene } from '@/presentation/compileScene'
 import type { PresentationInputs } from '@/presentation/evaluationKey'
+import type { TextureBinding, TextureSampling } from '@/presentation/textureBinding'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 输出形态与编码端口
@@ -492,6 +493,74 @@ export function exportAssetManifest(
     canonical: assetManifestCanonicalText(assets),
     entries: Object.freeze([...assets]),
   })
+}
+
+/**
+ * **一份纹理资源明细**（Q8 面板 B 块的唯一数据源；**不进** digest）。
+ *
+ * 为什么要与 `ExportAssetNeed` 分开：`assetManifestDigest` 只折叠
+ * `assetId@contentVersion:req|opt` 四字段（见 {@link assetManifestDigest}），
+ * 把采样参数/序列规格塞进清单会**改变 digest**，等于改掉"字节面不变"的契约。
+ * ⇒ 明细走这条**独立只读面**，面板只渲染它，不参与摘要与对账。
+ */
+export interface ExportCaptureFactTexture {
+  /** 材质身份（`material:<下标>` 约定；与清单的 `assetId` 同一来源）。 */
+  readonly materialId: string
+  readonly materialVersion: string
+  /** 纹理内容身份的 id 段（`ContentIdentity#id`）。 */
+  readonly textureId: string
+  /** 纹理内容身份的版本段（`ContentIdentity#version`）。 */
+  readonly textureVersion: string
+  /** 采样设置（filter/wrap/flipY/mipmaps/anisotropy）。 */
+  readonly sampling: TextureSampling
+  /**
+   * 纹理序列规格；`null` = 静态贴图（**缺席就是缺席**，不写 0 帧）。
+   *
+   * `durationsMs` 与声明同源（`TextureSequence#frames[].duration` 的有理秒换算），
+   * 不在这里做 GIF 的厘秒量化 —— 那是编码层的诊断（`ExportTimeQuantized`）。
+   */
+  readonly sequence: { readonly frameCount: number; readonly durationsMs: readonly number[] } | null
+}
+
+/** 捕获期的**只读**资源明细（Q8 面板 B 块；不参与清单身份）。 */
+export interface ExportCaptureFacts {
+  readonly textures: readonly ExportCaptureFactTexture[]
+}
+
+/** 有理秒 → 毫秒（B 块人读；不退化成"帧数 × 默认帧时长"的自算）。 */
+function durationMsOf(d: { readonly num: number; readonly den: number }): number {
+  if (!Number.isFinite(d.num) || !Number.isFinite(d.den) || d.den === 0) return 0
+  return (d.num * 1000) / d.den
+}
+
+/**
+ * 纹理绑定 → 资源明细（**唯一**构造点）。
+ *
+ * 只收 `map` 在场的绑定：无贴图材质不是"缺资源"，把它列成一行空纹理会让
+ * 面板读起来像"这里少了一张图"。顺序沿用绑定生产顺序（材质去重后稳定）。
+ */
+export function captureFactsOfBindings(bindings: readonly TextureBinding[]): ExportCaptureFacts {
+  const textures: ExportCaptureFactTexture[] = []
+  for (const b of bindings) {
+    if (b.map === undefined) continue
+    const sequence = b.animation === undefined
+      ? null
+      : Object.freeze({
+          frameCount: b.animation.sequence.frames.length,
+          durationsMs: Object.freeze(b.animation.sequence.frames.map((f) => durationMsOf(f.duration))),
+        })
+    textures.push(
+      Object.freeze({
+        materialId: b.materialId,
+        materialVersion: b.materialVersion,
+        textureId: b.map.id,
+        textureVersion: b.map.version,
+        sampling: b.sampling,
+        sequence,
+      }),
+    )
+  }
+  return Object.freeze({ textures: Object.freeze(textures) })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

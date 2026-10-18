@@ -48,7 +48,7 @@ import { sceneClockOf, type TimeValue as DomainTimeValue } from '@/domain/animat
 import type { EvaluationKey } from '@/presentation/evaluationKey'
 import type { MaterialDescriptor } from '@/presentation/evaluationKey'
 import type { PresentationInputs } from '@/presentation/evaluationKey'
-import { compileScene, type CompiledScene } from '@/presentation/compileScene'
+import { compileScene, materialDescriptorsOf, type CompiledScene } from '@/presentation/compileScene'
 import { PickIndex, evaluateStalePick, type PickResolution } from '@/presentation/pickingIndex'
 import { BatchedPresenter, type TexturePort } from '@/presentation/presenter'
 import {
@@ -415,19 +415,9 @@ export class PresenterSession {
   materialDescriptors(): readonly MaterialDescriptor[] {
     const c = this.compiled
     if (c === null) return []
-    const byId = new Map<string, MaterialDescriptor>()
-    for (const p of c.payloads) {
-      byId.set(p.material.id, p.material)
-      /**
-       * **合并批次**里批次级材质只是代表值，成员各自还有自己的材质（逐 `materialIndex` 分组，
-       * 见 `compileScene#BatchInstance.material`）。漏掉它们 ⇒ 那些成员拿不到纹理绑定
-       * ⇒ 画面少贴一批图，而**不会有任何报错**（本批实测：真实信封夹具 39 组只绑了 32 个）。
-       */
-      for (const instance of p.instances) {
-        if (instance.material !== undefined) byId.set(instance.material.id, instance.material)
-      }
-    }
-    return Object.freeze([...byId.values()])
+    // 唯一构造点已上移到 `presentation/compileScene#materialDescriptorsOf`：
+    // 导出捕获与屏上呈现必须读**同一份**材质表（合并批次的成员材质也在其中）。
+    return materialDescriptorsOf(c)
   }
 
   /**

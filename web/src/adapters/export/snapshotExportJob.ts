@@ -32,7 +32,7 @@
 import type { DocumentContent } from '@/domain/content'
 import type { ExportAssetNeed, ExportRequest } from '@/domain/captureSpec'
 import type { ArtifactEncoding, ExportKind } from '@/application/exportPlan'
-import type { AssetNeedDerivation } from '@/application/exportPlan'
+import type { AssetNeedDerivation, ExportCaptureFacts } from '@/application/exportPlan'
 import type { AssetStateStore } from '@/presentation/assetState'
 import type { TextureResource } from '@/presentation/textureBinding'
 import { ExportJob, type ExportProgress } from '@/runtime/exportJob'
@@ -71,6 +71,11 @@ export interface SnapshotExportJobOptions {
    * 缺省 ⇒ 产物清单自报 `assembled: false`（不伪造"无需资源"）。
    */
   readonly assetNeeds?: AssetNeedDerivation
+  /**
+   * **捕获期的资源明细**（Q8 面板 B 块；只读、不进 digest）。
+   * 缺省 = 不提供该读数（受控设备测试）。
+   */
+  readonly captureFacts?: ExportCaptureFacts
   /**
    * **取消入口**（M6-3 / G4）：信号一响 ⇒ `ExportJob.cancel()`。
    *
@@ -129,6 +134,7 @@ export function assembleSnapshotExportJob(options: SnapshotExportJobOptions): Sn
     ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
     ...(options.loopCount === undefined ? {} : { loopCount: options.loopCount }),
     ...(options.assetNeeds === undefined ? {} : { assetNeeds: options.assetNeeds }),
+    ...(options.captureFacts === undefined ? {} : { captureFacts: options.captureFacts }),
   })
 
   // G4：信号在**构造之后**接上（作业的 cancel() 是唯一取消真相）。

@@ -37,14 +37,14 @@ import type { Version } from '@/domain/identity'
 import { LOOP_LIMITS, planSequenceLoop, type SequenceLoopPlan } from '@/domain/materials'
 import type { Scene } from '@/domain/scene'
 import type { AssetNeedDerivation, CaptureInput } from '@/application/exportPlan'
-import { deriveAssetNeeds, planExportRequest } from '@/application/exportPlan'
+import { captureFactsOfBindings, deriveAssetNeeds, planExportRequest, type ExportCaptureFacts } from '@/application/exportPlan'
 import type { EvaluationKey, PresentationInputs } from '@/presentation/evaluationKey'
 import { isoCameraSpecsOf, type IsoExportBounds } from '@/presentation/isoExportCamera'
-import { compileScene } from '@/presentation/compileScene'
+import { compileScene, materialDescriptorsOf } from '@/presentation/compileScene'
 import type { TextureResource } from '@/presentation/textureBinding'
 import { AssetStateStore } from '@/presentation/assetState'
 import { kernelPresentationInputs } from '@/composition/kernelPresentationInputs'
-import { textureResourcesOf, type TextureDecoder } from '@/composition/kernelTextureResources'
+import { textureBindingsOf, textureResourcesOf, type TextureDecoder } from '@/composition/kernelTextureResources'
 
 /**
  * 捕获读面（**窄接口**：本模块不 import `runtime/context`）。
@@ -96,6 +96,13 @@ export interface ExportCapture {
   readonly request: ExportRequest
   readonly content: DocumentContent
   readonly textureResources: readonly TextureResource[]
+  /**
+   * **捕获期的资源明细**（Q8 面板 B 块；只读、不进清单身份/digest）。
+   *
+   * 与设备/绑定读的是**同一个** `textureResources` 数组值 + 同一次编译的材质表，
+   * 故面板里的"材质 → 纹理 → 采样/序列"与真正绑上去的那份逐字段同源。
+   */
+  readonly captureFacts: ExportCaptureFacts
   readonly assetNeeds: AssetNeedDerivation
   readonly assets: AssetStateStore
   /** 四个相机值（请求里存被选中的那一个；其余三个同批算出，供诊断）。 */
@@ -231,6 +238,12 @@ export async function captureExportSnapshot(
     return err(unsupportedOperation({ reason: 'exportCaptureTextureDecodeThrew', detail: String(e) }))
   }
 
+  // ③b 资源明细（Q8 面板 B 块）：与绑定**同一份**材质表 + **同一个**资源数组值。
+  //     它只读数，不参与请求身份，也不进 digest（见 `ExportCaptureFacts` 的文件注释）。
+  const captureFacts = captureFactsOfBindings(
+    textureBindingsOf({ materials: materialDescriptorsOf(compiled.value), resources: textureResources }),
+  )
+
   const bounds = unionBoundsOf(compiled.value.plans)
   const cameras = isoCameraSpecsOf({ bounds })
   if (!Number.isInteger(options.directionIndex) || options.directionIndex < 0 || options.directionIndex > 3) {
@@ -323,6 +336,7 @@ export async function captureExportSnapshot(
       request,
       content: snap.content,
       textureResources,
+      captureFacts,
       assetNeeds,
       assets,
       cameras,

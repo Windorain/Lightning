@@ -33,7 +33,7 @@
 import type { DomainError, Result } from '@/domain/errors'
 import { err, unsupportedOperation } from '@/domain/errors'
 import type { ExportRequest } from '@/domain/captureSpec'
-import type { AssetNeedDerivation, ExportAssetManifest, ExportDiagnostic } from '@/application/exportPlan'
+import type { AssetNeedDerivation, ExportAssetManifest, ExportCaptureFacts, ExportDiagnostic } from '@/application/exportPlan'
 import { exportAssetManifest, preflightError, preflightExport, type ArtifactEncoding, type EncoderPort, type ExportKind, type ExportPreflight, type RenderedFrame } from '@/application/exportPlan'
 import { packageExportArtifact, type PackagedArtifact } from '@/application/exportAssetCarrier'
 
@@ -141,6 +141,13 @@ export interface ExportJobOptions {
    * **绝不**把"没拿到推导记录"读成"无需资源"（那是本条接缝的假绿形态）。
    */
   readonly assetNeeds?: AssetNeedDerivation
+  /**
+   * **捕获期的资源明细**（Q8 面板 B 块；只读、不进 digest）。
+   *
+   * 缺省 = 本作业没有捕获面（受控设备/测试替身）⇒ 结局**不带**该字段
+   * （"没有这份读数"与"资源为零"必须可区分，同 `sampling` 的纪律）。
+   */
+  readonly captureFacts?: ExportCaptureFacts
 }
 
 /**
@@ -177,6 +184,19 @@ export type JobOutcome =
        * 取消/失败路径**不带**（不伪造读数），受控设备测试里也不带。
        */
       readonly sampling?: readonly FrameSamplingReport[]
+      /**
+       * 清单的**交付位置**（Q8 裁决：UI 面板，不产生第二个下载文件）。
+       *
+       * 它是可断言的值而不是注释："一次下载只有产物"由它 + 面板断言共同表达。
+       */
+      readonly delivery: 'panel'
+      /**
+       * **捕获期的资源明细**（Q8 面板 B 块）。
+       *
+       * 只有捕获面提供了它才在场（受控设备测试不带）—— 面板据此显示"无纹理资源"，
+       * 而不是伪造一张空表。
+       */
+      readonly captureFacts?: ExportCaptureFacts
     }
   | { readonly status: 'cancelled'; readonly releasedFor: number; readonly framesRendered: number }
   | { readonly status: 'failed'; readonly diagnostics: readonly ExportDiagnostic[]; readonly releasedFor: number; readonly error: DomainError }
@@ -345,8 +365,12 @@ export class ExportJob {
         manifestLocation: packaged.manifestLocation,
         carrierFallbackReason: packaged.fallbackReason,
         diagnostics: pre.diagnostics,
+        // Q8：清单交付在**面板**（一次下载只产产物本身；不产生第二个文件）。
+        delivery: 'panel' as const,
         // 只读诊断面：端口有才报（受控设备/测试替身缺省 ⇒ 不伪造空数组）。
         ...(this.opts.port.samplingReport === undefined ? {} : { sampling: this.opts.port.samplingReport() }),
+        // 捕获明细同理：没有捕获面就不带（面板显示"无纹理资源"而不是伪造表）。
+        ...(this.opts.captureFacts === undefined ? {} : { captureFacts: this.opts.captureFacts }),
       })
     } finally {
       // 四条路径（完成/取消/失败/抛错）都会到这里；`release()` 必须幂等。
