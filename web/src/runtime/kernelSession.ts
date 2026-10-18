@@ -772,7 +772,8 @@ export class KernelSession {
    * 那个协调器自带**一份独立 `SaveLedger`**（构造参数 `ledger`）并要求
    * `SaveTargetPort`（条件版本写入 + 序列化端口）。三条生产保存路径的目标分别是
    * 浏览器下载（无远端修订）与 MediaWiki 编辑（冲突由 `mw.Api` 的
-   * `editconflict` 回答，见 `wikiDataWikiApiAdapter`），没有一条需要"本实例的
+   * `editconflict` 回答，见 `wiki/mwApiAdapter` 与
+   * `workbench/document/sources/wikiDataPageSource`），没有一条需要"本实例的
    * 第二本账"。用它 = 在 `ApplicationState.saveLedgers` 之外再造一份"什么算保存成功"，
    * 正是本包要消灭的双写。⇒ **不接**；reduce 路径自足（见 `completeSaveRequest`）。
    *
