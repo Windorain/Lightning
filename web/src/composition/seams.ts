@@ -97,6 +97,11 @@ export interface SeamRegistration {
  * **不**登记进本表 —— 本表语义是"双轨**剩余**数、只应减少"，
  * 把已退役项塞进来会违背该口径；那两条改由
  * `composition/__tests__/seams.test.ts` 的**回归断言**把守（防被改回去）。
+ *
+ * ⚠️ **M6-6（Q5）的一条例外**：`screenshot-live-capture-by-design` **不是**待退役双轨
+ * （截屏按产品定义就是即兴抓屏），它的 `exitCondition`（甲）（乙）都写"不适用"。
+ * 它进表只为让 `tests/architecture/export-purity.test.ts` 的"导出入口读了实时视口/相机"
+ * 判据有一个**显式且承重**的例外 ⇒ 读"双轨剩余数"时须把这一条**扣除**。
  */
 export const SEAMS: readonly SeamRegistration[] = Object.freeze([
   /**
@@ -318,7 +323,7 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     newTrack:
       '内核侧固定快照导出（#260）：`domain/captureSpec` 把取景复制成 `CameraSpec` 值、把采样时间算成冻结的 `CaptureTime` 序列；`application/exportPlan` 组装**不可变**请求并在预检处默认失败；`runtime/exportJob` 的离屏端口只有 `acquire/renderFrame/release`（**没有**取实时相机/视口的方法）。静态判据见 `web/tests/architecture/export-purity.test.ts`。',
     oldTrack:
-      '旧导出器仍在**部分**生产路径上：`src/workbench/export/bundleMeshAssembly.ts` 消费**旧文档内容**（消费方经 `ctx.plainForSave()` 取 plain 文档），命令入口在 `src/operators/builtin/exportOperators.ts`。⚠️ **M6-3 起只剩三个**（Plain / Envelope / OBJ）；等轴 PNG 与场景 GIF 已迁至 `assembleSnapshotExportJob` + `ExportJob.run()`，旧烘焙链（`workbench/exportIsometricImage.ts` / `exportAnimatedGif.ts` / `animatedGifEncoder.ts`）整文件删除。',
+      '旧导出器仍在**部分**生产路径上：`src/workbench/export/bundleMeshAssembly.ts` 消费**旧文档内容**（消费方经 `ctx.plainForSave()` 取 plain 文档），命令入口在 `src/operators/builtin/exportOperators.ts`。⚠️ **M6-3 起只剩三个**（Plain / Envelope / OBJ）；等轴 PNG 与场景 GIF 已迁至 `assembleSnapshotExportJob` + `ExportJob.run()`，旧烘焙链（`workbench/exportIsometricImage.ts` / `exportAnimatedGif.ts` / `animatedGifEncoder.ts`）整文件删除。\n⚠️ **截屏不在本条旧轨内**：`runtime/renderEngine#screenshot` 读活画布/活相机是**明示例外**（即兴抓屏，不是正式导出），单独登记在 `screenshot-live-capture-by-design`（M6-6 / Q5）。',
     blocker:
       '**P10c（#286）实测修正（改写 P9 的原文，附机械证据）**：\n' +
       '① **消费者面（M6-3 更新）**：Plain / Envelope / OBJ **三个**命令与 `ExportWorkspace.vue` 的导出卡片仍经 `ctx.plainForSave()` 读旧文档投影（`getDoc()` 已终删）⇒ 删掉它们需要那三条产物迁到内核侧；等轴 PNG 与场景 GIF **已退出**该面（M6-3：经 `workbench/export/isoExportJob` → `ExportJob`）。\n' +
@@ -327,7 +332,8 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       // 实现、`ExportJob` 已有生产构造点（`src/adapters/export/`；判据见
       // `tests/architecture/export-port-implementation.test.ts` 与
       // `src/adapters/export/__tests__/exportPorts.test.ts`）。仍未接的是**消费面**：
-      // 四个导出命令仍走旧导出器 ⇒ 四命令迁移归主线 D/E。
+      // 当时**四个**导出命令仍走旧导出器 ⇒ 四命令迁移归主线 D/E。
+      // （M6-3 后只剩三个：Plain / Envelope / OBJ；等轴 PNG 与场景 GIF 已迁，见下 ③。）
       // ⚠️ 真实 GPU 填充那一段**只由 e2e 证明**（本仓 `gl@8.1.6` 是 WebGL 1.0，
       // 而 three r174 硬编码请求 `webgl2` ⇒ vitest 无真 GL 路径）。
       //
@@ -338,7 +344,8 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       //  - **有**生产构造点：`src/adapters/export/snapshotExportJob.ts` 的
       //    `assembleSnapshotExportJob` → `new ExportJob({`（实测 `:82`；此前 11 处
       //    `new ExportJob(` 全在 `__tests__`）；
-      //  - **零**生产消费方：四个导出命令仍走 `workbench/export*` 旧导出器，
+      //  - **零**生产消费方（**2026-10-13 的实测**；M6-3 后为部分消费方 2/5，见下 ③）：
+      //    当时四个导出命令仍走 `workbench/export*` 旧导出器，
       //    无一处调 `assembleSnapshotExportJob` / `ExportJob.run()`。
       // ⇒ 措辞改为「**有生产构造点、零生产消费方**」，并**去掉**"四命令迁移归主线 D/E"
       //   这一半 —— Lead 裁决：**四命令不迁 `ExportJob`**（切过去丢贴图 + 违反 A29
@@ -361,8 +368,9 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       '③ **替代面的两半必须分开写**（原文"零生产调用方"把两者混为一谈）：\n' +
       '  · **有生产构造点**：`src/adapters/export/snapshotExportJob.ts` 的 `assembleSnapshotExportJob` 内实例化 `ExportJob`（实测 `:82`，本文件外的唯一构造点；判据 `tests/architecture/export-port-implementation.test.ts`）；`OffscreenRenderPort` 与 `EncoderPort` **各有生产实现**（`src/adapters/export/offscreenRenderPort.ts` / `encoderPort.ts`）。\n' +
       '  · **部分生产消费方（2/5）**：等轴 PNG（`OPERATOR_EXPORT_ISO_PNG`）与场景 GIF（`OPERATOR_EXPORT_SCENE_GIF`）已经 `workbench/export/isoExportJob` 调 `assembleSnapshotExportJob` + `ExportJob.run()`（M6-3）；Plain / Envelope / OBJ 三条仍走 `plainForSave()` 的旧投影路径（它们产的是 JSON/ZIP，不属呈现链）。\n' +
-      '  · **Lead 裁决（#262 comment 6429 三，2026-10-13）：四个导出命令 `迁 ExportJob` = 采纳「不迁」**（切过去丢贴图 + 违反 A29 借用实时视口）⇒ 剩下的只是**旧导出器本体**的删除，其前置收窄为「渲染链终切」（见 seam `isometric-export-legacy-bake`）。\n' +
-            '④ **文字修正**：本条的旧 `oldTrack` 曾称两个文件"从正在操作的视口取景（必要时临时改机位再恢复）"。实测**不成立**：`bundleMeshAssembly.ts` 与 `exportIsometricImage.ts` 都不 import 任何视口/相机/`ctx` 实时面，后者自建 `new THREE.WebGLRenderer` 与自建透视/正交相机（`:105,:153-168`）。"借用并旋转实时相机"发生在**截图**路径（`runtime/renderEngine.ts:215` 的 `canvas.toDataURL`），不是这两个导出器。A29 的负对照面据此收窄（见汇报）。',
+      '  · **Lead 裁决（#262 comment 6429 三，2026-10-13）：四个导出命令 `迁 ExportJob` = 采纳「不迁」**（切过去丢贴图 + 违反 A29 借用实时视口）⇒ 剩下的只是**旧导出器本体**的删除，其前置收窄为「渲染链终切」。\n' +
+      '  · **M6-3 已核销 `isometric-export-legacy-bake`**（旧烘焙链三文件删除）；"命令不许回退到自建链"由 `web/tests/architecture/export-chain.test.ts` 的 C1/C2 静态判据把守（含负对照）。\n' +
+            '④ **文字修正**：本条的旧 `oldTrack` 曾称两个文件"从正在操作的视口取景（必要时临时改机位再恢复）"。实测**不成立**：`bundleMeshAssembly.ts` 与 `exportIsometricImage.ts` 都不 import 任何视口/相机/`ctx` 实时面，后者自建 `new THREE.WebGLRenderer` 与自建透视/正交相机（`:105,:153-168`）。"借用并旋转实时相机"发生在**截图**路径（`runtime/renderEngine.ts:215` 的 `canvas.toDataURL`），不是这两个导出器。A29 的负对照面据此收窄（见汇报）；截屏的**明示例外**登记见 `screenshot-live-capture-by-design`（M6-6 / Q5）。',
     // ⚠️ **M6-3：闭包覆盖从 `outside-closure` 翻成 `in-closure`** —— 这条翻转本身就是切链的证据：
     // 切链前 `runtime/exportJob.ts` 在生产入口的可达闭包**外**（"尚未接线"），现在经
     // `workbench/export/isoExportJob` → `assembleSnapshotExportJob` 可达。
@@ -370,9 +378,53 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     closureCoverage: 'in-closure',
     owner: Object.freeze({ p: 'P10d', issue: 289, duty: '内核内容面补全与呈现消费、渲染链终切' }),
     exitCondition:
-      "**（甲）登记条件 —— ✅ 已成立**：导出端口实现完备（`adapters/export/snapshotExportJob.ts` + `SnapshotOffscreenRenderPort` + `createEncoderPort`），且已有真 GL e2e 证据（`e2e/export-ports.spec.ts`）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立（3 条）**：Plain / Envelope / OBJ 仍走 `plainForSave()` 的旧投影路径；等轴 PNG 与场景 GIF **已迁**（M6-3，经 `workbench/export/isoExportJob` → `ExportJob.run()`，旧烘焙链整文件删除）。\n⚠️ 本条 `closureCoverage: 'outside-closure'` ⇒ **不得**用闭包判据（见 `closureNote`）。\n**以下为原退出条件（逐字保留）**：\n"
+      "**（甲）登记条件 —— ✅ 已成立**：导出端口实现完备（`adapters/export/snapshotExportJob.ts` + `SnapshotOffscreenRenderPort` + `createEncoderPort`），且已有真 GL e2e 证据（`e2e/export-ports.spec.ts`）。\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立（剩 3 条：Plain / Envelope / OBJ）**：三条仍走 `plainForSave()` 的旧投影路径；等轴 PNG 与场景 GIF **已迁**（M6-3，经 `workbench/export/isoExportJob` → `ExportJob.run()`，旧烘焙链整文件删除）。\n✅ **闭包判据适用（M6-3 翻转）**：本条 `closureCoverage: 'in-closure'`（声明与实测量均为 in-closure，`boundary-scan.test.ts` 逐条核对）⇒ 原 `outside-closure` 的「不得用闭包判据」警告已作废。\n**命令不许回退到自建链**另有静态判据：`web/tests/architecture/export-chain.test.ts`（C1 命令必须经作业 / C2 装配必须真的运行，各带负对照）。\n**以下为原退出条件（逐字保留）**：\n"
       +
       '`src/workbench/export/bundleMeshAssembly.ts` 被删除，且 `src/operators/builtin/exportOperators.ts` 的全部导出命令改由 `src/runtime/exportJob.ts` 的 `ExportJob` 承担（含 OBJ 几何来自内核内容面而不再依赖旧文档回显）；届时删除本条登记。\n⚠️ **M6-3 已兑现一半**：等轴 PNG / 场景 GIF 两条已迁且旧烘焙链整文件删除；剩 Plain / Envelope / OBJ 三条与 `bundleMeshAssembly.ts`。',
+  }),
+  /**
+   * Q5（M6-6）登记：**截屏是明示例外，不是待退役的债务**。
+   *
+   * ## 为什么它不是双轨
+   *
+   * `runtime/renderEngine#screenshot()` 用的是**活画布 / 活相机 / 墙钟文件名**
+   * （`renderEngine.ts:223-250`）：`vp.domElement.toDataURL()` 取当前帧，
+   * `lightning-screenshot-${Date.now()}.png` 落盘。按产品定义它就是**即兴抓屏**
+   * （"把眼前这一画面存下来"），**不是**正式导出 —— 正式导出的纪律是 SPEC §9 的
+   * 固定快照（`ExportRequest` + 资源清单 + `ExportJob`），那条链由
+   * `export-borrows-live-viewport-dual-track` 与 `tests/architecture/export-chain.test.ts` 把守。
+   *
+   * ⇒ 把截屏改造成"固定快照导出"会**改变产品语义**（用户要的是"此刻画面"，
+   * 不是"某组导出配置下的产物"）。故它**不进入**退役流程：本登记的作用是让
+   * `export-purity` 扩面时"命中实时视口/相机"的静态判据有一个**显式且承重**的例外，
+   * 而不是让那条判据对截屏路径静默失明。
+   *
+   * ## 判据面（不是只挂个名字）
+   *
+   * - `web/tests/architecture/export-purity.test.ts` 的 `EXPORT_LIVE_VIEWPORT_EXCEPTIONS`
+   *   按 `file + symbol` 精确放行本路径；**删掉这条例外 ⇒ 判据判红**（证明例外承重）；
+   * - 例外条目必须**有对应命中**（该 file/symbol 真的读写实时面），否则报
+   *   "例外条目无对应命中" —— 防止例外表变成万能免死金牌。
+   */
+  Object.freeze({
+    id: 'screenshot-live-capture-by-design',
+    files: Object.freeze([
+      'src/runtime/renderEngine.ts',
+      'src/shared/viewport/EmbedViewport.vue',
+    ]),
+    newTrack:
+      '无替代轨 —— 本路径按产品定义就是**即兴抓屏**：`renderEngine.ts#screenshot()` 读当前活画布（`vp.domElement`）、用当前相机渲染（`renderMain`）并直接 `toDataURL` 落盘（文件名前缀 `lightning-screenshot-`，与正式导出产物天然区分）。',
+    oldTrack:
+      '同一路径即"旧轨"：它读了实时视口/相机与墙钟，**不**走固定快照（无 `ExportRequest`、无资源清单、不进 `ExportJob`）。这不是待迁移的双轨，而是**明示例外**（Q5 裁决：保留为即兴抓屏）。',
+    blocker:
+      '**不适用（不是债务）**：没有"把它迁到固定快照"的计划 —— 那会改变产品语义（"存下此刻画面" ≠ "导出配置下的产物"）。若日后产品要它成为正式导出，须**另立包**，并同批改写本条与 `export-purity` 的例外表。',
+    closureCoverage: 'in-closure',
+    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
+    exitCondition:
+      '**（甲）登记条件 —— 不适用**：`src/runtime/renderEngine.ts` 的 `screenshot()` 就是按产品定义读实时面（活画布/活相机/墙钟），不存在"能力尚未就绪"。\n' +
+      '**（乙）消费者迁移数 = 0 —— 不适用**：本路径不是待迁移的旧轨；它由 `EXPORT_LIVE_VIEWPORT_EXCEPTIONS` 按 `file + symbol` 显式登记为**明示例外**。\n' +
+      '**真正的判据**（不是退出条件，而是"例外不得变成装饰"）：`web/tests/architecture/export-purity.test.ts` 的两条反空洞判据 —— ① 假条目必须报"例外条目无对应命中"；② 删掉 `runtime/renderEngine.ts` 的真条目 ⇒ 判据必须判红。\n' +
+      '**若日后要它成为正式导出**：须另立包，同批改本条与例外表；届时才谈退出。',
   }),
   /**
    * P9（#260）登记：**导出资源清单的产出方式**尚未接线。

@@ -130,16 +130,28 @@ describe('C3 · 导出层不得 import 旧材质库/网格构建（不借道旧�
 })
 
 /**
- * **C4 的额外扫面**：本批未纳入 C3 的 OBJ 文件（Q4：不同批切链）。
+ * **C4 的判定面 = 全树生产源码**（M6-5 收口；设计 §10.6「全树不得再有 ticks*5 自算」）。
  *
- * 它们对旧网格/材质入口的依赖是**既成事实**（且 `bundleMaterialBaking` 那条是类型依赖），
- * 强行纳入 C3 只会逼出一个假绿豁免；但"不得自算逐帧时延"与格式无关，必须一并覆盖。
+ * 原先 C4 只扫两张**手列**清单（`EXPORT_LAYER_FILES` + OBJ 的三个额外文件）。
+ * 手列清单的漏项就是免查券：新文件只要没被列进去，自算 tick 就全绿 —— 而
+ * "逐帧时延必须来自声明"与**哪个文件**无关，它属于整棵生产树（Q2 之后材质卡的
+ * 自算入口已随 `materialOperators` 退役，判定更不能只盯着导出目录）。
+ * 故判定面改为 `src/**` 全量（排除 `__tests__` 与 `*.test.*`/`*.spec.*`）。
  */
-const C4_EXTRA_FILES = [
-  'workbench/export/bundleMeshAssembly.ts',
-  'workbench/export/bundleMaterialBaking.ts',
-  'workbench/textureAtlasRaster.ts',
-]
+function productionSources(): string[] {
+  const out: string[] = []
+  const walk = (dir: string): void => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === '__tests__' || e.name === 'node_modules') continue
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) { walk(full); continue }
+      if (!/\.(ts|tsx|mts|vue)$/.test(e.name) || /\.(test|spec)\.[cm]?[jt]sx?$/.test(e.name)) continue
+      out.push(path.relative(SRC, full).replace(/\\/g, '/'))
+    }
+  }
+  walk(SRC)
+  return out
+}
 
 describe('C4 · 逐帧时延**不得**自算（M6-2 判定的迁移形态）', () => {
   /**
@@ -156,9 +168,20 @@ describe('C4 · 逐帧时延**不得**自算（M6-2 判定的迁移形态）', (
     return out
   }
 
-  it('导出层没有任何 `* 5` 形式的 ticks→厘秒自算', () => {
+  it('全树生产源码没有任何 `* 5` 形式的 ticks→厘秒自算', () => {
+    const files = productionSources()
+    // 反空洞真：判定面必须真的扫到整棵树（否则"0 违规"可能只是没扫到）。
+    expect(files.length, '判定面必须覆盖整棵生产树').toBeGreaterThan(200)
+    expect(files, '判定面必须含导出层与旧 OBJ 装配（不靠手列清单）').toEqual(
+      expect.arrayContaining([
+        COMMANDS,
+        RUNNER,
+        'workbench/export/bundleMeshAssembly.ts',
+        'workbench/textureAtlasRaster.ts',
+      ]),
+    )
     const hits: string[] = []
-    for (const rel of [...EXPORT_LAYER_FILES, ...C4_EXTRA_FILES]) {
+    for (const rel of files) {
       const code = codeOnly(readSource(rel))
       for (const line of selfComputedDelays(code)) hits.push(rel + ': ' + line)
     }
