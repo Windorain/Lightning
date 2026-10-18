@@ -29,6 +29,7 @@ import {
   clickMenuItem,
   expectEngineClose,
   leaveAndReturnWorkspace,
+  MENU_MERGE,
   MENU_SPLIT_H,
   MENU_VIEW,
   openWorkbenchWithScene,
@@ -115,4 +116,32 @@ test.describe('M7-1 · G2 多区分割 + 工作区往返（布局与两区机位
     expect(camA2.engine.m, '切回后 A 区必须有真实引擎相机').not.toBeNull()
     expect(camB2.engine.m, '切回后 B 区必须有真实引擎相机').not.toBeNull()
   })
-})
+
+  test('G2 负对照：布局签名读面必须能区分 1 区 / 2 区（否则主判据 toEqual 恒绿）', async ({ page }) => {
+    test.setTimeout(240_000)
+    await openWorkbenchWithScene(page)
+
+    const one = await readLayoutSignature(page)
+    expect(one.areas.length, '负对照：单区时签名应有 1 个叶子').toBe(1)
+    expect(one.splits, '负对照：单区时不应有分割节点').toEqual([])
+
+    await clickMenuItem(page, MENU_VIEW, MENU_SPLIT_H)
+    await expect
+      .poll(async () => (await readAreaState(page)).leafCount, { timeout: 30_000 })
+      .toBe(2)
+    const two = await readLayoutSignature(page)
+    expect(
+      two,
+      '负对照：分割后签名必须与单区不同 —— 若读面恒返回同一值，主判据的 layout toEqual 就是空转',
+    ).not.toEqual(one)
+    expect(two.splits, '负对照：分割后应恰好 1 个分割节点').toHaveLength(1)
+
+    await clickMenuItem(page, MENU_VIEW, MENU_MERGE)
+    await expect
+      .poll(async () => (await readAreaState(page)).leafCount, { timeout: 30_000 })
+      .toBe(1)
+    const backToOne = await readLayoutSignature(page)
+    expect(backToOne.areas.length, '负对照：合并回单区后签名应回到 1 个叶子').toBe(1)
+    expect(backToOne, '负对照：合并回单区后签名必须与最初单区签名一致（读面是纯读，不带副作用）').toEqual(one)
+  })
+});

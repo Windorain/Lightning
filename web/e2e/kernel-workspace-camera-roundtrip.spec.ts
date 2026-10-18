@@ -124,4 +124,28 @@ test.describe('M7-1 · G1 工作区往返（机位属于编辑器实例）', () 
     await clickWorkspaceTab(page, TAB_PREVIEW)
     await expect(page.locator('.vc-viewport canvas')).toHaveCount(1, { timeout: 60_000 })
   })
-})
+  test('G1 判定链自检：同一读面下“被复位”与“未被复位”必须可区分（复位可判红）', async ({ page }) => {
+    test.setTimeout(180_000)
+    await openWorkbenchWithScene(page)
+
+    const fit = await readCamera(page, ROOT_REGION)
+    await setCamera(page, ROOT_REGION, POSE_A)
+    const moved = await readCamera(page, ROOT_REGION)
+
+    // ① 挪动真的生效 → 与 fit 可区分（若读面恒等，下面“复位可判红”就是空话）
+    expect(moved.logical, '自检：挪动后必须与 fit 可区分').not.toEqual(fit.logical)
+
+    // ② 主动把机位写回 fit（模拟“被复位”这一事件），断言判定式**能**判红
+    await setCamera(page, ROOT_REGION, fit.logical!)
+    const reset = await readCamera(page, ROOT_REGION)
+    expect(
+      reset.logical,
+      '自检：被复位后机位必须等于 fit —— 这证明主判据的 not.toEqual(fit) / toEqual(moved) 具备判红能力',
+    ).toEqual(fit.logical)
+    expect(
+      reset.logical,
+      '自检：被复位后必须**不**等于用户机位（主判据 toEqual(moved) 会当场红）',
+    ).not.toEqual(moved.logical)
+    expect(reset.engine, '自检：复位同样必须反映到引擎相机上').not.toEqual(moved.engine)
+  })
+});
