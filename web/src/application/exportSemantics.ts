@@ -169,7 +169,9 @@ export const GIF_PUBLISH_CAPABILITIES: PublishCapabilities = Object.freeze({
 export function capabilityFindingOf(item: CapabilityReportItem): ExportSemanticFinding {
   return Object.freeze({
     code: EXPORT_SEMANTIC_CODES.capabilityUnsupported,
-    params: Object.freeze({ category: item.category, reason: item.reason, ...item.detail }),
+    // `objectId` 同时进 **params**（诊断数据自带归属）与 correlation（可按下标查）：
+    // SPEC §9 要求"逐项报告"，而 `objectId` 与 `reason` 是那一条的**结构化**主键。
+    params: Object.freeze({ category: item.category, reason: item.reason, objectId: item.objectId, ...item.detail }),
     objectId: item.objectId,
   })
 }

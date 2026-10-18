@@ -165,6 +165,11 @@ export const KERNEL_FILES = [
   'adapters/export/offscreenRenderPort.ts',
   'adapters/export/encoderPort.ts',
   'adapters/export/snapshotExportJob.ts',
+  // M6-4：导出**不可表达语义**的声明点（矩阵 + 纯生产者）与它到诊断通道的桥。
+  // 两者都只依赖 application/domain（`exportDiagnostics` 只 import `application/diagnostics`），
+  // 登记进本表使"新实现不得反向依赖旧层"这条判据**覆盖**它们（不登记就是留白）。
+  'application/exportSemantics.ts',
+  'runtime/exportDiagnostics.ts',
 ]
 
 /**
@@ -842,6 +847,39 @@ const APPROVED_LEGACY_TO_KERNEL_EDGES = [
       reason: 'M6-3：' + reason + '。切链后导出命令经作业面消费内核能力（旧烘焙链已删除）。',
       exitStage:
         'M6-5/M6-6 之后工作台导出面板整体迁入内核侧编辑器（workbench/ 不再有导出入口）时，本边核销',
+    }),
+  ),
+  // ── M6-4：导出**诊断**接线（旧层消费内核的语义声明与导出政策）──────────────
+  //
+  // M6-4 把三种此前没有任何可查询载体的东西接进诊断通道：能力损失（`capabilityReport`
+  // 生产零调用）、OBJ 的不可表达语义（此前只写产物注释行）、命令的完成/失败事实
+  // （此前只有 `log.warn` 与 UI 红字）。这些边就是那条接线本身：
+  //
+  //  - `workbench/export/*` 与两个导出卡片组件消费 `application/exportPlan` 的
+  //    清单/能力面（`ExportAssetManifest` / `ExportCaptureFacts` / `ExportDiagnostic`）；
+  //  - 消费 `application/exportSemantics` 的矩阵与纯生产者（判定**只在**那一处）；
+  //  - `exportCommandDiagnostics` 需要 `domain/errors` 的形状（失败是值）。
+  //
+  // 它们**不是**"用新层给旧路径续命"：旧形态（`log.warn` + 注释行）在同批被替代，
+  // 而登记使"下一条未登记的旧→新依赖"仍然判红（闸门不放宽）。
+  // 退出：M6-5/M6-6 之后工作台导出面板整体迁入内核侧编辑器（workbench/ 不再有导出入口）时核销。
+  ...([
+    ['src/workbench/components/ExportManifestPanel.vue', 'application/exportPlan', '面板渲染的清单类型（A 块）与捕获明细类型（B 块）来自导出政策层，不在这里重定义'],
+    ['src/workbench/components/ExportWorkspace.vue', 'application/exportPlan', '导出卡片把 outcome 的清单/明细喂给面板时需要的类型（与上面同一个来源）'],
+    ['src/workbench/export/exportCommandDiagnostics.ts', 'application/exportPlan', '作业/预检诊断项的类型（ExportDiagnostic）—— 映射到 export.* 码时逐项读它'],
+    ['src/workbench/export/exportCommandDiagnostics.ts', 'domain/errors', '失败是值（DomainError 的 code+params），诊断参数直接取自它而不是人读文案'],
+    ['src/workbench/export/exportCommandDiagnostics.ts', 'application/exportSemantics', '预检诊断 → 导出码的映射只在该处（findingOfExportDiagnostic），不复制第二份判定'],
+    ['src/workbench/export/isoExportJob.ts', 'application/exportSemantics', '捕获后、作业前的不可表达语义由 stillExportSemantics 一次算出（PNG/GIF 各一张能力表）'],
+    ['src/workbench/export/bundleMeshAssembly.ts', 'application/exportSemantics', 'OBJ 装配期把首帧/跳过/分层/混合近似折叠成 BundleSemanticReport（类型来源）'],
+    ['src/workbench/export/bundleMaterialBaking.ts', 'application/exportSemantics', '导出选项里的 onSemanticReport 形状（回调类型来源）'],
+    ['src/operators/builtin/exportOperators.ts', 'application/exportSemantics', 'OBJ 命令把报告映射成诊断（objExportSemantics）—— 命令只做接线，不重判'],
+  ] as const).map(([from, to, reason]) =>
+    Object.freeze({
+      from,
+      to,
+      reason: 'M6-4：' + reason + '。SPEC §9「无法表达的语义必须诊断，不静默丢弃」的落点。',
+      exitStage:
+        'M6-5/M6-6 之后工作台导出面板与命令整体迁入内核侧编辑器时，本边随文件退场',
     }),
   ),
   // ── M5-4 的两条边（GIF 时延的唯一权威）**已随 M6-3 核销** ────────────────

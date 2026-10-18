@@ -59,6 +59,14 @@ const EXPORT_LAYER_FILES = [
   'composition/exportCapture.ts',
   RUNNER,
   COMMANDS,
+  // M6-4：导出**语义矩阵**与它的命令侧接线同样属于"导出实现"——
+  // 漏掉它们等于给新文件一张"不得 import 旧材质库 / 不得自算 ticks"的免查券。
+  'application/exportSemantics.ts',
+  'workbench/export/exportCommandDiagnostics.ts',
+  // M6-4：OBJ 装配/栅格化在本批**不入 C3**（Q4 裁决：OBJ 不同批切链，只登记缺口）。
+  // 它们保留对旧网格/材质入口的既有依赖（`bundleMaterialBaking` 的
+  // `BuildBlockMeshOptions` 是**类型**依赖），强行纳入 C3 只会逼出一个假绿豁免。
+  // ⇒ 只把它们纳入 C4（不得自算逐帧时延）—— 那条与"哪个格式"无关。
 ]
 
 describe('C1 · 导出命令**必须经作业**（自建烘焙入口不得复活）', () => {
@@ -121,6 +129,18 @@ describe('C3 · 导出层不得 import 旧材质库/网格构建（不借道旧�
   })
 })
 
+/**
+ * **C4 的额外扫面**：本批未纳入 C3 的 OBJ 文件（Q4：不同批切链）。
+ *
+ * 它们对旧网格/材质入口的依赖是**既成事实**（且 `bundleMaterialBaking` 那条是类型依赖），
+ * 强行纳入 C3 只会逼出一个假绿豁免；但"不得自算逐帧时延"与格式无关，必须一并覆盖。
+ */
+const C4_EXTRA_FILES = [
+  'workbench/export/bundleMeshAssembly.ts',
+  'workbench/export/bundleMaterialBaking.ts',
+  'workbench/textureAtlasRaster.ts',
+]
+
 describe('C4 · 逐帧时延**不得**自算（M6-2 判定的迁移形态）', () => {
   /**
    * 旧形态：`(m.animation?.defaultFrametimeTicks ?? 1) * 5` —— 它把"1 tick = 5 厘秒"
@@ -138,7 +158,7 @@ describe('C4 · 逐帧时延**不得**自算（M6-2 判定的迁移形态）', (
 
   it('导出层没有任何 `* 5` 形式的 ticks→厘秒自算', () => {
     const hits: string[] = []
-    for (const rel of EXPORT_LAYER_FILES) {
+    for (const rel of [...EXPORT_LAYER_FILES, ...C4_EXTRA_FILES]) {
       const code = codeOnly(readSource(rel))
       for (const line of selfComputedDelays(code)) hits.push(rel + ': ' + line)
     }

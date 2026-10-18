@@ -86,6 +86,10 @@ export const LAYER_DESTINATIONS = [
       'runtime/inputPort.ts',
       // P10（#261）：内核→生产接线的宿主侧会话（R-WK-03 的核心内容）
       'runtime/kernelSession.ts',
+      // M6-4：导出事实 → 有界诊断通道的桥（只 import application/diagnostics；
+      // 与 `runtime/contentDiagnostics.ts` 同一分层纪律）。登记使"不得依赖 Vue/Three/DOM"
+      // 的 `corePurity` 闸门**覆盖**它（不登记＝留白）。
+      'runtime/exportDiagnostics.ts',
     ],
     /** 该层的新实现属**纯核心**（不得依赖 Vue/Three/DOM）：执行协议、求值判定、资源记账、导出作业与输入路由是业务规则，不是呈现。 */
     corePurity: true,

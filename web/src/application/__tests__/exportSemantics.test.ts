@@ -153,7 +153,8 @@ describe('PNG/GIF：能力表 → 结构化诊断（`export.capabilityUnsupporte
     })
     expect(f.code).toBe('export.capabilityUnsupported')
     expect(f.objectId).toBe('o9')
-    expect(f.params).toMatchObject({ category: 'deformation', reason: 'LegacyExportUnsupportedDeformation', deformationId: 'wave' })
+    // SPEC §9「逐项报告」的结构化主键：objectId / reason 必须在**参数**里（不只挂在关联字段上）。
+    expect(f.params).toMatchObject({ category: 'deformation', reason: 'LegacyExportUnsupportedDeformation', objectId: 'o9', deformationId: 'wave' })
   })
 })
 
