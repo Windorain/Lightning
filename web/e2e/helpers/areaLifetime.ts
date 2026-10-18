@@ -174,7 +174,9 @@ export async function leaveAndReturnWorkspace(
   page: Page,
   away: string = TAB_EXPORT,
   back: string = TAB_PREVIEW,
+  opts: { expectLeaves?: number } = {},
 ): Promise<{ awayArea: AreaState }> {
+  const expectLeaves = opts.expectLeaves ?? 1
   await clickWorkspaceTab(page, away)
   // 呈现真的被卸载（否则"状态没丢"是空转：组件根本没走）
   await expect
@@ -192,7 +194,19 @@ export async function leaveAndReturnWorkspace(
   const awayArea = await readAreaState(page)
 
   await clickWorkspaceTab(page, back)
-  await waitForViewportMounted(page, 60_000)
+  if (expectLeaves === 1) {
+    await waitForViewportMounted(page, 60_000)
+  } else {
+    // 多区往返：不能读"第一个 .vc-viewport"（strict 模式会因多个匹配失败），
+    // 改为等"叶子数 = 画布数 = 期望区数"这一事实（每个区都真的挂上了画布）。
+    await expect
+      .poll(async () => {
+        const leaves = await page.locator('.area-node--leaf').count()
+        const canvases = await page.locator('.vc-viewport canvas').count()
+        return leaves + ':' + canvases
+      }, { message: '切回后必须仍有 ' + expectLeaves + ' 个 Area 且各自挂上画布', timeout: 60_000 })
+      .toBe(expectLeaves + ':' + expectLeaves)
+  }
   // 重挂后的自动框选（缺陷形态）在 @ready 之后若干百毫秒内落地，等够再读
   await page.waitForTimeout(1800)
   return { awayArea }
@@ -200,12 +214,47 @@ export async function leaveAndReturnWorkspace(
 
 /** 真实点击菜单项（顶栏 `.ux-menu-btn` → 下拉 `.ux-menu-item`）。 */
 export async function clickMenuItem(page: Page, menu: string, item: string): Promise<void> {
-  const btn = page.locator('.ux-menu-btn', { hasText: new RegExp('^\s*' + menu + '\s*$') })
+  // 顶栏菜单只有 文件/编辑/视图/帮助 四项，直接用文案子串匹配（避免正则转义在字符串里失真）。
+  const btn = page.locator('.ux-menu-btn', { hasText: menu })
   await expect(btn, '菜单「' + menu + '」必须可见').toBeVisible({ timeout: 15_000 })
   await btn.click()
   const entry = page.locator('.ux-menu-item', { hasText: item })
   await expect(entry, '菜单项「' + item + '」必须可见').toBeVisible({ timeout: 10_000 })
   await entry.click()
+}
+
+export interface LayoutSignature {
+  /** 叶子 Area（id + 编辑器类型）；`instanceId`/`localState` 刻意不取（见下）。 */
+  areas: { id: string; editorType: string }[]
+  /** 分割节点（id + 方向 + 比例）。 */
+  splits: { id: string; direction: string; ratio: number }[]
+}
+
+/**
+ * 布局**结构**签名（分割树的值面）。
+ *
+ * `instanceId` 与 `localState` 刻意**不**纳入：`instanceId` 是接线层分配的运行期身份
+ * （S0-B §2.2：重挂时必然换代，属 M7-2 的"实例身份跨承载保持"工作包），
+ * 本判据钉的是 §7.3-a 的**布局与观察视角**：区数、分割方向与比例、各区的类型。
+ */
+export async function readLayoutSignature(page: Page): Promise<LayoutSignature> {
+  return (await page.evaluate(() => {
+    const host = (window as any).__areaHost__?.() ?? null
+    const out = { areas: [] as { id: string; editorType: string }[], splits: [] as { id: string; direction: string; ratio: number }[] }
+    if (!host) return out
+    const walk = (n: any): void => {
+      if (n === null || n === undefined) return
+      if (n.kind === 'area') {
+        out.areas.push({ id: String(n.id), editorType: String(n.editorType) })
+        return
+      }
+      out.splits.push({ id: String(n.id), direction: String(n.direction), ratio: Number(n.ratio) })
+      walk(n.first)
+      walk(n.second)
+    }
+    walk(host.workspace.value.layout)
+    return out
+  })) as LayoutSignature
 }
 
 export interface LedgerReading {
