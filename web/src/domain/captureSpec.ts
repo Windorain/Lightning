@@ -34,13 +34,13 @@ import { invalidValue, unsupportedOperation, type Result, ok, err } from './erro
 import {
   compareTime,
   frameRateOf,
-  framesPerSecond,
   rationalToNumber,
   secondsOf,
-  timeValue,
+  timeFromSeconds,
   type FrameRateSpec,
   type TimeValue,
 } from './animation'
+import { LOOP_LIMITS } from './materials'
 import { findObject, findObjectData, type ObjectData, type Scene } from './scene'
 import { legacyExportDiagnostics, type LegacyExportDiagnostic } from './geometry'
 import type { Version } from './identity'
@@ -147,7 +147,10 @@ export function resolveCameraSpec(scene: Scene, source: CameraSource): Result<Ca
  *
  * - `scene`：采样直接是场景时间轴上的帧号（起始帧 + 步长 × 序号）；
  * - `runtime`：**必须**给出 `anchorSeconds` —— 运行时间在导出中的固定起点。
- *   缺它即预检失败，因为"从执行当刻的墙钟开始"正是 §19.4 禁止的事。
+ *   缺它即预检失败，因为"从执行当刻的墙钟开始"正是 §19.4 禁止的事；
+ * - `scene-holds`（M6-2）：**逐帧驻留是唯一权威**，采样时刻由累积时长派生。
+ *   它表达"一个循环的逐帧 hold"（GIF 时延的来源）；均匀形态在
+ *   {@link planCaptureFrames} 内部**展开成同一种 holds**，故生成路径只有一条。
  *
  * `clock` 只在 `runtime` 下出现，且必须是**装配层安装了**的时钟 ID
  * （{@link validateTimeMapping} 逐个核对；未安装 ⇒ `UnsupportedOperation`，
@@ -156,6 +159,19 @@ export function resolveCameraSpec(scene: Scene, source: CameraSource): Result<Ca
 export type TimeMapping =
   | { readonly source: 'scene'; readonly startFrame: number; readonly stepFrames: number }
   | { readonly source: 'runtime'; readonly clock: string; readonly anchorSeconds: number; readonly stepFrames: number }
+  /**
+   * 逐帧驻留（M6-2）。**时长是唯一权威**，帧序列由累积时长派生。
+   *
+   * - `startSeconds`：首个采样在场景时间轴上的起点（秒）。整数帧起点也用它表达
+   *   （`startFrame / fps`），使 holds 与均匀形态共用同一个"起点"概念。
+   * - `holdsMs[i]`：第 i 个采样在产物里的驻留（**毫秒整数、>= 1**）；
+   *   第 i 个采样的时刻 = `startSeconds + Σ_{j<i} holdsMs[j]/1000`。
+   *
+   * 时长上限复用 `domain/materials#LOOP_LIMITS`（与 GIF 的"太长"定义同一张表）。
+   * `runtime` 映射**不**支持 holds（`runtimeHoldMappingUnsupported`）：
+   * 运行时间映射已有显式 `anchorSeconds`，再叠逐帧 hold 会变成两套语义。
+   */
+  | { readonly source: 'scene-holds'; readonly startSeconds: number; readonly holdsMs: readonly number[] }
 
 /** 已安装的时间源（由装配层提供；纯层只读它，不自己探测环境）。 */
 export interface CaptureTimeSources {
@@ -169,6 +185,14 @@ export interface CaptureTime {
   readonly index: number
   readonly time: TimeValue
   readonly seconds: number
+  /**
+   * 该采样在产物里的驻留（毫秒整数、>= 1）。
+   *
+   * **缺席 = 未声明驻留**（单帧图片、或未走 `planCaptureFrames` 的手工请求），
+   * **不用 0 冒充"没有驻留"**（沿用本仓"缺席就是缺席"的形状纪律）。
+   * 动画编码要求每一帧都在场（见 `adapters/export/gifEncoderPort`）。
+   */
+  readonly holdMs?: number
 }
 
 /** 一次导出的帧数与渲染设置。 */
@@ -200,12 +224,20 @@ export interface RenderSettings {
 /**
  * 规划固定采样序列 —— **纯函数**（同一 `spec` 恒得同一序列）。
  *
- * 三条判据：
+ * 判据（每条一个 distinct reason，全部在本函数一处判定）：
  *  1. `frameCount` 必须为正整数、渲染尺寸必须为正整数 —— 否则 `InvalidValue`
  *     （不夹取、不"用 1 代替"，#249 §7「不把任意小数写成非法取值」的同族要求）；
  *  2. `runtime` 映射缺 `anchorSeconds` ⇒ `UnsupportedOperation{reason:'runtimeTimeMappingMissing'}`；
- *  3. 序列由 `(起点, 步长, 序号)` 决定，**不读任何时钟** —— 于是"导出期间继续编辑"
+ *     携带 `holdsMs` ⇒ `runtimeHoldMappingUnsupported`（运行时间映射不叠逐帧 hold）；
+ *  3. `scene-holds`：起点有限（允许负数）、条数 == `frameCount`
+ *     （`holdCountMismatch`）、每项为整数且 >= 1（`holdDurationInvalid`）；
+ *  4. 时长上限复用 `LOOP_LIMITS`（`captureHoldsExceedLimits`，**不截断、不抽帧**）；
+ *  5. 序列由 `(起点, 步长/累积时长, 序号)` 决定，**不读任何时钟** —— 于是"导出期间继续编辑"
  *     不可能改变这次快照的采样时间（A29 原文）。
+ *
+ * **均匀形态不另走一条路径**：它先按"每帧驻留 = 步长对应的毫秒"展开成 holds
+ * （有理帧率下非整数 ⇒ `uniformHoldNotIntegralMs`，不四舍五入），之后与
+ * `scene-holds` 共用同一个累积循环 ⇒ "哪个是时间权威"只有一个答案（展开后的序列）。
  */
 export function planCaptureFrames(spec: CaptureSpec, available: CaptureTimeSources = SCENE_TIME_ONLY): Result<readonly CaptureTime[]> {
   if (!Number.isInteger(spec.frameCount) || spec.frameCount <= 0) {
@@ -219,52 +251,134 @@ export function planCaptureFrames(spec: CaptureSpec, available: CaptureTimeSourc
   }
   const rate = frameRateOf(spec.frameRate)
   if (!rate.ok) return err(rate.error)
+  const fps = rationalToNumber(rate.value)
+  const mapping = spec.mapping
 
-  let baseFrame: number
-  let step: number
-  if (spec.mapping.source === 'scene') {
-    baseFrame = spec.mapping.startFrame
-    step = spec.mapping.stepFrames
+  // N1：`runtime` 不得携带逐帧 holds（类型上不可表达；运行时也要判红，
+  // 因为反序列化回来的请求与 JS 调用方可以绕过类型）。
+  if (mapping.source === 'runtime' && Object.prototype.hasOwnProperty.call(mapping, 'holdsMs')) {
+    return err(unsupportedOperation({ reason: 'runtimeHoldMappingUnsupported', clock: mapping.clock }))
+  }
+
+  let startSeconds: number
+  let holdsMs: number[]
+  if (mapping.source === 'scene-holds') {
+    // I3：起点必须有限（**允许负数** —— 采样器对负时间取模，与 `normalizeIsoSeconds` 同口径）。
+    startSeconds = mapping.startSeconds
+    if (typeof startSeconds !== 'number' || !Number.isFinite(startSeconds)) {
+      return err(invalidValue({ reason: 'startSecondsNotFinite', startSeconds: String(startSeconds) }))
+    }
+    // I1/N4：条数必须与 `frameCount` 一致（空表也是"不一致"，不产出 1 帧假动画）。
+    if (!Array.isArray(mapping.holdsMs) || mapping.holdsMs.length !== spec.frameCount) {
+      return err(
+        invalidValue({
+          reason: 'holdCountMismatch',
+          frameCount: spec.frameCount,
+          holds: Array.isArray(mapping.holdsMs) ? mapping.holdsMs.length : 0,
+        }),
+      )
+    }
+    // I2：每项须为整数且 >= 1（0/负数/小数在 GIF 里没有含义；1 厘秒地板是**编码层**的量化）。
+    holdsMs = []
+    for (let i = 0; i < mapping.holdsMs.length; i++) {
+      const h = mapping.holdsMs[i]
+      if (typeof h !== 'number' || !Number.isInteger(h) || h < 1) {
+        return err(
+          invalidValue({
+            reason: 'holdDurationInvalid',
+            index: i,
+            holdMs: typeof h === 'number' && Number.isFinite(h) ? h : String(h),
+          }),
+        )
+      }
+      holdsMs.push(h)
+    }
   } else {
-    // 先用**同一判据**核对时间源是否安装（与 `domain/materials.resolveTimeBinding` 一致）：
-    // 显示"支持运行时间"却默默按场景时间播，正是 A27/A28 要判红的形态。
-    if (!available.runtimeClocks.includes(spec.mapping.clock)) {
+    // 均匀形态：起点与步长按**既有判据**解析（reason 逐字保留）。
+    let baseFrame: number
+    if (mapping.source === 'scene') {
+      baseFrame = mapping.startFrame
+    } else {
+      // 先用**同一判据**核对时间源是否安装（与 `domain/materials.resolveTimeBinding` 一致）：
+      // 显示"支持运行时间"却默默按场景时间播，正是 A27/A28 要判红的形态。
+      if (!available.runtimeClocks.includes(mapping.clock)) {
+        return err(
+          unsupportedOperation({
+            reason: 'runtimeClockNotInstalled',
+            clock: mapping.clock,
+            binding: 'runtime',
+          }),
+        )
+      }
+      const anchor = mapping.anchorSeconds
+      if (typeof anchor !== 'number' || !Number.isFinite(anchor)) {
+        // 「缺少映射时预检失败」——**不**退回"按场景时间播"（那正是负对照要判红的形态）。
+        return err(
+          unsupportedOperation({
+            reason: 'runtimeTimeMappingMissing',
+            clock: mapping.clock,
+            binding: 'runtime',
+          }),
+        )
+      }
+      baseFrame = anchor * fps
+    }
+    if (!Number.isFinite(baseFrame)) {
+      return err(invalidValue({ reason: 'startFrameNotFinite', frame: String(baseFrame) }))
+    }
+    const step = mapping.stepFrames
+    if (!Number.isInteger(step) || step < 0) {
+      return err(invalidValue({ reason: 'stepFramesInvalid', stepFrames: mapping.stepFrames }))
+    }
+
+    // **C 案的核心**：均匀形态展开成 holds，之后只有一条生成路径。
+    // 每帧驻留 = 采样步长对应的毫秒（`step === 0` 时停在相同时刻，驻留仍按 1 帧计）。
+    // 有理帧率下可能不是整数（如 30fps ⇒ 1000/30）⇒ **显式失败、不四舍五入**：
+    // 四舍五入会让"每帧 50ms"静默变成"33/34ms 交替"，声明与产物分叉。
+    const frameMs = (step === 0 ? 1000 : step * 1000) / fps
+    if (!Number.isInteger(frameMs)) {
       return err(
-        unsupportedOperation({
-          reason: 'runtimeClockNotInstalled',
-          clock: spec.mapping.clock,
-          binding: 'runtime',
+        invalidValue({
+          reason: 'uniformHoldNotIntegralMs',
+          fps,
+          stepFrames: step,
+          holdMs: String(frameMs),
         }),
       )
     }
-    const anchor = spec.mapping.anchorSeconds
-    if (typeof anchor !== 'number' || !Number.isFinite(anchor)) {
-      // 「缺少映射时预检失败」——**不**退回"按场景时间播"（那正是负对照要判红的形态）。
-      return err(
-        unsupportedOperation({
-          reason: 'runtimeTimeMappingMissing',
-          clock: spec.mapping.clock,
-          binding: 'runtime',
-        }),
-      )
-    }
-    baseFrame = anchor * framesPerSecond(spec.frameRate)
-    step = spec.mapping.stepFrames
-  }
-  if (!Number.isFinite(baseFrame)) {
-    return err(invalidValue({ reason: 'startFrameNotFinite', frame: String(baseFrame) }))
-  }
-  if (!Number.isInteger(step) || step < 0) {
-    return err(invalidValue({ reason: 'stepFramesInvalid', stepFrames: spec.mapping.stepFrames }))
+    startSeconds = baseFrame / fps
+    holdsMs = new Array(spec.frameCount).fill(frameMs)
   }
 
+  // I4：上限复用 GIF 的**同一张**表（不另立第二组"太长"的定义）；超限**不截断、不抽帧**。
+  let totalMs = 0
+  for (const h of holdsMs) totalMs += h
+  if (holdsMs.length > LOOP_LIMITS.maxFrames || totalMs > LOOP_LIMITS.maxTotalMs) {
+    return err(
+      unsupportedOperation({
+        reason: 'captureHoldsExceedLimits',
+        frames: holdsMs.length,
+        totalMs,
+        maxFrames: LOOP_LIMITS.maxFrames,
+        maxTotalMs: LOOP_LIMITS.maxTotalMs,
+      }),
+    )
+  }
+
+  // 唯一生成路径：时刻 = 起点 + 累积时长；不引入"不前进的采样"（I7）。
   const out: CaptureTime[] = []
-  for (let i = 0; i < spec.frameCount; i++) {
-    const frame = baseFrame + step * i
-    const time = timeValue(frame, spec.frameRate)
-    // 秒数由有理数精确换算 —— 循环内的**唯一**时间来源，没有第二个时钟。
-    const seconds = rationalToNumber(secondsOf(time))
-    out.push(Object.freeze({ index: i, time, seconds }))
+  let accMs = 0
+  for (let i = 0; i < holdsMs.length; i++) {
+    const seconds = startSeconds + accMs / 1000
+    const time = timeFromSeconds(seconds, spec.frameRate)
+    // I5：「两个时间字段不许互相矛盾」的可检查形态。正常换算不可能触发；
+    // 留给"有人改了换算"时炸，而不是静默漂移。
+    const timeSeconds = rationalToNumber(secondsOf(time))
+    if (Math.abs(timeSeconds - seconds) > 1e-6) {
+      return err(invalidValue({ reason: 'holdTimeNotFaithful', index: i, seconds, timeSeconds }))
+    }
+    out.push(Object.freeze({ index: i, time, seconds, holdMs: holdsMs[i]! }))
+    accMs += holdsMs[i]!
   }
   return ok(Object.freeze(out))
 }
@@ -355,10 +469,36 @@ export function freezeExportRequest(init: {
     frames: Object.freeze([...init.frames]),
     channels: Object.freeze({ ...init.channels }),
     render: Object.freeze({ ...init.render }),
-    mapping: Object.freeze({ ...init.mapping }),
+    mapping: freezeTimeMapping(init.mapping),
     assets: Object.freeze([...init.assets]),
     capabilityLoss: Object.freeze([...init.capabilityLoss]),
   })
+}
+
+/**
+ * 冻结时间映射 —— `scene-holds` 的 `holdsMs` 必须**深冻结**。
+ *
+ * 只做 `{...mapping}` 会让外部仍持有同一个 `holdsMs` 数组：之后一次
+ * `push/splice` 就能改掉"不可变请求"的时间序列（N8 的判据点）。
+ */
+function freezeTimeMapping(mapping: TimeMapping): TimeMapping {
+  switch (mapping.source) {
+    case 'scene':
+      return Object.freeze({ source: 'scene', startFrame: mapping.startFrame, stepFrames: mapping.stepFrames })
+    case 'runtime':
+      return Object.freeze({
+        source: 'runtime',
+        clock: mapping.clock,
+        anchorSeconds: mapping.anchorSeconds,
+        stepFrames: mapping.stepFrames,
+      })
+    case 'scene-holds':
+      return Object.freeze({
+        source: 'scene-holds',
+        startSeconds: mapping.startSeconds,
+        holdsMs: Object.freeze([...mapping.holdsMs]),
+      })
+  }
 }
 
 /**

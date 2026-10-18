@@ -31,7 +31,9 @@ import {
   type ExportAssetNeed,
   type ExportRequest,
   type RenderSettings,
+  type TimeMapping,
 } from '@/domain/captureSpec'
+import { LOOP_LIMITS } from '@/domain/materials'
 import {
   describeExportRequest,
   evaluationKeyOf,
@@ -231,6 +233,188 @@ describe('A29：请求不可变、采样时间固定（不读墙钟）', () => {
     const s2 = addBlockObject(latestDoc.scene, { objectId: 'x', dataId: 'dx' })!
     void withScene(latestDoc, s2)
     expect(req.payload.version.contentVersion, '请求里的版本不因文档变化而变').toBe(capturedVersion)
+  })
+})
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 一·补（M6-2）：逐帧 hold（`scene-holds`）—— N1–N8 负对照 + 等价性判据
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 用 holds 形态造 spec（条数缺省 = holds 条数）。 */
+function holdsSpec(over: {
+  readonly holdsMs: readonly number[]
+  readonly startSeconds?: number
+  readonly frameCount?: number
+  readonly frameRate?: number
+}): CaptureSpec {
+  return specOf({
+    frameCount: over.frameCount ?? over.holdsMs.length,
+    frameRate: over.frameRate ?? 20,
+    mapping: { source: 'scene-holds', startSeconds: over.startSeconds ?? 0, holdsMs: over.holdsMs },
+  })
+}
+
+/** 取到成功序列（失败即抛，避免"以为跑到了其实早退了"）。 */
+function framesOf(spec: CaptureSpec): readonly CaptureTime[] {
+  const r = planCaptureFrames(spec)
+  if (!r.ok) throw new Error("planCaptureFrames 意外失败：" + r.error.code + " " + JSON.stringify(r.error.params))
+  return r.value
+}
+
+describe('M6-2：`scene-holds` —— 时长是唯一权威，帧序列由累积时长派生', () => {
+  it('逐帧驻留进入 `seconds` 与 `holdMs`（不等时长的序列是真的不等）', () => {
+    const frames = framesOf(holdsSpec({ holdsMs: [50, 100, 50], startSeconds: 1 }))
+    expect(frames.map((f) => f.seconds)).toEqual([1, 1.05, 1.15])
+    expect(frames.map((f) => f.holdMs)).toEqual([50, 100, 50])
+    // 时刻**由累积和派生**：不是"起点 + 下标 × 某个常数"，否则 [50,100,50] 会被摊平。
+    expect(frames[2]!.seconds).toBeCloseTo(1 + (50 + 100) / 1000, 10)
+  })
+
+  it('N7 **等价性**：均匀 `{startFrame:100, stepFrames:5}` ⇔ holds `{startSeconds:5, holdsMs:[250,250]}`（逐字段相等）', () => {
+    // 均匀形态的每帧驻留 = 步长对应的毫秒 = 5 帧 @20fps = 250ms。
+    // ⇒ "两种表达"不是两个权威，而是同一语义的两种记法（设计 §2.3 的等价性判据）。
+    const uniform = framesOf(specOf({ frameCount: 2, frameRate: 20, mapping: { source: 'scene', startFrame: 100, stepFrames: 5 } }))
+    const holds = framesOf(holdsSpec({ holdsMs: [250, 250], startSeconds: 5, frameCount: 2 }))
+    expect(uniform).toEqual(holds)
+    expect(uniform.map((f) => f.time.frame)).toEqual([100, 105])
+    expect(uniform.map((f) => f.holdMs)).toEqual([250, 250])
+  })
+
+  it('均匀形态**也**带 holdMs（`step:1 @20fps` ⇒ 50ms/帧，与旧 seconds 判据同值）', () => {
+    const frames = framesOf(specOf({ frameCount: 3, frameRate: 20 }))
+    expect(frames.map((f) => f.seconds)).toEqual([0, 0.05, 0.1])
+    expect(frames.map((f) => f.holdMs)).toEqual([50, 50, 50])
+  })
+
+  it('有理帧率下均匀驻留非整数毫秒 ⇒ **显式失败**（不四舍五入成 33/34 交替）', () => {
+    const r = planCaptureFrames(specOf({ frameCount: 2, frameRate: 30, mapping: { source: 'scene', startFrame: 0, stepFrames: 1 } }))
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error.code).toBe('InvalidValue')
+      expect(r.error.params.reason).toBe('uniformHoldNotIntegralMs')
+      expect(r.error.params.fps).toBe(30)
+    }
+  })
+
+  it('I6 纯函数：同一 holds spec 两次调用逐字段相等（含 holdMs）', () => {
+    const a = framesOf(holdsSpec({ holdsMs: [50, 100, 50] }))
+    const b = framesOf(holdsSpec({ holdsMs: [50, 100, 50] }))
+    expect(a).toEqual(b)
+  })
+})
+
+describe('M6-2 N1–N6：holds 的显式失败面（每条一个 distinct reason）', () => {
+  it('N1 `runtime` 映射携带 holds ⇒ `runtimeHoldMappingUnsupported`（不静默按场景时间播）', () => {
+    const mapping = {
+      source: 'runtime',
+      clock: 'rt-1',
+      anchorSeconds: 0,
+      stepFrames: 1,
+      holdsMs: [50],
+    } as unknown as TimeMapping
+    const r = planCaptureFrames(specOf({ frameCount: 1, mapping }), { runtimeClocks: ['rt-1'] })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error.code).toBe('UnsupportedOperation')
+      expect(r.error.params.reason).toBe('runtimeHoldMappingUnsupported')
+      expect(r.error.params.clock).toBe('rt-1')
+    }
+  })
+
+  it('N2 条数与 `frameCount` 不一致 ⇒ `holdCountMismatch`（不以短的为准）', () => {
+    const r = planCaptureFrames(holdsSpec({ holdsMs: [50, 50], frameCount: 3 }))
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error.code).toBe('InvalidValue')
+      expect(r.error.params.reason).toBe('holdCountMismatch')
+      expect(r.error.params.frameCount).toBe(3)
+      expect(r.error.params.holds).toBe(2)
+    }
+  })
+
+  it('N3 驻留为 0 / 负数 / 小数 ⇒ `holdDurationInvalid`（带下标，不夹取）', () => {
+    for (const bad of [0, -50, 50.5]) {
+      const r = planCaptureFrames(holdsSpec({ holdsMs: [50, bad] }))
+      expect(r.ok, '驻留 ' + bad + ' 必须被拒绝').toBe(false)
+      if (r.ok) continue
+      expect(r.error.code).toBe('InvalidValue')
+      expect(r.error.params.reason).toBe('holdDurationInvalid')
+      expect(r.error.params.index).toBe(1)
+    }
+  })
+
+  it('N4 空 holds ⇒ `holdCountMismatch`（不是"产 1 帧假 GIF"）', () => {
+    const r = planCaptureFrames(holdsSpec({ holdsMs: [], frameCount: 1 }))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error.params.reason).toBe('holdCountMismatch')
+  })
+
+  it('N5 超过 `LOOP_LIMITS`（帧数或总时长）⇒ `captureHoldsExceedLimits`，不截断', () => {
+    const tooMany = planCaptureFrames(holdsSpec({ holdsMs: new Array(LOOP_LIMITS.maxFrames + 1).fill(50) }))
+    expect(tooMany.ok).toBe(false)
+    if (!tooMany.ok) {
+      expect(tooMany.error.code).toBe('UnsupportedOperation')
+      expect(tooMany.error.params.reason).toBe('captureHoldsExceedLimits')
+      expect(tooMany.error.params.frames).toBe(LOOP_LIMITS.maxFrames + 1)
+    }
+    const tooLong = planCaptureFrames(holdsSpec({ holdsMs: [LOOP_LIMITS.maxTotalMs + 1] }))
+    expect(tooLong.ok).toBe(false)
+    if (!tooLong.ok) {
+      expect(tooLong.error.params.reason).toBe('captureHoldsExceedLimits')
+      expect(tooLong.error.params.totalMs).toBe(LOOP_LIMITS.maxTotalMs + 1)
+    }
+    // 正面对照：恰在限内必须成功（证明上面两条不是"恒红"）。
+    const within = planCaptureFrames(holdsSpec({ holdsMs: new Array(3).fill(50) }))
+    expect(within.ok).toBe(true)
+    expect(LOOP_LIMITS.maxFrames).toBe(240)
+  })
+
+  it('N6 `startSeconds: NaN` ⇒ `startSecondsNotFinite`（负数则**允许**）', () => {
+    const nan = planCaptureFrames(holdsSpec({ holdsMs: [50], startSeconds: Number.NaN }))
+    expect(nan.ok).toBe(false)
+    if (!nan.ok) {
+      expect(nan.error.code).toBe('InvalidValue')
+      expect(nan.error.params.reason).toBe('startSecondsNotFinite')
+    }
+    const negative = framesOf(holdsSpec({ holdsMs: [50, 50], startSeconds: -1 }))
+    expect(negative.map((f) => f.seconds)).toEqual([-1, -0.95])
+  })
+})
+
+describe('M6-2 N8：`freezeExportRequest` 必须**深冻结** `holdsMs`', () => {
+  it('外部改写原数组（push / 下标赋值）不改请求里的 holds', () => {
+    const holdsMs = [50, 100, 50]
+    const req = freezeExportRequest({
+      requestId: 'r-holds',
+      createdAt: 0,
+      payload: {
+        documentId: 'doc-1',
+        version: { documentVersion: 0, contentVersion: 0 },
+        sceneId: 's',
+        scene: createDocument('doc-1').scene,
+        animation: EMPTY_ANIMATION,
+      },
+      camera: VIEW,
+      frames: framesOf(holdsSpec({ holdsMs })),
+      channels: {},
+      render: { width: 8, height: 8, background: 'transparent' },
+      mapping: { source: 'scene-holds', startSeconds: 0, holdsMs },
+      assets: [],
+      capabilityLoss: [],
+    })
+
+    // 外部仍持有同一个数组：浅冻结（`{...mapping}`）时下面两行会改到请求里。
+    holdsMs.push(999)
+    holdsMs[0] = 1
+
+    const frozen = req.mapping
+    expect(frozen.source).toBe('scene-holds')
+    if (frozen.source !== 'scene-holds') return
+    expect([...frozen.holdsMs]).toEqual([50, 100, 50])
+    expect(Object.isFrozen(frozen.holdsMs), 'holdsMs 必须是冻结数组（N8 的判据点）').toBe(true)
+    // 请求里的 frames 与 mapping 说的是同一件事（不是两份可漂移的声明）
+    expect(req.frames.map((f) => f.holdMs)).toEqual([50, 100, 50])
   })
 })
 
