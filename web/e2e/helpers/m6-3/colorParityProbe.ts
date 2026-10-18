@@ -48,6 +48,17 @@ export interface ColorStats {
   readonly meanRgb: readonly [number, number, number]
   readonly modalColor: readonly [number, number, number]
   readonly modalShare: number
+  /**
+   * **占比前 5 的主色**（各自是所属量化簇的精确均值）。
+   *
+   * ## 为什么需要"一组"而不只是"一个"
+   *
+   * 几何的顶点色里**烘焙了逐面明暗**（`structureMaterialPrimitives` 的顶点色路径），
+   * 于是同一张贴图在不同朝向的面上亮度不同。视口里"哪一面占主导"会随取景/宽高比
+   * 变化（实测：同一夹具两次测量主色 198 vs 179）—— 只比**单一**主色会把
+   * "选面不同"误判成"偏色"。⇒ 判据口径是"导出的主色必须**出现在**视口的主色组里"。
+   */
+  readonly topColors: readonly (readonly [number, number, number])[]
 }
 
 function statsOf(data: Uint8ClampedArray | Uint8Array, w: number, h: number, mask: (i: number) => boolean): ColorStats {
@@ -86,7 +97,17 @@ function statsOf(data: Uint8ClampedArray | Uint8Array, w: number, h: number, mas
     }
   }
   const c = top > 0 ? counts[topKey]! : 1
+  // 前 5 簇（按占比降序；每簇给出精确均值）
+  const clusterOrder = Array.from({ length: counts.length }, (_, k) => k)
+    .filter((k) => counts[k]! > 0)
+    .sort((a, b) => counts[b]! - counts[a]!)
+    .slice(0, 5)
+  const topColors = clusterOrder.map((k) => {
+    const d = counts[k]!
+    return [rCounts[k]! / d, gCounts[k]! / d, bCounts[k]! / d] as readonly [number, number, number]
+  })
   return {
+    topColors,
     width: w,
     height: h,
     pixels: n,

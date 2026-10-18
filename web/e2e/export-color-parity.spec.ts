@@ -51,6 +51,7 @@ interface ColorStats {
   meanRgb: readonly number[]
   modalColor: readonly number[]
   modalShare: number
+  topColors: readonly (readonly number[])[]
 }
 
 interface ColorParityResult {
@@ -111,14 +112,17 @@ async function viewportContent(page: Page): Promise<ColorStats> {
       e.c += 1; e.r += r; e.g += gg; e.b += b
       counts.set(key, e)
     }
-    const top = [...counts.values()].sort((a, b2) => b2.c - a.c)[0]
+    const ordered = [...counts.values()].sort((a, b2) => b2.c - a.c)
+    const top = ordered[0]
     const den = top?.c ?? 1
+    const topColors = ordered.slice(0, 5).map((x) => [x.r / x.c, x.g / x.c, x.b / x.c] as readonly number[])
     return {
       width: c.width, height: c.height, pixels: n,
       meanLuma: n ? sl / n : 0,
       meanRgb: n ? [sr / n, sg / n, sb / n] : [0, 0, 0],
       modalColor: top ? [top.r / den, top.g / den, top.b / den] : [0, 0, 0],
       modalShare: n ? (top?.c ?? 0) / n : 0,
+      topColors,
     }
   })) as ColorStats
 }
@@ -185,11 +189,25 @@ test.describe('M6-3 · 导出与屏上**同观感**（色彩一致性）', () =>
     // ── ② 导出 vs 活视口 ──
     expect(rel(first.export!.meanLuma, vp1.meanLuma), '导出平均亮度必须与**屏上视口**一致').toBeLessThanOrEqual(TOL)
     for (let i = 0; i < 3; i += 1) {
-      expect(
-        Math.abs(first.export!.modalColor[i]! - vp1.modalColor[i]!),
-        '通道 ' + i + ' 的主色必须与屏上一致',
-      ).toBeLessThanOrEqual(MODAL_TOLERANCE)
+      expect(rel(first.export!.meanRgb[i]!, vp1.meanRgb[i]!), '通道 ' + i + ' 的均值必须与屏上一致').toBeLessThanOrEqual(TOL)
     }
+    /**
+     * **主色**的对账口径：导出的主色必须出现在视口的前 5 个主色里（容差内）。
+     *
+     * 几何顶点色里烘焙了逐面明暗 ⇒ 同一贴图在不同朝向的面上亮度不同，"哪一面占主导"
+     * 会随取景变化（实测同一夹具两次测量主色 198 vs 179）。只比单一主色会把
+     * "选面不同"误判成"偏色"；而线性写出会让**整组**主色下移约 50 级，
+     * 故"整组里找不到"仍然精确判红。
+     */
+    const nearest = vp1.topColors
+      .map((c) => Math.max(...c.map((v, i) => Math.abs(v - first.export!.modalColor[i]!))))
+      .reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY)
+    console.log('[M6-3·color] modalMatch=' + JSON.stringify({
+      exportModal: first.export!.modalColor,
+      viewportTop: vp1.topColors.map((c) => c.map((v) => Math.round(v))),
+      nearest: Math.round(nearest),
+    }))
+    expect(nearest, '导出的主色必须出现在视口的前 5 个主色里（容差 ' + MODAL_TOLERANCE + '）').toBeLessThanOrEqual(MODAL_TOLERANCE)
     // 主色还必须落在**贴图源色**附近（防止两边一起错到同一个地方）
     for (let i = 0; i < 3; i += 1) {
       expect(
