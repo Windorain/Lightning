@@ -57,7 +57,7 @@ export interface ViewportFacts {
   slot: { camera: boolean; dom: boolean; definition: boolean }
   camera: { logical: unknown; engine: CameraEngineFacts }
   selection: { items: string[]; active: string | null; mode: string }
-  time: { seconds: number; frameIndex: number }
+  time: { seconds: number; frameIndex: number; frame: number; fps: Record<string, number> | string | null }
   content: { digest: string; documentId: string | null; annotations: number }
   presenter: {
     generation: string | null
@@ -153,7 +153,16 @@ export async function readViewportFacts(page: Page, rid: string = VIEWPORT_REGIO
 
     const sel = vm?.getSelection?.() ?? null
     const items = sel ? [...sel.items.value] : []
-    const time = { seconds: Number(vm?.getSceneSeconds?.() ?? 0), frameIndex: Number(vm?.getFrameIndex?.() ?? 0) }
+    const pb = vm?.kernel?.playback?.() ?? null
+    const rawTime = pb?.time ?? null
+    const time = {
+      seconds: Number(vm?.getSceneSeconds?.() ?? 0),
+      frameIndex: Number(vm?.getFrameIndex?.() ?? 0),
+      // 权威时间值的原始读数：fps 无效时 seconds 恒 0（sceneClockOf 的早退分支），
+      // 故"时间真的动了吗"必须以 frame 为主读数，否则会把"动了"误判成"没动"。
+      frame: Number(rawTime?.frame ?? 0),
+      fps: rawTime?.fps === undefined || rawTime?.fps === null ? null : JSON.parse(JSON.stringify(rawTime.fps)),
+    }
 
     return {
       canvas: {
@@ -358,41 +367,100 @@ export async function setCameraPose(
 /** 非默认机位（与自动框选显著不同；取值沿用 M7-1 的 POSE_A）。 */
 export const POSE_A = { target: { x: 9, y: 1, z: 5 }, yawDeg: 35, elevationDeg: 20, distance: 6, zoom: 2.4 }
 
+export interface TimeReading {
+  /** 权威时间值（内核 `EditContext.time` 的投影；`fps` 无效时 seconds 恒 0，故 frame 才是主读数）。 */
+  frame: number
+  fps: Record<string, number> | string | null
+  seconds: number
+  playing: boolean
+  rate: number
+}
+
+/** 读权威时间（`__vm__.kernel.playback()` —— 内核会话的播放读面，不另算一遍）。 */
+export async function readTime(page: Page): Promise<TimeReading> {
+  return (await page.evaluate(() => {
+    const vm = (window as any).__vm__
+    const pb = vm?.kernel?.playback?.() ?? null
+    const time = pb?.time ?? null
+    return {
+      frame: Number(time?.frame ?? 0),
+      fps: time?.fps === undefined || time?.fps === null ? null : JSON.parse(JSON.stringify(time.fps)),
+      seconds: Number(vm?.getSceneSeconds?.() ?? 0),
+      playing: Boolean(pb?.playing),
+      rate: Number(pb?.rate ?? 0),
+    }
+  })) as TimeReading
+}
+
+/** 时间的可比较签名（frame 为主；fps 变化也算"时间轴变了"）。 */
+export function timeSignature(t: TimeReading): string {
+  return 'frame=' + String(t.frame) + ';fps=' + JSON.stringify(t.fps)
+}
+
 /**
  * 把**场景时间**挪离默认值（生产路径：真播放 → 等时间推进 → 真停止）。
  *
  * 为什么不用 OPERATOR_SET_FRAME_INDEX：本仓 e2e 夹具是**多方块**文档（无帧轴），
  * KernelSession#seekFrame 对 frameSource.count() <= 1 的文档恒定位到 0
  * （kernelSession.ts:902-911）⇒ 帧下标读面对这类文档没有区分力。
- * 播放走的是 advancePlayback 命令（domain/editing.ts:544，无时长钳制），
- * 因此**时间真的会离开 0**，且停止后保持（§3.3「停止播放保留当前时间」）。
+ * 播放走的是 advancePlayback 命令（domain/editing.ts:544），时间按
+ * frame += deltaSeconds * fps 推进（domain/animation.ts:268-270）。
+ *
+ * 判定口径：以 `time.frame` 为主读数（seconds 由 sceneClockOf 派生，fps 无效时恒 0，
+ * 会把"时间真的动了"误读成"没动"）。前提不成立时抛出**带读数**的错误，
+ * 让失败信息能区分"没在播放"与"播放了但时间不动"。
  *
  * 注意 OPERATOR_SET_FRAME_PLAYBACK 的 poll 对单帧文档为 false（UI 不给入口）；
  * 这里显式 exec 它在语义上等于"用户在多帧场景按播放"，只作**前提设置**，
  * 不作观测 —— 与 setCameraPose 同一定位。
  */
-export async function advanceSceneTimeOffDefault(page: Page, minSeconds = 0.05): Promise<number> {
-  const before = await page.evaluate(() => Number((window as any).__vm__.getSceneSeconds()))
+export async function advanceSceneTimeOffDefault(page: Page, minSeconds = 0.05): Promise<TimeReading & { via: string }> {
+  const before = await readTime(page)
+  // 第一步走**生产算子**（UI 的播放入口）。它对单帧文档的 poll 为 false
+  // （miscOperators.ts:64-67），故这一步在多方块夹具上会被算子层按设计取消。
   await page.evaluate(async () => {
     const vm = (window as any).__vm__
     await vm.getOperators().exec('OPERATOR_SET_FRAME_PLAYBACK', { playing: true })
   })
+  let via = 'operator'
+  let started = await readTime(page)
+  if (!started.playing) {
+    // 第二步：经内核会话端口置播放（**前提设置**，不是观测）。
+    // 语义依据：播放状态属 EditContext（§3.3），advancePlayback 本身没有时长钳制；
+    // 单帧文档只是"UI 不给播放入口"（poll=false），不是"时间轴不可推进"。
+    // 这里与 setCameraPose 同一定位：只负责把被测状态挪离默认值。
+    via = 'kernel-session'
+    await page.evaluate(() => {
+      const vm = (window as any).__vm__
+      vm.kernel.setPlaying(true)
+    })
+    started = await readTime(page)
+  }
   const deadline = Date.now() + 20_000
-  let now = before
+  let now = started
+  const samples: string[] = []
   for (;;) {
-    now = await page.evaluate(() => Number((window as any).__vm__.getSceneSeconds()))
-    if (now - before >= minSeconds) break
+    now = await readTime(page)
+    samples.push(now.playing + '/' + now.frame + '/' + now.seconds)
+    if (now.frame > before.frame || now.seconds - before.seconds >= minSeconds) break
     if (Date.now() > deadline) {
-      throw new Error('M8：场景时间未离开默认值（before=' + before + ' now=' + now + '）—— 时间面判据将无从成立')
+      await page.evaluate(() => {
+        const vm = (window as any).__vm__
+        if (vm?.kernel?.setPlaying) vm.kernel.setPlaying(false)
+      })
+      throw new Error(
+        'M8：场景时间未离开默认值 —— 时间面判据无从成立。before=' +
+          JSON.stringify(before) + ' via=' + via + ' tries=' + JSON.stringify(samples.slice(0, 6)),
+      )
     }
     await page.waitForTimeout(50)
   }
-  await page.evaluate(async () => {
+  await page.evaluate(() => {
     const vm = (window as any).__vm__
-    await vm.getOperators().exec('OPERATOR_SET_FRAME_PLAYBACK', { playing: false })
+    if (vm?.kernel?.setPlaying) vm.kernel.setPlaying(false)
   })
   await page.waitForTimeout(300)
-  return await page.evaluate(() => Number((window as any).__vm__.getSceneSeconds()))
+  return { ...(await readTime(page)), via }
 }
 
 /** 生产选择入口（ctx.getSelection().select；与 OPERATOR_SELECT 同一条写路径）。 */
