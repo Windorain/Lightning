@@ -42,6 +42,42 @@ import { packageExportArtifact, type PackagedArtifact } from '@/application/expo
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * 一条纹理采样读数的**结构形状**（与 `presentation/presenter#TextureSampleReport` 逐字段一致）。
+ *
+ * ## 为什么在这里重新声明（而不是 import presenter 的类型）
+ *
+ * `runtime/exportJob` 是**作业接线**：它不该 import 呈现实现（那会把"作业"绑到某个渲染器上，
+ * 也会让 `export-purity` 的"导出层不 import 旧实现"判据更难守）。本类型只承诺**字段名与类型**，
+ * 呈现器的报告在结构上满足它 —— 形状一致性由 `exportPorts.test.ts` 的逐字段断言把守。
+ */
+export interface TextureSampleReportLike {
+  readonly assetId: string
+  readonly contentVersion: string
+  readonly seconds: number
+  readonly frame: number
+  readonly nextFrame: number
+  readonly mix: number
+  readonly stripFrameCount: number
+  readonly offsetY: number
+  readonly repeatY: number
+}
+
+/** 采样诊断计数（与 `presenter#textureSampleStats` 同形状）。 */
+export interface TextureSampleStats {
+  readonly errors: number
+  readonly blended: number
+  readonly phaseSkipped: number
+}
+
+/** 一帧的采样读数（帧序号 + 场景秒 + 逐材质样本 + 计数）。 */
+export interface FrameSamplingReport {
+  readonly frameIndex: number
+  readonly seconds: number
+  readonly samples: readonly TextureSampleReportLike[]
+  readonly stats: TextureSampleStats
+}
+
+/**
  * 离屏渲染端口（由呈现层/适配器实现）。
  *
  * 「作业有**独立生命周期与资源预算**，结束/取消**释放其引用，不关闭用户视口**」
@@ -60,6 +96,16 @@ export interface OffscreenRenderPort {
   renderFrame(request: ExportRequest, frameIndex: number): Result<RenderedFrame>
   /** 释放 `acquire` 分配的全部资源。**必须幂等**（重复调用不重复释放）。 */
   release(): void
+  /**
+   * **只读诊断面**（可选）：逐帧的纹理采样读数（M6-3 / 判据 ②）。
+   *
+   * 缺省 = 该端口不提供采样诊断（受控设备/测试替身），作业据此**不报** `sampling`
+   * （不伪造空读数 —— "没读"与"读到 0 条"必须可区分）。
+   *
+   * 它是**只读**的：方法集合的判定（`tests/architecture/export-purity.test.ts` 只数
+   * `acquire/renderFrame/release`）不因它变化，端口契约的"没有取实时相机的方法"逐字不变。
+   */
+  readonly samplingReport?: () => readonly FrameSamplingReport[]
 }
 
 /** 作业进度上报（#249 §19.4「报告进度」）。 */
@@ -124,6 +170,13 @@ export type JobOutcome =
        * 阻塞项不可能走到这里（它们让作业 `failed`），故本字段只承载 notes。
        */
       readonly diagnostics: readonly ExportDiagnostic[]
+      /**
+       * **逐帧纹理采样读数**（M6-3 / 判据 ② 的只读诊断面）。
+       *
+       * 只有端口提供 `samplingReport` 且作业**完成**时才在场：
+       * 取消/失败路径**不带**（不伪造读数），受控设备测试里也不带。
+       */
+      readonly sampling?: readonly FrameSamplingReport[]
     }
   | { readonly status: 'cancelled'; readonly releasedFor: number; readonly framesRendered: number }
   | { readonly status: 'failed'; readonly diagnostics: readonly ExportDiagnostic[]; readonly releasedFor: number; readonly error: DomainError }
@@ -292,6 +345,8 @@ export class ExportJob {
         manifestLocation: packaged.manifestLocation,
         carrierFallbackReason: packaged.fallbackReason,
         diagnostics: pre.diagnostics,
+        // 只读诊断面：端口有才报（受控设备/测试替身缺省 ⇒ 不伪造空数组）。
+        ...(this.opts.port.samplingReport === undefined ? {} : { sampling: this.opts.port.samplingReport() }),
       })
     } finally {
       // 四条路径（完成/取消/失败/抛错）都会到这里；`release()` 必须幂等。

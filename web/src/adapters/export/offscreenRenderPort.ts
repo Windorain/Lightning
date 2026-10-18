@@ -54,6 +54,8 @@ import { createPresenterSession, type PresenterSession } from '@/composition/pre
 import { threeCameraOf } from '@/presentation/offscreenCamera'
 import type { OffscreenDeviceFactory, OffscreenDevice } from './renderDevice'
 import type { TexturePort } from '@/presentation/presenter'
+import type { TextureResource } from '@/presentation/textureBinding'
+import type { FrameSamplingReport } from '@/runtime/exportJob'
 
 /**
  * 资源版本表（`EvaluationKey.contentResourceVersions`）。
@@ -81,6 +83,20 @@ export interface OffscreenRenderPortOptions {
   readonly scope: string
   /** 纹理取用端口（五态链的消费端；缺省 = 不消费纹理，材质走中性色）。 */
   readonly textures?: TexturePort
+  /**
+   * **捕获期那一份** `TextureResource[]`（M6-3 / 接线 G2）。
+   *
+   * ## 为什么必须与设备的 `resources` 是*同一个数组值*
+   *
+   * 竖条格数 `stripFrameCount` 来自解码后的像素高度比（`domain/textureAnimation`），
+   * 而离屏设备的像素来自 `textureResourcesOf`。若"传给设备的 resources"与
+   * "参与绑定的 resources"是两份各自算出来的表，格数与帧序列就可能分叉 ——
+   * 表现为"GIF 的帧数来自 A 表、画面裁切来自 B 表"，静默。
+   * ⇒ 实现约束：调用方只允许从**捕获期那一个变量**取（`captureExportSnapshot` 的产物）。
+   *
+   * 缺省 = 不绑纹理（受控设备测试 / 不消费纹理的端口配置）。
+   */
+  readonly textureResources?: readonly TextureResource[]
 }
 
 /**
@@ -103,6 +119,15 @@ export class SnapshotOffscreenRenderPort implements OffscreenRenderPort {
   private session: PresenterSession | null = null
   private allocated = 0
   private released = false
+  /**
+   * 纹理绑定是否已做过（**只做一次**：内容在请求里冻结 ⇒ 绑定不会变）。
+   *
+   * 时机是判据的一部分：必须在**首次真重建**的 `applyIfChanged` **之后**
+   * （`materialDescriptors()` 在编译产物里，早于它调用会绑 0 条且静默无贴图）。
+   */
+  private boundTextureResources = false
+  /** 逐帧采样读数（只读诊断面；见 `samplingReport()`）。 */
+  private readonly sampling: FrameSamplingReport[] = []
 
   constructor(private readonly options: OffscreenRenderPortOptions) {}
 
@@ -131,9 +156,13 @@ export class SnapshotOffscreenRenderPort implements OffscreenRenderPort {
     }
 
     try {
+      // **G1**：设备自建的纹理域优先（`renderDevice#acquire` 在**本次**渲染器上造出它）。
+      // 构造期注入的 `textures` 只是受控设备/测试替身的回落 —— 生产路径上设备的域名才是
+      // 唯一拥有本 GL 上下文的那个（跨上下文共用句柄是不成立的）。
+      const textures = acquired.value.textures ?? this.options.textures
       this.session = createPresenterSession({
         scope: this.options.scope,
-        ...(this.options.textures === undefined ? {} : { textures: this.options.textures }),
+        ...(textures === undefined ? {} : { textures }),
       })
     } catch (e) {
       // 会话建不出来：设备已经拿到手，必须**当场**释放（否则这份设备永远无人回收）。
@@ -198,6 +227,17 @@ export class SnapshotOffscreenRenderPort implements OffscreenRenderPort {
       )
     }
 
+    // ③b **G2**：把捕获期那份资源表绑给会话（唯一绑定生产点是 `bindTextures`）。
+    //
+    // 顺序：必须在**首次真重建**之后（`materialDescriptors()` 来自编译产物；
+    // 早于首次 apply 会绑 0 条 ⇒ 材质走中性色且**没有任何报错**）。
+    // 只做一次：内容在 `request.payload` 里冻结 ⇒ 绑定表不会变。
+    if (!this.boundTextureResources && this.options.textureResources !== undefined) {
+      this.boundTextureResources = true
+      // 绑定条数与"材质描述符条数"由判据对账（`exportPorts.test.ts` 的 G2 组）。
+      session.bindTextures(this.options.textureResources)
+    }
+
     // ④ 取景由**冻结值**映射（不是"借一台相机"—— 见 `presentation/offscreenCamera`）。
     const camera = threeCameraOf(request.camera, request.render)
 
@@ -217,6 +257,19 @@ export class SnapshotOffscreenRenderPort implements OffscreenRenderPort {
         }),
       )
     }
+
+    // ⑤b **只读诊断**：把本帧的采样读数留一份（不参与渲染，不改状态机）。
+    //
+    // 与屏上同一份读面（`presenterSession.textureSamples()`），故"离屏与屏上同样本"
+    // 可以**逐字段**对账（判据 ②）。复制成纯数据，避免把呈现器的内部对象泄漏给作业。
+    this.sampling.push(
+      Object.freeze({
+        frameIndex,
+        seconds: time.seconds,
+        samples: Object.freeze(session.textureSamples().map((s) => Object.freeze({ ...s }))),
+        stats: Object.freeze({ ...session.textureSampleStats() }),
+      }),
+    )
 
     return ok(
       Object.freeze({
@@ -249,6 +302,16 @@ export class SnapshotOffscreenRenderPort implements OffscreenRenderPort {
   /** 本端口已分配/已释放的句柄数（诊断与对账；`ExportJob.releasedFor` 的来源之一）。 */
   get allocatedCount(): number {
     return this.allocated
+  }
+
+  /**
+   * **逐帧采样读数的只读快照**（M6-3 / 判据 ②）。
+   *
+   * 返回副本（不是内部数组）：调用方拿到它之后不可能改写本端口的诊断面。
+   * 取消/失败路径上作业**不读**它（`JobOutcome` 只在完成分支带 `sampling`）。
+   */
+  samplingReport(): readonly FrameSamplingReport[] {
+    return Object.freeze([...this.sampling])
   }
 }
 

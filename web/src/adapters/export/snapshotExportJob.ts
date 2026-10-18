@@ -32,12 +32,15 @@
 import type { DocumentContent } from '@/domain/content'
 import type { ExportAssetNeed, ExportRequest } from '@/domain/captureSpec'
 import type { ArtifactEncoding, ExportKind } from '@/application/exportPlan'
+import type { AssetNeedDerivation } from '@/application/exportPlan'
 import type { AssetStateStore } from '@/presentation/assetState'
+import type { TextureResource } from '@/presentation/textureBinding'
 import { ExportJob, type ExportProgress } from '@/runtime/exportJob'
 import { createSnapshotOffscreenRenderPort, type SnapshotOffscreenRenderPort } from './offscreenRenderPort'
 import { createEncoderPort } from './encoderPort'
 import type { OffscreenDeviceFactory } from './renderDevice'
 import type { TexturePort } from '@/presentation/presenter'
+import { cancelOnAbort } from './abortBridge'
 
 export interface SnapshotExportJobOptions {
   /** 不可变导出请求（由 `application/exportPlan.planExportRequest` 产出）。 */
@@ -56,6 +59,24 @@ export interface SnapshotExportJobOptions {
   readonly allowLossy?: boolean
   /** 纹理取用端口（缺省 = 材质走中性色）。 */
   readonly textures?: TexturePort
+  /**
+   * **捕获期那一份** ¤TextureResource[]¤（M6-3 / G2）。
+   *
+   * ⚠️ 必须与 `devices` 里 `createThreeOffscreenDevice({ resources })` 用的是**同一个数组值**
+   * （理由见 `offscreenRenderPort#textureResources`）。缺省 = 不绑纹理。
+   */
+  readonly textureResources?: readonly TextureResource[]
+  /**
+   * **资源需求推导记录**（M6-3 / G3）。作业据它判清单是否"装配过"：
+   * 缺省 ⇒ 产物清单自报 `assembled: false`（不伪造"无需资源"）。
+   */
+  readonly assetNeeds?: AssetNeedDerivation
+  /**
+   * **取消入口**（M6-3 / G4）：信号一响 ⇒ `ExportJob.cancel()`。
+   *
+   * 只做内部语义（**不加 UI 按钮**，Q3 裁决）。取消路径零产物、必释放、不改编辑现场。
+   */
+  readonly signal?: AbortSignal
   /** 进度回调（纯观察；不驱动业务）。 */
   readonly onProgress?: (p: ExportProgress) => void
   /** 仅 `kind === 'animation'`：GIF 循环次数（缺省 `0` = 无限）。 */
@@ -66,6 +87,13 @@ export interface SnapshotExportJobOptions {
 export interface SnapshotExportJob {
   readonly job: ExportJob
   readonly port: SnapshotOffscreenRenderPort
+  /**
+   * **撤销中止订阅**（作业结束后必须调用；幂等）。
+   *
+   * 不调用不会让作业跑错，只会让监听留在调用方的 `AbortController` 上 —— 那是资源泄漏，
+   * 故把它作为返回值的一部分，而不是"记得自己清"。
+   */
+  readonly detachAbort: () => void
 }
 
 /**
@@ -86,6 +114,7 @@ export function assembleSnapshotExportJob(options: SnapshotExportJobOptions): Sn
     content: options.content,
     scope: options.scope,
     ...(options.textures === undefined ? {} : { textures: options.textures }),
+    ...(options.textureResources === undefined ? {} : { textureResources: options.textureResources }),
   })
   const encoder = createEncoderPort()
 
@@ -99,9 +128,13 @@ export function assembleSnapshotExportJob(options: SnapshotExportJobOptions): Sn
     ...(options.allowLossy === undefined ? {} : { allowLossy: options.allowLossy }),
     ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
     ...(options.loopCount === undefined ? {} : { loopCount: options.loopCount }),
+    ...(options.assetNeeds === undefined ? {} : { assetNeeds: options.assetNeeds }),
   })
 
-  return { job, port }
+  // G4：信号在**构造之后**接上（作业的 cancel() 是唯一取消真相）。
+  const detachAbort = cancelOnAbort(job, options.signal)
+
+  return { job, port, detachAbort }
 }
 
 /** 未使用占位：保持 `ExportAssetNeed` 的类型可达性（调用方常需它构造 request）。 */
