@@ -283,6 +283,10 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       'src/workbench/exportIsometricImage.ts',
       'src/operators/builtin/exportOperators.ts',
       'src/adapters/export/snapshotExportJob.ts',
+      // M6-2：GIF 字节核心与动画编码端口已落在 adapters/export（新轨那一端），
+      // 故一并登记 —— 否则"旧链退役"的判据面看不见这两块已经在位的替代物。
+      'src/adapters/export/gifEncoder.ts',
+      'src/adapters/export/gifEncoderPort.ts',
       // M5-4：GIF 导出在同一自建链上（同 stage/同相机），故同属本接缝。
       'src/workbench/exportAnimatedGif.ts',
       'src/workbench/animatedGifEncoder.ts',
@@ -290,7 +294,8 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
     newTrack:
       '`adapters/export/snapshotExportJob#assembleSnapshotExportJob` + '
       + '`SnapshotOffscreenRenderPort`（取景/求值/呈现/读回/释放）+ `createEncoderPort`'
-      + '（真 PNG 字节）—— 冻结快照导出作业的**生产装配**，且已有真 GL e2e 证据'
+      + '（**组合端口**：PNG part 出真 PNG 字节、GIF part 出真 GIF 字节，见 `adapters/export/gifEncoderPort`）'
+      + '—— 冻结快照导出作业的**生产装配**，且已有真 GL e2e 证据'
       + '（`e2e/export-ports.spec.ts`，2 passed / 负对照诚实失败）。',
     oldTrack:
       '`src/operators/builtin/exportOperators.ts` 的 `ExportIsoPngOperator` 经 '
@@ -301,8 +306,10 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '`workbench/exportAnimatedGif.ts#bakeIsometricGifBlob` 复用同一个 `openIsometricStage`'
       + '（同相机/同尺寸/同材质库），逐帧 `setSceneTime` → `render` → `readPixels` → `omggif` 编码。'
       + '时间输入是**显式**的（序列一个循环的边界，见 `domain/materials#planSequenceLoop`），'
-      + '但呈现链仍是 legacy 链 —— 维持该链的**当前**理由是「PNG/GIF 同链同相机」'
-      + '与「作业面表达不了逐帧 hold」，**不再**是"呈现链不采纹理时间"（M5-3 已落地该采样）。',
+      + '但呈现链仍是 legacy 链 —— 维持该链的**当前**理由是**同链判据**（PNG/GIF 同相机/同尺寸/'
+      + '同材质库，"GIF 首帧 ≈ 同参数 PNG"才是可观测判据），**不再**是"呈现链不采纹理时间"'
+      + '（M5-3 已落地该采样），**也不再**是"作业面表达不了逐帧 hold"'
+      + '（M6-2 已落地 `scene-holds` + `CaptureTime.holdMs` + GIF 编码端口）。',
     blocker:
       // ⚠️ M5-4 更正（原文第②句已过时，依据 #389 R3-②）：**纹理域这半已落地** ——
       //     离屏设备在 `acquire` 内自建 `TexturePort`（`adapters/export/renderDevice.ts:132-138`），
@@ -312,9 +319,13 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '仍缺两件：① 呈现链**按时间采样帧条**已由 M5-3 落地（`presentation/presenter.ts` 写 `repeat.y`/`offset.y`）；'
       + '② 渲染链终切（材质统一）。 ⇒ 切换前置仍是「渲染链终切」，但**不再是"没有纹理端口"**。'
       + ' 与 `presenter-surface-dual-track` / `legacy-render-source-document` 同一前置。'
-      + ' ⚠️ M6 前置补充（M5-4 实测）：`domain/captureSpec` 的 `TimeMapping` 只能表达均匀 `stepFrames`'
-      + '（`captureSpec.ts:156-158` + `planCaptureFrames:262-268`），`EncoderInput`（`application/exportPlan.ts:117-124`）'
-      + '没有逐帧 hold ⇒ GIF 的"一个循环"在作业面上**不可表达**；接线前需扩这两处（并让 `encoderPort` 支持 `animation`）。',
+      + ' ✅ **作业面已能表达（M6-2）**：`domain/captureSpec` 的 `TimeMapping` 增 `scene-holds`'
+      + '（`startSeconds` + `holdsMs[]`，驻留时长是唯一权威），`CaptureTime.holdMs` 逐帧驻留，'
+      + '`RenderedFrame.holdMs` 随帧搬运（不做平行数组），`encoderPort` 由**组合端口**支持 `animation`'
+      + '（`adapters/export/gifEncoderPort` + `adapters/export/gifEncoder`），ms→厘秒只有 `domain/materials#delayCsOf` 一处换算。'
+      + ' ⇒ 旧链**不能**再以"作业面表达不了"为由保留；仍缺的是下一段的**呈现链纹理域接线**'
+      + '（离屏端口 bindTextures / 设备纹理透传 / assetNeeds 转发，归 M6-3），'
+      + '接线未完成时切过去会出**没有贴图**的产物（`presentation/presenter.ts` 走中性色）。',
     // ⚠️ **闭包外**（R1-α 实测）：见 `closureNote` —— 「闭包 ∩ 旧层 = ∅」对本条恒真。
     closureCoverage: 'outside-closure',
     closureNote:

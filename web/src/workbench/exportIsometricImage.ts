@@ -124,9 +124,16 @@ export function normalizeIsoSeconds(raw: unknown): number {
  * ## 为什么把 stage 抽出来（M5-4）
  *
  * 场景 GIF 必须与 PNG **同一条**烘焙链（同相机/同尺寸/同材质库）：
- * 走内核呈现链（`assembleSnapshotExportJob`）在今天会把整条竖帧贴图压到一个面上
- * （呈现链尚未按时间裁切帧条，M5-2 的另一半），那会产出"看起来没动"的假 GIF。
  * 共享 stage 让"GIF 第 k 帧"与"同 seconds 的 PNG"从结构上就是同一张图。
+ *
+ * ⚠️ （M6-2/M6-3 更正）原文"呈现链会把整条竖帧贴图压到一个面上"**已过时**：
+ * `presentation/presenter.ts` 自 M5-3 起按场景时间写 `repeat.y = 1/N` 与 `offset.y`，
+ * 见 `textureBinding.ts`（唯一采样入口 `sampleBoundTexture`）与 `composition/seams.ts` 的
+ * `isometric-export-legacy-bake`（登记面已承认该采样落地）。
+ * 维持本 stage 的**当下**真实理由是：离屏链的**纹理域尚未接线**
+ * （`offscreenRenderPort` 不调 `bindTextures`；设备自建的 `TexturePort` 只进 acquisition、不进会话），
+ * 经它出的图会**没有任何贴图**（`presenter.ts` 的材质走中性色）。
+ * ⇒ M6-3 的切换前置是"三处接线 + 采样面判据"，不是"补裁切"。
  */
 export interface IsometricStage {
   readonly renderer: THREE.WebGLRenderer

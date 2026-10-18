@@ -1,6 +1,13 @@
 /**
  * Encode animated GIF89a with omggif.
  *
+ * ## ⚠️ M6-2：编码核心**已抽到** `adapters/export/gifEncoder.ts`
+ *
+ * M6-2 把"帧 → 调色板 → 索引 → GifWriter"的循环抽成 `encodeGifBytes`（返回 `Result<Uint8Array>`），
+ * 由 `adapters/export/gifEncoderPort.ts` 的动画端口调用。**这里是旧入口的暂留**：
+ * 本文件仍在服役（材质卡 GIF 与场景 GIF 的旧链），随 seam `isometric-export-legacy-bake`
+ * 一起删除（M6-3）。⇒ **不得**在此新增任何编码逻辑 —— 改就改 `adapters/export/gifEncoder`。
+ *
  * ## 两个入口，一套编码核心（M5-4）
  *
  * | 入口 | 输入 | 调色板 |

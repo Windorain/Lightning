@@ -9,11 +9,12 @@
  *
  *  1. **同链判据**：PNG 与 GIF 同渲染器/同相机/同尺寸/同材质库 ⇒ "GIF 首帧 ≈ 同参数 PNG"
  *     才能作为一条可观测判据（e2e C9）。两条链各画一张，这条判据就退化成"两张图差不多"。
- *  2. **作业面表达不了逐帧 hold**：`domain/captureSpec` 的 `TimeMapping` 只有**均匀**
- *     `stepFrames`（`planCaptureFrames` 只按 `baseFrame + step*i` 生成）；
- *     `EncoderInput`（`application/exportPlan`）没有逐帧 hold 字段；`encoderPort` 的
- *     `SUPPORTED_ENCODE_KINDS` 还没有 `'animation'` ⇒ GIF 的时延**无处安放**。
- *     这三条是 M6 前置（已登记进 seams），不是被忽略。
+ *  2. ~~**作业面表达不了逐帧 hold**~~ —— **该理由已被 M6-2 作废**：
+ *     `domain/captureSpec` 现已有 `scene-holds`（逐帧驻留是唯一权威）与
+ *     `CaptureTime.holdMs`，`RenderedFrame.holdMs` 随帧搬运，
+ *     `adapters/export/gifEncoderPort` 也真的能编 `animation` + `gif`。
+ *     ⇒ 现在**只剩**上面第 1 条（同链判据）与"呈现链纹理域尚未接线"（M6-3 的前置）。
+ *     本文件随 seam `isometric-export-legacy-bake` 一起退出，不是因为这条已消失的理由。
  *
  * 于是本包复用与等轴 PNG **同一条**烘焙链（`workbench/exportIsometricImage#openIsometricStage`），
  * 时间序列本身则完全冻结（`planSequenceLoop` 一次算完）。M6 整链替换时本文件一并退出。
