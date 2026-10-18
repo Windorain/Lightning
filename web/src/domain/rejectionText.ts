@@ -44,6 +44,8 @@ export type RejectionOperation =
   | 'move'
   | 'annotationEdit'
   | 'metaEdit'
+  /** Area 布局命令（M7-3：合并/关闭最后一个 Area 被拒）。 */
+  | 'areaLayout'
   | 'generic'
 
 /** 参数记录（`DomainError.params` 的形状；只读）。 */
@@ -139,6 +141,17 @@ const REASONS: Readonly<Record<string, Entry>> = Object.freeze({
   'InvalidValue:notFinite': {
     zh: (q) => `值不是有限数（${p(q, 'value')}）`,
     en: (q) => `not a finite number (${p(q, 'value')})`,
+  },
+  /**
+   * M7-3 / M7-0 Q4：合并（或关闭）**最后一个 Area** 被拒。
+   *
+   * 文案是**定稿**：底栏成句为「区域操作被拒：至少保留一个区域」。
+   * 判据逐字钉在 `e2e/kernel-area-merge-guard.spec.ts`（G5）—— 改这里的
+   * zh 文本必须同批改那条断言（宽正则已于 M7-3 收紧，不允许再放宽）。
+   */
+  'InvalidValue:lastArea': {
+    zh: () => '至少保留一个区域',
+    en: () => 'at least one area must be kept',
   },
 
   // ── ReadOnly ──────────────────────────────────────────────────────────────
@@ -339,10 +352,12 @@ function headLabel(op: RejectionOperation, lang: Lang, subject: string | undefin
       case 'move': return 'Move'
       case 'annotationEdit': return 'Annotation edit'
       case 'metaEdit': return 'Metadata write'
+      case 'areaLayout': return 'Area layout'
       default: return subject ?? 'Operation'
     }
   }
   if (op === 'move') return '移动'
+  if (op === 'areaLayout') return '区域操作'
   if (op === 'generic') return subject ?? '操作'
   const base = op === 'annotationEdit' ? '编辑' : '写入'
   return subject === undefined || subject === '' ? defaultHead(op) : `${subject}${base}`
@@ -354,6 +369,7 @@ function defaultHead(op: RejectionOperation): string {
     case 'annotationEdit': return '注解编辑'
     case 'metaEdit': return '元数据写入'
     case 'move': return '移动'
+    case 'areaLayout': return '区域操作'
     default: return '操作'
   }
 }

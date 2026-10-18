@@ -31,6 +31,8 @@ const CASES: Readonly<Record<string, DomainError>> = {
   'InvalidValue:emptyMetadataPatch': domainError('InvalidValue', { reason: 'emptyMetadataPatch' }),
   'InvalidValue:interactionAlreadyActive': domainError('InvalidValue', { reason: 'interactionAlreadyActive', tool: 'move' }),
   'InvalidValue:notFinite': domainError('InvalidValue', { reason: 'notFinite', channel: 'rotation', value: 'NaN' }),
+  // M7-3：合并/关闭最后一个 Area（G5 的底栏成句来源；e2e 逐字断言「至少保留一个区域」）
+  'InvalidValue:lastArea': domainError('InvalidValue', { reason: 'lastArea', areaId: 'a1' }),
   'ReadOnly:declared-read-only': domainError('ReadOnly', { reason: 'declared-read-only', property: 'lightning.block.id' }),
   'ReadOnly:generated-owner': domainError('ReadOnly', { reason: 'generated-owner', objectId: 'cell@1,2,3' }),
   'ReadOnly:animation-driven': domainError('ReadOnly', { reason: 'animation-driven', property: 'lightning.annotation.pos' }),
@@ -117,6 +119,12 @@ describe('M4-3 R1 · 拒绝原因成句映射', () => {
     expect(rejectionSentence(e, 'zh', 'propertyWrite')).toMatch(/^属性写入被拒：.+$/)
     expect(rejectionSentence(e, 'zh', 'move')).toMatch(/^移动被拒：.+$/)
     expect(rejectionSentence(e, 'en', 'move')).toMatch(/^Move rejected: .+$/)
+  })
+
+  it('成句：Area 布局拒绝 =「区域操作被拒：至少保留一个区域」（M7-3 定稿文案）', () => {
+    const e = domainError('InvalidValue', { reason: 'lastArea', areaId: 'a1' })
+    expect(rejectionSentence(e, 'zh', 'areaLayout')).toBe('区域操作被拒：至少保留一个区域')
+    expect(rejectionSentence(e, 'en', 'areaLayout')).toBe('Area layout rejected: at least one area must be kept')
   })
 
   it('成句带参数事实：越界句子点名具体坐标（可据以行动）', () => {

@@ -37,6 +37,7 @@
 import type { OperatorType, OperatorProperties } from '@/operators/operatorType'
 import { OP_RESULT } from '@/operators/operatorType'
 import type { Context } from '@/runtime/context'
+import { announceRejection } from '@/runtime/rejectionNotice'
 import type { SplitDirection } from '@/domain/workspace'
 
 /**
@@ -144,7 +145,23 @@ function doMerge(ctx: Context, props: OperatorProperties): typeof OP_RESULT.FINI
   if (areaId === null) return fail(ctx, 'mergeArea', 'no target area')
 
   const result = session.merge(areaId)
-  if (!result.ok) return fail(ctx, 'mergeArea', result.error)
+  if (!result.ok) {
+    /**
+     * **拒绝必须用户可见**（M7-3 / M7-0 Q4）：最后一个 Area 不可合并。
+     *
+     * 走 M4-3 建立的**唯一拒绝写点**（`announceRejection` → `LogCenter.liveStatus`，
+     * `origin: 'rejection'` ⇒ 状态栏最高优先级 + `__log__.liveStatus()` 读面）。
+     * **不**用 `ctx.log.setStatus`/`entries` 老路 —— 那条路被 `lastDisplayable`
+     * 永久遮蔽（M4 裁决；#399 的暗坑）。
+     *
+     * 底栏因此显示成句原因「区域操作被拒：至少保留一个区域」，而不是
+     * 只把破坏性动作报成 FINISHED（G5 的首红形态）。
+     */
+    // `LayoutCommandResult.error` 在类型上是可选的；失败时它必然在（接线层的约定）。
+    // 万一缺席也不编造原因：仍然落诊断日志（`fail`），不静默。
+    if (result.error !== undefined) announceRejection(ctx, result.error, 'areaLayout')
+    return fail(ctx, 'mergeArea', result.error)
+  }
 
   // 被释放的实例如实报告（A13「关闭 Area 释放运行资源」的可测量事实）
   if (result.disposedInstances !== undefined && result.disposedInstances.length > 0) {
