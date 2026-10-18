@@ -85,6 +85,34 @@ export const CAPABILITY = Object.freeze({
   INSPECTOR_PANELS: 'inspector.panels',
   /** 文本编辑工具（A21 的扩展证明用测试类型）。 */
   TEXT_EDIT: 'text.edit',
+
+  // ── M7-5：把"宿主分叉"换成的**环境能力**（§4.1：外壳与宿主 = 布局/界面装配/环境能力） ──
+  //
+  // 这几个能力替换的是旧的宿主身份判断（M7-4 报告 §5 的 25 点清单）：
+  // 它们描述"本运行实例的**输入面/外观面/外壳**是什么"，不是"当前宿主叫什么"。
+  // 声明在装配层（composition/profiles），消费点是能力查询 —— 于是新增一种外壳
+  // 只需声明能力，不必在共享代码里加分支。
+
+  /**
+   * **工具/操纵器面**（工具注册表、工具参数、gizmo）。由 `tools.transformManipulators`
+   * 模块提供；查看器/无界面装配没有它。M7-5 之前它只以字符串出现，消费点各自写
+   * 宿主身份判断 —— 现在也是能力常量。
+   */
+  TOOLS_MANIPULATORS: 'tools.manipulators',
+  /**
+   * **屏上手势面**：指针以手指/触控笔为主（含 dev 触控模拟），拖拽手势由手势处理器拥有
+   * ⇒ keymap 的"点击后拖拽旋转"鼠标兜底不适用。只有嵌入外壳声明它。
+   */
+  SCREEN_GESTURES: 'interaction.screenGestures',
+  /**
+   * **实例内可改外观**（主题/语言）。嵌入的外观由宿主页决定 ⇒ 没有本地覆盖
+   * （声明方：工作台与 Wiki 外壳；嵌入外壳不声明）。
+   */
+  APPEARANCE_LOCAL: 'appearance.local',
+  /** **工作台外壳**（工具架/属性区等 chrome 区、工作台会话读面、嵌入配置面板）。 */
+  SHELL_WORKBENCH: 'shell.workbench',
+  /** **嵌入外壳**（固定布局查看器）。 */
+  SHELL_EMBED: 'shell.embed',
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

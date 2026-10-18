@@ -151,39 +151,26 @@ export function createShellRuntimeForProfile(
 }
 
 /**
- * `inject` 一个**兜底**外壳运行实例（能力为空集）。
+ * 在组件里取外壳运行实例。
  *
- * 为什么兜底是"空"而不是"全能力"：**失败应当关闭**。
- * 若某个组件没被外壳包裹就渲染出来，它应该看到"没有能力"而不是"什么都能做" ——
- * 后者会让一次装配遗漏变成一次静默的能力提升（正是 A15 要防的那类退化）。
+ * ## M7-5：未 `provide` ⇒ **抛错**（删除 `EMPTY_SHELL_RUNTIME` 兜底）
+ *
+ * 旧实现是 `inject(shellKey, EMPTY_SHELL_RUNTIME)`：忘了 `provide(shellKey)` 时静默拿到
+ * 一个**能力空集**的外壳 —— 页面照常启动，只有若干能力面悄悄消失（Wiki 状态入口、
+ * 可调整布局的菜单项…）。"失败关闭"本身没错（少做事，不多给能力），错的是**没有任何信号**：
+ * 装配遗漏与"这个外壳本来就没有该能力"在运行期完全同形。那正是"忘了装配也能跑"的旁路。
+ *
+ * 因此兜底被**删除**而不是保留：未 provide 立即抛，装配遗漏在挂载时就响亮失败。
+ * 能力查询仍只有 `shell.has(cap)` 一个入口（组件依旧问不到宿主名）。
  */
-export const EMPTY_SHELL_RUNTIME: ShellRuntime = Object.freeze({
-  profileId: 'headless',
-  assembly: Object.freeze({
-    profileId: 'headless',
-    modules: Object.freeze([]),
-    capabilities: Object.freeze([]),
-    contributions: Object.freeze({
-      objectTypes: Object.freeze([]),
-      evaluationNodes: Object.freeze([]),
-      commands: Object.freeze([]),
-      editors: Object.freeze([]),
-      controls: Object.freeze([]),
-      hostPorts: Object.freeze([]),
-      shellLayouts: Object.freeze([]),
-    }),
-    pruned: Object.freeze([]),
-    prunedLandings: Object.freeze([]),
-  }),
-  has: () => false,
-  adjustableLayout: false,
-  regions: Object.freeze([]),
-  pageKeyboard: null,
-})
-
-/** 在组件里取外壳运行实例；未 provide 时得到**能力为空**的兜底（失败关闭）。 */
 export function useShell(): ShellRuntime {
-  return inject(shellKey, EMPTY_SHELL_RUNTIME)
+  const shell = inject(shellKey)
+  if (shell === undefined) {
+    throw new Error(
+      '外壳运行实例未 provide：根组件必须 provide(shellKey, shell)（见 workbench/WorkbenchRoot.vue 与 embed/EmbedRoot.vue）',
+    )
+  }
+  return shell
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

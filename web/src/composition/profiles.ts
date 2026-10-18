@@ -296,7 +296,7 @@ const M_CONTENT_COMMANDS = moduleDecl({
  */
 export const M_MANIPULATORS = moduleDecl({
   id: 'tools.transformManipulators',
-  provides: ['tools.manipulators'],
+  provides: [CAPABILITY.TOOLS_MANIPULATORS],
   requires: [CAPABILITY.CONTENT_EDIT, CAPABILITY.INTERACTION_BEGIN],
   contributes: { commands: [{ commandId: 'gizmo.translate', requires: [CAPABILITY.CONTENT_EDIT] }] },
   note: '操纵工具（gizmo/平移/旋转/缩放）。查看器构建不得可达。',
@@ -525,7 +525,7 @@ const M_LAYOUT_EDIT = moduleDecl({
 /** 工作台外壳：**可调整 Area 布局**。 */
 export const M_SHELL_WORKBENCH = moduleDecl({
   id: 'shells.workbench',
-  provides: ['shell.workbench'],
+  provides: [CAPABILITY.SHELL_WORKBENCH],
   requires: [CAPABILITY.LAYOUT_EDIT, CAPABILITY.LAYOUT_RESTORE, 'workspace.layout'],
   contributes: {
     shellLayouts: [
@@ -561,7 +561,10 @@ export const M_SHELL_WORKBENCH = moduleDecl({
  */
 export const M_SHELL_EMBED = moduleDecl({
   id: 'shells.embed',
-  provides: ['shell.embed'],
+  // M7-5：interaction.screenGestures 由**本外壳**声明（它是这个壳的指针输入面事实），
+  // 于是 runtime/attachViewport（触控手势判定）与 handlers/keymapHandler（拖拽旋转兜底）
+  // 都能问能力，而不必问"我是不是嵌入"。
+  provides: [CAPABILITY.SHELL_EMBED, CAPABILITY.SCREEN_GESTURES],
   requires: ['workspace.layout', CAPABILITY.EVALUATE, CAPABILITY.INTERACTION_BEGIN],
   contributes: {
     shellLayouts: [{ shellId: 'embed', adjustableLayout: false, regions: ['viewport', 'channels', 'timeline'] }],
@@ -573,13 +576,35 @@ export const M_SHELL_EMBED = moduleDecl({
 export const M_SHELL_WIKI = moduleDecl({
   id: 'shells.wikiWorkbench',
   provides: ['shell.wikiWorkbench'],
-  requires: ['shell.workbench'],
+  requires: [CAPABILITY.SHELL_WORKBENCH],
   contributes: {
     shellLayouts: [
       { shellId: 'wikiWorkbench', adjustableLayout: true, regions: ['viewport', 'inspector', 'wikiStatus', 'menubar'] },
     ],
   },
   note: 'Wiki 工作台：工作台外壳 + Wiki 状态/上传落点。',
+})
+
+/**
+ * **实例内可改外观**（主题/语言）—— M7-5 新增的**环境能力**。
+ *
+ * ## 它替换了什么
+ *
+ * `OPERATOR_TOGGLE_THEME` / `OPERATOR_SET_LANGUAGE` 的 `exec` 里原来各自写一句
+ * 宿主身份判断。那两句的用户事实是：
+ * **本实例允许用户在实例内改外观**（工作台/Wiki）；嵌入的外观由宿主页决定
+ * （`EmbedSettings.theme` 是宿主输入），所以嵌入面没有本地覆盖。
+ *
+ * 把这条事实写成能力后：算子的门（`requires`）与其它命令同形，宿主名不再出现在
+ * 分支里；新增一种外壳想要"本地覆盖"就该声明本能力，而不是去改那两句判断。
+ *
+ * 它**不**在 `CORE_SEMANTIC_CAPABILITIES` 里：外观不是对象/时间/通道语义
+ * （H3 的一致性判据只覆盖那三类，过宽会把一致性用成功能清单）。
+ */
+export const M_APPEARANCE_LOCAL = moduleDecl({
+  id: 'appearance.local',
+  provides: [CAPABILITY.APPEARANCE_LOCAL],
+  note: '实例内可改外观（主题/语言）。嵌入不引用它：外观归宿主页。',
 })
 
 /** Wiki 上传（只有 Wiki profile）。 */
@@ -693,6 +718,7 @@ export const WORKBENCH_PROFILE: ProfileDecl = profile(
     M_LAYOUT_EDIT,
     M_TEXT_EDITOR,
     M_SHELL_WORKBENCH,
+    M_APPEARANCE_LOCAL,
     M_LAYOUT_STORAGE,
     M_SAVE_LOCAL,
     M_PORT_BROWSER,
@@ -729,6 +755,7 @@ export const WIKI_PROFILE: ProfileDecl = profile(
     M_TEXT_EDITOR,
     M_SHELL_WORKBENCH,
     M_SHELL_WIKI,
+    M_APPEARANCE_LOCAL,
     M_WIKI_UPLOAD,
     M_LAYOUT_STORAGE,
     M_SAVE_LOCAL,
