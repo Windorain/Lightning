@@ -40,9 +40,13 @@ export interface LedgerFacts {
   zeroCrossings: number
   activeCount: number
   balanced: boolean
-  /** M8 调度者裁决②：abandonAll 必须记账（当前 ledger() **没有**这一项）。 */
+  /** M8 调度者裁决②：abandonAll 必须记账（单列，不混进 releaseTotal）。 */
   abandonedTotal: number | null
   lastAbandonReason: string | null
+  /** 仍在服役的**份额**数（守恒式的 live 项；共享条目 > activeCount）。 */
+  liveRefs: number | null
+  /** 活跃计数回基线（A19 的旧读面；丢失/服役期与 balanced 故意不同）。 */
+  atBaseline: boolean | null
 }
 
 export interface CameraEngineFacts {
@@ -64,8 +68,16 @@ export interface ViewportFacts {
     pendingRebuild: boolean | null
     ledger: LedgerFacts | null
     mountedBatches: number | null
-    /** 设备代次读面（M8-3 前置：当前**不存在**，读作 null）。 */
+    /** 设备代次读面（M8-3 落地；不存在时如实读作 null，不冒充 0）。 */
     deviceGeneration: number | null
+    /** 设备相位（M8-3：ready/lost/recovering/failed；读面缺席 ⇒ null）。 */
+    devicePhase: string | null
+    /** 丢失期暂停提交（M8-3 读面；缺席 ⇒ null）。 */
+    deviceReady: boolean | null
+    /** 上次**实际应用**的内容身份（§7.5:264「从当前有效状态重建」的机检面）。 */
+    appliedContentIdentity: string | null
+    /** 注解/描边子树的实时对象数（"新内容进画面"的结构读数）。 */
+    overlay: { annotations: number; outlines: number } | null
   }
   texture: { state: string | null; loadingSeen: string | null }
   dom: { viewportCount: number; canvasCount: number }
@@ -122,6 +134,8 @@ export async function readViewportFacts(page: Page, rid: string = VIEWPORT_REGIO
           // 裁决② 要求的 abandoned 记账：ledger() 若没有该字段，读面如实报 null
           abandonedTotal: typeof l.abandonedTotal === 'number' ? l.abandonedTotal : null,
           lastAbandonReason: typeof l.lastAbandonReason === 'string' ? l.lastAbandonReason : null,
+          liveRefs: typeof l.liveRefs === 'number' ? l.liveRefs : null,
+          atBaseline: typeof l.atBaseline === 'boolean' ? l.atBaseline : null,
         }
       }
     } catch {
@@ -199,6 +213,20 @@ export async function readViewportFacts(page: Page, rid: string = VIEWPORT_REGIO
         pendingRebuild: typeof surface?.pendingRebuild === 'boolean' ? surface.pendingRebuild : null,
         ledger,
         mountedBatches: stats && typeof stats.batches === 'number' ? stats.batches : null,
+        devicePhase: typeof surface?.devicePhase === 'string' ? surface.devicePhase : null,
+        deviceReady: typeof surface?.deviceReady === 'boolean' ? surface.deviceReady : null,
+        appliedContentIdentity:
+          typeof surface?.appliedContentIdentity === 'string' ? surface.appliedContentIdentity : null,
+        overlay: (() => {
+          try {
+            const o = surface?.overlayStatsSnapshot?.() ?? null
+            return o === null
+              ? null
+              : { annotations: Number(o.annotationObjects), outlines: Number(o.outlineObjects) }
+          } catch {
+            return null
+          }
+        })(),
         // M8-3 前置：设备代次读面。当前不存在 ⇒ 如实读作 null（不是"代次为 0"）
         deviceGeneration:
           typeof surface?.deviceGeneration === 'number'
@@ -342,6 +370,37 @@ export async function restoreProductContext(page: Page, timeout = 20_000): Promi
       throw new Error('M8：等待 webglcontextrestored 超时（events=' + state.restoredEvents + ' isContextLost=' + String(state.isLost) + '）')
     }
     await page.waitForTimeout(30)
+  }
+}
+
+/**
+ * 等呈现会话**稳定**（连续两次读数的结构世代与"实际应用的内容身份"都相同）。
+ *
+ * ## 为什么需要它（本批 e2e 实测）
+ *
+ * "恢复后结构世代回到同一值"这条判据要求基线读数是**稳定态**：编辑（逐格说明）之后
+ * 编译是异步落地的（帧时钟驱动），若基线读在落地之前，读到的世代是上一份内容的 ——
+ * 于是恢复后（用**新**内容重建）的世代必然与它不同，判据会假红。
+ *
+ * 判据本身不放宽：稳定态基线 + 恢复后同值，仍然证明"内容没变的恢复回到同一世代"。
+ */
+export async function settlePresenter(
+  page: Page,
+  rid: string = VIEWPORT_REGION,
+  timeout = 15_000,
+): Promise<ViewportFacts> {
+  const deadline = Date.now() + timeout
+  let prev = await readViewportFacts(page, rid)
+  for (;;) {
+    await page.waitForTimeout(400)
+    const now = await readViewportFacts(page, rid)
+    const stable =
+      now.presenter.generation === prev.presenter.generation &&
+      now.presenter.appliedContentIdentity === prev.presenter.appliedContentIdentity &&
+      now.presenter.generation !== null
+    if (stable) return now
+    if (Date.now() > deadline) return now
+    prev = now
   }
 }
 
