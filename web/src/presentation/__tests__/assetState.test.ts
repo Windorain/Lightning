@@ -71,7 +71,11 @@ describe('A19 resource-release：归属资源 acquire/release 平衡', () => {
       disposeTotal: 200,
       zeroCrossings: 200,
       activeCount: 0,
+      liveRefs: 0,
+      abandonedTotal: 0,
+      lastAbandonReason: '',
       balanced: true,
+      atBaseline: true,
     })
     expect(disposed).toBe(200)
   })
@@ -111,7 +115,7 @@ describe('A19 resource-release：归属资源 acquire/release 平衡', () => {
     expect(registry.ledger().balanced).toBe(true)
   })
 
-  it('负对照：少一次 dispose ⇒ 账不守恒（balanced === false）', () => {
+  it('负对照：少一次 dispose ⇒ 份额仍在服役（atBaseline === false 且 liveRefs 暴露它）', () => {
     const registry = new OwnershipRegistry()
     const entry = { identity: IDENTITY, deviceScope: 's1' }
     registry.acquire(entry, () => {})
@@ -119,10 +123,20 @@ describe('A19 resource-release：归属资源 acquire/release 平衡', () => {
     registry.release(entry)
     // 破坏方式：忘记第二次 release
     const ledger = registry.ledger()
-    expect(ledger.balanced, '少一次 dispose 必须被判红').toBe(false)
+    // M8 裁决② 起 `balanced` 是"记账守恒"（每一次 acquire 都有明确去向：
+    // 已释放 / 已放弃 / 仍活跃且被计入），而**漏释放**在账上是"仍然活跃"——
+    // 它由 `liveRefs`（份额数）与 `atBaseline`（回基线）两个独立读数判红，
+    // 分辨力没有降低：漏一次 release ⇒ liveRefs 恰为 1、atBaseline 恰为 false。
+    expect(ledger.liveRefs, '少一次 dispose ⇒ 仍有一份份额在服役').toBe(1)
+    expect(ledger.atBaseline, '少一次 dispose 必须被判红（活跃计数未回基线）').toBe(false)
+    expect(ledger.balanced, '账本身没说谎（份额确实还在，不是丢了账）').toBe(true)
     expect(ledger.acquireTotal).toBe(2)
     expect(ledger.releaseTotal).toBe(1)
     expect(ledger.activeCount).toBe(1)
+    // 补上那次 release ⇒ 回基线
+    registry.release(entry)
+    expect(registry.ledger().liveRefs).toBe(0)
+    expect(registry.ledger().atBaseline, '补齐后必须回基线').toBe(true)
   })
 
   it('负对照：提前释放共享资源 ⇒ 未知条目/计数已零，显式报错', () => {
@@ -162,19 +176,48 @@ describe('A19 resource-release：归属资源 acquire/release 平衡', () => {
     expect(deviceScopeCount()).toBeGreaterThanOrEqual(2)
   })
 
-  it('放弃全部（设备丢失）在账上单列，不冒充正常回收', () => {
+  it('放弃全部（设备丢失）在账上单列，不冒充正常回收（裁决②：按**份额**记账）', () => {
     const registry = new OwnershipRegistry()
     const entry = { identity: IDENTITY, deviceScope: 's1' }
     registry.acquire(entry, () => {})
     registry.acquire(entry, () => {})
+    const ledgerBefore = registry.ledger()
+    expect(ledgerBefore.liveRefs, '前提：两次 acquire 同一条目 ⇒ 两份份额').toBe(2)
     const abandoned = registry.abandonAll('webgl-context-lost')
-    expect(abandoned).toBe(1)
-    expect(registry.abandoned.total).toBe(1)
+    // 放弃的是**份额**（2），不是条目数（1）：balanced 按 acquire 次数记账，
+    // 按条目计数会让共享条目永远差一份（裁决② 的 A19 口径）。
+    expect(abandoned, '放弃数必须等于被放弃的份额数').toBe(2)
+    expect(registry.abandoned.total).toBe(2)
     expect(registry.abandoned.lastReason).toBe('webgl-context-lost')
     expect(registry.activeCount()).toBe(0)
     // 正常账**不**因放弃而变化（放弃是另一类事实，单独记）
     expect(registry.ledger().acquireTotal).toBe(2)
-    expect(registry.ledger().releaseTotal).toBe(0)
+    expect(registry.ledger().releaseTotal, '严禁在 abandonAll 里偷偷加 releaseTotal').toBe(0)
+    expect(registry.ledger().abandonedTotal).toBe(2)
+    expect(registry.ledger().lastAbandonReason).toBe('webgl-context-lost')
+    expect(registry.ledger().balanced, 'acquired(2) === released(0) + abandoned(2) + live(0)').toBe(true)
+    expect(registry.ledger().atBaseline).toBe(true)
+  })
+
+  it('**新代次重新 acquire 后仍守恒**（acquired === released + abandoned + live）', () => {
+    const registry = new OwnershipRegistry()
+    const gen1 = { identity: IDENTITY, deviceScope: 's1', deviceGeneration: 1 }
+    registry.acquire(gen1, () => {})
+    registry.acquire({ ...gen1, identity: { id: 'tex:dirt', version: 'v1' } }, () => {})
+    registry.abandonAll('webgl-context-lost')
+    // 恢复：同一内容身份在**新代次**重新获取 ⇒ 键不同（代次段进键）
+    const gen2 = { identity: IDENTITY, deviceScope: 's1', deviceGeneration: 2 }
+    const snap = registry.acquire(gen2, () => {})
+    expect(snap.deviceGeneration, '快照必须暴露份额所属设备代次').toBe(2)
+    expect(snap.key, '代次进归属键（新旧设备的份额可区分）').toContain('#g2')
+    const ledger = registry.ledger()
+    expect(ledger.acquireTotal).toBe(3)
+    expect(ledger.releaseTotal).toBe(0)
+    expect(ledger.abandonedTotal).toBe(2)
+    expect(ledger.liveRefs).toBe(1)
+    expect(ledger.balanced, '3 === 0 + 2 + 1').toBe(true)
+    expect(ledger.activeCount, '恢复后新代次的份额重新建立').toBe(1)
+    expect(ledger.atBaseline, '仍有活跃份额 ⇒ 未回基线').toBe(false)
   })
 })
 
@@ -325,15 +368,17 @@ describe('A36 asset-states：五态显式、占位与真实资源可区分', () 
 })
 
 describe('A30 graphics-recovery：设备状态机与失败隔离', () => {
-  it('丢失 ⇒ 不可提交；恢复 ⇒ 需显式重建并回到可提交', () => {
+  it('丢失 ⇒ 不可提交；恢复 ⇒ 推进设备代次、需显式重建并回到可提交', () => {
     const m = new DeviceStateMachine()
     expect(m.canSubmit()).toBe(true)
-    m.markPresented('g:1', 0)
+    expect(m.deviceGeneration, '设备代次从第 1 代起（number，不是结构世代）').toBe(1)
+    m.markPresented(0)
+    expect(m.heldGeneration(), '已呈现 ⇒ 本代次已服役').toBe(1)
 
     m.markLost('webglcontextlost', 10)
     expect(m.canSubmit()).toBe(false)
     expect(m.current.phase).toBe('lost')
-    expect(m.heldGeneration(), '丢失瞬间仍记录在显示的那一代').toBe('g:1')
+    expect(m.heldGeneration(), '丢失瞬间仍记录在显示的那一代（设备代次）').toBe(1)
 
     expect(m.markRecovering(11)).toBe(true)
     expect(m.current.phase).toBe('recovering')
@@ -341,14 +386,31 @@ describe('A30 graphics-recovery：设备状态机与失败隔离', () => {
 
     m.markRestored(12)
     expect(m.canSubmit()).toBe(true)
+    expect(m.deviceGeneration, '恢复必须推进设备代次（旧代次此后不服役）').toBe(2)
     // 恢复后必须由调用方用**当前有效版本**重新编译并 present
-    expect(m.heldGeneration()).toBeNull()
-    m.markPresented('g:2', 13)
-    expect(m.heldGeneration()).toBe('g:2')
+    expect(m.heldGeneration(), '只 markRestored 不重建 ⇒ 本代次尚未呈现').toBeNull()
+    m.markPresented(13)
+    expect(m.heldGeneration()).toBe(2)
     expect(m.transitions.map((t) => t.to)).toEqual(['ready', 'lost', 'recovering', 'ready', 'ready'])
+    expect(m.transitions.map((t) => t.deviceGeneration)).toEqual([1, 1, 1, 2, 2])
   })
 
-  it('恢复失败 ⇒ 可诊断、可重试、保留内容（不进入"已恢复"）', () => {
+  it('**设备代次与结构世代不同空间**：内容编辑不推进代次，只有设备生命周期推进它', () => {
+    const m = new DeviceStateMachine()
+    // 反复"内容变了 ⇒ 重新呈现"：代次必须**不动**（S3-b 的显式要求）
+    for (let i = 0; i < 5; i++) m.markPresented(i)
+    expect(m.deviceGeneration, '呈现（内容侧）不得推进设备代次').toBe(1)
+    // 只有丢失 → 恢复推进它，且严格递增
+    m.markLost('lost', 10)
+    m.markRestored(11)
+    expect(m.deviceGeneration).toBe(2)
+    m.markLost('lost', 20)
+    m.markRestored(21)
+    expect(m.deviceGeneration).toBe(3)
+    expect(typeof m.deviceGeneration, 'S3-b：必须是 number（不得拿 CompileGeneration 冒充）').toBe('number')
+  })
+
+  it('恢复失败 ⇒ 可诊断、可重试、保留内容（不进入"已恢复"、不推进代次）', () => {
     const m = new DeviceStateMachine()
     m.markLost('lost', 1)
     m.markRecovering(2)
@@ -357,6 +419,7 @@ describe('A30 graphics-recovery：设备状态机与失败隔离', () => {
     const failedState: DeviceState = m.current
     expect(failedState.phase).toBe('failed')
     expect(m.canSubmit()).toBe(false)
+    expect(m.deviceGeneration, '恢复失败不得推进代次（没有新的有效设备）').toBe(1)
     if (failedState.phase === 'failed') {
       expect(failedState.retryable).toBe(true)
       expect(failedState.reason).toBe('context create failed')
@@ -371,11 +434,13 @@ describe('A30 graphics-recovery：设备状态机与失败隔离', () => {
     }
     m.markRestored(5)
     expect(m.canSubmit()).toBe(true)
+    expect(m.deviceGeneration, '真正恢复成功才推进').toBe(2)
   })
 
   it('负对照：只 resize 而不重建 ⇒ heldGeneration 不更新，可被断言抓住', () => {
     const m = new DeviceStateMachine()
-    m.markPresented('g:1', 0)
+    m.markPresented(0)
+    expect(m.heldGeneration()).toBe(1)
     m.markLost('lost', 1)
     m.markRecovering(2)
     m.markRestored(3)
@@ -384,27 +449,33 @@ describe('A30 graphics-recovery：设备状态机与失败隔离', () => {
     expect(m.current.phase).toBe('ready')
   })
 
-  it('两视口失败隔离：一个丢失，另一个继续可提交', () => {
+  it('两视口失败隔离：一个丢失，另一个继续可提交；注销后退出读面', () => {
     const reg = new ViewportDeviceRegistry()
     const a = reg.machineFor('r-viewport')
     const b = reg.machineFor('r-wiki-preview')
-    a.markPresented('g:1', 0)
-    b.markPresented('g:1', 0)
+    a.markPresented(0)
+    b.markPresented(0)
 
     a.markLost('webglcontextlost', 1)
     expect(reg.submittableViewports()).toEqual(['r-wiki-preview'])
     expect(reg.pending()).toEqual([{ viewportId: 'r-viewport', state: a.current }])
     expect(reg.summary()).toEqual({ ready: 1, lost: 1, recovering: 0, failed: 0 })
 
-    // b 不受 a 的状态影响
+    // b 不受 a 的状态影响（"其他 Area 继续可用"）
     expect(b.canSubmit()).toBe(true)
-    expect(b.heldGeneration()).toBe('g:1')
+    expect(b.heldGeneration()).toBe(1)
 
     a.markRecovering(2)
     a.markRestored(3)
-    a.markPresented('g:2', 4)
+    a.markPresented(4)
     expect(reg.submittableViewports()).toEqual(['r-viewport', 'r-wiki-preview'])
     expect(reg.summary().ready).toBe(2)
+    expect(a.deviceGeneration, 'A 的恢复只推进 A 的代次').toBe(2)
+    expect(b.deviceGeneration, 'B 的设备生命周期不受 A 的丢失影响').toBe(1)
+
+    // M8-3：视口拆解后不得继续出现在"可提交视口"读面里
+    reg.remove('r-wiki-preview')
+    expect(reg.submittableViewports()).toEqual(['r-viewport'])
   })
 
   it('状态转移有界（不无限增长）', () => {
@@ -415,6 +486,7 @@ describe('A30 graphics-recovery：设备状态机与失败隔离', () => {
       m.markRestored(i)
     }
     expect(m.transitions.length).toBeLessThanOrEqual(8)
+    expect(m.deviceGeneration, '50 次真实恢复 ⇒ 代次严格递增到 51').toBe(51)
   })
 })
 

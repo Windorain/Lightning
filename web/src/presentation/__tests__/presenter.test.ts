@@ -207,9 +207,15 @@ describe('A19：呈现器资源计数平衡', () => {
     // 破坏方式：直接丢弃呈现器，不做 dispose（"少一次 dispose"的经典形态）
     const leaked = presenter.ledger()
     expect(leaked.activeCount, '未 dispose 时必须留下可观测的活跃资源 —— 这就是判红读数').toBeGreaterThan(0)
-    expect(leaked.balanced).toBe(false)
+    // M8 裁决② 起 bifurcate：`balanced` 是"记账守恒"（份额都还在账上、没有丢账），
+    // 而**漏释放**的判红读数是"份额仍在服役"（`liveRefs > 0` 且 `atBaseline === false`）。
+    // 分辨力不降：漏一次 dispose ⇒ liveRefs 恰为未被释放的那几份。
+    expect(leaked.liveRefs, '未 dispose ⇒ 这些份额仍在服役').toBeGreaterThan(0)
+    expect(leaked.atBaseline, '未 dispose ⇒ 活跃计数不得回基线').toBe(false)
+    expect(leaked.balanced, '账没说谎：份额在账上，不是丢了').toBe(true)
     // 清理，避免测试间互相影响
     presenter.dispose()
+    expect(presenter.ledger().atBaseline, 'dispose 后必须回基线').toBe(true)
   })
 
   it('两个呈现器（两个设备作用域）互不影响：释放其一另一仍可用', () => {
@@ -273,9 +279,14 @@ describe('A30：设备丢失处置', () => {
     presenter.apply(scene)
     const beforeActive = presenter.ledger().activeCount
     expect(beforeActive).toBeGreaterThan(0)
+    const releasedBefore = presenter.ledger().releaseTotal
 
+    expect(presenter.currentDeviceGeneration, '第 1 代设备').toBe(1)
     const abandoned = presenter.handleContextLost()
-    expect(abandoned).toBeGreaterThan(0)
+    expect(abandoned, '放弃数按**份额**记（不是条目数）').toBeGreaterThan(0)
+    expect(presenter.ledger().abandonedTotal, '裁决②：放弃必须单列').toBe(abandoned)
+    expect(presenter.ledger().releaseTotal, '严禁偷偷加 releaseTotal').toBe(releasedBefore)
+    expect(presenter.ledger().lastAbandonReason).toBe('webgl-context-lost')
     expect(presenter.ledger().activeCount, '丢失后旧句柄全部放弃').toBe(0)
     expect(presenter.object3d.children, '挂载表清空 ⇒ 恢复必然重建').toHaveLength(0)
     expect(presenter.currentGeneration).toBeNull()
@@ -283,9 +294,13 @@ describe('A30：设备丢失处置', () => {
     // 恢复：用**当前有效版本**重新 apply（A30 明文）
     presenter.handleContextRestored()
     expect(presenter.restores).toBe(1)
+    // M8-3：恢复**不得**自行切代次 —— 代次由设备状态机推进后下发（唯一权威）。
+    presenter.beginDeviceGeneration(2)
+    expect(presenter.currentDeviceGeneration, '新代次已下发给呈现器').toBe(2)
     presenter.apply(scene)
     expect(presenter.object3d.children.length).toBeGreaterThan(0)
     expect(presenter.ledger().activeCount).toBeGreaterThan(0)
+    expect(presenter.statsSnapshot().deviceGeneration, '统计面也必须报代次').toBe(2)
     presenter.dispose()
   })
 

@@ -115,10 +115,30 @@ export class OverlayPresenter {
     return { drawn, unrendered }
   }
 
+  /**
+   * **WebGL 上下文丢失**：放弃注解/描边的全部 GPU 对象（旧代次句柄不复用）。
+   *
+   * 与 `dispose()` 的差别只在**是否逐对象 dispose**：设备丢失后 `gl.delete*` 已无意义
+   * （句柄属于失效的上下文），逐条 dispose 只会产生错误日志。语义与
+   * `BatchedPresenter#handleContextLost` 的 `abandonAll` 同口径：
+   * **放弃**≠**正常回收**。恢复后由 `PresenterSession#handleContextRestored`
+   * 用上次编译产物重画（A30「恢复后按当前有效版本重建」）。
+   */
+  handleContextLost(): void {
+    this.abandonGroup(this.annotationWorld)
+    this.abandonGroup(this.annotationOverlay)
+    this.abandonGroup(this.outlineGroup)
+  }
+
   dispose(): void {
     this.clearAnnotations()
     this.clearOutline()
     this.group.clear()
+  }
+
+  /** 只摘除子对象、**不** dispose（设备丢失：旧上下文里的句柄已不可用）。 */
+  private abandonGroup(group: THREE.Group): void {
+    for (const child of [...group.children]) group.remove(child)
   }
 
   private clearGroup(group: THREE.Group): void {

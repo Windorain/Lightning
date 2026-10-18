@@ -42,6 +42,7 @@ import type { ContentIdentity } from './assetIdentity'
 import { sampleBoundTexture, type TextureBinding } from './textureBinding'
 import { contentIdentityKey } from './assetIdentity'
 import { OwnershipRegistry, type OwnershipEntry } from './ownership'
+import type { DeviceGeneration } from './deviceState'
 
 /** 呈现器可查询的运行统计（诊断与 A18/A19 观测面）。 */
 export interface PresenterStats {
@@ -156,6 +157,14 @@ export class BatchedPresenter {
   private generation: CompileGeneration | null = null
   private restoreCount = 0
   /**
+   * 本呈现器当前份额所属的**设备代次**（SPEC §6:206；与 `generation` 不同空间）。
+   *
+   * 权威不在本类：`PresenterSession` 的设备状态机推进代次后，经
+   * `beginDeviceGeneration()` 下发（装配边只在这里**镜像**一份用于归属键）。
+   * 它进归属键 ⇒ 旧代次的条目在账上与新代次条目可区分（§7.5:262）。
+   */
+  private deviceGeneration: DeviceGeneration = 1
+  /**
    * 上一次 `apply` 的场景（**供换纹理绑定时重放**）。
    *
    * 存整份引用而不只存"批次键集"：重放需要完整的 payloads 才能按新绑定重建材质。
@@ -228,17 +237,48 @@ export class BatchedPresenter {
     return this.restoreCount
   }
 
+  /** 当前份额所属的设备代次（诊断/判据面）。 */
+  get currentDeviceGeneration(): DeviceGeneration {
+    return this.deviceGeneration
+  }
+
+  /**
+   * 切到**新的设备代次**（只允许在旧代次份额被全部放弃之后）。
+   *
+   * ## 为什么必须显式给代次而不是本地自增
+   *
+   * 代次的唯一权威是 `DeviceStateMachine`（它是"第几次有效设备生命周期"的持有者）。
+   * 呈现器若自己再数一份，就会出现两个答案 —— 而"旧代次不服役"的判据正是
+   * 比对这个数字。故本方法只接受**已推进**的代次，并拒绝两种违约形态：
+   *  - 没有推进（`generation <= current`）⇒ no-op（重复恢复事件幂等）；
+   *  - 旧份额仍在服役（`activeCount > 0`）⇒ 抛错（那会让旧句柄带着新代次号复活）。
+   */
+  beginDeviceGeneration(generation: DeviceGeneration): void {
+    if (generation <= this.deviceGeneration) return
+    if (this.ownership.activeCount() !== 0) {
+      throw new Error(
+        `presenter: 旧代次仍有 ${this.ownership.activeCount()} 条活跃份额，不能切到设备代次 ${generation}`,
+      )
+    }
+    this.deviceGeneration = generation
+  }
+
   /**
    * 当前可查询的运行统计。
    *
    * `batchObjects` / `instanceCount` 是**实时**读数（不是累计），其余为累计。
    */
-  statsSnapshot(): PresenterStats & { generation: CompileGeneration | null; scope: string } {
+  statsSnapshot(): PresenterStats & {
+    generation: CompileGeneration | null
+    deviceGeneration: DeviceGeneration
+    scope: string
+  } {
     return {
       ...this.stats,
       batchObjects: this.mounted.size,
       instanceCount: this.countInstances(),
       generation: this.generation,
+      deviceGeneration: this.deviceGeneration,
       scope: this.options.scope,
     }
   }
@@ -247,7 +287,8 @@ export class BatchedPresenter {
    * 资源计数对账（A19 主判据）。
    *
    * 覆盖**本呈现器显式登记**的资源：材质与几何各 acquire 一次、卸载时 release 一次。
-   * 恒等式：`acquireTotal === releaseTotal` 且 `disposeTotal === releaseTotal`。
+   * M8 起设备丢失的份额由 `abandonAll` **单列**记账，守恒式见
+   * `presentation/ownership#ledger`（acquire 的三去向：released + abandoned + live）。
    */
   ledger(): ReturnType<OwnershipRegistry['ledger']> {
     return this.ownership.ledger()
@@ -827,7 +868,7 @@ export class BatchedPresenter {
    * 不需要调用方记住这一点（这正是 A19「一方关闭不破坏另一方」的实现基础）。
    */
   private entryOf(identity: ContentIdentity): OwnershipEntry {
-    return { identity, deviceScope: this.options.scope }
+    return { identity, deviceScope: this.options.scope, deviceGeneration: this.deviceGeneration }
   }
 
   private countInstances(): number {

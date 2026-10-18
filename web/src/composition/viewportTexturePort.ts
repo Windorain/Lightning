@@ -71,6 +71,15 @@ export interface ViewportTexturePort extends TexturePort {
   dispose(): void
   /** 释放全部纹理但**可继续用**（换文档：新文档的资源会重新上传）。 */
   clear(): void
+  /**
+   * **放弃**全部纹理（WebGL 设备丢失：旧代次的 GPU 句柄已不可用）。
+   *
+   * 与 `clear()` 的差别只在**是否逐张 dispose**：丢失后 GL 句柄属于失效上下文，
+   * `texture.dispose()` 只会向死上下文发删除命令（错误日志、无收益）。
+   * 与 `OwnershipRegistry#abandonAll` 同口径：**放弃 ≠ 正常回收**。
+   * 返回被放弃的纹理数（诊断关联字段）。
+   */
+  abandon(): number
   /** 存活纹理数（观测面）。 */
   readonly size: number
 }
@@ -151,6 +160,14 @@ export function createViewportTexturePort(scope: string): ViewportTexturePort {
     clear(): void {
       if (disposed) return
       releaseAll()
+    },
+
+    abandon(): number {
+      if (disposed) return 0
+      const n = byKey.size
+      // **不**逐张 dispose（设备已失效）；直接丢引用 ⇒ 恢复后按当前资源表重建。
+      byKey.clear()
+      return n
     },
 
     dispose(): void {
