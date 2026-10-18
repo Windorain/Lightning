@@ -11,6 +11,7 @@ import type {
 } from '@/runtime/contextAccess'
 import { createViewerPreferences } from '@/viewer/preferences'
 import { readPersistedPanelWidths } from '@/workbench/layout/panelLayoutStorage'
+import { instanceUiKey } from '@/runtime/instanceStorage'
 import { REGION, REGION_KEYMAP } from '@/runtime/regionIds'
 import { createHoverClock, createViewportHoverState, type HoverClock } from '@/runtime/hover'
 import type { ConnectionState, UIWorkspace, WorkbenchWorkspaceMode } from '@/runtime/types'
@@ -66,6 +67,11 @@ export class ScreenRoot {
     session: WorkbenchSession | EmbedSession,
     layout?: Partial<{ leftWidth: number; rightWidth: number }>,
     hoverClock?: HoverClock,
+    /**
+     * **本屏所属实例身份**（M7-6）：运行期新登记的视口 region 的 viewer 偏好键
+     * 也带这段。缺省 `default`（测试/诊断宿主），生产两宿主都显式传。
+     */
+    readonly instanceId: string = 'default',
   ) {
     this.areas = areas
     this.popupRegions = popupRegions
@@ -144,7 +150,7 @@ export class ScreenRoot {
       keymapId: REGION_KEYMAP.WORKBENCH_VIEWPORT,
       state: {
         // 每个视口**自己的** viewer 偏好实例：共享会让"关掉 A 的注解显示"改到 B。
-        viewer: createViewerPreferences(`lightning.prefs.viewport.${regionId}`),
+        viewer: createViewerPreferences(instanceUiKey(this.instanceId, `viewer.${regionId}`)),
         hover: createViewportHoverState(this.hoverClock),
       },
     })
@@ -243,6 +249,8 @@ export function createWorkbenchScreenRoot(
     header: PanelDeclaration[]
     properties: PanelDeclaration[]
   },
+  /** 本实例身份（M7-6；装配层分配，见 `runtime/instanceIdentity`）。 */
+  instanceId: string = 'workbench',
 ): ScreenRoot {
   const session = createWorkbenchSession()
   /** 本屏的悬停时钟（同屏各 region 共用；见 `ScreenRoot#hoverClock`）。 */
@@ -264,7 +272,7 @@ export function createWorkbenchScreenRoot(
           wmInputId: REGION.WORKBENCH_VIEWPORT,
           keymapId: REGION_KEYMAP.WORKBENCH_VIEWPORT,
           state: {
-            viewer: createViewerPreferences('lightning.prefs.viewport'),
+            viewer: createViewerPreferences(instanceUiKey(instanceId, `viewer.${REGION.WORKBENCH_VIEWPORT}`)),
             hover: createViewportHoverState(hoverClock),
           },
         }),
@@ -286,15 +294,15 @@ export function createWorkbenchScreenRoot(
   const wikiPreview = createRegionNode(REGION.WIKI_PREVIEW, RegionType.MAIN, {
     wmInputId: REGION.WIKI_PREVIEW,
     keymapId: REGION_KEYMAP.EMBED_VIEWPORT,
-    state: { viewer: createViewerPreferences('lightning.prefs.wiki-preview'), hover: createViewportHoverState(hoverClock) },
+    state: { viewer: createViewerPreferences(instanceUiKey(instanceId, `viewer.${REGION.WIKI_PREVIEW}`)), hover: createViewportHoverState(hoverClock) },
   })
   wikiPreview.visible = false
 
-  const { leftWidth, rightWidth } = readPersistedPanelWidths()
+  const { leftWidth, rightWidth } = readPersistedPanelWidths(instanceId)
   return new ScreenRoot('workbench', { width: 1400, height: 800 }, areas, [wikiPreview], session, {
     leftWidth,
     rightWidth,
-  }, hoverClock)
+  }, hoverClock, instanceId)
 }
 
 /** Embed：单 Region 退化树 */
@@ -302,8 +310,11 @@ export function createEmbedScreenRoot(
   tool: ToolSettings,
   extras?: {
     initialLayerWorldY?: number
+    /** 本实例身份（M7-6；`mount()` 每实例分配一个）。 */
+    instanceId?: string
   },
 ): ScreenRoot {
+  const instanceId = extras?.instanceId ?? 'embed'
   const session = createEmbedSession(extras)
   const hoverClock = createHoverClock()
   const areas: AreaNode[] = [
@@ -316,10 +327,10 @@ export function createEmbedScreenRoot(
         createRegionNode(REGION.EMBED, RegionType.MAIN, {
           wmInputId: REGION.EMBED,
           keymapId: REGION_KEYMAP.EMBED_VIEWPORT,
-          state: { tool, viewer: createViewerPreferences('lightning.prefs.embed'), hover: createViewportHoverState(hoverClock) },
+          state: { tool, viewer: createViewerPreferences(instanceUiKey(instanceId, `viewer.${REGION.EMBED}`)), hover: createViewportHoverState(hoverClock) },
         }),
       ],
     },
   ]
-  return new ScreenRoot('embed', { width: 800, height: 600 }, areas, [], session, undefined, hoverClock)
+  return new ScreenRoot('embed', { width: 800, height: 600 }, areas, [], session, undefined, hoverClock, instanceId)
 }

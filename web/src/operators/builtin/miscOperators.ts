@@ -4,6 +4,7 @@ import type { WorkbenchWorkspaceMode } from '@/runtime/types'
 import type { BlockRef } from '@/context/selection'
 import { REGION } from '@/runtime/regionIds'
 import { setRegionHoverAnnotation, setRegionHoverBlock } from '@/runtime/hover'
+import { panelWidthKey } from '@/workbench/layout/panelLayoutStorage'
 function setNested(obj: Record<string, unknown>, path: string, value: unknown): void {
   const parts = path.split('.')
   let cur: Record<string, unknown> = obj
@@ -341,10 +342,15 @@ export const ResetLayoutOperator: OperatorType = {
     return true
   },
 
-  exec(_ctx, _props) {
+  exec(ctx, _props) {
     // Direct DOM access is intentional here: we need to clear persisted layout
     // state and force a full page reload to re-initialise the Screen layout system.
-    try { localStorage.removeItem('wsr-wb-left-w'); localStorage.removeItem('wsr-wb-right-w') } catch { /* */ }
+    //
+    // 键带实例段（M7-6）：重置只清**本实例**的面板宽度，不再误伤同页其它实例。
+    try {
+      localStorage.removeItem(panelWidthKey(ctx.instanceId, 'left'))
+      localStorage.removeItem(panelWidthKey(ctx.instanceId, 'right'))
+    } catch { /* */ }
     location.reload()
   },
 }

@@ -2086,6 +2086,16 @@ export class Context {
   }
 
   /**
+   * **本实例身份**（M7-6；由装配层分配，见 `runtime/instanceIdentity`）。
+   *
+   * 单一来源是 `wm.settings.instanceId`（外壳构造参数）—— 本类不另存一份：
+   * 两份 id 会允许"设置写进 A 的键、日志登记成 B 的实例"这种静默错位。
+   */
+  get instanceId(): string {
+    return this.wm.settings.instanceId
+  }
+
+  /**
    * 字段级写拒绝的共享读面（M4-3 R2）。
    *
    * 返回的是**存储本身**（含 `reject`/`clear` 写方法）：写点只有唯一写路由的结算处，

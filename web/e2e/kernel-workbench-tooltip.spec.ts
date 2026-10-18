@@ -28,7 +28,7 @@
  * H2（嵌入侧，region 区分）：
  *  5. 切到 Wiki 工作区、在 r-wiki-preview 上真实悬停 ⇒ .wm-tooltip-box 出现且文本
  *     含该格逐格说明与方块 NEI 名（旧链路未回退）；
- *  6. 偏好 showHoverTooltip:false（lightning.prefs.wiki-preview）⇒ 拾取仍在、
+ *  6. 偏好 showHoverTooltip:false（`lk-ui.v1.workbench.viewer.r-wiki-preview`；M7-6 起键带实例段）⇒ 拾取仍在、
  *     tooltip 计数 0（偏好门禁在**仍然存在**的那条呈现上照旧生效）。
  */
 import { expect, test, type Page } from '@playwright/test'
@@ -49,10 +49,11 @@ import { fixturePath, innerDocOf, readJson, type InnerDoc } from './helpers/save
 const REGION = 'r-viewport'
 const FIXTURE = 'structuredata-exported-envelope.json'
 /**
- * Wiki 预览 region 的 viewer 偏好键（runtime/screenRoot.ts 里
- * createViewerPreferences('lightning.prefs.wiki-preview')）。
+ * Wiki 预览 region 的 viewer 偏好键（M7-6 起**带实例段**）：
+ * `runtime/instanceStorage#instanceUiKey('workbench', 'viewer.r-wiki-preview')`。
+ * 旧键 `lightning.prefs.wiki-preview` 已作废（不迁移）。
  */
-const WIKI_PREF_KEY = 'lightning.prefs.wiki-preview'
+const WIKI_PREF_KEY = 'lk-ui.v1.workbench.viewer.r-wiki-preview'
 
 /** 夹具里的一个「带逐格说明的格」候选（文件索引 = hover voxel 下标）。 */
 interface Candidate {

@@ -16,6 +16,14 @@ import { REGION } from '@/runtime/regionIds'
 
 const props = defineProps<{
   bootstrap: EmbedBootstrapOptions
+  /**
+   * **本嵌入实例身份**（M7-6）：由装配层 `embed/mount` 分配。
+   *
+   * 它是本实例持久化键与日志观测面的唯一键。缺省 `'embed'` 只为
+   * 宿主直接 `createApp(EmbedRoot, { bootstrap })` 的旧用法保留一个可解释的形态；
+   * 走 `mount()` 的生产路径恒传一个逐实例不同的 id。
+   */
+  instanceId?: string
 }>()
 
 const settings = buildEmbedSettingsFromBootstrap({
@@ -47,7 +55,7 @@ const { host, ctx } = createEmbedHost(settings, {
   structureBase: props.bootstrap.structureBase,
   workbenchEdit: props.bootstrap.workbenchEdit,
   handlers: props.bootstrap.handlers,
-}, shell)
+}, shell, props.instanceId ?? 'embed')
 
 /**
  * **装配只读面**（M7-4 段 A）：把**本实例真实的** `shell.assembly` 登记进按实例的

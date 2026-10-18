@@ -40,7 +40,7 @@ export function createKeymapHandler(
       const tool = ctx.hasCapability(CAPABILITY.TOOLS_MANIPULATORS)
         ? ctx.getToolRegistry().activeTool.value
         : null
-      const defaultKeymap = resolveRegionBaseKeymap(ctx.region(regionId)?.keymapId)
+      const defaultKeymap = resolveRegionBaseKeymap(ctx.region(regionId)?.keymapId, ctx.instanceId)
       const toolBindings = tool?.keymap ?? []
       const fallbackBindings = tool?.keymapFallback ?? []
 

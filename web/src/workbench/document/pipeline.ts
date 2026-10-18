@@ -80,7 +80,7 @@ export async function documentLoadPipeline(
       saveBaseline: result.document.clone(),
     })
     if (sourceId === 'wiki-data') {
-      pushRecentStructure(loadResult.displayName ?? loadResult.locator)
+      pushRecentStructure(loadResult.displayName ?? loadResult.locator, ctx.instanceId)
       ctx.getLocalFileName().value = loadResult.displayName ?? loadResult.locator
     }
   } else {

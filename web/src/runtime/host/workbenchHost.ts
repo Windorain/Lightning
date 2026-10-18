@@ -23,6 +23,7 @@ import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/ru
 import { useAreaHost } from '@/editors/useAreaHost'
 import { editorTypeRegistry } from '@/editors/builtinEditors'
 import { createInitialLayout, createWorkspace } from '@/domain/workspace'
+import { WORKBENCH_INSTANCE_ID } from '@/runtime/instanceIdentity'
 import { parseWorkbenchQuery } from '@/workbench/utils/fileNaming'
 import {
   WORKBENCH_PANELS,
@@ -96,9 +97,12 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   const { selection, editHistory, toolRegistry, tool, shell } = deps
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
-  const wm = new WM(logCenter)
+  // 工作台实例身份是**固定**的（Q3：结构上禁止同页两个工作台）。
+  // 它仍必须显式传给 WM / ScreenRoot：持久化键与观测面都按实例命名，
+  // 而不是按"当前宿主是什么"反查。
+  const wm = new WM(logCenter, { surface: 'workbench', instanceId: WORKBENCH_INSTANCE_ID })
 
-  const screen = createWorkbenchScreenRoot(tool, WORKBENCH_PANELS)
+  const screen = createWorkbenchScreenRoot(tool, WORKBENCH_PANELS, WORKBENCH_INSTANCE_ID)
 
   const main = new Main({
     operators: registry,

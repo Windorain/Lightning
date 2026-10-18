@@ -102,7 +102,7 @@ export const WikiSaveAsOperator: OperatorType = {
       saveBaseline: ctx.frozenDocumentValue(),
     })
     ctx.getLocalFileName().value = name
-    pushRecentStructure(name)
+    pushRecentStructure(name, ctx.instanceId)
     afterDocumentSave(ctx, ctx.getDocumentBinding(), result.revisionId)
     ctx.log.info('Wiki 另存为', name)
   },

@@ -25,7 +25,7 @@ watch(
   open => {
     if (!open) return
     query.value = ''
-    recent.value = getRecentStructures()
+    recent.value = getRecentStructures(props.ctx.instanceId)
     hits.value = []
     void runSearch('')
   },

@@ -51,6 +51,13 @@ export function createEmbedHost(
    * 装配失败由 `createEmbedShellRuntime` 显式抛出）。
    */
   shell: ShellRuntime,
+  /**
+   * **本嵌入实例身份**（M7-6；由装配层 `embed/mount` 每实例分配一个）。
+   *
+   * 必填：它是"同页多实例"的唯一键 —— 实例设置、日志观测面、viewer 偏好/
+   * 面板/键位全部按它命名。缺省成固定串就等于把 D6/D7/D9 留在原地。
+   */
+  instanceId: string,
 ): { host: EmbedHost; ctx: Context; shell: ShellRuntime } {
   const registry = createOperatorRegistry()
   const viewports = createViewportManager()
@@ -59,11 +66,13 @@ export function createEmbedHost(
   // （那会让同页两实例互相覆盖）。
   const wm = new WM(logCenter, {
     surface: 'embed',
+    instanceId,
     ...(settings.theme === undefined ? {} : { initialTheme: settings.theme }),
   })
 
   const screen = createEmbedScreenRoot(createToolSettings(), {
     initialLayerWorldY: settings.initialLayerWorldY,
+    instanceId,
   })
 
   const main = new Main({

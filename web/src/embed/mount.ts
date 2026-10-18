@@ -7,6 +7,7 @@ import { createApp } from 'vue'
 import EmbedRoot from '@/embed/EmbedRoot.vue'
 import { ensureMobileFitHost } from '@/embed/mobileFitHost'
 import { initEmbedTouchSim } from '@/embed/touchPointer'
+import { allocateEmbedInstanceId } from '@/runtime/instanceIdentity'
 
 import type { EmbedBootstrapOptions } from './embedContract'
 
@@ -59,5 +60,9 @@ export function mount(
   const mountEl = el as HTMLElement
   ensureMobileFitHost(mountEl)
   if (import.meta.env.DEV) initEmbedTouchSim(mountEl)
-  createApp(EmbedRoot, { bootstrap: options }).mount(mountEl)
+  // 实例身份由**装配层**分配（M7-6）：同页两次 mount 得到互不相同的 id，
+  // 实例设置/viewer 偏好/日志观测面因此互不覆盖。同一次页面装载里按挂载顺序
+  // 稳定（第一个嵌入恒为 embed-1）⇒ 刷新后仍读回自己的偏好。
+  const instanceId = allocateEmbedInstanceId()
+  createApp(EmbedRoot, { bootstrap: options, instanceId }).mount(mountEl)
 }

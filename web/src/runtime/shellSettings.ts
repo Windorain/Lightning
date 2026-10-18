@@ -76,6 +76,14 @@ export interface CreateShellSettingsOptions {
  * 语言变化**只**影响本实例的调用点。
  */
 export interface ShellSettings {
+  /**
+   * **本实例身份**（M7-6；由装配层分配，见 `runtime/instanceIdentity`）。
+   *
+   * 它是"同页多实例"的唯一键：持久化键、日志观测面、面板/键位等 UI 状态
+   * 全部按它命名。读面因此**不需要**再问"我是哪个宿主"——
+   * 一个实例的 id 是构造参数，不是运行期反查出来的全局。
+   */
+  readonly instanceId: string
   readonly theme: Ref<AppTheme>
   readonly lang: Ref<AppLanguage>
   /** 本实例的翻译函数（消费本实例语言；无模块级状态）。 */
@@ -234,6 +242,7 @@ export function createShellSettings(opts: CreateShellSettingsOptions = {}): Shel
   }, { flush: 'sync' })
 
   return {
+    instanceId,
     theme,
     lang,
     t: (key: string) => translate(key, lang.value),
