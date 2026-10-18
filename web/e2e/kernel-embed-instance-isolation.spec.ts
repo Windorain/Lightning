@@ -229,7 +229,128 @@ test.describe('M7-1 · G-embed 嵌入双实例 / 重挂载的实例隔离', () =
     expect(
       b3Checked,
       '⚠️ G-embed/G8：重挂载的实例必须读回**自己的**偏好（默认 true），不得继承 A 改成 false 的值 —— ' +
-        '当前实现两实例共用固定偏好键 `lightning.prefs.embed`（runtime/screenRoot.ts:319）；实际 ' + b3Checked,
+        'M7-6 起偏好键带实例段（lk-ui.v1.<instanceId>.viewer.r-embed）；实际 ' + b3Checked,
     ).toBe(true)
+  })
+
+  /**
+   * GE-4（M7-6 · 计划「LogCenter 实例化」判据）：**同页各实例的日志与实时状态互不影响**。
+   *
+   * ## 判据为什么必须用"两份内容不同的文档"
+   *
+   * `liveStatus` 的终态是 `纹理就绪 N/N`，N = 本实例文档的资源条数。
+   * 两个实例装**同一份**文档时 N 相同 ⇒ "各读各的"与"共用一份"读数一样，
+   * 判据恒绿（空洞真）。故第三个实例装 `minimal-v2.json`（1 条资源）：
+   * A 的 N=62、C 的 N=1 ⇒ 读数可区分。
+   *
+   * ## 三面
+   *
+   * 1. **按实例登记**：`__log__.instanceIds()` 恰为挂载顺序的三个 id；
+   * 2. **各读各的**：`forInstance(id).liveStatus()` 分别是 62/62 与 1/1（不相等）；
+   * 3. **缺省读面不是"最后写者"**（D9 的原始形态）：`__log__.liveStatus()` 等于
+   *    **第一个在册实例**的结论，而最后写的是 C（1/1）。共享单例时这里会是 1/1 ⇒ 判红。
+   *
+   * 另加两条护栏：`forInstance(未知 id)` 必须是 `null`（不静默回落到缺省 ——
+   * 那会让"读错实例"与"实例已卸载"同形）；A 的可见状态栏仍是**自己那一条**。
+   */
+  test('GE-4 同页三实例：liveStatus 与日志登记按实例隔离（缺省读面不得是最后写者）', async ({ page }) => {
+    test.setTimeout(300_000)
+    await waitEmbedDualReady(page)
+
+    // 第三个实例：**另一份内容**（1 条资源）⇒ 与 A/B 的 62 条可区分。
+    const mounted = await page.evaluate(async () => {
+      const host = document.querySelector('#remount-slot') as HTMLElement
+      const el = document.createElement('div')
+      el.id = 'embed-c'
+      el.className = 'web-structure-renderer'
+      Object.assign(el.style, { width: '400px', height: '300px', background: '#0f172a' })
+      host.appendChild(el)
+      return await (window as any).__embedDual__.mountTracked({ selector: '#embed-c', data: 'minimal', theme: 'dark' })
+    })
+    expect(mounted.mounted, '第三个实例必须真的挂上（否则"三份读数"少一份）').toBe(true)
+
+    // 等 A 与 C 各自走到**纹理终态**（纹理同步是异步的：加载中 n/62 → 就绪 62/62）。
+    //
+    // 这一步本身不是判据，而是"读数必须在终态上比较"的前提：加载中的进度文本
+    // 随帧推进（A=24/62、C=1/1），把它当结论会让断言依赖于采样时机。
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate((cId: string) => {
+            const log = (window as any).__log__
+            const aState = log?.forInstance?.(log.instanceIds()[0])?.liveStatus?.()?.state ?? null
+            const cState = log?.forInstance?.(cId)?.liveStatus?.()?.state ?? null
+            return [aState, cState].join('|')
+          }, mounted.instanceId),
+        { message: 'A 与 C 都必须走到纹理终态（ready）', timeout: 180_000 },
+      )
+      .toBe('ready|ready')
+
+    const reading = (await page.evaluate(() => {
+      const log = (window as any).__log__
+      const ids: string[] = log?.instanceIds?.() ?? []
+      const per = ids.map((id: string) => {
+        const api = log.forInstance(id)
+        const live = api?.liveStatus?.() ?? null
+        return { id, message: live?.message ?? null, state: live?.state ?? null, origin: live?.origin ?? null }
+      })
+      return {
+        ids,
+        per,
+        defaultLive: log?.liveStatus?.() ?? null,
+        // ⚠️ 不得用 `?? 'MISSING-API'`：`forInstance` 对未知 id 的正确返回**就是 null**，
+        // 那会把判据要读的值替换成兜底串，从而把"正确"读成"API 不存在"。
+        unknown: typeof log?.forInstance === 'function' ? log.forInstance('no-such-instance') : 'MISSING-API',
+        instancesLen: (log?.instances?.() ?? []).length,
+      }
+    })) as {
+      ids: string[]
+      per: { id: string; message: string | null; state: string | null; origin: string | null }[]
+      defaultLive: { message: string; state: string | null } | null
+      unknown: unknown
+      instancesLen: number
+    }
+    console.log('[GE-4] ids=' + JSON.stringify(reading.ids) + ' per=' + JSON.stringify(reading.per) +
+      ' default=' + JSON.stringify(reading.defaultLive))
+
+    // ── ① 按实例登记（顺序 = 挂载顺序，且互不相同）──
+    expect(reading.ids.length, '三个实例 ⇒ 三条日志登记').toBe(3)
+    expect(new Set(reading.ids).size, '实例 id 必须互不相同（同 id 会互相覆盖）').toBe(3)
+    expect(reading.ids[2], '最后挂载的实例身份应等于 mount() 返回的那个').toBe(mounted.instanceId)
+    expect(reading.instancesLen, 'instances() 必须与 instanceIds() 同长').toBe(3)
+
+    // ── ② 各读各的：A 与 C 的纹理结论必须不同（内容不同 ⇒ N 不同）──
+    const a = reading.per[0]!
+    const c = reading.per[2]!
+    expect(a.state, '前提：A 必须已到纹理终态').toBe('ready')
+    expect(c.state, '前提：C 必须已到纹理终态').toBe('ready')
+    expect(a.origin, 'A 的实时状态必须仍标明来源是纹理链').toBe('texture')
+    expect(c.origin).toBe('texture')
+    expect(
+      a.message,
+      '⚠️ D9：A 的实时状态必须读回**A 自己**的结论（62 条资源）',
+    ).toBe('纹理就绪 62/62')
+    expect(
+      c.message,
+      '⚠️ D9：C 的实时状态必须读回**C 自己**的结论（1 条资源）',
+    ).toBe('纹理就绪 1/1')
+    expect(a.message, '两实例内容不同 ⇒ 读数必须不同（相同即共用一份槽）').not.toBe(c.message)
+
+    // ── ③ 缺省读面 = 第一个在册实例，**不是最后写者** ──
+    expect(
+      reading.defaultLive?.message,
+      '⚠️ D9：缺省读面不得是"最后写者胜"（最后写的是 C=1/1；这里必须是 A=62/62）',
+    ).toBe('纹理就绪 62/62')
+
+    // ── ④ 未知实例不得静默回落到缺省 ──
+    expect(reading.unknown, '⚠️ forInstance(未知 id) 必须是 null（回落会让"读错实例"与"已卸载"同形）').toBeNull()
+
+    // ── ⑤ 可见状态栏仍按实例：A 有自己的一条、B 没有（未被别的实例"点亮"）──
+    expect(await page.locator('#embed-a .wm-status-bar').count(), 'A 的状态栏必须还在').toBe(1)
+    expect(await page.locator('#embed-b .wm-status-bar').count(), 'B 未开调试状态栏 ⇒ 仍不得出现').toBe(0)
+    expect(
+      (await page.locator('#embed-a .wm-status-text').textContent()) ?? '',
+      'A 的状态栏必须仍显示自己那份文档的结论',
+    ).toContain('场景已加载')
   })
 })
