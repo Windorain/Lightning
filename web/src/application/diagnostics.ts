@@ -69,6 +69,36 @@ export type DiagnosticReasonCode =
   | 'module.pruned'
   /** 内容边界拒绝外部内容中的危险构造（#259 / §19.6）。 */
   | 'content.rejected'
+  // —— 导出（M6-4；SPEC §9「无法表达的语义必须诊断，不静默丢弃」）——
+  /** 导出命令被接收（命令/作业身份随关联字段带出）。 */
+  | 'export.requested'
+  /** 导出完成（参数带产物形态/帧数/清单摘要/交付位置）。 */
+  | 'export.completed'
+  /** 导出失败（参数带稳定 reason 与领域错误码；不得只有 UI 文案）。 */
+  | 'export.failed'
+  /**
+   * **目标格式表达不了**的语义（逐项；`objectId` / `reason` 结构化）。
+   *
+   * 与 `application/exportPlan#ExportCapabilityUnsupported` 同一事实的
+   * 诊断通道形态：`params.category` / `params.reason` / `params.objectId`。
+   */
+  | 'export.capabilityUnsupported'
+  /** 必需资源未就绪（预检 blocked 的原因，逐条）。 */
+  | 'export.assetNotReady'
+  /** 有损失但只有显式有损模式才允许产出。 */
+  | 'export.requiresLossyMode'
+  /** 声明时长与产物时长不一致（GIF 厘秒量化；已完成但有偏差）。 */
+  | 'export.timeQuantized'
+  /** 目标种类/编码没有可用的编码器（不产出伪完整文件）。 */
+  | 'export.encodingNotConfigured'
+  /** 场景为空 ⇒ 空的"完整导出"是假成功。 */
+  | 'export.emptyScene'
+  /** OBJ：竖条动画纹理只取首帧（多帧序列不可表达）。 */
+  | 'export.firstFrameOnly'
+  /** OBJ：无几何/解码失败的体素被跳过（此前只写注释行）。 */
+  | 'export.geometrySkipped'
+  /** OBJ：混合模式只能用 MTL 的 `d`/`illum` 近似（cutout/translucent 不精确）。 */
+  | 'export.blendApproximated'
 
 /** 原因的可选结构化参数（**值**只允许标量；不塞对象图）。 */
 export type DiagnosticParams = Readonly<Record<string, string | number | boolean>>
@@ -112,6 +142,8 @@ export type DiagnosticChannel =
   | 'effect'
   | 'module'
   | 'content'
+  /** 导出通道（M6-4）：能力损失/不可表达语义/作业结算。 */
+  | 'export'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 脱敏（#259：生产不记录凭据或完整文档）
