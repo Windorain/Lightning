@@ -78,9 +78,10 @@ export function createViewportManager() {
    * **初始机位施加台账**（M1 缺陷修复；纪律与实测证据见
    * `runtime/viewportCameraInit.ts` 的文件头）。
    *
-   * 它按 region 记"上次是哪份文档时框选的"，故必须与槽位**同生共死**：
-   * 槽位被拆解（`unregister` / `reset`）即忘记 ⇒ "关掉再打开一个 Area 仍会重新框选"
-   * 与改动前一致，而同一份文档内的内容投影（编辑/移动）不再重置机位。
+   * 它按 region 记"上次是哪份文档时框选的"。台账的寿命是 **Context**，
+   * **不随呈现卸载清除**（M7-2 / D1）：槽位归零/注销只说明"这一刻没有承载"，
+   * 不说明"这个视口从没框选过"——后者会让每次工作区往返都重新 fit，
+   * 覆盖用户机位（与 SPEC §7.3-b③ 相反；裁决与判据见模块头）。
    */
   const cameraInit = createViewportCameraInitLedger()
 
@@ -120,8 +121,9 @@ export function createViewportManager() {
       const slot = slots.get(id)
       if (slot) resetSlot(slot)
       slots.delete(id)
-      // 视口真的被拆解 ⇒ 初始机位记号一并作废（见 `cameraInit` 的说明）
-      cameraInit.forget(id)
+      // ⚠️ **不**清除初始机位记号（M7-2 / D1）：注销槽位是呈现生命周期事件
+      // （工作区切走、合并 Area 都会走到这里），而机位记号表达的是
+      // "这个 region 在当前文档下框选过没有"。清掉它会让重挂变成"首装"⇒ 重新 fit。
       if (activeId.value === id) {
         activeId.value = slots.keys().next().value ?? null
       }
@@ -130,7 +132,6 @@ export function createViewportManager() {
     reset(id: string): void {
       const slot = slots.get(id)
       if (slot) resetSlot(slot)
-      cameraInit.forget(id)
     },
     /**
      * 该 region 此刻是否**应当**施加初始机位（`runtime/viewportCameraInit.ts`）。

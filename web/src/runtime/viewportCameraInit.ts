@@ -84,9 +84,33 @@
  *
  * 判定本身是纯函数（显式输入、不改输入、无 IO）；"某个 region 上次施加时是哪份文档"
  * 是**状态**，由 {@link createViewportCameraInitLedger} 持有，挂在该 Context 的
- * 视口管理器上（`runtime/viewportManager.ts`）—— 于是它在
- * `unregister`/`reset`（视口真的被拆解）时随槽位一起清除：**关掉再打开一个 Area
- * 仍会重新框选**（与改动前的行为一致），而"同一份文档内的内容投影"不会。
+ * 视口管理器上（`runtime/viewportManager.ts`）。
+ *
+ * ## ⚠️ 台账**不随呈现卸载清除**（M7-2 修复 D1；G1/G2 先红实测）
+ *
+ * 旧实现把"忘记记号"绑在 `ViewportManager.unregister/reset`（呈现组件卸载）上，
+ * 于是**更换承载**（工作区切走再切回）被误当成"这个视口从没框选过"：
+ *
+ * ```
+ * unregister → forget ⇒ 重挂 claim(hasCameraState=true, last=null)=true
+ *            ⇒ OPERATOR_INIT_VIEWPORT_CAMERA ⇒ fit 覆盖用户机位
+ * ```
+ *
+ * 这与 SPEC §7.3-b③ 正好相反：「界面承载确需重新建立时，逻辑状态应在首次呈现前
+ * **正确恢复**；不得以先重置再补回掩盖不必要的重建」。机位状态本来就跨组件存活
+ * （`Main.cameras`，见 `runtime/mainCameras.ts`），呈现重建不该让它看起来像"没有状态"。
+ *
+ * 故记号的生命周期 = **Context**（region 是视口在该 Context 里的身份），
+ * 只有两种情形会让它重新框选：
+ *   1. 该视口**没有任何**逻辑相机状态（首装、装载路径 `resetAllViewportCameras` 归零）；
+ *   2. **换了一份文档**（窄信号 `documentRevision`；此时即便机位键还留有上一份文档的值，
+ *      也必须给新文档重新取景 —— 判据是"记号里的文档身份 ≠ 当前文档身份"，
+ *      而不是"组件有没有被卸载过"）。
+ *
+ * 后者正是本台账存在的理由：`hasCameraState` 单独一条在"承载卸载期间换了文档"
+ * （槽位已注销、`resetAllViewportCameras` 遍历不到该键）时会复用上一份文档的机位。
+ * 判据见 `e2e/kernel-workspace-camera-roundtrip.spec.ts`（G1）与
+ * `e2e/kernel-area-split-roundtrip.spec.ts`（G2）。
  */
 
 /** 一次"是否施加初始机位"判定的全部输入。 */
@@ -122,8 +146,6 @@ export interface ViewportCameraInitLedger {
    * 并就地记下本次文档身份；返回 `false` 表示本视口在当前文档下已施加过。
    */
   claim(regionId: string, documentRevision: number, hasCameraState: boolean): boolean
-  /** 忘记某 region 的记号（视口被拆解/槽位归零时调用）。 */
-  forget(regionId: string): void
   /** 当前记下的文档身份（诊断/判据面；未记录为 `null`）。 */
   appliedRevisionOf(regionId: string): number | null
 }
@@ -138,9 +160,6 @@ export function createViewportCameraInitLedger(): ViewportCameraInitLedger {
       }
       applied.set(regionId, documentRevision)
       return true
-    },
-    forget(regionId) {
-      applied.delete(regionId)
     },
     appliedRevisionOf(regionId) {
       return applied.get(regionId) ?? null

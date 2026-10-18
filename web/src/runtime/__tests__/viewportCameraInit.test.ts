@@ -17,6 +17,7 @@
  * | 同一文档内的内容投影（编辑/移动后宿主重挂） | **不施加** | 用户机位必须跨内容投影存活 |
  * | 换了一份文档（`documentRevision` 变） | **施加** | 新文档要有自己的初始机位 |
  * | 相机状态被归零（装载路径 `resetAllViewportCameras`） | **施加** | 否则视口会停在"没有机位" |
+ * | **呈现卸载后重挂**（工作区切走再切回；`unregister`/`reset`） | **不施加** | SPEC §7.3-b③：承载重建要恢复逻辑机位，不得重新框选（M7-2 / D1；G1/G2 先红实测） |
  *
  * ## 负对照（本文件必须能判红的那一条）
  *
@@ -53,6 +54,20 @@ describe('初始机位施加纪律：纯函数判定', () => {
         hasCameraState: true,
       }),
       '这正是缺陷形态：编辑一格说明 / 移动方块（内容投影）后宿主重挂，不得重新 fit',
+    ).toBe(false)
+  })
+
+  it('⚠️ 呈现卸载后重挂（同一份文档、机位仍在）⇒ **不施加**', () => {
+    // M7-2 / D1：台账若在 `unregister`/`reset` 时被清空，重挂会被误判成"首装"。
+    // 本行的输入就是重挂时的实际输入：机位跨组件存活（hasCameraState=true），
+    // 台标记着**同一份文档**的施加记录（lastAppliedDocumentRevision=1）。
+    expect(
+      shouldApplyInitialViewportCamera({
+        documentRevision: 1,
+        lastAppliedDocumentRevision: 1,
+        hasCameraState: true,
+      }),
+      '承载重建不得重新框选（否则用户机位被 fit 覆盖 —— G1/G2 的缺陷形态）',
     ).toBe(false)
   })
 
@@ -93,30 +108,37 @@ describe('台账：按 region 记"上次是哪份文档时框选的"', () => {
     expect(ledger.claim(REGION, 2, true), '换文档后可再施加').toBe(true)
     expect(ledger.appliedRevisionOf(REGION)).toBe(2)
   })
-
-  it('`forget` 之后重新可取（视口被拆解 ⇒ 重开要重新框选，与改动前一致）', () => {
-    const ledger = createViewportCameraInitLedger()
-    ledger.claim(REGION, 1, true)
-    ledger.forget(REGION)
-    expect(ledger.appliedRevisionOf(REGION)).toBeNull()
-    expect(ledger.claim(REGION, 1, true)).toBe(true)
-  })
 })
 
-describe('台账挂在视口管理器上：槽位拆解即忘记', () => {
-  it('`unregister` / `reset` 清除记号；`register` 幂等不误伤', () => {
+describe('台账挂在视口管理器上：**呈现卸载不改变台账**（M7-2 / D1）', () => {
+  it('`reset` / `unregister`（槽位归零/注销）后重挂**不得**重新框选', () => {
     const vp = createViewportManager()
     vp.register(REGION)
     expect(vp.claimInitialViewportCamera(REGION, 1, true)).toBe(true)
     expect(vp.claimInitialViewportCamera(REGION, 1, true)).toBe(false)
     expect(vp.initialViewportCameraRevisionOf(REGION)).toBe(1)
 
+    // 工作区切走：组件卸载 → 槽位归零/注销。机位（Main.cameras）**仍存活**。
     vp.reset(REGION)
-    expect(vp.initialViewportCameraRevisionOf(REGION), 'reset（组件卸载）必须忘记').toBeNull()
-    expect(vp.claimInitialViewportCamera(REGION, 1, true), '重挂后可再框选').toBe(true)
+    expect(vp.initialViewportCameraRevisionOf(REGION), 'presentation 卸载不得抹掉文档记号').toBe(1)
+    expect(
+      vp.claimInitialViewportCamera(REGION, 1, true),
+      '重挂时同一份文档 + 机位仍在 ⇒ 不施加初始机位（否则覆盖用户机位）',
+    ).toBe(false)
 
     vp.unregister(REGION)
-    expect(vp.initialViewportCameraRevisionOf(REGION), 'unregister（真拆解）必须忘记').toBeNull()
+    expect(vp.initialViewportCameraRevisionOf(REGION), 'unregister 同样只结束呈现，不清台账').toBe(1)
+    expect(vp.claimInitialViewportCamera(REGION, 1, true), '重挂仍不得重新框选').toBe(false)
+
+    // 对照：换文档（窄信号变）⇒ 仍可再施加 —— 本判据不是"恒不施加"。
+    expect(vp.claimInitialViewportCamera(REGION, 2, true), '换文档必须重新取景').toBe(true)
+  })
+
+  it('首装（无相机状态）仍施加；`register` 幂等不误伤', () => {
+    const vp = createViewportManager()
+    vp.register(REGION)
+    expect(vp.claimInitialViewportCamera(REGION, 1, false), '首次装载无状态 ⇒ 自动框选').toBe(true)
+    expect(vp.register(REGION).id, 'register 幂等').toBe(REGION)
   })
 })
 

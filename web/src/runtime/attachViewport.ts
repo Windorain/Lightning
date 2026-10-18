@@ -105,8 +105,13 @@ export async function attachViewport(
    * 故内容投影连"重挂"都不会发生。本台账仍保留：它管的是"谁可以框选"（换文档 / 首次），
    * 与挂载次数解耦；回退保护见 `e2e/kernel-viewport-host-lifetime.spec.ts`。
    *
-   * 判据是纯函数 + 按 region 的台账（`ctx.viewports.claimInitialViewportCamera`），
-   * 台账随槽位拆解清除 ⇒ "关掉再打开 Area"仍会重新框选。
+   * 判据是纯函数 + 按 region 的台账（`ctx.viewports.claimInitialViewportCamera`）。
+   *
+   * 📌 **M7-2（D1）**：台账**不随槽位拆解清除** —— "关掉再打开 Area 仍会重新框选"
+   * 这条旧行为被删除，因为它是"承载重建 ⇒ 重新 fit"的同一误判（工作区往返时
+   * 呈现组件卸载会走到 `unregister`）。现行语义只有两条：该视口没有机位状态，
+   * 或换了一份文档。判据见 `e2e/kernel-workspace-camera-roundtrip.spec.ts`。
+   * 槽位拆解后重挂，由下面的"把现有逻辑机位施加到新相机"负责恢复取景。
    *
    * ⚠️ **不是**"把政策塞进组件回调"：本函数是装配边（`HostBase.attachViewport`
    * 的唯一实现体），纪律只此一处；两个宿主（工作台/嵌入）都不需要自己记状态。
