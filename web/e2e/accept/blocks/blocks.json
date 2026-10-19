@@ -99,9 +99,47 @@
       "category": "tesr",
       "te": {
         "completer": "lp-pipe",
-        "params": { "pipe": "LogisticsPipes:item.PipeItemsBasicLogistics" },
+        "params": {
+          "pipe": "LogisticsPipes:item.PipeItemsBasicLogistics"
+        },
         "why": "LP 通用管块 setBlock 之后只是空壳（pipeId=-1 ⇒ 渲染器什么都不画，实拍整格背景），必须经 LP 自己的放置 API；completer 与物品名取自 test/cases/anchor/lp-pipe-row.json"
       }
+    },
+    {
+      "id": "ender-chest",
+      "registryId": "minecraft:ender_chest",
+      "meta": 0,
+      "category": "tesr"
+    },
+    {
+      "id": "beacon",
+      "registryId": "minecraft:beacon",
+      "meta": 0,
+      "category": "tesr"
+    },
+    {
+      "id": "enchanting-table",
+      "registryId": "minecraft:enchanting_table",
+      "meta": 0,
+      "category": "tesr"
+    },
+    {
+      "id": "anvil",
+      "registryId": "minecraft:anvil",
+      "meta": 0,
+      "category": "nonfull"
+    },
+    {
+      "id": "cauldron",
+      "registryId": "minecraft:cauldron",
+      "meta": 0,
+      "category": "nonfull"
+    },
+    {
+      "id": "hopper",
+      "registryId": "minecraft:hopper",
+      "meta": 0,
+      "category": "nonfull"
     }
   ]
 }
