@@ -61,7 +61,7 @@ test('缩放 = 10 / 正交高度（内核正交相机 height=10/zoom）', () => 
   for (const c of p.cameras) assert.equal(c.web.zoom, 10 / p.orthoHeight)
 })
 
-test('游戏侧投影：PR109 north 机位复算（1280×720、正交高 6、每格 120 px）', () => {
+test('游戏侧投影：正交机位复算（1280×720、正交高 6、每格 120 px）', () => {
   const camera = { pos: [66.5, 12.5, 57.5], yaw: 0, pitch: 0, orthoHeight: 6 }
   const stoneMin = [64, 12, 64]
   const got = projectGame(camera, [1280, 720], stoneMin)

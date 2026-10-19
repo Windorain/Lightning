@@ -184,16 +184,18 @@ test('accept: render plan cameras through the product viewport', async ({ page }
     // 只在「世界每像素」这一层对齐：zoom 由 canvas 高度反推，保证与游戏侧同 px/block
     const zoom = (10 * (cam.game.resolution[1] / cam.game.orthoHeight)) / box.height
 
-    // 目标点用**声明的网格中心**（内核把网格居中 ⇒ 局部原点），不是"渲染出来的内容"中心：
-    // 少渲染几块时内容中心会漂移，机位跟着漂（实测过）。
-    const target = sceneFrame !== null
-      ? { x: 0, y: 0, z: 0 }
-      : (localBox === null ? null : {
-          x: (localBox.min[0] + localBox.max[0]) / 2,
-          y: (localBox.min[1] + localBox.max[1]) / 2,
-          z: (localBox.min[2] + localBox.max[2]) / 2,
-        })
-    if (target === null) throw new Error('localBox 为空：无法确定机位目标点')
+    // 目标点 = **内容中心在局部坐标里的位置**：两侧必须瞄同一个世界点。
+    //   局部内容中心 = 世界内容中心（plan.bounds.center） − 声明网格中心（sceneFrame）
+    // 扫描区常比内容大（留白格）；若直接瞄局部原点，取景整体偏移（实测：平移 (1,0,2) 格后 stone 判红）。
+    // 也禁止用"渲染出来的包围盒"当目标：少渲染几块时内容中心会漂移（实测：只剩箱子时目标点偏到箱子上）。
+    if (sceneFrame === null) throw new Error('导出件缺声明网格（cellGrid/scanBounds）：无法建立世界→局部映射')
+    if (!plan.bounds || !Array.isArray(plan.bounds.center)) throw new Error('机位计划缺 bounds.center')
+    const gridCenter = [0, 1, 2].map((i) => sceneFrame!.min[i] + sceneFrame!.size[i] / 2)
+    const target = {
+      x: plan.bounds.center[0] - gridCenter[0],
+      y: plan.bounds.center[1] - gridCenter[1],
+      z: plan.bounds.center[2] - gridCenter[2],
+    }
     // 产品在装载后会做一次「初始取景」并**覆写**相机状态（实测：设置后读回被改成默认斜视）。
     // 故这里写成**有界重试 + 读回核验**：不假设写一次就生效，也不放宽判据。
     const want = { target, yawDeg: cam.web.yawDeg, elevationDeg: cam.web.elevationDeg, distance: cam.web.distance, zoom }
@@ -235,6 +237,7 @@ test('accept: render plan cameras through the product viewport', async ({ page }
       name: cam.name,
       canvas: { width: box.width, height: box.height },
       zoom,
+      target,
       web: { ...cam.web, zoom },
       pxPerBlock: box.height * zoom / 10,
       game: cam.game,

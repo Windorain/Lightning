@@ -7,7 +7,7 @@
 天空盒：`compare.exclude` 含 sky 时，两图各自的角落色即背景，**背景色本身不参与**比较。
 光照：`compare.normalize=per-face-luminance` 时只比色度（亮度归一化）。
 """
-import argparse, json, math, sys
+import argparse, hashlib, json, math, sys
 from PIL import Image
 from pairmap import corner_bg, is_background, sample, normalize, game_mapping, web_mapping
 
@@ -25,7 +25,10 @@ def main():
     ap.add_argument('--scene', required=True); ap.add_argument('--expect', required=True)
     ap.add_argument('--plan', required=True); ap.add_argument('--camera', required=True)
     ap.add_argument('--game', required=True); ap.add_argument('--web', required=True)
-    ap.add_argument('--shot-meta', required=True); ap.add_argument('--out', default=None)
+    ap.add_argument('--shot-meta', required=True)
+    ap.add_argument('--run', required=True, help='本批次运行清单 run.json（批次落盘，含每张图/导出件的 sha256）')
+    ap.add_argument('--doc', required=True, help='Web 侧实际使用的导出件（必须与运行清单同源）')
+    ap.add_argument('--out', default=None)
     ap.add_argument('--bg-tol', type=float, default=26)
     a = ap.parse_args()
 
@@ -36,8 +39,33 @@ def main():
     cam = next(c for c in plan['cameras'] if c['name'] == a.camera)
     shot = next(s for s in meta['shots'] if s['name'] == a.camera)
     sf = meta.get('sceneFrame')
-    if meta.get('localBox') is None and sf is None:
-        print(json.dumps({'verdict': 'blocked', 'reason': '缺 localBox 与 sceneFrame，无法建立世界→Web 映射'}, ensure_ascii=False)); return 2
+
+    # 端到端闸门：图与导出件必须是**本次运行**的产物（sha256 与运行清单一致）。
+    # 历史截图/历史导出件顶替同一路径 —— 在这里被机械拒绝，而不是靠人记得。
+    run = json.load(open(a.run, encoding='utf-8'))
+    def sha256(p):
+        h = hashlib.sha256()
+        with open(p, 'rb') as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b''):
+                h.update(chunk)
+        return h.hexdigest()
+    gate = []
+    if run.get('scene') != scene.get('id'):
+        gate.append('运行清单场景=%r 与场景定义 %r 不一致' % (run.get('scene'), scene.get('id')))
+    want_shot = (run.get('shots') or {}).get(a.camera, {}).get('sha256')
+    if not want_shot:
+        gate.append('运行清单缺机位 %r 的截图' % a.camera)
+    elif sha256(a.game) != want_shot:
+        gate.append('截图与运行清单 sha256 不一致（game.png=%s… 清单=%s…）' % (sha256(a.game)[:12], want_shot[:12]))
+    want_export = (run.get('export') or {}).get('sha256')
+    if not want_export:
+        gate.append('运行清单缺导出件')
+    elif sha256(a.doc) != want_export:
+        gate.append('导出件与运行清单 sha256 不一致（doc=%s… 清单=%s…）' % (sha256(a.doc)[:12], want_export[:12]))
+    if gate:
+        print(json.dumps({'verdict': 'blocked', 'reason': '端到端闸门拒绝：' + '；'.join(gate)}, ensure_ascii=False)); return 2
+    if sf is None:
+        print(json.dumps({'verdict': 'blocked', 'reason': '导出件缺声明网格 sceneFrame：无法建立世界→Web 映射'}, ensure_ascii=False)); return 2
 
     g = Image.open(a.game).convert('RGB'); w = Image.open(a.web).convert('RGB')
     bg_g, bg_w = corner_bg(g), corner_bg(w)
@@ -63,29 +91,8 @@ def main():
     content_ratio = (wp / gp) if gp else 0.0
 
     def web_px(point):
-        """世界点 → Web 图像像素。平移来自**声明的网格**（内核把网格居中 ⇒ 局部原点）。"""
-        if sf is not None:
-            off = [sf['min'][i] + sf['size'][i] / 2 for i in range(3)]
-            lp = [point[i] - off[i] for i in range(3)]
-            web = shot['web']
-            W, H = shot['canvas']['width'], shot['canvas']['height']
-            zoom = shot['zoom']
-            yaw = math.radians(web['yawDeg']); elev = math.radians(web['elevationDeg'])
-            d = [math.sin(yaw) * math.cos(elev), math.sin(elev), math.cos(yaw) * math.cos(elev)]
-            cam_pos = [d[i] * web['distance'] for i in range(3)]
-            fwd = [-d[0], -d[1], -d[2]]
-            right = [-fwd[2], 0.0, fwd[0]]
-            rl = math.sqrt(sum(v * v for v in right)) or 1.0
-            right = [v / rl for v in right]
-            up = [right[1] * fwd[2] - right[2] * fwd[1],
-                  right[2] * fwd[0] - right[0] * fwd[2],
-                  right[0] * fwd[1] - right[1] * fwd[0]]
-            rel = [lp[i] - cam_pos[i] for i in range(3)]
-            ppb = H * zoom / 10
-            return (W / 2 + sum(rel[i] * right[i] for i in range(3)) * ppb,
-                    H / 2 - sum(rel[i] * up[i] for i in range(3)) * ppb,
-                    ppb)
-        return web_mapping(shot, meta['localBox'], point)
+        """世界点 → Web 像素：唯一实现来自 pairmap.web_mapping（声明网格 + shot.target）。"""
+        return web_mapping(shot, sf, point)
 
     for chk in expect['checks']:
         kind = chk['kind']
@@ -160,7 +167,7 @@ def main():
             idx = {'x': 0, 'y': 1, 'z': 2}[axis]
             edges = {}
             for name, img, conv in (('game', g, lambda q: game_mapping(cam['game'], q)),
-                                    ('web', w, lambda q: web_mapping(shot, meta['localBox'], q))):
+                                    ('web', w, lambda q: web_mapping(shot, sf, q))):
                 vals = []
                 for d in (-0.45, -0.15, 0.15, 0.45):
                     pass  # 沿分界线两侧取样：以 mid 为界，向两侧各取 3 个采样带
@@ -210,7 +217,7 @@ def main():
                         mp[x, y] = 255 if not is_background(px_[x0 + x, y0 + y], bg, a.bg_tol) else 0
                 return m
             rg = rect_of_bounds(lambda q: game_mapping(cam['game'], q))
-            rw = rect_of_bounds(lambda q: web_mapping(shot, meta['localBox'], q))
+            rw = rect_of_bounds(lambda q: web_mapping(shot, sf, q))
             mg = mask_in(g, bg_g, rg); mw = mask_in(w, bg_w, rw)
             SIZE = 256
             mg = mg.resize((SIZE, SIZE)); mw = mw.resize((SIZE, SIZE))

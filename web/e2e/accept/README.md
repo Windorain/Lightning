@@ -23,6 +23,11 @@
 4. **配对不上 = 失败**：A 有而 B 没有（或反之）不能算“跳过”。
 5. **允许差异要事先声明**：写在 `expect/*.json` 的 `compare` 里；事后解释不算。
 6. **棘轮**：入库场景只增不减；判据只收紧；基线图带 sha256，变更必须写理由。
+7. **端到端，不许顶替**：A 类图与导出件必须由**同一次运行**产生，批次落 `run.json`（逐件 sha256）；
+   判据与基线只认清单里登记的产物。历史截图、历史导出件、别人的 PR 附件、上一次运行的产物——
+   一律不得进入判定链。**这不是"申请窗口"能给豁免的事**：窗开了也只许现场搭、现场拍。
+8. **Web 侧只吃导出件**：B 类渲染的唯一输入是**本次运行**导出的场景文件（导出链本身在被测范围内）；
+   不许改成"直接从场景 JSON 搭给 Web 看"，那等于把导出链排除出验收。
 
 ## 3. 目录
 
@@ -130,16 +135,33 @@ node e2e/accept/runner/batch.mjs --submit --mc-dir <run/client>      # 提交给
 
 - 端口从 `<mc-dir>/controlplane/server.json` 读，**不假设**；token 来自 `tokens.json` 的 `tokens.scene`。
 - `--submit` 只提交**作业**：单场景失败不重启客户端；进程崩溃才重放整批（场景是数据，重放幂等）。
-- 生成的用例与 `manifest.json` 落在 `--out` 指定目录（默认 `temp/accept-cases`，不入库）。
+- 作业跑完后执行器**实读** `<mc-dir>/controlplane/runs/<runId>/`：按 `manifest.json` 逐件复核字节与 sha256
+  （缺件/被替换立刻失败），再落运行清单 `<out>/runs/<scene>.run.json`：
+
+```jsonc
+{
+  "schema": "lightning.accept.run/1",
+  "scene": "ctm-glass", "caseId": "accept-ctm-glass", "runId": "<ts>-accept-ctm-glass-1",
+  "runDir": ".../controlplane/runs/<runId>",
+  "shots": { "front": { "path": ".../shots/front.png", "sha256": "…", "bytes": 11537 } },
+  "export": { "path": ".../export/ctm-glass.json", "sha256": "…", "bytes": 12771 },
+  "manifestSha256": "…"
+}
+```
+
+- `run.json` 是本次交付的**唯一凭据**：判据与基线都拿它校验来源；拿不出或对不上就 `blocked`，不进入内容判定。
 
 ## 10. 判据执行器
 
 ```powershell
 python e2e/accept/verify/judge.py --scene scenes/glass-seam.json --expect expect/glass-seam.json `
   --plan <plan.json> --camera front --game <game.png> --web <web.png> `
-  --shot-meta <shot-meta.json> --out <report.json>
+  --shot-meta <shot-meta.json> --run <run.json> --doc <export.json> --out <report.json>
 ```
 
+- **端到端闸门（先于一切判据）**：`--run` 与 `--doc` 必填；`game.png` 的 sha256 必须等于清单里该机位的值，
+  `--doc` 的 sha256 必须等于清单的导出件值，场景 id 也必须一致。任一不符 ⇒ 直接 `blocked` 并打印两侧哈希，
+  **不进入内容判定**（历史图/历史导出件顶替在这里被机械拒绝）。
 - 输出固定格式：`{verdict, counts, checks[{id, verdict, value, threshold}]}`；退出码 0 = 无 fail（blocked 允许）。
 - **机位健康检查（前置闸门）**：先比两侧**中心区内容像素量**；比值落在 [0.5, 2] 之外即判 `blocked` 并给出读数。
   实测（PR109 北向）：game 57216 px / web 14400 px（正好一格）= 0.25 ⇒ 该机位只渲染出 1 格，不能拿去判内容。
@@ -150,11 +172,14 @@ python e2e/accept/verify/judge.py --scene scenes/glass-seam.json --expect expect
 ## 11. 基线与棘轮
 
 ```powershell
-node e2e/accept/runner/baseline.mjs --scene glass-seam --camera front --game g.png --web w.png --report r.json
+node e2e/accept/runner/baseline.mjs --run runs/glass-seam.run.json --scene glass-seam --camera front \
+  --game g.png --web w.png --report r.json
 python e2e/accept/verify/ratchet.py --scene glass-seam --camera front --game g.png --web w.png
 ```
 
-- 登记写入 `baselines/<scene>/<camera>/{game,web,report}.png/json` + `baselines/<scene>/manifest.json`（含两侧图/报告/场景/判据的 sha256）。
+- 登记写入 `baselines/<scene>/<camera>/{game,web,report}.png/json` + `baselines/<scene>/manifest.json`
+  （含两侧图/报告/场景/判据的 sha256，以及来源 `run.runId` / `manifestSha256` / 导出件 sha256）。
+- `--run` 必填：基线必须能追溯到**哪一次运行**；`game.png` 的 sha256 与清单不符直接拒绝登记。
 - 同路径再登记必须显式 `--force`，并在提交说明写原因；**棘轮只增不减**。
 - `ratchet.py`：sha 相同 ⇒ `pass(identical)`；不同则算逐像素平均差，超阈值 ⇒ `fail` 并给数值；没有基线 ⇒ `blocked`。
 - 实测：同图 pass；换成另一机位的图 ⇒ `fail(mean_abs_diff=5.073 > 2.0)`。
@@ -165,4 +190,6 @@ python e2e/accept/verify/ratchet.py --scene glass-seam --camera front --game g.p
 - 为了让图出来而修补导出件；
 - 用“看起来差不多”代替数值判据；
 - 新增未在 `blocks.json` 登记的方块 id；
-- 让 A/B 两侧分辨率、正交高度、裁切窗口不一致。
+- 让 A/B 两侧分辨率、正交高度、裁切窗口不一致；
+- **复用历史产物**：拿旧截图/旧导出件/他人附件顶替本次运行（`run.json` 闸门会拒，别试）；
+- 把 Web 侧改成"直接从场景 JSON 搭"——B 类必须吃本次运行的导出件（导出链在被测范围内）。

@@ -1,6 +1,6 @@
 {
   "schema": "lightning.accept.expect/1",
-  "scene": "pr91-pipes-chest-legacy",
+  "scene": "tesr-pipes",
   "compare": {
     "pairs": "all-cameras",
     "normalize": "per-face-luminance",
@@ -8,7 +8,7 @@
       "sky"
     ],
     "thresholds": {
-      "silhouetteIoU": 0.9,
+      "silhouetteIoU": 0.98,
       "faceColorDelta": 0.06,
       "seamEdgeMax": 0.05
     }
@@ -16,13 +16,25 @@
   "checks": [
     {
       "kind": "opaque",
+      "id": "pipe-0",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "min_coverage": 0.05,
+      "coverage_tolerance": 0.25
+    },
+    {
+      "kind": "opaque",
       "id": "pipe-1",
       "at": [
         1,
         0,
-        1
+        0
       ],
-      "min_coverage": 0.05
+      "min_coverage": 0.05,
+      "coverage_tolerance": 0.25
     },
     {
       "kind": "opaque",
@@ -30,9 +42,10 @@
       "at": [
         2,
         0,
-        1
+        0
       ],
-      "min_coverage": 0.05
+      "min_coverage": 0.05,
+      "coverage_tolerance": 0.25
     },
     {
       "kind": "opaque",
@@ -40,29 +53,21 @@
       "at": [
         3,
         0,
-        1
+        0
       ],
-      "min_coverage": 0.05
-    },
-    {
-      "kind": "opaque",
-      "id": "pipe-4",
-      "at": [
-        4,
-        0,
-        1
-      ],
-      "min_coverage": 0.05
+      "min_coverage": 0.05,
+      "coverage_tolerance": 0.25
     },
     {
       "kind": "opaque",
       "id": "chest",
       "at": [
-        5,
+        4,
         0,
-        1
+        0
       ],
-      "min_coverage": 0.3
+      "min_coverage": 0.2,
+      "coverage_tolerance": 0.25
     }
   ]
 }
