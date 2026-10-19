@@ -132,6 +132,45 @@ test('accept: render plan cameras through the product viewport', async ({ page }
   })
   console.log('[step] camState', JSON.stringify(camState))
 
+  // 真实交互诊断（不写相机）：用鼠标拖拽把视口转到目标 yaw/elevation，截图后仍读回状态自证。
+  if (process.env.ACCEPT_DRAG === '1') {
+    const targetYaw = Number(process.env.ACCEPT_DRAG_YAW ?? '180')
+    const targetElev = Number(process.env.ACCEPT_DRAG_ELEV ?? '0')
+    const read = () => page.evaluate(() => (window as any).__vm__?.main?.ensureCamera?.('r-viewport')?.value ?? null)
+    const boxDrag = (await page.locator('canvas').first().boundingBox())!
+    const cx = boxDrag.x + boxDrag.width / 2
+    const cy = boxDrag.y + boxDrag.height / 2
+    // 先标定灵敏度：拖 120 px 读回 yaw 变化
+    const before = await read()
+    await page.mouse.move(cx, cy)
+    await page.mouse.down()
+    await page.mouse.move(cx + 120, cy, { steps: 12 })
+    await page.mouse.up()
+    await page.waitForTimeout(300)
+    const after = await read()
+    const degPerPx = ((after?.yawDeg ?? 0) - (before?.yawDeg ?? 0)) / 120
+    console.log('[drag] sensitivity', degPerPx, 'before', before?.yawDeg, 'after', after?.yawDeg)
+    const wrap = (d: number) => ((d % 360) + 540) % 360 - 180
+    for (let i = 0; i < 8; i++) {
+      const cur = await read()
+      const dyaw = wrap(targetYaw - (cur?.yawDeg ?? 0))
+      const delev = targetElev - (cur?.elevationDeg ?? 0)
+      if (Math.abs(dyaw) < 1 && Math.abs(delev) < 1) break
+      const dx = degPerPx === 0 ? 0 : -dyaw / degPerPx
+      const dy = -delev / (degPerPx || 0.3) * 0.35
+      await page.mouse.move(cx, cy)
+      await page.mouse.down()
+      await page.mouse.move(cx + dx, cy + dy, { steps: 16 })
+      await page.mouse.up()
+      await page.waitForTimeout(250)
+    }
+    const finalState = await read()
+    console.log('[drag] final', JSON.stringify(finalState))
+    await page.waitForTimeout(600)
+    fs.mkdirSync(outDir, { recursive: true })
+    await page.locator('canvas').first().screenshot({ path: path.join(outDir, 'drag-view.png') })
+    console.log('[drag] shot written drag-view.png')
+  }
   const metas: any[] = []
   for (const cam of plan.cameras) {
     console.log('[step] camera', cam.name)
@@ -253,6 +292,102 @@ test('accept: render plan cameras through the product viewport', async ({ page }
     }
     if (!applied) throw new Error('相机写入被产品覆写：' + JSON.stringify(await read()))
     console.log('[step] camera applied', cam.name)
+    if (process.env.ACCEPT_DIAG === '1') {
+      // 视锥剔除诊断：把每个网格的包围球/世界位置与相机视锥参数打出来。
+      const info = await page.evaluate(() => {
+        const slot = (window as any).__vm__?.viewports?.get?.('r-viewport')
+        const root = slot?.presenterSurface?.root ?? slot?.presenterSurface?.object3d
+        const cam = slot?.camera?.isCamera ? slot.camera : slot?.camera?.value
+        const meshes: any[] = []
+        root?.traverse?.((o: any) => {
+          if (!o?.isMesh) return
+          const g = o.geometry
+          if (g && !g.boundingSphere) g.computeBoundingSphere?.()
+          const bs = g?.boundingSphere
+          const wp = new o.constructor.prototype.constructor === undefined ? null : null
+          meshes.push({
+            name: o.name || null,
+            visible: o.visible,
+            frustumCulled: o.frustumCulled,
+            materialSide: o.material?.side ?? null,
+            bs: bs ? { c: [bs.center.x, bs.center.y, bs.center.z], r: bs.radius } : null,
+            pos: [o.position.x, o.position.y, o.position.z],
+            matrixWorldPos: (() => {
+              const e = o.matrixWorld?.elements
+              return e ? [Math.round(e[12] * 1000) / 1000, Math.round(e[13] * 1000) / 1000, Math.round(e[14] * 1000) / 1000] : null
+            })(),
+          })
+        })
+        return {
+          meshes,
+          camera: cam ? { l: cam.left, r: cam.right, t: cam.top, b: cam.bottom, near: cam.near, far: cam.far, pos: [cam.position.x, cam.position.y, cam.position.z] } : null,
+        }
+      })
+      console.log('[diag-cull]', JSON.stringify(info))
+      const depth = await page.evaluate(() => {
+        const slot = (window as any).__vm__?.viewports?.get?.('r-viewport')
+        const root = slot?.presenterSurface?.root ?? slot?.presenterSurface?.object3d
+        const cam = slot?.camera?.isCamera ? slot.camera : slot?.camera?.value
+        if (!root || !cam) return null
+        root.updateMatrixWorld?.(true)
+        const THREE = (root.constructor as any)?.__three ?? null
+        // 直接用 three 的 Box3 从 Object3D 求盒：不引入依赖，靠遍历累加 geometry.boundingBox
+        let min = [Infinity, Infinity, Infinity]
+        let max = [-Infinity, -Infinity, -Infinity]
+        const v: any = { x: 0, y: 0, z: 0 }
+        root.traverse?.((o: any) => {
+          if (!o?.isMesh || !o.geometry) return
+          o.geometry.computeBoundingBox?.()
+          const bb = o.geometry.boundingBox
+          if (!bb) return
+          for (const x of [bb.min.x, bb.max.x]) for (const y of [bb.min.y, bb.max.y]) for (const z of [bb.min.z, bb.max.z]) {
+            v.x = x; v.y = y; v.z = z
+            const e = o.matrixWorld.elements
+            const wx = e[0] * v.x + e[4] * v.y + e[8] * v.z + e[12]
+            const wy = e[1] * v.x + e[5] * v.y + e[9] * v.z + e[13]
+            const wz = e[2] * v.x + e[6] * v.y + e[10] * v.z + e[14]
+            if (wx < min[0]) min[0] = wx; if (wx > max[0]) max[0] = wx
+            if (wy < min[1]) min[1] = wy; if (wy > max[1]) max[1] = wy
+            if (wz < min[2]) min[2] = wz; if (wz > max[2]) max[2] = wz
+          }
+        })
+        return { worldBox: { min, max }, near: cam.near, far: cam.far, camPos: [cam.position.x, cam.position.y, cam.position.z] }
+      })
+      console.log('[diag-box]', JSON.stringify(depth))
+    }
+    if (process.env.ACCEPT_WIDENEAR === '1') {
+      // 近/远平面诊断：产品把正交相机的 near/far 收成 target±1 的薄板，场景深度超出就被裁。
+      const before = await page.evaluate(() => {
+        const slot = (window as any).__vm__?.viewports?.get?.('r-viewport')
+        const cam = slot?.camera?.isCamera ? slot.camera : slot?.camera?.value
+        if (!cam) return null
+        const b = { near: cam.near, far: cam.far }
+        cam.near = 0.01
+        cam.far = 200
+        cam.updateProjectionMatrix?.()
+        return b
+      })
+      console.log('[diag] near/far widened from', JSON.stringify(before))
+      await page.waitForTimeout(800)
+      const after = await page.evaluate(() => {
+        const slot = (window as any).__vm__?.viewports?.get?.('r-viewport')
+        const cam = slot?.camera?.isCamera ? slot.camera : slot?.camera?.value
+        return cam ? { near: cam.near, far: cam.far } : null
+      })
+      console.log('[diag] near/far after 800ms', JSON.stringify(after))
+      await page.waitForTimeout(400)
+    }
+    if (process.env.ACCEPT_NOCULL === '1') {
+      const n = await page.evaluate(() => {
+        const slot = (window as any).__vm__?.viewports?.get?.('r-viewport')
+        const root = slot?.presenterSurface?.root ?? slot?.presenterSurface?.object3d
+        let k = 0
+        root?.traverse?.((o: any) => { if (o?.isMesh) { o.frustumCulled = false; k++ } })
+        return k
+      })
+      console.log('[diag] frustumCulled=false applied to', n, 'meshes')
+      await page.waitForTimeout(400)
+    }
     if (process.env.ACCEPT_DOUBLE === '1') {
       const n = await page.evaluate(() => {
         const slot = (window as any).__vm__?.viewports?.get?.('r-viewport')
