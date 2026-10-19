@@ -212,7 +212,18 @@ export async function readViewportFacts(page: Page, rid: string = VIEWPORT_REGIO
         generation: (surface?.generation ?? null) as string | null,
         pendingRebuild: typeof surface?.pendingRebuild === 'boolean' ? surface.pendingRebuild : null,
         ledger,
-        mountedBatches: stats && typeof stats.batches === 'number' ? stats.batches : null,
+        // ⚠️ 统计面的字段名是 `batchObjects`（`presentation/presenter#statsSnapshot`），
+        // 不是 `batches` —— 读错字段会让"画面还在吗"恒读成 null（M8-5 实测：
+        // D3 的前提断言因它超时）。两个名字都认，只为一个原因：将来改名不会
+        // 把"页面无批次"和"读面读错"混成同一件事。
+        mountedBatches:
+          stats === null
+            ? null
+            : typeof stats.batchObjects === 'number'
+              ? stats.batchObjects
+              : typeof stats.batches === 'number'
+                ? stats.batches
+                : null,
         devicePhase: typeof surface?.devicePhase === 'string' ? surface.devicePhase : null,
         deviceReady: typeof surface?.deviceReady === 'boolean' ? surface.deviceReady : null,
         appliedContentIdentity:

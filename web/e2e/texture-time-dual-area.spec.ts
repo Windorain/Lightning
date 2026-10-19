@@ -416,15 +416,14 @@ test.describe('M5-3 · 纹理时间 → 呈现（真实双 Area）', () => {
    * ## 实测事实（本批重新量过，与设计稿的预期不同）
    *
    * 设计稿 §5.3-步 6 预期"坏纹理 ⇒ 终态 failed，但视口仍挂载（不阻断）"。
-   * 实测：坏字节会让 **legacy 渲染链**的 `buildMaterialLibrary` 抛错
-   * （`[drw] loadStructureAndResources: failed to build textureCache`），
-   * 于是整份场景**装载失败**（页面停在 "No scene loaded"）、视口根本不挂载。
-   * 那是 M5-3 **不拥有**的既有行为（`render/data/buildMaterialLibrary.ts` 的
-   * "一处失败即整库失败"，P10d 的五态链已在呈现侧替代它，但可见视口仍由 legacy 绘制）。
+   * M5-3 当时实测的是相反的既有行为：坏字节让 **legacy 渲染链**的
+   * `buildMaterialLibrary` 抛错 ⇒ 整份场景装载失败、视口不挂载（`render/data/buildMaterialLibrary`
+   * 的"一处失败即整库失败"）。
    *
-   * ⇒ 本用例只断言**本批能负责的那一半**：坏字节必须落在可辨认的非就绪态，
-   * 且任何已存在的视口都不得产出可采样动画（不得"假就绪"）。视口挂不挂载**如实记录**，
-   * 作为遗留缺口（见交付说明）。
+   * **M8-5 起该链已退役**（逐资源降级 + 唯一解码链；Q1：资源失败不夺视口）⇒
+   * 设计稿的预期形态现在成立。本用例的断言保持"只断言本批能负责的那一半"
+   * （终态可辨认 + 任何已存在的视口不得产出可采样动画），挂载数仍只**如实打印**
+   * —— 形态判据由 `kernel-m8-s7-resource-diagnostics.spec.ts` 的 S7-a 钉住。
    */
   test('TT-3 坏字节：终态可辨认（非 ready）、无任何可采样动画（视口挂载情况如实记录）', async ({ page }) => {
     test.setTimeout(300_000)

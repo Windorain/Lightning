@@ -212,7 +212,7 @@ test.describe('M2-4 呈现画面：纹理就绪前后像素对照（真实入口
     ).toBeLessThan(before!.chroma.neutralGrayRatio)
   })
 
-  test('PX-2 负对照：损坏一张贴图 ⇒ 终态可辨认，且永远不会出现可采样的就绪画面', async ({ page }) => {
+  test('PX-2 负对照：损坏一张贴图 ⇒ 终态可辨认、无就绪采样，且**视口仍挂载**（Q1：资源失败不夺视口）', async ({ page }) => {
     test.setTimeout(420_000)
     await gotoWorkbench(page)
     await expect(page.locator(STATUS_BAR)).toBeVisible()
@@ -243,7 +243,7 @@ test.describe('M2-4 呈现画面：纹理就绪前后像素对照（真实入口
     expect(refused!, '拒绝消息必须点名未就绪与实际状态').toContain('未就绪')
     expect(refused!, '拒绝消息必须带上实际终态').toContain(brokenState)
 
-    // ── 画面侧事实：损坏场景连视口都没有挂上（见本文件末的观测登记）──
+    // ── 画面侧事实：视口**仍在**，但状态不是 ready（Q1；见下方断言与说明）──
     const mounted = await page.evaluate(() => document.querySelectorAll('.vc-viewport').length)
     console.log(
       '[PX-2] intact state=' + intact.state + ' sha=' + intact.sha256.slice(0, 12) +
@@ -251,6 +251,41 @@ test.describe('M2-4 呈现画面：纹理就绪前后像素对照（真实入口
         ' uniqueColors=' + intact.stats.uniqueColors +
         ' | broken state=' + brokenState + ' canvasCount=' + mounted,
     )
-    expect(mounted, '观测登记：缺一张贴图时视口不挂载 ⇒ 损坏场景根本没有 canvas 可采样（见文件末说明）').toBe(0)
+    /**
+     * ## 画面形态（M8-5 / Q1 定稿：**资源失败不夺视口**）
+     *
+     * 旧形态（S0-B D2 实测）：缺一张贴图 ⇒ legacy 材质库整库 reject ⇒
+     * `loadStatus='error'` ⇒ **视口不挂载**，本行当时断言 `mounted === 0`。
+     * Q1 裁决后形态反过来了：受影响图元以占位呈现、其余照常显示。
+     *
+     * ⇒ 本行改写为**更强**的一组事实（而不是删掉）：视口必须挂载，且"有贴图的材质"
+     * 与"被降级（无 map）的材质"同时存在 —— 后者证明占位真的发生了，
+     * 而不是"把坏图当没发生"或"整幅变平"。
+     *
+     * 「永远不出现可当作就绪画面的采样」这一条**不变**（上面 ready 门的拒绝仍在）：
+     * 视口在，但它的状态**不是 ready**。
+     */
+    const form = (await page.evaluate(() => {
+      const vm = (window as any).__vm__
+      const surface = vm?.viewports?.get?.('r-viewport')?.presenterSurface ?? null
+      let mapped = 0
+      let degraded = 0
+      try {
+        surface?.object3d?.traverse?.((o: any) => {
+          if (o?.isMesh !== true && o?.isInstancedMesh !== true) return
+          const m = Array.isArray(o.material) ? undefined : o.material
+          if (m === undefined || m === null) return
+          if (m.map === null || m.map === undefined) degraded += 1
+          else mapped += 1
+        })
+      } catch {
+        /* 读面失败按 0 计（会让判据红，不静默变绿） */
+      }
+      return { mounted: document.querySelectorAll('.vc-viewport').length, mapped, degraded }
+    })) as { mounted: number; mapped: number; degraded: number }
+    expect(mounted, '⚠️ Q1：缺一张贴图**不得**夺走视口（旧形态 mounted===0）').toBeGreaterThan(0)
+    expect(form.degraded, '⚠️ Q1：占位必须可观测 —— 至少一个材质因缺图而没有 map').toBeGreaterThan(0)
+    expect(form.mapped, '其余内容照常显示 —— 至少一个材质仍然带 map').toBeGreaterThan(0)
+    console.log('[PX-2·form] mounted=' + form.mounted + ' mapped=' + form.mapped + ' degraded=' + form.degraded)
   })
 })

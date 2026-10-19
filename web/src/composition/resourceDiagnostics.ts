@@ -62,7 +62,12 @@ export interface ResourceOutcomeFacts {
 /** 显式重试请求（用户点击"重试"或命令触发）。 */
 export interface ResourceRetryRequest {
   readonly viewportId: string
-  /** 当前仍未就绪的资源身份（用于 `params.assets` 点名与"恢复"的对账）。 */
+  /**
+   * 上次失败的资源名（**locator 优先**、否则 assetId）—— 用于 `params.assets` 点名。
+   *
+   * 为什么是"名"而不是"身份"：D7 要求诊断能对上用户**看到**的那个名字
+   * （底栏点名的就是 locator）；只带 `material:0` 这类内部槽位 id 对不上。
+   */
   readonly failed: readonly string[]
   readonly attempt: number
 }
@@ -112,7 +117,7 @@ export function createResourceDiagnostics(
         {
           attempt: request.attempt,
           failed: request.failed.length,
-          // 点名（有界：最多前 3 条，单条由记录器按 200 字符截断）
+          // 点名（有界：最多前 3 条；单条由记录器按 200 字符截断）
           assets: request.failed.slice(0, 3).join(','),
         },
         request.viewportId,

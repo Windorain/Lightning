@@ -664,8 +664,14 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    */
   let retryAttempt = 0
   let pendingRetry = false
-  /** 上次结算里**失败**的资源身份（重试请求的点名与"恢复"对账用；有界 = 资源条数）。 */
-  let lastFailedAssetIds: string[] = []
+  /**
+   * 上次结算里**失败**的资源名（重试请求的**点名**用；有界 = 资源条数）。
+   *
+   * locator 优先（有取回位置就报取回位置，否则报 assetId）—— 与状态栏文案、
+   * `resource.failed` 的 `params.locator`/`params.assetId` 同一口径：
+   * 诊断里的名字要能被**用户在底栏看到的那个名字**对上（D7）。
+   */
+  let lastFailedNames: string[] = []
   const stopResourceRetryWatch = ctx.onResourceRetry(() => {
     pendingRetry = true
     // 去重键作废：失败后同身份不会自动重试（这正是 D6 的成因），重试必须显式破键。
@@ -702,7 +708,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       // 文档已关闭：实时状态不得残留上一份文档的成品结论（SPEC §7.4：状态由**当前**事实推导）。
       ctx.log.clearLiveStatus()
       // 失败清单同理：下一份文档的"恢复"不得拿上一份的身份对账。
-      lastFailedAssetIds = []
+      lastFailedNames = []
       return
     }
     const identity = textureIdentityOf(doc)
@@ -723,7 +729,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       retryAttempt += 1
       presenterBundle.resources.reportRetryRequested({
         viewportId: regionId,
-        failed: lastFailedAssetIds,
+        failed: lastFailedNames,
         attempt: retryAttempt,
       })
     }
@@ -822,7 +828,7 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
         missingRequired: bound.missingRequired,
         attempt: retryAttempt,
       })
-      lastFailedAssetIds = notReadyResources.map((r) => r.identity.id)
+      lastFailedNames = notReadyResources.map((r) => (r.locator.url !== '' ? r.locator.url : r.identity.id))
       if (bound.missingRequired > 0) {
         presenterErrors.push(`textures-missing-required:${bound.missingRequired}`)
       }
