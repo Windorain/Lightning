@@ -1,5 +1,6 @@
 import { EMBED_KEYMAP } from './embedKeymap'
 import { REGION_KEYMAP } from '@/runtime/regionIds'
+import { instanceUiKey } from '@/runtime/instanceStorage'
 
 export interface KeyBinding {
   type: 'KEY'
@@ -63,29 +64,38 @@ export const DEFAULT_KEYMAP: InputBinding[] = [
   { type: 'WHEEL', direction: 'up', opId: 'OPERATOR_VIEW_ZOOM', description: '放大' },
 ]
 
-const STORAGE_KEY = 'lightning-workbench-keymap'
+/**
+ * 键位表的**实例作用域**键（M7-6）：`lk-ui.v1.<instanceId>.keymap`。
+ *
+ * 旧键是固定的 `lightning-workbench-keymap`（全页一份）。同页两个工作台今天被
+ * 结构禁止，但键里的实例段是 D7 的机械判据（两个实例互不覆盖），也是将来
+ * 放开多工作台的前置条件。旧键**不迁移**（没有实例身份可归属）。
+ */
+function keymapStorageKey(instanceId: string): string {
+  return instanceUiKey(instanceId, 'keymap')
+}
 
-export function loadKeymap(): InputBinding[] {
+export function loadKeymap(instanceId: string = 'workbench'): InputBinding[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(keymapStorageKey(instanceId))
     if (raw) return JSON.parse(raw) as InputBinding[]
   } catch { /* ignore */ }
   return DEFAULT_KEYMAP
 }
 
-const REGION_KEYMAP_PRESETS: Record<string, () => InputBinding[]> = {
-  [REGION_KEYMAP.WORKBENCH_VIEWPORT]: () => loadKeymap(),
+const REGION_KEYMAP_PRESETS: Record<string, (instanceId: string) => InputBinding[]> = {
+  [REGION_KEYMAP.WORKBENCH_VIEWPORT]: (instanceId) => loadKeymap(instanceId),
   [REGION_KEYMAP.EMBED_VIEWPORT]: () => EMBED_KEYMAP,
 }
 
-/** 按 Screen Region.keymapId 解析基础键位（不含工具覆盖层） */
-export function resolveRegionBaseKeymap(keymapId?: string): InputBinding[] {
-  if (!keymapId) return loadKeymap()
-  return REGION_KEYMAP_PRESETS[keymapId]?.() ?? loadKeymap()
+/** 按 Screen Region.keymapId 解析基础键位（不含工具覆盖层；键位按实例隔离）。 */
+export function resolveRegionBaseKeymap(keymapId?: string, instanceId: string = 'workbench'): InputBinding[] {
+  if (!keymapId) return loadKeymap(instanceId)
+  return REGION_KEYMAP_PRESETS[keymapId]?.(instanceId) ?? loadKeymap(instanceId)
 }
 
-export function saveKeymap(keymap: InputBinding[]): void {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(keymap)) } catch { /* */ }
+export function saveKeymap(keymap: InputBinding[], instanceId: string = 'workbench'): void {
+  try { localStorage.setItem(keymapStorageKey(instanceId), JSON.stringify(keymap)) } catch { /* */ }
 }
 
 export function matchBinding(

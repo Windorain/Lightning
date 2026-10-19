@@ -25,7 +25,8 @@ test.describe('OBJ export — blob capture (Chromium)', () => {
 
     const base64Data = await page.evaluate(async () => {
       const ctx = (window as any).__vm__
-      const doc = ctx.getDoc().value?.serialize()
+      // #301 P10f D3（R3）：产物 plain 的唯一入口（与导出命令同源）。
+      const doc = ctx.plainForSave().plain
       if (!doc) throw new Error('No document')
       const { buildStructureBundleZip } = await import('/src/workbench/export/bundleMeshAssembly.ts')
       const { loadStructureOrWorld } = await import('/src/render/data/bundleResolve')
@@ -122,7 +123,8 @@ test.describe('OBJ export — Firefox', () => {
 
     const base64Data = await page.evaluate(async () => {
       const ctx = (window as any).__vm__
-      const doc = ctx.getDoc().value?.serialize()
+      // #301 P10f D3（R3）：产物 plain 的唯一入口（与导出命令同源）。
+      const doc = ctx.plainForSave().plain
       if (!doc) throw new Error('No document')
       const { buildStructureBundleZip } = await import('/src/workbench/export/bundleMeshAssembly.ts')
       const { loadStructureOrWorld } = await import('/src/render/data/bundleResolve')

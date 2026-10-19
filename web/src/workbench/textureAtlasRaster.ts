@@ -48,24 +48,32 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
   })
 }
 
-/** 动画条取首帧后的像素尺寸 */
+/**
+ * 动画条取首帧后的像素尺寸。
+ *
+ * `stripFrameCount`（M6-4）：竖条**总格数**，**只在**"这确实是一条动画贴图且我们只画
+ * 了首帧"时 > 1。调用方据此产出 `export.firstFrameOnly` 诊断 —— 此前这个事实只存在于
+ * 这段裁切代码里（`sh = nw`），产物里看不出来，用户与机器都读不到。
+ */
 export async function measureTextureBlobFirstFrame(
   rawBlob: string,
   entry: MaterialPaletteEntry,
-): Promise<{ width: number; height: number }> {
+): Promise<{ width: number; height: number; stripFrameCount: number }> {
   const dataUrl = base64PngToDataUrl(rawBlob)
   const img = await loadImageElement(dataUrl)
   const nw = img.naturalWidth
   const nh = img.naturalHeight
   if (nw <= 0 || nh <= 0) throw new Error('纹理图尺寸无效')
   let sh = nh
+  let stripFrameCount = 1
   if (entry.kind === 'animated') {
     const frameCount = frameCountFromImageSize(nw, nh)
     if (frameCount > 1) {
       sh = nw
+      stripFrameCount = frameCount
     }
   }
-  return { width: nw, height: sh }
+  return { width: nw, height: sh, stripFrameCount }
 }
 
 /** 整张首帧裁切为 PNG Blob（与旧版工作台导出一致） */

@@ -5,6 +5,8 @@ import {
   sdeGetExportFile,
   sdePutWorkspaceDocument,
 } from '@/workbench/sdeApi'
+import { adoptDocumentIntoKernel } from '@/operators/builtin/docLifecycleOperators'
+import { plainRootOf } from '@/adapters/plainRoot'
 
 export const SDEConnectOperator: OperatorType = {
   id: 'OPERATOR_SDE_CONNECT',
@@ -45,17 +47,22 @@ export const SDELoadExportOperator: OperatorType = {
   async exec(ctx, _props) {
     const name = _props.name as string
     ctx.getSelection().clear()
-    ctx.getEditHistory().clear()
+    // R1-β① C2：`getEditHistory().clear()` 已删 —— 理由同
+    // `docLifecycleOperators#NewSceneOperator`：下方的 `setDocument` 换文档即换
+    // `Document#history`（契约 §6），清空是结构上已发生的事。
     const data = await sdeGetExportFile(ctx.getConnection().apiBase, ctx.getConnection().token, name)
     ctx.getConnection().selectedExportName = name
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      ctx.main.replaceDoc( result.document)
-      ctx.getCurrentFrameIndex().value = 0
+      ctx.setDocument( result.document)
+      ctx.requireKernelSession().seekFrame(0)
+      // #301 A′：**本路径此前从不装配内核**（9 条未装配路径之一）。
+      // `plainRootOf` 是**同步**函数（P10e 统一口径），故不 await。
+      adoptDocumentIntoKernel(ctx, result.document, plainRootOf(data), name)
       const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
       ctx.log.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
     } else {
-      ctx.main.replaceDoc( null)
+      ctx.setDocument( null)
       ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: name, error: result.error })
     }
     ctx.getWorkspaceMode().value = 'sde'
@@ -70,14 +77,16 @@ export const SDELoadWorkspaceOperator: OperatorType = {
   async exec(ctx, props) {
     const data = props.data
     ctx.getSelection().clear()
-    ctx.getEditHistory().clear()
+    // `getEditHistory().clear()` 已删（同上）。
     const result = await ctx.main.registries.parsers.detectAndParse(data)
     if (result.document) {
-      ctx.main.replaceDoc( result.document)
-      ctx.getCurrentFrameIndex().value = 0
+      ctx.setDocument( result.document)
+      ctx.requireKernelSession().seekFrame(0)
+      // #301 A′：**本路径此前从不装配内核**（9 条未装配路径之一）。
+      adoptDocumentIntoKernel(ctx, result.document, plainRootOf(data), 'SDE workspace')
       ctx.log.info('场景加载', 'SDE workspace', { frames: result.document.frameCount })
     } else {
-      ctx.main.replaceDoc( null)
+      ctx.setDocument( null)
       ctx.log.error('场景加载', result.error ?? '未知错误')
     }
     await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'sde' })
@@ -90,15 +99,15 @@ export const SDEPushOperator: OperatorType = {
   description: '将当前场景保存到 SDE 工作区',
 
   poll(ctx) {
-    return ctx.getConnection().connected === true && ctx.getDoc().value !== null
+    return ctx.getConnection().connected === true && ctx.hasLoadedDocument()
   },
 
   async exec(ctx, _props) {
-    if (!ctx.getConnection().apiBase || !ctx.getDoc().value) return
+    if (!ctx.getConnection().apiBase || !ctx.hasLoadedDocument()) return
     await sdePutWorkspaceDocument(
       ctx.getConnection().apiBase,
       ctx.getConnection().token,
-      ctx.getDoc().value!.serialize() as Record<string, unknown>,
+      ctx.plainForSave().plain as Record<string, unknown>,
     )
   },
 }

@@ -38,7 +38,8 @@ export const wikiDataPageSource: DocumentSource = {
       props.saveAsBase != null
         ? normalizeBase(String(props.saveAsBase))
         : displayNameFromLocator(binding.locator)
-    const plain = ctx.getDoc().value?.serialize()
+    // #301 P10f D2：产物改由**内核投影**给出（未装配自动回落旧文档）。
+    const plain = ctx.plainForSave().plain
     if (!plain) throw new Error('无场景可保存')
     const envelope = buildEnvelopePackage(plain)
     const plan = previewUploadPlan(base, envelope)

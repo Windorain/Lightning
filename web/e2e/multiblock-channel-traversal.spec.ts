@@ -14,13 +14,19 @@
  *  3. 断言：`data-mb-variant` = 期望变体键、`data-mb-dims` = 参考尺寸、
  *     `definition.cellGrid` 与参考展开网格**逐格一致（差异 0）**。
  *
- * 覆盖矩阵（性能控制）：
- *  - `desktop-chrome`：**全量 552**（EBF 432 + 仅总 Tier 12 + LSC 108）；
- *  - `mobile-chrome`：**抽样子集**（每 fixture：`全 0` / `各通道有效下界` / `各通道域上界` × tierSample × 运行态）。
+ * 覆盖矩阵（#332 时间治理：**性能控制 + 逐条论证的抽样**）：
+ *  - `desktop-chrome`：**精简集**（`reducedTraversal(file)`，`552 → ≈69`）。删减不是"跑快点"，
+ *    而是"门禁口径下内容互异类只有 43 个"这一事实的直接推论：552 条等式里 509 条与其
+ *    类代表**逐格相同**，逐条配对账本由 `reducedTraversal.ts` 机械产出并在本文件自检。
+ *    区分力由三类成员共同守住：**内容类代表**（不存在没断言过的期望内容）、
+ *    **轴跃迁见证**（任一滑杆/Tier 轴失效必红）、**逐档覆盖**（每档真的走过 DOM 事件路径）。
+ *    完整论证与实测数据见 `web/e2e/helpers/multiblock/reducedTraversal.ts` 文件头。
+ *  - `mobile-chrome`：**抽样子集**（每 fixture：`全 0` / `各通道有效下界` / `各通道域上界` × tierSample × 运行态）
+ *    —— 保留原有的跨视口抽样（与精简集口径不同：它证的是"窄视口下同一条链路同样成立"）。
  *
  * 连续装配优化：同文档内**渐进拖动**（只对与当前值不同的控件派发事件），每 fixture 只注入一次文档。
  * 截图策略：每个 Tier 档位的第一条组合截一张视口图（等级跨档 = 有意义的证据），
- * 不为 552 个组合各存一张几乎完全相同的 PNG。
+ * 不为数百个组合各存一张几乎完全相同的 PNG。
  */
 
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
@@ -40,6 +46,8 @@ import {
   readChannelPanel,
   readFixture,
   readRenderedDefinition,
+  reducedTraversal,
+  assertReducedTraversal,
   sampleCombos,
   setTier,
   signatureDiff,
@@ -256,7 +264,13 @@ async function runCombos(
 }
 
 /** 汇总日志（覆盖矩阵 + 耗时实测）。 */
-function logSummary(file: string, outcomes: ComboOutcome[], elapsedMs: number, testInfo: TestInfo): void {
+function logSummary(
+  file: string,
+  outcomes: ComboOutcome[],
+  elapsedMs: number,
+  testInfo: TestInfo,
+  reduced: ReturnType<typeof reducedTraversal> | null,
+): void {
   const settle = outcomes.map((o) => o.settleMs)
   const sum = settle.reduce((a, b) => a + b, 0)
   const max = settle.reduce((a, b) => Math.max(a, b), 0)
@@ -267,6 +281,13 @@ function logSummary(file: string, outcomes: ComboOutcome[], elapsedMs: number, t
   // 诊断：面板当前**没有**输出 `data-mb-declared`（实测恒为 null），故"组合是否已声明"这一维度
   // 由"面板变体键逐字命中期望键 + 逐格 diff=0"这两条可观测证据等价表达（见 README §7.7）。
   const declaredSamples = [...new Set(outcomes.map((o) => String(o.declaredVariant)))].join(',')
+  // #332 删减账本（desktop 精简集才有）：声明多少 → 实跑多少 → 判据上界（内容类）多少。
+  const ledger = reduced
+    ? `\n  删减账本（#332）：声明 ${reduced.declared} → 精简 ${reduced.combos.length}` +
+      `（内容类 ${reduced.contentClasses} = 判据上界／轴跃迁见证 ${reduced.witnesses.length}／逐档覆盖 ${reduced.levelCover.length}）` +
+      `；省略 ${reduced.pairing.length} 条**逐条已配对**（每条都能指认一个逐格相同的保留成员）；` +
+      `盲轴 [${reduced.blindAxes.join(',') || '无'}]`
+    : ''
   console.log(
     `[T2.6] 遍历 ${testInfo.project.name} :: ${file}\n` +
       `  组合 ${outcomes.length} / 格 ${cells} / 逐格 diff=0 的组合 ${gridDiffZero}/${outcomes.length}` +
@@ -275,23 +296,25 @@ function logSummary(file: string, outcomes: ComboOutcome[], elapsedMs: number, t
       `，单组合驱动→收敛 mean ${(sum / Math.max(outcomes.length, 1)).toFixed(1)} ms / max ${max} ms` +
       `，收敛探测 ${probes} 次（${(probes / Math.max(outcomes.length, 1)).toFixed(2)}/组合）\n` +
       `  渲染调色板尺寸 ${[...new Set(outcomes.map((o) => o.renderedPaletteSize))].join(',')}` +
-      `；data-mb-declared 观测值集合 {${declaredSamples}}`,
+      `；data-mb-declared 观测值集合 {${declaredSamples}}` +
+      ledger,
   )
 }
 
-test.describe('T2.6 · 通道滑杆全组合遍历（desktop 全量 552 / mobile 抽样）', () => {
+test.describe('T2.6 · 通道滑杆组合遍历（desktop 精简集 / mobile 抽样）', () => {
   for (const file of FIXTURES) {
-    test(`${file}：全部已声明组合 → 变体键 / 尺寸 / 逐格 diff`, async ({ page }, testInfo) => {
+    test(`${file}：已声明组合 → 变体键 / 尺寸 / 逐格 diff`, async ({ page }, testInfo) => {
       const ref = snapshotOrFallbackReference(file)
-      const full = enumerateExpectedCombos(file)
+      const reduced = reducedTraversal(file)
       const isDesktop = testInfo.project.name === 'desktop-chrome'
-      const combos = isDesktop ? full : sampleCombos(file)
-      test.setTimeout(isDesktop ? 900_000 : 300_000)
+      // desktop 跑**精简集**（#332）；mobile 保留原抽样子集（证窄视口下同一链路成立）。
+      const combos = isDesktop ? reduced.combos : sampleCombos(file)
+      test.setTimeout(300_000)
 
       const { outcomes, elapsedMs } = await runCombos(page, file, combos, ref, testInfo)
-      logSummary(file, outcomes, elapsedMs, testInfo)
+      logSummary(file, outcomes, elapsedMs, testInfo, isDesktop ? reduced : null)
 
-      expect(outcomes.length, `${file}：覆盖组合数`).toBe(isDesktop ? ref.byVariant.size : combos.length)
+      expect(outcomes.length, `${file}：遍历组合数`).toBe(combos.length)
       expect(
         outcomes.filter((o) => o.diff.count === 0).length,
         `${file}：全部组合的逐格 diff 必须为 0`,
@@ -305,7 +328,7 @@ test.describe('T2.6 · 通道滑杆全组合遍历（desktop 全量 552 / mobile
       if (fullMismatch.length > 0) {
         console.log(
           `[T2.6] 诊断：full 签名口径下 ${fullMismatch.length}/${outcomes.length} 个组合存在差异` +
-            `（预期：EBF 并集调色板 7/8 同 name:meta，渲染侧按 SlotBlock 归并且保留条目不确定）；` +
+            `（预期：渲染侧把调色板条目的 registryId 归一为 minecraft: 前缀 + 按 name:meta 归并）；` +
             `idMeta 口径仍为 0 —— 例如 ${comboLabel(fullMismatch[0]!)}：${describeGridDiff(fullMismatch[0]!.diffFull)}`,
         )
       }
@@ -435,6 +458,113 @@ test.describe('T2.6 · 通道滑杆全组合遍历（desktop 全量 552 / mobile
     expect(s1.stats.uniqueColors, '视口截图不得退化成纯色').toBeGreaterThan(1)
   })
 
+  /**
+   * #334 · **运行态可辨（EBF，门禁）** —— 从"非门禁诊断"升格为判据。
+   *
+   * ## 病历（为什么它此前只能"记录"）
+   *
+   * 本条原先只驱动一对"**其余轴全部固定、仅运行态不同**"的组合，断言①两次都收敛到各自
+   * 参考，然后**记录**②渲染定义是否可分辨、③控制器条目内容 —— 因为当时实测渲染面
+   * **结构性不可分辨**（`cellGrid` 与 `blockPalette` 两次全文相同），把"注定红"的断言写成
+   * 门禁等于用假失败冒充判据。缺口登记在 `reducedTraversal.ts` 的 `KNOWN_BLIND_AXES`。
+   *
+   * ## 现在为什么能当门禁（#334 已修，根因=失效判定读面）
+   *
+   * 根因不在投影、也不在渲染包解析（三段实测：`kernelRenderViewOf` 的产物、`fromV2Plain`
+   * 往返、`resolveRenderBundle` 的解析**都已经可辨**），而在**内容身份的读面**：
+   * `runtime/presentationAdapter#readContentIdentity` 的结构摘要只含**名称级**调色板身份
+   * （`registryId@meta`），对"同 `name:meta`、异条目内容"（运行态：`tooltip`/`nbt.activeFace`）
+   * 结构性不可见 ⇒ `planContentRebuild` 全 false ⇒ 渲染链**什么都不做** ⇒ 视口定义逐字节不变。
+   *
+   * ## 判据（两条都是**生产观测面**：`vpSlot.definition`，不新造探针）
+   *
+   *  1. **逐字节变化**：两次渲染定义（`cellGrid` + `blockPalette` 全文）必须不同；
+   *  2. **含 running 形态**：active 的控制器条目必须带运行态内容（`tooltip` 含
+   *     `(running)` **且** `nbt.activeFace === true`），idle 的必须**不带** ——
+   *     两侧都断言，防止"随手改点别的字段"也算过。
+   *
+   * 门禁仍保留原有的"两次都必须收敛到各自参考（`idMeta` 逐格 diff=0）"作为前置：
+   * 否则下面的"可分辨性"结论毫无意义。
+   */
+  test('运行态可辨（EBF，门禁）：固定其余轴、仅改运行态 ⇒ 视口渲染定义逐字节变化且含 running 形态', async ({ page }) => {
+    test.setTimeout(120_000)
+    const file = 'multiblock-ebf-2ch.json'
+    const ref = snapshotOrFallbackReference(file)
+    await gotoWorkbench(page)
+    await injectSceneDocumentOk(page, readFixture(file).envelope, file)
+    await openChannelTabReady(page)
+
+    // 一对**其余轴固定、仅 runstate 不同**的组合（取精简集里那一对的取值）。
+    const common = { height: 1, coil: 1, glass: 1 }
+    const tiers = 1
+    const keyOf = (rs: string): string =>
+      `height:${common.height}|coil:${common.coil}|glass:${common.glass}|tt:${tiers}|runstate:${rs}`
+
+    const drive = async (rs: string) => {
+      await drivePanel(page, { tier: tiers, runstate: rs, values: common })
+      const reference = ref.byVariant.get(keyOf(rs))!
+      const observed = await waitForRenderMatch(async () => {
+        await new Promise((r) => setTimeout(r, 0))
+        const rendered = await readRenderedDefinition(page)
+        const got = signatureGrid(rendered.cellGrid, rendered.palette, 'idMeta')
+        return { rendered, diffCount: diffCountAgainst(got, reference.signature) }
+      }, SETTLE_TIMEOUT_MS)
+      return observed
+    }
+
+    const idle = await drive('idle')
+    const active = await drive('active')
+
+    // 前置：两次都必须真收敛到各自参考（否则下面的"可分辨性"结论毫无意义）
+    expect(idle.diffCount, `${keyOf('idle')}：必须收敛到参考（idMeta 逐格 diff=0）`).toBe(0)
+    expect(active.diffCount, `${keyOf('active')}：必须收敛到参考（idMeta 逐格 diff=0）`).toBe(0)
+
+    // 门禁①：渲染定义**逐字节**变化（cellGrid + blockPalette 全文）
+    const idleText = JSON.stringify(idle.rendered)
+    const activeText = JSON.stringify(active.rendered)
+    expect(
+      activeText,
+      '#334：仅切运行态后，视口渲染定义（cellGrid + blockPalette 全文）必须逐字节变化',
+    ).not.toBe(idleText)
+
+    // 门禁②：active 必须含 running 形态，idle 必须不含（两侧都断言）
+    const controllerOf = (palette: unknown[]): Record<string, unknown> => {
+      const hit = paletteSignatures(palette).findIndex((s) => s.idMeta === 'gt.blockmachines:1000')
+      expect(hit, 'EBF 的控制器条目（gt.blockmachines:1000）必须出现在渲染调色板里').toBeGreaterThanOrEqual(0)
+      return palette[hit] as Record<string, unknown>
+    }
+    const runningShape = (e: Record<string, unknown>): boolean =>
+      JSON.stringify(e.tooltip ?? null).includes('(running)') &&
+      (e.nbt as { activeFace?: unknown } | undefined)?.activeFace === true
+
+    const idleCtl = controllerOf(idle.rendered.palette)
+    const activeCtl = controllerOf(active.rendered.palette)
+    expect(runningShape(activeCtl), `#334：active 的控制器条目必须带 running 形态（tooltip + nbt.activeFace），实测 ${JSON.stringify(activeCtl)}`).toBe(true)
+    expect(runningShape(idleCtl), `#334：idle 的控制器条目**不得**带 running 形态，实测 ${JSON.stringify(idleCtl)}`).toBe(false)
+
+    // 参考侧对照（诊断；不是门禁）：并集下标 7/8 的 tooltip/nbt
+    const refController = (key: string): string => {
+      const grid = ref.byVariant.get(key)!.cellGrid
+      const used = new Set<number>()
+      for (const slice of grid) for (const row of slice) for (const i of row) used.add(i)
+      const idxs = [...used].filter((i) => ref.paletteLabels[i] === 'gt.blockmachines@1000')
+      return idxs
+        .map((i) => {
+          const e = ref.palette[i] as { tooltip?: unknown; nbt?: unknown }
+          return `[${i}] tooltip=${JSON.stringify(e.tooltip)} nbt=${JSON.stringify(e.nbt)}`
+        })
+        .join('  ')
+    }
+
+    console.log(
+      `[#334 运行态门禁] ${file} :: 其余轴固定 (height=${common.height},coil=${common.coil},glass=${common.glass},tt=${tiers})\n` +
+        `  前置①：两次渲染均收敛到各自参考，idMeta 逐格 diff=0\n` +
+        `  门禁①：渲染定义逐字节变化 = ${idleText !== activeText}（idle ${idleText.length}B / active ${activeText.length}B）\n` +
+        `  门禁②：active 控制器 = ${JSON.stringify(activeCtl)}；idle 控制器 = ${JSON.stringify(idleCtl)}\n` +
+        `  参考侧对照：idle → ${refController(keyOf('idle'))}；active → ${refController(keyOf('active'))}`,
+    )
+  })
+
   test('覆盖矩阵自检：期望枚举 ↔ 文件声明 ↔ 参考清单 三方一致（含 mobile 抽样命中）', async ({}, testInfo) => {
     for (const file of FIXTURES) {
       const ref = snapshotOrFallbackReference(file)
@@ -455,6 +585,32 @@ test.describe('T2.6 · 通道滑杆全组合遍历（desktop 全量 552 / mobile
       console.log(
         `[T2.6] 覆盖矩阵 ${testInfo.project.name} :: ${file} 全量 ${all.length} / mobile 抽样 ${sample.length}`,
       )
+    }
+  })
+
+  /**
+   * #332 删减论证自证（**零浏览器成本**，两个 project 都跑）。
+   *
+   * 精简集 `S` 的三条不变量若有一条站不住，`buildReducedTraversal()` 会**抛错**：
+   *  ① 内容类全覆盖（不存在"没有任何组合断言过"的期望内容）；
+   *  ② 每条"内容会变"的轴跃迁都有见证落在 `S` 内（任一滑杆/Tier 轴失效必红）；
+   *  ③ 每个被省略的组合都能指认 `S` 内一个**逐格相同**的成员（逐条配对，不是抽样估计）；
+   *  ④ 实际盲轴集合 == `KNOWN_BLIND_AXES`（轴"悄悄变盲"必须被抓住）。
+   *
+   * 这条用例是"删减 483 条组合"这一动作的**判据**——删减理由本身也被测试把守。
+   */
+  test('精简集自证：内容类全覆盖 / 跃迁见证完备 / 省略者逐条配对 / 盲轴已登记', async () => {
+    const summary = assertReducedTraversal()
+    console.log(summary)
+    for (const file of FIXTURES) {
+      const s = reducedTraversal(file)
+      expect(s.combos.length, `${file}：精简集必须非空且小于声明数（除全互异的 tiny fixture）`).toBeGreaterThan(0)
+      expect(s.contentClasses, `${file}：判据上界（内容类数）必须为正`).toBeGreaterThan(0)
+      // 逐个保留成员都必须在参考清单里（防止"精简"把键写错导致空跑）
+      const ref = snapshotOrFallbackReference(file)
+      for (const combo of s.combos) {
+        expect(ref.byVariant.has(combo.variantKey), `${file}：保留成员 ${combo.variantKey} 必须在参考清单`).toBe(true)
+      }
     }
   })
 })

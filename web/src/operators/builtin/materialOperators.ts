@@ -1,6 +1,18 @@
+/**
+ * 材质面板的算子：导出**静态**纹理 PNG、复制定位符。
+ *
+ * ## Q2 裁决（M6-3）：材质卡的「导出 GIF」入口**已退出**
+ *
+ * 它导的是**贴图条本身**（2D 材质审阅），而场景 GIF 导的是**模型画面**（3D）。
+ * 两个入口合并成一个（导出页签的「动画 GIF」卡片）⇒ 本文件不再有
+ * `ExportGifOperator`、`workbench/animatedGifEncoder` 整文件删除。
+ *
+ * **能力后果（如实记录）**："把某张材质的动画单独导出成 GIF"**不再有入口**；
+ * 静态纹理仍可经 {@link ExportTextureOperator} 导出 PNG。若日后需要，属新需求。
+ */
+
 import type { OperatorType } from '@/operators/operatorType'
 import type { MaterialQueryItem } from '@/runtime/types'
-import { encodeAnimatedGif } from '@/workbench/animatedGifEncoder'
 import { filenameStem } from '@/pure/string'
 import { downloadPng, copyTextToClipboard } from '@/util/browser'
 import { listMaterials } from '@/context/queries'
@@ -49,40 +61,5 @@ export const CopyMaterialLocatorOperator: OperatorType = {
       return
     }
     await copyTextToClipboard(m.locator)
-  },
-}
-
-export const ExportGifOperator: OperatorType = {
-  id: 'OPERATOR_EXPORT_GIF',
-  label: '导出 GIF',
-  description: '将动画纹理导出为 GIF 动图',
-
-  poll(ctx) {
-    return listMaterials(ctx).some(
-      (m: MaterialQueryItem) => m.kind === 'animated' && m.textureDataUrl !== null,
-    )
-  },
-
-  async exec(ctx, props) {
-    const materialId = (props?.materialId as string) ?? '0'
-    const m = resolveMaterial(ctx, materialId)
-    if (!m?.textureDataUrl || m.kind !== 'animated') {
-      ctx.log?.warn('导出', `材质 ${materialId} 不是动画纹理`)
-      return
-    }
-    try {
-      const delay = (m.animation?.defaultFrametimeTicks ?? 1) * 5 // ticks to centiseconds
-      const { blob } = await encodeAnimatedGif(m.textureDataUrl, delay)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${filenameStem(m, materialId)}.gif`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    } catch (e) {
-      ctx.log?.warn('导出', `GIF 导出失败: ${e}`)
-    }
   },
 }

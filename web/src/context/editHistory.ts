@@ -26,6 +26,37 @@ export interface UndoManager {
   bindLog(log: EditHistoryLog): void
 }
 
+/**
+ * **撤销权威的值快照**（R1-β① C2）。
+ *
+ * ## 为什么它在这里，而不是在 `runtime/`
+ *
+ * 它是**撤销契约**的一部分：`UndoManager`（旧栈）与它（内核权威）回答的是
+ * 同一组四个问题（"能撤吗 / 能重做吗 / 撤的是什么 / 重做的是什么"）。
+ * 把两侧的读面形状放在同一个文件里，使"权威换了但读面口径没变"这件事
+ * 在**类型上**可见 —— 消费点换源不需要改形状。
+ *
+ * ## 与 `UndoManager` 的形状差异是**刻意**的，不是待补的缺口
+ *
+ * | 成员 | `UndoManager`（旧栈） | `KernelUndoState`（内核） |
+ * |---|---|---|
+ * | `canUndo`/`canRedo`/两个 label | `Ref`（可被任意写） | **值**（不可写） |
+ * | `push` | 有 —— 调用方能塞任意闭包 | **没有** —— 内核不收闭包，只收命令 |
+ * | `undo`/`redo` | 有 —— 直接改栈 | **没有** —— 走 `Command` 的 `{kind:'undo'\|'redo'}` |
+ *
+ * 内核撤销不是"一个可在外部改的栈"，而是**两条语义命令**（记账由 `reduceUndoRedo`
+ * 在事务内完成，契约 §5.2）。若这里补齐 `push()`/`undo()` 使形状与旧栈一致，
+ * 就等于把旧栈的形状**保活**成新门面（#171 明令禁止的新门面包旧核心）。
+ *
+ * ⇒ 读走本类型；写走 `Context#submitKernelUndoRedo` 之类的**命令提交**。
+ */
+export interface KernelUndoState {
+  readonly canUndo: boolean
+  readonly canRedo: boolean
+  readonly undoLabel: string | null
+  readonly redoLabel: string | null
+}
+
 export const editHistoryKey: InjectionKey<UndoManager> = Symbol('editHistory')
 
 export function createEditHistory(maxStack = 256): UndoManager {

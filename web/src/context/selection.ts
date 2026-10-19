@@ -5,7 +5,8 @@ import { ref, shallowRef } from 'vue'
 import type { createLogCenter } from '@/logging/LogCenter'
 
 type SelectionLog = Pick<ReturnType<typeof createLogCenter>, 'debug'>
-import type { ScenePickEntity } from '@/render/interaction/scenePick'
+// R1-β① C8：形状契约迁出旧实现文件（见 `presentation/pickResult` 的说明）。
+import type { PickEntity } from '@/presentation/pickResult'
 import { posKey, isSamePosition } from '@/pure/vec'
 import type { AnnotationType } from '@/render/data/annotationTypes'
 
@@ -13,7 +14,7 @@ import type { AnnotationType } from '@/render/data/annotationTypes'
  * Convert a scene pick result to a SelectedEntity (or null if not matchable).
  */
 export function scenePickToSelectedEntity(
-  pick: ScenePickEntity,
+  pick: PickEntity,
 ):
   | { kind: 'block'; ref: { pos: { x: number; y: number; z: number }; block_state_id: string } }
   | { kind: 'annotation'; id: string; type: AnnotationType }
@@ -261,7 +262,7 @@ export interface PickHandler {
 // ---------------------------------------------------------------------------
 
 export interface PickHandlerV2 {
-  pickAll(event: PointerEvent): ScenePickEntity[]
+  pickAll(event: PointerEvent): readonly PickEntity[]
   selection: {
     selectEntity(entity: SelectedEntity): void
     add(voxels: BlockRef[]): void

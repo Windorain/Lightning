@@ -16,7 +16,6 @@ import {
   type PartTooltipInfo,
   type PreviewTooltipHover,
 } from '@/pure/tooltipResolution'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
 import { TOOLTIP_GRID_NONE, type StructureDefinition } from '@/render/schema/types'
 
 // ---- 既有逐格说明解析（P2.2 未触碰，钉住行为） ----
@@ -82,10 +81,10 @@ describe('resolveViewportTooltipChain — 回归锁定（part == null ⇒ 与 P2
     ).toBe('人工说明')
   })
 
-  it('无逐格说明 ⇒ 宿主 NEI 首行回退（renderTooltipHtml，既有规则）', () => {
+  it('无逐格说明 ⇒ 宿主 NEI 首行回退（返回**原文**，格式由呈现边界解析）', () => {
     expect(
       resolveViewportTooltipChain({ cellText: '', part: null, hostNeiLines: hostNei }),
-    ).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    ).toBe('ME Glass Cable - Fluix')
   })
 
   it('什么都没有 ⇒ 空串（既有规则）', () => {
@@ -144,7 +143,7 @@ describe('resolveViewportTooltipChain — 部件命中（P2.2）', () => {
     const empty: PartTooltipInfo = { localId: 'x:0', displayName: '', tooltip: [] }
     expect(
       resolveViewportTooltipChain({ cellText: '', part: empty, hostNeiLines: hostNei }),
-    ).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    ).toBe('ME Glass Cable - Fluix')
     expect(
       resolveViewportTooltipChain({ cellText: '', part: empty, hostNeiLines: undefined }),
     ).toBe('')

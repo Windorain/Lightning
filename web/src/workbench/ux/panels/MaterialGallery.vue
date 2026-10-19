@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import type { MaterialQueryItem } from '@/runtime/types'
 import { useContext } from '@/runtime/context'
 import OperatorBtn from '@/workbench/ux/OperatorBtn.vue'
 import { parsePngDims } from '@/util/pngDims'
-import { useMaterialAnimation } from './useMaterialAnimation'
+import { sampleTextureSequence, type TextureSequence } from '@/domain/materials'
+import { animationSpecKey, textureAnimationOf } from '@/domain/textureAnimation'
 import { listMaterials, getMaterialUsageCounts } from '@/context/queries'
 
 const ctx = useContext()
@@ -26,6 +27,13 @@ interface MaterialCard {
 const cards = ref<MaterialCard[]>([])
 const selectedId = ref<string | null>(null)
 const focusedIndex = ref(0)
+/**
+ * 每个 canvas 上次画出的样本帧（同帧重绘是纯浪费；也是"没有自驱 tick"的可见证据）。
+ *
+ * 文档内容重读（`refresh`）时必须清空：换了一份贴图而帧下标恰好相同，不得因为
+ * "帧没变"跳过重绘（否则画面上是上一份文档的帧）。
+ */
+const lastPaintedFrame = new Map<string, number>()
 
 const KIND_LABEL: Record<string, string> = { static16: '静态 (16×)', animated: '动画' }
 const BLEND_LABEL: Record<string, string> = { opaque: '不透明', cutout: '裁剪', translucent: '半透明' }
@@ -99,6 +107,8 @@ function refresh() {
     }
   })
 
+  // 内容重读 ⇒ 贴图/声明可能变了，上一轮"画过第几帧"不再是事实（见 lastPaintedFrame）。
+  lastPaintedFrame.clear()
   if (selectedId.value && !cards.value.find(c => c.materialId === selectedId.value)) {
     selectedId.value = null
   }
@@ -111,13 +121,189 @@ function selectCard(id: string) {
   selectedId.value = selectedId.value === id ? null : id
 }
 
-watch(() => ctx.getDoc().value, () => refresh(), { immediate: true })
+// #301 P10f C′1（N9）：材质面板要的是**宽**信号（内容重读）—— 原地编辑也要刷新
+// （`requestContentRefresh` 也自增 tick），故用 `getContentRefreshTick()`。
+watch(() => ctx.getContentRefreshTick().value, () => refresh(), { immediate: true })
 
-const { setCanvasRef } = useMaterialAnimation((id: string) => {
-  const card = cards.value.find(c => c.materialId === id)
-  if (!card) return undefined
-  return { dataUrl: card.dataUrl, kind: card.kind, animation: card.animation }
+// ---- Animated thumbnails：统一时间 + 纯采样（#249 §19.3；退役 #11） ----
+//
+// 本组件此前用 `useMaterialAnimation` —— 它自持 `requestAnimationFrame` 且
+// `elapsed += delta` 累积帧时间（B5 退役矩阵 #11「材质各自 tick 累积纹理时间」）。
+// 现改为：**时间来自场景**（`ctx.getCurrentFrameIndex()` 与帧 `durationMs`），
+// **样本来自纯采样器** `sampleTextureSequence`。两处消费者（网格缩略图与详情
+// 缩略图）在同一次时间推进里用**同一个**时间值，故同时间同结果（A27）。
+//
+// 时钟是**外围**的：本组件不持有任何调度器，重画由两个**事件**驱动
+// （文档变化、帧下标变化）。这与旧实现的差别不是"换了个循环"，而是
+// **没有任何东西累积，也没有任何东西自驱**。
+
+/** 缓存的序列（按 dataUrl + 声明解析一次；解析失败 ⇒ 不播动画）。 */
+const sequences = new Map<string, TextureSequence | null>()
+const animationCanvases = new Map<string, HTMLCanvasElement>()
+const animationImages = new Map<string, HTMLImageElement>()
+
+// 场景秒数**不再**在本组件里计算：唯一权威是 `domain/animation#sceneClockOf`，
+// 本组件经 `ctx.getSceneSeconds()` 读它的只读投影。
+//
+// 被删除的旧本地实现是"Σ 当前帧之前各帧 durationMs"，与视口的连续口径
+// （时间 × 帧率）不同源 —— 在不等帧时长的文档上两者给出不同的采样时刻。
+// 它还带一个 `DEFAULT_FRAME_MS=50` 的缺省：场景秒**不吃**任何帧时长缺省，
+// 那个常量随公式一起消失（纹理序列的 tick 缺省另有唯一出处）。
+
+/**
+ * 材质声明 → 纹理序列（纯）。
+ *
+ * ## 为什么调 `domain/textureAnimation#textureAnimationOf`（而不是本地再推一遍）
+ *
+ * 本组件此前自己算"格数 = floor(h/w)、缺省 tick × 50ms、顺序播放"。同一张竖条贴图
+ * 在**视口呈现**（UV 偏移裁切）与**本面板缩略图**由两份派生解释 ⇒ 只要其中一份漂移
+ * （例如格数取整、tick 缺省、帧索引是否取模），同一时刻面板与视口就会显示不同帧
+ * （A27 的同族形态）。⇒ 派生只有一处：`textureAnimationOf`（返回 `null` = 静态）。
+ *
+ * 缓存键必须含**动画声明**：同一个 dataUrl 的字节配不同 `frametime/frames` 是不同
+ * 序列（只按 dataUrl 缓存会让"改了播放速度"在面板上不生效）。
+ */
+function sequenceFor(card: MaterialCard): TextureSequence | null {
+  if (!card.dataUrl || card.kind !== 'animated') return null
+  const cacheKey = `${card.dataUrl.length.toString(36)}:${card.dataUrl.slice(-32)}|${animationSpecKey(card.animation)}`
+  const cached = sequences.get(cacheKey)
+  if (cached !== undefined) return cached
+
+  if (!card.textureWidth || !card.textureHeight) {
+    sequences.set(cacheKey, null)
+    return null
+  }
+  const binding = textureAnimationOf({
+    id: card.materialId,
+    resource: { assetId: card.materialId, contentVersion: cacheKey, url: card.dataUrl },
+    kind: card.kind,
+    animation: card.animation ?? null,
+    width: card.textureWidth,
+    height: card.textureHeight,
+  })
+  const value = binding === null ? null : binding.sequence
+  sequences.set(cacheKey, value)
+  return value
+}
+
+/** 把一个样本画到 canvas 上（呈现消费采样结果；采样本身是纯的）。 */
+function paint(canvas: HTMLCanvasElement, img: HTMLImageElement, card: MaterialCard, sample: { frame: number }): void {
+  const frameSize = card.textureWidth ?? img.width
+  if (canvas.width !== frameSize) canvas.width = frameSize
+  if (canvas.height !== frameSize) canvas.height = frameSize
+  const g = canvas.getContext('2d')
+  if (!g) return
+  g.imageSmoothingEnabled = false
+  g.clearRect(0, 0, frameSize, frameSize)
+  g.drawImage(img, 0, sample.frame * frameSize, frameSize, frameSize, 0, 0, frameSize, frameSize)
+}
+
+/**
+ * 所有在册缩略图按同一场景时间重画一次（跳帧/倒退/暂停都由它体现）。
+ *
+ * ## 为什么这里是**事件驱动**而不是 rAF 循环（合流后修正）
+ *
+ * P4 初版让一个 `requestAnimationFrame` 循环每帧调用本函数。那是**多余且有害**的：
+ *
+ *  - `sceneSeconds()`（见下）是**帧下标的纯函数** —— 没有累积量、没有独立时钟。
+ *    帧下标不变时它每次都返回同一个数，于是那个循环每帧重画**完全相同的像素**；
+ *  - 而两个输入都已各自被 `watch` 覆盖（文档变化 → `refresh()`；帧下标变化 →
+ *    本函数）。⇒ 循环没有提供任何新的重画时机。
+ *
+ * 合流到 P5 后被 `presentation-purity.test.ts` 的「遗留 RAF 双向登记」闸门抓到
+ * （它普查 `src/` 全部真实 RAF 调用点，未登记即判红）。**正确的处置不是把它
+ * 登记成 `paint-wakeup`，而是删除它** —— 登记是给"暂时无法消除的接缝"用的，
+ * 而这一处可以直接消除。这也更贴合 #249 §19.3「禁止材质/视口自行累计 tick」
+ * 与 §15 第 6 条「业务推进可枚举」的意图：**能不留自驱调度就不留**。
+ */
+function paintAll(): void {
+  // 时间来自**唯一权威**（与视口/导出同一函数），不是本组件的独立累加器。
+  const seconds = ctx.getSceneSeconds()
+  for (const [key, canvas] of animationCanvases) {
+    const img = animationImages.get(key)
+    const card = cards.value.find(c => c.materialId === key || `${c.materialId}-detail` === key)
+    if (!img || !card) continue
+    const seq = sequenceFor(card)
+    if (!seq) continue
+    const sample = sampleTextureSequence(seq, seconds)
+    if (!sample.ok) continue
+    const frame = sample.value.frame
+    if (lastPaintedFrame.get(key) === frame) continue
+    paint(canvas, img, card, sample.value)
+    lastPaintedFrame.set(key, frame)
+  }
+}
+
+/** Vue `:ref` 绑定入口（与旧 `useMaterialAnimation().setCanvasRef` 同一调用形态）。 */
+function setCanvasRef(el: unknown, materialId: string): void {
+  const canvas = el as HTMLCanvasElement | null
+  if (!canvas) {
+    animationCanvases.delete(materialId)
+    animationImages.delete(materialId)
+    return
+  }
+  const lookupId = materialId.endsWith('-detail') ? materialId.slice(0, -7) : materialId
+  const card = cards.value.find(c => c.materialId === lookupId)
+  if (!card?.dataUrl || card.kind !== 'animated') return
+  animationCanvases.set(materialId, canvas)
+  const img = new Image()
+  img.onload = () => {
+    animationImages.set(materialId, img)
+    // 图片到达后立即画首帧（此时才拿得到像素）。
+    // 之后的每次重画都由**事件**驱动：文档变化（`refresh`）与帧下标变化（下面的 watch）
+    // —— 没有自驱循环（原因见 `paintAll` 的说明）。
+    const seq = sequenceFor(card)
+    if (seq) {
+      const sample = sampleTextureSequence(seq, ctx.getSceneSeconds())
+      if (sample.ok) {
+        paint(canvas, img, card, sample.value)
+        lastPaintedFrame.set(materialId, sample.value.frame)
+      }
+    }
+  }
+  img.src = card.dataUrl
+}
+
+onUnmounted(() => {
+  animationCanvases.clear()
+  animationImages.clear()
+  lastPaintedFrame.clear()
 })
+
+/**
+ * **帧时钟订阅**（播放驱动）+ **帧下标 watch**（暂停态拖动定位）。
+ *
+ * ## 为什么必须订阅时钟（而不只 watch 帧下标）
+ *
+ * 旧驱动只有 `watch(() => ctx.getFrameIndex())`。M5-1 拆掉多方块帧轴后，
+ * 多方块文档 `frameCount()===0`、帧下标恒 0 ⇒ 播放不会触发 watch，面板冻结。
+ * 而纹理时间**本来就不该**依赖世界帧轴（`domain/animation#sceneClockOf` 只吃 frame/fps）。
+ *
+ * ## 为什么只在本组件订阅、不自己起调度器
+ *
+ * 时钟归外壳（`Context#getFrameClock`，一个 `EditContext` 一个），本组件只**订阅**：
+ * 不累加任何 delta、不持有 rAF。暂停时 `advanced===false`（内核时间没变）⇒ 不重绘。
+ * 帧时钟不可用（组件挂载早于外壳装配）时由 `watch(clock)` 在它出现后补订阅。
+ */
+let unframe: (() => void) | null = null
+function subscribeClock(): void {
+  unframe?.()
+  unframe = null
+  const clock = ctx.getFrameClock()
+  if (clock === null) return
+  unframe = clock.onFrame((info) => {
+    if (info.advanced) paintAll()
+  })
+}
+watch(() => ctx.getFrameClock(), () => subscribeClock())
+onMounted(() => subscribeClock())
+onBeforeUnmount(() => {
+  unframe?.()
+  unframe = null
+})
+
+// 暂停态拖动定位（时间变了但时钟 `advanced` 未必触发）⇒ 也重画一次。
+watch(() => ctx.getFrameIndex(), () => paintAll())
 
 // ---- Keyboard navigation ----
 const gridEl = ref<HTMLElement | null>(null)
@@ -281,12 +467,8 @@ watch(focusedIndex, () => {
           </div>
 
           <div class="mg-detail-ops">
-            <OperatorBtn
-              v-if="selected.kind === 'animated'"
-              op-id="OPERATOR_EXPORT_GIF"
-              label="导出 GIF"
-              :operator-props="{ materialId: selected.materialId }"
-            />
+            <!-- Q2（M6-3）：材质卡的「导出 GIF」入口已退出（与场景 GIF 合并成一个入口）。
+                 静态纹理仍可导出 PNG；"单独导出某张材质的动画 GIF"不再有入口。 -->
             <OperatorBtn
               op-id="OPERATOR_EXPORT_TEXTURE"
               label="导出 PNG"

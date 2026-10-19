@@ -13,7 +13,7 @@ import {
   serializeMtl,
   serializeObjMeshes,
   type MtlSerializedEntry,
-} from '@/render/mesh/objExportSerialize'
+} from '@/adapters/export/objExportSerialize'
 import {
   collectStructureGeometryPiecesPure,
   mergeBakedQuadPiecesAttributes,
@@ -33,6 +33,11 @@ import {
   rasterizeVoxelAtlasToPngBlob,
   type VoxelAtlasTileSource,
 } from '@/workbench/textureAtlasRaster'
+import type {
+  BundleBlendApproximationFact,
+  BundleSemanticReport,
+  BundleTextureFirstFrameFact,
+} from '@/application/exportSemantics'
 
 import {
   OBJ_NAME,
@@ -44,6 +49,84 @@ import {
   extractTextureBlobs,
   representativePaletteEntryForBlob,
 } from './bundleMaterialBaking'
+
+/** 装配期收集的**不可表达事实**（纯局部累加器；最终折叠成 `BundleSemanticReport`）。 */
+interface SemanticAccumulator {
+  readonly firstFrameOnly: BundleTextureFirstFrameFact[]
+  readonly blendApproximations: BundleBlendApproximationFact[]
+}
+
+function newSemanticAccumulator(): SemanticAccumulator {
+  return { firstFrameOnly: [], blendApproximations: [] }
+}
+
+/**
+ * 记一条"竖条动画只画了首帧"（M6-4）。
+ *
+ * 归属材质按下标反查（`materialPalette[i].textureBlobIndex === blobIndex`）：
+ * 没有归属也要记（`materialIndices: []`）—— "有动画贴图被压成一帧"这件事不得因为
+ * 反查不到材质而消失。
+ */
+function recordFirstFrameOnly(
+  acc: SemanticAccumulator,
+  def: StructureDefinition,
+  blobIndex: number,
+  stripFrameCount: number,
+): void {
+  if (stripFrameCount <= 1) return
+  const materialIndices: number[] = []
+  for (let i = 0; i < def.materialPalette.length; i += 1) {
+    const e = def.materialPalette[i]
+    if (e && typeof e.textureBlobIndex === 'number' && Math.floor(e.textureBlobIndex) === blobIndex) materialIndices.push(i)
+  }
+  acc.firstFrameOnly.push({ blobIndex, frameCount: stripFrameCount, materialIndices })
+}
+
+/**
+ * 记"混合模式只能近似"（M6-4）。
+ *
+ * 判据取**实际参与该集群的材质声明**，不取 `mtlDissolveAndIllum` 的产物：
+ * 后者把 cutout 归成 `d=1,illum=1`（与 opaque 同形），若按它判就会漏报"cutout 被
+ * 当成不透明"—— 那正是本节要暴露的近似。`translucent` 同样只是 `d=0.92` 的近似。
+ */
+function recordBlendApproximations(
+  acc: SemanticAccumulator,
+  def: StructureDefinition,
+  pieces: readonly BakedQuadGeometryPiece[],
+  materialName: string,
+): void {
+  const seen = new Set<number>()
+  for (const p of pieces) {
+    if (seen.has(p.materialIndex)) continue
+    seen.add(p.materialIndex)
+    const blend = def.materialPalette[p.materialIndex]?.blend
+    if (blend !== 'cutout' && blend !== 'translucent') continue
+    acc.blendApproximations.push({ materialName, blend })
+  }
+}
+
+/** 折叠报告并交给调用方（纯观察；回调抛错不影响导出）。 */
+function emitSemanticReport(
+  options: StructureBundleExportOptions | undefined,
+  acc: SemanticAccumulator,
+  stats: { readonly nonAirVoxelCount: number; readonly skippedUnmappedCount: number; readonly undefinedBlockDetails: readonly { registryKey: string; reason: string; voxelCount: number }[] },
+  layered: { readonly layerCount: number } | null,
+): void {
+  const report: BundleSemanticReport = Object.freeze({
+    firstFrameOnly: Object.freeze([...acc.firstFrameOnly]),
+    skippedUnmappedVoxels: stats.skippedUnmappedCount,
+    skippedVoxels: Object.freeze(
+      stats.undefinedBlockDetails.map((d) => Object.freeze({ registryKey: d.registryKey, reason: d.reason, voxelCount: d.voxelCount })),
+    ),
+    layered: layered === null ? null : Object.freeze({ layerCount: layered.layerCount }),
+    blendApproximations: Object.freeze([...acc.blendApproximations]),
+  })
+  try {
+    options?.onSemanticReport?.(report)
+  } catch {
+    // 诊断是旁路：上报失败不改变导出结论（同 `runIsoExport#onSemantics` 的纪律）。
+  }
+}
 
 function remapUvsByTileId(
   uvs: Float32Array,
@@ -72,6 +155,7 @@ async function buildAtlasFromPieces(
   blobs: string[],
   maxSide: number,
   serialRef: { next: number },
+  semantics: SemanticAccumulator,
 ): Promise<{
   merged: { positions: Float32Array; uvs: Float32Array; colors: Float32Array }
   pngBlob: Blob | null
@@ -160,7 +244,9 @@ async function buildAtlasFromPieces(
     const raw = blobs[bi]
     const rep = representativePaletteEntryForBlob(def, matOrder, bi)
     if (!rep || typeof raw !== 'string') continue
-    const { width, height } = await measureTextureBlobFirstFrame(raw, rep)
+    const { width, height, stripFrameCount } = await measureTextureBlobFirstFrame(raw, rep)
+    // M6-4：这条贴图若是竖条动画，画面上只会出现**首帧** —— 事实必须带出去。
+    recordFirstFrameOnly(semantics, def, bi, stripFrameCount)
     blobIndexToTileId.set(bi, nextTileId)
     dims.push({ tileId: nextTileId++, width, height })
   }
@@ -287,6 +373,7 @@ async function buildStructureBundleZipBlock(
   const mtlEntries: MtlSerializedEntry[] = []
   const atlasZipFiles: Array<{ path: string; blob: Blob }> = []
   const serialRef = { next: 0 }
+  const semantics = newSemanticAccumulator()
 
   for (const voxelKey of sortedVoxelKeys) {
     const voxelPieces = byVoxel.get(voxelKey)!
@@ -299,10 +386,11 @@ async function buildStructureBundleZipBlock(
       : `block_${col}_${row}_${zSlice}`
     const matName = sanitizeNewmtlName(matBase)
 
-    const r = await buildAtlasFromPieces(voxelPieces, def, blobs, maxSide, serialRef)
+    const r = await buildAtlasFromPieces(voxelPieces, def, blobs, maxSide, serialRef, semantics)
 
     const texName = `textures/block_${col}_${row}_${zSlice}.png`
     const { d, illum } = mtlDissolveAndIllum(r.repBlend?.blend)
+    recordBlendApproximations(semantics, def, voxelPieces, matName)
 
     if (!r.hasAtlas) {
       mtlEntries.push({ name: matName, d, illum, mapKd: undefined })
@@ -354,6 +442,8 @@ async function buildStructureBundleZipBlock(
     zip.file(f.path, f.blob)
   }
 
+  // M6-4：注释行里的那些事实（skipped_unmapped_voxels 等）同批**结构化**交回调用方。
+  emitSemanticReport(options, semantics, stats, null)
   return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
 }
 
@@ -376,6 +466,7 @@ async function buildStructureBundleZipConnected(
   const atlasZipFiles: Array<{ path: string; blob: Blob }> = []
   let texSerial = 0
   const serialRef = { next: 0 }
+  const semantics = newSemanticAccumulator()
 
   for (let cid = 0; cid < componentCount; cid++) {
     const { pieces } = collectStructureGeometryPiecesPure(def, {
@@ -385,13 +476,14 @@ async function buildStructureBundleZipConnected(
     })
     if (pieces.length === 0) continue
 
-    const r = await buildAtlasFromPieces(pieces, def, blobs, maxSide, serialRef)
+    const r = await buildAtlasFromPieces(pieces, def, blobs, maxSide, serialRef, semantics)
 
     const texName = `textures/component_${texSerial}.png`
     texSerial++
 
     const matName = sanitizeNewmtlName(`component_${cid}`)
     const { d, illum } = mtlDissolveAndIllum(r.repBlend?.blend)
+    recordBlendApproximations(semantics, def, pieces, matName)
 
     if (!r.hasAtlas) {
       mtlEntries.push({ name: matName, d, illum, mapKd: undefined })
@@ -443,6 +535,7 @@ async function buildStructureBundleZipConnected(
     zip.file(f.path, f.blob)
   }
 
+  emitSemanticReport(options, semantics, stats, null)
   return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
 }
 
@@ -455,6 +548,7 @@ async function buildLayeredAtlasFromPieces(
   def: StructureDefinition,
   blobs: string[],
   maxSide: number,
+  semantics: SemanticAccumulator,
 ): Promise<{
   merged: { positions: Float32Array; uvs: Float32Array; colors: Float32Array }
   layerCount: number
@@ -511,7 +605,8 @@ async function buildLayeredAtlasFromPieces(
     if (t.blobIndex < 0) continue
     const rep = representativePaletteEntryForBlob(def, matOrder, t.blobIndex)
     if (!rep) continue
-    const { width, height } = await measureTextureBlobFirstFrame(blobs[t.blobIndex]!, rep)
+    const { width, height, stripFrameCount } = await measureTextureBlobFirstFrame(blobs[t.blobIndex]!, rep)
+    recordFirstFrameOnly(semantics, def, t.blobIndex, stripFrameCount)
     tileDims.push({ tileId: t.tileId, width, height, src: { kind: 'blob', blobIndex: t.blobIndex } })
   }
 
@@ -574,7 +669,8 @@ async function buildStructureBundleZipLayered(
     cullOccludedQuads: false,
   })
 
-  const r = await buildLayeredAtlasFromPieces(pieces, def, blobs, maxSide)
+  const semantics = newSemanticAccumulator()
+  const r = await buildLayeredAtlasFromPieces(pieces, def, blobs, maxSide, semantics)
 
   const objMeshes: ObjExportMesh[] = []
   const mtlEntries: MtlSerializedEntry[] = []
@@ -620,5 +716,7 @@ async function buildStructureBundleZipLayered(
   zip.file(OBJ_NAME, objBody)
   zip.file(MTL_NAME, serializeMtl(mtlEntries))
   for (const f of atlasZipFiles) zip.file(f.path, f.blob)
+  // layered：叠化规则只在文件名与注释里 —— 这一条也必须结构化报出（M6-4）。
+  emitSemanticReport(options, semantics, stats, r.hasAtlas ? { layerCount: r.layerCount } : null)
   return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
 }

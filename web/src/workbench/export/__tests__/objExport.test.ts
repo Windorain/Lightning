@@ -10,7 +10,7 @@ import {
   serializeMtl,
   type ObjExportMesh,
   type MtlSerializedEntry,
-} from '@/render/mesh/objExportSerialize'
+} from '@/adapters/export/objExportSerialize'
 import { labelVoxelComponents, AIR_COMPONENT } from '@/render/mesh/voxelComponents'
 import { collectStructureGeometryPiecesPure } from '@/render/mesh/structureGeometryCore'
 import type {

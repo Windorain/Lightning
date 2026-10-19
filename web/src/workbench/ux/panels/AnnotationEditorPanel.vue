@@ -1,114 +1,81 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount, shallowRef } from 'vue'
+/**
+ * **注解属性**面板（#253 P2）。
+ *
+ * 依据：#249 §6（基础 Inspector 由 RNA 生成）、§19.1（草稿与提交分离）；契约 §5.2。
+ *
+ * ## 退役 #3：本文件原来的三样东西都删了
+ *
+ *  1. **`buildRnaOwner()` 的 `Proxy`**（原 40–54 行）：一个 `set` 陷阱把赋值转成
+ *     `ANNOTATION_UPDATE`。那是**旁路写入的隐式形式** —— 赋值语法触发写命令，
+ *     静态上无法列出「谁写了什么」，且它绕过了 RNA 的合法性/可编辑性判定。
+ *  2. **手写 `restLayout`**（原 20 条 `kind: 'property'`）：每条都要人记得加，
+ *     且 `annotation.description` 干脆不走 RNA（自建 `textarea` + 200ms debounce）。
+ *  3. **`IMMEDIATE_KEYS` 过滤**：`description`/`id`/`created_at`/`updated_at`/`type`
+ *     在 Proxy 里被静默 `return true`（即「写成功」但不做任何事）——
+ *     用户改了没反应且**没有任何提示**。
+ *
+ * 现在：属性由 `lightning.annotation.*` 声明生成（`PropertyInspector`），
+ * 写入经唯一写路由；只读属性由 `evaluateEditability` 给出**结构化原因**并显示，
+ * 不再是「静默吞掉」。本文件只保留注解面板**特有**的两件事：
+ *  - 描述字段的 tooltip 富文本预览（呈现功能，不是写面）；
+ *  - 「删除注解」具名命令（删除不是字段写入）。
+ */
+
+import { computed, ref, watch } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { Annotation } from '@/render/data/annotationTypes'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
-import UIRenderer from '@/workbench/ux/UIRenderer.vue'
-import type { UILayout, UILayoutItem } from '@/workbench/ux/types/layout'
+import ContentText from '@/editors/ContentText.vue'
+import PropertyInspector from '@/workbench/ux/PropertyInspector.vue'
 
 const props = defineProps<{ ctx: Context }>()
 
-const DESC_SAVE_DELAY = 200
-const IMMEDIATE_KEYS = new Set(['description', 'id', 'created_at', 'updated_at', 'type'])
-
 const annos = ref<Annotation[]>([])
-const rnaOwner = shallowRef<object | null>(null)
-const desc = ref('')
-const focused = ref(false)
-
-let descTimer: ReturnType<typeof setTimeout> | undefined
-
-function selectedIds(): string[] {
-  return annos.value.map(a => a.id)
-}
-
-function applyPatch(patch: Record<string, unknown>): void {
-  for (const id of selectedIds()) {
-    void props.ctx.getOperators().exec('ANNOTATION_UPDATE', { id, patch })
-  }
-}
-
-function patchProperty(key: string, value: unknown): void {
-  if (IMMEDIATE_KEYS.has(key)) return
-  const patch: Record<string, unknown> = { [key]: value }
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    patch[key] = { ...(value as Record<string, unknown>) }
-  }
-  applyPatch(patch)
-}
-
-function buildRnaOwner(first: Annotation): object {
-  return new Proxy(first as object, {
-    get(target, key) {
-      return (target as Record<string, unknown>)[key as string]
-    },
-    set(_target, key, value) {
-      const k = String(key)
-      if (IMMEDIATE_KEYS.has(k) || k === 'description') return true
-      patchProperty(k, value)
-      return true
-    },
-  })
-}
 
 function load(): void {
   const sel = [...props.ctx.getSelection().items.value].filter(e => e.kind === 'annotation')
-  const doc = props.ctx.getDoc().value
-  const all = (doc?.annotations ?? []) as Annotation[]
-  let found: Annotation[]
+  // #301 P10f D3（R2）：注解表走内核注解读面（`KernelAnnotationView`）。
+  // ⚠️ 面板的 `Annotation` 类型比读面**宽**（含 `renderOpacity`/`fontSize` 等 legacy
+  // 专有字段）⇒ 两跳断言（`as unknown as`）是刻意的：读面给的是**它承载的那一份**，
+  // 未承载字段在面板上表现为 `undefined`（不显示），而**不是**被伪造一个默认值。
+  // 该收窄登记在 `composition/seams.ts` 的 `annotation-wide-field-face`（owner P11）。
+  const all = props.ctx.kernelAnnotations() as unknown as Annotation[]
   if (sel.length === 0) {
     const hoverId = props.ctx.getHoveredAnnotationId().value
     const hovered = hoverId ? all.find(a => a.id === hoverId) : undefined
-    if (!hovered) {
-      annos.value = []
-      rnaOwner.value = null
-      return
-    }
-    found = [hovered]
-  } else {
-    found = sel.map(s => all.find(a => a.id === s.id)).filter(Boolean) as Annotation[]
-  }
-  annos.value = found
-  if (found.length === 0) {
-    rnaOwner.value = null
+    annos.value = hovered ? [hovered] : []
     return
   }
-
-  rnaOwner.value = buildRnaOwner(found[0]!)
-
-  if (!focused.value) {
-    if (found.length === 1) {
-      desc.value = found[0]!.description ?? ''
-    } else {
-      const firstDesc = found[0]!.description ?? ''
-      const same = found.every(a => (a.description ?? '') === firstDesc)
-      desc.value = same ? firstDesc : ''
-    }
-  }
+  annos.value = sel.map(s => all.find(a => a.id === s.id)).filter(Boolean) as Annotation[]
 }
 
 watch(
   () => [
     props.ctx.getSelection().items.value,
-    props.ctx.getDoc().value,
+    // #301 P10f C′1（N9）：宽信号（内容重读）。
+    props.ctx.getContentRefreshTick().value,
+    props.ctx.getContentRefreshTick().value,
     props.ctx.getHoveredAnnotationId().value,
   ] as const,
-  () => { load() },
+  () => {
+    load()
+  },
   { immediate: true },
 )
 
-function onDescInput(e: Event): void {
-  desc.value = (e.target as HTMLTextAreaElement).value
-  if (descTimer) clearTimeout(descTimer)
-  descTimer = setTimeout(() => {
-    descTimer = undefined
-    applyPatch({ description: desc.value })
-  }, DESC_SAVE_DELAY)
-}
-
-onBeforeUnmount(() => { if (descTimer) clearTimeout(descTimer) })
-
-const previewHtml = computed(() => renderTooltipHtml(desc.value))
+/**
+ * 描述预览文本：读**已提交**的描述（不是本地草稿）。
+ *
+ * 旧实现里预览用本地 `desc` 而写入走 200ms debounce，于是「预览已经变了但文档还没变」
+ * 是个用户可见的不一致窗口。现在预览跟随文档（提交后立即一致），
+ * 草稿态由 `PropertyField` 自己管理。
+ *
+ * 呈现侧：只算出**要呈现的文本**，解析交给公共受控边界（`ContentText`）——
+ * 不再产 HTML 串再 `v-html`（#259 A32 退役项：本文件原为 6 条直通路径之一；
+ * 旧的 `pure/renderTooltipHtml.ts` 已随 P8 退役删除）。
+ * 于是注解预览与 Tooltip 框、Tooltip 编辑预览走同一条规则。
+ */
+const previewText = computed(() => annos.value[0]?.description ?? '')
 
 const typeLabel = computed(() => {
   if (annos.value.length === 0) return ''
@@ -118,82 +85,10 @@ const typeLabel = computed(() => {
   return annos.value.length > 1 ? `${base} ×${annos.value.length}` : base
 })
 
-const restLayout = computed<UILayout | null>(() => {
-  const a = annos.value[0]
-  if (!a) return null
-  const multi = annos.value.length > 1
-  const items: UILayoutItem[] = []
-
-  items.push({
-    kind: 'box',
-    label: '外观',
-    items: [
-      { kind: 'property', rnaPath: 'annotation.color', label: '颜色' },
-      { kind: 'property', rnaPath: 'annotation.visible', label: '可见' },
-      { kind: 'property', rnaPath: 'annotation.locked', label: '锁定' },
-    ],
-  })
-
-  if (multi) return { kind: 'column', align: false, items }
-
-  switch (a.type) {
-    case 'box':
-      items.push({ kind: 'separator' })
-      items.push({
-        kind: 'box',
-        label: '包围盒',
-        items: [
-          { kind: 'property', rnaPath: 'annotation.min', label: '最小坐标' },
-          { kind: 'property', rnaPath: 'annotation.max', label: '最大坐标' },
-          { kind: 'property', rnaPath: 'annotation.renderStyle', label: '渲染样式' },
-          { kind: 'property', rnaPath: 'annotation.renderOpacity', label: '不透明度' },
-          { kind: 'property', rnaPath: 'annotation.fillOpacity', label: '填充不透明度' },
-          { kind: 'property', rnaPath: 'annotation.frameThickness', label: '边框厚度' },
-          { kind: 'property', rnaPath: 'annotation.overlay', label: '覆盖层' },
-        ],
-      })
-      break
-    case 'point':
-      items.push({ kind: 'separator' })
-      items.push({
-        kind: 'box',
-        label: '位置 & 图标',
-        items: [
-          { kind: 'property', rnaPath: 'annotation.pos', label: '位置' },
-          { kind: 'property', rnaPath: 'annotation.icon', label: '图标' },
-          { kind: 'property', rnaPath: 'annotation.size', label: '大小' },
-        ],
-      })
-      break
-    case 'line':
-      items.push({ kind: 'separator' })
-      items.push({
-        kind: 'box',
-        label: '线段',
-        items: [
-          { kind: 'property', rnaPath: 'annotation.thickness', label: '粗细' },
-          { kind: 'property', rnaPath: 'annotation.arrow', label: '箭头' },
-          { kind: 'property', rnaPath: 'annotation.showPoints', label: '显示控制点' },
-        ],
-      })
-      break
-    case 'text':
-      items.push({ kind: 'separator' })
-      items.push({
-        kind: 'box',
-        label: '文本',
-        items: [
-          { kind: 'property', rnaPath: 'annotation.anchorPos', label: '锚点位置' },
-          { kind: 'property', rnaPath: 'annotation.text', label: '内容' },
-          { kind: 'property', rnaPath: 'annotation.fontSize', label: '字号' },
-          { kind: 'property', rnaPath: 'annotation.backgroundAlpha', label: '背景透明度' },
-        ],
-      })
-      break
-  }
-
-  return { kind: 'column', align: false, items }
-})
+/** 删除是**具名命令**（不是字段写入）—— 故不经属性面板。 */
+function deleteSelected(): void {
+  for (const a of annos.value) void props.ctx.getOperators().invoke('ANNOTATION_DELETE', { id: a.id })
+}
 </script>
 
 <template>
@@ -202,37 +97,20 @@ const restLayout = computed<UILayout | null>(() => {
       <span class="anno-editor-type">{{ typeLabel }}</span>
     </div>
 
-    <div class="ux-box">
-      <label class="ux-box-label">注解信息</label>
-      <div class="anno-editor-desc">
-        <textarea
-          class="anno-editor-textarea"
-          :value="desc"
-          @input="onDescInput"
-          @focus="focused = true"
-          @blur="focused = false"
-          placeholder="描述（支持 § 颜色码和换行）"
-          spellcheck="false"
-        />
-        <div class="anno-editor-preview wm-tooltip-surface wm-tooltip-surface--inline">
-          <!-- eslint-disable-next-line vue/no-v-html -->
-          <div class="wm-tooltip-body" v-html="previewHtml" />
-        </div>
-      </div>
+    <!--
+      描述预览（呈现功能；描述本身是 RNA 属性，由下方属性面板渲染与提交）。
+      外部文本（注解描述）经受控呈现边界；**无 `v-html`**。
+      （#259 A32 退役项：本文件原为 6 条 `v-html` 直通路径之一。）
+    -->
+    <div class="anno-editor-preview wm-tooltip-surface wm-tooltip-surface--inline">
+      <ContentText class="wm-tooltip-body" :text="previewText" mode="mc" />
     </div>
 
-    <UIRenderer
-      v-if="restLayout && rnaOwner"
-      :layout="restLayout"
-      :rna="ctx.getRna()"
-      :owner="rnaOwner"
-    />
+    <!-- 全部注解属性（含 description）：生成式，写入经唯一写路由 -->
+    <PropertyInspector :ctx="ctx" title="注解属性" />
 
     <hr class="ux-sep" />
-    <button
-      class="anno-editor-delete"
-      @click="annos.forEach(a => ctx.getOperators().invoke('ANNOTATION_DELETE', { id: a.id }))"
-    >删除注解</button>
+    <button class="anno-editor-delete" @click="deleteSelected">删除注解</button>
   </div>
   <div v-else class="tooltip-editor-empty">
     选中一个注解以编辑
@@ -258,32 +136,12 @@ const restLayout = computed<UILayout | null>(() => {
   border-radius: var(--wb-radius-sm);
   border: 1px solid var(--wb-border);
 }
-.anno-editor-desc {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-.anno-editor-textarea {
-  flex: 1;
-  min-height: 100px;
-  padding: 8px;
+.anno-editor-preview {
+  min-width: 0;
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius-md);
+  padding: 8px;
   background: var(--wb-bg-surface);
-  color: var(--wb-text);
-  font-size: 13px;
-  font-family: var(--wb-font-mono);
-  line-height: 1.5;
-  resize: vertical;
-  outline: none;
-  white-space: pre-wrap;
-}
-.anno-editor-textarea:focus {
-  border-color: var(--wb-accent);
-}
-.anno-editor-preview {
-  flex: 1;
-  min-width: 0;
 }
 .anno-editor-delete {
   padding: 6px 12px;
@@ -303,25 +161,6 @@ const restLayout = computed<UILayout | null>(() => {
   color: var(--wb-text-dim);
   padding: 20px 0;
   text-align: center;
-}
-</style>
-
-<style>
-.ux-box {
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-lg);
-  padding: 10px;
-  margin: 4px 0;
-  background: var(--wb-bg-surface);
-}
-.ux-box-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--wb-text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  margin-bottom: 6px;
 }
 .ux-sep {
   border: none;

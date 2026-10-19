@@ -27,6 +27,7 @@ import {
   readOutlineMask,
   maskLocalAabb,
   readGridSize,
+  screenshotWikiViewport,
   type QuadCorners,
 } from './helpers/parts'
 
@@ -83,7 +84,7 @@ test.describe('B-1 · 描边 mask 从整格收敛到部件', () => {
       // mask 是 rAF/帧后写入的：等一帧再截图，保证截到的是稳定态
       await page.waitForTimeout(150)
       const file = path.join(SHOT_DIR, `b1-after-${name}-hover.png`)
-      await page.locator('.vc-viewport').first().screenshot({ path: file })
+      await screenshotWikiViewport(page, file)
       shots[name] = file
     }
 
@@ -116,7 +117,7 @@ test.describe('B-1 · 描边 mask 从整格收敛到部件', () => {
     expect(stoneLocal.min).toEqual([0, 0, 0])
     expect(stoneLocal.max).toEqual([1, 1, 1])
     const stoneFile = path.join(SHOT_DIR, 'b1-regression-fullcube-stone-hover.png')
-    await page.locator('.vc-viewport').first().screenshot({ path: stoneFile })
+    await screenshotWikiViewport(page, stoneFile)
 
     console.log(`[B-1] mask 局部 AABB = ${JSON.stringify(observed)}`)
     console.log(`[B-1] 满方块对照 mask = ${JSON.stringify(stoneLocal)}；截图 = ${JSON.stringify({ ...shots, stone: stoneFile })}`)

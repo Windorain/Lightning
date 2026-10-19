@@ -25,7 +25,25 @@
   font-display: swap;
 }
 
-:root {
+/**
+ * 暗色（默认）值。
+ *
+ * ## 为什么选择器里有 `[data-lk-theme="dark"]`（P10 #261，收口 F2）
+ *
+ * 亮色块用的是 `[data-lk-theme="light"]`（见下），而**暗色原先只有 `:root`**。
+ * 自定义属性沿 DOM 继承 ⇒ 一个 `dark` 实例嵌在 `light` 实例（或 light 文档根）
+ * 里时，它从祖先继承到**亮色**变量，而自己没有一条规则把暗色值重新确立 ——
+ * 于是"一 light 一 dark 同页"里 dark 那半显示成亮色（F2 的原始描述）。
+ *
+ * 把 `[data-lk-theme="dark"]` 加进暗色块后，**任何**标了 dark 的元素
+ * （实例根或文档根）都会重新确立暗色值，与祖先的主题无关。
+ * 这是"主题作用域补齐半边"，不是新机制：`[data-lk-theme]` 本就由
+ * `shellSettings.scopeAttrs` 写在每个实例根上，只是此前只有 light 半边有规则。
+ *
+ * `:root` 保留（未标任何主题属性时的默认）。
+ */
+:root,
+[data-lk-theme="dark"] {
   /* Surface hierarchy */
   --wb-bg-deepest: #080d12;
   --wb-bg-surface: #111c26;
@@ -74,7 +92,19 @@
   --wb-radius-full: 10px;
 }
 
-[data-wb-theme="light"] {
+/**
+ * 亮色覆盖。
+ *
+ * `[data-lk-theme]` 是 **P8（#259 A33）** 新增的**实例作用域**选择器：
+ * 自定义属性沿 DOM 继承，因此把该属性放在**实例根元素**上时，
+ * 同页两个实例各自解析出各自的变量值 —— 而 `[data-wb-theme]`（文档根）
+ * 是全页一份，第二个实例挂载即覆盖第一个。
+ *
+ * 两者并存：旧属性仍由既有外壳/宿主设置，不改变现有行为；
+ * 实例作用域是新增的可选路径。
+ */
+[data-wb-theme="light"],
+[data-lk-theme="light"] {
   --wb-bg-deepest: #dee4ea;
   --wb-bg-surface: #eaeef3;
   --wb-bg-elevated: #f2f5f8;

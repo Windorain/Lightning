@@ -2,7 +2,7 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import type { Context } from '@/runtime/context'
 import type { BlockRef } from '@/context/selection'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
+import ContentText from '@/editors/ContentText.vue'
 import { getBlockPaletteEntry } from '@/context/queries'
 
 const props = defineProps<{ ctx: Context }>()
@@ -20,8 +20,8 @@ const blockName = computed(() => blockRef.value?.block_state_id ?? '(未选中)'
 const h = computed(() => {
   const item = blockRef.value
   if (!item) return 0
-  const g = props.ctx.getDoc().value?.frame(0)?.grid
-  return g?.height ?? 0
+  // #301 P10f D3（R5）：网格读面。帧下标**逐字保留 `0`**（旧实现即 `frame(0)`）。
+  return props.ctx.kernelGrid(0)?.height ?? 0
 })
 
 const text = ref('')
@@ -30,12 +30,14 @@ const focused = ref(false)
 function loadValue(): void {
   const item = blockRef.value
   if (!item) { text.value = ''; return }
-  const doc = props.ctx.getDoc().value as Record<string, any> | null
-  const grid = doc?.cellTooltipGrid as number[][][] | undefined
-  if (!grid) { text.value = ''; return }
+  // #301 P10f D3（R6）：逐格说明有**自己**的读面（内容键 → 侧表的投影在
+  // `runtime/tooltipRead`，与保存投影**同一条**取载荷规则 ⇒ 面板看到的 == 存出来的）。
+  const tips = props.ctx.cellTooltips()
+  if (!tips) { text.value = ''; return }
   // #80 修复：缺 tooltipPalette 按**空调色板**处理（写入侧会新建），不再把
   // "调色板缺省"当"无说明层"短路——否则面板上写入的内容读不回，表现为"接受了输入"。
-  const palette = (doc?.tooltipPalette as string[] | undefined) ?? []
+  const grid = tips.grid
+  const palette = tips.palette
   const row = h.value > 0 ? h.value - 1 - item.pos.y : item.pos.y
   const idx = grid[item.pos.z]?.[row]?.[item.pos.x]
   if (idx == null || idx < 0 || idx >= palette.length) { text.value = ''; return }
@@ -43,7 +45,8 @@ function loadValue(): void {
 }
 
 watch(() => blockRef.value, () => { loadValue() }, { immediate: true })
-watch(() => props.ctx.getDoc().value, () => { if (!focused.value) loadValue() })
+// #301 P10f C′1（N9）：宽信号（内容重读）—— tooltip 侧表可能被原地改。
+watch(() => props.ctx.getContentRefreshTick().value, () => { if (!focused.value) loadValue() })
 
 let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -75,7 +78,11 @@ const paletteNameLine = computed(() => {
   return ''
 })
 
-const previewHtml = computed(() => {
+/**
+ * 预览**文本**（不是 HTML 串）：旧实现在这里调 `renderTooltipHtml` 再 `v-html`。
+ * 前置宿主 NEI 名行的既有规则保留；解析交给公共受控边界。
+ */
+const previewText = computed(() => {
   let t = text.value
   if (paletteNameLine.value) {
     const nl = t.indexOf('\n')
@@ -84,7 +91,7 @@ const previewHtml = computed(() => {
       t = paletteNameLine.value + '\n' + t
     }
   }
-  return renderTooltipHtml(t)
+  return t
 })
 </script>
 
@@ -104,8 +111,11 @@ const previewHtml = computed(() => {
         spellcheck="false"
       />
       <div class="tooltip-editor-preview wm-tooltip-surface wm-tooltip-surface--inline">
-        <!-- eslint-disable-next-line vue/no-v-html -->
-        <div class="wm-tooltip-body" v-html="previewHtml" />
+        <!--
+          外部文本（工具tip 草稿）经受控呈现边界；无 `v-html`。
+          （#259 A32 退役项：本文件原为 6 条 `v-html` 直通路径之一。）
+        -->
+        <ContentText class="wm-tooltip-body" :text="previewText" mode="mc" />
       </div>
     </div>
   </div>

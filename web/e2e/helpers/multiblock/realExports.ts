@@ -1057,7 +1057,7 @@ export function realDeclarationViolations(doc: DocObservation, p: RealProduct): 
   cmp('变体数', doc.variantCount, p.variantKeys.length)
   cmp('差异规则条数', doc.ruleCount, p.ruleCount)
   cmp('帧数 = 变体数（一变体一帧）', doc.frameCount, p.variantKeys.length)
-  cmp('帧声明数', doc.multiblockFrameCount, p.variantKeys.length)
+  cmp('场景声明数', doc.multiblockSceneCount, p.variantKeys.length)
   cmp('并集调色板条目数', doc.blockPaletteSize, p.paletteSize)
   cmp('骨架 sizeChannel', doc.backbone?.sizeChannel ?? null, p.sizeChannel)
   cmp('骨架阶数', doc.backbone?.stepCount ?? null, p.steps.length)
@@ -1074,7 +1074,12 @@ export function realDeclarationViolations(doc: DocObservation, p: RealProduct): 
   if (doc.backboneMatchesSource !== true) {
     v.push(`decl.backbone 与 multiblockSource 原文不一致（backboneMatchesSource=${doc.backboneMatchesSource}）`)
   }
-  if (doc.warnings.length > 0) v.push(`解析告警非空：${doc.warnings.join(' | ')}`)
+  if (doc.warnings.length > 0) v.push(`解析告警非空（内核源根重解析）：${doc.warnings.join(' | ')}`)
+  // 伴随断言（R2/S3）：内容同一性 —— 与 `contract#declarationViolations` 同一口径
+  // （"告警为空"必须连同"应用读的就是这份 body"一起成立）。
+  if (doc.declarationMatchesSource !== true) {
+    v.push(`应用侧声明与内核源根重解析不一致（declarationMatchesSource=${doc.declarationMatchesSource}）`)
+  }
   return v
 }
 

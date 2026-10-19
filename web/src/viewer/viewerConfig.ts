@@ -3,7 +3,6 @@
  */
 
 import type { BlockIconCacheOptions } from '@/render/interaction/blockIconCache'
-import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
 import type { RenderBundle } from '@/render/schema/types'
 import type { Main } from '@/runtime/main'
 
@@ -45,7 +44,6 @@ export const ALL_FEATURES_OFF: View3DFeatures = {
 export interface View3DConfig {
   sceneId: string
   renderBundle: RenderBundle
-  materialLibrary: MaterialLibraryApi
   features: View3DFeatures
   blockIconCacheOptions: BlockIconCacheOptions
   initialLayerWorldY: number
@@ -62,7 +60,11 @@ export interface View3DConfig {
 
 /**
  * EmbedSettings — 嵌入视口的渲染配置。
- * 从 View3DConfig 拆解出渲染端所需字段，不含 renderBundle / materialLibrary。
+ * 从 View3DConfig 拆解出渲染端所需字段，不含 renderBundle / sceneId。
+ *
+ * 材质库**不在**配置里（M8-5）：图标材质库由 DRW 内部按**已解码像素**装配
+ * （唯一解码链 = `composition/kernelTextureResources`），旧的 `buildMaterialLibrary`
+ * 第二解码链已退役。
  */
 export interface EmbedSettings {
   features: View3DFeatures
@@ -74,6 +76,21 @@ export interface EmbedSettings {
   loadingMessage: string
   okMessage: (modelId: string) => string
   debug: boolean
+  /**
+   * 宿主指定的主题（P10 #261，收口 F1）。
+   *
+   * ## 为什么它必须进 `EmbedSettings` 而不是被 `mount()` 写进全局
+   *
+   * 旧 `mount()` 直接 `document.documentElement.dataset.neiTheme = theme` ——
+   * 全页一份，同页两实例互相覆盖（F1）。现在它是**本实例**的初始设置，
+   * 经 `createEmbedHost` → `createShellSettings({ initialTheme })` →
+   * 实例根元素的 `data-lk-theme`。
+   *
+   * 缺省 `undefined` = "不指定，走实例偏好/宿主页属性/默认 dark 那条既有优先级"
+   * —— 不是"默认 light"，也不是"默认 dark"：那两者都由 `shellSettings` 决定，
+   * 本字段只表达"宿主**显式**要求了什么"。
+   */
+  theme?: 'light' | 'dark'
 }
 
 /** 从 View3DConfig 提取 EmbedSettings */
@@ -102,6 +119,8 @@ export function buildEmbedSettingsFromBootstrap(parts: {
     loadingMessage?: string
     okMessage?: (modelId: string) => string
     debug?: boolean
+    /** 宿主指定的主题（P10 #261 F1：进实例设置，不写全局）。 */
+    theme?: 'light' | 'dark'
   }
   features?: Partial<View3DFeatures>
 }): EmbedSettings {
@@ -120,6 +139,8 @@ export function buildEmbedSettingsFromBootstrap(parts: {
     loadingMessage: ui.loadingMessage ?? defaultEmbedUi.loadingMessage,
     okMessage: ui.okMessage ?? defaultEmbedUi.okMessage,
     debug: ui.debug ?? defaultEmbedUi.debug,
+    // P10 #261（F1）：宿主显式指定的主题进**实例**设置，不再写文档根。
+    ...(ui.theme === undefined ? {} : { theme: ui.theme }),
   }
 }
 
@@ -143,7 +164,7 @@ export function buildEmbedSettingsFromMain(main: Main): EmbedSettings {
   }
 }
 
-export const defaultEmbedUi: Omit<View3DConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
+export const defaultEmbedUi: Omit<View3DConfig, 'renderBundle' | 'sceneId'> = {
   features: {
     blockStatsSidebar: false,
     layerBar: false,

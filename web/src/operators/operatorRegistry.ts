@@ -10,6 +10,23 @@ import { pushDocUndo } from './pushDocUndo'
 
 import { ModalOperatorWrapper } from './modalOperatorWrapper'
 import type { StateDigest } from '@/logging/LogCenter'
+import { refuseOperator } from './capabilityRefusal'
+import { reportCommandApplied, reportCommandReceived } from '@/runtime/commandDiagnostics'
+
+/**
+ * 该算子**缺哪一个能力**（`null` = 全部具备）。
+ *
+ * M7-5：能力门是**声明式**的（`OperatorType.requires`），结算点在注册表的两条入口
+ * （`exec`/`invoke`）—— 于是"缺能力"只有一种行为：**结构化拒绝** + 成句原因，
+ * 不会出现"某个算子在 poll 里悄悄返回 false、另一个在 exec 里直接 return"的分叉
+ * （SPEC §10.7/§10.10）。
+ */
+function missingCapabilityOf(op: OperatorType, ctx: Context): string | null {
+  for (const capability of op.requires ?? []) {
+    if (!ctx.hasCapability(capability)) return capability
+  }
+  return null
+}
 
 function logOperatorResult(
   ctx: Context, opId: string, label: string, result: string,
@@ -44,24 +61,37 @@ export class OperatorRegistry {
   async exec(ctx: Context, id: string, props?: OperatorProperties): Promise<void> {
     const op = this.operators.get(id)
     if (!op) { ctx.log.warn('Operator', `exec: op not found ${id}`, { opId: id }); return }
+    // M8-6：命令的"被接收/已执行"是 §19.9 第一项要求的事实。这里是**唯一**写点
+    // （菜单、快捷键、脚本、`ctx.getOperators().exec` 全部经过它）；拒绝由
+    // `capabilityRefusal`/`settleFieldWrite` 发 `command.rejected`，不在这里重复。
+    reportCommandReceived(ctx.wm.diagnostics, id)
+    // 能力门优先于 poll：缺能力是**装配事实**（不会因文档状态变化），必须先结算成拒绝。
+    const missingCapability = missingCapabilityOf(op, ctx)
+    if (missingCapability !== null) { refuseOperator(ctx, op, missingCapability); return }
     if (op.poll && !op.poll(ctx)) {
       ctx.log.info('Operator', `exec: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
       return
     }
 
-    const doc = ctx.getDoc().value
-    const snap = doc ? ctx.log.snapshot(ctx) : undefined
+    // #301 P10f C′1：存在性判定走 GF-15 读面（B′ 已建立的不变量）。
+    // 原写法 `const doc = …; doc ? snapshot : undefined` 只用"有没有文档"这一位事实
+    // ⇒ 换成读面后残留归零。⚠️ 下方 `:57`/`:59` 的 `.clone()` 是 **N10**
+    // （受控双轨，Lead 裁决 (b)：legacy 快照在撤销路径存续，归一归 P11）—— 本批**不动**。
+    const snap = ctx.hasLoadedDocument() ? ctx.log.snapshot(ctx) : undefined
     const resolvedProps: OperatorProperties = props ?? {}
     if (op.exec) {
-      if (op.flagUndo && ctx.getDoc().value !== null) {
-        const before = ctx.getDoc().value?.clone() ?? null
+      if (op.flagUndo && ctx.hasLoadedDocument()) {
+        // #301 P10f D3（R8）：撤销快照 = **不透明令牌**（R-WK-09 裁决 3）。
+        // `null` = 当时没有文档 ⇒ 表达"撤销到无文档"（内核历史结构性表达不了的那一态）。
+        const before = ctx.documentSnapshot()
         await op.exec(ctx, resolvedProps)
-        const after = ctx.getDoc().value?.clone() ?? null
-        pushDocUndo(ctx, before, after, op.label, op.undoReplaceDocOptions)
+        const after = ctx.documentSnapshot()
+        pushDocUndo(ctx, before, after, op.label)
       } else {
         await op.exec(ctx, resolvedProps)
       }
       logOperatorResult(ctx, id, op.label, 'FINISHED', snap)
+      reportCommandApplied(ctx.wm.diagnostics, id)
     }
   }
 
@@ -75,20 +105,22 @@ export class OperatorRegistry {
   ): OpResult {
     const op = this.operators.get(id)
     if (!op) { ctx.log.warn('Operator', `invoke: op not found ${id}`, { opId: id }); return OP_RESULT.CANCELLED }
+    const missingCapability = missingCapabilityOf(op, ctx)
+    if (missingCapability !== null) { refuseOperator(ctx, op, missingCapability); return OP_RESULT.CANCELLED }
     if (op.poll && !op.poll(ctx)) {
       ctx.log.info('Operator', `invoke: poll failed ${op.label}`, { opId: id, result: 'CANCELLED', reason: 'poll' })
       return OP_RESULT.CANCELLED
     }
 
-    const doc = ctx.getDoc().value
-    const snap = doc ? ctx.log.snapshot(ctx) : undefined
+    // #301 P10f C′1：同 `:52`（存在性走 GF-15 读面）。
+    const snap = ctx.hasLoadedDocument() ? ctx.log.snapshot(ctx) : undefined
 
     const resolvedProps: OperatorProperties = props ?? {}
     if (regionId) resolvedProps._regionId = regionId
 
     if (op.invoke) {
-      const snapshot = op.flagUndo && ctx.getDoc().value !== null
-        ? ctx.getDoc().value?.clone() ?? null
+      const snapshot = op.flagUndo && ctx.hasLoadedDocument()
+        ? ctx.documentSnapshot()
         : null
 
       const result = op.invoke(ctx, resolvedProps, event)
@@ -103,8 +135,8 @@ export class OperatorRegistry {
         logOperatorResult(ctx, id, op.label, 'RUNNING_MODAL', snap)
       } else if (result === OP_RESULT.FINISHED) {
         if (snapshot !== null) {
-          const snapshotAfter = ctx.getDoc().value?.clone() ?? null
-          pushDocUndo(ctx, snapshot, snapshotAfter, op.label, op.undoReplaceDocOptions)
+          const snapshotAfter = ctx.documentSnapshot()
+          pushDocUndo(ctx, snapshot, snapshotAfter, op.label)
         }
         logOperatorResult(ctx, id, op.label, 'FINISHED', snap)
       }
@@ -127,11 +159,11 @@ async function invokeExecFallback(
   op: OperatorType,
   props: OperatorProperties,
 ): Promise<OpResult> {
-  if (op.flagUndo && ctx.getDoc().value !== null) {
-    const snapshot = ctx.getDoc().value?.clone() ?? null
+  if (op.flagUndo && ctx.hasLoadedDocument()) {
+    const snapshot = ctx.documentSnapshot()
     await op.exec!(ctx, props)
-    const snapshotAfter = ctx.getDoc().value?.clone() ?? null
-    pushDocUndo(ctx, snapshot, snapshotAfter, op.label, op.undoReplaceDocOptions)
+    const snapshotAfter = ctx.documentSnapshot()
+    pushDocUndo(ctx, snapshot, snapshotAfter, op.label)
   } else {
     await op.exec!(ctx, props)
   }

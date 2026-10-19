@@ -6,13 +6,15 @@
  *  - 给出且该格有部件 ⇒ 该部件盒 union（AE2 同格三部件各自不同）；
  *  - 未知 localId / 无部件数据 / 无几何 ⇒ 回退整格 / null（不劣化）。
  *
- * ctx 只取 getDoc()/getCurrentFrameIndex()，与 `pickPart.test.ts` 同口径的最小手工实例。
+ * ctx 只取 getDoc()/getFrameIndex()，与 `pickPart.test.ts` 同口径的最小手工实例。
  */
 import { describe, it, expect } from 'vitest'
-import { ref } from 'vue'
+// #301 P10f D3：`ref` 随手工替身一起移除（改走 `makeKernelReadHost` 的真 `Context`）。
 import { getBlockGeometry, getPartMaskGeometry, getPartsAt } from '@/context/queries'
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import type { Context } from '@/runtime/context'
+// #301 P10f D3：手工替身换成**真 `Context`**（见 `pickPart.test.ts` 的同款说明）。
+import { makeKernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
 import type { BlockRef } from '@/render/schema/types'
 
 import ae2Fixture from '../../../e2e/fixtures/parts-ae2-multibox.v2.json'
@@ -21,10 +23,12 @@ import singleboxFixture from '../../../e2e/fixtures/parts-singlebox-mix.v2.json'
 type Json = Record<string, unknown>
 
 function ctxFor(doc: RuntimeDocument): Context {
-  return {
-    getDoc: () => ref(doc),
-    getCurrentFrameIndex: () => ref(0),
-  } as unknown as Context
+  // #301 P10f D3：`getDoc()` 已终删 ⇒ 用**真 `Context`**（生产读面本体）。
+  // ⚠️ 这是**正确的摩擦**：生产读面变了，替身必须同步 —— 若替身缺 `kernelGrid`，
+  // 会以 `is not a function` 判红，而不是静默读到空网格（后者会让判据空转）。
+  const ctx = makeKernelReadHost(doc).ctx
+  // `getFrameIndex` 是**时间面**（不属本组读面）⇒ 手工补一位（本组只用帧 0）。
+  return Object.assign(ctx, { getFrameIndex: () => 0 }) as Context
 }
 
 /** fixture 网格 2×1×1：部件格 (0,0,0)，石头格 (1,0,0) */

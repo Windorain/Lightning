@@ -11,6 +11,7 @@
  * 键盘事件路由到最后鼠标所在的 region（activeRegion）。
  */
 import type { RegionEventHandler } from '@/events/handlerTypes'
+import type { DiagnosticRecorder } from '@/application/diagnostics'
 import type { createLogCenter } from '@/logging/LogCenter'
 
 type EventDispatcherLog = Pick<
@@ -66,7 +67,16 @@ export class EventDispatcherImpl {
   /** 当前 dispatch 的目标 region（操作符上下文） */
   private _currentRegionId: string | null = null
 
-  constructor(private readonly _log?: EventDispatcherLog) {}
+  /**
+   * @param _log 日志面（追踪/人读）
+   * @param _diagnostics 结构化诊断面（M8-6）：区域不存在、模态 onEnter/handleEvent 抛错
+   *   这四条此前只有 `console.warn/error` —— 用户看不到、判据读不到。现在全部落到
+   *   有界记录器上（稳定码 + 关联字段），不再直写控制台。
+   */
+  constructor(
+    private readonly _log?: EventDispatcherLog,
+    private readonly _diagnostics?: Pick<DiagnosticRecorder, 'record'>,
+  ) {}
 
   // ---- Region 生命周期 ----
 
@@ -111,7 +121,13 @@ export class EventDispatcherImpl {
   ): () => void {
     const system = this._regionSystems.get(regionId)
     if (!system) {
-      console.warn(`[EventDispatcher] region not found: ${regionId}`)
+      // 区域不存在 ⇒ 这条绑定**不会生效**（旧形态：一句控制台警告，调用方以为注册成功）。
+      this._diagnostics?.record({
+        channel: 'command',
+        code: 'command.unsupported',
+        params: { source: 'EventDispatcher.registerRegionHandler', reason: 'region-not-found', regionId },
+        correlation: {},
+      })
       return () => {}
     }
     system.handlerChain.push(handler)
@@ -127,13 +143,29 @@ export class EventDispatcherImpl {
   pushModal(regionId: string, op: ModalOperation, event: Event): void {
     const system = this._regionSystems.get(regionId)
     if (!system) {
-      console.warn(`[EventDispatcher] pushModal: region not found ${regionId}`)
+      this._diagnostics?.record({
+        channel: 'command',
+        code: 'command.unsupported',
+        params: { source: 'EventDispatcher.pushModal', reason: 'region-not-found', regionId, operator: op.id },
+        correlation: {},
+      })
       return
     }
     try {
       op.keymap = op.onEnter(event) ?? undefined
     } catch (e) {
-      console.error(`[EventDispatcher] pushModal onEnter error for ${op.id}:`, e)
+      // 模态算子进场抛错 ⇒ 这次交互**被拒绝**（不是"没反应"）。
+      this._diagnostics?.record({
+        channel: 'command',
+        code: 'command.rejected',
+        params: {
+          source: 'EventDispatcher.pushModal',
+          reason: 'onEnterThrew',
+          operator: op.id,
+          error: e instanceof Error ? e.message : String(e),
+        },
+        correlation: {},
+      })
       return
     }
     system.modalStack.push(op)
@@ -207,7 +239,19 @@ export class EventDispatcherImpl {
             return { break: true, traceId }
           }
         } catch (e) {
-          console.error(`[EventDispatcher] modal ${modal.id} handleEvent error:`, e)
+          // 模态处理抛错 ⇒ 该模态被摘除。"被摘除"是用户可感知的（拖拽中途失效），
+          // 因此它必须留下结构化记录，而不是只进控制台。
+          this._diagnostics?.record({
+            channel: 'command',
+            code: 'command.rejected',
+            params: {
+              source: 'EventDispatcher.dispatch',
+              reason: 'handleEventThrew',
+              modal: modal.id,
+              error: e instanceof Error ? e.message : String(e),
+            },
+            correlation: {},
+          })
           system.modalStack.splice(i, 1)
           modal.onExit(true)
           this._log?.endTrace(`modal ${modal.id} crashed, removed from stack`)
@@ -230,4 +274,3 @@ export class EventDispatcherImpl {
     return { break: false, traceId }
   }
 }
-

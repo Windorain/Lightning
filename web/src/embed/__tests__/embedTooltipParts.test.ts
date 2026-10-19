@@ -10,12 +10,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import { ref, shallowRef } from 'vue'
-import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
+import { useEmbedTooltip } from '@/shared/viewport/useEmbedTooltip'
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import type { EmbedHover } from '@/runtime/hover'
 import type { PartTooltipInfo } from '@/pure/tooltipResolution'
 import type { StructureDefinition } from '@/render/schema/types'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
 
 import ae2Fixture from '../../../e2e/fixtures/parts-ae2-multibox.v2.json'
 
@@ -39,6 +38,21 @@ const partNorth: PartTooltipInfo = {
   tooltip: ['ME Toggle Bus'],
 }
 
+/**
+ * R1-β① C5：`useEmbedTooltip` 的入参由"旧文档本体（`docRef`）"改为**内核读面投影**
+ * （`metaRef` + `annotationsRef`）。本替身从同一份真实夹具读值 —— 生产里这两项分别来自
+ * `ctx.documentMetadata()` 与 `ctx.kernelAnnotations()`（见 `EmbedViewport.vue`）。
+ */
+const fixturePlain = doc.serialize() as Json
+const fixtureMeta = {
+  author: String((doc.meta as Json).author ?? ''),
+  gtnhVersion: String(fixturePlain.gtnhVersion ?? ''),
+}
+const fixtureAnnotations = (doc.annotations ?? []).map((a) => {
+  const r = a as unknown as { id?: unknown; description?: unknown }
+  return { id: String(r.id ?? ''), description: String(r.description ?? '') }
+})
+
 function makeTooltip(deps: {
   def?: StructureDefinition | null
   palette?: readonly string[]
@@ -50,7 +64,8 @@ function makeTooltip(deps: {
     definitionRef: shallowRef(deps.def === undefined ? ae2Def : deps.def),
     tooltipPaletteRef: ref(deps.palette ?? []),
     showHoverTooltipRef: ref(deps.showHover ?? true),
-    docRef: ref(doc),
+    metaRef: ref(fixtureMeta),
+    annotationsRef: ref(fixtureAnnotations),
   })
   return { hoverRef, api }
 }
@@ -87,13 +102,13 @@ describe('useEmbedTooltip — 部件命中（fixture: parts-ae2-multibox）', ()
   it('同格无部件命中（part=null）⇒ 宿主 NEI 回退（既有行为不劣化）', () => {
     const { hoverRef, api } = makeTooltip({})
     hoverRef.value = blockHover(CABLE_BUS, 0, null)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    expect(api.tooltipText.value).toBe('ME Glass Cable - Fluix')
   })
 
   it('满方块格（石头）⇒ 宿主 NEI 回退，与基线一致', () => {
     const { hoverRef, api } = makeTooltip({})
     hoverRef.value = blockHover(STONE, 1, null)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('Stone'))
+    expect(api.tooltipText.value).toBe('Stone')
   })
 })
 
@@ -118,7 +133,7 @@ describe('useEmbedTooltip — 逐格人工说明叠加层（两条链不互相�
   it('满方块格无逐格说明（-1）⇒ 宿主 NEI 回退不受部件链影响', () => {
     const { hoverRef, api } = makeTooltip({ def: defWithNote, palette: ['人工说明'] })
     hoverRef.value = blockHover(STONE, 1, null)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('Stone'))
+    expect(api.tooltipText.value).toBe('Stone')
   })
 })
 
@@ -132,7 +147,7 @@ describe('useEmbedTooltip — 既有门禁与旁路不变', () => {
   it('侧栏悬停不携带部件 ⇒ NEI 全行（既有行为）', () => {
     const { hoverRef, api } = makeTooltip({})
     hoverRef.value = { kind: 'block', source: 'sidebar', blockId: CABLE_BUS, clientX: 0, clientY: 0 }
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    expect(api.tooltipText.value).toBe('ME Glass Cable - Fluix')
   })
 
   it('无 hover / 无定义 ⇒ 空串', () => {
@@ -222,7 +237,7 @@ describe('B-4 侧栏物品行：物品身份键 → itemIndex 说明行', () => 
     expect(api.tooltipText.value).toBe(STORAGE_ITEM_KEY)
     // 宿主键（block_registry 键）⇒ NEI 既有语义不变
     hoverRef.value = sidebarHover(CABLE_BUS)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    expect(api.tooltipText.value).toBe('ME Glass Cable - Fluix')
   })
 
   it('键巧合同形时物品索引表优先（单一数据源 = itemIndex）', () => {
@@ -237,7 +252,7 @@ describe('B-4 侧栏物品行：物品身份键 → itemIndex 说明行', () => 
     const { hoverRef, api } = makeTooltip({}) // ae2Def 无 itemIndex
     expect(api.tooltipText.value).toBe('')
     hoverRef.value = sidebarHover(CABLE_BUS)
-    expect(api.tooltipText.value).toBe(renderTooltipHtml('ME Glass Cable - Fluix'))
+    expect(api.tooltipText.value).toBe('ME Glass Cable - Fluix')
   })
 
   it('showHoverTooltip 门禁：侧栏物品行不受该开关影响（门禁沿用现状，只在视口路径）', () => {

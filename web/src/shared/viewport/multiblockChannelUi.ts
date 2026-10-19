@@ -2,28 +2,61 @@
  * 「通道」面板的**纯逻辑**（T2.4/T2.5）—— 无 Vue、无 DOM、无 ctx。
  *
  * 分工：
- *  - 本模块：文件声明 → 滑杆规格 / 初始取值 / 面板模型；当前取值 → 装配（T2.2 装配器）→ 渲染视图文档。
- *  - `useMultiblockChannels.ts`：把本模块包成响应式状态（Vue）。
+ *  - 本模块：文件声明 → 滑杆规格 / 面板模型（纯派生）。
+ *  - `useKernelChannels.ts`：把本模块包成响应式状态（Vue），求值走内核面
+ *    （`evaluateMultiblockPresentation` 的唯一求值点）。
  *  - `MultiblockChannelPanel.vue`：纯展示 + 事件（props/emits）。
+ *
+ * ⚠️ **M6-1**：本文件原有的三个吃 `RuntimeDocument` 的旧文档入口
+ * （`assembleForSelection`/`buildChannelPanelModel`/`buildMultiblockRenderView`）
+ * **已删除** —— 它们生产零调用、只被切换前后的对照/面板判据消费；本批把那些判据
+ * 改为「生产派生（内核读面 + 唯一求值点）+ 冻结夹具/指纹」后同批退场
+ * （登记见 `application/__tests__/retirementRegistry.test.ts` 的 `M5_CLOSEOUT`）。
+ * 面板模型的唯一派生入口是 {@link channelPanelModelOf}。
  *
  * **忠实展示文件声明**（计划 T2.4 硬约束）：滑杆条数 = 声明条数（`slider === true`，`hatch` 由解析器排除）、
  * 标签取 `name`（呈现名，来自文件）、上限取 `channel.domain.hi`、`0` 显示 `Not set`。
  * 本模块**不猜测通道语义**：`kind` 只用于展示与 `data-*` 观测属性，不改变任何行为分支。
+ *
+ * ## R2/S3：形参收成**声明事实的结构最小面**（两个载体都能喂）
+ *
+ * 声明侧入口（`tierSampleValues`/`channelSliderSpecs`/`clampChannelValue`/
+ * `initialMultiblockSelection`/`buildChannelPanelModelOf`）吃 {@link MultiblockDeclarationFacts}，
+ * 于是**解析形状**（`context/parsers/multiblockDocument`，元素多带 `raw`）与
+ * **内核域声明**（`domain/multiblockDocument#MultiblockDeclaration`，元素无 `raw`）
+ * 都能喂——消费者适应内核，而不是让内核去兼容旧解析形状。
+ * ⇒ 本模块**不再** import 任何旧格式文档类型（`RuntimeDocument`/`AssemblyResult` 等已随旧入口删除）。
  */
+import { multiblockVariantKey } from '@/context/runtimeDocument'
+import type { ClampRecord } from '@/context/multiblock'
+// M5-2：选择投影下沉到 domain（面板 / 装载装配 / 画面求值**同吃一处**）。
+// 本模块不再自己实现，只把同一批具名符号转出给既有调用方（签名/语义不变）。
 import {
-  RuntimeDocument,
-  RuntimeFrame,
-  multiblockVariantKey,
-  type MultiblockChannelDecl,
-  type MultiblockDecl,
-} from '@/context/runtimeDocument'
-import {
-  assembleSelection,
-  type AssemblyResult,
-  type ClampRecord,
-  type MultiblockInnerDocument,
-} from '@/context/multiblock'
-import { formatUnknownError } from '@/util/formatUnknownError'
+  clampChannelValue,
+  initialMultiblockSelection,
+  snapTierToSample,
+  tierSampleValues,
+} from '@/domain/multiblockSelection'
+import type {
+  MultiblockChannelFacts,
+  MultiblockDeclarationFacts,
+  MultiblockRunstateFacts,
+  MultiblockSelectionState,
+} from '@/domain/multiblockSelection'
+import type { MultiblockDeclarationView } from '@/domain/multiblockDocument'
+
+export {
+  clampChannelValue,
+  initialMultiblockSelection,
+  snapTierToSample,
+  tierSampleValues,
+}
+export type {
+  MultiblockChannelFacts,
+  MultiblockDeclarationFacts,
+  MultiblockRunstateFacts,
+  MultiblockSelectionState,
+}
 
 // ---------------------------------------------------------------------------
 // 面板模型（props 形状，Embed / Workbench 共用）
@@ -45,7 +78,7 @@ export interface ChannelSliderSpec {
   hi: number
 }
 
-/** 面板一次性输入（由 `buildChannelPanelModel` 组装）。 */
+/** 面板一次性输入（由 `channelPanelModelOf` 组装）。 */
 export interface MultiblockChannelPanelModel {
   displayName: string
   tier: number
@@ -58,6 +91,13 @@ export interface MultiblockChannelPanelModel {
   values: Record<string, number>
   runstates: Array<{ id: string; name: string }>
   runstate: string
+  /**
+   * **场景数**（变体配置集合的条数；观测点）。
+   *
+   * M5-1：这份清单是**场景（Scene）**，不是时间轴上的帧 —— 它与播放无关。
+   * 面板显示它只是为了让"文件声明了多少个变体配置"可见。
+   */
+  sceneCount: number
   /** 当前取值派生的变体键（观测点：装配产物确实随之变化） */
   variantKey: string
   /** 装配结果尺寸 `w×h×d`（观测点；装配失败为空串） */
@@ -66,103 +106,13 @@ export interface MultiblockChannelPanelModel {
   notices: string[]
 }
 
-/** 当前取值选择（视图本地状态，与 `assembleSelection` 的输入同形）。 */
-export interface MultiblockSelectionState {
-  totalTier: number
-  values: Record<string, number>
-  runstate: string
-}
-
-/** 装配结论：结果 + 是否命中声明组合 + 提示。 */
-export interface MultiblockAssemblyOutcome {
-  result: AssemblyResult | null
-  variantKey: string
-  /** 变体键是否命中 `decl.variantByKey`（未命中时由 T2.2 回落并落提示） */
-  declared: boolean
-  notices: string[]
-}
+// M5-2：`MultiblockSelectionState` 与"声明事实的结构最小面"、以及
+// `tierSampleValues`/`snapTierToSample`/`clampChannelValue`/`initialMultiblockSelection`
+// 已下沉到 `domain/multiblockSelection`（面板 / 装载装配 / 画面求值同一实现），
+// 本文件在文件头以 `export type` / `export` 转出，签名与语义不变。
 
 // ---------------------------------------------------------------------------
-// 声明 → 滑杆 / 初始取值
-// ---------------------------------------------------------------------------
-
-/** 总 Tier 抽取值清单：显式 `tierSample` 优先，缺省 = 整个 `totalTierDomain`。 */
-export function tierSampleValues(decl: MultiblockDecl): number[] {
-  const sample = decl.tierSample
-  if (Array.isArray(sample) && sample.length > 0) {
-    return [...sample].map((n) => Math.trunc(n)).sort((a, b) => a - b)
-  }
-  const out: number[] = []
-  for (let i = Math.trunc(decl.totalTierDomain.min); i <= Math.trunc(decl.totalTierDomain.max); i++) out.push(i)
-  return out
-}
-
-/**
- * Tier 吸附：把任意 Tier 值吸附到最近的**已声明**抽样值（并列取较小者）。
- *
- * 依据 T2.2 移交注意②：未落在 `tierSample` 的 Tier 会被装配器回落最近抽样并落 warning。
- * 滑杆吸附后 UI 只会停在已声明组合上，warning 不再因滑杆产生（文档瑕疵仍照实提示）。
- */
-export function snapTierToSample(samples: readonly number[], tier: number): number {
-  if (samples.length === 0) return Math.trunc(tier)
-  const target = Math.trunc(tier)
-  let best = samples[0]!
-  for (const v of samples) {
-    const d = Math.abs(v - target)
-    const bd = Math.abs(best - target)
-    if (d < bd || (d === bd && v < best)) best = v
-  }
-  return best
-}
-
-/** 每通道一条滑杆的规格（`slider === false` 的 `hatch` 已被解析器排除，此处不重复判断语义）。 */
-export function channelSliderSpecs(decl: MultiblockDecl): ChannelSliderSpec[] {
-  return decl.channels
-    .filter((c) => c.slider)
-    .map((c: MultiblockChannelDecl) => ({
-      key: c.key,
-      name: c.name,
-      kind: c.kind,
-      min: c.min,
-      max: c.max,
-      hi: c.domain.hi,
-    }))
-}
-
-/**
- * 通道取值夹到声明取值域 `0..domain.hi`（滑杆理论上到不了域外，这里仍是**不信任输入**的一道闸）。
- * 未声明的通道 key → `null`（调用方忽略该次改动）。
- */
-export function clampChannelValue(
-  decl: MultiblockDecl,
-  key: string,
-  value: number,
-): number | null {
-  const ch = decl.channels.find((c) => c.key === key)
-  if (!ch) return null
-  const v = Math.trunc(value)
-  if (!Number.isFinite(v)) return 0
-  return Math.min(Math.max(v, 0), ch.domain.hi)
-}
-
-/** 初始取值：Tier = `domain.default ?? max`（吸附抽样）、所有通道 Not set(0)、运行态 = 声明首项。 */
-export function initialMultiblockSelection(decl: MultiblockDecl): MultiblockSelectionState {
-  const domain = decl.totalTierDomain
-  const samples = tierSampleValues(decl)
-  const rawDefault = Math.trunc(domain.default ?? domain.max)
-  const inDomain = Math.min(Math.max(rawDefault, Math.trunc(domain.min)), Math.trunc(domain.max))
-  const values: Record<string, number> = {}
-  // 契约 §5.1：变体声明值**每个通道都有**（未设置写 0）——故全部通道入表，滑杆只覆盖其中一部分
-  for (const c of decl.channels) values[c.key] = 0
-  return {
-    totalTier: snapTierToSample(samples, inDomain),
-    values,
-    runstate: decl.runstates[0]?.id ?? '',
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 当前取值 → 装配
+// 装配提示（唯一构造点）
 // ---------------------------------------------------------------------------
 
 function formatClampText(c: ClampRecord): string {
@@ -173,79 +123,151 @@ function formatClampText(c: ClampRecord): string {
 }
 
 /**
- * 装配当前取值（**唯一装配入口**，UI 不直接调用 T2.2）。
+ * **装配提示的唯一构造点**（R2/S3）：文件软约束 + 未命中声明组合的回落 + 夹取 + 警告。
  *
- * 守卫（计划 T2.4/T2.5 明文）：先用 `multiblockVariantKey` + `decl.variantByKey` 判断组合是否已声明；
- * 未声明时**不拒绝**（契约 §5.2 推论 3：只夹取/回落），落一条提示后交给 `assembleSelection`。
- * 装配异常一律在此捕获（`result: null` + 提示），不得穿透到 UI。
+ * ## 为什么是具名函数（而不是在调用点各写一遍）
+ *
+ * 面板的提示是**可显示的事实**，顺序也是 ⇒ 提示文案只能有一份实现。
+ * 生产装配来源是内核面（`assembleMultiblockKernelFace` 的 `report`），
+ * 由 {@link channelPanelModelOf} 喂入。
+ *
+ * ⚠️ `report === null` = **没有装配结论**（未装配/装配失败），此时只有文件软约束提示 ——
+ * 与旧实现"notes 先入表、失败再追加一条"的顺序逐字一致。
  */
-export function assembleForSelection(
-  doc: RuntimeDocument,
-  state: MultiblockSelectionState,
-): MultiblockAssemblyOutcome {
-  const mb = doc.multiblock
-  if (!mb) return { result: null, variantKey: '', declared: false, notices: [] }
-
-  const decl = mb.decl
-  const variantKey = multiblockVariantKey(decl, state.values, state.runstate, state.totalTier)
-  const declared = decl.variantByKey.has(variantKey)
-
-  // 文件软约束（`notes`）：只提示，不参与装配（契约 §7.3）
-  const notices: string[] = decl.notes.map((n) => `提示（文件声明）：${n.text}`)
-
-  const inner = doc.multiblockSource as MultiblockInnerDocument | null
-  if (!inner) {
-    notices.push('文档未携带可装配的内层 body（multiblockSource 为空）')
-    return { result: null, variantKey, declared, notices }
+export function assemblyNoticesOf(input: {
+  readonly notes: readonly Readonly<{ readonly text: string }>[]
+  readonly variantKey: string
+  readonly declared: boolean
+  readonly report: Readonly<{
+    readonly variantKey: string
+    readonly clamped: readonly ClampRecord[]
+    readonly warnings: readonly string[]
+  }> | null
+}): string[] {
+  const notices: string[] = input.notes.map((n) => `提示（文件声明）：${n.text}`)
+  if (input.report === null) return notices
+  if (!input.declared) {
+    notices.push(
+      `组合未声明（${input.variantKey}）：按契约回落最近已声明变体 ${input.report.variantKey}`,
+    )
   }
+  for (const c of input.report.clamped) notices.push(formatClampText(c))
+  for (const w of input.report.warnings) notices.push(w)
+  return notices
+}
 
-  try {
-    const result = assembleSelection(inner, {
-      totalTier: state.totalTier,
-      values: { ...state.values },
-      runstate: state.runstate,
-    })
-    if (!declared) {
-      notices.push(
-        `组合未声明（${variantKey}）：按契约回落最近已声明变体 ${result.report.variantKey}`,
-      )
-    }
-    for (const c of result.report.clamped) notices.push(formatClampText(c))
-    for (const w of result.report.warnings) notices.push(w)
-    return { result, variantKey, declared, notices }
-  } catch (e) {
-    notices.push(`装配失败（已保留上一次可渲染结果）：${formatUnknownError(e)}`)
-    return { result: null, variantKey, declared, notices }
-  }
+// ---------------------------------------------------------------------------
+// 声明 → 滑杆
+// ---------------------------------------------------------------------------
+
+/** 每通道一条滑杆的规格（`slider === false` 的 `hatch` 已被解析器排除，此处不重复判断语义）。 */
+export function channelSliderSpecs(decl: MultiblockDeclarationFacts): ChannelSliderSpec[] {
+  return decl.channels
+    .filter((c) => c.slider)
+    .map((c: MultiblockChannelFacts) => ({
+      key: c.key,
+      name: c.name,
+      kind: c.kind,
+      min: c.min,
+      max: c.max,
+      hi: c.domain.hi,
+    }))
 }
 
 // ---------------------------------------------------------------------------
 // 装配产物 → 渲染视图文档
 // ---------------------------------------------------------------------------
 
-/** 面板模型：声明 + 当前取值 + 装配结论 → 面板一次性输入。 */
-export function buildChannelPanelModel(
-  doc: RuntimeDocument,
+/**
+ * 装配结论的**最小面**（R2/S3）：面板只用到"变体键 + 尺寸文本 + 提示"三样。
+ *
+ * 为什么不直接用 `MultiblockAssemblyOutcome`（它带 `AssemblyResult`）：那个类型来自
+ * 旧装配器（`context/multiblock`），而内核面路径（`assembleMultiblockKernelFace`）
+ * 产出的是 `report` + `Grid`，**没有** `AssemblyResult`。收成这三样后，两个来源
+ * （旧文档 / 内核面）都能喂，面板本身不再依赖任何一种装配实现。
+ */
+export interface ChannelPanelOutcome {
+  /** **场景数**（变体配置集合的条数；M5-1：场景不是时间轴帧）。 */
+  readonly sceneCount: number
+  /** 当前取值派生的变体键（观测点）。 */
+  readonly variantKey: string
+  /** 装配尺寸文本（`formatDims` 的产出）；`''` = 本次没有装配结果。 */
+  readonly dims: string
+  readonly notices: readonly string[]
+}
+
+/**
+ * **面板模型（声明事实版）**：声明 + 取值 + 装配结论 → 面板一次性输入。
+ *
+ * 这是面板模型的**唯一组装实现**（旧文档版适配器已随 M6-1 删除）。
+ */
+export function buildChannelPanelModelOf(
+  decl: MultiblockDeclarationFacts,
   state: MultiblockSelectionState,
-  outcome: MultiblockAssemblyOutcome,
-): MultiblockChannelPanelModel | null {
-  const mb = doc.multiblock
-  if (!mb) return null
-  const domain = mb.decl.totalTierDomain
+  outcome: ChannelPanelOutcome,
+): MultiblockChannelPanelModel {
+  const domain = decl.totalTierDomain
   return {
-    displayName: mb.decl.displayName,
+    displayName: decl.displayName,
     tier: state.totalTier,
     tierMin: Math.trunc(domain.min),
     tierMax: Math.trunc(domain.max),
-    tierSamples: tierSampleValues(mb.decl),
-    channels: channelSliderSpecs(mb.decl),
+    tierSamples: tierSampleValues(decl),
+    channels: channelSliderSpecs(decl),
     values: { ...state.values },
-    runstates: mb.decl.runstates.map((r) => ({ id: r.id, name: r.name })),
+    runstates: decl.runstates.map((r) => ({ id: r.id, name: r.name })),
     runstate: state.runstate,
+    sceneCount: outcome.sceneCount,
     variantKey: outcome.variantKey,
-    dims: outcome.result ? formatDims(outcome.result.dims) : '',
-    notices: outcome.notices,
+    dims: outcome.dims,
+    notices: [...outcome.notices],
   }
+}
+
+/**
+ * 装配结论的**最小面**（面板只读"变体键 + 尺寸 + 夹取/警告"）。
+ *
+ * 结构类型：装配根产物（`MultiblockKernelFaceAssembly['report']`）与旧
+ * `AssemblyResult['report']` 都能喂 —— 面板本身不依赖任何一种装配实现。
+ */
+export interface ChannelPanelAssemblyFacts {
+  readonly report: {
+    readonly variantKey: string
+    readonly dims: Readonly<{ w: number; h: number; d: number }>
+    readonly clamped: readonly ClampRecord[]
+    readonly warnings: readonly string[]
+  }
+}
+
+/**
+ * **面板模型（生产唯一派生）**：声明读视图 + 当前取值 + 装配结论 → 面板一次性输入。
+ *
+ * 它替代旧文档版 `buildChannelPanelModel`（M6-1）：旧版要一份 `RuntimeDocument`
+ * 才能取声明与场景数，而生产面板的输入早已是内核读面（声明 = `DocumentContent.multiblock`、
+ * 场景数 = 声明里的 `scenes`、尺寸/提示 = 唯一求值点的装配报告）。
+ * ⇒ 调用方不再需要旧文档，面板模型只有一个派生入口（`useKernelChannels#panel` 与判据同吃）。
+ */
+export function channelPanelModelOf(
+  decl: MultiblockDeclarationView,
+  state: MultiblockSelectionState,
+  sceneCount: number,
+  face: ChannelPanelAssemblyFacts | null,
+): MultiblockChannelPanelModel {
+  // 变体键走**契约的唯一派生规则**（`multiblockVariantKey`）—— 不是 report 里的
+  // "回落后的实际变体"：面板要报的是**当前取值派生**的键（两者在未声明组合上不同）。
+  const variantKey = multiblockVariantKey(decl, { ...state.values }, state.runstate, state.totalTier)
+  return buildChannelPanelModelOf(decl, state, {
+    sceneCount,
+    variantKey,
+    dims: face === null ? '' : formatDims(face.report.dims),
+    notices: assemblyNoticesOf({
+      notes: decl.notes,
+      variantKey,
+      // 「该组合是否已声明」用**索引视图**判（唯一索引实现；键面不含 raw）。
+      declared: decl.variantByKey.has(variantKey),
+      report: face === null ? null : face.report,
+    }),
+  })
 }
 
 /** `0` = 未设置（契约 §5.2：0 与"不设置"在数据层等价）。 */
@@ -256,46 +278,4 @@ export function formatChannelValue(value: number): string {
 /** `w×h×d`（观测用）。 */
 export function formatDims(dims: { w: number; h: number; d: number }): string {
   return `${dims.w}×${dims.h}×${dims.d}`
-}
-
-/**
- * 用装配产物构造**渲染视图文档**（只交给 DRW，不外泄给编辑器/其它消费者）。
- *
- * 为什么必须这样做：多方块文档的 `frame.grid` 恒为 `null`（设计如此，网格是装配产物），
- * 而渲染路径（`drwMeshPipeline`）只能吃 `doc.serialize()`，对 `format_version:"2.0"` 文档
- * 解析的是**顶层展开（首帧 structure）**——故：把装配出的 `Grid` 放到首帧
- * （同时放到当前帧下标，兼容"按当前帧解析"的实现），顶层即可解析出装配结构。
- *
- * ⚠️ **刻意不传 `multiblock`（也不传 `_extra`）**：`serialize()` 会优先写入 `extra`/多方块节点，
- * 其中的根级 `blockPalette` 是**并集调色板**（下标是并集下标），而首帧 `structure` 的
- * `blockPalette` 是 `_gridToV2` 依据"装配网格里实际出现的方块"**重编号**后的调色板。
- * 两者混用会让 `cellGrid` 指向错误的调色板条目 —— 静默渲染错方块。
- * 不传多方块节点 ⇒ 顶层只有首帧 structure 一份自洽的 `cellGrid + blockPalette`。
- */
-export function buildMultiblockRenderView(
-  doc: RuntimeDocument,
-  result: AssemblyResult | null,
-  frameIndex: number,
-): RuntimeDocument {
-  if (!doc.isMultiblock || !result) return doc
-  const grid = result.grid
-  const current = Math.trunc(frameIndex)
-  const frames = doc.frames.map((f, i) => {
-    if (i !== 0 && i !== current) return f
-    return new RuntimeFrame(f.index, f.label, grid, f.durationMs, f.multiblock)
-  })
-  return new RuntimeDocument({
-    formatVersion: doc.formatVersion,
-    id: doc.id,
-    frames,
-    meta: doc.meta,
-    annotations: doc.annotations,
-    labels: doc.labels,
-    textureBlobs: doc.textureBlobs ?? null,
-    tooltipPalette: doc.tooltipPalette ?? null,
-    cellTooltipGrid: doc.cellTooltipGrid ?? null,
-    materialPalette: doc.materialPalette ?? null,
-    playback: doc.playback ?? null,
-    multiblock: null,
-  })
 }

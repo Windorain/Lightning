@@ -7,14 +7,20 @@
  *  - 格内未命中任何部件盒 ⇒ null（回退宿主）
  *  - 栅栏越界盒（maxY=1.5）经碰撞盒回退命中
  *
- * ctx 仅取 getDoc()/getCurrentFrameIndex()，测试用最小手工实例（非渲染路径替身）。
+ * ctx 走 `makeKernelReadHost`（**真 `Context` + 生产读面**）+ 手工补 `getFrameIndex`
+ *（#301 P10f D3：`getDoc()` 已终删，网格读面是 `ctx.kernelGrid`）。
  */
 import { describe, it, expect } from 'vitest'
-import { ref } from 'vue'
+// #301 P10f D3：`ref` 随手工替身一起移除（改走 `makeKernelReadHost` 的真 `Context`）。
 import { pickPartForScenePick } from '@/context/queries'
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import type { Context } from '@/runtime/context'
-import type { ScenePickBlock } from '@/render/interaction/scenePick'
+// #301 P10f D3：`getDoc()` 已终删 ⇒ 手工替身换成**真 `Context`**（生产读面本体）。
+// 这是**正确的摩擦**：生产读面变了，替身必须同步（`kernelGrid` 不在替身上时
+// 会以 `is not a function` 判红，而不是静默读到空网格）。
+import { makeKernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
+// R1-β① C8：形状契约迁出旧实现文件（`render/interaction/scenePick` 本批删除）。
+import type { PickBlock } from '@/presentation/pickResult'
 import { voxelCenterWorld } from '@/pure/vec'
 
 import ae2Fixture from '../../../e2e/fixtures/parts-ae2-multibox.v2.json'
@@ -23,10 +29,9 @@ import singleboxFixture from '../../../e2e/fixtures/parts-singlebox-mix.v2.json'
 type Json = Record<string, unknown>
 
 function ctxFor(doc: RuntimeDocument): Context {
-  return {
-    getDoc: () => ref(doc),
-    getCurrentFrameIndex: () => ref(0),
-  } as unknown as Context
+  const ctx = makeKernelReadHost(doc).ctx
+  // `getFrameIndex` 不在读面范围内（它是时间面），本组只用到帧 0 ⇒ 手工补一位。
+  return Object.assign(ctx, { getFrameIndex: () => 0 }) as Context
 }
 
 /** 由格内局部坐标构造 pick 结果的世界命中点（与网格世界偏移互逆，见 pure/partHit.ts） */
@@ -36,7 +41,7 @@ function pickAt(
   zSlice: number,
   size: { w: number; h: number; d: number },
   local: { x: number; y: number; z: number },
-): ScenePickBlock {
+): PickBlock {
   const center = voxelCenterWorld(column, row, zSlice, size.w, size.h, size.d)
   return {
     kind: 'block',

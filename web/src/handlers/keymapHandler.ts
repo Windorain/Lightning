@@ -12,6 +12,7 @@ import { REGION } from '@/runtime/regionIds'
 import { toggleRegionCollapsed } from '@/runtime/screenLayout'
 import { matchBinding, resolveRegionBaseKeymap, type InputBinding } from '@/keymap'
 import { OP_RESULT } from '@/operators/operatorType'
+import { CAPABILITY } from '@/composition/modules'
 
 interface DragState {
   active: boolean
@@ -32,8 +33,14 @@ export function createKeymapHandler(
       if (!ctx) return { break: false }
 
       // --- Build effective keymap ---
-      const tool = ctx.isEmbed() ? null : ctx.getToolRegistry().activeTool.value
-      const defaultKeymap = resolveRegionBaseKeymap(ctx.region(regionId)?.keymapId)
+      //
+      // M7-5：工具键位层（activeTool 的 keymap/keymapFallback）属于**操纵器面**；
+      // 没有该能力的实例（嵌入）只用区域基础键位表。旧写法是一句宿主身份判断
+      // （嵌入 ⇒ 不看工具层）—— 同一事实现在由装配声明（`tools.manipulators`）回答。
+      const tool = ctx.hasCapability(CAPABILITY.TOOLS_MANIPULATORS)
+        ? ctx.getToolRegistry().activeTool.value
+        : null
+      const defaultKeymap = resolveRegionBaseKeymap(ctx.region(regionId)?.keymapId, ctx.instanceId)
       const toolBindings = tool?.keymap ?? []
       const fallbackBindings = tool?.keymapFallback ?? []
 
@@ -96,10 +103,12 @@ export function createKeymapHandler(
               }
               case 'select-all': ctx.getOperators().exec('OPERATOR_SELECT_ALL'); break
               case 'toggle-toolshelf':
-                if (!ctx.isEmbed()) toggleRegionCollapsed(ctx, REGION.WORKBENCH_TOOLSHELF)
+                // 折叠的是**工作台外壳的 chrome 区**（工具架/属性区）⇒ 外壳能力。
+                // 没有工作台外壳的实例（嵌入）根本没有这两个 region。
+                if (ctx.hasCapability(CAPABILITY.SHELL_WORKBENCH)) toggleRegionCollapsed(ctx, REGION.WORKBENCH_TOOLSHELF)
                 break
               case 'toggle-properties':
-                if (!ctx.isEmbed()) toggleRegionCollapsed(ctx, REGION.WORKBENCH_PROPS)
+                if (ctx.hasCapability(CAPABILITY.SHELL_WORKBENCH)) toggleRegionCollapsed(ctx, REGION.WORKBENCH_PROPS)
                 break
             }
           }
@@ -124,9 +133,12 @@ export function createKeymapHandler(
             const mergedProps = { ...toolProps, ...itemProps }
 
             const result = ctx.getOperators().invoke(binding.opId, mergedProps, event, regionId)
-            if (ctx.isEmbed()) return { break: true }
+            // **屏上手势面**的指针拖拽由手势处理器（`embed/embedTouchHandler`）拥有
+            // ⇒ 不走"点击后拖拽旋转"这条鼠标兜底（否则一次手势会被解释两次，
+            // SPEC §4.3「同一输入事件不得被重复解释为两次操作」）。
+            if (ctx.hasCapability(CAPABILITY.SCREEN_GESTURES)) return { break: true }
             if (result === OP_RESULT.FINISHED) {
-              const hasGizmo = !ctx.isEmbed() && ctx.getToolRegistry().activeGizmo.value !== null
+              const hasGizmo = ctx.hasCapability(CAPABILITY.TOOLS_MANIPULATORS) && ctx.getToolRegistry().hasGizmo()
               if (!hasGizmo) {
                 const pe = event as PointerEvent
                 drag.active = true

@@ -33,7 +33,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick, ref, shallowRef, type App } from 'vue'
 import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
-import { useEmbedTooltip } from '@/embed/useEmbedTooltip'
+import { useEmbedTooltip } from '@/shared/viewport/useEmbedTooltip'
 import { BlockIconCache } from '@/render/interaction/blockIconCache'
 import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
 import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
@@ -657,7 +657,10 @@ function tooltipTextFor(def: StructureDefinition, blockId: string): string {
     definitionRef: shallowRef(def),
     tooltipPaletteRef: ref<readonly string[]>([]),
     showHoverTooltipRef: ref(true),
-    docRef: ref(null),
+    // R1-β① C5：`useEmbedTooltip` 改吃内核读面投影；本条只验侧栏行键解析，
+    // 故两项如实给"没有元数据 / 没有注解"（不是伪装成有值）。
+    metaRef: ref(null),
+    annotationsRef: ref([]),
   })
   return api.tooltipText.value
 }

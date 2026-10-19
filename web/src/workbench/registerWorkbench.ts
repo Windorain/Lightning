@@ -1,6 +1,5 @@
 import type { OperatorType } from '@/operators/operatorType'
 import type { OperatorRegistry } from '@/operators/operatorRegistry'
-import { createRNARegistry, blockRNA, toolSettingsRNA, sceneMetaRNA, wikiConfigRNA, annotationRNA, materialRNA } from '@/workbench/ux/rna'
 import {
   blockInspectorPanel, toolShelfPanel,
   transformPanel, sceneInfoPanel,
@@ -15,16 +14,16 @@ import {
   InitViewportCameraOperator,
 } from '@/operators/builtin/viewOperators'
 import { TooltipEditOperator } from '@/operators/builtin/metaEditOperators'
-import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator } from '@/operators/builtin/docLifecycleOperators'
+import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator, SaveProjectOperator, OpenProjectOperator } from '@/operators/builtin/docLifecycleOperators'
 import { SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator } from '@/operators/builtin/sdeOperators'
-import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator } from '@/operators/builtin/exportOperators'
+import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator, ExportSceneGifOperator } from '@/operators/builtin/exportOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/operators/builtin/annotationOperators'
 import {
   SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetHoveredBlockOperator, SetHoveredAnnotationOperator,
   ThemeToggleOperator, SetLanguageOperator, SetToolSettingOperator, SetRegionSettingOperator, UndoOperator, RedoOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator, SetWikiConfigOperator, ApplySettingsOperator, SetLayerYOperator,
 } from '@/operators/builtin/miscOperators'
-import { ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator } from '@/operators/builtin/materialOperators'
+import { ExportTextureOperator, CopyMaterialLocatorOperator } from '@/operators/builtin/materialOperators'
 import {
   HydrateEmbedInitialViewOperator,
   SyncEmbedInitialViewOperator,
@@ -41,7 +40,10 @@ import {
   WikiSaveAsOperator,
   CopyWikiEmbedOperator,
 } from '@/operators/builtin/wikiOperators'
-import { isWikiHostProfile } from '@/runtime/hostProfile'
+import { CAPABILITY } from '@/composition/modules'
+import { RecoveryAdoptOperator, RecoveryDiscardOperator } from '@/operators/builtin/recoveryOperators'
+import { RetryResourcesOperator } from '@/operators/builtin/resourceOperators'
+import { AREA_OPERATORS } from '@/operators/builtin/areaOperators'
 import { selectTool, moveTool } from '@/workbench/tools/toolDefs'
 import { MoveGizmo } from '@/workbench/tools/gizmos'
 import { boxTool, boxFullTool, BoxGizmo, AnnotationBoxCommitOperator, AnnotationBoxResetOperator } from '@/workbench/tools/boxTool'
@@ -50,8 +52,7 @@ import { lineTool, LineGizmo } from '@/workbench/tools/lineTool'
 import { textTool, TextGizmo } from '@/workbench/tools/textTool'
 import { faceTool, FaceGizmo } from '@/workbench/tools/faceTool'
 import type { ToolRegistry } from '@/workbench/tools/registry'
-import type { ViewportManager } from '@/runtime/viewportManager'
-import type { Main } from '@/runtime/main'
+import { unhandledWritableTypes } from '@/editors/workbench-rna'
 import type { PanelDeclaration } from '@/workbench/ux/types/panel'
 import type { ToolSettings } from '@/runtime/contextAccess'
 
@@ -71,14 +72,17 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   InitViewportCameraOperator,
   TooltipEditOperator,
   NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator,
+  // R1-α（#387）：工程格式的生产开/存入口（R0-D④ 实测 `adapters/files/projectFormat`
+  // 此前零生产调用者 ⇒ "保存/重开一份工程"在产品里没有入口）。
+  SaveProjectOperator, OpenProjectOperator,
   SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetToolSettingOperator, SetRegionSettingOperator, SetHoveredBlockOperator, SetHoveredAnnotationOperator, SetLayerYOperator, ApplySettingsOperator, SetWikiConfigOperator,
   SetWorkspaceModeOperator, ResetLayoutOperator,
   SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator,
-  ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator,
+  ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator, ExportSceneGifOperator,
   ThemeToggleOperator, SetLanguageOperator,
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
   AnnotationBoxCommitOperator, AnnotationBoxResetOperator,
-  ExportTextureOperator, CopyMaterialLocatorOperator, ExportGifOperator,
+  ExportTextureOperator, CopyMaterialLocatorOperator,
   HydrateEmbedInitialViewOperator,
   SyncEmbedInitialViewOperator,
   DocumentLoadOperator,
@@ -89,15 +93,31 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   WikiSaveConfirmOperator,
   WikiSaveAsOperator,
   CopyWikiEmbedOperator,
+  // M8-4：恢复副本的显式采纳/放弃（底栏按钮与命令共用同一条入口；
+  // **没有**"读到就自动采纳"的路径 —— SPEC §9:299）。
+  RecoveryAdoptOperator,
+  RecoveryDiscardOperator,
+  // M8-5：资源失败的手动重试入口（D6；底栏按钮与命令共用同一条入口）。
+  RetryResourcesOperator,
+  // #282 P10b：Area 布局编辑命令的 operator 入口（分割/合并/切类型/调比例）。
+  // `poll` 读"是否有 Area 会话"（装配结果）⇒ 嵌入外壳里天然不可用。
+  ...AREA_OPERATORS,
 ]
 
+/**
+ * 把 SDE 相关 operator 的 `poll` 收窄到"本外壳**没有** Wiki 上传能力"时才可用。
+ *
+ * B5 #7：旧实现是 `if (isWikiHostProfile()) return false`（模块级宿主反查）。
+ * 现在问的是能力 —— SDE（外部 JAR 连接）与 Wiki 上传是两条互斥的文档来源，
+ * 这个互斥是**装配**的后果，不是"宿主叫什么"的后果。
+ */
 function disableOnWikiProfile(op: OperatorType): OperatorType {
   if (!op.poll) return op
   const origPoll = op.poll.bind(op)
   return {
     ...op,
     poll(ctx) {
-      if (isWikiHostProfile()) return false
+      if (ctx.hasCapability(CAPABILITY.WIKI_UPLOAD)) return false
       return origPoll(ctx)
     },
   }
@@ -117,32 +137,45 @@ export function registerWorkbenchOperators(registry: OperatorRegistry): void {
   }
 }
 
-export function registerWorkbenchRna(main: Main): void {
-  const rna = createRNARegistry()
-  rna.register(blockRNA)
-  rna.register(toolSettingsRNA)
-  rna.register(sceneMetaRNA)
-  rna.register(wikiConfigRNA)
-  rna.register(annotationRNA)
-  rna.register(materialRNA)
-  main.registries.rna = rna
+/**
+ * RNA 注册（#253 P2）。
+ *
+ * 旧实现 `registerWorkbenchRna(main)` 造一个 `RNAStruct` 注册表并塞进 `main.registries.rna`；
+ * 那份描述自带 `get`/`set` 闭包与 `uiWidget` 控件名（契约 §5.1/§5.2 禁止）。
+ *
+ * 新形态：属性描述由 `@/editors/workbench-rna` 的 `workbenchRegistry()` **按需构造**
+ * （对象类型声明是数据，不是往 `Main` 上挂的可变注册表），因此 `main.registries.rna`
+ * 与 `context.getRna()` 一并不再需要。本函数保留为**装配期的自检入口**：
+ * 校验「声明的可写对象类型都有写入端口」——即启动期就能发现装配缺陷，
+ * 而不是等到用户点某个控件时才发现 `UnsupportedOperation`。
+ */
+export function validateWorkbenchRna(): readonly string[] {
+  return unhandledWritableTypes()
 }
 
+/**
+ * 注册工作台工具与其 gizmo **工厂**（M4-1：gizmo 按 region 归属）。
+ *
+ * ## 为什么这里不再造实例、也不再往 `'r-viewport'` 槽位写
+ *
+ * 旧实现造**一个** `MoveGizmo` 并塞进根视口槽位 ⇒ 第二区没有 gizmo（S0 域 1 缺口 ②），
+ * 而两区共用同一个 `Object3D` 在结构上也不可能（一个节点只有一个父）。
+ *
+ * 现在注册的是**工厂**：每个视口在 `ready` 时向注册表要**本区**的实例
+ * （`ToolRegistry#gizmoOf(toolId, regionId)`），并挂到本区的
+ * `toolsOverlayGroup`。注册期因此不需要知道"未来会分割出哪些 region"。
+ */
 export function registerWorkbenchTools(
   toolRegistry: ToolRegistry,
-  viewports: ViewportManager,
   _tool: ToolSettings,
-): MoveGizmo {
-  const moveGizmo = new MoveGizmo()
-  viewports.register('r-viewport').gizmo.value = moveGizmo
+): void {
   toolRegistry.register(selectTool)
-  toolRegistry.register(moveTool, moveGizmo)
-  toolRegistry.register(boxTool, new BoxGizmo())
-  toolRegistry.register(boxFullTool, new BoxGizmo())
-  toolRegistry.register(pointTool, new PointGizmo())
-  toolRegistry.register(lineTool, new LineGizmo())
-  toolRegistry.register(textTool, new TextGizmo())
-  toolRegistry.register(faceTool, new FaceGizmo())
+  toolRegistry.register(moveTool, () => new MoveGizmo())
+  toolRegistry.register(boxTool, () => new BoxGizmo())
+  toolRegistry.register(boxFullTool, () => new BoxGizmo())
+  toolRegistry.register(pointTool, () => new PointGizmo())
+  toolRegistry.register(lineTool, () => new LineGizmo())
+  toolRegistry.register(textTool, () => new TextGizmo())
+  toolRegistry.register(faceTool, () => new FaceGizmo())
   toolRegistry.activate('select')
-  return moveGizmo
 }
