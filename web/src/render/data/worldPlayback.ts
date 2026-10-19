@@ -16,10 +16,15 @@
  * （`getDefaultFrameIndex` / `frameAt` / `embeddedStructure`），
  * 它们由适配器使用、不依赖任何时钟（#249 §2.1）。
  *
- * **接缝声明**：`drwMeshPipeline.scheduleNextWorldFrameStep()` 的 `setTimeout` 播放链
- * 是同一退役条目的另一半，其语义替代是 P4 的统一动画求值轨道。P4 尚未交付
- * （远端无 `web-kernel/p04-*` 分支），故按 Lead 裁决**不做半成品替换**，
- * 由 Lead 排合并顺序（详见 #256 交付汇报的接缝一节）。
+ * **接缝声明（M9-1 更正：原文写“P4 尚未交付 / 由 Lead 排合并顺序”，已过期）**：
+ * `drwMeshPipeline.scheduleNextWorldFrameStep()` 的 `setTimeout` 播放链是同一退役条目的
+ * 另一半，**已删除**：`retirementRegistry` 的 `world-frame-playback` 组四个符号
+ * （`scheduleNextWorldFrameStep`/`clearWorldPlaybackSchedule`/`worldPlaybackTimeoutId`/
+ * `dwellMsForCurrentWorldFrame`）相位全 `executed`，全树生产命中 **0**
+ * （只剩本注释与判据文字）；语义替代 = P4（#255）**已交付**的通用轨道：
+ * `domain/animation#sampleTrack` + `advancePlayhead`，时间唯一权威 = `EditContext.time`
+ * （`domain/editing.ts:129`）。⇒ 本模块与播放之间**已无未了的接缝**：
+ * 它只提供无时间参数的纯解析函数。
  */
 
 import type { Frame, StructureData, World } from '../schema/types'
