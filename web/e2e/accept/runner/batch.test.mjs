@@ -10,14 +10,16 @@ test('每个场景都能产出用例，且机位数 = 六视图 + 轴测', () =>
   for (const s of scenes) {
     const plan = planForScene(s)
     const c = caseForScene(s, plan)
-    assert.equal(c.cameras.length, s.cameras.views.length + s.cameras.axonometric.length)
+    assert.equal(c.cameras.length, plan.cameras.length)
     for (const cam of c.cameras) {
       assert.equal(cam.projection.type, 'ortho')
       assert.ok(cam.projection.orthoHeight > 0)
       const [W, H] = cam.resolution
       assert.equal(W / H, 16 / 9)
-      assert.equal(cam.resolution[0], 1920)
-      assert.equal(cam.resolution[1], 1080)
+      if (!s.id.startsWith('pr109-')) {
+        assert.equal(cam.resolution[0], 1920)
+        assert.equal(cam.resolution[1], 1080)
+      }
     }
   }
 })

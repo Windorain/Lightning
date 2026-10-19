@@ -101,9 +101,6 @@
     "cameras": {
       "type": "object",
       "required": [
-        "views",
-        "axonometric",
-        "orthoHeight",
         "resolution"
       ],
       "additionalProperties": false,
@@ -166,6 +163,46 @@
           },
           "minItems": 2,
           "maxItems": 2
+        },
+        "explicit": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "pos",
+              "yaw",
+              "pitch",
+              "orthoHeight"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pos": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "yaw": {
+                "type": "number"
+              },
+              "pitch": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90
+              },
+              "orthoHeight": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          }
         }
       }
     },

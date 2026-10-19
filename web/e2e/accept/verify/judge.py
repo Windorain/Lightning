@@ -78,15 +78,42 @@ def main():
 
     for chk in expect['checks']:
         kind = chk['kind']
+        if chk.get('cameras') and a.camera not in chk['cameras']:
+            results.append({'id': chk['id'], 'kind': kind, 'verdict': 'na', 'reason': '该机位不适用（判据文件声明）'})
+            continue
         if kind in ('region', 'opaque'):
             at = chk['at']
             p = list(cell_center(scene, at))
             if chk.get('face') in FACE_NORMAL:
                 n = FACE_NORMAL[chk['face']]
                 p = [p[i] + n[i] * 0.5 for i in range(3)]
-            gx, gy, wx, wy = px(p)
-            gc = sample(g, gx, gy); wc = sample(w, wx, wy)
-            gcls, wcls = classify(gc, bg_g, a.bg_tol), classify(wc, bg_w, a.bg_tol)
+            # 网格采样：把该格的 8 个角投影成像素矩形，在矩形内取 5×5 —— 与机位无关，
+            # 且不会因为撞到缝合线/边框而给单点结论。
+            corners = []
+            for dx in (0.0, 1.0):
+                for dy in (0.0, 1.0):
+                    for dz in (0.0, 1.0):
+                        corners.append((p[0] - 0.5 + dx, p[1] - 0.5 + dy, p[2] - 0.5 + dz))
+            def rect_of(conv):
+                xs = []; ys = []
+                for c in corners:
+                    X, Y, _ = conv(c); xs.append(X); ys.append(Y)
+                return min(xs), min(ys), max(xs), max(ys)
+            def ratio(img, bg, conv):
+                x0, y0, x1, y1 = rect_of(conv)
+                inset_x = (x1 - x0) * 0.15; inset_y = (y1 - y0) * 0.15
+                n = hit = 0
+                for i in range(5):
+                    for j in range(5):
+                        X = x0 + inset_x + (x1 - x0 - 2 * inset_x) * i / 4
+                        Y = y0 + inset_y + (y1 - y0 - 2 * inset_y) * j / 4
+                        n += 1
+                        hit += 1 if is_background(sample(img, X, Y, r=2), bg, a.bg_tol) else 0
+                return hit / n
+            gr = ratio(g, bg_g, lambda q: game_mapping(cam['game'], q))
+            wr = ratio(w, bg_w, lambda q: web_mapping(shot, meta['localBox'], q))
+            gcls = 'background' if gr >= 0.5 else 'content'
+            wcls = 'background' if wr >= 0.5 else 'content'
             want = chk.get('expect', 'not-background')
             if want.startswith('block:'):
                 results.append({'id': chk['id'], 'kind': kind, 'verdict': 'blocked',
@@ -102,7 +129,7 @@ def main():
                 verdict, reason = 'pass', None
             item = {'id': chk['id'], 'kind': kind, 'verdict': verdict,
                     'game': gcls, 'web': wcls, 'want': want,
-                    'game_rgb': [round(v) for v in gc], 'web_rgb': [round(v) for v in wc]}
+                    'game_bg_ratio': round(gr, 3), 'web_bg_ratio': round(wr, 3)}
             if reason: item['reason'] = reason
             results.append(item)
 
@@ -141,30 +168,45 @@ def main():
                     for x in range(W):
                         row[x] = 0 if is_background(px_[x, y], bg, a.bg_tol) else 1
                 return m
-            mg, mw = mask(g, bg_g), mask(w, bg_w)
-            # 以内容质心对齐后求 IoU（只比较形状，不比位置）
-            def centroid(m):
-                W = len(m[0]); H = len(m); sx = sy = n = 0
-                for y in range(H):
-                    for x in range(W):
-                        if m[y][x]: sx += x; sy += y; n += 1
-                return (sx / n, sy / n) if n else (0, 0)
-            cg, cw = centroid(mg), centroid(mw)
-            H = min(len(mg), len(mw)); W = min(len(mg[0]), len(mw[0]))
+            o = scene['world']['origin']
+            xs = [o[0] + b['at'][0] for b in scene['blocks']] + [o[0] + b['at'][0] + 1 for b in scene['blocks']]
+            ys = [o[1] + b['at'][1] for b in scene['blocks']] + [o[1] + b['at'][1] + 1 for b in scene['blocks']]
+            zs = [o[2] + b['at'][2] for b in scene['blocks']] + [o[2] + b['at'][2] + 1 for b in scene['blocks']]
+            def rect_of_bounds(conv):
+                px_ = []
+                for X in (min(xs), max(xs)):
+                    for Y in (min(ys), max(ys)):
+                        for Z in (min(zs), max(zs)):
+                            x, y, _ = conv((X, Y, Z)); px_.append((x, y))
+                return (min(p[0] for p in px_), min(p[1] for p in px_), max(p[0] for p in px_), max(p[1] for p in px_))
+            def mask_in(img, bg, rect):
+                x0, y0, x1, y1 = [int(v) for v in rect]
+                W, H = img.size
+                x0 = max(0, x0); y0 = max(0, y0); x1 = min(W, x1); y1 = min(H, y1)
+                px_ = img.load()
+                m = Image.new('L', (max(1, x1 - x0), max(1, y1 - y0)), 0)
+                mp = m.load()
+                for y in range(max(1, y1 - y0)):
+                    for x in range(max(1, x1 - x0)):
+                        mp[x, y] = 255 if not is_background(px_[x0 + x, y0 + y], bg, a.bg_tol) else 0
+                return m
+            rg = rect_of_bounds(lambda q: game_mapping(cam['game'], q))
+            rw = rect_of_bounds(lambda q: web_mapping(shot, meta['localBox'], q))
+            mg = mask_in(g, bg_g, rg); mw = mask_in(w, bg_w, rw)
+            SIZE = 256
+            mg = mg.resize((SIZE, SIZE)); mw = mw.resize((SIZE, SIZE))
+            pg, pw = mg.load(), mw.load()
             inter = union = 0
-            for y in range(H):
-                for x in range(W):
-                    xg = int(x + cg[0] - cw[0]); yg = int(y + cg[1] - cw[1])
-                    if not (0 <= xg < len(mg[0]) and 0 <= yg < len(mg)):
-                        continue
-                    vg, vw = mg[yg][xg], mw[y][x]
-                    if vg or vw: union += 1
-                    if vg and vw: inter += 1
+            for y in range(SIZE):
+                for x in range(SIZE):
+                    a1 = pg[x, y] > 127; a2 = pw[x, y] > 127
+                    if a1 or a2: union += 1
+                    if a1 and a2: inter += 1
             iou = inter / union if union else 0.0
             verdict = 'pass' if iou >= thr['silhouetteIoU'] else 'fail'
             results.append({'id': chk['id'], 'kind': 'silhouette', 'verdict': verdict,
                             'value': round(iou, 4), 'threshold': thr['silhouetteIoU']})
-
+            continue
         else:
             results.append({'id': chk['id'], 'kind': kind, 'verdict': 'blocked', 'reason': '首版未实现该判据类型'})
 

@@ -74,15 +74,18 @@ export function validateScene(scene, blocks) {
   const c = scene?.cameras
   if (!c || typeof c !== 'object') E('cameras 缺失')
   else {
-    if (!Array.isArray(c.views) || c.views.length === 0) E('cameras.views 不能为空')
-    else {
-      if (new Set(c.views).size !== c.views.length) E('cameras.views 有重复')
-      for (const v of c.views) if (!VIEWS.includes(v)) E('cameras.views 含未知视图：' + v)
+    const hasExplicit = Array.isArray(c.explicit) && c.explicit.length > 0
+    if (!hasExplicit) {
+      if (!Array.isArray(c.views) || c.views.length === 0) E('cameras.views 不能为空（除非给了 explicit）')
+      else {
+        if (new Set(c.views).size !== c.views.length) E('cameras.views 有重复')
+        for (const v of c.views) if (!VIEWS.includes(v)) E('cameras.views 含未知视图：' + v)
+      }
     }
-    if (!Array.isArray(c.axonometric)) E('cameras.axonometric 必须是数组')
-    else {
+    if (!hasExplicit) {
+      if (!Array.isArray(c.axonometric)) E('cameras.axonometric 必须是数组')
       const names = new Set()
-      for (const a of c.axonometric) {
+      for (const a of c.axonometric ?? []) {
         if (typeof a?.name !== 'string' || a.name === '') E('axonometric 条目缺 name')
         else {
           if (names.has(a.name)) E('axonometric name 重复：' + a.name)
@@ -93,7 +96,18 @@ export function validateScene(scene, blocks) {
         if (!isNum(a?.pitch) || a.pitch < -90 || a.pitch > 90) E('axonometric.pitch 必须在 -90..90')
       }
     }
-    if (c.orthoHeight !== 'auto' && !(isNum(c.orthoHeight) && c.orthoHeight > 0)) E('cameras.orthoHeight 必须是 auto 或正数')
+    if (hasExplicit) {
+      const names = new Set()
+      for (const e of c.explicit) {
+        if (typeof e?.name !== 'string' || e.name === '') E('explicit 条目缺 name')
+        else { if (names.has(e.name)) E('explicit name 重复：' + e.name); names.add(e.name) }
+        if (!Array.isArray(e?.pos) || e.pos.length !== 3 || !e.pos.every(isNum)) E('explicit.pos 必须是 3 个数字')
+        if (!isNum(e?.yaw)) E('explicit.yaw 必须是数字')
+        if (!isNum(e?.pitch) || e.pitch < -90 || e.pitch > 90) E('explicit.pitch 必须在 -90..90')
+        if (!isNum(e?.orthoHeight) || e.orthoHeight <= 0) E('explicit.orthoHeight 必须 > 0')
+      }
+    }
+    if (!hasExplicit && c.orthoHeight !== 'auto' && !(isNum(c.orthoHeight) && c.orthoHeight > 0)) E('cameras.orthoHeight 必须是 auto 或正数')
     if (!Array.isArray(c.resolution) || c.resolution.length !== 2 || !c.resolution.every((n) => isInt(n) && n >= 160)) E('cameras.resolution 必须是 2 个 ≥160 的整数')
     else {
       const [W, H] = c.resolution

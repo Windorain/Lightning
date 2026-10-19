@@ -122,16 +122,22 @@ export function orbitForGameCamera(camera, bounds, orthoHeight) {
 /** 场景 → 机位计划（唯一的机位来源）。 */
 export function planForScene(scene) {
   const bounds = contentBounds(scene)
-  const orthoHeight = scene.cameras.orthoHeight === 'auto' ? autoOrthoHeight(bounds) : scene.cameras.orthoHeight
+  const explicit = Array.isArray(scene.cameras.explicit) ? scene.cameras.explicit : null
+  const orthoHeight = explicit ? null : (scene.cameras.orthoHeight === 'auto' ? autoOrthoHeight(bounds) : scene.cameras.orthoHeight)
   const resolution = scene.cameras.resolution
   const cams = []
-  for (const v of scene.cameras.views) cams.push(cameraForView(v, bounds, orthoHeight))
-  for (const a of scene.cameras.axonometric) cams.push(cameraForAxonometric(a, bounds, orthoHeight))
+  if (explicit) {
+    for (const e of explicit) cams.push({ name: e.name, pos: e.pos, yaw: e.yaw, pitch: e.pitch, orthoHeight: e.orthoHeight })
+  } else {
+    for (const v of scene.cameras.views) cams.push(cameraForView(v, bounds, orthoHeight))
+    for (const a of scene.cameras.axonometric) cams.push(cameraForAxonometric(a, bounds, orthoHeight))
+  }
+  const effectiveOrtho = orthoHeight ?? cams[0]?.orthoHeight ?? 1
   return {
     scene: scene.id,
     resolution,
-    orthoHeight,
-    pxPerBlock: resolution[1] / orthoHeight,
+    orthoHeight: effectiveOrtho,
+    pxPerBlock: resolution[1] / effectiveOrtho,
     bounds,
     cameras: cams.map((c) => ({
       name: c.name,
