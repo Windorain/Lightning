@@ -8,12 +8,51 @@
 - 原因：契约把 `blockPalette` 放在顶层（帧内移除），而 `RuntimeDocument.fromV2Plain` 只认帧内 `structure.blockPalette`。
 - 现状：本树带临时补丁（解析期把顶层表回落各帧，注释写明绑 #301 退出）；判据：三组对照 A/B/C 全过。
 
-## F2 · 透明方块被画成不透明
+## F2 · 透明方块被画成不透明（**两个独立根因，均已修**）
 
-- 现象：同一对图上，游戏侧玻璃格采样为背景色（透出天空），Web 侧采样为内容。
-- 位置：导出件 `materialPalette` 不含 `blend`（契约里该字段存在）；内核 `asBlend` 缺省取 `opaque`；旧渲染链曾按贴图 alpha 推断（新内核未迁）。
-- 影响：判据执行器把这类格记 `blocked`（同一根因不重复计红）。
-- 待办：导出侧补 `blend`（权威），内核侧恢复"缺省按贴图 alpha 推断"（鲁棒）。
+### 现象（机械读数，不是"看着像"）
+
+- 同一对图上：游戏侧玻璃格采样 `game_bg_ratio = 0.88`（透出天空），Web 侧 `web_bg_ratio = 0.00`（不透）。
+- `glass-transparent` 记 `blocked`；同一根因把 `pair-silhouette` 也拖红（front/back IoU 0.8189 / 0.8187）。
+
+### 根因①（导出侧：权威字段从来不产出）
+
+- 契约 `docs/contracts/format-multiblock-doc.md` 把 `blend` 列在 `materialPalette` 条目里，
+  但生产侧**全历史零处**写它（`git log -S 'addProperty("blend"' -- mod/gtnh/src` 无命中）；
+  于是消费侧 `runtime/presentationAdapter#asBlend` 只能按 `opaque` 兜底。
+- 判定规则**不是挑的**，从 MC 1.7.10 的渲染分工推（`EntityRenderer` pass 0 有 alpha test 无混合、
+  pass 1 才有混合）：`getRenderBlockPass() > 0` ⇒ `translucent`；pass 0 且 `!isOpaqueCube()` ⇒ `cutout`；
+  其余 ⇒ `opaque`。**不扫贴图像素**：那在本工程已有唯一一条多级回退链（`TextureBlobEmbedder`）。
+- 修复：`client/export/MaterialBlendMode`（纯判定 + 方块入口）+ `SamplerTable` 写 `blend`（并进缓存键，
+  否则同一贴图跨 pass 时一方覆盖另一方且不报错）。判据：`MaterialBlendModeTest` 5/5。
+
+### 根因②（Web 侧：**加了 blend 也没用**的原因 —— 纹理解码把 alpha 弄没了）
+
+- `adapters/textureDecode` 为省分配复用模块级 `OffscreenCanvas`；而 `drawImage` 是 **source-over 合成**，
+  同尺寸的下一张纹理不触发 resize ⇒ 画布既不清空也不重置 ⇒ 新图的透明像素透出上一张的颜色、
+  alpha 被顶成上一张的 255。
+- 实测（同一份导出件，浏览器内读材质贴图）：玻璃贴图中心本该 `(0,0,0,0)`，Web 解出
+  `[131,45,43,255]` = **前一张红羊毛**的像素；残留色随解码顺序变（同一文档一次偏蓝一次偏红）。
+  ⇒ 玻璃贴图"永远不透明"，任何 `blend` 都无效。这才是为什么"只补 blend"跑出来 `web_bg_ratio` 仍是 0.00。
+- 修复：绘制前 `clearRect`。判据：`src/adapters/__tests__/textureDecodeSharedCanvas.test.ts` 3/3；
+  负对照去掉 `clearRect` ⇒ 2/3 红（`expected 255 to be +0` / `+128`）。
+
+### 单变量对照（同一 run、同一机位、只改导出件的 `blend`）
+
+| 文档 | web_bg_ratio（front/back/top/bottom） | 分类 |
+|---|---|---|
+| 原导出件（无 `blend`）+ 修前解码 | 0.00 / 0.00 / 0.00 / 0.00 | content（且颜色随解码顺序漂） |
+| 原导出件（无 `blend`）+ 修后解码 | 0.08 / 0.08 / 0.08 / 0.12 | content（中心变黑：alpha 丢失被修好，但 opaque 仍不吃 alpha） |
+| `blend:"cutout"` + 修后解码 | **0.80 / 0.80 / 0.80 / 0.80** | background ✔（游戏 0.88/0.88/0.80/0.80） |
+
+⇒ 两个根因**都必需**；② 是 ① 的前置（不修 ②，① 无法被观测）。
+
+### 复验（新 run `20261019-230757-accept-calibration-1`，全链真端到端）
+
+- 导出件：`glass = cutout`、四块羊毛 = `opaque`；批处理新增不变量 `verifyExportPalette` 通过
+  （**逐条必须声明**，缺席/越词表即失败）。
+- `glass-transparent`：front / back 均 **pass**；`pair-silhouette` front **1.0** / back **0.9999**。
+- 玻璃格 bg 比在 9 个机位上 game 与 Web 逐台一致（0.88/0.80、0.80/0.80、0.44/0.44、0.68/0.64…）。
 
 ## F3 · 近裁剪面落在内容之内 1 cm，把朝向相机的那一层面裁掉（**已更正：不是绕向**）
 
@@ -75,3 +114,21 @@
   `top` 0.915 → 1.219、`bottom` 0 → 1.22。⇒ 缺的是**面**，不是几何缺失；坐实 F3。
 - 双面下仍有残余差异：`front/top/bottom` 的 `anchor-white` 色差 0.157~0.247、轮廓 IoU 0.81~0.86；
   `iso-*` IoU 0.84~0.86。属另一条待定性缺陷（随 F3 修完后重判）。
+
+## F9 · 斜视/俯视机位的残余差异（**未定性**，本轮不追）
+
+F2 修完后（run `20261019-230757-accept-calibration-1`）已经过 6 台、还红 3 台：
+
+- `pair-silhouette`：`top` **0.9858**、`bottom` **0.9946**、`iso-ne` **0.9930**（阈值 0.995）；
+  其余 front/back/left/right **1.0/0.9999**、iso-nw 0.9959、iso-high 0.9985。
+- `iso-ne` 的 `axis-x-red` 色差 **0.1267**（阈值 0.04），而 `iso-nw` 同项 **0.002**
+  —— 同一格、两台相机结论相反，指向"取样落在哪个面"而不是"颜色错"。
+- 玻璃格 bg 比：`iso-ne` game 0.32 / web 0.44（其余机位差 ≤0.04）。
+- 目视对照（`temp/accept-run/v2/cmp-{game,web}-iso-ne.png`）：内容、朝向、玻璃透明度一致；
+  游戏侧多出几条白色直线（游戏侧叠加物），边缘宽度/亮部略有差。
+
+待定的两个方向（都要用判据说清，而不是调阈值糊过去）：
+
+1. 斜视机位的 5×5 取样是否**跨面**：跨两个面时，"亮度归一化"消不掉面间的色度差，
+   判据应显式声明 `face`；标定场景的 `expect` 目前没标；
+2. `silhouetteIoU 0.995` 对 1–2 px 边缘差是否过严（当前差异量级 = 边缘带，不是内容缺口）。

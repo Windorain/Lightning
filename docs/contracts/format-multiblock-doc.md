@@ -110,7 +110,7 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
   "multiblockCount": 1,
   "multiblock":  { …§4… },
   "blockPalette": [ …§6… ],          // 所有变体的并集，签名全局去重
-  "materialPalette": [ … ],          // 既有结构（locator/atlas/blend/textureBlobIndex）
+  "materialPalette": [ … ],          // 既有结构（locator/kind/atlas/linear/useMipmaps/blend/animation/textureBlobIndex）
   "textureBlobs": [ … ],             // 既有结构（base64 PNG）
   "tooltipPalette": [ … ],           // 既有结构
   "frames": [ …§5.3… ],              // Frame = 变体存储原语
@@ -121,6 +121,23 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
 
 > **`blockPalette` 放根级**与 `liftBlockPaletteToRoot` 的既有做法完全一致（帧内不再各自持有一份调色板），
 > 故这是**复用**而不是新约定。帧为主的既有形态另有"把首帧 structure 展开到根级"的兼容约定，多方块文档**不采用**。
+
+### 3.1 `materialPalette[].blend`：**导出侧是权威**
+
+取值词表：`opaque` | `cutout` | `translucent`。**每条材质都必须声明**——缺席表示"这份产物不知道"，
+消费方只能按 `opaque` 兜底，于是玻璃会被画成不透明，而**产物本身看不出任何异常**（Gitea #2 实测：
+同一格两侧一个透出天空、一个是不透明的块）。
+
+判定规则（`client/export/MaterialBlendMode`，由 MC 1.7.10 的渲染分工推出，不是挑的）：
+
+| 条件 | `blend` | 依据 |
+|---|---|---|
+| `getRenderBlockPass() > 0` | `translucent` | pass 1 才开混合（`EntityRenderer:1378/:1396`） |
+| pass 0 且 `!isOpaqueCube()` | `cutout` | pass 0 有 alpha test（`GREATER 0.1`，:1113/:1289）、无混合 |
+| pass 0 且 `isOpaqueCube()` | `opaque` | 同上；整格不透明方块必然无透明纹素（否则光照/邻面剔除先坏） |
+
+`blend` 参与材质槽位的缓存键：同一张贴图在不同 pass 下出现时必须是两条材质，否则一方覆盖另一方
+且**没有任何报错**。
 
 ---
 
