@@ -425,6 +425,23 @@ export function blockGeometryAsset(quads: readonly Quad[], encoding: 'bakedQuads
     for (let k = 0; k < 4; k++) {
       const a = ids[k] as VertexId
       const b = ids[((k + 1) % 4)] as VertexId
+      // ── 零长度棱**不**进拓扑（实测缺陷：一条退化棱让**整份**资产被拒）──────────
+      //
+      // 现场（2026-10-20，LP 物流管，PR #91 忠实捕获导出件）：每个管格的
+      // `blockPalette` 条目含 174/188 个四边形，其中 **8 个是退化四边形**
+      // （两个角顶点逐位相同 —— LP 的 Tessellator 对 1/16 薄片本来就发出这种零面积四边形，
+      // 游戏里它只是"什么也不画"）。旧实现为每个四边形的 4 条棱无条件建边 ⇒ 其中
+      // 8 条满足 `a === b` ⇒ `meshTopology` 以 `degenerateEdge` **拒绝整个拓扑** ⇒
+      // `blockGeometryAsset` 返回 `null` ⇒ 该调色板条目"无几何" ⇒ 整格**静默不渲染**
+      // （实测：4 根管子全空，同批的箱子照常渲染；把材质强制改 `opaque` 重渲 PNG 逐字节相同，
+      // 因为根本没有几何进渲染器）。
+      //
+      // 为什么修在**这里**而不是放宽 `meshTopology`：
+      //  - 棱是**派生**拓扑（选择/拾取用），零长度棱没有几何含义、也不可能被拾取；
+      //  - `meshTopology` 的 `degenerateEdge` 是"不许静默修正坏数据"的守卫，该保留；
+      //  - 四边形本身**必须保留**（`faces[k] === quads[k]` 是资产的不变量；且零面积四边形
+      //    是文件里的真实内容 —— 丢掉它会让"装配 → 编码"往返不再逐字节无损）。
+      if (a === b) continue
       edges.push(Object.freeze({ id: edgeIdOf(a, b), a, b }))
     }
   }
