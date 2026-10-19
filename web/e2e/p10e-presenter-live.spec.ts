@@ -91,6 +91,14 @@ interface PresenterObservation {
   readonly diagnosticsReadable: boolean
   /** 呈现失败记录（**生产值**：读面 = `ctx.getDiagnostics().byCode('effect.failed')`）。 */
   readonly presenterFailures: readonly PresenterFailure[]
+  /**
+   * 资源失败记录（**生产值**：读面 = `ctx.getDiagnostics()` 的 `resource.*` 族）。
+   *
+   * M8-5 把「必需贴图缺失」这条事实从 `effect.failed` 迁到了 `resource.*`
+   * （S0-B D2/D7：借用 effect 通道的记录没有 assetId，与编译/注解失败混在一起）。
+   * 本字段就是那条事实现在的读面 —— 判据跟着事实走，而不是跟着旧码走。
+   */
+  readonly resourceRecords: readonly { code: string; channel: string; params: Record<string, string | number | boolean> }[]
 }
 
 /**
@@ -136,10 +144,19 @@ async function readPresenterObservation(page: Page): Promise<PresenterObservatio
             objectId: typeof r.correlation?.objectId === 'string' ? r.correlation.objectId : null,
           }))
       : []
+    const resourceRecords = diagnosticsReadable
+      ? (readView.all() as any[])
+          .filter((r) => String(r?.code ?? '').startsWith('resource.'))
+          .map((r) => ({
+            code: String(r.code ?? ''),
+            channel: String(r.channel ?? ''),
+            params: (r.params ?? {}) as Record<string, string | number | boolean>,
+          }))
+      : []
     const blank: any = {
       hasSurface: false, batchObjects: 0, instanceCount: 0, geometryBuilds: 0, materialBuilds: 0,
       missingRequiredTextures: 0, generation: null, ledgerAcquire: 0, ledgerRelease: 0,
-      ledgerActive: 0, ledgerBalanced: 0, diagnosticsReadable, presenterFailures,
+      ledgerActive: 0, ledgerBalanced: 0, diagnosticsReadable, presenterFailures, resourceRecords,
     }
     if (slots === undefined) return blank
     const candidates: any[] = []
@@ -167,6 +184,7 @@ async function readPresenterObservation(page: Page): Promise<PresenterObservatio
       ledgerBalanced: led.balanced === true ? 1 : 0,
       diagnosticsReadable,
       presenterFailures,
+      resourceRecords,
     }
   }) as Promise<PresenterObservation>
 }
@@ -174,6 +192,13 @@ async function readPresenterObservation(page: Page): Promise<PresenterObservatio
 /** 只取呈现失败（轮询用；与 `readPresenterObservation` 同一读面、同一过滤口径）。 */
 async function readPresenterFailures(page: Page): Promise<readonly PresenterFailure[]> {
   return (await readPresenterObservation(page)).presenterFailures
+}
+
+/** 只取 `resource.*` 记录（轮询用；同上一个读面）。 */
+async function readResourceRecords(
+  page: Page,
+): Promise<PresenterObservation['resourceRecords']> {
+  return (await readPresenterObservation(page)).resourceRecords
 }
 
 /** 经 vite 转译加载浏览器侧探针（见文件头"探针为什么要走 vite 转译"）。 */
@@ -278,8 +303,14 @@ test.describe('P10e 段② · 呈现链真实上线（生产装配 → Presenter
    *   → presentation/textureBinding#bindTexture: required && failed ⇒ missingRequired=true
    *     → presenterSession#bindTextures 统计 missingRequired > 0
    *       → useViewportRuntime#syncPresenterTextures:
-   *          emitPresenterFailure('textures-missing-required', String(n))
+   *          presenterBundle.resources.reportOutcome(…)         // M8-5：事实的新家
+   *            ⇒ resource.failed（逐条，带 assetId/locator）+ resource.degraded（missingRequired）
    * ```
+   *
+   * ⚠️ **M8-6 订正（本判据此前已红）**：M8-5（`fdf50f56`）把「必需贴图缺失」从
+   * `effect.failed`（借用的过渡口径，S0-B D2/D7）迁到 `resource.*`，本文件仍按旧码读 ⇒
+   * 正对照恒红。判据**跟着事实走**：现在读 `resource.*` 族，强度不降反升 ——
+   * 除了「必须有记录」，还要求记录**点名那张资源**（D7：只有计数不可定位）。
    *
    * 选这条而不是"直接调 `applyKernelDocument`"的理由：**发射点在帧循环里**
    * （会话自己不写诊断），只有走真实文档加载 + 真实帧循环才证明"接线还在"。
@@ -321,29 +352,28 @@ test.describe('P10e 段② · 呈现链真实上线（生产装配 → Presenter
 
     // ── ③ 判据：记录必须出现在诊断读面上（有界轮询，不靠固定 sleep 猜）──
     await expect
-      .poll(async () => (await readPresenterFailures(page)).length, {
+      .poll(async () => (await readResourceRecords(page)).length, {
         timeout: 30_000,
-        message: '贴图坏掉后呈现链必须报出一条失败记录（读面 = getDiagnostics().byCode）',
+        message: '贴图坏掉后必须报出 resource.* 记录（读面 = getDiagnostics()）',
       })
       .toBeGreaterThan(0)
 
-    const failures = await readPresenterFailures(page)
-    console.log(`[P10e·呈现失败] 注入坏贴图 ⇒ 记录 ${JSON.stringify(failures)}`)
+    const records = await readResourceRecords(page)
+    console.log(`[P10e·资源失败] 注入坏贴图 ⇒ 记录 ${JSON.stringify(records)}`)
 
-    const record = failures.find((f) => f.reason === 'textures-missing-required')
-    // `params.source === 'presenter'` 由读面过滤给出（`readPresenterObservation` 内的
-    // `.filter(r => r.params.source === 'presenter')`）：能出现在这里的记录 source 必然正确。
+    // 逐资源：必须有 `resource.failed`，且**点名**（assetId / locator —— D7 的可定位要求）。
+    const failed = records.filter((r) => r.code === 'resource.failed')
+    expect(failed.length, `必须报出逐资源失败：实测 ${JSON.stringify(records)}`).toBeGreaterThan(0)
+    expect(failed[0]!.channel, '必须落在 resource 通道（不借 effect 冒充）').toBe('resource')
+    const named = failed.some((r) => String(r.params.assetId ?? '') !== '' || String(r.params.locator ?? '') !== '')
+    expect(named, '失败记录必须点名失败的那一项资源（assetId/locator），只有计数不算可定位').toBe(true)
+
+    // 汇总：`missingRequired > 0` 就是"必需贴图缺失"这条事实（M8-5 的迁移落点）。
+    const degraded = records.filter((r) => r.code === 'resource.degraded')
+    expect(degraded.length, '必须有降级汇总记录（否则"画面变平了但账上什么都没有"）').toBeGreaterThan(0)
     expect(
-      record,
-      `必须报出"必需贴图缺失"这条：实测 ${JSON.stringify(failures)}`,
-    ).toBeDefined()
-    // 码/通道/source 是"这条记录属于呈现链"的身份三件套（读面按码过滤，source 由过滤给出）
-    expect(record!.code, '必须走既有码 effect.failed').toBe('effect.failed')
-    expect(record!.channel, '必须落在 effect 通道').toBe('effect')
-    expect(record!.dropped, '首现的失败不是丢弃上报').toBe(false)
-    expect(
-      Number(record!.detail),
-      `detail 必须是缺失计数（实测 ${JSON.stringify(record!.detail)}）`,
+      Number(degraded[0]!.params.missingRequired),
+      `missingRequired 必须是缺失计数（实测 ${JSON.stringify(degraded[0]!.params)}）`,
     ).toBeGreaterThan(0)
 
     // ── ④ 负对照第二半：**干净的**同一份夹具不得报出这条 reason ──
@@ -361,10 +391,15 @@ test.describe('P10e 段② · 呈现链真实上线（生产装配 → Presenter
       cleanObs.presenterFailures,
       `干净夹具不得报出呈现失败（实测 ${JSON.stringify(cleanObs.presenterFailures)}）`,
     ).toEqual([])
+    // 只排**失败/降级**码：`resource.acquired` 是健康的"拿到了几个句柄"的记录（成功类），
+    // 干净文档上有它是**正确**的 —— 把它算进负对照会让"有记录"与"有失败"混为一谈。
+    const cleanFailures = cleanObs.resourceRecords.filter(
+      (r) => r.code === 'resource.failed' || r.code === 'resource.degraded',
+    )
     expect(
-      cleanObs.presenterFailures.filter((f) => f.reason === 'textures-missing-required').length,
-      '③ 用的同一条判据（同一过滤 + 同一 reason）在干净夹具上必须为 0',
-    ).toBe(0)
+      cleanFailures,
+      `③ 用的同一条判据（同一读面 + 同一失败码族）在干净夹具上必须为 0：实测 ${JSON.stringify(cleanFailures)}`,
+    ).toEqual([])
   })
 
   test('**逐格拾取可用**（真实视口 + 多个屏幕位置 ⇒ 解出多个不同的格）', { tag: '@smoke' }, async ({ page }) => {
