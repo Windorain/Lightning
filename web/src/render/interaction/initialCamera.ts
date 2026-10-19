@@ -241,7 +241,9 @@ export function fitOrthoFrustumToWorldBox(
   camera.top = cy + halfH
 
   const zEps = 1e-2
-  camera.near = Math.max(0.01, -maxZ + zEps)
+  // near 必须落在**最近表面之前**（-maxZ - eps），写 +eps 会把最近的一层面裁掉：
+  // 正交轴视图下那一层正是朝向相机的可见面，裁掉后只剩侧棱（面积为 0）与背面（被背面剔除）⇒ 整幅空白。
+  camera.near = Math.max(0.01, -maxZ - zEps)
   camera.far = Math.max(camera.near + 0.02, -minZ + zEps)
   camera.updateProjectionMatrix()
 }
@@ -288,7 +290,8 @@ export function syncClipPlanesToGroup(
     }
   }
   const zEps = 1e-2
-  const near = Math.max(0.01, -maxZ + zEps)
+  // 同 fitOrthoFrustumToWorldBox：near 放在最近表面**之外**，否则最近的那层面被裁掉。
+  const near = Math.max(0.01, -maxZ - zEps)
   const far = Math.max(near + 0.02, -minZ + zEps)
   // 只在真的需要时写（避免每帧 updateProjectionMatrix：矩阵一致时 Three 也还要重算）。
   const changed =

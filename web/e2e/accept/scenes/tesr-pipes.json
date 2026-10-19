@@ -1,0 +1,90 @@
+{
+  "schema": "lightning.accept.scene/1",
+  "id": "tesr-pipes",
+  "title": "LP 四管 + 箱子：TESR 捕获几何必须与游戏一致",
+  "notes": "覆盖 TESR 捕获路径（PR91 那类：管道连接态 + 箱子）。game 侧图必须由同一次运行产生。",
+  "world": {
+    "region": "cp_accept_tesr_pipes",
+    "origin": [
+      64,
+      12,
+      63
+    ],
+    "dim": 0,
+    "time": 6000,
+    "weather": "clear"
+  },
+  "blocks": [
+    {
+      "block": "lp-pipe",
+      "at": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "lp-pipe",
+      "at": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "lp-pipe",
+      "at": [
+        2,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "lp-pipe",
+      "at": [
+        3,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "chest",
+      "at": [
+        4,
+        0,
+        0
+      ]
+    }
+  ],
+  "cameras": {
+    "views": [
+      "front",
+      "back",
+      "left",
+      "right",
+      "top",
+      "bottom"
+    ],
+    "axonometric": [
+      {
+        "name": "iso-ne",
+        "yaw": 225,
+        "pitch": 30
+      },
+      {
+        "name": "iso-se",
+        "yaw": 135,
+        "pitch": 30
+      }
+    ],
+    "orthoHeight": "auto",
+    "resolution": [
+      1920,
+      1080
+    ]
+  },
+  "export": {
+    "name": "tesr-pipes",
+    "shape": "world"
+  }
+}

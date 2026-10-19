@@ -14,6 +14,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.mc.ModReflect;
+import com.lightning.mod.client.export.MaterialBlendMode;
 import com.lightning.mod.client.meshcapture.CaptureChannel;
 import com.lightning.mod.client.meshcapture.CaptureDiagnostics;
 import com.lightning.mod.client.meshcapture.CaptureDumpAssembler;
@@ -559,7 +560,8 @@ public final class CaptureDiagSession {
                 inst.quads.add(CaptureDumpAssembler.copyQuad(q));
             }
             if (!inst.quads.isEmpty()) {
-                MeshCaptureService.CaptureToolkit.attachQuadMaterials(inst, textureMap, materialTable);
+                MeshCaptureService.CaptureToolkit
+                    .attachQuadMaterials(inst, textureMap, materialTable, MaterialBlendMode.of(block));
             }
             // 标签口径：老探针用受控放置的 label（pipe-1/chest-1），控制面没有「放置计划」这一层。
             // 用 registryId 作标签：它回答「这一格本该是什么」；装配器在 missing 里会自行追加

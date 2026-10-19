@@ -1,0 +1,90 @@
+{
+  "schema": "lightning.accept.expect/1",
+  "scene": "glass-seam",
+  "compare": {
+    "pairs": "all-cameras",
+    "normalize": "per-face-luminance",
+    "exclude": [
+      "sky"
+    ],
+    "thresholds": {
+      "silhouetteIoU": 0.98,
+      "faceColorDelta": 0.06,
+      "seamEdgeMax": 0
+    }
+  },
+  "checks": [
+    {
+      "kind": "seam",
+      "id": "seam-g1-g2",
+      "between": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          2,
+          0,
+          0
+        ]
+      ],
+      "axis": "x",
+      "expect": "no-edge"
+    },
+    {
+      "kind": "seam",
+      "id": "seam-g2-g3",
+      "between": [
+        [
+          2,
+          0,
+          0
+        ],
+        [
+          3,
+          0,
+          0
+        ]
+      ],
+      "axis": "x",
+      "expect": "no-edge"
+    },
+    {
+      "kind": "region",
+      "id": "isolated-glass-interior",
+      "at": [
+        1,
+        0,
+        2
+      ],
+      "face": "+y",
+      "expect": "background"
+    },
+    {
+      "kind": "region",
+      "id": "glass-over-stone",
+      "at": [
+        3,
+        0,
+        2
+      ],
+      "face": "-z",
+      "expect": "not-background"
+    },
+    {
+      "kind": "opaque",
+      "id": "stone-opaque",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "expect": "not-background"
+    },
+    {
+      "kind": "silhouette",
+      "id": "pair-silhouette"
+    }
+  ]
+}

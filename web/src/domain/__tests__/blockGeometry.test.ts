@@ -267,6 +267,53 @@ describe('解码与编码：往返零 diff（"零回显依赖"的可判定含义
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 3b. 退化四边形（零长度棱）—— 实测缺陷：一条退化棱让**整份**资产变成 null
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 零面积四边形：角序与 UV 原样，但第 2 个角**逐位复制**第 1 个角。
+ *
+ * 形状取自实机（2026-10-20，LP 物流管 / PR #91 忠实捕获导出件）：每个管格的
+ * `blockPalette` 条目 174/188 个四边形里有 **8 个**是这种 1/16 薄片的退化四边形 ——
+ * LP 的 Tessellator 本来就这么发，游戏里它只是"什么也不画"。
+ */
+function sliverQuad(): Quad {
+  const q = quad(0)
+  return {
+    materialIndex: 0,
+    vertices: [q.vertices[0]!, q.vertices[1]!, { ...q.vertices[1]! }, q.vertices[3]!],
+  }
+}
+
+describe('退化四边形（零长度棱）：不拒整份资产', () => {
+  it('一条零长度棱**不得**让整份几何变成 `null`（实测：4 根 LP 管全格空渲染）', () => {
+    const asset = blockGeometryAsset([sliverQuad()])
+    expect(asset, '退化四边形是文件里的真实内容，不得让整份资产被拒').not.toBeNull()
+    // 四边形**保真**：零面积四边形是"什么也不画"，不是"不存在" ——
+    // 丢掉它会让"装配 → 编码"的逐字节往返不再无损（见本文件第 3 节）。
+    expect(asset!.quads.length, '退化四边形必须原样保留（往返无损）').toBe(1)
+    expect(asset!.mesh.topology.faces.length, '每个四边形对应一个面（`faces[k] === quads[k]` 不变量）').toBe(1)
+  })
+
+  it('零长度棱不进拓扑（3 条实棱），且没有自环棱', () => {
+    const asset = blockGeometryAsset([sliverQuad()])!
+    expect(asset.mesh.topology.edges.length, '三角形状的退化四边形只有 3 条实棱').toBe(3)
+    for (const e of asset.mesh.topology.edges) expect(e.a, `棱 ${e.id} 不得自环`).not.toBe(e.b)
+  })
+
+  it('**负对照**：正常四边形仍有 4 条棱（上一条不是"永远 3 条"）', () => {
+    const asset = blockGeometryAsset([quad(0)])!
+    expect(asset.mesh.topology.edges.length).toBe(4)
+  })
+
+  it('退化与正常四边形混排 ⇒ 面都保留，棱按内容去重（4 + 3 − 公共棱）', () => {
+    const asset = blockGeometryAsset([quad(0), sliverQuad()])!
+    expect(asset.mesh.topology.faces.length, '两个四边形 ⇒ 两个面').toBe(2)
+    expect(asset.mesh.topology.edges.length, '(v0,v1) 与 (v3,v0) 是公共棱 ⇒ 5 条').toBe(5)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 4. 调色板（联合表 / 共享统计）
 // ─────────────────────────────────────────────────────────────────────────────
 
