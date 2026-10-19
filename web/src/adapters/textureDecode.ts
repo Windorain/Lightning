@@ -105,9 +105,42 @@ function perfSince(name: string, start: number): void {
  *   await** ⇒ 单线程下不可能穿插另一张的绘制（并发解码也只在 `await` 处交错）。
  * - 返回的 `Uint8Array` 由 `new Uint8Array(ImageData.data)` **新分配**，不与该画布共享
  *   内存 ⇒ 复用不会让已交付的像素在下一张解码时被改写（这条是 B2 的正确性判据）。
- * - resize 会清空画布内容，但我们每次都重绘，故无残留。
+ *
+ * ## ⚠️ 复用**必须**先清空画布：`drawImage` 是 **source-over 合成**，不是覆盖写
+ *
+ * 上一条"我们每次都重绘，故无残留"是错的（2026-10-19 验收实测推翻）：**同尺寸**的下一张
+ * 纹理**不触发 resize**（`if (canvas.width !== width)` 不成立），画布既不 resize 也不清空，
+ * 于是 `drawImage` 按 source-over 合成到上一张的残留像素上 —— 新图的**透明像素**原样透出
+ * 上一张的颜色，且 alpha 变成上一张的 255。
+ *
+ * 现象（E2E 标定场景，导出件 `textureBlobs` 里玻璃中心确实是 `(0,0,0,0)`）：
+ * 「玻璃」材质解出来的像素中心是**上一张羊毛纹理**的颜色、alpha 255 ⇒ 该贴图永远"不透明"，
+ * 任何 cutout/translucent 判据都失效；而**残留色取决于解码顺序**，所以同一份文档两次渲染
+ * 玻璃中心可以一次偏蓝一次偏红（实测：串行解码时玻璃跟随前一张红羊毛）。
+ *
+ * 修法：每次绘制前 `clearRect`（比"强制 resize"便宜，且保留复用）。
+ * 回归判据：`src/adapters/__tests__/textureDecodeSharedCanvas.test.ts`
+ * （同尺寸两张、第二张中心透明 ⇒ 中心 alpha 必须为 0）。
  */
 let sharedCanvas2d: OffscreenCanvas | null = null
+
+/**
+ * 把画布内容清空后绘制 `source`，读回整幅 RGBA。
+ *
+ * `clearRect` 不可省：复用同一张画布时，source-over 会把新图的透明区域留给上一张的像素
+ * （见 {@link sharedCanvas2d} 的警告段）。
+ */
+function clearDrawRead(
+  ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  width: number,
+  height: number,
+): Uint8Array {
+  ctx.clearRect(0, 0, width, height)
+  ctx.drawImage(source, 0, 0)
+  // `new Uint8Array(ImageData.data)` 即一份独立拷贝（去掉旧写法的第二份 `.buffer.slice(0)`）。
+  return new Uint8Array(ctx.getImageData(0, 0, width, height).data)
+}
 
 /** 取 2D 画布的 `ImageData`（`OffscreenCanvas` 优先；无则用 `<canvas>`）。 */
 function readRgba(source: CanvasImageSource, width: number, height: number): Uint8Array | null {
@@ -115,11 +148,9 @@ function readRgba(source: CanvasImageSource, width: number, height: number): Uin
     const canvas = sharedCanvas2d ?? (sharedCanvas2d = new OffscreenCanvas(width, height))
     if (canvas.width !== width) canvas.width = width
     if (canvas.height !== height) canvas.height = height
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D | null
     if (ctx === null) return null
-    ctx.drawImage(source, 0, 0)
-    // `new Uint8Array(ImageData.data)` 即一份独立拷贝（去掉旧写法的第二份 `.buffer.slice(0)`）。
-    return new Uint8Array(ctx.getImageData(0, 0, width, height).data)
+    return clearDrawRead(ctx, source, width, height)
   }
   if (typeof document === 'undefined') return null
   const canvas = document.createElement('canvas')
@@ -127,8 +158,7 @@ function readRgba(source: CanvasImageSource, width: number, height: number): Uin
   canvas.height = height
   const ctx = canvas.getContext('2d')
   if (ctx === null) return null
-  ctx.drawImage(source, 0, 0)
-  return new Uint8Array(ctx.getImageData(0, 0, width, height).data)
+  return clearDrawRead(ctx, source, width, height)
 }
 
 /** data URL / 裸 base64 → `Blob`（**不**取远端：外链资源由宿主端口负责）。 */
