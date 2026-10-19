@@ -27,8 +27,9 @@ import base from './playwright.config'
 export default defineConfig({
   ...base,
   testDir: './e2e/accept',
-  // 覆盖普通配置里"忽略 e2e/accept"的那条；产物门控的 4 份 spec 不在此 testDir 下，天然不收集
-  testIgnore: [],
+  // 覆盖普通配置里"忽略 e2e/accept"的那条；产物门控的 4 份 spec 不在此 testDir 下，天然不收集。
+  // runner 的 node:test 单测（*.test.mjs）不是 Playwright 用例，两边都排掉（理由见普通配置）。
+  testIgnore: ['**/*.test.mjs'],
   projects: [
     {
       name: 'accept-replay',

@@ -96,6 +96,15 @@ const TEST_IGNORE = testIgnoreGlobs()
 const ACCEPT_SPEC_GLOB = '**/accept/**/*.spec.ts'
 
 /**
+ * 验收 runner 的 `*.test.mjs` 是 **node:test** 单测（`node --test e2e/accept/runner/…`），
+ * 不是 Playwright 用例。但 Playwright 的缺省 `testMatch` 也收 `*.test.*` ⇒ 它们会在
+ * **collection 期被 import**，于是 node:test 当场执行并往日志里打 `✔ …`（L3 实测出现）。
+ * 那些文件本身产出 0 条 Playwright 用例，所以计数不差，却让"跑 e2e"里混进了另一套测试的输出，
+ * 且其中一条断言若失败会把 collection 打成红。⇒ 两个配置都显式排掉。
+ */
+const NODE_TEST_GLOB = '**/*.test.mjs'
+
+/**
  * 本次运行的服务身份标记（随机 nonce）。
  *
  * 用 `process.env` 做**进程级单例**：配置文件可能在同一进程里被加载多次，而模块级随机数
@@ -109,7 +118,7 @@ export default defineConfig({
   testDir: './e2e',
   // #332：真实产物未就绪的 spec 按产物门控排除（产物就绪时为空数组 ⇒ 全部纳入）
   // 另加：验收 replay spec 不在普通套件里收集（见 ACCEPT_SPEC_GLOB）
-  testIgnore: [...TEST_IGNORE, ACCEPT_SPEC_GLOB],
+  testIgnore: [...TEST_IGNORE, ACCEPT_SPEC_GLOB, NODE_TEST_GLOB],
   // 服务身份核验：在任何用例之前断言"端口上的服务是本树的"
   globalSetup: './e2e/global-setup.ts',
   timeout: 90_000,
