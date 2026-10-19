@@ -147,7 +147,19 @@ python e2e/accept/verify/judge.py --scene scenes/glass-seam.json --expect expect
 - 天空盒：两图各自角落色即背景，背景色本身不参与比较；光照：只比色度。
 - 投影数学在 `verify/pairmap.py`（与 `runner/camera-plan.mjs` 同式；改动必须两处同批）。
 
-## 11. 禁止
+## 11. 基线与棘轮
+
+```powershell
+node e2e/accept/runner/baseline.mjs --scene glass-seam --camera front --game g.png --web w.png --report r.json
+python e2e/accept/verify/ratchet.py --scene glass-seam --camera front --game g.png --web w.png
+```
+
+- 登记写入 `baselines/<scene>/<camera>/{game,web,report}.png/json` + `baselines/<scene>/manifest.json`（含两侧图/报告/场景/判据的 sha256）。
+- 同路径再登记必须显式 `--force`，并在提交说明写原因；**棘轮只增不减**。
+- `ratchet.py`：sha 相同 ⇒ `pass(identical)`；不同则算逐像素平均差，超阈值 ⇒ `fail` 并给数值；没有基线 ⇒ `blocked`。
+- 实测：同图 pass；换成另一机位的图 ⇒ `fail(mean_abs_diff=5.073 > 2.0)`。
+
+## 12. 禁止
 
 - 在 spec 里写死机位/坐标/缩放；
 - 为了让图出来而修补导出件；
