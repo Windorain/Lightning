@@ -140,6 +140,27 @@ async function openDualArea(page: Page): Promise<{ a: AreaRef; b: AreaRef }> {
     { timeout: 60_000 },
   )
   expect(areas[0]!.region, '前提：第一个叶子仍是根区（DOM 顺序 = 布局顺序）').toBe(ROOT_REGION)
+
+  /**
+   * **前提守卫（M8-7 / P4 回归）**：两个区的初始机位都必须是**框选结果**。
+   *
+   * 本轮实测：M8-5 的 `loadStatus` 时序让首次 fit 落"定义缺省兜底"（zoom=1），
+   * 于是 `projectCellLocal` 投出来的点与画面里的那一格不再对应 ⇒ 本文件的失败消息
+   * 变成"悬停未命中任何带逐格说明的格"（下游症状）。钉在前提，缺陷在源头说话。
+   */
+  for (const area of areas) {
+    await expect
+      .poll(
+        async () => await page.evaluate((rid: string) => (window as any).__vm__.viewports?.cameraInitStateOf?.(rid) ?? null, area.region),
+        { message: '前提：' + area.region + ' 的初始机位必须走 fit（不得停在缺省兜底）', timeout: 30_000 },
+      )
+      .toBe('fitted')
+    expect(
+      await page.evaluate((rid: string) => (window as any).__vm__.main?.cameras?.[rid]?.value?.zoom ?? null, area.region),
+      '前提：' + area.region + ' 的 zoom 不得等于定义缺省 1（= 没框选）',
+    ).not.toBe(1)
+  }
+
   return { a: areas[0]!, b: areas[1]! }
 }
 

@@ -231,6 +231,26 @@ async function gotoWithAnnotatedCellSelected(
     .poll(async () => await selectedPos(page), { message: '生产选择 API 必须让右栏显示坐标（否则面板无目标）' })
     .not.toBeNull()
   expect(await selectedPos(page), '选中的必须正是夹具里那一格').toEqual(target.kernel)
+
+  /**
+   * **前提守卫（M8-7 / P4 回归）**：初始机位必须是**框选结果**。
+   *
+   * 为什么放在前提处：M8-5 的 `loadStatus` 时序曾让首次 fit 落"定义缺省兜底"
+   * （zoom=1 / target y=2）。那时本用例的红**不**在拖动本身，而是"取消后多一条撤销项""
+   * 这种下游症状（指针落点相对内容的含义变了）—— 定位成本全花在误导读数上。
+   * 把"相机真的框选过"钉在前提，缺陷形态在源头就说话。
+   */
+  await expect
+    .poll(
+      async () => await page.evaluate(() => (window as any).__vm__.viewports?.cameraInitStateOf?.('r-viewport') ?? null),
+      { message: '前提：初始机位必须走 fit（不得停在缺省兜底）', timeout: 30_000 },
+    )
+    .toBe('fitted')
+  expect(
+    await page.evaluate(() => (window as any).__vm__.main?.cameras?.['r-viewport']?.value?.zoom ?? null),
+    '前提：首次装载的 zoom 不得等于定义缺省 1（= 没框选）',
+  ).not.toBe(1)
+
   return { expected: target.expected, kernel: target.kernel, sizeRow: doc.cellGrid[0]!.length }
 }
 
