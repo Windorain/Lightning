@@ -121,7 +121,18 @@ accept/
 | D Web | replay spec（只消费 plan） | 同一导出件产出全套图 |
 | E 判定 | 验证器 + 报告 | 每对图输出 pass/fail + 数值 |
 
-## 9. 禁止
+## 9. 批次执行器（长驻联动）
+
+```powershell
+node e2e/accept/runner/batch.mjs --out temp/accept-cases            # 只生成用例 + 机位计划（无需客户端）
+node e2e/accept/runner/batch.mjs --submit --mc-dir <run/client>      # 提交给常驻客户端（同一进程内逐个作业）
+```
+
+- 端口从 `<mc-dir>/controlplane/server.json` 读，**不假设**；token 来自 `tokens.json` 的 `tokens.scene`。
+- `--submit` 只提交**作业**：单场景失败不重启客户端；进程崩溃才重放整批（场景是数据，重放幂等）。
+- 生成的用例与 `manifest.json` 落在 `--out` 指定目录（默认 `temp/accept-cases`，不入库）。
+
+## 10. 禁止
 
 - 在 spec 里写死机位/坐标/缩放；
 - 为了让图出来而修补导出件；
