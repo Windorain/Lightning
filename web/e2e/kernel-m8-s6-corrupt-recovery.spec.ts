@@ -9,14 +9,16 @@
  *  b. **可辨认**（§10.7:309「失败必须…明确说明实际后果」）：损坏副本必须留下**结构化诊断**
  *     （稳定码 + 原因 + 文档身份），不得只静默丢弃。
  *
- * ## 当前预期（S0-B D5：全链零生产接线）
+ * ## 记录（M8-1 先红 → M8-4 起为真保证）
  *
- * 恢复副本链路（写/读/校验/采纳）**生产零调用**：writeRecoveryCopy / readRecoveryCopy /
- * validateRecoveryCopy / adoptRecoveryCopy 调用点全部为 0，也没有任何自动恢复副本写点。
- * ⇒ (a) 今天**必然绿**，但绿的方式是"根本没人读它"——这不是能力，是空洞成立
- *   （与 A31 单测全绿同源：纯政策在测试里被调用，生产从不调用）。
- * ⇒ (b) 今天**红**：没有 recovery 码族，也没有存储失败诊断。
- * 本文件如实分别断言两半，并在日志里写明"绿的那一半是空洞成立"，避免把空洞当能力。
+ * M8-1 写本文件时恢复副本链路**生产零调用**（write/read/validate/adopt 调用点全为 0）：
+ * 那时 (a) 半"必然绿"，但绿的方式是"根本没人读它"——**空洞成立**，不是能力；
+ * (b) 半红（无 recovery 码族）。
+ *
+ * M8-4 起链路已生产接线（`composition/recoverySession` + `runtime/host/recoveryHost`）：
+ * (a) 半的绿从此是**真保证**（有读路径、有校验、损坏副本被拒绝而非"没人读"）；
+ * (b) 半转绿（`recovery.corrupt`）。本文件保留两半断言：
+ * 把"不破坏有效内容"与"损坏可辨认"分别钉死，避免只测一半。
  *
  * ## 损坏副本怎么"在场"（注入面）
  *
@@ -102,7 +104,7 @@ function corruptRecords(records: readonly DiagnosticFacts[]): DiagnosticFacts[] 
 }
 
 test.describe('M8-1 · S6 损坏恢复副本不破坏有效内容', () => {
-  test('S6-a 在场损坏副本：正常装载/编辑/保存仍不受影响（绿的那一半是空洞成立）', async ({ page }) => {
+  test('S6-a 在场损坏副本：正常装载/编辑/保存仍不受影响（M8-4 起为真保证）', async ({ page }) => {
     test.setTimeout(480_000)
     const out = m8CaseDir('s6-a', test.info().project.name)
     const inputCopy = path.join(out, 'input-copy.json')
@@ -195,7 +197,7 @@ test.describe('M8-1 · S6 损坏恢复副本不破坏有效内容', () => {
     expect(s2.bytes, '损坏副本在场的保存必须仍然产出非空产物').toBeGreaterThan(0)
     expect(fs.readFileSync(saved2, 'utf8'), '第二次保存必须含第二次编辑').toContain(SECOND)
 
-    console.log('[S6-a] 结论：(a) 有效内容未被改写 —— 但这是**空洞成立**（生产根本不读恢复副本，S0-B §2.3）')
+    console.log('[S6-a] 结论：(a) 有效内容未被改写 —— M8-4 起读路径已接线，损坏副本被校验拒绝（不再"没人读"），这是真保证')
   })
 
   test('S6-b 损坏副本必须留下结构化诊断（不得静默丢弃）', async ({ page }) => {
