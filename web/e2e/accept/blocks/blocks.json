@@ -1,0 +1,102 @@
+{
+  "schema": "lightning.accept.blocks/1",
+  "note": "基础方块库。category 决定该方块在判据中的默认期望；缺库的 id 一律拒绝（防止随手写错登记名）。",
+  "blocks": [
+    {
+      "id": "stone",
+      "registryId": "minecraft:stone",
+      "meta": 0,
+      "category": "opaque"
+    },
+    {
+      "id": "planks",
+      "registryId": "minecraft:planks",
+      "meta": 0,
+      "category": "opaque"
+    },
+    {
+      "id": "dirt",
+      "registryId": "minecraft:dirt",
+      "meta": 0,
+      "category": "opaque"
+    },
+    {
+      "id": "glowstone",
+      "registryId": "minecraft:glowstone",
+      "meta": 0,
+      "category": "emissive"
+    },
+    {
+      "id": "slab",
+      "registryId": "minecraft:stone_slab",
+      "meta": 0,
+      "category": "nonfull"
+    },
+    {
+      "id": "glass",
+      "registryId": "minecraft:glass",
+      "meta": 0,
+      "category": "transparent"
+    },
+    {
+      "id": "chest",
+      "registryId": "minecraft:chest",
+      "meta": 0,
+      "category": "tesr"
+    },
+    {
+      "id": "water",
+      "registryId": "minecraft:water",
+      "meta": 0,
+      "category": "fluid"
+    },
+    {
+      "id": "wool-white",
+      "registryId": "minecraft:wool",
+      "meta": 0,
+      "category": "opaque"
+    },
+    {
+      "id": "wool-red",
+      "registryId": "minecraft:wool",
+      "meta": 14,
+      "category": "opaque"
+    },
+    {
+      "id": "wool-green",
+      "registryId": "minecraft:wool",
+      "meta": 13,
+      "category": "opaque"
+    },
+    {
+      "id": "wool-blue",
+      "registryId": "minecraft:wool",
+      "meta": 11,
+      "category": "opaque"
+    },
+    {
+      "id": "acc-glass",
+      "registryId": "GoodGenerator:antimatterContainmentCasing",
+      "meta": 0,
+      "category": "transparent"
+    },
+    {
+      "id": "magnetic-flux",
+      "registryId": "GoodGenerator:magneticFluxCasing",
+      "meta": 0,
+      "category": "opaque"
+    },
+    {
+      "id": "gravity-stab",
+      "registryId": "GoodGenerator:gravityStabilizationCasing",
+      "meta": 0,
+      "category": "opaque"
+    },
+    {
+      "id": "lp-pipe",
+      "registryId": "LogisticsPipes:logisticsPipeBlock",
+      "meta": 0,
+      "category": "tesr"
+    }
+  ]
+}

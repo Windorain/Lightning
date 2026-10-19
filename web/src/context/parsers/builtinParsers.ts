@@ -64,6 +64,26 @@ export function createEnvelopeParser(registry: ParserRegistryImpl): DocumentPars
   }
 }
 
+/**
+ * World 形态「跨帧调色板提升」的**逆运算**（契约 `format-scene-file.md` §2.3 / §3）。
+ *
+ * 契约把 World 的 `blockPalette` 放在**顶层**（`liftBlockPaletteToRoot` 产出、帧内移除），
+ * 而 `RuntimeDocument.fromV2Plain` 只在**帧内** `structure.blockPalette` 存在时才建网格。
+ * 缺这一步 ⇒ 合规产物装载后帧网格为 null ⇒ 装配以 `unsupportedDocumentShape` 拒绝（Gitea #408）。
+ *
+ * 判据（幂等）：帧内已有表 ⇒ 原样返回；顶层无表 ⇒ 原样返回（让下游如实失败，不伪造空表）。
+ *
+ * ⚠️ 临时的落点：本函数挂在旧载体解析链上。#301（`RuntimeDocument` 退出生产）落地后，
+ * 「顶层共享表 → 各对象自己的调色板」属于「plain → 内核文档」的导入投影，本函数随之删除。
+ */
+function withWorldRootPalette(structure: unknown, rootPalette: unknown): unknown {
+  if (structure === null || typeof structure !== 'object' || Array.isArray(structure)) return structure
+  if (!Array.isArray(rootPalette) || rootPalette.length === 0) return structure
+  const st = structure as Record<string, unknown>
+  if (Array.isArray(st.blockPalette)) return structure
+  return { ...st, blockPalette: rootPalette }
+}
+
 export const WorldParser: DocumentParser = {
   formatName: 'World',
   detect(raw: unknown): boolean {
@@ -92,7 +112,9 @@ export const WorldParser: DocumentParser = {
         return {
           index: (frame.index as number) ?? i,
           label: frame.label as string | undefined,
-          structure: frame.structure ?? undefined,
+          structure: frame.structure === undefined
+            ? undefined
+            : withWorldRootPalette(frame.structure, world.blockPalette),
         }
       }),
       annotations: (world.annotations as unknown[]) ?? [],

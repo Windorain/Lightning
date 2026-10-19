@@ -1,0 +1,84 @@
+{
+  "schema": "lightning.accept.expect/1",
+  "scene": "calibration",
+  "compare": {
+    "pairs": "all-cameras",
+    "normalize": "per-face-luminance",
+    "exclude": [
+      "sky"
+    ],
+    "thresholds": {
+      "silhouetteIoU": 0.995,
+      "faceColorDelta": 0.04,
+      "seamEdgeMax": 0
+    }
+  },
+  "checks": [
+    {
+      "kind": "region",
+      "id": "anchor-white",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "expect": "block:wool-white"
+    },
+    {
+      "kind": "region",
+      "id": "axis-x-red",
+      "at": [
+        1,
+        0,
+        0
+      ],
+      "expect": "block:wool-red"
+    },
+    {
+      "kind": "region",
+      "id": "axis-z-green",
+      "at": [
+        0,
+        0,
+        1
+      ],
+      "expect": "block:wool-green"
+    },
+    {
+      "kind": "region",
+      "id": "axis-y-blue",
+      "at": [
+        0,
+        1,
+        0
+      ],
+      "expect": "block:wool-blue"
+    },
+    {
+      "kind": "region",
+      "id": "glass-transparent",
+      "at": [
+        2,
+        0,
+        0
+      ],
+      "face": "+z",
+      "expect": "background"
+    },
+    {
+      "kind": "region",
+      "id": "stone-opaque",
+      "at": [
+        2,
+        0,
+        1
+      ],
+      "face": "+z",
+      "expect": "not-background"
+    },
+    {
+      "kind": "silhouette",
+      "id": "pair-silhouette"
+    }
+  ]
+}
