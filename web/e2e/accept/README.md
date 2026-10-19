@@ -132,7 +132,20 @@ node e2e/accept/runner/batch.mjs --submit --mc-dir <run/client>      # 提交给
 - `--submit` 只提交**作业**：单场景失败不重启客户端；进程崩溃才重放整批（场景是数据，重放幂等）。
 - 生成的用例与 `manifest.json` 落在 `--out` 指定目录（默认 `temp/accept-cases`，不入库）。
 
-## 10. 禁止
+## 10. 判据执行器
+
+```powershell
+python e2e/accept/verify/judge.py --scene scenes/glass-seam.json --expect expect/glass-seam.json `
+  --plan <plan.json> --camera front --game <game.png> --web <web.png> `
+  --shot-meta <shot-meta.json> --out <report.json>
+```
+
+- 输出固定格式：`{verdict, counts, checks[{id, verdict, value, threshold}]}`；退出码 0 = 无 fail（blocked 允许）。
+- **同一根因不重复计红**：透明缺陷已计入 `blocked` 时，形状判据同标 `blocked`。
+- 天空盒：两图各自角落色即背景，背景色本身不参与比较；光照：只比色度。
+- 投影数学在 `verify/pairmap.py`（与 `runner/camera-plan.mjs` 同式；改动必须两处同批）。
+
+## 11. 禁止
 
 - 在 spec 里写死机位/坐标/缩放；
 - 为了让图出来而修补导出件；
