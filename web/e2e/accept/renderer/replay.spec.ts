@@ -104,6 +104,58 @@ test('accept: render plan cameras through the product viewport', async ({ page }
       }
     })
         console.log('[step] camInfo', JSON.stringify(camInfo))
+    if (process.env.ACCEPT_DIAG === '1') {
+      const dirStats = await page.evaluate(() => {
+        const slot = (window as any).__vm__?.viewports?.get?.('r-viewport')
+        const root = slot?.presenterSurface?.root ?? slot?.presenterSurface?.object3d
+        const out: any = { meshes: 0, byDir: {}, sides: {} as any }
+        const bucket = (n: number[]) => {
+          const a = n.map(Math.abs); const i = a.indexOf(Math.max(...a))
+          return ['x', 'y', 'z'][i] + (n[i] < 0 ? '-' : '+')
+        }
+        root?.traverse?.((o: any) => {
+          if (!o?.isMesh) return
+          out.meshes++
+          const side = o.material?.side ?? null
+          out.sides[String(side)] = (out.sides[String(side)] ?? 0) + 1
+          const pos = o.geometry?.attributes?.position
+          if (!pos) return
+          for (let i = 0; i + 2 < pos.count; i += 3) {
+            const p0 = [pos.getX(i), pos.getY(i), pos.getZ(i)]
+            const p1 = [pos.getX(i + 1), pos.getY(i + 1), pos.getZ(i + 1)]
+            const p2 = [pos.getX(i + 2), pos.getY(i + 2), pos.getZ(i + 2)]
+            const u = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]]
+            const v = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]]
+            const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+            const k = bucket(n)
+            out.byDir[k] = (out.byDir[k] ?? 0) + 1
+          }
+        })
+        return out
+      })
+      console.log('[diag] triangles by facing', JSON.stringify(dirStats))
+      const camFwd = await page.evaluate(() => {
+        const slot = (window as any).__vm__?.viewports?.get?.('r-viewport')
+        const c = slot?.camera?.isCamera ? slot.camera : slot?.camera?.value
+        if (!c) return null
+        const q = c.quaternion
+        const rot = (v: number[]) => {
+          const [x, y, z] = v
+          const ix = q.w * x + q.y * z - q.z * y
+          const iy = q.w * y + q.z * x - q.x * z
+          const iz = q.w * z + q.x * y - q.y * x
+          const iw = -q.x * x - q.y * y - q.z * z
+          return [
+            ix * q.w + iw * -q.x + iy * -q.z - iz * -q.y,
+            iy * q.w + iw * -q.y + iz * -q.x - ix * -q.z,
+            iz * q.w + iw * -q.z + ix * -q.y - iy * -q.x,
+          ]
+        }
+        const f = rot([0, 0, -1])
+        return { pos: [c.position.x, c.position.y, c.position.z], forward: f.map((v: number) => +v.toFixed(3)), near: c.near, far: c.far, zoom: c.zoom }
+      })
+      console.log('[diag] camFwd', JSON.stringify(camFwd), 'cam=' + cam.name)
+    }
     if (!box) throw new Error('找不到视口容器 .vc-viewport')
 
     // 只在「世界每像素」这一层对齐：zoom 由 canvas 高度反推，保证与游戏侧同 px/block
@@ -138,6 +190,17 @@ test('accept: render plan cameras through the product viewport', async ({ page }
     }
     if (!applied) throw new Error('相机写入被产品覆写：' + JSON.stringify(await read()))
     console.log('[step] camera applied', cam.name)
+    if (process.env.ACCEPT_DOUBLE === '1') {
+      const n = await page.evaluate(() => {
+        const slot = (window as any).__vm__?.viewports?.get?.('r-viewport')
+        const root = slot?.presenterSurface?.root ?? slot?.presenterSurface?.object3d
+        let k = 0
+        root?.traverse?.((o: any) => { if (o?.isMesh && o.material) { o.material.side = 2; o.material.needsUpdate = true; k++ } })
+        return k
+      })
+      console.log('[diag] double-side applied to', n, 'meshes')
+      await page.waitForTimeout(400)
+    }
     await page.waitForTimeout(700)
     await canvasLoc.screenshot({ path: path.join(outDir, cam.name + '.png') })
     console.log('[step] shot written', cam.name)
