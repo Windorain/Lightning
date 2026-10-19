@@ -96,7 +96,12 @@
       "id": "lp-pipe",
       "registryId": "LogisticsPipes:logisticsPipeBlock",
       "meta": 0,
-      "category": "tesr"
+      "category": "tesr",
+      "te": {
+        "completer": "lp-pipe",
+        "params": { "pipe": "LogisticsPipes:item.PipeItemsBasicLogistics" },
+        "why": "LP 通用管块 setBlock 之后只是空壳（pipeId=-1 ⇒ 渲染器什么都不画，实拍整格背景），必须经 LP 自己的放置 API；completer 与物品名取自 test/cases/anchor/lp-pipe-row.json"
+      }
     }
   ]
 }

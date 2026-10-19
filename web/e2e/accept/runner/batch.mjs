@@ -57,7 +57,18 @@ export function caseForScene(scene, plan) {
 
   const build = [{ op: 'clear', from: clearFrom, to: clearTo }]
   for (const b of scene.blocks) {
-    build.push({ op: 'block', at: [o[0] + b.at[0], o[1] + b.at[1], o[2] + b.at[2]], id: blockOf(b, scene), meta: metaOf(b, scene) })
+    const at = [o[0] + b.at[0], o[1] + b.at[1], o[2] + b.at[2]]
+    // 模组 TE 方块**必须**走 te 步 + 对应 completer：LP 管块用 block 步只会得到空壳
+    // （pipeId=-1 ⇒ 渲染器什么都不画，实拍与导出同时是空的，而**没有任何报错**）。
+    const te = entryOf(b, scene).te
+    if (te !== undefined) {
+      if (typeof te.completer !== 'string' || te.completer === '') {
+        throw new Error('方块 ' + b.block + ' 声明了 te 但缺少 completer')
+      }
+      build.push({ op: 'te', at, completer: te.completer, params: te.params ?? {} })
+      continue
+    }
+    build.push({ op: 'block', at, id: blockOf(b, scene), meta: metaOf(b, scene) })
   }
 
   // 导出前置：站位 → 选区 → 起点 → 帧号 → 录制（缺一步 export.scene 会报「帧缓冲为空」）
@@ -123,6 +134,13 @@ export function loadBlocks(root = ROOT) {
   const map = new Map()
   for (const b of doc.blocks) map.set(b.id, b)
   return map
+}
+
+/** 方块库条目（含可选的 te 声明：{completer, params}）。 */
+function entryOf(b, scene, blocks = loadBlocks()) {
+  const e = blocks.get(b.block)
+  if (!e) throw new Error(`场景 ${scene.id} 引用了未登记的方块：${b.block}`)
+  return e
 }
 
 function blockOf(b, scene, blocks = loadBlocks()) {
