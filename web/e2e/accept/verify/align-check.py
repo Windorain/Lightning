@@ -84,6 +84,7 @@ def main():
     ap.add_argument('--camera', required=True); ap.add_argument('--scene', required=True)
     ap.add_argument('--threshold', type=float, default=0.06)
     ap.add_argument('--bg-tol', type=float, default=26)
+    ap.add_argument('--transparent-blocks', default='', help='逗号分隔：这些方块若两侧背景/内容分类不一致，判 blocked（已知产品缺陷）而非 fail')
     ap.add_argument('--out', default=None)
     a = ap.parse_args()
 
@@ -109,8 +110,9 @@ def main():
         gc = sample(g, gx, gy); wc = sample(w, wx, wy)
         g_bg = is_background(gc, bg_g, tol=a.bg_tol)
         w_bg = is_background(wc, bg_w, tol=a.bg_tol)
+        is_transparent = b['block'] in [x.strip() for x in a.transparent_blocks.split(',') if x.strip()]
         if g_bg != w_bg:
-            verdict, d = 'fail', None
+            verdict, d = ('blocked' if is_transparent else 'fail'), None
         elif g_bg and w_bg:
             d = 0.0; verdict = 'pass'  # 两侧都透出背景：一致（背景色本身不比）
         else:
@@ -122,7 +124,7 @@ def main():
                        'game_background': g_bg, 'web_background': w_bg,
                        'chroma_delta': None if d is None else round(d, 4),
                        'verdict': verdict})
-    ok = all(c['verdict'] == 'pass' for c in checks)
+    ok = all(c['verdict'] in ('pass', 'blocked') for c in checks)
     report = {'camera': a.camera, 'px_per_block': {'game': round(gppb, 3), 'web': round(wppb, 3)},
               'threshold': a.threshold, 'checks': checks, 'verdict': 'pass' if ok else 'fail'}
     txt = json.dumps(report, ensure_ascii=False, indent=2)

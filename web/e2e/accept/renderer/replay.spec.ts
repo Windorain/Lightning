@@ -80,6 +80,26 @@ test('accept: render plan cameras through the product viewport', async ({ page }
     console.log('[step] camera', cam.name)
     const box = await page.locator('.vc-viewport').first().boundingBox()
     console.log('[step] viewport box', JSON.stringify(box))
+    const camInfo = await page.evaluate(() => {
+      const w = window as any
+      const slot = w.__vm__?.viewports?.get?.('r-viewport')
+      const describeCam = (c: any): any => {
+        if (!c) return null
+        const cam = c.isCamera ? c : (c.value?.isCamera ? c.value : null)
+        if (!cam) return { notACamera: true, keys: Object.keys(c).slice(0, 12), ctor: c?.constructor?.name ?? null }
+        return {
+          type: cam.type, zoom: cam.zoom, near: cam.near, far: cam.far,
+          left: cam.left, right: cam.right, top: cam.top, bottom: cam.bottom,
+          pos: [cam.position.x, cam.position.y, cam.position.z],
+          quat: [cam.quaternion.x, cam.quaternion.y, cam.quaternion.z, cam.quaternion.w],
+        }
+      }
+      return {
+        camera: describeCam(slot?.camera),
+        cameraMainKey: slot?.cameraMainKey ?? null,
+      }
+    })
+        console.log('[step] camInfo', JSON.stringify(camInfo))
     if (!box) throw new Error('找不到视口容器 .vc-viewport')
 
     // 只在「世界每像素」这一层对齐：zoom 由 canvas 高度反推，保证与游戏侧同 px/block
