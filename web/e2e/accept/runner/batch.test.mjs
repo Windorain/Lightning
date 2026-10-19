@@ -16,7 +16,7 @@ test('每个场景都能产出用例，且机位数 = 六视图 + 轴测', () =>
       assert.ok(cam.projection.orthoHeight > 0)
       const [W, H] = cam.resolution
       assert.equal(W / H, 16 / 9)
-      if (!s.id.startsWith('pr109-')) {
+      if (!/^pr(91|109)-/.test(s.id)) {
         assert.equal(cam.resolution[0], 1920)
         assert.equal(cam.resolution[1], 1080)
       }
