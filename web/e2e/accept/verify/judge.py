@@ -7,7 +7,7 @@
 天空盒：`compare.exclude` 含 sky 时，两图各自的角落色即背景，**背景色本身不参与**比较。
 光照：`compare.normalize=per-face-luminance` 时只比色度（亮度归一化）。
 """
-import argparse, json, sys
+import argparse, json, math, sys
 from PIL import Image
 from pairmap import corner_bg, is_background, sample, normalize, game_mapping, web_mapping
 
@@ -35,8 +35,9 @@ def main():
     meta = json.load(open(a.shot_meta, encoding='utf-8'))
     cam = next(c for c in plan['cameras'] if c['name'] == a.camera)
     shot = next(s for s in meta['shots'] if s['name'] == a.camera)
-    if meta.get('localBox') is None:
-        print(json.dumps({'verdict': 'blocked', 'reason': '缺 localBox'}, ensure_ascii=False)); return 2
+    sf = meta.get('sceneFrame')
+    if meta.get('localBox') is None and sf is None:
+        print(json.dumps({'verdict': 'blocked', 'reason': '缺 localBox 与 sceneFrame，无法建立世界→Web 映射'}, ensure_ascii=False)); return 2
 
     g = Image.open(a.game).convert('RGB'); w = Image.open(a.web).convert('RGB')
     bg_g, bg_w = corner_bg(g), corner_bg(w)
@@ -60,6 +61,31 @@ def main():
         return n
     gp, wp = content_pixels(g, bg_g), content_pixels(w, bg_w)
     content_ratio = (wp / gp) if gp else 0.0
+
+    def web_px(point):
+        """世界点 → Web 图像像素。平移来自**声明的网格**（内核把网格居中 ⇒ 局部原点）。"""
+        if sf is not None:
+            off = [sf['min'][i] + sf['size'][i] / 2 for i in range(3)]
+            lp = [point[i] - off[i] for i in range(3)]
+            web = shot['web']
+            W, H = shot['canvas']['width'], shot['canvas']['height']
+            zoom = shot['zoom']
+            yaw = math.radians(web['yawDeg']); elev = math.radians(web['elevationDeg'])
+            d = [math.sin(yaw) * math.cos(elev), math.sin(elev), math.cos(yaw) * math.cos(elev)]
+            cam_pos = [d[i] * web['distance'] for i in range(3)]
+            fwd = [-d[0], -d[1], -d[2]]
+            right = [-fwd[2], 0.0, fwd[0]]
+            rl = math.sqrt(sum(v * v for v in right)) or 1.0
+            right = [v / rl for v in right]
+            up = [right[1] * fwd[2] - right[2] * fwd[1],
+                  right[2] * fwd[0] - right[0] * fwd[2],
+                  right[0] * fwd[1] - right[1] * fwd[0]]
+            rel = [lp[i] - cam_pos[i] for i in range(3)]
+            ppb = H * zoom / 10
+            return (W / 2 + sum(rel[i] * right[i] for i in range(3)) * ppb,
+                    H / 2 - sum(rel[i] * up[i] for i in range(3)) * ppb,
+                    ppb)
+        return web_mapping(shot, meta['localBox'], point)
 
     for chk in expect['checks']:
         kind = chk['kind']
@@ -86,7 +112,8 @@ def main():
                 return min(xs), min(ys), max(xs), max(ys)
             def ratio(img, bg, conv):
                 x0, y0, x1, y1 = rect_of(conv)
-                inset_x = (x1 - x0) * 0.15; inset_y = (y1 - y0) * 0.15
+                # 只取格面的**中心区**：管/箱等非整方块只占格内一部分，取整格会把空白算进多数票
+                inset_x = (x1 - x0) * 0.30; inset_y = (y1 - y0) * 0.30
                 n = hit = 0
                 for i in range(5):
                     for j in range(5):
@@ -96,20 +123,22 @@ def main():
                         hit += 1 if is_background(sample(img, X, Y, r=2), bg, a.bg_tol) else 0
                 return hit / n
             gr = ratio(g, bg_g, lambda q: game_mapping(cam['game'], q))
-            wr = ratio(w, bg_w, lambda q: web_mapping(shot, meta['localBox'], q))
+            wr = ratio(w, bg_w, lambda q: web_px(q))
             gcls = 'background' if gr >= 0.5 else 'content'
             wcls = 'background' if wr >= 0.5 else 'content'
             want = chk.get('expect', 'not-background')
             if want.startswith('block:'):
                 results.append({'id': chk['id'], 'kind': kind, 'verdict': 'blocked',
-                                'reason': '未建立方块参考色表，无法机械比对指定方块色', 'game_rgb': list(map(round, gc)), 'web_rgb': list(map(round, wc))})
+                                'reason': '未建立方块参考色表，无法机械比对指定方块色', 'game_bg_ratio': round(gr, 3), 'web_bg_ratio': round(wr, 3)})
                 continue
             min_cov = float(chk.get('min_coverage', 0.5))
             if want == 'background':
                 ok = (gr >= 0.5) and (wr >= 0.5)
             else:
                 # 非整方块（管/箱子等）只占格内一部分：按“内容覆盖率下限”判，而不是多数票
-                ok = ((1 - gr) >= min_cov) and ((1 - wr) >= min_cov)
+                tol = float(chk.get('coverage_tolerance', 0.20))
+                # Web 侧的内容覆盖率不得比游戏侧少太多（少 = 该格没画出来）
+                ok = ((1 - gr) >= min_cov) and ((1 - wr) >= (1 - gr) - tol)
             if not ok and (gcls != wcls) and blocks & transparent and kind == 'region':
                 verdict = 'blocked'
                 reason = '透明方块两侧分类不一致（Web 未按透明渲染，已知缺陷）'
@@ -209,7 +238,7 @@ def main():
                 r['reason'] = '受同一透明缺陷影响（形状随透明度变化）'
     content_checks = [r for r in results if r['kind'] in ('opaque', 'region') and r.get('want') == 'not-background'] + [r for r in results if r['kind'] == 'opaque']
     content_checks = list({id(r): r for r in content_checks}.values())
-    if content_checks and all(r['verdict'] == 'fail' for r in content_checks):
+    if content_ratio < 0.05 and content_checks and all(r['verdict'] == 'fail' for r in content_checks):
         for r in content_checks:
             r['verdict'] = 'blocked'
             r['reason'] = '该机位整体无内容（视图级缺陷，先修渲染再判内容）'
