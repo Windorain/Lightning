@@ -68,6 +68,7 @@ import { plainRootOf } from '@/adapters/plainRoot'
 import { workbenchCommandSink } from '@/workbench/inputHotkeys'
 import { findObject, findObjectData } from '@/domain/scene'
 import { cellContentKey } from '@/domain/cellContent'
+import { createDiagnosticRecorder } from '@/application/diagnostics'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 生产解析 + 装配（真信封；不做任何"手搓文档"）
@@ -146,6 +147,8 @@ function makeWorkbenchContext(
 ): Context {
   const ctx = Object.create(Context.prototype) as Context
   Object.assign(ctx as unknown as Record<string, unknown>, {
+    // M8-6：算子/属性写结算会写结构化诊断面（命令接收/结算、只读原因）。
+    wm: { diagnostics: createDiagnosticRecorder({ capacity: 64, now: () => 0 }) },
     main: {
       doc: docRef,
       embedPublish: ref({}),

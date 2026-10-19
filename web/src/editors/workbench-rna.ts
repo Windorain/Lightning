@@ -46,6 +46,7 @@ import { KERNEL_ANNOTATION_TYPE } from '@/application/kernel-properties'
 import { KERNEL_CONTEXT_ID } from '@/runtime/kernelSession'
 import { annotationObjectIdOf } from '@/runtime/annotationRead'
 import { announceRejection } from '@/runtime/rejectionNotice'
+import { reportPropertyWriteSettlement } from '@/runtime/commandDiagnostics'
 import { cellTooltipTextAt } from '@/runtime/tooltipRead'
 import type { DocumentMetadata } from '@/domain/content'
 import { NO_CHANGE } from '@/domain/identity'
@@ -664,6 +665,14 @@ function fieldLabelOf(propertyId: string): string | undefined {
  */
 function settleFieldWrite(ctx: Context, refs: readonly PropertyRef[], outcome: CommandOutcome): void {
   const store = ctx.getFieldRejections()
+  // M8-6：同一次结算也进结构化诊断面（`command.unchanged` / `command.rejected` /
+  // `command.wouldBlock` / `property.readOnly` 四码的**唯一**分派点）。分派只看
+  // `CommandOutcome` 与领域错误码 —— 不解析文案、不看 message。
+  reportPropertyWriteSettlement(
+    ctx.wm.diagnostics,
+    outcome,
+    refs.map((r) => r.property),
+  )
   if (outcome.status === 'rejected') {
     for (const r of refs) store.reject(r.property, outcome.error)
     const first = refs[0]?.['property']

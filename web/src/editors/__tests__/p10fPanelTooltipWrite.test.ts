@@ -53,6 +53,7 @@ import { writeErrorKey } from '@/editors/property-writers'
 import { projectCellTooltipsToLegacy } from '@/runtime/tooltipRead'
 import { projectAnnotationsToLegacy } from '@/runtime/annotationRead'
 import { createFieldRejectionStore } from '@/runtime/fieldRejections'
+import { createDiagnosticRecorder } from '@/application/diagnostics'
 
 const OBJ = 'structure:frame-0'
 /** 高度 2 的网格（`cellGrid` 行序：row 0 = 顶部 ⇒ 世界 y = h-1-row）。 */
@@ -127,6 +128,8 @@ function makeWorkbenchContext(
 ): Context {
   const ctx = Object.create(Context.prototype) as Context
   Object.assign(ctx as unknown as Record<string, unknown>, {
+    // M8-6：属性写结算会写结构化诊断面（`command.unChanged`/`property.readOnly`/`command.wouldBlock`）。
+    wm: { diagnostics: createDiagnosticRecorder({ capacity: 64, now: () => 0 }) },
     main: {
       doc: docRef,
       // `documentStateOf` 读它造 shell 快照；本判据不看壳设置 ⇒ 给最小可读形状
@@ -486,6 +489,8 @@ describe('#333 · 负对照（证明上面的判据真的在测"回写"）', () 
       fresh.markLoaded()
       // 面板的**真实**提交入口（`commitFieldValue`）：它自己从选中集解析目标。
       Object.assign(ctx as unknown as Record<string, unknown>, {
+    // M8-6：属性写结算会写结构化诊断面（`command.unChanged`/`property.readOnly`/`command.wouldBlock`）。
+    wm: { diagnostics: createDiagnosticRecorder({ capacity: 64, now: () => 0 }) },
         getSelection: () => ({
           active: ref(null),
           items: ref(new Set([{ kind: 'block', ref: { pos: { x: 0, y: 1, z: 0 } } }])),

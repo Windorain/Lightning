@@ -11,6 +11,7 @@ import { pushDocUndo } from './pushDocUndo'
 import { ModalOperatorWrapper } from './modalOperatorWrapper'
 import type { StateDigest } from '@/logging/LogCenter'
 import { refuseOperator } from './capabilityRefusal'
+import { reportCommandApplied, reportCommandReceived } from '@/runtime/commandDiagnostics'
 
 /**
  * 该算子**缺哪一个能力**（`null` = 全部具备）。
@@ -60,6 +61,10 @@ export class OperatorRegistry {
   async exec(ctx: Context, id: string, props?: OperatorProperties): Promise<void> {
     const op = this.operators.get(id)
     if (!op) { ctx.log.warn('Operator', `exec: op not found ${id}`, { opId: id }); return }
+    // M8-6：命令的"被接收/已执行"是 §19.9 第一项要求的事实。这里是**唯一**写点
+    // （菜单、快捷键、脚本、`ctx.getOperators().exec` 全部经过它）；拒绝由
+    // `capabilityRefusal`/`settleFieldWrite` 发 `command.rejected`，不在这里重复。
+    reportCommandReceived(ctx.wm.diagnostics, id)
     // 能力门优先于 poll：缺能力是**装配事实**（不会因文档状态变化），必须先结算成拒绝。
     const missingCapability = missingCapabilityOf(op, ctx)
     if (missingCapability !== null) { refuseOperator(ctx, op, missingCapability); return }
@@ -86,6 +91,7 @@ export class OperatorRegistry {
         await op.exec(ctx, resolvedProps)
       }
       logOperatorResult(ctx, id, op.label, 'FINISHED', snap)
+      reportCommandApplied(ctx.wm.diagnostics, id)
     }
   }
 

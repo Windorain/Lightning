@@ -24,6 +24,7 @@ import { resolveComposition } from '@/composition/resolver'
 import { createOperatorRegistry } from '@/operators/operatorRegistry'
 import { SetToolSettingOperator } from '@/operators/builtin/miscOperators'
 import { registerWorkbenchOperators } from '@/workbench/registerWorkbench'
+import { createDiagnosticRecorder } from '@/application/diagnostics'
 
 /** 生产 profile 的解析结果（可选：删掉一部分模块 = 删能力）。 */
 function assemblyOf(omit: readonly string[] = []) {
@@ -50,6 +51,8 @@ function makeContext(capabilities: readonly string[]) {
   }
   const ctx = Object.create(ContextClass.prototype) as Context
   Object.assign(ctx as unknown as Record<string, unknown>, {
+    // M8-6：算子/属性写结算会写结构化诊断面（命令接收/结算、只读原因）。
+    wm: { diagnostics: createDiagnosticRecorder({ capacity: 64, now: () => 0 }) },
     capabilities,
     main: { doc: ref(null), embedPublish: ref({}), contentRefreshTick: ref(0) },
     workbench: {},
