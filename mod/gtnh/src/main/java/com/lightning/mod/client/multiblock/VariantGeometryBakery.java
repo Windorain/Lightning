@@ -25,6 +25,7 @@ import org.lwjgl.opengl.GL11;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.lightning.mod.client.export.MaterialBlendMode;
 import com.lightning.mod.client.meshcapture.MeshCaptureService;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedBlockInstance;
@@ -372,7 +373,8 @@ public final class VariantGeometryBakery {
         out.positionsCaptured++;
         // applySpriteLocalToQuad 会把顶点 UV 就地改写成 sprite 局部 [0,1] 并写回 q.materialKey，
         // 因此**每个四边形只能调用一次**（重复调用会把局部 UV 当图集 UV 再解析 → 退化成 "unknown"）。
-        MeshCaptureService.CaptureToolkit.attachQuadMaterials(inst, textureMap, palette.materials());
+        MeshCaptureService.CaptureToolkit
+            .attachQuadMaterials(inst, textureMap, palette.materials(), MaterialBlendMode.of(block));
         JsonObject geometry = MeshCaptureService.CaptureToolkit.geometryOf(inst);
         // 注意：不传 Block —— 调色板条目不再带 thumbnailPNG（GPU 像素跨运行不稳定，见 GeometryPalette 类注释）。
         return palette.intern(registryId, meta, geometry, block.isOpaqueCube(), referencedByMachine, inst.quads.size());

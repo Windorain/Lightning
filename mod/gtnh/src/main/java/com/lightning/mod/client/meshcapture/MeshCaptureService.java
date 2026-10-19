@@ -43,6 +43,7 @@ import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.export.BlockThumbnailRenderer;
 import com.lightning.mod.client.export.ExportTextureLocator;
 import com.lightning.mod.client.export.MaterialAnimationJson;
+import com.lightning.mod.client.export.MaterialBlendMode;
 import com.lightning.mod.client.export.NbtJsonSerializer;
 import com.lightning.mod.client.export.SceneEnvelopeBuilder;
 import com.lightning.mod.client.export.TextureBlobEmbedder;
@@ -733,7 +734,7 @@ public final class MeshCaptureService {
                         if (inst.quads.isEmpty()) {
                             remapped[zi][ri][ci] = 0;
                         } else {
-                            attachMaterials(inst, textureMap, samplers);
+                            attachMaterials(inst, textureMap, samplers, MaterialBlendMode.of(b));
                             JsonObject geo = bakedQuadsGeometryFromCapture(inst);
 
                             List<String> tt = tooltipByCellType.get(ti);
@@ -968,8 +969,9 @@ public final class MeshCaptureService {
          * 给已经捕获好的四边形挂上材质下标（写入 {@link CapturedQuad#samplerIndex}）。
          * {@code table} 必须在整个数据集内共享，否则 {@code materialIndex} 会跨变体漂移。
          */
-        public static void attachQuadMaterials(CapturedBlockInstance inst, TextureMap textureMap, MaterialTable table) {
-            attachMaterials(inst, textureMap, table.inner);
+        public static void attachQuadMaterials(CapturedBlockInstance inst, TextureMap textureMap, MaterialTable table,
+            String blend) {
+            attachMaterials(inst, textureMap, table.inner, blend);
         }
 
         /** 几何内容签名（4 位小数 / 四边形内顶点排序 / 四边形间排序 / SHA-256）。 */
@@ -1002,8 +1004,9 @@ public final class MeshCaptureService {
             private final SamplerTable inner = new SamplerTable();
 
             public int indexFor(String materialKey, TextureMap blocksTextureMap, boolean standaloneFileTexture,
-                String paletteAtlasKind) {
-                return inner.indexForMaterial(materialKey, blocksTextureMap, standaloneFileTexture, paletteAtlasKind);
+                String paletteAtlasKind, String blend) {
+                return inner
+                    .indexForMaterial(materialKey, blocksTextureMap, standaloneFileTexture, paletteAtlasKind, blend);
             }
 
             public JsonArray toMaterialPalette() {
@@ -1363,12 +1366,19 @@ public final class MeshCaptureService {
         return cellGridJson;
     }
 
-    private static void attachMaterials(CapturedBlockInstance inst, TextureMap textureMap, SamplerTable samplers) {
+    /**
+     * 给一次逐格捕获的四边形挂材质下标。
+     *
+     * @param blend 该格方块的混合模式（{@link com.lightning.mod.client.export.MaterialBlendMode#of}）；
+     *              {@code null} = 这条路径不声明（材质条目不带 `blend`，与改动前逐字一致）
+     */
+    private static void attachMaterials(CapturedBlockInstance inst, TextureMap textureMap, SamplerTable samplers,
+        String blend) {
         for (CapturedQuad q : inst.quads) {
             String materialKey = MaterialKeyResolver.applySpriteLocalToQuad(q, textureMap);
             String atlasKind = q.materialUsesStandaloneTexture ? null : q.materialAtlasKind;
             q.samplerIndex = samplers
-                .indexForMaterial(materialKey, textureMap, q.materialUsesStandaloneTexture, atlasKind);
+                .indexForMaterial(materialKey, textureMap, q.materialUsesStandaloneTexture, atlasKind, blend);
         }
     }
 
@@ -1377,10 +1387,18 @@ public final class MeshCaptureService {
         private final List<JsonObject> list = new ArrayList<>();
         private final Map<String, Integer> indexByKey = new LinkedHashMap<>();
 
+        /**
+         * 取（或新建）材质槽位。
+         *
+         * `blend` 进**缓存键**：同一张贴图可能在两种混合语义下出现（例如玻璃与玻璃板走不同
+         * pass），那时必须是两条材质、不能共用一个槽位 —— 否则其中一方的 `blend` 会被另一方的
+         * 覆盖，且**没有任何报错**。
+         */
         int indexForMaterial(String materialKey, TextureMap blocksTextureMap, boolean standaloneFileTexture,
-            String paletteAtlasKind) {
+            String paletteAtlasKind, String blend) {
             String atlasBand = standaloneFileTexture ? "file" : ("items".equals(paletteAtlasKind) ? "items" : "blocks");
-            String cacheKey = standaloneFileTexture ? materialKey + "\0__sde_file_tex" : materialKey + "\0" + atlasBand;
+            String baseKey = standaloneFileTexture ? materialKey + "\0__sde_file_tex" : materialKey + "\0" + atlasBand;
+            String cacheKey = blend == null ? baseKey : baseKey + "\0blend:" + blend;
             Integer idx = indexByKey.get(cacheKey);
             if (idx != null) {
                 return idx;
@@ -1402,6 +1420,9 @@ public final class MeshCaptureService {
             }
             String kind = inferMaterialKindForSprite(materialKey, kindMap);
             s.addProperty("kind", kind);
+            if (blend != null) {
+                s.addProperty("blend", blend);
+            }
             if ("animated".equals(kind)) {
                 TextureAtlasSprite sprAnim = MaterialKeyResolver.findSpriteForMaterialKey(materialKey, kindMap);
                 String norm = ExportTextureLocator.normalizeLocatorForBundle(materialKey);
@@ -1428,6 +1449,9 @@ public final class MeshCaptureService {
                     "kind",
                     s.get("kind")
                         .getAsString());
+                if (s.has("blend")) {
+                    m.add("blend", s.get("blend"));
+                }
                 if (s.has("atlas")) {
                     m.add("atlas", s.get("atlas"));
                 }
