@@ -868,6 +868,74 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + 'M9-1 只补登记，**不改任何行为**。',
   }),
   /**
+   * **M9-1 补登（U2）**：壳设置 → `Main.embedPublish` 的**运行期镜像**。
+   *
+   * ## 事实（cf3935e1 实测）
+   *
+   * - 权威 = `DocumentState.shell.shellSettings`：`editors/workbench-rna.ts#documentStateOf`
+   *   构造它（`:536-549`），写经 `applySetProperty` 结算（壳设置不进文档历史，契约 §6.4）。
+   * - 镜像 = `Main.embedPublish`（`runtime/main.ts:119`；由 `runtime/mainCameras.ts:125-126`
+   *   的 store 分配）。写点**唯一**：`editors/workbench-rna.ts:916`（`applyShellState`，
+   *   其 `:910` 注释即“壳设置写回…不进文档历史”）。
+   * - 读点：`editors/workbench-rna.ts:330`（`workspace` 拥有者的 RNA 读）、`:538`
+   *   （`documentStateOf` 把镜像**再塞回** `shell.shellSettings`）、`:915`（写前取当前值）；
+   *   运行期消费者：`workbench/WorkbenchRoot.vue:138`（`:517` 用它的 `viewWidth`/`viewHeight`）、
+   *   `viewer/viewerConfig.ts:155`、`wiki/wikiEmbedTemplate.ts:8`、
+   *   `operators/builtin/miscOperators.ts:295`、`workbench/ux/PropertyInspector.vue:67`。
+   *
+   * ## 为什么算双轨（不是“写一次、只读”的末端缓存）
+   *
+   * `documentStateOf` 用镜像**重建** `DocumentState`，`applyShellState` 又把结算结果写回镜像
+   * ⇒ 同一事实在同一轮里走“权威 → 镜像 → 权威”的**往返**：第二份存储是回路的一部分，
+   * 而不是末端派生值。且这条写落在 `ctx.main` 上（§15 第 1 条“Main 裸字段”的残余面之一）。
+   *
+   * ## 它不属 GF-21
+   *
+   * `embedPublish` 是发布/预览配置（视口尺寸、背景、特性开关），**不是**
+   * `meta.embed_initial_view`（那是 U3，见 `main-embed-initial-view-mirror`）。
+   * 故本条的退出**不以 GF-21 为前置**；两条镜像按同批纪律一起复审。
+   *
+   * ## owner 口径
+   *
+   * 本条**没有**已排期的实现批认领（壳设置读面迁移尚未立包）⇒ owner 取退役审计批
+   * P11（#262）跟踪；实现批立包时按本条的（乙）接管，并同批改本注释。
+   */
+  Object.freeze({
+    id: 'main-embed-publish-mirror',
+    files: Object.freeze([
+      'src/runtime/main.ts',
+      'src/runtime/mainCameras.ts',
+      'src/editors/workbench-rna.ts',
+    ]),
+    newTrack:
+      '壳设置的**权威**是 `DocumentState.shell.shellSettings`：写经 `editors/workbench-rna.ts#submitPropertyWrite`'
+      + ' 的壳分派（`applySetProperty` 结算，不进文档历史），读经 `documentStateOf`；'
+      + '消费者应当读这份壳状态（或其具名投影），而不是读一个可写的 Ref。',
+    oldTrack:
+      '`Main.embedPublish` 是同一事实的**第二份存储**：`src/runtime/main.ts:119` 声明、'
+      + '`src/runtime/mainCameras.ts:125-126` 分配；写点 `src/editors/workbench-rna.ts:916`'
+      + '（`applyShellState`）；读点 `:330`/`:538`/`:915`；运行期消费者 `workbench/WorkbenchRoot.vue:138`、'
+      + '`viewer/viewerConfig.ts:155`、`wiki/wikiEmbedTemplate.ts:8`、`operators/builtin/miscOperators.ts:295`、'
+      + '`workbench/ux/PropertyInspector.vue:67`。生产读数（去测试文件）：**9 处 / 6 文件**。',
+    blocker:
+      '消费者按 Vue `Ref` 形状读它（`viewerConfig`/`wikiEmbedTemplate`/`PropertyInspector` 直接取 `.value`），'
+      + '且 `documentStateOf` 用它重建 `DocumentState` ⇒ 迁移需要一条壳设置的**具名读面**'
+      + '（或让读者直接吃 `DocumentState.shell` 的投影）。那属壳/面板批次，本批只登记。',
+    closureCoverage: 'in-closure',
+    owner: Object.freeze({ p: 'P11', issue: 262, duty: '退役审计、全量回归、性能门槛与复杂度对账' }),
+    exitCondition:
+      '**（甲）登记条件 —— ✅ 已成立（权威在案）**：壳设置的权威存储 = `DocumentState.shell.shellSettings`'
+      + '（`src/editors/workbench-rna.ts#documentStateOf` 构造，`applySetProperty` 结算）。'
+      + '\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立（写点 1 + 读点 3 + 运行期消费者 5）**：'
+      + '`main.embedPublish` 的生产读数 = 9 处 / 6 文件，其中写点 1 处（`src/editors/workbench-rna.ts:916`）。'
+      + '\n**退出条件（两个子句同时成立时删除镜像字段与本条登记）**：'
+      + '① `src/runtime/main.ts` 不再声明 `embedPublish`，`src/runtime/mainCameras.ts` 不再分配它；'
+      + '② `main.embedPublish` 的读写点 = 0（`src/editors/workbench-rna.ts` 的 `documentStateOf`/`applyShellState`'
+      + ' 改为直接用 `DocumentState.shell` 或具名读面）。'
+      + '\n**退出阶段**：壳设置读面迁移批 —— **不以 GF-21 为前置**（本条不涉及 `meta.embed_initial_view`）；'
+      + '与 `main-embed-initial-view-mirror` 同批复审。',
+  }),
+  /**
    * ⚠️ **已核销（R1-β① C10 / `d4708d0b`；关单裁决 #387 评论 7489 二）**：原
    * `shared-viewport-upward-imports-assembly-root` 登记在此。
    *
