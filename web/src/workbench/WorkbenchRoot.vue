@@ -304,6 +304,21 @@ function assembleWorkbenchInput(): void {
     onTextEffects: () => {
       refreshDraftMirrors()
     },
+    // 平台动作失败（指针捕获/焦点移交等）→ 诊断面（M8-6）：用户感知是"拖了一下没抓住"，
+    // 而此前只有一句 console.warn。参数只带失败种类（由适配器给出的稳定串）。
+    onPlatformFailure: (failures) => {
+      ctx.wm.diagnostics.record({
+        channel: 'command',
+        code: 'command.unsupported',
+        params: {
+          source: 'inputBinding.platformAction',
+          reason: 'platform-action-failed',
+          failures: failures.slice(0, 3).map((f) => `${f.action}:${f.error}`).join(','),
+          count: failures.length,
+        },
+        correlation: {},
+      })
+    },
     onResume: ({ resumeBaseline, droppedTicks }) => {
       // 恢复**不**追赶：只把基线记进诊断（#249 §9）。绝不在此补跑历史 tick。
       ctx.log.info('输入', `页面恢复：基线=${Math.round(resumeBaseline)}ms 丢弃 ${droppedTicks} tick`)
@@ -319,7 +334,19 @@ function assembleWorkbenchInput(): void {
     if (e instanceof ExclusiveKeydownConflict) {
       singleInstanceNotice.value = SINGLE_WORKBENCH_NOTICE
       ctx.log.warn('工作台', SINGLE_WORKBENCH_NOTICE, { incumbent: e.incumbent, challenger: e.challenger })
-      console.warn('[StructureRenderer] ' + SINGLE_WORKBENCH_NOTICE)
+      // M8-6：控制台那句直写已删除 —— 同一事实现在有**两个**读者：状态栏提示
+      // （`singleInstanceNotice`，用户看）与诊断面（判据/排障看）。
+      ctx.wm.diagnostics.record({
+        channel: 'command',
+        code: 'command.unsupported',
+        params: {
+          source: 'WorkbenchRoot.assembleInput',
+          reason: 'single-workbench',
+          incumbent: e.incumbent,
+          challenger: e.challenger,
+        },
+        correlation: {},
+      })
       return
     }
     // 别的装配异常照旧上抛：吞掉它们会把真正的缺陷变成"没有键盘"。

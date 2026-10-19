@@ -235,6 +235,16 @@ export interface DrwMeshPipelineDeps {
    */
   onFrameChangeUnavailable?: (report: FrameChangeUnavailableReport) => void
   /**
+   * **呈现链内部失败**的上报口（M8-6）：本层不 import 诊断实现，落点由接线层给。
+   *
+   * 全部四条原先是 `console.error/warn`（图标库装配失败、未注入 seekFrame、内容重读失败、
+   * 内核源面在该帧取不到定义）—— 它们描述的是"画面/图标为什么塌了"，
+   * 而用户只剩一句"看起来没反应"。生产接线把它映射到 `effect.failed`（呈现链失败族）。
+   *
+   * 缺席 = 退回静默（只为单测直接构造保留）；生产恒注入，由接线判据把守。
+   */
+  onInternalFailure?: (report: { readonly reason: string; readonly detail?: string }) => void
+  /**
    * 时间是否在前进（P10 #261：替代旧的 `framesPlaybackIsPlaying` Ref）。
    *
    * 本管线不做任何调度 —— 只把它当**呈现侧观测**（是否继续跟随）。
@@ -294,7 +304,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     docRef, loadStatus, blockIconCache, tooltipPalette,
     structureDefinition, sceneRef, worldFrameIndex, layerWorldY,
     blockIconCacheOptions, initialWorldFrameIndex, contentRefreshTickRef, seekFrame,
-    toolsOverlayGroupRef, renderSourceRef, onFrameChangeUnavailable,
+    toolsOverlayGroupRef, renderSourceRef, onFrameChangeUnavailable, onInternalFailure,
   } = deps
 
   /** 内核渲染源面（在场 ⇒ 定义/说明/材质三样**不**再经旧格式文档）。 */
@@ -356,7 +366,8 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       })
       return textureCache.value
     } catch (e) {
-      console.error('[drw] 图标材质库装配失败（视口与画面不受影响，图标降级为无）', e)
+      // 图标库建不起来 ⇒ 图标降级为无（视口/画面不受影响）：这是**可降级**的呈现事实。
+      onInternalFailure?.({ reason: 'icon-library-assembly-failed', detail: e instanceof Error ? e.message : String(e) })
       textureCache.value = null
       return null
     }
@@ -527,7 +538,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       return
     }
     // 没有接线（例如单测直接构造本管线）：显式不做，**不**静默假装换帧成功。
-    console.warn('[drw] setCurrentWorldFrame: 未注入 seekFrame（内核会话未接线）')
+    onInternalFailure?.({ reason: 'seek-frame-not-wired' })
   }
 
   /**
@@ -577,7 +588,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     stopContentRefreshWatch?.()
     stopContentRefreshWatch = watch(contentRefreshTickRef, () => {
       void applyContentRefresh('content-refresh-tick').catch(e => {
-        console.error('[drw] content refresh failed:', e)
+        onInternalFailure?.({ reason: 'content-refresh-failed', detail: e instanceof Error ? e.message : String(e) })
         loadStatus.value = 'error'
       })
     })
@@ -601,7 +612,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
         const hit = source.definitionAt(frameIdx)
         if (hit === null) {
           loadStatus.value = 'error'
-          console.error('[drw] loadStructureAndResources: 内核渲染源面在该帧取不到定义')
+          onInternalFailure?.({ reason: 'render-source-definition-missing' })
           return
         }
         structureDefinition.value = hit.definition
@@ -637,7 +648,7 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
       loadStatus.value = 'ok'
     } catch (e) {
       loadStatus.value = 'error'
-      console.error('[drw] loadStructureAndResources', e)
+      onInternalFailure?.({ reason: 'load-structure-failed', detail: e instanceof Error ? e.message : String(e) })
     }
   }
 

@@ -77,6 +77,14 @@ export interface InputBindingOptions {
    * 通知通道让呈现层刷新草稿镜像与提示（见 `reportTextEffects` 的说明）。
    */
   readonly onTextEffects?: (controlId: string, effects: readonly TextDraftEffect[]) => void
+  /**
+   * **平台动作失败**的上报口（M8-6）。
+   *
+   * 什么是平台动作：指针捕获/释放、焦点移交、滚动等"会话已经决定、由平台执行"的动作。
+   * 它失败时用户感知是"拖了一下但没抓住"，而此前只有一句 `console.warn`（判据读不到）。
+   * 适配器不 import 诊断层（`adapters` 不依赖 `runtime`），因此由装配边注入回调。
+   */
+  readonly onPlatformFailure?: (failures: readonly { readonly action: string; readonly error: string }[]) => void
 }
 
 export interface InputBinding {
@@ -233,7 +241,8 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
     const outcome = applyPlatformActions(event, action, pointerId, target)
     if (outcome.failures.length > 0) {
       // 缺失能力/平台拒绝必须**可见**（#249 §9「不以薄适配器为由丢掉必要同步契约」）
-      console.warn('[inputBinding] 平台动作失败', outcome.failures)
+      // M8-6：由装配边注入的上报口落到诊断面（适配器不 import 诊断层）。
+      options.onPlatformFailure?.(outcome.failures)
     }
   }
 
@@ -259,7 +268,7 @@ export function createInputBinding(options: InputBindingOptions): InputBinding {
     // 捕获/释放由会话**决定**（`platformAction.captureAction`），此处只执行。
     const outcome = applyPlatformActions(pe, result.platformAction, fact.pointerId, captureTarget)
     if (outcome.failures.length > 0) {
-      console.warn('[inputBinding] 平台动作失败', outcome.failures)
+      options.onPlatformFailure?.(outcome.failures)
     }
     options.onEvent?.(result)
   }

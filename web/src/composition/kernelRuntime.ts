@@ -108,6 +108,14 @@ export interface FrameClockOptions {
    * 故"同一时间 ⇒ 同一样本"不受影响。
    */
   readonly maxDeltaSeconds?: number
+  /**
+   * 订阅者抛错时的上报口（M8-6）：宿主把它接到诊断面。
+   *
+   * 为什么需要：`onFrame` 的订阅者（视口、探针、叠加层）各自有缺陷，一个抛错不能
+   * 打断其它订阅者，也不能打断帧推进 —— 于是它此前只写了一句 `console.error`，
+   * 而用户看到的是"画面偶尔不动"且没有任何可查记录。
+   */
+  readonly onListenerError?: (error: unknown) => void
 }
 
 /** 缺省单帧上限：0.25 秒（约 4fps 以上都正常；更长的间隔视为"离屏"）。 */
@@ -160,7 +168,8 @@ export function createFrameClock(opts: FrameClockOptions): FrameClock {
       } catch (e) {
         // 单个订阅者抛错不影响其它订阅者，也不回滚内核状态
         // （状态已原子发布；异常属于订阅者自己的缺陷）。
-        console.error('[FrameClock] onFrame', e)
+        // M8-6：改由宿主注入的上报口进诊断面（缺省没人接 = 静默，但结构上不再直写控制台）。
+        opts.onListenerError?.(e)
       }
     }
     if (handle === null && running) handle = raf.request(tick)

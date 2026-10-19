@@ -172,7 +172,16 @@ describe('R5-0 ② · 接线判据：生产文件确实走这个有界上报器'
     //
     // 只把 9 改成 8 是**放宽**；等价的替换是下面这一对断言：
     // 「借用的那一条已消失」+「资源事实有了自己的结构化发点」。
-    expect(src.match(/emitPresenterFailure\(/g)?.length ?? 0).toBe(8)
+    // ⚠️ M8-6 起是 **9**：新增的第 9 个是 DRW 内部失败的上报口
+    // （`onInternalFailure` → `drw-*`：图标库装配失败 / 未注入 seekFrame / 内容重读失败 /
+    // 内核源面取不到定义 —— 它们此前是 `console.error/warn`，用户与判据都读不到）。
+    // 这是一条**新来源**，不是「把借用的那条加回来」：下面两条断言继续钉住那条借用**已消失**、
+    // 资源事实**有自己**的结构化发点。
+    expect(src.match(/emitPresenterFailure\(/g)?.length ?? 0).toBe(9)
+    expect(
+      src,
+      'DRW 内部失败必须是新族（`drw-` 前缀），不得冒充呈现会话的既有 reason',
+    ).toContain('emitPresenterFailure(`drw-${report.reason}`')
     expect(
       src,
       '资源事实不得再借 effect.failed（M8-5：应落 resource.* 族）',

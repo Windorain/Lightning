@@ -100,7 +100,22 @@ export function useKernelFrameLoop(ctx: Context): FrameClock | null {
     durationsMs: () => [...ctx.frameDeclarations().durationsMs],
   })
 
-  const clock = createFrameClock({ session: kernel })
+  const clock = createFrameClock({
+    session: kernel,
+    // 订阅者抛错 → 诊断面（M8-6）：帧推进不停，但"谁在帧回调里坏了"变成可查记录。
+    onListenerError: (error) => {
+      ctx.wm.diagnostics.record({
+        channel: 'effect',
+        code: 'effect.failed',
+        params: {
+          source: 'frame-clock',
+          reason: 'frame-listener-threw',
+          error: error instanceof Error ? error.message : String(error),
+        },
+        correlation: {},
+      })
+    },
+  })
   // 让视口能订阅（时间属共享 EditContext ⇒ 时钟归外壳，视口只订阅）。
   ctx.setFrameClock(clock)
 

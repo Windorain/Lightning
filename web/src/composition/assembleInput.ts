@@ -111,6 +111,13 @@ export interface AssembleInputOptions {
    * 不静默 —— 本批实测这曾导致 `edit.undo` 在工作台里从未真正生效。
    */
   readonly contextId?: string | null
+  /**
+   * **平台动作失败**的上报口（M8-6）：装配层把它接到诊断面。
+   *
+   * 适配器（`adapters/inputBinding`）不 import 诊断层，故这条回调由本层注入 ——
+   * 与 `onEvent`/`onTextEffects` 同一形态（装配边是唯一允许跨层接线的地方）。
+   */
+  readonly onPlatformFailure?: (failures: readonly { readonly action: string; readonly error: string }[]) => void
 }
 
 export interface AssembledInput {
@@ -180,6 +187,7 @@ export function assembleInput(options: AssembleInputOptions, claim = true): Asse
       options.onTextEffects?.(controlId, effects)
       notify()
     },
+    ...(options.onPlatformFailure === undefined ? {} : { onPlatformFailure: options.onPlatformFailure }),
   })
   if (claim) binding.claimExclusive(options.owner)
 

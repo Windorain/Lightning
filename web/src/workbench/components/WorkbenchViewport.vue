@@ -125,7 +125,24 @@ const policy: EditorViewportPolicy = {
 
     const onFrame = (): void => {
       if (!isAlive()) return
-      try { updateOverlay(regionId, vpSlot) } catch (e) { console.error('[Workbench] updateOverlay', e) }
+      try {
+        updateOverlay(regionId, vpSlot)
+      } catch (e) {
+        // M8-6：叠加层逐帧更新失败此前只有一句 console.error（用户看到"描边偶尔不动"，
+        // 判据什么也读不到）。这里落到诊断面的**呈现链失败**族（`effect.failed`，
+        // 与 `useViewportRuntime` 的呈现链发点同一族，用 `params.source` 区分来源）。
+        ctx.wm.diagnostics.record({
+          channel: 'effect',
+          code: 'effect.failed',
+          params: {
+            source: 'overlay',
+            reason: 'update-threw',
+            error: e instanceof Error ? e.message : String(e),
+            viewportId: regionId,
+          },
+          correlation: { viewportId: regionId },
+        })
+      }
     }
     addFrameHook(onFrame)
     onFrame()

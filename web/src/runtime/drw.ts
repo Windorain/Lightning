@@ -88,6 +88,8 @@ export interface DRWDeps {
    * 本类只透传：判别与去重都在管线的既有守卫处（那里才看得见 `docRef`）。
    */
   onFrameChangeUnavailable?: (report: FrameChangeUnavailableReport) => void
+  /** 呈现链内部失败的上报口（M8-6；本类只透传，落点由接线层给）。 */
+  onInternalFailure?: (report: { readonly reason: string; readonly detail?: string }) => void
   /** 时间是否在前进（呈现侧观测；不驱动任何调度）。 */
   isPlaying?: () => boolean
   /** overlay pass 内**工具预览**根（ViewportSlot；工具的呈现，不是内容网格）。 */
@@ -157,6 +159,7 @@ export class DRW {
       contentRefreshTickRef: deps.contentRefreshTickRef,
       seekFrame: deps.seekFrame,
       onFrameChangeUnavailable: deps.onFrameChangeUnavailable,
+      onInternalFailure: deps.onInternalFailure,
       isPlaying: deps.isPlaying,
       toolsOverlayGroupRef: deps.toolsOverlayGroupRef,
     })
