@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import { EventDispatcherImpl } from '@/events/dispatcher'
 import type { createLogCenter } from '@/logging/LogCenter'
 import type { ContextMenuItem } from '@/workbench/ux/contextMenu'
@@ -7,7 +7,7 @@ import type { WikiUiState } from '@/runtime/wikiUi'
 import type { InputPort } from '@/runtime/inputPort'
 import type { ControlBinding } from '@/application/inputCommands'
 import { createShellSettings, type CreateShellSettingsOptions } from '@/runtime/shellSettings'
-import { createDiagnosticRecorder, type DiagnosticRecorder } from '@/application/diagnostics'
+import { createDiagnosticRecorder, type DiagnosticRecorder, type DiagnosticRecord } from '@/application/diagnostics'
 
 export interface WMChrome {
   contextMenuOpen?: Ref<boolean>
@@ -30,6 +30,17 @@ export class WM {
    * 挂在 WM 上 ⇒ **每实例一份**，同页两实例的诊断互不混杂。
    */
   readonly diagnostics: DiagnosticRecorder
+  /**
+   * **诊断代次**（M8-6）：每写一条诊断 +1。
+   *
+   * 诊断记录器本身是纯对象（没有 Vue 反应式）—— 它**不该**为了 UI 变成响应式状态
+   * （那会让"记录一条诊断"变成"触发一次渲染"）。但底栏诊断列表必须能知道"有新记录"。
+   * 折中是这一个计数器：它只做**失效通知**，数据仍然从 `Context#getDiagnostics()` 读
+   * （用户面不读 `__vm__`、也不读日志缓冲）。
+   */
+  readonly diagnosticEpoch = ref(0)
+  /** 宿主注入的诊断投影（C1 → C2/C3）；见 `runtime/diagnosticProjection`。 */
+  private diagnosticsObserver: ((record: Readonly<DiagnosticRecord>) => void) | null = null
   readonly chrome: WMChrome = {}
   /**
    * **输入端口**（P7 #258）：呈现层声明焦点/弹窗/控件绑定等**显式状态**的唯一入口。
@@ -84,6 +95,16 @@ export class WM {
    */
   readonly pendingControlBindings: ControlBinding[] = []
 
+  /**
+   * 注入诊断投影（M8-6）。
+   *
+   * 由宿主在构造 `WM` 之后立刻调用；缺省（单测/无宿主）不投影 —— 诊断本身照常记录。
+   * 重复调用会替换投影（宿主只有一个，替换是显式的，不做"多个投影串联"）。
+   */
+  observeDiagnostics(observer: (record: Readonly<DiagnosticRecord>) => void): void {
+    this.diagnosticsObserver = observer
+  }
+
   /** 取输入端口；未装配即抛（不静默降级）。 */
   requireInputPort(): InputPort {
     if (this.inputPort === null) {
@@ -97,12 +118,19 @@ export class WM {
     shellOptions?: CreateShellSettingsOptions,
     diagnosticsOptions?: { capacity?: number; now?: () => number },
   ) {
-    this.events = new EventDispatcherImpl(log)
     this.settings = createShellSettings(shellOptions)
+    // 记录器先建：事件分发器要把"区域不存在/模态处理抛错"写进它（M8-6；
+    // 那四条此前是 `console.warn/error`，用户与判据都读不到）。
     this.diagnostics = createDiagnosticRecorder({
       capacity: diagnosticsOptions?.capacity ?? 512,
       now: diagnosticsOptions?.now ?? (() => Date.now()),
+      observe: (record) => {
+        // 失效通知（UI）+ 宿主投影（C2/C3）。顺序固定：先让读面失效，再投影。
+        this.diagnosticEpoch.value += 1
+        this.diagnosticsObserver?.(record)
+      },
     })
+    this.events = new EventDispatcherImpl(log, this.diagnostics)
     // 内容拒绝事实 → 诊断通道的**报告函数**由 HostProvider 注入给呈现边界
     // （见 runtime/HostProvider.vue 与 editors/contentBoundary.ts）。
   }

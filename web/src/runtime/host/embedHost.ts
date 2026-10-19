@@ -22,6 +22,8 @@ import { capabilitiesOf } from '@/composition/resolver'
 import { objectTypeDeclarationsOf } from '@/composition/contributedObjectTypes'
 import type { ShellRuntime } from '@/composition/shell'
 import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
+import { createDiagnosticProjection } from '@/runtime/diagnosticProjection'
+import { reportModuleAssembly } from '@/runtime/commandDiagnostics'
 
 export class EmbedHost extends HostBase {
   constructor(
@@ -87,6 +89,11 @@ export function createEmbedHost(
     instanceId,
     ...(settings.theme === undefined ? {} : { initialTheme: settings.theme }),
   })
+  // M8-6：C1 是唯一结构化诊断面，C2/C3 是它的投影。嵌入侧同样投影 —— 嵌入没有底栏
+  // 诊断列表，但 `__log__` 与诊断记录的可读性不该因宿主而分叉。
+  wm.observeDiagnostics(createDiagnosticProjection(log))
+  // 装配结果（§19.9 第七项）：嵌入外壳同样报一次（能力集是嵌入侧唯一可见的装配事实）。
+  reportModuleAssembly(wm.diagnostics, shell.assembly)
 
   const screen = createEmbedScreenRoot(createToolSettings(), {
     initialLayerWorldY: settings.initialLayerWorldY,
@@ -161,4 +168,3 @@ export function createEmbedHost(
 
   return { host: new EmbedHost(main, ctx, wm, log, disposeLogApi), ctx, shell: runtime }
 }
-

@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import { PresenterSession } from '@/composition/presenterSession'
 import { attachViewportDeviceEvents } from '@/runtime/deviceEvents'
+import { createDiagnosticProjection } from '@/runtime/diagnosticProjection'
 import { createDiagnosticRecorder } from '@/application/diagnostics'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
 import { createParserRegistry } from '@/context/parserRegistry'
@@ -710,19 +711,25 @@ describe('A30 graphics-recovery：恢复后文档/选择/时间/机位不丢 + *
     // | 静态扫描即可满足 | 行为面：真事件 → 真会话 → `pendingRebuild` 翻转 + 设备代次推进 |
     // | 不知道接线是否可用 | 注销后**不再**转译（D11：监听可注销） |
     const session = new PresenterSession({ scope: 'test-m8-wiring' })
-    const recorder = createDiagnosticRecorder({ capacity: 64, now: () => 0 })
+    // M8-6：底栏提示不再由 deviceEvents 直写，而是由 `device.*` 记录**投影**出来
+    // （`createDiagnosticProjection` 是生产实现，这里只给它一个最小的日志替身）。
     const live: { message: string; state: string | null }[] = []
+    const recorder = createDiagnosticRecorder({
+      capacity: 64,
+      now: () => 0,
+      observe: createDiagnosticProjection({
+        event: () => ({}) as never,
+        setLiveStatus: (message: string, _level?: number, state?: string | null) => {
+          live.push({ message, state: state ?? null })
+        },
+      } as never),
+    })
     const canvas = new FakeCanvas()
     const detach = attachViewportDeviceEvents({
       canvas,
       viewportId: 'r-viewport',
       session,
       diagnostics: recorder,
-      liveStatus: {
-        setLiveStatus: (message: string, _level?: number, state?: string | null) => {
-          live.push({ message, state: state ?? null })
-        },
-      },
     })
     try {
       // ① 装载（真实夹具）后进入稳定态

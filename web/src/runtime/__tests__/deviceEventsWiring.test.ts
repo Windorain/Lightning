@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest'
 import { createDiagnosticRecorder } from '@/application/diagnostics'
 import { attachViewportDeviceEvents, type ViewportDeviceSession } from '@/runtime/deviceEvents'
+import { createDiagnosticProjection } from '@/runtime/diagnosticProjection'
 
 class FakeCanvas {
   readonly listeners = new Map<string, Set<(ev: Event) => void>>()
@@ -64,30 +65,52 @@ function fakeSession(): ViewportDeviceSession & { calls: string[]; generation: n
   return s as unknown as ViewportDeviceSession & { calls: string[]; generation: number; phase: string; lost: number }
 }
 
+/**
+ * 底栏读面替身 + 日志读面替身（M8-6：C2/C3 由**诊断投影**产出，不再由 deviceEvents 直写）。
+ *
+ * 为什么替身放在这里而不是直接断言 `ctx.log`：本单测只驱动转译层，不建整个宿主。
+ * 投影函数是**生产实现**（`createDiagnosticProjection`）—— 判据测的是"记录 → 投影"这条
+ * 真链路，不是测试自己编的一句话。
+ */
+function projectionHarness() {
+  const live: { message: string; state: string | null; origin: string | null }[] = []
+  const events: { code: string; channel: string; level: number; message: string }[] = []
+  const log = {
+    event: (entry: { code: string; channel: string; level: number; message: string }) => {
+      events.push({ code: entry.code, channel: entry.channel, level: entry.level, message: entry.message })
+      return entry as never
+    },
+    setLiveStatus: (message: string, _level?: number, state?: string | null, origin?: string | null) => {
+      live.push({ message, state: state ?? null, origin: origin ?? null })
+    },
+  }
+  const recorder = createDiagnosticRecorder({
+    capacity: 32,
+    now: () => 0,
+    observe: createDiagnosticProjection(log as never),
+  })
+  return { live, events, recorder }
+}
+
 function harness(): {
   canvas: FakeCanvas
   session: ReturnType<typeof fakeSession>
   recorder: ReturnType<typeof createDiagnosticRecorder>
   live: { message: string; state: string | null; origin: string | null }[]
+  events: { code: string; channel: string; level: number; message: string }[]
   detach: () => void
 } {
   const canvas = new FakeCanvas()
   const session = fakeSession()
-  const recorder = createDiagnosticRecorder({ capacity: 32, now: () => 0 })
-  const live: { message: string; state: string | null; origin: string | null }[] = []
+  const { live, events, recorder } = projectionHarness()
   const detach = attachViewportDeviceEvents({
     canvas,
     viewportId: 'r-viewport',
     session,
     diagnostics: recorder,
-    liveStatus: {
-      setLiveStatus: (message: string, _level?: number, state?: string | null, origin?: string) => {
-        live.push({ message, state: state ?? null, origin: origin ?? null })
-      },
-    },
     onLost: () => 3,
   })
-  return { canvas, session, recorder, live, detach }
+  return { canvas, session, recorder, live, events, detach }
 }
 
 describe('M8-3 设备事件接线', () => {
@@ -103,6 +126,9 @@ describe('M8-3 设备事件接线', () => {
     expect(lost[0]!.params.abandoned, '放弃份额数必须进参数（旧读面只有一次性返回值）').toBe(7)
     expect(lost[0]!.params.texturesAbandoned, '附加处置（纹理）的放弃数也必须进参数').toBe(3)
     expect(h.live.map((l) => l.state)).toEqual(['device-lost'])
+    // M8-6：提示由**投影**产出（C2/C3 同源），日志条目必须带稳定码。
+    expect(h.events.map((e) => e.code), 'C2 条目必须由 device.* 记录投影而来（带稳定码）').toEqual(['device.lost'])
+    expect(h.events[0]!.channel).toBe('device')
     expect(h.live[0]!.origin, '明确渠道：设备提示不得冒充纹理/拒绝').toBe('device')
     expect(h.live[0]!.message.length, '提示必须成句（不是空串/单个词）').toBeGreaterThan(8)
     h.detach()

@@ -15,6 +15,11 @@ import { DRW } from '@/runtime/drw'
 import type { PresenterSession } from '@/composition/presenterSession'
 import type { ViewportPresenterBundle } from '@/runtime/host'
 import { attachViewportDeviceEvents } from '@/runtime/deviceEvents'
+import {
+  reportPresentationVersion,
+  reportResourceLedger,
+  reportResourceLeaked,
+} from '@/runtime/commandDiagnostics'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
 import { animationSpecKey } from '@/domain/textureAnimation'
 import type { ContentResource } from '@/domain/content'
@@ -310,6 +315,11 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
      * **新码请求**（更精确的码，如 `frame.changeUnavailable`）在交付报告里列出交由裁决，
      * 不在这里悄悄加码。
      */
+    // 呈现链内部失败（M8-6）：DRW 不 import 诊断层，映射在这里 —— 与呈现会话的
+    // 失败族共用 `effect.failed`，用 `params.source='drw'` 区分来源（同一手法见 M8-5）。
+    onInternalFailure: (report) => {
+      emitPresenterFailure(`drw-${report.reason}`, report.detail ?? '')
+    },
     onFrameChangeUnavailable: (report) => {
       ctx.wm.diagnostics.record({
         channel: 'command',
@@ -410,6 +420,9 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     texturesDisposed = true
     ctx.log.clearLiveStatus()
     presenterBundle.dispose()
+    // **泄漏登记**（M8-6；A19「不得泄漏 GPU 份额」）：正常路径释放后恒为 0；
+    // 非 0 ⇒ 有句柄没被回收，那是实现缺陷，必须留下结构化记录而不是安静退出。
+    reportResourceLeaked(ctx.wm.diagnostics, { viewportId: regionId, live: presenterTextures.size })
     if (vpSlot.presenterSurface === presenterSurface) vpSlot.presenterSurface = null
     // 结构层指向已释放的呈现根会让"卸载后仍有对象在场景里"（幽灵挂载）——
     // 只有确实是**本会话**的根才清（避免抹掉重挂后新会话写下的值）。
@@ -750,6 +763,15 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       // 取消：更新的同步已开始（或有更新的文档）⇒ 本次结果作废，**不**落地。
       if (seq !== textureSyncSeq || texturesDisposed) return
       const synced = presenterTextures.sync(resources)
+      // **句柄账**（M8-6；§19.9 第五项「资源拥有者与引用数」）：一次同步一条，
+      // 只在真拿/真放时发（uploaded/released > 0）—— 逐张记录会写爆 512 条共享缓冲。
+      reportResourceLedger(ctx.wm.diagnostics, {
+        viewportId: regionId,
+        uploaded: synced.uploaded,
+        released: synced.released,
+        ready: synced.ready,
+        attempt: retryAttempt,
+      })
       const bound = presenterSurface.bindTextures(resources)
       // **图标材质库的像素来源**（M8-5）：把**已解码**的槽位交给 DRW。
       //
@@ -906,7 +928,8 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    * - 会话（`PresenterSession`）：放弃旧代次份额、置 `pendingRebuild`、恢复后强制重建；
    * - 图幅/纹理：丢失期放弃旧 GPU 纹理（`abandon` —— 不逐张 dispose 死句柄），
    *   恢复后把纹理同步去重键作废，使下一帧按**当前内容**重新上传；
-   * - 诊断/底栏：`runtime/deviceEvents` 发 `device.*` 并写用户可见状态。
+   * - 诊断/底栏：`runtime/deviceEvents` 发 `device.*`；用户可见提示由 C1 的投影写成
+   *   （M8-6 起 liveStatus 不再是第二个独立写点）。
    *
    * ## 为什么恢复期要作废纹理去重键
    *
@@ -926,7 +949,8 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
         viewportId: regionId,
         session: presenterSurface,
         diagnostics: ctx.wm.diagnostics,
-        liveStatus: ctx.log,
+        // 底栏提示不在这里写：`device.*` 记录由诊断投影（M8-6）写成 liveStatus，
+        // 同一事实只有一个写点（`runtime/diagnosticProjection`）。
         onLost: () => presenterTextures.abandon(),
         onRestored: () => {
           lastTextureIdentity = null
@@ -940,6 +964,14 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
     detachDeviceEvents?.()
     detachDeviceEvents = null
   })
+
+  /**
+   * **屏上画的是哪个文档版本**（`presentation.version` 的 `actualPresentationVersion`）。
+   *
+   * 它是本视口的**本地事实**（最后一次真正落地的那次 `apply` 的文档版本），不是第二份权威：
+   * 权威仍是呈现会话的内容身份；这个数字只用于诊断的"实际 vs 目标"对比。
+   */
+  let presentedDocumentVersion = 0
 
   const applyPresenterSurface = (): void => {
     /**
@@ -968,6 +1000,19 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       const layerMode = drw.computed.layerPreviewMode.value
       presenterSurface.setLayerPreview(layerMode === 'all' ? null : layerMode.worldY)
       const out = presenterSurface.applyKernelDocument(doc, kernel?.playback().time ?? ZERO_TIME)
+      // **呈现版本**（M8-6；§19.9 第四项「实际/目标呈现版本」）：只在"这一次真的落地/试过"时记 ——
+      // `applyKernelDocument` 在内容身份未变时每帧都返回 `applied:false`，在那里发记录会变成帧心跳。
+      if (out.applied || out.compileError !== null) {
+        reportPresentationVersion(ctx.wm.diagnostics, {
+          applied: out.applied,
+          targetDocumentVersion: doc.version.documentVersion,
+          actualDocumentVersion: presentedDocumentVersion,
+          batches: out.batches,
+          ...(out.compileError === null ? {} : { compileError: out.compileError }),
+          skipped: out.skipped.length + out.compileSkipped.length,
+        })
+        if (out.applied) presentedDocumentVersion = doc.version.documentVersion
+      }
       // 编译失败/跳过是**真实事实**，必须可见（不得静默当"画好了"）。
       if (out.compileError !== null) {
         presenterErrors.push(`compile:${out.compileError}`)

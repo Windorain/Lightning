@@ -21,6 +21,8 @@ import { objectTypeDeclarationsOf } from '@/composition/contributedObjectTypes'
 import type { ShellRuntime } from '@/composition/shell'
 import { createKernelSession, KERNEL_CONTEXT_ID, KERNEL_DOCUMENT_ID } from '@/runtime/kernelSession'
 import { createRecoverySession } from '@/composition/recoverySession'
+import { createDiagnosticProjection } from '@/runtime/diagnosticProjection'
+import { reportModuleAssembly } from '@/runtime/commandDiagnostics'
 import { createRecoveryHost } from '@/runtime/host/recoveryHost'
 import { useAreaHost } from '@/editors/useAreaHost'
 import { editorTypeRegistry } from '@/editors/builtinEditors'
@@ -130,6 +132,13 @@ export function createWorkbenchHost(deps: WorkbenchHostDeps): WorkbenchHostResul
   // 它仍必须显式传给 WM / ScreenRoot：持久化键与观测面都按实例命名，
   // 而不是按"当前宿主是什么"反查。
   const wm = new WM(log, { surface: 'workbench', instanceId: WORKBENCH_INSTANCE_ID })
+  // M8-6 通道收口：C1（诊断记录器）是唯一结构化面，C2（日志）/C3（底栏实时状态）是它的**投影**。
+  // 在装载任何文档之前接上 —— 装载期的资源/内容诊断也要进这两面。
+  wm.observeDiagnostics(createDiagnosticProjection(log))
+  // 装配结果也是诊断事实（§19.9 第七项）：保留了哪些模块/能力、裁掉了哪些落点。
+  // 每次装配一条汇总 + 逐条裁剪原因（`Assembly.pruned`；`prunedLandings` 的落点粒度
+  // 由 `module.pruned` 的 `capability` 参数与落点表格承载）。
+  reportModuleAssembly(wm.diagnostics, shell.assembly)
 
   const screen = createWorkbenchScreenRoot(tool, WORKBENCH_PANELS, WORKBENCH_INSTANCE_ID)
 

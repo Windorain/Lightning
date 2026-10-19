@@ -27,17 +27,11 @@
  */
 import type { DiagnosticRecorder } from '@/application/diagnostics'
 import type { DeviceState } from '@/presentation/deviceState'
-import { LOG_LEVEL } from '@/logging/LogCenter'
 
 /** 只看两个方法：浏览器 `EventTarget` 与测试里的替身都满足（不绑定 DOM 实现）。 */
 export interface DeviceEventCanvas {
   addEventListener(type: string, listener: (ev: Event) => void, options?: boolean | AddEventListenerOptions): void
   removeEventListener(type: string, listener: (ev: Event) => void, options?: boolean | AddEventListenerOptions): void
-}
-
-/** 实时状态写面（`ctx.log` 的结构子集；只允许 `device` 渠道 —— 不抢纹理/拒绝的槽）。 */
-export interface DeviceLiveStatusPort {
-  setLiveStatus(message: string, level?: number, state?: string | null, origin?: 'device'): void
 }
 
 /**
@@ -54,15 +48,9 @@ export interface ViewportDeviceSession {
   readonly pendingRebuild: boolean
 }
 
-/** 丢失期的成句提示（**永久丢失**时它一直显示 —— 用户知道画面为什么停、内容没丢）。 */
-export const DEVICE_LOST_MESSAGE =
-  '显示设备已丢失：画面已暂停，内容与编辑状态未受影响；设备恢复后会自动重建画面。'
-/** 恢复事件的成句提示（随后纹理链会把它覆盖为"加载中/就绪"）。 */
-export const DEVICE_RESTORED_MESSAGE =
-  '显示设备已恢复：正在按当前内容重建画面，内容与编辑状态未受影响。'
-/** `liveStatus.state` 的机器可读标签（读面不解析文本）。 */
-export const DEVICE_LOST_STATE = 'device-lost'
-export const DEVICE_RESTORED_STATE = 'device-restored'
+// 用户可见文案与 `liveStatus.state` 标签**不在本模块**（M8-6 通道收口）：
+// 它们由 `runtime/diagnosticProjection` 从 `device.*` 记录投影出来 —— 同一句话只有一个来源，
+// 这里是**转译**（浏览器事件 → 会话/诊断），不是呈现。
 
 export interface ViewportDeviceWiringOptions {
   readonly canvas: DeviceEventCanvas
@@ -70,7 +58,6 @@ export interface ViewportDeviceWiringOptions {
   readonly viewportId: string
   readonly session: ViewportDeviceSession
   readonly diagnostics: DiagnosticRecorder
-  readonly liveStatus?: DeviceLiveStatusPort
   /** 丢失时的附加处置（视口层放弃纹理等），返回被放弃的纹理数（诊断用）。 */
   readonly onLost?: (abandonedShares: number) => number
   /** 恢复时的附加处置（视口层重置纹理同步去重键等）。 */
@@ -83,7 +70,7 @@ export interface ViewportDeviceWiringOptions {
  * 注销函数是幂等的：重复调用不会重复摘除，也不会让已摘除的监听复活。
  */
 export function attachViewportDeviceEvents(options: ViewportDeviceWiringOptions): () => void {
-  const { canvas, viewportId, session, diagnostics, liveStatus, onLost, onRestored } = options
+  const { canvas, viewportId, session, diagnostics, onLost, onRestored } = options
   let attached = true
   let lostEvents = 0
 
@@ -96,7 +83,8 @@ export function attachViewportDeviceEvents(options: ViewportDeviceWiringOptions)
     lostEvents += 1
     const abandoned = session.handleContextLost()
     const texturesAbandoned = onLost?.(abandoned) ?? 0
-    liveStatus?.setLiveStatus(DEVICE_LOST_MESSAGE, LOG_LEVEL.WARN, DEVICE_LOST_STATE, 'device')
+    // 用户可见提示由 C1 的 `device.lost` 记录**投影**出来（见 `runtime/diagnosticProjection`），
+    // 本模块不再自己写 liveStatus —— 那是同一事实的第二个写点（M8-6 收口）。
     diagnostics.record({
       channel: 'device',
       code: 'device.lost',
@@ -118,7 +106,7 @@ export function attachViewportDeviceEvents(options: ViewportDeviceWiringOptions)
     onRestored?.()
     if (!wasPending) return
     const generation = session.deviceGeneration
-    liveStatus?.setLiveStatus(DEVICE_RESTORED_MESSAGE, LOG_LEVEL.INFO, DEVICE_RESTORED_STATE, 'device')
+    // 同上：提示来自 `device.restored` 的投影。
     diagnostics.record({
       channel: 'device',
       code: 'device.restored',

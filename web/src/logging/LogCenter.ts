@@ -51,6 +51,13 @@ export interface Report {
   source: string
   message: string
   detail?: unknown
+  /**
+   * **稳定诊断码**（M8-6；S0-B §4.3 第 3 条："LogCenter.Report 无稳定码"）。
+   *
+   * 只有由诊断面（C1）投影出来的条目才带它 —— 见 `event()`。
+   * 普通日志条目保持 `undefined`：它们不是诊断，不该被按码聚合。
+   */
+  code?: string
   traceId?: string
   sessionId?: string
   sessionPhase?: 'begin' | 'end'
@@ -194,8 +201,19 @@ export function createLogCenter() {
   let _gizmoPos: { x: number; y: number; z: number } | null = null
   let _cameraState: { position: [number, number, number]; target: [number, number, number] } | null = null
 
-  /** Append a log entry. NOTE: also updates lastDisplayable, displayMessage/Level refs, and console in DEV. */
-  function push(level: LogLevelValue, source: string, message: string, detail?: unknown): Report {
+  /**
+   * Append a log entry. NOTE: also updates lastDisplayable, displayMessage/Level refs, and console in DEV.
+   *
+   * `code`（M8-6）：由诊断面投影来的条目带上稳定码；`takeOverDisplay=false` 时**不**更新
+   * `lastDisplayable`（诊断日志不得抢占"最后一条操作反馈"的位置，见 `event()`）。
+   */
+  function push(
+    level: LogLevelValue,
+    source: string,
+    message: string,
+    detail?: unknown,
+    options: { readonly code?: string; readonly takeOverDisplay?: boolean } = {},
+  ): Report {
     const report: Report = {
       id: uid(),
       time: hhmmss(),
@@ -203,6 +221,7 @@ export function createLogCenter() {
       source,
       message,
       detail,
+      ...(options.code === undefined ? {} : { code: options.code }),
       traceId: _traceId ?? undefined,
     }
 
@@ -211,7 +230,7 @@ export function createLogCenter() {
     if (list.length > MAX_ENTRIES) list.splice(0, list.length - MAX_ENTRIES)
     entries.value = list
 
-    if (level !== LOG_LEVEL.DEBUG) {
+    if (level !== LOG_LEVEL.DEBUG && options.takeOverDisplay !== false) {
       lastDisplayable.value = report
       _displayMessage.value = message
       _displayLevel.value = level
@@ -252,6 +271,34 @@ export function createLogCenter() {
 
     error(source: string, message: string, detail?: unknown): Report {
       return push(LOG_LEVEL.ERROR, source, message, detail)
+    },
+
+    /**
+     * **诊断投影条目**（M8-6）：把一条诊断记录写成带稳定码的人读日志。
+     *
+     * ## 为什么不是 `warn()`/`error()`
+     *
+     * 1. **必须带码**：`code` 是必填参数 —— 由诊断面（`wm.diagnostics`）投影来的条目
+     *    才有资格进这条通道，于是"日志里有一条看起来像诊断、却无码可聚合"的形态
+     *    在类型上不可表达（S0-B §4.3 第 3 条的修复落点）。
+     * 2. **不抢显示位**：`lastDisplayable` 是"最后一条操作反馈"，它一旦被写过就再无
+     *    代码清（`clear()` 零生产调用）。诊断条目若也写它，拖拽一次就会把操作反馈
+     *    永久压在一条资源记录下面。用户可读的诊断面是底栏那个**可点开的列表**
+     *    （数据源仍是 C1），不是这里。
+     *
+     * `source` 传**通道名**（不是模块名）：按通道检索日志时与 `byChannel` 同口径。
+     */
+    event(entry: {
+      readonly code: string
+      readonly channel: string
+      readonly level: LogLevelValue
+      readonly message: string
+      readonly detail?: unknown
+    }): Report {
+      return push(entry.level, entry.channel, entry.message, entry.detail, {
+        code: entry.code,
+        takeOverDisplay: false,
+      })
     },
 
     recent(levelMask?: number, count = 20): Report[] {
@@ -703,10 +750,15 @@ export function installUnifiedLogApi(ctx: Context): UnifiedLogDisposer {
    * 缺的只是"经 `window.__log__` 指名读它"这个跨实例观测面。
    */
   if (registeredLogs.some((r) => r.instanceId === ctx.instanceId)) {
-    console.warn(
-      `[LogCenter] 实例身份 ${ctx.instanceId} 已被登记：本次实例不进入 __log__ 观测面` +
-        '（同页两个工作台属结构禁止，见 Q3）',
-    )
+    // M8-6：这条事实此前只有一句 `console.warn`（用户看不到、判据读不到）。
+    // 它描述的是"本实例拿不到跨实例观测面"，属"命令/能力在当前状态下不可用"——
+    // 用既有 `command.unsupported` 承载，关联字段带实例身份。
+    ctx.wm.diagnostics.record({
+      channel: 'command',
+      code: 'command.unsupported',
+      params: { source: 'LogCenter.installUnifiedLogApi', reason: 'instance-already-registered', instanceId: ctx.instanceId },
+      correlation: {},
+    })
     return () => {}
   }
   const entry: RegisteredLog = { instanceId: ctx.instanceId, ctx, api: createUnifiedLogApi(ctx) }
