@@ -196,14 +196,30 @@ describe('接缝核销判据 · `shared-viewport-upward-imports-assembly-root`�
 
   it('**登记表口径**：本 id 不得再占用 `SEAMS`（表 = 双轨剩余数，只应减少）', async () => {
     const mod = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
-    const seams = mod.SEAMS as ReadonlyArray<{ id: string }>
+    const seams = mod.SEAMS as ReadonlyArray<{ id: string; files: readonly string[] }>
     expect(seams.length, '反空洞真：核销不能让表变空').toBeGreaterThan(0)
     expect(
       seams.some((s) => s.id === SEAM_ID),
       '本接缝已核销（两个子句同时成立）⇒ 不得留在表里，否则是空转登记',
     ).toBe(false)
-    // 表本身仍然在册（证明上面的断言查的是真表，不是空数组）
-    expect(seams.some((s) => s.id === 'legacy-render-source-document')).toBe(true)
+    // ── 表本身仍然在册（证明上面的断言查的是**真表**，不是空数组）────────────
+    //
+    // ⚠️ **M9-1 审视并改写**：这里原写
+    //   `expect(seams.some((s) => s.id === 'legacy-render-source-document')).toBe(true)`
+    // —— 即**借另一条接缝的存续**来证明「本表非空」。那条接缝（渲染链的旧格式源文档）
+    // 一旦正式核销、条目从 `SEAMS` 删除，本行就会变**恒假**，而它测的并不是本条接缝
+    // （本 id 早已不在表里）。⇒ 改为**结构性**正向对照：不点名任何会被核销的 id。
+    //
+    // **核销时的联动点**：`legacy-render-source-document` 真核销时，**本文件无须改动**
+    // （下面这条断言与 id 无关）。需要同批审视的是另外两处「点名义锚点」：
+    //  · `tests/architecture/boundary-scan.test.ts` 的「未登记的接缝判据」用例
+    //    （拿该 id 当反空洞锚点，同处注释已写明该义务）；
+    //  · `src/composition/__tests__/p10fD3ExportOwnership.test.ts` 的「该条仍在案」正面断言。
+    // 两处都在各自的注释里标了「核销时同批改」，故本文件不再替它们背债。
+    expect(
+      seams.every((s) => typeof s.id === 'string' && s.id.length > 0 && Array.isArray(s.files) && s.files.length > 0),
+      '反空洞真：表里每条登记都得有 id 与 files（否则上面的 some() 查的是一张空壳表）',
+    ).toBe(true)
     expect(mod.seamById(SEAM_ID), '`seamById` 也必须查不到它').toBeUndefined()
   })
 })

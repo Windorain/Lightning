@@ -223,11 +223,13 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '生产 = 0 **且** 全仓 = 0（覆盖 `src/` + **`e2e/`** + `tests/` + `scripts/` —— 后三者是 L0 的盲区，'
       + '本轮实测正是 `e2e/` 2 处当时不被任何判据看见），各带负对照，其中'
       + '「往真实 `e2e/` 文件注入一处调用 ⇒ 必红」为**实跑**证据。'
-      + '⚠️ **本条的（甲）子句（材质/注解统一）与上面 ②③ 两类残余仍在** ⇒ **登记条目本身保留**'
-      + '（`tests/architecture/shared-viewport-upward-import-closure.test.ts:198` 仍在断言该 id 在册）。'
-      + '**登记一项审视义务（本批不动那条断言）**：该"仍在册"断言是**为核销后的回归**设计的；'
-      + '本接缝**正式核销**（②③ 与（甲）都走完、条目从 `SEAMS` 删除）时，必须连同那条断言一并重新审视 ——'
-      + '否则它会退化成"断言一个已不存在的登记"的恒真/恒假判据。',
+      + '⚠️ **上面 ②③ 两类残余仍在** ⇒ **登记条目本身保留**（它们就是本条的退出闸口，见上）。'
+      + '**M9-1 已审视并改写那条「仍在册」断言**：`tests/architecture/shared-viewport-upward-import-closure.test.ts`'
+      + '原先借本 id 证明「表非空」的那处（原 `:206`）已改为**结构性**正向对照 —— '
+      + '本接缝**正式核销**时该文件**无须改动**。仍需同批审视的是另外两处「点名义锚点」：'
+      + '`tests/architecture/boundary-scan.test.ts` 的「未登记的接缝判据」用例（拿本 id 当反空洞锚点）'
+      + '与 `src/composition/__tests__/p10fD3ExportOwnership.test.ts` 的「本 id 仍在案」正面断言；'
+      + '两者都已在各自注释里标明「核销时同批改」，故本文件不再替它们背债。',
   }),
   /**
    * ⚠️ **已核销（R1-β① C3；#385 裁决④ + GF-21）**：原 `legacy-document-in-place-edit`
