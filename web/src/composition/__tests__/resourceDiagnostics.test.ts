@@ -115,6 +115,38 @@ describe('M8-5 · resource.* 诊断', () => {
     expect(degraded[0]!.params.total).toBe(1)
   })
 
+  it('**未请求（外链）不得冒充就绪**（D8）：`unrequested` 进汇总的 `unrequested` 计数，不与 `failed` 混计', () => {
+    const { records, recorder } = collector()
+    const port = createResourceDiagnostics(recorder)
+    port.reportOutcome(
+      facts({
+        resources: [resource('ok', 'ready'), resource('ext', 'unrequested')],
+        // `resource()` 给了 locator ⇒ 它是"外链未取回"（会被计入）
+        degradedMaterials: 1,
+        missingRequired: 0,
+      }),
+    )
+    const degraded = records.filter((r) => r.code === 'resource.degraded')
+    expect(degraded, '有未请求资源 ⇒ 必须有汇总（否则"全就绪"是假就绪）').toHaveLength(1)
+    expect(degraded[0]!.params.unrequested, '未请求单独计数').toBe(1)
+    expect(degraded[0]!.params.failed, '未请求**不得**被算成失败（"没人去取"≠"取回来是坏的"）').toBe(0)
+    expect(records.filter((r) => r.code === 'resource.failed'), '未请求不产逐条失败记录').toHaveLength(0)
+
+    // 边界：`payload===null && locator===''` = "本来就没有贴图"，**不得**算成未请求。
+    records.length = 0
+    port.reportOutcome(
+      facts({
+        resources: [
+          resource('ok', 'ready'),
+          { identity: { id: 'plain', version: 'v:plain' }, locator: { kind: 'inline', url: '' }, state: 'unrequested', pixels: null } as TextureResource,
+        ],
+        degradedMaterials: 0,
+        missingRequired: 0,
+      }),
+    )
+    expect(records.filter((r) => r.code === 'resource.degraded'), '无贴图材质不得被算成"没到"').toHaveLength(0)
+  })
+
   it('**通道不互染**：所有记录只在 resource 通道，码只在 resource.* 族', () => {
     const { records, recorder } = collector()
     const port = createResourceDiagnostics(recorder)

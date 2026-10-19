@@ -144,13 +144,25 @@ export function createResourceDiagnostics(
       // ② 降级汇总：只要"有绑定指向未就绪资源"就必须有记录（不得静默变平）。
       //    `failed` 是**资源条数**（与状态栏文案同单位），`degradedMaterials` 是**材质条数**
       //    —— 两者单位不同且都有明确语义，故并列给出而不是挑一个冒充另一个。
-      if (facts.degradedMaterials > 0 || failed.length > 0) {
+      /**
+       * 未请求（外链、本产品无取回路径 ⇒ 永远到不了）的资源条数。
+       *
+       * 它与 `failed` **分开计数**：把"没人去取"混进"取回来是坏的"会让
+       * "失败"这个词失去意义（处置也不同：前者要产品补取回路径，后者要修字节）。
+       * 但它同样构成"未就绪"，故一并进汇总（SPEC §7.4:254「占位不能冒充完整结果」）。
+       */
+      // 只算**有取回位置**的未请求条目（`locator === ''` 是"本来就没有贴图"，见视口侧同一条口径）。
+      const unrequested = facts.resources.filter(
+        (r) => r.state === 'unrequested' && r.locator.url !== '',
+      )
+      if (facts.degradedMaterials > 0 || failed.length > 0 || unrequested.length > 0) {
         record(
           'resource.degraded',
           {
             degradedMaterials: facts.degradedMaterials,
             missingRequired: facts.missingRequired,
             failed: failed.length,
+            unrequested: unrequested.length,
             total: facts.resources.length,
             attempt: facts.attempt,
             omitted: Math.max(0, failed.length - RESOURCE_FAILURE_REPORT_MAX),

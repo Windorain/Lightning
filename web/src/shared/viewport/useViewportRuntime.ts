@@ -789,8 +789,47 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
       // 注意：这里**不早退** —— 下面的 `missingRequired` / `readyWithoutPixels` 诊断必须照旧上报。
       const notReadyResources = resources.filter((r) => r.state !== 'ready' && r.state !== 'unrequested')
       const notReady = notReadyResources.length
-      if (notReady === 0) {
+      /**
+       * **未请求**的资源（`payload === null`：外链条目）。
+       *
+       * ## 为什么它必须参与终态（M8-5 / S0-B D8）
+       *
+       * `unrequested` 的语义是"**还没**请求"（不是"缺失"也不是"失败"），所以它不进
+       * `notReady` —— 那是五态模型的口径，不动。但**界面所称"显示完成"必须对应必要资源
+       * 已经可呈现**（SPEC §7.4:254「占位不能冒充完整结果」）。
+       *
+       * 本产品的取回是宿主端口的职责，而**生产里没有外链取回路径**（内核资源都由文档内嵌
+       * 字节承载）⇒ 一条 `payload === null` 的资源**永远**停在 `unrequested`。
+       * 旧实现在这种情况下照样报「纹理就绪 n/n」—— 那是**假就绪**（D8）：
+       * 用户看到"全就绪"，而某张图从来没被取过、画面里那块是占位。
+       *
+       * ⇒ 只要存在未请求资源，就**不得**声称整批就绪：文案点名数量与去向，
+       * 状态标 `missing`（"这一批里有没有到的"是**可辨认的缺失**，不是解码失败 ——
+       * 用 `failed` 会把"没人去取"说成"取回来是坏的"）。
+       */
+      // ⚠️ 只有**有取回位置**的未请求条目才算"没到"：`payload===null && locator===''` 是
+      // "该材质本来就没有贴图"（装配侧已就 `resourceWithoutPayloadOrLocator` 报过），
+      // 把它算成"未请求"会让每份无贴图材质都变成一条待办事项。
+      const unrequestedResources = resources.filter(
+        (r) => r.state === 'unrequested' && r.locator.url !== '',
+      )
+      if (notReady === 0 && unrequestedResources.length === 0) {
         writeTextureLive(`纹理就绪 ${total}/${total}`, 'ready')
+      } else if (notReady === 0) {
+        const namedUnrequested = unrequestedResources
+          .slice(0, 2)
+          .map((r) => {
+            const s = r.locator.url !== '' ? r.locator.url : r.identity.id
+            return s.length > 28 ? `${s.slice(0, 27)}…` : s
+          })
+          .join(', ')
+        writeTextureLive(
+          `纹理未请求 ${unrequestedResources.length}/${total}（${namedUnrequested}${
+            unrequestedResources.length > 2 ? ' 等' : ''
+          }）：外链资源未取回，画面中对应图元以占位显示`,
+          'missing',
+          LOG_LEVEL.WARN,
+        )
       } else {
         const named = notReadyResources
           .slice(0, 2)
