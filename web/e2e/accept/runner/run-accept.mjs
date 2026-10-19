@@ -66,7 +66,8 @@ function main() {
     const webOut = path.join(outDir, 'web', scene.id)
     const code = sh(process.execPath, [
       path.join(WEB_ROOT, 'node_modules', 'playwright', 'cli.js'), 'test',
-      'e2e/accept/renderer/replay.spec.ts', '--project=desktop-chrome', '--workers=1',
+      '--config=playwright.accept.config.ts',
+      'e2e/accept/renderer/replay.spec.ts', '--project=accept-replay', '--workers=1',
       '--reporter=line',
     ], {
       cwd: WEB_ROOT,

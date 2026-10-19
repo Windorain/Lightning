@@ -81,6 +81,21 @@ const WIKI_BASE_URL = resolveWikiBaseURL(WIKI_PORT)
 const TEST_IGNORE = testIgnoreGlobs()
 
 /**
+ * 验收流水线的 replay spec **不进普通 e2e 套件**。
+ *
+ * 它的输入（`ACCEPT_PLAN`/`ACCEPT_DOC`/`ACCEPT_OUT`）由 `e2e/accept/runner/run-accept.mjs`
+ * 注入；缺了就在 spec 顶部抛（`replay.spec.ts:22`，那是**故意的**：没被驱动就跑等于假绿）。
+ * 但若把它留在 `test:e2e:tree` / `:smoke` / `:full` 的收集范围里，那一条抛错会把
+ * "本次没跑验收"报成"PR 回归红"—— 红绿语义就错了。
+ *
+ * ⇒ 隔离成**独立配置** `web/playwright.accept.config.ts`（复用本文件的 webServer/globalSetup/
+ * 端口与身份链，只把 testDir 收到 `e2e/accept`）；本文件把请求方显式忽略。
+ * runner 用 `--config=playwright.accept.config.ts` 调起。
+ * 产物门控的 4 份 spec 仍按 `TEST_IGNORE` 在两边各自生效（同一个函数、同一份判据）。
+ */
+const ACCEPT_SPEC_GLOB = '**/accept/**/*.spec.ts'
+
+/**
  * 本次运行的服务身份标记（随机 nonce）。
  *
  * 用 `process.env` 做**进程级单例**：配置文件可能在同一进程里被加载多次，而模块级随机数
@@ -93,7 +108,8 @@ const TREE_NONCE =
 export default defineConfig({
   testDir: './e2e',
   // #332：真实产物未就绪的 spec 按产物门控排除（产物就绪时为空数组 ⇒ 全部纳入）
-  testIgnore: TEST_IGNORE,
+  // 另加：验收 replay spec 不在普通套件里收集（见 ACCEPT_SPEC_GLOB）
+  testIgnore: [...TEST_IGNORE, ACCEPT_SPEC_GLOB],
   // 服务身份核验：在任何用例之前断言"端口上的服务是本树的"
   globalSetup: './e2e/global-setup.ts',
   timeout: 90_000,
