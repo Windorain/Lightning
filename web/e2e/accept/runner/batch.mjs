@@ -21,7 +21,7 @@ import { planForScene } from './camera-plan.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const ROOT = path.resolve(HERE, '..')
-const DEFAULT_MC_DIR = path.resolve(ROOT, '..', '..', '..', 'mod', 'gtn', 'run', 'client')
+export const DEFAULT_MC_DIR = path.resolve(ROOT, '..', '..', '..', 'mod', 'gtnh', 'run', 'client')
 
 const sha256 = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')
 

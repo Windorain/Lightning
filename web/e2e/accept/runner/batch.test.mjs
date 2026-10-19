@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { caseForScene, loadScenes, loadBlocks, runRecordFor, verifyArtifacts } from './batch.mjs'
+import { DEFAULT_MC_DIR, caseForScene, loadScenes, loadBlocks, runRecordFor, verifyArtifacts } from './batch.mjs'
 import { planForScene } from './camera-plan.mjs'
 
 const scenes = loadScenes()
@@ -109,4 +109,9 @@ test('场景不得复用历史产物：文件名与内容都不许出现 legacy/
     assert.doesNotMatch(file, /legacy/i, '场景文件名不得带 legacy：' + file)
     assert.doesNotMatch(body, banned, '场景不得引用历史产物：' + file)
   }
+})
+
+test('默认客户端目录必须是 mod/gtnh/run/client（仓库布局，不是 gtn）', () => {
+  assert.ok(DEFAULT_MC_DIR.endsWith(path.join('mod', 'gtnh', 'run', 'client')), DEFAULT_MC_DIR)
+  assert.ok(fs.existsSync(path.join(DEFAULT_MC_DIR, '..', '..', '..')), '仓库 mod/gtnh 目录应存在')
 })
