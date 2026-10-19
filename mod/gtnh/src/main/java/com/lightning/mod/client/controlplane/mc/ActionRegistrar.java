@@ -250,6 +250,21 @@ public final class ActionRegistrar {
             () -> new WorldRollbackAction(runtime));
 
         registry.register(
+            ActionDescriptor.builder("world.resync", Tier.SCENE)
+                .description(
+                    "把区域内 TE 的状态**重新下发**给客户端：逐个位置重发方块更新包（markBlockForUpdate），再等 waitTicks 个 tick 让包投递并被客户端应用。"
+                        + "不改方块、不派发邻居事件，因此不受 capture.begin 的写动作门禁限制。"
+                        + "用途：托管世界是直接写服务端搭出来的，依赖「邻居变化才重算才下发」的模组（典型 LP 管道）客户端会永久停在空状态——"
+                        + "实测客户端 pipeConnectionMatrix 全 false、服务端 renderStateConnections 为 EAST:true，导出里管道只剩管体（无连接臂、无 -status/-inactive 层）。")
+                .required("from", ActionDescriptor.TYPE_ARRAY, "区域角点 [x,y,z]（含）")
+                .required("to", ActionDescriptor.TYPE_ARRAY, "区域角点 [x,y,z]（含）；体积 ≤ 4096")
+                .returns("{schema, action, tier, teCount, marked, from, to}")
+                .example("{\"from\":[63,11,62],\"to\":[69,13,64],\"confirm\":true}")
+                .since("1.9")
+                .build(),
+            new WorldResyncAction());
+
+        registry.register(
             ActionDescriptor.builder("case.validate", Tier.OBSERVE)
                 .description(
                     "解析用例文件并返回规范化执行计划（分段、展开后的判据、期望证据、警告）与判据类型自描述"
