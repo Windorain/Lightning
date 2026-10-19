@@ -42,7 +42,12 @@
         0,
         1
       ],
-      "expect": "block:wool-green"
+      "expect": "block:wool-green",
+      "cameras": [
+        "back",
+        "left",
+        "right"
+      ]
     },
     {
       "kind": "region",
@@ -52,7 +57,13 @@
         1,
         0
       ],
-      "expect": "block:wool-blue"
+      "expect": "block:wool-blue",
+      "cameras": [
+        "front",
+        "back",
+        "left",
+        "right"
+      ]
     },
     {
       "kind": "region",
@@ -62,23 +73,16 @@
         0,
         0
       ],
-      "face": "+z",
-      "expect": "background"
-    },
-    {
-      "kind": "region",
-      "id": "stone-opaque",
-      "at": [
-        2,
-        0,
-        1
-      ],
-      "face": "+z",
-      "expect": "not-background"
+      "expect": "background",
+      "cameras": [
+        "front",
+        "back"
+      ]
     },
     {
       "kind": "silhouette",
       "id": "pair-silhouette"
     }
-  ]
+  ],
+  "notes": "标定判据只回答两件事：(1) 四个标记的色度两侧一致（布局/朝向/纹理对）；(2) 玻璃在前/后机位透出背景。像素级落点由 verify/px-check.py 单独判（±1 px）。"
 }

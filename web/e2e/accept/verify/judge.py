@@ -135,8 +135,25 @@ def main():
             wcls = 'background' if wr >= 0.5 else 'content'
             want = chk.get('expect', 'not-background')
             if want.startswith('block:'):
-                results.append({'id': chk['id'], 'kind': kind, 'verdict': 'blocked',
-                                'reason': '未建立方块参考色表，无法机械比对指定方块色', 'game_bg_ratio': round(gr, 3), 'web_bg_ratio': round(wr, 3)})
+                # 指定方块（标定用的染色羊毛）：参考色取自**游戏侧同一点**（真值），只比色度、不比亮度。
+                # 两侧必须都是内容——"透明块透出背景"另用 expect=background 的判据测，不混在这条里。
+                q = cell_center(scene, chk['at'])
+                gx, gy, _ = game_mapping(cam['game'], q)
+                wx, wy, _ = web_px(q)
+                gc = sample(g, gx, gy, r=2); wc = sample(w, wx, wy, r=2)
+                g_is_bg = is_background(gc, bg_g, a.bg_tol)
+                w_is_bg = is_background(wc, bg_w, a.bg_tol)
+                if g_is_bg or w_is_bg:
+                    results.append({'id': chk['id'], 'kind': kind, 'verdict': 'blocked',
+                                    'reason': '取样点为背景（game=%s web=%s），无法比色' % (g_is_bg, w_is_bg),
+                                    'game_bg_ratio': round(gr, 3), 'web_bg_ratio': round(wr, 3)})
+                    continue
+                d = max(abs(normalize(gc)[i] - normalize(wc)[i]) for i in range(3))
+                results.append({'id': chk['id'], 'kind': kind,
+                                'verdict': 'pass' if d <= thr['faceColorDelta'] else 'fail',
+                                'value': round(d, 4), 'threshold': thr['faceColorDelta'],
+                                'want': want, 'game_rgb': [round(v) for v in gc], 'web_rgb': [round(v) for v in wc],
+                                'game_bg_ratio': round(gr, 3), 'web_bg_ratio': round(wr, 3)})
                 continue
             min_cov = float(chk.get('min_coverage', 0.5))
             if want == 'background':
@@ -249,7 +266,13 @@ def main():
         for r in content_checks:
             r['verdict'] = 'blocked'
             r['reason'] = '该机位整体无内容（视图级缺陷，先修渲染再判内容）'
-    verdict = 'fail' if any(r['verdict'] == 'fail' for r in results) else 'pass'
+    # 结论口径：有 fail 即 fail；否则只要还有 blocked（没能判）就不能报 pass——"判不了"不等于"通过"。
+    if any(r['verdict'] == 'fail' for r in results):
+        verdict = 'fail'
+    elif any(r['verdict'] == 'blocked' for r in results):
+        verdict = 'blocked'
+    else:
+        verdict = 'pass'
     report = {'scene': scene['id'], 'camera': a.camera, 'verdict': verdict, 'content_ratio': round(content_ratio, 3),
               'counts': {k: sum(1 for r in results if r['verdict'] == k) for k in ('pass', 'fail', 'blocked')},
               'checks': results,

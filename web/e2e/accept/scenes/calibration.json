@@ -1,7 +1,7 @@
 {
   "schema": "lightning.accept.scene/1",
   "id": "calibration",
-  "title": "机位标定：三轴染色标记 + 一块玻璃 + 一块实心（机位错则一切免谈）",
+  "title": "机位标定：三轴染色标记 + 一块玻璃（机位错则一切免谈）",
   "world": {
     "region": "cp_accept_calibration",
     "origin": [
@@ -58,15 +58,6 @@
         0
       ],
       "note": "透明参照"
-    },
-    {
-      "block": "stone",
-      "at": [
-        2,
-        0,
-        1
-      ],
-      "note": "实心参照"
     }
   ],
   "cameras": {
@@ -104,5 +95,6 @@
   "export": {
     "name": "calibration",
     "shape": "world"
-  }
+  },
+  "notes": "标定场景只放能定位的标记：白=原点、红=+X、绿=+Z、蓝=+Y，另加一块玻璃（透明参照，仅前/后机位判 background）。实心/透明/接缝等材质特性在 ctm-glass、glass-seam、opaque-mix 里覆盖。"
 }

@@ -36,12 +36,19 @@ test('accept: render plan cameras through the product viewport', async ({ page }
         innerDoc = JSON.parse(zlib.gunzipSync(Buffer.from(doc.payload, 'base64')).toString('utf8'))
       }
     } catch { innerDoc = doc }
+    // 网格来源优先级：导出件自带的 provenance.selection（权威，含 min/max/size）→ cellGrid + scanBounds。
+    // 不用"渲染出来的内容"：那会随缺陷漂移（实测：1×1×1 的坏导出会让包围盒缩成一块）。
+    const provSel = (doc as any)?.meta?.provenance?.selection ?? (innerDoc as any)?.frames?.[0]?.structure?.provenance?.selection ?? null
     const st = innerDoc?.frames?.[0]?.structure
     const g = st?.cellGrid as number[][][] | undefined
-    if (g && g.length && g[0]?.length && g[0][0]?.length) {
+    if (provSel && Array.isArray(provSel.min) && Array.isArray(provSel.pos2)) {
+      const size = [provSel.sizeX, provSel.sizeY, provSel.sizeZ]
+      if (size.every((v: any) => Number.isFinite(v) && v > 0)) sceneFrame = { min: provSel.min, size }
+    }
+    if (sceneFrame === null && g && g.length && g[0]?.length && g[0][0]?.length) {
       const size = [g[0][0].length, g[0].length, g.length]
-      const sb = st?.scanBounds ?? {}
-      const min = [sb.minX ?? 0, sb.minY ?? sb.maxY ?? 0, sb.minZ ?? 0]
+      const sb = st?.scanBounds ?? {};
+      const min = [(sb as any).minX ?? 0, (sb as any).minY ?? (sb as any).maxY ?? 0, (sb as any).minZ ?? 0]
       sceneFrame = { min, size }
     }
   }
@@ -60,6 +67,33 @@ test('accept: render plan cameras through the product viewport', async ({ page }
   console.log('[step] injected', JSON.stringify(injected))
   await waitForViewportMounted(page)
   console.log('[step] viewport mounted')
+
+  // 画布必须**恰好等于场景分辨率**（两侧同宽高是配对的前提；画布比窗口小，靠加窗口尺寸补齐）。
+  // 宽度 = 窗口 − 侧栏，高度 = 窗口 − 顶栏，故用实测边距迭代几次即可；对不上就报错，不缩图。
+  const [TARGET_W, TARGET_H] = plan.resolution as [number, number]
+  const largestCanvas = async () => {
+    const boxes = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('canvas')).map((c, i) => {
+        const r = c.getBoundingClientRect()
+        return { i, w: Math.round(r.width), h: Math.round(r.height) }
+      }),
+    )
+    const best = boxes.filter((b) => b.w > 200 && b.h > 200).sort((a, b) => b.w * b.h - a.w * a.h)[0]
+    if (!best) throw new Error('没有可用的 canvas：' + JSON.stringify(boxes))
+    return best
+  }
+  let probe = await largestCanvas()
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (Math.abs(probe.w - TARGET_W) <= 2 && Math.abs(probe.h - TARGET_H) <= 2) break
+    const vp = page.viewportSize()!
+    await page.setViewportSize({ width: Math.round(TARGET_W + vp.width - probe.w), height: Math.round(TARGET_H + vp.height - probe.h) })
+    await page.waitForTimeout(700)
+    probe = await largestCanvas()
+  }
+  console.log('[step] canvas aligned', JSON.stringify({ canvas: probe, target: [TARGET_W, TARGET_H] }))
+  if (Math.abs(probe.w - TARGET_W) > 2 || Math.abs(probe.h - TARGET_H) > 2) {
+    throw new Error('画布 ' + probe.w + '×' + probe.h + ' 与场景分辨率 ' + TARGET_W + '×' + TARGET_H + ' 对不齐（两侧必须同宽高）')
+  }
   await page.waitForTimeout(1200)
 
   const localBox = (await page.evaluate(async () => {

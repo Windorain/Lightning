@@ -4,11 +4,14 @@
  *
  * 两种模式：
  *   --emit   只产出用例 JSON + 机位计划 + manifest（无需客户端，可在 CI 里跑）
- *   --submit 逐个作业提交到 CP 的 HTTP 服务（同一客户端进程内串行，不重启），
- *            作业跑完后从 run 目录**实读产物**、逐件复核 sha256，落运行清单 run.json
+ *   --submit 逐个用例提交到 CP（`POST /cp/v1/actions/case.run`，同一客户端进程内串行，不重启），
+ *            作业完成后**实读** run 目录、逐件复核字节与 sha256，落运行清单 run.json
  *
- * 客户端是常驻服务：一个批次 = 同一进程内的多个作业；单个作业失败只算该场景红。
- * 端口从 `<mc-dir>/controlplane/server.json` 读，永不假设。
+ * 契约事实（以 docs/control-plane 为准，不猜）：
+ *   - 用例 schema 是 `lightning.case/1`，`criteria` 与 `evidence` 必填；
+ *   - 提交端点 `POST /cp/v1/actions/case.run`，参数 `{inline, confirm:true, totalTimeoutMs}`；
+ *   - 含 `cameras` 段的用例按内容升格为 forensic ⇒ 必须用 forensic token；
+ *   - 产物落 `<mcDataDir>/controlplane/runs/<runId>/`，清单 `manifest.json`（逐件 sha256）。
  *
  * 端到端纪律：run.json 是本批次的**唯一交付凭据**——判据只认清单里登记的图与导出件，
  * 历史文件即使放进同一路径也会因 sha256 不符被拒（judge.py 的端到端闸门）。
@@ -16,6 +19,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import zlib from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import { planForScene } from './camera-plan.mjs'
 
@@ -25,24 +29,48 @@ export const DEFAULT_MC_DIR = path.resolve(ROOT, '..', '..', '..', 'mod', 'gtnh'
 
 const sha256 = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')
 
-/** 场景 → 控制面用例（纯函数，便于单测）。 */
-export function caseForScene(scene, plan) {
+/**
+ * 场景 → 选区（导出扫描区）：内容 bbox 各向外扩 1 格。
+ *
+ * 导出件的网格 = 这个选区，Web 侧的世界→局部映射以它为准（sceneFrame），
+ * 所以它必须与场景定义机械对应——不准靠"记得选对范围"。
+ */
+export function selectionFor(scene) {
   const o = scene.world.origin
   const min = [0, 1, 2].map((i) => Math.min(...scene.blocks.map((b) => b.at[i])) + o[i])
   const max = [0, 1, 2].map((i) => Math.max(...scene.blocks.map((b) => b.at[i])) + o[i])
-  const clearFrom = [min[0] - 2, min[1] - 2, min[2] - 2]
-  const clearTo = [max[0] + 2, max[1] + 2, max[2] + 2]
+  return {
+    from: [min[0] - 1, min[1] - 1, min[2] - 1],
+    to: [max[0] + 1, max[1] + 1, max[2] + 1],
+    clearFrom: [min[0] - 2, min[1] - 2, min[2] - 2],
+    clearTo: [max[0] + 2, max[1] + 2, max[2] + 2],
+    size: [max[0] + 1 - (min[0] - 1) + 1, max[1] + 1 - (min[1] - 1) + 1, max[2] + 1 - (min[2] - 1) + 1],
+  }
+}
+
+/** 场景 → 控制面用例（纯函数，便于单测）。 */
+export function caseForScene(scene, plan) {
+  const o = scene.world.origin
+  const sel = selectionFor(scene)
+  const clearFrom = sel.clearFrom
+  const clearTo = sel.clearTo
 
   const build = [{ op: 'clear', from: clearFrom, to: clearTo }]
   for (const b of scene.blocks) {
     build.push({ op: 'block', at: [o[0] + b.at[0], o[1] + b.at[1], o[2] + b.at[2]], id: blockOf(b, scene), meta: metaOf(b, scene) })
   }
 
-  // 导出前置：选区 → 两角 → 起点 → 帧号 → 录制（缺一步 export.scene 会报「帧缓冲为空」）
+  // 导出前置：站位 → 选区 → 起点 → 帧号 → 录制（缺一步 export.scene 会报「帧缓冲为空」）
+  // `/sde pos1|pos2` **不接受坐标**（与 WorldEdit //pos1 一致，取玩家脚下方块）——实测传坐标会被静默忽略、
+  // 两角都记成玩家所在格 ⇒ 导出网格退化成 1×1×1。故先 `scene.player.pose` 站到角点（allowFlying 默认开，
+  // 全虚空世界不会坠落），再发命令。
+  const footAt = (c) => [c[0] + 0.5, c[1], c[2] + 0.5]
   const action = [
+    { action: 'scene.player.pose', params: { pos: footAt(sel.from), yaw: 0, pitch: 0 } },
     { action: 'cmd.exec', params: { command: '/sde sel cuboid' } },
-    { action: 'cmd.exec', params: { command: `/sde pos1 ${clearFrom[0]} ${clearFrom[1]} ${clearFrom[2]}` } },
-    { action: 'cmd.exec', params: { command: `/sde pos2 ${clearTo[0]} ${clearTo[1]} ${clearTo[2]}` } },
+    { action: 'cmd.exec', params: { command: '/sde pos1' } },
+    { action: 'scene.player.pose', params: { pos: footAt(sel.to), yaw: 0, pitch: 0 } },
+    { action: 'cmd.exec', params: { command: '/sde pos2' } },
     { action: 'cmd.exec', params: { command: '/sde start' } },
     { action: 'cmd.exec', params: { command: '/sde setframe 0' } },
     { action: 'cmd.exec', params: { command: '/sde record' } },
@@ -57,15 +85,35 @@ export function caseForScene(scene, plan) {
     resolution: c.game.resolution,
   }))
 
+  const [W, H] = scene.cameras.resolution
+  // 游戏侧自检（不替代配对判定）：每张图必须存在、尺寸正确、非纯色——先排掉"没拍出来"的假证据。
+  const criteria = [
+    { id: 'export-exists', type: 'artifact-exists', params: { path: `export/${scene.export.name}.json` } },
+    { id: 'export-nonempty', type: 'artifact-nonempty', params: { path: `export/${scene.export.name}.json`, minBytes: 256 } },
+  ]
+  for (const c of cameras) {
+    criteria.push({ id: `shot-size-${c.name}`, type: 'image-size-equals', params: { path: `shots/${c.name}.png`, width: W, height: H } })
+    criteria.push({ id: `shot-content-${c.name}`, type: 'image-not-uniform', params: { path: `shots/${c.name}.png`, maxSameColorRatio: 0.98 } })
+  }
+
   return {
-    schema: 'lightning.controlplane.case/1',
+    schema: 'lightning.case/1',
     id: 'accept-' + scene.id,
     label: '验收：' + scene.title,
     world: { folder: 'cp_accept_' + scene.id.replace(/-/g, '_'), seed: 20261019, void: true, base: o, settleTicks: 60 },
+    capture: { lighting: 'natural', renderMode: '本色', worldTime: scene.world.time },
     build,
-    export: [{ action: 'export.scene', params: { name: scene.export.name, shape: scene.export.shape } }],
-    cameras,
     action,
+    export: [{ action: 'export.scene', params: { name: scene.export.name, shape: scene.export.shape, frames: 'all' } }],
+    cameras,
+    criteria,
+    evidence: {
+      expect: [
+        { path: 'observation.json', role: 'observation' },
+        { path: 'criteria.json', role: 'criteria' },
+        { path: `export/${scene.export.name}.json`, role: 'scene-export' },
+      ],
+    },
   }
 }
 
@@ -103,7 +151,7 @@ export function readServerPort(mcDir) {
   return doc.port
 }
 
-function readToken(mcDir, kind = 'scene') {
+function readToken(mcDir, kind = 'forensic') {
   const p = path.join(mcDir, 'controlplane', 'tokens.json')
   const doc = JSON.parse(fs.readFileSync(p, 'utf8'))
   const token = doc.tokens?.[kind]
@@ -111,31 +159,84 @@ function readToken(mcDir, kind = 'scene') {
   return token
 }
 
-export async function submitCase(mcDir, caseDoc, outPath) {
-  const port = readServerPort(mcDir)
-  const token = readToken(mcDir, 'scene')
-  const url = `http://127.0.0.1:${port}/cp/v1/cases`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-    body: JSON.stringify(caseDoc),
+function cpUrl(mcDir, suffix) {
+  return `http://127.0.0.1:${readServerPort(mcDir)}/cp/v1${suffix}`
+}
+
+async function cpCall(mcDir, suffix, init = {}, kind = 'forensic') {
+  const res = await fetch(cpUrl(mcDir, suffix), {
+    ...init,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + readToken(mcDir, kind), ...(init.headers ?? {}) },
   })
   const text = await res.text()
-  if (!res.ok) throw new Error(`提交失败 ${res.status}：${text.slice(0, 400)}`)
-  const doc = JSON.parse(text)
-  fs.mkdirSync(path.dirname(outPath), { recursive: true })
-  fs.writeFileSync(outPath, JSON.stringify(doc, null, 2) + '\n', 'utf8')
-  return doc
+  let doc
+  try { doc = JSON.parse(text) } catch { throw new Error(`CP 返回非 JSON（${res.status}）：${text.slice(0, 300)}`) }
+  if (!res.ok || doc.ok === false) {
+    const err = doc.error ?? {}
+    throw new Error(`CP ${suffix} 失败 ${res.status} ${err.code ?? ''}：${err.message ?? text.slice(0, 300)}`)
+  }
+  return doc.data ?? doc
 }
 
-/** cp 的 run 目录：`<mc-dir>/controlplane/runs/<runId>/`。 */
-export function runsDirOf(mcDir) {
-  return path.join(mcDir, 'controlplane', 'runs')
+/** 提交并等作业结束（CP 默认异步：先拿 jobId，再轮询 jobs）。 */
+export async function submitCaseRun(mcDir, caseDoc, { timeoutMs = 20 * 60 * 1000, pollMs = 1500, now = () => Date.now() } = {}) {
+  const submitted = await cpCall(mcDir, '/actions/case.run', {
+    method: 'POST',
+    body: JSON.stringify({ inline: caseDoc, confirm: true, totalTimeoutMs: timeoutMs }),
+  })
+  const jobId = submitted.jobId
+  if (!jobId) throw new Error('case.run 未返回 jobId：' + JSON.stringify(submitted).slice(0, 200))
+  const deadline = now() + timeoutMs + 60_000
+  for (;;) {
+    const job = await cpCall(mcDir, '/jobs/' + jobId, {}, 'observe')
+    if (job.state === 'done') return { jobId, job, result: job.result ?? null }
+    if (job.state === 'failed') throw new Error(`case.run 作业失败 ${job.error?.code ?? ''}：${job.error?.message ?? JSON.stringify(job).slice(0, 300)}`)
+    if (now() > deadline) throw new Error('等 case.run 作业超时：' + jobId)
+    await new Promise((r) => setTimeout(r, pollMs))
+  }
 }
 
-export function listRunIds(mcDir) {
-  try { return fs.readdirSync(runsDirOf(mcDir), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) }
-  catch { return [] }
+/** 读导出件（信封 gzip+base64 则解包），返回内层文档。 */
+export function readExportDocument(file) {
+  const doc = JSON.parse(fs.readFileSync(file, 'utf8'))
+  if (typeof doc.payload === 'string') {
+    return { outer: doc, inner: JSON.parse(zlib.gunzipSync(Buffer.from(doc.payload, 'base64')).toString('utf8')) }
+  }
+  return { outer: doc, inner: doc }
+}
+
+/**
+ * 导出网格必须等于场景声明的选区（内容 bbox 各外扩 1）。
+ *
+ * 为什么必须查：`/sde pos1|pos2` 取的是**玩家脚下体素**，站位错一格或命令被忽略时，
+ * 导出件会静默变成 1×1×1（实测一次），Web 侧随后按错误网格取景，看起来"渲染不对"而真因在导出。
+ * 这里用导出件自带的 provenance.selection 与 cellGrid 两个独立来源交叉核对。
+ */
+export function verifyExportGrid(runDir, scene) {
+  const sel = selectionFor(scene)
+  const file = path.join(runDir, 'export', scene.export.name + '.json')
+  if (!fs.existsSync(file)) throw new Error('缺导出件：' + file)
+  const { outer, inner } = readExportDocument(file)
+  const prov = outer?.meta?.provenance?.selection ?? inner?.frames?.[0]?.structure?.provenance?.selection ?? null
+  const grid = inner?.frames?.[0]?.structure?.cellGrid
+  if (!grid) throw new Error('导出件缺 cellGrid：' + file)
+  const dims = [grid[0][0].length, grid[0].length, grid.length]
+  const bad = []
+  if (dims[0] !== sel.size[0] || dims[1] !== sel.size[1] || dims[2] !== sel.size[2]) {
+    bad.push(`网格尺寸 [${dims}] ≠ 选区 [${sel.size}]`)
+  }
+  if (prov) {
+    const min = prov.min ?? null
+    const max = prov.max ?? null
+    if (min && (min[0] !== sel.from[0] || min[1] !== sel.from[1] || min[2] !== sel.from[2])) {
+      bad.push(`选区 min [${min}] ≠ 期望 [${sel.from}]`)
+    }
+    if (max && (max[0] !== sel.to[0] || max[1] !== sel.to[1] || max[2] !== sel.to[2])) {
+      bad.push(`选区 max [${max}] ≠ 期望 [${sel.to}]`)
+    }
+  }
+  if (bad.length) throw new Error('导出网格与场景不符：' + bad.join('；') + '（导出件 ' + file + '）')
+  return { dims, selection: prov, file }
 }
 
 /** 运行清单 → 交付记录（纯函数：输入 manifest 原文 + 目录，输出 run.json 内容，不读盘）。 */
@@ -176,40 +277,13 @@ export function verifyArtifacts(runDir, manifest) {
   return true
 }
 
-/** 等本次提交对应的 run 落盘并稳定（manifest 可解析 + 含截图/导出件 + 两次轮询不变）。 */
-export async function waitForRun(mcDir, caseId, { before = [], timeoutMs = 20 * 60 * 1000, pollMs = 3000, now = () => Date.now() } = {}) {
-  const deadline = now() + timeoutMs
-  const seen = new Map()
-  for (;;) {
-    for (const id of listRunIds(mcDir)) {
-      if (before.includes(id)) continue
-      const runDir = path.join(runsDirOf(mcDir), id)
-      const mf = path.join(runDir, 'manifest.json')
-      if (!fs.existsSync(mf)) continue
-      let stable
-      try { stable = fs.statSync(mf).mtimeMs } catch { continue }
-      const prev = seen.get(id)
-      if (prev === undefined) { seen.set(id, stable); continue }
-      if (prev !== stable) { seen.set(id, stable); continue }   // 还在写
-      let manifest
-      try { manifest = JSON.parse(fs.readFileSync(mf, 'utf8')) } catch { continue }
-      if (manifest.caseId !== caseId) continue
-      const roles = new Set((manifest.artifacts ?? []).map((a) => a.role))
-      if (!roles.has('shot') || !roles.has('scene-export')) continue
-      return { runId: id, runDir, manifest, manifestSha256: sha256(mf) }
-    }
-    if (now() > deadline) throw new Error('等运行超时（' + Math.round(timeoutMs / 1000) + 's）：caseId=' + caseId)
-    await new Promise((r) => setTimeout(r, pollMs))
-  }
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2)
   const get = (k, d = null) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d }
   const outDir = get('--out', path.join(ROOT, '..', '..', '..', 'temp', 'accept-cases'))
   const ids = get('--scenes') ? get('--scenes').split(',') : null
   const submit = args.includes('--submit')
-  const mcDir = get('--mc-dir', DEFAULT_MC_DIR)
+  const mcDir = path.resolve(get('--mc-dir', DEFAULT_MC_DIR))
   const scenes = loadScenes(ROOT, ids)
   if (scenes.length === 0) { console.error('没有匹配的场景'); process.exit(2) }
   fs.mkdirSync(outDir, { recursive: true })
@@ -219,21 +293,29 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const c = caseForScene(scene, plan)
     fs.writeFileSync(path.join(outDir, c.id + '.case.json'), JSON.stringify(c, null, 2) + '\n', 'utf8')
     fs.writeFileSync(path.join(outDir, scene.id + '.plan.json'), JSON.stringify(plan, null, 2) + '\n', 'utf8')
-    let run = null
-    if (submit) {
-      const before = listRunIds(mcDir)
-      const submitted = await submitCase(mcDir, c, path.join(outDir, scene.id + '.submit.json'))
-      const found = await waitForRun(mcDir, c.id, { before })
-      verifyArtifacts(found.runDir, found.manifest)
-      run = runRecordFor({ scene: scene.id, runId: found.runId, caseId: c.id, runDir: found.runDir, manifest: found.manifest, manifestSha256: found.manifestSha256 })
-      fs.mkdirSync(path.join(outDir, 'runs'), { recursive: true })
-      fs.writeFileSync(path.join(outDir, 'runs', scene.id + '.run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8')
-      manifest.scenes.push({ scene: scene.id, case: c.id, cameras: c.cameras.length, blocks: scene.blocks.length, submitted, runId: run.runId, run: path.join(outDir, 'runs', scene.id + '.run.json') })
-      console.log('[batch]', scene.id, 'run=' + run.runId, 'shots=' + Object.keys(run.shots).length, 'export=' + run.export.path)
+    if (!submit) {
+      manifest.scenes.push({ scene: scene.id, case: c.id, cameras: c.cameras.length, blocks: scene.blocks.length, submitted: null })
+      console.log('[batch]', scene.id, 'cameras=' + c.cameras.length, 'blocks=' + scene.blocks.length, 'emitted')
       continue
     }
-    manifest.scenes.push({ scene: scene.id, case: c.id, cameras: c.cameras.length, blocks: scene.blocks.length, submitted: null })
-    console.log('[batch]', scene.id, 'cameras=' + c.cameras.length, 'blocks=' + scene.blocks.length, 'emitted')
+    const { jobId, result } = await submitCaseRun(mcDir, c)
+    const runId = result?.runId
+    if (!runId) throw new Error('case.run 结果缺 runId：' + JSON.stringify(result).slice(0, 300))
+    const runDir = path.join(mcDir, 'controlplane', 'runs', runId)
+    const manifestPath = path.join(runDir, 'manifest.json')
+    const cpManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    verifyArtifacts(runDir, cpManifest)
+    const grid = verifyExportGrid(runDir, scene)
+    const run = runRecordFor({ scene: scene.id, runId, caseId: c.id, runDir, manifest: cpManifest, manifestSha256: sha256(manifestPath) })
+    fs.mkdirSync(path.join(outDir, 'runs'), { recursive: true })
+    fs.writeFileSync(path.join(outDir, 'runs', scene.id + '.run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8')
+    fs.writeFileSync(path.join(outDir, 'runs', scene.id + '.job.json'), JSON.stringify({ jobId, overall: result?.overall ?? null, criteria: result?.criteria ?? null }, null, 2) + '\n', 'utf8')
+    manifest.scenes.push({
+      scene: scene.id, case: c.id, cameras: c.cameras.length, blocks: scene.blocks.length,
+      jobId, runId, overall: result?.overall ?? null,
+      run: path.join('runs', scene.id + '.run.json'),
+    })
+    console.log('[batch]', scene.id, 'run=' + runId, 'shots=' + Object.keys(run.shots).length, 'overall=' + (result?.overall ?? '?'))
   }
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8')
   console.log('[batch] 产物：' + outDir)

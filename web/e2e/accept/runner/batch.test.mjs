@@ -29,6 +29,7 @@ test('每个场景都能产出用例，且机位数 = 六视图 + 轴测', () =>
 test('用例结构：清区 + 每块一个 block op + 导出 + 六步前置', () => {
   const s = byId['glass-seam']
   const c = caseForScene(s, planForScene(s))
+  assert.equal(c.schema, 'lightning.case/1')
   assert.equal(c.build[0].op, 'clear')
   assert.equal(c.build.length, 1 + s.blocks.length)
   const b0 = c.build[1]
@@ -36,8 +37,30 @@ test('用例结构：清区 + 每块一个 block op + 导出 + 六步前置', ()
   assert.equal(b0.id, 'minecraft:stone')
   assert.deepEqual(b0.at, [64, 12, 64])
   assert.equal(c.export[0].action, 'export.scene')
-  assert.equal(c.action.length, 6)
+  assert.equal(c.export[0].params.shape, 'world')
+  assert.ok(!('path' in c.export[0]), 'export 段不接受 path（落点由动作决定）')
+  // 站位 2 步 + 选区/起点/帧号/录制 6 步：`/sde pos1|pos2` 取玩家脚下体素，命令本身不接受坐标
+  assert.equal(c.action.length, 8)
+  assert.equal(c.action[0].action, 'scene.player.pose')
+  assert.deepEqual(c.action[1].params.command, '/sde sel cuboid')
+  assert.deepEqual(c.action[2].params.command, '/sde pos1')
+  assert.equal(c.action[3].action, 'scene.player.pose')
+  assert.deepEqual(c.action[4].params.command, '/sde pos2')
   assert.ok(c.action.every((a) => typeof a.path === 'string' && a.path.length > 0))
+})
+
+test('用例必填段：criteria 与 evidence（契约要求，缺一即 CP-VALID-002）', () => {
+  const s = byId['glass-seam']
+  const c = caseForScene(s, planForScene(s))
+  assert.ok(Array.isArray(c.criteria) && c.criteria.length >= 1)
+  // 每个机位两条自检：尺寸 + 非纯色；另加导出件两条
+  assert.equal(c.criteria.length, 2 + 2 * c.cameras.length)
+  assert.deepEqual(c.evidence.expect.map((e) => e.path), ['observation.json', 'criteria.json', `export/${s.export.name}.json`])
+  assert.equal(c.capture.worldTime, s.world.time)
+  for (const cam of c.cameras) {
+    assert.ok(c.criteria.some((x) => x.id === `shot-size-${cam.name}`))
+    assert.ok(c.criteria.some((x) => x.id === `shot-content-${cam.name}`))
+  }
 })
 
 test('未登记方块必须抛错（不猜 id）', () => {
