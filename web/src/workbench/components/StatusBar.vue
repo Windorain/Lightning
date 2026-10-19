@@ -9,6 +9,7 @@ import { useShell } from '@/composition/shell'
 import { CAPABILITY } from '@/composition/modules'
 import { buildWikiDataPageUrl, displayNameFromLocator } from '@/wiki/wikiUrls'
 import { buildWikiEditSummaryDraft, hasWikiAuditableChanges } from '@/wiki/wikiEditSummary'
+import { diagnosticSeverityOf } from '@/runtime/diagnosticProjection'
 
 const ctx = useContext()
 const shell = useShell()
@@ -96,6 +97,85 @@ const hoveredBlock = computed(() => ctx.getHoveredBlock().value)
  */
 const recoveryCandidate = computed(() => ctx.getRecoverySession()?.candidate.value ?? null)
 const recoveryCorrupt = computed(() => ctx.getRecoverySession()?.corruptCount.value ?? 0)
+
+/**
+ * **诊断列表**（M8-6 / Q3 暂定默认）：底栏常驻区 + 可点开的列表。
+ *
+ * ## 数据源是**生产读面**，不是特权读面
+ *
+ * `ctx.getDiagnostics()` 是 `DiagnosticsReadView`（只有查询方法；e2e 经 `__vm__` 拿到的是
+ * **同一个**对象）。本组件不读 `__vm__`、不读日志缓冲、不读诊断记录器的写面 ——
+ * 于是"用户看到的诊断"与"判据读到的诊断"是**同一份数据**，不可能分叉。
+ *
+ * ## 为什么用 `wm.diagnosticEpoch` 而不是把记录器变成响应式
+ *
+ * 记录器是纯对象（`application/diagnostics` 不依赖 Vue），它**不该**为了 UI 变成响应式
+ * 状态（那会让"记录一条诊断"变成"触发一次渲染"）。`diagnosticEpoch` 只在记录落地后 +1，
+ * 用作失效通知；数据仍然现读。
+ *
+ * ## 为什么是"常驻区 + 可点开列表"而不是面板/弹窗
+ *
+ * 用户裁决的暂定默认（Q3）：不弹窗、不造新面板。有诊断时底栏显示条数与最高级别，
+ * 点开是列表；空态**不显示**（"0 条诊断"不是信息，是噪声）。
+ */
+const diagnosticsOpen = ref(false)
+const diagnosticsEpoch = computed(() => ctx.wm.diagnosticEpoch.value)
+interface DiagnosticRow {
+  readonly seq: number
+  readonly code: string
+  readonly channel: string
+  readonly time: string
+  readonly object: string
+}
+/**
+ * 当前有效诊断（**新→旧**；有界 = 记录器容量 512 —— 复用同一口径，不另立上限）。
+ *
+ * 排序取 `seq` 降序：最新的一条在列表顶。行内"对象"取最贴近用户的那个名字：
+ * `params.locator` → `params.assetId` → `correlation.objectId` → `correlation.viewportId`。
+ */
+const diagnosticRows = computed<DiagnosticRow[]>(() => {
+  void diagnosticsEpoch.value
+  const records = ctx.getDiagnostics().snapshot()
+  const out: DiagnosticRow[] = []
+  for (const r of records) {
+    // 只收**需要用户知道**的（WARN/ERROR）：info 级逐条事件（装配汇总/呈现版本/句柄获取）
+    // 是"过程"，常驻显示会把底栏变成心跳计数器。它们仍可从 `getDiagnostics()` 与
+    // `__log__` 读到 —— 用户面与机读面的差别只在**采样**，不在数据。
+    if (diagnosticSeverityOf(r.code) === 'info') continue
+    const params = r.params as Record<string, string | number | boolean>
+    const pick = (k: string): string => (typeof params[k] === 'string' ? String(params[k]) : '')
+    const where =
+      pick('locator') ||
+      pick('assetId') ||
+      pick('property') ||
+      pick('operator') ||
+      r.correlation.objectId ||
+      r.correlation.viewportId ||
+      pick('documentId') ||
+      ''
+    const d = new Date(r.at)
+    const time = Number.isNaN(d.getTime())
+      ? String(r.at)
+      : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+    out.push({ seq: r.seq, code: r.code, channel: r.channel, time, object: where })
+  }
+  out.sort((a, b) => b.seq - a.seq)
+  return out
+})
+const diagnosticCount = computed(() => diagnosticRows.value.length)
+/** 最高级别（只用于底栏那个小圆点的颜色；级别由投影表给出，见 `diagnosticProjection`）。 */
+/** 最高级别（底栏那个小圆点的颜色）—— 与日志级别**同一个**映射函数。 */
+const diagnosticLevel = computed<'error' | 'warn' | 'info'>(() => {
+  for (const r of diagnosticRows.value) {
+    const severity = diagnosticSeverityOf(r.code as never)
+    if (severity === 'error') return 'error'
+    if (severity === 'warn') return 'warn'
+  }
+  return 'info'
+})
+function toggleDiagnostics(): void {
+  diagnosticsOpen.value = !diagnosticsOpen.value
+}
 
 function recoveryTime(ms: number): string {
   try {
@@ -194,6 +274,38 @@ function openWikiDataPage() {
       {{ t('wikiStructure') }}: {{ wikiName }}
       <span v-if="wikiDirty" class="sb-unsaved"> · {{ t('unsaved') }}</span>
     </span>
+    <!--
+      **诊断常驻区**（M8-6 / Q3）：有诊断时才出现，点开是列表。
+      空态不显示（`v-if` 在计数 > 0）；不弹窗、不占新面板。
+    -->
+    <span v-if="diagnosticCount > 0" class="sb-diagnostics" data-lk-diagnostics-root>
+      <button
+        class="sb-diag-btn"
+        :class="'sb-diag-btn--' + diagnosticLevel"
+        data-lk-diagnostics
+        type="button"
+        :aria-expanded="diagnosticsOpen ? 'true' : 'false'"
+        :title="'诊断 ' + diagnosticCount + ' 条（点开查看码 / 对象 / 时间 / 通道）'"
+        @click="toggleDiagnostics"
+      >
+        <span class="sb-diag-dot" />诊断 {{ diagnosticCount }}
+      </button>
+      <ul v-if="diagnosticsOpen" class="sb-diag-list" data-lk-diagnostics-list>
+        <li
+          v-for="row in diagnosticRows"
+          :key="row.seq"
+          class="sb-diag-row"
+          data-lk-diagnostic-row
+          :data-diag-code="row.code"
+          :data-diag-channel="row.channel"
+        >
+          <code class="sb-diag-code" data-lk-diag-code>{{ row.code }}</code>
+          <span class="sb-diag-object" data-lk-diag-object>{{ row.object }}</span>
+          <span class="sb-diag-time" data-lk-diag-time>{{ row.time }}</span>
+          <span class="sb-diag-channel">{{ row.channel }}</span>
+        </li>
+      </ul>
+    </span>
     <span class="sb-spacer" />
     <span v-if="hasWorldMultiFrame" class="sb-item">
       Frame {{ (ctx.getFrameIndex()) + 1 }} / {{ frameCount }}
@@ -229,4 +341,56 @@ function openWikiDataPage() {
 .sb-item--error { color: var(--wb-danger); }
 .sb-item--warn { color: var(--wb-warn); }
 .sb-spacer { flex: 1; }
+.sb-diagnostics { position: relative; }
+.sb-diag-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--wb-text);
+  background: transparent;
+  border: 1px solid var(--wb-border, #555);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.sb-diag-btn:hover { background: var(--wb-hover, rgba(255, 255, 255, 0.12)); }
+.sb-diag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wb-text-muted, #999);
+}
+.sb-diag-btn--error .sb-diag-dot { background: var(--wb-danger, #ff6b6b); }
+.sb-diag-btn--warn .sb-diag-dot { background: var(--wb-warn, #ffb86b); }
+.sb-diag-list {
+  position: absolute;
+  bottom: 18px;
+  left: 0;
+  z-index: 20;
+  max-height: 40vh;
+  min-width: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--wb-bg-surface, #1b1f24);
+  border: 1px solid var(--wb-border, #555);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.sb-diag-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 8px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.sb-diag-row:hover { background: var(--wb-hover, rgba(255, 255, 255, 0.08)); }
+.sb-diag-code { color: var(--wb-accent, #7fb3ff); }
+.sb-diag-object { color: var(--wb-text); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.sb-diag-time { color: var(--wb-text-muted, #999); }
+.sb-diag-channel { color: var(--wb-text-muted, #999); }
 </style>
