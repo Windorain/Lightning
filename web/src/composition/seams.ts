@@ -936,6 +936,80 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + '与 `main-embed-initial-view-mirror` 同批复审。',
   }),
   /**
+   * **M9-1 补登（U3）**：`meta.embed_initial_view` → `Main.embedInitialView` 的**运行期镜像**
+   * —— GF-21 未闭时的那条补偿。
+   *
+   * ## 事实（cf3935e1 实测）
+   *
+   * - 载体侧落点 = 文档 `meta.embed_initial_view`（`EMBED_INITIAL_VIEW_META_KEY`，
+   *   `src/context/embedInitialView.ts:5`）：`setDocumentEmbedInitialView`（`:42-51`）**原地**写、
+   *   `getDocumentEmbedInitialView`（`:35-40`）读（命中判据 `isViewportCameraState` `:19-33`）。
+   * - 镜像 = `Main.embedInitialView`（`src/runtime/main.ts:118`；`src/runtime/mainCameras.ts:125` 分配）。
+   *   **写点 4 处**：`src/context/embedInitialView.ts:62`（`hydrateMainEmbedInitialViewFromDoc`，
+   *   装载/替换文档后）、`src/runtime/context.ts:1144`（`setHostEmbedInitialView` 同一动作的两半）、
+   *   `src/operators/builtin/docLifecycleOperators.ts:141`/`:276`（关闭/替换文档时置 `null`）。
+   *   **读点 2 处**：`src/runtime/viewportCamera.ts:96-102`（无活相机时的嵌入机位初值）、
+   *   `src/runtime/viewportCameraApply.ts:39`（把初始视角应用到机位）。
+   *
+   * ## 为什么它必须存在（= 为什么它仍算双轨）
+   *
+   * GF-21（甲）**未闭**：`meta.embed_initial_view` 至今**没有类型化内核落点** ——
+   * `composition/kernelAssembly.ts:1280-1282` 明写观察视角仍放在**非类型化**的 `view` 里。
+   * 于是运行期必须留一份**可观察**的镜像给机位初始化读；此刻删镜像会把读者逼回旧文档本体
+   * （那正是 R1-β① C3 刚拆掉的口）。⇒ 它是有期限的补偿，不是永久设计。
+   *
+   * ## 与 `main-embed-publish-mirror` 的区别
+   *
+   * 那条是壳设置镜像，不依赖 GF-21；本条是 **GF-21 的运行期补偿** ——
+   * GF-21 收口时本条的（甲）才可能成立。两者按同批纪律复审。
+   *
+   * ## owner 口径
+   *
+   * GF-21 属 R1-β①（#387）的遗留缺口（本表 `legacy-document-in-place-edit` 的核销注末句
+   * 即写“核销**不等于** GF-21 关闭”）⇒ owner 取该批的职责归属。
+   */
+  Object.freeze({
+    id: 'main-embed-initial-view-mirror',
+    files: Object.freeze([
+      'src/runtime/main.ts',
+      'src/runtime/context.ts',
+      'src/context/embedInitialView.ts',
+      'src/context/captureEmbedInitialView.ts',
+    ]),
+    newTrack:
+      '观察视角的落点是文档 `meta.embed_initial_view`（`src/context/embedInitialView.ts` 的'
+      + ' `setDocumentEmbedInitialView`/`getDocumentEmbedInitialView`，写入**原地**、不换文档引用、'
+      + '不推进 `documentRevision`）；宿主侧经具名装配面 `Context#setHostEmbedInitialView`（`src/runtime/context.ts:1140`）'
+      + ' 收口，抓取半在 `src/context/captureEmbedInitialView.ts:29`。',
+    oldTrack:
+      '`Main.embedInitialView` 是同一事实的**运行期镜像**：`src/runtime/main.ts:118` 声明、'
+      + '`src/runtime/mainCameras.ts:125` 分配；写点 4 处（`src/context/embedInitialView.ts:62`、'
+      + '`src/runtime/context.ts:1144`、`src/operators/builtin/docLifecycleOperators.ts:141`/`:276`）；'
+      + '读点 2 处（`src/runtime/viewportCamera.ts:96-102`、`src/runtime/viewportCameraApply.ts:39`）。'
+      + '生产读写点合计 **6 处**。',
+    blocker:
+      '**GF-21（甲）未闭**：`meta.embed_initial_view` 没有类型化内核落点（`composition/kernelAssembly.ts:1280-1282`'
+      + ' 明写观察视角在非类型化的 `view` 里，给它类型化落点是 GF-21 甲）。在类型化读面出现前删镜像，'
+      + '机位初始化就只能回读旧文档本体（`RuntimeDocument.meta`）—— 那是 C3 刚退役的取值形态。'
+      + '本批只登记（任务书边界：零行为变更），GF-21 的收口不在 M9-1 范围。',
+    closureCoverage: 'in-closure',
+    owner: Object.freeze({ p: 'R1-β①', issue: 387, duty: '端口切换与写路径内核化（撤销权威统一）' }),
+    exitCondition:
+      '**（甲）登记条件 —— ⏳ 未成立**：GF-21（甲）要求 `meta.embed_initial_view` 有**类型化内核落点 + 类型化读面**；'
+      + '今天它仍是 `src/context/embedInitialView.ts` 上的旧文档 `meta`，装配仍把观察视角放在非类型化的 `view`'
+      + '（`composition/kernelAssembly.ts:1280-1282`）。'
+      + '\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立（写点 4 + 读点 2 = 6 处）**：'
+      + '`src/context/embedInitialView.ts:62`、`src/runtime/context.ts:1144`、'
+      + '`src/operators/builtin/docLifecycleOperators.ts:141`/`:276`、`src/runtime/viewportCamera.ts:96`、'
+      + '`src/runtime/viewportCameraApply.ts:39`。'
+      + '\n**退出条件（删除镜像字段与本条登记）**：**（乙）是唯一删除闸口** —— 上述 6 处读写点 = 0，'
+      + '且 `src/runtime/main.ts` 不再声明 `embedInitialView`、`src/runtime/mainCameras.ts` 不再分配它。'
+      + '两条路径都以此为准：① GF-21 收口（类型化落点 + 读面就位 ⇒ 6 处改吃它）；'
+      + '② 镜像消除（即便 GF-21 未闭，只要 6 处读写点归零）。**只有（甲）不算退出。**'
+      + '\n**退出阶段**：GF-21 收口之后的第一批，或镜像消除批 —— 二者先到先算；'
+      + '与 `main-embed-publish-mirror` 同批复审。',
+  }),
+  /**
    * ⚠️ **已核销（R1-β① C10 / `d4708d0b`；关单裁决 #387 评论 7489 二）**：原
    * `shared-viewport-upward-imports-assembly-root` 登记在此。
    *
