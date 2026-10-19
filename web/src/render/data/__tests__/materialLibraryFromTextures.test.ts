@@ -84,4 +84,44 @@ describe('M8-5 · 已解码像素 → 图标材质库', () => {
     // 反空洞真：确实读到了源文件
     expect(src.length).toBeGreaterThan(500)
   })
+
+  /**
+   * **退役审计（#171）**：旧链的**文件**与**生产引用**都必须归零。
+   *
+   * 为什么要有这条常驻判据（而不是只在交付报告里写一句"已删除"）：
+   * "第二解码链"最容易的回归形态不是有人重写它，而是**有人把旧文件恢复回来接上**
+   * （复制粘贴、冲突解错、或者 `git checkout` 一把把删除抹掉 —— 本包实测发生过一次）。
+   * 那条路径不会让任何行为判据变红（新链还在跑），却让"解码只有一处"重新变成假的。
+   */
+  it('**退役审计**：旧链文件已删除，且生产代码里对它的 import 归零', () => {
+    const legacy = path.join(import.meta.dirname, '..', 'buildMaterialLibrary.ts')
+    expect(fs.existsSync(legacy), '旧链文件 buildMaterialLibrary.ts 不得复活').toBe(false)
+
+    // 扫生产源码（排除 __tests__）：任何 `.../buildMaterialLibrary'` 形态的导入都必须为零。
+    // 只扫"导入形态"而不是裸名 —— 注释里解释旧链是**允许且必要**的（历史说明）。
+    const hits: string[] = []
+    const walk = (dir: string): void => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === '__tests__' || e.name === 'node_modules') continue
+        const full = path.join(dir, e.name)
+        if (e.isDirectory()) {
+          walk(full)
+          continue
+        }
+        if (!/\.(ts|tsx|vue)$/.test(e.name)) continue
+        const code = fs
+          .readFileSync(full, 'utf8')
+          .replace(/\r\n/g, '\n')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .split('\n')
+          .filter((line) => !line.trim().startsWith('//'))
+          .join('\n')
+        if (/from\s+['"][^'"]*buildMaterialLibrary['"]/.test(code)) {
+          hits.push(path.relative(path.join(process.cwd(), 'src'), full))
+        }
+      }
+    }
+    walk(path.join(process.cwd(), 'src'))
+    expect(hits, '生产代码不得再 import 旧链（第二解码链）：' + hits.join(', ')).toEqual([])
+  })
 })
