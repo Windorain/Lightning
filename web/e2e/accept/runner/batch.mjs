@@ -239,6 +239,37 @@ export function verifyExportGrid(runDir, scene) {
   return { dims, selection: prov, file }
 }
 
+/**
+ * 材质调色板必须**逐条声明混合模式**，且取值在词表内。
+ *
+ * 为什么必须查：`blend` 是"这层画不画得透"的**唯一权威**（导出侧；消费方只在字段缺席时按
+ * `opaque` 兜底）。字段缺席时 Web 把玻璃画成不透明，表现为"同一格两侧一个透一个不透"，
+ * 而**导出件本身看不出任何异常** —— 那种缺陷只能靠"缺席即失败"在这里拦住。
+ *
+ * 判据来源：`docs/contracts/format-multiblock-doc.md` 的 `materialPalette` 条目
+ * （`locator/kind/atlas/linear/useMipmaps/blend/animation`）。
+ */
+export function verifyExportPalette(runDir, scene) {
+  const file = path.join(runDir, 'export', scene.export.name + '.json')
+  if (!fs.existsSync(file)) throw new Error('缺导出件：' + file)
+  const { inner } = readExportDocument(file)
+  const pal = inner?.materialPalette ?? inner?.frames?.[0]?.structure?.materialPalette ?? null
+  if (!Array.isArray(pal)) throw new Error('导出件缺 materialPalette：' + file)
+  if (pal.length === 0) throw new Error('导出件 materialPalette 为空：' + file)
+  const ALLOWED = new Set(['opaque', 'cutout', 'translucent'])
+  const bad = []
+  pal.forEach((entry, i) => {
+    const locator = entry?.locator ?? '(缺 locator)'
+    if (!Object.prototype.hasOwnProperty.call(entry ?? {}, 'blend')) {
+      bad.push(`[${i}] ${locator}：缺 blend`)
+    } else if (!ALLOWED.has(entry.blend)) {
+      bad.push(`[${i}] ${locator}：blend=${JSON.stringify(entry.blend)} 不在词表 [opaque|cutout|translucent]`)
+    }
+  })
+  if (bad.length) throw new Error('导出件材质缺/错混合模式：' + bad.join('；') + '（导出件 ' + file + '）')
+  return { entries: pal.length }
+}
+
 /** 运行清单 → 交付记录（纯函数：输入 manifest 原文 + 目录，输出 run.json 内容，不读盘）。 */
 export function runRecordFor({ scene, runId, caseId, runDir, manifest, manifestSha256 }) {
   const shots = {}
@@ -306,6 +337,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const cpManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
     verifyArtifacts(runDir, cpManifest)
     const grid = verifyExportGrid(runDir, scene)
+    const palette = verifyExportPalette(runDir, scene)
     const run = runRecordFor({ scene: scene.id, runId, caseId: c.id, runDir, manifest: cpManifest, manifestSha256: sha256(manifestPath) })
     fs.mkdirSync(path.join(outDir, 'runs'), { recursive: true })
     fs.writeFileSync(path.join(outDir, 'runs', scene.id + '.run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8')
@@ -313,6 +345,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     manifest.scenes.push({
       scene: scene.id, case: c.id, cameras: c.cameras.length, blocks: scene.blocks.length,
       jobId, runId, overall: result?.overall ?? null,
+      materials: palette.entries,
       run: path.join('runs', scene.id + '.run.json'),
     })
     console.log('[batch]', scene.id, 'run=' + runId, 'shots=' + Object.keys(run.shots).length, 'overall=' + (result?.overall ?? '?'))

@@ -4,7 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { DEFAULT_MC_DIR, caseForScene, loadScenes, loadBlocks, runRecordFor, verifyArtifacts } from './batch.mjs'
+import zlib from 'node:zlib'
+import { DEFAULT_MC_DIR, caseForScene, loadScenes, loadBlocks, runRecordFor, verifyArtifacts, verifyExportPalette } from './batch.mjs'
 import { planForScene } from './camera-plan.mjs'
 
 const scenes = loadScenes()
@@ -132,6 +133,38 @@ test('场景不得复用历史产物：文件名与内容都不许出现 legacy/
     assert.doesNotMatch(file, /legacy/i, '场景文件名不得带 legacy：' + file)
     assert.doesNotMatch(body, banned, '场景不得引用历史产物：' + file)
   }
+})
+
+/** 造一个只有导出件的临时 run 目录（信封 gzip+base64，与真产物同形）。 */
+function fakeRunDir(inner) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'accept-palette-'))
+  const scene = { export: { name: 'fake' } }
+  fs.mkdirSync(path.join(dir, 'export'), { recursive: true })
+  const outer = {
+    documentFormat: 'Envelope',
+    payloadEncoding: 'gzip+base64',
+    meta: { id: 'fake' },
+    payload: zlib.gzipSync(Buffer.from(JSON.stringify(inner), 'utf8')).toString('base64'),
+  }
+  fs.writeFileSync(path.join(dir, 'export', 'fake.json'), JSON.stringify(outer))
+  return { dir, scene }
+}
+
+test('材质调色板：逐条声明 blend，缺一即失败（缺席 = "看不出异常的不透明玻璃"）', () => {
+  const ok = fakeRunDir({ materialPalette: [{ locator: 'a', blend: 'opaque' }, { locator: 'b', blend: 'cutout' }] })
+  assert.deepEqual(verifyExportPalette(ok.dir, ok.scene), { entries: 2 })
+
+  const missing = fakeRunDir({ materialPalette: [{ locator: 'glass' }] })
+  assert.throws(() => verifyExportPalette(missing.dir, missing.scene), /缺 blend/)
+
+  const offVocab = fakeRunDir({ materialPalette: [{ locator: 'glass', blend: 'transparent' }] })
+  assert.throws(() => verifyExportPalette(offVocab.dir, offVocab.scene), /不在词表/)
+
+  const empty = fakeRunDir({ materialPalette: [] })
+  assert.throws(() => verifyExportPalette(empty.dir, empty.scene), /为空/)
+
+  const none = fakeRunDir({ frames: [{ structure: {} }] })
+  assert.throws(() => verifyExportPalette(none.dir, none.scene), /缺 materialPalette/)
 })
 
 test('默认客户端目录必须是 mod/gtnh/run/client（仓库布局，不是 gtn）', () => {
