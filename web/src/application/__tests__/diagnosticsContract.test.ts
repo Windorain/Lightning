@@ -19,6 +19,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  DIAGNOSTIC_CODES,
   PARAM_VALUE_MAX,
   REDACTED,
   asReadOnlyDiagnostics,
@@ -57,19 +58,19 @@ describe('A35 正对照：可按 command/job/object/version 关联原因与归�
     const clock = fixedClock()
     const rec = createDiagnosticRecorder({ capacity: 32, now: clock.now })
     rec.record({ channel: 'command', code: 'command.received', params: {}, correlation: { commandId: 'c1' } })
-    rec.record({ channel: 'evaluation', code: 'evaluation.invalidated', params: { node: 'n1' }, correlation: { objectId: 'o1' } })
+    rec.record({ channel: 'module', code: 'module.pruned', params: { node: 'n1' }, correlation: { objectId: 'o1' } })
     rec.record({ channel: 'resource', code: 'resource.leaked', params: { owner: 'tex' }, correlation: { objectId: 'o2' } })
     rec.record({ channel: 'command', code: 'command.applied', params: {}, correlation: { commandId: 'c2' } })
 
     expect(rec.byChannel('command').map((r) => r.code)).toEqual(['command.received', 'command.applied'])
-    expect(rec.byChannel('evaluation')).toHaveLength(1)
+    expect(rec.byChannel('module')).toHaveLength(1)
     expect(rec.byCode('resource.leaked')).toHaveLength(1)
     expect(rec.byCorrelation({ commandId: 'c2' })).toHaveLength(1)
     expect(rec.byCorrelation({ objectId: 'o1' })).toHaveLength(1)
     expect(rec.byCorrelation({ commandId: 'nope' })).toEqual([])
   })
 
-  it('可关联"实际/目标呈现版本"（§19.9 第四项）与效果取消状态（第六项）', () => {
+  it('可关联"实际/目标呈现版本"（§19.9 第四项）；效果取消族**按事实删除**（第六项）', () => {
     const clock = fixedClock()
     const rec = createDiagnosticRecorder({ capacity: 8, now: clock.now })
     rec.record({
@@ -78,19 +79,21 @@ describe('A35 正对照：可按 command/job/object/version 关联原因与归�
       params: {},
       correlation: { actualPresentationVersion: 4, targetPresentationVersion: 6 },
     })
-    rec.record({
-      channel: 'effect',
-      code: 'effect.cancelRequested',
-      params: { job: 'encode' },
-      correlation: { jobId: 'j-1' },
-    })
     const v = rec.byCode('presentation.version')[0]!
     expect(v.correlation.actualPresentationVersion).toBe(4)
     expect(v.correlation.targetPresentationVersion).toBe(6)
-    const c = rec.byCorrelation({ jobId: 'j-1' })[0]!
-    expect(c.code).toBe('effect.cancelRequested')
-    // "请求取消"与"已取消"是两个不同状态（#249 §9：超时不冒充取消）
-    expect(c.code).not.toBe('effect.cancelled')
+
+    // ## 第六项（效果关联/取消）的处置：**删码**，不是留一个类型愿望
+    //
+    // M8-6 实测：`runtime/effects#JobState` 的生产实例化 = 0（全树 `enqueueJob`/
+    // `applyJobEvent` 只在定义与单测里出现），生产面没有任何 `AbortController` 发起取消。
+    // 于是一个只存在于类型里的 `cancelRequested`/`cancelled` 只能让"按码聚合"恒为空集。
+    // 负对照：这些码**必须**从码表消失（码表不是许愿单）；真接入取消协议时按新事实立码。
+    for (const removed of ['effect.started', 'effect.cancelRequested', 'effect.cancelled', 'effect.succeeded']) {
+      expect(DIAGNOSTIC_CODES as readonly string[], `已删除的零生产者码不得复活：${removed}`).not.toContain(removed)
+    }
+    // 保留的 `effect.failed` 仍有 8 个生产发点（呈现链编译/注解失败）。
+    expect(DIAGNOSTIC_CODES as readonly string[]).toContain('effect.failed')
   })
 
   it('模块装配与裁剪原因可记录（§19.9 第七项）', () => {
@@ -152,14 +155,14 @@ describe('A35 负对照 1：追踪有界（"无限增长记录"结构上不可�
     const rec = createDiagnosticRecorder({
       capacity: 100,
       now: clock.now,
-      sample: (candidate) => candidate.code !== 'evaluation.invalidated',
+      sample: (candidate) => candidate.code !== 'module.pruned',
     })
     rec.record({ channel: 'command', code: 'command.received', params: {}, correlation: {} })
-    rec.record({ channel: 'evaluation', code: 'evaluation.invalidated', params: {}, correlation: {} })
+    rec.record({ channel: 'module', code: 'module.pruned', params: {}, correlation: {} })
     rec.record({ channel: 'command', code: 'command.applied', params: {}, correlation: {} })
     expect(rec.totalRecorded).toBe(2)
     expect(rec.size()).toBe(2)
-    expect(rec.byCode('evaluation.invalidated')).toEqual([])
+    expect(rec.byCode('module.pruned')).toEqual([])
   })
 
   it('快照是**副本**：调用方改它不影响记录器（读面不暴露内部缓冲）', () => {
@@ -175,15 +178,10 @@ describe('A35 负对照 1：追踪有界（"无限增长记录"结构上不可�
 
 describe('A35 负对照 2：不是"仅 console 文案"（码 + 参数，翻译分离）', () => {
   it('原因以稳定码 + 结构化参数表达；码不随语言改变', () => {
-    const codes: DiagnosticReasonCode[] = [
-      'command.received', 'command.applied', 'command.unchanged', 'command.rejected',
-      'command.wouldBlock', 'command.unsupported', 'property.readOnly',
-      'evaluation.invalidated', 'evaluation.stale', 'presentation.version',
-      'resource.acquired', 'resource.released', 'resource.leaked',
-      'effect.started', 'effect.cancelRequested', 'effect.cancelled',
-      'effect.succeeded', 'effect.failed', 'module.assembled', 'module.pruned',
-      'content.rejected',
-    ]
+    // 码表**从数据读**（M8-6 起 `DIAGNOSTIC_CODES` 是运行时清单）：手写列表会漂移，
+    // 而"每码都合规"这件事只能对着真清单判。
+    const codes: readonly DiagnosticReasonCode[] = DIAGNOSTIC_CODES
+    expect(codes.length).toBeGreaterThan(30)
     for (const c of codes) {
       // 码是 ASCII 点分标识，不是自然语言（改语言不改它）
       expect(c, c).toMatch(/^[a-z]+\.[a-zA-Z]+$/)

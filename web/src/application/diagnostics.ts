@@ -50,8 +50,18 @@ export type DiagnosticReasonCode =
   // —— 属性只读（§19.9 第二项）——
   | 'property.readOnly'
   // —— 求值节点失效（§19.9 第三项）——
-  | 'evaluation.invalidated'
-  | 'evaluation.stale'
+  //
+  // ⚠️ **M8-6 码表对账：两码已删除**（evaluation.invalidated / evaluation.stale）。
+  //
+  // 论证（不是"暂时没人用"，而是**结构上没有这个事实**）：
+  //  - `runtime/evaluation#EvaluationInstance`（唯一产出"节点失效/过期接纳"的地方）在
+  //    生产面**零实例化**（`src/runtime/kernelSession.ts:8` 自己登记了这条事实）；
+  //  - 生产的多方块求值（`composition/kernelMultiblockEvaluation`）是**每次读面全量重算**：
+  //    没有缓存 ⇒ 没有"失效"事件；没有异步节点接纳 ⇒ 没有"过期结果"事件。
+  //  - 唯一形似的"上一份编译产物被替换"由 `presentation.version` 如实承载
+  //    （实际/目标呈现版本），那是**呈现**事实，不是求值图事实。
+  // ⇒ 两码若保留，只能靠"有人写了不存在的发射点"才绿 —— 那正是码表变许愿单的形态。
+  // 求值图接线时（引入缓存与异步节点接纳）应按新事实重新立码并同批接发射点。
   // —— 呈现版本（§19.9 第四项）——
   | 'presentation.version'
   // —— 资源归属（§19.9 第五项）——
@@ -59,10 +69,17 @@ export type DiagnosticReasonCode =
   | 'resource.released'
   | 'resource.leaked'
   // —— 效果关联/取消（§19.9 第六项）——
-  | 'effect.started'
-  | 'effect.cancelRequested'
-  | 'effect.cancelled'
-  | 'effect.succeeded'
+  //
+  // ⚠️ **M8-6 码表对账：四个生命周期码已删除**（effect.started / effect.cancelRequested /
+  // effect.cancelled / effect.succeeded）。
+  //
+  // 理由（S0-B §4.2 的零生产者清单 + M8-6 实测）：它们描述的作业状态机
+  // （runtime/effects#JobState：queued → running → cancelRequested → succeeded|failed|cancelled）
+  // 在**生产面零实例化**——全树 enqueueJob/applyJobEvent 只出现在定义与单测里，
+  // 且生产没有任何 AbortController 发起取消。码表不是许愿单：一条只存在于类型里的码
+  // 会让「按码聚合」的读面永远给出空集，并让后来者以为这条链已被观测覆盖。
+  // 保留 effect.failed —— 它有 8 个生产发点（呈现链编译/注解失败；M8-5 已按等价替换钉过）。
+  // 若日后真的接入作业取消协议（例如导出取消入口），按新事实**重新立码**并同批接发射点。
   | 'effect.failed'
   // —— 模块装配与裁剪（§19.9 第七项）——
   | 'module.assembled'
@@ -164,6 +181,70 @@ export type DiagnosticReasonCode =
   /** 之前失败的一项资源在重试后**就绪**（占位恢复为正常呈现）。 */
   | 'resource.recovered'
 
+/**
+ * **码表作为数据**（M8-6：让「每码都有生产发射点」可被机械核对）。
+ *
+ * ## 为什么需要它
+ *
+ * 码表此前只是**联合类型** —— 类型层数得出 30+ 条码，但没有任何运行时清单，
+ * 于是「哪些码只有类型、没有生产者」只能靠人肉 grep（S0-B §4.2 就是这么数出 18 个的，
+ * 而且每次扩码都要重数一遍）。本常量把码表变成**可在测试里遍历的数据**：
+ * `src/runtime/__tests__/diagnosticCodeProducers.test.ts` 逐码扫描生产源文件，
+ * 要求每码要么有 `code: '<码>'` 发射点，要么从本表消失。
+ *
+ * ## 为什么不会与联合类型漂移
+ *
+ * 映射表的键类型是 `Record<DiagnosticReasonCode, true>`：
+ * 少一个键 = 编译错误；多一个不存在的键 = 编译错误。
+ * ⇒ 「加码不加表」在类型上不可表达。
+ */
+const DIAGNOSTIC_CODE_TABLE: Readonly<Record<DiagnosticReasonCode, true>> = Object.freeze({
+  'command.received': true,
+  'command.applied': true,
+  'command.unchanged': true,
+  'command.rejected': true,
+  'command.wouldBlock': true,
+  'command.unsupported': true,
+  'property.readOnly': true,
+  'presentation.version': true,
+  'resource.acquired': true,
+  'resource.released': true,
+  'resource.leaked': true,
+  'effect.failed': true,
+  'module.assembled': true,
+  'module.pruned': true,
+  'content.rejected': true,
+  'export.requested': true,
+  'export.completed': true,
+  'export.failed': true,
+  'export.capabilityUnsupported': true,
+  'export.assetNotReady': true,
+  'export.requiresLossyMode': true,
+  'export.timeQuantized': true,
+  'export.encodingNotConfigured': true,
+  'export.emptyScene': true,
+  'export.firstFrameOnly': true,
+  'export.geometrySkipped': true,
+  'export.layerStackUnexpressed': true,
+  'export.blendApproximated': true,
+  'device.lost': true,
+  'device.restored': true,
+  'recovery.writeFailed': true,
+  'recovery.detected': true,
+  'recovery.adopted': true,
+  'recovery.adoptFailed': true,
+  'recovery.discarded': true,
+  'recovery.corrupt': true,
+  'resource.failed': true,
+  'resource.degraded': true,
+  'resource.retryRequested': true,
+  'resource.recovered': true,
+})
+
+/** 码表的运行时清单（顺序 = 上面的声明顺序；只读）。 */
+export const DIAGNOSTIC_CODES: readonly DiagnosticReasonCode[] = Object.freeze(
+  Object.keys(DIAGNOSTIC_CODE_TABLE) as DiagnosticReasonCode[],
+)
 /** 原因的可选结构化参数（**值**只允许标量；不塞对象图）。 */
 export type DiagnosticParams = Readonly<Record<string, string | number | boolean>>
 
@@ -279,6 +360,24 @@ export interface DiagnosticRecorderOptions {
    * #249 §19.9「不让日志成为额外业务驱动源」）。
    */
   readonly sample?: (candidate: Omit<DiagnosticRecord, 'seq' | 'at'>) => boolean
+  /**
+   * **投影观察者**（M8-6）：每写一条记录后，把**同一条记录**交给调用方去投影成
+   * 其它可读面（人读日志条目、底栏实时状态）。
+   *
+   * ## 为什么是"观察者"而不是第二个写入口
+   *
+   * C1（本记录器）是**唯一结构化诊断面**；C2（`LogCenter`）/C3（`liveStatus`）
+   * 只允许是它的**投影** —— 于是"同一事实两条通道"不可能再各自演化：
+   * 任何投影都必须能由 `record` 的 `code` + `params` 推导出来。
+   *
+   * ## 约束（都有单测钉）
+   *
+   * 1. **只读**：观察者拿到的记录是只读的，不得借此写回诊断或业务状态；
+   * 2. **不驱动业务**：观察者抛错不得让 `record()` 抛错、更不得改变业务结果
+   *    （见 `diagnosticProjection.test.ts` 的负对照）；
+   * 3. **不改变记录**：返回值仍是那条记录；采样丢弃时不调用观察者（没有记录就没有投影）。
+   */
+  readonly observe?: (record: Readonly<DiagnosticRecord>) => void
 }
 
 /**
@@ -373,6 +472,16 @@ export function createDiagnosticRecorder(options: DiagnosticRecorderOptions): Di
     total++
     if (buffer.length >= capacity) buffer.shift()
     buffer.push(full)
+    // 投影（M8-6）：记录**落地之后**才通知，且观察者失败不影响记录/业务。
+    // 这里刻意吞掉异常：观察者是读面（日志/底栏），它坏掉不该让"一次诊断"
+    // 变成"一次业务失败"；但它也不得静默改变返回值（返回的仍是 full）。
+    if (options.observe !== undefined) {
+      try {
+        options.observe(full)
+      } catch {
+        // 投影失败：诊断本身仍然有效（C1 是权威，C2/C3 是投影）。
+      }
+    }
     return full
   }
 
