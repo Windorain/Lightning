@@ -649,6 +649,78 @@ describe('暂存双轨登记：每条接缝都有负责人与**可判定**的退
   })
 
   /**
+   * **死登记检查**（M9-1 补）：接缝声明的文件必须**存在于树上**。
+   *
+   * 本表是现状清单（文件头：本表是声明而非机制），一条指向**已删除文件**的登记
+   * 既不是声明也不是现状：它让审读者以为某条双轨仍在（实际早已随文件消失），
+   * 也让『表长 = 双轨剩余数』这个读数虚高。M9 S0-B 的死登记核对是**人工**做的
+   * （7 条逐条查存在性），本判据把它变成常驻的机械核对。
+   */
+  it('**死登记检查**：每条接缝声明的文件都必须存在于树上', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    const missingOf = (files: readonly string[]): string[] =>
+      files.filter((f: string) => !fs.existsSync(path.join(WEB_ROOT, f)))
+    const dead: string[] = []
+    for (const s of SEAMS) for (const m of missingOf(s.files)) dead.push(s.id + ' -> ' + m)
+    expect(
+      dead,
+      '接缝声明了不存在的文件 ⇒ 死登记（登记表与现状脱节）：' + dead.join('，'),
+    ).toEqual([])
+    // 负对照：同一判定式必须能判出一个**不存在**的路径（否则上面的空数组是恒真）
+    expect(missingOf(['src/composition/__deleted_probe__.ts'])).toEqual(['src/composition/__deleted_probe__.ts'])
+    expect(missingOf(['src/runtime/context.ts']), '正对照：真实文件必须判为存在').toEqual([])
+  })
+
+  /**
+   * **未登记双轨抽查**（M9-1 补；范围限本包三条：U1/U2/U3 的镜像与投影）。
+   *
+   * ## 它防的是什么
+   *
+   * M9 S0-B 的三条发现（U1 `syncLegacyFromKernel`、U2 `Main.embedPublish`、
+   * U3 `Main.embedInitialView`）当时都**真实存在于代码里**，而 `SEAMS` 里 0 命中 ——
+   * 登记表结构上发现不了『有旧轨但没登记』。本判据把这三条做成**抽查示例**：
+   * 只要符号仍出现在生产代码里，就必须有一条登记同时（a）列出该文件、（b）在文本里
+   * 点名该符号（防『随便挂一条同文件的登记』蒙过去）。
+   *
+   * ## 为什么它不会在核销后变恒假
+   *
+   * 判据先剥注释、再判断符号是否**仍在代码里**：机制被消除后该条**自动跳过**，
+   * 于是核销镜像时**无须改本判据**（与 `shared-viewport-upward-import-closure.test.ts`
+   * 那条『仍在册』断言在 M9-1 的改写同一纪律）。
+   */
+  it('**未登记双轨抽查**：本包三条镜像/投影只要仍在生产代码里出现，就必须在册', async () => {
+    const { SEAMS } = await import(path.join(SRC_ROOT, 'composition', 'seams.ts').replace(/\\/g, '/'))
+    const codeOnly = (text: string): string =>
+      text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')
+    const isRegistered = (file: string, symbol: string): boolean =>
+      SEAMS.some((s: { files: readonly string[]; newTrack: string; oldTrack: string; blocker: string; exitCondition: string }) =>
+        s.files.includes(file)
+        && (s.newTrack + s.oldTrack + s.blocker + s.exitCondition).includes(symbol))
+    const SPOT = [
+      { symbol: 'syncLegacyFromKernel', file: 'src/runtime/context.ts' },
+      { symbol: 'embedPublish', file: 'src/runtime/main.ts' },
+      { symbol: 'embedInitialView', file: 'src/runtime/main.ts' },
+    ]
+    const unregistered: string[] = []
+    for (const spot of SPOT) {
+      const abs = path.join(WEB_ROOT, spot.file)
+      if (!fs.existsSync(abs)) { unregistered.push(spot.file + '（声明文件不存在）'); continue }
+      // 机制已消除 ⇒ 不需要登记（核销后自动通过）
+      if (!codeOnly(readSource(abs)).includes(spot.symbol)) continue
+      if (!isRegistered(spot.file, spot.symbol)) unregistered.push(spot.file + ' -> ' + spot.symbol)
+    }
+    expect(
+      unregistered,
+      '这些镜像/投影仍在生产代码里，却没有接缝登记（= 未登记的双轨；补登记或消除机制）：'
+        + unregistered.join('，'),
+    ).toEqual([])
+    // 负对照：判定式对『未在册的符号 / 未在册的文件』必须判否（证明它不是恒真）
+    expect(isRegistered('src/runtime/main.ts', 'embedPublish'), '正对照：本包 U2 必须命中').toBe(true)
+    expect(isRegistered('src/runtime/main.ts', 'noSuchSymbolInAnySeam'), '负对照：未在册符号必须判否').toBe(false)
+    expect(isRegistered('src/domain/document.ts', 'embedPublish'), '负对照：未在册文件必须判否').toBe(false)
+  })
+
+  /**
    * **核销回归（R1-β① C3）**：`kernel-property-write-dual-track` 与
    * `property-write-legacy-document-model` 两条登记**已退出**，此处把守"不得复活"。
    *
