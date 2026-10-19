@@ -1,7 +1,8 @@
 import { computed, ref, shallowRef } from 'vue'
 import type { ViewportSlot } from '@/runtime/types'
 import { cameraMainKeyForRegion } from '@/runtime/mainCameras'
-import { createViewportCameraInitLedger } from '@/runtime/viewportCameraInit'
+import { createViewportCameraInitLedger, type CameraInitState } from '@/runtime/viewportCameraInit'
+import type { ViewportCameraState } from '@/runtime/viewportCamera'
 import { ViewportDeviceRegistry } from '@/presentation/deviceState'
 
 /**
@@ -155,6 +156,42 @@ export function createViewportManager() {
     /** 台账中该 region 已施加初始机位的文档身份（`null` = 尚未施加；判据/诊断面）。 */
     initialViewportCameraRevisionOf(id: string): number | null {
       return cameraInit.appliedRevisionOf(id)
+    },
+
+    /**
+     * 登记"首次框选待做"（M8-7）：fit 时内容组还没有几何 ⇒ 等首个成功 apply 补做一次。
+     * 与 `claimInitialViewportCamera` 同一台账，语义与判据见 `viewportCameraInit`。
+     */
+    markInitialFitPending(id: string, documentRevision: number, provisional: ViewportCameraState | null): void {
+      cameraInit.markFitPending(id, documentRevision, provisional)
+    },
+    /**
+     * 取走"待做"的首次框选（**只一次**）；`'fit'` 表示现在应当再施加一次初始机位。
+     *
+     * `'user'`（用户已先动相机）与 `'stale'`（换了文档）都表示**放弃补偿**。
+     */
+    takeInitialFitPending(
+      id: string,
+      documentRevision: number,
+      current: ViewportCameraState | null,
+    ): 'fit' | 'user' | 'stale' | null {
+      return cameraInit.takePendingFit(id, documentRevision, current)
+    },
+    /** 记录初始机位来自 fit（`cameraInitState === 'fitted'`）。 */
+    markInitialCameraFitted(id: string): void {
+      cameraInit.markFitted(id)
+    },
+    /** 记录初始机位来自定义缺省兜底（`cameraInitState === 'fallback'`）。 */
+    markInitialCameraFallback(id: string): void {
+      cameraInit.markFallback(id)
+    },
+    /**
+     * 该视口初始机位的施加结果（`pending`/`fitted`/`fallback`/`user`；`null` = 还没判定过）。
+     *
+     * 判据面（P4）："首次装载后 `fitted` 且 zoom ≠ 定义缺省 1" 才证明自动框选真的跑过。
+     */
+    cameraInitStateOf(id: string): CameraInitState | null {
+      return cameraInit.initStateOf(id)
     },
     get(id: string): ViewportSlot | undefined {
       return slots.get(id)

@@ -973,6 +973,29 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
    */
   let presentedDocumentVersion = 0
 
+  /**
+   * **补做"待做的首次框选"**（M8-7 / P4 回归修复）。
+   *
+   * 链路：`viewportCameraApply` 的 fit 在**内容尚未落地**时登记 pending
+   * （`fitCameraToGroup` 拿不到几何），据此把"初始机位"从**时序依赖**改成**事实依赖**：
+   * 首个真的把批次画上去的 apply 之后，再施加一次初始机位。
+   *
+   * 三条纪律（缺一即错）：
+   *  1. **只一次**：`takeInitialFitPending` 取走即删（重复调用返回 `null`）；
+   *  2. **不抢用户机位**：登记时记下当时的逻辑机位，取走时逐字段比对 —— 不同 ⇒ `'user'`，
+   *     放弃补偿（M7 §7.3-b③ 与 G1/G2 判据钉死的行为）；
+   *  3. **不跨文档**：等待期间换了文档 ⇒ `'stale'`，由新文档自己的 claim 负责。
+   */
+  const finishPendingInitialFit = (): void => {
+    const decision = ctx.viewports.takeInitialFitPending(
+      regionId,
+      ctx.getDocumentRevision().value,
+      ctx.main.ensureCamera(vpSlot.cameraMainKey).value,
+    )
+    if (decision !== 'fit') return
+    void ctx.getOperators().exec('OPERATOR_INIT_VIEWPORT_CAMERA', { _regionId: regionId })
+  }
+
   const applyPresenterSurface = (): void => {
     /**
      * **画面源 = 内核呈现文档**（M5-2）。
@@ -1011,7 +1034,10 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
           ...(out.compileError === null ? {} : { compileError: out.compileError }),
           skipped: out.skipped.length + out.compileSkipped.length,
         })
-        if (out.applied) presentedDocumentVersion = doc.version.documentVersion
+        if (out.applied) {
+          presentedDocumentVersion = doc.version.documentVersion
+          finishPendingInitialFit()
+        }
       }
       // 编译失败/跳过是**真实事实**，必须可见（不得静默当"画好了"）。
       if (out.compileError !== null) {

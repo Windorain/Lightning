@@ -113,6 +113,8 @@
  * `e2e/kernel-area-split-roundtrip.spec.ts`（G2）。
  */
 
+import type { ViewportCameraState } from '@/runtime/viewportCamera'
+
 /** 一次"是否施加初始机位"判定的全部输入。 */
 export interface InitialCameraClaimInput {
   /** 当前文档身份（窄信号 `ctx.getDocumentRevision()`，**只**在换文档时变）。 */
@@ -148,10 +150,86 @@ export interface ViewportCameraInitLedger {
   claim(regionId: string, documentRevision: number, hasCameraState: boolean): boolean
   /** 当前记下的文档身份（诊断/判据面；未记录为 `null`）。 */
   appliedRevisionOf(regionId: string): number | null
+  /**
+   * 登记"首次框选**待做**"（M8-7 / 回归修复）。
+   *
+   * 何时发生：fit 的输入**还没有几何**（内容组为空）——`fitCameraToGroup` 返回
+   * `{ok:false, reason:'group has no geometry bounds'}`。这不是"空文档"，而是
+   * "内容还没落地"（首帧呈现 apply 尚未发生）。
+   *
+   * `provisional` 是登记时**已写进**相机状态的那一份（`null` = 当时没有逻辑机位）。
+   * 补做的判据是"相机**仍等于** `provisional`" ⇒ 用户没动过它（见 {@link takePendingFit}）。
+   */
+  markFitPending(
+    regionId: string,
+    documentRevision: number,
+    provisional: ViewportCameraState | null,
+  ): void
+  /**
+   * 内容首次落地时取走"待做"（**只一次**）。
+   *
+   * 返回：
+   *  - `'fit'`：**应当**立刻再施加一次初始机位（相机仍是 `provisional`，用户没动过）；
+   *  - `'user'`：用户已先动过相机 ⇒ **放弃**补偿（不抢机位，M7 纪律优先）；
+   *  - `'stale'`：等待期间换了文档 ⇒ 放弃（新文档会走自己的 claim）；
+   *  - `null`：本来没有待做项（幂等）。
+   */
+  takePendingFit(
+    regionId: string,
+    documentRevision: number,
+    current: ViewportCameraState | null,
+  ): 'fit' | 'user' | 'stale' | null
+  /** 记录"初始机位由 fit 得到"（`cameraInitState === 'fitted'`）。 */
+  markFitted(regionId: string): void
+  /** 记录"始终没有几何 ⇒ 用了定义缺省兜底"（`cameraInitState === 'fallback'`）。 */
+  markFallback(regionId: string): void
+  /** 初始机位的施加结果（只读读面；`null` = 该视口还没走过初始机位判定）。 */
+  initStateOf(regionId: string): CameraInitState | null
+  /** 当前待做项（诊断面；`null` = 没有）。 */
+  pendingOf(regionId: string): PendingInitialFit | null
+  /** 丢弃某个 region 的全部记录（视口**销毁**时用；卸载/换工作区**不**清，见模块头）。 */
+  forget(regionId: string): void
+}
+
+/**
+ * **初始机位的施加结果**（`cameraInitState` 只读读面；M8-7）。
+ *
+ * | 值 | 含义 |
+ * |---|---|
+ * | `pending` | fit 因**内容尚未落地**（内容组无几何）而推迟；等首个成功 apply 补做一次 |
+ * | `fitted` | 初始机位是**框选结果**（正常情况） |
+ * | `fallback` | 始终没有几何 ⇒ 用了定义缺省值（真的空文档才该出现） |
+ * | `user` | 内容迟到前用户已动过相机 ⇒ **不补偿**（M7 纪律：内容不得重置用户机位） |
+ */
+export type CameraInitState = 'pending' | 'fitted' | 'fallback' | 'user'
+
+/** 一个"待做的首次框选"。 */
+export interface PendingInitialFit {
+  readonly documentRevision: number
+  readonly provisional: ViewportCameraState | null
+}
+
+/** 两份逻辑机位是否**逐字段相同**（"用户动没动过"的判定口径）。 */
+export function sameViewportCameraState(
+  a: ViewportCameraState | null,
+  b: ViewportCameraState | null,
+): boolean {
+  if (a === null || b === null) return a === b
+  return (
+    a.target.x === b.target.x &&
+    a.target.y === b.target.y &&
+    a.target.z === b.target.z &&
+    a.yawDeg === b.yawDeg &&
+    a.elevationDeg === b.elevationDeg &&
+    a.distance === b.distance &&
+    a.zoom === b.zoom
+  )
 }
 
 export function createViewportCameraInitLedger(): ViewportCameraInitLedger {
   const applied = new Map<string, number>()
+  const pending = new Map<string, PendingInitialFit>()
+  const state = new Map<string, CameraInitState>()
   return {
     claim(regionId, documentRevision, hasCameraState) {
       const last = applied.get(regionId) ?? null
@@ -159,10 +237,51 @@ export function createViewportCameraInitLedger(): ViewportCameraInitLedger {
         return false
       }
       applied.set(regionId, documentRevision)
+      // 新的一次施加开始 ⇒ 上一轮的待做/结论不再有效（同一 region 换文档时尤其如此）。
+      pending.delete(regionId)
+      state.delete(regionId)
       return true
     },
     appliedRevisionOf(regionId) {
       return applied.get(regionId) ?? null
+    },
+    markFitPending(regionId, documentRevision, provisional) {
+      pending.set(regionId, { documentRevision, provisional })
+      state.set(regionId, 'pending')
+    },
+    takePendingFit(regionId, documentRevision, current) {
+      const p = pending.get(regionId)
+      if (p === undefined) return null
+      pending.delete(regionId)
+      if (p.documentRevision !== documentRevision) {
+        state.delete(regionId)
+        return 'stale'
+      }
+      if (!sameViewportCameraState(p.provisional, current)) {
+        // 用户（或其它写者）已接管机位 ⇒ 不抢（M7 §7.3-b③ 纪律）。
+        state.set(regionId, 'user')
+        return 'user'
+      }
+      return 'fit'
+    },
+    markFitted(regionId) {
+      pending.delete(regionId)
+      state.set(regionId, 'fitted')
+    },
+    markFallback(regionId) {
+      pending.delete(regionId)
+      state.set(regionId, 'fallback')
+    },
+    initStateOf(regionId) {
+      return state.get(regionId) ?? null
+    },
+    pendingOf(regionId) {
+      return pending.get(regionId) ?? null
+    },
+    forget(regionId) {
+      applied.delete(regionId)
+      pending.delete(regionId)
+      state.delete(regionId)
     },
   }
 }

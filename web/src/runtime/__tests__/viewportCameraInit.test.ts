@@ -161,3 +161,61 @@ describe('**负对照**：判据必须能区分"每次 attach 都施加"这一�
     expect(shouldApplyInitialViewportCamera(firstLoad)).toBe(true)
   })
 })
+describe('**首次框选待做 / 补偿**（M8-7：内容迟到时不得落兜底机位）', () => {
+  const FALLBACK = { target: { x: 0, y: 2, z: 0 }, yawDeg: 225, elevationDeg: 35.264, distance: 10, zoom: 1 }
+  const FITTED = { target: { x: 0, y: 0, z: 0 }, yawDeg: -135, elevationDeg: 35, distance: 10, zoom: 2.31 }
+
+  it('fit 拿不到几何 ⇒ pending；相机没被动过 ⇒ 取回 \'fit\'（且**只一次**）', () => {
+    const ledger = createViewportCameraInitLedger()
+    ledger.markFitPending(REGION, 1, FALLBACK)
+    expect(ledger.initStateOf(REGION), '待做必须可读（否则"没框选"不可观测）').toBe('pending')
+    expect(ledger.takePendingFit(REGION, 1, { ...FALLBACK, target: { ...FALLBACK.target } }), '逐字段相同 ⇒ 可以补做').toBe('fit')
+    expect(ledger.initStateOf(REGION), '取走即删（补做只会发生一次）').toBe('pending')
+    expect(ledger.takePendingFit(REGION, 1, FALLBACK), '第二次取走必须为空（幂等）').toBeNull()
+  })
+
+  it('⚠️ 用户已先动过相机 ⇒ 放弃补偿（\'user\'，不抢机位）', () => {
+    const ledger = createViewportCameraInitLedger()
+    ledger.markFitPending(REGION, 1, FALLBACK)
+    expect(ledger.takePendingFit(REGION, 1, FITTED), '相机已不是登记时那一份 ⇒ 不补做').toBe('user')
+    expect(ledger.initStateOf(REGION), '读面必须说清"为什么没框选"').toBe('user')
+    expect(ledger.pendingOf(REGION), '待做项只能被消费一次').toBeNull()
+  })
+
+  it('等待期间换了文档 ⇒ \'stale\'（由新文档自己的 claim 负责）', () => {
+    const ledger = createViewportCameraInitLedger()
+    ledger.markFitPending(REGION, 1, FALLBACK)
+    expect(ledger.takePendingFit(REGION, 2, FALLBACK)).toBe('stale')
+    expect(ledger.initStateOf(REGION), '跨文档的补偿不得冒充结果').toBeNull()
+  })
+
+  it('claim（新一轮施加）清掉上一轮的 pending/结论', () => {
+    const ledger = createViewportCameraInitLedger()
+    expect(ledger.claim(REGION, 1, false)).toBe(true)
+    ledger.markFitPending(REGION, 1, null)
+    expect(ledger.initStateOf(REGION)).toBe('pending')
+    expect(ledger.claim(REGION, 2, true), '换文档 ⇒ 新一次施加').toBe(true)
+    expect(ledger.pendingOf(REGION), '旧待做不得跨文档存活').toBeNull()
+    expect(ledger.initStateOf(REGION), '旧结论同样作废（等新一轮判定）').toBeNull()
+  })
+
+  it('fit 成功 / 兜底 各有独立读面值（判据能区分两条路径）', () => {
+    const a = createViewportCameraInitLedger()
+    a.markFitted(REGION)
+    expect(a.initStateOf(REGION)).toBe('fitted')
+    const b = createViewportCameraInitLedger()
+    b.markFallback(REGION)
+    expect(b.initStateOf(REGION)).toBe('fallback')
+  })
+
+  it('管理器透传：pending → 首个 apply 之后取回 \'fit\'，读面同步', () => {
+    const vp = createViewportManager()
+    vp.register(REGION)
+    expect(vp.claimInitialViewportCamera(REGION, 1, false)).toBe(true)
+    vp.markInitialFitPending(REGION, 1, FALLBACK)
+    expect(vp.cameraInitStateOf(REGION)).toBe('pending')
+    expect(vp.takeInitialFitPending(REGION, 1, FALLBACK)).toBe('fit')
+    vp.markInitialCameraFitted(REGION)
+    expect(vp.cameraInitStateOf(REGION)).toBe('fitted')
+  })
+})

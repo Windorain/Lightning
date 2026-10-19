@@ -69,11 +69,32 @@ export function applyViewportCameraFromDocumentInitial(
       const captured = captureViewportCamera(camera, orbit)
       if (captured) {
         camRef.value = captured
+        ctx.viewports.markInitialCameraFitted(vp.id)
         return
       }
+    } else if (result.reason === 'group has no geometry bounds') {
+      /**
+       * **内容尚未落地**（M8-7 / P4 回归修复）：
+       *
+       * 视口在"首帧呈现 apply"之前就会被挂载（M8-5 起 `loadStatus='ok'` 不再等纹理解码），
+       * 此时内容组存在但**没有任何几何**，`fitCameraToGroup` 返回
+       * `{ok:false, reason:'group has no geometry bounds'}`。
+       *
+       * 旧实现此时直接落"定义缺省兜底"（zoom 1 / target=定义 focus）—— 那不是一个错误值，
+       * 而是一个**永远不该被用户看到**的初始视角：机器被画小约 2.3 倍，且之后按 M7 的
+       * "内容投影不得重置用户机位"纪律**不会**再 fit。
+       *
+       * ⇒ 登记"待做"，由**首个成功的呈现 apply** 补做一次（`useViewportRuntime`），
+       * 判据是"相机仍等于登记时那一份"（= 用户没动过）。用户先动过 ⇒ 放弃补偿（`'user'`）。
+       * 真的**始终没有几何**（空文档）时不会补做 —— 那属于"定义里没有内容"，
+       * 由下面的 fallback 分支承担。
+       */
+      ctx.viewports.markInitialFitPending(vp.id, ctx.getDocumentRevision().value, camRef.value)
+      return
     }
   }
 
-  // 3. Fallback — 安全默认值
+  // 3. Fallback — 安全默认值（真的没有可框选的内容时才落到这里）
   camRef.value = resolveInitialViewportCamera({ definition: def })
+  ctx.viewports.markInitialCameraFallback(vp.id)
 }
