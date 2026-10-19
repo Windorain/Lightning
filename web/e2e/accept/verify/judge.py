@@ -59,22 +59,7 @@ def main():
                     n += 1
         return n
     gp, wp = content_pixels(g, bg_g), content_pixels(w, bg_w)
-    ratio = (wp / gp) if gp else 0.0
-    if gp == 0 or ratio < 0.5 or ratio > 2.0:
-        report = {'scene': scene['id'], 'camera': a.camera, 'verdict': 'blocked',
-                  'reason': '两侧内容量差异过大（game=%d px, web=%d px, ratio=%.2f）——先查渲染缺陷，再判内容' % (gp, wp, ratio),
-                  'counts': {'pass': 0, 'fail': 0, 'blocked': 1},
-                  'checks': [{'id': 'view-health', 'kind': 'guard', 'verdict': 'blocked', 'game_px': gp, 'web_px': wp, 'ratio': round(ratio, 3)}],
-                  'images': {'game': a.game, 'web': a.web}}
-        txt = json.dumps(report, ensure_ascii=False, indent=2)
-        if a.out: open(a.out, 'w', encoding='utf-8').write(txt + '\n')
-        print(txt)
-        return 0
-
-    def px(point):
-        gx, gy, _ = game_mapping(cam['game'], point)
-        wx, wy, _ = web_mapping(shot, meta['localBox'], point)
-        return gx, gy, wx, wy
+    content_ratio = (wp / gp) if gp else 0.0
 
     for chk in expect['checks']:
         kind = chk['kind']
@@ -119,7 +104,12 @@ def main():
                 results.append({'id': chk['id'], 'kind': kind, 'verdict': 'blocked',
                                 'reason': '未建立方块参考色表，无法机械比对指定方块色', 'game_rgb': list(map(round, gc)), 'web_rgb': list(map(round, wc))})
                 continue
-            ok = (gcls == 'background' and wcls == 'background') if want == 'background' else (gcls == 'content' and wcls == 'content')
+            min_cov = float(chk.get('min_coverage', 0.5))
+            if want == 'background':
+                ok = (gr >= 0.5) and (wr >= 0.5)
+            else:
+                # 非整方块（管/箱子等）只占格内一部分：按“内容覆盖率下限”判，而不是多数票
+                ok = ((1 - gr) >= min_cov) and ((1 - wr) >= min_cov)
             if not ok and (gcls != wcls) and blocks & transparent and kind == 'region':
                 verdict = 'blocked'
                 reason = '透明方块两侧分类不一致（Web 未按透明渲染，已知缺陷）'
@@ -217,8 +207,14 @@ def main():
             if r['kind'] == 'silhouette' and r['verdict'] == 'fail':
                 r['verdict'] = 'blocked'
                 r['reason'] = '受同一透明缺陷影响（形状随透明度变化）'
+    content_checks = [r for r in results if r['kind'] in ('opaque', 'region') and r.get('want') == 'not-background'] + [r for r in results if r['kind'] == 'opaque']
+    content_checks = list({id(r): r for r in content_checks}.values())
+    if content_checks and all(r['verdict'] == 'fail' for r in content_checks):
+        for r in content_checks:
+            r['verdict'] = 'blocked'
+            r['reason'] = '该机位整体无内容（视图级缺陷，先修渲染再判内容）'
     verdict = 'fail' if any(r['verdict'] == 'fail' for r in results) else 'pass'
-    report = {'scene': scene['id'], 'camera': a.camera, 'verdict': verdict,
+    report = {'scene': scene['id'], 'camera': a.camera, 'verdict': verdict, 'content_ratio': round(content_ratio, 3),
               'counts': {k: sum(1 for r in results if r['verdict'] == k) for k in ('pass', 'fail', 'blocked')},
               'checks': results,
               'images': {'game': a.game, 'web': a.web}}

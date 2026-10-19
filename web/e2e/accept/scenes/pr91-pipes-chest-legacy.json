@@ -1,0 +1,93 @@
+{
+  "schema": "lightning.accept.scene/1",
+  "id": "pr91-pipes-chest-legacy",
+  "title": "PR91 LP 管 + 箱（按 2026-10 实拍机位复现；1280×720）",
+  "notes": "game 侧图来自既有实拍（evidence/pr91/game-ortho-*.png）；persp-row→game-ortho-iso，persp-front→game-ortho-front。",
+  "world": {
+    "region": "cp_lp4_e2e",
+    "origin": [
+      64,
+      12,
+      63
+    ],
+    "dim": 0,
+    "time": 6000,
+    "weather": "clear"
+  },
+  "blocks": [
+    {
+      "block": "lp-pipe",
+      "at": [
+        1,
+        0,
+        1
+      ]
+    },
+    {
+      "block": "lp-pipe",
+      "at": [
+        2,
+        0,
+        1
+      ]
+    },
+    {
+      "block": "lp-pipe",
+      "at": [
+        3,
+        0,
+        1
+      ]
+    },
+    {
+      "block": "lp-pipe",
+      "at": [
+        4,
+        0,
+        1
+      ]
+    },
+    {
+      "block": "chest",
+      "at": [
+        5,
+        0,
+        1
+      ]
+    }
+  ],
+  "cameras": {
+    "explicit": [
+      {
+        "name": "persp-row",
+        "pos": [
+          60.4,
+          17.5,
+          71.6
+        ],
+        "yaw": 225,
+        "pitch": 30,
+        "orthoHeight": 7
+      },
+      {
+        "name": "persp-front",
+        "pos": [
+          67,
+          12.5,
+          73.5
+        ],
+        "yaw": 180,
+        "pitch": 0,
+        "orthoHeight": 5
+      }
+    ],
+    "resolution": [
+      1280,
+      720
+    ]
+  },
+  "export": {
+    "name": "lp4",
+    "shape": "world"
+  }
+}
