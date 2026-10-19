@@ -78,7 +78,11 @@ test('accept: render plan cameras through the product viewport', async ({ page }
   const metas: any[] = []
   for (const cam of plan.cameras) {
     console.log('[step] camera', cam.name)
-    const box = await page.locator('.vc-viewport').first().boundingBox()
+    const canvases = await page.evaluate(() => Array.from(document.querySelectorAll('canvas')).map((c, i) => { const r = c.getBoundingClientRect(); return { i, w: r.width, h: r.height, x: r.x, y: r.y } }))
+    const best = canvases.filter((c) => c.w > 100 && c.h > 100).sort((a, b) => b.w * b.h - a.w * a.h)[0]
+    if (!best) throw new Error('没有可用的 canvas：' + JSON.stringify(canvases))
+    const canvasLoc = page.locator('canvas').nth(best.i)
+    const box = await canvasLoc.boundingBox()
     console.log('[step] viewport box', JSON.stringify(box))
     const camInfo = await page.evaluate(() => {
       const w = window as any
@@ -135,7 +139,7 @@ test('accept: render plan cameras through the product viewport', async ({ page }
     if (!applied) throw new Error('相机写入被产品覆写：' + JSON.stringify(await read()))
     console.log('[step] camera applied', cam.name)
     await page.waitForTimeout(700)
-    await page.screenshot({ path: path.join(outDir, cam.name + '.png'), clip: box })
+    await canvasLoc.screenshot({ path: path.join(outDir, cam.name + '.png') })
     console.log('[step] shot written', cam.name)
     metas.push({
       name: cam.name,

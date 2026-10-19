@@ -45,6 +45,32 @@ def main():
     transparent = {b['block'] for b in scene['blocks'] if 'glass' in b['block']}
     results = []
 
+    # 机位健康检查：两侧内容像素量必须同量级。
+    # 实测：某机位（-Z 侧）只渲染出 1 格（疑似单侧裁剪缺陷）——这种图不能拿去判内容，
+    # 否则会把产品缺陷记成内容不一致。故先量覆盖率，不足即 blocked。
+    def content_pixels(img, bg):
+        # 只统计**中心区**：工具栏/提示条等 UI 覆盖在画面边缘，会把"内容量"污染成恒等。
+        px = img.load(); W, H = img.size; n = 0
+        x0, x1 = int(W * 0.10), int(W * 0.90)
+        y0, y1 = int(H * 0.10), int(H * 0.90)
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                if not is_background(px[x, y], bg, a.bg_tol):
+                    n += 1
+        return n
+    gp, wp = content_pixels(g, bg_g), content_pixels(w, bg_w)
+    ratio = (wp / gp) if gp else 0.0
+    if gp == 0 or ratio < 0.5 or ratio > 2.0:
+        report = {'scene': scene['id'], 'camera': a.camera, 'verdict': 'blocked',
+                  'reason': '两侧内容量差异过大（game=%d px, web=%d px, ratio=%.2f）——先查渲染缺陷，再判内容' % (gp, wp, ratio),
+                  'counts': {'pass': 0, 'fail': 0, 'blocked': 1},
+                  'checks': [{'id': 'view-health', 'kind': 'guard', 'verdict': 'blocked', 'game_px': gp, 'web_px': wp, 'ratio': round(ratio, 3)}],
+                  'images': {'game': a.game, 'web': a.web}}
+        txt = json.dumps(report, ensure_ascii=False, indent=2)
+        if a.out: open(a.out, 'w', encoding='utf-8').write(txt + '\n')
+        print(txt)
+        return 0
+
     def px(point):
         gx, gy, _ = game_mapping(cam['game'], point)
         wx, wy, _ = web_mapping(shot, meta['localBox'], point)

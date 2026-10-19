@@ -141,6 +141,8 @@ python e2e/accept/verify/judge.py --scene scenes/glass-seam.json --expect expect
 ```
 
 - 输出固定格式：`{verdict, counts, checks[{id, verdict, value, threshold}]}`；退出码 0 = 无 fail（blocked 允许）。
+- **机位健康检查（前置闸门）**：先比两侧**中心区内容像素量**；比值落在 [0.5, 2] 之外即判 `blocked` 并给出读数。
+  实测（PR109 北向）：game 57216 px / web 14400 px（正好一格）= 0.25 ⇒ 该机位只渲染出 1 格，不能拿去判内容。
 - **同一根因不重复计红**：透明缺陷已计入 `blocked` 时，形状判据同标 `blocked`。
 - 天空盒：两图各自角落色即背景，背景色本身不参与比较；光照：只比色度。
 - 投影数学在 `verify/pairmap.py`（与 `runner/camera-plan.mjs` 同式；改动必须两处同批）。
