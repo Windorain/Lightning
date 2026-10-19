@@ -48,6 +48,7 @@ import {
 } from '../assets/textureStripAnimation'
 import { batchMaterialCacheKey, type BatchDescriptor } from '../mesh/batchDescriptor'
 import type { MaterialBlendMode, MaterialEntry, MaterialRegistryData } from '../schema/types'
+import { materialPassStateOf } from '@/domain/materialPass'
 import { sampleStripFrameAt, stripTimeline, type StripTimeline } from '@/domain/materials'
 
 /**
@@ -97,15 +98,17 @@ function createFaceMaterial(
   useVertexColor: boolean,
 ): THREE.MeshBasicMaterial {
   const baseColor = useVertexColor ? new THREE.Color(0xffffff) : tint
-  if (blend === 'cutout' || blend === 'translucent') {
-    const cutout = blend === 'cutout'
+  const pass = materialPassStateOf(blend)
+  if (pass.transparent) {
+    // 混合/裁切**状态**来自唯一映射（`domain/materialPass`），不在这里第二遍判断：
+    // `translucent` 不写深度这一条修过实际缺陷（全透明四边形把后面的实体深度剔除）。
     return new THREE.MeshBasicMaterial({
       map: tex,
       color: baseColor,
       vertexColors: useVertexColor,
-      transparent: true,
-      alphaTest: cutout ? 0.5 : 0,
-      depthWrite: true,
+      transparent: pass.transparent,
+      alphaTest: pass.alphaTest,
+      depthWrite: pass.depthWrite,
     })
   }
   return new THREE.MeshBasicMaterial({

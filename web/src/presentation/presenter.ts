@@ -43,6 +43,7 @@ import { sampleBoundTexture, type TextureBinding } from './textureBinding'
 import { contentIdentityKey } from './assetIdentity'
 import { OwnershipRegistry, type OwnershipEntry } from './ownership'
 import type { DeviceGeneration } from './deviceState'
+import { materialPassStateOf } from '@/domain/materialPass'
 
 /** 呈现器可查询的运行统计（诊断与 A18/A19 观测面）。 */
 export interface PresenterStats {
@@ -1061,10 +1062,14 @@ function createMaterial(
     vertexColors: descriptor.useVertexColor,
     color: descriptor.useVertexColor ? 0xffffff : descriptor.tint,
   }
-  if (descriptor.blend !== 'opaque') {
-    params.transparent = true
-    params.alphaTest = descriptor.blend === 'cutout' ? 0.5 : 0
-    params.depthWrite = true
+  // 混合/裁切**状态**取唯一映射（`domain/materialPass`）：两条渲染链共用一份判据，
+  // 否则"同一导出件在两条链上画得不一样"只在有重叠半透明几何时才可见（实测缺陷：
+  // 全透明的两张四边形把 LP 管接缝的竖板深度剔除，见 `domain/materialPass` 文件头）。
+  const pass = materialPassStateOf(descriptor.blend)
+  if (pass.transparent) {
+    params.transparent = pass.transparent
+    params.alphaTest = pass.alphaTest
+    params.depthWrite = pass.depthWrite
   }
 
   // ③ 纹理贴图（#289 P10d 补；缺席即不设 —— 见判据 2）。
