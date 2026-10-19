@@ -88,7 +88,14 @@ export interface WriteFaceSpec {
  *
  * ⚠️ `mayFork` 全为 `false` —— 这**不是**一句口号：它意味着"第二份存储"在四类写里
  * 都**不被允许**，R1 的清算对象（legacy 镜像、`syncLegacyFromKernel`）正落在
- * `document-content` 上（那是一条被容忍的临时分叉，由接缝登记与退出条件把守）。
+ * `document-content` 上（那是一条被容忍的临时分叉）。
+ *
+ * 那条分叉**登记在册**（M9-1 补登）：`composition/seams.ts` 的
+ * `kernel-to-legacy-carrier-projection` —— 含 `owner`/`exitCondition`/退出阶段，
+ * 由 `tests/architecture/boundary-scan.test.ts` 逐条机检。本注释与登记的**联动点**：
+ * 条目核销（载体退出生产读面）时，本段应改成"已无分叉"，而不是改写登记。
+ * ⚠️ 声明与机制必须同进同退：先有登记、再声称"被把守"（M9-1 前本句曾写成
+ * "由接缝登记与退出条件把守"，而当时 `SEAMS` 里 0 命中该路径）。
  */
 export const WRITE_FACES: readonly WriteFaceSpec[] = Object.freeze([
   Object.freeze({

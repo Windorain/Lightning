@@ -789,6 +789,85 @@ export const SEAMS: readonly SeamRegistration[] = Object.freeze([
       + ' 不再包旧栈撤销 ⇒ 届时删除本条登记。',
   }),
   /**
+   * **M9-1 补登**：内核 → 旧载体的**投影回写**（`Context#syncLegacyFromKernel`）。
+   *
+   * ## 为什么是补登而不是新登记
+   *
+   * `application/writeFaces.ts:89-91` 早已**点名**这条路径：R1 的清算对象
+   * （legacy 镜像、`syncLegacyFromKernel`）正落在 `document-content` 上
+   * （那是一条被容忍的临时分叉，**由接缝登记与退出条件把守**）。
+   * 而 M9-S0-B 实测：本表在 `syncLegacyFromKernel` 上 **0 命中**
+   * ⇒ 那句话里的把守当时是**声明里的空话**。本表是**现状清单**
+   * （见文件头『本表是声明而非机制』），声明与现状不符就是本表要修的事。
+   *
+   * ## 它为什么**算**双轨（不是合法的投影单向面）
+   *
+   * | 问 | 实测（cf3935e1） |
+   * |---|---|
+   * | 同一内容事实是否两处**存储** | 是：内核 `Document`（写权威）+ `RuntimeDocument` 载体（被投影维护的**存量**副本，不是读时计算） |
+   * | 载体是否仍被生产**读** | 是：渲染回落 `runtime/drwMeshPipeline.ts:568`/`:633` 的 `doc.serialize()`；未装配侧元数据 `runtime/context.ts:1070` |
+   * | 是否需要**人工保持同步** | 是：新增内核写命令必须同批扩本方法 —— `runtime/context.ts:1758-1764` 逐字记着 D0 段二加 `setCellTooltip` 却漏扩的后果（『提交成功但看不到』，e2e A25-3b 确定性红） |
+   *
+   * ⇒ 它不是『求值派生』（求值不进存储、不换引用、不进历史），而是一条**必须随内核写命令
+   * 手工扩展**的存量投影；漏扩的失败形态是『静默不同步』（内核写了、载体停在旧值）。
+   * 这正是 #171 要求『暂存路径必须有负责人与退出阶段』的那类事实。
+   *
+   * ## 与 `legacy-render-source-document` 的分工（不是同一条的重复登记）
+   *
+   * 那条登记的是**读面**（旧格式文档作为渲染/声明的格式输入）；本条登记的是**写面**
+   * （内核内容被投影回载体，载体因此成为同一事实的第二份存储）。两条的退出是同一件事的
+   * 两半：读面迁走 **且** 不再需要投影 ⇒ 载体退出生产（`RuntimeDocument` 退出生产）。
+   *
+   * ## owner 口径
+   *
+   * `owner.p` 取**职责归属**而非活跃批次（与 `P10b`/`P10d` 同口径）：P10f（#301）的
+   * 职责原文即『RuntimeDocument 退出生产』，本条的退出就落在那条线的残余上。
+   * M9-1 只补登记，**不改任何行为**。
+   */
+  Object.freeze({
+    id: 'kernel-to-legacy-carrier-projection',
+    files: Object.freeze([
+      'src/runtime/context.ts',
+      'src/runtime/host/recoveryHost.ts',
+      'src/context/runtimeDocument.ts',
+    ]),
+    newTrack:
+      '内核 `Document` 是内容的**唯一写权威**：编辑经 `Context#submitContentEditSettlement` → '
+      + '`application/commands#reduceCommand` 结算（自带历史记账）；画面读内核求值面（`PresenterSession`），'
+      + '保存/导出读内核投影（`Context#plainForSave` → `composition/saveProjection`）。'
+      + '载体（若仍需存在）只是**派生副本**，不得反向写入内核。',
+    oldTrack:
+      '`RuntimeDocument` 载体是同一份内容事实的**第二处存储**：`Context#syncLegacyFromKernel`'
+      + '（`src/runtime/context.ts:1775`）把内核的网格/注解/逐格说明投影回载体'
+      + '（`projectKernelGrids` + `projectAnnotationsToLegacy` + `projectCellTooltipsToLegacy`），'
+      + '并经唯一写者 `Context#setDocument(next, content-sync)` 写入（`src/runtime/context.ts:1840`；'
+      + '`intent` 参数见 `:1709`）。**生产调用点 3 处**：`src/runtime/context.ts:1934`'
+      + '（内容提交结算的 `applied` 分支）、`src/runtime/context.ts:2333`、'
+      + '`src/runtime/host/recoveryHost.ts:99`（恢复副本采纳）。载体仍被生产读：'
+      + '`runtime/drwMeshPipeline.ts:568`/`:633` 的 `doc.serialize()` 回落（条件 `renderSource() === null`）、'
+      + '`runtime/context.ts:1070`（未装配侧元数据读）。',
+    blocker:
+      '载体退出生产读面的前置是**两条读路径**，都不在 M9-1 的范围：'
+      + '① 渲染链的旧格式回落（`runtime/drwMeshPipeline.ts:568`/`:633`）—— 归 `legacy-render-source-document` '
+      + '的同一条退出线（图标缓存身份键 + `contentRefreshTick` 消费点）；'
+      + '② 未装配侧（GF-16=false）的元数据读（`runtime/context.ts:1070`）—— 需要内核成为唯一装配产物，'
+      + '未装配分支不再有生产调用方。本批只登记，不改运行逻辑（任务书边界：零行为变更）。',
+    closureCoverage: 'in-closure',
+    owner: Object.freeze({ p: 'P10f', issue: 301, duty: 'D4 终退统战：RuntimeDocument 退出生产、G-6 三段与导出面端口' }),
+    exitCondition:
+      '**（甲）登记条件 —— ✅ 已成立（投影面在案，且写入只经唯一写者）**：内核承载面齐全（网格/注解/逐格说明），'
+      + '投影三件套在 `src/runtime/context.ts#syncLegacyFromKernel` 内，写入经 `Context#setDocument(next, content-sync)`。'
+      + '\n**（乙）消费者迁移数 = 0 —— ⏳ 未成立（现 3 处调用点；载体仍被生产读）**：'
+      + '`syncLegacyFromKernel()` 的调用点 = 3（`src/runtime/context.ts:1934`、`:2333`、`src/runtime/host/recoveryHost.ts:99`）；'
+      + '`content-sync` 的唯一写入点 = `src/runtime/context.ts:1840`。'
+      + '\n**退出条件（两个子句同时成立时删除本方法与本条登记）**：'
+      + '① 上述 3 处调用点 = 0，且 `src/runtime/context.ts` 的 `setDocument` 不再接受 `content-sync` 意图；'
+      + '② 载体不再被生产读 —— `runtime/drwMeshPipeline.ts` 的 `doc.serialize()` 回落删除，'
+      + '且 `src/runtime/context.ts:1070` 的未装配侧元数据读删除。'
+      + '\n**退出阶段**：与 `legacy-render-source-document` 的（乙）同批（渲染链终切 + 未装配分支消失之后）；'
+      + 'M9-1 只补登记，**不改任何行为**。',
+  }),
+  /**
    * ⚠️ **已核销（R1-β① C10 / `d4708d0b`；关单裁决 #387 评论 7489 二）**：原
    * `shared-viewport-upward-imports-assembly-root` 登记在此。
    *
