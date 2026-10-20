@@ -658,8 +658,12 @@ export class BatchedPresenter {
   // ── 挂载 / 更新 / 卸载 ──
 
   private mount(payload: BatchPayload): MountedBatch {
-    const materialIdentity = materialIdentityOf(payload.material)
-    const material = this.materialFor(payload.material, this.options.textureBindings?.get(payload.material.id))
+    // 批次级材质：**键与对象一起**从 `materialFor` 取回（#415：不得在这里另算身份 ——
+    // 绑定价必须进键，否则卸载时释放的是一个缓存里不存在的键，材质永不 dispose）。
+    const batchMaterial = this.materialFor(
+      payload.material,
+      this.options.textureBindings?.get(payload.material.id),
+    )
     const geometryKey = geometryKeyOf(payload)
     const geometry = this.geometryFor(geometryKey, payload.attributes)
     /** 非同质批次里**与批次级不同**的成员材质键（卸载时逐份释放，见 `unmount`）。 */
@@ -667,7 +671,7 @@ export class BatchedPresenter {
 
     let object: THREE.Object3D
     if (payload.instanceable && payload.sharedGeometry) {
-      const inst = new THREE.InstancedMesh(geometry, material, payload.instances.length)
+      const inst = new THREE.InstancedMesh(geometry, batchMaterial.material, payload.instances.length)
       inst.name = `batch:${payload.batchIndex}`
       for (const instance of payload.instances) {
         inst.setMatrixAt(instance.instanceSlot, matrixOf(instance.transform))
@@ -679,7 +683,7 @@ export class BatchedPresenter {
       const holder = new THREE.Group()
       holder.name = `batch:${payload.batchIndex}`
       for (const instance of payload.instances) {
-        const mesh = new THREE.Mesh(geometry, material)
+        const mesh = new THREE.Mesh(geometry, batchMaterial.material)
         mesh.applyMatrix4(matrixOf(instance.transform))
         mesh.userData.presentationBatch = batchTagOf(payload, instance.instanceSlot)
         holder.add(mesh)
@@ -699,12 +703,15 @@ export class BatchedPresenter {
           : geometry
         // 成员自己的材质（合并批次里批次级只是代表值）。绑定也必须按**成员**材质 id 取。
         const descriptor = instance.material ?? payload.material
-        const binding = this.options.textureBindings?.get(descriptor.id)
-        const m = this.materialFor(descriptor, binding)
+        const memberMaterial = this.materialFor(
+          descriptor,
+          this.options.textureBindings?.get(descriptor.id),
+        )
         if (descriptor.id !== payload.material.id) {
-          memberMaterialKeys.push(identityKey(materialIdentityOf(descriptor, binding)))
+          // 成员键**就是**缓存键（与批次级同一口径：登记与释放同一把钥匙）。
+          memberMaterialKeys.push(memberMaterial.key)
         }
-        const mesh = new THREE.Mesh(g, m)
+        const mesh = new THREE.Mesh(g, memberMaterial.material)
         mesh.applyMatrix4(matrixOf(instance.transform))
         mesh.userData.presentationBatch = batchTagOf(payload, instance.instanceSlot)
         holder.add(mesh)
@@ -715,8 +722,7 @@ export class BatchedPresenter {
     return {
       key: batchKeyOf(payload),
       object,
-      materialIdentity,
-      materialKey: identityKey(materialIdentity),
+      materialKey: batchMaterial.key,
       geometryKey,
       /** 非同质批次会为每个成员各持一份几何引用 —— 卸载时逐份释放。 */
       memberGeometryKeys: payload.sharedGeometry
@@ -768,7 +774,8 @@ export class BatchedPresenter {
 
   private unmount(mounted: MountedBatch): void {
     this.group.remove(mounted.object)
-    this.stats.disposals += 1
+    // `stats.disposals` **不**在这里计：卸载 != 释放（材质/几何可能还被别的批次持有）。
+    // 只有真的调用了 `dispose()` 的路径才累加（材质归零 / 几何归零 / 本类 dispose 扫尾）。
     this.releaseMaterialRef(mounted.materialKey)
     for (const key of mounted.memberMaterialKeys) this.releaseMaterialRef(key)
     this.releaseGeometryRef(mounted.geometryKey)
@@ -809,14 +816,27 @@ export class BatchedPresenter {
 
   // ── 材质缓存 ──
 
-  private materialFor(descriptor: MaterialDescriptor, binding: TextureBinding | undefined): THREE.Material {
+  /**
+   * 取材质，**同时把它在缓存里的键交回给调用方**。
+   *
+   * ## 为什么返回键，而不是让调用方自己再算一次身份
+   *
+   * 材质缓存键（含纹理绑定）**就是**卸载时的检索键（`releaseMaterialRef`）。若调用方另算
+   * 一份身份（例如只按 descriptor），两把钥匙会悄悄分叉，卸载时就检索不到、材质永不
+   * dispose —— #415 的形态正是如此（`mount` 用不含绑定的身份，而缓存键含绑定）。
+   * 于是"键只有一处产生"是结构性保证，不是纪律要求。
+   */
+  private materialFor(
+    descriptor: MaterialDescriptor,
+    binding: TextureBinding | undefined,
+  ): { material: THREE.Material; key: string } {
     const identity = materialIdentityOf(descriptor, binding)
     const key = identityKey(identity)
     const cached = this.materialCache.get(key)
     if (cached !== undefined) {
       cached.refs += 1
       this.stats.materialReuses += 1
-      return cached.value
+      return { material: cached.value, key }
     }
     const material = createMaterial(descriptor, binding, this.options.textures)
     this.materialCache.set(key, { value: material, refs: 1 })
@@ -824,7 +844,7 @@ export class BatchedPresenter {
     this.stats.materialBuilds += 1
     if (binding?.missingRequired === true) this.stats.missingRequiredTextures += 1
     this.registerAnimatedMaterial(key, binding)
-    return material
+    return { material, key }
   }
 
   private releaseMaterialRef(key: string): void {
@@ -882,7 +902,10 @@ export class BatchedPresenter {
 interface MountedBatch {
   key: string
   object: THREE.Object3D
-  materialIdentity: ContentIdentity
+  /**
+   * 批次级材质的**缓存键** = `materialFor` 的键 = `releaseMaterialRef` 的检索键
+   * （含纹理绑定）。三者必须**同一个字符串**；#415 的泄漏就是"另算了一个不含绑定的身份"。
+   */
   materialKey: string
   geometryKey: string
   memberGeometryKeys: string[]
