@@ -286,3 +286,23 @@ F12 修完后，游戏实拍与 Web 重渲逐机位对比（`temp/pr91-lp-after/
   不是 web 把它画错了颜色。而导出件的逐顶点 `brightness` 对这些面**恒为 `0xF00000`**
   （MC 打包：`sky<<20 \| block<<4` ⇒ sky 15 / block 0 = 满亮度）⇒ **只吃导出件无法复原那 0.70**。
   这属已登记的「光照模型（另立特性）」，`expect/*.json` 的 `normalize: per-face-luminance` 也据此只比色度。
+### F16.2 根因：(a)–(d) 逐条判定（代码级 + 读数）
+
+| 假设 | 判定 | 证据 |
+|---|---|---|
+| (a) 材质水合/装配链没把 `blend` 送到 `materialPassStateOf` 的消费点 | **证伪** | 生产链完整：`content.resources[].blend` → `runtime/presentationAdapter#structureMaterialGroups`（`asBlend`）→ `MaterialDescriptor.blend` → `presentation/presenter#createMaterial` → `materialPassStateOf`。判据 ④（真实信封）断言 ACC 两组材质 `blend==='translucent'` 且 pass 状态 `{transparent:true, alphaTest:0, depthWrite:false}`。若这条断了，玻璃中心会像 F2 那样**不透**，与现场（中心确实透出天空）不符。 |
+| (b) 同一面多片 translucent quad 的绘制顺序 | **存在，但非本场景根因** | 事实：`structureMaterialPrimitives` 把**全场景同 `materialIndex` 的四边形并进一个 geometry**（本件只有两个半透明批次），且 `transparency` 恒为 `null` ⇒ 组内绘制顺序 = 采集顺序（`z,row,col`），three 的透明排序只作用于 object。但本场景的可见错显**全部**由 (c) 造成（修后同机位与游戏一致）；重叠的几片是同一平面同一贴图、α 只有 {0,255}（贴图直方图：`242..,255` 与 `0,0,0,0` 两类），同色叠加换序不改结果。真正的顺序风险属"不同深度上互遮的半透明面"，MC 同 pass 也不做三角形级排序 ⇒ 按 MC 保真口径不新造排序机制（列残余风险）。 |
+| (c) 合面/邻接面合并对 translucent 的交互 | **证实 = 根因** | `render/mesh/structureGeometryCore` 判"邻格是不是同一方块"用的是 **palette 下标相等**（旧 `nidx === paletteIndex`，函数名 `shouldCullQuadFacingSamePaletteNeighbor`）。本件成对两格是 `blockPalette[2]` / `blockPalette[3]`（同 `registryId`、同 meta 0、无 facing/nbt，只是 CTM 象限贴图互为镜像）⇒ 判成"不同方块" ⇒ 共享面留在几何里。生产读数（真实信封 → 内核 → 投影 → 生产收集器）：关掉剔除 **102** 片 / 开剔除 **96** 片，差额 **6** = 成对共享面 **4**（每面 2 层 × 2 侧）+ magneticFlux↔gravityStabilization 的**不透明**邻面 2（另一条规则）。 |
+| (d) 视口路径与离屏导出路径不一致 | **证伪** | 两侧同源：视口走 `composition/kernelPresentationInputs → runtime/presentationAdapter#structureMaterialPrimitives → collectStructureGeometryPiecesPure`；`OPERATOR_EXPORT_SHOT_PNG` 走同一 presenter/`compileScene`（差异只在机位与读回）。实测同一份导出件：**修前**的离屏 `ortho-iso`（`temp/pb-refresh-acceptance/web/web/ortho-iso.png`）与**修前**的视口截图（`repro-before/vp-iso-a.png`）都出现同一道共享面框环 ⇒ 一条路径上不存在另一条没有的问题。 |
+
+**游戏侧锚点（版本已双核）**：`goodgenerator.blocks.regularBlock.BlockFrame`（运行期绑定 5.09.54.194 的
+`GT5-Unofficial-5.09.54.194-dev.jar`，`javap -c` 复核字节码）：`isOpaqueCube()=false`、
+`getRenderBlockPass()=1`、`renderAsNormalBlock()=false`，`shouldSideBeRendered()` 为
+`getBlock(x,y,z) instanceof BlockFrame ? false : super…`（`instanceof` + `iconst_0 ireturn` 分支在字节码里可见）。
+本地源码仓 HEAD 是 `5.09.52.525`（与运行期不同版本）⇒ 语义与符号按 **jar** 为准复核，源码只作可读参照。
+⇒ **游戏侧剔除同块邻面**，判据是方块身份而非渲染变体；web 用调色板槽位当身份 ⇒ 同一方块的两个烘焙变体之间不剔除。
+
+**修复落点**（机制级，非 ACC 专属）：`structureGeometryCore` 把"同一方块"的判据改为**方块状态**相等
+（`registryId` + `meta` + `facing` + `nbt`，即 `VoxelState` 的四个字段 —— `render/data/grid#buildVoxelVolume` 还原的那一套），
+不对任何方块类型写特判。取"同状态"而非 MC 的 `instanceof` 是**保守**选择：不改变既有夹具的剔除结果
+（`domain/blockGeometry` 记的 `4882 → 4862` 那条历史观测仍成立），偏差方向只会"多画"，不会画出空洞。
