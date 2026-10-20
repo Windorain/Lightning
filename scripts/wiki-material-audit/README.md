@@ -8,7 +8,7 @@
 
 ```powershell
 # 站点由 Cloudflare 托管，匿名请求会被挑战页拦下（HTTP 403，cf-mitigated: challenge）。
-# 实测必须带团队的 X-authkey；值在 resources\secrets\huiji-wiki.env，禁止入库。
+# 需要团队的灰机共享 key（向 Wiki 维护者索取）；只通过环境变量传入，禁止写进仓库。
 $env:HUIJI_AUTHKEY = "..."
 
 node scripts/wiki-material-audit/audit.mjs
@@ -19,7 +19,7 @@ node scripts/wiki-material-audit/audit.mjs
 ```powershell
 node scripts/wiki-material-audit/audit.mjs --page 工业高炉      # 只审计一个页面及其结构
 node scripts/wiki-material-audit/audit.mjs --limit 5            # 最多审计 5 个结构
-node scripts/wiki-material-audit/audit.mjs --out D:\tmp\audit   # 指定输出目录
+node scripts/wiki-material-audit/audit.mjs --out ./audit-out    # 指定输出目录
 node scripts/wiki-material-audit/audit.mjs --no-sweep           # 跳过文章命名空间全量扫描（快，但覆盖不完整）
 ```
 
@@ -32,13 +32,38 @@ node scripts/wiki-material-audit/audit.mjs --no-sweep           # 跳过文章�
 
 退出码：`0` 跑完；`1` 参数或前置错误（如没给 `HUIJI_AUTHKEY`）；`2` 跑完但有结构/页面无法判定。
 
-## 判据（复用既有判型，不重新发明）
+## 判据
 
-| 型 | 判据 | 出处 |
-|---|---|---|
-| **#87 占位图** | blob 16x16、颜色数 <= 4、洋红占比 > 10%、纯黑占比 > 10% | `temp/pb-26-triage/assets/scan-placeholder-python.txt`、`temp/pb-26-triage/scan_blobs.py` |
-| **#9 横向多面带** | blob 384x32 或 192x32（H=32、W>32 的横向带），且材质 locator 是 IC2 系（`ic2:` / `ic2/`） | `temp/pb-ic2-recon/`、`temp/pb-ic2-fix/issue9-comment.md` |
-| **未判型** | 横向带但非 IC2 / 宽度不对、像占位图但未达 #87 门槛、贴图解码失败 —— 如实列出，不硬塞 | — |
+两类可判定的坏材质，加一个「未判型」兜底桶。判据只看贴图本身与材质 locator，不需要对照
+任何上游记录或工单。
+
+### missingTexture（缺失材质占位图）
+
+Minecraft 找不到材质时会用一张 16x16 的黑/洋红棋盘占位。判据：
+
+- 贴图 16x16；
+- 颜色数 <= 4；
+- 洋红像素（`|r-255| < 24` 且 `g < 24` 且 `|b-255| < 24`）占比 > 10%；
+- 纯黑像素（`max(r,g,b) < 24`）占比 > 10%。
+
+命中说明导出时材质没解析出来，页面上的方块会显示成黑/洋红棋盘。
+
+### ic2FaceStrip（IC2 横向多面带）
+
+IC2 的部分机器贴图是一张 PNG 横向排多个面（每面 32px）。导出器如果把整条带当成一个面，
+就会把 N 个面压进同一个面的 UV 里。判据：
+
+- 贴图高 32、宽 > 32（横向带）；
+- 宽为 384 或 192（即 12 面或 6 面，N x 32）；
+- 材质 locator 以 `ic2:` 或 `ic2/` 开头。
+
+### 未判型
+
+- 横向带但 locator 不是 IC2，或宽度不是 384/192；
+- 像占位图（尺寸 <= 32、颜色数 <= 8、洋红与纯黑都出现）但没达到 missingTexture 门槛；
+- 贴图解码失败（隔行 PNG、非 PNG 等）。
+
+这些如实列出，不硬塞进上面两类。
 
 判定分两层，避免冤枉页面：
 
@@ -81,7 +106,7 @@ node scripts/wiki-material-audit/audit.mjs --no-sweep           # 跳过文章�
 node --test "scripts/wiki-material-audit/*.test.mjs"
 ```
 
-36 条，全部离线：PNG 解码往返、#87/#9 正负对照、未判型边界、frames 布局、
+36 条，全部离线：PNG 解码往返、missingTexture / ic2FaceStrip 正负对照、未判型边界、frames 布局、
 Envelope/分片拼装、wikitext 提取（嵌套模板 / pre / 注释 / 参数化名字）、
 以及一条本地假 MediaWiki 的端到端（`audit.test.mjs`，不碰真站）。
 文本断言统一按 LF，不受 `core.autocrlf` 影响。
