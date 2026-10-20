@@ -28,9 +28,19 @@
  *
  * ## 资源身份与释放（A19）
  *
- * 材质与几何都按**内容身份**（几何身份；材质身份含 blend/tint/顶点色）持有一份，并由
- * `OwnershipRegistry` 显式计数。`dispose()` 释放本呈现器的全部份额；两个视口共享同一条目
- * 时关闭其一不影响另一方。
+ * 材质与几何都按**内容身份**持有一份，并由 `OwnershipRegistry` 显式计数。`dispose()` 释放
+ * 本呈现器的全部份额；两个视口共享同一条目时关闭其一不影响另一方。
+ *
+ * ### 材质身份**含纹理绑定**，且缓存键就是释放键（#415 修下的契约）
+ *
+ * `materialIdentityOf(descriptor, binding)` 是材质的**唯一**身份：`map` 的内容身份、alpha
+ * 类别与相位都在里面（换贴图内容 ⇒ 换材质）。因此**缓存键 / `mounted.materialKey` / 卸载时
+ * 的检索键必须是同一个字符串**，并且只由 `materialFor` 一处产生、随材质一起交回调用方。
+ *
+ * 为什么这是**契约**而不是纪律：#415 就是 `mount` 自己另算了一份**不含绑定**的身份 ——
+ * 释放键在缓存里根本不存在 ⇒ 带绑定材质永不 dispose，每次换绑定（纹理解码完成触发的重建）
+ * 漏一份，直到整体 `dispose()`；而旧的 `stats.disposals` 把 unmount 当释放，读数上看不出
+ * 异常。把「键只有一处产生」落到函数签名上（`materialFor` 返回 key），这类分叉就不再靠自觉。
  */
 
 import * as THREE from 'three'
@@ -61,7 +71,19 @@ export interface PresenterStats {
   batchReuses: number
   /** 新建批次对象次数。 */
   batchBuilds: number
-  /** 真正 `dispose()` 的对象数（A19：与配置的 acquire 平衡）。 */
+  /**
+   * **真实 `dispose()` 的对象数**（材质 + 几何；A19：与配置的 acquire 平衡）。
+   *
+   * **口径（#415 修正）：卸载 != 释放**
+   *
+   * 只有真的调用了 `dispose()` 的三条路径累加：材质引用归零、几何引用归零、本类
+   * `dispose()` 扫尾。`unmount` **不**计入 —— 卸载掉的批次对象，其材质/几何可能还被
+   * 别的批次持有（那只是引用 -1）。
+   *
+   * 为什么必须这么严：旧口径给每次 `unmount` 加一，于是"带绑定材质永不 dispose"在读数上
+   * 与健康状态**看不出差别**（数还在涨），泄漏被伪装成正常回收。判据见
+   * `__tests__/materialBindRelease.test.ts` 的 ④（与真实调用数逐数对账）。
+   */
   disposals: number
   /** 当前挂载的批次对象数（主色彩 pass 的**对象**数，不是 draw call 数）。 */
   batchObjects: number
@@ -181,6 +203,8 @@ export class BatchedPresenter {
    *
    * 材质缓存键（materialIdentityOf 的 identityKey）就是卸载时的检索键
    * （releaseMaterialRef）；用同一把钥匙登记，登记与释放不会各说各话。
+   * （#415 之前这句只是**意图**：`mount` 另算了一份不含绑定的身份，于是动画材质同样
+   * 释放不到。现在由 `materialFor` 返回 key、`mount` 直接持有来保证。）
    * 而**采样**是纹理级操作（offset/repeat 是 THREE.Texture 的属性）⇒
    * 一次 applySceneTime 里对同一张纹理只写一次（见该方法）。
    */
