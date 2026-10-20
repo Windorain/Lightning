@@ -306,3 +306,44 @@ F12 修完后，游戏实拍与 Web 重渲逐机位对比（`temp/pr91-lp-after/
 （`registryId` + `meta` + `facing` + `nbt`，即 `VoxelState` 的四个字段 —— `render/data/grid#buildVoxelVolume` 还原的那一套），
 不对任何方块类型写特判。取"同状态"而非 MC 的 `instanceof` 是**保守**选择：不改变既有夹具的剔除结果
 （`domain/blockGeometry` 记的 `4882 → 4862` 那条历史观测仍成立），偏差方向只会"多画"，不会画出空洞。
+### F16.3 修后实测（同一导出件、同一批机位）
+
+| 项 | 读数 |
+|---|---|
+| 生产装配读数 | 剔除总量 102 → **96** 片；成对两格各 **34** 片（未剔除各 36）；Δ=6 = 共享面 4（2 层 × 2 侧）+ 不透明邻面 2 |
+| 视口（同机位 yaw 235 / elev 22 / dist 12 / zoom 2.31） | 共享面白框环**消失**：成对玻璃回到"外侧框 + 一道中缝"，与游戏实拍同形（`repro-after2/vp-iso-a.png`） |
+| 六轴器具（`shot-ortho.spec.ts`，port 5212） | `1 passed`，6 机位 1280×720；输出 `temp/pb-fix-translucent/web/` |
+| 修前/修后**逐像素**（同机位、同输入、只换代码） | `south` / `north` / `east` / `west` / `top`：**0 px 差**；`iso`：**2667 px 差**（maxd 224，差异区域 72×122@495,280 = 共享面处）—— 修复的作用面精确等于"只有斜视看得见的共享面" |
+| 三对齐目验（`sbs/sbs-ortho-*.png`，左=游戏实拍 / 右=web 修后） | `iso` 与游戏同形（成对=外侧框+中缝，孤立 ACC 六面框完整）；其余五机位与修前逐像素相同（游戏侧差异仍是已登记的整体亮度与底色常量） |
+| 3× 放大三方对照 | `sbs/zoom-iso-game-prefixweb-postfixweb.png`（左=游戏 / 中=web 修前 / 右=web 修后）：修前中间多出共享面框环，修后与游戏一致 |
+| L0 | `npm run typecheck`：仅 4 条既有登记错误（#407）；`npm run arch:scan`：**PASS（0 finding）** |
+| L1 | `npm test`：**3145 passed / 1 failed**（唯一红 `partMaskEnvelopeExemption` 为既有：缺 mod 侧脚本）；`npm run test:arch`：**265 passed / 5 skipped / 0 failed**（270） |
+| L2 | `PLAYWRIGHT_PORT=5212 npm run test:e2e:smoke`：**26 passed / 0 failed / 2 skipped**，墙钟 26.3 s（预算 120 s 硬限） |
+| L3 | **未跑**（未获授权） |
+
+**残余差异（都不是本缺陷）**：① 整体亮度：游戏乘光图、web 无光照（本篇 F16.1 已量化 ≈0.70，属"光照模型"另立特性）；
+② 底色常量 `#BCD5FF` vs `#9EC6E8`（已登记）；③ `ortho-top` 游戏侧那块大白面（已登记）。
+
+### F16.4 捕获侧判定：共享面**确实多录**了（建议另立单，不在本批范围）
+
+- **读数**：同一份导出件里，成对两格朝共享面的四边形**都在**（左格 `+x` 2 片、右格 `-x` 2 片，每面 2 层）。
+- **游戏侧行为**：`BlockFrame#shouldSideBeRendered` 在邻格是 `BlockFrame` 时**返回 false**
+  （运行期 jar 5.09.54.194 `javap -c` 复核：`getBlock(...) instanceof BlockFrame` + `iconst_0 ireturn`）
+  ⇒ 游戏**从不发**这个面。
+- **判定**：导出侧**多录**（捕获未按 `shouldSideBeRendered` 剔除同块邻面）。**建议另立捕获侧单**
+  同批核实两件事：(a) 同块邻面剔除；(b) 每面 **2 层完全相同的四边形**（位置/UV/材质/brightness 逐字段同，
+  实测每格 36 = 2 × 18）——本批**不判**它是缺陷：若游戏确实两遍渲染则是忠实记录，若是重复录制则是捕获缺陷；
+  两种情况下对本批症状都无影响（贴图 α 只有 {0,255}，叠两遍不变色），但对**真半透明**贴图会双重混合。
+- **为什么 web 侧仍必须修**：捕获多录只是"多给了面"，而"该不该画"是渲染期的判据（游戏在渲染期剔除）；
+  消费端不得依赖捕获端预先剔除（OBJ 导出、其他消费端同样吃这份数据）。⇒ 两侧各自成立，web 侧已修并有用例把守。
+
+### F16.5 遗留风险
+
+1. **同一批次内 translucent 三角形的绘制顺序**不是深度序：`structureMaterialPrimitives` 把全场景同 `materialIndex`
+   的四边形并进一个 geometry，`transparency` 恒 `null`（`runtime/presentationAdapter.ts`）⇒ three 的透明排序
+   只作用于 object。本场景无影响（同一平面同一贴图、α∈{0,255}），但"不同深度上互遮的半透明面"仍依赖绘制顺序。
+   MC 同 pass 也不做三角形级排序，故本轮**不新造排序机制**；若将来要与游戏逐像素对齐，这是要单独立项的课题。
+2. **判据偏窄**（有意）：身份取 `registryId+meta+facing+nbt`，比 MC 的 `instanceof` 窄。跨 meta/facing/NBT 的同方块邻面
+   仍会多画（有深度兜底，只在半透明时可见）。要放宽须先有"哪些差异不影响邻面渲染"的证据。
+3. 三条正视图判据（`front`/`back`/`seam-*`）**看不见**这类缺陷（共享面在正视图里退化成线）。
+   以后凡"同块邻面/内部结构"类判据，必须至少含一台**斜视**机位。
