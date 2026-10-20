@@ -60,6 +60,7 @@ import com.lightning.mod.client.meshcapture.postrender.MeshCaptureBlockPostRende
 import com.lightning.mod.client.meshcapture.primary.BlockPrimaryCaptureContext;
 import com.lightning.mod.client.meshcapture.primary.BlockPrimaryCaptureRegistry;
 import com.lightning.mod.core.sampling.VoxelSample;
+import com.lightning.mod.core.sampling.renderstate.TileRenderStateProviders;
 import com.lightning.mod.core.session.ScanCellResolution;
 import com.lightning.mod.core.session.SdeCellCoords;
 import com.lightning.mod.mixin.interfaces.accessors.TextureMapAccessor;
@@ -680,7 +681,9 @@ public final class MeshCaptureService {
                             wx,
                             wy,
                             wz,
-                            teIsMultipart);
+                            teIsMultipart,
+                            vs.tileRenderState,
+                            vs.tileRenderStateFormat);
                     }
                     // #104：老 try/finally 只剩 inplace 负对照的回滚段，随该分支一并删除；
                     // 这里保留原来的作用域（裸块）以免局部变量外泄。
@@ -879,12 +882,14 @@ public final class MeshCaptureService {
      * 已被清空时（{@code liveTe == null}）仍然能造出副本，「按扫描身份保留」才不至于退化成
      * 「保留了块、丢了 TE 渲染」这种更隐蔽的失真。
      *
-     * @param liveTe        活动世界该格的 TE（可为 null；**只读**，绝不写回）
-     * @param wx/wy/wz      该格世界坐标（{@code liveTe} 为 null 时的坐标来源）
-     * @param teIsMultipart 是否多部件格（活动 TE 在时基于其类判定，不在时基于扫描 NBT 的 id）
+     * @param liveTe                活动世界该格的 TE（可为 null；**只读**，绝不写回）
+     * @param wx/wy/wz              该格世界坐标（{@code liveTe} 为 null 时的坐标来源）
+     * @param teIsMultipart         是否多部件格（活动 TE 在时基于其类判定，不在时基于扫描 NBT 的 id）
+     * @param tileRenderState       扫描时刻采下的渲染状态字节（{@code null}/空 = 该格无渲染状态）
+     * @param tileRenderStateFormat 渲染状态格式串（读回时据此选提供者）
      */
     private static TileEntity createCaptureTileEntityCopy(World world, NBTTagCompound tileNbt, TileEntity liveTe,
-        int wx, int wy, int wz, boolean teIsMultipart) {
+        int wx, int wy, int wz, boolean teIsMultipart, byte[] tileRenderState, String tileRenderStateFormat) {
         try {
             NBTTagCompound toApply = captureNbtWithCoords(tileNbt, liveTe, wx, wy, wz);
             // 1.7.10 静态工厂：按 NBT 的 "id" 建实例并 readFromNBT（扫描 NBT 来自 writeToNBT，含 id）
@@ -901,6 +906,17 @@ public final class MeshCaptureService {
             copyTe.setWorldObj(world);
             if (teIsMultipart) {
                 MultipartNbtStateUtil.loadPartStatesFromNbt(copyTe, toApply);
+            }
+            // Gitea #410 方向 A：渲染状态回填。作用对象**只能是副本**（活动 TE 全程零写入，issue #12）；
+            // 回填入口是模组自己的 readData（语义 = 客户端收到同步包后的摄取），不做任何推算。
+            if (tileRenderState != null && tileRenderState.length > 0) {
+                if (!TileRenderStateProviders.apply(tileRenderStateFormat, copyTe, tileRenderState)) {
+                    FMLLog.warning(
+                        "[SDE] 渲染状态回填未生效（该格 %d,%d,%d 按无渲染状态渲染；活动 TE 未受影响）",
+                        Integer.valueOf(wx),
+                        Integer.valueOf(wy),
+                        Integer.valueOf(wz));
+                }
             }
             return copyTe;
         } catch (Throwable t) {
@@ -1209,7 +1225,20 @@ public final class MeshCaptureService {
                     .decode(b64);
                 tileNbt = CompressedStreamTools.readCompressed(new ByteArrayInputStream(raw));
             }
-            out[i] = new VoxelSample(id, meta, facing, null, tileNbt);
+            // Gitea #410 方向 A：渲染状态字节随扫描快照而来（承载族才有这两个字段）
+            byte[] tileRenderState = null;
+            String tileRenderStateFormat = null;
+            if (t.has("tileRenderStateB64")) {
+                tileRenderState = Base64.getDecoder()
+                    .decode(
+                        t.get("tileRenderStateB64")
+                            .getAsString());
+                if (t.has("tileRenderStateFormat")) {
+                    tileRenderStateFormat = t.get("tileRenderStateFormat")
+                        .getAsString();
+                }
+            }
+            out[i] = new VoxelSample(id, meta, facing, null, tileNbt, tileRenderState, tileRenderStateFormat);
         }
         return out;
     }
