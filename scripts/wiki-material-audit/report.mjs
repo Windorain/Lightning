@@ -58,7 +58,16 @@ export function renderMarkdown(result) {
   lines.push('')
 
   const badPages = result.pages.filter((page) => page.status === 'bad')
-  lines.push('## 命中页面（' + badPages.length + '）')
+  const badPairs = badPages.reduce(
+    (sum, page) =>
+      sum +
+      page.mounts.filter((mount) => {
+        const structure = findStructure(result, mount.structureTitle)
+        return structure && structure.status === 'bad'
+      }).length,
+    0,
+  )
+  lines.push('## 命中页面（' + badPages.length + ' 页 / ' + badPairs + ' 个页面-结构对）')
   lines.push('')
   if (!badPages.length) {
     lines.push('本次清点没有页面命中 #87 / #9。')
