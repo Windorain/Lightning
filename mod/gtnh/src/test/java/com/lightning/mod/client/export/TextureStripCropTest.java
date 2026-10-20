@@ -143,6 +143,27 @@ public class TextureStripCropTest {
         assertEquals(-1, TextureStripCrop.columnIndexForFace(384, 128, 32, 32, 3));
     }
 
+    /**
+     * IC2 2.2.828 里**真实存在**的竖向多帧贴图（全量口径：jar 内 18 张，全部是流体）。
+     *
+     * <p>
+     * 实测（`ic2-2.2.828-dev.jar` 全量扫描，清单 `temp/pb-ic2-fix/ic2-vertical-strips.json`）：
+     * {@code fluids/*_still} = 16×512（32 帧）、{@code fluids/*_flow} = 32×1024（32 帧）；
+     * 除它们之外，IC2 的 {@code .mcmeta} 只有 2 张**物品**贴图 + {@code pack.mcmeta} ⇒
+     * <b>IC2 没有「竖向动画条 + 方块面 sprite」这种复合形态</b>（{@code BlockTextureStitched} 的
+     * {@code animationLength} 分支要求 {@code mcmeta.frameHeight>0}，而方块贴图无 mcmeta）。
+     * 这组断言把「真出现这种形态也不裁」钉住：两个形状都是 {@code 高 ≠ 格高}，故命中竖向条分支。
+     */
+    @Test
+    public void ic2RealFluidAnimationStripsAreLeftAlone() {
+        // fluids/*_still：16×512（32 帧）—— 若被误当横带（16 <= 16）或误用「高整除宽」粗判都会出错
+        assertEquals(-1, TextureStripCrop.columnIndexForFace(16, 512, 16, 16, 0));
+        // fluids/*_flow：32×1024（32 帧）—— 高整除宽成立（1024 % 32 == 0），但高 ≠ 格高 ⇒ 必须不裁
+        assertEquals(-1, TextureStripCrop.columnIndexForFace(32, 1024, 32, 32, 3));
+        // 反面对照：同一张 flow 的「单帧」形态（32×32）本来就不该裁（宽 == 格宽）
+        assertEquals(-1, TextureStripCrop.columnIndexForFace(32, 32, 32, 32, 3));
+    }
+
     @Test
     public void mismatchedOrUnknownShapesAreLeftAlone() {
         assertEquals("宽不整除格宽", -1, TextureStripCrop.columnIndexForFace(100, 32, 32, 32, 0));
